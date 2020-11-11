@@ -1,0 +1,676 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
+<CodeBlocks_project_file>
+	<FileVersion major="1" minor="6" />
+	<Project>
+		<Option title="sond" />
+		<Option pch_mode="2" />
+		<Option compiler="gcc" />
+		<Build>
+			<Target title="zond (Release)">
+				<Option output="bin/zond" prefix_auto="1" extension_auto="1" />
+				<Option object_output="obj/zond" />
+				<Option type="0" />
+				<Option compiler="gcc" />
+				<Compiler>
+					<Add option="-O2" />
+				</Compiler>
+				<Linker>
+					<Add option="-s" />
+					<Add option="-mwindows" />
+				</Linker>
+			</Target>
+			<Target title="zond (Testing)">
+				<Option output="bin/zond-testing" prefix_auto="1" extension_auto="1" />
+				<Option object_output="obj/zond-testing/" />
+				<Option type="1" />
+				<Option compiler="gcc" />
+				<Option use_console_runner="0" />
+				<Compiler>
+					<Add option="-g" />
+				</Compiler>
+				<Linker>
+					<Add option="-mconsole" />
+				</Linker>
+			</Target>
+			<Target title="Viewer (Release)">
+				<Option output="bin/viewer" prefix_auto="1" extension_auto="1" />
+				<Option object_output="obj/viewer" />
+				<Option type="0" />
+				<Option compiler="gcc" />
+				<Compiler>
+					<Add option="-DVIEWER" />
+				</Compiler>
+			</Target>
+			<Target title="Viewer (Testing)">
+				<Option output="bin/viewer-testing" prefix_auto="1" extension_auto="1" />
+				<Option object_output="obj/viewer-testing" />
+				<Option type="1" />
+				<Option compiler="gcc" />
+				<Option use_console_runner="0" />
+				<Compiler>
+					<Add option="-g" />
+					<Add option="-DVIEWER" />
+				</Compiler>
+			</Target>
+			<Target title="Sojus (Release)">
+				<Option output="bin/sojus" prefix_auto="1" extension_auto="1" />
+				<Option object_output="obj/sojus" />
+				<Option type="0" />
+				<Option compiler="gcc" />
+			</Target>
+			<Target title="Sojus (Testing)">
+				<Option output="bin/sojus-testing" prefix_auto="1" extension_auto="1" />
+				<Option object_output="obj/sojus-testing" />
+				<Option type="1" />
+				<Option compiler="gcc" />
+				<Option use_console_runner="0" />
+				<Compiler>
+					<Add option="-g" />
+				</Compiler>
+			</Target>
+		</Build>
+		<Compiler>
+			<Add option="-Wall" />
+			<Add option="`pkg-config --cflags gtk+-3.0`" />
+			<Add option="`pkg-config --cflags freetype2`" />
+			<Add option="`pkg-config --cflags tesseract`" />
+			<Add option="`pkg-config --cflags lept`" />
+			<Add option="--verbose" />
+		</Compiler>
+		<Linker>
+			<Add option="`pkg-config --libs gtk+-3.0`" />
+			<Add option="`pkg-config --libs sqlite3`" />
+			<Add option="`pkg-config --libs libcrypto`" />
+			<Add option="`pkg-config --libs libssl`" />
+			<Add option="`pkg-config --libs tesseract`" />
+			<Add option="`pkg-config --libs lept`" />
+			<Add option="`pkg-config --libs mariadb`" />
+			<Add option="`pkg-config --libs libmariadb`" />
+			<Add library="C:/msys64/mingw64/bin/libpodofo.dll" />
+			<Add library="C:/msys64/mingw64/x86_64-w64-mingw32/lib/libgdi32.a" />
+			<Add library="C:/msys64/mingw64/x86_64-w64-mingw32/lib/libws2_32.a" />
+			<Add library="C:/Windows/System32/shlwapi.dll" />
+			<Add library="C:/msys64/mingw64/lib/libmupdf.a" />
+			<Add library="C:/msys64/mingw64/lib/libmupdf-third.a" />
+		</Linker>
+		<Unit filename="src/fm.c">
+			<Option compilerVar="CC" />
+		</Unit>
+		<Unit filename="src/fm.h" />
+		<Unit filename="src/misc.c">
+			<Option compilerVar="CC" />
+		</Unit>
+		<Unit filename="src/misc.h" />
+		<Unit filename="src/sojus/00misc/auswahl.c">
+			<Option compilerVar="CC" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/00misc/auswahl.h">
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/00misc/settings.c">
+			<Option compilerVar="CC" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/00misc/settings.h">
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/00misc/sql.c">
+			<Option compilerVar="CC" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/00misc/sql.h">
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/00misc/zeit.c">
+			<Option compilerVar="CC" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/00misc/zeit.h">
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/01Desktop/aktenschnellansicht.c">
+			<Option compilerVar="CC" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/01Desktop/aktenschnellansicht.h">
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/01Desktop/callbacks_adressen.c">
+			<Option compilerVar="CC" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/01Desktop/callbacks_adressen.h">
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/01Desktop/callbacks_akten.c">
+			<Option compilerVar="CC" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/01Desktop/callbacks_akten.h">
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/01Desktop/callbacks_einstellungen.c">
+			<Option compilerVar="CC" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/01Desktop/callbacks_einstellungen.h">
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/01Desktop/main.c">
+			<Option compilerVar="CC" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/01Desktop/widgets_desktop.c">
+			<Option compilerVar="CC" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/01Desktop/widgets_desktop.h">
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/02Akten/akten.c">
+			<Option compilerVar="CC" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/02Akten/akten.h">
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/02Akten/aktenbet.c">
+			<Option compilerVar="CC" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/02Akten/aktenbet.h">
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/02Akten/aktenbetwidgets.c">
+			<Option compilerVar="CC" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/02Akten/aktenbetwidgets.h">
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/02Akten/aktenfenster.c">
+			<Option compilerVar="CC" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/02Akten/aktenfenster.h">
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/02Akten/widgets_akte.c">
+			<Option compilerVar="CC" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/02Akten/widgets_akte.h">
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/03Adressen/adresse_auswahl_neu.c">
+			<Option compilerVar="CC" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/03Adressen/adresse_auswahl_neu.h">
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/03Adressen/adressen.c">
+			<Option compilerVar="CC" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/03Adressen/adressen.h">
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/03Adressen/adressenfenster.c">
+			<Option compilerVar="CC" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/03Adressen/adressenfenster.h">
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/03Adressen/widgets_adresse.c">
+			<Option compilerVar="CC" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/03Adressen/widgets_adresse.h">
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/20Einstellungen/db.c">
+			<Option compilerVar="CC" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/20Einstellungen/db.h">
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/20Einstellungen/sachbearbeiterverwaltung.c">
+			<Option compilerVar="CC" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/20Einstellungen/sachbearbeiterverwaltung.h">
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/20Einstellungen/widgets_einstellungen.c">
+			<Option compilerVar="CC" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/20Einstellungen/widgets_einstellungen.h">
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/global_types_sojus.h">
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/globals.h">
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/treeview.c">
+			<Option compilerVar="CC" />
+		</Unit>
+		<Unit filename="src/treeview.h" />
+		<Unit filename="src/zond/10init/app_window.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/10init/app_window.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/10init/headerbar.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/10init/headerbar.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/10init/icons.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/10init/icons.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/10init/init.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/10init/init.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/10init/main.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/10init/treeviews.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/10init/treeviews.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/20allgemein/convert.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/20allgemein/db_sojus_zentral.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/20allgemein/export.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/20allgemein/export.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/20allgemein/fs_tree.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/20allgemein/fs_tree.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/20allgemein/oeffnen.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/20allgemein/oeffnen.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/20allgemein/pdf_dateien.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/20allgemein/pdf_dateien.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/20allgemein/pdf_text.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/20allgemein/pdf_text.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/20allgemein/project.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/20allgemein/project.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/20allgemein/selection.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/20allgemein/selection.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/20allgemein/suchen.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/20allgemein/suchen.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/20allgemein/ziele.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/20allgemein/ziele.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/20allgemein/zieleplus.cpp">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/20allgemein/zieleplus.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/40viewer/annot.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Viewer (Release)" />
+			<Option target="Viewer (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/40viewer/annot.h">
+			<Option compile="1" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Viewer (Release)" />
+			<Option target="Viewer (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/40viewer/document.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Viewer (Release)" />
+			<Option target="Viewer (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/40viewer/document.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Viewer (Release)" />
+			<Option target="Viewer (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/40viewer/render.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Viewer (Release)" />
+			<Option target="Viewer (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/40viewer/render.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Viewer (Release)" />
+			<Option target="Viewer (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/40viewer/seiten.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Viewer (Release)" />
+			<Option target="Viewer (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/40viewer/seiten.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Viewer (Release)" />
+			<Option target="Viewer (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/40viewer/stand_alone.c">
+			<Option compilerVar="CC" />
+			<Option target="Viewer (Release)" />
+			<Option target="Viewer (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/40viewer/stand_alone.h">
+			<Option target="Viewer (Release)" />
+			<Option target="Viewer (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/40viewer/viewer.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Viewer (Release)" />
+			<Option target="Viewer (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/40viewer/viewer.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Viewer (Release)" />
+			<Option target="Viewer (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/99conv/baum.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/99conv/baum.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/99conv/db_read.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/99conv/db_read.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/99conv/db_write.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/99conv/db_write.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/99conv/db_zu_baum.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/99conv/db_zu_baum.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/99conv/general.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Viewer (Release)" />
+			<Option target="Viewer (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/99conv/general.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Viewer (Release)" />
+			<Option target="Viewer (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/99conv/mupdf.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Viewer (Release)" />
+			<Option target="Viewer (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/99conv/mupdf.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Viewer (Release)" />
+			<Option target="Viewer (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/99conv/pdf.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Viewer (Release)" />
+			<Option target="Viewer (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/99conv/pdf.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Viewer (Release)" />
+			<Option target="Viewer (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/99conv/pdf_ocr.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Viewer (Release)" />
+			<Option target="Viewer (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/99conv/pdf_ocr.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Viewer (Release)" />
+			<Option target="Viewer (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/99conv/test.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Viewer (Release)" />
+			<Option target="Viewer (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/99conv/test.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Viewer (Release)" />
+			<Option target="Viewer (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/ToDo.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Viewer (Release)" />
+			<Option target="Viewer (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/bugs.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Viewer (Release)" />
+			<Option target="Viewer (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/enums.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/error.h">
+			<Option compile="1" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Viewer (Release)" />
+			<Option target="Viewer (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/global_types.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Viewer (Release)" />
+			<Option target="Viewer (Testing)" />
+		</Unit>
+		<Extensions>
+			<AutoVersioning>
+				<Scheme minor_max="10" build_max="0" rev_max="0" rev_rand_max="10" build_times_to_increment_minor="100" />
+				<Settings autoincrement="1" date_declarations="1" use_define="0" update_manifest="1" do_auto_increment="0" ask_to_increment="0" language="C++" svn="0" svn_directory="" header_path="version.h" />
+				<Changes_Log show_changes_editor="0" app_title="released version %M.%m.%b of %p" changeslog_path="ChangesLog.txt" />
+				<Code header_guard="VERSION_H" namespace="AutoVersion" prefix="" />
+			</AutoVersioning>
+			<lib_finder disable_auto="1" />
+		</Extensions>
+	</Project>
+</CodeBlocks_project_file>
