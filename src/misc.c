@@ -122,7 +122,7 @@ abfrage_frage( GtkWidget* window, const gchar* message, const gchar* secondary, 
     gint res;
 
     res = dialog_with_buttons( window, message, secondary, text, "Ja",
-            GTK_RESPONSE_YES, "Abbrechen", GTK_RESPONSE_CANCEL, NULL );
+            GTK_RESPONSE_YES, "Nein", GTK_RESPONSE_NO, NULL );
 
     return res;
 }

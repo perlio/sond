@@ -529,7 +529,7 @@ treeviews_init_fs_tree( Projekt* zond )
 {
     GtkCellRenderer* cell = NULL;
 
-    zond->treeview[BAUM_FS] = fm_create_tree_view( zond->app_window, treeviews_cb_cell_edited );
+    zond->treeview[BAUM_FS] = fm_create_tree_view( zond->app_window, zond );
 
     //die Selection
     zond->selection[BAUM_FS] = gtk_tree_view_get_selection(
