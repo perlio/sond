@@ -1,3 +1,5 @@
+#include <stdlib.h>
+
 #include "../global_types.h"
 #include "../error.h"
 

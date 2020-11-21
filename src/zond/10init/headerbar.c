@@ -1141,8 +1141,6 @@ init_menu( Projekt* zond )
     g_signal_connect( G_OBJECT(loeschenitem), "activate",
             G_CALLBACK(cb_loeschen_activate), (gpointer) zond );
 
-   // GtkWidget* sep_struktur2item = gtk_separator_menu_item_new();
-
     //Speichern als Projektdatei
     GtkWidget* anbindung_entfernenitem = gtk_menu_item_new_with_label(
             "Anbindung entfernen");

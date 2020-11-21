@@ -139,134 +139,6 @@ typedef struct _PV_Text_Treffer
 } PVTextTreffer;
 
 
-static void
-viewer_highlight_treffer( PdfViewer* pv, gint index )
-{
-    PVTextTreffer pv_text_treffer = { 0 };
-
-    if ( index >= pv->arr_text_treffer->len ) return;
-
-    pv_text_treffer = g_array_index( pv->arr_text_treffer, PVTextTreffer, index );
-
-    PdfPos pos_pdf = { 0 };
-    pos_pdf.seite = pv_text_treffer.num;
-    pos_pdf.index = pv_text_treffer.quad.ul.y;
-
-    viewer_springen_zu_pos_pdf( pv, pos_pdf, 50.0 );
-
-    //highlight = 1. sichtbarer Treffer
-    pv->highlight[0] = pv_text_treffer.quad;
-
-    //Sentinel setzen
-    pv->highlight[1].ul.x = -1;
-
-    //Trick, um richtige Seite anzusprechen
-    pv->click_pdf_punkt.seite = pv_text_treffer.num;
-
-    //anzeigen
-    gtk_widget_queue_draw( ((ViewerPage*) g_ptr_array_index( pv->arr_pages,
-            pv_text_treffer.num ))->image );
-
-    return;
-}
-
-
-/*  punkt:      Koordinate im Layout (ScrolledWindow)
-    pdf_punkt:  hier wird Ergebnis abgelegt
-    gint:       0 wenn Punkt auf Seite liegt; -1 wenn außerhalb
-
-    Wenn Punkt im Zwischenraum zwischen zwei Seiten oder unterhalb der letzten
-    Seite liegt, wird pdf_punkt.seite die davorliegende Seite und
-    pdf_punkt.punkt.y = EOP.
-    Wenn punkt links oder rechts daneben liegt, ist pdf_punkt.punkt.x negativ
-    oder größer als Seitenbreite
-*/
-static gint
-viewer_abfragen_pdf_punkt( PdfViewer* pv, fz_point punkt, PdfPunkt* pdf_punkt )
-{
-    gint ret = 0;
-    gdouble v_oben = 0.0;
-    gdouble v_unten = 0.0;
-
-    gint i = 0;
-
-    for ( i = 0; i < pv->arr_pages->len; i++ )
-    {
-        fz_rect rect = viewer_get_displayed_rect( pv, i );
-
-        pdf_punkt->delta_y = rect.y0;
-
-        v_unten = v_oben +
-                (rect.y1 - rect.y0) * pv->zoom / 100;
-
-        if ( punkt.y >= v_oben && punkt.y <= v_unten )
-        {
-            pdf_punkt->seite = i;
-            pdf_punkt->punkt.y = (punkt.y - v_oben) / pv->zoom * 100 + rect.y0;
-
-            break;
-        }
-        else if ( punkt.y < v_unten )
-        {
-            pdf_punkt->seite = i - 1;
-            pdf_punkt->punkt.y = EOP;
-
-            break;
-        }
-
-        v_oben = v_unten + 10;
-    }
-
-    if ( i == pv->arr_pages->len )
-    {
-        ret = -1;
-        pdf_punkt->seite = i - 1;
-        pdf_punkt->punkt.y = EOP;
-    }
-
-    fz_rect rect = { 0 };
-    gint x = 0;
-
-    gtk_container_child_get( GTK_CONTAINER(pv->layout),
-            ((ViewerPage*) g_ptr_array_index( pv->arr_pages,
-            pdf_punkt->seite ))->image, "x", &x, NULL );
-
-    if ( punkt.x < x ) ret = -1;
-    rect = viewer_get_displayed_rect( pv, pdf_punkt->seite );
-    if ( punkt.x > (((rect.x1 - rect.x0) * pv->zoom / 100) + x) ) ret = -1;
-
-    pdf_punkt->punkt.x = (punkt.x - x) / pv->zoom * 100;
-
-    return ret;
-}
-
-
-static gint
-viewer_suchen_naechstes_vorkommen( PdfViewer* pv )
-{
-    PdfPunkt pdf_punkt = { 0 };
-    fz_point punkt = { 0 };
-    punkt.y = gtk_adjustment_get_value( pv->v_adj );
-
-    viewer_abfragen_pdf_punkt( pv, punkt, &pdf_punkt );
-
-    PVTextTreffer pv_text_treffer = { 0 };
-
-    gint i = 0;
-    for ( i = 0; i < pv->arr_text_treffer->len; i++ )
-    {
-        pv_text_treffer = g_array_index( pv->arr_text_treffer, PVTextTreffer, i );
-        if ( (pv_text_treffer.num == pdf_punkt.seite &&
-                pv_text_treffer.quad.ul.y > pdf_punkt.punkt.y) ||
-                (pv_text_treffer.num > pdf_punkt.seite) ) break;
-    }
-
-    pv->highlight_index = i;
-
-    return i;
-}
-
-
 void
 viewer_abfragen_sichtbare_seiten( PdfViewer* pv, gint* von, gint* bis )
 {
@@ -293,21 +165,21 @@ viewer_abfragen_sichtbare_seiten( PdfViewer* pv, gint* von, gint* bis )
 }
 
 
-gboolean
-viewer_page_ist_sichtbar( PdfViewer* pv, gint page )
+void
+viewer_init_thread_pools( PdfViewer* pv )
 {
-    gint von = 0;
-    gint bis = 0;
+    pv->thread_pool_page = g_thread_pool_new( (GFunc) render_page_thread, pv, 1, FALSE, NULL );
+//    pv->thread_pool_thumb = g_thread_pool_new( (GFunc) render_thumb_thread, pv, 1, FALSE, NULL );
+    for ( gint i = 0; i < pv->arr_pages->len; i++ )
+    {
+        g_thread_pool_push( pv->thread_pool_page, GINT_TO_POINTER(i + 1), NULL );
+    }
 
-    viewer_abfragen_sichtbare_seiten( pv, &von, &bis );
-
-    if ( (page < von) || (page > bis) ) return FALSE;
-
-    return TRUE;
+    return;
 }
 
 
-static void
+void
 viewer_einrichten_layout( PdfViewer* pv )
 {
     if ( pv->arr_pages->len == 0 ) return;
@@ -359,19 +231,145 @@ viewer_einrichten_layout( PdfViewer* pv )
 }
 
 
-void
-viewer_refresh_layouts( GPtrArray* arr_pv )
+static gboolean
+cb_viewer_draw_image( GtkWidget* image, cairo_t *cr, gpointer user_data )
 {
-    for ( gint i = 0; i < arr_pv->len; i++ )
-    {
-        PdfViewer* pv = g_ptr_array_index( arr_pv, i );
+    PdfViewer* pv = (PdfViewer*) user_data;
 
-        if ( g_object_get_data( G_OBJECT(pv->layout), "dirty" ) )
+    if ( image != VIEWER_PAGE(pv->click_pdf_punkt.seite)->image ) return FALSE;
+
+    fz_matrix transform = fz_translate( 0.0, -pv->click_pdf_punkt.delta_y );
+    transform = fz_post_scale( transform, pv->zoom / 100, pv->zoom / 100 );
+
+    //wenn annot angeclickt wurde
+    if ( pv->clicked_annot )
+    {
+        PVQuad* pv_quad = pv->clicked_annot->first;
+
+        do
         {
-            viewer_einrichten_layout( pv );
-            g_object_set_data( G_OBJECT(pv->layout), "dirty", NULL );
+            fz_quad quad = fz_transform_quad( pv_quad->quad, transform );
+            cairo_move_to( cr, quad.ul.x, quad.ul.y );
+            cairo_line_to( cr, quad.ur.x, quad.ur.y );
+            cairo_line_to( cr, quad.lr.x, quad.lr.y );
+            cairo_line_to( cr, quad.ll.x, quad.ll.y );
+            cairo_line_to( cr, quad.ul.x, quad.ul.y );
+            cairo_set_source_rgb(cr, 0, 1, 0 );
+            cairo_stroke( cr );
+
+            pv_quad = pv_quad->next;
+        }
+        while ( pv_quad );
+    }
+    else //ansonsten etwaige highlights zeichnen
+    {
+        gint i = 0;
+        while ( pv->highlight[i].ul.x >= 0 )
+        {
+            fz_rect rect = fz_transform_rect( fz_rect_from_quad( pv->highlight[i] ), transform );
+
+            float x = rect.x0;
+            float y = rect.y0;
+            float width = rect.x1 - x;
+            float heigth = rect.y1 - y;
+
+            cairo_rectangle( cr, x, y, width, heigth );
+            cairo_set_source_rgba (cr, 0, .1, .8, 0.5);
+            cairo_fill(cr);
+
+            i++;
         }
     }
+
+    return FALSE;
+}
+
+
+void
+viewer_insert_thumb( PdfViewer* pv, gint page_pv, fz_rect rect )
+{
+    gint width = 0;
+    gint height = 0;
+    GdkPixbuf* pix = NULL;
+
+    //tree mit thumbnails
+    width = (gint) (rect.x1 - rect.x0) *.15;
+    height = (gint) (rect.y1 - rect.y0) *.15;
+    pix = gdk_pixbuf_new( GDK_COLORSPACE_RGB, FALSE, 8, width, height );
+    gdk_pixbuf_fill( pix, 0xffffffff );
+
+    gtk_list_store_insert_with_values(
+            GTK_LIST_STORE(gtk_tree_view_get_model(
+            GTK_TREE_VIEW(pv->tree_thumb) )), NULL, page_pv,
+            0, pix, 1, FALSE, -1 );
+    g_object_unref( pix );
+
+    return;
+}
+
+
+ViewerPage*
+viewer_new_viewer_page( PdfViewer* pv )
+{
+    ViewerPage* viewer_page = g_malloc0( sizeof( ViewerPage ) );
+
+    viewer_page->image = gtk_image_new( );
+    gtk_widget_show( viewer_page->image );
+    g_signal_connect_after( viewer_page->image, "draw", G_CALLBACK(cb_viewer_draw_image), pv );
+    gtk_layout_put( GTK_LAYOUT(pv->layout), GTK_WIDGET(viewer_page->image), 0, 0 );
+
+    return viewer_page;
+}
+
+
+static void
+viewer_create_layout( PdfViewer* pv )
+{
+    DisplayedDocument* dd = pv->dd;
+
+    do
+    {
+        gint seite_dd = 0;
+        gint von = 0;
+        gint bis = 0;
+
+        if ( dd->anbindung )
+        {
+            von = dd->anbindung->von.seite;
+            bis = dd->anbindung->bis.seite;
+        }
+        else bis = dd->document->pages->len - 1;
+
+        while ( seite_dd  + von <= bis )
+        {
+            //ViewerPage erstellen und einfügen
+            ViewerPage* viewer_page = viewer_new_viewer_page( pv );
+            g_ptr_array_add( pv->arr_pages, viewer_page );
+
+            viewer_insert_thumb( pv, -1,
+                    viewer_get_displayed_rect_from_dd( dd, seite_dd ) );
+
+            seite_dd++;
+        }
+
+    } while ( (dd = dd->next) );
+
+    return;
+}
+
+
+void
+viewer_display_document( PdfViewer* pv, DisplayedDocument* dd )
+{
+    pv->dd = dd;
+
+    viewer_create_layout( pv );
+
+    viewer_einrichten_layout( pv );
+
+    viewer_init_thread_pools( pv );
+
+    gtk_widget_grab_focus( pv->layout );
 
     return;
 }
@@ -528,144 +526,6 @@ cb_viewer_loeschen_anbindung_button_clicked( GtkButton* button, gpointer data )
 
 
 static gboolean
-cb_viewer_draw_image( GtkWidget* image, cairo_t *cr, gpointer user_data )
-{
-    PdfViewer* pv = (PdfViewer*) user_data;
-
-    if ( image != VIEWER_PAGE(pv->click_pdf_punkt.seite)->image ) return FALSE;
-
-    fz_matrix transform = fz_translate( 0.0, -pv->click_pdf_punkt.delta_y );
-    transform = fz_post_scale( transform, pv->zoom / 100, pv->zoom / 100 );
-
-    //wenn annot angeclickt wurde
-    if ( pv->clicked_annot )
-    {
-        PVQuad* pv_quad = pv->clicked_annot->first;
-
-        do
-        {
-            fz_quad quad = fz_transform_quad( pv_quad->quad, transform );
-            cairo_move_to( cr, quad.ul.x, quad.ul.y );
-            cairo_line_to( cr, quad.ur.x, quad.ur.y );
-            cairo_line_to( cr, quad.lr.x, quad.lr.y );
-            cairo_line_to( cr, quad.ll.x, quad.ll.y );
-            cairo_line_to( cr, quad.ul.x, quad.ul.y );
-            cairo_set_source_rgb(cr, 0, 1, 0 );
-            cairo_stroke( cr );
-
-            pv_quad = pv_quad->next;
-        }
-        while ( pv_quad );
-    }
-    else //ansonsten etwaige highlights zeichnen
-    {
-        gint i = 0;
-        while ( pv->highlight[i].ul.x >= 0 )
-        {
-            fz_rect rect = fz_transform_rect( fz_rect_from_quad( pv->highlight[i] ), transform );
-
-            float x = rect.x0;
-            float y = rect.y0;
-            float width = rect.x1 - x;
-            float heigth = rect.y1 - y;
-
-            cairo_rectangle( cr, x, y, width, heigth );
-            cairo_set_source_rgba (cr, 0, .1, .8, 0.5);
-            cairo_fill(cr);
-
-            i++;
-        }
-    }
-
-    return FALSE;
-}
-
-
-static void
-viewer_free_viewer_page( ViewerPage* viewer_page )
-{
-    gtk_widget_destroy( viewer_page->image );
-
-    g_free( viewer_page );
-
-    return;
-}
-
-
-void
-viewer_insert_thumb( PdfViewer* pv, gint page_pv, fz_rect rect )
-{
-    gint width = 0;
-    gint height = 0;
-    GdkPixbuf* pix = NULL;
-
-    //tree mit thumbnails
-    width = (gint) (rect.x1 - rect.x0) *.15;
-    height = (gint) (rect.y1 - rect.y0) *.15;
-    pix = gdk_pixbuf_new( GDK_COLORSPACE_RGB, FALSE, 8, width, height );
-    gdk_pixbuf_fill( pix, 0xffffffff );
-
-    gtk_list_store_insert_with_values(
-            GTK_LIST_STORE(gtk_tree_view_get_model(
-            GTK_TREE_VIEW(pv->tree_thumb) )), NULL, page_pv,
-            0, pix, 1, FALSE, -1 );
-    g_object_unref( pix );
-
-    return;
-}
-
-
-ViewerPage*
-viewer_new_viewer_page( PdfViewer* pv )
-{
-    ViewerPage* viewer_page = g_malloc0( sizeof( ViewerPage ) );
-
-    viewer_page->image = gtk_image_new( );
-    gtk_widget_show( viewer_page->image );
-    g_signal_connect_after( viewer_page->image, "draw", G_CALLBACK(cb_viewer_draw_image), pv );
-    gtk_layout_put( GTK_LAYOUT(pv->layout), GTK_WIDGET(viewer_page->image), 0, 0 );
-
-    return viewer_page;
-}
-
-
-static void
-viewer_create_layout( PdfViewer* pv )
-{
-    DisplayedDocument* dd = pv->dd;
-
-    do
-    {
-        gint seite_dd = 0;
-        gint von = 0;
-        gint bis = 0;
-
-        if ( dd->anbindung )
-        {
-            von = dd->anbindung->von.seite;
-            bis = dd->anbindung->bis.seite;
-        }
-        else bis = dd->document->pages->len - 1;
-
-        while ( seite_dd  + von <= bis )
-        {
-            //ViewerPage erstellen und einfügen
-            ViewerPage* viewer_page = viewer_new_viewer_page( pv );
-            g_ptr_array_add( pv->arr_pages, viewer_page );
-
-            viewer_insert_thumb( pv, -1,
-                    viewer_get_displayed_rect_from_dd( dd, seite_dd ) );
-
-            seite_dd++;
-        }
-
-    } while ( (dd = dd->next) );
-
-    return;
-}
-
-
-static gboolean
 cb_viewer_auswahlwerkzeug( GtkButton* button, GdkEvent* event, gpointer data )
 {
     gint button_ID = 0;
@@ -710,20 +570,6 @@ viewer_set_clean( GPtrArray* arr_pv )
         } while ( (dd = dd->next) );
 
         if ( clean == TRUE ) gtk_widget_set_sensitive( pv_vergleich->button_speichern, FALSE );
-    }
-
-    return;
-}
-
-
-void
-viewer_init_thread_pools( PdfViewer* pv )
-{
-    pv->thread_pool_page = g_thread_pool_new( (GFunc) render_page_thread, pv, 1, FALSE, NULL );
-//    pv->thread_pool_thumb = g_thread_pool_new( (GFunc) render_thumb_thread, pv, 1, FALSE, NULL );
-    for ( gint i = 0; i < pv->arr_pages->len; i++ )
-    {
-        g_thread_pool_push( pv->thread_pool_page, GINT_TO_POINTER(i + 1), NULL );
     }
 
     return;
@@ -805,6 +651,38 @@ cb_tree_thumb( GtkToggleButton* button, gpointer data )
 
 
 static void
+viewer_highlight_treffer( PdfViewer* pv, gint index )
+{
+    PVTextTreffer pv_text_treffer = { 0 };
+
+    if ( index >= pv->arr_text_treffer->len ) return;
+
+    pv_text_treffer = g_array_index( pv->arr_text_treffer, PVTextTreffer, index );
+
+    PdfPos pos_pdf = { 0 };
+    pos_pdf.seite = pv_text_treffer.num;
+    pos_pdf.index = pv_text_treffer.quad.ul.y;
+
+    viewer_springen_zu_pos_pdf( pv, pos_pdf, 50.0 );
+
+    //highlight = 1. sichtbarer Treffer
+    pv->highlight[0] = pv_text_treffer.quad;
+
+    //Sentinel setzen
+    pv->highlight[1].ul.x = -1;
+
+    //Trick, um richtige Seite anzusprechen
+    pv->click_pdf_punkt.seite = pv_text_treffer.num;
+
+    //anzeigen
+    gtk_widget_queue_draw( ((ViewerPage*) g_ptr_array_index( pv->arr_pages,
+            pv_text_treffer.num ))->image );
+
+    return;
+}
+
+
+static void
 cb_viewer_vor_button_clicked( GtkButton* button, gpointer data )
 {
     PdfViewer* pv = (PdfViewer*) data;
@@ -840,6 +718,102 @@ cb_viewer_text_search_entry_buffer_changed( gpointer data )
     g_array_remove_range( pv->arr_text_treffer, 0, pv->arr_text_treffer->len );
 
     return;
+}
+
+
+/*  punkt:      Koordinate im Layout (ScrolledWindow)
+    pdf_punkt:  hier wird Ergebnis abgelegt
+    gint:       0 wenn Punkt auf Seite liegt; -1 wenn außerhalb
+
+    Wenn Punkt im Zwischenraum zwischen zwei Seiten oder unterhalb der letzten
+    Seite liegt, wird pdf_punkt.seite die davorliegende Seite und
+    pdf_punkt.punkt.y = EOP.
+    Wenn punkt links oder rechts daneben liegt, ist pdf_punkt.punkt.x negativ
+    oder größer als Seitenbreite
+*/
+static gint
+viewer_abfragen_pdf_punkt( PdfViewer* pv, fz_point punkt, PdfPunkt* pdf_punkt )
+{
+    gint ret = 0;
+    gdouble v_oben = 0.0;
+    gdouble v_unten = 0.0;
+
+    gint i = 0;
+
+    for ( i = 0; i < pv->arr_pages->len; i++ )
+    {
+        fz_rect rect = viewer_get_displayed_rect( pv, i );
+
+        pdf_punkt->delta_y = rect.y0;
+
+        v_unten = v_oben +
+                (rect.y1 - rect.y0) * pv->zoom / 100;
+
+        if ( punkt.y >= v_oben && punkt.y <= v_unten )
+        {
+            pdf_punkt->seite = i;
+            pdf_punkt->punkt.y = (punkt.y - v_oben) / pv->zoom * 100 + rect.y0;
+
+            break;
+        }
+        else if ( punkt.y < v_unten )
+        {
+            pdf_punkt->seite = i - 1;
+            pdf_punkt->punkt.y = EOP;
+
+            break;
+        }
+
+        v_oben = v_unten + 10;
+    }
+
+    if ( i == pv->arr_pages->len )
+    {
+        ret = -1;
+        pdf_punkt->seite = i - 1;
+        pdf_punkt->punkt.y = EOP;
+    }
+
+    fz_rect rect = { 0 };
+    gint x = 0;
+
+    gtk_container_child_get( GTK_CONTAINER(pv->layout),
+            ((ViewerPage*) g_ptr_array_index( pv->arr_pages,
+            pdf_punkt->seite ))->image, "x", &x, NULL );
+
+    if ( punkt.x < x ) ret = -1;
+    rect = viewer_get_displayed_rect( pv, pdf_punkt->seite );
+    if ( punkt.x > (((rect.x1 - rect.x0) * pv->zoom / 100) + x) ) ret = -1;
+
+    pdf_punkt->punkt.x = (punkt.x - x) / pv->zoom * 100;
+
+    return ret;
+}
+
+
+static gint
+viewer_suchen_naechstes_vorkommen( PdfViewer* pv )
+{
+    PdfPunkt pdf_punkt = { 0 };
+    fz_point punkt = { 0 };
+    punkt.y = gtk_adjustment_get_value( pv->v_adj );
+
+    viewer_abfragen_pdf_punkt( pv, punkt, &pdf_punkt );
+
+    PVTextTreffer pv_text_treffer = { 0 };
+
+    gint i = 0;
+    for ( i = 0; i < pv->arr_text_treffer->len; i++ )
+    {
+        pv_text_treffer = g_array_index( pv->arr_text_treffer, PVTextTreffer, i );
+        if ( (pv_text_treffer.num == pdf_punkt.seite &&
+                pv_text_treffer.quad.ul.y > pdf_punkt.punkt.y) ||
+                (pv_text_treffer.num > pdf_punkt.seite) ) break;
+    }
+
+    pv->highlight_index = i;
+
+    return i;
 }
 
 
@@ -1223,21 +1197,6 @@ viewer_get_visible_thumbs( PdfViewer* pv, gint* start, gint* end )
 }
 
 
-gboolean
-viewer_thumb_ist_sichtbar( PdfViewer* pv, gint page_pv )
-{
-    gint rc = 0;
-    gint start = 0;
-    gint end = 0;
-
-    rc = viewer_get_visible_thumbs( pv, &start, &end );
-
-    if ( rc == 0 && page_pv >= start && page_pv <= end ) return TRUE;
-
-    return FALSE;
-}
-
-
 gint
 viewer_get_iter_thumb( PdfViewer* pv, gint page_pv, GtkTreeIter* iter,
         gchar** errmsg )
@@ -1257,6 +1216,20 @@ viewer_get_iter_thumb( PdfViewer* pv, gint page_pv, GtkTreeIter* iter,
     if ( rendered ) return 1;
 
     return 0;
+}
+
+
+gboolean
+viewer_page_ist_sichtbar( PdfViewer* pv, gint page )
+{
+    gint von = 0;
+    gint bis = 0;
+
+    viewer_abfragen_sichtbare_seiten( pv, &von, &bis );
+
+    if ( (page < von) || (page > bis) ) return FALSE;
+
+    return TRUE;
 }
 
 
@@ -2070,18 +2043,12 @@ viewer_einrichten_fenster( PdfViewer* pv )
 }
 
 
-void
-viewer_display_document( PdfViewer* pv, DisplayedDocument* dd )
+static void
+viewer_free_viewer_page( ViewerPage* viewer_page )
 {
-    pv->dd = dd;
+    gtk_widget_destroy( viewer_page->image );
 
-    viewer_create_layout( pv );
-
-    viewer_einrichten_layout( pv );
-
-    viewer_init_thread_pools( pv );
-
-    gtk_widget_grab_focus( pv->layout );
+    g_free( viewer_page );
 
     return;
 }

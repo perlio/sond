@@ -85,5 +85,6 @@ Makethird modifizieren:
 - in Abschnitt jbig2dec:
 - DHAVE_ ??? memento entfernen
 - alle includes mit stddef.h und stdlib.h aus allen files entfernen
+    - jbig2dec und momento.h
 
 */

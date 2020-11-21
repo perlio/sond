@@ -352,9 +352,42 @@ cb_pv_seiten_ocr( GtkMenuItem* item, gpointer data )
 }
 
 
+static void
+seiten_refresh_layouts( GPtrArray* arr_pv )
+{
+    for ( gint i = 0; i < arr_pv->len; i++ )
+    {
+        PdfViewer* pv = g_ptr_array_index( arr_pv, i );
+
+        if ( g_object_get_data( G_OBJECT(pv->layout), "dirty" ) )
+        {
+            viewer_einrichten_layout( pv );
+            g_object_set_data( G_OBJECT(pv->layout), "dirty", NULL );
+        }
+    }
+
+    return;
+}
+
+
 /*
 **      Seiten drehen
 */
+static gboolean
+seiten_thumb_ist_sichtbar( PdfViewer* pv, gint page_pv )
+{
+    gint rc = 0;
+    gint start = 0;
+    gint end = 0;
+
+    rc = viewer_get_visible_thumbs( pv, &start, &end );
+
+    if ( rc == 0 && page_pv >= start && page_pv <= end ) return TRUE;
+
+    return FALSE;
+}
+
+
 static gint
 seiten_cb_drehen( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg )
 {
@@ -379,7 +412,7 @@ seiten_cb_drehen( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg )
     g_thread_pool_push( pv->thread_pool_page, GINT_TO_POINTER(page_pv + 1), NULL );
 
     if ( viewer_page_ist_sichtbar( pv, page_pv ) ||
-            viewer_thumb_ist_sichtbar( pv, page_pv ) )
+            seiten_thumb_ist_sichtbar( pv, page_pv ) )
             g_thread_pool_move_to_front( pv->thread_pool_page, GINT_TO_POINTER(page_pv + 1) );
 
     return 0;
@@ -490,7 +523,7 @@ cb_pv_seiten_drehen( GtkMenuItem* item, gpointer data )
         return;
     }
 
-    viewer_refresh_layouts( pv->zond->arr_pv );
+    seiten_refresh_layouts( pv->zond->arr_pv );
 
     return;
 }
@@ -650,7 +683,7 @@ seiten_loeschen( PdfViewer* pv, GPtrArray* arr_document_page, gchar** errmsg )
         }
     }
 
-    viewer_refresh_layouts( pv->zond->arr_pv );
+    seiten_refresh_layouts( pv->zond->arr_pv );
 
     //abgeschaltete thread_pools wieder anschalten
     for ( gint i = 0; i < arr_pv->len; i++ )
@@ -924,7 +957,7 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
         return;
     }
 
-    viewer_refresh_layouts( pv->zond->arr_pv );
+    seiten_refresh_layouts( pv->zond->arr_pv );
 
     return;
 }
