@@ -834,8 +834,6 @@ viewer_durchsuchen_angezeigtes_doc( PdfViewer* pv, const gchar* search_text,
         gint bis = 0;
         fz_context* ctx = dd->document->ctx;
 
-        g_mutex_lock( &dd->document->mutex_doc );
-
         viewer_get_von_bis( dd, &von, &bis );
         for ( gint i = von; i <= bis; i++ )
         {
@@ -847,27 +845,19 @@ viewer_durchsuchen_angezeigtes_doc( PdfViewer* pv, const gchar* search_text,
 
             if ( stext_page->first_block == NULL )
             {
-                fz_display_list* dl = NULL;
-
-                dl = DOCUMENT_PAGE(i)->display_list;
+                fz_display_list* dl = DOCUMENT_PAGE(i)->display_list;
 
                 if ( !fz_display_list_is_empty( ctx, dl ) )
                 {
                     rc = render_display_list_to_stext_page( ctx, DOCUMENT_PAGE(i), errmsg );
-                    if ( rc )
-                    {
-                        g_mutex_unlock( &dd->document->mutex_doc );
-                        ERROR_PAO( "render_display_list_to_stext_page" )
-                    }
+                    if ( rc ) ERROR_PAO( "render_display_list_to_stext_page" )
                 }
                 else //wenn display_list noch nicht erzeugt, dann direkt aus page erzeugen
                 {
+                    g_mutex_lock( &dd->document->mutex_doc );
                     rc = pdf_render_stext_page_direct( DOCUMENT_PAGE(i), errmsg );
-                    if ( rc )
-                    {
-                        g_mutex_unlock( &dd->document->mutex_doc );
-                        ERROR_PAO( "pdf_render_stext_page_direct" )
-                    }
+                    g_mutex_unlock( &dd->document->mutex_doc );
+                    if ( rc ) ERROR_PAO( "pdf_render_stext_page_direct" )
                 }
             }
 
@@ -892,8 +882,6 @@ viewer_durchsuchen_angezeigtes_doc( PdfViewer* pv, const gchar* search_text,
                 }
             }
         }
-
-        g_mutex_unlock( &dd->document->mutex_doc );
 
     } while ( (dd = dd->next) );
 
