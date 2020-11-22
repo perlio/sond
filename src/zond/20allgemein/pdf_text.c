@@ -325,8 +325,6 @@ pdf_textsuche_pdf( Projekt* zond, const gchar* rel_path, const gchar* search_tex
     gint rc = 0;
     fz_context* ctx = dd->document->ctx;
 
-    g_mutex_lock( &dd->document->mutex_doc );
-
     for ( gint i = 0; i < dd->document->pages->len; i++ )
     {
         gint anzahl = 0;
@@ -339,17 +337,17 @@ pdf_textsuche_pdf( Projekt* zond, const gchar* rel_path, const gchar* search_tex
                 rc = render_display_list_to_stext_page( ctx, DOCUMENT_PAGE(i), errmsg );
                 if ( rc )
                 {
-                    g_mutex_unlock( &dd->document->mutex_doc );
                     document_free_displayed_documents( zond, dd );
                     ERROR_PAO( "render_display_list_to_stext_page" )
                 }
             }
             else //wenn display_list noch nicht erzeugt, dann direkt aus page erzeugen
             {
+                g_mutex_lock( &dd->document->mutex_doc );
                 rc = pdf_render_stext_page_direct( DOCUMENT_PAGE(i), errmsg );
+                g_mutex_unlock( &dd->document->mutex_doc );
                 if ( rc )
                 {
-                    g_mutex_unlock( &dd->document->mutex_doc );
                     document_free_displayed_documents( zond, dd );
                     ERROR_PAO( "pdf_render_stext_page_direct" )
                 }
@@ -413,7 +411,6 @@ pdf_textsuche_pdf( Projekt* zond, const gchar* rel_path, const gchar* search_tex
         }
     }
 
-    g_mutex_unlock( &dd->document->mutex_doc );
     document_free_displayed_documents( zond, dd );
 
     return 0;

@@ -78,7 +78,6 @@ mupdf_close_context( fz_context* ctx )
 
     g_free( mutex );
 
-
     return;
 }
 
