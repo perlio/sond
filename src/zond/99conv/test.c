@@ -199,7 +199,7 @@ datei_query_filesystem( const gchar* filename, gchar** errmsg )
     return 1;
 }
 
-
+/*
 gint
 pdf_print_content_stream( fz_context* ctx, pdf_obj* page_ref, gchar** errmsg )
 {
@@ -222,6 +222,7 @@ pdf_print_content_stream( fz_context* ctx, pdf_obj* page_ref, gchar** errmsg )
 
     return 0;
 }
+*/
 
 #ifdef _WIN32
 #include <windows.h>
