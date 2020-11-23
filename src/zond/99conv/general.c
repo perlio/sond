@@ -368,6 +368,7 @@ info_window_close( InfoWindow* info_window )
             gtk_dialog_get_widget_for_response( GTK_DIALOG(info_window->dialog),
             GTK_RESPONSE_CANCEL );
     gtk_button_set_label( GTK_BUTTON(button), "Schließen" );
+    gtk_widget_grab_focus( button );
 
     gtk_dialog_run( GTK_DIALOG(info_window->dialog) );
 

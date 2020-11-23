@@ -49,35 +49,40 @@ typedef struct _PDF_Text_Occ
 static gboolean
 cb_window_textsearch_delete( GtkWidget* window, GdkEvent* event, gpointer data )
 {
-    GtkListBox* list_box = g_object_get_data( G_OBJECT(window), "list-box" );
-    GArray* arr_pdf_text_occ = g_object_get_data( G_OBJECT(list_box),
-            "arr-pdf-text-occ" );
-    g_array_free( arr_pdf_text_occ, TRUE );
+    g_array_unref( (GArray*) data );
 
     return FALSE;
 }
 
 
 static void
-pdf_text_fuellen_fenster( Projekt* zond, GtkWidget* window, gint index )
+pdf_text_fuellen_fenster( Projekt* zond, GtkListBox* list_box, GArray* arr_pdf_text_occ )
 {
-    GtkListBox* list_box = g_object_get_data( G_OBJECT(window), "list-box" );
-    GArray* arr_pdf_text_occ =
-            g_object_get_data( G_OBJECT(list_box), "arr-pdf-text-occ" );
+    for ( gint i = 0; i < arr_pdf_text_occ->len; i++ )
+    {
+        GtkTextIter text_iter = { 0 };
+        PDFTextOcc pdf_text_occ = { 0 };
+        gchar* label_text = NULL;
+        GtkWidget* text_view = NULL;
 
-    PDFTextOcc pdf_text_occ = g_array_index( arr_pdf_text_occ, PDFTextOcc, index );
+        pdf_text_occ = g_array_index( arr_pdf_text_occ, PDFTextOcc, i );
 
-	//label erstellen
-    gchar* label_text = g_strdup_printf( "%30s, S. %3i: %30s",
-            pdf_text_occ.rel_path, pdf_text_occ.page + 1, pdf_text_occ.zeile );
+        label_text = g_strdup_printf( "<markup><small><u>%s, S. %i</u></small>"
+                "</markup>\n", pdf_text_occ.rel_path, pdf_text_occ.page + 1 );
 
-    GtkWidget* label = gtk_label_new( label_text );
-    g_object_set_data( G_OBJECT(label), "index", GINT_TO_POINTER(index) );
-    gtk_label_set_xalign( GTK_LABEL(label), 0 );
-    gtk_widget_show_all( label );
+        //text_view erzeugen und einfügen
+        text_view = gtk_text_view_new( );
+        gtk_text_view_set_wrap_mode( GTK_TEXT_VIEW(text_view), GTK_WRAP_WORD );
+        gtk_text_view_set_editable( GTK_TEXT_VIEW(text_view), FALSE );
+        GtkTextBuffer* buf = gtk_text_view_get_buffer( GTK_TEXT_VIEW(text_view) );
+        gtk_text_buffer_get_start_iter( buf, &text_iter );
+        gtk_text_buffer_insert_markup( buf, &text_iter, label_text, -1 );
+        g_free( label_text );
+        gtk_text_buffer_insert_markup( buf, &text_iter, pdf_text_occ.zeile, -1 );
+        gtk_text_buffer_insert( buf, &text_iter, "\n", -1 );
 
-    gtk_list_box_insert( list_box, label, -1 );
-    g_free( label_text );
+        gtk_list_box_insert( list_box, text_view, -1 );
+    }
 
     return;
 }
@@ -95,14 +100,16 @@ cb_button_pdf_popover( GtkButton* button, gpointer data )
 static void
 cb_textsuche_changed( GtkListBox* box, GtkListBoxRow* row, gpointer data )
 {
+    gint index = 0;
+
     Projekt* zond = (Projekt*) data;
 
     gint node_id = 0;
     gchar* errmsg = NULL;
 
     GArray* arr_pdf_text_occ = g_object_get_data( G_OBJECT(box), "arr-pdf-text-occ" );
-    GtkWidget* label = gtk_bin_get_child( GTK_BIN(row) );
-    gint index = GPOINTER_TO_INT(g_object_get_data( G_OBJECT(label), "index" ));
+
+    index = gtk_list_box_row_get_index( row );
 
     PDFTextOcc pdf_text_occ = g_array_index( arr_pdf_text_occ, PDFTextOcc, index );
 
@@ -178,8 +185,7 @@ cb_textsuche_act( GtkListBox* box, GtkListBoxRow* row, gpointer data )
     PdfPos pos_pdf = { 0 };
 
     arr_pdf_text_occ = g_object_get_data( G_OBJECT(box), "arr-pdf-text-occ" );
-    GtkWidget* label = gtk_bin_get_child( GTK_BIN(row) );
-    index = GPOINTER_TO_INT(g_object_get_data( G_OBJECT(label), "index" ));
+    index = gtk_list_box_row_get_index( row );
 
     pdf_text_occ = g_array_index( arr_pdf_text_occ, PDFTextOcc, index );
 
@@ -233,7 +239,6 @@ pdf_text_oeffnen_fenster( Projekt* zond, GPtrArray* arr_rel_path,
             GTK_SELECTION_MULTIPLE );
     gtk_list_box_set_activate_on_single_click( GTK_LIST_BOX(list_box), FALSE );
 
-    g_object_set_data( G_OBJECT(window), "zond", zond );
     g_object_set_data( G_OBJECT(window), "list-box", list_box );
     g_object_set_data( G_OBJECT(list_box), "arr-pdf-text-occ", arr_pdf_text_occ );
 
@@ -272,8 +277,6 @@ pdf_text_oeffnen_fenster( Projekt* zond, GPtrArray* arr_rel_path,
 
     gtk_container_add( GTK_CONTAINER(popover), label );
 
-    gtk_widget_show_all( window );
-
     g_signal_connect( list_box, "row-activated", G_CALLBACK(cb_textsuche_act),
             (gpointer) zond );
     g_signal_connect( list_box, "row-selected",
@@ -282,7 +285,7 @@ pdf_text_oeffnen_fenster( Projekt* zond, GPtrArray* arr_rel_path,
             (gpointer) popover );
 
     g_signal_connect( window, "delete-event",
-            G_CALLBACK(cb_window_textsearch_delete), zond );
+            G_CALLBACK(cb_window_textsearch_delete), arr_pdf_text_occ );
 
     return window;
 }
@@ -294,8 +297,11 @@ pdf_text_anzeigen_ergebnisse( Projekt* zond, gchar* search_text, GPtrArray* arr_
 {
     GtkWidget* window = pdf_text_oeffnen_fenster( zond, arr_rel_path, arr_pdf_text_occ, search_text );
 
-    for ( gint i = 0; i < arr_pdf_text_occ->len; i++ )
-            pdf_text_fuellen_fenster( zond, window, i );
+    GtkListBox* list_box = g_object_get_data( G_OBJECT(window), "list-box" );
+
+    pdf_text_fuellen_fenster( zond, list_box, arr_pdf_text_occ );
+
+    gtk_widget_show_all( window );
 
     return 0;
 }
@@ -359,6 +365,7 @@ pdf_textsuche_pdf( Projekt* zond, const gchar* rel_path, const gchar* search_tex
 
         for ( gint u = 0; u < anzahl; u++ )
         {
+            gchar* text_tmp = NULL;
             PDFTextOcc pdf_text_occ = { 0 };
 
             pdf_text_occ.rel_path = g_strdup( rel_path );
@@ -385,18 +392,47 @@ pdf_textsuche_pdf( Projekt* zond, const gchar* rel_path, const gchar* search_tex
                     if ( fz_contains_rect( line->bbox,
                             fz_rect_from_quad( pdf_text_occ.quad ) ) )
                     {
+                        gboolean marked_up = FALSE;
+
                         found_line = TRUE;
                         //falls Zeile drüber exisitiert:
                         if ( line->prev )
-                                for (ch = line->prev->first_char; ch; ch = ch->next)
-                                fz_append_rune( ctx, buf, ch->c );
+                        {
+                            for (ch = line->prev->first_char; ch; ch = ch->next)
+                                    fz_append_rune( ctx, buf, ch->c );
+                            fz_append_byte( ctx, buf, 10 );
+                        }
                         //die Zeile mit Fundort selbst
                         for (ch = line->first_char; ch; ch = ch->next)
-                                fz_append_rune( ctx, buf, ch->c );
+                        {
+                            gboolean inside = fz_contains_rect(
+                                    fz_rect_from_quad( pdf_text_occ.quad ),
+                                    fz_rect_from_quad( ch->quad ) );
+
+                            if ( inside && !marked_up )
+                            {
+                                fz_append_string( ctx, buf, "<markup><i><b>" );
+                                marked_up = TRUE;
+                            }
+                            else if ( !inside && marked_up )
+                            {
+                                fz_append_string( ctx, buf, "</b></i></markup>" );
+                                marked_up = FALSE;
+                            }
+
+                            fz_append_rune( ctx, buf, ch->c );
+                        }
+
+                        //Falls Zeile mit gesuchtem Wort aufhört:
+                        if ( marked_up ) fz_append_string( ctx, buf, "</b></i></markup>" );
+
                         //falls Zeile drunter exisitiert:
                         if ( line->next )
-                                for (ch = line->next->first_char; ch; ch = ch->next)
-                                fz_append_rune( ctx, buf, ch->c );
+                        {
+                            fz_append_byte( ctx, buf, 10 );
+                            for (ch = line->next->first_char; ch; ch = ch->next)
+                                    fz_append_rune( ctx, buf, ch->c );
+                        }
                         break;
                     }
                     if ( found_line ) break;
@@ -404,8 +440,16 @@ pdf_textsuche_pdf( Projekt* zond, const gchar* rel_path, const gchar* search_tex
                 if ( found_line ) break;
             }
 
-            pdf_text_occ.zeile = g_strdup( fz_string_from_buffer( ctx, buf ) );
+            text_tmp = g_strdup( fz_string_from_buffer( ctx, buf ) );
             fz_drop_buffer( ctx, buf );
+
+            g_strstrip( text_tmp );
+            if ( *text_tmp == '\10' ) pdf_text_occ.zeile = g_strdup( text_tmp + 1 );
+            else pdf_text_occ.zeile = g_strdup( text_tmp );
+            g_free( text_tmp );
+
+            if ( *(pdf_text_occ.zeile + strlen( pdf_text_occ.zeile )) == '\10' )
+                    *(pdf_text_occ.zeile + strlen( pdf_text_occ.zeile ) - 1) = '\0';
 
             g_array_append_val( arr_pdf_text_occ, pdf_text_occ );
         }
