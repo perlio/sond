@@ -338,9 +338,12 @@ pdf_textsuche_pdf( Projekt* zond, const gchar* rel_path, const gchar* search_tex
 
         if ( DOCUMENT_PAGE(i)->stext_page->first_block == NULL )
         {
+            g_mutex_lock( &dd->document->mutex_doc );
+
             if ( !fz_display_list_is_empty( ctx, DOCUMENT_PAGE(i)->display_list ) )
             {
                 rc = render_display_list_to_stext_page( ctx, DOCUMENT_PAGE(i), errmsg );
+                g_mutex_unlock( &dd->document->mutex_doc );
                 if ( rc )
                 {
                     document_free_displayed_documents( zond, dd );
@@ -349,7 +352,6 @@ pdf_textsuche_pdf( Projekt* zond, const gchar* rel_path, const gchar* search_tex
             }
             else //wenn display_list noch nicht erzeugt, dann direkt aus page erzeugen
             {
-                g_mutex_lock( &dd->document->mutex_doc );
                 rc = pdf_render_stext_page_direct( DOCUMENT_PAGE(i), errmsg );
                 g_mutex_unlock( &dd->document->mutex_doc );
                 if ( rc )

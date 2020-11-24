@@ -45,23 +45,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #endif // _WIN32
 
 
-static gint
-init_stmts_for_sb_sz( Projekt* zond, gchar** errmsg )
-{
-    gint rc = 0;
-
-    /*  db_sz_get_path  */
-    rc = sqlite3_prepare_v2( zond->sojus_zentral,
-            "SELECT path FROM dateien "
-            "WHERE guuid=?;",
-            -1, &(zond->stmts_db_sz.db_sz_get_path[0]), NULL );
-    if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_prepare_v2 "
-                "(db_sz_get_path[0])" )
-
-    return 0;
-}
-
-
 static void
 recover( Projekt* zond, gchar* project, GApplication* app )
 {
@@ -253,35 +236,6 @@ init( GtkApplication* app )
 
         return NULL;
     }
-/*
-    rc = fs_tree_create_sojus_zentral( zond, &errmsg );
-    if ( rc )
-    {
-        meldung( zond->app_window, "Keine sojus_zentral-Datenbank\n\n"
-                "Bei Aufruf fs_tree_create_sojus_zentral:\n", errmsg, NULL );
-        g_free( errmsg );
-
-        gboolean ret = FALSE;
-        g_signal_emit_by_name( zond->app_window, "delete-event", NULL, &ret );
-
-        return NULL;
-    }
-*/
-/*
-    zond->root = g_strdup( "C:/lfd Akten" );
-
-    rc = fs_tree_load_dir( zond, NULL, &errmsg );
-    if ( rc )
-    {
-        meldung( zond->app_window, "fs_tree konnte nicht geladen werden:\n\n"
-                "Bei Aufruf fs_tree_load_dir:\n", errmsg, NULL );
-        g_free( errmsg );
-        gboolean ret = FALSE;
-        g_signal_emit_by_name( zond->app_window, "delete-event", NULL, &ret );
-
-        return NULL;
-    }
-*/
 
     return zond;
 }

@@ -161,8 +161,6 @@ typedef struct _Projekt
 
     DND dnd;
 
-    //sojus_zentral
-    sqlite3* sojus_zentral;
     //Working-copy project
     sqlite3* db;
     //Original-Projekt
@@ -170,10 +168,6 @@ typedef struct _Projekt
 
     //prepared statements
     STMTS stmts;
-
-    struct stmts_db_sz {
-        sqlite3_stmt* db_sz_get_path[1];
-    } stmts_db_sz;
 
     Menu menu;
     GtkWidget* fs_button;

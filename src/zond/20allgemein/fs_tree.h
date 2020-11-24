@@ -26,8 +26,6 @@ GFile* fs_insert_dir( GFile*, gboolean, gchar** );
 
 gint fs_tree_insert_dir( Projekt*, gboolean, gchar** );
 
-gint fs_tree_create_sojus_zentral( Projekt*, gchar** );
-
 gint fs_tree_remove_node( Projekt*, GFile*, GtkTreeIter*, gchar** );
 
 #endif // FS_TREE_H_INCLUDED

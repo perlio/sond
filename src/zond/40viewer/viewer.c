@@ -845,16 +845,17 @@ viewer_durchsuchen_angezeigtes_doc( PdfViewer* pv, const gchar* search_text,
 
             if ( stext_page->first_block == NULL )
             {
+                g_mutex_lock( &dd->document->mutex_doc );
                 fz_display_list* dl = DOCUMENT_PAGE(i)->display_list;
 
                 if ( !fz_display_list_is_empty( ctx, dl ) )
                 {
                     rc = render_display_list_to_stext_page( ctx, DOCUMENT_PAGE(i), errmsg );
+                    g_mutex_unlock( &dd->document->mutex_doc );
                     if ( rc ) ERROR_PAO( "render_display_list_to_stext_page" )
                 }
                 else //wenn display_list noch nicht erzeugt, dann direkt aus page erzeugen
                 {
-                    g_mutex_lock( &dd->document->mutex_doc );
                     rc = pdf_render_stext_page_direct( DOCUMENT_PAGE(i), errmsg );
                     g_mutex_unlock( &dd->document->mutex_doc );
                     if ( rc ) ERROR_PAO( "pdf_render_stext_page_direct" )
