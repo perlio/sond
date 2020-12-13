@@ -102,6 +102,16 @@ pdf_ocr_text_showing_op( gchar* begin, gchar* end )
 }
 
 
+static gboolean
+is_white( const char* s )
+{
+    if ( *s == 0 || *s == 9 || *s == 10 || *s == 12 || *s == 13 || *s == 32 )
+            return TRUE;
+
+    return FALSE;
+}
+
+
 static gint
 pdf_ocr_find_next_Tr( gchar* buf, size_t size, gchar** end_Tr )
 {

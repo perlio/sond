@@ -9,13 +9,9 @@ typedef int gint;
 typedef char gchar;
 
 
-gboolean db_create( sqlite3*, gchar** );
-
 void project_set_changed( gpointer );
 
 void reset_project_changed( Projekt* );
-
-gint create_stmts( Projekt*, gchar** );
 
 void projekt_set_widgets_sensitiv( Projekt*, gboolean );
 

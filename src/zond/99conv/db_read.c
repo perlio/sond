@@ -22,18 +22,18 @@ db_get_parent( Projekt* zond, Baum baum, gint node_id, gchar** errmsg )
 
     for ( gint i = 0; i < 1; i++ )
     {
-        sqlite3_reset( zond->stmts.db_get_parent[i] );
-        sqlite3_clear_bindings( zond->stmts.db_get_parent[i] );
+        sqlite3_reset( zond->dbase->stmts.db_get_parent[i] );
+        sqlite3_clear_bindings( zond->dbase->stmts.db_get_parent[i] );
     }
 
-    rc = sqlite3_bind_int( zond->stmts.db_get_parent[0 + (gint) baum], 1, node_id );
+    rc = sqlite3_bind_int( zond->dbase->stmts.db_get_parent[0 + (gint) baum], 1, node_id );
     if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_bind_int (node_id)" )
 
-    rc = sqlite3_step( zond->stmts.db_get_parent[0 + (gint) baum] );
+    rc = sqlite3_step( zond->dbase->stmts.db_get_parent[0 + (gint) baum] );
     if ( rc != SQLITE_DONE && rc != SQLITE_ROW ) ERROR_SQL( "sqlite3_step" )
 
     if ( rc == SQLITE_ROW ) parent_id =
-            sqlite3_column_int( zond->stmts.db_get_parent[0 + (gint) baum], 0 );
+            sqlite3_column_int( zond->dbase->stmts.db_get_parent[0 + (gint) baum], 0 );
 
     if ( rc == SQLITE_DONE )
     {
@@ -61,18 +61,18 @@ db_get_older_sibling( Projekt* zond, Baum baum, gint node_id, gchar** errmsg )
 
     for ( gint i = 0; i < 1; i++ )
     {
-        sqlite3_reset( zond->stmts.db_get_older_sibling[i] );
-        sqlite3_clear_bindings( zond->stmts.db_get_older_sibling[i] );
+        sqlite3_reset( zond->dbase->stmts.db_get_older_sibling[i] );
+        sqlite3_clear_bindings( zond->dbase->stmts.db_get_older_sibling[i] );
     }
 
-    rc = sqlite3_bind_int( zond->stmts.db_get_older_sibling[0 + (gint) baum], 1, node_id );
+    rc = sqlite3_bind_int( zond->dbase->stmts.db_get_older_sibling[0 + (gint) baum], 1, node_id );
     if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_bind_int (node_id)" )
 
-    rc = sqlite3_step( zond->stmts.db_get_older_sibling[0 + (gint) baum] );
+    rc = sqlite3_step( zond->dbase->stmts.db_get_older_sibling[0 + (gint) baum] );
     if ( rc != SQLITE_DONE && rc != SQLITE_ROW ) ERROR_SQL( "sqlite3_step" )
 
     if ( rc == SQLITE_ROW ) older_sibling_id =
-            sqlite3_column_int( zond->stmts.db_get_older_sibling[0 + (gint) baum], 0 );
+            sqlite3_column_int( zond->dbase->stmts.db_get_older_sibling[0 + (gint) baum], 0 );
 
     if ( rc == SQLITE_DONE )
     {
@@ -95,18 +95,18 @@ db_get_younger_sibling( Projekt* zond, Baum baum, gint node_id, gchar** errmsg )
 
     for ( gint i = 0; i < 2; i++ )
     {
-        sqlite3_reset( zond->stmts.db_get_younger_sibling[i] );
-        sqlite3_clear_bindings( zond->stmts.db_get_younger_sibling[i] );
+        sqlite3_reset( zond->dbase->stmts.db_get_younger_sibling[i] );
+        sqlite3_clear_bindings( zond->dbase->stmts.db_get_younger_sibling[i] );
     }
 
-    rc = sqlite3_bind_int( zond->stmts.db_get_younger_sibling[0 + (gint) baum], 1, node_id );
+    rc = sqlite3_bind_int( zond->dbase->stmts.db_get_younger_sibling[0 + (gint) baum], 1, node_id );
     if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_bind_int (node_id)" )
 
-    rc = sqlite3_step( zond->stmts.db_get_younger_sibling[0 + (gint) baum] );
+    rc = sqlite3_step( zond->dbase->stmts.db_get_younger_sibling[0 + (gint) baum] );
     if ( rc != SQLITE_DONE && rc != SQLITE_ROW ) ERROR_SQL( "sqlite3_step" )
 
     if ( rc == SQLITE_ROW ) younger_sibling_id =
-            sqlite3_column_int( zond->stmts.db_get_younger_sibling[0 + (gint) baum], 1 );
+            sqlite3_column_int( zond->dbase->stmts.db_get_younger_sibling[0 + (gint) baum], 1 );
 
     if ( rc == SQLITE_DONE )
     {
@@ -127,18 +127,18 @@ db_get_first_child( Projekt* zond, Baum baum, gint node_id, gchar** errmsg )
 
     for ( gint i = 0; i < 2; i++ )
     {
-        sqlite3_reset( zond->stmts.db_get_first_child[i] );
-        sqlite3_clear_bindings( zond->stmts.db_get_first_child[i] );
+        sqlite3_reset( zond->dbase->stmts.db_get_first_child[i] );
+        sqlite3_clear_bindings( zond->dbase->stmts.db_get_first_child[i] );
     }
 
-    rc = sqlite3_bind_int( zond->stmts.db_get_first_child[0 + (gint) baum], 1, node_id );
+    rc = sqlite3_bind_int( zond->dbase->stmts.db_get_first_child[0 + (gint) baum], 1, node_id );
     if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_bind_int (node_id)" )
 
-    rc = sqlite3_step( zond->stmts.db_get_first_child[0 + (gint) baum] );
+    rc = sqlite3_step( zond->dbase->stmts.db_get_first_child[0 + (gint) baum] );
     if ( rc != SQLITE_DONE && rc != SQLITE_ROW ) ERROR_SQL( "sqlite3_step" )
 
     if ( rc == SQLITE_ROW ) first_child_id =
-            sqlite3_column_int( zond->stmts.db_get_first_child[0 + (gint) baum], 1 );
+            sqlite3_column_int( zond->dbase->stmts.db_get_first_child[0 + (gint) baum], 1 );
 
     if ( rc == SQLITE_DONE )
     {
@@ -159,25 +159,25 @@ db_get_icon_name_and_node_text( Projekt* zond, Baum baum, gint node_id, gchar** 
 
     for ( gint i = 0; i < 2; i++ )
     {
-        sqlite3_reset( zond->stmts.db_get_icon_name_and_node_text[i] );
-        sqlite3_clear_bindings( zond->stmts.db_get_icon_name_and_node_text[i] );
+        sqlite3_reset( zond->dbase->stmts.db_get_icon_name_and_node_text[i] );
+        sqlite3_clear_bindings( zond->dbase->stmts.db_get_icon_name_and_node_text[i] );
     }
 
-    rc = sqlite3_bind_int( zond->stmts.db_get_icon_name_and_node_text[0 + (gint) baum], 1, node_id );
+    rc = sqlite3_bind_int( zond->dbase->stmts.db_get_icon_name_and_node_text[0 + (gint) baum], 1, node_id );
     if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_bind_int (node_id)" )
 
-    rc = sqlite3_step( zond->stmts.db_get_icon_name_and_node_text[0 + (gint) baum] );
+    rc = sqlite3_step( zond->dbase->stmts.db_get_icon_name_and_node_text[0 + (gint) baum] );
     if ( rc != SQLITE_DONE && rc != SQLITE_ROW ) ERROR_SQL( "sqlite3_step" )
 
     if ( rc == SQLITE_ROW )
     {
         gchar* buf_icon_name = (gchar*)
-                sqlite3_column_text( zond->stmts.db_get_icon_name_and_node_text[0 + (gint) baum], 0 );
+                sqlite3_column_text( zond->dbase->stmts.db_get_icon_name_and_node_text[0 + (gint) baum], 0 );
         if ( buf_icon_name && icon_name ) *icon_name= g_strdup( buf_icon_name );
         else if ( node_text ) *node_text = g_strdup( "" );
 
         gchar* buf_node_text = (gchar*)
-                sqlite3_column_text( zond->stmts.db_get_icon_name_and_node_text[0 + (gint) baum], 1 );
+                sqlite3_column_text( zond->dbase->stmts.db_get_icon_name_and_node_text[0 + (gint) baum], 1 );
         if ( buf_node_text && node_text ) *node_text = g_strdup( buf_node_text );
         else if ( node_text ) *node_text = g_strdup( "" );
     }
@@ -193,16 +193,16 @@ db_get_ref_id( Projekt* zond, gint node_id, gchar** errmsg )
     gint rc = 0;
     gint ref_id = 0;
 
-    sqlite3_reset( zond->stmts.db_get_ref_id[0] );
+    sqlite3_reset( zond->dbase->stmts.db_get_ref_id[0] );
 
-    rc = sqlite3_bind_int( zond->stmts.db_get_ref_id[0], 1, node_id );
+    rc = sqlite3_bind_int( zond->dbase->stmts.db_get_ref_id[0], 1, node_id );
     if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_bind_int (node_id)" )
 
-    rc = sqlite3_step( zond->stmts.db_get_ref_id[0] );
+    rc = sqlite3_step( zond->dbase->stmts.db_get_ref_id[0] );
     if ( rc != SQLITE_DONE && rc != SQLITE_ROW ) ERROR_SQL( "sqlite3_step" )
 
     if ( rc == SQLITE_ROW ) ref_id =
-            sqlite3_column_int( zond->stmts.db_get_ref_id[0], 0 );
+            sqlite3_column_int( zond->dbase->stmts.db_get_ref_id[0], 0 );
     else if ( rc == SQLITE_DONE )
     {
         if ( errmsg ) *errmsg = add_string( *errmsg,
@@ -234,12 +234,12 @@ db_get_rel_path( Projekt* zond, Baum baum, gint node_id, gchar** rel_path,
 
     gint rc = 0;
 
-    sqlite3_reset( zond->stmts.db_get_rel_path[0] );
+    sqlite3_reset( zond->dbase->stmts.db_get_rel_path[0] );
 
-    rc = sqlite3_bind_int( zond->stmts.db_get_rel_path[0], 1, node_id );
+    rc = sqlite3_bind_int( zond->dbase->stmts.db_get_rel_path[0], 1, node_id );
     if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_bind_int (node_id)" )
 
-    rc = sqlite3_step( zond->stmts.db_get_rel_path[0] );
+    rc = sqlite3_step( zond->dbase->stmts.db_get_rel_path[0] );
     if ( rc != SQLITE_DONE && rc != SQLITE_ROW ) ERROR_SQL( "sqlite3_step" )
     else if ( rc == SQLITE_DONE )
     {
@@ -248,7 +248,7 @@ db_get_rel_path( Projekt* zond, Baum baum, gint node_id, gchar** rel_path,
         return -1;
     }
 
-    text = (gchar*) sqlite3_column_text( zond->stmts.db_get_rel_path[0], 1 );
+    text = (gchar*) sqlite3_column_text( zond->dbase->stmts.db_get_rel_path[0], 1 );
 
     if ( !text || !g_strcmp0( text, "" ) ) return -2;
 
@@ -275,12 +275,12 @@ db_get_ziel( Projekt* zond, Baum baum, gint node_id, Ziel** ziel, gchar** errmsg
 
     gint rc = 0;
 
-    sqlite3_reset( zond->stmts.db_get_ziel[0] );
+    sqlite3_reset( zond->dbase->stmts.db_get_ziel[0] );
 
-    rc = sqlite3_bind_int( zond->stmts.db_get_ziel[0], 1, node_id );
+    rc = sqlite3_bind_int( zond->dbase->stmts.db_get_ziel[0], 1, node_id );
     if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_bind_int (node_id)" )
 
-    rc = sqlite3_step( zond->stmts.db_get_ziel[0] );
+    rc = sqlite3_step( zond->dbase->stmts.db_get_ziel[0] );
     if ( rc != SQLITE_DONE && rc != SQLITE_ROW ) ERROR_SQL( "sqlite3_step" )
     else if ( rc == SQLITE_DONE ) return 0;
 
@@ -288,16 +288,16 @@ db_get_ziel( Projekt* zond, Baum baum, gint node_id, Ziel** ziel, gchar** errmsg
     gchar* buf = NULL;
 
     //ziel_id_von
-    buf = (gchar*) sqlite3_column_text( zond->stmts.db_get_ziel[0], 0 );
+    buf = (gchar*) sqlite3_column_text( zond->dbase->stmts.db_get_ziel[0], 0 );
     (*ziel)->ziel_id_von = g_strdup( buf );
 
     //ziel_id_bis
-    buf = (gchar*) sqlite3_column_text( zond->stmts.db_get_ziel[0], 2 );
+    buf = (gchar*) sqlite3_column_text( zond->dbase->stmts.db_get_ziel[0], 2 );
     (*ziel)->ziel_id_bis = g_strdup( buf );
 
     //index_von und -bis
-    (*ziel)->index_von = sqlite3_column_int( zond->stmts.db_get_ziel[0], 1 );
-    (*ziel)->index_bis = sqlite3_column_int( zond->stmts.db_get_ziel[0], 3 );
+    (*ziel)->index_von = sqlite3_column_int( zond->dbase->stmts.db_get_ziel[0], 1 );
+    (*ziel)->index_bis = sqlite3_column_int( zond->dbase->stmts.db_get_ziel[0], 3 );
 
     return 0;
 }
@@ -334,12 +334,12 @@ db_get_text( Projekt* zond, gint node_id, gchar** text, gchar** errmsg )
 {
     gint rc = 0;
 
-    sqlite3_reset( zond->stmts.db_get_text[0] );
+    sqlite3_reset( zond->dbase->stmts.db_get_text[0] );
 
-    rc = sqlite3_bind_int( zond->stmts.db_get_text[0], 1, node_id );
+    rc = sqlite3_bind_int( zond->dbase->stmts.db_get_text[0], 1, node_id );
     if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_bind_int (node_id)" )
 
-    rc = sqlite3_step( zond->stmts.db_get_text[0] );
+    rc = sqlite3_step( zond->dbase->stmts.db_get_text[0] );
     if ( rc != SQLITE_DONE && rc != SQLITE_ROW ) ERROR_SQL( "sqlite3_step" )
     else if ( rc == SQLITE_DONE )
     {
@@ -350,7 +350,7 @@ db_get_text( Projekt* zond, gint node_id, gchar** text, gchar** errmsg )
     }
 
     if ( rc == SQLITE_ROW && text ) *text =
-            g_strdup( (const gchar*) sqlite3_column_text( zond->stmts.db_get_text[0], 1 ) );
+            g_strdup( (const gchar*) sqlite3_column_text( zond->dbase->stmts.db_get_text[0], 1 ) );
 
     return 0;
 }
@@ -364,16 +364,16 @@ db_get_node_id_from_rel_path( Projekt* zond, const gchar* rel_path, gchar** errm
     gint rc = 0;
     gint node_id = 0;
 
-    sqlite3_reset( zond->stmts.db_get_node_id_from_rel_path[0] );
+    sqlite3_reset( zond->dbase->stmts.db_get_node_id_from_rel_path[0] );
 
-    rc = sqlite3_bind_text( zond->stmts.db_get_node_id_from_rel_path[0], 1, rel_path, -1, NULL );
+    rc = sqlite3_bind_text( zond->dbase->stmts.db_get_node_id_from_rel_path[0], 1, rel_path, -1, NULL );
     if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_bind_text (rel_path)" )
 
-    rc = sqlite3_step( zond->stmts.db_get_node_id_from_rel_path[0] );
+    rc = sqlite3_step( zond->dbase->stmts.db_get_node_id_from_rel_path[0] );
     if ( (rc != SQLITE_ROW) && rc != SQLITE_DONE ) ERROR_SQL( "sqlite3_step" )
 
     if ( rc == SQLITE_ROW ) node_id =
-            sqlite3_column_int( zond->stmts.db_get_node_id_from_rel_path[0], 0 );
+            sqlite3_column_int( zond->dbase->stmts.db_get_node_id_from_rel_path[0], 0 );
 
     return node_id;
 }
@@ -384,12 +384,12 @@ db_check_id( Projekt* zond, const gchar* id, gchar** errmsg )
 {
     gint rc = 0;
 
-    sqlite3_reset( zond->stmts.db_check_id[0] );
+    sqlite3_reset( zond->dbase->stmts.db_check_id[0] );
 
-    rc = sqlite3_bind_text( zond->stmts.db_check_id[0], 1, id, -1, NULL );
+    rc = sqlite3_bind_text( zond->dbase->stmts.db_check_id[0], 1, id, -1, NULL );
     if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_bind_text (id)" )
 
-    rc = sqlite3_step( zond->stmts.db_check_id[0] );
+    rc = sqlite3_step( zond->dbase->stmts.db_check_id[0] );
     if ( (rc != SQLITE_ROW) && rc != SQLITE_DONE ) ERROR_SQL( "sqlite3_step" )
 
     if ( rc == SQLITE_ROW ) return 1;

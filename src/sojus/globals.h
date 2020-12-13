@@ -20,7 +20,7 @@
 #include <dirent.h>
 #include <mariadb/mysql.h>
 
-#include "global_types.h"
+//#include "global_types.h"
 
 #include "00misc/auswahl.h"
 #include "00misc/settings.h"

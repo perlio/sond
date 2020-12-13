@@ -135,6 +135,67 @@ meldung( GtkWidget* window, const gchar* text1, ... )
 }
 
 
+/** Gibt nur bei Fehler NULL zurück, sonst immer Zeiger auf Anbindung **/
+static Anbindung*
+ziel_zu_anbindung( fz_context* ctx, const gchar* rel_path, Ziel* ziel, gchar** errmsg )
+{
+    gint page_num = 0;
+
+    Anbindung* anbindung = g_malloc0( sizeof( Anbindung ) );
+
+    page_num = pdf_get_page_num_from_dest( ctx, rel_path, ziel->ziel_id_von, errmsg );
+    if ( page_num == -1 )
+    {
+        g_free( anbindung );
+        ERROR_PAO_R( "pdf_get_page_num_from_dest", NULL )
+    }
+    else if ( page_num == -2 )
+    {
+        if ( errmsg ) *errmsg = g_strdup( "NamedDest nicht in Dokument vohanden" );
+        g_free( anbindung );
+
+        return NULL;
+    }
+    else anbindung->von.seite = page_num;
+
+    page_num = pdf_get_page_num_from_dest( ctx, rel_path, ziel->ziel_id_bis,
+            errmsg );
+    if ( page_num == -1 )
+    {
+        g_free( anbindung );
+
+        ERROR_PAO_R( "pdf_get_page_num_from_dest", NULL )
+    }
+    else if ( page_num == -2 )
+    {
+        if ( errmsg ) *errmsg = g_strdup( "NamedDest nicht in Dokument vohanden" );
+        g_free( anbindung );
+
+        return NULL;
+    }
+    else anbindung->bis.seite = page_num;
+
+    anbindung->von.index = ziel->index_von;
+    anbindung->bis.index = ziel->index_bis;
+
+    return anbindung;
+}
+
+
+void
+ziele_free( Ziel* ziel )
+{
+    if ( !ziel ) return;
+
+    g_free( ziel->ziel_id_von );
+    g_free( ziel->ziel_id_bis );
+
+    g_free( ziel );
+
+    return;
+}
+
+
 #ifndef VIEWER
 /** Wenn Fehler: -1
     Wenn Vorfahre Datei ist: 1
@@ -209,71 +270,8 @@ knoten_verschieben( Projekt* zond, Baum baum, gint node_id, gint new_parent,
 
     return 0;
 }
-#endif // VIEWER
 
 
-/** Gibt nur bei Fehler NULL zurück, sonst immer Zeiger auf Anbindung **/
-static Anbindung*
-ziel_zu_anbindung( fz_context* ctx, const gchar* rel_path, Ziel* ziel, gchar** errmsg )
-{
-    gint page_num = 0;
-
-    Anbindung* anbindung = g_malloc0( sizeof( Anbindung ) );
-
-    page_num = pdf_get_page_num_from_dest( ctx, rel_path, ziel->ziel_id_von, errmsg );
-    if ( page_num == -1 )
-    {
-        g_free( anbindung );
-        ERROR_PAO_R( "pdf_get_page_num_from_dest", NULL )
-    }
-    else if ( page_num == -2 )
-    {
-        if ( errmsg ) *errmsg = g_strdup( "NamedDest nicht in Dokument vohanden" );
-        g_free( anbindung );
-
-        return NULL;
-    }
-    else anbindung->von.seite = page_num;
-
-    page_num = pdf_get_page_num_from_dest( ctx, rel_path, ziel->ziel_id_bis,
-            errmsg );
-    if ( page_num == -1 )
-    {
-        g_free( anbindung );
-
-        ERROR_PAO_R( "pdf_get_page_num_from_dest", NULL )
-    }
-    else if ( page_num == -2 )
-    {
-        if ( errmsg ) *errmsg = g_strdup( "NamedDest nicht in Dokument vohanden" );
-        g_free( anbindung );
-
-        return NULL;
-    }
-    else anbindung->bis.seite = page_num;
-
-    anbindung->von.index = ziel->index_von;
-    anbindung->bis.index = ziel->index_bis;
-
-    return anbindung;
-}
-
-
-void
-ziele_free( Ziel* ziel )
-{
-    if ( !ziel ) return;
-
-    g_free( ziel->ziel_id_von );
-    g_free( ziel->ziel_id_bis );
-
-    g_free( ziel );
-
-    return;
-}
-
-
-#ifndef VIEWER
 /** Keine Datei mit node_id verknüpft: 2
     Kein ziel mit node_id verknüpft: 1
     Datei und ziel verknüpft: 0
@@ -331,6 +329,67 @@ abfragen_rel_path_and_anbindung( Projekt* zond, Baum baum, gint node_id,
 
     return 0;
 }
+
+
+gint
+update_db_before_path_change( gpointer data, gchar** errmsg )
+{
+    gint rc = 0;
+
+    Projekt* zond = (Projekt*) data;
+
+    rc = db_begin_both( zond, errmsg );
+    if ( rc == -1 ) ERROR_PAO( "db_begin_both" )
+    else if ( rc == -2 ) ERROR_PAO_ROLLBACK( "db_begin_both" )
+
+    return 0;
+}
+
+
+gint
+update_db_after_path_change( const GFile* file_source, const GFile* file_dest,
+        const gint rc_edit, gpointer data, gchar** errmsg )
+{
+    gint rc = 0;
+
+    Projekt* zond = (Projekt*) data;
+
+    if ( rc_edit == 1 )
+    {
+        rc = db_rollback_both( zond, errmsg );
+        if ( rc ) ERROR_PAO( "db_rollback_both" )
+    }
+    else if ( rc_edit == -1 )
+    {
+        rc = db_rollback_both( zond, errmsg );
+        if ( rc ) ERROR_PAO( "db_rollback_both" )
+        else if ( errmsg ) *errmsg = add_string( *errmsg, g_strdup( "\n\n"
+                "Rollback durchgeführt" ) );
+    }
+    else
+    {
+        gchar* path_source = g_file_get_path( (GFile*) file_source );
+        gchar* rel_path_source = g_strdup( path_source + strlen( zond->project_dir ) + 1 );
+        gchar* path_dest = g_file_get_path( (GFile*) file_dest );
+        gchar* rel_path_dest = g_strdup( path_dest + strlen( zond->project_dir ) + 1 );
+
+        rc = db_update_path( zond, rel_path_source, rel_path_dest, errmsg );
+
+        g_free( rel_path_source );
+        g_free( rel_path_dest );
+        g_free( path_source );
+        g_free( path_dest );
+
+        if ( rc ) ERROR_PAO_ROLLBACK_BOTH( "db_update_path" );
+
+        rc = db_commit_both( zond, errmsg );
+        if ( rc ) ERROR_PAO_ROLLBACK_BOTH( "db_commit_both" )
+    }
+
+    return 0;
+}
+
+
 #endif // VIEWER
 
 
@@ -348,16 +407,6 @@ is_pdf( const gchar* path )
     g_free( content_type );
 
     return res;
-}
-
-
-gboolean
-is_white( const char* s )
-{
-    if ( *s == 0 || *s == 9 || *s == 10 || *s == 12 || *s == 13 || *s == 32 )
-            return TRUE;
-
-    return FALSE;
 }
 
 

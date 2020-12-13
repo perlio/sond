@@ -133,27 +133,27 @@ ziele_einfuegen_db( Projekt* zond, gint anchor_id, gboolean kind, Ziel* ziel,
             zond->icon[ICON_ANBINDUNG].icon_name, node_text, errmsg );
     if ( new_node == -1 ) ERROR_PAO( "db_insert_node" )
 
-    sqlite3_reset( zond->stmts.ziele_einfuegen[0] );
-    sqlite3_clear_bindings( zond->stmts.ziele_einfuegen[0] );
+    sqlite3_reset( zond->dbase->stmts.ziele_einfuegen[0] );
+    sqlite3_clear_bindings( zond->dbase->stmts.ziele_einfuegen[0] );
 
-    rc = sqlite3_bind_text( zond->stmts.ziele_einfuegen[0], 1,
+    rc = sqlite3_bind_text( zond->dbase->stmts.ziele_einfuegen[0], 1,
             ziel->ziel_id_von, -1, NULL );
     if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_bind_text [0,1]" )
 
-    rc = sqlite3_bind_int( zond->stmts.ziele_einfuegen[0], 2, ziel->index_von );
+    rc = sqlite3_bind_int( zond->dbase->stmts.ziele_einfuegen[0], 2, ziel->index_von );
     if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_bind_int [0,2]" )
 
-    rc = sqlite3_bind_text( zond->stmts.ziele_einfuegen[0], 3, ziel->ziel_id_bis,
+    rc = sqlite3_bind_text( zond->dbase->stmts.ziele_einfuegen[0], 3, ziel->ziel_id_bis,
             -1, NULL );
     if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_bind_text [0,3]" )
 
-    rc = sqlite3_bind_int( zond->stmts.ziele_einfuegen[0], 4, ziel->index_bis );
+    rc = sqlite3_bind_int( zond->dbase->stmts.ziele_einfuegen[0], 4, ziel->index_bis );
     if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_bind_text [0,4]" )
 
-    rc = sqlite3_bind_int( zond->stmts.ziele_einfuegen[0], 5, anchor_id );
+    rc = sqlite3_bind_int( zond->dbase->stmts.ziele_einfuegen[0], 5, anchor_id );
     if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_bind_int [0,5]" )
 
-    rc = sqlite3_step( zond->stmts.ziele_einfuegen[0] );
+    rc = sqlite3_step( zond->dbase->stmts.ziele_einfuegen[0] );
     if ( rc != SQLITE_DONE ) ERROR_SQL( "sqlite3_step [0]" )
 
     return new_node;

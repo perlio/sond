@@ -62,15 +62,6 @@ typedef struct _Info_Window
 } InfoWindow;
 
 
-struct _DND
-{
-    gboolean dndactive;
-    gboolean first_change;
-    gint node_id;
-};
-
-typedef struct _DND DND;
-
 struct _Menu
 {
     GtkWidget* projekt;
@@ -121,12 +112,15 @@ typedef struct _STMTS
     sqlite3_stmt* db_update_path[2];
 } STMTS;
 
-//Hier sind die Knoten gespeichern, die kopiert bzw. ausgeschnitten sind
-typedef struct _Clipboard {
-    GtkTreeView* tree_view;
-    gboolean ausschneiden;
-    GPtrArray* arr_ref;
-} Clipboard;
+typedef struct _Clipboard Clipboard;
+
+typedef struct _Database
+{
+    sqlite3* db;
+    sqlite3* db_store;
+    STMTS stmts;
+} Database;
+
 
 typedef struct _Projekt
 {
@@ -157,17 +151,17 @@ typedef struct _Projekt
 
     GtkTextView* textview;
 
-    Clipboard clipboard;
-
-    DND dnd;
+    Clipboard* clipboard;
 
     //Working-copy project
     sqlite3* db;
     //Original-Projekt
     sqlite3* db_store;
 
+    Database* dbase;
+
     //prepared statements
-    STMTS stmts;
+  //  STMTS stmts;
 
     Menu menu;
     GtkWidget* fs_button;
@@ -211,14 +205,6 @@ struct _Ziel
 
 typedef struct _Ziel Ziel;
 
-
-struct _Foreach_Pipe
-{
-    gpointer question;
-    gpointer answer;
-};
-
-typedef struct _Foreach_Pipe ForeachPipe;
 
 typedef struct _Pdf_Punkt
 {

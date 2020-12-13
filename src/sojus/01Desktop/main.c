@@ -1,6 +1,8 @@
 #define MAIN_C
 
-#include "../globals.h"
+#include <gtk/gtk.h>
+
+#include "../global_types_sojus.h"
 #include <gio/gio.h>
 
 #include "aktenschnellansicht.h"
@@ -35,7 +37,7 @@ init_db ( Sojus* sojus )
     //working dir = Sojus/
     gchar* program = g_find_program_in_path( "Sojus.exe" );
     gchar* wd_path = g_strndup( program, strlen( program ) - 15 );
-    chdir( wd_path );
+    g_chdir( wd_path );
     g_free( program );
     g_free( wd_path );
 

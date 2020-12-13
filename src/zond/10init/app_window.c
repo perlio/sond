@@ -16,6 +16,12 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+#include <gtk/gtk.h>
+#include <mupdf/fitz.h>
+
+#include "../../misc.h"
+#include "../../treeview.h"
+
 #include "../global_types.h"
 
 #include "../99conv/general.h"
@@ -27,11 +33,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "treeviews.h"
 
 #include "../40viewer/viewer.h"
-
-#include "../../misc.h"
-
-#include <gtk/gtk.h>
-#include <mupdf/fitz.h>
 
 
 
@@ -64,7 +65,8 @@ cb_delete_event( GtkWidget* app_window, GdkEvent* event, gpointer user_data )
 
     g_ptr_array_unref( zond->arr_docs );
     g_ptr_array_unref( zond->arr_pv );
-    g_ptr_array_unref( zond->clipboard.arr_ref );
+    g_ptr_array_unref( zond->clipboard->arr_ref );
+    g_free( zond->clipboard );
 
     g_free( zond );
 

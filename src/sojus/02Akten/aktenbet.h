@@ -1,6 +1,14 @@
 #ifndef AKTENBET_H_INCLUDED
 #define AKTENBET_H_INCLUDED
 
+typedef struct _GtkWidget GtkWidget;
+typedef struct _GPtrArray GPtrArray;
+
+typedef struct _Aktenbet Aktenbet;
+
+typedef void* gpointer;
+typedef int gint;
+
 GPtrArray* aktenbet_oeffnen( GtkWidget*, gint, gint );
 
 void aktenbet_free( gpointer );

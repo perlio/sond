@@ -421,6 +421,16 @@
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
 		</Unit>
+		<Unit filename="src/zond/20allgemein/project_db.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/20allgemein/project_db.h">
+			<Option compile="1" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
 		<Unit filename="src/zond/20allgemein/selection.c">
 			<Option compilerVar="CC" />
 			<Option target="zond (Release)" />
@@ -658,6 +668,7 @@
 			<Option target="Viewer (Testing)" />
 		</Unit>
 		<Unit filename="src/zond/global_types.h">
+			<Option compile="1" />
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
 			<Option target="Viewer (Release)" />

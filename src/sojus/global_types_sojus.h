@@ -3,8 +3,6 @@
 
 #define JAHRHUNDERT_GRENZE 70
 
-
-
 typedef char gchar;
 typedef int gint;
 typedef int gboolean;

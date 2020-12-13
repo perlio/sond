@@ -8,59 +8,65 @@ gchar* prepend_string( gchar*, gchar* );
 
 
 //Fehlerbehandlung
-#define ERROR_PAO_R(x,y) { if ( errmsg ) *errmsg = prepend_string( *errmsg, \
-                       g_strdup( "Bei Aufruf " x ":\n" ) ); \
-                       return y; }
-
-#define ERROR_SQL_R(x,y) { if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf " x ":\n", \
-                       sqlite3_errmsg(zond->db), NULL ); \
-                       return y; }
-
-#define ERROR_MUPDF_R(x,y) { if ( errmsg ) *errmsg = prepend_string( *errmsg, g_strconcat( \
-                        "Bei Aufruf " x ":\n", fz_caught_message( ctx ), NULL ) ); \
-                         return y; }
-
-#define ERROR_PAO(x) { if ( errmsg ) *errmsg = prepend_string( *errmsg, \
-                       g_strdup( "Bei Aufruf " x ":\n" ) ); \
+#define ERROR_PAO(x) { if ( errmsg ) *errmsg = add_string( \
+                       g_strdup( "Bei Aufruf " x ":\n" ), *errmsg ); \
                        return -1; }
 
-#define ERROR_THREAD(x) { fprintf( stderr, "Thread error: %s\n", x); \
-                          fz_drop_context( ctx ); return; }
+#define ERROR_PAO_R(x,y) { if ( errmsg ) *errmsg = add_string( \
+                       g_strdup( "Bei Aufruf " x ":\n" ), *errmsg ); \
+                       return y; }
 
-#define ERROR_SQL(x) { if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf " x ":\n", \
-                       sqlite3_errmsg(zond->db), NULL ); \
+#define ERROR_SQL(x) { if ( errmsg ) *errmsg = add_string( g_strconcat( "Bei Aufruf " x ":\n", \
+                       sqlite3_errmsg(zond->db), NULL ), *errmsg ); \
                        return -1; }
+
+#define ERROR_SQL_R(x,y) { if ( errmsg ) *errmsg = add_string( g_strconcat( "Bei Aufruf " x ":\n", \
+                       sqlite3_errmsg(zond->db), NULL ), *errmsg ); \
+                       return y; }
 
 #define ERROR_MUPDF(x) { if ( errmsg ) *errmsg = add_string( *errmsg, g_strconcat( \
                         "Bei Aufruf " x ":\n", fz_caught_message( ctx ), NULL ) ); \
                          return -1; }
 
+#define ERROR_MUPDF_R(x,y) { if ( errmsg ) *errmsg = add_string( g_strconcat( \
+                        "Bei Aufruf " x ":\n", fz_caught_message( ctx ), NULL ), *errmsg ); \
+                         return y; }
+
 #define ERR_MUPDF(x) { if ( errmsg ) *errmsg = add_string( *errmsg, g_strconcat( \
                         "Bei Aufruf " x ":\n", fz_caught_message( ctx ), NULL ) ); }
+
+#define ERROR_THREAD(x) { fprintf( stderr, "Thread error: %s\n", x); \
+                          fz_drop_context( ctx ); return; }
 
 #define ERROR_MUPDF_CTX(x,y) { if ( errmsg ) *errmsg = add_string( *errmsg, g_strconcat( \
                         "Bei Aufruf " x ":\n", fz_caught_message( y ), NULL ) ); \
                          return -1; }
 
-#define ROLLBACK \
-          { rc = db_rollback( zond, errmsg ); \
+#define ERROR_PAO_ROLLBACK(x) \
+          { if ( errmsg ) *errmsg = add_string( \
+            g_strdup( "Bei Aufruf " x ":\n" ), *errmsg ); \
+            \
+            gchar* err_rollback = NULL; \
+            gint rc_rollback = 0; \
+            rc_rollback = db_rollback( zond, &err_rollback ); \
+            if ( errmsg ) \
+            { \
+                if ( !rc_rollback ) *errmsg = add_string( *errmsg, \
+                        g_strdup( "\n\nRollback durchgeführt" ) ); \
+                else *errmsg = add_string( *errmsg, g_strconcat( "\n\nRollback " \
+                        "fehlgeschlagen\n\nBei Aufruf db_rollback:\n", \
+                        err_rollback, "\n\nDatenbankverbindung trennen", NULL ) ); \
+            } \
+            g_free( err_rollback ); \
+            \
+            return -1; }
+
+#define ERROR_PAO_ROLLBACK_BOTH(x) \
+          { if ( errmsg ) *errmsg = add_string( \
+            g_strdup( "Bei Aufruf " x ":\n" ), *errmsg ); \
+            rc = db_rollback_both( zond, errmsg ); \
             if ( !rc && errmsg ) *errmsg = add_string( *errmsg, \
                     g_strdup( "\n\nRollback durchgeführt" ) ); \
-            else if ( errmsg ) *errmsg = add_string( *errmsg, \
-                    g_strdup( "\n\nGgf. Datenbankverbindung schließen" ) ); \
-        }
-
-#define ERROR_PAO_ROLLBACK(x) \
-          { if ( errmsg ) *errmsg = prepend_string( *errmsg, \
-            g_strdup( "Bei Aufruf " x ":\n" ) ); \
-            ROLLBACK \
             return -1; }
-
-#define ERROR_SQL_ROLLBACK(x) \
-          { if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf " x ":\n", \
-                    sqlite3_errmsg(zond->db), NULL ); \
-            ROLLBACK \
-            return -1; }
-
 
 #endif // ERROR_H_INCLUDED

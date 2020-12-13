@@ -17,6 +17,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 
+#include "../../misc.h"
+#include "../../treeview.h"
+
 #include "../global_types.h"
 #include "../error.h"
 
@@ -31,8 +34,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "icons.h"
 #include "app_window.h"
 #include "headerbar.h"
-
-#include "../../misc.h"
 
 #include <sqlite3.h>
 #include <gtk/gtk.h>
@@ -192,7 +193,7 @@ init( GtkApplication* app )
     zond = g_malloc0( sizeof( Projekt ) );
 
     //benötigte Arrays erzeugen
-    zond->clipboard.arr_ref = g_ptr_array_new_with_free_func( (GDestroyNotify) gtk_tree_row_reference_free );
+    zond->clipboard = treeview_init_clipboard( );
 
     zond->arr_pv = g_ptr_array_new( );
     zond->arr_docs = g_ptr_array_new( );

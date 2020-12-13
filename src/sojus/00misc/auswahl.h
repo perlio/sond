@@ -8,6 +8,8 @@ typedef struct _GtkWidget GtkWidget;
 typedef struct _GtkEntry GtkEntry;
 
 typedef char gchar;
+typedef int gint;
+typedef int gboolean;
 
 
 //void cb_row_activated( GtkListBox*, GtkListBoxRow*, gpointer );

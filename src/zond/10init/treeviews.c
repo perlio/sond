@@ -16,6 +16,12 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+#include <gtk/gtk.h>
+#include <mupdf/fitz.h>
+
+#include "../../treeview.h"
+#include "../../fm.h"
+
 #include "../global_types.h"
 #include "../error.h"
 
@@ -31,13 +37,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../20allgemein/fs_tree.h"
 
 #include "../40viewer/viewer.h"
-
-#include "../../treeview.h"
-#include "../../fm.h"
-
-#include <gtk/gtk.h>
-#include <mupdf/fitz.h>
-
 
 
 
@@ -217,63 +216,6 @@ cb_focus_in( GtkWidget* treeview, GdkEvent* event, gpointer user_data )
 
 
 static void
-cb_drag_begin( GtkWidget* widget, GdkDragContext* context, gpointer zond )
-{
-    ((Projekt*) zond)->dnd.dndactive = TRUE;
-    ((Projekt*) zond)->dnd.first_change = TRUE;
-
-    return;
-}
-
-
-void
-cb_row_changed( GtkTreeModel* model, GtkTreePath* path, GtkTreeIter* iter,
-        gpointer user_data )
-{
-    Projekt* zond = (Projekt*) user_data;
-
-    if ( !(zond->dnd.dndactive)) return;
-    if ( !(zond->dnd.first_change) ) return;
-
-    gtk_tree_model_get( model, iter, 2, &(zond->dnd.node_id), -1 );
-
-    zond->dnd.first_change = FALSE;
-    return;
-}
-
-
-static void
-cb_drag_end( GtkWidget* widget, GdkDragContext* context, gpointer user_data )
-{
-    Projekt* zond = (Projekt*) user_data;
-
-    GtkTreeIter* iter = baum_abfragen_iter( zond->treeview[BAUM_AUSWERTUNG],
-            zond->dnd.node_id );
-
-    gint new_parent_id = baum_abfragen_parent_id( zond, BAUM_AUSWERTUNG, iter );
-    gint new_older_sibling_id = baum_abfragen_older_sibling_id( zond,
-            BAUM_AUSWERTUNG, iter );
-
-    gtk_tree_iter_free( iter );
-
-    gchar* errmsg = NULL;
-    gint rc = 0;
-    rc = db_verschieben_knoten( zond, BAUM_AUSWERTUNG, zond->dnd.node_id, new_parent_id,
-            new_older_sibling_id, &errmsg );
-    if ( rc == -1 )
-    {
-        meldung( zond->app_window, "Fehler Drag'n Drop:\n\nBei Aufruf "
-                "db_verschieben_knoten:\n", errmsg, NULL );
-        g_free( errmsg );
-    }
-
-    zond->dnd.dndactive = FALSE;
-
-    return;
-}
-
-
-static void
 treeviews_cb_cell_edited( GtkCellRenderer* cell, gchar* path_string, gchar* new_text,
         gpointer user_data )
 {
@@ -350,7 +292,7 @@ treeviews_cell_data_function( GtkTreeViewColumn* column, GtkCellRenderer* render
 
     treeview_underline_cursor( tree_view, path, renderer );
 
-    treeview_zelle_ausgrauen( tree_view, path, renderer, &zond->clipboard );
+    treeview_zelle_ausgrauen( tree_view, path, renderer, zond->clipboard );
 
     if ( baum == BAUM_AUSWERTUNG )
     {
@@ -383,7 +325,7 @@ treeviews_cell_data_function( GtkTreeViewColumn* column, GtkCellRenderer* render
     }
     else if ( baum == BAUM_FS ) //wenn angebunden, Hintergrund
     {
-        gchar* rel_path = fs_tree_get_rel_path( zond, iter );
+        gchar* rel_path = fm_get_rel_path( zond->treeview[BAUM_FS], iter );
         if ( rel_path )
         {
             rc = db_get_node_id_from_rel_path( zond, rel_path, &errmsg );
@@ -509,16 +451,7 @@ init_treeviews( Projekt* zond )
     }
 
     gtk_tree_view_set_reorderable( zond->treeview[BAUM_INHALT], FALSE );
-    gtk_tree_view_set_reorderable( zond->treeview[BAUM_AUSWERTUNG], TRUE );
-
-    //dnd erfassen - nur BAUM_AUSWERTUNG
-    g_signal_connect( GTK_WIDGET(zond->treeview[BAUM_AUSWERTUNG]), "drag-begin",
-            G_CALLBACK(cb_drag_begin), (gpointer) zond );
-    g_signal_connect( GTK_WIDGET(zond->treeview[BAUM_AUSWERTUNG]), "drag-end",
-            G_CALLBACK(cb_drag_end), (gpointer) zond );
-
-    g_signal_connect( gtk_tree_view_get_model(zond->treeview[BAUM_AUSWERTUNG]),
-            "row-changed", G_CALLBACK(cb_row_changed), (gpointer) zond );
+    gtk_tree_view_set_reorderable( zond->treeview[BAUM_AUSWERTUNG], FALSE );
 
     return;
 }
@@ -529,7 +462,12 @@ treeviews_init_fs_tree( Projekt* zond )
 {
     GtkCellRenderer* cell = NULL;
 
-    zond->treeview[BAUM_FS] = fm_create_tree_view( zond->app_window, zond );
+    static SFMChangePath s_fm_change_path = { update_db_before_path_change,
+            update_db_after_path_change, NULL };
+
+    s_fm_change_path.data = (gpointer) zond;
+
+    zond->treeview[BAUM_FS] = fm_create_tree_view( zond->app_window, &s_fm_change_path );
 
     //die Selection
     zond->selection[BAUM_FS] = gtk_tree_view_get_selection(

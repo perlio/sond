@@ -21,7 +21,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "../99conv/general.h"
 
-#include "project.h"
+#include "project_db.h"
 
 #include <gtk/gtk.h>
 #include <sqlite3.h>
@@ -163,7 +163,7 @@ convert_datei_oeffnen( Projekt* zond, gchar** errmsg )
         return NULL;
     }
 
-    if ( !db_create( db_convert, errmsg ) )
+    if ( !project_db_create( db_convert, errmsg ) )
     {
         sqlite3_close( db_convert );
         g_free( abs_path );

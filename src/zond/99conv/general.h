@@ -5,6 +5,7 @@
 
 #include <stdio.h>
 
+typedef struct _GFile GFile;
 typedef struct _GSList GSList;
 typedef struct _GtkWindow GtkWindow;
 typedef struct _GtkWidget GtkWidget;
@@ -36,13 +37,15 @@ gint hat_vorfahre_datei( Projekt*, Baum, gint, gboolean, gchar** );
 
 gint knoten_verschieben( Projekt*, Baum, gint, gint, gint, gchar** );
 
+gint update_db_before_path_change( gpointer, gchar** );
+
+gint update_db_after_path_change( const GFile*, const GFile*, const gint, gpointer, gchar** );
+
 void ziele_free( Ziel* );
 
 gint abfragen_rel_path_and_anbindung( Projekt*, Baum, gint, gchar**, Anbindung**, gchar** );
 
 gboolean is_pdf( const gchar* );
-
-gboolean is_white( const char* );
 
 /*  info_window  */
 void info_window_scroll( InfoWindow* );

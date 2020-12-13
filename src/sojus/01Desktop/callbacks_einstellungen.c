@@ -1,4 +1,8 @@
-#include "../globals.h"
+#include <gtk/gtk.h>
+
+#include "../global_types_sojus.h"
+
+#include "../20Einstellungen/db.h"
 
 #include "../../misc.h"
 

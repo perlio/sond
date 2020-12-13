@@ -125,27 +125,13 @@ db_baum_neu_laden( Projekt* zond, Baum baum, gchar** errmsg )
 gint
 db_baum_refresh( Projekt* zond, gchar** errmsg )
 {
-    gchar* errmsg_ii = NULL;
     gint rc = 0;
-    rc = db_baum_neu_laden( zond, BAUM_INHALT, &errmsg_ii );
-    if ( rc )
-    {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf db_baum_neu_laden für "
-                "BAUM_INHALT:\n", errmsg_ii, NULL );
-        g_free( errmsg_ii );
 
-        return -1;
-    }
+    rc = db_baum_neu_laden( zond, BAUM_INHALT, errmsg );
+    if ( rc ) ERROR_PAO( "db_baum_neu_laden (BAUM_INHALT)" )
 
-    rc = db_baum_neu_laden( zond, BAUM_AUSWERTUNG, &errmsg_ii );
-    if ( rc )
-    {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf db_baum_neu_laden für "
-                "BAUM_AUSWERTUNG:\n", errmsg_ii, NULL );
-        g_free( errmsg_ii );
-
-        return -1;
-    }
+    rc = db_baum_neu_laden( zond, BAUM_AUSWERTUNG, errmsg );
+    if ( rc ) ERROR_PAO( "db_baum_neu_laden (BAUM_AUSWERTUNG)" )
 
     gtk_tree_selection_unselect_all( zond->selection[BAUM_AUSWERTUNG] );
     g_object_set(zond->renderer_text[BAUM_AUSWERTUNG], "editable", FALSE, NULL);

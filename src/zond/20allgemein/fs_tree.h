@@ -11,20 +11,8 @@ typedef int gboolean;
 
 typedef struct _Projekt Projekt;
 
-gchar* fs_tree_get_basename( Projekt*, GtkTreeIter* );
-
-gchar* fs_tree_get_rel_path( Projekt*, GtkTreeIter* );
-
-gchar* fs_tree_get_full_path( Projekt*, GtkTreeIter* );
-
 gint fs_tree_dir_foreach( Projekt*, GFile*, gint (*) (Projekt*, GFile*, GFile*,
         GFileInfo*, gpointer, gchar**), gpointer, gchar**);
-
-gint fs_tree_load_dir( Projekt*, GtkTreeIter*, gchar** );
-
-GFile* fs_insert_dir( GFile*, gboolean, gchar** );
-
-gint fs_tree_insert_dir( Projekt*, gboolean, gchar** );
 
 gint fs_tree_remove_node( Projekt*, GFile*, GtkTreeIter*, gchar** );
 

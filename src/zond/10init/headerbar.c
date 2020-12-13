@@ -16,6 +16,15 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+#include <gtk/gtk.h>
+#include <mupdf/fitz.h>
+#include <mupdf/pdf.h>
+#include <sqlite3.h>
+#include <tesseract/capi.h>
+
+#include "../../fm.h"
+#include "../../treeview.h"
+
 #include "../global_types.h"
 #include "../error.h"
 
@@ -42,11 +51,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "../../misc.h"
 
-#include <gtk/gtk.h>
-#include <mupdf/fitz.h>
-#include <mupdf/pdf.h>
-#include <sqlite3.h>
-#include <tesseract/capi.h>
 
 
 /*
@@ -403,11 +407,11 @@ cb_punkt_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
     if ( baum == KEIN_BAUM ) return;
     if ( baum == BAUM_FS )
     {
-        rc = fs_tree_insert_dir( zond, child, &errmsg );
+        rc = fm_create_dir( zond->treeview[BAUM_FS], child, &errmsg );
         if ( rc )
         {
             meldung( zond->app_window, "Verzeichnis kann nicht eingefügt werden\n\n"
-                    "Bei Aufruf fs_tree_insert_dir:\n", errmsg, NULL );
+                    "Bei Aufruf fm_create_dir:\n", errmsg, NULL );
             g_free( errmsg );
         }
 
@@ -454,9 +458,9 @@ cb_punkt_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
     }
 
     //Knoten in Datenbank einfügen
-    rc = db_insert_node( zond, baum, node_id, child, zond->icon[ICON_NORMAL].icon_name,
+    new_node_id = db_insert_node( zond, baum, node_id, child, zond->icon[ICON_NORMAL].icon_name,
             "Neuer Punkt", &errmsg );
-    if ( rc == -1 )
+    if ( new_node_id == -1 )
     {
         meldung( zond->app_window, "Punkt einfügen nicht möglich:\n\nBei Aufruf "
                 "db_insert_node:\n", errmsg, NULL );
@@ -474,9 +478,8 @@ cb_punkt_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
         return;
     }
 
-    new_node_id = sqlite3_last_insert_rowid( zond->db );
     //Knoten in baum_inhalt einfuegen
-    GtkTreeIter* iter = baum_abfragen_aktuellen_cursor( zond->treeview[baum] );
+    GtkTreeIter* iter = treeview_get_cursor( zond->treeview[baum] );
 
     GtkTreeIter* new_iter = baum_einfuegen_knoten( zond->treeview[baum], iter, child );
 
@@ -607,7 +610,10 @@ cb_kopieren_activate( GtkMenuItem* item, gpointer user_data )
 {
     Projekt* zond = (Projekt*) user_data;
 
-    selection_copy_or_cut( zond, FALSE );
+    Baum baum = baum_abfragen_aktiver_treeview( zond );
+    if ( baum == KEIN_BAUM ) return;
+
+    treeview_copy_or_cut_selection( zond->treeview[baum], zond->clipboard, FALSE );
 
     return;
 }
@@ -618,7 +624,10 @@ cb_ausschneiden_activate( GtkMenuItem* item, gpointer user_data )
 {
     Projekt* zond = (Projekt*) user_data;
 
-    selection_copy_or_cut( zond, TRUE );
+    Baum baum = baum_abfragen_aktiver_treeview( zond );
+    if ( baum == KEIN_BAUM ) return;
+
+    treeview_copy_or_cut_selection( zond->treeview[baum], zond->clipboard, TRUE );
 
     return;
 }
@@ -629,7 +638,7 @@ cb_clipboard_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
 {
     Projekt* zond = (Projekt*) user_data;
 
-    if ( zond->clipboard.arr_ref->len == 0 ) return;
+    if ( zond->clipboard->arr_ref->len == 0 ) return;
 
     gboolean kind = (gboolean) GPOINTER_TO_INT(g_object_get_data( G_OBJECT(item),
             "kind" ));
@@ -643,9 +652,28 @@ cb_clipboard_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
 static void
 cb_loeschen_activate( GtkMenuItem* item, gpointer user_data )
 {
-    Projekt* zond = (Projekt*) user_data;
+    gint rc = 0;
+    gchar* errmsg = NULL;
 
-    selection_loeschen( zond );
+    Projekt* zond = (Projekt*) user_data;
+ //   static SFMForeachLoeschen s_fm_foreach_loeschen = {};
+
+    Baum baum = baum_abfragen_aktiver_treeview( zond );
+    if ( baum == KEIN_BAUM ) return;
+
+    GPtrArray* refs = treeview_selection_get_refs( zond->treeview[baum] );
+    if ( !refs ) return;
+
+    rc = selection_loeschen( zond, baum, refs, &errmsg );
+
+    g_ptr_array_unref( refs );
+
+    if ( rc )
+    {
+        meldung( zond->app_window, "Löschen fehlgeschlagen -\n\nBei Aufruf "
+                "selection_loeschen:\n", errmsg, NULL );
+        g_free( errmsg );
+    }
 
     return;
 }
@@ -892,43 +920,6 @@ cb_settings_zoom( GtkMenuItem* item, gpointer data )
 
     g_free( text );
 
-    return;
-}
-
-
-static void
-cb_settings_root( GtkMenuItem* item, gpointer data )
-{/*
-    gint rc = 0;
-    gchar* errmsg = NULL;
-
-    Projekt* zond = (Projekt*) data;
-
-    //ToDo: altes root-Verzeichnis anzeigen
-    gchar* text = NULL;
-    rc = abfrage_frage( zond->app_window, "Pfad root-verzeichnis eingeben", zond->root, &text );
-    if ( !text ) return;
-    if ( !g_strcmp0( text, "" ) )
-    {
-        g_free( text );
-
-        return;
-    }
-
-    //ToDo: text auf Gültigkeit überprüfen
-
-    g_settings_set_string( zond->settings, "root", text );
-    zond->root = text;
-
-    gtk_tree_store_clear( GTK_TREE_STORE(gtk_tree_view_get_model( zond->treeview[BAUM_FS] )) );
-    rc = fs_tree_load_dir( zond, NULL, &errmsg );
-    if ( rc )
-    {
-        meldung( zond->app_window, "Dateibaum konnte nicht geladen werden\n\n"
-                "Bei Aufruf fs_tree_load_dir:\n", errmsg, NULL );
-        g_free( errmsg );
-    }
-*/
     return;
 }
 
@@ -1264,7 +1255,6 @@ init_menu( Projekt* zond )
             root_item );
 
     g_signal_connect( zoom_item, "activate", G_CALLBACK(cb_settings_zoom), zond );
-    g_signal_connect( root_item, "activate", G_CALLBACK(cb_settings_root), zond );
 
 /*  Gesamtmenu:
 *   Die erzeugten Menus als Untermenu der Menuitems aus der menubar
@@ -1293,6 +1283,9 @@ cb_button_mode_toggled( GtkToggleButton* button, gpointer data )
 
     if ( gtk_toggle_button_get_active( button ) )
     {
+        gint rc = 0;
+        gchar* errmsg = NULL;
+
         //fs_tree und baum_inhalt anzeigen
         //zwischenspeichern
         left = g_object_ref( zond->tree[BAUM_INHALT] );
@@ -1309,6 +1302,14 @@ cb_button_mode_toggled( GtkToggleButton* button, gpointer data )
         //Zwischenspeicher ändern
         zond->tree[BAUM_INHALT] = left;
         zond->tree[BAUM_AUSWERTUNG] = right;
+
+        rc = fm_load_dir( zond->treeview[BAUM_FS], NULL, &errmsg );
+        if ( rc )
+        {
+            meldung( zond->app_window, "Fehler beim Laden Root-Verzeichnis -\n\n",
+                    errmsg, NULL );
+            g_free( errmsg );
+        }
     }
     else
     {
@@ -1328,6 +1329,9 @@ cb_button_mode_toggled( GtkToggleButton* button, gpointer data )
         //Zwischenspeicher ändern
         zond->tree[BAUM_FS] = left;
         zond->tree[BAUM_INHALT] = right;
+
+        gtk_tree_store_clear( GTK_TREE_STORE(gtk_tree_view_get_model(
+                zond->treeview[BAUM_FS] )) );
     }
 
     return;
