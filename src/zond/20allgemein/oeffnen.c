@@ -154,7 +154,7 @@ oeffnen_auszug( Projekt* zond, gint node_id, gchar** errmsg )
     }
 
     PdfViewer* pv = viewer_start_pv( zond );
-    viewer_display_document( pv, dd );
+    viewer_display_document( pv, dd, 0, 0 );
 
     return 0;
 }
@@ -202,10 +202,7 @@ oeffnen_internal_viewer( Projekt* zond, const gchar* rel_path, Anbindung* anbind
     if ( pos_pdf ) pos_von = *pos_pdf;
 
     PdfViewer* pv = viewer_start_pv( zond );
-    viewer_display_document( pv, dd );
-
-    if ( pos_von.seite > (pv->arr_pages->len - 1) ) pos_von.seite = pv->arr_pages->len - 1;
-    viewer_springen_zu_pos_pdf( pv, pos_von, 0.0 );
+    viewer_display_document( pv, dd, pos_von.seite, 0 );
 
     return 0;
 }

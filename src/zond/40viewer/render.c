@@ -299,7 +299,7 @@ render_sichtbare_seiten( PdfViewer* pv )
 
     viewer_abfragen_sichtbare_seiten( pv, &erste, &letzte );
 
-    //Seite vom oberen Rand im entry anzeigen
+    //Seite von oberen - unterem Rand im entry anzeigen
     gchar* text = g_strdup_printf( "%i-%i", erste + 1, letzte + 1 );
     gtk_entry_set_text( GTK_ENTRY(pv->entry), text );
     g_free( text );

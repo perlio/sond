@@ -28,7 +28,7 @@ void viewer_einrichten_layout( PdfViewer* );
 
 void viewer_insert_thumb( PdfViewer*, gint, fz_rect );
 
-void viewer_display_document( PdfViewer*, DisplayedDocument* );
+void viewer_display_document( PdfViewer*, DisplayedDocument*, gint, gint );
 
 ViewerPage* viewer_new_viewer_page( PdfViewer* );
 

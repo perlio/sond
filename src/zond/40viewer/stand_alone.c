@@ -100,6 +100,8 @@ pv_schliessen_datei( PdfViewer* pv )
         gtk_widget_set_sensitive( pv->button_speichern, FALSE );
     }
 
+    viewer_close_thread_pools( pv );
+
     //thumbs leeren
     GtkListStore* store_thumb =
             GTK_LIST_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(pv->tree_thumb) ));
@@ -110,8 +112,6 @@ pv_schliessen_datei( PdfViewer* pv )
     pv->dd = NULL;
 
     pv_activate_widgets( pv, FALSE );
-
-    viewer_close_thread_pools( pv );
 
     //Arrays zurücksetzen
     g_array_remove_range( pv->arr_text_treffer, 0, pv->arr_text_treffer->len );
@@ -124,17 +124,10 @@ pv_schliessen_datei( PdfViewer* pv )
 static gint
 pv_oeffnen_datei( PdfViewer* pv, gchar* path, gchar** errmsg )
 {
-    PdfPos pos_von = { 0, 0 };
-
     DisplayedDocument* dd = document_new_displayed_document( pv->zond, path, NULL, errmsg );
     if ( !dd ) ERROR_PAO( "document_new_displayed_document" )
 
-    viewer_display_document( pv, dd, pos_von );
-
-    for ( gint i = 0; i < pv->arr_pages->len; i++ )
-    {
-        g_thread_pool_push( pv->thread_pool_page, GINT_TO_POINTER(i + 1), NULL );
-    }
+    viewer_display_document( pv, dd, 0, 0 );
 
     pv_activate_widgets( pv, TRUE );
 

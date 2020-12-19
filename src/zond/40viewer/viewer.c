@@ -218,14 +218,14 @@ viewer_einrichten_layout( PdfViewer* pv )
 
     gtk_layout_set_size( GTK_LAYOUT(pv->layout), width, height );
 
-    gtk_adjustment_set_value( pv->h_adj, (gdouble) ((width - 950) / 2) );
-
     //label mit Gesamtseitenzahl erzeugen
     gchar* text = g_strdup_printf( "/ %i ", pv->arr_pages->len );
     gtk_label_set_text( GTK_LABEL(pv->label_anzahl), text );
     g_free( text );
 
     gtk_widget_set_size_request( pv->layout, width, height );
+
+    gtk_adjustment_set_value( pv->h_adj, (gdouble) ((width - 950) / 2) );
 
     return;
 }
@@ -359,8 +359,10 @@ viewer_create_layout( PdfViewer* pv )
 
 
 void
-viewer_display_document( PdfViewer* pv, DisplayedDocument* dd )
+viewer_display_document( PdfViewer* pv, DisplayedDocument* dd, gint page, gint index )
 {
+    PdfPos pdf_pos = { page, index };
+
     pv->dd = dd;
 
     viewer_create_layout( pv );
@@ -368,6 +370,9 @@ viewer_display_document( PdfViewer* pv, DisplayedDocument* dd )
     viewer_einrichten_layout( pv );
 
     viewer_init_thread_pools( pv );
+
+    if ( page || index ) viewer_springen_zu_pos_pdf( pv, pdf_pos, 0.0 );
+    else render_sichtbare_seiten( pv );
 
     gtk_widget_grab_focus( pv->layout );
 
@@ -437,6 +442,7 @@ viewer_schliessen( PdfViewer* pv )
 }
 
 
+#ifndef VIEWER
 static gboolean
 cb_viewer_delete_event( GtkWidget* window, GdkEvent* event, gpointer user_data )
 {
@@ -446,6 +452,7 @@ cb_viewer_delete_event( GtkWidget* window, GdkEvent* event, gpointer user_data )
 
     return TRUE;
 }
+#endif // VIEWER
 
 
 static void
