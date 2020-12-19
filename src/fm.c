@@ -79,7 +79,7 @@ fm_get_full_path( GtkTreeView* tree_view, GtkTreeIter* iter )
 /** mode:
     0 - insert dir
     1 - copy file
-    2 - move file oder leeres dir
+    2 - move file oder dir
     3 - row edited
     4 - delete
     Rückgabe:
@@ -349,12 +349,12 @@ fm_dir_foreach( GtkTreeView* tree_view, GtkTreeIter* iter_dir, GFile* file_dir,
 
 typedef struct _S_FM_Paste_Selection{
     GFile* file_parent;
+    GFile* file_dest;
     GtkTreeIter* iter_cursor;
     gboolean kind;
     gboolean ausschneiden;
     gboolean expanded;
     gboolean inserted;
-    gchar** basename;
     SFMChangePath* s_fm_change_path;
 } SFMPasteSelection;
 
@@ -364,14 +364,14 @@ fm_move_or_copy_node( GtkTreeView* tree_view, GtkTreeIter* iter, GFile* file,
         GFileInfo* info_file, gpointer data, gchar** errmsg )
 {
     gint rc = 0;
-    GFile* file_dest = NULL;
     gchar* basename_file = NULL;
 
     SFMPasteSelection* s_fm_paste_selection = (SFMPasteSelection*) data;
 
-    //path_new_dir = file_parent + basename(file_source)
+    g_clear_object( &s_fm_paste_selection->file_dest );
+
     basename_file = g_file_get_basename( file );
-    file_dest = g_file_get_child( s_fm_paste_selection->file_parent, basename_file );
+    s_fm_paste_selection->file_dest = g_file_get_child( s_fm_paste_selection->file_parent, basename_file );
     g_free( basename_file );
 
     GFileType type = g_file_query_file_type( file, G_FILE_QUERY_INFO_NONE, NULL );
@@ -379,27 +379,30 @@ fm_move_or_copy_node( GtkTreeView* tree_view, GtkTreeIter* iter, GFile* file,
     {
         GFile* file_parent_tmp = NULL;
 
-        rc = fm_move_copy_create_delete( tree_view, NULL, &file_dest, 0, errmsg );
+        rc = fm_move_copy_create_delete( tree_view, NULL, &s_fm_paste_selection->file_dest, 0, errmsg );
         if ( rc )
         {
-            g_object_unref( file_dest );
+            g_object_unref( s_fm_paste_selection->file_dest );
+            s_fm_paste_selection->file_dest = NULL;
             if ( rc == -1 ) ERROR_PAO( "fm_move_copy_create_delete" )
             else return rc;
         }
 
         file_parent_tmp = s_fm_paste_selection->file_parent;
-        s_fm_paste_selection->file_parent = g_object_ref( file_dest );
+        s_fm_paste_selection->file_parent = g_object_ref( s_fm_paste_selection->file_dest );
 
-        rc = fm_dir_foreach( tree_view, NULL, file_dest,
+        rc = fm_dir_foreach( tree_view, iter, s_fm_paste_selection->file_dest,
                 fm_move_or_copy_node, s_fm_paste_selection, errmsg );
 
         g_object_unref( s_fm_paste_selection->file_parent );
         s_fm_paste_selection->file_parent = file_parent_tmp;
 
-        if ( rc == -1 )
+        if ( rc )
         {
-            g_object_unref( file_dest );
-            ERROR_PAO( "fm_dir_foreach" )
+            g_object_unref( s_fm_paste_selection->file_dest );
+            s_fm_paste_selection->file_dest = NULL;
+            if ( rc == -1 ) ERROR_PAO( "fm_dir_foreach" )
+            else return rc;
         }
     }
     else
@@ -409,18 +412,21 @@ fm_move_or_copy_node( GtkTreeView* tree_view, GtkTreeIter* iter, GFile* file,
         if ( s_fm_paste_selection->ausschneiden ) mode = 2;
         else mode = 1;
 
-        rc = fm_move_copy_create_delete( tree_view, file, &file_dest, mode, errmsg );
-        if ( rc == -1 )
+        rc = fm_move_copy_create_delete( tree_view, file, &s_fm_paste_selection->file_dest, mode, errmsg );
+        if ( rc )
         {
-            g_object_unref( file_dest );
-            ERROR_PAO( "fm_move_copy_create_delete" )
+            g_object_unref( s_fm_paste_selection->file_dest );
+            s_fm_paste_selection->file_dest = NULL;
+            if ( rc == -1 ) ERROR_PAO( "fm_move_copy_create_delete" )
+            else return rc;
         }
     }
 
-    *s_fm_paste_selection->basename = g_file_get_basename( file_dest );
-    g_object_unref( file_dest );
+    if ( iter && s_fm_paste_selection->ausschneiden )
+            gtk_tree_store_remove( GTK_TREE_STORE(gtk_tree_view_get_model(
+            tree_view )), iter );
 
-    return rc;
+    return 0;
 }
 
 
@@ -494,13 +500,11 @@ fm_paste_selection_foreach( GtkTreeView* tree_view, GtkTreeIter* iter,
     }
 
     //Kopieren/verschieben
-    rc = fm_move_or_copy_node( tree_view, NULL, file_source, NULL, s_fm_paste_selection, errmsg );
+    rc = fm_move_or_copy_node( tree_view, iter, file_source, NULL, s_fm_paste_selection, errmsg );
     g_object_unref( file_source );
 
-    if ( rc ) g_free( *s_fm_paste_selection->basename );
-
     if ( rc == -1 ) ERROR_PAO( "selection_move_file" )
-    else if ( rc == 1 ) return 0; //treeview_selection_foreach interpretiert dies als Abbruch
+    else if ( rc == 1 ) return 0; //Ünerspringen gewählt - einfach weiter
     else if ( rc == 2 ) return 1; //nur bei selection_move_file/_dir möglich
 
     s_fm_paste_selection->inserted = TRUE;
@@ -510,6 +514,7 @@ fm_paste_selection_foreach( GtkTreeView* tree_view, GtkTreeIter* iter,
     {
         //Ziel-FS-tree eintragen
         GtkTreeIter* iter_new = NULL;
+        GError* error = NULL;
 
         iter_new = treeview_insert_node( tree_view, s_fm_paste_selection->iter_cursor,
                 s_fm_paste_selection->kind );
@@ -527,23 +532,27 @@ fm_paste_selection_foreach( GtkTreeView* tree_view, GtkTreeIter* iter,
         }
 
         //alte Daten holen
-        GIcon* icon = NULL;
+        GFileInfo* file_dest_info = g_file_query_info( s_fm_paste_selection->file_dest, "*", G_FILE_QUERY_INFO_NONE, NULL, &error );
+        if ( !file_dest_info && error )
+        {
+            if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_file_query_info:\n",
+                    error->message, NULL );
+            g_error_free( error );
+            g_object_unref( s_fm_paste_selection->file_dest );
 
-        gtk_tree_model_get( gtk_tree_view_get_model( tree_view ),
-                iter, 0, &icon, -1 );
+            return -1;
+        }
+        else if ( file_dest_info )
+        {
+            //in neu erzeugten node einsetzen
+            gtk_tree_store_set( GTK_TREE_STORE(gtk_tree_view_get_model( tree_view )),
+                    s_fm_paste_selection->iter_cursor, 0, g_file_info_get_icon( file_dest_info ), 1, g_file_get_basename( s_fm_paste_selection->file_dest ), -1 );
 
-        //in neu erzeugten node einsetzen
-        gtk_tree_store_set( GTK_TREE_STORE(gtk_tree_view_get_model(
-                tree_view )), s_fm_paste_selection->iter_cursor, 0, icon, 1, *s_fm_paste_selection->basename, -1 );
-
-        g_object_unref( icon );
+            g_object_unref( file_dest_info );
+        }
     }
 
-    g_free( *s_fm_paste_selection->basename );
-
-    //falls ausschneiden: in Quell-FS-Tree löschen
-    if ( s_fm_paste_selection->ausschneiden ) gtk_tree_store_remove( GTK_TREE_STORE(gtk_tree_view_get_model(
-                tree_view )), iter );
+    g_clear_object( &s_fm_paste_selection->file_dest );
 
     return 0;
 }
@@ -560,7 +569,6 @@ fm_paste_selection( GtkTreeView* tree_view, GPtrArray* refs,
     GFile* file_parent = NULL;
     GFileType file_type = G_FILE_TYPE_UNKNOWN;
     gboolean expanded = FALSE;
-    gchar* basename = NULL;
 
     //Datei unter cursor holen
     iter_cursor = treeview_get_cursor( tree_view );
@@ -607,8 +615,8 @@ fm_paste_selection( GtkTreeView* tree_view, GPtrArray* refs,
         g_object_unref( file_cursor );
     }
 
-    SFMPasteSelection s_fm_paste_selection = { file_parent, iter_cursor, kind,
-            ausschneiden, expanded, FALSE, &basename, (SFMChangePath*) data };
+    SFMPasteSelection s_fm_paste_selection = { file_parent, NULL, iter_cursor, kind,
+            ausschneiden, expanded, FALSE, (SFMChangePath*) data };
 
     rc = treeview_selection_foreach( tree_view, refs,
             fm_paste_selection_foreach, (gpointer) &s_fm_paste_selection, errmsg );
