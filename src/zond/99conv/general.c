@@ -331,8 +331,27 @@ abfragen_rel_path_and_anbindung( Projekt* zond, Baum baum, gint node_id,
 }
 
 
+gchar*
+get_rel_path_from_file( Projekt* zond, const GFile* file )
+{
+    //Überprüfung, ob schon angebunden
+    gchar* rel_path = NULL;
+    gchar* abs_path = g_file_get_path( (GFile*) file );
+
+#ifdef _WIN32
+    abs_path = g_strdelimit( abs_path, "\\", '/' );
+#endif // _WIN32
+
+    rel_path = g_strdup( abs_path + strlen( zond->project_dir ) + 1 );
+    g_free( abs_path );
+
+    return rel_path; //muß freed werden
+}
+
+
 gint
-update_db_before_path_change( gpointer data, gchar** errmsg )
+update_db_before_path_change( const GFile* file_source, const GFile* file_dest,
+        gpointer data, gchar** errmsg )
 {
     gint rc = 0;
 
@@ -342,13 +361,22 @@ update_db_before_path_change( gpointer data, gchar** errmsg )
     if ( rc == -1 ) ERROR_PAO( "db_begin_both" )
     else if ( rc == -2 ) ERROR_PAO_ROLLBACK( "db_begin_both" )
 
+    gchar* rel_path_source = get_rel_path_from_file( zond, file_source );
+    gchar* rel_path_dest = get_rel_path_from_file( zond, file_dest );
+
+    rc = db_update_path( zond, rel_path_source, rel_path_dest, errmsg );
+
+    g_free( rel_path_source );
+    g_free( rel_path_dest );
+
+    if ( rc ) ERROR_PAO_ROLLBACK_BOTH( "db_update_path" );
+
     return 0;
 }
 
 
 gint
-update_db_after_path_change( const GFile* file_source, const GFile* file_dest,
-        const gint rc_edit, gpointer data, gchar** errmsg )
+update_db_after_path_change( const gint rc_edit, gpointer data, gchar** errmsg )
 {
     gint rc = 0;
 
@@ -368,20 +396,6 @@ update_db_after_path_change( const GFile* file_source, const GFile* file_dest,
     }
     else
     {
-        gchar* path_source = g_file_get_path( (GFile*) file_source );
-        gchar* rel_path_source = g_strdup( path_source + strlen( zond->project_dir ) + 1 );
-        gchar* path_dest = g_file_get_path( (GFile*) file_dest );
-        gchar* rel_path_dest = g_strdup( path_dest + strlen( zond->project_dir ) + 1 );
-
-        rc = db_update_path( zond, rel_path_source, rel_path_dest, errmsg );
-
-        g_free( rel_path_source );
-        g_free( rel_path_dest );
-        g_free( path_source );
-        g_free( path_dest );
-
-        if ( rc ) ERROR_PAO_ROLLBACK_BOTH( "db_update_path" );
-
         rc = db_commit_both( zond, errmsg );
         if ( rc ) ERROR_PAO_ROLLBACK_BOTH( "db_commit_both" )
     }

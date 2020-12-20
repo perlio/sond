@@ -13,8 +13,8 @@ typedef char gchar;
 
 typedef struct _S_FM_Change_Path
 {
-    gint (* before) ( gpointer, gchar** );
-    gint (* after) ( const GFile*, const GFile*, const gint, gpointer, gchar** );
+    gint (* before) ( const GFile*, const GFile*, gpointer, gchar** );
+    gint (* after) ( const gint, gpointer, gchar** );
     gpointer data;
 } SFMChangePath;
 

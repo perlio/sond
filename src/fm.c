@@ -90,7 +90,7 @@ fm_get_full_path( GtkTreeView* tree_view, GtkTreeIter* iter )
 **/
 static gint
 fm_move_copy_create_delete( GtkTreeView* tree_view, GFile* file_source,
-        GFile** file_dest, gint mode, gchar** errmsg )
+        GFile** file_dest, gint mode, SFMChangePath* s_fm_change_path, gchar** errmsg )
 {
     gint zaehler = 0;
     gchar* basename = NULL;
@@ -105,8 +105,37 @@ fm_move_copy_create_delete( GtkTreeView* tree_view, GFile* file_source,
         if ( mode == 0 ) suc = g_file_make_directory( *file_dest, NULL, &error );
         else if ( mode == 1 ) suc = g_file_copy ( file_source, *file_dest,
                 G_FILE_COPY_NONE, NULL, NULL, NULL, &error );
-        else if ( mode == 2 || mode == 3 ) suc = g_file_move ( file_source,
-                *file_dest, G_FILE_COPY_NONE, NULL, NULL, NULL, &error );
+        else if ( mode == 2 || mode == 3 )
+        {
+            if ( s_fm_change_path && s_fm_change_path->before )
+            {
+                gint rc = 0;
+
+                rc = s_fm_change_path->before( file_source, *file_dest,
+                        s_fm_change_path->data, errmsg );
+                if ( rc )
+                {
+                    g_free( basename );
+                    ERROR_PAO( "before" )
+                }
+            }
+
+            suc = g_file_move ( file_source, *file_dest, G_FILE_COPY_NONE, NULL,
+                    NULL, NULL, &error );
+
+            if ( s_fm_change_path && s_fm_change_path->after )
+            {
+                gint rc = 0;
+
+                rc = s_fm_change_path->after( (suc) ? 0 : 1, s_fm_change_path->data,
+                        errmsg );
+                if ( rc )
+                {
+                    g_free( basename );
+                    ERROR_PAO( "after" )
+                }
+            }
+        }
         else if ( mode == 4 ) suc = g_file_delete( *file_dest, NULL, &error );
 
         if ( suc ) break;
@@ -228,7 +257,7 @@ fm_create_dir( GtkTreeView* tree_view, gboolean child, gchar** errmsg )
     GFile* file_dir = g_file_get_child( parent, "Neues Verzeichnis" );
     g_object_unref( parent );
 
-    rc = fm_move_copy_create_delete( tree_view, NULL, &file_dir, 0, errmsg );
+    rc = fm_move_copy_create_delete( tree_view, NULL, &file_dir, 0, NULL, errmsg );
     if ( rc == -1 ) //anderer Fall tritt nicht ein
     {
         gtk_tree_iter_free( iter );
@@ -379,7 +408,7 @@ fm_move_or_copy_node( GtkTreeView* tree_view, GtkTreeIter* iter, GFile* file,
     {
         GFile* file_parent_tmp = NULL;
 
-        rc = fm_move_copy_create_delete( tree_view, NULL, &s_fm_paste_selection->file_dest, 0, errmsg );
+        rc = fm_move_copy_create_delete( tree_view, NULL, &s_fm_paste_selection->file_dest, 0, NULL, errmsg );
         if ( rc )
         {
             g_object_unref( s_fm_paste_selection->file_dest );
@@ -412,7 +441,9 @@ fm_move_or_copy_node( GtkTreeView* tree_view, GtkTreeIter* iter, GFile* file,
         if ( s_fm_paste_selection->ausschneiden ) mode = 2;
         else mode = 1;
 
-        rc = fm_move_copy_create_delete( tree_view, file, &s_fm_paste_selection->file_dest, mode, errmsg );
+        rc = fm_move_copy_create_delete( tree_view, file,
+                &s_fm_paste_selection->file_dest, mode,
+                s_fm_paste_selection->s_fm_change_path, errmsg );
         if ( rc )
         {
             g_object_unref( s_fm_paste_selection->file_dest );
@@ -681,7 +712,7 @@ fm_remove_node( GtkTreeView* tree_view, GtkTreeIter* iter_file, GFile* file,
                                     //Datei angebunden war, übersprungen wurde oder Abbruch gewählt
     }
 
-    rc = fm_move_copy_create_delete( tree_view, NULL, &file, 4, errmsg );
+    rc = fm_move_copy_create_delete( tree_view, NULL, &file, 4, NULL, errmsg );
     if ( rc == -1 ) ERROR_PAO( "fm_move_copy_create_delete" )
 
     if ( iter_file ) gtk_tree_store_remove( GTK_TREE_STORE(gtk_tree_view_get_model( tree_view )),
@@ -838,35 +869,15 @@ cb_fm_row_text_edited( GtkCellRenderer* cell, gchar* path_string, gchar* new_tex
     if ( !g_file_equal( file_source, file_dest ) )
     {
         gint rc = 0;
-        gint rc_edit = 0;
 
-        if ( s_fm_change_path && s_fm_change_path->before )
-        {
-            rc = s_fm_change_path->before( s_fm_change_path->data, &errmsg );
-            if ( rc )
-            {
-                display_message( gtk_widget_get_toplevel( GTK_WIDGET(tree_view) ),
-                        "Umbenennen nicht möglich\n\nBei Aufruf before:\n",
-                        errmsg, NULL );
-                g_free( errmsg );
+        rc = fm_move_copy_create_delete( tree_view, file_source, &file_dest,
+                3, s_fm_change_path, &errmsg );
 
-                g_object_unref( file_source );
-                g_object_unref( file_dest );
-
-                return;
-            }
-        }
-
-        rc_edit = fm_move_copy_create_delete( tree_view, file_source, &file_dest, 3, &errmsg );
-        if ( s_fm_change_path && s_fm_change_path->after )
-                rc = s_fm_change_path->after( file_source, file_dest, rc_edit,
-                s_fm_change_path->data, &errmsg );
-
-        if ( rc_edit == -1 || rc )
+        if ( rc == -1 )
                 display_message( gtk_widget_get_toplevel( GTK_WIDGET(tree_view) ),
                 "Umbenennen nicht möglich\n\nBei Aufruf fm_move_copy_create_delete:\n",
                 errmsg, NULL );
-        else if ( rc_edit == 0 && rc == 0 )
+        else if ( rc == 0 )
         {
             gtk_tree_store_set( GTK_TREE_STORE(model), &iter, 1, new_text, -1 );
             gtk_tree_view_columns_autosize( tree_view );

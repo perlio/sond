@@ -251,24 +251,6 @@ selection_get_icon_name( Projekt* zond, GFile* file )
 }
 
 
-static gchar*
-selection_get_rel_path_from_file( Projekt* zond, GFile* file )
-{
-    //Überprüfung, ob schon angebunden
-    gchar* rel_path = NULL;
-    gchar* abs_path = g_file_get_path( (GFile*) file );
-
-#ifdef _WIN32
-    abs_path = g_strdelimit( abs_path, "\\", '/' );
-#endif // _WIN32
-
-    rel_path = g_strdup( abs_path + strlen( zond->project_dir ) + 1 );
-    g_free( abs_path );
-
-    return rel_path; //muß freed werden
-}
-
-
 static gint
 selection_datei_einfuegen_in_db( Projekt* zond, GFile* file, gint node_id,
         gboolean child, gchar** errmsg )
@@ -294,7 +276,7 @@ selection_datei_einfuegen_in_db( Projekt* zond, GFile* file, gint node_id,
         return -1;
     }
 
-    rel_path = selection_get_rel_path_from_file( zond, file );
+    rel_path = get_rel_path_from_file( zond, file );
     rc = db_set_datei( zond, new_node_id, rel_path, errmsg );
     g_free( rel_path );
     if ( rc ) ERROR_PAO( "db_set_datei" )
@@ -316,7 +298,7 @@ selection_datei_anbinden( Projekt* zond, InfoWindow* info_window, GFile* file, g
     if ( info_window->cancel ) return -2;
 
     //Prüfen, ob Datei schon angebunden
-    gchar* rel_path = selection_get_rel_path_from_file( zond, file );
+    gchar* rel_path = get_rel_path_from_file( zond, file );
     rc = db_get_node_id_from_rel_path( zond, rel_path, errmsg );
     if ( rc == -1 )
     {
@@ -325,7 +307,7 @@ selection_datei_anbinden( Projekt* zond, InfoWindow* info_window, GFile* file, g
     }
     else if ( rc > 0 )
     {
-        gchar* text = g_strconcat( rel_path, " ...bereits angebunden", NULL );
+        gchar* text = add_string( rel_path, g_strdup( " ...bereits angebunden" ) );
         info_window_set_message( info_window, text );
         g_free( text );
 

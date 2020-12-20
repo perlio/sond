@@ -12,9 +12,6 @@
     - Anbindungen in PDF einfügen
     - Anbindungen in PDF löschen
 
-- BAUM_FS
-    - Umbennennen und verschieben nicht, wenn Pdf geöffnet ist
-
 - Viewer
     - Farben für Markieren
     - Rummalen
