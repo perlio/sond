@@ -1030,17 +1030,90 @@ cb_fm_row_expanded( GtkTreeView* tree_view, GtkTreeIter* iter,
 }
 
 
+static GFileInfo*
+fm_get_info( GtkTreeView* tree_view, GtkTreeIter* iter )
+{
+    gchar* path = NULL;
+    GFile* file = NULL;
+    GFileInfo* info = NULL;
+
+    path = fm_get_full_path( tree_view, iter );
+    file = g_file_new_for_path( path );
+    g_free( path );
+    info = g_file_query_info( file, "*", G_FILE_QUERY_INFO_NONE, NULL, NULL );
+    g_object_unref( file );
+
+    return info;
+}
+
+
+static void
+fm_render_file_modify( GtkTreeViewColumn* column, GtkCellRenderer* renderer,
+        GtkTreeModel* model, GtkTreeIter* iter, gpointer data )
+{
+    GFileInfo* info = NULL;
+    GDateTime* datetime = NULL;
+    gchar* text = NULL;
+
+    GtkTreeView* tree_view = (GtkTreeView*) data;
+    info = fm_get_info( tree_view, iter );
+    if ( !info ) return;
+
+    datetime = g_file_info_get_modification_date_time( info );
+    g_object_unref( info );
+
+    text = g_date_time_format( datetime, "%d.%m.%Y %T" );
+
+    g_object_set( G_OBJECT(renderer), "text", text, NULL );
+    g_free( text );
+
+    return;
+}
+
+
+static void
+fm_render_file_size( GtkTreeViewColumn* column, GtkCellRenderer* renderer,
+        GtkTreeModel* model, GtkTreeIter* iter, gpointer data )
+{
+    GFileInfo* info = NULL;
+    goffset size = 0;
+    gchar* text = NULL;
+
+    GtkTreeView* tree_view = (GtkTreeView*) data;
+    info = fm_get_info( tree_view, iter );
+    if ( !info ) return;
+
+    size = g_file_info_get_size( info );
+    g_object_unref( info );
+
+    text = g_strdup_printf( "%lld", size );
+
+    g_object_set( G_OBJECT(renderer), "text", text, NULL );
+    g_free( text );
+
+    return;
+}
+
+
+/** In GObject treeview muß "root" mit Urpsrungsverzeichnis gesetzt werden
+**/
 GtkTreeView*
 fm_create_tree_view( GtkWidget* window_parent, SFMChangePath* s_fm_change_path )
 {
-    //renderer
+    //treeview
+    GtkTreeView* treeview_fs = (GtkTreeView*) gtk_tree_view_new( );
+    gtk_tree_view_set_headers_visible( treeview_fs, FALSE );
+    gtk_tree_view_set_fixed_height_mode( treeview_fs, TRUE );
+    gtk_tree_view_set_enable_tree_lines( treeview_fs, TRUE );
+    gtk_tree_view_set_enable_search( treeview_fs, FALSE );
+
+    //Filename
     GtkCellRenderer* renderer_icon = gtk_cell_renderer_pixbuf_new( );
     GtkCellRenderer* renderer_text = gtk_cell_renderer_text_new( );
 
     g_object_set( renderer_text, "editable", TRUE, NULL);
     g_object_set( renderer_text, "underline", PANGO_UNDERLINE_SINGLE, NULL );
 
-    //die column
     GtkTreeViewColumn* fs_tree_column = gtk_tree_view_column_new( );
     gtk_tree_view_column_set_resizable( fs_tree_column, FALSE );
     gtk_tree_view_column_set_sizing(fs_tree_column, GTK_TREE_VIEW_COLUMN_FIXED );
@@ -1052,14 +1125,29 @@ fm_create_tree_view( GtkWidget* window_parent, SFMChangePath* s_fm_change_path )
     gtk_tree_view_column_set_attributes( fs_tree_column,
             renderer_text, "text", 1, NULL );
 
-    //treeview
-    GtkTreeView* treeview_fs = (GtkTreeView*) gtk_tree_view_new( );
-    gtk_tree_view_set_headers_visible( treeview_fs, FALSE );
-    gtk_tree_view_set_fixed_height_mode( treeview_fs, TRUE );
-    gtk_tree_view_set_enable_tree_lines( treeview_fs, TRUE );
-    gtk_tree_view_set_enable_search( treeview_fs, FALSE );
+    //Größe
+    GtkCellRenderer* renderer_size = gtk_cell_renderer_text_new( );
+
+    GtkTreeViewColumn* fs_tree_column_size = gtk_tree_view_column_new( );
+    gtk_tree_view_column_set_resizable( fs_tree_column_size, FALSE );
+    gtk_tree_view_column_set_sizing(fs_tree_column_size, GTK_TREE_VIEW_COLUMN_FIXED );
+    gtk_tree_view_column_pack_start( fs_tree_column_size, renderer_size, FALSE );
+    gtk_tree_view_column_set_cell_data_func( fs_tree_column_size, renderer_size,
+            fm_render_file_size, treeview_fs, NULL );
+
+    //Änderungsdatum
+    GtkCellRenderer* renderer_modify = gtk_cell_renderer_text_new( );
+
+    GtkTreeViewColumn* fs_tree_column_modify = gtk_tree_view_column_new( );
+    gtk_tree_view_column_set_resizable( fs_tree_column_modify, FALSE );
+    gtk_tree_view_column_set_sizing(fs_tree_column_modify, GTK_TREE_VIEW_COLUMN_FIXED );
+    gtk_tree_view_column_pack_start( fs_tree_column_modify, renderer_modify, FALSE );
+    gtk_tree_view_column_set_cell_data_func( fs_tree_column_modify, renderer_modify,
+            fm_render_file_modify, treeview_fs, NULL );
 
     gtk_tree_view_append_column( treeview_fs, fs_tree_column );
+    gtk_tree_view_append_column( treeview_fs, fs_tree_column_size );
+    gtk_tree_view_append_column( treeview_fs, fs_tree_column_modify );
 
     g_object_set_data( G_OBJECT(treeview_fs), "renderer-icon", renderer_icon );
     g_object_set_data( G_OBJECT(treeview_fs), "renderer-text", renderer_text );
