@@ -25,9 +25,10 @@ typedef struct _S_FM_Remove
 } SFMRemove;
 
 
-gchar* fm_get_rel_path( GtkTreeView*, GtkTreeIter* );
 
 gchar* fm_get_full_path( GtkTreeView*, GtkTreeIter* );
+
+gchar* fm_get_rel_path( GtkTreeView*, GtkTreeIter* );
 
 gint fm_create_dir( GtkTreeView*, gboolean, gchar** );
 

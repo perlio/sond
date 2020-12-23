@@ -325,7 +325,7 @@ treeviews_cell_data_function( GtkTreeViewColumn* column, GtkCellRenderer* render
     }
     else if ( baum == BAUM_FS ) //wenn angebunden, Hintergrund
     {
-        gchar* rel_path = fm_get_rel_path( zond->treeview[BAUM_FS], iter );
+        const gchar* rel_path = fm_get_rel_path( zond->treeview[BAUM_FS], iter );
         if ( rel_path )
         {
             rc = db_get_node_id_from_rel_path( zond, rel_path, &errmsg );
@@ -338,8 +338,6 @@ treeviews_cell_data_function( GtkTreeViewColumn* column, GtkCellRenderer* render
             else if ( rc == 0 ) g_object_set( G_OBJECT(renderer),
                     "background-set", FALSE, NULL );
             else g_object_set( G_OBJECT(renderer), "background-set", TRUE, NULL );
-
-            g_free( rel_path );
         }
     }
 
@@ -483,11 +481,11 @@ treeviews_init_fs_tree( Projekt* zond )
     gdkrgba.green = 0.95;
 
     g_object_set( cell, "background-rgba", &gdkrgba, NULL );
-
+/*
     gtk_tree_view_column_set_cell_data_func( gtk_tree_view_get_column(
             zond->treeview[BAUM_FS], 0 ), cell, treeviews_cell_data_function,
             zond, NULL );
-
+*/
     //focus-in
     zond->treeview_focus_in_signal[BAUM_FS] = g_signal_connect( zond->treeview[BAUM_FS],
             "focus-in-event", G_CALLBACK(cb_focus_in), (gpointer) zond );

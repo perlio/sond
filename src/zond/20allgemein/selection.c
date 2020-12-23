@@ -450,10 +450,9 @@ selection_foreach_anbinden( GtkTreeView* tree_view, GtkTreeIter* iter,
     SSelectionAnbinden* s_selection = (SSelectionAnbinden*) data;
 
     //datei ermitteln und anbinden
-    gchar* full_path = fm_get_full_path( tree_view, iter );
+    const gchar* full_path = fm_get_full_path( tree_view, iter );
 
     GFile* file = g_file_new_for_path( full_path );
-    g_free( full_path );
     gint new_node_id = 0;
 
     if ( g_file_query_file_type( file, G_FILE_QUERY_INFO_NONE, NULL ) ==

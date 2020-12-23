@@ -15,49 +15,45 @@
 #endif // _WIN32
 
 
-static gchar*
-fm_get_basename( GtkTreeView* tree_view, GtkTreeIter* iter )
+static const gchar*
+fm_get_name( GtkTreeModel* model, GtkTreeIter* iter )
 {
-    gchar* basename = NULL;
+    GFileInfo* info = NULL;
+    const gchar* name = NULL;
 
-    gtk_tree_model_get( gtk_tree_view_get_model( tree_view ), iter, 1,
-            &basename, -1 );
+    gtk_tree_model_get( model, iter, 0, &info, -1 );
+    name = g_file_info_get_name( info );
+    g_object_unref( info );
 
-    return basename;
+    return name;
 }
 
 
 gchar*
 fm_get_rel_path( GtkTreeView* tree_view, GtkTreeIter* iter )
 {
-    GtkTreeIter iter_parent;
     gchar* rel_path = NULL;
+    GtkTreeIter iter_parent = { 0 };
+    GtkTreeIter* iter_seg = NULL;
 
-    if ( iter )
+    iter_seg = gtk_tree_iter_copy( iter );
+
+    rel_path = g_strdup( fm_get_name( gtk_tree_view_get_model( tree_view ), iter_seg ) );
+
+    while ( gtk_tree_model_iter_parent( gtk_tree_view_get_model( tree_view ), &iter_parent, iter_seg ) )
     {
-        GtkTreeIter* iter_child = gtk_tree_iter_copy( iter );
-        gboolean parent = FALSE;
+        gchar* path_segment = NULL;
 
-        do
-        {
-            parent = FALSE;
-            gchar* path_segment = fm_get_basename( tree_view, iter_child );
+        gtk_tree_iter_free( iter_seg );
+        iter_seg = gtk_tree_iter_copy( &iter_parent );
 
-            rel_path = add_string( path_segment, rel_path );
+        path_segment = g_strdup( fm_get_name( gtk_tree_view_get_model( tree_view ), iter_seg ) );
 
-            if ( gtk_tree_model_iter_parent( gtk_tree_view_get_model( tree_view ), &iter_parent, iter_child ) )
-            {
-                parent = TRUE;
-                gtk_tree_iter_free( iter_child );
-                iter_child = gtk_tree_iter_copy( &iter_parent );
-
-                rel_path = add_string( g_strdup( "/" ), rel_path );
-            }
-        }
-        while ( parent );
-
-        gtk_tree_iter_free( iter_child );
+        rel_path = add_string( g_strdup( "/" ), rel_path );
+        rel_path = add_string( path_segment, rel_path );
     }
+
+    gtk_tree_iter_free( iter_seg );
 
     return rel_path;
 }
@@ -66,13 +62,11 @@ fm_get_rel_path( GtkTreeView* tree_view, GtkTreeIter* iter )
 gchar*
 fm_get_full_path( GtkTreeView* tree_view, GtkTreeIter* iter )
 {
-    gchar* path_dir = NULL;
+    gchar* full_path = NULL;
 
-    gchar* rel_path = fm_get_rel_path( tree_view, iter );
-    path_dir = g_strconcat( g_object_get_data( G_OBJECT(tree_view), "root" ), "/", NULL );
-    path_dir = add_string( path_dir, rel_path );
+    full_path = add_string( g_strconcat( g_object_get_data( G_OBJECT(tree_view), "root" ), "/", NULL ), fm_get_rel_path( tree_view, iter ) );
 
-    return path_dir;
+    return full_path;
 }
 
 
@@ -225,7 +219,8 @@ gint
 fm_create_dir( GtkTreeView* tree_view, gboolean child, gchar** errmsg )
 {
     gint rc = 0;
-    gchar* path = NULL;
+    GFileInfo* info = NULL;
+    gchar* full_path = NULL;
     GFile* file = NULL;
     GFile* parent = NULL;
     GFileType type = G_FILE_TYPE_UNKNOWN;
@@ -234,18 +229,20 @@ fm_create_dir( GtkTreeView* tree_view, gboolean child, gchar** errmsg )
 
     if ( !iter ) return 0;
 
-    path = fm_get_full_path( tree_view, iter );
-    file = g_file_new_for_path( path );
-    g_free( path );
-    type = g_file_query_file_type( file, G_FILE_QUERY_INFO_NONE, NULL );
+    gtk_tree_model_get( gtk_tree_view_get_model( tree_view ), iter, 0, &info, -1 );
 
+    type = g_file_info_get_file_type( info );
+    g_object_unref( info );
     if ( !(type == G_FILE_TYPE_DIRECTORY) && child ) //kein Verzeichnis in Datei
     {
-        g_object_unref( file );
         gtk_tree_iter_free( iter );
 
         return 0;
     }
+
+    full_path = fm_get_full_path( tree_view, iter );
+    file = g_file_new_for_path( full_path );
+    g_free( full_path );
 
     if ( child ) parent = file;
     else
@@ -266,18 +263,27 @@ fm_create_dir( GtkTreeView* tree_view, gboolean child, gchar** errmsg )
 
     //In Baum tun
     GtkTreeIter* iter_new = NULL;
+    GFileInfo* info_new = NULL;
+    GError* error = NULL;
 
     iter_new = treeview_insert_node( tree_view, iter, child );
-
     gtk_tree_iter_free( iter );
 
-    GIcon* icon = g_icon_new_for_string( "folder", NULL );
-    gchar* node_text = g_file_get_basename( file_dir );
-    gtk_tree_store_set( GTK_TREE_STORE(gtk_tree_view_get_model(
-            tree_view )), iter_new, 0, icon, 1, node_text, -1 );
-
+    info_new = g_file_query_info( file_dir, "*", G_FILE_QUERY_INFO_NONE, NULL, &error );
     g_object_unref( file_dir );
-    g_object_unref( icon );
+    if ( !info_new )
+    {
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_file_query_info:\n",
+                error->message, NULL );
+        g_error_free( error );
+
+        return -1;
+    }
+
+    gtk_tree_store_set( GTK_TREE_STORE(gtk_tree_view_get_model(
+            tree_view )), iter_new, 0, info_new, -1 );
+
+    g_object_unref( info_new );
 
     treeview_set_cursor( tree_view, iter_new );
 
@@ -293,14 +299,15 @@ fm_create_dir( GtkTreeView* tree_view, gboolean child, gchar** errmsg )
     rc == 2: nicht alles ausgeführt, Callback hat 2 zurückgegeben -> Abbruch
     **/
 static gint
-fm_dir_foreach( GtkTreeView* tree_view, GtkTreeIter* iter_dir, GFile* file_dir,
+fm_dir_foreach( GtkTreeView* tree_view, GtkTreeIter* iter_dir, GFile* file,
         gint (*foreach) ( GtkTreeView*, GtkTreeIter*, GFile*, GFileInfo*, gpointer, gchar** ),
         gpointer data, gchar** errmsg )
 {
     GError* error = NULL;
     gboolean flag = FALSE;
+    GFileEnumerator* enumer = NULL;
 
-    GFileEnumerator* enumer = g_file_enumerate_children( file_dir, "*", G_FILE_QUERY_INFO_NONE, NULL, &error );
+    enumer = g_file_enumerate_children( file, "*", G_FILE_QUERY_INFO_NONE, NULL, &error );
     if ( !enumer )
     {
         if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_file_enumerate_children:\n",
@@ -312,10 +319,10 @@ fm_dir_foreach( GtkTreeView* tree_view, GtkTreeIter* iter_dir, GFile* file_dir,
 
     while ( 1 )
     {
-        GFile* child = NULL;
+        GFile* file_child = NULL;
         GFileInfo* info_child = NULL;
 
-        if ( !g_file_enumerator_iterate( enumer, &info_child, &child, NULL, &error ) )
+        if ( !g_file_enumerator_iterate( enumer, &info_child, &file_child, NULL, &error ) )
         {
             if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_file_enumerator_iterate:\n",
                     error->message, NULL );
@@ -325,7 +332,7 @@ fm_dir_foreach( GtkTreeView* tree_view, GtkTreeIter* iter_dir, GFile* file_dir,
             return -1;
         }
 
-        if ( child ) //es gibt noch Datei in Verzeichnis
+        if ( file_child ) //es gibt noch Datei in Verzeichnis
         {
             gint rc = 0;
             GtkTreeIter iter_file = { 0 };
@@ -334,24 +341,18 @@ fm_dir_foreach( GtkTreeView* tree_view, GtkTreeIter* iter_dir, GFile* file_dir,
             if ( iter_dir && gtk_tree_model_iter_children(
                     gtk_tree_view_get_model( tree_view ), &iter_file, iter_dir ) )
             {
-                gchar* basename = g_file_get_basename( child );
-
                 do
                 {
                     //den Namen des aktuellen Kindes holen
-                    gchar* text_row = NULL;
-
-                    gtk_tree_model_get( gtk_tree_view_get_model( tree_view ), &iter_file, 1, &text_row, -1 );
-                    if ( !g_strcmp0( text_row, basename ) ) found = TRUE;//paßt?
-                    g_free( text_row );
+                    if ( !g_strcmp0( fm_get_name( gtk_tree_view_get_model( tree_view ), &iter_file ),
+                            g_file_info_get_name( info_child ) ) )
+                            found = TRUE;//paßt?
 
                     if ( found ) break;
                 } while ( gtk_tree_model_iter_next( gtk_tree_view_get_model( tree_view ), &iter_file ) );
-
-                g_free( basename );
             }
 
-            rc = foreach( tree_view, (found) ? &iter_file : NULL, child, info_child, data, errmsg );
+            rc = foreach( tree_view, (found) ? &iter_file : NULL, file_child, info_child, data, errmsg );
             if ( rc == -1 )
             {
                 g_object_unref( enumer );
@@ -366,7 +367,7 @@ fm_dir_foreach( GtkTreeView* tree_view, GtkTreeIter* iter_dir, GFile* file_dir,
                 g_object_unref( enumer );
                 return 2;
             }
-        } //ende if ( child )
+        } //ende if ( file_child )
         else break;
     }
 
@@ -467,7 +468,7 @@ fm_paste_selection_foreach( GtkTreeView* tree_view, GtkTreeIter* iter,
 {
     gint rc = 0;
     GFile* file_source = NULL;
-    gchar* path_source = NULL;
+    const gchar* path_source = NULL;
     gboolean same_dir = FALSE;
     gboolean dir_with_children = FALSE;
     GFileType file_type = G_FILE_TYPE_UNKNOWN;
@@ -479,7 +480,6 @@ fm_paste_selection_foreach( GtkTreeView* tree_view, GtkTreeIter* iter,
 
     //source-file
     file_source = g_file_new_for_path( path_source );
-    g_free( path_source );
 
     //prüfen, ob innerhalb des gleichen Verzeichnisses verschoben/kopiert werden
     //soll - dann: same_dir = TRUE
@@ -577,7 +577,7 @@ fm_paste_selection_foreach( GtkTreeView* tree_view, GtkTreeIter* iter,
         {
             //in neu erzeugten node einsetzen
             gtk_tree_store_set( GTK_TREE_STORE(gtk_tree_view_get_model( tree_view )),
-                    s_fm_paste_selection->iter_cursor, 0, g_file_info_get_icon( file_dest_info ), 1, g_file_get_basename( s_fm_paste_selection->file_dest ), -1 );
+                    s_fm_paste_selection->iter_cursor, 0, file_dest_info, -1 );
 
             g_object_unref( file_dest_info );
         }
@@ -595,7 +595,7 @@ fm_paste_selection( GtkTreeView* tree_view, GPtrArray* refs,
 {
     gint rc = 0;
     GtkTreeIter* iter_cursor = NULL;
-    gchar* path = NULL;
+    const gchar* path = NULL;
     GFile* file_cursor = NULL;
     GFile* file_parent = NULL;
     GFileType file_type = G_FILE_TYPE_UNKNOWN;
@@ -613,7 +613,6 @@ fm_paste_selection( GtkTreeView* tree_view, GPtrArray* refs,
     }
 
     file_cursor = g_file_new_for_path( path );
-    g_free( path );
     file_type = g_file_query_file_type( file_cursor, G_FILE_QUERY_INFO_NONE, NULL );
 
     //if kind && datei != dir: Fehler
@@ -693,7 +692,7 @@ fm_remove_node( GtkTreeView* tree_view, GtkTreeIter* iter_file, GFile* file,
 
     SFMRemove* s_fm_remove = (SFMRemove*) data;
 
-    type = g_file_query_file_type( file, G_FILE_QUERY_INFO_NONE, NULL );
+    type = g_file_info_get_file_type( info_file );
 
     if ( type != G_FILE_TYPE_DIRECTORY )
     {
@@ -726,14 +725,16 @@ gint
 fm_foreach_loeschen( GtkTreeView* tree_view, GtkTreeIter* iter,
         gpointer data, gchar** errmsg )
 {
-    gchar* full_path = NULL;
+    gint rc = 0;
+    GFileInfo* info = NULL;
     GFile* file = NULL;
 
-    full_path = fm_get_full_path( tree_view, iter );
-    file = g_file_new_for_path( full_path );
-    g_free( full_path );
+    gtk_tree_model_get( gtk_tree_view_get_model( tree_view ), iter, 0, &info, -1 );
 
-    gint rc = fm_remove_node( tree_view, iter, file, NULL, data, errmsg );
+    file = g_file_new_for_path( g_file_info_get_display_name( info ) );
+    g_object_unref( info );
+
+    rc = fm_remove_node( tree_view, iter, file, NULL, data, errmsg );
     g_object_unref( file );
     if ( rc == -1 ) ERROR_PAO( "fm_remove_node" )
     else if ( rc == 2 ) return 1;
@@ -751,14 +752,13 @@ fm_load_dir_foreach( GtkTreeView* tree_view, GtkTreeIter* iter, GFile* file,
 {
     GtkTreeIter iter_new = { 0 };
 
-    GtkTreeIter* iter_parent = (GtkTreeIter*) data;
+    GtkTreeIter* iter_dir = (GtkTreeIter*) data;
 
     //child in tree einfügen
     gtk_tree_store_insert( GTK_TREE_STORE(gtk_tree_view_get_model( tree_view )),
-            &iter_new, iter_parent, -1 );
+            &iter_new, iter_dir, -1 );
     gtk_tree_store_set( GTK_TREE_STORE(gtk_tree_view_get_model( tree_view )),
-            &iter_new, 0, g_file_info_get_icon( info ),
-            1, g_file_info_get_display_name( info ), -1 );
+            &iter_new, 0, info , -1 );
 
     //falls directory: überprüfen ob leer, falls nicht, dummy als child
     GFileType type = g_file_info_get_file_type( info );
@@ -803,17 +803,22 @@ fm_load_dir_foreach( GtkTreeView* tree_view, GtkTreeIter* iter, GFile* file,
 gint
 fm_load_dir( GtkTreeView* tree_view, GtkTreeIter* iter, gchar** errmsg )
 {
-    gchar* path_dir = NULL;
     gint rc = 0;
+    GFile* file = NULL;
 
-    //path des directory aus tree holen
-    path_dir = fm_get_full_path( tree_view, iter ); //keine Fehlerrückgabe0
+    if ( iter )
+    {
+        gchar* full_path = NULL;
 
-    GFile* dir = g_file_new_for_path( path_dir );
-    g_free( path_dir );
+        full_path = fm_get_full_path( tree_view, iter );
+        file = g_file_new_for_path( full_path );
+        g_free( full_path );
+    }
+    else file = g_file_new_for_path( g_object_get_data( G_OBJECT(tree_view), "root" ) );
 
     //fm_load_dir_foreach gibt 0 oder -1 zurück
-    rc = fm_dir_foreach( tree_view, NULL, dir, fm_load_dir_foreach, iter, errmsg );
+    rc = fm_dir_foreach( tree_view, iter, file, fm_load_dir_foreach, iter, errmsg );
+    g_object_unref( file );
     if ( rc == -1 )
     {
         if ( errmsg ) *errmsg = add_string( g_strdup( "Bei Aufruf fm_dir_foreach:\n" ),
@@ -836,7 +841,7 @@ cb_fm_row_text_edited( GtkCellRenderer* cell, gchar* path_string, gchar* new_tex
     GtkTreeView* tree_view = NULL;
     GtkTreeModel* model = NULL;
     GtkTreeIter iter;
-    gchar* root = NULL;
+    const gchar* root = NULL;
     gchar* old_text = NULL;
     GtkTreeIter iter_parent = { 0 };
     GFile* file_source = NULL;
@@ -850,7 +855,7 @@ cb_fm_row_text_edited( GtkCellRenderer* cell, gchar* path_string, gchar* new_tex
 
     if ( gtk_tree_model_iter_parent( model, &iter_parent, &iter ) ) root =
             fm_get_full_path( tree_view, &iter_parent );
-    else root = g_strdup( g_object_get_data( G_OBJECT(tree_view), "root" ) );
+    else root = g_object_get_data( G_OBJECT(tree_view), "root" );
 
     gtk_tree_model_get( model, &iter, 1, &old_text, -1 );
 
@@ -858,7 +863,6 @@ cb_fm_row_text_edited( GtkCellRenderer* cell, gchar* path_string, gchar* new_tex
     g_free( old_text );
 
     path_new = g_strconcat( root, "/", new_text, NULL );
-    g_free( root );
 
     file_source = g_file_new_for_path( path_old );
     file_dest = g_file_new_for_path( path_new );
@@ -879,10 +883,26 @@ cb_fm_row_text_edited( GtkCellRenderer* cell, gchar* path_string, gchar* new_tex
                 errmsg, NULL );
         else if ( rc == 0 )
         {
-            gtk_tree_store_set( GTK_TREE_STORE(model), &iter, 1, new_text, -1 );
-            gtk_tree_view_columns_autosize( tree_view );
+            GError* error = NULL;
+            GFileInfo* info = NULL;
+
+            info = g_file_query_info( file_dest, "*", G_FILE_QUERY_INFO_NONE, NULL, &error );
+            if ( !info )
+            {
+                display_message( gtk_widget_get_toplevel( GTK_WIDGET(tree_view) ),
+                "Umbenennen nicht möglich\n\nBei Aufruf g_file_query_info:\n",
+                error->message, NULL );
+                g_error_free( error );
+            }
+            else
+            {
+                gtk_tree_store_set( GTK_TREE_STORE(model), &iter, 0, info, -1 );
+                gtk_tree_view_columns_autosize( tree_view );
+                g_object_unref( info );
+            }
         } //wenn rc_edit == 1 oder 2: einfach zurück
     }
+    g_object_unref( file_dest );
 
     return;
 }
@@ -954,17 +974,16 @@ cb_fm_row_activated( GtkTreeView* tree_view, GtkTreePath* tree_path,
 {
     GtkWidget* window_parent = (GtkWidget*) data;
 
-    gchar* path = NULL;
     GtkTreeIter iter;
+    GFileInfo* info = NULL;
     gint rc = 0;
     gchar* errmsg = NULL;
 
     gtk_tree_model_get_iter( gtk_tree_view_get_model( tree_view ), &iter, tree_path );
+    gtk_tree_model_get( gtk_tree_view_get_model( tree_view ), &iter, 0, &info, -1 );
 
-    path = fm_get_full_path( tree_view, &iter );
-
-    rc = fm_datei_oeffnen( path, &errmsg );
-    g_free( path );
+    rc = fm_datei_oeffnen( g_file_info_get_display_name( info ), &errmsg );
+    g_object_unref( info );
     if ( rc )
     {
         display_message( window_parent, "Öffnen nicht möglich\n\nBei Aufruf "
@@ -995,6 +1014,8 @@ cb_fm_row_collapsed( GtkTreeView* tree_view, GtkTreeIter* iter,
     gtk_tree_store_insert( GTK_TREE_STORE(gtk_tree_view_get_model( tree_view )),
             &iter_child, iter, -1 );
 
+    gtk_tree_view_columns_autosize( tree_view );
+
     return;
 }
 
@@ -1005,15 +1026,17 @@ cb_fm_row_expanded( GtkTreeView* tree_view, GtkTreeIter* iter,
 {
     gint rc = 0;
     gchar* errmsg = NULL;
-    GtkTreeIter new_iter;
-    gchar* string = NULL;
+    GtkTreeIter new_iter = { 0 };
+    GFileInfo* info = NULL;
 
     GtkWidget* window = (GtkWidget*) data;
 
     gtk_tree_model_iter_nth_child( gtk_tree_view_get_model( tree_view ), &new_iter, iter, 0 );
-    gtk_tree_model_get( gtk_tree_view_get_model( tree_view ), &new_iter, 1, &string, -1 );
-    if ( !string )
+    gtk_tree_model_get( gtk_tree_view_get_model( tree_view ), &new_iter, 0, &info, -1 );
+    if ( !info )
     {
+        gtk_tree_store_remove( GTK_TREE_STORE(gtk_tree_view_get_model( tree_view )),
+                &new_iter );
         rc = fm_load_dir( tree_view, iter, &errmsg );
         if ( rc )
         {
@@ -1021,29 +1044,12 @@ cb_fm_row_expanded( GtkTreeView* tree_view, GtkTreeIter* iter,
                     "Bei Aufruf fm_load_dir:\n", errmsg, NULL );
             g_free( errmsg );
         }
-        gtk_tree_store_remove( GTK_TREE_STORE(gtk_tree_view_get_model( tree_view )),
-                &new_iter );
     }
+    else g_object_unref( info );
+
     gtk_tree_view_columns_autosize( tree_view );
 
     return;
-}
-
-
-static GFileInfo*
-fm_get_info( GtkTreeView* tree_view, GtkTreeIter* iter )
-{
-    gchar* path = NULL;
-    GFile* file = NULL;
-    GFileInfo* info = NULL;
-
-    path = fm_get_full_path( tree_view, iter );
-    file = g_file_new_for_path( path );
-    g_free( path );
-    info = g_file_query_info( file, "*", G_FILE_QUERY_INFO_NONE, NULL, NULL );
-    g_object_unref( file );
-
-    return info;
 }
 
 
@@ -1055,9 +1061,7 @@ fm_render_file_modify( GtkTreeViewColumn* column, GtkCellRenderer* renderer,
     GDateTime* datetime = NULL;
     gchar* text = NULL;
 
-    GtkTreeView* tree_view = (GtkTreeView*) data;
-    info = fm_get_info( tree_view, iter );
-    if ( !info ) return;
+    gtk_tree_model_get( model, iter, 0, &info, -1 );
 
     datetime = g_file_info_get_modification_date_time( info );
     g_object_unref( info );
@@ -1079,9 +1083,7 @@ fm_render_file_size( GtkTreeViewColumn* column, GtkCellRenderer* renderer,
     goffset size = 0;
     gchar* text = NULL;
 
-    GtkTreeView* tree_view = (GtkTreeView*) data;
-    info = fm_get_info( tree_view, iter );
-    if ( !info ) return;
+    gtk_tree_model_get( model, iter, 0, &info, -1 );
 
     size = g_file_info_get_size( info );
     g_object_unref( info );
@@ -1090,6 +1092,32 @@ fm_render_file_size( GtkTreeViewColumn* column, GtkCellRenderer* renderer,
 
     g_object_set( G_OBJECT(renderer), "text", text, NULL );
     g_free( text );
+
+    return;
+}
+
+
+static void
+fm_render_file_name( GtkTreeViewColumn* column, GtkCellRenderer* renderer,
+        GtkTreeModel* model, GtkTreeIter* iter, gpointer data )
+{
+    g_object_set( G_OBJECT(renderer), "text", fm_get_name( model, iter ), NULL );
+
+    return;
+}
+
+
+static void
+fm_render_file_icon( GtkTreeViewColumn* column, GtkCellRenderer* renderer,
+        GtkTreeModel* model, GtkTreeIter* iter, gpointer data )
+{
+    GFileInfo* info = NULL;
+
+    gtk_tree_model_get( model, iter, 0, &info, -1 );
+
+    g_object_set( G_OBJECT(renderer), "gicon", g_file_info_get_icon( info ), NULL );
+
+    g_object_unref( info );
 
     return;
 }
@@ -1107,7 +1135,7 @@ fm_create_tree_view( GtkWidget* window_parent, SFMChangePath* s_fm_change_path )
     gtk_tree_view_set_enable_tree_lines( treeview_fs, TRUE );
     gtk_tree_view_set_enable_search( treeview_fs, FALSE );
 
-    //Filename
+    //Icon und filename
     GtkCellRenderer* renderer_icon = gtk_cell_renderer_pixbuf_new( );
     GtkCellRenderer* renderer_text = gtk_cell_renderer_text_new( );
 
@@ -1117,13 +1145,13 @@ fm_create_tree_view( GtkWidget* window_parent, SFMChangePath* s_fm_change_path )
     GtkTreeViewColumn* fs_tree_column = gtk_tree_view_column_new( );
     gtk_tree_view_column_set_resizable( fs_tree_column, FALSE );
     gtk_tree_view_column_set_sizing(fs_tree_column, GTK_TREE_VIEW_COLUMN_FIXED );
-    gtk_tree_view_column_pack_start( fs_tree_column, renderer_icon, FALSE );
-    gtk_tree_view_column_pack_start( fs_tree_column, renderer_text, TRUE );
+    gtk_tree_view_column_pack_start( fs_tree_column, renderer_icon, FALSE);
+    gtk_tree_view_column_pack_start( fs_tree_column, renderer_text, FALSE );
 
-    gtk_tree_view_column_set_attributes( fs_tree_column,
-            renderer_icon, "gicon", 0, NULL );
-    gtk_tree_view_column_set_attributes( fs_tree_column,
-            renderer_text, "text", 1, NULL );
+    gtk_tree_view_column_set_cell_data_func( fs_tree_column, renderer_icon,
+            fm_render_file_icon, NULL, NULL );
+    gtk_tree_view_column_set_cell_data_func( fs_tree_column, renderer_text,
+            fm_render_file_name, NULL, NULL );
 
     //Größe
     GtkCellRenderer* renderer_size = gtk_cell_renderer_text_new( );
@@ -1133,7 +1161,7 @@ fm_create_tree_view( GtkWidget* window_parent, SFMChangePath* s_fm_change_path )
     gtk_tree_view_column_set_sizing(fs_tree_column_size, GTK_TREE_VIEW_COLUMN_FIXED );
     gtk_tree_view_column_pack_start( fs_tree_column_size, renderer_size, FALSE );
     gtk_tree_view_column_set_cell_data_func( fs_tree_column_size, renderer_size,
-            fm_render_file_size, treeview_fs, NULL );
+            fm_render_file_size, NULL, NULL );
 
     //Änderungsdatum
     GtkCellRenderer* renderer_modify = gtk_cell_renderer_text_new( );
@@ -1143,7 +1171,7 @@ fm_create_tree_view( GtkWidget* window_parent, SFMChangePath* s_fm_change_path )
     gtk_tree_view_column_set_sizing(fs_tree_column_modify, GTK_TREE_VIEW_COLUMN_FIXED );
     gtk_tree_view_column_pack_start( fs_tree_column_modify, renderer_modify, FALSE );
     gtk_tree_view_column_set_cell_data_func( fs_tree_column_modify, renderer_modify,
-            fm_render_file_modify, treeview_fs, NULL );
+            fm_render_file_modify, NULL, NULL );
 
     gtk_tree_view_append_column( treeview_fs, fs_tree_column );
     gtk_tree_view_append_column( treeview_fs, fs_tree_column_size );
@@ -1153,7 +1181,7 @@ fm_create_tree_view( GtkWidget* window_parent, SFMChangePath* s_fm_change_path )
     g_object_set_data( G_OBJECT(treeview_fs), "renderer-text", renderer_text );
     g_object_set_data( G_OBJECT(renderer_text), "tree-view", treeview_fs );
 
-    GtkTreeStore* tree_store = gtk_tree_store_new( 2, G_TYPE_ICON, G_TYPE_STRING );
+    GtkTreeStore* tree_store = gtk_tree_store_new( 1, G_TYPE_OBJECT );
     gtk_tree_view_set_model( treeview_fs, GTK_TREE_MODEL(tree_store) );
     g_object_unref( tree_store );
 
