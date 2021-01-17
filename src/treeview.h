@@ -8,6 +8,7 @@ typedef struct _GtkTreePath GtkTreePath;
 typedef struct _GtkTreeView GtkTreeView;
 typedef struct _GPtrArray GPtrArray;
 typedef struct _GtkCellRenderer GtkCellRenderer;
+typedef struct _GtkTreeViewColumn GtkTreeViewColumn;
 
 typedef int gboolean;
 typedef void* gpointer;
@@ -30,10 +31,10 @@ GtkTreeIter* treeview_get_cursor( GtkTreeView* );
 
 void  treeview_set_cursor( GtkTreeView*, GtkTreeIter* );
 
-void treeview_zelle_ausgrauen( GtkTreeView*, GtkTreePath*, GtkCellRenderer*,
+void treeview_zelle_ausgrauen( GtkTreeView*, GtkTreeIter*, GtkCellRenderer*,
         Clipboard* );
 
-void treeview_underline_cursor( GtkTreeView*, GtkTreePath*, GtkCellRenderer* );
+void treeview_underline_cursor( GtkTreeViewColumn*, GtkCellRenderer*, GtkTreeIter* );
 
 gboolean treeview_selection_select_func( GtkTreeSelection*, GtkTreeModel*, GtkTreePath*,
         gboolean, gpointer );

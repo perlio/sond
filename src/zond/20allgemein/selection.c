@@ -571,12 +571,9 @@ selection_paste( Projekt* zond, gboolean kind )
     {
         if ( baum == BAUM_FS )
         {
-            SFMChangePath s_fm_change_path = { update_db_before_path_change,
-                    update_db_after_path_change, zond };
-
             rc = fm_paste_selection( zond->treeview[BAUM_FS],
                     zond->clipboard->arr_ref, zond->clipboard->ausschneiden,
-                    kind, &s_fm_change_path, &errmsg );
+                    kind, &errmsg );
             if ( rc )
             {
                 meldung( zond->app_window, "Selection kann nicht kopiert/verschoben "
@@ -810,42 +807,16 @@ selection_foreach_loeschen( GtkTreeView* tree_view, GtkTreeIter* iter,
     return 0;
 }
 
-static gint
-selection_abfrage_anbindung( GFile* file, gpointer data, gchar** errmsg )
-{
-    gint rc = 0;
-
-    Projekt* zond = (Projekt*) data;
-
-    gchar* uri = g_file_get_uri( file );
-    gchar* uri_unesc = g_uri_unescape_string( uri, NULL );
-    g_free( uri );
-    gchar* rel_path = g_strdup( uri_unesc + 8 + strlen( zond->project_dir - 1 ) );
-    g_free( uri_unesc );
-
-    rc = db_get_node_id_from_rel_path( zond, rel_path, errmsg );
-    g_free( rel_path );
-
-    if ( rc == -1 ) ERROR_PAO( "db_get_node_id_from_rel_path" )
-    else if ( rc > 0 ) return 1;
-
-    return 0;
-}
-
-
-
 gint
 selection_loeschen( Projekt* zond, Baum baum, GPtrArray* refs, gchar** errmsg )
 {
     gint rc = 0;
 
-    SFMRemove s_fm_remove = { selection_abfrage_anbindung, zond};
-
     if ( baum == BAUM_INHALT || baum == BAUM_AUSWERTUNG ) rc =
             treeview_selection_foreach( zond->treeview[baum], refs,
             selection_foreach_loeschen, zond, errmsg );
     else rc = treeview_selection_foreach( zond->treeview[baum], refs,
-            fm_foreach_loeschen, &s_fm_remove, errmsg );
+            fm_foreach_loeschen, NULL, errmsg );
 
     if ( rc == -1 ) ERROR_PAO( "treeview_selection_foreach" )
 

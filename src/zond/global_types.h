@@ -37,6 +37,8 @@ typedef struct sqlite3 sqlite3;
 
 typedef struct pdf_document pdf_document;
 
+typedef struct _File_Manager FileManager;
+
 typedef int gboolean;
 typedef char gchar;
 typedef int gint;
@@ -110,6 +112,7 @@ typedef struct _STMTS
     sqlite3_stmt* db_get_node_id_from_rel_path[1];
     sqlite3_stmt* db_check_id[1];
     sqlite3_stmt* db_update_path[2];
+    sqlite3_stmt* db_check_rel_path[2];
 } STMTS;
 
 typedef struct _Clipboard Clipboard;
@@ -138,7 +141,6 @@ typedef struct _Projekt
 
     GtkWidget* hpaned;
     //Baum - Modell, Ansicht mit Selection
-    GtkWidget* tree[3];
     GtkTreeView* treeview[3];
     GtkTreeSelection* selection[3];
     GtkCellRenderer* renderer_text[3];
@@ -159,9 +161,6 @@ typedef struct _Projekt
     sqlite3* db_store;
 
     Database* dbase;
-
-    //prepared statements
-  //  STMTS stmts;
 
     Menu menu;
     GtkWidget* fs_button;

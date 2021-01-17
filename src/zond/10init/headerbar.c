@@ -1278,32 +1278,21 @@ cb_button_mode_toggled( GtkToggleButton* button, gpointer data )
 {
     Projekt* zond = (Projekt*) data;
 
-    GtkWidget* left = NULL;
-    GtkWidget* right = NULL;
-
     if ( gtk_toggle_button_get_active( button ) )
     {
         gint rc = 0;
         gchar* errmsg = NULL;
 
-        //fs_tree und baum_inhalt anzeigen
-        //zwischenspeichern
-        left = g_object_ref( zond->tree[BAUM_INHALT] );
-        right = g_object_ref( zond->tree[BAUM_AUSWERTUNG] );
+        GtkWidget* baum_fs = NULL;
+        GtkWidget* baum_auswertung = NULL;
 
-        //leeren
-        gtk_container_remove( GTK_CONTAINER(zond->hpaned), gtk_paned_get_child1( GTK_PANED(zond->hpaned) ) );
-        gtk_container_remove( GTK_CONTAINER(zond->hpaned), gtk_paned_get_child2( GTK_PANED(zond->hpaned) ) );
+        baum_fs = gtk_paned_get_child1( GTK_PANED(zond->hpaned) );
+        gtk_widget_show_all( baum_fs );
 
-        //neu füllen
-        gtk_paned_add1( GTK_PANED(zond->hpaned), zond->tree[BAUM_FS] );
-        gtk_paned_add2( GTK_PANED(zond->hpaned), left );
+        baum_auswertung = gtk_paned_get_child2( GTK_PANED(gtk_paned_get_child2( GTK_PANED(zond->hpaned) )) );
+        gtk_widget_hide( baum_auswertung );
 
-        //Zwischenspeicher ändern
-        zond->tree[BAUM_INHALT] = left;
-        zond->tree[BAUM_AUSWERTUNG] = right;
-
-        rc = fm_load_dir( zond->treeview[BAUM_FS], NULL, &errmsg );
+        rc = fm_set_root( zond->treeview[BAUM_FS], zond->project_dir, &errmsg );
         if ( rc )
         {
             meldung( zond->app_window, "Fehler beim Laden Root-Verzeichnis -\n\n",
@@ -1315,23 +1304,17 @@ cb_button_mode_toggled( GtkToggleButton* button, gpointer data )
     {
         //baum_inhalt und baum_auswertung anzeigen
         //zwischenspeichern
-        left = g_object_ref( zond->tree[BAUM_FS] );
-        right = g_object_ref( zond->tree[BAUM_INHALT] );
-
         //leeren
-        gtk_container_remove( GTK_CONTAINER(zond->hpaned), gtk_paned_get_child1( GTK_PANED(zond->hpaned) ) );
-        gtk_container_remove( GTK_CONTAINER(zond->hpaned), gtk_paned_get_child2( GTK_PANED(zond->hpaned) ) );
+        GtkWidget* baum_fs = NULL;
+        GtkWidget* baum_auswertung = NULL;
 
-        //neu füllen
-        gtk_paned_add1( GTK_PANED(zond->hpaned), right );
-        gtk_paned_add2( GTK_PANED(zond->hpaned), zond->tree[BAUM_AUSWERTUNG]);
+        baum_fs = gtk_paned_get_child1( GTK_PANED(zond->hpaned) );
+        gtk_widget_hide( baum_fs );
 
-        //Zwischenspeicher ändern
-        zond->tree[BAUM_FS] = left;
-        zond->tree[BAUM_INHALT] = right;
+        baum_auswertung = gtk_paned_get_child2( GTK_PANED(gtk_paned_get_child2( GTK_PANED(zond->hpaned) )) );
+        gtk_widget_show_all( baum_auswertung );
 
-        gtk_tree_store_clear( GTK_TREE_STORE(gtk_tree_view_get_model(
-                zond->treeview[BAUM_FS] )) );
+        fm_unset_root( zond->treeview[BAUM_FS] );
     }
 
     return;

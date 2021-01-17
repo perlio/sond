@@ -166,9 +166,9 @@ init_app_window( Projekt* zond )
 
 /*
 **  oberer Teil der VBox  */
-    //zuerst links/rechts teilen
+    //zuerst HBox
     zond->hpaned = gtk_paned_new( GTK_ORIENTATION_HORIZONTAL );
-    gtk_paned_set_position( GTK_PANED(zond->hpaned), 350);
+    gtk_paned_set_position( GTK_PANED(zond->hpaned), 400 );
 
     //jetzt in oberen Teil der vbox einfügen
     gtk_box_pack_start( GTK_BOX(vbox), zond->hpaned, TRUE, TRUE, 0 );
@@ -178,30 +178,33 @@ init_app_window( Projekt* zond )
     treeviews_init_fs_tree( zond );
 
     //BAUM_FS
-    zond->tree[BAUM_FS] = gtk_scrolled_window_new( NULL, NULL );
-    gtk_container_add( GTK_CONTAINER(zond->tree[BAUM_FS]), GTK_WIDGET(zond->treeview[BAUM_FS]) );
-    gtk_widget_show_all( zond->tree[BAUM_FS] );
+    GtkWidget* swindow_baum_fs = gtk_scrolled_window_new( NULL, NULL );
+    gtk_container_add( GTK_CONTAINER(swindow_baum_fs), GTK_WIDGET(zond->treeview[BAUM_FS]) );
+    gtk_paned_add1( GTK_PANED(zond->hpaned), swindow_baum_fs );
+
+    GtkWidget* hpaned_inner = gtk_paned_new( GTK_ORIENTATION_HORIZONTAL );
+    gtk_paned_add2( GTK_PANED(zond->hpaned), hpaned_inner );
 
     //BAUM_INHALT
-    zond->tree[BAUM_INHALT] = gtk_scrolled_window_new( NULL, NULL );
-    gtk_container_add( GTK_CONTAINER(zond->tree[BAUM_INHALT]), GTK_WIDGET(zond->treeview[BAUM_INHALT]) );
+    GtkWidget* swindow_baum_inhalt = gtk_scrolled_window_new( NULL, NULL );
+    gtk_container_add( GTK_CONTAINER(swindow_baum_inhalt), GTK_WIDGET(zond->treeview[BAUM_INHALT]) );
 
     //BAUM_AUSWERTUNG
     //VPaned erzeugen
-    zond->tree[BAUM_AUSWERTUNG] = gtk_paned_new( GTK_ORIENTATION_VERTICAL );
-    gtk_paned_set_position( GTK_PANED(zond->tree[BAUM_AUSWERTUNG]), 500);
+    GtkWidget* paned_baum_auswertung = gtk_paned_new( GTK_ORIENTATION_VERTICAL );
+    gtk_paned_set_position( GTK_PANED(paned_baum_auswertung), 500);
 
     GtkWidget* swindow_treeview_auswertung = gtk_scrolled_window_new( NULL, NULL );
     gtk_container_add( GTK_CONTAINER(swindow_treeview_auswertung), GTK_WIDGET(zond->treeview[BAUM_AUSWERTUNG]) );
 
-    gtk_paned_pack1( GTK_PANED(zond->tree[BAUM_AUSWERTUNG]), swindow_treeview_auswertung, TRUE, TRUE);
+    gtk_paned_pack1( GTK_PANED(paned_baum_auswertung), swindow_treeview_auswertung, TRUE, TRUE);
 
     //in die untere Hälfte des vpaned kommt text_view in swindow
     //Scrolled Window zum Anzeigen erstellen
     GtkWidget* swindow_textview = gtk_scrolled_window_new( NULL, NULL );
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(swindow_textview),
             GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
-    gtk_paned_pack2( GTK_PANED(zond->tree[BAUM_AUSWERTUNG]), swindow_textview, TRUE, TRUE );
+    gtk_paned_pack2( GTK_PANED(paned_baum_auswertung), swindow_textview, TRUE, TRUE );
 
     //text_view erzeugen
     zond->textview = GTK_TEXT_VIEW(gtk_text_view_new( ));
@@ -214,8 +217,8 @@ init_app_window( Projekt* zond )
             GTK_WIDGET(zond->textview) );
 
     //Zum Start: links BAUM_INHALT, rechts BAUM_AUSWERTUNG
-    gtk_paned_add1( GTK_PANED(zond->hpaned), zond->tree[BAUM_INHALT] );
-    gtk_paned_add2( GTK_PANED(zond->hpaned), zond->tree[BAUM_AUSWERTUNG] );
+    gtk_paned_pack1( GTK_PANED(hpaned_inner), swindow_baum_inhalt, TRUE, TRUE );
+    gtk_paned_pack2( GTK_PANED(hpaned_inner), paned_baum_auswertung, TRUE, TRUE );
 
     //Hört die Signale
     g_signal_connect( zond->textview, "focus-in-event",

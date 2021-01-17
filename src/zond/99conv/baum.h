@@ -7,6 +7,7 @@ typedef struct _GtkTreeIter GtkTreeIter;
 typedef struct _GtkTreeView GtkTreeView;
 typedef struct _Projekt Projekt;
 typedef struct _GtkTreePath GtkTreePath;
+typedef struct _GtkTreeModel GtkTreeModel;
 
 typedef int gboolean;
 typedef int gint;
@@ -30,6 +31,8 @@ void baum_setzen_cursor( Projekt*, Baum, GtkTreeIter* );
 void expand_row( Projekt*, Baum, GtkTreeIter* );
 
 void expand_to_row( Projekt*, Baum, GtkTreeIter* );
+
+gint baum_get_node_id( GtkTreeModel*, GtkTreeIter* );
 
 gint baum_abfragen_node_id( GtkTreeView*, GtkTreePath*, gchar** );
 

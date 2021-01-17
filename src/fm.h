@@ -6,24 +6,23 @@ typedef struct _GtkWidget GtkWidget;
 typedef struct _GtkTreeView GtkTreeView;
 typedef struct _GtkTreeIter GtkTreeIter;
 typedef struct _GtkCellRenderer GtkCellRenderer;
+typedef struct _GPtrArray GPtrArray;
+
+typedef struct sqlite3 sqlite3;
+typedef struct sqlite3_stmt sqlite3_stmt;
 
 typedef void* gpointer;
 typedef int gboolean;
 typedef char gchar;
+typedef int gint;
 
-typedef struct _S_FM_Change_Path
+typedef struct _Modify_File
 {
-    gint (* before) ( const GFile*, const GFile*, gpointer, gchar** );
-    gint (* after) ( const gint, gpointer, gchar** );
+    gint (* before_move) ( const GFile*, const GFile*, gpointer, gchar** );
+    gint (* after_move) ( const gint, gpointer, gchar** );
+    gint (* test) ( const GFile*, gpointer, gchar** );
     gpointer data;
-} SFMChangePath;
-
-typedef struct _S_FM_Remove
-{
-    gint (* fm_test) ( GFile*, gpointer, gchar** );
-    gpointer data;
-} SFMRemove;
-
+} ModifyFile;
 
 
 gchar* fm_get_full_path( GtkTreeView*, GtkTreeIter* );
@@ -32,18 +31,14 @@ gchar* fm_get_rel_path( GtkTreeView*, GtkTreeIter* );
 
 gint fm_create_dir( GtkTreeView*, gboolean, gchar** );
 
-void cb_fm_row_text_edited( GtkCellRenderer*, gchar*, gchar*, gpointer );
-
-gint fm_datei_oeffnen( const gchar*, gchar** );
-
-gint fm_paste_selection( GtkTreeView*, GPtrArray*, gboolean, gboolean, gpointer,
-        gchar** );
+gint fm_paste_selection( GtkTreeView*, GPtrArray*, gboolean, gboolean, gchar** );
 
 gint fm_foreach_loeschen( GtkTreeView*, GtkTreeIter*, gpointer, gchar** );
 
-gint fm_load_dir( GtkTreeView*, GtkTreeIter*, gchar** );
+GtkTreeView* fm_create_tree_view( void );
 
-GtkTreeView* fm_create_tree_view( GtkWidget*, SFMChangePath* );
+void fm_unset_root( GtkTreeView* );
 
+gint fm_set_root( GtkTreeView*, const gchar*, gchar** );
 
 #endif // FM_H_INCLUDED

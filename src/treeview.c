@@ -83,7 +83,7 @@ treeview_set_cursor( GtkTreeView* tree_view, GtkTreeIter* iter )
 
 
 void
-treeview_zelle_ausgrauen( GtkTreeView* tree_view, GtkTreePath* path,
+treeview_zelle_ausgrauen( GtkTreeView* tree_view, GtkTreeIter* iter,
         GtkCellRenderer* renderer, Clipboard* clipboard )
 {
     if ( !clipboard ) return;
@@ -91,7 +91,10 @@ treeview_zelle_ausgrauen( GtkTreeView* tree_view, GtkTreePath* path,
     if ( clipboard->tree_view == tree_view && clipboard->ausschneiden )
     {
         gboolean enthalten = FALSE;
+        GtkTreePath* path = NULL;
         GtkTreePath* path_sel = NULL;
+
+        path = gtk_tree_model_get_path( gtk_tree_view_get_model( tree_view ), iter );
         for ( gint i = 0; i < clipboard->arr_ref->len; i++ )
         {
             path_sel = gtk_tree_row_reference_get_path( g_ptr_array_index( clipboard->arr_ref, i ) );
@@ -99,6 +102,7 @@ treeview_zelle_ausgrauen( GtkTreeView* tree_view, GtkTreePath* path,
             gtk_tree_path_free( path_sel );
             if ( enthalten ) break;
         }
+        gtk_tree_path_free( path );
 
         if ( enthalten ) g_object_set( G_OBJECT(renderer), "sensitive", FALSE,
                 NULL );
@@ -111,17 +115,21 @@ treeview_zelle_ausgrauen( GtkTreeView* tree_view, GtkTreePath* path,
 
 
 void
-treeview_underline_cursor( GtkTreeView* tree_view, GtkTreePath* path,
-        GtkCellRenderer* renderer )
+treeview_underline_cursor( GtkTreeViewColumn* column, GtkCellRenderer* renderer,
+        GtkTreeIter* iter )
 {
     GtkTreePath* path_cursor = NULL;
-    gtk_tree_view_get_cursor( tree_view, &path_cursor, NULL );
+    gtk_tree_view_get_cursor( GTK_TREE_VIEW(gtk_tree_view_column_get_tree_view( column )),
+            &path_cursor, NULL );
 
     if ( path_cursor )
     {
+        GtkTreePath* path = gtk_tree_model_get_path( gtk_tree_view_get_model(
+                GTK_TREE_VIEW(gtk_tree_view_column_get_tree_view( column )) ), iter );
         if ( !gtk_tree_path_compare( path, path_cursor ) ) g_object_set(
                 G_OBJECT(renderer), "underline-set", TRUE, NULL );
         else g_object_set( G_OBJECT(renderer), "underline-set", FALSE, NULL );
+        gtk_tree_path_free( path );
     }
     else g_object_set( G_OBJECT(renderer), "underline-set", FALSE, NULL );
 

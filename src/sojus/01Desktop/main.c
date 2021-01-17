@@ -342,8 +342,6 @@ startup_app( GtkApplication* app, gpointer data )
     gchar* dokument_dir = g_settings_get_string( (*sojus)->settings, "dokument-dir" );
     g_object_set_data( G_OBJECT((*sojus)->widgets.AppWindow.AktenSchnellansicht.treeview_fm), "root", dokument_dir );
 
-    fm_load_dir( GTK_TREE_VIEW((*sojus)->widgets.AppWindow.AktenSchnellansicht.treeview_fm), NULL, NULL );
-
     return;
 }
 

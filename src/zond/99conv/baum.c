@@ -147,6 +147,17 @@ expand_to_row( Projekt* zond, Baum baum, GtkTreeIter* iter )
 
 
 gint
+baum_get_node_id( GtkTreeModel* model, GtkTreeIter* iter )
+{
+    gint node_id = 0;
+
+    gtk_tree_model_get( model, iter, 2, &node_id, -1 );
+
+    return node_id;
+}
+
+
+gint
 baum_abfragen_node_id( GtkTreeView* treeview, GtkTreePath* path, gchar** errmsg )
 {
     gint node_id = 0;

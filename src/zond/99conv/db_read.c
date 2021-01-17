@@ -398,3 +398,34 @@ db_check_id( Projekt* zond, const gchar* id, gchar** errmsg )
 }
 
 
+/*  Gibt 0 zurück, wenn rel_path in db und db_store nicht vorhanden
+**  Bei Fehler: -1  */
+gint
+db_check_rel_path( Projekt* zond, const gchar* rel_path, gchar** errmsg )
+{
+    gint rc = 0;
+    gint ret = 0;
+
+    sqlite3_reset( zond->dbase->stmts.db_check_rel_path[0] );
+    sqlite3_reset( zond->dbase->stmts.db_check_rel_path[1] );
+
+    rc = sqlite3_bind_text( zond->dbase->stmts.db_check_rel_path[0], 1, rel_path, -1, NULL );
+    if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_bind_text (rel_path)" )
+
+    rc = sqlite3_step( zond->dbase->stmts.db_check_rel_path[0] );
+    if ( (rc != SQLITE_ROW) && rc != SQLITE_DONE ) ERROR_SQL( "sqlite3_step" )
+
+    if ( rc == SQLITE_ROW ) ret +=1;
+
+    rc = sqlite3_bind_text( zond->dbase->stmts.db_check_rel_path[1], 1, rel_path, -1, NULL );
+    if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_bind_text (rel_path)" )
+
+    rc = sqlite3_step( zond->dbase->stmts.db_check_rel_path[1] );
+    if ( (rc != SQLITE_ROW) && rc != SQLITE_DONE ) ERROR_SQL( "sqlite3_step" )
+
+    if ( rc == SQLITE_ROW ) ret +=2;
+
+    return ret;
+}
+
+

@@ -350,6 +350,26 @@ get_rel_path_from_file( Projekt* zond, const GFile* file )
 
 
 gint
+test_rel_path( const GFile* file, gpointer data, gchar** errmsg )
+{
+    gint rc = 0;
+    gchar* rel_path = NULL;
+
+    Projekt* zond = (Projekt*) data;
+
+    rel_path = get_rel_path_from_file( zond, file );
+
+    rc = db_check_rel_path( zond, rel_path, errmsg );
+    g_free( rel_path );
+
+    if ( rc == -1 ) ERROR_PAO( "db_get_node_id_from_rel_path" )
+    else if ( rc > 0 ) return 1;
+
+    return 0;
+}
+
+
+gint
 update_db_before_path_change( const GFile* file_source, const GFile* file_dest,
         gpointer data, gchar** errmsg )
 {

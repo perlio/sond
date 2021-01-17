@@ -105,6 +105,8 @@ project_db_destroy_stmts( Database* dbase )
     sqlite3_finalize( dbase->stmts.db_check_id[0] );
     sqlite3_finalize( dbase->stmts.db_update_path[0] );
     sqlite3_finalize( dbase->stmts.db_update_path[1] );
+    sqlite3_finalize( dbase->stmts.db_check_rel_path[0] );
+    sqlite3_finalize( dbase->stmts.db_check_rel_path[1] );
 
     return;
 }
@@ -644,6 +646,19 @@ project_db_create_stmts( Database* dbase, gchar** errmsg )
     if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_prepare_v2 "
                 "(db_update_path[1])" )
 
+/*  db_check_rel_path  */
+    rc = sqlite3_prepare_v2( dbase->db,
+            "SELECT node_id FROM dateien WHERE rel_path=?1;",
+            -1, &(dbase->stmts.db_check_rel_path[0]), NULL );
+    if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_prepare_v2 "
+                "(db_check_rel_path[0])" )
+
+    rc = sqlite3_prepare_v2( dbase->db_store,
+            "SELECT node_id FROM dateien WHERE rel_path=?1;",
+            -1, &(dbase->stmts.db_check_rel_path[1]), NULL );
+    if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_prepare_v2 "
+                "(db_check_rel_path[1])" )
+
     return 0;
 }
 
@@ -676,7 +691,6 @@ project_db_backup( sqlite3* db_orig, sqlite3* db_dest, gchar** errmsg )
 
         return -1;
     }
-
 
     return 0;
 }

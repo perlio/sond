@@ -24,6 +24,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../error.h"
 
 #include "../../misc.h"
+#include "../../fm.h"
 
 #include "../99conv/general.h"
 #include "../99conv/db_zu_baum.h"
@@ -169,8 +170,7 @@ void projekt_schliessen( Projekt* zond )
             zond->treeview_focus_in_signal[BAUM_AUSWERTUNG] );
 
     //muß vor project_destroy..., weil callback ausgelöst wird, der db_get_node_id... aufruft
-    gtk_tree_store_clear( GTK_TREE_STORE(gtk_tree_view_get_model(
-            zond->treeview[BAUM_FS] )) );
+    fm_unset_root( zond->treeview[BAUM_FS] );
 
     //prepared statements zerstören
     rc = project_db_finish_database( zond->dbase, &errmsg );

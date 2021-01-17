@@ -225,7 +225,7 @@ init( GtkApplication* app )
     DisableDebug( );
 
     gtk_widget_show_all( zond->app_window );
-//    while ( gtk_events_pending( ) ) gtk_main_iteration( );
+    gtk_widget_hide( gtk_paned_get_child1( GTK_PANED(zond->hpaned) ) );
 
     zond->ctx = mupdf_init( );
     if ( !zond->ctx )

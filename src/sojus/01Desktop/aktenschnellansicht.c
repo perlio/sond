@@ -100,7 +100,7 @@ aktenschnellansicht_create_window( Sojus* sojus )
             "clicked", G_CALLBACK(cb_bu_doc_erzeugen), sojus );
 
     sojus->widgets.AppWindow.AktenSchnellansicht.treeview_fm =
-            GTK_WIDGET(fm_create_tree_view( sojus->app_window, G_CALLBACK(cb_fm_row_text_edited) ));
+            GTK_WIDGET(fm_create_tree_view( ));
     gtk_container_add( GTK_CONTAINER(swindow),
             sojus->widgets.AppWindow.AktenSchnellansicht.treeview_fm );
 

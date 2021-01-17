@@ -232,8 +232,7 @@ treeviews_cb_cell_edited( GtkCellRenderer* cell, gchar* path_string, gchar* new_
     gtk_tree_model_get_iter_from_string( model, &iter, path_string );
 
     //node_id holen, node_text in db ändern
-    gint node_id = 0;
-    gtk_tree_model_get( model, &iter, 2, &node_id, -1 );
+    gint node_id = baum_get_node_id( model, &iter );
 
     rc = db_set_node_text( zond, baum, node_id, new_text, &errmsg );
     if ( rc )
@@ -274,8 +273,9 @@ cb_show_popupmenu( GtkTreeView* treeview, GdkEventButton* event,
 }
 */
 
+
 void
-treeviews_cell_data_function( GtkTreeViewColumn* column, GtkCellRenderer* renderer,
+treeviews_render_node_text( GtkTreeViewColumn* column, GtkCellRenderer* renderer,
         GtkTreeModel* treemodel, GtkTreeIter* iter, gpointer user_data )
 {
     gint rc = 0;
@@ -287,61 +287,29 @@ treeviews_cell_data_function( GtkTreeViewColumn* column, GtkCellRenderer* render
     tree_view = g_object_get_data( G_OBJECT(renderer), "tree-view" );
     Baum baum = baum_get_baum_from_treeview( zond, GTK_WIDGET(tree_view) );
 
-    //underline wenn Reihe cursor hat
-    GtkTreePath* path = gtk_tree_model_get_path( treemodel, iter );
-
-    treeview_underline_cursor( tree_view, path, renderer );
-
-    treeview_zelle_ausgrauen( tree_view, path, renderer, zond->clipboard );
+    treeview_underline_cursor( column, renderer, iter );
+    treeview_zelle_ausgrauen( tree_view, iter, renderer, zond->clipboard );
 
     if ( baum == BAUM_AUSWERTUNG )
     {
-        //Hintergrund icon rot wenn Text in textview
         gchar* text = NULL;
-        gint node_id = 0;
 
-        node_id = baum_abfragen_node_id( zond->treeview[BAUM_AUSWERTUNG], path, &errmsg );
-        if ( node_id == -1 )
+        //Hintergrund icon rot wenn Text in textview
+        gint node_id = baum_get_node_id( gtk_tree_view_get_model( tree_view ), iter );
+
+        rc = db_get_text( zond, node_id, &text, &errmsg );
+        if ( rc )
         {
-            meldung( zond->app_window, "Fehler in cb_cursor_changed\n\n"
-                    "Bei Aufruf baum_abfragen_node_id:\n", errmsg, NULL );
+            meldung( zond->app_window, "Warnung -\n\nBei Aufruf db_get_text:\n",
+                    errmsg, NULL );
             g_free( errmsg );
         }
-        else
-        {
-            rc = db_get_text( zond, node_id, &text, &errmsg );
-            if ( rc )
-            {
-                meldung( zond->app_window, "Warnung -\n\nBei Aufruf db_get_text:\n",
-                        errmsg, NULL );
-                g_free( errmsg );
-            }
-            else if ( !text || !g_strcmp0( text, "" ) ) g_object_set( G_OBJECT(renderer),
-                    "background-set", FALSE, NULL );
-            else g_object_set( G_OBJECT(renderer), "background-set", TRUE, NULL );
+        else if ( !text || !g_strcmp0( text, "" ) ) g_object_set( G_OBJECT(renderer),
+                "background-set", FALSE, NULL );
+        else g_object_set( G_OBJECT(renderer), "background-set", TRUE, NULL );
 
-            g_free( text );
-        }
+        g_free( text );
     }
-    else if ( baum == BAUM_FS ) //wenn angebunden, Hintergrund
-    {
-        const gchar* rel_path = fm_get_rel_path( zond->treeview[BAUM_FS], iter );
-        if ( rel_path )
-        {
-            rc = db_get_node_id_from_rel_path( zond, rel_path, &errmsg );
-            if ( rc == -1 )
-            {
-                meldung( zond->app_window, "Warnung -\n\nBei Aufruf db_get_node_"
-                        "id_from_rel_path:\n", errmsg, NULL );
-                g_free( errmsg );
-            }
-            else if ( rc == 0 ) g_object_set( G_OBJECT(renderer),
-                    "background-set", FALSE, NULL );
-            else g_object_set( G_OBJECT(renderer), "background-set", TRUE, NULL );
-        }
-    }
-
-    gtk_tree_path_free( path );
 
     return;
 }
@@ -393,7 +361,7 @@ init_treeviews( Projekt* zond )
         gtk_tree_view_column_set_sizing(column, GTK_TREE_VIEW_COLUMN_FIXED);
 
         gtk_tree_view_column_set_cell_data_func( column, zond->renderer_text[baum],
-                (GtkTreeCellDataFunc) treeviews_cell_data_function, (gpointer) zond,
+                (GtkTreeCellDataFunc) treeviews_render_node_text, (gpointer) zond,
                 NULL );
 
         gtk_tree_view_column_pack_start( column, renderer_pixbuf, FALSE );
@@ -460,13 +428,14 @@ treeviews_init_fs_tree( Projekt* zond )
 {
     GtkCellRenderer* cell = NULL;
 
-    static SFMChangePath s_fm_change_path = { update_db_before_path_change,
-            update_db_after_path_change, NULL };
+    static ModifyFile modify_file = { update_db_before_path_change,
+            update_db_after_path_change, test_rel_path, NULL };
 
-    s_fm_change_path.data = (gpointer) zond;
+    modify_file.data = (gpointer) zond;
 
-    zond->treeview[BAUM_FS] = fm_create_tree_view( zond->app_window, &s_fm_change_path );
-
+    zond->treeview[BAUM_FS] = fm_create_tree_view( );
+    g_object_set_data( G_OBJECT(zond->treeview[BAUM_FS]), "modify-file", &modify_file );
+    g_object_set_data( G_OBJECT(zond->treeview[BAUM_FS]), "clipboard", zond->clipboard );
     //die Selection
     zond->selection[BAUM_FS] = gtk_tree_view_get_selection(
             zond->treeview[BAUM_FS] );
@@ -481,11 +450,7 @@ treeviews_init_fs_tree( Projekt* zond )
     gdkrgba.green = 0.95;
 
     g_object_set( cell, "background-rgba", &gdkrgba, NULL );
-/*
-    gtk_tree_view_column_set_cell_data_func( gtk_tree_view_get_column(
-            zond->treeview[BAUM_FS], 0 ), cell, treeviews_cell_data_function,
-            zond, NULL );
-*/
+
     //focus-in
     zond->treeview_focus_in_signal[BAUM_FS] = g_signal_connect( zond->treeview[BAUM_FS],
             "focus-in-event", G_CALLBACK(cb_focus_in), (gpointer) zond );
