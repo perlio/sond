@@ -44,8 +44,8 @@ cb_fm_entry( GtkEntry* entry, gpointer data )
     g_free( path );
     if ( rc )
     {
-        display_message( sojus->app_window, "Fehler -\n\nBei Aufruf fm_set_root:\n",
-                errmsg, NULL );
+        display_message( gtk_widget_get_toplevel( GTK_WIDGET(fm) ),
+                "Fehler -\n\nBei Aufruf fm_set_root:\n", errmsg, NULL );
         g_free( errmsg );
     }
 
@@ -84,6 +84,8 @@ file_manager_create( GtkWidget* button, gpointer data )
     g_signal_connect( entry, "activate", G_CALLBACK(cb_fm_entry), fm_treeview );
 
     gtk_widget_show_all( fm_window );
+
+    gtk_widget_grab_focus( entry );
 
     return;
 }

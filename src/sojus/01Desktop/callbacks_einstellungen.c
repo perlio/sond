@@ -9,33 +9,6 @@
 
 
 void
-cb_button_db_erstellen_clicked( GtkButton* button, gpointer user_data )
-{
-//    db_create( (Sojus*) user_data );
-
-    return;
-}
-
-
-void
-cb_button_db_waehlen_clicked( GtkButton* button, gpointer user_data )
-{
- //   db_select( (Sojus*) user_data );
-
-    return;
-}
-
-
-void
-cb_button_db_con_clicked( GtkButton* button, gpointer user_data )
-{
-//    db_connection_window( (Sojus*) user_data );
-
-    return;
-}
-
-
-void
 cb_button_sachbearbeiterverwaltung( GtkButton* button, gpointer user_data )
 {
     sachbearbeiterfenster_oeffnen( (Sojus*) user_data );

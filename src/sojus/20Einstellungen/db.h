@@ -1,21 +1,14 @@
 #ifndef DB_H_INCLUDED
 #define DB_H_INCLUDED
 
-typedef struct st_mysql MYSQL;
 typedef struct _GtkWidget GtkWidget;
-typedef char gchar;
+typedef struct st_mysql MYSQL;
 typedef int gint;
 typedef struct _Sojus Sojus;
 
 
-gint db_get_connection( Sojus* );
+gint db_connect_database( Sojus*, GtkWidget*, MYSQL* );
 
-gint db_active( GtkWidget*, const gchar*, gchar** );
-
-void db_select( Sojus* );
-
-void db_create( Sojus* );
-
-gint db_connect_database( Sojus*, gboolean );
+gint db_get_connection( Sojus*, GtkWidget* );
 
 #endif // DB_H_INCLUDED

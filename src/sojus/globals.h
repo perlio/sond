@@ -44,4 +44,3 @@
 
 #include "20Einstellungen/db.h"
 #include "20Einstellungen/sachbearbeiterverwaltung.h"
-#include "20Einstellungen/widgets_einstellungen.h"

@@ -53,7 +53,7 @@ init_db ( Sojus* sojus )
 {
     gint rc = 0;
 
-    rc = db_get_connection( sojus );
+    rc = db_get_connection( sojus, sojus->app_window );
     if ( rc )
     {
         gboolean ret = FALSE;
@@ -142,6 +142,7 @@ init_app_window( GtkApplication* app, Sojus* sojus )
     //Akten
     GtkWidget* bu_akte_fenster = gtk_button_new_with_mnemonic( "_Aktenfenster" );
     GtkWidget* bu_akte_suchen = gtk_button_new_with_mnemonic( "Akte _suchen" );
+    GtkWidget* bu_dokumente = gtk_button_new_with_mnemonic( "_Dokumente" );
 
     //Adressen
     GtkWidget* bu_adresse_fenster = gtk_button_new_with_mnemonic( "A_dressenfenster" );
@@ -160,22 +161,17 @@ init_app_window( GtkApplication* app, Sojus* sojus )
 **  in grid einfügen  */
     gtk_grid_attach( GTK_GRID(grid), bu_akte_fenster, 0, 1, 1, 1 );
     gtk_grid_attach( GTK_GRID(grid), bu_akte_suchen, 0, 2, 1, 1 );
+    gtk_grid_attach( GTK_GRID(grid), bu_dokumente, 0, 3, 1, 1 );
 
-    gtk_grid_attach( GTK_GRID(grid), bu_adresse_fenster, 0, 3, 1, 1 );
-    gtk_grid_attach( GTK_GRID(grid), bu_adresse_suchen, 0, 4, 1, 1 );
+    gtk_grid_attach( GTK_GRID(grid), bu_adresse_fenster, 0, 4, 1, 1 );
+    gtk_grid_attach( GTK_GRID(grid), bu_adresse_suchen, 0, 5, 1, 1 );
 
-    gtk_grid_attach( GTK_GRID(grid), bu_kalender, 0, 5, 1, 1 );
-    gtk_grid_attach( GTK_GRID(grid), bu_termine_zur_akte, 0, 6, 1, 1 );
-    gtk_grid_attach( GTK_GRID(grid), bu_fristen, 0, 7, 1, 1 );
-    gtk_grid_attach( GTK_GRID(grid), bu_wiedervorlagen, 0, 8, 1, 1 );
+    gtk_grid_attach( GTK_GRID(grid), bu_kalender, 0, 6, 1, 1 );
+    gtk_grid_attach( GTK_GRID(grid), bu_termine_zur_akte, 0, 7, 1, 1 );
+    gtk_grid_attach( GTK_GRID(grid), bu_fristen, 0, 8, 1, 1 );
+    gtk_grid_attach( GTK_GRID(grid), bu_wiedervorlagen, 0, 9, 1, 1 );
 
-    gtk_grid_attach( GTK_GRID(grid), bu_einstellungen, 0, 9, 1, 1 );
-
-    //Akten-Schnellübersicht
-    GtkWidget* frame_akte = gtk_frame_new( "Aktenschnellansicht" );
-    gtk_grid_attach( GTK_GRID(grid), frame_akte, 1, 1, 3, 13 );
-
-    gtk_container_add( GTK_CONTAINER(frame_akte), aktenschnellansicht_create_window( sojus ) );
+    gtk_grid_attach( GTK_GRID(grid), bu_einstellungen, 0, 10, 1, 1 );
 
 /*
 **  window mit widgets und sojus vollstopfen  */
@@ -206,6 +202,8 @@ init_app_window( GtkApplication* app, Sojus* sojus )
             G_CALLBACK(cb_button_aktenfenster_clicked), sojus );
     g_signal_connect( bu_akte_suchen, "clicked",
             G_CALLBACK(cb_button_akte_suchen_clicked), sojus );
+    g_signal_connect( bu_dokumente, "clicked",
+            G_CALLBACK(file_manager_create), sojus );
 
     g_signal_connect( bu_adresse_fenster, "clicked",
             G_CALLBACK(cb_button_adresse_fenster_clicked), sojus );
@@ -257,9 +255,6 @@ startup_app( GtkApplication* app, gpointer data )
     init_app_window( app, *sojus );
     init_socket( *sojus );
     init_db( *sojus );
-
-    gchar* dokument_dir = g_settings_get_string( (*sojus)->settings, "dokument-dir" );
-    g_object_set_data( G_OBJECT((*sojus)->widgets.AppWindow.AktenSchnellansicht.treeview_fm), "root", dokument_dir );
 
     return;
 }

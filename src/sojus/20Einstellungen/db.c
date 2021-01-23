@@ -324,7 +324,8 @@ db_create( Sojus* sojus, MYSQL* con, gchar* db_name, gchar** errmsg )
             "ENGINE=InnoDB;";
 
     rc = mysql_query( con, sql );
-    if ( rc  )
+
+    if ( rc )
     {
         gint ret = 0;
         if ( errmsg ) *errmsg = g_strconcat( "Bei Einrichtung db:\n",
@@ -333,10 +334,37 @@ db_create( Sojus* sojus, MYSQL* con, gchar* db_name, gchar** errmsg )
         ret = mysql_query( con, sql );
         g_free( sql );
         if ( ret && errmsg ) add_string( *errmsg, g_strconcat( "\n\nFehler "
-                "bei Löschen der Database:\n", db_name, "`:\n",
+                "bei Löschen der Database ", db_name, ":\n",
                 mysql_error( con ), NULL ) );
-        else if ( errmsg ) add_string( *errmsg, g_strconcat( "Database ",
-                mysql_error( con ), " wurde gelöscht", NULL ) );
+        else if ( errmsg ) add_string( *errmsg, g_strconcat( "Database ", db_name,
+                " wurde gelöscht", NULL ) );
+
+        return -1;
+    }
+
+    gint status = 0;
+
+    do
+    {
+        rc = mysql_affected_rows( con );
+        if ( rc < 0 ) break;
+        /* more results? -1 = no, >0 = error, 0 = yes (keep looping) */
+        status = mysql_next_result( con );
+    } while (status == 0);
+
+    if ( rc || (status > 0) )
+    {
+        gint ret = 0;
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Einrichtung db:\n",
+                mysql_error( con ), NULL );
+        sql = g_strdup_printf( "DROP DATABASE `%s`", db_name );
+        ret = mysql_query( con, sql );
+        g_free( sql );
+        if ( ret && errmsg ) add_string( *errmsg, g_strconcat( "\n\nFehler "
+                "bei Löschen der Database ", db_name, ":\n",
+                mysql_error( con ), NULL ) );
+        else if ( errmsg ) add_string( *errmsg, g_strconcat( "Database ", db_name,
+                " wurde gelöscht", NULL ) );
 
         return -1;
     }
@@ -346,7 +374,7 @@ db_create( Sojus* sojus, MYSQL* con, gchar* db_name, gchar** errmsg )
 
 
 gint
-db_connect_database( Sojus* sojus, MYSQL* con )
+db_connect_database( Sojus* sojus, GtkWidget* window, MYSQL* con )
 {
     gint rc = 0;
     gchar* errmsg = NULL;
@@ -372,14 +400,11 @@ db_connect_database( Sojus* sojus, MYSQL* con )
             gint rc = 0;
 
             if ( g_strcmp0( mysql_error( con ), "" ) )
-            {
-                display_message( sojus->app_window, "Datenbank konnte nicht "
-                        "verbunden werden -\n\nBei Aufruf db_select_database:\n",
-                        mysql_error( con ), NULL );
-                g_free( errmsg );
-            }
+                    display_message( window, "Datenbank konnte nicht "
+                    "verbunden werden -\n\nBei Aufruf db_select_database:\n",
+                    mysql_error( con ), NULL );
 
-            rc = dialog_with_buttons( sojus->app_window, "Datenbank auswählen",
+            rc = dialog_with_buttons( window, "Datenbank auswählen",
                     "", &db_name, "Bestehende Datenbank", 1, "Datenbank erzeugen", 2,
                     "Abbrechen", GTK_RESPONSE_CANCEL, NULL );
             if ( rc == 1 ) continue;
@@ -390,12 +415,12 @@ db_connect_database( Sojus* sojus, MYSQL* con )
                 ret = db_create( sojus, con, db_name, &errmsg );
                 if ( ret == -1 )
                 {
-                    display_message( sojus->app_window, "Datenbank """, db_name,
+                    display_message( window, "Datenbank """, db_name,
                             """ konnte nicht erzeugt werden -\nBei Aufruf "
                             "db_create:\n", errmsg, NULL );
                     g_free( errmsg );
                 }
-                else if ( ret == 1 ) display_message( sojus->app_window, "Datenbank """, db_name,
+                else if ( ret == 1 ) display_message( window, "Datenbank """, db_name,
                             """ existiert bereits", NULL );
                 else if ( ret == 0 ) break;
             }
@@ -409,7 +434,7 @@ db_connect_database( Sojus* sojus, MYSQL* con )
     rc = db_activate( sojus, con, db_name, &errmsg );
     if ( rc )
     {
-        display_message( sojus->app_window, "Fehler beim Aktivieren der Datenbank -\n\n"
+        display_message( window, "Fehler beim Aktivieren der Datenbank -\n\n"
                 "Bei Aufruf db_activate:\n", errmsg, NULL );
         g_free( errmsg );
 
@@ -418,6 +443,8 @@ db_connect_database( Sojus* sojus, MYSQL* con )
         return -1;
     }
 
+    g_settings_set_string( sojus->settings, "dbname", db_name );
+
     g_free( db_name );
 
     return 0;
@@ -425,10 +452,10 @@ db_connect_database( Sojus* sojus, MYSQL* con )
 
 
 static gint
-db_get_con_params( Sojus* sojus, gchar** host, gint* port, gchar** user, gchar** password )
+db_get_con_params( GtkWidget* window, gchar** host, gint* port, gchar** user, gchar** password )
 {
     GtkWidget* dialog = gtk_dialog_new_with_buttons( "Verbindung zu SQL-Server",
-            GTK_WINDOW(sojus->app_window), GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
+            GTK_WINDOW(window), GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
             "Ok", GTK_RESPONSE_OK, "Abbrechen", GTK_RESPONSE_CANCEL, NULL );
 
     GtkWidget* content = gtk_dialog_get_content_area( GTK_DIALOG(dialog) );
@@ -498,7 +525,7 @@ db_get_con_params( Sojus* sojus, gchar** host, gint* port, gchar** user, gchar**
 
 
 static MYSQL*
-db_connect( GtkWidget* window, const gchar* host, const gchar* user, const gchar*
+db_connect( const gchar* host, const gchar* user, const gchar*
         password, gint port, gchar** errmsg )
 {
     MYSQL* con = mysql_init( NULL );
@@ -517,7 +544,7 @@ db_connect( GtkWidget* window, const gchar* host, const gchar* user, const gchar
 
 
 gint
-db_get_connection( Sojus* sojus )
+db_get_connection( Sojus* sojus, GtkWidget* window )
 {
     MYSQL* con = NULL;
     gchar* errmsg = NULL;
@@ -536,7 +563,7 @@ db_get_connection( Sojus* sojus )
 
     do
     {
-        if ( try_settings ) con = db_connect( sojus->app_window, host, user, password, port, &errmsg );
+        if ( try_settings ) con = db_connect( host, user, password, port, &errmsg );
 
         //Wenn Verbindung nicht hergestellt werden konnte
         if ( !con )
@@ -544,7 +571,7 @@ db_get_connection( Sojus* sojus )
             gint rc = 0;
 
             if ( !try_settings ) rc = 2;
-            else rc = dialog_with_buttons( sojus->app_window, "Verbindung zu SQL-Server "
+            else rc = dialog_with_buttons( window, "Verbindung zu SQL-Server "
                     "konnte nicht hergestellt werden", errmsg, NULL,
                     "Erneut versuchen", 1, "Andere Verbindung", 2, "Abbrechen",
                     GTK_RESPONSE_CANCEL, NULL );
@@ -556,7 +583,7 @@ db_get_connection( Sojus* sojus )
             if ( rc == 1 ) continue;
             else if ( rc == 2 )
             {
-                rc = db_get_con_params( sojus, &host, &port, &user, &password );
+                rc = db_get_con_params( window, &host, &port, &user, &password );
                 if ( rc == GTK_RESPONSE_OK ) continue;
             }
 
@@ -569,7 +596,7 @@ db_get_connection( Sojus* sojus )
     {
         gint rc = 0;
 
-        rc = db_connect_database( sojus, con );
+        rc = db_connect_database( sojus, window, con );
         if ( rc == 0 )
         {
             g_settings_set_string( sojus->settings, "host", host );

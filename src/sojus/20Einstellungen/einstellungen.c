@@ -5,6 +5,28 @@
 #include "db.h"
 
 
+static void
+cb_select_db( GtkWidget* button, gpointer data )
+{
+    Sojus* sojus = (Sojus*) data;
+
+    db_connect_database( sojus, gtk_widget_get_toplevel( button ), sojus->db.con );
+
+    return;
+}
+
+
+static void
+cb_connect( GtkWidget* button, gpointer data )
+{
+    Sojus* sojus = (Sojus*) data;
+
+    db_get_connection( sojus, gtk_widget_get_toplevel( button ) );
+
+    return;
+}
+
+
 void
 einstellungen( GtkWidget* button, gpointer data )
 {
@@ -23,7 +45,8 @@ einstellungen( GtkWidget* button, gpointer data )
     gtk_grid_attach( GTK_GRID(grid), bu_sql, 0, 3, 1, 1 );
     gtk_grid_attach( GTK_GRID(grid), bu_db, 0, 4, 1, 1 );
 
-    g_signal_connect_swapped( bu_sql, "clicked", G_CALLBACK(db_get_connection), sojus );
+    g_signal_connect( bu_sql, "clicked", G_CALLBACK(cb_connect), sojus );
+    g_signal_connect( bu_db, "clicked", G_CALLBACK(cb_select_db), sojus );
 
     gtk_widget_show_all( window );
 
