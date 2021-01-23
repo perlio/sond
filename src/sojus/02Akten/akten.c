@@ -1,8 +1,17 @@
-#include <gtk/gtk.h>
+#include <stdlib.h>
 
-#include "../global_types_sojus.h"
+#include <gtk/gtk.h>
+#include <mariadb/mysql.h>
 
 #include "../../misc.h"
+
+#include "aktenbet.h"
+#include "widgets_akte.h"
+
+#include "../00misc/sql.h"
+#include "../global_types_sojus.h"
+
+
 
 
 void
@@ -22,10 +31,8 @@ akte_free( Akte* akte )
 
 
 Akte*
-akte_oeffnen( GtkWidget* akten_window, gint regnr, gint jahr )
+akte_oeffnen( Sojus* sojus, gint regnr, gint jahr )
 {
-    Sojus* sojus = g_object_get_data( G_OBJECT(akten_window), "sojus" );
-
     //Datensatz aus Tabelle akten holen
     gchar* sql = NULL;
     gint rc = 0;
@@ -36,7 +43,7 @@ akte_oeffnen( GtkWidget* akten_window, gint regnr, gint jahr )
     g_free( sql );
     if ( rc )
     {
-        display_message( akten_window, "Fehler bei akte_oeffnen:\n"
+        display_message( sojus->app_window, "Fehler bei akte_oeffnen:\n"
                 "mysql_query\n", mysql_error( sojus->db.con ), NULL );
         return NULL;
     }
@@ -44,7 +51,7 @@ akte_oeffnen( GtkWidget* akten_window, gint regnr, gint jahr )
     MYSQL_RES* mysql_res = mysql_store_result( sojus->db.con );
     if ( !mysql_res )
     {
-        display_message( akten_window, "Fehler bei akte_oeffnen:\n",
+        display_message( sojus->app_window, "Fehler bei akte_oeffnen:\n",
                 "mysql_store_res:\n", mysql_error( sojus->db.con ), NULL );
         return NULL;
     }
@@ -147,7 +154,7 @@ akte_anlegen( Sojus* sojus )
         return FALSE;
     }
 
-    sql_log( sojus->app_window, sojus->db.con, sql, sojus->db.user );
+    sql_log( sojus, sql );
 
     g_free( sql );
 
@@ -223,7 +230,7 @@ akte_speichern( GtkWidget* akten_window )
         return;
     }
 
-    sql_log( akten_window, sojus->db.con, sql, sojus->db.user );
+    sql_log( sojus, sql );
 
     g_free( sql );
 

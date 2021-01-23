@@ -1244,6 +1244,9 @@ fm_create_tree_view( void )
 void
 fm_unset_root( GtkTreeView* tree_view )
 {
+    gchar* root = g_object_get_data( G_OBJECT(tree_view), "root" );
+    g_free( root );
+
     g_object_set_data( G_OBJECT(tree_view), "root", NULL );
 
     gtk_tree_store_clear( GTK_TREE_STORE(gtk_tree_view_get_model(
@@ -1260,7 +1263,7 @@ fm_set_root( GtkTreeView* tree_view, const gchar* root, gchar** errmsg )
 
     fm_unset_root( tree_view );
 
-    g_object_set_data( G_OBJECT(tree_view), "root", (gpointer) root );
+    g_object_set_data( G_OBJECT(tree_view), "root", (gpointer) g_strdup( root ) );
 
     rc = fm_load_dir( tree_view, NULL, errmsg );
     if ( rc ) ERROR_PAO( "fm_load_dir" )

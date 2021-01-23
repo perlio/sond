@@ -21,6 +21,8 @@ typedef struct _Clipboard {
 } Clipboard;
 
 
+void treeview_free_clipboard( Clipboard* );
+
 Clipboard* treeview_init_clipboard( void );
 
 void treeview_expand_row( GtkTreeView*, GtkTreeIter* );

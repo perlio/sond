@@ -5,6 +5,16 @@
 #include "misc.h"
 
 
+void
+treeview_free_clipboard( Clipboard* clipboard )
+{
+    g_ptr_array_unref( clipboard->arr_ref );
+    g_free( clipboard );
+
+    return;
+}
+
+
 Clipboard*
 treeview_init_clipboard( void )
 {

@@ -181,15 +181,6 @@
 			<Option target="Sojus (Release)" />
 			<Option target="Sojus (Testing)" />
 		</Unit>
-		<Unit filename="src/sojus/01Desktop/widgets_desktop.c">
-			<Option compilerVar="CC" />
-			<Option target="Sojus (Release)" />
-			<Option target="Sojus (Testing)" />
-		</Unit>
-		<Unit filename="src/sojus/01Desktop/widgets_desktop.h">
-			<Option target="Sojus (Release)" />
-			<Option target="Sojus (Testing)" />
-		</Unit>
 		<Unit filename="src/sojus/02Akten/akten.c">
 			<Option compilerVar="CC" />
 			<Option target="Sojus (Release)" />
@@ -271,6 +262,15 @@
 			<Option target="Sojus (Release)" />
 			<Option target="Sojus (Testing)" />
 		</Unit>
+		<Unit filename="src/sojus/06Dokumente/file_manager.c">
+			<Option compilerVar="CC" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/06Dokumente/file_manager.h">
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
 		<Unit filename="src/sojus/20Einstellungen/db.c">
 			<Option compilerVar="CC" />
 			<Option target="Sojus (Release)" />
@@ -280,21 +280,21 @@
 			<Option target="Sojus (Release)" />
 			<Option target="Sojus (Testing)" />
 		</Unit>
+		<Unit filename="src/sojus/20Einstellungen/einstellungen.c">
+			<Option compilerVar="CC" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/20Einstellungen/einstellungen.h">
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
 		<Unit filename="src/sojus/20Einstellungen/sachbearbeiterverwaltung.c">
 			<Option compilerVar="CC" />
 			<Option target="Sojus (Release)" />
 			<Option target="Sojus (Testing)" />
 		</Unit>
 		<Unit filename="src/sojus/20Einstellungen/sachbearbeiterverwaltung.h">
-			<Option target="Sojus (Release)" />
-			<Option target="Sojus (Testing)" />
-		</Unit>
-		<Unit filename="src/sojus/20Einstellungen/widgets_einstellungen.c">
-			<Option compilerVar="CC" />
-			<Option target="Sojus (Release)" />
-			<Option target="Sojus (Testing)" />
-		</Unit>
-		<Unit filename="src/sojus/20Einstellungen/widgets_einstellungen.h">
 			<Option target="Sojus (Release)" />
 			<Option target="Sojus (Testing)" />
 		</Unit>

@@ -235,7 +235,7 @@ adresse_speichern( GtkWidget* adressen_window )
         return;
     }
 
-    sql_log( adressen_window, sojus->db.con, sql, sojus->db.user );
+    sql_log( sojus, sql );
 
     g_free( sql );
 

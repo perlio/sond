@@ -2,15 +2,16 @@
 
 #include "../global_types_sojus.h"
 
-#include "../20Einstellungen/db.h"
-
 #include "../../misc.h"
+
+#include "../20Einstellungen/db.h"
+#include "../20Einstellungen/sachbearbeiterverwaltung.h"
 
 
 void
 cb_button_db_erstellen_clicked( GtkButton* button, gpointer user_data )
 {
-    db_create( (Sojus*) user_data );
+//    db_create( (Sojus*) user_data );
 
     return;
 }
@@ -19,7 +20,7 @@ cb_button_db_erstellen_clicked( GtkButton* button, gpointer user_data )
 void
 cb_button_db_waehlen_clicked( GtkButton* button, gpointer user_data )
 {
-    db_select( (Sojus*) user_data );
+ //   db_select( (Sojus*) user_data );
 
     return;
 }
@@ -28,7 +29,7 @@ cb_button_db_waehlen_clicked( GtkButton* button, gpointer user_data )
 void
 cb_button_db_con_clicked( GtkButton* button, gpointer user_data )
 {
-    db_connection_window( (Sojus*) user_data );
+//    db_connection_window( (Sojus*) user_data );
 
     return;
 }

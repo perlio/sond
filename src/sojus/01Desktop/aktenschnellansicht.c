@@ -1,7 +1,8 @@
-//#include "../global_types.h"
+#include "../global_types_sojus.h"
 
 #include "../00misc/auswahl.h"
 #include "../../misc.h"
+#include "../02Akten/akten.h"
 
 #include "../../fm.h"
 
@@ -61,16 +62,35 @@ cb_bu_doc_erzeugen( GtkButton* button, gpointer data )
 static void
 cb_entry_regnr_activate( GtkEntry* entry, gpointer data )
 {
+    gint rc = 0;
+    Akte* akte = NULL;
+    gchar* path = NULL;
+    gchar* errmsg = NULL;
+
     Sojus* sojus = (Sojus*) data;
 
     if ( !auswahl_get_regnr_akt( sojus, entry ) ) return;
 
-    //path-data in tree_view_fs schreiben
+    akte = akte_oeffnen( sojus, sojus->regnr_akt, sojus->jahr_akt );
+    if ( !akte ) return;
 
-    //Verzeichnis in fs_tree einlesen
+    path = g_strdelimit( g_strdup( akte->bezeichnung ), "/\\", '-' );
+    akte_free( akte );
+
+    path = add_string( path, g_strdup_printf( " %i-%i", sojus->regnr_akt, sojus->jahr_akt % 100 ) );
+
+    rc = fm_set_root( GTK_TREE_VIEW(sojus->widgets.AppWindow.AktenSchnellansicht.treeview_fm), path, &errmsg );
+    g_free( path );
+    if ( rc )
+    {
+        display_message( sojus->app_window, "Fehler -\n\nBei Aufruf fm_set_root:\n",
+                errmsg, NULL );
+        g_free( errmsg );
+    }
 
     //bu_dokument_erzeugen anschalten
 
+    return;
 }
 
 
@@ -93,6 +113,7 @@ aktenschnellansicht_create_window( Sojus* sojus )
 
     //tree_view dokument_dir
     GtkWidget* swindow = gtk_scrolled_window_new( NULL, NULL );
+    gtk_widget_set_size_request( swindow, 350, -1 );
 
     g_signal_connect( sojus->widgets.AppWindow.AktenSchnellansicht.entry_regnr,
             "activate", G_CALLBACK(cb_entry_regnr_activate), sojus );
@@ -104,8 +125,8 @@ aktenschnellansicht_create_window( Sojus* sojus )
     gtk_container_add( GTK_CONTAINER(swindow),
             sojus->widgets.AppWindow.AktenSchnellansicht.treeview_fm );
 
-    gtk_grid_attach( GTK_GRID(grid_in_frame), swindow, 0, 2, 10, 10 );
-    gtk_grid_set_row_homogeneous( GTK_GRID(grid_in_frame), TRUE );
+    gtk_grid_attach( GTK_GRID(grid_in_frame), swindow, 0, 2, 20, 20 );
+//    gtk_grid_set_row_homogeneous( GTK_GRID(grid_in_frame), TRUE );
 
     return grid_in_frame;
 }

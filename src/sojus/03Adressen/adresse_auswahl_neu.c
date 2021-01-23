@@ -48,7 +48,7 @@ naechste_adressnr( Sojus* sojus )
         return FALSE;
     }
 
-    sql_log( sojus->app_window, sojus->db.con, sql, sojus->db.user );
+    sql_log( sojus, sql );
 
     g_free( sql );
 

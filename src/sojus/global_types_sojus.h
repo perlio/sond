@@ -12,6 +12,8 @@ typedef struct _GPtrArray GPtrArray;
 typedef struct _GSocketService GSocketService;
 typedef struct _GSettings GSettings;
 
+typedef struct _Clipboard Clipboard;
+
 
 struct _SB
 {
@@ -99,13 +101,10 @@ struct _Sojus
 
     GSocketService* socket;
 
+    Clipboard* clipboard;
+
     struct {
         MYSQL* con;
-        gchar* host;
-        gint port;
-        gchar* user;
-        gchar* password;
-        gchar* db_name;
     } db;
 
     gint regnr_akt;

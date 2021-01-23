@@ -10,7 +10,7 @@ typedef int gint;
 
 void akte_free( Akte* );
 
-Akte* akte_oeffnen( GtkWidget*, gint, gint );
+Akte* akte_oeffnen( Sojus*, gint, gint );
 
 void akte_speichern( GtkWidget* );
 

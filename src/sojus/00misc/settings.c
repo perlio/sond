@@ -10,7 +10,7 @@ GSettings* settings_open( void )
 
 
     schema_source = g_settings_schema_source_new_from_directory(
-            "99Settings/", NULL, FALSE, &error );
+            "schemas/", NULL, FALSE, &error );
     if ( error )
     {
         printf( "%s\n", error->message );
@@ -19,7 +19,7 @@ GSettings* settings_open( void )
     }
 
     schema = g_settings_schema_source_lookup( schema_source,
-            "de.rubarth-krieger.Sojus", FALSE );
+            "de.perlio.Sojus", FALSE );
     g_settings_schema_source_unref( schema_source );
 
     settings = g_settings_new_full( schema, NULL, NULL );

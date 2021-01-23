@@ -20,14 +20,13 @@
 #include <dirent.h>
 #include <mariadb/mysql.h>
 
-//#include "global_types.h"
+#include "global_types_sojus.h"
 
 #include "00misc/auswahl.h"
 #include "00misc/settings.h"
 #include "00misc/sql.h"
 #include "00misc/zeit.h"
 
-#include "01Desktop/widgets_desktop.h"
 #include "01Desktop/callbacks_adressen.h"
 #include "01Desktop/callbacks_akten.h"
 #include "01Desktop/callbacks_einstellungen.h"

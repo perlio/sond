@@ -112,7 +112,7 @@ cb_button_reakt_clicked( GtkButton* button, gpointer user_data )
         return;
     }
 
-    sql_log( sojus->app_window, sojus->db.con, sql, sojus->db.user );
+    sql_log( sojus, sql );
 
     g_free( sql );
 
@@ -172,7 +172,7 @@ cb_button_ablegen_clicked( GtkButton* button, gpointer user_data )
         return;
     }
 
-    sql_log( akten_window, sojus->db.con, sql, sojus->db.user );
+    sql_log( sojus, sql );
 
     g_free( sql );
 
@@ -601,7 +601,7 @@ aktenfenster_fuellen( GtkWidget* akten_window, gint regnr, gint jahr )
     /*
     **  Akte holen  */
         Akte* akte = NULL;
-        if ( !(akte = akte_oeffnen( akten_window, regnr, jahr )) )
+        if ( !(akte = akte_oeffnen( sojus, regnr, jahr )) )
         {
             display_message( akten_window, "Akteninhalt ändern:\n "
                     "Kein Datensatz vorhanden", NULL );

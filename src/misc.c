@@ -66,7 +66,7 @@ dialog_with_buttons( GtkWidget* window, const gchar* message,
 
     va_start( arg_pointer, first_button_text );
 
-   GtkWidget* dialog = gtk_message_dialog_new( GTK_WINDOW(window),
+    GtkWidget* dialog = gtk_message_dialog_new( GTK_WINDOW(window),
             GTK_DIALOG_DESTROY_WITH_PARENT, GTK_MESSAGE_QUESTION,
             GTK_BUTTONS_NONE, message, NULL );
     gtk_message_dialog_format_secondary_text( GTK_MESSAGE_DIALOG(dialog), "%s",
@@ -97,6 +97,7 @@ dialog_with_buttons( GtkWidget* window, const gchar* message,
         entry = gtk_entry_new( );
         gtk_container_add( GTK_CONTAINER(content), entry);
         if ( *text ) gtk_entry_set_text( GTK_ENTRY(entry), *text );
+        g_free( *text );
 
         gtk_widget_show_all( content );
 

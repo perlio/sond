@@ -8,15 +8,14 @@ typedef int gint;
 typedef struct _Sojus Sojus;
 
 
-MYSQL* db_connect( GtkWidget*, const gchar*, const gchar*, const gchar*, gint,
-        gchar** );
+gint db_get_connection( Sojus* );
 
 gint db_active( GtkWidget*, const gchar*, gchar** );
-
-void db_connection_window( Sojus* );
 
 void db_select( Sojus* );
 
 void db_create( Sojus* );
+
+gint db_connect_database( Sojus*, gboolean );
 
 #endif // DB_H_INCLUDED

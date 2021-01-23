@@ -1,6 +1,8 @@
 #ifndef SQL_H_INCLUDED
 #define SQL_H_INCLUDED
 
-gint sql_log( GtkWidget*, MYSQL*, gchar*, gchar* );
+typedef struct _Sojus Sojus;
+
+gint sql_log( Sojus*, const gchar* );
 
 #endif // SQL_H_INCLUDED

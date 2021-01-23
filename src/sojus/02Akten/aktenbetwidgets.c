@@ -1,4 +1,5 @@
 #include "../globals.h"
+#include "../global_types_sojus.h"
 
 #include "../../misc.h"
 

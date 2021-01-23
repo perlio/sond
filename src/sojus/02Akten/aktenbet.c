@@ -1,4 +1,5 @@
 #include "../globals.h"
+#include "../global_types_sojus.h"
 
 #include "../../misc.h"
 
@@ -108,7 +109,7 @@ aktenbet_speichern( GtkWidget* akten_window )
                 return;
             }
 
-            sql_log( akten_window, sojus->db.con, sql, sojus->db.user );
+            sql_log( sojus, sql );
             g_free( sql );
         }
     }

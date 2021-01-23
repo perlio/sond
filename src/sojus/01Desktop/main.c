@@ -1,14 +1,27 @@
 #define MAIN_C
 
 #include <gtk/gtk.h>
+#include <glib/gstdio.h>
+#include <mariadb/mysql.h>
 
+#include "../../treeview.h"
 #include "../global_types_sojus.h"
-#include <gio/gio.h>
 
 #include "aktenschnellansicht.h"
+#include "callbacks_akten.h"
+#include "callbacks_adressen.h"
+#include "callbacks_einstellungen.h"
+
+#include "../00misc/settings.h"
+
+#include "../20Einstellungen/db.h"
+#include "../20Einstellungen/einstellungen.h"
+
+#include"../06Dokumente/file_manager.h"
 
 #include "../../fm.h"
 #include "../../misc.h"
+#include "../../treeview.h"
 
 
 static gboolean
@@ -18,8 +31,12 @@ cb_desktop_delete_event( GtkWidget* app_window, GdkEvent* event, gpointer data )
 
     gtk_widget_destroy( app_window );
 
+    mysql_close( sojus->db.con );
+
     g_object_unref( sojus->socket );
     g_object_unref( sojus->settings );
+
+    treeview_free_clipboard( sojus->clipboard );
 
     g_ptr_array_unref( sojus->sachgebiete );
     g_ptr_array_unref( sojus->beteiligtenart );
@@ -34,73 +51,13 @@ cb_desktop_delete_event( GtkWidget* app_window, GdkEvent* event, gpointer data )
 static void
 init_db ( Sojus* sojus )
 {
-    //working dir = Sojus/
-    gchar* program = g_find_program_in_path( "Sojus.exe" );
-    gchar* wd_path = g_strndup( program, strlen( program ) - 15 );
-    g_chdir( wd_path );
-    g_free( program );
-    g_free( wd_path );
+    gint rc = 0;
 
-    GSettings* settings = settings_open( );
-    gchar* host = g_settings_get_string( settings, "host" );
-    gint port = 0;
-    port = g_settings_get_int( settings, "port" );
-    gchar* user = g_settings_get_string( settings, "user" );
-    gchar* password = g_settings_get_string( settings, "password" );
-    g_object_unref( settings );
-
-    sojus->db.host = host;
-    sojus->db.port = port;
-    sojus->db.user = user;
-    sojus->db.password = password;
-
-    gchar* errmsg = NULL;
-    if ( g_strcmp0( host, "" ) && port && g_strcmp0( user, "" ) &&
-            g_strcmp0( password, "" ) ) sojus->db.con = db_connect(
-            sojus->app_window, host, user, password, port, &errmsg );
-
-    //Wenn Verbindung nicht hergestellt werden konnte
-    if ( !sojus->db.con )
-    {
-        widgets_desktop_db_name( sojus, FALSE );
-        widgets_desktop_db_con( G_OBJECT(sojus->app_window), FALSE );
-
-        display_message( sojus->app_window, "Fehler -\n\n"
-                "In Einstellungen gespeicherte Verbindung konnte nicht "
-                "hergestellt werden:\n", errmsg, NULL );
-        g_free( errmsg );
-
-        return;
-    }
-
-    //Verbindung wurde hergestellt - anzeigen
-    widgets_desktop_label_con( G_OBJECT(sojus->app_window), sojus->db.host,
-            sojus->db.port, sojus->db.user );
-
-    //Settings-Datei öffnen und nach letztem Namen gucken
-    settings = settings_open( );
-    gchar* db_name = g_settings_get_string( settings, "dbname" );
-    g_object_unref( settings );
-
-    if ( !g_strcmp0( db_name, "" ) )
-    {
-        g_free( db_name );
-        widgets_desktop_db_name( sojus, FALSE );
-
-        return;
-    }
-
-    gint rc = db_active( sojus->app_window, db_name, &errmsg );
-    g_free( errmsg );
+    rc = db_get_connection( sojus );
     if ( rc )
     {
-        widgets_desktop_db_name( sojus, FALSE );
-        display_message( sojus->app_window, "Fehler -\n\n",
-                "In Settings gespeicherte db kann nicht "
-                "geöffnet werden:\n", errmsg, NULL );
-        g_free( db_name );
-
-        return;
+        gboolean ret = FALSE;
+        g_signal_emit_by_name( sojus->app_window, "delete-event", NULL, &ret );
     }
 
     return;
@@ -115,17 +72,25 @@ cb_socket_incoming(GSocketService *service,
 {
     gssize ret = 0;
     gchar* buffer = NULL;
-    gchar* port_str = NULL;
     GError* error = NULL;
 
     Sojus* sojus = (Sojus*) data;
 
     GOutputStream * ostream = g_io_stream_get_output_stream(G_IO_STREAM (connection));
 
-    port_str = g_strdup_printf( "%i", sojus->db.port );
-    buffer = g_strconcat( sojus->db.host, ";", port_str, ";", sojus->db.user,
-            ";", sojus->db.password, ";", sojus->db.db_name, NULL );
-    g_free( port_str );
+    gchar* host = g_settings_get_string( sojus->settings, "host" );
+    gint port = g_settings_get_int( sojus->settings, "port" );
+    gchar* user = g_settings_get_string( sojus->settings, "user" );
+    gchar* password = g_settings_get_string( sojus->settings, "password" );
+    gchar* db_name = g_settings_get_string( sojus->settings, "dbname" );
+
+    buffer = g_strdup_printf( "%s;%i;%s;%s;%s", host, port, user, password, db_name );
+
+    g_free( host );
+    g_free( user );
+    g_free( password );
+    g_free( db_name );
+
     ret = g_output_stream_write( ostream, buffer, strlen( buffer ), NULL, &error );
     g_free( buffer );
     if ( ret == -1 )
@@ -189,20 +154,7 @@ init_app_window( GtkApplication* app, Sojus* sojus )
     GtkWidget* bu_wiedervorlagen = gtk_button_new_with_mnemonic( "_Wiedervorlagen" );
 
     //Einstellungen
-    GtkWidget* bu_db_con = gtk_button_new_with_mnemonic( "_Verbindung zu "
-            "SQL-Server" );
-    GtkWidget* bu_db_waehlen = gtk_button_new_with_mnemonic( "Daten_bank wählen" );
-    GtkWidget* bu_db_erstellen = gtk_button_new_with_mnemonic( "Datenban_k erstellen" );
-    GtkWidget* bu_sachbearbeiterverwaltung = gtk_button_new_with_mnemonic(
-            "Sachbearbeiter_verwaltung" );
-    sojus->widgets.Einstellungen.bu_dokument_dir = gtk_button_new_with_mnemonic(
-            "Dokumentenver_zeichnis" );
-
-    //Label connection/DB
-    GtkWidget* label_con_title = gtk_label_new( "SQL-Server-Verbindung:" );
-    GtkWidget* label_con = gtk_label_new( NULL );
-    GtkWidget* label_db_title = gtk_label_new( "Datenbank:" );
-    GtkWidget* label_db = gtk_label_new( NULL );
+    GtkWidget* bu_einstellungen = gtk_button_new_with_mnemonic( "_Einstellungen" );
 
 /*
 **  in grid einfügen  */
@@ -217,22 +169,11 @@ init_app_window( GtkApplication* app, Sojus* sojus )
     gtk_grid_attach( GTK_GRID(grid), bu_fristen, 0, 7, 1, 1 );
     gtk_grid_attach( GTK_GRID(grid), bu_wiedervorlagen, 0, 8, 1, 1 );
 
-    gtk_grid_attach( GTK_GRID(grid), bu_db_con, 0, 9, 1, 1 );
-    gtk_grid_attach( GTK_GRID(grid), bu_db_waehlen, 0, 10, 1, 1 );
-    gtk_grid_attach( GTK_GRID(grid), bu_db_erstellen, 0, 11, 1, 1 );
-    gtk_grid_attach( GTK_GRID(grid), bu_sachbearbeiterverwaltung, 0, 12, 1, 1 );
-    gtk_grid_attach( GTK_GRID(grid), sojus->widgets.Einstellungen.bu_dokument_dir,
-            0, 13, 1, 1 );
-
-    gtk_grid_attach( GTK_GRID(grid), label_con_title, 2, 0, 2, 1 );
-    gtk_grid_attach( GTK_GRID(grid), label_con, 2, 1, 2, 2 );
-
-    gtk_grid_attach( GTK_GRID(grid), label_db_title, 2, 3, 2, 1 );
-    gtk_grid_attach( GTK_GRID(grid), label_db, 2, 4, 2, 2 );
+    gtk_grid_attach( GTK_GRID(grid), bu_einstellungen, 0, 9, 1, 1 );
 
     //Akten-Schnellübersicht
     GtkWidget* frame_akte = gtk_frame_new( "Aktenschnellansicht" );
-    gtk_grid_attach( GTK_GRID(grid), frame_akte, 4, 2, 20, 50 );
+    gtk_grid_attach( GTK_GRID(grid), frame_akte, 1, 1, 3, 13 );
 
     gtk_container_add( GTK_CONTAINER(frame_akte), aktenschnellansicht_create_window( sojus ) );
 
@@ -259,20 +200,6 @@ init_app_window( GtkApplication* app, Sojus* sojus )
     g_object_set_data( G_OBJECT(sojus->app_window), "bu_wiedervorlagen",
             (gpointer) bu_wiedervorlagen );
 
-    g_object_set_data( G_OBJECT(sojus->app_window), "bu_db_con", (gpointer)
-            bu_db_con );
-    g_object_set_data( G_OBJECT(sojus->app_window), "bu_db_waehlen", (gpointer)
-            bu_db_waehlen );
-    g_object_set_data( G_OBJECT(sojus->app_window), "bu_db_erstellen",
-            (gpointer) bu_db_erstellen );
-    g_object_set_data( G_OBJECT(sojus->app_window), "bu_sachbearbeiterverwaltung",
-            (gpointer) bu_sachbearbeiterverwaltung );
-
-    g_object_set_data( G_OBJECT(sojus->app_window), "label_con",
-            (gpointer) label_con );
-    g_object_set_data( G_OBJECT(sojus->app_window), "label_db",
-            (gpointer) label_db );
-
 /*
 **  callbacks  */
     g_signal_connect( bu_akte_fenster, "clicked",
@@ -285,17 +212,8 @@ init_app_window( GtkApplication* app, Sojus* sojus )
     g_signal_connect( bu_adresse_suchen, "clicked",
             G_CALLBACK(cb_bu_adresse_suchen_clicked), sojus );
 
-    g_signal_connect( bu_db_con, "clicked",
-            G_CALLBACK(cb_button_db_con_clicked), sojus );
-    g_signal_connect( bu_db_waehlen, "clicked",
-            G_CALLBACK(cb_button_db_waehlen_clicked), sojus );
-    g_signal_connect( bu_db_erstellen, "clicked",
-            G_CALLBACK(cb_button_db_erstellen_clicked), sojus );
-
-    g_signal_connect( bu_sachbearbeiterverwaltung, "clicked",
-            G_CALLBACK(cb_button_sachbearbeiterverwaltung), sojus );
-    g_signal_connect( sojus->widgets.Einstellungen.bu_dokument_dir, "clicked",
-            G_CALLBACK(cb_button_dokument_dir), sojus );
+    g_signal_connect( bu_einstellungen, "clicked",
+            G_CALLBACK(einstellungen), sojus );
 
     //Signal für App-Fenster schließen
     g_signal_connect( sojus->app_window, "delete-event",
@@ -311,6 +229,8 @@ static Sojus*
 init_sojus( void )
 {
     Sojus* sojus = g_malloc0( sizeof( Sojus ) );
+
+    sojus->clipboard = treeview_init_clipboard( );
 
     sojus->sachgebiete = g_ptr_array_new_with_free_func( (GDestroyNotify) g_free );
     sojus->beteiligtenart = g_ptr_array_new_with_free_func( (GDestroyNotify) g_free );
@@ -337,7 +257,6 @@ startup_app( GtkApplication* app, gpointer data )
     init_app_window( app, *sojus );
     init_socket( *sojus );
     init_db( *sojus );
-
 
     gchar* dokument_dir = g_settings_get_string( (*sojus)->settings, "dokument-dir" );
     g_object_set_data( G_OBJECT((*sojus)->widgets.AppWindow.AktenSchnellansicht.treeview_fm), "root", dokument_dir );
