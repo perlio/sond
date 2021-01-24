@@ -23,6 +23,7 @@ cb_fm_entry( GtkEntry* entry, gpointer data )
 {
     gint rc = 0;
     Akte* akte = NULL;
+    gchar* dokument_dir = NULL;
     gchar* path = NULL;
     gchar* errmsg = NULL;
 
@@ -35,9 +36,11 @@ cb_fm_entry( GtkEntry* entry, gpointer data )
     akte = akte_oeffnen( sojus, sojus->regnr_akt, sojus->jahr_akt );
     if ( !akte ) return;
 
+    dokument_dir = g_settings_get_string( sojus->settings, "dokument-dir" );
+    dokument_dir = add_string( dokument_dir, g_strdup( "/" ) );
     path = g_strdelimit( g_strdup( akte->bezeichnung ), "/\\", '-' );
     akte_free( akte );
-
+    path = add_string( dokument_dir, path );
     path = add_string( path, g_strdup_printf( " %i-%i", sojus->regnr_akt, sojus->jahr_akt % 100 ) );
 
     rc = fm_set_root( fm, path, &errmsg );

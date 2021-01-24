@@ -27,6 +27,18 @@ cb_connect( GtkWidget* button, gpointer data )
 }
 
 
+static void
+cb_file_set( GtkWidget* button, gpointer data )
+{
+    Sojus* sojus = (Sojus*) data;
+
+    g_settings_set_string( sojus->settings, "dokument-dir",
+            gtk_file_chooser_get_filename( GTK_FILE_CHOOSER(button) ) );
+
+    return;
+}
+
+
 void
 einstellungen( GtkWidget* button, gpointer data )
 {
@@ -39,12 +51,20 @@ einstellungen( GtkWidget* button, gpointer data )
     GtkWidget* grid = gtk_grid_new( );
     gtk_container_add( GTK_CONTAINER(window), grid );
 
+    gchar* path = g_settings_get_string( sojus->settings, "dokument-dir" );
+    GtkWidget* bu_file = gtk_file_chooser_button_new( NULL,
+            GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER );
+    gtk_file_chooser_set_filename( GTK_FILE_CHOOSER(bu_file), path );
+    g_free( path );
+    gtk_grid_attach( GTK_GRID(grid), bu_file, 2, 0, 2, 1 );
+
     GtkWidget* bu_sql = gtk_button_new_with_label( "SQL-Server" );
     GtkWidget* bu_db = gtk_button_new_with_label( "Datenbank" );
 
     gtk_grid_attach( GTK_GRID(grid), bu_sql, 0, 3, 1, 1 );
     gtk_grid_attach( GTK_GRID(grid), bu_db, 0, 4, 1, 1 );
 
+    g_signal_connect( bu_file, "file-set", G_CALLBACK(cb_file_set), sojus );
     g_signal_connect( bu_sql, "clicked", G_CALLBACK(cb_connect), sojus );
     g_signal_connect( bu_db, "clicked", G_CALLBACK(cb_select_db), sojus );
 
