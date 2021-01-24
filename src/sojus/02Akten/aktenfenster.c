@@ -2,6 +2,8 @@
 
 #include "../../misc.h"
 
+#include "../00misc/auswahl.h"
+
 
 gboolean
 cb_window_delete_event( GtkWidget* window, GdkEvent* event, gpointer user_data )
@@ -365,6 +367,18 @@ cb_entry_regnr_activate( GtkEntry* entry, gpointer user_data )
     GtkWidget* akten_window = (GtkWidget*) user_data;
     Sojus* sojus = g_object_get_data( G_OBJECT(akten_window), "sojus" );
 
+    if ( auswahl_regnr_ist_wohlgeformt( gtk_entry_get_text( entry ) ) )
+    {
+        gint regnr = 0;
+        gint jahr = 0;
+
+        auswahl_parse_regnr( gtk_entry_get_text( entry ), &regnr, &jahr );
+
+        aktenfenster_fuellen( gtk_widget_get_toplevel( GTK_WIDGET(entry) ), regnr, jahr );
+
+        return;
+    }
+
     gboolean ret = auswahl_get_regnr_akt( sojus, entry );
 
     if ( ret ) aktenfenster_fuellen( akten_window, sojus->regnr_akt,
@@ -593,7 +607,7 @@ aktenfenster_fuellen( GtkWidget* akten_window, gint regnr, gint jahr )
 {
     Sojus* sojus = (Sojus*) g_object_get_data( G_OBJECT(akten_window), "sojus" );
 
-    if ( (regnr > 0) && (jahr > 0) )
+    if ( (regnr > 0) && (jahr > 0) && auswahl_regnr_existiert( akten_window, sojus->db.con, regnr, jahr ) )
     {
         GtkWidget* listbox_aktenbet = GTK_WIDGET(g_object_get_data(
                 G_OBJECT(akten_window), "listbox_aktenbet" ));
@@ -681,7 +695,21 @@ aktenfenster_fuellen( GtkWidget* akten_window, gint regnr, gint jahr )
     }
     else
     {
-        gtk_entry_set_text( GTK_ENTRY(g_object_get_data( G_OBJECT(akten_window),
+        if ( regnr > 0 && jahr > 0 )
+        {
+            gint rc = abfrage_frage( akten_window, "Akte exsitiert nicht", "Anlegen?", NULL );
+            if ( rc == GTK_RESPONSE_NO )
+            {
+                gtk_widget_destroy( akten_window );
+
+                return;
+            }
+
+            gchar* entry_text = g_strdup_printf( "%i/%i", regnr, jahr % 100 );
+            gtk_entry_set_text( GTK_ENTRY(g_object_get_data( G_OBJECT(akten_window), "entry_regnr" )), entry_text );
+            g_free( entry_text );
+        }
+        else gtk_entry_set_text( GTK_ENTRY(g_object_get_data( G_OBJECT(akten_window),
                 "entry_regnr" )), "- neu -" );
 
         //Sachgebiet

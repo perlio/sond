@@ -94,7 +94,7 @@ auswahl_dialog_run( GtkDialog* dialog )
 }
 
 
-static gboolean
+gboolean
 auswahl_regnr_existiert( GtkWidget* window, MYSQL* con, gint regnr, gint year )
 {
     gboolean ret = FALSE;
@@ -128,7 +128,7 @@ auswahl_regnr_existiert( GtkWidget* window, MYSQL* con, gint regnr, gint year )
 }
 
 
-static void
+void
 auswahl_parse_regnr( const gchar* entry, gint* regnr, gint* jahr )
 {
     gint strlen_vor_slash = 0;
@@ -153,7 +153,7 @@ auswahl_parse_regnr( const gchar* entry, gint* regnr, gint* jahr )
 }
 
 
-static gboolean
+gboolean
 auswahl_regnr_ist_wohlgeformt( const gchar* entry )
 {
     if ( (*entry < 48) || (*entry > 57) ) return FALSE; //erstes Zeichen muß Ziffer sein
