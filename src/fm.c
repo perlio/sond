@@ -976,15 +976,15 @@ cb_fm_row_activated( GtkTreeView* tree_view, GtkTreePath* tree_path,
         GtkTreeViewColumn* column, gpointer data )
 {
     GtkTreeIter iter;
-    GFileInfo* info = NULL;
+    gchar* path = NULL;
     gint rc = 0;
     gchar* errmsg = NULL;
 
     gtk_tree_model_get_iter( gtk_tree_view_get_model( tree_view ), &iter, tree_path );
-    gtk_tree_model_get( gtk_tree_view_get_model( tree_view ), &iter, 0, &info, -1 );
 
-    rc = fm_datei_oeffnen( g_file_info_get_display_name( info ), &errmsg );
-    g_object_unref( info );
+    path = fm_get_full_path( tree_view, &iter );
+    rc = fm_datei_oeffnen( path, &errmsg );
+    g_free( path );
     if ( rc )
     {
         display_message( gtk_widget_get_toplevel( GTK_WIDGET(tree_view) ),

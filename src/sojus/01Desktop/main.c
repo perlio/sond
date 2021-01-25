@@ -139,10 +139,13 @@ init_app_window( GtkApplication* app, Sojus* sojus )
     GtkWidget* grid = gtk_grid_new( );
     gtk_container_add( GTK_CONTAINER(sojus->app_window), grid );
 
+    GtkWidget* frame_dok = gtk_frame_new( "Dokumentenverzeichnis öffnen" );
+    GtkWidget* entry_dok = gtk_entry_new( );
+    gtk_container_add( GTK_CONTAINER(frame_dok), entry_dok );
+
     //Akten
     GtkWidget* bu_akte_fenster = gtk_button_new_with_mnemonic( "_Aktenfenster" );
     GtkWidget* bu_akte_suchen = gtk_button_new_with_mnemonic( "Akte _suchen" );
-    GtkWidget* bu_dokumente = gtk_button_new_with_mnemonic( "_Dokumente" );
 
     //Adressen
     GtkWidget* bu_adresse_fenster = gtk_button_new_with_mnemonic( "A_dressenfenster" );
@@ -159,9 +162,9 @@ init_app_window( GtkApplication* app, Sojus* sojus )
 
 /*
 **  in grid einfügen  */
+    gtk_grid_attach( GTK_GRID(grid), frame_dok, 0, 0, 1, 1 );
     gtk_grid_attach( GTK_GRID(grid), bu_akte_fenster, 0, 1, 1, 1 );
     gtk_grid_attach( GTK_GRID(grid), bu_akte_suchen, 0, 2, 1, 1 );
-    gtk_grid_attach( GTK_GRID(grid), bu_dokumente, 0, 3, 1, 1 );
 
     gtk_grid_attach( GTK_GRID(grid), bu_adresse_fenster, 0, 4, 1, 1 );
     gtk_grid_attach( GTK_GRID(grid), bu_adresse_suchen, 0, 5, 1, 1 );
@@ -198,12 +201,12 @@ init_app_window( GtkApplication* app, Sojus* sojus )
 
 /*
 **  callbacks  */
+    g_signal_connect( entry_dok, "activate",
+            G_CALLBACK(file_manager_entry_activate), sojus );
     g_signal_connect( bu_akte_fenster, "clicked",
             G_CALLBACK(cb_button_aktenfenster_clicked), sojus );
     g_signal_connect( bu_akte_suchen, "clicked",
             G_CALLBACK(cb_button_akte_suchen_clicked), sojus );
-    g_signal_connect( bu_dokumente, "clicked",
-            G_CALLBACK(file_manager_create), sojus );
 
     g_signal_connect( bu_adresse_fenster, "clicked",
             G_CALLBACK(cb_button_adresse_fenster_clicked), sojus );

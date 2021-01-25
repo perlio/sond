@@ -119,9 +119,6 @@ projekt_aktivieren( Projekt* zond, gchar* project, gboolean disc, gchar** errmsg
     g_settings_set_string( zond->settings, "project", set );
     g_free( set );
 
-    //project_dir in fs_treeview
-    g_object_set_data( G_OBJECT(zond->treeview[BAUM_FS]), "root", zond->project_dir );
-
     reset_project_changed( zond );
 
     return 0;
@@ -170,7 +167,7 @@ void projekt_schliessen( Projekt* zond )
             zond->treeview_focus_in_signal[BAUM_AUSWERTUNG] );
 
     //muß vor project_destroy..., weil callback ausgelöst wird, der db_get_node_id... aufruft
-    fm_unset_root( zond->treeview[BAUM_FS] );
+    gtk_toggle_button_set_active( GTK_TOGGLE_BUTTON(zond->fs_button), FALSE );
 
     //prepared statements zerstören
     rc = project_db_finish_database( zond->dbase, &errmsg );
@@ -186,9 +183,6 @@ void projekt_schliessen( Projekt* zond )
     if ( res == -1) meldung( zond->app_window, "Fehler beim Löschen der "
             "temporären Datenbank:\n", strerror( errno ), NULL );
     g_free( working_copy );
-
-    //project_dir in fs_treeview auf NULL setzen
-    g_object_set_data( G_OBJECT(zond->treeview[BAUM_FS]), "root", NULL );
 
     //project-Namen zurücksetzen
     g_free( zond->project_name );
