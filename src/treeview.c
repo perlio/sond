@@ -238,7 +238,7 @@ treeview_selection_foreach( GtkTreeView* tree_view, GPtrArray* refs,
         }
 
         rc = foreach( tree_view, &iter_ref, data, errmsg );
-        if ( rc == -1)
+        if ( rc == -1 )
         {
             if ( errmsg ) *errmsg = add_string( g_strdup( "Bei Aufruf foreach:\n" ),
                     *errmsg );

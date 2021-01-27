@@ -1,8 +1,5 @@
 /* ToDo-Liste
 
-- Bugs:
-    - bei Schliessen Projekt: PDFs schließen
-
 - suchen
     - Menu Struktur verschieben
     - Einheitliche Suche (Dateiname, node_text, text)

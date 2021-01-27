@@ -571,7 +571,7 @@ selection_paste( Projekt* zond, gboolean kind )
     {
         if ( baum == BAUM_FS )
         {
-            rc = fm_paste_selection( zond->treeview[BAUM_FS],
+            rc = fm_paste_selection( zond->treeview[BAUM_FS], zond->treeview[BAUM_FS],
                     zond->clipboard->arr_ref, zond->clipboard->ausschneiden,
                     kind, &errmsg );
             if ( rc )

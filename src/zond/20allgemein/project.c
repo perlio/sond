@@ -32,6 +32,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "fs_tree.h"
 #include "project_db.h"
 
+#include "../40viewer/viewer.h"
+
 
 void
 project_set_changed( gpointer user_data )
@@ -131,6 +133,9 @@ void projekt_schliessen( Projekt* zond )
     gchar* errmsg = NULL;
 
     if ( !zond->project_name ) return;
+
+    for ( gint i = 0; i < zond->arr_pv->len; i++ )
+            viewer_schliessen( g_ptr_array_index( zond->arr_pv, i ) );
 
     //Menus aktivieren/ausgrauen
     projekt_set_widgets_sensitiv( zond, FALSE );

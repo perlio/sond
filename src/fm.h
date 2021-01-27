@@ -24,6 +24,7 @@ typedef struct _Modify_File
     gpointer data;
 } ModifyFile;
 
+gchar* fm_get_rel_path_from_file( const gchar*, const GFile* );
 
 gchar* fm_get_full_path( GtkTreeView*, GtkTreeIter* );
 
@@ -31,7 +32,7 @@ gchar* fm_get_rel_path( GtkTreeView*, GtkTreeIter* );
 
 gint fm_create_dir( GtkTreeView*, gboolean, gchar** );
 
-gint fm_paste_selection( GtkTreeView*, GPtrArray*, gboolean, gboolean, gchar** );
+gint fm_paste_selection( GtkTreeView*, GtkTreeView*, GPtrArray*, gboolean, gboolean, gchar** );
 
 gint fm_foreach_loeschen( GtkTreeView*, GtkTreeIter*, gpointer, gchar** );
 

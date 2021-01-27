@@ -15,6 +15,24 @@
 #endif // _WIN32
 
 
+gchar*
+fm_get_rel_path_from_file( const gchar* root, const GFile* file )
+{
+    //Überprüfung, ob schon angebunden
+    gchar* rel_path = NULL;
+    gchar* abs_path = g_file_get_path( (GFile*) file );
+
+#ifdef _WIN32
+    abs_path = g_strdelimit( abs_path, "\\", '/' );
+#endif // _WIN32
+
+    rel_path = g_strdup( abs_path + strlen( root ) + 1 );
+    g_free( abs_path );
+
+    return rel_path; //muß freed werden
+}
+
+
 static const gchar*
 fm_get_name( GtkTreeModel* model, GtkTreeIter* iter )
 {
@@ -112,10 +130,15 @@ fm_move_copy_create_delete( GtkTreeView* tree_view, GFile* file_source,
 
                 rc = modify_file->before_move( file_source, *file_dest,
                         modify_file->data, errmsg );
-                if ( rc )
+                if ( rc == -1 )
                 {
                     g_free( basename );
                     ERROR_PAO( "before" )
+                }
+                else if ( rc == 1 ) //Kein verschieben
+                {
+                    g_free( basename );
+                    return 1;
                 }
             }
 
@@ -385,6 +408,7 @@ fm_dir_foreach( GtkTreeView* tree_view, GtkTreeIter* iter_dir, GFile* file,
 typedef struct _S_FM_Paste_Selection{
     GFile* file_parent;
     GFile* file_dest;
+    GtkTreeView* tree_view_dest;
     GtkTreeIter* iter_cursor;
     gboolean kind;
     gboolean ausschneiden;
@@ -551,7 +575,7 @@ fm_paste_selection_foreach( GtkTreeView* tree_view, GtkTreeIter* iter,
         GtkTreeIter* iter_new = NULL;
         GError* error = NULL;
 
-        iter_new = treeview_insert_node( tree_view, s_fm_paste_selection->iter_cursor,
+        iter_new = treeview_insert_node( s_fm_paste_selection->tree_view_dest, s_fm_paste_selection->iter_cursor,
                 s_fm_paste_selection->kind );
 
         gtk_tree_iter_free( s_fm_paste_selection->iter_cursor );
@@ -563,7 +587,7 @@ fm_paste_selection_foreach( GtkTreeView* tree_view, GtkTreeIter* iter,
         {
             GtkTreeIter iter_tmp;
             gtk_tree_store_insert( GTK_TREE_STORE(gtk_tree_view_get_model(
-                tree_view )), &iter_tmp, s_fm_paste_selection->iter_cursor, -1 );
+                s_fm_paste_selection->tree_view_dest )), &iter_tmp, s_fm_paste_selection->iter_cursor, -1 );
         }
 
         //alte Daten holen
@@ -580,7 +604,7 @@ fm_paste_selection_foreach( GtkTreeView* tree_view, GtkTreeIter* iter,
         else if ( file_dest_info )
         {
             //in neu erzeugten node einsetzen
-            gtk_tree_store_set( GTK_TREE_STORE(gtk_tree_view_get_model( tree_view )),
+            gtk_tree_store_set( GTK_TREE_STORE(gtk_tree_view_get_model( s_fm_paste_selection->tree_view_dest )),
                     s_fm_paste_selection->iter_cursor, 0, file_dest_info, -1 );
 
             g_object_unref( file_dest_info );
@@ -594,7 +618,7 @@ fm_paste_selection_foreach( GtkTreeView* tree_view, GtkTreeIter* iter,
 
 
 gint
-fm_paste_selection( GtkTreeView* tree_view, GPtrArray* refs,
+fm_paste_selection( GtkTreeView* tree_view_dest, GtkTreeView* tree_view, GPtrArray* refs,
         gboolean ausschneiden, gboolean kind, gchar** errmsg )
 {
     gint rc = 0;
@@ -606,10 +630,10 @@ fm_paste_selection( GtkTreeView* tree_view, GPtrArray* refs,
     gboolean expanded = FALSE;
 
     //Datei unter cursor holen
-    iter_cursor = treeview_get_cursor( tree_view );
+    iter_cursor = treeview_get_cursor( tree_view_dest );
     if ( !iter_cursor ) return 0;
 
-    path = fm_get_full_path( tree_view, iter_cursor );
+    path = fm_get_full_path( tree_view_dest, iter_cursor );
     if ( !path )
     {
         gtk_tree_iter_free( iter_cursor );
@@ -637,9 +661,9 @@ fm_paste_selection( GtkTreeView* tree_view, GPtrArray* refs,
         //prüfen, ob geöffnet ist
         GtkTreePath* path = NULL;
 
-        path = gtk_tree_model_get_path( gtk_tree_view_get_model( tree_view ),
+        path = gtk_tree_model_get_path( gtk_tree_view_get_model( tree_view_dest ),
                 iter_cursor );
-        expanded = gtk_tree_view_row_expanded( tree_view, path );
+        expanded = gtk_tree_view_row_expanded( tree_view_dest, path );
         gtk_tree_path_free( path );
     }
     else //unterhalb angefügt
@@ -649,8 +673,8 @@ fm_paste_selection( GtkTreeView* tree_view, GPtrArray* refs,
         g_object_unref( file_cursor );
     }
 
-    SFMPasteSelection s_fm_paste_selection = { file_parent, NULL, iter_cursor, kind,
-            ausschneiden, expanded, FALSE };
+    SFMPasteSelection s_fm_paste_selection = { file_parent, NULL, tree_view_dest,
+            iter_cursor, kind, ausschneiden, expanded, FALSE };
 
     rc = treeview_selection_foreach( tree_view, refs,
             fm_paste_selection_foreach, (gpointer) &s_fm_paste_selection, errmsg );
@@ -667,7 +691,7 @@ fm_paste_selection( GtkTreeView* tree_view, GPtrArray* refs,
     {
         GtkTreeIter iter_tmp;
         gtk_tree_store_insert( GTK_TREE_STORE(gtk_tree_view_get_model(
-                tree_view )), &iter_tmp, s_fm_paste_selection.iter_cursor, -1 );
+                tree_view_dest )), &iter_tmp, s_fm_paste_selection.iter_cursor, -1 );
     }
 
     //Alte Auswahl löschen - muß vor baum_setzen_cursor geschehen,
@@ -678,7 +702,7 @@ fm_paste_selection( GtkTreeView* tree_view, GPtrArray* refs,
     gtk_widget_queue_draw( GTK_WIDGET(tree_view) );
 
     //Wenn neuer Knoten sichtbar: Cursor setzen
-    if ( !kind || expanded ) treeview_set_cursor( tree_view,
+    if ( !kind || expanded ) treeview_set_cursor( tree_view_dest,
             s_fm_paste_selection.iter_cursor );
 
     gtk_tree_iter_free( s_fm_paste_selection.iter_cursor );

@@ -331,24 +331,6 @@ abfragen_rel_path_and_anbindung( Projekt* zond, Baum baum, gint node_id,
 }
 
 
-gchar*
-get_rel_path_from_file( Projekt* zond, const GFile* file )
-{
-    //Überprüfung, ob schon angebunden
-    gchar* rel_path = NULL;
-    gchar* abs_path = g_file_get_path( (GFile*) file );
-
-#ifdef _WIN32
-    abs_path = g_strdelimit( abs_path, "\\", '/' );
-#endif // _WIN32
-
-    rel_path = g_strdup( abs_path + strlen( zond->project_dir ) + 1 );
-    g_free( abs_path );
-
-    return rel_path; //muß freed werden
-}
-
-
 gint
 test_rel_path( const GFile* file, gpointer data, gchar** errmsg )
 {
@@ -357,7 +339,7 @@ test_rel_path( const GFile* file, gpointer data, gchar** errmsg )
 
     Projekt* zond = (Projekt*) data;
 
-    rel_path = get_rel_path_from_file( zond, file );
+    rel_path = fm_get_rel_path_from_file( zond, file );
 
     rc = db_check_rel_path( zond, rel_path, errmsg );
     g_free( rel_path );
@@ -381,8 +363,8 @@ update_db_before_path_change( const GFile* file_source, const GFile* file_dest,
     if ( rc == -1 ) ERROR_PAO( "db_begin_both" )
     else if ( rc == -2 ) ERROR_PAO_ROLLBACK( "db_begin_both" )
 
-    gchar* rel_path_source = get_rel_path_from_file( zond, file_source );
-    gchar* rel_path_dest = get_rel_path_from_file( zond, file_dest );
+    gchar* rel_path_source = fm_get_rel_path_from_file( zond->project_dir, file_source );
+    gchar* rel_path_dest = fm_get_rel_path_from_file( zond->project_dir, file_dest );
 
     rc = db_update_path( zond, rel_path_source, rel_path_dest, errmsg );
 
@@ -407,13 +389,6 @@ update_db_after_path_change( const gint rc_edit, gpointer data, gchar** errmsg )
         rc = db_rollback_both( zond, errmsg );
         if ( rc ) ERROR_PAO( "db_rollback_both" )
     }
-    else if ( rc_edit == -1 )
-    {
-        rc = db_rollback_both( zond, errmsg );
-        if ( rc ) ERROR_PAO( "db_rollback_both" )
-        else if ( errmsg ) *errmsg = add_string( *errmsg, g_strdup( "\n\n"
-                "Rollback durchgeführt" ) );
-    }
     else
     {
         rc = db_commit_both( zond, errmsg );
@@ -422,8 +397,6 @@ update_db_after_path_change( const gint rc_edit, gpointer data, gchar** errmsg )
 
     return 0;
 }
-
-
 #endif // VIEWER
 
 

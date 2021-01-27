@@ -1291,7 +1291,7 @@ cb_button_mode_toggled( GtkToggleButton* button, gpointer data )
 
         baum_auswertung = gtk_paned_get_child2( GTK_PANED(gtk_paned_get_child2( GTK_PANED(zond->hpaned) )) );
         gtk_widget_hide( baum_auswertung );
-printf("%s\n", zond->project_dir);
+
         rc = fm_set_root( zond->treeview[BAUM_FS], zond->project_dir, &errmsg );
         if ( rc )
         {
