@@ -1,9 +1,13 @@
 #include <stdlib.h>
 
+#include <gtk/gtk.h>
+#include <ctype.h>
+
 #include "../global_types.h"
 #include "../error.h"
 
 #include "../../misc.h"
+#include "../../fm.h"
 
 #include "../99conv/baum.h"
 #include "../99conv/db_read.h"
@@ -13,8 +17,6 @@
 
 #include "../40viewer/document.h"
 
-#include <gtk/gtk.h>
-#include <ctype.h>
 
 
 /** String Utilities **/
@@ -339,7 +341,7 @@ test_rel_path( const GFile* file, gpointer data, gchar** errmsg )
 
     Projekt* zond = (Projekt*) data;
 
-    rel_path = fm_get_rel_path_from_file( zond, file );
+    rel_path = fm_get_rel_path_from_file( zond->project_dir, file );
 
     rc = db_check_rel_path( zond, rel_path, errmsg );
     g_free( rel_path );

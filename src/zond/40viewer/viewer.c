@@ -1779,6 +1779,20 @@ viewer_einrichten_fenster( PdfViewer* pv )
             GTK_ICON_SIZE_BUTTON );
     gtk_button_set_image( GTK_BUTTON(button_paint), image_paint );
 
+    //SpinButton für Zoom
+    GtkWidget* spin_button = gtk_spin_button_new_with_range( ZOOM_MIN,
+            ZOOM_MAX, 5.0 );
+    gtk_orientable_set_orientation( GTK_ORIENTABLE(spin_button), GTK_ORIENTATION_VERTICAL );
+    gtk_spin_button_set_value( GTK_SPIN_BUTTON(spin_button), (gdouble) pv->zoom );
+
+    //frame
+    GtkWidget* frame_spin = gtk_frame_new( "Zoom" );
+    gtk_container_add( GTK_CONTAINER(frame_spin), spin_button );
+
+    //signale des SpinButton
+    g_signal_connect( spin_button, "value-changed",
+            G_CALLBACK(cb_viewer_spinbutton_value_changed), (gpointer) pv );
+
     gtk_toggle_button_set_active( GTK_TOGGLE_BUTTON(button_zeiger), TRUE );
 
     g_object_set_data( G_OBJECT(button_zeiger), "button-other-1", button_highlight );
@@ -1818,6 +1832,7 @@ viewer_einrichten_fenster( PdfViewer* pv )
     gtk_box_pack_start( GTK_BOX(vbox_tools), button_highlight, FALSE, FALSE, 0 );
     gtk_box_pack_start( GTK_BOX(vbox_tools), button_underline, FALSE, FALSE, 0 );
     gtk_box_pack_start( GTK_BOX(vbox_tools), button_paint, FALSE, FALSE, 0 );
+    gtk_box_pack_start( GTK_BOX(vbox_tools), frame_spin, FALSE, FALSE, 0 );
 #ifndef VIEWER
     gtk_box_pack_start( GTK_BOX(vbox_tools), pv->button_anbindung, FALSE, FALSE, 0 );
 #endif // VIEWER
@@ -1838,19 +1853,11 @@ viewer_einrichten_fenster( PdfViewer* pv )
     GtkWidget* frame_seiten = gtk_frame_new( "Seiten" );
     gtk_container_add( GTK_CONTAINER(frame_seiten), box_seiten );
 
-    //SpinButton für Zoom
-    GtkWidget* spin_button = gtk_spin_button_new_with_range( ZOOM_MIN,
-            ZOOM_MAX, 5.0 );
-    gtk_spin_button_set_value( GTK_SPIN_BUTTON(spin_button), (gdouble) pv->zoom );
-
-    //frame
-    GtkWidget* frame_spin = gtk_frame_new( "Zoom" );
-    gtk_container_add( GTK_CONTAINER(frame_spin), spin_button );
-
     //Textsuche im geöffneten Dokument
     pv->button_vorher = gtk_button_new_from_icon_name( "go-previous",
             GTK_ICON_SIZE_SMALL_TOOLBAR );
     pv->entry_search = gtk_entry_new( );
+    gtk_entry_set_width_chars( GTK_ENTRY(pv->entry_search), 15 );
     pv->button_nachher = gtk_button_new_from_icon_name( "go-next",
             GTK_ICON_SIZE_SMALL_TOOLBAR );
 
@@ -1862,7 +1869,6 @@ viewer_einrichten_fenster( PdfViewer* pv )
     gtk_container_add( GTK_CONTAINER(frame_search), box_text );
 
     gtk_header_bar_pack_start( GTK_HEADER_BAR(pv->headerbar), frame_seiten );
-    gtk_header_bar_pack_start( GTK_HEADER_BAR(pv->headerbar), frame_spin );
     gtk_header_bar_pack_end( GTK_HEADER_BAR(pv->headerbar), frame_search );
 
 //layout
@@ -1968,10 +1974,6 @@ viewer_einrichten_fenster( PdfViewer* pv )
     //signale des entry
     g_signal_connect( pv->entry, "activate",
             G_CALLBACK(cb_viewer_page_entry_activated), (gpointer) pv );
-
-    //signale des SpinButton
-    g_signal_connect( spin_button, "value-changed",
-            G_CALLBACK(cb_viewer_spinbutton_value_changed), (gpointer) pv );
 
     //Textsuche-entry
     g_signal_connect( pv->entry_search, "activate",

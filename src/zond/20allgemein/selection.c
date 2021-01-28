@@ -276,7 +276,7 @@ selection_datei_einfuegen_in_db( Projekt* zond, GFile* file, gint node_id,
         return -1;
     }
 
-    rel_path = get_rel_path_from_file( zond, file );
+    rel_path = fm_get_rel_path_from_file( zond->project_dir, file );
     rc = db_set_datei( zond, new_node_id, rel_path, errmsg );
     g_free( rel_path );
     if ( rc ) ERROR_PAO( "db_set_datei" )
@@ -298,7 +298,7 @@ selection_datei_anbinden( Projekt* zond, InfoWindow* info_window, GFile* file, g
     if ( info_window->cancel ) return -2;
 
     //Prüfen, ob Datei schon angebunden
-    gchar* rel_path = get_rel_path_from_file( zond, file );
+    gchar* rel_path = fm_get_rel_path_from_file( zond->project_dir, file );
     rc = db_get_node_id_from_rel_path( zond, rel_path, errmsg );
     if ( rc == -1 )
     {
