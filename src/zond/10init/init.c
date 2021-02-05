@@ -232,7 +232,7 @@ init( GtkApplication* app )
     {
         meldung( zond->app_window, "zond->ctx konnte nicht initialisiert werden",
                 NULL );
-                gboolean ret = FALSE;
+        gboolean ret = FALSE;
         g_signal_emit_by_name( zond->app_window, "delete-event", NULL, &ret );
 
         return NULL;

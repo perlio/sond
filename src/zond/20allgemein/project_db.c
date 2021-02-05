@@ -731,16 +731,30 @@ project_db_create( sqlite3* db, gchar** errmsg )
                 "PRIMARY KEY(ID) "
             "); "
 
+            "CREATE TABLE eingang ("
+                "rel_path VARCHAR(200), "
+                "eingangsdatum DATE, "
+                "transport VARCHAR(30), " //Post, Fax, pers.,
+                "traeger VARCHAR(30), " //CD, Papier, USB
+                "ort VARCHAR(30), " //Kanzlei, HV-Saal
+                "absender VARCHAR(30), " //LG Buxtehude, RA Meier
+                "absendedatum DATE, "
+                "erfassungsdatum DATE "
+            "); "
+
             "CREATE TABLE baum_inhalt ("
-            "node_id INTEGER PRIMARY KEY,"
-            "parent_id INTEGER NOT NULL,"
-            "older_sibling_id INTEGER NOT NULL,"
-            "icon_name VARCHAR(50),"
-            "node_text VARCHAR(200), "
-            "FOREIGN KEY (parent_id) REFERENCES baum_inhalt (node_id) "
-            "ON DELETE CASCADE ON UPDATE CASCADE, "
-            "FOREIGN KEY (older_sibling_id) REFERENCES baum_inhalt (node_id) "
-            "ON DELETE CASCADE ON UPDATE CASCADE ); "
+                "node_id INTEGER PRIMARY KEY,"
+                "parent_id INTEGER NOT NULL,"
+                "older_sibling_id INTEGER NOT NULL,"
+                "icon_name VARCHAR(50),"
+                "node_text VARCHAR(200), "
+                "FOREIGN KEY (eingang) REFERENCES eingang (ID) "
+                "ON DELETE CASCADE ON UPDATE CASCADE, "
+                "FOREIGN KEY (parent_id) REFERENCES baum_inhalt (node_id) "
+                "ON DELETE CASCADE ON UPDATE CASCADE, "
+                "FOREIGN KEY (older_sibling_id) REFERENCES baum_inhalt (node_id) "
+                "ON DELETE CASCADE ON UPDATE CASCADE "
+            "); "
 
             "INSERT INTO baum_inhalt (node_id, parent_id, older_sibling_id, "
             "node_text ) VALUES (0, 0, 0, 'zondv1');"

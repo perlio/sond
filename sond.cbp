@@ -365,8 +365,12 @@
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
 		</Unit>
-		<Unit filename="src/zond/20allgemein/db_sojus_zentral.c">
+		<Unit filename="src/zond/20allgemein/eingang.c">
 			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/20allgemein/eingang.h">
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
 		</Unit>

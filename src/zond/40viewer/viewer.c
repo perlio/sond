@@ -111,6 +111,8 @@ viewer_springen_zu_pos_pdf( PdfViewer* pv, PdfPos pdf_pos, gdouble delta )
 {
     gdouble value = 0.0;
 
+    if ( pdf_pos.seite > pv->arr_pages->len ) pdf_pos.seite = pv->arr_pages->len - 1;
+
     //zur zunächst anzuzeigenden Position springen
     gdouble value_seite = viewer_abfragen_value_von_seite( pv, pdf_pos.seite );
 

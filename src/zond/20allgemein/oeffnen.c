@@ -202,7 +202,7 @@ oeffnen_internal_viewer( Projekt* zond, const gchar* rel_path, Anbindung* anbind
     if ( pos_pdf ) pos_von = *pos_pdf;
 
     PdfViewer* pv = viewer_start_pv( zond );
-    viewer_display_document( pv, dd, pos_von.seite, 0 );
+    viewer_display_document( pv, dd, pos_von.seite, pos_von.index );
 
     return 0;
 }

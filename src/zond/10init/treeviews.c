@@ -107,10 +107,10 @@ cb_cursor_changed( GtkTreeView* treeview, gpointer user_data )
     }
 
     if ( rc == 2 ) text_label = g_strdup( "" );
-    else if ( rc == 1 ) text_label = g_strconcat( "Datei: ", rel_path, NULL );
+    else if ( rc == 1 ) text_label = g_strdup( rel_path );
     else if ( rc == 0 )
     {
-        text_label = g_strdup_printf( "Datei: %s, von Seite %i, "
+        text_label = g_strdup_printf( "%s, von Seite %i, "
                 "Index %i, bis Seite %i, index %i", rel_path,
                 anbindung->von.seite, anbindung->von.index, anbindung->bis.seite,
                 anbindung->bis.index );
