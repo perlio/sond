@@ -20,6 +20,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../global_types.h"
 #include "../error.h"
 
+#include "project.h"
+
 #include "../99conv/db_read.h"
 #include "../99conv/baum.h"
 #include "../99conv/general.h"
@@ -281,7 +283,7 @@ export_html( Projekt* zond, GFileOutputStream* stream, gint umfang, gchar** errm
             "<html>"
             "<head><title>Export</title></head>"
             "<body>"
-            "<h1>Projekt: ", zond->project_name, "\nBaum: ", (baum = BAUM_INHALT) ? "Inhalt" : "Auswertung",
+            "<h1>Projekt: ", zond->dbase_zond->project_name, "\nBaum: ", (baum = BAUM_INHALT) ? "Inhalt" : "Auswertung",
             "</h1>", NULL );
 
     //Hier htm-Datei in stream schreiben

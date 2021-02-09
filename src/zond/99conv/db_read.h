@@ -34,6 +34,4 @@ gint db_get_node_id_from_rel_path( Projekt*, const gchar*, gchar** );
 
 gint db_check_id( Projekt*, const gchar*, gchar** );
 
-gint db_check_rel_path( Projekt*, const gchar*, gchar** );
-
 #endif // DB_STRUKTUR_H_INCLUDED

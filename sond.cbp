@@ -94,6 +94,19 @@
 			<Add library="C:/msys64/mingw64/lib/libmupdf.a" />
 			<Add library="C:/msys64/mingw64/lib/libmupdf-third.a" />
 		</Linker>
+		<Unit filename="src/dbase.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/dbase.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
 		<Unit filename="src/fm.c">
 			<Option compilerVar="CC" />
 		</Unit>
@@ -361,6 +374,20 @@
 			<Option target="zond (Testing)" />
 		</Unit>
 		<Unit filename="src/zond/20allgemein/convert.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/20allgemein/dbase_full.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/20allgemein/dbase_full.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/20allgemein/dbase_zond.c">
 			<Option compilerVar="CC" />
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />

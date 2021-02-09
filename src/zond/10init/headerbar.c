@@ -24,6 +24,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "../../fm.h"
 #include "../../treeview.h"
+#include "../../dbase.h"
 
 #include "../global_types.h"
 #include "../error.h"
@@ -43,7 +44,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../20allgemein/suchen.h"
 #include "../20allgemein/project.h"
 #include "../20allgemein/export.h"
-#include "../20allgemein/fs_tree.h"
+#include "../20allgemein/dbase_full.h"
 
 #include "../40viewer/document.h"
 
@@ -81,7 +82,7 @@ pdf_rel_path_in_array( GPtrArray* arr_rel_path, gchar* rel_path )
     return FALSE;
 }
 
-GPtrArray*
+static GPtrArray*
 selection_abfragen_pdf( Projekt* zond, gchar** errmsg )
 {
     gint rc = 0;
@@ -448,7 +449,7 @@ cb_punkt_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
         if ( node_id == 0 ) child = TRUE;
     }
 
-    rc = db_begin( zond, &errmsg );
+    rc = dbase_begin( (DBase*) zond->dbase_zond->dbase_work, &errmsg );
     if ( rc )
     {
         meldung( zond->app_window, "Punkt einfügen nicht möglich -\n\nBei "
@@ -458,18 +459,18 @@ cb_punkt_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
     }
 
     //Knoten in Datenbank einfügen
-    new_node_id = db_insert_node( zond, baum, node_id, child, zond->icon[ICON_NORMAL].icon_name,
-            "Neuer Punkt", &errmsg );
+    new_node_id = dbase_full_insert_node( zond->dbase_zond->dbase_work, baum,
+            node_id, child, zond->icon[ICON_NORMAL].icon_name, "Neuer Punkt", &errmsg );
     if ( new_node_id == -1 )
     {
-        meldung( zond->app_window, "Punkt einfügen nicht möglich:\n\nBei Aufruf "
-                "db_insert_node:\n", errmsg, NULL );
+        meldung( zond->app_window, "Punkt einfügen nicht möglich -\n\nBei Aufruf "
+                "dbase_full_insert_node:\n", errmsg, NULL );
         g_free( errmsg );
 
         return;
     }
 
-    rc = db_commit( zond, &errmsg );
+    rc = dbase_commit( (DBase*) zond->dbase_zond->dbase_work, &errmsg );
     if ( rc )
     {
         meldung( zond->app_window, "Punkt einfügen nicht möglich -\n\nBei "
@@ -1292,7 +1293,7 @@ cb_button_mode_toggled( GtkToggleButton* button, gpointer data )
         baum_auswertung = gtk_paned_get_child2( GTK_PANED(gtk_paned_get_child2( GTK_PANED(zond->hpaned) )) );
         gtk_widget_hide( baum_auswertung );
 
-        rc = fm_set_root( zond->treeview[BAUM_FS], zond->project_dir, &errmsg );
+        rc = fm_set_root( zond->treeview[BAUM_FS], zond->dbase_zond->project_dir, &errmsg );
         if ( rc )
         {
             meldung( zond->app_window, "Fehler beim Laden Root-Verzeichnis -\n\n",

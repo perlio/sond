@@ -20,27 +20,31 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <gtk/gtk.h>
 #include <glib/gstdio.h>
 
-#include "../global_types.h"
-#include "../error.h"
-
 #include "../../misc.h"
 #include "../../fm.h"
+#include "../../dbase.h"
+
+#include "../global_types.h"
+#include "../error.h"
 
 #include "../99conv/general.h"
 #include "../99conv/db_zu_baum.h"
 
-#include "fs_tree.h"
-#include "project_db.h"
-
 #include "../40viewer/viewer.h"
 
+#include "fs_tree.h"
+#include "project.h"
+#include "project_db.h"
+#include "dbase_full.h"
 
-void
+
+
+static void
 project_set_changed( gpointer user_data )
 {
     Projekt* zond = (Projekt*) user_data;
 
-    zond->changed = TRUE;
+    zond->dbase_zond->changed = TRUE;
     gtk_widget_set_sensitive( zond->menu.speichernitem, TRUE );
     g_settings_set_boolean( zond->settings, "speichern", TRUE );
 
@@ -48,14 +52,121 @@ project_set_changed( gpointer user_data )
 }
 
 
-void
+static void
 reset_project_changed( Projekt* zond )
 {
-    zond->changed = FALSE;
+    zond->dbase_zond->changed = FALSE;
     gtk_widget_set_sensitive( zond->menu.speichernitem, FALSE );
     g_settings_set_boolean( zond->settings, "speichern", FALSE );
 
     return;
+}
+
+
+gint
+project_test_rel_path( const GFile* file, gpointer data, gchar** errmsg )
+{
+    gint rc = 0;
+    gchar* rel_path = NULL;
+
+    Projekt* zond = (Projekt*) data;
+
+    rel_path = fm_get_rel_path_from_file( zond->dbase_zond->project_dir, file );
+
+    rc = dbase_test_path( zond->dbase_zond->dbase_store, rel_path, errmsg );
+    if ( rc ) g_free( rel_path );
+    if ( rc == -1 ) ERROR( "dbase_test_path" )
+    else if ( rc == 1 ) return 1;
+
+    rc = dbase_test_path( (DBase*) zond->dbase_zond->dbase_work, rel_path, errmsg );
+    g_free( rel_path );
+    if ( rc == -1 ) ERROR( "dbase_test_path" )
+    else if ( rc == 1 ) return 1;
+
+    return 0;
+}
+
+
+gint
+project_before_move( const GFile* file_source, const GFile* file_dest,
+        gpointer data, gchar** errmsg )
+{
+    gint rc = 0;
+
+    Projekt* zond = (Projekt*) data;
+
+    rc = dbase_begin( zond->dbase_zond->dbase_store, errmsg );
+    if ( rc ) ERROR( "dbase_begin (dbase_store" )
+
+    rc = dbase_begin( (DBase*) zond->dbase_zond->dbase_work, errmsg );
+    if ( rc ) ERROR_ROLLBACK( zond->dbase_zond->dbase_store, "dbase_begin (dbase_work)" )
+
+    gchar* rel_path_source = fm_get_rel_path_from_file( zond->dbase_zond->project_dir, file_source );
+    gchar* rel_path_dest = fm_get_rel_path_from_file( zond->dbase_zond->project_dir, file_dest );
+
+    rc = dbase_update_path( zond->dbase_zond->dbase_store, rel_path_source, rel_path_dest, errmsg );
+    if ( rc )
+    {
+        g_free( rel_path_source );
+        g_free( rel_path_dest );
+
+        ERROR_ROLLBACK_BOTH( zond->dbase_zond->dbase_store,
+            (DBase*) zond->dbase_zond->dbase_work, "dbase_update_path (dbase_store)" )
+    }
+
+    rc = dbase_update_path( (DBase*) zond->dbase_zond->dbase_work, rel_path_source, rel_path_dest, errmsg );
+    g_free( rel_path_source );
+    g_free( rel_path_dest );
+    if ( rc ) ERROR_ROLLBACK_BOTH( zond->dbase_zond->dbase_store,
+            (DBase*) zond->dbase_zond->dbase_work, "dbase_update_path (dbase_work)" )
+
+    return 0;
+}
+
+
+gint
+project_after_move( const gint rc_edit, gpointer data, gchar** errmsg )
+{
+    gint rc = 0;
+
+    Projekt* zond = (Projekt*) data;
+
+    if ( rc_edit == 1 )
+    {
+        gint rc1 = 0;
+        gint rc2 = 0;
+        gchar* err_rollback = NULL;
+
+        rc1 = dbase_rollback( zond->dbase_zond->dbase_store, &err_rollback );
+        if ( rc1 && errmsg ) *errmsg = g_strconcat( "Bei Aufruf dbase_rollback "
+                "(dbase_store):\n", err_rollback, NULL );
+        g_free( err_rollback );
+
+        rc2 = dbase_rollback  ( (DBase*) zond->dbase_zond->dbase_work, &err_rollback );
+        if ( rc2 && errmsg ) *errmsg = g_strconcat( "Bei Aufruf dbase_rollback "
+                "(dbase_work):\n", err_rollback, NULL );
+        g_free( err_rollback );
+
+        if ( (rc1 || rc2) )
+        {
+            if ( errmsg ) *errmsg = add_string( *errmsg,
+                    g_strdup( "\n\nDatenbank inkonsistent" ) );
+
+            return -1;
+        }
+    }
+    else
+    {
+        rc = dbase_commit( zond->dbase_zond->dbase_store, errmsg );
+        if ( rc ) ERROR_ROLLBACK_BOTH( zond->dbase_zond->dbase_store,
+                (DBase*) zond->dbase_zond->dbase_work, "dbase_commit (dbase_store)" )
+
+        rc = dbase_commit( (DBase*) zond->dbase_zond->dbase_work, errmsg );
+        if ( rc ) ERROR_ROLLBACK_BOTH( zond->dbase_zond->dbase_store,
+                (DBase*) zond->dbase_zond->dbase_work, "dbase_commit (dbase_work)" )
+    }
+
+    return 0;
 }
 
 
@@ -75,51 +186,132 @@ projekt_set_widgets_sensitiv( Projekt* zond, gboolean active )
 }
 
 
-gint
-projekt_aktivieren( Projekt* zond, gchar* project, gboolean disc, gchar** errmsg )
+static gint
+project_backup( sqlite3* db_orig, sqlite3* db_dest, gchar** errmsg )
 {
-    //Pfad aus filename entfernen
-    gchar* mark = strrchr( project, '/' );
-    zond->project_name = g_strdup( mark  + 1 );
+    gint rc = 0;
 
-    //project_dir
-    zond->project_dir = g_strndup( project, strlen( project ) - strlen(
-            mark ) );
+    //Datenbank öffnen
+    sqlite3_backup* backup = NULL;
+    backup = sqlite3_backup_init( db_dest, "main", db_orig, "main" );
 
-    //zum Arbeitsverzeichnis machen
-    g_chdir( zond->project_dir );
-
-//Datenbankdateien öffnen
-    //Ursprungsdatei
-    zond->dbase = project_db_init_database( zond->project_name,
-            zond->project_dir, disc, errmsg );
-    if ( !zond->dbase )
+    if ( !backup )
     {
-        g_free( zond->project_name );
-        g_free( zond->project_dir );
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_backup_init\nresult code: ",
+                sqlite3_errstr( sqlite3_errcode( db_dest ) ), "\n",
+                sqlite3_errmsg( db_dest ), NULL );
 
-        zond->project_name = NULL;
-        zond->project_dir = NULL;
+        return -1;
+    }
+    rc = sqlite3_backup_step( backup, -1 );
+    sqlite3_backup_finish( backup );
+    if ( rc != SQLITE_DONE )
+    {
+        if ( errmsg && rc == SQLITE_NOTADB ) *errmsg = g_strdup( "Datei ist "
+                "keine SQLITE-Datenbank" );
+        else if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_backup_step:\nresult code: ",
+                sqlite3_errstr( rc ), "\n", sqlite3_errmsg( db_dest ), NULL );
 
-        ERROR_PAO( "project_db_init_database" )
+        return -1;
     }
 
-    zond->db = zond->dbase->db;
-    zond->db_store = zond->dbase->db_store;
+    return 0;
+}
 
-    sqlite3_update_hook( zond->dbase->db, (void*) project_set_changed, (gpointer) zond );
+
+static gint
+project_create_dbase_zond( Projekt* zond, const gchar* path, gboolean create,
+        DBaseZond** dbase_zond, gchar** errmsg )
+{
+    gint rc = 0;
+    DBase* dbase = NULL;
+    gchar* path_tmp = NULL;
+    DBaseFull* dbase_full = NULL;
+
+    rc = dbase_create( path, &dbase, create, FALSE, errmsg );
+    if ( rc == -1 ) ERROR( "projekt_create_dbase_zond" )
+    else if ( rc == 1 ) return 1;
+
+    path_tmp = g_strconcat( path, ".tmp", NULL );
+    rc = dbase_full_create( path_tmp, &dbase_full, FALSE, TRUE, errmsg );
+    if ( rc )
+    {
+        dbase_destroy( dbase );
+        g_free( path_tmp );
+        if ( rc == -1 ) ERROR( "dbase_full_create" )
+        else if ( rc == 1 ) return 1;
+    }
+
+    rc = project_backup( zond->dbase_zond->dbase_store->db, zond->dbase_zond->dbase_work->dbase.db, errmsg );
+    if ( rc ) ERROR( "project_backup" )
+
+    sqlite3_update_hook( zond->dbase_zond->dbase_work->dbase.db,
+            (void*) project_set_changed, (gpointer) zond );
+
+    *dbase_zond = g_malloc0( sizeof( DBaseZond ) );
+
+    (*dbase_zond)->dbase_store = dbase;
+    (*dbase_zond)->dbase_work = dbase_full;
+    (*dbase_zond)->project_name = g_strdup( strrchr( path, '/' ) + 1 );
+    (*dbase_zond)->project_dir = g_strndup( path, strlen( path ) - strlen(
+            strrchr( path, '/' ) ) );
+
+    return 0;
+}
+
+
+static void
+projekt_aktivieren( Projekt* zond )
+{
+    //zum Arbeitsverzeichnis machen
+    g_chdir( zond->dbase_zond->project_dir );
 
     projekt_set_widgets_sensitiv( zond, TRUE );
 
     //project_name als Titel Headerbar
     gtk_header_bar_set_title(
             GTK_HEADER_BAR(gtk_window_get_titlebar(
-            GTK_WINDOW(zond->app_window) )), zond->project_name );
+            GTK_WINDOW(zond->app_window) )), zond->dbase_zond->project_name );
 
     //project_name in settings schreiben
-    gchar* set = g_strconcat( zond->project_dir, "/", zond->project_name, NULL );
+    gchar* set = g_strconcat( zond->dbase_zond->project_dir, "/",
+            zond->dbase_zond->project_name, NULL );
     g_settings_set_string( zond->settings, "project", set );
     g_free( set );
+
+    reset_project_changed( zond );
+
+    return;
+}
+
+
+static void
+project_clear_dbase_zond( DBaseZond** dbase_zond )
+{
+    dbase_destroy( (DBase*) (*dbase_zond)->dbase_work );
+    dbase_destroy( (*dbase_zond)->dbase_store );
+
+    g_free( (*dbase_zond)->project_dir );
+    g_free( (*dbase_zond)->project_name );
+
+    g_free( *dbase_zond );
+
+    *dbase_zond = NULL;
+
+    return;
+}
+
+
+static gint
+project_speichern( Projekt* zond, gchar** errmsg )
+{
+    gint rc = 0;
+
+    if ( !(zond->dbase_zond->changed) ) return 0;
+
+    rc = project_backup( zond->dbase_zond->dbase_work->dbase.db,
+            zond->dbase_zond->dbase_store->db,errmsg );
+    if ( rc ) ERROR( "project_backup" )
 
     reset_project_changed( zond );
 
@@ -127,12 +319,46 @@ projekt_aktivieren( Projekt* zond, gchar* project, gboolean disc, gchar** errmsg
 }
 
 
-void projekt_schliessen( Projekt* zond )
+void
+cb_menu_datei_speichern_activate( GtkMenuItem* item, gpointer user_data )
 {
     gint rc = 0;
     gchar* errmsg = NULL;
 
-    if ( !zond->project_name ) return;
+    Projekt* zond = (Projekt*) user_data;
+
+    rc = project_speichern( zond, &errmsg );
+    if ( rc )
+    {
+        meldung( zond->app_window, "Fehler beim Speichern -\n\nBei Aufruf "
+                "project_speichern:\n", errmsg, NULL );
+        g_free( errmsg );
+    }
+
+    return;
+}
+
+
+gint
+projekt_schliessen( Projekt* zond, gchar** errmsg )
+{
+    if ( !zond->dbase_zond ) return 0;
+
+    if ( zond->dbase_zond->changed )
+    {
+        gint rc = 0;
+
+        rc = abfrage_frage( zond->app_window, "Datei schließen", "Änderungen "
+                "aktuelles Projekt speichern?", NULL );
+
+        if ( rc == GTK_RESPONSE_YES )
+        {
+            gint rc = 0;
+            rc = project_speichern( zond, errmsg );
+            if ( rc ) ERROR( "projekt_speichern" )
+        }
+        else if ( rc != GTK_RESPONSE_NO) return 1;
+    }
 
     for ( gint i = 0; i < zond->arr_pv->len; i++ )
             viewer_schliessen( g_ptr_array_index( zond->arr_pv, i ) );
@@ -174,26 +400,19 @@ void projekt_schliessen( Projekt* zond )
     //muß vor project_destroy..., weil callback ausgelöst wird, der db_get_node_id... aufruft
     gtk_toggle_button_set_active( GTK_TOGGLE_BUTTON(zond->fs_button), FALSE );
 
-    //prepared statements zerstören
-    rc = project_db_finish_database( zond->dbase, &errmsg );
-    if ( rc )
-    {
-        meldung( zond->app_window, errmsg, NULL );
-        g_free( errmsg );
-    }
+    //legacy...
+    project_db_destroy_stmts( zond->dbase );
+    g_free( zond->dbase );
+    zond->dbase = NULL;
 
-    gchar* working_copy = g_strconcat( zond->project_dir, "/",
-            zond->project_name, ".tmp", NULL );
+    gchar* working_copy = g_strconcat( zond->dbase_zond->project_dir, "/",
+            zond->dbase_zond->project_name, ".tmp", NULL );
     gint res = g_remove( working_copy );
     if ( res == -1) meldung( zond->app_window, "Fehler beim Löschen der "
             "temporären Datenbank:\n", strerror( errno ), NULL );
     g_free( working_copy );
 
-    //project-Namen zurücksetzen
-    g_free( zond->project_name );
-    g_free( zond->project_dir );
-    zond->project_name = NULL;
-    zond->project_dir = NULL;
+    project_clear_dbase_zond( &(zond->dbase_zond) );
 
     gtk_header_bar_set_title(
             GTK_HEADER_BAR(gtk_window_get_titlebar(
@@ -202,51 +421,80 @@ void projekt_schliessen( Projekt* zond )
     //project in settings auf leeren String setzen
     g_settings_set_string( zond->settings, "project", "" );
 
-    return;
-}
-
-
-void
-cb_menu_datei_speichern_activate( GtkMenuItem* item, gpointer user_data )
-{
-    Projekt* zond = (Projekt*) user_data;
-
-    if ( !(zond->changed) ) return;
-
-    gint rc = 0;
-    gchar* errmsg = NULL;
-
-    rc = project_db_backup( zond->db, zond->db_store, &errmsg );
-    if ( rc )
-    {
-        meldung( zond->app_window, "Fehler beim Speichern:\n Bei Aufruf "
-                "db_backup\n", errmsg, NULL );
-        g_free( errmsg );
-    }
-    else reset_project_changed( zond );
-
-    return;
+    return 0;
 }
 
 
 void
 cb_menu_datei_schliessen_activate( GtkMenuItem* item, gpointer user_data )
 {
+    gint rc = 0;
+    gchar* errmsg = NULL;
+
     Projekt* zond = (Projekt*) user_data;
 
-    if ( zond->changed )
+    rc = projekt_schliessen( zond, &errmsg );
+    if ( rc )
     {
-        gint rc = 0;
-        rc = abfrage_frage( zond->app_window, "Datei schließen", "Änderungen "
-                "aktuelles Projekt speichern?", NULL );
-
-        if ( rc == GTK_RESPONSE_YES ) cb_menu_datei_speichern_activate( NULL, zond );
-        else if ( rc != GTK_RESPONSE_NO) return;
+        display_message( zond->app_window, "Fehler bei Schließen des Projekts -\n\n"
+                "Bei Aufruf projekt_schliessen:\n", errmsg, NULL );
+        g_free( errmsg );
     }
 
-    projekt_schliessen( (Projekt*) zond );
-
     return;
+}
+
+
+gint
+project_oeffnen( Projekt* zond, const gchar* abs_path, gboolean create,
+        gchar** errmsg )
+{
+    gint rc = 0;
+    DBaseZond* dbase_zond = NULL;
+
+    rc = project_create_dbase_zond( zond, abs_path, FALSE, &dbase_zond, errmsg );
+    if ( rc == -1 ) ERROR( "project_create_dbase_zond" )
+    else if ( rc == 1 ) return 1;
+
+    rc = projekt_schliessen( zond, errmsg );
+    if ( rc )
+    {
+        project_clear_dbase_zond( &dbase_zond );
+        if ( rc == -1 ) ERROR( "project_schliessen" )
+        else return 1;
+    }
+
+    zond->dbase_zond = dbase_zond;
+
+    projekt_aktivieren( zond );
+
+    //legacy...
+    Database* dbase = g_malloc0( sizeof( Database ) );
+    dbase->db_store = zond->dbase_zond->dbase_store->db;
+    dbase->db = zond->dbase_zond->dbase_work->dbase.db;
+    rc = project_db_create_stmts( dbase, errmsg );
+    if ( rc ) ERROR( "project_db_create_stmts" )
+
+    zond->dbase = dbase;
+    zond->db = zond->dbase->db;
+    zond->db_store = zond->dbase->db_store;
+
+    return 0;
+}
+
+
+static gint
+project_wechseln( Projekt* zond )
+{
+    gint rc = 0;
+    //nachfragen, ob aktuelles Projekt gespeichert werden soll
+    if ( !zond->dbase_zond ) return 0;
+
+    rc = abfrage_frage( zond->app_window, zond->dbase_zond->project_name,
+            "Projekt schließen?", NULL );
+    if( (rc != GTK_RESPONSE_YES) ) return 1; //Abbrechen -> nicht öffnen
+
+    return 0;
 }
 
 
@@ -258,36 +506,23 @@ cb_menu_datei_oeffnen_activate( GtkMenuItem* item, gpointer user_data )
 
     Projekt* zond = (Projekt*) user_data;
 
-    //nachfragen, ob aktuelles Projekt gespeichert werden soll
-    if ( zond->project_name != NULL )
-    {
-        rc = abfrage_frage( zond->app_window, "Datei öffnen", "Projekt wechseln?", NULL );
-        if( (rc != GTK_RESPONSE_YES) ) return; //Abbrechen -> nicht öffnen
-    }
-
-    if ( zond->changed )
-    {
-        rc = abfrage_frage( zond->app_window, "Datei öffnen", "Änderungen "
-                "aktuelles Projekt speichern?", NULL );
-
-        if ( rc == GTK_RESPONSE_YES ) cb_menu_datei_speichern_activate( NULL, zond );
-        else if ( rc != GTK_RESPONSE_NO) return;
-    }
+    rc = project_wechseln( zond );
+    if ( rc ) return;
 
     gchar* abs_path = filename_oeffnen( GTK_WINDOW(zond->app_window) );
     if ( !abs_path ) return;
 
-    projekt_schliessen( zond );
-    rc = projekt_aktivieren( zond, abs_path, FALSE, &errmsg );
+    rc = project_oeffnen( zond, abs_path, FALSE, &errmsg );
     g_free( abs_path );
-    if ( rc )
+    if ( rc == -1 )
     {
-        meldung( zond->app_window, "Bei Aufruf projekt_aktivieren:\n",
-                errmsg, NULL );
+        meldung( zond->app_window, "Fehler beim Öffnen-\n\nBei Aufruf "
+                "project_oeffnen:\n", errmsg, NULL );
         g_free( errmsg );
 
         return;
     }
+    else if ( rc == 1 ) return;
 
     rc = db_baum_refresh( zond, &errmsg );
     if ( rc == -1 )
@@ -309,41 +544,21 @@ cb_menu_datei_neu_activate( GtkMenuItem* item, gpointer user_data )
 
     Projekt* zond = (Projekt*) user_data;
 
-    //nachfragen, ob aktuelles Projekt gespeichert werden soll
-    if ( zond->project_name != NULL )
-    {
-        rc = abfrage_frage( zond->app_window, "Neues Projekt", "Projekt wechseln?", NULL );
-        if( rc != GTK_RESPONSE_YES ) return; //kein neues Projekt anlegen
-    }
-
-    if ( zond->changed )
-    {
-        rc = abfrage_frage( zond->app_window, "Neues Projekt", "Änderungen "
-                "aktuelles Projekt speichern?", NULL );
-
-        if ( rc == GTK_RESPONSE_YES ) cb_menu_datei_speichern_activate( NULL, zond );
-        else if ( rc != GTK_RESPONSE_NO) return;
-
-        reset_project_changed( zond );
-    }
+    rc = project_wechseln( zond );
+    if ( rc ) return;
 
     gchar* abs_path = filename_speichern( GTK_WINDOW(zond->app_window),
             "Projekt anlegen" );
     if ( !abs_path ) return;
 
-    projekt_schliessen( zond );
-    rc = projekt_aktivieren( zond, abs_path, TRUE, &errmsg );
+    rc = project_oeffnen( zond, abs_path, TRUE, &errmsg );
     g_free( abs_path );
-    if ( rc )
+    if ( rc == -1 )
     {
-        meldung( zond->app_window, "Bei Aufruf projekt_aktivieren:\n",
-                errmsg, NULL );
+        meldung( zond->app_window, "Fehler beim Öffnen-\n\nBei Aufruf "
+                "project_oeffnen:\n", errmsg, NULL );
         g_free( errmsg );
-
-        return;
     }
-
-    reset_project_changed( zond );
 
     return;
 }

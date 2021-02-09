@@ -53,22 +53,11 @@ project_db_get_open_stmts( sqlite3* db )
 }
 
 
-static void
+void
 project_db_destroy_stmts( Database* dbase )
 {
     sqlite3_finalize( dbase->stmts.db_speichern_textview[0] );
     sqlite3_finalize( dbase->stmts.db_set_datei[0] );
-    sqlite3_finalize( dbase->stmts.transaction[0] );
-    sqlite3_finalize( dbase->stmts.transaction[1] );
-    sqlite3_finalize( dbase->stmts.transaction[2] );
-    sqlite3_finalize( dbase->stmts.transaction_store[0] );
-    sqlite3_finalize( dbase->stmts.transaction_store[1] );
-    sqlite3_finalize( dbase->stmts.transaction_store[2] );
-    sqlite3_finalize( dbase->stmts.db_insert_node[0] );
-    sqlite3_finalize( dbase->stmts.db_insert_node[1] );
-    sqlite3_finalize( dbase->stmts.db_insert_node[2] );
-    sqlite3_finalize( dbase->stmts.db_insert_node[3] );
-    sqlite3_finalize( dbase->stmts.db_insert_node[4] );
     sqlite3_finalize( dbase->stmts.ziele_einfuegen[0] );
     sqlite3_finalize( dbase->stmts.db_kopieren_nach_auswertung[0] );
     sqlite3_finalize( dbase->stmts.db_kopieren_nach_auswertung[1] );
@@ -95,63 +84,18 @@ project_db_destroy_stmts( Database* dbase )
     sqlite3_finalize( dbase->stmts.db_get_ziel[0] );
     sqlite3_finalize( dbase->stmts.db_get_text[0] );
     sqlite3_finalize( dbase->stmts.db_get_rel_path[0] );
-    sqlite3_finalize( dbase->stmts.db_set_node_text[0] );
-    sqlite3_finalize( dbase->stmts.db_set_node_text[1] );
     sqlite3_finalize( dbase->stmts.db_set_icon_id[0] );
     sqlite3_finalize( dbase->stmts.db_set_icon_id[1] );
     sqlite3_finalize( dbase->stmts.db_get_first_child[0] );
     sqlite3_finalize( dbase->stmts.db_get_first_child[1] );
     sqlite3_finalize( dbase->stmts.db_get_node_id_from_rel_path[0] );
     sqlite3_finalize( dbase->stmts.db_check_id[0] );
-    sqlite3_finalize( dbase->stmts.db_update_path[0] );
-    sqlite3_finalize( dbase->stmts.db_update_path[1] );
-    sqlite3_finalize( dbase->stmts.db_check_rel_path[0] );
-    sqlite3_finalize( dbase->stmts.db_check_rel_path[1] );
 
     return;
 }
 
 
 gint
-project_db_finish_database( Database* dbase, gchar** errmsg )
-{
-    gint rc = 0;
-    gint rc1 = 0;
-    gint rc2 = 0;
-    gchar* open_stmts = NULL;
-
-    project_db_destroy_stmts( dbase );
-
-   //Datenbanken schließen
-    rc1 = sqlite3_close( dbase->db_store );
-    if ( rc1 == SQLITE_BUSY )
-    {
-        open_stmts = project_db_get_open_stmts( dbase->db_store );
-        if ( errmsg ) *errmsg = g_strconcat( "db_store kann nicht geschlossen "
-                "werden\n\nOffene Statements:\n", open_stmts, NULL );
-        g_free( open_stmts );
-        rc = -1;
-    }
-    else dbase->db_store = NULL;
-
-    rc2 = sqlite3_close( dbase->db );
-    if ( rc2 == SQLITE_BUSY )
-    {
-        open_stmts = project_db_get_open_stmts( dbase->db_store );
-        if ( errmsg ) *errmsg = add_string( *errmsg, g_strconcat( "db_store "
-                "kann nicht geschlossen werden\n\nOffene Statements:\n", open_stmts, NULL ) );
-        g_free( open_stmts );
-        rc = -1;
-    }
-    else dbase->db = NULL;
-
-    if ( rc == 0 ) g_free( dbase );
-
-    return rc;
-}
-
-
-static gint
 project_db_create_stmts( Database* dbase, gchar** errmsg )
 {
     gint rc = 0;
@@ -179,135 +123,6 @@ project_db_create_stmts( Database* dbase, gchar** errmsg )
 
         return -1;
     }
-
-/*  transactions  */
-    rc = sqlite3_prepare_v2( dbase->db, "BEGIN;", -1, &(dbase->stmts.transaction[0]), NULL );
-    if ( rc != SQLITE_OK )
-    {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_prepare_v2 "
-                "(BEGIN):\n",
-                sqlite3_errmsg( dbase->db ), NULL );
-
-        return -1;
-    }
-
-    rc = sqlite3_prepare_v2( dbase->db, "COMMIT;", -1, &(dbase->stmts.transaction[1]), NULL );
-    if ( rc != SQLITE_OK )
-    {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_prepare_v2 "
-                "(COMMIT):\n",
-                sqlite3_errmsg( dbase->db ), NULL );
-
-        return -1;
-    }
-
-    rc = sqlite3_prepare_v2( dbase->db, "ROLLBACK;", -1, &(dbase->stmts.transaction[2]), NULL );
-    if ( rc != SQLITE_OK )
-    {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_prepare_v2 "
-                "(ROLLBACK):\n",
-                sqlite3_errmsg( dbase->db ), NULL );
-
-        return -1;
-    }
-
-/*  transactions_store  */
-    rc = sqlite3_prepare_v2( dbase->db_store, "BEGIN;", -1, &(dbase->stmts.transaction_store[0]), NULL );
-    if ( rc != SQLITE_OK )
-    {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_prepare_v2 "
-                "(BEGIN db_store):\n",
-                sqlite3_errmsg( dbase->db_store ), NULL );
-
-        return -1;
-    }
-
-    rc = sqlite3_prepare_v2( dbase->db_store, "COMMIT;", -1, &(dbase->stmts.transaction_store[1]), NULL );
-    if ( rc != SQLITE_OK )
-    {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_prepare_v2 "
-                "(COMMIT db_store):\n",
-                sqlite3_errmsg( dbase->db_store ), NULL );
-
-        return -1;
-    }
-
-    rc = sqlite3_prepare_v2( dbase->db_store, "ROLLBACK;", -1, &(dbase->stmts.transaction_store[2]), NULL );
-    if ( rc != SQLITE_OK )
-    {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_prepare_v2 "
-                "(ROLLBACK db_Store):\n",
-                sqlite3_errmsg( dbase->db_store ), NULL );
-
-        return -1;
-    }
-
-/*  db_insert_node  */
-    rc = sqlite3_prepare_v2( dbase->db,
-        "INSERT INTO baum_inhalt "
-        "(parent_id, older_sibling_id, icon_name, node_text) "
-        "VALUES ("
-            "CASE ?1 " //child
-                "WHEN 0 THEN (SELECT parent_id FROM baum_inhalt WHERE node_id=?2) "
-                "WHEN 1 THEN ?2 " //node_id
-            "END, "
-            "CASE ?1 "
-                "WHEN 0 THEN ?2 "
-                "WHEN 1 THEN 0 "
-            "END, "
-            "?3, " //icon_name
-            "?4); ", //node_text
-            -1, &(dbase->stmts.db_insert_node[0]), NULL );
-    if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_prepare_v2 (db_insert_node[0])" )
-
-    rc = sqlite3_prepare_v2( dbase->db,
-        "INSERT INTO baum_auswertung "
-        "(parent_id, older_sibling_id, icon_name, node_text) "
-        "VALUES ("
-            "CASE ?1 " //child
-                "WHEN 0 THEN (SELECT parent_id FROM baum_auswertung WHERE node_id=?2) "
-                "WHEN 1 THEN ?2 " //node_id
-            "END, "
-            "CASE ?1 "
-                "WHEN 0 THEN ?2 "
-                "WHEN 1 THEN 0 "
-            "END, "
-            "?3, " //icon_name
-            "?4); ", //node_text
-            -1, &(dbase->stmts.db_insert_node[1]), NULL );
-    if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_prepare_v2 (db_insert_node[1])" )
-
-    rc = sqlite3_prepare_v2( dbase->db,
-            "UPDATE baum_inhalt SET "
-                "older_sibling_id=last_insert_rowid() "
-            "WHERE "
-                "parent_id=(SELECT parent_id FROM baum_inhalt WHERE node_id=last_insert_rowid()) "
-            "AND "
-                "older_sibling_id=(SELECT older_sibling_id FROM baum_inhalt WHERE node_id=last_insert_rowid()) "
-            "AND "
-                "node_id!=last_insert_rowid() "
-            "AND "
-                "node_id!=0; ",
-            -1, &(dbase->stmts.db_insert_node[2]), NULL );
-    if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_prepare_v2 (db_insert_node[2])" )
-
-    rc = sqlite3_prepare_v2( dbase->db,
-            "UPDATE baum_auswertung SET "
-                "older_sibling_id=last_insert_rowid() "
-            "WHERE "
-                "parent_id=(SELECT parent_id FROM baum_auswertung WHERE node_id=last_insert_rowid()) "
-            "AND "
-                "older_sibling_id=(SELECT older_sibling_id FROM baum_auswertung WHERE node_id=last_insert_rowid()) "
-            "AND "
-                "node_id!=last_insert_rowid() "
-            "AND "
-                "node_id!=0; ",
-            -1, &(dbase->stmts.db_insert_node[3]), NULL );
-    if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_prepare_v2 (db_insert_node[3])" )
-
-    rc = sqlite3_prepare_v2( dbase->db, "VALUES (last_insert_rowid()); ",
-            -1, &(dbase->stmts.db_insert_node[4]), NULL );
-    if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_prepare_v2 (db_insert_node[4])" )
 
 /*  ziele_einfuegen  */
     rc = sqlite3_prepare_v2( dbase->db, "INSERT INTO ziele (ziel_id_von, index_von, "
@@ -570,19 +385,6 @@ project_db_create_stmts( Database* dbase, gchar** errmsg )
     if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_prepare_v2 "
                 "(db_get_rel_path[0])" )
 
-/*  db_set_node_text  */
-    rc = sqlite3_prepare_v2( dbase->db,
-            "UPDATE baum_inhalt SET node_text = ?1 WHERE node_id = ?2;",
-            -1, &(dbase->stmts.db_set_node_text[0]), NULL );
-    if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_prepare_v2 "
-                "(db_set_node_text[0])" )
-
-    rc = sqlite3_prepare_v2( dbase->db,
-            "UPDATE baum_auswertung SET node_text = ?1 WHERE node_id = ?2;",
-            -1, &(dbase->stmts.db_set_node_text[1]), NULL );
-    if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_prepare_v2 "
-                "(db_set_node_text[1])" )
-
 /*  db_set_icon_name  */
     rc = sqlite3_prepare_v2( dbase->db,
             "UPDATE baum_inhalt SET icon_name = ?1 WHERE node_id = ?2;",
@@ -632,65 +434,6 @@ project_db_create_stmts( Database* dbase, gchar** errmsg )
             -1, &(dbase->stmts.db_check_id[0]), NULL );
     if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_prepare_v2 "
                 "(db_check_id[0])" )
-
-/*  db_update_path  */
-    rc = sqlite3_prepare_v2( dbase->db,
-            "UPDATE dateien SET rel_path = REPLACE( SUBSTR( rel_path, 1, LENGTH( ?1 ) ), ?1, ?2 ) || SUBSTR( rel_path, LENGTH( ?1 ) + 1 );",
-            -1, &(dbase->stmts.db_update_path[0]), NULL );
-    if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_prepare_v2 "
-                "(db_update_path[0])" )
-
-    rc = sqlite3_prepare_v2( dbase->db_store,
-            "UPDATE dateien SET rel_path = REPLACE( SUBSTR( rel_path, 1, LENGTH( ?1 ) ), ?1, ?2 ) || SUBSTR( rel_path, LENGTH( ?1 ) + 1 );",
-            -1, &(dbase->stmts.db_update_path[1]), NULL );
-    if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_prepare_v2 "
-                "(db_update_path[1])" )
-
-/*  db_check_rel_path  */
-    rc = sqlite3_prepare_v2( dbase->db,
-            "SELECT node_id FROM dateien WHERE rel_path=?1;",
-            -1, &(dbase->stmts.db_check_rel_path[0]), NULL );
-    if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_prepare_v2 "
-                "(db_check_rel_path[0])" )
-
-    rc = sqlite3_prepare_v2( dbase->db_store,
-            "SELECT node_id FROM dateien WHERE rel_path=?1;",
-            -1, &(dbase->stmts.db_check_rel_path[1]), NULL );
-    if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_prepare_v2 "
-                "(db_check_rel_path[1])" )
-
-    return 0;
-}
-
-
-gint
-project_db_backup( sqlite3* db_orig, sqlite3* db_dest, gchar** errmsg )
-{
-    gint rc = 0;
-
-    //Datenbank öffnen
-    sqlite3_backup* backup = NULL;
-    backup = sqlite3_backup_init( db_dest, "main", db_orig, "main" );
-
-    if ( !backup )
-    {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_backup_init\nresult code: ",
-                sqlite3_errstr( sqlite3_errcode( db_dest ) ), "\n",
-                sqlite3_errmsg( db_dest ), NULL );
-
-        return -1;
-    }
-    rc = sqlite3_backup_step( backup, -1 );
-    sqlite3_backup_finish( backup );
-    if ( rc != SQLITE_DONE )
-    {
-        if ( errmsg && rc == SQLITE_NOTADB ) *errmsg = g_strdup( "Datei ist "
-                "keine SQLITE-Datenbank" );
-        else if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_backup_step:\nresult code: ",
-                sqlite3_errstr( rc ), "\n", sqlite3_errmsg( db_dest ), NULL );
-
-        return -1;
-    }
 
     return 0;
 }
@@ -813,86 +556,5 @@ project_db_create( sqlite3* db, gchar** errmsg )
     }
 
     return TRUE;
-}
-
-
-Database*
-project_db_init_database( gchar* project_name, gchar* project_dir, gboolean disc,
-        gchar** errmsg )
-{
-    gint rc = 0;
-    gchar* db_name = NULL;
-    gchar* db_store_name = NULL;
-
-    Database* dbase = g_malloc0( sizeof( Database ) );
-
-    db_store_name = g_strconcat( project_dir, "/", project_name, NULL );
-
-    rc = sqlite3_open( db_store_name, &(dbase->db_store ) ); //gibt auch dann ok zurück, wenn keine sqlite-Datei!
-    g_free( db_store_name );
-    if ( rc != SQLITE_OK )
-    {
-        sqlite3_close( dbase->db_store );
-        g_free( dbase );
-        ERROR_PAO_R( "sqlite3_open (db_store)", NULL )
-    }
-
-    if ( disc && !project_db_create( dbase->db_store, errmsg ) )
-    {
-        sqlite3_close( dbase->db_store );
-        g_free( dbase );
-        ERROR_PAO_R( "project_db_create", NULL )
-    }
-
-    //Arbeitskopie
-    db_name = g_strconcat( project_dir, "/", project_name,
-            ".tmp", NULL );
-    rc = sqlite3_open( db_name, &(dbase->db) );
-    g_free( db_name );
-    if ( rc != SQLITE_OK )
-    {
-        sqlite3_close( dbase->db_store );
-        sqlite3_close( dbase->db );
-        g_free( dbase );
-        ERROR_PAO_R( "sqlite3_open (db)", NULL )
-    }
-
-    //in Arbeitskopie kopieren
-    rc = project_db_backup( dbase->db_store, dbase->db, errmsg );
-    if ( rc )
-    {
-        sqlite3_close( dbase->db_store );
-        sqlite3_close( dbase->db );
-        g_free( dbase );
-        ERROR_PAO_R( "project_db_backup", NULL )
-    }
-
-    //Damit foreign keys funktionieren
-    gchar* errmsg_ii = NULL;
-    gchar* sql = "PRAGMA foreign_keys = ON; PRAGMA case_sensitive_like = ON";
-    rc = sqlite3_exec( dbase->db, sql, NULL, NULL, &errmsg_ii );
-    if ( rc != SQLITE_OK )
-    {
-        sqlite3_close( dbase->db_store );
-        sqlite3_close( dbase->db );
-        g_free( dbase );
-
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_exec\nsql: ",
-                sql, "\nresult code: ", sqlite3_errstr( rc ), "\n", errmsg_ii, NULL );
-        sqlite3_free( errmsg_ii );
-
-        return NULL;
-    }
-
-    rc = project_db_create_stmts( dbase, errmsg );
-    if ( rc )
-    {
-        sqlite3_close( dbase->db_store );
-        sqlite3_close( dbase->db );
-        g_free( dbase );
-        ERROR_PAO_R( "project_create_stmts", NULL )
-    }
-
-    return dbase;
 }
 

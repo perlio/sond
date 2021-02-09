@@ -120,10 +120,12 @@ aktenschnellansicht_create_window( Sojus* sojus )
     g_signal_connect( sojus->widgets.AppWindow.AktenSchnellansicht.button_doc_erzeugen,
             "clicked", G_CALLBACK(cb_bu_doc_erzeugen), sojus );
 
+/*
     sojus->widgets.AppWindow.AktenSchnellansicht.treeview_fm =
             GTK_WIDGET(fm_create_tree_view( ));
     gtk_container_add( GTK_CONTAINER(swindow),
             sojus->widgets.AppWindow.AktenSchnellansicht.treeview_fm );
+*/
 
     gtk_grid_attach( GTK_GRID(grid_in_frame), swindow, 0, 2, 20, 20 );
 //    gtk_grid_set_row_homogeneous( GTK_GRID(grid_in_frame), TRUE );

@@ -233,6 +233,24 @@ pdf_print_content_stream( fz_context* ctx, pdf_obj* page_ref, gchar** errmsg )
 gint
 test( Projekt* zond, gchar** errmsg )
 {
+    gint rc = 0;
+    sqlite3* db = NULL;
+
+    rc = sqlite3_open_v2( "kl.txt", &db, SQLITE_OPEN_READWRITE, NULL );
+    if ( rc != SQLITE_OK )
+    {
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_open_v2:\n",
+                sqlite3_errstr( rc ), NULL );
+        sqlite3_close( db );
+
+        return -1;
+    }
+
+    return 0;
+}
+
+
+/*
     //Pfad LibreOffice herausfinden
     gchar soffice_exe[270] = { 0 };
     GError* error = NULL;
@@ -278,5 +296,5 @@ test( Projekt* zond, gchar** errmsg )
 
     return 0;
 }
-
+*/
 

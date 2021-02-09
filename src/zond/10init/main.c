@@ -32,7 +32,7 @@ open_app( GtkApplication* app, gpointer files, gint n_files, gchar *hint,
 
     if ( !(*zond) ) return;
 
-    if ( (*zond)->project_name ) return;
+    if ( (*zond)->dbase_zond ) return;
 
     open_file( *zond, files );
 

@@ -1,5 +1,8 @@
 /* ToDo-Liste
 
+- DBase
+    -Fehler beim schließen loggen
+
 - suchen
     - Menu Struktur verschieben
     - Einheitliche Suche (Dateiname, node_text, text)

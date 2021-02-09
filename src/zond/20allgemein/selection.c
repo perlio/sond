@@ -25,11 +25,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../99conv/db_write.h"
 #include "../99conv/db_zu_baum.h"
 
-#include "../20allgemein/fs_tree.h"
+#include "project.h"
+#include "fs_tree.h"
+#include "dbase_full.h"
 
 #include "../../misc.h"
 #include "../../fm.h"
 #include "../../treeview.h"
+#include "../../dbase.h"
 
 #include <gtk/gtk.h>
 #include <glib/gstdio.h>
@@ -134,24 +137,26 @@ selection_foreach_kopieren( GtkTreeView* tree_view, GtkTreeIter* iter, gpointer 
     gint new_node_id = 0;
 
     SSelectionKopieren* s_selection = (SSelectionKopieren*) data;
-    Projekt* zond = s_selection->zond;
 
-    rc = db_begin( s_selection->zond, errmsg );
-    if ( rc ) ERROR_PAO( "db_begin" )
+    rc = dbase_begin( (DBase*) s_selection->zond->dbase_zond->dbase_work, errmsg );
+    if ( rc ) ERROR( "db_begin" )
 
     gtk_tree_model_get( gtk_tree_view_get_model( tree_view ), iter,
             2, &node_id, -1 );
 
     new_node_id = db_kopieren_nach_auswertung_mit_kindern( s_selection->zond, FALSE, s_selection->baum,
             node_id, s_selection->anchor_id, s_selection->kind, errmsg );
-    if ( new_node_id == -1 ) ERROR_PAO_ROLLBACK( "db_kopieren_nach_auswertung_mit_kindern (urspr. Aufruf)" )
+    if ( new_node_id == -1 ) ERROR_ROLLBACK( (DBase*) s_selection->zond->dbase_zond->dbase_work,
+            "db_kopieren_nach_auswertung_mit_kindern (urspr. Aufruf)" )
 
     iter_new = db_baum_knoten_mit_kindern( s_selection->zond, FALSE,
             BAUM_AUSWERTUNG, new_node_id, s_selection->iter_dest, s_selection->kind, errmsg );
-    if ( !iter_new ) ERROR_PAO_ROLLBACK( "db_baum_knoten_mit_kindern (urspr. Aufruf)" )
+    if ( !iter_new ) ERROR_ROLLBACK( (DBase*) s_selection->zond->dbase_zond->dbase_work,
+            "db_baum_knoten_mit_kindern (urspr. Aufruf)" )
 
-    rc = db_commit( zond, errmsg );
-    if ( rc ) ERROR_PAO_ROLLBACK( "db_commit" )
+    rc = dbase_commit( (DBase*) s_selection->zond->dbase_zond->dbase_work, errmsg );
+    if ( rc ) ERROR_ROLLBACK( (DBase*) s_selection->zond->dbase_zond->dbase_work,
+            "db_commit" )
 
     if ( s_selection->iter_dest ) gtk_tree_iter_free( s_selection->iter_dest );
     s_selection->iter_dest = gtk_tree_iter_copy( iter_new );
@@ -262,7 +267,7 @@ selection_datei_einfuegen_in_db( Projekt* zond, GFile* file, gint node_id,
     gchar* icon_name = selection_get_icon_name( zond, (GFile*) file );
     gchar* basename = g_file_get_basename( (GFile*) file );
 
-    new_node_id = db_insert_node( zond, BAUM_INHALT, node_id, child, icon_name,
+    new_node_id = dbase_full_insert_node( zond->dbase_zond->dbase_work, BAUM_INHALT, node_id, child, icon_name,
             basename, errmsg );
 
     g_free( basename );
@@ -271,12 +276,12 @@ selection_datei_einfuegen_in_db( Projekt* zond, GFile* file, gint node_id,
     if ( new_node_id == -1 )
     {
         if ( errmsg ) *errmsg = prepend_string( *errmsg,
-                g_strdup( "Bei Aufruf db_insert_node:\n" ) );
+                g_strdup( "Bei Aufruf dbase_full_insert_node:\n" ) );
 
         return -1;
     }
 
-    rel_path = fm_get_rel_path_from_file( zond->project_dir, file );
+    rel_path = fm_get_rel_path_from_file( zond->dbase_zond->project_dir, file );
     rc = db_set_datei( zond, new_node_id, rel_path, errmsg );
     g_free( rel_path );
     if ( rc ) ERROR_PAO( "db_set_datei" )
@@ -298,7 +303,7 @@ selection_datei_anbinden( Projekt* zond, InfoWindow* info_window, GFile* file, g
     if ( info_window->cancel ) return -2;
 
     //Prüfen, ob Datei schon angebunden
-    gchar* rel_path = fm_get_rel_path_from_file( zond->project_dir, file );
+    gchar* rel_path = fm_get_rel_path_from_file( zond->dbase_zond->project_dir, file );
     rc = db_get_node_id_from_rel_path( zond, rel_path, errmsg );
     if ( rc == -1 )
     {
@@ -342,7 +347,7 @@ selection_ordner_anbinden_rekursiv( Projekt* zond, InfoWindow* info_window,
 
     basename = g_file_get_basename( file );
 
-    new_node_id = db_insert_node( zond, BAUM_INHALT, node_id, child, "folder",
+    new_node_id = dbase_full_insert_node( zond->dbase_zond->dbase_work, BAUM_INHALT, node_id, child, "folder",
             basename, errmsg );
 
     text = g_strconcat( "Verzeichnis eingefügt: ", basename, NULL );
@@ -351,7 +356,7 @@ selection_ordner_anbinden_rekursiv( Projekt* zond, InfoWindow* info_window,
 
     g_free( basename );
 
-    if ( new_node_id == -1 ) ERROR_SQL( "db_insert_node" )
+    if ( new_node_id == -1 ) ERROR_SQL( "dbase_full_insert_node" )
 
     GFileEnumerator* enumer = g_file_enumerate_children( file, "*", G_FILE_QUERY_INFO_NONE, NULL, &error );
     if ( !enumer )
@@ -504,18 +509,18 @@ selection_anbinden( Projekt* zond, gint anchor_id, gboolean kind, GArray* arr_ne
     s_selection.zaehler = 0;
     s_selection.info_window = info_window;
 
-    rc = db_begin( zond, errmsg );
-    if ( rc ) ERROR_PAO( "db_begin" )
+    rc = dbase_begin( (DBase*) zond->dbase_zond->dbase_work, errmsg );
+    if ( rc ) ERROR( "db_begin" )
 
     rc = treeview_selection_foreach( zond->treeview[BAUM_FS], zond->clipboard->arr_ref,
             selection_foreach_anbinden, &s_selection, errmsg );
-    if ( rc == -1 ) ERROR_PAO_ROLLBACK( "treeview_selection_foreach" )
+    if ( rc == -1 ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "treeview_selection_foreach" )
 
     rc = selection_anbinden_zu_baum( zond, &iter, kind, arr_new_nodes, errmsg );
-    if ( rc ) ERROR_PAO_ROLLBACK( "selection_anbinden_zu_baum" );
+    if ( rc ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "selection_anbinden_zu_baum" );
 
-    rc = db_commit( zond, errmsg );
-    if ( rc ) ERROR_PAO_ROLLBACK( "db_commit" )
+    rc = dbase_commit( (DBase*) zond->dbase_zond->dbase_work, errmsg );
+    if ( rc ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "db_commit" )
 
     if ( iter )
     {
@@ -738,30 +743,32 @@ selection_foreach_entfernen_anbindung( GtkTreeView* tree_view,
     parent = db_get_parent( zond, BAUM_INHALT, node_id, errmsg );
     if ( parent < 0 ) ERROR_PAO( "db_get_parent" )
 
-    rc = db_begin( zond, errmsg );
-    if ( rc ) ERROR_PAO( "db_begin" )
+    rc = dbase_begin( (DBase*) zond->dbase_zond->dbase_work, errmsg );
+    if ( rc ) ERROR( "db_begin" )
 
     child = 0;
     while ( (child = db_get_first_child( zond, BAUM_INHALT, node_id,
             errmsg )) )
     {
-        if ( child < 0 ) ERROR_PAO_ROLLBACK( "db_get_first_child" )
+        if ( child < 0 ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work,
+                "db_get_first_child" )
 
         rc = knoten_verschieben( zond, BAUM_INHALT, child, parent,
                 older_sibling, errmsg );
-        if ( rc == -1 ) ERROR_PAO_ROLLBACK( "knoten_verschieben" )
+        if ( rc == -1 ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work,
+                "knoten_verschieben" )
 
         older_sibling = child;
     }
 
     rc = db_remove_node( zond, BAUM_INHALT, node_id, errmsg );
-    if ( rc ) ERROR_PAO_ROLLBACK( "db_remove_node" )
+    if ( rc ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "db_remove_node" )
 
     gtk_tree_store_remove( GTK_TREE_STORE(gtk_tree_view_get_model(
             tree_view )), iter );
 
-    rc = db_commit( zond, errmsg );
-    if ( rc ) ERROR_PAO_ROLLBACK( "db_commit" )
+    rc = dbase_commit( (DBase*) zond->dbase_zond->dbase_work, errmsg );
+    if ( rc ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "db_commit" )
 
     return 0;
 }

@@ -39,23 +39,21 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 static gboolean
 cb_delete_event( GtkWidget* app_window, GdkEvent* event, gpointer user_data )
 {
+    gint rc = 0;
+    gchar* errmsg = NULL;
+
     Projekt* zond = (Projekt*) user_data;
 
-    //Geöffnete Viewer schließen
-    for ( gint i = 0; i < zond->arr_pv->len; i++ ) viewer_schliessen(
-            g_ptr_array_index( zond->arr_pv, i ) );
-
-    if ( zond->changed )
+    rc = projekt_schliessen( zond, &errmsg );
+    if ( rc == -1 )
     {
-        gint rc = 0;
-        rc = abfrage_frage( zond->app_window, "zond beenden", "Änderungen "
-                "aktuelles Projekt speichern?", NULL );
+        display_message( zond->app_window, "Fehler bei Schließen des Projekts -\n\n"
+                "Bei Aufruf projekt_schliessen:\n", errmsg, NULL );
+        g_free( errmsg );
 
-        if ( rc == GTK_RESPONSE_YES ) cb_menu_datei_speichern_activate( NULL, zond );
-        else if ( rc != GTK_RESPONSE_NO) return TRUE; //Abbruch gewählt
+        return TRUE;
     }
-
-    projekt_schliessen( (Projekt*) zond );
+    else if ( rc == 1 ) return TRUE;
 
     gtk_widget_destroy( zond->app_window );
 
@@ -86,7 +84,6 @@ cb_pao_button_event( GtkWidget* app_window, GdkEvent* event, gpointer data )
 void
 cb_text_buffer_changed( GtkTextBuffer* buffer, gpointer zond )
 {
-    project_set_changed( zond );
     g_object_set_data( G_OBJECT(gtk_text_view_get_buffer(
             ((Projekt*) zond)->textview )), "changed", GINT_TO_POINTER(1) );
 

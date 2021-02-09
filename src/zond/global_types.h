@@ -37,7 +37,7 @@ typedef struct sqlite3 sqlite3;
 
 typedef struct pdf_document pdf_document;
 
-typedef struct _File_Manager FileManager;
+typedef struct _DBase_Zond DBaseZond;
 
 typedef int gboolean;
 typedef char gchar;
@@ -91,9 +91,6 @@ typedef struct _STMTS
 {
     sqlite3_stmt* db_speichern_textview[1];
     sqlite3_stmt* db_set_datei[1];
-    sqlite3_stmt* transaction[3];
-    sqlite3_stmt* transaction_store[3];
-    sqlite3_stmt* db_insert_node[5];
     sqlite3_stmt* ziele_einfuegen[1];
     sqlite3_stmt* db_kopieren_nach_auswertung[3];
     sqlite3_stmt* db_get_icon_name_and_node_text[2];
@@ -111,8 +108,6 @@ typedef struct _STMTS
     sqlite3_stmt* db_get_first_child[2];
     sqlite3_stmt* db_get_node_id_from_rel_path[1];
     sqlite3_stmt* db_check_id[1];
-    sqlite3_stmt* db_update_path[2];
-    sqlite3_stmt* db_check_rel_path[2];
 } STMTS;
 
 typedef struct _Clipboard Clipboard;
@@ -128,10 +123,6 @@ typedef struct _Database
 typedef struct _Projekt
 {
 #ifndef VIEWER
-    gchar* project_name;
-    gchar* project_dir;
-    gboolean changed;
-
     guint state; //Modifier Mask
 
     Icon icon[NUMBER_OF_ICONS];
@@ -161,6 +152,7 @@ typedef struct _Projekt
     sqlite3* db_store;
 
     Database* dbase;
+    DBaseZond* dbase_zond;
 
     Menu menu;
     GtkWidget* fs_button;

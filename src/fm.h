@@ -15,6 +15,7 @@ typedef void* gpointer;
 typedef int gboolean;
 typedef char gchar;
 typedef int gint;
+typedef struct _Clipboard Clipboard;
 
 typedef struct _Modify_File
 {
@@ -36,7 +37,7 @@ gint fm_paste_selection( GtkTreeView*, GtkTreeView*, GPtrArray*, gboolean, gbool
 
 gint fm_foreach_loeschen( GtkTreeView*, GtkTreeIter*, gpointer, gchar** );
 
-GtkTreeView* fm_create_tree_view( void );
+GtkTreeView* fm_create_tree_view( Clipboard*, ModifyFile* );
 
 void fm_unset_root( GtkTreeView* );
 

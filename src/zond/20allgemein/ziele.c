@@ -29,7 +29,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "../40viewer/document.h"
 
+#include "dbase_full.h"
 #include "zieleplus.h"
+#include "project.h"
 
 #include "../../misc.h"
 
@@ -129,9 +131,9 @@ ziele_einfuegen_db( Projekt* zond, gint anchor_id, gboolean kind, Ziel* ziel,
     gint new_node = 0;
 
     //zuerst in baum_inhalt-Tabelle (weil FK in Tabelle "ziele" darauf Bezug nimmt)
-    new_node = db_insert_node( zond, BAUM_INHALT, anchor_id, kind,
+    new_node = dbase_full_insert_node( zond->dbase_zond->dbase_work, BAUM_INHALT, anchor_id, kind,
             zond->icon[ICON_ANBINDUNG].icon_name, node_text, errmsg );
-    if ( new_node == -1 ) ERROR_PAO( "db_insert_node" )
+    if ( new_node == -1 ) ERROR_PAO( "dbase_full_insert_node" )
 
     sqlite3_reset( zond->dbase->stmts.ziele_einfuegen[0] );
     sqlite3_clear_bindings( zond->dbase->stmts.ziele_einfuegen[0] );
@@ -174,30 +176,33 @@ ziele_einfuegen_anbindung( Projekt* zond, const gchar* rel_path, gint anchor_id,
     else node_text = g_strdup_printf( "S. %i, %s", anbindung.von.seite + 1,
             rel_path );
 
-    rc = db_begin( zond, errmsg );
+    rc = dbase_begin( (DBase*) zond->dbase_zond->dbase_work, errmsg );
     if ( rc )
     {
         g_free( node_text );
 
-        ERROR_PAO( "db_begin" )
+        ERROR( "db_begin" )
     }
 
     new_node = ziele_einfuegen_db( zond, anchor_id, kind, ziel, node_text, errmsg );
     g_free( node_text );
-    if ( new_node == -1) ERROR_PAO_ROLLBACK( "ziele_einfuegen_db" )
+    if ( new_node == -1) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work,
+            "ziele_einfuegen_db" )
 
     //eingefügtes ziel in Baum
     GtkTreeIter* iter = baum_abfragen_iter( zond->treeview[BAUM_INHALT], anchor_id );
     GtkTreeIter* new_iter = db_baum_knoten( zond, BAUM_INHALT, new_node, iter,
             kind, errmsg );
     gtk_tree_iter_free( iter );
-    if ( !new_iter ) ERROR_PAO_ROLLBACK( "db_baum_knoten_mit_kindern" )
+    if ( !new_iter ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work,
+            "db_baum_knoten_mit_kindern" )
 
     rc = ziele_verschieben_kinder( zond, new_node, anbindung, errmsg );
-    if ( rc ) ERROR_PAO_ROLLBACK( "ziele_verschieben_kinder" )
+    if ( rc ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work,
+            "ziele_verschieben_kinder" )
 
-    rc = db_commit( zond, errmsg );
-    if ( rc ) ERROR_PAO_ROLLBACK( "db_commit" )
+    rc = dbase_commit( (DBase*) zond->dbase_zond->dbase_work, errmsg );
+    if ( rc ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "db_commit" )
 
     expand_row( zond, BAUM_INHALT, new_iter );
     baum_setzen_cursor( zond, BAUM_INHALT, new_iter );

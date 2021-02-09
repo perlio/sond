@@ -226,18 +226,50 @@ init_app_window( GtkApplication* app, Sojus* sojus )
 }
 
 
+static GSettings*
+init_settings( void )
+{
+    GSettingsSchemaSource* schema_source = NULL;
+    GSettingsSchema* schema = NULL;
+    GSettings* settings = NULL;
+    GError* error = NULL;
+
+
+    schema_source = g_settings_schema_source_new_from_directory(
+            "schemas/", NULL, FALSE, &error );
+    if ( error )
+    {
+        printf( "%s\n", error->message );
+        g_error_free( error );
+        return NULL;
+    }
+
+    schema = g_settings_schema_source_lookup( schema_source,
+            "de.perlio.Sojus", FALSE );
+    g_settings_schema_source_unref( schema_source );
+
+    settings = g_settings_new_full( schema, NULL, NULL );
+    g_settings_schema_unref( schema );
+
+    return settings;
+}
+
+
 static Sojus*
 init_sojus( void )
 {
+    GSettings* settings = init_settings( );
+    if ( !settings ) return NULL;
+
     Sojus* sojus = g_malloc0( sizeof( Sojus ) );
+
+    sojus->settings = settings;
 
     sojus->clipboard = treeview_init_clipboard( );
 
     sojus->sachgebiete = g_ptr_array_new_with_free_func( (GDestroyNotify) g_free );
     sojus->beteiligtenart = g_ptr_array_new_with_free_func( (GDestroyNotify) g_free );
     sojus->sachbearbeiter = g_ptr_array_new_with_free_func( (GDestroyNotify) g_free );
-
-    sojus->settings = settings_open( );
 
     return sojus;
 }
@@ -249,12 +281,15 @@ activate_app( GtkApplication* app, gpointer data )
     return;
 }
 
+
 static void
 startup_app( GtkApplication* app, gpointer data )
 {
     Sojus** sojus = (Sojus**) data;
 
     *sojus = init_sojus( );
+    if ( !(*sojus) ) return;
+
     init_app_window( app, *sojus );
     init_socket( *sojus );
     init_db( *sojus );
@@ -264,8 +299,7 @@ startup_app( GtkApplication* app, gpointer data )
 
 
 gint
-main(int argc,
-     char **argv)
+main( int argc, char **argv)
 {
     GtkApplication* app = NULL;
     Sojus* sojus = NULL;

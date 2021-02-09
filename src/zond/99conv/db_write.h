@@ -11,15 +11,7 @@ typedef char gchar;
 typedef int gboolean;
 
 
-gint db_begin( Projekt*, gchar** );
-
-gint db_commit( Projekt*, gchar** );
-
-gint db_rollback( Projekt*, gchar** );
-
 gint db_remove_node( Projekt*, Baum, gint, gchar** );
-
-gint db_insert_node( Projekt*, Baum, gint, gboolean, const gchar*, const gchar*, gchar** );
 
 gint db_set_datei( Projekt*, gint, gchar*, gchar** );
 
@@ -35,13 +27,5 @@ gint db_set_node_text( Projekt*, Baum, gint, const gchar*, gchar** );
 gint db_set_icon_id( Projekt*, Baum, gint, const gchar*, gchar** );
 
 gint db_speichern_textview( Projekt*, gint, gchar*, gchar** );
-
-gint db_begin_both( Projekt*, gchar** );
-
-gint db_commit_both( Projekt*, gchar** );
-
-gint db_rollback_both( Projekt*, gchar** );
-
-gint db_update_path( Projekt*, const gchar*, const gchar*, gchar** );
 
 #endif // DB_H_INCLUDED

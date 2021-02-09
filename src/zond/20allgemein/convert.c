@@ -133,7 +133,7 @@ convert_datei_oeffnen( Projekt* zond, gchar** errmsg )
     gint rc = 0;
     sqlite3* db_convert = NULL;
 
-    if ( zond->project_name != NULL )
+    if ( zond->dbase_zond != NULL )
     {
         if ( errmsg ) *errmsg = g_strconcat( "Projekt muß geschlossen sein", NULL );
 

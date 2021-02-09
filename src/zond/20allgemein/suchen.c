@@ -16,7 +16,11 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+#include <gtk/gtk.h>
+#include <sqlite3.h>
+
 #include "../../misc.h"
+#include "../../dbase.h"
 
 #include "../global_types.h"
 #include "../enums.h"
@@ -29,8 +33,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../99conv/db_write.h"
 #include "../99conv/db_zu_baum.h"
 
-#include <gtk/gtk.h>
-#include <sqlite3.h>
+#include "project.h"
+
 
 //Prototype
 void cb_cursor_changed( GtkTreeView*, gpointer );
@@ -137,6 +141,48 @@ suchen_fuellen_ergebnisfenster( Projekt* zond, GtkWidget* ergebnisfenster,
 }
 
 
+static gint
+suchen_kopieren_listenpunkt( Projekt* zond, GList* list, gint anchor_id,
+        gboolean child, gchar** errmsg )
+{
+    gint rc = 0;
+    Baum baum = KEIN_BAUM;
+    gint node_id = 0;
+    gint new_node_id = 0;
+
+    baum = (Baum) GPOINTER_TO_INT(g_object_get_data( G_OBJECT(list->data), "baum" ));
+    node_id = GPOINTER_TO_INT(g_object_get_data( G_OBJECT(list->data), "node-id" ));
+
+    rc = dbase_begin( (DBase*) zond->dbase_zond->dbase_work, errmsg );
+    if ( rc ) ERROR( "dbase_begin" )
+
+    new_node_id = db_kopieren_nach_auswertung( zond, baum, node_id,
+            anchor_id, child, errmsg );
+    if ( new_node_id == -1 ) ERROR( "db_kopieren_nach_auswertung" )
+
+    rc = dbase_commit( (DBase*) zond->dbase_zond->dbase_work, errmsg );
+    if ( rc ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "dbase_commit" )
+
+    GtkTreeIter* iter = baum_abfragen_iter( zond->treeview[BAUM_AUSWERTUNG],
+            anchor_id );
+
+    GtkTreeIter* new_iter = db_baum_knoten( zond, BAUM_AUSWERTUNG,
+            new_node_id, iter, child, errmsg );
+    if ( iter ) gtk_tree_iter_free( iter );
+    if ( !new_iter ) ERROR( "db_baum_knoten" )
+
+    expand_row( zond, BAUM_AUSWERTUNG, new_iter );
+    baum_setzen_cursor( zond, BAUM_AUSWERTUNG, new_iter );
+
+    gtk_tree_iter_free( new_iter );
+
+    anchor_id = new_node_id;
+    child = FALSE;
+
+    return 0;
+}
+
+
 static void
 cb_suchen_nach_auswertung( GtkMenuItem* item, gpointer user_data )
 {
@@ -161,70 +207,22 @@ cb_suchen_nach_auswertung( GtkMenuItem* item, gpointer user_data )
     //aktuellen cursor im BAUM_AUSWERTUNG: node_id und iter abfragen
     gint anchor_id = baum_abfragen_aktuelle_node_id( zond->treeview[BAUM_AUSWERTUNG] );
 
-    gint rc = 0;
-    gint node_id = 0;
-    Baum baum = KEIN_BAUM;
-    gint new_node_id = 0;
     gchar* errmsg = NULL;
 
     list = selected;
     do
     {
-        baum = (Baum) GPOINTER_TO_INT(g_object_get_data( G_OBJECT(list->data), "baum" ));
-        node_id = GPOINTER_TO_INT(g_object_get_data( G_OBJECT(list->data), "node-id" ));
+        gint rc = 0;
 
-        rc = db_begin( zond, &errmsg );
+        rc = suchen_kopieren_listenpunkt( zond, list, anchor_id, child, &errmsg );
         if ( rc )
         {
             meldung( zond->app_window, "Fehler in Suchen/Kopieren in Auswertung -\n\n"
-                    "Bei Aufruf db_begin:\n", errmsg, NULL );
+                    "Bei Aufruf suchen_kopieren_listenpunkt:\n", errmsg, NULL );
             g_free( errmsg );
 
             return;
         }
-
-        new_node_id = db_kopieren_nach_auswertung( zond, baum, node_id,
-                anchor_id, child, &errmsg );
-        if ( new_node_id == -1 )
-        {
-            meldung( zond->app_window, "Fehler in Suchen/Kopieren in Auswertung -\n\n"
-                    "Bei Aufruf db_kopieren_nach_auswertung:\n", errmsg, NULL );
-            g_free( errmsg );
-
-            return;
-        }
-
-        rc = db_commit( zond, &errmsg );
-        if ( rc )
-        {
-            meldung( zond->app_window, "Fehler in kopieren nach BAUM_AUSWERTUNG:\n\n"
-                        "Bei Aufruf db_commit:\n", errmsg, NULL );
-
-            return;
-        }
-
-        GtkTreeIter* iter = baum_abfragen_iter( zond->treeview[BAUM_AUSWERTUNG],
-                anchor_id );
-
-        GtkTreeIter* new_iter = db_baum_knoten( zond, BAUM_AUSWERTUNG,
-                new_node_id, iter, child, &errmsg );
-        if ( iter ) gtk_tree_iter_free( iter );
-        if ( !new_iter )
-        {
-            meldung( zond->app_window, "Fehler in kopieren nach BAUM_AUSWERTUNG:\n\n"
-                    "Bei Aufruf db_baum_knoten:\n", errmsg, NULL );
-            g_free( errmsg );
-
-            return;
-        }
-
-        expand_row( zond, BAUM_AUSWERTUNG, new_iter );
-        baum_setzen_cursor( zond, BAUM_AUSWERTUNG, new_iter );
-
-        gtk_tree_iter_free( new_iter );
-
-        anchor_id = new_node_id;
-        child = FALSE;
     } while ( (list = list->next) );
 
     g_list_free( selected );

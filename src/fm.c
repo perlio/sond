@@ -1187,7 +1187,7 @@ fm_render_file_icon( GtkTreeViewColumn* column, GtkCellRenderer* renderer,
 /** In GObject treeview muß "root" mit Urpsrungsverzeichnis gesetzt werden
 **/
 GtkTreeView*
-fm_create_tree_view( void )
+fm_create_tree_view( Clipboard* clipboard, ModifyFile* modify_file )
 {
     //treeview
     GtkTreeView* treeview_fs = (GtkTreeView*) gtk_tree_view_new( );
@@ -1195,6 +1195,9 @@ fm_create_tree_view( void )
     gtk_tree_view_set_fixed_height_mode( treeview_fs, TRUE );
     gtk_tree_view_set_enable_tree_lines( treeview_fs, TRUE );
     gtk_tree_view_set_enable_search( treeview_fs, FALSE );
+
+    g_object_set_data( G_OBJECT(treeview_fs), "clipboard", clipboard );
+    g_object_set_data( G_OBJECT(treeview_fs), "modify-file", modify_file );
 
     //Icon und filename
     GtkCellRenderer* renderer_icon = gtk_cell_renderer_pixbuf_new( );

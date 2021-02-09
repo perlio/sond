@@ -12,48 +12,6 @@
 
 
 gint
-db_begin( Projekt* zond, gchar** errmsg )
-{
-    gint rc = 0;
-
-    sqlite3_reset( zond->dbase->stmts.transaction[0] );
-
-    rc = sqlite3_step( zond->dbase->stmts.transaction[0] );
-    if ( rc != SQLITE_DONE ) ERROR_SQL( "sqlite3_step" )
-
-    return 0;
-}
-
-
-gint
-db_commit( Projekt* zond, gchar** errmsg )
-{
-    gint rc = 0;
-
-    sqlite3_reset( zond->dbase->stmts.transaction[1] );
-
-    rc = sqlite3_step( zond->dbase->stmts.transaction[1] );
-    if ( rc != SQLITE_DONE ) ERROR_SQL( "sqlite3_step" )
-
-    return 0;
-}
-
-
-gint
-db_rollback( Projekt* zond, gchar** errmsg )
-{
-    gint rc = 0;
-
-    sqlite3_reset( zond->dbase->stmts.transaction[2] );
-
-    rc = sqlite3_step( zond->dbase->stmts.transaction[2] );
-    if ( rc != SQLITE_DONE ) ERROR_SQL( "sqlite3_step (rollback)" )
-
-    return 0;
-}
-
-
-gint
 db_remove_node( Projekt* zond, Baum baum, gint node_id, gchar** errmsg )
 {
     gint rc = 0;
@@ -77,48 +35,6 @@ db_remove_node( Projekt* zond, Baum baum, gint node_id, gchar** errmsg )
     if ( rc != SQLITE_DONE ) ERROR_SQL( "sqlite3_step [2/3]" )
 
     return 0;
-}
-
-
-gint
-db_insert_node( Projekt* zond, Baum baum, gint node_id, gboolean child,
-        const gchar* icon_name, const gchar* node_text, gchar** errmsg )
-{
-    gint rc = 0;
-    gint new_node_id = 0;
-
-    for ( gint i = 0; i < 5; i++ )
-    {
-        sqlite3_reset( zond->dbase->stmts.db_insert_node[i] );
-        sqlite3_clear_bindings( zond->dbase->stmts.db_insert_node[i] );
-    }
-
-    rc = sqlite3_bind_int( zond->dbase->stmts.db_insert_node[0 + (gint) baum], 1, child );
-    if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_bind_int (child)" )
-
-    rc = sqlite3_bind_int( zond->dbase->stmts.db_insert_node[0 + (gint) baum], 2, node_id );
-    if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_bind_int (node_id)" )
-
-    rc = sqlite3_bind_text( zond->dbase->stmts.db_insert_node[0 + (gint) baum], 3,
-            icon_name, -1, NULL );
-    if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_bind_int (icon_name)" )
-
-    rc = sqlite3_bind_text( zond->dbase->stmts.db_insert_node[0 + (gint) baum], 4, node_text,
-            -1, NULL );
-    if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_bind_text (node_text)" )
-
-    rc = sqlite3_step( zond->dbase->stmts.db_insert_node[0 + (gint) baum] );
-    if ( rc != SQLITE_DONE ) ERROR_SQL( "sqlite3_step [0/1]" )
-
-    rc = sqlite3_step( zond->dbase->stmts.db_insert_node[2 + (gint) baum] );
-    if ( rc != SQLITE_DONE ) ERROR_SQL( "sqlite3_step ([2/3])" )
-
-    rc = sqlite3_step( zond->dbase->stmts.db_insert_node[4] );
-    if ( rc != SQLITE_ROW ) ERROR_SQL( "sqlite3_step ([4])" )
-
-    new_node_id = sqlite3_column_int( zond->dbase->stmts.db_insert_node[4], 0 );
-
-    return new_node_id;
 }
 
 
@@ -268,7 +184,6 @@ db_verschieben_knoten( Projekt* zond, Baum baum, gint node_id, gint new_parent_i
 /** Die folgenden zwei Funktionen, mit denen einzelnen Felder eines Knotens
 *** verändert werden können, geben auch dann 0 zurück, wenn der Knoten gar nicht
 *** existiert   **/
-
 gint
 db_set_node_text( Projekt* zond, Baum baum, gint node_id, const gchar* node_text,
         gchar** errmsg )
@@ -336,112 +251,3 @@ db_speichern_textview( Projekt* zond, gint node_id, gchar* text, gchar** errmsg 
 }
 
 
-gint
-db_begin_both( Projekt* zond, gchar** errmsg )
-{
-    gint rc = 0;
-
-    sqlite3_reset( zond->dbase->stmts.transaction[0] );
-    sqlite3_reset( zond->dbase->stmts.transaction_store[0] );
-
-    rc = sqlite3_step( zond->dbase->stmts.transaction[0] );
-    if ( rc != SQLITE_DONE ) ERROR_SQL( "sqlite3_step (begin db)" )
-
-    rc = sqlite3_step( zond->dbase->stmts.transaction_store[0] );
-    if ( rc != SQLITE_DONE ) ERROR_SQL_R( "sqlite3_step (begin db_store)", -2 )
-
-    return 0;
-}
-
-
-gint
-db_commit_both( Projekt* zond, gchar** errmsg )
-{
-    gint rc = 0;
-
-    sqlite3_reset( zond->dbase->stmts.transaction[1] );
-    sqlite3_reset( zond->dbase->stmts.transaction_store[1] );
-
-    rc = sqlite3_step( zond->dbase->stmts.transaction[1] );
-    if ( rc != SQLITE_DONE ) ERROR_SQL( "sqlite3_step (commit db)" )
-
-    rc = sqlite3_step( zond->dbase->stmts.transaction_store[1] );
-    if ( rc != SQLITE_DONE ) ERROR_SQL( "sqlite3_step (commit db_store)" )
-
-    return 0;
-}
-
-
-gint
-db_rollback_both( Projekt* zond, gchar** errmsg )
-{
-    gint rc1 = 0;
-    gint rc2 = 0;
-
-    sqlite3_reset( zond->dbase->stmts.transaction[2] );
-    sqlite3_reset( zond->dbase->stmts.transaction_store[2] );
-
-    rc1 = sqlite3_step( zond->dbase->stmts.transaction[2] );
-    rc2 = sqlite3_step( zond->dbase->stmts.transaction_store[2] );
-
-    if ( rc1 != SQLITE_DONE || rc2 != SQLITE_DONE )
-    {
-        if ( errmsg )
-        {
-            *errmsg = add_string( *errmsg, g_strdup( "\n\nRollback "
-                    "fehlgeschlagen\n\n" ) );
-
-            if ( rc1 != SQLITE_DONE ) *errmsg = add_string( *errmsg, g_strconcat(
-                    "Bei Aufruf sqlite3_step (rollback db):\n", sqlite3_errmsg( zond->dbase->db ), NULL ) );
-            if ( rc2 != SQLITE_DONE ) *errmsg = add_string( *errmsg, g_strconcat(
-                    "\nBei Aufruf sqlite3_step (rollback db_store):\n", sqlite3_errmsg( zond->dbase->db_store ), NULL ) );
-
-            *errmsg = add_string( *errmsg, g_strdup( "\n\nDatenbankverbindung neu starten" ) );
-        }
-
-        return -1;
-    }
-
-    return 0;
-}
-
-
-gint
-db_update_path( Projekt* zond, const gchar* old_path, const gchar* new_path, gchar** errmsg )
-{
-    gint rc = 0;
-    gboolean changed = FALSE;
-
-    changed = zond->changed;
-
-    sqlite3_reset( zond->dbase->stmts.db_update_path[0] );
-    sqlite3_reset( zond->dbase->stmts.db_update_path[1] );
-
-    rc = sqlite3_bind_text( zond->dbase->stmts.db_update_path[0], 1,
-            old_path, -1, NULL );
-    if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_bind_text[0] (old_path)" )
-
-    rc = sqlite3_bind_text( zond->dbase->stmts.db_update_path[0], 2,
-            new_path, -1, NULL );
-    if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_bind_text[0] (new_path)" )
-
-    rc = sqlite3_step( zond->dbase->stmts.db_update_path[0] );
-    if ( rc != SQLITE_DONE ) ERROR_SQL( "sqlite3_step[0]" )
-
-    //auch in zond->db_store schreiben
-    rc = sqlite3_bind_text( zond->dbase->stmts.db_update_path[1], 1,
-            old_path, -1, NULL );
-    if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_bind_text[1] (old_path)" )
-
-    rc = sqlite3_bind_text( zond->dbase->stmts.db_update_path[1], 2,
-            new_path, -1, NULL );
-    if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_bind_text[1] (new_path)" )
-
-    rc = sqlite3_step( zond->dbase->stmts.db_update_path[1] );
-    if ( rc != SQLITE_DONE ) ERROR_SQL( "sqlite3_step[1]" )
-
-    //falls nicht geändert, hierdurch auch nicht
-    if ( !changed ) reset_project_changed( zond );
-
-    return 0;
-}

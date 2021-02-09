@@ -9,12 +9,10 @@ typedef int gint;
 typedef struct _Database Database;
 
 
-gint project_db_finish_database( Database*, gchar** );
+void project_db_destroy_stmts( Database* );
 
-gint project_db_backup( sqlite3*, sqlite3*, gchar** );
+gint project_db_create_stmts( Database*, gchar** );
 
 gboolean project_db_create( sqlite3*, gchar** );
-
-Database* project_db_init_database( gchar*, gchar*, gboolean, gchar** );
 
 #endif // PROJECT_DB_H_INCLUDED

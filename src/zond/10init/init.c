@@ -162,12 +162,12 @@ open_file( Projekt* zond, gpointer files )
     gchar* uri = g_file_get_uri( g_file[0] );
     gchar* uri_unesc = g_uri_unescape_string( uri, NULL );
     g_free( uri );
-    rc = projekt_aktivieren( zond, uri_unesc + 8, FALSE, &errmsg );
+    rc = project_oeffnen( zond, uri_unesc + 8, FALSE, &errmsg );
     g_free( uri_unesc );
     if ( rc )
     {
         meldung( zond->app_window, "Fehler - Projekt kann nicht geöffnet "
-                "werden\n\nBei Aufruf projekt_aktivieren:\n", errmsg, NULL );
+                "werden\n\nBei Aufruf projekt_oeffnen:\n", errmsg, NULL );
         g_free( errmsg );
 
         return;
@@ -220,7 +220,8 @@ init( GtkApplication* app )
     g_free( proj_settings );
 
     projekt_set_widgets_sensitiv( zond, FALSE );
-    reset_project_changed( zond );
+    gtk_widget_set_sensitive( zond->menu.speichernitem, FALSE );
+    g_settings_set_boolean( zond->settings, "speichern", FALSE );
 
     DisableDebug( );
 

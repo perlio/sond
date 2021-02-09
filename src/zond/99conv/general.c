@@ -8,6 +8,7 @@
 
 #include "../../misc.h"
 #include "../../fm.h"
+#include "../../dbase.h"
 
 #include "../99conv/baum.h"
 #include "../99conv/db_read.h"
@@ -333,72 +334,6 @@ abfragen_rel_path_and_anbindung( Projekt* zond, Baum baum, gint node_id,
 }
 
 
-gint
-test_rel_path( const GFile* file, gpointer data, gchar** errmsg )
-{
-    gint rc = 0;
-    gchar* rel_path = NULL;
-
-    Projekt* zond = (Projekt*) data;
-
-    rel_path = fm_get_rel_path_from_file( zond->project_dir, file );
-
-    rc = db_check_rel_path( zond, rel_path, errmsg );
-    g_free( rel_path );
-
-    if ( rc == -1 ) ERROR_PAO( "db_get_node_id_from_rel_path" )
-    else if ( rc > 0 ) return 1;
-
-    return 0;
-}
-
-
-gint
-update_db_before_path_change( const GFile* file_source, const GFile* file_dest,
-        gpointer data, gchar** errmsg )
-{
-    gint rc = 0;
-
-    Projekt* zond = (Projekt*) data;
-
-    rc = db_begin_both( zond, errmsg );
-    if ( rc == -1 ) ERROR_PAO( "db_begin_both" )
-    else if ( rc == -2 ) ERROR_PAO_ROLLBACK( "db_begin_both" )
-
-    gchar* rel_path_source = fm_get_rel_path_from_file( zond->project_dir, file_source );
-    gchar* rel_path_dest = fm_get_rel_path_from_file( zond->project_dir, file_dest );
-
-    rc = db_update_path( zond, rel_path_source, rel_path_dest, errmsg );
-
-    g_free( rel_path_source );
-    g_free( rel_path_dest );
-
-    if ( rc ) ERROR_PAO_ROLLBACK_BOTH( "db_update_path" );
-
-    return 0;
-}
-
-
-gint
-update_db_after_path_change( const gint rc_edit, gpointer data, gchar** errmsg )
-{
-    gint rc = 0;
-
-    Projekt* zond = (Projekt*) data;
-
-    if ( rc_edit == 1 )
-    {
-        rc = db_rollback_both( zond, errmsg );
-        if ( rc ) ERROR_PAO( "db_rollback_both" )
-    }
-    else
-    {
-        rc = db_commit_both( zond, errmsg );
-        if ( rc ) ERROR_PAO_ROLLBACK_BOTH( "db_commit_both" )
-    }
-
-    return 0;
-}
 #endif // VIEWER
 
 

@@ -428,14 +428,13 @@ treeviews_init_fs_tree( Projekt* zond )
 {
     GtkCellRenderer* cell = NULL;
 
-    static ModifyFile modify_file = { update_db_before_path_change,
-            update_db_after_path_change, test_rel_path, NULL };
+    static ModifyFile modify_file = { project_before_move,
+            project_after_move, project_test_rel_path, NULL };
 
     modify_file.data = (gpointer) zond;
 
-    zond->treeview[BAUM_FS] = fm_create_tree_view( );
-    g_object_set_data( G_OBJECT(zond->treeview[BAUM_FS]), "modify-file", &modify_file );
-    g_object_set_data( G_OBJECT(zond->treeview[BAUM_FS]), "clipboard", zond->clipboard );
+    zond->treeview[BAUM_FS] = fm_create_tree_view( zond->clipboard, &modify_file );
+
     //die Selection
     zond->selection[BAUM_FS] = gtk_tree_view_get_selection(
             zond->treeview[BAUM_FS] );

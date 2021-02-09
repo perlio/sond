@@ -1,6 +1,10 @@
 #ifndef MISC_H_INCLUDED
 #define MISC_H_INCLUDED
 
+#define ERROR(x) { if ( errmsg ) *errmsg = add_string( \
+                       g_strdup( "Bei Aufruf " x ":\n" ), *errmsg ); \
+                       return -1; }
+
 typedef struct _GSList GSList;
 typedef struct _GPtrArray GPtrArray;
 typedef struct _GtkWidget GtkWidget;
