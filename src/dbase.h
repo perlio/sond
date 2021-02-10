@@ -55,8 +55,10 @@ void dbase_destroy( DBase* );
 
 sqlite3_stmt* dbase_prepare_stmt( sqlite3*, const gchar*, gchar** );
 
+gint dbase_prepare_stmts( DBase*, gchar** );
+
 gint dbase_open( const gchar*, DBase*, gboolean, gboolean, gchar** );
 
-gint dbase_create( const gchar*, DBase**, gboolean, gboolean, gchar** );
+gint dbase_create_with_stmts( const gchar*, DBase**, gboolean, gboolean, gchar** );
 
 #endif // DBASE_H_INCLUDED

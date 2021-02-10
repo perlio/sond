@@ -21,6 +21,10 @@ typedef struct _DBase_Full
 gint dbase_full_insert_node( DBaseFull*, Baum, gint, gboolean, const gchar*,
         const gchar*, gchar** );
 
+gint dbase_full_set_node_text( DBaseFull*, Baum, gint, const gchar*, gchar** );
+
+gint dbase_full_prepare_stmts( DBaseFull*, gchar** );
+
 gint dbase_full_create( const gchar*, DBaseFull**, gboolean, gboolean, gchar** );
 
 #endif // DBASE_FULL_H_INCLUDED

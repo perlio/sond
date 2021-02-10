@@ -183,7 +183,7 @@ file_manager_create_modify_file( const gchar* path, ModifyFile** modify_file, gc
 
     db_name = g_strconcat( path, ".ZND", NULL );
 
-    rc = dbase_create( db_name, &dbase, FALSE, errmsg );
+    rc = dbase_create_with_stmts( db_name, &dbase, FALSE, errmsg );
     g_free( db_name );
     if ( rc ) // da FALSE, kann nur -1 oder 0 zurückgegeben werden
     {

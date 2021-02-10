@@ -496,7 +496,7 @@ fm_paste_selection_foreach( GtkTreeView* tree_view, GtkTreeIter* iter,
 {
     gint rc = 0;
     GFile* file_source = NULL;
-    const gchar* path_source = NULL;
+    gchar* path_source = NULL;
     gboolean same_dir = FALSE;
     gboolean dir_with_children = FALSE;
     GFileType file_type = G_FILE_TYPE_UNKNOWN;
@@ -508,6 +508,7 @@ fm_paste_selection_foreach( GtkTreeView* tree_view, GtkTreeIter* iter,
 
     //source-file
     file_source = g_file_new_for_path( path_source );
+    g_free( path_source );
 
     //prüfen, ob innerhalb des gleichen Verzeichnisses verschoben/kopiert werden
     //soll - dann: same_dir = TRUE
@@ -623,7 +624,7 @@ fm_paste_selection( GtkTreeView* tree_view_dest, GtkTreeView* tree_view, GPtrArr
 {
     gint rc = 0;
     GtkTreeIter* iter_cursor = NULL;
-    const gchar* path = NULL;
+    gchar* path = NULL;
     GFile* file_cursor = NULL;
     GFile* file_parent = NULL;
     GFileType file_type = G_FILE_TYPE_UNKNOWN;
@@ -641,6 +642,7 @@ fm_paste_selection( GtkTreeView* tree_view_dest, GtkTreeView* tree_view, GPtrArr
     }
 
     file_cursor = g_file_new_for_path( path );
+    g_free( path );
     file_type = g_file_query_file_type( file_cursor, G_FILE_QUERY_INFO_NONE, NULL );
 
     //if kind && datei != dir: Fehler
@@ -756,13 +758,16 @@ fm_foreach_loeschen( GtkTreeView* tree_view, GtkTreeIter* iter,
     gint rc = 0;
     GFileInfo* info = NULL;
     GFile* file = NULL;
+    gchar* full_path = NULL;
 
     gtk_tree_model_get( gtk_tree_view_get_model( tree_view ), iter, 0, &info, -1 );
 
-    file = g_file_new_for_path( g_file_info_get_display_name( info ) );
-    g_object_unref( info );
+    full_path = fm_get_full_path( tree_view, iter );
+    file = g_file_new_for_path( full_path );
+    g_free( full_path );
 
-    rc = fm_remove_node( tree_view, iter, file, NULL, data, errmsg );
+    rc = fm_remove_node( tree_view, iter, file, info, data, errmsg );
+    g_object_unref( info );
     g_object_unref( file );
     if ( rc == -1 ) ERROR_PAO( "fm_remove_node" )
     else if ( rc == 2 ) return 1;
@@ -870,8 +875,9 @@ cb_fm_row_text_edited( GtkCellRenderer* cell, gchar* path_string, gchar* new_tex
     GtkTreeModel* model = NULL;
     GtkTreeIter iter;
     const gchar* root = NULL;
-    gchar* old_text = NULL;
+    const gchar* old_text = NULL;
     GtkTreeIter iter_parent = { 0 };
+    GFileInfo* info = NULL;
     GFile* file_source = NULL;
     GFile* file_dest = NULL;
 
@@ -884,10 +890,11 @@ cb_fm_row_text_edited( GtkCellRenderer* cell, gchar* path_string, gchar* new_tex
             fm_get_full_path( tree_view, &iter_parent );
     else root = g_object_get_data( G_OBJECT(tree_view), "root" );
 
-    gtk_tree_model_get( model, &iter, 1, &old_text, -1 );
+    gtk_tree_model_get( model, &iter, 0, &info, -1 );
+    old_text = g_file_info_get_name( info );
 
     path_old = g_strconcat( root, "/", old_text, NULL );
-    g_free( old_text );
+    g_object_unref( info );
 
     path_new = g_strconcat( root, "/", new_text, NULL );
 

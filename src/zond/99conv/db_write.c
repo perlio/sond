@@ -181,32 +181,9 @@ db_verschieben_knoten( Projekt* zond, Baum baum, gint node_id, gint new_parent_i
 }
 
 
-/** Die folgenden zwei Funktionen, mit denen einzelnen Felder eines Knotens
+/** Die folgende Funktion, mit denen einzelnen Felder eines Knotens
 *** verändert werden können, geben auch dann 0 zurück, wenn der Knoten gar nicht
 *** existiert   **/
-gint
-db_set_node_text( Projekt* zond, Baum baum, gint node_id, const gchar* node_text,
-        gchar** errmsg )
-{
-    gint rc = 0;
-
-    sqlite3_reset( zond->dbase->stmts.db_set_node_text[0] );
-    sqlite3_reset( zond->dbase->stmts.db_set_node_text[1] );
-
-    rc = sqlite3_bind_text( zond->dbase->stmts.db_set_node_text[0 + (gint) baum], 1,
-            node_text, -1, NULL );
-    if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_bind_text (text)" )
-
-    rc = sqlite3_bind_int( zond->dbase->stmts.db_set_node_text[0 + (gint) baum], 2, node_id );
-    if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_bind_int (node_id)" )
-
-    rc = sqlite3_step( zond->dbase->stmts.db_set_node_text[0 + (gint) baum] );
-    if ( rc != SQLITE_DONE ) ERROR_SQL( "sqlite3_step" )
-
-    return 0;
-}
-
-
 gint
 db_set_icon_id( Projekt* zond, Baum baum, gint node_id, const gchar* icon_name,
         gchar** errmsg )

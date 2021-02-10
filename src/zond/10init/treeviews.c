@@ -34,7 +34,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../20allgemein/oeffnen.h"
 #include "../20allgemein/ziele.h"
 #include "../20allgemein/project.h"
-#include "../20allgemein/fs_tree.h"
+#include "../20allgemein/dbase_full.h"
 
 #include "../40viewer/viewer.h"
 
@@ -234,7 +234,7 @@ treeviews_cb_cell_edited( GtkCellRenderer* cell, gchar* path_string, gchar* new_
     //node_id holen, node_text in db ändern
     gint node_id = baum_get_node_id( model, &iter );
 
-    rc = db_set_node_text( zond, baum, node_id, new_text, &errmsg );
+    rc = dbase_full_set_node_text( zond->dbase_zond->dbase_work, baum, node_id, new_text, &errmsg );
     if ( rc )
     {
         meldung( zond->app_window, "Knoten umbenennen nicht möglich\n\n"

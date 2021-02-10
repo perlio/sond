@@ -72,11 +72,16 @@ dbase_full_set_node_text( DBaseFull* dbase_full, Baum baum, gint node_id,
 }
 
 
-static gint
+gint
 dbase_full_prepare_stmts( DBaseFull* dbase_full, gchar** errmsg )
 {
+    gint rc = 0;
     gint zaehler = 0;
     sqlite3_stmt* stmt = NULL;
+
+    rc = dbase_prepare_stmts( (DBase*) dbase_full, errmsg );
+    if ( rc ) ERROR( "dbase_prepare_stmts" );
+
     gchar* sql[] = {
 
 /*  insert_node  */
@@ -367,23 +372,6 @@ dbase_full_new( void )
 
 
 gint
-dbase_full_open( const gchar* path, DBaseFull* dbase_full, gboolean create,
-        gboolean overwrite, gchar** errmsg )
-{
-    gint rc = 0;
-
-    rc = dbase_open( path, (DBase*) dbase_full, create, overwrite, errmsg );
-    if ( rc == -1 ) ERROR( "dbase_open" )
-    else if ( rc == 1 ) return 1;
-
-    rc = dbase_full_prepare_stmts( dbase_full, errmsg );
-    if ( rc ) ERROR( "dbase_full_prepare_stmts" )
-
-    return 0;
-}
-
-
-gint
 dbase_full_create( const gchar* path, DBaseFull** dbase_full, gboolean create,
         gboolean overwrite, gchar** errmsg )
 {
@@ -391,7 +379,7 @@ dbase_full_create( const gchar* path, DBaseFull** dbase_full, gboolean create,
 
     *dbase_full = dbase_full_new( );
 
-    rc = dbase_full_open( path, *dbase_full, create, overwrite,errmsg );
+    rc = dbase_open( path, (DBase*) *dbase_full, create, overwrite, errmsg );
     if ( rc )
     {
         dbase_destroy( (DBase*) *dbase_full );

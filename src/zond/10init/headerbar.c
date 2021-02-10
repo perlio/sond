@@ -563,7 +563,7 @@ cb_item_text_anbindung( GtkMenuItem* item, gpointer data )
 
         g_free( rel_path );
 
-        rc = db_set_node_text( zond, baum, node_id, node_text, &errmsg );
+        rc = dbase_full_set_node_text( zond->dbase_zond->dbase_work, baum, node_id, node_text, &errmsg );
         if ( rc )
         {
             meldung( zond->app_window, "Fehler in Text anpassen (Anbindung):\n\n"

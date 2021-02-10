@@ -33,68 +33,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../../misc.h"
 
 
-static gchar*
-project_db_get_open_stmts( sqlite3* db )
-{
-    sqlite3_stmt* stmt = NULL;
-    sqlite3_stmt* next = NULL;
-
-    gchar* sql = g_strdup( "" );
-
-    do
-    {
-        stmt = sqlite3_next_stmt( db, next );
-        sql = add_string( sql, g_strdup( sqlite3_sql( stmt ) ) );
-        sql = add_string( sql, g_strdup( "\n" ) );
-        if ( stmt ) next = stmt;
-    } while ( stmt );
-
-    return sql;
-}
-
-
-void
-project_db_destroy_stmts( Database* dbase )
-{
-    sqlite3_finalize( dbase->stmts.db_speichern_textview[0] );
-    sqlite3_finalize( dbase->stmts.db_set_datei[0] );
-    sqlite3_finalize( dbase->stmts.ziele_einfuegen[0] );
-    sqlite3_finalize( dbase->stmts.db_kopieren_nach_auswertung[0] );
-    sqlite3_finalize( dbase->stmts.db_kopieren_nach_auswertung[1] );
-    sqlite3_finalize( dbase->stmts.db_kopieren_nach_auswertung[2] );
-    sqlite3_finalize( dbase->stmts.db_get_icon_name_and_node_text[0] );
-    sqlite3_finalize( dbase->stmts.db_get_icon_name_and_node_text[1] );
-    sqlite3_finalize( dbase->stmts.db_remove_node[0] );
-    sqlite3_finalize( dbase->stmts.db_remove_node[1] );
-    sqlite3_finalize( dbase->stmts.db_remove_node[2] );
-    sqlite3_finalize( dbase->stmts.db_remove_node[3] );
-    sqlite3_finalize( dbase->stmts.db_verschieben_knoten[0] );
-    sqlite3_finalize( dbase->stmts.db_verschieben_knoten[1] );
-    sqlite3_finalize( dbase->stmts.db_verschieben_knoten[2] );
-    sqlite3_finalize( dbase->stmts.db_verschieben_knoten[3] );
-    sqlite3_finalize( dbase->stmts.db_verschieben_knoten[4] );
-    sqlite3_finalize( dbase->stmts.db_verschieben_knoten[5] );
-    sqlite3_finalize( dbase->stmts.db_get_parent[0] );
-    sqlite3_finalize( dbase->stmts.db_get_parent[1] );
-    sqlite3_finalize( dbase->stmts.db_get_older_sibling[0] );
-    sqlite3_finalize( dbase->stmts.db_get_older_sibling[1] );
-    sqlite3_finalize( dbase->stmts.db_get_younger_sibling[0] );
-    sqlite3_finalize( dbase->stmts.db_get_younger_sibling[1] );
-    sqlite3_finalize( dbase->stmts.db_get_ref_id[0] );
-    sqlite3_finalize( dbase->stmts.db_get_ziel[0] );
-    sqlite3_finalize( dbase->stmts.db_get_text[0] );
-    sqlite3_finalize( dbase->stmts.db_get_rel_path[0] );
-    sqlite3_finalize( dbase->stmts.db_set_icon_id[0] );
-    sqlite3_finalize( dbase->stmts.db_set_icon_id[1] );
-    sqlite3_finalize( dbase->stmts.db_get_first_child[0] );
-    sqlite3_finalize( dbase->stmts.db_get_first_child[1] );
-    sqlite3_finalize( dbase->stmts.db_get_node_id_from_rel_path[0] );
-    sqlite3_finalize( dbase->stmts.db_check_id[0] );
-
-    return;
-}
-
-
 gint
 project_db_create_stmts( Database* dbase, gchar** errmsg )
 {

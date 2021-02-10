@@ -142,7 +142,7 @@ dbase_prepare_stmt( sqlite3* db, const gchar* sql, gchar** errmsg )
 }
 
 
-static gint
+gint
 dbase_prepare_stmts( DBase* dbase, gchar** errmsg )
 {
     gint zaehler = 0;
@@ -307,13 +307,6 @@ dbase_create_db( sqlite3* db, gchar** errmsg )
 }
 
 
-static DBase*
-dbase_new( void )
-{
-    return g_malloc0( sizeof( DBase ) );
-}
-
-
 gint
 dbase_open( const gchar* path, DBase* dbase, gboolean create, gboolean overwrite,
         gchar** errmsg )
@@ -381,16 +374,20 @@ dbase_open( const gchar* path, DBase* dbase, gboolean create, gboolean overwrite
     rc = sqlite3_exec( dbase->db, sql, NULL, NULL, errmsg );
     if ( rc != SQLITE_OK ) ERROR( "sqlite3_exec (PRAGMA)" )
 
-    rc = dbase_prepare_stmts( dbase, errmsg );
-    if ( rc ) ERROR( "dbase_prepare_stmts" )
-
     return 0;
 }
 
 
+static DBase*
+dbase_new( void )
+{
+    return g_malloc0( sizeof( DBase ) );
+}
+
+
 gint
-dbase_create( const gchar* path, DBase** dbase, gboolean create,
-        gboolean overwrite,gchar** errmsg )
+dbase_create_with_stmts( const gchar* path, DBase** dbase, gboolean create,
+        gboolean overwrite, gchar** errmsg )
 {
     gint rc = 0;
 
@@ -402,6 +399,13 @@ dbase_create( const gchar* path, DBase** dbase, gboolean create,
         dbase_destroy( *dbase );
         if ( rc == -1 ) ERROR( "dbase_open" )
         else return 1;
+    }
+
+    rc = dbase_prepare_stmts( *dbase, errmsg );
+    if ( rc )
+    {
+        dbase_destroy( *dbase );
+        ERROR( "dbase_prepare_stmts" )
     }
 
     return 0;

@@ -53,7 +53,7 @@ project_set_changed( gpointer user_data )
 
 
 static void
-reset_project_changed( Projekt* zond )
+project_reset_changed( Projekt* zond )
 {
     zond->dbase_zond->changed = FALSE;
     gtk_widget_set_sensitive( zond->menu.speichernitem, FALSE );
@@ -92,6 +92,7 @@ project_before_move( const GFile* file_source, const GFile* file_dest,
         gpointer data, gchar** errmsg )
 {
     gint rc = 0;
+    gboolean changed = FALSE;
 
     Projekt* zond = (Projekt*) data;
 
@@ -104,6 +105,8 @@ project_before_move( const GFile* file_source, const GFile* file_dest,
     gchar* rel_path_source = fm_get_rel_path_from_file( zond->dbase_zond->project_dir, file_source );
     gchar* rel_path_dest = fm_get_rel_path_from_file( zond->dbase_zond->project_dir, file_dest );
 
+    changed = zond->dbase_zond->changed;
+
     rc = dbase_update_path( zond->dbase_zond->dbase_store, rel_path_source, rel_path_dest, errmsg );
     if ( rc )
     {
@@ -115,8 +118,12 @@ project_before_move( const GFile* file_source, const GFile* file_dest,
     }
 
     rc = dbase_update_path( (DBase*) zond->dbase_zond->dbase_work, rel_path_source, rel_path_dest, errmsg );
+
     g_free( rel_path_source );
     g_free( rel_path_dest );
+
+    if ( !changed ) project_reset_changed( zond );
+
     if ( rc ) ERROR_ROLLBACK_BOTH( zond->dbase_zond->dbase_store,
             (DBase*) zond->dbase_zond->dbase_work, "dbase_update_path (dbase_work)" )
 
@@ -228,8 +235,8 @@ project_create_dbase_zond( Projekt* zond, const gchar* path, gboolean create,
     gchar* path_tmp = NULL;
     DBaseFull* dbase_full = NULL;
 
-    rc = dbase_create( path, &dbase, create, FALSE, errmsg );
-    if ( rc == -1 ) ERROR( "projekt_create_dbase_zond" )
+    rc = dbase_create_with_stmts( path, &dbase, create, FALSE, errmsg );
+    if ( rc == -1 ) ERROR( "dbase_create" )
     else if ( rc == 1 ) return 1;
 
     path_tmp = g_strconcat( path, ".tmp", NULL );
@@ -242,11 +249,22 @@ project_create_dbase_zond( Projekt* zond, const gchar* path, gboolean create,
         else if ( rc == 1 ) return 1;
     }
 
-    rc = project_backup( zond->dbase_zond->dbase_store->db, zond->dbase_zond->dbase_work->dbase.db, errmsg );
-    if ( rc ) ERROR( "project_backup" )
+    rc = project_backup( dbase->db, dbase_full->dbase.db, errmsg );
+    if ( rc )
+    {
+        dbase_destroy( dbase );
+        dbase_destroy( (DBase*) dbase_full );
+        ERROR( "project_backup" )
+    }
 
-    sqlite3_update_hook( zond->dbase_zond->dbase_work->dbase.db,
-            (void*) project_set_changed, (gpointer) zond );
+    rc = dbase_full_prepare_stmts( dbase_full, errmsg );
+    if ( rc )
+    {
+        dbase_destroy( (DBase*) dbase_full );
+        ERROR( "dbase_full_prepare_stmts" )
+    }
+
+    sqlite3_update_hook( dbase_full->dbase.db, (void*) project_set_changed, (gpointer) zond );
 
     *dbase_zond = g_malloc0( sizeof( DBaseZond ) );
 
@@ -279,7 +297,7 @@ projekt_aktivieren( Projekt* zond )
     g_settings_set_string( zond->settings, "project", set );
     g_free( set );
 
-    reset_project_changed( zond );
+    project_reset_changed( zond );
 
     return;
 }
@@ -313,7 +331,7 @@ project_speichern( Projekt* zond, gchar** errmsg )
             zond->dbase_zond->dbase_store->db,errmsg );
     if ( rc ) ERROR( "project_backup" )
 
-    reset_project_changed( zond );
+    project_reset_changed( zond );
 
     return 0;
 }
@@ -376,7 +394,7 @@ projekt_schliessen( Projekt* zond, gchar** errmsg )
     g_object_set_data( G_OBJECT(buffer), "changed", NULL );
     g_object_set_data( G_OBJECT(zond->textview), "node-id", NULL );
 
-    reset_project_changed( zond );
+    project_reset_changed( zond );
 
     //Vor leeren der treeviews: focus-in-callback blocken
     //darin wird cursor-changed-callback angeschaltet --> Absturz
@@ -400,19 +418,19 @@ projekt_schliessen( Projekt* zond, gchar** errmsg )
     //muß vor project_destroy..., weil callback ausgelöst wird, der db_get_node_id... aufruft
     gtk_toggle_button_set_active( GTK_TOGGLE_BUTTON(zond->fs_button), FALSE );
 
+    gchar* working_copy = g_strconcat( zond->dbase_zond->project_dir, "/",
+            zond->dbase_zond->project_name, ".tmp", NULL );
+
+    project_clear_dbase_zond( &(zond->dbase_zond) );
+
     //legacy...
-    project_db_destroy_stmts( zond->dbase );
     g_free( zond->dbase );
     zond->dbase = NULL;
 
-    gchar* working_copy = g_strconcat( zond->dbase_zond->project_dir, "/",
-            zond->dbase_zond->project_name, ".tmp", NULL );
     gint res = g_remove( working_copy );
-    if ( res == -1) meldung( zond->app_window, "Fehler beim Löschen der "
+    if ( res == -1 ) meldung( zond->app_window, "Fehler beim Löschen der "
             "temporären Datenbank:\n", strerror( errno ), NULL );
     g_free( working_copy );
-
-    project_clear_dbase_zond( &(zond->dbase_zond) );
 
     gtk_header_bar_set_title(
             GTK_HEADER_BAR(gtk_window_get_titlebar(
