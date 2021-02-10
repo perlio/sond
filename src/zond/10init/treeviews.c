@@ -238,7 +238,7 @@ treeviews_cb_cell_edited( GtkCellRenderer* cell, gchar* path_string, gchar* new_
     if ( rc )
     {
         meldung( zond->app_window, "Knoten umbenennen nicht möglich\n\n"
-                "Bei Aufruf db_set_node_text:\n", errmsg, NULL );
+                "Bei Aufruf dbase_full_set_node_text:\n", errmsg, NULL );
         g_free( errmsg );
 
         return;

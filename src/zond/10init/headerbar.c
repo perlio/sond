@@ -567,7 +567,7 @@ cb_item_text_anbindung( GtkMenuItem* item, gpointer data )
         if ( rc )
         {
             meldung( zond->app_window, "Fehler in Text anpassen (Anbindung):\n\n"
-                    "Bei Aufruf db_set_node_text:\n", errmsg, NULL );
+                    "Bei Aufruf dbase_full_set_node_text:\n", errmsg, NULL );
             g_free( errmsg );
             g_free( node_text );
             g_list_free_full( selected, (GDestroyNotify) gtk_tree_path_free );

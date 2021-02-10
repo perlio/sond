@@ -110,9 +110,7 @@
 		<Unit filename="src/fm.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="src/fm.h">
-			<Option compile="1" />
-		</Unit>
+		<Unit filename="src/fm.h" />
 		<Unit filename="src/misc.c">
 			<Option compilerVar="CC" />
 		</Unit>
@@ -716,6 +714,9 @@
 				<Code header_guard="VERSION_H" namespace="AutoVersion" prefix="" />
 			</AutoVersioning>
 			<lib_finder disable_auto="1" />
+			<code_completion />
+			<envvars />
+			<debugger />
 		</Extensions>
 	</Project>
 </CodeBlocks_project_file>

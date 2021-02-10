@@ -22,8 +22,6 @@ gint db_kopieren_nach_auswertung( Projekt*, Baum, gint, gint, gboolean, gchar** 
 gint db_kopieren_nach_auswertung_mit_kindern( Projekt*, gboolean, Baum,
         gint, gint, gboolean, gchar** );
 
-gint db_set_node_text( Projekt*, Baum, gint, const gchar*, gchar** );
-
 gint db_set_icon_id( Projekt*, Baum, gint, const gchar*, gchar** );
 
 gint db_speichern_textview( Projekt*, gint, gchar*, gchar** );
