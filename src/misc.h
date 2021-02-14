@@ -29,4 +29,6 @@ gchar* add_string( gchar*, gchar* );
 
 GSList* choose_files( const GtkWidget*, const gchar*, const gchar*, gchar*, gint, gboolean );
 
+gchar* get_path_from_base( const gchar*, gchar** );
+
 #endif // MISC_H_INCLUDED

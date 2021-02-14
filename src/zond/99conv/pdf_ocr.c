@@ -16,6 +16,15 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+#include <mupdf/fitz.h>
+#include <mupdf/pdf.h>
+#include <gtk/gtk.h>
+#include <tesseract/capi.h>
+#include <allheaders.h>
+#include <glib/gstdio.h>
+
+#include "../../misc.h"
+
 #include "../error.h"
 
 #include "../40viewer/document.h"
@@ -23,13 +32,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../99conv/pdf.h"
 #include "../99conv/general.h"
 #include "../99conv/mupdf.h"
-
-#include <mupdf/fitz.h>
-#include <mupdf/pdf.h>
-#include <gtk/gtk.h>
-#include <tesseract/capi.h>
-#include <allheaders.h>
-#include <glib/gstdio.h>
 
 #ifdef _WIN32
 #include <errhandlingapi.h>
@@ -1243,19 +1245,25 @@ pdf_ocr_create_pdf_only_text( InfoWindow* info_window,
         TessResultRenderer* renderer, gchar** errmsg )
 {
     gint rc = 0;
+    gint len = 0;
+    gint zaehler = 0;
     gint i = 0;
     gint alle = 0;
+
+    len = arr_document_pages->len;
 
     for ( i = 0; i < arr_document_pages->len; i++ )
     {
         gboolean rendered = FALSE;
 
+        zaehler++;
+
         DocumentPage* document_page = g_ptr_array_index( arr_document_pages, i );
         gint index = document_get_index_of_document_page( document_page );
 
         gchar* info_text = g_strdup_printf( "(%i/%i) %s, Seite %i",
-                i + 1, arr_document_pages->len, document_page->document->path,
-                index );
+                zaehler, len, document_page->document->path,
+                index + 1 );
         info_window_set_message( info_window, info_text );
         g_free( info_text );
 
@@ -1311,51 +1319,6 @@ pdf_ocr_create_pdf_only_text( InfoWindow* info_window,
 }
 
 
-/*
- *  Gibt "...xxx\" zurück
- */
-gchar*
-get_path_from_base( gchar* path, gchar** errmsg )
-{
-    gchar* base_dir = NULL;
-    gchar* full_path = NULL;
-
-#ifdef _WIN32
-    DWORD ret = 0;
-    TCHAR buff[MAX_PATH] = { 0 };
-
-    ret = GetModuleFileName(NULL, buff, _countof(buff));
-    if ( !ret && errmsg )
-    {
-        DWORD error_code = 0;
-
-        error_code = GetLastError( );
-
-        *errmsg = add_string( *errmsg, g_strdup_printf( "Bei Aufruf GetModuleFileName:\n"
-                "Error Code: %li", error_code ) );
-    }
-    else if ( ret ) base_dir = g_strndup( (const gchar*) buff, strlen( buff ) -
-            strlen( g_strrstr( (const gchar*) buff, "\\" ) ) - 3 );
-#elif defined( __linux__ )
-    gchar path[PATH_MAX] = { 0 };
-    gchar dest[PATH_MAX] = { 0 };
-    struct stat info;
-    pid_t pid = getpid();
-    sprintf(path, "/proc/%d/exe", pid);
-
-    if ( readlink( path, dest, PATH_MAX ) == -1 )
-    {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf readling:\n", strerror( errno ), NULL );
-    }
-    else base_dir = g_strdup( path );
-#endif // _WIN32
-
-    full_path = add_string( base_dir, g_strdup( path ) );
-
-    return full_path;
-}
-
-
 static gint
 init_tesseract( TessBaseAPI** handle, TessResultRenderer** renderer, gchar** errmsg )
 {
@@ -1371,7 +1334,7 @@ init_tesseract( TessBaseAPI** handle, TessResultRenderer** renderer, gchar** err
     if ( !tessdata_dir )
     {
         TessBaseAPIDelete( *handle );
-        ERROR_PAO( "get_path_from_base" );
+        ERROR( "get_path_from_base" )
     }
 
     rc = TessBaseAPIInit3( *handle, tessdata_dir, "deu" );

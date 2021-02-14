@@ -7,7 +7,6 @@ typedef struct _GDate GDate;
 
 typedef struct _Eingang
 {
-    gchar* rel_path;
     GDate* eingangsdatum;
     gchar* transport;
     gchar* traeger;

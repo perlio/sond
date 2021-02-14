@@ -433,7 +433,7 @@ treeviews_init_fs_tree( Projekt* zond )
 
     modify_file.data = (gpointer) zond;
 
-    zond->treeview[BAUM_FS] = fm_create_tree_view( zond->clipboard, &modify_file );
+    zond->treeview[BAUM_FS] = GTK_TREE_VIEW(fm_create_tree_view( zond->clipboard, &modify_file ));
 
     //die Selection
     zond->selection[BAUM_FS] = gtk_tree_view_get_selection(
@@ -441,14 +441,6 @@ treeviews_init_fs_tree( Projekt* zond )
 
     cell = g_object_get_data( G_OBJECT(zond->treeview[BAUM_FS]), "renderer-text" );
     zond->renderer_text[BAUM_FS] = cell;
-
-    GdkRGBA gdkrgba;
-    gdkrgba.alpha = 1.0;
-    gdkrgba.red = 0.95;
-    gdkrgba.blue = 0.95;
-    gdkrgba.green = 0.95;
-
-    g_object_set( cell, "background-rgba", &gdkrgba, NULL );
 
     //focus-in
     zond->treeview_focus_in_signal[BAUM_FS] = g_signal_connect( zond->treeview[BAUM_FS],

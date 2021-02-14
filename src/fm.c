@@ -26,7 +26,7 @@ fm_get_rel_path_from_file( const gchar* root, const GFile* file )
     abs_path = g_strdelimit( abs_path, "\\", '/' );
 #endif // _WIN32
 
-    rel_path = g_strdup( abs_path + strlen( root ) + 1 );
+    rel_path = g_strdup( abs_path + ((root) ? strlen( root ) + 1 : 0) );
     g_free( abs_path );
 
     return rel_path; //muß freed werden
@@ -1193,15 +1193,15 @@ fm_render_file_icon( GtkTreeViewColumn* column, GtkCellRenderer* renderer,
 
 /** In GObject treeview muß "root" mit Urpsrungsverzeichnis gesetzt werden
 **/
-GtkTreeView*
+GtkWidget*
 fm_create_tree_view( Clipboard* clipboard, ModifyFile* modify_file )
 {
     //treeview
-    GtkTreeView* treeview_fs = (GtkTreeView*) gtk_tree_view_new( );
-    gtk_tree_view_set_headers_visible( treeview_fs, FALSE );
-    gtk_tree_view_set_fixed_height_mode( treeview_fs, TRUE );
-    gtk_tree_view_set_enable_tree_lines( treeview_fs, TRUE );
-    gtk_tree_view_set_enable_search( treeview_fs, FALSE );
+    GtkWidget* treeview_fs = gtk_tree_view_new( );
+    gtk_tree_view_set_headers_visible( GTK_TREE_VIEW(treeview_fs), FALSE );
+    gtk_tree_view_set_fixed_height_mode( GTK_TREE_VIEW(treeview_fs), TRUE );
+    gtk_tree_view_set_enable_tree_lines( GTK_TREE_VIEW(treeview_fs), TRUE );
+    gtk_tree_view_set_enable_search( GTK_TREE_VIEW(treeview_fs), FALSE );
 
     g_object_set_data( G_OBJECT(treeview_fs), "clipboard", clipboard );
     g_object_set_data( G_OBJECT(treeview_fs), "modify-file", modify_file );
@@ -1209,6 +1209,14 @@ fm_create_tree_view( Clipboard* clipboard, ModifyFile* modify_file )
     //Icon und filename
     GtkCellRenderer* renderer_icon = gtk_cell_renderer_pixbuf_new( );
     GtkCellRenderer* renderer_text = gtk_cell_renderer_text_new( );
+
+    GdkRGBA gdkrgba;
+    gdkrgba.alpha = 1.0;
+    gdkrgba.red = 0.95;
+    gdkrgba.blue = 0.95;
+    gdkrgba.green = 0.95;
+
+    g_object_set( renderer_text, "background-rgba", &gdkrgba, NULL );
 
     g_object_set_data( G_OBJECT(treeview_fs), "renderer-text", renderer_text );
 
@@ -1246,16 +1254,16 @@ fm_create_tree_view( Clipboard* clipboard, ModifyFile* modify_file )
     gtk_tree_view_column_set_cell_data_func( fs_tree_column_modify, renderer_modify,
             fm_render_file_modify, treeview_fs, NULL );
 
-    gtk_tree_view_append_column( treeview_fs, fs_tree_column );
-    gtk_tree_view_append_column( treeview_fs, fs_tree_column_size );
-    gtk_tree_view_append_column( treeview_fs, fs_tree_column_modify );
+    gtk_tree_view_append_column( GTK_TREE_VIEW(treeview_fs), fs_tree_column );
+    gtk_tree_view_append_column( GTK_TREE_VIEW(treeview_fs), fs_tree_column_size );
+    gtk_tree_view_append_column( GTK_TREE_VIEW(treeview_fs), fs_tree_column_modify );
 
     GtkTreeStore* tree_store = gtk_tree_store_new( 1, G_TYPE_OBJECT );
-    gtk_tree_view_set_model( treeview_fs, GTK_TREE_MODEL(tree_store) );
+    gtk_tree_view_set_model( GTK_TREE_VIEW(treeview_fs), GTK_TREE_MODEL(tree_store) );
     g_object_unref( tree_store );
 
     //die Selection
-    GtkTreeSelection* selection = gtk_tree_view_get_selection( treeview_fs );
+    GtkTreeSelection* selection = gtk_tree_view_get_selection( GTK_TREE_VIEW(treeview_fs) );
     gtk_tree_selection_set_mode( selection, GTK_SELECTION_MULTIPLE );
     gtk_tree_selection_set_select_function( selection,
             (GtkTreeSelectionFunc) treeview_selection_select_func, NULL, NULL );

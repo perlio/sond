@@ -29,6 +29,7 @@ typedef struct sqlite3 sqlite3;
 typedef struct sqlite3_stmt sqlite3_stmt;
 typedef char gchar;
 typedef int gint;
+typedef struct _Eingang Eingang;
 
 typedef struct _DBase
 {
@@ -38,6 +39,7 @@ typedef struct _DBase
     sqlite3_stmt* rollback;
     sqlite3_stmt* update_path;
     sqlite3_stmt* test_path;
+    sqlite3_stmt* eingang_for_rel_path;
 } DBase;
 
 
@@ -51,11 +53,15 @@ gint dbase_update_path( DBase*, const gchar*, const gchar*, gchar** );
 
 gint dbase_test_path( DBase*, const gchar*, gchar** );
 
+gint dbase_get_eingang_for_rel_path( DBase*, const gchar*, Eingang**, gchar** );
+
 void dbase_destroy( DBase* );
 
 sqlite3_stmt* dbase_prepare_stmt( sqlite3*, const gchar*, gchar** );
 
 gint dbase_prepare_stmts( DBase*, gchar** );
+
+gint dbase_create_db( sqlite3*, gchar** );
 
 gint dbase_open( const gchar*, DBase*, gboolean, gboolean, gchar** );
 

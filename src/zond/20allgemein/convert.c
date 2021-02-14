@@ -16,15 +16,15 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+#include <gtk/gtk.h>
+#include <sqlite3.h>
+
+#include "../../dbase.h"
+
 #include "../error.h"
 #include "../global_types.h"
 
 #include "../99conv/general.h"
-
-#include "project_db.h"
-
-#include <gtk/gtk.h>
-#include <sqlite3.h>
 
 
 static gint
@@ -163,7 +163,7 @@ convert_datei_oeffnen( Projekt* zond, gchar** errmsg )
         return NULL;
     }
 
-    if ( !project_db_create( db_convert, errmsg ) )
+    if ( dbase_create_db( db_convert, errmsg ) )
     {
         sqlite3_close( db_convert );
         g_free( abs_path );

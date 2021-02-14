@@ -21,15 +21,16 @@ cb_file_manager_delete_event( GtkWidget* window, GdkEvent* event, gpointer data 
 
     Sojus* sojus = (Sojus*) data;
 
-    fm_treeview = g_object_get_data( G_OBJECT(window), "fm_treeview" );
-    regnr_string = g_object_get_data( G_OBJECT(fm_treeview), "regnr-string" );
-
+    regnr_string = g_object_get_data( G_OBJECT(window), "regnr-string" );
     g_object_set_data( G_OBJECT(sojus->app_window), regnr_string, NULL );
-
     g_free( regnr_string );
 
+    fm_treeview = g_object_get_data( G_OBJECT(window), "fm-treeview" );
+
+    fm_unset_root( GTK_TREE_VIEW(fm_treeview) );
+
+    dbase_destroy( (DBase*) g_object_get_data( G_OBJECT(fm_treeview), "dbase" ) );
     modify_file = g_object_get_data( G_OBJECT(fm_treeview), "modify-file" );
-    dbase_destroy( (DBase*) modify_file->data );
     g_free( modify_file );
 
     return FALSE;
@@ -41,6 +42,153 @@ file_manager_close( GtkWidget* fm_window )
 {
     gboolean ret = FALSE;
     g_signal_emit_by_name( fm_window, "delete-event", &ret );
+
+    return;
+}
+
+
+static void
+file_manager_cb_dir_einfuegen_p( GtkWidget* item, gpointer data )
+{
+    gint rc = 0;
+    gchar* errmsg = NULL;
+
+    GtkWidget* fm_window = (GtkWidget*) data;
+
+    GtkWidget* fm_treeview = g_object_get_data( G_OBJECT(fm_window), "fm-treeview" );
+
+    rc = fm_create_dir( GTK_TREE_VIEW(fm_treeview), FALSE, &errmsg );
+    if ( rc )
+    {
+        display_message( fm_window, "Fehler bei Erzeugen neues Verzeichnis -\n\n"
+                "Bei Aufruf fm_create_dir:\n", errmsg, NULL );
+        g_free( errmsg );
+    }
+
+    return;
+}
+
+
+static void
+file_manager_cb_dir_einfuegen_up( GtkWidget* item, gpointer data )
+{
+    gint rc = 0;
+    gchar* errmsg = NULL;
+
+    GtkWidget* fm_window = (GtkWidget*) data;
+
+    GtkWidget* fm_treeview = g_object_get_data( G_OBJECT(fm_window), "fm-treeview" );
+
+    rc = fm_create_dir( GTK_TREE_VIEW(fm_treeview), TRUE, &errmsg );
+    if ( rc )
+    {
+        display_message( fm_window, "Fehler bei Erzeugen neues Verzeichnis -\n\n"
+                "Bei Aufruf fm_create_dir:\n", errmsg, NULL );
+        g_free( errmsg );
+    }
+
+    return;
+}
+
+
+static void
+file_manager_cb_kopieren( GtkWidget* item, gpointer data )
+{
+    GtkWidget* fm_window = (GtkWidget*) data;
+
+    GtkWidget* fm_treeview = g_object_get_data( G_OBJECT(fm_window), "fm-treeview" );
+    Clipboard* clipboard = g_object_get_data( G_OBJECT(fm_treeview), "clipboard" );
+
+    treeview_copy_or_cut_selection( GTK_TREE_VIEW(fm_treeview), clipboard, FALSE );
+
+    return;
+}
+
+
+static void
+file_manager_cb_ausschneiden( GtkWidget* item, gpointer data )
+{
+    GtkWidget* fm_window = (GtkWidget*) data;
+
+    GtkWidget* fm_treeview = g_object_get_data( G_OBJECT(fm_window), "fm-treeview" );
+    Clipboard* clipboard = g_object_get_data( G_OBJECT(fm_treeview), "clipboard" );
+
+    treeview_copy_or_cut_selection( GTK_TREE_VIEW(fm_treeview), clipboard, TRUE );
+
+    return;
+}
+
+
+static void
+file_manager_cb_einfuegen_p( GtkWidget* item, gpointer data )
+{
+    gint rc = 0;
+    gchar* errmsg = NULL;
+
+    GtkWidget* fm_window = (GtkWidget*) data;
+
+    GtkWidget* fm_treeview = g_object_get_data( G_OBJECT(fm_window), "fm-treeview" );
+    Clipboard* clipboard = g_object_get_data( G_OBJECT(fm_treeview), "clipboard" );
+
+    rc = fm_paste_selection( GTK_TREE_VIEW(fm_treeview), clipboard->tree_view,
+            clipboard->arr_ref, clipboard->ausschneiden, FALSE, &errmsg );
+    if ( rc )
+    {
+        display_message( fm_window, "Fehler bei Einfügen -\n\nBei Aufruf fm_"
+                "paste_selection:\n", errmsg, NULL );
+        g_free( errmsg );
+    }
+
+    return;
+}
+
+
+static void
+file_manager_cb_einfuegen_up( GtkWidget* item, gpointer data )
+{
+    gint rc = 0;
+    gchar* errmsg = NULL;
+
+    GtkWidget* fm_window = (GtkWidget*) data;
+
+    GtkWidget* fm_treeview = g_object_get_data( G_OBJECT(fm_window), "fm-treeview" );
+    Clipboard* clipboard = g_object_get_data( G_OBJECT(fm_treeview), "clipboard" );
+
+    rc = fm_paste_selection( GTK_TREE_VIEW(fm_treeview), clipboard->tree_view,
+            clipboard->arr_ref, clipboard->ausschneiden, TRUE, &errmsg );
+    if ( rc )
+    {
+        display_message( fm_window, "Fehler bei Einfügen -\n\nBei Aufruf fm_"
+                "paste_selection:\n", errmsg, NULL );
+        g_free( errmsg );
+    }
+
+    return;
+}
+
+
+static void
+file_manager_cb_loeschen( GtkWidget* item, gpointer data )
+{
+    gint rc = 0;
+    gchar* errmsg = NULL;
+
+    GtkWidget* fm_window = (GtkWidget*) data;
+
+    GtkWidget* fm_treeview = g_object_get_data( G_OBJECT(fm_window), "fm-treeview" );
+
+    GPtrArray* refs = treeview_selection_get_refs( GTK_TREE_VIEW(fm_treeview) );
+    if ( !refs ) return;
+
+    rc = treeview_selection_foreach( GTK_TREE_VIEW(fm_treeview), refs,
+            fm_foreach_loeschen, NULL, &errmsg );
+    g_ptr_array_unref( refs );
+    if ( rc == -1 )
+    {
+        display_message( fm_window, "Fehler bei Löschen -\n\nBei Aufruf "
+                "treeview_selection_foreach:\n", errmsg, NULL );
+        g_free( errmsg );
+    }
 
     return;
 }
@@ -67,9 +215,11 @@ file_manager_test( const GFile* file, gpointer data, gchar** errmsg )
     gint rc = 0;
     gchar* rel_path = NULL;
 
-    DBase* dbase = (DBase*) data;
+    GtkWidget* fm_treeview = (GtkWidget*) data;
+    const gchar* root = g_object_get_data( G_OBJECT(fm_treeview), "root" );
+    DBase* dbase = g_object_get_data( G_OBJECT(fm_treeview), "dbase" );
 
-    rel_path = fm_get_rel_path_from_file( dbase->path, file );
+    rel_path = fm_get_rel_path_from_file( root, file );
 
     rc = dbase_test_path( dbase, rel_path, errmsg );
     g_free( rel_path );
@@ -86,9 +236,11 @@ file_manager_before_move( const GFile* src, const GFile* dest, gpointer data,
 {
     gint rc = 0;
 
-    DBase* dbase = (DBase*) data;
+    GtkWidget* fm_treeview = (GtkWidget*) data;
+    const gchar* root = g_object_get_data( G_OBJECT(fm_treeview), "root" );
+    DBase* dbase = g_object_get_data( G_OBJECT(fm_treeview), "dbase" );
 
-    if ( !file_manager_same_project( dbase->path, dest ) ) //Verschieben in anderes Projekt
+    if ( !file_manager_same_project( root, dest ) ) //Verschieben in anderes Projekt
     {
         gint rc = 0;
 
@@ -100,8 +252,8 @@ file_manager_before_move( const GFile* src, const GFile* dest, gpointer data,
     rc = dbase_begin( dbase, errmsg );
     if ( rc ) ERROR( "dbase_begin" )
 
-    gchar* rel_path_source = fm_get_rel_path_from_file( dbase->path, src );
-    gchar* rel_path_dest = fm_get_rel_path_from_file( dbase->path, dest );
+    gchar* rel_path_source = fm_get_rel_path_from_file( root, src );
+    gchar* rel_path_dest = fm_get_rel_path_from_file( root, dest );
 
     rc = dbase_update_path( dbase, rel_path_source, rel_path_dest, errmsg );
 
@@ -139,7 +291,8 @@ file_manager_after_move( gint rc_update, gpointer data, gchar** errmsg )
 {
     gint rc = 0;
 
-    DBase* dbase = (DBase*) data;
+    GtkWidget* fm_treeview = (GtkWidget*) data;
+    DBase* dbase = g_object_get_data( G_OBJECT(fm_treeview), "dbase" );
 
     if ( rc_update == 1 )
     {
@@ -175,33 +328,116 @@ file_manager_after_move( gint rc_update, gpointer data, gchar** errmsg )
 
 
 static gint
-file_manager_create_modify_file( const gchar* path, ModifyFile** modify_file, gchar** errmsg )
+file_manager_fill_modify_file( GtkWidget* fm_treeview, ModifyFile* modify_file,
+        gchar** errmsg )
 {
     gint rc = 0;
     DBase* dbase = NULL;
     gchar* db_name = NULL;
 
-    db_name = g_strconcat( path, ".ZND", NULL );
+    db_name = g_strconcat( g_object_get_data( G_OBJECT(fm_treeview), "root" ),
+            "/doc_db.ZND", NULL );
 
-    rc = dbase_create_with_stmts( db_name, &dbase, FALSE, errmsg );
+    rc = dbase_create_with_stmts( db_name, &dbase, FALSE, FALSE, errmsg );
     g_free( db_name );
     if ( rc ) // da FALSE, kann nur -1 oder 0 zurückgegeben werden
     {
         if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf file_manager_create_dbase:\n",
-                errmsg, NULL );
-        g_free( errmsg );
+                *errmsg, NULL );
 
         return -1;
     }
 
-    *modify_file = g_malloc0( sizeof( ModifyFile ) );
+    g_object_set_data( G_OBJECT(fm_treeview), "dbase", dbase );
 
-    (*modify_file)->before_move = file_manager_before_move;
-    (*modify_file)->after_move = file_manager_after_move;
-    (*modify_file)->test = file_manager_test;
-    (*modify_file)->data = dbase;
+    modify_file->before_move = file_manager_before_move;
+    modify_file->after_move = file_manager_after_move;
+    modify_file->test = file_manager_test;
+    modify_file->data = (gpointer) fm_treeview;
 
     return 0;
+}
+
+
+static void
+file_manager_set_headerbar( GtkWidget* fm_window, const gchar* path )
+{
+    GtkWidget* headerbar = gtk_header_bar_new( );
+    GtkWidget* menu_fm = gtk_menu_new( );
+    GtkWidget* menu_button = gtk_menu_button_new( );
+
+    GtkAccelGroup* accel_group = gtk_accel_group_new( );
+    gtk_window_add_accel_group( GTK_WINDOW(fm_window), accel_group );
+
+    GtkWidget* dir_einfuegen = gtk_menu_item_new_with_label( "Neues Verzeichnis" );
+    GtkWidget* dir_einfuegen_menu = gtk_menu_new( );
+    GtkWidget* dir_einfuegen_p = gtk_menu_item_new_with_label( "Gleiche Ebene" );
+    GtkWidget* dir_einfuegen_up = gtk_menu_item_new_with_label( "Unterpunkt" );
+    gtk_menu_shell_append( GTK_MENU_SHELL(dir_einfuegen_menu), dir_einfuegen_p );
+    gtk_menu_shell_append( GTK_MENU_SHELL(dir_einfuegen_menu), dir_einfuegen_up );
+    gtk_menu_item_set_submenu( GTK_MENU_ITEM(dir_einfuegen), dir_einfuegen_menu );
+
+    GtkWidget* kopieren = gtk_menu_item_new_with_label( "Kopieren" );
+    GtkWidget* ausschneiden = gtk_menu_item_new_with_label( "Ausschneiden" );
+
+    GtkWidget* einfuegen = gtk_menu_item_new_with_label( "Einfügen" );
+    GtkWidget* einfuegen_menu = gtk_menu_new( );
+    GtkWidget* einfuegen_p = gtk_menu_item_new_with_label( "Gleiche Ebene" );
+    GtkWidget* einfuegen_up = gtk_menu_item_new_with_label( "Unterpunkt" );
+    gtk_menu_shell_append( GTK_MENU_SHELL(einfuegen_menu), einfuegen_p );
+    gtk_menu_shell_append( GTK_MENU_SHELL(einfuegen_menu), einfuegen_up );
+    gtk_menu_item_set_submenu( GTK_MENU_ITEM(einfuegen), einfuegen_menu );
+
+    GtkWidget* loeschen = gtk_menu_item_new_with_label( "Löschen" );
+
+    g_signal_connect( dir_einfuegen_p, "activate", G_CALLBACK(file_manager_cb_dir_einfuegen_p),
+            fm_window );
+    g_signal_connect( dir_einfuegen_up, "activate", G_CALLBACK(file_manager_cb_dir_einfuegen_up),
+            fm_window );
+    g_signal_connect( kopieren, "activate", G_CALLBACK(file_manager_cb_kopieren),
+            fm_window );
+    g_signal_connect( ausschneiden, "activate", G_CALLBACK(file_manager_cb_ausschneiden),
+            fm_window );
+    g_signal_connect( einfuegen_p, "activate", G_CALLBACK(file_manager_cb_einfuegen_p),
+            fm_window );
+    g_signal_connect( einfuegen_up, "activate", G_CALLBACK(file_manager_cb_einfuegen_up),
+            fm_window );
+    g_signal_connect( loeschen, "activate", G_CALLBACK(file_manager_cb_loeschen),
+            fm_window );
+
+    gtk_widget_add_accelerator( dir_einfuegen_p, "activate", accel_group,
+            GDK_KEY_p, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
+    gtk_widget_add_accelerator( dir_einfuegen_up, "activate", accel_group,
+            GDK_KEY_p, GDK_CONTROL_MASK | GDK_SHIFT_MASK, GTK_ACCEL_VISIBLE);
+    gtk_widget_add_accelerator( kopieren, "activate", accel_group,
+            GDK_KEY_c, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
+    gtk_widget_add_accelerator( ausschneiden, "activate", accel_group,
+            GDK_KEY_x, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
+    gtk_widget_add_accelerator( einfuegen_p, "activate", accel_group,
+            GDK_KEY_v, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
+    gtk_widget_add_accelerator( einfuegen_up, "activate", accel_group,
+            GDK_KEY_v, GDK_CONTROL_MASK | GDK_SHIFT_MASK, GTK_ACCEL_VISIBLE);
+    gtk_widget_add_accelerator( loeschen, "activate", accel_group,
+            GDK_KEY_Delete, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
+
+    gtk_menu_shell_append( GTK_MENU_SHELL(menu_fm), dir_einfuegen );
+    gtk_menu_shell_append( GTK_MENU_SHELL(menu_fm), kopieren );
+    gtk_menu_shell_append( GTK_MENU_SHELL(menu_fm), ausschneiden );
+    gtk_menu_shell_append( GTK_MENU_SHELL(menu_fm), einfuegen );
+    gtk_menu_shell_append( GTK_MENU_SHELL(menu_fm), loeschen );
+
+    gtk_widget_show_all( menu_fm );
+
+    gtk_menu_button_set_popup( GTK_MENU_BUTTON(menu_button), menu_fm );
+
+    gtk_header_bar_pack_start( GTK_HEADER_BAR(headerbar), menu_button );
+    gtk_header_bar_set_title( GTK_HEADER_BAR(headerbar), path );
+    gtk_header_bar_set_decoration_layout(GTK_HEADER_BAR(headerbar), ":minimize,maximize,close");
+    gtk_header_bar_set_show_close_button(GTK_HEADER_BAR(headerbar), TRUE);
+
+    gtk_window_set_titlebar( GTK_WINDOW(fm_window), headerbar );
+
+    return;
 }
 
 
@@ -249,36 +485,44 @@ file_manager_entry_activate( GtkWidget* entry, gpointer data )
     path = g_strdelimit( g_strdup( akte->bezeichnung ), "/\\", '-' );
     akte_free( akte );
     path = add_string( dokument_dir, path );
-    path = add_string( path, g_strdup_printf( " %i-%i/", sojus->regnr_akt,
+    path = add_string( path, g_strdup_printf( " %i-%i", sojus->regnr_akt,
             sojus->jahr_akt % 100 ) );
 
-    rc = file_manager_create_modify_file( path, &modify_file, &errmsg );
-    if ( rc )
-    {
-        display_message( gtk_widget_get_toplevel( GTK_WIDGET(fm_window) ),
-                "Fehler FileManager -\n\nBei Aufruf file_manager_create_modify:\n",
-                errmsg, NULL );
-        g_free( errmsg );
-        file_manager_close( fm_window );
+    modify_file = g_malloc0( sizeof( ModifyFile ) );
 
-        return;
-    }
-
-    GtkWidget* fm_treeview = GTK_WIDGET(fm_create_tree_view( sojus->clipboard, modify_file ));
+    GtkWidget* fm_treeview = fm_create_tree_view( sojus->clipboard, modify_file );
     gtk_container_add( GTK_CONTAINER(swindow), fm_treeview );
 
-    g_object_set_data( G_OBJECT(fm_window), "fm_treeview", fm_treeview );
+    g_object_set_data( G_OBJECT(fm_window), "fm-treeview", fm_treeview );
 
     rc = fm_set_root( GTK_TREE_VIEW(fm_treeview), path, &errmsg );
-    gtk_window_set_title( GTK_WINDOW(fm_window), path );
+    file_manager_set_headerbar( fm_window, path );
     g_free( path );
     if ( rc )
     {
         display_message( gtk_widget_get_toplevel( GTK_WIDGET(fm_treeview) ),
                 "Fehler -\n\nBei Aufruf fm_set_root:\n", errmsg, NULL );
         g_free( errmsg );
+        g_object_set_data( G_OBJECT(sojus->app_window), regnr_string, NULL );
+        g_free( regnr_string );
+        g_free( modify_file );
+        gtk_widget_destroy( fm_window );
 
-        file_manager_close( fm_window );
+        return;
+    }
+
+    rc = file_manager_fill_modify_file( fm_treeview, modify_file, &errmsg );
+    if ( rc )
+    {
+        display_message( gtk_widget_get_toplevel( GTK_WIDGET(fm_window) ),
+                "Fehler FileManager -\n\nBei Aufruf file_manager_create_modify:\n",
+                errmsg, NULL );
+        g_free( errmsg );
+        g_object_set_data( G_OBJECT(sojus->app_window), regnr_string, NULL );
+        g_free( regnr_string );
+        fm_unset_root( GTK_TREE_VIEW(fm_treeview) );
+        g_free( modify_file );
+        gtk_widget_destroy( fm_window );
 
         return;
     }

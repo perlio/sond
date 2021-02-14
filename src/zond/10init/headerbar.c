@@ -1297,7 +1297,7 @@ cb_button_mode_toggled( GtkToggleButton* button, gpointer data )
         if ( rc )
         {
             meldung( zond->app_window, "Fehler beim Laden Root-Verzeichnis -\n\n",
-                    errmsg, NULL );
+                    "Bei Aufruf fm_set_root:\n", errmsg, NULL );
             g_free( errmsg );
         }
     }

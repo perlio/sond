@@ -2,6 +2,7 @@
 #include <gtk/gtk.h>
 
 #include "dbase.h"
+#include "eingang.h"
 
 #include "misc.h"
 
@@ -89,6 +90,36 @@ dbase_test_path( DBase* dbase, const gchar* rel_path, gchar** errmsg )
 }
 
 
+gint
+dbase_get_eingang_for_rel_path( DBase* dbase, const gchar* rel_path,
+        Eingang** eingang, gchar** errmsg )
+{
+    gint rc = 0;
+
+    sqlite3_reset( dbase->eingang_for_rel_path );
+
+    rc = sqlite3_bind_text( dbase->eingang_for_rel_path, 1, rel_path, -1, NULL );
+    if ( rc != SQLITE_OK ) ERROR_DBASE( "sqlite3_bind_text" )
+
+    rc = sqlite3_step( dbase->test_path );
+    if ( (rc != SQLITE_ROW) && rc != SQLITE_DONE ) ERROR_DBASE( "sqlite3_step" )
+
+    if ( rc == SQLITE_DONE ) return 1; //rel_path nicht vorhanden
+
+    *eingang = g_malloc0( sizeof( Eingang ) );
+
+    (*eingang)->eingangsdatum = g_date_new_julian( sqlite3_column_int( dbase->eingang_for_rel_path, 0 ) );
+    (*eingang)->transport = g_strdup( (const gchar*) sqlite3_column_text( dbase->eingang_for_rel_path, 1 ) );
+    (*eingang)->traeger = g_strdup( (const gchar*) sqlite3_column_text( dbase->eingang_for_rel_path, 2 ) );
+    (*eingang)->ort = g_strdup( (const gchar*) sqlite3_column_text( dbase->eingang_for_rel_path, 3 ) );
+    (*eingang)->absender = g_strdup( (const gchar*) sqlite3_column_text( dbase->eingang_for_rel_path, 4 ) );
+    (*eingang)->absendedatum = g_date_new_julian( sqlite3_column_int( dbase->eingang_for_rel_path, 5 ) );
+    (*eingang)->erfassungsdatum = g_date_new_julian( sqlite3_column_int( dbase->eingang_for_rel_path, 6 ) );
+
+    return 0;
+}
+
+
 static void
 dbase_finalize_stmts( DBase* dbase )
 {
@@ -160,6 +191,11 @@ dbase_prepare_stmts( DBase* dbase, gchar** errmsg )
 
             "SELECT node_id FROM dateien WHERE rel_path=?1;",
 
+            "SELECT t1.eingangsdatum, t1.transport, t1.traeger, t1.ort, "
+            "t1.absender, t1.absendedatum, t1.erfassungsdatum "
+            "FROM eingang AS t1 LEFT JOIN eingang_rel_path AS t2 "
+            "ON t1.ID=t2.eingang WHERE rel_path=?1;",
+
             NULL };
 
     while ( sql[zaehler] != NULL )
@@ -187,7 +223,7 @@ dbase_prepare_stmts( DBase* dbase, gchar** errmsg )
 }
 
 
-static gint
+gint
 dbase_create_db( sqlite3* db, gchar** errmsg )
 {
     gchar* errmsg_ii = NULL;
@@ -197,6 +233,7 @@ dbase_create_db( sqlite3* db, gchar** errmsg )
     //Tabellenstruktur erstellen
     sql = //Haupttabelle
             "DROP TABLE IF EXISTS baum_auswertung; "
+            "DROP TABLE IF EXISTS eingang; "
             "DROP TABLE IF EXISTS dateien;"
             "DROP TABLE IF EXISTS ziele;"
             "DROP TABLE IF EXISTS baum_inhalt;"
@@ -223,14 +260,21 @@ dbase_create_db( sqlite3* db, gchar** errmsg )
             "); "
 
             "CREATE TABLE eingang ("
-                "rel_path VARCHAR(200), "
-                "eingangsdatum DATE, "
+                "ID INTEGER PRIMARY KEY, "
+                "eingangsdatum VARCHAR(20), "
                 "transport VARCHAR(30), " //Post, Fax, pers.,
                 "traeger VARCHAR(30), " //CD, Papier, USB
                 "ort VARCHAR(30), " //Kanzlei, HV-Saal
                 "absender VARCHAR(30), " //LG Buxtehude, RA Meier
-                "absendedatum DATE, "
-                "erfassungsdatum DATE "
+                "absendedatum VARCHAR(20), "
+                "erfassungsdatum VARCHAR(20) "
+            "); "
+
+            "CREATE TABLE eingang_rel_path ( "
+                "eingang INTEGER NOT NULL, "
+                "rel_path VARCHAR(200) NOT NULL, "
+                "FOREIGN KEY eingang REFERENCES eingang (ID) "
+                "ON DELETE CASCADE ON UPDATE CASCADE "
             "); "
 
             "CREATE TABLE baum_inhalt ("
@@ -368,11 +412,15 @@ dbase_open( const gchar* path, DBase* dbase, gboolean create, gboolean overwrite
         }
     }
 
-    dbase->db = db;
-
     gchar* sql = "PRAGMA foreign_keys = ON; PRAGMA case_sensitive_like = ON";
-    rc = sqlite3_exec( dbase->db, sql, NULL, NULL, errmsg );
-    if ( rc != SQLITE_OK ) ERROR( "sqlite3_exec (PRAGMA)" )
+    rc = sqlite3_exec( db, sql, NULL, NULL, errmsg );
+    if ( rc != SQLITE_OK )
+    {
+        sqlite3_close( db );
+        ERROR( "sqlite3_exec (PRAGMA)" )
+    }
+
+    dbase->db = db;
 
     return 0;
 }
@@ -397,6 +445,7 @@ dbase_create_with_stmts( const gchar* path, DBase** dbase, gboolean create,
     if ( rc )
     {
         dbase_destroy( *dbase );
+        *dbase = NULL;
         if ( rc == -1 ) ERROR( "dbase_open" )
         else return 1;
     }
@@ -405,6 +454,7 @@ dbase_create_with_stmts( const gchar* path, DBase** dbase, gboolean create,
     if ( rc )
     {
         dbase_destroy( *dbase );
+        *dbase = NULL;
         ERROR( "dbase_prepare_stmts" )
     }
 

@@ -19,10 +19,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include <gtk/gtk.h>
 
-#include "../global_types.h"
-
+#include "misc.h"
 #include "eingang.h"
-
+#include "dbase.h"
 
 void
 eingang_free( Eingang* eingang )
@@ -49,7 +48,7 @@ eingang_new( void )
 
 
 gint
-eingang_set_rel_path( Projekt* zond, Eingang* eingang,
+eingang_set_rel_path( DBase* dbase, Eingang* eingang,
         gchar** errmsg )
 {
 
@@ -59,11 +58,46 @@ eingang_set_rel_path( Projekt* zond, Eingang* eingang,
 
 
 gint
-eingang_get_for_rel_path( Projekt* zond, const gchar* rel_path,
+eingang_get_for_rel_path( DBase* dbase, const gchar* rel_path,
         Eingang** eingang, gchar** errmsg )
 {
+    gchar* buf = NULL;
+    gint zaehler = 1;
 
+    buf = g_strdup( rel_path );
 
+    do
+    {
+        gint rc = 0;
+        gchar* buf_int = NULL;
+        gchar* ptr_buf = NULL;
+
+        rc = dbase_get_eingang_for_rel_path( dbase, buf, eingang, errmsg );
+        if ( rc == -1 )
+        {
+            g_free( buf );
+            ERROR( "dbase_get_eingang_for_rel_path" )
+        }
+        else if ( rc == 0 ) //*eingang wurde gesetzt
+        {
+            g_free( buf );
+            return zaehler;
+        }
+
+        ptr_buf = g_strrstr( buf, "/" );
+        if ( !ptr_buf ) break;
+
+        buf_int = g_strndup( buf, strlen( buf ) - strlen( ptr_buf ) );
+        g_free( buf );
+        buf = buf_int;
+
+        zaehler++;
+    }
+    while ( 1 );
+
+    g_free( buf );
+
+    return 0;
 }
 
 
