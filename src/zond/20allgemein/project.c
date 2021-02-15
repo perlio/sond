@@ -470,7 +470,7 @@ project_oeffnen( Projekt* zond, const gchar* abs_path, gboolean create,
     gint rc = 0;
     DBaseZond* dbase_zond = NULL;
 
-    rc = project_create_dbase_zond( zond, abs_path, FALSE, &dbase_zond, errmsg );
+    rc = project_create_dbase_zond( zond, abs_path, create, &dbase_zond, errmsg );
     if ( rc == -1 ) ERROR( "project_create_dbase_zond" )
     else if ( rc == 1 ) return 1;
 

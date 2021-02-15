@@ -128,7 +128,7 @@ convert_copy( Projekt* zond, sqlite3* db_convert, gchar** errmsg )
 
 
 static sqlite3*
-convert_datei_oeffnen( Projekt* zond, gchar** errmsg )
+convert_datei_oeffnen( Projekt* zond, const gchar* zus, gchar** errmsg )
 {
     gint rc = 0;
     sqlite3* db_convert = NULL;
@@ -151,8 +151,8 @@ convert_datei_oeffnen( Projekt* zond, gchar** errmsg )
     //ToDo: abfragen, ob v1-Datei schon existiert und ggf. überschrieben werden soll
 
     //Ursprungsdatei
-    gchar* origin = g_strconcat( abs_path, "v1", NULL );
-    rc = sqlite3_open( origin, &(db_convert) );
+    gchar* origin = g_strconcat( abs_path, zus, NULL );
+    rc = sqlite3_open( origin, &db_convert );
     g_free( origin );
     if ( rc != SQLITE_OK )
     {
@@ -195,17 +195,59 @@ gint
 convert_09_to_1( Projekt* zond, gchar** errmsg )
 {
     gint rc = 0;
+    sqlite3* db_convert = NULL;
 
-    sqlite3* db_convert = convert_datei_oeffnen( zond, errmsg );
+    db_convert = convert_datei_oeffnen( zond, "v1", errmsg );
     if ( !db_convert ) ERROR_PAO( "convert_datei_oeffnen" )
 
     rc = convert_copy( zond, db_convert, errmsg );
+    sqlite3_close( db_convert );
     if ( rc ) ERROR_PAO( "convert_copy" )
 
-    sqlite3_close( db_convert );
-
     return 0;
-
 }
 
+
+static gint
+convert_copy_eingang( Projekt* zond, sqlite3* db_convert, gchar** errmsg )
+{
+    gint rc = 0;
+
+    gchar* sql =
+            "INSERT INTO baum_inhalt SELECT node_id, parent_id, older_sibling_id, "
+                    "icon_name, node_text, NULL FROM old.baum_inhalt WHERE node_id != 0; "
+            "INSERT INTO baum_auswertung SELECT * FROM old.baum_auswertung WHERE node_id != 0; "
+            "INSERT INTO dateien SELECT * FROM old.dateien; "
+            "INSERT Into ziele SELECT * FROM old.ziele; ";
+
+    rc = sqlite3_exec( db_convert, sql, NULL, NULL, errmsg );
+    if ( rc != SQLITE_OK )
+    {
+        if ( errmsg ) *errmsg = add_string( g_strdup( "Bei Aufruf sqlite3_exec:\n" ),
+                *errmsg );
+
+        return -1;
+    }
+
+    return 0;
+}
+
+
+gint
+convert_addeingang( Projekt* zond, gchar** errmsg )
+{
+    gint rc = 0;
+    sqlite3* db_convert = NULL;
+
+    db_convert = convert_datei_oeffnen( zond, "eing", errmsg );
+    if ( !db_convert ) ERROR_PAO( "convert_datei_oeffnen" )
+
+    rc = convert_copy_eingang( zond, db_convert, errmsg );
+    sqlite3_close( db_convert );
+    if ( rc ) ERROR_PAO( "convert_copy_eingang" )
+
+
+
+    return 0;
+}
 

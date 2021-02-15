@@ -58,7 +58,7 @@ eingang_set_rel_path( DBase* dbase, Eingang* eingang,
 
 
 gint
-eingang_get_for_rel_path( DBase* dbase, const gchar* rel_path,
+eingang_for_rel_path( DBase* dbase, const gchar* rel_path,
         Eingang** eingang, gchar** errmsg )
 {
     gchar* buf = NULL;

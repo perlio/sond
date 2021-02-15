@@ -1098,7 +1098,7 @@ fm_render_file_modify( GtkTreeViewColumn* column, GtkCellRenderer* renderer,
     g_object_unref( info );
 
     text = g_date_time_format( datetime, "%d.%m.%Y %T" );
-
+    g_date_time_unref( datetime );
     g_object_set( G_OBJECT(renderer), "text", text, NULL );
     g_free( text );
 

@@ -876,6 +876,7 @@ cb_menu_test_activate( GtkMenuItem* item, gpointer zond )
 
 //Prototyp-Definition, um Header-Datei zu sparen
 gint convert_09_to_1( Projekt*, gchar** );
+gint convert_addeingang( Projekt*, gchar** );
 
 static void
 cb_menu_convert_activate( GtkMenuItem* item, gpointer data )
@@ -889,7 +890,27 @@ cb_menu_convert_activate( GtkMenuItem* item, gpointer data )
     if ( rc )
     {
         meldung( zond->app_window, "Konvertieren nicht möglich -\n\nBei "
-                "Aufruf convert:\n", errmsg, NULL );
+                "Aufruf convert_09_to_1:\n", errmsg, NULL );
+        g_free( errmsg );
+    }
+
+    return;
+}
+
+
+static void
+cb_menu_addeingang_activate( GtkMenuItem* item, gpointer data )
+{
+    Projekt* zond = (Projekt*) data;
+
+    gint rc = 0;
+    gchar* errmsg = NULL;
+
+    rc = convert_addeingang( zond, &errmsg );
+    if ( rc )
+    {
+        meldung( zond->app_window, "Unterstützung Eingang hinzufügen nicht möglich-\n\nBei "
+                "Aufruf convert_addeingang:\n", errmsg, NULL );
         g_free( errmsg );
     }
 
@@ -1232,11 +1253,15 @@ init_menu( Projekt* zond )
     g_signal_connect( testitem, "activate", G_CALLBACK(cb_menu_test_activate), (gpointer) zond );
 
     //convert
-    GtkWidget* convertitem = gtk_menu_item_new_with_label( "Konvertieren" );
+    GtkWidget* convertitem = gtk_menu_item_new_with_label( "Konvertieren .9->1.0" );
     g_signal_connect( convertitem, "activate", G_CALLBACK(cb_menu_convert_activate), (gpointer) zond );
+
+    GtkWidget* addeingangitem = gtk_menu_item_new_with_label( "eingang hinzufügen" );
+    g_signal_connect( addeingangitem , "activate", G_CALLBACK(cb_menu_addeingang_activate), (gpointer) zond );
 
     gtk_menu_shell_append( GTK_MENU_SHELL(extrasmenu), testitem);
     gtk_menu_shell_append( GTK_MENU_SHELL(extrasmenu), convertitem);
+    gtk_menu_shell_append( GTK_MENU_SHELL(extrasmenu), addeingangitem );
 
 /*  Menu Einstellungen */
     GtkWidget* einstellungenmenu = gtk_menu_new( );

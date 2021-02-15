@@ -124,10 +124,21 @@ static void
 dbase_finalize_stmts( DBase* dbase )
 {
     sqlite3_stmt* stmt = NULL;
+    sqlite3_stmt* next_stmt = NULL;
 
     if ( dbase == NULL || dbase->db == NULL ) return;
 
-    while ( (stmt = sqlite3_next_stmt( dbase->db, stmt )) ) sqlite3_finalize( stmt );
+    stmt = sqlite3_next_stmt( dbase->db, NULL );
+
+    if ( !stmt ) return;
+
+    do
+    {
+        next_stmt = sqlite3_next_stmt( dbase->db, stmt );
+        sqlite3_finalize( stmt );
+        stmt = next_stmt;
+    }
+    while ( stmt );
 
     return;
 }
@@ -191,10 +202,11 @@ dbase_prepare_stmts( DBase* dbase, gchar** errmsg )
 
             "SELECT node_id FROM dateien WHERE rel_path=?1;",
 
-            "SELECT t1.eingangsdatum, t1.transport, t1.traeger, t1.ort, "
-            "t1.absender, t1.absendedatum, t1.erfassungsdatum "
-            "FROM eingang AS t1 LEFT JOIN eingang_rel_path AS t2 "
-            "ON t1.ID=t2.eingang WHERE rel_path=?1;",
+            "SELECT eingangsdatum, transport, traeger, ort, "
+            "absender, absendedatum, erfassungsdatum "
+            "FROM eingang LEFT JOIN "
+            "eingang_rel_path "
+            "ON eingang.ID=eingang_rel_path.eingang_id WHERE rel_path=?1;",
 
             NULL };
 
@@ -234,10 +246,11 @@ dbase_create_db( sqlite3* db, gchar** errmsg )
     sql = //Haupttabelle
             "DROP TABLE IF EXISTS baum_auswertung; "
             "DROP TABLE IF EXISTS eingang; "
+            "DROP TABLE IF EXISTS eingang_rel_path; "
             "DROP TABLE IF EXISTS dateien;"
             "DROP TABLE IF EXISTS ziele;"
             "DROP TABLE IF EXISTS baum_inhalt;"
-
+/*
             "CREATE TABLE IF NOT EXISTS Entities ( "
                 "ID INTEGER NOT NULL, "
                 "Bezeichnung TEXT, "
@@ -258,22 +271,23 @@ dbase_create_db( sqlite3* db, gchar** errmsg )
                 "FOREIGN KEY (property) REFERENCES Properties (ID), "
                 "PRIMARY KEY(ID) "
             "); "
-
+*/
             "CREATE TABLE eingang ("
-                "ID INTEGER PRIMARY KEY, "
+                "ID INTEGER NOT NULL, "
                 "eingangsdatum VARCHAR(20), "
                 "transport VARCHAR(30), " //Post, Fax, pers.,
                 "traeger VARCHAR(30), " //CD, Papier, USB
                 "ort VARCHAR(30), " //Kanzlei, HV-Saal
                 "absender VARCHAR(30), " //LG Buxtehude, RA Meier
                 "absendedatum VARCHAR(20), "
-                "erfassungsdatum VARCHAR(20) "
+                "erfassungsdatum VARCHAR(20), "
+                "PRIMARY KEY(ID) "
             "); "
 
             "CREATE TABLE eingang_rel_path ( "
-                "eingang INTEGER NOT NULL, "
+                "eingang_id INTEGER NOT NULL, "
                 "rel_path VARCHAR(200) NOT NULL, "
-                "FOREIGN KEY eingang REFERENCES eingang (ID) "
+                "FOREIGN KEY (eingang_id) REFERENCES eingang (ID) "
                 "ON DELETE CASCADE ON UPDATE CASCADE "
             "); "
 
@@ -283,7 +297,8 @@ dbase_create_db( sqlite3* db, gchar** errmsg )
                 "older_sibling_id INTEGER NOT NULL,"
                 "icon_name VARCHAR(50),"
                 "node_text VARCHAR(200), "
-                "FOREIGN KEY (eingang) REFERENCES eingang (ID) "
+                "eingang_id INTEGER NULL DEFAULT NULL, "
+                "FOREIGN KEY (eingang_id) REFERENCES eingang (ID) "
                 "ON DELETE CASCADE ON UPDATE CASCADE, "
                 "FOREIGN KEY (parent_id) REFERENCES baum_inhalt (node_id) "
                 "ON DELETE CASCADE ON UPDATE CASCADE, "
