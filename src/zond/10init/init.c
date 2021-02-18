@@ -29,7 +29,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "../20allgemein/project.h"
 #include "../20allgemein/zieleplus.h"
-#include "../20allgemein/fs_tree.h"
 
 #include "icons.h"
 #include "app_window.h"

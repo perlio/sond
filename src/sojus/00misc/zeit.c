@@ -16,6 +16,7 @@ sql_date_to_gdate( gchar* date )
 {
     gchar* year_text = g_strndup( date, 4 );
     gint year = g_ascii_strtoll( year_text, NULL, 10 );
+    g_free( year_text );
     if ( year < 1000 || year > 9999 ) return NULL;
 
     gchar* month_text = g_strndup( date + 5, 2 );
@@ -34,13 +35,15 @@ sql_date_to_gdate( gchar* date )
 
 
 gchar*
-gdate_to_string( GDate* g_date )
+gdate_to_string( const GDate* g_date )
 {
     gint day = g_date_get_day( g_date );
     gint month = g_date_get_month( g_date );
     gint year = g_date_get_year( g_date );
 
-    gchar* string = g_strdup_printf("%2i.%2i.%i", day, month, year );
+    gchar* string = g_strdup_printf("%4i-%2i-%2i", year, month, day );
 
     return string; //muß g_freed werden!
 }
+
+

@@ -96,25 +96,98 @@ dbase_get_eingang_for_rel_path( DBase* dbase, const gchar* rel_path,
 {
     gint rc = 0;
 
-    sqlite3_reset( dbase->eingang_for_rel_path );
+    sqlite3_reset( dbase->get_eingang_for_rel_path );
 
-    rc = sqlite3_bind_text( dbase->eingang_for_rel_path, 1, rel_path, -1, NULL );
+    rc = sqlite3_bind_text( dbase->get_eingang_for_rel_path, 1, rel_path, -1, NULL );
     if ( rc != SQLITE_OK ) ERROR_DBASE( "sqlite3_bind_text" )
 
-    rc = sqlite3_step( dbase->test_path );
+    rc = sqlite3_step( dbase->get_eingang_for_rel_path );
     if ( (rc != SQLITE_ROW) && rc != SQLITE_DONE ) ERROR_DBASE( "sqlite3_step" )
 
     if ( rc == SQLITE_DONE ) return 1; //rel_path nicht vorhanden
 
     *eingang = g_malloc0( sizeof( Eingang ) );
 
-    (*eingang)->eingangsdatum = g_date_new_julian( sqlite3_column_int( dbase->eingang_for_rel_path, 0 ) );
-    (*eingang)->transport = g_strdup( (const gchar*) sqlite3_column_text( dbase->eingang_for_rel_path, 1 ) );
-    (*eingang)->traeger = g_strdup( (const gchar*) sqlite3_column_text( dbase->eingang_for_rel_path, 2 ) );
-    (*eingang)->ort = g_strdup( (const gchar*) sqlite3_column_text( dbase->eingang_for_rel_path, 3 ) );
-    (*eingang)->absender = g_strdup( (const gchar*) sqlite3_column_text( dbase->eingang_for_rel_path, 4 ) );
-    (*eingang)->absendedatum = g_date_new_julian( sqlite3_column_int( dbase->eingang_for_rel_path, 5 ) );
-    (*eingang)->erfassungsdatum = g_date_new_julian( sqlite3_column_int( dbase->eingang_for_rel_path, 6 ) );
+    (*eingang)->eingangsdatum = g_strdup( (const gchar*) sqlite3_column_text( dbase->get_eingang_for_rel_path, 0 ) );
+    (*eingang)->transport = g_strdup( (const gchar*) sqlite3_column_text( dbase->get_eingang_for_rel_path, 1 ) );
+    (*eingang)->traeger = g_strdup( (const gchar*) sqlite3_column_text( dbase->get_eingang_for_rel_path, 2 ) );
+    (*eingang)->ort = g_strdup( (const gchar*) sqlite3_column_text( dbase->get_eingang_for_rel_path, 3 ) );
+    (*eingang)->absender = g_strdup( (const gchar*) sqlite3_column_text( dbase->get_eingang_for_rel_path, 4 ) );
+    (*eingang)->absendedatum = g_strdup( (const gchar*) sqlite3_column_text( dbase->get_eingang_for_rel_path, 5 ) );
+    (*eingang)->erfassungsdatum = g_strdup( (const gchar*) sqlite3_column_text( dbase->get_eingang_for_rel_path, 6 ) );
+
+    return 0;
+}
+
+
+gint
+dbase_insert_eingang( DBase* dbase, Eingang* eingang, gchar** errmsg )
+{
+    gint rc = 0;
+
+    sqlite3_reset( dbase->insert_eingang );
+
+    rc = sqlite3_bind_text( dbase->insert_eingang, 1, eingang->eingangsdatum, -1, NULL );
+    if ( rc != SQLITE_OK ) ERROR_DBASE( "sqlite3_bind_text (eingangsdatum)" )
+
+    rc = sqlite3_bind_text( dbase->insert_eingang, 2, eingang->transport, -1, NULL );
+    if ( rc != SQLITE_OK ) ERROR_DBASE( "sqlite3_bind_text (transport)" )
+
+    rc = sqlite3_bind_text( dbase->insert_eingang, 3, eingang->traeger, -1, NULL );
+    if ( rc != SQLITE_OK ) ERROR_DBASE( "sqlite3_bind_text (traeger)" )
+
+    rc = sqlite3_bind_text( dbase->insert_eingang, 4, eingang->ort, -1, NULL );
+    if ( rc != SQLITE_OK ) ERROR_DBASE( "sqlite3_bind_text (ort)" )
+
+    rc = sqlite3_bind_text( dbase->insert_eingang, 5, eingang->absender, -1, NULL );
+    if ( rc != SQLITE_OK ) ERROR_DBASE( "sqlite3_bind_text (absender)" )
+
+    rc = sqlite3_bind_text( dbase->insert_eingang, 6, eingang->absendedatum, -1, NULL );
+    if ( rc != SQLITE_OK ) ERROR_DBASE( "sqlite3_bind_text (absendedatum)" )
+
+    rc = sqlite3_bind_text( dbase->insert_eingang, 7, eingang->erfassungsdatum, -1, NULL );
+    if ( rc != SQLITE_OK ) ERROR_DBASE( "sqlite3_bind_text (erfassungsdatum)" )
+
+    rc = sqlite3_step( dbase->insert_eingang );
+    if ( rc != SQLITE_DONE ) ERROR_DBASE( "sqlite3_step" )
+
+    return (gint) sqlite3_last_insert_rowid( dbase->db );
+}
+
+
+gint
+dbase_update_eingang( DBase* dbase, const gint ID, Eingang* eingang, gchar** errmsg )
+{
+    gint rc = 0;
+
+    sqlite3_reset( dbase->update_eingang );
+
+    rc = sqlite3_bind_text( dbase->update_eingang, 1, eingang->eingangsdatum, -1, NULL );
+    if ( rc != SQLITE_OK ) ERROR_DBASE( "sqlite3_bind_text (eingangsdatum)" )
+
+    rc = sqlite3_bind_text( dbase->update_eingang, 2, eingang->transport, -1, NULL );
+    if ( rc != SQLITE_OK ) ERROR_DBASE( "sqlite3_bind_text (transport)" )
+
+    rc = sqlite3_bind_text( dbase->update_eingang, 3, eingang->traeger, -1, NULL );
+    if ( rc != SQLITE_OK ) ERROR_DBASE( "sqlite3_bind_text (traeger)" )
+
+    rc = sqlite3_bind_text( dbase->update_eingang, 4, eingang->ort, -1, NULL );
+    if ( rc != SQLITE_OK ) ERROR_DBASE( "sqlite3_bind_text (ort)" )
+
+    rc = sqlite3_bind_text( dbase->update_eingang, 5, eingang->absender, -1, NULL );
+    if ( rc != SQLITE_OK ) ERROR_DBASE( "sqlite3_bind_text (absender)" )
+
+    rc = sqlite3_bind_text( dbase->update_eingang, 6, eingang->absendedatum, -1, NULL );
+    if ( rc != SQLITE_OK ) ERROR_DBASE( "sqlite3_bind_text (absendedatum)" )
+
+    rc = sqlite3_bind_text( dbase->update_eingang, 7, eingang->erfassungsdatum, -1, NULL );
+    if ( rc != SQLITE_OK ) ERROR_DBASE( "sqlite3_bind_text (erfassungsdatum)" )
+
+    rc = sqlite3_bind_int( dbase->update_eingang, 8, ID );
+    if ( rc != SQLITE_OK ) ERROR_DBASE( "sqlite3_bind_int (ID)" )
+
+    rc = sqlite3_step( dbase->update_eingang );
+    if ( rc != SQLITE_DONE ) ERROR_DBASE( "sqlite3_step" )
 
     return 0;
 }
@@ -208,6 +281,13 @@ dbase_prepare_stmts( DBase* dbase, gchar** errmsg )
             "eingang_rel_path "
             "ON eingang.ID=eingang_rel_path.eingang_id WHERE rel_path=?1;",
 
+            "INSERT INTO eingang (eingangsdatum, transport, traeger, ort, "
+            "absender, absendedatum, erfassungsdatum) "
+            "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7); ",
+
+            "UPDATE eingang SET eingangsdatum=?1,transport=?2,traeger=?3,ort=?4,"
+            "absender=?5,absendedatum=?6,erfassungsdatum=?7 WHERE ID=?8; ",
+
             NULL };
 
     while ( sql[zaehler] != NULL )
@@ -227,6 +307,9 @@ dbase_prepare_stmts( DBase* dbase, gchar** errmsg )
         else if ( zaehler == 2  ) dbase->rollback = stmt;
         else if ( zaehler == 3  ) dbase->update_path = stmt;
         else if ( zaehler == 4 ) dbase->test_path = stmt;
+        else if ( zaehler == 5 ) dbase->get_eingang_for_rel_path = stmt;
+        else if ( zaehler == 6 ) dbase->insert_eingang = stmt;
+        else if ( zaehler == 7 ) dbase->update_eingang = stmt;
 
         zaehler++;
     }

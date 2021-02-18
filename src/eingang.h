@@ -7,18 +7,20 @@ typedef struct _GDate GDate;
 
 typedef struct _Eingang
 {
-    GDate* eingangsdatum;
+    gchar* eingangsdatum;
     gchar* transport;
     gchar* traeger;
     gchar* ort;
     gchar* absender;
-    GDate* absendedatum;
-    GDate* erfassungsdatum;
+    gchar* absendedatum;
+    gchar* erfassungsdatum;
 } Eingang;
 
 
 void eingang_free( Eingang* );
 
 Eingang* eingang_new( void );
+
+gint eingang_fenster( GtkWidget*, Eingang*, gboolean );
 
 #endif // EINGANG_H_INCLUDED

@@ -32,7 +32,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "../40viewer/viewer.h"
 
-#include "fs_tree.h"
 #include "project.h"
 #include "project_db.h"
 #include "dbase_full.h"

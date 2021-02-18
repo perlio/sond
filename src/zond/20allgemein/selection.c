@@ -26,7 +26,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../99conv/db_zu_baum.h"
 
 #include "project.h"
-#include "fs_tree.h"
 #include "dbase_full.h"
 
 #include "../../misc.h"

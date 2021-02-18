@@ -10,6 +10,7 @@
 
 #include "../../fm.h"
 #include "../../dbase.h"
+#include "../../eingang.h"
 
 
 static gboolean
@@ -194,6 +195,62 @@ file_manager_cb_loeschen( GtkWidget* item, gpointer data )
 }
 
 
+static void
+file_manager_cb_eingang( GtkWidget* item, gpointer data )
+{
+    gint rc = 0;
+    gint ID = 0;
+    gchar* errmsg = NULL;
+    Eingang* eingang = NULL;
+    DBase* dbase = NULL;
+
+    GtkWidget* fm_window = (GtkWidget*) data;
+
+    GtkWidget* fm_treeview = g_object_get_data( G_OBJECT(fm_window), "fm-treeview" );
+
+    dbase = g_object_get_data( G_OBJECT(fm_treeview), "dbase" );
+
+    //selektierte Dateien holen
+    GPtrArray* refs = treeview_selection_get_refs( GTK_TREE_VIEW(fm_treeview) );
+    if ( !refs ) return;
+
+    //Eingang abfragen
+    eingang = eingang_new( );
+
+    rc = eingang_fenster( fm_window, eingang, TRUE );
+    if ( rc != GTK_RESPONSE_OK )
+    {
+        eingang_free( eingang );
+        g_ptr_array_free( refs, TRUE );
+
+        return;
+    }
+
+    ID = dbase_insert_eingang( dbase, eingang, &errmsg );
+    eingang_free( eingang );
+    if ( ID == -1 )
+    {
+        display_message( fm_window, "Fehler bei Eingang -\n\nBei Aufruf "
+                "treeview_selection_foreach:\n", errmsg, NULL );
+        g_free( errmsg );
+
+        return;
+    }
+
+    rc = treeview_selection_foreach( GTK_TREE_VIEW(fm_treeview), refs,
+            NULL, GINT_TO_POINTER(ID), &errmsg );
+    g_ptr_array_unref( refs );
+    if ( rc == -1 )
+    {
+        display_message( fm_window, "Fehler bei Eingang -\n\nBei Aufruf "
+                "treeview_selection_foreach:\n", errmsg, NULL );
+        g_free( errmsg );
+    }
+
+    return;
+}
+
+
 static gboolean
 file_manager_same_project( const gchar* path, const GFile* dest )
 {
@@ -328,17 +385,16 @@ file_manager_after_move( gint rc_update, gpointer data, gchar** errmsg )
 
 
 static gint
-file_manager_fill_modify_file( GtkWidget* fm_treeview, ModifyFile* modify_file,
+file_manager_open_dbase( GtkWidget* fm_treeview, DBase** dbase,
         gchar** errmsg )
 {
     gint rc = 0;
-    DBase* dbase = NULL;
     gchar* db_name = NULL;
 
     db_name = g_strconcat( g_object_get_data( G_OBJECT(fm_treeview), "root" ),
             "/doc_db.ZND", NULL );
 
-    rc = dbase_create_with_stmts( db_name, &dbase, FALSE, FALSE, errmsg );
+    rc = dbase_create_with_stmts( db_name, dbase, FALSE, FALSE, errmsg );
     g_free( db_name );
     if ( rc ) // da FALSE, kann nur -1 oder 0 zurückgegeben werden
     {
@@ -347,13 +403,6 @@ file_manager_fill_modify_file( GtkWidget* fm_treeview, ModifyFile* modify_file,
 
         return -1;
     }
-
-    g_object_set_data( G_OBJECT(fm_treeview), "dbase", dbase );
-
-    modify_file->before_move = file_manager_before_move;
-    modify_file->after_move = file_manager_after_move;
-    modify_file->test = file_manager_test;
-    modify_file->data = (gpointer) fm_treeview;
 
     return 0;
 }
@@ -390,6 +439,8 @@ file_manager_set_headerbar( GtkWidget* fm_window, const gchar* path )
 
     GtkWidget* loeschen = gtk_menu_item_new_with_label( "Löschen" );
 
+    GtkWidget* eingang = gtk_menu_item_new_with_label( "Eingang" );
+
     g_signal_connect( dir_einfuegen_p, "activate", G_CALLBACK(file_manager_cb_dir_einfuegen_p),
             fm_window );
     g_signal_connect( dir_einfuegen_up, "activate", G_CALLBACK(file_manager_cb_dir_einfuegen_up),
@@ -403,6 +454,8 @@ file_manager_set_headerbar( GtkWidget* fm_window, const gchar* path )
     g_signal_connect( einfuegen_up, "activate", G_CALLBACK(file_manager_cb_einfuegen_up),
             fm_window );
     g_signal_connect( loeschen, "activate", G_CALLBACK(file_manager_cb_loeschen),
+            fm_window );
+    g_signal_connect( eingang, "activate", G_CALLBACK(file_manager_cb_eingang),
             fm_window );
 
     gtk_widget_add_accelerator( dir_einfuegen_p, "activate", accel_group,
@@ -419,12 +472,15 @@ file_manager_set_headerbar( GtkWidget* fm_window, const gchar* path )
             GDK_KEY_v, GDK_CONTROL_MASK | GDK_SHIFT_MASK, GTK_ACCEL_VISIBLE);
     gtk_widget_add_accelerator( loeschen, "activate", accel_group,
             GDK_KEY_Delete, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
+    gtk_widget_add_accelerator( eingang, "activate", accel_group,
+            GDK_KEY_e, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
 
     gtk_menu_shell_append( GTK_MENU_SHELL(menu_fm), dir_einfuegen );
     gtk_menu_shell_append( GTK_MENU_SHELL(menu_fm), kopieren );
     gtk_menu_shell_append( GTK_MENU_SHELL(menu_fm), ausschneiden );
     gtk_menu_shell_append( GTK_MENU_SHELL(menu_fm), einfuegen );
     gtk_menu_shell_append( GTK_MENU_SHELL(menu_fm), loeschen );
+    gtk_menu_shell_append( GTK_MENU_SHELL(menu_fm), eingang );
 
     gtk_widget_show_all( menu_fm );
 
@@ -452,6 +508,7 @@ file_manager_entry_activate( GtkWidget* entry, gpointer data )
     gint rc = 0;
     gchar* errmsg = NULL;
     ModifyFile* modify_file = NULL;
+    DBase* dbase = NULL;
 
     Sojus* sojus = (Sojus*) data;
 
@@ -511,7 +568,12 @@ file_manager_entry_activate( GtkWidget* entry, gpointer data )
         return;
     }
 
-    rc = file_manager_fill_modify_file( fm_treeview, modify_file, &errmsg );
+    modify_file->before_move = file_manager_before_move;
+    modify_file->after_move = file_manager_after_move;
+    modify_file->test = file_manager_test;
+    modify_file->data = (gpointer) fm_treeview;
+
+    rc = file_manager_open_dbase( fm_treeview, &dbase, &errmsg );
     if ( rc )
     {
         display_message( gtk_widget_get_toplevel( GTK_WIDGET(fm_window) ),
@@ -526,6 +588,10 @@ file_manager_entry_activate( GtkWidget* entry, gpointer data )
 
         return;
     }
+
+    fm_add_column_eingang( GTK_TREE_VIEW(fm_treeview), dbase, &errmsg );
+
+    g_object_set_data( G_OBJECT(fm_treeview), "dbase", dbase );
 
     gtk_widget_show_all( fm_window );
 

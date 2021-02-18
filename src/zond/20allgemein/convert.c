@@ -246,8 +246,6 @@ convert_addeingang( Projekt* zond, gchar** errmsg )
     sqlite3_close( db_convert );
     if ( rc ) ERROR_PAO( "convert_copy_eingang" )
 
-
-
     return 0;
 }
 

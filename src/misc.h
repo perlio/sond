@@ -8,6 +8,7 @@
 typedef struct _GSList GSList;
 typedef struct _GPtrArray GPtrArray;
 typedef struct _GtkWidget GtkWidget;
+typedef struct _GtkCalendar GtkCalendar;
 
 typedef char gchar;
 typedef int gint;
@@ -30,5 +31,9 @@ gchar* add_string( gchar*, gchar* );
 GSList* choose_files( const GtkWidget*, const gchar*, const gchar*, gchar*, gint, gboolean );
 
 gchar* get_path_from_base( const gchar*, gchar** );
+
+void misc_set_calendar( GtkCalendar*, const gchar* );
+
+gchar* misc_get_calendar( GtkCalendar* );
 
 #endif // MISC_H_INCLUDED

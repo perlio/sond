@@ -253,4 +253,42 @@ get_path_from_base( const gchar* path, gchar** errmsg )
 }
 
 
+void
+misc_set_calendar( GtkCalendar* calendar, const gchar* date )
+{
+    if ( !date ) return;
+
+    gchar* year_text = g_strndup( date, 4 );
+    gint year = g_ascii_strtoll( year_text, NULL, 10 );
+    g_free( year_text );
+
+    gchar* month_text = g_strndup( date + 5, 2 );
+    gint month = g_ascii_strtoll( month_text, NULL, 10 );
+    g_free( month_text );
+
+    gchar* day_text = g_strdup( date + 8 );
+    gint day = g_ascii_strtoll( day_text, NULL, 10 );
+    g_free( day_text );
+
+    gtk_calendar_select_month( calendar, month, year );
+    gtk_calendar_select_day( calendar, day );
+
+    return;
+}
+
+
+gchar*
+misc_get_calendar( GtkCalendar* calendar )
+{
+    guint year = 0;
+    guint month = 0;
+    guint day = 0;
+    gchar* string = NULL;
+
+    gtk_calendar_get_date( calendar, &year, &month, &day );
+
+    string = g_strdup_printf( "%4i-%2i-%2i", year, month, day );
+
+    return string;
+}
 

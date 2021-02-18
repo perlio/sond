@@ -16,6 +16,7 @@ typedef int gboolean;
 typedef char gchar;
 typedef int gint;
 typedef struct _Clipboard Clipboard;
+typedef struct _DBase DBase;
 
 typedef struct _Modify_File
 {
@@ -29,13 +30,13 @@ gchar* fm_get_rel_path_from_file( const gchar*, const GFile* );
 
 gchar* fm_get_full_path( GtkTreeView*, GtkTreeIter* );
 
-gchar* fm_get_rel_path( GtkTreeView*, GtkTreeIter* );
-
 gint fm_create_dir( GtkTreeView*, gboolean, gchar** );
 
 gint fm_paste_selection( GtkTreeView*, GtkTreeView*, GPtrArray*, gboolean, gboolean, gchar** );
 
 gint fm_foreach_loeschen( GtkTreeView*, GtkTreeIter*, gpointer, gchar** );
+
+void fm_add_column_eingang( GtkTreeView*, DBase*, gchar** );
 
 GtkWidget* fm_create_tree_view( Clipboard*, ModifyFile* );
 
