@@ -22,11 +22,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "misc.h"
 #include "eingang.h"
 #include "dbase.h"
+#include "fm.h"
 
 
 void
 eingang_free( Eingang* eingang )
 {
+    if ( !eingang ) return;
+
     g_free( eingang->eingangsdatum );
     g_free( eingang->traeger );
     g_free( eingang->transport );
@@ -194,4 +197,43 @@ eingang_fenster( GtkWidget* widget, Eingang* eingang, gboolean sens )
     return ret;
 }
 
+
+gint
+eingang_set( GtkTreeView* fm_treeview, GtkTreeIter* iter, gpointer data,
+        gchar** errmsg )
+{
+    gchar* rel_path = NULL;
+    gint rc = 0;
+    Eingang* eingang = NULL;
+    gint ID = 0;
+
+    DBase* dbase = g_object_get_data( G_OBJECT(fm_treeview), "dbase" );
+
+    Eingang** eingang_loop = (Eingang**) data;
+
+    rel_path = fm_get_rel_path( gtk_tree_view_get_model( fm_treeview ), iter );
+    rc = eingang_for_rel_path( dbase, rel_path, &eingang, errmsg );
+    if ( rc == -1 ) ERROR( "eingang_for_rel_path" )
+    else if ( rc > 1 )
+    {
+        //hier Abfage, was bei drohender Kollision gemacht werden sol
+
+        eingang_free( eingang );
+        return 0;
+    }
+
+    if ( !(*eingang_loop) )
+    {
+        //Eingang abfragen
+        *eingang_loop = eingang_new( );
+
+        rc = eingang_fenster( GTK_WIDGET(fm_treeview), *eingang_loop, TRUE );
+        if ( rc != GTK_RESPONSE_OK ) return 1;
+    }
+
+    ID = dbase_insert_eingang( dbase, *eingang_loop, errmsg );
+    if ( ID == -1 ) ERROR( "dbase_insert_eingang" )
+
+    return 0;
+}
 

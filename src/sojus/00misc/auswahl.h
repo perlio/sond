@@ -26,7 +26,7 @@ gboolean auswahl_regnr_existiert( GtkWidget*, MYSQL*, gint, gint );
 
 gboolean auswahl_regnr_ist_wohlgeformt( const gchar* );
 
-gboolean auswahl_parse_entry( GtkWidget*, const gchar* );
+gboolean auswahl_parse_entry( GtkWidget*, const gchar*, gint*, gint* );
 
 gboolean auswahl_get_regnr_akt( Sojus*, GtkEntry*);
 

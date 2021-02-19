@@ -199,47 +199,21 @@ static void
 file_manager_cb_eingang( GtkWidget* item, gpointer data )
 {
     gint rc = 0;
-    gint ID = 0;
     gchar* errmsg = NULL;
     Eingang* eingang = NULL;
-    DBase* dbase = NULL;
 
     GtkWidget* fm_window = (GtkWidget*) data;
 
     GtkWidget* fm_treeview = g_object_get_data( G_OBJECT(fm_window), "fm-treeview" );
 
-    dbase = g_object_get_data( G_OBJECT(fm_treeview), "dbase" );
-
     //selektierte Dateien holen
     GPtrArray* refs = treeview_selection_get_refs( GTK_TREE_VIEW(fm_treeview) );
     if ( !refs ) return;
 
-    //Eingang abfragen
-    eingang = eingang_new( );
-
-    rc = eingang_fenster( fm_window, eingang, TRUE );
-    if ( rc != GTK_RESPONSE_OK )
-    {
-        eingang_free( eingang );
-        g_ptr_array_free( refs, TRUE );
-
-        return;
-    }
-
-    ID = dbase_insert_eingang( dbase, eingang, &errmsg );
-    eingang_free( eingang );
-    if ( ID == -1 )
-    {
-        display_message( fm_window, "Fehler bei Eingang -\n\nBei Aufruf "
-                "treeview_selection_foreach:\n", errmsg, NULL );
-        g_free( errmsg );
-
-        return;
-    }
-
     rc = treeview_selection_foreach( GTK_TREE_VIEW(fm_treeview), refs,
-            NULL, GINT_TO_POINTER(ID), &errmsg );
+            eingang_set, &eingang, &errmsg );
     g_ptr_array_unref( refs );
+    eingang_free( eingang );
     if ( rc == -1 )
     {
         display_message( fm_window, "Fehler bei Eingang -\n\nBei Aufruf "

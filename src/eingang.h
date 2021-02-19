@@ -23,4 +23,6 @@ Eingang* eingang_new( void );
 
 gint eingang_fenster( GtkWidget*, Eingang*, gboolean );
 
+gint  eingang_set( GtkTreeView*, GtkTreeIter*, gpointer, gchar** );
+
 #endif // EINGANG_H_INCLUDED

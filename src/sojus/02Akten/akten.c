@@ -9,6 +9,7 @@
 #include "widgets_akte.h"
 
 #include "../00misc/sql.h"
+#include "../00misc/auswahl.h"
 #include "../global_types_sojus.h"
 
 
@@ -81,12 +82,37 @@ akte_oeffnen( Sojus* sojus, gint regnr, gint jahr )
 
 
 static gboolean
-akte_anlegen( Sojus* sojus )
+akte_anlegen( Sojus* sojus, gint regnr, gint year )
+{
+    gint rc = 0;
+
+    gchar* sql = g_strdup_printf( "INSERT INTO akten VALUES (%i, %i, '', '', '', '', "
+            "NOW(3), '')", regnr, year );
+    rc = mysql_query( sojus->db.con, sql );
+    if ( rc )
+    {
+        display_message( sojus->app_window, "Fehler bei nächste_regnr\n "
+                "INSERT INTO akten:\n", mysql_error( sojus->db.con ), NULL );
+        g_free( sql );
+
+        return FALSE;
+    }
+
+    sql_log( sojus, sql );
+
+    g_free( sql );
+
+    return TRUE;
+}
+
+
+gboolean
+akte_next_regnr( Sojus* sojus, gint* regnr_ret, gint* year_ret )
 {
     gint year = 0;
+    gint regnr = 0;
     gchar* sql = NULL;
     gint rc = 0;
-    gint regnr = 0;
 
     GDateTime* time = g_date_time_new_now_local( );
     year = g_date_time_get_year( time );
@@ -142,24 +168,8 @@ akte_anlegen( Sojus* sojus )
 
     mysql_free_result( mysql_res );
 
-    sql = g_strdup_printf( "INSERT INTO akten VALUES (%i, %i, '', '', '', '', "
-            "NOW(3), '')", regnr, year );
-    rc = mysql_query( sojus->db.con, sql );
-    if ( rc )
-    {
-        display_message( sojus->app_window, "Fehler bei nächste_regnr\n "
-                "INSERT INTO akten:\n", mysql_error( sojus->db.con ), NULL );
-        g_free( sql );
-
-        return FALSE;
-    }
-
-    sql_log( sojus, sql );
-
-    g_free( sql );
-
-    sojus->regnr_akt = regnr;
-    sojus->jahr_akt = year;
+    *regnr_ret = regnr;
+    *year_ret = year;
 
     return TRUE;
 }
@@ -168,6 +178,9 @@ akte_anlegen( Sojus* sojus )
 void
 akte_speichern( GtkWidget* akten_window )
 {
+    gint regnr = 0;
+    gint jahr = 0;
+
     Sojus* sojus = (Sojus*) g_object_get_data( G_OBJECT(akten_window), "sojus" );
 
 /*
@@ -179,14 +192,18 @@ akte_speichern( GtkWidget* akten_window )
 
     if ( !g_strcmp0( regnr_text, "- neu -" ) )
     {
-        akte_anlegen( sojus );
+        if ( !akte_next_regnr( sojus, &regnr, &jahr ) ) return;
 
         //adressnr in entry
-        gchar* entry_text = g_strdup_printf( "%i/%i", sojus->regnr_akt,
-                sojus->jahr_akt % 100 );
+        gchar* entry_text = g_strdup_printf( "%i/%i", regnr,
+                jahr % 100 );
         gtk_entry_set_text( GTK_ENTRY(entry_regnr), entry_text );
         g_free( entry_text );
     }
+    else auswahl_parse_entry( akten_window, regnr_text, &regnr, &jahr );
+
+    if ( !auswahl_regnr_existiert( akten_window, sojus->db.con, regnr, jahr ) )
+                akte_anlegen( sojus, regnr, jahr );
 
     //aktenbezeichnung
     GtkWidget* entry_bezeichnung = g_object_get_data( G_OBJECT(akten_window),
@@ -216,7 +233,7 @@ akte_speichern( GtkWidget* akten_window )
             "`Gegenstand`='%s', `Sachgebiet`='%s', `Sachbearbeiter-ID`='%s' "
             "WHERE RegNr=%i AND RegJahr=%i;",
             bezeichnung, gegenstand, sachgebiet, sachbearbeiter_id,
-            sojus->regnr_akt, sojus->jahr_akt );
+            regnr, jahr );
 
     g_free( sachgebiet );
     g_free( sachbearbeiter_id );
@@ -235,6 +252,9 @@ akte_speichern( GtkWidget* akten_window )
     g_free( sql );
 
     aktenbet_speichern( akten_window );
+
+    sojus->regnr_akt = regnr;
+    sojus->jahr_akt = jahr;
 
     widgets_akte_geaendert( G_OBJECT(akten_window), FALSE );
 

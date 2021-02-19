@@ -85,6 +85,9 @@ cb_button_ok_clicked( GtkButton* button, gpointer user_data )
 void
 cb_button_reakt_clicked( GtkButton* button, gpointer user_data )
 {
+    gint regnr = 0;
+    gint jahr = 0;
+
     GtkWidget* akten_window = (GtkWidget*) user_data;
     GPtrArray* arr_aktenbet = g_object_get_data( G_OBJECT(akten_window),
             "arr_aktenbet" );
@@ -94,10 +97,7 @@ cb_button_reakt_clicked( GtkButton* button, gpointer user_data )
             "entry_regnr" );
     const gchar* regnr_text = gtk_entry_get_text( GTK_ENTRY(entry_regnr) );
 
-    auswahl_parse_entry( akten_window, (gchar*) regnr_text );
-
-    gint regnr = sojus->regnr_akt;
-    gint jahr = sojus->jahr_akt;
+    auswahl_parse_entry( akten_window, (gchar*) regnr_text, &regnr, &jahr );
 
     GtkWidget* label_ablagenr = g_object_get_data( G_OBJECT(akten_window),
             "label_ablagenr" );
@@ -133,6 +133,9 @@ cb_button_reakt_clicked( GtkButton* button, gpointer user_data )
 void
 cb_button_ablegen_clicked( GtkButton* button, gpointer user_data )
 {
+    gint regnr = 0;
+    gint jahr = 0;
+
     GtkWidget* akten_window = (GtkWidget*) user_data;
     Sojus* sojus = (Sojus*) g_object_get_data( G_OBJECT(akten_window), "sojus" );
 
@@ -140,10 +143,7 @@ cb_button_ablegen_clicked( GtkButton* button, gpointer user_data )
             "entry_regnr" );
     const gchar* regnr_text = gtk_entry_get_text( GTK_ENTRY(entry_regnr) );
 
-    auswahl_parse_entry( akten_window, (gchar*) regnr_text );
-
-    gint regnr = sojus->regnr_akt;
-    gint jahr = sojus->jahr_akt;
+    auswahl_parse_entry( akten_window, (gchar*) regnr_text, &regnr, &jahr );
 
     GtkWidget* label_ablagenr = g_object_get_data( G_OBJECT(akten_window),
             "label_ablagenr" );
@@ -697,7 +697,7 @@ aktenfenster_fuellen( GtkWidget* akten_window, gint regnr, gint jahr )
     {
         if ( regnr > 0 && jahr > 0 )
         {
-            gint rc = abfrage_frage( akten_window, "Akte exsitiert nicht", "Anlegen?", NULL );
+            gint rc = abfrage_frage( akten_window, "Akte existiert nicht", "Anlegen?", NULL );
             if ( rc == GTK_RESPONSE_NO )
             {
                 gtk_widget_destroy( akten_window );

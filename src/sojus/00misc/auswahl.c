@@ -177,21 +177,16 @@ auswahl_regnr_ist_wohlgeformt( const gchar* entry )
 
 
 gboolean
-auswahl_parse_entry( GtkWidget* window, const gchar* entry )
+auswahl_parse_entry( GtkWidget* window, const gchar* entry, gint* regnr, gint* jahr )
 {
     Sojus* sojus = (Sojus*) g_object_get_data( G_OBJECT(window), "sojus" );
 
     if ( auswahl_regnr_ist_wohlgeformt( entry ) )
     {
-        gint jahr = 0;
-        gint regnr = 0;
-        auswahl_parse_regnr( entry, &regnr, &jahr );
+        auswahl_parse_regnr( entry, regnr, jahr );
 
-        if ( !auswahl_regnr_existiert( window, sojus->db.con, regnr, jahr ) )
+        if ( !auswahl_regnr_existiert( window, sojus->db.con, *regnr, *jahr ) )
                 return FALSE;
-
-        sojus->jahr_akt = jahr;
-        sojus->regnr_akt = regnr;
 
         return TRUE;
     }
@@ -243,8 +238,8 @@ auswahl_parse_entry( GtkWidget* window, const gchar* entry )
         if ( index >= 0 )
         {
             row = g_ptr_array_index( rows, index );
-            sojus->regnr_akt = (gint) g_ascii_strtoll( row[0], NULL, 10 );
-            sojus->jahr_akt = (gint) g_ascii_strtoll( row[1], NULL, 10 );
+            *regnr = (gint) g_ascii_strtoll( row[0], NULL, 10 );
+            *jahr = (gint) g_ascii_strtoll( row[1], NULL, 10 );
 
             ret = TRUE;
         }
@@ -260,9 +255,12 @@ auswahl_parse_entry( GtkWidget* window, const gchar* entry )
 gboolean
 auswahl_get_regnr_akt( Sojus* sojus, GtkEntry* entry )
 {
+    gint regnr = 0;
+    gint jahr = 0;
+
     const gchar* entry_text = gtk_entry_get_text( entry );
 
-    if ( !auswahl_parse_entry( sojus->app_window, entry_text ) )
+    if ( !auswahl_parse_entry( sojus->app_window, entry_text, &regnr, &jahr ) )
     {
         gchar* text = NULL;
         //alte RegNr einfügen
@@ -274,6 +272,9 @@ auswahl_get_regnr_akt( Sojus* sojus, GtkEntry* entry )
 
         return FALSE;
     }
+
+    sojus->regnr_akt = regnr;
+    sojus->jahr_akt = jahr;
 
     return TRUE;
 }

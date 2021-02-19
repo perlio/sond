@@ -4,12 +4,9 @@
 typedef struct _GFile GFile;
 typedef struct _GtkWidget GtkWidget;
 typedef struct _GtkTreeView GtkTreeView;
+typedef struct _GtkTreeModel GtkTreeModel;
 typedef struct _GtkTreeIter GtkTreeIter;
-typedef struct _GtkCellRenderer GtkCellRenderer;
 typedef struct _GPtrArray GPtrArray;
-
-typedef struct sqlite3 sqlite3;
-typedef struct sqlite3_stmt sqlite3_stmt;
 
 typedef void* gpointer;
 typedef int gboolean;
@@ -27,6 +24,8 @@ typedef struct _Modify_File
 } ModifyFile;
 
 gchar* fm_get_rel_path_from_file( const gchar*, const GFile* );
+
+gchar* fm_get_rel_path( GtkTreeModel*, GtkTreeIter* );
 
 gchar* fm_get_full_path( GtkTreeView*, GtkTreeIter* );
 

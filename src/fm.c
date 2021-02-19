@@ -52,7 +52,7 @@ fm_get_name( GtkTreeModel* model, GtkTreeIter* iter )
 }
 
 
-static gchar*
+gchar*
 fm_get_rel_path( GtkTreeModel* model, GtkTreeIter* iter )
 {
     gchar* rel_path = NULL;
