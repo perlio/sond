@@ -1256,7 +1256,7 @@ init_menu( Projekt* zond )
     GtkWidget* convertitem = gtk_menu_item_new_with_label( "Konvertieren .9->1.0" );
     g_signal_connect( convertitem, "activate", G_CALLBACK(cb_menu_convert_activate), (gpointer) zond );
 
-    GtkWidget* addeingangitem = gtk_menu_item_new_with_label( "eingang hinzufügen" );
+    GtkWidget* addeingangitem = gtk_menu_item_new_with_label( "Konvertieren ->eingang" );
     g_signal_connect( addeingangitem , "activate", G_CALLBACK(cb_menu_addeingang_activate), (gpointer) zond );
 
     gtk_menu_shell_append( GTK_MENU_SHELL(extrasmenu), testitem);
