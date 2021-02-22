@@ -408,7 +408,7 @@ cb_punkt_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
     if ( baum == KEIN_BAUM ) return;
     if ( baum == BAUM_FS )
     {
-        rc = fm_create_dir( zond->treeview[BAUM_FS], child, &errmsg );
+        rc = fm_create_dir( zond->fm, child, &errmsg );
         if ( rc )
         {
             meldung( zond->app_window, "Verzeichnis kann nicht eingefügt werden\n\n"
@@ -1318,7 +1318,7 @@ cb_button_mode_toggled( GtkToggleButton* button, gpointer data )
         baum_auswertung = gtk_paned_get_child2( GTK_PANED(gtk_paned_get_child2( GTK_PANED(zond->hpaned) )) );
         gtk_widget_hide( baum_auswertung );
 
-        rc = fm_set_root( zond->treeview[BAUM_FS], zond->dbase_zond->project_dir, &errmsg );
+        rc = fm_set_root( zond->fm, zond->dbase_zond->project_dir, &errmsg );
         if ( rc )
         {
             meldung( zond->app_window, "Fehler beim Laden Root-Verzeichnis -\n\n",
@@ -1340,7 +1340,7 @@ cb_button_mode_toggled( GtkToggleButton* button, gpointer data )
         baum_auswertung = gtk_paned_get_child2( GTK_PANED(gtk_paned_get_child2( GTK_PANED(zond->hpaned) )) );
         gtk_widget_show_all( baum_auswertung );
 
-        fm_unset_root( zond->treeview[BAUM_FS] );
+        fm_unset_root( zond->fm );
     }
 
     return;

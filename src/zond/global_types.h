@@ -38,6 +38,7 @@ typedef struct sqlite3 sqlite3;
 typedef struct pdf_document pdf_document;
 
 typedef struct _DBase_Zond DBaseZond;
+typedef struct _FM FM;
 
 typedef int gboolean;
 typedef char gchar;
@@ -137,6 +138,8 @@ typedef struct _Projekt
 
     Baum last_baum;
 
+    FM* fm;
+
     gulong cursor_changed_signal;
     gulong text_buffer_changed_signal;
     gulong treeview_focus_in_signal[3];
@@ -147,8 +150,6 @@ typedef struct _Projekt
 
     //Working-copy project
     sqlite3* db;
-    //Original-Projekt
-    sqlite3* db_store;
 
     Database* dbase;
     DBaseZond* dbase_zond;

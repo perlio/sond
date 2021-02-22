@@ -728,13 +728,11 @@ fm_paste_selection( FM* fm, GtkTreeView* tree_view, GPtrArray* refs,
 
 
 static gint
-fm_remove_node( GtkTreeView* tree_view, GtkTreeIter* iter_file, GFile* file,
+fm_remove_node( FM* fm, GtkTreeIter* iter_file, GFile* file,
         GFileInfo* info_file, gpointer data, gchar** errmsg )
 {
     gint rc = 0;
     GFileType type = G_FILE_TYPE_UNKNOWN;
-
-    FM* fm = (FM*) data;
 
     type = g_file_info_get_file_type( info_file );
 
@@ -758,7 +756,7 @@ fm_remove_node( GtkTreeView* tree_view, GtkTreeIter* iter_file, GFile* file,
     rc = fm_move_copy_create_delete( fm, NULL, &file, 4, errmsg );
     if ( rc == -1 ) ERROR_PAO( "fm_move_copy_create_delete" )
 
-    if ( iter_file ) gtk_tree_store_remove( GTK_TREE_STORE(gtk_tree_view_get_model( tree_view )),
+    if ( iter_file ) gtk_tree_store_remove( GTK_TREE_STORE(gtk_tree_view_get_model( fm->fm_treeview )),
             iter_file );
 
     return 0;
@@ -782,7 +780,7 @@ fm_foreach_loeschen( GtkTreeView* tree_view, GtkTreeIter* iter,
     file = g_file_new_for_path( full_path );
     g_free( full_path );
 
-    rc = fm_remove_node( tree_view, iter, file, info, data, errmsg );
+    rc = fm_remove_node( fm, iter, file, info, data, errmsg );
     g_object_unref( info );
     g_object_unref( file );
     if ( rc == -1 ) ERROR_PAO( "fm_remove_node" )
@@ -1309,9 +1307,9 @@ fm_create( void )
     gtk_tree_view_column_pack_start( fs_tree_column, fm->cell_filename, FALSE );
 
     gtk_tree_view_column_set_cell_data_func( fs_tree_column, renderer_icon,
-            fm_render_file_icon, fm->fm_treeview, NULL );
+            fm_render_file_icon, NULL, NULL );
     gtk_tree_view_column_set_cell_data_func( fs_tree_column, fm->cell_filename,
-            fm_render_file_name, fm->fm_treeview, NULL );
+            fm_render_file_name, fm, NULL );
 
     //Größe
     GtkCellRenderer* renderer_size = gtk_cell_renderer_text_new( );
@@ -1321,7 +1319,7 @@ fm_create( void )
     gtk_tree_view_column_set_sizing(fs_tree_column_size, GTK_TREE_VIEW_COLUMN_FIXED );
     gtk_tree_view_column_pack_start( fs_tree_column_size, renderer_size, FALSE );
     gtk_tree_view_column_set_cell_data_func( fs_tree_column_size, renderer_size,
-            fm_render_file_size, fm->fm_treeview, NULL );
+            fm_render_file_size, NULL, NULL );
 
     //Änderungsdatum
     GtkCellRenderer* renderer_modify = gtk_cell_renderer_text_new( );

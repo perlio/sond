@@ -41,6 +41,7 @@ cb_desktop_delete_event( GtkWidget* app_window, GdkEvent* event, gpointer data )
     g_ptr_array_unref( sojus->sachgebiete );
     g_ptr_array_unref( sojus->beteiligtenart );
     g_ptr_array_unref( sojus->sachbearbeiter );
+    g_ptr_array_unref( sojus->arr_open_fm );
 
     g_free( sojus );
 
@@ -266,6 +267,8 @@ init_sojus( void )
     sojus->settings = settings;
 
     sojus->clipboard = treeview_init_clipboard( );
+
+    sojus->arr_open_fm = g_ptr_array_new_with_free_func( (GDestroyNotify) g_free );
 
     sojus->sachgebiete = g_ptr_array_new_with_free_func( (GDestroyNotify) g_free );
     sojus->beteiligtenart = g_ptr_array_new_with_free_func( (GDestroyNotify) g_free );

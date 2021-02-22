@@ -58,11 +58,11 @@ typedef struct _DBase_Zond
 } DBaseZond;
 
 
-gint project_test_rel_path( const GFile*, gpointer, gchar** );
+gint project_test_rel_path( const gchar*, const GFile*, gpointer, gchar** );
 
-gint project_before_move( const GFile*, const GFile*, gpointer, gchar** );
+gint project_before_move( const gchar*, const GFile*, const GFile*, gpointer, gchar** );
 
-gint project_after_move( const gint, gpointer, gchar** );
+gint project_after_move( const gchar*, const gint, gpointer, gchar** );
 
 void projekt_set_widgets_sensitiv( Projekt*, gboolean );
 

@@ -111,6 +111,8 @@ struct _Sojus
     gint jahr_akt;
     gint adressnr_akt;
 
+    GPtrArray* arr_open_fm;
+
     GPtrArray* sachgebiete;
     GPtrArray* beteiligtenart;
     GPtrArray* sachbearbeiter;

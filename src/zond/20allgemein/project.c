@@ -63,14 +63,14 @@ project_reset_changed( Projekt* zond )
 
 
 gint
-project_test_rel_path( const GFile* file, gpointer data, gchar** errmsg )
+project_test_rel_path( const gchar* root, const GFile* file, gpointer data, gchar** errmsg )
 {
     gint rc = 0;
     gchar* rel_path = NULL;
 
     Projekt* zond = (Projekt*) data;
 
-    rel_path = fm_get_rel_path_from_file( zond->dbase_zond->project_dir, file );
+    rel_path = fm_get_rel_path_from_file( root, file );
 
     rc = dbase_test_path( zond->dbase_zond->dbase_store, rel_path, errmsg );
     if ( rc ) g_free( rel_path );
@@ -87,7 +87,7 @@ project_test_rel_path( const GFile* file, gpointer data, gchar** errmsg )
 
 
 gint
-project_before_move( const GFile* file_source, const GFile* file_dest,
+project_before_move( const gchar* root, const GFile* file_source, const GFile* file_dest,
         gpointer data, gchar** errmsg )
 {
     gint rc = 0;
@@ -101,8 +101,8 @@ project_before_move( const GFile* file_source, const GFile* file_dest,
     rc = dbase_begin( (DBase*) zond->dbase_zond->dbase_work, errmsg );
     if ( rc ) ERROR_ROLLBACK( zond->dbase_zond->dbase_store, "dbase_begin (dbase_work)" )
 
-    gchar* rel_path_source = fm_get_rel_path_from_file( zond->dbase_zond->project_dir, file_source );
-    gchar* rel_path_dest = fm_get_rel_path_from_file( zond->dbase_zond->project_dir, file_dest );
+    gchar* rel_path_source = fm_get_rel_path_from_file( root, file_source );
+    gchar* rel_path_dest = fm_get_rel_path_from_file( root, file_dest );
 
     changed = zond->dbase_zond->changed;
 
@@ -131,7 +131,7 @@ project_before_move( const GFile* file_source, const GFile* file_dest,
 
 
 gint
-project_after_move( const gint rc_edit, gpointer data, gchar** errmsg )
+project_after_move( const gchar* root, const gint rc_edit, gpointer data, gchar** errmsg )
 {
     gint rc = 0;
 
@@ -497,7 +497,6 @@ project_oeffnen( Projekt* zond, const gchar* abs_path, gboolean create,
 
     zond->dbase = dbase;
     zond->db = zond->dbase->db;
-    zond->db_store = zond->dbase->db_store;
 
     return 0;
 }

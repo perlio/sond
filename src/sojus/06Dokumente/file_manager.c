@@ -1,30 +1,36 @@
 #include <gtk/gtk.h>
 #include <sqlite3.h>
 
+#include "../../fm.h"
+#include "../../dbase.h"
+#include "../../eingang.h"
 #include "../../treeview.h"
+
 #include "../global_types_sojus.h"
 
 #include "../00misc/auswahl.h"
 #include "../../misc.h"
 #include "../02Akten/akten.h"
 
-#include "../../fm.h"
-#include "../../dbase.h"
-#include "../../eingang.h"
+#include "file_manager.h"
 
 
 static gboolean
 cb_file_manager_delete_event( GtkWidget* window, GdkEvent* event, gpointer data )
 {
-    gchar* regnr_string = NULL;
-
     FM* fm = (FM*) data;
 
     Sojus* sojus = (Sojus*) fm->app_context;
 
-    regnr_string = g_object_get_data( G_OBJECT(window), "regnr-string" );
-    g_object_set_data( G_OBJECT(sojus->app_window), regnr_string, NULL );
-    g_free( regnr_string );
+    for ( gint i = 0; i < sojus->arr_open_fm->len; i++ )
+    {
+        OpenFM* open_fm = g_ptr_array_index( sojus->arr_open_fm, i );
+        if ( open_fm->window == window )
+        {
+            g_ptr_array_remove_index_fast( sojus->arr_open_fm, i );
+            break;
+        }
+    }
 
     dbase_destroy( (DBase*) fm->modify_file->data );
 
@@ -209,14 +215,12 @@ file_manager_same_project( const gchar* path, const GFile* dest )
 
 
 static gint
-file_manager_test( const GFile* file, gpointer data, gchar** errmsg )
+file_manager_test( const gchar* root, const GFile* file, gpointer data, gchar** errmsg )
 {
     gint rc = 0;
     gchar* rel_path = NULL;
 
-    GtkWidget* fm_treeview = (GtkWidget*) data;
-    const gchar* root = g_object_get_data( G_OBJECT(fm_treeview), "root" );
-    DBase* dbase = g_object_get_data( G_OBJECT(fm_treeview), "dbase" );
+    DBase* dbase = (DBase*) data;
 
     rel_path = fm_get_rel_path_from_file( root, file );
 
@@ -230,20 +234,18 @@ file_manager_test( const GFile* file, gpointer data, gchar** errmsg )
 
 
 static gint
-file_manager_before_move( const GFile* src, const GFile* dest, gpointer data,
+file_manager_before_move( const gchar* root, const GFile* src, const GFile* dest, gpointer data,
         gchar** errmsg )
 {
     gint rc = 0;
 
-    GtkWidget* fm_treeview = (GtkWidget*) data;
-    const gchar* root = g_object_get_data( G_OBJECT(fm_treeview), "root" );
-    DBase* dbase = g_object_get_data( G_OBJECT(fm_treeview), "dbase" );
+    DBase* dbase = (DBase*) data;
 
     if ( !file_manager_same_project( root, dest ) ) //Verschieben in anderes Projekt
     {
         gint rc = 0;
 
-        rc = file_manager_test( src, data, errmsg ); //Datei in Ursprungsprojekt angebunden?
+        rc = file_manager_test( root, src, data, errmsg ); //Datei in Ursprungsprojekt angebunden?
         if ( rc == -1 ) ERROR( "file_manager_test" )
         else if ( rc == 1 ) return 1; //Wenn ja: überspringen
     }
@@ -286,12 +288,11 @@ file_manager_before_move( const GFile* src, const GFile* dest, gpointer data,
 
 
 static gint
-file_manager_after_move( gint rc_update, gpointer data, gchar** errmsg )
+file_manager_after_move( const gchar* root, gint rc_update, gpointer data, gchar** errmsg )
 {
     gint rc = 0;
 
-    GtkWidget* fm_treeview = (GtkWidget*) data;
-    DBase* dbase = g_object_get_data( G_OBJECT(fm_treeview), "dbase" );
+    DBase* dbase = (DBase*) data;
 
     if ( rc_update == 1 )
     {
@@ -438,42 +439,65 @@ file_manager_set_headerbar( GtkWidget* fm_window, FM* fm, const gchar* path )
 }
 
 
+static void
+file_manager_set_window( Sojus* sojus, GtkWidget* window )
+{
+    OpenFM* open_fm = g_malloc0( sizeof( OpenFM ) );
+
+    open_fm->window = window;
+    open_fm->regnr = sojus->regnr_akt;
+    open_fm->jahr = sojus->jahr_akt;
+
+    g_ptr_array_add( sojus->arr_open_fm, open_fm );
+
+    return;
+}
+
+
+static GtkWidget*
+file_manager_get_window( Sojus* sojus )
+{
+    for ( gint i = 0; i < sojus->arr_open_fm->len; i++ )
+    {
+        OpenFM* open_fm = g_ptr_array_index( sojus->arr_open_fm, i );
+
+        if ( open_fm->regnr == sojus->regnr_akt && open_fm->jahr == sojus->jahr_akt )
+                return open_fm->window;
+    }
+
+    return NULL;
+}
+
+
 void
 file_manager_entry_activate( GtkWidget* entry, gpointer data )
 {
     gchar* regnr_string = NULL;
-    GtkWidget* fm_other_window = NULL;
     GtkWidget* fm_window = NULL;
     Akte* akte = NULL;
     gchar* dokument_dir = NULL;
     gchar* path = NULL;
     gint rc = 0;
     gchar* errmsg = NULL;
-    ModifyFile* modify_file = NULL;
     DBase* dbase = NULL;
 
     Sojus* sojus = (Sojus*) data;
 
     if ( !auswahl_get_regnr_akt( sojus, GTK_ENTRY(entry) ) ) return;
 
-    regnr_string = g_strdup_printf( "%i-%i", sojus->regnr_akt, sojus->jahr_akt );
-    if ( (fm_other_window = g_object_get_data( G_OBJECT(sojus->app_window), regnr_string )) )
+    if ( (fm_window = file_manager_get_window( sojus )) )
     {
-        gtk_window_present( GTK_WINDOW(fm_other_window) );
-        g_free( regnr_string );
-
+        gtk_window_present( GTK_WINDOW(fm_window) );
         return;
     }
 
     akte = akte_oeffnen( sojus, sojus->regnr_akt, sojus->jahr_akt );
-    if ( !akte )
-    {
-        g_free( regnr_string );
-        return;
-    }
+    if ( !akte ) return;
 
     fm_window = gtk_window_new( GTK_WINDOW_TOPLEVEL );
     gtk_window_set_default_size( GTK_WINDOW(fm_window), 1200, 700 );
+
+    file_manager_set_window( sojus, fm_window );
 
     GtkWidget* swindow = gtk_scrolled_window_new( NULL, NULL );
     gtk_container_add( GTK_CONTAINER(fm_window), swindow );
@@ -486,13 +510,8 @@ file_manager_entry_activate( GtkWidget* entry, gpointer data )
     path = add_string( path, g_strdup_printf( " %i-%i", sojus->regnr_akt,
             sojus->jahr_akt % 100 ) );
 
-    modify_file = g_malloc0( sizeof( ModifyFile ) );
-
     FM* fm = fm_create( );
-    gtk_container_add( GTK_CONTAINER(swindow), fm->fm_treeview );
-
-    g_object_set_data( G_OBJECT(sojus->app_window), regnr_string, fm_treeview );
-    g_object_set_data( G_OBJECT(fm_treeview), "regnr-string", regnr_string );
+    gtk_container_add( GTK_CONTAINER(swindow), GTK_WIDGET(fm->fm_treeview) );
 
     fm->app_context = (gpointer) sojus;
 
@@ -513,11 +532,6 @@ file_manager_entry_activate( GtkWidget* entry, gpointer data )
         return;
     }
 
-    fm->modify_file->before_move = file_manager_before_move;
-    fm->modify_file->after_move = file_manager_after_move;
-    fm->modify_file->test = file_manager_test;
-    fm->modify_file->data = (gpointer) fm;
-
     rc = file_manager_open_dbase( fm, &dbase, &errmsg );
     if ( rc )
     {
@@ -533,8 +547,12 @@ file_manager_entry_activate( GtkWidget* entry, gpointer data )
         return;
     }
 
+    fm->modify_file->before_move = file_manager_before_move;
+    fm->modify_file->after_move = file_manager_after_move;
+    fm->modify_file->test = file_manager_test;
+    fm->modify_file->data = (gpointer) dbase;
 
-    fm_add_column_eingang( fm->fm_treeview, dbase );
+    fm_add_column_eingang( fm, dbase );
 
     gtk_widget_show_all( fm_window );
 

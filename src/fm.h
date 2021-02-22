@@ -5,6 +5,7 @@ typedef struct _GFile GFile;
 typedef struct _GtkWidget GtkWidget;
 typedef struct _GtkTreeView GtkTreeView;
 typedef struct _GtkTreeViewColumn GtkTreeViewColumn;
+typedef struct _GtkCellRenderer GtkCellRenderer;
 typedef struct _GtkTreeModel GtkTreeModel;
 typedef struct _GtkTreeIter GtkTreeIter;
 typedef struct _GPtrArray GPtrArray;

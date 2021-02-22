@@ -426,21 +426,20 @@ init_treeviews( Projekt* zond )
 void
 treeviews_init_fs_tree( Projekt* zond )
 {
-    GtkCellRenderer* cell = NULL;
+    zond->fm = fm_create( );
 
-    static ModifyFile modify_file = { project_before_move,
-            project_after_move, project_test_rel_path, NULL };
+    zond->treeview[BAUM_FS] = zond->fm->fm_treeview;
 
-    modify_file.data = (gpointer) zond;
-
-    zond->treeview[BAUM_FS] = GTK_TREE_VIEW(fm_create_tree_view( zond->clipboard, &modify_file ));
+    zond->fm->modify_file->before_move = project_before_move;
+    zond->fm->modify_file->after_move = project_after_move;
+    zond->fm->modify_file->test = project_test_rel_path;
+    zond->fm->modify_file->data = zond;
 
     //die Selection
     zond->selection[BAUM_FS] = gtk_tree_view_get_selection(
             zond->treeview[BAUM_FS] );
 
-    cell = g_object_get_data( G_OBJECT(zond->treeview[BAUM_FS]), "renderer-text" );
-    zond->renderer_text[BAUM_FS] = cell;
+    zond->renderer_text[BAUM_FS] = zond->fm->cell_filename;
 
     //focus-in
     zond->treeview_focus_in_signal[BAUM_FS] = g_signal_connect( zond->treeview[BAUM_FS],
