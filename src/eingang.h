@@ -4,6 +4,7 @@
 typedef int gint;
 typedef char gchar;
 typedef struct _GDate GDate;
+typedef struct _DBase DBase;
 
 typedef struct _Eingang
 {
@@ -21,7 +22,7 @@ void eingang_free( Eingang* );
 
 Eingang* eingang_new( void );
 
-gint eingang_fenster( GtkWidget*, Eingang*, gboolean );
+gint eingang_for_rel_path( DBase*, const gchar*, gint*, Eingang**, gint*, gchar** );
 
 gint  eingang_set( GtkTreeView*, GtkTreeIter*, gpointer, gchar** );
 

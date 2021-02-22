@@ -287,7 +287,7 @@ misc_get_calendar( GtkCalendar* calendar )
 
     gtk_calendar_get_date( calendar, &year, &month, &day );
 
-    string = g_strdup_printf( "%4i-%2i-%2i", year, month, day );
+    string = g_strdup_printf( "%04d-%02d-%02d", year, month, day );
 
     return string;
 }

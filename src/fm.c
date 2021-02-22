@@ -836,6 +836,18 @@ fm_load_dir_foreach( GtkTreeView* tree_view, GtkTreeIter* iter, GFile* file,
 }
 
 
+void
+fm_remove_column_eingang( GtkTreeView* fm_treeview )
+{
+    GtkWidget* column_eingang = g_object_get_data( G_OBJECT(fm_treeview), "column-eingang" );
+
+    if ( column_eingang ) gtk_tree_view_remove_column( fm_treeview,
+            GTK_TREE_VIEW_COLUMN(column_eingang) );
+
+    return;
+}
+
+
 static void
 fm_render_eingang( GtkTreeViewColumn* column, GtkCellRenderer* renderer,
         GtkTreeModel* model, GtkTreeIter* iter, gpointer data )
@@ -850,23 +862,27 @@ fm_render_eingang( GtkTreeViewColumn* column, GtkCellRenderer* renderer,
     rel_path = fm_get_rel_path( model, iter );
     if ( !rel_path ) return;
 
-    rc = dbase_get_eingang_for_rel_path( dbase, rel_path, &eingang, &errmsg );
+    rc = eingang_for_rel_path( dbase, rel_path, NULL, &eingang, NULL, &errmsg );
+    g_free( rel_path );
     if ( rc == -1 )
     {
         display_message( gtk_widget_get_toplevel( GTK_WIDGET(gtk_tree_view_column_get_tree_view( column )) ),
-                "Warnung -\n\nBei Aufruf dbase_get_eingang_for_rel_path:\n",
+                "Warnung -\n\nBei Aufruf eingang_for_rel_path:\n",
                 errmsg, NULL );
         g_free( errmsg );
     }
-    else if ( rc == 0 ) g_object_set( G_OBJECT(renderer), "text",
+    else if ( rc == 1 ) g_object_set( G_OBJECT(renderer), "text",
             eingang->eingangsdatum, NULL );
+    else g_object_set( G_OBJECT(renderer), "text", "", NULL );
+
+    eingang_free( eingang );
 
     return;
 }
 
 
 void
-fm_add_column_eingang( GtkTreeView* fm_treeview, DBase* dbase, gchar** errmsg )
+fm_add_column_eingang( GtkTreeView* fm_treeview, DBase* dbase )
 {
     //Änderungsdatum
     GtkCellRenderer* renderer_eingang = gtk_cell_renderer_text_new( );
@@ -877,8 +893,11 @@ fm_add_column_eingang( GtkTreeView* fm_treeview, DBase* dbase, gchar** errmsg )
     gtk_tree_view_column_pack_start( fs_tree_column_eingang, renderer_eingang, FALSE );
     gtk_tree_view_column_set_cell_data_func( fs_tree_column_eingang, renderer_eingang,
             fm_render_eingang, dbase, NULL );
+    gtk_tree_view_column_set_title( fs_tree_column_eingang, "Eingang" );
 
     gtk_tree_view_append_column( GTK_TREE_VIEW(fm_treeview), fs_tree_column_eingang );
+
+    g_object_set_data( G_OBJECT(fm_treeview), "column-eingang", fs_tree_column_eingang );
 
     return;
 }
@@ -1249,7 +1268,7 @@ fm_create_tree_view( Clipboard* clipboard, ModifyFile* modify_file )
 {
     //treeview
     GtkWidget* treeview_fs = gtk_tree_view_new( );
-    gtk_tree_view_set_headers_visible( GTK_TREE_VIEW(treeview_fs), FALSE );
+//    gtk_tree_view_set_headers_visible( GTK_TREE_VIEW(treeview_fs), FALSE );
     gtk_tree_view_set_fixed_height_mode( GTK_TREE_VIEW(treeview_fs), TRUE );
     gtk_tree_view_set_enable_tree_lines( GTK_TREE_VIEW(treeview_fs), TRUE );
     gtk_tree_view_set_enable_search( GTK_TREE_VIEW(treeview_fs), FALSE );

@@ -35,7 +35,9 @@ gint fm_paste_selection( GtkTreeView*, GtkTreeView*, GPtrArray*, gboolean, gbool
 
 gint fm_foreach_loeschen( GtkTreeView*, GtkTreeIter*, gpointer, gchar** );
 
-void fm_add_column_eingang( GtkTreeView*, DBase*, gchar** );
+void fm_remove_column_eingang( GtkTreeView* );
+
+void fm_add_column_eingang( GtkTreeView*, DBase* );
 
 GtkWidget* fm_create_tree_view( Clipboard*, ModifyFile* );
 

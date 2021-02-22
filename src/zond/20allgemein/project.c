@@ -420,6 +420,7 @@ projekt_schliessen( Projekt* zond, gchar** errmsg )
     gchar* working_copy = g_strconcat( zond->dbase_zond->project_dir, "/",
             zond->dbase_zond->project_name, ".tmp", NULL );
 
+    fm_remove_column_eingang( zond->treeview[BAUM_FS] );
     project_clear_dbase_zond( &(zond->dbase_zond) );
 
     //legacy...
@@ -484,6 +485,8 @@ project_oeffnen( Projekt* zond, const gchar* abs_path, gboolean create,
     zond->dbase_zond = dbase_zond;
 
     projekt_aktivieren( zond );
+
+    fm_add_column_eingang( zond->treeview[BAUM_FS], (DBase*) zond->dbase_zond->dbase_work );
 
     //legacy...
     Database* dbase = g_malloc0( sizeof( Database ) );
