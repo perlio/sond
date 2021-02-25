@@ -325,6 +325,19 @@
 			<Option compilerVar="CC" />
 		</Unit>
 		<Unit filename="src/treeview.h" />
+		<Unit filename="src/treeviewfm.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/treeviewfm.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
 		<Unit filename="src/zond/10init/app_window.c">
 			<Option compilerVar="CC" />
 			<Option target="zond (Release)" />
@@ -686,9 +699,6 @@
 				<Code header_guard="VERSION_H" namespace="AutoVersion" prefix="" />
 			</AutoVersioning>
 			<lib_finder disable_auto="1" />
-			<code_completion />
-			<envvars />
-			<debugger />
 		</Extensions>
 	</Project>
 </CodeBlocks_project_file>

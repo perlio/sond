@@ -1280,7 +1280,7 @@ fm_create( void )
     fm->modify_file = g_malloc0( sizeof( ModifyFile ) );
 
     //treeview
-    fm->fm_treeview = (GtkTreeView*) gtk_tree_view_new( );
+    fm->fm_treeview = GTK_TREE_VIEW(sond_treeview_new( ));
 //    gtk_tree_view_set_headers_visible( fm->fm_treeview, FALSE );
     gtk_tree_view_set_fixed_height_mode( fm->fm_treeview, TRUE );
     gtk_tree_view_set_enable_tree_lines( fm->fm_treeview, TRUE );
@@ -1338,12 +1338,6 @@ fm_create( void )
     GtkTreeStore* tree_store = gtk_tree_store_new( 1, G_TYPE_OBJECT );
     gtk_tree_view_set_model( fm->fm_treeview, GTK_TREE_MODEL(tree_store) );
     g_object_unref( tree_store );
-
-    //die Selection
-    GtkTreeSelection* selection = gtk_tree_view_get_selection( fm->fm_treeview );
-    gtk_tree_selection_set_mode( selection, GTK_SELECTION_MULTIPLE );
-    gtk_tree_selection_set_select_function( selection,
-            (GtkTreeSelectionFunc) treeview_selection_select_func, NULL, NULL );
 
     //Zeile expandiert
     g_signal_connect( fm->fm_treeview, "row-expanded", G_CALLBACK(cb_fm_row_expanded), fm );

@@ -1,11 +1,33 @@
 #ifndef TREEVIEW_H_INCLUDED
 #define TREEVIEW_H_INCLUDED
 
+
+#include <glib-object.h>
+#include <gtk/gtk.h>
+
+G_BEGIN_DECLS
+
+#define SOND_TYPE_TREEVIEW sond_treeview_get_type ()
+G_DECLARE_DERIVABLE_TYPE (SondTreeview, sond_treeview, SOND, TREEVIEW, GtkTreeView)
+/*
+ *  Method definitions
+ */
+
+struct _SondTreeviewClass
+{
+    GtkTreeView* parent_class;
+
+};
+
+SondTreeview* sond_treeview_new( void );
+
+G_END_DECLS
+
+
 typedef struct _GtkTreeIter GtkTreeIter;
 typedef struct _GtkTreeSelection GtkTreeSelection;
 typedef struct _GtkTreeModel GtkTreeModel;
 typedef struct _GtkTreePath GtkTreePath;
-typedef struct _GtkTreeView GtkTreeView;
 typedef struct _GPtrArray GPtrArray;
 typedef struct _GtkCellRenderer GtkCellRenderer;
 typedef struct _GtkTreeViewColumn GtkTreeViewColumn;
@@ -37,9 +59,6 @@ void treeview_zelle_ausgrauen( GtkTreeView*, GtkTreeIter*, GtkCellRenderer*,
         Clipboard* );
 
 void treeview_underline_cursor( GtkTreeViewColumn*, GtkCellRenderer*, GtkTreeIter* );
-
-gboolean treeview_selection_select_func( GtkTreeSelection*, GtkTreeModel*, GtkTreePath*,
-        gboolean, gpointer );
 
 gint treeview_selection_foreach( GtkTreeView*, GPtrArray*, gint (*)
         ( GtkTreeView*, GtkTreeIter*, gpointer, gchar** ), gpointer, gchar** );

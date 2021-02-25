@@ -321,7 +321,7 @@ init_treeviews( Projekt* zond )
     for ( Baum baum = BAUM_INHALT; baum <= BAUM_AUSWERTUNG; baum++ )
     {
         //der treeview
-        zond->treeview[baum] = GTK_TREE_VIEW(gtk_tree_view_new( ));
+        zond->treeview[baum] = GTK_TREE_VIEW(sond_treeview_new( ));
 
         //Tree-Model erzeugen und verbinden
         GtkTreeStore* tree_store = gtk_tree_store_new( 3, G_TYPE_STRING,
@@ -330,10 +330,6 @@ init_treeviews( Projekt* zond )
         g_object_unref( tree_store );
 
         gtk_tree_view_set_headers_visible( zond->treeview[baum], FALSE );
-        gtk_tree_view_set_fixed_height_mode( zond->treeview[baum], TRUE );
-        gtk_tree_view_set_enable_tree_lines( zond->treeview[baum], TRUE );
-        gtk_tree_view_set_enable_search( zond->treeview[baum], FALSE );
-
         //die renderer
         GtkCellRenderer* renderer_pixbuf = gtk_cell_renderer_pixbuf_new();
         zond->renderer_text[baum] = gtk_cell_renderer_text_new();
@@ -375,10 +371,6 @@ init_treeviews( Projekt* zond )
         //die Selection
         zond->selection[baum] = gtk_tree_view_get_selection(
                 zond->treeview[baum] );
-        gtk_tree_selection_set_mode( zond->selection[baum],
-                GTK_SELECTION_MULTIPLE );
-        gtk_tree_selection_set_select_function( zond->selection[baum],
-                (GtkTreeSelectionFunc) treeview_selection_select_func, zond, NULL );
 
 /*        //Kontextmenu erzeugen, welches bei Rechtsklick auf treeview angezeigt wird
         GtkWidget* contextmenu_tv = gtk_menu_new();
