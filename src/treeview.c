@@ -5,30 +5,6 @@
 #include "misc.h"
 
 
-typedef struct
-{
-    Clipboard* clipboard;
-
-    /*  stuff  */
-} SondTreeviewPrivate;
-
-G_DEFINE_TYPE_WITH_PRIVATE (SondTreeview, sond_treeview, GTK_TYPE_TREE_VIEW)
-
-
-static void
-sond_treeview_class_init( SondTreeviewClass* klass )
-{
-
-}
-
-
-static void
-sond_treeview_init( SondTreeview* self )
-{
-
-}
-
-
 void
 treeview_free_clipboard( Clipboard* clipboard )
 {
@@ -174,7 +150,7 @@ treeview_underline_cursor( GtkTreeViewColumn* column, GtkCellRenderer* renderer,
 
 
 static gboolean
-sond_treeview_selection_select_func( GtkTreeSelection* selection, GtkTreeModel* model,
+treeview_selection_select_func( GtkTreeSelection* selection, GtkTreeModel* model,
         GtkTreePath* path, gboolean selected, gpointer data )
 {
     if ( selected ) return TRUE; //abschalten geht immer
@@ -324,22 +300,22 @@ treeview_copy_or_cut_selection( GtkTreeView* tree_view, Clipboard* clipboard,
 }
 
 
-SondTreeview*
-sond_treeview_new( )
+GtkWidget*
+treeview_new( )
 {
-    SondTreeview* stw = g_object_new( SOND_TYPE_TREEVIEW, NULL );
+    GtkWidget* trv = gtk_tree_view_new( );
 
-    gtk_tree_view_set_fixed_height_mode( GTK_TREE_VIEW(stw), TRUE );
-    gtk_tree_view_set_enable_tree_lines( GTK_TREE_VIEW(stw), TRUE );
-    gtk_tree_view_set_enable_search( GTK_TREE_VIEW(stw), FALSE );
+    gtk_tree_view_set_fixed_height_mode( GTK_TREE_VIEW(trv), TRUE );
+    gtk_tree_view_set_enable_tree_lines( GTK_TREE_VIEW(trv), TRUE );
+    gtk_tree_view_set_enable_search( GTK_TREE_VIEW(trv), FALSE );
 
     //die Selection
-    GtkTreeSelection* selection = gtk_tree_view_get_selection( GTK_TREE_VIEW(stw) );
+    GtkTreeSelection* selection = gtk_tree_view_get_selection( GTK_TREE_VIEW(trv) );
     gtk_tree_selection_set_mode( selection, GTK_SELECTION_MULTIPLE );
     gtk_tree_selection_set_select_function( selection,
-            (GtkTreeSelectionFunc) sond_treeview_selection_select_func, NULL, NULL );
+            (GtkTreeSelectionFunc) treeview_selection_select_func, NULL, NULL );
 
-    return stw;
+    return trv;
 }
 
 

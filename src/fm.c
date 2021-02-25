@@ -1280,11 +1280,8 @@ fm_create( void )
     fm->modify_file = g_malloc0( sizeof( ModifyFile ) );
 
     //treeview
-    fm->fm_treeview = GTK_TREE_VIEW(sond_treeview_new( ));
+    fm->fm_treeview = GTK_TREE_VIEW(treeview_new( ));
 //    gtk_tree_view_set_headers_visible( fm->fm_treeview, FALSE );
-    gtk_tree_view_set_fixed_height_mode( fm->fm_treeview, TRUE );
-    gtk_tree_view_set_enable_tree_lines( fm->fm_treeview, TRUE );
-    gtk_tree_view_set_enable_search( fm->fm_treeview, FALSE );
 
     //Icon und filename
     GtkCellRenderer* renderer_icon = gtk_cell_renderer_pixbuf_new( );

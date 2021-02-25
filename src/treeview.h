@@ -2,28 +2,6 @@
 #define TREEVIEW_H_INCLUDED
 
 
-#include <glib-object.h>
-#include <gtk/gtk.h>
-
-G_BEGIN_DECLS
-
-#define SOND_TYPE_TREEVIEW sond_treeview_get_type ()
-G_DECLARE_DERIVABLE_TYPE (SondTreeview, sond_treeview, SOND, TREEVIEW, GtkTreeView)
-/*
- *  Method definitions
- */
-
-struct _SondTreeviewClass
-{
-    GtkTreeView* parent_class;
-
-};
-
-SondTreeview* sond_treeview_new( void );
-
-G_END_DECLS
-
-
 typedef struct _GtkTreeIter GtkTreeIter;
 typedef struct _GtkTreeSelection GtkTreeSelection;
 typedef struct _GtkTreeModel GtkTreeModel;
@@ -68,5 +46,7 @@ gint treeview_selection_testen_cursor_ist_abkoemmling( GtkTreeView*, GPtrArray* 
 GPtrArray* treeview_selection_get_refs( GtkTreeView* );
 
 void treeview_copy_or_cut_selection( GtkTreeView*, Clipboard*, gboolean );
+
+GtkWidget* treeview_new( void );
 
 #endif // TREEVIEW_H_INCLUDED

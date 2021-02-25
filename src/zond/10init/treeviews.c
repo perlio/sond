@@ -321,7 +321,7 @@ init_treeviews( Projekt* zond )
     for ( Baum baum = BAUM_INHALT; baum <= BAUM_AUSWERTUNG; baum++ )
     {
         //der treeview
-        zond->treeview[baum] = GTK_TREE_VIEW(sond_treeview_new( ));
+        zond->treeview[baum] = GTK_TREE_VIEW(treeview_new( ));
 
         //Tree-Model erzeugen und verbinden
         GtkTreeStore* tree_store = gtk_tree_store_new( 3, G_TYPE_STRING,
