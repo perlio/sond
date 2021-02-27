@@ -178,20 +178,13 @@ file_manager_cb_eingang( GtkWidget* item, gpointer data )
     gchar* errmsg = NULL;
     Eingang* eingang = NULL;
 
-    GtkWidget* fm_treeview = (GtkWidget*) data;
+    FM* fm = (FM*) data;
 
-    //selektierte Dateien holen
-    GPtrArray* refs = treeview_selection_get_refs( GTK_TREE_VIEW(fm_treeview) );
-    if ( !refs ) return;
-
-    rc = treeview_selection_foreach( GTK_TREE_VIEW(fm_treeview), refs,
-            eingang_set, &eingang, &errmsg );
-    g_ptr_array_unref( refs );
-    eingang_free( eingang );
+    rc = fm_set_eingang( fm, (DBase*) fm->modify_file->data, &errmsg );
     if ( rc == -1 )
     {
-        display_message( gtk_widget_get_toplevel( fm_treeview ), "Fehler bei Eingang -\n\nBei Aufruf "
-                "treeview_selection_foreach:\n", errmsg, NULL );
+        display_message( gtk_widget_get_toplevel( fm->fm_treeview ), "Fehler bei Eingang -\n\nBei Aufruf "
+                "fm_set_eingang:\n", errmsg, NULL );
         g_free( errmsg );
     }
 

@@ -134,7 +134,8 @@ db_baum_refresh( Projekt* zond, gchar** errmsg )
     if ( rc ) ERROR_PAO( "db_baum_neu_laden (BAUM_AUSWERTUNG)" )
 
     gtk_tree_selection_unselect_all( zond->selection[BAUM_AUSWERTUNG] );
-    g_object_set(zond->renderer_text[BAUM_AUSWERTUNG], "editable", FALSE, NULL);
+
+    g_object_set( zond->renderer_text[BAUM_AUSWERTUNG], "editable", FALSE, NULL);
     g_object_set(zond->renderer_text[BAUM_INHALT], "editable", TRUE, NULL);
 
     gtk_widget_grab_focus( GTK_WIDGET(zond->treeview[BAUM_INHALT]) );

@@ -18,6 +18,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include <gtk/gtk.h>
 #include <sqlite3.h>
+#include <glib/gstdio.h>
 
 #include "../../dbase.h"
 
@@ -128,7 +129,7 @@ convert_copy( Projekt* zond, sqlite3* db_convert, gchar** errmsg )
 
 
 static sqlite3*
-convert_datei_oeffnen( Projekt* zond, const gchar* zus, gchar** errmsg )
+convert_datei_oeffnen( Projekt* zond, const gchar* zus, gchar** abs_path, gchar** errmsg )
 {
     gint rc = 0;
     sqlite3* db_convert = NULL;
@@ -140,8 +141,8 @@ convert_datei_oeffnen( Projekt* zond, const gchar* zus, gchar** errmsg )
         return NULL;
     }
 
-    gchar* abs_path = filename_oeffnen( GTK_WINDOW(zond->app_window) );
-    if ( !abs_path )
+    *abs_path = filename_oeffnen( GTK_WINDOW(zond->app_window) );
+    if ( !(*abs_path) )
     {
         if ( errmsg ) *errmsg = g_strdup( "Keine Datei zum konvertieren ausgewählt" );
 
@@ -151,14 +152,13 @@ convert_datei_oeffnen( Projekt* zond, const gchar* zus, gchar** errmsg )
     //ToDo: abfragen, ob v1-Datei schon existiert und ggf. überschrieben werden soll
 
     //Ursprungsdatei
-    gchar* origin = g_strconcat( abs_path, zus, NULL );
+    gchar* origin = g_strconcat( *abs_path, zus, NULL );
     rc = sqlite3_open( origin, &db_convert );
     g_free( origin );
     if ( rc != SQLITE_OK )
     {
         if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf "
                 "sqlite3_open (origin):\n", sqlite3_errmsg( db_convert ), NULL );
-        g_free( abs_path );
 
         return NULL;
     }
@@ -166,14 +166,12 @@ convert_datei_oeffnen( Projekt* zond, const gchar* zus, gchar** errmsg )
     if ( dbase_create_db( db_convert, errmsg ) )
     {
         sqlite3_close( db_convert );
-        g_free( abs_path );
 
         ERROR_PAO_R( "db_create", NULL );
     }
 
     gchar* sql =  g_strdup_printf(
-            "ATTACH DATABASE `%s` AS old;", abs_path );
-    g_free( abs_path );
+            "ATTACH DATABASE `%s` AS old;", *abs_path );
 
     rc = sqlite3_exec( db_convert, sql, NULL, NULL, errmsg );
     if ( rc != SQLITE_OK )
@@ -196,12 +194,14 @@ convert_09_to_1( Projekt* zond, gchar** errmsg )
 {
     gint rc = 0;
     sqlite3* db_convert = NULL;
+    gchar* abs_path = NULL;
 
-    db_convert = convert_datei_oeffnen( zond, "v1", errmsg );
+    db_convert = convert_datei_oeffnen( zond, "v1", &abs_path, errmsg );
     if ( !db_convert ) ERROR_PAO( "convert_datei_oeffnen" )
 
     rc = convert_copy( zond, db_convert, errmsg );
     sqlite3_close( db_convert );
+    g_free( abs_path );
     if ( rc ) ERROR_PAO( "convert_copy" )
 
     return 0;
@@ -238,13 +238,45 @@ convert_addeingang( Projekt* zond, gchar** errmsg )
 {
     gint rc = 0;
     sqlite3* db_convert = NULL;
+    gchar* abs_path = NULL;
+    gchar* new_path = NULL;
 
-    db_convert = convert_datei_oeffnen( zond, "eing", errmsg );
+    db_convert = convert_datei_oeffnen( zond, "eing", &abs_path, errmsg );
     if ( !db_convert ) ERROR_PAO( "convert_datei_oeffnen" )
 
     rc = convert_copy_eingang( zond, db_convert, errmsg );
     sqlite3_close( db_convert );
-    if ( rc ) ERROR_PAO( "convert_copy_eingang" )
+    if ( rc )
+    {
+        g_free( abs_path );
+        ERROR_PAO( "convert_copy_eingang" )
+    }
+
+    new_path = g_strconcat( abs_path, ".old_vor_eingang", NULL );
+    rc = g_rename( abs_path, new_path );
+    g_free( new_path );
+    if ( rc )
+    {
+        g_free( abs_path );
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_rename:\n",
+                strerror( errno ), NULL );
+
+        return -1;
+    }
+
+    new_path = g_strconcat( abs_path, "eing", NULL );
+    rc = g_rename( new_path, abs_path );
+    g_free( new_path );
+    g_free( abs_path );
+    g_free( new_path );
+    if ( rc )
+    {
+        g_free( abs_path );
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_rename:\n",
+                strerror( errno ), NULL );
+
+        return -1;
+    }
 
     return 0;
 }

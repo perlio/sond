@@ -309,14 +309,15 @@ eingang_set( GtkTreeView* fm_treeview, GtkTreeIter* iter, gpointer data,
 {
     gchar* rel_path = NULL;
     gint rc = 0;
+    Eingang** eingang = NULL;
+    DBase* dbase = NULL;
 
-    DBase* dbase = g_object_get_data( G_OBJECT(fm_treeview), "dbase" );
-
-    Eingang** eingang_loop = (Eingang**) data;
+    EingangDBase* eingang_dbase = (EingangDBase*) data;
 
     rel_path = fm_get_rel_path( gtk_tree_view_get_model( fm_treeview ), iter );
 
-    rc = eingang_insert_or_update( fm_treeview, dbase, rel_path, eingang_loop, errmsg );
+    rc = eingang_insert_or_update( fm_treeview, eingang_dbase->dbase, rel_path,
+            eingang_dbase->eingang, errmsg );
     g_free( rel_path );
     if ( rc == -1 ) ERROR( "eingang_insert_or_update" )
 

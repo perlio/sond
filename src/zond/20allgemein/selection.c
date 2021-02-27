@@ -29,6 +29,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "dbase_full.h"
 
 #include "../../misc.h"
+#include "../../eingang.h"
 #include "../../fm.h"
 #include "../../treeview.h"
 #include "../../dbase.h"
@@ -221,6 +222,31 @@ selection_anbinden_zu_baum( Projekt* zond, GtkTreeIter** iter, gboolean kind,
 }
 
 
+static gint
+selection_set_datei_und_eingang( Projekt* zond, gint node_id_new, const gchar*
+        rel_path, gchar** errmsg )
+{
+    gint rc = 0;
+    gint ID = 0;
+
+    rc = db_set_datei( zond, node_id_new, rel_path, errmsg );
+    if ( rc ) ERROR( "db_set_datei" )
+
+    rc = eingang_for_rel_path( (DBase*) zond->dbase_zond->dbase_work, rel_path, &ID,
+            NULL, NULL, errmsg );
+    if ( rc == -1 ) ERROR( "eingang_for_rel_path" )
+//    else if ( rc == 0 ) überflüssig, da eingang_ID default 0 ist
+    else if ( rc > 0 )
+    {
+        rc = dbase_set_eingang_id( (DBase*) zond->dbase_zond->dbase_work, node_id_new,
+                ID, errmsg );
+        if ( rc ) ERROR( "dbase_set_eingang_id" )
+    }
+
+    return 0;
+}
+
+
 static gchar*
 selection_get_icon_name( Projekt* zond, GFile* file )
 {
@@ -281,9 +307,11 @@ selection_datei_einfuegen_in_db( Projekt* zond, GFile* file, gint node_id,
     }
 
     rel_path = fm_get_rel_path_from_file( zond->dbase_zond->project_dir, file );
-    rc = db_set_datei( zond, new_node_id, rel_path, errmsg );
+
+    rc = selection_set_datei_und_eingang( zond, new_node_id, rel_path, errmsg );
+
     g_free( rel_path );
-    if ( rc ) ERROR_PAO( "db_set_datei" )
+    if ( rc ) ERROR_PAO( "selection_set_datei_und_eingang" )
 
     return new_node_id;
 }
@@ -454,7 +482,7 @@ selection_foreach_anbinden( GtkTreeView* tree_view, GtkTreeIter* iter,
     SSelectionAnbinden* s_selection = (SSelectionAnbinden*) data;
 
     //datei ermitteln und anbinden
-    gchar* full_path = fm_get_full_path( tree_view, iter );
+    gchar* full_path = fm_get_full_path( s_selection->zond->fm, iter );
 
     GFile* file = g_file_new_for_path( full_path );
     g_free( full_path );
@@ -576,7 +604,7 @@ selection_paste( Projekt* zond, gboolean kind )
     {
         if ( baum == BAUM_FS )
         {
-            rc = fm_paste_selection( zond->treeview[BAUM_FS], zond->treeview[BAUM_FS],
+            rc = fm_paste_selection( zond->fm, zond->treeview[BAUM_FS],
                     zond->clipboard->arr_ref, zond->clipboard->ausschneiden,
                     kind, &errmsg );
             if ( rc )

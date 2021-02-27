@@ -39,7 +39,7 @@ db_remove_node( Projekt* zond, Baum baum, gint node_id, gchar** errmsg )
 
 
 gint
-db_set_datei( Projekt* zond, gint node_id, gchar* rel_path, gchar** errmsg )
+db_set_datei( Projekt* zond, gint node_id, const gchar* rel_path, gchar** errmsg )
 {
     gint rc = 0;
 

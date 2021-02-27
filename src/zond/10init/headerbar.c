@@ -607,6 +607,35 @@ cb_change_icon_item( GtkMenuItem* item, gpointer data )
 
 
 static void
+cb_eingang_activate( GtkMenuItem* item, gpointer data )
+{
+    Projekt* zond = (Projekt*) data;
+
+    Baum baum = baum_abfragen_aktiver_treeview( zond );
+    if ( baum == KEIN_BAUM ) return;
+    else if ( baum == BAUM_FS )
+    {
+        gint rc = 0;
+        gchar* errmsg = NULL;
+
+        rc = fm_set_eingang( zond->fm, (DBase*) zond->dbase_zond->dbase_work, &errmsg );
+        if ( rc )
+        {
+            meldung( zond->app_window, "Eingang ändern fehlgeschlagen -\n\nBei Aufruf "
+                    "fm_set_eingang:\n", errmsg, NULL );
+            g_free( errmsg );
+        }
+    }
+    else
+    {
+
+    }
+
+    return;
+}
+
+
+static void
 cb_kopieren_activate( GtkMenuItem* item, gpointer user_data )
 {
     Projekt* zond = (Projekt*) user_data;
@@ -1100,6 +1129,13 @@ init_menu( Projekt* zond )
     gtk_menu_item_set_submenu( GTK_MENU_ITEM(icon_change_item),
             icon_change_menu );
 
+    GtkWidget* eingang_item = gtk_menu_item_new_with_label( "Eingangsdaten setzen" );
+    gtk_widget_add_accelerator(eingang_item, "activate", accel_group, GDK_KEY_e,
+            GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
+    g_signal_connect( G_OBJECT(eingang_item), "activate",
+            G_CALLBACK(cb_eingang_activate), (gpointer) zond );
+
+
     GtkWidget* sep_struktur0item = gtk_separator_menu_item_new();
 
     //Kopieren
@@ -1173,6 +1209,7 @@ init_menu( Projekt* zond )
     gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), sep_struktur2item );
     gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), item_text_anbindung );
     gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), icon_change_item );
+    gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), eingang_item );
 
 /*********************
 *  Menu Pdf-Dateien

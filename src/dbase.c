@@ -106,19 +106,22 @@ dbase_get_eingang_for_rel_path( DBase* dbase, const gchar* rel_path, gint* ID,
 
     if ( rc == SQLITE_DONE ) return 1; //rel_path nicht vorhanden
 
-    if ( ID ) *ID = sqlite3_column_int( dbase->get_eingang_for_rel_path, 8 );
-    *eingang = g_malloc0( sizeof( Eingang ) );
+    if ( eingang )
+    {
+        *eingang = g_malloc0( sizeof( Eingang ) );
 
-    (*eingang)->eingangsdatum = g_strdup( (const gchar*) sqlite3_column_text( dbase->get_eingang_for_rel_path, 0 ) );
-    (*eingang)->transport = g_strdup( (const gchar*) sqlite3_column_text( dbase->get_eingang_for_rel_path, 1 ) );
-    (*eingang)->traeger = g_strdup( (const gchar*) sqlite3_column_text( dbase->get_eingang_for_rel_path, 2 ) );
-    (*eingang)->ort = g_strdup( (const gchar*) sqlite3_column_text( dbase->get_eingang_for_rel_path, 3 ) );
-    (*eingang)->absender = g_strdup( (const gchar*) sqlite3_column_text( dbase->get_eingang_for_rel_path, 4 ) );
-    (*eingang)->absendedatum = g_strdup( (const gchar*) sqlite3_column_text( dbase->get_eingang_for_rel_path, 5 ) );
-    (*eingang)->erfassungsdatum = g_strdup( (const gchar*) sqlite3_column_text( dbase->get_eingang_for_rel_path, 6 ) );
+        (*eingang)->eingangsdatum = g_strdup( (const gchar*) sqlite3_column_text( dbase->get_eingang_for_rel_path, 0 ) );
+        (*eingang)->transport = g_strdup( (const gchar*) sqlite3_column_text( dbase->get_eingang_for_rel_path, 1 ) );
+        (*eingang)->traeger = g_strdup( (const gchar*) sqlite3_column_text( dbase->get_eingang_for_rel_path, 2 ) );
+        (*eingang)->ort = g_strdup( (const gchar*) sqlite3_column_text( dbase->get_eingang_for_rel_path, 3 ) );
+        (*eingang)->absender = g_strdup( (const gchar*) sqlite3_column_text( dbase->get_eingang_for_rel_path, 4 ) );
+        (*eingang)->absendedatum = g_strdup( (const gchar*) sqlite3_column_text( dbase->get_eingang_for_rel_path, 5 ) );
+        (*eingang)->erfassungsdatum = g_strdup( (const gchar*) sqlite3_column_text( dbase->get_eingang_for_rel_path, 6 ) );
+    }
     if ( ID_eingang_rel_path ) *ID_eingang_rel_path =
             sqlite3_column_int( dbase->get_eingang_for_rel_path, 7 );
 
+    if ( ID ) *ID = sqlite3_column_int( dbase->get_eingang_for_rel_path, 8 );
     return 0;
 }
 
@@ -239,7 +242,27 @@ dbase_update_eingang_rel_path( DBase* dbase, const gint ID, const gint eingang_i
     if ( rc != SQLITE_DONE ) ERROR_DBASE( "sqlite3_step" )
 
     return 0;
+}
 
+
+gint
+dbase_set_eingang_id( DBase* dbase, const gint node_id, const gint eingang_id,
+        gchar** errmsg )
+{
+    gint rc = 0;
+
+    sqlite3_reset( dbase->set_eingang_id );
+
+    rc = sqlite3_bind_int( dbase->set_eingang_id, 1, eingang_id );
+    if ( rc != SQLITE_OK ) ERROR_DBASE( "sqlite3_bind_int (eingang_id)" )
+
+    rc = sqlite3_bind_int( dbase->set_eingang_id, 2, node_id );
+    if ( rc != SQLITE_OK ) ERROR_DBASE( "sqlite3_bind_text (node_id)" )
+
+    rc = sqlite3_step( dbase->set_eingang_id );
+    if ( rc != SQLITE_DONE ) ERROR_DBASE( "sqlite3_step" )
+
+    return 0;
 }
 
 
@@ -327,7 +350,7 @@ dbase_prepare_stmts( DBase* dbase, gchar** errmsg )
 
             //get_eingang_for_rel_path
             "SELECT eingangsdatum, transport, traeger, ort, "
-            "absender, absendedatum, erfassungsdatum, eingang_rel_path.ID "
+            "absender, absendedatum, erfassungsdatum, eingang_rel_path.ID, eingang.ID "
             "FROM eingang LEFT JOIN "
             "eingang_rel_path "
             "ON eingang.ID=eingang_rel_path.eingang_id WHERE rel_path=?1;",
@@ -344,6 +367,9 @@ dbase_prepare_stmts( DBase* dbase, gchar** errmsg )
 
             "UPDATE eingang_rel_path SET eingang_id=?1, rel_path=?2 "
             "WHERE ID=?3; ",
+
+            //dbase_set_eingang_id
+            "UPDATE baum_inhalt SET eingang_id=?1 WHERE node_id=?2; ",
 
             NULL };
 
@@ -369,6 +395,7 @@ dbase_prepare_stmts( DBase* dbase, gchar** errmsg )
         else if ( zaehler == 7 ) dbase->update_eingang = stmt;
         else if ( zaehler == 8 ) dbase->insert_eingang_rel_path = stmt;
         else if ( zaehler == 9 ) dbase->update_eingang_rel_path = stmt;
+        else if ( zaehler == 10 ) dbase->set_eingang_id = stmt;
 
         zaehler++;
     }
@@ -426,6 +453,8 @@ dbase_create_db( sqlite3* db, gchar** errmsg )
                 "PRIMARY KEY(ID) "
             "); "
 
+            "INSERT INTO eingang (ID) VALUES (0); "
+
             "CREATE TABLE eingang_rel_path ( "
                 "ID INTEGER NOT NULL, "
                 "eingang_id INTEGER NOT NULL, "
@@ -441,8 +470,8 @@ dbase_create_db( sqlite3* db, gchar** errmsg )
                 "older_sibling_id INTEGER NOT NULL,"
                 "icon_name VARCHAR(50),"
                 "node_text VARCHAR(200), "
-                "eingang_id INTEGER NULL DEFAULT NULL, "
-                "FOREIGN KEY (eingang_id) REFERENCES eingang_rel_path (ID) "
+                "eingang_id INTEGER NOT NULL DEFAULT 0, "
+                "FOREIGN KEY (eingang_id) REFERENCES eingang (ID) "
                 "ON DELETE CASCADE ON UPDATE CASCADE, "
                 "FOREIGN KEY (parent_id) REFERENCES baum_inhalt (node_id) "
                 "ON DELETE CASCADE ON UPDATE CASCADE, "

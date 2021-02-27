@@ -48,6 +48,8 @@ gchar* fm_get_rel_path( GtkTreeModel*, GtkTreeIter* );
 
 gchar* fm_get_full_path( FM*, GtkTreeIter* );
 
+gint fm_set_eingang( FM*, DBase*, gchar** );
+
 gint fm_create_dir( FM*, gboolean, gchar** );
 
 gint fm_paste_selection( FM*, GtkTreeView*, GPtrArray*, gboolean, gboolean, gchar** );

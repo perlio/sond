@@ -2,6 +2,7 @@
 #define TREEVIEW_H_INCLUDED
 
 
+typedef struct _GtkTreeView GtkTreeView;
 typedef struct _GtkTreeIter GtkTreeIter;
 typedef struct _GtkTreeSelection GtkTreeSelection;
 typedef struct _GtkTreeModel GtkTreeModel;

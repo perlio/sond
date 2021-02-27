@@ -1,8 +1,8 @@
 #include <gtk/gtk.h>
 
+#include "fm.h"
 #include "misc.h"
 #include "treeview.h"
-#include "fm.h"
 #include "eingang.h"
 #include "dbase.h"
 
@@ -102,6 +102,28 @@ fm_get_full_path( FM* fm, GtkTreeIter* iter )
             fm_get_rel_path( gtk_tree_view_get_model( fm->fm_treeview ), iter ) );
 
     return full_path;
+}
+
+
+gint
+fm_set_eingang( FM* fm, DBase* dbase, gchar** errmsg )
+{
+    gint rc = 0;
+    Eingang* eingang = NULL;
+
+    EingangDBase eingang_dbase = { &eingang, dbase };
+
+    //selektierte Dateien holen
+    GPtrArray* refs = treeview_selection_get_refs( fm->fm_treeview );
+    if ( !refs ) return 0;
+
+    rc = treeview_selection_foreach( fm->fm_treeview, refs,
+            eingang_set, &eingang_dbase, errmsg );
+    g_ptr_array_unref( refs );
+    eingang_free( eingang );
+    if ( rc == -1 ) ERROR_PAO( "treeview_selection_foreach" )
+
+    return 0;
 }
 
 

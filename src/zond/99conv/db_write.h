@@ -13,7 +13,7 @@ typedef int gboolean;
 
 gint db_remove_node( Projekt*, Baum, gint, gchar** );
 
-gint db_set_datei( Projekt*, gint, gchar*, gchar** );
+gint db_set_datei( Projekt*, gint, const gchar*, gchar** );
 
 gint db_verschieben_knoten( Projekt*, Baum, gint, gint, gint, gchar** );
 

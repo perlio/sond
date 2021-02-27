@@ -17,6 +17,11 @@ typedef struct _Eingang
     gchar* erfassungsdatum;
 } Eingang;
 
+typedef struct _Eingang_DBase
+{
+    Eingang** eingang;
+    DBase* dbase;
+} EingangDBase;
 
 void eingang_free( Eingang* );
 
