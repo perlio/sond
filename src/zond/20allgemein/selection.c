@@ -228,20 +228,24 @@ selection_set_datei_und_eingang( Projekt* zond, gint node_id_new, const gchar*
 {
     gint rc = 0;
     gint ID = 0;
+    gint eingang_rel_path_id = 0;
 
     rc = db_set_datei( zond, node_id_new, rel_path, errmsg );
     if ( rc ) ERROR( "db_set_datei" )
 
     rc = eingang_for_rel_path( (DBase*) zond->dbase_zond->dbase_work, rel_path, &ID,
-            NULL, NULL, errmsg );
+            NULL, &eingang_rel_path_id, errmsg );
     if ( rc == -1 ) ERROR( "eingang_for_rel_path" )
-//    else if ( rc == 0 ) überflüssig, da eingang_ID default 0 ist
-    else if ( rc > 0 )
-    {
-        rc = dbase_set_eingang_id( (DBase*) zond->dbase_zond->dbase_work, node_id_new,
-                ID, errmsg );
-        if ( rc ) ERROR( "dbase_set_eingang_id" )
+
+    if ( !eingang_rel_path_id ) //entweder nix gespeichert oder für parent
+    { //wenn nix, ist ID == 0, hoffe ich
+        eingang_rel_path_id = dbase_insert_eingang_rel_path( (DBase*) zond->dbase_zond->dbase_work, ID, rel_path, errmsg );
+        if ( rc == -1 ) ERROR( "dbase_insert_eingang_rel_path" )
     }
+
+    rc = dbase_set_eingang_id( (DBase*) zond->dbase_zond->dbase_work,
+            node_id_new, eingang_rel_path_id, errmsg );
+    if ( rc ) ERROR( "dbase_set_eingang_id" )
 
     return 0;
 }

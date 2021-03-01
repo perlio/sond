@@ -268,10 +268,8 @@ convert_addeingang( Projekt* zond, gchar** errmsg )
     rc = g_rename( new_path, abs_path );
     g_free( new_path );
     g_free( abs_path );
-    g_free( new_path );
     if ( rc )
     {
-        g_free( abs_path );
         if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_rename:\n",
                 strerror( errno ), NULL );
 

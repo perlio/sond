@@ -21,6 +21,7 @@ typedef struct _Eingang_DBase
 {
     Eingang** eingang;
     DBase* dbase;
+    gint* last_inserted_ID;
 } EingangDBase;
 
 void eingang_free( Eingang* );
@@ -29,6 +30,6 @@ Eingang* eingang_new( void );
 
 gint eingang_for_rel_path( DBase*, const gchar*, gint*, Eingang**, gint*, gchar** );
 
-gint  eingang_set( GtkTreeView*, GtkTreeIter*, gpointer, gchar** );
+gint  eingang_set_for_rel_path( GtkTreeView*, GtkTreeIter*, gpointer, gchar** );
 
 #endif // EINGANG_H_INCLUDED

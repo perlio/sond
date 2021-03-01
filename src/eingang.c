@@ -113,13 +113,13 @@ eingang_fenster( GtkWidget* widget, Eingang* eingang, const gboolean sens,
             "Ok", GTK_RESPONSE_OK, "Nein", GTK_RESPONSE_NO, "Abbrechen",
             GTK_RESPONSE_CANCEL, NULL );
 
-    GtkWidget* headerbar = gtk_header_bar_new( );
-    gtk_header_bar_set_title( GTK_HEADER_BAR(headerbar), title );
-    if ( secondary ) gtk_header_bar_set_subtitle( GTK_HEADER_BAR(headerbar), secondary );
-
-    gtk_window_set_titlebar( GTK_WINDOW(dialog), headerbar );
-
     GtkWidget* content_area = gtk_dialog_get_content_area( GTK_DIALOG(dialog) );
+
+    GtkWidget* label_title = gtk_label_new( title );
+    GtkWidget* label_secondary = gtk_label_new( secondary );
+
+    gtk_box_pack_start( GTK_BOX(content_area), label_title, TRUE, TRUE, 0 );
+    gtk_box_pack_start( GTK_BOX(content_area), label_secondary, TRUE, TRUE, 0 );
 
     GtkWidget* grid = gtk_grid_new( );
     gtk_box_pack_start( GTK_BOX( content_area ), grid, TRUE, TRUE, 0 );
@@ -135,11 +135,15 @@ eingang_fenster( GtkWidget* widget, Eingang* eingang, const gboolean sens,
     if ( eingang->transport ) gtk_entry_set_text( GTK_ENTRY(entry_transport), eingang->transport );
     gtk_container_add( GTK_CONTAINER(frame_transport), entry_transport);
 
+    GtkWidget* frame_traeger = gtk_frame_new( "Trägermedium" );
     GtkWidget* entry_traeger = gtk_entry_new( );
     if ( eingang->traeger ) gtk_entry_set_text( GTK_ENTRY(entry_traeger), eingang->traeger );
+    gtk_container_add( GTK_CONTAINER(frame_traeger), entry_traeger );
 
+    GtkWidget* frame_ort = gtk_frame_new( "Übergabeort" );
     GtkWidget* entry_ort = gtk_entry_new( );
     if ( eingang->ort ) gtk_entry_set_text( GTK_ENTRY(entry_ort), eingang->ort );
+    gtk_container_add( GTK_CONTAINER(frame_ort), entry_ort );
 
     GtkWidget* entry_absender = gtk_entry_new( );
     if ( eingang->absender ) gtk_entry_set_text( GTK_ENTRY(entry_absender), eingang->absender );
@@ -163,8 +167,8 @@ eingang_fenster( GtkWidget* widget, Eingang* eingang, const gboolean sens,
 
     gtk_grid_attach( GTK_GRID(grid), frame_eingang, 0, 0, 1, 1 );
     gtk_grid_attach( GTK_GRID(grid), frame_transport, 0, 1, 1, 1 );
-    gtk_grid_attach( GTK_GRID(grid), entry_traeger, 0, 2, 1, 1 );
-    gtk_grid_attach( GTK_GRID(grid), entry_ort, 0, 3, 1, 1 );
+    gtk_grid_attach( GTK_GRID(grid), frame_traeger, 0, 2, 1, 1 );
+    gtk_grid_attach( GTK_GRID(grid), frame_ort, 0, 3, 1, 1 );
     gtk_grid_attach( GTK_GRID(grid), entry_absender, 0, 4, 1, 1 );
     gtk_grid_attach( GTK_GRID(grid), calendar_absendedatum, 0, 5, 1, 1 );
     gtk_grid_attach( GTK_GRID(grid), calendar_erfassungsdatum, 0, 6, 1, 1 );
@@ -215,17 +219,23 @@ eingang_fenster( GtkWidget* widget, Eingang* eingang, const gboolean sens,
 
 
 static gint
-eingang_insert_or_update( GtkTreeView* fm_treeview, DBase* dbase,
-        const gchar* rel_path, Eingang** eingang_loop, gchar** errmsg )
+eingang_insert_or_update( GtkTreeView* fm_treeview, EingangDBase* eingang_dbase,
+        const gchar* rel_path, gchar** errmsg )
 {
     gint rc = 0;
     gint ret = 0;
-    gint ID = 0;
-    gint ID_eingang_rel_path = 0;
+    gint eingang_id = 0;
+    gint eingang_rel_path_id = 0;
     Eingang* eingang = NULL;
+    DBase* dbase = NULL;
+    Eingang** eingang_loop = NULL;
+    gint* last_inserted_ID = NULL;
 
-    ret = eingang_for_rel_path( dbase, rel_path, &ID, &eingang, &ID_eingang_rel_path,
-            errmsg );
+    dbase = eingang_dbase->dbase;
+    eingang_loop = eingang_dbase->eingang;
+    last_inserted_ID = eingang_dbase->last_inserted_ID;
+
+    ret = eingang_for_rel_path( dbase, rel_path, &eingang_id, &eingang, &eingang_rel_path_id, errmsg );
     if ( ret == -1 ) ERROR( "eingang_for_rel_path" )
     else if ( ret > 0 )
     {
@@ -262,38 +272,48 @@ eingang_insert_or_update( GtkTreeView* fm_treeview, DBase* dbase,
     if ( ret == 1 ) //zu rel_path selbst ist Eingang gespeichert
     {
         gint rc = 0;
-        //Abfragen, ob Eingang von mehreren eingang_rel_pathes
-        //referenziert wird (dbase_get_ID_eingang_rel_path( dbase, ID, &id_eingang_rel_path )
+        rc = dbase_get_num_of_refs_to_eingang( dbase, eingang_id, errmsg );
+        if ( rc == -1 ) ERROR_ROLLBACK( dbase, "dbase_get_num_of_refs_to_eingang" )
 
-        if ( rc == 1 )
+        if ( !(*last_inserted_ID) && rc == 1 )
         {
             gint rc = 0;
 
-            rc = dbase_update_eingang( dbase, ID, *eingang_loop, errmsg );
+            rc = dbase_update_eingang( dbase, eingang_id, *eingang_loop, errmsg );
             if ( rc ) ERROR_ROLLBACK( dbase, "dbase_update_eingang" );
         }
         else //müßte > 1 sein...
         {//wenn mehrere:
-            gint ID_new = 0;
+            gint retc = 0;
+            if ( !(*last_inserted_ID) )
+            {
+                *last_inserted_ID = dbase_insert_eingang( dbase, *eingang_loop, errmsg );
+                if ( *last_inserted_ID == -1 ) ERROR_ROLLBACK( dbase, "dbase_insert_eingang" )
+            }
 
-            ID_new = dbase_insert_eingang( dbase, *eingang_loop, errmsg );
-            if ( ID_new == -1 ) ERROR_ROLLBACK( dbase, "dbase_insert_eingang" )
+            retc = dbase_update_eingang_rel_path( dbase, eingang_rel_path_id,
+                    *last_inserted_ID, rel_path, errmsg );
+            if ( retc ) ERROR_ROLLBACK( dbase, "dbase_update_eingang" )
 
-            rc = dbase_update_eingang_rel_path( dbase, ID_eingang_rel_path, ID_new, rel_path, errmsg );
-            if ( rc ) ERROR_ROLLBACK( dbase, "dbase_update_eingang" )
+            if ( rc == 1 )
+            {
+                gint retc = 0;
+
+                retc = dbase_delete_eingang( dbase, eingang_id, errmsg );
+                if ( retc == -1 ) ERROR_ROLLBACK( dbase, "dbase_delete_eingang" )
+            }
         }
     }
     else //wenn Eltern oder gar nicht: kann gleich behandelt werden
             //wenn Vermittlung über Eltern, dann ist Datei noch nicht angebunden
-    {
-        gint ID_new = 0;
-        gint ID_eingang_rel_path = 0;
+    {//eingang_rel_path_id ist 0, wenn ret > 1
+        if ( !(*last_inserted_ID) ) *last_inserted_ID =
+                dbase_insert_eingang( dbase, *eingang_loop, errmsg );
+        if ( *last_inserted_ID == -1 ) ERROR_ROLLBACK( dbase, "dbase_insert_eingang" )
 
-        ID_new = dbase_insert_eingang( dbase, *eingang_loop, errmsg );
-        if ( ID_new == -1 ) ERROR_ROLLBACK( dbase, "dbase_insert_eingang" )
-
-        ID_eingang_rel_path = dbase_insert_eingang_rel_path( dbase, ID_new, rel_path, errmsg );
-        if ( ID_eingang_rel_path == -1 ) ERROR_ROLLBACK( dbase, "dbase_insert_eingang_rel_path" )
+        eingang_rel_path_id = dbase_insert_eingang_rel_path( dbase,
+                *last_inserted_ID, rel_path, errmsg );
+        if ( eingang_rel_path_id == -1 ) ERROR_ROLLBACK( dbase, "dbase_insert_eingang_rel_path" )
     }
 
     rc = dbase_commit( dbase, errmsg );
@@ -304,23 +324,20 @@ eingang_insert_or_update( GtkTreeView* fm_treeview, DBase* dbase,
 
 
 gint
-eingang_set( GtkTreeView* fm_treeview, GtkTreeIter* iter, gpointer data,
+eingang_set_for_rel_path( GtkTreeView* fm_treeview, GtkTreeIter* iter, gpointer data,
         gchar** errmsg )
 {
     gchar* rel_path = NULL;
     gint rc = 0;
-    Eingang** eingang = NULL;
-    DBase* dbase = NULL;
 
     EingangDBase* eingang_dbase = (EingangDBase*) data;
 
     rel_path = fm_get_rel_path( gtk_tree_view_get_model( fm_treeview ), iter );
 
-    rc = eingang_insert_or_update( fm_treeview, eingang_dbase->dbase, rel_path,
-            eingang_dbase->eingang, errmsg );
+    rc = eingang_insert_or_update( fm_treeview, eingang_dbase, rel_path, errmsg );
     g_free( rel_path );
     if ( rc == -1 ) ERROR( "eingang_insert_or_update" )
 
-    return 0;
+    return 1;
 }
 

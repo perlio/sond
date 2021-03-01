@@ -216,7 +216,7 @@ dbase_insert_eingang_rel_path( DBase* dbase, const gint ID, const gchar* rel_pat
     rc = sqlite3_step( dbase->insert_eingang_rel_path );
     if ( rc != SQLITE_DONE ) ERROR_DBASE( "sqlite3_step" )
 
-    return 0;
+    return (gint) sqlite3_last_insert_rowid( dbase->db );
 
 }
 
@@ -261,6 +261,43 @@ dbase_set_eingang_id( DBase* dbase, const gint node_id, const gint eingang_id,
 
     rc = sqlite3_step( dbase->set_eingang_id );
     if ( rc != SQLITE_DONE ) ERROR_DBASE( "sqlite3_step" )
+
+    return 0;
+}
+
+
+gint
+dbase_get_num_of_refs_to_eingang( DBase* dbase, const gint eingang_id, gchar** errmsg )
+{
+    gint rc = 0;
+    gint count = 0;
+
+    sqlite3_reset( dbase->get_num_of_refs_to_eingang );
+
+    rc = sqlite3_bind_int( dbase->get_num_of_refs_to_eingang, 1, eingang_id );
+    if ( rc != SQLITE_OK ) ERROR_DBASE( "sqlite3_bind_int (eingang_id)" )
+
+    rc = sqlite3_step( dbase->get_eingang_for_rel_path );
+    if ( rc != SQLITE_ROW && rc != SQLITE_DONE ) ERROR_DBASE( "sqlite3_step" )
+
+    if ( rc == SQLITE_ROW ) count = sqlite3_column_int( dbase->get_num_of_refs_to_eingang, 0 );
+
+    return count;
+}
+
+
+gint
+dbase_delete_eingang( DBase* dbase, const gint eingang_id, gchar** errmsg )
+{
+    gint rc = 0;
+
+    sqlite3_reset( dbase->delete_eingang );
+
+    rc = sqlite3_bind_int( dbase->delete_eingang, 1, eingang_id );
+    if ( rc != SQLITE_OK ) ERROR_DBASE( "sqlite3_bind_int (eingang_id)" )
+
+    rc = sqlite3_step( dbase->delete_eingang );
+    if ( rc != SQLITE_ROW ) ERROR_DBASE( "sqlite3_step" )
 
     return 0;
 }
@@ -369,7 +406,14 @@ dbase_prepare_stmts( DBase* dbase, gchar** errmsg )
             "WHERE ID=?3; ",
 
             //dbase_set_eingang_id
-            "UPDATE baum_inhalt SET eingang_id=?1 WHERE node_id=?2; ",
+            "UPDATE baum_inhalt SET eingang_rel_path_id=?1 WHERE node_id=?2; ",
+
+            //dbase_get_num_of_refs_to_eingang
+            "SELECT COUNT(*) FROM eingang_rel_path LEFT JOIN eingang "
+            "ON eingang.ID = eingang_rel_path.eingang_id WHERE eingang.ID=?1; ",
+
+            //dbase_delete_eingang
+            "DELETE FROM eingang WHERE ID=?1; ",
 
             NULL };
 
@@ -396,6 +440,8 @@ dbase_prepare_stmts( DBase* dbase, gchar** errmsg )
         else if ( zaehler == 8 ) dbase->insert_eingang_rel_path = stmt;
         else if ( zaehler == 9 ) dbase->update_eingang_rel_path = stmt;
         else if ( zaehler == 10 ) dbase->set_eingang_id = stmt;
+        else if ( zaehler == 11 ) dbase->get_num_of_refs_to_eingang = stmt;
+        else if ( zaehler == 12 ) dbase->delete_eingang = stmt;
 
         zaehler++;
     }
@@ -470,8 +516,8 @@ dbase_create_db( sqlite3* db, gchar** errmsg )
                 "older_sibling_id INTEGER NOT NULL,"
                 "icon_name VARCHAR(50),"
                 "node_text VARCHAR(200), "
-                "eingang_id INTEGER NOT NULL DEFAULT 0, "
-                "FOREIGN KEY (eingang_id) REFERENCES eingang (ID) "
+                "eingang_rel_path_id INTEGER, "
+                "FOREIGN KEY (eingang_rel_path_id) REFERENCES eingang_rel_path (ID) "
                 "ON DELETE CASCADE ON UPDATE CASCADE, "
                 "FOREIGN KEY (parent_id) REFERENCES baum_inhalt (node_id) "
                 "ON DELETE CASCADE ON UPDATE CASCADE, "

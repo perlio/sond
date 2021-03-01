@@ -110,15 +110,16 @@ fm_set_eingang( FM* fm, DBase* dbase, gchar** errmsg )
 {
     gint rc = 0;
     Eingang* eingang = NULL;
+    gint last_inserted_id = 0;
 
-    EingangDBase eingang_dbase = { &eingang, dbase };
+    EingangDBase eingang_dbase = { &eingang, dbase, &last_inserted_id };
 
     //selektierte Dateien holen
     GPtrArray* refs = treeview_selection_get_refs( fm->fm_treeview );
     if ( !refs ) return 0;
 
     rc = treeview_selection_foreach( fm->fm_treeview, refs,
-            eingang_set, &eingang_dbase, errmsg );
+            eingang_set_for_rel_path, &eingang_dbase, errmsg );
     g_ptr_array_unref( refs );
     eingang_free( eingang );
     if ( rc == -1 ) ERROR_PAO( "treeview_selection_foreach" )
@@ -1353,6 +1354,10 @@ fm_create( void )
     gtk_tree_view_append_column( fm->fm_treeview, fs_tree_column );
     gtk_tree_view_append_column( fm->fm_treeview, fs_tree_column_size );
     gtk_tree_view_append_column( fm->fm_treeview, fs_tree_column_modify );
+
+    gtk_tree_view_column_set_title( fs_tree_column, "Datei" );
+    gtk_tree_view_column_set_title( fs_tree_column_size, "Größe" );
+    gtk_tree_view_column_set_title( fs_tree_column_modify, "Änderungsdatum" );
 
     GtkTreeStore* tree_store = gtk_tree_store_new( 1, G_TYPE_OBJECT );
     gtk_tree_view_set_model( fm->fm_treeview, GTK_TREE_MODEL(tree_store) );
