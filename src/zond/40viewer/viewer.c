@@ -66,10 +66,12 @@ viewer_get_displayed_rect_from_dd( DisplayedDocument* dd, gint page_dd )
 
     fz_rect rect = ((DocumentPage*) g_ptr_array_index( dd->document->pages, page_dd + von ))->rect;
 
-    if ( (dd->anbindung != NULL) && (page_dd == 0 || page_dd + von == bis) )
+    if ( dd->anbindung != NULL )
     {
-        if ( dd->anbindung->von.index > rect.y0 ) rect.y0 = dd->anbindung->von.index;
-        if ( dd->anbindung->bis.index < rect.y1 ) rect.y1 = dd->anbindung->bis.index;
+        if ( (page_dd == 0) && (dd->anbindung->von.index > rect.y0) )
+                rect.y0 = dd->anbindung->von.index;
+        if ( (page_dd + von == bis) && (dd->anbindung->bis.index < rect.y1) )
+                rect.y1 = dd->anbindung->bis.index;
     }
 
     return rect;

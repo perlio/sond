@@ -99,7 +99,7 @@ oeffnen_auszug( Projekt* zond, gint node_id, gchar** errmsg )
         {
             DisplayedDocument* dd_new = NULL;
 
-            dd_new = document_new_displayed_document( zond, rel_path, anbindung, errmsg ); //reference "anbindung" wird übernommen
+            dd_new = document_new_displayed_document( zond, rel_path, anbindung, errmsg );
             g_free( rel_path );
             g_free( anbindung );
             if ( !dd_new )
