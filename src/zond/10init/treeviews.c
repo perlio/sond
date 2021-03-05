@@ -112,7 +112,7 @@ cb_cursor_changed( GtkTreeView* treeview, gpointer user_data )
     {
         text_label = g_strdup_printf( "%s, von Seite %i, "
                 "Index %i, bis Seite %i, index %i", rel_path,
-                anbindung->von.seite, anbindung->von.index, anbindung->bis.seite,
+                anbindung->von.seite + 1, anbindung->von.index, anbindung->bis.seite + 1,
                 anbindung->bis.index );
         g_free( anbindung );
     }

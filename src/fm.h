@@ -2,7 +2,6 @@
 #define FM_H_INCLUDED
 
 
-
 typedef struct _GFile GFile;
 typedef struct _GtkWidget GtkWidget;
 typedef struct _GtkTreeView GtkTreeView;

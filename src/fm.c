@@ -886,6 +886,7 @@ fm_render_eingang( GtkTreeViewColumn* column, GtkCellRenderer* renderer,
 {
     gint rc = 0;
     Eingang* eingang = NULL;
+    gint eingang_id = 0;
     gchar* rel_path = NULL;
     gchar* errmsg = NULL;
 
@@ -894,7 +895,7 @@ fm_render_eingang( GtkTreeViewColumn* column, GtkCellRenderer* renderer,
     rel_path = fm_get_rel_path( model, iter );
     if ( !rel_path ) return;
 
-    rc = eingang_for_rel_path( dbase, rel_path, NULL, &eingang, NULL, &errmsg );
+    rc = eingang_for_rel_path( dbase, rel_path, &eingang_id, &eingang, NULL, &errmsg );
     g_free( rel_path );
     if ( rc == -1 )
     {
@@ -903,8 +904,12 @@ fm_render_eingang( GtkTreeViewColumn* column, GtkCellRenderer* renderer,
                 errmsg, NULL );
         g_free( errmsg );
     }
-    else if ( rc == 1 ) g_object_set( G_OBJECT(renderer), "text",
+    else if ( rc == 1 )
+    {
+        if ( eingang_id ) g_object_set( G_OBJECT(renderer), "text",
             eingang->eingangsdatum, NULL );
+        else g_object_set( G_OBJECT(renderer), "text", "----", NULL );
+    }
     else g_object_set( G_OBJECT(renderer), "text", "", NULL );
 
     eingang_free( eingang );

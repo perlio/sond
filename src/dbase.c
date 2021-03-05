@@ -277,7 +277,7 @@ dbase_get_num_of_refs_to_eingang( DBase* dbase, const gint eingang_id, gchar** e
     rc = sqlite3_bind_int( dbase->get_num_of_refs_to_eingang, 1, eingang_id );
     if ( rc != SQLITE_OK ) ERROR_DBASE( "sqlite3_bind_int (eingang_id)" )
 
-    rc = sqlite3_step( dbase->get_eingang_for_rel_path );
+    rc = sqlite3_step( dbase->get_num_of_refs_to_eingang );
     if ( rc != SQLITE_ROW && rc != SQLITE_DONE ) ERROR_DBASE( "sqlite3_step" )
 
     if ( rc == SQLITE_ROW ) count = sqlite3_column_int( dbase->get_num_of_refs_to_eingang, 0 );

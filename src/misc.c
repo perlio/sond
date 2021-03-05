@@ -270,8 +270,9 @@ misc_set_calendar( GtkCalendar* calendar, const gchar* date )
     gint day = g_ascii_strtoll( day_text, NULL, 10 );
     g_free( day_text );
 
-    gtk_calendar_select_month( calendar, month, year );
-    gtk_calendar_select_day( calendar, day );
+    gtk_calendar_select_month( calendar, month - 1, year );
+    gtk_calendar_select_day( calendar, 0 );
+    gtk_calendar_mark_day( calendar, day );
 
     return;
 }
@@ -287,7 +288,7 @@ misc_get_calendar( GtkCalendar* calendar )
 
     gtk_calendar_get_date( calendar, &year, &month, &day );
 
-    string = g_strdup_printf( "%04d-%02d-%02d", year, month, day );
+    string = g_strdup_printf( "%04d-%02d-%02d", year, month + 1, day );
 
     return string;
 }

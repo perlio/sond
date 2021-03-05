@@ -278,6 +278,8 @@ void
 treeview_copy_or_cut_selection( GtkTreeView* tree_view, Clipboard* clipboard,
         gboolean ausschneiden )
 {
+    if ( !clipboard ) return;
+
     GPtrArray* refs = treeview_selection_get_refs( tree_view );
     if ( !refs ) return;
 

@@ -145,11 +145,15 @@ eingang_fenster( GtkWidget* widget, Eingang* eingang, const gboolean sens,
     if ( eingang->ort ) gtk_entry_set_text( GTK_ENTRY(entry_ort), eingang->ort );
     gtk_container_add( GTK_CONTAINER(frame_ort), entry_ort );
 
+    GtkWidget* frame_absender = gtk_frame_new( "Absender" );
     GtkWidget* entry_absender = gtk_entry_new( );
     if ( eingang->absender ) gtk_entry_set_text( GTK_ENTRY(entry_absender), eingang->absender );
+    gtk_container_add( GTK_CONTAINER(frame_absender), entry_absender );
 
+    GtkWidget* frame_absendedatum = gtk_frame_new( "Absendefatum" );
     GtkWidget* calendar_absendedatum = gtk_calendar_new( );
     misc_set_calendar( GTK_CALENDAR(calendar_absendedatum), eingang->absendedatum);
+    gtk_container_add( GTK_CONTAINER(frame_absendedatum), calendar_absendedatum );
 
     GtkWidget* calendar_erfassungsdatum = gtk_calendar_new( );
     misc_set_calendar( GTK_CALENDAR(calendar_erfassungsdatum), eingang->erfassungsdatum );
@@ -165,13 +169,13 @@ eingang_fenster( GtkWidget* widget, Eingang* eingang, const gboolean sens,
         gtk_widget_set_sensitive( calendar_erfassungsdatum, FALSE );
     }
 
-    gtk_grid_attach( GTK_GRID(grid), frame_eingang, 0, 0, 1, 1 );
-    gtk_grid_attach( GTK_GRID(grid), frame_transport, 0, 1, 1, 1 );
-    gtk_grid_attach( GTK_GRID(grid), frame_traeger, 0, 2, 1, 1 );
-    gtk_grid_attach( GTK_GRID(grid), frame_ort, 0, 3, 1, 1 );
-    gtk_grid_attach( GTK_GRID(grid), entry_absender, 0, 4, 1, 1 );
-    gtk_grid_attach( GTK_GRID(grid), calendar_absendedatum, 0, 5, 1, 1 );
-    gtk_grid_attach( GTK_GRID(grid), calendar_erfassungsdatum, 0, 6, 1, 1 );
+    gtk_grid_attach( GTK_GRID(grid), frame_eingang, 0, 0, 1, 3 );
+    gtk_grid_attach( GTK_GRID(grid), frame_transport, 1, 0, 1, 1 );
+    gtk_grid_attach( GTK_GRID(grid), frame_traeger, 1, 1, 1, 1 );
+    gtk_grid_attach( GTK_GRID(grid), frame_ort, 1, 2, 1, 1 );
+    gtk_grid_attach( GTK_GRID(grid), frame_absendedatum, 0, 3, 1, 2 );
+    gtk_grid_attach( GTK_GRID(grid), frame_absender, 1, 3, 1, 1 );
+    gtk_grid_attach( GTK_GRID(grid), calendar_erfassungsdatum, 0, 5, 1, 1 );
 
     gtk_widget_show_all( content_area );
     gtk_widget_grab_focus( calendar_eingang );
@@ -271,36 +275,40 @@ eingang_insert_or_update( GtkTreeView* fm_treeview, EingangDBase* eingang_dbase,
     //hier Abfrage, was bei drohender Kollision gemacht werden soll
     if ( ret == 1 ) //zu rel_path selbst ist Eingang gespeichert
     {
-        gint rc = 0;
-        rc = dbase_get_num_of_refs_to_eingang( dbase, eingang_id, errmsg );
-        if ( rc == -1 ) ERROR_ROLLBACK( dbase, "dbase_get_num_of_refs_to_eingang" )
+        gint refs = 0;
 
-        if ( !(*last_inserted_ID) && rc == 1 )
+        refs = dbase_get_num_of_refs_to_eingang( dbase, eingang_id, errmsg );
+        if ( refs == -1 ) ERROR_ROLLBACK( dbase, "dbase_get_num_of_refs_to_eingang" )
+
+        if ( !(*last_inserted_ID) && refs == 1 )
         {
             gint rc = 0;
 
             rc = dbase_update_eingang( dbase, eingang_id, *eingang_loop, errmsg );
             if ( rc ) ERROR_ROLLBACK( dbase, "dbase_update_eingang" );
+
+            *last_inserted_ID = eingang_id;
         }
         else //müßte > 1 sein...
         {//wenn mehrere:
-            gint retc = 0;
+            gint rc = 0;
+
             if ( !(*last_inserted_ID) )
             {
                 *last_inserted_ID = dbase_insert_eingang( dbase, *eingang_loop, errmsg );
                 if ( *last_inserted_ID == -1 ) ERROR_ROLLBACK( dbase, "dbase_insert_eingang" )
             }
 
-            retc = dbase_update_eingang_rel_path( dbase, eingang_rel_path_id,
+            rc = dbase_update_eingang_rel_path( dbase, eingang_rel_path_id,
                     *last_inserted_ID, rel_path, errmsg );
-            if ( retc ) ERROR_ROLLBACK( dbase, "dbase_update_eingang" )
+            if ( rc ) ERROR_ROLLBACK( dbase, "dbase_update_eingang" )
 
-            if ( rc == 1 )
+            if ( refs == 1 )
             {
-                gint retc = 0;
+                gint rc = 0;
 
-                retc = dbase_delete_eingang( dbase, eingang_id, errmsg );
-                if ( retc == -1 ) ERROR_ROLLBACK( dbase, "dbase_delete_eingang" )
+                rc = dbase_delete_eingang( dbase, eingang_id, errmsg );
+                if ( rc == -1 ) ERROR_ROLLBACK( dbase, "dbase_delete_eingang" )
             }
         }
     }

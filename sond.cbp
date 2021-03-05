@@ -321,23 +321,23 @@
 			<Option target="Sojus (Release)" />
 			<Option target="Sojus (Testing)" />
 		</Unit>
+		<Unit filename="src/sond_treeview.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sond_treeview.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
 		<Unit filename="src/treeview.c">
 			<Option compilerVar="CC" />
 		</Unit>
 		<Unit filename="src/treeview.h" />
-		<Unit filename="src/treeviewfm.c">
-			<Option compilerVar="CC" />
-			<Option target="zond (Release)" />
-			<Option target="zond (Testing)" />
-			<Option target="Sojus (Release)" />
-			<Option target="Sojus (Testing)" />
-		</Unit>
-		<Unit filename="src/treeviewfm.h">
-			<Option target="zond (Release)" />
-			<Option target="zond (Testing)" />
-			<Option target="Sojus (Release)" />
-			<Option target="Sojus (Testing)" />
-		</Unit>
 		<Unit filename="src/zond/10init/app_window.c">
 			<Option compilerVar="CC" />
 			<Option target="zond (Release)" />
