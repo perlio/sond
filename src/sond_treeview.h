@@ -16,18 +16,22 @@ struct _SondTreeviewClass
 
 };
 
-typedef struct _Clipboard {
-    SondTreeview* tree_view;
-    gboolean ausschneiden;
-    GPtrArray* arr_ref;
-} Clipboard;
+typedef struct _Clipboard Clipboard;
 
 SondTreeview* sond_treeview_new( );
 
 void sond_treeview_set_clipboard( SondTreeview*, Clipboard* );
 
-void sond_treeview_set_render_text_cell( SondTreeview*, void (*)
+Clipboard* sond_treeview_get_clipboard( SondTreeview* );
+
+void sond_treeview_set_render_text_cell_func( SondTreeview*, void (*)
         ( SondTreeview*, GtkTreeIter*, gpointer ), gpointer );
+
+GtkTreeViewColumn* sond_treeview_get_column( SondTreeview* );
+
+GtkCellRenderer* sond_treeview_get_cell_renderer_icon( SondTreeview* );
+
+GtkCellRenderer* sond_treeview_get_cell_renderer_text( SondTreeview* );
 
 void sond_treeview_expand_row( SondTreeview*, GtkTreeIter* );
 

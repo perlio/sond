@@ -22,7 +22,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "misc.h"
 #include "eingang.h"
 #include "dbase.h"
-#include "fm.h"
+#include "sond_treeviewfm.h"
 
 
 void
@@ -62,6 +62,8 @@ eingang_for_rel_path( DBase* dbase, const gchar* rel_path, gint* ID,
     gchar* buf = NULL;
     gint zaehler = 1;
 
+    if ( !dbase ) return 0;
+
     buf = g_strdup( rel_path );
 
     do
@@ -75,7 +77,7 @@ eingang_for_rel_path( DBase* dbase, const gchar* rel_path, gint* ID,
         if ( rc == -1 )
         {
             g_free( buf );
-            ERROR( "dbase_get_eingang_for_rel_path" )
+            ERROR_SOND( "dbase_get_eingang_for_rel_path" )
         }
         else if ( rc == 0 ) //*eingang wurde gesetzt
         {
@@ -223,7 +225,7 @@ eingang_fenster( GtkWidget* widget, Eingang* eingang, const gboolean sens,
 
 
 static gint
-eingang_insert_or_update( GtkTreeView* fm_treeview, EingangDBase* eingang_dbase,
+eingang_insert_or_update( SondTreeviewFM* stvfm, EingangDBase* eingang_dbase,
         const gchar* rel_path, gchar** errmsg )
 {
     gint rc = 0;
@@ -240,7 +242,7 @@ eingang_insert_or_update( GtkTreeView* fm_treeview, EingangDBase* eingang_dbase,
     last_inserted_ID = eingang_dbase->last_inserted_ID;
 
     ret = eingang_for_rel_path( dbase, rel_path, &eingang_id, &eingang, &eingang_rel_path_id, errmsg );
-    if ( ret == -1 ) ERROR( "eingang_for_rel_path" )
+    if ( ret == -1 ) ERROR_SOND( "eingang_for_rel_path" )
     else if ( ret > 0 )
     {
         gint rc = 0;
@@ -248,7 +250,7 @@ eingang_insert_or_update( GtkTreeView* fm_treeview, EingangDBase* eingang_dbase,
 
         title = g_strconcat( "Zur Datei ", rel_path, " wurden bereits Eingangsdaten gespeichert", NULL );
 
-        rc = eingang_fenster( GTK_WIDGET(fm_treeview), eingang, FALSE, title, "Überschreiben?" );
+        rc = eingang_fenster( GTK_WIDGET(stvfm), eingang, FALSE, title, "Überschreiben?" );
         g_free( title );
 
         eingang_free( eingang );
@@ -264,7 +266,7 @@ eingang_insert_or_update( GtkTreeView* fm_treeview, EingangDBase* eingang_dbase,
         //Eingang abfragen
         *eingang_loop = eingang_new( );
 
-        rc = eingang_fenster( GTK_WIDGET(fm_treeview), *eingang_loop, TRUE,
+        rc = eingang_fenster( GTK_WIDGET(stvfm), *eingang_loop, TRUE,
                 "Bitte Eingangsdaten eingeben", NULL );
         if ( rc != GTK_RESPONSE_OK ) return 1;
     }
@@ -331,8 +333,8 @@ eingang_insert_or_update( GtkTreeView* fm_treeview, EingangDBase* eingang_dbase,
 }
 
 
-gint
-eingang_set_for_rel_path( GtkTreeView* fm_treeview, GtkTreeIter* iter, gpointer data,
+static gint
+eingang_set_for_rel_path( SondTreeview* stv, GtkTreeIter* iter, gpointer data,
         gchar** errmsg )
 {
     gchar* rel_path = NULL;
@@ -340,12 +342,32 @@ eingang_set_for_rel_path( GtkTreeView* fm_treeview, GtkTreeIter* iter, gpointer 
 
     EingangDBase* eingang_dbase = (EingangDBase*) data;
 
-    rel_path = fm_get_rel_path( gtk_tree_view_get_model( fm_treeview ), iter );
+    rel_path = sond_treeviewfm_get_rel_path( SOND_TREEVIEWFM(stv), iter );
 
-    rc = eingang_insert_or_update( fm_treeview, eingang_dbase, rel_path, errmsg );
+    rc = eingang_insert_or_update( SOND_TREEVIEWFM(stv), eingang_dbase, rel_path, errmsg );
     g_free( rel_path );
-    if ( rc == -1 ) ERROR( "eingang_insert_or_update" )
+    if ( rc == -1 ) ERROR_SOND( "eingang_insert_or_update" )
 
     return 1;
 }
+
+
+gint
+eingang_set( SondTreeviewFM* stvfm, gchar** errmsg )
+{
+    gint rc = 0;
+    Eingang* eingang = NULL;
+    gint last_inserted_id = 0;
+
+    EingangDBase eingang_dbase = { &eingang, sond_treeviewfm_get_dbase( stvfm ),
+            &last_inserted_id };
+
+    rc = sond_treeview_selection_foreach( SOND_TREEVIEW(stvfm),
+            eingang_set_for_rel_path, &eingang_dbase, errmsg );
+    eingang_free( eingang );
+    if ( rc == -1 ) ERROR_SOND( "sond_treeview_selection_foreach" )
+
+    return 0;
+}
+
 

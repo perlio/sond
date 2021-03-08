@@ -192,7 +192,7 @@ init( GtkApplication* app )
     zond = g_malloc0( sizeof( Projekt ) );
 
     //benötigte Arrays erzeugen
-    zond->clipboard = treeview_init_clipboard( );
+    zond->clipboard = clipboard_init( );
 
     zond->arr_pv = g_ptr_array_new( );
     zond->arr_docs = g_ptr_array_new( );

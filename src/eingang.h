@@ -5,6 +5,7 @@ typedef int gint;
 typedef char gchar;
 typedef struct _GDate GDate;
 typedef struct _DBase DBase;
+typedef struct _SondTreeviewFM SondTreeviewFM;
 
 typedef struct _Eingang
 {
@@ -30,6 +31,6 @@ Eingang* eingang_new( void );
 
 gint eingang_for_rel_path( DBase*, const gchar*, gint*, Eingang**, gint*, gchar** );
 
-gint  eingang_set_for_rel_path( GtkTreeView*, GtkTreeIter*, gpointer, gchar** );
+gint eingang_set( SondTreeviewFM*, gchar** );
 
 #endif // EINGANG_H_INCLUDED

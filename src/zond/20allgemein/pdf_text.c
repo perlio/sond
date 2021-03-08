@@ -164,8 +164,8 @@ cb_textsuche_changed( GtkListBox* box, GtkListBoxRow* row, gpointer data )
     }
 
     GtkTreePath* path = baum_abfragen_path( zond->treeview[BAUM_INHALT], node_id );
-    gtk_tree_view_expand_to_path( zond->treeview[BAUM_INHALT], path );
-    gtk_tree_view_set_cursor( zond->treeview[BAUM_INHALT], path, NULL, FALSE );
+    gtk_tree_view_expand_to_path( GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]), path );
+    gtk_tree_view_set_cursor( GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]), path, NULL, FALSE );
     gtk_tree_path_free( path );
 
     return;

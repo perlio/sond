@@ -7,7 +7,6 @@
 #include "../error.h"
 
 #include "../../misc.h"
-#include "../../fm.h"
 #include "../../dbase.h"
 
 #include "../99conv/baum.h"
@@ -245,7 +244,7 @@ knoten_verschieben( Projekt* zond, Baum baum, gint node_id, gint new_parent,
     iter = baum_abfragen_iter( zond->treeview[baum], node_id );
 
     gtk_tree_store_remove( GTK_TREE_STORE(gtk_tree_view_get_model(
-            zond->treeview[baum] ) ), iter );
+            GTK_TREE_VIEW(zond->treeview[baum]) ) ), iter );
     gtk_tree_iter_free( iter );
 
     //jetzt neuen kindknoten aus db erzeugen

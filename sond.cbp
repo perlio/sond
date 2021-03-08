@@ -111,10 +111,6 @@
 			<Option compilerVar="CC" />
 		</Unit>
 		<Unit filename="src/eingang.h" />
-		<Unit filename="src/fm.c">
-			<Option compilerVar="CC" />
-		</Unit>
-		<Unit filename="src/fm.h" />
 		<Unit filename="src/misc.c">
 			<Option compilerVar="CC" />
 		</Unit>
@@ -334,6 +330,10 @@
 			<Option target="Sojus (Release)" />
 			<Option target="Sojus (Testing)" />
 		</Unit>
+		<Unit filename="src/sond_treeviewfm.c">
+			<Option compilerVar="CC" />
+		</Unit>
+		<Unit filename="src/sond_treeviewfm.h" />
 		<Unit filename="src/treeview.c">
 			<Option compilerVar="CC" />
 		</Unit>

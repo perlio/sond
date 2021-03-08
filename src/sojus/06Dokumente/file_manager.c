@@ -219,7 +219,7 @@ file_manager_test( const gchar* root, const GFile* file, gpointer data, gchar** 
 
     rc = dbase_test_path( dbase, rel_path, errmsg );
     g_free( rel_path );
-    if ( rc == -1 ) ERROR( "dbase_test_path" )
+    if ( rc == -1 ) ERROR_SOND( "dbase_test_path" )
     else if ( rc == 1 ) return 1; //Datei existiert
 
     return 0;
@@ -239,12 +239,12 @@ file_manager_before_move( const gchar* root, const GFile* src, const GFile* dest
         gint rc = 0;
 
         rc = file_manager_test( root, src, data, errmsg ); //Datei in Ursprungsprojekt angebunden?
-        if ( rc == -1 ) ERROR( "file_manager_test" )
+        if ( rc == -1 ) ERROR_SOND( "file_manager_test" )
         else if ( rc == 1 ) return 1; //Wenn ja: überspringen
     }
 
     rc = dbase_begin( dbase, errmsg );
-    if ( rc ) ERROR( "dbase_begin" )
+    if ( rc ) ERROR_SOND( "dbase_begin" )
 
     gchar* rel_path_source = fm_get_rel_path_from_file( root, src );
     gchar* rel_path_dest = fm_get_rel_path_from_file( root, dest );
@@ -290,7 +290,7 @@ file_manager_after_move( const gchar* root, gint rc_update, gpointer data, gchar
     if ( rc_update == 1 )
     {
         rc = dbase_rollback( dbase, errmsg );
-        if ( rc ) ERROR( "dbase_rollback" )
+        if ( rc ) ERROR_SOND( "dbase_rollback" )
     }
     else
     {

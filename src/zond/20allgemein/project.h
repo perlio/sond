@@ -43,6 +43,7 @@ typedef struct _GtkMenuItem GtkMenuItem;
 typedef struct _GFile GFile;
 typedef struct _DBase DBase;
 typedef struct _DBase_Full DBaseFull;
+typedef struct _SondTreeviewFM SondTreeviewFM;
 
 typedef void* gpointer;
 typedef int gint;
@@ -58,11 +59,11 @@ typedef struct _DBase_Zond
 } DBaseZond;
 
 
-gint project_test_rel_path( const gchar*, const GFile*, gpointer, gchar** );
+gint project_test_rel_path( SondTreeviewFM*, const GFile*, gpointer, gchar** );
 
-gint project_before_move( const gchar*, const GFile*, const GFile*, gpointer, gchar** );
+gint project_before_move( SondTreeviewFM*, const GFile*, const GFile*, gpointer, gchar** );
 
-gint project_after_move( const gchar*, const gint, gpointer, gchar** );
+gint project_after_move( SondTreeviewFM*, const gint, gpointer, gchar** );
 
 void projekt_set_widgets_sensitiv( Projekt*, gboolean );
 

@@ -98,7 +98,7 @@ dbase_full_prepare_stmts( DBaseFull* dbase_full, gchar** errmsg )
     sqlite3_stmt* stmt = NULL;
 
     rc = dbase_prepare_stmts( (DBase*) dbase_full, errmsg );
-    if ( rc ) ERROR( "dbase_prepare_stmts" );
+    if ( rc ) ERROR_SOND( "dbase_prepare_stmts" );
 
     gchar* sql[] = {
 
@@ -402,7 +402,7 @@ dbase_full_create( const gchar* path, DBaseFull** dbase_full, gboolean create,
     {
         dbase_destroy( (DBase*) *dbase_full );
         *dbase_full = NULL;
-        if ( rc == -1 ) ERROR( "dbase_full_open" )
+        if ( rc == -1 ) ERROR_SOND( "dbase_full_open" )
         else return 1;
     }
 

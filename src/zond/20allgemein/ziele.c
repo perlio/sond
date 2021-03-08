@@ -34,6 +34,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "project.h"
 
 #include "../../misc.h"
+#include "../../sond_treeview.h"
 
 #include <glib/gstdio.h>
 #include <sqlite3.h>
@@ -181,7 +182,7 @@ ziele_einfuegen_anbindung( Projekt* zond, const gchar* rel_path, gint anchor_id,
     {
         g_free( node_text );
 
-        ERROR( "db_begin" )
+        ERROR_SOND( "db_begin" )
     }
 
     new_node = ziele_einfuegen_db( zond, anchor_id, kind, ziel, node_text, errmsg );
@@ -204,8 +205,8 @@ ziele_einfuegen_anbindung( Projekt* zond, const gchar* rel_path, gint anchor_id,
     rc = dbase_commit( (DBase*) zond->dbase_zond->dbase_work, errmsg );
     if ( rc ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "db_commit" )
 
-    expand_row( zond, BAUM_INHALT, new_iter );
-    baum_setzen_cursor( zond, BAUM_INHALT, new_iter );
+    sond_treeview_expand_row( zond->treeview[BAUM_INHALT], new_iter );
+    sond_treeview_set_cursor( zond->treeview[BAUM_INHALT], new_iter );
 
     gtk_tree_iter_free( new_iter );
 

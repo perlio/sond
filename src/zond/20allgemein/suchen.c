@@ -21,6 +21,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "../../misc.h"
 #include "../../dbase.h"
+#include "../../sond_treeview.h"
 
 #include "../global_types.h"
 #include "../enums.h"
@@ -154,11 +155,11 @@ suchen_kopieren_listenpunkt( Projekt* zond, GList* list, gint anchor_id,
     node_id = GPOINTER_TO_INT(g_object_get_data( G_OBJECT(list->data), "node-id" ));
 
     rc = dbase_begin( (DBase*) zond->dbase_zond->dbase_work, errmsg );
-    if ( rc ) ERROR( "dbase_begin" )
+    if ( rc ) ERROR_SOND( "dbase_begin" )
 
     new_node_id = db_kopieren_nach_auswertung( zond, baum, node_id,
             anchor_id, child, errmsg );
-    if ( new_node_id == -1 ) ERROR( "db_kopieren_nach_auswertung" )
+    if ( new_node_id == -1 ) ERROR_SOND( "db_kopieren_nach_auswertung" )
 
     rc = dbase_commit( (DBase*) zond->dbase_zond->dbase_work, errmsg );
     if ( rc ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "dbase_commit" )
@@ -169,10 +170,10 @@ suchen_kopieren_listenpunkt( Projekt* zond, GList* list, gint anchor_id,
     GtkTreeIter* new_iter = db_baum_knoten( zond, BAUM_AUSWERTUNG,
             new_node_id, iter, child, errmsg );
     if ( iter ) gtk_tree_iter_free( iter );
-    if ( !new_iter ) ERROR( "db_baum_knoten" )
+    if ( !new_iter ) ERROR_SOND( "db_baum_knoten" )
 
-    expand_row( zond, BAUM_AUSWERTUNG, new_iter );
-    baum_setzen_cursor( zond, BAUM_AUSWERTUNG, new_iter );
+    sond_treeview_expand_row( zond->treeview[BAUM_AUSWERTUNG], new_iter );
+    sond_treeview_set_cursor( zond->treeview[BAUM_AUSWERTUNG], new_iter );
 
     gtk_tree_iter_free( new_iter );
 
@@ -245,12 +246,12 @@ cb_lb_row_activated( GtkWidget* listbox, GtkWidget* row, gpointer user_data )
     gtk_tree_selection_unselect_all( zond->selection[BAUM_AUSWERTUNG] );
 
     GtkTreePath* path = baum_abfragen_path( zond->treeview[baum], node_id );
-    gtk_tree_view_expand_to_path( zond->treeview[baum], path );
+    gtk_tree_view_expand_to_path( GTK_TREE_VIEW(zond->treeview[baum]), path );
 
     //kurz Signal verbinden, damit label und textview angezeigt werden
     gulong signal = g_signal_connect( zond->treeview[baum], "cursor-changed",
             G_CALLBACK(cb_cursor_changed), zond );
-    gtk_tree_view_set_cursor( zond->treeview[baum], path, NULL, FALSE );
+    gtk_tree_view_set_cursor( GTK_TREE_VIEW(zond->treeview[baum]), path, NULL, FALSE );
     g_signal_handler_disconnect( zond->treeview[baum], signal );
 
     gtk_tree_path_free( path );

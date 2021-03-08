@@ -623,7 +623,7 @@ dbase_open( const gchar* path, DBase* dbase, gboolean create, gboolean overwrite
         if ( rc )
         {
             sqlite3_close( db );
-            ERROR( "dbase_create_db" )
+            ERROR_SOND( "dbase_create_db" )
         }
     }
     else if ( create ) //Datei existiert - überschreiben?
@@ -642,7 +642,7 @@ dbase_open( const gchar* path, DBase* dbase, gboolean create, gboolean overwrite
         if ( rc )
         {
             sqlite3_close( db );
-            ERROR( "dbase_create_db" )
+            ERROR_SOND( "dbase_create_db" )
         }
     }
 
@@ -651,7 +651,7 @@ dbase_open( const gchar* path, DBase* dbase, gboolean create, gboolean overwrite
     if ( rc != SQLITE_OK )
     {
         sqlite3_close( db );
-        ERROR( "sqlite3_exec (PRAGMA)" )
+        ERROR_SOND( "sqlite3_exec (PRAGMA)" )
     }
 
     dbase->db = db;
@@ -680,7 +680,7 @@ dbase_create_with_stmts( const gchar* path, DBase** dbase, gboolean create,
     {
         dbase_destroy( *dbase );
         *dbase = NULL;
-        if ( rc == -1 ) ERROR( "dbase_open" )
+        if ( rc == -1 ) ERROR_SOND( "dbase_open" )
         else return 1;
     }
 
@@ -689,7 +689,7 @@ dbase_create_with_stmts( const gchar* path, DBase** dbase, gboolean create,
     {
         dbase_destroy( *dbase );
         *dbase = NULL;
-        ERROR( "dbase_prepare_stmts" )
+        ERROR_SOND( "dbase_prepare_stmts" )
     }
 
     return 0;

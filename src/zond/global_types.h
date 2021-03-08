@@ -31,6 +31,7 @@ typedef struct _GdkWindow GdkWindow;
 typedef struct _GdkCursor GdkCursor;
 typedef struct _GtkAdjustment GtkAdjustment;
 typedef struct _GList GList;
+typedef struct _SondTreeview SondTreeview;
 
 typedef struct sqlite3_stmt sqlite3_stmt;
 typedef struct sqlite3 sqlite3;
@@ -132,13 +133,10 @@ typedef struct _Projekt
 
     GtkWidget* hpaned;
     //Baum - Modell, Ansicht mit Selection
-    GtkTreeView* treeview[3];
+    SondTreeview* treeview[3];
     GtkTreeSelection* selection[3];
-    GtkCellRenderer* renderer_text[3];
 
     Baum last_baum;
-
-    FM* fm;
 
     gulong cursor_changed_signal;
     gulong text_buffer_changed_signal;

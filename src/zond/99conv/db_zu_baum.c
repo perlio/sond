@@ -8,6 +8,8 @@
 
 #include <gtk/gtk.h>
 
+#include "../../sond_treeview.h"
+
 
 GtkTreeIter*
 db_baum_knoten( Projekt* zond, Baum baum, gint node_id, GtkTreeIter* iter,
@@ -29,11 +31,11 @@ db_baum_knoten( Projekt* zond, Baum baum, gint node_id, GtkTreeIter* iter,
     }
 
     //neuen Knoten einfügen
-    GtkTreeIter* new_iter = baum_einfuegen_knoten( zond->treeview[baum], iter,
+    GtkTreeIter* new_iter = sond_treeview_insert_node( zond->treeview[baum], iter,
             child );
 
     //Daten rein
-    gtk_tree_store_set( GTK_TREE_STORE(gtk_tree_view_get_model( zond->treeview[baum] )),
+    gtk_tree_store_set( GTK_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) )),
             new_iter, 0, icon_name, 1, node_text, 2, node_id, -1);
 
     g_free( icon_name );
@@ -97,7 +99,7 @@ db_baum_neu_laden( Projekt* zond, Baum baum, gchar** errmsg )
     gint first_node_id = 0;
 
     gtk_tree_store_clear( GTK_TREE_STORE(gtk_tree_view_get_model(
-            zond->treeview[baum] )) );
+            GTK_TREE_VIEW(zond->treeview[baum]) )) );
 
     first_node_id = db_get_first_child( zond, baum, 0, errmsg );
     if ( first_node_id < 0 ) ERROR_PAO( "db_get_first_child" )
@@ -112,7 +114,7 @@ db_baum_neu_laden( Projekt* zond, Baum baum, gchar** errmsg )
         //kurz Signal verbinden, damit label und textview angezeigt werden
         gulong signal = g_signal_connect( zond->treeview[baum], "cursor-changed",
                 G_CALLBACK(cb_cursor_changed), zond );
-        baum_setzen_cursor( zond, baum, iter );
+        sond_treeview_set_cursor( zond->treeview[baum], iter );
         g_signal_handler_disconnect( zond->treeview[baum], signal );
 
         gtk_tree_iter_free( iter );
@@ -135,8 +137,10 @@ db_baum_refresh( Projekt* zond, gchar** errmsg )
 
     gtk_tree_selection_unselect_all( zond->selection[BAUM_AUSWERTUNG] );
 
-    g_object_set( zond->renderer_text[BAUM_AUSWERTUNG], "editable", FALSE, NULL);
-    g_object_set(zond->renderer_text[BAUM_INHALT], "editable", TRUE, NULL);
+    g_object_set( sond_treeview_get_cell_renderer_text( zond->treeview[BAUM_AUSWERTUNG] ),
+            "editable", FALSE, NULL);
+    g_object_set( sond_treeview_get_cell_renderer_text( zond->treeview[BAUM_INHALT] ),
+            "editable", TRUE, NULL);
 
     gtk_widget_grab_focus( GTK_WIDGET(zond->treeview[BAUM_INHALT]) );
 

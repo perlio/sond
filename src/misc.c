@@ -1,3 +1,5 @@
+#include "misc.h"
+
 #include <gtk/gtk.h>
 
 #ifdef _WIN32
@@ -253,6 +255,24 @@ get_path_from_base( const gchar* path, gchar** errmsg )
 }
 
 
+gchar*
+get_rel_path_from_file( const gchar* root, const GFile* file )
+{
+    //Überprüfung, ob schon angebunden
+    gchar* rel_path = NULL;
+    gchar* abs_path = g_file_get_path( (GFile*) file );
+
+#ifdef _WIN32
+    abs_path = g_strdelimit( abs_path, "\\", '/' );
+#endif // _WIN32
+
+    rel_path = g_strdup( abs_path + ((root) ? strlen( root ) + 1 : 0) );
+    g_free( abs_path );
+
+    return rel_path; //muß freed werden
+}
+
+
 void
 misc_set_calendar( GtkCalendar* calendar, const gchar* date )
 {
@@ -292,4 +312,28 @@ misc_get_calendar( GtkCalendar* calendar )
 
     return string;
 }
+
+
+
+Clipboard*
+clipboard_init( void )
+{
+    Clipboard* clipboard = g_malloc0( sizeof( Clipboard ) );
+
+    clipboard->arr_ref = g_ptr_array_new_with_free_func( (GDestroyNotify) gtk_tree_row_reference_free );
+
+    return clipboard;
+}
+
+
+void
+clipboard_free( Clipboard* clipboard )
+{
+    g_ptr_array_unref( clipboard->arr_ref );
+    g_free( clipboard );
+
+    return;
+}
+
+
 

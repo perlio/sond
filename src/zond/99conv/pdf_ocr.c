@@ -1334,7 +1334,7 @@ init_tesseract( TessBaseAPI** handle, TessResultRenderer** renderer, gchar** err
     if ( !tessdata_dir )
     {
         TessBaseAPIDelete( *handle );
-        ERROR( "get_path_from_base" )
+        ERROR_SOND( "get_path_from_base" )
     }
 
     rc = TessBaseAPIInit3( *handle, tessdata_dir, "deu" );

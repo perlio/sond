@@ -21,8 +21,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <glib/gstdio.h>
 
 #include "../../misc.h"
-#include "../../fm.h"
 #include "../../dbase.h"
+#include "../../sond_treeviewfm.h"
 
 #include "../global_types.h"
 #include "../error.h"
@@ -63,23 +63,23 @@ project_reset_changed( Projekt* zond )
 
 
 gint
-project_test_rel_path( const gchar* root, const GFile* file, gpointer data, gchar** errmsg )
+project_test_rel_path( SondTreeviewFM* stvfm, const GFile* file, gpointer data, gchar** errmsg )
 {
     gint rc = 0;
     gchar* rel_path = NULL;
 
     Projekt* zond = (Projekt*) data;
 
-    rel_path = fm_get_rel_path_from_file( root, file );
+    rel_path = get_rel_path_from_file( sond_treeviewfm_get_root( stvfm ), file );
 
     rc = dbase_test_path( zond->dbase_zond->dbase_store, rel_path, errmsg );
     if ( rc ) g_free( rel_path );
-    if ( rc == -1 ) ERROR( "dbase_test_path" )
+    if ( rc == -1 ) ERROR_SOND( "dbase_test_path" )
     else if ( rc == 1 ) return 1;
 
     rc = dbase_test_path( (DBase*) zond->dbase_zond->dbase_work, rel_path, errmsg );
     g_free( rel_path );
-    if ( rc == -1 ) ERROR( "dbase_test_path" )
+    if ( rc == -1 ) ERROR_SOND( "dbase_test_path" )
     else if ( rc == 1 ) return 1;
 
     return 0;
@@ -87,22 +87,24 @@ project_test_rel_path( const gchar* root, const GFile* file, gpointer data, gcha
 
 
 gint
-project_before_move( const gchar* root, const GFile* file_source, const GFile* file_dest,
+project_before_move( SondTreeviewFM* stvfm, const GFile* file_source, const GFile* file_dest,
         gpointer data, gchar** errmsg )
 {
     gint rc = 0;
     gboolean changed = FALSE;
 
+    const gchar* root = sond_treeviewfm_get_root( stvfm );
+
     Projekt* zond = (Projekt*) data;
 
     rc = dbase_begin( zond->dbase_zond->dbase_store, errmsg );
-    if ( rc ) ERROR( "dbase_begin (dbase_store" )
+    if ( rc ) ERROR_SOND( "dbase_begin (dbase_store" )
 
     rc = dbase_begin( (DBase*) zond->dbase_zond->dbase_work, errmsg );
     if ( rc ) ERROR_ROLLBACK( zond->dbase_zond->dbase_store, "dbase_begin (dbase_work)" )
 
-    gchar* rel_path_source = fm_get_rel_path_from_file( root, file_source );
-    gchar* rel_path_dest = fm_get_rel_path_from_file( root, file_dest );
+    gchar* rel_path_source = get_rel_path_from_file( root, file_source );
+    gchar* rel_path_dest = get_rel_path_from_file( root, file_dest );
 
     changed = zond->dbase_zond->changed;
 
@@ -131,7 +133,7 @@ project_before_move( const gchar* root, const GFile* file_source, const GFile* f
 
 
 gint
-project_after_move( const gchar* root, const gint rc_edit, gpointer data, gchar** errmsg )
+project_after_move( SondTreeviewFM* stvfm, const gint rc_edit, gpointer data, gchar** errmsg )
 {
     gint rc = 0;
 
@@ -235,7 +237,7 @@ project_create_dbase_zond( Projekt* zond, const gchar* path, gboolean create,
     DBaseFull* dbase_full = NULL;
 
     rc = dbase_create_with_stmts( path, &dbase, create, FALSE, errmsg );
-    if ( rc == -1 ) ERROR( "dbase_create" )
+    if ( rc == -1 ) ERROR_SOND( "dbase_create" )
     else if ( rc == 1 ) return 1;
 
     path_tmp = g_strconcat( path, ".tmp", NULL );
@@ -244,7 +246,7 @@ project_create_dbase_zond( Projekt* zond, const gchar* path, gboolean create,
     {
         dbase_destroy( dbase );
         g_free( path_tmp );
-        if ( rc == -1 ) ERROR( "dbase_full_create" )
+        if ( rc == -1 ) ERROR_SOND( "dbase_full_create" )
         else if ( rc == 1 ) return 1;
     }
 
@@ -253,14 +255,14 @@ project_create_dbase_zond( Projekt* zond, const gchar* path, gboolean create,
     {
         dbase_destroy( dbase );
         dbase_destroy( (DBase*) dbase_full );
-        ERROR( "project_backup" )
+        ERROR_SOND( "project_backup" )
     }
 
     rc = dbase_full_prepare_stmts( dbase_full, errmsg );
     if ( rc )
     {
         dbase_destroy( (DBase*) dbase_full );
-        ERROR( "dbase_full_prepare_stmts" )
+        ERROR_SOND( "dbase_full_prepare_stmts" )
     }
 
     sqlite3_update_hook( dbase_full->dbase.db, (void*) project_set_changed, (gpointer) zond );
@@ -328,7 +330,7 @@ project_speichern( Projekt* zond, gchar** errmsg )
 
     rc = project_backup( zond->dbase_zond->dbase_work->dbase.db,
             zond->dbase_zond->dbase_store->db,errmsg );
-    if ( rc ) ERROR( "project_backup" )
+    if ( rc ) ERROR_SOND( "project_backup" )
 
     project_reset_changed( zond );
 
@@ -372,7 +374,7 @@ projekt_schliessen( Projekt* zond, gchar** errmsg )
         {
             gint rc = 0;
             rc = project_speichern( zond, errmsg );
-            if ( rc ) ERROR( "projekt_speichern" )
+            if ( rc ) ERROR_SOND( "projekt_speichern" )
         }
         else if ( rc != GTK_RESPONSE_NO) return 1;
     }
@@ -404,9 +406,9 @@ projekt_schliessen( Projekt* zond, gchar** errmsg )
 
     //treeviews leeren
     gtk_tree_store_clear( GTK_TREE_STORE(gtk_tree_view_get_model(
-            zond->treeview[BAUM_INHALT] )) );
+            GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]) )) );
     gtk_tree_store_clear( GTK_TREE_STORE(gtk_tree_view_get_model(
-            zond->treeview[BAUM_AUSWERTUNG] )) );
+            GTK_TREE_VIEW(zond->treeview[BAUM_AUSWERTUNG]) )) );
 
     //Wieder anschalten
     g_signal_handler_unblock( zond->treeview[BAUM_INHALT],
@@ -420,7 +422,7 @@ projekt_schliessen( Projekt* zond, gchar** errmsg )
     gchar* working_copy = g_strconcat( zond->dbase_zond->project_dir, "/",
             zond->dbase_zond->project_name, ".tmp", NULL );
 
-    fm_remove_column_eingang( zond->fm );
+    sond_treeviewfm_set_dbase( SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), NULL );
     project_clear_dbase_zond( &(zond->dbase_zond) );
 
     //legacy...
@@ -471,29 +473,30 @@ project_oeffnen( Projekt* zond, const gchar* abs_path, gboolean create,
     DBaseZond* dbase_zond = NULL;
 
     rc = project_create_dbase_zond( zond, abs_path, create, &dbase_zond, errmsg );
-    if ( rc == -1 ) ERROR( "project_create_dbase_zond" )
+    if ( rc == -1 ) ERROR_SOND( "project_create_dbase_zond" )
     else if ( rc == 1 ) return 1;
 
     rc = projekt_schliessen( zond, errmsg );
     if ( rc )
     {
         project_clear_dbase_zond( &dbase_zond );
-        if ( rc == -1 ) ERROR( "project_schliessen" )
+        if ( rc == -1 ) ERROR_SOND( "project_schliessen" )
         else return 1;
     }
+
+    sond_treeviewfm_set_dbase( SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
+            (DBase*) dbase_zond->dbase_work );
 
     zond->dbase_zond = dbase_zond;
 
     projekt_aktivieren( zond );
-
-    fm_add_column_eingang( zond->fm, (DBase*) zond->dbase_zond->dbase_work );
 
     //legacy...
     Database* dbase = g_malloc0( sizeof( Database ) );
     dbase->db_store = zond->dbase_zond->dbase_store->db;
     dbase->db = zond->dbase_zond->dbase_work->dbase.db;
     rc = project_db_create_stmts( dbase, errmsg );
-    if ( rc ) ERROR( "project_db_create_stmts" )
+    if ( rc ) ERROR_SOND( "project_db_create_stmts" )
 
     zond->dbase = dbase;
     zond->db = zond->dbase->db;

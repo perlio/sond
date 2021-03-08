@@ -17,7 +17,7 @@ gint selection_entfernen_anbindung( Projekt*, gchar** );
 
 gint selection_foreach_loeschen( GtkTreeView*, GtkTreeIter*, gpointer, gchar** );
 
-gint selection_loeschen( Projekt*, Baum, GPtrArray*, gchar** );
+gint selection_loeschen( Projekt*, Baum, gchar** );
 
 gint selection_change_icon_id( Projekt*, const gchar* );
 

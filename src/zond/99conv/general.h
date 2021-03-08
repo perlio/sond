@@ -37,8 +37,6 @@ gint hat_vorfahre_datei( Projekt*, Baum, gint, gboolean, gchar** );
 
 gint knoten_verschieben( Projekt*, Baum, gint, gint, gint, gchar** );
 
-gchar* get_rel_path_from_file( Projekt*, GFile* );
-
 gint update_db_before_path_change( const GFile*, const GFile*, gpointer, gchar** );
 
 gint update_db_after_path_change( const gint, gpointer, gchar** );

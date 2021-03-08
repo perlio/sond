@@ -73,12 +73,12 @@ export_node( Projekt* zond, GtkTreeModel* model, GtkTreePath* path, gint depth,
 
     g_free( buffer );
 
-    if ( model == gtk_tree_view_get_model( zond->treeview[BAUM_INHALT] ) )
+    if ( model == gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]) ) )
             return 0;
     if ( GTK_IS_TREE_MODEL_FILTER(model) )
     {
         if ( gtk_tree_model_filter_get_model( GTK_TREE_MODEL_FILTER(model) ) ==
-                gtk_tree_view_get_model( zond->treeview[BAUM_INHALT] ) ) return 0;
+                gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]) ) ) return 0;
     }
 
     rc = db_get_text( zond, node_id, &text, errmsg );
@@ -127,7 +127,7 @@ export_selektierte_punkte( Projekt* zond, Baum baum, GFileOutputStream* stream,
         return -1;
     }
 
-    GtkTreeModel* model = gtk_tree_view_get_model( zond->treeview[baum] );
+    GtkTreeModel* model = gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) );
 
     g_object_set_data( G_OBJECT(model), "stream", (gpointer) stream );
     g_object_set_data( G_OBJECT(model), "errmsg", (gpointer) errmsg );
@@ -200,7 +200,7 @@ export_selektierte_zweige( Projekt* zond, Baum baum, GFileOutputStream* stream,
         return -1;
     }
 
-    GtkTreeModel* model = gtk_tree_view_get_model( zond->treeview[baum] );
+    GtkTreeModel* model = gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) );
 
     list = selected;
     do //alle rows aus der Liste
@@ -243,7 +243,7 @@ static gint
 export_alles( Projekt* zond, Baum baum, GFileOutputStream* stream, gchar** errmsg )
 {
     gchar* errmsg_ii = NULL;
-    GtkTreeModel* model = gtk_tree_view_get_model( zond->treeview[baum] );
+    GtkTreeModel* model = gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) );
 
     g_object_set_data( G_OBJECT(model), "stream", (gpointer) stream );
     g_object_set_data( G_OBJECT(model), "errmsg", (gpointer) &errmsg_ii );

@@ -109,13 +109,7 @@ sond_treeview_render_text( GtkTreeViewColumn* column, GtkCellRenderer* renderer,
     sond_treeview_grey_cut_cell( stv, iter );
     sond_treeview_underline_cursor( stv, iter );
 
-    if ( data )
-    {
-        void (* render_text_cell) ( SondTreeview*, GtkTreeIter*, gpointer ) = NULL;
-
-        render_text_cell = data;
-        render_text_cell( stv, iter, stv_priv->render_text_cell_data );
-    }
+    stv_priv->render_text_cell( stv, iter, stv_priv->render_text_cell_data );
 
     return;
 }
@@ -175,7 +169,7 @@ sond_treeview_init( SondTreeview* stv )
     gdkrgba.green = 0.95;
 
     g_object_set( G_OBJECT(stv_private->renderer_text), "background-rgba", &gdkrgba,
-            NULL );
+            "background-set", FALSE, NULL );
 
     //die column
     stv_private->first_column = gtk_tree_view_column_new();
@@ -192,8 +186,9 @@ sond_treeview_init( SondTreeview* stv )
 
     gtk_tree_view_column_set_cell_data_func( stv_private->first_column,
             stv_private->renderer_text, (GtkTreeCellDataFunc)
-            sond_treeview_render_text, (gpointer) stv_private->render_text_cell,
-            NULL );
+            sond_treeview_render_text, NULL, NULL );
+
+    gtk_tree_view_columns_autosize( GTK_TREE_VIEW(stv) );
 
     return;
 }
@@ -217,8 +212,16 @@ sond_treeview_set_clipboard( SondTreeview* stv, Clipboard* clipboard )
 }
 
 
+Clipboard*
+sond_treeview_get_clipboard( SondTreeview* stv )
+{
+    SondTreeviewPrivate* stv_priv = sond_treeview_get_instance_private( stv );
+
+    return stv_priv->clipboard;
+}
+
 void
-sond_treeview_set_render_text_cell( SondTreeview* stv, void (* render_text_cell)
+sond_treeview_set_render_text_cell_func( SondTreeview* stv, void (* render_text_cell)
         ( SondTreeview*, GtkTreeIter*, gpointer ), gpointer func_data )
 {
     SondTreeviewPrivate* stv_priv = sond_treeview_get_instance_private( stv );
@@ -227,6 +230,33 @@ sond_treeview_set_render_text_cell( SondTreeview* stv, void (* render_text_cell)
     stv_priv->render_text_cell_data = func_data;
 
     return;
+}
+
+
+GtkTreeViewColumn*
+sond_treeview_get_column( SondTreeview* stv )
+{
+    SondTreeviewPrivate* stv_priv = sond_treeview_get_instance_private( stv );
+
+        return stv_priv->first_column;
+}
+
+
+GtkCellRenderer*
+sond_treeview_get_cell_renderer_icon( SondTreeview* stv )
+{
+    SondTreeviewPrivate* stv_priv = sond_treeview_get_instance_private( stv );
+
+        return stv_priv->renderer_icon;
+}
+
+
+GtkCellRenderer*
+sond_treeview_get_cell_renderer_text( SondTreeview* stv )
+{
+    SondTreeviewPrivate* stv_priv = sond_treeview_get_instance_private( stv );
+
+    return stv_priv->renderer_text;
 }
 
 
@@ -240,6 +270,8 @@ sond_treeview_expand_row( SondTreeview* stv, GtkTreeIter* iter )
     gtk_tree_view_expand_to_path( GTK_TREE_VIEW(stv), path );
     gtk_tree_view_expand_row( GTK_TREE_VIEW(stv), path, TRUE );
     gtk_tree_path_free( path );
+
+    gtk_tree_view_columns_autosize( GTK_TREE_VIEW(stv) );
 
     return;
 }
@@ -411,7 +443,7 @@ sond_treeview_refs_foreach( SondTreeview* stv, GPtrArray* refs,
         }
 
         rc = foreach( stv, &iter_ref, data, errmsg );
-        if ( rc == -1 ) ERROR( "foreach" )
+        if ( rc == -1 ) ERROR_SOND( "foreach" )
         else if ( rc > 1 ) return rc; //Abbruch gewählt
     }
 
@@ -430,7 +462,7 @@ sond_treeview_clipboard_foreach( SondTreeview* stv, gint (*foreach)
 
     rc = sond_treeview_refs_foreach( stv, stv_priv->clipboard->arr_ref, foreach,
             data, errmsg );
-    if ( rc == -1 ) ERROR( "sond_treeview_refs_foreach" )
+    if ( rc == -1 ) ERROR_SOND( "sond_treeview_refs_foreach" )
     else if ( rc > 1 ) return rc;
 
     return 0;
@@ -450,7 +482,7 @@ sond_treeview_selection_foreach( SondTreeview* stv, gint (*foreach)
 
     rc = sond_treeview_refs_foreach( stv, refs, foreach, data, errmsg );
     g_ptr_array_unref( refs );
-    if ( rc == -1 ) ERROR( "sond_treeview_refs_foreach" )
+    if ( rc == -1 ) ERROR_SOND( "sond_treeview_refs_foreach" )
     else if ( rc > 1 ) return rc;
 
     return 0;
