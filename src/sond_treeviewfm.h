@@ -33,6 +33,8 @@ void sond_treeviewfm_set_dbase( SondTreeviewFM*, DBase* );
 
 DBase* sond_treeviewfm_get_dbase( SondTreeviewFM* );
 
+void sond_treeviewfm_column_eingang_set_visible( SondTreeviewFM*, gboolean );
+
 void sond_treeviewfm_set_funcs( SondTreeviewFM*,
         gint (*) (SondTreeviewFM*, const GFile*, const GFile*, gpointer, gchar**),
         gint (*) (SondTreeviewFM*, const gint, gpointer, gchar**),

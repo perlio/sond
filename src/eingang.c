@@ -42,7 +42,7 @@ eingang_free( Eingang* eingang )
 }
 
 
-Eingang*
+static Eingang*
 eingang_new( void )
 {
     Eingang* eingang = g_malloc0( sizeof( Eingang ) );
@@ -243,6 +243,10 @@ eingang_insert_or_update( SondTreeviewFM* stvfm, EingangDBase* eingang_dbase,
 
     ret = eingang_for_rel_path( dbase, rel_path, &eingang_id, &eingang, &eingang_rel_path_id, errmsg );
     if ( ret == -1 ) ERROR_SOND( "eingang_for_rel_path" )
+    if ( ret == 0 ) //kein Eingang (weder direkt noch über Eltern vermittelt) verzeichnet
+    {
+        //prüfen, ob
+    }
     else if ( ret > 0 )
     {
         gint rc = 0;

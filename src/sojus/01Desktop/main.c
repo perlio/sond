@@ -19,7 +19,6 @@
 
 #include"../06Dokumente/file_manager.h"
 
-#include "../../fm.h"
 #include "../../misc.h"
 #include "../../treeview.h"
 
@@ -36,7 +35,7 @@ cb_desktop_delete_event( GtkWidget* app_window, GdkEvent* event, gpointer data )
     g_object_unref( sojus->socket );
     g_object_unref( sojus->settings );
 
-    treeview_free_clipboard( sojus->clipboard );
+    clipboard_free( sojus->clipboard );
 
     g_ptr_array_unref( sojus->sachgebiete );
     g_ptr_array_unref( sojus->beteiligtenart );
@@ -266,7 +265,7 @@ init_sojus( void )
 
     sojus->settings = settings;
 
-    sojus->clipboard = treeview_init_clipboard( );
+    sojus->clipboard = clipboard_init( );
 
     sojus->arr_open_fm = g_ptr_array_new_with_free_func( (GDestroyNotify) g_free );
 

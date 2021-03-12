@@ -1,7 +1,6 @@
 #include <gtk/gtk.h>
 #include <sqlite3.h>
 
-#include "../../fm.h"
 #include "../../dbase.h"
 #include "../../eingang.h"
 #include "../../treeview.h"
@@ -15,11 +14,17 @@
 #include "file_manager.h"
 
 
+typedef struct _Open_FM
+{
+    GtkWidget* window;
+    gint regnr;
+    gint jahr;
+}OpenFM;
+
+
 static gboolean
 cb_file_manager_delete_event( GtkWidget* window, GdkEvent* event, gpointer data )
 {
-    FM* fm = (FM*) data;
-
     Sojus* sojus = (Sojus*) fm->app_context;
 
     for ( gint i = 0; i < sojus->arr_open_fm->len; i++ )
@@ -344,7 +349,7 @@ file_manager_open_dbase( FM* fm, DBase** dbase,
 
 
 static void
-file_manager_set_headerbar( GtkWidget* fm_window, FM* fm, const gchar* path )
+file_manager_set_headerbar( GtkWidget* fm_window, SondTreeviewFM* stvfm, const gchar* path )
 {
     GtkWidget* headerbar = gtk_header_bar_new( );
     GtkWidget* menu_fm = gtk_menu_new( );
@@ -377,21 +382,21 @@ file_manager_set_headerbar( GtkWidget* fm_window, FM* fm, const gchar* path )
     GtkWidget* eingang = gtk_menu_item_new_with_label( "Eingang" );
 
     g_signal_connect( dir_einfuegen_p, "activate", G_CALLBACK(file_manager_cb_dir_einfuegen_p),
-            fm );
+            stvfm );
     g_signal_connect( dir_einfuegen_up, "activate", G_CALLBACK(file_manager_cb_dir_einfuegen_up),
-            fm );
+            stvfm );
     g_signal_connect( kopieren, "activate", G_CALLBACK(file_manager_cb_kopieren),
-            fm );
+            stvfm );
     g_signal_connect( ausschneiden, "activate", G_CALLBACK(file_manager_cb_ausschneiden),
-            fm );
+            stvfm );
     g_signal_connect( einfuegen_p, "activate", G_CALLBACK(file_manager_cb_einfuegen_p),
-            fm );
+            stvfm );
     g_signal_connect( einfuegen_up, "activate", G_CALLBACK(file_manager_cb_einfuegen_up),
-            fm );
+            stvfm );
     g_signal_connect( loeschen, "activate", G_CALLBACK(file_manager_cb_loeschen),
-            fm );
+            stvfm );
     g_signal_connect( eingang, "activate", G_CALLBACK(file_manager_cb_eingang),
-            fm );
+            stvfm );
 
     gtk_widget_add_accelerator( dir_einfuegen_p, "activate", accel_group,
             GDK_KEY_p, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
@@ -465,7 +470,6 @@ file_manager_get_window( Sojus* sojus )
 void
 file_manager_entry_activate( GtkWidget* entry, gpointer data )
 {
-    gchar* regnr_string = NULL;
     GtkWidget* fm_window = NULL;
     Akte* akte = NULL;
     gchar* dokument_dir = NULL;
@@ -503,24 +507,24 @@ file_manager_entry_activate( GtkWidget* entry, gpointer data )
     path = add_string( path, g_strdup_printf( " %i-%i", sojus->regnr_akt,
             sojus->jahr_akt % 100 ) );
 
-    FM* fm = fm_create( );
-    gtk_container_add( GTK_CONTAINER(swindow), GTK_WIDGET(fm->fm_treeview) );
+    SondTreeviewFM* stvfm = sond_treeviewfm_new( );
 
-    fm->app_context = (gpointer) sojus;
+    gtk_container_add( GTK_CONTAINER(swindow), GTK_WIDGET(stvfm) );
 
     g_signal_connect( fm_window, "delete-event", G_CALLBACK(cb_file_manager_delete_event), fm );
 
-    rc = fm_set_root( fm, path, &errmsg );
-    file_manager_set_headerbar( fm_window, fm, path );
+    rc = sond_treeviewfm_set_root( stvfm, path, &errmsg );
+    file_manager_set_headerbar( fm_window, stvfm, path );
     g_free( path );
     if ( rc )
     {
-        display_message( gtk_widget_get_toplevel( GTK_WIDGET(fm->fm_treeview) ),
-                "Fehler -\n\nBei Aufruf fm_set_root:\n", errmsg, NULL );
+        gboolean ret = FALSE;
+
+        display_message( gtk_widget_get_toplevel( GTK_WIDGET(fm_window) ),
+                "Fehler -\n\nBei Aufruf sond_treeviewfm_set_root:\n", errmsg, NULL );
         g_free( errmsg );
-        g_object_set_data( G_OBJECT(sojus->app_window), regnr_string, NULL );
-        g_free( regnr_string );
-        gtk_widget_destroy( fm_window );
+
+        g_signal_emit_by_name( fm_window, "delete-event", &ret );
 
         return;
     }
@@ -528,24 +532,20 @@ file_manager_entry_activate( GtkWidget* entry, gpointer data )
     rc = file_manager_open_dbase( fm, &dbase, &errmsg );
     if ( rc )
     {
+        gboolean ret = FALSE;
+
         display_message( gtk_widget_get_toplevel( GTK_WIDGET(fm_window) ),
                 "Fehler FileManager -\n\nBei Aufruf file_manager_create_modify:\n",
                 errmsg, NULL );
         g_free( errmsg );
-        g_object_set_data( G_OBJECT(sojus->app_window), regnr_string, NULL );
-        g_free( regnr_string );
-        fm_unset_root( fm );
-        gtk_widget_destroy( fm_window );
+
+        g_signal_emit_by_name( fm_window, "delete-event", &ret );
 
         return;
     }
 
-    fm->modify_file->before_move = file_manager_before_move;
-    fm->modify_file->after_move = file_manager_after_move;
-    fm->modify_file->test = file_manager_test;
-    fm->modify_file->data = (gpointer) dbase;
-
-    fm_add_column_eingang( fm, dbase );
+    sond_treeviewfm_set_funcs( stvfm, file_manager_before_move,
+            file_manager_after_move, file_manager_test, dbase;
 
     gtk_widget_show_all( fm_window );
 

@@ -122,8 +122,6 @@ cb_cursor_changed( SondTreeview* treeview, gpointer user_data )
 
     if ( baum == BAUM_INHALT ) return;
 
-    gtk_widget_set_sensitive( GTK_WIDGET(zond->textview), TRUE );
-
     //TextBuffer laden
     GtkTextBuffer* buffer = gtk_text_view_get_buffer( zond->textview );
 
@@ -179,7 +177,7 @@ cb_focus_out( GtkWidget* treeview, GdkEvent* event, gpointer user_data )
 
 gboolean
 cb_focus_in( GtkWidget* treeview, GdkEvent* event, gpointer user_data )
-{
+{printf("in\n");
     Projekt* zond = (Projekt*) user_data;
 
     Baum baum = baum_get_baum_from_treeview( zond, treeview );
@@ -211,7 +209,7 @@ cb_focus_in( GtkWidget* treeview, GdkEvent* event, gpointer user_data )
 
     if ( baum != BAUM_AUSWERTUNG )
             gtk_widget_set_sensitive( GTK_WIDGET(zond->textview), FALSE );
-    else g_signal_emit_by_name( zond->treeview[baum], "cursor-changed" );
+    else gtk_widget_set_sensitive( GTK_WIDGET(zond->textview), TRUE );
 
     return FALSE;
 }
@@ -223,12 +221,13 @@ treeviews_cb_cell_edited( GtkCellRenderer* cell, gchar* path_string, gchar* new_
 {
     gint rc = 0;
     gchar* errmsg = NULL;
+    Baum baum = KEIN_BAUM;
 
-    Projekt* zond = (Projekt*) user_data;
-    Baum baum = baum_get_baum_from_treeview( zond,
-            g_object_get_data( G_OBJECT(cell), "tree-view" ) );
+    SondTreeview* stv = (SondTreeview*) user_data;
+    Projekt* zond = g_object_get_data( G_OBJECT(stv), "zond" );
 
-    GtkTreeModel* model = gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) );
+    baum = baum_get_baum_from_treeview( zond, GTK_WIDGET(stv) );
+    GtkTreeModel* model = gtk_tree_view_get_model( GTK_TREE_VIEW(stv) );
 
     GtkTreeIter iter;
     gtk_tree_model_get_iter_from_string( model, &iter, path_string );
@@ -239,7 +238,7 @@ treeviews_cb_cell_edited( GtkCellRenderer* cell, gchar* path_string, gchar* new_
     rc = dbase_full_set_node_text( zond->dbase_zond->dbase_work, baum, node_id, new_text, &errmsg );
     if ( rc )
     {
-        meldung( zond->app_window, "Knoten umbenennen nicht möglich\n\n"
+        meldung( gtk_widget_get_toplevel( GTK_WIDGET(stv) ), "Knoten umbenennen nicht möglich\n\n"
                 "Bei Aufruf dbase_full_set_node_text:\n", errmsg, NULL );
         g_free( errmsg );
 
@@ -247,7 +246,7 @@ treeviews_cb_cell_edited( GtkCellRenderer* cell, gchar* path_string, gchar* new_
     }
 
     gtk_tree_store_set( GTK_TREE_STORE(model), &iter, 1, new_text, -1 );
-    gtk_tree_view_columns_autosize( GTK_TREE_VIEW(zond->treeview[baum]) );
+    gtk_tree_view_columns_autosize( GTK_TREE_VIEW(stv) );
 
     return;
 }
@@ -342,6 +341,7 @@ init_treeviews( Projekt* zond )
                 sond_treeview_get_cell_renderer_text( zond->treeview[baum] ),
                 "text", 1, NULL);
 
+                g_object_set_data( G_OBJECT(zond->treeview[baum]), "zond", zond );
         //die Selection
         zond->selection[baum] = gtk_tree_view_get_selection(
                 GTK_TREE_VIEW(zond->treeview[baum]) );
@@ -363,7 +363,7 @@ init_treeviews( Projekt* zond )
     */
         //Text-Spalte wird editiert
         g_signal_connect( sond_treeview_get_cell_renderer_text( zond->treeview[baum] ),
-                "edited", G_CALLBACK(treeviews_cb_cell_edited), (gpointer) zond); //Klick in textzelle = Inhalt editieren
+                "edited", G_CALLBACK(treeviews_cb_cell_edited), (gpointer) zond->treeview[baum] ); //Klick in textzelle = Inhalt editieren
 
         // Doppelklick = angebundene Datei anzeigen
         g_signal_connect( zond->treeview[baum], "row-activated",

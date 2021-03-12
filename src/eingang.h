@@ -27,8 +27,6 @@ typedef struct _Eingang_DBase
 
 void eingang_free( Eingang* );
 
-Eingang* eingang_new( void );
-
 gint eingang_for_rel_path( DBase*, const gchar*, gint*, Eingang**, gint*, gchar** );
 
 gint eingang_set( SondTreeviewFM*, gchar** );

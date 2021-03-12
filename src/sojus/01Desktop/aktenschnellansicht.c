@@ -4,7 +4,7 @@
 #include "../../misc.h"
 #include "../02Akten/akten.h"
 
-#include "../../fm.h"
+#include "../../sond_treeviewfm.h"
 
 #include <gtk/gtk.h>
 

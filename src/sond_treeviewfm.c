@@ -799,7 +799,7 @@ sond_treeviewfm_init( SondTreeviewFM* stvfm )
     gtk_tree_view_column_pack_start( stvfm_priv->column_eingang, renderer_eingang, FALSE );
     gtk_tree_view_column_set_cell_data_func( stvfm_priv->column_eingang, renderer_eingang,
             sond_treeviewfm_render_eingang, stvfm, NULL );
-    gtk_tree_view_column_set_visible( stvfm_priv->column_eingang, FALSE );
+//    gtk_tree_view_column_set_visible( stvfm_priv->column_eingang, FALSE );
 
     gtk_tree_view_append_column( GTK_TREE_VIEW(stvfm), stvfm_priv->column_eingang );
     gtk_tree_view_append_column( GTK_TREE_VIEW(stvfm), fs_tree_column_size );
@@ -889,6 +889,17 @@ sond_treeviewfm_get_dbase( SondTreeviewFM* stvfm )
     SondTreeviewFMPrivate* stvfm_priv = sond_treeviewfm_get_instance_private( stvfm );
 
     return stvfm_priv->dbase;
+}
+
+
+void
+sond_treeviewfm_column_eingang_set_visible( SondTreeviewFM* stvfm, gboolean vis )
+{
+    SondTreeviewFMPrivate* stvfm_priv = sond_treeviewfm_get_instance_private( stvfm );
+
+    gtk_tree_view_column_set_visible( stvfm_priv->column_eingang, vis );
+
+    return;
 }
 
 
