@@ -708,7 +708,7 @@ viewer_suchen_naechstes_vorkommen( PdfViewer* pv )
             if ( quad.ul.y > pdf_punkt.punkt.y )
             {
                 PdfPos pdf_pos = { page_pv, quad.ul.y };
-                viewer_springen_zu_pos_pdf( pv, pdf_pos, -20 );
+                viewer_springen_zu_pos_pdf( pv, pdf_pos, 50 );
 
                 return;
             }

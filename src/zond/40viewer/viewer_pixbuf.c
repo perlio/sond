@@ -24,7 +24,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <mupdf/fitz.h>
 #include <gtk/gtk.h>
 
-#include "viewer_pixbuf.h"
 
 typedef struct
 {
@@ -47,10 +46,10 @@ viewer_pixbuf_finalize( guchar *pixels, gpointer data )
 }
 
 
-ViewerPixbuf*
+GdkPixbuf*
 viewer_pixbuf_new_from_pixmap( fz_context* ctx, fz_pixmap* pixmap )
 {
-    ViewerPixbuf* pixbuf = NULL;
+    GdkPixbuf* pixbuf = NULL;
 
     ViewerPixbufPrivate* viewer_pixbuf_priv = g_malloc0( sizeof( ViewerPixbufPrivate ) );
     viewer_pixbuf_priv->ctx = fz_clone_context( ctx );
