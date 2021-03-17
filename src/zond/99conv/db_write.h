@@ -4,7 +4,6 @@
 #include "../enums.h"
 
 typedef struct _Projekt Projekt;
-typedef struct _Database Database;
 
 typedef int gint;
 typedef char gchar;

@@ -44,7 +44,6 @@ typedef struct _DBase
     sqlite3_stmt* update_eingang;
     sqlite3_stmt* insert_eingang_rel_path;
     sqlite3_stmt* update_eingang_rel_path;
-    sqlite3_stmt* set_eingang_id;
     sqlite3_stmt* get_num_of_refs_to_eingang;
     sqlite3_stmt* delete_eingang;
 } DBase;
@@ -70,8 +69,6 @@ gint dbase_insert_eingang_rel_path( DBase*, const gint, const gchar*, gchar** );
 
 gint dbase_update_eingang_rel_path( DBase*, const gint, const gint, const gchar*,
         gchar** );
-
-gint dbase_set_eingang_id( DBase*, const gint, const gint, gchar** );
 
 gint dbase_get_num_of_refs_to_eingang( DBase*, const gint, gchar** );
 

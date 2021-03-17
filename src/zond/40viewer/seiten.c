@@ -31,6 +31,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "render.h"
 #include "annot.h"
 #include "document.h"
+#include "viewer_page.h"
 
 #include "../../misc.h"
 
@@ -279,7 +280,7 @@ seiten_abfrage_seiten( PdfViewer* pv, const gchar* title, gint* winkel )
 /*
 **  Seiten OCR
 */
-gint
+static gint
 cb_foreach_ocr( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg )
 {
     g_thread_pool_push( pv->thread_pool_page, GINT_TO_POINTER(page_pv + 1), NULL );
@@ -392,8 +393,6 @@ static gint
 seiten_cb_drehen( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg )
 {
     gint winkel = 0;
-    gint rc = 0;
-    GtkTreeIter iter;
 
     winkel = GPOINTER_TO_INT(data);
     if ( winkel == 90 || winkel == -90 ) g_object_set_data( G_OBJECT(pv->layout),
@@ -401,13 +400,7 @@ seiten_cb_drehen( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg )
 
     ViewerPage* viewer_page = g_ptr_array_index( pv->arr_pages, page_pv );
 
-    gtk_image_clear( GTK_IMAGE(viewer_page->image) );
-
-    rc = viewer_get_iter_thumb( pv, page_pv, &iter, errmsg );
-    if ( rc == -1 ) ERROR_PAO( "viewer_get_iter_thumb" )
-
-    gtk_list_store_set( GTK_LIST_STORE(gtk_tree_view_get_model(
-            GTK_TREE_VIEW(pv->tree_thumb) )), &iter, 1, FALSE, -1 );
+    gtk_image_clear( GTK_IMAGE(viewer_page) );
 
     g_thread_pool_push( pv->thread_pool_page, GINT_TO_POINTER(page_pv + 1), NULL );
 
@@ -773,7 +766,7 @@ seiten_cb_einfuegen( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg 
 
     for ( gint u = 0; u < count; u++ )
     {
-        ViewerPage* viewer_page = viewer_new_viewer_page( pv );
+        ViewerPage* viewer_page = viewer_page_new( pv );
         g_ptr_array_insert( pv->arr_pages, page_pv + u, viewer_page );
 
         viewer_insert_thumb( pv, page_pv + u,

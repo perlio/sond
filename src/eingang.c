@@ -243,16 +243,12 @@ eingang_insert_or_update( SondTreeviewFM* stvfm, EingangDBase* eingang_dbase,
 
     ret = eingang_for_rel_path( dbase, rel_path, &eingang_id, &eingang, &eingang_rel_path_id, errmsg );
     if ( ret == -1 ) ERROR_SOND( "eingang_for_rel_path" )
-    if ( ret == 0 ) //kein Eingang (weder direkt noch über Eltern vermittelt) verzeichnet
-    {
-        //prüfen, ob
-    }
-    else if ( ret > 0 )
+    else if ( ret > 0 ) //es gibt - mittelbar oder unmittelbar - Eingangsdaten
     {
         gint rc = 0;
         gchar* title = NULL;
 
-        title = g_strconcat( "Zur Datei ", rel_path, " wurden bereits Eingangsdaten gespeichert", NULL );
+        title = g_strconcat( "Zur Datei ", rel_path, "\nwurden bereits Eingangsdaten gespeichert", NULL );
 
         rc = eingang_fenster( GTK_WIDGET(stvfm), eingang, FALSE, title, "Überschreiben?" );
         g_free( title );
@@ -295,11 +291,11 @@ eingang_insert_or_update( SondTreeviewFM* stvfm, EingangDBase* eingang_dbase,
 
             *last_inserted_ID = eingang_id;
         }
-        else //müßte > 1 sein...
-        {//wenn mehrere:
+        else //*last_inserted_ID oder refs > 1
+        {
             gint rc = 0;
 
-            if ( !(*last_inserted_ID) )
+            if ( !(*last_inserted_ID) ) //&& refs > 1
             {
                 *last_inserted_ID = dbase_insert_eingang( dbase, *eingang_loop, errmsg );
                 if ( *last_inserted_ID == -1 ) ERROR_ROLLBACK( dbase, "dbase_insert_eingang" )
@@ -319,11 +315,12 @@ eingang_insert_or_update( SondTreeviewFM* stvfm, EingangDBase* eingang_dbase,
         }
     }
     else //wenn Eltern oder gar nicht: kann gleich behandelt werden
-            //wenn Vermittlung über Eltern, dann ist Datei noch nicht angebunden
     {//eingang_rel_path_id ist 0, wenn ret > 1
-        if ( !(*last_inserted_ID) ) *last_inserted_ID =
-                dbase_insert_eingang( dbase, *eingang_loop, errmsg );
-        if ( *last_inserted_ID == -1 ) ERROR_ROLLBACK( dbase, "dbase_insert_eingang" )
+        if ( !(*last_inserted_ID) )
+        {
+            *last_inserted_ID = dbase_insert_eingang( dbase, *eingang_loop, errmsg );
+            if ( *last_inserted_ID == -1 ) ERROR_ROLLBACK( dbase, "dbase_insert_eingang" )
+        }
 
         eingang_rel_path_id = dbase_insert_eingang_rel_path( dbase,
                 *last_inserted_ID, rel_path, errmsg );

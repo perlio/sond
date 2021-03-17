@@ -173,7 +173,7 @@ sond_treeview_init( SondTreeview* stv )
 
     //die column
     stv_private->first_column = gtk_tree_view_column_new();
-    gtk_tree_view_column_set_resizable( stv_private->first_column, FALSE);
+    gtk_tree_view_column_set_resizable( stv_private->first_column, TRUE);
     gtk_tree_view_column_set_sizing( stv_private->first_column,
             GTK_TREE_VIEW_COLUMN_FIXED);
 

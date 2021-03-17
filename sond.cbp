@@ -558,6 +558,23 @@
 			<Option target="Viewer (Release)" />
 			<Option target="Viewer (Testing)" />
 		</Unit>
+		<Unit filename="src/zond/40viewer/viewer_page.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Viewer (Release)" />
+			<Option target="Viewer (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/40viewer/viewer_page.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Viewer (Release)" />
+			<Option target="Viewer (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/40viewer/viewer_pixbuf.c">
+			<Option compilerVar="CC" />
+		</Unit>
+		<Unit filename="src/zond/40viewer/viewer_pixbuf.h" />
 		<Unit filename="src/zond/99conv/baum.c">
 			<Option compilerVar="CC" />
 			<Option target="zond (Release)" />
@@ -690,6 +707,19 @@
 			<Option target="zond (Testing)" />
 			<Option target="Viewer (Release)" />
 			<Option target="Viewer (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/pdf/pdf_documentpage.c">
+			<Option compilerVar="CC" />
+		</Unit>
+		<Unit filename="src/zond/pdf/pdf_documentpage.h" />
+		<Unit filename="src/zond/zond_datei.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/zond_datei.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
 		</Unit>
 		<Extensions>
 			<AutoVersioning>

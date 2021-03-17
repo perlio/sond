@@ -5,7 +5,6 @@
 #define ZOOM_MAX 400
 
 #define DOCUMENT_PAGE(u) ((DocumentPage*) g_ptr_array_index( dd->document->pages, u ))
-#define VIEWER_PAGE(u) ((ViewerPage*) g_ptr_array_index( pv->arr_pages, u ))
 
 #define EOP 999999
 
@@ -32,6 +31,7 @@ typedef struct _GdkCursor GdkCursor;
 typedef struct _GtkAdjustment GtkAdjustment;
 typedef struct _GList GList;
 typedef struct _SondTreeview SondTreeview;
+typedef struct _ViewerThumblist ViewerThumblist;
 
 typedef struct sqlite3_stmt sqlite3_stmt;
 typedef struct sqlite3 sqlite3;
@@ -234,12 +234,6 @@ typedef struct _PV_Annot_Page
     PVAnnot* last;
 } PVAnnotPage;
 
-typedef struct _Viewer_Page
-{
-    //fz_pixmap* pixmap;
-    GtkWidget* image;
-} ViewerPage;
-
 typedef struct _Document Document;
 
 typedef struct _Document_Page
@@ -308,6 +302,7 @@ typedef struct _Pdf_Viewer
 
     gdouble zoom;
 
+    GtkWidget* swindow_tree;
     GtkWidget* tree_thumb;
 
     //gewähltes Werkzeug wird hier gespeichert
@@ -331,9 +326,6 @@ typedef struct _Pdf_Viewer
     GThreadPool* thread_pool_page;
 
     fz_quad highlight[1000];
-    gint highlight_index;
-
-    GArray* arr_text_treffer;
 } PdfViewer;
 
 

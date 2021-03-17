@@ -229,10 +229,18 @@ pdf_print_content_stream( fz_context* ctx, pdf_obj* page_ref, gchar** errmsg )
 #include <shlwapi.h>
 #endif // _WIN32
 
+#include "../40viewer/viewer_pixbuf.h"
+#include <mupdf/fitz.h>
+
 
 gint
 test( Projekt* zond, gchar** errmsg )
 {
+
+    return 0;
+}
+/*
+
     gint rc = 0;
     sqlite3* db = NULL;
 
@@ -250,7 +258,7 @@ test( Projekt* zond, gchar** errmsg )
 }
 
 
-/*
+
     //Pfad LibreOffice herausfinden
     gchar soffice_exe[270] = { 0 };
     GError* error = NULL;

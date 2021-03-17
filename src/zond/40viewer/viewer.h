@@ -30,8 +30,6 @@ void viewer_insert_thumb( PdfViewer*, gint, fz_rect );
 
 void viewer_display_document( PdfViewer*, DisplayedDocument*, gint, gint );
 
-ViewerPage* viewer_new_viewer_page( PdfViewer* );
-
 void viewer_close_thread_pools( PdfViewer* );
 
 void viewer_schliessen( PdfViewer* );

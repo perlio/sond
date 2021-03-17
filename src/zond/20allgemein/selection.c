@@ -221,35 +221,6 @@ selection_anbinden_zu_baum( Projekt* zond, GtkTreeIter** iter, gboolean kind,
 }
 
 
-static gint
-selection_set_datei_und_eingang( Projekt* zond, gint node_id_new, const gchar*
-        rel_path, gchar** errmsg )
-{
-    gint rc = 0;
-    gint ID = 0;
-    gint eingang_rel_path_id = 0;
-
-    rc = db_set_datei( zond, node_id_new, rel_path, errmsg );
-    if ( rc ) ERROR_SOND( "db_set_datei" )
-
-    rc = eingang_for_rel_path( (DBase*) zond->dbase_zond->dbase_work, rel_path, &ID,
-            NULL, &eingang_rel_path_id, errmsg );
-    if ( rc == -1 ) ERROR_SOND( "eingang_for_rel_path" )
-
-    if ( !eingang_rel_path_id ) //entweder nix gespeichert oder für parent
-    { //wenn nix, ist ID == 0, hoffe ich
-        eingang_rel_path_id = dbase_insert_eingang_rel_path( (DBase*) zond->dbase_zond->dbase_work, ID, rel_path, errmsg );
-        if ( rc == -1 ) ERROR_SOND( "dbase_insert_eingang_rel_path" )
-    }
-
-    rc = dbase_set_eingang_id( (DBase*) zond->dbase_zond->dbase_work,
-            node_id_new, eingang_rel_path_id, errmsg );
-    if ( rc ) ERROR_SOND( "dbase_set_eingang_id" )
-
-    return 0;
-}
-
-
 static gchar*
 selection_get_icon_name( Projekt* zond, GFile* file )
 {
@@ -285,12 +256,11 @@ selection_get_icon_name( Projekt* zond, GFile* file )
 
 
 static gint
-selection_datei_einfuegen_in_db( Projekt* zond, GFile* file, gint node_id,
+selection_datei_einfuegen_in_db( Projekt* zond, gchar* rel_path, GFile* file, gint node_id,
         gboolean child, gchar** errmsg )
 {
     gint rc = 0;
     gint new_node_id = 0;
-    gchar* rel_path = NULL;
 
     gchar* icon_name = selection_get_icon_name( zond, (GFile*) file );
     gchar* basename = g_file_get_basename( (GFile*) file );
@@ -309,12 +279,8 @@ selection_datei_einfuegen_in_db( Projekt* zond, GFile* file, gint node_id,
         return -1;
     }
 
-    rel_path = get_rel_path_from_file( zond->dbase_zond->project_dir, file );
-
-    rc = selection_set_datei_und_eingang( zond, new_node_id, rel_path, errmsg );
-
-    g_free( rel_path );
-    if ( rc ) ERROR_PAO( "selection_set_datei_und_eingang" )
+    rc = db_set_datei( zond, new_node_id, rel_path, errmsg );
+    if ( rc ) ERROR_SOND( "db_set_datei" )
 
     return new_node_id;
 }
@@ -350,10 +316,10 @@ selection_datei_anbinden( Projekt* zond, InfoWindow* info_window, GFile* file, g
     }
 
     info_window_set_message( info_window, rel_path );
-    g_free( rel_path );
 
-    new_node_id = selection_datei_einfuegen_in_db( zond, file, node_id,
+    new_node_id = selection_datei_einfuegen_in_db( zond, rel_path, file, node_id,
             child, errmsg );
+    g_free( rel_path );
     if ( new_node_id == -1 ) ERROR_PAO( "selection_datei_einfuegen_in_db" )
 
     (*zaehler)++;

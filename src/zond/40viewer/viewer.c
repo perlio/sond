@@ -30,6 +30,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "render.h"
 #include "stand_alone.h"
 #include "seiten.h"
+#include "viewer_page.h"
 
 #include "../../misc.h"
 
@@ -136,13 +137,6 @@ viewer_springen_zu_pos_pdf( PdfViewer* pv, PdfPos pdf_pos, gdouble delta )
 }
 
 
-typedef struct _PV_Text_Treffer
-{
-    gint num;
-    fz_quad quad;
-} PVTextTreffer;
-
-
 void
 viewer_abfragen_sichtbare_seiten( PdfViewer* pv, gint* von, gint* bis )
 {
@@ -207,8 +201,8 @@ viewer_einrichten_layout( PdfViewer* pv )
         h = ((rect.y1 - rect.y0) * pv->zoom / 100);
         w = ((rect.x1 - rect.x0) * pv->zoom / 100);
 
-        gtk_layout_move( GTK_LAYOUT(pv->layout), GTK_WIDGET(((ViewerPage*)
-                (g_ptr_array_index( pv->arr_pages, i )))->image),
+        gtk_layout_move( GTK_LAYOUT(pv->layout), GTK_WIDGET(
+                g_ptr_array_index( pv->arr_pages, i )),
                 (int) ((w_max - w) / 2 + 0.5),
                 (int) (h_sum + 0.5) );
 
@@ -235,94 +229,13 @@ viewer_einrichten_layout( PdfViewer* pv )
 }
 
 
-static gboolean
-cb_viewer_draw_image( GtkWidget* image, cairo_t *cr, gpointer user_data )
-{
-    PdfViewer* pv = (PdfViewer*) user_data;
-
-    if ( image != VIEWER_PAGE(pv->click_pdf_punkt.seite)->image ) return FALSE;
-
-    fz_matrix transform = fz_translate( 0.0, -pv->click_pdf_punkt.delta_y );
-    transform = fz_post_scale( transform, pv->zoom / 100, pv->zoom / 100 );
-
-    //wenn annot angeclickt wurde
-    if ( pv->clicked_annot )
-    {
-        PVQuad* pv_quad = pv->clicked_annot->first;
-
-        do
-        {
-            fz_quad quad = fz_transform_quad( pv_quad->quad, transform );
-            cairo_move_to( cr, quad.ul.x, quad.ul.y );
-            cairo_line_to( cr, quad.ur.x, quad.ur.y );
-            cairo_line_to( cr, quad.lr.x, quad.lr.y );
-            cairo_line_to( cr, quad.ll.x, quad.ll.y );
-            cairo_line_to( cr, quad.ul.x, quad.ul.y );
-            cairo_set_source_rgb(cr, 0, 1, 0 );
-            cairo_stroke( cr );
-
-            pv_quad = pv_quad->next;
-        }
-        while ( pv_quad );
-    }
-    else //ansonsten etwaige highlights zeichnen
-    {
-        gint i = 0;
-        while ( pv->highlight[i].ul.x >= 0 )
-        {
-            fz_rect rect = fz_transform_rect( fz_rect_from_quad( pv->highlight[i] ), transform );
-
-            float x = rect.x0;
-            float y = rect.y0;
-            float width = rect.x1 - x;
-            float heigth = rect.y1 - y;
-
-            cairo_rectangle( cr, x, y, width, heigth );
-            cairo_set_source_rgba (cr, 0, .1, .8, 0.5);
-            cairo_fill(cr);
-
-            i++;
-        }
-    }
-
-    return FALSE;
-}
-
-
 void
 viewer_insert_thumb( PdfViewer* pv, gint page_pv, fz_rect rect )
 {
-    gint width = 0;
-    gint height = 0;
-    GdkPixbuf* pix = NULL;
-
-    //tree mit thumbnails
-    width = (gint) (rect.x1 - rect.x0) *.15;
-    height = (gint) (rect.y1 - rect.y0) *.15;
-    pix = gdk_pixbuf_new( GDK_COLORSPACE_RGB, FALSE, 8, width, height );
-    gdk_pixbuf_fill( pix, 0xffffffff );
-
-    gtk_list_store_insert_with_values(
-            GTK_LIST_STORE(gtk_tree_view_get_model(
-            GTK_TREE_VIEW(pv->tree_thumb) )), NULL, page_pv,
-            0, pix, 1, FALSE, -1 );
-    g_object_unref( pix );
+    gtk_list_store_insert_with_values( GTK_LIST_STORE(gtk_tree_view_get_model(
+            GTK_TREE_VIEW(pv->tree_thumb) )), NULL, page_pv, 0, NULL, -1 );
 
     return;
-}
-
-
-ViewerPage*
-viewer_new_viewer_page( PdfViewer* pv )
-{
-    ViewerPage* viewer_page = g_malloc0( sizeof( ViewerPage ) );
-
-    viewer_page->image = gtk_image_new( );
-    gtk_widget_show( viewer_page->image );
-    g_signal_connect_after( viewer_page->image, "draw", G_CALLBACK(cb_viewer_draw_image), pv );
-    gtk_layout_put( GTK_LAYOUT(pv->layout), GTK_WIDGET(viewer_page->image), 0, 0 );
-
-    return viewer_page;
 }
 
 
@@ -347,7 +260,7 @@ viewer_create_layout( PdfViewer* pv )
         while ( seite_dd  + von <= bis )
         {
             //ViewerPage erstellen und einfügen
-            ViewerPage* viewer_page = viewer_new_viewer_page( pv );
+            ViewerPage* viewer_page = viewer_page_new( pv );
             g_ptr_array_add( pv->arr_pages, viewer_page );
 
             viewer_insert_thumb( pv, -1,
@@ -435,8 +348,6 @@ viewer_schliessen( PdfViewer* pv )
 
     //pv aus Liste der geöffneten pvs entfernen
     g_ptr_array_remove_fast( pv->zond->arr_pv, pv );
-
-    g_array_free( pv->arr_text_treffer, TRUE );
 
     gtk_widget_destroy( pv->vf );
 
@@ -646,62 +557,19 @@ cb_pv_speichern( GtkButton* button, gpointer data )
 static void
 cb_tree_thumb( GtkToggleButton* button, gpointer data )
 {
-    GtkWidget* swindow = (GtkWidget*) data;
+    PdfViewer* pdfv= (PdfViewer*) data;
 
-    if ( gtk_toggle_button_get_active( button ) ) gtk_widget_show( swindow );
+    if ( gtk_toggle_button_get_active( button ) )
+    {
+        gtk_widget_show( pdfv->swindow_tree );
+    }
     else
     {
-        gtk_widget_hide( swindow );
+        gtk_widget_hide( pdfv->swindow_tree );
         GtkTreeSelection* sel = gtk_tree_view_get_selection(
-                GTK_TREE_VIEW(gtk_bin_get_child( GTK_BIN(swindow) )) );
+                GTK_TREE_VIEW(pdfv->tree_thumb) );
         gtk_tree_selection_unselect_all( sel );
     }
-
-    return;
-}
-
-
-static void
-viewer_highlight_treffer( PdfViewer* pv, gint index )
-{
-    PVTextTreffer pv_text_treffer = { 0 };
-
-    if ( index >= pv->arr_text_treffer->len ) return;
-
-    pv_text_treffer = g_array_index( pv->arr_text_treffer, PVTextTreffer, index );
-
-    PdfPos pos_pdf = { 0 };
-    pos_pdf.seite = pv_text_treffer.num;
-    pos_pdf.index = pv_text_treffer.quad.ul.y;
-
-    viewer_springen_zu_pos_pdf( pv, pos_pdf, 50.0 );
-
-    //highlight = 1. sichtbarer Treffer
-    pv->highlight[0] = pv_text_treffer.quad;
-
-    //Sentinel setzen
-    pv->highlight[1].ul.x = -1;
-
-    //Trick, um richtige Seite anzusprechen
-    pv->click_pdf_punkt.seite = pv_text_treffer.num;
-
-    //anzeigen
-    gtk_widget_queue_draw( ((ViewerPage*) g_ptr_array_index( pv->arr_pages,
-            pv_text_treffer.num ))->image );
-
-    return;
-}
-
-
-static void
-cb_viewer_vor_button_clicked( GtkButton* button, gpointer data )
-{
-    PdfViewer* pv = (PdfViewer*) data;
-
-    if ( pv->highlight_index < (pv->arr_text_treffer->len - 1) ) pv->highlight_index++;
-    else pv->highlight_index = 0;
-
-    viewer_highlight_treffer( pv, pv->highlight_index );
 
     return;
 }
@@ -711,12 +579,12 @@ static void
 cb_viewer_zurueck_button_clicked( GtkButton* butxton, gpointer data )
 {
     PdfViewer* pv = (PdfViewer*) data;
-
+/*
     if ( pv->highlight_index > 0 ) pv->highlight_index--;
     else pv->highlight_index = pv->arr_text_treffer->len - 1;
 
     viewer_highlight_treffer( pv, pv->highlight_index );
-
+*/
     return;
 }
 
@@ -726,7 +594,15 @@ cb_viewer_text_search_entry_buffer_changed( gpointer data )
 {
     PdfViewer* pv = (PdfViewer*) data;
 
-    g_array_remove_range( pv->arr_text_treffer, 0, pv->arr_text_treffer->len );
+    for ( gint i = 0; i < pv->arr_pages->len; i++ )
+    {
+        ViewerPage* viewer_page = NULL;
+        GArray* arr_text_found = NULL;
+
+        viewer_page = g_ptr_array_index( pv->arr_pages, i );
+        arr_text_found = viewer_page_get_arr_text_found( viewer_page );
+        g_array_remove_range( arr_text_found, 0, arr_text_found->len );
+    }
 
     return;
 }
@@ -789,8 +665,8 @@ viewer_abfragen_pdf_punkt( PdfViewer* pv, fz_point punkt, PdfPunkt* pdf_punkt )
     gint x = 0;
 
     gtk_container_child_get( GTK_CONTAINER(pv->layout),
-            ((ViewerPage*) g_ptr_array_index( pv->arr_pages,
-            pdf_punkt->seite ))->image, "x", &x, NULL );
+            g_ptr_array_index( pv->arr_pages,
+            pdf_punkt->seite ), "x", &x, NULL );
 
     if ( punkt.x < x ) ret = -1;
     rect = viewer_get_displayed_rect( pv, pdf_punkt->seite );
@@ -802,29 +678,55 @@ viewer_abfragen_pdf_punkt( PdfViewer* pv, fz_point punkt, PdfPunkt* pdf_punkt )
 }
 
 
-static gint
+static void
 viewer_suchen_naechstes_vorkommen( PdfViewer* pv )
 {
     PdfPunkt pdf_punkt = { 0 };
     fz_point punkt = { 0 };
-    punkt.y = gtk_adjustment_get_value( pv->v_adj );
 
+    punkt.y = gtk_adjustment_get_value( pv->v_adj );
     viewer_abfragen_pdf_punkt( pv, punkt, &pdf_punkt );
 
-    PVTextTreffer pv_text_treffer = { 0 };
-
-    gint i = 0;
-    for ( i = 0; i < pv->arr_text_treffer->len; i++ )
+    for ( gint i = 0; i < pv->arr_pages->len; i++ )
     {
-        pv_text_treffer = g_array_index( pv->arr_text_treffer, PVTextTreffer, i );
-        if ( (pv_text_treffer.num == pdf_punkt.seite &&
-                pv_text_treffer.quad.ul.y > pdf_punkt.punkt.y) ||
-                (pv_text_treffer.num > pdf_punkt.seite) ) break;
+        gint page_pv = 0;
+        ViewerPage* viewer_page = NULL;
+        GArray* arr_text_found = NULL;
+
+        page_pv = i + pdf_punkt.seite;
+        if ( page_pv >= pv->arr_pages->len ) page_pv -= pv->arr_pages->len;
+
+        viewer_page = g_ptr_array_index( pv->arr_pages, page_pv );
+        arr_text_found = viewer_page_get_arr_text_found( viewer_page );
+
+        for ( gint u = 0; u < arr_text_found->len; u++ )
+        {
+            fz_quad quad = { 0 };
+
+            quad = g_array_index( arr_text_found, fz_quad, u );
+
+            if ( quad.ul.y > pdf_punkt.punkt.y )
+            {
+                PdfPos pdf_pos = { page_pv, quad.ul.y };
+                viewer_springen_zu_pos_pdf( pv, pdf_pos, -20 );
+
+                return;
+            }
+        }
     }
 
-    pv->highlight_index = i;
+    return;
+}
 
-    return i;
+
+static void
+cb_viewer_vor_button_clicked( GtkButton* button, gpointer data )
+{
+    PdfViewer* pv = (PdfViewer*) data;
+
+    viewer_suchen_naechstes_vorkommen( pv );
+
+    return;
 }
 
 
@@ -834,15 +736,14 @@ viewer_durchsuchen_angezeigtes_doc( PdfViewer* pv, const gchar* search_text,
 {
     gint rc = 0;
     DisplayedDocument* dd = NULL;
-
-    g_array_remove_range( pv->arr_text_treffer,
-            0, pv->arr_text_treffer->len );
+    gboolean found = FALSE;
 
     dd = pv->dd;
     do
     {
         gint von = 0;
         gint bis = 0;
+
         fz_context* ctx = dd->document->ctx;
 
         viewer_get_von_bis( dd, &von, &bis );
@@ -851,6 +752,16 @@ viewer_durchsuchen_angezeigtes_doc( PdfViewer* pv, const gchar* search_text,
             gint anzahl = 0;
             fz_quad quads[100] = { 0 };
             fz_stext_page* stext_page = NULL;
+            gint page_pv = 0;
+            ViewerPage* viewer_page = NULL;
+            GArray* arr_text_found = NULL;
+            fz_rect displayed_rect;
+
+            page_pv = document_get_page_pv( pv, dd, i - von );
+
+            viewer_page = g_ptr_array_index( pv->arr_pages, page_pv );
+            arr_text_found = viewer_page_get_arr_text_found( viewer_page );
+            g_array_remove_range( arr_text_found, 0, arr_text_found->len );
 
             stext_page = DOCUMENT_PAGE(i)->stext_page;
 
@@ -876,26 +787,28 @@ viewer_durchsuchen_angezeigtes_doc( PdfViewer* pv, const gchar* search_text,
             anzahl = fz_search_stext_page( ctx,
                     DOCUMENT_PAGE(i)->stext_page, search_text, quads, 99 );
 
+            displayed_rect = viewer_get_displayed_rect_from_dd( dd, i - von );
+
             for ( gint u = 0; u < anzahl; u++ )
             {
-                PVTextTreffer pv_text_treffer = { 0 };
-
-                fz_rect displayed_rect = viewer_get_displayed_rect_from_dd( dd, i - von );
                 fz_rect text_rect = fz_rect_from_quad( quads[u] );
                 fz_rect cropped_rect = fz_intersect_rect( displayed_rect, text_rect );
 
                 if ( !fz_is_empty_rect( cropped_rect ) )
                 {
+                    fz_quad quad;
+
                     cropped_rect = fz_translate_rect( cropped_rect, -displayed_rect.x0, -displayed_rect.y0 );
 
-                    pv_text_treffer.num = document_get_page_pv( pv, dd, i - von );
-                    pv_text_treffer.quad = fz_quad_from_rect( cropped_rect );
-                    g_array_append_val( pv->arr_text_treffer, pv_text_treffer );
+                    quad = fz_quad_from_rect( cropped_rect );
+                    g_array_append_val( arr_text_found, quad );
+                    found = TRUE;
                 }
             }
         }
-
     } while ( (dd = dd->next) );
+
+    if ( !found ) return 1; //nix gefunden
 
     return 0;
 }
@@ -920,7 +833,7 @@ cb_viewer_text_search_entry_activate( GtkEntry* entry, gpointer data )
     }
 
     rc = viewer_durchsuchen_angezeigtes_doc( pv, text_entry, &errmsg );
-    if ( rc )
+    if ( rc == -1 )
     {
         meldung( pv->vf, "Fehler - Textsuche:\n\nBei Aufruf viewer_durchsuchen_"
                 "angezeigtes_doc", errmsg, NULL );
@@ -928,18 +841,14 @@ cb_viewer_text_search_entry_activate( GtkEntry* entry, gpointer data )
 
         return;
     }
-
-    if ( pv->arr_text_treffer->len == 0 )
+    else if ( rc == 1 )
     {
-        pv->highlight[0].ul.x = -1;
         meldung( pv->vf, "Kein Treffer", NULL );
 
         return;
     }
 
-    gint index = viewer_suchen_naechstes_vorkommen( pv );
-
-    viewer_highlight_treffer( pv, index );
+    viewer_suchen_naechstes_vorkommen( pv );
 
     gtk_widget_grab_focus( pv->button_nachher );
 
@@ -956,8 +865,8 @@ cb_viewer_spinbutton_value_changed( GtkSpinButton* spin_button, gpointer user_da
 
     for ( gint i = 0; i < pv->arr_pages->len; i++ )
     {
-        if ( gtk_image_get_storage_type( GTK_IMAGE(VIEWER_PAGE(i)->image) ) ==
-                GTK_IMAGE_PIXBUF ) gtk_image_clear( GTK_IMAGE(VIEWER_PAGE(i)->image) );
+        if ( gtk_image_get_storage_type( GTK_IMAGE(g_ptr_array_index( pv->arr_pages, i )) ) ==
+                GTK_IMAGE_PIXBUF ) gtk_image_clear( GTK_IMAGE(g_ptr_array_index( pv->arr_pages, i )) );
     }
 
     //Alte Position merken
@@ -1204,7 +1113,6 @@ viewer_get_iter_thumb( PdfViewer* pv, gint page_pv, GtkTreeIter* iter,
     GtkTreeModel* model = NULL;
     GtkTreePath* path = NULL;
     gboolean exists = FALSE;
-    gboolean rendered = FALSE;
 
     path = gtk_tree_path_new_from_indices( page_pv, -1 );
     model = gtk_tree_view_get_model( GTK_TREE_VIEW(pv->tree_thumb) );
@@ -1212,10 +1120,27 @@ viewer_get_iter_thumb( PdfViewer* pv, gint page_pv, GtkTreeIter* iter,
     gtk_tree_path_free( path );
     if ( !exists ) ERROR_PAO( "gtk_tree_model_get_iter:\nSeite existiert nicht" );
 
-    gtk_tree_model_get( model, iter, 1, &rendered, -1 );
-    if ( rendered ) return 1;
-
     return 0;
+}
+
+
+static void
+viewer_thumblist_render_textcell( GtkTreeViewColumn* column, GtkCellRenderer* cell,
+        GtkTreeModel* model, GtkTreeIter* iter, gpointer data )
+{
+    GtkTreePath* path = NULL;
+    gint* indices = NULL;
+    gchar* text = NULL;
+
+    path = gtk_tree_model_get_path( model, iter );
+    indices = gtk_tree_path_get_indices( path );
+
+    text = g_strdup_printf( "%i", indices[0] + 1 );
+    gtk_tree_path_free( path );
+    g_object_set( G_OBJECT(cell), "text", text, NULL );
+    g_free( text );
+
+    return;
 }
 
 
@@ -1236,16 +1161,9 @@ viewer_page_ist_sichtbar( PdfViewer* pv, gint page )
 static gint
 viewer_cb_change_annot( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg )
 {
-    gint rc = 0;
-    GtkTreeIter iter;
-
     ViewerPage* viewer_page = g_ptr_array_index( pv->arr_pages, page_pv );
 
-    gtk_image_clear( GTK_IMAGE(viewer_page->image) );
-    rc = viewer_get_iter_thumb( pv, page_pv, &iter, errmsg );
-    if ( rc == -1 ) ERROR_PAO( "viewer_get_iter_thumb" )
-    gtk_list_store_set( GTK_LIST_STORE(gtk_tree_view_get_model(
-            GTK_TREE_VIEW(pv->tree_thumb) )), &iter, 1, FALSE, -1 );
+    gtk_image_clear( GTK_IMAGE(viewer_page) );
 
     g_thread_pool_push( pv->thread_pool_page, GINT_TO_POINTER( page_pv + 1), NULL );
 
@@ -1436,8 +1354,8 @@ cb_viewer_layout_motion_notify( GtkWidget* layout, GdkEvent* event, gpointer dat
                 pv->highlight[n].ul.x = -1;
                 pv->highlight[n].ll = pdf_punkt.punkt;
 
-                gtk_widget_queue_draw( ((ViewerPage*)
-                        g_ptr_array_index( pv->arr_pages, pdf_punkt.seite ))->image );
+                gtk_widget_queue_draw( GTK_WIDGET(g_ptr_array_index( pv->arr_pages,
+                        pdf_punkt.seite )) );
             }
         }
         else if ( !pv->clicked_annot )
@@ -1648,26 +1566,6 @@ cb_viewer_layout_press_button( GtkWidget* layout, GdkEvent* event, gpointer
 #endif
 
     return FALSE;
-}
-
-
-static void
-cell_data_func_page( GtkTreeViewColumn* column, GtkCellRenderer* cell,
-        GtkTreeModel* model, GtkTreeIter* iter, gpointer data )
-{
-    GtkTreePath* path = NULL;
-    gint* indices = NULL;
-    gchar* text = NULL;
-
-    path = gtk_tree_model_get_path( model, iter );
-    indices = gtk_tree_path_get_indices( path );
-
-    text = g_strdup_printf( "%i", indices[0] + 1 );
-    gtk_tree_path_free( path );
-    g_object_set( G_OBJECT(cell), "text", text, NULL );
-    g_free( text );
-
-    return;
 }
 
 
@@ -1896,6 +1794,7 @@ viewer_einrichten_fenster( PdfViewer* pv )
 
 //Scrolled window für thumbnail_tree
     pv->tree_thumb = gtk_tree_view_new( );
+
     gtk_tree_view_set_headers_visible( GTK_TREE_VIEW(pv->tree_thumb), FALSE );
     GtkTreeSelection* sel = gtk_tree_view_get_selection( GTK_TREE_VIEW(pv->tree_thumb) );
     gtk_tree_selection_set_mode( sel, GTK_SELECTION_MULTIPLE );
@@ -1905,29 +1804,28 @@ viewer_einrichten_fenster( PdfViewer* pv )
     gtk_tree_view_column_set_sizing(column, GTK_TREE_VIEW_COLUMN_FIXED);
 
     GtkCellRenderer* renderer_text = gtk_cell_renderer_text_new( );
-    GtkCellRenderer* renderer_pixbuf = gtk_cell_renderer_pixbuf_new();
     gtk_tree_view_column_pack_start( column, renderer_text, FALSE );
     gtk_tree_view_column_set_cell_data_func( column, renderer_text,
-            cell_data_func_page, pv, NULL );
+            viewer_thumblist_render_textcell, NULL, NULL );
+
+    GtkCellRenderer* renderer_pixbuf = gtk_cell_renderer_pixbuf_new();
     gtk_tree_view_column_pack_start( column, renderer_pixbuf, TRUE );
-    gtk_tree_view_column_set_attributes(column, renderer_pixbuf, "pixbuf", 0, NULL);
 
-    gtk_tree_view_append_column(GTK_TREE_VIEW(pv->tree_thumb), column);
+    gtk_tree_view_column_set_attributes( column, renderer_pixbuf, "pixbuf", 0, NULL );
+    gtk_tree_view_append_column( GTK_TREE_VIEW(pv->tree_thumb), column);
 
-    GtkListStore* store_thumbs = gtk_list_store_new( 2, GDK_TYPE_PIXBUF,
-            G_TYPE_BOOLEAN );
-    gtk_tree_view_set_model( GTK_TREE_VIEW(pv->tree_thumb),
-            GTK_TREE_MODEL(store_thumbs) );
+    GtkListStore* store_thumbs = gtk_list_store_new( 1, GDK_TYPE_PIXBUF );
+    gtk_tree_view_set_model( GTK_TREE_VIEW(pv->tree_thumb), GTK_TREE_MODEL(store_thumbs) );
     g_object_unref( store_thumbs );
 
-    GtkWidget* swindow_tree = gtk_scrolled_window_new( NULL, NULL );
-    gtk_container_add( GTK_CONTAINER(swindow_tree), pv->tree_thumb );
+    pv->swindow_tree = gtk_scrolled_window_new( NULL, NULL );
+    gtk_container_add( GTK_CONTAINER(pv->swindow_tree), pv->tree_thumb );
     GtkAdjustment* vadj_thumb =
-            gtk_scrolled_window_get_vadjustment( GTK_SCROLLED_WINDOW(swindow_tree) );
+            gtk_scrolled_window_get_vadjustment( GTK_SCROLLED_WINDOW(pv->swindow_tree) );
 
     GtkWidget* paned = gtk_paned_new( GTK_ORIENTATION_HORIZONTAL );
     gtk_paned_pack1( GTK_PANED(paned), swindow, TRUE, TRUE );
-    gtk_paned_pack2( GTK_PANED(paned), swindow_tree, FALSE, FALSE );
+    gtk_paned_pack2( GTK_PANED(paned), pv->swindow_tree, FALSE, FALSE );
     gtk_paned_set_position( GTK_PANED(paned), 760 );
 
 //hbox erstellen
@@ -1939,7 +1837,7 @@ viewer_einrichten_fenster( PdfViewer* pv )
     gtk_container_add( GTK_CONTAINER(pv->vf), hbox );
 
     gtk_widget_show_all( pv->vf );
-    gtk_widget_hide( swindow_tree );
+    gtk_widget_hide( pv->swindow_tree );
 
     pv->gdk_window = gtk_widget_get_window( pv->vf );
     GdkDisplay* display = gdk_window_get_display( pv->gdk_window );
@@ -1995,7 +1893,7 @@ viewer_einrichten_fenster( PdfViewer* pv )
     g_signal_connect( pv->button_speichern, "clicked", G_CALLBACK(cb_pv_speichern),
             pv );
     g_signal_connect( button_thumb, "toggled", G_CALLBACK(cb_tree_thumb),
-            swindow_tree );
+            pv );
     g_signal_connect( button_zeiger, "button-press-event",
             G_CALLBACK(cb_viewer_auswahlwerkzeug), (gpointer) pv );
     g_signal_connect( button_highlight, "button-press-event",
@@ -2020,7 +1918,8 @@ viewer_einrichten_fenster( PdfViewer* pv )
     //thumb-tree
     g_signal_connect( pv->tree_thumb, "row-activated",
             G_CALLBACK(cb_thumb_activated), pv );
-    g_signal_connect( sel, "changed", G_CALLBACK(cb_thumb_sel_changed), pv );
+    g_signal_connect( gtk_tree_view_get_selection( GTK_TREE_VIEW(pv->tree_thumb) ),
+            "changed", G_CALLBACK(cb_thumb_sel_changed), pv );
 
     //Jetzt die Signale des layout verbinden
     g_signal_connect( pv->layout, "button-press-event",
@@ -2045,17 +1944,6 @@ viewer_einrichten_fenster( PdfViewer* pv )
 }
 
 
-static void
-viewer_free_viewer_page( ViewerPage* viewer_page )
-{
-    gtk_widget_destroy( viewer_page->image );
-
-    g_free( viewer_page );
-
-    return;
-}
-
-
 PdfViewer*
 viewer_start_pv( Projekt* zond )
 {
@@ -2066,10 +1954,7 @@ viewer_start_pv( Projekt* zond )
 
     g_ptr_array_add( zond->arr_pv, pv );
 
-    pv->arr_pages = g_ptr_array_new_with_free_func( (GDestroyNotify) viewer_free_viewer_page );
-
-    /*  Array für Text-Treffer  */
-    pv->arr_text_treffer = g_array_new( FALSE, FALSE, sizeof( PVTextTreffer ) );
+    pv->arr_pages = g_ptr_array_new_with_free_func( (GDestroyNotify) gtk_widget_destroy );
 
     //highlight Sentinel an den Anfang setzen
     pv->highlight[0].ul.x = -1;

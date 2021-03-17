@@ -26,6 +26,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "annot.h"
 #include "viewer.h"
 #include "document.h"
+#include "viewer_pixbuf.h"
+#include "viewer_page.h"
 
 #include <mupdf/fitz.h>
 #include <gtk/gtk.h>
@@ -60,19 +62,6 @@ render_display_list_to_stext_page( fz_context* ctx, DocumentPage* document_page,
 }
 
 
-//wrapper, erforderlich, weil ich bei PixBuf der Destroy-Funktion nur einen Zeiger mitgeben kann
-static void
-drop_pixmap( guchar* pixels, gpointer user_data )
-{
-    void** pixmap_destroy = (void**) user_data;
-    fz_drop_pixmap( pixmap_destroy[0], pixmap_destroy[1] );
-    fz_drop_context( pixmap_destroy[0] );
-    g_free( pixmap_destroy );
-
-    return;
-}
-
-
 static gint
 render_thumbnail( PdfViewer* pv, fz_context* ctx, gint num,
         DocumentPage* document_page, gchar** errmsg )
@@ -80,55 +69,53 @@ render_thumbnail( PdfViewer* pv, fz_context* ctx, gint num,
     gint rc = 0;
     GtkTreeIter iter;
     fz_pixmap* pixmap = NULL;
-    GdkPixbuf* pixbuf = NULL;
+    ViewerPixbuf* pixbuf = NULL;
 
     rc = viewer_get_iter_thumb( pv, num, &iter, errmsg );
     if ( rc == -1 )  ERROR_PAO( "viewer_get_iter_thumb" );
 
-    if ( rc == 0 )
+    gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(pv->tree_thumb) ),
+            &iter, 0, &pixbuf, -1 );
+
+    if ( pixbuf )
     {
-        fz_matrix transform = fz_scale( 0.15, 0.15 );
-
-        fz_rect rect = fz_transform_rect( viewer_get_displayed_rect( pv, num ), transform );
-        fz_irect irect = fz_round_rect( rect );
-
-    //per draw-device to pixmap
-        fz_try( ctx ) pixmap = fz_new_pixmap_with_bbox( ctx,
-                fz_device_rgb( ctx ), irect, NULL, 0 );
-        fz_catch( ctx ) ERROR_MUPDF( "fz_new_pixmap_with_bbox" )
-
-        fz_try( ctx) fz_clear_pixmap_with_value( ctx, pixmap, 255 );
-        fz_catch( ctx ) ERROR_MUPDF( "fz_clear_pixmap" )
-
-        fz_device* draw_device = NULL;
-        fz_try( ctx ) draw_device = fz_new_draw_device( ctx, fz_identity, pixmap );
-        fz_catch( ctx ) ERROR_MUPDF( "fz_new_draw_device" )
-
-        fz_try( ctx ) fz_run_display_list( ctx, document_page->display_list,
-                draw_device, transform, rect, NULL );
-        fz_always( ctx )
-        {
-            fz_close_device( ctx, draw_device );
-            fz_drop_device( ctx, draw_device );
-        }
-        fz_catch( ctx )
-        {
-            fz_drop_pixmap( ctx, pixmap );
-            ERROR_MUPDF( "fz_run_display_list" )
-        }
-
-        void** pixbuf_destroy = g_malloc0( sizeof( fz_context* ) + sizeof( fz_pixmap* ) );
-        pixbuf_destroy[0] = fz_clone_context( document_page->document->ctx );
-        pixbuf_destroy[1] = pixmap;
-
-        pixbuf = gdk_pixbuf_new_from_data( pixmap->samples,
-                GDK_COLORSPACE_RGB, FALSE, 8, pixmap->w, pixmap->h,
-                pixmap->stride, drop_pixmap, pixbuf_destroy );
-
-        gtk_list_store_set( GTK_LIST_STORE(gtk_tree_view_get_model(
-                GTK_TREE_VIEW(pv->tree_thumb) )), &iter, 0, pixbuf, 1, TRUE, -1 );
         g_object_unref( pixbuf );
+        return 1;
     }
+
+    fz_matrix transform = fz_scale( 0.15, 0.15 );
+
+    fz_rect rect = fz_transform_rect( viewer_get_displayed_rect( pv, num ), transform );
+    fz_irect irect = fz_round_rect( rect );
+
+//per draw-device to pixmap
+    fz_try( ctx ) pixmap = fz_new_pixmap_with_bbox( ctx,
+            fz_device_rgb( ctx ), irect, NULL, 0 );
+    fz_catch( ctx ) ERROR_MUPDF( "fz_new_pixmap_with_bbox" )
+
+    fz_try( ctx) fz_clear_pixmap_with_value( ctx, pixmap, 255 );
+    fz_catch( ctx ) ERROR_MUPDF( "fz_clear_pixmap" )
+
+    fz_device* draw_device = NULL;
+    fz_try( ctx ) draw_device = fz_new_draw_device( ctx, fz_identity, pixmap );
+    fz_catch( ctx ) ERROR_MUPDF( "fz_new_draw_device" )
+
+    fz_try( ctx ) fz_run_display_list( ctx, document_page->display_list,
+            draw_device, transform, rect, NULL );
+    fz_always( ctx )
+    {
+        fz_close_device( ctx, draw_device );
+        fz_drop_device( ctx, draw_device );
+    }
+    fz_catch( ctx )
+    {
+        fz_drop_pixmap( ctx, pixmap );
+        ERROR_MUPDF( "fz_run_display_list" )
+    }
+
+    pixbuf = viewer_pixbuf_new_from_pixmap( document_page->document->ctx, pixmap );
+    gtk_list_store_set( GTK_LIST_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(pv->tree_thumb) )), &iter, 0, pixbuf, -1 );
+    g_object_unref( pixbuf );
 
     return 0;
 }
@@ -139,10 +126,10 @@ render_pixmap( PdfViewer* pv, fz_context* ctx, gint num, DocumentPage* document_
         gchar** errmsg )
 {
     fz_pixmap* pixmap = NULL;
-    GdkPixbuf* pixbuf = NULL;
+    ViewerPixbuf* pixbuf = NULL;
 
     //pixmap schon gerendert?
-    if ( gtk_image_get_storage_type( GTK_IMAGE(VIEWER_PAGE(num)->image) )
+    if ( gtk_image_get_storage_type( GTK_IMAGE(g_ptr_array_index( pv->arr_pages, num )) )
             != GTK_IMAGE_EMPTY ) return 1; //bereits gerendert
 
     fz_matrix transform = fz_scale( pv->zoom / 100, pv->zoom / 100);
@@ -179,15 +166,9 @@ render_pixmap( PdfViewer* pv, fz_context* ctx, gint num, DocumentPage* document_
         ERROR_MUPDF( "fz_run_display_list" )
     }
 
-    void** pixbuf_destroy = g_malloc0( sizeof( fz_context* ) + sizeof( fz_pixmap* ) );
-    pixbuf_destroy[0] = fz_clone_context( ctx );
-    pixbuf_destroy[1] = pixmap;
-
-    pixbuf = gdk_pixbuf_new_from_data( pixmap->samples, GDK_COLORSPACE_RGB,
-            FALSE, 8, pixmap->w, pixmap->h, pixmap->stride, drop_pixmap, pixbuf_destroy );
-
-    gtk_image_set_from_pixbuf( GTK_IMAGE(VIEWER_PAGE(num)->image), pixbuf );
-
+    pixbuf = viewer_pixbuf_new_from_pixmap( document_page->document->ctx, pixmap );
+    gtk_image_set_from_pixbuf( GTK_IMAGE(g_ptr_array_index( pv->arr_pages, num )),
+            pixbuf );
     g_object_unref( pixbuf );
 
     return 0;
@@ -273,7 +254,7 @@ render_page_thread( gpointer data, gpointer user_data )
     if ( rc == -1 ) ERROR_THREAD( "render_pixmap" )
 
     rc = render_thumbnail( pv, ctx, seite, document_page, &errmsg );
-    if ( rc ) ERROR_THREAD( "render_thumbnail" )
+    if ( rc == -1 ) ERROR_THREAD( "render_thumbnail" )
 
     rc = render_display_list_to_stext_page( ctx, document_page, &errmsg );
     if ( rc == -1 ) ERROR_THREAD( "render_diaplay_list_to_stext_page" )

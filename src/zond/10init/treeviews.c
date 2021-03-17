@@ -177,7 +177,7 @@ cb_focus_out( GtkWidget* treeview, GdkEvent* event, gpointer user_data )
 
 gboolean
 cb_focus_in( GtkWidget* treeview, GdkEvent* event, gpointer user_data )
-{printf("in\n");
+{
     Projekt* zond = (Projekt*) user_data;
 
     Baum baum = baum_get_baum_from_treeview( zond, treeview );

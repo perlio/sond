@@ -215,7 +215,7 @@ convert_copy_eingang( Projekt* zond, sqlite3* db_convert, gchar** errmsg )
 
     gchar* sql =
             "INSERT INTO baum_inhalt SELECT node_id, parent_id, older_sibling_id, "
-                    "icon_name, node_text, NULL FROM old.baum_inhalt WHERE node_id != 0; "
+                    "icon_name, node_text FROM old.baum_inhalt WHERE node_id != 0; "
             "INSERT INTO baum_auswertung SELECT * FROM old.baum_auswertung WHERE node_id != 0; "
             "INSERT INTO dateien SELECT * FROM old.dateien; "
             "INSERT Into ziele SELECT * FROM old.ziele; ";

@@ -246,27 +246,6 @@ dbase_update_eingang_rel_path( DBase* dbase, const gint ID, const gint eingang_i
 
 
 gint
-dbase_set_eingang_id( DBase* dbase, const gint node_id, const gint eingang_id,
-        gchar** errmsg )
-{
-    gint rc = 0;
-
-    sqlite3_reset( dbase->set_eingang_id );
-
-    rc = sqlite3_bind_int( dbase->set_eingang_id, 1, eingang_id );
-    if ( rc != SQLITE_OK ) ERROR_DBASE( "sqlite3_bind_int (eingang_id)" )
-
-    rc = sqlite3_bind_int( dbase->set_eingang_id, 2, node_id );
-    if ( rc != SQLITE_OK ) ERROR_DBASE( "sqlite3_bind_text (node_id)" )
-
-    rc = sqlite3_step( dbase->set_eingang_id );
-    if ( rc != SQLITE_DONE ) ERROR_DBASE( "sqlite3_step" )
-
-    return 0;
-}
-
-
-gint
 dbase_get_num_of_refs_to_eingang( DBase* dbase, const gint eingang_id, gchar** errmsg )
 {
     gint rc = 0;
@@ -392,21 +371,22 @@ dbase_prepare_stmts( DBase* dbase, gchar** errmsg )
             "eingang_rel_path "
             "ON eingang.ID=eingang_rel_path.eingang_id WHERE rel_path=?1;",
 
+            //dbase_insert_eingang
             "INSERT INTO eingang (eingangsdatum, transport, traeger, ort, "
             "absender, absendedatum, erfassungsdatum) "
             "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7); ",
 
+            //dbase_update_eingang
             "UPDATE eingang SET eingangsdatum=?1,transport=?2,traeger=?3,ort=?4,"
             "absender=?5,absendedatum=?6,erfassungsdatum=?7 WHERE ID=?8; ",
 
+            //dbase_insert_eingang_rel_path
             "INSERT INTO eingang_rel_path (eingang_id, rel_path) "
             "VALUES (?1, ?2); ",
 
+            //dbase_update_eingang_rel_path
             "UPDATE eingang_rel_path SET eingang_id=?1, rel_path=?2 "
             "WHERE ID=?3; ",
-
-            //dbase_set_eingang_id
-            "UPDATE baum_inhalt SET eingang_rel_path_id=?1 WHERE node_id=?2; ",
 
             //dbase_get_num_of_refs_to_eingang
             "SELECT COUNT(*) FROM eingang_rel_path LEFT JOIN eingang "
@@ -439,9 +419,8 @@ dbase_prepare_stmts( DBase* dbase, gchar** errmsg )
         else if ( zaehler == 7 ) dbase->update_eingang = stmt;
         else if ( zaehler == 8 ) dbase->insert_eingang_rel_path = stmt;
         else if ( zaehler == 9 ) dbase->update_eingang_rel_path = stmt;
-        else if ( zaehler == 10 ) dbase->set_eingang_id = stmt;
-        else if ( zaehler == 11 ) dbase->get_num_of_refs_to_eingang = stmt;
-        else if ( zaehler == 12 ) dbase->delete_eingang = stmt;
+        else if ( zaehler == 10 ) dbase->get_num_of_refs_to_eingang = stmt;
+        else if ( zaehler == 11 ) dbase->delete_eingang = stmt;
 
         zaehler++;
     }
@@ -499,12 +478,10 @@ dbase_create_db( sqlite3* db, gchar** errmsg )
                 "PRIMARY KEY(ID) "
             "); "
 
-            "INSERT INTO eingang (ID) VALUES (0); "
-
             "CREATE TABLE eingang_rel_path ( "
                 "ID INTEGER NOT NULL, "
                 "eingang_id INTEGER NOT NULL, "
-                "rel_path VARCHAR(200) NOT NULL, "
+                "rel_path VARCHAR(200), "
                 "PRIMARY KEY(ID), "
                 "FOREIGN KEY (eingang_id) REFERENCES eingang (ID) "
                 "ON DELETE CASCADE ON UPDATE CASCADE "
@@ -516,9 +493,6 @@ dbase_create_db( sqlite3* db, gchar** errmsg )
                 "older_sibling_id INTEGER NOT NULL,"
                 "icon_name VARCHAR(50),"
                 "node_text VARCHAR(200), "
-                "eingang_rel_path_id INTEGER, "
-                "FOREIGN KEY (eingang_rel_path_id) REFERENCES eingang_rel_path (ID) "
-                "ON DELETE CASCADE ON UPDATE CASCADE, "
                 "FOREIGN KEY (parent_id) REFERENCES baum_inhalt (node_id) "
                 "ON DELETE CASCADE ON UPDATE CASCADE, "
                 "FOREIGN KEY (older_sibling_id) REFERENCES baum_inhalt (node_id) "
@@ -526,7 +500,7 @@ dbase_create_db( sqlite3* db, gchar** errmsg )
             "); "
 
             "INSERT INTO baum_inhalt (node_id, parent_id, older_sibling_id, "
-            "node_text ) VALUES (0, 0, 0, 'zondv1');"
+            "node_text) VALUES (0, 0, 0, 'zondv1');"
 
             //Hilfstabelle "dateien"
             //hier werden angebundene Dateien erfaßt
