@@ -22,6 +22,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "init.h"
 
 #include <gtk/gtk.h>
+#include <glib.h>
+
 
 
 void

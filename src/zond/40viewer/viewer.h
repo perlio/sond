@@ -26,7 +26,7 @@ void viewer_init_thread_pools( PdfViewer* );
 
 void viewer_einrichten_layout( PdfViewer* );
 
-void viewer_insert_thumb( PdfViewer*, gint, fz_rect );
+void viewer_insert_thumb( PdfViewer*, gint );
 
 void viewer_display_document( PdfViewer*, DisplayedDocument*, gint, gint );
 

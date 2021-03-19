@@ -322,6 +322,7 @@ typedef struct _Pdf_Viewer
 
     DisplayedDocument* dd;
     GPtrArray* arr_pages; //array von ViewerPage*
+    GArray* arr_text_found;
 
     GThreadPool* thread_pool_page;
 

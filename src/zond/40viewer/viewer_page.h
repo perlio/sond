@@ -3,10 +3,12 @@
 
 #include <glib-object.h>
 #include <gtk/gtk.h>
+#include <mupdf/fitz.h>
 
 G_BEGIN_DECLS
 
 typedef struct _Pdf_Viewer PdfViewer;
+typedef struct _Document_Page DocumentPage;
 
 
 #define VIEWER_TYPE_PAGE viewer_page_get_type( )
@@ -19,11 +21,11 @@ struct _ViewerPageClass
 };
 
 
-ViewerPage* viewer_page_new( PdfViewer* );
+ViewerPage* viewer_page_new_full( PdfViewer*, DocumentPage*, fz_rect );
 
-GArray* viewer_page_get_arr_text_found( ViewerPage* );
+DocumentPage* viewer_page_get_document_page( ViewerPage* );
 
-void viewer_page_empty_arr_text_found( ViewerPage* );
+fz_rect viewer_page_get_crop( ViewerPage* );
 
 G_END_DECLS
 

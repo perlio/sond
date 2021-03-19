@@ -236,7 +236,8 @@ pdf_print_content_stream( fz_context* ctx, pdf_obj* page_ref, gchar** errmsg )
 gint
 test( Projekt* zond, gchar** errmsg )
 {
-
+    GType rect = g_type_from_name( "Recte" );
+    printf("%p\n", rect);
     return 0;
 }
 /*

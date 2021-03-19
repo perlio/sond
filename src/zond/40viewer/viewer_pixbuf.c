@@ -22,8 +22,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
 #include <mupdf/fitz.h>
-#include <gtk/gtk.h>
-
+#include <gdk-pixbuf/gdk-pixbuf.h>
 
 typedef struct
 {

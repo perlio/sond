@@ -230,7 +230,7 @@ viewer_einrichten_layout( PdfViewer* pv )
 
 
 void
-viewer_insert_thumb( PdfViewer* pv, gint page_pv, fz_rect rect )
+viewer_insert_thumb( PdfViewer* pv, gint page_pv )
 {
     gtk_list_store_insert_with_values( GTK_LIST_STORE(gtk_tree_view_get_model(
             GTK_TREE_VIEW(pv->tree_thumb) )), NULL, page_pv, 0, NULL, -1 );
@@ -246,7 +246,6 @@ viewer_create_layout( PdfViewer* pv )
 
     do
     {
-        gint seite_dd = 0;
         gint von = 0;
         gint bis = 0;
 
@@ -257,16 +256,27 @@ viewer_create_layout( PdfViewer* pv )
         }
         else bis = dd->document->pages->len - 1;
 
-        while ( seite_dd  + von <= bis )
+        while ( von <= bis )
         {
+            DocumentPage* document_page = NULL;
+            fz_rect crop = { 0, };
+
+            document_page = g_ptr_array_index( dd->document->pages, von );
+
+            crop = document_page->rect;
+            if ( dd->anbindung )
+            {
+                crop.y0 = (von == dd->anbindung->von.seite) ? (gfloat) dd->anbindung->von.index : crop.y0;
+                crop.y1 = (von == dd->anbindung->bis.seite) ? (gfloat) dd->anbindung->bis.index : crop.y1;
+            }
+
             //ViewerPage erstellen und einfügen
-            ViewerPage* viewer_page = viewer_page_new( pv );
+            ViewerPage* viewer_page = viewer_page_new_full( pv, document_page, crop );
             g_ptr_array_add( pv->arr_pages, viewer_page );
 
-            viewer_insert_thumb( pv, -1,
-                    viewer_get_displayed_rect_from_dd( dd, seite_dd ) );
+            viewer_insert_thumb( pv, -1 );
 
-            seite_dd++;
+            von++;
         }
 
     } while ( (dd = dd->next) );
@@ -342,6 +352,7 @@ viewer_schliessen( PdfViewer* pv )
     } while ( (dd = dd->next) );
 
     g_ptr_array_unref( pv->arr_pages );
+    g_array_unref( pv->arr_text_found );
     gtk_widget_destroy( pv->tree_thumb );
 
     document_free_displayed_documents( pv->zond, pv->dd );
@@ -575,18 +586,11 @@ cb_tree_thumb( GtkToggleButton* button, gpointer data )
 }
 
 
-static void
-cb_viewer_zurueck_button_clicked( GtkButton* butxton, gpointer data )
+typedef struct
 {
-    PdfViewer* pv = (PdfViewer*) data;
-/*
-    if ( pv->highlight_index > 0 ) pv->highlight_index--;
-    else pv->highlight_index = pv->arr_text_treffer->len - 1;
-
-    viewer_highlight_treffer( pv, pv->highlight_index );
-*/
-    return;
-}
+    gint page_pv;
+    fz_quad quad;
+} TextFound;
 
 
 static void
@@ -594,15 +598,8 @@ cb_viewer_text_search_entry_buffer_changed( gpointer data )
 {
     PdfViewer* pv = (PdfViewer*) data;
 
-    for ( gint i = 0; i < pv->arr_pages->len; i++ )
-    {
-        ViewerPage* viewer_page = NULL;
-        GArray* arr_text_found = NULL;
-
-        viewer_page = g_ptr_array_index( pv->arr_pages, i );
-        arr_text_found = viewer_page_get_arr_text_found( viewer_page );
-        g_array_remove_range( arr_text_found, 0, arr_text_found->len );
-    }
+    pv->highlight[0].ul.x = -1;
+    g_array_remove_range( pv->arr_text_found, 0, pv->arr_text_found->len );
 
     return;
 }
@@ -629,7 +626,7 @@ viewer_abfragen_pdf_punkt( PdfViewer* pv, fz_point punkt, PdfPunkt* pdf_punkt )
 
     for ( i = 0; i < pv->arr_pages->len; i++ )
     {
-        fz_rect rect = viewer_get_displayed_rect( pv, i );
+        fz_rect rect = viewer_page_get_crop( g_ptr_array_index( pv->arr_pages, i ) );
 
         pdf_punkt->delta_y = rect.y0;
 
@@ -669,7 +666,7 @@ viewer_abfragen_pdf_punkt( PdfViewer* pv, fz_point punkt, PdfPunkt* pdf_punkt )
             pdf_punkt->seite ), "x", &x, NULL );
 
     if ( punkt.x < x ) ret = -1;
-    rect = viewer_get_displayed_rect( pv, pdf_punkt->seite );
+    rect = viewer_page_get_crop( g_ptr_array_index( pv->arr_pages, i ) );
     if ( punkt.x > (((rect.x1 - rect.x0) * pv->zoom / 100) + x) ) ret = -1;
 
     pdf_punkt->punkt.x = (punkt.x - x) / pv->zoom * 100;
@@ -679,6 +676,65 @@ viewer_abfragen_pdf_punkt( PdfViewer* pv, fz_point punkt, PdfPunkt* pdf_punkt )
 
 
 static void
+viewer_springen_zu_textfund( PdfViewer* pv, gint i )
+{
+    TextFound text_found;
+    PdfPos pdf_pos;
+
+    if ( i == -1 ) return; //nix nachher gefunden
+
+    text_found = g_array_index( pv->arr_text_found, TextFound, i );
+
+    pv->highlight[0] = text_found.quad;
+    pv->highlight[1].ul.x = -1;
+
+    pdf_pos.seite = text_found.page_pv;
+    pdf_pos.index = text_found.quad.ul.y;
+
+    viewer_springen_zu_pos_pdf( pv, pdf_pos, 40 );
+
+    return;
+}
+
+
+static gint
+viewer_suchen_vorheriges_vorkommen( PdfViewer* pv )
+{
+    PdfPunkt pdf_punkt = { 0 };
+    fz_point punkt = { 0 };
+
+    punkt.y = gtk_adjustment_get_value( pv->v_adj );
+    viewer_abfragen_pdf_punkt( pv, punkt, &pdf_punkt );
+
+    for ( gint i = pv->arr_text_found->len - 1; i >= 0; i-- )
+    {
+        TextFound text_found = g_array_index( pv->arr_text_found, TextFound, i );
+
+        if ( text_found.page_pv > pdf_punkt.seite ) continue;
+        if ( text_found.page_pv == pdf_punkt.seite &&
+                text_found.quad.ul.y > pdf_punkt.punkt.y ) continue;
+
+        return i;
+    }
+
+    return -1;
+}
+
+
+static void
+cb_viewer_zurueck_button_clicked( GtkButton* butxton, gpointer data )
+{
+    PdfViewer* pv = (PdfViewer*) data;
+
+    gint i = viewer_suchen_vorheriges_vorkommen( pv );
+
+    viewer_springen_zu_textfund( pv, i );
+
+    return;
+}
+
+
+static gint
 viewer_suchen_naechstes_vorkommen( PdfViewer* pv )
 {
     PdfPunkt pdf_punkt = { 0 };
@@ -687,35 +743,18 @@ viewer_suchen_naechstes_vorkommen( PdfViewer* pv )
     punkt.y = gtk_adjustment_get_value( pv->v_adj );
     viewer_abfragen_pdf_punkt( pv, punkt, &pdf_punkt );
 
-    for ( gint i = 0; i < pv->arr_pages->len; i++ )
+    for ( gint i = 0; i < pv->arr_text_found->len; i++ )
     {
-        gint page_pv = 0;
-        ViewerPage* viewer_page = NULL;
-        GArray* arr_text_found = NULL;
+        TextFound text_found = g_array_index( pv->arr_text_found, TextFound, i );
 
-        page_pv = i + pdf_punkt.seite;
-        if ( page_pv >= pv->arr_pages->len ) page_pv -= pv->arr_pages->len;
+        if ( text_found.page_pv < pdf_punkt.seite ) continue;
+        if ( text_found.page_pv == pdf_punkt.seite &&
+                text_found.quad.ul.y < pdf_punkt.punkt.y ) continue;
 
-        viewer_page = g_ptr_array_index( pv->arr_pages, page_pv );
-        arr_text_found = viewer_page_get_arr_text_found( viewer_page );
-
-        for ( gint u = 0; u < arr_text_found->len; u++ )
-        {
-            fz_quad quad = { 0 };
-
-            quad = g_array_index( arr_text_found, fz_quad, u );
-
-            if ( quad.ul.y > pdf_punkt.punkt.y )
-            {
-                PdfPos pdf_pos = { page_pv, quad.ul.y };
-                viewer_springen_zu_pos_pdf( pv, pdf_pos, 50 );
-
-                return;
-            }
-        }
+        return i;
     }
 
-    return;
+    return -1;
 }
 
 
@@ -723,8 +762,9 @@ static void
 cb_viewer_vor_button_clicked( GtkButton* button, gpointer data )
 {
     PdfViewer* pv = (PdfViewer*) data;
+    gint i = viewer_suchen_naechstes_vorkommen( pv );
 
-    viewer_suchen_naechstes_vorkommen( pv );
+    viewer_springen_zu_textfund( pv, i );
 
     return;
 }
@@ -735,78 +775,60 @@ viewer_durchsuchen_angezeigtes_doc( PdfViewer* pv, const gchar* search_text,
         gchar** errmsg )
 {
     gint rc = 0;
-    DisplayedDocument* dd = NULL;
     gboolean found = FALSE;
 
-    dd = pv->dd;
-    do
+    for ( gint i = 0; i < pv->arr_pages->len; i++ )
     {
-        gint von = 0;
-        gint bis = 0;
+        gint anzahl = 0;
+        fz_quad quads[100] = { 0 };
 
-        fz_context* ctx = dd->document->ctx;
+        ViewerPage* viewer_page = g_ptr_array_index( pv->arr_pages, i );
+        DocumentPage* document_page = viewer_page_get_document_page( viewer_page );
+        fz_rect crop = viewer_page_get_crop( viewer_page );
 
-        viewer_get_von_bis( dd, &von, &bis );
-        for ( gint i = von; i <= bis; i++ )
+        if ( document_page->stext_page->first_block == NULL )
         {
-            gint anzahl = 0;
-            fz_quad quads[100] = { 0 };
-            fz_stext_page* stext_page = NULL;
-            gint page_pv = 0;
-            ViewerPage* viewer_page = NULL;
-            GArray* arr_text_found = NULL;
-            fz_rect displayed_rect;
+            g_mutex_lock( &document_page->document->mutex_doc );
 
-            page_pv = document_get_page_pv( pv, dd, i - von );
-
-            viewer_page = g_ptr_array_index( pv->arr_pages, page_pv );
-            arr_text_found = viewer_page_get_arr_text_found( viewer_page );
-            g_array_remove_range( arr_text_found, 0, arr_text_found->len );
-
-            stext_page = DOCUMENT_PAGE(i)->stext_page;
-
-            if ( stext_page->first_block == NULL )
+            if ( !fz_display_list_is_empty( document_page->document->ctx,
+                    document_page->display_list ) )
             {
-                g_mutex_lock( &dd->document->mutex_doc );
-                fz_display_list* dl = DOCUMENT_PAGE(i)->display_list;
-
-                if ( !fz_display_list_is_empty( ctx, dl ) )
-                {
-                    rc = render_display_list_to_stext_page( ctx, DOCUMENT_PAGE(i), errmsg );
-                    g_mutex_unlock( &dd->document->mutex_doc );
-                    if ( rc ) ERROR_PAO( "render_display_list_to_stext_page" )
-                }
-                else //wenn display_list noch nicht erzeugt, dann direkt aus page erzeugen
-                {
-                    rc = pdf_render_stext_page_direct( DOCUMENT_PAGE(i), errmsg );
-                    g_mutex_unlock( &dd->document->mutex_doc );
-                    if ( rc ) ERROR_PAO( "pdf_render_stext_page_direct" )
-                }
+                rc = render_display_list_to_stext_page( document_page->document->ctx,
+                        document_page, errmsg );
+                g_mutex_unlock( &document_page->document->mutex_doc );
+                if ( rc ) ERROR_PAO( "render_display_list_to_stext_page" )
             }
-
-            anzahl = fz_search_stext_page( ctx,
-                    DOCUMENT_PAGE(i)->stext_page, search_text, quads, 99 );
-
-            displayed_rect = viewer_get_displayed_rect_from_dd( dd, i - von );
-
-            for ( gint u = 0; u < anzahl; u++ )
+            else //wenn display_list noch nicht erzeugt, dann direkt aus page erzeugen
             {
-                fz_rect text_rect = fz_rect_from_quad( quads[u] );
-                fz_rect cropped_rect = fz_intersect_rect( displayed_rect, text_rect );
-
-                if ( !fz_is_empty_rect( cropped_rect ) )
-                {
-                    fz_quad quad;
-
-                    cropped_rect = fz_translate_rect( cropped_rect, -displayed_rect.x0, -displayed_rect.y0 );
-
-                    quad = fz_quad_from_rect( cropped_rect );
-                    g_array_append_val( arr_text_found, quad );
-                    found = TRUE;
-                }
+                rc = pdf_render_stext_page_direct( document_page, errmsg );
+                g_mutex_unlock( &document_page->document->mutex_doc );
+                if ( rc ) ERROR_PAO( "pdf_render_stext_page_direct" )
             }
         }
-    } while ( (dd = dd->next) );
+
+        anzahl = fz_search_stext_page( document_page->document->ctx,
+                document_page->stext_page, search_text, quads, 99 );
+
+        for ( gint u = 0; u < anzahl; u++ )
+        {
+            fz_rect text_rect = fz_rect_from_quad( quads[u] );
+            fz_rect cropped_text_rect = fz_intersect_rect( crop, text_rect );
+
+            if ( !fz_is_empty_rect( cropped_text_rect ) )
+            {
+                TextFound text_found = { 0, };
+
+                cropped_text_rect = fz_translate_rect( cropped_text_rect,
+                        -crop.x0, -crop.y0 );
+
+                text_found.quad = fz_quad_from_rect( cropped_text_rect );
+                text_found.page_pv = i;
+
+                g_array_append_val( pv->arr_text_found, text_found );
+                found = TRUE;
+            }
+        }
+    }
 
     if ( !found ) return 1; //nix gefunden
 
@@ -848,7 +870,9 @@ cb_viewer_text_search_entry_activate( GtkEntry* entry, gpointer data )
         return;
     }
 
-    viewer_suchen_naechstes_vorkommen( pv );
+    gint i = viewer_suchen_naechstes_vorkommen( pv );
+
+    viewer_springen_zu_textfund( pv, i );
 
     gtk_widget_grab_focus( pv->button_nachher );
 
@@ -1960,6 +1984,8 @@ viewer_start_pv( Projekt* zond )
     pv->highlight[0].ul.x = -1;
     pv->anbindung.von.index = -1;
     pv->anbindung.bis.index = EOP + 1;
+
+    pv->arr_text_found = g_array_new( FALSE, FALSE, sizeof( TextFound ) );
 
     //  Fenster erzeugen und anzeigen
     viewer_einrichten_fenster( pv );

@@ -708,10 +708,11 @@
 			<Option target="Viewer (Release)" />
 			<Option target="Viewer (Testing)" />
 		</Unit>
-		<Unit filename="src/zond/pdf/pdf_documentpage.c">
+		<Unit filename="src/zond/pdf/pdf_datei.c">
 			<Option compilerVar="CC" />
 		</Unit>
-		<Unit filename="src/zond/pdf/pdf_documentpage.h" />
+		<Unit filename="src/zond/pdf/pdf_datei.h" />
+		<Unit filename="src/zond/pdf/pdf_document.h" />
 		<Unit filename="src/zond/zond_datei.c">
 			<Option compilerVar="CC" />
 			<Option target="zond (Release)" />

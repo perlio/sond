@@ -761,16 +761,27 @@ seiten_cb_einfuegen( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg 
     if ( dd->anbindung )
     {
         if ( !(page_doc <= dd->anbindung->von.seite || page_doc > dd->anbindung->bis.seite) )
-                dd->anbindung->bis.seite = dd->anbindung->bis.seite + count;
+                dd->anbindung->bis.seite += count;
     }
 
-    for ( gint u = 0; u < count; u++ )
+    for ( gint u = page_doc; u < page_doc + count; u++ )
     {
-        ViewerPage* viewer_page = viewer_page_new( pv );
+        DocumentPage* document_page = NULL;
+        fz_rect crop = { 0, };
+
+        document_page = g_ptr_array_index( dd->document->pages, u );
+
+        crop = document_page->rect;
+        if ( dd->anbindung )
+        {
+            crop.y0 = (u == dd->anbindung->von.seite) ? (gfloat) dd->anbindung->von.index : crop.y0;
+            crop.y1 = (u == dd->anbindung->bis.seite) ? (gfloat) dd->anbindung->bis.index : crop.y1;
+        }
+
+        ViewerPage* viewer_page = viewer_page_new_full( pv, document_page, crop );
         g_ptr_array_insert( pv->arr_pages, page_pv + u, viewer_page );
 
-        viewer_insert_thumb( pv, page_pv + u,
-                viewer_get_displayed_rect_from_dd( dd, page_dd + u ) );
+        viewer_insert_thumb( pv, page_pv + u );
     }
 
     for ( gint i = page_pv; i < pv->arr_pages->len; i++ )
