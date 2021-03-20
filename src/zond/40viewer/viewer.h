@@ -14,10 +14,6 @@ typedef int gboolean;
 typedef void* gpointer;
 
 
-fz_rect viewer_get_displayed_rect_from_dd( DisplayedDocument*, gint );
-
-fz_rect viewer_get_displayed_rect( PdfViewer*, gint );
-
 void viewer_springen_zu_pos_pdf( PdfViewer*, PdfPos, gdouble );
 
 void viewer_abfragen_sichtbare_seiten( PdfViewer*, gint*, gint* );

@@ -13,6 +13,8 @@ G_DECLARE_DERIVABLE_TYPE (ZondDatei, zond_datei, ZOND, DATEI, GObject)
 struct _ZondDateiClass
 {
     GObjectClass parent_class;
+
+    GPtrArray* arr_dateien;
 };
 
 

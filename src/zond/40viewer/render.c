@@ -85,7 +85,7 @@ render_thumbnail( PdfViewer* pv, fz_context* ctx, gint num,
 
     fz_matrix transform = fz_scale( 0.15, 0.15 );
 
-    fz_rect rect = fz_transform_rect( viewer_get_displayed_rect( pv, num ), transform );
+    fz_rect rect = fz_transform_rect( viewer_page_get_crop( g_ptr_array_index( pv->arr_pages, num ) ), transform );
     fz_irect irect = fz_round_rect( rect );
 
 //per draw-device to pixmap
@@ -134,7 +134,7 @@ render_pixmap( PdfViewer* pv, fz_context* ctx, gint num, DocumentPage* document_
 
     fz_matrix transform = fz_scale( pv->zoom / 100, pv->zoom / 100);
 
-    fz_rect rect = fz_transform_rect( viewer_get_displayed_rect( pv, num ), transform );
+    fz_rect rect = fz_transform_rect( viewer_page_get_crop( g_ptr_array_index( pv->arr_pages, num ) ), transform );
     fz_irect irect = fz_round_rect( rect );
 
     //per draw-device to pixmap

@@ -32,7 +32,10 @@ typedef enum
 {
     PROP_PDFV = 1,
     PROP_DOCUMENTPAGE,
-    PROP_CROP,
+    PROP_CROP_X0,
+    PROP_CROP_X1,
+    PROP_CROP_Y0,
+    PROP_CROP_Y1,
     N_PROPERTIES
 } ViewerPageProperty;
 
@@ -41,13 +44,14 @@ typedef struct
 {
     PdfViewer* pdfv;
     DocumentPage* document_page;
-    fz_rect* crop;
+    fz_rect crop;
 } ViewerPagePrivate;
 
 
 G_DEFINE_TYPE_WITH_PRIVATE(ViewerPage, viewer_page, GTK_TYPE_IMAGE)
 
 static GParamSpec *obj_properties[N_PROPERTIES] = { NULL, };
+
 
 static void
 viewer_page_set_property (GObject      *object,
@@ -68,9 +72,20 @@ viewer_page_set_property (GObject      *object,
       priv->document_page = g_value_get_pointer(value);
       break;
 
-    case PROP_CROP:
-      if ( priv->crop ) g_boxed_free( g_type_from_name( "fz_rect" ), priv->crop );
-      priv->crop = g_value_get_boxed(value);
+    case PROP_CROP_X0:
+      priv->crop.x0 = g_value_get_float(value);
+      break;
+
+    case PROP_CROP_X1:
+      priv->crop.x1 = g_value_get_float(value);
+      break;
+
+    case PROP_CROP_Y0:
+      priv->crop.y0 = g_value_get_float(value);
+      break;
+
+    case PROP_CROP_Y1:
+      priv->crop.y1 = g_value_get_float(value);
       break;
 
     default:
@@ -100,8 +115,20 @@ viewer_page_get_property (GObject    *object,
                 g_value_set_pointer( value, priv->document_page );
                 break;
 
-        case PROP_CROP:
-                g_value_set_boxed( value, priv->crop );
+        case PROP_CROP_X0:
+                g_value_set_float( value, priv->crop.x0 );
+                break;
+
+        case PROP_CROP_X1:
+                g_value_set_float( value, priv->crop.x1 );
+                break;
+
+        case PROP_CROP_Y0:
+                g_value_set_float( value, priv->crop.y0 );
+                break;
+
+        case PROP_CROP_Y1:
+                g_value_set_float( value, priv->crop.y1 );
                 break;
 
         default:
@@ -164,7 +191,7 @@ viewer_page_draw( GtkWidget* viewer_page, cairo_t* cr, gpointer data )
         gint i = 0;
         while ( pdfv->highlight[i].ul.x >= 0 )
         {
-            viewer_page_mark_quad( cr,pdfv->highlight[i], transform );
+            viewer_page_mark_quad( cr, pdfv->highlight[i], transform );
 
             i++;
         }
@@ -188,20 +215,10 @@ viewer_page_constructed( GObject* self )
 }
 
 
-static gpointer
-viewer_page_crop_copy( gpointer rect )
-{
-    return g_memdup( rect, sizeof( fz_rect ) );
-}
-
-
 static void
 viewer_page_class_init( ViewerPageClass* klass )
 {
     GObjectClass *object_class = G_OBJECT_CLASS(klass);
-
-//    if ( !g_type_from_name( "fz_rect" ) )
-            g_boxed_type_register_static( "fz_rect", viewer_page_crop_copy, g_free );
 
     object_class->constructed = viewer_page_constructed;
 
@@ -220,11 +237,32 @@ viewer_page_class_init( ViewerPageClass* klass )
                                   "Zeiger auf Seite des PDF-Documents.",
                                   G_PARAM_CONSTRUCT_ONLY | G_PARAM_READWRITE);
 
-    obj_properties[PROP_CROP] =
-            g_param_spec_boxed ("crop",
-                                "fz_rect",
-                                "cropped rect des PdfViewers.",
-                                g_type_from_name( "fz_rect" ),
+    obj_properties[PROP_CROP_X0] =
+            g_param_spec_float ("crop-x0",
+                                "fz_rect.x0",
+                                "x0-Koordinate des cropped rect des PdfViewers.",
+                                0.0, 100000.0, 0,
+                                G_PARAM_CONSTRUCT_ONLY | G_PARAM_READWRITE);
+
+    obj_properties[PROP_CROP_X1] =
+            g_param_spec_float ("crop-x1",
+                                "fz_rect.x1",
+                                "x1-Koordinate des cropped rect des PdfViewers.",
+                                0.0, 100000.0, 0,
+                                G_PARAM_CONSTRUCT_ONLY | G_PARAM_READWRITE);
+
+    obj_properties[PROP_CROP_Y0] =
+            g_param_spec_float ("crop-y0",
+                                "fz_rect.y0",
+                                "y0-Koordinate des cropped rect des PdfViewers.",
+                                0.0, 100000.0, 0,
+                                G_PARAM_CONSTRUCT_ONLY | G_PARAM_READWRITE);
+
+    obj_properties[PROP_CROP_Y1] =
+            g_param_spec_float ("crop-y1",
+                                "fz_rect.y1",
+                                "y1-Koordinate des cropped rect des PdfViewers.",
+                                0.0, 100000.0, 0,
                                 G_PARAM_CONSTRUCT_ONLY | G_PARAM_READWRITE);
 
 
@@ -249,7 +287,8 @@ ViewerPage*
 viewer_page_new_full( PdfViewer* pdfv, DocumentPage* document_page, fz_rect crop )
 {
     ViewerPage* viewer_page = g_object_new( VIEWER_TYPE_PAGE, "pdfv", pdfv,
-            "document-page", document_page, "crop", &crop, NULL );
+            "document-page", document_page, "crop-x0", crop.x0,
+            "crop-x1", crop.x1, "crop-y0", crop.y0, "crop-y1", crop.y1, NULL );
 
     return viewer_page;
 }
@@ -269,7 +308,5 @@ viewer_page_get_crop( ViewerPage* self )
 {
     ViewerPagePrivate* priv = viewer_page_get_instance_private( self );
 
-    if ( priv->crop ) return *(priv->crop);
-
-    return fz_empty_rect;
+    return priv->crop;
 }

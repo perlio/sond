@@ -33,6 +33,8 @@ G_DEFINE_TYPE_WITH_PRIVATE(ZondDatei, zond_datei, G_TYPE_OBJECT)
 static void
 zond_datei_class_init( ZondDateiClass* klass )
 {
+    klass->arr_dateien = g_ptr_array_new( );
+
     return;
 }
 

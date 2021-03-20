@@ -41,55 +41,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
 
-static void
-viewer_get_von_bis( DisplayedDocument* dd, gint* von, gint* bis )
-{
-    *von = 0;
-
-    if ( dd->anbindung )
-    {
-        *von = dd->anbindung->von.seite;
-        *bis = dd->anbindung->bis.seite;
-    }
-    else *bis = dd->document->pages->len - 1;
-
-    return;
-}
-
-
-fz_rect
-viewer_get_displayed_rect_from_dd( DisplayedDocument* dd, gint page_dd )
-{
-    gint von = 0;
-    gint bis = 0;
-
-    viewer_get_von_bis( dd, &von, &bis );
-
-    fz_rect rect = ((DocumentPage*) g_ptr_array_index( dd->document->pages, page_dd + von ))->rect;
-
-    if ( dd->anbindung != NULL )
-    {
-        if ( (page_dd == 0) && (dd->anbindung->von.index > rect.y0) )
-                rect.y0 = dd->anbindung->von.index;
-        if ( (page_dd + von == bis) && (dd->anbindung->bis.index < rect.y1) )
-                rect.y1 = dd->anbindung->bis.index;
-    }
-
-    return rect;
-}
-
-
-fz_rect
-viewer_get_displayed_rect( PdfViewer* pv, gint page_pv )
-{
-    gint page_dd = 0;
-
-    DisplayedDocument* dd = document_get_dd( pv, page_pv, NULL, &page_dd, NULL );
-
-    return viewer_get_displayed_rect_from_dd( dd, page_dd );
-}
-
-
 static gdouble
 viewer_abfragen_value_von_seite( PdfViewer* pv, gint page_num )
 {
@@ -99,7 +50,7 @@ viewer_abfragen_value_von_seite( PdfViewer* pv, gint page_num )
 
     for ( gint i = 0; i < page_num; i++ )
     {
-        fz_rect rect = viewer_get_displayed_rect( pv, i );
+        fz_rect rect = viewer_page_get_crop( g_ptr_array_index( pv->arr_pages, i ) );
 
         value += ((rect.y1 - rect.y0) *
             pv->zoom / 100) + 10;
@@ -120,7 +71,7 @@ viewer_springen_zu_pos_pdf( PdfViewer* pv, PdfPos pdf_pos, gdouble delta )
     gdouble value_seite = viewer_abfragen_value_von_seite( pv, pdf_pos.seite );
 
     //Länge aktueller Seite ermitteln
-    fz_rect rect = viewer_get_displayed_rect( pv, pdf_pos.seite );
+    fz_rect rect = viewer_page_get_crop( g_ptr_array_index( pv->arr_pages, pdf_pos.seite ) );
     gdouble page = rect.y1 - rect.y0;
     if ( pdf_pos.index <= page ) value = value_seite + (pdf_pos.index * pv->zoom / 100);
     else value = value_seite + (page * pv->zoom / 100);
@@ -152,7 +103,7 @@ viewer_abfragen_sichtbare_seiten( PdfViewer* pv, gint* von, gint* bis )
     while ( ((value + size) > v_oben) && ((*bis) < ((gint) pv->arr_pages->len - 1)) )
     {
         (*bis)++;
-        fz_rect rect = viewer_get_displayed_rect( pv, *bis );
+        fz_rect rect = viewer_page_get_crop( g_ptr_array_index( pv->arr_pages, *bis ) );
         v_oben += ((rect.y1 -rect.y0) * pv->zoom / 100) + 10;
 
         if ( value > v_unten ) (*von)++;
@@ -189,7 +140,7 @@ viewer_einrichten_layout( PdfViewer* pv )
 
     for ( gint u = 0; u < pv->arr_pages->len; u++ )
     {
-        fz_rect rect = viewer_get_displayed_rect( pv, u );
+        fz_rect rect = viewer_page_get_crop( g_ptr_array_index( pv->arr_pages, u ) );
         w = (rect.x1 - rect.x0) * pv->zoom / 100;
 
         if ( w > w_max ) w_max = w;
@@ -197,7 +148,7 @@ viewer_einrichten_layout( PdfViewer* pv )
 
     for ( gint i = 0; i < pv->arr_pages->len; i++ )
     {
-        fz_rect rect = viewer_get_displayed_rect( pv, i );
+        fz_rect rect = viewer_page_get_crop( g_ptr_array_index( pv->arr_pages, i ) );
         h = ((rect.y1 - rect.y0) * pv->zoom / 100);
         w = ((rect.x1 - rect.x0) * pv->zoom / 100);
 
@@ -666,7 +617,9 @@ viewer_abfragen_pdf_punkt( PdfViewer* pv, fz_point punkt, PdfPunkt* pdf_punkt )
             pdf_punkt->seite ), "x", &x, NULL );
 
     if ( punkt.x < x ) ret = -1;
+
     rect = viewer_page_get_crop( g_ptr_array_index( pv->arr_pages, i ) );
+
     if ( punkt.x > (((rect.x1 - rect.x0) * pv->zoom / 100) + x) ) ret = -1;
 
     pdf_punkt->punkt.x = (punkt.x - x) / pv->zoom * 100;
