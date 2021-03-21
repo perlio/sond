@@ -52,7 +52,6 @@ G_DEFINE_TYPE_WITH_PRIVATE(ViewerPage, viewer_page, GTK_TYPE_IMAGE)
 
 static GParamSpec *obj_properties[N_PROPERTIES] = { NULL, };
 
-
 static void
 viewer_page_set_property (GObject      *object,
                           guint         property_id,

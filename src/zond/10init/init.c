@@ -184,10 +184,20 @@ open_file( Projekt* zond, gpointer files )
 }
 
 
+static gboolean
+init_class_cache( gpointer cache_data, GTypeClass* g_class )
+{
+    printf("cache clean\n");
+
+    return FALSE;
+}
+
 Projekt*
 init( GtkApplication* app )
 {
     Projekt* zond = NULL;
+
+    g_type_add_class_cache_func( NULL, init_class_cache );
 
     zond = g_malloc0( sizeof( Projekt ) );
 
@@ -227,7 +237,7 @@ init( GtkApplication* app )
     gtk_widget_show_all( zond->app_window );
     gtk_widget_hide( gtk_paned_get_child1( GTK_PANED(zond->hpaned) ) );
 
-    zond->ctx = mupdf_init( );
+    zond->ctx = mupdf_init( NULL );
     if ( !zond->ctx )
     {
         meldung( zond->app_window, "zond->ctx konnte nicht initialisiert werden",

@@ -713,12 +713,12 @@
 		</Unit>
 		<Unit filename="src/zond/pdf/pdf_datei.h" />
 		<Unit filename="src/zond/pdf/pdf_document.h" />
-		<Unit filename="src/zond/zond_datei.c">
+		<Unit filename="src/zond/zond_pdf_document.c">
 			<Option compilerVar="CC" />
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
 		</Unit>
-		<Unit filename="src/zond/zond_datei.h">
+		<Unit filename="src/zond/zond_pdf_document.h">
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
 		</Unit>

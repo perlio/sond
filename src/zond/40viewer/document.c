@@ -169,7 +169,7 @@ document_new_document( const gchar* rel_path, gchar** errmsg )
 
     document = g_malloc0( sizeof( Document ) );
 
-    document->ctx = mupdf_init( );
+    document->ctx = mupdf_init( errmsg );
     if ( !document->ctx ) ERROR_PAO_R( "mupdf_init", NULL )
 
     document->doc = mupdf_dokument_oeffnen( document->ctx, rel_path, errmsg );

@@ -31,7 +31,7 @@ mupdf_lock( void* user, gint lock )
 
 /** Wenn NULL, dann Fehler und *errmsg gesetzt **/
 fz_context*
-mupdf_init( )
+mupdf_init( gchar** errmsg )
 {
     fz_context* ctx = NULL;
     fz_locks_context locks_context;
@@ -49,7 +49,7 @@ mupdf_init( )
     {
         g_mutex_clear( mutex );
         g_free( mutex );
-        return NULL;
+        ERROR_MUPDF_R( "fz_new_context", NULL )
     }
 
 	/* Register the default file types to handle. */
@@ -59,7 +59,7 @@ mupdf_init( )
         fz_drop_context( ctx );
         g_mutex_clear( mutex );
         g_free( mutex );
-        return NULL;
+        ERROR_MUPDF_R( "fz_new_context", NULL )
     }
 
     return ctx;
