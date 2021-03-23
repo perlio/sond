@@ -431,12 +431,12 @@ zond_pdf_document_open( const gchar* path, gchar** errmsg )
     ZondPdfDocumentClass* klass = g_type_class_peek( ZOND_TYPE_PDF_DOCUMENT );
 
     if ( klass )
-    {
+    {printf("%i\n", klass->arr_pdf_documents->len);
         for ( gint i = 0; i < klass->arr_pdf_documents->len; i++ )
         {
             zond_pdf_document = g_ptr_array_index( klass->arr_pdf_documents, i );
             ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( zond_pdf_document );
-
+printf("%s  %s\n", priv->path, path);
             if ( !g_strcmp0( priv->path, path ) ) return g_object_ref( zond_pdf_document );
         }
     }
@@ -446,7 +446,7 @@ zond_pdf_document_open( const gchar* path, gchar** errmsg )
 
     if ( priv->errmsg )
     {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf zond_pdf_document_new:\n",
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_object_new:\n",
                 priv->errmsg, NULL );
         g_object_unref( zond_pdf_document );
 

@@ -20,7 +20,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <mupdf/fitz.h>
 
 #include "../../misc.h"
-#include "../../treeview.h"
 
 #include "../global_types.h"
 

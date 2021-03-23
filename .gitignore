@@ -4,6 +4,8 @@
 !/schemas
 !/src
 
+!*/*gch
+
 !.gitignore
 !LICENSE
 !sond.cbp
