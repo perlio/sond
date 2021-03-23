@@ -47,9 +47,46 @@ struct _ZondPdfDocumentClass
 };
 
 
-ZondPdfDocument* zond_pdf_document_open( gchar*, gchar** );
+ZondPdfDocument* zond_pdf_document_open( const gchar*, gchar** );
+
+//Gibt Zeiger auf geöffnetes document mit gchar* == path zurück; keine neue ref!
+const ZondPdfDocument* zond_pdf_document_is_open( const gchar* );
+
+gboolean zond_pdf_document_is_dirty( ZondPdfDocument* );
+
+void zond_pdf_document_set_dirty( ZondPdfDocument*, gboolean );
+
+gint zond_pdf_document_save( ZondPdfDocument*, gchar** );
+
+void zond_pdf_document_close_doc_and_pages( ZondPdfDocument* );
+
+gint zond_pdf_document_reopen_doc_and_pages( ZondPdfDocument*, gchar** );
 
 void zond_pdf_document_close( ZondPdfDocument* );
+
+fz_document* zond_pdf_document_get_fz_doc( ZondPdfDocument* );
+
+GPtrArray* zond_pdf_document_get_arr_pages( ZondPdfDocument* );
+
+PdfDocumentPage* zond_pdf_document_get_pdf_document_page( ZondPdfDocument*, gint );
+
+gint zond_pdf_document_get_number_of_pages( ZondPdfDocument* );
+
+fz_context* zond_pdf_document_get_ctx( ZondPdfDocument* );
+
+gchar* zond_pdf_document_get_path( ZondPdfDocument* );
+
+gint zond_pdf_document_get_index( PdfDocumentPage* );
+
+void zond_pdf_document_mutex_lock( ZondPdfDocument* );
+
+void zond_pdf_document_mutex_unlock( ZondPdfDocument* );
+
+gint zond_pdf_document_page_refresh( ZondPdfDocument*, gint, gint, gchar** );
+
+gint zond_pdf_document_insert_pages( ZondPdfDocument*, gint, gint, fz_context*,
+        pdf_document*, gchar** );
+
 
 G_END_DECLS
 

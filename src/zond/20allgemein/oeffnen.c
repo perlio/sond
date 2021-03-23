@@ -16,6 +16,11 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+#include <gtk/gtk.h>
+#include <mupdf/fitz.h>
+
+#include "../zond_pdf_document.h"
+
 #include "../global_types.h"
 #include "../error.h"
 
@@ -28,9 +33,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "../40viewer/document.h"
 #include "../40viewer/viewer.h"
-
-#include <gtk/gtk.h>
-#include <mupdf/fitz.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -47,7 +49,7 @@ oeffnen_dd_sind_gleich( DisplayedDocument* dd1, DisplayedDocument* dd2 )
 
     do
     {
-        if ( g_strcmp0( dd1_ptr->document->path, dd2_ptr->document->path ) ) return FALSE;
+        if ( dd1_ptr->zond_pdf_document != dd2_ptr->zond_pdf_document ) return FALSE;
         if ( (dd1_ptr->anbindung && !dd2_ptr->anbindung) ||
                 (!dd1_ptr->anbindung && dd2_ptr->anbindung) ) return FALSE;
         if ( (dd1_ptr->anbindung && dd2_ptr->anbindung) &&
@@ -104,7 +106,7 @@ oeffnen_auszug( Projekt* zond, gint node_id, gchar** errmsg )
             g_free( anbindung );
             if ( !dd_new )
             {
-                document_free_displayed_documents( zond, dd );
+                document_free_displayed_documents( dd );
                 ERROR_PAO( "document_new_displayed_document" );
             }
 
@@ -146,7 +148,7 @@ oeffnen_auszug( Projekt* zond, gint node_id, gchar** errmsg )
             if ( oeffnen_dd_sind_gleich( pv_vergleich->dd, dd ) )
             {
                 gtk_window_present( GTK_WINDOW(pv_vergleich->vf) );
-                document_free_displayed_documents( zond, dd );
+                document_free_displayed_documents( dd );
 
                 return 0;
             }
@@ -174,7 +176,7 @@ oeffnen_internal_viewer( Projekt* zond, const gchar* rel_path, Anbindung* anbind
         {
             PdfViewer* pv = g_ptr_array_index( zond->arr_pv, i );
             if ( pv->dd->next == NULL &&
-                    !g_strcmp0( rel_path, pv->dd->document->path ) )
+                    !g_strcmp0( rel_path, zond_pdf_document_get_path( pv->dd->zond_pdf_document ) ) )
             {
                 if ( (!pv->dd->anbindung && !anbindung) ||
                         (pv->dd->anbindung && anbindung &&

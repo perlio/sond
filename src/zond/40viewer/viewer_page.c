@@ -23,6 +23,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "viewer.h"
 
+#include "../zond_pdf_document.h"
 #include "../global_types.h"
 
 #include "../../misc.h"
@@ -43,7 +44,7 @@ typedef enum
 typedef struct
 {
     PdfViewer* pdfv;
-    DocumentPage* document_page;
+    PdfDocumentPage* pdf_document_page;
     fz_rect crop;
 } ViewerPagePrivate;
 
@@ -68,7 +69,7 @@ viewer_page_set_property (GObject      *object,
       break;
 
     case PROP_DOCUMENTPAGE:
-      priv->document_page = g_value_get_pointer(value);
+      priv->pdf_document_page = g_value_get_pointer(value);
       break;
 
     case PROP_CROP_X0:
@@ -111,7 +112,7 @@ viewer_page_get_property (GObject    *object,
                 break;
 
         case PROP_DOCUMENTPAGE:
-                g_value_set_pointer( value, priv->document_page );
+                g_value_set_pointer( value, priv->pdf_document_page );
                 break;
 
         case PROP_CROP_X0:
@@ -168,11 +169,12 @@ viewer_page_draw( GtkWidget* viewer_page, cairo_t* cr, gpointer data )
     //wenn annot angeclickt wurde
     if ( pdfv->clicked_annot )
     {
-        PVQuad* pv_quad = pdfv->clicked_annot->first;
+        GArray* arr_quads = pdfv->clicked_annot->arr_quads;
 
-        do
+        for ( gint i = 0; i < arr_quads->len; i++ )
         {
-            fz_quad quad = fz_transform_quad( pv_quad->quad, transform );
+            fz_quad quad = g_array_index( arr_quads, fz_quad, i );
+            quad = fz_transform_quad( quad, transform );
             cairo_move_to( cr, quad.ul.x, quad.ul.y );
             cairo_line_to( cr, quad.ur.x, quad.ur.y );
             cairo_line_to( cr, quad.lr.x, quad.lr.y );
@@ -180,10 +182,7 @@ viewer_page_draw( GtkWidget* viewer_page, cairo_t* cr, gpointer data )
             cairo_line_to( cr, quad.ul.x, quad.ul.y );
             cairo_set_source_rgb(cr, 0, 1, 0 );
             cairo_stroke( cr );
-
-            pv_quad = pv_quad->next;
         }
-        while ( pv_quad );
     }
     else //ansonsten etwaige highlights zeichnen
     {
@@ -283,7 +282,7 @@ viewer_page_init( ViewerPage* self )
 
 
 ViewerPage*
-viewer_page_new_full( PdfViewer* pdfv, DocumentPage* document_page, fz_rect crop )
+viewer_page_new_full( PdfViewer* pdfv, PdfDocumentPage* document_page, fz_rect crop )
 {
     ViewerPage* viewer_page = g_object_new( VIEWER_TYPE_PAGE, "pdfv", pdfv,
             "document-page", document_page, "crop-x0", crop.x0,
@@ -293,12 +292,12 @@ viewer_page_new_full( PdfViewer* pdfv, DocumentPage* document_page, fz_rect crop
 }
 
 
-DocumentPage*
+PdfDocumentPage*
 viewer_page_get_document_page( ViewerPage* self )
 {
     ViewerPagePrivate* priv = viewer_page_get_instance_private( self );
 
-    return priv->document_page;
+    return priv->pdf_document_page;
 }
 
 

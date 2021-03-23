@@ -205,7 +205,6 @@ init( GtkApplication* app )
     zond->clipboard = clipboard_init( );
 
     zond->arr_pv = g_ptr_array_new( );
-    zond->arr_docs = g_ptr_array_new( );
 
     init_app_window( zond );
     gtk_application_add_window( app, GTK_WINDOW(zond->app_window) );

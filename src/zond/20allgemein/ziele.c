@@ -16,6 +16,12 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+#include <glib/gstdio.h>
+#include <sqlite3.h>
+#include <gtk/gtk.h>
+
+#include "../zond_pdf_document.h"
+
 #include "../global_types.h"
 #include "../error.h"
 
@@ -36,9 +42,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../../misc.h"
 #include "../../sond_treeview.h"
 
-#include <glib/gstdio.h>
-#include <sqlite3.h>
-#include <gtk/gtk.h>
 
 
 gboolean
@@ -219,27 +222,30 @@ ziele_erzeugen_ziel( GtkWidget* window, const DisplayedDocument* dd,
         Anbindung anbindung, Ziel* ziel, gchar** errmsg )
 {
     gint rc = 0;
+    fz_context* ctx = NULL;
+    fz_document* doc = NULL;
 
-    g_mutex_lock( &dd->document->mutex_doc );
+    zond_pdf_document_mutex_lock( dd->zond_pdf_document );
+
+    ctx = zond_pdf_document_get_ctx( dd->zond_pdf_document );
+    doc = zond_pdf_document_get_fz_doc( dd->zond_pdf_document );
 
     //schon nameddest zur Seite?
-    rc = pdf_document_get_dest( dd->document->ctx,
-            pdf_specifics( dd->document->ctx, dd->document->doc ),
+    rc = pdf_document_get_dest( ctx, pdf_specifics( ctx, doc ),
             anbindung.von.seite, (gpointer*) &ziel->ziel_id_von, TRUE, errmsg );
     if ( rc )
     {
-        g_mutex_unlock( &dd->document->mutex_doc );
+        zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
 
         ERROR_PAO( "pdf_document_get_dest" )
     }
 
     //nameddest herausfinden bzw. einfügen
-    rc = pdf_document_get_dest( dd->document->ctx,
-            pdf_specifics( dd->document->ctx, dd->document->doc ),
+    rc = pdf_document_get_dest( ctx, pdf_specifics( ctx, doc ),
             anbindung.bis.seite, (gpointer*) &ziel->ziel_id_bis, TRUE, errmsg );
     if ( rc )
     {
-        g_mutex_unlock( &dd->document->mutex_doc );
+        zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
 
         ERROR_PAO( "pdf_document_get_dest" )
     }
@@ -252,29 +258,27 @@ ziele_erzeugen_ziel( GtkWidget* window, const DisplayedDocument* dd,
 
     if ( page_number1 >= 0 || page_number2 >= 0 )
     {
-        if ( dd->document->dirty )
+        if ( zond_pdf_document_is_dirty( dd->zond_pdf_document ) )
         {
             rc = abfrage_frage( window, "Änderungen müssen vor Einfügen von "
                     "Anbindungen gespeichert werden", "Änderungen speichern?", NULL );
             if ( rc == GTK_RESPONSE_YES )
             {
-                rc = mupdf_save_document( dd->document, errmsg );
+                rc = zond_pdf_document_save( dd->zond_pdf_document, errmsg );
                 if ( rc )
                 {
-                    g_mutex_unlock( &dd->document->mutex_doc );
-                    ERROR_PAO_R( "mupdf_save_document", -2 )
+                    zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
+                    ERROR_PAO_R( "zond_pdf_document_save", -2 )
                 }
             }
             else
             {
-                rc = mupdf_open_document( dd->document, errmsg );
-                g_mutex_unlock( &dd->document->mutex_doc );
-                if ( rc ) ERROR_PAO_R( "mupdf_open_document", -2 )
+                zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
 
                 return 1;
             }
         }
-        else mupdf_close_document( dd->document );
+        else zond_pdf_document_close_doc_and_pages( dd->zond_pdf_document );
 
         //namedDest einfügen
         rc = SetDestPage( dd, page_number1, page_number2,
@@ -285,22 +289,22 @@ ziele_erzeugen_ziel( GtkWidget* window, const DisplayedDocument* dd,
                     "werden\n\nBei Aufruf SetDestPage:\n", *errmsg, NULL );
             g_free( *errmsg );
 
-            rc = mupdf_open_document( dd->document, errmsg );
-            g_mutex_unlock( &dd->document->mutex_doc );
-            if ( rc ) ERROR_PAO_R( "mupdf_open_document", -2 )
+            rc = zond_pdf_document_reopen_doc_and_pages( dd->zond_pdf_document, errmsg );
+            zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
+            if ( rc ) ERROR_PAO_R( "zond_pdf_document_reopen_doc_and_pages", -2 )
 
             return 1;
         }
 
-        rc = mupdf_open_document( dd->document, errmsg );
+        rc = zond_pdf_document_reopen_doc_and_pages( dd->zond_pdf_document, errmsg );
         if ( rc )
         {
-            g_mutex_unlock( &dd->document->mutex_doc );
-            ERROR_PAO_R( "mupdf_open_document", -2 )
+            zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
+            ERROR_PAO_R( "zond_pdf_document_reopen_doc_and_pages", -2 )
         }
     }
 
-    g_mutex_unlock( &dd->document->mutex_doc );
+    zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
 
     ziel->index_von = anbindung.von.index;
     ziel->index_bis = anbindung.bis.index;
@@ -447,7 +451,8 @@ ziele_erzeugen_anbindung( PdfViewer* pv, gchar** errmsg )
     anbindung.bis.seite = page_doc_bis;
     anbindung.bis.index = pv->anbindung.bis.index;
 
-    node_id = db_get_node_id_from_rel_path( pv->zond, dd_von->document->path, errmsg );
+    node_id = db_get_node_id_from_rel_path( pv->zond,
+            zond_pdf_document_get_path( dd_von->zond_pdf_document ), errmsg );
     if ( node_id == -1 ) ERROR_PAO( "db_get_node_id_from_rel_path" )
     else if ( node_id == 0 ) ERROR_PAO( "Datei nicht vorhanden" )
 
@@ -463,7 +468,8 @@ ziele_erzeugen_anbindung( PdfViewer* pv, gchar** errmsg )
     else if ( rc == -1 ) ERROR_PAO( "ziele_erzeugen_ziel" )
     else if ( rc == -2 ) ERROR_PAO_R( "ziele_erzeugen_ziel", -2 )
 
-    rc = ziele_einfuegen_anbindung( pv->zond, dd_von->document->path, anchor_id, kind,
+    rc = ziele_einfuegen_anbindung( pv->zond,
+            zond_pdf_document_get_path( dd_von->zond_pdf_document ), anchor_id, kind,
             anbindung, ziel, errmsg );
     ziele_free( ziel );
     if ( rc ) ERROR_PAO( "ziele_einfuegen_anbindung" )

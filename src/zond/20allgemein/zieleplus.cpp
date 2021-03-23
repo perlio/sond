@@ -20,6 +20,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <podofo/podofo.h>
 #include <glib/gstdio.h>
 
+#include "../zond_pdf_document.h"
+
 #include "../global_types.h"
 
 extern "C" gchar* utf8_to_local_filename( const gchar* );
@@ -55,8 +57,10 @@ SetDestPage( const DisplayedDocument* dd, gint page_number1, gint page_number2,
 {
     PdfMemDocument document;
 
+    gchar* doc_path = zond_pdf_document_get_path( dd->zond_pdf_document );
+
     gchar* current_dir = g_get_current_dir( );
-    gchar* abs_path = g_strconcat( current_dir, "/", dd->document->path, NULL );
+    gchar* abs_path = g_strconcat( current_dir, "/", doc_path, NULL );
     g_free( current_dir );
     gchar* abs_path_local = utf8_to_local_filename( abs_path );
     g_free( abs_path );

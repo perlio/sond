@@ -32,6 +32,8 @@ typedef struct _GtkAdjustment GtkAdjustment;
 typedef struct _GList GList;
 typedef struct _SondTreeview SondTreeview;
 typedef struct _ViewerThumblist ViewerThumblist;
+typedef struct _ZondPdfDocument ZondPdfDocument;
+typedef struct _Pdf_Document_Page_Annot PdfDocumentPageAnnot;
 
 typedef struct sqlite3_stmt sqlite3_stmt;
 typedef struct sqlite3 sqlite3;
@@ -162,7 +164,6 @@ typedef struct _Projekt
 
     //Hier sind alle geöffneten PdfViewer abgelegt
     GPtrArray* arr_pv;
-    GPtrArray* arr_docs;
     pdf_document* pv_clip;
 } Projekt;
 
@@ -203,64 +204,9 @@ typedef struct _Pdf_Punkt
 } PdfPunkt;
 
 
-typedef struct _PV_Quad PVQuad;
-
-struct _PV_Quad
-{
-    fz_quad quad;
-    PVQuad* next;
-};
-
-typedef struct _PV_Annot PVAnnot;
-
-struct _PV_Annot
-{
-    PVAnnot* prev;
-    PVAnnot* next;
-
-    gint idx;
-    enum pdf_annot_type type;
-
-    fz_rect annot_rect;
-
-    gint n_quad;
-    PVQuad* first;
-};
-
-typedef struct _PV_Annot_Page
-{
-    gint n;
-    PVAnnot* first;
-    PVAnnot* last;
-} PVAnnotPage;
-
-typedef struct _Document Document;
-
-typedef struct _Document_Page
-{
-    Document* document;
-    fz_page* page;
-    fz_rect rect;
-    fz_display_list* display_list;
-    fz_stext_page* stext_page;
-    PVAnnotPage* pv_annot_page;
-} DocumentPage;
-
-struct _Document
-{
-    GMutex mutex_doc;
-    fz_context* ctx;
-    gint ref_count;
-    fz_document* doc;
-    gboolean dirty;
-    gchar* path;
-    GPtrArray* pages; //array von DocumentPage*
-};
-
-
 typedef struct _Displayed_Document
 {
-    Document* document;
+    ZondPdfDocument* zond_pdf_document;
     Anbindung* anbindung;
     struct _Displayed_Document* next;
 } DisplayedDocument;
@@ -317,7 +263,7 @@ typedef struct _Pdf_Viewer
 
     //Beim Klick
     gboolean click_on_text;
-    PVAnnot* clicked_annot;
+    PdfDocumentPageAnnot* clicked_annot;
     PdfPunkt click_pdf_punkt;
 
     DisplayedDocument* dd;

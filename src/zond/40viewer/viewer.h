@@ -6,6 +6,7 @@
 
 typedef struct _GtkTreeIter GtkTreeIter;
 typedef struct _Projekt Projekt;
+typedef struct _Pdf_Document_Page PdfDocumentPage;
 
 typedef int gint;
 typedef char gchar;
@@ -36,9 +37,7 @@ gint viewer_get_iter_thumb( PdfViewer*, gint, GtkTreeIter*, gchar** );
 
 gboolean viewer_page_ist_sichtbar( PdfViewer*, gint );
 
-gint viewer_reload_document_page( PdfViewer*, Document*, gint, gint, gchar** );
-
-gint viewer_foreach( GPtrArray*, Document*, gint, gint (*) (PdfViewer*, gint,
+gint viewer_foreach( GPtrArray*, PdfDocumentPage*, gint (*) (PdfViewer*, gint,
         gpointer, gchar**), gpointer, gchar** errmsg );
 
 PdfViewer* viewer_start_pv( Projekt* );

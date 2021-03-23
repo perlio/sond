@@ -1,5 +1,7 @@
 #include "../error.h"
 
+#include "../zond_pdf_document.h"
+
 #include "../99conv/mupdf.h"
 #include "../99conv/general.h"
 
@@ -226,20 +228,20 @@ pdf_copy_page( fz_context* ctx, pdf_document* doc_src, gint page_from,
 
 
 gint
-pdf_render_stext_page_direct( DocumentPage* document_page, gchar** errmsg )
+pdf_render_stext_page_direct( PdfDocumentPage* pdf_document_page, gchar** errmsg )
 {
     //structured text-device
     fz_device* s_t_device = NULL;
 
     fz_stext_options opts = { FZ_STEXT_DEHYPHENATE };
 
-    fz_context* ctx = document_page->document->ctx;
+    fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
 
-    fz_try( ctx ) s_t_device = fz_new_stext_device( ctx, document_page->stext_page, &opts );
+    fz_try( ctx ) s_t_device = fz_new_stext_device( ctx, pdf_document_page->stext_page, &opts );
     fz_catch( ctx ) ERROR_MUPDF( "fz_new_stext_device" )
 
 //Seite durch's device laufen lassen
-    fz_try( ctx ) fz_run_page( ctx, document_page->page, s_t_device, fz_identity, NULL );
+    fz_try( ctx ) fz_run_page( ctx, pdf_document_page->page, s_t_device, fz_identity, NULL );
     fz_always( ctx )
     {
         fz_close_device( ctx, s_t_device );

@@ -70,7 +70,7 @@ pv_schliessen_datei( PdfViewer* pv )
         rc = abfrage_frage( pv->vf, "PDF geändert", "Speichern?", NULL );
         if ( rc == GTK_RESPONSE_YES )
         {
-            rc = mupdf_save_document( pv->dd->document, &errmsg );
+            rc = zond_pdf_document_save( pv->dd->zond_pdf_document, &errmsg );
             if ( rc )
             {
                 errmsg = add_string( g_strdup( "Dokument kann nicht gespeichert "
@@ -78,25 +78,10 @@ pv_schliessen_datei( PdfViewer* pv )
                 rc = abfrage_frage( pv->vf, errmsg, "Trotzdem schließen?", NULL );
                 g_free( errmsg );
 
-                if ( rc == GTK_RESPONSE_NO )
-                {
-                    pv->dd->document->doc =
-                            mupdf_dokument_oeffnen( pv->dd->document->ctx,
-                            pv->dd->document->path, &errmsg );
-                    if ( !pv->dd->document->doc )
-                    {
-                        meldung( pv->vf, "Dokument konnte nicht erneut geöffnet werden -\n\n"
-                                "Bei Aufruf mupdf_dokument_oeffnen:\n", errmsg,
-                                "\n\nViewer wird geschlossen", NULL );
-                        g_free( errmsg );
-                    }
-                    else return;
-                }
+                if ( rc == GTK_RESPONSE_NO ) return;
             }
-            pv->dd->document->doc = NULL;
         }
 
-        pv->dd->document->dirty = FALSE;
         gtk_widget_set_sensitive( pv->button_speichern, FALSE );
     }
 

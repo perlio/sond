@@ -23,6 +23,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <allheaders.h>
 #include <glib/gstdio.h>
 
+#include "../zond_pdf_document.h"
+
 #include "../../misc.h"
 
 #include "../error.h"
@@ -535,7 +537,7 @@ pdf_ocr_filter_stream( fz_context* ctx, pdf_obj* page_ref, gint flags, gchar** e
 
 
 static gint
-pdf_ocr_sandwich_page( DocumentPage* document_page,
+pdf_ocr_sandwich_page( PdfDocumentPage* pdf_document_page,
         pdf_document* doc_text, gint page_text, gchar** errmsg )
 {
     gint rc = 0;
@@ -553,14 +555,15 @@ pdf_ocr_sandwich_page( DocumentPage* document_page,
     pdf_obj* font_dict_key = NULL;
     pdf_obj* font_dict_val = NULL;
 
-    fz_context* ctx = document_page->document->ctx;
-    pdf_document* pdf_doc = pdf_specifics( ctx, document_page->document->doc );
-    gint page = document_get_index_of_document_page( document_page );
+    fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
+//    pdf_document* pdf_doc = pdf_specifics( ctx, zond_pdf_document_get_fz_doc( pdf_document_page->document ) );
+//    gint page = document_get_index_of_document_page( document_page );
+    pdf_page* pdf_page = pdf_page_from_fz_page( ctx, pdf_document_page->page );
 
     fz_try ( ctx )
     {
-        page_ref = pdf_lookup_page_obj( ctx, pdf_doc, page );
-        pdf_flatten_inheritable_page_items( ctx, page_ref );
+//        page_ref = pdf_lookup_page_obj( ctx, pdf_doc, page );
+        pdf_flatten_inheritable_page_items( ctx, pdf_page->obj );
         page_ref_text = pdf_lookup_page_obj( ctx, doc_text, page_text );
         pdf_flatten_inheritable_page_items( ctx, page_ref_text );
     }
@@ -680,12 +683,12 @@ pdf_ocr_sandwich_doc( GPtrArray* arr_document_pages, pdf_document* doc_text,
 
     for ( gint i = 0; i < arr_document_pages->len; i++ )
     {
-        DocumentPage* document_page =
+        PdfDocumentPage* pdf_document_page =
                 g_ptr_array_index( arr_document_pages, i );
 
-        g_mutex_lock( &document_page->document->mutex_doc );
-        rc = pdf_ocr_sandwich_page( document_page, doc_text, zaehler, errmsg );
-        g_mutex_unlock( &document_page->document->mutex_doc );
+        zond_pdf_document_mutex_lock( pdf_document_page->document );
+        rc = pdf_ocr_sandwich_page( pdf_document_page, doc_text, zaehler, errmsg );
+        zond_pdf_document_mutex_unlock( pdf_document_page->document );
         zaehler++;
         if ( rc == -1 ) ERROR_PAO( "pdf_ocr_sandwich" )
         else if ( rc == -2 )
@@ -835,24 +838,24 @@ pdf_ocr_render_pixmap( fz_context* ctx, pdf_document* doc, gint num,
 
 //thread-safe
 static pdf_document*
-pdf_ocr_create_doc_with_page( DocumentPage* document_page, gint flag, gchar** errmsg )
+pdf_ocr_create_doc_with_page( PdfDocumentPage* pdf_document_page, gint flag, gchar** errmsg )
 {
     gint rc = 0;
     pdf_document* doc_new = NULL;
     gint page_doc = 0;
     pdf_obj* page_ref = NULL;
 
-    fz_context* ctx = document_page->document->ctx;
-    pdf_document* doc = pdf_specifics( ctx, document_page->document->doc );
+    fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
+    pdf_document* doc = pdf_specifics( ctx, zond_pdf_document_get_fz_doc( pdf_document_page->document ) );
 
     fz_try( ctx ) doc_new = pdf_create_document( ctx );
     fz_catch( ctx ) ERROR_MUPDF_R( "pdf_create_document", NULL )
 
-    page_doc = document_get_index_of_document_page( document_page );
+    page_doc = document_get_index_of_document_page( pdf_document_page );
 
-    g_mutex_lock( &document_page->document->mutex_doc );
+    zond_pdf_document_mutex_lock( pdf_document_page->document );
     rc = pdf_copy_page( ctx, doc, page_doc, page_doc, doc_new, 0, errmsg );
-    g_mutex_unlock( &document_page->document->mutex_doc );
+    zond_pdf_document_mutex_unlock( pdf_document_page->document );
     if ( rc )
     {
         pdf_drop_document( ctx, doc_new );
@@ -879,17 +882,17 @@ pdf_ocr_create_doc_with_page( DocumentPage* document_page, gint flag, gchar** er
 
 //thread-safe
 static gint
-pdf_ocr_page( DocumentPage* document_page, InfoWindow* info_window,
+pdf_ocr_page( PdfDocumentPage* pdf_document_page, InfoWindow* info_window,
         TessBaseAPI* handle, TessResultRenderer* renderer, gchar** errmsg )
 {
     gint rc = 0;
     fz_pixmap* pixmap = NULL;
     pdf_document* doc_new = NULL;
 
-    doc_new = pdf_ocr_create_doc_with_page( document_page, 1, errmsg ); //thread-safe
+    doc_new = pdf_ocr_create_doc_with_page( pdf_document_page, 1, errmsg ); //thread-safe
     if ( !doc_new ) ERROR_PAO( "pdf_ocr_create_doc_with_page" )
 
-    fz_context* ctx = fz_clone_context( document_page->document->ctx );
+    fz_context* ctx = fz_clone_context( zond_pdf_document_get_ctx( pdf_document_page->document ) );
 
     pixmap = pdf_ocr_render_pixmap( ctx, doc_new, 0, 4, errmsg );
     pdf_drop_document( ctx, doc_new );
@@ -938,15 +941,15 @@ pdf_ocr_create_dialog( InfoWindow* info_window, gint page )
 
 //thread-safe
 static fz_pixmap*
-pdf_ocr_render_images( DocumentPage* document_page, gchar** errmsg )
+pdf_ocr_render_images( PdfDocumentPage* pdf_document_page, gchar** errmsg )
 {
     pdf_document* doc_tmp_orig = NULL;
     fz_pixmap* pixmap = NULL;
 
-    doc_tmp_orig = pdf_ocr_create_doc_with_page( document_page, 1, errmsg ); //thread-safe
+    doc_tmp_orig = pdf_ocr_create_doc_with_page( pdf_document_page, 1, errmsg ); //thread-safe
     if ( !doc_tmp_orig ) ERROR_PAO_R( "pdf_create_doc_with_page", NULL )
 
-    fz_context* ctx = fz_clone_context( document_page->document->ctx );
+    fz_context* ctx = fz_clone_context( zond_pdf_document_get_ctx( pdf_document_page->document ) );
 
     pixmap = pdf_ocr_render_pixmap( ctx, doc_tmp_orig,
             0, 1.2, errmsg );
@@ -1006,7 +1009,7 @@ pdf_ocr_get_text_from_stext_page( fz_context* ctx, fz_stext_page* stext_page,
 
 //thread-safe
 static gchar*
-pdf_ocr_get_hidden_text( DocumentPage* document_page, gchar** errmsg )
+pdf_ocr_get_hidden_text( PdfDocumentPage* pdf_document_page, gchar** errmsg )
 {
     pdf_document* doc_tmp_alt = NULL;
     fz_page* page = NULL;
@@ -1015,10 +1018,10 @@ pdf_ocr_get_hidden_text( DocumentPage* document_page, gchar** errmsg )
     gchar* text = NULL;
 
     //flag == 4: alles außer verstecktem Text herausfiltern
-    doc_tmp_alt = pdf_ocr_create_doc_with_page( document_page, 4, errmsg ); //thread-safe
+    doc_tmp_alt = pdf_ocr_create_doc_with_page( pdf_document_page, 4, errmsg ); //thread-safe
     if ( !doc_tmp_alt ) ERROR_PAO_R( "pdf_create_doc_with_page", NULL )
 
-    fz_context* ctx = fz_clone_context( document_page->document->ctx );
+    fz_context* ctx = fz_clone_context( zond_pdf_document_get_ctx( pdf_document_page->document ) );
 
     fz_try( ctx ) page = fz_load_page( ctx, (fz_document*) doc_tmp_alt, 0 );
     fz_catch( ctx )
@@ -1084,7 +1087,7 @@ pdf_ocr_get_hidden_text( DocumentPage* document_page, gchar** errmsg )
 
 //thread-safe
 static gint
-pdf_ocr_show_text( InfoWindow* info_window, DocumentPage* document_page,
+pdf_ocr_show_text( InfoWindow* info_window, PdfDocumentPage* pdf_document_page,
         TessBaseAPI* handle, TessResultRenderer* renderer, gchar** errmsg )
 {
     gint rc = 0;
@@ -1093,11 +1096,11 @@ pdf_ocr_show_text( InfoWindow* info_window, DocumentPage* document_page,
     gchar* text_neu = NULL;
 
     //Bisherigen versteckten Text
-    text_alt = pdf_ocr_get_hidden_text( document_page, errmsg ); //thread-safe
+    text_alt = pdf_ocr_get_hidden_text( pdf_document_page, errmsg ); //thread-safe
     if ( !text_alt ) ERROR_PAO( "pdf_ocr_get_hidden_text" )
 
     //gerenderte Seite ohne sichtbaren Text
-    pixmap_orig = pdf_ocr_render_images( document_page, errmsg ); //thread-safe
+    pixmap_orig = pdf_ocr_render_images( pdf_document_page, errmsg ); //thread-safe
     if ( !pixmap_orig )
     {
         g_free( text_alt );
@@ -1107,10 +1110,10 @@ pdf_ocr_show_text( InfoWindow* info_window, DocumentPage* document_page,
     //Eigene OCR
     //Wenn angezeigt werden soll, dann muß Seite erstmal OCRed werden
     //Um Vergleich zu haben
-    rc = pdf_ocr_page( document_page, info_window, handle, renderer, errmsg ); //thread-safe
+    rc = pdf_ocr_page( pdf_document_page, info_window, handle, renderer, errmsg ); //thread-safe
     if ( rc )
     {
-        fz_context* ctx = fz_clone_context( document_page->document->ctx );
+        fz_context* ctx = fz_clone_context( zond_pdf_document_get_ctx( pdf_document_page->document ) );
         fz_drop_pixmap( ctx, pixmap_orig );
         fz_drop_context( ctx );
         g_free( text_alt );
@@ -1163,7 +1166,7 @@ pdf_ocr_show_text( InfoWindow* info_window, DocumentPage* document_page,
     gtk_box_pack_start( GTK_BOX(vbox), hbox, FALSE, FALSE, 0 );
     gtk_box_pack_start( GTK_BOX(vbox), swindow, TRUE, TRUE, 0 );
 
-    gint page = document_get_index_of_document_page( document_page );
+    gint page = zond_pdf_document_get_index( pdf_document_page );
     GtkWidget* dialog = pdf_ocr_create_dialog( info_window, page + 1 );
 
     GtkWidget* content_area =
@@ -1180,7 +1183,7 @@ pdf_ocr_show_text( InfoWindow* info_window, DocumentPage* document_page,
     rc = gtk_dialog_run( GTK_DIALOG(dialog) );
 
     gtk_widget_destroy( dialog );
-    fz_context* ctx = fz_clone_context( document_page->document->ctx );
+    fz_context* ctx = fz_clone_context( zond_pdf_document_get_ctx( pdf_document_page->document ) );
     fz_drop_pixmap( ctx, pixmap_orig );
     fz_drop_context( ctx );
 
@@ -1190,25 +1193,25 @@ pdf_ocr_show_text( InfoWindow* info_window, DocumentPage* document_page,
 
 /** thread-safe **/
 static gint
-pdf_ocr_page_has_hidden_text( DocumentPage* document_page, gchar** errmsg )
+pdf_ocr_page_has_hidden_text( PdfDocumentPage* pdf_document_page, gchar** errmsg )
 {
     fz_buffer* buf = NULL;
     gchar* data = NULL;
     gchar* ptr = NULL;
     size_t size = 0;
 
-    g_mutex_lock( &document_page->document->mutex_doc );
+    zond_pdf_document_mutex_lock( pdf_document_page->document );
 
-    fz_context* ctx = document_page->document->ctx;
+    fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
 
-    pdf_page* pdf_page = pdf_page_from_fz_page( ctx, document_page->page );
+    pdf_page* pdf_page = pdf_page_from_fz_page( ctx, pdf_document_page->page );
 
     pdf_obj* page_ref = pdf_page->obj;
 
     buf = pdf_ocr_get_content_stream_as_buffer( ctx, page_ref, errmsg );
     if ( !buf )
     {
-        g_mutex_unlock( &document_page->document->mutex_doc );
+        zond_pdf_document_mutex_unlock( pdf_document_page->document );
         ERROR_PAO( "pdf_ocr_get_content_stream_as_buffer" )
     }
 
@@ -1224,7 +1227,7 @@ pdf_ocr_page_has_hidden_text( DocumentPage* document_page, gchar** errmsg )
             if ( *ptr == 'T' && *(ptr + 1) == 'r' )
             {
                 fz_drop_buffer( ctx, buf );
-                g_mutex_unlock( &document_page->document->mutex_doc );
+                zond_pdf_document_mutex_unlock( pdf_document_page->document );
 
                 return 1;
             }
@@ -1233,7 +1236,7 @@ pdf_ocr_page_has_hidden_text( DocumentPage* document_page, gchar** errmsg )
     }
     fz_drop_buffer( ctx, buf );
 
-    g_mutex_unlock( &document_page->document->mutex_doc );
+    zond_pdf_document_mutex_unlock( pdf_document_page->document );
 
     return 0;
 }
@@ -1258,16 +1261,16 @@ pdf_ocr_create_pdf_only_text( InfoWindow* info_window,
 
         zaehler++;
 
-        DocumentPage* document_page = g_ptr_array_index( arr_document_pages, i );
-        gint index = document_get_index_of_document_page( document_page );
+        PdfDocumentPage* pdf_document_page = g_ptr_array_index( arr_document_pages, i );
+        gint index = zond_pdf_document_get_index( pdf_document_page );
 
         gchar* info_text = g_strdup_printf( "(%i/%i) %s, Seite %i",
-                zaehler, len, document_page->document->path,
+                zaehler, len, zond_pdf_document_get_path( pdf_document_page->document ),
                 index + 1 );
         info_window_set_message( info_window, info_text );
         g_free( info_text );
 
-        rc = pdf_ocr_page_has_hidden_text( document_page, errmsg ); //thread_safe
+        rc = pdf_ocr_page_has_hidden_text( pdf_document_page, errmsg ); //thread_safe
         if ( rc == -1 ) ERROR_PAO( "pdf_ocr_page_has_hidden_text" )
 
         if ( rc == 1 && alle == 0 )
@@ -1282,7 +1285,7 @@ pdf_ocr_create_pdf_only_text( InfoWindow* info_window,
             //Wenn Anzeigen gewählt wird, dialog in Unterfunktion neu starten
             if ( rc == 5 )
             {
-                rc = pdf_ocr_show_text( info_window, document_page, handle,
+                rc = pdf_ocr_show_text( info_window, pdf_document_page, handle,
                         renderer, errmsg ); //thread-safe
                 if ( rc == -1 ) ERROR_PAO( "pdf_ocr_show_text" )
                 rendered = TRUE;
@@ -1302,7 +1305,7 @@ pdf_ocr_create_pdf_only_text( InfoWindow* info_window,
             if ( rc == 4 ) break;
         }
 
-        if ( !rendered ) rc = pdf_ocr_page( document_page, info_window, handle,
+        if ( !rendered ) rc = pdf_ocr_page( pdf_document_page, info_window, handle,
                 renderer, errmsg ); //thread-safe
         if ( rc ) ERROR_PAO( "pdf_ocr_page" )
 

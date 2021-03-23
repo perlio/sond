@@ -6,7 +6,7 @@
 typedef struct fz_context fz_context;
 typedef struct fz_document fz_document;
 typedef struct _Projekt Projekt;
-typedef struct _Document_Page DocumentPage;
+typedef struct _Pdf_Document_Page PdfDocumentPage;
 
 typedef int gint;
 typedef char gchar;
@@ -27,6 +27,6 @@ float pdf_get_rotate( fz_context*, pdf_obj* );
 gint pdf_copy_page( fz_context*, pdf_document*, gint, gint, pdf_document*,
         gint, gchar** );
 
-gint pdf_render_stext_page_direct( DocumentPage*, gchar** );
+gint pdf_render_stext_page_direct( PdfDocumentPage*, gchar** );
 
 #endif // PDF_DATEIEN_H_INCLUDED

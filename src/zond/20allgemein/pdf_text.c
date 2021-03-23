@@ -16,6 +16,11 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+#include <gtk/gtk.h>
+#include <mupdf/fitz.h>
+
+#include "../zond_pdf_document.h"
+
 #include "../error.h"
 #include "../global_types.h"
 
@@ -32,8 +37,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../40viewer/document.h"
 #include "../40viewer/render.h"
 
-#include <gtk/gtk.h>
-#include <mupdf/fitz.h>
 
 typedef struct _Pdf_Viewer PdfViewer;
 
@@ -323,47 +326,52 @@ static gint
 pdf_textsuche_pdf( Projekt* zond, const gchar* rel_path, const gchar* search_text,
         GArray* arr_pdf_text_occ, InfoWindow* info_window, gchar** errmsg )
 {
+    gint rc = 0;
     DisplayedDocument* dd = NULL;
+    GPtrArray* arr_pdf_document_pages = NULL;
+    fz_context* ctx = NULL;
 
     dd = document_new_displayed_document( zond, rel_path, NULL, errmsg );
     if ( !dd ) ERROR_PAO( "pdf_textsuche_pdf" )
 
-    gint rc = 0;
-    fz_context* ctx = dd->document->ctx;
+    ctx = zond_pdf_document_get_ctx( dd->zond_pdf_document );
+    arr_pdf_document_pages = zond_pdf_document_get_arr_pages( dd->zond_pdf_document );
 
-    for ( gint i = 0; i < dd->document->pages->len; i++ )
+    for ( gint i = 0; i < arr_pdf_document_pages->len; i++ )
     {
         gint anzahl = 0;
         fz_quad quads[100] = { 0 };
 
-        if ( DOCUMENT_PAGE(i)->stext_page->first_block == NULL )
-        {
-            g_mutex_lock( &dd->document->mutex_doc );
+        PdfDocumentPage* pdf_document_page = g_ptr_array_index( arr_pdf_document_pages, i );
 
-            if ( !fz_display_list_is_empty( ctx, DOCUMENT_PAGE(i)->display_list ) )
+        if ( pdf_document_page->stext_page->first_block == NULL )
+        {
+            zond_pdf_document_mutex_lock( dd->zond_pdf_document );
+
+            if ( !fz_display_list_is_empty( ctx, pdf_document_page->display_list ) )
             {
-                rc = render_display_list_to_stext_page( ctx, DOCUMENT_PAGE(i), errmsg );
-                g_mutex_unlock( &dd->document->mutex_doc );
+                rc = render_display_list_to_stext_page( ctx, pdf_document_page, errmsg );
+                zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
                 if ( rc )
                 {
-                    document_free_displayed_documents( zond, dd );
+                    document_free_displayed_documents( dd );
                     ERROR_PAO( "render_display_list_to_stext_page" )
                 }
             }
             else //wenn display_list noch nicht erzeugt, dann direkt aus page erzeugen
             {
-                rc = pdf_render_stext_page_direct( DOCUMENT_PAGE(i), errmsg );
-                g_mutex_unlock( &dd->document->mutex_doc );
+                rc = pdf_render_stext_page_direct( pdf_document_page, errmsg );
+                zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
                 if ( rc )
                 {
-                    document_free_displayed_documents( zond, dd );
+                    document_free_displayed_documents( dd );
                     ERROR_PAO( "pdf_render_stext_page_direct" )
                 }
             }
         }
 
         anzahl = fz_search_stext_page( ctx,
-                DOCUMENT_PAGE(i)->stext_page, search_text, quads, 99 );
+                pdf_document_page->stext_page, search_text, quads, 99 );
 
         for ( gint u = 0; u < anzahl; u++ )
         {
@@ -385,7 +393,7 @@ pdf_textsuche_pdf( Projekt* zond, const gchar* rel_path, const gchar* search_tex
             fz_stext_block* block = NULL;
             fz_stext_line* line = NULL;
             fz_stext_char* ch = NULL;
-            for ( block = DOCUMENT_PAGE(i)->stext_page->first_block; block; block = block->next )
+            for ( block = pdf_document_page->stext_page->first_block; block; block = block->next )
             {
                 if ( block->type != FZ_STEXT_BLOCK_TEXT ) continue;
 
@@ -457,7 +465,7 @@ pdf_textsuche_pdf( Projekt* zond, const gchar* rel_path, const gchar* search_tex
         }
     }
 
-    document_free_displayed_documents( zond, dd );
+    document_free_displayed_documents( dd );
 
     return 0;
 }

@@ -3,6 +3,8 @@
 #include <gtk/gtk.h>
 #include <ctype.h>
 
+#include "../zond_pdf_document.h"
+
 #include "../global_types.h"
 #include "../error.h"
 
@@ -308,12 +310,12 @@ abfragen_rel_path_and_anbindung( Projekt* zond, Baum baum, gint node_id,
         return 1;
     }
 
-    Document* document = document_geoeffnet( zond, rel_path_intern );
-    if ( document ) g_mutex_lock( &document->mutex_doc );
+    ZondPdfDocument* zond_pdf_document = zond_pdf_document_is_open( rel_path_intern );
+    if ( zond_pdf_document ) zond_pdf_document_mutex_lock( zond_pdf_document );
 
     anbindung_intern = ziel_zu_anbindung( zond->ctx, rel_path_intern, ziel, errmsg );
 
-    if ( document ) g_mutex_unlock( &document->mutex_doc );
+    if ( zond_pdf_document ) zond_pdf_document_mutex_unlock( zond_pdf_document );
 
     ziele_free( ziel );
 

@@ -483,20 +483,6 @@
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
 		</Unit>
-		<Unit filename="src/zond/40viewer/annot.c">
-			<Option compilerVar="CC" />
-			<Option target="zond (Release)" />
-			<Option target="zond (Testing)" />
-			<Option target="Viewer (Release)" />
-			<Option target="Viewer (Testing)" />
-		</Unit>
-		<Unit filename="src/zond/40viewer/annot.h">
-			<Option compile="1" />
-			<Option target="zond (Release)" />
-			<Option target="zond (Testing)" />
-			<Option target="Viewer (Release)" />
-			<Option target="Viewer (Testing)" />
-		</Unit>
 		<Unit filename="src/zond/40viewer/document.c">
 			<Option compilerVar="CC" />
 			<Option target="zond (Release)" />

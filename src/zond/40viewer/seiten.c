@@ -16,6 +16,13 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+#include <mupdf/fitz.h>
+#include <mupdf/pdf.h>
+#include <gtk/gtk.h>
+#include <tesseract/capi.h>
+
+#include "../zond_pdf_document.h"
+
 #include "../global_types.h"
 #include "../error.h"
 
@@ -29,34 +36,26 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "viewer.h"
 #include "render.h"
-#include "annot.h"
 #include "document.h"
 #include "viewer_page.h"
 
 #include "../../misc.h"
 
-#include <mupdf/fitz.h>
-#include <mupdf/pdf.h>
-#include <gtk/gtk.h>
-#include <tesseract/capi.h>
-
 
 static GPtrArray*
-seiten_get_document_pages( PdfViewer* pv, GArray* arr_seiten )
+seiten_get_document_pages( PdfViewer* pv, GArray* arr_seiten_pv )
 {
-    DocumentPage* document_page = NULL;
-
     GPtrArray* arr_document_page = g_ptr_array_new( );
 
-    if ( arr_seiten )
+    if ( arr_seiten_pv )
     {
-        for ( gint i = 0; i < arr_seiten->len; i++ )
+        for ( gint i = 0; i < arr_seiten_pv->len; i++ )
         {
-            document_get_dd( pv, g_array_index( arr_seiten, gint, i ),
-                    &document_page, NULL, NULL );
+            ViewerPage* viewer_page = g_ptr_array_index( pv->arr_pages,
+                    g_array_index( arr_seiten_pv, gint, i ) );
 
-            if ( !g_ptr_array_find( arr_document_page, document_page, NULL ) )
-                    g_ptr_array_add( arr_document_page, document_page );
+            if ( !g_ptr_array_find( arr_document_page, viewer_page_get_document_page( viewer_page ), NULL ) )
+                    g_ptr_array_add( arr_document_page, viewer_page_get_document_page( viewer_page ) );
         }
     }
 
@@ -324,12 +323,12 @@ cb_pv_seiten_ocr( GtkMenuItem* item, gpointer data )
 
     for ( gint i = 0; i < arr_document_page->len; i++ )
     {
-        DocumentPage* document_page = g_ptr_array_index( arr_document_page, i );
+        PdfDocumentPage* pdf_document_page = g_ptr_array_index( arr_document_page, i );
 
-        gint page_doc = document_get_index_of_document_page( document_page );
+        gint page_doc = zond_pdf_document_get_index( pdf_document_page );
 
         //mit mutex sichern...
-        rc = viewer_reload_document_page( pv, document_page->document,
+        rc = zond_pdf_document_page_refresh( pdf_document_page->document,
                 page_doc, 1, &errmsg );
         if ( rc )
         {
@@ -338,7 +337,7 @@ cb_pv_seiten_ocr( GtkMenuItem* item, gpointer data )
             g_free( errmsg );
         }
 
-        rc = viewer_foreach( pv->zond->arr_pv, document_page->document, page_doc, cb_foreach_ocr, NULL, &errmsg );
+        rc = viewer_foreach( pv->zond->arr_pv, pdf_document_page, cb_foreach_ocr, NULL, &errmsg );
         if ( rc )
         {
             meldung( pv->vf, "Fehler - OCR\n\nBei Aufruf viewer_foreach:\n",
@@ -413,15 +412,15 @@ seiten_cb_drehen( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg )
 
 
 static gint
-seiten_drehen_pdf( DocumentPage* document_page, gint winkel, gchar** errmsg )
+seiten_drehen_pdf( PdfDocumentPage* pdf_document_page, gint winkel, gchar** errmsg )
 {
     pdf_page* page = NULL;
     pdf_obj* page_obj = NULL;
     pdf_obj* rotate_obj = NULL;
     gint rotate = 0;
-    fz_context* ctx = document_page->document->ctx;
+    fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
 
-    page = pdf_page_from_fz_page( ctx, document_page->page );
+    page = pdf_page_from_fz_page( ctx, pdf_document_page->page );
     page_obj = page->obj;
 
     rotate_obj = pdf_dict_get_inheritable( ctx, page_obj, PDF_NAME(Rotate) );
@@ -453,28 +452,28 @@ seiten_drehen( PdfViewer* pv, GPtrArray* arr_document_page, gint winkel, gchar**
     {
         gint rc = 0;
 
-        DocumentPage* document_page = g_ptr_array_index( arr_document_page, i );
-        gint page_doc = document_get_index_of_document_page( document_page );
+        PdfDocumentPage* pdf_document_page = g_ptr_array_index( arr_document_page, i );
+        gint page_doc = zond_pdf_document_get_index( pdf_document_page );
 
-        g_mutex_lock( &document_page->document->mutex_doc );
+        zond_pdf_document_mutex_lock( pdf_document_page->document );
 
-        rc = seiten_drehen_pdf( document_page, winkel, errmsg );
+        rc = seiten_drehen_pdf( pdf_document_page, winkel, errmsg );
         if ( rc == -1 )
         {
-            g_mutex_unlock( &document_page->document->mutex_doc );
+            zond_pdf_document_mutex_unlock( pdf_document_page->document );
             ERROR_PAO( "seiten_drehen_pdf" )
         }
 
-        rc = viewer_reload_document_page( pv, document_page->document, page_doc, 3, errmsg );
+        rc = zond_pdf_document_page_refresh( pdf_document_page->document, page_doc, 3, errmsg );
         if ( rc )
         {
-            g_mutex_unlock( &document_page->document->mutex_doc );
-            ERROR_PAO( "viewer_reload_document_page" )
+            zond_pdf_document_mutex_unlock( pdf_document_page->document );
+            ERROR_PAO( "zond_pdf_document_mutex_unlock" )
         }
 
-        g_mutex_unlock( &document_page->document->mutex_doc );
+        zond_pdf_document_mutex_unlock( pdf_document_page->document );
 
-        rc = viewer_foreach( pv->zond->arr_pv, document_page->document, page_doc,
+        rc = viewer_foreach( pv->zond->arr_pv, pdf_document_page,
                 seiten_cb_drehen, GINT_TO_POINTER(winkel), errmsg );
         if ( rc )
         {
@@ -500,8 +499,7 @@ cb_pv_seiten_drehen( GtkMenuItem* item, gpointer data )
     PdfViewer* pv = (PdfViewer*) data;
 
     //zu drehende Seiten holen
-    title = g_strdup_printf( "Seiten drehen (1 - %i):",
-            document_get_num_of_pages_of_pv( pv ) );
+    title = g_strdup_printf( "Seiten drehen (1 - %i):", pv->arr_pages->len );
     arr_document_page = seiten_abfrage_seiten( pv, title, &winkel );
     g_free( title );
 
@@ -573,20 +571,20 @@ seiten_anbindung( PdfViewer* pv, GPtrArray* arr_document_page, gchar** errmsg )
 {
     gint rc = 0;
     GPtrArray* arr_dests = NULL;
-    DocumentPage* document_page = NULL;
 
     arr_dests = g_ptr_array_new_with_free_func( (GDestroyNotify) g_free );
 
     //Alle NamedDests der zu löschenden Seiten sammeln
     for ( gint i = 0; i < arr_document_page->len; i++ )
     {
-        document_page = g_ptr_array_index( arr_document_page, i );
+        PdfDocumentPage* pdf_document_page = g_ptr_array_index( arr_document_page, i );
+        fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
 
-        gint page_doc = document_get_index_of_document_page( document_page );
+        gint page_doc = document_get_index_of_document_page( pdf_document_page );
 
-        rc = pdf_document_get_dest( document_page->document->ctx,
-                pdf_specifics( document_page->document->ctx,
-                document_page->document->doc ), page_doc, (gpointer*) &arr_dests, FALSE, errmsg );
+        rc = pdf_document_get_dest( ctx, pdf_specifics( ctx,
+                zond_pdf_document_get_fz_doc( pdf_document_page->document ) ),
+                page_doc, (gpointer*) &arr_dests, FALSE, errmsg );
         if ( rc )
         {
             g_ptr_array_free( arr_dests, TRUE );
@@ -642,33 +640,36 @@ seiten_loeschen( PdfViewer* pv, GPtrArray* arr_document_page, gchar** errmsg )
         if ( rc == 1 ) return -2;
     }
 
-    fz_context* ctx = pv->dd->document->ctx;
+    fz_context* ctx = zond_pdf_document_get_ctx( pv->dd->zond_pdf_document );
 
     GPtrArray* arr_pv = g_ptr_array_new( );
 
     for ( gint i = arr_document_page->len - 1; i >= 0; i-- )
     {
-        gint page_pv = document_get_index_of_document_page( g_ptr_array_index( arr_document_page, i ) );
+        PdfDocumentPage* pdf_document_page = g_ptr_array_index( arr_document_page, i );
+
+        gint page_doc = zond_pdf_document_get_index( pdf_document_page ); //ist gleich page_pv, da löschen nur bei einem Dokument mglich
 
         //macht - sofern noch nicht geschehen - thread_pool des pv dicht, in dem Seite angezeigt wird
         //Dann wird Seite aus pv gelöscht
         //seiten_cb_loesche_seite gibt niemals Fehler zurück
-        viewer_foreach( pv->zond->arr_pv, pv->dd->document, page_pv,
+        viewer_foreach( pv->zond->arr_pv, pdf_document_page,
                 seiten_cb_loesche_seite, (gpointer) &arr_pv, errmsg );
 
         //Seite aus document entfernen
-        g_ptr_array_remove_index( pv->dd->document->pages, page_pv ); //ist gleich page_doc
+        g_ptr_array_remove_index( zond_pdf_document_get_arr_pages( pv->dd->zond_pdf_document ), page_doc ); //ist gleich page_pv
 
         //Seite aus PDF entfernen
         fz_try( ctx ) pdf_delete_page( ctx, pdf_specifics( ctx,
-                pv->dd->document->doc ), page_pv );
+                zond_pdf_document_get_fz_doc( pv->dd->zond_pdf_document ) ), page_doc );
         fz_catch( ctx )
         {
             g_ptr_array_unref( arr_pv );
             ERROR_MUPDF( "pdf_delete_page" )
         }
 
-        fz_try( ctx ) pdf_clean_document( ctx, pdf_specifics( ctx, pv->dd->document->doc ) );
+        fz_try( ctx ) pdf_clean_document( ctx, pdf_specifics( ctx,
+                zond_pdf_document_get_fz_doc( pv->dd->zond_pdf_document ) ) );
         fz_catch( ctx )
         {
             g_ptr_array_unref( arr_pv );
@@ -766,19 +767,19 @@ seiten_cb_einfuegen( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg 
 
     for ( gint u = page_doc; u < page_doc + count; u++ )
     {
-        DocumentPage* document_page = NULL;
+        PdfDocumentPage* pdf_document_page = NULL;
         fz_rect crop = { 0, };
 
-        document_page = g_ptr_array_index( dd->document->pages, u );
+        pdf_document_page = g_ptr_array_index( zond_pdf_document_get_arr_pages( dd->zond_pdf_document ), u );
 
-        crop = document_page->rect;
+        crop = pdf_document_page->rect;
         if ( dd->anbindung )
         {
             crop.y0 = (u == dd->anbindung->von.seite) ? (gfloat) dd->anbindung->von.index : crop.y0;
             crop.y1 = (u == dd->anbindung->bis.seite) ? (gfloat) dd->anbindung->bis.index : crop.y1;
         }
 
-        ViewerPage* viewer_page = viewer_page_new_full( pv, document_page, crop );
+        ViewerPage* viewer_page = viewer_page_new_full( pv, pdf_document_page, crop );
         g_ptr_array_insert( pv->arr_pages, page_pv + u, viewer_page );
 
         viewer_insert_thumb( pv, page_pv + u );
@@ -854,19 +855,18 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
 
     gint ret = 0;
     gint rc = 0;
-    guint num = 0;
-    DisplayedDocument* dd = NULL;
+    guint pos = 0;
     pdf_document* doc_merge = NULL;
     gint count = 0;
     gint count_old = 0;
     fz_context* ctx = NULL;
     gchar* errmsg = NULL;
 
-    ret = seiten_abfrage_seitenzahl( pv, &num );
+    ret = seiten_abfrage_seitenzahl( pv, &pos );
     if ( ret == -1 ) return;
 
-    count_old = pv->dd->document->pages->len;
-    if ( num > count_old )
+    count_old = zond_pdf_document_get_number_of_pages( pv->dd->zond_pdf_document );
+    if ( pos > count_old )
     {
         meldung( pv->vf, "Dokument hat ja gar \nnicht so viele Seiten", NULL );
 
@@ -887,7 +887,7 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
 
             return;
         }
-
+/*
         dd = document_new_displayed_document( pv->zond, path_merge, NULL, &errmsg );
         g_free( path_merge );
         if ( !dd )
@@ -897,60 +897,38 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
 
             return;
         }
-        ctx = dd->document->ctx;
-        doc_merge = pdf_specifics( ctx, dd->document->doc );
+        ctx = zond_pdf_document_get_ctx( dd->zond_pdf_document );
+*/
+        fz_document* fz_doc = mupdf_dokument_oeffnen( pv->zond->ctx, path_merge, &errmsg );
+        g_free( path_merge );
+        if ( !fz_doc )
+        {
+            meldung( pv->vf, "Fehler Datei einfügen -\n\nBei Aufruf "
+                    "mupdf_dokument_oeffnen:\n", errmsg, NULL );
+            g_free( errmsg );
+
+            return;
+        }
+
+        doc_merge = pdf_specifics( pv->zond->ctx, fz_doc );
     }
     else if ( ret == 2 )
     {
-        ctx = pv->zond->ctx;
+//        ctx = pv->zond->ctx;
         doc_merge = pdf_keep_document( ctx, pv->zond->pv_clip ); //Clipboard
     }
 
-    count = pdf_count_pages( ctx, doc_merge );
-    if ( count == 0 )
-    {
-        meldung( pv->vf, "Fehler Einfügen-\n\nKeine Seiten!", NULL );
-        if ( ret == 1 ) document_free_displayed_documents( pv->zond, dd );
-        if ( ret == 2 ) pdf_drop_document( ctx, doc_merge );
+    zond_pdf_document_mutex_lock( pv->dd->zond_pdf_document );
+    rc = zond_pdf_document_insert_pages( pv->dd->zond_pdf_document, pos, pdf_count_pages( pv->zond->ctx, doc_merge ),
+            pv->zond->ctx, doc_merge, &errmsg );
+    zond_pdf_document_mutex_unlock( pv->dd->zond_pdf_document );
 
-        return;
-    }
+    pdf_drop_document(pv->zond->ctx, doc_merge );
 
-    g_mutex_lock( &pv->dd->document->mutex_doc );
 
-    //einfügen in doc
-    rc = pdf_copy_page( ctx, doc_merge, 0, count - 1,
-            pdf_specifics( pv->dd->document->ctx,  pv->dd->document->doc ), num, &errmsg );
-
-    //nur wenn Datei ausgewählt und dd erzeugt wurde:
-    if ( ret == 1 ) document_free_displayed_documents( pv->zond, dd );
-    if ( ret == 2 ) pdf_drop_document( ctx, doc_merge );
-
-    if ( rc )
-    {
-        meldung( pv->vf, "Fehler Einfügen -\n\nBei Aufruf pdf_copy_page:\n",
-                errmsg, NULL );
-        g_free( errmsg );
-        g_mutex_unlock( &pv->dd->document->mutex_doc );
-
-        return;
-    }
-
-    rc = document_insert_pages( pv->dd->document, num, count, &errmsg );
-    if ( rc )
-    {
-        meldung( pv->vf, "Fehler bei Einfügen\n\nBei Aufruf document_insert_"
-                "pages:\n", errmsg, NULL );
-        g_free( errmsg );
-        g_mutex_unlock( &pv->dd->document->mutex_doc );
-
-        return;
-    }
-
-    g_mutex_unlock( &pv->dd->document->mutex_doc );
-
-    rc = viewer_foreach( pv->zond->arr_pv, pv->dd->document, num,
-            seiten_cb_einfuegen, GINT_TO_POINTER(count), &errmsg );
+    rc = viewer_foreach( pv->zond->arr_pv,
+            zond_pdf_document_get_pdf_document_page( pv->dd->zond_pdf_document,
+            pos ), seiten_cb_einfuegen, GINT_TO_POINTER(count), &errmsg );
     if ( rc )
     {
         meldung( pv->vf, "Fehler Einfügen -\n\nBei Aufruf viewer_foreach:\n",
@@ -970,14 +948,17 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
 static pdf_document*
 seiten_create_document( PdfViewer* pv, GArray* arr_page_pv, gchar** errmsg )
 {
-    fz_context* ctx = NULL;
     pdf_document* doc_dest = NULL;
     gint rc = 0;
 
-    ctx = pv->zond->ctx;
+    fz_try( pv->zond->ctx ) doc_dest = pdf_create_document( pv->zond->ctx );
+    fz_catch( pv->zond->ctx )
+    {
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf pdf_create_document:\n",
+                fz_caught_message( pv->zond->ctx ), NULL );
 
-    fz_try( ctx ) doc_dest = pdf_create_document( ctx );
-    fz_catch( ctx ) ERROR_MUPDF_R( "pdf_create_document", NULL )
+        return NULL;
+    }
 
     for ( gint i = 0; i < arr_page_pv->len; i++ )
     {
@@ -988,13 +969,13 @@ seiten_create_document( PdfViewer* pv, GArray* arr_page_pv, gchar** errmsg )
 
         dd = document_get_dd( pv, page_pv, NULL, NULL, &page_doc );
 
-        g_mutex_lock( &dd->document->mutex_doc );
-        rc = pdf_copy_page( ctx, pdf_specifics( dd->document->ctx,
-                dd->document->doc ), page_doc, page_doc, doc_dest, -1, errmsg );
-        g_mutex_unlock( &dd->document->mutex_doc );
+        zond_pdf_document_mutex_lock( dd->zond_pdf_document );
+        rc = pdf_copy_page( pv->zond->ctx, pdf_specifics( zond_pdf_document_get_ctx( dd->zond_pdf_document ),
+                zond_pdf_document_get_fz_doc( dd->zond_pdf_document ) ), page_doc, page_doc, doc_dest, -1, errmsg );
+        zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
         if ( rc )
         {
-            pdf_drop_document( ctx, doc_dest );
+            pdf_drop_document( pv->zond->ctx, doc_dest );
 
             ERROR_PAO_R( "pdf_copy_page", NULL )
         }

@@ -19,8 +19,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "zond_pdf_document.h"
 
 #include <mupdf/fitz.h>
+#include <glib/gstdio.h>
 
 #include "99conv/mupdf.h"
+#include "99conv/pdf.h"
 
 #include "../misc.h"
 
@@ -92,13 +94,34 @@ zond_pdf_document_get_property (GObject    *object,
 
 
 static void
+zond_pdf_document_close_doc_tmp( ZondPdfDocument* self )
+{
+    gchar* path_tmp = NULL;
+
+    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( ZOND_PDF_DOCUMENT(self) );
+
+    fz_drop_document( priv->ctx, priv->doc );
+
+    path_tmp = g_strconcat( priv->path, ".tmp", NULL );
+    if ( g_remove( path_tmp ) ) display_message( NULL, "Datei ", priv->path,
+            ".tmp konnte nicht gelöscht werden.\n\nBei Aufruf g_remove:\n",
+            strerror( errno ), NULL );
+    g_free( path_tmp );
+
+    return;
+}
+
+
+static void
 zond_pdf_document_finalize( GObject* self )
 {
     ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( ZOND_PDF_DOCUMENT(self) );
 
-    fz_drop_document( priv->ctx, priv->doc );
-    fz_drop_context( priv->ctx );
     g_ptr_array_unref( priv->pages );
+
+    zond_pdf_document_close_doc_tmp( ZOND_PDF_DOCUMENT(self) );
+    mupdf_close_context( priv->ctx ); //ToDo: Prüfen, ob drop_context nicht ausreicht...
+
     g_free( priv->path );
     g_free( priv->errmsg );
     g_mutex_clear( &priv->mutex_doc );
@@ -193,6 +216,20 @@ zond_pdf_document_page_load_annots( PdfDocumentPage* pdf_document_page )
 
 
 static gint
+zond_pdf_document_load_stext_page( ZondPdfDocument* self, gint page_doc, gchar** errmsg )
+{
+    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
+    PdfDocumentPage* pdf_document_page = g_ptr_array_index( priv->pages, page_doc );
+
+    fz_try( priv->ctx ) pdf_document_page->stext_page =
+            fz_new_stext_page( priv->ctx, pdf_document_page->rect );
+    fz_catch( priv->ctx ) ERROR_MUPDF_CTX( "fz_new_stext_page", priv->ctx )
+
+    return 0;
+}
+
+
+static gint
 zond_pdf_document_load_page( ZondPdfDocument* self, gint page_doc, gchar** errmsg )
 {
     ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
@@ -200,11 +237,7 @@ zond_pdf_document_load_page( ZondPdfDocument* self, gint page_doc, gchar** errms
 
     fz_try( priv->ctx ) pdf_document_page->page =
             fz_load_page( priv->ctx, priv->doc, page_doc );
-    fz_catch( priv->ctx )
-    {
-        g_free( pdf_document_page );
-        ERROR_MUPDF_CTX( "fz_load_page", priv->ctx );
-    }
+    fz_catch( priv->ctx ) ERROR_MUPDF_CTX( "fz_load_page", priv->ctx );
 
     pdf_document_page->rect = fz_bound_page( priv->ctx, pdf_document_page->page );
 
@@ -213,19 +246,31 @@ zond_pdf_document_load_page( ZondPdfDocument* self, gint page_doc, gchar** errms
     fz_catch( priv->ctx )
     {
         fz_drop_page( priv->ctx, pdf_document_page->page );
-        g_free( pdf_document_page );
         ERROR_MUPDF_CTX( "fz_new_display_list", priv->ctx );
     }
 
-    fz_try( priv->ctx ) pdf_document_page->stext_page =
-            fz_new_stext_page( priv->ctx, pdf_document_page->rect );
-    fz_catch( priv->ctx )
-    {
-        fz_drop_display_list( priv->ctx, pdf_document_page->display_list );
-        fz_drop_page( priv->ctx, pdf_document_page->page );
-        g_free( pdf_document_page );
-        ERROR_MUPDF_CTX( "fz_new_stext_page", priv->ctx )
-    }
+    return 0;
+}
+
+
+static gint
+zond_pdf_document_page_init( ZondPdfDocument* self, gint index, gchar** errmsg )
+{
+    gint rc = 0;
+
+    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( ZOND_PDF_DOCUMENT(self) );
+
+    PdfDocumentPage* pdf_document_page = g_malloc0( sizeof( PdfDocumentPage ) );
+    ((priv->pages)->pdata)[index] = pdf_document_page;
+
+    pdf_document_page->document = self; //keine ref!
+    pdf_document_page->arr_annots = g_ptr_array_new_with_free_func( zond_pdf_document_page_annot_free );
+
+    rc = zond_pdf_document_load_page( self, index, errmsg );
+    if ( rc == -1 ) ERROR_SOND( "zond_pdf_document_load_page" )
+
+    rc = zond_pdf_document_load_stext_page( self, index, errmsg );
+    if ( rc == -1 ) ERROR_SOND( "zond_pdf_document_load_stext_page" )
 
     zond_pdf_document_page_load_annots( pdf_document_page );
 
@@ -233,31 +278,45 @@ zond_pdf_document_load_page( ZondPdfDocument* self, gint page_doc, gchar** errms
 }
 
 
-static gint
-zond_pdf_document_init_page( ZondPdfDocument* self, gint index, gchar** errmsg )
+static fz_document*
+zond_pdf_document_doc_tmp_open( ZondPdfDocument* self, gchar** errmsg )
 {
-    gint rc = 0;
+    fz_document* doc = NULL;
+    gchar* path_tmp = NULL;
+    gboolean success = FALSE;
+    GError* error = NULL;
 
     ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( ZOND_PDF_DOCUMENT(self) );
 
-    PdfDocumentPage* pdf_document_page = g_malloc0( sizeof( PdfDocumentPage ) );
+    //Datei auf *.tmp kopieren
+    path_tmp = g_strconcat( priv->path, ".tmp", NULL );
+    GFile* orig = g_file_new_for_path( priv->path );
+    GFile* tmp = g_file_new_for_path( path_tmp );
 
-    pdf_document_page->document = self; //keine ref!
-    pdf_document_page->arr_annots = g_ptr_array_new_with_free_func( zond_pdf_document_page_annot_free );
-
-    rc = zond_pdf_document_load_page( self, index, errmsg );
-    if ( rc == -1 )
+    success = g_file_copy( orig, tmp, G_FILE_COPY_NONE, NULL, NULL, NULL, &error );
+    g_object_unref( orig );
+    g_object_unref( tmp );
+    if ( !success )
     {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf zond_load_page:\n",
-                errmsg, NULL );
-        g_free( errmsg );
+        g_free( path_tmp );
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_file_copy:\n",
+                error->message, NULL );
+        g_error_free( error );
 
-        return -1;
+        return NULL;
     }
 
-    ((priv->pages)->pdata)[index] = pdf_document_page;
+    doc = mupdf_dokument_oeffnen( priv->ctx, path_tmp, errmsg );
 
-    return 0;
+    if ( !doc )
+    {
+        if ( errmsg ) *errmsg = add_string( g_strdup( "Bei Aufruf mupdf_dokument_oeffnen:\n" ),
+                *errmsg );
+
+        return NULL;
+    }
+
+    return doc;
 }
 
 
@@ -269,10 +328,10 @@ zond_pdf_document_constructed( GObject* self )
 
     ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( ZOND_PDF_DOCUMENT(self) );
 
-    priv->doc = mupdf_dokument_oeffnen( priv->ctx, priv->path, &errmsg );
+    priv->doc = zond_pdf_document_doc_tmp_open( ZOND_PDF_DOCUMENT(self), &errmsg );
     if ( !priv->doc )
     {
-        priv->errmsg = g_strconcat( "Bei Aufruf mupdfdocument_oeffnen:\n",
+        priv->errmsg = g_strconcat( "Bei Aufruf mupdf_dokument_oeffnen:\n",
                 errmsg, NULL );
         g_free( errmsg );
 
@@ -293,7 +352,7 @@ zond_pdf_document_constructed( GObject* self )
     {
         gint rc = 0;
 
-        rc = zond_pdf_document_init_page( ZOND_PDF_DOCUMENT(self), i, &errmsg );
+        rc = zond_pdf_document_page_init( ZOND_PDF_DOCUMENT(self), i, &errmsg );
         if ( rc == -1 )
         {
             priv->errmsg = g_strconcat( "bei Aufruf document_load_page:\n",
@@ -364,19 +423,22 @@ zond_pdf_document_init( ZondPdfDocument* self )
 
 
 ZondPdfDocument*
-zond_pdf_document_open( gchar* path, gchar** errmsg )
+zond_pdf_document_open( const gchar* path, gchar** errmsg )
 {
     ZondPdfDocument* zond_pdf_document = NULL;
     ZondPdfDocumentPrivate* priv = NULL;
 
-    ZondPdfDocumentClass* klass = g_type_class_peek_static( zond_pdf_document_get_type( ) );
+    ZondPdfDocumentClass* klass = g_type_class_peek( ZOND_TYPE_PDF_DOCUMENT );
 
-    for ( gint i = 0; i < klass->arr_pdf_documents->len; i++ )
+    if ( klass )
     {
-        zond_pdf_document = g_ptr_array_index( klass->arr_pdf_documents, i );
-        ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( zond_pdf_document );
+        for ( gint i = 0; i < klass->arr_pdf_documents->len; i++ )
+        {
+            zond_pdf_document = g_ptr_array_index( klass->arr_pdf_documents, i );
+            ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( zond_pdf_document );
 
-        if ( !g_strcmp0( priv->path, path ) ) return g_object_ref( zond_pdf_document );
+            if ( !g_strcmp0( priv->path, path ) ) return g_object_ref( zond_pdf_document );
+        }
     }
 
     zond_pdf_document = g_object_new( ZOND_TYPE_PDF_DOCUMENT, "path", path, NULL );
@@ -391,7 +453,113 @@ zond_pdf_document_open( gchar* path, gchar** errmsg )
         return NULL;
     }
 
+    if ( klass ) g_ptr_array_add( klass->arr_pdf_documents, zond_pdf_document );
+
     return zond_pdf_document;
+}
+
+
+const ZondPdfDocument*
+zond_pdf_document_is_open( const gchar* path )
+{
+    ZondPdfDocumentClass* klass = g_type_class_peek_static( zond_pdf_document_get_type( ) );
+
+    for ( gint i = 0; i < klass->arr_pdf_documents->len; i++ )
+    {
+        ZondPdfDocument* zond_pdf_document = g_ptr_array_index( klass->arr_pdf_documents, i );
+        ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( zond_pdf_document );
+
+        if ( !g_strcmp0( priv->path, path ) ) return zond_pdf_document;
+    }
+
+    return NULL;
+}
+
+
+gint
+zond_pdf_document_save( ZondPdfDocument* self, gchar** errmsg )
+{
+    gint rc = 0;
+
+    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
+
+    if ( priv->dirty )
+    {
+        rc = mupdf_save_doc( priv->ctx,
+                pdf_specifics( priv->ctx, priv->doc ), priv->path, errmsg );
+        if ( rc )
+        {
+            if ( errmsg ) *errmsg = add_string( g_strdup( "Bei Aufruf mupdf_save_doc:\n" ),
+                    *errmsg );
+
+            return -1;
+        }
+
+        priv->dirty = FALSE;
+    }
+
+    return 0;
+}
+
+
+void
+zond_pdf_document_close_doc_and_pages( ZondPdfDocument* self )
+{
+    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
+
+    for ( gint i = 0; i < priv->pages->len; i++ )
+    {
+        PdfDocumentPage* pdf_document_page = g_ptr_array_index( priv->pages, i );
+        fz_drop_page( priv->ctx, pdf_document_page->page );
+        pdf_document_page->page = NULL;
+    }
+
+    fz_drop_document( priv->ctx, priv->doc );
+    priv->doc = NULL;
+
+    return;
+}
+
+
+gint
+zond_pdf_document_reopen_doc_and_pages( ZondPdfDocument* self, gchar** errmsg )
+{
+    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
+
+    priv->doc = mupdf_dokument_oeffnen( priv->ctx, priv->path, errmsg );
+    if ( !priv->doc ) ERROR_SOND( "mupdf_dokument_oeffnen" )
+
+    //Seiten wieder laden
+    for ( gint i = 0; i < priv->pages->len; i++ )
+    {
+        fz_try( priv->ctx ) ((PdfDocumentPage*) ((priv->pages)->pdata)[i])->page =
+                fz_load_page( priv->ctx, priv->doc, i );
+        fz_catch( priv->ctx ) ERROR_MUPDF_CTX( "fz_load_page", priv->ctx )
+    }
+
+    return 0;
+}
+
+
+gboolean
+zond_pdf_document_is_dirty( ZondPdfDocument* self )
+{
+    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
+
+    if ( priv->dirty ) return TRUE;
+
+    return FALSE;
+}
+
+
+void
+zond_pdf_document_set_dirty( ZondPdfDocument* self, gboolean dirty )
+{
+    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
+
+    priv->dirty = dirty;
+
+    return;
 }
 
 
@@ -402,3 +570,173 @@ zond_pdf_document_close( ZondPdfDocument* zond_pdf_document )
 
     return;
 }
+
+
+fz_document*
+zond_pdf_document_get_fz_doc( ZondPdfDocument* self )
+{
+    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
+
+    return priv->doc;
+}
+
+
+GPtrArray*
+zond_pdf_document_get_arr_pages( ZondPdfDocument* self )
+{
+    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
+
+    return priv->pages;
+}
+
+
+PdfDocumentPage*
+zond_pdf_document_get_pdf_document_page( ZondPdfDocument* self, gint page_doc )
+{
+    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
+
+    return g_ptr_array_index( priv->pages, page_doc );
+}
+
+
+gint
+zond_pdf_document_get_number_of_pages( ZondPdfDocument* self )
+{
+    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
+
+    return priv->pages->len;
+}
+
+
+fz_context*
+zond_pdf_document_get_ctx( ZondPdfDocument* self )
+{
+    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
+
+    return priv->ctx;
+}
+
+
+gchar*
+zond_pdf_document_get_path( ZondPdfDocument* self )
+{
+    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
+
+    return priv->path;
+}
+
+
+gint
+zond_pdf_document_get_index( PdfDocumentPage* pdf_document_page )
+{
+    guint index = 0;
+
+    ZondPdfDocumentPrivate* priv =
+            zond_pdf_document_get_instance_private( pdf_document_page->document );
+
+    if ( g_ptr_array_find( priv->pages, pdf_document_page, &index ) ) return index;
+
+    return -1;
+}
+
+
+void
+zond_pdf_document_mutex_lock( ZondPdfDocument* self )
+{
+    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
+
+    g_mutex_lock( &priv->mutex_doc );
+
+    return;
+}
+
+
+void
+zond_pdf_document_mutex_unlock( ZondPdfDocument* self )
+{
+    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
+
+    g_mutex_unlock( &priv->mutex_doc );
+
+    return;
+}
+
+
+gint
+zond_pdf_document_page_refresh( ZondPdfDocument* self, gint page_doc,
+        gint flags, gchar** errmsg )
+{
+    gint rc = 0;
+
+    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
+
+    fz_context* ctx = priv->ctx;
+
+    PdfDocumentPage* pdf_document_page = g_ptr_array_index( priv->pages, page_doc );
+
+    //Seite clearen
+    fz_drop_page( ctx, pdf_document_page->page );
+    fz_drop_display_list( ctx, pdf_document_page->display_list );
+
+    rc = zond_pdf_document_load_page( self, page_doc, errmsg );
+    if ( rc == -1 ) ERROR_SOND( "zond_pdf_document_load_page" )
+
+    if ( flags & 1 )
+    {
+        fz_drop_stext_page( ctx, pdf_document_page->stext_page );
+        pdf_document_page->stext_page = NULL;
+
+        zond_pdf_document_load_stext_page( self, page_doc, errmsg );
+        if ( rc ) ERROR_SOND( "zond_pdf_document_load_stext_page" )
+    }
+    if ( flags & 2 )
+    {
+        g_ptr_array_remove_range( pdf_document_page->arr_annots, 0, pdf_document_page->arr_annots->len );
+
+        zond_pdf_document_page_load_annots( pdf_document_page );
+    }
+
+    return 0;
+}
+
+
+gint
+zond_pdf_document_insert_pages( ZondPdfDocument* zond_pdf_document, gint pos,
+        gint num, fz_context* ctx, pdf_document* pdf_doc, gchar** errmsg )
+{
+    gint rc = 0;
+    gint count = 0;
+
+    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( zond_pdf_document );
+
+    count = pdf_count_pages( ctx, pdf_doc );
+    if ( count == 0 ) return 0;
+
+    //einfügen in doc
+    rc = pdf_copy_page( ctx, pdf_doc, 0, pdf_count_pages( ctx, pdf_doc ) - 1,
+            pdf_specifics( zond_pdf_document_get_ctx( zond_pdf_document ),
+            zond_pdf_document_get_fz_doc( zond_pdf_document ) ), pos, errmsg );
+    if ( rc ) ERROR_SOND( "pdf_copy-page" )
+
+    for ( gint i = 0; i < count; i++ )
+    {
+        gint rc = 0;
+
+        g_ptr_array_insert( priv->pages, pos + i, NULL );
+
+        rc = zond_pdf_document_page_init( zond_pdf_document, pos + i, errmsg );
+        if ( rc == -1 ) ERROR_SOND( "zond_pdf_document_page_init" )
+    }
+
+    for ( gint i = pos + count; i < priv->pages->len; i++ )
+    {
+        gint rc = 0;
+
+        rc = zond_pdf_document_page_refresh( zond_pdf_document, i, 2, errmsg );
+        if ( rc == -1 ) ERROR_SOND( "zond_pdf_document_page_refresh" )
+    }
+
+    return 0;
+}
+
+

@@ -8,7 +8,7 @@
 G_BEGIN_DECLS
 
 typedef struct _Pdf_Viewer PdfViewer;
-typedef struct _Document_Page DocumentPage;
+typedef struct _Pdf_Document_Page PdfDocumentPage;
 
 
 #define VIEWER_TYPE_PAGE viewer_page_get_type( )
@@ -21,9 +21,9 @@ struct _ViewerPageClass
 };
 
 
-ViewerPage* viewer_page_new_full( PdfViewer*, DocumentPage*, fz_rect );
+ViewerPage* viewer_page_new_full( PdfViewer*, PdfDocumentPage*, fz_rect );
 
-DocumentPage* viewer_page_get_document_page( ViewerPage* );
+PdfDocumentPage* viewer_page_get_document_page( ViewerPage* );
 
 fz_rect viewer_page_get_crop( ViewerPage* );
 

@@ -22,6 +22,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <sqlite3.h>
 #include <tesseract/capi.h>
 
+#include "../zond_pdf_document.h"
+
 #include "../../sond_treeview.h"
 #include "../../sond_treeviewfm.h"
 #include "../../dbase.h"
@@ -167,7 +169,7 @@ cb_item_clean_pdf( GtkMenuItem* item, gpointer data )
     for ( gint i = 0; i < arr_rel_path->len; i++ )
     {
         //prüfen, ob in Viewer geöffnet
-        if ( document_geoeffnet( zond, g_ptr_array_index( arr_rel_path, i ) ) )
+        if ( zond_pdf_document_is_open( g_ptr_array_index( arr_rel_path, i ) ) )
         {
             meldung( zond->app_window, "PDF ", g_ptr_array_index( arr_rel_path, i ), " säubern nicht möglich\n\n"
                     "PDF bereits geöffnet - zunächst schließen", NULL );
@@ -343,7 +345,7 @@ cb_datei_ocr( GtkMenuItem* item, gpointer data )
         info_window_set_message(info_window, g_ptr_array_index( arr_rel_path, i ) );
 
         //prüfen, ob in Viewer geöffnet
-        if ( document_geoeffnet( zond, g_ptr_array_index( arr_rel_path, i ) ) )
+        if ( zond_pdf_document_is_open( g_ptr_array_index( arr_rel_path, i ) ) )
         {
             meldung( info_window->dialog, "Datei in Viewer geöffnet", NULL );
 
@@ -362,15 +364,16 @@ cb_datei_ocr( GtkMenuItem* item, gpointer data )
             continue;
         }
 
-        GPtrArray* arr_document_pages = g_ptr_array_sized_new( dd->document->pages->len );
-        for ( gint u = 0; u < dd->document->pages->len; u++ )
+        GPtrArray* arr_pdf_document_pages = zond_pdf_document_get_arr_pages(dd->zond_pdf_document );
+        GPtrArray* arr_document_pages_ocr = g_ptr_array_sized_new( arr_pdf_document_pages->len);
+        for ( gint u = 0; u < arr_pdf_document_pages->len; u++ )
         {
-            g_ptr_array_add( arr_document_pages, g_ptr_array_index( dd->document->pages, u ) );
+            g_ptr_array_add( arr_document_pages_ocr, g_ptr_array_index( arr_pdf_document_pages, u ) );
         }
 
-        rc = pdf_ocr_pages( zond, info_window, arr_document_pages, &errmsg );
-        g_ptr_array_unref( arr_document_pages );
-        document_free_displayed_documents( zond, dd );
+        rc = pdf_ocr_pages( zond, info_window, arr_document_pages_ocr, &errmsg );
+        g_ptr_array_unref( arr_document_pages_ocr );
+        document_free_displayed_documents( dd );
         if ( rc == -1 )
         {
             message = g_strdup_printf( "Fehler bei Aufruf pdf_ocr_pages:\n%s", errmsg );

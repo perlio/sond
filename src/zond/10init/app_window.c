@@ -63,7 +63,6 @@ cb_delete_event( GtkWidget* app_window, GdkEvent* event, gpointer user_data )
 
     clipboard_free( zond->clipboard );
 
-    g_ptr_array_unref( zond->arr_docs );
     g_ptr_array_unref( zond->arr_pv );
 
     g_free( zond );
