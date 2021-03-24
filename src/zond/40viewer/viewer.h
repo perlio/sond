@@ -29,7 +29,7 @@ void viewer_display_document( PdfViewer*, DisplayedDocument*, gint, gint );
 
 void viewer_close_thread_pools( PdfViewer* );
 
-void viewer_schliessen( PdfViewer* );
+void viewer_save_and_close( PdfViewer* );
 
 gint viewer_get_visible_thumbs( PdfViewer*, gint*, gint* );
 

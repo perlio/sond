@@ -380,7 +380,7 @@ projekt_schliessen( Projekt* zond, gchar** errmsg )
     }
 
     for ( gint i = 0; i < zond->arr_pv->len; i++ )
-            viewer_schliessen( g_ptr_array_index( zond->arr_pv, i ) );
+            viewer_save_and_close( g_ptr_array_index( zond->arr_pv, i ) );
 
     //Menus aktivieren/ausgrauen
     projekt_set_widgets_sensitiv( zond, FALSE );

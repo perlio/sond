@@ -122,27 +122,12 @@ mupdf_save_doc( fz_context* ctx, pdf_document* doc, const gchar* path,
             "", // upwd_utf8[128]
             };
 
-    path_tmp = g_strconcat( path, ".tmp", NULL );
-
     fz_try( ctx ) pdf_save_document( ctx, doc, path_tmp, &opts );
-    fz_always( ctx ) pdf_drop_document( ctx, doc );
     fz_catch( ctx )
     {
         g_free( path_tmp );
         ERROR_MUPDF( "pdf_save_document" )
     }
-
-    if ( g_rename( path_tmp, path ) )
-    {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_rename:\n"
-                "Datei save_pdf.tmp konnte nicht in ", path,
-                " umbenannt werden:\n", strerror( errno ), NULL );
-        g_free( path_tmp );
-
-        return -1;
-    }
-
-    g_free( path_tmp );
 
     return 0;
 }

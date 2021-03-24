@@ -293,7 +293,7 @@ zond_pdf_document_doc_tmp_open( ZondPdfDocument* self, gchar** errmsg )
     GFile* orig = g_file_new_for_path( priv->path );
     GFile* tmp = g_file_new_for_path( path_tmp );
 
-    success = g_file_copy( orig, tmp, G_FILE_COPY_NONE, NULL, NULL, NULL, &error );
+    success = g_file_copy( orig, tmp, G_FILE_COPY_OVERWRITE, NULL, NULL, NULL, &error );
     g_object_unref( orig );
     g_object_unref( tmp );
     if ( !success )
@@ -387,7 +387,7 @@ zond_pdf_document_class_init( ZondPdfDocumentClass* klass )
                                  "gchar*",
                                  "Pfad zur Datei.",
                                  NULL,
-                                  G_PARAM_CONSTRUCT_ONLY | G_PARAM_READWRITE);
+                                  G_PARAM_CONSTRUCT | G_PARAM_READWRITE);
 
     g_object_class_install_properties(object_class,
                                       N_PROPERTIES,

@@ -3,6 +3,7 @@
 	<FileVersion major="1" minor="6" />
 	<Project>
 		<Option title="sond" />
+		<Option pch_mode="0" />
 		<Option compiler="gcc" />
 		<Build>
 			<Target title="zond (Release)">
@@ -333,10 +334,6 @@
 			<Option compilerVar="CC" />
 		</Unit>
 		<Unit filename="src/sond_treeviewfm.h" />
-		<Unit filename="src/treeview.c">
-			<Option compilerVar="CC" />
-		</Unit>
-		<Unit filename="src/treeview.h" />
 		<Unit filename="src/zond/10init/app_window.c">
 			<Option compilerVar="CC" />
 			<Option target="zond (Release)" />
@@ -693,11 +690,6 @@
 			<Option target="Viewer (Release)" />
 			<Option target="Viewer (Testing)" />
 		</Unit>
-		<Unit filename="src/zond/pdf/pdf_datei.c">
-			<Option compilerVar="CC" />
-		</Unit>
-		<Unit filename="src/zond/pdf/pdf_datei.h" />
-		<Unit filename="src/zond/pdf/pdf_document.h" />
 		<Unit filename="src/zond/zond_pdf_document.c">
 			<Option compilerVar="CC" />
 			<Option target="zond (Release)" />

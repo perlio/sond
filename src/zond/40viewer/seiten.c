@@ -477,7 +477,7 @@ seiten_drehen( PdfViewer* pv, GPtrArray* arr_document_page, gint winkel, gchar**
                 seiten_cb_drehen, GINT_TO_POINTER(winkel), errmsg );
         if ( rc )
         {
-            viewer_schliessen( pv );
+            viewer_save_and_close( pv );
 
             ERROR_PAO( "viewer_foreach" )
         }
@@ -729,7 +729,7 @@ cb_pv_seiten_loeschen( GtkMenuItem* item, gpointer data )
                 "seiten_loeschen:\n", errmsg, "\n\nViewer wird geschlossen", NULL );
         g_free( errmsg );
 
-        viewer_schliessen( pv );
+        viewer_save_and_close( pv );
 
         return;
     }
@@ -934,7 +934,7 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
         meldung( pv->vf, "Fehler Einfügen -\n\nBei Aufruf viewer_foreach:\n",
                 errmsg, "\n\nViewer wird geschlossen", NULL );
         g_free( errmsg );
-        viewer_schliessen( pv );
+        viewer_save_and_close( pv );
 
         return;
     }

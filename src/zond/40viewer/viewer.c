@@ -271,37 +271,10 @@ viewer_close_thread_pools( PdfViewer* pv )
 }
 
 
-void
+static void
 viewer_schliessen( PdfViewer* pv )
 {
-    DisplayedDocument* dd = pv->dd;
-
     viewer_close_thread_pools( pv );
-
-    do
-    {
-        if ( zond_pdf_document_is_dirty( dd->zond_pdf_document ) )
-        {
-            gchar* text_frage = g_strconcat( "PDF-Datei ",
-                    zond_pdf_document_get_path( dd->zond_pdf_document ),
-                    " geändert", NULL );
-            gint rc = abfrage_frage( pv->vf, text_frage, "Speichern?", NULL );
-            g_free( text_frage );
-            if ( rc == GTK_RESPONSE_YES )
-            {
-                gchar* errmsg = NULL;
-
-                gint rc = zond_pdf_document_save( dd->zond_pdf_document, &errmsg );
-                if ( rc )
-                {
-                    meldung( pv->vf, "Dokument ", zond_pdf_document_get_path( dd->zond_pdf_document ),
-                            " konnte nicht gespeichert werden:\n", errmsg, NULL );
-
-                    g_free( errmsg );
-                }
-            }
-        }
-    } while ( (dd = dd->next) );
 
     g_ptr_array_unref( pv->arr_pages );
     g_array_unref( pv->arr_text_found );
@@ -320,13 +293,60 @@ viewer_schliessen( PdfViewer* pv )
 }
 
 
+static void
+viewer_save_dirty_docs( PdfViewer* pdfv )
+{
+    DisplayedDocument* dd = pdfv->dd;
+
+    do
+    {
+        if ( zond_pdf_document_is_dirty( dd->zond_pdf_document ) )
+        {
+            gchar* text_frage = g_strconcat( "PDF-Datei ",
+                    zond_pdf_document_get_path( dd->zond_pdf_document ),
+                    " geändert", NULL );
+            gint rc = abfrage_frage( pdfv->vf, text_frage, "Speichern?", NULL );
+            g_free( text_frage );
+            if ( rc == GTK_RESPONSE_YES )
+            {
+                gchar* errmsg = NULL;
+
+                zond_pdf_document_mutex_lock( dd->zond_pdf_document );
+                gint rc = zond_pdf_document_save( dd->zond_pdf_document, &errmsg );
+                zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
+                if ( rc )
+                {
+                    meldung( pdfv->vf, "Dokument ", zond_pdf_document_get_path( dd->zond_pdf_document ),
+                            "\nkonnte nicht gespeichert werden:\n", errmsg, NULL );
+
+                    g_free( errmsg );
+                }
+                else zond_pdf_document_set_dirty( dd->zond_pdf_document, FALSE );
+            }
+        }
+    } while ( (dd = dd->next) );
+
+    return;
+}
+
+
+void
+viewer_save_and_close( PdfViewer* pdfv )
+{
+    viewer_save_dirty_docs( pdfv );
+    viewer_schliessen( pdfv );
+
+    return;
+}
+
+
 #ifndef VIEWER
 static gboolean
 cb_viewer_delete_event( GtkWidget* window, GdkEvent* event, gpointer user_data )
 {
-    PdfViewer* pv = (PdfViewer*) user_data;
+    PdfViewer* pdfv = (PdfViewer*) user_data;
 
-    viewer_schliessen( pv );
+    viewer_save_and_close( pdfv );
 
     return TRUE;
 }
@@ -461,50 +481,12 @@ viewer_set_clean( GPtrArray* arr_pv )
 }
 
 
-static gint
-viewer_dd_speichern( DisplayedDocument* dd, gchar** errmsg )
-{
-    gint rc = 0;
-
-    rc = zond_pdf_document_save( dd->zond_pdf_document, errmsg );
-    if ( rc ) ERROR_PAO( "zond_pdf_document_save" )
-
-    return 0;
-
-}
-
-
 static void
 cb_pv_speichern( GtkButton* button, gpointer data )
 {
-    gint rc = 0;
-    gchar* errmsg = NULL;
-    DisplayedDocument* dd = NULL;
-
     PdfViewer* pv = (PdfViewer*) data;
 
-    dd = pv->dd;
-
-    do
-    {
-        if ( !zond_pdf_document_is_dirty( dd->zond_pdf_document ) ) continue;
-
-        zond_pdf_document_mutex_lock( dd->zond_pdf_document );
-
-        rc = viewer_dd_speichern( dd, &errmsg );
-        if ( rc )
-        {
-            meldung( pv->vf, "Dokument ", zond_pdf_document_get_path( dd->zond_pdf_document )," konnte nicht "
-                    "gespeichert werden:\n\nBei Aufruf viewer_dd_speichern:\n",
-                    errmsg, "\n\nViewer wird geschlossen", NULL );
-            g_free( errmsg );
-            zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
-            viewer_schliessen( pv );
-        }
-
-        zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
-    }
-    while ( (dd = dd->next) );
+    viewer_save_dirty_docs( pv );
 
     viewer_set_clean( pv->zond->arr_pv );
 
@@ -1547,7 +1529,7 @@ cb_viewer_layout_press_button( GtkWidget* layout, GdkEvent* event, gpointer
             {
                 meldung( pv->vf, "Fehler - Dokument konnte nicht gespeichert/"
                         "erneut geöffnet werden\n\nBei Aufruf ziele_erzeugen_"
-                        "anbindung:\n", errmsg, "\n\nViewer wirdgeschlossen", NULL );
+                        "anbindung:\n", errmsg, "\n\nViewer wird geschlossen", NULL );
                 g_free( errmsg );
                 viewer_schliessen( pv );
             }
