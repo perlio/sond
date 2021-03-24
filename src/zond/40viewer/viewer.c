@@ -294,7 +294,7 @@ viewer_schliessen( PdfViewer* pv )
 
 
 static void
-viewer_save_dirty_docs( PdfViewer* pdfv )
+viewer_save_dirty_docs( PdfViewer* pdfv, gboolean ask )
 {
     DisplayedDocument* dd = pdfv->dd;
 
@@ -302,11 +302,18 @@ viewer_save_dirty_docs( PdfViewer* pdfv )
     {
         if ( zond_pdf_document_is_dirty( dd->zond_pdf_document ) )
         {
-            gchar* text_frage = g_strconcat( "PDF-Datei ",
-                    zond_pdf_document_get_path( dd->zond_pdf_document ),
-                    " geändert", NULL );
-            gint rc = abfrage_frage( pdfv->vf, text_frage, "Speichern?", NULL );
-            g_free( text_frage );
+            gint rc = 0;
+
+            if ( ask )
+            {
+                gchar* text_frage = g_strconcat( "PDF-Datei ",
+                        zond_pdf_document_get_path( dd->zond_pdf_document ),
+                        " geändert", NULL );
+                rc = abfrage_frage( pdfv->vf, text_frage, "Speichern?", NULL );
+                g_free( text_frage );
+            }
+            else rc = GTK_RESPONSE_YES;
+
             if ( rc == GTK_RESPONSE_YES )
             {
                 gchar* errmsg = NULL;
@@ -333,7 +340,7 @@ viewer_save_dirty_docs( PdfViewer* pdfv )
 void
 viewer_save_and_close( PdfViewer* pdfv )
 {
-    viewer_save_dirty_docs( pdfv );
+    viewer_save_dirty_docs( pdfv, TRUE );
     viewer_schliessen( pdfv );
 
     return;
@@ -486,7 +493,7 @@ cb_pv_speichern( GtkButton* button, gpointer data )
 {
     PdfViewer* pv = (PdfViewer*) data;
 
-    viewer_save_dirty_docs( pv );
+    viewer_save_dirty_docs( pv, FALSE );
 
     viewer_set_clean( pv->zond->arr_pv );
 

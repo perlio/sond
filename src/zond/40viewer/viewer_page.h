@@ -27,6 +27,8 @@ PdfDocumentPage* viewer_page_get_document_page( ViewerPage* );
 
 fz_rect viewer_page_get_crop( ViewerPage* );
 
+void viewer_page_tilt( ViewerPage* );
+
 G_END_DECLS
 
 

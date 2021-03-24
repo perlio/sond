@@ -396,17 +396,27 @@ seiten_thumb_ist_sichtbar( PdfViewer* pv, gint page_pv )
 
 
 static gint
-seiten_cb_drehen( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg )
+seiten_drehen_foreach( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg )
 {
+    gint rc = 0;
     gint winkel = 0;
-
+    GtkTreeIter iter = { 0 };
     winkel = GPOINTER_TO_INT(data);
-    if ( winkel == 90 || winkel == -90 ) g_object_set_data( G_OBJECT(pv->layout),
-            "dirty", GINT_TO_POINTER(1) );
-
     ViewerPage* viewer_page = g_ptr_array_index( pv->arr_pages, page_pv );
 
     gtk_image_clear( GTK_IMAGE(viewer_page) );
+
+    if ( winkel == 90 || winkel == -90 )
+    {
+        viewer_page_tilt( viewer_page );
+        g_object_set_data( G_OBJECT(pv->layout), "dirty", GINT_TO_POINTER(1) );
+    }
+
+    rc = viewer_get_iter_thumb( pv, page_pv, &iter, errmsg );
+    if ( rc ) ERROR_SOND( "viewer_get_iter_thumb" )
+
+    gtk_list_store_set( GTK_LIST_STORE( gtk_tree_view_get_model(
+            GTK_TREE_VIEW(pv->tree_thumb) ) ), &iter, 0, NULL, -1 );
 
     g_thread_pool_push( pv->thread_pool_page, GINT_TO_POINTER(page_pv + 1), NULL );
 
@@ -481,7 +491,7 @@ seiten_drehen( PdfViewer* pv, GPtrArray* arr_document_page, gint winkel, gchar**
         zond_pdf_document_mutex_unlock( pdf_document_page->document );
 
         rc = viewer_foreach( pv->zond->arr_pv, pdf_document_page,
-                seiten_cb_drehen, GINT_TO_POINTER(winkel), errmsg );
+                seiten_drehen_foreach, GINT_TO_POINTER(winkel), errmsg );
         if ( rc )
         {
             viewer_save_and_close( pv );
@@ -537,8 +547,8 @@ seiten_cb_loesche_seite( PdfViewer* pv, gint page_pv, gpointer data, gchar** err
 {
     GPtrArray** p_arr_pv = data;
 
+    gint rc = 0;
     gboolean closed = FALSE;
-    gchar* path_string = NULL;
     GtkTreeIter iter;
 
     //in Array suchen, ob pv schon vorhanden
@@ -563,13 +573,11 @@ seiten_cb_loesche_seite( PdfViewer* pv, gint page_pv, gpointer data, gchar** err
 
     g_ptr_array_remove_index( pv->arr_pages, page_pv ); //viewer_page wird freed!
 
-    path_string = g_strdup_printf( "%i", page_pv );
-    if ( gtk_tree_model_get_iter_from_string( gtk_tree_view_get_model(
-            GTK_TREE_VIEW(pv->tree_thumb) ), &iter, path_string ) )
-            gtk_list_store_remove( GTK_LIST_STORE( gtk_tree_view_get_model(
-            GTK_TREE_VIEW(pv->tree_thumb) ) ), &iter );
+    rc = viewer_get_iter_thumb( pv, page_pv, &iter, errmsg );
+    if ( rc ) ERROR_SOND( "viewer_get_iter_thumb" )
 
-    g_free( path_string );
+    gtk_list_store_remove( GTK_LIST_STORE( gtk_tree_view_get_model(
+            GTK_TREE_VIEW(pv->tree_thumb) ) ), &iter );
 
     return 0;
 }
@@ -864,7 +872,6 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
     pdf_document* doc_merge = NULL;
     gint count = 0;
     gint count_old = 0;
-    fz_context* ctx = NULL;
     gchar* errmsg = NULL;
 
     ret = seiten_abfrage_seitenzahl( pv, &pos );
@@ -920,16 +927,16 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
     else if ( ret == 2 )
     {
 //        ctx = pv->zond->ctx;
-        doc_merge = pdf_keep_document( ctx, pv->zond->pv_clip ); //Clipboard
+        doc_merge = pdf_keep_document( pv->zond->ctx, pv->zond->pv_clip ); //Clipboard
     }
 
     zond_pdf_document_mutex_lock( pv->dd->zond_pdf_document );
-    rc = zond_pdf_document_insert_pages( pv->dd->zond_pdf_document, pos, pdf_count_pages( pv->zond->ctx, doc_merge ),
-            pv->zond->ctx, doc_merge, &errmsg );
+    rc = zond_pdf_document_insert_pages( pv->dd->zond_pdf_document, pos,
+            pdf_count_pages( pv->zond->ctx, doc_merge ), pv->zond->ctx,
+            doc_merge, &errmsg );
     zond_pdf_document_mutex_unlock( pv->dd->zond_pdf_document );
 
     pdf_drop_document(pv->zond->ctx, doc_merge );
-
 
     rc = viewer_foreach( pv->zond->arr_pv,
             zond_pdf_document_get_pdf_document_page( pv->dd->zond_pdf_document,

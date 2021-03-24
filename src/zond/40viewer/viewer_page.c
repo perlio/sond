@@ -308,3 +308,24 @@ viewer_page_get_crop( ViewerPage* self )
 
     return priv->crop;
 }
+
+
+void
+viewer_page_tilt( ViewerPage* self )
+{
+    ViewerPagePrivate* priv = viewer_page_get_instance_private( self );
+
+    float x1_tmp = 0.0;
+    float y1_tmp = 0.0;
+
+    x1_tmp = priv->crop.x0 + (priv->crop.y1 - priv->crop.y0);
+    y1_tmp = priv->crop.y0 + (priv->crop.x1 - priv->crop.x0);
+
+    priv->crop.x1 = x1_tmp;
+    priv->crop.y1 = y1_tmp;
+
+    return;
+}
+
+
+
