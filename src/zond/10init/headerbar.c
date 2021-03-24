@@ -21,6 +21,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <mupdf/pdf.h>
 #include <sqlite3.h>
 #include <tesseract/capi.h>
+#include <glib/gstdio.h>
 
 #include "../zond_pdf_document.h"
 
@@ -168,6 +169,8 @@ cb_item_clean_pdf( GtkMenuItem* item, gpointer data )
 
     for ( gint i = 0; i < arr_rel_path->len; i++ )
     {
+        gchar* path_tmp = NULL;
+
         //prüfen, ob in Viewer geöffnet
         if ( zond_pdf_document_is_open( g_ptr_array_index( arr_rel_path, i ) ) )
         {
@@ -197,12 +200,34 @@ cb_item_clean_pdf( GtkMenuItem* item, gpointer data )
             continue;
         }
 
-        rc = mupdf_save_doc( zond->ctx, pdf_specifics( zond->ctx, doc ), g_ptr_array_index( arr_rel_path, i ), &errmsg );
+        path_tmp = g_strconcat( g_ptr_array_index( arr_rel_path, i ), ".tmp_clean", NULL );
+
+        rc = mupdf_save_doc( zond->ctx, pdf_specifics( zond->ctx, doc ), path_tmp, &errmsg );
         if ( rc )
         {
+            g_free( path_tmp );
             meldung( zond->app_window, "PDF ", g_ptr_array_index( arr_rel_path, i ), " säubern nicht möglich\n\n"
                     "Bei Aufruf mupdf_save_doc:\n", errmsg, NULL );
             g_free( errmsg );
+
+            continue;
+        }
+
+        fz_drop_document( zond->ctx, doc );
+
+        if ( g_remove( g_ptr_array_index( arr_rel_path, i ) ) )
+        {
+            g_free( path_tmp );
+            meldung( zond->app_window, "PDF ", g_ptr_array_index( arr_rel_path, i ), " säubern nicht möglich\n\n"
+                    "Bei Aufruf g_remove (*.tmp_clean):\n", strerror( errno ), NULL );
+
+            continue;
+        }
+        if ( g_rename( path_tmp, g_ptr_array_index( arr_rel_path, i ) ) )
+        {
+            g_free( path_tmp );
+            meldung( zond->app_window, "PDF ", g_ptr_array_index( arr_rel_path, i ), " säubern nicht möglich\n\n"
+                    "Bei Aufruf g_rename (*.tmp_clean->.pdf):\n", strerror( errno ), NULL );
 
             continue;
         }

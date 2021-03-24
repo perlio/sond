@@ -175,7 +175,7 @@ seiten_abfrage_seiten( PdfViewer* pv, const gchar* title, gint* winkel )
     GtkWidget* radio_180 = NULL;
     GtkWidget* radio_90_gegen_UZS = NULL;
     gchar* text = NULL;
-    GArray* arr_seiten_pv = NULL;
+    GPtrArray* arr_document_pages = NULL;
 
     GtkWidget* dialog = gtk_dialog_new_with_buttons( title,
             GTK_WINDOW(pv->vf), GTK_DIALOG_MODAL,
@@ -239,6 +239,8 @@ seiten_abfrage_seiten( PdfViewer* pv, const gchar* title, gint* winkel )
 
     if ( rc == GTK_RESPONSE_OK )
     {
+        GArray* arr_seiten_pv = NULL;
+
         if ( winkel )
         {
             if ( gtk_toggle_button_get_active( GTK_TOGGLE_BUTTON(radio_90_UZS) ) )
@@ -265,12 +267,15 @@ seiten_abfrage_seiten( PdfViewer* pv, const gchar* title, gint* winkel )
         {
             arr_seiten_pv = seiten_markierte_thumbs( pv );
         }
+
+        if ( arr_seiten_pv && arr_seiten_pv->len )
+        {
+            arr_document_pages = seiten_get_document_pages( pv, arr_seiten_pv );
+            g_array_unref( arr_seiten_pv );
+        }
     }
 
     gtk_widget_destroy( dialog );
-
-    GPtrArray* arr_document_pages = seiten_get_document_pages( pv, arr_seiten_pv );
-    g_array_unref( arr_seiten_pv );
 
     return arr_document_pages;
 }
@@ -306,6 +311,8 @@ cb_pv_seiten_ocr( GtkMenuItem* item, gpointer data )
     title = g_strdup_printf( "Seiten OCR (1 - %i):", pv->arr_pages->len );
     arr_document_page = seiten_abfrage_seiten( pv, title, NULL );
     g_free( title );
+
+    if ( !arr_document_page ) return;
 
     info_window = info_window_open( pv->vf, "OCR" );
 
@@ -502,6 +509,8 @@ cb_pv_seiten_drehen( GtkMenuItem* item, gpointer data )
     title = g_strdup_printf( "Seiten drehen (1 - %i):", pv->arr_pages->len );
     arr_document_page = seiten_abfrage_seiten( pv, title, &winkel );
     g_free( title );
+
+    if ( !arr_document_page ) return;
 
     rc = seiten_drehen( pv, arr_document_page, winkel, &errmsg );
     g_ptr_array_unref( arr_document_page );
@@ -709,18 +718,14 @@ cb_pv_seiten_loeschen( GtkMenuItem* item, gpointer data )
         meldung( pv->vf, "Seiten aus Auszug löschen nicht möglich" , NULL );
         return;
     }
-/*    if ( pv->dd->document->ref_count > 1 ) //document soll nur einmal (hier) geöffnet sein
-    {
-        meldung( pv->vf, "Dokument ist mehrfach geöffnet", NULL );
-        return;
-    }
-*/
     count = document_get_num_of_pages_of_dd( pv->dd );
 
     //zu löschende Seiten holen
     title = g_strdup_printf( "Seiten löschen (1 - %i):", count );
     arr_document_page = seiten_abfrage_seiten( pv, title, NULL );
     g_free( title );
+
+    if ( !arr_document_page ) return;
 
     rc = seiten_loeschen( pv, arr_document_page, &errmsg );
     if ( rc == -1 )
