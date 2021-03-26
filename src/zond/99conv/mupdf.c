@@ -75,8 +75,8 @@ mupdf_close_context( fz_context* ctx )
 
     fz_drop_context( ctx );
 
-    for ( gint i = 0; i < FZ_LOCK_MAX; i++ )
-            g_mutex_clear( &mutex[i] );
+//    for ( gint i = 0; i < FZ_LOCK_MAX; i++ )
+  //          g_mutex_clear( &mutex[i] );
 
 //    g_free( mutex );
 
@@ -98,9 +98,11 @@ mupdf_dokument_oeffnen( fz_context* ctx, const gchar* path, gchar** errmsg )
 
 
 gint
-mupdf_save_doc( fz_context* ctx, pdf_document* doc, const gchar* path,
+mupdf_save_doc( fz_context* ctx, fz_document* doc, const gchar* path,
         gchar** errmsg )
 {
+    pdf_document* pdf_doc = pdf_specifics( ctx, doc );
+
     pdf_write_options opts = {
             0, // do_incremental
             1, // do_pretty
@@ -120,7 +122,7 @@ mupdf_save_doc( fz_context* ctx, pdf_document* doc, const gchar* path,
             "", // upwd_utf8[128]
             };
 
-    fz_try( ctx ) pdf_save_document( ctx, doc, path, &opts );
+    fz_try( ctx ) pdf_save_document( ctx, pdf_doc, path, &opts );
     fz_catch( ctx ) ERROR_MUPDF( "pdf_save_document" )
 
     return 0;

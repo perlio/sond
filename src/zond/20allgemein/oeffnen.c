@@ -101,7 +101,7 @@ oeffnen_auszug( Projekt* zond, gint node_id, gchar** errmsg )
         {
             DisplayedDocument* dd_new = NULL;
 
-            dd_new = document_new_displayed_document( zond, rel_path, anbindung, errmsg );
+            dd_new = document_new_displayed_document( rel_path, anbindung, errmsg );
             g_free( rel_path );
             g_free( anbindung );
             if ( !dd_new )
@@ -197,8 +197,8 @@ oeffnen_internal_viewer( Projekt* zond, const gchar* rel_path, Anbindung* anbind
         }
     }
 
-    DisplayedDocument* dd = document_new_displayed_document( zond,
-            rel_path, anbindung, errmsg );
+    DisplayedDocument* dd = document_new_displayed_document( rel_path,
+            anbindung, errmsg );
     if ( !dd ) ERROR_PAO( "document_new_displayed_document" );
 
     if ( pos_pdf ) pos_von = *pos_pdf;

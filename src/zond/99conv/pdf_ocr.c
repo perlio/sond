@@ -556,14 +556,13 @@ pdf_ocr_sandwich_page( PdfDocumentPage* pdf_document_page,
     pdf_obj* font_dict_val = NULL;
 
     fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
-//    pdf_document* pdf_doc = pdf_specifics( ctx, zond_pdf_document_get_fz_doc( pdf_document_page->document ) );
-//    gint page = document_get_index_of_document_page( document_page );
-    pdf_page* pdf_page = pdf_page_from_fz_page( ctx, pdf_document_page->page );
 
     fz_try ( ctx )
     {
-//        page_ref = pdf_lookup_page_obj( ctx, pdf_doc, page );
-        pdf_flatten_inheritable_page_items( ctx, pdf_page->obj );
+        pdf_page* pdf_page = pdf_page_from_fz_page( ctx, pdf_document_page->page );
+        page_ref = pdf_page->obj;
+        pdf_flatten_inheritable_page_items( ctx, page_ref );
+
         page_ref_text = pdf_lookup_page_obj( ctx, doc_text, page_text );
         pdf_flatten_inheritable_page_items( ctx, page_ref_text );
     }
@@ -851,7 +850,7 @@ pdf_ocr_create_doc_with_page( PdfDocumentPage* pdf_document_page, gint flag, gch
     fz_try( ctx ) doc_new = pdf_create_document( ctx );
     fz_catch( ctx ) ERROR_MUPDF_R( "pdf_create_document", NULL )
 
-    page_doc = document_get_index_of_document_page( pdf_document_page );
+    page_doc = zond_pdf_document_get_index( pdf_document_page );
 
     zond_pdf_document_mutex_lock( pdf_document_page->document );
     rc = pdf_copy_page( ctx, doc, page_doc, page_doc, doc_new, 0, errmsg );

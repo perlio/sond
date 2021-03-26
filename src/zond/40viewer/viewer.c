@@ -297,6 +297,7 @@ static void
 viewer_save_dirty_docs( PdfViewer* pdfv, gboolean ask )
 {
     DisplayedDocument* dd = pdfv->dd;
+    if ( !dd ) return;
 
     do
     {
@@ -345,19 +346,6 @@ viewer_save_and_close( PdfViewer* pdfv )
 
     return;
 }
-
-
-#ifndef VIEWER
-static gboolean
-cb_viewer_delete_event( GtkWidget* window, GdkEvent* event, gpointer user_data )
-{
-    PdfViewer* pdfv = (PdfViewer*) user_data;
-
-    viewer_save_and_close( pdfv );
-
-    return TRUE;
-}
-#endif // VIEWER
 
 
 static void
@@ -1850,7 +1838,7 @@ viewer_einrichten_fenster( PdfViewer* pv )
     //öffnen
     g_signal_connect( pv->item_schliessen, "activate", G_CALLBACK(cb_datei_schliessen), pv );
     //beenden
-    g_signal_connect( item_beenden, "activate", G_CALLBACK(cb_pv_sa_beenden), pv );
+    g_signal_connect_swapped( item_beenden, "activate", G_CALLBACK(viewer_save_and_close), pv );
 #endif // VIEWER
     //Seiten kopieren
     g_signal_connect( pv->item_kopieren, "activate", G_CALLBACK(cb_seiten_kopieren),
@@ -1929,12 +1917,9 @@ viewer_einrichten_fenster( PdfViewer* pv )
 
     g_signal_connect( pv->vf, "motion-notify-event",
             G_CALLBACK(cb_viewer_motion_notify), (gpointer) pv );
-#ifndef VIEWER //Stand-Alone hat anderen Callback zum schließen
-    g_signal_connect( pv->vf, "delete-event",
-            G_CALLBACK(cb_viewer_delete_event), (gpointer) pv );
-#else
-    g_signal_connect( pv->vf, "delete-event", G_CALLBACK(cb_pv_sa_beenden), pv );
-#endif // VIEWER
+
+    g_signal_connect_swapped( pv->vf, "delete-event",
+            G_CALLBACK(viewer_save_and_close), (gpointer) pv );
 
     return;
 }

@@ -202,7 +202,7 @@ cb_item_clean_pdf( GtkMenuItem* item, gpointer data )
 
         path_tmp = g_strconcat( g_ptr_array_index( arr_rel_path, i ), ".tmp_clean", NULL );
 
-        rc = mupdf_save_doc( zond->ctx, pdf_specifics( zond->ctx, doc ), path_tmp, &errmsg );
+        rc = mupdf_save_doc( zond->ctx, doc, path_tmp, &errmsg );
         if ( rc )
         {
             g_free( path_tmp );
@@ -377,7 +377,7 @@ cb_datei_ocr( GtkMenuItem* item, gpointer data )
             continue;
         }
 
-        DisplayedDocument* dd = document_new_displayed_document( zond,
+        DisplayedDocument* dd = document_new_displayed_document(
                 g_ptr_array_index( arr_rel_path, i ), NULL, &errmsg );
         if ( !dd )
         {

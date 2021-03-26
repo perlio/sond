@@ -96,10 +96,6 @@
 		</Linker>
 		<Unit filename="src/dbase.c">
 			<Option compilerVar="CC" />
-			<Option target="zond (Release)" />
-			<Option target="zond (Testing)" />
-			<Option target="Sojus (Release)" />
-			<Option target="Sojus (Testing)" />
 		</Unit>
 		<Unit filename="src/dbase.h">
 			<Option target="zond (Release)" />
@@ -319,10 +315,6 @@
 		</Unit>
 		<Unit filename="src/sond_treeview.c">
 			<Option compilerVar="CC" />
-			<Option target="zond (Release)" />
-			<Option target="zond (Testing)" />
-			<Option target="Sojus (Release)" />
-			<Option target="Sojus (Testing)" />
 		</Unit>
 		<Unit filename="src/sond_treeview.h">
 			<Option target="zond (Release)" />
@@ -665,13 +657,6 @@
 			<Option target="Viewer (Release)" />
 			<Option target="Viewer (Testing)" />
 		</Unit>
-		<Unit filename="src/zond/bugs.c">
-			<Option compilerVar="CC" />
-			<Option target="zond (Release)" />
-			<Option target="zond (Testing)" />
-			<Option target="Viewer (Release)" />
-			<Option target="Viewer (Testing)" />
-		</Unit>
 		<Unit filename="src/zond/enums.h">
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
@@ -692,8 +677,6 @@
 		</Unit>
 		<Unit filename="src/zond/zond_pdf_document.c">
 			<Option compilerVar="CC" />
-			<Option target="zond (Release)" />
-			<Option target="zond (Testing)" />
 		</Unit>
 		<Unit filename="src/zond/zond_pdf_document.h">
 			<Option target="zond (Release)" />
@@ -707,9 +690,6 @@
 				<Code header_guard="VERSION_H" namespace="AutoVersion" prefix="" />
 			</AutoVersioning>
 			<lib_finder disable_auto="1" />
-			<code_completion />
-			<envvars />
-			<debugger />
 		</Extensions>
 	</Project>
 </CodeBlocks_project_file>

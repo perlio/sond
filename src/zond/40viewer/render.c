@@ -176,10 +176,9 @@ render_pixmap( fz_context* ctx, ViewerPage* viewer_page, gdouble zoom,
 
 
 static gint
-render_display_list( PdfDocumentPage* pdf_document_page,
+render_display_list( fz_context* ctx, PdfDocumentPage* pdf_document_page,
         gchar** errmsg )
 {
-    fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
     fz_device* list_device = NULL;
 
     zond_pdf_document_mutex_lock( pdf_document_page->document );
@@ -242,12 +241,8 @@ render_page_thread( gpointer data, gpointer user_data )
 
     ctx = fz_clone_context( zond_pdf_document_get_ctx( pdf_document_page->document ) );
 
-    //Display_list immer noch leer?
-    if ( fz_display_list_is_empty( ctx, pdf_document_page->display_list ) )
-    {
-        gint rc = render_display_list( pdf_document_page, &errmsg );
-        if ( rc ) ERROR_THREAD( "render_display_list" )
-    }
+    rc = render_display_list( ctx, pdf_document_page, &errmsg );
+    if ( rc ) ERROR_THREAD( "render_display_list" )
 
     rc = render_pixmap( ctx, viewer_page, pv->zoom, pdf_document_page, &errmsg );
     if ( rc == -1 ) ERROR_THREAD( "render_pixmap" )

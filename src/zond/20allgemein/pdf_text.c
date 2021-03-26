@@ -331,7 +331,7 @@ pdf_textsuche_pdf( Projekt* zond, const gchar* rel_path, const gchar* search_tex
     GPtrArray* arr_pdf_document_pages = NULL;
     fz_context* ctx = NULL;
 
-    dd = document_new_displayed_document( zond, rel_path, NULL, errmsg );
+    dd = document_new_displayed_document( rel_path, NULL, errmsg );
     if ( !dd ) ERROR_PAO( "pdf_textsuche_pdf" )
 
     ctx = zond_pdf_document_get_ctx( dd->zond_pdf_document );

@@ -21,7 +21,7 @@ void mupdf_close_context( fz_context* );
 
 fz_document* mupdf_dokument_oeffnen( fz_context*, const gchar*, gchar** );
 
-gint mupdf_save_doc( fz_context*, pdf_document*, const gchar*, gchar** );
+gint mupdf_save_doc( fz_context*, fz_document*, const gchar*, gchar** );
 
 
 #endif // MUPDF_H_INCLUDED

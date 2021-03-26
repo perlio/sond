@@ -597,11 +597,11 @@ seiten_anbindung( PdfViewer* pv, GPtrArray* arr_document_page, gchar** errmsg )
         PdfDocumentPage* pdf_document_page = g_ptr_array_index( arr_document_page, i );
         fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
 
-        gint page_doc = document_get_index_of_document_page( pdf_document_page );
+        gint page_doc = zond_pdf_document_get_index( pdf_document_page );
 
-        rc = pdf_document_get_dest( ctx, pdf_specifics( ctx,
-                zond_pdf_document_get_fz_doc( pdf_document_page->document ) ),
-                page_doc, (gpointer*) &arr_dests, FALSE, errmsg );
+        rc = pdf_document_get_dest( ctx, zond_pdf_document_get_fz_doc(
+                pdf_document_page->document ), page_doc, (gpointer*) &arr_dests,
+                FALSE, errmsg );
         if ( rc )
         {
             g_ptr_array_free( arr_dests, TRUE );
@@ -726,7 +726,7 @@ cb_pv_seiten_loeschen( GtkMenuItem* item, gpointer data )
         meldung( pv->vf, "Seiten aus Auszug löschen nicht möglich" , NULL );
         return;
     }
-    count = document_get_num_of_pages_of_dd( pv->dd );
+    count = pv->arr_pages->len;
 
     //zu löschende Seiten holen
     title = g_strdup_printf( "Seiten löschen (1 - %i):", count );
@@ -930,10 +930,11 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
         doc_merge = pdf_keep_document( pv->zond->ctx, pv->zond->pv_clip ); //Clipboard
     }
 
+    count = pdf_count_pages( pv->zond->ctx, doc_merge );
+
     zond_pdf_document_mutex_lock( pv->dd->zond_pdf_document );
     rc = zond_pdf_document_insert_pages( pv->dd->zond_pdf_document, pos,
-            pdf_count_pages( pv->zond->ctx, doc_merge ), pv->zond->ctx,
-            doc_merge, &errmsg );
+            count, pv->zond->ctx, doc_merge, &errmsg );
     zond_pdf_document_mutex_unlock( pv->dd->zond_pdf_document );
 
     pdf_drop_document(pv->zond->ctx, doc_merge );

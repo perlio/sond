@@ -16,6 +16,11 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+#include <gtk/gtk.h>
+#include <mupdf/fitz.h>
+#include <mupdf/pdf.h>
+
+#include "../zond_pdf_document.h"
 #include "../global_types.h"
 #include "../error.h"
 
@@ -27,9 +32,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "../../misc.h"
 
-#include <gtk/gtk.h>
-#include <mupdf/fitz.h>
-#include <mupdf/pdf.h>
 
 
 
@@ -65,6 +67,8 @@ pv_schliessen_datei( PdfViewer* pv )
     gint rc = 0;
     gchar* errmsg = NULL;
 
+    viewer_close_thread_pools( pv );
+
     if ( gtk_widget_get_sensitive( pv->button_speichern ) )
     {
         rc = abfrage_frage( pv->vf, "PDF geändert", "Speichern?", NULL );
@@ -85,7 +89,8 @@ pv_schliessen_datei( PdfViewer* pv )
         gtk_widget_set_sensitive( pv->button_speichern, FALSE );
     }
 
-    viewer_close_thread_pools( pv );
+    //Arrays zurücksetzen
+    g_ptr_array_remove_range( pv->arr_pages, 0, pv->arr_pages->len );
 
     //thumbs leeren
     GtkListStore* store_thumb =
@@ -93,14 +98,10 @@ pv_schliessen_datei( PdfViewer* pv )
     gtk_list_store_clear( store_thumb );
 
     gtk_layout_set_size( GTK_LAYOUT(pv->layout), 0, 0 );
-    if ( pv->dd ) document_free_displayed_documents( pv->zond, pv->dd );
+    if ( pv->dd ) document_free_displayed_documents( pv->dd );
     pv->dd = NULL;
 
     pv_activate_widgets( pv, FALSE );
-
-    //Arrays zurücksetzen
-    g_array_remove_range( pv->arr_text_treffer, 0, pv->arr_text_treffer->len );
-    g_ptr_array_remove_range( pv->arr_pages, 0, pv->arr_pages->len );
 
     return;
 }
@@ -109,7 +110,7 @@ pv_schliessen_datei( PdfViewer* pv )
 static gint
 pv_oeffnen_datei( PdfViewer* pv, gchar* path, gchar** errmsg )
 {
-    DisplayedDocument* dd = document_new_displayed_document( pv->zond, path, NULL, errmsg );
+    DisplayedDocument* dd = document_new_displayed_document( path, NULL, errmsg );
     if ( !dd ) ERROR_PAO( "document_new_displayed_document" )
 
     viewer_display_document( pv, dd, 0, 0 );
@@ -117,34 +118,6 @@ pv_oeffnen_datei( PdfViewer* pv, gchar* path, gchar** errmsg )
     pv_activate_widgets( pv, TRUE );
 
     return 0;
-}
-
-
-void
-cb_pv_sa_beenden( GtkWidget* item, gpointer data )
-{
-    PdfViewer* pv = (PdfViewer*) data;
-
-    Projekt* zond = pv->zond;
-
-    if ( pv->dd ) pv_schliessen_datei( pv );
-
-    g_ptr_array_unref( pv->arr_pages );
-    g_array_unref( pv->arr_text_treffer );
-
-    gtk_widget_destroy( pv->vf );
-    g_free( pv );
-
-    if ( !zond->arr_pv->len ) //falls letztes viewer-Fenster:
-    {
-        g_ptr_array_unref( zond->arr_docs );
-        g_ptr_array_unref( zond->arr_pv );
-
-        fz_drop_context( zond->ctx );
-        g_free( zond );
-    }
-
-    return;
 }
 
 
@@ -177,7 +150,7 @@ cb_datei_oeffnen( GtkWidget* item, gpointer data )
     gchar* filename = filename_oeffnen( GTK_WINDOW(pv->vf) );
     if ( !filename ) return;
 
-    pv_schliessen_datei( pv );
+    if ( pv->dd ) pv_schliessen_datei( pv );
     rc = pv_oeffnen_datei( pv, filename, &errmsg );
     g_free( filename );
     if ( rc )
@@ -195,9 +168,6 @@ static PdfViewer*
 init( GtkApplication* app, Projekt* zond )
 {
     PdfViewer* pv = viewer_start_pv( zond );
-
-    g_signal_connect( pv->vf, "delete-event", G_CALLBACK(cb_pv_sa_beenden),
-            (gpointer) pv );
 
     gtk_application_add_window( app, GTK_WINDOW(pv->vf) );
 
@@ -269,7 +239,6 @@ startup_app( GtkApplication* app, gpointer user_data )
     (*zond)->settings = g_settings_new( "de.perlio.zondPV" );
 
     (*zond)->arr_pv = g_ptr_array_new( );
-    (*zond)->arr_docs = g_ptr_array_new( );
 
     return;
 }

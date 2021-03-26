@@ -37,7 +37,7 @@ document_free_displayed_documents( DisplayedDocument* dd )
 
 
 DisplayedDocument*
-document_new_displayed_document( Projekt* zond, const gchar* rel_path,
+document_new_displayed_document( const gchar* rel_path,
         Anbindung* anbindung, gchar** errmsg )
 {
     ZondPdfDocument* zond_pdf_document = NULL;
@@ -64,7 +64,7 @@ document_new_displayed_document( Projekt* zond, const gchar* rel_path,
 }
 
 
-gint
+static gint
 document_get_num_of_pages_of_dd( DisplayedDocument* dd )
 {
     gint anz_seiten = 0;
@@ -81,7 +81,6 @@ DisplayedDocument*
 document_get_dd( PdfViewer* pv, gint page, PdfDocumentPage** pdf_document_page,
         gint* page_dd, gint* page_doc )
 {
-    gint pages_dd = 0;
     gint zaehler = 0;
     DisplayedDocument* dd = NULL;
 
@@ -89,7 +88,7 @@ document_get_dd( PdfViewer* pv, gint page, PdfDocumentPage** pdf_document_page,
 
     do
     {
-        pages_dd = document_get_num_of_pages_of_dd( dd );
+        gint pages_dd = document_get_num_of_pages_of_dd( dd );
 
         if ( page < zaehler + pages_dd )
         {
@@ -110,31 +109,3 @@ document_get_dd( PdfViewer* pv, gint page, PdfDocumentPage** pdf_document_page,
     return NULL;
 }
 
-
-gint
-document_get_page_pv( PdfViewer* pv, DisplayedDocument* dd, gint page_dd )
-{
-    gint zaehler = 0;
-    DisplayedDocument* dd_vergleich = NULL;
-
-    dd_vergleich = pv->dd;
-
-    do
-    {
-        if ( dd_vergleich == dd ) return zaehler + page_dd;
-        zaehler += document_get_num_of_pages_of_dd( dd_vergleich );
-    } while ( (dd_vergleich = dd_vergleich->next) );
-
-    return -1;
-}
-
-
-gint
-document_get_index_of_document_page( PdfDocumentPage* pdf_document_page )
-{
-    guint index = 0;
-
-    if ( g_ptr_array_find( zond_pdf_document_get_arr_pages( pdf_document_page->document ), pdf_document_page, &index ) )
-            return (gint) index;
-    else return -1;
-}

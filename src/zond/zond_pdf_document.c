@@ -488,8 +488,7 @@ zond_pdf_document_save( ZondPdfDocument* self, gchar** errmsg )
 
     if ( priv->dirty )
     {
-        rc = mupdf_save_doc( priv->ctx,
-                pdf_specifics( priv->ctx, priv->doc ), priv->path, errmsg );
+        rc = mupdf_save_doc( priv->ctx, priv->doc, priv->path, errmsg );
         if ( rc )
         {
             if ( errmsg ) *errmsg = add_string( g_strdup( "Bei Aufruf mupdf_save_doc:\n" ),
