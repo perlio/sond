@@ -4,7 +4,6 @@
 #include <glib/gstdio.h>
 #include <mariadb/mysql.h>
 
-#include "../../treeview.h"
 #include "../global_types_sojus.h"
 
 #include "aktenschnellansicht.h"
@@ -20,7 +19,6 @@
 #include"../06Dokumente/file_manager.h"
 
 #include "../../misc.h"
-#include "../../treeview.h"
 
 
 static gboolean

@@ -1,9 +1,10 @@
 #include <gtk/gtk.h>
 #include <sqlite3.h>
 
+#include "../../sond_treeviewfm.h"
+
 #include "../../dbase.h"
 #include "../../eingang.h"
-#include "../../treeview.h"
 
 #include "../global_types_sojus.h"
 
@@ -17,6 +18,7 @@
 typedef struct _Open_FM
 {
     GtkWidget* window;
+    SondTreeviewFM* stvfm;
     gint regnr;
     gint jahr;
 }OpenFM;
@@ -25,21 +27,19 @@ typedef struct _Open_FM
 static gboolean
 cb_file_manager_delete_event( GtkWidget* window, GdkEvent* event, gpointer data )
 {
-    Sojus* sojus = (Sojus*) fm->app_context;
+    Sojus* sojus = (Sojus*) data;
 
     for ( gint i = 0; i < sojus->arr_open_fm->len; i++ )
     {
         OpenFM* open_fm = g_ptr_array_index( sojus->arr_open_fm, i );
         if ( open_fm->window == window )
         {
+            dbase_destroy( sond_treeviewfm_get_dbase( open_fm->stvfm ) );
+
             g_ptr_array_remove_index_fast( sojus->arr_open_fm, i );
             break;
         }
     }
-
-    dbase_destroy( (DBase*) fm->modify_file->data );
-
-    fm_destroy( fm );
 
     return FALSE;
 }
@@ -51,14 +51,14 @@ file_manager_cb_dir_einfuegen_p( GtkWidget* item, gpointer data )
     gint rc = 0;
     gchar* errmsg = NULL;
 
-    FM* fm = (FM*) data;
+    SondTreeviewFM* stvfm = (SondTreeviewFM*) data;
 
-    rc = fm_create_dir( fm, FALSE, &errmsg );
+    rc = sond_treeviewfm_create_dir( stvfm, FALSE, &errmsg );
     if ( rc )
     {
-        display_message( gtk_widget_get_toplevel( GTK_WIDGET(fm->fm_treeview) ),
+        display_message( gtk_widget_get_toplevel( GTK_WIDGET(stvfm) ),
                 "Fehler bei Erzeugen neues Verzeichnis -\n\n"
-                "Bei Aufruf fm_create_dir:\n", errmsg, NULL );
+                "Bei Aufruf sond_treeviewfm_create_dir:\n", errmsg, NULL );
         g_free( errmsg );
     }
 
@@ -72,14 +72,14 @@ file_manager_cb_dir_einfuegen_up( GtkWidget* item, gpointer data )
     gint rc = 0;
     gchar* errmsg = NULL;
 
-    FM* fm = (FM*) data;
+    SondTreeviewFM* stvfm = (SondTreeviewFM*) data;
 
-    rc = fm_create_dir( fm, TRUE, &errmsg );
+    rc = sond_treeviewfm_create_dir( stvfm, TRUE, &errmsg );
     if ( rc )
     {
-        display_message( gtk_widget_get_toplevel( GTK_WIDGET(fm->fm_treeview) ),
+        display_message( gtk_widget_get_toplevel( GTK_WIDGET(stvfm) ),
                 "Fehler bei Erzeugen neues Verzeichnis -\n\n"
-                "Bei Aufruf fm_create_dir:\n", errmsg, NULL );
+                "Bei Aufruf sond_treeviewfm_create_dir:\n", errmsg, NULL );
         g_free( errmsg );
     }
 
@@ -90,9 +90,9 @@ file_manager_cb_dir_einfuegen_up( GtkWidget* item, gpointer data )
 static void
 file_manager_cb_kopieren( GtkWidget* item, gpointer data )
 {
-    FM* fm = (FM*) data;
+    SondTreeviewFM* stvfm = (SondTreeviewFM*) data;
 
-    treeview_copy_or_cut_selection( fm->fm_treeview, fm->clipboard, FALSE );
+    sond_treeview_copy_or_cut_selection( SOND_TREEVIEW(stvfm), FALSE );
 
     return;
 }
@@ -101,9 +101,9 @@ file_manager_cb_kopieren( GtkWidget* item, gpointer data )
 static void
 file_manager_cb_ausschneiden( GtkWidget* item, gpointer data )
 {
-    FM* fm = (FM*) data;
+    SondTreeviewFM* stvfm = (SondTreeviewFM*) data;
 
-    treeview_copy_or_cut_selection( fm->fm_treeview, fm->clipboard, TRUE );
+    sond_treeview_copy_or_cut_selection( SOND_TREEVIEW(stvfm), TRUE );
 
     return;
 }
@@ -115,13 +115,12 @@ file_manager_cb_einfuegen_p( GtkWidget* item, gpointer data )
     gint rc = 0;
     gchar* errmsg = NULL;
 
-    FM* fm = (FM*) data;
+    SondTreeviewFM* stvfm = (SondTreeviewFM*) data;
 
-    rc = fm_paste_selection( fm, fm->clipboard->tree_view,
-            fm->clipboard->arr_ref, fm->clipboard->ausschneiden, FALSE, &errmsg );
+    rc = sond_treeviewfm_paste_clipboard( stvfm, FALSE, &errmsg );
     if ( rc )
     {
-        display_message( gtk_widget_get_toplevel( GTK_WIDGET(fm->fm_treeview) ), "Fehler bei Einfügen -\n\nBei Aufruf fm_"
+        display_message( gtk_widget_get_toplevel( GTK_WIDGET(stvfm) ), "Fehler bei Einfügen -\n\nBei Aufruf fm_"
                 "paste_selection:\n", errmsg, NULL );
         g_free( errmsg );
     }
@@ -136,13 +135,12 @@ file_manager_cb_einfuegen_up( GtkWidget* item, gpointer data )
     gint rc = 0;
     gchar* errmsg = NULL;
 
-    FM* fm = (FM*) data;
+    SondTreeviewFM* stvfm = (SondTreeviewFM*) data;
 
-    rc = fm_paste_selection( fm, fm->clipboard->tree_view,
-            fm->clipboard->arr_ref, fm->clipboard->ausschneiden, TRUE, &errmsg );
+    rc = sond_treeviewfm_paste_clipboard( stvfm, TRUE, &errmsg );
     if ( rc )
     {
-        display_message( gtk_widget_get_toplevel( GTK_WIDGET(fm->fm_treeview) ), "Fehler bei Einfügen -\n\nBei Aufruf fm_"
+        display_message( gtk_widget_get_toplevel( GTK_WIDGET(stvfm) ), "Fehler bei Einfügen -\n\nBei Aufruf fm_"
                 "paste_selection:\n", errmsg, NULL );
         g_free( errmsg );
     }
@@ -157,17 +155,12 @@ file_manager_cb_loeschen( GtkWidget* item, gpointer data )
     gint rc = 0;
     gchar* errmsg = NULL;
 
-    FM* fm = (FM*) data;
+    SondTreeviewFM* stvfm = (SondTreeviewFM*) data;
 
-    GPtrArray* refs = treeview_selection_get_refs( fm->fm_treeview );
-    if ( !refs ) return;
-
-    rc = treeview_selection_foreach( fm->fm_treeview, refs,
-            fm_foreach_loeschen, NULL, &errmsg );
-    g_ptr_array_unref( refs );
+    rc = sond_treeviewfm_selection_loeschen( stvfm, &errmsg );
     if ( rc == -1 )
     {
-        display_message( gtk_widget_get_toplevel( GTK_WIDGET(fm->fm_treeview) ), "Fehler bei Löschen -\n\nBei Aufruf "
+        display_message( gtk_widget_get_toplevel( GTK_WIDGET(stvfm) ), "Fehler bei Löschen -\n\nBei Aufruf "
                 "treeview_selection_foreach:\n", errmsg, NULL );
         g_free( errmsg );
     }
@@ -183,12 +176,12 @@ file_manager_cb_eingang( GtkWidget* item, gpointer data )
     gchar* errmsg = NULL;
     Eingang* eingang = NULL;
 
-    FM* fm = (FM*) data;
+    SondTreeviewFM* stvfm = (SondTreeviewFM*) data;
 
-    rc = fm_set_eingang( fm, (DBase*) fm->modify_file->data, &errmsg );
+    rc = eingang_set( stvfm, &errmsg );
     if ( rc == -1 )
     {
-        display_message( gtk_widget_get_toplevel( fm->fm_treeview ), "Fehler bei Eingang -\n\nBei Aufruf "
+        display_message( gtk_widget_get_toplevel( GTK_WIDGET(stvfm) ), "Fehler bei Eingang -\n\nBei Aufruf "
                 "fm_set_eingang:\n", errmsg, NULL );
         g_free( errmsg );
     }
@@ -213,14 +206,14 @@ file_manager_same_project( const gchar* path, const GFile* dest )
 
 
 static gint
-file_manager_test( const gchar* root, const GFile* file, gpointer data, gchar** errmsg )
+file_manager_test( SondTreeviewFM* stvfm, const GFile* file, gpointer data, gchar** errmsg )
 {
     gint rc = 0;
     gchar* rel_path = NULL;
 
     DBase* dbase = (DBase*) data;
 
-    rel_path = fm_get_rel_path_from_file( root, file );
+    rel_path = get_rel_path_from_file( sond_treeviewfm_get_root( stvfm ), file );
 
     rc = dbase_test_path( dbase, rel_path, errmsg );
     g_free( rel_path );
@@ -232,18 +225,18 @@ file_manager_test( const gchar* root, const GFile* file, gpointer data, gchar** 
 
 
 static gint
-file_manager_before_move( const gchar* root, const GFile* src, const GFile* dest, gpointer data,
+file_manager_before_move( SondTreeviewFM*stvfm, const GFile* src, const GFile* dest, gpointer data,
         gchar** errmsg )
 {
     gint rc = 0;
 
     DBase* dbase = (DBase*) data;
 
-    if ( !file_manager_same_project( root, dest ) ) //Verschieben in anderes Projekt
+    if ( !file_manager_same_project( sond_treeviewfm_get_root( stvfm ), dest ) ) //Verschieben in anderes Projekt
     {
         gint rc = 0;
 
-        rc = file_manager_test( root, src, data, errmsg ); //Datei in Ursprungsprojekt angebunden?
+        rc = file_manager_test( stvfm, src, data, errmsg ); //Datei in Ursprungsprojekt angebunden?
         if ( rc == -1 ) ERROR_SOND( "file_manager_test" )
         else if ( rc == 1 ) return 1; //Wenn ja: überspringen
     }
@@ -251,8 +244,8 @@ file_manager_before_move( const gchar* root, const GFile* src, const GFile* dest
     rc = dbase_begin( dbase, errmsg );
     if ( rc ) ERROR_SOND( "dbase_begin" )
 
-    gchar* rel_path_source = fm_get_rel_path_from_file( root, src );
-    gchar* rel_path_dest = fm_get_rel_path_from_file( root, dest );
+    gchar* rel_path_source = get_rel_path_from_file( sond_treeviewfm_get_root( stvfm ), src );
+    gchar* rel_path_dest = get_rel_path_from_file( sond_treeviewfm_get_root( stvfm ), dest );
 
     rc = dbase_update_path( dbase, rel_path_source, rel_path_dest, errmsg );
 
@@ -286,7 +279,7 @@ file_manager_before_move( const gchar* root, const GFile* src, const GFile* dest
 
 
 static gint
-file_manager_after_move( const gchar* root, gint rc_update, gpointer data, gchar** errmsg )
+file_manager_after_move( SondTreeviewFM* stvfm, gint rc_update, gpointer data, gchar** errmsg )
 {
     gint rc = 0;
 
@@ -326,13 +319,13 @@ file_manager_after_move( const gchar* root, gint rc_update, gpointer data, gchar
 
 
 static gint
-file_manager_open_dbase( FM* fm, DBase** dbase,
+file_manager_open_dbase( SondTreeviewFM* stvfm, DBase** dbase,
         gchar** errmsg )
 {
     gint rc = 0;
     gchar* db_name = NULL;
 
-    db_name = g_strconcat( fm->root, "/doc_db.ZND", NULL );
+    db_name = g_strconcat( sond_treeviewfm_get_root( stvfm ), "/doc_db.ZND", NULL );
 
     rc = dbase_create_with_stmts( db_name, dbase, FALSE, FALSE, errmsg );
     g_free( db_name );
@@ -438,11 +431,12 @@ file_manager_set_headerbar( GtkWidget* fm_window, SondTreeviewFM* stvfm, const g
 
 
 static void
-file_manager_set_window( Sojus* sojus, GtkWidget* window )
+file_manager_set_window( Sojus* sojus, GtkWidget* window, SondTreeviewFM* stvfm )
 {
     OpenFM* open_fm = g_malloc0( sizeof( OpenFM ) );
 
     open_fm->window = window;
+    open_fm->stvfm = stvfm;
     open_fm->regnr = sojus->regnr_akt;
     open_fm->jahr = sojus->jahr_akt;
 
@@ -494,8 +488,6 @@ file_manager_entry_activate( GtkWidget* entry, gpointer data )
     fm_window = gtk_window_new( GTK_WINDOW_TOPLEVEL );
     gtk_window_set_default_size( GTK_WINDOW(fm_window), 1200, 700 );
 
-    file_manager_set_window( sojus, fm_window );
-
     GtkWidget* swindow = gtk_scrolled_window_new( NULL, NULL );
     gtk_container_add( GTK_CONTAINER(fm_window), swindow );
 
@@ -507,11 +499,13 @@ file_manager_entry_activate( GtkWidget* entry, gpointer data )
     path = add_string( path, g_strdup_printf( " %i-%i", sojus->regnr_akt,
             sojus->jahr_akt % 100 ) );
 
-    SondTreeviewFM* stvfm = sond_treeviewfm_new( );
+    SondTreeviewFM* stvfm = sond_treeviewfm_new( sojus->clipboard );
+
+    file_manager_set_window( sojus, fm_window, stvfm );
 
     gtk_container_add( GTK_CONTAINER(swindow), GTK_WIDGET(stvfm) );
 
-    g_signal_connect( fm_window, "delete-event", G_CALLBACK(cb_file_manager_delete_event), fm );
+    g_signal_connect( fm_window, "delete-event", G_CALLBACK(cb_file_manager_delete_event), sojus );
 
     rc = sond_treeviewfm_set_root( stvfm, path, &errmsg );
     file_manager_set_headerbar( fm_window, stvfm, path );
@@ -529,7 +523,7 @@ file_manager_entry_activate( GtkWidget* entry, gpointer data )
         return;
     }
 
-    rc = file_manager_open_dbase( fm, &dbase, &errmsg );
+    rc = file_manager_open_dbase( stvfm, &dbase, &errmsg );
     if ( rc )
     {
         gboolean ret = FALSE;
@@ -545,7 +539,7 @@ file_manager_entry_activate( GtkWidget* entry, gpointer data )
     }
 
     sond_treeviewfm_set_funcs( stvfm, file_manager_before_move,
-            file_manager_after_move, file_manager_test, dbase;
+            file_manager_after_move, file_manager_test, dbase );
 
     gtk_widget_show_all( fm_window );
 

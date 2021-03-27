@@ -830,9 +830,12 @@ sond_treeviewfm_init( SondTreeviewFM* stvfm )
 
 
 SondTreeviewFM*
-sond_treeviewfm_new( void )
+sond_treeviewfm_new( Clipboard* clipboard )
 {
-    return g_object_new( SOND_TYPE_TREEVIEWFM, NULL );
+    SondTreeviewFM* stvfm = g_object_new( SOND_TYPE_TREEVIEWFM, NULL );
+    sond_treeview_set_clipboard( SOND_TREEVIEW(stvfm), clipboard );
+
+    return stvfm;
 }
 
 
@@ -886,6 +889,8 @@ sond_treeviewfm_set_dbase( SondTreeviewFM* stvfm, DBase* dbase )
 DBase*
 sond_treeviewfm_get_dbase( SondTreeviewFM* stvfm )
 {
+    if ( ! stvfm ) return NULL;
+
     SondTreeviewFMPrivate* stvfm_priv = sond_treeviewfm_get_instance_private( stvfm );
 
     return stvfm_priv->dbase;
@@ -1419,11 +1424,11 @@ sond_treeviewfm_foreach_loeschen( SondTreeview* stv, GtkTreeIter* iter,
 }
 
 gint
-sond_treeviewfm_clipboard_loeschen( SondTreeviewFM* stvfm, gchar** errmsg )
+sond_treeviewfm_selection_loeschen( SondTreeviewFM* stvfm, gchar** errmsg )
 {
     gint rc = 0;
 
-    rc = sond_treeview_clipboard_foreach( SOND_TREEVIEW(stvfm),
+    rc = sond_treeview_selection_foreach( SOND_TREEVIEW(stvfm),
             sond_treeviewfm_foreach_loeschen, NULL, errmsg );
     if ( rc == -1 ) ERROR_SOND( "sond_treeview_clipboard_foreach" )
 

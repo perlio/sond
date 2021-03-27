@@ -814,7 +814,7 @@ selection_loeschen( Projekt* zond, Baum baum, gchar** errmsg )
     if ( baum == BAUM_INHALT || baum == BAUM_AUSWERTUNG ) rc =
             sond_treeview_selection_foreach( zond->treeview[baum],
             selection_foreach_loeschen, zond, errmsg );
-    else rc = sond_treeviewfm_clipboard_loeschen( SOND_TREEVIEWFM(zond->treeview[baum]), errmsg );
+    else rc = sond_treeviewfm_selection_loeschen( SOND_TREEVIEWFM(zond->treeview[baum]), errmsg );
 
     if ( rc == -1 ) ERROR_SOND( "treeview_selection_foreach" )
 

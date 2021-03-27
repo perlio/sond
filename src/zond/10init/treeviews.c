@@ -389,9 +389,8 @@ init_treeviews( Projekt* zond )
 void
 treeviews_init_fs_tree( Projekt* zond )
 {
-    zond->treeview[BAUM_FS] = SOND_TREEVIEW(sond_treeviewfm_new( ));
+    zond->treeview[BAUM_FS] = SOND_TREEVIEW(sond_treeviewfm_new( zond->clipboard ));
 
-    sond_treeview_set_clipboard( zond->treeview[BAUM_FS], zond->clipboard );
     sond_treeviewfm_set_funcs( SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), project_before_move,
             project_after_move, project_test_rel_path, zond );
 
