@@ -51,7 +51,7 @@ project_set_changed( gpointer user_data )
 }
 
 
-static void
+void
 project_reset_changed( Projekt* zond )
 {
     zond->dbase_zond->changed = FALSE;
@@ -59,122 +59,6 @@ project_reset_changed( Projekt* zond )
     g_settings_set_boolean( zond->settings, "speichern", FALSE );
 
     return;
-}
-
-
-gint
-project_test_rel_path( SondTreeviewFM* stvfm, const GFile* file, gpointer data, gchar** errmsg )
-{
-    gint rc = 0;
-    gchar* rel_path = NULL;
-
-    Projekt* zond = (Projekt*) data;
-
-    rel_path = get_rel_path_from_file( sond_treeviewfm_get_root( stvfm ), file );
-
-    rc = dbase_test_path( zond->dbase_zond->dbase_store, rel_path, errmsg );
-    if ( rc ) g_free( rel_path );
-    if ( rc == -1 ) ERROR_SOND( "dbase_test_path" )
-    else if ( rc == 1 ) return 1;
-
-    rc = dbase_test_path( (DBase*) zond->dbase_zond->dbase_work, rel_path, errmsg );
-    g_free( rel_path );
-    if ( rc == -1 ) ERROR_SOND( "dbase_test_path" )
-    else if ( rc == 1 ) return 1;
-
-    return 0;
-}
-
-
-gint
-project_before_move( SondTreeviewFM* stvfm, const GFile* file_source, const GFile* file_dest,
-        gpointer data, gchar** errmsg )
-{
-    gint rc = 0;
-    gboolean changed = FALSE;
-
-    const gchar* root = sond_treeviewfm_get_root( stvfm );
-
-    Projekt* zond = (Projekt*) data;
-
-    rc = dbase_begin( zond->dbase_zond->dbase_store, errmsg );
-    if ( rc ) ERROR_SOND( "dbase_begin (dbase_store" )
-
-    rc = dbase_begin( (DBase*) zond->dbase_zond->dbase_work, errmsg );
-    if ( rc ) ERROR_ROLLBACK( zond->dbase_zond->dbase_store, "dbase_begin (dbase_work)" )
-
-    gchar* rel_path_source = get_rel_path_from_file( root, file_source );
-    gchar* rel_path_dest = get_rel_path_from_file( root, file_dest );
-
-    changed = zond->dbase_zond->changed;
-
-    rc = dbase_update_path( zond->dbase_zond->dbase_store, rel_path_source, rel_path_dest, errmsg );
-    if ( rc )
-    {
-        g_free( rel_path_source );
-        g_free( rel_path_dest );
-
-        ERROR_ROLLBACK_BOTH( zond->dbase_zond->dbase_store,
-            (DBase*) zond->dbase_zond->dbase_work, "dbase_update_path (dbase_store)" )
-    }
-
-    rc = dbase_update_path( (DBase*) zond->dbase_zond->dbase_work, rel_path_source, rel_path_dest, errmsg );
-
-    g_free( rel_path_source );
-    g_free( rel_path_dest );
-
-    if ( !changed ) project_reset_changed( zond );
-
-    if ( rc ) ERROR_ROLLBACK_BOTH( zond->dbase_zond->dbase_store,
-            (DBase*) zond->dbase_zond->dbase_work, "dbase_update_path (dbase_work)" )
-
-    return 0;
-}
-
-
-gint
-project_after_move( SondTreeviewFM* stvfm, const gint rc_edit, gpointer data, gchar** errmsg )
-{
-    gint rc = 0;
-
-    Projekt* zond = (Projekt*) data;
-
-    if ( rc_edit == 1 )
-    {
-        gint rc1 = 0;
-        gint rc2 = 0;
-        gchar* err_rollback = NULL;
-
-        rc1 = dbase_rollback( zond->dbase_zond->dbase_store, &err_rollback );
-        if ( rc1 && errmsg ) *errmsg = g_strconcat( "Bei Aufruf dbase_rollback "
-                "(dbase_store):\n", err_rollback, NULL );
-        g_free( err_rollback );
-
-        rc2 = dbase_rollback  ( (DBase*) zond->dbase_zond->dbase_work, &err_rollback );
-        if ( rc2 && errmsg ) *errmsg = g_strconcat( "Bei Aufruf dbase_rollback "
-                "(dbase_work):\n", err_rollback, NULL );
-        g_free( err_rollback );
-
-        if ( (rc1 || rc2) )
-        {
-            if ( errmsg ) *errmsg = add_string( *errmsg,
-                    g_strdup( "\n\nDatenbank inkonsistent" ) );
-
-            return -1;
-        }
-    }
-    else
-    {
-        rc = dbase_commit( zond->dbase_zond->dbase_store, errmsg );
-        if ( rc ) ERROR_ROLLBACK_BOTH( zond->dbase_zond->dbase_store,
-                (DBase*) zond->dbase_zond->dbase_work, "dbase_commit (dbase_store)" )
-
-        rc = dbase_commit( (DBase*) zond->dbase_zond->dbase_work, errmsg );
-        if ( rc ) ERROR_ROLLBACK_BOTH( zond->dbase_zond->dbase_store,
-                (DBase*) zond->dbase_zond->dbase_work, "dbase_commit (dbase_work)" )
-    }
-
-    return 0;
 }
 
 

@@ -190,134 +190,6 @@ file_manager_cb_eingang( GtkWidget* item, gpointer data )
 }
 
 
-static gboolean
-file_manager_same_project( const gchar* path, const GFile* dest )
-{
-    gboolean same = FALSE;
-
-    gchar* path_dest = g_file_get_path( (GFile*) dest );
-
-    same = g_str_has_prefix( path_dest, path );
-
-    g_free( path_dest );
-
-    return same;
-}
-
-
-static gint
-file_manager_test( SondTreeviewFM* stvfm, const GFile* file, gpointer data, gchar** errmsg )
-{
-    gint rc = 0;
-    gchar* rel_path = NULL;
-
-    DBase* dbase = (DBase*) data;
-
-    rel_path = get_rel_path_from_file( sond_treeviewfm_get_root( stvfm ), file );
-
-    rc = dbase_test_path( dbase, rel_path, errmsg );
-    g_free( rel_path );
-    if ( rc == -1 ) ERROR_SOND( "dbase_test_path" )
-    else if ( rc == 1 ) return 1; //Datei existiert
-
-    return 0;
-}
-
-
-static gint
-file_manager_before_move( SondTreeviewFM*stvfm, const GFile* src, const GFile* dest, gpointer data,
-        gchar** errmsg )
-{
-    gint rc = 0;
-
-    DBase* dbase = (DBase*) data;
-
-    if ( !file_manager_same_project( sond_treeviewfm_get_root( stvfm ), dest ) ) //Verschieben in anderes Projekt
-    {
-        gint rc = 0;
-
-        rc = file_manager_test( stvfm, src, data, errmsg ); //Datei in Ursprungsprojekt angebunden?
-        if ( rc == -1 ) ERROR_SOND( "file_manager_test" )
-        else if ( rc == 1 ) return 1; //Wenn ja: überspringen
-    }
-
-    rc = dbase_begin( dbase, errmsg );
-    if ( rc ) ERROR_SOND( "dbase_begin" )
-
-    gchar* rel_path_source = get_rel_path_from_file( sond_treeviewfm_get_root( stvfm ), src );
-    gchar* rel_path_dest = get_rel_path_from_file( sond_treeviewfm_get_root( stvfm ), dest );
-
-    rc = dbase_update_path( dbase, rel_path_source, rel_path_dest, errmsg );
-
-    g_free( rel_path_source );
-    g_free( rel_path_dest );
-
-    if ( rc )
-    {
-        gint rc = 0;
-        gchar* err_rollback = NULL;
-
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf dbase_update_path:\n",
-                errmsg, NULL );
-
-        rc = dbase_rollback( dbase, &err_rollback );
-        if ( rc )
-        {
-            if ( errmsg ) *errmsg = add_string( *errmsg, g_strconcat( "\n\nBei Aufruf "
-                    "dbase_rollback:\n", err_rollback,
-                    "\n\nDatenbank inkonsistent", NULL ) );
-            g_free( err_rollback );
-        }
-        else if ( errmsg ) *errmsg = add_string( *errmsg, g_strdup( "\n\n"
-                    "Rollback durchgeführt" ) );
-
-        return -1;
-    }
-
-    return 0;
-}
-
-
-static gint
-file_manager_after_move( SondTreeviewFM* stvfm, gint rc_update, gpointer data, gchar** errmsg )
-{
-    gint rc = 0;
-
-    DBase* dbase = (DBase*) data;
-
-    if ( rc_update == 1 )
-    {
-        rc = dbase_rollback( dbase, errmsg );
-        if ( rc ) ERROR_SOND( "dbase_rollback" )
-    }
-    else
-    {
-        rc = dbase_commit( dbase, errmsg );
-        if ( rc )
-        {
-            gint rc = 0;
-            gchar* err_rollback = NULL;
-
-            if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf dbase_commit:\n",
-                    errmsg, NULL );
-            rc = dbase_rollback( dbase, &err_rollback );
-            if ( rc )
-            {
-                if ( errmsg ) *errmsg = add_string( *errmsg, g_strconcat( "\n\n"
-                        "Bei Aufruf dbase_rollback:\n", err_rollback, NULL ) );
-                g_free( err_rollback );
-            }
-            else if ( errmsg ) *errmsg = add_string( *errmsg, g_strdup( "\n\n"
-                    "Rollback durchgeführt" ) );
-
-            return -1;
-        }
-    }
-
-    return 0;
-}
-
-
 static gint
 file_manager_open_dbase( SondTreeviewFM* stvfm, DBase** dbase,
         gchar** errmsg )
@@ -538,8 +410,7 @@ file_manager_entry_activate( GtkWidget* entry, gpointer data )
         return;
     }
 
-    sond_treeviewfm_set_funcs( stvfm, file_manager_before_move,
-            file_manager_after_move, file_manager_test, dbase );
+    sond_treeviewfm_set_dbase( stvfm, dbase );
 
     gtk_widget_show_all( fm_window );
 

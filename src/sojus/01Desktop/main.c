@@ -134,6 +134,7 @@ init_app_window( GtkApplication* app, Sojus* sojus )
 **  Widgets erzeugen  */
     //app-window
     sojus->app_window = gtk_application_window_new( app );
+//    gtk_window_set_keep_above( GTK_WINDOW(sojus->app_window), TRUE );
     GtkWidget* grid = gtk_grid_new( );
     gtk_container_add( GTK_CONTAINER(sojus->app_window), grid );
 

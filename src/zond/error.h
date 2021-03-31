@@ -42,31 +42,4 @@ gchar* prepend_string( gchar*, gchar* );
                         "Bei Aufruf " x ":\n", fz_caught_message( y ), NULL ) ); \
                          return -1; }
 
-#define ERROR_PAO_ROLLBACK(x) \
-          { if ( errmsg ) *errmsg = add_string( \
-            g_strdup( "Bei Aufruf " x ":\n" ), *errmsg ); \
-            \
-            gchar* err_rollback = NULL; \
-            gint rc_rollback = 0; \
-            rc_rollback = db_rollback( zond, &err_rollback ); \
-            if ( errmsg ) \
-            { \
-                if ( !rc_rollback ) *errmsg = add_string( *errmsg, \
-                        g_strdup( "\n\nRollback durchgeführt" ) ); \
-                else *errmsg = add_string( *errmsg, g_strconcat( "\n\nRollback " \
-                        "fehlgeschlagen\n\nBei Aufruf db_rollback:\n", \
-                        err_rollback, "\n\nDatenbankverbindung trennen", NULL ) ); \
-            } \
-            g_free( err_rollback ); \
-            \
-            return -1; }
-
-#define ERROR_PAO_ROLLBACK_BOTH(x) \
-          { if ( errmsg ) *errmsg = add_string( \
-            g_strdup( "Bei Aufruf " x ":\n" ), *errmsg ); \
-            rc = db_rollback_both( zond, errmsg ); \
-            if ( !rc && errmsg ) *errmsg = add_string( *errmsg, \
-                    g_strdup( "\n\nRollback durchgeführt" ) ); \
-            return -1; }
-
 #endif // ERROR_H_INCLUDED

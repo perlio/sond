@@ -16,13 +16,89 @@ typedef struct
     gchar* root;
     GtkTreeViewColumn* column_eingang;
     DBase* dbase;
-    gint (* before_move) ( SondTreeviewFM*, const GFile*, const GFile*, gpointer, gchar** );
-    gint (* after_move) ( SondTreeviewFM*, const gint, gpointer, gchar** );
-    gint (* test) ( SondTreeviewFM*, const GFile*, gpointer, gchar** );
-    gpointer func_data;
 } SondTreeviewFMPrivate;
 
 G_DEFINE_TYPE_WITH_PRIVATE(SondTreeviewFM, sond_treeviewfm, SOND_TYPE_TREEVIEW)
+
+
+static gint
+sond_treeviewfm_dbase_begin( SondTreeviewFM* stvfm, gchar** errmsg )
+{
+    gint rc = 0;
+    SondTreeviewFMPrivate* priv = sond_treeviewfm_get_instance_private( stvfm );
+
+    rc = dbase_begin( priv->dbase, errmsg );
+    if ( rc ) ERROR_SOND( "dbase_begin" )
+
+    return 0;
+}
+
+
+static gint
+sond_treeviewfm_dbase_test( SondTreeviewFM* stvfm, GFile* file, gchar** errmsg )
+{
+    gint rc = 0;
+
+    SondTreeviewFMPrivate* priv = sond_treeviewfm_get_instance_private( stvfm );
+
+    gchar* rel_path = get_rel_path_from_file( priv->root, file );
+
+    rc = dbase_test_path( priv->dbase, rel_path, errmsg );
+    g_free( rel_path );
+    if ( rc == -1 ) ERROR_ROLLBACK( priv->dbase, "dbase_test_path" )
+    else if ( rc == 1 ) ROLLBACK(priv->dbase)
+
+    return rc;
+}
+
+
+static gint
+sond_treeviewfm_dbase_update_path( SondTreeviewFM* stvfm, GFile* source, GFile* dest,
+        gchar** errmsg )
+{
+    gint rc = 0;
+
+    SondTreeviewFMPrivate* priv = sond_treeviewfm_get_instance_private( stvfm );
+
+    gchar* rel_path_source = get_rel_path_from_file( sond_treeviewfm_get_root( stvfm ), source );
+    gchar* rel_path_dest = get_rel_path_from_file( sond_treeviewfm_get_root( stvfm ), dest );
+
+    rc = dbase_update_path( priv->dbase, rel_path_source, rel_path_dest, errmsg );
+
+    g_free( rel_path_source );
+    g_free( rel_path_dest );
+
+    if ( rc ) ERROR_ROLLBACK( priv->dbase, "dbase_update_path" )
+
+    return 0;
+}
+
+
+static gint
+sond_treeviewfm_dbase_update_eingang( SondTreeviewFM* stvfm, GFile* source, GFile* dest,
+        gchar** errmsg )
+{
+
+    return 0;
+}
+
+
+static gint
+sond_treeviewfm_dbase_end( SondTreeviewFM* stvfm, gboolean suc, gchar** errmsg )
+{
+    SondTreeviewFMPrivate* priv = sond_treeviewfm_get_instance_private( stvfm );
+
+    if ( suc )
+    {
+        gint rc = 0;
+
+        rc = dbase_commit( priv->dbase, errmsg );
+        if ( rc ) ERROR_ROLLBACK( priv->dbase, "dbase_commit" )
+    }
+    else ROLLBACK(priv->dbase)
+
+    return 0;
+}
 
 
 static void
@@ -38,15 +114,18 @@ sond_treeviewfm_finalize( GObject* g_object )
 }
 
 
-static void
-sond_treeviewfm_class_init( SondTreeviewFMClass* klass )
+static gboolean
+sond_treeviewfm_beyond_root( const gchar* root, const GFile* dest )
 {
+    gboolean same = FALSE;
 
-    GObjectClass *object_class = G_OBJECT_CLASS(klass);
+    gchar* path_dest = g_file_get_path( (GFile*) dest );
 
-    object_class->finalize = sond_treeviewfm_finalize;
+    same = g_str_has_prefix( path_dest, root );
 
-    return;
+    g_free( path_dest );
+
+    return same;
 }
 
 
@@ -75,49 +154,78 @@ sond_treeviewfm_move_copy_create_delete( SondTreeviewFM* stvfm, GFile* file_sour
 
     while ( 1 )
     {
-        gboolean suc = FALSE;
         GError* error = NULL;
+        gboolean suc = FALSE;
 
         if ( mode == 0 ) suc = g_file_make_directory( *file_dest, NULL, &error );
-        else if ( mode == 1 ) suc = g_file_copy ( file_source, *file_dest,
-                G_FILE_COPY_NONE, NULL, NULL, NULL, &error );
-        else if ( mode == 2 || mode == 3 )
+        else if ( mode == 1 || mode == 2 || mode == 3 || mode == 4 )
         {
-            if ( stvfm_priv->before_move )
-            {
-                gint rc = 0;
+            gint rc = 0;
 
-                rc = stvfm_priv->before_move( stvfm, file_source, *file_dest,
-                        stvfm_priv->func_data, errmsg );
-                if ( rc == -1 )
+            rc = SOND_TREEVIEWFM_GET_CLASS(stvfm)->dbase_begin( stvfm, errmsg );
+            if ( rc ) //begin räumt sich selbst auf
+            {
+                g_free( basename );
+                ERROR_SOND( "dbase_begin" )
+            }
+
+            if ( mode == 2 )
+            {
+                if ( sond_treeviewfm_beyond_root( stvfm_priv->root, *file_dest ) )
                 {
-                    g_free( basename );
-                    ERROR_SOND( "before" )
-                }
-                else if ( rc == 1 ) //Kein verschieben
-                {
-                    g_free( basename );
-                    return 1;
+                    rc = SOND_TREEVIEWFM_GET_CLASS(stvfm)->dbase_test( stvfm, file_source, errmsg );
+                    if ( rc ) //aufräumen...
+                    {
+                        g_free( basename );
+                        if ( rc == -1 ) ERROR_SOND( "dbase_test" )
+                        else if ( rc == 1 ) return 1;
+                    }
                 }
             }
 
-            suc = g_file_move ( file_source, *file_dest, G_FILE_COPY_NONE, NULL,
-                    NULL, NULL, &error );
-
-            if ( stvfm_priv->after_move )
+            if ( mode == 4 )
             {
                 gint rc = 0;
 
-                rc = stvfm_priv->after_move( stvfm, (suc) ? 0 : 1, stvfm_priv->func_data,
-                        errmsg );
+                rc = SOND_TREEVIEWFM_GET_CLASS(stvfm)->dbase_test( stvfm, *file_dest, errmsg );
                 if ( rc )
                 {
                     g_free( basename );
-                    ERROR_SOND( "after" )
+                    if ( rc == -1 ) ERROR_SOND( "dbase_test" )
+                    else if ( rc == 1 ) return 1;
+                }
+
+            }
+
+            if ( mode == 2 || mode == 3 )
+            {
+                rc = SOND_TREEVIEWFM_GET_CLASS(stvfm)->dbase_update_path( stvfm, file_source, *file_dest, errmsg );
+                if ( rc )
+                {
+                    g_free( basename );
+                    ERROR_SOND( "dbase_update_path" )
                 }
             }
+
+            if ( mode == 1 || mode == 2 )
+            {
+                rc = SOND_TREEVIEWFM_GET_CLASS(stvfm)->dbase_update_eingang( stvfm, file_source, *file_dest, errmsg );
+                if ( rc )
+                {
+                    g_free( basename );
+                    ERROR_SOND( "dbase_update_eingang" )
+                }
+            }
+
+            if ( mode == 1 ) suc = g_file_copy ( file_source, *file_dest,
+                    G_FILE_COPY_NONE, NULL, NULL, NULL, &error );
+            else if ( mode == 2 || mode == 3 ) suc = g_file_move ( file_source,
+                    *file_dest, G_FILE_COPY_NONE, NULL, NULL, NULL, &error );
+            else if ( mode == 4 ) suc = g_file_delete( *file_dest, NULL, &error );
+
+            rc = SOND_TREEVIEWFM_GET_CLASS(stvfm)->dbase_end( stvfm, suc, errmsg );
+            if ( rc ) ERROR_SOND( "dbase_end" )
         }
-        else if ( mode == 4 ) suc = g_file_delete( *file_dest, NULL, &error );
 
         if ( suc ) break;
         else
@@ -717,41 +825,54 @@ sond_treeviewfm_render_file_icon( GtkTreeViewColumn* column, GtkCellRenderer* re
 static void
 sond_treeviewfm_render_file_name( SondTreeview* stv, GtkTreeIter* iter, gpointer data )
 {
-    SondTreeviewFMPrivate* stvfm_priv = sond_treeviewfm_get_instance_private( SOND_TREEVIEWFM(stv) );
-
     g_object_set( G_OBJECT(sond_treeview_get_cell_renderer_text( stv )), "text",
             sond_treeviewfm_get_name( SOND_TREEVIEWFM(stv), iter ), NULL );
 
-    if ( stvfm_priv->test )
+    gchar* full_path = NULL;
+
+    full_path = sond_treeviewfm_get_full_path( SOND_TREEVIEWFM(stv), iter );
+
+    if ( full_path )
     {
-        gchar* full_path = NULL;
+        gint rc = 0;
+        gchar* errmsg = NULL;
 
-        full_path = sond_treeviewfm_get_full_path( SOND_TREEVIEWFM(stv), iter );
+        GFile* file = g_file_new_for_path( full_path );
+        g_free( full_path );
 
-        if ( full_path )
+        rc = SOND_TREEVIEWFM_GET_CLASS(SOND_TREEVIEWFM(stv))->dbase_test( SOND_TREEVIEWFM(stv), file, &errmsg );
+        g_object_unref( file );
+        if ( rc == -1 )
         {
-            gint rc = 0;
-            gchar* errmsg = NULL;
-
-            GFile* file = g_file_new_for_path( full_path );
-            g_free( full_path );
-
-            rc = stvfm_priv->test( SOND_TREEVIEWFM(stv), file, stvfm_priv->func_data, &errmsg );
-            g_object_unref( file );
-            if ( rc == -1 )
-            {
-                display_message( gtk_widget_get_toplevel( GTK_WIDGET(stv) ),
-                        "Warnung -\n\nBei Aufruf db_get_node_id_from_rel_path:\n",
-                        errmsg, NULL );
-                g_free( errmsg );
-            }
-            else if ( rc == 0 ) g_object_set(
-                    G_OBJECT(sond_treeview_get_cell_renderer_text( stv )),
-                    "background-set", FALSE, NULL );
-            else g_object_set( G_OBJECT(sond_treeview_get_cell_renderer_text(
-                    stv )), "background-set", TRUE, NULL );
+            display_message( gtk_widget_get_toplevel( GTK_WIDGET(stv) ),
+                    "Warnung -\n\nBei Aufruf dbase_test:\n",
+                    errmsg, NULL );
+            g_free( errmsg );
         }
+        else if ( rc == 0 ) g_object_set(
+                G_OBJECT(sond_treeview_get_cell_renderer_text( stv )),
+                "background-set", FALSE, NULL );
+        else g_object_set( G_OBJECT(sond_treeview_get_cell_renderer_text(
+                stv )), "background-set", TRUE, NULL );
     }
+
+    return;
+}
+
+
+static void
+sond_treeviewfm_class_init( SondTreeviewFMClass* klass )
+{
+    klass->dbase_begin = sond_treeviewfm_dbase_begin;
+    klass->dbase_test = sond_treeviewfm_dbase_test;
+    klass->dbase_update_path = sond_treeviewfm_dbase_update_path;
+    klass->dbase_update_eingang = sond_treeviewfm_dbase_update_eingang;
+    klass->dbase_end= sond_treeviewfm_dbase_end;
+    klass->row_text_edited = sond_treeviewfm_row_text_edited;
+
+    GObjectClass *object_class = G_OBJECT_CLASS(klass);
+
+    object_class->finalize = sond_treeviewfm_finalize;
 
     return;
 }
@@ -903,24 +1024,6 @@ sond_treeviewfm_column_eingang_set_visible( SondTreeviewFM* stvfm, gboolean vis 
     SondTreeviewFMPrivate* stvfm_priv = sond_treeviewfm_get_instance_private( stvfm );
 
     gtk_tree_view_column_set_visible( stvfm_priv->column_eingang, vis );
-
-    return;
-}
-
-
-void
-sond_treeviewfm_set_funcs( SondTreeviewFM* stvfm,
-        gint (* before_move) (SondTreeviewFM*, const GFile*, const GFile*, gpointer, gchar**),
-        gint (* after_move) (SondTreeviewFM*, const gint, gpointer, gchar**),
-        gint (* test) (SondTreeviewFM*, const GFile*, gpointer, gchar**),
-        gpointer func_data )
-{
-    SondTreeviewFMPrivate* stvfm_priv = sond_treeviewfm_get_instance_private( stvfm );
-
-    stvfm_priv->before_move = before_move;
-    stvfm_priv->after_move = after_move;
-    stvfm_priv->test = test;
-    stvfm_priv->func_data = func_data;
 
     return;
 }
@@ -1367,20 +1470,9 @@ sond_treeviewfm_remove_node( SondTreeviewFM* stvfm, GtkTreeIter* iter_file, GFil
     gint rc = 0;
     GFileType type = G_FILE_TYPE_UNKNOWN;
 
-    SondTreeviewFMPrivate* stvfm_priv = sond_treeviewfm_get_instance_private( stvfm );
-
     type = g_file_info_get_file_type( info_file );
 
-    if ( type != G_FILE_TYPE_DIRECTORY )
-    {
-        if ( stvfm_priv->test )
-        {
-            rc = stvfm_priv->test( stvfm, file, stvfm_priv->func_data, errmsg );
-            if ( rc == -1 ) ERROR_SOND( "test" )
-            if ( rc == 1 ) return 1; //flag bei fm_dir_foreach wird gesetzt
-        }
-    }
-    else //Verzeichnis - muß erst geleert werden
+    if ( type == G_FILE_TYPE_DIRECTORY )
     {
         rc = sond_treeviewfm_dir_foreach( stvfm, iter_file, file,
                 sond_treeviewfm_remove_node, data, errmsg );
@@ -1391,6 +1483,7 @@ sond_treeviewfm_remove_node( SondTreeviewFM* stvfm, GtkTreeIter* iter_file, GFil
 
     rc = sond_treeviewfm_move_copy_create_delete( stvfm, NULL, &file, 4, errmsg );
     if ( rc == -1 ) ERROR_SOND( "sond_treeviewfm_move_copy_create_delete" )
+    else if ( rc == 1 ) return 1;
 
     if ( iter_file ) gtk_tree_store_remove( GTK_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(stvfm) )),
             iter_file );
@@ -1422,6 +1515,7 @@ sond_treeviewfm_foreach_loeschen( SondTreeview* stv, GtkTreeIter* iter,
 
     return 0;
 }
+
 
 gint
 sond_treeviewfm_selection_loeschen( SondTreeviewFM* stvfm, gchar** errmsg )

@@ -4,8 +4,6 @@
 #define ZOOM_MIN 10
 #define ZOOM_MAX 400
 
-#define DOCUMENT_PAGE(u) ((DocumentPage*) g_ptr_array_index( dd->document->pages, u ))
-
 #define EOP 999999
 
 #include "enums.h"

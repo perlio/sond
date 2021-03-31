@@ -600,10 +600,6 @@
 		</Unit>
 		<Unit filename="src/zond/99conv/mupdf.c">
 			<Option compilerVar="CC" />
-			<Option target="zond (Release)" />
-			<Option target="zond (Testing)" />
-			<Option target="Viewer (Release)" />
-			<Option target="Viewer (Testing)" />
 		</Unit>
 		<Unit filename="src/zond/99conv/mupdf.h">
 			<Option target="zond (Release)" />
@@ -613,10 +609,6 @@
 		</Unit>
 		<Unit filename="src/zond/99conv/pdf.c">
 			<Option compilerVar="CC" />
-			<Option target="zond (Release)" />
-			<Option target="zond (Testing)" />
-			<Option target="Viewer (Release)" />
-			<Option target="Viewer (Testing)" />
 		</Unit>
 		<Unit filename="src/zond/99conv/pdf.h">
 			<Option target="zond (Release)" />
@@ -679,6 +671,15 @@
 			<Option compilerVar="CC" />
 		</Unit>
 		<Unit filename="src/zond/zond_pdf_document.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/zond_treeviewfm.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/zond_treeviewfm.h">
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
 		</Unit>

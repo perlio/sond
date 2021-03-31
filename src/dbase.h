@@ -1,9 +1,21 @@
 #ifndef DBASE_H_INCLUDED
 #define DBASE_H_INCLUDED
 
-#define ERROR_DBASE(x) { if ( errmsg ) *errmsg = add_string( g_strconcat( "Bei Aufruf " x ":\n", \
-                       sqlite3_errmsg(dbase->db), NULL ), *errmsg ); \
+#define ERROR_DBASE(x) { if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf " x ":\n", \
+                       sqlite3_errmsg(dbase->db), NULL ); \
                        return -1; }
+
+#define ROLLBACK(dbase) \
+          { gint rc_rollback = 0; \
+            rc_rollback = dbase_rollback( dbase, errmsg ); \
+            if ( rc_rollback ) \
+            { \
+                if ( errmsg ) *errmsg = add_string( g_strdup( "Rollback " \
+                    "fehlgeschlagen\n\nBei Aufruf dbase_rollback:\n" ), \
+                    *errmsg ); \
+                return -1; \
+            } \
+          }
 
 #define ERROR_ROLLBACK(dbase,x) \
           { if ( errmsg ) *errmsg = add_string( \

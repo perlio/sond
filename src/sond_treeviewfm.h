@@ -1,5 +1,5 @@
-#ifndef FM_H_INCLUDED
-#define FM_H_INCLUDED
+#ifndef SOND_TREEVIEWFM_H_INCLUDED
+#define SOND_TREEVIEWFM_H_INCLUDED
 
 #include <glib-object.h>
 #include <gtk/gtk.h>
@@ -19,8 +19,13 @@ G_DECLARE_DERIVABLE_TYPE (SondTreeviewFM, sond_treeviewfm, SOND, TREEVIEWFM, Son
 
 struct _SondTreeviewFMClass
 {
-    GtkTreeViewClass parent_class;
-
+    SondTreeviewClass parent_class;
+    void (*row_text_edited) (GtkCellRenderer*, gchar*, gchar*, gpointer);
+    gint (*dbase_begin) (SondTreeviewFM*, gchar**);
+    gint (*dbase_test) (SondTreeviewFM*, GFile*, gchar**);
+    gint (*dbase_update_path) (SondTreeviewFM*, GFile*, GFile*, gchar**);
+    gint (*dbase_update_eingang) (SondTreeviewFM*, GFile*, GFile*, gchar**);
+    gint (*dbase_end) (SondTreeviewFM*, gboolean, gchar**);
 };
 
 
@@ -36,12 +41,6 @@ DBase* sond_treeviewfm_get_dbase( SondTreeviewFM* );
 
 void sond_treeviewfm_column_eingang_set_visible( SondTreeviewFM*, gboolean );
 
-void sond_treeviewfm_set_funcs( SondTreeviewFM*,
-        gint (*) (SondTreeviewFM*, const GFile*, const GFile*, gpointer, gchar**),
-        gint (*) (SondTreeviewFM*, const gint, gpointer, gchar**),
-        gint (*) (SondTreeviewFM*, const GFile*, gpointer, gchar**),
-        gpointer func_data );
-
 gchar* sond_treeviewfm_get_full_path( SondTreeviewFM*, GtkTreeIter* );
 
 gchar* sond_treeviewfm_get_rel_path( SondTreeviewFM*, GtkTreeIter* );
@@ -54,4 +53,4 @@ gint sond_treeviewfm_selection_loeschen( SondTreeviewFM*, gchar** );
 
 
 
-#endif // FM_H_INCLUDED
+#endif // SOND_TREEVIEWFM_H_INCLUDED

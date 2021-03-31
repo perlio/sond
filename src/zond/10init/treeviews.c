@@ -19,8 +19,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <gtk/gtk.h>
 #include <mupdf/fitz.h>
 
-#include "../../sond_treeview.h"
-#include "../../sond_treeviewfm.h"
+#include "../zond_treeviewfm.h"
+
+//#include "../../sond_treeview.h"
+//#include "../../sond_treeviewfm.h"
 
 #include "../global_types.h"
 #include "../error.h"
@@ -389,10 +391,8 @@ init_treeviews( Projekt* zond )
 void
 treeviews_init_fs_tree( Projekt* zond )
 {
-    zond->treeview[BAUM_FS] = SOND_TREEVIEW(sond_treeviewfm_new( zond->clipboard ));
-
-    sond_treeviewfm_set_funcs( SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), project_before_move,
-            project_after_move, project_test_rel_path, zond );
+    zond->treeview[BAUM_FS] = SOND_TREEVIEW(zond_treeviewfm_new( zond->clipboard ));
+    zond_treeviewfm_set_zond( ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), zond );
 
     //die Selection
     zond->selection[BAUM_FS] = gtk_tree_view_get_selection(

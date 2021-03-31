@@ -73,10 +73,9 @@ mupdf_close_context( fz_context* ctx )
 {
     GMutex* mutex = (GMutex*) ctx->locks.user;
 
-    fz_drop_context( ctx );
+//    for ( gint i = 0; i < FZ_LOCK_MAX; i++ ) g_mutex_clear( &mutex[i] );
 
-//    for ( gint i = 0; i < FZ_LOCK_MAX; i++ )
-  //          g_mutex_clear( &mutex[i] );
+    fz_drop_context( ctx );
 
 //    g_free( mutex );
 

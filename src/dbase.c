@@ -42,8 +42,8 @@ dbase_rollback( DBase* dbase, gchar** errmsg )
 
     sqlite3_reset( dbase->rollback );
 
-    rc = sqlite3_step( dbase->update_path );
-    if ( rc != SQLITE_DONE ) ERROR_DBASE( "sqlite3_step (rollback)" )
+    rc = sqlite3_step( dbase->rollback );
+    if ( rc != SQLITE_DONE ) ERROR_DBASE( "sqlite3_step(rollback)" )
 
     return 0;
 }
