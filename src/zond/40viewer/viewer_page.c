@@ -205,7 +205,6 @@ viewer_page_constructed( GObject* self )
     ViewerPagePrivate* priv = viewer_page_get_instance_private( VIEWER_PAGE(self) );
 
     g_signal_connect_after( self, "draw", G_CALLBACK(viewer_page_draw), priv->pdfv );
-    gtk_layout_put( GTK_LAYOUT(priv->pdfv->layout), GTK_WIDGET(self), 0, 0 );
 
     G_OBJECT_CLASS(viewer_page_parent_class)->constructed( self );
 

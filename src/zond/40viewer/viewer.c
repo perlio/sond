@@ -224,6 +224,7 @@ viewer_create_layout( PdfViewer* pv )
 
             //ViewerPage erstellen und einfügen
             ViewerPage* viewer_page = viewer_page_new_full( pv, pdf_document_page, crop );
+            gtk_layout_put( GTK_LAYOUT(pv->layout), GTK_WIDGET(viewer_page), 0, 0 );
             g_ptr_array_add( pv->arr_pages, viewer_page );
 
             viewer_insert_thumb( pv, -1 );
@@ -276,16 +277,16 @@ viewer_schliessen( PdfViewer* pv )
 {
     viewer_close_thread_pools( pv );
 
-    g_ptr_array_unref( pv->arr_pages );
+    g_ptr_array_unref( pv->arr_pages ); //vor gtk_widget_destroy(vf), weil freeFunc gesetzt
     g_array_unref( pv->arr_text_found );
-    gtk_widget_destroy( pv->tree_thumb );
+//    gtk_widget_destroy( pv->tree_thumb );
+
+    gtk_widget_destroy( pv->vf );
 
     document_free_displayed_documents( pv->dd );
 
     //pv aus Liste der geöffneten pvs entfernen
     g_ptr_array_remove_fast( pv->zond->arr_pv, pv );
-
-    gtk_widget_destroy( pv->vf );
 
     g_free( pv );
 

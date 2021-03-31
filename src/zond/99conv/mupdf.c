@@ -49,7 +49,7 @@ mupdf_init( gchar** errmsg )
 	ctx = fz_new_context( NULL, &locks_context, FZ_STORE_UNLIMITED );
     if ( !ctx )
     {
-        g_mutex_clear( mutex );
+        for ( gint i = 0; i < FZ_LOCK_MAX; i++ ) g_mutex_clear( &mutex[i] );
         g_free( mutex );
         ERROR_MUPDF_R( "fz_new_context", NULL )
     }
@@ -59,8 +59,7 @@ mupdf_init( gchar** errmsg )
 	fz_catch( ctx ) //ERROR_MUPDF( "fz_register_document_handlers" )
     {
         fz_drop_context( ctx );
-        g_mutex_clear( mutex );
-        g_free( mutex );
+        for ( gint i = 0; i < FZ_LOCK_MAX; i++ ) g_mutex_clear( &mutex[i] );
         ERROR_MUPDF_R( "fz_register_document_handlers", NULL )
     }
 
@@ -73,9 +72,9 @@ mupdf_close_context( fz_context* ctx )
 {
     GMutex* mutex = (GMutex*) ctx->locks.user;
 
-//    for ( gint i = 0; i < FZ_LOCK_MAX; i++ ) g_mutex_clear( &mutex[i] );
-
     fz_drop_context( ctx );
+
+    for ( gint i = 0; i < FZ_LOCK_MAX; i++ ) g_mutex_clear( &mutex[i] );
 
 //    g_free( mutex );
 
