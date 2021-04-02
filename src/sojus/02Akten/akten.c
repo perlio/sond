@@ -2,6 +2,9 @@
 
 #include <gtk/gtk.h>
 #include <mariadb/mysql.h>
+#include <sqlite3.h>
+
+#include "../../dbase.h"
 
 #include "../../misc.h"
 
@@ -82,7 +85,7 @@ akte_oeffnen( Sojus* sojus, gint regnr, gint jahr )
 
 
 static gboolean
-akte_anlegen( Sojus* sojus, gint regnr, gint year )
+akte_anlegen( Sojus* sojus, const gchar* bezeichnung, gint regnr, gint year )
 {
     gint rc = 0;
 
@@ -91,7 +94,7 @@ akte_anlegen( Sojus* sojus, gint regnr, gint year )
     rc = mysql_query( sojus->db.con, sql );
     if ( rc )
     {
-        display_message( sojus->app_window, "Fehler bei nächste_regnr\n "
+        display_message( sojus->app_window, "Fehler akte_anlegen\n "
                 "INSERT INTO akten:\n", mysql_error( sojus->db.con ), NULL );
         g_free( sql );
 
@@ -101,6 +104,48 @@ akte_anlegen( Sojus* sojus, gint regnr, gint year )
     sql_log( sojus, sql );
 
     g_free( sql );
+
+    //Verzeichnis anlegen
+    gchar* dokument_dir = g_settings_get_string( sojus->settings, "dokument-dir" );
+    dokument_dir = add_string( dokument_dir, g_strdup( "/" ) );
+    gchar* path = g_strdelimit( g_strdup( bezeichnung ), "/\\", '-' );
+    path = add_string( dokument_dir, path );
+    path = add_string( path, g_strdup_printf( " %i-%i", regnr, year % 100 ) );
+
+
+    GError* error = NULL;
+    GFile* file = g_file_new_for_path( path );
+    gboolean suc = g_file_make_directory( file, NULL, &error );
+    if ( !suc )
+    {
+        display_message( sojus->app_window, "Fehler Anlage Dokumentenverzeichnis \n\n"
+                "Bei Aufruf g_file_make_directory:\n", error->message, NULL );
+        g_error_free( error );
+        g_free( path );
+
+        return TRUE;
+    }
+
+    //ZND-Datei anlegen
+    gchar* errmsg = NULL;
+    DBase dbase = { 0 };
+
+    path = add_string( path, g_strdup( "/doc_db.ZND" ) );
+    rc = dbase_open( path, &dbase, TRUE, FALSE, &errmsg );
+    g_free( path );
+    if ( rc )
+    {
+        display_message( sojus->app_window, "Fehler Anlage ZND-Datei\n\n"
+                "Bei Aufruf dbase_open:\n", errmsg, NULL );
+        g_free( errmsg );
+
+        return TRUE;
+    }
+
+    rc = sqlite3_close( dbase.db );
+    if ( rc ) display_message( sojus->app_window, "Verbindung zu erzeugter Datenbank "
+                "konnte nicht geschlossen werden\n\nBei Aufruf sqlite32_close:\n",
+                sqlite3_errmsg( dbase.db ), NULL );
 
     return TRUE;
 }
@@ -190,6 +235,11 @@ akte_speichern( GtkWidget* akten_window )
             "entry_regnr" );
     const gchar* regnr_text = gtk_entry_get_text( GTK_ENTRY(entry_regnr) );
 
+    //aktenbezeichnung
+    GtkWidget* entry_bezeichnung = g_object_get_data( G_OBJECT(akten_window),
+            "entry_bezeichnung" );
+    const gchar* bezeichnung = gtk_entry_get_text( GTK_ENTRY(entry_bezeichnung) );
+
     if ( !g_strcmp0( regnr_text, "- neu -" ) )
     {
         if ( !akte_next_regnr( sojus, &regnr, &jahr ) ) return;
@@ -203,12 +253,7 @@ akte_speichern( GtkWidget* akten_window )
     else auswahl_parse_entry( akten_window, regnr_text, &regnr, &jahr );
 
     if ( !auswahl_regnr_existiert( akten_window, sojus->db.con, regnr, jahr ) )
-                akte_anlegen( sojus, regnr, jahr );
-
-    //aktenbezeichnung
-    GtkWidget* entry_bezeichnung = g_object_get_data( G_OBJECT(akten_window),
-            "entry_bezeichnung" );
-    const gchar* bezeichnung = gtk_entry_get_text( GTK_ENTRY(entry_bezeichnung) );
+                akte_anlegen( sojus, bezeichnung, regnr, jahr );
 
     GtkWidget* entry_gegenstand = g_object_get_data( G_OBJECT(akten_window),
             "entry_gegenstand" );

@@ -390,7 +390,7 @@ file_manager_entry_activate( GtkWidget* entry, gpointer data )
                 "Fehler -\n\nBei Aufruf sond_treeviewfm_set_root:\n", errmsg, NULL );
         g_free( errmsg );
 
-        g_signal_emit_by_name( fm_window, "delete-event", &ret );
+        g_signal_emit_by_name( fm_window, "delete-event", NULL, &ret );
 
         return;
     }
@@ -405,7 +405,7 @@ file_manager_entry_activate( GtkWidget* entry, gpointer data )
                 errmsg, NULL );
         g_free( errmsg );
 
-        g_signal_emit_by_name( fm_window, "delete-event", &ret );
+        g_signal_emit_by_name( fm_window, "delete-event", NULL, &ret );
 
         return;
     }
