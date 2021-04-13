@@ -22,9 +22,9 @@ struct _SondTreeviewFMClass
     SondTreeviewClass parent_class;
     void (*row_text_edited) (GtkCellRenderer*, gchar*, gchar*, gpointer);
     gint (*dbase_begin) (SondTreeviewFM*, gchar**);
-    gint (*dbase_test) (SondTreeviewFM*, GFile*, gchar**);
-    gint (*dbase_update_path) (SondTreeviewFM*, GFile*, GFile*, gchar**);
-    gint (*dbase_update_eingang) (SondTreeviewFM*, GFile*, GFile*, gchar**);
+    gint (*dbase_test) (SondTreeviewFM*, const gchar*, gchar**);
+    gint (*dbase_update_path) (SondTreeviewFM*, const gchar*, const gchar*, gchar**);
+    gint (*dbase_update_eingang) (SondTreeviewFM*, const gchar*, const gchar*, gboolean, gchar**);
     gint (*dbase_end) (SondTreeviewFM*, gboolean, gchar**);
 };
 

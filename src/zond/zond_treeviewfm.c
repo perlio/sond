@@ -31,17 +31,18 @@ zond_treeviewfm_dbase_begin( SondTreeviewFM* stvfm, gchar** errmsg )
     ZondTreeviewFMPrivate* priv = zond_treeviewfm_get_instance_private( ZOND_TREEVIEWFM(stvfm) );
 
     rc = SOND_TREEVIEWFM_CLASS(zond_treeviewfm_parent_class)->dbase_begin( SOND_TREEVIEWFM(stvfm), errmsg );
-    if ( rc ) ERROR_SOND( "dbase_begin (store)" )
+    if ( rc ) ERROR_SOND( "dbase_begin (work)" )
 
-    rc = dbase_begin( (DBase*) priv->zond->dbase_zond->dbase_work, errmsg );
-    if ( rc ) ERROR_ROLLBACK ( (DBase*) priv->zond->dbase_zond->dbase_work, "dbase_begin (work)" ) //dbase_store
+    rc = dbase_begin( (DBase*) priv->zond->dbase_zond->dbase_store, errmsg );
+    if ( rc ) ERROR_ROLLBACK ( sond_treeviewfm_get_dbase( stvfm ), "dbase_begin (store)" ) //dbase_store
 
     return 0;
 }
 
 
 static gint
-zond_treeviewfm_dbase_test( SondTreeviewFM* stvfm, GFile* file, gchar** errmsg )
+zond_treeviewfm_dbase_test( SondTreeviewFM* stvfm, const gchar* rel_path_source,
+        gchar** errmsg )
 {
     gint rc = 0;
 
@@ -49,44 +50,32 @@ zond_treeviewfm_dbase_test( SondTreeviewFM* stvfm, GFile* file, gchar** errmsg )
     DBase* dbase = sond_treeviewfm_get_dbase( stvfm );
     DBase* dbase_work = (DBase*) priv->zond->dbase_zond->dbase_work;
 
-    gchar* rel_path = get_rel_path_from_file( sond_treeviewfm_get_root( stvfm ), file );
+    rc = dbase_test_path( dbase, rel_path_source, errmsg );
+    if ( rc == -1 ) ERROR_SOND( "dbase_test_path" )
+    else if ( rc == 1 ) return 1;
 
-    rc = dbase_test_path( dbase, rel_path, errmsg );
-    if ( rc )
-    {
-        g_free( rel_path );
-        if ( rc == -1 ) ERROR_ROLLBACK_BOTH( "dbase_test_path" )
-        else if ( rc == 1 ) ROLLBACK_BOTH(dbase, (DBase*) priv->zond->dbase_zond->dbase_work)
-    }
-
-    rc = dbase_test_path( (DBase*) priv->zond->dbase_zond->dbase_work, rel_path, errmsg );
-    g_free( rel_path );
-    if ( rc == -1 ) ERROR_ROLLBACK_BOTH( "dbase_test (work)" )
-    else if ( rc == 1 ) ROLLBACK_BOTH(dbase,(DBase*) priv->zond->dbase_zond->dbase_work)
+    rc = dbase_test_path( dbase_work, rel_path_source, errmsg );
+    if ( rc == -1 ) ERROR_SOND( "dbase_test (work)" )
+    else if ( rc == 1 ) return 1;
 
     return 0;
 }
 
 
 static gint
-zond_treeviewfm_dbase_update_path( SondTreeviewFM* stvfm, GFile* source, GFile* dest,
-        gchar** errmsg )
+zond_treeviewfm_dbase_update_path( SondTreeviewFM* stvfm,
+        const gchar* rel_path_source, const gchar* rel_path_dest, gchar** errmsg )
 {
     gint rc1 = 0;
     gint rc2 = 0;
 
     ZondTreeviewFMPrivate* priv = zond_treeviewfm_get_instance_private( ZOND_TREEVIEWFM(stvfm) );
-    DBase* dbase = sond_treeviewfm_get_dbase( stvfm );
-    DBase* dbase_work = (DBase*)  priv->zond->dbase_zond->dbase_work;
 
-    gchar* rel_path_source = get_rel_path_from_file( sond_treeviewfm_get_root( stvfm ), source );
-    gchar* rel_path_dest = get_rel_path_from_file( sond_treeviewfm_get_root( stvfm ), dest );
+    DBase* dbase_work = sond_treeviewfm_get_dbase( stvfm );
+    DBase* dbase = (DBase*)  priv->zond->dbase_zond->dbase_store;
 
     rc1 = dbase_update_path( dbase, rel_path_source, rel_path_dest, errmsg );
     rc2 = dbase_update_path( dbase_work, rel_path_source, rel_path_dest, errmsg );
-
-    g_free( rel_path_source );
-    g_free( rel_path_dest );
 
     if ( rc1 || rc2 ) ERROR_ROLLBACK_BOTH( "dbase_update_path" )
 
@@ -95,9 +84,22 @@ zond_treeviewfm_dbase_update_path( SondTreeviewFM* stvfm, GFile* source, GFile* 
 
 
 static gint
-zond_treeviewfm_dbase_update_eingang( SondTreeviewFM* stvfm, GFile* source, GFile* dest,
+zond_treeviewfm_dbase_update_eingang( SondTreeviewFM* stvfm,
+        const gchar* rel_path_source, const gchar* rel_path_dest, gboolean del,
         gchar** errmsg )
 {
+    gint rc1 = 0;
+    gint rc2 = 0;
+
+    ZondTreeviewFMPrivate* priv = zond_treeviewfm_get_instance_private( ZOND_TREEVIEWFM(stvfm) );
+
+    DBase* dbase_work = sond_treeviewfm_get_dbase( stvfm );
+    DBase* dbase_store = (DBase*)  priv->zond->dbase_zond->dbase_store;
+
+    rc1 = eingang_update_rel_path( dbase_store, rel_path_source, rel_path_dest, del, errmsg );
+    rc2 = eingang_update_rel_path( dbase_work, rel_path_source, rel_path_dest, del, errmsg );
+
+    if ( rc1 || rc2 ) ERROR_ROLLBACK_BOTH( "eingang_update_path" )
 
     return 0;
 }
@@ -111,16 +113,16 @@ zond_treeviewfm_dbase_end( SondTreeviewFM* stvfm, gboolean suc, gchar** errmsg )
     ZondTreeviewFMPrivate* priv = zond_treeviewfm_get_instance_private( ZOND_TREEVIEWFM(stvfm) );
 
     rc = SOND_TREEVIEWFM_CLASS(zond_treeviewfm_parent_class)->dbase_end( stvfm, suc, errmsg );
-    if ( rc == -1 ) ERROR_ROLLBACK( (DBase*) priv->zond->dbase_zond->dbase_work,"dbase_end (store)" )
+    if ( rc == -1 ) ERROR_ROLLBACK( (DBase*) priv->zond->dbase_zond->dbase_store,"dbase_end (work)" )
 
     if ( suc )
     {
         gint rc = 0;
 
-        rc = dbase_commit( (DBase*) priv->zond->dbase_zond->dbase_work, errmsg );
-        if ( rc ) ERROR_ROLLBACK( (DBase*) priv->zond->dbase_zond->dbase_work, "dbase_commit (work)" )
+        rc = dbase_commit( (DBase*) priv->zond->dbase_zond->dbase_store, errmsg );
+        if ( rc ) ERROR_ROLLBACK( (DBase*) priv->zond->dbase_zond->dbase_store, "dbase_commit (store)" )
     }
-    else ROLLBACK( (DBase*) priv->zond->dbase_zond->dbase_work )
+    else ROLLBACK( (DBase*) priv->zond->dbase_zond->dbase_store )
 
     return 0;
 }

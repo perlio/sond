@@ -246,6 +246,23 @@ dbase_update_eingang_rel_path( DBase* dbase, const gint ID, const gint eingang_i
 
 
 gint
+dbase_delete_eingang_rel_path( DBase* dbase, const gint ID, gchar** errmsg )
+{
+    gint rc = 0;
+
+    sqlite3_reset( dbase->delete_eingang_rel_path );
+
+    rc = sqlite3_bind_int( dbase->delete_eingang_rel_path, 1, ID );
+    if ( rc != SQLITE_OK ) ERROR_DBASE( "sqlite3_bind_int (ID)" )
+
+    rc = sqlite3_step( dbase->delete_eingang_rel_path );
+    if ( rc != SQLITE_ROW ) ERROR_DBASE( "sqlite3_step" )
+
+    return 0;
+}
+
+
+gint
 dbase_get_num_of_refs_to_eingang( DBase* dbase, const gint eingang_id, gchar** errmsg )
 {
     gint rc = 0;
@@ -380,6 +397,9 @@ dbase_prepare_stmts( DBase* dbase, gchar** errmsg )
             "UPDATE eingang SET eingangsdatum=?1,transport=?2,traeger=?3,ort=?4,"
             "absender=?5,absendedatum=?6,erfassungsdatum=?7 WHERE ID=?8; ",
 
+            //dbase_delete_eingang
+            "DELETE FROM eingang WHERE ID=?1; ",
+
             //dbase_insert_eingang_rel_path
             "INSERT INTO eingang_rel_path (eingang_id, rel_path) "
             "VALUES (?1, ?2); ",
@@ -388,12 +408,12 @@ dbase_prepare_stmts( DBase* dbase, gchar** errmsg )
             "UPDATE eingang_rel_path SET eingang_id=?1, rel_path=?2 "
             "WHERE ID=?3; ",
 
+            //dbase_delete_eingang_rel_path
+            "DELETE FROM eingang_rel_path WHERE ID=?1; ",
+
             //dbase_get_num_of_refs_to_eingang
             "SELECT COUNT(*) FROM eingang_rel_path LEFT JOIN eingang "
             "ON eingang.ID = eingang_rel_path.eingang_id WHERE eingang.ID=?1; ",
-
-            //dbase_delete_eingang
-            "DELETE FROM eingang WHERE ID=?1; ",
 
             NULL };
 
@@ -417,10 +437,11 @@ dbase_prepare_stmts( DBase* dbase, gchar** errmsg )
         else if ( zaehler == 5 ) dbase->get_eingang_for_rel_path = stmt;
         else if ( zaehler == 6 ) dbase->insert_eingang = stmt;
         else if ( zaehler == 7 ) dbase->update_eingang = stmt;
-        else if ( zaehler == 8 ) dbase->insert_eingang_rel_path = stmt;
-        else if ( zaehler == 9 ) dbase->update_eingang_rel_path = stmt;
-        else if ( zaehler == 10 ) dbase->get_num_of_refs_to_eingang = stmt;
-        else if ( zaehler == 11 ) dbase->delete_eingang = stmt;
+        else if ( zaehler == 8 ) dbase->delete_eingang = stmt;
+        else if ( zaehler == 9 ) dbase->insert_eingang_rel_path = stmt;
+        else if ( zaehler == 10 ) dbase->update_eingang_rel_path = stmt;
+        else if ( zaehler == 11 ) dbase->delete_eingang_rel_path = stmt;
+        else if ( zaehler == 12 ) dbase->get_num_of_refs_to_eingang = stmt;
 
         zaehler++;
     }

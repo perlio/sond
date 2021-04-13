@@ -29,6 +29,8 @@ void eingang_free( Eingang* );
 
 gint eingang_for_rel_path( DBase*, const gchar*, gint*, Eingang**, gint*, gchar** );
 
+gint eingang_update_rel_path( DBase*, const gchar*, const gchar*, gboolean, gchar** );
+
 gint eingang_set( SondTreeviewFM*, gchar** );
 
 #endif // EINGANG_H_INCLUDED

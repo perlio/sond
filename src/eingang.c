@@ -104,6 +104,49 @@ eingang_for_rel_path( DBase* dbase, const gchar* rel_path, gint* ID,
 }
 
 
+gint
+eingang_update_rel_path( DBase* dbase, const gchar* rel_path_src, const gchar* rel_path_dest, gboolean del, gchar** errmsg )
+{
+    gint rc_src = 0, rc_dest = 0;
+    gint ID_src = 0, ID_dest = 0;
+    Eingang* eingang_src = NULL, * eingang_dest = NULL;
+    gint ID_eingang_rel_path_src = 0, ID_eingang_rel_path_dest = 0;
+
+    rc_dest = eingang_for_rel_path( dbase, rel_path_dest, &ID_dest, &eingang_dest, &ID_eingang_rel_path_dest, errmsg );
+    if ( rc_dest == -1 ) ERROR_SOND( "eingang_for_rel_path(dest)" )
+
+    rc_src = eingang_for_rel_path( dbase, rel_path_src, &ID_src, &eingang_src, &ID_eingang_rel_path_src, errmsg );
+    if ( rc_src == -1 ) ERROR_SOND( "eingang_for_rel_path (source)" )
+
+    if ( rc_src == 1 && ID_src == ID_dest && del ) //unmittelbar markierte Datei in identischen scope verschieben
+    {
+        gint rc = 0;
+
+        rc = dbase_delete_eingang_rel_path( dbase, ID_eingang_rel_path_src, errmsg );
+        if ( rc ) ERROR_SOND( "dbase_delete_eingang_rel_path" )
+    }
+    else if ( rc_src == 1 && del ) //unmittelbar markierte Datei in anderen scope verschieben
+    {
+        gint rc = 0;
+
+        //Markierung bleibt, nur rel_path wird angepaßt
+        rc = dbase_update_eingang_rel_path( dbase, ID_eingang_rel_path_src, ID_src, rel_path_dest, errmsg );
+        if ( rc ) ERROR_SOND( "dbase_update_eingang_rel_path" )
+    }
+    else if ( (rc_src == 0 && rc_dest != 0) || (rc_src > 1 && ID_src != ID_dest )
+            || (!del && (rc_src == 1 && ID_src != ID_dest)) )
+    { //nicht markierte Datei in markierten scope oder mittelbar markierte Datei in anderen scope
+        gint rc = 0;
+
+        //Datei muß eigene Markierung enthalten
+        rc = dbase_insert_eingang_rel_path( dbase, ID_src, rel_path_dest, errmsg );
+        if ( rc ) ERROR_SOND( "dbase_insert_eingang_rel_path" )
+    }
+
+    return 0;
+}
+
+
 static gint
 eingang_fenster( GtkWidget* widget, Eingang* eingang, const gboolean sens,
         const gchar* title, const gchar* secondary )

@@ -43,7 +43,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
 static void
-cb_row_activated( SondTreeview* tv, GtkTreePath* tp, GtkTreeViewColumn* tvc,
+baum_row_activated( SondTreeview* tv, GtkTreePath* tp, GtkTreeViewColumn* tvc,
         gpointer user_data )
 {
     gint rc = 0;
@@ -369,7 +369,7 @@ init_treeviews( Projekt* zond )
 
         // Doppelklick = angebundene Datei anzeigen
         g_signal_connect( zond->treeview[baum], "row-activated",
-                G_CALLBACK(cb_row_activated), (gpointer) zond );
+                G_CALLBACK(baum_row_activated), (gpointer) zond );
 
         //Zeile expandiert oder kollabiert
         g_signal_connect( zond->treeview[baum], "row-expanded",

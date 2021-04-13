@@ -174,7 +174,6 @@ file_manager_cb_eingang( GtkWidget* item, gpointer data )
 {
     gint rc = 0;
     gchar* errmsg = NULL;
-    Eingang* eingang = NULL;
 
     SondTreeviewFM* stvfm = (SondTreeviewFM*) data;
 
