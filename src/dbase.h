@@ -72,7 +72,7 @@ gint dbase_update_path( DBase*, const gchar*, const gchar*, gchar** );
 
 gint dbase_test_path( DBase*, const gchar*, gchar** );
 
-gint dbase_get_eingang_for_rel_path( DBase*, const gchar*, gint*, Eingang**, gint*, gchar** );
+gint dbase_get_eingang_for_rel_path( DBase*, const gchar*, gint*, Eingang*, gint*, gchar** );
 
 gint dbase_insert_eingang( DBase*, Eingang*, gchar** );
 

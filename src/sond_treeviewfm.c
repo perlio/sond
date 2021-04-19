@@ -69,9 +69,10 @@ sond_treeviewfm_dbase_update_eingang( SondTreeviewFM* stvfm, const gchar* source
 {
     gint rc = 0;
 
+    Clipboard* clipboard = sond_treeview_get_clipboard( SOND_TREEVIEW(stvfm) );
     SondTreeviewFMPrivate* priv = sond_treeviewfm_get_instance_private( stvfm );
 
-    rc = eingang_update_rel_path( priv->dbase, source, dest, del, errmsg );
+    rc = eingang_update_rel_path( sond_treeviewfm_get_dbase( SOND_TREEVIEWFM(clipboard->tree_view) ), source, priv->dbase, dest, del, errmsg );
     if ( rc ) ERROR_ROLLBACK( priv->dbase, "eingang_update_rel_path" )
 
     return 0;
@@ -99,9 +100,15 @@ sond_treeviewfm_dbase_end( SondTreeviewFM* stvfm, gboolean suc, gchar** errmsg )
 static void
 sond_treeviewfm_finalize( GObject* g_object )
 {
+    Clipboard* clipboard = NULL;
+
     SondTreeviewFMPrivate* stvfm_priv = sond_treeviewfm_get_instance_private( SOND_TREEVIEWFM(g_object) );
 
     g_free( stvfm_priv->root );
+
+    clipboard = sond_treeview_get_clipboard(SOND_TREEVIEW(g_object) );
+    if ( G_OBJECT(clipboard->tree_view) == g_object )
+            g_ptr_array_remove_range( clipboard->arr_ref, 0, clipboard->arr_ref->len );
 
     G_OBJECT_CLASS (sond_treeviewfm_parent_class)->finalize (g_object);
 
@@ -110,31 +117,37 @@ sond_treeviewfm_finalize( GObject* g_object )
 
 
 static gboolean
-sond_treeviewfm_beyond_root( SondTreeviewFM* stvfm, const GFile* dest )
+sond_treeviewfm_other_fm( SondTreeviewFM* stvfm )
 {
-    gboolean same = FALSE;
+    Clipboard* clipboard = NULL;
+    DBase* dbase_source = NULL;
+    DBase* dbase_dest = NULL;
 
     SondTreeviewFMPrivate* stvfm_priv = sond_treeviewfm_get_instance_private( stvfm );
 
-    gchar* path_dest = g_file_get_path( (GFile*) dest );
+    clipboard = sond_treeview_get_clipboard( SOND_TREEVIEW(stvfm) );
+    dbase_source = sond_treeviewfm_get_dbase( SOND_TREEVIEWFM(clipboard->tree_view) );
 
-    same = g_str_has_prefix( path_dest, stvfm_priv->root );
+    dbase_dest = stvfm_priv->dbase;
 
-    g_free( path_dest );
+    if ( dbase_dest == dbase_source ) return FALSE;
 
-    return same;
+    return TRUE;
 }
 
 
 static gint
 sond_treeviewfm_dbase( SondTreeviewFM* stvfm, gint mode, const gchar* rel_path_source,
-        const GFile* dest, const gchar* rel_path_dest, gchar** errmsg )
+        const gchar* rel_path_dest, gchar** errmsg )
 {
     gint rc = 0;
+    Clipboard* clipboard = NULL;
 
-    if ( mode == 2 && sond_treeviewfm_beyond_root( stvfm, dest ) )
+    clipboard = sond_treeview_get_clipboard( SOND_TREEVIEW(stvfm) );
+
+    if ( mode == 2 && sond_treeviewfm_other_fm( stvfm ) )
     {
-        rc = SOND_TREEVIEWFM_GET_CLASS(stvfm)->dbase_test( stvfm, rel_path_source, errmsg );
+        rc = SOND_TREEVIEWFM_GET_CLASS(stvfm)->dbase_test( SOND_TREEVIEWFM(clipboard->tree_view), rel_path_source, errmsg );
         if ( rc ) //aufräumen...
         {
             if ( rc == -1 ) ERROR_SOND( "dbase_test" )
@@ -157,7 +170,7 @@ sond_treeviewfm_dbase( SondTreeviewFM* stvfm, gint mode, const gchar* rel_path_s
     rc = SOND_TREEVIEWFM_GET_CLASS(stvfm)->dbase_begin( stvfm, errmsg );
     if ( rc ) ERROR_SOND( "dbase_begin" )
 
-    if ( mode == 2 || mode == 3 )
+    if ( mode == 2 || mode == 3 ) //mode == 2: beyond wurde schon ausgeschlossen - mode == 3: ausgeschlossen
     {
         rc = SOND_TREEVIEWFM_GET_CLASS(stvfm)->dbase_update_path( stvfm,
                 rel_path_source, rel_path_dest, errmsg );
@@ -205,16 +218,25 @@ sond_treeviewfm_move_copy_create_delete( SondTreeviewFM* stvfm, GFile* file_sour
         else //if ( mode == 1 || mode == 2 || mode == 3 || mode == 4 )
         {
             gint rc = 0;
+            Clipboard* clipboard = NULL;
             gchar* rel_path_source = NULL;
             gchar* rel_path_dest = NULL;
 
-            if ( mode != 4 ) rel_path_source =  get_rel_path_from_file( sond_treeviewfm_get_root( stvfm ), file_source );
+            clipboard = sond_treeview_get_clipboard( SOND_TREEVIEW(stvfm) );
+
+            if ( mode == 1 || mode == 2 ) rel_path_source =
+                    get_rel_path_from_file( sond_treeviewfm_get_root(
+                    SOND_TREEVIEWFM(clipboard->tree_view) ), file_source );
+            else if ( mode == 3 ) rel_path_source =  get_rel_path_from_file(
+                    sond_treeviewfm_get_root( stvfm ), file_source );
             rel_path_dest = get_rel_path_from_file( sond_treeviewfm_get_root( stvfm ), *file_dest );
 
-            rc = sond_treeviewfm_dbase( stvfm, mode, rel_path_source, *file_dest,
-                    rel_path_dest, errmsg );
-            g_free( rel_path_source );
+            rc = sond_treeviewfm_dbase( stvfm, mode, rel_path_source, rel_path_dest,
+                    errmsg );
+
             g_free( rel_path_dest );
+            g_free( rel_path_source );
+
             if ( rc == -1 )
             {
                 g_free( basename );
@@ -328,7 +350,7 @@ sond_treeviewfm_row_text_edited( GtkCellRenderer* cell, gchar* path_string, gcha
     gchar* path_new = NULL;
     GtkTreeModel* model = NULL;
     GtkTreeIter iter;
-    const gchar* root = NULL;
+    gchar* root = NULL;
     const gchar* old_text = NULL;
     GtkTreeIter iter_parent = { 0 };
     GFileInfo* info = NULL;
@@ -341,17 +363,21 @@ sond_treeviewfm_row_text_edited( GtkCellRenderer* cell, gchar* path_string, gcha
     model = gtk_tree_view_get_model( GTK_TREE_VIEW(stvfm) );
     gtk_tree_model_get_iter_from_string( gtk_tree_view_get_model( GTK_TREE_VIEW(stvfm) ), &iter, path_string );
 
-    if ( gtk_tree_model_iter_parent( model, &iter_parent, &iter ) ) root =
-            sond_treeviewfm_get_full_path( stvfm, &iter_parent );
-    else root = stvfm_priv->root;
-
     gtk_tree_model_get( model, &iter, 0, &info, -1 );
     old_text = g_file_info_get_name( info );
+
+    if ( !g_strcmp0( old_text, new_text ) ) return;
+
+    if ( gtk_tree_model_iter_parent( model, &iter_parent, &iter ) ) root =
+            sond_treeviewfm_get_full_path( stvfm, &iter_parent );
+    else root = g_strdup( stvfm_priv->root );
 
     path_old = g_strconcat( root, "/", old_text, NULL );
     g_object_unref( info );
 
     path_new = g_strconcat( root, "/", new_text, NULL );
+
+    g_free( root );
 
     file_source = g_file_new_for_path( path_old );
     file_dest = g_file_new_for_path( path_new );
@@ -359,38 +385,36 @@ sond_treeviewfm_row_text_edited( GtkCellRenderer* cell, gchar* path_string, gcha
     g_free( path_old );
     g_free( path_new );
 
-    if ( !g_file_equal( file_source, file_dest ) )
+    gint rc = 0;
+
+    rc = sond_treeviewfm_move_copy_create_delete( stvfm, file_source, &file_dest,
+            3, &errmsg );
+
+    if ( rc == -1 )
+            display_message( gtk_widget_get_toplevel( GTK_WIDGET(stvfm) ),
+            "Umbenennen nicht möglich\n\nBei Aufruf sond_treeviewfm_move_copy_create_delete:\n",
+            errmsg, NULL );
+    else if ( rc == 0 )
     {
-        gint rc = 0;
+        GError* error = NULL;
+        GFileInfo* info = NULL;
 
-        rc = sond_treeviewfm_move_copy_create_delete( stvfm, file_source, &file_dest,
-                3, &errmsg );
-
-        if ( rc == -1 )
-                display_message( gtk_widget_get_toplevel( GTK_WIDGET(stvfm) ),
-                "Umbenennen nicht möglich\n\nBei Aufruf fm_move_copy_create_delete:\n",
-                errmsg, NULL );
-        else if ( rc == 0 )
+        info = g_file_query_info( file_dest, "*", G_FILE_QUERY_INFO_NONE, NULL, &error );
+        if ( !info )
         {
-            GError* error = NULL;
-            GFileInfo* info = NULL;
+            display_message( gtk_widget_get_toplevel( GTK_WIDGET(stvfm) ),
+            "Umbenennen nicht möglich\n\nBei Aufruf g_file_query_info:\n",
+            error->message, NULL );
+            g_error_free( error );
+        }
+        else
+        {
+            gtk_tree_store_set( GTK_TREE_STORE(model), &iter, 0, info, -1 );
+            gtk_tree_view_columns_autosize( GTK_TREE_VIEW(stvfm) );
+            g_object_unref( info );
+        }
+    } //wenn rc_edit == 1 oder 2: einfach zurück
 
-            info = g_file_query_info( file_dest, "*", G_FILE_QUERY_INFO_NONE, NULL, &error );
-            if ( !info )
-            {
-                display_message( gtk_widget_get_toplevel( GTK_WIDGET(stvfm) ),
-                "Umbenennen nicht möglich\n\nBei Aufruf g_file_query_info:\n",
-                error->message, NULL );
-                g_error_free( error );
-            }
-            else
-            {
-                gtk_tree_store_set( GTK_TREE_STORE(model), &iter, 0, info, -1 );
-                gtk_tree_view_columns_autosize( GTK_TREE_VIEW(stvfm) );
-                g_object_unref( info );
-            }
-        } //wenn rc_edit == 1 oder 2: einfach zurück
-    }
     g_object_unref( file_dest );
 
     return;
@@ -737,7 +761,7 @@ sond_treeviewfm_render_eingang( GtkTreeViewColumn* column, GtkCellRenderer* rend
         GtkTreeModel* model, GtkTreeIter* iter, gpointer data )
 {
     gint rc = 0;
-    Eingang* eingang = NULL;
+    Eingang eingang = { 0 };
     gint eingang_id = 0;
     gchar* rel_path = NULL;
     gchar* errmsg = NULL;
@@ -760,12 +784,10 @@ sond_treeviewfm_render_eingang( GtkTreeViewColumn* column, GtkCellRenderer* rend
     else if ( rc == 1 )
     {
         if ( eingang_id ) g_object_set( G_OBJECT(renderer), "text",
-            eingang->eingangsdatum, NULL );
+            eingang.eingangsdatum, NULL );
         else g_object_set( G_OBJECT(renderer), "text", "----", NULL );
     }
     else g_object_set( G_OBJECT(renderer), "text", "", NULL );
-
-    eingang_free( eingang );
 
     return;
 }
@@ -995,6 +1017,8 @@ sond_treeviewfm_set_root( SondTreeviewFM* stvfm, const gchar* root, gchar** errm
 const gchar*
 sond_treeviewfm_get_root( SondTreeviewFM* stvfm )
 {
+    if ( !stvfm ) return NULL;
+
     SondTreeviewFMPrivate* stvfm_priv = sond_treeviewfm_get_instance_private( stvfm );
 
     return stvfm_priv->root;
@@ -1236,7 +1260,7 @@ sond_treeviewfm_move_or_copy_node( SondTreeviewFM* stvfm, GtkTreeIter* iter, GFi
 
     if ( iter && clipboard->ausschneiden )
             gtk_tree_store_remove( GTK_TREE_STORE(gtk_tree_view_get_model(
-            GTK_TREE_VIEW(stvfm) )), iter );
+            GTK_TREE_VIEW(clipboard->tree_view) )), iter );
 
     return 0;
 }
@@ -1382,6 +1406,11 @@ sond_treeviewfm_paste_clipboard( SondTreeviewFM* stvfm, gboolean kind, gchar** e
     GFile* file_parent = NULL;
     GFileType file_type = G_FILE_TYPE_UNKNOWN;
     gboolean expanded = FALSE;
+    Clipboard* clipboard = NULL;
+
+    clipboard = sond_treeview_get_clipboard( SOND_TREEVIEW(stvfm) );
+
+    if ( clipboard->arr_ref->len == 0 ) return 0;
 
     //Datei unter cursor holen
     iter_cursor = sond_treeview_get_cursor( SOND_TREEVIEW(stvfm) );
@@ -1451,8 +1480,6 @@ sond_treeviewfm_paste_clipboard( SondTreeviewFM* stvfm, gboolean kind, gchar** e
 
     //Alte Auswahl löschen - muß vor baum_setzen_cursor geschehen,
     //da in change_row-callback ref abgefragt wird
-    Clipboard* clipboard = sond_treeview_get_clipboard( SOND_TREEVIEW(stvfm) );
-
     if ( clipboard->ausschneiden && clipboard->arr_ref->len > 0 )
             g_ptr_array_remove_range( clipboard->arr_ref,
             0, clipboard->arr_ref->len );

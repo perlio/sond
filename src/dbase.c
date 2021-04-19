@@ -90,9 +90,11 @@ dbase_test_path( DBase* dbase, const gchar* rel_path, gchar** errmsg )
 }
 
 
+/*  eingang: Zeiger auf initialisierte Eingang-Struktur
+*/
 gint
 dbase_get_eingang_for_rel_path( DBase* dbase, const gchar* rel_path, gint* ID,
-        Eingang** eingang, gint* ID_eingang_rel_path, gchar** errmsg )
+        Eingang* eingang, gint* ID_eingang_rel_path, gchar** errmsg )
 {
     gint rc = 0;
 
@@ -108,20 +110,19 @@ dbase_get_eingang_for_rel_path( DBase* dbase, const gchar* rel_path, gint* ID,
 
     if ( eingang )
     {
-        *eingang = g_malloc0( sizeof( Eingang ) );
-
-        (*eingang)->eingangsdatum = g_strdup( (const gchar*) sqlite3_column_text( dbase->get_eingang_for_rel_path, 0 ) );
-        (*eingang)->transport = g_strdup( (const gchar*) sqlite3_column_text( dbase->get_eingang_for_rel_path, 1 ) );
-        (*eingang)->traeger = g_strdup( (const gchar*) sqlite3_column_text( dbase->get_eingang_for_rel_path, 2 ) );
-        (*eingang)->ort = g_strdup( (const gchar*) sqlite3_column_text( dbase->get_eingang_for_rel_path, 3 ) );
-        (*eingang)->absender = g_strdup( (const gchar*) sqlite3_column_text( dbase->get_eingang_for_rel_path, 4 ) );
-        (*eingang)->absendedatum = g_strdup( (const gchar*) sqlite3_column_text( dbase->get_eingang_for_rel_path, 5 ) );
-        (*eingang)->erfassungsdatum = g_strdup( (const gchar*) sqlite3_column_text( dbase->get_eingang_for_rel_path, 6 ) );
+        eingang->eingangsdatum = g_strdup( (const gchar*) sqlite3_column_text( dbase->get_eingang_for_rel_path, 0 ) );
+        eingang->transport = g_strdup( (const gchar*) sqlite3_column_text( dbase->get_eingang_for_rel_path, 1 ) );
+        eingang->traeger = g_strdup( (const gchar*) sqlite3_column_text( dbase->get_eingang_for_rel_path, 2 ) );
+        eingang->ort = g_strdup( (const gchar*) sqlite3_column_text( dbase->get_eingang_for_rel_path, 3 ) );
+        eingang->absender = g_strdup( (const gchar*) sqlite3_column_text( dbase->get_eingang_for_rel_path, 4 ) );
+        eingang->absendedatum = g_strdup( (const gchar*) sqlite3_column_text( dbase->get_eingang_for_rel_path, 5 ) );
+        eingang->erfassungsdatum = g_strdup( (const gchar*) sqlite3_column_text( dbase->get_eingang_for_rel_path, 6 ) );
     }
     if ( ID_eingang_rel_path ) *ID_eingang_rel_path =
             sqlite3_column_int( dbase->get_eingang_for_rel_path, 7 );
 
     if ( ID ) *ID = sqlite3_column_int( dbase->get_eingang_for_rel_path, 8 );
+
     return 0;
 }
 
@@ -194,6 +195,23 @@ dbase_update_eingang( DBase* dbase, const gint ID, Eingang* eingang, gchar** err
 
     rc = sqlite3_step( dbase->update_eingang );
     if ( rc != SQLITE_DONE ) ERROR_DBASE( "sqlite3_step" )
+
+    return 0;
+}
+
+
+gint
+dbase_delete_eingang( DBase* dbase, const gint eingang_id, gchar** errmsg )
+{
+    gint rc = 0;
+
+    sqlite3_reset( dbase->delete_eingang );
+
+    rc = sqlite3_bind_int( dbase->delete_eingang, 1, eingang_id );
+    if ( rc != SQLITE_OK ) ERROR_DBASE( "sqlite3_bind_int (eingang_id)" )
+
+    rc = sqlite3_step( dbase->delete_eingang );
+    if ( rc != SQLITE_ROW ) ERROR_DBASE( "sqlite3_step" )
 
     return 0;
 }
@@ -279,23 +297,6 @@ dbase_get_num_of_refs_to_eingang( DBase* dbase, const gint eingang_id, gchar** e
     if ( rc == SQLITE_ROW ) count = sqlite3_column_int( dbase->get_num_of_refs_to_eingang, 0 );
 
     return count;
-}
-
-
-gint
-dbase_delete_eingang( DBase* dbase, const gint eingang_id, gchar** errmsg )
-{
-    gint rc = 0;
-
-    sqlite3_reset( dbase->delete_eingang );
-
-    rc = sqlite3_bind_int( dbase->delete_eingang, 1, eingang_id );
-    if ( rc != SQLITE_OK ) ERROR_DBASE( "sqlite3_bind_int (eingang_id)" )
-
-    rc = sqlite3_step( dbase->delete_eingang );
-    if ( rc != SQLITE_ROW ) ERROR_DBASE( "sqlite3_step" )
-
-    return 0;
 }
 
 

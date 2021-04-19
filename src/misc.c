@@ -258,6 +258,8 @@ get_path_from_base( const gchar* path, gchar** errmsg )
 gchar*
 get_rel_path_from_file( const gchar* root, const GFile* file )
 {
+    if ( !file ) return NULL;
+
     //Überprüfung, ob schon angebunden
     gchar* rel_path = NULL;
     gchar* abs_path = g_file_get_path( (GFile*) file );

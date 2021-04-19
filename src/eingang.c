@@ -42,22 +42,13 @@ eingang_free( Eingang* eingang )
 }
 
 
-static Eingang*
-eingang_new( void )
-{
-    Eingang* eingang = g_malloc0( sizeof( Eingang ) );
-
-    return eingang;
-}
-
-
 /** -1: Fehler
      0: nicht gefunden
      1: row in Tabelle eingang mit Verweis von rel_path
      2ff.: Grad der Elternverzeichnisse eingetragen         **/
 gint
 eingang_for_rel_path( DBase* dbase, const gchar* rel_path, gint* ID,
-        Eingang** eingang, gint* ID_eingang_rel_path, gchar** errmsg )
+        Eingang* eingang, gint* ID_eingang_rel_path, gchar** errmsg )
 {
     gchar* buf = NULL;
     gint zaehler = 1;
@@ -105,42 +96,81 @@ eingang_for_rel_path( DBase* dbase, const gchar* rel_path, gint* ID,
 
 
 gint
-eingang_update_rel_path( DBase* dbase, const gchar* rel_path_src, const gchar* rel_path_dest, gboolean del, gchar** errmsg )
+eingang_update_rel_path( DBase* dbase_src, const gchar* rel_path_src,
+        DBase* dbase_dest, const gchar* rel_path_dest, gboolean del, gchar** errmsg )
 {
     gint rc_src = 0, rc_dest = 0;
     gint ID_src = 0, ID_dest = 0;
-    Eingang* eingang_src = NULL, * eingang_dest = NULL;
-    gint ID_eingang_rel_path_src = 0, ID_eingang_rel_path_dest = 0;
+    Eingang eingang_src = { 0 };
+    gint ID_eingang_rel_path_src = 0;
 
-    rc_dest = eingang_for_rel_path( dbase, rel_path_dest, &ID_dest, &eingang_dest, &ID_eingang_rel_path_dest, errmsg );
+    rc_dest = eingang_for_rel_path( dbase_dest, rel_path_dest, &ID_dest, NULL, NULL, errmsg );
     if ( rc_dest == -1 ) ERROR_SOND( "eingang_for_rel_path(dest)" )
 
-    rc_src = eingang_for_rel_path( dbase, rel_path_src, &ID_src, &eingang_src, &ID_eingang_rel_path_src, errmsg );
+    rc_src = eingang_for_rel_path( dbase_src, rel_path_src, &ID_src, &eingang_src, &ID_eingang_rel_path_src, errmsg );
     if ( rc_src == -1 ) ERROR_SOND( "eingang_for_rel_path (source)" )
 
-    if ( rc_src == 1 && ID_src == ID_dest && del ) //unmittelbar markierte Datei in identischen scope verschieben
+    if ( dbase_dest == dbase_src )
     {
-        gint rc = 0;
+        if ( rc_src == 1 && ID_src == ID_dest && del ) //unmittelbar markierte Datei in identischen scope verschieben
+        {
+            gint rc = 0;
 
-        rc = dbase_delete_eingang_rel_path( dbase, ID_eingang_rel_path_src, errmsg );
-        if ( rc ) ERROR_SOND( "dbase_delete_eingang_rel_path" )
+            rc = dbase_delete_eingang_rel_path( dbase_src, ID_eingang_rel_path_src, errmsg );
+            if ( rc ) ERROR_SOND( "dbase_delete_eingang_rel_path" )
+        }
+        else if ( rc_src == 1 && del ) //unmittelbar markierte Datei in anderen scope verschieben
+        {
+            gint rc = 0;
+
+            //Markierung bleibt, nur rel_path wird angepaßt
+            rc = dbase_update_eingang_rel_path( dbase_dest, ID_eingang_rel_path_src, ID_src, rel_path_dest, errmsg );
+            if ( rc ) ERROR_SOND( "dbase_update_eingang_rel_path" )
+        }
+        else if ( (rc_src == 0 && rc_dest != 0) || (rc_src > 1 && ID_src != ID_dest )
+                || (!del && (rc_src == 1 && ID_src != ID_dest)) )
+        { //nicht markierte Datei in markierten scope oder mittelbar markierte Datei in anderen scope
+            gint rc = 0;
+
+            //Datei muß eigene Markierung enthalten
+            rc = dbase_insert_eingang_rel_path( dbase_dest, ID_src, rel_path_dest, errmsg );
+            if ( rc ) ERROR_SOND( "dbase_insert_eingang_rel_path" )
+        }
     }
-    else if ( rc_src == 1 && del ) //unmittelbar markierte Datei in anderen scope verschieben
+    else
     {
-        gint rc = 0;
+        gint ID_eingang_dest_new = 0;
+        gint ID_eingang_rel_path_dest_new = 0;
 
-        //Markierung bleibt, nur rel_path wird angepaßt
-        rc = dbase_update_eingang_rel_path( dbase, ID_eingang_rel_path_src, ID_src, rel_path_dest, errmsg );
-        if ( rc ) ERROR_SOND( "dbase_update_eingang_rel_path" )
-    }
-    else if ( (rc_src == 0 && rc_dest != 0) || (rc_src > 1 && ID_src != ID_dest )
-            || (!del && (rc_src == 1 && ID_src != ID_dest)) )
-    { //nicht markierte Datei in markierten scope oder mittelbar markierte Datei in anderen scope
-        gint rc = 0;
+        if ( rc_src == 1 && del )
+        {
+            gint rc = 0;
 
-        //Datei muß eigene Markierung enthalten
-        rc = dbase_insert_eingang_rel_path( dbase, ID_src, rel_path_dest, errmsg );
-        if ( rc ) ERROR_SOND( "dbase_insert_eingang_rel_path" )
+            rc = dbase_delete_eingang_rel_path( dbase_src, ID_eingang_rel_path_src, errmsg );
+            if ( rc ) ERROR_SOND( "dbase_delete_eingang_rel_path" )
+
+            //letzte reference auf eingang ID_scr -> dann ID_scr löschen
+            rc = dbase_get_num_of_refs_to_eingang( dbase_src, ID_src, errmsg );
+            if ( rc == -1 ) ERROR_SOND( "dbase_eingang_ist_waise" )
+
+            if ( rc > 0 )
+            {
+                gint rc = 0;
+
+                rc = dbase_delete_eingang( dbase_src, ID_src, errmsg );
+                if ( rc == -1 ) ERROR_SOND( "dbase_delete_eingang" )
+            }
+        }
+
+        //neuen eingang einfügen
+        ID_eingang_dest_new = dbase_insert_eingang( dbase_dest, &eingang_src, errmsg );
+        if ( ID_eingang_dest_new == -1 ) ERROR_SOND( "dbase_insert_eingang" )
+
+        //neuen eingang_rel_path einfügen
+        ID_eingang_rel_path_dest_new = dbase_insert_eingang_rel_path( dbase_dest,
+                ID_eingang_dest_new, rel_path_dest, errmsg );
+        if ( ID_eingang_rel_path_dest_new == -1 )
+                ERROR_SOND( "dbase_insert_eingang_rel_path" )
     }
 
     return 0;
@@ -275,7 +305,7 @@ eingang_insert_or_update( SondTreeviewFM* stvfm, EingangDBase* eingang_dbase,
     gint ret = 0;
     gint eingang_id = 0;
     gint eingang_rel_path_id = 0;
-    Eingang* eingang = NULL;
+    Eingang eingang = { 0 };
     DBase* dbase = NULL;
     Eingang** eingang_loop = NULL;
     gint* last_inserted_ID = NULL;
@@ -293,10 +323,8 @@ eingang_insert_or_update( SondTreeviewFM* stvfm, EingangDBase* eingang_dbase,
 
         title = g_strconcat( "Zur Datei ", rel_path, "\nwurden bereits Eingangsdaten gespeichert", NULL );
 
-        rc = eingang_fenster( GTK_WIDGET(stvfm), eingang, FALSE, title, "Überschreiben?" );
+        rc = eingang_fenster( GTK_WIDGET(stvfm), &eingang, FALSE, title, "Überschreiben?" );
         g_free( title );
-
-        eingang_free( eingang );
 
         if ( rc == GTK_RESPONSE_NO ) return 0;
         else if ( rc != GTK_RESPONSE_OK ) return 1; //abgebrochen
@@ -307,7 +335,7 @@ eingang_insert_or_update( SondTreeviewFM* stvfm, EingangDBase* eingang_dbase,
         gint rc = 0;
 
         //Eingang abfragen
-        *eingang_loop = eingang_new( );
+        *eingang_loop = g_malloc0( sizeof( Eingang ) );
 
         rc = eingang_fenster( GTK_WIDGET(stvfm), *eingang_loop, TRUE,
                 "Bitte Eingangsdaten eingeben", NULL );
@@ -408,7 +436,7 @@ eingang_set( SondTreeviewFM* stvfm, gchar** errmsg )
 
     rc = sond_treeview_selection_foreach( SOND_TREEVIEW(stvfm),
             eingang_set_for_rel_path, &eingang_dbase, errmsg );
-    eingang_free( eingang );
+    eingang_free( *(eingang_dbase.eingang) );
     if ( rc == -1 ) ERROR_SOND( "sond_treeview_selection_foreach" )
 
     return 0;

@@ -94,10 +94,10 @@ zond_treeviewfm_dbase_update_eingang( SondTreeviewFM* stvfm,
     ZondTreeviewFMPrivate* priv = zond_treeviewfm_get_instance_private( ZOND_TREEVIEWFM(stvfm) );
 
     DBase* dbase_work = sond_treeviewfm_get_dbase( stvfm );
-    DBase* dbase_store = (DBase*)  priv->zond->dbase_zond->dbase_store;
+    DBase* dbase = (DBase*)  priv->zond->dbase_zond->dbase_store;
 
-    rc1 = eingang_update_rel_path( dbase_store, rel_path_source, rel_path_dest, del, errmsg );
-    rc2 = eingang_update_rel_path( dbase_work, rel_path_source, rel_path_dest, del, errmsg );
+    rc1 = eingang_update_rel_path( dbase, rel_path_source, dbase, rel_path_dest, del, errmsg );
+    rc2 = eingang_update_rel_path( dbase_work, rel_path_source, dbase_work, rel_path_dest, del, errmsg );
 
     if ( rc1 || rc2 ) ERROR_ROLLBACK_BOTH( "eingang_update_path" )
 
