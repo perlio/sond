@@ -64,7 +64,7 @@ gint zond_pdf_document_reopen_doc_and_pages( ZondPdfDocument*, gchar** );
 
 void zond_pdf_document_close( ZondPdfDocument* );
 
-fz_document* zond_pdf_document_get_fz_doc( ZondPdfDocument* );
+pdf_document* zond_pdf_document_get_pdf_doc( ZondPdfDocument* );
 
 GPtrArray* zond_pdf_document_get_arr_pages( ZondPdfDocument* );
 

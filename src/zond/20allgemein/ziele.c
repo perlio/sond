@@ -223,15 +223,15 @@ ziele_erzeugen_ziel( GtkWidget* window, const DisplayedDocument* dd,
 {
     gint rc = 0;
     fz_context* ctx = NULL;
-    fz_document* doc = NULL;
+    pdf_document* doc = NULL;
 
     zond_pdf_document_mutex_lock( dd->zond_pdf_document );
 
     ctx = zond_pdf_document_get_ctx( dd->zond_pdf_document );
-    doc = zond_pdf_document_get_fz_doc( dd->zond_pdf_document );
+    doc = zond_pdf_document_get_pdf_doc( dd->zond_pdf_document );
 
     //schon nameddest zur Seite?
-    rc = pdf_document_get_dest( ctx, doc, anbindung.von.seite,
+    rc = pdf_document_get_dest( ctx, &(doc->super), anbindung.von.seite,
             (gpointer*) &ziel->ziel_id_von, TRUE, errmsg );
     if ( rc )
     {
@@ -241,7 +241,7 @@ ziele_erzeugen_ziel( GtkWidget* window, const DisplayedDocument* dd,
     }
 
     //nameddest herausfinden bzw. einfügen
-    rc = pdf_document_get_dest( ctx, doc, anbindung.bis.seite,
+    rc = pdf_document_get_dest( ctx, &(doc->super), anbindung.bis.seite,
             (gpointer*) &ziel->ziel_id_bis, TRUE, errmsg );
     if ( rc )
     {

@@ -845,7 +845,7 @@ pdf_ocr_create_doc_with_page( PdfDocumentPage* pdf_document_page, gint flag, gch
     pdf_obj* page_ref = NULL;
 
     fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
-    pdf_document* doc = pdf_specifics( ctx, zond_pdf_document_get_fz_doc( pdf_document_page->document ) );
+    pdf_document* doc = zond_pdf_document_get_pdf_doc( pdf_document_page->document );
 
     fz_try( ctx ) doc_new = pdf_create_document( ctx );
     fz_catch( ctx ) ERROR_MUPDF_R( "pdf_create_document", NULL )

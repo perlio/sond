@@ -189,7 +189,7 @@ open_app( GtkApplication* app, gpointer files, gint n_files, gchar *hint,
     gint rc = 0;
     gchar* errmsg = NULL;
 
-    GFile** g_file;
+    GFile** g_file = NULL;
     g_file = (GFile**) files;
 
     gchar* uri = g_file_get_uri( g_file[0] );

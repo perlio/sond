@@ -21,6 +21,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <mupdf/fitz.h>
 #include <glib/gstdio.h>
 
+#include "error.h"
 #include "99conv/mupdf.h"
 #include "99conv/pdf.h"
 
@@ -37,7 +38,7 @@ typedef struct
 {
     GMutex mutex_doc;
     fz_context* ctx;
-    fz_document* doc;
+    pdf_document* doc;
     gboolean dirty;
     gchar* path;
     GPtrArray* pages; //array von DocumentPage*
@@ -94,32 +95,13 @@ zond_pdf_document_get_property (GObject    *object,
 
 
 static void
-zond_pdf_document_close_doc_tmp( ZondPdfDocument* self )
-{
-    gchar* path_tmp = NULL;
-
-    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( ZOND_PDF_DOCUMENT(self) );
-
-    fz_drop_document( priv->ctx, priv->doc );
-
-    path_tmp = g_strconcat( priv->path, ".tmp", NULL );
-    if ( g_remove( path_tmp ) ) display_message( NULL, "Datei ", priv->path,
-            ".tmp konnte nicht gelöscht werden.\n\nBei Aufruf g_remove:\n",
-            strerror( errno ), NULL );
-    g_free( path_tmp );
-
-    return;
-}
-
-
-static void
 zond_pdf_document_finalize( GObject* self )
 {
     ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( ZOND_PDF_DOCUMENT(self) );
 
     g_ptr_array_unref( priv->pages );
 
-    zond_pdf_document_close_doc_tmp( ZOND_PDF_DOCUMENT(self) );
+    pdf_drop_document( priv->ctx, priv->doc );
     mupdf_close_context( priv->ctx ); //ToDo: Prüfen, ob drop_context nicht ausreicht...
 
     g_free( priv->path );
@@ -236,7 +218,7 @@ zond_pdf_document_load_page( ZondPdfDocument* self, gint page_doc, gchar** errms
     PdfDocumentPage* pdf_document_page = g_ptr_array_index( priv->pages, page_doc );
 
     fz_try( priv->ctx ) pdf_document_page->page =
-            fz_load_page( priv->ctx, priv->doc, page_doc );
+            fz_load_page( priv->ctx, &(priv->doc->super), page_doc );
     fz_catch( priv->ctx ) ERROR_MUPDF_CTX( "fz_load_page", priv->ctx );
 
     pdf_document_page->rect = fz_bound_page( priv->ctx, pdf_document_page->page );
@@ -278,67 +260,24 @@ zond_pdf_document_page_init( ZondPdfDocument* self, gint index, gchar** errmsg )
 }
 
 
-static fz_document*
-zond_pdf_document_doc_tmp_open( ZondPdfDocument* self, gchar** errmsg )
-{
-    fz_document* doc = NULL;
-    gchar* path_tmp = NULL;
-    gboolean success = FALSE;
-    GError* error = NULL;
-
-    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( ZOND_PDF_DOCUMENT(self) );
-
-    //Datei auf *.tmp kopieren
-    path_tmp = g_strconcat( priv->path, ".tmp", NULL );
-    GFile* orig = g_file_new_for_path( priv->path );
-    GFile* tmp = g_file_new_for_path( path_tmp );
-
-    success = g_file_copy( orig, tmp, G_FILE_COPY_OVERWRITE, NULL, NULL, NULL, &error );
-    g_object_unref( orig );
-    g_object_unref( tmp );
-    if ( !success )
-    {
-        g_free( path_tmp );
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_file_copy:\n",
-                error->message, NULL );
-        g_error_free( error );
-
-        return NULL;
-    }
-
-    doc = mupdf_dokument_oeffnen( priv->ctx, path_tmp, errmsg );
-
-    if ( !doc )
-    {
-        if ( errmsg ) *errmsg = add_string( g_strdup( "Bei Aufruf mupdf_dokument_oeffnen:\n" ),
-                *errmsg );
-
-        return NULL;
-    }
-
-    return doc;
-}
-
-
 static void
 zond_pdf_document_constructed( GObject* self )
 {
-    gchar* errmsg = NULL;
     gint number_of_pages = 0;
 
     ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( ZOND_PDF_DOCUMENT(self) );
 
-    priv->doc = zond_pdf_document_doc_tmp_open( ZOND_PDF_DOCUMENT(self), &errmsg );
-    if ( !priv->doc )
+    fz_try( priv->ctx ) priv->doc = pdf_open_document( priv->ctx, priv->path );
+    fz_catch( priv->ctx )
     {
-        priv->errmsg = g_strconcat( "Bei Aufruf mupdf_dokument_oeffnen:\n",
-                errmsg, NULL );
-        g_free( errmsg );
+        priv->errmsg = g_strconcat( "Bei Aufruf pdf_open_document:\n",
+                fz_caught_message( priv->ctx ), NULL );
+        priv->doc = NULL;
 
         return;
     }
 
-    number_of_pages = fz_count_pages( priv->ctx, priv->doc );
+    number_of_pages = pdf_count_pages( priv->ctx, priv->doc );
     if ( number_of_pages == 0 )
     {
         priv->errmsg = g_strdup( "Dokument enthält keine Seiten" );
@@ -351,6 +290,7 @@ zond_pdf_document_constructed( GObject* self )
     for ( gint i = 0; i < priv->pages->len; i++ )
     {
         gint rc = 0;
+        gchar* errmsg = NULL;
 
         rc = zond_pdf_document_page_init( ZOND_PDF_DOCUMENT(self), i, &errmsg );
         if ( rc == -1 )
@@ -482,20 +422,64 @@ zond_pdf_document_is_open( const gchar* path )
 gint
 zond_pdf_document_save( ZondPdfDocument* self, gchar** errmsg )
 {
-    gint rc = 0;
-
     ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
 
     if ( priv->dirty )
     {
-        rc = mupdf_save_doc( priv->ctx, priv->doc, priv->path, errmsg );
-        if ( rc )
-        {
-            if ( errmsg ) *errmsg = add_string( g_strdup( "Bei Aufruf mupdf_save_doc:\n" ),
-                    *errmsg );
+        fz_buffer* buf = NULL;
+        fz_output* out = NULL;
 
-            return -1;
+        fz_context* ctx = priv->ctx;
+
+        pdf_write_options opts = {
+                0, // do_incremental
+                1, // do_pretty
+                0, // do_ascii
+                0, // do_compress
+                1, // do_compress_images
+                1, // do_compress_fonts
+                1, // do_decompress
+                1, // do_garbage
+                0, // do_linear
+                1, // do_clean
+                1, // do_sanitize
+                0, // do_appearance
+                0, // do_encrypt
+                ~0, // permissions
+                "", // opwd_utf8[128]
+                "", // upwd_utf8[128]
+                };
+
+        fz_try( priv->ctx ) buf = fz_new_buffer( priv->ctx, 1024 );
+        fz_catch( priv->ctx ) ERROR_MUPDF( "fz_new_buffer" )
+
+        fz_try( priv->ctx ) out = fz_new_output_with_buffer(priv->ctx, buf );
+        fz_catch( priv->ctx )
+        {
+            fz_drop_buffer( priv->ctx, buf );
+            ERROR_MUPDF( "fz_new_output_with_buffer" )
         }
+
+        fz_try( priv->ctx ) pdf_write_document( priv->ctx, priv->doc, out, &opts );
+        fz_always( priv->ctx )
+        {
+            fz_close_output( priv->ctx, out );
+            fz_drop_output( priv->ctx, out );
+            pdf_drop_document( priv->ctx, priv->doc );
+
+        }
+        fz_catch( priv->ctx )
+        {
+            fz_drop_buffer( priv->ctx, buf );
+            ERROR_MUPDF( "pdf_write_document" )
+        }
+
+        fz_try( priv->ctx ) fz_save_buffer( priv->ctx, buf, priv->path );
+        fz_always( priv->ctx ) fz_drop_buffer( priv->ctx, buf );
+        fz_catch( priv->ctx ) ERROR_MUPDF( "fz_save_buffer" )
+
+        fz_try( priv->ctx ) priv->doc = pdf_open_document( priv->ctx, priv->path );
+        fz_catch( priv->ctx ) ERROR_MUPDF( "pdf_open_document" )
 
         priv->dirty = FALSE;
     }
@@ -516,7 +500,7 @@ zond_pdf_document_close_doc_and_pages( ZondPdfDocument* self )
         pdf_document_page->page = NULL;
     }
 
-    fz_drop_document( priv->ctx, priv->doc );
+    pdf_drop_document( priv->ctx, priv->doc );
     priv->doc = NULL;
 
     return;
@@ -528,14 +512,16 @@ zond_pdf_document_reopen_doc_and_pages( ZondPdfDocument* self, gchar** errmsg )
 {
     ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
 
-    priv->doc = mupdf_dokument_oeffnen( priv->ctx, priv->path, errmsg );
-    if ( !priv->doc ) ERROR_SOND( "mupdf_dokument_oeffnen" )
+    fz_try( priv->ctx ) priv->doc = pdf_open_document( priv->ctx, priv->path );
+    fz_catch( priv->ctx ) ERROR_MUPDF_CTX( "pdf_open_document", priv->ctx )
+
+    //ToDo: Überprüfen, ob nicht alle privs neu initialisiert werden müssen?!
 
     //Seiten wieder laden
     for ( gint i = 0; i < priv->pages->len; i++ )
     {
         fz_try( priv->ctx ) ((PdfDocumentPage*) ((priv->pages)->pdata)[i])->page =
-                fz_load_page( priv->ctx, priv->doc, i );
+                fz_load_page( priv->ctx, &(priv->doc->super), i );
         fz_catch( priv->ctx ) ERROR_MUPDF_CTX( "fz_load_page", priv->ctx )
     }
 
@@ -574,8 +560,8 @@ zond_pdf_document_close( ZondPdfDocument* zond_pdf_document )
 }
 
 
-fz_document*
-zond_pdf_document_get_fz_doc( ZondPdfDocument* self )
+pdf_document*
+zond_pdf_document_get_pdf_doc( ZondPdfDocument* self )
 {
     ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
 
@@ -716,8 +702,7 @@ zond_pdf_document_insert_pages( ZondPdfDocument* zond_pdf_document, gint pos,
 
     //einfügen in doc
     rc = pdf_copy_page( ctx, pdf_doc, 0, pdf_count_pages( ctx, pdf_doc ) - 1,
-            pdf_specifics( zond_pdf_document_get_ctx( zond_pdf_document ),
-            zond_pdf_document_get_fz_doc( zond_pdf_document ) ), pos, errmsg );
+            zond_pdf_document_get_pdf_doc( zond_pdf_document ), pos, errmsg );
     if ( rc ) ERROR_SOND( "pdf_copy-page" )
 
     for ( gint i = 0; i < count; i++ )

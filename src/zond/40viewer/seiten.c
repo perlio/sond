@@ -596,11 +596,11 @@ seiten_anbindung( PdfViewer* pv, GPtrArray* arr_document_page, gchar** errmsg )
     {
         PdfDocumentPage* pdf_document_page = g_ptr_array_index( arr_document_page, i );
         fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
+        pdf_document* doc = zond_pdf_document_get_pdf_doc( pdf_document_page->document );
 
         gint page_doc = zond_pdf_document_get_index( pdf_document_page );
 
-        rc = pdf_document_get_dest( ctx, zond_pdf_document_get_fz_doc(
-                pdf_document_page->document ), page_doc, (gpointer*) &arr_dests,
+        rc = pdf_document_get_dest( ctx, &(doc->super), page_doc, (gpointer*) &arr_dests,
                 FALSE, errmsg );
         if ( rc )
         {
@@ -677,16 +677,14 @@ seiten_loeschen( PdfViewer* pv, GPtrArray* arr_document_page, gchar** errmsg )
         g_ptr_array_remove_index( zond_pdf_document_get_arr_pages( pv->dd->zond_pdf_document ), page_doc ); //ist gleich page_pv
 
         //Seite aus PDF entfernen
-        fz_try( ctx ) pdf_delete_page( ctx, pdf_specifics( ctx,
-                zond_pdf_document_get_fz_doc( pv->dd->zond_pdf_document ) ), page_doc );
+        fz_try( ctx ) pdf_delete_page( ctx, zond_pdf_document_get_pdf_doc( pv->dd->zond_pdf_document ), page_doc );
         fz_catch( ctx )
         {
             g_ptr_array_unref( arr_pv );
             ERROR_MUPDF( "pdf_delete_page" )
         }
 
-        fz_try( ctx ) pdf_clean_document( ctx, pdf_specifics( ctx,
-                zond_pdf_document_get_fz_doc( pv->dd->zond_pdf_document ) ) );
+        fz_try( ctx ) pdf_clean_document( ctx, zond_pdf_document_get_pdf_doc( pv->dd->zond_pdf_document ) );
         fz_catch( ctx )
         {
             g_ptr_array_unref( arr_pv );
@@ -911,18 +909,15 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
         }
         ctx = zond_pdf_document_get_ctx( dd->zond_pdf_document );
 */
-        fz_document* fz_doc = mupdf_dokument_oeffnen( pv->zond->ctx, path_merge, &errmsg );
-        g_free( path_merge );
-        if ( !fz_doc )
+        fz_try( pv->zond->ctx ) doc_merge = pdf_open_document( pv->zond->ctx, path_merge );
+        fz_always( pv->zond->ctx ) g_free( path_merge );
+        fz_catch( pv->zond->ctx )
         {
             meldung( pv->vf, "Fehler Datei einfügen -\n\nBei Aufruf "
-                    "mupdf_dokument_oeffnen:\n", errmsg, NULL );
-            g_free( errmsg );
+                    "pdf_open_document:\n", fz_caught_message( pv->zond->ctx ), NULL );
 
             return;
         }
-
-        doc_merge = pdf_specifics( pv->zond->ctx, fz_doc );
     }
     else if ( ret == 2 )
     {
@@ -983,8 +978,7 @@ seiten_create_document( PdfViewer* pv, GArray* arr_page_pv, gchar** errmsg )
         dd = document_get_dd( pv, page_pv, NULL, NULL, &page_doc );
 
         zond_pdf_document_mutex_lock( dd->zond_pdf_document );
-        rc = pdf_copy_page( pv->zond->ctx, pdf_specifics( zond_pdf_document_get_ctx( dd->zond_pdf_document ),
-                zond_pdf_document_get_fz_doc( dd->zond_pdf_document ) ), page_doc, page_doc, doc_dest, -1, errmsg );
+        rc = pdf_copy_page( pv->zond->ctx, zond_pdf_document_get_pdf_doc( dd->zond_pdf_document ), page_doc, page_doc, doc_dest, -1, errmsg );
         zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
         if ( rc )
         {

@@ -145,7 +145,6 @@ cb_item_clean_pdf( GtkMenuItem* item, gpointer data )
 {
     Projekt* zond = (Projekt*) data;
 
-    gint rc = 0;
     gchar* errmsg = NULL;
 
     GPtrArray* arr_rel_path = selection_abfragen_pdf( zond, &errmsg );
@@ -170,6 +169,26 @@ cb_item_clean_pdf( GtkMenuItem* item, gpointer data )
     for ( gint i = 0; i < arr_rel_path->len; i++ )
     {
         gchar* path_tmp = NULL;
+        pdf_document* doc = NULL;
+        pdf_write_options opts = {
+                0, // do_incremental
+                1, // do_pretty
+                0, // do_ascii
+                0, // do_compress
+                1, // do_compress_images
+                1, // do_compress_fonts
+                1, // do_decompress
+                1, // do_garbage
+                0, // do_linear
+                1, // do_clean
+                1, // do_sanitize
+                0, // do_appearance
+                0, // do_encrypt
+                ~0, // permissions
+                "", // opwd_utf8[128]
+                "", // upwd_utf8[128]
+                };
+
 
         //prüfen, ob in Viewer geöffnet
         if ( zond_pdf_document_is_open( g_ptr_array_index( arr_rel_path, i ) ) )
@@ -180,20 +199,19 @@ cb_item_clean_pdf( GtkMenuItem* item, gpointer data )
             continue;
         }
 
-        fz_document* doc = mupdf_dokument_oeffnen( zond->ctx, g_ptr_array_index( arr_rel_path, i ), &errmsg );
-        if ( !doc )
+        fz_try( zond->ctx ) doc = pdf_open_document( zond->ctx, g_ptr_array_index( arr_rel_path, i ) );
+        fz_catch( zond->ctx )
         {
             meldung( zond->app_window, "PDF ", g_ptr_array_index( arr_rel_path, i ), " säubern nicht möglich\n\n"
-                    "Bei Aufruf mupdf_dokument_oeffnen:\n", errmsg, NULL );
-            g_free( errmsg );
+                    "Bei Aufruf pdf_open_document:\n", fz_caught_message( zond->ctx ), NULL );
 
             continue;
         }
 
-        fz_try( zond->ctx ) pdf_clean_document( zond->ctx, pdf_specifics( zond->ctx, doc ) );
+        fz_try( zond->ctx ) pdf_clean_document( zond->ctx, doc );
         fz_catch( zond->ctx )
         {
-            fz_drop_document( zond->ctx, doc );
+            pdf_drop_document( zond->ctx, doc );
             meldung( zond->app_window, "PDF ", g_ptr_array_index( arr_rel_path, i ), " säubern nicht möglich\n\n"
                     "Bei Aufruf pdf_clean_document:\n", fz_caught_message( zond->ctx ), NULL );
 
@@ -202,18 +220,16 @@ cb_item_clean_pdf( GtkMenuItem* item, gpointer data )
 
         path_tmp = g_strconcat( g_ptr_array_index( arr_rel_path, i ), ".tmp_clean", NULL );
 
-        rc = mupdf_save_doc( zond->ctx, doc, path_tmp, &errmsg );
-        if ( rc )
+        fz_try( zond->ctx ) pdf_save_document( zond->ctx, doc, path_tmp, &opts );
+        fz_always( zond->ctx ) pdf_drop_document( zond->ctx, doc );
+        fz_catch( zond->ctx )
         {
             g_free( path_tmp );
             meldung( zond->app_window, "PDF ", g_ptr_array_index( arr_rel_path, i ), " säubern nicht möglich\n\n"
-                    "Bei Aufruf mupdf_save_doc:\n", errmsg, NULL );
-            g_free( errmsg );
+                    "Bei Aufruf pdf_save_document:\n", fz_caught_message( zond->ctx ), NULL );
 
             continue;
         }
-
-        fz_drop_document( zond->ctx, doc );
 
         if ( g_remove( g_ptr_array_index( arr_rel_path, i ) ) )
         {
@@ -231,6 +247,8 @@ cb_item_clean_pdf( GtkMenuItem* item, gpointer data )
 
             continue;
         }
+
+        g_free( path_tmp );
     }
 
     g_ptr_array_free( arr_rel_path, TRUE );

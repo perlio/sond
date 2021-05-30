@@ -6,7 +6,6 @@
 #include <mupdf/pdf.h>
 #include <gio/gio.h>
 #include <glib/gstdio.h>
-#include <string.h>
 
 
 static void
@@ -79,50 +78,5 @@ mupdf_close_context( fz_context* ctx )
 //    g_free( mutex );
 
     return;
-}
-
-
-/** Wenn NULL, dann Fehler und *errmsg gesetzt **/
-fz_document*
-mupdf_dokument_oeffnen( fz_context* ctx, const gchar* path, gchar** errmsg )
-{
-    fz_document* doc = NULL;
-
-	fz_try( ctx ) doc = fz_open_document( ctx, path );
-	fz_catch( ctx ) ERROR_MUPDF_R( "fz_open_document", NULL )
-
-	return doc;
-}
-
-
-gint
-mupdf_save_doc( fz_context* ctx, fz_document* doc, const gchar* path,
-        gchar** errmsg )
-{
-    pdf_document* pdf_doc = pdf_specifics( ctx, doc );
-
-    pdf_write_options opts = {
-            0, // do_incremental
-            1, // do_pretty
-            0, // do_ascii
-            0, // do_compress
-            1, // do_compress_images
-            1, // do_compress_fonts
-            1, // do_decompress
-            1, // do_garbage
-            0, // do_linear
-            1, // do_clean
-            1, // do_sanitize
-            0, // do_appearance
-            0, // do_encrypt
-            ~0, // permissions
-            "", // opwd_utf8[128]
-            "", // upwd_utf8[128]
-            };
-
-    fz_try( ctx ) pdf_save_document( ctx, pdf_doc, path, &opts );
-    fz_catch( ctx ) ERROR_MUPDF( "pdf_save_document" )
-
-    return 0;
 }
 

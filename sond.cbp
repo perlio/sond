@@ -25,7 +25,6 @@
 				<Option type="1" />
 				<Option compiler="gcc" />
 				<Option use_console_runner="0" />
-				<Option parameters='&quot;C:\lfd Akten\Test\Test.ZND&quot;' />
 				<Compiler>
 					<Add option="-g" />
 				</Compiler>
