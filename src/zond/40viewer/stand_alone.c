@@ -229,7 +229,7 @@ startup_app( GtkApplication* app, gpointer user_data )
 
     *zond = g_malloc0( sizeof( Projekt ) );
 
-    (*zond)->ctx = mupdf_init( NULL);
+    (*zond)->ctx = mupdf_init( NULL );
     if ( !((*zond)->ctx) )
     {
         g_free( *zond );

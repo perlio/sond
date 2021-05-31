@@ -235,7 +235,7 @@ cb_item_clean_pdf( GtkMenuItem* item, gpointer data )
         {
             g_free( path_tmp );
             meldung( zond->app_window, "PDF ", g_ptr_array_index( arr_rel_path, i ), " säubern nicht möglich\n\n"
-                    "Bei Aufruf g_remove (*.tmp_clean):\n", strerror( errno ), NULL );
+                    "Bei Aufruf g_remove (old):\n", strerror( errno ), NULL );
 
             continue;
         }

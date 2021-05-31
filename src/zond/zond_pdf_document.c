@@ -157,7 +157,15 @@ zond_pdf_document_page_annot_load( PdfDocumentPage* pdf_document_page,
     pdf_document_page_annot->idx = idx;
     pdf_document_page_annot->type = pdf_annot_type( priv->ctx, annot );
     pdf_document_page_annot->rect = pdf_annot_rect( priv->ctx, annot );
-    pdf_document_page_annot->n_quad = pdf_annot_quad_point_count( priv->ctx, annot );
+
+    fz_try( priv->ctx ) pdf_document_page_annot->n_quad = pdf_annot_quad_point_count( priv->ctx, annot );
+    fz_catch( priv->ctx )
+    {
+        g_free( pdf_document_page_annot );
+        fz_warn( priv->ctx, "Warnung: Funktion pdf_annot_quad_point_count gab "
+                "Fehler zurück: %s", fz_caught_message( priv->ctx ) );
+        return;
+    }
 
     pdf_document_page_annot->arr_quads = g_array_new( FALSE, FALSE, sizeof( fz_quad ) );
 
@@ -680,7 +688,6 @@ zond_pdf_document_page_refresh( ZondPdfDocument* self, gint page_doc,
     if ( flags & 2 )
     {
         g_ptr_array_remove_range( pdf_document_page->arr_annots, 0, pdf_document_page->arr_annots->len );
-
         zond_pdf_document_page_load_annots( pdf_document_page );
     }
 
