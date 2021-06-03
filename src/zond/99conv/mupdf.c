@@ -38,7 +38,8 @@ mupdf_init( gchar** errmsg )
 
     GMutex* mutex = g_malloc0( sizeof( GMutex ) * FZ_LOCK_MAX );
 
-    for ( gint i = 0; i < FZ_LOCK_MAX; i++ ) g_mutex_init( &mutex[i] );
+//    static GMutex mutex[FZ_LOCK_MAX];
+    for ( gint i = 0; i < FZ_LOCK_MAX; i++ ) g_mutex_init( &(mutex[i]) );
 
     locks_context.user = mutex;
     locks_context.lock = mupdf_lock;
