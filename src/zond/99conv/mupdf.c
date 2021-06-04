@@ -13,7 +13,7 @@ mupdf_unlock( void* user, gint lock )
 {
     GMutex* mutex = (GMutex*) user;
 
-    g_mutex_unlock( &mutex[lock] );
+    g_mutex_unlock( &(mutex[lock]) );
 
     return;
 }
@@ -23,7 +23,7 @@ mupdf_lock( void* user, gint lock )
 {
     GMutex* mutex = (GMutex*) user;
 
-    g_mutex_lock( &mutex[lock] );
+    g_mutex_lock( &(mutex[lock]) );
 
     return;
 }
@@ -53,8 +53,8 @@ mupdf_init( gchar** errmsg )
         g_free( mutex );
         ERROR_MUPDF_R( "fz_new_context", NULL )
     }
-
-	/* Register the default file types to handle. */
+/*
+	// Register the default file types to handle.
 	fz_try(ctx)  fz_register_document_handlers(ctx);
 	fz_catch( ctx ) //ERROR_MUPDF( "fz_register_document_handlers" )
     {
@@ -62,7 +62,7 @@ mupdf_init( gchar** errmsg )
         for ( gint i = 0; i < FZ_LOCK_MAX; i++ ) g_mutex_clear( &mutex[i] );
         ERROR_MUPDF_R( "fz_register_document_handlers", NULL )
     }
-
+*/
     return ctx;
 }
 
