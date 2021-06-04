@@ -76,7 +76,7 @@ mupdf_close_context( fz_context* ctx )
 
     for ( gint i = 0; i < FZ_LOCK_MAX; i++ ) g_mutex_clear( &mutex[i] );
 
-//    g_free( mutex );
+    g_free( mutex );
 
     return;
 }
