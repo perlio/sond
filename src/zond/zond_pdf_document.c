@@ -489,12 +489,54 @@ zond_pdf_document_is_open( const gchar* path )
 
 
 gint
+zond_pdf_document_reopen_doc_and_pages( ZondPdfDocument* self, gchar** errmsg )
+{
+    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
+
+    fz_try( priv->ctx ) priv->doc = pdf_open_document( priv->ctx, priv->path );
+    fz_catch( priv->ctx ) ERROR_MUPDF_CTX( "pdf_open_document", priv->ctx )
+
+    //ToDo: Überprüfen, ob nicht alle privs neu initialisiert werden müssen?!
+
+    //Seiten wieder laden
+    for ( gint i = 0; i < priv->pages->len; i++ )
+    {
+        fz_try( priv->ctx ) ((PdfDocumentPage*) ((priv->pages)->pdata)[i])->page =
+                fz_load_page( priv->ctx, &(priv->doc->super), i );
+        fz_catch( priv->ctx ) ERROR_MUPDF_CTX( "fz_load_page", priv->ctx )
+    }
+
+    return 0;
+}
+
+
+void
+zond_pdf_document_close_doc_and_pages( ZondPdfDocument* self )
+{
+    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
+
+    for ( gint i = 0; i < priv->pages->len; i++ )
+    {
+        PdfDocumentPage* pdf_document_page = g_ptr_array_index( priv->pages, i );
+        fz_drop_page( priv->ctx, pdf_document_page->page );
+        pdf_document_page->page = NULL;
+    }
+
+    pdf_drop_document( priv->ctx, priv->doc );
+    priv->doc = NULL;
+
+    return;
+}
+
+
+gint
 zond_pdf_document_save( ZondPdfDocument* self, gchar** errmsg )
 {
     ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
 
     if ( priv->dirty )
     {
+        gint rc = 0;
         fz_buffer* buf = NULL;
         fz_output* out = NULL;
 
@@ -534,8 +576,8 @@ zond_pdf_document_save( ZondPdfDocument* self, gchar** errmsg )
         {
             fz_close_output( priv->ctx, out );
             fz_drop_output( priv->ctx, out );
-            pdf_drop_document( priv->ctx, priv->doc );
 
+            zond_pdf_document_close_doc_and_pages( self );
         }
         fz_catch( priv->ctx )
         {
@@ -547,51 +589,10 @@ zond_pdf_document_save( ZondPdfDocument* self, gchar** errmsg )
         fz_always( priv->ctx ) fz_drop_buffer( priv->ctx, buf );
         fz_catch( priv->ctx ) ERROR_MUPDF( "fz_save_buffer" )
 
-        fz_try( priv->ctx ) priv->doc = pdf_open_document( priv->ctx, priv->path );
-        fz_catch( priv->ctx ) ERROR_MUPDF( "pdf_open_document" )
+        rc = zond_pdf_document_reopen_doc_and_pages( self, errmsg );
+        if ( rc ) ERROR_PAO( "zond_pdf_document_reopen_doc_pages" )
 
         priv->dirty = FALSE;
-    }
-
-    return 0;
-}
-
-
-void
-zond_pdf_document_close_doc_and_pages( ZondPdfDocument* self )
-{
-    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
-
-    for ( gint i = 0; i < priv->pages->len; i++ )
-    {
-        PdfDocumentPage* pdf_document_page = g_ptr_array_index( priv->pages, i );
-        fz_drop_page( priv->ctx, pdf_document_page->page );
-        pdf_document_page->page = NULL;
-    }
-
-    pdf_drop_document( priv->ctx, priv->doc );
-    priv->doc = NULL;
-
-    return;
-}
-
-
-gint
-zond_pdf_document_reopen_doc_and_pages( ZondPdfDocument* self, gchar** errmsg )
-{
-    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
-
-    fz_try( priv->ctx ) priv->doc = pdf_open_document( priv->ctx, priv->path );
-    fz_catch( priv->ctx ) ERROR_MUPDF_CTX( "pdf_open_document", priv->ctx )
-
-    //ToDo: Überprüfen, ob nicht alle privs neu initialisiert werden müssen?!
-
-    //Seiten wieder laden
-    for ( gint i = 0; i < priv->pages->len; i++ )
-    {
-        fz_try( priv->ctx ) ((PdfDocumentPage*) ((priv->pages)->pdata)[i])->page =
-                fz_load_page( priv->ctx, &(priv->doc->super), i );
-        fz_catch( priv->ctx ) ERROR_MUPDF_CTX( "fz_load_page", priv->ctx )
     }
 
     return 0;

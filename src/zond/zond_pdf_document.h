@@ -56,11 +56,11 @@ gboolean zond_pdf_document_is_dirty( ZondPdfDocument* );
 
 void zond_pdf_document_set_dirty( ZondPdfDocument*, gboolean );
 
-gint zond_pdf_document_save( ZondPdfDocument*, gchar** );
+gint zond_pdf_document_reopen_doc_and_pages( ZondPdfDocument*, gchar** );
 
 void zond_pdf_document_close_doc_and_pages( ZondPdfDocument* );
 
-gint zond_pdf_document_reopen_doc_and_pages( ZondPdfDocument*, gchar** );
+gint zond_pdf_document_save( ZondPdfDocument*, gchar** );
 
 void zond_pdf_document_close( ZondPdfDocument* );
 
