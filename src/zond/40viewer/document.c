@@ -55,6 +55,7 @@ document_new_displayed_document( const gchar* rel_path,
     if ( anbindung )
     {
         dd->anbindung = g_malloc0( sizeof( Anbindung ) );
+
         dd->anbindung->von = anbindung->von;
         dd->anbindung->bis = anbindung->bis;
     }

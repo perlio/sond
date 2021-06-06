@@ -4,7 +4,7 @@
 #define ZOOM_MIN 10
 #define ZOOM_MAX 400
 
-#define EOP 999999
+#define EOP 99999
 
 #include "enums.h"
 
