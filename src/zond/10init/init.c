@@ -24,7 +24,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "../99conv/general.h"
 #include "../99conv/db_zu_baum.h"
-#include "../99conv/mupdf.h"
 
 #include "../20allgemein/project.h"
 #include "../20allgemein/zieleplus.h"
@@ -235,7 +234,7 @@ init( GtkApplication* app )
     gtk_widget_show_all( zond->app_window );
     gtk_widget_hide( gtk_paned_get_child1( GTK_PANED(zond->hpaned) ) );
 
-    zond->ctx = fz_new_context( NULL, NULL, FZ_STORE_UNLIMITED )
+    zond->ctx = fz_new_context( NULL, NULL, FZ_STORE_UNLIMITED );
     if ( !zond->ctx )
     {
         meldung( zond->app_window, "zond->ctx konnte nicht initialisiert werden",

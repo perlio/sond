@@ -31,7 +31,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../99conv/general.h"
 #include "../99conv/db_read.h"
 #include "../99conv/db_write.h"
-#include "../99conv/mupdf.h"
 
 #include "../20allgemein/oeffnen.h"
 #include "../20allgemein/ziele.h"

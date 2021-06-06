@@ -34,7 +34,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../error.h"
 
 #include "../99conv/general.h"
-#include "../99conv/mupdf.h"
 #include "../99conv/baum.h"
 #include "../99conv/db_write.h"
 #include "../99conv/db_read.h"

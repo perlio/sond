@@ -310,7 +310,7 @@ abfragen_rel_path_and_anbindung( Projekt* zond, Baum baum, gint node_id,
         return 1;
     }
 
-    const ZondPdfDocument* zond_pdf_document = zond_pdf_document_is_open( rel_path_intern );
+    ZondPdfDocument* zond_pdf_document = zond_pdf_document_is_open( rel_path_intern );
     if ( zond_pdf_document ) zond_pdf_document_mutex_lock( zond_pdf_document );
 
     anbindung_intern = ziel_zu_anbindung( zond->ctx, rel_path_intern, ziel, errmsg );

@@ -2,7 +2,6 @@
 
 #include "../zond_pdf_document.h"
 
-#include "../99conv/mupdf.h"
 #include "../99conv/general.h"
 
 #include <mupdf/fitz.h>
@@ -78,17 +77,15 @@ pdf_document_get_dest( fz_context* ctx, fz_document* doc, gint page_doc,
 
 
 static gint
-pdf_get_page_num_from_dest_doc( fz_context* ctx, fz_document* doc, const gchar* dest, gchar** errmsg )
+pdf_get_page_num_from_dest_doc( fz_context* ctx, pdf_document* doc, const gchar* dest, gchar** errmsg )
 {
     pdf_obj* obj_dest_string = NULL;
     pdf_obj* obj_dest = NULL;
     pdf_obj* pageobj = NULL;
     gint page_num = 0;
 
-    pdf_document* pdf_doc = pdf_specifics( ctx, doc );
-
     obj_dest_string = pdf_new_string( ctx, dest, strlen( dest ) );
-    fz_try( ctx ) obj_dest = pdf_lookup_dest( ctx, pdf_doc, obj_dest_string);
+    fz_try( ctx ) obj_dest = pdf_lookup_dest( ctx, doc, obj_dest_string);
     fz_always( ctx ) pdf_drop_obj( ctx, obj_dest_string );
     fz_catch( ctx ) ERROR_MUPDF( "pdf_lookup_dest" )
 
@@ -97,7 +94,7 @@ pdf_get_page_num_from_dest_doc( fz_context* ctx, fz_document* doc, const gchar* 
 	if ( pdf_is_int( ctx, pageobj ) ) page_num = pdf_to_int( ctx, pageobj );
 	else
 	{
-		fz_try( ctx ) page_num = pdf_lookup_page_number( ctx, pdf_doc, pageobj );
+		fz_try( ctx ) page_num = pdf_lookup_page_number( ctx, doc, pageobj );
 		fz_catch( ctx ) ERROR_MUPDF( "pdf_lookup_page_number" )
 	}
 
@@ -109,14 +106,14 @@ gint
 pdf_get_page_num_from_dest( fz_context* ctx, const gchar* rel_path,
         const gchar* dest, gchar** errmsg )
 {
-    fz_document* doc = NULL;
+    pdf_document* doc = NULL;
     gint page_num = 0;
 
-    fz_try( ctx ) doc = fz_open_document( ctx, rel_path );
+    fz_try( ctx ) doc = pdf_open_document( ctx, rel_path );
     fz_catch( ctx ) ERROR_MUPDF( "fz_open_document" )
 
     page_num = pdf_get_page_num_from_dest_doc( ctx, doc, dest, errmsg );
-	fz_drop_document( ctx, doc );
+	pdf_drop_document( ctx, doc );
     if ( page_num < 0 ) ERROR_PAO( "get_page_num_from_dest_doc" )
 
     return page_num;

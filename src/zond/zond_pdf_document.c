@@ -22,7 +22,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <glib/gstdio.h>
 
 #include "error.h"
-#include "99conv/mupdf.h"
 #include "99conv/pdf.h"
 
 #include "../misc.h"
