@@ -540,7 +540,6 @@ pdf_ocr_sandwich_page( PdfDocumentPage* pdf_document_page,
         pdf_document* doc_text, gint page_text, gchar** errmsg )
 {
     gint rc = 0;
-    pdf_obj* page_ref = NULL;
     pdf_obj* page_ref_text = NULL;
     pdf_graft_map *graft_map = NULL;
     pdf_obj *obj = NULL;
@@ -558,20 +557,18 @@ pdf_ocr_sandwich_page( PdfDocumentPage* pdf_document_page,
 
     fz_try ( ctx )
     {
-        pdf_page* pdf_page = pdf_page_from_fz_page( ctx, pdf_document_page->page );
-        page_ref = pdf_page->obj;
-        pdf_flatten_inheritable_page_items( ctx, page_ref );
+        pdf_flatten_inheritable_page_items( ctx, pdf_document_page->page->obj );
 
         page_ref_text = pdf_lookup_page_obj( ctx, doc_text, page_text );
         pdf_flatten_inheritable_page_items( ctx, page_ref_text );
     }
     fz_catch( ctx ) ERROR_MUPDF_R( "pdf_lookup_page", -2 );
 
-    rc = pdf_ocr_filter_stream( ctx, page_ref, 3, errmsg );
+    rc = pdf_ocr_filter_stream( ctx, pdf_document_page->page->obj, 3, errmsg );
     if ( rc ) ERROR_PAO( "pdf_ocr_filter_stream" )
 
-    fz_rect rect = pdf_ocr_get_mediabox( ctx, page_ref );
-    float rotate = pdf_get_rotate( ctx, page_ref );
+    fz_rect rect = pdf_ocr_get_mediabox( ctx, pdf_document_page->page->obj );
+    float rotate = pdf_get_rotate( ctx, pdf_document_page->page->obj );
     float scale = 1./4./72.*70.;
 
     fz_matrix ctm = pdf_ocr_create_matrix( ctx, rect, scale, rotate );
@@ -579,14 +576,14 @@ pdf_ocr_sandwich_page( PdfDocumentPage* pdf_document_page,
     rc = pdf_ocr_process_tess_tmp( ctx, page_ref_text, ctm, errmsg );
     if ( rc ) ERROR_PAO_R( "pdf_ocr_process_tess_tmp", -2 )
 
-    fz_try( ctx ) contents_arr = pdf_new_array( ctx, pdf_get_bound_document( ctx, page_ref ), 1 );
+    fz_try( ctx ) contents_arr = pdf_new_array( ctx, pdf_get_bound_document( ctx, pdf_document_page->page->obj ), 1 );
     fz_catch( ctx ) ERROR_MUPDF_R( "pdf_new_array", -2 )
 
     fz_try( ctx )
     {
         //Contents aus Ursrpungs-Pdf in neues Array umkopieren
         //graft nicht erforderlich, da selbes Dokument - Referenzen bleiben
-        obj = pdf_dict_get( ctx, page_ref, PDF_NAME(Contents) ); //keine exception
+        obj = pdf_dict_get( ctx, pdf_document_page->page->obj, PDF_NAME(Contents) ); //keine exception
         if ( pdf_is_array( ctx, obj ) )
         {
             for ( gint i = 0; i < pdf_array_len( ctx, obj ); i++ )
@@ -606,7 +603,7 @@ pdf_ocr_sandwich_page( PdfDocumentPage* pdf_document_page,
         }
 
         //Jetzt aus Text-PDF - graf map erforderlich
-        graft_map = pdf_new_graft_map( ctx, pdf_get_bound_document( ctx, page_ref ) ); //keine exception
+        graft_map = pdf_new_graft_map( ctx, pdf_get_bound_document( ctx, pdf_document_page->page->obj ) ); //keine exception
 
         obj = pdf_dict_get( ctx, page_ref_text, PDF_NAME(Contents) );
         if ( pdf_is_array( ctx, obj ) )
@@ -631,16 +628,16 @@ pdf_ocr_sandwich_page( PdfDocumentPage* pdf_document_page,
         }
 
         //alte Contents raus, neue rein
-        pdf_dict_del( ctx, page_ref, PDF_NAME(Contents) );
-        pdf_dict_put( ctx, page_ref, PDF_NAME(Contents), contents_arr );
+        pdf_dict_del( ctx, pdf_document_page->page->obj, PDF_NAME(Contents) );
+        pdf_dict_put( ctx, pdf_document_page->page->obj, PDF_NAME(Contents), contents_arr );
 
         //Resources aus pdf_text hizukopieren
-        resources = pdf_dict_get( ctx, page_ref, PDF_NAME(Resources) );
+        resources = pdf_dict_get( ctx, pdf_document_page->page->obj, PDF_NAME(Resources) );
         //Zunächst testen, ob Page-Object Font enthält
         font_dict = pdf_dict_get( ctx, resources, PDF_NAME(Font) );
         if ( !font_dict )
         {
-            font_dict = pdf_new_dict( ctx, pdf_get_bound_document( ctx, page_ref ), 1 );
+            font_dict = pdf_new_dict( ctx, pdf_get_bound_document( ctx, pdf_document_page->page->obj ), 1 );
             pdf_dict_put_drop( ctx, resources, PDF_NAME(Font), font_dict );
         }
 
@@ -1202,11 +1199,7 @@ pdf_ocr_page_has_hidden_text( PdfDocumentPage* pdf_document_page, gchar** errmsg
 
     fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
 
-    pdf_page* pdf_page = pdf_page_from_fz_page( ctx, pdf_document_page->page );
-
-    pdf_obj* page_ref = pdf_page->obj;
-
-    buf = pdf_ocr_get_content_stream_as_buffer( ctx, page_ref, errmsg );
+    buf = pdf_ocr_get_content_stream_as_buffer( ctx, pdf_document_page->page->obj, errmsg );
     if ( !buf )
     {
         zond_pdf_document_mutex_unlock( pdf_document_page->document );
