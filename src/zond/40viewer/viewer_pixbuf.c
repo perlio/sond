@@ -37,7 +37,7 @@ viewer_pixbuf_finalize( guchar *pixels, gpointer data )
     ViewerPixbufPrivate* viewer_pixbuf_priv = (ViewerPixbufPrivate*) data;
 
     fz_drop_pixmap( viewer_pixbuf_priv->ctx, viewer_pixbuf_priv->pixmap );
-    fz_drop_context( viewer_pixbuf_priv->ctx );
+//    fz_drop_context( viewer_pixbuf_priv->ctx );
 
     g_free( viewer_pixbuf_priv );
 
@@ -51,13 +51,14 @@ viewer_pixbuf_new_from_pixmap( fz_context* ctx, fz_pixmap* pixmap )
     GdkPixbuf* pixbuf = NULL;
 
     ViewerPixbufPrivate* viewer_pixbuf_priv = g_malloc0( sizeof( ViewerPixbufPrivate ) );
-    viewer_pixbuf_priv->ctx = fz_clone_context( ctx );
+
+    viewer_pixbuf_priv->ctx = ctx;
+
     viewer_pixbuf_priv->pixmap = pixmap;
 
     pixbuf = gdk_pixbuf_new_from_data( pixmap->samples,
             GDK_COLORSPACE_RGB, FALSE, 8, pixmap->w, pixmap->h,
             pixmap->stride, viewer_pixbuf_finalize, viewer_pixbuf_priv );
-
 
     return pixbuf;
 }

@@ -58,7 +58,7 @@ cb_delete_event( GtkWidget* app_window, GdkEvent* event, gpointer user_data )
 
     pdf_drop_document( zond->ctx, zond->pv_clip );
 
-    mupdf_close_context( zond->ctx );
+    fz_drop_context( zond->ctx );
 
     clipboard_free( zond->clipboard );
 

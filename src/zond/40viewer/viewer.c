@@ -1936,7 +1936,7 @@ viewer_start_pv( Projekt* zond )
 
     g_ptr_array_add( zond->arr_pv, pv );
 
-    pv->arr_pages = g_ptr_array_new_with_free_func( (GDestroyNotify) gtk_widget_destroy );
+    pv->arr_pages = g_ptr_array_new( );
 
     //highlight Sentinel an den Anfang setzen
     pv->highlight[0].ul.x = -1;

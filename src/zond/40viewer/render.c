@@ -114,7 +114,7 @@ render_thumbnail( PdfViewer* pv, fz_context* ctx, gint num,
         ERROR_MUPDF( "fz_run_display_list" )
     }
 
-    pixbuf = viewer_pixbuf_new_from_pixmap( ctx, pixmap );
+    pixbuf = viewer_pixbuf_new_from_pixmap( zond_pdf_document_get_ctx( pdf_document_page->document ), pixmap );
     gtk_list_store_set( GTK_LIST_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(pv->tree_thumb) )), &iter, 0, pixbuf, -1 );
     g_object_unref( pixbuf );
 
@@ -167,7 +167,7 @@ render_pixmap( fz_context* ctx, ViewerPage* viewer_page, gdouble zoom,
         ERROR_MUPDF( "fz_run_display_list" )
     }
 
-    pixbuf = viewer_pixbuf_new_from_pixmap( ctx, pixmap );
+    pixbuf = viewer_pixbuf_new_from_pixmap( zond_pdf_document_get_ctx( pdf_document_page->document ), pixmap );
     gtk_image_set_from_pixbuf( GTK_IMAGE(viewer_page), pixbuf );
     g_object_unref( pixbuf );
 
@@ -208,17 +208,15 @@ render_display_list( fz_context* ctx, PdfDocumentPage* pdf_document_page,
     {
         fz_close_device( ctx, list_device );
         fz_drop_device( ctx, list_device );
+        zond_pdf_document_mutex_unlock( pdf_document_page->document );
     }
     fz_catch( ctx )
     {
         if ( errmsg ) *errmsg = add_string( *errmsg,
                 g_strconcat( "fz_run_page:\n", fz_caught_message( ctx ), NULL ) );
-        zond_pdf_document_mutex_unlock( pdf_document_page->document );
 
         return -1;
     }
-
-    zond_pdf_document_mutex_unlock( pdf_document_page->document );
 
     return 0;
 }
@@ -240,6 +238,7 @@ render_page_thread( gpointer data, gpointer user_data )
     pdf_document_page = viewer_page_get_document_page( viewer_page );
 
     ctx = fz_clone_context( zond_pdf_document_get_ctx( pdf_document_page->document ) );
+    if ( !ctx ) ERROR_THREAD( "fz_clone_context" )
 
     rc = render_display_list( ctx, pdf_document_page, &errmsg );
     if ( rc ) ERROR_THREAD( "render_display_list" )

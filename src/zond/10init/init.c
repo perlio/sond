@@ -235,7 +235,7 @@ init( GtkApplication* app )
     gtk_widget_show_all( zond->app_window );
     gtk_widget_hide( gtk_paned_get_child1( GTK_PANED(zond->hpaned) ) );
 
-    zond->ctx = mupdf_init( NULL );
+    zond->ctx = fz_new_context( NULL, NULL, FZ_STORE_UNLIMITED )
     if ( !zond->ctx )
     {
         meldung( zond->app_window, "zond->ctx konnte nicht initialisiert werden",

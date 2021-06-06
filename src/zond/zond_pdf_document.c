@@ -95,6 +95,21 @@ zond_pdf_document_get_property (GObject    *object,
 
 
 static void
+zond_pdf_document_close_context( fz_context* ctx )
+{
+    GMutex* mutex = (GMutex*) ctx->locks.user;
+
+    fz_drop_context( ctx );
+
+    for ( gint i = 0; i < FZ_LOCK_MAX; i++ ) g_mutex_clear( &mutex[i] );
+
+    g_free( mutex );
+
+    return;
+}
+
+
+static void
 zond_pdf_document_finalize( GObject* self )
 {
     ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( ZOND_PDF_DOCUMENT(self) );
@@ -102,7 +117,7 @@ zond_pdf_document_finalize( GObject* self )
     g_ptr_array_unref( priv->pages );
 
     pdf_drop_document( priv->ctx, priv->doc );
-    mupdf_close_context( priv->ctx ); //ToDo: Prüfen, ob drop_context nicht ausreicht...
+    zond_pdf_document_close_context( priv->ctx ); //drop_context reicht nicht aus!
 
     g_free( priv->path );
     g_free( priv->errmsg );
@@ -346,17 +361,64 @@ zond_pdf_document_class_init( ZondPdfDocumentClass* klass )
 
 
 static void
+mupdf_unlock( void* user, gint lock )
+{
+    GMutex* mutex = (GMutex*) user;
+
+    g_mutex_unlock( &(mutex[lock]) );
+
+    return;
+}
+
+static void
+mupdf_lock( void* user, gint lock )
+{
+    GMutex* mutex = (GMutex*) user;
+
+    g_mutex_lock( &(mutex[lock]) );
+
+    return;
+}
+
+
+/** Wenn NULL, dann Fehler und *errmsg gesetzt **/
+static fz_context*
+zond_pdf_document_init_context( void )
+{
+    fz_context* ctx = NULL;
+    fz_locks_context locks_context;
+
+    GMutex* mutex = g_malloc0( sizeof( GMutex ) * FZ_LOCK_MAX );
+
+//    static GMutex mutex[FZ_LOCK_MAX];
+    for ( gint i = 0; i < FZ_LOCK_MAX; i++ ) g_mutex_init( &(mutex[i]) );
+
+    locks_context.user = mutex;
+    locks_context.lock = mupdf_lock;
+    locks_context.unlock = mupdf_unlock;
+
+	/* Create a context to hold the exception stack and various caches. */
+	ctx = fz_new_context( NULL, &locks_context, FZ_STORE_UNLIMITED );
+    if ( !ctx )
+    {
+        for ( gint i = 0; i < FZ_LOCK_MAX; i++ ) g_mutex_clear( &mutex[i] );
+        g_free( mutex );
+    }
+
+    return ctx;
+}
+
+
+static void
 zond_pdf_document_init( ZondPdfDocument* self )
 {
-    gchar* errmsg = NULL;
-
     ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
 
-    priv->ctx = mupdf_init( &errmsg );
+    priv->ctx = zond_pdf_document_init_context( );
     if ( !priv->ctx )
     {
-        priv->errmsg = g_strconcat( "Bei Aufruf mupdf_init:\n", errmsg, NULL );
-        g_free( errmsg );
+        priv->errmsg = g_strconcat( "In zond_pdf_document_init:\n"
+                "fz_context konnte nicht erzeugt werden", NULL );
 
         return;
     }
@@ -394,7 +456,7 @@ zond_pdf_document_open( const gchar* path, gchar** errmsg )
     priv = zond_pdf_document_get_instance_private( zond_pdf_document );
     if ( priv->errmsg )
     {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_object_new:\n",
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_object_new:\n\n",
                 priv->errmsg, NULL );
         g_object_unref( zond_pdf_document );
 
@@ -616,6 +678,7 @@ zond_pdf_document_get_ctx( ZondPdfDocument* self )
 gchar*
 zond_pdf_document_get_path( ZondPdfDocument* self )
 {
+    if ( !ZOND_IS_PDF_DOCUMENT(self) ) return NULL;
     ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
 
     return priv->path;

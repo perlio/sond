@@ -27,6 +27,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../99conv/mupdf.h"
 #include "../99conv/general.h"
 
+#include "viewer_page.h"
 #include "viewer.h"
 #include "document.h"
 
@@ -89,17 +90,33 @@ pv_schliessen_datei( PdfViewer* pv )
         gtk_widget_set_sensitive( pv->button_speichern, FALSE );
     }
 
-    //Arrays zurücksetzen
+    //Array zurücksetzen
     g_ptr_array_remove_range( pv->arr_pages, 0, pv->arr_pages->len );
 
     //thumbs leeren
-    GtkListStore* store_thumb =
-            GTK_LIST_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(pv->tree_thumb) ));
-    gtk_list_store_clear( store_thumb );
+    //treeview bzw. treestore muß zerstört werden, da sonst irgendwie ref auf
+    //einen GdkPixbuf kleben bleibt; die wird dann erst aufgegeben,
+    //wenn die neuen GdkPixbufs eingefüllt werden
+    //dann existiert der fz_context aber schon nicht mehr...
+//    gtk_list_store_clear( GTK_LIST_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(pv->tree_thumb) )) );
+    gtk_widget_destroy( pv->tree_thumb );
+    pv->tree_thumb = gtk_tree_view_new( );
+    GtkListStore* list_store = gtk_list_store_new( 1, GDK_TYPE_PIXBUF );
+    gtk_tree_view_set_model( GTK_TREE_VIEW(pv->tree_thumb), GTK_TREE_MODEL(list_store) );
+    g_object_unref( list_store );
 
+    //layout von ViewerImages befreien
+    gtk_container_foreach( GTK_CONTAINER(pv->layout), (GtkCallback) gtk_widget_destroy, NULL );
     gtk_layout_set_size( GTK_LAYOUT(pv->layout), 0, 0 );
-    if ( pv->dd ) document_free_displayed_documents( pv->dd );
-    pv->dd = NULL;
+
+    if ( pv->dd )
+    {
+        document_free_displayed_documents( pv->dd );
+        pv->dd = NULL;
+    }
+
+    gtk_header_bar_set_title( GTK_HEADER_BAR(pv->headerbar), "" );
+    gtk_header_bar_set_subtitle( GTK_HEADER_BAR(pv->headerbar), "" );
 
     pv_activate_widgets( pv, FALSE );
 
@@ -110,7 +127,9 @@ pv_schliessen_datei( PdfViewer* pv )
 static gint
 pv_oeffnen_datei( PdfViewer* pv, gchar* path, gchar** errmsg )
 {
-    DisplayedDocument* dd = document_new_displayed_document( path, NULL, errmsg );
+    DisplayedDocument* dd = NULL;
+
+    dd = document_new_displayed_document( path, NULL, errmsg );
     if ( !dd ) ERROR_PAO( "document_new_displayed_document" )
 
     viewer_display_document( pv, dd, 0, 0 );
@@ -229,7 +248,7 @@ startup_app( GtkApplication* app, gpointer user_data )
 
     *zond = g_malloc0( sizeof( Projekt ) );
 
-    (*zond)->ctx = mupdf_init( NULL );
+    (*zond)->ctx = fz_new_context( NULL, NULL, FZ_STORE_UNLIMITED );
     if ( !((*zond)->ctx) )
     {
         g_free( *zond );
