@@ -13,7 +13,7 @@
 
 /** Nicht thread-safe  **/
 gint
-pdf_document_get_dest( fz_context* ctx, fz_document* doc, gint page_doc,
+pdf_document_get_dest( fz_context* ctx, pdf_document* doc, gint page_doc,
         gpointer* ret, gboolean first_occ, gchar** errmsg )
 {
     pdf_obj* obj_dest_tree = NULL;
@@ -24,9 +24,8 @@ pdf_document_get_dest( fz_context* ctx, fz_document* doc, gint page_doc,
     gint num = 0;
     const gchar* dest_found = NULL;
 
-    pdf_document* pdf_doc = pdf_specifics( ctx, doc );
 
-    fz_try( ctx ) obj_dest_tree = pdf_load_name_tree( ctx, pdf_doc, PDF_NAME(Dests) );
+    fz_try( ctx ) obj_dest_tree = pdf_load_name_tree( ctx, doc, PDF_NAME(Dests) );
     fz_catch( ctx ) ERROR_MUPDF( "pdf_load_name_tree" )
 
     for ( gint i = 0; i < pdf_dict_len( ctx, obj_dest_tree ); i++ )
@@ -44,7 +43,7 @@ pdf_document_get_dest( fz_context* ctx, fz_document* doc, gint page_doc,
 
         obj_page = pdf_array_get( ctx, obj_array, 0 );
 
-        fz_try( ctx ) num = pdf_lookup_page_number( ctx, pdf_doc, obj_page );
+        fz_try( ctx ) num = pdf_lookup_page_number( ctx, doc, obj_page );
         fz_catch( ctx )
         {
             pdf_drop_obj( ctx, obj_dest_tree );

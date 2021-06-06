@@ -599,7 +599,7 @@ seiten_anbindung( PdfViewer* pv, GPtrArray* arr_document_page, gchar** errmsg )
 
         gint page_doc = zond_pdf_document_get_index( pdf_document_page );
 
-        rc = pdf_document_get_dest( ctx, &(doc->super), page_doc, (gpointer*) &arr_dests,
+        rc = pdf_document_get_dest( ctx, doc, page_doc, (gpointer*) &arr_dests,
                 FALSE, errmsg );
         if ( rc )
         {

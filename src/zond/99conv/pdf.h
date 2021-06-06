@@ -17,7 +17,7 @@ typedef struct pdf_document pdf_document;
 typedef struct fz_page fz_page;
 
 
-gint pdf_document_get_dest( fz_context*, fz_document*, gint, gpointer*,
+gint pdf_document_get_dest( fz_context*, pdf_document*, gint, gpointer*,
         gboolean, gchar** );
 
 gint pdf_get_page_num_from_dest( fz_context*, const gchar*, const gchar*, gchar** );
