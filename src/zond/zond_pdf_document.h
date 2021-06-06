@@ -31,7 +31,7 @@ typedef struct _Document Document;
 typedef struct _Pdf_Document_Page
 {
     ZondPdfDocument* document; //erhält keine ref
-    fz_page* page;
+    pdf_page* page;
     fz_rect rect;
     fz_display_list* display_list;
     fz_stext_page* stext_page;

@@ -430,14 +430,12 @@ seiten_drehen_foreach( PdfViewer* pv, gint page_pv, gpointer data, gchar** errms
 static gint
 seiten_drehen_pdf( PdfDocumentPage* pdf_document_page, gint winkel, gchar** errmsg )
 {
-    pdf_page* page = NULL;
     pdf_obj* page_obj = NULL;
     pdf_obj* rotate_obj = NULL;
     gint rotate = 0;
     fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
 
-    page = pdf_page_from_fz_page( ctx, pdf_document_page->page );
-    page_obj = page->obj;
+    page_obj = pdf_document_page->page->obj;
 
     rotate_obj = pdf_dict_get_inheritable( ctx, page_obj, PDF_NAME(Rotate) );
     if ( !rotate_obj )

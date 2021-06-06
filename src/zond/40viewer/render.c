@@ -202,7 +202,7 @@ render_display_list( fz_context* ctx, PdfDocumentPage* pdf_document_page,
     }
 
     //page durchs list-device laufen lassen
-    fz_try( ctx ) fz_run_page( ctx, pdf_document_page->page, list_device, fz_identity, NULL );
+    fz_try( ctx ) pdf_run_page( ctx, pdf_document_page->page, list_device, fz_identity, NULL );
     fz_always( ctx )
     {
         fz_close_device( ctx, list_device );

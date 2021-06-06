@@ -19,6 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "zond_pdf_document.h"
 
 #include <mupdf/fitz.h>
+#include <mupdf/pdf.h>
 #include <glib/gstdio.h>
 
 #include "error.h"
@@ -137,7 +138,7 @@ zond_pdf_document_page_free( PdfDocumentPage* pdf_document_page )
 {
     ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( pdf_document_page->document );
 
-    fz_drop_page( priv->ctx, pdf_document_page->page );
+    fz_drop_page( priv->ctx, &(pdf_document_page->page->super) );
     fz_drop_stext_page( priv->ctx, pdf_document_page->stext_page );
     fz_drop_display_list( priv->ctx, pdf_document_page->display_list );
     g_ptr_array_unref( pdf_document_page->arr_annots );
@@ -202,8 +203,7 @@ zond_pdf_document_page_load_annots( PdfDocumentPage* pdf_document_page )
 
     ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( pdf_document_page->document );
 
-    annot = pdf_first_annot( priv->ctx, pdf_page_from_fz_page( priv->ctx,
-            pdf_document_page->page ) );
+    annot = pdf_first_annot( priv->ctx, pdf_document_page->page );
 
     if ( !annot ) return;
 
@@ -240,16 +240,16 @@ zond_pdf_document_load_page( ZondPdfDocument* self, gint page_doc, gchar** errms
     PdfDocumentPage* pdf_document_page = g_ptr_array_index( priv->pages, page_doc );
 
     fz_try( priv->ctx ) pdf_document_page->page =
-            fz_load_page( priv->ctx, &(priv->doc->super), page_doc );
-    fz_catch( priv->ctx ) ERROR_MUPDF_CTX( "fz_load_page", priv->ctx );
+            pdf_load_page( priv->ctx, priv->doc, page_doc );
+    fz_catch( priv->ctx ) ERROR_MUPDF_CTX( "pdf_load_page", priv->ctx );
 
-    pdf_document_page->rect = fz_bound_page( priv->ctx, pdf_document_page->page );
+    pdf_document_page->rect = pdf_bound_page( priv->ctx, pdf_document_page->page );
 
     fz_try( priv->ctx ) pdf_document_page->display_list =
             fz_new_display_list( priv->ctx, pdf_document_page->rect );
     fz_catch( priv->ctx )
     {
-        fz_drop_page( priv->ctx, pdf_document_page->page );
+        fz_drop_page( priv->ctx, &(pdf_document_page->page->super) );
         ERROR_MUPDF_CTX( "fz_new_display_list", priv->ctx );
     }
 
@@ -502,8 +502,8 @@ zond_pdf_document_reopen_doc_and_pages( ZondPdfDocument* self, gchar** errmsg )
     for ( gint i = 0; i < priv->pages->len; i++ )
     {
         fz_try( priv->ctx ) ((PdfDocumentPage*) ((priv->pages)->pdata)[i])->page =
-                fz_load_page( priv->ctx, &(priv->doc->super), i );
-        fz_catch( priv->ctx ) ERROR_MUPDF_CTX( "fz_load_page", priv->ctx )
+                pdf_load_page( priv->ctx, priv->doc, i );
+        fz_catch( priv->ctx ) ERROR_MUPDF_CTX( "pdf_load_page", priv->ctx )
     }
 
     return 0;
@@ -518,7 +518,7 @@ zond_pdf_document_close_doc_and_pages( ZondPdfDocument* self )
     for ( gint i = 0; i < priv->pages->len; i++ )
     {
         PdfDocumentPage* pdf_document_page = g_ptr_array_index( priv->pages, i );
-        fz_drop_page( priv->ctx, pdf_document_page->page );
+        fz_drop_page( priv->ctx, &(pdf_document_page->page->super) );
         pdf_document_page->page = NULL;
     }
 
@@ -734,7 +734,7 @@ zond_pdf_document_page_refresh( ZondPdfDocument* self, gint page_doc,
     PdfDocumentPage* pdf_document_page = g_ptr_array_index( priv->pages, page_doc );
 
     //Seite clearen
-    fz_drop_page( ctx, pdf_document_page->page );
+    fz_drop_page( ctx, &(pdf_document_page->page->super) );
     fz_drop_display_list( ctx, pdf_document_page->display_list );
 
     rc = zond_pdf_document_load_page( self, page_doc, errmsg );

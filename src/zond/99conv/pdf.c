@@ -239,7 +239,7 @@ pdf_render_stext_page_direct( PdfDocumentPage* pdf_document_page, gchar** errmsg
     fz_catch( ctx ) ERROR_MUPDF( "fz_new_stext_device" )
 
 //Seite durch's device laufen lassen
-    fz_try( ctx ) fz_run_page( ctx, pdf_document_page->page, s_t_device, fz_identity, NULL );
+    fz_try( ctx ) pdf_run_page( ctx, pdf_document_page->page, s_t_device, fz_identity, NULL );
     fz_always( ctx )
     {
         fz_close_device( ctx, s_t_device );

@@ -933,10 +933,8 @@ viewer_on_text( PdfViewer* pv, PdfPunkt pdf_punkt )
                 gboolean quer = FALSE;
 
                 fz_context* ctx = fz_clone_context( zond_pdf_document_get_ctx( pdf_document_page->document ) );
-                if ( pdf_get_rotate( ctx, pdf_page_from_fz_page( ctx,
-                        pdf_document_page->page )->obj ) == 90 ||
-                        pdf_get_rotate( ctx, pdf_page_from_fz_page( ctx,
-                        pdf_document_page->page )->obj ) == 180 ) quer = TRUE;
+                if ( pdf_get_rotate( ctx, pdf_document_page->page->obj ) == 90 ||
+                        pdf_get_rotate( ctx, pdf_document_page->page->obj ) == 180 ) quer = TRUE;
                 fz_drop_context( ctx );
 
                 if ( line->wmode == 0 && !quer ) return 1;
@@ -1182,13 +1180,12 @@ static gint
 viewer_annot_delete( PdfDocumentPage* pdf_document_page, PdfDocumentPageAnnot* pdf_document_page_annot, gchar** errmsg )
 {
     fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
-    pdf_page* page = pdf_page_from_fz_page( ctx, pdf_document_page->page );
 
-    pdf_annot* annot = pdf_first_annot( ctx, page );
+    pdf_annot* annot = pdf_first_annot( ctx, pdf_document_page->page );
 
     for ( gint i = 0; i < pdf_document_page_annot->idx; i++ ) annot = pdf_next_annot( ctx, annot );
 
-    fz_try( ctx ) pdf_delete_annot( ctx, page, annot );
+    fz_try( ctx ) pdf_delete_annot( ctx, pdf_document_page->page, annot );
     fz_catch( ctx ) ERROR_MUPDF( "pdf_delete_annot" )
 
     return 0;
@@ -1329,8 +1326,7 @@ viewer_annot_create( PdfDocumentPage* pdf_document_page, fz_quad* highlight, gin
     if ( state == 1 ) art = PDF_ANNOT_HIGHLIGHT;
     else if ( state == 2 ) art = PDF_ANNOT_UNDERLINE;
 
-    fz_try( ctx ) annot = pdf_create_annot( ctx, pdf_page_from_fz_page( ctx,
-            pdf_document_page->page ), art );
+    fz_try( ctx ) annot = pdf_create_annot( ctx, pdf_document_page->page, art );
     fz_catch( ctx ) ERROR_MUPDF( "pdf_create_annot/pdf_set_annot_color" )
 
     if ( art == PDF_ANNOT_UNDERLINE )
