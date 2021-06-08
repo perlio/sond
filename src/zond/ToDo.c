@@ -1,7 +1,6 @@
 /*
 Bugs:
 Viewer:
-    - wenn PDF geschlossen und neues geöffnet->Absturz i.Z.m. g_mutex
     - Textsuche funktioniert nicht
 
 

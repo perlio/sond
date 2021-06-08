@@ -792,6 +792,7 @@ seiten_cb_einfuegen( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg 
 
         viewer_insert_thumb( pv, page_pv + u );
     }
+//hier das layout neu machen?!
 
     for ( gint i = page_pv; i < pv->arr_pages->len; i++ )
             g_thread_pool_push( pv->thread_pool_page, GINT_TO_POINTER( i + 1 ), NULL );
@@ -923,7 +924,7 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
     }
 
     count = pdf_count_pages( pv->zond->ctx, doc_merge );
-
+//hier müssen alle thread-pools stillgelegt werden
     zond_pdf_document_mutex_lock( pv->dd->zond_pdf_document );
     rc = zond_pdf_document_insert_pages( pv->dd->zond_pdf_document, pos,
             count, pv->zond->ctx, doc_merge, &errmsg );
