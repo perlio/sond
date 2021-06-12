@@ -24,7 +24,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../global_types.h"
 #include "../error.h"
 
-#include "../99conv/mupdf.h"
 #include "../99conv/general.h"
 
 #include "viewer_page.h"

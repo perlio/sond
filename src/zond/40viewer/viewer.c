@@ -615,6 +615,7 @@ viewer_springen_zu_textfund( PdfViewer* pv, gint i )
 
     pv->highlight[0] = text_found.quad;
     pv->highlight[1].ul.x = -1;
+    pv->highlight[1].ul.y = (float) i;
 
     pv->click_pdf_punkt.seite = text_found.page_pv;
 
@@ -632,13 +633,24 @@ viewer_suchen_vorheriges_vorkommen( PdfViewer* pv )
 {
     PdfPunkt pdf_punkt = { 0 };
     fz_point punkt = { 0 };
+    gint index = 0;
 
+    index = (gint) pv->highlight[1].ul.y;
+
+    //wenn am Ende des arrays: zurückspringen
+    if ( index == 0 ) return pv->arr_text_found->len - 1;
+
+    //wenn schon irgendwohin gesprungen wurde
+    if ( index > 0 ) return index - 1;
+
+    //wenn kein Fund aktiviert, einfach zum nächsten gehen
     punkt.y = gtk_adjustment_get_value( pv->v_adj );
     viewer_abfragen_pdf_punkt( pv, punkt, &pdf_punkt );
 
-    for ( gint i = pv->arr_text_found->len - 1; i >= 0; i-- )
+    for ( gint i = 0; i < pv->arr_text_found->len; i++ )
     {
         TextFound text_found = g_array_index( pv->arr_text_found, TextFound, i );
+
 
         if ( text_found.page_pv > pdf_punkt.seite ) continue;
         if ( text_found.page_pv == pdf_punkt.seite &&
@@ -651,25 +663,22 @@ viewer_suchen_vorheriges_vorkommen( PdfViewer* pv )
 }
 
 
-static void
-cb_viewer_zurueck_button_clicked( GtkButton* butxton, gpointer data )
-{
-    PdfViewer* pv = (PdfViewer*) data;
-
-    gint i = viewer_suchen_vorheriges_vorkommen( pv );
-
-    viewer_springen_zu_textfund( pv, i );
-
-    return;
-}
-
-
 static gint
 viewer_suchen_naechstes_vorkommen( PdfViewer* pv )
 {
     PdfPunkt pdf_punkt = { 0 };
     fz_point punkt = { 0 };
+    gint index = 0;
 
+    index = (gint) pv->highlight[1].ul.y;
+
+    //wenn am Ende des arrays: zurückspringen
+    if ( index == pv->arr_text_found->len - 1 ) return 0;//zurückspringen
+
+    //wenn schon irgendwohin gesprungen wurde
+    if ( index >= 0 ) return index + 1;
+
+    //wenn kein Fund aktiviert, einfach zum nächsten gehen
     punkt.y = gtk_adjustment_get_value( pv->v_adj );
     viewer_abfragen_pdf_punkt( pv, punkt, &pdf_punkt );
 
@@ -685,18 +694,6 @@ viewer_suchen_naechstes_vorkommen( PdfViewer* pv )
     }
 
     return -1;
-}
-
-
-static void
-cb_viewer_vor_button_clicked( GtkButton* button, gpointer data )
-{
-    PdfViewer* pv = (PdfViewer*) data;
-    gint i = viewer_suchen_naechstes_vorkommen( pv );
-
-    viewer_springen_zu_textfund( pv, i );
-
-    return;
 }
 
 
@@ -766,44 +763,47 @@ viewer_durchsuchen_angezeigtes_doc( PdfViewer* pv, const gchar* search_text,
 
 
 static void
-cb_viewer_text_search_entry_activate( GtkEntry* entry, gpointer data )
+cb_viewer_text_search( GtkWidget* widget, gpointer data )
 {
+    gint i = 0;
+
     PdfViewer* pv = (PdfViewer*) data;
 
-    gint rc = 0;
-    gchar* errmsg = NULL;
-
-    const gchar* text_entry = gtk_entry_get_text( entry );
-
-    if ( !g_strcmp0( text_entry, "" ) )
+    //wenn nach aktuellem Wort schon gesucht, wie vorspringen behandeln
+    //sofern entry geändert wurde, löscht callback array
+    if ( !pv->arr_text_found->len )
     {
-        pv->highlight[0].ul.x = -1;
-        gtk_widget_grab_focus( pv->layout);
+        gint rc = 0;
+        gchar* errmsg = NULL;
 
-        return;
+        const gchar* text_entry = gtk_entry_get_text( GTK_ENTRY(pv->entry_search) );
+
+        //wenn entry leer: nichts machen
+        if ( !g_strcmp0( text_entry, "" ) ) return;
+
+        rc = viewer_durchsuchen_angezeigtes_doc( pv, text_entry, &errmsg );
+        if ( rc == -1 )
+        {
+            meldung( pv->vf, "Fehler - Textsuche:\n\nBei Aufruf viewer_durchsuchen_"
+                    "angezeigtes_doc", errmsg, NULL );
+            g_free( errmsg );
+
+            return;
+        }
+        else if ( rc == 1 )
+        {
+            meldung( pv->vf, "Kein Treffer", NULL );
+
+            return;
+        }
     }
 
-    rc = viewer_durchsuchen_angezeigtes_doc( pv, text_entry, &errmsg );
-    if ( rc == -1 )
-    {
-        meldung( pv->vf, "Fehler - Textsuche:\n\nBei Aufruf viewer_durchsuchen_"
-                "angezeigtes_doc", errmsg, NULL );
-        g_free( errmsg );
-
-        return;
-    }
-    else if ( rc == 1 )
-    {
-        meldung( pv->vf, "Kein Treffer", NULL );
-
-        return;
-    }
-
-    gint i = viewer_suchen_naechstes_vorkommen( pv );
+    if ( widget == pv->button_vorher ) i = viewer_suchen_vorheriges_vorkommen( pv );
+    else i = viewer_suchen_naechstes_vorkommen( pv );
 
     viewer_springen_zu_textfund( pv, i );
 
-    gtk_widget_grab_focus( pv->button_nachher );
+    if ( widget == pv->entry_search ) gtk_widget_grab_focus( pv->button_nachher );
 
     return;
 }
@@ -1865,15 +1865,15 @@ viewer_einrichten_fenster( PdfViewer* pv )
 
     //Textsuche-entry
     g_signal_connect( pv->entry_search, "activate",
-            G_CALLBACK(cb_viewer_text_search_entry_activate), pv );
+            G_CALLBACK(cb_viewer_text_search), pv );
+    g_signal_connect( pv->button_nachher, "clicked",
+            G_CALLBACK(cb_viewer_text_search), pv );
+    g_signal_connect( pv->button_vorher, "clicked",
+            G_CALLBACK(cb_viewer_text_search), pv );
     g_signal_connect_swapped( gtk_entry_get_buffer( GTK_ENTRY(pv->entry_search) ),
             "deleted-text", G_CALLBACK(cb_viewer_text_search_entry_buffer_changed), pv );
     g_signal_connect_swapped( gtk_entry_get_buffer( GTK_ENTRY(pv->entry_search) ),
             "inserted-text", G_CALLBACK(cb_viewer_text_search_entry_buffer_changed), pv );
-    g_signal_connect( pv->button_vorher, "clicked",
-            G_CALLBACK(cb_viewer_zurueck_button_clicked), pv );
-    g_signal_connect( pv->button_nachher, "clicked",
-            G_CALLBACK(cb_viewer_vor_button_clicked), pv );
 
 // Signale Toolbox
     g_signal_connect( pv->button_speichern, "clicked", G_CALLBACK(cb_pv_speichern),

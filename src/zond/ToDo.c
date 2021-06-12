@@ -1,8 +1,9 @@
 /*
 Bugs:
 Viewer:
-    - Textsuche funktioniert nicht
     - Seiten Einfügen stürzt ab - thread-pools abschalten?!
+    - Seiten löschen funktioniert ebenfalls nicht
+        - bei letzter Seite auch gerne Absturz
 
 - fm:
     - manchmal (nach Verschieben) wird leeres child angezeigt
