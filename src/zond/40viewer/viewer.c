@@ -512,13 +512,6 @@ cb_tree_thumb( GtkToggleButton* button, gpointer data )
 }
 
 
-typedef struct
-{
-    gint page_pv;
-    fz_quad quad;
-} TextFound;
-
-
 static void
 cb_viewer_text_search_entry_buffer_changed( gpointer data )
 {
@@ -603,6 +596,13 @@ viewer_abfragen_pdf_punkt( PdfViewer* pv, fz_point punkt, PdfPunkt* pdf_punkt )
 }
 
 
+typedef struct
+{
+    gint page_pv;
+    fz_quad quad;
+} TextFound;
+
+
 static void
 viewer_springen_zu_textfund( PdfViewer* pv, gint i )
 {
@@ -615,6 +615,8 @@ viewer_springen_zu_textfund( PdfViewer* pv, gint i )
 
     pv->highlight[0] = text_found.quad;
     pv->highlight[1].ul.x = -1;
+
+    pv->click_pdf_punkt.seite = text_found.page_pv;
 
     pdf_pos.seite = text_found.page_pv;
     pdf_pos.index = text_found.quad.ul.y;
@@ -982,6 +984,8 @@ static PdfDocumentPageAnnot*
 viewer_on_annot( PdfViewer* pv, PdfPunkt pdf_punkt )
 {
     PdfDocumentPage* pdf_document_page = NULL;
+
+    if ( pdf_punkt.seite >= pv->arr_pages->len ) return NULL;
 
     pdf_document_page = viewer_page_get_document_page( (ViewerPage*) g_ptr_array_index( pv->arr_pages, pdf_punkt.seite) );
     if ( !(pdf_document_page->arr_annots->len) ) return NULL;

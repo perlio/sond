@@ -2,9 +2,13 @@
 Bugs:
 Viewer:
     - Textsuche funktioniert nicht
+    - Seiten Einfügen stürzt ab - thread-pools abschalten?!
 
+- fm:
+    - manchmal (nach Verschieben) wird leeres child angezeigt
 
  ToDo-Liste
+
 
 - DBase
     -Fehler beim schließen loggen

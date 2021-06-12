@@ -568,6 +568,7 @@ seiten_cb_loesche_seite( PdfViewer* pv, gint page_pv, gpointer data, gchar** err
     //pv muß neues layout haben!
     g_object_set_data( G_OBJECT(pv->layout), "dirty", GINT_TO_POINTER(1) );
 
+    gtk_widget_destroy( GTK_WIDGET(g_ptr_array_index( pv->arr_pages, page_pv )) );
     g_ptr_array_remove_index( pv->arr_pages, page_pv ); //viewer_page wird freed!
 
     rc = viewer_get_iter_thumb( pv, page_pv, &iter, errmsg );
@@ -671,6 +672,7 @@ seiten_loeschen( PdfViewer* pv, GPtrArray* arr_document_page, gchar** errmsg )
                 seiten_cb_loesche_seite, (gpointer) &arr_pv, errmsg );
 
         //Seite aus document entfernen
+        //vor pdf_delete_page, da ansonsten noch ref auf page?!
         g_ptr_array_remove_index( zond_pdf_document_get_arr_pages( pv->dd->zond_pdf_document ), page_doc ); //ist gleich page_pv
 
         //Seite aus PDF entfernen

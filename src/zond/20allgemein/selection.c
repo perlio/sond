@@ -96,7 +96,7 @@ selection_verschieben( Projekt* zond, Baum baum, gint anchor_id, gboolean kind,
 
     rc = sond_treeview_clipboard_foreach( zond->treeview[baum],
             selection_foreach_verschieben, &s_selection, errmsg );
-    if ( rc == -1 ) ERROR_PAO( "treeview_selection_foreach" )
+    if ( rc == -1 ) ERROR_PAO( "somd_treeview_selection_foreach" )
 
     //Alte Auswahl löschen
     if ( zond->clipboard->arr_ref->len > 0 ) g_ptr_array_remove_range( zond->clipboard->arr_ref,
@@ -687,7 +687,7 @@ selection_paste( Projekt* zond, gboolean kind )
             if ( rc == -1 )
             {
                 meldung( zond->app_window, "Bei Aufruf selection_"
-                        "inhalt_nach_inhalt:\n\n", errmsg, NULL );
+                        "verschieben:\n\n", errmsg, NULL );
                 g_free( errmsg );
 
                 return;

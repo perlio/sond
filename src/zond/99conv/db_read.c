@@ -4,8 +4,6 @@
 
 #include "../99conv/general.h"
 
-#include "../20allgemein/ziele.h"
-
 #include <sqlite3.h>
 #include <glib/gstdio.h>
 
@@ -20,7 +18,7 @@ db_get_parent( Projekt* zond, Baum baum, gint node_id, gchar** errmsg )
     gint rc = 0;
     gint parent_id = 0;
 
-    for ( gint i = 0; i < 1; i++ )
+    for ( gint i = 0; i < 2; i++ )
     {
         sqlite3_reset( zond->dbase->stmts.db_get_parent[i] );
         sqlite3_clear_bindings( zond->dbase->stmts.db_get_parent[i] );
@@ -59,11 +57,8 @@ db_get_older_sibling( Projekt* zond, Baum baum, gint node_id, gchar** errmsg )
     gint rc = 0;
     gint older_sibling_id = 0;
 
-    for ( gint i = 0; i < 1; i++ )
-    {
-        sqlite3_reset( zond->dbase->stmts.db_get_older_sibling[i] );
-        sqlite3_clear_bindings( zond->dbase->stmts.db_get_older_sibling[i] );
-    }
+    for ( gint i = 0; i < 2; i++ )
+            sqlite3_reset( zond->dbase->stmts.db_get_older_sibling[i] );
 
     rc = sqlite3_bind_int( zond->dbase->stmts.db_get_older_sibling[0 + (gint) baum], 1, node_id );
     if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_bind_int (node_id)" )
@@ -94,10 +89,7 @@ db_get_younger_sibling( Projekt* zond, Baum baum, gint node_id, gchar** errmsg )
     gint younger_sibling_id = 0;
 
     for ( gint i = 0; i < 2; i++ )
-    {
-        sqlite3_reset( zond->dbase->stmts.db_get_younger_sibling[i] );
-        sqlite3_clear_bindings( zond->dbase->stmts.db_get_younger_sibling[i] );
-    }
+            sqlite3_reset( zond->dbase->stmts.db_get_younger_sibling[i] );
 
     rc = sqlite3_bind_int( zond->dbase->stmts.db_get_younger_sibling[0 + (gint) baum], 1, node_id );
     if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_bind_int (node_id)" )
@@ -126,10 +118,7 @@ db_get_first_child( Projekt* zond, Baum baum, gint node_id, gchar** errmsg )
     gint first_child_id = 0;
 
     for ( gint i = 0; i < 2; i++ )
-    {
-        sqlite3_reset( zond->dbase->stmts.db_get_first_child[i] );
-        sqlite3_clear_bindings( zond->dbase->stmts.db_get_first_child[i] );
-    }
+            sqlite3_reset( zond->dbase->stmts.db_get_first_child[i] );
 
     rc = sqlite3_bind_int( zond->dbase->stmts.db_get_first_child[0 + (gint) baum], 1, node_id );
     if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_bind_int (node_id)" )
@@ -158,10 +147,7 @@ db_get_icon_name_and_node_text( Projekt* zond, Baum baum, gint node_id, gchar** 
     gint rc = 0;
 
     for ( gint i = 0; i < 2; i++ )
-    {
-        sqlite3_reset( zond->dbase->stmts.db_get_icon_name_and_node_text[i] );
-        sqlite3_clear_bindings( zond->dbase->stmts.db_get_icon_name_and_node_text[i] );
-    }
+            sqlite3_reset( zond->dbase->stmts.db_get_icon_name_and_node_text[i] );
 
     rc = sqlite3_bind_int( zond->dbase->stmts.db_get_icon_name_and_node_text[0 + (gint) baum], 1, node_id );
     if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_bind_int (node_id)" )
