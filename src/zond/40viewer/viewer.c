@@ -518,6 +518,7 @@ cb_viewer_text_search_entry_buffer_changed( gpointer data )
     PdfViewer* pv = (PdfViewer*) data;
 
     pv->highlight[0].ul.x = -1;
+    pv->highlight[1].ul.y = -1;
     g_array_remove_range( pv->arr_text_found, 0, pv->arr_text_found->len );
 
     return;
