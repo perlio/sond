@@ -551,7 +551,7 @@ seiten_cb_loesche_seite( PdfViewer* pv, gint page_pv, gpointer data, gchar** err
     //in Array suchen, ob pv schon vorhanden
     for ( gint i = 0; i < (*p_arr_pv)->len; i++ )
     {
-        if ( g_ptr_array_index( (*p_arr_pv), i ) == pv )
+        if ( g_ptr_array_index( *p_arr_pv, i ) == pv )
         {
             closed = TRUE;
             break;
@@ -562,7 +562,7 @@ seiten_cb_loesche_seite( PdfViewer* pv, gint page_pv, gpointer data, gchar** err
     if ( closed == FALSE )
     {
         viewer_close_thread_pools( pv );
-        g_ptr_array_add( (*p_arr_pv), pv );
+        g_ptr_array_add( *p_arr_pv, pv );
     }
 
     //pv muß neues layout haben!

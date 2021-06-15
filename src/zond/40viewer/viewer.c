@@ -1133,12 +1133,12 @@ viewer_foreach( GPtrArray* arr_pv, PdfDocumentPage* pdf_document_page,
 {
     zond_pdf_document_set_dirty( pdf_document_page->document, TRUE );
 
-    for ( gint i = 0; i < arr_pv->len; i++ )
+    for ( gint p = 0; p < arr_pv->len; p++ )
     {
         gint zaehler = 0;
         gboolean dirty = FALSE;
 
-        PdfViewer* pv_vergleich = g_ptr_array_index( arr_pv, i );
+        PdfViewer* pv_vergleich = g_ptr_array_index( arr_pv, p );
         DisplayedDocument* dd_vergleich = pv_vergleich->dd;
 
         do
@@ -1157,7 +1157,7 @@ viewer_foreach( GPtrArray* arr_pv, PdfDocumentPage* pdf_document_page,
             {
                 GPtrArray* arr_pages = zond_pdf_document_get_arr_pages( pdf_document_page->document );
 
-                for ( gint i = von; i < bis; i++ )
+                for ( gint i = von; i <= bis; i++ )
                 {
                     PdfDocumentPage* pdf_document_page_vergleich = g_ptr_array_index( arr_pages, i );
                     if ( pdf_document_page_vergleich == pdf_document_page )

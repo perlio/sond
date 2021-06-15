@@ -2,14 +2,14 @@
 Bugs:
 Viewer:
     - Seiten Einfügen stürzt ab - thread-pools abschalten?!
-    - Seiten löschen funktioniert ebenfalls nicht
-        - bei letzter Seite auch gerne Absturz
 
 - fm:
     - manchmal (nach Verschieben) wird leeres child angezeigt
 
- ToDo-Liste
+ToDo:
+- wenn Anbindung erzeugt wird, wird diese zwar markiert, aber nicht fokussiert
 
+- viewer: cb adj_changed erst anschalten, wenn layout fertig
 
 - DBase
     -Fehler beim schließen loggen
