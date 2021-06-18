@@ -208,7 +208,8 @@ ziele_einfuegen_anbindung( Projekt* zond, const gchar* rel_path, gint anchor_id,
     if ( rc ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "db_commit" )
 
     sond_treeview_expand_row( zond->treeview[BAUM_INHALT], new_iter );
-    sond_treeview_set_cursor( zond->treeview[BAUM_INHALT], new_iter );
+    sond_treeview_set_cursor_on_text_cell( zond->treeview[BAUM_INHALT], new_iter );
+    gtk_widget_grab_focus( GTK_WIDGET(zond->treeview[BAUM_INHALT]) );
 
     gtk_tree_iter_free( new_iter );
 

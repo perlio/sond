@@ -327,6 +327,23 @@ sond_treeview_set_cursor( SondTreeview* stv, GtkTreeIter* iter )
 }
 
 
+void
+sond_treeview_set_cursor_on_text_cell( SondTreeview* stv, GtkTreeIter* iter )
+{
+    if ( !iter ) return;
+
+    SondTreeviewPrivate* stv_priv = sond_treeview_get_instance_private( stv );
+
+    GtkTreePath* path = gtk_tree_model_get_path( gtk_tree_view_get_model(
+            GTK_TREE_VIEW(stv) ), iter );
+    gtk_tree_view_set_cursor_on_cell( GTK_TREE_VIEW(stv), path,
+            stv_priv->first_column, stv_priv->renderer_text, FALSE );
+    gtk_tree_path_free( path );
+
+    return;
+}
+
+
 //überprüft beim verschieben, ob auf zu verschiebenden Knoten oder dessen
 //Nachfahren verschoben werden soll
 gboolean

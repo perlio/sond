@@ -7,9 +7,8 @@ Viewer:
     - manchmal (nach Verschieben) wird leeres child angezeigt
 
 ToDo:
-- wenn Anbindung erzeugt wird, wird diese zwar markiert, aber nicht fokussiert
-
-- viewer: cb adj_changed erst anschalten, wenn layout fertig
+- viewer: cb adj_changed erst anschalten, wenn layout fertig? Wirklich?
+            Oder so lassen, d.h. in render abfragen, ob thread_pool vorhanden?
 
 - DBase
     -Fehler beim schließen loggen
