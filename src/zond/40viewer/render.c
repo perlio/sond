@@ -34,34 +34,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
 
-gint
-render_display_list_to_stext_page( fz_context* ctx, PdfDocumentPage* pdf_document_page,
-        gchar** errmsg )
-{
-    fz_device* s_t_device = NULL;
-
-    if ( pdf_document_page->stext_page->first_block != NULL ) return 1;
-
-    fz_stext_options opts = { FZ_STEXT_DEHYPHENATE };
-
-    //structured text-device
-    fz_try( ctx ) s_t_device = fz_new_stext_device( ctx, pdf_document_page->stext_page, &opts );
-    fz_catch( ctx ) ERROR_MUPDF( "fz_new_stext_device" )
-
-    //und durchs stext-device laufen lassen
-    fz_try( ctx ) fz_run_display_list( ctx, pdf_document_page->display_list, s_t_device,
-            fz_identity, pdf_document_page->rect, NULL );
-    fz_always( ctx )
-    {
-        fz_close_device( ctx, s_t_device );
-        fz_drop_device( ctx, s_t_device );
-    }
-    fz_catch( ctx ) ERROR_MUPDF( "fz_run_display_list" )
-
-    return 0;
-}
-
-
 static gint
 render_thumbnail( PdfViewer* pv, fz_context* ctx, gint num,
         PdfDocumentPage* pdf_document_page, gchar** errmsg )
@@ -174,21 +146,42 @@ render_pixmap( fz_context* ctx, ViewerPage* viewer_page, gdouble zoom,
 }
 
 
+gint
+render_display_list_to_stext_page( fz_context* ctx, PdfDocumentPage* pdf_document_page,
+        gchar** errmsg )
+{
+    fz_device* s_t_device = NULL;
+
+    if ( pdf_document_page->stext_page->first_block != NULL ) return 1;
+
+    fz_stext_options opts = { FZ_STEXT_DEHYPHENATE };
+
+    //structured text-device
+    fz_try( ctx ) s_t_device = fz_new_stext_device( ctx, pdf_document_page->stext_page, &opts );
+    fz_catch( ctx ) ERROR_MUPDF( "fz_new_stext_device" )
+
+    //und durchs stext-device laufen lassen
+    fz_try( ctx ) fz_run_display_list( ctx, pdf_document_page->display_list, s_t_device,
+            fz_identity, pdf_document_page->rect, NULL );
+    fz_always( ctx )
+    {
+        fz_close_device( ctx, s_t_device );
+        fz_drop_device( ctx, s_t_device );
+    }
+    fz_catch( ctx ) ERROR_MUPDF( "fz_run_display_list" )
+
+    return 0;
+}
+
+
 static gint
 render_display_list( fz_context* ctx, PdfDocumentPage* pdf_document_page,
         gchar** errmsg )
 {
     fz_device* list_device = NULL;
 
-    zond_pdf_document_mutex_lock( pdf_document_page->document );
-
     //Display_list immer noch leer?
-    if ( !fz_display_list_is_empty( ctx, pdf_document_page->display_list ) )
-    {
-        zond_pdf_document_mutex_unlock( pdf_document_page->document );
-
-        return 0;
-    }
+    if ( !fz_display_list_is_empty( ctx, pdf_document_page->display_list ) ) return 1;
 
     //list_device für die Seite erzeugen
     fz_try( ctx ) list_device = fz_new_list_device( ctx, pdf_document_page->display_list );
@@ -196,7 +189,6 @@ render_display_list( fz_context* ctx, PdfDocumentPage* pdf_document_page,
     {
         if ( errmsg ) *errmsg = add_string( *errmsg,
                 g_strconcat( "fz_new_list_device:\n", fz_caught_message( ctx ), NULL ) );
-        zond_pdf_document_mutex_unlock( pdf_document_page->document );
 
         return -1;
     }
@@ -207,7 +199,6 @@ render_display_list( fz_context* ctx, PdfDocumentPage* pdf_document_page,
     {
         fz_close_device( ctx, list_device );
         fz_drop_device( ctx, list_device );
-        zond_pdf_document_mutex_unlock( pdf_document_page->document );
     }
     fz_catch( ctx )
     {
@@ -239,17 +230,24 @@ render_page_thread( gpointer data, gpointer user_data )
     ctx = fz_clone_context( zond_pdf_document_get_ctx( pdf_document_page->document ) );
     if ( !ctx ) ERROR_THREAD( "fz_clone_context" )
 
+    zond_pdf_document_mutex_lock( pdf_document_page->document );
+
     rc = render_display_list( ctx, pdf_document_page, &errmsg );
-    if ( rc ) ERROR_THREAD( "render_display_list" )
+    if ( rc == -1 )
+    {
+        zond_pdf_document_mutex_unlock( pdf_document_page->document );
+        ERROR_THREAD( "render_display_list" )
+    }
+
+    rc = render_display_list_to_stext_page( ctx, pdf_document_page, &errmsg );
+    zond_pdf_document_mutex_unlock( pdf_document_page->document );
+    if ( rc == -1 ) ERROR_THREAD( "render_diaplay_list_to_stext_page" )
 
     rc = render_pixmap( ctx, viewer_page, pv->zoom, pdf_document_page, &errmsg );
     if ( rc == -1 ) ERROR_THREAD( "render_pixmap" )
 
     rc = render_thumbnail( pv, ctx, seite, pdf_document_page, &errmsg );
     if ( rc == -1 ) ERROR_THREAD( "render_thumbnail" )
-
-    rc = render_display_list_to_stext_page( ctx, pdf_document_page, &errmsg );
-    if ( rc == -1 ) ERROR_THREAD( "render_diaplay_list_to_stext_page" )
 
     fz_drop_context( ctx );
 

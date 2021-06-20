@@ -723,7 +723,7 @@ viewer_durchsuchen_angezeigtes_doc( PdfViewer* pv, const gchar* search_text,
             {
                 rc = render_display_list_to_stext_page( ctx, pdf_document_page, errmsg );
                 zond_pdf_document_mutex_unlock( pdf_document_page->document );
-                if ( rc ) ERROR_PAO( "render_display_list_to_stext_page" )
+                if ( rc == -1 ) ERROR_PAO( "render_display_list_to_stext_page" )
             }
             else //wenn display_list noch nicht erzeugt, dann direkt aus page erzeugen
             {
