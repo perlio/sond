@@ -30,11 +30,12 @@ typedef struct _Document Document;
 
 typedef struct _Pdf_Document_Page
 {
-    ZondPdfDocument* document; //erhält keine ref
+    ZondPdfDocument* document; //erhält keine ref - muß das mal mit dem const kapieren...
     pdf_page* page;
     fz_rect rect;
     fz_display_list* display_list;
     fz_stext_page* stext_page;
+    GMutex mutex_page;
     GPtrArray* arr_annots;
 } PdfDocumentPage;
 

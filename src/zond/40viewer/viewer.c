@@ -703,7 +703,70 @@ viewer_durchsuchen_angezeigtes_doc( PdfViewer* pv, const gchar* search_text,
         gchar** errmsg )
 {
     gint rc = 0;
+    fz_point point = { 0.0, 0.0 };
+    PdfPunkt pdf_punkt = { 0 };
+    gint page = 0;
     gboolean found = FALSE;
+
+    viewer_abfragen_pdf_punkt( pv, point, &pdf_punkt );
+
+    page = pdf_punkt.seite;
+
+    do
+    {
+        gint anzahl = 0;
+        fz_quad quads[100] = { 0 };
+
+        ViewerPage* viewer_page = g_ptr_array_index( pv->arr_pages, page );
+        PdfDocumentPage* pdf_document_page = viewer_page_get_document_page( viewer_page );
+        fz_rect crop = viewer_page_get_crop( viewer_page );
+        fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
+
+        do
+        {
+            gboolean rendered = FALSE;
+
+            zond_pdf_document_mutex_lock( pdf_document_page->document );
+            rendered = !fz_display_list_is_empty( ctx, pdf_document_page->display_list );
+            zond_pdf_document_mutex_unlock( pdf_document_page->document );
+        } while ( !rendered );
+
+        anzahl = fz_search_stext_page( ctx, pdf_document_page->stext_page,
+                search_text, quads, 99 );
+
+        for ( gint u = 0; u < anzahl; u++ )
+        {
+            fz_rect text_rect = fz_rect_from_quad( quads[u] );
+            fz_rect cropped_text_rect = fz_intersect_rect( crop, text_rect );
+
+            if ( !fz_is_empty_rect( cropped_text_rect ) )
+            {
+                TextFound text_found = { 0, };
+
+                cropped_text_rect = fz_translate_rect( cropped_text_rect,
+                        -crop.x0, -crop.y0 );
+
+                text_found.quad = fz_quad_from_rect( cropped_text_rect );
+                text_found.page_pv = i;
+
+                g_array_append_val( pv->arr_text_found, text_found );
+                found = TRUE;
+            }
+        }
+
+        if ( !found && anzahl )
+        {
+            TextFound text_found = { 0, };
+
+            text_found = g_array_index( pv->arr_text_found, TextFound, pv->arr_text_found->len - anzahl + i );
+
+        }
+
+        if ( page < pv->arr_pages->len - 1 ) page++;
+        else page = 0;
+
+    } while ( page < pdf_punkt.seite );
+
 
     for ( gint i = 0; i < pv->arr_pages->len; i++ )
     {

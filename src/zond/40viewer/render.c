@@ -152,9 +152,12 @@ render_display_list_to_stext_page( fz_context* ctx, PdfDocumentPage* pdf_documen
 {
     fz_device* s_t_device = NULL;
 
-    if ( pdf_document_page->stext_page->first_block != NULL ) return 1;
+    if ( pdf_document_page->stext_page ) return 0;
 
     fz_stext_options opts = { FZ_STEXT_DEHYPHENATE };
+
+    fz_try( ctx ) pdf_document_page->stext_page = fz_new_stext_page( ctx, pdf_document_page->rect );
+    fz_catch( ctx ) ERROR_MUPDF( "fz_new_stext_page" )
 
     //structured text-device
     fz_try( ctx ) s_t_device = fz_new_stext_device( ctx, pdf_document_page->stext_page, &opts );
@@ -231,16 +234,13 @@ render_page_thread( gpointer data, gpointer user_data )
     if ( !ctx ) ERROR_THREAD( "fz_clone_context" )
 
     zond_pdf_document_mutex_lock( pdf_document_page->document );
-
     rc = render_display_list( ctx, pdf_document_page, &errmsg );
-    if ( rc == -1 )
-    {
-        zond_pdf_document_mutex_unlock( pdf_document_page->document );
-        ERROR_THREAD( "render_display_list" )
-    }
-
-    rc = render_display_list_to_stext_page( ctx, pdf_document_page, &errmsg );
     zond_pdf_document_mutex_unlock( pdf_document_page->document );
+    if ( rc == -1 ) ERROR_THREAD( "render_display_list" )
+
+    g_mutex_lock( &pdf_document_page->mutex_page );
+    rc = render_display_list_to_stext_page( ctx, pdf_document_page, &errmsg );
+    g_mutex_unlock( &pdf_document_page->mutex_page );
     if ( rc == -1 ) ERROR_THREAD( "render_diaplay_list_to_stext_page" )
 
     rc = render_pixmap( ctx, viewer_page, pv->zoom, pdf_document_page, &errmsg );
@@ -288,7 +288,7 @@ render_sichtbare_seiten( PdfViewer* pv )
     gtk_header_bar_set_subtitle( GTK_HEADER_BAR(pv->headerbar), subtitle );
     g_free( subtitle );
 
-    if ( pv->thread_pool_page ) for ( gint i = erste; i <= letzte; i++ )
+    if ( pv->thread_pool_page ) for ( gint i = letzte; i >= erste; i-- )
             g_thread_pool_move_to_front( pv->thread_pool_page, GINT_TO_POINTER(i + 1) );
 
     //thumb-Leiste anpassen

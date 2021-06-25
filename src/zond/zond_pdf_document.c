@@ -141,6 +141,7 @@ zond_pdf_document_page_free( PdfDocumentPage* pdf_document_page )
     fz_drop_page( priv->ctx, &(pdf_document_page->page->super) );
     fz_drop_stext_page( priv->ctx, pdf_document_page->stext_page );
     fz_drop_display_list( priv->ctx, pdf_document_page->display_list );
+    g_mutex_clear( &pdf_document_page->mutex_page );
     g_ptr_array_unref( pdf_document_page->arr_annots );
 
     return;
@@ -220,20 +221,6 @@ zond_pdf_document_page_load_annots( PdfDocumentPage* pdf_document_page )
 
 
 static gint
-zond_pdf_document_load_stext_page( ZondPdfDocument* self, gint page_doc, gchar** errmsg )
-{
-    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
-    PdfDocumentPage* pdf_document_page = g_ptr_array_index( priv->pages, page_doc );
-
-    fz_try( priv->ctx ) pdf_document_page->stext_page =
-            fz_new_stext_page( priv->ctx, pdf_document_page->rect );
-    fz_catch( priv->ctx ) ERROR_MUPDF_CTX( "fz_new_stext_page", priv->ctx )
-
-    return 0;
-}
-
-
-static gint
 zond_pdf_document_load_page( ZondPdfDocument* self, gint page_doc, gchar** errmsg )
 {
     ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
@@ -273,8 +260,7 @@ zond_pdf_document_page_init( ZondPdfDocument* self, gint index, gchar** errmsg )
     rc = zond_pdf_document_load_page( self, index, errmsg );
     if ( rc == -1 ) ERROR_SOND( "zond_pdf_document_load_page" )
 
-    rc = zond_pdf_document_load_stext_page( self, index, errmsg );
-    if ( rc == -1 ) ERROR_SOND( "zond_pdf_document_load_stext_page" )
+    g_mutex_init( &pdf_document_page->mutex_page );
 
     zond_pdf_document_page_load_annots( pdf_document_page );
 
@@ -744,9 +730,6 @@ zond_pdf_document_page_refresh( ZondPdfDocument* self, gint page_doc,
     {
         fz_drop_stext_page( ctx, pdf_document_page->stext_page );
         pdf_document_page->stext_page = NULL;
-
-        zond_pdf_document_load_stext_page( self, page_doc, errmsg );
-        if ( rc ) ERROR_SOND( "zond_pdf_document_load_stext_page" )
     }
     if ( flags & 2 )
     {
