@@ -6,6 +6,10 @@ Viewer:
 - fm:
     - manchmal (nach Verschieben) wird leeres child angezeigt
 
+- zond:
+    - Einfügen gleiches als Unterpunkt (EOP geändert)
+
+
 ToDo:
 - viewer: cb adj_changed erst anschalten, wenn layout fertig? Wirklich?
             Oder so lassen, d.h. in render abfragen, ob thread_pool vorhanden?
