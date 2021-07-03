@@ -616,6 +616,7 @@ viewer_anzeigen_text_occ( PdfViewer* pv )
     pdf_pos.index = (gint) text_occ.quad.ul.y;
 
     viewer_springen_zu_pos_pdf( pv, pdf_pos, 40 );
+    gtk_widget_queue_draw( pv->layout ); //für den Fall, daß auf gleicher Höhe - dann zeichnet viewer_spring... nicht neu
 
     return;
 }
@@ -736,10 +737,10 @@ cb_viewer_text_search( GtkWidget* widget, gpointer data )
     //array leeren
     g_array_remove_range( pv->arr_text_occ, 0, pv->arr_text_occ->len );
 
-    still_rendering = (g_thread_pool_unprocessed( pv->thread_pool_page ) != 0);
-
     //nur bis zum nächsten Vorkommen suchen
     page_act = pdf_pos.seite;
+
+    still_rendering = (g_thread_pool_unprocessed( pv->thread_pool_page ) != 0);
 
     do //alle Seiten durchgegen, bis Seite wieder Anfangsseite
     {

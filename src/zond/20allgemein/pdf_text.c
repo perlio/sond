@@ -326,44 +326,49 @@ pdf_textsuche_pdf( Projekt* zond, const gchar* rel_path, const gchar* search_tex
         GArray* arr_pdf_text_occ, InfoWindow* info_window, gchar** errmsg )
 {
     gint rc = 0;
-    DisplayedDocument* dd = NULL;
+    ZondPdfDocument* zond_pdf_document = NULL;
     GPtrArray* arr_pdf_document_pages = NULL;
     fz_context* ctx = NULL;
 
-    dd = document_new_displayed_document( rel_path, NULL, errmsg );
-    if ( !dd ) ERROR_PAO( "pdf_textsuche_pdf" )
+    zond_pdf_document = zond_pdf_document_open( rel_path, errmsg );
+    if ( !zond_pdf_document ) ERROR_PAO( "pdf_textsuche_pdf" )
 
-    ctx = zond_pdf_document_get_ctx( dd->zond_pdf_document );
-    arr_pdf_document_pages = zond_pdf_document_get_arr_pages( dd->zond_pdf_document );
+    ctx = zond_pdf_document_get_ctx( zond_pdf_document );
+    arr_pdf_document_pages = zond_pdf_document_get_arr_pages( zond_pdf_document );
 
     for ( gint i = 0; i < arr_pdf_document_pages->len; i++ )
     {
         gint anzahl = 0;
         fz_quad quads[100] = { 0 };
+        gboolean rendered = FALSE;
 
         PdfDocumentPage* pdf_document_page = g_ptr_array_index( arr_pdf_document_pages, i );
 
-        if ( pdf_document_page->stext_page->first_block == NULL )
+        g_mutex_lock( &pdf_document_page->mutex_page );
+        rendered = (pdf_document_page->stext_page != NULL);
+        g_mutex_unlock( &pdf_document_page->mutex_page );
+
+        if ( !rendered )
         {
-            zond_pdf_document_mutex_lock( dd->zond_pdf_document );
+            zond_pdf_document_mutex_lock( zond_pdf_document );
 
             if ( !fz_display_list_is_empty( ctx, pdf_document_page->display_list ) )
             {
                 rc = render_display_list_to_stext_page( ctx, pdf_document_page, errmsg );
-                zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
+                zond_pdf_document_mutex_unlock( zond_pdf_document );
                 if ( rc )
                 {
-                    document_free_displayed_documents( dd );
+                    zond_pdf_document_close( zond_pdf_document );
                     ERROR_PAO( "render_display_list_to_stext_page" )
                 }
             }
             else //wenn display_list noch nicht erzeugt, dann direkt aus page erzeugen
             {
                 rc = pdf_render_stext_page_direct( pdf_document_page, errmsg );
-                zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
+                zond_pdf_document_mutex_unlock( zond_pdf_document );
                 if ( rc )
                 {
-                    document_free_displayed_documents( dd );
+                    zond_pdf_document_close( zond_pdf_document );
                     ERROR_PAO( "pdf_render_stext_page_direct" )
                 }
             }
@@ -464,7 +469,7 @@ pdf_textsuche_pdf( Projekt* zond, const gchar* rel_path, const gchar* search_tex
         }
     }
 
-    document_free_displayed_documents( dd );
+    zond_pdf_document_close( zond_pdf_document );
 
     return 0;
 }

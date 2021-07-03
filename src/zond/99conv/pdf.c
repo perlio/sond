@@ -233,7 +233,12 @@ pdf_render_stext_page_direct( PdfDocumentPage* pdf_document_page, gchar** errmsg
 
     fz_stext_options opts = { FZ_STEXT_DEHYPHENATE };
 
+    if ( pdf_document_page->stext_page ) return 0;
+
     fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
+
+    fz_try( ctx ) pdf_document_page->stext_page = fz_new_stext_page( ctx, pdf_document_page->rect );
+    fz_catch( ctx ) ERROR_MUPDF( "fz_new_stext_page" )
 
     fz_try( ctx ) s_t_device = fz_new_stext_device( ctx, pdf_document_page->stext_page, &opts );
     fz_catch( ctx ) ERROR_MUPDF( "fz_new_stext_device" )
