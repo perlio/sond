@@ -580,7 +580,7 @@ viewer_abfragen_pdf_punkt( PdfViewer* pv, fz_point punkt, PdfPunkt* pdf_punkt )
 
     fz_rect rect = { 0 };
     gint x = 0;
-
+gint a = pdf_punkt->seite;
     gtk_container_child_get( GTK_CONTAINER(pv->layout),
             g_ptr_array_index( pv->arr_pages,
             pdf_punkt->seite ), "x", &x, NULL );

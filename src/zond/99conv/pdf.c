@@ -135,7 +135,6 @@ pdf_copy_page( fz_context* ctx, pdf_document* doc_src, gint page_from,
         gint page_to, pdf_document* doc_dest, gint page,
         gchar** errmsg )
 {
-    //  Seiten in doc_src einfügen
     /* Copy as few key/value pairs as we can. Do not include items that reference other pages. */
     static pdf_obj * const copy_list[] = {
         PDF_NAME(Contents),

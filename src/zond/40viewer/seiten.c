@@ -369,6 +369,7 @@ seiten_refresh_layouts( GPtrArray* arr_pv )
         {
             viewer_einrichten_layout( pv );
             g_object_set_data( G_OBJECT(pv->layout), "dirty", NULL );
+            gtk_widget_queue_draw( pv->layout );
         }
     }
 
@@ -766,39 +767,31 @@ seiten_cb_einfuegen( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg 
 
     gint count = GPOINTER_TO_INT(data);
 
-    g_object_set_data( G_OBJECT(pv->layout), "dirty", GINT_TO_POINTER(1) );
-
     dd = document_get_dd( pv, page_pv, NULL, &page_dd, &page_doc );
     if ( dd->anbindung )
     {
-        if ( !(page_doc <= dd->anbindung->von.seite || page_doc > dd->anbindung->bis.seite) )
-                dd->anbindung->bis.seite += count;
+        //Seite, nach der eingefügt wird, ist ist erste oder letzte Seite der Anbindung
+        if ( (page_doc == dd->anbindung->von.seite) || (dd->anbindung->bis.seite) ) return 0;
+
+        //wenn mittendrin: anbindung "aufweiten"
+        dd->anbindung->bis.seite += count;
     }
 
-    for ( gint u = page_doc; u < page_doc + count; u++ )
+    for ( gint u = page_doc + 1; u < page_doc + 1 + count; u++ )
     {
         PdfDocumentPage* pdf_document_page = NULL;
-        fz_rect crop = { 0, };
 
-        pdf_document_page = g_ptr_array_index( zond_pdf_document_get_arr_pages( dd->zond_pdf_document ), u );
+        pdf_document_page = zond_pdf_document_get_pdf_document_page( dd->zond_pdf_document, u );
 
-        crop = pdf_document_page->rect;
-        if ( dd->anbindung )
-        {
-            crop.y0 = (u == dd->anbindung->von.seite) ? (gfloat) dd->anbindung->von.index : crop.y0;
-            crop.y1 = (u == dd->anbindung->bis.seite) ? (gfloat) dd->anbindung->bis.index : crop.y1;
-        }
-
-        ViewerPage* viewer_page = viewer_page_new_full( pv, pdf_document_page, crop );
+        ViewerPage* viewer_page = viewer_page_new_full( pv, pdf_document_page,
+                pdf_document_page->rect );
         g_ptr_array_insert( pv->arr_pages, page_pv + u, viewer_page );
+        gtk_layout_put( GTK_LAYOUT(pv->layout), GTK_WIDGET(viewer_page), 0, 0 );
 
         viewer_insert_thumb( pv, page_pv + u );
     }
-//hier das layout neu machen?!
 
-    for ( gint i = page_pv; i < pv->arr_pages->len; i++ )
-            g_thread_pool_push( pv->thread_pool_page, GINT_TO_POINTER( i + 1 ), NULL );
-
+    g_object_set_data( G_OBJECT(pv->layout), "dirty", GINT_TO_POINTER(1) );
 
     return 0;
 }
@@ -919,24 +912,35 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
             return;
         }
     }
-    else if ( ret == 2 )
+    else if ( ret == 2 ) doc_merge = pdf_keep_document( pv->zond->ctx, pv->zond->pv_clip ); //Clipboard
+
+    //Erstmal alle thread_pools abstellen, soweit eingefügt werden muß
+    for ( gint i = 0; i < pv->zond->arr_pv->len; i++ )
     {
-//        ctx = pv->zond->ctx;
-        doc_merge = pdf_keep_document( pv->zond->ctx, pv->zond->pv_clip ); //Clipboard
+        PdfViewer* pv_vergleich = g_ptr_array_index( pv->zond->arr_pv, i );
+        DisplayedDocument* dd = pv_vergleich->dd;
+
+        do
+        {
+            if ( dd->zond_pdf_document == pv->dd->zond_pdf_document )
+            {
+                viewer_close_thread_pools( pv_vergleich );
+                pv_vergleich->thread_pool_page = NULL;
+            }
+        } while ( (dd = dd->next) );
     }
 
     count = pdf_count_pages( pv->zond->ctx, doc_merge );
-//hier müssen alle thread-pools stillgelegt werden
-    zond_pdf_document_mutex_lock( pv->dd->zond_pdf_document );
+
+    //Seiten einfügen - kein mutex, weil alle thread-pools aus
     rc = zond_pdf_document_insert_pages( pv->dd->zond_pdf_document, pos,
             count, pv->zond->ctx, doc_merge, &errmsg );
-    zond_pdf_document_mutex_unlock( pv->dd->zond_pdf_document );
-
     pdf_drop_document(pv->zond->ctx, doc_merge );
 
+    //betroffene viewer-seiten einfügen
     rc = viewer_foreach( pv->zond->arr_pv,
             zond_pdf_document_get_pdf_document_page( pv->dd->zond_pdf_document,
-            pos ), seiten_cb_einfuegen, GINT_TO_POINTER(count), &errmsg );
+            pos - 1 ), seiten_cb_einfuegen, GINT_TO_POINTER(count), &errmsg );
     if ( rc )
     {
         meldung( pv->vf, "Fehler Einfügen -\n\nBei Aufruf viewer_foreach:\n",
@@ -948,6 +952,22 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
     }
 
     seiten_refresh_layouts( pv->zond->arr_pv );
+
+    //thread_pools anschalten
+    //Erstmal alle thread_pools abstellen, soweit eingefügt werden muß
+    for ( gint i = 0; i < pv->zond->arr_pv->len; i++ )
+    {
+        PdfViewer* pv_vergleich = g_ptr_array_index( pv->zond->arr_pv, i );
+        DisplayedDocument* dd = pv_vergleich->dd;
+
+        do
+        {
+            if ( dd->zond_pdf_document == pv->dd->zond_pdf_document )
+            {
+                if ( pv_vergleich->thread_pool_page == 0 ) viewer_init_thread_pools( pv_vergleich );
+            }
+        } while ( (dd = dd->next) );
+    }
 
     return;
 }
