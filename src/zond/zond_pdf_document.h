@@ -79,9 +79,9 @@ gchar* zond_pdf_document_get_path( ZondPdfDocument* );
 
 gint zond_pdf_document_get_index( PdfDocumentPage* );
 
-void zond_pdf_document_mutex_lock( ZondPdfDocument* );
+void zond_pdf_document_mutex_lock( const ZondPdfDocument* );
 
-void zond_pdf_document_mutex_unlock( ZondPdfDocument* );
+void zond_pdf_document_mutex_unlock( const ZondPdfDocument* );
 
 gint zond_pdf_document_page_refresh( ZondPdfDocument*, gint, gint, gchar** );
 

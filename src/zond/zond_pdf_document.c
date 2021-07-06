@@ -686,9 +686,9 @@ zond_pdf_document_get_index( PdfDocumentPage* pdf_document_page )
 
 
 void
-zond_pdf_document_mutex_lock( ZondPdfDocument* self )
+zond_pdf_document_mutex_lock( const ZondPdfDocument* self )
 {
-    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
+    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( (ZondPdfDocument*) self );
 
     g_mutex_lock( &priv->mutex_doc );
 
@@ -697,9 +697,9 @@ zond_pdf_document_mutex_lock( ZondPdfDocument* self )
 
 
 void
-zond_pdf_document_mutex_unlock( ZondPdfDocument* self )
+zond_pdf_document_mutex_unlock( const ZondPdfDocument* self )
 {
-    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
+    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( (ZondPdfDocument*) self );
 
     g_mutex_unlock( &priv->mutex_doc );
 

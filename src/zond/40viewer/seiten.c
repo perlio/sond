@@ -286,7 +286,7 @@ seiten_abfrage_seiten( PdfViewer* pv, const gchar* title, gint* winkel )
 static gint
 cb_foreach_ocr( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg )
 {
-    g_thread_pool_push( pv->thread_pool_page, GINT_TO_POINTER(page_pv + 1), NULL );
+    viewer_start_render_thread( pv, page_pv );
 
     if ( viewer_page_ist_sichtbar( pv, page_pv ) )
             g_thread_pool_move_to_front( pv->thread_pool_page, GINT_TO_POINTER(page_pv + 1) );
@@ -418,7 +418,7 @@ seiten_drehen_foreach( PdfViewer* pv, gint page_pv, gpointer data, gchar** errms
     gtk_list_store_set( GTK_LIST_STORE( gtk_tree_view_get_model(
             GTK_TREE_VIEW(pv->tree_thumb) ) ), &iter, 0, NULL, -1 );
 
-    g_thread_pool_push( pv->thread_pool_page, GINT_TO_POINTER(page_pv + 1), NULL );
+    viewer_start_render_thread( pv, page_pv );
 
     if ( viewer_page_ist_sichtbar( pv, page_pv ) ||
             seiten_thumb_ist_sichtbar( pv, page_pv ) )
@@ -562,7 +562,10 @@ seiten_cb_loesche_seite( PdfViewer* pv, gint page_pv, gpointer data, gchar** err
     //Falls noch nicht: erstmal thread_pool abstellen
     if ( closed == FALSE )
     {
-        viewer_close_thread_pools( pv );
+        gint rc = 0;
+
+        rc = viewer_stop_thread_pool( pv, errmsg );
+        if ( rc ) ERROR_SOND( "viewer_stop_thread_pool" )
         g_ptr_array_add( *p_arr_pv, pv );
     }
 
@@ -749,8 +752,6 @@ cb_pv_seiten_loeschen( GtkMenuItem* item, gpointer data )
             "Zu löschende Seiten enthalten Anbindungen", NULL );
 #endif // VIEWER
 
-//    viewer_init_thread_pools( pv );
-
     return;
 }
 
@@ -890,18 +891,7 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
 
             return;
         }
-/*
-        dd = document_new_displayed_document( pv->zond, path_merge, NULL, &errmsg );
-        g_free( path_merge );
-        if ( !dd )
-        {
-            meldung( pv->vf, "Fehler Datei einfügen -\n\nBei Aufruf "
-                    "pdf_open_document:\n", fz_caught_message( ctx ), NULL );
 
-            return;
-        }
-        ctx = zond_pdf_document_get_ctx( dd->zond_pdf_document );
-*/
         fz_try( pv->zond->ctx ) doc_merge = pdf_open_document( pv->zond->ctx, path_merge );
         fz_always( pv->zond->ctx ) g_free( path_merge );
         fz_catch( pv->zond->ctx )
@@ -924,8 +914,22 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
         {
             if ( dd->zond_pdf_document == pv->dd->zond_pdf_document )
             {
-                viewer_close_thread_pools( pv_vergleich );
-                pv_vergleich->thread_pool_page = NULL;
+                gint rc = 0;
+                gchar* errmsg = NULL;
+
+                rc = viewer_stop_thread_pool( pv_vergleich, &errmsg );
+                if ( rc )
+                {
+                    meldung( pv->vf, "Fehler Seiten einfügen -\n\nBei Aufruf "
+                            "viewer_stop_thread_pool:\n", errmsg, "\n\nViewer "
+                            "wird geschlossen", NULL );
+                    g_free( errmsg );
+
+                    viewer_save_and_close( pv );
+
+                    return;
+                }
+
             }
         } while ( (dd = dd->next) );
     }
@@ -954,7 +958,6 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
     seiten_refresh_layouts( pv->zond->arr_pv );
 
     //thread_pools anschalten
-    //Erstmal alle thread_pools abstellen, soweit eingefügt werden muß
     for ( gint i = 0; i < pv->zond->arr_pv->len; i++ )
     {
         PdfViewer* pv_vergleich = g_ptr_array_index( pv->zond->arr_pv, i );

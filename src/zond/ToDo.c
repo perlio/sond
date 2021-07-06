@@ -1,18 +1,15 @@
 /*
 Bugs:
-Viewer:
-    - Seiten Einfügen stürzt ab - thread-pools abschalten?!
-
 - fm:
     - manchmal (nach Verschieben) wird leeres child angezeigt
 
-- zond:
-    - Einfügen gleiches als Unterpunkt (EOP geändert)
-
+- pdf_text: mutexes och nicht ok
 
 ToDo:
 - viewer: cb adj_changed erst anschalten, wenn layout fertig? Wirklich?
             Oder so lassen, d.h. in render abfragen, ob thread_pool vorhanden?
+
+- Synchron-Punkte
 
 - DBase
     -Fehler beim schließen loggen

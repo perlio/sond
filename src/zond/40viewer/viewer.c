@@ -114,15 +114,40 @@ viewer_abfragen_sichtbare_seiten( PdfViewer* pv, gint* von, gint* bis )
 }
 
 
+static gboolean
+viewer_check_rendering( gpointer data )
+{
+    PdfViewer* pv = (PdfViewer*) data;
+
+    if ( g_thread_pool_unprocessed( pv->thread_pool_page ) == 0 )
+    {
+        pv->still_rendering = FALSE;
+
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+
+void
+viewer_start_render_thread( PdfViewer* pv, gint page )
+{
+    g_thread_pool_push( pv->thread_pool_page, GINT_TO_POINTER(page + 1), NULL );
+
+    pv->still_rendering = TRUE;
+
+    g_idle_add( (GSourceFunc) viewer_check_rendering, pv );
+
+}
+
+
 void
 viewer_init_thread_pools( PdfViewer* pv )
 {
     pv->thread_pool_page = g_thread_pool_new( (GFunc) render_page_thread, pv, 1, FALSE, NULL );
-//    pv->thread_pool_thumb = g_thread_pool_new( (GFunc) render_thumb_thread, pv, 1, FALSE, NULL );
-    for ( gint i = 0; i < pv->arr_pages->len; i++ )
-    {
-        g_thread_pool_push( pv->thread_pool_page, GINT_TO_POINTER(i + 1), NULL );
-    }
+
+    for ( gint i = 0; i < pv->arr_pages->len; i++ ) viewer_start_render_thread( pv, i );
 
     return;
 }
@@ -261,22 +286,34 @@ viewer_display_document( PdfViewer* pv, DisplayedDocument* dd, gint page, gint i
 }
 
 
-void
-viewer_close_thread_pools( PdfViewer* pv )
+gint
+viewer_stop_thread_pool( PdfViewer* pv, gchar** errmsg )
 {
-    if ( !pv->thread_pool_page ) return;
+    GError* error = NULL;
 
-    g_thread_pool_free( pv->thread_pool_page, TRUE, TRUE );
-    pv->thread_pool_page = NULL;
+    if ( !g_thread_pool_set_max_threads( pv->thread_pool_page, 0, &error ) )
+    {
+        *errmsg = g_strconcat( "Bei Aufruf g_thread_pool_set_max_thread:\n",
+                error->message, NULL );
+        g_error_free( error );
 
-    return;
+        return -1;
+    }
+    do
+    {
+        //wait
+    } while ( g_thread_pool_get_num_threads( pv->thread_pool_page ) != 0 );
+
+    pv->still_rendering = FALSE;
+
+    return 0;
 }
 
 
 static void
 viewer_schliessen( PdfViewer* pv )
 {
-    viewer_close_thread_pools( pv );
+    if ( pv->thread_pool_page ) g_thread_pool_free( pv->thread_pool_page, TRUE, TRUE );
 
     g_ptr_array_unref( pv->arr_pages ); //vor gtk_widget_destroy(vf), weil freeFunc gesetzt
     g_array_unref( pv->arr_text_occ );
@@ -580,7 +617,7 @@ viewer_abfragen_pdf_punkt( PdfViewer* pv, fz_point punkt, PdfPunkt* pdf_punkt )
 
     fz_rect rect = { 0 };
     gint x = 0;
-gint a = pdf_punkt->seite;
+
     gtk_container_child_get( GTK_CONTAINER(pv->layout),
             g_ptr_array_index( pv->arr_pages,
             pdf_punkt->seite ), "x", &x, NULL );
@@ -663,7 +700,6 @@ cb_viewer_text_search( GtkWidget* widget, gpointer data )
     gint dir = 0;
     PdfPos pdf_pos = { -1, -1 };
     gchar* search_text = NULL;
-    gboolean still_rendering = TRUE;
     gint page_act = 0;
 
     PdfViewer* pv = (PdfViewer*) data;
@@ -740,8 +776,6 @@ cb_viewer_text_search( GtkWidget* widget, gpointer data )
     //nur bis zum nächsten Vorkommen suchen
     page_act = pdf_pos.seite;
 
-    still_rendering = (g_thread_pool_unprocessed( pv->thread_pool_page ) != 0);
-
     do //alle Seiten durchgegen, bis Seite wieder Anfangsseite
     {
         gint anzahl = 0;
@@ -755,7 +789,7 @@ cb_viewer_text_search( GtkWidget* widget, gpointer data )
         fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
 
 
-        if ( still_rendering )
+        if ( pv->still_rendering )
         {
             g_thread_pool_move_to_front( pv->thread_pool_page, GINT_TO_POINTER(page_act + 1) );
 
@@ -795,7 +829,7 @@ cb_viewer_text_search( GtkWidget* widget, gpointer data )
         //Überlauf?
         if ( page_act < 0 || page_act >= pv->arr_pages->len )
                 page_act = (dir == 1) ? 0 : pv->arr_pages->len - 1;
-    } while ( page_act != pdf_pos.seite && !((pv->arr_text_occ->len > 0) && still_rendering) );
+    } while ( page_act != pdf_pos.seite && !((pv->arr_text_occ->len > 0) && pv->still_rendering) );
 
     //nur nächstes Vorkommen suchen
     if ( pv->arr_text_occ->len == 0 )
@@ -843,10 +877,7 @@ cb_viewer_spinbutton_value_changed( GtkSpinButton* spin_button, gpointer user_da
 
     gtk_widget_grab_focus( pv->layout );
 
-    for ( gint i = 0; i < pv->arr_pages->len; i++ )
-    {
-        g_thread_pool_push( pv->thread_pool_page, GINT_TO_POINTER(i + 1), NULL );
-    }
+    for ( gint i = 0; i < pv->arr_pages->len; i++ ) viewer_start_render_thread( pv, i );
 
     render_sichtbare_seiten( pv );
 
@@ -925,7 +956,15 @@ viewer_on_text( PdfViewer* pv, PdfPunkt pdf_punkt )
             viewer_page_get_document_page( g_ptr_array_index( pv->arr_pages,
             pdf_punkt.seite ) );
 
-    if ( !pdf_document_page->stext_page->first_block ) return FALSE;
+    if ( pv->still_rendering )
+    {
+        gboolean rendered = FALSE;
+
+        g_mutex_lock( &pdf_document_page->mutex_page );
+        rendered = (pdf_document_page->stext_page != NULL);
+        g_mutex_unlock( &pdf_document_page->mutex_page );
+        if ( !rendered ) return 0;
+    }
 
 	for ( fz_stext_block* block = pdf_document_page->stext_page->first_block; block;
             block = block->next)
@@ -1122,7 +1161,7 @@ viewer_cb_change_annot( PdfViewer* pv, gint page_pv, gpointer data, gchar** errm
 
     gtk_image_clear( GTK_IMAGE(viewer_page) );
 
-    g_thread_pool_push( pv->thread_pool_page, GINT_TO_POINTER( page_pv + 1), NULL );
+    viewer_start_render_thread( pv, page_pv );
 
     if ( viewer_page_ist_sichtbar( pv, page_pv ) )
             g_thread_pool_move_to_front( pv->thread_pool_page, GINT_TO_POINTER(page_pv + 1) );
