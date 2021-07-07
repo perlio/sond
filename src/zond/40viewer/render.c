@@ -288,7 +288,7 @@ render_sichtbare_seiten( PdfViewer* pv )
     gtk_header_bar_set_subtitle( GTK_HEADER_BAR(pv->headerbar), subtitle );
     g_free( subtitle );
 
-    if ( pv->thread_pool_page && pv->still_rendering ) for ( gint i = letzte; i >= erste; i-- )
+    if ( pv->thread_pool_page ) for ( gint i = letzte; i >= erste; i-- )
             g_thread_pool_move_to_front( pv->thread_pool_page, GINT_TO_POINTER(i + 1) );
 
     //thumb-Leiste anpassen
@@ -307,10 +307,10 @@ render_sichtbare_thumbs( PdfViewer* pv )
     gint start = 0;
     gint end = 0;
 
-    if ( !pv->thread_pool_page ) return;
+    if ( !(pv->thread_pool_page) ) return;
 
     rc = viewer_get_visible_thumbs( pv, &start, &end );
-    if ( rc == 0 && pv->still_rendering ) for ( gint i = start; i <= end; i++ )
+    if ( rc == 0 ) for ( gint i = start; i <= end; i++ )
             g_thread_pool_move_to_front( pv->thread_pool_page, GINT_TO_POINTER(i + 1) );
 
     return;

@@ -114,40 +114,110 @@ viewer_abfragen_sichtbare_seiten( PdfViewer* pv, gint* von, gint* bis )
 }
 
 
+void
+viewer_close_thread_pool( PdfViewer* pv )
+{
+    if ( pv->thread_pool_page )
+    {
+        g_thread_pool_free( pv->thread_pool_page, TRUE, TRUE );
+        pv->thread_pool_page = NULL;
+    }
+
+    return;
+}
+
+
+gint
+viewer_get_visible_thumbs( PdfViewer* pv, gint* start, gint* end )
+{
+    GtkTreePath* path_start = NULL;
+    GtkTreePath* path_end = NULL;
+    gint* index_start = NULL;
+    gint* index_end = NULL;
+
+    if ( pv->arr_pages->len == 0 ) return 1;
+
+    if ( !gtk_tree_view_get_visible_range( GTK_TREE_VIEW(pv->tree_thumb),
+            &path_start, &path_end ) ) return 1;
+
+    index_start = gtk_tree_path_get_indices( path_start );
+    index_end = gtk_tree_path_get_indices( path_end );
+
+    *start = index_start[0];
+    *end = index_end[0];
+
+    gtk_tree_path_free( path_start );
+    gtk_tree_path_free( path_end );
+
+    return 0;
+}
+
+
 static gboolean
 viewer_check_rendering( gpointer data )
 {
     PdfViewer* pv = (PdfViewer*) data;
 
+    if ( !pv->thread_pool_page ) return G_SOURCE_REMOVE;
+
     if ( g_thread_pool_unprocessed( pv->thread_pool_page ) == 0 )
     {
-        pv->still_rendering = FALSE;
+        viewer_close_thread_pool( pv );
 
-        return FALSE;
+        return G_SOURCE_REMOVE;
     }
+
+    return G_SOURCE_CONTINUE;
+}
+
+
+static gboolean
+viewer_thumb_ist_sichtbar( PdfViewer* pv, gint page_pv )
+{
+    gint rc = 0;
+    gint start = 0;
+    gint end = 0;
+
+    rc = viewer_get_visible_thumbs( pv, &start, &end );
+
+    if ( rc == 0 && page_pv >= start && page_pv <= end ) return TRUE;
+
+    return FALSE;
+}
+
+
+static gboolean
+viewer_page_ist_sichtbar( PdfViewer* pv, gint page )
+{
+    gint von = 0;
+    gint bis = 0;
+
+    viewer_abfragen_sichtbare_seiten( pv, &von, &bis );
+
+    if ( (page < von) || (page > bis) ) return FALSE;
 
     return TRUE;
 }
 
 
 void
-viewer_start_render_thread( PdfViewer* pv, gint page )
+viewer_thread_render( PdfViewer* pv, gint page )
 {
-    g_thread_pool_push( pv->thread_pool_page, GINT_TO_POINTER(page + 1), NULL );
+    gboolean still_rendering = FALSE;
 
-    pv->still_rendering = TRUE;
+    still_rendering = (pv->thread_pool_page != NULL);
 
-    g_idle_add( (GSourceFunc) viewer_check_rendering, pv );
+    if ( !still_rendering ) pv->thread_pool_page = g_thread_pool_new( (GFunc) render_page_thread, pv, 1, FALSE, NULL );
 
-}
+    if ( page == -1 ) for ( gint i = 0; i < pv->arr_pages->len; i++ )
+            g_thread_pool_push( pv->thread_pool_page, GINT_TO_POINTER(i + 1), NULL );
+    else  g_thread_pool_push( pv->thread_pool_page, GINT_TO_POINTER(page + 1), NULL );
 
+    if ( page != -1 && (viewer_page_ist_sichtbar( pv, page ) ||
+            viewer_thumb_ist_sichtbar( pv, page )) )
+            g_thread_pool_move_to_front( pv->thread_pool_page, GINT_TO_POINTER(page + 1) );
 
-void
-viewer_init_thread_pools( PdfViewer* pv )
-{
-    pv->thread_pool_page = g_thread_pool_new( (GFunc) render_page_thread, pv, 1, FALSE, NULL );
-
-    for ( gint i = 0; i < pv->arr_pages->len; i++ ) viewer_start_render_thread( pv, i );
+    if ( !still_rendering ) g_idle_add( (GSourceFunc) viewer_check_rendering, pv );
 
     return;
 }
@@ -275,7 +345,7 @@ viewer_display_document( PdfViewer* pv, DisplayedDocument* dd, gint page, gint i
 
     viewer_einrichten_layout( pv );
 
-    viewer_init_thread_pools( pv );
+    viewer_thread_render( pv, -1 );
 
     if ( page || index ) viewer_springen_zu_pos_pdf( pv, pdf_pos, 0.0 );
     else render_sichtbare_seiten( pv );
@@ -286,34 +356,10 @@ viewer_display_document( PdfViewer* pv, DisplayedDocument* dd, gint page, gint i
 }
 
 
-gint
-viewer_stop_thread_pool( PdfViewer* pv, gchar** errmsg )
-{
-    GError* error = NULL;
-
-    if ( !g_thread_pool_set_max_threads( pv->thread_pool_page, 0, &error ) )
-    {
-        *errmsg = g_strconcat( "Bei Aufruf g_thread_pool_set_max_thread:\n",
-                error->message, NULL );
-        g_error_free( error );
-
-        return -1;
-    }
-    do
-    {
-        //wait
-    } while ( g_thread_pool_get_num_threads( pv->thread_pool_page ) != 0 );
-
-    pv->still_rendering = FALSE;
-
-    return 0;
-}
-
-
 static void
 viewer_schliessen( PdfViewer* pv )
 {
-    if ( pv->thread_pool_page ) g_thread_pool_free( pv->thread_pool_page, TRUE, TRUE );
+    viewer_close_thread_pool( pv );
 
     g_ptr_array_unref( pv->arr_pages ); //vor gtk_widget_destroy(vf), weil freeFunc gesetzt
     g_array_unref( pv->arr_text_occ );
@@ -789,7 +835,7 @@ cb_viewer_text_search( GtkWidget* widget, gpointer data )
         fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
 
 
-        if ( pv->still_rendering )
+        if ( pv->thread_pool_page )
         {
             g_thread_pool_move_to_front( pv->thread_pool_page, GINT_TO_POINTER(page_act + 1) );
 
@@ -829,7 +875,7 @@ cb_viewer_text_search( GtkWidget* widget, gpointer data )
         //Überlauf?
         if ( page_act < 0 || page_act >= pv->arr_pages->len )
                 page_act = (dir == 1) ? 0 : pv->arr_pages->len - 1;
-    } while ( page_act != pdf_pos.seite && !((pv->arr_text_occ->len > 0) && pv->still_rendering) );
+    } while ( page_act != pdf_pos.seite && !((pv->arr_text_occ->len > 0) && pv->thread_pool_page) );
 
     //nur nächstes Vorkommen suchen
     if ( pv->arr_text_occ->len == 0 )
@@ -877,7 +923,7 @@ cb_viewer_spinbutton_value_changed( GtkSpinButton* spin_button, gpointer user_da
 
     gtk_widget_grab_focus( pv->layout );
 
-    for ( gint i = 0; i < pv->arr_pages->len; i++ ) viewer_start_render_thread( pv, i );
+    viewer_thread_render( pv, -1 );
 
     render_sichtbare_seiten( pv );
 
@@ -956,7 +1002,7 @@ viewer_on_text( PdfViewer* pv, PdfPunkt pdf_punkt )
             viewer_page_get_document_page( g_ptr_array_index( pv->arr_pages,
             pdf_punkt.seite ) );
 
-    if ( pv->still_rendering )
+    if ( pv->thread_pool_page )
     {
         gboolean rendered = FALSE;
 
@@ -1077,32 +1123,6 @@ viewer_set_cursor( PdfViewer* pv, gint rc, PdfPunkt pdf_punkt )
 
 
 gint
-viewer_get_visible_thumbs( PdfViewer* pv, gint* start, gint* end )
-{
-    GtkTreePath* path_start = NULL;
-    GtkTreePath* path_end = NULL;
-    gint* index_start = NULL;
-    gint* index_end = NULL;
-
-    if ( pv->arr_pages->len == 0 ) return 1;
-
-    if ( !gtk_tree_view_get_visible_range( GTK_TREE_VIEW(pv->tree_thumb),
-            &path_start, &path_end ) ) return 1;
-
-    index_start = gtk_tree_path_get_indices( path_start );
-    index_end = gtk_tree_path_get_indices( path_end );
-
-    *start = index_start[0];
-    *end = index_end[0];
-
-    gtk_tree_path_free( path_start );
-    gtk_tree_path_free( path_end );
-
-    return 0;
-}
-
-
-gint
 viewer_get_iter_thumb( PdfViewer* pv, gint page_pv, GtkTreeIter* iter,
         gchar** errmsg )
 {
@@ -1140,20 +1160,6 @@ viewer_thumblist_render_textcell( GtkTreeViewColumn* column, GtkCellRenderer* ce
 }
 
 
-gboolean
-viewer_page_ist_sichtbar( PdfViewer* pv, gint page )
-{
-    gint von = 0;
-    gint bis = 0;
-
-    viewer_abfragen_sichtbare_seiten( pv, &von, &bis );
-
-    if ( (page < von) || (page > bis) ) return FALSE;
-
-    return TRUE;
-}
-
-
 static gint
 viewer_cb_change_annot( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg )
 {
@@ -1161,10 +1167,7 @@ viewer_cb_change_annot( PdfViewer* pv, gint page_pv, gpointer data, gchar** errm
 
     gtk_image_clear( GTK_IMAGE(viewer_page) );
 
-    viewer_start_render_thread( pv, page_pv );
-
-    if ( viewer_page_ist_sichtbar( pv, page_pv ) )
-            g_thread_pool_move_to_front( pv->thread_pool_page, GINT_TO_POINTER(page_pv + 1) );
+    viewer_thread_render( pv, page_pv );
 
     return 0;
 }

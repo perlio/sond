@@ -278,7 +278,6 @@ typedef struct _Pdf_Viewer
     gboolean text_occ_search_completed;
 
     GThreadPool* thread_pool_page;
-    gboolean still_rendering;
 
     fz_quad highlight[1000];
 } PdfViewer;

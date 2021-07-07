@@ -283,18 +283,6 @@ seiten_abfrage_seiten( PdfViewer* pv, const gchar* title, gint* winkel )
 /*
 **  Seiten OCR
 */
-static gint
-cb_foreach_ocr( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg )
-{
-    viewer_start_render_thread( pv, page_pv );
-
-    if ( viewer_page_ist_sichtbar( pv, page_pv ) )
-            g_thread_pool_move_to_front( pv->thread_pool_page, GINT_TO_POINTER(page_pv + 1) );
-
-    return 0;
-}
-
-
 void
 cb_pv_seiten_ocr( GtkMenuItem* item, gpointer data )
 {
@@ -343,7 +331,8 @@ cb_pv_seiten_ocr( GtkMenuItem* item, gpointer data )
             g_free( errmsg );
         }
 
-        rc = viewer_foreach( pv->zond->arr_pv, pdf_document_page, cb_foreach_ocr, NULL, &errmsg );
+        rc = viewer_foreach( pv->zond->arr_pv, pdf_document_page,
+                (gint (*) (PdfViewer*, gint, gpointer, gchar**)) viewer_thread_render, NULL, &errmsg );
         if ( rc )
         {
             meldung( pv->vf, "Fehler - OCR\n\nBei Aufruf viewer_foreach:\n",
@@ -380,21 +369,6 @@ seiten_refresh_layouts( GPtrArray* arr_pv )
 /*
 **      Seiten drehen
 */
-static gboolean
-seiten_thumb_ist_sichtbar( PdfViewer* pv, gint page_pv )
-{
-    gint rc = 0;
-    gint start = 0;
-    gint end = 0;
-
-    rc = viewer_get_visible_thumbs( pv, &start, &end );
-
-    if ( rc == 0 && page_pv >= start && page_pv <= end ) return TRUE;
-
-    return FALSE;
-}
-
-
 static gint
 seiten_drehen_foreach( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg )
 {
@@ -418,11 +392,7 @@ seiten_drehen_foreach( PdfViewer* pv, gint page_pv, gpointer data, gchar** errms
     gtk_list_store_set( GTK_LIST_STORE( gtk_tree_view_get_model(
             GTK_TREE_VIEW(pv->tree_thumb) ) ), &iter, 0, NULL, -1 );
 
-    viewer_start_render_thread( pv, page_pv );
-
-    if ( viewer_page_ist_sichtbar( pv, page_pv ) ||
-            seiten_thumb_ist_sichtbar( pv, page_pv ) )
-            g_thread_pool_move_to_front( pv->thread_pool_page, GINT_TO_POINTER(page_pv + 1) );
+    viewer_thread_render( pv, page_pv );
 
     return 0;
 }
@@ -562,10 +532,7 @@ seiten_cb_loesche_seite( PdfViewer* pv, gint page_pv, gpointer data, gchar** err
     //Falls noch nicht: erstmal thread_pool abstellen
     if ( closed == FALSE )
     {
-        gint rc = 0;
-
-        rc = viewer_stop_thread_pool( pv, errmsg );
-        if ( rc ) ERROR_SOND( "viewer_stop_thread_pool" )
+        viewer_close_thread_pool( pv );
         g_ptr_array_add( *p_arr_pv, pv );
     }
 
@@ -699,7 +666,7 @@ seiten_loeschen( PdfViewer* pv, GPtrArray* arr_document_page, gchar** errmsg )
 
     //abgeschaltete thread_pools wieder anschalten
     for ( gint i = 0; i < arr_pv->len; i++ )
-            viewer_init_thread_pools( g_ptr_array_index( arr_pv, i ) );
+            viewer_thread_render( g_ptr_array_index( arr_pv, i ), -1 );
 
     g_ptr_array_unref( arr_pv );
 
@@ -917,7 +884,7 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
                 gint rc = 0;
                 gchar* errmsg = NULL;
 
-                rc = viewer_stop_thread_pool( pv_vergleich, &errmsg );
+                viewer_close_thread_pool( pv_vergleich );
                 if ( rc )
                 {
                     meldung( pv->vf, "Fehler Seiten einfügen -\n\nBei Aufruf "
@@ -966,9 +933,7 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
         do
         {
             if ( dd->zond_pdf_document == pv->dd->zond_pdf_document )
-            {
-                if ( pv_vergleich->thread_pool_page == 0 ) viewer_init_thread_pools( pv_vergleich );
-            }
+                    viewer_thread_render( pv_vergleich, -1 );
         } while ( (dd = dd->next) );
     }
 

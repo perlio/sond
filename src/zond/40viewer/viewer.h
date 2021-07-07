@@ -19,17 +19,15 @@ void viewer_springen_zu_pos_pdf( PdfViewer*, PdfPos, gdouble );
 
 void viewer_abfragen_sichtbare_seiten( PdfViewer*, gint*, gint* );
 
-void viewer_start_render_thread( PdfViewer*, gint );
+void viewer_close_thread_pool( PdfViewer* );
 
-void viewer_init_thread_pools( PdfViewer* );
+void viewer_thread_render( PdfViewer*, gint );
 
 void viewer_einrichten_layout( PdfViewer* );
 
 void viewer_insert_thumb( PdfViewer*, gint );
 
 void viewer_display_document( PdfViewer*, DisplayedDocument*, gint, gint );
-
-gint viewer_stop_thread_pool( PdfViewer*, gchar** );
 
 void viewer_save_and_close( PdfViewer* );
 
