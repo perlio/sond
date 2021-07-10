@@ -258,11 +258,14 @@ pdf_ocr_get_content_stream_as_buffer( fz_context* ctx, pdf_obj* page_ref,
     fz_try( ctx )
     {
         stream = pdf_open_contents_stream( ctx, pdf_get_bound_document( ctx, page_ref ), obj_contents );
-/*
+
         // Test
         gint rc = pdf_print_token( ctx, stream, errmsg );
         if ( rc ) ERROR_PAO_R( "pdf_print_token", NULL )
-*/
+
+        fz_drop_stream( ctx, stream );
+
+        stream = pdf_open_contents_stream( ctx, pdf_get_bound_document( ctx, page_ref ), obj_contents );
         buf = fz_read_all( ctx, stream, 1024 );
     }
     fz_always( ctx ) fz_drop_stream( ctx, stream );

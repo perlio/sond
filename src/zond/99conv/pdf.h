@@ -29,4 +29,6 @@ gint pdf_copy_page( fz_context*, pdf_document*, gint, gint, pdf_document*,
 
 gint pdf_render_stext_page_direct( PdfDocumentPage*, gchar** );
 
+gint pdf_print_token( fz_context*, fz_stream*, gchar** );
+
 #endif // PDF_DATEIEN_H_INCLUDED

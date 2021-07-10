@@ -274,7 +274,6 @@ pdf_print_token( fz_context* ctx, fz_stream* stream, gchar** errmsg )
         pdf_lexbuf_fin( ctx, &lxb );
     }
 
-
     return 0;
 
 }
@@ -293,6 +292,30 @@ pdf_append_filtered_TO( fz_context* ctx, fz_buffer* buf_new, gchar* BT,
     }
 
     return 0;
+}
+
+
+gint
+pdf_filter_content_stream( fz_context* ctx, pdf_obj* page_ref, gchar** errmsg )
+{
+    /*
+    fz_buffer* buf = NULL;
+    size_t size = 0;
+    unsigned char* data = NULL;
+    unsigned char* ptr = NULL;
+
+    buf = pdf_ocr_get_content_stream_as_buffer( ctx, page_ref, errmsg );
+    size = fz_buffer_storage( ctx, buf, &data )
+
+    //Entferne unsichtbare Text-Show-Operatoren
+
+    ptr = data;
+
+    while ( ptr < data + size )
+    {
+        //search first/next BT/ET
+    }
+    */
 }
 
 
