@@ -154,15 +154,9 @@ render_display_list_to_stext_page( fz_context* ctx, PdfDocumentPage* pdf_documen
 
     fz_stext_options opts = { FZ_STEXT_DEHYPHENATE };
 
-    g_mutex_lock( &pdf_document_page->mutex_page );
-    if ( pdf_document_page->stext_page )
-    {
-        g_mutex_unlock( &pdf_document_page->mutex_page );
-        return 0;
-    }
+    if ( pdf_document_page->stext_page ) return 0;
 
     fz_try( ctx ) pdf_document_page->stext_page = fz_new_stext_page( ctx, pdf_document_page->rect );
-    fz_always( ctx ) g_mutex_unlock( &pdf_document_page->mutex_page );
     fz_catch( ctx ) ERROR_MUPDF( "fz_new_stext_page" )
 
     //structured text-device
@@ -244,7 +238,9 @@ render_page_thread( gpointer data, gpointer user_data )
     zond_pdf_document_mutex_unlock( pdf_document_page->document );
     if ( rc == -1 ) ERROR_THREAD( "render_display_list" )
 
+    g_mutex_lock( &pdf_document_page->mutex_page );
     rc = render_display_list_to_stext_page( ctx, pdf_document_page, &errmsg );
+    g_mutex_unlock( &pdf_document_page->mutex_page );
     if ( rc == -1 ) ERROR_THREAD( "render_diaplay_list_to_stext_page" )
 
     rc = render_pixmap( ctx, viewer_page, pv->zoom, pdf_document_page, &errmsg );

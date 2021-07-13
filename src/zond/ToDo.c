@@ -6,10 +6,9 @@ Bugs:
 - pdf_text: mutexes och nicht ok
 
 ToDo:
-- viewer: cb adj_changed erst anschalten, wenn layout fertig? Wirklich?
-            Oder so lassen, d.h. in render abfragen, ob thread_pool vorhanden?
-
 - Synchron-Punkte
+
+- Abschnitte neu organisieren
 
 - DBase
     -Fehler beim schließen loggen

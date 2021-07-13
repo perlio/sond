@@ -571,11 +571,9 @@ pdf_ocr_sandwich_page( PdfDocumentPage* pdf_document_page,
     if ( rc ) ERROR_PAO( "pdf_ocr_filter_stream" )
 
     fz_rect rect = pdf_ocr_get_mediabox( ctx, pdf_document_page->page->obj );
-    gint rotate = pdf_get_rotate( ctx, pdf_document_page->page->obj, errmsg );
-    if ( rotate == -1 ) ERROR_PAO( "pdf_get_rotate" )
     float scale = 1./4./72.*70.;
 
-    fz_matrix ctm = pdf_ocr_create_matrix( ctx, rect, scale, rotate );
+    fz_matrix ctm = pdf_ocr_create_matrix( ctx, rect, scale, pdf_document_page->rotate );
 
     rc = pdf_ocr_process_tess_tmp( ctx, page_ref_text, ctm, errmsg );
     if ( rc ) ERROR_PAO_R( "pdf_ocr_process_tess_tmp", -2 )
@@ -784,7 +782,6 @@ pdf_ocr_render_pixmap( fz_context* ctx, pdf_document* doc, gint num,
     page = pdf_load_page( ctx, doc, 0 );
 
     fz_rect rect = pdf_bound_page( ctx, page );
-//    gfloat rotate = pdf_get_rotate( ctx, page->obj );
     fz_matrix ctm = pdf_ocr_create_matrix( ctx, rect, scale, 0 );
 
     rect = fz_transform_rect( rect, ctm );

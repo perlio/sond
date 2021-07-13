@@ -22,8 +22,6 @@ gint pdf_document_get_dest( fz_context*, pdf_document*, gint, gpointer*,
 
 gint pdf_get_page_num_from_dest( fz_context*, const gchar*, const gchar*, gchar** );
 
-gint pdf_get_rotate( fz_context*, pdf_obj*, gchar** );
-
 gint pdf_copy_page( fz_context*, pdf_document*, gint, gint, pdf_document*,
         gint, gchar** );
 

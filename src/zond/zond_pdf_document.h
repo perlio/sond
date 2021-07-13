@@ -33,6 +33,7 @@ typedef struct _Pdf_Document_Page
     ZondPdfDocument* document; //erhält keine ref - muß das mal mit dem const kapieren...
     pdf_page* page;
     fz_rect rect;
+    gint rotate;
     fz_display_list* display_list;
     fz_stext_page* stext_page;
     GMutex mutex_page;

@@ -207,7 +207,7 @@ viewer_thread_render( PdfViewer* pv, gint page )
 
     still_rendering = (pv->thread_pool_page != NULL);
 
-    if ( !still_rendering ) pv->thread_pool_page = g_thread_pool_new( (GFunc) render_page_thread, pv, 1, FALSE, NULL );
+    if ( !still_rendering ) pv->thread_pool_page = g_thread_pool_new( (GFunc) render_page_thread, pv, 4, FALSE, NULL );
 
     if ( page == -1 ) for ( gint i = 0; i < pv->arr_pages->len; i++ )
             g_thread_pool_push( pv->thread_pool_page, GINT_TO_POINTER(i + 1), NULL );
@@ -826,7 +826,6 @@ cb_viewer_text_search( GtkWidget* widget, gpointer data )
     {
         gint anzahl = 0;
         fz_quad quads[100] = { 0 };
-        gboolean rendered = FALSE;
 
         //page_act durchsuchen
         ViewerPage* viewer_page = g_ptr_array_index( pv->arr_pages, page_act );
@@ -834,9 +833,10 @@ cb_viewer_text_search( GtkWidget* widget, gpointer data )
         fz_rect crop = viewer_page_get_crop( viewer_page );
         fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
 
-
         if ( pv->thread_pool_page )
         {
+            gboolean rendered = FALSE;
+
             g_thread_pool_move_to_front( pv->thread_pool_page, GINT_TO_POINTER(page_act + 1) );
 
             do //warten, bis page gerendert ist
@@ -848,6 +848,8 @@ cb_viewer_text_search( GtkWidget* widget, gpointer data )
         }
 
         //prüfen, ob Seite Suchtext enthält
+        //ToDo: muß mit fz_try abgesichert werden
+        //macht lock!!!
         anzahl = fz_search_stext_page( ctx, pdf_document_page->stext_page,
                 search_text, quads, 99 );
 
@@ -1026,10 +1028,7 @@ viewer_on_text( PdfViewer* pv, PdfPunkt pdf_punkt, gchar** errmsg )
                 gboolean quer = FALSE;
                 gint rotate = 0;
 
-                fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
-
-                rotate = pdf_get_rotate( ctx, pdf_document_page->page->obj, errmsg );
-                if ( rotate == -1 ) ERROR_PAO( "pdf_get_rotate" )
+                rotate = pdf_document_page->rotate;
 
                 if ( rotate == 90 || rotate == 180 ) quer = TRUE;
 

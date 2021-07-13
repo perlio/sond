@@ -404,11 +404,14 @@ seiten_drehen_pdf( PdfDocumentPage* pdf_document_page, gint winkel, gchar** errm
     pdf_obj* page_obj = NULL;
     pdf_obj* rotate_obj = NULL;
     gint rotate = 0;
+
     fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
 
     page_obj = pdf_document_page->page->obj;
 
-    rotate_obj = pdf_dict_get_inheritable( ctx, page_obj, PDF_NAME(Rotate) );
+    fz_try( ctx ) rotate_obj = pdf_dict_get_inheritable( ctx, page_obj, PDF_NAME(Rotate) );
+    fz_catch( ctx ) ERROR_MUPDF( "pdf_dict_get_inheritable" )
+
     if ( !rotate_obj )
     {
         rotate_obj = pdf_new_int( ctx, (int64_t) winkel );

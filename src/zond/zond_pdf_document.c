@@ -221,6 +221,24 @@ zond_pdf_document_page_load_annots( PdfDocumentPage* pdf_document_page )
 
 
 static gint
+zond_pdf_document_page_get_rotate( PdfDocumentPage* pdf_document_page, gchar** errmsg )
+{
+    pdf_obj* rotate_obj = NULL;
+    gint rotate = 0;
+
+    fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
+
+    fz_try( ctx ) rotate_obj = pdf_dict_get( ctx, pdf_document_page->page->obj, PDF_NAME(Rotate) );
+    fz_catch( ctx ) ERROR_MUPDF( "pdf_dict_get" )
+
+    fz_try( ctx ) rotate = pdf_to_int( ctx, rotate_obj );
+    fz_catch( ctx ) ERROR_MUPDF( "pdf_to_int" )
+
+    return rotate;
+}
+
+
+static gint
 zond_pdf_document_load_page( ZondPdfDocument* self, gint page_doc, gchar** errmsg )
 {
     ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
@@ -231,6 +249,13 @@ zond_pdf_document_load_page( ZondPdfDocument* self, gint page_doc, gchar** errms
     fz_catch( priv->ctx ) ERROR_MUPDF_CTX( "pdf_load_page", priv->ctx );
 
     pdf_document_page->rect = pdf_bound_page( priv->ctx, pdf_document_page->page );
+
+    pdf_document_page->rotate = zond_pdf_document_page_get_rotate( pdf_document_page, errmsg );
+    if ( pdf_document_page->rotate == -1 )
+    {
+        fz_drop_page( priv->ctx, &(pdf_document_page->page->super) );
+        ERROR_PAO( "zond_pdf_document_page_get_rotate" )
+    }
 
     fz_try( priv->ctx ) pdf_document_page->display_list =
             fz_new_display_list( priv->ctx, pdf_document_page->rect );
