@@ -354,8 +354,10 @@ pdf_textsuche_pdf( Projekt* zond, const gchar* rel_path, const gchar* search_tex
 
             if ( !fz_display_list_is_empty( ctx, pdf_document_page->display_list ) )
             {
-                rc = render_display_list_to_stext_page( ctx, pdf_document_page, errmsg );
                 zond_pdf_document_mutex_unlock( zond_pdf_document );
+                g_mutex_lock( &pdf_document_page->mutex_page );
+                rc = render_display_list_to_stext_page( ctx, pdf_document_page, errmsg );
+                g_mutex_unlock( &pdf_document_page->mutex_page );
                 if ( rc )
                 {
                     zond_pdf_document_close( zond_pdf_document );
@@ -364,7 +366,9 @@ pdf_textsuche_pdf( Projekt* zond, const gchar* rel_path, const gchar* search_tex
             }
             else //wenn display_list noch nicht erzeugt, dann direkt aus page erzeugen
             {
+                g_mutex_lock( &pdf_document_page->mutex_page );
                 rc = pdf_render_stext_page_direct( pdf_document_page, errmsg );
+                g_mutex_unlock( &pdf_document_page->mutex_page );
                 zond_pdf_document_mutex_unlock( zond_pdf_document );
                 if ( rc )
                 {
