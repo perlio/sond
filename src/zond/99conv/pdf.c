@@ -119,14 +119,19 @@ pdf_get_page_num_from_dest( fz_context* ctx, const gchar* rel_path,
 }
 
 
-float
-pdf_get_rotate( fz_context* ctx, pdf_obj* page )
+gint
+pdf_get_rotate( fz_context* ctx, pdf_obj* page, gchar** errmsg )
 {
     pdf_obj* rotate_obj = NULL;
+    gint rotate = 0;
 
-    rotate_obj = pdf_dict_get( ctx, page, PDF_NAME(Rotate) );
+    fz_try( ctx ) rotate_obj = pdf_dict_get( ctx, page, PDF_NAME(Rotate) );
+    fz_catch( ctx ) ERROR_MUPDF( "pdf_dict_get" )
 
-    return pdf_to_real( ctx, rotate_obj );
+    fz_try( ctx ) rotate = pdf_to_int( ctx, rotate_obj );
+    fz_catch( ctx ) ERROR_MUPDF( "pdf_to_int" )
+
+    return rotate;
 }
 
 

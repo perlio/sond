@@ -996,7 +996,7 @@ cb_pv_copy_text( GtkMenuItem* item, gpointer data )
 
 
 static gint
-viewer_on_text( PdfViewer* pv, PdfPunkt pdf_punkt )
+viewer_on_text( PdfViewer* pv, PdfPunkt pdf_punkt, gchar** errmsg )
 {
     PdfDocumentPage* pdf_document_page =
             viewer_page_get_document_page( g_ptr_array_index( pv->arr_pages,
@@ -1024,11 +1024,14 @@ viewer_on_text( PdfViewer* pv, PdfPunkt pdf_punkt )
                     pdf_punkt.punkt.y >= box.y0 && pdf_punkt.punkt.y <= box.y1 )
             {
                 gboolean quer = FALSE;
+                gint rotate = 0;
 
-                fz_context* ctx = fz_clone_context( zond_pdf_document_get_ctx( pdf_document_page->document ) );
-                if ( pdf_get_rotate( ctx, pdf_document_page->page->obj ) == 90 ||
-                        pdf_get_rotate( ctx, pdf_document_page->page->obj ) == 180 ) quer = TRUE;
-                fz_drop_context( ctx );
+                fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
+
+                rotate = pdf_get_rotate( ctx, pdf_document_page->page->obj, errmsg );
+                if ( rotate == -1 ) ERROR_PAO( "pdf_get_rotate" )
+
+                if ( rotate == 90 || rotate == 180 ) quer = TRUE;
 
                 if ( line->wmode == 0 && !quer ) return 1;
                 else if ( line->wmode == 1 && quer ) return 1;
@@ -1095,10 +1098,11 @@ viewer_on_annot( PdfViewer* pv, PdfPunkt pdf_punkt )
 }
 
 
-static void
-viewer_set_cursor( PdfViewer* pv, gint rc, PdfPunkt pdf_punkt )
+static gint
+viewer_set_cursor( PdfViewer* pv, gint rc, PdfPunkt pdf_punkt, gchar** errmsg )
 {
     PdfDocumentPageAnnot* pdf_document_page_annot = NULL;
+    gint on_text = 0;
 
     if ( rc ) gdk_window_set_cursor( pv->gdk_window, pv->cursor_default );
     else if ( (pdf_document_page_annot = viewer_on_annot( pv, pdf_punkt )) )
@@ -1108,17 +1112,18 @@ viewer_set_cursor( PdfViewer* pv, gint rc, PdfPunkt pdf_punkt )
         {
             gdk_window_set_cursor( pv->gdk_window, pv->cursor_annot );
 
-            return;
+            return -1;
         }
     }
 
-    if ( viewer_on_text( pv, pdf_punkt ) == 1 )
-            gdk_window_set_cursor( pv->gdk_window, pv->cursor_text );
-    else if ( viewer_on_text( pv, pdf_punkt ) == 2 )
-            gdk_window_set_cursor( pv->gdk_window, pv->cursor_vtext );
+    on_text = viewer_on_text( pv, pdf_punkt, errmsg );
+    if ( on_text == -1 ) ERROR_PAO( "viewer_on_text" )
+
+    if ( on_text == 1 ) gdk_window_set_cursor( pv->gdk_window, pv->cursor_text );
+    else if ( on_text == 2 ) gdk_window_set_cursor( pv->gdk_window, pv->cursor_vtext );
     else gdk_window_set_cursor( pv->gdk_window, pv->cursor_default );
 
-    return;
+    return 0;
 }
 
 
@@ -1361,7 +1366,20 @@ cb_viewer_layout_motion_notify( GtkWidget* layout, GdkEvent* event, gpointer dat
         }
 
     }
-    else viewer_set_cursor( pv, rc, pdf_punkt ); //Kein Knopf gedrückt
+    else
+    {
+        gint rc = 0;
+        gchar* errmsg = NULL;
+
+        rc = viewer_set_cursor( pv, rc, pdf_punkt, &errmsg ); //Kein Knopf gedrückt
+        if ( rc == -1 )
+        {
+            display_message( pv->vf, "Fehler in cb_viewer_layout_motion_notify -\n\n"
+                    "Bei Aufruft viewer_set_cursor:\n", errmsg, NULL );
+            g_free( errmsg );
+        }
+    }
+
 
     return TRUE;
 }
@@ -1416,6 +1434,7 @@ viewer_annot_create( PdfDocumentPage* pdf_document_page, fz_quad* highlight, gin
 static gboolean
 cb_viewer_layout_release_button( GtkWidget* layout, GdkEvent* event, gpointer data )
 {
+    gint rc = 0;
     gchar* errmsg = NULL;
 
     PdfViewer* pv = (PdfViewer*) data;
@@ -1423,12 +1442,20 @@ cb_viewer_layout_release_button( GtkWidget* layout, GdkEvent* event, gpointer da
     if ( !(pv->dd) ) return TRUE;
 
     PdfPunkt pdf_punkt = { 0 };
-    gint rc = viewer_abfragen_pdf_punkt( pv,
+    rc = viewer_abfragen_pdf_punkt( pv,
             fz_make_point( event->motion.x, event->motion.y ), &pdf_punkt );
 
     pv->click_on_text = FALSE;
 
-    viewer_set_cursor( pv, rc, pdf_punkt );
+    rc = viewer_set_cursor( pv, rc, pdf_punkt, &errmsg );
+    if ( rc == -1 )
+    {
+        display_message( pv->vf, "Fehler in cb_viewer_layout_release_button -\n\n"
+                "Bei Aufruf viewer_set_cursor:\n", errmsg, NULL );
+        g_free( errmsg );
+
+        return TRUE;
+    }
 
     if ( pv->highlight[0].ul.x != -1 ) //es sind Markierungen gespeichert
     {
@@ -1523,11 +1550,26 @@ cb_viewer_layout_press_button( GtkWidget* layout, GdkEvent* event, gpointer
             }
 
             if ( pv->clicked_annot );
-            else if ( viewer_on_text( pv, pdf_punkt ) ) pv->click_on_text = TRUE;
             else
             {
-                pv->click_on_text = FALSE;
-                gdk_window_set_cursor( pv->gdk_window, pv->cursor_grab );
+                gchar* errmsg = NULL;
+                gint on_text = 0;
+
+                on_text = viewer_on_text( pv, pdf_punkt, &errmsg );
+                if ( on_text == -1 )
+                {
+                    display_message( pv->vf, "Fehler in cb_viewer_layout_press_button -\n\n"
+                            "Bei Aufruf viewer_on_text:\n", errmsg, NULL );
+                    g_free( errmsg );
+
+                    return FALSE;
+                }
+                else if ( on_text > 0 ) pv->click_on_text = TRUE;
+                else if ( on_text == 0 )
+                {
+                    pv->click_on_text = FALSE;
+                    gdk_window_set_cursor( pv->gdk_window, pv->cursor_grab );
+                }
             }
         }
         gtk_widget_queue_draw( pv->layout ); //um ggf. Markierung der annot zu löschen

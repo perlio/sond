@@ -152,11 +152,15 @@ render_display_list_to_stext_page( fz_context* ctx, PdfDocumentPage* pdf_documen
 {
     fz_device* s_t_device = NULL;
 
-    if ( pdf_document_page->stext_page ) return 0;
-
     fz_stext_options opts = { FZ_STEXT_DEHYPHENATE };
 
     g_mutex_lock( &pdf_document_page->mutex_page );
+    if ( pdf_document_page->stext_page )
+    {
+        g_mutex_unlock( &pdf_document_page->mutex_page );
+        return 0;
+    }
+
     fz_try( ctx ) pdf_document_page->stext_page = fz_new_stext_page( ctx, pdf_document_page->rect );
     fz_always( ctx ) g_mutex_unlock( &pdf_document_page->mutex_page );
     fz_catch( ctx ) ERROR_MUPDF( "fz_new_stext_page" )
