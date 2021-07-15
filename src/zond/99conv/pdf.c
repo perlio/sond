@@ -75,50 +75,6 @@ pdf_document_get_dest( fz_context* ctx, pdf_document* doc, gint page_doc,
 }
 
 
-static gint
-pdf_get_page_num_from_dest_doc( fz_context* ctx, pdf_document* doc, const gchar* dest, gchar** errmsg )
-{
-    pdf_obj* obj_dest_string = NULL;
-    pdf_obj* obj_dest = NULL;
-    pdf_obj* pageobj = NULL;
-    gint page_num = 0;
-
-    obj_dest_string = pdf_new_string( ctx, dest, strlen( dest ) );
-    fz_try( ctx ) obj_dest = pdf_lookup_dest( ctx, doc, obj_dest_string);
-    fz_always( ctx ) pdf_drop_obj( ctx, obj_dest_string );
-    fz_catch( ctx ) ERROR_MUPDF( "pdf_lookup_dest" )
-
-	pageobj = pdf_array_get( ctx, obj_dest, 0 );
-
-	if ( pdf_is_int( ctx, pageobj ) ) page_num = pdf_to_int( ctx, pageobj );
-	else
-	{
-		fz_try( ctx ) page_num = pdf_lookup_page_number( ctx, doc, pageobj );
-		fz_catch( ctx ) ERROR_MUPDF( "pdf_lookup_page_number" )
-	}
-
-    return page_num;
-}
-
-
-gint
-pdf_get_page_num_from_dest( fz_context* ctx, const gchar* rel_path,
-        const gchar* dest, gchar** errmsg )
-{
-    pdf_document* doc = NULL;
-    gint page_num = 0;
-
-    fz_try( ctx ) doc = pdf_open_document( ctx, rel_path );
-    fz_catch( ctx ) ERROR_MUPDF( "fz_open_document" )
-
-    page_num = pdf_get_page_num_from_dest_doc( ctx, doc, dest, errmsg );
-	pdf_drop_document( ctx, doc );
-    if ( page_num < 0 ) ERROR_PAO( "get_page_num_from_dest_doc" )
-
-    return page_num;
-}
-
-
 gint
 pdf_copy_page( fz_context* ctx, pdf_document* doc_src, gint page_from,
         gint page_to, pdf_document* doc_dest, gint page,
@@ -211,38 +167,6 @@ pdf_copy_page( fz_context* ctx, pdf_document* doc_src, gint page_from,
 
     return 0;
 }
-
-
-gint
-pdf_render_stext_page_direct( PdfDocumentPage* pdf_document_page, gchar** errmsg )
-{
-    //structured text-device
-    fz_device* s_t_device = NULL;
-
-    fz_stext_options opts = { FZ_STEXT_DEHYPHENATE };
-
-    if ( pdf_document_page->stext_page ) return 0;
-
-    fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
-
-    fz_try( ctx ) pdf_document_page->stext_page = fz_new_stext_page( ctx, pdf_document_page->rect );
-    fz_catch( ctx ) ERROR_MUPDF( "fz_new_stext_page" )
-
-    fz_try( ctx ) s_t_device = fz_new_stext_device( ctx, pdf_document_page->stext_page, &opts );
-    fz_catch( ctx ) ERROR_MUPDF( "fz_new_stext_device" )
-
-//Seite durch's device laufen lassen
-    fz_try( ctx ) pdf_run_page( ctx, pdf_document_page->page, s_t_device, fz_identity, NULL );
-    fz_always( ctx )
-    {
-        fz_close_device( ctx, s_t_device );
-        fz_drop_device( ctx, s_t_device );
-    }
-    fz_catch( ctx ) ERROR_MUPDF( "fz_run_page" )
-
-    return 0;
-}
-
 
 
 /** stream filtern **/

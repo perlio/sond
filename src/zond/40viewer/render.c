@@ -139,6 +139,7 @@ render_pixmap( fz_context* ctx, ViewerPage* viewer_page, gdouble zoom,
     }
 
     pixbuf = viewer_pixbuf_new_from_pixmap( zond_pdf_document_get_ctx( pdf_document_page->document ), pixmap );
+
     gtk_image_set_from_pixbuf( GTK_IMAGE(viewer_page), pixbuf );
     g_object_unref( pixbuf );
 
@@ -154,7 +155,7 @@ render_display_list_to_stext_page( fz_context* ctx, PdfDocumentPage* pdf_documen
 
     fz_stext_options opts = { FZ_STEXT_DEHYPHENATE };
 
-    if ( pdf_document_page->stext_page ) return 0;
+    if ( pdf_document_page->stext_page != NULL ) return 0;
 
     fz_try( ctx ) pdf_document_page->stext_page = fz_new_stext_page( ctx, pdf_document_page->rect );
     fz_catch( ctx ) ERROR_MUPDF( "fz_new_stext_page" )
@@ -183,20 +184,22 @@ render_display_list( fz_context* ctx, PdfDocumentPage* pdf_document_page,
 {
     fz_device* list_device = NULL;
 
-    //Display_list immer noch leer?
-    if ( !fz_display_list_is_empty( ctx, pdf_document_page->display_list ) ) return 1;
+    if ( pdf_document_page->display_list != NULL ) return 0;
+
+    fz_try( ctx ) pdf_document_page->display_list = fz_new_display_list( ctx, pdf_document_page->rect );
+    fz_catch( ctx ) ERROR_MUPDF( "fz_new_display_list" )
 
     //list_device für die Seite erzeugen
     fz_try( ctx ) list_device = fz_new_list_device( ctx, pdf_document_page->display_list );
     fz_catch( ctx )
     {
-        if ( errmsg ) *errmsg = add_string( *errmsg,
-                g_strconcat( "fz_new_list_device:\n", fz_caught_message( ctx ), NULL ) );
-
-        return -1;
+        fz_drop_display_list( ctx, pdf_document_page->display_list );
+        pdf_document_page->display_list = NULL;
+        ERROR_MUPDF( "fz_new_list_device" )
     }
 
     //page durchs list-device laufen lassen
+
     fz_try( ctx ) pdf_run_page( ctx, pdf_document_page->page, list_device, fz_identity, NULL );
     fz_always( ctx )
     {
@@ -205,10 +208,9 @@ render_display_list( fz_context* ctx, PdfDocumentPage* pdf_document_page,
     }
     fz_catch( ctx )
     {
-        if ( errmsg ) *errmsg = add_string( *errmsg,
-                g_strconcat( "fz_run_page:\n", fz_caught_message( ctx ), NULL ) );
-
-        return -1;
+        fz_drop_display_list( ctx, pdf_document_page->display_list );
+        pdf_document_page->display_list = NULL;
+        ERROR_MUPDF( "fz_drop_display_list" )
     }
 
     return 0;

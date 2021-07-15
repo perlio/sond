@@ -139,6 +139,50 @@ meldung( GtkWidget* window, const gchar* text1, ... )
 }
 
 
+static gint
+general_get_page_num_from_dest_doc( fz_context* ctx, pdf_document* doc, const gchar* dest, gchar** errmsg )
+{
+    pdf_obj* obj_dest_string = NULL;
+    pdf_obj* obj_dest = NULL;
+    pdf_obj* pageobj = NULL;
+    gint page_num = 0;
+
+    obj_dest_string = pdf_new_string( ctx, dest, strlen( dest ) );
+    fz_try( ctx ) obj_dest = pdf_lookup_dest( ctx, doc, obj_dest_string);
+    fz_always( ctx ) pdf_drop_obj( ctx, obj_dest_string );
+    fz_catch( ctx ) ERROR_MUPDF( "pdf_lookup_dest" )
+
+	pageobj = pdf_array_get( ctx, obj_dest, 0 );
+
+	if ( pdf_is_int( ctx, pageobj ) ) page_num = pdf_to_int( ctx, pageobj );
+	else
+	{
+		fz_try( ctx ) page_num = pdf_lookup_page_number( ctx, doc, pageobj );
+		fz_catch( ctx ) ERROR_MUPDF( "pdf_lookup_page_number" )
+	}
+
+    return page_num;
+}
+
+
+static gint
+general_get_page_num_from_dest( fz_context* ctx, const gchar* rel_path,
+        const gchar* dest, gchar** errmsg )
+{
+    pdf_document* doc = NULL;
+    gint page_num = 0;
+
+    fz_try( ctx ) doc = pdf_open_document( ctx, rel_path );
+    fz_catch( ctx ) ERROR_MUPDF( "fz_open_document" )
+
+    page_num = general_get_page_num_from_dest_doc( ctx, doc, dest, errmsg );
+	pdf_drop_document( ctx, doc );
+    if ( page_num < 0 ) ERROR_PAO( "get_page_num_from_dest_doc" )
+
+    return page_num;
+}
+
+
 /** Gibt nur bei Fehler NULL zurück, sonst immer Zeiger auf Anbindung **/
 static Anbindung*
 ziel_zu_anbindung( fz_context* ctx, const gchar* rel_path, Ziel* ziel, gchar** errmsg )
@@ -147,11 +191,11 @@ ziel_zu_anbindung( fz_context* ctx, const gchar* rel_path, Ziel* ziel, gchar** e
 
     Anbindung* anbindung = g_malloc0( sizeof( Anbindung ) );
 
-    page_num = pdf_get_page_num_from_dest( ctx, rel_path, ziel->ziel_id_von, errmsg );
+    page_num = general_get_page_num_from_dest( ctx, rel_path, ziel->ziel_id_von, errmsg );
     if ( page_num == -1 )
     {
         g_free( anbindung );
-        ERROR_PAO_R( "pdf_get_page_num_from_dest", NULL )
+        ERROR_PAO_R( "general_get_page_num_from_dest", NULL )
     }
     else if ( page_num == -2 )
     {
@@ -162,13 +206,13 @@ ziel_zu_anbindung( fz_context* ctx, const gchar* rel_path, Ziel* ziel, gchar** e
     }
     else anbindung->von.seite = page_num;
 
-    page_num = pdf_get_page_num_from_dest( ctx, rel_path, ziel->ziel_id_bis,
+    page_num = general_get_page_num_from_dest( ctx, rel_path, ziel->ziel_id_bis,
             errmsg );
     if ( page_num == -1 )
     {
         g_free( anbindung );
 
-        ERROR_PAO_R( "pdf_get_page_num_from_dest", NULL )
+        ERROR_PAO_R( "general_get_page_num_from_dest", NULL )
     }
     else if ( page_num == -2 )
     {

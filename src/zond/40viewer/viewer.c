@@ -158,7 +158,9 @@ viewer_check_rendering( gpointer data )
 {
     PdfViewer* pv = (PdfViewer*) data;
 
-    if ( !pv->thread_pool_page ) return G_SOURCE_REMOVE;
+    if ( !pv ) return G_SOURCE_REMOVE;
+
+    if ( !(pv->thread_pool_page) ) return G_SOURCE_REMOVE;
 
     if ( g_thread_pool_unprocessed( pv->thread_pool_page ) == 0 )
     {
@@ -200,18 +202,32 @@ viewer_page_ist_sichtbar( PdfViewer* pv, gint page )
 }
 
 
+static void
+viewer_push_thread( GThreadPool* thread_pool, gint page, gint mode )
+{
+    gint data = 0;
+
+    data = mode + (page * 4);
+
+    g_thread_pool_push( thread_pool, GINT_TO_POINTER(page + 1), NULL );
+
+    return;
+}
+
+
 void
 viewer_thread_render( PdfViewer* pv, gint page )
 {
     gboolean still_rendering = FALSE;
+    gint mode = 0;
 
     still_rendering = (pv->thread_pool_page != NULL);
 
     if ( !still_rendering ) pv->thread_pool_page = g_thread_pool_new( (GFunc) render_page_thread, pv, 4, FALSE, NULL );
 
     if ( page == -1 ) for ( gint i = 0; i < pv->arr_pages->len; i++ )
-            g_thread_pool_push( pv->thread_pool_page, GINT_TO_POINTER(i + 1), NULL );
-    else  g_thread_pool_push( pv->thread_pool_page, GINT_TO_POINTER(page + 1), NULL );
+            viewer_push_thread( pv->thread_pool_page, i, mode );
+    else  viewer_push_thread( pv->thread_pool_page, page, mode );
 
     if ( page != -1 && (viewer_page_ist_sichtbar( pv, page ) ||
             viewer_thumb_ist_sichtbar( pv, page )) )
@@ -372,6 +388,7 @@ viewer_schliessen( PdfViewer* pv )
     g_ptr_array_remove_fast( pv->zond->arr_pv, pv );
 
     g_free( pv );
+    pv = NULL; //wegen viewer_check_rendering
 
     return;
 }
@@ -1331,7 +1348,7 @@ cb_viewer_layout_motion_notify( GtkWidget* layout, GdkEvent* event, gpointer dat
     if ( !(pv->dd) ) return TRUE;
 
     PdfPunkt pdf_punkt = { 0 };
-    gint rc = viewer_abfragen_pdf_punkt( pv,
+    viewer_abfragen_pdf_punkt( pv,
             fz_make_point( event->motion.x, event->motion.y ), &pdf_punkt );
 
     if ( event->motion.state == GDK_BUTTON1_MASK )

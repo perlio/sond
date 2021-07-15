@@ -257,14 +257,6 @@ zond_pdf_document_load_page( ZondPdfDocument* self, gint page_doc, gchar** errms
         ERROR_PAO( "zond_pdf_document_page_get_rotate" )
     }
 
-    fz_try( priv->ctx ) pdf_document_page->display_list =
-            fz_new_display_list( priv->ctx, pdf_document_page->rect );
-    fz_catch( priv->ctx )
-    {
-        fz_drop_page( priv->ctx, &(pdf_document_page->page->super) );
-        ERROR_MUPDF_CTX( "fz_new_display_list", priv->ctx );
-    }
-
     return 0;
 }
 
@@ -747,6 +739,7 @@ zond_pdf_document_page_refresh( ZondPdfDocument* self, gint page_doc,
     //Seite clearen
     fz_drop_page( ctx, &(pdf_document_page->page->super) );
     fz_drop_display_list( ctx, pdf_document_page->display_list );
+    pdf_document_page->display_list = NULL;
 
     rc = zond_pdf_document_load_page( self, page_doc, errmsg );
     if ( rc == -1 ) ERROR_SOND( "zond_pdf_document_load_page" )

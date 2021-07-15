@@ -3,8 +3,6 @@ Bugs:
 - fm:
     - manchmal (nach Verschieben) wird leeres child angezeigt
 
-- pdf_text: mutexes och nicht ok
-
 ToDo:
 - Synchron-Punkte
 
