@@ -200,6 +200,7 @@ pdf_zond_get_token_array( fz_context* ctx, fz_stream* stream )
     g_array_set_clear_func( arr_zond_token, (GDestroyNotify) pdf_zond_free_token_array);
 
     pdf_token tok = PDF_TOK_NULL;
+    printf("\n\nToken Array:\n");
 
     while ( tok != PDF_TOK_EOF )
     {
@@ -216,7 +217,7 @@ pdf_zond_get_token_array( fz_context* ctx, fz_stream* stream )
         else if ( tok == PDF_TOK_INT ) zond_token.i = lxb.i;
         else if ( tok == PDF_TOK_STRING || tok == PDF_TOK_NAME ||
                 tok == PDF_TOK_KEYWORD ) zond_token.s = g_strdup( lxb.scratch );
-
+printf("%i   %s\n", tok, lxb.scratch );
         pdf_lexbuf_fin( ctx, &lxb );
 
         g_array_append_val( arr_zond_token, zond_token );
@@ -227,8 +228,34 @@ pdf_zond_get_token_array( fz_context* ctx, fz_stream* stream )
 }
 
 
+static void
+pdf_zond_insert_keyword( GArray* arr_zond_token, const gchar* keyword, gint index )
+{
+    ZondToken zond_token;
+
+    zond_token.tok = PDF_TOK_KEYWORD;
+    zond_token.s = g_strdup( keyword );
+
+    g_array_insert_val( arr_zond_token, index, zond_token );
+
+    return;
+}
+
+
+static void
+pdf_zond_invalidate_token( GArray* arr_zond_token, gint index, gint len )
+{
+    for ( gint u = index; u > index - len; u-- )
+    {
+        ((ZondToken*) arr_zond_token->data)[u].tok = PDF_NUM_TOKENS;
+    }
+
+    return;
+}
+
+
 void
-pdf_zond_filter_token( GArray* arr_zond_token, gint flags )
+pdf_zond_filter_text( GArray* arr_zond_token, gint flags )
 {
     struct TextState
     {
@@ -282,7 +309,7 @@ pdf_zond_filter_token( GArray* arr_zond_token, gint flags )
             }
             else if ( !g_strcmp0( zond_token.s, "Tf" ) )
             {
-                if ( text_state.Tf != -1 ) pdf_zond_invalidate_token( arr_zond_token, text_state.Tf, 2 );
+                if ( text_state.Tf != -1 ) pdf_zond_invalidate_token( arr_zond_token, text_state.Tf, 3 );
 
                 text_state.Tf = i;
             }
@@ -302,6 +329,32 @@ pdf_zond_filter_token( GArray* arr_zond_token, gint flags )
 
             //nur merken, wo ist, ob gelöscht wird bei ET entschieden
             else if ( !g_strcmp0( zond_token.s, "BT" ) ) text_state.BT = i;
+
+            else if ( !g_strcmp0( zond_token.s, "Td" ) )
+            {
+                if ( text_state.Td != -1 ) pdf_zond_invalidate_token( arr_zond_token, text_state.Td, 3 );
+
+                text_state.Td = i;
+            }
+            else if ( !g_strcmp0( zond_token.s, "TD" ) )
+            {
+                if ( text_state.TD != -1 ) pdf_zond_invalidate_token( arr_zond_token, text_state.TD, 3 );
+
+                text_state.TD = i;
+            }
+            else if ( !g_strcmp0( zond_token.s, "Tm" ) )
+            {
+                if ( text_state.Tm != -1 ) pdf_zond_invalidate_token( arr_zond_token, text_state.Tm, 7 );
+
+                text_state.Tm = i;
+            }
+            else if ( !g_strcmp0( zond_token.s, "TAst" ) )
+            {
+                if ( text_state.TAst != -1 ) pdf_zond_invalidate_token( arr_zond_token, text_state.TAst, 1 );
+
+                text_state.TAst = i;
+            }
+
 
             else if ( !g_strcmp0( zond_token.s, "Tj" ) ||
                     !g_strcmp0( zond_token.s, "'" ) ||
@@ -409,7 +462,7 @@ pdf_zond_filter_token( GArray* arr_zond_token, gint flags )
             if ( text_state.Tw != -1 ) pdf_zond_invalidate_token( arr_zond_token, text_state.Tw, 2 );
             if ( text_state.Tz != -1 ) pdf_zond_invalidate_token( arr_zond_token, text_state.Tz, 2 );
             if ( text_state.TL != -1 ) pdf_zond_invalidate_token( arr_zond_token, text_state.TL, 2 );
-            if ( text_state.Tf != -1 ) pdf_zond_invalidate_token( arr_zond_token, text_state.Tf, 2 );
+            if ( text_state.Tf != -1 ) pdf_zond_invalidate_token( arr_zond_token, text_state.Tf, 3 );
             if ( text_state.Tr != -1 ) pdf_zond_invalidate_token( arr_zond_token, text_state.Tr, 2 );
             if ( text_state.Ts != -1 ) pdf_zond_invalidate_token( arr_zond_token, text_state.Ts, 2 );
 
@@ -425,6 +478,69 @@ pdf_zond_filter_token( GArray* arr_zond_token, gint flags )
     }
 
     return;
+}
+
+
+fz_buffer*
+pdf_zond_reassemble_buffer( fz_context* ctx, GArray* arr_zond_token, gchar** errmsg )
+{
+    fz_buffer* fzbuf = NULL;
+
+    fz_try( ctx ) fzbuf = fz_new_buffer( ctx, 1012 );
+    fz_catch( ctx ) ERROR_MUPDF_R( "fz_new_buffer", NULL )
+
+    for ( gint i = 0; i < arr_zond_token->len; i++ )
+    {
+        ZondToken zond_token = g_array_index( arr_zond_token, ZondToken, i );
+
+        switch (zond_token.tok)
+        {
+            case PDF_NUM_TOKENS:
+                break;
+            case PDF_TOK_EOF:
+                fz_append_byte( ctx, fzbuf, 0 );
+                break;
+            case PDF_TOK_NAME:
+                fz_append_printf(ctx, fzbuf, "/%s ", zond_token.s);
+                break;
+            case PDF_TOK_STRING:
+                fz_append_pdf_string(ctx, fzbuf, zond_token.s);
+                break;
+            case PDF_TOK_OPEN_DICT:
+                fz_append_string(ctx, fzbuf, "<<");
+                break;
+            case PDF_TOK_CLOSE_DICT:
+                fz_append_string(ctx, fzbuf, ">>");
+                break;
+            case PDF_TOK_OPEN_ARRAY:
+                fz_append_byte(ctx, fzbuf, '[');
+                break;
+            case PDF_TOK_CLOSE_ARRAY:
+                fz_append_byte(ctx, fzbuf, ']');
+                break;
+            case PDF_TOK_OPEN_BRACE:
+                fz_append_byte(ctx, fzbuf, '{');
+                break;
+            case PDF_TOK_CLOSE_BRACE:
+                fz_append_byte(ctx, fzbuf, '}');
+                break;
+            case PDF_TOK_INT:
+                fz_append_printf(ctx, fzbuf, "%ld ", zond_token.i);
+                break;
+            case PDF_TOK_REAL:
+                fz_append_printf(ctx, fzbuf, "%g ", zond_token.f);
+                break;
+            case PDF_TOK_KEYWORD:
+                fz_append_printf(ctx, fzbuf, "%s\n", zond_token.s);
+                break;
+            default:
+         //       fz_append_data(ctx, fzbuf, zond_token.s, strlen( zond_token.s ) -1 );
+         printf("%s\n", zond_token.s);
+                break;
+        }
+    }
+
+    return fzbuf;
 }
 
 

@@ -31,7 +31,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "../40viewer/document.h"
 
-#include "../99conv/pdf.h"
+#include "pdf.h"
 #include "../99conv/general.h"
 
 #ifdef _WIN32
@@ -258,15 +258,25 @@ pdf_ocr_get_content_stream_as_buffer( fz_context* ctx, pdf_obj* page_ref,
     fz_try( ctx )
     {
         stream = pdf_open_contents_stream( ctx, pdf_get_bound_document( ctx, page_ref ), obj_contents );
+        buf = fz_read_all( ctx, stream, 1024 );
+        printf( "\n\nVorher:\n%s\n", buf->data );
+        fz_drop_stream( ctx, stream );
 
+        stream = pdf_open_contents_stream( ctx, pdf_get_bound_document( ctx, page_ref ), obj_contents );
+        GArray* arr_zond_token = pdf_zond_get_token_array( ctx, stream );
+
+        pdf_zond_filter_text( arr_zond_token, 3 );
+        fz_buffer* buf = pdf_zond_reassemble_buffer( ctx, arr_zond_token, errmsg );
+        if ( !buf ) ERROR_PAO_R( "pdf_zond_reassemble_buffer", NULL )
+
+        printf("%s\n", buf->data );
+
+        fz_drop_buffer( ctx, buf );
         // Test
 //        gint rc = pdf_print_token( ctx, stream, errmsg );
 //        if ( rc ) ERROR_PAO_R( "pdf_print_token", NULL )
 
-        fz_drop_stream( ctx, stream );
 
-        stream = pdf_open_contents_stream( ctx, pdf_get_bound_document( ctx, page_ref ), obj_contents );
-        buf = fz_read_all( ctx, stream, 1024 );
     }
     fz_always( ctx ) fz_drop_stream( ctx, stream );
     fz_catch( ctx ) ERROR_MUPDF_R( "open and read stream", NULL )
