@@ -248,63 +248,60 @@ pdf_zond_filter_token( GArray* arr_zond_token, gint flags )
         gint TD;
         gint Tm;
         gint TAst;
-    } text_state = { -1, -1, -1, -1, -1, -1, -1, 0, -1, -1, -1, -1, -1 }
+    } text_state = { -1, -1, -1, -1, -1, -1, -1, 0, -1, -1, -1, -1, -1 };
 
     for ( gint i = 0; i < arr_zond_token->len; i++ )
     {
         ZondToken zond_token = g_array_index( arr_zond_token, ZondToken, i );
 
-        if ( (zond_token.tok != PDF_TOK_KEYWORD) )
+        if ( (zond_token.tok == PDF_TOK_KEYWORD) )
         {
             if ( !g_strcmp0( zond_token.s, "Tc" ) )
             {
                 if ( text_state.Tc != -1 ) pdf_zond_invalidate_token( arr_zond_token, text_state.Tc, 2 );
 
-                text_state.Tc.index = i;
+                text_state.Tc = i;
             }
             else if ( !g_strcmp0( zond_token.s, "Tw" ) )
             {
                 if ( text_state.Tw != -1 ) pdf_zond_invalidate_token( arr_zond_token, text_state.Tw, 2 );
 
-                text_state.Tw.index = i;
+                text_state.Tw = i;
             }
             else if ( !g_strcmp0( zond_token.s, "Tz" ) )
             {
                 if ( text_state.Tz != -1 ) pdf_zond_invalidate_token( arr_zond_token, text_state.Tz, 2 );
 
-                text_state.Tz.index = i;
+                text_state.Tz = i;
             }
             else if ( !g_strcmp0( zond_token.s, "TL" ) )
             {
                 if ( text_state.TL != -1 ) pdf_zond_invalidate_token( arr_zond_token, text_state.TL, 2 );
 
-                text_state.TL.index = i;
+                text_state.TL = i;
             }
             else if ( !g_strcmp0( zond_token.s, "Tf" ) )
             {
                 if ( text_state.Tf != -1 ) pdf_zond_invalidate_token( arr_zond_token, text_state.Tf, 2 );
 
-                text_state.Tf.index = i;
+                text_state.Tf = i;
             }
             else if ( !g_strcmp0( zond_token.s, "Tr" ) )
             {
                 if ( text_state.Tr != -1 ) pdf_zond_invalidate_token( arr_zond_token, text_state.Tr, 2 );
 
-                text_state.Tr.index = i;
+                text_state.Tr = i;
                 text_state.Tr_act = zond_token.i;
             }
             else if ( !g_strcmp0( zond_token.s, "Ts" ) )
             {
                 if ( text_state.Ts != -1 ) pdf_zond_invalidate_token( arr_zond_token, text_state.Ts, 2 );
 
-                text_state.Ts.index = i;
+                text_state.Ts = i;
             }
 
-            else if ( !g_strcmp0( zond_token.s, "BT" ) )
-            {
-                text_state.BT.index = i;
-                text_state.BT.text_shown = FALSE;
-            }
+            //nur merken, wo ist, ob gelöscht wird bei ET entschieden
+            else if ( !g_strcmp0( zond_token.s, "BT" ) ) text_state.BT = i;
 
             else if ( !g_strcmp0( zond_token.s, "Tj" ) ||
                     !g_strcmp0( zond_token.s, "'" ) ||
@@ -312,209 +309,127 @@ pdf_zond_filter_token( GArray* arr_zond_token, gint flags )
                     !g_strcmp0( zond_token.s, "TJ" ) )
             {
                 //soll Text gefiltert werden?
-                gint Tr = text_state.Tr.value;
-
-                if ( flags == 3 || (flags == 1 && Tr != 3) || (flags == 2 && Tr == 3) ) //nicht anzeigen!
+                if ( flags == 3 || (flags == 1 && text_state.Tr_act != 3) ||
+                        (flags == 2 && text_state.Tr_act == 3) ) //nicht anzeigen!
                 {
                     //Löschen bzw. ersetzen
+                    if ( !g_strcmp0( zond_token.s, "Tj" ) )
+                    {
+                        g_array_remove_range( arr_zond_token, i - 1, 2 );
+                        i = i - 2;
+                    }
+                    else if ( !g_strcmp0( zond_token.s, "'" ) )
+                    {
+                        g_array_remove_range( arr_zond_token, i - 1, 2 );
 
-                    //applied bzw. BT.text_shown unverändert lassen
+                        pdf_zond_insert_keyword( arr_zond_token, "T*", i - 1 );
+
+                        text_state.TAst = i - 1;
+
+                        i--; //auf i - 1 gehen; array eins kürzer geworden!
+                    }
+                    else if ( !g_strcmp0( zond_token.s, """" ) )
+                    {
+                        pdf_zond_insert_keyword( arr_zond_token, "Tw", i - 2 );
+                        g_array_remove_range( arr_zond_token, i, 2 );
+                        pdf_zond_insert_keyword( arr_zond_token, "Tc", i );
+                        pdf_zond_insert_keyword( arr_zond_token, "T*", i + 1 );
+
+                        text_state.Tw = i - 2;
+                        text_state.Tc = i;
+                        text_state.TAst = i + 1;
+
+                        i++;
+                    }
+                    else if ( !g_strcmp0( zond_token.s, "TJ" ) )
+                    {
+                        //Beginn array finden
+                        ZondToken zond_token_begin;
+                        gint begin = i;
+                        do
+                        {
+                            begin--;
+                            zond_token_begin = g_array_index( arr_zond_token, ZondToken, begin );
+                        } while ( zond_token_begin.tok != PDF_TOK_OPEN_ARRAY );
+
+                        g_array_remove_range( arr_zond_token, begin, i - begin + 1 );
+
+                        i = i - begin + 1;
+                    }
                 }
                 else //Text wird angezeigt
                 {
-                    if ( text_state.Tc.index != -1 ) text_state.Tc.applied = TRUE;
-                    if ( text_state.Tw.index != -1 ) text_state.Tw.applied = TRUE;
-                    if ( text_state.Tz.index != -1 ) text_state.Tz.applied = TRUE;
-                    if ( text_state.TL.index != -1 ) text_state.TL.applied = TRUE;
-                    if ( text_state.Tf.index != -1 ) text_state.Tf.applied = TRUE;
-                    if ( text_state.Tr.index != -1 ) text_state.Tr.applied = TRUE;
-                    if ( text_state.Ts.index != -1 ) text_state.Ts.applied = TRUE;
+                    //etwaig gesetzte text_states resetten
+                    text_state.Tc = -1;
+                    text_state.Tw = -1;
+                    text_state.Tz = -1;
+                    text_state.TL = -1;
+                    text_state.Tf = -1;
+                    text_state.Tr = -1;
+                    text_state.Ts = -1;
 
-                    text_state.BT.text_shown = TRUE;
+                    text_state.BT = -1;
+
+                    text_state.Td = -1;
+                    text_state.TD = -1;
+                    text_state.Tm = -1;
+                    text_state.TAst = -1;
                 }
             }
 
             else if (!g_strcmp0( zond_token.s, "ET" ) )
             {
-                //Text Pos-Operatoren löschen oder resetten
-                if ( text_state.Td.index != -1 )
+                //BT löschen, wenn nicht resetted
+                if ( text_state.BT != -1 )
                 {
-                    if ( text_state.Td.applied == FALSE ) pdf_zond_invalidate_token( arr_zond_token, text_state.Td.index, ???? );
-                    else text_state.Td.applied = FALSE;
-
-                    text_state.Td.index = -1;
+                    pdf_zond_invalidate_token( arr_zond_token, text_state.BT, 1 );
+                    //und ET löschen
+                    pdf_zond_invalidate_token( arr_zond_token, i, 1 );
                 }
 
-                if ( text_state.BT ) //wenn nix in TextObject
-                {
-                    pdf_zond_invalidate_token( arr_zond_token, text_state.BT, 1);
-                    pdf_zond_invalidate_token( arr_zond_token, i, 1 ); //ET auch löschen
+                //Text Pos-Operatoren löschen
+                if ( text_state.Td != -1 ) pdf_zond_invalidate_token( arr_zond_token, text_state.Td, 3 );
+                if ( text_state.TD != -1 ) pdf_zond_invalidate_token( arr_zond_token, text_state.TD, 3 );
+                if ( text_state.Tm != -1 ) pdf_zond_invalidate_token( arr_zond_token, text_state.Tm, 7 );
+                if ( text_state.TAst != -1 ) pdf_zond_invalidate_token( arr_zond_token, text_state.TAst, 1 );
 
-                    //BT resetten
-                    text_state.BT = -1;
-                }
+                //und resetten
+                text_state.BT = -1;
+
+                text_state.Td = -1;
+                text_state.TD = -1;
+                text_state.Tm = -1;
+                text_state.TAst = -1;
             }
         }
-        else if ( zond_token.tok = PDF_TOK_EOF )
+        else if ( zond_token.tok == PDF_TOK_EOF )
         {
             //noch gesetzte Text-State-Ops löschen
-        }
+            if ( text_state.Tc != -1 ) pdf_zond_invalidate_token( arr_zond_token, text_state.Tc, 2 );
+            if ( text_state.Tw != -1 ) pdf_zond_invalidate_token( arr_zond_token, text_state.Tw, 2 );
+            if ( text_state.Tz != -1 ) pdf_zond_invalidate_token( arr_zond_token, text_state.Tz, 2 );
+            if ( text_state.TL != -1 ) pdf_zond_invalidate_token( arr_zond_token, text_state.TL, 2 );
+            if ( text_state.Tf != -1 ) pdf_zond_invalidate_token( arr_zond_token, text_state.Tf, 2 );
+            if ( text_state.Tr != -1 ) pdf_zond_invalidate_token( arr_zond_token, text_state.Tr, 2 );
+            if ( text_state.Ts != -1 ) pdf_zond_invalidate_token( arr_zond_token, text_state.Ts, 2 );
 
+            //etwaig gesetzte text_states resetten
+            text_state.Tc = -1;
+            text_state.Tw = -1;
+            text_state.Tz = -1;
+            text_state.TL = -1;
+            text_state.Tf = -1;
+            text_state.Tr = -1;
+            text_state.Ts = -1;
+        }
     }
 
     return;
 }
 
 
-static gint
-pdf_append_filtered_TO( fz_context* ctx, fz_buffer* buf_new, gchar* BT,
-        gchar* ET, gboolean vis_TO_BT, gint flags, gchar** errmsg )
-{
-    gboolean vis_act = vis_TO_BT;
-    gchar* ptr = BT;
-
-    while ( ptr < ET )
-    {
-
-    }
-
-    return 0;
-}
-
-
-gint
-pdf_filter_content_stream( fz_context* ctx, pdf_obj* page_ref, gchar** errmsg )
-{
-    /*
-    fz_buffer* buf = NULL;
-    size_t size = 0;
-    unsigned char* data = NULL;
-    unsigned char* ptr = NULL;
-
-    buf = pdf_ocr_get_content_stream_as_buffer( ctx, page_ref, errmsg );
-    size = fz_buffer_storage( ctx, buf, &data )
-
-    //Entferne unsichtbare Text-Show-Operatoren
-
-    ptr = data;
-
-    while ( ptr < data + size )
-    {
-        //search first/next BT/ET
-    }
-    */
-}
-
 
 /*
-static gint
-pdf_filter_buf( fz_context* ctx, fz_buffer* buf, fz_buffer* buf_new, gint flags,
-        gchar** errmsg )
-{
-    gchar* data = NULL;
-    gchar* BT = NULL;
-    gchar* pos = NULL;
-    gchar* ET = NULL;
-    gchar* end_Tr = NULL;
-    gint last_Tr = -1;
-    size_t size = 0;
-    gboolean vis_TO_BT = TRUE;
-
-    size = fz_buffer_storage( ctx, buf, (guchar**) &data );
-    pos = data;
-
-    while ( pos < data + size - 1 )
-    {
-        gboolean uniform = FALSE;
-        gboolean has_text = FALSE;
-        gchar* ptr = NULL;
-
-        BT = find_next_BT( pos, size - (pos - data) , &ET );
-
-        //stream vor BT einfügen
-        fz_try( ctx ) fz_append_data( ctx, buf_new, pos, BT - pos );
-        fz_catch( ctx ) ERROR_MUPDF( "fz_append_data" )
-
-        //vor dem aktuellen TextObject suchen
-        ptr = pos;
-        while ( ptr < BT )
-        {
-            gint search_Tr = find_next_Tr( ptr, BT - ptr, &end_Tr );
-            if ( search_Tr >= 0 ) last_Tr = search_Tr;
-            ptr = end_Tr + 1;
-        }
-
-        if ( last_Tr == 3 ) vis_TO_BT = FALSE;
-        else if ( last_Tr >= 0 ) vis_TO_BT = TRUE;
-
-        gboolean vis_TO = FALSE;
-
-        uniform = text_object_uniform_vis( BT, ET, vis_TO_BT,
-                &vis_TO, &has_text );
-
-        if ( has_text && ((flags & 3) != 3) ) //nicht: kein Text oder aller Text soll weg
-        {
-            if ( uniform && (((flags & 1 ) && vis_TO) || ((flags & 2) && !vis_TO)) )
-            {
-                fz_try( ctx )
-                {
-                    fz_append_data( ctx, buf_new, BT, ET - BT + 1 );
-                    fz_append_data( ctx, buf_new, "\n", 1 );
-                }
-                fz_catch( ctx ) ERROR_MUPDF( "fz_append_data" )
-            }
-            else if ( !uniform )
-            {
-                gint rc = 0;
-                rc = pdf_append_filtered_TO( ctx, buf_new, BT, ET, vis_TO_BT, flags, errmsg );
-                if ( rc ) ERROR_PAO( "pdf_filter_TO" )
-            }
-        }
-
-        if ( uniform ) vis_TO_BT = vis_TO;
-
-        pos = ET + 1;
-    }
-
-    return 0;
-}
-
-
-gint
-pdf_remove_text( fz_context* ctx, pdf_obj* page_ref, gint flags, gchar** errmsg )
-{
-    gint rc = 0;
-    fz_buffer* buf = NULL;
-    fz_buffer* buf_new = NULL;
-
-    if ( flags == 0 ) return 0;
-
-    buf = pdf_get_content_stream_as_buffer( ctx, page_ref, errmsg );
-    if ( !buf ) ERROR_PAO( "pdf_get_content_stream_as_buffer" )
-
-    fz_try( ctx ) buf_new = fz_new_buffer( ctx, 1024 );
-    fz_catch( ctx )
-    {
-        fz_drop_buffer( ctx, buf );
-        ERROR_MUPDF( "fz_new_buffer" )
-    }
-
-    rc = pdf_filter_buf( ctx, buf, buf_new, flags, errmsg );
-    fz_drop_buffer( ctx, buf );
-    if ( rc )
-    {
-        fz_drop_buffer( ctx, buf_new );
-        ERROR_PAO( "pdf_filter_buf" )
-    }
-
-    rc = pdf_update_content_stream( ctx, page_ref, buf_new, errmsg );
-    fz_drop_buffer( ctx, buf_new );
-    if ( rc ) ERROR_PAO( "pdf_update_content_stream" )
-
-    return 0;
-}
-
-
 // (War nötig, um von tesseract erstellte Pdf mit darzustellen)
 gint
 pdf_show_hidden_text( fz_context* ctx, pdf_obj* page_ref, gchar** errmsg )
