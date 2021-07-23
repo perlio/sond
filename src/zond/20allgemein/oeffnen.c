@@ -331,7 +331,9 @@ oeffnen_datei( Projekt* zond, const gchar* rel_path, Anbindung* anbindung,
     g_free( local_rel_path_win32 );
     if ( ret == (HINSTANCE) 31 ) //no app associated
     {
-printf("ShellExecute: noassoc\n");
+        if ( errmsg ) *errmsg = g_strdup( "Bei Aufruf ShellExecute:\nErrCode:\n"
+                "Keine Anwendung in Registry gespeichert" );
+        return -1;
     }
     else if ( ret <= (HINSTANCE) 32 )
     {

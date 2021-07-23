@@ -307,7 +307,7 @@ cb_pv_seiten_ocr( GtkMenuItem* item, gpointer data )
     info_window_close( info_window );
     if ( rc == -1 )
     {
-        meldung( pv->vf, "Fehler - OCR\n\nBei Aufruf pdf_ocr_doc:\n", errmsg,
+        meldung( pv->vf, "Fehler - OCR\n\nBei Aufruf pdf_ocr_pages:\n", errmsg,
                 NULL );
         g_free( errmsg );
         g_ptr_array_unref( arr_document_page );
@@ -322,8 +322,10 @@ cb_pv_seiten_ocr( GtkMenuItem* item, gpointer data )
         gint page_doc = zond_pdf_document_get_index( pdf_document_page );
 
         //mit mutex sichern...
+        zond_pdf_document_mutex_lock( pdf_document_page->document );
         rc = zond_pdf_document_page_refresh( pdf_document_page->document,
                 page_doc, 1, &errmsg );
+        zond_pdf_document_mutex_unlock( pdf_document_page->document );
         if ( rc )
         {
             meldung( pv->vf, "Fehler - OCR\n\nBei Aufruf viewer_reload_fz_page:\n",

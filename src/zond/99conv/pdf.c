@@ -200,8 +200,8 @@ pdf_zond_get_token_array( fz_context* ctx, fz_stream* stream )
     g_array_set_clear_func( arr_zond_token, (GDestroyNotify) pdf_zond_free_token_array);
 
     pdf_token tok = PDF_TOK_NULL;
-    printf("\n\nToken Array:\n");
 
+//printf("GetTokenArray:\n");
     while ( tok != PDF_TOK_EOF )
     {
         ZondToken zond_token = { 0, };
@@ -217,14 +217,14 @@ pdf_zond_get_token_array( fz_context* ctx, fz_stream* stream )
         else if ( tok == PDF_TOK_INT ) zond_token.i = lxb.i;
         else if ( tok == PDF_TOK_STRING || tok == PDF_TOK_NAME ||
                 tok == PDF_TOK_KEYWORD ) zond_token.s = g_strdup( lxb.scratch );
-printf("%i   %s\n", tok, lxb.scratch );
-        pdf_lexbuf_fin( ctx, &lxb );
 
+        pdf_lexbuf_fin( ctx, &lxb );
+//printf("%i  %s\n", zond_token.tok, (zond_token.tok == PDF_TOK_KEYWORD) ? zond_token.s : "");
         g_array_append_val( arr_zond_token, zond_token );
     }
+//printf("End---\n");
 
     return arr_zond_token;
-
 }
 
 
@@ -498,7 +498,7 @@ pdf_zond_reassemble_buffer( fz_context* ctx, GArray* arr_zond_token, gchar** err
             case PDF_NUM_TOKENS:
                 break;
             case PDF_TOK_EOF:
-                fz_append_byte( ctx, fzbuf, 0 );
+             //   fz_append_byte( ctx, fzbuf, 0 );
                 break;
             case PDF_TOK_NAME:
                 fz_append_printf(ctx, fzbuf, "/%s ", zond_token.s);
@@ -531,11 +531,20 @@ pdf_zond_reassemble_buffer( fz_context* ctx, GArray* arr_zond_token, gchar** err
                 fz_append_printf(ctx, fzbuf, "%g ", zond_token.f);
                 break;
             case PDF_TOK_KEYWORD:
-                fz_append_printf(ctx, fzbuf, "%s\n", zond_token.s);
+                fz_append_printf(ctx, fzbuf, "%s", zond_token.s);
+                if ( !g_strcmp0( zond_token.s, "ID" ) ) fz_append_byte( ctx, fzbuf, ' ' );
+                fz_append_byte( ctx, fzbuf, '\n' );
                 break;
-            default:
-         //       fz_append_data(ctx, fzbuf, zond_token.s, strlen( zond_token.s ) -1 );
-         printf("%s\n", zond_token.s);
+            case PDF_TOK_TRUE:
+                fz_append_printf(ctx, fzbuf, "true " );
+                break;
+            case PDF_TOK_FALSE:
+                fz_append_printf(ctx, fzbuf, "false " );
+                break;
+            case PDF_TOK_NULL:
+                fz_append_printf(ctx, fzbuf, "null " );
+                break;
+            default: /* isregular: !isdelim && !iswhite && c != EOF */
                 break;
         }
     }

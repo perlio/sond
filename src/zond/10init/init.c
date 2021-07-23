@@ -195,7 +195,7 @@ init( GtkApplication* app )
 {
     Projekt* zond = NULL;
 
-    g_type_add_class_cache_func( NULL, init_class_cache );
+//    g_type_add_class_cache_func( NULL, init_class_cache );
 
     zond = g_malloc0( sizeof( Projekt ) );
 

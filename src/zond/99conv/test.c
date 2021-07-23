@@ -2,10 +2,12 @@
 #include "../error.h"
 
 #include "../99conv/general.h"
-#include "../99conv/pdf.h"
+#include "pdf.h"
+#include "pdf_ocr.h"
 
 #include "../20allgemein/project.h"
 
+#include <mupdf/fitz.h>
 #include <mupdf/pdf.h>
 #include <gtk/gtk.h>
 #include <sqlite3.h>
@@ -199,7 +201,7 @@ datei_query_filesystem( const gchar* filename, gchar** errmsg )
     return 1;
 }
 
-/*
+
 gint
 pdf_print_content_stream( fz_context* ctx, pdf_obj* page_ref, gchar** errmsg )
 {
@@ -208,21 +210,27 @@ pdf_print_content_stream( fz_context* ctx, pdf_obj* page_ref, gchar** errmsg )
     gchar* pos = NULL;
     size_t size = 0;
 
-    buf = pdf_get_content_stream_as_buffer( ctx, page_ref, errmsg );
+    buf = pdf_ocr_get_content_stream_as_buffer( ctx, page_ref, errmsg );
     if ( !buf ) ERROR_PAO( "pdf_ocr_get_content_stream_as_buffer" )
 
     size = fz_buffer_storage( ctx, buf, (guchar**) &data );
     pos = data;
     for ( gint i = 0; i < size; i++ )
     {
-        if ( !is_white( pos ) ) printf("%c", *pos );
+        if ( !(*pos == 0 ||
+                *pos == 9 ||
+                *pos == 10 ||
+                *pos == 12 ||
+                *pos == 13 ||
+                *pos == 31) ) printf("%c", *pos );
+        else if ( *pos == 10 || *pos == 13 ) printf("\n");
         else printf(" ");
         pos++;
     }
 
     return 0;
 }
-*/
+
 
 #ifdef _WIN32
 #include <windows.h>

@@ -32,7 +32,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../40viewer/document.h"
 
 #include "pdf.h"
-#include "../99conv/general.h"
+#include "general.h"
+#include "test.h"
 
 #ifdef _WIN32
 #include <errhandlingapi.h>
@@ -41,13 +42,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <string.h>
 #include <errno.h>
 #endif // _WIN32
-
-
-typedef struct _Tess_Recog
-{
-    TessBaseAPI* handle;
-    ETEXT_DESC* monitor;
-} TessRecog;
 
 
 static gint
@@ -83,114 +77,26 @@ pdf_ocr_update_content_stream( fz_context* ctx, pdf_obj* page_ref,
 }
 
 
-static gboolean
-pdf_ocr_text_showing_op( gchar* begin, gchar* end )
+fz_buffer*
+pdf_ocr_get_content_stream_as_buffer( fz_context* ctx, pdf_obj* page_ref,
+        gchar** errmsg )
 {
-    gchar* ptr = NULL;
+    pdf_obj* obj_contents = NULL;
+    fz_stream* stream = NULL;
+    fz_buffer* buf = NULL;
 
-    ptr = begin;
+    //Stream doc_text
+    obj_contents = pdf_dict_get( ctx, page_ref, PDF_NAME(Contents) );
 
-    while ( ptr < end )
+    fz_try( ctx )
     {
-        if ( *ptr == '"' || *ptr == 39 ) return TRUE;
-        if ( *ptr == 'T' )
-        {
-            if ( *(ptr + 1) == 'J' || *(ptr + 1) == 'j' ) return TRUE;
-        }
-
-        ptr++;
+        stream = pdf_open_contents_stream( ctx, pdf_get_bound_document( ctx, page_ref ), obj_contents );
+        buf = fz_read_all( ctx, stream, 1024 );
     }
+    fz_always( ctx ) fz_drop_stream( ctx, stream );
+    fz_catch( ctx ) ERROR_MUPDF_R( "open and read stream", NULL )
 
-    return FALSE;
-}
-
-
-static gboolean
-is_white( const char* s )
-{
-    if ( *s == 0 || *s == 9 || *s == 10 || *s == 12 || *s == 13 || *s == 32 )
-            return TRUE;
-
-    return FALSE;
-}
-
-
-static gint
-pdf_ocr_find_next_Tr( gchar* buf, size_t size, gchar** end_Tr )
-{
-    gchar* ptr = NULL;
-    gint64 num = 0;
-    gchar* endptr = NULL;
-
-    ptr = buf;
-
-    while ( ptr < buf + size )
-    {
-        //1. Zahl
-        num = g_ascii_strtoll( ptr, &endptr, 10 );
-        if ( ptr != endptr ) //Zahl gefunden
-        { //vorspulen
-            ptr = endptr;
-            while ( is_white( ptr) ) ptr++;
-        }
-        else
-        {
-            ptr++;
-            continue;
-        }
-
-        //2. Tr
-        if ( *ptr == 'T' && *(ptr + 1) == 'r' )
-        {
-            *end_Tr = ptr + 1;
-            return (gint) num;
-        }
-    }
-
-    //nix gefunden
-    *end_Tr = buf + size;
-
-    return -1;
-}
-
-
-static gboolean
-pdf_ocr_text_object_uniform_vis( gchar* BT, gchar* ET, gboolean vis_BT, gboolean* vis_ET,
-        gboolean* has_text )
-{
-    gboolean uniform = TRUE;
-    gchar* ptr = NULL;
-    gchar* end_ptr = NULL;
-    gint Tr_act = -1;
-    gint Tr = -1;
-
-    *has_text = FALSE;
-    *vis_ET = vis_BT;
-
-    //Sichtbarkeit des ersten angezeigten Textes ermitteln
-    ptr = BT;
-    while ( ptr < ET )
-    {
-        Tr_act = pdf_ocr_find_next_Tr( ptr, ET - ptr, &end_ptr );
-
-        if ( pdf_ocr_text_showing_op( ptr, end_ptr ) )
-        {
-            if ( *has_text && Tr_act != -1 )
-            {
-                if ( (Tr == 3) == (*vis_ET) ) uniform = FALSE;
-            }
-
-            *has_text = TRUE;
-        }
-
-        if ( Tr_act >= 0 ) Tr = Tr_act;
-
-        if ( Tr >= 0 ) *vis_ET = (Tr == 3) ? FALSE : TRUE;
-
-        ptr = end_ptr + 1;
-    }
-
-    return uniform;
+    return buf;
 }
 
 
@@ -241,47 +147,6 @@ pdf_ocr_find_next_BT( gchar* buf, size_t size, gchar** ET )
     if ( ET ) *ET = buf + size - 1;
 
     return buf + size - 1;
-}
-
-
-static fz_buffer*
-pdf_ocr_get_content_stream_as_buffer( fz_context* ctx, pdf_obj* page_ref,
-        gchar** errmsg )
-{
-    pdf_obj* obj_contents = NULL;
-    fz_stream* stream = NULL;
-    fz_buffer* buf = NULL;
-
-    //Stream doc_text
-    obj_contents = pdf_dict_get( ctx, page_ref, PDF_NAME(Contents) );
-
-    fz_try( ctx )
-    {
-        stream = pdf_open_contents_stream( ctx, pdf_get_bound_document( ctx, page_ref ), obj_contents );
-        buf = fz_read_all( ctx, stream, 1024 );
-        printf( "\n\nVorher:\n%s\n", buf->data );
-        fz_drop_stream( ctx, stream );
-
-        stream = pdf_open_contents_stream( ctx, pdf_get_bound_document( ctx, page_ref ), obj_contents );
-        GArray* arr_zond_token = pdf_zond_get_token_array( ctx, stream );
-
-        pdf_zond_filter_text( arr_zond_token, 3 );
-        fz_buffer* buf = pdf_zond_reassemble_buffer( ctx, arr_zond_token, errmsg );
-        if ( !buf ) ERROR_PAO_R( "pdf_zond_reassemble_buffer", NULL )
-
-        printf("%s\n", buf->data );
-
-        fz_drop_buffer( ctx, buf );
-        // Test
-//        gint rc = pdf_print_token( ctx, stream, errmsg );
-//        if ( rc ) ERROR_PAO_R( "pdf_print_token", NULL )
-
-
-    }
-    fz_always( ctx ) fz_drop_stream( ctx, stream );
-    fz_catch( ctx ) ERROR_MUPDF_R( "open and read stream", NULL )
-
-    return buf;
 }
 
 
@@ -391,157 +256,45 @@ pdf_ocr_get_mediabox( fz_context* ctx, pdf_obj* page )
 
     return rect;
 }
+typedef struct _Zond_Token
+{
+    pdf_token tok;
+    union
+    {
+        gint i;
+        gfloat f;
+        gchar* s;
+    };
+} ZondToken;
 
 
-/** Flags:
-*** 1<<0:   allg. Stream
-*** 1<<1:   TextObjekte sichtbar
-*** 1<<2:   TextObjekte unsichtbar  **/
+
 static gint
-pdf_ocr_filter_stream( fz_context* ctx, pdf_obj* page_ref, gint flags, gchar** errmsg )
+pdf_ocr_filter_content_stream( fz_context* ctx, pdf_obj* page_ref, gint flag, gchar** errmsg )
 {
     gint rc = 0;
+    pdf_obj* obj_contents = NULL;
+    fz_stream* stream = NULL;
+    GArray* arr_zond_token = NULL;
     fz_buffer* buf = NULL;
-    fz_buffer* buf_new = NULL;
-    gchar* data = NULL;
-    gchar* BT = NULL;
-    gchar* pos = NULL;
-    gchar* ET = NULL;
-    gchar* end_Tr = NULL;
-    gint last_Tr = -1;
-    size_t size = 0;
-    gboolean vis_TO = TRUE;
 
-    if ( flags == 7 ) return 0;
+    //Stream doc_text
+    obj_contents = pdf_dict_get( ctx, page_ref, PDF_NAME(Contents) );
 
-    fz_try( ctx ) buf_new = fz_new_buffer( ctx, 1024 );
-    fz_catch( ctx ) ERROR_MUPDF( "fz_new_buffer" )
+    fz_try( ctx ) stream = pdf_open_contents_stream( ctx, pdf_get_bound_document( ctx, page_ref ), obj_contents );
+    fz_catch( ctx ) ERROR_MUPDF( "pdf_open_contents_stream" )
 
-    buf = pdf_ocr_get_content_stream_as_buffer( ctx, page_ref, errmsg );
-    if ( !buf )
-    {
-        fz_drop_buffer( ctx, buf_new );
-        ERROR_PAO( "pdf_ocr_get_content_stream_as_buffer" )
-    }
+    arr_zond_token = pdf_zond_get_token_array( ctx, stream );
+    fz_drop_stream( ctx, stream );
 
-    size = fz_buffer_storage( ctx, buf, (guchar**) &data );
-    pos = data;
+    pdf_zond_filter_text( arr_zond_token, flag );
 
-    while ( pos < data + size - 1 )
-    {
-        gboolean uniform = FALSE;
-        gboolean has_text = FALSE;
-        gchar* ptr = NULL;
+    buf = pdf_zond_reassemble_buffer( ctx, arr_zond_token, errmsg );
+    g_array_unref( arr_zond_token );
+    if ( !buf ) ERROR_PAO( "pdf_zond_reassemble_buffer" )
 
-        BT = pdf_ocr_find_next_BT( pos, size - (pos - data) , &ET );
-
-        //wenn "normaler Stream" gewählt, dann alles außer Text-Objecten
-        if ( flags & 1 )
-        {
-            fz_try( ctx ) fz_append_data( ctx, buf_new, pos, BT - pos );
-            fz_catch( ctx )
-            {
-                fz_drop_buffer( ctx, buf );
-                fz_drop_buffer( ctx, buf_new );
-                ERROR_MUPDF( "fz_append_data" )
-            }
-        }
-
-        //falls "normaler" stream nicht kopiert werden soll UND erstes TextObject des streams...
-        if ( !(flags & 1) && pos == data && BT != ET ) //gucken, ob vorher (innerhalb q/Q-Rahmen) cm vorhanden
-        {
-            ptr = BT - 1;
-
-            while ( *ptr != 'q' )
-            {
-                if ( *ptr == 'm' && *(ptr - 1) == 'c' ) //cm gefunden
-                {
-                    ptr = ptr - 2;
-
-                    //sechs Leerstellen zurückspulen
-                    gint zaehler = 6;
-                    gdouble cm[6] = { 0.0 };
-                    while ( zaehler >= 0 )
-                    {
-                        if ( is_white( ptr ) )
-                        {
-                            zaehler--;
-                            while ( is_white( ptr ) ) ptr--;
-                            while ( !is_white( ptr ) ) ptr--;
-                        }
-                        cm[zaehler] = g_ascii_strtod( ptr, NULL );
-                    }
-
-                    gchar* cm_string = g_strdup_printf( "\n%g %g %g %g %g %g cm\n",
-                            cm[0], cm[1], cm[2], cm[3], cm[4], cm[5] );
-
-                    //Komma durch Punkt ersetzen
-                    for ( gint i = 0; i < strlen( cm_string ); i++ )
-                            if ( *(cm_string + i) == ',' ) *(cm_string + i) = '.';
-
-                    fz_try( ctx ) fz_append_data( ctx, buf_new, cm_string, strlen( cm_string ) );
-                    fz_catch( ctx )
-                    {
-                        fz_drop_buffer( ctx, buf );
-                        fz_drop_buffer( ctx, buf_new );
-                        ERROR_MUPDF( "fz_append_data" )
-                    }
-                    break;
-                }
-
-                ptr--;
-            }
-        }
-
-        if ( flags & 6 )
-        {
-            gboolean last_vis_TO = FALSE;
-
-            //vor dem aktuellen TextObject suchen
-            ptr = pos;
-            while ( ptr < BT )
-            {
-                gint search_Tr = pdf_ocr_find_next_Tr( ptr, BT - ptr, &end_Tr );
-                if ( search_Tr >= 0 ) last_Tr = search_Tr;
-                ptr = end_Tr + 1;
-            }
-
-            if ( last_Tr == 3 ) vis_TO = FALSE;
-            else if ( last_Tr >= 0 ) vis_TO = TRUE;
-
-            uniform = pdf_ocr_text_object_uniform_vis( BT, ET, vis_TO,
-                    &last_vis_TO, &has_text );
-
-            vis_TO = last_vis_TO;
-        }
-
-       if ( (!uniform && (flags & 6)) || //TextObject ist gemischt-vorläufig
-                                            //nur entfernen, wenn beide Sorten
-                                            //Text entfernt werden sollen
-                (uniform && (flags & 2) && has_text && vis_TO ) ||
-                (uniform && (flags & 4) && has_text && (!vis_TO)) ) //nur sichtbarer Text soll
-                                                        //entfernt werden und Text ist unsichtbar
-        {
-            fz_try( ctx )
-            {
-                fz_append_data( ctx, buf_new, BT, ET - BT + 1 );
-                fz_append_data( ctx, buf_new, "\n", 1 );
-            }
-            fz_catch( ctx )
-            {
-                fz_drop_buffer( ctx, buf );
-                fz_drop_buffer( ctx, buf_new );
-                ERROR_MUPDF( "fz_append_data" )
-            }
-        }
-
-        pos = ET + 1;
-    }
-
+    rc = pdf_ocr_update_content_stream( ctx, page_ref, buf, errmsg );
     fz_drop_buffer( ctx, buf );
-
-    rc = pdf_ocr_update_content_stream( ctx, page_ref, buf_new, errmsg );
-    fz_drop_buffer( ctx, buf_new );
     if ( rc ) ERROR_PAO( "pdf_ocr_update_content_stream" )
 
     return 0;
@@ -568,17 +321,17 @@ pdf_ocr_sandwich_page( PdfDocumentPage* pdf_document_page,
 
     fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
 
-    fz_try ( ctx )
-    {
-        pdf_flatten_inheritable_page_items( ctx, pdf_document_page->page->obj );
+    fz_try( ctx ) pdf_flatten_inheritable_page_items( ctx, pdf_document_page->page->obj );
+    fz_catch( ctx ) ERROR_MUPDF_R( "pdf_flatten_inheritable_page_items (orig)", -2 )
 
-        page_ref_text = pdf_lookup_page_obj( ctx, doc_text, page_text );
-        pdf_flatten_inheritable_page_items( ctx, page_ref_text );
-    }
-    fz_catch( ctx ) ERROR_MUPDF_R( "pdf_lookup_page", -2 );
+    fz_try( ctx ) page_ref_text = pdf_lookup_page_obj( ctx, doc_text, page_text );
+    fz_catch( ctx ) ERROR_MUPDF_R( "pdf_lookup_page_obj", -2 )
 
-    rc = pdf_ocr_filter_stream( ctx, pdf_document_page->page->obj, 3, errmsg );
-    if ( rc ) ERROR_PAO( "pdf_ocr_filter_stream" )
+    fz_try( ctx ) pdf_flatten_inheritable_page_items( ctx, page_ref_text );
+    fz_catch( ctx ) ERROR_MUPDF_R( "pdf_flatten_inheritable_page_items (text)", -2 );
+
+    rc = pdf_ocr_filter_content_stream( ctx, pdf_document_page->page->obj, 3, errmsg );
+    if ( rc ) ERROR_PAO( "pdf_ocr_filter_content_stream" )
 
     fz_rect rect = pdf_ocr_get_mediabox( ctx, pdf_document_page->page->obj );
     float scale = 1./4./72.*70.;
@@ -614,7 +367,7 @@ pdf_ocr_sandwich_page( PdfDocumentPage* pdf_document_page,
             zaehler++;
         }
 
-        //Jetzt aus Text-PDF - graf map erforderlich
+        //Jetzt aus Text-PDF - graft map erforderlich
         graft_map = pdf_new_graft_map( ctx, pdf_get_bound_document( ctx, pdf_document_page->page->obj ) ); //keine exception
 
         obj = pdf_dict_get( ctx, page_ref_text, PDF_NAME(Contents) );
@@ -715,6 +468,13 @@ pdf_ocr_sandwich_doc( GPtrArray* arr_document_pages, pdf_document* doc_text,
 
     return 0;
 }
+
+
+typedef struct _Tess_Recog
+{
+    TessBaseAPI* handle;
+    ETEXT_DESC* monitor;
+} TessRecog;
 
 
 static gpointer
@@ -844,7 +604,7 @@ pdf_ocr_render_pixmap( fz_context* ctx, pdf_document* doc, gint num,
 
 //thread-safe
 static pdf_document*
-pdf_ocr_create_doc_with_page( PdfDocumentPage* pdf_document_page, gint flag, gchar** errmsg )
+pdf_ocr_create_doc_from_page( PdfDocumentPage* pdf_document_page, gint flag, gchar** errmsg )
 {
     gint rc = 0;
     pdf_document* doc_new = NULL;
@@ -869,17 +629,14 @@ pdf_ocr_create_doc_with_page( PdfDocumentPage* pdf_document_page, gint flag, gch
     }
 
     fz_try( ctx ) page_ref = pdf_lookup_page_obj( ctx, doc_new, 0 );
-    fz_catch( ctx )
-    {
-        pdf_drop_document( ctx, doc_new );
-        ERROR_MUPDF_R( "pdf_lookup_page_obj", NULL );
-    }
+    fz_catch( ctx ) ERROR_MUPDF_R( "pdf_lookup_page_obj", NULL )
 
-    rc = pdf_ocr_filter_stream( ctx, page_ref, flag, errmsg );
+    //neues dokument mit einer Seite filtern
+    rc = pdf_ocr_filter_content_stream( ctx, page_ref, flag, errmsg );
     if ( rc )
     {
         pdf_drop_document( ctx, doc_new );
-        ERROR_PAO_R( "pdf_ocr_filter_stream", NULL );
+        ERROR_MUPDF_R( "pdf_ocr_filter_content_stream", NULL );
     }
 
     return doc_new;
@@ -895,22 +652,17 @@ pdf_ocr_page( PdfDocumentPage* pdf_document_page, InfoWindow* info_window,
     fz_pixmap* pixmap = NULL;
     pdf_document* doc_new = NULL;
 
-    doc_new = pdf_ocr_create_doc_with_page( pdf_document_page, 1, errmsg ); //thread-safe
+    doc_new = pdf_ocr_create_doc_from_page( pdf_document_page, 3, errmsg ); //thread-safe
     if ( !doc_new ) ERROR_PAO( "pdf_ocr_create_doc_with_page" )
 
-    fz_context* ctx = fz_clone_context( zond_pdf_document_get_ctx( pdf_document_page->document ) );
+    fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
 
     pixmap = pdf_ocr_render_pixmap( ctx, doc_new, 0, 4, errmsg );
     pdf_drop_document( ctx, doc_new );
-    if ( !pixmap )
-    {
-        fz_drop_context( ctx );
-        ERROR_PAO( "pdf_render_pixmap" )
-    }
+    if ( !pixmap ) ERROR_PAO( "pdf_render_pixmap" )
 
     rc = pdf_ocr_tess_page( info_window, handle, pixmap, errmsg );
     fz_drop_pixmap( ctx, pixmap );
-    fz_drop_context( ctx );
     if ( rc ) ERROR_PAO( "pdf_ocr_tess_page" )
 
     return 0;
@@ -952,15 +704,14 @@ pdf_ocr_render_images( PdfDocumentPage* pdf_document_page, gchar** errmsg )
     pdf_document* doc_tmp_orig = NULL;
     fz_pixmap* pixmap = NULL;
 
-    doc_tmp_orig = pdf_ocr_create_doc_with_page( pdf_document_page, 1, errmsg ); //thread-safe
-    if ( !doc_tmp_orig ) ERROR_PAO_R( "pdf_create_doc_with_page", NULL )
+    doc_tmp_orig = pdf_ocr_create_doc_from_page( pdf_document_page, 3, errmsg ); //thread-safe
+    if ( !doc_tmp_orig ) ERROR_PAO_R( "pdf_ocr_create_doc_with_page", NULL )
 
-    fz_context* ctx = fz_clone_context( zond_pdf_document_get_ctx( pdf_document_page->document ) );
+    fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
 
     pixmap = pdf_ocr_render_pixmap( ctx, doc_tmp_orig,
             0, 1.2, errmsg );
     pdf_drop_document( ctx, doc_tmp_orig );
-    fz_drop_context( ctx );
     if ( !pixmap ) ERROR_PAO_R( "pdf_ocr_render_pixmap", NULL )
 
     return pixmap;
@@ -1018,35 +769,33 @@ static gchar*
 pdf_ocr_get_hidden_text( PdfDocumentPage* pdf_document_page, gchar** errmsg )
 {
     pdf_document* doc_tmp_alt = NULL;
-    fz_page* page = NULL;
+    pdf_page* page = NULL;
     fz_stext_page* stext_page = NULL;
     fz_device* s_t_device = NULL;
     gchar* text = NULL;
 
-    //flag == 4: alles außer verstecktem Text herausfiltern
-    doc_tmp_alt = pdf_ocr_create_doc_with_page( pdf_document_page, 4, errmsg ); //thread-safe
+    //flag == 2: nur versteckten Text entfernen
+    doc_tmp_alt = pdf_ocr_create_doc_from_page( pdf_document_page, 2, errmsg ); //thread-safe
     if ( !doc_tmp_alt ) ERROR_PAO_R( "pdf_create_doc_with_page", NULL )
 
-    fz_context* ctx = fz_clone_context( zond_pdf_document_get_ctx( pdf_document_page->document ) );
+    fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
 
-    fz_try( ctx ) page = fz_load_page( ctx, (fz_document*) doc_tmp_alt, 0 );
+    fz_try( ctx ) page = pdf_load_page( ctx, doc_tmp_alt, 0 );
     fz_catch( ctx )
     {
         pdf_drop_document( ctx, doc_tmp_alt );
         ERR_MUPDF( "fz_load_page" );
-        fz_drop_context( ctx );
 
         return NULL;
     }
 
     //structured text-device
-    fz_try( ctx ) stext_page = fz_new_stext_page( ctx, fz_bound_page( ctx, page ) );
+    fz_try( ctx ) stext_page = fz_new_stext_page( ctx, pdf_bound_page( ctx, page ) );
     fz_catch( ctx )
     {
-        fz_drop_page( ctx, page );
+        fz_drop_page( ctx, &page->super );
         pdf_drop_document( ctx, doc_tmp_alt );
         ERR_MUPDF( "fz_new_stext_page" )
-        fz_drop_context( ctx );
 
         return NULL;
     }
@@ -1055,36 +804,31 @@ pdf_ocr_get_hidden_text( PdfDocumentPage* pdf_document_page, gchar** errmsg )
     fz_catch( ctx )
     {
         fz_drop_stext_page( ctx, stext_page );
-        fz_drop_page( ctx, page );
+        fz_drop_page( ctx, &page->super );
         pdf_drop_document( ctx, doc_tmp_alt );
         ERR_MUPDF( "fz_new_stext_device" )
-        fz_drop_context( ctx );
 
         return NULL;
     }
 
 //Seite durch's device laufen lassen
-    fz_try( ctx ) fz_run_page( ctx, page, s_t_device, fz_identity, NULL );
+    fz_try( ctx ) pdf_run_page( ctx, page, s_t_device, fz_identity, NULL );
     fz_always( ctx )
     {
         fz_close_device( ctx, s_t_device );
         fz_drop_device( ctx, s_t_device );
-        fz_drop_page( ctx, page );
+        fz_drop_page( ctx, &page->super );
         pdf_drop_document( ctx, doc_tmp_alt );
     }
     fz_catch( ctx )
     {
         fz_drop_stext_page( ctx, stext_page );
-        ERR_MUPDF( "fz_run_page" )
-        fz_drop_context( ctx );
-
-        return NULL;
+        ERROR_MUPDF_R( "fz_run_page", NULL )
     }
 
     //bisheriger versteckter Text
     text = pdf_ocr_get_text_from_stext_page( ctx, stext_page, errmsg );
     fz_drop_stext_page( ctx, stext_page );
-    fz_drop_context( ctx );
     if ( !text ) ERROR_PAO_R( "pdf_get_text_from_stext_page", NULL )
 
     return text;
@@ -1094,24 +838,18 @@ pdf_ocr_get_hidden_text( PdfDocumentPage* pdf_document_page, gchar** errmsg )
 //thread-safe
 static gint
 pdf_ocr_show_text( InfoWindow* info_window, PdfDocumentPage* pdf_document_page,
-        TessBaseAPI* handle, TessResultRenderer* renderer, gchar** errmsg )
+        gchar* text_alt, TessBaseAPI* handle, TessResultRenderer* renderer, gchar** errmsg )
 {
     gint rc = 0;
-    gchar* text_alt = NULL;
     fz_pixmap* pixmap_orig = NULL;
     gchar* text_neu = NULL;
 
-    //Bisherigen versteckten Text
-    text_alt = pdf_ocr_get_hidden_text( pdf_document_page, errmsg ); //thread-safe
-    if ( !text_alt ) ERROR_PAO( "pdf_ocr_get_hidden_text" )
+    fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
 
+    //Bisherigen versteckten Text
     //gerenderte Seite ohne sichtbaren Text
     pixmap_orig = pdf_ocr_render_images( pdf_document_page, errmsg ); //thread-safe
-    if ( !pixmap_orig )
-    {
-        g_free( text_alt );
-        ERROR_PAO( "pdf_ocr_render_images" )
-    }
+    if ( !pixmap_orig ) ERROR_PAO( "pdf_ocr_render_images" )
 
     //Eigene OCR
     //Wenn angezeigt werden soll, dann muß Seite erstmal OCRed werden
@@ -1119,10 +857,7 @@ pdf_ocr_show_text( InfoWindow* info_window, PdfDocumentPage* pdf_document_page,
     rc = pdf_ocr_page( pdf_document_page, info_window, handle, renderer, errmsg ); //thread-safe
     if ( rc )
     {
-        fz_context* ctx = fz_clone_context( zond_pdf_document_get_ctx( pdf_document_page->document ) );
         fz_drop_pixmap( ctx, pixmap_orig );
-        fz_drop_context( ctx );
-        g_free( text_alt );
         ERROR_PAO( "pdf_ocr_page" )
     }
     text_neu = TessBaseAPIGetUTF8Text( handle );
@@ -1138,7 +873,6 @@ pdf_ocr_show_text( InfoWindow* info_window, PdfDocumentPage* pdf_document_page,
     gtk_text_view_set_editable( GTK_TEXT_VIEW(text_view_alt), FALSE );
     gtk_text_buffer_set_text( gtk_text_view_get_buffer(
             GTK_TEXT_VIEW(text_view_alt) ), text_alt, -1 );
-    g_free( text_alt );
 
     GtkWidget* text_view_neu = gtk_text_view_new( );
     gtk_text_view_set_editable( GTK_TEXT_VIEW(text_view_neu), FALSE );
@@ -1189,58 +923,9 @@ pdf_ocr_show_text( InfoWindow* info_window, PdfDocumentPage* pdf_document_page,
     rc = gtk_dialog_run( GTK_DIALOG(dialog) );
 
     gtk_widget_destroy( dialog );
-    fz_context* ctx = fz_clone_context( zond_pdf_document_get_ctx( pdf_document_page->document ) );
-    fz_drop_pixmap( ctx, pixmap_orig );
-    fz_drop_context( ctx );
+//    fz_drop_pixmap( ctx, pixmap_orig ); //wird mit widget zerstört
 
     return rc;
-}
-
-
-/** thread-safe **/
-static gint
-pdf_ocr_page_has_hidden_text( PdfDocumentPage* pdf_document_page, gchar** errmsg )
-{
-    fz_buffer* buf = NULL;
-    gchar* data = NULL;
-    gchar* ptr = NULL;
-    size_t size = 0;
-
-    zond_pdf_document_mutex_lock( pdf_document_page->document );
-
-    fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
-
-    buf = pdf_ocr_get_content_stream_as_buffer( ctx, pdf_document_page->page->obj, errmsg );
-    if ( !buf )
-    {
-        zond_pdf_document_mutex_unlock( pdf_document_page->document );
-        ERROR_PAO( "pdf_ocr_get_content_stream_as_buffer" )
-    }
-
-    size = fz_buffer_storage( ctx, buf, (guchar**) &data );
-    ptr = data;
-    while ( ptr < data + size )
-    {
-        if ( *ptr == '3' )
-        {
-            ptr++;
-            while ( is_white( ptr ) ) ptr++;
-
-            if ( *ptr == 'T' && *(ptr + 1) == 'r' )
-            {
-                fz_drop_buffer( ctx, buf );
-                zond_pdf_document_mutex_unlock( pdf_document_page->document );
-
-                return 1;
-            }
-        }
-        ptr ++;
-    }
-    fz_drop_buffer( ctx, buf );
-
-    zond_pdf_document_mutex_unlock( pdf_document_page->document );
-
-    return 0;
 }
 
 
@@ -1249,7 +934,6 @@ pdf_ocr_create_pdf_only_text( InfoWindow* info_window,
         GPtrArray* arr_document_pages, TessBaseAPI* handle,
         TessResultRenderer* renderer, gchar** errmsg )
 {
-    gint rc = 0;
     gint len = 0;
     gint zaehler = 0;
     gint i = 0;
@@ -1260,6 +944,8 @@ pdf_ocr_create_pdf_only_text( InfoWindow* info_window,
     for ( i = 0; i < arr_document_pages->len; i++ )
     {
         gboolean rendered = FALSE;
+        gchar* page_text = NULL;
+        gint rc = 0;
 
         zaehler++;
 
@@ -1272,10 +958,10 @@ pdf_ocr_create_pdf_only_text( InfoWindow* info_window,
         info_window_set_message( info_window, info_text );
         g_free( info_text );
 
-        rc = pdf_ocr_page_has_hidden_text( pdf_document_page, errmsg ); //thread_safe
-        if ( rc == -1 ) ERROR_PAO( "pdf_ocr_page_has_hidden_text" )
+        page_text = pdf_ocr_get_hidden_text( pdf_document_page, errmsg );
+        if ( !page_text ) ERROR_PAO( "pdf_ocr_get_hidden_text" )
 
-        if ( rc == 1 && alle == 0 )
+        if ( g_strcmp0( page_text, "" ) && alle == 0 )
         {
             GtkWidget* dialog = pdf_ocr_create_dialog( info_window, index + 1 );
             //braucht nicht thread_safe zu sein
@@ -1287,11 +973,13 @@ pdf_ocr_create_pdf_only_text( InfoWindow* info_window,
             //Wenn Anzeigen gewählt wird, dialog in Unterfunktion neu starten
             if ( rc == 5 )
             {
-                rc = pdf_ocr_show_text( info_window, pdf_document_page, handle,
+                rc = pdf_ocr_show_text( info_window, pdf_document_page, page_text, handle,
                         renderer, errmsg ); //thread-safe
+                g_free( page_text );
                 if ( rc == -1 ) ERROR_PAO( "pdf_ocr_show_text" )
                 rendered = TRUE;
             }
+            else g_free( page_text );
 
             if ( rc == GTK_RESPONSE_CANCEL || rc == GTK_RESPONSE_DELETE_EVENT )
                     break;
@@ -1325,11 +1013,10 @@ pdf_ocr_create_pdf_only_text( InfoWindow* info_window,
 
 
 static gint
-init_tesseract( TessBaseAPI** handle, TessResultRenderer** renderer, gchar** errmsg )
+init_tesseract( TessBaseAPI** handle, TessResultRenderer** renderer, gchar* path_tmp, gchar** errmsg )
 {
     gint rc = 0;
     gchar* tessdata_dir = NULL;
-    gchar* path_tmp = NULL;
 
     //TessBaseAPI
     *handle = TessBaseAPICreate( );
@@ -1351,17 +1038,8 @@ init_tesseract( TessBaseAPI** handle, TessResultRenderer** renderer, gchar** err
         ERROR_PAO( "TessBaseAPIInit3:\nFehler bei Initialisierung" )
     }
 
-    path_tmp = get_path_from_base( "tmp/tess_tmp", errmsg );
-    if ( !path_tmp )
-    {
-        TessBaseAPIEnd( *handle );
-        TessBaseAPIDelete( *handle );
-        ERROR_PAO( "get_path_from_base" );
-    }
-
     //TessPdfRenderer
     *renderer = TessPDFRendererCreate( path_tmp, TessBaseAPIGetDatapath( *handle ), 1 );
-    g_free( path_tmp );
     if ( !(*renderer) )
     {
         TessBaseAPIEnd( *handle );
@@ -1384,9 +1062,17 @@ pdf_ocr_pages( Projekt* zond, InfoWindow* info_window, GPtrArray* arr_document_p
     gint rc = 0;
     TessBaseAPI* handle = NULL;
     TessResultRenderer* renderer = NULL;
+    gchar* path_tmp = NULL;
 
-    rc = init_tesseract( &handle, &renderer, errmsg );
-    if ( rc ) ERROR_PAO( "init_tesseract" )
+    path_tmp = get_path_from_base( "tmp/tess_tmp", errmsg );
+    if ( !path_tmp ) ERROR_PAO( "get_path_from_base" );
+
+    rc = init_tesseract( &handle, &renderer, path_tmp, errmsg );
+    if ( rc )
+    {
+        g_free( path_tmp );
+        ERROR_PAO( "init_tesseract" )
+    }
 
     rc = pdf_ocr_create_pdf_only_text( info_window, arr_document_pages, handle,
             renderer, errmsg );
@@ -1396,18 +1082,19 @@ pdf_ocr_pages( Projekt* zond, InfoWindow* info_window, GPtrArray* arr_document_p
     TessBaseAPIEnd( handle );
     TessBaseAPIDelete( handle );
 
-    if ( rc ) ERROR_PAO( "pdf_ocr_create_pdf_only_text" )
+    if ( rc )
+    {
+        g_free( path_tmp );
+        ERROR_PAO( "pdf_ocr_create_pdf_only_text" )
+    }
 
     //erzeugtes PDF mit nur Text mit muPDF öffnen
-    gchar* path_tmp = NULL;
     pdf_document* doc_text = NULL;
-
-    path_tmp = get_path_from_base( "tmp/tess_tmp.pdf", errmsg );
-    if ( !path_tmp ) ERROR_PAO_R( "get_path_from_base", -2 );
+    path_tmp = add_string( path_tmp, g_strdup( ".pdf" ) );
 
     //doc mit text öffnen
     fz_try( zond->ctx ) doc_text = pdf_open_document( zond->ctx, path_tmp );
-    fz_always( zond->ctx ) { g_free( path_tmp ); }
+    fz_always( zond->ctx ) g_free( path_tmp );
     fz_catch( zond->ctx ) ERROR_MUPDF_CTX( "pdf_open_document", zond->ctx )
 
     //Text in PDF übertragen
@@ -1418,89 +1105,3 @@ pdf_ocr_pages( Projekt* zond, InfoWindow* info_window, GPtrArray* arr_document_p
     return 0;
 }
 
-
-/*
-Irgendwie sind die Bibliotheken für das Lesen von Pdf etc nicht mitkompiliert
-D.h. wenn müßte das über command_line gehen
-gint
-ocr_convert_page( const gchar* path, gint page, gchar** errmsg )
-{
-    MagickBooleanType status;
-	MagickWand *mw = NULL;
-
-	MagickWandGenesis( );
-
-	// Create a wand
-	mw = NewMagickWand();
-
-	gchar* image = g_strdup_printf( "%s[%i]", path, page );
-
-	// Read the input image
-	status = MagickReadImage( mw, "audio.png" ); //image );
-	g_free( image );
-	if ( status == MagickFalse )
-    {
-        char *description = NULL;
-        ExceptionType severity;
-        description = MagickGetException( mw, &severity );
-
-        if ( errmsg ) *errmsg = add_string( *errmsg,
-                g_strconcat( "Bei Aufruf MagickReadImage:\n",
-                description, NULL ) );
-        MagickRelinquishMemory( description );
-
-        return -1;
-    }
-
-	// write it
-	MagickWriteImage( mw, "out.tiff" );
-
-	// Tidy up
-	if(mw) mw = DestroyMagickWand(mw);
-
-	MagickWandTerminus();
-
-	return 0;
-}
-*/
-/*
-gint
-pdf_ocr_to_tiff( const gchar* path, gint page, gchar** errmsg )
-{
-    gint exit = 0;
-    GError* error = NULL;
-    gchar* path_page = NULL;
-
-    path_page = g_strdup_printf( "%s[%i]", path, page );
-
-    gchar* argv[13] = { NULL };
-    argv[0] = "C:/_msys64/mingw64/bin/convert";
-    argv[1] = "-density";
-    argv[2] = "300";
-    argv[3] = path_page;
-    argv[4] = "-depth";
-    argv[5] = "8";
-    argv[6] = "-strip";
-    argv[7] = "-background";
-    argv[8] = "white";
-    argv[9] = "-alpha";
-    argv[10] = "off";
-    argv[11] = "output.tiff";
-    argv[12] = NULL;
-
-
-    gboolean rc = g_spawn_sync( NULL, argv, NULL, G_SPAWN_DEFAULT,
-            NULL, NULL, NULL, NULL, &exit, &error );
-    g_free( path_page );
-    if ( !rc )
-    {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_spawn_async:\n",
-                error->message, NULL );
-        g_error_free( error );
-
-        return -1;
-    }
-
-	return 0;
-}
-*/

@@ -205,10 +205,6 @@ viewer_page_ist_sichtbar( PdfViewer* pv, gint page )
 static void
 viewer_push_thread( GThreadPool* thread_pool, gint page, gint mode )
 {
-    gint data = 0;
-
-    data = mode + (page * 4);
-
     g_thread_pool_push( thread_pool, GINT_TO_POINTER(page + 1), NULL );
 
     return;
@@ -998,7 +994,7 @@ cb_pv_copy_text( GtkMenuItem* item, gpointer data )
 
     if ( i == 0 ) return;
 
-    ctx = fz_clone_context( zond_pdf_document_get_ctx( pdf_document_page->document ) );
+    ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
     text = fz_copy_selection( ctx, pdf_document_page->stext_page,
             pv->click_pdf_punkt.punkt, pv->highlight[i].ll, FALSE );
 
@@ -1359,10 +1355,9 @@ cb_viewer_layout_motion_notify( GtkWidget* layout, GdkEvent* event, gpointer dat
             {
                 PdfDocumentPage* pdf_document_page = viewer_page_get_document_page( g_ptr_array_index( pv->arr_pages, pv->click_pdf_punkt.seite ) );
 
-                fz_context* ctx = fz_clone_context( zond_pdf_document_get_ctx( pdf_document_page->document ) );
+                fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
                 gint n = fz_highlight_selection( ctx, pdf_document_page->stext_page,
                         pv->click_pdf_punkt.punkt, pdf_punkt.punkt, pv->highlight, 999 );
-                fz_drop_context( ctx );
 
                 pv->highlight[n].ul.x = -1;
                 pv->highlight[n].ll = pdf_punkt.punkt;
@@ -1496,7 +1491,7 @@ cb_viewer_layout_release_button( GtkWidget* layout, GdkEvent* event, gpointer da
                 if ( rc )
                 {
                     meldung( pv->vf, "Fehler - Annotation einfügen\n\n"
-                            "Bei Aufruf viewer_reload_fz_page:\n", errmsg, NULL );
+                            "Bei Aufruf zond_pdf_document_page_refresh:\n", errmsg, NULL );
                     g_free( errmsg );
                 }
 
