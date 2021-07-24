@@ -315,10 +315,14 @@ pdf_zond_filter_text( GArray* arr_zond_token, gint flags )
             }
             else if ( !g_strcmp0( zond_token.s, "Tr" ) )
             {
+                ZondToken zond_token_prev = { 0 };
+
                 if ( text_state.Tr != -1 ) pdf_zond_invalidate_token( arr_zond_token, text_state.Tr, 2 );
 
                 text_state.Tr = i;
-                text_state.Tr_act = zond_token.i;
+
+                zond_token_prev = g_array_index( arr_zond_token, ZondToken, i - 1 );
+                text_state.Tr_act = zond_token_prev.i;
             }
             else if ( !g_strcmp0( zond_token.s, "Ts" ) )
             {
@@ -363,7 +367,7 @@ pdf_zond_filter_text( GArray* arr_zond_token, gint flags )
             {
                 //soll Text gefiltert werden?
                 if ( flags == 3 || (flags == 1 && text_state.Tr_act != 3) ||
-                        (flags == 2 && text_state.Tr_act == 3) ) //nicht anzeigen!
+                        (flags == 2 && text_state.Tr_act == 3) ) //löschen!
                 {
                     //Löschen bzw. ersetzen
                     if ( !g_strcmp0( zond_token.s, "Tj" ) )

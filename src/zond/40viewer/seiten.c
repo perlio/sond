@@ -283,6 +283,16 @@ seiten_abfrage_seiten( PdfViewer* pv, const gchar* title, gint* winkel )
 /*
 **  Seiten OCR
 */
+//wrapper, weil viewer_thread_render void ist; viewer_foreach gibt dann Fehler zurück
+static gint
+seiten_ocr_foreach( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg )
+{
+    viewer_thread_render( pv, page_pv );
+
+    return 0;
+}
+
+
 void
 cb_pv_seiten_ocr( GtkMenuItem* item, gpointer data )
 {
@@ -333,8 +343,8 @@ cb_pv_seiten_ocr( GtkMenuItem* item, gpointer data )
             g_free( errmsg );
         }
 
-        rc = viewer_foreach( pv->zond->arr_pv, pdf_document_page,
-                (gint (*) (PdfViewer*, gint, gpointer, gchar**)) viewer_thread_render, NULL, &errmsg );
+        rc = viewer_foreach( pv->zond->arr_pv, pdf_document_page, seiten_ocr_foreach,
+                NULL, &errmsg );
         if ( rc )
         {
             meldung( pv->vf, "Fehler - OCR\n\nBei Aufruf viewer_foreach:\n",

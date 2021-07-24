@@ -774,8 +774,8 @@ pdf_ocr_get_hidden_text( PdfDocumentPage* pdf_document_page, gchar** errmsg )
     fz_device* s_t_device = NULL;
     gchar* text = NULL;
 
-    //flag == 2: nur versteckten Text entfernen
-    doc_tmp_alt = pdf_ocr_create_doc_from_page( pdf_document_page, 2, errmsg ); //thread-safe
+    //flag == 1: nur sichtbaren Text entfernen
+    doc_tmp_alt = pdf_ocr_create_doc_from_page( pdf_document_page, 1, errmsg ); //thread-safe
     if ( !doc_tmp_alt ) ERROR_PAO_R( "pdf_create_doc_with_page", NULL )
 
     fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
@@ -788,7 +788,7 @@ pdf_ocr_get_hidden_text( PdfDocumentPage* pdf_document_page, gchar** errmsg )
 
         return NULL;
     }
-
+pdf_print_content_stream( ctx, page->obj, errmsg );
     //structured text-device
     fz_try( ctx ) stext_page = fz_new_stext_page( ctx, pdf_bound_page( ctx, page ) );
     fz_catch( ctx )
