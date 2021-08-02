@@ -162,7 +162,7 @@ pdf_ocr_process_tess_tmp( fz_context* ctx, pdf_obj* page_ref,
     gchar* cm = NULL;
     gchar* BT = NULL;
 
-    cm = g_strdup_printf( "\n%g %g %g %g %g %g cm\nBT",
+    cm = g_strdup_printf( "\nq\n%g %g %g %g %g %g cm\nBT",
             ctm.a, ctm.b, ctm.c, ctm.d, ctm.e, ctm.f );
 
     //Komma durch Punkt ersetzen
@@ -191,6 +191,7 @@ pdf_ocr_process_tess_tmp( fz_context* ctx, pdf_obj* page_ref,
     {
         fz_append_data( ctx, buf_new, cm, strlen( cm ) );
         fz_append_data( ctx, buf_new, BT + 2, size - (BT + 2 - data) );
+        fz_append_data( ctx, buf_new, "\nQ\n", 3 );
     }
     fz_always( ctx )
     {

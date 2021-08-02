@@ -937,7 +937,7 @@ pdf_zond_filter_content_stream( GArray* arr_zond_token, gint flags )
             }
             else if ( !g_strcmp0( zond_token.s, "Q" ) )
             {
-                if ( GS_act->q != -1 )
+                if ( GS_act->q >= GS_act->begin )
                 {
                     pdf_zond_invalidate_token( arr_zond_token, GS_act->q, 1 );
                     pdf_zond_invalidate_token( arr_zond_token, i, 1 );

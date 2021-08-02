@@ -640,38 +640,47 @@ viewer_abfragen_pdf_punkt( PdfViewer* pv, fz_point punkt, PdfPunkt* pdf_punkt )
 
     gint i = 0;
 
-    for ( i = 0; i < pv->arr_pages->len; i++ )
-    {
-        fz_rect rect = viewer_page_get_crop( g_ptr_array_index( pv->arr_pages, i ) );
-
-        pdf_punkt->delta_y = rect.y0;
-
-        v_unten = v_oben +
-                (rect.y1 - rect.y0) * pv->zoom / 100;
-
-        if ( punkt.y >= v_oben && punkt.y <= v_unten )
-        {
-            pdf_punkt->seite = i;
-            pdf_punkt->punkt.y = (punkt.y - v_oben) / pv->zoom * 100 + rect.y0;
-
-            break;
-        }
-        else if ( punkt.y < v_unten )
-        {
-            pdf_punkt->seite = i - 1;
-            pdf_punkt->punkt.y = EOP;
-
-            break;
-        }
-
-        v_oben = v_unten + 10;
-    }
-
-    if ( i == pv->arr_pages->len )
+    if ( punkt.y < 0 )
     {
         ret = -1;
-        pdf_punkt->seite = i - 1;
-        pdf_punkt->punkt.y = EOP;
+        pdf_punkt->seite = 0;
+        pdf_punkt->punkt.y = 0;
+    }
+    else
+    {
+        for ( i = 0; i < pv->arr_pages->len; i++ )
+        {
+            fz_rect rect = viewer_page_get_crop( g_ptr_array_index( pv->arr_pages, i ) );
+
+            pdf_punkt->delta_y = rect.y0;
+
+            v_unten = v_oben +
+                    (rect.y1 - rect.y0) * pv->zoom / 100;
+
+            if ( punkt.y >= v_oben && punkt.y <= v_unten )
+            {
+                pdf_punkt->seite = i;
+                pdf_punkt->punkt.y = (punkt.y - v_oben) / pv->zoom * 100 + rect.y0;
+
+                break;
+            }
+            else if ( punkt.y < v_unten )
+            {
+                pdf_punkt->seite = i - 1;
+                pdf_punkt->punkt.y = EOP;
+
+                break;
+            }
+
+            v_oben = v_unten + 10;
+        }
+
+        if ( i == pv->arr_pages->len )
+        {
+            ret = -1;
+            pdf_punkt->seite = i - 1;
+            pdf_punkt->punkt.y = EOP;
+        }
     }
 
     fz_rect rect = { 0 };

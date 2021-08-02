@@ -556,7 +556,7 @@ zond_pdf_document_save( ZondPdfDocument* self, gchar** errmsg )
                 1, // do_garbage
                 0, // do_linear
                 1, // do_clean
-                1, // do_sanitize
+                0, // do_sanitize
                 0, // do_appearance
                 0, // do_encrypt
                 0, // dont_regenerate_id  Don't regenerate ID if set (used for clean)
