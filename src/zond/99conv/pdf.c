@@ -177,6 +177,7 @@ typedef struct _Zond_Token
         gint i;
         gfloat f;
         gchar* s;
+        GByteArray* gba;
     };
 } ZondToken;
 
@@ -186,8 +187,9 @@ pdf_zond_free_token_array( gpointer data )
 {
     ZondToken* zond_token = (ZondToken*) data;
 
-    if ( zond_token->tok == PDF_TOK_STRING || zond_token->tok == PDF_TOK_NAME ||
-            zond_token->tok == PDF_TOK_KEYWORD ) g_free( zond_token->s );
+    if ( zond_token->tok == PDF_TOK_KEYWORD || zond_token->tok == PDF_TOK_NAME )
+            g_free( zond_token->s );
+    else if ( zond_token->tok == PDF_TOK_STRING ) g_byte_array_unref( zond_token->gba );
 
     return;
 }
@@ -201,7 +203,6 @@ pdf_zond_get_token_array( fz_context* ctx, fz_stream* stream )
 
     pdf_token tok = PDF_TOK_NULL;
 
-//printf("GetTokenArray:\n");
     while ( tok != PDF_TOK_EOF )
     {
         ZondToken zond_token = { 0, };
@@ -215,14 +216,18 @@ pdf_zond_get_token_array( fz_context* ctx, fz_stream* stream )
 
         if ( tok == PDF_TOK_REAL ) zond_token.f = lxb.f;
         else if ( tok == PDF_TOK_INT ) zond_token.i = lxb.i;
-        else if ( tok == PDF_TOK_STRING || tok == PDF_TOK_NAME ||
-                tok == PDF_TOK_KEYWORD ) zond_token.s = g_strdup( lxb.scratch );
+        else if ( tok == PDF_TOK_NAME || tok == PDF_TOK_KEYWORD )
+                zond_token.s = g_strdup( lxb.scratch );
+        else if ( tok == PDF_TOK_STRING )
+        {
+            zond_token.gba = g_byte_array_new( );
+            g_byte_array_append( zond_token.gba, (guint8*) lxb.scratch, lxb.len );
+        }
 
         pdf_lexbuf_fin( ctx, &lxb );
-//printf("%i  %s\n", zond_token.tok, (zond_token.tok == PDF_TOK_KEYWORD) ? zond_token.s : "");
+
         g_array_append_val( arr_zond_token, zond_token );
     }
-//printf("End---\n");
 
     return arr_zond_token;
 }
@@ -508,7 +513,9 @@ pdf_zond_reassemble_buffer( fz_context* ctx, GArray* arr_zond_token, gchar** err
                 fz_append_printf(ctx, fzbuf, "/%s ", zond_token.s);
                 break;
             case PDF_TOK_STRING:
-                fz_append_pdf_string(ctx, fzbuf, zond_token.s);
+                fz_append_byte( ctx, fzbuf, '(' );
+                fz_append_data(ctx, fzbuf, zond_token.gba->data, zond_token.gba->len );
+                fz_append_byte( ctx, fzbuf, ')' );
                 break;
             case PDF_TOK_OPEN_DICT:
                 fz_append_string(ctx, fzbuf, "<<");
@@ -556,6 +563,438 @@ pdf_zond_reassemble_buffer( fz_context* ctx, GArray* arr_zond_token, gchar** err
     return fzbuf;
 }
 
+
+struct GraphicsState
+{
+    gint begin;
+    gint Tr_act;
+    gint q;
+    GArray* arr_cm;
+    struct
+    {
+        gint Tc;
+        gint Tw;
+        gint Tz;
+        gint TL;
+        gint Tf;
+        gint Tr;
+        gint Ts;
+    };
+};
+
+
+//immer "allgemeine" States (cm)
+//1: Text
+static void
+zond_pdf_reset_gs( GPtrArray* arr_gs, gint flags )
+{
+    gint idx = arr_gs->len - 1;
+
+    do
+    {
+        struct GraphicsState* GS_act = g_ptr_array_index( arr_gs, idx );
+
+        if ( GS_act->q >= GS_act->begin ) GS_act->q = -1; //ist natürlich nur beim letzten der Fall
+        for ( gint i = GS_act->arr_cm->len - 1; i >= 0; i-- )
+        {
+            if ( g_array_index( GS_act->arr_cm, gint, i ) >= GS_act->begin ) g_array_index( GS_act->arr_cm, gint, i ) = -1;
+        }
+
+        //TextState
+        if ( flags & 1 )
+        {
+            if ( GS_act->Tc >= GS_act->begin ) GS_act->Tc = -1;
+            if ( GS_act->Tw >= GS_act->begin ) GS_act->Tw = -1;
+            if ( GS_act->Tz >= GS_act->begin ) GS_act->Tz = -1;
+            if ( GS_act->TL >= GS_act->begin ) GS_act->TL = -1;
+            if ( GS_act->Tf >= GS_act->begin ) GS_act->Tf = -1;
+            if ( GS_act->Tr >= GS_act->begin ) GS_act->Tr = -1;
+            if ( GS_act->Ts >= GS_act->begin ) GS_act->Ts = -1;
+        }
+
+        idx--;
+    } while ( idx >= 0 );
+
+    return;
+}
+
+
+static struct GraphicsState*
+zond_pdf_restore_gs( GPtrArray* arr_gs )
+{
+    g_ptr_array_remove_index( arr_gs, arr_gs->len - 1 );
+
+    struct GraphicsState* GS = g_ptr_array_index( arr_gs, arr_gs->len - 1 );
+
+    return GS;
+}
+
+
+static struct GraphicsState*
+zond_pdf_store_gs( GPtrArray* arr_gs, gint i )
+{
+    struct GraphicsState* GS_act = g_ptr_array_index( arr_gs, arr_gs->len - 1 );
+
+    //alte Werte übernehmen
+    struct GraphicsState* GS_new = g_memdup2( GS_act, sizeof( struct GraphicsState ) );
+
+    //nur Beginn (q) aktuell
+    GS_new->begin = i;
+    GS_new->q = GS_new->begin;
+
+    GS_new->arr_cm = g_array_copy( GS_act->arr_cm );
+
+    g_ptr_array_add( arr_gs, GS_new );
+
+    return GS_new;
+}
+
+
+static void
+pdf_zond_free_gs( gpointer data )
+{
+    struct GraphicsState* GS = (struct GraphicsState*) data;
+
+    g_array_unref( GS->arr_cm );
+
+    g_free( GS );
+
+    return;
+}
+
+
+void
+pdf_zond_filter_content_stream( GArray* arr_zond_token, gint flags )
+{
+    struct BT
+    {
+        gint BT;
+
+        gint Td;
+        gint TD;
+        gint Tm;
+        gint TAst;
+    } BT = { -1, -1, -1, -1, -1 };
+
+    struct BI
+    {
+        gint BI;
+        gint ID;
+    } BI = { -1, -1 };
+
+    gint BX = -1;
+
+    GPtrArray* arr_gs = g_ptr_array_new( );
+    g_ptr_array_set_free_func( arr_gs, pdf_zond_free_gs );
+
+    //Ausgangs-GS
+    struct GraphicsState* GS_act = g_malloc0( sizeof ( struct GraphicsState ) );
+    GS_act->q = -1;
+    GS_act->arr_cm = g_array_new( FALSE, FALSE, sizeof( gint ) );
+    GS_act->Tc = -1;
+    GS_act->Tw = -1;
+    GS_act->Tz = -1;
+    GS_act->TL = -1;
+    GS_act->Tf = -1;
+    GS_act->Tr = -1;
+    GS_act->Ts = -1;
+    g_ptr_array_add( arr_gs, GS_act );
+
+    gint last_token = -1;
+
+    //Tokens durchgehen
+    for ( gint i = 0; i < arr_zond_token->len; i++ )
+    {
+        ZondToken zond_token = g_array_index( arr_zond_token, ZondToken, i );
+
+        if ( (zond_token.tok == PDF_TOK_KEYWORD) )
+        {
+            if ( !g_strcmp0( zond_token.s, "q" ) ) GS_act = zond_pdf_store_gs( arr_gs, i );
+            else if ( !g_strcmp0( zond_token.s, "cm" ) ) g_array_append_val( GS_act->arr_cm, i );
+            else if ( !g_strcmp0( zond_token.s, "Tc" ) )
+            {
+                //nur wenn Operand in gleicher Ebene bereits gesetzt wurde, steht fest, das vorheriger nutzlos ist
+                if ( GS_act->Tc >= GS_act->begin )
+                        pdf_zond_invalidate_token( arr_zond_token, GS_act->Tc, 2 );
+
+                GS_act->Tc = i;
+            }
+            else if ( !g_strcmp0( zond_token.s, "Tw" ) )
+            {
+                if ( GS_act->Tw >= GS_act->begin ) //stammt aus der gleichen Ebene
+                        pdf_zond_invalidate_token( arr_zond_token, GS_act->Tw, 2 );
+
+                GS_act->Tw = i;
+            }
+            else if ( !g_strcmp0( zond_token.s, "Tz" ) )
+            {
+                if ( GS_act->Tz >= GS_act->begin ) //stammt aus der gleichen Ebene
+                        pdf_zond_invalidate_token( arr_zond_token, GS_act->Tz, 2 );
+
+                GS_act->Tz = i;
+            }
+            else if ( !g_strcmp0( zond_token.s, "TL" ) )
+            {
+                if ( GS_act->TL >= GS_act->begin ) //stammt aus der gleichen Ebene
+                        pdf_zond_invalidate_token( arr_zond_token, GS_act->TL, 2 );
+
+                GS_act->TL = i;
+            }
+            else if ( !g_strcmp0( zond_token.s, "Tf" ) )
+            {
+                if ( GS_act->Tf >= GS_act->begin ) //stammt aus der gleichen Ebene
+                        pdf_zond_invalidate_token( arr_zond_token, GS_act->Tf, 3 );
+
+                GS_act->Tf = i;
+            }
+            else if ( !g_strcmp0( zond_token.s, "Tr" ) )
+            {
+                ZondToken zond_token_prev = { 0 };
+
+                zond_token_prev = g_array_index( arr_zond_token, ZondToken, i - 1 );
+                GS_act->Tr_act = zond_token_prev.i;
+
+                if ( GS_act->Tr >= GS_act->begin ) //stammt aus der gleichen Ebene
+                        pdf_zond_invalidate_token( arr_zond_token, GS_act->Tr, 2 );
+
+                GS_act->Tr = i;
+            }
+            else if ( !g_strcmp0( zond_token.s, "Ts" ) )
+            {
+                if ( GS_act->Ts >= GS_act->begin ) //stammt aus der gleichen Ebene
+                        pdf_zond_invalidate_token( arr_zond_token, GS_act->Ts, 2 );
+
+                GS_act->Ts = i;
+            }
+
+            //nur merken, wo ist, ob gelöscht wird bei ET entschieden
+            else if ( !g_strcmp0( zond_token.s, "BT" ) ) //initialisieren
+            {
+                BT.BT = i;
+                BT.Td = -1;
+                BT.TD = -1;
+                BT.Tm = -1;
+                BT.TAst = -1;
+            }
+
+            else if ( !g_strcmp0( zond_token.s, "Td" ) )
+            {
+                if ( BT.Td != -1 ) pdf_zond_invalidate_token( arr_zond_token, BT.Td, 3 );
+
+                BT.Td = i;
+            }
+            else if ( !g_strcmp0( zond_token.s, "TD" ) )
+            {
+                if ( BT.TD != -1 ) pdf_zond_invalidate_token( arr_zond_token, BT.TD, 3 );
+
+                BT.TD = i;
+            }
+            else if ( !g_strcmp0( zond_token.s, "Tm" ) )
+            {
+                if ( BT.Tm != -1 ) pdf_zond_invalidate_token( arr_zond_token, BT.Tm, 7 );
+
+                BT.Tm = i;
+            }
+            else if ( !g_strcmp0( zond_token.s, "TAst" ) )
+            {
+                if ( BT.TAst != -1 ) pdf_zond_invalidate_token( arr_zond_token, BT.TAst, 1 );
+
+                BT.TAst = i;
+            }
+
+
+            else if ( !g_strcmp0( zond_token.s, "Tj" ) ||
+                    !g_strcmp0( zond_token.s, "'" ) ||
+                    !g_strcmp0( zond_token.s, """" ) ||
+                    !g_strcmp0( zond_token.s, "TJ" ) )
+            {
+                //soll Text gefiltert werden?
+                if ( flags == 3 || (flags == 1 && GS_act->Tr_act != 3) ||
+                        (flags == 2 && GS_act->Tr_act == 3) ) //löschen!
+                {
+                    //Löschen bzw. ersetzen
+                    if ( !g_strcmp0( zond_token.s, "Tj" ) )
+                    {
+                        g_array_remove_range( arr_zond_token, i - 1, 2 );
+                        i = i - 2;
+                    }
+                    else if ( !g_strcmp0( zond_token.s, "'" ) )
+                    {
+                        g_array_remove_range( arr_zond_token, i - 1, 2 );
+
+                        pdf_zond_insert_keyword( arr_zond_token, "T*", i - 1 );
+
+                        if ( BT.TAst != -1 ) pdf_zond_invalidate_token( arr_zond_token, BT.TAst, 1 );
+                        BT.TAst = i - 1;
+
+                        i--; //auf i - 1 gehen; array eins kürzer geworden!
+                    }
+                    else if ( !g_strcmp0( zond_token.s, """" ) )
+                    {
+                        pdf_zond_insert_keyword( arr_zond_token, "Tw", i - 2 );
+                        g_array_remove_range( arr_zond_token, i, 2 );
+                        pdf_zond_insert_keyword( arr_zond_token, "Tc", i );
+                        pdf_zond_insert_keyword( arr_zond_token, "T*", i + 1 );
+
+                        if ( GS_act->Tw != -1 && GS_act->Tw >= GS_act->begin ) //stammt aus der gleichen Ebene
+                                pdf_zond_invalidate_token( arr_zond_token, GS_act->Tw, 2 );
+                        GS_act->Tw = i - 2;
+
+                        if ( GS_act->Tc != -1 && GS_act->Tc >= GS_act->begin ) //stammt aus der gleichen Ebene
+                                pdf_zond_invalidate_token( arr_zond_token, GS_act->Tc, 2 );
+                        GS_act->Tw = i;
+
+                        if ( BT.TAst != -1 ) pdf_zond_invalidate_token( arr_zond_token, BT.TAst, 1 );
+                        BT.TAst = i + 1;
+
+                        i++;
+                    }
+                    else if ( !g_strcmp0( zond_token.s, "TJ" ) )
+                    {
+                        //Beginn array finden
+                        ZondToken zond_token_begin;
+                        gint begin = i;
+                        do
+                        {
+                            begin--;
+                            zond_token_begin = g_array_index( arr_zond_token, ZondToken, begin );
+                        } while ( zond_token_begin.tok != PDF_TOK_OPEN_ARRAY );
+
+                        g_array_remove_range( arr_zond_token, begin, i - begin + 1 );
+
+                        i = begin - 1;
+                    }
+                }
+                else //Text wird angezeigt
+                {
+                    //BT resetten
+                    BT.BT = -1;
+
+                    BT.Td = -1;
+                    BT.TD = -1;
+                    BT.Tm = -1;
+                    BT.TAst = -1;
+
+                    //BX resetten
+                    BX = -1;
+
+                    //reset graphics_state
+                    zond_pdf_reset_gs( arr_gs, 1 );
+                }
+            }
+
+            else if ( !g_strcmp0( zond_token.s, "ET" ) )
+            {
+                //BT löschen, wenn nicht resetted
+                if ( BT.BT != -1 )
+                {
+                    pdf_zond_invalidate_token( arr_zond_token, BT.BT, 1 );
+                    //und ET löschen
+                    pdf_zond_invalidate_token( arr_zond_token, i, 1 );
+                }
+
+                //Text Pos-Operatoren löschen
+                if ( BT.Td != -1 ) pdf_zond_invalidate_token( arr_zond_token, BT.Td, 3 );
+                if ( BT.TD != -1 ) pdf_zond_invalidate_token( arr_zond_token, BT.TD, 3 );
+                if ( BT.Tm != -1 ) pdf_zond_invalidate_token( arr_zond_token, BT.Tm, 7 );
+                if ( BT.TAst != -1 ) pdf_zond_invalidate_token( arr_zond_token, BT.TAst, 1 );
+            }
+
+            else if ( !g_strcmp0( zond_token.s, "BI" ) )
+            {
+                BI.BI = i;
+                BI.ID = -1;
+            }
+            else if ( !g_strcmp0( zond_token.s, "ID" ) ) BI.ID = i;
+            else if ( !g_strcmp0( zond_token.s, "EI" ) )
+            {
+                if (BI.ID == i - 1 ) //nix dazwischen
+                {
+                    for ( gint u = BI.BI; u <= i; u++ )
+                            pdf_zond_invalidate_token( arr_zond_token, i, i - BI.BI + 1 );
+                }
+            }
+
+            else if ( !g_strcmp0( zond_token.s, "BX" ) ) BX = i;
+            else if ( !g_strcmp0( zond_token.s, "EX" ) )
+            {
+                //nix dazwischen
+                if ( BX == i - 1 ) pdf_zond_invalidate_token( arr_zond_token, i, 2 );
+           /*     else
+                {
+                    gboolean stay = FALSE;
+
+                    for ( gint u = BX; u < EX; u++ )
+                    {
+                        if ( g_array_index( arr_zond_token, ZondToken, u ).tok != PDF_NUM_TOKENS )
+                        {
+                            stay = TRUE;
+                            break;
+                        }
+                    }
+
+                }*/
+            }
+            else if ( !g_strcmp0( zond_token.s, "Q" ) )
+            {
+                if ( GS_act->q != -1 )
+                {
+                    pdf_zond_invalidate_token( arr_zond_token, GS_act->q, 1 );
+                    pdf_zond_invalidate_token( arr_zond_token, i, 1 );
+                }
+
+                for ( gint u = GS_act->arr_cm->len - 1; u >= 0; u-- )
+                {
+                    gint cm = g_array_index( GS_act->arr_cm, gint, u );
+                    if ( cm >= GS_act->begin ) pdf_zond_invalidate_token( arr_zond_token, cm, 7 );
+                }
+                //noch gesetzte Text-State-Ops löschen (wenn aus aktueller Ebene - dann auch != -1!
+                if ( GS_act->Tc >= GS_act->begin ) pdf_zond_invalidate_token( arr_zond_token, GS_act->Tc, 2 );
+                if ( GS_act->Tw >= GS_act->begin ) pdf_zond_invalidate_token( arr_zond_token, GS_act->Tw, 2 );
+                if ( GS_act->Tz >= GS_act->begin ) pdf_zond_invalidate_token( arr_zond_token, GS_act->Tz, 2 );
+                if ( GS_act->TL >= GS_act->begin ) pdf_zond_invalidate_token( arr_zond_token, GS_act->TL, 2 );
+                if ( GS_act->Tf >= GS_act->begin ) pdf_zond_invalidate_token( arr_zond_token, GS_act->Tf, 3 );
+                if ( GS_act->Tr >= GS_act->begin ) pdf_zond_invalidate_token( arr_zond_token, GS_act->Tr, 2 );
+                if ( GS_act->Ts >= GS_act->begin ) pdf_zond_invalidate_token( arr_zond_token, GS_act->Ts, 2 );
+
+                //GS zurücksetzen
+                GS_act = zond_pdf_restore_gs( arr_gs );
+            }
+
+            //irgendein token
+            else
+            {
+                zond_pdf_reset_gs( arr_gs, 0 ); //Text ist ja schon behandelt; irgendwann auch weitere ausgenommen...
+                BX = -1;
+            }
+
+            last_token = i;
+        }
+        else if ( zond_token.tok == PDF_TOK_EOF )
+        {
+            if ( GS_act->q != -1 ) pdf_zond_invalidate_token( arr_zond_token, GS_act->q, 1 );
+
+            for ( gint u = GS_act->arr_cm->len - 1; u >= 0; u --)
+            {
+                gint cm = g_array_index( GS_act->arr_cm, gint, u );
+                if ( cm >= GS_act->begin ) pdf_zond_invalidate_token( arr_zond_token, cm, 7 );
+            }
+
+            //noch gesetzte Text-State-Ops löschen
+            if ( GS_act->Tc != -1 ) pdf_zond_invalidate_token( arr_zond_token, GS_act->Tc, 2 );
+            if ( GS_act->Tw != -1 ) pdf_zond_invalidate_token( arr_zond_token, GS_act->Tw, 2 );
+            if ( GS_act->Tz != -1 ) pdf_zond_invalidate_token( arr_zond_token, GS_act->Tz, 2 );
+            if ( GS_act->TL != -1 ) pdf_zond_invalidate_token( arr_zond_token, GS_act->TL, 2 );
+            if ( GS_act->Tf != -1 ) pdf_zond_invalidate_token( arr_zond_token, GS_act->Tf, 3 );
+            if ( GS_act->Tr != -1 ) pdf_zond_invalidate_token( arr_zond_token, GS_act->Tr, 2 );
+            if ( GS_act->Ts != -1 ) pdf_zond_invalidate_token( arr_zond_token, GS_act->Ts, 2 );
+        }
+    }
+
+    g_ptr_array_unref( arr_gs );
+
+    return;
+}
 
 
 /*

@@ -29,4 +29,6 @@ void pdf_zond_filter_text( GArray*, gint );
 
 fz_buffer* pdf_zond_reassemble_buffer( fz_context*, GArray*, gchar** );
 
+void pdf_zond_filter_content_stream( GArray*, gint );
+
 #endif // PDF_DATEIEN_H_INCLUDED

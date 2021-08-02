@@ -559,9 +559,11 @@ zond_pdf_document_save( ZondPdfDocument* self, gchar** errmsg )
                 1, // do_sanitize
                 0, // do_appearance
                 0, // do_encrypt
+                0, // dont_regenerate_id  Don't regenerate ID if set (used for clean)
                 ~0, // permissions
                 "", // opwd_utf8[128]
                 "", // upwd_utf8[128]
+                0 //do snapshot
                 };
 
         fz_try( priv->ctx ) buf = fz_new_buffer( priv->ctx, 1024 );

@@ -202,7 +202,6 @@ pdf_ocr_process_tess_tmp( fz_context* ctx, pdf_obj* page_ref,
         fz_drop_buffer( ctx, buf_new );
         ERROR_MUPDF( "append buffer" )
     }
-
     rc = pdf_ocr_update_content_stream( ctx, page_ref, buf_new, errmsg );
     fz_drop_buffer( ctx, buf_new );
     if ( rc ) ERROR_PAO( "pdf_ocr_update_content_stream" )
@@ -242,20 +241,6 @@ pdf_ocr_create_matrix( fz_context* ctx, fz_rect rect, gfloat scale, gint rotate 
 }
 
 
-static fz_rect
-pdf_ocr_get_mediabox( fz_context* ctx, pdf_obj* page )
-{
-    fz_rect rect = { 0 };
-    pdf_obj* mediabox = NULL;
-
-    mediabox = pdf_dict_get( ctx, page, PDF_NAME(MediaBox) );
-    rect.x0 = pdf_array_get_real( ctx, mediabox, 0 );
-    rect.x1 = pdf_array_get_real( ctx, mediabox, 2 );
-    rect.y0 = pdf_array_get_real( ctx, mediabox, 1 );
-    rect.y1 = pdf_array_get_real( ctx, mediabox, 3 );
-
-    return rect;
-}
 typedef struct _Zond_Token
 {
     pdf_token tok;
@@ -287,7 +272,7 @@ pdf_ocr_filter_content_stream( fz_context* ctx, pdf_obj* page_ref, gint flag, gc
     arr_zond_token = pdf_zond_get_token_array( ctx, stream );
     fz_drop_stream( ctx, stream );
 
-    pdf_zond_filter_text( arr_zond_token, flag );
+    pdf_zond_filter_content_stream( arr_zond_token, flag );
 
     buf = pdf_zond_reassemble_buffer( ctx, arr_zond_token, errmsg );
     g_array_unref( arr_zond_token );
@@ -321,6 +306,9 @@ pdf_ocr_sandwich_page( PdfDocumentPage* pdf_document_page,
 
     fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
 
+pdf_print_content_stream( ctx, pdf_document_page->page->obj, errmsg);
+printf("\n\nNeu:\n");
+
     fz_try( ctx ) pdf_flatten_inheritable_page_items( ctx, pdf_document_page->page->obj );
     fz_catch( ctx ) ERROR_MUPDF_R( "pdf_flatten_inheritable_page_items (orig)", -2 )
 
@@ -333,10 +321,10 @@ pdf_ocr_sandwich_page( PdfDocumentPage* pdf_document_page,
     rc = pdf_ocr_filter_content_stream( ctx, pdf_document_page->page->obj, 3, errmsg );
     if ( rc ) ERROR_PAO( "pdf_ocr_filter_content_stream" )
 
-    fz_rect rect = pdf_ocr_get_mediabox( ctx, pdf_document_page->page->obj );
+//    fz_rect rect = pdf_ocr_get_mediabox( ctx, pdf_document_page->page->obj );
     float scale = 1./4./72.*70.;
 
-    fz_matrix ctm = pdf_ocr_create_matrix( ctx, rect, scale, pdf_document_page->rotate );
+    fz_matrix ctm = pdf_ocr_create_matrix( ctx, pdf_document_page->rect, scale, pdf_document_page->rotate );
 
     rc = pdf_ocr_process_tess_tmp( ctx, page_ref_text, ctm, errmsg );
     if ( rc ) ERROR_PAO_R( "pdf_ocr_process_tess_tmp", -2 )
@@ -425,7 +413,7 @@ pdf_ocr_sandwich_page( PdfDocumentPage* pdf_document_page,
         pdf_drop_graft_map( ctx, graft_map );
     }
     fz_catch( ctx ) ERROR_MUPDF( "fz_try (page_sandwich)" )
-
+pdf_print_content_stream( ctx, pdf_document_page->page->obj, errmsg);
     return 0;
 }
 
@@ -788,7 +776,7 @@ pdf_ocr_get_hidden_text( PdfDocumentPage* pdf_document_page, gchar** errmsg )
 
         return NULL;
     }
-pdf_print_content_stream( ctx, page->obj, errmsg );
+
     //structured text-device
     fz_try( ctx ) stext_page = fz_new_stext_page( ctx, pdf_bound_page( ctx, page ) );
     fz_catch( ctx )
@@ -939,8 +927,6 @@ pdf_ocr_create_pdf_only_text( InfoWindow* info_window,
     gint i = 0;
     gint alle = 0;
 
-    len = arr_document_pages->len;
-
     for ( i = 0; i < arr_document_pages->len; i++ )
     {
         gboolean rendered = FALSE;
@@ -994,6 +980,7 @@ pdf_ocr_create_pdf_only_text( InfoWindow* info_window,
             }
             if ( rc == 4 ) break;
         }
+        else g_free( page_text );
 
         if ( !rendered ) rc = pdf_ocr_page( pdf_document_page, info_window, handle,
                 renderer, errmsg ); //thread-safe

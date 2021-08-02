@@ -1425,7 +1425,6 @@ viewer_annot_create( PdfDocumentPage* pdf_document_page, fz_quad* highlight, gin
         fz_catch( ctx )
         {
             pdf_drop_annot( ctx, annot );
-
             ERROR_MUPDF( "pdf_annot_quad_point" )
         }
 
@@ -1435,7 +1434,7 @@ viewer_annot_create( PdfDocumentPage* pdf_document_page, fz_quad* highlight, gin
     }
 
     fz_try( ctx ) pdf_set_annot_rect( ctx, annot, rect );
-//    fz_always( ctx ) pdf_drop_annot( ctx, annot );
+    fz_always( ctx ) pdf_drop_annot( ctx, annot );
     fz_catch( ctx ) ERROR_MUPDF( "pdf_set_annot_rect" )
 
     return 0;
