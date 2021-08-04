@@ -552,8 +552,8 @@ zond_pdf_document_save( ZondPdfDocument* self, gchar** errmsg )
                 0, // do_compress
                 1, // do_compress_images
                 1, // do_compress_fonts
-                1, // do_decompress
-                1, // do_garbage
+                0, // do_decompress
+                4, // do_garbage
                 0, // do_linear
                 1, // do_clean
                 0, // do_sanitize

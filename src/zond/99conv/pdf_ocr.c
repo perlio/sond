@@ -307,9 +307,6 @@ pdf_ocr_sandwich_page( PdfDocumentPage* pdf_document_page,
 
     fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
 
-pdf_print_content_stream( ctx, pdf_document_page->page->obj, errmsg);
-printf("\n\nNeu:\n");
-
     fz_try( ctx ) pdf_flatten_inheritable_page_items( ctx, pdf_document_page->page->obj );
     fz_catch( ctx ) ERROR_MUPDF_R( "pdf_flatten_inheritable_page_items (orig)", -2 )
 
@@ -414,7 +411,7 @@ printf("\n\nNeu:\n");
         pdf_drop_graft_map( ctx, graft_map );
     }
     fz_catch( ctx ) ERROR_MUPDF( "fz_try (page_sandwich)" )
-pdf_print_content_stream( ctx, pdf_document_page->page->obj, errmsg);
+
     return 0;
 }
 

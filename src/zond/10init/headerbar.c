@@ -169,6 +169,7 @@ cb_item_clean_pdf( GtkMenuItem* item, gpointer data )
     {
         gchar* path_tmp = NULL;
         pdf_document* doc = NULL;
+
         pdf_write_options opts = {
                 0, // do_incremental
                 1, // do_pretty
@@ -176,18 +177,19 @@ cb_item_clean_pdf( GtkMenuItem* item, gpointer data )
                 0, // do_compress
                 1, // do_compress_images
                 1, // do_compress_fonts
-                1, // do_decompress
-                1, // do_garbage
+                0, // do_decompress
+                4, // do_garbage
                 0, // do_linear
                 1, // do_clean
-                1, // do_sanitize
+                0, // do_sanitize
                 0, // do_appearance
                 0, // do_encrypt
+                0, // dont_regenerate_id  Don't regenerate ID if set (used for clean)
                 ~0, // permissions
                 "", // opwd_utf8[128]
                 "", // upwd_utf8[128]
+                0 //do snapshot
                 };
-
 
         //prüfen, ob in Viewer geöffnet
         if ( zond_pdf_document_is_open( g_ptr_array_index( arr_rel_path, i ) ) )
