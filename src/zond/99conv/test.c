@@ -1,5 +1,6 @@
 #include "../global_types.h"
 #include "../error.h"
+#include "../zond_pdf_document.h"
 
 #include "../99conv/general.h"
 #include "pdf.h"
@@ -244,6 +245,23 @@ pdf_print_content_stream( fz_context* ctx, pdf_obj* page_ref, gchar** errmsg )
 gint
 test( Projekt* zond, gchar** errmsg )
 {
+    gint rc = 0;
+
+    ZondPdfDocument* zpd = zond_pdf_document_open( "Hauptakte Band 12 10.pdf", errmsg );
+    PdfDocumentPage* pdp = zond_pdf_document_get_pdf_document_page( zpd, 0 );
+
+    fz_context* ctx = zond_pdf_document_get_ctx( pdp->document );
+
+    //neues dokument mit einer Seite filtern
+    rc = pdf_ocr_filter_content_stream( ctx, pdp->page, 0, errmsg );
+    if ( rc )
+    {
+        zond_pdf_document_close( zpd );
+        ERROR_PAO( "pdf_zond_filter_content_stream" )
+    }
+    rc = pdf_print_content_stream( ctx, pdp->page->obj, errmsg );
+    zond_pdf_document_close( zpd );
+    if ( rc )  ERROR_PAO( "pdf_print_content_stream" )
 
     return 0;
 }

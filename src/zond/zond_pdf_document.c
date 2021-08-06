@@ -548,7 +548,7 @@ zond_pdf_document_save( ZondPdfDocument* self, gchar** errmsg )
         pdf_write_options opts = {
                 0, // do_incremental
                 1, // do_pretty
-                0, // do_ascii
+                1, // do_ascii
                 0, // do_compress
                 1, // do_compress_images
                 1, // do_compress_fonts

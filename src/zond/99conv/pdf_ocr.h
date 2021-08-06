@@ -8,8 +8,7 @@ typedef char gchar;
 typedef struct _Projekt Projekt;
 typedef struct _Info_Window InfoWindow;
 
-fz_buffer* pdf_ocr_get_content_stream_as_buffer( fz_context*, pdf_obj*,
-        gchar** );
+fz_buffer* pdf_ocr_get_content_stream_as_buffer( fz_context*, pdf_obj*, gchar** );
 
 gint pdf_ocr_pages( Projekt*, InfoWindow*, GPtrArray*, gchar** );
 

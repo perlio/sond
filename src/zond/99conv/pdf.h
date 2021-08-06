@@ -23,12 +23,6 @@ gint pdf_document_get_dest( fz_context*, pdf_document*, gint, gpointer*,
 gint pdf_copy_page( fz_context*, pdf_document*, gint, gint, pdf_document*,
         gint, gchar** );
 
-GArray* pdf_zond_get_token_array( fz_context*, fz_stream* );
-
-void pdf_zond_filter_text( GArray*, gint );
-
-fz_buffer* pdf_zond_reassemble_buffer( fz_context*, GArray*, gchar** );
-
-void pdf_zond_filter_content_stream( GArray*, gint );
+gint pdf_ocr_filter_content_stream( fz_context*, pdf_page*, gint flags, gchar** );
 
 #endif // PDF_DATEIEN_H_INCLUDED
