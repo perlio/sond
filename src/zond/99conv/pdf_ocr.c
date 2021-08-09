@@ -121,7 +121,7 @@ pdf_ocr_free_zond_token( gpointer data )
 
     if ( zond_token->tok == PDF_TOK_KEYWORD || zond_token->tok == PDF_TOK_NAME )
             g_free( zond_token->s );
-    else if ( zond_token->tok == PDF_TOK_STRING || zond_token->tok == PDF_TOK_INLINE_STREAM ) g_byte_array_unref( zond_token->gba );
+    else if ( zond_token->tok == PDF_TOK_INLINE_STREAM || zond_token->tok == PDF_TOK_STRING ) g_byte_array_unref( zond_token->gba );
 
     return;
 }
@@ -162,6 +162,9 @@ pdf_ocr_reassemble_buffer( fz_context* ctx, GArray* arr_zond_token, gchar** errm
 
     for ( gint i = 0; i < arr_zond_token->len; i++ )
     {
+        guint8* s;
+        gchar oct[4];
+
         ZondToken zond_token = g_array_index( arr_zond_token, ZondToken, i );
 
         switch (zond_token.tok)
@@ -175,8 +178,66 @@ pdf_ocr_reassemble_buffer( fz_context* ctx, GArray* arr_zond_token, gchar** errm
                 fz_append_printf(ctx, fzbuf, "/%s ", zond_token.s);
                 break;
             case PDF_TOK_STRING:
+
                 fz_append_byte( ctx, fzbuf, '(' );
-                fz_append_data(ctx, fzbuf, zond_token.gba->data, zond_token.gba->len );
+                s = zond_token.gba->data;
+
+                while ( s < (zond_token.gba->data + zond_token.gba->len - 1 ) )
+                {
+                    if ( *s < 32 )
+                    {
+                        switch (*s)
+                        {
+                            case '\n':
+                                fz_append_byte( ctx, fzbuf, '\\' );
+                                fz_append_byte( ctx, fzbuf, 'n' );
+                                break;
+                            case '\r':
+                                fz_append_byte( ctx, fzbuf, '\\' );
+                                fz_append_byte( ctx, fzbuf, 'r' );
+                                break;
+                            case '\t':
+                                fz_append_byte( ctx, fzbuf, '\\' );
+                                fz_append_byte( ctx, fzbuf, 't' );
+                                break;
+                            case '\b':
+                                fz_append_byte( ctx, fzbuf, '\\' );
+                                fz_append_byte( ctx, fzbuf, 'b' );
+                                break;
+                            case '\f':
+                                fz_append_byte( ctx, fzbuf, '\\' );
+                                fz_append_byte( ctx, fzbuf, 'f' );
+                                break;
+                            default:
+                                fz_append_byte( ctx, fzbuf, '\\' );
+
+                                g_snprintf( oct, 4, "%03o", *s );
+                                fz_append_data( ctx, fzbuf, (void*) oct, 3 );
+                        }
+                    }
+                    else
+                    {
+                        switch( *s )
+                        {
+                            case '(':
+                                fz_append_byte( ctx, fzbuf, '\\' );
+                                fz_append_byte( ctx, fzbuf, '(' );
+                                break;
+                            case ')':
+                                fz_append_byte( ctx, fzbuf, '\\' );
+                                fz_append_byte( ctx, fzbuf, ')' );
+                                break;
+                            case '\\':
+                                fz_append_byte( ctx, fzbuf, '\\' );
+                                fz_append_byte( ctx, fzbuf, '\\' );
+                                break;
+                            default:
+                                fz_append_byte( ctx, fzbuf, *s );
+                        }
+                    }
+
+                    s++;
+                }
                 fz_append_byte( ctx, fzbuf, ')' );
                 break;
             case PDF_TOK_OPEN_DICT:
@@ -204,12 +265,14 @@ pdf_ocr_reassemble_buffer( fz_context* ctx, GArray* arr_zond_token, gchar** errm
                 fz_append_printf(ctx, fzbuf, "%g ", zond_token.f);
                 break;
             case PDF_TOK_KEYWORD:
-                fz_append_printf(ctx, fzbuf, "%s\n", zond_token.s);
+                fz_append_printf(ctx, fzbuf, "%s \n", zond_token.s);
                 break;
             case PDF_TOK_INLINE_STREAM:
                 fz_append_byte( ctx, fzbuf, 0 );
                 fz_append_data(ctx, fzbuf, zond_token.gba->data, zond_token.gba->len );
                 fz_append_byte( ctx, fzbuf, '>' );
+                fz_append_byte( ctx, fzbuf, ' ' );
+                break;
             case PDF_TOK_TRUE:
                 fz_append_printf(ctx, fzbuf, "true " );
                 break;
@@ -352,27 +415,15 @@ pdf_ocr_prepare_content_stream( fz_context* ctx, pdf_page* page, gchar** errmsg 
 }
 
 
-gint
+static gint
 pdf_ocr_filter_content_stream( fz_context* ctx, pdf_page* page, gint flags, gchar** errmsg )
 {
     gint rc = 0;
+    fz_buffer* buf = NULL;
 
     //erst den vorhandenen stream schön machen, insbesondere für inline-images!!!
     rc = pdf_ocr_prepare_content_stream( ctx, page, errmsg );
     if ( rc ) ERROR_PAO( "pdf_zond_prepare_content_stream" )
-
-    struct BT
-    {
-        gint BT;
-
-        gint Td;
-        gint TD;
-        gint Tm;
-        gint TAst;
-    } BT = { -1, -1, -1, -1, -1 };
-
-    gint BX = -1;
-    gint BI = -1;
 
     GPtrArray* arr_gs = g_ptr_array_new( );
     g_ptr_array_set_free_func( arr_gs, pdf_ocr_free_gs );
@@ -390,12 +441,25 @@ pdf_ocr_filter_content_stream( fz_context* ctx, pdf_page* page, gint flags, gcha
     GS_act->Ts = -1;
     g_ptr_array_add( arr_gs, GS_act );
 
-    gint last_token = -1;
+    struct BT
+    {
+        gint BT;
+
+        gint Td;
+        gint TD;
+        gint Tm;
+        gint TAst;
+    } BT = { -1, -1, -1, -1, -1 };
+
+    gint BX = -1;
+
+    gint BI = -1;
+
+    GArray* arr_marked_content = g_array_new( FALSE, FALSE, sizeof( gint ) );
 
     pdf_obj* obj_contents = NULL;
     fz_stream* stream = NULL;
     GArray* arr_zond_token = NULL;
-    fz_buffer* buf = NULL;
     gint idx = -1; //damit idx immer aktueller Stand des arrays ist
 
     arr_zond_token = g_array_new( FALSE, FALSE, sizeof( ZondToken ) );
@@ -425,8 +489,11 @@ pdf_ocr_filter_content_stream( fz_context* ctx, pdf_page* page, gint flags, gcha
                 zond_token.s = g_strdup( lxb.scratch );
         else if ( tok == PDF_TOK_STRING )
         {
+            guint8 byte = 0;
+
             zond_token.gba = g_byte_array_new( );
             g_byte_array_append( zond_token.gba, (guint8*) lxb.scratch, lxb.len );
+            g_byte_array_append( zond_token.gba, &byte, 1);
         }
 
         pdf_lexbuf_fin( ctx, &lxb );
@@ -607,6 +674,9 @@ pdf_ocr_filter_content_stream( fz_context* ctx, pdf_page* page, gint flags, gcha
 
                     //reset graphics_state - flag == 1: mit text_state
                     pdf_ocr_reset_gs( arr_gs, 1 );
+                    // Marked Content bleibt!
+                    for ( gint i = 0; i < arr_marked_content->len; i++ )
+                            g_array_index( arr_marked_content, gint, i ) = -1;
                 }
             }
 
@@ -626,12 +696,13 @@ pdf_ocr_filter_content_stream( fz_context* ctx, pdf_page* page, gint flags, gcha
                 if ( BT.Tm != -1 ) pdf_ocr_invalidate_token( arr_zond_token, BT.Tm, 7 );
                 if ( BT.TAst != -1 ) pdf_ocr_invalidate_token( arr_zond_token, BT.TAst, 1 );
             }
+
             //InlineImages
             else if ( !g_strcmp0( zond_token.s, "BI" ) ) BI = idx;
             else if ( !g_strcmp0( zond_token.s, "ID" ) )
             {
                 //jetzt den inline-stream
-                zond_token.tok = 99; //Wert für inline-image-stream
+                zond_token.tok = PDF_TOK_INLINE_STREAM; //Wert für inline-image-stream
                 gint ch = 0;
 
                 //white nach ID
@@ -662,18 +733,19 @@ pdf_ocr_filter_content_stream( fz_context* ctx, pdf_page* page, gint flags, gcha
                         return -1;
                     }
                     else if ( ch == 'E' && fz_peek_byte( ctx, stream ) == 'I' ) break;
+
                 } while ( 1 );
+                fz_read_byte( ctx, stream ); //auf das I vorgehen
 
                 if ( flags & 4 ) //inline-images werden herausgefiltert
                 {
-                    g_array_remove_range( arr_zond_token, BI, idx - BI + 1 );
-                    idx = BI - 1;
+                    pdf_ocr_invalidate_token( arr_zond_token, idx, idx - BI + 1 );
                     BI = -1;
                 }
                 else //bleibt drin
                 {
                     zond_token.tok = PDF_TOK_KEYWORD;
-                    zond_token.s = g_strdup( "EI" );
+                    zond_token.s = g_strdup( "\nEI" );
 
                     g_array_append_val( arr_zond_token, zond_token );
                     idx++;
@@ -681,23 +753,52 @@ pdf_ocr_filter_content_stream( fz_context* ctx, pdf_page* page, gint flags, gcha
                     //"vorgespannte" Operatoren resetten
                     BX = -1;
                     pdf_ocr_reset_gs( arr_gs, 0 );
+                    for ( gint i = 0; i < arr_marked_content->len; i++ )
+                            g_array_index( arr_marked_content, gint, i ) = -1;
                 }
             }
 
             //XObjects
             else if ( !g_strcmp0( zond_token.s, "Do" ) )
             {
-                if ( flags & 8 ) //XObjects löschen
-                {
-                    g_array_remove_range( arr_zond_token, idx - 1, 2 );
-                    idx = idx - 2;
-                }
+                //XObjects löschen
+                if ( flags & 8 ) pdf_ocr_invalidate_token( arr_zond_token, idx, 2 );
                 else
                 {
                     BX = -1;
                     pdf_ocr_reset_gs( arr_gs, 0 );
+                    for ( gint i = 0; i < arr_marked_content->len; i++ )
+                            g_array_index( arr_marked_content, gint, i ) = -1;
                 }
             }
+
+            else if ( !g_strcmp0( zond_token.s, "BMC" ) || !g_strcmp0( zond_token.s, "BDC" ) )
+                    g_array_append_val( arr_marked_content, idx );
+            else if ( !g_strcmp0( zond_token.s, "EMC" ) )
+            {
+                gint idx_B_C = g_array_index( arr_marked_content, gint, arr_marked_content->len - 1 );
+                if ( idx_B_C != -1 )
+                {
+                    if ( !g_strcmp0( g_array_index( arr_zond_token, ZondToken, idx_B_C ).s, "BMC" ) )
+                            pdf_ocr_invalidate_token( arr_zond_token, idx_B_C, 2 );
+                    else
+                    {
+                        //Beginn dict finden
+                        ZondToken zond_token_begin;
+                        gint begin = idx_B_C;
+                        do
+                        {
+                            begin--;
+                            zond_token_begin = g_array_index( arr_zond_token, ZondToken, begin );
+                        } while ( zond_token_begin.tok != PDF_TOK_OPEN_DICT );
+
+                        pdf_ocr_invalidate_token( arr_zond_token, idx_B_C, idx_B_C - begin + 2 );
+                        pdf_ocr_invalidate_token( arr_zond_token, idx, 1 ); //EMC selbert
+                    }
+                }
+                g_array_remove_index_fast( arr_marked_content, arr_marked_content->len - 1 );
+            }
+
             else if ( !g_strcmp0( zond_token.s, "BX" ) ) BX = idx;
             else if ( !g_strcmp0( zond_token.s, "EX" ) )
             {
@@ -749,6 +850,8 @@ pdf_ocr_filter_content_stream( fz_context* ctx, pdf_page* page, gint flags, gcha
             {
                 pdf_ocr_reset_gs( arr_gs, 0 ); //Text ist ja schon behandelt; irgendwann auch weitere ausgenommen...
                 BX = -1;
+                for ( gint i = 0; i < arr_marked_content->len; i++ )
+                        g_array_index( arr_marked_content, gint, i ) = -1;
             }
         } //endif tok == KEYWORD
     } //endwhile tok != PDF_TOK_EOF
@@ -774,6 +877,7 @@ pdf_ocr_filter_content_stream( fz_context* ctx, pdf_page* page, gint flags, gcha
     if ( GS_act->Ts != -1 ) pdf_ocr_invalidate_token( arr_zond_token, GS_act->Ts, 2 );
 
     g_ptr_array_unref( arr_gs );
+    g_array_unref( arr_marked_content );
 
     buf = pdf_ocr_reassemble_buffer( ctx, arr_zond_token, errmsg );
     g_array_unref( arr_zond_token );
@@ -782,7 +886,7 @@ pdf_ocr_filter_content_stream( fz_context* ctx, pdf_page* page, gint flags, gcha
     rc = pdf_ocr_update_content_stream( ctx, page->obj, buf, errmsg );
     fz_drop_buffer( ctx, buf );
     if ( rc ) ERROR_PAO( "pdf_ocr_update_content_stream" )
-
+pdf_print_content_stream( ctx, page->obj, errmsg);
     return 0;
 }
 
@@ -1265,9 +1369,6 @@ pdf_ocr_page( PdfDocumentPage* pdf_document_page, InfoWindow* info_window,
 
     fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
 
-printf("Flag = 3\n");
-pdf_print_content_stream( ctx, pdf_document_page->page->obj, errmsg );
-
     pixmap = pdf_ocr_render_pixmap( ctx, doc_new, 0, 4, errmsg );
     pdf_drop_document( ctx, doc_new );
     if ( !pixmap ) ERROR_PAO( "pdf_render_pixmap" )
@@ -1399,8 +1500,7 @@ pdf_ocr_get_hidden_text( PdfDocumentPage* pdf_document_page, gchar** errmsg )
 
         return NULL;
     }
-printf("falg = 1\n");
-pdf_print_content_stream( ctx, page->obj, errmsg );
+pdf_print_content_stream( ctx, page->obj, errmsg);
     //structured text-device
     fz_try( ctx ) stext_page = fz_new_stext_page( ctx, pdf_bound_page( ctx, page ) );
     fz_catch( ctx )
@@ -1671,6 +1771,7 @@ gint
 pdf_ocr_pages( Projekt* zond, InfoWindow* info_window, GPtrArray* arr_document_pages, gchar** errmsg )
 {
     gint rc = 0;
+
     TessBaseAPI* handle = NULL;
     TessResultRenderer* renderer = NULL;
     gchar* path_tmp = NULL;
@@ -1715,4 +1816,101 @@ pdf_ocr_pages( Projekt* zond, InfoWindow* info_window, GPtrArray* arr_document_p
 
     return 0;
 }
+
+
+// EXPERIMENTELL!!!
+gint
+pdf_change_hidden_text( fz_context* ctx, pdf_obj* page_ref, gchar** errmsg )
+{
+    gint rc = 0;
+    pdf_obj* obj_contents = NULL;
+    fz_stream* stream = NULL;
+    pdf_token tok = PDF_TOK_NULL;
+    gint idx = -1;
+    GArray* arr_zond_token = NULL;
+    fz_buffer* buf = NULL;
+
+    //Stream doc_text
+    obj_contents = pdf_dict_get( ctx, page_ref, PDF_NAME(Contents) );
+
+    fz_try( ctx ) stream = pdf_open_contents_stream( ctx, pdf_get_bound_document( ctx, page_ref ), obj_contents );
+    fz_catch( ctx ) ERROR_MUPDF( "pdf_open_contents_stream" )
+
+    arr_zond_token = g_array_new( FALSE, FALSE, sizeof( ZondToken ) );
+    g_array_set_clear_func( arr_zond_token, pdf_ocr_free_zond_token );
+
+    while ( tok != PDF_TOK_EOF )
+    {
+        ZondToken zond_token = { 0, };
+        pdf_lexbuf lxb;
+
+        pdf_lexbuf_init( ctx, &lxb, PDF_LEXBUF_SMALL );
+
+        tok = pdf_lex( ctx, stream, &lxb );
+        zond_token.tok = tok;
+
+        if ( tok == PDF_TOK_REAL ) zond_token.f = lxb.f;
+        else if ( tok == PDF_TOK_INT ) zond_token.i = lxb.i;
+        else if ( tok == PDF_TOK_NAME || tok == PDF_TOK_KEYWORD )
+                zond_token.s = g_strdup( lxb.scratch );
+        else if ( tok == PDF_TOK_STRING )
+        {
+            zond_token.gba = g_byte_array_new( );
+            g_byte_array_append( zond_token.gba, (guint8*) lxb.scratch, lxb.len );
+        }
+
+        pdf_lexbuf_fin( ctx, &lxb );
+
+        g_array_append_val( arr_zond_token, zond_token );
+        idx++;
+
+        if ( tok == PDF_TOK_KEYWORD && !g_strcmp0( zond_token.s, "Tr" ) )
+        {
+            if ( g_array_index( arr_zond_token, ZondToken, idx - 1 ).i == 3 )
+                    g_array_index( arr_zond_token, ZondToken, idx - 1 ).i = 0;
+        }
+    }
+
+    buf = pdf_ocr_reassemble_buffer( ctx, arr_zond_token, errmsg );
+    g_array_unref( arr_zond_token );
+    if ( !buf ) ERROR_PAO( "pdf_zond_reassemble_buffer" )
+
+    rc = pdf_ocr_update_content_stream( ctx, page_ref, buf, errmsg );
+    fz_drop_buffer( ctx, buf );
+    if ( rc ) ERROR_PAO( "pdf_update_content_stream" )
+
+    //Dann Font-Dict
+    pdf_obj* f_0_0 = NULL;
+
+    fz_try( ctx ) pdf_flatten_inheritable_page_items( ctx, page_ref );
+    fz_catch( ctx ) ERROR_MUPDF( "get page_ref" )
+
+    pdf_obj* resources = pdf_dict_get( ctx, page_ref, PDF_NAME(Resources) );
+    pdf_obj* font = pdf_dict_get( ctx, resources, PDF_NAME(Font) );
+
+    pdf_obj* f_0_0_name = pdf_new_name( ctx, "f-0-0" );
+    f_0_0 = pdf_dict_get( ctx, font, f_0_0_name );
+    pdf_drop_obj( ctx, f_0_0_name );
+
+    if ( !f_0_0 ) return 0; //Font nicht vorhanden - nix mehr zu tun
+
+    //Einträge löschen
+    gint len = pdf_dict_len( ctx, f_0_0 );
+    for ( gint i = 0; i < len; i++ )
+    {
+        pdf_dict_del( ctx, f_0_0, pdf_dict_get_key( ctx, f_0_0, 0 ) );
+    }
+
+    pdf_dict_put( ctx, f_0_0, PDF_NAME(Type), PDF_NAME(Font) );
+    pdf_dict_put( ctx, f_0_0, PDF_NAME(Subtype), PDF_NAME(Type1) );
+    pdf_obj* font_name = pdf_new_name( ctx, "Times-Roman" );
+    pdf_dict_put( ctx, f_0_0, PDF_NAME(BaseFont), font_name );
+//    pdf_dict_put( ctx, f_0_0, PDF_NAME(Encoding), PDF_NAME(WinAnsiEndcoding) );
+    pdf_drop_obj( ctx, font_name );
+
+    return 0;
+}
+
+
+
 

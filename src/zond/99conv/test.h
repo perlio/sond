@@ -9,9 +9,9 @@ typedef int gint;
 typedef char gchar;
 
 
-gint test( Projekt*, gchar** );
-
 gint pdf_print_content_stream( fz_context*, pdf_obj*, gchar** );
+
+gint test( Projekt*, gchar** );
 
 
 #endif // TEST_H_INCLUDED

@@ -928,8 +928,8 @@ cb_viewer_spinbutton_value_changed( GtkSpinButton* spin_button, gpointer user_da
 
     for ( gint i = 0; i < pv->arr_pages->len; i++ )
     {
-        if ( gtk_image_get_storage_type( GTK_IMAGE(g_ptr_array_index( pv->arr_pages, i )) ) ==
-                GTK_IMAGE_PIXBUF ) gtk_image_clear( GTK_IMAGE(g_ptr_array_index( pv->arr_pages, i )) );
+      /*  if ( gtk_image_get_storage_type( GTK_IMAGE(g_ptr_array_index( pv->arr_pages, i )) ) ==
+                GTK_IMAGE_PIXBUF ) */ gtk_image_clear( GTK_IMAGE(g_ptr_array_index( pv->arr_pages, i )) );
     }
 
     //Alte Position merken

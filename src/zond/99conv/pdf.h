@@ -23,6 +23,4 @@ gint pdf_document_get_dest( fz_context*, pdf_document*, gint, gpointer*,
 gint pdf_copy_page( fz_context*, pdf_document*, gint, gint, pdf_document*,
         gint, gchar** );
 
-gint pdf_ocr_filter_content_stream( fz_context*, pdf_page*, gint flags, gchar** );
-
 #endif // PDF_DATEIEN_H_INCLUDED
