@@ -391,39 +391,11 @@ pdf_ocr_free_gs( gpointer data )
 
 
 
-static gint
-pdf_ocr_prepare_content_stream( fz_context* ctx, pdf_page* page, gchar** errmsg )
+static GArray*
+pdf_ocr_get_cleaned_tokens( fz_context* ctx, fz_stream* stream, gint flags, gchar** errmsg )
 {
-    //zunächst mit mupdf alles schön machen, d.h. AsciiHex-Filter für (Inline-)Images
-	pdf_annot* annot = NULL;
-	pdf_filter_options filter = { 0 };
-
-	filter.recurse = 1;
-	filter.sanitize = 0;
-	filter.ascii = 1;
-
-    fz_try(ctx) pdf_filter_page_contents(ctx, page->doc, page, &filter);
-    fz_catch( ctx ) ERROR_MUPDF( "pdf_filter_page_contents" )
-
-    for (annot = pdf_first_annot(ctx, page); annot != NULL; annot = pdf_next_annot(ctx, annot))
-    {
-        fz_try( ctx ) pdf_filter_annot_contents(ctx, page->doc, annot, &filter);
-        fz_catch( ctx ) ERROR_MUPDF( "pdf_filter_anoot_contents" )
-    }
-
-    return 0;
-}
-
-
-static gint
-pdf_ocr_filter_content_stream( fz_context* ctx, pdf_page* page, gint flags, gchar** errmsg )
-{
-    gint rc = 0;
-    fz_buffer* buf = NULL;
-
-    //erst den vorhandenen stream schön machen, insbesondere für inline-images!!!
-    rc = pdf_ocr_prepare_content_stream( ctx, page, errmsg );
-    if ( rc ) ERROR_PAO( "pdf_zond_prepare_content_stream" )
+    GArray* arr_zond_token = NULL;
+    gint idx = -1; //damit idx immer aktueller Stand des arrays ist
 
     GPtrArray* arr_gs = g_ptr_array_new( );
     g_ptr_array_set_free_func( arr_gs, pdf_ocr_free_gs );
@@ -451,28 +423,16 @@ pdf_ocr_filter_content_stream( fz_context* ctx, pdf_page* page, gint flags, gcha
         gint TAst;
     } BT = { -1, -1, -1, -1, -1 };
 
-    gint BX = -1;
-
     gint BI = -1;
 
     GArray* arr_marked_content = g_array_new( FALSE, FALSE, sizeof( gint ) );
 
-    pdf_obj* obj_contents = NULL;
-    fz_stream* stream = NULL;
-    GArray* arr_zond_token = NULL;
-    gint idx = -1; //damit idx immer aktueller Stand des arrays ist
-
     arr_zond_token = g_array_new( FALSE, FALSE, sizeof( ZondToken ) );
     g_array_set_clear_func( arr_zond_token, pdf_ocr_free_zond_token );
 
-    //Stream doc_text
-    obj_contents = pdf_dict_get( ctx, page->obj, PDF_NAME(Contents) );
-
-    fz_try( ctx ) stream = pdf_open_contents_stream( ctx, page->doc, obj_contents );
-    fz_catch( ctx ) ERROR_MUPDF( "pdf_open_contents_stream" )
-
     pdf_token tok = PDF_TOK_NULL;
 
+    //1. Durchgang: einlesen und prüfen
     while ( tok != PDF_TOK_EOF )
     {
         ZondToken zond_token = { 0, };
@@ -607,11 +567,7 @@ pdf_ocr_filter_content_stream( fz_context* ctx, pdf_page* page, gint flags, gcha
                         (flags & 2 && GS_act->Tr_act == 3) ) //löschen!
                 {
                     //Löschen bzw. ersetzen
-                    if ( !g_strcmp0( zond_token.s, "Tj" ) )
-                    {
-                        g_array_remove_range( arr_zond_token, idx - 1, 2 );
-                        idx -= 2;
-                    }
+                    if ( !g_strcmp0( zond_token.s, "Tj" ) ) pdf_ocr_invalidate_token( arr_zond_token, idx, 2 );
                     else if ( !g_strcmp0( zond_token.s, "'" ) )
                     {
                         g_array_remove_range( arr_zond_token, idx - 1, 2 );
@@ -654,9 +610,7 @@ pdf_ocr_filter_content_stream( fz_context* ctx, pdf_page* page, gint flags, gcha
                             zond_token_begin = g_array_index( arr_zond_token, ZondToken, begin );
                         } while ( zond_token_begin.tok != PDF_TOK_OPEN_ARRAY );
 
-                        g_array_remove_range( arr_zond_token, begin, idx - begin + 1 );
-
-                        idx = begin - 1;
+                        pdf_ocr_invalidate_token( arr_zond_token, idx, idx - begin + 1 );
                     }
                 }
                 else //Text wird angezeigt
@@ -668,9 +622,6 @@ pdf_ocr_filter_content_stream( fz_context* ctx, pdf_page* page, gint flags, gcha
                     BT.TD = -1;
                     BT.Tm = -1;
                     BT.TAst = -1;
-
-                    //BX resetten
-                    BX = -1;
 
                     //reset graphics_state - flag == 1: mit text_state
                     pdf_ocr_reset_gs( arr_gs, 1 );
@@ -726,11 +677,11 @@ pdf_ocr_filter_content_stream( fz_context* ctx, pdf_page* page, gint flags, gcha
                     if ( ch == EOF )
                     {
                         g_ptr_array_unref( arr_gs );
+                        g_array_unref( arr_marked_content );
                         g_array_unref( arr_zond_token );
-                        fz_drop_stream( ctx, stream );
                         if ( errmsg ) *errmsg = g_strdup( "Syntax Error in ContentStream:\n"
                                 "EI nicht gefunden" );
-                        return -1;
+                        return NULL;
                     }
                     else if ( ch == 'E' && fz_peek_byte( ctx, stream ) == 'I' ) break;
 
@@ -751,7 +702,6 @@ pdf_ocr_filter_content_stream( fz_context* ctx, pdf_page* page, gint flags, gcha
                     idx++;
 
                     //"vorgespannte" Operatoren resetten
-                    BX = -1;
                     pdf_ocr_reset_gs( arr_gs, 0 );
                     for ( gint i = 0; i < arr_marked_content->len; i++ )
                             g_array_index( arr_marked_content, gint, i ) = -1;
@@ -765,7 +715,6 @@ pdf_ocr_filter_content_stream( fz_context* ctx, pdf_page* page, gint flags, gcha
                 if ( flags & 8 ) pdf_ocr_invalidate_token( arr_zond_token, idx, 2 );
                 else
                 {
-                    BX = -1;
                     pdf_ocr_reset_gs( arr_gs, 0 );
                     for ( gint i = 0; i < arr_marked_content->len; i++ )
                             g_array_index( arr_marked_content, gint, i ) = -1;
@@ -799,16 +748,6 @@ pdf_ocr_filter_content_stream( fz_context* ctx, pdf_page* page, gint flags, gcha
                 g_array_remove_index_fast( arr_marked_content, arr_marked_content->len - 1 );
             }
 
-            else if ( !g_strcmp0( zond_token.s, "BX" ) ) BX = idx;
-            else if ( !g_strcmp0( zond_token.s, "EX" ) )
-            {
-                //nix dazwischen
-                if ( BX != -1 )
-                {
-                    pdf_ocr_invalidate_token( arr_zond_token, BX, 1 );
-                    pdf_ocr_invalidate_token( arr_zond_token, idx, 1 );
-                }
-            }
             else if ( !g_strcmp0( zond_token.s, "Q" ) )
             {
                 if ( GS_act->q >= GS_act->begin )
@@ -849,14 +788,11 @@ pdf_ocr_filter_content_stream( fz_context* ctx, pdf_page* page, gint flags, gcha
                     !g_strcmp0( zond_token.s, "sh" ) ) //macht sh etwas?
             {
                 pdf_ocr_reset_gs( arr_gs, 0 ); //Text ist ja schon behandelt; irgendwann auch weitere ausgenommen...
-                BX = -1;
                 for ( gint i = 0; i < arr_marked_content->len; i++ )
                         g_array_index( arr_marked_content, gint, i ) = -1;
             }
         } //endif tok == KEYWORD
     } //endwhile tok != PDF_TOK_EOF
-
-    fz_drop_stream( ctx, stream );
 
     //tok == PDF_TOK_EOF
     if ( GS_act->q != -1 ) pdf_ocr_invalidate_token( arr_zond_token, GS_act->q, 1 );
@@ -878,6 +814,71 @@ pdf_ocr_filter_content_stream( fz_context* ctx, pdf_page* page, gint flags, gcha
 
     g_ptr_array_unref( arr_gs );
     g_array_unref( arr_marked_content );
+
+    return arr_zond_token;
+}
+
+
+static gint
+pdf_ocr_prepare_content_stream( fz_context* ctx, pdf_page* page, gchar** errmsg )
+{
+    //zunächst mit mupdf alles schön machen, d.h. AsciiHex-Filter für (Inline-)Images
+	pdf_annot* annot = NULL;
+	pdf_filter_options filter = { 0 };
+
+	filter.recurse = 1;
+	filter.sanitize = 0;
+	filter.ascii = 1;
+
+    fz_try(ctx) pdf_filter_page_contents(ctx, page->doc, page, &filter);
+    fz_catch( ctx ) ERROR_MUPDF( "pdf_filter_page_contents" )
+
+    for (annot = pdf_first_annot(ctx, page); annot != NULL; annot = pdf_next_annot(ctx, annot))
+    {
+        fz_try( ctx ) pdf_filter_annot_contents(ctx, page->doc, annot, &filter);
+        fz_catch( ctx ) ERROR_MUPDF( "pdf_filter_anoot_contents" )
+    }
+
+    return 0;
+}
+
+
+static gint
+pdf_ocr_filter_content_stream( fz_context* ctx, pdf_page* page, gint flags, gchar** errmsg )
+{
+    gint rc = 0;
+    fz_buffer* buf = NULL;
+    fz_stream* stream = NULL;
+    GArray* arr_zond_token = NULL;
+
+    //erst den vorhandenen stream schön machen, insbesondere für inline-images!!!
+    rc = pdf_ocr_prepare_content_stream( ctx, page, errmsg );
+    if ( rc ) ERROR_PAO( "pdf_zond_prepare_content_stream" )
+
+    //Stream doc_text
+    fz_try( ctx ) stream = pdf_open_contents_stream( ctx, page->doc, pdf_dict_get( ctx, page->obj, PDF_NAME(Contents) ) );
+    fz_catch( ctx ) ERROR_MUPDF( "pdf_open_contents_stream" )
+
+    arr_zond_token = pdf_ocr_get_cleaned_tokens( ctx, stream, flags, errmsg );
+    fz_drop_stream( ctx, stream );
+    if ( !arr_zond_token ) ERROR_PAO( "pdf_ocr_get_cleaned_tokens" )
+
+    //auf BX-EX prüfen
+    for ( gint idx = 0; idx < arr_zond_token->len; idx++ )
+    {
+        gint BX = -1;
+        ZondToken zond_token = g_array_index( arr_zond_token, ZondToken, idx );
+
+        if ( zond_token.tok == PDF_TOK_KEYWORD && !g_strcmp0( zond_token.s, "BX" ) ) BX = idx;
+        else if ( zond_token.tok != PDF_NUM_TOKENS && BX > -1 ) BX = -1;
+        else if ( zond_token.tok == PDF_TOK_KEYWORD && !g_strcmp0( zond_token.s, "EX" )
+                && BX > -1 )
+        {
+            pdf_ocr_invalidate_token( arr_zond_token, BX, 1 );
+            pdf_ocr_invalidate_token( arr_zond_token, idx, 1 );
+            BX = -1;
+        }
+    }
 
     buf = pdf_ocr_reassemble_buffer( ctx, arr_zond_token, errmsg );
     g_array_unref( arr_zond_token );
@@ -903,7 +904,7 @@ pdf_ocr_find_BT( gchar* buf, size_t size )
         ptr++;
     }
 
-    return buf + size - 1;
+    return NULL;
 }
 
 
