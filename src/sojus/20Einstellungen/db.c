@@ -170,7 +170,12 @@ db_create( Sojus* sojus, MYSQL* con, gchar* db_name, gchar** errmsg )
             "(`Sachbearbeiter-ID`) "
             "ON DELETE RESTRICT ON UPDATE RESTRICT ) "
             "ENGINE=InnoDB;"
+/*
+CREATE TABLE Person ( "
+ID INT(11) NOT NULL, "
 
+
+                     */
             "CREATE TABLE `Adressen` ( "
             "`Adressnr` INT(11) NOT NULL, "
             "`Adresszeile1` VARCHAR(50) NULL DEFAULT NULL, "

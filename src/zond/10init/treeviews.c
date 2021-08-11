@@ -76,10 +76,19 @@ cb_cursor_changed( SondTreeview* treeview, gpointer user_data )
 {
     gint rc = 0;
     gchar* errmsg = NULL;
+    gint node_id = 0;
+    GtkTreeIter iter;
 
     Projekt* zond = (Projekt*) user_data;
 
-    gint node_id = baum_abfragen_aktuelle_node_id( treeview );
+    Baum baum = baum_get_baum_from_treeview( zond, GTK_WIDGET(treeview) );
+
+    if ( baum == BAUM_AUSWERTUNG &&
+            gtk_tree_model_get_iter_first( gtk_tree_view_get_model(
+            GTK_TREE_VIEW(zond->treeview[baum]) ), &iter ) )
+            gtk_widget_set_sensitive( GTK_WIDGET(zond->textview), TRUE );
+
+    node_id = baum_abfragen_aktuelle_node_id( treeview );
     if ( node_id == 0 ) //letzter Knoten wird gelöscht
     {
         gtk_widget_set_sensitive( GTK_WIDGET(zond->textview), FALSE );
@@ -87,8 +96,6 @@ cb_cursor_changed( SondTreeview* treeview, gpointer user_data )
 
         return;
     }
-
-    Baum baum = baum_get_baum_from_treeview( zond, GTK_WIDGET(treeview) );
 
 //status_label setzen
     gchar* rel_path = NULL;
@@ -179,9 +186,13 @@ cb_focus_out( GtkWidget* treeview, GdkEvent* event, gpointer user_data )
 gboolean
 cb_focus_in( GtkWidget* treeview, GdkEvent* event, gpointer user_data )
 {
+    GtkTreeIter iter;
+
     Projekt* zond = (Projekt*) user_data;
 
     Baum baum = baum_get_baum_from_treeview( zond, treeview );
+
+    cb_cursor_changed( (SondTreeview*) treeview, user_data );
 
     //cursor-changed-signal für den aktivierten treeview anschalten
     if ( baum != BAUM_FS ) zond->cursor_changed_signal =
@@ -192,7 +203,7 @@ cb_focus_in( GtkWidget* treeview, GdkEvent* event, gpointer user_data )
     {
         //selection in "altem" treeview löschen
         gtk_tree_selection_unselect_all( zond->selection[zond->last_baum] );
-
+/*
         //Cursor gewählter treeview selektieren
         GtkTreePath* path = NULL;
         GtkTreeViewColumn* focus_column = NULL;
@@ -203,6 +214,7 @@ cb_focus_in( GtkWidget* treeview, GdkEvent* event, gpointer user_data )
                     focus_column, FALSE );
             gtk_tree_path_free( path );
         }
+*/
     }
 
     g_object_set( sond_treeview_get_cell_renderer_text( zond->treeview[baum] ),
@@ -210,7 +222,6 @@ cb_focus_in( GtkWidget* treeview, GdkEvent* event, gpointer user_data )
 
     if ( baum != BAUM_AUSWERTUNG )
             gtk_widget_set_sensitive( GTK_WIDGET(zond->textview), FALSE );
-    else gtk_widget_set_sensitive( GTK_WIDGET(zond->textview), TRUE );
 
     return FALSE;
 }
