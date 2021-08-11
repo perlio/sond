@@ -114,7 +114,7 @@ cb_cursor_changed( SondTreeview* treeview, gpointer user_data )
         return;
     }
 
-    if ( rc == 2 ) text_label = g_strdup( "" );
+    if ( rc == 2 ) text_label = g_strdup( "Keine Anbindung" );
     else if ( rc == 1 ) text_label = g_strdup( rel_path );
     else if ( rc == 0 )
     {
@@ -186,8 +186,6 @@ cb_focus_out( GtkWidget* treeview, GdkEvent* event, gpointer user_data )
 gboolean
 cb_focus_in( GtkWidget* treeview, GdkEvent* event, gpointer user_data )
 {
-    GtkTreeIter iter;
-
     Projekt* zond = (Projekt*) user_data;
 
     Baum baum = baum_get_baum_from_treeview( zond, treeview );
@@ -203,7 +201,7 @@ cb_focus_in( GtkWidget* treeview, GdkEvent* event, gpointer user_data )
     {
         //selection in "altem" treeview löschen
         gtk_tree_selection_unselect_all( zond->selection[zond->last_baum] );
-/*
+/* wennüberhaupt, dann in cb row_collapse oder _expand verschieben, aber eher besser so!!!
         //Cursor gewählter treeview selektieren
         GtkTreePath* path = NULL;
         GtkTreeViewColumn* focus_column = NULL;
