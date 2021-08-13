@@ -182,20 +182,10 @@ open_file( Projekt* zond, gpointer files )
 }
 
 
-static gboolean
-init_class_cache( gpointer cache_data, GTypeClass* g_class )
-{
-    printf("cache clean\n");
-
-    return FALSE;
-}
-
 Projekt*
 init( GtkApplication* app )
 {
     Projekt* zond = NULL;
-
-//    g_type_add_class_cache_func( NULL, init_class_cache );
 
     zond = g_malloc0( sizeof( Projekt ) );
 

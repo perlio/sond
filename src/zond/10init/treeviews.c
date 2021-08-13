@@ -77,7 +77,7 @@ cb_cursor_changed( SondTreeview* treeview, gpointer user_data )
     gint rc = 0;
     gchar* errmsg = NULL;
     gint node_id = 0;
-    GtkTreeIter iter;
+    static GtkTreeIter iter;
 
     Projekt* zond = (Projekt*) user_data;
 
