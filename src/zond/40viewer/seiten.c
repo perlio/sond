@@ -398,8 +398,13 @@ seiten_drehen_foreach( PdfViewer* pv, gint page_pv, gpointer data, gchar** errms
         g_object_set_data( G_OBJECT(pv->layout), "dirty", GINT_TO_POINTER(1) );
     }
 
-    rc = viewer_get_iter_thumb( pv, page_pv, &iter, errmsg );
-    if ( rc ) ERROR_SOND( "viewer_get_iter_thumb" )
+    rc = viewer_get_iter_thumb( pv, page_pv, &iter );
+    if ( rc )
+    {
+        if ( errmsg ) *errmsg = g_strdup( "Bei Aufruf viewer_get_iter_thumb:\n"
+                "Konnte keinen iter ermitteln" );
+        return -1;
+    }
 
     gtk_list_store_set( GTK_LIST_STORE( gtk_tree_view_get_model(
             GTK_TREE_VIEW(pv->tree_thumb) ) ), &iter, 0, NULL, -1 );
@@ -557,8 +562,13 @@ seiten_cb_loesche_seite( PdfViewer* pv, gint page_pv, gpointer data, gchar** err
     gtk_widget_destroy( GTK_WIDGET(g_ptr_array_index( pv->arr_pages, page_pv )) );
     g_ptr_array_remove_index( pv->arr_pages, page_pv ); //viewer_page wird freed!
 
-    rc = viewer_get_iter_thumb( pv, page_pv, &iter, errmsg );
-    if ( rc ) ERROR_SOND( "viewer_get_iter_thumb" )
+    rc = viewer_get_iter_thumb( pv, page_pv, &iter );
+    if ( rc )
+    {
+        if ( errmsg ) *errmsg = g_strdup( "Bei Aufruf viewer_get_iter_thumb:\n"
+                "Konnte keinen iter ermitteln" );
+        return -1;
+    }
 
     gtk_list_store_remove( GTK_LIST_STORE( gtk_tree_view_get_model(
             GTK_TREE_VIEW(pv->tree_thumb) ) ), &iter );
@@ -895,24 +905,7 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
         do
         {
             if ( dd->zond_pdf_document == pv->dd->zond_pdf_document )
-            {
-                gint rc = 0;
-                gchar* errmsg = NULL;
-
-                viewer_close_thread_pool( pv_vergleich );
-                if ( rc )
-                {
-                    meldung( pv->vf, "Fehler Seiten einfügen -\n\nBei Aufruf "
-                            "viewer_stop_thread_pool:\n", errmsg, "\n\nViewer "
-                            "wird geschlossen", NULL );
-                    g_free( errmsg );
-
-                    viewer_save_and_close( pv );
-
-                    return;
-                }
-
-            }
+                    viewer_close_thread_pool( pv_vergleich );
         } while ( (dd = dd->next) );
     }
 

@@ -14,6 +14,12 @@ typedef double gdouble;
 typedef int gboolean;
 typedef void* gpointer;
 
+typedef struct _Thread_Pool_User_Data
+{
+    GArray* arr_rendered_pages;
+    GMutex mutex_array;
+} tpud;
+
 
 void viewer_springen_zu_pos_pdf( PdfViewer*, PdfPos, gdouble );
 
@@ -33,7 +39,7 @@ void viewer_save_and_close( PdfViewer* );
 
 gint viewer_get_visible_thumbs( PdfViewer*, gint*, gint* );
 
-gint viewer_get_iter_thumb( PdfViewer*, gint, GtkTreeIter*, gchar** );
+gint viewer_get_iter_thumb( PdfViewer*, gint, GtkTreeIter* );
 
 gboolean viewer_page_ist_sichtbar( PdfViewer*, gint );
 

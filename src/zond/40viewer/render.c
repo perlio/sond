@@ -35,29 +35,17 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
 static gint
-render_thumbnail( PdfViewer* pv, fz_context* ctx, gint num,
+render_thumbnail( fz_context* ctx, ViewerPage* viewer_page,
         PdfDocumentPage* pdf_document_page, gchar** errmsg )
 {
-    gint rc = 0;
-    GtkTreeIter iter;
     fz_pixmap* pixmap = NULL;
     ViewerPixbuf* pixbuf = NULL;
 
-    rc = viewer_get_iter_thumb( pv, num, &iter, errmsg );
-    if ( rc == -1 )  ERROR_PAO( "viewer_get_iter_thumb" );
-
-    gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(pv->tree_thumb) ),
-            &iter, 0, &pixbuf, -1 );
-
-    if ( pixbuf )
-    {
-        g_object_unref( pixbuf );
-        return 1;
-    }
+    if ( viewer_page_get_pixbuf_thumb( viewer_page ) ) return 1;
 
     fz_matrix transform = fz_scale( 0.15, 0.15 );
 
-    fz_rect rect = fz_transform_rect( viewer_page_get_crop( g_ptr_array_index( pv->arr_pages, num ) ), transform );
+    fz_rect rect = fz_transform_rect( viewer_page_get_crop( viewer_page ), transform );
     fz_irect irect = fz_round_rect( rect );
 
 //per draw-device to pixmap
@@ -86,8 +74,8 @@ render_thumbnail( PdfViewer* pv, fz_context* ctx, gint num,
     }
 
     pixbuf = viewer_pixbuf_new_from_pixmap( zond_pdf_document_get_ctx( pdf_document_page->document ), pixmap );
-    gtk_list_store_set( GTK_LIST_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(pv->tree_thumb) )), &iter, 0, pixbuf, -1 );
-    g_object_unref( pixbuf );
+
+    viewer_page_set_pixbuf_thumb( viewer_page, pixbuf );
 
     return 0;
 }
@@ -100,9 +88,8 @@ render_pixmap( fz_context* ctx, ViewerPage* viewer_page, gdouble zoom,
     fz_pixmap* pixmap = NULL;
     ViewerPixbuf* pixbuf = NULL;
 
-    //pixmap schon gerendert?
-    if ( gtk_image_get_storage_type( GTK_IMAGE(viewer_page) )
-            != GTK_IMAGE_EMPTY ) return 1; //bereits gerendert
+    //schon gerendert?
+    if ( viewer_page_get_pixbuf_page( viewer_page ) ) return 1;
 
     fz_matrix transform = fz_scale( zoom / 100, zoom / 100);
 
@@ -140,8 +127,7 @@ render_pixmap( fz_context* ctx, ViewerPage* viewer_page, gdouble zoom,
 
     pixbuf = viewer_pixbuf_new_from_pixmap( zond_pdf_document_get_ctx( pdf_document_page->document ), pixmap );
 
-    gtk_image_set_from_pixbuf( GTK_IMAGE(viewer_page), pixbuf );
-    g_object_unref( pixbuf );
+    viewer_page_set_pixbuf_page( viewer_page, pixbuf );
 
     return 0;
 }
@@ -225,11 +211,12 @@ render_page_thread( gpointer data, gpointer user_data )
     ViewerPage* viewer_page = NULL;
     PdfDocumentPage* pdf_document_page = NULL;
     fz_context* ctx = NULL;
+    gint page = 0;
 
-    gint seite = GPOINTER_TO_INT(data) - 1;
     PdfViewer* pv =(PdfViewer*) user_data;
 
-    viewer_page = g_ptr_array_index( pv->arr_pages, seite );
+    page = GPOINTER_TO_INT( data );
+    viewer_page = g_ptr_array_index( pv->arr_pages, page - 1 );
     pdf_document_page = viewer_page_get_document_page( viewer_page );
 
     ctx = fz_clone_context( zond_pdf_document_get_ctx( pdf_document_page->document ) );
@@ -247,9 +234,22 @@ render_page_thread( gpointer data, gpointer user_data )
 
     rc = render_pixmap( ctx, viewer_page, pv->zoom, pdf_document_page, &errmsg );
     if ( rc == -1 ) ERROR_THREAD( "render_pixmap" )
+    else if ( rc == 0 )
+    {
+        g_mutex_lock( &pv->mutex_arr_rendered );
+        g_array_append_val( pv->arr_rendered, page );
+        g_mutex_unlock( &pv->mutex_arr_rendered );
+    }
 
-    rc = render_thumbnail( pv, ctx, seite, pdf_document_page, &errmsg );
+    rc = render_thumbnail( ctx, viewer_page, pdf_document_page, &errmsg );
     if ( rc == -1 ) ERROR_THREAD( "render_thumbnail" )
+    else if ( rc == 0 )
+    {
+        page = page * -1;
+        g_mutex_lock( &pv->mutex_arr_rendered );
+        g_array_append_val( pv->arr_rendered, page );
+        g_mutex_unlock( &pv->mutex_arr_rendered );
+    }
 
     fz_drop_context( ctx );
 

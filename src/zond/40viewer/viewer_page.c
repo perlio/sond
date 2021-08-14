@@ -17,6 +17,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 #include "viewer_page.h"
+#include "viewer_pixbuf.h"
 
 #include <gtk/gtk.h>
 #include <mupdf/fitz.h>
@@ -46,6 +47,8 @@ typedef struct
     PdfViewer* pdfv;
     PdfDocumentPage* pdf_document_page;
     fz_rect crop;
+    ViewerPixbuf* pixbuf_page;
+    ViewerPixbuf* pixbuf_thumb;
 } ViewerPagePrivate;
 
 
@@ -274,6 +277,11 @@ viewer_page_class_init( ViewerPageClass* klass )
 static void
 viewer_page_init( ViewerPage* self )
 {
+    ViewerPagePrivate* priv = viewer_page_get_instance_private( self );
+
+    priv->pixbuf_page = NULL;
+    priv->pixbuf_thumb = NULL;
+
     gtk_widget_show( GTK_WIDGET(self) );
 
     return;
@@ -324,6 +332,54 @@ viewer_page_tilt( ViewerPage* self )
     priv->crop.y1 = y1_tmp;
 
     return;
+}
+
+
+void
+viewer_page_set_pixbuf_page( ViewerPage* self, ViewerPixbuf* pix )
+{
+    ViewerPagePrivate* priv = viewer_page_get_instance_private( self );
+
+    priv->pixbuf_page = pix;
+
+    return;
+}
+
+
+ViewerPixbuf*
+viewer_page_get_pixbuf_page( ViewerPage* self )
+{
+    ViewerPixbuf* pix = NULL;
+
+    ViewerPagePrivate* priv = viewer_page_get_instance_private( self );
+
+    pix = priv->pixbuf_page;
+
+    return pix;
+}
+
+
+void
+viewer_page_set_pixbuf_thumb( ViewerPage* self, ViewerPixbuf* pix )
+{
+    ViewerPagePrivate* priv = viewer_page_get_instance_private( self );
+
+    priv->pixbuf_thumb = pix;
+
+    return;
+}
+
+
+ViewerPixbuf*
+viewer_page_get_pixbuf_thumb( ViewerPage* self )
+{
+    ViewerPixbuf* pix = NULL;
+
+    ViewerPagePrivate* priv = viewer_page_get_instance_private( self );
+
+    pix = priv->pixbuf_thumb;
+
+    return pix;
 }
 
 

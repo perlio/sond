@@ -5,6 +5,8 @@
 #include <gtk/gtk.h>
 #include <mupdf/fitz.h>
 
+#include "viewer_pixbuf.h"
+
 G_BEGIN_DECLS
 
 typedef struct _Pdf_Viewer PdfViewer;
@@ -28,6 +30,14 @@ PdfDocumentPage* viewer_page_get_document_page( ViewerPage* );
 fz_rect viewer_page_get_crop( ViewerPage* );
 
 void viewer_page_tilt( ViewerPage* );
+
+void viewer_page_set_pixbuf_page( ViewerPage*, ViewerPixbuf* );
+
+ViewerPixbuf* viewer_page_get_pixbuf_page( ViewerPage* );
+
+void viewer_page_set_pixbuf_thumb( ViewerPage*, ViewerPixbuf* );
+
+ViewerPixbuf* viewer_page_get_pixbuf_thumb( ViewerPage* );
 
 G_END_DECLS
 
