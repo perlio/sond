@@ -389,15 +389,11 @@ seiten_drehen_foreach( PdfViewer* pv, gint page_pv, gpointer data, gchar** errms
     GtkTreeIter iter = { 0 };
     winkel = GPOINTER_TO_INT(data);
     ViewerPage* viewer_page = g_ptr_array_index( pv->arr_pages, page_pv );
+    gboolean rendered_page = FALSE;
+    gboolean rendered_thumb = FALSE;
+    GdkPixbuf* pix = NULL;
 
-    gtk_image_clear( GTK_IMAGE(viewer_page) );
-
-    if ( winkel == 90 || winkel == -90 )
-    {
-        viewer_page_tilt( viewer_page );
-        g_object_set_data( G_OBJECT(pv->layout), "dirty", GINT_TO_POINTER(1) );
-    }
-
+    //thumb gerenderd?
     rc = viewer_get_iter_thumb( pv, page_pv, &iter );
     if ( rc )
     {
@@ -406,10 +402,29 @@ seiten_drehen_foreach( PdfViewer* pv, gint page_pv, gpointer data, gchar** errms
         return -1;
     }
 
+    gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(pv->tree_thumb) ), &iter, 0, &pix, -1 );
+    if ( pix )
+    {
+        rendered_thumb = TRUE;
+        g_object_unref( pix );
+    }
+
+    rendered_page = (gtk_image_get_storage_type( GTK_IMAGE(viewer_page) ) == GTK_IMAGE_PIXBUF );
+
+    if ( !(rendered_page && rendered_thumb) ) viewer_close_thread_pool( pv );
+
+    gtk_image_clear( GTK_IMAGE(viewer_page) );
     gtk_list_store_set( GTK_LIST_STORE( gtk_tree_view_get_model(
             GTK_TREE_VIEW(pv->tree_thumb) ) ), &iter, 0, NULL, -1 );
 
-    viewer_thread_render( pv, page_pv );
+    if ( winkel == 90 || winkel == -90 )
+    {
+        viewer_page_tilt( viewer_page );
+        g_object_set_data( G_OBJECT(pv->layout), "dirty", GINT_TO_POINTER(1) );
+    }
+
+    if ( !(rendered_page && rendered_thumb) ) viewer_thread_render( pv, -1 );
+    else viewer_thread_render( pv, page_pv );
 
     return 0;
 }

@@ -1207,15 +1207,19 @@ viewer_thumblist_render_textcell( GtkTreeViewColumn* column, GtkCellRenderer* ce
 static gint
 viewer_cb_change_annot( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg )
 {
+    gboolean page_rendered = FALSE;
+
     ViewerPage* viewer_page = g_ptr_array_index( pv->arr_pages, page_pv );
 
-    if ( gtk_image_get_storage_type( GTK_IMAGE(viewer_page) ) == GTK_IMAGE_PIXBUF )
-    {
-        gtk_image_clear( GTK_IMAGE(viewer_page) );
-        viewer_page_set_pixbuf_page( viewer_page, NULL );
-    }
+    page_rendered = (gtk_image_get_storage_type( GTK_IMAGE(viewer_page) ) == GTK_IMAGE_PIXBUF );
 
-    viewer_thread_render( pv, page_pv );
+    if ( !page_rendered ) viewer_close_thread_pool( pv );
+
+    gtk_image_clear( GTK_IMAGE(viewer_page) );
+    viewer_page_set_pixbuf_page( viewer_page, NULL );
+
+    if ( !page_rendered ) viewer_thread_render( pv, -1 );
+    else viewer_thread_render( pv, page_pv );
 
     return 0;
 }
