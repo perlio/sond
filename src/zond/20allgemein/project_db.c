@@ -323,19 +323,6 @@ project_db_create_stmts( Database* dbase, gchar** errmsg )
     if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_prepare_v2 "
                 "(db_get_rel_path[0])" )
 
-/*  db_set_icon_name  */
-    rc = sqlite3_prepare_v2( dbase->db,
-            "UPDATE baum_inhalt SET icon_name = ?1 WHERE node_id = ?2;",
-            -1, &(dbase->stmts.db_set_icon_id[0]), NULL );
-    if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_prepare_v2 "
-                "(db_set_icon_id[0])" )
-
-    rc = sqlite3_prepare_v2( dbase->db,
-            "UPDATE baum_auswertung SET icon_name = ?1 WHERE node_id = ?2;",
-            -1, &(dbase->stmts.db_set_icon_id[1]), NULL );
-    if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_prepare_v2 "
-                "(db_set_icon_id[1])" )
-
 /*  db_get_first_child  */
     rc = sqlite3_prepare_v2( dbase->db,
             "SELECT inhalt1.node_id, inhalt2.node_id FROM baum_inhalt AS inhalt1 "

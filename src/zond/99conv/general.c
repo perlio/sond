@@ -139,6 +139,96 @@ meldung( GtkWidget* window, const gchar* text1, ... )
 }
 
 
+void
+ziele_free( Ziel* ziel )
+{
+    if ( !ziel ) return;
+
+    g_free( ziel->ziel_id_von );
+    g_free( ziel->ziel_id_bis );
+
+    g_free( ziel );
+
+    return;
+}
+
+
+#ifndef VIEWER
+/** Wenn Fehler: -1
+    Wenn Vorfahre Datei ist: 1
+    ansonsten: 0 **/
+gint
+hat_vorfahre_datei( Projekt* zond, Baum baum, gint anchor_id, gboolean child, gchar** errmsg )
+{
+    if ( !child )
+    {
+        anchor_id = db_get_parent( zond, baum, anchor_id, errmsg );
+        if ( anchor_id < 0 ) ERROR_PAO( "db_get_parent" )
+    }
+
+    gint rc = 0;
+    while ( anchor_id != 0 )
+    {
+        rc = db_knotentyp_abfragen( zond, baum, anchor_id, errmsg );
+        if ( rc == -1 ) ERROR_PAO( "db_knotentyp_abfragen" )
+
+        if ( rc > 0 ) return 1;
+
+        anchor_id = db_get_parent( zond, baum, anchor_id, errmsg );
+        if ( anchor_id < 0 ) ERROR_PAO( "db_get_parent" )
+    }
+
+    return 0;
+}
+
+
+gint
+knoten_verschieben( Projekt* zond, Baum baum, gint node_id, gint new_parent,
+        gint new_older_sibling, gchar** errmsg )
+{
+    gint rc = 0;
+
+    //kind verschieben
+    rc = db_verschieben_knoten( zond, baum, node_id, new_parent,
+            new_older_sibling, errmsg );
+    if ( rc ) ERROR_PAO (" db_verschieben_knoten" )
+
+    //Knoten im tree löschen
+    //hierzu iter des verschobenen Kindknotens herausfinden
+    GtkTreeIter* iter = NULL;
+    iter = baum_abfragen_iter( zond->treeview[baum], node_id );
+
+    gtk_tree_store_remove( GTK_TREE_STORE(gtk_tree_view_get_model(
+            GTK_TREE_VIEW(zond->treeview[baum]) ) ), iter );
+    gtk_tree_iter_free( iter );
+
+    //jetzt neuen kindknoten aus db erzeugen
+    //hierzu zunächst iter des Anker-Knotens ermitteln
+    gboolean kind = FALSE;
+    if ( new_older_sibling )
+    {
+        iter = baum_abfragen_iter( zond->treeview[baum], new_older_sibling );
+        kind = FALSE;
+    }
+    else
+    {
+        iter = baum_abfragen_iter( zond->treeview[baum], new_parent );
+        kind = TRUE;
+    }
+
+    //Knoten erzeugen
+    GtkTreeIter* iter_anker = db_baum_knoten_mit_kindern( zond, FALSE,
+            baum, node_id, iter, kind, errmsg );
+    gtk_tree_iter_free( iter );
+
+    if ( !iter_anker ) ERROR_PAO( "db_baum_knoten_mit_kindern" )
+
+    gtk_tree_iter_free( iter_anker );
+
+    return 0;
+}
+
+
 static gint
 general_get_page_num_from_dest_doc( fz_context* ctx, pdf_document* doc, const gchar* dest, gchar** errmsg )
 {
@@ -227,96 +317,6 @@ ziel_zu_anbindung( fz_context* ctx, const gchar* rel_path, Ziel* ziel, gchar** e
     anbindung->bis.index = ziel->index_bis;
 
     return anbindung;
-}
-
-
-void
-ziele_free( Ziel* ziel )
-{
-    if ( !ziel ) return;
-
-    g_free( ziel->ziel_id_von );
-    g_free( ziel->ziel_id_bis );
-
-    g_free( ziel );
-
-    return;
-}
-
-
-#ifndef VIEWER
-/** Wenn Fehler: -1
-    Wenn Vorfahre Datei ist: 1
-    ansonsten: 0 **/
-gint
-hat_vorfahre_datei( Projekt* zond, Baum baum, gint anchor_id, gboolean child, gchar** errmsg )
-{
-    if ( !child )
-    {
-        anchor_id = db_get_parent( zond, baum, anchor_id, errmsg );
-        if ( anchor_id < 0 ) ERROR_PAO( "db_get_parent" )
-    }
-
-    gint rc = 0;
-    while ( anchor_id != 0 )
-    {
-        rc = db_knotentyp_abfragen( zond, baum, anchor_id, errmsg );
-        if ( rc == -1 ) ERROR_PAO( "db_knotentyp_abfragen" )
-
-        if ( rc > 0 ) return 1;
-
-        anchor_id = db_get_parent( zond, baum, anchor_id, errmsg );
-        if ( anchor_id < 0 ) ERROR_PAO( "db_get_parent" )
-    }
-
-    return 0;
-}
-
-
-gint
-knoten_verschieben( Projekt* zond, Baum baum, gint node_id, gint new_parent,
-        gint new_older_sibling, gchar** errmsg )
-{
-    gint rc = 0;
-
-    //kind verschieben
-    rc = db_verschieben_knoten( zond, baum, node_id, new_parent,
-            new_older_sibling, errmsg );
-    if ( rc ) ERROR_PAO (" db_verschieben_knoten" )
-
-    //Knoten im tree löschen
-    //hierzu iter des verschobenen Kindknotens herausfinden
-    GtkTreeIter* iter = NULL;
-    iter = baum_abfragen_iter( zond->treeview[baum], node_id );
-
-    gtk_tree_store_remove( GTK_TREE_STORE(gtk_tree_view_get_model(
-            GTK_TREE_VIEW(zond->treeview[baum]) ) ), iter );
-    gtk_tree_iter_free( iter );
-
-    //jetzt neuen kindknoten aus db erzeugen
-    //hierzu zunächst iter des Anker-Knotens ermitteln
-    gboolean kind = FALSE;
-    if ( new_older_sibling )
-    {
-        iter = baum_abfragen_iter( zond->treeview[baum], new_older_sibling );
-        kind = FALSE;
-    }
-    else
-    {
-        iter = baum_abfragen_iter( zond->treeview[baum], new_parent );
-        kind = TRUE;
-    }
-
-    //Knoten erzeugen
-    GtkTreeIter* iter_anker = db_baum_knoten_mit_kindern( zond, FALSE,
-            baum, node_id, iter, kind, errmsg );
-    gtk_tree_iter_free( iter );
-
-    if ( !iter_anker ) ERROR_PAO( "db_baum_knoten_mit_kindern" )
-
-    gtk_tree_iter_free( iter_anker );
-
-    return 0;
 }
 
 

@@ -14,14 +14,44 @@ typedef struct _DBase_Full
     DBase dbase;
     sqlite3_stmt* insert_node[5];
     sqlite3_stmt* set_node_text[2];
-    sqlite3_stmt* stmts[25];
+    sqlite3_stmt* set_icon_id[2];
+    sqlite3_stmt* stmts[50];
 
 } DBaseFull;
+
+typedef struct _Property
+{
+    gint ID;
+    gchar* label;
+    gchar* value;
+} Property;
+
+typedef struct _Edge
+{
+    gint ID_edge;
+    gchar* label_edge;
+    gint ID_object;
+    gchar* label_object;
+    GArray* arr_properties;
+} Edge;
+
 
 gint dbase_full_insert_node( DBaseFull*, Baum, gint, gboolean, const gchar*,
         const gchar*, gchar** );
 
 gint dbase_full_set_node_text( DBaseFull*, Baum, gint, const gchar*, gchar** );
+
+gint dbase_full_set_icon_id( DBaseFull*, Baum, gint, const gchar*, gchar** );
+
+gint dbase_full_insert_entity( DBaseFull*, gint, gchar** );
+
+gint dbase_full_insert_property( DBaseFull*, gint, gint, gchar*, gchar** );
+
+gint dbase_full_get_label_entity( DBaseFull*, gint, gchar**, gchar** );
+
+gint dbase_full_get_properties( DBaseFull*, gint, GArray**, gchar** );
+
+gint dbase_full_get_edges( DBaseFull*, gint, GArray**, gchar** );
 
 gint dbase_full_prepare_stmts( DBaseFull*, gchar** );
 

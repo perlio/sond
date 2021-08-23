@@ -4,8 +4,6 @@
 #define ERROR_SOND(x) { if ( errmsg ) *errmsg = add_string( \
                        g_strdup( "Bei Aufruf " x ":\n" ), *errmsg ); \
                        return -1; }
-#define ERROR_SOND_II(x) { if ( errmsg ) *errmsg = add_string( \
-                       g_strdup( "Bei Aufruf " x ":\n" ), *errmsg ); }
 
 typedef struct _GSList GSList;
 typedef struct _GPtrArray GPtrArray;

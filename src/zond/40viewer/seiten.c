@@ -414,8 +414,10 @@ seiten_drehen_foreach( PdfViewer* pv, gint page_pv, gpointer data, gchar** errms
     if ( !(rendered_page && rendered_thumb) ) viewer_close_thread_pool( pv );
 
     gtk_image_clear( GTK_IMAGE(viewer_page) );
+    viewer_page_set_pixbuf_page( viewer_page, NULL );
     gtk_list_store_set( GTK_LIST_STORE( gtk_tree_view_get_model(
             GTK_TREE_VIEW(pv->tree_thumb) ) ), &iter, 0, NULL, -1 );
+    viewer_page_set_pixbuf_thumb( viewer_page, NULL );
 
     if ( winkel == 90 || winkel == -90 )
     {

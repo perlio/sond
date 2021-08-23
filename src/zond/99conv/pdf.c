@@ -113,7 +113,7 @@ pdf_copy_page( fz_context* ctx, pdf_document* doc_src, gint page_from,
         fz_catch( ctx )
         {
             pdf_drop_graft_map( ctx, graft_map );
-            ERROR_MUPDF_CTX( "pdf_lookup- and flatten_inheritable_page", ctx )
+            ERROR_MUPDF( "pdf_lookup- and flatten_inheritable_page" )
         }
 
         fz_try( ctx )
@@ -126,7 +126,7 @@ pdf_copy_page( fz_context* ctx, pdf_document* doc_src, gint page_from,
         {
             pdf_drop_graft_map( ctx, graft_map );
             pdf_drop_obj( ctx, page_dict );
-            ERROR_MUPDF_CTX( "pdf_new_dict/_put", ctx )
+            ERROR_MUPDF( "pdf_new_dict/_put" )
         }
 
         for ( gint i = 0; i < nelem(copy_list); i++ )
@@ -139,7 +139,7 @@ pdf_copy_page( fz_context* ctx, pdf_document* doc_src, gint page_from,
             {
                 pdf_drop_graft_map( ctx, graft_map );
                 pdf_drop_obj( ctx, page_dict );
-                ERROR_MUPDF_CTX( "pdf_dict_put_drop", ctx )
+                ERROR_MUPDF( "pdf_dict_put_drop" )
             }
         }
 
@@ -160,7 +160,7 @@ pdf_copy_page( fz_context* ctx, pdf_document* doc_src, gint page_from,
         {
             pdf_drop_graft_map( ctx, graft_map );
 
-            ERROR_MUPDF_CTX( "pdf_add_object/_insert_page", ctx )
+            ERROR_MUPDF( "pdf_add_object/_insert_page" )
         }
     }
 

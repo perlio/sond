@@ -43,11 +43,7 @@ document_new_displayed_document( const gchar* rel_path,
     DisplayedDocument* dd = NULL;
 
     zond_pdf_document = zond_pdf_document_open( rel_path, errmsg );
-    if ( !zond_pdf_document )
-    {
-        ERROR_SOND_II( "zond_pdf_document_open" )
-        return NULL;
-    }
+    if ( !zond_pdf_document ) ERROR_PAO_R( "zond_pdf_document_open", NULL )
 
     dd = g_malloc0( sizeof( DisplayedDocument ) );
     dd->zond_pdf_document = zond_pdf_document;

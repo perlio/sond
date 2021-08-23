@@ -105,7 +105,6 @@ typedef struct _STMTS
     sqlite3_stmt* db_get_ziel[1];
     sqlite3_stmt* db_get_text[1];
     sqlite3_stmt* db_get_rel_path[1];
-    sqlite3_stmt* db_set_icon_id[2];
     sqlite3_stmt* db_get_first_child[2];
     sqlite3_stmt* db_get_node_id_from_rel_path[1];
     sqlite3_stmt* db_check_id[1];

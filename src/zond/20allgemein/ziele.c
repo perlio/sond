@@ -213,7 +213,7 @@ ziele_einfuegen_anbindung( Projekt* zond, const gchar* rel_path, gint anchor_id,
 
     gtk_tree_iter_free( new_iter );
 
-    return 0;
+    return new_node;
 }
 
 
@@ -428,7 +428,7 @@ ziele_abfragen_anker_rek( Projekt* zond, gint node_id, Anbindung anbindung,
 
 
 gint
-ziele_erzeugen_anbindung( PdfViewer* pv, gchar** errmsg )
+ziele_erzeugen_anbindung( PdfViewer* pv, gint* ptr_new_node, gchar** errmsg )
 {
     gint rc = 0;
     gint node_id = 0;
@@ -472,7 +472,9 @@ ziele_erzeugen_anbindung( PdfViewer* pv, gchar** errmsg )
             zond_pdf_document_get_path( dd_von->zond_pdf_document ), anchor_id, kind,
             anbindung, ziel, errmsg );
     ziele_free( ziel );
-    if ( rc ) ERROR_PAO( "ziele_einfuegen_anbindung" )
+    if ( rc == -1 ) ERROR_PAO( "ziele_einfuegen_anbindung" )
+
+    if ( ptr_new_node ) *ptr_new_node = rc;
 
     return 0;
 }

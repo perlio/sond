@@ -815,6 +815,23 @@ pdf_ocr_get_cleaned_tokens( fz_context* ctx, fz_stream* stream, gint flags, gcha
     g_ptr_array_unref( arr_gs );
     g_array_unref( arr_marked_content );
 
+    //auf BX-EX prüfen
+    for ( gint idx = 0; idx < arr_zond_token->len; idx++ )
+    {
+        gint BX = -1;
+        ZondToken zond_token = g_array_index( arr_zond_token, ZondToken, idx );
+
+        if ( zond_token.tok == PDF_TOK_KEYWORD && !g_strcmp0( zond_token.s, "BX" ) ) BX = idx;
+        else if ( zond_token.tok != PDF_NUM_TOKENS && BX > -1 ) BX = -1;
+        else if ( zond_token.tok == PDF_TOK_KEYWORD && !g_strcmp0( zond_token.s, "EX" )
+                && BX > -1 )
+        {
+            pdf_ocr_invalidate_token( arr_zond_token, BX, 1 );
+            pdf_ocr_invalidate_token( arr_zond_token, idx, 1 );
+            BX = -1;
+        }
+    }
+
     return arr_zond_token;
 }
 
@@ -863,23 +880,6 @@ pdf_ocr_filter_content_stream( fz_context* ctx, pdf_page* page, gint flags, gcha
     fz_drop_stream( ctx, stream );
     if ( !arr_zond_token ) ERROR_PAO( "pdf_ocr_get_cleaned_tokens" )
 
-    //auf BX-EX prüfen
-    for ( gint idx = 0; idx < arr_zond_token->len; idx++ )
-    {
-        gint BX = -1;
-        ZondToken zond_token = g_array_index( arr_zond_token, ZondToken, idx );
-
-        if ( zond_token.tok == PDF_TOK_KEYWORD && !g_strcmp0( zond_token.s, "BX" ) ) BX = idx;
-        else if ( zond_token.tok != PDF_NUM_TOKENS && BX > -1 ) BX = -1;
-        else if ( zond_token.tok == PDF_TOK_KEYWORD && !g_strcmp0( zond_token.s, "EX" )
-                && BX > -1 )
-        {
-            pdf_ocr_invalidate_token( arr_zond_token, BX, 1 );
-            pdf_ocr_invalidate_token( arr_zond_token, idx, 1 );
-            BX = -1;
-        }
-    }
-
     buf = pdf_ocr_reassemble_buffer( ctx, arr_zond_token, errmsg );
     g_array_unref( arr_zond_token );
     if ( !buf ) ERROR_PAO( "pdf_zond_reassemble_buffer" )
@@ -887,7 +887,7 @@ pdf_ocr_filter_content_stream( fz_context* ctx, pdf_page* page, gint flags, gcha
     rc = pdf_ocr_update_content_stream( ctx, page->obj, buf, errmsg );
     fz_drop_buffer( ctx, buf );
     if ( rc ) ERROR_PAO( "pdf_ocr_update_content_stream" )
-pdf_print_content_stream( ctx, page->obj, errmsg);
+
     return 0;
 }
 
@@ -1497,20 +1497,18 @@ pdf_ocr_get_hidden_text( PdfDocumentPage* pdf_document_page, gchar** errmsg )
     fz_catch( ctx )
     {
         pdf_drop_document( ctx, doc_tmp_alt );
-        ERR_MUPDF( "fz_load_page" );
+        ERROR_MUPDF_R( "fz_load_page", NULL );
 
         return NULL;
     }
-pdf_print_content_stream( ctx, page->obj, errmsg);
+
     //structured text-device
     fz_try( ctx ) stext_page = fz_new_stext_page( ctx, pdf_bound_page( ctx, page ) );
     fz_catch( ctx )
     {
         fz_drop_page( ctx, &page->super );
         pdf_drop_document( ctx, doc_tmp_alt );
-        ERR_MUPDF( "fz_new_stext_page" )
-
-        return NULL;
+        ERROR_MUPDF_R( "fz_new_stext_page", NULL )
     }
 
     fz_try( ctx ) s_t_device = fz_new_stext_device( ctx, stext_page, NULL );
@@ -1519,7 +1517,7 @@ pdf_print_content_stream( ctx, page->obj, errmsg);
         fz_drop_stext_page( ctx, stext_page );
         fz_drop_page( ctx, &page->super );
         pdf_drop_document( ctx, doc_tmp_alt );
-        ERR_MUPDF( "fz_new_stext_device" )
+        ERROR_MUPDF_R( "fz_new_stext_device", NULL )
 
         return NULL;
     }

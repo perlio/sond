@@ -22,6 +22,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <mupdf/pdf.h>
 
 #include "../zond_pdf_document.h"
+#include "../zond_database.h"
 
 #include "../global_types.h"
 #include "../error.h"
@@ -1624,12 +1625,13 @@ cb_viewer_layout_press_button( GtkWidget* layout, GdkEvent* event, gpointer
                     (pdf_punkt.punkt.y >= pv->anbindung.von.index))) )
         {
             gchar* errmsg = NULL;
+            gint new_node = 0;
 
             pv->anbindung.bis.seite = pdf_punkt.seite;
             if ( punktgenau ) pv->anbindung.bis.index = pdf_punkt.punkt.y;
             else pv->anbindung.bis.index = EOP;
 
-            rc = ziele_erzeugen_anbindung( pv, &errmsg );
+            rc = ziele_erzeugen_anbindung( pv, &new_node, &errmsg );
             if ( rc == -2 )
             {
                 meldung( pv->vf, "Fehler - Dokument konnte nicht gespeichert/"
@@ -1647,7 +1649,23 @@ cb_viewer_layout_press_button( GtkWidget* layout, GdkEvent* event, gpointer
             else if ( rc == 2 ) display_message( pv->vf, "Anbindung kann nicht "
                     "erzeugt werden\n\nSeiten stammen aus unterschiedlichen "
                     "Dokumenten", NULL );
-            else if ( rc == 0 ) gtk_window_present( GTK_WINDOW(pv->zond->app_window) );
+            else if ( rc == 0 )
+            {
+                gint rc = 0;
+
+                gtk_window_present( GTK_WINDOW(pv->zond->app_window) );
+
+                //Datenbank!!!
+                rc = zond_database_insert_anbindung( pv->zond, new_node, &errmsg );
+                if ( rc == -1 )
+                {
+                    meldung( pv->zond->app_window, "Fehler - Erzeugte Anbindung "
+                            "konnte nicht in database eingefügt werden\n\n"
+                            "Bei Aufruf zond_database_insert_anbindung:\n",
+                            errmsg, NULL );
+                    g_free( errmsg );
+                }
+            }
         }
 
         //anbindung.von "löschen"

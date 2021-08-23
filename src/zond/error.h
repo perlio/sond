@@ -32,9 +32,6 @@ gchar* prepend_string( gchar*, gchar* );
                         "Bei Aufruf " x ":\n", fz_caught_message( ctx ), NULL ), *errmsg ); \
                          return y; }
 
-#define ERR_MUPDF(x) { if ( errmsg ) *errmsg = add_string( *errmsg, g_strconcat( \
-                        "Bei Aufruf " x ":\n", fz_caught_message( ctx ), NULL ) ); }
-
 #define ERROR_THREAD(x) { fprintf( stderr, "Thread error: %s\n", x); \
                           fz_drop_context( ctx ); return; }
 

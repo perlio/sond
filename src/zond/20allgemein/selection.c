@@ -840,8 +840,8 @@ selection_foreach_change_icon_id( SondTreeview* tree_view, GtkTreeIter* iter,
     gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(tree_view) ), iter,
             2, &node_id, -1 );
 
-    rc = db_set_icon_id( s_selection->zond, s_selection->baum, node_id, s_selection->icon_name, errmsg );
-    if ( rc ) ERROR_PAO( "db_set_icon_id" )
+    rc = dbase_full_set_icon_id( s_selection->zond->dbase_zond->dbase_work, s_selection->baum, node_id, s_selection->icon_name, errmsg );
+    if ( rc ) ERROR_PAO( "dbase_full_set_icon_id" )
 
     //neuen icon_name im tree speichern
     gtk_tree_store_set( GTK_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(s_selection->
