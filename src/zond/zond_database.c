@@ -223,7 +223,7 @@ zond_database_link_nodes( DBaseFull* dbase_full, GtkWidget* dialog,
     gtk_container_add( GTK_CONTAINER(swindow_linked), listbox_linked );
 
     tree_labels = zond_database_get_tree_labels( dbase_full, nomen, errmsg );
-    if ( !tree_labels ) ERROR_PAO( "zond_database_link_to_konvolut" )
+    if ( !tree_labels ) ERROR_PAO( "zond_database_get_tree_labels" )
     combo_labels = gtk_combo_box_new_with_model( GTK_TREE_MODEL(tree_labels) );
     g_object_unref( tree_labels );
     gtk_grid_attach( GTK_GRID(grid), combo_labels, 1, 0, 1, 1 );
@@ -259,7 +259,12 @@ zond_database_link_anbindung( Projekt* zond, gint ID_entity, gchar** errmsg )
     //Fenster ausgestalten mit Link zu Konvolut
     ret = zond_database_link_nodes( zond->dbase_zond->dbase_work, dialog,
             ID_entity, 10290, 600, errmsg ); //600 ist Konvolut, 10290 Anbindung --> Konvolut
-    if ( ret == GTK_RESPONSE_CANCEL ) return 1;
+    if ( ret == -1 )
+    {
+        gtk_widget_destroy( dialog );
+        ERROR_PAO( "zond_database_link_nodes" )
+    }
+    else if ( ret == GTK_RESPONSE_CANCEL ) return 1;
     else if ( ret == GTK_RESPONSE_CLOSE ) return 0;
 
     //else if ret == GTK_RESPONSE_APPLY: link to inhalt

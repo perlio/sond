@@ -664,6 +664,10 @@
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
 		</Unit>
+		<Unit filename="src/zond/zond_database.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
 		<Unit filename="src/zond/zond_pdf_document.c">
 			<Option compilerVar="CC" />
 		</Unit>

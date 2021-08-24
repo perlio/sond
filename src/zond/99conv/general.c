@@ -452,15 +452,6 @@ info_window_set_message( InfoWindow* info_window, const gchar* message )
 }
 
 
-static gboolean
-cb_info_window_delete_event( GtkWidget* widget, gpointer data )
-{
-    gtk_dialog_response( GTK_DIALOG(widget), GTK_RESPONSE_CANCEL );
-
-    return TRUE;
-}
-
-
 static void
 cb_info_window_response( GtkDialog* dialog, gint id, gpointer data )
 {
@@ -500,8 +491,6 @@ info_window_open( GtkWidget* window, const gchar* title )
 
     g_signal_connect( GTK_DIALOG(info_window->dialog), "response",
             G_CALLBACK(cb_info_window_response), info_window );
-    g_signal_connect( info_window->dialog, "delete-event",
-            G_CALLBACK(cb_info_window_delete_event), NULL );
 
     return info_window;
 }

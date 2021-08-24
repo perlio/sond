@@ -129,7 +129,7 @@ dbase_full_insert_entity( DBaseFull* dbase_full, gint label, gchar** errmsg )
     if ( rc != SQLITE_DONE ) ERROR_DBASE_FULL( "sqlite3_step (insert)" )
 
     rc = sqlite3_step( dbase_full->stmts[42] );
-    if ( rc != SQLITE_DONE && rc != SQLITE_ROW ) ERROR_DBASE_FULL( "sqlite3_step (get last inserted rowid)" )
+    if ( rc != SQLITE_ROW ) ERROR_DBASE_FULL( "sqlite3_step (get last inserted rowid)" )
 
     new_node_id = sqlite3_column_int( dbase_full->stmts[42], 0 );
 
@@ -172,7 +172,7 @@ dbase_full_get_label_entity( DBaseFull* dbase_full, gint ID_entity, gchar** labe
     if ( rc != SQLITE_OK ) ERROR_DBASE_FULL( "sqlite3_bind_int (ID_entity)" )
 
     rc = sqlite3_step( dbase_full->stmts[44] );
-    if ( rc != SQLITE_DONE ) ERROR_DBASE_FULL( "sqlite3_step" )
+    if ( rc != SQLITE_ROW ) ERROR_DBASE_FULL( "sqlite3_step" )
 
     if ( label ) *label =
             g_strdup( (const gchar*) sqlite3_column_text( dbase_full->stmts[44], 0 ) );
@@ -214,7 +214,7 @@ dbase_full_get_properties( DBaseFull* dbase_full, gint ID_entity,
         Property property = { 0 };
 
         rc = sqlite3_step( dbase_full->stmts[45] );
-        if ( rc != SQLITE_ROW || rc != SQLITE_DONE )
+        if ( rc != SQLITE_ROW && rc != SQLITE_DONE )
         {
             g_array_unref( *arr_properties );
             ERROR_DBASE_FULL( "sqlite3_step" )
@@ -266,7 +266,7 @@ dbase_full_get_edges( DBaseFull* dbase_full, gint ID_entity, GArray** arr_edges,
         Edge edge = { 0 };
 
         rc = sqlite3_step( dbase_full->stmts[46] );
-        if ( rc != SQLITE_ROW || rc != SQLITE_DONE )
+        if ( rc != SQLITE_ROW && rc != SQLITE_DONE )
         {
             g_array_unref( *arr_edges );
             ERROR_DBASE_FULL( "sqlite3_step" )
@@ -557,7 +557,7 @@ dbase_full_prepare_stmts( DBaseFull* dbase_full, gchar** errmsg )
 /*  insert_entity  (41) */
             "INSERT INTO entities (label) VALUES (?1);",
 
-            "VALUES (last_insert_rowid()); ",
+            "SELECT (last_insert_rowid()); ",
 
 /*  insert_property (43)  */
             "INSERT INTO properties (entity,label,value) VALUES (?1, ?2, ?3);",
