@@ -7,5 +7,6 @@ typedef char gchar;
 
 gint zond_database_insert_anbindung( Projekt*, gint, gchar** );
 
+gint zond_database_edit_node( Projekt*, gint, gchar** );
 
 #endif //ZOND_DATABASE_H_INCLUDED

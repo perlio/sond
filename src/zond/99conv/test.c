@@ -1,6 +1,7 @@
 #include "../global_types.h"
 #include "../error.h"
 #include "../zond_pdf_document.h"
+#include "../zond_database.h"
 
 #include "../99conv/general.h"
 #include "pdf.h"
@@ -245,9 +246,9 @@ pdf_print_content_stream( fz_context* ctx, pdf_obj* page_ref, gchar** errmsg )
 gint
 test( Projekt* zond, gchar** errmsg )
 {
+    zond_database_edit_node( zond, 1, errmsg );
 
     return 0;
-
 }
 
 

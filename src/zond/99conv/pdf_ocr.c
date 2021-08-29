@@ -1382,15 +1382,6 @@ pdf_ocr_page( PdfDocumentPage* pdf_document_page, InfoWindow* info_window,
 }
 
 
-static gboolean
-cb_dialog_delete( GtkWidget* window, GdkEvent* event, gpointer data )
-{
-    gtk_dialog_response( GTK_DIALOG(window), GTK_RESPONSE_CANCEL );
-
-    return TRUE;
-}
-
-
 static GtkWidget*
 pdf_ocr_create_dialog( InfoWindow* info_window, gint page )
 {
@@ -1402,9 +1393,6 @@ pdf_ocr_create_dialog( InfoWindow* info_window, gint page )
             "Anzeigen", 5,
             "Abbrechen", GTK_RESPONSE_CANCEL, NULL );
     g_free( titel );
-
-    g_signal_connect( dialog, "delete-event", G_CALLBACK(cb_dialog_delete),
-            NULL );
 
     return dialog;
 }

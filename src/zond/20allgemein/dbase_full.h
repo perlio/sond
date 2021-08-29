@@ -15,7 +15,7 @@ typedef struct _DBase_Full
     sqlite3_stmt* insert_node[5];
     sqlite3_stmt* set_node_text[2];
     sqlite3_stmt* set_icon_id[2];
-    sqlite3_stmt* stmts[50];
+    sqlite3_stmt* stmts[55];
 
 } DBaseFull;
 
@@ -26,12 +26,19 @@ typedef struct _Property
     gchar* value;
 } Property;
 
+typedef struct _Node
+{
+    gint ID;
+    gchar* label;
+    GArray* arr_properties;
+} Node;
+
 typedef struct _Edge
 {
     gint ID_edge;
     gchar* label_edge;
+    gint ID_subject;
     gint ID_object;
-    gchar* label_object;
     GArray* arr_properties;
 } Edge;
 
@@ -51,7 +58,15 @@ gint dbase_full_get_label_entity( DBaseFull*, gint, gchar**, gchar** );
 
 gint dbase_full_get_properties( DBaseFull*, gint, GArray**, gchar** );
 
-gint dbase_full_get_edges( DBaseFull*, gint, GArray**, gchar** );
+gint dbase_full_get_outgoing_edges( DBaseFull*, gint, GArray**, gchar** );
+
+gint dbase_full_get_label_text( DBaseFull*, gint, gchar**, gchar** );
+
+gint dbase_full_get_array_children_label( DBaseFull*, gint, GArray**, gchar** );
+
+gint dbase_full_get_array_nodes( DBaseFull*, gint, GArray**, gchar** );
+
+gint dbase_full_get_incoming_edges( DBaseFull*, gint, GArray**, gchar** );
 
 gint dbase_full_prepare_stmts( DBaseFull*, gchar** );
 
