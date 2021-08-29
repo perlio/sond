@@ -105,116 +105,6 @@ zond_database_fill_listbox_with_existing_nodes( DBaseFull* dbase_full,
 
 
 static gint
-zond_database_fill_listbox_with_outgoing_edges( DBaseFull* dbase_full,
-        GtkWidget* listbox, gint ID_entity, gchar** errmsg)
-{
-    gint rc = 0;
-    GArray* arr_edges = NULL;
-    GtkWidget* button_new = NULL;
-
-    rc = dbase_full_get_outgoing_edges( dbase_full, ID_entity, &arr_edges, errmsg );
-    if ( rc ) ERROR_PAO( "dbase_full_get_outgoing_edges" )
-
-    button_new = gtk_button_new_with_label( "Neue ausgehende\nVerbindung" );
-    gtk_list_box_insert( GTK_LIST_BOX(listbox), button_new, -1 );
-
-    for ( gint i = 0; i < arr_edges->len; i++ )
-    {
-        Edge edge = { 0 };
-        GtkWidget* hbox = NULL;
-        GtkWidget* label_edge = NULL;
-        GtkWidget* label_object = NULL;
-        gchar* text_edge = NULL;
-
-        edge = g_array_index( arr_edges, Edge, i );
-
-        hbox = gtk_box_new( GTK_ORIENTATION_HORIZONTAL, 0 );
-
-        text_edge = g_strdup_printf( "ID: %i  Label: %s", edge.ID_edge, edge.label_edge );
-        for (gint u = 0; u < edge.arr_properties->len; u++ )
-        {
-            Property property = g_array_index( edge.arr_properties, Property, u );
-
-            text_edge = add_string( text_edge, g_strdup_printf( "\n%i  %s  %s",
-                    property.ID, property.label, property.value ) );
-        }
-        label_edge = gtk_label_new( (const gchar*) text_edge );
-        g_free( text_edge );
-        gtk_box_pack_start( GTK_BOX(hbox), label_edge, FALSE, FALSE, 0 );
-
-        label_object = zond_database_get_info_entity( dbase_full, edge.ID_object, errmsg );
-        if ( !label_object )
-        {
-            gtk_widget_destroy( label_edge );
-            g_array_unref( arr_edges );
-            ERROR_PAO( "zond_database_get_info_entity" )
-        }
-
-        gtk_box_pack_start( GTK_BOX(hbox), label_object, FALSE, FALSE, 0 );
-
-        gtk_list_box_insert( GTK_LIST_BOX(listbox), hbox, -1 );
-    }
-
-    g_array_unref( arr_edges );
-
-    return 0;
-}
-
-
-static gint
-zond_database_fill_listbox_with_incoming_edges( DBaseFull* dbase_full,
-        GtkWidget* listbox, gint ID_entity, gchar** errmsg)
-{
-    gint rc = 0;
-    GArray* arr_edges = NULL;
-
-    rc = dbase_full_get_incoming_edges( dbase_full, ID_entity, &arr_edges, errmsg );
-    if ( rc ) ERROR_PAO( "dbase_full_get_incoming_edges" )
-
-    for ( gint i = 0; i < arr_edges->len; i++ )
-    {
-        Edge edge = { 0 };
-        GtkWidget* hbox = NULL;
-        GtkWidget* label_edge = NULL;
-        GtkWidget* label_subject = NULL;
-        gchar* text_edge = NULL;
-
-        edge = g_array_index( arr_edges, Edge, i );
-
-        hbox = gtk_box_new( GTK_ORIENTATION_HORIZONTAL, 0 );
-
-        label_subject = zond_database_get_info_entity( dbase_full, edge.ID_subject, errmsg );
-        if ( !label_subject )
-        {
-            gtk_widget_destroy( label_edge );
-            g_array_unref( arr_edges );
-            ERROR_PAO( "zond_database_get_info_entity" )
-        }
-
-        gtk_box_pack_start( GTK_BOX(hbox), label_subject, FALSE, FALSE, 0 );
-
-        text_edge = g_strdup_printf( "ID: %i  Label: %s", edge.ID_edge, edge.label_edge );
-        for (gint u = 0; u < edge.arr_properties->len; u++ )
-        {
-            Property property = g_array_index( edge.arr_properties, Property, u );
-
-            text_edge = add_string( text_edge, g_strdup_printf( "\n%i  %s  %s",
-                    property.ID, property.label, property.value ) );
-        }
-        label_edge = gtk_label_new( (const gchar*) text_edge );
-        g_free( text_edge );
-        gtk_box_pack_start( GTK_BOX(hbox), label_edge, FALSE, FALSE, 0 );
-
-        gtk_list_box_insert( GTK_LIST_BOX(listbox), hbox, -1 );
-    }
-
-    g_array_unref( arr_edges );
-
-    return 0;
-}
-
-
-static gint
 zond_database_get_tree_labels( DBaseFull* dbase_full, gint label,
         GtkTreeIter* iter, GtkTreeStore* tree_store, gchar** errmsg )
 {
@@ -429,6 +319,135 @@ zond_database_add_link( DBaseFull* dbase_full, GtkWidget* dialog,
     ret = gtk_dialog_run( GTK_DIALOG(dialog) );
 
     return ret;
+}
+
+
+static void
+zond_database_cb_new_outgoing( GtkButton* button, gpointer data )
+{
+    gint ID_entity = 0;
+    DBaseFull* dbase_full = NULL;
+    GtkWidget* dialog = NULL;
+
+    ID_entity = g_object_get_data( G_OBJECT(button), "ID-entity" );
+    dbase_full = (DBaseFull*) data;
+
+    dialog =
+
+
+}
+
+
+static gint
+zond_database_fill_listbox_with_outgoing_edges( DBaseFull* dbase_full,
+        GtkWidget* listbox, gint ID_entity, gchar** errmsg)
+{
+    gint rc = 0;
+    GArray* arr_edges = NULL;
+    GtkWidget* button_new = NULL;
+
+    rc = dbase_full_get_outgoing_edges( dbase_full, ID_entity, &arr_edges, errmsg );
+    if ( rc ) ERROR_PAO( "dbase_full_get_outgoing_edges" )
+
+    button_new = gtk_button_new_with_label( "Neue ausgehende\nVerbindung" );
+    g_object_set_data( G_OBJECT(button_new), "ID-entity", GINT_TO_POINTER(ID_entity) );
+
+    gtk_list_box_insert( GTK_LIST_BOX(listbox), button_new, -1 );
+
+    for ( gint i = 0; i < arr_edges->len; i++ )
+    {
+        Edge edge = { 0 };
+        GtkWidget* hbox = NULL;
+        GtkWidget* label_edge = NULL;
+        GtkWidget* label_object = NULL;
+        gchar* text_edge = NULL;
+
+        edge = g_array_index( arr_edges, Edge, i );
+
+        hbox = gtk_box_new( GTK_ORIENTATION_HORIZONTAL, 0 );
+
+        text_edge = g_strdup_printf( "ID: %i  Label: %s", edge.ID_edge, edge.label_edge );
+        for (gint u = 0; u < edge.arr_properties->len; u++ )
+        {
+            Property property = g_array_index( edge.arr_properties, Property, u );
+
+            text_edge = add_string( text_edge, g_strdup_printf( "\n%i  %s  %s",
+                    property.ID, property.label, property.value ) );
+        }
+        label_edge = gtk_label_new( (const gchar*) text_edge );
+        g_free( text_edge );
+        gtk_box_pack_start( GTK_BOX(hbox), label_edge, FALSE, FALSE, 0 );
+
+        label_object = zond_database_get_info_entity( dbase_full, edge.ID_object, errmsg );
+        if ( !label_object )
+        {
+            gtk_widget_destroy( label_edge );
+            g_array_unref( arr_edges );
+            ERROR_PAO( "zond_database_get_info_entity" )
+        }
+
+        gtk_box_pack_start( GTK_BOX(hbox), label_object, FALSE, FALSE, 0 );
+
+        gtk_list_box_insert( GTK_LIST_BOX(listbox), hbox, -1 );
+    }
+
+    g_signal_connect( button_new, "clicked", (GCallback) zond_database_cb_new_outgoing, dbase_full))
+    g_array_unref( arr_edges );
+
+    return 0;
+}
+
+
+static gint
+zond_database_fill_listbox_with_incoming_edges( DBaseFull* dbase_full,
+        GtkWidget* listbox, gint ID_entity, gchar** errmsg)
+{
+    gint rc = 0;
+    GArray* arr_edges = NULL;
+
+    rc = dbase_full_get_incoming_edges( dbase_full, ID_entity, &arr_edges, errmsg );
+    if ( rc ) ERROR_PAO( "dbase_full_get_incoming_edges" )
+
+    for ( gint i = 0; i < arr_edges->len; i++ )
+    {
+        Edge edge = { 0 };
+        GtkWidget* hbox = NULL;
+        GtkWidget* label_edge = NULL;
+        GtkWidget* label_subject = NULL;
+        gchar* text_edge = NULL;
+
+        edge = g_array_index( arr_edges, Edge, i );
+
+        hbox = gtk_box_new( GTK_ORIENTATION_HORIZONTAL, 0 );
+
+        label_subject = zond_database_get_info_entity( dbase_full, edge.ID_subject, errmsg );
+        if ( !label_subject )
+        {
+            gtk_widget_destroy( label_edge );
+            g_array_unref( arr_edges );
+            ERROR_PAO( "zond_database_get_info_entity" )
+        }
+
+        gtk_box_pack_start( GTK_BOX(hbox), label_subject, FALSE, FALSE, 0 );
+
+        text_edge = g_strdup_printf( "ID: %i  Label: %s", edge.ID_edge, edge.label_edge );
+        for (gint u = 0; u < edge.arr_properties->len; u++ )
+        {
+            Property property = g_array_index( edge.arr_properties, Property, u );
+
+            text_edge = add_string( text_edge, g_strdup_printf( "\n%i  %s  %s",
+                    property.ID, property.label, property.value ) );
+        }
+        label_edge = gtk_label_new( (const gchar*) text_edge );
+        g_free( text_edge );
+        gtk_box_pack_start( GTK_BOX(hbox), label_edge, FALSE, FALSE, 0 );
+
+        gtk_list_box_insert( GTK_LIST_BOX(listbox), hbox, -1 );
+    }
+
+    g_array_unref( arr_edges );
+
+    return 0;
 }
 
 
