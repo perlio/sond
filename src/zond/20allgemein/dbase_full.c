@@ -442,6 +442,28 @@ dbase_full_get_incoming_edges( DBaseFull* dbase_full, gint ID_entity, GArray** a
 
 
 gint
+dbase_full_get_adm_entities( DBaseFull* dbase_full, gint ID_entity, gchar** adm_entity, gchar** errmsg )
+{
+    gint rc = 0;
+
+    if ( !adm_entity ) return 0;
+
+    sqlite3_reset( dbase_full->stmts[51] );
+
+    rc = sqlite3_bind_int( dbase_full->stmts[51], 1, ID_entity );
+    if ( rc != SQLITE_OK ) ERROR_DBASE_FULL( "sqlite3_bind_int (ID_entity)" )
+
+    rc = sqlite3_step( dbase_full->stmts[51] );
+    if ( rc != SQLITE_ROW ) ERROR_DBASE_FULL( "sqlite3_step" )
+
+    *adm_entity = g_strdup( (const gchar*) sqlite3_column_text( dbase_full->stmts[51], 0 ) );
+
+    return 0;
+
+}
+
+
+gint
 dbase_full_prepare_stmts( DBaseFull* dbase_full, gchar** errmsg )
 {
     gint rc = 0;
@@ -751,6 +773,11 @@ dbase_full_prepare_stmts( DBaseFull* dbase_full, gchar** errmsg )
                 "(SELECT edges.subject AS ID_subject, edges.edge AS ID_edge, entities.label AS ID_label_edge, edges.object AS ID_object "
                 "FROM edges JOIN entities ON edges.edge = entities.ID WHERE edges.object = ?1) "
                 "ON ID_label_edge = labels.ID; ",
+
+/*  get_adm_entities (51)   */
+            "SELECT labels.adm_entities FROM labels JOIN entities "
+                "ON labels.ID = entities.label "
+                "WHERE entities.ID = ?1; ",
 
             NULL };
 

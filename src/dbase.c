@@ -475,16 +475,16 @@ dbase_create_db( sqlite3* db, gchar** errmsg )
                 "ID INTEGER PRIMARY KEY, "
                 "label TEXT NOT NULL, "
                 "parent INTEGER NOT NULL, "
-                "adm_property TEXT, "
-                "adm_nomen TEXT, "
+                "adm_properties TEXT, "
+                "adm_entities TEXT, "
                 "FOREIGN KEY(parent) REFERENCES labels (ID) "
             "); "
 
-            "INSERT INTO labels (ID, label, parent, adm_property, adm_nomen ) VALUES "
-                "(0, 'root', 0, NULL, NULL), "
-                "(1, 'Nomen', 0, NULL, NULL), "
+            "INSERT INTO labels (ID, label, parent ) VALUES "
+                "(0, 'root', 0), "
+                "(1, 'Nomen', 0), "
                 "(100, 'Fundstelle', 1, '10075', '10290'), "
-                "(200, 'Subjekt', 1, '10200,10210', NULL), "
+                "(200, 'Subjekt', 1), "
                 "(210, 'natürliche Person', 200, NULL, '10105,10106'), "
                 "(220, 'juristische Person', 200, NULL, '10100'), "
 /*                "(230, 'priv jur Person', 220), "
@@ -514,8 +514,9 @@ dbase_create_db( sqlite3* db, gchar** errmsg )
                 "(500, 'Verfahren', 1, NULL, '10300'), "
 
                 "(600, 'Konvolut', 1, NULL, NULL), "
-                "(610, 'Akte', 600, '10250,10260', '10270'), "
-                "(620, 'Aktenband', 600, '10250,10260', '10290'), "
+                "(610, 'Aktenteil', 600)"
+                "(620, 'Akte', 610, '10250,10260', '10270'), "
+                "(630, 'Aktenband', 610, '10250,10260', '10290'), "
 /*
                 "(700, 'angebundenes Objekt', 1, NULL, '10020'), "
                 "(750, 'Urkunde', 700), "
@@ -543,29 +544,58 @@ dbase_create_db( sqlite3* db, gchar** errmsg )
                 "(1060, 'Familienname', 1), "
                 "(1070, 'Vorname', 1), "
 */
-                "(10000, 'Prädikate', 0, NULL, NULL), "
-                "(10010, '_hat node_id_', 10000, NULL, NULL), " //nur property
+                "(10000, 'Prädikate', 0), "
+                "(10010, '_hat node_id_', 10000), " //nur property
                 "(10020, '_hat Fundstelle_', 10000, NULL, '100'), " //nur edge
 
-                "(10100, '_hat Bezeichnung_', 10000, '10200,10210', '1050'), " //E
-                "(10105, '_hat Familiennamen_', 10000, '10200,10210', '1060'), " //E
-                "(10106, '_hat Vornamen_', 10000, '10200,10210', '1070'), " //E
+                "(10100, '_hat Namen_', 10000, '10200,10210', '1050'), " //E
+                "(10105, '_hat Familiennamen_', 10100, '10200,10210', '1060'), " //E
+                "(10106, '_hat Vornamen_', 10100, '10200,10210', '1070'), " //E
                 "(10110, '_ist ansässig_', 10000, '10200,10210', '1020'), "
                 "(10150, '_befindet sich_', 10000, '10200,10210', '1000'), "
 
-                "(10200, '_von (Zeit)_', 10000, NULL, NULL), " //nur property
-                "(10210, '_bis (Zeit)_', 10000, NULL, NULL), " //nur property
+                "(10200, '_von (Zeit)_', 10000), " //nur property
+                "(10210, '_bis (Zeit)_', 10000), " //nur property
 
-                "(10250, '_von (Aktenblatt)_', 10000, NULL, NULL), " //nur property
-                "(10260, '_bis (Aktenblatt)_', 10000, NULL, NULL), " //nur property
+                "(10250, '_von (Aktenblatt)_', 10000), " //nur property
+                "(10260, '_bis (Aktenblatt)_', 10000), " //nur property
                 "(10270, '_gehört zu Verfahren_', 10000, NULL, '500'), " //Akte
                 "(10290, '_gehört zu Konvolut_', 10000, NULL, '600'), " //Anbindung zu Aktenband oder Akte oder allg. Konvolut
-                "(10300, '_wird geführt bei_', 10000, '10310', '320'), " //Verfahren bei Gericht, Polizei, StA#
-                "(10310, '_hat Aktenzeichen', 10000, NULL, NULL) " //property von 10300
+                "(10300, '_wird geführt bei_', 10000, '10310', '320'), " //Verfahren bei Gericht, Polizei, StA
+                "(10310, '_hat Aktenzeichen', 10000) " //property von 10300
 /*
                 "(10400, '_verfaßt von_', 10000), "
                 "(10410, '_handelnd_durch_', 10000) " //qualifier, wenn Behörde tätig wurde
 */                "; "
+
+            "CREATE TABLE IF NOT EXISTS adm_properties ( "
+                "entity INTEGER NOT NULL, "
+                "property INTEGER NOT NULL, "
+                "FOREIGN KEY (entity) REFERENCES labels (ID), "
+                "FOREIGN KEY (property) REFERENCES labels (ID) "
+            "); "
+
+            "INSERT INTO adm_properties (entity,property) VALUES "
+                "(100, 10075), "
+                "(200, 10200), "
+                "(200, 10210), "
+                "(610, 10250), "
+                "(610, 10260), "
+                "(10100, 10200), "
+                "(10100, 10210), "
+                "(10110, 10200), "
+                "(10110, 10210), "
+                "(10150, 10200), "
+                "(10150, 10210), "
+                "(10300, 10310); "
+
+
+            "CREATE TABEL IF NOT EXISTS adm_entities ( "
+                "lentity INTEGER NOT NULL, "
+                "rentity INTEGER NOT NULL, "
+                "FOREIGN KEY (lentity) REFERENCES labels (ID), "
+                "FOREIGN KEY (rentity) REFERENCES labels (ID) "
+            "); "
 
             "CREATE TABLE IF NOT EXISTS entities( "
                 "ID INTEGER NOT NULL, "

@@ -68,6 +68,8 @@ gint dbase_full_get_array_nodes( DBaseFull*, gint, GArray**, gchar** );
 
 gint dbase_full_get_incoming_edges( DBaseFull*, gint, GArray**, gchar** );
 
+gint dbase_full_get_adm_entities( DBaseFull*, gint, gchar**, gchar** );
+
 gint dbase_full_prepare_stmts( DBaseFull*, gchar** );
 
 gint dbase_full_create( const gchar*, DBaseFull**, gboolean, gboolean, gchar** );
