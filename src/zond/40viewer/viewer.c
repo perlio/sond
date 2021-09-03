@@ -409,6 +409,7 @@ static void
 viewer_schliessen( PdfViewer* pv )
 {
     viewer_close_thread_pool( pv );
+    g_idle_remove_by_data( pv );
 
     g_array_unref( pv->arr_rendered );
     g_mutex_clear( &pv->mutex_arr_rendered );
@@ -422,8 +423,6 @@ viewer_schliessen( PdfViewer* pv )
 
     //pv aus Liste der geöffneten pvs entfernen
     g_ptr_array_remove_fast( pv->zond->arr_pv, pv );
-
-    g_idle_remove_by_data( pv );
 
     g_free( pv );
 
