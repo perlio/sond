@@ -179,8 +179,6 @@ viewer_check_rendering( gpointer data )
 
     PdfViewer* pv = (PdfViewer*) data;
 
-    if ( !pv ) return G_SOURCE_REMOVE;
-
     if ( !(pv->thread_pool_page) ) ret = G_SOURCE_REMOVE;
     else if ( g_thread_pool_unprocessed( pv->thread_pool_page ) == 0 )
     {
@@ -411,6 +409,7 @@ static void
 viewer_schliessen( PdfViewer* pv )
 {
     viewer_close_thread_pool( pv );
+
     g_array_unref( pv->arr_rendered );
     g_mutex_clear( &pv->mutex_arr_rendered );
 
@@ -424,8 +423,9 @@ viewer_schliessen( PdfViewer* pv )
     //pv aus Liste der geöffneten pvs entfernen
     g_ptr_array_remove_fast( pv->zond->arr_pv, pv );
 
+    g_idle_remove_by_data( pv );
+
     g_free( pv );
-    pv = NULL; //wegen viewer_check_rendering
 
     return;
 }
@@ -1655,7 +1655,7 @@ cb_viewer_layout_press_button( GtkWidget* layout, GdkEvent* event, gpointer
 
                 gtk_window_present( GTK_WINDOW(pv->zond->app_window) );
 
-                //Datenbank!!!
+/*                //Datenbank!!!
                 rc = zond_database_insert_anbindung( pv->zond, new_node, &errmsg );
                 if ( rc == -1 )
                 {
@@ -1664,7 +1664,7 @@ cb_viewer_layout_press_button( GtkWidget* layout, GdkEvent* event, gpointer
                             "Bei Aufruf zond_database_insert_anbindung:\n",
                             errmsg, NULL );
                     g_free( errmsg );
-                }
+                } */
             }
         }
 

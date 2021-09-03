@@ -460,17 +460,18 @@ dbase_create_db( sqlite3* db, gchar** errmsg )
 
     //Tabellenstruktur erstellen
     sql = //Haupttabelle
-            "DROP TABLE IF EXISTS labels; "
+/*            "DROP TABLE IF EXISTS labels; "
             "DROP TABLE IF EXISTS entities; "
             "DROP TABLE IF EXISTS edges; "
             "DROP TABLE IF EXISTS properties; "
-            "DROP TABLE IF EXISTS baum_auswertung; "
+*/
             "DROP TABLE IF EXISTS eingang; "
             "DROP TABLE IF EXISTS eingang_rel_path; "
             "DROP TABLE IF EXISTS dateien;"
             "DROP TABLE IF EXISTS ziele;"
             "DROP TABLE IF EXISTS baum_inhalt;"
-
+            "DROP TABLE IF EXISTS baum_auswertung; "
+/*
             "CREATE TABLE IF NOT EXISTS labels ( "
                 "ID INTEGER PRIMARY KEY, "
                 "label TEXT NOT NULL, "
@@ -487,7 +488,7 @@ dbase_create_db( sqlite3* db, gchar** errmsg )
                 "(200, 'Subjekt', 1), "
                 "(210, 'natürliche Person', 200, NULL, '10105,10106'), "
                 "(220, 'juristische Person', 200, NULL, '10100'), "
-/*                "(230, 'priv jur Person', 220), "
+/**                "(230, 'priv jur Person', 220), "
                 "(231, 'GmbH', 230), "
                 "(232, 'UG', 230), "
                 "(233, 'AG', 230), "
@@ -510,7 +511,7 @@ dbase_create_db( sqlite3* db, gchar** errmsg )
                 "(440, 'Staatsanwaltschaft', 320), "
                 "(450, 'Generalstaatsanwaltschaft', 320), "
                 "(460, 'Staatsanwaltschaft beim Landgericht', 320), "
-*/
+*//*
                 "(500, 'Verfahren', 1, NULL, '10300'), "
 
                 "(600, 'Konvolut', 1, NULL, NULL), "
@@ -543,7 +544,7 @@ dbase_create_db( sqlite3* db, gchar** errmsg )
                 "(1050, 'Bezeichnung', 1), "
                 "(1060, 'Familienname', 1), "
                 "(1070, 'Vorname', 1), "
-*/
+*//*
                 "(10000, 'Prädikate', 0), "
                 "(10010, '_hat node_id_', 10000), " //nur property
                 "(10020, '_hat Fundstelle_', 10000, NULL, '100'), " //nur edge
@@ -566,7 +567,7 @@ dbase_create_db( sqlite3* db, gchar** errmsg )
 /*
                 "(10400, '_verfaßt von_', 10000), "
                 "(10410, '_handelnd_durch_', 10000) " //qualifier, wenn Behörde tätig wurde
-*/                "; "
+*//*                "; "
 
             "CREATE TABLE IF NOT EXISTS adm_properties ( "
                 "entity INTEGER NOT NULL, "
@@ -622,7 +623,7 @@ dbase_create_db( sqlite3* db, gchar** errmsg )
                 "FOREIGN KEY (label) REFERENCES labels (ID), "
                 "PRIMARY KEY(ID) "
             "); "
-
+*/
             "CREATE TABLE eingang ("
                 "ID INTEGER NOT NULL, "
                 "eingangsdatum VARCHAR(20), "

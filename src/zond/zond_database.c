@@ -399,7 +399,7 @@ zond_database_edit_node( Projekt* zond, gint ID_entity, gchar** errmsg )
     GtkWidget* swindow_out = NULL;
     GtkWidget* vbox_in = NULL;
     GtkWidget* combo_out = NULL;
-    GtkCellRendererText* column_out = NULL;
+    GtkCellRenderer* column_out = NULL;
     GtkTreeStore* treestore_out = NULL;
     GtkWidget* button_in = NULL;
     GtkWidget* button_out = NULL;
