@@ -24,22 +24,21 @@ typedef struct _Property
     gint ID;
     gchar* label;
     gchar* value;
+    GArray* arr_properties;
 } Property;
 
-typedef struct _Node
+typedef struct _Entity
 {
     gint ID;
     gchar* label;
     GArray* arr_properties;
-} Node;
+} Entity;
 
 typedef struct _Edge
 {
-    gint ID_edge;
-    gchar* label_edge;
-    gint ID_subject;
-    gint ID_object;
-    GArray* arr_properties;
+    gint ID;
+    gint subject;
+    gint object;
 } Edge;
 
 
@@ -54,7 +53,7 @@ gint dbase_full_insert_entity( DBaseFull*, gint, gchar** );
 
 gint dbase_full_insert_property( DBaseFull*, gint, gint, gchar*, gchar** );
 
-gint dbase_full_get_label_entity( DBaseFull*, gint, gchar**, gchar** );
+gint dbase_full_get_label_text_for_entity( DBaseFull*, gint, gchar**, gchar** );
 
 gint dbase_full_get_properties( DBaseFull*, gint, GArray**, gchar** );
 
@@ -68,7 +67,13 @@ gint dbase_full_get_array_nodes( DBaseFull*, gint, GArray**, gchar** );
 
 gint dbase_full_get_incoming_edges( DBaseFull*, gint, GArray**, gchar** );
 
-gint dbase_full_get_adm_entities( DBaseFull*, gint, gchar**, gchar** );
+gint dbase_full_get_adm_entities( DBaseFull*, gint, GArray**, gchar** );
+
+gint dbase_full_get_label_for_entity( DBaseFull*, gint, gchar** );
+
+gint dbase_full_insert_edge( DBaseFull*, gint, gint, gint, gchar** );
+
+gint dbase_full_get_entity( DBaseFull*, gint, Entity**, gchar** );
 
 gint dbase_full_prepare_stmts( DBaseFull*, gchar** );
 

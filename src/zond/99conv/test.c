@@ -246,7 +246,7 @@ pdf_print_content_stream( fz_context* ctx, pdf_obj* page_ref, gchar** errmsg )
 gint
 test( Projekt* zond, gchar** errmsg )
 {
-    zond_database_edit_node( zond, 1, errmsg );
+//    zond_database_edit_node( zond, 1, errmsg );
 
     return 0;
 }

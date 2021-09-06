@@ -5,6 +5,7 @@ typedef struct _Projekt Projekt;
 typedef int gint;
 typedef char gchar;
 
+
 gint zond_database_edit_node( Projekt*, gint, gchar** );
 
 gint zond_database_insert_anbindung( Projekt*, gint, gchar** );

@@ -120,7 +120,8 @@ dbase_full_insert_entity( DBaseFull* dbase_full, gint label, gchar** errmsg )
     gint rc = 0;
     gint new_node_id = 0;
 
-    for ( gint i = 41; i < 42; i++ ) sqlite3_reset( dbase_full->stmts[i] );
+    sqlite3_reset( dbase_full->stmts[41] );
+    sqlite3_reset( dbase_full->stmts[42] );
 
     rc = sqlite3_bind_int( dbase_full->stmts[41], 1, label );
     if ( rc != SQLITE_OK ) ERROR_DBASE_FULL( "sqlite3_bind_int (label)" )
@@ -142,14 +143,19 @@ dbase_full_insert_property( DBaseFull* dbase_full, gint ID_entity, gint label,
         gchar* value, gchar** errmsg )
 {
     gint rc = 0;
+    gint new_entity = 0;
+
+    rc = dbase_full_insert_entity( dbase_full, label, errmsg );
+    if ( rc == -1 ) ERROR_PAO( "dbase_full_insert_entity" )
+    else new_entity = rc;
 
     sqlite3_reset( dbase_full->stmts[43] );
 
-    rc = sqlite3_bind_int( dbase_full->stmts[43], 1, ID_entity );
-    if ( rc != SQLITE_OK ) ERROR_DBASE_FULL( "sqlite3_bind_int (ID_entity)" )
+    rc = sqlite3_bind_int( dbase_full->stmts[43], 1, new_entity );
+    if ( rc != SQLITE_OK ) ERROR_DBASE_FULL( "sqlite3_bind_int (entity)" )
 
-    rc = sqlite3_bind_int( dbase_full->stmts[43], 2, label );
-    if ( rc != SQLITE_OK ) ERROR_DBASE_FULL( "sqlite3_bind_int (label)" )
+    rc = sqlite3_bind_int( dbase_full->stmts[43], 2, ID_entity );
+    if ( rc != SQLITE_OK ) ERROR_DBASE_FULL( "sqlite3_bind_int (subject)" )
 
     rc = sqlite3_bind_text( dbase_full->stmts[43], 3, value, -1, NULL );
     if ( rc != SQLITE_OK ) ERROR_DBASE_FULL( "sqlite3_bind_int (value)" )
@@ -162,7 +168,7 @@ dbase_full_insert_property( DBaseFull* dbase_full, gint ID_entity, gint label,
 
 
 gint
-dbase_full_get_label_entity( DBaseFull* dbase_full, gint ID_entity, gchar** label, gchar** errmsg )
+dbase_full_get_label_text_for_entity( DBaseFull* dbase_full, gint ID_entity, gchar** label, gchar** errmsg )
 {
     gint rc = 0;
 
@@ -188,6 +194,7 @@ dbase_full_clear_property( gpointer data )
 
     g_free( property->label );
     g_free( property->value );
+    g_array_unref( property->arr_properties );
 
     return;
 }
@@ -201,13 +208,13 @@ dbase_full_get_properties( DBaseFull* dbase_full, gint ID_entity,
 
     if ( !arr_properties ) return 0;
 
-    *arr_properties = g_array_new( FALSE, FALSE, sizeof( Property ) );
-    g_array_set_clear_func( *arr_properties, dbase_full_clear_property );
-
     sqlite3_reset( dbase_full->stmts[45] );
 
     rc = sqlite3_bind_int( dbase_full->stmts[45], 1, ID_entity );
     if ( rc != SQLITE_OK ) ERROR_DBASE_FULL( "sqlite3_bind_int (ID_entity)" )
+
+    *arr_properties = g_array_new( FALSE, FALSE, sizeof( Property ) );
+    g_array_set_clear_func( *arr_properties, dbase_full_clear_property );
 
     do
     {
@@ -221,28 +228,24 @@ dbase_full_get_properties( DBaseFull* dbase_full, gint ID_entity,
         }
         else if ( rc == SQLITE_ROW )
         {
+            gint ret = 0;
+
             property.ID = sqlite3_column_int( dbase_full->stmts[45], 0 );
             property.label = g_strdup( (const gchar*) sqlite3_column_text( dbase_full->stmts[45], 1 ) );
             property.value = g_strdup( (const gchar*) sqlite3_column_text( dbase_full->stmts[45], 2 ) );
+
+            ret = dbase_full_get_properties( dbase_full, property.ID, &(property.arr_properties), errmsg );
+            if ( ret )
+            {
+                g_array_unref( *arr_properties );
+                ERROR_PAO( "dbase_full_get_properties" );
+            }
 
             g_array_append_val( *arr_properties, property );
         }
     } while ( rc == SQLITE_ROW );
 
     return 0;
-}
-
-
-static void
-dbase_full_clear_edge( gpointer data )
-{
-    Edge* edge = (Edge*) data;
-
-    g_free( edge->label_edge );
-
-    g_array_unref( edge->arr_properties );
-
-    return;
 }
 
 
@@ -254,18 +257,15 @@ dbase_full_get_outgoing_edges( DBaseFull* dbase_full, gint ID_entity, GArray** a
 
     if ( !arr_edges ) return 0;
 
-    *arr_edges = g_array_new( FALSE, FALSE, sizeof( Edge ) );
-    g_array_set_clear_func( *arr_edges, dbase_full_clear_edge );
-
     sqlite3_reset( dbase_full->stmts[46] );
 
     rc = sqlite3_bind_int( dbase_full->stmts[46], 1, ID_entity );
     if ( rc != SQLITE_OK ) ERROR_DBASE_FULL( "sqlite3_bind_int (ID_entity)" )
 
+    *arr_edges = g_array_new( FALSE, FALSE, sizeof( Edge ) );
+
     do
     {
-        Edge edge = { 0 };
-
         rc = sqlite3_step( dbase_full->stmts[46] );
         if ( rc != SQLITE_ROW && rc != SQLITE_DONE )
         {
@@ -274,19 +274,11 @@ dbase_full_get_outgoing_edges( DBaseFull* dbase_full, gint ID_entity, GArray** a
         }
         else if ( rc == SQLITE_ROW )
         {
-            edge.ID_subject = ID_entity;
-            edge.ID_edge = sqlite3_column_int( dbase_full->stmts[46], 1 );
-            edge.label_edge = g_strdup( (const gchar*) sqlite3_column_text( dbase_full->stmts[46], 2 ) );
-            edge.ID_object = sqlite3_column_int( dbase_full->stmts[46], 3 );
+            Edge edge = { 0 };
 
-            rc = dbase_full_get_properties( dbase_full, edge.ID_edge, &(edge.arr_properties), errmsg );
-            if ( rc )
-            {
-                g_free( edge.label_edge );
-                g_array_unref( edge.arr_properties );
-                g_array_unref( *arr_edges );
-                ERROR_SOND( "dbase_full_get_properties" )
-            }
+            edge.ID = sqlite3_column_int( dbase_full->stmts[46], 0 );
+            edge.subject = sqlite3_column_int( dbase_full->stmts[46], 1 );
+            edge.object = sqlite3_column_int( dbase_full->stmts[46], 2 );
 
             g_array_append_val( *arr_edges, edge );
         }
@@ -326,12 +318,12 @@ dbase_full_get_array_children_label( DBaseFull* dbase_full, gint label,
 
     if ( !arr_children ) return 0;
 
-    *arr_children = g_array_new( FALSE, FALSE, sizeof( gint ) );
-
     sqlite3_reset( dbase_full->stmts[48] );
 
     rc = sqlite3_bind_int( dbase_full->stmts[48], 1, label );
     if ( rc != SQLITE_OK ) ERROR_DBASE_FULL( "sqlite3_bind_int (label)" )
+
+    *arr_children = g_array_new( FALSE, FALSE, sizeof( gint ) );
 
     do
     {
@@ -363,12 +355,12 @@ dbase_full_get_array_nodes( DBaseFull* dbase_full, gint nomen, GArray** arr_node
 
     if ( !arr_nodes ) return 0;
 
-    *arr_nodes = g_array_new( FALSE, FALSE, sizeof( gint ) );
-
     sqlite3_reset( dbase_full->stmts[49] );
 
     rc = sqlite3_bind_int( dbase_full->stmts[49], 1, nomen );
     if ( rc != SQLITE_OK ) ERROR_DBASE_FULL( "sqlite3_bind_int (nomen)" )
+
+    *arr_nodes = g_array_new( FALSE, FALSE, sizeof( gint ) );
 
     do
     {
@@ -399,18 +391,15 @@ dbase_full_get_incoming_edges( DBaseFull* dbase_full, gint ID_entity, GArray** a
 
     if ( !arr_edges ) return 0;
 
-    *arr_edges = g_array_new( FALSE, FALSE, sizeof( Edge ) );
-    g_array_set_clear_func( *arr_edges, dbase_full_clear_edge );
-
     sqlite3_reset( dbase_full->stmts[50] );
 
     rc = sqlite3_bind_int( dbase_full->stmts[50], 1, ID_entity );
     if ( rc != SQLITE_OK ) ERROR_DBASE_FULL( "sqlite3_bind_int (ID_entity)" )
 
+    *arr_edges = g_array_new( FALSE, FALSE, sizeof( Edge ) );
+
     do
     {
-        Edge edge = { 0 };
-
         rc = sqlite3_step( dbase_full->stmts[50] );
         if ( rc != SQLITE_ROW && rc != SQLITE_DONE )
         {
@@ -419,19 +408,11 @@ dbase_full_get_incoming_edges( DBaseFull* dbase_full, gint ID_entity, GArray** a
         }
         else if ( rc == SQLITE_ROW )
         {
-            edge.ID_subject = sqlite3_column_int( dbase_full->stmts[50], 0 );
-            edge.ID_edge = sqlite3_column_int( dbase_full->stmts[50], 1 );
-            edge.label_edge = g_strdup( (const gchar*) sqlite3_column_text( dbase_full->stmts[50], 2 ) );
-            edge.ID_object = ID_entity;
+            Edge edge = { 0 };
 
-            rc = dbase_full_get_properties( dbase_full, edge.ID_edge, &(edge.arr_properties), errmsg );
-            if ( rc )
-            {
-                g_free( edge.label_edge );
-                g_array_unref( edge.arr_properties );
-                g_array_unref( *arr_edges );
-                ERROR_SOND( "dbase_full_get_properties" )
-            }
+            edge.ID = sqlite3_column_int( dbase_full->stmts[50], 0 );
+            edge.subject = sqlite3_column_int( dbase_full->stmts[50], 1 );
+            edge.object = sqlite3_column_int( dbase_full->stmts[50], 2 );
 
             g_array_append_val( *arr_edges, edge );
         }
@@ -442,24 +423,109 @@ dbase_full_get_incoming_edges( DBaseFull* dbase_full, gint ID_entity, GArray** a
 
 
 gint
-dbase_full_get_adm_entities( DBaseFull* dbase_full, gint ID_entity, gchar** adm_entity, gchar** errmsg )
+dbase_full_get_adm_entities( DBaseFull* dbase_full, gint label, GArray** arr_adm_entities, gchar** errmsg )
 {
     gint rc = 0;
 
-    if ( !adm_entity ) return 0;
+    if ( !arr_adm_entities ) return 0;
 
     sqlite3_reset( dbase_full->stmts[51] );
 
-    rc = sqlite3_bind_int( dbase_full->stmts[51], 1, ID_entity );
-    if ( rc != SQLITE_OK ) ERROR_DBASE_FULL( "sqlite3_bind_int (ID_entity)" )
+    rc = sqlite3_bind_int( dbase_full->stmts[51], 1, label );
+    if ( rc != SQLITE_OK ) ERROR_DBASE_FULL( "sqlite3_bind_int (label)" )
 
-    rc = sqlite3_step( dbase_full->stmts[51] );
-    if ( rc != SQLITE_ROW ) ERROR_DBASE_FULL( "sqlite3_step" )
+    *arr_adm_entities = g_array_new( FALSE, FALSE, sizeof( gint ) );
 
-    *adm_entity = g_strdup( (const gchar*) sqlite3_column_text( dbase_full->stmts[51], 0 ) );
+    do
+    {
+        rc = sqlite3_step( dbase_full->stmts[51] );
+        if ( rc != SQLITE_ROW && rc != SQLITE_DONE )
+        {
+            g_array_unref( *arr_adm_entities );
+            ERROR_DBASE_FULL( "sqlite3_step" )
+        }
+        else if ( rc == SQLITE_ROW )
+        {
+            gint adm_entity = 0;
+
+            adm_entity = sqlite3_column_int( dbase_full->stmts[51], 0 );
+            g_array_append_val( *arr_adm_entities, adm_entity );
+        }
+    } while ( rc == SQLITE_ROW );
 
     return 0;
+}
 
+
+gint
+dbase_full_get_label_for_entity( DBaseFull* dbase_full, gint ID_entity, gchar** errmsg )
+{
+    gint rc = 0;
+    gint label = 0;
+
+    sqlite3_reset( dbase_full->stmts[52] );
+
+    rc = sqlite3_bind_int( dbase_full->stmts[52], 1, ID_entity );
+    if ( rc != SQLITE_OK ) ERROR_DBASE_FULL( "sqlite3_bind_int (ID_entity)" )
+
+    rc = sqlite3_step( dbase_full->stmts[52] );
+    if ( rc != SQLITE_ROW ) ERROR_DBASE_FULL( "sqlite3_step" )
+
+    label = sqlite3_column_int( dbase_full->stmts[52], 0 );
+
+    return label;
+}
+
+
+gint
+dbase_full_insert_edge( DBaseFull* dbase_full, gint entity, gint subject,
+        gint object, gchar** errmsg )
+{
+    gint rc = 0;
+
+    sqlite3_reset( dbase_full->stmts[53] );
+
+    rc = sqlite3_bind_int( dbase_full->stmts[53], 1, entity );
+    if ( rc != SQLITE_OK ) ERROR_DBASE_FULL( "sqlite3_bind_int (entity)" )
+
+    rc = sqlite3_bind_int( dbase_full->stmts[53], 2, subject );
+    if ( rc != SQLITE_OK ) ERROR_DBASE_FULL( "sqlite3_bind_int (subject)" )
+
+    rc = sqlite3_bind_int( dbase_full->stmts[53], 3, object );
+    if ( rc != SQLITE_OK ) ERROR_DBASE_FULL( "sqlite3_bind_int (value)" )
+
+    rc = sqlite3_step( dbase_full->stmts[53] );
+    if ( rc != SQLITE_DONE ) ERROR_DBASE_FULL( "sqlite3_step" )
+
+    return 0;
+}
+
+
+gint
+dbase_full_get_entity( DBaseFull* dbase_full, gint ID_entity, Entity** entity, gchar** errmsg )
+{
+    gchar* label = NULL;
+    GArray* arr_properties = NULL;
+    gint rc = 0;
+
+    if ( !entity ) return 0;
+
+    rc = dbase_full_get_label_text_for_entity( dbase_full, ID_entity, &label, errmsg );
+    if ( rc ) ERROR_PAO( "dbase_full_get_label_text_for_entity" )
+
+    rc = dbase_full_get_properties( dbase_full, ID_entity, &arr_properties, errmsg );
+    if ( rc )
+    {
+        g_free( label );
+        ERROR_PAO( "dbase_full_get_properties" )
+    }
+
+    *entity = g_malloc0( sizeof( Entity ) );
+    (*entity)->ID = ID_entity;
+    (*entity)->label = label;
+    (*entity)->arr_properties = arr_properties;
+
+    return 0;
 }
 
 
@@ -722,41 +788,40 @@ dbase_full_prepare_stmts( DBaseFull* dbase_full, gchar** errmsg )
             "SELECT ziel_id_von FROM ziele WHERE ziel_id_von=?1;"
             "UNION "
             "SELECT ziel_id_bis FROM ziele WHERE ziel_id_bis=?1;",
-
-/*  insert_entity  (41) */
+/*
+//  insert_entity  (41)
             "INSERT INTO entities (label) VALUES (?1);",
 
             "SELECT (last_insert_rowid()); ",
 
-/*  insert_property (43)  */
-            "INSERT INTO properties (entity,label,value) VALUES (?1, ?2, ?3);",
+//  insert_property (43)
+            "INSERT INTO properties (entity,subject,value) VALUES (?1, ?2, ?3);",
 
-/*  get_label_entity (44)  */
+//  get_label_entity (44)
             "SELECT labels.label FROM labels JOIN entities "
                 "ON entities.label = labels.ID WHERE entities.ID = ?1;",
 
-/*  get_properties (45)  */
-            "SELECT ID_property, label_text, property_value FROM "
-                "(SELECT properties.ID AS ID_property, properties.entity AS ID_entity, labels.label AS label_text, "
-                    "properties.value AS property_value FROM labels JOIN properties ON labels.ID = properties.label "
-                    "WHERE properties.entity = ?1) "
-                    "JOIN "
-                    "entities ON ID_entity = entities.ID;",
+//  get_properties (45)
+            "SELECT ID_entity, label_text, properties.value FROM "
+                "(SELECT entities.ID AS ID_entity,labels.label AS label_text "
+                    "FROM entities JOIN labels ON entities.label = labels.ID) "
+                    "JOIN properties ON ID_entity = properties.entity "
+                    "WHERE properties.subject = ?1; ",
 
-/*  get_outgoint_edges (46)  */
+//  get_outgoint_edges (46)
             "SELECT ID_subject, ID_edge, labels.label, ID_object "
                 "FROM labels JOIN "
-                "(SELECT edges.subject AS ID_subject, edges.edge AS ID_edge, entities.label AS ID_label_edge, edges.object AS ID_object "
-                "FROM edges JOIN entities ON edges.edge = entities.ID WHERE edges.subject = ?1) "
+                "(SELECT edges.subject AS ID_subject, edges.entity AS ID_edge, entities.label AS ID_label_edge, edges.object AS ID_object "
+                "FROM edges JOIN entities ON edges.entity = entities.ID WHERE edges.subject = ?1) "
                 "ON ID_label_edge = labels.ID; ",
 
-/*  get_label_text (47) */
+//  get_label_text (47)
             "SELECT labels.label FROM labels WHERE labels.ID = ?1; ",
 
-/*  get_array_children (48) */
+//  get_array_children (48)
             "SELECT labels.ID FROM labels WHERE labels.parent = ?1; ",
 
-/*  get_array_nodes (49)  */
+//  get_array_nodes (49)
             "SELECT entities.ID FROM entities JOIN "
             "(WITH RECURSIVE cte_labels (ID) AS ( "
                 "VALUES (?1) "
@@ -767,18 +832,27 @@ dbase_full_prepare_stmts( DBaseFull* dbase_full, gchar** errmsg )
                 ") SELECT ID AS ID_CTE FROM cte_labels) "
                 "ON entities.label = ID_CTE; ",
 
-/*  get_incoming_edges (50)  */
-            "SELECT ID_subject, ID_edge, labels.label, ID_object "
-                "FROM labels JOIN "
-                "(SELECT edges.subject AS ID_subject, edges.edge AS ID_edge, entities.label AS ID_label_edge, edges.object AS ID_object "
-                "FROM edges JOIN entities ON edges.edge = entities.ID WHERE edges.object = ?1) "
-                "ON ID_label_edge = labels.ID; ",
+//  get_incoming_edges (50)
+            "SELECT edges.ID, edges.subject, edges.object"
+                "FROM edges JOIN entities ON edges.entity = entities.ID WHERE edges.object = ?1; "
 
-/*  get_adm_entities (51)   */
-            "SELECT labels.adm_entities FROM labels JOIN entities "
-                "ON labels.ID = entities.label "
-                "WHERE entities.ID = ?1; ",
+//  get_adm_entities (51)
+            "SELECT adm_entities.rentity FROM adm_entities JOIN "
+            "(WITH RECURSIVE cte_labels (ID) AS ( "
+                "VALUES (?1) "
+                "UNION ALL "
+                "SELECT labels.ID "
+                    "FROM labels JOIN cte_labels WHERE "
+                    "labels.parent = cte_labels.ID "
+                ") SELECT ID AS ID_CTE FROM cte_labels) "
+                "ON adm_entities.entity = ID_CTE; ",
 
+//  get_label_for_entity (52)
+            "SELECT entities.label FROM entities WHERE entities.ID = ?1; ",
+
+//  insert_edge (53)
+            "INSERT INTO edges (entity,subject,object) VALUES (?1,?2,?3); ",
+*/
             NULL };
 
     while ( sql[zaehler] != NULL )

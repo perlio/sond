@@ -461,11 +461,12 @@ dbase_create_db( sqlite3* db, gchar** errmsg )
     //Tabellenstruktur erstellen
     sql = //Haupttabelle
 /*            "DROP TABLE IF EXISTS labels; "
+            "DROP TABLE IF EXISTS adm_properties; "
+            "DROP TABLE IF EXISTS adm_entities; "
             "DROP TABLE IF EXISTS entities; "
             "DROP TABLE IF EXISTS edges; "
             "DROP TABLE IF EXISTS properties; "
-*/
-            "DROP TABLE IF EXISTS eingang; "
+*/            "DROP TABLE IF EXISTS eingang; "
             "DROP TABLE IF EXISTS eingang_rel_path; "
             "DROP TABLE IF EXISTS dateien;"
             "DROP TABLE IF EXISTS ziele;"
@@ -476,19 +477,18 @@ dbase_create_db( sqlite3* db, gchar** errmsg )
                 "ID INTEGER PRIMARY KEY, "
                 "label TEXT NOT NULL, "
                 "parent INTEGER NOT NULL, "
-                "adm_properties TEXT, "
-                "adm_entities TEXT, "
                 "FOREIGN KEY(parent) REFERENCES labels (ID) "
             "); "
 
-            "INSERT INTO labels (ID, label, parent ) VALUES "
+            "INSERT INTO labels (ID, label, parent) VALUES "
                 "(0, 'root', 0), "
                 "(1, 'Nomen', 0), "
-                "(100, 'Fundstelle', 1, '10075', '10290'), "
-                "(200, 'Subjekt', 1), "
-                "(210, 'natürliche Person', 200, NULL, '10105,10106'), "
-                "(220, 'juristische Person', 200, NULL, '10100'), "
-/**                "(230, 'priv jur Person', 220), "
+                "(100, 'Fundstelle', 1), "
+                "(200, 'Rechtssubjekt', 1), "
+                "(210, 'Rechtsperson', 200), "
+                "(220, 'natürliche Person', 210), "
+                "(230, 'juristische Person', 210), "
+/*                "(230, 'priv jur Person', 220), "
                 "(231, 'GmbH', 230), "
                 "(232, 'UG', 230), "
                 "(233, 'AG', 230), "
@@ -496,7 +496,8 @@ dbase_create_db( sqlite3* db, gchar** errmsg )
                 "(241, 'Bundesland', 240), "
                 "(242, 'Gemeinde', 240), "
                 "(250, 'Personenmehrheit', 200, NULL, '10100'), "
-                "(320, 'Behörde', 200), "
+                "(300, 'Organ', 1),
+                "(320, 'Behörde', 300), "
                 "(330, 'Gericht', 320), "
                 "(340, 'Oberlandesgericht', 330), "
                 "(350, 'Landgericht', 330), "
@@ -512,12 +513,12 @@ dbase_create_db( sqlite3* db, gchar** errmsg )
                 "(450, 'Generalstaatsanwaltschaft', 320), "
                 "(460, 'Staatsanwaltschaft beim Landgericht', 320), "
 *//*
-                "(500, 'Verfahren', 1, NULL, '10300'), "
+                "(500, 'Verfahren', 1), "
 
-                "(600, 'Konvolut', 1, NULL, NULL), "
-                "(610, 'Aktenteil', 600)"
-                "(620, 'Akte', 610, '10250,10260', '10270'), "
-                "(630, 'Aktenband', 610, '10250,10260', '10290'), "
+                "(600, 'Konvolut', 1), "
+                "(610, 'Aktenbestandteil', 600),"
+                "(620, 'Akte', 610), "
+                "(630, 'Aktenband', 610), "
 /*
                 "(700, 'angebundenes Objekt', 1, NULL, '10020'), "
                 "(750, 'Urkunde', 700), "
@@ -547,22 +548,24 @@ dbase_create_db( sqlite3* db, gchar** errmsg )
 *//*
                 "(10000, 'Prädikate', 0), "
                 "(10010, '_hat node_id_', 10000), " //nur property
-                "(10020, '_hat Fundstelle_', 10000, NULL, '100'), " //nur edge
+                "(10020, '_hat Fundstelle_', 10000), " //nur edge
 
-                "(10100, '_hat Namen_', 10000, '10200,10210', '1050'), " //E
-                "(10105, '_hat Familiennamen_', 10100, '10200,10210', '1060'), " //E
-                "(10106, '_hat Vornamen_', 10100, '10200,10210', '1070'), " //E
+                "(10100, '_hat Namen_', 10000), " //E
+                "(10110, '_hat Firma_', 10100), "
+                "(10105, '_hat Familiennamen_', 10100), " //E
+                "(10106, '_hat Vornamen_', 10100), " //E
+/*
                 "(10110, '_ist ansässig_', 10000, '10200,10210', '1020'), "
                 "(10150, '_befindet sich_', 10000, '10200,10210', '1000'), "
-
+*//*
                 "(10200, '_von (Zeit)_', 10000), " //nur property
                 "(10210, '_bis (Zeit)_', 10000), " //nur property
 
                 "(10250, '_von (Aktenblatt)_', 10000), " //nur property
                 "(10260, '_bis (Aktenblatt)_', 10000), " //nur property
-                "(10270, '_gehört zu Verfahren_', 10000, NULL, '500'), " //Akte
-                "(10290, '_gehört zu Konvolut_', 10000, NULL, '600'), " //Anbindung zu Aktenband oder Akte oder allg. Konvolut
-                "(10300, '_wird geführt bei_', 10000, '10310', '320'), " //Verfahren bei Gericht, Polizei, StA
+                "(10270, '_gehört zu Verfahren_', 10000), " //Akte
+                "(10290, '_gehört zu Konvolut_', 10000), " //Anbindung zu Aktenband oder Akte oder allg. Konvolut
+                "(10300, '_wird geführt bei_', 10000), " //Verfahren bei Gericht, Polizei, StA
                 "(10310, '_hat Aktenzeichen', 10000) " //property von 10300
 /*
                 "(10400, '_verfaßt von_', 10000), "
@@ -577,7 +580,7 @@ dbase_create_db( sqlite3* db, gchar** errmsg )
             "); "
 
             "INSERT INTO adm_properties (entity,property) VALUES "
-                "(100, 10075), "
+                "(100, 10010), "
                 "(200, 10200), "
                 "(200, 10210), "
                 "(610, 10250), "
@@ -586,17 +589,26 @@ dbase_create_db( sqlite3* db, gchar** errmsg )
                 "(10100, 10210), "
                 "(10110, 10200), "
                 "(10110, 10210), "
-                "(10150, 10200), "
-                "(10150, 10210), "
                 "(10300, 10310); "
 
 
-            "CREATE TABEL IF NOT EXISTS adm_entities ( "
-                "lentity INTEGER NOT NULL, "
+            "CREATE TABLE IF NOT EXISTS adm_entities ( "
+                "entity INTEGER NOT NULL, "
                 "rentity INTEGER NOT NULL, "
-                "FOREIGN KEY (lentity) REFERENCES labels (ID), "
+                "FOREIGN KEY (entity) REFERENCES labels (ID), "
                 "FOREIGN KEY (rentity) REFERENCES labels (ID) "
             "); "
+
+            "INSERT INTO adm_entities (entity,rentity) VALUES "
+                "(100,10290), "
+                "(500, 10300), "
+                "(620, 10270), "
+                "(630, 10290), "
+                "(10020, 100), "
+                "(10270, 500), "
+                "(10290, 600), "
+                "(10300, 320) "
+            "; "
 
             "CREATE TABLE IF NOT EXISTS entities( "
                 "ID INTEGER NOT NULL, "
@@ -606,22 +618,20 @@ dbase_create_db( sqlite3* db, gchar** errmsg )
             "); "
 
             "CREATE TABLE IF NOT EXISTS edges ( "
-                "edge INTEGER NOT NULL, "
+                "entity INTEGER NOT NULL, "
                 "subject INTEGER NOT NULL, "
                 "object INTEGER NOT NULL, "
-                "FOREIGN KEY (edge) REFERENCES entities (ID), "
+                "FOREIGN KEY (entity) REFERENCES entities (ID), "
                 "FOREIGN KEY (subject) REFERENCES entities (ID), "
                 "FOREIGN KEY (object) REFERENCES entities (ID) "
             "); "
 
             "CREATE TABLE IF NOT EXISTS properties ( "
-                "ID INTEGER NOT NULL, "
                 "entity INTEGER NOT NULL, "
-                "label INTEGER NOT NULL, "
+                "subject INTEGER NOT NULL, "
                 "value TEXT, "
                 "FOREIGN KEY (entity) REFERENCES entities (ID), "
-                "FOREIGN KEY (label) REFERENCES labels (ID), "
-                "PRIMARY KEY(ID) "
+                "FOREIGN KEY (subject) REFERENCES entities (ID) "
             "); "
 */
             "CREATE TABLE eingang ("

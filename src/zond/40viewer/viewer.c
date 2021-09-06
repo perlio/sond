@@ -1653,8 +1653,8 @@ cb_viewer_layout_press_button( GtkWidget* layout, GdkEvent* event, gpointer
                 gint rc = 0;
 
                 gtk_window_present( GTK_WINDOW(pv->zond->app_window) );
-
-/*                //Datenbank!!!
+/*
+                //Datenbank!!!
                 rc = zond_database_insert_anbindung( pv->zond, new_node, &errmsg );
                 if ( rc == -1 )
                 {
