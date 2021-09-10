@@ -1050,6 +1050,8 @@ dbase_open( const gchar* path, DBase* dbase, gboolean create, gboolean overwrite
 
             rc = dbase_convert_to_actual_version( path, v_string, errmsg );
             if ( rc ) ERROR_PAO( "convert_to_actual_version" )
+            else display_message( NULL, "Datei von ", v_string, " zu "DB_VERSION
+                    "konvertiert", NULL );
 
             rc = sqlite3_open_v2( path, &db, SQLITE_OPEN_READWRITE, NULL );
             if ( rc ) ERROR_PAO( "sqlite3_open_v2" )

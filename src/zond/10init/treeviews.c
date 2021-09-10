@@ -190,7 +190,7 @@ cb_focus_in( GtkWidget* treeview, GdkEvent* event, gpointer user_data )
 
     Baum baum = baum_get_baum_from_treeview( zond, treeview );
 
-    cb_cursor_changed( (SondTreeview*) treeview, user_data );
+    if ( baum != BAUM_FS ) cb_cursor_changed( (SondTreeview*) treeview, user_data );
 
     //cursor-changed-signal für den aktivierten treeview anschalten
     if ( baum != BAUM_FS ) zond->cursor_changed_signal =
