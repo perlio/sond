@@ -1,10 +1,15 @@
 #include <sqlite3.h>
 #include <gtk/gtk.h>
+#include <glib/gstdio.h>
+
+#include "zond/error.h"
 
 #include "dbase.h"
 #include "eingang.h"
 
 #include "misc.h"
+
+#define DB_VERSION "v0.9"
 
 
 gint
@@ -668,7 +673,7 @@ dbase_create_db( sqlite3* db, gchar** errmsg )
             "); "
 
             "INSERT INTO baum_inhalt (node_id, parent_id, older_sibling_id, "
-            "icon_name, node_text) VALUES (0, 0, 0, 'v0.9.2', 'root');"
+            "node_text) VALUES (0, 0, 0, 'v0.9');"
 
             //Hilfstabelle "dateien"
             //hier werden angebundene Dateien erfaßt
@@ -709,8 +714,8 @@ dbase_create_db( sqlite3* db, gchar** errmsg )
             "FOREIGN KEY (ref_id) REFERENCES baum_inhalt (node_id) "
             "ON DELETE RESTRICT ON UPDATE RESTRICT );"
 
-            "INSERT INTO baum_auswertung (node_id, parent_id, older_sibling_id, "
-            "icon_name, node_text) VALUES (0, 0, 0, 'v0.9.2', 'root')"; //mit eingang
+            "INSERT INTO baum_auswertung (node_id, parent_id, older_sibling_id) "
+            "VALUES (0, 0, 0)"; //mit eingang
 
     rc = sqlite3_exec( db, sql, NULL, NULL, &errmsg_ii );
     if ( rc != SQLITE_OK )
@@ -727,6 +732,295 @@ dbase_create_db( sqlite3* db, gchar** errmsg )
 }
 
 
+//v0.7: in Tabellen baum_inhalt und baum_auswertung Spalte icon_id statt icon_name in v0.8
+static gint
+dbase_convert_from_v0_7( sqlite3* db_convert, gchar** errmsg )
+{
+    gint rc = 0;
+    gchar* errmsg_ii = NULL;
+
+    gchar* sql = "INSERT INTO main.baum_inhalt "
+                    "SELECT node_id, parent_id, older_sibling_id, "
+                            "CASE icon_id "
+                            "WHEN 0 THEN 'dialog-error' "
+                            "WHEN 1 THEN 'emblem-new' "
+                            "WHEN 2 THEN 'folder' "
+                            "WHEN 3 THEN 'document-open' "
+                            "WHEN 4 THEN 'pdf' "
+                            "WHEN 5 THEN 'anbindung' "
+                            "WHEN 6 THEN 'akte' "
+                            "WHEN 7 THEN 'application-x-executable' "
+                            "WHEN 8 THEN 'text-x-generic' "
+                            "WHEN 9 THEN 'x-office-document' "
+                            "WHEN 10 THEN 'x-office-presentation' "
+                            "WHEN 11 THEN 'x-office-spreadsheet' "
+                            "WHEN 12 THEN 'emblem-photo' "
+                            "WHEN 13 THEN 'video-x-generic' "
+                            "WHEN 14 THEN 'audio-x-generic' "
+                            "WHEN 15 THEN 'mail-unread' "
+                            "WHEN 16 THEN 'emblem-web' "
+                            "WHEN 25 THEN 'system-log-out' "
+                            "WHEN 26 THEN 'mark-location' "
+                            "WHEN 27 THEN 'phone' "
+                            "WHEN 28 THEN 'emblem-important' "
+                            "WHEN 29 THEN 'camera-web' "
+                            "WHEN 30 THEN 'media-optical' "
+                            "WHEN 31 THEN 'user-info' "
+                            "WHEN 32 THEN 'system-users' "
+                            "WHEN 33 THEN 'orange' "
+                            "WHEN 34 THEN 'blau' "
+                            "WHEN 35 THEN 'rot' "
+                            "WHEN 36 THEN 'gruen' "
+                            "WHEN 37 THEN 'tuerkis' "
+                            "WHEN 38 THEN 'magenta' "
+                            "ELSE 'process-stop' "
+                            "END, "
+                        "node_text FROM old.baum_inhalt WHERE node_id!=0; "
+            "INSERT INTO main.dateien SELECT uri, node_id FROM old.dateien; "
+            "INSERT INTO main.ziele SELECT ziel_id_von, index_von, ziel_id_bis, index_bis, "
+            "(SELECT uri FROM old.dateien WHERE datei_id=old.ziele.datei_id), "
+            "node_id FROM old.ziele; "
+            "INSERT INTO main.baum_auswertung "
+                    "SELECT node_id, parent_id, older_sibling_id, "
+                            "CASE icon_id "
+                            "WHEN 0 THEN 'dialog-error' "
+                            "WHEN 1 THEN 'emblem-new' "
+                            "WHEN 2 THEN 'folder' "
+                            "WHEN 3 THEN 'document-open' "
+                            "WHEN 4 THEN 'pdf' "
+                            "WHEN 5 THEN 'anbindung' "
+                            "WHEN 6 THEN 'akte' "
+                            "WHEN 7 THEN 'application-x-executable' "
+                            "WHEN 8 THEN 'text-x-generic' "
+                            "WHEN 9 THEN 'x-office-document' "
+                            "WHEN 10 THEN 'x-office-presentation' "
+                            "WHEN 11 THEN 'x-office-spreadsheet' "
+                            "WHEN 12 THEN 'emblem-photo' "
+                            "WHEN 13 THEN 'video-x-generic' "
+                            "WHEN 14 THEN 'audio-x-generic' "
+                            "WHEN 15 THEN 'mail-unread' "
+                            "WHEN 16 THEN 'emblem-web' "
+                            "WHEN 25 THEN 'system-log-out' "
+                            "WHEN 26 THEN 'mark-location' "
+                            "WHEN 27 THEN 'phone' "
+                            "WHEN 28 THEN 'emblem-important' "
+                            "WHEN 29 THEN 'camera-web' "
+                            "WHEN 30 THEN 'media-optical' "
+                            "WHEN 31 THEN 'user-info' "
+                            "WHEN 32 THEN 'system-users' "
+                            "WHEN 33 THEN 'orange' "
+                            "WHEN 34 THEN 'blau' "
+                            "WHEN 35 THEN 'rot' "
+                            "WHEN 36 THEN 'gruen' "
+                            "WHEN 37 THEN 'tuerkis' "
+                            "WHEN 38 THEN 'magenta' "
+                            "ELSE 'process-stop' "
+                            "END, "
+                        "node_text, text, ref_id FROM old.baum_auswertung WHERE node_id!=0; ";
+
+    rc = sqlite3_exec( db_convert, sql, NULL, NULL, &errmsg_ii );
+    if ( rc != SQLITE_OK )
+    {
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_exec:\n"
+                "result code: ", sqlite3_errstr( rc ), "\nerrmsg: ",
+                errmsg_ii, NULL );
+        sqlite3_free( errmsg_ii );
+
+        return -1;
+    }
+
+    return 0;
+}
+
+
+//v0.8 Tabellen eingang und eingang_rel_path fehlen ggü. v0.9
+static gint
+dbase_convert_from_v0_8( sqlite3* db_convert, gchar** errmsg )
+{
+    gint rc = 0;
+
+    gchar* sql =
+            "INSERT INTO baum_inhalt SELECT node_id, parent_id, older_sibling_id, "
+                    "icon_name, node_text FROM old.baum_inhalt WHERE node_id != 0; "
+            "INSERT INTO baum_auswertung SELECT * FROM old.baum_auswertung WHERE node_id != 0; "
+            "INSERT INTO dateien SELECT * FROM old.dateien; "
+            "INSERT Into ziele SELECT * FROM old.ziele; ";
+
+    rc = sqlite3_exec( db_convert, sql, NULL, NULL, errmsg );
+    if ( rc != SQLITE_OK )
+    {
+        if ( errmsg ) *errmsg = add_string( g_strdup( "Bei Aufruf sqlite3_exec:\n" ),
+                *errmsg );
+
+        return -1;
+    }
+
+    return 0;
+}
+
+
+gint
+dbase_convert_to_actual_version( const gchar* path, gchar* v_string,
+        gchar** errmsg ) //eingang hinzugefügt
+{
+    gint rc = 0;
+    sqlite3* db = NULL;
+    gchar* sql = NULL;
+    gchar* path_old = NULL;
+    sqlite3_stmt* stmt = NULL;
+    gchar* path_new = NULL;
+
+    path_new = g_strconcat( path, ".tmp", NULL );
+    rc = sqlite3_open( path_new, &db);
+    if ( rc != SQLITE_OK )
+    {
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf "
+                "sqlite3_open:\n", sqlite3_errmsg( db ), NULL );
+        g_free( path_new );
+
+        return -1;
+    }
+
+    if ( dbase_create_db( db, errmsg ) )
+    {
+        sqlite3_close( db);
+        g_free( path_new );
+
+        ERROR_PAO( "dbase_create" );
+    }
+
+    sql = g_strdup_printf( "ATTACH DATABASE '%s' AS old;", path );
+    rc = sqlite3_exec( db, sql, NULL, NULL, errmsg );
+    g_free( sql );
+    if ( rc != SQLITE_OK )
+    {
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_exec:\n"
+                "result code: ", sqlite3_errstr( rc ), "\nerrmsg: ",
+                *errmsg, NULL );
+        sqlite3_close( db );
+        g_free( path_new );
+
+        return -1;
+    }
+
+    if ( !g_strcmp0( v_string , "v0.7" ) )
+    {
+        rc = dbase_convert_from_v0_7( db, errmsg );
+        if ( rc )
+        {
+            sqlite3_close( db );
+            g_free( path_new );
+
+            ERROR_PAO( "convert_from_v0_7" )
+        }
+    }
+    else if ( !g_strcmp0( v_string , "v0.8" ) )
+    {
+        rc = dbase_convert_from_v0_8( db, errmsg );
+        if ( rc )
+        {
+            sqlite3_close( db );
+            g_free( path_new );
+            ERROR_PAO( "convert_from_v0_8" )
+        }
+    }
+    else
+    {
+        //Mitteilung, daß keine Versionsangabe
+        if ( errmsg ) *errmsg = g_strdup( "Keine Version erkannt - ggf. händisch überprüfen" );
+        sqlite3_close( db );
+        g_free( path_new );
+
+        return -1;
+    }
+
+    //updaten#
+    sql = "UPDATE baum_inhalt SET node_text = '"DB_VERSION"' WHERE node_id = 0;";
+    rc = sqlite3_prepare_v2( db, sql, -1, &stmt, NULL );
+    if ( rc != SQLITE_OK )
+    {
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_prepare_v2:\n",
+                sqlite3_errstr( rc ), NULL );
+        sqlite3_close( db );
+        g_free( path_new );
+
+        return -1;
+    }
+
+    rc = sqlite3_step( stmt );
+    sqlite3_finalize( stmt );
+    if ( rc != SQLITE_DONE )
+    {
+        sqlite3_close( db );
+        g_free( path_new );
+        if ( errmsg ) *errmsg = add_string( g_strconcat( "Bei Aufruf sqlite3_step:\n",
+                sqlite3_errmsg( db ), NULL ), *errmsg );
+
+        return -1;
+    }
+
+    sqlite3_close( db );
+
+    path_old = g_strconcat( path, v_string, NULL );
+    rc = g_rename( path, path_old);
+    g_free( path_old );
+    if ( rc )
+    {
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_rename:\n",
+                strerror( errno ), NULL );
+        g_free( path_new );
+
+        return -1;
+    }
+
+    rc = g_rename ( path_new, path );
+    g_free( path_new );
+    if ( rc )
+    {
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_rename:\n",
+                strerror( errno ), NULL );
+
+        return -1;
+    }
+
+    return 0;
+}
+
+
+static gchar*
+dbase_get_version( sqlite3* db, gchar** errmsg )
+{
+    gint rc = 0;
+    sqlite3_stmt* stmt = NULL;
+    gchar* v_string = NULL;
+
+    rc = sqlite3_prepare_v2( db, "SELECT node_text FROM baum_inhalt WHERE node_id = 0;", -1, &stmt, NULL );
+    if ( rc != SQLITE_OK )
+    {
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_prepare_v2:\n",
+                sqlite3_errstr( rc ), NULL );
+
+        return NULL;
+    }
+
+    rc = sqlite3_step( stmt );
+    if ( rc != SQLITE_ROW )
+    {
+        if ( errmsg ) *errmsg = add_string( g_strconcat( "Bei Aufruf sqlite3_step:\n",
+                sqlite3_errmsg( db ), NULL ), *errmsg );
+        sqlite3_finalize( stmt );
+
+        return NULL;
+    }
+
+    v_string = g_strdup( (const gchar*) sqlite3_column_text( stmt, 0 ) );
+
+    sqlite3_finalize( stmt );
+
+    return v_string;
+}
+
+
 gint
 dbase_open( const gchar* path, DBase* dbase, gboolean create, gboolean overwrite,
         gchar** errmsg )
@@ -739,15 +1033,38 @@ dbase_open( const gchar* path, DBase* dbase, gboolean create, gboolean overwrite
     rc = sqlite3_open_v2( path, &db, SQLITE_OPEN_READWRITE | ((overwrite == FALSE) ? 0 : SQLITE_OPEN_CREATE), NULL );
 
     if ( rc != SQLITE_OK ) sqlite3_close( db );
+    else if ( !overwrite ) //Datei vorhanden, aber nicht erzeugt worden (dbase_full), soll nicht überschrieben werden
+    {
+        gchar* v_string = NULL;
 
-    if ( rc != SQLITE_OK && !create )
+        v_string = dbase_get_version( db, errmsg );
+        if ( !v_string )
+        {
+            sqlite3_close( db );
+            ERROR_PAO( "dbase_get_version" );
+        }
+
+        if ( g_strcmp0( v_string, DB_VERSION ) ) //alte version
+        {
+            sqlite3_close( db );
+
+            rc = dbase_convert_to_actual_version( path, v_string, errmsg );
+            if ( rc ) ERROR_PAO( "convert_to_actual_version" )
+
+            rc = sqlite3_open_v2( path, &db, SQLITE_OPEN_READWRITE, NULL );
+            if ( rc ) ERROR_PAO( "sqlite3_open_v2" )
+        }
+
+    }
+
+    if ( rc != SQLITE_OK && !create ) //db gibts schon und nicht create oder sonstiger Fähler
     {
         if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_open_v2:\n",
                 sqlite3_errstr( rc ), NULL );
 
         return -1;
     }
-    else if ( create && rc == SQLITE_CANTOPEN )
+    else if ( create && rc == SQLITE_CANTOPEN ) //db gibts noch nicht
     {
         gint rc = 0;
 
@@ -802,20 +1119,13 @@ dbase_open( const gchar* path, DBase* dbase, gboolean create, gboolean overwrite
 }
 
 
-static DBase*
-dbase_new( void )
-{
-    return g_malloc0( sizeof( DBase ) );
-}
-
-
 gint
 dbase_create_with_stmts( const gchar* path, DBase** dbase, gboolean create,
         gboolean overwrite, gchar** errmsg )
 {
     gint rc = 0;
 
-    *dbase = dbase_new( );
+    *dbase = g_malloc0( sizeof( DBase ) );
 
     rc = dbase_open( path, *dbase, create, overwrite, errmsg );
     if ( rc )

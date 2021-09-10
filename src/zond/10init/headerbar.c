@@ -945,13 +945,9 @@ cb_menu_test_activate( GtkMenuItem* item, gpointer zond )
 }
 
 
-//Prototyp-Definition, um Header-Datei zu sparen
-gint convert_09_to_1( Projekt*, gchar** );
-gint convert_addeingang( Projekt*, gchar** );
-
 static void
 cb_menu_convert_activate( GtkMenuItem* item, gpointer data )
-{
+{/*
     Projekt* zond = (Projekt*) data;
 
     gint rc = 0;
@@ -964,14 +960,14 @@ cb_menu_convert_activate( GtkMenuItem* item, gpointer data )
                 "Aufruf convert_09_to_1:\n", errmsg, NULL );
         g_free( errmsg );
     }
-
+*/
     return;
 }
 
 
 static void
 cb_menu_addeingang_activate( GtkMenuItem* item, gpointer data )
-{
+{/*
     Projekt* zond = (Projekt*) data;
 
     gint rc = 0;
@@ -984,7 +980,7 @@ cb_menu_addeingang_activate( GtkMenuItem* item, gpointer data )
                 "Aufruf convert_addeingang:\n", errmsg, NULL );
         g_free( errmsg );
     }
-
+*/
     return;
 }
 
