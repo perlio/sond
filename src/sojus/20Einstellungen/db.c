@@ -328,6 +328,210 @@ ID INT(11) NOT NULL, "
             "`Nutzer` VARCHAR(50) NOT NULL ) "
             "ENGINE=InnoDB;";
 
+    gchar* sql2 =
+            "DROP TABLE IF EXISTS labels; "
+            "DROP TABLE IF EXISTS entities; "
+            "DROP TABLE IF EXISTS rels; "
+            "DROP TABLE IF EXISTS properties; "
+
+            "CREATE TABLE IF NOT EXISTS labels ( "
+                "ID INTEGER PRIMARY KEY, "
+                "label TEXT NOT NULL, "
+                "parent INTEGER NOT NULL, "
+                "FOREIGN KEY(parent) REFERENCES labels (ID) "
+            "); "
+
+            "INSERT INTO labels (ID, label, parent) VALUES "
+                "(0, 'root', 0), "
+                "(1, 'nodes', 0), "
+
+                "(100, 'Rechtssubjekt', 1), "
+
+                "(110, 'Rechtsperson', 100), "
+                "(115, 'natürliche Person', 110), "
+                "(120, 'juristische Person', 110), "
+                "(130, 'priv jur Person', 120), "
+                "(131, 'GmbH', 130), "
+                "(132, 'UG', 130), "
+                "(133, 'AG', 130), "
+                "(134, 'Verein', 130), "
+                "(140, 'öffr jur Person', 120), "
+                "(150, 'Körperschaft', 130), "
+                "(155, 'Gebietskörperschaft', 150), "
+                "(156, 'Staat', 155), "
+                "(158, 'Bundesland', 155), "
+                "(160, 'Kreis', 155), "
+                "(162, 'Gemeinde', 155), "
+
+                "(170, 'Personenmehrheit', 100), "
+
+                "(200, 'Organ', 1),
+                "(320, 'Behörde', 300), "
+                "(330, 'Gericht', 320), "
+                "(340, 'Oberlandesgericht', 330), "
+                "(350, 'Landgericht', 330), "
+                "(360, 'Amtsgericht', 330), "
+                "(370, 'Finanzgericht', 330), "
+                "(380, 'Verwaltungsgericht', 330), "
+                "(390, 'Oberverwaltungsgericht', 330), "
+                "(400, 'Arbeitsgericht', 330), "
+                "(410, 'Landesarbeitsgericht', 330), "
+                "(420, 'Sozialgericht', 330), "
+                "(430, 'Landessozialgericht', 330), "
+                "(440, 'Staatsanwaltschaft', 320), "
+                "(450, 'Generalstaatsanwaltschaft', 320), "
+                "(460, 'Staatsanwaltschaft beim Landgericht', 320), "
+
+                "(300, 'Verfahren', 1), "
+
+                "(600, 'Konvolut', 1), "
+                "(610, 'Aktenbestandteil', 600),"
+                "(620, 'Akte', 610), "
+                "(630, 'Aktenband', 610), "
+
+                "(650, 'Fundstelle', 1), "
+
+                "(700, 'angebundenes Objekt', 1), "
+                "(750, 'Urkunde', 700), "
+                "(760, 'Urkunde ohne Adressat', 750), "
+                "(770, 'Vermerk', 760), "
+                "(780, 'Verfügung', 760), "
+                "(790, 'Entscheidung', 760), "
+                "(800, 'Beschluß', 790), "
+                "(810, 'Urteil', 790), "
+                "(820, 'Protokoll', 760), "
+                "(830, 'Vernehmungsprotokoll', 820), "
+                "(832, 'Durchs.-/Sicherst.Protokoll', 820), "
+                "(834, 'Gesprächsniederschrift', 820), "
+                "(850, 'Urkunde mit Adressat', 750), "
+                "(860, 'Schreiben', 850), "
+                "(870, 'Übersendungsschreiben', 860), "
+                "(880, 'Bescheid', 850), "
+                "(890, 'Antrag', 850), "
+                "(900, 'Stellungnahme', 850), "
+
+                "(1000, 'Ort', 1), "
+                "(1010, 'Straße, 1000), "
+                "(1020, 'Adresse', 1000), "
+                "(1030, 'Geoposition', 1000), "
+
+                "(1100, 'Telefonnetz', 1), "
+                "(1110, 'Ländernetz', 1100), "
+                "(1120, 'Ortsnetz', 1100), "
+                "(1130, 'Mobilfunknetz', 1100), "
+
+                "(1140, 'TK-Anschluß', 1), "
+                "(1150, 'Teilnehmernummer', 1140), "
+                "(1160, 'IMSI', 1140), "
+                "(1170, 'IMEI', 1140), "
+
+                "(9000, 'value', 1), "
+                "(9010, 'string', 9000), "
+                "(9020, 'int', 9000), "
+                "(9030, 'float', 9000), "
+                "(9040, 'time', 9000), "
+
+                "(10000, 'Prädikate', 0), "
+                "(10005, '_von_, 0), "
+                "(10006, '_bis_', 0), "
+                "(10010, '_heißt_', 10000), "
+                "(10011, '_hat Vornamen, 10000), "
+
+
+
+                "(10010, '_hat node_id_', 10000), " //nur property
+                "(10020, '_hat Fundstelle_', 10000), " //nur edge
+                "(10050, '_gehört zu_', 10000), "
+
+                "(10106, '_hat Vornamen_', 10100), " //E
+
+                "(10108, '_hat Hausnr_', 10000), "
+                "(10110, '_ist ansässig_', 10000, '10200,10210', '1020'), "
+                "(10150, '_befindet sich_', 10000, '10200,10210', '1000'), "
+
+                "(10250, '_von (Aktenblatt)_', 10000), " //nur property
+                "(10260, '_bis (Aktenblatt)_', 10000), " //nur property
+                "(10270, '_gehört zu Verfahren_', 10000), " //Akte
+                "(10300, '_wird geführt bei_', 10000), " //Verfahren bei Gericht, Polizei, StA
+                "(10310, '_hat Aktenzeichen', 10000) " //property von 10300
+
+                "(10400, '_verfaßt von_', 10000), "
+                "(10410, '_handelnd_durch_', 10000) " //qualifier, wenn Behörde tätig wurde
+                "; "
+
+            "CREATE TABLE IF NOT EXISTS adm_rels ( "
+                "from INTEGER NOT NULL, "
+                "rel INTEGER NOT NULL, "
+                "to INTEGER NOT NULL, "
+                "FOREIGN KEY (from) REFERENCES labels (ID), "
+                "FOREIGN KEY (to) REFERENCES labels (ID) "
+            "); "
+
+            "INSERT INTO adm_rels (from,to) VALUES "
+                "(100, 10010, 11), " //Rechtssubjekt _heißt_ (string)
+                "(115, 10011, 11), " //natürliche Person _hat Vornamen_ (string)
+
+
+
+
+                "(10010, 10005, 14), " //_heißt_ _von_ (string)
+                "(10010, 10006, 14), " //_heißt_ _bis_ (string)
+
+                "(650, 10050, 600), " //Fundstelle gehört zu (Konvolut)
+                "(500, 10300), "
+                "(620, 10270), "
+                "(630, 10290), "
+                "(10020, 100), "
+                "(10100, 9010), " //_hat Namen_ und Kinder haben property string
+                "(10100, 10200), " //_hat Namen_ und Kinder haben Prädikat _von_
+                "(10100, 10210), " //_hat Namen_ und Kinder haben Prädikat _bis_
+                "(10200, 9040), " //_von_ hat property DATETIME
+                "(10210, 9040), " //_bis_ hat property DATETIME
+                "(10270, 500), "
+                "(10290, 600), "
+                "(10300, 320) "
+            "; "
+
+            "CREATE TABLE IF NOT EXISTS entities( "
+                "ID INTEGER NOT NULL, "
+                "label INTEGER NOT NULL, "
+                "FOREIGN KEY (label) REFERENCES labels (ID), "
+                "PRIMARY KEY(ID) "
+            "); "
+
+            "CREATE TABLE IF NOT EXISTS rels ( "
+                "entity INTEGER NOT NULL, "
+                "subject INTEGER NOT NULL, "
+                "object INTEGER NOT NULL, "
+                "FOREIGN KEY (entity) REFERENCES entities (ID), "
+                "FOREIGN KEY (subject) REFERENCES entities (ID), "
+                "FOREIGN KEY (object) REFERENCES entities (ID) "
+            "); "
+
+            "CREATE TABLE IF NOT EXISTS strings ( "
+                "entity INTEGER NOT NULL, "
+                "value TEXT, "
+                "FOREIGN KEY (entity) REFERENCES entities (ID), "
+            "); "
+
+            "CREATE TABLE IF NOT EXISTS ints ( "
+                "entity INTEGER NOT NULL, "
+                "value INTEGER, "
+                "FOREIGN KEY (entity) REFERENCES entities (ID), "
+            "); "
+
+            "CREATE TABLE IF NOT EXISTS reals ( "
+                "entity INTEGER NOT NULL, "
+                "value REAL, "
+                "FOREIGN KEY (entity) REFERENCES entities (ID), "
+            "); "
+
+            "CREATE TABLE IF NOT EXISTS times ( "
+                "entity INTEGER NOT NULL, "
+                "value DATETIME, "
+                "FOREIGN KEY (entity) REFERENCES entities (ID), "
+            "); "
+
     rc = mysql_query( con, sql );
 
     if ( rc )

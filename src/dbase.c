@@ -550,6 +550,15 @@ dbase_create_db( sqlite3* db, gchar** errmsg )
                 "(1050, 'Bezeichnung', 1), "
                 "(1060, 'Familienname', 1), "
                 "(1070, 'Vorname', 1), "
+
+                "(1100, 'Telefonnetz', 1), "
+                "(1110, 'Ländernetz', 1100), "
+                "(1120, 'Ortsnetz', 1100), "
+                "(1130, 'Mobilfunknetz', 1100), "
+
+                "(1150, 'Rufnummer', 1), "
+                "(1160, 'IMSI', 1), "
+                "(1170, 'IMEI', 1), "
 *//*
                 "(10000, 'Prädikate', 0), "
                 "(10010, '_hat node_id_', 10000), " //nur property

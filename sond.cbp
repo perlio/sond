@@ -377,11 +377,6 @@
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
 		</Unit>
-		<Unit filename="src/zond/20allgemein/convert.c">
-			<Option compilerVar="CC" />
-			<Option target="zond (Release)" />
-			<Option target="zond (Testing)" />
-		</Unit>
 		<Unit filename="src/zond/20allgemein/dbase_full.c">
 			<Option compilerVar="CC" />
 			<Option target="zond (Release)" />

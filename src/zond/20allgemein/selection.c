@@ -542,6 +542,8 @@ selection_paste( Projekt* zond, gboolean kind )
     Baum baum = KEIN_BAUM;
     baum = baum_abfragen_aktiver_treeview( zond );
 
+    if ( baum == KEIN_BAUM ) return;
+
     Baum baum_selection = baum_get_baum_from_treeview( zond,
             GTK_WIDGET(zond->clipboard->tree_view) );
 

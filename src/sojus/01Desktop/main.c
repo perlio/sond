@@ -225,45 +225,12 @@ init_app_window( GtkApplication* app, Sojus* sojus )
 }
 
 
-static GSettings*
-init_settings( void )
-{
-    GSettingsSchemaSource* schema_source = NULL;
-    GSettingsSchema* schema = NULL;
-    GSettings* settings = NULL;
-    GError* error = NULL;
-
-
-    schema_source = g_settings_schema_source_new_from_directory(
-            "schemas/", NULL, FALSE, &error );
-    if ( error )
-    {
-        printf( "%s\n", error->message );
-        g_error_free( error );
-        return NULL;
-    }
-
-    schema = g_settings_schema_source_lookup( schema_source,
-            "de.perlio.Sojus", FALSE );
-    g_settings_schema_source_unref( schema_source );
-
-    settings = g_settings_new_full( schema, NULL, NULL );
-    g_settings_schema_unref( schema );
-
-    return settings;
-}
-
-
 static Sojus*
 init_sojus( void )
 {
-    GSettings* settings = init_settings( );
-    if ( !settings ) return NULL;
-
     Sojus* sojus = g_malloc0( sizeof( Sojus ) );
 
-    sojus->settings = settings;
-
+    sojus->settings = g_settings_new( "de.perlio.Sojus" );
     sojus->clipboard = clipboard_init( );
 
     sojus->arr_open_fm = g_ptr_array_new_with_free_func( (GDestroyNotify) g_free );
