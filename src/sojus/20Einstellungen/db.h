@@ -9,6 +9,6 @@ typedef struct _Sojus Sojus;
 
 gint db_connect_database( Sojus*, GtkWidget*, MYSQL* );
 
-gint db_get_connection( Sojus*, GtkWidget* );
+gint db_get_connection( Sojus* );
 
 #endif // DB_H_INCLUDED

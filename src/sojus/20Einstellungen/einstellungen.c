@@ -10,7 +10,7 @@ cb_select_db( GtkWidget* button, gpointer data )
 {
     Sojus* sojus = (Sojus*) data;
 
-    db_connect_database( sojus, gtk_widget_get_toplevel( button ), sojus->db.con );
+    db_connect_database( sojus, sojus->con );
 
     return;
 }
