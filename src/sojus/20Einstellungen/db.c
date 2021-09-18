@@ -98,52 +98,52 @@ db_activate( Sojus* sojus, MYSQL* con, const gchar* db_name, gchar** errmsg )
 *   ausreichenden Rechten muß hergestellt sein
 **************************************************/
 static gint
-db_create( Sojus* sojus, MYSQL* con, gchar* db_name, gchar** errmsg )
+db_create( Sojus* sojus, gchar* db_name, gchar** errmsg )
 {
     gint rc = 0;
 
     //prüfen, ob db "db_name" schon existiert
-    if ( !mysql_select_db( con, db_name ) ) return 1;//Falls nicht:
+    if ( !mysql_select_db( sojus->con, db_name ) ) return 1;//Falls nicht:
 
     //neue Datenbank erstellen
     gchar* sql = g_strconcat( "CREATE DATABASE `", db_name,"` "
             "CHARACTER SET = 'utf8' COLLATE = 'utf8_general_ci'", NULL );
-    rc = mysql_query( con, sql );
+    rc = mysql_query( sojus->con, sql );
     g_free( sql );
     if ( rc )
     {
         if ( errmsg ) *errmsg = g_strconcat( "Fehler bei CREATE "
-                "DATABASE ", db_name, ":\n", mysql_error( con ),
+                "DATABASE ", db_name, ":\n", mysql_error( sojus->con ),
                 NULL );
 
         return -1;
     }
 
     //Mit der neuen Datenbank verbinden
-    if ( (rc = mysql_select_db( con, db_name )) )
+    if ( (rc = mysql_select_db( sojus->con, db_name )) )
     {
         if ( errmsg ) *errmsg = g_strconcat( "Fehler in cb_dialog_"
                 "create_response:\nErzeugte Datenbank konnte nicht "
                 "verbunden werden.\nmysql_select_db \"", db_name, "\":\n",
-                mysql_error( con ), NULL );
+                mysql_error( sojus->con ), NULL );
 
         return -1;
     }
 
-    rc = mysql_query( con, sond_database_sql_create_database( ) );
+    rc = mysql_query( sojus->con, sond_database_sql_create_database( ) );
     if ( rc )
     {
         gint ret = 0;
         gchar* sql_drop = NULL;
 
         if ( errmsg ) *errmsg = g_strconcat( "Bei Einrichtung db:\n",
-                mysql_error( con ), NULL );
+                mysql_error( sojus->con ), NULL );
         sql_drop = g_strdup_printf( "DROP DATABASE `%s`", db_name );
-        ret = mysql_query( con, sql_drop );
+        ret = mysql_query( sojus->con, sql_drop );
         g_free( sql_drop );
         if ( ret && errmsg ) add_string( *errmsg, g_strconcat( "\n\nFehler "
                 "bei Löschen der Database ", db_name, ":\n",
-                mysql_error( con ), NULL ) );
+                mysql_error( sojus->con ), NULL ) );
         else if ( errmsg ) add_string( *errmsg, g_strconcat( "Database ", db_name,
                 " wurde gelöscht", NULL ) );
 
@@ -154,23 +154,23 @@ db_create( Sojus* sojus, MYSQL* con, gchar* db_name, gchar** errmsg )
 
     do
     {
-        rc = mysql_affected_rows( con );
+        rc = mysql_affected_rows( sojus->con );
         if ( rc < 0 ) break;
         /* more results? -1 = no, >0 = error, 0 = yes (keep looping) */
-        status = mysql_next_result( con );
+        status = mysql_next_result( sojus->con );
     } while (status == 0);
 
     if ( rc || (status > 0) )
     {
         gint ret = 0;
         if ( errmsg ) *errmsg = g_strconcat( "Bei Einrichtung db:\n",
-                mysql_error( con ), NULL );
+                mysql_error( sojus->con ), NULL );
         sql = g_strdup_printf( "DROP DATABASE `%s`", db_name );
-        ret = mysql_query( con, sql );
+        ret = mysql_query( sojus->con, sql );
         g_free( sql );
         if ( ret && errmsg ) add_string( *errmsg, g_strconcat( "\n\nFehler "
                 "bei Löschen der Database ", db_name, ":\n",
-                mysql_error( con ), NULL ) );
+                mysql_error( sojus->con ), NULL ) );
         else if ( errmsg ) add_string( *errmsg, g_strconcat( "Database ", db_name,
                 " wurde gelöscht", NULL ) );
 
@@ -182,20 +182,20 @@ db_create( Sojus* sojus, MYSQL* con, gchar* db_name, gchar** errmsg )
 
 
 gint
-db_connect_database( Sojus* sojus, MYSQL* con )
+db_connect_database( Sojus* sojus )
 {
     gchar* db_name = NULL;
     gboolean dont_ask = FALSE;
 
-    dont_ask = (gboolean) (!sojus->con && g_strcmp0( db_name, "" ));
     db_name = g_settings_get_string( sojus->settings, "dbname" );
+    dont_ask = (gboolean) (sojus->con && g_strcmp0( db_name, "" ));
 
     do
     {
         gint ret = 0;
         gchar* errmsg = NULL;
 
-        if ( dont_ask ) ret = mysql_select_db( con, db_name );
+        if ( dont_ask ) ret = mysql_select_db( sojus->con, db_name );
         else ret = 1;
 
         dont_ask = TRUE;
@@ -205,10 +205,10 @@ db_connect_database( Sojus* sojus, MYSQL* con )
         {
             gint rc = 0;
 
-            if ( g_strcmp0( mysql_error( con ), "" ) )
+            if ( g_strcmp0( mysql_error( sojus->con ), "" ) )
                     display_message( sojus->app_window, "Datenbank konnte nicht "
                     "verbunden werden -\n\nBei Aufruf db_select_database:\n",
-                    mysql_error( con ), NULL );
+                    mysql_error( sojus->con ), NULL );
 
             rc = dialog_with_buttons( sojus->app_window, "Datenbank auswählen",
                     "", &db_name, "Bestehende Datenbank", 1, "Datenbank erzeugen", 2,
@@ -218,7 +218,7 @@ db_connect_database( Sojus* sojus, MYSQL* con )
             {
                 gint ret = 0;
 
-                ret = db_create( sojus, con, db_name, &errmsg );
+                ret = db_create( sojus, db_name, &errmsg );
                 if ( ret == -1 )
                 {
                     display_message( sojus->app_window, "Datenbank """, db_name,
@@ -402,18 +402,18 @@ db_get_connection( Sojus* sojus )
     {
         gint rc = 0;
 
-        rc = db_connect_database( sojus, con );
+        mysql_close( sojus->con );
+        sojus->con = con;
+
+        rc = db_connect_database( sojus );
         if ( rc == 0 )
         {
             g_settings_set_string( sojus->settings, "host", host );
             g_settings_set_int( sojus->settings, "port", port );
             g_settings_set_string( sojus->settings, "user", user );
             g_settings_set_string( sojus->settings, "password", password );
-
-            mysql_close( sojus->con );
-            sojus->con = con;
         }
-        else mysql_close( con );
+        else mysql_close( sojus->con );
     }
 
     g_free( host );

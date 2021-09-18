@@ -168,6 +168,8 @@
 		</Unit>
 		<Unit filename="src/sojus/01Desktop/callbacks_akten.c">
 			<Option compilerVar="CC" />
+			<Option compile="0" />
+			<Option link="0" />
 			<Option target="Sojus (Release)" />
 			<Option target="Sojus (Testing)" />
 		</Unit>
@@ -184,13 +186,10 @@
 			<Option target="Sojus (Release)" />
 			<Option target="Sojus (Testing)" />
 		</Unit>
-		<Unit filename="src/sojus/01Desktop/main.c">
-			<Option compilerVar="CC" />
-			<Option target="Sojus (Release)" />
-			<Option target="Sojus (Testing)" />
-		</Unit>
 		<Unit filename="src/sojus/02Akten/akten.c">
 			<Option compilerVar="CC" />
+			<Option compile="0" />
+			<Option link="0" />
 			<Option target="Sojus (Release)" />
 			<Option target="Sojus (Testing)" />
 		</Unit>
@@ -200,6 +199,7 @@
 		</Unit>
 		<Unit filename="src/sojus/02Akten/aktenbet.c">
 			<Option compilerVar="CC" />
+			<Option compile="0" />
 			<Option target="Sojus (Release)" />
 			<Option target="Sojus (Testing)" />
 		</Unit>
@@ -209,6 +209,8 @@
 		</Unit>
 		<Unit filename="src/sojus/02Akten/aktenbetwidgets.c">
 			<Option compilerVar="CC" />
+			<Option compile="0" />
+			<Option link="0" />
 			<Option target="Sojus (Release)" />
 			<Option target="Sojus (Testing)" />
 		</Unit>
@@ -218,6 +220,8 @@
 		</Unit>
 		<Unit filename="src/sojus/02Akten/aktenfenster.c">
 			<Option compilerVar="CC" />
+			<Option compile="0" />
+			<Option link="0" />
 			<Option target="Sojus (Release)" />
 			<Option target="Sojus (Testing)" />
 		</Unit>
@@ -227,6 +231,7 @@
 		</Unit>
 		<Unit filename="src/sojus/02Akten/widgets_akte.c">
 			<Option compilerVar="CC" />
+			<Option compile="0" />
 			<Option target="Sojus (Release)" />
 			<Option target="Sojus (Testing)" />
 		</Unit>
@@ -236,6 +241,7 @@
 		</Unit>
 		<Unit filename="src/sojus/03Adressen/adresse_auswahl_neu.c">
 			<Option compilerVar="CC" />
+			<Option compile="0" />
 			<Option target="Sojus (Release)" />
 			<Option target="Sojus (Testing)" />
 		</Unit>
@@ -245,6 +251,7 @@
 		</Unit>
 		<Unit filename="src/sojus/03Adressen/adressen.c">
 			<Option compilerVar="CC" />
+			<Option compile="0" />
 			<Option target="Sojus (Release)" />
 			<Option target="Sojus (Testing)" />
 		</Unit>
@@ -254,6 +261,7 @@
 		</Unit>
 		<Unit filename="src/sojus/03Adressen/adressenfenster.c">
 			<Option compilerVar="CC" />
+			<Option compile="0" />
 			<Option target="Sojus (Release)" />
 			<Option target="Sojus (Testing)" />
 		</Unit>
@@ -263,19 +271,11 @@
 		</Unit>
 		<Unit filename="src/sojus/03Adressen/widgets_adresse.c">
 			<Option compilerVar="CC" />
+			<Option compile="0" />
 			<Option target="Sojus (Release)" />
 			<Option target="Sojus (Testing)" />
 		</Unit>
 		<Unit filename="src/sojus/03Adressen/widgets_adresse.h">
-			<Option target="Sojus (Release)" />
-			<Option target="Sojus (Testing)" />
-		</Unit>
-		<Unit filename="src/sojus/06Dokumente/file_manager.c">
-			<Option compilerVar="CC" />
-			<Option target="Sojus (Release)" />
-			<Option target="Sojus (Testing)" />
-		</Unit>
-		<Unit filename="src/sojus/06Dokumente/file_manager.h">
 			<Option target="Sojus (Release)" />
 			<Option target="Sojus (Testing)" />
 		</Unit>
@@ -316,6 +316,24 @@
 		</Unit>
 		<Unit filename="src/sojus/main.c">
 			<Option compilerVar="CC" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/sojus_adressen.c">
+			<Option compilerVar="CC" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/sojus_adressen.h">
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/sojus_file_manager.c">
+			<Option compilerVar="CC" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/sojus_file_manager.h">
 			<Option target="Sojus (Release)" />
 			<Option target="Sojus (Testing)" />
 		</Unit>

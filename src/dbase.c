@@ -2,6 +2,8 @@
 #include <gtk/gtk.h>
 #include <glib/gstdio.h>
 
+#include "sond_database.h"
+
 #include "zond/error.h"
 
 #include "dbase.h"
@@ -550,6 +552,54 @@ dbase_create_db( sqlite3* db, gchar** errmsg )
             "INSERT INTO baum_auswertung (node_id, parent_id, older_sibling_id) "
             "VALUES (0, 0, 0)"; //mit eingang
 
+    rc = sqlite3_exec( db, sql, NULL, NULL, &errmsg_ii );
+    if ( rc != SQLITE_OK )
+    {
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_exec\nsql: ",
+                sql, "\nresult code: ", sqlite3_errstr( rc ), "\nerrmsg: ",
+                errmsg_ii, NULL );
+        sqlite3_free( errmsg_ii );
+
+        return -1;
+    }
+
+    sql = sond_database_sql_create_database( );
+    rc = sqlite3_exec( db, sql, NULL, NULL, &errmsg_ii );
+    if ( rc != SQLITE_OK )
+    {
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_exec\nsql: ",
+                sql, "\nresult code: ", sqlite3_errstr( rc ), "\nerrmsg: ",
+                errmsg_ii, NULL );
+        sqlite3_free( errmsg_ii );
+
+        return -1;
+    }
+
+    sql = sond_database_sql_create_database( );
+    rc = sqlite3_exec( db, sql, NULL, NULL, &errmsg_ii );
+    if ( rc != SQLITE_OK )
+    {
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_exec\nsql: ",
+                sql, "\nresult code: ", sqlite3_errstr( rc ), "\nerrmsg: ",
+                errmsg_ii, NULL );
+        sqlite3_free( errmsg_ii );
+
+        return -1;
+    }
+
+    sql = sond_database_sql_insert_labels( );
+    rc = sqlite3_exec( db, sql, NULL, NULL, &errmsg_ii );
+    if ( rc != SQLITE_OK )
+    {
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_exec\nsql: ",
+                sql, "\nresult code: ", sqlite3_errstr( rc ), "\nerrmsg: ",
+                errmsg_ii, NULL );
+        sqlite3_free( errmsg_ii );
+
+        return -1;
+    }
+
+    sql = sond_database_sql_insert_adm_rels( );
     rc = sqlite3_exec( db, sql, NULL, NULL, &errmsg_ii );
     if ( rc != SQLITE_OK )
     {

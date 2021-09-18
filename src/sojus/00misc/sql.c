@@ -1,7 +1,7 @@
 #include <gtk/gtk.h>
 #include <mariadb/mysql.h>
 
-#include "../global_types_sojus.h"
+#include "../sojus_init.h"
 
 #include "../../misc.h"
 
@@ -18,10 +18,10 @@ sql_log( Sojus* sojus, const gchar* sql_log_str )
 
     g_free( user );
 
-    rc = mysql_query( sojus->db.con, sql );
+    rc = mysql_query( sojus->con, sql );
     g_free( sql );
     if ( rc ) display_message( sojus->app_window, "Fehler bei sql_log:\n",
-            mysql_error( sojus->db.con ), NULL );
+            mysql_error( sojus->con ), NULL );
 
 
     return rc;

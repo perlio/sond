@@ -1,5 +1,5 @@
 /*
-zond (sond_database.c) - Akten, Beweisstücke, Unterlagen
+sond (sond_database.c) - Akten, Beweisstücke, Unterlagen
 Copyright (C) 2021  pelo america
 
 This program is free software: you can redistribute it and/or modify
@@ -38,7 +38,7 @@ typedef struct _Rel
     {
         Node object;
         gchar* string;
-        gint int;
+        gint integer;
         float real;
         time_t time;
     } object;
@@ -134,7 +134,7 @@ sond_database_sql_insert_labels( void )
                 "(133, 'AG', 130), "
                 "(134, 'Verein', 130), "
                 "(140, 'öffr jur Person', 120), "
-                "(150, 'Körperschaft', 130), "
+                "(150, 'Körperschaft', 140), "
                 "(155, 'Gebietskörperschaft', 150), "
                 "(156, 'Staat', 155), "
                 "(158, 'Bundesland', 155), "
@@ -142,6 +142,10 @@ sond_database_sql_insert_labels( void )
                 "(162, 'Gemeinde', 155), "
 
                 "(170, 'Personenmehrheit', 105), "
+                "(175, 'Eheleute', 170), "
+                "(178, 'GbR', 170), "
+                "(180, 'OHG', 170), "
+                "(182, 'Partnerschaft', 170), "
 
                 "(200, 'Behörde', 100), "
                 "(230, 'Gericht', 200), "
@@ -226,9 +230,11 @@ sond_database_sql_insert_labels( void )
                 "(10006, '_bis_', 2), "
                 "(10010, '_heißt_', 2), "
                 "(10011, '_hat Vornamen, 2), "
+                "(10012, '_hat Titel_', 2), "
                 "(10020, '_gehört zu', 2), "
                 "(10030, '_ist_', 2), "
-                "(10040, '_ist ansässig_', 2), "
+                "(10040, '_hat Sitz_', 2), "
+                "(10042, '_hat Kanzleisitz_', 2), " //für private Personen
                 "(10045, '_hat Hausnr_', 2), " //für 402 Adresse!
                 "(10046, '_hat Zusatz (1. Zeile)_', 2), "
 
@@ -271,8 +277,12 @@ sond_database_sql_insert_adm_rels( void )
             "(100, 10005, 100004), " //Subjekt _von_ (time) (Geburtstag bei nat Person, sonst Gründungsdatum etc.)
             "(100, 10006, 100004), " //Subjekt _bis_ (time) (Todestag/Auflösungsdatum)
             "(100, 10010, 100001), " //Subjekt _heißt_ (string)
-            "(115, 10011, 100001), " //natürliche Person _hat Vornamen_ (string)
             "(100, 10040, 402), " //Subjekt _ist ansässig_ Adresse
+            "(115, 10011, 100001), " //natürliche Person _hat Vornamen_ (string)
+            "(115, 10012, 100001), " //natürliche Person _hat Titel_ (string)
+            "(115, 10042, 402), " //natürliche Person _hat Kanzleisitz_ Adresse
+            "(130, 10042, 402), " //priv jur Person _hat Kanzleisitz_ Adresse
+            "(170, 10042, 402), " //Personenmehrheit _hat Kanzleisitz_ Adresse
 
             "(400, 10010, 100001), " //Straße _heißt_ (string)
             "(400, 10020, 162), " //Straße _gehört zu_ Gemeinde

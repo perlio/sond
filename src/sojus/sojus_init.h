@@ -42,6 +42,6 @@ typedef struct _Sojus
 } Sojus;
 
 
-Sojus* sojus_init( void );
+Sojus* sojus_init( GtkApplication* );
 
 #endif // SOJUS_INIT_H_INCLUDED

@@ -19,8 +19,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../misc.h"
 
 #include "sojus_init.h"
+#include "sojus_adressen.h"
+#include "sojus_file_manager.h"
 
 #include "20Einstellungen/db.h"
+#include "20Einstellungen/einstellungen.h"
 
 
 static void
@@ -103,6 +106,26 @@ sojus_init_socket( Sojus* sojus, gchar** errmsg )
 }
 
 
+static gboolean
+cb_desktop_delete_event( GtkWidget* app_window, GdkEvent* event, gpointer data )
+{
+    Sojus* sojus = (Sojus*) data;
+
+    gtk_widget_destroy( app_window );
+
+    mysql_close( sojus->con );
+
+    g_object_unref( sojus->socket );
+    g_object_unref( sojus->settings );
+
+    g_ptr_array_unref( sojus->arr_open_fm );
+
+    g_free( sojus );
+
+    return TRUE;
+}
+
+
 static void
 sojus_init_app_window( Sojus* sojus )
 {
@@ -123,7 +146,7 @@ sojus_init_app_window( Sojus* sojus )
     GtkWidget* bu_akte_suchen = gtk_button_new_with_mnemonic( "Akte _suchen" );
 
     //Adressen
-    GtkWidget* bu_adresse_fenster = gtk_button_new_with_mnemonic( "A_dressenfenster" );
+    GtkWidget* bu_adressen_fenster = gtk_button_new_with_mnemonic( "A_dressenfenster" );
     GtkWidget* bu_adresse_suchen = gtk_button_new_with_mnemonic( "Adresse s_uchen" );
 
     //Termine
@@ -141,7 +164,7 @@ sojus_init_app_window( Sojus* sojus )
     gtk_grid_attach( GTK_GRID(grid), bu_akte_fenster, 0, 1, 1, 1 );
     gtk_grid_attach( GTK_GRID(grid), bu_akte_suchen, 0, 2, 1, 1 );
 
-    gtk_grid_attach( GTK_GRID(grid), bu_adresse_fenster, 0, 4, 1, 1 );
+    gtk_grid_attach( GTK_GRID(grid), bu_adressen_fenster, 0, 4, 1, 1 );
     gtk_grid_attach( GTK_GRID(grid), bu_adresse_suchen, 0, 5, 1, 1 );
 
     gtk_grid_attach( GTK_GRID(grid), bu_kalender, 0, 6, 1, 1 );
@@ -155,16 +178,16 @@ sojus_init_app_window( Sojus* sojus )
 **  callbacks  */
     g_signal_connect( entry_dok, "activate",
             G_CALLBACK(file_manager_entry_activate), sojus );
-    g_signal_connect( bu_akte_fenster, "clicked",
+/*    g_signal_connect( bu_akte_fenster, "clicked",
             G_CALLBACK(cb_button_aktenfenster_clicked), sojus );
     g_signal_connect( bu_akte_suchen, "clicked",
             G_CALLBACK(cb_button_akte_suchen_clicked), sojus );
-
-    g_signal_connect( bu_adresse_fenster, "clicked",
-            G_CALLBACK(cb_button_adresse_fenster_clicked), sojus );
-    g_signal_connect( bu_adresse_suchen, "clicked",
+*/
+    g_signal_connect( bu_adressen_fenster, "clicked",
+            G_CALLBACK(sojus_adressen_cb_fenster), sojus );
+/*    g_signal_connect( bu_adresse_suchen, "clicked",
             G_CALLBACK(cb_bu_adresse_suchen_clicked), sojus );
-
+*/
     g_signal_connect( bu_einstellungen, "clicked",
             G_CALLBACK(einstellungen), sojus );
 
@@ -195,14 +218,15 @@ sojus_init( GtkApplication* app )
         display_message( sojus->app_window, "Fehler Init -\n\nBei Aufruf "
                 "sojus_init_socket:\n", errmsg, NULL );
         g_free( errmsg );
+        gboolean ret = FALSE;
+        g_signal_emit_by_name( sojus->app_window, "delete-event", NULL, &ret );
 
         return NULL;
     }
 
-    rc = sojus_init_db( sojus );
-
     sojus->settings = g_settings_new( "de.perlio.Sojus" );
-    sojus->clipboard = clipboard_init( );
+
+    sojus_init_db( sojus ); //Bei Fehler wird Programm beendet!
 
     sojus->arr_open_fm = g_ptr_array_new_with_free_func( (GDestroyNotify) g_free );
 

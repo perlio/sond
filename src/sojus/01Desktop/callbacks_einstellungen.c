@@ -1,7 +1,6 @@
 #include <gtk/gtk.h>
 
-#include "../global_types_sojus.h"
-
+#include "../sojus_init.h"
 #include "../../misc.h"
 
 #include "../20Einstellungen/db.h"

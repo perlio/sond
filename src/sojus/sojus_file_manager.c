@@ -1,18 +1,31 @@
+/*
+sojus (sojus_file_manager.c) - softkanzlei
+Copyright (C) 2021  pelo america
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+*/
+
 #include <gtk/gtk.h>
 #include <sqlite3.h>
 
-#include "../../sond_treeviewfm.h"
+#include "../sond_treeviewfm.h"
 
-#include "../../dbase.h"
-#include "../../eingang.h"
+#include "../dbase.h"
+#include "../eingang.h"
+#include "../misc.h"
 
-#include "../global_types_sojus.h"
-
-#include "../00misc/auswahl.h"
-#include "../../misc.h"
-#include "../02Akten/akten.h"
-
-#include "file_manager.h"
+#include "sojus_init.h"
 
 
 typedef struct _Open_FM
@@ -334,7 +347,7 @@ file_manager_get_window( Sojus* sojus )
 
 void
 file_manager_entry_activate( GtkWidget* entry, gpointer data )
-{
+{/*
     GtkWidget* fm_window = NULL;
     Akte* akte = NULL;
     gchar* dokument_dir = NULL;
@@ -412,6 +425,6 @@ file_manager_entry_activate( GtkWidget* entry, gpointer data )
     sond_treeviewfm_set_dbase( stvfm, dbase );
 
     gtk_widget_show_all( fm_window );
-
+*/
     return;
 }

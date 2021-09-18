@@ -1,10 +1,13 @@
-#include "../global_types_sojus.h"
-
-#include "../../misc.h"
+#define JAHRHUNDERT_GRENZE 70
 
 #include <stdlib.h>
 #include <gtk/gtk.h>
 #include <mariadb/mysql.h>
+
+#include "../../misc.h"
+
+#include "../sojus_init.h"
+
 
 
 void
@@ -185,7 +188,7 @@ auswahl_parse_entry( GtkWidget* window, const gchar* entry, gint* regnr, gint* j
     {
         auswahl_parse_regnr( entry, regnr, jahr );
 
-        if ( !auswahl_regnr_existiert( window, sojus->db.con, *regnr, *jahr ) )
+        if ( !auswahl_regnr_existiert( window, sojus->con, *regnr, *jahr ) )
                 return FALSE;
 
         return TRUE;
@@ -197,18 +200,18 @@ auswahl_parse_entry( GtkWidget* window, const gchar* entry, gint* regnr, gint* j
 
     sql = g_strdup_printf( "SELECT * FROM akten WHERE "
             "LOWER(Bezeichnung) LIKE LOWER('%%%s%%')", entry );
-    if ( (rc = mysql_query( sojus->db.con, sql )) )
+    if ( (rc = mysql_query( sojus->con, sql )) )
     {
         display_message( window, "Fehler bei auswahl_parse_regnr\n", sql,
-                "\n", mysql_error( sojus->db.con ), NULL );
+                "\n", mysql_error( sojus->con ), NULL );
         return FALSE;
     }
 
-    MYSQL_RES* mysql_res = mysql_store_result( sojus->db.con );
+    MYSQL_RES* mysql_res = mysql_store_result( sojus->con );
     if ( !mysql_res )
     {
         display_message( window, "Fehler bei auswahl_parse_regnr:\n", sql,
-                ":\n", mysql_error( sojus->db.con ), NULL );
+                ":\n", mysql_error( sojus->con ), NULL );
         return FALSE;
     }
 

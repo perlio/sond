@@ -1,4 +1,4 @@
-#include "../global_types_sojus.h"
+#include "../sojus_init.h"
 
 #include "../00misc/auswahl.h"
 #include "../../misc.h"

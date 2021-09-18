@@ -16,7 +16,7 @@
 #include "../global_types_sojus.h"
 
 
-
+/*
 
 void
 akte_free( Akte* akte )
@@ -230,7 +230,7 @@ akte_speichern( GtkWidget* akten_window )
 
 /*
 **  aktuelle Werte holen  */
-    //regnr
+/*    //regnr
     GtkWidget* entry_regnr = g_object_get_data( G_OBJECT(akten_window),
             "entry_regnr" );
     const gchar* regnr_text = gtk_entry_get_text( GTK_ENTRY(entry_regnr) );
@@ -271,7 +271,7 @@ akte_speichern( GtkWidget* akten_window )
 
 /*
 **  in sql speichern  */
-    gchar* sql = NULL;
+/*   gchar* sql = NULL;
     gint rc = 0;
 
     sql = g_strdup_printf( "UPDATE Akten SET `Bezeichnung`='%s', "
@@ -305,5 +305,5 @@ akte_speichern( GtkWidget* akten_window )
 
     return;
 }
-
+*/
 
