@@ -317,25 +317,5 @@ misc_get_calendar( GtkCalendar* calendar )
 
 
 
-Clipboard*
-clipboard_init( void )
-{
-    Clipboard* clipboard = g_malloc0( sizeof( Clipboard ) );
-
-    clipboard->arr_ref = g_ptr_array_new_with_free_func( (GDestroyNotify) gtk_tree_row_reference_free );
-
-    return clipboard;
-}
-
-
-void
-clipboard_free( Clipboard* clipboard )
-{
-    g_ptr_array_unref( clipboard->arr_ref );
-    g_free( clipboard );
-
-    return;
-}
-
 
 

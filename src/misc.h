@@ -16,12 +16,6 @@ typedef char gchar;
 typedef int gint;
 typedef int gboolean;
 
-typedef struct _Clipboard {
-    SondTreeview* tree_view;
-    gboolean ausschneiden;
-    GPtrArray* arr_ref;
-} Clipboard;
-
 
 void display_message( GtkWidget*, const gchar*, ... );
 
@@ -45,9 +39,5 @@ gchar* get_rel_path_from_file( const gchar*, const GFile* );
 void misc_set_calendar( GtkCalendar*, const gchar* );
 
 gchar* misc_get_calendar( GtkCalendar* );
-
-Clipboard* clipboard_init( void );
-
-void clipboard_free( Clipboard* );
 
 #endif // MISC_H_INCLUDED

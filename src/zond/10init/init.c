@@ -190,8 +190,6 @@ init( GtkApplication* app )
     zond = g_malloc0( sizeof( Projekt ) );
 
     //benötigte Arrays erzeugen
-    zond->clipboard = clipboard_init( );
-
     zond->arr_pv = g_ptr_array_new( );
 
     init_app_window( zond );

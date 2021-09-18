@@ -10,7 +10,6 @@
 G_BEGIN_DECLS
 
 typedef struct _DBase DBase;
-typedef struct _Clipboard Clipboard;
 
 
 #define SOND_TYPE_TREEVIEWFM sond_treeviewfm_get_type( )
@@ -29,7 +28,7 @@ struct _SondTreeviewFMClass
 };
 
 
-SondTreeviewFM* sond_treeviewfm_new( Clipboard* clipboard );
+SondTreeviewFM* sond_treeviewfm_new( void );
 
 gint sond_treeviewfm_set_root( SondTreeviewFM*, const gchar*, gchar** );
 

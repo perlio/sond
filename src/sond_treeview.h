@@ -10,17 +10,21 @@ G_BEGIN_DECLS
 G_DECLARE_DERIVABLE_TYPE (SondTreeview, sond_treeview, SOND, TREEVIEW, GtkTreeView)
 
 
+typedef struct _Clipboard {
+    SondTreeview* tree_view;
+    gboolean ausschneiden;
+    GPtrArray* arr_ref;
+} Clipboard;
+
 struct _SondTreeviewClass
 {
     GtkTreeViewClass parent_class;
 
+    Clipboard* clipboard;
 };
 
-typedef struct _Clipboard Clipboard;
 
 SondTreeview* sond_treeview_new( );
-
-void sond_treeview_set_clipboard( SondTreeview*, Clipboard* );
 
 Clipboard* sond_treeview_get_clipboard( SondTreeview* );
 

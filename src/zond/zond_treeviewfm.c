@@ -170,10 +170,9 @@ zond_treeviewfm_init( ZondTreeviewFM* stvfm )
 
 
 ZondTreeviewFM*
-zond_treeviewfm_new( Clipboard* clipboard )
+zond_treeviewfm_new( void )
 {
     ZondTreeviewFM* ztvfm = g_object_new( ZOND_TYPE_TREEVIEWFM, NULL );
-    sond_treeview_set_clipboard( SOND_TREEVIEW(ztvfm), clipboard );
 
     return ztvfm;
 }

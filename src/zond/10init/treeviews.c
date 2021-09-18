@@ -330,7 +330,6 @@ init_treeviews( Projekt* zond )
         //der treeview
         zond->treeview[baum] = sond_treeview_new( );
 
-        sond_treeview_set_clipboard( zond->treeview[baum], zond->clipboard );
         sond_treeview_set_render_text_cell_func( zond->treeview[baum],
                 treeviews_render_node_text, zond );
 
@@ -399,7 +398,7 @@ init_treeviews( Projekt* zond )
 void
 treeviews_init_fs_tree( Projekt* zond )
 {
-    zond->treeview[BAUM_FS] = SOND_TREEVIEW(zond_treeviewfm_new( zond->clipboard ));
+    zond->treeview[BAUM_FS] = SOND_TREEVIEW(zond_treeviewfm_new( ));
     zond_treeviewfm_set_zond( ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), zond );
 
     //die Selection

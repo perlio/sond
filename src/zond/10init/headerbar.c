@@ -716,8 +716,6 @@ cb_clipboard_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
 {
     Projekt* zond = (Projekt*) user_data;
 
-    if ( zond->clipboard->arr_ref->len == 0 ) return;
-
     gboolean kind = (gboolean) GPOINTER_TO_INT(g_object_get_data( G_OBJECT(item),
             "kind" ));
 

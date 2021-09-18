@@ -86,7 +86,7 @@ struct _ZondTreeviewFMClass
 };
 
 
-ZondTreeviewFM* zond_treeviewfm_new( Clipboard* clipboard );
+ZondTreeviewFM* zond_treeviewfm_new( void );
 
 void zond_treeviewfm_set_zond( ZondTreeviewFM*, Projekt* );
 
