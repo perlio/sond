@@ -143,8 +143,6 @@ typedef struct _Projekt
 
     GtkTextView* textview;
 
-    Clipboard* clipboard;
-
     //Working-copy project
     sqlite3* db;
 

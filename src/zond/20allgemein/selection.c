@@ -83,6 +83,7 @@ selection_verschieben( Projekt* zond, Baum baum, gint anchor_id, gboolean kind,
         gchar** errmsg )
 {
     gint rc = 0;
+    Clipboard* clipboard = NULL;
     SSelectionVerschieben s_selection = { zond, baum, 0, 0 };
 
     if ( kind ) s_selection.parent_id = anchor_id;
@@ -99,8 +100,9 @@ selection_verschieben( Projekt* zond, Baum baum, gint anchor_id, gboolean kind,
     if ( rc == -1 ) ERROR_PAO( "somd_treeview_selection_foreach" )
 
     //Alte Auswahl löschen
-    if ( zond->clipboard->arr_ref->len > 0 ) g_ptr_array_remove_range( zond->clipboard->arr_ref,
-            0, zond->clipboard->arr_ref->len );
+    clipboard = sond_treeview_get_clipboard( zond->treeview[baum] );
+    if ( clipboard->arr_ref->len > 0 ) g_ptr_array_remove_range( clipboard->arr_ref,
+            0, clipboard->arr_ref->len );
 
     gtk_widget_queue_draw( GTK_WIDGET(zond->treeview[baum]) );
 
@@ -538,14 +540,17 @@ selection_paste( Projekt* zond, gboolean kind )
 {
     gint rc = 0;
     gchar* errmsg = NULL;
-
     Baum baum = KEIN_BAUM;
+    Clipboard* clipboard = NULL;
+
     baum = baum_abfragen_aktiver_treeview( zond );
 
     if ( baum == KEIN_BAUM ) return;
 
+    clipboard = sond_treeview_get_clipboard( zond->treeview[baum] );
+
     Baum baum_selection = baum_get_baum_from_treeview( zond,
-            GTK_WIDGET(zond->clipboard->tree_view) );
+            GTK_WIDGET(clipboard->tree_view) );
 
     //Todo: kopieren so ändern, daß zukünftig diese Beschränkung nur für
     //ausschneiden erforderlich ist (erst Knoten mit Kindern komplett kopieren,
@@ -587,7 +592,7 @@ selection_paste( Projekt* zond, gboolean kind )
                 return;
             }
         }
-        else if ( baum == BAUM_INHALT && !zond->clipboard->ausschneiden )
+        else if ( baum == BAUM_INHALT && !clipboard->ausschneiden )
         {
             InfoWindow* info_window = NULL;
             GArray* arr_new_nodes = NULL;
@@ -630,7 +635,7 @@ selection_paste( Projekt* zond, gboolean kind )
     }
     else if ( baum_selection == BAUM_INHALT )
     {
-        if ( baum == BAUM_INHALT && zond->clipboard->ausschneiden )
+        if ( baum == BAUM_INHALT && clipboard->ausschneiden )
         {
             if ( anchor_id == 0 ) kind = TRUE;
             else
@@ -664,11 +669,11 @@ selection_paste( Projekt* zond, gboolean kind )
                 return;
             }
         }
-        else if ( baum == BAUM_INHALT && !zond->clipboard->ausschneiden )
+        else if ( baum == BAUM_INHALT && !clipboard->ausschneiden )
         {//kopieren innerhalb BAUM_INHALT = verschieben von Anbindungen
 
         }
-        else if ( baum == BAUM_AUSWERTUNG && !zond->clipboard->ausschneiden )
+        else if ( baum == BAUM_AUSWERTUNG && !clipboard->ausschneiden )
         {
             rc = selection_kopieren( zond, baum_selection, anchor_id, kind, &errmsg );
             if ( rc == -1 )
@@ -683,7 +688,7 @@ selection_paste( Projekt* zond, gboolean kind )
     }
     else if ( baum_selection == BAUM_AUSWERTUNG )
     {
-        if ( baum == BAUM_AUSWERTUNG && zond->clipboard->ausschneiden )
+        if ( baum == BAUM_AUSWERTUNG && clipboard->ausschneiden )
         {
             rc = selection_verschieben( zond, baum_selection, anchor_id, kind, &errmsg );
             if ( rc == -1 )
@@ -695,7 +700,7 @@ selection_paste( Projekt* zond, gboolean kind )
                 return;
             }
         }
-        else if ( baum == BAUM_AUSWERTUNG && !zond->clipboard->ausschneiden )
+        else if ( baum == BAUM_AUSWERTUNG && !clipboard->ausschneiden )
         {
             rc = selection_kopieren( zond, baum_selection, anchor_id, kind, &errmsg );
             if ( rc == -1 )

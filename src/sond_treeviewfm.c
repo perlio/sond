@@ -978,10 +978,9 @@ sond_treeviewfm_init( SondTreeviewFM* stvfm )
 
 
 SondTreeviewFM*
-sond_treeviewfm_new( Clipboard* clipboard )
+sond_treeviewfm_new( void )
 {
     SondTreeviewFM* stvfm = g_object_new( SOND_TYPE_TREEVIEWFM, NULL );
-    sond_treeview_set_clipboard( SOND_TREEVIEW(stvfm), clipboard );
 
     return stvfm;
 }

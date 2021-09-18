@@ -28,7 +28,6 @@ typedef struct
     GtkCellRenderer* renderer_text;
     void (* render_text_cell) ( SondTreeview*, GtkTreeIter*, gpointer );
     gpointer render_text_cell_data;
-    Clipboard* clipboard;
 } SondTreeviewPrivate;
 
 G_DEFINE_TYPE_WITH_PRIVATE(SondTreeview, sond_treeview, GTK_TYPE_TREE_VIEW)
@@ -37,6 +36,11 @@ G_DEFINE_TYPE_WITH_PRIVATE(SondTreeview, sond_treeview, GTK_TYPE_TREE_VIEW)
 static void
 sond_treeview_class_init( SondTreeviewClass* klass )
 {
+    klass->clipboard = g_malloc0( sizeof( Clipboard ) );
+    klass->clipboard->arr_ref = g_ptr_array_new_with_free_func( (GDestroyNotify) gtk_tree_row_reference_free );
+    //class_finalize muß nicht definiert werden -
+    //statisch registrierte Klasse wird zurLaufzeit niemals finalisiert!
+
     return;
 }
 
@@ -45,19 +49,18 @@ static void
 sond_treeview_grey_cut_cell( SondTreeview* stv, GtkTreeIter* iter )
 {
     SondTreeviewPrivate* stv_priv = sond_treeview_get_instance_private( stv );
+    Clipboard* clipboard = SOND_TREEVIEW_GET_CLASS( stv )->clipboard;
 
-    if ( !(stv_priv->clipboard) ) return;
-
-    if ( stv_priv->clipboard->tree_view == stv && stv_priv->clipboard->ausschneiden )
+    if ( clipboard->tree_view == stv && clipboard->ausschneiden )
     {
         gboolean enthalten = FALSE;
         GtkTreePath* path = NULL;
         GtkTreePath* path_sel = NULL;
 
         path = gtk_tree_model_get_path( gtk_tree_view_get_model( GTK_TREE_VIEW(stv) ), iter );
-        for ( gint i = 0; i < stv_priv->clipboard->arr_ref->len; i++ )
+        for ( gint i = 0; i < clipboard->arr_ref->len; i++ )
         {
-            path_sel = gtk_tree_row_reference_get_path( g_ptr_array_index( stv_priv->clipboard->arr_ref, i ) );
+            path_sel = gtk_tree_row_reference_get_path( g_ptr_array_index( clipboard->arr_ref, i ) );
             enthalten = !gtk_tree_path_compare( path, path_sel );
             gtk_tree_path_free( path_sel );
             if ( enthalten ) break;
@@ -201,24 +204,14 @@ sond_treeview_new( )
 }
 
 
-void
-sond_treeview_set_clipboard( SondTreeview* stv, Clipboard* clipboard )
-{
-    SondTreeviewPrivate* stv_priv = sond_treeview_get_instance_private( stv );
-
-    stv_priv->clipboard = clipboard;
-
-    return;
-}
-
-
 Clipboard*
 sond_treeview_get_clipboard( SondTreeview* stv )
 {
-    SondTreeviewPrivate* stv_priv = sond_treeview_get_instance_private( stv );
+    SondTreeviewClass* stv_klass = SOND_TREEVIEW_GET_CLASS( stv );
 
-    return stv_priv->clipboard;
+    return stv_klass->clipboard;
 }
+
 
 void
 sond_treeview_set_render_text_cell_func( SondTreeview* stv, void (* render_text_cell)
@@ -349,21 +342,21 @@ sond_treeview_set_cursor_on_text_cell( SondTreeview* stv, GtkTreeIter* iter )
 gboolean
 sond_treeview_test_cursor_descendant( SondTreeview* stv )
 {
-    SondTreeviewPrivate* stv_priv = sond_treeview_get_instance_private( stv );
+    Clipboard* clipboard = SOND_TREEVIEW_GET_CLASS( stv )->clipboard;
 
     GtkTreePath* path = NULL;
 
-    if ( stv_priv->clipboard->arr_ref->len == 0 ) return FALSE;
+    if ( clipboard->arr_ref->len == 0 ) return FALSE;
 
     gtk_tree_view_get_cursor( GTK_TREE_VIEW(stv), &path, NULL );
     if ( !path ) return FALSE;
 
     GtkTreePath* path_sel = NULL;
     gboolean descend = FALSE;
-    for ( gint i = 0; i < stv_priv->clipboard->arr_ref->len; i++ )
+    for ( gint i = 0; i < clipboard->arr_ref->len; i++ )
     {
         path_sel = gtk_tree_row_reference_get_path( g_ptr_array_index(
-                stv_priv->clipboard->arr_ref, i ) );
+                clipboard->arr_ref, i ) );
         if ( !path_sel ) continue;
         descend = gtk_tree_path_is_descendant( path, path_sel );
         gtk_tree_path_free( path_sel );
@@ -406,27 +399,25 @@ sond_treeview_selection_get_refs( SondTreeview* stv )
 void
 sond_treeview_copy_or_cut_selection( SondTreeview* stv, gboolean ausschneiden )
 {
-    SondTreeviewPrivate* stv_priv = sond_treeview_get_instance_private( stv );
-
-    if ( !(stv_priv->clipboard) ) return;
+    Clipboard* clipboard = SOND_TREEVIEW_GET_CLASS( stv )->clipboard;
 
     GPtrArray* refs = sond_treeview_selection_get_refs( stv );
     if ( !refs ) return;
 
     //wenn ausgeschnitten war, alle rows wieder normal zeichnen
-    if ( stv_priv->clipboard->ausschneiden )
-            gtk_widget_queue_draw( GTK_WIDGET(stv_priv->clipboard->tree_view) );
+    if ( clipboard->ausschneiden )
+            gtk_widget_queue_draw( GTK_WIDGET(clipboard->tree_view) );
 
     //Alte Auswahl löschen, falls vorhanden
-    g_ptr_array_unref( stv_priv->clipboard->arr_ref );
+    g_ptr_array_unref( clipboard->arr_ref );
 
     //clipboard setzen
-    stv_priv->clipboard->tree_view = stv;
-    stv_priv->clipboard->ausschneiden = ausschneiden;
-    stv_priv->clipboard->arr_ref = refs;
+    clipboard->tree_view = stv;
+    clipboard->ausschneiden = ausschneiden;
+    clipboard->arr_ref = refs;
 
     if ( ausschneiden )
-            gtk_widget_queue_draw( GTK_WIDGET(stv_priv->clipboard->tree_view) );
+            gtk_widget_queue_draw( GTK_WIDGET(clipboard->tree_view) );
 
     return;
 }
@@ -475,9 +466,9 @@ sond_treeview_clipboard_foreach( SondTreeview* stv, gint (*foreach)
 {
     gint rc = 0;
 
-    SondTreeviewPrivate* stv_priv = sond_treeview_get_instance_private( stv );
+    Clipboard* clipboard = SOND_TREEVIEW_GET_CLASS( stv )->clipboard;
 
-    rc = sond_treeview_refs_foreach( stv, stv_priv->clipboard->arr_ref, foreach,
+    rc = sond_treeview_refs_foreach( stv, clipboard->arr_ref, foreach,
             data, errmsg );
     if ( rc == -1 ) ERROR_SOND( "sond_treeview_refs_foreach" )
     else if ( rc > 1 ) return rc;

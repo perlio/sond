@@ -33,8 +33,6 @@ cb_desktop_delete_event( GtkWidget* app_window, GdkEvent* event, gpointer data )
     g_object_unref( sojus->socket );
     g_object_unref( sojus->settings );
 
-    clipboard_free( sojus->clipboard );
-
     g_ptr_array_unref( sojus->sachgebiete );
     g_ptr_array_unref( sojus->beteiligtenart );
     g_ptr_array_unref( sojus->sachbearbeiter );
@@ -231,7 +229,6 @@ init_sojus( void )
     Sojus* sojus = g_malloc0( sizeof( Sojus ) );
 
     sojus->settings = g_settings_new( "de.perlio.Sojus" );
-    sojus->clipboard = clipboard_init( );
 
     sojus->arr_open_fm = g_ptr_array_new_with_free_func( (GDestroyNotify) g_free );
 
