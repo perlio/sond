@@ -168,7 +168,7 @@ sond_database_sql_insert_labels( void )
                 "(325, 'Polizeipräsident', 310), "
                 "(330, 'Kreispolizeibehörde', 310), "
 
-                "(400, 'Straße, 1), "
+                "(400, 'Straße', 1), "
                 "(402, 'Adresse', 1), "
 
                 "(405, 'Telefonnummer', 1), "
@@ -186,7 +186,7 @@ sond_database_sql_insert_labels( void )
 
 
                 // 1000-5000: Knoten zond
-                "(300, 'Verfahren', 1), "
+                "(500, 'Verfahren', 1), "
 
                 "(600, 'Konvolut', 1), "
                 "(610, 'Aktenbestandteil', 600),"
@@ -215,8 +215,8 @@ sond_database_sql_insert_labels( void )
                 "(900, 'Stellungnahme', 850), "
 
 
-                "(1160, 'IMSI', 1140), "
-                "(1170, 'IMEI', 1140), "
+                "(1160, 'IMSI', 1), "
+                "(1170, 'IMEI', 1), "
 
                 //5000 - 8999: Knoten sojus
                 "(5000, 'Akte', 1), "
@@ -227,12 +227,12 @@ sond_database_sql_insert_labels( void )
                 "(5040, 'Termin', 1), "
 
                 //10000-15000: Prädikate, allgemein
-                "(10005, '_von_, 2), "
+                "(10005, '_von_', 2), "
                 "(10006, '_bis_', 2), "
                 "(10010, '_heißt_', 2), "
-                "(10011, '_hat Vornamen, 2), "
+                "(10011, '_hat Vornamen_', 2), "
                 "(10012, '_hat Titel_', 2), "
-                "(10020, '_gehört zu', 2), "
+                "(10020, '_gehört zu_', 2), "
                 "(10030, '_ist_', 2), "
                 "(10040, '_hat Sitz_', 2), "
                 "(10042, '_hat Kanzleisitz_', 2), " //für private Personen
@@ -240,18 +240,18 @@ sond_database_sql_insert_labels( void )
                 "(10046, '_hat Zusatz (1. Zeile)_', 2), "
 
                 //15000-19999: Prädikate zond
-                "(10010, '_hat node_id_', 10000), " //nur property
-                "(10020, '_hat Fundstelle_', 10000), " //nur edge
+                "(15010, '_hat node_id_', 2), " //nur property
+                "(15020, '_hat Fundstelle_', 2), " //nur edge
 
-                "(10150, '_befindet sich_', 10000, '10200,10210', '1000'), "
+                "(15150, '_befindet sich_', 2), "
 
-                "(10250, '_von (Aktenblatt)_', 10000), " //nur property
-                "(10260, '_bis (Aktenblatt)_', 10000), " //nur property
-                "(10300, '_wird geführt bei_', 10000), " //Verfahren bei Gericht, Polizei, StA
-                "(10310, '_hat Aktenzeichen', 10000) " //property von 10300
+                "(15250, '_von (Aktenblatt)_', 2), " //nur property
+                "(15260, '_bis (Aktenblatt)_', 2), " //nur property
+                "(15300, '_wird geführt bei_', 2), " //Verfahren bei Gericht, Polizei, StA
+                "(15310, '_hat Aktenzeichen_', 2), " //property von 10300
 
-                "(10400, '_verfaßt von_', 10000), "
-                "(10410, '_handelnd_durch_', 10000) " //qualifier, wenn Behörde tätig wurde
+                "(15400, '_verfaßt von_', 2), "
+                "(15410, '_handelnd_durch_', 2), " //qualifier, wenn Behörde tätig wurde
 
                 //20000-24999: Prädikate sojus
                 "(20000, '_hat Registernummer_', 2), "
@@ -266,7 +266,7 @@ sond_database_sql_insert_labels( void )
                 "(100001, 'string', 3), "
                 "(100002, 'int', 3), "
                 "(100003, 'real', 3), "
-                "(100004, 'time', 3), "
+                "(100004, 'time', 3) "
                 "; ";
 }
 
@@ -274,7 +274,7 @@ sond_database_sql_insert_labels( void )
 const gchar*
 sond_database_sql_insert_adm_rels( void )
 {
-    return "INSERT INTO adm_rels (from,to) VALUES "
+    return "INSERT INTO adm_rels (subject,rel,object) VALUES "
             "(100, 10005, 100004), " //Subjekt _von_ (time) (Geburtstag bei nat Person, sonst Gründungsdatum etc.)
             "(100, 10006, 100004), " //Subjekt _bis_ (time) (Todestag/Auflösungsdatum)
             "(100, 10010, 100001), " //Subjekt _heißt_ (string)
@@ -317,7 +317,7 @@ sond_database_sql_insert_adm_rels( void )
             "(10040, 10006, 100004), " //_ist ansässig_ _bis_ (time)
 
             "(20030, 20031, 5020), " //_hat als Beteiligten_ _ist Beteiligtenart_ Aktenbeteiligtenart
-            "(20030, 20032, 100001), " //_hat als Aktenbeteiligten_ _hat Betreff_ (string)
+            "(20030, 20032, 100001) " //_hat als Aktenbeteiligten_ _hat Betreff_ (string)
 
 
             "; ";

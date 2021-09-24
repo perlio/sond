@@ -68,7 +68,7 @@ db_create( MYSQL* con, gchar* db_name, gchar** errmsg )
     sql = add_string( g_strdup( sond_database_sql_create_database( ) ),
             g_strdup( sond_database_sql_insert_labels( ) ) );
     sql = add_string( sql, g_strdup( sond_database_sql_insert_adm_rels( ) ) );
-    rc = mysql_query( con, sond_database_sql_create_database( ) );
+    rc = mysql_query( con, sql );
     g_free( sql );
     if ( rc )
     {
@@ -81,22 +81,22 @@ db_create( MYSQL* con, gchar* db_name, gchar** errmsg )
         sql_drop = g_strdup_printf( "DROP DATABASE `%s`", db_name );
         ret = mysql_query( con, sql_drop );
         g_free( sql_drop );
-        if ( ret && errmsg ) add_string( *errmsg, g_strconcat( "\n\nFehler "
+        if ( ret && errmsg ) *errmsg = add_string( *errmsg, g_strconcat( "\n\nFehler "
                 "bei Löschen der Database ", db_name, ":\n",
                 mysql_error( con ), NULL ) );
-        else if ( errmsg ) add_string( *errmsg, g_strconcat( "Database ", db_name,
+        else if ( errmsg ) *errmsg = add_string( *errmsg, g_strconcat( "Database ", db_name,
                 " wurde gelöscht", NULL ) );
 
         return -1;
     }
-
+/*
     gint status = 0;
 
     do
     {
         rc = mysql_affected_rows( con );
         if ( rc < 0 ) break;
-        /* more results? -1 = no, >0 = error, 0 = yes (keep looping) */
+        // more results? -1 = no, >0 = error, 0 = yes (keep looping)
         status = mysql_next_result( con );
     } while (status == 0);
 
@@ -108,15 +108,15 @@ db_create( MYSQL* con, gchar* db_name, gchar** errmsg )
         sql = g_strdup_printf( "DROP DATABASE `%s`", db_name );
         ret = mysql_query( con, sql );
         g_free( sql );
-        if ( ret && errmsg ) add_string( *errmsg, g_strconcat( "\n\nFehler "
+        if ( ret && errmsg ) *errmsg = add_string( *errmsg, g_strconcat( "\n\nFehler "
                 "bei Löschen der Database ", db_name, ":\n",
                 mysql_error( con ), NULL ) );
-        else if ( errmsg ) add_string( *errmsg, g_strconcat( "Database ", db_name,
+        else if ( errmsg ) *errmsg = add_string( *errmsg, g_strconcat( "Database ", db_name,
                 " wurde gelöscht", NULL ) );
 
         return -1;
     }
-
+*/
     return 0;
 }
 
