@@ -7,8 +7,8 @@ typedef int gint;
 typedef struct _Sojus Sojus;
 
 
-gint db_connect_database( Sojus* );
+gint db_real_connect_database( GtkWidget*, MYSQL*, gchar** );
 
-gint db_get_connection( Sojus* );
+void db_connect_database( Sojus* );
 
 #endif // DB_H_INCLUDED

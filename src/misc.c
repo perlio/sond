@@ -100,6 +100,7 @@ dialog_with_buttons( GtkWidget* window, const gchar* message,
         gtk_container_add( GTK_CONTAINER(content), entry);
         if ( *text ) gtk_entry_set_text( GTK_ENTRY(entry), *text );
         g_free( *text );
+        *text = NULL;
 
         gtk_widget_show_all( content );
 

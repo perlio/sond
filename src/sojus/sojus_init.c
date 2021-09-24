@@ -26,22 +26,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "20Einstellungen/einstellungen.h"
 
 
-static void
-sojus_init_db ( Sojus* sojus )
-{
-    gint rc = 0;
-
-    rc = db_get_connection( sojus );
-    if ( rc )
-    {
-        gboolean ret = FALSE;
-        g_signal_emit_by_name( sojus->app_window, "delete-event", NULL, &ret );
-    }
-
-    return;
-}
-
-
 static gboolean
 cb_socket_incoming(GSocketService *service,
                     GSocketConnection *connection,
@@ -226,7 +210,14 @@ sojus_init( GtkApplication* app )
 
     sojus->settings = g_settings_new( "de.perlio.Sojus" );
 
-    sojus_init_db( sojus ); //Bei Fehler wird Programm beendet!
+    db_connect_database( sojus );
+    if ( !sojus->con )
+    {
+        gboolean ret = FALSE;
+        g_signal_emit_by_name( sojus->app_window, "delete-event", NULL, &ret );
+
+        return NULL;
+    }
 
     sojus->arr_open_fm = g_ptr_array_new_with_free_func( (GDestroyNotify) g_free );
 

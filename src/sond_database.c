@@ -59,15 +59,16 @@ sond_database_sql_create_database( void )
                 "ID INTEGER PRIMARY KEY, "
                 "label TEXT NOT NULL, "
                 "parent INTEGER NOT NULL, "
-                "FOREIGN KEY(parent) REFERENCES labels (ID) "
+                "FOREIGN KEY (parent) REFERENCES labels (ID) "
             "); "
 
             "CREATE TABLE IF NOT EXISTS adm_rels ( "
-                "from INTEGER NOT NULL, "
+                "subject INTEGER NOT NULL, "
                 "rel INTEGER NOT NULL, "
-                "to INTEGER NOT NULL, "
-                "FOREIGN KEY (from) REFERENCES labels (ID), "
-                "FOREIGN KEY (to) REFERENCES labels (ID) "
+                "object INTEGER NOT NULL, "
+                "FOREIGN KEY (subject) REFERENCES labels (ID), "
+                "FOREIGN KEY (rel) REFERENCES labels (ID), "
+                "FOREIGN KEY (object) REFERENCES labels (ID) "
             "); "
 
             "CREATE TABLE IF NOT EXISTS entities( "
@@ -89,25 +90,25 @@ sond_database_sql_create_database( void )
             "CREATE TABLE IF NOT EXISTS strings ( "
                 "entity INTEGER NOT NULL, "
                 "value TEXT, "
-                "FOREIGN KEY (entity) REFERENCES entities (ID), "
+                "FOREIGN KEY (entity) REFERENCES entities (ID) "
             "); "
 
             "CREATE TABLE IF NOT EXISTS ints ( "
                 "entity INTEGER NOT NULL, "
                 "value INTEGER, "
-                "FOREIGN KEY (entity) REFERENCES entities (ID), "
+                "FOREIGN KEY (entity) REFERENCES entities (ID) "
             "); "
 
             "CREATE TABLE IF NOT EXISTS reals ( "
                 "entity INTEGER NOT NULL, "
                 "value REAL, "
-                "FOREIGN KEY (entity) REFERENCES entities (ID), "
+                "FOREIGN KEY (entity) REFERENCES entities (ID) "
             "); "
 
             "CREATE TABLE IF NOT EXISTS times ( "
                 "entity INTEGER NOT NULL, "
                 "value DATETIME, "
-                "FOREIGN KEY (entity) REFERENCES entities (ID), "
+                "FOREIGN KEY (entity) REFERENCES entities (ID) "
             "); ";
 }
 

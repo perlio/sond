@@ -8,9 +8,13 @@
 static void
 cb_select_db( GtkWidget* button, gpointer data )
 {
+    gchar* dbname = NULL;
+
     Sojus* sojus = (Sojus*) data;
 
-    db_connect_database( sojus );
+    db_real_connect_database( sojus->app_window, sojus->con, &dbname );
+
+    g_free( dbname );
 
     return;
 }
@@ -21,7 +25,7 @@ cb_connect( GtkWidget* button, gpointer data )
 {
     Sojus* sojus = (Sojus*) data;
 
-    db_get_connection( sojus );
+    db_connect_database( sojus );
 
     return;
 }
