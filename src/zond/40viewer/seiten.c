@@ -787,18 +787,18 @@ seiten_cb_einfuegen( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg 
         dd->anbindung->bis.seite += count;
     }
 
-    for ( gint u = page_doc + 1; u < page_doc + 1 + count; u++ )
+    for ( gint u = 0; u < count; u++ )
     {
         PdfDocumentPage* pdf_document_page = NULL;
 
-        pdf_document_page = zond_pdf_document_get_pdf_document_page( dd->zond_pdf_document, u );
+        pdf_document_page = zond_pdf_document_get_pdf_document_page( dd->zond_pdf_document, page_doc + 1 + u );
 
         ViewerPage* viewer_page = viewer_page_new_full( pv, pdf_document_page,
                 pdf_document_page->rect );
-        g_ptr_array_insert( pv->arr_pages, page_pv + u, viewer_page );
+        g_ptr_array_insert( pv->arr_pages, page_pv + 1 + u, viewer_page );
         gtk_layout_put( GTK_LAYOUT(pv->layout), GTK_WIDGET(viewer_page), 0, 0 );
 
-        viewer_insert_thumb( pv, page_pv + u );
+        viewer_insert_thumb( pv, page_pv + u + 1 );
     }
 
     g_object_set_data( G_OBJECT(pv->layout), "dirty", GINT_TO_POINTER(1) );
