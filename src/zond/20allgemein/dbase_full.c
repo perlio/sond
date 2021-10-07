@@ -113,7 +113,7 @@ dbase_full_set_icon_id( DBaseFull* dbase_full, Baum baum, gint node_id, const gc
     return 0;
 }
 
-
+/*
 gint
 dbase_full_insert_entity( DBaseFull* dbase_full, gint label, gchar** errmsg )
 {
@@ -527,7 +527,7 @@ dbase_full_get_entity( DBaseFull* dbase_full, gint ID_entity, Entity** entity, g
 
     return 0;
 }
-
+*/
 
 gint
 dbase_full_prepare_stmts( DBaseFull* dbase_full, gchar** errmsg )

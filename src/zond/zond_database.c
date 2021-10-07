@@ -38,7 +38,7 @@ typedef enum _Direction
     INCOMING,
     OUTGOING
 } Direction;
-
+/*
 typedef struct _Node
 {
     Entity* node;
@@ -66,6 +66,7 @@ typedef union _Segment
         Node* object;
     } Out;
 } Segment;
+property
 
 void
 zond_database_free_segment( gpointer data )
@@ -598,10 +599,10 @@ zond_database_fill_listbox_with_edges( DBaseFull* dbase_full,
                 g_array_unref( arr_edges );
                 ERROR_PAO( "zond_database_get_info_entity" )
             }
-*/
+
             gtk_box_pack_start( GTK_BOX(hbox), label_subject, FALSE, FALSE, 0 );
         }
-/*
+
         text_edge = g_strdup_printf( "ID: %i  Label: %s", edge.ID_edge, edge.label_edge );
         for (gint u = 0; u < edge.arr_properties->len; u++ )
         {
@@ -610,12 +611,12 @@ zond_database_fill_listbox_with_edges( DBaseFull* dbase_full,
             text_edge = add_string( text_edge, g_strdup_printf( "\n%i  %s  %s",
                     property.ID, property.label, property.value ) );
         }
-*/        label_edge = gtk_label_new( (const gchar*) text_edge );
+        label_edge = gtk_label_new( (const gchar*) text_edge );
         g_free( text_edge );
         gtk_box_pack_start( GTK_BOX(hbox), label_edge, FALSE, FALSE, 0 );
 
         if ( dir == OUTGOING )
-        {/*
+        {
             label_object = zond_database_get_info_entity( dbase_full, edge.ID_object, errmsg );
             if ( !label_object )
             {
@@ -624,7 +625,7 @@ zond_database_fill_listbox_with_edges( DBaseFull* dbase_full,
                 ERROR_PAO( "zond_database_get_info_entity" )
             }
             gtk_box_pack_start( GTK_BOX(hbox), label_object, FALSE, FALSE, 0 );
-      */  }
+        }
 
         listbox_row = gtk_list_box_row_new( );
 //        g_object_set_data( G_OBJECT(listbox_row), "ID-edge", GINT_TO_POINTER(edge.ID_edge) );
@@ -639,7 +640,7 @@ zond_database_fill_listbox_with_edges( DBaseFull* dbase_full,
 }
 
 
-/*
+
 gint
 zond_database_edit_node( Projekt* zond, gint ID_entity, gchar** errmsg )
 {
@@ -751,7 +752,7 @@ zond_database_edit_node( Projekt* zond, gint ID_entity, gchar** errmsg )
 
     return 0;
 }
-*/
+
 
 static gint
 zond_database_cmpint (gconstpointer a, gconstpointer b)
@@ -940,7 +941,7 @@ zond_database_free_node( Node* node )
 }
 
 
-/** flags: 1-mit outgoing; 2-mit incoming 3-alles**/
+// flags: 1-mit outgoing; 2-mit incoming 3-alles
 Node*
 zond_database_get_node( DBaseFull* dbase_full, gint ID_entity, GArray* arr_linked_nodes, gint flags, gchar** errmsg )
 {
@@ -1013,3 +1014,4 @@ zond_database_insert_anbindung( Projekt* zond, gint node_id, gchar** errmsg )
 }
 
 
+*/

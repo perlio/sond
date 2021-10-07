@@ -25,6 +25,20 @@ typedef struct _Entity
     gint label;
 } Entity;
 
+
+typedef struct _Property
+{
+    Entity entity;
+    union
+    {
+        gchar* string;
+        gint integer;
+        float real;
+        time_t time;
+    } value;
+
+} Property;
+
 typedef struct _Node
 {
     Entity entity;
@@ -87,27 +101,9 @@ sond_database_sql_create_database( void )
                 "FOREIGN KEY (object) REFERENCES entities (ID) "
             "); "
 
-            "CREATE TABLE IF NOT EXISTS strings ( "
+            "CREATE TABLE IF NOT EXISTS properties ( "
                 "entity INTEGER NOT NULL, "
                 "value TEXT, "
-                "FOREIGN KEY (entity) REFERENCES entities (ID) "
-            "); "
-
-            "CREATE TABLE IF NOT EXISTS ints ( "
-                "entity INTEGER NOT NULL, "
-                "value INTEGER, "
-                "FOREIGN KEY (entity) REFERENCES entities (ID) "
-            "); "
-
-            "CREATE TABLE IF NOT EXISTS reals ( "
-                "entity INTEGER NOT NULL, "
-                "value REAL, "
-                "FOREIGN KEY (entity) REFERENCES entities (ID) "
-            "); "
-
-            "CREATE TABLE IF NOT EXISTS times ( "
-                "entity INTEGER NOT NULL, "
-                "value DATETIME, "
                 "FOREIGN KEY (entity) REFERENCES entities (ID) "
             "); ";
 }
@@ -125,65 +121,82 @@ sond_database_sql_insert_labels( void )
                 //100 - 999: Knoten, allgemein
                 "(100, 'Subjekt', 1), "
 
-                "(105, 'Rechtssubjekt', 100),"
-                "(110, 'Rechtsperson', 105), "
-                "(115, 'natürliche Person', 110), "
-                "(120, 'juristische Person', 110), "
-                "(130, 'priv jur Person', 120), "
-                "(131, 'GmbH', 130), "
-                "(132, 'UG', 130), "
-                "(133, 'AG', 130), "
-                "(134, 'Verein', 130), "
-                "(140, 'öffr jur Person', 120), "
-                "(150, 'Körperschaft', 140), "
-                "(155, 'Gebietskörperschaft', 150), "
-                "(156, 'Staat', 155), "
-                "(158, 'Bundesland', 155), "
-                "(160, 'Kreis', 155), "
-                "(162, 'Gemeinde', 155), "
+                "(110, 'Subjekt des öffentlichen Rechts', 105), "
 
-                "(170, 'Personenmehrheit', 105), "
-                "(175, 'Eheleute', 170), "
-                "(178, 'GbR', 170), "
-                "(180, 'OHG', 170), "
-                "(182, 'Partnerschaft', 170), "
+                "(115, 'Gebietskörperschaft', 110), "
+                "(117, 'Staat', 115), "
+                "(119, 'Bundesland', 115), "
+                "(121, 'Kreis', 115), "
+                "(123, 'Gemeinde', 115), "
 
-                "(200, 'Behörde', 100), "
-                "(230, 'Gericht', 200), "
-                "(235, 'Oberlandesgericht', 230), "
-                "(236, 'Landgericht', 230), "
-                "(237, 'Amtsgericht', 230), "
-                "(238, 'Finanzgericht', 230), "
-                "(240, 'Verwaltungsgericht', 230), "
-                "(292, 'Oberverwaltungsgericht', 230), "
-                "(294, 'Arbeitsgericht', 230), "
-                "(295, 'Landesarbeitsgericht', 230), "
-                "(297, 'Sozialgericht', 230), "
-                "(298, 'Landessozialgericht', 230), "
-                "(300, 'Staatsanwaltschaft', 200), "
-                "(302, 'Generalstaatsanwaltschaft', 300), "
-                "(303, 'Staatsanwaltschaft beim Landgericht', 300), "
-                "(310, 'Polizeibehörde', 200), "
-                "(320, 'Landeskriminalamt', 310), "
-                "(325, 'Polizeipräsident', 310), "
-                "(330, 'Kreispolizeibehörde', 310), "
+                "(130, 'sonstiges Subjekt des öffentlichen Rechts', 110), "
+
+                "(135, 'öffr jur Person', 130), "
+                "(137, 'Körperschaft', 120), "
+                "(139, 'Universität', 137), "
+                "(141, 'Kammer', 137), "
+                "(143, 'Rechtsanwaltskammer', 141), "
+                "(145, 'Anstalt', 135), "
+
+                "(160, 'Behörde', 130), "
+                "(170, 'Gericht', 160), "
+                "(175, 'Oberlandesgericht', 170), "
+                "(180, 'Landgericht', 170), "
+                "(185, 'Amtsgericht', 170), "
+                "(190, 'Finanzgericht', 170), "
+                "(195, 'Verwaltungsgericht', 170), "
+                "(200, 'Oberverwaltungsgericht', 170), "
+                "(205, 'Arbeitsgericht', 170), "
+                "(210, 'Landesarbeitsgericht', 170), "
+                "(215, 'Sozialgericht', 170), "
+                "(220, 'Landessozialgericht', 170), "
+                "(230, 'Staatsanwaltschaft', 160), "
+                "(235, 'Generalstaatsanwaltschaft', 230), "
+                "(240, 'Staatsanwaltschaft beim Landgericht', 230), "
+                "(250, 'Polizeibehörde', 160), "
+                "(255, 'Landeskriminalamt', 250), "
+                "(260, 'Polizeipräsident', 250), "
+                "(265, 'Kreispolizeibehörde', 250), "
+
+                "(300, 'Subjekt des Privatrechts', 100), "
+
+                "(310, 'natürliche Person', 300), "
+                "(320, 'juristische Person', 300), "
+                "(325, 'GmbH', 320), "
+                "(330, 'UG', 320), "
+                "(335, 'AG', 320), "
+                "(340, 'Verein', 320), "
+
+                "(350, 'Personenmehrheit', 300), "
+                "(352, 'Eheleute', 350), "
+                "(355, 'GbR', 350), "
+                "(360, 'OHG', 350), "
+                "(365, 'KG', 350), "
+                "(370, 'Partnerschaft', 350), "
 
                 "(400, 'Straße', 1), "
-                "(402, 'Adresse', 1), "
 
                 "(405, 'Telefonnummer', 1), "
                 "(410, 'Vorwahl', 405), "
                 "(412, 'Ländervorwahl', 410), "
                 "(413, 'Teilnetzvorwahl', 410), "
-                "(414, 'Ortsvorwahl', 410), "
-                "(416, 'Mobilfunknetzvorwahl', 410), "
+                "(414, 'Ortsvorwahl', 413), "
+                "(416, 'Mobilfunknetzvorwahl', 413), "
                 "(420, 'Teilnehmernummer', 405), "
+                "(430, 'Stammrufnummer', 405), "
 
                 "(430, 'Homepage', 1), "
                 "(435, 'E-Mail-Adresse', 1), "
 
                 "(440, 'Kontoverbindung', 1), "
 
+                "(450, 'Sitz', 1), "
+                "(452, 'Geschäftssitz', 450), "
+                "(454, 'Kanzleisitz', 452), "
+                "(456, 'Wohnsitz', 450), "
+                "(460, 'Dienstsitz', 450), "
+                "(462, 'erster Dienstsitz', 460), "
+                "(464, 'weiterer Dienstsitz', 460), "
 
                 // 1000-5000: Knoten zond
                 "(500, 'Verfahren', 1), "
@@ -227,17 +240,27 @@ sond_database_sql_insert_labels( void )
                 "(5040, 'Termin', 1), "
 
                 //10000-15000: Prädikate, allgemein
-                "(10005, '_von_', 2), "
-                "(10006, '_bis_', 2), "
-                "(10010, '_heißt_', 2), "
-                "(10011, '_hat Vornamen_', 2), "
-                "(10012, '_hat Titel_', 2), "
-                "(10020, '_gehört zu_', 2), "
-                "(10030, '_ist_', 2), "
-                "(10040, '_hat Sitz_', 2), "
-                "(10042, '_hat Kanzleisitz_', 2), " //für private Personen
-                "(10045, '_hat Hausnr_', 2), " //für 402 Adresse!
-                "(10046, '_hat Zusatz (1. Zeile)_', 2), "
+                "(10000, '_gehört zu_', 2), "
+                "(10010, '_hat_', 2), "
+                "(10020, '_arbeitet an_', 2), "
+
+                //Properties allgemein
+                "(10100, '_Name_', 2), "
+                "(11010, '_Vorname_', 2), "
+                "(11020, '_Titel_', 2), "
+
+                "(11030, '_Hausnr_', 2), "
+                "(11040, '_Adresszusatz_', 2), "
+
+                "(11050, '_Anrede_', 2), "
+                "(11035, '_Hinweis auf Sitz_', 2), "
+                "(11080, '_Durchwahl_', 2), "
+                "(11090, '_Faxdurchwahl_', 2), "
+
+                //qualifier allgemein
+                "(12000, '_von_', 2), "
+                "(12010, '_bis_', 2), "
+                "(12020, '_Bemerkung_', 2), "
 
                 //15000-19999: Prädikate zond
                 "(15010, '_hat node_id_', 2), " //nur property
@@ -275,6 +298,17 @@ const gchar*
 sond_database_sql_insert_adm_rels( void )
 {
     return "INSERT INTO adm_rels (subject,rel,object) VALUES "
+
+            "(130, 10010, 460), " //sonst Subjekt des öff Rechts (keine Gebietskörperschaften) _hat_ Dienstsitz
+            "(300, 10010, 452), " //Subjekt des Privatrechts _hat_ Geschäftssitz
+            "(310, 10010, 456), " //natürliche Person _hat_ Wohnsitz
+
+            "(400, 10000, 162), " //Straße _gehört zu_ Gemeinde
+            "(402, 10000, 400), " //Adresse _gehört zu_ Straße
+
+            "(413, 10000, 412), " //Teilnetzvorwahl _gehört zu_ Ländervorahl
+            "(420, 10000, 413), " //Teilnehmernummer _gehört zu_ Teilnetzvorwahl
+
             "(100, 10005, 100004), " //Subjekt _von_ (time) (Geburtstag bei nat Person, sonst Gründungsdatum etc.)
             "(100, 10006, 100004), " //Subjekt _bis_ (time) (Todestag/Auflösungsdatum)
             "(100, 10010, 100001), " //Subjekt _heißt_ (string)
@@ -286,15 +320,10 @@ sond_database_sql_insert_adm_rels( void )
             "(170, 10042, 402), " //Personenmehrheit _hat Kanzleisitz_ Adresse
 
             "(400, 10010, 100001), " //Straße _heißt_ (string)
-            "(400, 10020, 162), " //Straße _gehört zu_ Gemeinde
-
-            "(402, 10020, 400), " //Adresse _gehört zu_ Straße
             "(402, 10045, 100001), " //Adresse _hat Hausnummer_ (string)
             "(402, 10046, 100001), " //Adresse _hat Zusatz (1. Zeile)_ (string)
 
             "(405, 10030, 100001), " //Telefonnummer _ist_ (string)
-            "(413, 10020, 412), " //Teilnetzvorwahl _gehört zu_ Ländervorahl
-            "(420, 10020, 413), " //Teilnehmernummer _gehört zu_ Teilnetzvorwahl
 
             "(5000, 10005, 100004), " //Akte _von_ (time) (Anlage der Akte bzw.Reaktivierung
             "(5000, 10006, 100004), " //Akte _bis_ (time) - Ablage bzw. erneute Ablage

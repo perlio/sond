@@ -196,6 +196,8 @@ viewer_check_rendering( gpointer data )
 
         if ( page > 0 )
         {
+            //Kein mutex erforderlich, weil nur Zugriff, wenn schon gerendert
+            //Dann ist aber ausgeschlossen, daß ein thread auf viewer_page->pixbuf_page zugreift
             gtk_image_set_from_pixbuf( GTK_IMAGE(viewer_page), viewer_page_get_pixbuf_page( viewer_page ) );
             g_object_unref( viewer_page_get_pixbuf_page( viewer_page ) );
         }
@@ -216,6 +218,51 @@ viewer_check_rendering( gpointer data )
     g_mutex_unlock( &pv->mutex_arr_rendered );
 
     return ret;
+}
+
+
+static void
+viewer_render_sichtbare_seiten( PdfViewer* pv )
+{
+    GtkTreePath* path = NULL;
+    gint page_doc = 0;
+    ViewerPage* viewer_page = NULL;
+    PdfDocumentPage* pdf_document_page = NULL;
+    gchar* path_doc = NULL;
+
+    if ( pv->arr_pages->len == 0 ) return;
+
+    gint erste = 0;
+    gint letzte = 0;
+
+    viewer_abfragen_sichtbare_seiten( pv, &erste, &letzte );
+
+    viewer_page = g_ptr_array_index( pv->arr_pages, erste );
+    pdf_document_page = viewer_page_get_document_page( viewer_page );
+
+    //Seite von oberen - unterem Rand im entry anzeigen
+    gchar* text = g_strdup_printf( "%i-%i", erste + 1, letzte + 1 );
+    gtk_entry_set_text( GTK_ENTRY(pv->entry), text );
+    g_free( text );
+
+    //in Headerbar angezeigte Datei und Seite anzeigen
+    path_doc = zond_pdf_document_get_path( pdf_document_page->document );
+    gtk_header_bar_set_title( GTK_HEADER_BAR(pv->headerbar), path_doc );
+
+    page_doc = zond_pdf_document_get_index( pdf_document_page );
+    gchar* subtitle = g_strdup_printf( "Seite: %i", page_doc + 1);
+    gtk_header_bar_set_subtitle( GTK_HEADER_BAR(pv->headerbar), subtitle );
+    g_free( subtitle );
+
+    if ( pv->thread_pool_page ) for ( gint i = letzte; i >= erste; i-- )
+            g_thread_pool_move_to_front( pv->thread_pool_page, GINT_TO_POINTER(i + 1) );
+
+    //thumb-Leiste anpassen
+    path = gtk_tree_path_new_from_indices( erste, -1 );
+    gtk_tree_view_scroll_to_cell( GTK_TREE_VIEW(pv->tree_thumb), path, NULL, FALSE, 0, 0 );
+    gtk_tree_path_free( path );
+
+    return;
 }
 
 
@@ -397,7 +444,7 @@ viewer_display_document( PdfViewer* pv, DisplayedDocument* dd, gint page, gint i
     viewer_thread_render( pv, -1 );
 
     if ( page || index ) viewer_springen_zu_pos_pdf( pv, pdf_pos, 0.0 );
-    else render_sichtbare_seiten( pv );
+    else viewer_render_sichtbare_seiten( pv );
 
     gtk_widget_grab_focus( pv->layout );
 
@@ -521,11 +568,28 @@ cb_thumb_activated(GtkTreeView* tv, GtkTreePath* path, GtkTreeViewColumn* column
 
 
 static void
+viewer_render_sichtbare_thumbs( PdfViewer* pv )
+{
+    gint rc = 0;
+    gint start = 0;
+    gint end = 0;
+
+    if ( !(pv->thread_pool_page) ) return;
+
+    rc = viewer_get_visible_thumbs( pv, &start, &end );
+    if ( rc == 0 ) for ( gint i = start; i <= end; i++ )
+            g_thread_pool_move_to_front( pv->thread_pool_page, GINT_TO_POINTER(i + 1) );
+
+    return;
+}
+
+
+static void
 cb_viewer_vadj_thumb( GtkAdjustment* vadj_thumb, gpointer data )
 {
     PdfViewer* pv = (PdfViewer*) data;
 
-    render_sichtbare_thumbs( pv );
+    viewer_render_sichtbare_thumbs( pv );
 
     return;
 }
@@ -538,7 +602,7 @@ cb_viewer_vadjustment_value_changed( GtkAdjustment* vadjustment, gpointer data )
 
     if ( pv->arr_pages->len == 0 ) return;
 
-    render_sichtbare_seiten( pv );
+    viewer_render_sichtbare_seiten( pv );
 
     return;
 }
@@ -1681,6 +1745,185 @@ cb_viewer_layout_press_button( GtkWidget* layout, GdkEvent* event, gpointer
 
 
 static void
+viewer_cb_draw_page( GtkPrintOperation* op, GtkPrintContext* context, gint page_nr, gpointer user_data )
+{
+    PdfViewer* pdfv = NULL;
+    ViewerPage* viewer_page = NULL;
+    PdfDocumentPage* pdf_document_page = NULL;
+    fz_rect crop = { 0, };
+    fz_context* ctx = NULL;
+    gdouble width = 0;
+    gdouble height = 0;
+    gdouble zoom_x = 0;
+    gdouble zoom_y = 0;
+    gdouble zoom = 0;
+    gdouble top, bottom, left, right;
+
+    gtk_print_context_get_hard_margins( context, &top, &bottom, &left, &right );
+    printf("%f  %f  %f  %f\n", top, bottom, left, right);
+
+    pdfv = (PdfViewer*) user_data;
+
+    //page_act durchsuchen
+    viewer_page = g_ptr_array_index( pdfv->arr_pages, page_nr );
+    pdf_document_page = viewer_page_get_document_page( viewer_page );
+    crop = viewer_page_get_crop( viewer_page );
+
+    if ( pdfv->thread_pool_page )
+    {
+        gboolean rendered = FALSE;
+
+        g_thread_pool_move_to_front( pdfv->thread_pool_page, GINT_TO_POINTER(page_nr + 1) );
+
+        do //warten, bis display_list erzeugt worden ist
+        {
+            zond_pdf_document_mutex_lock( pdf_document_page->document );
+            rendered = (pdf_document_page->display_list != NULL);
+            zond_pdf_document_mutex_unlock( pdf_document_page->document );
+        } while ( !rendered );
+    }
+
+    width = gtk_print_context_get_width( context );
+    height = gtk_print_context_get_height( context );
+
+    zoom_x = width / (crop.x1 - crop.x0);
+    zoom_y = height / (crop.y1 - crop.y0);
+
+    printf("%f  %f  %f  %f\n", zoom_x, zoom_y, width, height );
+    zoom = (zoom_x <= zoom_y) ? zoom_x : zoom_y;
+
+    ctx = fz_clone_context( zond_pdf_document_get_ctx( pdf_document_page->document ) );
+    if ( !ctx )
+    {
+        gchar* errmsg = NULL;
+
+        errmsg = g_strdup_printf( "Seite Nr. %i", page_nr );
+        display_message( pdfv->vf, "Fehler Drucken ", errmsg, " -\n\nfz_context "
+                "konnte nicht geklont werden", NULL );
+        g_free( errmsg );
+
+        return;
+    }
+
+    //Pixmap rendern
+    fz_pixmap* pixmap = NULL;
+
+    fz_matrix transform = fz_scale( zoom, zoom );
+
+    fz_rect rect = fz_transform_rect( crop, transform );
+    fz_irect irect = fz_round_rect( rect );
+
+    //per draw-device to pixmap
+    fz_try( ctx ) pixmap = fz_new_pixmap_with_bbox( ctx, fz_device_rgb( ctx ),
+            irect, NULL, 0 );
+    fz_catch( ctx )
+    {
+        gchar* errmsg = NULL;
+
+        errmsg = g_strdup_printf( "Seite Nr. %i", page_nr );
+        display_message( pdfv->vf, "Fehler Drucken ", errmsg, " -\n\nBei "
+                "Aufruf fz_new_pixmap_with_bbox:\n", fz_caught_message( ctx ), NULL );
+        g_free( errmsg );
+        fz_drop_context( ctx );
+
+        return;
+    }
+
+    fz_try( ctx) fz_clear_pixmap_with_value( ctx, pixmap, 255 );
+    fz_catch( ctx )
+    {
+        gchar* errmsg = NULL;
+
+        errmsg = g_strdup_printf( "Seite Nr. %i", page_nr );
+        display_message( pdfv->vf, "Fehler Drucken ", errmsg, " -\n\nBei "
+                "Aufruf fz_pixmap_with_value:\n", fz_caught_message( ctx ), NULL );
+        g_free( errmsg );
+        fz_drop_context( ctx );
+
+        return;
+    }
+
+    fz_device* draw_device = NULL;
+    fz_try( ctx ) draw_device = fz_new_draw_device( ctx, fz_identity, pixmap );
+    fz_catch( ctx )
+    {
+        gchar* errmsg = NULL;
+
+        fz_drop_pixmap( ctx, pixmap );
+
+        errmsg = g_strdup_printf( "Seite Nr. %i", page_nr );
+        display_message( pdfv->vf, "Fehler Drucken ", errmsg, " -\n\nBei "
+                "Aufruf fz_new_draw_device:\n", fz_caught_message( ctx ), NULL );
+        g_free( errmsg );
+        fz_drop_context( ctx );
+
+        return;
+    }
+
+    fz_try( ctx ) fz_run_display_list( ctx, pdf_document_page->display_list,
+            draw_device, transform, rect, NULL );
+    fz_always( ctx )
+    {
+        fz_close_device( ctx, draw_device );
+        fz_drop_device( ctx, draw_device );
+    }
+    fz_catch( ctx )
+    {
+        gchar* errmsg = NULL;
+
+        fz_drop_pixmap( ctx, pixmap );
+
+        errmsg = g_strdup_printf( "Seite Nr. %i", page_nr );
+        display_message( pdfv->vf, "Fehler Drucken ", errmsg, " -\n\nBei "
+                "Aufruf fz_run_display_list:\n", fz_caught_message( ctx ), NULL );
+        g_free( errmsg );
+        fz_drop_context( ctx );
+
+        return;
+    }
+    GdkPixbuf* pixbuf = NULL;
+
+    pixbuf = gdk_pixbuf_new_from_data( pixmap->samples,
+            GDK_COLORSPACE_RGB, FALSE, 8, pixmap->w, pixmap->h,
+            pixmap->stride, NULL, NULL );
+
+    cairo_t* cr = gtk_print_context_get_cairo_context( context );
+    gdk_cairo_set_source_pixbuf( cr, pixbuf, 0, 0 );
+    g_object_unref( pixbuf );
+    fz_drop_pixmap( ctx, pixmap );
+    fz_drop_context( ctx );
+
+    cairo_paint( cr );
+    cairo_fill( cr );
+
+    return;
+}
+
+
+static void
+viewer_cb_print( GtkButton* button, gpointer data )
+{
+    GtkPrintOperation* print = NULL;
+    GtkPrintOperationResult res;
+
+    PdfViewer* pdfv = (PdfViewer*) data;
+
+    print = gtk_print_operation_new( );
+
+    gtk_print_operation_set_n_pages( print, pdfv->arr_pages->len );
+
+    g_signal_connect (print, "draw_page", G_CALLBACK (viewer_cb_draw_page), pdfv );
+
+    res = gtk_print_operation_run (print, GTK_PRINT_OPERATION_ACTION_PRINT_DIALOG,
+                                 GTK_WINDOW(pdfv->vf), NULL);
+
+    printf("res: %i\n", res);
+
+    return;
+}
+
+
+static void
 viewer_einrichten_fenster( PdfViewer* pv )
 {
     pv->vf = gtk_window_new( GTK_WINDOW_TOPLEVEL );
@@ -1771,6 +2014,7 @@ viewer_einrichten_fenster( PdfViewer* pv )
     //  Werkzeug Zeiger
     pv->button_speichern = gtk_toggle_button_new( );
     gtk_widget_set_sensitive( pv->button_speichern, FALSE );
+    GtkWidget* button_print = gtk_button_new_from_icon_name( "document-print", GTK_ICON_SIZE_BUTTON );
     GtkWidget* button_zeiger = gtk_toggle_button_new( );
     GtkWidget* button_highlight = gtk_toggle_button_new( );
     GtkWidget* button_underline = gtk_toggle_button_new( );
@@ -1840,6 +2084,7 @@ viewer_einrichten_fenster( PdfViewer* pv )
     //einfügen
     gtk_box_pack_start( GTK_BOX(vbox_tools), button_menu_viewer, FALSE, FALSE, 0 );
     gtk_box_pack_start( GTK_BOX(vbox_tools), pv->button_speichern, FALSE, FALSE, 0 );
+    gtk_box_pack_start( GTK_BOX(vbox_tools), button_print, FALSE, FALSE, 0 );
     gtk_box_pack_start( GTK_BOX(vbox_tools), button_thumb, FALSE, FALSE, 0 );
     gtk_box_pack_start( GTK_BOX(vbox_tools), button_zeiger, FALSE, FALSE, 0 );
     gtk_box_pack_start( GTK_BOX(vbox_tools), button_highlight, FALSE, FALSE, 0 );
@@ -2003,6 +2248,7 @@ viewer_einrichten_fenster( PdfViewer* pv )
 // Signale Toolbox
     g_signal_connect( pv->button_speichern, "clicked", G_CALLBACK(cb_pv_speichern),
             pv );
+    g_signal_connect( button_print, "clicked", G_CALLBACK(viewer_cb_print), pv );
     g_signal_connect( button_thumb, "toggled", G_CALLBACK(cb_tree_thumb),
             pv );
     g_signal_connect( button_zeiger, "button-press-event",
