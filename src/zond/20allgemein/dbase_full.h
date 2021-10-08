@@ -19,27 +19,6 @@ typedef struct _DBase_Full
 
 } DBaseFull;
 
-typedef struct _Property
-{
-    gint ID;
-    gchar* label;
-    gchar* value;
-    GArray* arr_properties;
-} Property;
-
-typedef struct _Entity
-{
-    gint ID;
-    gchar* label;
-    GArray* arr_properties;
-} Entity;
-
-typedef struct _Edge
-{
-    gint ID;
-    gint subject;
-    gint object;
-} Edge;
 
 
 gint dbase_full_insert_node( DBaseFull*, Baum, gint, gboolean, const gchar*,
@@ -72,11 +51,11 @@ gint dbase_full_get_adm_entities( DBaseFull*, gint, GArray**, gchar** );
 gint dbase_full_get_label_for_entity( DBaseFull*, gint, gchar** );
 
 gint dbase_full_insert_edge( DBaseFull*, gint, gint, gint, gchar** );
-
+/*
 gint dbase_full_get_entity( DBaseFull*, gint, Entity**, gchar** );
 
 gint dbase_full_prepare_stmts( DBaseFull*, gchar** );
 
 gint dbase_full_create( const gchar*, DBaseFull**, gboolean, gboolean, gchar** );
-
+*/
 #endif // DBASE_FULL_H_INCLUDED

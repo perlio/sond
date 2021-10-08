@@ -243,10 +243,53 @@ pdf_print_content_stream( fz_context* ctx, pdf_obj* page_ref, gchar** errmsg )
 #include "../40viewer/viewer_pixbuf.h"
 #include <mupdf/fitz.h>
 
+
+static void
+begin_print( GtkPrintOperation* op, GtkPrintContext* context )
+{
+    printf( "begin\n" );
+
+    return;
+}
+
+
+static void
+draw_page( GtkPrintOperation* op, GtkPrintContext* context, gint page_nr, gpointer user_data )
+{
+    gdouble dpi_x = 0;
+    gdouble dpi_y = 0;
+    gdouble width = 0;
+    gdouble height = 0;
+
+    dpi_x = gtk_print_context_get_dpi_x( context );
+    dpi_y = gtk_print_context_get_dpi_y( context );
+    width = gtk_print_context_get_width( context );
+    height = gtk_print_context_get_height( context );
+
+
+  //  gdk_cairo_set_source_pixbuf( gtk_print_context_get_cairo_context( context ), pixbuf, 0, 0 );
+
+    return;
+}
+
+
 gint
 test( Projekt* zond, gchar** errmsg )
 {
-//    zond_database_edit_node( zond, 1, errmsg );
+    GtkPrintOperation* print = NULL;
+    GtkPrintOperationResult res;
+
+    print = gtk_print_operation_new( );
+
+    gtk_print_operation_set_n_pages( print, 12 );
+
+    g_signal_connect (print, "begin_print", G_CALLBACK (begin_print), NULL);
+    g_signal_connect (print, "draw_page", G_CALLBACK (draw_page), NULL);
+
+    res = gtk_print_operation_run (print, GTK_PRINT_OPERATION_ACTION_PRINT_DIALOG,
+                                 GTK_WINDOW (zond->app_window), NULL);
+
+    printf("res: %i\n", res);
 
     return 0;
 }

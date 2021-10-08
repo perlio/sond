@@ -120,8 +120,7 @@ cb_entry_adressnr_activate( GtkEntry* entry, gpointer user_data )
 GtkWidget*
 adressenfenster_oeffnen( Sojus* sojus )
 {
-/*
-**  Window erzeugen  */
+    //Window erzeugen
     GtkWidget* adressen_window = gtk_window_new( GTK_WINDOW_TOPLEVEL );
     gtk_window_set_title( GTK_WINDOW(adressen_window), "Adresse" );
     gtk_window_set_default_size( GTK_WINDOW(adressen_window), 1200, 700 );

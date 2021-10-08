@@ -2,6 +2,8 @@
 #include <gtk/gtk.h>
 #include <glib/gstdio.h>
 
+#include "sond_database.h"
+
 #include "zond/error.h"
 
 #include "dbase.h"
@@ -465,189 +467,13 @@ dbase_create_db( sqlite3* db, gchar** errmsg )
 
     //Tabellenstruktur erstellen
     sql = //Haupttabelle
-/*            "DROP TABLE IF EXISTS labels; "
-            "DROP TABLE IF EXISTS adm_properties; "
-            "DROP TABLE IF EXISTS adm_entities; "
-            "DROP TABLE IF EXISTS entities; "
-            "DROP TABLE IF EXISTS edges; "
-            "DROP TABLE IF EXISTS properties; "
-*/            "DROP TABLE IF EXISTS eingang; "
+            "DROP TABLE IF EXISTS eingang; "
             "DROP TABLE IF EXISTS eingang_rel_path; "
             "DROP TABLE IF EXISTS dateien;"
             "DROP TABLE IF EXISTS ziele;"
             "DROP TABLE IF EXISTS baum_inhalt;"
             "DROP TABLE IF EXISTS baum_auswertung; "
-/*
-            "CREATE TABLE IF NOT EXISTS labels ( "
-                "ID INTEGER PRIMARY KEY, "
-                "label TEXT NOT NULL, "
-                "parent INTEGER NOT NULL, "
-                "FOREIGN KEY(parent) REFERENCES labels (ID) "
-            "); "
 
-            "INSERT INTO labels (ID, label, parent) VALUES "
-                "(0, 'root', 0), "
-                "(1, 'Nomen', 0), "
-                "(100, 'Fundstelle', 1), "
-                "(200, 'Rechtssubjekt', 1), "
-                "(210, 'Rechtsperson', 200), "
-                "(220, 'natürliche Person', 210), "
-                "(230, 'juristische Person', 210), "
-/*                "(230, 'priv jur Person', 220), "
-                "(231, 'GmbH', 230), "
-                "(232, 'UG', 230), "
-                "(233, 'AG', 230), "
-                "(240, 'öffr jur Person', 220), "
-                "(241, 'Bundesland', 240), "
-                "(242, 'Gemeinde', 240), "
-                "(250, 'Personenmehrheit', 200, NULL, '10100'), "
-                "(300, 'Organ', 1),
-                "(320, 'Behörde', 300), "
-                "(330, 'Gericht', 320), "
-                "(340, 'Oberlandesgericht', 330), "
-                "(350, 'Landgericht', 330), "
-                "(360, 'Amtsgericht', 330), "
-                "(370, 'Finanzgericht', 330), "
-                "(380, 'Verwaltungsgericht', 330), "
-                "(390, 'Oberverwaltungsgericht', 330), "
-                "(400, 'Arbeitsgericht', 330), "
-                "(410, 'Landesarbeitsgericht', 330), "
-                "(420, 'Sozialgericht', 330), "
-                "(430, 'Landessozialgericht', 330), "
-                "(440, 'Staatsanwaltschaft', 320), "
-                "(450, 'Generalstaatsanwaltschaft', 320), "
-                "(460, 'Staatsanwaltschaft beim Landgericht', 320), "
-*//*
-                "(500, 'Verfahren', 1), "
-
-                "(600, 'Konvolut', 1), "
-                "(610, 'Aktenbestandteil', 600),"
-                "(620, 'Akte', 610), "
-                "(630, 'Aktenband', 610), "
-/*
-                "(700, 'angebundenes Objekt', 1, NULL, '10020'), "
-                "(750, 'Urkunde', 700), "
-                "(760, 'Urkunde ohne Adressat', 750), "
-                "(770, 'Vermerk', 760), "
-                "(780, 'Verfügung', 760), "
-                "(790, 'Entscheidung', 760), "
-                "(800, 'Beschluß', 790), "
-                "(810, 'Urteil', 790), "
-                "(820, 'Protokoll', 760), "
-                "(830, 'Vernehmungsprotokoll', 820), "
-                "(832, 'Durchs.-/Sicherst.Protokoll', 820), "
-                "(834, 'Gesprächsniederschrift', 820), "
-                "(850, 'Urkunde mit Adressat', 750), "
-                "(860, 'Schreiben', 850), "
-                "(870, 'Übersendungsschreiben', 860), "
-                "(880, 'Bescheid', 850), "
-                "(890, 'Antrag', 850), "
-                "(900, 'Stellungnahme', 850), "
-                "(1000, 'Ort', 1), "
-                "(1010, 'Straße, 1000), "
-                "(1020, 'Adresse', 1000), "
-                "(1030, 'Geoposition', 1000), "
-                "(1050, 'Bezeichnung', 1), "
-                "(1060, 'Familienname', 1), "
-                "(1070, 'Vorname', 1), "
-
-                "(1100, 'Telefonnetz', 1), "
-                "(1110, 'Ländernetz', 1100), "
-                "(1120, 'Ortsnetz', 1100), "
-                "(1130, 'Mobilfunknetz', 1100), "
-
-                "(1150, 'Rufnummer', 1), "
-                "(1160, 'IMSI', 1), "
-                "(1170, 'IMEI', 1), "
-*//*
-                "(10000, 'Prädikate', 0), "
-                "(10010, '_hat node_id_', 10000), " //nur property
-                "(10020, '_hat Fundstelle_', 10000), " //nur edge
-
-                "(10100, '_hat Namen_', 10000), " //E
-                "(10110, '_hat Firma_', 10100), "
-                "(10105, '_hat Familiennamen_', 10100), " //E
-                "(10106, '_hat Vornamen_', 10100), " //E
-/*
-                "(10110, '_ist ansässig_', 10000, '10200,10210', '1020'), "
-                "(10150, '_befindet sich_', 10000, '10200,10210', '1000'), "
-*//*
-                "(10200, '_von (Zeit)_', 10000), " //nur property
-                "(10210, '_bis (Zeit)_', 10000), " //nur property
-
-                "(10250, '_von (Aktenblatt)_', 10000), " //nur property
-                "(10260, '_bis (Aktenblatt)_', 10000), " //nur property
-                "(10270, '_gehört zu Verfahren_', 10000), " //Akte
-                "(10290, '_gehört zu Konvolut_', 10000), " //Anbindung zu Aktenband oder Akte oder allg. Konvolut
-                "(10300, '_wird geführt bei_', 10000), " //Verfahren bei Gericht, Polizei, StA
-                "(10310, '_hat Aktenzeichen', 10000) " //property von 10300
-/*
-                "(10400, '_verfaßt von_', 10000), "
-                "(10410, '_handelnd_durch_', 10000) " //qualifier, wenn Behörde tätig wurde
-*//*                "; "
-
-            "CREATE TABLE IF NOT EXISTS adm_properties ( "
-                "entity INTEGER NOT NULL, "
-                "property INTEGER NOT NULL, "
-                "FOREIGN KEY (entity) REFERENCES labels (ID), "
-                "FOREIGN KEY (property) REFERENCES labels (ID) "
-            "); "
-
-            "INSERT INTO adm_properties (entity,property) VALUES "
-                "(100, 10010), "
-                "(200, 10200), "
-                "(200, 10210), "
-                "(610, 10250), "
-                "(610, 10260), "
-                "(10100, 10200), "
-                "(10100, 10210), "
-                "(10110, 10200), "
-                "(10110, 10210), "
-                "(10300, 10310); "
-
-
-            "CREATE TABLE IF NOT EXISTS adm_entities ( "
-                "entity INTEGER NOT NULL, "
-                "rentity INTEGER NOT NULL, "
-                "FOREIGN KEY (entity) REFERENCES labels (ID), "
-                "FOREIGN KEY (rentity) REFERENCES labels (ID) "
-            "); "
-
-            "INSERT INTO adm_entities (entity,rentity) VALUES "
-                "(100,10290), "
-                "(500, 10300), "
-                "(620, 10270), "
-                "(630, 10290), "
-                "(10020, 100), "
-                "(10270, 500), "
-                "(10290, 600), "
-                "(10300, 320) "
-            "; "
-
-            "CREATE TABLE IF NOT EXISTS entities( "
-                "ID INTEGER NOT NULL, "
-                "label INTEGER NOT NULL, "
-                "FOREIGN KEY (label) REFERENCES labels (ID), "
-                "PRIMARY KEY(ID) "
-            "); "
-
-            "CREATE TABLE IF NOT EXISTS edges ( "
-                "entity INTEGER NOT NULL, "
-                "subject INTEGER NOT NULL, "
-                "object INTEGER NOT NULL, "
-                "FOREIGN KEY (entity) REFERENCES entities (ID), "
-                "FOREIGN KEY (subject) REFERENCES entities (ID), "
-                "FOREIGN KEY (object) REFERENCES entities (ID) "
-            "); "
-
-            "CREATE TABLE IF NOT EXISTS properties ( "
-                "entity INTEGER NOT NULL, "
-                "subject INTEGER NOT NULL, "
-                "value TEXT, "
-                "FOREIGN KEY (entity) REFERENCES entities (ID), "
-                "FOREIGN KEY (subject) REFERENCES entities (ID) "
-            "); "
-*/
             "CREATE TABLE eingang ("
                 "ID INTEGER NOT NULL, "
                 "eingangsdatum VARCHAR(20), "
@@ -726,6 +552,54 @@ dbase_create_db( sqlite3* db, gchar** errmsg )
             "INSERT INTO baum_auswertung (node_id, parent_id, older_sibling_id) "
             "VALUES (0, 0, 0)"; //mit eingang
 
+    rc = sqlite3_exec( db, sql, NULL, NULL, &errmsg_ii );
+    if ( rc != SQLITE_OK )
+    {
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_exec\nsql: ",
+                sql, "\nresult code: ", sqlite3_errstr( rc ), "\nerrmsg: ",
+                errmsg_ii, NULL );
+        sqlite3_free( errmsg_ii );
+
+        return -1;
+    }
+
+    sql = sond_database_sql_create_database( );
+    rc = sqlite3_exec( db, sql, NULL, NULL, &errmsg_ii );
+    if ( rc != SQLITE_OK )
+    {
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_exec\nsql: ",
+                sql, "\nresult code: ", sqlite3_errstr( rc ), "\nerrmsg: ",
+                errmsg_ii, NULL );
+        sqlite3_free( errmsg_ii );
+
+        return -1;
+    }
+
+    sql = sond_database_sql_create_database( );
+    rc = sqlite3_exec( db, sql, NULL, NULL, &errmsg_ii );
+    if ( rc != SQLITE_OK )
+    {
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_exec\nsql: ",
+                sql, "\nresult code: ", sqlite3_errstr( rc ), "\nerrmsg: ",
+                errmsg_ii, NULL );
+        sqlite3_free( errmsg_ii );
+
+        return -1;
+    }
+
+    sql = sond_database_sql_insert_labels( );
+    rc = sqlite3_exec( db, sql, NULL, NULL, &errmsg_ii );
+    if ( rc != SQLITE_OK )
+    {
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_exec\nsql: ",
+                sql, "\nresult code: ", sqlite3_errstr( rc ), "\nerrmsg: ",
+                errmsg_ii, NULL );
+        sqlite3_free( errmsg_ii );
+
+        return -1;
+    }
+
+    sql = sond_database_sql_insert_adm_rels( );
     rc = sqlite3_exec( db, sql, NULL, NULL, &errmsg_ii );
     if ( rc != SQLITE_OK )
     {

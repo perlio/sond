@@ -1,6 +1,6 @@
 #include <gtk/gtk.h>
 
-#include "../global_types_sojus.h"
+#include "../sojus_init.h"
 
 #include "db.h"
 
@@ -8,9 +8,13 @@
 static void
 cb_select_db( GtkWidget* button, gpointer data )
 {
+    gchar* dbname = NULL;
+
     Sojus* sojus = (Sojus*) data;
 
-    db_connect_database( sojus, gtk_widget_get_toplevel( button ), sojus->db.con );
+    db_real_connect_database( sojus->app_window, sojus->con, &dbname );
+
+    g_free( dbname );
 
     return;
 }
@@ -21,7 +25,7 @@ cb_connect( GtkWidget* button, gpointer data )
 {
     Sojus* sojus = (Sojus*) data;
 
-    db_get_connection( sojus, gtk_widget_get_toplevel( button ) );
+    db_connect_database( sojus );
 
     return;
 }

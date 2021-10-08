@@ -1,8 +1,6 @@
 #ifndef GLOBAL_TYPES_SOJUS_H_INCLUDED
 #define GLOBAL_TYPES_SOJUS_H_INCLUDED
 
-#define JAHRHUNDERT_GRENZE 70
-
 typedef char gchar;
 typedef int gint;
 typedef int gboolean;
@@ -11,8 +9,6 @@ typedef struct st_mysql MYSQL;
 typedef struct _GPtrArray GPtrArray;
 typedef struct _GSocketService GSocketService;
 typedef struct _GSettings GSettings;
-
-typedef struct _Clipboard Clipboard;
 
 
 struct _SB
@@ -38,6 +34,9 @@ typedef struct _Aktenbet Aktenbet;
 
 struct _Akte
 {
+    gint ID;
+    gint regnr;
+    gint regjahr;
     gchar* bezeichnung;
     gchar* gegenstand;
     gchar* sachgebiet;
@@ -48,7 +47,7 @@ struct _Akte
 
 typedef struct _Akte Akte;
 
-struct _Adresse
+typedef struct _Subjekt
 {
     gchar* adresszeile1;
     gchar* titel;
@@ -70,54 +69,8 @@ struct _Adresse
     gchar* bic;
     gchar* anrede;
     gchar* bemerkungen;
-};
-
-typedef struct _Adresse Adresse;
+} Subjekt;
 
 
-typedef struct
-{
-    struct
-    {
-        struct {
-            GtkWidget* entry_regnr;
-            GtkWidget* button_doc_erzeugen;
-            GtkWidget* treeview_fm;
-        } AktenSchnellansicht;
-    } AppWindow;
-
-    struct {
-        GtkWidget* bu_dokument_dir;
-    } Einstellungen;
-} Widgets;
-
-
-struct _Sojus
-{
-    GtkWidget* app_window;
-    Widgets widgets;
-
-    GSettings* settings;
-
-    GSocketService* socket;
-
-    Clipboard* clipboard;
-
-    struct {
-        MYSQL* con;
-    } db;
-
-    gint regnr_akt;
-    gint jahr_akt;
-    gint adressnr_akt;
-
-    GPtrArray* arr_open_fm;
-
-    GPtrArray* sachgebiete;
-    GPtrArray* beteiligtenart;
-    GPtrArray* sachbearbeiter;
-};
-
-typedef struct _Sojus Sojus;
 
 #endif // GLOBAL_TYPES_SOJUS_H_INCLUDED

@@ -349,13 +349,9 @@ viewer_page_set_pixbuf_page( ViewerPage* self, ViewerPixbuf* pix )
 ViewerPixbuf*
 viewer_page_get_pixbuf_page( ViewerPage* self )
 {
-    ViewerPixbuf* pix = NULL;
-
     ViewerPagePrivate* priv = viewer_page_get_instance_private( self );
 
-    pix = priv->pixbuf_page;
-
-    return pix;
+    return priv->pixbuf_page;
 }
 
 
