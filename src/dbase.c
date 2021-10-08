@@ -562,7 +562,7 @@ dbase_create_db( sqlite3* db, gchar** errmsg )
 
         return -1;
     }
-
+/*
     sql = sond_database_sql_create_database( );
     rc = sqlite3_exec( db, sql, NULL, NULL, &errmsg_ii );
     if ( rc != SQLITE_OK )
@@ -610,7 +610,7 @@ dbase_create_db( sqlite3* db, gchar** errmsg )
 
         return -1;
     }
-
+*/
     return 0;
 }
 
