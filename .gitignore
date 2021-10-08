@@ -9,4 +9,5 @@
 !.gitignore
 !LICENSE
 !sond.cbp
+!release.sh
 
