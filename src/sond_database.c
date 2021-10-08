@@ -29,34 +29,21 @@ typedef struct _Entity
 typedef struct _Property
 {
     Entity entity;
-    union
-    {
-        gchar* string;
-        gint integer;
-        float real;
-        time_t time;
-    } value;
-
+    gchar* value;
 } Property;
 
 typedef struct _Node
 {
     Entity entity;
+    GArray* properties;
     GArray* outgoing_rels;
 } Node;
 
 typedef struct _Rel
 {
     Entity rel;
-    union
-    {
-        Node object;
-        gchar* string;
-        gint integer;
-        float real;
-        time_t time;
-    } object;
-    GArray* outgoing_rel;
+    GArray* properties;
+    Node object;
 } Rel;
 
 
@@ -122,23 +109,19 @@ sond_database_sql_insert_labels( void )
                 "(100, 'Subjekt', 1), "
 
                 "(110, 'Subjekt des öffentlichen Rechts', 105), "
+                "(115, 'öffr jur Person', 110), "
+                "(120, 'Körperschaft', 115), "
+                "(122, 'Gebietskörperschaft', 120), "
+                "(124, 'Staat', 122), "
+                "(126, 'Bundesland', 122), "
+                "(128, 'Kreis', 122), "
+                "(130, 'Gemeinde', 122), "
+                "(135, 'Universität', 120), "
+                "(140, 'Kammer', 120), "
+                "(142, 'Rechtsanwaltskammer', 140), "
+                "(145, 'Anstalt', 115), "
 
-                "(115, 'Gebietskörperschaft', 110), "
-                "(117, 'Staat', 115), "
-                "(119, 'Bundesland', 115), "
-                "(121, 'Kreis', 115), "
-                "(123, 'Gemeinde', 115), "
-
-                "(130, 'sonstiges Subjekt des öffentlichen Rechts', 110), "
-
-                "(135, 'öffr jur Person', 130), "
-                "(137, 'Körperschaft', 120), "
-                "(139, 'Universität', 137), "
-                "(141, 'Kammer', 137), "
-                "(143, 'Rechtsanwaltskammer', 141), "
-                "(145, 'Anstalt', 135), "
-
-                "(160, 'Behörde', 130), "
+                "(160, 'Behörde', 110), "
                 "(170, 'Gericht', 160), "
                 "(175, 'Oberlandesgericht', 170), "
                 "(180, 'Landgericht', 170), "
@@ -258,8 +241,8 @@ sond_database_sql_insert_labels( void )
                 "(11090, '_Faxdurchwahl_', 2), "
 
                 //qualifier allgemein
-                "(12000, '_von_', 2), "
-                "(12010, '_bis_', 2), "
+                "(12000, '_Beginn_', 2), "
+                "(12010, '_Ende_', 2), "
                 "(12020, '_Bemerkung_', 2), "
 
                 //15000-19999: Prädikate zond
@@ -309,9 +292,9 @@ sond_database_sql_insert_adm_rels( void )
             "(413, 10000, 412), " //Teilnetzvorwahl _gehört zu_ Ländervorahl
             "(420, 10000, 413), " //Teilnehmernummer _gehört zu_ Teilnetzvorwahl
 
-            "(100, 10005, 100004), " //Subjekt _von_ (time) (Geburtstag bei nat Person, sonst Gründungsdatum etc.)
-            "(100, 10006, 100004), " //Subjekt _bis_ (time) (Todestag/Auflösungsdatum)
-            "(100, 10010, 100001), " //Subjekt _heißt_ (string)
+            "(100, 10005, 100004), " //Subjekt _Beginn_ (time) (Geburtstag bei nat Person, sonst Gründungsdatum etc.)
+            "(100, 10006, 100004), " //Subjekt _Ende_ (time) (Todestag/Auflösungsdatum)
+            "(100, 10100, 100001), " //Subjekt _Name_ (string)
             "(100, 10040, 402), " //Subjekt _ist ansässig_ Adresse
             "(115, 10011, 100001), " //natürliche Person _hat Vornamen_ (string)
             "(115, 10012, 100001), " //natürliche Person _hat Titel_ (string)
