@@ -1757,10 +1757,6 @@ viewer_cb_draw_page( GtkPrintOperation* op, GtkPrintContext* context, gint page_
     gdouble zoom_x = 0;
     gdouble zoom_y = 0;
     gdouble zoom = 0;
-    gdouble top, bottom, left, right;
-
-    gtk_print_context_get_hard_margins( context, &top, &bottom, &left, &right );
-    printf("%f  %f  %f  %f\n", top, bottom, left, right);
 
     pdfv = (PdfViewer*) user_data;
 
@@ -1789,7 +1785,6 @@ viewer_cb_draw_page( GtkPrintOperation* op, GtkPrintContext* context, gint page_
     zoom_x = width / (crop.x1 - crop.x0);
     zoom_y = height / (crop.y1 - crop.y0);
 
-    printf("%f  %f  %f  %f\n", zoom_x, zoom_y, width, height );
     zoom = (zoom_x <= zoom_y) ? zoom_x : zoom_y;
 
     ctx = fz_clone_context( zond_pdf_document_get_ctx( pdf_document_page->document ) );
@@ -1905,6 +1900,7 @@ viewer_cb_print( GtkButton* button, gpointer data )
 {
     GtkPrintOperation* print = NULL;
     GtkPrintOperationResult res;
+    GtkPageSetup* page_setup = NULL;
 
     PdfViewer* pdfv = (PdfViewer*) data;
 
@@ -1912,12 +1908,20 @@ viewer_cb_print( GtkButton* button, gpointer data )
 
     gtk_print_operation_set_n_pages( print, pdfv->arr_pages->len );
 
+    page_setup = gtk_page_setup_new( );
+    gtk_page_setup_set_top_margin( page_setup, 0, GTK_UNIT_POINTS );
+    gtk_page_setup_set_bottom_margin( page_setup, 0, GTK_UNIT_POINTS );
+    gtk_page_setup_set_left_margin( page_setup, 0, GTK_UNIT_POINTS );
+    gtk_page_setup_set_right_margin( page_setup, 0, GTK_UNIT_POINTS );
+    gtk_print_operation_set_default_page_setup( print, page_setup );
+    g_object_unref( page_setup );
+
     g_signal_connect (print, "draw_page", G_CALLBACK (viewer_cb_draw_page), pdfv );
 
     res = gtk_print_operation_run (print, GTK_PRINT_OPERATION_ACTION_PRINT_DIALOG,
                                  GTK_WINDOW(pdfv->vf), NULL);
 
-    printf("res: %i\n", res);
+    g_object_unref( print );
 
     return;
 }
