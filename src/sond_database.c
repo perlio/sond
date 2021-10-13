@@ -19,32 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include <gtk/gtk.h>
 
-typedef struct _Entity
-{
-    gint ID;
-    gint label;
-} Entity;
-
-
-typedef struct _Property
-{
-    Entity entity;
-    gchar* value;
-} Property;
-
-typedef struct _Node
-{
-    Entity entity;
-    GArray* properties;
-    GArray* outgoing_rels;
-} Node;
-
-typedef struct _Rel
-{
-    Entity rel;
-    GArray* properties;
-    Node object;
-} Rel;
+#include "sond_database.h"
 
 
 
@@ -108,14 +83,10 @@ sond_database_sql_insert_labels( void )
                 //100 - 999: Knoten, allgemein
                 "(100, 'Subjekt', 1), "
 
-                "(110, 'Subjekt des öffentlichen Rechts', 105), "
+                "(110, 'Subjekt des öffentlichen Rechts', 100), "
+
                 "(115, 'öffr jur Person', 110), "
                 "(120, 'Körperschaft', 115), "
-                "(122, 'Gebietskörperschaft', 120), "
-                "(124, 'Staat', 122), "
-                "(126, 'Bundesland', 122), "
-                "(128, 'Kreis', 122), "
-                "(130, 'Gemeinde', 122), "
                 "(135, 'Universität', 120), "
                 "(140, 'Kammer', 120), "
                 "(142, 'Rechtsanwaltskammer', 140), "
@@ -151,13 +122,18 @@ sond_database_sql_insert_labels( void )
                 "(340, 'Verein', 320), "
 
                 "(350, 'Personenmehrheit', 300), "
-                "(352, 'Eheleute', 350), "
-                "(355, 'GbR', 350), "
-                "(360, 'OHG', 350), "
-                "(365, 'KG', 350), "
-                "(370, 'Partnerschaft', 350), "
+                "(354, 'Gesellschaft', 350), "
+                "(355, 'GbR', 354), "
+                "(360, 'OHG', 354), "
+                "(365, 'KG', 354), "
+                "(370, 'Partnerschaft', 354), "
 
-                "(400, 'Straße', 1), "
+                "(372, 'Geschlecht', 1), "
+
+                "(375, 'Adressbestandteil', 1), "
+                "(380, 'Land', 375), "
+                "(390, 'Ort', 375), "
+                "(400, 'Straße', 375), "
 
                 "(405, 'Telefonnummer', 1), "
                 "(410, 'Vorwahl', 405), "
@@ -166,10 +142,7 @@ sond_database_sql_insert_labels( void )
                 "(414, 'Ortsvorwahl', 413), "
                 "(416, 'Mobilfunknetzvorwahl', 413), "
                 "(420, 'Teilnehmernummer', 405), "
-                "(430, 'Stammrufnummer', 405), "
-
-                "(430, 'Homepage', 1), "
-                "(435, 'E-Mail-Adresse', 1), "
+                "(430, 'Stammrufnummer', 420), "
 
                 "(440, 'Kontoverbindung', 1), "
 
@@ -178,8 +151,8 @@ sond_database_sql_insert_labels( void )
                 "(454, 'Kanzleisitz', 452), "
                 "(456, 'Wohnsitz', 450), "
                 "(460, 'Dienstsitz', 450), "
-                "(462, 'erster Dienstsitz', 460), "
-                "(464, 'weiterer Dienstsitz', 460), "
+
+                "(470, 'Beruf-Dienstgrad', 1), "
 
                 // 1000-5000: Knoten zond
                 "(500, 'Verfahren', 1), "
@@ -228,24 +201,35 @@ sond_database_sql_insert_labels( void )
                 "(10020, '_arbeitet an_', 2), "
 
                 //Properties allgemein
+                "(10030, '_Beginn_', 2), "
+                "(10040, '_Ende_', 2), "
+                "(10050, '_Bemerkung_', 2), "
                 "(10100, '_Name_', 2), "
+                "(10110, '_Kürzel_, 2); "
+
+                //Properties für Subjekt
+                "(10120, '_E-Mail-Adresse_', 2), "
+                "(10130, '_Homepage_', 2), "
+                "(10140, '_BIC_', 2), " //für Subjekt wo Bank ist
+
+                //Properties für natürliche Person
                 "(11010, '_Vorname_', 2), "
                 "(11020, '_Titel_', 2), "
+                "(11025, '_Dienstgrad_', 2), "
 
+
+                //Properties für Kontoverbindung
+                "(11027, '_IBAN_', 2), "
+
+                //Für Sitz
                 "(11030, '_Hausnr_', 2), "
+                "(11035, '_PLZ_', 2), "
                 "(11040, '_Adresszusatz_', 2), "
 
-                "(11050, '_Anrede_', 2), "
-                "(11035, '_Hinweis auf Sitz_', 2), "
-                "(11080, '_Durchwahl_', 2), "
-                "(11090, '_Faxdurchwahl_', 2), "
+                //für Sitz und Rel Arbeitsplatz
+                "(11050, '_Durchwahl_', 2), "
 
-                //qualifier allgemein
-                "(12000, '_Beginn_', 2), "
-                "(12010, '_Ende_', 2), "
-                "(12020, '_Bemerkung_', 2), "
-
-                //15000-19999: Prädikate zond
+/*                //15000-19999: Prädikate zond
                 "(15010, '_hat node_id_', 2), " //nur property
                 "(15020, '_hat Fundstelle_', 2), " //nur edge
 
@@ -262,12 +246,10 @@ sond_database_sql_insert_labels( void )
                 //20000-24999: Prädikate sojus
                 "(20000, '_hat Registernummer_', 2), "
                 "(20001, '_hat Registerjahr_', 2), "
-                "(20025, '_hat Kürzel_', 2), "
                 "(20030, '_hat als Aktenbeteiligten', 2), "
                 "(20031, '_ist Aktenbeteiligtenart_', 2), "
                 "(20032, '_hat als Betreff_', 2), "
-
-
+*/
                 //Wert
                 "(100001, 'string', 3), "
                 "(100002, 'int', 3), "
@@ -282,54 +264,79 @@ sond_database_sql_insert_adm_rels( void )
 {
     return "INSERT INTO adm_rels (subject,rel,object) VALUES "
 
-            "(130, 10010, 460), " //sonst Subjekt des öff Rechts (keine Gebietskörperschaften) _hat_ Dienstsitz
-            "(300, 10010, 452), " //Subjekt des Privatrechts _hat_ Geschäftssitz
+            "(100, 10010, 420), " //Subjekt _hat_ Teilnehmernummer
+            "(100, 10010, 440), " //Subjekt _hat_ Kontoverbindung
+            "(100, 10030, 100004), " //Subjekt _Beginn_(date)
+            "(100, 10040, 100004), " //Subjekt _Ende_(date)
+            "(100, 10050, 100001), " //Subjekt _Bemerkung_(string)
+            "(100, 10100, 100001), " //Subjekt Name(string)
+            "(100, 10120, 100001), " //Subjekt _E-Mail-Adresse_(string)
+            "(100, 10130, 100001), " //Subjekt _Homepage_(string)
+            "(100, 10140, 100001), " //Subjekt _BIC_(string)
+
+            "(110, 10010, 460), " //Subjekt des öffentlichen Rechts _hat_ Dienstsitz
+            "(300, 10010, 452), " //Subjekt des Privatrechts _hat_Geschäftssitz
             "(310, 10010, 456), " //natürliche Person _hat_ Wohnsitz
+            "(310, 10010, 372), " //natürliche Person _hat_ Geschlecht#
+            "(310, 10010, 470), " //natürliche Person _hat_ Beruf/Dienstgrad
+            "(310, 10020, 450), " //natürliche Person _arbeitet an_ Sitz
+            "(310, 11010, 100001), " //natürliche Person Vorname(string)
+            "(310, 11020, 100001), " //natürliche Person Titel(string)
+            "(310, 11025, 100001), " //natürliche Person Dienstgrad(string)
 
-            "(400, 10000, 162), " //Straße _gehört zu_ Gemeinde
-            "(402, 10000, 400), " //Adresse _gehört zu_ Straße
+            "(375, 10100, 100001), " //Adressbestandteil Name(string)
+            "(380, 10110, 100001), " //Land Kürzel(string)
+            "(390, 10000, 380), " //Ort _gehört zu_ Land
+            "(400, 10000, 390), " //Straße gehört zu Ort
 
-            "(413, 10000, 412), " //Teilnetzvorwahl _gehört zu_ Ländervorahl
-            "(420, 10000, 413), " //Teilnehmernummer _gehört zu_ Teilnetzvorwahl
+            "(405, 10100, 100001), " //Telefonnummer Name(string) - meine Telefonnr heißt "..."
+            "(413, 10000, 412), " //Teilnetzvorwahll _gehört zu_ Ländervorwahl
+            "(420, 10000, 413), " //Teilnehmernr _gehört zu_ Teilnetzvorwahl
 
-            "(100, 10005, 100004), " //Subjekt _Beginn_ (time) (Geburtstag bei nat Person, sonst Gründungsdatum etc.)
-            "(100, 10006, 100004), " //Subjekt _Ende_ (time) (Todestag/Auflösungsdatum)
-            "(100, 10100, 100001), " //Subjekt _Name_ (string)
-            "(100, 10040, 402), " //Subjekt _ist ansässig_ Adresse
-            "(115, 10011, 100001), " //natürliche Person _hat Vornamen_ (string)
-            "(115, 10012, 100001), " //natürliche Person _hat Titel_ (string)
-            "(115, 10042, 402), " //natürliche Person _hat Kanzleisitz_ Adresse
-            "(130, 10042, 402), " //priv jur Person _hat Kanzleisitz_ Adresse
-            "(170, 10042, 402), " //Personenmehrheit _hat Kanzleisitz_ Adresse
+            "(440, 10000, 100), " //Kontoverbindung _gehört zu_ Subjekt (Bank)
 
-            "(400, 10010, 100001), " //Straße _heißt_ (string)
-            "(402, 10045, 100001), " //Adresse _hat Hausnummer_ (string)
-            "(402, 10046, 100001), " //Adresse _hat Zusatz (1. Zeile)_ (string)
+            "(450, 10000, 400), " //Sitz _gehört zu_ Straße
+            "(450, 10010, 420), " //Sitz _hat_ Teilnehmernr
+            "(450, 10120, 100001), " //Sitz _E-Mail-Adresse_(string)
+            "(450, 10130, 100001), " //Sitz _Homepage_(string)
+            "(450, 11030, 100001), " //Sitz Hausnr(string)
+            "(450, 11035, 100001), " //Sitz _PLZ_(string)
+            "(450, 11040, 100001), " //Sitz _Adresszusatz_(string)
+            "(450, 11050, 100001), " //Sitz _Durchwahl_(string) (nicht nat. Personen zuzuordnende Durchwahlen)
 
-            "(405, 10030, 100001), " //Telefonnummer _ist_ (string)
+            "(470, 10100, 100001), " //Beruf-Dienstgrad _Name_(string)
+            "(470, 10110, 100001), " //Beruf-Dienstgrad _Kürzel_(string)
 
-            "(5000, 10005, 100004), " //Akte _von_ (time) (Anlage der Akte bzw.Reaktivierung
-            "(5000, 10006, 100004), " //Akte _bis_ (time) - Ablage bzw. erneute Ablage
-            "(5000, 10010, 100001), " //Akte _heißt_ (string)
-            "(5000, 10020, 5005), " //Akte _gehört zu_ Sachbearbeiter
-            "(5000, 10020, 5010), " //Akte _gehört zu_ Sachgebiet
-            "(5000, 20000, 100002), " //Akten _hat Registernummer_ (int)
-            "(5000, 20001, 100002), " //Akte _hat Registerjahr_ (int)
-            "(5000, 20030, 100), " //Akte _hat als Beteiligten_ Subjekt
-            "(5005, 10030, 115), " //Sachbearbeiter _ist_ natürliche Person
-            "(5005, 20025, 100001), " //Sachbearbeiter _hat_ Kürzel (string)
-            "(5040, 10005, 100004), " //Termin _von_ (time)
-            "(5040, 10006, 100004), " //Termin _bis_ (time)
+            "(10010, 10030, 100004), " //_hat_ _Beginn_(date)
+            "(10010, 10040, 100004), " //_hat_ _Ende_(date)
+            "(10010, 10050, 100001), " //_hat_ _Bemerkung_(date)
+            "(10020, 11050, 100001), " //_arbeitet an_ _Durchwahl_(string)
+            "(10030, 10050, 100001), " //_Beginn_ _Bemerkung_(string)
+            "(10040, 10050, 100001), " //_Ende_ _Bemerkung_(string)
 
+            "(10100, 10030, 100004), " //_Name_ _Beginn_(date)
+            "(10100, 10040, 100004), " //_Name_ _Ende_(date)
+            "(10100, 10050, 100001), " //_Name_ _Bemerkung_(date)
 
-            "(10010, 10005, 100004), " //_heißt_ _von_ (time)
-            "(10010, 10006, 100004), " //_heißt_ _bis_ (time)
+            "(10120, 10030, 100004), " //_E-Mail-Adresse_ _Beginn_(date)
+            "(10120, 10040, 100004), " //_E-Mail-Adresse_ _Ende_(date)
+            "(10120, 10050, 100001), " //_E-Mail-Adresse_ _Bemerkung_(date)
 
-            "(10040, 10005, 100004), " //_ist ansässig_ _von_ (time)
-            "(10040, 10006, 100004), " //_ist ansässig_ _bis_ (time)
+            "(10130, 10030, 100004), " //_Homepage_ _Beginn_(date)
+            "(10130, 10040, 100004), " //_Homepage_ _Ende_(date)
+            "(10130, 10050, 100001), " //_Homepage_ _Bemerkung_(date)
 
-            "(20030, 20031, 5020), " //_hat als Beteiligten_ _ist Beteiligtenart_ Aktenbeteiligtenart
-            "(20030, 20032, 100001) " //_hat als Aktenbeteiligten_ _hat Betreff_ (string)
+            "(11010, 10030, 100004), " //_Vorname_ _Beginn_(date)
+            "(11010, 10040, 100004), " //_Vorname_ _Ende_(date)
+            "(11010, 10050, 100001), " //_Vorname_ _Bemerkung_(date)
+
+            "(11020, 10030, 100004), " //_Titel_ _Beginn_(date)
+            "(11020, 10040, 100004), " //_Titel_ _Ende_(date)
+            "(11020, 10050, 100001), " //_Titel_ _Bemerkung_(date)
+
+            "(11050, 10030, 100004), " //_Durchwahl_ _Beginn_(date)
+            "(11050, 10040, 100004), " //_Durchwahl_ _Ende_(date)
+            "(11050, 10050, 100001) " //_Durchwahl_ _Bemerkung_(date)
 
 
             "; ";

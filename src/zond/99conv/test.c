@@ -15,7 +15,7 @@
 #include <sqlite3.h>
 
 
-
+/*
 static gint
 datei_schreiben_guuid( const gchar* full_path, gchar** guuid_ret, gchar** errmsg )
 {
@@ -24,7 +24,7 @@ datei_schreiben_guuid( const gchar* full_path, gchar** guuid_ret, gchar** errmsg
     GFileOutputStream* stream = NULL;
     GError* error = NULL;
 
-    if (  /*filesystem ==*/ 1 ) //NTFS oder SMB
+    if (  filesystem == 1 ) //NTFS oder SMB
     {
         filename = g_strconcat( full_path, ":guuid", NULL );
         file = g_file_new_for_path( filename );
@@ -75,11 +75,12 @@ datei_schreiben_guuid( const gchar* full_path, gchar** guuid_ret, gchar** errmsg
 
     return 0;
 }
-
+*/
 
 /** Fehler: -1
     guuid wird zurückgegeben: 0
     keine guuid gefunden: 1  **/
+/*
 static gint
 datei_lesen_guuid( const gchar* full_path, gchar**guuid, gchar** errmsg )
 {
@@ -144,7 +145,7 @@ datei_lesen_guuid( const gchar* full_path, gchar**guuid, gchar** errmsg )
 static gint
 datei_query_filesystem( const gchar* filename, gchar** errmsg )
 {
-/*
+
     GFile* file = NULL;
     GError* error = NULL;
     GFileInfo* info = NULL;
@@ -198,11 +199,9 @@ datei_query_filesystem( const gchar* filename, gchar** errmsg )
     g_object_unref( info );
     g_object_unref( file );
 
-    return ret;  */
-
-    return 1;
+    return ret;
 }
-
+*/
 
 gint
 pdf_print_content_stream( fz_context* ctx, pdf_obj* page_ref, gchar** errmsg )
@@ -235,130 +234,11 @@ pdf_print_content_stream( fz_context* ctx, pdf_obj* page_ref, gchar** errmsg )
 }
 
 
-#ifdef _WIN32
-#include <windows.h>
-#include <shlwapi.h>
-#endif // _WIN32
-
-#include "../40viewer/viewer_pixbuf.h"
-#include <mupdf/fitz.h>
-
-
-static void
-begin_print( GtkPrintOperation* op, GtkPrintContext* context )
-{
-    printf( "begin\n" );
-
-    return;
-}
-
-
-static void
-draw_page( GtkPrintOperation* op, GtkPrintContext* context, gint page_nr, gpointer user_data )
-{
-    gdouble dpi_x = 0;
-    gdouble dpi_y = 0;
-    gdouble width = 0;
-    gdouble height = 0;
-
-    dpi_x = gtk_print_context_get_dpi_x( context );
-    dpi_y = gtk_print_context_get_dpi_y( context );
-    width = gtk_print_context_get_width( context );
-    height = gtk_print_context_get_height( context );
-
-
-  //  gdk_cairo_set_source_pixbuf( gtk_print_context_get_cairo_context( context ), pixbuf, 0, 0 );
-
-    return;
-}
-
-
 gint
 test( Projekt* zond, gchar** errmsg )
 {
-    GtkPrintOperation* print = NULL;
-    GtkPrintOperationResult res;
-
-    print = gtk_print_operation_new( );
-
-    gtk_print_operation_set_n_pages( print, 12 );
-
-    g_signal_connect (print, "begin_print", G_CALLBACK (begin_print), NULL);
-    g_signal_connect (print, "draw_page", G_CALLBACK (draw_page), NULL);
-
-    res = gtk_print_operation_run (print, GTK_PRINT_OPERATION_ACTION_PRINT_DIALOG,
-                                 GTK_WINDOW (zond->app_window), NULL);
-
-    printf("res: %i\n", res);
-
     return 0;
 }
 
 
-/*
-
-    gint rc = 0;
-    sqlite3* db = NULL;
-
-    rc = sqlite3_open_v2( "kl.txt", &db, SQLITE_OPEN_READWRITE, NULL );
-    if ( rc != SQLITE_OK )
-    {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_open_v2:\n",
-                sqlite3_errstr( rc ), NULL );
-        sqlite3_close( db );
-
-        return -1;
-    }
-
-    return 0;
-}
-
-
-
-    //Pfad LibreOffice herausfinden
-    gchar soffice_exe[270] = { 0 };
-    GError* error = NULL;
-
-#ifdef _WIN32
-    HRESULT rc = 0;
-
-    DWORD bufferlen = 270;
-
-    rc = AssocQueryString( 0, ASSOCSTR_EXECUTABLE, ".odt", "open", soffice_exe,
-            &bufferlen );
-    if ( rc != S_OK )
-    {
-        if ( errmsg ) *errmsg = g_strdup( "Export nicht möglich:\n\nFehler bei Aufruf "
-                "AssocQueryString" );
-
-        return -1;
-    }
-#else
-    //für Linux etc: Pfad von soffice suchen
-#endif // _WIN32
-
-    //htm-Datei umwandeln
-    gboolean ret = FALSE;
-
-    gchar* argv[6] = { NULL };
-    argv[0] = soffice_exe;
- //   argv[1] = "-o";
-    argv[1] = "C:/Users/pkrieger/AppData/Roaming/LibreOffice/4/user/template/vorlagen/Briefkopf.ott";
-//    argv[2] = "vnd.sun.star.script:Standard.Module.Main?language=Basic&location=application";
-    argv[2] = "macro:///Standard.Module.Dokument_erzeugen(2,2020,3,0,0)";
-//  127.0.0.1:3306", "root", "ttttt", 2, 2020, 3, 0, 0
-    ret = g_spawn_async( NULL, argv, NULL, G_SPAWN_DEFAULT, NULL, NULL, NULL,
-            &error );
-    if ( !ret )
-    {
-        if ( errmsg ) *errmsg = g_strconcat( "Export nicht möglich:\n\nFehler bei Aufruf "
-                "g_spawn_sync:\n", error->message, NULL );
-        g_error_free( error );
-
-        return -1;
-    }
-
-    return 0;
-}
-*/
 

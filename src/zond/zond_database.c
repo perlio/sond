@@ -32,20 +32,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "zond_database.h"
 
-
-typedef enum _Direction
-{
-    INCOMING,
-    OUTGOING
-} Direction;
 /*
-typedef struct _Node
-{
-    Entity* node;
-    GArray* arr_incoming_segs;
-    GArray* arr_outgoing_segs;
-} Node;
-
 typedef struct _Linked_Node
 {
     gint ID;
@@ -66,7 +53,8 @@ typedef union _Segment
         Node* object;
     } Out;
 } Segment;
-property
+
+
 
 void
 zond_database_free_segment( gpointer data )
@@ -591,7 +579,7 @@ zond_database_fill_listbox_with_edges( DBaseFull* dbase_full,
         hbox = gtk_box_new( GTK_ORIENTATION_HORIZONTAL, 0 );
 
         if ( dir == INCOMING )
-        {/*
+        {
             label_subject = zond_database_get_info_entity( dbase_full, edge.ID_subject, errmsg );
             if ( !label_subject )
             {
