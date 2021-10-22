@@ -89,34 +89,7 @@ db_create( MYSQL* con, gchar* db_name, gchar** errmsg )
 
         return -1;
     }
-/*
-    gint status = 0;
 
-    do
-    {
-        rc = mysql_affected_rows( con );
-        if ( rc < 0 ) break;
-        // more results? -1 = no, >0 = error, 0 = yes (keep looping)
-        status = mysql_next_result( con );
-    } while (status == 0);
-
-    if ( rc || (status > 0) )
-    {
-        gint ret = 0;
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Einrichtung db:\n",
-                mysql_error( con ), NULL );
-        sql = g_strdup_printf( "DROP DATABASE `%s`", db_name );
-        ret = mysql_query( con, sql );
-        g_free( sql );
-        if ( ret && errmsg ) *errmsg = add_string( *errmsg, g_strconcat( "\n\nFehler "
-                "bei Löschen der Database ", db_name, ":\n",
-                mysql_error( con ), NULL ) );
-        else if ( errmsg ) *errmsg = add_string( *errmsg, g_strconcat( "Database ", db_name,
-                " wurde gelöscht", NULL ) );
-
-        return -1;
-    }
-*/
     return 0;
 }
 

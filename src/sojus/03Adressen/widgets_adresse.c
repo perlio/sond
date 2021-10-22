@@ -14,6 +14,8 @@ widgets_adresse_geaendert( GObject* window, gboolean geaendert )
 void
 widgets_adresse_waehlen( GObject* window, gboolean waehlen )
 {
+    gtk_widget_activate_get_sensitive( GTK_WIDGET(g_object_get_data(G_OBJECT(window), "grid" )), waehlen );
+        /*
     //alles ausgrauen außer entry_adressnr
     gtk_widget_set_sensitive( GTK_WIDGET(g_object_get_data( G_OBJECT(window),
             "entry_adressnr" )), waehlen );
@@ -64,6 +66,6 @@ widgets_adresse_waehlen( GObject* window, gboolean waehlen )
             "button_ok" )), !waehlen );
     gtk_widget_set_sensitive( GTK_WIDGET(g_object_get_data( G_OBJECT(window),
             "button_speichern" )), !waehlen );
-
+*/
     return;
 }

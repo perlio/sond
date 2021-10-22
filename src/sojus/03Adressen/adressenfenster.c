@@ -358,6 +358,7 @@ adressenfenster_oeffnen( Sojus* sojus )
 
     g_object_set_data( G_OBJECT(adressen_window), "button_ok", button_ok );
     g_object_set_data( G_OBJECT(adressen_window), "button_speichern", button_speichern );
+    g_object_set_data( G_OBJECT(adressen_window), "grid", grid );
 
 /*
 **  Signale verknüpfen  */

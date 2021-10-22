@@ -21,7 +21,45 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "sond_database.h"
 
+/*
+gboolean
+sond_database_is_valid_time( const gchar* time )
+{
+    gchar* ptr = NULL;
+    gboolean res = TRUE;
 
+    if ( !time ) return FALSE;
+    if ( !(strlen( time ) == 4 ||
+           strlen( time ) == 7 ||
+           strlen( time ) == 10 ||
+           strlen( time ) == 13 ||
+           strlen( time ) == 16 ||
+           strlen( time ) == 19) ) return FALSE;
+
+    ptr = time;
+
+    for (gint i = 0; i < 4; i++ )
+    {
+        if ( time[i] < '0' || time[i] > '9' ) return FALSE;
+    }
+
+    if ( time[4] = NULL )
+    {
+        if ( precision ) *precision = 1;
+        return TRUE;
+    }
+    else if ( time[4] != '-' ) return FALSE;
+
+    if ( !(time[5] == '0' && time[6] >= '1' && time[6] <= '9') &&
+            !(time[5] == '1' && time[6] >= '0' && time[6] <= 2) ) return FALSE;
+
+    if ( time[7] == NULL )
+    {
+        if ( precision ) *precision = 2;
+        return TRUE;
+    }
+    else if ( time[7] != '-' ) return FALSE;
+}*/
 
 const gchar*
 sond_database_sql_create_database( void )
@@ -205,7 +243,7 @@ sond_database_sql_insert_labels( void )
                 "(10040, '_Ende_', 2), "
                 "(10050, '_Bemerkung_', 2), "
                 "(10100, '_Name_', 2), "
-                "(10110, '_Kürzel_, 2); "
+                "(10110, '_Kürzel_', 2), "
 
                 //Properties für Subjekt
                 "(10120, '_E-Mail-Adresse_', 2), "
@@ -215,8 +253,6 @@ sond_database_sql_insert_labels( void )
                 //Properties für natürliche Person
                 "(11010, '_Vorname_', 2), "
                 "(11020, '_Titel_', 2), "
-                "(11025, '_Dienstgrad_', 2), "
-
 
                 //Properties für Kontoverbindung
                 "(11027, '_IBAN_', 2), "
@@ -277,12 +313,11 @@ sond_database_sql_insert_adm_rels( void )
             "(110, 10010, 460), " //Subjekt des öffentlichen Rechts _hat_ Dienstsitz
             "(300, 10010, 452), " //Subjekt des Privatrechts _hat_Geschäftssitz
             "(310, 10010, 456), " //natürliche Person _hat_ Wohnsitz
-            "(310, 10010, 372), " //natürliche Person _hat_ Geschlecht#
+            "(310, 10010, 372), " //natürliche Person _hat_ Geschlecht
             "(310, 10010, 470), " //natürliche Person _hat_ Beruf/Dienstgrad
             "(310, 10020, 450), " //natürliche Person _arbeitet an_ Sitz
             "(310, 11010, 100001), " //natürliche Person Vorname(string)
             "(310, 11020, 100001), " //natürliche Person Titel(string)
-            "(310, 11025, 100001), " //natürliche Person Dienstgrad(string)
 
             "(375, 10100, 100001), " //Adressbestandteil Name(string)
             "(380, 10110, 100001), " //Land Kürzel(string)
@@ -310,6 +345,9 @@ sond_database_sql_insert_adm_rels( void )
             "(10010, 10030, 100004), " //_hat_ _Beginn_(date)
             "(10010, 10040, 100004), " //_hat_ _Ende_(date)
             "(10010, 10050, 100001), " //_hat_ _Bemerkung_(date)
+            "(10020, 10030, 100004), " //_arbeitet an_ _Beginn_(date)
+            "(10020, 10040, 100004), " //_arbeitet an_ _Ende_(date)
+            "(10020, 10050, 100001), " //_arbeitet an_ _Bemerkung_(date)
             "(10020, 11050, 100001), " //_arbeitet an_ _Durchwahl_(string)
             "(10030, 10050, 100001), " //_Beginn_ _Bemerkung_(string)
             "(10040, 10050, 100001), " //_Ende_ _Bemerkung_(string)

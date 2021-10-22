@@ -30,7 +30,6 @@ typedef struct _Sojus
 
     GSettings* settings;
     GSocketService* socket;
-//    Clipboard* clipboard;
 
     MYSQL* con;
 

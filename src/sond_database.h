@@ -4,11 +4,12 @@
 typedef char gchar;
 typedef int gint;
 
-typedef enum _Direction
+typedef enum _Type
 {
-    INCOMING,
-    OUTGOING
-} Direction;
+    NODE,
+    REL,
+    PROPERTY
+} Type;
 
 typedef struct _Entity
 {
@@ -18,24 +19,26 @@ typedef struct _Entity
 
 typedef struct _Property
 {
-    Entity entity;
-    gchar* value;
+    Entity rel;
     GArray* properties;
+    Entity property;
+    gchar* value;
 } Property;
 
 typedef struct _Node
 {
-    Entity entity;
+    Entity subject;
+    GArray* statements;
     GArray* properties;
-    GArray* outgoing_rels;
 } Node;
 
-typedef struct _Rel
+typedef struct _Statement
 {
     Entity rel;
     GArray* properties;
     Node object;
-} Rel;
+} Statement;
+
 
 
 const gchar* sond_database_sql_create_database( void );
