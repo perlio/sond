@@ -65,6 +65,7 @@ const gchar*
 sond_database_sql_create_database( void )
 {
     return "DROP TABLE IF EXISTS labels; "
+            "DROP TABLE IF EXISTS adm_rels; "
             "DROP TABLE IF EXISTS entities; "
             "DROP TABLE IF EXISTS rels; "
             "DROP TABLE IF EXISTS properties; "
@@ -86,7 +87,7 @@ sond_database_sql_create_database( void )
             "); "
 
             "CREATE TABLE IF NOT EXISTS entities( "
-                "ID INTEGER NOT NULL, "
+                "ID INTEGER NOT NULL AUTO_INCREMENT, "
                 "label INTEGER NOT NULL, "
                 "FOREIGN KEY (label) REFERENCES labels (ID), "
                 "PRIMARY KEY(ID) "
@@ -96,7 +97,6 @@ sond_database_sql_create_database( void )
                 "entity INTEGER NOT NULL, "
                 "subject INTEGER NOT NULL, "
                 "object INTEGER NOT NULL, "
-                "FOREIGN KEY (entity) REFERENCES entities (ID), "
                 "FOREIGN KEY (subject) REFERENCES entities (ID), "
                 "FOREIGN KEY (object) REFERENCES entities (ID) "
             "); "

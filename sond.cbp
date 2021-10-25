@@ -328,6 +328,15 @@
 			<Option target="Sojus (Release)" />
 			<Option target="Sojus (Testing)" />
 		</Unit>
+		<Unit filename="src/sojus/sojus_database.c">
+			<Option compilerVar="CC" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sojus/sojus_database.h">
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
 		<Unit filename="src/sojus/sojus_file_manager.c">
 			<Option compilerVar="CC" />
 			<Option target="Sojus (Release)" />

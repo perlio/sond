@@ -21,26 +21,32 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <gtk/gtk.h>
 
 #include "sojus_init.h"
+#include "sojus_database.h"
 
 #include "../misc.h"
 
-
-typedef struct _Common_Qualifier
-{
-    gint ID_bemerkung;
-    GtkWidget* bemerkung;
-    gint ID_von;
-    GtkWidget* von;
-    gint ID_bis;
-    GtkWidget* bis;
-} CommonQualifier;
 
 typedef struct _Property
 {
     gint property_ID;
     GtkWidget* entry_value;
-    CommonQualifier com_q;
+    gboolean dirty;
 } Property;
+
+
+typedef struct _History
+{
+    Property bemerkung;
+    Property von;
+    Property bis;
+} History;
+
+typedef struct _Property_With_History
+{
+    Property property;
+    History history;
+    GtkWidget* button_delete;
+} PropertyWithHistory;
 
 typedef struct _Telefonnummer
 {
@@ -52,13 +58,12 @@ typedef struct _Telefonnummer
     gchar* teilnetzvorwahl;
     gint ID_laendervorwahl;
     gchar* laendervorwahl;
-    CommonQualifier com_q;
+    History history;
 } Telefonnr;
 
 
 typedef struct _Sitz
 {
-    gint ID_rel;
     gint ID_sitz;
     gint label_sitz;
     gint ID_land;
@@ -75,15 +80,14 @@ typedef struct _Sitz
     gchar* adresszusatz;
     GArray* telefonnummern; //Array von Telefonnrn
     GArray* durchwahlen;
-    CommonQualifier com_q;
+    History history;
 } Sitz;
 
 typedef struct _Arbeitsplatz
 {
-    gint ID_rel;
     Sitz sitz;
     GArray* Durchwahl; //Properties
-    CommonQualifier com_q;
+    History history;
 } Arbeitsplatz;
 
 
@@ -93,6 +97,7 @@ typedef struct _Property_Box
     GtkWidget* button_neu;
     GArray* arr_properties;
 } PropertyBox;
+
 
 typedef struct _Adresse
 {
@@ -104,31 +109,17 @@ typedef struct _Adresse
 
     gint ID_subject;
     GtkWidget* combo_subject;
+    gboolean dirty;
 
-    GArray* arr_property_boxes;
+    PropertyBox namen;
 
-    GArray* vornamen;
-    GArray* Berufe;
-    GArray* telefonnrn; //insb. Handynummern
-    GArray* email_adressen;
-    GArray* homepages;
-    GArray* kontoverbindungen;
-    GArray* sitze;
-    GArray* arbeitsplaetze;
 } Adresse;
 
 
 static void
 sojus_adressen_adresse_free( Adresse* adresse )
 {
-    for ( gint i = 0; i < adresse->arr_property_boxes->len; i++ )
-    {
-        PropertyBox property_box = { 0, };
-
-        property_box = g_array_index( adresse->arr_property_boxes, PropertyBox, i );
-        g_array_unref( property_box.arr_properties );
-    }
-    g_array_unref( adresse->arr_property_boxes );
+    g_array_unref( adresse->namen.arr_properties );
 
     g_free( adresse );
 
@@ -338,7 +329,7 @@ sojus_adressen_create_entry_completion( Sojus* sojus, GtkWidget* entry )
                 "WHERE "
                     "cte_labels.ID = e1.label AND "
                     "e1.ID = rels.subject AND "
-                    "rels.entity = e2.ID AND "
+                    "rels.object = e2.ID AND "
                     "e2.label = 10100 AND "
                     "rels.object = properties.entity "
                     "ORDER BY properties.value "
@@ -382,9 +373,11 @@ sojus_adressen_cb_entry_changed( GtkEntryBuffer* entry_buffer, gpointer data )
 {
     GtkWidget* button_speichern = NULL;
 
-    Adresse* adresse = (Adresse*) data;
+    PropertyBox* property_box = (PropertyBox*) data;
 
-    button_speichern = gtk_dialog_get_widget_for_response( GTK_DIALOG(adresse->adressen_window), GTK_RESPONSE_APPLY );
+    button_speichern = gtk_dialog_get_widget_for_response(
+            GTK_DIALOG(gtk_widget_get_toplevel( property_box->list_box )),
+            GTK_RESPONSE_APPLY );
     gtk_widget_set_sensitive( button_speichern, TRUE );
 
     return;
@@ -392,40 +385,38 @@ sojus_adressen_cb_entry_changed( GtkEntryBuffer* entry_buffer, gpointer data )
 
 
 static void
-sojus_adressen_add_property_row( Adresse* adresse, gint pos_box )
+sojus_adressen_add_property_row( PropertyBox* property_box )
 {
     GtkWidget* box = NULL;
     GtkWidget* button_delete = NULL;
-    PropertyBox property_box = { 0, };
-    Property property = { 0, };
-
-    property_box = g_array_index( adresse->arr_property_boxes, PropertyBox, pos_box );
+    PropertyWithHistory propertywh = { 0, };
 
     box = gtk_box_new( GTK_ORIENTATION_HORIZONTAL, 1 );
-    gtk_list_box_insert( GTK_LIST_BOX(property_box.list_box), box, -1 );
+    gtk_list_box_insert( GTK_LIST_BOX(property_box->list_box), box, -1 );
 
     button_delete = gtk_button_new_from_icon_name( "edit-delete", GTK_ICON_SIZE_BUTTON );
     gtk_box_pack_start( GTK_BOX(box), button_delete, FALSE, FALSE, 1 );
 
-    g_object_set_data( G_OBJECT(button_delete), "index",
-            GINT_TO_POINTER(property_box.arr_properties->len) );
+    g_object_set_data( G_OBJECT(button_delete), "property-box", property_box );
 
-    property.com_q.von = gtk_entry_new( );
-    property.com_q.bis = gtk_entry_new( );
-    property.entry_value = gtk_entry_new( );
-    property.com_q.bemerkung = gtk_entry_new( );
+    propertywh.property.entry_value = gtk_entry_new( );
+    propertywh.history.von.entry_value = gtk_entry_new( );
+    propertywh.history.bis.entry_value = gtk_entry_new( );
+    propertywh.history.bemerkung.entry_value = gtk_entry_new( );
 
-    gtk_box_pack_start( GTK_BOX(box), property.com_q.von, TRUE, TRUE, 1 );
-    gtk_box_pack_start( GTK_BOX(box), property.com_q.bis, TRUE, TRUE, 1 );
-    gtk_box_pack_start( GTK_BOX(box), property.entry_value, TRUE, TRUE, 1 );
-    gtk_box_pack_start( GTK_BOX(box), property.com_q.bemerkung, TRUE, TRUE, 1 );
+    gtk_box_pack_start( GTK_BOX(box), propertywh.history.von.entry_value, FALSE, TRUE, 1 );
+    gtk_box_pack_start( GTK_BOX(box), propertywh.history.bis.entry_value, FALSE, TRUE, 1 );
+    gtk_box_pack_start( GTK_BOX(box), propertywh.property.entry_value, TRUE, TRUE, 1 );
+    gtk_box_pack_start( GTK_BOX(box), propertywh.history.bemerkung.entry_value, FALSE, TRUE, 1 );
 
-    g_signal_connect( property.com_q.von, "changed", G_CALLBACK(sojus_adressen_cb_entry_changed), adresse );
-    g_signal_connect( property.com_q.bis, "changed", G_CALLBACK(sojus_adressen_cb_entry_changed), adresse );
-    g_signal_connect( property.entry_value, "changed", G_CALLBACK(sojus_adressen_cb_entry_changed), adresse );
-    g_signal_connect( property.com_q.bemerkung, "changed", G_CALLBACK(sojus_adressen_cb_entry_changed), adresse );
+    g_signal_connect( propertywh.property.entry_value, "changed", G_CALLBACK(sojus_adressen_cb_entry_changed), property_box );
+    g_signal_connect( propertywh.history.von.entry_value, "changed", G_CALLBACK(sojus_adressen_cb_entry_changed), property_box );
+    g_signal_connect( propertywh.history.bis.entry_value, "changed", G_CALLBACK(sojus_adressen_cb_entry_changed), property_box );
+    g_signal_connect( propertywh.history.bemerkung.entry_value, "changed", G_CALLBACK(sojus_adressen_cb_entry_changed), property_box );
 
     gtk_widget_show_all( box );
+
+    g_array_append_val( property_box->arr_properties, propertywh );
 
     return;
 }
@@ -435,15 +426,12 @@ static void
 sojus_adressen_cb_new_row( GtkWidget* button, gpointer data )
 {
     GtkWidget* button_speichern = NULL;
-    gint index = 0;
 
-    Adresse* adresse = (Adresse*) data;
+    PropertyBox* property_box = (PropertyBox*) data;
 
-    index = GPOINTER_TO_INT(g_object_get_data( G_OBJECT(button), "index" ));
+    sojus_adressen_add_property_row( property_box );
 
-    sojus_adressen_add_property_row( adresse, index );
-
-    button_speichern = gtk_dialog_get_widget_for_response( GTK_DIALOG(adresse->adressen_window), GTK_RESPONSE_APPLY );
+    button_speichern = gtk_dialog_get_widget_for_response( GTK_DIALOG(gtk_widget_get_toplevel( button )), GTK_RESPONSE_APPLY );
     gtk_widget_set_sensitive( button_speichern, TRUE );
 
     return;
@@ -451,32 +439,27 @@ sojus_adressen_cb_new_row( GtkWidget* button, gpointer data )
 
 
 static void
-sojus_adressen_add_list_box( Adresse* adresse, const gchar* title )
+sojus_adressen_add_list_box( GtkWidget* box, PropertyBox* property_box, const gchar* title )
 {
     GtkWidget* frame = NULL;
     GtkWidget* swindow = NULL;
-    PropertyBox property_box = { 0, };
 
-    property_box.arr_properties = g_array_new( FALSE, FALSE, sizeof( Property ) );
+    property_box->arr_properties = g_array_new( FALSE, FALSE, sizeof( PropertyWithHistory ) );
 
-    property_box.list_box = gtk_list_box_new( );
+    property_box->list_box = gtk_list_box_new( );
     swindow = gtk_scrolled_window_new( NULL, NULL );
-    gtk_container_add( GTK_CONTAINER(swindow), property_box.list_box );
+    gtk_container_add( GTK_CONTAINER(swindow), property_box->list_box );
     frame = gtk_frame_new( title );
     gtk_container_add( GTK_CONTAINER(frame), swindow );
 
-    property_box.button_neu = gtk_button_new_with_label( "Neue Zeile" );
-    gtk_list_box_insert( GTK_LIST_BOX(property_box.list_box), property_box.button_neu, -1 );
+    property_box->button_neu = gtk_button_new_with_label( "Neue Zeile" );
+    gtk_list_box_insert( GTK_LIST_BOX(property_box->list_box), property_box->button_neu, -1 );
+    gtk_widget_set_halign( property_box->button_neu, GTK_ALIGN_START );
 
-    g_object_set_data( G_OBJECT(property_box.button_neu), "index",
-            GINT_TO_POINTER(adresse->arr_property_boxes->len) );
-
-    g_signal_connect( property_box.button_neu, "clicked", G_CALLBACK(sojus_adressen_cb_new_row), adresse );
-    gtk_box_pack_start( GTK_BOX(adresse->box), frame, TRUE, TRUE, 1 );
+    g_signal_connect( property_box->button_neu, "clicked", G_CALLBACK(sojus_adressen_cb_new_row), property_box );
+    gtk_box_pack_start( GTK_BOX(box), frame, TRUE, TRUE, 1 );
 
     gtk_widget_show_all( frame );
-
-    g_array_append_val( adresse->arr_property_boxes, property_box );
 
     return;
 }
@@ -516,127 +499,141 @@ sojus_adressen_cb_neue_adresse( GtkWidget* button, gpointer data )
 
 
 static gint
-sojus_adressen_speichern( Adresse* adresse, gchar** errmsg )
+sojus_adressen_get_number_actual_properties( PropertyBox* property_box, gchar** errmsg )
 {
-    //Namen
 
+
+    return 1;
+}
+
+
+static gint
+sojus_adressen_speichern_property( MYSQL* con, gint ID_subject,
+        Property* property, gint label_property, gint label_value, gchar** errmsg )
+{
+    gchar* value = NULL;
+    value = (gchar*) gtk_entry_get_text( GTK_ENTRY(property->entry_value) );
+
+    if ( !property->dirty )
+    {
+        if ( property->property_ID ) //property ist schon gespeichert
+        {
+            if ( !g_strcmp0( value, "" ) ) //ist leer
+            {
+                gint rc = 0;
+
+                rc = sojus_database_delete_property( con, property->property_ID, errmsg );
+                if ( rc ) ERROR_SOND( "sojus_database_delete_property" )
+
+                return 1; //history-qualifier werden mitgelöscht
+            }
+            else //steht was drin
+            {
+                gint rc = 0;
+
+                rc = sojus_database_update_property( con, property->property_ID, value, errmsg );
+                if ( rc ) ERROR_SOND( "sojus_database_update_property" )
+            }
+        }
+        else if ( g_strcmp0( value, "" ) )
+        {
+            gint rc = 0;
+
+            rc = sojus_database_insert_property( con, ID_subject, label_property, label_value, value, errmsg );
+            if ( rc ) ERROR_SOND( "sojus_database_insert_property" )
+        }
+    }
 
     return 0;
 }
 
 
-static void
-sojus_adressen_cb_bu_neu( GtkWidget* button, gpointer data )
+static gint
+sojus_adressen_speichern_property_box( MYSQL* con, gint ID_subject, PropertyBox* property_box, gchar** errmsg )
 {
-    GtkWidget* button_speichern = NULL;
-
-    Adresse* adresse = (Adresse*) data;
-
-    button_speichern = gtk_dialog_get_widget_for_response( GTK_DIALOG(adresse->adressen_window), GTK_RESPONSE_APPLY );
-    if ( gtk_widget_get_sensitive( button_speichern ) )
-    {
-        gint ret = 0;
-
-        ret = abfrage_frage( adresse->adressen_window, "Geändert", "Änderungen "
-                "speichern?", NULL );
-        if ( ret == GTK_RESPONSE_CANCEL ) return;
-        else if ( ret == GTK_RESPONSE_YES )
-        {
-            gint rc = 0;
-            gchar* errmsg = NULL;
-
-            rc = sojus_adressen_speichern( adresse, &errmsg );
-            if ( rc )
-            {
-                gint ret = 0;
-                gchar* message = NULL;
-
-                message = g_strconcat( "Fehler beim Speichern -\n\nBei Aufruf sojus_adressen_speichern:\n", errmsg, NULL );
-                g_free( errmsg );
-                ret = abfrage_frage( adresse->adressen_window, message, "Trotzdem neue Adresse?", NULL );
-                g_free( message );
-                if ( ret == GTK_RESPONSE_CANCEL || ret == GTK_RESPONSE_NO ) return;
-            }
-        }
-    }
-
-    //leeren
-
-    sojus_adressen_neue_adresse( adresse );
-
-    return;
-}
-
-
-static void
-sojus_adressen_cb_bu_speichern( GtkWidget* button, gpointer data )
-{
-    gint rc = 0;
-    gchar* errmsg = NULL;
-
-    Adresse* adresse = (Adresse*) data;
-
-    rc = sojus_adressen_speichern( adresse, &errmsg );
-    if ( rc )
-    {
-        display_message( adresse->adressen_window, "Fehler beim Speichern -\n\n"
-                "Bei Aufruf sojus_adressen_speichern:\n", errmsg, NULL );
-        g_free( errmsg );
-
-        return;
-    }
-
-    gtk_widget_set_sensitive( gtk_dialog_get_widget_for_response( GTK_DIALOG(adresse->adressen_window), GTK_RESPONSE_APPLY ), FALSE );
-
-    return;
-}
-
-
-static void
-sojus_adressen_cb_bu_speichern_verlassen( GtkWidget* button, gpointer data )
-{
-    GtkWidget* button_speichern = NULL;
-    gboolean ret = FALSE;
-
-    Adresse* adresse = (Adresse*) data;
-
-    button_speichern = gtk_dialog_get_widget_for_response( GTK_DIALOG(adresse->adressen_window), GTK_RESPONSE_APPLY );
-    if ( gtk_widget_get_sensitive( button_speichern ) )
+    for ( gint i = 0; i < property_box->arr_properties->len; i++ )
     {
         gint rc = 0;
-        gchar* errmsg = NULL;
+        PropertyWithHistory propertywh = { 0, };
 
-//            rc = sojus_adressen_apeichern( adresse, &errmsg );
-        if ( rc )
-        {
-            gint ret = 0;
-            gchar* message = NULL;
+        propertywh = g_array_index( property_box->arr_properties, PropertyWithHistory, i );
 
-            message = g_strconcat( "Fehler beim Speichern -\n\nBei Aufruf sojus_adressen_speichern:\n", errmsg, NULL );
-            g_free( errmsg );
-            ret = abfrage_frage( adresse->adressen_window, message, "Trotzdem neue Adresse?", NULL );
-            g_free( message );
-            if ( ret == GTK_RESPONSE_CANCEL || ret == GTK_RESPONSE_NO ) return;
-        }
+        rc = sojus_adressen_speichern_property( con, ID_subject,
+                &propertywh.property, 10100, 100001, errmsg );
+        if ( rc == -1 ) ERROR_SOND( "sojus_adressen_speichern_property" )
+        else if ( rc == 1 ) continue; //gelöscht - mit qualifiern
+
+        rc = sojus_adressen_speichern_property( con,
+                propertywh.property.property_ID, &propertywh.history.von, 10030,
+                100004, errmsg );
+        if ( rc ) ERROR_SOND( "sojus_adressen_speichern_property" )
+
+        rc = sojus_adressen_speichern_property( con,
+                propertywh.property.property_ID, &propertywh.history.von, 10040,
+                100004, errmsg );
+        if ( rc ) ERROR_SOND( "sojus_adressen_speichern_property" )
+
+        rc = sojus_adressen_speichern_property( con,
+                propertywh.property.property_ID, &propertywh.history.bemerkung,
+                10050, 100001, errmsg );
+        if ( rc ) ERROR_SOND( "sojus_adressen_speichern_property" )
     }
 
-    g_signal_emit_by_name( adresse->adressen_window, "delete-event", NULL, &ret );
-
-    return;
+    return 0;
 }
 
 
-static void
-sojus_adressen_cb_bu_abbrechen( GtkWidget* button, gpointer data )
+static gint
+sojus_adressen_speichern( Adresse* adresse, gchar** errmsg )
 {
-    gboolean ret = FALSE;
+    gint ret = 0;
 
-    Adresse* adresse = (Adresse*) data;
+    //neues subject anlegen?
+    if ( !adresse->ID_subject )
+    {
+        GtkTreeIter iter = { 0 };
+        GtkTreeModel* model = NULL;
+        gint label_subject = 0;
+        gchar* entry_text = NULL;
+        GtkWidget* headerbar = NULL;
+        GList* children = NULL;
 
-    g_signal_emit_by_name( adresse->adressen_window, "delete-event", adresse, &ret );
 
-    return;
+        //iter abfragen
+        if ( !gtk_combo_box_get_active_iter( GTK_COMBO_BOX(adresse->combo_subject), &iter ) )
+        {
+            if ( errmsg ) *errmsg = g_strdup( "Bei Aufruf gtk_combo_box_get_active_iter:\n"
+                    "iter konnte nicht gesetzt werden" );
+            return -1;
+        }
+
+        model = gtk_combo_box_get_model( GTK_COMBO_BOX(adresse->combo_subject) );
+        gtk_tree_model_get( model, &iter, 0, &label_subject, -1 );
+
+        ret = sojus_adressen_insert_node( adresse->sojus->con, label_subject, errmsg );
+        if ( ret == -1 ) ERROR_SOND( "sojus_adressen_insert_noder" )
+        else adresse->ID_subject = ret;
+
+        entry_text = g_strdup_printf( "%i", adresse->ID_subject );
+        headerbar = gtk_window_get_titlebar( GTK_WINDOW(adresse->adressen_window) );
+        children = gtk_container_get_children( GTK_CONTAINER(headerbar) );
+        gtk_entry_set_text( GTK_ENTRY(gtk_bin_get_child(children->data)), entry_text );
+        g_list_free( children );
+        g_free( entry_text );
+    }
+
+    ret = sojus_adressen_get_number_actual_properties( &adresse->namen, errmsg );
+    if ( ret == -1 ) ERROR_SOND( "sojus_adressen_get_number_actual_properties" )
+    else if ( ret != 1 ) return 1;
+
+    ret = sojus_adressen_speichern_property_box( adresse->sojus->con,
+            adresse->ID_subject, &adresse->namen, errmsg );
+    if ( ret ) ERROR_SOND( "sojus_adressen_speichern_property_box" )
+
+
+    return 0;
 }
+
 
 static gint
 sojus_adressen_get_label_children( Adresse* adresse, gint label,
@@ -676,6 +673,7 @@ sojus_adressen_get_label_children( Adresse* adresse, gint label,
     }
 
     mysql_free_result( mysql_res );
+    mysql_res = NULL;
 
     //Kinder von label
     arr_children = g_array_new( FALSE, FALSE, sizeof( gint ) );
@@ -746,9 +744,8 @@ sojus_adressen_create_combo_subjects( Adresse* adresse, gchar** errmsg )
     rc = sojus_adressen_get_label_children( adresse, 100, NULL, tree_store, errmsg );
     if ( rc )
     {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sojus_adressen_get_label_children:\n",
-                errmsg, NULL );
-        g_free( errmsg );
+        if ( errmsg ) *errmsg = add_string( g_strdup( "Bei Aufruf sojus_adressen_get_label_children:\n" ),
+                *errmsg );
 
         return NULL;
     }
@@ -765,12 +762,204 @@ sojus_adressen_create_combo_subjects( Adresse* adresse, gchar** errmsg )
 }
 
 
+static gint
+sojus_adressen_create_box( Adresse* adresse, gchar** errmsg )
+{
+    GtkWidget* content = NULL;
+    GtkWidget* swindow = NULL;
+
+    //combobox für subject-Art
+    adresse->combo_subject =  sojus_adressen_create_combo_subjects( adresse, errmsg );
+    if ( !adresse->combo_subject )
+    {
+        if ( errmsg ) *errmsg = add_string( g_strdup( "Bei Aufruf "
+                "sojus_adressen_create_combo_subjects:\n" ), *errmsg );
+
+        return -1;
+    }
+
+    content = gtk_dialog_get_content_area( GTK_DIALOG(adresse->adressen_window) );
+    swindow = gtk_scrolled_window_new( NULL, NULL );
+    gtk_box_pack_start( GTK_BOX(content), swindow, TRUE, TRUE, 1 );
+
+    adresse->box = gtk_box_new( GTK_ORIENTATION_VERTICAL, 0 );
+    gtk_container_add( GTK_CONTAINER(swindow), adresse->box );
+
+    gtk_box_pack_start( GTK_BOX(adresse->box), adresse->combo_subject, FALSE, FALSE, 1 );
+    gtk_widget_set_halign( adresse->combo_subject, GTK_ALIGN_START );
+
+    gtk_widget_show_all( adresse->adressen_window );
+    gtk_widget_set_sensitive( adresse->box, FALSE );
+
+    sojus_adressen_add_list_box( adresse->box,&adresse->namen, "Name" );
+    sojus_adressen_add_property_row( &adresse->namen );
+
+    return 0;
+}
+
+
+static void
+sojus_adressen_cb_bu_neu( GtkWidget* button, gpointer data )
+{
+    gint rc = 0;
+    gchar* errmsg = NULL;
+    GtkWidget* button_speichern = NULL;
+    GtkWidget* headerbar = NULL;
+    GList* children = NULL;
+
+    Adresse* adresse = (Adresse*) data;
+
+    button_speichern = gtk_dialog_get_widget_for_response( GTK_DIALOG(adresse->adressen_window), GTK_RESPONSE_APPLY );
+    if ( gtk_widget_get_sensitive( button_speichern ) )
+    {
+        gint ret = 0;
+
+        ret = abfrage_frage( adresse->adressen_window, "Geändert", "Änderungen "
+                "speichern?", NULL );
+        if ( ret == GTK_RESPONSE_CANCEL ) return;
+        else if ( ret == GTK_RESPONSE_YES )
+        {
+            gint rc = 0;
+            gchar* errmsg = NULL;
+
+            rc = sojus_adressen_speichern( adresse, &errmsg );
+            if ( rc == 1 )
+            {
+                display_message( adresse->adressen_window, "Genau ein Name muß "
+                        "aktuell sein\nBitte korrigieren", NULL );
+                return;
+            }
+            if ( rc == -1 )
+            {
+                gint ret = 0;
+                gchar* message = NULL;
+
+                message = g_strconcat( "Fehler beim Speichern -\n\nBei Aufruf sojus_adressen_speichern:\n", errmsg, NULL );
+                g_free( errmsg );
+                ret = abfrage_frage( adresse->adressen_window, message, "Trotzdem neue Adresse?", NULL );
+                g_free( message );
+                if ( ret == GTK_RESPONSE_CANCEL || ret == GTK_RESPONSE_NO ) return;
+            }
+        }
+    }
+
+    gtk_widget_destroy( gtk_widget_get_parent( gtk_widget_get_parent( adresse->box ) ) );
+    rc = sojus_adressen_create_box( adresse, &errmsg );
+    if ( rc == 1 )
+    {
+        display_message( adresse->adressen_window, "Genau ein Name muß "
+                "aktuell sein\nBitte korrigieren", NULL );
+
+        return;
+    }
+    if ( rc == -1 )
+    {
+        gboolean ret = FALSE;
+
+        display_message( adresse->adressen_window, "Fehler -\n\nBei Aufruf "
+                "sojus_adressen_create_box:\n", errmsg, NULL );
+        g_free( errmsg );
+
+        g_signal_emit_by_name( adresse->adressen_window, "delete-event", adresse, &ret );
+
+        return;
+    }
+
+    headerbar = gtk_window_get_titlebar( GTK_WINDOW(adresse->adressen_window) );
+    children = gtk_container_get_children( GTK_CONTAINER(headerbar) );
+    gtk_entry_set_text( GTK_ENTRY(gtk_bin_get_child(children->data)), "" );
+    gtk_widget_set_sensitive( GTK_WIDGET(children->data), TRUE );
+
+    gtk_widget_set_sensitive( GTK_WIDGET(children->next->data), TRUE );
+
+    g_list_free( children );
+
+    return;
+}
+
+
+static void
+sojus_adressen_cb_bu_speichern( GtkWidget* button, gpointer data )
+{
+    gint rc = 0;
+    gchar* errmsg = NULL;
+
+    Adresse* adresse = (Adresse*) data;
+
+    rc = sojus_adressen_speichern( adresse, &errmsg );
+    if ( rc == 1 )
+    {
+        display_message( adresse->adressen_window, "Genau ein Name muß "
+                "aktuell sein\nBitte korrigieren", NULL );
+
+        return;
+    }
+    if ( rc == -1 )
+    {
+        display_message( adresse->adressen_window, "Fehler beim Speichern -\n\n"
+                "Bei Aufruf sojus_adressen_speichern:\n", errmsg, NULL );
+        g_free( errmsg );
+
+        return;
+    }
+
+    gtk_widget_set_sensitive( gtk_dialog_get_widget_for_response( GTK_DIALOG(adresse->adressen_window), GTK_RESPONSE_APPLY ), FALSE );
+
+    return;
+}
+
+
+static void
+sojus_adressen_cb_bu_speichern_verlassen( GtkWidget* button, gpointer data )
+{
+    GtkWidget* button_speichern = NULL;
+    gboolean ret = FALSE;
+
+    Adresse* adresse = (Adresse*) data;
+
+    button_speichern = gtk_dialog_get_widget_for_response( GTK_DIALOG(adresse->adressen_window), GTK_RESPONSE_APPLY );
+    if ( gtk_widget_get_sensitive( button_speichern ) )
+    {
+        gint rc = 0;
+        gchar* errmsg = NULL;
+
+        rc = sojus_adressen_speichern( adresse, &errmsg );
+        if ( rc )
+        {
+            gint ret = 0;
+            gchar* message = NULL;
+
+            message = g_strconcat( "Fehler beim Speichern -\n\nBei Aufruf sojus_adressen_speichern:\n", errmsg, NULL );
+            g_free( errmsg );
+            ret = abfrage_frage( adresse->adressen_window, message, "Trotzdem neue Adresse?", NULL );
+            g_free( message );
+            if ( ret == GTK_RESPONSE_CANCEL || ret == GTK_RESPONSE_NO ) return;
+        }
+    }
+
+    g_signal_emit_by_name( adresse->adressen_window, "delete-event", NULL, &ret );
+
+    return;
+}
+
+
+static void
+sojus_adressen_cb_bu_abbrechen( GtkWidget* button, gpointer data )
+{
+    gboolean ret = FALSE;
+
+    Adresse* adresse = (Adresse*) data;
+
+    g_signal_emit_by_name( adresse->adressen_window, "delete-event", adresse, &ret );
+
+    return;
+}
+
 void
 sojus_adressen_cb_fenster( GtkButton* button, gpointer data )
 {
+    gint rc = 0;
     Adresse* adresse = NULL;
-    GtkWidget* content = NULL;
-    GtkWidget* swindow = NULL;
     GtkWidget* button_apply = NULL;
     GtkWidget* button_change_adress = NULL;
     gchar* errmsg = NULL;
@@ -821,38 +1010,19 @@ sojus_adressen_cb_fenster( GtkButton* button, gpointer data )
             G_CALLBACK(sojus_adressen_cb_entry_adressnr), adresse );
     g_signal_connect( button_neue_adresse, "clicked", G_CALLBACK(sojus_adressen_cb_neue_adresse), adresse );
 
-    content = gtk_dialog_get_content_area( GTK_DIALOG(adresse->adressen_window) );
-    swindow = gtk_scrolled_window_new( NULL, NULL );
-    adresse->box = gtk_box_new( GTK_ORIENTATION_VERTICAL, 0 );
-    gtk_box_pack_start( GTK_BOX(content), swindow, TRUE, TRUE, 1 );
-    gtk_container_add( GTK_CONTAINER(swindow), adresse->box );
-
-    //combobox für subject-Art
-//    treestore = gtk_tree_store_new( 2, G_TYPE_INT, G_TYPE_STRING );
-
-    adresse->combo_subject =  sojus_adressen_create_combo_subjects( adresse, &errmsg );
-    if ( !adresse->combo_subject )
+    rc = sojus_adressen_create_box( adresse, &errmsg );
+    if ( rc )
     {
         gboolean ret = FALSE;
 
         display_message( adresse->adressen_window, "Fehler -\n\nBei Aufruf "
-                "sojus_adressen_create_combo_subjects:\n", errmsg, NULL );
+                "sojus_adressen_create_box:\n", errmsg, NULL );
         g_free( errmsg );
 
         g_signal_emit_by_name( adresse->adressen_window, "delete-event", adresse, &ret );
 
         return;
     }
-
-    gtk_box_pack_start( GTK_BOX(adresse->box), adresse->combo_subject, FALSE, FALSE, 1 );
-
-    gtk_widget_show_all( adresse->adressen_window );
-    gtk_widget_set_sensitive( adresse->box, FALSE );
-
-    adresse->arr_property_boxes = g_array_new( FALSE, FALSE, sizeof( PropertyBox ) );
-
-    sojus_adressen_add_list_box( adresse, "Name" );
-    sojus_adressen_add_property_row( adresse, 0 );
 
     //Signale
     g_signal_connect( gtk_dialog_get_widget_for_response(

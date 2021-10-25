@@ -36,6 +36,7 @@ db_create( MYSQL* con, gchar* db_name, gchar** errmsg )
 {
     gint rc = 0;
     gchar* sql = NULL;
+    gint res = 0;
 
     //prüfen, ob db "db_name" schon existiert
     if ( !mysql_select_db( con, db_name ) ) return 1;//Falls nicht:
@@ -70,7 +71,36 @@ db_create( MYSQL* con, gchar* db_name, gchar** errmsg )
     sql = add_string( sql, g_strdup( sond_database_sql_insert_adm_rels( ) ) );
     rc = mysql_query( con, sql );
     g_free( sql );
-    if ( rc )
+    if ( !rc ) do
+    {
+/*        MYSQL_RES* result = NULL;
+
+      // did current statement return data?
+      result = mysql_store_result(con);
+      if (result)
+      {
+        // yes; process rows and free the result set
+        printf("result!\n");
+        mysql_free_result(result);
+      }
+      else          // no result set or error
+      {
+        if (mysql_field_count(con) == 0)
+        {
+          printf("%lld rows affected\n",
+                mysql_affected_rows(con));
+        }
+        else  // some error occurred
+        {
+          printf("Could not retrieve result set\n%s\n", mysql_error( con ) );
+          break;
+        }
+      }*/
+      /* more results? -1 = no, >0 = error, 0 = yes (keep looping) */
+        res = mysql_next_result( con );
+    } while (res == 0);
+
+    if ( rc || res > 0 )
     {
         gint ret = 0;
         gchar* sql_drop = NULL;
@@ -84,7 +114,7 @@ db_create( MYSQL* con, gchar* db_name, gchar** errmsg )
         if ( ret && errmsg ) *errmsg = add_string( *errmsg, g_strconcat( "\n\nFehler "
                 "bei Löschen der Database ", db_name, ":\n",
                 mysql_error( con ), NULL ) );
-        else if ( errmsg ) *errmsg = add_string( *errmsg, g_strconcat( "Database ", db_name,
+        else if ( errmsg ) *errmsg = add_string( *errmsg, g_strconcat( "\n\nDatabase ", db_name,
                 " wurde gelöscht", NULL ) );
 
         return -1;
@@ -128,6 +158,8 @@ db_real_connect_database( GtkWidget* app_window, MYSQL* con, gchar** dbname )
                         """ konnte nicht erzeugt werden -\nBei Aufruf "
                         "db_create:\n", errmsg, NULL );
                 g_free( errmsg );
+
+                return 1;
             }
             else if ( ret == 1 ) display_message( app_window, "Datenbank """, *dbname,
                         """ existiert bereits", NULL );
