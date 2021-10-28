@@ -1,5 +1,5 @@
 /*
-zond (zond_pdf_document.c) - Akten, Beweisstücke, Unterlagen
+sojus (sojus_adressen_entry.c) - Akten, Beweisstücke, Unterlagen
 Copyright (C) 2021  pelo america
 
 This program is free software: you can redistribute it and/or modify
@@ -16,14 +16,13 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include "zond_pdf_document.h"
+#include "sojus_adressen_entry.h"
 
 #include <mupdf/fitz.h>
 #include <mupdf/pdf.h>
 #include <glib/gstdio.h>
 
 #include "error.h"
-#include "99conv/pdf.h"
 
 #include "../misc.h"
 
@@ -298,7 +297,6 @@ zond_pdf_document_constructed( GObject* self )
         priv->errmsg = g_strconcat( "Bei Aufruf pdf_open_document:\n",
                 fz_caught_message( priv->ctx ), NULL );
         priv->doc = NULL;
-        G_OBJECT_CLASS(zond_pdf_document_parent_class)->constructed( self );
 
         return;
     }
@@ -307,7 +305,6 @@ zond_pdf_document_constructed( GObject* self )
     if ( number_of_pages == 0 )
     {
         priv->errmsg = g_strdup( "Dokument enthält keine Seiten" );
-        G_OBJECT_CLASS(zond_pdf_document_parent_class)->constructed( self );
 
         return;
     }
@@ -325,13 +322,10 @@ zond_pdf_document_constructed( GObject* self )
             priv->errmsg = g_strconcat( "bei Aufruf document_load_page:\n",
                     errmsg, NULL );
             g_free( errmsg );
-            G_OBJECT_CLASS(zond_pdf_document_parent_class)->constructed( self );
 
             return;
         }
     }
-
-    G_OBJECT_CLASS(zond_pdf_document_parent_class)->constructed( self );
 
     return;
 }
