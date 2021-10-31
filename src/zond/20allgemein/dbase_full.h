@@ -51,11 +51,11 @@ gint dbase_full_get_adm_entities( DBaseFull*, gint, GArray**, gchar** );
 gint dbase_full_get_label_for_entity( DBaseFull*, gint, gchar** );
 
 gint dbase_full_insert_edge( DBaseFull*, gint, gint, gint, gchar** );
-/*
-gint dbase_full_get_entity( DBaseFull*, gint, Entity**, gchar** );
+
+//gint dbase_full_get_entity( DBaseFull*, gint, Entity**, gchar** );
 
 gint dbase_full_prepare_stmts( DBaseFull*, gchar** );
 
 gint dbase_full_create( const gchar*, DBaseFull**, gboolean, gboolean, gchar** );
-*/
+
 #endif // DBASE_FULL_H_INCLUDED

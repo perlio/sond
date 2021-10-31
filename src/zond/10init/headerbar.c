@@ -98,6 +98,7 @@ selection_abfragen_pdf( Projekt* zond, gchar** errmsg )
     GPtrArray* arr_rel_path = g_ptr_array_new_with_free_func( (GDestroyNotify) g_free );
 
     baum = baum_abfragen_aktiver_treeview( zond );
+    if ( baum == KEIN_BAUM ) return NULL;
 
     selected = gtk_tree_selection_get_selected_rows( zond->selection[baum], NULL );
     if( !selected ) return NULL;
@@ -150,9 +151,12 @@ cb_item_clean_pdf( GtkMenuItem* item, gpointer data )
 
     if ( !arr_rel_path )
     {
-        meldung( zond->app_window, "PDF kann nicht gereinigt werden\n\nBei "
-                "Aufruf selection_abfragen_pdf:\n", errmsg, NULL );
-        g_free( errmsg );
+        if ( errmsg )
+        {
+            meldung( zond->app_window, "PDF kann nicht gereinigt werden\n\nBei "
+                    "Aufruf selection_abfragen_pdf:\n", errmsg, NULL );
+            g_free( errmsg );
+        }
 
         return;
     }
@@ -270,9 +274,12 @@ cb_item_textsuche( GtkMenuItem* item, gpointer data )
     GPtrArray* arr_rel_path = selection_abfragen_pdf( zond, &errmsg );
     if ( !arr_rel_path )
     {
-        meldung( zond->app_window, "Textsuche nicht möglich\n\nBei "
-                "Aufruf selection_abfragen_pdf:\n", errmsg, NULL );
-        g_free( errmsg );
+        if ( errmsg )
+        {
+            meldung( zond->app_window, "Textsuche nicht möglich\n\nBei "
+                    "Aufruf selection_abfragen_pdf:\n", errmsg, NULL );
+            g_free( errmsg );
+        }
 
         return;
     }
@@ -366,9 +373,12 @@ cb_datei_ocr( GtkMenuItem* item, gpointer data )
     GPtrArray* arr_rel_path = selection_abfragen_pdf( zond, &errmsg );
     if ( !arr_rel_path )
     {
-        meldung( zond->app_window, "Texterkennung nicht möglich\n\nBei "
-                "Aufruf selection_abfragen_pdf:\n", errmsg, NULL );
-        g_free( errmsg );
+        if ( errmsg )
+        {
+            meldung( zond->app_window, "Texterkennung nicht möglich\n\nBei "
+                    "Aufruf selection_abfragen_pdf:\n", errmsg, NULL );
+            g_free( errmsg );
+        }
 
         return;
     }

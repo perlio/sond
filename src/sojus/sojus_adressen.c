@@ -515,11 +515,10 @@ sojus_adressen_hist_row_new( HistBox* hist_box )
     gtk_box_pack_start( GTK_BOX(hist_row->hist_row), *((GtkWidget**)hist_row->row), FALSE,
             TRUE, 1 );
 
-    gtk_widget_show_all( hist_row->hist_row );
-
     g_ptr_array_add( hist_box->hist_rows, hist_row );
 
     gtk_box_pack_start( GTK_BOX(hist_box->hist_box), hist_row->hist_row, FALSE, TRUE, 1 );
+    gtk_widget_set_size_request( hist_row->hist_row, -1, -1 );
 
     g_signal_connect( hist_row->button_delete, "clicked",
             G_CALLBACK(sojus_adressen_hist_row_delete), hist_row );
@@ -531,9 +530,14 @@ sojus_adressen_hist_row_new( HistBox* hist_box )
 static void
 sojus_adressen_cb_hist_row_new( GtkWidget* button, gpointer data )
 {
+    HistRow* hist_row = NULL;
+
     HistBox* hist_box = (HistBox*) data;
 
     sojus_adressen_hist_row_new( hist_box );
+
+    hist_row = g_ptr_array_index( hist_box->hist_rows, hist_box->hist_rows->len - 1 );
+    gtk_widget_show_all( hist_row->hist_row );
 
     gtk_widget_set_sensitive( hist_box->adresse->button_speichern, TRUE );
 
@@ -569,14 +573,13 @@ sojus_adressen_hist_box_new( Adresse* adresse, GtkOrientation orientation,
     hist_box->button_neu = gtk_button_new_with_label( "Neu" );
     gtk_box_pack_start( GTK_BOX(hist_box->hist_box), hist_box->button_neu,
             FALSE, FALSE, 1 );
-    gtk_widget_set_halign( hist_box->button_neu, GTK_ALIGN_START );
+
+    sojus_adressen_hist_row_new( hist_box );
 
     gtk_widget_show_all( frame );
 
     g_signal_connect( hist_box->button_neu, "clicked",
             G_CALLBACK(sojus_adressen_cb_hist_row_new), hist_box );
-
-    sojus_adressen_hist_row_new( hist_box );
 
     return hist_box;
 }
