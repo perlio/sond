@@ -788,101 +788,12 @@ cb_anbindung_entfernenitem_activate( GtkMenuItem* item, gpointer user_data )
 }
 
 
-/*  Callbacks des Menus "Suchen"  */
-static void
-cb_suchen_path( GtkMenuItem* item, gpointer data )
-{
-    gint rc = 0;
-    gchar* errmsg = NULL;
-    gchar* suchtext= NULL;
-
-    Projekt* zond = (Projekt*) data;
-
-    rc = abfrage_frage( zond->app_window, "In Dateinamen suchen:", "Dateinamen eingeben", &suchtext );
-
-    if ( rc != GTK_RESPONSE_YES ) return;
-    if ( !g_strcmp0( suchtext, "" ) )
-    {
-        g_free( suchtext );
-
-        return;
-    }
-
-    rc = suchen_path( zond, suchtext, &errmsg );
-    g_free( suchtext );
-    if ( rc == -1 )
-    {
-        meldung( zond->app_window, "Fehler in Suchen in Dateinamen -\n\n"
-                "Bei Aufruf suchen_path:\n", errmsg, NULL );
-        g_free( errmsg );
-    }
-    if ( rc == -2 ) meldung( zond->app_window, "Keine Treffer", NULL );
-
-    return;
-}
-
-
-static void
-cb_suchen_node_text( GtkMenuItem* item, gpointer data )
-{
-    gint rc = 0;
-    gchar* errmsg = NULL;
-    gchar* suchtext = NULL;
-
-    Projekt* zond = (Projekt*) data;
-
-    rc = abfrage_frage( zond->app_window, "In Knotentext suchen:", "Knotentext eingeben", &suchtext );
-
-    if ( rc != GTK_RESPONSE_YES ) return;
-    if ( !g_strcmp0( suchtext, "" ) )
-    {
-        g_free( suchtext );
-
-        return;
-    }
-
-    rc = suchen_node_text( zond, suchtext, &errmsg );
-    g_free( suchtext );
-    if ( rc == -1 )
-    {
-        meldung( zond->app_window, "Fehler in Suchen in node_text -\n\n"
-                "Bei Aufruf suchen_node_text:\n", errmsg, NULL );
-        g_free( errmsg );
-    }
-    if ( rc == -2 ) meldung( zond->app_window, "Keine Treffer", NULL );
-
-    return;
-}
-
-
 static void
 cb_suchen_text( GtkMenuItem* item, gpointer data )
 {
-    gint rc = 0;
-    gchar* errmsg = NULL;
-    gchar* suchtext = NULL;
-
     Projekt* zond = (Projekt*) data;
 
-    rc = abfrage_frage( zond->app_window, "In Textview suchen:", "Suchtext eingeben", &suchtext );
-
-    if ( rc != GTK_RESPONSE_YES ) return;
-    if ( !g_strcmp0( suchtext, "" ) )
-    {
-        g_free( suchtext );
-
-        return;
-    }
-
-    rc = suchen_text( zond, suchtext, &errmsg );
-    g_free( suchtext );
-    if ( rc == -1 )
-    {
-        meldung( zond->app_window, "Fehler in Suchen in TextView -\n\n"
-                "Bei Aufruf suchen_path:\n", errmsg, NULL );
-        g_free( errmsg );
-    }
-    if ( rc == -2 ) meldung( zond->app_window, "Keine Treffer", NULL );
+    gtk_popover_popup( GTK_POPOVER(zond->popover) );
 
     return;
 }
@@ -1034,7 +945,6 @@ init_menu( Projekt* zond )
     zond->menu.projekt = gtk_menu_item_new_with_label ( "Projekt" );
     zond->menu.pdf = gtk_menu_item_new_with_label("PDF-Dateien");
     zond->menu.struktur = gtk_menu_item_new_with_label( "Struktur" );
-    zond->menu.suchen = gtk_menu_item_new_with_label( "Suchen" );
     zond->menu.ansicht = gtk_menu_item_new_with_label("Ansicht");
     zond->menu.extras = gtk_menu_item_new_with_label( "Extras" );
     GtkWidget* einstellungen = gtk_menu_item_new_with_label(
@@ -1045,7 +955,6 @@ init_menu( Projekt* zond )
     gtk_menu_shell_append ( GTK_MENU_SHELL(menubar), zond->menu.projekt );
     gtk_menu_shell_append ( GTK_MENU_SHELL(menubar), zond->menu.struktur );
     gtk_menu_shell_append ( GTK_MENU_SHELL(menubar), zond->menu.pdf );
-    gtk_menu_shell_append ( GTK_MENU_SHELL(menubar), zond->menu.suchen );
     gtk_menu_shell_append ( GTK_MENU_SHELL(menubar), zond->menu.ansicht );
     gtk_menu_shell_append ( GTK_MENU_SHELL(menubar), zond->menu.extras );
     gtk_menu_shell_append ( GTK_MENU_SHELL(menubar), einstellungen );
@@ -1232,7 +1141,8 @@ init_menu( Projekt* zond )
 
     //Punkt(e) löschen
     GtkWidget* loeschenitem = gtk_menu_item_new_with_label("Punkte löschen");
-    gtk_widget_add_accelerator(loeschenitem, "activate", accel_group, GDK_KEY_Delete, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
+    gtk_widget_add_accelerator(loeschenitem, "activate", accel_group,
+            GDK_KEY_Delete, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
     g_signal_connect( G_OBJECT(loeschenitem), "activate",
             G_CALLBACK(cb_loeschen_activate), (gpointer) zond );
 
@@ -1241,6 +1151,11 @@ init_menu( Projekt* zond )
             "Anbindung entfernen");
     g_signal_connect( G_OBJECT(anbindung_entfernenitem), "activate",
             G_CALLBACK(cb_anbindung_entfernenitem_activate), zond );
+
+    GtkWidget* suchenitem = gtk_menu_item_new_with_label(
+            "Suchen");
+    GtkWidget* sep_struktur3item = gtk_separator_menu_item_new();
+    g_signal_connect( suchenitem, "activate", G_CALLBACK(cb_suchen_text), zond );
 
     //Menus "Bearbeiten" anbinden
 //Menus in dateienmenu
@@ -1253,6 +1168,8 @@ init_menu( Projekt* zond )
     gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), loeschenitem );
     gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), anbindung_entfernenitem );
     gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), sep_struktur2item );
+    gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), suchenitem );
+    gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), sep_struktur3item );
     gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), item_text_anbindung );
     gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), icon_change_item );
     gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), eingang_item );
@@ -1278,24 +1195,6 @@ init_menu( Projekt* zond )
     GtkWidget* item_ocr = gtk_menu_item_new_with_label( "OCR" );
     gtk_menu_shell_append( GTK_MENU_SHELL(menu_dateien), item_ocr );
     g_signal_connect( item_ocr, "activate", G_CALLBACK(cb_datei_ocr), zond );
-
-/*  Menu Suchen  */
-    GtkWidget* suchenmenu = gtk_menu_new( );
-
-    GtkWidget* suchen_path = gtk_menu_item_new_with_label( "Dateiname" );
-    GtkWidget* suchen_node_text = gtk_menu_item_new_with_label( "Beschriftung Knotenpunkt" );
-    GtkWidget* suchen_text = gtk_menu_item_new_with_label( "Text Auswertung" );
-
-    gtk_menu_shell_append(  GTK_MENU_SHELL(suchenmenu), suchen_path );
-    gtk_menu_shell_append(  GTK_MENU_SHELL(suchenmenu), suchen_node_text );
-    gtk_menu_shell_append(  GTK_MENU_SHELL(suchenmenu), suchen_text );
-
-    g_signal_connect( G_OBJECT(suchen_path), "activate",
-            G_CALLBACK(cb_suchen_path), (gpointer) zond );
-    g_signal_connect( G_OBJECT(suchen_node_text), "activate",
-            G_CALLBACK(cb_suchen_node_text), (gpointer) zond );
-    g_signal_connect( G_OBJECT(suchen_text), "activate",
-            G_CALLBACK(cb_suchen_text), (gpointer) zond );
 
 /*  Menu Ansicht */
     GtkWidget* ansichtmenu = gtk_menu_new();
@@ -1372,7 +1271,6 @@ init_menu( Projekt* zond )
     gtk_menu_item_set_submenu( GTK_MENU_ITEM(zond->menu.projekt), projektmenu );
     gtk_menu_item_set_submenu( GTK_MENU_ITEM(zond->menu.pdf), menu_dateien );
     gtk_menu_item_set_submenu( GTK_MENU_ITEM(zond->menu.struktur), strukturmenu );
-    gtk_menu_item_set_submenu( GTK_MENU_ITEM(zond->menu.suchen), suchenmenu );
     gtk_menu_item_set_submenu( GTK_MENU_ITEM(zond->menu.ansicht), ansichtmenu );
     gtk_menu_item_set_submenu( GTK_MENU_ITEM(zond->menu.extras), extrasmenu );
     gtk_menu_item_set_submenu( GTK_MENU_ITEM(einstellungen),

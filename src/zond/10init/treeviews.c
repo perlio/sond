@@ -190,12 +190,12 @@ cb_focus_in( GtkWidget* treeview, GdkEvent* event, gpointer user_data )
 
     Baum baum = baum_get_baum_from_treeview( zond, treeview );
 
-    if ( baum != BAUM_FS ) cb_cursor_changed( (SondTreeview*) treeview, user_data );
-
     //cursor-changed-signal für den aktivierten treeview anschalten
     if ( baum != BAUM_FS ) zond->cursor_changed_signal =
             g_signal_connect( treeview, "cursor-changed",
             G_CALLBACK(cb_cursor_changed), zond );
+
+    if ( baum != BAUM_FS ) cb_cursor_changed( (SondTreeview*) treeview, user_data );
 
     if ( baum != zond->last_baum )
     {
@@ -262,7 +262,7 @@ treeviews_cb_cell_edited( GtkCellRenderer* cell, gchar* path_string, gchar* new_
 }
 
 
-/*
+
 static gboolean
 cb_show_popupmenu( GtkTreeView* treeview, GdkEventButton* event,
         GtkMenu* contextmenu_tv )
@@ -282,7 +282,7 @@ cb_show_popupmenu( GtkTreeView* treeview, GdkEventButton* event,
 
     return FALSE;
 }
-*/
+
 
 
 static void
@@ -322,6 +322,7 @@ treeviews_render_node_text( SondTreeview* stv, GtkTreeIter* iter, gpointer data 
 }
 
 
+
 void
 init_treeviews( Projekt* zond )
 {
@@ -355,7 +356,7 @@ init_treeviews( Projekt* zond )
         zond->selection[baum] = gtk_tree_view_get_selection(
                 GTK_TREE_VIEW(zond->treeview[baum]) );
 
-/*        //Kontextmenu erzeugen, welches bei Rechtsklick auf treeview angezeigt wird
+        //Kontextmenu erzeugen, welches bei Rechtsklick auf treeview angezeigt wird
         GtkWidget* contextmenu_tv = gtk_menu_new();
 
         GtkWidget* datei_oeffnen_item = gtk_menu_item_new_with_label( "Öffnen" );
@@ -364,12 +365,12 @@ init_treeviews( Projekt* zond )
 
         //Die Signale
         //Rechtsklick - Kontextmenu
-        g_signal_connect( zond->treeview[BAUM_AUSWERTUNG], "button-press-event",
+        g_signal_connect( zond->treeview[baum], "button-press-event",
                 G_CALLBACK(cb_show_popupmenu), (gpointer) contextmenu_tv );
 
-        g_signal_connect( datei_oeffnen_item, "activate",
-                G_CALLBACK(cb_datei_oeffnen), (gpointer) zond );
-    */
+//        g_signal_connect( datei_oeffnen_item, "activate",
+//                G_CALLBACK(cb_datei_oeffnen), (gpointer) zond );
+
         //Text-Spalte wird editiert
         g_signal_connect( sond_treeview_get_cell_renderer_text( zond->treeview[baum] ),
                 "edited", G_CALLBACK(treeviews_cb_cell_edited), (gpointer) zond->treeview[baum] ); //Klick in textzelle = Inhalt editieren

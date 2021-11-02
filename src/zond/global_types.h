@@ -77,8 +77,6 @@ struct _Menu
 
     GtkWidget* struktur;
 
-    GtkWidget* suchen;
-
     GtkWidget* ansicht;
 
     GtkWidget* extras;
@@ -129,6 +127,8 @@ typedef struct _Projekt
 
     GtkWidget* app_window;
     GtkLabel* label_status;
+    GtkWidget* label_project;
+    GtkWidget* popover;
 
     GtkWidget* hpaned;
     //Baum - Modell, Ansicht mit Selection
@@ -140,6 +140,7 @@ typedef struct _Projekt
     gulong cursor_changed_signal;
     gulong text_buffer_changed_signal;
     gulong treeview_focus_in_signal[3];
+    gulong key_press_signal;
 
     GtkTextView* textview;
 

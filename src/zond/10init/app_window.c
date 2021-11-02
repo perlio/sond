@@ -27,6 +27,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../99conv/db_write.h"
 
 #include "../20allgemein/project.h"
+#include "../20allgemein/suchen.h"
 
 #include "treeviews.h"
 
@@ -91,9 +92,26 @@ cb_textview_focus_in( GtkWidget* textview, GdkEvent* event, gpointer user_data )
 {
     Projekt* zond = (Projekt*) user_data;
 
+    g_signal_handler_disconnect( zond->app_window, zond->key_press_signal );
+
     zond->text_buffer_changed_signal =
             g_signal_connect( gtk_text_view_get_buffer( GTK_TEXT_VIEW(textview) ),
             "changed", G_CALLBACK(cb_text_buffer_changed), (gpointer) zond );
+
+    return FALSE;
+}
+
+
+static gboolean
+cb_key_press( GtkWidget* treeview, GdkEventKey* event, gpointer data )
+{
+    Projekt* zond = (Projekt*) data;
+
+    if ( event->is_modifier ) return FALSE;
+
+    if ( (event->state & GDK_CONTROL_MASK) ) return FALSE;
+
+    gtk_popover_popup( GTK_POPOVER(zond->popover) );
 
     return FALSE;
 }
@@ -106,6 +124,10 @@ cb_textview_focus_out( GtkWidget* textview, GdkEvent* event, gpointer user_data 
     gchar* errmsg = NULL;
 
     Projekt* zond = (Projekt*) user_data;
+
+    //key_press-event-signal einschalten
+    zond->key_press_signal = g_signal_connect( zond->app_window,
+            "key-press-event", G_CALLBACK(cb_key_press), zond );
 
     g_signal_handler_disconnect( gtk_text_view_get_buffer( GTK_TEXT_VIEW(textview) ),
             zond->text_buffer_changed_signal );
@@ -145,9 +167,36 @@ cb_textview_focus_out( GtkWidget* textview, GdkEvent* event, gpointer user_data 
 }
 
 
+static void
+cb_entry_search( GtkWidget* entry, gpointer data )
+{
+    gint rc = 0;
+    gchar* errmsg = NULL;
+    gchar* text = NULL;
+
+    Projekt* zond = (Projekt*) data;
+
+    text = g_strconcat( "%", gtk_entry_get_text( GTK_ENTRY(entry) ), "%", NULL );
+    rc = suchen_treeviews( zond, text, &errmsg );
+    g_free( text );
+    if ( rc )
+    {
+        display_message( zond->app_window, "Fehler Suche -\n\nBei Aufruf "
+                "suchen_treeviews:\n", errmsg, NULL );
+        g_free( errmsg );
+    }
+
+    gtk_popover_popdown( GTK_POPOVER(zond->popover) );
+
+    return;
+}
+
+
 void
 init_app_window( Projekt* zond )
 {
+    GtkWidget* entry_search = NULL;
+
     //ApplicationWindow erzeugen
     zond->app_window = gtk_window_new( GTK_WINDOW_TOPLEVEL );
     gtk_window_set_default_size( GTK_WINDOW(zond->app_window), 800, 1000 );
@@ -222,6 +271,18 @@ init_app_window( Projekt* zond )
             G_CALLBACK(cb_pao_button_event), zond );
     g_signal_connect( zond->app_window, "button-release-event",
             G_CALLBACK(cb_pao_button_event), zond );
+
+    zond->popover = gtk_popover_new( GTK_WIDGET(zond->treeview[BAUM_INHALT]) );
+    entry_search = gtk_entry_new( );
+    gtk_container_add( GTK_CONTAINER(zond->popover), entry_search );
+
+    gtk_widget_show_all( zond->popover );
+
+    //key_press-event-signal einschalten
+    zond->key_press_signal = g_signal_connect( zond->app_window,
+            "key-press-event", G_CALLBACK(cb_key_press), zond );
+
+    g_signal_connect( entry_search, "activate", G_CALLBACK(cb_entry_search), zond );
 
 /*
 **  untere Hälfte vbox: Status-Zeile  */

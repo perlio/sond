@@ -69,7 +69,6 @@ projekt_set_widgets_sensitiv( Projekt* zond, gboolean active )
     gtk_widget_set_sensitive( GTK_WIDGET(zond->menu.exportitem), active );
     gtk_widget_set_sensitive( GTK_WIDGET(zond->menu.pdf), active );
     gtk_widget_set_sensitive( GTK_WIDGET(zond->menu.struktur), active );
-    gtk_widget_set_sensitive( GTK_WIDGET(zond->menu.suchen), active );
     gtk_widget_set_sensitive( GTK_WIDGET(zond->menu.ansicht), active );
     gtk_widget_set_sensitive( GTK_WIDGET(zond->fs_button), active );
 //    gtk_widget_set_sensitive( GTK_WIDGET(zond->menu.extras), TRUE );
