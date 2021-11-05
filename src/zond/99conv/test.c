@@ -237,6 +237,21 @@ pdf_print_content_stream( fz_context* ctx, pdf_obj* page_ref, gchar** errmsg )
 gint
 test( Projekt* zond, gchar** errmsg )
 {
+    GtkTreePath* path = NULL;
+    GtkTreeIter iter = { 0 };
+    GtkTreeModel* model = NULL;
+    GtkTreeIter iter_new = { 0 };
+
+    model = gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_AUSWERTUNG]) );
+
+    gtk_tree_view_get_cursor( GTK_TREE_VIEW(zond->treeview[BAUM_AUSWERTUNG]), &path, NULL );
+    gtk_tree_model_get_iter( model, &iter, path );
+    gtk_tree_path_free( path );
+
+    gtk_tree_store_insert_after( GTK_TREE_STORE(model), &iter_new, NULL, &iter );
+
+    iter_new.user_data = iter.user_data;
+
     return 0;
 }
 
