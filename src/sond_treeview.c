@@ -282,7 +282,7 @@ sond_treeview_insert_node( SondTreeview* stv, GtkTreeIter* iter, gboolean child 
     else gtk_tree_store_insert_after( treestore, &new_iter, iter, NULL );
 
     GtkTreeIter* ret_iter = gtk_tree_iter_copy( &new_iter );
-gtk_tree_store_insert
+
     return ret_iter; //muß nach Gebrauch gtk_tree_iter_freed werden!!!
 }
 
