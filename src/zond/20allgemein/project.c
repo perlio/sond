@@ -31,6 +31,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../99conv/db_zu_baum.h"
 
 #include "../40viewer/viewer.h"
+#include "../zond_tree_store.h"
 
 #include "project.h"
 #include "project_db.h"
@@ -288,9 +289,9 @@ projekt_schliessen( Projekt* zond, gchar** errmsg )
             zond->treeview_focus_in_signal[BAUM_AUSWERTUNG] );
 
     //treeviews leeren
-    gtk_tree_store_clear( GTK_TREE_STORE(gtk_tree_view_get_model(
+    zond_tree_store_clear( ZOND_TREE_STORE(gtk_tree_view_get_model(
             GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]) )) );
-    gtk_tree_store_clear( GTK_TREE_STORE(gtk_tree_view_get_model(
+    zond_tree_store_clear( ZOND_TREE_STORE(gtk_tree_view_get_model(
             GTK_TREE_VIEW(zond->treeview[BAUM_AUSWERTUNG]) )) );
 
     //Wieder anschalten

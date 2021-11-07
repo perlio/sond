@@ -18,7 +18,6 @@ typedef struct _GtkWidget GtkWidget;
 typedef struct _GSettings GSettings;
 typedef struct _GtkLabel GtkLabel;
 typedef struct _GtkTreeView GtkTreeView;
-typedef struct _GtkTreeStore GtkTreeStore;
 typedef struct _GtkTreeSelection GtkTreeSelection;
 typedef struct _GtkCellRenderer GtkCellRenderer;
 typedef struct _GtkTextView GtkTextView;

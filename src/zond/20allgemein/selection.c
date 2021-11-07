@@ -18,6 +18,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "../global_types.h"
 #include "../error.h"
+#include "../zond_tree_store.h"
+
 
 #include "../99conv/baum.h"
 #include "../99conv/general.h"
@@ -536,7 +538,7 @@ selection_anbinden( Projekt* zond, gint anchor_id, gboolean kind, GArray* arr_ne
 
 
 void
-selection_paste( Projekt* zond, gboolean kind )
+selection_paste( Projekt* zond, gboolean kind, gboolean link )
 {
     gint rc = 0;
     gchar* errmsg = NULL;
@@ -558,6 +560,17 @@ selection_paste( Projekt* zond, gboolean kind )
     //Muß auf jeden Fall geprüft werden (derzeit)
             //will ich das wirklich?
 
+    if ( link )
+    {
+        GtkTreeModel* model = NULL;
+
+        if ( baum != baum_selection ) return;
+        if ( clipboard->arr_ref->len != 1 ) return;
+
+        model = gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) );
+
+        zond_tree_store_insert_link( )
+    }
     if ( baum == baum_selection ) //wenn innerhalb des gleichen Baums
     {
         rc = sond_treeview_test_cursor_descendant( zond->treeview[baum] );
@@ -767,7 +780,7 @@ selection_foreach_entfernen_anbindung( SondTreeview* stv,
     rc = db_remove_node( zond, BAUM_INHALT, node_id, errmsg );
     if ( rc ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "db_remove_node" )
 
-    gtk_tree_store_remove( GTK_TREE_STORE(gtk_tree_view_get_model(
+    zond_tree_store_remove( ZOND_TREE_STORE(gtk_tree_view_get_model(
             GTK_TREE_VIEW(stv) )), iter );
 
     rc = dbase_commit( (DBase*) zond->dbase_zond->dbase_work, errmsg );
@@ -807,7 +820,7 @@ selection_foreach_loeschen( SondTreeview* tree_view, GtkTreeIter* iter,
     gint rc = db_remove_node( zond, baum, node_id, errmsg );
     if ( rc ) ERROR_PAO ( "db_remove_node" )
 
-    gtk_tree_store_remove( GTK_TREE_STORE(gtk_tree_view_get_model(
+    zond_tree_store_remove( ZOND_TREE_STORE(gtk_tree_view_get_model(
             GTK_TREE_VIEW(zond->treeview[baum]) )), iter );
 
     return 0;
@@ -851,8 +864,8 @@ selection_foreach_change_icon_id( SondTreeview* tree_view, GtkTreeIter* iter,
     if ( rc ) ERROR_PAO( "dbase_full_set_icon_id" )
 
     //neuen icon_name im tree speichern
-    gtk_tree_store_set( GTK_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(s_selection->
-            zond->treeview[s_selection->baum]) )), iter, 0, s_selection->icon_name, -1 );
+    zond_tree_store_set( ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(s_selection->
+            zond->treeview[s_selection->baum]) )), iter, s_selection->icon_name, NULL, 0 );
 
     return 0;
 }

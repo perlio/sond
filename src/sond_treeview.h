@@ -39,8 +39,6 @@ GtkCellRenderer* sond_treeview_get_cell_renderer_text( SondTreeview* );
 
 void sond_treeview_expand_row( SondTreeview*, GtkTreeIter* );
 
-GtkTreeIter* sond_treeview_insert_node( SondTreeview*, GtkTreeIter*, gboolean );
-
 GtkTreeIter* sond_treeview_get_cursor( SondTreeview* );
 
 void sond_treeview_set_cursor( SondTreeview*, GtkTreeIter* );

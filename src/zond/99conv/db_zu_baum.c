@@ -9,6 +9,7 @@
 #include <gtk/gtk.h>
 
 #include "../../sond_treeview.h"
+#include "../zond_tree_store.h"
 
 
 GtkTreeIter*
@@ -19,6 +20,7 @@ db_baum_knoten( Projekt* zond, Baum baum, gint node_id, GtkTreeIter* iter,
     gint rc = 0;
     gchar* icon_name = NULL;
     gchar* node_text = NULL;
+    ZondTreeStore* tree_store = NULL;
 
     rc = db_get_icon_name_and_node_text( zond, baum, node_id, &icon_name,
             &node_text, errmsg );
@@ -30,13 +32,15 @@ db_baum_knoten( Projekt* zond, Baum baum, gint node_id, GtkTreeIter* iter,
         return NULL;
     }
 
+    tree_store = ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) ));
+
     //neuen Knoten einfügen
-    GtkTreeIter* new_iter = sond_treeview_insert_node( zond->treeview[baum], iter,
+    GtkTreeIter* new_iter = zond_tree_store_insert_node( tree_store, iter,
             child );
 
     //Daten rein
-    gtk_tree_store_set( GTK_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) )),
-            new_iter, 0, icon_name, 1, node_text, 2, node_id, -1);
+    zond_tree_store_set( ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) )),
+            new_iter, icon_name, node_text, node_id );
 
     g_free( icon_name );
     g_free( node_text );
@@ -98,7 +102,7 @@ db_baum_neu_laden( Projekt* zond, Baum baum, gchar** errmsg )
 #ifndef VIEWER
     gint first_node_id = 0;
 
-    gtk_tree_store_clear( GTK_TREE_STORE(gtk_tree_view_get_model(
+    zond_tree_store_clear( ZOND_TREE_STORE(gtk_tree_view_get_model(
             GTK_TREE_VIEW(zond->treeview[baum]) )) );
 
     first_node_id = db_get_first_child( zond, baum, 0, errmsg );

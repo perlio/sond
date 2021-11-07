@@ -32,6 +32,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "../global_types.h"
 #include "../error.h"
+#include "../zond_tree_store.h"
 
 #include "../99conv/general.h"
 #include "../99conv/baum.h"
@@ -455,6 +456,7 @@ cb_punkt_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
     gchar* errmsg = NULL;
     gint node_id = 0;
     gint new_node_id = 0;
+    ZondTreeStore* tree_store = NULL;
 
     Projekt* zond = (Projekt*) user_data;
 
@@ -540,14 +542,15 @@ cb_punkt_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
     //Knoten in baum_inhalt einfuegen
     GtkTreeIter* iter = sond_treeview_get_cursor( zond->treeview[baum] );
 
-    GtkTreeIter* new_iter = sond_treeview_insert_node( zond->treeview[baum], iter, child );
+    tree_store = ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) ));
+    GtkTreeIter* new_iter = zond_tree_store_insert_node( tree_store, iter, child );
 
     if ( child && iter ) sond_treeview_expand_row( zond->treeview[baum], iter );
     if ( iter ) gtk_tree_iter_free( iter );
 
     //Standardinhalt setzen
-    gtk_tree_store_set( GTK_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) )),
-            new_iter, 0, zond->icon[ICON_NORMAL].icon_name, 1, "Neuer Punkt", 2, new_node_id, -1 );
+    zond_tree_store_set( ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) )),
+            new_iter, zond->icon[ICON_NORMAL].icon_name, "Neuer Punkt", new_node_id );
 
     sond_treeview_set_cursor( zond->treeview[baum], new_iter );
 
@@ -635,8 +638,8 @@ cb_item_text_anbindung( GtkMenuItem* item, gpointer data )
 
         iter = baum_abfragen_iter( zond->treeview[baum], node_id );
         //neuen text im tree speichern
-        gtk_tree_store_set( GTK_TREE_STORE(gtk_tree_view_get_model(
-                GTK_TREE_VIEW(zond->treeview[baum]) )), iter, 1, node_text, -1 );
+        zond_tree_store_set( ZOND_TREE_STORE(gtk_tree_view_get_model(
+                GTK_TREE_VIEW(zond->treeview[baum]) )), iter, NULL, node_text, 0 );
         gtk_tree_iter_free( iter );
         g_free( node_text );
     }
@@ -729,7 +732,7 @@ cb_clipboard_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
     gboolean kind = (gboolean) GPOINTER_TO_INT(g_object_get_data( G_OBJECT(item),
             "kind" ));
 
-    selection_paste( zond, kind );
+    selection_paste( zond, kind, FALSE );
 
     return;
 }
@@ -1124,6 +1127,25 @@ init_menu( Projekt* zond )
     g_object_set_data( G_OBJECT(alsunterpunkt_einfuegenitem), "kind",
             GINT_TO_POINTER(1) );
 
+    //Link Einfügen
+    GtkWidget* pasteitem_link = gtk_menu_item_new_with_label("Link");
+    GtkWidget* pastemenu_link = gtk_menu_new();
+    GtkWidget* alspunkt_einfuegenitem_link = gtk_menu_item_new_with_label(
+            "Gleiche Ebene");
+    GtkWidget* alsunterpunkt_einfuegenitem_link = gtk_menu_item_new_with_label(
+            "Unterebene");
+    gtk_menu_shell_append(GTK_MENU_SHELL(pastemenu_link), alspunkt_einfuegenitem_link);
+    gtk_widget_add_accelerator(alspunkt_einfuegenitem_link, "activate", accel_group,
+            GDK_KEY_v, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
+    gtk_menu_shell_append(GTK_MENU_SHELL(pastemenu_link),
+            alsunterpunkt_einfuegenitem_link);
+    g_object_set_data( G_OBJECT(alsunterpunkt_einfuegenitem_link), "kind",
+            GINT_TO_POINTER(1) );
+    g_object_set_data( G_OBJECT(alsunterpunkt_einfuegenitem_link), "link",
+            GINT_TO_POINTER(1) );
+    g_object_set_data( G_OBJECT(alspunkt_einfuegenitem_link), "link",
+            GINT_TO_POINTER(1) );
+
     GtkWidget* sep_struktur1item = gtk_separator_menu_item_new();
 
     gtk_widget_add_accelerator(alsunterpunkt_einfuegenitem, "activate",
@@ -1134,6 +1156,12 @@ init_menu( Projekt* zond )
     g_signal_connect( G_OBJECT(alspunkt_einfuegenitem), "activate",
             G_CALLBACK(cb_clipboard_einfuegen_activate), (gpointer) zond );
     g_signal_connect( G_OBJECT(alsunterpunkt_einfuegenitem), "activate",
+            G_CALLBACK(cb_clipboard_einfuegen_activate),
+            (gpointer) zond );
+
+    g_signal_connect( G_OBJECT(alspunkt_einfuegenitem_link), "activate",
+            G_CALLBACK(cb_clipboard_einfuegen_activate), (gpointer) zond );
+    g_signal_connect( G_OBJECT(alsunterpunkt_einfuegenitem_link), "activate",
             G_CALLBACK(cb_clipboard_einfuegen_activate),
             (gpointer) zond );
 
@@ -1164,6 +1192,7 @@ init_menu( Projekt* zond )
     gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), kopierenitem );
     gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), ausschneidenitem );
     gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), pasteitem );
+    gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), pasteitem_link );
     gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), sep_struktur1item );
     gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), loeschenitem );
     gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), anbindung_entfernenitem );

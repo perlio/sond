@@ -18,9 +18,7 @@
 #ifndef ZOND_TREE_STORE_H_INCLUDED
 #define ZOND_TREE_STORE_H_INCLUDED
 
-#include <gdk/gdk.h>
-#include <gtk/gtktreemodel.h>
-#include <gtk/gtktreesortable.h>
+#include <gtk/gtk.h>
 #include <stdarg.h>
 
 G_BEGIN_DECLS
@@ -68,6 +66,14 @@ void          zond_tree_store_insert           (ZondTreeStore *tree_store,
                                                GtkTreeIter  *iter,
                                                GtkTreeIter  *parent,
                                                gint          position);
+
+GDK_AVAILABLE_IN_ALL
+void zond_tree_store_insert_link (ZondTreeStore *tree_store,
+                       GtkTreeIter  *iter,
+                       GtkTreeIter* iter_insert,
+                       GtkTreeIter  *parent,
+                       gint          position);
+
 GDK_AVAILABLE_IN_ALL
 void          zond_tree_store_insert_after     (ZondTreeStore *tree_store,
                                                GtkTreeIter  *iter,
@@ -75,16 +81,21 @@ void          zond_tree_store_insert_after     (ZondTreeStore *tree_store,
                                                GtkTreeIter  *sibling);
 
 GDK_AVAILABLE_IN_ALL
-gboolean      gtk_tree_store_is_ancestor      (GtkTreeStore *tree_store,
+GtkTreeIter* zond_tree_store_insert_node(ZondTreeStore* tree_store,
+                                         GtkTreeIter* iter,
+                                         gboolean child );
+
+GDK_AVAILABLE_IN_ALL
+gboolean      zond_tree_store_is_ancestor      (ZondTreeStore *tree_store,
                                                GtkTreeIter  *iter,
                                                GtkTreeIter  *descendant);
 GDK_AVAILABLE_IN_ALL
-gint          gtk_tree_store_iter_depth       (GtkTreeStore *tree_store,
+gint          zond_tree_store_iter_depth       (ZondTreeStore *tree_store,
                                                GtkTreeIter  *iter);
 GDK_AVAILABLE_IN_ALL
 void          zond_tree_store_clear            (ZondTreeStore *tree_store);
 GDK_AVAILABLE_IN_ALL
-gboolean      gtk_tree_store_iter_is_valid    (GtkTreeStore *tree_store,
+gboolean      zond_tree_store_iter_is_valid    (ZondTreeStore *tree_store,
                                                GtkTreeIter  *iter);
 G_END_DECLS
 #endif /* ZOND_TREE_STORE_H_INCLUDED */

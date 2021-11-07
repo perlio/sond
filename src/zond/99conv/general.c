@@ -4,6 +4,7 @@
 #include <ctype.h>
 
 #include "../zond_pdf_document.h"
+#include "../zond_tree_store.h"
 
 #include "../global_types.h"
 #include "../error.h"
@@ -198,7 +199,7 @@ knoten_verschieben( Projekt* zond, Baum baum, gint node_id, gint new_parent,
     GtkTreeIter* iter = NULL;
     iter = baum_abfragen_iter( zond->treeview[baum], node_id );
 
-    gtk_tree_store_remove( GTK_TREE_STORE(gtk_tree_view_get_model(
+    zond_tree_store_remove( ZOND_TREE_STORE(gtk_tree_view_get_model(
             GTK_TREE_VIEW(zond->treeview[baum]) ) ), iter );
     gtk_tree_iter_free( iter );
 

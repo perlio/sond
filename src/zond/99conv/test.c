@@ -2,6 +2,8 @@
 #include "../error.h"
 #include "../zond_pdf_document.h"
 #include "../zond_database.h"
+#include "../zond_tree_store.h"
+#include "../../sond_treeview.h"
 
 #include "../99conv/general.h"
 #include "pdf.h"
@@ -237,20 +239,15 @@ pdf_print_content_stream( fz_context* ctx, pdf_obj* page_ref, gchar** errmsg )
 gint
 test( Projekt* zond, gchar** errmsg )
 {
-    GtkTreePath* path = NULL;
-    GtkTreeIter iter = { 0 };
     GtkTreeModel* model = NULL;
-    GtkTreeIter iter_new = { 0 };
+    GtkTreeIter iter = { 0 };
+    GtkTreeIter* iter_cursor = NULL;
 
     model = gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_AUSWERTUNG]) );
 
-    gtk_tree_view_get_cursor( GTK_TREE_VIEW(zond->treeview[BAUM_AUSWERTUNG]), &path, NULL );
-    gtk_tree_model_get_iter( model, &iter, path );
-    gtk_tree_path_free( path );
+    iter_cursor = sond_treeview_get_cursor( zond->treeview[BAUM_AUSWERTUNG] );
 
-    gtk_tree_store_insert_after( GTK_TREE_STORE(model), &iter_new, NULL, &iter );
-
-    iter_new.user_data = iter.user_data;
+    zond_tree_store_insert_link( ZOND_TREE_STORE(model), &iter, iter_cursor, iter_cursor, -1 );
 
     return 0;
 }

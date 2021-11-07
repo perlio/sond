@@ -1103,6 +1103,23 @@ sond_treeviewfm_get_rel_path( SondTreeviewFM* stvfm, GtkTreeIter* iter )
 }
 
 
+static GtkTreeIter*
+sond_treeviewfm_insert_node( SondTreeviewFM* stvfm, GtkTreeIter* iter, gboolean child )
+{
+    GtkTreeIter new_iter;
+    GtkTreeStore* treestore = GTK_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(stvfm) ));
+
+    //Hauptknoten erzeugen
+    if ( !child ) gtk_tree_store_insert_after( treestore, &new_iter, NULL, iter );
+    //Unterknoten erzeugen
+    else gtk_tree_store_insert_after( treestore, &new_iter, iter, NULL );
+
+    GtkTreeIter* ret_iter = gtk_tree_iter_copy( &new_iter );
+
+    return ret_iter; //muß nach Gebrauch gtk_tree_iter_freed werden!!!
+}
+
+
 gint
 sond_treeviewfm_create_dir( SondTreeviewFM* stvfm, gboolean child, gchar** errmsg )
 {
@@ -1154,7 +1171,7 @@ sond_treeviewfm_create_dir( SondTreeviewFM* stvfm, gboolean child, gchar** errms
     GFileInfo* info_new = NULL;
     GError* error = NULL;
 
-    iter_new = sond_treeview_insert_node( SOND_TREEVIEW(stvfm), iter, child );
+    iter_new = sond_treeviewfm_insert_node( stvfm, iter, child );
     gtk_tree_iter_free( iter );
 
     info_new = g_file_query_info( file_dir, "*", G_FILE_QUERY_INFO_NONE, NULL, &error );
@@ -1353,7 +1370,7 @@ sond_treeviewfm_paste_clipboard_foreach( SondTreeview* stv, GtkTreeIter* iter,
         GtkTreeIter* iter_new = NULL;
         GError* error = NULL;
 
-        iter_new = sond_treeview_insert_node( stv, s_fm_paste_selection->iter_cursor,
+        iter_new = sond_treeviewfm_insert_node( SOND_TREEVIEWFM(stv), s_fm_paste_selection->iter_cursor,
                 s_fm_paste_selection->kind );
 
         gtk_tree_iter_free( s_fm_paste_selection->iter_cursor );

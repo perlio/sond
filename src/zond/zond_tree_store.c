@@ -216,6 +216,7 @@ zond_tree_store_new ( void )
     return (ZondTreeStore*) g_object_new (ZOND_TYPE_TREE_STORE, NULL);
 }
 
+
 static gboolean
 node_free (GNode *node, gpointer data)
 {
@@ -367,9 +368,21 @@ zond_tree_store_get_value (GtkTreeModel *tree_model,
   g_return_if_fail (VALID_ITER (iter, tree_store));
   row_data = (RowData*) G_NODE (iter->user_data)->data;
 
-  if ( column == 0 ) g_value_set_string( value, g_strdup( row_data->icon_name ) );
-  else if ( column == 1 ) g_value_set_string( value, g_strdup( row_data->node_text ) );
-  else if ( column == 2 ) g_value_set_int( value, row_data->node_id );
+  if ( column == 0 )
+  {
+      g_value_init(value, G_TYPE_STRING );
+      g_value_set_string( value, g_strdup( row_data->icon_name ) );
+  }
+  else if ( column == 1 )
+  {
+      g_value_init(value, G_TYPE_STRING );
+      g_value_set_string( value, g_strdup( row_data->node_text ) );
+  }
+  else if ( column == 2 )
+  {
+      g_value_init( value, G_TYPE_INT );
+      g_value_set_int( value, row_data->node_id );
+  }
 
   return;
 }
@@ -550,6 +563,8 @@ zond_tree_store_set (ZondTreeStore *tree_store,
     }
 
     if ( node_id ) row_data->node_id = node_id;
+
+    return;
 }
 
 /**
@@ -662,6 +677,45 @@ zond_tree_store_insert (ZondTreeStore *tree_store,
   gtk_tree_path_free (path);
   validate_tree ((ZondTreeStore*)tree_store);
 }
+
+
+void
+zond_tree_store_insert_link (ZondTreeStore *tree_store,
+                       GtkTreeIter  *iter,
+                       GtkTreeIter* iter_insert,
+                       GtkTreeIter  *parent,
+                       gint          position)
+{
+  ZondTreeStorePrivate *priv = tree_store->priv;
+  GtkTreePath *path;
+  GNode *parent_node;
+  GNode *new_node;
+  g_return_if_fail (ZOND_IS_TREE_STORE (tree_store));
+  g_return_if_fail (iter != NULL);
+  if (parent)
+    g_return_if_fail (VALID_ITER (parent, tree_store));
+  if (parent)
+    parent_node = parent->user_data;
+  else
+    parent_node = priv->root;
+  new_node = iter_insert->user_data;
+  iter->stamp = priv->stamp;
+  iter->user_data = new_node;
+  path = zond_tree_store_get_path (GTK_TREE_MODEL (tree_store), iter);
+  gtk_tree_model_row_inserted (GTK_TREE_MODEL (tree_store), path, iter);
+  if (parent_node != priv->root)
+    {
+      if (new_node->prev == NULL && new_node->next == NULL)
+        {
+          gtk_tree_path_up (path);
+          gtk_tree_model_row_has_child_toggled (GTK_TREE_MODEL (tree_store), path, parent);
+        }
+    }
+  gtk_tree_path_free (path);
+  validate_tree ((ZondTreeStore*)tree_store);
+}
+
+
 /**
  * gtk_tree_store_insert_after:
  * @tree_store: A #GtkTreeStore
@@ -731,6 +785,23 @@ zond_tree_store_insert_after (ZondTreeStore *tree_store,
   gtk_tree_path_free (path);
   validate_tree (tree_store);
 }
+
+
+GtkTreeIter*
+zond_tree_store_insert_node( ZondTreeStore* tree_store, GtkTreeIter* iter, gboolean child )
+{
+    GtkTreeIter new_iter;
+
+    //Hauptknoten erzeugen
+    if ( !child ) zond_tree_store_insert_after( tree_store, &new_iter, NULL, iter );
+    //Unterknoten erzeugen
+    else zond_tree_store_insert_after( tree_store, &new_iter, iter, NULL );
+
+    GtkTreeIter* ret_iter = gtk_tree_iter_copy( &new_iter );
+
+    return ret_iter; //muß nach Gebrauch gtk_tree_iter_freed werden!!!
+}
+
 
 /**
  * gtk_tree_store_is_ancestor:
@@ -827,7 +898,7 @@ zond_tree_store_increment_stamp (ZondTreeStore *tree_store)
 void
 zond_tree_store_clear (ZondTreeStore *tree_store)
 {
-  g_return_if_fail (GTK_IS_TREE_STORE (tree_store));
+  g_return_if_fail (ZOND_IS_TREE_STORE (tree_store));
   zond_tree_store_clear_traverse (tree_store->priv->root, tree_store);
   zond_tree_store_increment_stamp (tree_store);
 }

@@ -11,7 +11,7 @@ typedef char gchar;
 typedef int gboolean;
 
 
-void selection_paste( Projekt*, gboolean );
+void selection_paste( Projekt*, gboolean, gboolean );
 
 gint selection_entfernen_anbindung( Projekt*, gchar** );
 

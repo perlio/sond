@@ -26,6 +26,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "../global_types.h"
 #include "../error.h"
+#include "../zond_tree_store.h"
 
 #include "../99conv/baum.h"
 #include "../99conv/general.h"
@@ -255,7 +256,7 @@ treeviews_cb_cell_edited( GtkCellRenderer* cell, gchar* path_string, gchar* new_
         return;
     }
 
-    gtk_tree_store_set( GTK_TREE_STORE(model), &iter, 1, new_text, -1 );
+    zond_tree_store_set( ZOND_TREE_STORE(model), &iter, NULL, new_text, 0 );
     gtk_tree_view_columns_autosize( GTK_TREE_VIEW(stv) );
 
     return;
@@ -335,8 +336,8 @@ init_treeviews( Projekt* zond )
                 treeviews_render_node_text, zond );
 
         //Tree-Model erzeugen und verbinden
-        GtkTreeStore* tree_store = gtk_tree_store_new( 3, G_TYPE_STRING,
-                G_TYPE_STRING, G_TYPE_INT );
+        ZondTreeStore* tree_store = zond_tree_store_new( );
+
         gtk_tree_view_set_model( GTK_TREE_VIEW(zond->treeview[baum]), GTK_TREE_MODEL(tree_store) );
         g_object_unref( tree_store );
 
