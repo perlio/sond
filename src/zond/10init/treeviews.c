@@ -21,8 +21,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "../zond_treeviewfm.h"
 
-//#include "../../sond_treeview.h"
-//#include "../../sond_treeviewfm.h"
+#include "app_window.h"
 
 #include "../global_types.h"
 #include "../error.h"
@@ -252,17 +251,48 @@ treeviews_cb_cell_edited( GtkCellRenderer* cell, gchar* path_string, gchar* new_
         meldung( gtk_widget_get_toplevel( GTK_WIDGET(stv) ), "Knoten umbenennen nicht möglich\n\n"
                 "Bei Aufruf dbase_full_set_node_text:\n", errmsg, NULL );
         g_free( errmsg );
-
-        return;
+    }
+    else
+    {
+        gtk_tree_store_set( GTK_TREE_STORE(model), &iter, 1, new_text, -1 );
+        gtk_tree_view_columns_autosize( GTK_TREE_VIEW(stv) );
     }
 
-    zond_tree_store_set( ZOND_TREE_STORE(model), &iter, NULL, new_text, 0 );
-    gtk_tree_view_columns_autosize( GTK_TREE_VIEW(stv) );
+    zond->key_press_signal = g_signal_connect( zond->app_window, "key-press-event",
+            G_CALLBACK(cb_key_press), zond );
 
     return;
 }
 
 
+static void
+treeviews_cb_editing_canceled( GtkCellRenderer* renderer,
+                              gpointer data)
+{
+    Projekt* zond = (Projekt*) data;
+
+    zond_tree_store_set( ZOND_TREE_STORE(model), &iter, NULL, new_text, 0 );
+    gtk_tree_view_columns_autosize( GTK_TREE_VIEW(stv) );
+
+    zond->key_press_signal = g_signal_connect( zond->app_window, "key-press-event",
+            G_CALLBACK(cb_key_press), zond );
+
+    return;
+}
+
+
+static void
+treeviews_cb_editing_started( GtkCellRenderer* renderer, GtkEditable* editable,
+                             const gchar* path,
+                             gpointer data )
+{
+    Projekt* zond = (Projekt*) data;
+
+    g_signal_handler_disconnect( zond->app_window, zond->key_press_signal );
+    zond->key_press_signal = 0;
+
+    return;
+}
 
 static gboolean
 cb_show_popupmenu( GtkTreeView* treeview, GdkEventButton* event,
@@ -373,6 +403,11 @@ init_treeviews( Projekt* zond )
 //                G_CALLBACK(cb_datei_oeffnen), (gpointer) zond );
 
         //Text-Spalte wird editiert
+        //Beginn
+        g_signal_connect( sond_treeview_get_cell_renderer_text( zond->treeview[baum] ),
+                "editing-started", G_CALLBACK(treeviews_cb_editing_started), zond );
+        g_signal_connect( sond_treeview_get_cell_renderer_text( zond->treeview[baum] ),
+                "editing-canceled", G_CALLBACK(treeviews_cb_editing_canceled), zond );
         g_signal_connect( sond_treeview_get_cell_renderer_text( zond->treeview[baum] ),
                 "edited", G_CALLBACK(treeviews_cb_cell_edited), (gpointer) zond->treeview[baum] ); //Klick in textzelle = Inhalt editieren
 

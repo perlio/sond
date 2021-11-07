@@ -441,8 +441,11 @@ suchen_treeviews( Projekt* zond, const gchar* text, gchar** errmsg )
         ERROR_PAO( "suchen_db" )
     }
 
-    titel = g_strconcat( "Suche nach: '", text, "'", NULL );
-    rc = suchen_anzeigen_ergebnisse( zond, titel, arr_treffer, errmsg );
+    if ( arr_treffer->len )
+    {
+        titel = g_strconcat( "Suche nach: '", text, "'", NULL );
+        rc = suchen_anzeigen_ergebnisse( zond, titel, arr_treffer, errmsg );
+    }
     g_array_unref( arr_treffer );
     if ( rc ) ERROR_PAO( "suchen_anzeigen_ergebnisse" );
 

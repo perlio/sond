@@ -102,14 +102,16 @@ cb_textview_focus_in( GtkWidget* textview, GdkEvent* event, gpointer user_data )
 }
 
 
-static gboolean
+
+gboolean
 cb_key_press( GtkWidget* treeview, GdkEventKey* event, gpointer data )
 {
     Projekt* zond = (Projekt*) data;
 
-    if ( event->is_modifier ) return FALSE;
-
-    if ( (event->state & GDK_CONTROL_MASK) ) return FALSE;
+    if ( event->is_modifier || (event->state & GDK_CONTROL_MASK) ||
+            (event->keyval < 0x21) ||
+            (event->keyval > 0x7e) )
+            return FALSE;
 
     gtk_popover_popup( GTK_POPOVER(zond->popover) );
 
@@ -117,7 +119,7 @@ cb_key_press( GtkWidget* treeview, GdkEventKey* event, gpointer data )
 }
 
 
-gboolean
+static gboolean
 cb_textview_focus_out( GtkWidget* textview, GdkEvent* event, gpointer user_data )
 {
     gint rc = 0;
