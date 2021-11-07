@@ -271,8 +271,13 @@ treeviews_cb_editing_canceled( GtkCellRenderer* renderer,
 {
     Projekt* zond = (Projekt*) data;
 
+<<<<<<< HEAD
     zond_tree_store_set( ZOND_TREE_STORE(model), &iter, NULL, new_text, 0 );
     gtk_tree_view_columns_autosize( GTK_TREE_VIEW(stv) );
+=======
+    zond->key_press_signal = g_signal_connect( zond->app_window, "key-press-event",
+            G_CALLBACK(cb_key_press), zond );
+>>>>>>> 068356a (BugFix: Such-Entry ging immer los, auch wenn es nicht sollte)
 
     zond->key_press_signal = g_signal_connect( zond->app_window, "key-press-event",
             G_CALLBACK(cb_key_press), zond );
