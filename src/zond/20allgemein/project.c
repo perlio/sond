@@ -27,6 +27,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../global_types.h"
 #include "../error.h"
 
+#include "../10init/app_window.h"
+
 #include "../99conv/general.h"
 #include "../99conv/db_zu_baum.h"
 
@@ -325,6 +327,8 @@ projekt_schliessen( Projekt* zond, gchar** errmsg )
     //project in settings auf leeren String setzen
     g_settings_set_string( zond->settings, "project", "" );
 
+    g_signal_handler_disconnect( zond->app_window, zond->key_press_signal );
+
     return 0;
 }
 
@@ -379,11 +383,16 @@ project_oeffnen( Projekt* zond, const gchar* abs_path, gboolean create,
     Database* dbase = g_malloc0( sizeof( Database ) );
     dbase->db_store = zond->dbase_zond->dbase_store->db;
     dbase->db = zond->dbase_zond->dbase_work->dbase.db;
+
     rc = project_db_create_stmts( dbase, errmsg );
     if ( rc ) ERROR_SOND( "project_db_create_stmts" )
 
     zond->dbase = dbase;
     zond->db = zond->dbase->db;
+
+    //key_press-event-signal einschalten
+    zond->key_press_signal = g_signal_connect( zond->app_window,
+            "key-press-event", G_CALLBACK(cb_key_press), zond );
 
     return 0;
 }

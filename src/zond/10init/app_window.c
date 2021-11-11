@@ -276,13 +276,8 @@ init_app_window( Projekt* zond )
 
     zond->popover = gtk_popover_new( GTK_WIDGET(zond->treeview[BAUM_INHALT]) );
     entry_search = gtk_entry_new( );
+    gtk_widget_show( entry_search );
     gtk_container_add( GTK_CONTAINER(zond->popover), entry_search );
-
-//    gtk_widget_show_all( zond->popover );
-
-    //key_press-event-signal einschalten
-    zond->key_press_signal = g_signal_connect( zond->app_window,
-            "key-press-event", G_CALLBACK(cb_key_press), zond );
 
     g_signal_connect( entry_search, "activate", G_CALLBACK(cb_entry_search), zond );
 
