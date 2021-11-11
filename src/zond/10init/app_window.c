@@ -278,7 +278,7 @@ init_app_window( Projekt* zond )
     entry_search = gtk_entry_new( );
     gtk_container_add( GTK_CONTAINER(zond->popover), entry_search );
 
-    gtk_widget_show_all( zond->popover );
+//    gtk_widget_show_all( zond->popover );
 
     //key_press-event-signal einschalten
     zond->key_press_signal = g_signal_connect( zond->app_window,

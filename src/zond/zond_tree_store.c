@@ -56,7 +56,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 struct _ZondTreeStorePrivate
 {
   gint stamp;
-  gpointer root;
+  GNode* root;
 };
 
 typedef struct _Row_Data
@@ -549,6 +549,8 @@ zond_tree_store_set (ZondTreeStore *tree_store,
                     gchar* node_text,
                     gint node_id )
 {
+    GtkTreePath* path = NULL;
+
     RowData* row_data = (RowData*) G_NODE(iter->user_data)->data;
 
     if ( icon_name )
@@ -563,6 +565,10 @@ zond_tree_store_set (ZondTreeStore *tree_store,
     }
 
     if ( node_id ) row_data->node_id = node_id;
+
+    path = gtk_tree_model_get_path( GTK_TREE_MODEL(tree_store), iter );
+    gtk_tree_model_row_changed( GTK_TREE_MODEL(tree_store), path, iter );
+    gtk_tree_path_free( path );
 
     return;
 }
@@ -679,43 +685,6 @@ zond_tree_store_insert (ZondTreeStore *tree_store,
 }
 
 
-void
-zond_tree_store_insert_link (ZondTreeStore *tree_store,
-                       GtkTreeIter  *iter,
-                       GtkTreeIter* iter_insert,
-                       GtkTreeIter  *parent,
-                       gint          position)
-{
-  ZondTreeStorePrivate *priv = tree_store->priv;
-  GtkTreePath *path;
-  GNode *parent_node;
-  GNode *new_node;
-  g_return_if_fail (ZOND_IS_TREE_STORE (tree_store));
-  g_return_if_fail (iter != NULL);
-  if (parent)
-    g_return_if_fail (VALID_ITER (parent, tree_store));
-  if (parent)
-    parent_node = parent->user_data;
-  else
-    parent_node = priv->root;
-  new_node = iter_insert->user_data;
-  iter->stamp = priv->stamp;
-  iter->user_data = new_node;
-  path = zond_tree_store_get_path (GTK_TREE_MODEL (tree_store), iter);
-  gtk_tree_model_row_inserted (GTK_TREE_MODEL (tree_store), path, iter);
-  if (parent_node != priv->root)
-    {
-      if (new_node->prev == NULL && new_node->next == NULL)
-        {
-          gtk_tree_path_up (path);
-          gtk_tree_model_row_has_child_toggled (GTK_TREE_MODEL (tree_store), path, parent);
-        }
-    }
-  gtk_tree_path_free (path);
-  validate_tree ((ZondTreeStore*)tree_store);
-}
-
-
 /**
  * gtk_tree_store_insert_after:
  * @tree_store: A #GtkTreeStore
@@ -800,6 +769,27 @@ zond_tree_store_insert_node( ZondTreeStore* tree_store, GtkTreeIter* iter, gbool
     GtkTreeIter* ret_iter = gtk_tree_iter_copy( &new_iter );
 
     return ret_iter; //muß nach Gebrauch gtk_tree_iter_freed werden!!!
+}
+
+
+GtkTreeIter*
+zond_tree_store_insert_link (ZondTreeStore *tree_store,
+                       GtkTreeIter* iter_link,
+                       GtkTreeIter* iter,
+                       gboolean child )
+{
+    GtkTreeIter* iter_new = NULL;
+    GtkTreePath* path = NULL;
+
+    g_return_if_fail (ZOND_IS_TREE_STORE (tree_store));
+
+    iter_new = zond_tree_store_insert_node( tree_store, iter, child );
+    ((GNode*) iter_new->user_data)->data = ((GNode*) iter_link->user_data)->data;
+    path = zond_tree_store_get_path (GTK_TREE_MODEL (tree_store), iter_new );
+    gtk_tree_model_row_changed (GTK_TREE_MODEL (tree_store), path, iter_new );
+    gtk_tree_path_free( path );
+
+    return iter_new;
 }
 
 

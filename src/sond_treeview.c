@@ -271,8 +271,6 @@ sond_treeview_expand_row( SondTreeview* stv, GtkTreeIter* iter )
 
 
 GtkTreeIter*
-<<<<<<< HEAD
-=======
 sond_treeview_insert_node( SondTreeview* stv, GtkTreeIter* iter, gboolean child )
 {
     GtkTreeIter new_iter;
@@ -290,7 +288,6 @@ sond_treeview_insert_node( SondTreeview* stv, GtkTreeIter* iter, gboolean child 
 
 
 GtkTreeIter*
->>>>>>> 068356a (BugFix: Such-Entry ging immer los, auch wenn es nicht sollte)
 sond_treeview_get_cursor( SondTreeview* stv )
 {
     GtkTreePath* path;

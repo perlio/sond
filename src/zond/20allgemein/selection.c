@@ -131,7 +131,7 @@ typedef struct {
 } SSelectionKopieren;
 
 
-gint static
+static gint
 selection_foreach_kopieren( SondTreeview* tree_view, GtkTreeIter* iter, gpointer data, gchar** errmsg )
 {
     gint rc = 0;
@@ -537,6 +537,57 @@ selection_anbinden( Projekt* zond, gint anchor_id, gboolean kind, GArray* arr_ne
 }
 
 
+typedef struct {
+    Projekt* zond;
+    Baum baum;
+    GtkTreeIter* iter_dest;
+    gboolean kind;
+} SSelectionLink;
+
+
+static gint
+selection_foreach_link( SondTreeview* tree_view, GtkTreeIter* iter, gpointer data, gchar** errmsg )
+{
+    GtkTreeIter* iter_created = NULL;
+    GtkTreeModel* model = NULL;
+
+    SSelectionLink* s_selection = (SSelectionLink*) data;
+
+    model = gtk_tree_view_get_model( GTK_TREE_VIEW(tree_view) );
+    iter_created = zond_tree_store_insert_link( ZOND_TREE_STORE(model), iter,
+            s_selection->iter_dest, s_selection->kind );
+
+    if ( s_selection->iter_dest ) gtk_tree_iter_free( s_selection->iter_dest );
+    s_selection->iter_dest = iter_created;
+
+    s_selection->kind = FALSE;
+
+    return 0;
+}
+
+
+//Ziel ist immer BAUM_AUSWERTUNG
+static gint
+selection_link( Projekt* zond, Baum baum_von, gint anchor_id, gboolean kind, gchar** errmsg )
+{
+    gint rc = 0;
+
+    SSelectionLink s_selection = { zond, baum_von, NULL, kind };
+    s_selection.iter_dest = sond_treeview_get_cursor( zond->treeview[baum_von] );
+
+    rc = sond_treeview_clipboard_foreach( zond->treeview[baum_von],
+            selection_foreach_link, &s_selection, errmsg );
+
+    sond_treeview_expand_row( zond->treeview[baum_von], s_selection.iter_dest );
+    sond_treeview_set_cursor( zond->treeview[baum_von], s_selection.iter_dest );
+    if ( s_selection.iter_dest ) gtk_tree_iter_free( s_selection.iter_dest );
+
+    if ( rc == -1 ) ERROR_PAO( "treeview_selection_foreach" )
+
+    return 0;
+}
+
+
 void
 selection_paste( Projekt* zond, gboolean kind, gboolean link )
 {
@@ -560,33 +611,36 @@ selection_paste( Projekt* zond, gboolean kind, gboolean link )
     //Muß auf jeden Fall geprüft werden (derzeit)
             //will ich das wirklich?
 
-    if ( link )
-    {
-        GtkTreeModel* model = NULL;
-
-        if ( baum != baum_selection ) return;
-        if ( clipboard->arr_ref->len != 1 ) return;
-
-        model = gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) );
-
-        zond_tree_store_insert_link( )
-    }
     if ( baum == baum_selection ) //wenn innerhalb des gleichen Baums
     {
-        rc = sond_treeview_test_cursor_descendant( zond->treeview[baum] );
-        if ( rc == 1 )
+        if ( sond_treeview_test_cursor_descendant( zond->treeview[baum] ) )
         {
             meldung( zond->app_window, "Clipboard kann dorthin nicht "
                     "verschoben werden\nAbkömmling von zu verschiebendem "
                     "Knoten", NULL );
             return;
         }
-        else if ( rc == 2 ) return;
     }
+    else if ( link ) return;
 
     gint anchor_id = 0;
     if ( baum != BAUM_FS ) anchor_id =
             baum_abfragen_aktuelle_node_id( zond->treeview[baum] );
+
+    if ( link )
+    {
+        gint rc = 0;
+
+        rc = selection_link( zond, baum, anchor_id, kind, &errmsg );
+        if ( rc )
+        {
+            meldung( zond->app_window, "Selection kann nicht kopiert/verschoben "
+                    "werden\n\nBei Aufruf fm_paste_clipboard:\n", errmsg, NULL );
+            g_free( errmsg );
+        }
+
+        return;
+    }
 
     //Jetzt die einzelnen Varianten
     if ( baum_selection == BAUM_FS )

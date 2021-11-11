@@ -731,8 +731,10 @@ cb_clipboard_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
 
     gboolean kind = (gboolean) GPOINTER_TO_INT(g_object_get_data( G_OBJECT(item),
             "kind" ));
+    gboolean link = (gboolean) GPOINTER_TO_INT(g_object_get_data( G_OBJECT(item),
+            "link" ));
 
-    selection_paste( zond, kind, FALSE );
+    selection_paste( zond, kind, link );
 
     return;
 }
@@ -1145,6 +1147,7 @@ init_menu( Projekt* zond )
             GINT_TO_POINTER(1) );
     g_object_set_data( G_OBJECT(alspunkt_einfuegenitem_link), "link",
             GINT_TO_POINTER(1) );
+    gtk_menu_item_set_submenu(GTK_MENU_ITEM(pasteitem_link), pastemenu_link);
 
     GtkWidget* sep_struktur1item = gtk_separator_menu_item_new();
 

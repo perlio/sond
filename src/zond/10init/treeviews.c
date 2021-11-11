@@ -254,7 +254,7 @@ treeviews_cb_cell_edited( GtkCellRenderer* cell, gchar* path_string, gchar* new_
     }
     else
     {
-        gtk_tree_store_set( GTK_TREE_STORE(model), &iter, 1, new_text, -1 );
+        zond_tree_store_set( ZOND_TREE_STORE(model), &iter, NULL, new_text, 0 );
         gtk_tree_view_columns_autosize( GTK_TREE_VIEW(stv) );
     }
 
@@ -270,14 +270,6 @@ treeviews_cb_editing_canceled( GtkCellRenderer* renderer,
                               gpointer data)
 {
     Projekt* zond = (Projekt*) data;
-
-<<<<<<< HEAD
-    zond_tree_store_set( ZOND_TREE_STORE(model), &iter, NULL, new_text, 0 );
-    gtk_tree_view_columns_autosize( GTK_TREE_VIEW(stv) );
-=======
-    zond->key_press_signal = g_signal_connect( zond->app_window, "key-press-event",
-            G_CALLBACK(cb_key_press), zond );
->>>>>>> 068356a (BugFix: Such-Entry ging immer los, auch wenn es nicht sollte)
 
     zond->key_press_signal = g_signal_connect( zond->app_window, "key-press-event",
             G_CALLBACK(cb_key_press), zond );

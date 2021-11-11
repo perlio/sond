@@ -247,7 +247,6 @@ test( Projekt* zond, gchar** errmsg )
 
     iter_cursor = sond_treeview_get_cursor( zond->treeview[BAUM_AUSWERTUNG] );
 
-    zond_tree_store_insert_link( ZOND_TREE_STORE(model), &iter, iter_cursor, iter_cursor, -1 );
 
     return 0;
 }
