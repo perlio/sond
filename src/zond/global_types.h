@@ -273,7 +273,7 @@ typedef struct _Pdf_Viewer
     GPtrArray* arr_pages; //array von ViewerPage*
     GArray* arr_text_occ;
     gint text_occ_act;
-    gboolean text_occ_search_completed;
+    gint text_occ_search_completed;
 
     GThreadPool* thread_pool_page;
     GArray* arr_rendered;
