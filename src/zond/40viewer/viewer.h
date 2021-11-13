@@ -14,12 +14,6 @@ typedef double gdouble;
 typedef int gboolean;
 typedef void* gpointer;
 
-typedef struct _Thread_Pool_User_Data
-{
-    GArray* arr_rendered_pages;
-    GMutex mutex_array;
-} tpud;
-
 
 void viewer_springen_zu_pos_pdf( PdfViewer*, PdfPos, gdouble );
 

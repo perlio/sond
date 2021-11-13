@@ -877,7 +877,11 @@ cb_viewer_text_search( GtkWidget* widget, gpointer data )
     PdfViewer* pv = (PdfViewer*) data;
 
     //dokument durchsucht und kein Fund: return
-    if ( pv->text_occ_search_completed == -1 ) return;
+    if ( pv->text_occ_search_completed == -1 )
+    {
+        display_message( gtk_widget_get_toplevel( widget ), "Kein Treffer", NULL );
+        return;
+    }
 
     dir = (widget == pv->button_vorher) ? -1 : 1;
 
@@ -1013,6 +1017,7 @@ cb_viewer_text_search( GtkWidget* widget, gpointer data )
 
         return;
     }
+    else pv->text_occ_search_completed = 1;
 
     viewer_text_occ_search_next( pv, pdf_pos, dir );
     viewer_anzeigen_text_occ( pv );
