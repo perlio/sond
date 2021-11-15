@@ -21,6 +21,7 @@ db_baum_knoten( Projekt* zond, Baum baum, gint node_id, GtkTreeIter* iter,
     gchar* icon_name = NULL;
     gchar* node_text = NULL;
     ZondTreeStore* tree_store = NULL;
+    GtkTreeIter new_iter = { 0 };
 
     rc = db_get_icon_name_and_node_text( zond, baum, node_id, &icon_name,
             &node_text, errmsg );
@@ -35,17 +36,16 @@ db_baum_knoten( Projekt* zond, Baum baum, gint node_id, GtkTreeIter* iter,
     tree_store = ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) ));
 
     //neuen Knoten einfügen
-    GtkTreeIter* new_iter = zond_tree_store_insert_node( tree_store, iter,
-            child );
+    zond_tree_store_insert_node( tree_store, iter, child, &new_iter );
 
     //Daten rein
     zond_tree_store_set( ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) )),
-            new_iter, icon_name, node_text, node_id );
+            &new_iter, icon_name, node_text, node_id );
 
     g_free( icon_name );
     g_free( node_text );
 
-    return new_iter; //muß gtk_tree_iter_freed werden!!
+    return gtk_tree_iter_copy( &new_iter ); //muß gtk_tree_iter_freed werden!!
 }
 
 

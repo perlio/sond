@@ -9,11 +9,11 @@ gint
 baum_abfragen_aktuelle_node_id( SondTreeview* treeview )
 {
     gint node_id = 0;
-    GtkTreeIter* iter = sond_treeview_get_cursor( treeview );
-    if ( !iter ) return 0;
+    GtkTreeIter iter = { 0 };
 
-    gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(treeview) ), iter, 2, &node_id, -1 );
-    gtk_tree_iter_free( iter );
+    if ( !sond_treeview_get_cursor( treeview, &iter ) ) return 0;
+
+    gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(treeview) ), &iter, 2, &node_id, -1 );
 
     return node_id;
 }

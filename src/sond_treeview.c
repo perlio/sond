@@ -287,22 +287,19 @@ sond_treeview_insert_node( SondTreeview* stv, GtkTreeIter* iter, gboolean child 
 }
 
 
-GtkTreeIter*
-sond_treeview_get_cursor( SondTreeview* stv )
+gboolean
+sond_treeview_get_cursor( SondTreeview* stv, GtkTreeIter* iter )
 {
     GtkTreePath* path;
 
     gtk_tree_view_get_cursor( GTK_TREE_VIEW(stv), &path, NULL );
-    if ( !path ) return NULL;
+    if ( !path ) return FALSE;
 
-    GtkTreeIter iter;
-    gtk_tree_model_get_iter( gtk_tree_view_get_model( GTK_TREE_VIEW(stv) ), &iter, path );
+    gtk_tree_model_get_iter( gtk_tree_view_get_model( GTK_TREE_VIEW(stv) ), iter, path );
 
     gtk_tree_path_free( path );
 
-    GtkTreeIter* ret_iter = gtk_tree_iter_copy( &iter );
-
-    return ret_iter; //muß gtk_tree_iter_freed werden!
+    return TRUE;
 }
 
 

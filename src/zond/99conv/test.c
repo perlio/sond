@@ -245,7 +245,6 @@ test( Projekt* zond, gchar** errmsg )
 
     model = gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_AUSWERTUNG]) );
 
-    iter_cursor = sond_treeview_get_cursor( zond->treeview[BAUM_AUSWERTUNG] );
 
 
     return 0;

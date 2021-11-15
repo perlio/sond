@@ -540,21 +540,22 @@ cb_punkt_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
     }
 
     //Knoten in baum_inhalt einfuegen
-    GtkTreeIter* iter = sond_treeview_get_cursor( zond->treeview[baum] );
+    GtkTreeIter iter = { 0 };
+    GtkTreeIter new_iter = { 0 };
+    gboolean success = FALSE;
+
+    success = sond_treeview_get_cursor( zond->treeview[baum], &iter );
 
     tree_store = ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) ));
-    GtkTreeIter* new_iter = zond_tree_store_insert_node( tree_store, iter, child );
+    zond_tree_store_insert_node( tree_store, &iter, child, &new_iter );
 
-    if ( child && iter ) sond_treeview_expand_row( zond->treeview[baum], iter );
-    if ( iter ) gtk_tree_iter_free( iter );
+    if ( child && success ) sond_treeview_expand_row( zond->treeview[baum], &iter );
 
     //Standardinhalt setzen
     zond_tree_store_set( ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) )),
-            new_iter, zond->icon[ICON_NORMAL].icon_name, "Neuer Punkt", new_node_id );
+            &new_iter, zond->icon[ICON_NORMAL].icon_name, "Neuer Punkt", new_node_id );
 
-    sond_treeview_set_cursor( zond->treeview[baum], new_iter );
-
-    gtk_tree_iter_free( new_iter );
+    sond_treeview_set_cursor( zond->treeview[baum], &new_iter );
 
     return;
 }
