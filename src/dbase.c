@@ -473,6 +473,7 @@ dbase_create_db( sqlite3* db, gchar** errmsg )
             "DROP TABLE IF EXISTS ziele;"
             "DROP TABLE IF EXISTS baum_inhalt;"
             "DROP TABLE IF EXISTS baum_auswertung; "
+            "DROP TABLE IF EXISTS links; "
 
             "CREATE TABLE eingang ("
                 "ID INTEGER NOT NULL, "
@@ -550,7 +551,15 @@ dbase_create_db( sqlite3* db, gchar** errmsg )
             "ON DELETE RESTRICT ON UPDATE RESTRICT );"
 
             "INSERT INTO baum_auswertung (node_id, parent_id, older_sibling_id) "
-            "VALUES (0, 0, 0)"; //mit eingang
+            "VALUES (0, 0, 0)" //mit eingang
+
+            "CREATE TABLE links ( "
+            "projekt VARCHAR (200), "
+            "baum_id INTEGER, "
+            "node_id INTEGER, "
+            "baum_id_dest INTEGER, "
+            "node_id_dest INTEGER "
+            " ); ";
 
     rc = sqlite3_exec( db, sql, NULL, NULL, &errmsg_ii );
     if ( rc != SQLITE_OK )

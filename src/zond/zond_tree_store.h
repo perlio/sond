@@ -97,5 +97,9 @@ void          zond_tree_store_clear            (ZondTreeStore *tree_store);
 GDK_AVAILABLE_IN_ALL
 gboolean      zond_tree_store_iter_is_valid    (ZondTreeStore *tree_store,
                                                GtkTreeIter  *iter);
+
+gboolean
+zond_tree_store_get_link_target( GtkTreeIter*, GtkTreeIter* );
+
 G_END_DECLS
 #endif /* ZOND_TREE_STORE_H_INCLUDED */

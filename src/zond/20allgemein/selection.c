@@ -209,7 +209,7 @@ selection_anbinden_zu_baum( Projekt* zond, GtkTreeIter* iter, gboolean kind,
         //datei in baum_inhalt einfügen
         iter_new = db_baum_knoten_mit_kindern( zond, FALSE, BAUM_INHALT, node_id_new,
                 iter, kind, errmsg );
-        if ( !iter_new ) ERROR_PAO( "db_baum_knoten" )
+        if ( !iter_new ) ERROR_PAO( "db_baum_knoten_mit_kindern" )
 
         sond_treeview_expand_row( zond->treeview[BAUM_INHALT], iter_new );
         gtk_tree_view_columns_autosize( GTK_TREE_VIEW(((Projekt*) zond)->treeview[BAUM_INHALT]) );
@@ -549,6 +549,9 @@ selection_foreach_link( SondTreeview* tree_view, GtkTreeIter* iter, gpointer dat
     SSelectionLink* s_selection = (SSelectionLink*) data;
 
     model = gtk_tree_view_get_model( GTK_TREE_VIEW(tree_view) );
+
+    zond_tree_store_get_link_target( iter, iter );
+
     zond_tree_store_insert_link( ZOND_TREE_STORE(model), iter,
             s_selection->iter_dest, s_selection->kind );
 

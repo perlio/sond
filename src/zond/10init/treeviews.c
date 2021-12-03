@@ -323,6 +323,24 @@ treeviews_render_node_text( SondTreeview* stv, GtkTreeIter* iter, gpointer data 
 
     Baum baum = baum_get_baum_from_treeview( zond, GTK_WIDGET(stv) );
 
+    if ( zond_tree_store_get_link_target( NULL, iter ) )
+    {
+        gchar *label = NULL;
+        gchar *markuptxt = NULL;
+
+        // Retrieve the current label
+        gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(stv) ), iter, 1, &label, -1);
+
+        markuptxt = g_strdup_printf("<i>%s</i>", label);
+
+        g_object_set( G_OBJECT(sond_treeview_get_cell_renderer_text( stv )),
+                "markup", markuptxt, NULL);  // markup isn't showing and text field is blank due to "text" == NULL
+
+        g_free(markuptxt);
+    }
+
+//    else g_object_set( G_OBJECT(sond_treeview_get_cell_renderer_text( stv )),
+//            "strikethrough-set", FALSE, NULL );
     if ( baum == BAUM_AUSWERTUNG )
     {
         gchar* text = NULL;
@@ -348,7 +366,6 @@ treeviews_render_node_text( SondTreeview* stv, GtkTreeIter* iter, gpointer data 
 
     return;
 }
-
 
 
 void
