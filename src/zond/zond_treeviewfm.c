@@ -5,6 +5,9 @@
 #include "../eingang.h"
 #include "../sond_treeviewfm.h"
 
+#include "10init/app_window.h"
+#include "10init/treeviews.h"
+
 #include "global_types.h"
 
 #ifdef _WIN32
@@ -13,6 +16,11 @@
 #endif // _WIN32
 
 
+typedef enum
+{
+    PROP_PROJEKT = 1,
+    N_PROPERTIES
+} ZondTreeviewFMProperty;
 
 typedef struct
 {
@@ -21,6 +29,53 @@ typedef struct
 
 
 G_DEFINE_TYPE_WITH_PRIVATE(ZondTreeviewFM, zond_treeviewfm, SOND_TYPE_TREEVIEWFM)
+
+static GParamSpec *obj_properties[N_PROPERTIES] = { NULL, };
+
+static void
+zond_treeviewfm_set_property (GObject      *object,
+                          guint         property_id,
+                          const GValue *value,
+                          GParamSpec   *pspec)
+{
+    ZondTreeviewFM* self = ZOND_TREEVIEWFM(object);
+    ZondTreeviewFMPrivate* priv = zond_treeviewfm_get_instance_private( self );
+
+    switch ((ZondTreeviewFMProperty) property_id)
+    {
+    case PROP_PROJEKT:
+      priv->zond = g_value_get_pointer(value);
+      break;
+
+    default:
+      /* We don't have any other property... */
+      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
+      break;
+    }
+}
+
+
+static void
+zond_treeviewfm_get_property (GObject    *object,
+                          guint       property_id,
+                          GValue     *value,
+                          GParamSpec *pspec)
+{
+    ZondTreeviewFM* self = ZOND_TREEVIEWFM(object);
+    ZondTreeviewFMPrivate* priv = zond_treeviewfm_get_instance_private( self );
+
+    switch ((ZondTreeviewFMProperty) property_id)
+    {
+        case PROP_PROJEKT:
+                g_value_set_pointer( value, priv->zond );
+                break;
+
+        default:
+                /* We don't have any other property... */
+                G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
+                break;
+    }
+}
 
 
 static gint
@@ -137,9 +192,12 @@ zond_treeviewfm_row_text_edited( GtkCellRenderer* cell, gchar* path_string, gcha
     ZondTreeviewFM* ztvfm = (ZondTreeviewFM*) data;
     ZondTreeviewFMPrivate* ztvfm_priv = zond_treeviewfm_get_instance_private( ztvfm );
 
+    ztvfm_priv->zond->key_press_signal = g_signal_connect( ztvfm_priv->zond->app_window, "key-press-event",
+            G_CALLBACK(cb_key_press), ztvfm_priv->zond );
+
     if ( ztvfm_priv->zond->dbase_zond->changed ) changed = TRUE;
 
-    SOND_TREEVIEWFM_CLASS(zond_treeviewfm_parent_class)->row_text_edited( cell, path_string, new_text, data );
+    sond_treeviewfm_row_text_edited( cell, path_string, new_text, data );
 
     if ( !changed ) project_reset_changed( ztvfm_priv->zond );
 
@@ -148,45 +206,71 @@ zond_treeviewfm_row_text_edited( GtkCellRenderer* cell, gchar* path_string, gcha
 
 
 static void
-zond_treeviewfm_class_init( ZondTreeviewFMClass* klass )
+zond_treeviewfm_constructed( GObject* self )
 {
-    SOND_TREEVIEWFM_CLASS(klass)->dbase_begin = zond_treeviewfm_dbase_begin;
-    SOND_TREEVIEWFM_CLASS(klass)->dbase_test = zond_treeviewfm_dbase_test;
-    SOND_TREEVIEWFM_CLASS(klass)->dbase_update_path = zond_treeviewfm_dbase_update_path;
-    SOND_TREEVIEWFM_CLASS(klass)->dbase_update_eingang = zond_treeviewfm_dbase_update_eingang;
-    SOND_TREEVIEWFM_CLASS(klass)->dbase_end = zond_treeviewfm_dbase_end;
-    SOND_TREEVIEWFM_CLASS(klass)->row_text_edited = zond_treeviewfm_row_text_edited;
+    ZondTreeviewFMPrivate* ztvfm_priv = zond_treeviewfm_get_instance_private( ZOND_TREEVIEWFM(self) );
+
+    g_signal_connect( sond_treeview_get_cell_renderer_text( SOND_TREEVIEW(self) ),
+            "editing-started", G_CALLBACK(treeviews_cb_editing_started), ztvfm_priv->zond );
+    g_signal_connect( sond_treeview_get_cell_renderer_text( SOND_TREEVIEW(self) ),
+            "editing-canceled", G_CALLBACK(treeviews_cb_editing_canceled), ztvfm_priv->zond );
+
+    G_OBJECT_CLASS(zond_treeviewfm_parent_class)->constructed( self );
 
     return;
 }
 
 
 static void
-zond_treeviewfm_init( ZondTreeviewFM* stvfm )
+zond_treeviewfm_class_init( ZondTreeviewFMClass* klass )
 {
+    GObjectClass *object_class = G_OBJECT_CLASS(klass);
 
+    object_class->constructed = zond_treeviewfm_constructed;
+
+    object_class->set_property = zond_treeviewfm_set_property;
+    object_class->get_property = zond_treeviewfm_get_property;
+
+    obj_properties[PROP_PROJEKT] =
+            g_param_spec_pointer ("Projekt",
+                                  "Projekt",
+                                  "Kontext-Struktur.",
+                                  G_PARAM_CONSTRUCT_ONLY | G_PARAM_READWRITE);
+
+   g_object_class_install_properties(object_class,
+                                      N_PROPERTIES,
+                                      obj_properties);
+
+    SOND_TREEVIEWFM_CLASS(klass)->dbase_begin = zond_treeviewfm_dbase_begin;
+    SOND_TREEVIEWFM_CLASS(klass)->dbase_test = zond_treeviewfm_dbase_test;
+    SOND_TREEVIEWFM_CLASS(klass)->dbase_update_path = zond_treeviewfm_dbase_update_path;
+    SOND_TREEVIEWFM_CLASS(klass)->dbase_update_eingang = zond_treeviewfm_dbase_update_eingang;
+    SOND_TREEVIEWFM_CLASS(klass)->dbase_end = zond_treeviewfm_dbase_end;
+
+    return;
+}
+
+
+static void
+zond_treeviewfm_init( ZondTreeviewFM* ztvfm )
+{
     return;
 }
 
 
 ZondTreeviewFM*
-zond_treeviewfm_new( void )
+zond_treeviewfm_new( Projekt* zond )
 {
-    ZondTreeviewFM* ztvfm = g_object_new( ZOND_TYPE_TREEVIEWFM, NULL );
+    ZondTreeviewFM* ztvfm = g_object_new( ZOND_TYPE_TREEVIEWFM, "Projekt", zond, NULL );
+
+    //Text-Spalte wird editiert
+    g_signal_connect( sond_treeview_get_cell_renderer_text( SOND_TREEVIEW(ztvfm) ),
+            "edited", G_CALLBACK(zond_treeviewfm_row_text_edited), ztvfm ); //Klick in textzelle = Datei umbenennen
 
     return ztvfm;
 }
 
 
-void
-zond_treeviewfm_set_zond( ZondTreeviewFM* ztvfm, Projekt* zond )
-{
-    ZondTreeviewFMPrivate* ztvfm_priv = zond_treeviewfm_get_instance_private( ztvfm );
-
-    ztvfm_priv->zond = zond;
-
-    return;
-}
 
 
 

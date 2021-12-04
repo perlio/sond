@@ -19,7 +19,6 @@ G_DECLARE_DERIVABLE_TYPE (SondTreeviewFM, sond_treeviewfm, SOND, TREEVIEWFM, Son
 struct _SondTreeviewFMClass
 {
     SondTreeviewClass parent_class;
-    void (*row_text_edited) (GtkCellRenderer*, gchar*, gchar*, gpointer);
     gint (*dbase_begin) (SondTreeviewFM*, gchar**);
     gint (*dbase_test) (SondTreeviewFM*, const gchar*, gchar**);
     gint (*dbase_update_path) (SondTreeviewFM*, const gchar*, const gchar*, gchar**);
@@ -27,6 +26,9 @@ struct _SondTreeviewFMClass
     gint (*dbase_end) (SondTreeviewFM*, gboolean, gchar**);
 };
 
+
+void
+sond_treeviewfm_row_text_edited( GtkCellRenderer*, gchar*, gchar*, gpointer );
 
 SondTreeviewFM* sond_treeviewfm_new( void );
 

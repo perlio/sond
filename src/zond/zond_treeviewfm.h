@@ -74,6 +74,7 @@ G_BEGIN_DECLS
 
 typedef struct _DBase DBase;
 typedef struct _Clipboard Clipboard;
+typedef struct _Projekt Projekt;
 
 
 #define ZOND_TYPE_TREEVIEWFM zond_treeviewfm_get_type( )
@@ -86,9 +87,8 @@ struct _ZondTreeviewFMClass
 };
 
 
-ZondTreeviewFM* zond_treeviewfm_new( void );
+ZondTreeviewFM* zond_treeviewfm_new( Projekt* );
 
-void zond_treeviewfm_set_zond( ZondTreeviewFM*, Projekt* );
 
 
 

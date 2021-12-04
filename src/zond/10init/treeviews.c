@@ -264,7 +264,7 @@ treeviews_cb_cell_edited( GtkCellRenderer* cell, gchar* path_string, gchar* new_
 }
 
 
-static void
+void
 treeviews_cb_editing_canceled( GtkCellRenderer* renderer,
                               gpointer data)
 {
@@ -277,7 +277,7 @@ treeviews_cb_editing_canceled( GtkCellRenderer* renderer,
 }
 
 
-static void
+void
 treeviews_cb_editing_started( GtkCellRenderer* renderer, GtkEditable* editable,
                              const gchar* path,
                              gpointer data )
@@ -431,8 +431,7 @@ init_treeviews( Projekt* zond )
 void
 treeviews_init_fs_tree( Projekt* zond )
 {
-    zond->treeview[BAUM_FS] = SOND_TREEVIEW(zond_treeviewfm_new( ));
-    zond_treeviewfm_set_zond( ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), zond );
+    zond->treeview[BAUM_FS] = SOND_TREEVIEW(zond_treeviewfm_new( zond ));
 
     //die Selection
     zond->selection[BAUM_FS] = gtk_tree_view_get_selection(
