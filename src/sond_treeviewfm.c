@@ -341,7 +341,7 @@ sond_treeviewfm_move_copy_create_delete( SondTreeviewFM* stvfm, GFile* file_sour
 }
 
 
-static void
+void
 sond_treeviewfm_row_text_edited( GtkCellRenderer* cell, gchar* path_string, gchar* new_text,
         gpointer data )
 {
@@ -895,7 +895,6 @@ sond_treeviewfm_class_init( SondTreeviewFMClass* klass )
     klass->dbase_update_path = sond_treeviewfm_dbase_update_path;
     klass->dbase_update_eingang = sond_treeviewfm_dbase_update_eingang;
     klass->dbase_end= sond_treeviewfm_dbase_end;
-    klass->row_text_edited = sond_treeviewfm_row_text_edited;
 
     GObjectClass *object_class = G_OBJECT_CLASS(klass);
 
@@ -969,10 +968,6 @@ sond_treeviewfm_init( SondTreeviewFM* stvfm )
     // Doppelklick = angebundene Datei anzeigen
     g_signal_connect( stvfm, "row-activated", G_CALLBACK(sond_treeviewfm_row_activated), NULL );
 
-    //Text-Spalte wird editiert
-    g_signal_connect( sond_treeview_get_cell_renderer_text( SOND_TREEVIEW(stvfm) ),
-            "edited", G_CALLBACK(sond_treeviewfm_row_text_edited), stvfm ); //Klick in textzelle = Datei umbenennen
-
     return;
 }
 
@@ -981,6 +976,10 @@ SondTreeviewFM*
 sond_treeviewfm_new( void )
 {
     SondTreeviewFM* stvfm = g_object_new( SOND_TYPE_TREEVIEWFM, NULL );
+
+    //Text-Spalte wird editiert
+    g_signal_connect( sond_treeview_get_cell_renderer_text( SOND_TREEVIEW(stvfm) ),
+            "edited", G_CALLBACK(sond_treeviewfm_row_text_edited), stvfm ); //Klick in textzelle = Datei umbenennen
 
     return stvfm;
 }
