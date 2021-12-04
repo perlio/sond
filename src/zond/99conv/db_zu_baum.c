@@ -36,7 +36,7 @@ db_baum_knoten( Projekt* zond, Baum baum, gint node_id, GtkTreeIter* iter,
     tree_store = ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) ));
 
     //neuen Knoten einfügen
-    zond_tree_store_insert_node( tree_store, iter, child, &new_iter );
+    zond_tree_store_insert( tree_store, iter, child, &new_iter );
 
     //Daten rein
     zond_tree_store_set( ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) )),

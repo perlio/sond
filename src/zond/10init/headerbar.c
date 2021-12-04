@@ -547,7 +547,7 @@ cb_punkt_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
     success = sond_treeview_get_cursor( zond->treeview[baum], &iter );
 
     tree_store = ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) ));
-    zond_tree_store_insert_node( tree_store, &iter, child, &new_iter );
+    zond_tree_store_insert( tree_store, &iter, child, &new_iter );
 
     if ( child && success ) sond_treeview_expand_row( zond->treeview[baum], &iter );
 

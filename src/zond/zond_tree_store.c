@@ -693,61 +693,6 @@ zond_tree_store_remove (ZondTreeStore *tree_store,
 }
 
 /**
- * gtk_tree_store_insert:
- * @tree_store: A #GtkTreeStore
- * @iter: (out): An unset #GtkTreeIter to set to the new row
- * @parent: (allow-none): A valid #GtkTreeIter, or %NULL
- * @position: position to insert the new row, or -1 for last
- *
- * Creates a new row at @position.  If parent is non-%NULL, then the row will be
- * made a child of @parent.  Otherwise, the row will be created at the toplevel.
- * If @position is -1 or is larger than the number of rows at that level, then
- * the new row will be inserted to the end of the list.  @iter will be changed
- * to point to this new row.  The row will be empty after this function is
- * called.  To fill in values, you need to call gtk_tree_store_set() or
- * gtk_tree_store_set_value().
- *
- **/
-void
-zond_tree_store_insert (ZondTreeStore *tree_store,
-                       GtkTreeIter  *iter,
-                       GtkTreeIter  *parent,
-                       gint          position)
-{
-  ZondTreeStorePrivate *priv = tree_store->priv;
-  GtkTreePath *path;
-  GNode *parent_node;
-  GNode *new_node;
-  g_return_if_fail (ZOND_IS_TREE_STORE (tree_store));
-  g_return_if_fail (iter != NULL);
-  if (parent)
-    g_return_if_fail (VALID_ITER (parent, tree_store));
-  if (parent)
-    parent_node = parent->user_data;
-  else
-    parent_node = priv->root;
-  new_node = g_node_new (NULL);
-  new_node->data = g_malloc0( sizeof( RowData ) );
-
-  iter->stamp = priv->stamp;
-  iter->user_data = new_node;
-  g_node_insert (parent_node, position, new_node);
-  path = zond_tree_store_get_path (GTK_TREE_MODEL (tree_store), iter);
-  gtk_tree_model_row_inserted (GTK_TREE_MODEL (tree_store), path, iter);
-  if (parent_node != priv->root)
-    {
-      if (new_node->prev == NULL && new_node->next == NULL)
-        {
-          gtk_tree_path_up (path);
-          gtk_tree_model_row_has_child_toggled (GTK_TREE_MODEL (tree_store), path, parent);
-        }
-    }
-  gtk_tree_path_free (path);
-  validate_tree ((ZondTreeStore*)tree_store);
-}
-
-
-/**
  * gtk_tree_store_insert_after:
  * @tree_store: A #GtkTreeStore
  * @iter: (out): An unset #GtkTreeIter to set to the new row
@@ -820,59 +765,120 @@ zond_tree_store_insert_after (ZondTreeStore *tree_store,
 }
 
 
-void
-zond_tree_store_insert_node_reel( ZondTreeStore* tree_store, GtkTreeIter* iter, gboolean child, GtkTreeIter* iter_new )
+static void
+_do_zond_tree_store_insert( ZondTreeStore* tree_store, GNode* node_parent,
+        gint pos, GtkTreeIter* iter_new )
 {
-    //Hauptknoten erzeugen
-    if ( !child ) zond_tree_store_insert_after( tree_store, iter_new, NULL, iter );
-    //Unterknoten erzeugen
-    else zond_tree_store_insert_after( tree_store, iter_new, iter, NULL );
+    GNode* node_new = NULL;
+    GtkTreeIter iter = { 0, };
+    GtkTreePath* path = NULL;
+
+    node_new = g_node_new (NULL);
+    node_new->data = g_malloc0( sizeof( RowData ) );
+
+    g_node_insert( node_parent, pos, node_new );
+
+    iter.stamp = tree_store->priv->stamp;
+    iter.user_data = node_new;
+
+    path = zond_tree_store_get_path (GTK_TREE_MODEL (tree_store), &iter);
+    gtk_tree_model_row_inserted (GTK_TREE_MODEL (tree_store), path, &iter);
+
+    if (node_parent != tree_store->priv->root)
+    {
+        if (node_new->prev == NULL && node_new->next == NULL)
+        {
+            GtkTreeIter iter_parent = { 0, };
+
+            iter_parent.stamp = tree_store->priv->stamp;
+            iter_parent.user_data = node_parent;
+
+            gtk_tree_path_up (path);
+            gtk_tree_model_row_has_child_toggled (GTK_TREE_MODEL (tree_store), path, &iter_parent );
+        }
+    }
+    gtk_tree_path_free (path);
+
+    if ( iter_new ) *iter_new = iter;
 
     return;
 }
 
 
 void
-zond_tree_store_insert_node( ZondTreeStore* tree_store, GtkTreeIter* iter, gboolean child, GtkTreeIter* iter_new )
+zond_tree_store_insert( ZondTreeStore* tree_store, GtkTreeIter* iter, gboolean child, GtkTreeIter* iter_new )
 {
-    GtkTreeIter iter_anchor = { 0 };
-    GNode* node_anchor = NULL;
+    GNode* node_parent = NULL;
+    gint pos = 0;
+    GList* list = NULL;
 
-    //orig herausfinden
-    if ( child )
+    g_return_if_fail (ZOND_IS_TREE_STORE (tree_store));
+    g_return_if_fail (iter_new != NULL);
+
+    if ( iter )
     {
-        GNode* node_orig = NULL;
+        GNode* node = NULL;
 
-        node_orig = ((RowData*) G_NODE(iter->user_data)->data)->orig_link;
-        if ( node_orig ) node_anchor = node_orig;
-        else node_anchor = G_NODE(iter->user_data);
+        node = iter->user_data;
+
+        //orig herausfinden
+        if ( child )
+        {
+            GNode* node_orig = NULL;
+
+            node_orig = ((RowData*) node->data)->orig_link;
+            if ( node_orig ) node_parent = node_orig;
+            else node_parent = node;
+            pos = -1;
+        }
+        else
+        {
+            pos = g_node_child_position( node->parent, node );
+
+            if ( node->parent == tree_store->priv->root)
+                    node_parent = tree_store->priv->root;
+            else
+            {
+                GNode* node_orig = NULL;
+
+                node_orig = ((RowData*) node->parent->data)->orig_link;
+                if ( node_orig ) node_parent = node_orig;
+                else node_parent = node->parent;
+            }
+        }
     }
     else
     {
-        if ( G_NODE(iter->user_data)->parent == tree_store->priv->root)
-                node_anchor = iter->user_data;
-        else
-        {
-            GNode* node_orig_parent = NULL;
-
-            ((RowData*) node_orig_parent = G_NODE(iter->user_data)->parent->data)->orig_link;
-            if ( node_orig_parent ) node_anchor = ((RowData*) G_NODE(iter->user_data)->data)->orig_link;
-            else node_anchor = G_NODE(iter->user_data);
-        }
+        node_parent = tree_store->priv->root;
+        pos = -1;
     }
 
-    iter_anchor->stamp = tree_store->priv->stamp;
-    iter_anchor->user_data = node_anchor;
-
-    zond_tree_store_insert_node_reel( tree_store, &iter_anchor, child, iter_new );
-    //Hauptknoten, bei links nur Zeiger hierauf
+    _do_zond_tree_store_insert( tree_store, node_parent, pos, iter_new );
     ((RowData*) G_NODE(iter_new->user_data)->data)->data = g_malloc0( sizeof( Data ) );
 
 
-    //Hauptknoten erzeugen
-    if ( !child ) zond_tree_store_insert_after( tree_store, iter_new, NULL, &iter_anchor );
-    //Unterknoten erzeugen
-    else zond_tree_store_insert_after( tree_store, iter_new, iter, NULL );
+    if ( node_parent != tree_store->priv->root &&
+            (list = ((RowData*) node_parent->data)->linked_nodes) )
+    {
+        GList* ptr = list;
+
+        do
+        {
+            GNode* parent_link = NULL;
+            GtkTreeIter iter_link = { 0, };
+
+            parent_link = ptr->data;
+            _do_zond_tree_store_insert( tree_store, parent_link, pos, &iter_link );
+
+            ((RowData*) G_NODE(iter_link.user_data)->data)->data =
+                    ((RowData*) G_NODE(iter_new->user_data)->data)->data;
+
+            ((RowData*) G_NODE(iter_link.user_data)->data)->orig_link =
+                    G_NODE(iter_new->user_data);
+        } while ( (ptr = ptr->next) );
+
+        g_list_free( list );
+    }
 
     return;
 }
@@ -889,7 +895,7 @@ zond_tree_store_insert_link (ZondTreeStore *tree_store,
     RowData* row_data = NULL;
 
     //Hauptknoten erzeugen
-    zond_tree_store_insert_node( tree_store, iter_dest, child, &iter_dest_new );
+    zond_tree_store_insert( tree_store, iter_dest, child, &iter_dest_new );
     iter_dest->user_data = iter_dest_new.user_data;
 
     //Daten

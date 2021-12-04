@@ -61,11 +61,6 @@ void          zond_tree_store_set              (ZondTreeStore *tree_store,
 GDK_AVAILABLE_IN_ALL
 gboolean      zond_tree_store_remove           (ZondTreeStore *tree_store,
                                                GtkTreeIter  *iter);
-GDK_AVAILABLE_IN_ALL
-void          zond_tree_store_insert           (ZondTreeStore *tree_store,
-                                               GtkTreeIter  *iter,
-                                               GtkTreeIter  *parent,
-                                               gint          position);
 
 GDK_AVAILABLE_IN_ALL
 void          zond_tree_store_insert_after     (ZondTreeStore *tree_store,
@@ -74,7 +69,7 @@ void          zond_tree_store_insert_after     (ZondTreeStore *tree_store,
                                                GtkTreeIter  *sibling);
 
 GDK_AVAILABLE_IN_ALL
-void zond_tree_store_insert_node(ZondTreeStore* tree_store,
+void zond_tree_store_insert(ZondTreeStore* tree_store,
                                          GtkTreeIter* iter,
                                          gboolean child,
                                          GtkTreeIter* iter_new );

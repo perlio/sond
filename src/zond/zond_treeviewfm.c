@@ -197,6 +197,7 @@ zond_treeviewfm_row_text_edited( GtkCellRenderer* cell, gchar* path_string, gcha
 
     if ( ztvfm_priv->zond->dbase_zond->changed ) changed = TRUE;
 
+    //chain-up
     sond_treeviewfm_row_text_edited( cell, path_string, new_text, data );
 
     if ( !changed ) project_reset_changed( ztvfm_priv->zond );
