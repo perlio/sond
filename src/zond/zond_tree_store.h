@@ -76,7 +76,7 @@ void zond_tree_store_insert(ZondTreeStore* tree_store,
 
 GDK_AVAILABLE_IN_ALL
 void         zond_tree_store_insert_link (ZondTreeStore*,
-                                          GtkTreeIter*,
+                                          GNode*,
                                           GtkTreeIter*,
                                           gboolean );
 
@@ -94,7 +94,10 @@ gboolean      zond_tree_store_iter_is_valid    (ZondTreeStore *tree_store,
                                                GtkTreeIter  *iter);
 
 gboolean
-zond_tree_store_get_link_target( GtkTreeIter*, GtkTreeIter* );
+zond_tree_store_is_link( GtkTreeIter* );
+
+GNode*
+zond_tree_store_get_node_orig( GtkTreeIter* );
 
 G_END_DECLS
 #endif /* ZOND_TREE_STORE_H_INCLUDED */

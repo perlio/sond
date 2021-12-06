@@ -323,7 +323,7 @@ treeviews_render_node_text( SondTreeview* stv, GtkTreeIter* iter, gpointer data 
 
     Baum baum = baum_get_baum_from_treeview( zond, GTK_WIDGET(stv) );
 
-    if ( zond_tree_store_get_link_target( NULL, iter ) )
+    if ( zond_tree_store_is_link( iter ) )
     {
         gchar *label = NULL;
         gchar *markuptxt = NULL;

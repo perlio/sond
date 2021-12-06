@@ -545,14 +545,15 @@ static gint
 selection_foreach_link( SondTreeview* tree_view, GtkTreeIter* iter, gpointer data, gchar** errmsg )
 {
     GtkTreeModel* model = NULL;
+    GNode* node_orig = NULL;
 
     SSelectionLink* s_selection = (SSelectionLink*) data;
 
     model = gtk_tree_view_get_model( GTK_TREE_VIEW(tree_view) );
 
-    zond_tree_store_get_link_target( iter, iter );
+    node_orig = zond_tree_store_get_node_orig( iter );
 
-    zond_tree_store_insert_link( ZOND_TREE_STORE(model), iter,
+    zond_tree_store_insert_link( ZOND_TREE_STORE(model), node_orig,
             s_selection->iter_dest, s_selection->kind );
 
     s_selection->kind = FALSE;
@@ -618,26 +619,10 @@ selection_paste( Projekt* zond, gboolean kind, gboolean link )
             return;
         }
     }
-    else if ( link ) return;
 
     gint anchor_id = 0;
     if ( baum != BAUM_FS ) anchor_id =
             baum_abfragen_aktuelle_node_id( zond->treeview[baum] );
-
-    if ( link )
-    {
-        gint rc = 0;
-
-        rc = selection_link( zond, baum, anchor_id, kind, &errmsg );
-        if ( rc )
-        {
-            meldung( zond->app_window, "Selection kann nicht kopiert/verschoben "
-                    "werden\n\nBei Aufruf fm_paste_clipboard:\n", errmsg, NULL );
-            g_free( errmsg );
-        }
-
-        return;
-    }
 
     //Jetzt die einzelnen Varianten
     if ( baum_selection == BAUM_FS )
@@ -737,7 +722,7 @@ selection_paste( Projekt* zond, gboolean kind, gboolean link )
         {//kopieren innerhalb BAUM_INHALT = verschieben von Anbindungen
 
         }
-        else if ( baum == BAUM_AUSWERTUNG && !clipboard->ausschneiden )
+        else if ( baum == BAUM_AUSWERTUNG && !clipboard->ausschneiden && !link )
         {
             rc = selection_kopieren( zond, baum_selection, anchor_id, kind, &errmsg );
             if ( rc == -1 )
@@ -749,10 +734,24 @@ selection_paste( Projekt* zond, gboolean kind, gboolean link )
                 return;
             }
         }
+        else if ( baum == BAUM_AUSWERTUNG && !clipboard->ausschneiden && link )
+        {
+            gint rc = 0;
+
+            rc = selection_link( zond, baum, anchor_id, kind, &errmsg );
+            if ( rc )
+            {
+                meldung( zond->app_window, "Selection kann nicht kopiert/verschoben "
+                        "werden\n\nBei Aufruf fm_paste_clipboard:\n", errmsg, NULL );
+                g_free( errmsg );
+            }
+
+            return;
+        }
     }
     else if ( baum_selection == BAUM_AUSWERTUNG )
     {
-        if ( baum == BAUM_AUSWERTUNG && clipboard->ausschneiden )
+        if ( baum == BAUM_AUSWERTUNG && clipboard->ausschneiden && !link )
         {
             rc = selection_verschieben( zond, baum_selection, anchor_id, kind, &errmsg );
             if ( rc == -1 )
@@ -764,7 +763,7 @@ selection_paste( Projekt* zond, gboolean kind, gboolean link )
                 return;
             }
         }
-        else if ( baum == BAUM_AUSWERTUNG && !clipboard->ausschneiden )
+        else if ( baum == BAUM_AUSWERTUNG && !clipboard->ausschneiden && !link )
         {
             rc = selection_kopieren( zond, baum_selection, anchor_id, kind, &errmsg );
             if ( rc == -1 )
@@ -775,6 +774,20 @@ selection_paste( Projekt* zond, gboolean kind, gboolean link )
 
                 return;
             }
+        }
+        else if ( baum == BAUM_AUSWERTUNG && !clipboard->ausschneiden && link )
+        {
+            gint rc = 0;
+
+            rc = selection_link( zond, baum, anchor_id, kind, &errmsg );
+            if ( rc )
+            {
+                meldung( zond->app_window, "Selection kann nicht kopiert/verschoben "
+                        "werden\n\nBei Aufruf fm_paste_clipboard:\n", errmsg, NULL );
+                g_free( errmsg );
+            }
+
+            return;
         }
     }
 
