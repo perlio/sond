@@ -129,11 +129,9 @@ cb_cursor_changed( SondTreeview* treeview, gpointer user_data )
             &anbindung, &errmsg );
     if ( rc == -1 )
     {
-        meldung( zond->app_window, "Fehler in cb_cursor_changed:\n\n"
-                "Bei Aufruf db_get_rel_path:\n", errmsg, NULL );
+        text_label = g_strconcat( "Fehler in cb_cursor_changed: Bei Aufruf "
+                "abfragen_rel_path_and_anbindung:", errmsg, NULL );
         g_free( errmsg );
-
-        return;
     }
 
     if ( rc == 2 ) text_label = g_strdup( "Keine Anbindung" );
@@ -148,9 +146,10 @@ cb_cursor_changed( SondTreeview* treeview, gpointer user_data )
     }
 
     gtk_label_set_text( zond->label_status, text_label );
+    g_free( text_label );
     g_free( rel_path );
 
-    if ( baum == BAUM_INHALT ) return;
+    if ( baum == BAUM_INHALT || rc == -1 ) return;
 
     //TextBuffer laden
     GtkTextBuffer* buffer = gtk_text_view_get_buffer( zond->textview );
@@ -159,9 +158,11 @@ cb_cursor_changed( SondTreeview* treeview, gpointer user_data )
     rc = db_get_text( zond, node_id, &text, &errmsg );
     if ( rc )
     {
-        meldung( zond->app_window, "Fehler in cb_cursor_changed:\n\nBei Aufruf "
-                "db_get_text\n", errmsg, NULL );
+        text_label = g_strconcat( "Fehler in cb_cursor_changed: Bei Aufruf "
+                "db_get_text:\n", errmsg, NULL );
         g_free( errmsg );
+        gtk_label_set_text( zond->label_status, text_label );
+        g_free( text_label );
 
         return;
     }
