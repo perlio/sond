@@ -290,7 +290,7 @@ sond_treeview_insert_node( SondTreeview* stv, GtkTreeIter* iter, gboolean child 
 gboolean
 sond_treeview_get_cursor( SondTreeview* stv, GtkTreeIter* iter )
 {
-    GtkTreePath* path;
+    GtkTreePath* path = NULL;
 
     gtk_tree_view_get_cursor( GTK_TREE_VIEW(stv), &path, NULL );
     if ( !path ) return FALSE;

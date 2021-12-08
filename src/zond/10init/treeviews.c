@@ -41,24 +41,46 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
 
+static gint
+treeviews_get_actual_baum_and_node_id( Projekt* zond, SondTreeview* stv, Baum* baum,
+        gint* node_id )
+{
+    GtkTreeIter iter = { 0, };
+    ZondTreeStore* tree_store = NULL;
+
+    if ( !sond_treeview_get_cursor( stv, &iter ) )
+    {
+        meldung( zond->app_window, "Kein Punkt ausgewählt", NULL );
+
+        return 1;
+    }
+
+    gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(stv) ), &iter, 2, node_id, 3, &tree_store, -1 );
+
+    if ( tree_store == ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]) )) ) baum = BAUM_INHALT;
+    else if ( tree_store == ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_AUSWERTUNG]) )) ) baum = BAUM_AUSWERTUNG;
+    else return 1;
+
+}
 static void
 baum_row_activated( SondTreeview* tv, GtkTreePath* tp, GtkTreeViewColumn* tvc,
         gpointer user_data )
 {
     gint rc = 0;
     gchar* errmsg = NULL;
+    GtkTreeIter iter = { 0, };
+    gint node_id = 0;
+    ZondTreeStore* tree_store = NULL;
+    Baum baum = KEIN_BAUM;
 
     Projekt* zond = (Projekt*) user_data;
-    Baum baum = baum_get_baum_from_treeview( zond, GTK_WIDGET(tv) );
+/*    Baum baum = baum_get_baum_from_treeview( zond, GTK_WIDGET(tv) );
 
     //aktuellen Knoten abfragen
-    gint node_id = baum_abfragen_aktuelle_node_id( tv );
-    if ( !node_id )
-    {
-        meldung( zond->app_window, "Kein Punkt ausgewählt", NULL );
+    gint node_id = baum_abfragen_aktuelle_node_id( tv ); */
 
-        return;
-    }
+    rc = treeviews_get_actual_baum_and_node_id( zond, tv, &baum, &node_id );
+    if ( rc ) return;
 
     rc = oeffnen_node( zond, baum, node_id, &errmsg );
     if ( rc )
@@ -77,18 +99,17 @@ cb_cursor_changed( SondTreeview* treeview, gpointer user_data )
     gint rc = 0;
     gchar* errmsg = NULL;
     gint node_id = 0;
-    static GtkTreeIter iter;
+    GtkTreeIter iter = { 0, };
 
     Projekt* zond = (Projekt*) user_data;
 
-    Baum baum = baum_get_baum_from_treeview( zond, GTK_WIDGET(treeview) );
-
-    if ( baum == BAUM_AUSWERTUNG &&
+    if ( treeview == zond->treeview[BAUM_AUSWERTUNG] &&
             gtk_tree_model_get_iter_first( gtk_tree_view_get_model(
-            GTK_TREE_VIEW(zond->treeview[baum]) ), &iter ) )
+            GTK_TREE_VIEW(treeview) ), &iter ) )
             gtk_widget_set_sensitive( GTK_WIDGET(zond->textview), TRUE );
 
-    node_id = baum_abfragen_aktuelle_node_id( treeview );
+    rc = treeviews_get_actual_baum_and_node_id( zond, treeview, &baum, &node_id );
+
     if ( node_id == 0 ) //letzter Knoten wird gelöscht
     {
         gtk_widget_set_sensitive( GTK_WIDGET(zond->textview), FALSE );
@@ -102,6 +123,7 @@ cb_cursor_changed( SondTreeview* treeview, gpointer user_data )
     Anbindung* anbindung = NULL;
     gchar* text_label = NULL;
     gchar* text = NULL;
+    Baum baum = BAUM_INHALT;
 
     rc = abfragen_rel_path_and_anbindung( zond, baum, node_id, &rel_path,
             &anbindung, &errmsg );

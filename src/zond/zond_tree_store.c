@@ -292,7 +292,7 @@ zond_tree_store_get_flags (GtkTreeModel *tree_model)
 static gint
 zond_tree_store_get_n_columns (GtkTreeModel *tree_model)
 {
-  return 3;
+  return 4;
 }
 
 static GType
@@ -302,6 +302,7 @@ zond_tree_store_get_column_type (GtkTreeModel *tree_model,
     if ( index == 0 ) return G_TYPE_STRING;
     else if ( index == 1 ) return G_TYPE_STRING;
     else if ( index == 2 ) return G_TYPE_INT;
+    else if ( index == 3 ) return G_TYPE_POINTER;
 
     return G_TYPE_INVALID;
 }
@@ -416,6 +417,11 @@ zond_tree_store_get_value (GtkTreeModel *tree_model,
   {
       g_value_init( value, G_TYPE_INT );
       g_value_set_int( value, row_data->data->node_id );
+  }
+  else if ( column == 3 )
+  {
+      g_value_init( value, G_TYPE_POINTER );
+      g_value_set_pointer( value, row_data->tree_store );
   }
 
   return;
