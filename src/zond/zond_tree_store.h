@@ -62,11 +62,6 @@ GDK_AVAILABLE_IN_ALL
 gboolean      zond_tree_store_remove           (ZondTreeStore *tree_store,
                                                GtkTreeIter  *iter);
 
-GDK_AVAILABLE_IN_ALL
-void          zond_tree_store_insert_after     (ZondTreeStore *tree_store,
-                                               GtkTreeIter  *iter,
-                                               GtkTreeIter  *parent,
-                                               GtkTreeIter  *sibling);
 
 GDK_AVAILABLE_IN_ALL
 void zond_tree_store_insert(ZondTreeStore* tree_store,

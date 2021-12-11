@@ -18,8 +18,6 @@ gint baum_abfragen_aktuelle_node_id( SondTreeview* );
 
 Baum baum_abfragen_aktiver_treeview( Projekt* );
 
-gint baum_get_node_id( GtkTreeModel*, GtkTreeIter* );
-
 gint baum_abfragen_node_id( SondTreeview*, GtkTreePath*, gchar** );
 
 GtkTreePath* baum_abfragen_path( SondTreeview*, gint );

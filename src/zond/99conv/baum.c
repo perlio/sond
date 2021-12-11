@@ -36,17 +36,6 @@ baum_abfragen_aktiver_treeview( Projekt* zond )
 
 
 gint
-baum_get_node_id( GtkTreeModel* model, GtkTreeIter* iter )
-{
-    gint node_id = 0;
-
-    gtk_tree_model_get( model, iter, 2, &node_id, -1 );
-
-    return node_id;
-}
-
-
-gint
 baum_abfragen_node_id( SondTreeview* treeview, GtkTreePath* path, gchar** errmsg )
 {
     gint node_id = 0;

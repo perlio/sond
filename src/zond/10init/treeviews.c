@@ -57,20 +57,21 @@ treeviews_get_actual_baum_and_node_id( Projekt* zond, SondTreeview* stv, Baum* b
 
     gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(stv) ), &iter, 2, node_id, 3, &tree_store, -1 );
 
-    if ( tree_store == ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]) )) ) baum = BAUM_INHALT;
-    else if ( tree_store == ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_AUSWERTUNG]) )) ) baum = BAUM_AUSWERTUNG;
+    if ( tree_store == ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]) )) ) *baum = BAUM_INHALT;
+    else if ( tree_store == ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_AUSWERTUNG]) )) ) *baum = BAUM_AUSWERTUNG;
     else return 1;
 
+    return 0;
 }
+
+
 static void
 baum_row_activated( SondTreeview* tv, GtkTreePath* tp, GtkTreeViewColumn* tvc,
         gpointer user_data )
 {
     gint rc = 0;
     gchar* errmsg = NULL;
-    GtkTreeIter iter = { 0, };
     gint node_id = 0;
-    ZondTreeStore* tree_store = NULL;
     Baum baum = KEIN_BAUM;
 
     Projekt* zond = (Projekt*) user_data;
@@ -100,6 +101,7 @@ cb_cursor_changed( SondTreeview* treeview, gpointer user_data )
     gchar* errmsg = NULL;
     gint node_id = 0;
     GtkTreeIter iter = { 0, };
+    Baum baum = KEIN_BAUM;
 
     Projekt* zond = (Projekt*) user_data;
 
@@ -123,7 +125,6 @@ cb_cursor_changed( SondTreeview* treeview, gpointer user_data )
     Anbindung* anbindung = NULL;
     gchar* text_label = NULL;
     gchar* text = NULL;
-    Baum baum = BAUM_INHALT;
 
     rc = abfragen_rel_path_and_anbindung( zond, baum, node_id, &rel_path,
             &anbindung, &errmsg );
@@ -255,19 +256,18 @@ treeviews_cb_cell_edited( GtkCellRenderer* cell, gchar* path_string, gchar* new_
     gint rc = 0;
     gchar* errmsg = NULL;
     Baum baum = KEIN_BAUM;
+    gint node_id = 0;
+    GtkTreeIter iter = { 0, };
 
     SondTreeview* stv = (SondTreeview*) user_data;
     Projekt* zond = g_object_get_data( G_OBJECT(stv), "zond" );
 
-    baum = baum_get_baum_from_treeview( zond, GTK_WIDGET(stv) );
-    GtkTreeModel* model = gtk_tree_view_get_model( GTK_TREE_VIEW(stv) );
+    rc = treeviews_get_actual_baum_and_node_id( zond, stv, &baum, &node_id );
+    if ( rc ) return;
 
-    GtkTreeIter iter;
-    gtk_tree_model_get_iter_from_string( model, &iter, path_string );
+    gtk_tree_model_get_iter_from_string( gtk_tree_view_get_model( GTK_TREE_VIEW(stv) ), &iter, path_string );
 
     //node_id holen, node_text in db ändern
-    gint node_id = baum_get_node_id( model, &iter );
-
     rc = dbase_full_set_node_text( zond->dbase_zond->dbase_work, baum, node_id, new_text, &errmsg );
     if ( rc )
     {
@@ -277,7 +277,7 @@ treeviews_cb_cell_edited( GtkCellRenderer* cell, gchar* path_string, gchar* new_
     }
     else
     {
-        zond_tree_store_set( ZOND_TREE_STORE(model), &iter, NULL, new_text, 0 );
+        zond_tree_store_set( ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(stv) )), &iter, NULL, new_text, 0 );
         gtk_tree_view_columns_autosize( GTK_TREE_VIEW(stv) );
     }
 
@@ -341,10 +341,13 @@ treeviews_render_node_text( SondTreeview* stv, GtkTreeIter* iter, gpointer data 
 {
     gint rc = 0;
     gchar* errmsg = NULL;
+    Baum baum = KEIN_BAUM;
+    gint node_id = 0;
 
     Projekt* zond = (Projekt*) data;
 
-    Baum baum = baum_get_baum_from_treeview( zond, GTK_WIDGET(stv) );
+    rc = treeviews_get_actual_baum_and_node_id( zond, stv, &baum, &node_id );
+    if ( rc ) return;
 
     if ( zond_tree_store_is_link( iter ) )
     {
@@ -369,14 +372,15 @@ treeviews_render_node_text( SondTreeview* stv, GtkTreeIter* iter, gpointer data 
         gchar* text = NULL;
 
         //Hintergrund icon rot wenn Text in textview
-        gint node_id = baum_get_node_id( gtk_tree_view_get_model( GTK_TREE_VIEW(stv) ), iter );
-
         rc = db_get_text( zond, node_id, &text, &errmsg );
         if ( rc )
         {
-            meldung( zond->app_window, "Warnung -\n\nBei Aufruf db_get_text:\n",
-                    errmsg, NULL );
+            gchar* text_label = NULL;
+            text_label = g_strconcat( "Fehler in treeviews_render_node_text -\n\n"
+                    "Bei Aufruf db_get_text:\n", errmsg, NULL );
             g_free( errmsg );
+            gtk_label_set_text( zond->label_status, text_label );
+            g_free( text_label );
         }
         else if ( !text || !g_strcmp0( text, "" ) )
                 g_object_set( G_OBJECT(sond_treeview_get_cell_renderer_text( stv )),

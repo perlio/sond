@@ -545,15 +545,12 @@ static gint
 selection_foreach_link( SondTreeview* tree_view, GtkTreeIter* iter, gpointer data, gchar** errmsg )
 {
     GtkTreeModel* model = NULL;
-    GNode* node_orig = NULL;
 
     SSelectionLink* s_selection = (SSelectionLink*) data;
 
     model = gtk_tree_view_get_model( GTK_TREE_VIEW(tree_view) );
 
-    node_orig = zond_tree_store_get_node_orig( iter );
-
-    zond_tree_store_insert_link( ZOND_TREE_STORE(model), node_orig,
+    zond_tree_store_insert_link( ZOND_TREE_STORE(model), iter->user_data,
             s_selection->iter_dest, s_selection->kind );
 
     s_selection->kind = FALSE;
