@@ -48,12 +48,7 @@ treeviews_get_actual_baum_and_node_id( Projekt* zond, SondTreeview* stv, Baum* b
     GtkTreeIter iter = { 0, };
     ZondTreeStore* tree_store = NULL;
 
-    if ( !sond_treeview_get_cursor( stv, &iter ) )
-    {
-        meldung( zond->app_window, "Kein Punkt ausgewählt", NULL );
-
-        return 1;
-    }
+    if ( !sond_treeview_get_cursor( stv, &iter ) ) return 1;
 
     gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(stv) ), &iter, 2, node_id, 3, &tree_store, -1 );
 
@@ -111,8 +106,7 @@ cb_cursor_changed( SondTreeview* treeview, gpointer user_data )
             gtk_widget_set_sensitive( GTK_WIDGET(zond->textview), TRUE );
 
     rc = treeviews_get_actual_baum_and_node_id( zond, treeview, &baum, &node_id );
-
-    if ( node_id == 0 ) //letzter Knoten wird gelöscht
+    if ( rc ) //letzter Knoten gelöscht oder kein Cursor gewählt
     {
         gtk_widget_set_sensitive( GTK_WIDGET(zond->textview), FALSE );
         gtk_text_buffer_set_text( gtk_text_view_get_buffer( zond->textview ), "", -1 );

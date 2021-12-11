@@ -876,7 +876,7 @@ zond_tree_store_insert_link (ZondTreeStore *tree_store,
         }
         else
         {
-            pos = g_node_child_position( G_NODE(iter_dest->user_data)->parent, iter_dest->user_data );
+            pos = g_node_child_position( G_NODE(iter_dest->user_data)->parent, iter_dest->user_data ) + 1;
 
             node_parent = G_NODE(iter_dest->user_data)->parent;
         }
@@ -889,17 +889,17 @@ zond_tree_store_insert_link (ZondTreeStore *tree_store,
 
     //Hauptknoten erzeugen
     _do_zond_tree_store_insert( tree_store, node_parent, pos, &iter_dest_new );
-    iter_dest->user_data = iter_dest_new.user_data;
+    *iter_dest = iter_dest_new;
 
     //Daten
-    row_data = G_NODE(iter_dest->user_data)->data;
+    row_data = G_NODE(iter_dest_new.user_data)->data;
 
     row_data->data = ((RowData*) node_link->data)->data;
     row_data->orig_link = node_link;
 
     ((RowData*) node_link->data)->linked_nodes =
             g_list_append( ((RowData*) node_link->data)->linked_nodes,
-            iter_dest->user_data );
+            iter_dest_new.user_data );
 
     //iter link hat Kinder?
     if ( (node_link = node_link->children) )
@@ -908,7 +908,7 @@ zond_tree_store_insert_link (ZondTreeStore *tree_store,
         child = TRUE;
         do
         {
-            zond_tree_store_insert_link( tree_store, node_link, iter_dest, child );
+            zond_tree_store_insert_link( tree_store, node_link, &iter_dest_new, child );
             child = FALSE;
         }
         while ( (node_link = node_link->next) );

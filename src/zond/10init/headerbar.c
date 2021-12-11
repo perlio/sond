@@ -1130,6 +1130,17 @@ init_menu( Projekt* zond )
     g_object_set_data( G_OBJECT(alsunterpunkt_einfuegenitem), "kind",
             GINT_TO_POINTER(1) );
 
+    gtk_widget_add_accelerator(alsunterpunkt_einfuegenitem, "activate",
+            accel_group, GDK_KEY_v, GDK_CONTROL_MASK | GDK_SHIFT_MASK,
+            GTK_ACCEL_VISIBLE);
+    gtk_menu_item_set_submenu(GTK_MENU_ITEM(pasteitem), pastemenu);
+
+    g_signal_connect( G_OBJECT(alspunkt_einfuegenitem), "activate",
+            G_CALLBACK(cb_clipboard_einfuegen_activate), (gpointer) zond );
+    g_signal_connect( G_OBJECT(alsunterpunkt_einfuegenitem), "activate",
+            G_CALLBACK(cb_clipboard_einfuegen_activate),
+            (gpointer) zond );
+
     //Link Einfügen
     GtkWidget* pasteitem_link = gtk_menu_item_new_with_label("Link");
     GtkWidget* pastemenu_link = gtk_menu_new();
@@ -1139,7 +1150,9 @@ init_menu( Projekt* zond )
             "Unterebene");
     gtk_menu_shell_append(GTK_MENU_SHELL(pastemenu_link), alspunkt_einfuegenitem_link);
     gtk_widget_add_accelerator(alspunkt_einfuegenitem_link, "activate", accel_group,
-            GDK_KEY_v, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
+            GDK_KEY_l, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
+    gtk_widget_add_accelerator(alsunterpunkt_einfuegenitem_link, "activate", accel_group,
+            GDK_KEY_l, GDK_CONTROL_MASK | GDK_SHIFT_MASK, GTK_ACCEL_VISIBLE);
     gtk_menu_shell_append(GTK_MENU_SHELL(pastemenu_link),
             alsunterpunkt_einfuegenitem_link);
     g_object_set_data( G_OBJECT(alsunterpunkt_einfuegenitem_link), "kind",
@@ -1151,17 +1164,6 @@ init_menu( Projekt* zond )
     gtk_menu_item_set_submenu(GTK_MENU_ITEM(pasteitem_link), pastemenu_link);
 
     GtkWidget* sep_struktur1item = gtk_separator_menu_item_new();
-
-    gtk_widget_add_accelerator(alsunterpunkt_einfuegenitem, "activate",
-            accel_group, GDK_KEY_v, GDK_CONTROL_MASK | GDK_SHIFT_MASK,
-            GTK_ACCEL_VISIBLE);
-    gtk_menu_item_set_submenu(GTK_MENU_ITEM(pasteitem), pastemenu);
-
-    g_signal_connect( G_OBJECT(alspunkt_einfuegenitem), "activate",
-            G_CALLBACK(cb_clipboard_einfuegen_activate), (gpointer) zond );
-    g_signal_connect( G_OBJECT(alsunterpunkt_einfuegenitem), "activate",
-            G_CALLBACK(cb_clipboard_einfuegen_activate),
-            (gpointer) zond );
 
     g_signal_connect( G_OBJECT(alspunkt_einfuegenitem_link), "activate",
             G_CALLBACK(cb_clipboard_einfuegen_activate), (gpointer) zond );
