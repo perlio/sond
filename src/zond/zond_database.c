@@ -982,12 +982,12 @@ zond_database_insert_anbindung( Projekt* zond, gint node_id, gchar** errmsg )
     if ( rc ) ERROR_PAO( "zond_database_create_savepoint" )
 
     ID_entity = dbase_full_insert_entity( zond->dbase_zond->dbase_work, 100, errmsg );
-    if ( ID_entity == -1 ) ERROR_PAO( "dbase_full_insert_entity" )
+    if ( ID_entity == -1 ) ERROR_ROLLBACK( "dbase_full_insert_entity" )
 
     value = g_strdup_printf( "%i", node_id );
     rc = dbase_full_insert_property( zond->dbase_zond->dbase_work, ID_entity, 10010, value, errmsg );
     g_free( value );
-    if ( rc ) ERROR_PAO( "dbase_full_insert_property" )
+    if ( rc ) ERROR_ROLLBACK( "dbase_full_insert_property" )
 
 
     rc = dbase_commit( (DBase*) zond->dbase_zond->dbase_work, errmsg );

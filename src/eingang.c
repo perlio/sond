@@ -343,7 +343,7 @@ eingang_insert_or_update( SondTreeviewFM* stvfm, EingangDBase* eingang_dbase,
     }
 
     rc = dbase_begin( dbase, errmsg );
-    if ( rc ) ERROR_ROLLBACK( dbase, "dbase_begin" )
+    if ( rc ) ERROR_SOND( "dbase_begin" )
 
     //hier Abfrage, was bei drohender Kollision gemacht werden soll
     if ( ret == 1 ) //zu rel_path selbst ist Eingang gespeichert
