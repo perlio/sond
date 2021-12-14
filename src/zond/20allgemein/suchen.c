@@ -154,7 +154,7 @@ suchen_kopieren_listenpunkt( Projekt* zond, GList* list, gint anchor_id,
 
     new_node_id = db_kopieren_nach_auswertung( zond, baum, node_id,
             anchor_id, child, errmsg );
-    if ( new_node_id == -1 ) ERROR_SOND( "db_kopieren_nach_auswertung" )
+    if ( new_node_id == -1 ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "db_kopieren_nach_auswertung" )
 
     rc = dbase_commit( (DBase*) zond->dbase_zond->dbase_work, errmsg );
     if ( rc ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "dbase_commit" )

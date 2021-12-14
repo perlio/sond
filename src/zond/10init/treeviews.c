@@ -50,7 +50,8 @@ treeviews_get_actual_baum_and_node_id( Projekt* zond, SondTreeview* stv, Baum* b
 
     if ( !sond_treeview_get_cursor( stv, &iter ) ) return 1;
 
-    gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(stv) ), &iter, 2, node_id, 3, &tree_store, -1 );
+    gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(stv) ), &iter, 2, node_id, -1 );
+    tree_store = zond_tree_store_get_tree_store( &iter );
 
     if ( tree_store == ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]) )) ) *baum = BAUM_INHALT;
     else if ( tree_store == ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_AUSWERTUNG]) )) ) *baum = BAUM_AUSWERTUNG;
@@ -359,8 +360,6 @@ treeviews_render_node_text( SondTreeview* stv, GtkTreeIter* iter, gpointer data 
         g_free(markuptxt);
     }
 
-//    else g_object_set( G_OBJECT(sond_treeview_get_cell_renderer_text( stv )),
-//            "strikethrough-set", FALSE, NULL );
     if ( baum == BAUM_AUSWERTUNG )
     {
         gchar* text = NULL;
