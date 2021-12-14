@@ -449,6 +449,26 @@ cb_datei_ocr( GtkMenuItem* item, gpointer data )
 
 
 /*  Callbacks des Menus "Struktur" */
+static gint
+headerbar_insert_node( Projekt* zond, Baum baum, gint node_id, gboolean child, gchar** errmsg )
+{
+    gint rc = 0;
+    gint new_node_id = 0;
+
+    rc = dbase_begin( (DBase*) zond->dbase_zond->dbase_work, errmsg );
+    if ( rc ) ERROR_SOND( "dbase_begin" )
+
+    //Knoten in Datenbank einfügen
+    new_node_id = dbase_full_insert_node( zond->dbase_zond->dbase_work, baum,
+            node_id, child, zond->icon[ICON_NORMAL].icon_name, "Neuer Punkt", errmsg );
+    if ( new_node_id == -1 ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "dbase_full_insert_node" )
+
+    rc = dbase_commit( (DBase*) zond->dbase_zond->dbase_work, errmsg );
+    if ( rc ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "dbase_commit" )
+
+    return 0;
+}
+
 static void
 cb_punkt_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
 {
@@ -509,32 +529,13 @@ cb_punkt_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
         if ( node_id == 0 ) child = TRUE;
     }
 
-    rc = dbase_begin( (DBase*) zond->dbase_zond->dbase_work, &errmsg );
+    rc = headerbar_insert_node( zond, baum, node_id, child, &errmsg );
     if ( rc )
     {
         meldung( zond->app_window, "Punkt einfügen nicht möglich -\n\nBei "
-                "Aufruf db_begin:\n", errmsg, NULL );
+                "Aufruf headerbar_insert_node:\n", errmsg, NULL );
 
-        return;
-    }
-
-    //Knoten in Datenbank einfügen
-    new_node_id = dbase_full_insert_node( zond->dbase_zond->dbase_work, baum,
-            node_id, child, zond->icon[ICON_NORMAL].icon_name, "Neuer Punkt", &errmsg );
-    if ( new_node_id == -1 )
-    {
-        meldung( zond->app_window, "Punkt einfügen nicht möglich -\n\nBei Aufruf "
-                "dbase_full_insert_node:\n", errmsg, NULL );
         g_free( errmsg );
-
-        return;
-    }
-
-    rc = dbase_commit( (DBase*) zond->dbase_zond->dbase_work, &errmsg );
-    if ( rc )
-    {
-        meldung( zond->app_window, "Punkt einfügen nicht möglich -\n\nBei "
-                "Aufruf db_commit:\n", errmsg, NULL );
 
         return;
     }
