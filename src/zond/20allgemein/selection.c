@@ -548,6 +548,10 @@ selection_foreach_link( SondTreeview* tree_view, GtkTreeIter* iter, gpointer dat
 
     SSelectionLink* s_selection = (SSelectionLink*) data;
 
+/*
+    rc = db_insert_link( s_selection->zond, s_selection->baum, ...
+    if ( rc ) ERROR_PAO( "db_insert_link" )
+*/
     model = gtk_tree_view_get_model( GTK_TREE_VIEW(tree_view) );
 
     zond_tree_store_insert_link( ZOND_TREE_STORE(model), iter->user_data,
@@ -878,11 +882,27 @@ selection_foreach_loeschen( SondTreeview* tree_view, GtkTreeIter* iter,
             2, &node_id, -1 );
     baum = baum_get_baum_from_treeview( zond, GTK_WIDGET(tree_view) );
 
-    gint rc = db_remove_node( zond, baum, node_id, errmsg );
-    if ( rc ) ERROR_PAO ( "db_remove_node" )
 
-    zond_tree_store_remove( ZOND_TREE_STORE(gtk_tree_view_get_model(
-            GTK_TREE_VIEW(zond->treeview[baum]) )), iter );
+    if ( !zond_tree_store_is_link( iter ) )
+    {
+        gint rc = 0;
+
+        rc = db_remove_node( zond, baum, node_id, errmsg );
+        if ( rc ) ERROR_PAO ( "db_remove_node" )
+
+        zond_tree_store_remove( ZOND_TREE_STORE(gtk_tree_view_get_model(
+        GTK_TREE_VIEW(tree_view) )), iter );
+    }
+    else if ( zond_tree_store_is_link_head( ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(tree_view) )), iter ) )
+    {
+        gint rc = 0;
+
+/*        rc = db_remove_link( zond, baum, node_id, errmsg );
+        if ( rc ) ERROR_PAO("db_remove_link" )
+*/
+        zond_tree_store_remove_link( ZOND_TREE_STORE(gtk_tree_view_get_model(
+        GTK_TREE_VIEW(tree_view) )), iter );
+    }
 
     return 0;
 }

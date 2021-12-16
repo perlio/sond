@@ -54,14 +54,15 @@ ZondTreeStore *zond_tree_store_new              ( void );
 GDK_AVAILABLE_IN_ALL
 void          zond_tree_store_set              (ZondTreeStore *tree_store,
                                                GtkTreeIter  *iter,
-                                                gchar* icon_name,
-                                                gchar* node_text,
-                                                gint node_id );
+                                                const gchar* icon_name,
+                                                const gchar* node_text,
+                                                const gint node_id );
 
 GDK_AVAILABLE_IN_ALL
 void      zond_tree_store_remove           (ZondTreeStore *tree_store,
                                                GtkTreeIter  *iter);
 
+void zond_tree_store_remove_link( ZondTreeStore*, GtkTreeIter* );
 
 GDK_AVAILABLE_IN_ALL
 void zond_tree_store_insert(ZondTreeStore* tree_store,
@@ -90,6 +91,9 @@ gboolean      zond_tree_store_iter_is_valid    (ZondTreeStore *tree_store,
 
 gboolean
 zond_tree_store_is_link( GtkTreeIter* );
+
+gboolean
+zond_tree_store_is_link_head( ZondTreeStore*, GtkTreeIter* );
 
 ZondTreeStore*
 zond_tree_store_get_tree_store( GtkTreeIter* );

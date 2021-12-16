@@ -620,9 +620,9 @@ zond_tree_store_linked_nodes_set_changed( GNode* node )
 void
 zond_tree_store_set (ZondTreeStore *tree_store,
                     GtkTreeIter  *iter,
-                    gchar* icon_name,
-                    gchar* node_text,
-                    gint node_id )
+                    const gchar* icon_name,
+                    const gchar* node_text,
+                    const gint node_id )
 {
     GNode* node = NULL;
     GNode* node_orig = NULL;
@@ -718,13 +718,7 @@ zond_tree_store_remove_links( GNode* node )
         GList* ptr = NULL;
 
         ptr = list;
-        do
-        {
-            GNode* link = NULL;
-
-            link = ptr->data;
-            zond_tree_store_remove_links( link );
-        }
+        do zond_tree_store_remove_links( ptr->data );
         while ( (ptr = ptr->next) );
     }
 
@@ -752,6 +746,20 @@ zond_tree_store_remove( ZondTreeStore* tree_store, GtkTreeIter* iter )
 
     return;
 }
+
+void
+zond_tree_store_remove_link( ZondTreeStore* tree_store, GtkTreeIter* link )
+{
+    g_return_if_fail( ZOND_IS_TREE_STORE(tree_store));
+    g_return_if_fail( VALID_ITER(link, tree_store) );
+    g_return_if_fail( zond_tree_store_is_link( link ) );
+
+    zond_tree_store_remove_links( link->user_data );
+
+    return;
+}
+
+
 
 static void
 _do_zond_tree_store_insert( ZondTreeStore* tree_store, GNode* node_parent,
@@ -948,13 +956,6 @@ zond_tree_store_insert_link (ZondTreeStore *tree_store,
     }
 
     return;
-}
-
-
-void
-zond_tree_store_remove_link( ZondTreeStore* tree_store, GtkTreeIter* link )
-{
-
 }
 
 
@@ -1349,6 +1350,18 @@ gboolean
 zond_tree_store_is_link( GtkTreeIter* iter )
 {
     if ( ((RowData*) G_NODE(iter->user_data)->data)->orig_link ) return TRUE;
+
+    return FALSE;
+}
+
+
+gboolean
+zond_tree_store_is_link_head( ZondTreeStore* tree_store, GtkTreeIter* iter )
+{
+    if ( ((RowData*) G_NODE(iter->user_data)->data)->orig_link && (
+            G_NODE(iter->user_data)->parent == tree_store->priv->root ||
+            ((RowData*) G_NODE(iter->user_data)->parent->data)->orig_link == NULL ) )
+            return TRUE;
 
     return FALSE;
 }
