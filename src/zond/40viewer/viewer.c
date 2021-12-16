@@ -981,7 +981,7 @@ cb_viewer_text_search( GtkWidget* widget, gpointer data )
         //ToDo: muß mit fz_try abgesichert werden
         //macht lock!!!
         anzahl = fz_search_stext_page( ctx, pdf_document_page->stext_page,
-                search_text, quads, 99 );
+                search_text, NULL, quads, 99 );
 
         for ( gint u = 0; u < anzahl; u++ )
         {

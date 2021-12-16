@@ -405,7 +405,7 @@ pdf_textsuche_pdf( Projekt* zond, const gchar* rel_path, const gchar* search_tex
         }
 
         anzahl = fz_search_stext_page( ctx,
-                pdf_document_page->stext_page, search_text, quads, 99 );
+                pdf_document_page->stext_page, search_text, NULL, quads, 99 );
 
         for ( gint u = 0; u < anzahl; u++ )
         {
