@@ -124,7 +124,7 @@ selection_abfragen_pdf( Projekt* zond, gchar** errmsg )
         gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) ), &iter, 2, &node_id, -1 );
 
         rc = db_get_rel_path( zond, baum, node_id, &rel_path, errmsg );
-        if ( rc == -2 ) continue;
+        if ( rc == 1 ) continue;
         else if ( rc )
         {
             g_list_free_full( selected, (GDestroyNotify) gtk_tree_path_free );

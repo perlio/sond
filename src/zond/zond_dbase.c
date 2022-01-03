@@ -787,12 +787,12 @@ zond_dbase_prepare_stmts( ZondDBase* zond_dbase, gint num, const gchar** sql,
 }
 
 
-typedef gint Baum;
 gint
-dbase_full_insert_node( ZondDBase* zond_dbase, Baum baum, gint node_id, gboolean child,
+zond_dbase_insert_node( ZondDBase* zond_dbase, Baum baum, gint node_id, gboolean child,
         const gchar* icon_name, const gchar* node_text, gchar** errmsg )
 {
     gint rc = 0;
+    const gint num_stmts = 5;
     gint new_node_id = 0;
     sqlite3_stmt** stmt = NULL;
 
@@ -800,9 +800,9 @@ dbase_full_insert_node( ZondDBase* zond_dbase, Baum baum, gint node_id, gboolean
     {
         gint rc = 0;
 
-        stmt = g_malloc0( sizeof( sqlite3_stmt* ) * 5 );
+        stmt = g_malloc0( sizeof( sqlite3_stmt* ) * num_stmts );
 
-        const gchar* sql[5] = {
+        const gchar* sql[] = {
             "INSERT INTO baum_inhalt "
             "(parent_id, older_sibling_id, icon_name, node_text) "
             "VALUES ("
@@ -855,7 +855,7 @@ dbase_full_insert_node( ZondDBase* zond_dbase, Baum baum, gint node_id, gboolean
 
                 "VALUES (last_insert_rowid()); " };
 
-        rc = zond_dbase_prepare_stmts( zond_dbase, 5, sql, stmt, errmsg );
+        rc = zond_dbase_prepare_stmts( zond_dbase, num_stmts, sql, stmt, errmsg );
         if ( rc )
         {
             g_free( stmt );
@@ -865,7 +865,7 @@ dbase_full_insert_node( ZondDBase* zond_dbase, Baum baum, gint node_id, gboolean
         g_object_set_data_full( G_OBJECT(zond_dbase), __func__, stmt, g_free );
     }
 
-    for ( gint i = 0; i < 5; i++ ) sqlite3_reset( stmt[i] );
+    for ( gint i = 0; i < num_stmts; i++ ) sqlite3_reset( stmt[i] );
 
     rc = sqlite3_bind_int( stmt[0 + (gint) baum], 1, child );
     if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (child)" )
@@ -894,5 +894,250 @@ dbase_full_insert_node( ZondDBase* zond_dbase, Baum baum, gint node_id, gboolean
 
     return new_node_id;
 }
+
+
+gint
+zond_dbase_remove_node( ZondDBase* zond_dbase, Baum baum, gint node_id, gchar** errmsg )
+{
+    gint rc = 0;
+    sqlite3_stmt** stmt = NULL;
+    const gint num_stmts = 4;
+
+    if ( !(stmt = g_object_get_data( G_OBJECT(zond_dbase), __func__ )) )
+    {
+        gint rc = 0;
+
+        stmt = g_malloc0( sizeof( sqlite3_stmt* ) * num_stmts );
+
+        const gchar* sql[] = {
+            "UPDATE baum_inhalt SET older_sibling_id=(SELECT older_sibling_id FROM baum_inhalt "
+            "WHERE node_id=?1) WHERE "
+            "older_sibling_id=?1; ",
+
+            "UPDATE baum_auswertung SET older_sibling_id=(SELECT older_sibling_id FROM baum_auswertung "
+            "WHERE node_id=?1) WHERE "
+            "older_sibling_id=?1; ",
+
+            "DELETE FROM baum_inhalt WHERE node_id = ?;",
+
+            "DELETE FROM baum_auswertung WHERE node_id = ?; "};
+
+        rc = zond_dbase_prepare_stmts( zond_dbase, num_stmts, sql, stmt, errmsg );
+        if ( rc )
+        {
+            g_free( stmt );
+            ERROR_SOND( "zond_dbase_prepare_stmts" )
+        }
+
+        g_object_set_data_full( G_OBJECT(zond_dbase), __func__, stmt, g_free );
+    }
+
+    for ( gint i = 0; i < num_stmts; i++ ) sqlite3_reset( stmt[i] );
+
+    rc = sqlite3_bind_int( stmt[0 + (gint) baum], 1, node_id );
+    if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (node_id)" )
+
+    rc = sqlite3_step( stmt[0 + (gint) baum] );
+    if ( rc != SQLITE_DONE ) ERROR_ZOND_DBASE( "sqlite3_step [0/1]" )
+
+    rc = sqlite3_bind_int( stmt[2 + (gint) baum], 1, node_id );
+    if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (node_id)" )
+
+    rc = sqlite3_step( stmt[2 + (gint) baum] );
+    if ( rc != SQLITE_DONE ) ERROR_ZOND_DBASE( "sqlite3_step [2/3]" )
+
+    return 0;
+}
+
+
+gint
+zond_dbase_kopieren_nach_auswertung( ZondDBase* zond_dbase, Baum baum_von, gint node_id_von,
+        gint node_id_nach, gboolean child, gchar** errmsg )
+{
+    gint rc = 0;
+    sqlite3_stmt** stmt = NULL;
+    const gint num_stmts = 3;
+
+    if ( !(stmt = g_object_get_data( G_OBJECT(zond_dbase), __func__ )) )
+    {
+        gint rc = 0;
+
+        stmt = g_malloc0( sizeof( sqlite3_stmt* ) * num_stmts );
+
+        const gchar* sql[] = {
+            "INSERT INTO baum_auswertung "
+            "(parent_id, older_sibling_id, icon_name, node_text, ref_id) "
+            "VALUES ("
+                "CASE ?1 " //child
+                    "WHEN 0 THEN (SELECT parent_id FROM baum_auswertung WHERE node_id=?2) "
+                    "WHEN 1 THEN ?2 " //node_id_nach
+                "END, "
+                "CASE ?1 " //older_sibling_id
+                    "WHEN 0 THEN ?2 "
+                    "WHEN 1 THEN 0 "
+                "END, "
+                "(SELECT icon_name FROM baum_inhalt WHERE node_id=?3), " //node_id_von
+                "(SELECT node_text FROM baum_inhalt WHERE node_id=?3), "//node_text
+                "(CASE "
+                    "WHEN " //datei_id zu node_id_von?
+                        "(SELECT dateien.rel_path FROM dateien LEFT JOIN ziele "
+                        "ON dateien.rel_path=ziele.rel_path "
+                        "JOIN baum_inhalt "
+                        "ON baum_inhalt.node_id=dateien.node_id OR "
+                        "baum_inhalt.node_id=ziele.node_id "
+                        "WHERE baum_inhalt.node_id=?3)"
+                            "IS NULL THEN 0 "
+                    "ELSE ?3 "
+                "END)); ",
+
+            "INSERT INTO baum_auswertung "
+            "(parent_id, older_sibling_id, icon_name, node_text, text, ref_id) "
+            "VALUES ("
+                "CASE ?1 " //child
+                    "WHEN 0 THEN (SELECT parent_id FROM baum_auswertung WHERE node_id=?2) "
+                    "WHEN 1 THEN ?2 " //node_id_nach
+                "END, "
+                "CASE ?1 " //older_sibling_id
+                    "WHEN 0 THEN ?2 "
+                    "WHEN 1 THEN 0 "
+                "END, "
+                "(SELECT icon_name FROM baum_auswertung WHERE node_id=?3), " //node_id_von
+                "(SELECT node_text FROM baum_auswertung WHERE node_id=?3), "//node_text
+                "(SELECT text FROM baum_auswertung WHERE node_id=?3), "//text
+                "(CASE "
+                    "WHEN " //datei_id zu node_id_von?
+                        "(SELECT dateien.rel_path FROM dateien LEFT JOIN ziele "
+                        "ON dateien.rel_path=ziele.rel_path "
+                        "JOIN baum_inhalt "
+                        "ON baum_inhalt.node_id=dateien.node_id OR "
+                        "baum_inhalt.node_id=ziele.node_id "
+                        "WHERE baum_inhalt.node_id="
+                            "(SELECT ref_id FROM baum_auswertung WHERE node_id=?3)"
+                            ") IS NULL THEN 0 "
+                    "ELSE "
+                        "(SELECT ref_id FROM baum_auswertung WHERE node_id=?3) "
+                "END)); ",
+
+            "UPDATE baum_auswertung SET "
+                "older_sibling_id=last_insert_rowid() "
+            "WHERE "
+                "parent_id=(SELECT parent_id FROM baum_auswertung WHERE node_id=last_insert_rowid()) "
+            "AND "
+                "older_sibling_id=(SELECT older_sibling_id FROM baum_auswertung WHERE node_id=last_insert_rowid()) "
+            "AND "
+                "node_id!=last_insert_rowid() "
+            "AND "
+                "node_id!=0; " };
+
+        rc = zond_dbase_prepare_stmts( zond_dbase, num_stmts, sql, stmt, errmsg );
+        if ( rc )
+        {
+            g_free( stmt );
+            ERROR_SOND( "zond_dbase_prepare_stmts" )
+        }
+
+        g_object_set_data_full( G_OBJECT(zond_dbase), __func__, stmt, g_free );
+    }
+
+    for ( gint i = 0; i < num_stmts; i++ ) sqlite3_reset( stmt[i] );
+
+    rc = sqlite3_bind_int( stmt[0 + (gint) baum_von], 1, child );
+    if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (child)" )
+
+    rc = sqlite3_bind_int( stmt[0 + (gint) baum_von], 2, node_id_nach );
+    if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (node_id_nach)" )
+
+    rc = sqlite3_bind_int( stmt[0 + (gint) baum_von], 3, node_id_von );
+    if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (node_id_von)" )
+
+    rc = sqlite3_step( stmt[0 + (gint) baum_von] );
+    if ( rc != SQLITE_DONE ) ERROR_ZOND_DBASE( "sqlite3_step [0/1]" )
+
+    rc = sqlite3_step( stmt[2] );
+    if ( rc != SQLITE_DONE ) ERROR_ZOND_DBASE( "sqlite3_step ([2])" )
+
+    return sqlite3_last_insert_rowid( zond_dbase_get_dbase( zond_dbase ) );
+}
+
+
+gint
+zond_dbase_verschieben_knoten( ZondDBase* zond_dbase, Baum baum, gint node_id, gint new_parent_id,
+        gint new_older_sibling_id, gchar** errmsg )
+{
+    gint rc = 0;
+    sqlite3_stmt** stmt = NULL;
+    const gint num_stmts = 6;
+
+    if ( !(stmt = g_object_get_data( G_OBJECT(zond_dbase), __func__ )) )
+    {
+        gint rc = 0;
+
+        stmt = g_malloc0( sizeof( sqlite3_stmt* ) * num_stmts );
+
+        const gchar* sql[] = {
+            "UPDATE baum_inhalt SET older_sibling_id="
+            "(SELECT older_sibling_id FROM baum_inhalt WHERE node_id=?1)" //node_id
+            "WHERE older_sibling_id=?1; ",
+
+            "UPDATE baum_auswertung SET older_sibling_id="
+            "(SELECT older_sibling_id FROM baum_auswertung WHERE node_id=?1)"
+            "WHERE older_sibling_id=?1; ",
+
+            "UPDATE baum_inhalt SET older_sibling_id=?1 WHERE node_id=" //node_id
+                "(SELECT node_id FROM baum_inhalt WHERE parent_id=?2 AND older_sibling_id=?3); ", //new_parent_id/new_older_s_id
+
+            "UPDATE baum_auswertung SET older_sibling_id=?1 WHERE node_id=" //node_id
+                "(SELECT node_id FROM baum_auswertung WHERE parent_id=?2 AND older_sibling_id=?3); ", //new_parent_id/new_older_s_id
+
+            "UPDATE baum_inhalt SET parent_id=?1, older_sibling_id=?2 WHERE node_id=?3; ",
+
+            "UPDATE baum_auswertung SET parent_id=?1, older_sibling_id=?2 WHERE node_id=?3; " };
+
+        rc = zond_dbase_prepare_stmts( zond_dbase, num_stmts, sql, stmt, errmsg );
+        if ( rc )
+        {
+            g_free( stmt );
+            ERROR_SOND( "zond_dbase_prepare_stmts" )
+        }
+
+        g_object_set_data_full( G_OBJECT(zond_dbase), __func__, stmt, g_free );
+    }
+
+    for ( gint i = 0; i < num_stmts; i++ ) sqlite3_reset( stmt[i] );
+
+    rc = sqlite3_bind_int( stmt[0 + (gint) baum], 1, node_id );
+    if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int [0, 1]" )
+
+    rc = sqlite3_step( stmt[0 + (gint) baum] );
+    if ( rc != SQLITE_DONE ) ERROR_ZOND_DBASE( "sqlite3_step [0]" )
+
+    rc = sqlite3_bind_int( stmt[2 + (gint) baum], 1, node_id );
+    if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int [2, 1]" )
+
+    rc = sqlite3_bind_int( stmt[2 + (gint) baum], 2, new_parent_id );
+    if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int [2, 2]" )
+
+    rc = sqlite3_bind_int( stmt[2 + (gint) baum], 3, new_older_sibling_id );
+    if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int [2, 3]" )
+
+    rc = sqlite3_step( stmt[2 + (gint) baum] );
+    if ( rc != SQLITE_DONE ) ERROR_ZOND_DBASE( "sqlite3_step [2]" )
+
+    rc = sqlite3_bind_int( stmt[4 + (gint) baum], 1, new_parent_id );
+    if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int [4, 1]" )
+
+    rc = sqlite3_bind_int( stmt[4 + (gint) baum], 2, new_older_sibling_id );
+    if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int [4, 2]" )
+
+    rc = sqlite3_bind_int( stmt[4 + (gint) baum], 3, node_id );
+    if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int [4, 3]" )
+
+    rc = sqlite3_step( stmt[4 + (gint) baum] );
+    if ( rc != SQLITE_DONE ) ERROR_ZOND_DBASE( "sqlite3_step [4]" )
+
+    return 0;
+}
+
+
 
 

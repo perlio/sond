@@ -167,13 +167,13 @@ hat_vorfahre_datei( Projekt* zond, Baum baum, gint anchor_id, gboolean child, gc
         if ( anchor_id < 0 ) ERROR_PAO( "db_get_parent" )
     }
 
-    gint rc = 0;
     while ( anchor_id != 0 )
     {
-        rc = db_knotentyp_abfragen( zond, baum, anchor_id, errmsg );
-        if ( rc == -1 ) ERROR_PAO( "db_knotentyp_abfragen" )
+        gint rc = 0;
 
-        if ( rc > 0 ) return 1;
+        rc = db_get_rel_path( zond, baum, anchor_id, NULL, errmsg );
+        if ( rc == -1 ) ERROR_PAO( "db_get_rel_path" )
+        else if ( rc == 0 ) return 1; //nicht mal datei!
 
         anchor_id = db_get_parent( zond, baum, anchor_id, errmsg );
         if ( anchor_id < 0 ) ERROR_PAO( "db_get_parent" )
@@ -336,16 +336,15 @@ abfragen_rel_path_and_anbindung( Projekt* zond, Baum baum, gint node_id,
 
     rc = db_get_rel_path( zond, baum, node_id, &rel_path_intern, errmsg );
     if ( rc == -1 ) ERROR_PAO( "db_get_rel_path" )
-    else if ( rc == -2 ) return 2;
+    else if ( rc == 1 ) return 2;
 
     rc = db_get_ziel( zond, baum, node_id, &ziel, errmsg );
-    if ( rc )
+    if ( rc == -1 )
     {
         g_free( rel_path_intern );
         ERROR_PAO( "db_get_ziel" )
     }
-
-    if ( !ziel )
+    else if ( rc == 1 )
     {
         if ( rel_path ) *rel_path = rel_path_intern;
         else g_free( rel_path_intern );

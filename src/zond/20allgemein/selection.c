@@ -64,10 +64,12 @@ selection_foreach_verschieben( SondTreeview* tree_view, GtkTreeIter* iter,
 
     if ( s_selection->baum == BAUM_INHALT )
     {
-        gint typ = db_knotentyp_abfragen( s_selection->zond, s_selection->baum,
-                node_id, errmsg );
-        if ( typ == -1 ) ERROR_PAO( "db_knotentyp_abfragen" )
-        else if ( typ == 2 ) return 0;
+        gint rc = 0;
+
+        rc = db_get_ziel( s_selection->zond, s_selection->baum,
+                node_id, NULL, errmsg );
+        if ( rc == -1 ) ERROR_PAO( "db_get_ziel" )
+        else if ( rc == 1 ) return 0;
     }
 
     rc = knoten_verschieben( s_selection->zond, s_selection->baum, node_id, s_selection->parent_id,
@@ -133,6 +135,43 @@ typedef struct {
 
 
 static gint
+selection_copy_node_db( Projekt* zond, gboolean with_younger_siblings, Baum baum_von, gint node_von,
+        gint node_nach, gboolean kind, gchar** errmsg )
+{
+    gint rc = 0;
+    gint first_child_id = 0;
+    gint new_node_id = 0;
+
+    new_node_id = db_kopieren_nach_auswertung( zond, baum_von, node_von,
+            node_nach, kind, errmsg );
+    if ( new_node_id == -1 ) ERROR_PAO( "db_kopieren_nach_auswertung" )
+
+    //Prüfen, ob Kind- oder Geschwisterknoten vorhanden
+    first_child_id = db_get_first_child( zond, baum_von, node_von, errmsg );
+    if ( first_child_id < 0 ) ERROR_PAO( "db_get_first_child" )
+    if ( first_child_id > 0 )
+    {
+        rc = selection_copy_node_db( zond, TRUE, baum_von,
+                first_child_id, new_node_id, TRUE, errmsg );
+        if ( rc == -1  ) ERROR_PAO( "selection_copy_node_db" )
+    }
+
+    gint younger_sibling_id = 0;
+    younger_sibling_id = db_get_younger_sibling( zond, baum_von, node_von,
+            errmsg );
+    if ( younger_sibling_id < 0 ) ERROR_PAO( "db_get_younger_sibling" )
+    if ( younger_sibling_id > 0 && with_younger_siblings )
+    {
+        rc = selection_copy_node_db( zond, TRUE, baum_von,
+                younger_sibling_id, new_node_id, FALSE, errmsg );
+        if ( rc == -1 ) ERROR_PAO( "selection_copy_node_db" )
+    }
+
+    return new_node_id;
+}
+
+
+static gint
 selection_foreach_kopieren( SondTreeview* tree_view, GtkTreeIter* iter, gpointer data, gchar** errmsg )
 {
     gint rc = 0;
@@ -148,10 +187,10 @@ selection_foreach_kopieren( SondTreeview* tree_view, GtkTreeIter* iter, gpointer
     gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(tree_view) ), iter,
             2, &node_id, -1 );
 
-    new_node_id = db_kopieren_nach_auswertung_mit_kindern( s_selection->zond, FALSE, s_selection->baum,
+    new_node_id = selection_copy_node_db( s_selection->zond, FALSE, s_selection->baum,
             node_id, s_selection->anchor_id, s_selection->kind, errmsg );
     if ( new_node_id == -1 ) ERROR_ROLLBACK( (DBase*) s_selection->zond->dbase_zond->dbase_work,
-            "db_kopieren_nach_auswertung_mit_kindern (urspr. Aufruf)" )
+            "selection_copy_node_db (urspr. Aufruf)" )
 
     rc = db_baum_knoten_mit_kindern( s_selection->zond, FALSE,
             BAUM_AUSWERTUNG, new_node_id, s_selection->iter_dest, s_selection->kind, &iter_new, errmsg );

@@ -83,7 +83,6 @@ treeviews_foreach_entfernen_anbindung( SondTreeview* stv,
         GtkTreeIter* iter, gpointer data, gchar** errmsg )
 {
     gint rc = 0;
-    gint typ = 0;
     gint older_sibling = 0;
     gint parent = 0;
     gint child = 0;
@@ -94,9 +93,9 @@ treeviews_foreach_entfernen_anbindung( SondTreeview* stv,
     gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(stv) ), iter,
             2, &node_id, -1 );
 
-    typ = db_knotentyp_abfragen( zond, BAUM_INHALT, node_id, errmsg );
-    if ( typ == -1 ) ERROR_PAO ( "db_knotentyp_abfragen" )
-    if ( typ != 2 ) return 0;
+    rc = db_get_ziel( zond, BAUM_INHALT, node_id, NULL, errmsg );
+    if ( rc == -1 ) ERROR_PAO ( "db_get_ziel" )
+    if ( rc == 1 ) return 0; //Knoten ist keine Anbindung
 
     //herausfinden, ob zu löschender Knoten älteres Geschwister hat
     older_sibling = db_get_older_sibling( zond, BAUM_INHALT, node_id, errmsg );
@@ -413,7 +412,8 @@ treeviews_insert_node( Projekt* zond, Baum baum_active, gboolean child, gchar** 
     if ( node_id == 0 ) child = TRUE;
     else if ( baum == BAUM_INHALT )
     {
-        rc = hat_vorfahre_datei( zond, baum, node_id, child, errmsg );
+        //child = TRUE, weil ja node_id schon der unmittelbare Vorfahre ist!
+        rc = hat_vorfahre_datei( zond, baum, node_id, TRUE, errmsg );
         if ( rc == -1 ) ERROR_SOND( "hat_vorfahre_datei" )
         else if ( rc == 1 )
         {

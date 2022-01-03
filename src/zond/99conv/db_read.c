@@ -204,7 +204,7 @@ db_get_ref_id( Projekt* zond, gint node_id, gchar** errmsg )
 /** Rückgabewert:
     Wenn alles ok: 0
     Wenn Fehler (inkl. node_id existiert nicht: -1 - errmsg wird - wenn != NULL - gesetzt
-    Wenn kein rel_path zur node_id: -2
+    Wenn kein rel_path zur node_id: 1
 **/
 gint
 db_get_rel_path( Projekt* zond, Baum baum, gint node_id, gchar** rel_path,
@@ -236,7 +236,7 @@ db_get_rel_path( Projekt* zond, Baum baum, gint node_id, gchar** rel_path,
 
     text = (gchar*) sqlite3_column_text( zond->dbase->stmts.db_get_rel_path[0], 1 );
 
-    if ( !text || !g_strcmp0( text, "" ) ) return -2;
+    if ( !text || !g_strcmp0( text, "" ) ) return 1;
 
     if ( rel_path ) *rel_path = g_strdup( (const gchar*) text );
 
@@ -245,21 +245,20 @@ db_get_rel_path( Projekt* zond, Baum baum, gint node_id, gchar** rel_path,
 
 
 /** Rückgabewert:
-    Falls kein ziel: 0, *ziel unverändert
+    Falls kein ziel: 1, *ziel unverändert
+    Fall ziel: 0, *ziel wird allociert, falls != NULL
     Fehler: -1
 **/
 gint
 db_get_ziel( Projekt* zond, Baum baum, gint node_id, Ziel** ziel, gchar** errmsg )
 {
-    *ziel = NULL;
+    gint rc = 0;
 
     if ( baum == BAUM_AUSWERTUNG )
     {
         node_id = db_get_ref_id( zond, node_id, errmsg );
         if ( node_id < 0 ) ERROR_PAO( "db_get_ref_id" )
     }
-
-    gint rc = 0;
 
     sqlite3_reset( zond->dbase->stmts.db_get_ziel[0] );
 
@@ -268,7 +267,9 @@ db_get_ziel( Projekt* zond, Baum baum, gint node_id, Ziel** ziel, gchar** errmsg
 
     rc = sqlite3_step( zond->dbase->stmts.db_get_ziel[0] );
     if ( rc != SQLITE_DONE && rc != SQLITE_ROW ) ERROR_SQL( "sqlite3_step" )
-    else if ( rc == SQLITE_DONE ) return 0;
+    else if ( rc == SQLITE_DONE ) return 1;
+
+    if ( !ziel ) return 0;
 
     *ziel = g_malloc0( sizeof( Ziel ) );
     gchar* buf = NULL;
@@ -286,31 +287,6 @@ db_get_ziel( Projekt* zond, Baum baum, gint node_id, Ziel** ziel, gchar** errmsg
     (*ziel)->index_bis = sqlite3_column_int( zond->dbase->stmts.db_get_ziel[0], 3 );
 
     return 0;
-}
-
-
-gint
-db_knotentyp_abfragen( Projekt* zond, Baum baum, gint node_id, gchar** errmsg )
-{
-    gint rc = 0;
-    gchar* rel_path = NULL;
-    Ziel* ziel = NULL;
-
-    rc = db_get_rel_path( zond, baum, node_id, &rel_path, errmsg );
-    if ( rc == -1 ) ERROR_PAO( "db_get_rel_path" )
-
-    if ( rc == -2 ) return 0;
-
-    g_free( rel_path );
-
-    rc = db_get_ziel( zond, baum, node_id, &ziel, errmsg );
-    if ( rc ) ERROR_PAO( "db_get_ziel" )
-
-    if ( !ziel ) return 1;
-
-    ziele_free( ziel );
-
-    return 2;
 }
 
 

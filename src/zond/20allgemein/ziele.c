@@ -195,8 +195,10 @@ ziele_einfuegen_anbindung( Projekt* zond, const gchar* rel_path, gint anchor_id,
 
     //eingefügtes ziel in Baum
     GtkTreeIter* iter = baum_abfragen_iter( zond->treeview[BAUM_INHALT], anchor_id );
-    if ( !db_baum_knoten( zond, BAUM_INHALT, new_node, iter, kind, &iter_new,
-            errmsg ) ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work,
+    rc = db_baum_knoten( zond, BAUM_INHALT, new_node, iter, kind, &iter_new,
+            errmsg );
+    gtk_tree_iter_free( iter );
+    if ( rc ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work,
             "db_baum_knoten" )
 
     rc = ziele_verschieben_kinder( zond, new_node, anbindung, errmsg );

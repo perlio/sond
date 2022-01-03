@@ -2,6 +2,7 @@
 #define ZOND_DBASE_H_INCLUDED
 
 #include <glib-object.h>
+#include "global_types.h"
 
 #define ZOND_DBASE_VERSION "v0.10"
 
@@ -21,6 +22,13 @@ struct _ZondDBaseClass
 
 
 
+gint zond_dbase_insert_node( ZondDBase*, Baum, gint, gboolean, const gchar*,
+        const gchar*, gchar** );
+
+gint zond_dbase_remove_node( ZondDBase*, Baum, gint, gchar** );
+
+gint zond_dbase_kopieren_nach_auswertung( ZondDBase*, Baum, gint, gint, gboolean,
+        gchar** );
 
 G_END_DECLS
 

@@ -38,9 +38,6 @@ db_remove_node( Projekt* zond, Baum baum, gint node_id, gchar** errmsg )
 }
 
 
-/*  Rückgabe bei Fehler: -1
-    Sämtliche Fehler lösen Rollback aus
-    ansonsten: ID des im BAUM_AUSWERTUNG erzeugten Knotens  */
 gint
 db_kopieren_nach_auswertung( Projekt* zond, Baum baum_von, gint node_id_von,
         gint node_id_nach, gboolean child, gchar** errmsg )
@@ -68,44 +65,6 @@ db_kopieren_nach_auswertung( Projekt* zond, Baum baum_von, gint node_id_von,
     if ( rc != SQLITE_DONE ) ERROR_SQL( "sqlite3_step ([2])" )
 
     return sqlite3_last_insert_rowid( zond->db );
-}
-
-
-gint
-db_kopieren_nach_auswertung_mit_kindern( Projekt* zond,
-        gboolean with_younger_siblings, Baum baum_von, gint node_von,
-        gint node_nach, gboolean kind, gchar** errmsg )
-{
-    gint rc = 0;
-    gint first_child_id = 0;
-    gint new_node_id = 0;
-
-    new_node_id = db_kopieren_nach_auswertung( zond, baum_von, node_von,
-            node_nach, kind, errmsg );
-    if ( new_node_id == -1 ) ERROR_PAO( "db_kopieren_nach_auswertung" )
-
-    //Prüfen, ob Kind- oder Geschwisterknoten vorhanden
-    first_child_id = db_get_first_child( zond, baum_von, node_von, errmsg );
-    if ( first_child_id < 0 ) ERROR_PAO( "db_get_first_child" )
-    if ( first_child_id > 0 )
-    {
-        rc = db_kopieren_nach_auswertung_mit_kindern( zond, TRUE, baum_von,
-                first_child_id, new_node_id, TRUE, errmsg );
-        if ( rc == -1  ) ERROR_PAO( "db_kopieren_nach_auswertung_mit_kindern" )
-    }
-
-    gint younger_sibling_id = 0;
-    younger_sibling_id = db_get_younger_sibling( zond, baum_von, node_von,
-            errmsg );
-    if ( younger_sibling_id < 0 ) ERROR_PAO( "db_get_younger_sibling" )
-    if ( younger_sibling_id > 0 && with_younger_siblings )
-    {
-        rc = db_kopieren_nach_auswertung_mit_kindern( zond, TRUE, baum_von,
-                younger_sibling_id, new_node_id, FALSE, errmsg );
-        if ( rc == -1 ) ERROR_PAO( "db_kopieren_nach_auswertung_mit_kindern" )
-    }
-
-    return new_node_id;
 }
 
 

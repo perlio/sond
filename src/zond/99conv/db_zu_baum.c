@@ -16,7 +16,7 @@
 static gint
 db_baum_insert_links( Projekt* zond, Baum baum, gchar** errmsg )
 {
-
+    return 0;
 }
 
 gint

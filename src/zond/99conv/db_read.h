@@ -26,8 +26,6 @@ gint db_get_rel_path( Projekt*, Baum, gint, gchar**, gchar** );
 
 gint db_get_ziel( Projekt*, Baum, gint, Ziel**, gchar** );
 
-gint db_knotentyp_abfragen( Projekt*, Baum, gint, gchar** );
-
 gint db_get_text( Projekt*, gint, gchar**, gchar** );
 
 gint db_get_node_id_from_rel_path( Projekt*, const gchar*, gchar** );
