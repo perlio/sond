@@ -171,6 +171,7 @@ ziele_einfuegen_anbindung( Projekt* zond, const gchar* rel_path, gint anchor_id,
 {
     gint rc = 0;
     gint new_node = 0;
+    GtkTreeIter iter_new = { 0, };
 
     gchar* node_text = NULL;
     if ( anbindung.bis.seite > anbindung.von.seite) node_text =
@@ -194,10 +195,8 @@ ziele_einfuegen_anbindung( Projekt* zond, const gchar* rel_path, gint anchor_id,
 
     //eingefügtes ziel in Baum
     GtkTreeIter* iter = baum_abfragen_iter( zond->treeview[BAUM_INHALT], anchor_id );
-    GtkTreeIter* new_iter = db_baum_knoten( zond, BAUM_INHALT, new_node, iter,
-            kind, errmsg );
-    gtk_tree_iter_free( iter );
-    if ( !new_iter ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work,
+    if ( !db_baum_knoten( zond, BAUM_INHALT, new_node, iter, kind, &iter_new,
+            errmsg ) ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work,
             "db_baum_knoten" )
 
     rc = ziele_verschieben_kinder( zond, new_node, anbindung, errmsg );
@@ -207,11 +206,9 @@ ziele_einfuegen_anbindung( Projekt* zond, const gchar* rel_path, gint anchor_id,
     rc = dbase_commit( (DBase*) zond->dbase_zond->dbase_work, errmsg );
     if ( rc ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "db_commit" )
 
-    sond_treeview_expand_row( zond->treeview[BAUM_INHALT], new_iter );
-    sond_treeview_set_cursor_on_text_cell( zond->treeview[BAUM_INHALT], new_iter );
+    sond_treeview_expand_row( zond->treeview[BAUM_INHALT], &iter_new );
+    sond_treeview_set_cursor_on_text_cell( zond->treeview[BAUM_INHALT], &iter_new );
     gtk_widget_grab_focus( GTK_WIDGET(zond->treeview[BAUM_INHALT]) );
-
-    gtk_tree_iter_free( new_iter );
 
     return new_node;
 }

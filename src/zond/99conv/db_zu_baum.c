@@ -9,86 +9,94 @@
 #include <gtk/gtk.h>
 
 #include "../../sond_treeview.h"
+#include "../../misc.h"
 #include "../zond_tree_store.h"
 
 
-GtkTreeIter*
+static gint
+db_baum_insert_links( Projekt* zond, Baum baum, gchar** errmsg )
+{
+
+}
+
+gint
 db_baum_knoten( Projekt* zond, Baum baum, gint node_id, GtkTreeIter* iter,
-        gboolean child, gchar** errmsg )
+        gboolean child, GtkTreeIter* iter_new, gchar** errmsg )
 {
     //Inhalt des Datensatzes mit node_id == node_id abfragen
     gint rc = 0;
     gchar* icon_name = NULL;
     gchar* node_text = NULL;
-    ZondTreeStore* tree_store = NULL;
-    GtkTreeIter new_iter = { 0 };
+    GtkTreeIter iter_inserted = { 0, };
 
     rc = db_get_icon_name_and_node_text( zond, baum, node_id, &icon_name,
             &node_text, errmsg );
-    if ( rc == -1 ) ERROR_PAO_R( "db_get_icon_id_and_node_text", NULL )
+    if ( rc == -1 ) ERROR_SOND( "db_get_icon_id_and_node_text" )
     else if ( rc == 1 )
     {
         if ( errmsg ) *errmsg = g_strdup( "node_id existiert nicht" );
 
-        return NULL;
+        return -1;
     }
 
-    tree_store = ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) ));
-
     //neuen Knoten einfügen
-    zond_tree_store_insert( tree_store, iter, child, &new_iter );
+    zond_tree_store_insert( ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) )),
+            iter, child, &iter_inserted );
 
     //Daten rein
-    zond_tree_store_set( ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) )),
-            &new_iter, icon_name, node_text, node_id );
+    zond_tree_store_set( &iter_inserted, icon_name, node_text, node_id );
 
     g_free( icon_name );
     g_free( node_text );
 
-    return gtk_tree_iter_copy( &new_iter ); //muß gtk_tree_iter_freed werden!!
+    if ( iter_new ) *iter_new = iter_inserted;
+
+    return 0;
 }
 
 
 //rekursive Funktion; gibt Zeiger auf 1. eingefügten Iter zurück (g_free)
-GtkTreeIter*
+gint
 db_baum_knoten_mit_kindern( Projekt* zond, gboolean with_younger_siblings,
-        Baum baum, gint node_id, GtkTreeIter* iter, gboolean child,
+        Baum baum, gint node_id, GtkTreeIter* iter, gboolean child, GtkTreeIter* iter_new,
         gchar** errmsg )
 {
-    GtkTreeIter* iter_new = NULL;
-    iter_new = db_baum_knoten( zond, baum, node_id, iter, child, errmsg );
-    if ( !iter_new ) ERROR_PAO_R( "db_baum_knoten", NULL )
+    gint rc = 0;
+    GtkTreeIter iter_inserted = { 0, };
+
+    rc = db_baum_knoten( zond, baum, node_id, iter, child, &iter_inserted, errmsg );
+    if ( rc ) ERROR_SOND( "db_baum_knoten" )
 
     //Prüfen, ob Kind- oder Geschwisterknoten vorhanden
     gint first_child_id = 0;
     gint younger_sibling_id = 0;
 
     first_child_id = db_get_first_child( zond, baum, node_id, errmsg );
-    if ( first_child_id < 0 ) ERROR_PAO_R( "db_get_first_child", NULL )
+    if ( first_child_id < 0 ) ERROR_SOND( "db_get_first_child" )
 
     if ( first_child_id > 0 )
     {
-        GtkTreeIter* iter_child = NULL;
-        iter_child = db_baum_knoten_mit_kindern( zond, TRUE, baum, first_child_id,
-                iter_new, TRUE, errmsg );
-        if ( !iter_child ) ERROR_PAO_R( "db_baum_knoten_mit_kindern", NULL )
-
-        gtk_tree_iter_free( iter_child );
+        gint rc = 0;
+        rc = db_baum_knoten_mit_kindern( zond, TRUE, baum, first_child_id,
+                &iter_inserted, TRUE, NULL, errmsg );
+        if ( rc ) ERROR_SOND( "db_baum_knoten_mit_kindern" )
     }
 
     younger_sibling_id = db_get_younger_sibling( zond, baum, node_id, errmsg );
-    if ( younger_sibling_id < 0 ) ERROR_PAO_R( "db_get_younger_sibling", NULL )
+    if ( younger_sibling_id < 0 ) ERROR_SOND( "db_get_younger_sibling" )
 
     if ( younger_sibling_id > 0 && with_younger_siblings )
     {
-        GtkTreeIter* iter_sibling = NULL;
-        iter_sibling = db_baum_knoten_mit_kindern( zond, TRUE, baum,
-                younger_sibling_id, iter_new, FALSE, errmsg );
-        if ( !iter_sibling ) ERROR_PAO_R( "db_baum_knoten_mit_kindern", NULL )
+        gint rc = 0;
 
-        gtk_tree_iter_free( iter_sibling);
+        rc = db_baum_knoten_mit_kindern( zond, TRUE, baum,
+                younger_sibling_id, &iter_inserted, FALSE, NULL, errmsg );
+        if ( rc ) ERROR_SOND( "db_baum_knoten_mit_kindern" )
     }
-    return iter_new;
+
+    if ( iter_new ) *iter_new = iter_inserted;
+
+    return 0;
 }
 
 
@@ -96,7 +104,7 @@ db_baum_knoten_mit_kindern( Projekt* zond, gboolean with_younger_siblings,
 void cb_cursor_changed( GtkTreeView*, gpointer );
 
 
-gint
+static gint
 db_baum_neu_laden( Projekt* zond, Baum baum, gchar** errmsg )
 {
 #ifndef VIEWER
@@ -106,22 +114,22 @@ db_baum_neu_laden( Projekt* zond, Baum baum, gchar** errmsg )
             GTK_TREE_VIEW(zond->treeview[baum]) )) );
 
     first_node_id = db_get_first_child( zond, baum, 0, errmsg );
-    if ( first_node_id < 0 ) ERROR_PAO( "db_get_first_child" )
+    if ( first_node_id < 0 ) ERROR_SOND( "db_get_first_child" )
 
-    GtkTreeIter* iter = NULL;
     if ( first_node_id )
     {
-        iter = db_baum_knoten_mit_kindern( zond, TRUE, baum, first_node_id, NULL,
-                TRUE, errmsg );
-        if ( !iter ) ERROR_PAO( "db_baum_knoten_mit_kindern" )
+        gint rc = 0;
 
-        //kurz Signal verbinden, damit label und textview angezeigt werden
+        rc = db_baum_knoten_mit_kindern( zond, TRUE, baum, first_node_id, NULL,
+                TRUE, NULL, errmsg );
+        if ( rc ) ERROR_SOND( "db_baum_knoten_mit_kindern" )
+
+/*        //kurz Signal verbinden, damit label und textview angezeigt werden
         gulong signal = g_signal_connect( zond->treeview[baum], "cursor-changed",
                 G_CALLBACK(cb_cursor_changed), zond );
         sond_treeview_set_cursor( zond->treeview[baum], iter );
         g_signal_handler_disconnect( zond->treeview[baum], signal );
-
-        gtk_tree_iter_free( iter );
+*/
     }
 #endif // VIEWER
     return 0;
@@ -134,10 +142,16 @@ db_baum_refresh( Projekt* zond, gchar** errmsg )
     gint rc = 0;
 
     rc = db_baum_neu_laden( zond, BAUM_INHALT, errmsg );
-    if ( rc ) ERROR_PAO( "db_baum_neu_laden (BAUM_INHALT)" )
+    if ( rc ) ERROR_SOND( "db_baum_neu_laden (BAUM_INHALT)" )
 
     rc = db_baum_neu_laden( zond, BAUM_AUSWERTUNG, errmsg );
-    if ( rc ) ERROR_PAO( "db_baum_neu_laden (BAUM_AUSWERTUNG)" )
+    if ( rc ) ERROR_SOND( "db_baum_neu_laden (BAUM_AUSWERTUNG)" )
+
+    rc = db_baum_insert_links( zond, BAUM_INHALT, errmsg );
+    if ( rc ) ERROR_SOND( "db_baum_insert_links (BAUM_INHALT)" )
+
+    rc = db_baum_insert_links( zond, BAUM_AUSWERTUNG, errmsg );
+    if ( rc ) ERROR_SOND( "db_baum_insert_links (BAUM_AUSWERTUNG)" )
 
     gtk_tree_selection_unselect_all( zond->selection[BAUM_AUSWERTUNG] );
 

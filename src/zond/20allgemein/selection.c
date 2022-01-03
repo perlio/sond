@@ -27,6 +27,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../99conv/db_write.h"
 #include "../99conv/db_zu_baum.h"
 
+
 #include "project.h"
 #include "dbase_full.h"
 
@@ -135,7 +136,7 @@ static gint
 selection_foreach_kopieren( SondTreeview* tree_view, GtkTreeIter* iter, gpointer data, gchar** errmsg )
 {
     gint rc = 0;
-    GtkTreeIter* iter_new = NULL;
+    GtkTreeIter iter_new = { 0, };
     gint node_id = 0;
     gint new_node_id = 0;
 
@@ -152,17 +153,17 @@ selection_foreach_kopieren( SondTreeview* tree_view, GtkTreeIter* iter, gpointer
     if ( new_node_id == -1 ) ERROR_ROLLBACK( (DBase*) s_selection->zond->dbase_zond->dbase_work,
             "db_kopieren_nach_auswertung_mit_kindern (urspr. Aufruf)" )
 
-    iter_new = db_baum_knoten_mit_kindern( s_selection->zond, FALSE,
-            BAUM_AUSWERTUNG, new_node_id, s_selection->iter_dest, s_selection->kind, errmsg );
-    if ( !iter_new ) ERROR_ROLLBACK( (DBase*) s_selection->zond->dbase_zond->dbase_work,
+    rc = db_baum_knoten_mit_kindern( s_selection->zond, FALSE,
+            BAUM_AUSWERTUNG, new_node_id, s_selection->iter_dest, s_selection->kind, &iter_new, errmsg );
+    if ( s_selection->iter_dest ) gtk_tree_iter_free( s_selection->iter_dest );
+    if ( rc ) ERROR_ROLLBACK( (DBase*) s_selection->zond->dbase_zond->dbase_work,
             "db_baum_knoten_mit_kindern (urspr. Aufruf)" )
 
     rc = dbase_commit( (DBase*) s_selection->zond->dbase_zond->dbase_work, errmsg );
     if ( rc ) ERROR_ROLLBACK( (DBase*) s_selection->zond->dbase_zond->dbase_work,
             "db_commit" )
 
-    *(s_selection->iter_dest) = *iter_new;
-    gtk_tree_iter_free( iter_new );
+    s_selection->iter_dest = gtk_tree_iter_copy( &iter_new );
 
     s_selection->anchor_id = new_node_id;
     s_selection->kind = FALSE;
@@ -177,16 +178,19 @@ selection_kopieren( Projekt* zond, Baum baum_von, gint anchor_id, gboolean kind,
 {
     gint rc = 0;
     GtkTreeIter iter = { 0 };
+    gboolean success = FALSE;
 
     SSelectionKopieren s_selection = { zond, baum_von, NULL, anchor_id, kind };
-    sond_treeview_get_cursor( zond->treeview[BAUM_AUSWERTUNG], &iter );
-    s_selection.iter_dest = &iter;
+    success = sond_treeview_get_cursor( zond->treeview[BAUM_AUSWERTUNG], &iter );
+    s_selection.iter_dest = (success) ? gtk_tree_iter_copy( &iter ) : NULL;
 
     rc = sond_treeview_clipboard_foreach( zond->treeview[baum_von],
             selection_foreach_kopieren, &s_selection, errmsg );
 
     sond_treeview_expand_row( zond->treeview[BAUM_AUSWERTUNG], s_selection.iter_dest );
     sond_treeview_set_cursor( zond->treeview[BAUM_AUSWERTUNG], s_selection.iter_dest );
+
+    if ( s_selection.iter_dest ) gtk_tree_iter_free( s_selection.iter_dest );
 
     if ( rc == -1 ) ERROR_PAO( "treeview_selection_foreach" )
 
@@ -199,26 +203,30 @@ static gint
 selection_anbinden_zu_baum( Projekt* zond, GtkTreeIter* iter, gboolean kind,
         GArray* arr_new_nodes, gchar** errmsg )
 {
+    GtkTreeIter* iter_loop = NULL;
+
     for ( gint i = 0; i < arr_new_nodes->len; i++ )
     {
+        gint rc = 0;
         gint node_id_new = 0;
-        GtkTreeIter* iter_new = NULL;
+        GtkTreeIter iter_new = { 0, };
 
         node_id_new = g_array_index( arr_new_nodes, gint, i );
 
         //datei in baum_inhalt einfügen
-        iter_new = db_baum_knoten_mit_kindern( zond, FALSE, BAUM_INHALT, node_id_new,
-                iter, kind, errmsg );
-        if ( !iter_new ) ERROR_PAO( "db_baum_knoten_mit_kindern" )
+        rc = db_baum_knoten_mit_kindern( zond, FALSE, BAUM_INHALT, node_id_new,
+                iter_loop, kind, &iter_new, errmsg );
+        if ( iter_loop ) gtk_tree_iter_free( iter_loop );
+        if ( rc ) ERROR_SOND( "db_baum_knoten_mit_kindern" )
 
-        sond_treeview_expand_row( zond->treeview[BAUM_INHALT], iter_new );
+        sond_treeview_expand_row( zond->treeview[BAUM_INHALT], &iter_new );
         gtk_tree_view_columns_autosize( GTK_TREE_VIEW(((Projekt*) zond)->treeview[BAUM_INHALT]) );
 
-        *iter = *iter_new;
-        gtk_tree_iter_free( iter_new );
-
+        iter_loop = gtk_tree_iter_copy( &iter_new );
         kind = FALSE;
     }
+
+    if ( iter_loop ) gtk_tree_iter_free( iter_loop );
 
     return 0;
 }
@@ -282,8 +290,8 @@ selection_datei_einfuegen_in_db( Projekt* zond, gchar* rel_path, GFile* file, gi
         return -1;
     }
 
-    rc = db_set_datei( zond, new_node_id, rel_path, errmsg );
-    if ( rc ) ERROR_SOND( "db_set_datei" )
+    rc = dbase_full_set_datei( zond->dbase_zond->dbase_work, new_node_id, rel_path, errmsg );
+    if ( rc ) ERROR_SOND( "dbase_full_set_datei" )
 
     return new_node_id;
 }
@@ -368,7 +376,7 @@ selection_ordner_anbinden_rekursiv( Projekt* zond, InfoWindow* info_window,
     }
 
     //new_anchor kopieren, da in der Schleife verändert wird
-    //es soll aber der soeben erzeugt Punkt zurückgegegen werden
+    //es soll aber der soeben erzeugte Punkt zurückgegegen werden
     GFile* file_child = NULL;
     GFileInfo* info_child = NULL;
     gint new_node_id_loop_tmp = 0;
@@ -517,7 +525,7 @@ selection_anbinden( Projekt* zond, gint anchor_id, gboolean kind, GArray* arr_ne
             selection_foreach_anbinden, &s_selection, errmsg );
     if ( rc == -1 ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "treeview_selection_foreach" )
 
-    rc = selection_anbinden_zu_baum( zond, &iter, kind, arr_new_nodes, errmsg );
+    rc = selection_anbinden_zu_baum( zond, (success) ? &iter : NULL, kind, arr_new_nodes, errmsg );
     if ( rc ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "selection_anbinden_zu_baum" );
 
     rc = dbase_commit( (DBase*) zond->dbase_zond->dbase_work, errmsg );
@@ -535,7 +543,8 @@ selection_anbinden( Projekt* zond, gint anchor_id, gboolean kind, GArray* arr_ne
 
 typedef struct {
     Projekt* zond;
-    Baum baum;
+    Baum baum_selection;
+    Baum baum_dest;
     GtkTreeIter* iter_dest;
     gboolean kind;
 } SSelectionLink;
@@ -544,18 +553,50 @@ typedef struct {
 static gint
 selection_foreach_link( SondTreeview* tree_view, GtkTreeIter* iter, gpointer data, gchar** errmsg )
 {
-    GtkTreeModel* model = NULL;
+    gint rc = 0;
+    gint node_new = 0;
+    gint node_id = 0;
+    gint node_id_anchor = 0;
+    ZondTreeStore* tree_store_dest = NULL;
+    GtkTreeIter iter_new = { 0, };
 
     SSelectionLink* s_selection = (SSelectionLink*) data;
 
-/*
-    rc = db_insert_link( s_selection->zond, s_selection->baum, ...
-    if ( rc ) ERROR_PAO( "db_insert_link" )
-*/
-    model = gtk_tree_view_get_model( GTK_TREE_VIEW(tree_view) );
+    //anchor, im dest-baum
+    tree_store_dest = ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(s_selection->zond->treeview[s_selection->baum_dest]) ));
 
-    zond_tree_store_insert_link( ZOND_TREE_STORE(model), iter->user_data,
-            s_selection->iter_dest, s_selection->kind );
+    if ( s_selection->iter_dest ) gtk_tree_model_get(
+            GTK_TREE_MODEL(tree_store_dest), s_selection->iter_dest, 2,
+            &node_id_anchor, -1 );
+
+    //node ID, auf den link zeigen soll
+    gtk_tree_model_get( gtk_tree_view_get_model(
+            GTK_TREE_VIEW(tree_view) ), iter, 2, &node_id, -1 );
+
+    rc = dbase_begin( (DBase*) s_selection->zond->dbase_zond->dbase_work, errmsg );
+    if ( rc ) ERROR_SOND( "dbase_begin" )
+
+    node_new = dbase_full_insert_node( s_selection->zond->dbase_zond->dbase_work,
+            s_selection->baum_dest, node_id_anchor, s_selection->kind, NULL,
+            NULL, errmsg );
+    if ( node_new < 0 ) ERROR_ROLLBACK( (DBase*) s_selection->zond->dbase_zond->dbase_work,
+            "dbase_full_insert_node" )
+
+    rc = dbase_full_set_link( s_selection->zond->dbase_zond->dbase_work,
+            s_selection->baum_dest, node_new, NULL, s_selection->baum_selection,
+            node_id, errmsg );
+    if ( rc ) ERROR_ROLLBACK( (DBase*) s_selection->zond->dbase_zond->dbase_work,
+            "dbase_full_set_link" )
+
+    rc = dbase_commit( (DBase*) s_selection->zond->dbase_zond->dbase_work, errmsg );
+    if ( rc ) ERROR_ROLLBACK( (DBase*) s_selection->zond->dbase_zond->dbase_work,
+            "dbase_commit" )
+
+    zond_tree_store_insert_link( iter->user_data, node_new, tree_store_dest,
+            s_selection->iter_dest, s_selection->kind, &iter_new );
+
+    if ( s_selection->iter_dest ) gtk_tree_iter_free( s_selection->iter_dest );
+    s_selection->iter_dest = gtk_tree_iter_copy( &iter_new );
 
     s_selection->kind = FALSE;
 
@@ -565,22 +606,24 @@ selection_foreach_link( SondTreeview* tree_view, GtkTreeIter* iter, gpointer dat
 
 //Ziel ist immer BAUM_AUSWERTUNG
 static gint
-selection_link( Projekt* zond, Baum baum_von, gint anchor_id, gboolean kind, gchar** errmsg )
+selection_link( Projekt* zond, Baum baum_selection, Baum baum_dest, gint anchor_id, gboolean kind, gchar** errmsg )
 {
     gint rc = 0;
     GtkTreeIter iter = { 0 };
+    gboolean success = FALSE;
 
-    SSelectionLink s_selection = { zond, baum_von, NULL, kind };
-    sond_treeview_get_cursor( zond->treeview[baum_von], &iter );
+    SSelectionLink s_selection = { zond, baum_selection, baum_dest, NULL, kind };
+    success = sond_treeview_get_cursor( zond->treeview[baum_dest], &iter );
 
-    s_selection.iter_dest = &iter;
+    s_selection.iter_dest = (success) ? gtk_tree_iter_copy( &iter ) : NULL;
 
-    rc = sond_treeview_clipboard_foreach( zond->treeview[baum_von],
+    rc = sond_treeview_clipboard_foreach( zond->treeview[baum_selection],
             selection_foreach_link, &s_selection, errmsg );
 
-    sond_treeview_expand_row( zond->treeview[baum_von], s_selection.iter_dest );
-    sond_treeview_set_cursor( zond->treeview[baum_von], s_selection.iter_dest );
+    sond_treeview_expand_row( zond->treeview[baum_dest], s_selection.iter_dest );
+    sond_treeview_set_cursor( zond->treeview[baum_dest], s_selection.iter_dest );
 
+    if ( s_selection.iter_dest ) gtk_tree_iter_free( s_selection.iter_dest );
     if ( rc == -1 ) ERROR_PAO( "treeview_selection_foreach" )
 
     return 0;
@@ -739,11 +782,11 @@ selection_paste( Projekt* zond, gboolean kind, gboolean link )
         {
             gint rc = 0;
 
-            rc = selection_link( zond, baum, anchor_id, kind, &errmsg );
+            rc = selection_link( zond, baum_selection, baum, anchor_id, kind, &errmsg );
             if ( rc )
             {
                 meldung( zond->app_window, "Selection kann nicht kopiert/verschoben "
-                        "werden\n\nBei Aufruf fm_paste_clipboard:\n", errmsg, NULL );
+                        "werden\n\nBei Aufruf selection_link:\n", errmsg, NULL );
                 g_free( errmsg );
             }
 
@@ -780,7 +823,7 @@ selection_paste( Projekt* zond, gboolean kind, gboolean link )
         {
             gint rc = 0;
 
-            rc = selection_link( zond, baum, anchor_id, kind, &errmsg );
+            rc = selection_link( zond, baum_selection, baum, anchor_id, kind, &errmsg );
             if ( rc )
             {
                 meldung( zond->app_window, "Selection kann nicht kopiert/verschoben "
@@ -790,189 +833,6 @@ selection_paste( Projekt* zond, gboolean kind, gboolean link )
 
             return;
         }
-    }
-
-    return;
-}
-
-
-static gint
-selection_foreach_entfernen_anbindung( SondTreeview* stv,
-        GtkTreeIter* iter, gpointer data, gchar** errmsg )
-{
-    gint rc = 0;
-    gint typ = 0;
-    gint older_sibling = 0;
-    gint parent = 0;
-    gint child = 0;
-    gint node_id = 0;
-
-    Projekt* zond = (Projekt*) data;
-
-    gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(stv) ), iter,
-            2, &node_id, -1 );
-
-    typ = db_knotentyp_abfragen( zond, BAUM_INHALT, node_id, errmsg );
-    if ( typ == -1 ) ERROR_PAO ( "db_knotentyp_abfragen" )
-    if ( typ != 2 ) return 0;
-
-    //herausfinden, ob zu löschender Knoten älteres Geschwister hat
-    older_sibling = db_get_older_sibling( zond, BAUM_INHALT, node_id, errmsg );
-    if ( older_sibling < 0 ) ERROR_PAO( "db_get_older_sibling" )
-
-    //Elternknoten ermitteln
-    parent = db_get_parent( zond, BAUM_INHALT, node_id, errmsg );
-    if ( parent < 0 ) ERROR_PAO( "db_get_parent" )
-
-    rc = dbase_begin( (DBase*) zond->dbase_zond->dbase_work, errmsg );
-    if ( rc ) ERROR_SOND( "db_begin" )
-
-    child = 0;
-    while ( (child = db_get_first_child( zond, BAUM_INHALT, node_id,
-            errmsg )) )
-    {
-        if ( child < 0 ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work,
-                "db_get_first_child" )
-
-        rc = knoten_verschieben( zond, BAUM_INHALT, child, parent,
-                older_sibling, errmsg );
-        if ( rc == -1 ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work,
-                "knoten_verschieben" )
-
-        older_sibling = child;
-    }
-
-    rc = db_remove_node( zond, BAUM_INHALT, node_id, errmsg );
-    if ( rc ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "db_remove_node" )
-
-    zond_tree_store_remove( ZOND_TREE_STORE(gtk_tree_view_get_model(
-            GTK_TREE_VIEW(stv) )), iter );
-
-    rc = dbase_commit( (DBase*) zond->dbase_zond->dbase_work, errmsg );
-    if ( rc ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "db_commit" )
-
-    return 0;
-}
-
-
-//Funktioniert nur im BAUM_INHALT - Abfrage im cb
-gint
-selection_entfernen_anbindung( Projekt* zond, gchar** errmsg )
-{
-    gint rc = 0;
-
-    rc = sond_treeview_selection_foreach( zond->treeview[BAUM_INHALT],
-            selection_foreach_entfernen_anbindung, zond, errmsg );
-    if ( rc == -1 ) ERROR_PAO( "treeview_selection_foreach" )
-
-    return 0;
-}
-
-
-static gint
-selection_foreach_loeschen( SondTreeview* tree_view, GtkTreeIter* iter,
-        gpointer data, gchar** errmsg )
-{
-    gint node_id = 0;
-    Baum baum = KEIN_BAUM;
-
-    Projekt* zond = (Projekt*) data;
-
-    gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(tree_view) ), iter,
-            2, &node_id, -1 );
-    baum = baum_get_baum_from_treeview( zond, GTK_WIDGET(tree_view) );
-
-
-    if ( !zond_tree_store_is_link( iter ) )
-    {
-        gint rc = 0;
-
-        rc = db_remove_node( zond, baum, node_id, errmsg );
-        if ( rc ) ERROR_PAO ( "db_remove_node" )
-
-        zond_tree_store_remove( ZOND_TREE_STORE(gtk_tree_view_get_model(
-        GTK_TREE_VIEW(tree_view) )), iter );
-    }
-    else if ( zond_tree_store_is_link_head( ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(tree_view) )), iter ) )
-    {
-        gint rc = 0;
-
-/*        rc = db_remove_link( zond, baum, node_id, errmsg );
-        if ( rc ) ERROR_PAO("db_remove_link" )
-*/
-        zond_tree_store_remove_link( ZOND_TREE_STORE(gtk_tree_view_get_model(
-        GTK_TREE_VIEW(tree_view) )), iter );
-    }
-
-    return 0;
-}
-
-gint
-selection_loeschen( Projekt* zond, Baum baum, gchar** errmsg )
-{
-    gint rc = 0;
-
-    if ( baum == BAUM_INHALT || baum == BAUM_AUSWERTUNG ) rc =
-            sond_treeview_selection_foreach( zond->treeview[baum],
-            selection_foreach_loeschen, zond, errmsg );
-    else rc = sond_treeviewfm_selection_loeschen( SOND_TREEVIEWFM(zond->treeview[baum]), errmsg );
-
-    if ( rc == -1 ) ERROR_SOND( "treeview_selection_foreach" )
-
-    return 0;
-}
-
-
-typedef struct _S_Selection_Change_Icon
-{
-    Projekt* zond;
-    Baum baum;
-    const gchar* icon_name;
-} SSelectionChangeIcon;
-
-static gint
-selection_foreach_change_icon_id( SondTreeview* tree_view, GtkTreeIter* iter,
-        gpointer data, gchar** errmsg )
-{
-    gint rc = 0;
-    gint node_id = 0;
-    SSelectionChangeIcon* s_selection = (SSelectionChangeIcon*) data;
-
-    gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(tree_view) ), iter,
-            2, &node_id, -1 );
-
-    rc = dbase_full_set_icon_id( s_selection->zond->dbase_zond->dbase_work, s_selection->baum, node_id, s_selection->icon_name, errmsg );
-    if ( rc ) ERROR_PAO( "dbase_full_set_icon_id" )
-
-    //neuen icon_name im tree speichern
-    zond_tree_store_set( ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(s_selection->
-            zond->treeview[s_selection->baum]) )), iter, s_selection->icon_name, NULL, 0 );
-
-    return 0;
-}
-
-
-void
-selection_change_icon_id( Projekt* zond, const gchar* icon_name )
-{
-    gint rc = 0;
-    gchar* errmsg = NULL;
-    SSelectionChangeIcon s_selection = { 0 };
-
-    Baum baum = baum_abfragen_aktiver_treeview( zond );
-    if ( baum == KEIN_BAUM || baum == BAUM_FS ) return;
-
-    s_selection.zond = zond;
-    s_selection.baum = baum;
-    s_selection.icon_name = icon_name;
-
-    rc = sond_treeview_selection_foreach( zond->treeview[baum],
-            selection_foreach_change_icon_id, (gpointer) &s_selection, &errmsg );
-    if ( rc == -1 )
-    {
-        meldung( zond->app_window, "Fehler Ändern Icons - \n\nBei Aufruf "
-                "treeview_selection_foreach:\n", errmsg, NULL );
-        g_free( errmsg );
     }
 
     return;

@@ -35,28 +35,6 @@ baum_abfragen_aktiver_treeview( Projekt* zond )
 }
 
 
-gint
-baum_abfragen_node_id( SondTreeview* treeview, GtkTreePath* path, gchar** errmsg )
-{
-    gint node_id = 0;
-    GtkTreeIter iter;
-
-    //node_id_orig im baum_inhalt abfragen
-    if ( !gtk_tree_model_get_iter( gtk_tree_view_get_model( GTK_TREE_VIEW(treeview) ),
-            &iter, path ) )
-    {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf gtk_tree_model_get_iter:\n"
-                "Rückgabewert FALSE - path nicht gültig", NULL );
-
-        return -1;
-    }
-    gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(treeview) ),
-            &iter, 2, &node_id, -1 );
-
-    return node_id;
-}
-
-
 static gboolean
 baum_path_foreach_node_id( GtkTreeModel* model, GtkTreePath* path, GtkTreeIter* iter,
         gpointer user_data )

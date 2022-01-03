@@ -188,6 +188,7 @@ knoten_verschieben( Projekt* zond, Baum baum, gint node_id, gint new_parent,
         gint new_older_sibling, gchar** errmsg )
 {
     gint rc = 0;
+    GtkTreeIter* iter = NULL;
 
     //kind verschieben
     rc = db_verschieben_knoten( zond, baum, node_id, new_parent,
@@ -196,7 +197,6 @@ knoten_verschieben( Projekt* zond, Baum baum, gint node_id, gint new_parent,
 
     //Knoten im tree löschen
     //hierzu iter des verschobenen Kindknotens herausfinden
-    GtkTreeIter* iter = NULL;
     iter = baum_abfragen_iter( zond->treeview[baum], node_id );
 
     zond_tree_store_remove( ZOND_TREE_STORE(gtk_tree_view_get_model(
@@ -218,13 +218,11 @@ knoten_verschieben( Projekt* zond, Baum baum, gint node_id, gint new_parent,
     }
 
     //Knoten erzeugen
-    GtkTreeIter* iter_anker = db_baum_knoten_mit_kindern( zond, FALSE,
-            baum, node_id, iter, kind, errmsg );
+    rc = db_baum_knoten_mit_kindern( zond, FALSE,
+            baum, node_id, iter, kind, NULL, errmsg );
     gtk_tree_iter_free( iter );
 
-    if ( !iter_anker ) ERROR_PAO( "db_baum_knoten_mit_kindern" )
-
-    gtk_tree_iter_free( iter_anker );
+    if ( rc ) ERROR_SOND( "db_baum_knoten_mit_kindern" )
 
     return 0;
 }

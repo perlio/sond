@@ -145,6 +145,7 @@ suchen_kopieren_listenpunkt( Projekt* zond, GList* list, gint anchor_id,
     Baum baum = KEIN_BAUM;
     gint node_id = 0;
     gint new_node_id = 0;
+    GtkTreeIter iter_new = { 0, };
 
     baum = (Baum) GPOINTER_TO_INT(g_object_get_data( G_OBJECT(list->data), "baum" ));
     node_id = GPOINTER_TO_INT(g_object_get_data( G_OBJECT(list->data), "node-id" ));
@@ -163,15 +164,13 @@ suchen_kopieren_listenpunkt( Projekt* zond, GList* list, gint anchor_id,
     GtkTreeIter* iter = baum_abfragen_iter( zond->treeview[BAUM_AUSWERTUNG],
             anchor_id );
 
-    GtkTreeIter* new_iter = db_baum_knoten( zond, BAUM_AUSWERTUNG,
-            new_node_id, iter, child, errmsg );
+    gboolean success = db_baum_knoten( zond, BAUM_AUSWERTUNG,
+            new_node_id, iter, child, &iter_new, errmsg );
     if ( iter ) gtk_tree_iter_free( iter );
-    if ( !new_iter ) ERROR_SOND( "db_baum_knoten" )
+    if ( !success ) ERROR_SOND( "db_baum_knoten" )
 
-    sond_treeview_expand_row( zond->treeview[BAUM_AUSWERTUNG], new_iter );
-    sond_treeview_set_cursor( zond->treeview[BAUM_AUSWERTUNG], new_iter );
-
-    gtk_tree_iter_free( new_iter );
+    sond_treeview_expand_row( zond->treeview[BAUM_AUSWERTUNG], &iter_new );
+    sond_treeview_set_cursor( zond->treeview[BAUM_AUSWERTUNG], &iter_new );
 
     anchor_id = new_node_id;
     child = FALSE;

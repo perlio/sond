@@ -11,13 +11,11 @@ typedef int gboolean;
 typedef char gchar;
 
 
-GtkTreeIter* db_baum_knoten( Projekt*, Baum, gint, GtkTreeIter*, gboolean,
-        gchar** );
+gint db_baum_knoten( Projekt*, Baum, gint, GtkTreeIter*, gboolean,
+        GtkTreeIter*, gchar** );
 
-GtkTreeIter* db_baum_knoten_mit_kindern( Projekt*, gboolean, Baum, gint,
-        GtkTreeIter*, gboolean, gchar** );
-
-gint db_baum_neu_laden( Projekt*, Baum, gchar** );
+gint db_baum_knoten_mit_kindern( Projekt*, gboolean, Baum, gint,
+        GtkTreeIter*, gboolean, GtkTreeIter*, gchar** );
 
 gint db_baum_refresh( Projekt*, gchar** );
 

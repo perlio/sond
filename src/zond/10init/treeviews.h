@@ -2,7 +2,19 @@
 #define TREEVIEWS_H_INCLUDED
 
 
+typedef int gint;
 typedef struct _Projekt Projekt;
+typedef enum BAEUME Baum;
+
+gint treeviews_entfernen_anbindung( Projekt*, Baum, gchar** );
+
+gint treeviews_selection_loeschen( Projekt*, Baum, gchar** );
+
+gint treeviews_change_icon_id( Projekt*, Baum, const gchar*, gchar** );
+
+gint treeviews_node_text_nach_anbindung( Projekt*, Baum, gchar** );
+
+gint treeviews_insert_node( Projekt*, Baum, gboolean, gchar** );
 
 void treeviews_cb_editing_canceled( GtkCellRenderer*, gpointer );
 

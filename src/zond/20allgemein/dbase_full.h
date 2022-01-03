@@ -15,6 +15,12 @@ typedef struct _DBase_Full
     sqlite3_stmt* insert_node[5];
     sqlite3_stmt* set_node_text[2];
     sqlite3_stmt* set_icon_id[2];
+    sqlite3_stmt* speichern_textview;
+    sqlite3_stmt* set_datei;
+    sqlite3_stmt* set_link;
+    sqlite3_stmt* get_link_target;
+    sqlite3_stmt* get_links;
+    sqlite3_stmt* remove_link;
     sqlite3_stmt* stmts[55];
 
 } DBaseFull;
@@ -27,6 +33,21 @@ gint dbase_full_insert_node( DBaseFull*, Baum, gint, gboolean, const gchar*,
 gint dbase_full_set_node_text( DBaseFull*, Baum, gint, const gchar*, gchar** );
 
 gint dbase_full_set_icon_id( DBaseFull*, Baum, gint, const gchar*, gchar** );
+
+gint dbase_full_speichern_textview( DBaseFull*, gint, gchar*, gchar** );
+
+gint dbase_full_set_datei( DBaseFull*, gint, const gchar*, gchar** );
+
+gint dbase_full_set_link( DBaseFull*, const gint, const gint, const gchar*,
+        const gint, const gint, gchar** );
+
+gint dbase_full_get_links( DBaseFull*, const gchar*, const gint, const gint,
+        GArray**, gchar** );
+
+gint dbase_full_get_link_target( DBaseFull*, const gint, const gint, gchar**, gint*,
+        gint*, gchar** );
+
+gint dbase_full_remove_link( DBaseFull*, const gint, const gint, gchar** );
 
 gint dbase_full_insert_entity( DBaseFull*, gint, gchar** );
 

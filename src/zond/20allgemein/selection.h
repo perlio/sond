@@ -13,14 +13,4 @@ typedef int gboolean;
 
 void selection_paste( Projekt*, gboolean, gboolean );
 
-gint selection_entfernen_anbindung( Projekt*, gchar** );
-
-gint selection_foreach_loeschen( GtkTreeView*, GtkTreeIter*, gpointer, gchar** );
-
-gint selection_loeschen( Projekt*, Baum, gchar** );
-
-gint selection_change_icon_id( Projekt*, const gchar* );
-
-void selection_copy_or_cut( Projekt*, gboolean );
-
 #endif // SELECTION_H_INCLUDED

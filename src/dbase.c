@@ -551,14 +551,14 @@ dbase_create_db( sqlite3* db, gchar** errmsg )
             "ON DELETE RESTRICT ON UPDATE RESTRICT );"
 
             "INSERT INTO baum_auswertung (node_id, parent_id, older_sibling_id) "
-            "VALUES (0, 0, 0)" //mit eingang
+            "VALUES (0, 0, 0); " //mit eingang
 
             "CREATE TABLE links ( "
-            "projekt VARCHAR (200), "
             "baum_id INTEGER, "
             "node_id INTEGER, "
-            "baum_id_dest INTEGER, "
-            "node_id_dest INTEGER "
+            "projekt_target VARCHAR (200), "
+            "baum_id_target INTEGER, "
+            "node_id_target INTEGER "
             " ); ";
 
     rc = sqlite3_exec( db, sql, NULL, NULL, &errmsg_ii );
@@ -914,7 +914,7 @@ dbase_get_version( sqlite3* db, gchar** errmsg )
 
 
 gint
-dbase_open( const gchar* path, DBase* dbase, gboolean create, gboolean overwrite,
+dbase_open( const gchar* path, DBase* dbase, gboolean create, gboolean create_file,
         gchar** errmsg )
 {
     gint rc = 0;
@@ -922,10 +922,11 @@ dbase_open( const gchar* path, DBase* dbase, gboolean create, gboolean overwrite
 
     if ( !dbase ) return 0;
 
-    rc = sqlite3_open_v2( path, &db, SQLITE_OPEN_READWRITE | ((overwrite == FALSE) ? 0 : SQLITE_OPEN_CREATE), NULL );
+    //wenn Datei nicht vorhanden und !create_file: Error
+    rc = sqlite3_open_v2( path, &db, SQLITE_OPEN_READWRITE | ((create_file == FALSE) ? 0 : SQLITE_OPEN_CREATE), NULL );
 
     if ( rc != SQLITE_OK ) sqlite3_close( db );
-    else if ( !overwrite ) //Datei vorhanden, aber nicht erzeugt worden (dbase_full), soll nicht überschrieben werden
+    else if ( !create_file ) //rc == SQLITE_OK: Datei war vorhanden - soll nicht überschrieben werden
     {
         gchar* v_string = NULL;
 
@@ -941,7 +942,7 @@ dbase_open( const gchar* path, DBase* dbase, gboolean create, gboolean overwrite
             sqlite3_close( db );
 
             rc = dbase_convert_to_actual_version( path, v_string, errmsg );
-            if ( rc ) ERROR_PAO( "convert_to_actual_version" )
+            if ( rc ) ERROR_PAO( "dbase_convert_to_actual_version" )
             else display_message( NULL, "Datei von ", v_string, " zu "DB_VERSION
                     "konvertiert", NULL );
 
@@ -951,7 +952,7 @@ dbase_open( const gchar* path, DBase* dbase, gboolean create, gboolean overwrite
 
     }
 
-    if ( rc != SQLITE_OK && !create ) //db gibts schon und nicht create oder sonstiger Fähler
+    if ( rc != SQLITE_OK && !create ) //db gibts noch nicht oder kann nicht geöffnet werden und soll auch nicht erzeugt werden
     {
         if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_open_v2:\n",
                 sqlite3_errstr( rc ), NULL );
@@ -1015,13 +1016,13 @@ dbase_open( const gchar* path, DBase* dbase, gboolean create, gboolean overwrite
 
 gint
 dbase_create_with_stmts( const gchar* path, DBase** dbase, gboolean create,
-        gboolean overwrite, gchar** errmsg )
+        gboolean create_file, gchar** errmsg )
 {
     gint rc = 0;
 
     *dbase = g_malloc0( sizeof( DBase ) );
 
-    rc = dbase_open( path, *dbase, create, overwrite, errmsg );
+    rc = dbase_open( path, *dbase, create, create_file, errmsg );
     if ( rc )
     {
         dbase_destroy( *dbase );

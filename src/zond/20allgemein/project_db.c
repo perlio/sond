@@ -38,30 +38,6 @@ project_db_create_stmts( Database* dbase, gchar** errmsg )
 {
     gint rc = 0;
 
-/*  db_speichern_textview  */
-    rc = sqlite3_prepare_v2( dbase->db, "UPDATE baum_auswertung SET text=? WHERE "
-            "node_id=?;", -1, &(dbase->stmts.db_speichern_textview[0]), NULL );
-    if ( rc != SQLITE_OK )
-    {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_prepare_v2 "
-                "(db_speichern_textview):\n", sqlite3_errmsg( dbase->db ), NULL );
-
-        return -1;
-    }
-
-/*  db_set_datei */
-    rc = sqlite3_prepare_v2( dbase->db,
-            "INSERT INTO dateien (rel_path, node_id) "
-            "VALUES (?, ?); ", //datei_id, rel_path, last_insert_rowid
-            -1, &(dbase->stmts.db_set_datei[0]), NULL );
-    if ( rc != SQLITE_OK )
-    {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_prepare_v2 "
-                "(db_set_datei [0]):\n", sqlite3_errmsg( dbase->db ), NULL );
-
-        return -1;
-    }
-
 /*  ziele_einfuegen  */
     rc = sqlite3_prepare_v2( dbase->db, "INSERT INTO ziele (ziel_id_von, index_von, "
             "ziel_id_bis, index_bis, rel_path, node_id) "

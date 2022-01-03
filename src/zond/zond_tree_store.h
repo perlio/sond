@@ -52,8 +52,7 @@ GDK_AVAILABLE_IN_ALL
 ZondTreeStore *zond_tree_store_new              ( void );
 
 GDK_AVAILABLE_IN_ALL
-void          zond_tree_store_set              (ZondTreeStore *tree_store,
-                                               GtkTreeIter  *iter,
+void          zond_tree_store_set              (GtkTreeIter  *iter,
                                                 const gchar* icon_name,
                                                 const gchar* node_text,
                                                 const gint node_id );
@@ -71,10 +70,15 @@ void zond_tree_store_insert(ZondTreeStore* tree_store,
                                          GtkTreeIter* iter_new );
 
 GDK_AVAILABLE_IN_ALL
-void         zond_tree_store_insert_link (ZondTreeStore*,
-                                          GNode*,
+void         zond_tree_store_insert_link (GNode*,
+                                          gint,
+                                          ZondTreeStore*,
                                           GtkTreeIter*,
-                                          gboolean );
+                                          gboolean,
+                                          GtkTreeIter* );
+
+gint
+zond_tree_store_get_link_head_nr( GNode* );
 
 GDK_AVAILABLE_IN_ALL
 gboolean      zond_tree_store_is_ancestor      (ZondTreeStore *tree_store,
@@ -92,11 +96,11 @@ gboolean      zond_tree_store_iter_is_valid    (ZondTreeStore *tree_store,
 gboolean
 zond_tree_store_is_link( GtkTreeIter* );
 
-gboolean
-zond_tree_store_is_link_head( ZondTreeStore*, GtkTreeIter* );
+GList* zond_tree_store_get_linked_nodes( GtkTreeIter* );
 
-ZondTreeStore*
-zond_tree_store_get_tree_store( GtkTreeIter* );
+void zond_tree_store_get_orig( GtkTreeIter*, GtkTreeIter* );
+
+ZondTreeStore* zond_tree_store_get_tree_store( GNode* );
 
 G_END_DECLS
 #endif /* ZOND_TREE_STORE_H_INCLUDED */

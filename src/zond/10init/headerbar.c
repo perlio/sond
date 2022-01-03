@@ -53,6 +53,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../40viewer/document.h"
 
 #include "app_window.h"
+#include "treeviews.h"
 
 #include "../../misc.h"
 
@@ -89,12 +90,9 @@ pdf_rel_path_in_array( GPtrArray* arr_rel_path, gchar* rel_path )
 static GPtrArray*
 selection_abfragen_pdf( Projekt* zond, gchar** errmsg )
 {
-    gint rc = 0;
     Baum baum = KEIN_BAUM;
     GList* selected = NULL;
     GList* list = NULL;
-    gint node_id = 0;
-    gchar* rel_path = NULL;
 
     GPtrArray* arr_rel_path = g_ptr_array_new_with_free_func( (GDestroyNotify) g_free );
 
@@ -107,15 +105,23 @@ selection_abfragen_pdf( Projekt* zond, gchar** errmsg )
     list = selected;
     do //alle rows aus der Liste
     {
-        node_id = baum_abfragen_node_id( zond->treeview[baum], list->data,
-                errmsg );
-        if ( node_id == -1 )
+        gint rc = 0;
+        GtkTreeIter iter = { 0, };
+        gint node_id = 0;
+        gchar* rel_path = NULL;
+
+        if ( !gtk_tree_model_get_iter( gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) ), &iter, list->data ) )
         {
             g_list_free_full( selected, (GDestroyNotify) gtk_tree_path_free );
-            g_ptr_array_free( arr_rel_path, TRUE );
+            g_ptr_array_unref( arr_rel_path );
 
-            ERROR_PAO_R( "baum_abfragen_node_id", NULL )
+            if ( errmsg ) *errmsg = g_strdup( "Bei Aufruf gtk_tree_model_get_iter:\n"
+                    "Es konnte kein gültiger iter ermittelt werden" );
+
+            return NULL;
         }
+
+        gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) ), &iter, 2, &node_id, -1 );
 
         rc = db_get_rel_path( zond, baum, node_id, &rel_path, errmsg );
         if ( rc == -2 ) continue;
@@ -449,34 +455,11 @@ cb_datei_ocr( GtkMenuItem* item, gpointer data )
 
 
 /*  Callbacks des Menus "Struktur" */
-static gint
-headerbar_insert_node( Projekt* zond, Baum baum, gint node_id, gboolean child, gchar** errmsg )
-{
-    gint rc = 0;
-    gint new_node_id = 0;
-
-    rc = dbase_begin( (DBase*) zond->dbase_zond->dbase_work, errmsg );
-    if ( rc ) ERROR_SOND( "dbase_begin" )
-
-    //Knoten in Datenbank einfügen
-    new_node_id = dbase_full_insert_node( zond->dbase_zond->dbase_work, baum,
-            node_id, child, zond->icon[ICON_NORMAL].icon_name, "Neuer Punkt", errmsg );
-    if ( new_node_id == -1 ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "dbase_full_insert_node" )
-
-    rc = dbase_commit( (DBase*) zond->dbase_zond->dbase_work, errmsg );
-    if ( rc ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "dbase_commit" )
-
-    return 0;
-}
-
 static void
 cb_punkt_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
 {
     gint rc = 0;
     gchar* errmsg = NULL;
-    gint node_id = 0;
-    gint new_node_id = 0;
-    ZondTreeStore* tree_store = NULL;
 
     Projekt* zond = (Projekt*) user_data;
 
@@ -495,68 +478,17 @@ cb_punkt_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
                     "Bei Aufruf fm_create_dir:\n", errmsg, NULL );
             g_free( errmsg );
         }
-
-        return;
     }
-    else if ( baum == BAUM_INHALT )
+    else
     {
-        node_id = baum_abfragen_aktuelle_node_id( zond->treeview[BAUM_INHALT] );
-        if ( node_id == 0 ) child = TRUE;
-        else
+        rc = treeviews_insert_node( zond, baum, child, &errmsg );
+        if ( rc == -1 )
         {
-            rc = hat_vorfahre_datei( zond, baum, node_id, child, &errmsg );
-            if ( rc == -1 )
-            {
-                meldung( zond->app_window, "Einfügen nicht möglich -\n\n"
-                        "Bei Aufruf hat_vorfahre_datei:\n", errmsg, NULL );
-                g_free( errmsg );
-
-                return;
-            }
-            else if ( rc == 1 )
-            {
-                meldung( zond->app_window, "Einfügen nicht möglich -\n\n"
-                        "Nicht zulässig als Unterpunkt von Datei:\n", errmsg, NULL );
-                g_free( errmsg );
-
-                return;
-            }
+            meldung( zond->app_window, "Punkt einfügen fehlgeschlagen\n\n"
+                    "Bei Aufruf treeviews_insert_node:\n", errmsg, NULL );
+            g_free( errmsg );
         }
     }
-    else if ( baum == BAUM_AUSWERTUNG )
-    {
-        node_id = baum_abfragen_aktuelle_node_id( zond->treeview[BAUM_AUSWERTUNG] );
-        if ( node_id == 0 ) child = TRUE;
-    }
-
-    rc = headerbar_insert_node( zond, baum, node_id, child, &errmsg );
-    if ( rc )
-    {
-        meldung( zond->app_window, "Punkt einfügen nicht möglich -\n\nBei "
-                "Aufruf headerbar_insert_node:\n", errmsg, NULL );
-
-        g_free( errmsg );
-
-        return;
-    }
-
-    //Knoten in baum_inhalt einfuegen
-    GtkTreeIter iter = { 0 };
-    GtkTreeIter new_iter = { 0 };
-    gboolean success = FALSE;
-
-    success = sond_treeview_get_cursor( zond->treeview[baum], &iter );
-
-    tree_store = ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) ));
-    zond_tree_store_insert( tree_store, (success) ? &iter : NULL, child, &new_iter );
-
-    if ( child && success ) sond_treeview_expand_row( zond->treeview[baum], &iter );
-
-    //Standardinhalt setzen
-    zond_tree_store_set( ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) )),
-            &new_iter, zond->icon[ICON_NORMAL].icon_name, "Neuer Punkt", new_node_id );
-
-    sond_treeview_set_cursor( zond->treeview[baum], &new_iter );
 
     return;
 }
@@ -566,104 +498,50 @@ cb_punkt_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
 static void
 cb_item_text_anbindung( GtkMenuItem* item, gpointer data )
 {
-    Projekt* zond = (Projekt*) data;
-
     Baum baum = KEIN_BAUM;
     gint rc = 0;
     gchar* errmsg = NULL;
-    GList* selected = NULL;
-    GList* list = NULL;
-    gint node_id = 0;
-    gchar* node_text = NULL;
-    GtkTreeIter* iter = NULL;
-    gchar* rel_path = NULL;
-    Anbindung* anbindung = NULL;
+    Projekt* zond = (Projekt*) data;
 
     baum = baum_abfragen_aktiver_treeview( zond );
 
-    if ( baum == BAUM_FS ) return;
+    if ( baum == KEIN_BAUM || baum == BAUM_FS ) return;
 
-    selected = gtk_tree_selection_get_selected_rows( zond->selection[baum], NULL );
-    if( !selected ) return;
-
-    list = selected;
-    do //alle rows aus der Liste
+    rc = treeviews_node_text_nach_anbindung( zond, baum, &errmsg );
+    if ( rc == -1 )
     {
-        node_id = baum_abfragen_node_id( zond->treeview[baum], list->data,
-                &errmsg );
-        if ( node_id == -1 )
-        {
-            meldung( zond->app_window, "Fehler in Text anpassen (Anbindung):\n\n"
-                    "Bei Aufruf baum_abfragen_node_id:\n", errmsg, NULL );
-            g_free( errmsg );
-            g_list_free_full( selected, (GDestroyNotify) gtk_tree_path_free );
-
-            return;
-        }
-
-        rc = abfragen_rel_path_and_anbindung( zond, baum, node_id, &rel_path,
-                &anbindung, &errmsg );
-        if ( rc == -1 )
-        {
-            meldung( zond->app_window, "Fehler in Text anpassen (Anbindung):\n\n"
-                    "Bei Aufruf abfragen_rel_path_and_anbindung:\n", errmsg, NULL );
-            g_free( errmsg );
-            g_list_free_full( selected, (GDestroyNotify) gtk_tree_path_free );
-
-            return;
-        }
-
-        if ( rc == 2 ) continue;
-        else if ( rc == 0 )
-        {
-            node_text = g_strdup_printf( "%s, S. %i (%i) - S. %i (%i)", rel_path,
-                    anbindung->von.seite, anbindung->von.index, anbindung->bis.seite,
-                    anbindung->bis.index );
-
-            g_free( anbindung );
-        }
-        else node_text = g_strdup_printf( "%s", rel_path );
-
-        g_free( rel_path );
-
-        rc = dbase_full_set_node_text( zond->dbase_zond->dbase_work, baum, node_id, node_text, &errmsg );
-        if ( rc )
-        {
-            meldung( zond->app_window, "Fehler in Text anpassen (Anbindung):\n\n"
-                    "Bei Aufruf dbase_full_set_node_text:\n", errmsg, NULL );
-            g_free( errmsg );
-            g_free( node_text );
-            g_list_free_full( selected, (GDestroyNotify) gtk_tree_path_free );
-
-            return;
-        }
-
-        iter = baum_abfragen_iter( zond->treeview[baum], node_id );
-        //neuen text im tree speichern
-        zond_tree_store_set( ZOND_TREE_STORE(gtk_tree_view_get_model(
-                GTK_TREE_VIEW(zond->treeview[baum]) )), iter, NULL, node_text, 0 );
-        gtk_tree_iter_free( iter );
-        g_free( node_text );
+        meldung( zond->app_window, "Knotentext anpassen fehlgeschlagen:\n\n"
+                "Bei Aufruf treeviews_node_text_nach_anbindung:\n", errmsg, NULL );
+        g_free( errmsg );
     }
-    while ( (list = list->next) );
-
-    g_list_free_full( selected, (GDestroyNotify) gtk_tree_path_free );
 
     return;
 }
 
-
 static void
 cb_change_icon_item( GtkMenuItem* item, gpointer data )
 {
-    Projekt* zond = (Projekt*) data;
-
+    gint rc = 0;
+    gchar* errmsg = NULL;
     gint icon_id = 0;
+    Projekt* zond = NULL;
+    Baum baum = KEIN_BAUM;
+
+    zond = (Projekt*) data;
+
+    baum = baum_abfragen_aktiver_treeview( zond );
+    if ( baum == KEIN_BAUM || baum == BAUM_FS ) return;
 
     icon_id = GPOINTER_TO_INT(g_object_get_data( G_OBJECT(item),
             "icon-id" ));
 
-    selection_change_icon_id( zond, zond->icon[icon_id].icon_name );
+    rc = treeviews_change_icon_id( zond, baum, zond->icon[icon_id].icon_name, &errmsg );
+    if ( rc == -1 )
+    {
+        meldung( zond->app_window, "Icon ändern fehlgeschlagen:\n\n"
+                "Bei Aufruf treeviews_change_icon_id:\n", errmsg, NULL );
+        g_free( errmsg );
+    }
 
     return;
 }
@@ -754,11 +632,14 @@ cb_loeschen_activate( GtkMenuItem* item, gpointer user_data )
     Baum baum = baum_abfragen_aktiver_treeview( zond );
     if ( baum == KEIN_BAUM ) return;
 
-    rc = selection_loeschen( zond, baum, &errmsg );
-    if ( rc )
+    if ( baum == BAUM_FS ) rc = sond_treeviewfm_selection_loeschen(
+            SOND_TREEVIEWFM(zond->treeview[baum]), &errmsg );
+    else if ( baum == BAUM_INHALT ||baum == BAUM_AUSWERTUNG ) rc =
+            treeviews_selection_loeschen( zond, baum, &errmsg );
+    if ( rc == -1 )
     {
         meldung( zond->app_window, "Löschen fehlgeschlagen -\n\nBei Aufruf "
-                "selection_loeschen:\n", errmsg, NULL );
+                "sond_treeviewfm_selection/treeviews_loeschen:\n", errmsg, NULL );
         g_free( errmsg );
     }
 
@@ -776,14 +657,9 @@ cb_anbindung_entfernenitem_activate( GtkMenuItem* item, gpointer user_data )
     Projekt* zond = (Projekt*) user_data;
 
     baum = baum_abfragen_aktiver_treeview( zond );
-    if ( baum != BAUM_INHALT )
-    {
-        meldung( zond->app_window, "Anbindungen können nur im Inhalts-Baum "
-                "entfernt werden", NULL );
-        return;
-    }
+    if ( baum == BAUM_FS ) return;
 
-    rc = selection_entfernen_anbindung( zond, &errmsg );
+    rc = treeviews_entfernen_anbindung( zond, baum, &errmsg );
     if ( rc )
     {
         meldung( zond->app_window, "Fehler bei löschen von Anbindungen - \n\n",

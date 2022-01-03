@@ -38,27 +38,6 @@ db_remove_node( Projekt* zond, Baum baum, gint node_id, gchar** errmsg )
 }
 
 
-gint
-db_set_datei( Projekt* zond, gint node_id, const gchar* rel_path, gchar** errmsg )
-{
-    gint rc = 0;
-
-    sqlite3_reset( zond->dbase->stmts.db_set_datei[0] );
-
-    rc = sqlite3_bind_text( zond->dbase->stmts.db_set_datei[0], 1, rel_path,
-            -1, NULL );
-    if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_bind_text (rel_path)" )
-
-    rc = sqlite3_bind_int( zond->dbase->stmts.db_set_datei[0], 2, node_id);
-    if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_bind_int (node_id)" )
-
-    rc = sqlite3_step( zond->dbase->stmts.db_set_datei[0] );
-    if ( rc != SQLITE_DONE ) ERROR_SQL( "sqlite3_step [0]" )
-
-    return 0;
-}
-
-
 /*  Rückgabe bei Fehler: -1
     Sämtliche Fehler lösen Rollback aus
     ansonsten: ID des im BAUM_AUSWERTUNG erzeugten Knotens  */
@@ -179,29 +158,4 @@ db_verschieben_knoten( Projekt* zond, Baum baum, gint node_id, gint new_parent_i
 
     return 0;
 }
-
-
-/** Die folgende Funktion, mit denen einzelnen Felder eines Knotens
-*** verändert werden können, geben auch dann 0 zurück, wenn der Knoten gar nicht
-*** existiert   **/
-gint
-db_speichern_textview( Projekt* zond, gint node_id, gchar* text, gchar** errmsg )
-{
-    gint rc = 0;
-
-    sqlite3_reset( zond->dbase->stmts.db_speichern_textview[0] );
-    sqlite3_clear_bindings( zond->dbase->stmts.db_speichern_textview[0] );
-
-    rc = sqlite3_bind_text( zond->dbase->stmts.db_speichern_textview[0], 1, text, -1, NULL );
-    if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_bind_text (text)" )
-
-    rc = sqlite3_bind_int( zond->dbase->stmts.db_speichern_textview[0], 2, node_id );
-    if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_bind_int ( node_id)" )
-
-    rc = sqlite3_step( zond->dbase->stmts.db_speichern_textview[0] );
-    if ( rc != SQLITE_DONE ) ERROR_SQL( "sqlite3_step" )
-
-    return 0;
-}
-
 

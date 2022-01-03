@@ -88,8 +88,6 @@ typedef struct _Menu Menu;
 
 typedef struct _STMTS
 {
-    sqlite3_stmt* db_speichern_textview[1];
-    sqlite3_stmt* db_set_datei[1];
     sqlite3_stmt* ziele_einfuegen[1];
     sqlite3_stmt* db_kopieren_nach_auswertung[3];
     sqlite3_stmt* db_get_icon_name_and_node_text[2];

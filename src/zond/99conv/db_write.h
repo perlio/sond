@@ -12,15 +12,11 @@ typedef int gboolean;
 
 gint db_remove_node( Projekt*, Baum, gint, gchar** );
 
-gint db_set_datei( Projekt*, gint, const gchar*, gchar** );
-
 gint db_verschieben_knoten( Projekt*, Baum, gint, gint, gint, gchar** );
 
 gint db_kopieren_nach_auswertung( Projekt*, Baum, gint, gint, gboolean, gchar** );
 
 gint db_kopieren_nach_auswertung_mit_kindern( Projekt*, gboolean, Baum,
         gint, gint, gboolean, gchar** );
-
-gint db_speichern_textview( Projekt*, gint, gchar*, gchar** );
 
 #endif // DB_H_INCLUDED

@@ -113,6 +113,176 @@ dbase_full_set_icon_id( DBaseFull* dbase_full, Baum baum, gint node_id, const gc
     return 0;
 }
 
+
+/** Die folgende Funktion, mit denen einzelnen Felder eines Knotens
+*** verändert werden können, geben auch dann 0 zurück, wenn der Knoten gar nicht
+*** existiert   **/
+gint
+dbase_full_speichern_textview( DBaseFull* dbase_full, gint node_id, gchar* text, gchar** errmsg )
+{
+    gint rc = 0;
+
+    sqlite3_reset( dbase_full->speichern_textview );
+
+    rc = sqlite3_bind_text( dbase_full->speichern_textview, 1, text, -1, NULL );
+    if ( rc != SQLITE_OK ) ERROR_DBASE_FULL( "sqlite3_bind_text (text)" )
+
+    rc = sqlite3_bind_int( dbase_full->speichern_textview, 2, node_id );
+    if ( rc != SQLITE_OK ) ERROR_DBASE_FULL( "sqlite3_bind_int ( node_id)" )
+
+    rc = sqlite3_step( dbase_full->speichern_textview );
+    if ( rc != SQLITE_DONE ) ERROR_DBASE_FULL( "sqlite3_step" )
+
+    return 0;
+}
+
+
+gint
+dbase_full_set_datei( DBaseFull* dbase_full, gint node_id, const gchar* rel_path, gchar** errmsg )
+{
+    gint rc = 0;
+
+    sqlite3_reset( dbase_full->set_datei );
+
+    rc = sqlite3_bind_text( dbase_full->set_datei, 1, rel_path,
+            -1, NULL );
+    if ( rc != SQLITE_OK ) ERROR_DBASE_FULL( "sqlite3_bind_text (rel_path)" )
+
+    rc = sqlite3_bind_int( dbase_full->set_datei, 2, node_id);
+    if ( rc != SQLITE_OK ) ERROR_DBASE_FULL( "sqlite3_bind_int (node_id)" )
+
+    rc = sqlite3_step( dbase_full->set_datei );
+    if ( rc != SQLITE_DONE ) ERROR_DBASE_FULL( "sqlite3_step [0]" )
+
+    return 0;
+}
+
+
+gint
+dbase_full_set_link( DBaseFull* dbase_full, const gint baum_id,
+        const gint node_id, const gchar* projekt_dest, const gint baum_id_dest,
+        const gint node_id_dest, gchar** errmsg )
+{
+    gint rc = 0;
+
+    sqlite3_reset( dbase_full->set_link );
+
+    rc = sqlite3_bind_int( dbase_full->set_link, 1, baum_id );
+    if ( rc != SQLITE_OK ) ERROR_DBASE_FULL( "sqlite3_bind_int (baum_id)" )
+
+    rc = sqlite3_bind_int( dbase_full->set_link, 2, node_id );
+    if ( rc != SQLITE_OK ) ERROR_DBASE_FULL( "sqlite3_bind_int (node_id)" )
+
+    rc = sqlite3_bind_text( dbase_full->set_link, 3, projekt_dest,
+            -1, NULL );
+    if ( rc != SQLITE_OK ) ERROR_DBASE_FULL( "sqlite3_bind_text (projekt)" )
+
+    rc = sqlite3_bind_int( dbase_full->set_link, 4, baum_id_dest );
+    if ( rc != SQLITE_OK ) ERROR_DBASE_FULL( "sqlite3_bind_int (baum_id_dest)" )
+
+    rc = sqlite3_bind_int( dbase_full->set_link, 5, node_id_dest );
+    if ( rc != SQLITE_OK ) ERROR_DBASE_FULL( "sqlite3_bind_int (node_id_dest)" )
+
+    rc = sqlite3_step( dbase_full->set_link );
+    if ( rc != SQLITE_DONE ) ERROR_DBASE_FULL( "sqlite3_step" )
+
+    return 0;
+}
+
+
+gint dbase_full_get_links( DBaseFull* dbase_full, const gchar* projekt_target,
+        const gint baum_id_target, const gint node_id_target, GArray** arr_links,
+        gchar** errmsg )
+{
+    gint rc = 0;
+
+    sqlite3_reset( dbase_full->get_links );
+
+    rc = sqlite3_bind_text( dbase_full->get_links, 1, projekt_target, -1, NULL );
+    if ( rc != SQLITE_OK ) ERROR_DBASE_FULL( "sqlite3_bind_text (projekt_target)" )
+
+    rc = sqlite3_bind_int( dbase_full->get_links, 2, baum_id_target );
+    if ( rc != SQLITE_OK ) ERROR_DBASE_FULL( "sqlite3_bind_int (baum_id_target)" )
+
+    rc = sqlite3_bind_int( dbase_full->get_links, 3, node_id_target );
+    if ( rc != SQLITE_OK ) ERROR_DBASE_FULL( "sqlite3_bind_int (node_id_target)" )
+
+    *arr_links = g_array_new( FALSE, FALSE, sizeof( gint ) );
+
+    do
+    {
+        rc = sqlite3_step( dbase_full->get_links );
+        if ( rc != SQLITE_ROW && rc != SQLITE_DONE )
+        {
+            g_array_unref( *arr_links );
+            ERROR_DBASE_FULL( "sqlite3_step" )
+        }
+        else if ( rc == SQLITE_ROW )
+        {
+            gint num = 0;
+
+            //baum_id
+            num = sqlite3_column_int( dbase_full->get_links, 0 );
+            g_array_append_val( *arr_links, num );
+
+            //node_id
+            num = sqlite3_column_int( dbase_full->get_links, 1 );
+            g_array_append_val( *arr_links, num );
+        }
+    } while ( rc == SQLITE_ROW );
+
+    return 0;
+}
+
+
+gint dbase_full_get_link_target( DBaseFull* dbase_full, const gint baum_id, const gint
+        node_id, gchar** projekt_target, gint* baum_id_target, gint* node_id_target,
+        gchar** errmsg )
+{
+    gint rc = 0;
+
+    sqlite3_reset( dbase_full->get_link_target );
+
+    rc = sqlite3_bind_int( dbase_full->get_link_target, 1, baum_id );
+    if ( rc != SQLITE_OK ) ERROR_DBASE_FULL( "sqlite3_bind_int (baum_id)" )
+
+    rc = sqlite3_bind_int( dbase_full->get_link_target, 2, node_id );
+    if ( rc != SQLITE_OK ) ERROR_DBASE_FULL( "sqlite3_bind_int (node_id)" )
+
+    rc = sqlite3_step( dbase_full->get_link_target );
+    if ( rc != SQLITE_DONE && rc != SQLITE_ROW ) ERROR_DBASE_FULL( "sqlite3_step" )
+
+    if ( rc == SQLITE_DONE ) return 1; //node_id nicht in linktabelle - kein link!
+
+    if ( projekt_target ) *projekt_target = g_strdup( (const gchar*)
+            sqlite3_column_text( dbase_full->get_link_target, 2 ) );
+    if ( baum_id_target ) *baum_id_target = sqlite3_column_int( dbase_full->get_link_target, 3 );
+    if ( node_id_target ) *node_id_target = sqlite3_column_int( dbase_full->get_link_target, 4 );
+
+    return 0;
+}
+
+
+gint dbase_full_remove_link( DBaseFull* dbase_full, const gint baum_id, const gint
+        node_id, gchar** errmsg )
+{
+    gint rc = 0;
+
+    sqlite3_reset( dbase_full->remove_link );
+
+    rc = sqlite3_bind_int( dbase_full->remove_link, 1, baum_id );
+    if ( rc != SQLITE_OK ) ERROR_DBASE_FULL( "sqlite3_bind_int (baum_id)" )
+
+    rc = sqlite3_bind_int( dbase_full->remove_link, 2, node_id );
+    if ( rc != SQLITE_OK ) ERROR_DBASE_FULL( "sqlite3_bind_int (node_id)" )
+
+    rc = sqlite3_step( dbase_full->remove_link );
+    if ( rc != SQLITE_DONE ) ERROR_DBASE_FULL( "sqlite3_step" )
+
+    return 0;
+}
+
+
 /*
 gint
 dbase_full_insert_entity( DBaseFull* dbase_full, gint label, gchar** errmsg )
@@ -594,21 +764,37 @@ dbase_full_prepare_stmts( DBaseFull* dbase_full, gchar** errmsg )
 
                 "VALUES (last_insert_rowid()); ",
 
-/*  db_set_node_text (5) */
+/*  set_node_text (5) */
             "UPDATE baum_inhalt SET node_text = ?1 WHERE node_id = ?2;",
 
             "UPDATE baum_auswertung SET node_text = ?1 WHERE node_id = ?2;",
 
-/*  dbase_full_set_icon_id  */
+/*  full_set_icon_id  */
             "UPDATE baum_inhalt SET icon_name = ?1 WHERE node_id = ?2;",
 
             "UPDATE baum_auswertung SET icon_name = ?1 WHERE node_id = ?2;",
 
-/*  db_speichern_textview  */
+/*  speichern_textview  */
             "UPDATE baum_auswertung SET text=? WHERE node_id=?;",
 
-/*  db_set_datei (10) */
+/*  set_datei (10) */
             "INSERT INTO dateien (rel_path, node_id) VALUES (?, ?); ",
+
+/*  set_link  */
+            "INSERT INTO links (baum_id, node_id, projekt_target, "
+                "baum_id_target, node_id_target) "
+                "VALUES (?, ?, ?, ?, ?); ",
+
+/*  get_link_target    */
+            "SELECT projekt_target, baum_id_target, node_id_target FROM links "
+                "WHERE baum_id=? AND node_id=?; ",
+
+/*  get_links   */
+            "SELECT baum_id, node_id FROM links WHERE "
+                "projekt_target='?' AND baum_id_target=? AND node_id_target=?; ",
+
+/*  remove_link */
+            "DELETE FROM links WHERE baum_id=? AND node_id=?; ",
 
 /*  ziele_einfuegen  */
             "INSERT INTO ziele (ziel_id_von, index_von, "
@@ -873,6 +1059,15 @@ dbase_full_prepare_stmts( DBaseFull* dbase_full, gchar** errmsg )
         else if ( zaehler == 7 ) dbase_full->set_icon_id[0] = stmt;
         else if ( zaehler == 8 ) dbase_full->set_icon_id[1] = stmt;
 
+        else if ( zaehler == 9 ) dbase_full->speichern_textview = stmt;
+
+        else if ( zaehler == 10 ) dbase_full->set_datei = stmt;
+
+        else if ( zaehler == 11 ) dbase_full->set_link = stmt;
+        else if ( zaehler == 12 ) dbase_full->get_link_target = stmt;
+        else if ( zaehler == 13 ) dbase_full->get_links = stmt;
+        else if ( zaehler == 14 ) dbase_full->remove_link = stmt;
+
         else dbase_full->stmts[zaehler] = stmt;
 
         zaehler++;
@@ -884,13 +1079,13 @@ dbase_full_prepare_stmts( DBaseFull* dbase_full, gchar** errmsg )
 
 gint
 dbase_full_create( const gchar* path, DBaseFull** dbase_full, gboolean create,
-        gboolean overwrite, gchar** errmsg )
+        gboolean create_file, gchar** errmsg )
 {
     gint rc = 0;
 
     *dbase_full = g_malloc0( sizeof( DBaseFull ) );
 
-    rc = dbase_open( path, (DBase*) *dbase_full, create, overwrite, errmsg );
+    rc = dbase_open( path, (DBase*) *dbase_full, create, create_file, errmsg );
     if ( rc )
     {
         dbase_destroy( (DBase*) *dbase_full );

@@ -239,11 +239,6 @@ pdf_print_content_stream( fz_context* ctx, pdf_obj* page_ref, gchar** errmsg )
 gint
 test( Projekt* zond, gchar** errmsg )
 {
-    GtkTreeModel* model = NULL;
-    GtkTreeIter iter = { 0 };
-    GtkTreeIter* iter_cursor = NULL;
-
-    model = gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_AUSWERTUNG]) );
 
 
 
