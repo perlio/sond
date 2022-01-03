@@ -465,7 +465,7 @@ headerbar_insert_node( Projekt* zond, Baum baum, gint node_id, gboolean child, g
     rc = dbase_commit( (DBase*) zond->dbase_zond->dbase_work, errmsg );
     if ( rc ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "dbase_commit" )
 
-    return 0;
+    return new_node_id;
 }
 
 static void
@@ -527,8 +527,8 @@ cb_punkt_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
         if ( node_id == 0 ) child = TRUE;
     }
 
-    rc = headerbar_insert_node( zond, baum, node_id, child, &errmsg );
-    if ( rc )
+    new_node_id = headerbar_insert_node( zond, baum, node_id, child, &errmsg );
+    if ( new_node_id == -1 )
     {
         meldung( zond->app_window, "Punkt einfügen nicht möglich -\n\nBei "
                 "Aufruf headerbar_insert_node:\n", errmsg, NULL );
