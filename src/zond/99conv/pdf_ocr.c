@@ -1633,7 +1633,6 @@ pdf_ocr_create_pdf_only_text( InfoWindow* info_window,
         GPtrArray* arr_document_pages, TessBaseAPI* handle,
         TessResultRenderer* renderer, gchar** errmsg )
 {
-    gint len = 0;
     gint zaehler = 0;
     gint i = 0;
     gint alle = 0;
@@ -1650,7 +1649,7 @@ pdf_ocr_create_pdf_only_text( InfoWindow* info_window,
         gint index = zond_pdf_document_get_index( pdf_document_page );
 
         gchar* info_text = g_strdup_printf( "(%i/%i) %s, Seite %i",
-                zaehler, len, zond_pdf_document_get_path( pdf_document_page->document ),
+                zaehler, arr_document_pages->len, zond_pdf_document_get_path( pdf_document_page->document ),
                 index + 1 );
         info_window_set_message( info_window, info_text );
         g_free( info_text );

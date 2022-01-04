@@ -433,7 +433,6 @@ cb_datei_ocr( GtkMenuItem* item, gpointer data )
 
         rc = pdf_ocr_pages( zond, info_window, arr_document_pages_ocr, &errmsg );
         g_ptr_array_unref( arr_document_pages_ocr );
-        document_free_displayed_documents( dd );
         if ( rc == -1 )
         {
             message = g_strdup_printf( "Fehler bei Aufruf pdf_ocr_pages:\n%s", errmsg );
@@ -441,8 +440,25 @@ cb_datei_ocr( GtkMenuItem* item, gpointer data )
             info_window_set_message(info_window, message );
             g_free( message );
 
+            document_free_displayed_documents( dd );
+
             continue;
         }
+
+        rc = zond_pdf_document_save( dd->zond_pdf_document, &errmsg );
+        if ( rc )
+        {
+            message = g_strdup_printf( "Fehler bei Aufruf zond_pdf_document_save:\n%s", errmsg );
+            g_free( errmsg );
+            info_window_set_message(info_window, message );
+            g_free( message );
+
+            document_free_displayed_documents( dd );
+
+            continue;
+        }
+
+        document_free_displayed_documents( dd );
     }
 
     info_window_close( info_window );
