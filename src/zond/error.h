@@ -17,11 +17,11 @@ gchar* prepend_string( gchar*, gchar* );
                        return y; }
 
 #define ERROR_SQL(x) { if ( errmsg ) *errmsg = add_string( g_strconcat( "Bei Aufruf " x ":\n", \
-                       sqlite3_errmsg(zond->db), NULL ), *errmsg ); \
+                       sqlite3_errmsg(zond->dbase_zond->dbase_work->dbase.db), NULL ), *errmsg ); \
                        return -1; }
 
 #define ERROR_SQL_R(x,y) { if ( errmsg ) *errmsg = add_string( g_strconcat( "Bei Aufruf " x ":\n", \
-                       sqlite3_errmsg(zond->db), NULL ), *errmsg ); \
+                       sqlite3_errmsg(zond->dbase_zond->dbase_work->dbase.db), NULL ), *errmsg ); \
                        return y; }
 
 #define ERROR_MUPDF(x) { if ( errmsg ) *errmsg = add_string( *errmsg, g_strconcat( \

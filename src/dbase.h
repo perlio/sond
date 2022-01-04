@@ -89,16 +89,10 @@ gint dbase_get_num_of_refs_to_eingang( DBase*, const gint, gchar** );
 
 gint dbase_delete_eingang( DBase*, const gint, gchar** );
 
-void dbase_destroy( DBase* );
-
 sqlite3_stmt* dbase_prepare_stmt( sqlite3*, const gchar*, gchar** );
 
 gint dbase_prepare_stmts( DBase*, gchar** );
 
-gint dbase_create_db( sqlite3*, gchar** );
-
-gint dbase_open( const gchar*, DBase*, gboolean, gboolean, gchar** );
-
-gint dbase_create_with_stmts( const gchar*, DBase**, gboolean, gboolean, gchar** );
+gint dbase_create_with_stmts( const gchar*, DBase**, sqlite3*, gchar** );
 
 #endif // DBASE_H_INCLUDED

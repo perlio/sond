@@ -722,7 +722,6 @@
 		</Unit>
 		<Unit filename="src/zond/zond_dbase.c">
 			<Option compilerVar="CC" />
-			<Option link="0" />
 		</Unit>
 		<Unit filename="src/zond/zond_dbase.h" />
 		<Unit filename="src/zond/zond_pdf_document.c">

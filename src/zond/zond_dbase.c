@@ -1,6 +1,6 @@
 /*
 zond (zond_dbase.c) - Akten, Beweisstücke, Unterlagen
-Copyright (C) 2021  pelo america
+Copyright (C) 2022  pelo america
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU Affero General Public License as
@@ -84,7 +84,7 @@ zond_dbase_get_property (GObject    *object,
                 break;
 
         case PROP_DBASE:
-                g_value_set_pointer( value, priv->path );
+                g_value_set_pointer( value, priv->dbase );
                 break;
 
         default:
@@ -150,14 +150,13 @@ zond_dbase_class_init( ZondDBaseClass* klass )
                                  "gchar*",
                                  "Pfad zur Datei.",
                                  NULL,
-                                  G_PARAM_CONSTRUCT_ONLY | G_PARAM_READABLE );
+                                  G_PARAM_CONSTRUCT_ONLY | G_PARAM_READWRITE);
 
     obj_properties[PROP_DBASE] =
-            g_param_spec_string( "conn",
+            g_param_spec_pointer( "dbase",
                                  "sqlite3*",
                                  "Datenbankverbindung.",
-                                 NULL,
-                                  G_PARAM_CONSTRUCT_ONLY | G_PARAM_READABLE );
+                                  G_PARAM_CONSTRUCT_ONLY | G_PARAM_READWRITE );
 
     g_object_class_install_properties(object_class,
                                       N_PROPERTIES,
@@ -726,19 +725,22 @@ zond_dbase_open( const gchar* path, gboolean create_file, gboolean create, sqlit
 }
 
 
-ZondDBase*
-zond_dbase_new( const gchar* path, gboolean create_file, gboolean create, gchar** errmsg )
+gint
+zond_dbase_new( const gchar* path, gboolean create_file, gboolean create,
+        ZondDBase** zond_dbase, gchar** errmsg )
 {
-    ZondDBase* zond_dbase = NULL;
     gint rc = 0;
     sqlite3* db = NULL;
 
+    g_return_val_if_fail( zond_dbase, -1 );
+
     rc = zond_dbase_open( path, create_file, create, &db, errmsg );
-    if ( rc ) ERROR_SOND_VAL( "zond_dbase_open", NULL )
+    if ( rc == -1 ) ERROR_SOND( "zond_dbase_open" )
+    else if ( rc == 1 ) return 1; //Abbruch gewählt
 
-    zond_dbase = g_object_new( ZOND_TYPE_DBASE, "path", path, "sqlite3", db, NULL );
+    *zond_dbase = g_object_new( ZOND_TYPE_DBASE, "path", path, "dbase", db, NULL );
 
-    return zond_dbase;
+    return 0;
 }
 
 

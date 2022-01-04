@@ -77,6 +77,6 @@ gint dbase_full_insert_edge( DBaseFull*, gint, gint, gint, gchar** );
 
 gint dbase_full_prepare_stmts( DBaseFull*, gchar** );
 
-gint dbase_full_create( const gchar*, DBaseFull**, gboolean, gboolean, gchar** );
+gint dbase_full_create_with_stmts( const gchar*, DBaseFull**, sqlite3*, gchar** );
 
 #endif // DBASE_FULL_H_INCLUDED

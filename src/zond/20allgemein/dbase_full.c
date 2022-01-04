@@ -1078,20 +1078,19 @@ dbase_full_prepare_stmts( DBaseFull* dbase_full, gchar** errmsg )
 
 
 gint
-dbase_full_create( const gchar* path, DBaseFull** dbase_full, gboolean create,
-        gboolean create_file, gchar** errmsg )
+dbase_full_create_with_stmts( const gchar* path, DBaseFull** dbase_full, sqlite3* db, gchar** errmsg )
 {
     gint rc = 0;
 
     *dbase_full = g_malloc0( sizeof( DBaseFull ) );
 
-    rc = dbase_open( path, (DBase*) *dbase_full, create, create_file, errmsg );
+    (*dbase_full)->dbase.db = db;
+
+    rc = dbase_full_prepare_stmts( *dbase_full, errmsg );
     if ( rc )
     {
-        dbase_destroy( (DBase*) *dbase_full );
-        *dbase_full = NULL;
-        if ( rc == -1 ) ERROR_SOND( "dbase_full_open" )
-        else return 1;
+        g_free( dbase_full );
+        ERROR_SOND( "dbase_full_open" )
     }
 
     return 0;

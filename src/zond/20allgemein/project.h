@@ -7,6 +7,7 @@ typedef struct _GtkMenuItem GtkMenuItem;
 typedef struct _GFile GFile;
 typedef struct _DBase DBase;
 typedef struct _DBase_Full DBaseFull;
+typedef struct _ZondDBase ZondDBase;
 typedef struct _SondTreeviewFM SondTreeviewFM;
 
 typedef void* gpointer;
@@ -17,6 +18,8 @@ typedef struct _DBase_Zond
 {
     DBaseFull* dbase_work;
     DBase* dbase_store;
+    ZondDBase* zond_dbase_store;
+    ZondDBase* zond_dbase_work;
     gchar* project_name;
     gchar* project_dir;
     gboolean changed;

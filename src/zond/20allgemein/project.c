@@ -26,6 +26,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "../global_types.h"
 #include "../error.h"
+#include "../zond_dbase.h"
 
 #include "../10init/app_window.h"
 
@@ -118,45 +119,54 @@ project_create_dbase_zond( Projekt* zond, const gchar* path, gboolean create,
         DBaseZond** dbase_zond, gchar** errmsg )
 {
     gint rc = 0;
-    DBase* dbase = NULL;
+    ZondDBase* zond_dbase_work = NULL;
+    ZondDBase* zond_dbase_store = NULL;
     gchar* path_tmp = NULL;
-    DBaseFull* dbase_full = NULL;
 
-    rc = dbase_create_with_stmts( path, &dbase, create, FALSE, errmsg );
-    if ( rc == -1 ) ERROR_SOND( "dbase_create" )
+    rc  = zond_dbase_new( path, FALSE, create, &zond_dbase_store, errmsg );
+    if ( rc == -1 ) ERROR_SOND( "zond_dbase_new" )
     else if ( rc == 1 ) return 1;
 
     path_tmp = g_strconcat( path, ".tmp", NULL );
-    rc = dbase_full_create( path_tmp, &dbase_full, FALSE, TRUE, errmsg );
+
+    rc = zond_dbase_new( path_tmp, TRUE, FALSE, &zond_dbase_work, errmsg );
+    g_free( path_tmp );
     if ( rc )
     {
-        dbase_destroy( dbase );
-        g_free( path_tmp );
-        if ( rc == -1 ) ERROR_SOND( "dbase_full_create" )
+        zond_dbase_close( zond_dbase_store );
+        if ( rc == -1 ) ERROR_SOND( "zond_dbase_new" )
         else if ( rc == 1 ) return 1;
     }
 
-    rc = project_backup( dbase->db, dbase_full->dbase.db, errmsg );
+    rc = project_backup( zond_dbase_get_dbase( zond_dbase_store ),
+            zond_dbase_get_dbase( zond_dbase_work ),
+            errmsg );
     if ( rc )
     {
-        dbase_destroy( dbase );
-        dbase_destroy( (DBase*) dbase_full );
+        zond_dbase_close( zond_dbase_store );
+        zond_dbase_close( zond_dbase_work );
         ERROR_SOND( "project_backup" )
     }
 
-    rc = dbase_full_prepare_stmts( dbase_full, errmsg );
-    if ( rc )
-    {
-        dbase_destroy( (DBase*) dbase_full );
-        ERROR_SOND( "dbase_full_prepare_stmts" )
-    }
+    sqlite3_update_hook( zond_dbase_get_dbase( zond_dbase_work ),
+            (void*) project_set_changed, (gpointer) zond );
 
-    sqlite3_update_hook( dbase_full->dbase.db, (void*) project_set_changed, (gpointer) zond );
+
+    DBase* dbase = NULL;
+    DBaseFull* dbase_full = NULL;
+
+    rc = dbase_create_with_stmts( path, &dbase, zond_dbase_get_dbase( zond_dbase_store ), errmsg );
+    if ( rc == -1 ) ERROR_SOND( "dbase_create_with_stmts" )
+
+    rc = dbase_full_create_with_stmts( path_tmp, &dbase_full, zond_dbase_get_dbase( zond_dbase_work ), errmsg );
+    if ( rc ) ERROR_SOND( "dbase_full_create" )
 
     *dbase_zond = g_malloc0( sizeof( DBaseZond ) );
 
     (*dbase_zond)->dbase_store = dbase;
     (*dbase_zond)->dbase_work = dbase_full;
+    (*dbase_zond)->zond_dbase_store = zond_dbase_store;
+    (*dbase_zond)->zond_dbase_work = zond_dbase_work;
     (*dbase_zond)->project_name = g_strdup( strrchr( path, '/' ) + 1 );
     (*dbase_zond)->project_dir = g_strndup( path, strlen( path ) - strlen(
             strrchr( path, '/' ) ) );
@@ -193,12 +203,14 @@ projekt_aktivieren( Projekt* zond )
 static void
 project_clear_dbase_zond( DBaseZond** dbase_zond )
 {
-    dbase_destroy( (DBase*) (*dbase_zond)->dbase_work );
-    dbase_destroy( (*dbase_zond)->dbase_store );
+    g_free( (*dbase_zond)->dbase_work );
+    g_free( (*dbase_zond)->dbase_store );
 
     g_free( (*dbase_zond)->project_dir );
     g_free( (*dbase_zond)->project_name );
 
+    g_object_unref( (*dbase_zond)->zond_dbase_store );
+    g_object_unref( (*dbase_zond)->zond_dbase_work );
     g_free( *dbase_zond );
 
     *dbase_zond = NULL;
@@ -388,7 +400,6 @@ project_oeffnen( Projekt* zond, const gchar* abs_path, gboolean create,
     if ( rc ) ERROR_SOND( "project_db_create_stmts" )
 
     zond->dbase = dbase;
-    zond->db = zond->dbase->db;
 
     //key_press-event-signal einschalten
     zond->key_press_signal = g_signal_connect( zond->app_window,

@@ -35,6 +35,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../99conv/db_zu_baum.h"
 
 #include "project.h"
+#include "dbase_full.h"
 
 
 //Prototype
@@ -357,7 +358,7 @@ suchen_db( Projekt* zond, const gchar* text, GArray* arr_treffer, gchar** errmsg
     Node node = { 0, };
     sqlite3_stmt* stmt = NULL;
 
-    rc = sqlite3_prepare_v2( zond->db,
+    rc = sqlite3_prepare_v2( zond->dbase_zond->dbase_work->dbase.db,
             "SELECT ?2, node_id FROM dateien WHERE LOWER(rel_path) LIKE LOWER(?1) "
             "UNION "
             "SELECT ?3, node_id FROM baum_inhalt WHERE LOWER(node_text) LIKE LOWER(?1) "

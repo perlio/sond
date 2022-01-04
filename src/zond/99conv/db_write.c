@@ -6,6 +6,7 @@
 #include "../99conv/db_read.h"
 
 #include "../20allgemein/project.h"
+#include "../20allgemein/dbase_full.h"
 
 #include <sqlite3.h>
 #include <glib/gstdio.h>
@@ -64,7 +65,7 @@ db_kopieren_nach_auswertung( Projekt* zond, Baum baum_von, gint node_id_von,
     rc = sqlite3_step( zond->dbase->stmts.db_kopieren_nach_auswertung[2] );
     if ( rc != SQLITE_DONE ) ERROR_SQL( "sqlite3_step ([2])" )
 
-    return sqlite3_last_insert_rowid( zond->db );
+    return sqlite3_last_insert_rowid( zond->dbase_zond->dbase_work->dbase.db );
 }
 
 

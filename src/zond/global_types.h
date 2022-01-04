@@ -141,9 +141,6 @@ typedef struct _Projekt
 
     GtkTextView* textview;
 
-    //Working-copy project
-    sqlite3* db;
-
     Database* dbase;
     DBaseZond* dbase_zond;
 

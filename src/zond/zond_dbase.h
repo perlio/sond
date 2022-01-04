@@ -4,7 +4,7 @@
 #include <glib-object.h>
 #include "global_types.h"
 
-#define ZOND_DBASE_VERSION "v0.10"
+#define ZOND_DBASE_VERSION "v0.9"
 
 #define ERROR_ZOND_DBASE(x) { if ( errmsg ) *errmsg = add_string( g_strconcat( "Bei Aufruf " x ":\n", \
                        sqlite3_errmsg(zond_dbase_get_dbase(zond_dbase)), NULL ), *errmsg ); \
@@ -21,6 +21,11 @@ struct _ZondDBaseClass
 };
 
 
+gint zond_dbase_new( const gchar*, gboolean, gboolean, ZondDBase**, gchar** );
+
+void zond_dbase_close( ZondDBase* );
+
+sqlite3* zond_dbase_get_dbase( ZondDBase* );
 
 gint zond_dbase_insert_node( ZondDBase*, Baum, gint, gboolean, const gchar*,
         const gchar*, gchar** );

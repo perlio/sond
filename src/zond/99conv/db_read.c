@@ -6,6 +6,10 @@
 
 #include <sqlite3.h>
 #include <glib/gstdio.h>
+#include "../zond_dbase.h"
+#include "../20allgemein/project.h"
+#include "../20allgemein/dbase_full.h"
+
 
 
 /** Rückgabe:
