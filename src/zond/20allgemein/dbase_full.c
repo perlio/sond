@@ -28,44 +28,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "dbase_full.h"
 
 
-gint
-dbase_full_insert_node( DBaseFull* dbase_full, Baum baum, gint node_id, gboolean child,
-        const gchar* icon_name, const gchar* node_text, gchar** errmsg )
-{
-    gint rc = 0;
-    gint new_node_id = 0;
-
-    for ( gint i = 0; i < 5; i++ ) sqlite3_reset( dbase_full->insert_node[i] );
-
-    rc = sqlite3_bind_int( dbase_full->insert_node[0 + (gint) baum], 1, child );
-    if ( rc != SQLITE_OK ) ERROR_DBASE_FULL( "sqlite3_bind_int (child)" )
-
-    rc = sqlite3_bind_int( dbase_full->insert_node[0 + (gint) baum], 2, node_id );
-    if ( rc != SQLITE_OK ) ERROR_DBASE_FULL( "sqlite3_bind_int (node_id)" )
-
-    rc = sqlite3_bind_text( dbase_full->insert_node[0 + (gint) baum], 3,
-            icon_name, -1, NULL );
-    if ( rc != SQLITE_OK ) ERROR_DBASE_FULL( "sqlite3_bind_int (icon_name)" )
-
-    rc = sqlite3_bind_text( dbase_full->insert_node[0 + (gint) baum], 4, node_text,
-            -1, NULL );
-    if ( rc != SQLITE_OK ) ERROR_DBASE_FULL( "sqlite3_bind_text (node_text)" )
-
-    rc = sqlite3_step( dbase_full->insert_node[0 + (gint) baum] );
-    if ( rc != SQLITE_DONE ) ERROR_DBASE_FULL( "sqlite3_step [0/1]" )
-
-    rc = sqlite3_step( dbase_full->insert_node[2 + (gint) baum] );
-    if ( rc != SQLITE_DONE ) ERROR_DBASE_FULL( "sqlite3_step ([2/3])" )
-
-    rc = sqlite3_step( dbase_full->insert_node[4] );
-    if ( rc != SQLITE_ROW ) ERROR_DBASE_FULL( "sqlite3_step ([4])" )
-
-    new_node_id = sqlite3_column_int( dbase_full->insert_node[4], 0 );
-
-    return new_node_id;
-}
-
-
 /** Rückgabe 0 auch wenn Knoten nicht existiert **/
 gint
 dbase_full_set_node_text( DBaseFull* dbase_full, Baum baum, gint node_id,
@@ -711,59 +673,6 @@ dbase_full_prepare_stmts( DBaseFull* dbase_full, gchar** errmsg )
 
     gchar* sql[] = {
 
-/*  insert_node (0) */
-            "INSERT INTO baum_inhalt "
-            "(parent_id, older_sibling_id, icon_name, node_text) "
-            "VALUES ("
-                "CASE ?1 " //child
-                    "WHEN 0 THEN (SELECT parent_id FROM baum_inhalt WHERE node_id=?2) "
-                    "WHEN 1 THEN ?2 " //node_id
-                "END, "
-                "CASE ?1 "
-                    "WHEN 0 THEN ?2 "
-                    "WHEN 1 THEN 0 "
-                "END, "
-                "?3, " //icon_name
-                "?4); ", //node_text
-
-            "INSERT INTO baum_auswertung "
-            "(parent_id, older_sibling_id, icon_name, node_text) "
-            "VALUES ("
-                "CASE ?1 " //child
-                    "WHEN 0 THEN (SELECT parent_id FROM baum_auswertung WHERE node_id=?2) "
-                    "WHEN 1 THEN ?2 " //node_id
-                "END, "
-                "CASE ?1 "
-                    "WHEN 0 THEN ?2 "
-                    "WHEN 1 THEN 0 "
-                "END, "
-                "?3, " //icon_name
-                "?4); ", //node_text
-
-                "UPDATE baum_inhalt SET "
-                    "older_sibling_id=last_insert_rowid() "
-                "WHERE "
-                    "parent_id=(SELECT parent_id FROM baum_inhalt WHERE node_id=last_insert_rowid()) "
-                "AND "
-                    "older_sibling_id=(SELECT older_sibling_id FROM baum_inhalt WHERE node_id=last_insert_rowid()) "
-                "AND "
-                    "node_id!=last_insert_rowid() "
-                "AND "
-                    "node_id!=0; ",
-
-                "UPDATE baum_auswertung SET "
-                    "older_sibling_id=last_insert_rowid() "
-                "WHERE "
-                    "parent_id=(SELECT parent_id FROM baum_auswertung WHERE node_id=last_insert_rowid()) "
-                "AND "
-                    "older_sibling_id=(SELECT older_sibling_id FROM baum_auswertung WHERE node_id=last_insert_rowid()) "
-                "AND "
-                    "node_id!=last_insert_rowid() "
-                "AND "
-                    "node_id!=0; ",
-
-                "VALUES (last_insert_rowid()); ",
-
 /*  set_node_text (5) */
             "UPDATE baum_inhalt SET node_text = ?1 WHERE node_id = ?2;",
 
@@ -809,39 +718,6 @@ dbase_full_prepare_stmts( DBaseFull* dbase_full, gchar** errmsg )
             "WHERE baum_inhalt.node_id=?), "
             "last_insert_rowid())",
 
-/*  db_remove_node  */
-            "UPDATE baum_inhalt SET older_sibling_id=(SELECT older_sibling_id FROM baum_inhalt "
-            "WHERE node_id=?1) WHERE "
-            "older_sibling_id=?1; ",
-
-            "UPDATE baum_auswertung SET older_sibling_id=(SELECT older_sibling_id FROM baum_auswertung "
-            "WHERE node_id=?1) WHERE "
-            "older_sibling_id=?1; ",
-
-            "DELETE FROM baum_inhalt WHERE node_id = ?;",
-
-            "DELETE FROM baum_auswertung WHERE node_id = ?;",
-
-/*  db_verschieben_knoten  */
-            //knoten herauslösen = older_sibling von younger sibling verbiegen
-            "UPDATE baum_inhalt SET older_sibling_id="
-            "(SELECT older_sibling_id FROM baum_inhalt WHERE node_id=?1)" //node_id
-            "WHERE older_sibling_id=?1; ",
-
-            "UPDATE baum_auswertung SET older_sibling_id="
-            "(SELECT older_sibling_id FROM baum_auswertung WHERE node_id=?1)"
-            "WHERE older_sibling_id=?1; ",
-
-            //older_sibling von neuem younger_sibling verbiegen
-            "UPDATE baum_inhalt SET older_sibling_id=?1 WHERE node_id=" //node_id
-            "(SELECT node_id FROM baum_inhalt WHERE parent_id=?2 AND older_sibling_id=?3); ", //new_parent_id/new_older_s_id
-
-            "UPDATE baum_auswertung SET older_sibling_id=?1 WHERE node_id=" //node_id
-            "(SELECT node_id FROM baum_auswertung WHERE parent_id=?2 AND older_sibling_id=?3); ", //new_parent_id/new_older_s_id
-
-            "UPDATE baum_inhalt SET parent_id=?1, older_sibling_id=?2 WHERE node_id=?3; ",
-
-            "UPDATE baum_auswertung SET parent_id=?1, older_sibling_id=?2 WHERE node_id=?3; ",
 
 /*  db_knoten_nach_auswertung (22) */
             "INSERT INTO baum_auswertung "
@@ -1047,26 +923,20 @@ dbase_full_prepare_stmts( DBaseFull* dbase_full, gchar** errmsg )
 
         if ( !stmt ) ERROR_PAO( "dbase_prepare_stmt" )
 
-        if ( zaehler == 0 ) dbase_full->insert_node[0] = stmt;
-        else if ( zaehler == 1 ) dbase_full->insert_node[1] = stmt;
-        else if ( zaehler == 2 ) dbase_full->insert_node[2] = stmt;
-        else if ( zaehler == 3 ) dbase_full->insert_node[3] = stmt;
-        else if ( zaehler == 4 ) dbase_full->insert_node[4] = stmt;
+        else if ( zaehler == 0 ) dbase_full->set_node_text[0] = stmt;
+        else if ( zaehler == 1 ) dbase_full->set_node_text[1] = stmt;
 
-        else if ( zaehler == 5 ) dbase_full->set_node_text[0] = stmt;
-        else if ( zaehler == 6 ) dbase_full->set_node_text[1] = stmt;
+        else if ( zaehler == 2 ) dbase_full->set_icon_id[0] = stmt;
+        else if ( zaehler == 3 ) dbase_full->set_icon_id[1] = stmt;
 
-        else if ( zaehler == 7 ) dbase_full->set_icon_id[0] = stmt;
-        else if ( zaehler == 8 ) dbase_full->set_icon_id[1] = stmt;
+        else if ( zaehler == 4 ) dbase_full->speichern_textview = stmt;
 
-        else if ( zaehler == 9 ) dbase_full->speichern_textview = stmt;
+        else if ( zaehler == 5 ) dbase_full->set_datei = stmt;
 
-        else if ( zaehler == 10 ) dbase_full->set_datei = stmt;
-
-        else if ( zaehler == 11 ) dbase_full->set_link = stmt;
-        else if ( zaehler == 12 ) dbase_full->get_link_target = stmt;
-        else if ( zaehler == 13 ) dbase_full->get_links = stmt;
-        else if ( zaehler == 14 ) dbase_full->remove_link = stmt;
+        else if ( zaehler == 6 ) dbase_full->set_link = stmt;
+        else if ( zaehler == 7 ) dbase_full->get_link_target = stmt;
+        else if ( zaehler == 8 ) dbase_full->get_links = stmt;
+        else if ( zaehler == 9 ) dbase_full->remove_link = stmt;
 
         else dbase_full->stmts[zaehler] = stmt;
 

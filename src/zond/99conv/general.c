@@ -5,6 +5,7 @@
 
 #include "../zond_pdf_document.h"
 #include "../zond_tree_store.h"
+#include "../zond_dbase.h"
 
 #include "../global_types.h"
 #include "../error.h"
@@ -14,9 +15,10 @@
 
 #include "../99conv/baum.h"
 #include "../99conv/db_read.h"
-#include "../99conv/db_write.h"
 #include "../99conv/db_zu_baum.h"
 #include "../99conv/pdf.h"
+#include "../20allgemein/project.h"
+
 
 #include "../40viewer/document.h"
 
@@ -191,9 +193,9 @@ knoten_verschieben( Projekt* zond, Baum baum, gint node_id, gint new_parent,
     GtkTreeIter* iter = NULL;
 
     //kind verschieben
-    rc = db_verschieben_knoten( zond, baum, node_id, new_parent,
+    rc = zond_dbase_verschieben_knoten( zond->dbase_zond->zond_dbase_work, baum, node_id, new_parent,
             new_older_sibling, errmsg );
-    if ( rc ) ERROR_PAO (" db_verschieben_knoten" )
+    if ( rc ) ERROR_PAO (" zond_dbase_verschieben_knoten" )
 
     //Knoten im tree löschen
     //hierzu iter des verschobenen Kindknotens herausfinden

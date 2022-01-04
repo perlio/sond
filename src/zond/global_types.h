@@ -89,10 +89,7 @@ typedef struct _Menu Menu;
 typedef struct _STMTS
 {
     sqlite3_stmt* ziele_einfuegen[1];
-    sqlite3_stmt* db_kopieren_nach_auswertung[3];
     sqlite3_stmt* db_get_icon_name_and_node_text[2];
-    sqlite3_stmt* db_remove_node[4];
-    sqlite3_stmt* db_verschieben_knoten[6];
     sqlite3_stmt* db_get_parent[2];
     sqlite3_stmt* db_get_older_sibling[2];
     sqlite3_stmt* db_get_younger_sibling[2];

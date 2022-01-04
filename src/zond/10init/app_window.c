@@ -24,7 +24,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../global_types.h"
 
 #include "../99conv/general.h"
-#include "../99conv/db_write.h"
 
 #include "../20allgemein/project.h"
 #include "../20allgemein/suchen.h"

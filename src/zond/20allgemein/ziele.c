@@ -24,10 +24,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "../global_types.h"
 #include "../error.h"
+#include "../zond_dbase.h"
 
 #include "../99conv/db_read.h"
 #include "../99conv/general.h"
-#include "../99conv/db_write.h"
 #include "../99conv/pdf.h"
 #include "../99conv/db_zu_baum.h"
 #include "../99conv/baum.h"
@@ -134,9 +134,9 @@ ziele_einfuegen_db( Projekt* zond, gint anchor_id, gboolean kind, Ziel* ziel,
     gint new_node = 0;
 
     //zuerst in baum_inhalt-Tabelle (weil FK in Tabelle "ziele" darauf Bezug nimmt)
-    new_node = dbase_full_insert_node( zond->dbase_zond->dbase_work, BAUM_INHALT, anchor_id, kind,
+    new_node = zond_dbase_insert_node( zond->dbase_zond->zond_dbase_work, BAUM_INHALT, anchor_id, kind,
             zond->icon[ICON_ANBINDUNG].icon_name, node_text, errmsg );
-    if ( new_node == -1 ) ERROR_PAO( "dbase_full_insert_node" )
+    if ( new_node == -1 ) ERROR_PAO( "zond_dbase_insert_node" )
 
     sqlite3_reset( zond->dbase->stmts.ziele_einfuegen[0] );
     sqlite3_clear_bindings( zond->dbase->stmts.ziele_einfuegen[0] );

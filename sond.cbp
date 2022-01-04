@@ -622,15 +622,6 @@
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
 		</Unit>
-		<Unit filename="src/zond/99conv/db_write.c">
-			<Option compilerVar="CC" />
-			<Option target="zond (Release)" />
-			<Option target="zond (Testing)" />
-		</Unit>
-		<Unit filename="src/zond/99conv/db_write.h">
-			<Option target="zond (Release)" />
-			<Option target="zond (Testing)" />
-		</Unit>
 		<Unit filename="src/zond/99conv/db_zu_baum.c">
 			<Option compilerVar="CC" />
 			<Option target="zond (Release)" />

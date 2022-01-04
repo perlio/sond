@@ -36,7 +36,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "../99conv/general.h"
 #include "../99conv/baum.h"
-#include "../99conv/db_write.h"
 #include "../99conv/db_read.h"
 #include "../99conv/db_zu_baum.h"
 #include "../99conv/test.h"

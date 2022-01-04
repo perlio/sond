@@ -27,9 +27,6 @@ typedef struct _DBase_Full
 
 
 
-gint dbase_full_insert_node( DBaseFull*, Baum, gint, gboolean, const gchar*,
-        const gchar*, gchar** );
-
 gint dbase_full_set_node_text( DBaseFull*, Baum, gint, const gchar*, gchar** );
 
 gint dbase_full_set_icon_id( DBaseFull*, Baum, gint, const gchar*, gchar** );

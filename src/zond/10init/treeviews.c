@@ -27,11 +27,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../global_types.h"
 #include "../error.h"
 #include "../zond_tree_store.h"
+#include "../zond_dbase.h"
 
 #include "../99conv/baum.h"
 #include "../99conv/general.h"
 #include "../99conv/db_read.h"
-#include "../99conv/db_write.h"
 
 #include "../20allgemein/oeffnen.h"
 #include "../20allgemein/ziele.h"
@@ -123,8 +123,8 @@ treeviews_foreach_entfernen_anbindung( SondTreeview* stv,
         older_sibling = child;
     }
 
-    rc = db_remove_node( zond, BAUM_INHALT, node_id, errmsg );
-    if ( rc ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "db_remove_node" )
+    rc = zond_dbase_remove_node( zond->dbase_zond->zond_dbase_work,BAUM_INHALT, node_id, errmsg );
+    if ( rc ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "zond_dbase_remove_node" )
 
     zond_tree_store_remove( ZOND_TREE_STORE(gtk_tree_view_get_model(
             GTK_TREE_VIEW(stv) )), iter );
@@ -206,8 +206,8 @@ treeviews_foreach_selection_loeschen( SondTreeview* tree_view, GtkTreeIter* iter
                     rc = dbase_begin( (DBase*) s_selection->zond->dbase_zond, errmsg );
                     if ( rc ) ERROR_SOND( "dbase_begin" )
 
-                    rc = db_remove_node( s_selection->zond, baum_link, head_nr, errmsg );
-                    if ( rc ) ERROR_ROLLBACK( (DBase*) s_selection->zond->dbase_zond->dbase_work, "db_remove_node" )
+                    rc = zond_dbase_remove_node( s_selection->zond->dbase_zond->zond_dbase_work, baum_link, head_nr, errmsg );
+                    if ( rc ) ERROR_ROLLBACK( (DBase*) s_selection->zond->dbase_zond->dbase_work, "zond_dbase_remove_node" )
 
                     rc = dbase_full_remove_link( s_selection->zond->dbase_zond->dbase_work, baum_link, head_nr, errmsg );
                     if ( rc ) ERROR_ROLLBACK( (DBase*) s_selection->zond->dbase_zond->dbase_work, "dbase_full_remove_link" )
@@ -221,8 +221,8 @@ treeviews_foreach_selection_loeschen( SondTreeview* tree_view, GtkTreeIter* iter
             g_list_free( list_links );
         }
 
-        rc = db_remove_node( s_selection->zond, baum, node_id, errmsg );
-        if ( rc ) ERROR_PAO ( "db_remove_node" )
+        rc = zond_dbase_remove_node( s_selection->zond->dbase_zond->zond_dbase_work, baum, node_id, errmsg );
+        if ( rc ) ERROR_PAO ( "zond_dbase_remove_node" )
 
         zond_tree_store_remove( ZOND_TREE_STORE(gtk_tree_view_get_model(
         GTK_TREE_VIEW(tree_view) )), iter );
@@ -412,8 +412,8 @@ treeviews_insert_node( Projekt* zond, Baum baum_active, gboolean child, gchar** 
     if ( node_id == 0 ) child = TRUE;
     else if ( baum == BAUM_INHALT )
     {
-        //child = TRUE, weil ja node_id schon der unmittelbare Vorfahre ist!
-        rc = hat_vorfahre_datei( zond, baum, node_id, TRUE, errmsg );
+        //child = TRUE; //, weil ja node_id schon der unmittelbare Vorfahre ist!
+        rc = hat_vorfahre_datei( zond, baum, node_id, child, errmsg );
         if ( rc == -1 ) ERROR_SOND( "hat_vorfahre_datei" )
         else if ( rc == 1 )
         {
@@ -427,9 +427,9 @@ treeviews_insert_node( Projekt* zond, Baum baum_active, gboolean child, gchar** 
     if ( rc ) ERROR_SOND( "dbase_begin" )
 
     //Knoten in Datenbank einfügen
-    node_id_new = dbase_full_insert_node( zond->dbase_zond->dbase_work, baum,
+    node_id_new = zond_dbase_insert_node( zond->dbase_zond->zond_dbase_work, baum,
             node_id, child, zond->icon[ICON_NORMAL].icon_name, "Neuer Punkt", errmsg );
-    if ( node_id_new == -1 ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "dbase_full_insert_node" )
+    if ( node_id_new == -1 ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "zond_dbase_insert_node" )
 
     rc = dbase_commit( (DBase*) zond->dbase_zond->dbase_work, errmsg );
     if ( rc ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "dbase_commit" )

@@ -68,7 +68,7 @@ int main(int argc, char **argv)
 
     //und starten
     g_signal_connect( app, "startup", G_CALLBACK (startup_app), &zond );
-    g_signal_connect( app, "activate", G_CALLBACK (activate_app), &zond );
+ //   g_signal_connect( app, "activate", G_CALLBACK (activate_app), &zond );
     g_signal_connect( app, "open", G_CALLBACK (open_app), &zond );
 
     gint status = g_application_run( G_APPLICATION(app), argc, argv );

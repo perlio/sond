@@ -766,7 +766,7 @@ static gint
 zond_dbase_prepare_stmts( ZondDBase* zond_dbase, gint num, const gchar** sql,
         sqlite3_stmt** stmt, gchar** errmsg )
 {
-    for ( gint i = 0; i < 5; i++ )
+    for ( gint i = 0; i < num; i++ )
     {
         gint rc = 0;
 

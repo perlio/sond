@@ -19,12 +19,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../global_types.h"
 #include "../error.h"
 #include "../zond_tree_store.h"
+#include "../zond_dbase.h"
 
 
 #include "../99conv/baum.h"
 #include "../99conv/general.h"
 #include "../99conv/db_read.h"
-#include "../99conv/db_write.h"
 #include "../99conv/db_zu_baum.h"
 
 
@@ -142,9 +142,9 @@ selection_copy_node_db( Projekt* zond, gboolean with_younger_siblings, Baum baum
     gint first_child_id = 0;
     gint new_node_id = 0;
 
-    new_node_id = db_kopieren_nach_auswertung( zond, baum_von, node_von,
+    new_node_id = zond_dbase_kopieren_nach_auswertung( zond->dbase_zond->zond_dbase_work, baum_von, node_von,
             node_nach, kind, errmsg );
-    if ( new_node_id == -1 ) ERROR_PAO( "db_kopieren_nach_auswertung" )
+    if ( new_node_id == -1 ) ERROR_PAO( "zond_dbase_kopieren_nach_auswertung" )
 
     //Prüfen, ob Kind- oder Geschwisterknoten vorhanden
     first_child_id = db_get_first_child( zond, baum_von, node_von, errmsg );
@@ -315,7 +315,7 @@ selection_datei_einfuegen_in_db( Projekt* zond, gchar* rel_path, GFile* file, gi
     gchar* icon_name = selection_get_icon_name( zond, (GFile*) file );
     gchar* basename = g_file_get_basename( (GFile*) file );
 
-    new_node_id = dbase_full_insert_node( zond->dbase_zond->dbase_work, BAUM_INHALT, node_id, child, icon_name,
+    new_node_id = zond_dbase_insert_node( zond->dbase_zond->zond_dbase_work, BAUM_INHALT, node_id, child, icon_name,
             basename, errmsg );
 
     g_free( basename );
@@ -324,7 +324,7 @@ selection_datei_einfuegen_in_db( Projekt* zond, gchar* rel_path, GFile* file, gi
     if ( new_node_id == -1 )
     {
         if ( errmsg ) *errmsg = prepend_string( *errmsg,
-                g_strdup( "Bei Aufruf dbase_full_insert_node:\n" ) );
+                g_strdup( "Bei Aufruf zond_dbase_insert_node:\n" ) );
 
         return -1;
     }
@@ -393,7 +393,7 @@ selection_ordner_anbinden_rekursiv( Projekt* zond, InfoWindow* info_window,
 
     basename = g_file_get_basename( file );
 
-    new_node_id = dbase_full_insert_node( zond->dbase_zond->dbase_work, BAUM_INHALT, node_id, child, "folder",
+    new_node_id = zond_dbase_insert_node( zond->dbase_zond->zond_dbase_work, BAUM_INHALT, node_id, child, "folder",
             basename, errmsg );
 
     text = g_strconcat( "Verzeichnis eingefügt: ", basename, NULL );
@@ -402,7 +402,7 @@ selection_ordner_anbinden_rekursiv( Projekt* zond, InfoWindow* info_window,
 
     g_free( basename );
 
-    if ( new_node_id == -1 ) ERROR_SQL( "dbase_full_insert_node" )
+    if ( new_node_id == -1 ) ERROR_SQL( "zond_dbase_insert_node" )
 
     GFileEnumerator* enumer = g_file_enumerate_children( file, "*", G_FILE_QUERY_INFO_NONE, NULL, &error );
     if ( !enumer )
@@ -615,11 +615,11 @@ selection_foreach_link( SondTreeview* tree_view, GtkTreeIter* iter, gpointer dat
     rc = dbase_begin( (DBase*) s_selection->zond->dbase_zond->dbase_work, errmsg );
     if ( rc ) ERROR_SOND( "dbase_begin" )
 
-    node_new = dbase_full_insert_node( s_selection->zond->dbase_zond->dbase_work,
+    node_new = zond_dbase_insert_node( s_selection->zond->dbase_zond->zond_dbase_work,
             s_selection->baum_dest, node_id_anchor, s_selection->kind, NULL,
             NULL, errmsg );
     if ( node_new < 0 ) ERROR_ROLLBACK( (DBase*) s_selection->zond->dbase_zond->dbase_work,
-            "dbase_full_insert_node" )
+            "zond_dbase_insert_node" )
 
     rc = dbase_full_set_link( s_selection->zond->dbase_zond->dbase_work,
             s_selection->baum_dest, node_new, NULL, s_selection->baum_selection,
@@ -775,8 +775,8 @@ selection_paste( Projekt* zond, gboolean kind, gboolean link )
                 rc = hat_vorfahre_datei( zond, baum, anchor_id, kind, &errmsg );
                 if ( rc == -1 )
                 {
-                    meldung( zond->app_window, "Bei Aufruf selection_testen_"
-                            "zulaessige_vorfahren:\n\n", errmsg, NULL );
+                    meldung( zond->app_window, "Bei Aufruf hat_vorfahre_datei\n\n",
+                            errmsg, NULL );
                     g_free( errmsg );
 
                     return;

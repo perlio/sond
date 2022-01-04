@@ -35,6 +35,8 @@ gint zond_dbase_remove_node( ZondDBase*, Baum, gint, gchar** );
 gint zond_dbase_kopieren_nach_auswertung( ZondDBase*, Baum, gint, gint, gboolean,
         gchar** );
 
+gint zond_dbase_verschieben_knoten( ZondDBase*, Baum, gint, gint, gint, gchar** );
+
 G_END_DECLS
 
 #endif // ZOND_DBASE_H_INCLUDED

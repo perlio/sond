@@ -26,12 +26,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../global_types.h"
 #include "../enums.h"
 #include "../error.h"
+#include "../zond_dbase.h"
 
 #include "../99conv/db_read.h"
 #include "../99conv/general.h"
 #include "../20allgemein/ziele.h"
 #include "../99conv/baum.h"
-#include "../99conv/db_write.h"
 #include "../99conv/db_zu_baum.h"
 
 #include "project.h"
@@ -154,10 +154,10 @@ suchen_kopieren_listenpunkt( Projekt* zond, GList* list, gint anchor_id,
     rc = dbase_begin( (DBase*) zond->dbase_zond->dbase_work, errmsg );
     if ( rc ) ERROR_SOND( "dbase_begin" )
 
-    new_node_id = db_kopieren_nach_auswertung( zond, baum, node_id,
+    new_node_id = zond_dbase_kopieren_nach_auswertung( zond->dbase_zond->zond_dbase_work, baum, node_id,
             anchor_id, child, errmsg );
     if ( new_node_id == -1 ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work,
-            "db_kopieren_nach_auswertung" )
+            "zond_dbase_kopieren_nach_auswertung" )
 
     rc = dbase_commit( (DBase*) zond->dbase_zond->dbase_work, errmsg );
     if ( rc ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "dbase_commit" )
