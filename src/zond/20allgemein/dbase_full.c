@@ -959,7 +959,7 @@ dbase_full_create_with_stmts( const gchar* path, DBaseFull** dbase_full, sqlite3
     rc = dbase_full_prepare_stmts( *dbase_full, errmsg );
     if ( rc )
     {
-        g_free( dbase_full );
+        g_free( *dbase_full );
         ERROR_SOND( "dbase_full_open" )
     }
 
