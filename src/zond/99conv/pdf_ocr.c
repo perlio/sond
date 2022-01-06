@@ -992,13 +992,13 @@ pdf_ocr_create_matrix( fz_context* ctx, fz_rect rect, gfloat scale, gint rotate 
     fz_matrix ctm1 = fz_scale( scale, scale );
     fz_matrix ctm2 = fz_rotate( (float) rotate );
 
-    if ( rotate == 90 ) shift_x = width;
-    if ( rotate == 180 )
+    if ( rotate == 90 ) shift_x = height;
+    else if ( rotate == 180 )
     {
         shift_x = height;
         shift_y = width;
     }
-    if ( rotate == 270 ) shift_y = height;
+    else if ( rotate == 270 ) shift_y = width;
 
     fz_matrix ctm = fz_concat( ctm1, ctm2 );
 
