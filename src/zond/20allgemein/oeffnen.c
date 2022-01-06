@@ -23,12 +23,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "../global_types.h"
 #include "../error.h"
+#include "../zond_dbase.h"
 
 #include "../99conv/pdf.h"
-#include "../99conv/db_read.h"
 #include "../99conv/general.h"
 
 #include "ziele.h"
+#include "project.h"
 
 #include "../40viewer/document.h"
 #include "../40viewer/viewer.h"
@@ -75,9 +76,9 @@ oeffnen_auszug( Projekt* zond, gint node_id, gchar** errmsg )
     DisplayedDocument* dd = NULL;
     DisplayedDocument* dd_next = NULL;
 
-    first_child = db_get_first_child( zond, BAUM_AUSWERTUNG, node_id, errmsg );
+    first_child = zond_dbase_get_first_child( zond->dbase_zond->zond_dbase_work, BAUM_AUSWERTUNG, node_id, errmsg );
 
-    if ( first_child < 0 ) ERROR_PAO( "db_get_first_child" )
+    if ( first_child < 0 ) ERROR_PAO( "zond_dbase_get_first_child" )
     else if ( first_child == 0 )
     {
         if ( errmsg ) *errmsg = g_strdup( "Auszug anzeigen nicht möglich:\n"
@@ -123,9 +124,9 @@ oeffnen_auszug( Projekt* zond, gint node_id, gchar** errmsg )
 
         first_child = younger_sibling;
 
-        younger_sibling = db_get_younger_sibling( zond, BAUM_AUSWERTUNG,
+        younger_sibling = zond_dbase_get_younger_sibling( zond->dbase_zond->zond_dbase_work, BAUM_AUSWERTUNG,
                 first_child, errmsg );
-        if ( younger_sibling < 0 ) ERROR_PAO( "db_get_younger_sibling" )
+        if ( younger_sibling < 0 ) ERROR_PAO( "zond_dbase_get_younger_sibling" )
     }
     while ( younger_sibling > 0 );
 

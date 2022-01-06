@@ -28,7 +28,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../error.h"
 #include "../zond_dbase.h"
 
-#include "../99conv/db_read.h"
 #include "../99conv/general.h"
 #include "../20allgemein/ziele.h"
 #include "../99conv/baum.h"
@@ -91,9 +90,9 @@ suchen_fuellen_row( Projekt* zond, GtkWidget* list_box, ZondSuchen zond_suchen, 
     {
         gchar* node_text = NULL;
 
-        rc = db_get_icon_name_and_node_text( zond, baum, node_id,
+        rc = zond_dbase_get_icon_name_and_node_text( zond->dbase_zond->zond_dbase_work, baum, node_id,
                 NULL, &node_text, errmsg );
-        if ( rc ) ERROR_PAO( "db_get_icon_id_and_node_text" )
+        if ( rc ) ERROR_PAO( "zond_dbase_get_icon_name_and_node_text" )
 
         if ( zond_suchen == ZOND_SUCHEN_NODE_TEXT_BAUM_INHALT )
                 text_label = add_string( g_strdup( "BAUM_INHALT: " ), node_text );

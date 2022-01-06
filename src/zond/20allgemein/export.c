@@ -19,10 +19,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../enums.h"
 #include "../global_types.h"
 #include "../error.h"
+#include "../zond_dbase.h"
 
 #include "project.h"
 
-#include "../99conv/db_read.h"
 #include "../99conv/baum.h"
 #include "../99conv/general.h"
 
@@ -81,8 +81,8 @@ export_node( Projekt* zond, GtkTreeModel* model, GtkTreePath* path, gint depth,
                 gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]) ) ) return 0;
     }
 
-    rc = db_get_text( zond, node_id, &text, errmsg );
-    if ( rc ) ERROR_PAO( "db_get_text" )
+    rc = zond_dbase_get_text( zond->dbase_zond->zond_dbase_work, node_id, &text, errmsg );
+    if ( rc ) ERROR_PAO( "zond_dbase_get_text" )
 
     if ( !text || !g_strcmp0( text, "" ) )
     {

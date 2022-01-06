@@ -14,7 +14,6 @@
 #include "../../dbase.h"
 
 #include "../99conv/baum.h"
-#include "../99conv/db_read.h"
 #include "../99conv/db_zu_baum.h"
 #include "../99conv/pdf.h"
 #include "../20allgemein/project.h"
@@ -165,20 +164,20 @@ hat_vorfahre_datei( Projekt* zond, Baum baum, gint anchor_id, gboolean child, gc
 {
     if ( !child )
     {
-        anchor_id = db_get_parent( zond, baum, anchor_id, errmsg );
-        if ( anchor_id < 0 ) ERROR_PAO( "db_get_parent" )
+        anchor_id = zond_dbase_get_parent( zond->dbase_zond->zond_dbase_work, baum, anchor_id, errmsg );
+        if ( anchor_id < 0 ) ERROR_PAO( "zond_dbase_get_parent" )
     }
 
     while ( anchor_id != 0 )
     {
         gint rc = 0;
 
-        rc = db_get_rel_path( zond, baum, anchor_id, NULL, errmsg );
-        if ( rc == -1 ) ERROR_PAO( "db_get_rel_path" )
+        rc = zond_dbase_get_rel_path( zond->dbase_zond->zond_dbase_work, baum, anchor_id, NULL, errmsg );
+        if ( rc == -1 ) ERROR_PAO( "zond_dbase_get_rel_path" )
         else if ( rc == 0 ) return 1; //nicht mal datei!
 
-        anchor_id = db_get_parent( zond, baum, anchor_id, errmsg );
-        if ( anchor_id < 0 ) ERROR_PAO( "db_get_parent" )
+        anchor_id = zond_dbase_get_parent( zond->dbase_zond->zond_dbase_work, baum, anchor_id, errmsg );
+        if ( anchor_id < 0 ) ERROR_PAO( "zond_dbase_get_parent" )
     }
 
     return 0;
@@ -336,15 +335,15 @@ abfragen_rel_path_and_anbindung( Projekt* zond, Baum baum, gint node_id,
     gchar* rel_path_intern = NULL;
     Anbindung* anbindung_intern = NULL;
 
-    rc = db_get_rel_path( zond, baum, node_id, &rel_path_intern, errmsg );
-    if ( rc == -1 ) ERROR_PAO( "db_get_rel_path" )
+    rc = zond_dbase_get_rel_path( zond->dbase_zond->zond_dbase_work, baum, node_id, &rel_path_intern, errmsg );
+    if ( rc == -1 ) ERROR_PAO( "zond_dbase_get_rel_path" )
     else if ( rc == 1 ) return 2;
 
-    rc = db_get_ziel( zond, baum, node_id, &ziel, errmsg );
+    rc = zond_dbase_get_ziel( zond->dbase_zond->zond_dbase_work, baum, node_id, &ziel, errmsg );
     if ( rc == -1 )
     {
         g_free( rel_path_intern );
-        ERROR_PAO( "db_get_ziel" )
+        ERROR_PAO( "zond_dbase_get_ziel" )
     }
     else if ( rc == 1 )
     {

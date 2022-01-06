@@ -26,7 +26,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../error.h"
 #include "../zond_dbase.h"
 
-#include "../99conv/db_read.h"
 #include "../99conv/general.h"
 #include "../99conv/pdf.h"
 #include "../99conv/db_zu_baum.h"
@@ -93,10 +92,10 @@ ziele_verschieben_kinder( Projekt* zond,
     gint younger_sibling = 0;
     gint older_sibling = 0;
 
-    while ( (younger_sibling = db_get_younger_sibling( zond, BAUM_INHALT,
+    while ( (younger_sibling = zond_dbase_get_younger_sibling( zond->dbase_zond->zond_dbase_work, BAUM_INHALT,
             node_id, errmsg )) )
     {
-        if ( younger_sibling < 0 ) ERROR_PAO( "db_get_younger_siblings" )
+        if ( younger_sibling < 0 ) ERROR_PAO( "zond_dbase_get_younger_sibling" )
 
         Anbindung* anbindung_younger_sibling = NULL;
         rc = abfragen_rel_path_and_anbindung( zond, BAUM_INHALT, younger_sibling,
@@ -138,28 +137,8 @@ ziele_einfuegen_db( Projekt* zond, gint anchor_id, gboolean kind, Ziel* ziel,
             zond->icon[ICON_ANBINDUNG].icon_name, node_text, errmsg );
     if ( new_node == -1 ) ERROR_PAO( "zond_dbase_insert_node" )
 
-    sqlite3_reset( zond->dbase->stmts.ziele_einfuegen[0] );
-    sqlite3_clear_bindings( zond->dbase->stmts.ziele_einfuegen[0] );
-
-    rc = sqlite3_bind_text( zond->dbase->stmts.ziele_einfuegen[0], 1,
-            ziel->ziel_id_von, -1, NULL );
-    if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_bind_text [0,1]" )
-
-    rc = sqlite3_bind_int( zond->dbase->stmts.ziele_einfuegen[0], 2, ziel->index_von );
-    if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_bind_int [0,2]" )
-
-    rc = sqlite3_bind_text( zond->dbase->stmts.ziele_einfuegen[0], 3, ziel->ziel_id_bis,
-            -1, NULL );
-    if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_bind_text [0,3]" )
-
-    rc = sqlite3_bind_int( zond->dbase->stmts.ziele_einfuegen[0], 4, ziel->index_bis );
-    if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_bind_text [0,4]" )
-
-    rc = sqlite3_bind_int( zond->dbase->stmts.ziele_einfuegen[0], 5, anchor_id );
-    if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_bind_int [0,5]" )
-
-    rc = sqlite3_step( zond->dbase->stmts.ziele_einfuegen[0] );
-    if ( rc != SQLITE_DONE ) ERROR_SQL( "sqlite3_step [0]" )
+    rc = zond_dbase_set_ziel( zond->dbase_zond->zond_dbase_work, ziel, anchor_id, errmsg );
+    if ( rc ) ERROR_SOND( "zond_dbase_set_ziel" )
 
     return new_node;
 }
@@ -331,9 +310,9 @@ ziele_abfragen_anker_rek( Projekt* zond, gint node_id, Anbindung anbindung,
         *kind = TRUE;
         new_node_id = node_id;
 
-        first_child_id = db_get_first_child( zond, BAUM_INHALT,
+        first_child_id = zond_dbase_get_first_child( zond->dbase_zond->zond_dbase_work, BAUM_INHALT,
                 node_id, errmsg );
-        if ( first_child_id < 0 ) ERROR_PAO( "db_get_first_child" )
+        if ( first_child_id < 0 ) ERROR_PAO( "zond_dbase_get_first_child" )
         else if ( first_child_id > 0 ) //hat kind
         {
             gint res = ziele_abfragen_anker_rek( zond, first_child_id, anbindung,
@@ -359,13 +338,13 @@ ziele_abfragen_anker_rek( Projekt* zond, gint node_id, Anbindung anbindung,
             *kind = TRUE;
             new_node_id = node_id;
 
-            first_child_id = db_get_first_child( zond, BAUM_INHALT,
+            first_child_id = zond_dbase_get_first_child( zond->dbase_zond->zond_dbase_work, BAUM_INHALT,
                     node_id, errmsg );
             if ( first_child_id < 0 )
             {
                 g_free( anbindung_node_id );
 
-                ERROR_PAO( "db_get_first_child" )
+                ERROR_PAO( "zond_dbase_get_first_child" )
             }
             else if ( first_child_id > 0 ) //hat kind
             {
@@ -387,13 +366,13 @@ ziele_abfragen_anker_rek( Projekt* zond, gint node_id, Anbindung anbindung,
             *kind = FALSE;
             new_node_id = node_id;
 
-            gint younger_sibling_id = db_get_younger_sibling( zond, BAUM_INHALT,
+            gint younger_sibling_id = zond_dbase_get_younger_sibling( zond->dbase_zond->zond_dbase_work, BAUM_INHALT,
                     node_id, errmsg );
             if ( younger_sibling_id < 0 )
             {
                 g_free( anbindung_node_id );
 
-                ERROR_PAO( "db_get_younger_sibling" )
+                ERROR_PAO( "zond_dbase_get_younger_sibling" )
             }
 
             if ( younger_sibling_id != 0 )
@@ -450,9 +429,9 @@ ziele_erzeugen_anbindung( PdfViewer* pv, gint* ptr_new_node, gchar** errmsg )
     anbindung.bis.seite = page_doc_bis;
     anbindung.bis.index = pv->anbindung.bis.index;
 
-    node_id = db_get_node_id_from_rel_path( pv->zond,
+    node_id = zond_dbase_get_node_id_from_rel_path( pv->zond->dbase_zond->zond_dbase_work,
             zond_pdf_document_get_path( dd_von->zond_pdf_document ), errmsg );
-    if ( node_id == -1 ) ERROR_PAO( "db_get_node_id_from_rel_path" )
+    if ( node_id == -1 ) ERROR_PAO( "zond_dbase_get_node_id_from_rel_path" )
     else if ( node_id == 0 ) ERROR_PAO( "Datei nicht vorhanden" )
 
     //Kinder von Knoten mit DateiID=datei_id durchgehen

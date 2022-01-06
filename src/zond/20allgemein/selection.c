@@ -24,7 +24,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "../99conv/baum.h"
 #include "../99conv/general.h"
-#include "../99conv/db_read.h"
 #include "../99conv/db_zu_baum.h"
 
 
@@ -66,9 +65,9 @@ selection_foreach_verschieben( SondTreeview* tree_view, GtkTreeIter* iter,
     {
         gint rc = 0;
 
-        rc = db_get_ziel( s_selection->zond, s_selection->baum,
+        rc = zond_dbase_get_ziel( s_selection->zond->dbase_zond->zond_dbase_work, s_selection->baum,
                 node_id, NULL, errmsg );
-        if ( rc == -1 ) ERROR_PAO( "db_get_ziel" )
+        if ( rc == -1 ) ERROR_PAO( "zond_dbase_get_ziel" )
         else if ( rc == 1 ) return 0;
     }
 
@@ -94,8 +93,8 @@ selection_verschieben( Projekt* zond, Baum baum, gint anchor_id, gboolean kind,
     if ( kind ) s_selection.parent_id = anchor_id;
     else
     {
-        s_selection.parent_id = db_get_parent( zond, baum, anchor_id, errmsg );
-        if ( s_selection.parent_id < 0 ) ERROR_PAO( "db_get_parent" )
+        s_selection.parent_id = zond_dbase_get_parent( zond->dbase_zond->zond_dbase_work, baum, anchor_id, errmsg );
+        if ( s_selection.parent_id < 0 ) ERROR_PAO( "zond_dbase_get_parent" )
 
         s_selection.older_sibling_id = anchor_id;
     }
@@ -147,8 +146,8 @@ selection_copy_node_db( Projekt* zond, gboolean with_younger_siblings, Baum baum
     if ( new_node_id == -1 ) ERROR_PAO( "zond_dbase_kopieren_nach_auswertung" )
 
     //Prüfen, ob Kind- oder Geschwisterknoten vorhanden
-    first_child_id = db_get_first_child( zond, baum_von, node_von, errmsg );
-    if ( first_child_id < 0 ) ERROR_PAO( "db_get_first_child" )
+    first_child_id = zond_dbase_get_first_child( zond->dbase_zond->zond_dbase_work, baum_von, node_von, errmsg );
+    if ( first_child_id < 0 ) ERROR_PAO( "zond_dbase_get_first_child" )
     if ( first_child_id > 0 )
     {
         rc = selection_copy_node_db( zond, TRUE, baum_von,
@@ -157,9 +156,9 @@ selection_copy_node_db( Projekt* zond, gboolean with_younger_siblings, Baum baum
     }
 
     gint younger_sibling_id = 0;
-    younger_sibling_id = db_get_younger_sibling( zond, baum_von, node_von,
+    younger_sibling_id = zond_dbase_get_younger_sibling( zond->dbase_zond->zond_dbase_work, baum_von, node_von,
             errmsg );
-    if ( younger_sibling_id < 0 ) ERROR_PAO( "db_get_younger_sibling" )
+    if ( younger_sibling_id < 0 ) ERROR_PAO( "zond_dbase_get_younger_sibling" )
     if ( younger_sibling_id > 0 && with_younger_siblings )
     {
         rc = selection_copy_node_db( zond, TRUE, baum_von,
@@ -350,11 +349,11 @@ selection_datei_anbinden( Projekt* zond, InfoWindow* info_window, GFile* file, g
 
     //Prüfen, ob Datei schon angebunden
     gchar* rel_path = get_rel_path_from_file( zond->dbase_zond->project_dir, file );
-    rc = db_get_node_id_from_rel_path( zond, rel_path, errmsg );
+    rc = zond_dbase_get_node_id_from_rel_path( zond->dbase_zond->zond_dbase_work, rel_path, errmsg );
     if ( rc == -1 )
     {
         g_free( rel_path );
-        ERROR_PAO( "db_get_node_id_from_rel_path" )
+        ERROR_PAO( "zond_dbase_get_node_id_from_rel_path" )
     }
     else if ( rc > 0 )
     {

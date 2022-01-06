@@ -19,12 +19,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <gtk/gtk.h>
 #include <mupdf/fitz.h>
 
-#include "../zond_pdf_document.h"
+#include "project.h"
 
+#include "../zond_pdf_document.h"
 #include "../error.h"
 #include "../global_types.h"
+#include "../zond_dbase.h"
 
-#include "../99conv/db_read.h"
 #include "../99conv/general.h"
 #include "../../misc.h"
 #include "../99conv/baum.h"
@@ -117,7 +118,7 @@ cb_textsuche_changed( GtkListBox* box, GtkListBoxRow* row, gpointer data )
 
     //herausfinden, welche Anbuindung am besten paßt
 
-    node_id = db_get_node_id_from_rel_path( zond, pdf_text_occ.rel_path, &errmsg );
+    node_id = zond_dbase_get_node_id_from_rel_path( zond->dbase_zond->zond_dbase_work, pdf_text_occ.rel_path, &errmsg );
     if ( node_id == 0 )
     {
         meldung( zond->app_window, "Fehler -\n\n"
@@ -127,7 +128,7 @@ cb_textsuche_changed( GtkListBox* box, GtkListBoxRow* row, gpointer data )
     else if ( node_id < 0 )
     {
         meldung( zond->app_window, "Fehler - \n\n"
-                "Bei Aufruf db_get_node_id_from_rel_path:\n", errmsg, NULL );
+                "Bei Aufruf zond_dbase_get_node_id_from_rel_path:\n", errmsg, NULL );
         g_free( errmsg );
 
         return;
@@ -154,10 +155,10 @@ cb_textsuche_changed( GtkListBox* box, GtkListBoxRow* row, gpointer data )
     //cursor dorthin setzen
     if ( !kind )
     {
-        node_id = db_get_parent( zond, BAUM_INHALT, node_id, &errmsg );
+        node_id = zond_dbase_get_parent( zond->dbase_zond->zond_dbase_work, BAUM_INHALT, node_id, &errmsg );
         if ( node_id < 0 )
         {
-            meldung( zond->app_window, "Fehler - \n\nBei Aufruf db_get_parent:\n",
+            meldung( zond->app_window, "Fehler - \n\nBei Aufruf zond_dbase_get_parent:\n",
                     errmsg, NULL );
             g_free( errmsg );
 

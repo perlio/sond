@@ -86,30 +86,7 @@ struct _Menu
 typedef struct _Menu Menu;
 
 
-typedef struct _STMTS
-{
-    sqlite3_stmt* ziele_einfuegen[1];
-    sqlite3_stmt* db_get_icon_name_and_node_text[2];
-    sqlite3_stmt* db_get_parent[2];
-    sqlite3_stmt* db_get_older_sibling[2];
-    sqlite3_stmt* db_get_younger_sibling[2];
-    sqlite3_stmt* db_get_ref_id[1];
-    sqlite3_stmt* db_get_ziel[1];
-    sqlite3_stmt* db_get_text[1];
-    sqlite3_stmt* db_get_rel_path[1];
-    sqlite3_stmt* db_get_first_child[2];
-    sqlite3_stmt* db_get_node_id_from_rel_path[1];
-    sqlite3_stmt* db_check_id[1];
-} STMTS;
-
 typedef struct _Clipboard Clipboard;
-
-typedef struct _Database
-{
-    sqlite3* db;
-    sqlite3* db_store;
-    STMTS stmts;
-} Database;
 
 
 typedef struct _Projekt
@@ -138,7 +115,6 @@ typedef struct _Projekt
 
     GtkTextView* textview;
 
-    Database* dbase;
     DBaseZond* dbase_zond;
 
     Menu menu;

@@ -31,7 +31,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "../99conv/baum.h"
 #include "../99conv/general.h"
-#include "../99conv/db_read.h"
 
 #include "../20allgemein/oeffnen.h"
 #include "../20allgemein/ziele.h"
@@ -93,27 +92,27 @@ treeviews_foreach_entfernen_anbindung( SondTreeview* stv,
     gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(stv) ), iter,
             2, &node_id, -1 );
 
-    rc = db_get_ziel( zond, BAUM_INHALT, node_id, NULL, errmsg );
-    if ( rc == -1 ) ERROR_PAO ( "db_get_ziel" )
+    rc = zond_dbase_get_ziel( zond->dbase_zond->zond_dbase_work, BAUM_INHALT, node_id, NULL, errmsg );
+    if ( rc == -1 ) ERROR_PAO ( "zond_dbase_get_ziel" )
     if ( rc == 1 ) return 0; //Knoten ist keine Anbindung
 
     //herausfinden, ob zu löschender Knoten älteres Geschwister hat
-    older_sibling = db_get_older_sibling( zond, BAUM_INHALT, node_id, errmsg );
-    if ( older_sibling < 0 ) ERROR_PAO( "db_get_older_sibling" )
+    older_sibling = zond_dbase_get_older_sibling( zond->dbase_zond->zond_dbase_work, BAUM_INHALT, node_id, errmsg );
+    if ( older_sibling < 0 ) ERROR_PAO( "zond_dbase_get_older_sibling" )
 
     //Elternknoten ermitteln
-    parent = db_get_parent( zond, BAUM_INHALT, node_id, errmsg );
-    if ( parent < 0 ) ERROR_PAO( "db_get_parent" )
+    parent = zond_dbase_get_parent( zond->dbase_zond->zond_dbase_work, BAUM_INHALT, node_id, errmsg );
+    if ( parent < 0 ) ERROR_PAO( "zond_dbase_get_parent" )
 
     rc = dbase_begin( (DBase*) zond->dbase_zond->dbase_work, errmsg );
     if ( rc ) ERROR_SOND( "db_begin" )
 
     child = 0;
-    while ( (child = db_get_first_child( zond, BAUM_INHALT, node_id,
+    while ( (child = zond_dbase_get_first_child( zond->dbase_zond->zond_dbase_work, BAUM_INHALT, node_id,
             errmsg )) )
     {
         if ( child < 0 ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work,
-                "db_get_first_child" )
+                "zond_dbase_get_first_child" )
 
         rc = knoten_verschieben( zond, BAUM_INHALT, child, parent,
                 older_sibling, errmsg );
@@ -339,7 +338,7 @@ treeviews_node_text_nach_anbindung_foreach( SondTreeview* stv, GtkTreeIter* iter
     if ( rc )
     {
         g_free( node_text );
-        ERROR_SOND( "dbase_fulle_set_node_text" )
+        ERROR_SOND( "dbase_full_set_node_text" )
     }
 
     //neuen text im tree speichern
@@ -537,11 +536,11 @@ cb_cursor_changed( SondTreeview* treeview, gpointer user_data )
     GtkTextBuffer* buffer = gtk_text_view_get_buffer( zond->textview );
 
     //neuen text einfügen
-    rc = db_get_text( zond, node_id, &text, &errmsg );
+    rc = zond_dbase_get_text( zond->dbase_zond->zond_dbase_work, node_id, &text, &errmsg );
     if ( rc )
     {
         text_label = g_strconcat( "Fehler in cb_cursor_changed: Bei Aufruf "
-                "db_get_text: ", errmsg, NULL );
+                "zond_dbase_get_text: ", errmsg, NULL );
         g_free( errmsg );
         gtk_label_set_text( zond->label_status, text_label );
         g_free( text_label );
@@ -752,12 +751,12 @@ treeviews_render_node_text( SondTreeview* stv, GtkTreeIter* iter, gpointer data 
         gchar* text = NULL;
 
         //Hintergrund icon rot wenn Text in textview
-        rc = db_get_text( zond, node_id, &text, &errmsg );
+        rc = zond_dbase_get_text( zond->dbase_zond->zond_dbase_work, node_id, &text, &errmsg );
         if ( rc )
         {
             gchar* text_label = NULL;
             text_label = g_strconcat( "Fehler in treeviews_render_node_text -\n\n"
-                    "Bei Aufruf db_get_text:\n", errmsg, NULL );
+                    "Bei Aufruf zond_dbase_get_text:\n", errmsg, NULL );
             g_free( errmsg );
             gtk_label_set_text( zond->label_status, text_label );
             g_free( text_label );

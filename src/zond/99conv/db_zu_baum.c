@@ -1,8 +1,9 @@
 #include "../global_types.h"
 #include "../enums.h"
 #include "../error.h"
+#include "../zond_dbase.h"
 
-#include "../99conv/db_read.h"
+#include "../20allgemein/project.h"
 #include "../99conv/general.h"
 #include "../99conv/baum.h"
 
@@ -29,9 +30,9 @@ db_baum_knoten( Projekt* zond, Baum baum, gint node_id, GtkTreeIter* iter,
     gchar* node_text = NULL;
     GtkTreeIter iter_inserted = { 0, };
 
-    rc = db_get_icon_name_and_node_text( zond, baum, node_id, &icon_name,
+    rc = zond_dbase_get_icon_name_and_node_text( zond->dbase_zond->zond_dbase_work, baum, node_id, &icon_name,
             &node_text, errmsg );
-    if ( rc == -1 ) ERROR_SOND( "db_get_icon_id_and_node_text" )
+    if ( rc == -1 ) ERROR_SOND( "zond_dbase_get_icon_name_and_node_text" )
     else if ( rc == 1 )
     {
         if ( errmsg ) *errmsg = g_strdup( "node_id existiert nicht" );
@@ -71,8 +72,8 @@ db_baum_knoten_mit_kindern( Projekt* zond, gboolean with_younger_siblings,
     gint first_child_id = 0;
     gint younger_sibling_id = 0;
 
-    first_child_id = db_get_first_child( zond, baum, node_id, errmsg );
-    if ( first_child_id < 0 ) ERROR_SOND( "db_get_first_child" )
+    first_child_id = zond_dbase_get_first_child( zond->dbase_zond->zond_dbase_work, baum, node_id, errmsg );
+    if ( first_child_id < 0 ) ERROR_SOND( "zond_dbase_get_first_child" )
 
     if ( first_child_id > 0 )
     {
@@ -82,8 +83,8 @@ db_baum_knoten_mit_kindern( Projekt* zond, gboolean with_younger_siblings,
         if ( rc ) ERROR_SOND( "db_baum_knoten_mit_kindern" )
     }
 
-    younger_sibling_id = db_get_younger_sibling( zond, baum, node_id, errmsg );
-    if ( younger_sibling_id < 0 ) ERROR_SOND( "db_get_younger_sibling" )
+    younger_sibling_id = zond_dbase_get_younger_sibling( zond->dbase_zond->zond_dbase_work, baum, node_id, errmsg );
+    if ( younger_sibling_id < 0 ) ERROR_SOND( "zond_dbase_get_younger_sibling" )
 
     if ( younger_sibling_id > 0 && with_younger_siblings )
     {
@@ -113,8 +114,8 @@ db_baum_neu_laden( Projekt* zond, Baum baum, gchar** errmsg )
     zond_tree_store_clear( ZOND_TREE_STORE(gtk_tree_view_get_model(
             GTK_TREE_VIEW(zond->treeview[baum]) )) );
 
-    first_node_id = db_get_first_child( zond, baum, 0, errmsg );
-    if ( first_node_id < 0 ) ERROR_SOND( "db_get_first_child" )
+    first_node_id = zond_dbase_get_first_child( zond->dbase_zond->zond_dbase_work, baum, 0, errmsg );
+    if ( first_node_id < 0 ) ERROR_SOND( "zond_dbase_get_first_child" )
 
     if ( first_node_id )
     {

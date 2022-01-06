@@ -37,6 +37,31 @@ gint zond_dbase_kopieren_nach_auswertung( ZondDBase*, Baum, gint, gint, gboolean
 
 gint zond_dbase_verschieben_knoten( ZondDBase*, Baum, gint, gint, gint, gchar** );
 
+gint zond_dbase_get_icon_name_and_node_text( ZondDBase*, Baum, gint, gchar**,
+        gchar**, gchar** );
+
+gint zond_dbase_get_text( ZondDBase*, gint, gchar**, gchar** );
+
+gint zond_dbase_set_ziel( ZondDBase*, Ziel*, gint, gchar** );
+
+gint zond_dbase_get_parent( ZondDBase*, Baum, gint, gchar** );
+
+gint zond_dbase_get_older_sibling( ZondDBase*, Baum, gint, gchar** );
+
+gint zond_dbase_get_younger_sibling( ZondDBase*, Baum, gint, gchar** );
+
+gint zond_dbase_get_first_child( ZondDBase*, Baum, gint, gchar** );
+
+gint zond_dbase_get_ref_id( ZondDBase*, gint, gchar** );
+
+gint zond_dbase_get_rel_path( ZondDBase*, Baum, gint, gchar**, gchar** );
+
+gint zond_dbase_get_ziel( ZondDBase*, Baum, gint, Ziel**, gchar** );
+
+gint zond_dbase_get_node_id_from_rel_path( ZondDBase*, const gchar*, gchar** );
+
+gint zond_dbase_check_id( ZondDBase*, const gchar*, gchar** );
+
 G_END_DECLS
 
 #endif // ZOND_DBASE_H_INCLUDED

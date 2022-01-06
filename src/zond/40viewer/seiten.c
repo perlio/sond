@@ -25,13 +25,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "../global_types.h"
 #include "../error.h"
+#include "../zond_dbase.h"
 
 #include "../99conv/general.h"
 #include "../99conv/pdf.h"
-#include "../99conv/db_read.h"
 #include "../99conv/pdf_ocr.h"
 
 #include "../20allgemein/ziele.h"
+#include "../20allgemein/project.h"
 
 #include "viewer.h"
 #include "render.h"
@@ -635,11 +636,11 @@ seiten_anbindung( PdfViewer* pv, GPtrArray* arr_document_page, gchar** errmsg )
     //Überprüfen, ob NamedDest in db als ziel
     for ( gint i = 0; i < arr_dests->len; i++ )
     {
-        rc = db_check_id( pv->zond, g_ptr_array_index( arr_dests, i ), errmsg );
+        rc = zond_dbase_check_id( pv->zond->dbase_zond->zond_dbase_work, g_ptr_array_index( arr_dests, i ), errmsg );
         if ( rc == -1 )
         {
             g_ptr_array_free( arr_dests, TRUE );
-            ERROR_PAO( "db_check_id" )
+            ERROR_PAO( "zond_dbase_check_id" )
         }
         if ( rc == 1 )
         {

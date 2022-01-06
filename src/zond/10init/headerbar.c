@@ -33,10 +33,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../global_types.h"
 #include "../error.h"
 #include "../zond_tree_store.h"
+#include "../zond_dbase.h"
 
 #include "../99conv/general.h"
 #include "../99conv/baum.h"
-#include "../99conv/db_read.h"
 #include "../99conv/db_zu_baum.h"
 #include "../99conv/test.h"
 #include "../99conv/pdf_ocr.h"
@@ -122,14 +122,14 @@ selection_abfragen_pdf( Projekt* zond, gchar** errmsg )
 
         gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) ), &iter, 2, &node_id, -1 );
 
-        rc = db_get_rel_path( zond, baum, node_id, &rel_path, errmsg );
+        rc = zond_dbase_get_rel_path( zond->dbase_zond->zond_dbase_work, baum, node_id, &rel_path, errmsg );
         if ( rc == 1 ) continue;
         else if ( rc )
         {
             g_list_free_full( selected, (GDestroyNotify) gtk_tree_path_free );
             g_ptr_array_free( arr_rel_path, TRUE );
 
-            ERROR_PAO_R( "db_get_rel_path", NULL )
+            ERROR_PAO_R( "zond_dbase_get_rel_path", NULL )
         }
 
         //Sonderbehandung, falls pdf-Datei
