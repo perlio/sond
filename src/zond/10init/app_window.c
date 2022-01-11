@@ -174,13 +174,18 @@ cb_entry_search( GtkWidget* entry, gpointer data )
 {
     gint rc = 0;
     gchar* errmsg = NULL;
-    gchar* text = NULL;
+    const gchar* text = NULL;
+    gchar* search_text = NULL;
 
     Projekt* zond = (Projekt*) data;
 
-    text = g_strconcat( "%", gtk_entry_get_text( GTK_ENTRY(entry) ), "%", NULL );
-    rc = suchen_treeviews( zond, text, &errmsg );
-    g_free( text );
+    text = gtk_entry_get_text( GTK_ENTRY(entry) );
+
+    if ( !text || strlen( text ) < 3 ) return;
+
+    search_text = g_strconcat( "%", text, "%", NULL );
+    rc = suchen_treeviews( zond, search_text, &errmsg );
+    g_free( search_text );
     if ( rc )
     {
         display_message( zond->app_window, "Fehler Suche -\n\nBei Aufruf "
