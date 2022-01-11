@@ -794,15 +794,13 @@ zond_dbase_insert_node( ZondDBase* zond_dbase, Baum baum, gint node_id, gboolean
         const gchar* icon_name, const gchar* node_text, gchar** errmsg )
 {
     gint rc = 0;
-    const gint num_stmts = 5;
+    gint num_stmts = 0;
     gint new_node_id = 0;
     sqlite3_stmt** stmt = NULL;
 
     if ( !(stmt = g_object_get_data( G_OBJECT(zond_dbase), __func__ )) )
     {
         gint rc = 0;
-
-        stmt = g_malloc0( sizeof( sqlite3_stmt* ) * num_stmts );
 
         const gchar* sql[] = {
             "INSERT INTO baum_inhalt "
@@ -857,6 +855,10 @@ zond_dbase_insert_node( ZondDBase* zond_dbase, Baum baum, gint node_id, gboolean
 
                 "VALUES (last_insert_rowid()); " };
 
+        num_stmts = nelem( sql );
+
+        stmt = g_malloc0( sizeof( sqlite3_stmt* ) * num_stmts );
+
         rc = zond_dbase_prepare_stmts( zond_dbase, num_stmts, sql, stmt, errmsg );
         if ( rc )
         {
@@ -866,6 +868,7 @@ zond_dbase_insert_node( ZondDBase* zond_dbase, Baum baum, gint node_id, gboolean
 
         g_object_set_data_full( G_OBJECT(zond_dbase), __func__, stmt, g_free );
     }
+    else num_stmts = nelem( stmt );
 
     for ( gint i = 0; i < num_stmts; i++ ) sqlite3_reset( stmt[i] );
 
