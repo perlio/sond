@@ -685,7 +685,7 @@ zond_pdf_document_get_ctx( ZondPdfDocument* self )
 }
 
 
-gchar*
+const gchar*
 zond_pdf_document_get_path( ZondPdfDocument* self )
 {
     if ( !ZOND_IS_PDF_DOCUMENT(self) ) return NULL;

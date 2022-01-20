@@ -228,31 +228,38 @@ viewer_render_sichtbare_seiten( PdfViewer* pv )
     gint page_doc = 0;
     ViewerPage* viewer_page = NULL;
     PdfDocumentPage* pdf_document_page = NULL;
-    gchar* path_doc = NULL;
-
-    if ( pv->arr_pages->len == 0 ) return;
-
+    const gchar* path_doc = NULL;
+    gchar* file = NULL;
+    gchar* dir = NULL;
     gint erste = 0;
     gint letzte = 0;
+    gchar* title = NULL;
+
+    if ( pv->arr_pages->len == 0 ) return;
 
     viewer_abfragen_sichtbare_seiten( pv, &erste, &letzte );
 
     viewer_page = g_ptr_array_index( pv->arr_pages, erste );
     pdf_document_page = viewer_page_get_document_page( viewer_page );
 
+    //in Headerbar angezeigte Datei und Seite anzeigen
+    path_doc = zond_pdf_document_get_path( pdf_document_page->document );
+    file = g_strrstr( path_doc, "/" ) + 1;
+    dir = g_strndup( path_doc, strlen( path_doc ) -
+            strlen( file ) );
+
+    page_doc = zond_pdf_document_get_index( pdf_document_page );
+    title = g_strdup_printf( "%s [Seite %i]", file, page_doc + 1 );
+    gtk_header_bar_set_title( GTK_HEADER_BAR(pv->headerbar), title );
+    g_free( title );
+
+    gtk_header_bar_set_subtitle( GTK_HEADER_BAR(pv->headerbar), dir );
+    g_free( dir );
+
     //Seite von oberen - unterem Rand im entry anzeigen
     gchar* text = g_strdup_printf( "%i-%i", erste + 1, letzte + 1 );
     gtk_entry_set_text( GTK_ENTRY(pv->entry), text );
     g_free( text );
-
-    //in Headerbar angezeigte Datei und Seite anzeigen
-    path_doc = zond_pdf_document_get_path( pdf_document_page->document );
-    gtk_header_bar_set_title( GTK_HEADER_BAR(pv->headerbar), path_doc );
-
-    page_doc = zond_pdf_document_get_index( pdf_document_page );
-    gchar* subtitle = g_strdup_printf( "Seite: %i", page_doc + 1);
-    gtk_header_bar_set_subtitle( GTK_HEADER_BAR(pv->headerbar), subtitle );
-    g_free( subtitle );
 
     if ( pv->thread_pool_page ) for ( gint i = letzte; i >= erste; i-- )
             g_thread_pool_move_to_front( pv->thread_pool_page, GINT_TO_POINTER(i + 1) );

@@ -76,7 +76,7 @@ gint zond_pdf_document_get_number_of_pages( ZondPdfDocument* );
 
 fz_context* zond_pdf_document_get_ctx( ZondPdfDocument* );
 
-gchar* zond_pdf_document_get_path( ZondPdfDocument* );
+const gchar* zond_pdf_document_get_path( ZondPdfDocument* );
 
 gint zond_pdf_document_get_index( PdfDocumentPage* );
 
