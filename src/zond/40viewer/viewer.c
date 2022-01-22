@@ -244,9 +244,10 @@ viewer_render_sichtbare_seiten( PdfViewer* pv )
 
     //in Headerbar angezeigte Datei und Seite anzeigen
     path_doc = zond_pdf_document_get_path( pdf_document_page->document );
-    file = g_strrstr( path_doc, "/" ) + 1;
-    dir = g_strndup( path_doc, strlen( path_doc ) -
-            strlen( file ) );
+    file = g_strrstr( path_doc, "/" );
+    if ( file ) file++; // "/" entfernen
+    else file = path_doc;
+    dir = g_strndup( path_doc, strlen( path_doc ) - strlen( file ) );
 
     page_doc = zond_pdf_document_get_index( pdf_document_page );
     title = g_strdup_printf( "%s [Seite %i]", file, page_doc + 1 );
