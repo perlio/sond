@@ -229,7 +229,7 @@ viewer_render_sichtbare_seiten( PdfViewer* pv )
     ViewerPage* viewer_page = NULL;
     PdfDocumentPage* pdf_document_page = NULL;
     const gchar* path_doc = NULL;
-    gchar* file = NULL;
+    const gchar* file = NULL;
     gchar* dir = NULL;
     gint erste = 0;
     gint letzte = 0;
