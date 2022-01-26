@@ -421,14 +421,15 @@ viewer_create_layout( PdfViewer* pv )
                         (dd->anbindung->bis.index < EOP)) ?
                         (gfloat) dd->anbindung->bis.index : crop.y1;
             }
-
+printf("vor viewer page new %i ", von);
             //ViewerPage erstellen und einfügen
             ViewerPage* viewer_page = viewer_page_new_full( pv, pdf_document_page, crop );
+            printf("nach new ");
             gtk_layout_put( GTK_LAYOUT(pv->layout), GTK_WIDGET(viewer_page), 0, 0 );
             g_ptr_array_add( pv->arr_pages, viewer_page );
-
+printf("nach put ");
             viewer_insert_thumb( pv, -1 );
-
+printf("nach insert\n");
             von++;
         }
 

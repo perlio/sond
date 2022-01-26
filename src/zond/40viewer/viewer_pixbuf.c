@@ -49,8 +49,10 @@ GdkPixbuf*
 viewer_pixbuf_new_from_pixmap( fz_context* ctx, fz_pixmap* pixmap )
 {
     GdkPixbuf* pixbuf = NULL;
+    ViewerPixbufPrivate* viewer_pixbuf_priv = NULL;
 
-    ViewerPixbufPrivate* viewer_pixbuf_priv = g_malloc0( sizeof( ViewerPixbufPrivate ) );
+    viewer_pixbuf_priv = g_try_malloc0( sizeof( ViewerPixbufPrivate ) );
+    if ( !viewer_pixbuf_priv ) return NULL;
 
     viewer_pixbuf_priv->ctx = ctx;
 

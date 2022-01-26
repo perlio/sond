@@ -37,7 +37,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../zond_tree_store.h"
 
 #include "project.h"
-#include "project_db.h"
 #include "dbase_full.h"
 
 

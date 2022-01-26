@@ -54,11 +54,19 @@ render_thumbnail( fz_context* ctx, ViewerPage* viewer_page,
     fz_catch( ctx ) ERROR_MUPDF( "fz_new_pixmap_with_bbox" )
 
     fz_try( ctx) fz_clear_pixmap_with_value( ctx, pixmap, 255 );
-    fz_catch( ctx ) ERROR_MUPDF( "fz_clear_pixmap" )
+    fz_catch( ctx )
+    {
+        fz_drop_pixmap( ctx, pixmap );
+        ERROR_MUPDF( "fz_clear_pixmap" )
+    }
 
     fz_device* draw_device = NULL;
     fz_try( ctx ) draw_device = fz_new_draw_device( ctx, fz_identity, pixmap );
-    fz_catch( ctx ) ERROR_MUPDF( "fz_new_draw_device" )
+    fz_catch( ctx )
+    {
+        fz_drop_pixmap( ctx, pixmap );
+        ERROR_MUPDF( "fz_new_draw_device" )
+    }
 
     fz_try( ctx ) fz_run_display_list( ctx, pdf_document_page->display_list,
             draw_device, transform, rect, NULL );
@@ -74,6 +82,14 @@ render_thumbnail( fz_context* ctx, ViewerPage* viewer_page,
     }
 
     pixbuf = viewer_pixbuf_new_from_pixmap( zond_pdf_document_get_ctx( pdf_document_page->document ), pixmap );
+    if ( !pixbuf )
+    {
+        fz_drop_pixmap( ctx, pixmap );
+        if ( errmsg ) *errmsg = g_strdup( "Bei Aufruf viewer_pixbuf_new_from_pixmap:\n"
+                "Out of memory" );
+
+        return -1;
+    }
 
     viewer_page_set_pixbuf_thumb( viewer_page, pixbuf );
 
@@ -102,7 +118,11 @@ render_pixmap( fz_context* ctx, ViewerPage* viewer_page, gdouble zoom,
     fz_catch( ctx ) ERROR_MUPDF( "fz_new_pixmap_with_bbox" )
 
     fz_try( ctx) fz_clear_pixmap_with_value( ctx, pixmap, 255 );
-    fz_catch( ctx ) ERROR_MUPDF( "fz_clear_pixmap" )
+    fz_catch( ctx )
+    {
+        fz_drop_pixmap( ctx, pixmap );
+        ERROR_MUPDF( "fz_clear_pixmap" )
+    }
 
     fz_device* draw_device = NULL;
     fz_try( ctx ) draw_device = fz_new_draw_device( ctx, fz_identity, pixmap );
@@ -126,6 +146,14 @@ render_pixmap( fz_context* ctx, ViewerPage* viewer_page, gdouble zoom,
     }
 
     pixbuf = viewer_pixbuf_new_from_pixmap( zond_pdf_document_get_ctx( pdf_document_page->document ), pixmap );
+    if ( !pixbuf )
+    {
+        fz_drop_pixmap( ctx, pixmap );
+        if ( errmsg ) *errmsg = g_strdup( "Bei Aufruf viewer_pixbuf_new_from_pixmap:\n"
+                "Out of memory" );
+
+        return -1;
+    }
 
     viewer_page_set_pixbuf_page( viewer_page, pixbuf );
 

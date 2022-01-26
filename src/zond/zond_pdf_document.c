@@ -169,7 +169,9 @@ zond_pdf_document_page_annot_load( PdfDocumentPage* pdf_document_page,
 
     ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( pdf_document_page->document );
 
-    pdf_document_page_annot = g_malloc0( sizeof( PdfDocumentPageAnnot ) );
+    pdf_document_page_annot = g_try_malloc0( sizeof( PdfDocumentPageAnnot ) );
+    if ( !pdf_document_page_annot ) printf("Error!\n");
+
     pdf_document_page_annot->idx = idx;
     pdf_document_page_annot->type = pdf_annot_type( priv->ctx, annot );
     pdf_document_page_annot->rect = pdf_annot_rect( priv->ctx, annot );
@@ -268,7 +270,14 @@ zond_pdf_document_page_init( ZondPdfDocument* self, gint index, gchar** errmsg )
 
     ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( ZOND_PDF_DOCUMENT(self) );
 
-    PdfDocumentPage* pdf_document_page = g_malloc0( sizeof( PdfDocumentPage ) );
+    PdfDocumentPage* pdf_document_page = g_try_malloc0( sizeof( PdfDocumentPage ) );
+    if ( !pdf_document_page )
+    {
+        if ( errmsg ) *errmsg = g_strdup( "Bei Aufruf g_try_malloc0:\nOut of memory" );
+
+        return -1;
+    }
+
     ((priv->pages)->pdata)[index] = pdf_document_page;
 
     pdf_document_page->document = self; //keine ref!
@@ -388,24 +397,53 @@ mupdf_lock( void* user, gint lock )
 }
 
 
+static void*
+mupdf_malloc( void* user, size_t size )
+{
+    return g_try_malloc( size );
+}
+
+
+static void*
+mupdf_realloc( void* user, void* old, size_t size )
+{
+    return g_try_realloc( old, size );
+}
+
+
+static void
+mupdf_free( void* user, void* ptr )
+{
+    g_free( ptr );
+
+    return;
+}
+
+
 /** Wenn NULL, dann Fehler und *errmsg gesetzt **/
 static fz_context*
 zond_pdf_document_init_context( void )
 {
+    GMutex* mutex = NULL;
     fz_context* ctx = NULL;
-    fz_locks_context locks_context;
+    fz_locks_context locks_context = { 0, };
+    fz_alloc_context alloc_context = { 0, };
 
-    GMutex* mutex = g_malloc0( sizeof( GMutex ) * FZ_LOCK_MAX );
-
-//    static GMutex mutex[FZ_LOCK_MAX];
+    //mutex für document
+    mutex = g_malloc0( sizeof( GMutex ) * FZ_LOCK_MAX );
     for ( gint i = 0; i < FZ_LOCK_MAX; i++ ) g_mutex_init( &(mutex[i]) );
 
     locks_context.user = mutex;
     locks_context.lock = mupdf_lock;
     locks_context.unlock = mupdf_unlock;
 
+    alloc_context.user = NULL;
+    alloc_context.malloc = mupdf_malloc;
+    alloc_context.realloc = mupdf_realloc;
+    alloc_context.free = mupdf_free;
+
 	/* Create a context to hold the exception stack and various caches. */
-	ctx = fz_new_context( NULL, &locks_context, FZ_STORE_UNLIMITED );
+	ctx = fz_new_context( &alloc_context, &locks_context, FZ_STORE_UNLIMITED );
     if ( !ctx )
     {
         for ( gint i = 0; i < FZ_LOCK_MAX; i++ ) g_mutex_clear( &mutex[i] );
