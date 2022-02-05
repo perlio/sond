@@ -281,14 +281,47 @@ zond_pdf_document_page_init( ZondPdfDocument* self, gint index, gchar** errmsg )
     ((priv->pages)->pdata)[index] = pdf_document_page;
 
     pdf_document_page->document = self; //keine ref!
-    pdf_document_page->arr_annots = g_ptr_array_new_with_free_func( zond_pdf_document_page_annot_free );
 
     rc = zond_pdf_document_load_page( self, index, errmsg );
-    if ( rc == -1 ) ERROR_SOND( "zond_pdf_document_load_page" )
+    if ( rc == -1 )
+    {
+        g_free( ((priv->pages)->pdata)[index] );
+        ((priv->pages)->pdata)[index] = NULL;
+        ERROR_SOND( "zond_pdf_document_load_page" )
+    }
+
+    pdf_document_page->arr_annots = g_ptr_array_new_with_free_func( zond_pdf_document_page_annot_free );
 
     g_mutex_init( &pdf_document_page->mutex_page );
 
     zond_pdf_document_page_load_annots( pdf_document_page );
+
+    return 0;
+}
+
+
+static gint
+zond_pdf_document_init_pages( ZondPdfDocument* self, gint von, gint bis, gchar** errmsg )
+{
+    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
+
+    if ( bis == -1 ) bis = priv->pages->len;
+
+    if ( von < 0 || von > bis || bis > priv->pages->len )
+    {
+        if ( errmsg ) *errmsg = g_strdup( "Seitengrenzen nicht eingehalten" );
+        return -1;
+    }
+
+    for ( gint i = von; i < bis; i++ )
+    {
+        gint rc = 0;
+
+        if ( g_ptr_array_index( priv->pages, i ) ) continue;
+
+        rc = zond_pdf_document_page_init( self, i, errmsg );
+        if ( rc == -1 ) ERROR_SOND( "zond_pdf_document_page_init" )
+    }
 
     return 0;
 }
@@ -322,23 +355,6 @@ zond_pdf_document_constructed( GObject* self )
     }
 
     g_ptr_array_set_size( priv->pages, number_of_pages );
-
-    for ( gint i = 0; i < priv->pages->len; i++ )
-    {
-        gint rc = 0;
-        gchar* errmsg = NULL;
-
-        rc = zond_pdf_document_page_init( ZOND_PDF_DOCUMENT(self), i, &errmsg );
-        if ( rc == -1 )
-        {
-            priv->errmsg = g_strconcat( "bei Aufruf document_load_page:\n",
-                    errmsg, NULL );
-            g_free( errmsg );
-            G_OBJECT_CLASS(zond_pdf_document_parent_class)->constructed( self );
-
-            return;
-        }
-    }
 
     G_OBJECT_CLASS(zond_pdf_document_parent_class)->constructed( self );
 
@@ -478,8 +494,9 @@ zond_pdf_document_init( ZondPdfDocument* self )
 
 
 ZondPdfDocument*
-zond_pdf_document_open( const gchar* path, gchar** errmsg )
+zond_pdf_document_open( const gchar* path, gint von, gint bis, gchar** errmsg )
 {
+    gint rc = 0;
     ZondPdfDocument* zond_pdf_document = NULL;
     ZondPdfDocumentPrivate* priv = NULL;
 
@@ -492,7 +509,15 @@ zond_pdf_document_open( const gchar* path, gchar** errmsg )
             zond_pdf_document = g_ptr_array_index( klass->arr_pdf_documents, i );
             ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( zond_pdf_document );
 
-            if ( !g_strcmp0( priv->path, path ) ) return g_object_ref( zond_pdf_document );
+            if ( !g_strcmp0( priv->path, path ) )
+            {
+                gint rc = 0;
+
+                rc = zond_pdf_document_init_pages( zond_pdf_document, von, bis, errmsg );
+                if ( rc ) ERROR_SOND_VAL( "zond_pdf_init_pages", NULL )
+
+                return g_object_ref( zond_pdf_document );
+            }
         }
     }
 
@@ -506,6 +531,13 @@ zond_pdf_document_open( const gchar* path, gchar** errmsg )
         g_object_unref( zond_pdf_document );
 
         return NULL;
+    }
+
+    rc = zond_pdf_document_init_pages( zond_pdf_document, von, bis, errmsg );
+    if ( rc )
+    {
+        g_object_unref( zond_pdf_document );
+        ERROR_SOND_VAL( "zond_pdf_init_pages", NULL )
     }
 
     if ( !klass ) klass = ZOND_PDF_DOCUMENT_GET_CLASS( zond_pdf_document );

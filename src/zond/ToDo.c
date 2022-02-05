@@ -23,7 +23,6 @@ ToDo:
 - Viewer
     - Farben für Markieren
     - Rummalen
-    - Angezeigte Datei in Statusleiste, nicht in Headerbar
     - TextTreffer in Fenster anzeigen
     - angezeigte Seiten als Datei speichern
 

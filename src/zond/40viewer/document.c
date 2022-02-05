@@ -42,7 +42,8 @@ document_new_displayed_document( const gchar* rel_path,
     ZondPdfDocument* zond_pdf_document = NULL;
     DisplayedDocument* dd = NULL;
 
-    zond_pdf_document = zond_pdf_document_open( rel_path, errmsg );
+    zond_pdf_document = zond_pdf_document_open( rel_path,
+            (anbindung) ? anbindung->von.seite : 0, (anbindung) ? anbindung->bis.seite : -1, errmsg );
     if ( !zond_pdf_document ) ERROR_PAO_R( "zond_pdf_document_open", NULL )
 
     dd = g_malloc0( sizeof( DisplayedDocument ) );
