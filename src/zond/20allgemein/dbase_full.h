@@ -27,8 +27,6 @@ typedef struct _DBase_Full
 
 
 
-gint dbase_full_set_node_text( DBaseFull*, Baum, gint, const gchar*, gchar** );
-
 gint dbase_full_set_icon_id( DBaseFull*, Baum, gint, const gchar*, gchar** );
 
 gint dbase_full_speichern_textview( DBaseFull*, gint, gchar*, gchar** );

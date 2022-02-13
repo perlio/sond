@@ -62,6 +62,10 @@ gint zond_dbase_get_node_id_from_rel_path( ZondDBase*, const gchar*, gchar** );
 
 gint zond_dbase_check_id( ZondDBase*, const gchar*, gchar** );
 
+gint zond_dbase_set_node_text( ZondDBase*, Baum, gint, const gchar*, gchar** );
+
+gint zond_dbase_check_link( ZondDBase*, Baum, gint, gchar** );
+
 G_END_DECLS
 
 #endif // ZOND_DBASE_H_INCLUDED

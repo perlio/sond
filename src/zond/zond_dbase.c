@@ -169,7 +169,7 @@ zond_dbase_class_init( ZondDBaseClass* klass )
 static void
 zond_dbase_init( ZondDBase* self )
 {
-    ZondDBasePrivate* priv = zond_dbase_get_instance_private( self );
+//    ZondDBasePrivate* priv = zond_dbase_get_instance_private( self );
 
     return;
 }
@@ -271,6 +271,7 @@ zond_dbase_create_db( sqlite3* db, gchar** errmsg )
             "VALUES (0, 0, 0); " //mit eingang
 
             "CREATE TABLE links ( "
+            "ID INTEGER PRIMARY KEY AUTOINCREMENT, " //order of appe...
             "baum_id INTEGER, "
             "node_id INTEGER, "
             "projekt_target VARCHAR (200), "
@@ -789,6 +790,32 @@ zond_dbase_prepare_stmts( ZondDBase* zond_dbase, gint num, const gchar** sql,
 }
 
 
+static gint
+zond_dbase_prepare( ZondDBase* zond_dbase, const gchar* func, const gchar** sql,
+        gint num_stmts, sqlite3_stmt*** stmt, gchar** errmsg )
+{
+    if ( !(*stmt = g_object_get_data( G_OBJECT(zond_dbase), func )) )
+    {
+        gint rc = 0;
+
+        *stmt = g_malloc0( sizeof( sqlite3_stmt* ) * num_stmts );
+
+        rc = zond_dbase_prepare_stmts( zond_dbase, num_stmts, sql, *stmt, errmsg );
+        if ( rc )
+        {
+            g_free( stmt );
+            ERROR_SOND( "zond_dbase_prepare_stmts" )
+        }
+
+        g_object_set_data_full( G_OBJECT(zond_dbase), func, *stmt, g_free );
+    }
+
+    for ( gint i = 0; i < num_stmts; i++ ) sqlite3_reset( (*stmt)[i] );
+
+    return 0;
+}
+
+
 gint
 zond_dbase_insert_node( ZondDBase* zond_dbase, Baum baum, gint node_id, gboolean child,
         const gchar* icon_name, const gchar* node_text, gchar** errmsg )
@@ -1267,7 +1294,8 @@ zond_dbase_set_ziel( ZondDBase* zond_dbase, Ziel* ziel, gint anchor_id, gchar** 
 
         const gchar* sql[] = {
         //...
-            "ziel_id_bis, index_bis, rel_path, node_id) "
+            "INSERT INTO ziele "
+            "(ziel_id_bis, index_bis, rel_path, node_id) "
             "VALUES (?, ?, ?, ?,"
             "(SELECT dateien.rel_path FROM dateien "
             "LEFT JOIN ziele "
@@ -1756,30 +1784,14 @@ zond_dbase_get_node_id_from_rel_path( ZondDBase* zond_dbase, const gchar* rel_pa
     gint rc = 0;
     gint node_id = 0;
     sqlite3_stmt** stmt = NULL;
-    const gint num_stmts = 1;
 
-    if ( !(stmt = g_object_get_data( G_OBJECT(zond_dbase), __func__ )) )
-    {
-        gint rc = 0;
+    const gchar* sql[] = {
+    //...
+        "SELECT node_id FROM dateien WHERE rel_path=?;"
+    };
 
-        stmt = g_malloc0( sizeof( sqlite3_stmt* ) * num_stmts );
-
-        const gchar* sql[] = {
-        //...
-            "SELECT node_id FROM dateien WHERE rel_path=?;"
-        };
-
-        rc = zond_dbase_prepare_stmts( zond_dbase, num_stmts, sql, stmt, errmsg );
-        if ( rc )
-        {
-            g_free( stmt );
-            ERROR_SOND( "zond_dbase_prepare_stmts" )
-        }
-
-        g_object_set_data_full( G_OBJECT(zond_dbase), __func__, stmt, g_free );
-    }
-
-    for ( gint i = 0; i < num_stmts; i++ ) sqlite3_reset( stmt[i] );
+    rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
+    if ( rc ) ERROR_SOND( "zond_dbase_prepare" )
 
     rc = sqlite3_bind_text( stmt[0], 1, rel_path, -1, NULL );
     if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_text (rel_path)" )
@@ -1798,32 +1810,16 @@ zond_dbase_check_id( ZondDBase* zond_dbase, const gchar* id, gchar** errmsg )
 {
     gint rc = 0;
     sqlite3_stmt** stmt = NULL;
-    const gint num_stmts = 1;
 
-    if ( !(stmt = g_object_get_data( G_OBJECT(zond_dbase), __func__ )) )
-    {
-        gint rc = 0;
+    const gchar* sql[] = {
+    //...
+        "SELECT ziel_id_von FROM ziele WHERE ziel_id_von=?1;"
+        "UNION "
+        "SELECT ziel_id_bis FROM ziele WHERE ziel_id_bis=?1;"
+    };
 
-        stmt = g_malloc0( sizeof( sqlite3_stmt* ) * num_stmts );
-
-        const gchar* sql[] = {
-        //...
-            "SELECT ziel_id_von FROM ziele WHERE ziel_id_von=?1;"
-            "UNION "
-            "SELECT ziel_id_bis FROM ziele WHERE ziel_id_bis=?1;"
-        };
-
-        rc = zond_dbase_prepare_stmts( zond_dbase, num_stmts, sql, stmt, errmsg );
-        if ( rc )
-        {
-            g_free( stmt );
-            ERROR_SOND( "zond_dbase_prepare_stmts" )
-        }
-
-        g_object_set_data_full( G_OBJECT(zond_dbase), __func__, stmt, g_free );
-    }
-
-    for ( gint i = 0; i < num_stmts; i++ ) sqlite3_reset( stmt[i] );
+    rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
+    if ( rc ) ERROR_SOND( "zond_dbase_prepare" )
 
     rc = sqlite3_bind_text( stmt[0], 1, id, -1, NULL );
     if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_text (id)" )
@@ -1835,6 +1831,66 @@ zond_dbase_check_id( ZondDBase* zond_dbase, const gchar* id, gchar** errmsg )
 
     return 0;
 }
+
+
+gint
+zond_dbase_set_node_text( ZondDBase* zond_dbase, Baum baum, gint node_id,
+        const gchar* node_text, gchar** errmsg )
+{
+    gint rc = 0;
+    sqlite3_stmt** stmt = NULL;
+
+    const gchar* sql[] = {
+    //...
+        "UPDATE baum_inhalt SET node_text = ?1 WHERE node_id = ?2;",
+
+        "UPDATE baum_auswertung SET node_text = ?1 WHERE node_id = ?2;"
+    };
+
+    rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
+    if ( rc ) ERROR_SOND( "zond_dbase_prepare" )
+
+    rc = sqlite3_bind_text( stmt[0 + (gint) baum], 1,
+            node_text, -1, NULL );
+    if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_text (text)" )
+
+    rc = sqlite3_bind_int( stmt[0 + (gint) baum], 2, node_id );
+    if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (node_id)" )
+
+    rc = sqlite3_step( stmt[0 + (gint) baum] );
+    if ( rc != SQLITE_DONE ) ERROR_ZOND_DBASE( "sqlite3_step" )
+
+    return 0;
+}
+
+
+gint
+zond_dbase_check_link( ZondDBase* zond_dbase, Baum baum, gint node_id, gchar** errmsg )
+{
+    gint rc = 0;
+    sqlite3_stmt** stmt = NULL;
+
+    const gchar* sql[] = {
+    //...
+        "SELECT ID FROM baum_inhalt WHERE node_id = ?1;",
+
+        "SELECT ID FROM baum_auswertung WHERE node_id = ?1;"
+    };
+
+    rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
+    if ( rc ) ERROR_SOND( "zond_dbase_prepare" )
+
+    rc = sqlite3_bind_int( stmt[0 + (gint) baum], 1, node_id );
+    if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (node_id)" )
+
+    rc = sqlite3_step( stmt[0 + (gint) baum] );
+    if ( (rc != SQLITE_ROW) && rc != SQLITE_DONE ) ERROR_ZOND_DBASE( "sqlite3_step" )
+
+    if ( rc == SQLITE_ROW ) return sqlite3_column_int( stmt[0], 0 );
+
+    return 0;
+}
+
 
 
 /*

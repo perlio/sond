@@ -28,30 +28,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "dbase_full.h"
 
 
-/** Rückgabe 0 auch wenn Knoten nicht existiert **/
-gint
-dbase_full_set_node_text( DBaseFull* dbase_full, Baum baum, gint node_id,
-        const gchar* node_text, gchar** errmsg )
-{
-    gint rc = 0;
-
-    sqlite3_reset( dbase_full->set_node_text[0] );
-    sqlite3_reset( dbase_full->set_node_text[1] );
-
-    rc = sqlite3_bind_text( dbase_full->set_node_text[0 + (gint) baum], 1,
-            node_text, -1, NULL );
-    if ( rc != SQLITE_OK ) ERROR_DBASE_FULL( "sqlite3_bind_text (text)" )
-
-    rc = sqlite3_bind_int( dbase_full->set_node_text[0 + (gint) baum], 2, node_id );
-    if ( rc != SQLITE_OK ) ERROR_DBASE_FULL( "sqlite3_bind_int (node_id)" )
-
-    rc = sqlite3_step(dbase_full->set_node_text[0 + (gint) baum] );
-    if ( rc != SQLITE_DONE ) ERROR_DBASE_FULL( "sqlite3_step" )
-
-    return 0;
-}
-
-
 /** gibt auch dann 0 zurück, wenn der Knoten gar nicht existiert   **/
 gint
 dbase_full_set_icon_id( DBaseFull* dbase_full, Baum baum, gint node_id, const gchar* icon_name,

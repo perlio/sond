@@ -14,9 +14,32 @@
 #include "../zond_tree_store.h"
 
 
+
 static gint
-db_baum_insert_links( Projekt* zond, Baum baum, gchar** errmsg )
+db_baum_insert_links( Projekt* zond, gchar** errmsg )
 {
+    gint ID_start = 0;
+    gint rc = 0;
+    Baum baum = KEIN_BAUM;
+    gint node_id = 0;
+    gchar* project = NULL;
+    Baum baum_target = KEIN_BAUM;
+    gint node_id_target = 0;
+
+    while ( 1 )
+    {
+        ID_start = zond_dbase_get_link( zond->dbase_zond->zond_dbase_work, ID_start, &baum, &node_id,
+            &project, &baum_target, &node_id_target, errmsg );
+        if ( ID_start == -1 ) ERROR_SOND( "zond_dbase_get_link" )
+        else if ( !ID_start ) break;
+
+        //iter wo link hinkommt ermitteln
+
+        //iter_target ermitteln
+
+        zond_tree_store_insert_link( iter_target->user_data, )
+    }
+
     return 0;
 }
 
@@ -29,6 +52,10 @@ db_baum_knoten( Projekt* zond, Baum baum, gint node_id, GtkTreeIter* iter,
     gchar* icon_name = NULL;
     gchar* node_text = NULL;
     GtkTreeIter iter_inserted = { 0, };
+
+    rc = zond_dbase_check_link( zond->dbase_zond->zond_dbase_work, baum, node_id, errmsg );
+    if ( rc > 0 ) return 1; //link gerfunden
+    else if ( rc == -1 ) ERROR_SOND( "zond_dbase_check_link" )
 
     rc = zond_dbase_get_icon_name_and_node_text( zond->dbase_zond->zond_dbase_work, baum, node_id, &icon_name,
             &node_text, errmsg );
@@ -66,7 +93,8 @@ db_baum_knoten_mit_kindern( Projekt* zond, gboolean with_younger_siblings,
     GtkTreeIter iter_inserted = { 0, };
 
     rc = db_baum_knoten( zond, baum, node_id, iter, child, &iter_inserted, errmsg );
-    if ( rc ) ERROR_SOND( "db_baum_knoten" )
+    if ( rc == 1 ) return 0;
+    else if ( rc == -1 ) ERROR_SOND( "db_baum_knoten" )
 
     //Prüfen, ob Kind- oder Geschwisterknoten vorhanden
     gint first_child_id = 0;
@@ -148,11 +176,8 @@ db_baum_refresh( Projekt* zond, gchar** errmsg )
     rc = db_baum_neu_laden( zond, BAUM_AUSWERTUNG, errmsg );
     if ( rc ) ERROR_SOND( "db_baum_neu_laden (BAUM_AUSWERTUNG)" )
 
-    rc = db_baum_insert_links( zond, BAUM_INHALT, errmsg );
-    if ( rc ) ERROR_SOND( "db_baum_insert_links (BAUM_INHALT)" )
-
-    rc = db_baum_insert_links( zond, BAUM_AUSWERTUNG, errmsg );
-    if ( rc ) ERROR_SOND( "db_baum_insert_links (BAUM_AUSWERTUNG)" )
+    rc = db_baum_insert_links( zond, errmsg );
+    if ( rc ) ERROR_SOND( "db_baum_insert_links" )
 
     gtk_tree_selection_unselect_all( zond->selection[BAUM_AUSWERTUNG] );
 

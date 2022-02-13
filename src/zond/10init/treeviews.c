@@ -334,11 +334,11 @@ treeviews_node_text_nach_anbindung_foreach( SondTreeview* stv, GtkTreeIter* iter
 
     g_free( rel_path );
 
-    rc = dbase_full_set_node_text( zond->dbase_zond->dbase_work, baum, node_id, node_text, errmsg );
+    rc = zond_dbase_set_node_text( zond->dbase_zond->zond_dbase_work, baum, node_id, node_text, errmsg );
     if ( rc )
     {
         g_free( node_text );
-        ERROR_SOND( "dbase_full_set_node_text" )
+        ERROR_SOND( "zond_dbase_set_node_text" )
     }
 
     //neuen text im tree speichern
@@ -649,11 +649,11 @@ treeviews_cb_cell_edited( GtkCellRenderer* cell, gchar* path_string, gchar* new_
     if ( rc ) return;
 
     //node_id holen, node_text in db ändern
-    rc = dbase_full_set_node_text( zond->dbase_zond->dbase_work, baum, node_id, new_text, &errmsg );
+    rc = zond_dbase_set_node_text( zond->dbase_zond->zond_dbase_work, baum, node_id, new_text, &errmsg );
     if ( rc )
     {
         meldung( gtk_widget_get_toplevel( GTK_WIDGET(stv) ), "Knoten umbenennen nicht möglich\n\n"
-                "Bei Aufruf dbase_full_set_node_text:\n", errmsg, NULL );
+                "Bei Aufruf zond_dbase_set_node_text:\n", errmsg, NULL );
         g_free( errmsg );
     }
     else
