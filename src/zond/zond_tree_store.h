@@ -69,6 +69,9 @@ void zond_tree_store_insert(ZondTreeStore* tree_store,
                                          gboolean child,
                                          GtkTreeIter* iter_new );
 
+void zond_tree_store_insert_link_at_pos( ZondTreeStore*, GNode*, gint, GNode*,
+        gint, GtkTreeIter* );
+
 GDK_AVAILABLE_IN_ALL
 void         zond_tree_store_insert_link (GNode*,
                                           gint,

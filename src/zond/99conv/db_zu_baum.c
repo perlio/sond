@@ -19,7 +19,6 @@ static gint
 db_baum_insert_links( Projekt* zond, gchar** errmsg )
 {
     gint ID_start = 0;
-    gint rc = 0;
     Baum baum = KEIN_BAUM;
     gint node_id = 0;
     gchar* project = NULL;
@@ -28,16 +27,72 @@ db_baum_insert_links( Projekt* zond, gchar** errmsg )
 
     while ( 1 )
     {
+        ZondTreeStore* tree_store = NULL;
+        GtkTreeIter* iter_dest = NULL;
+        GtkTreeIter* iter_target = NULL;
+        gboolean child = FALSE;
+
         ID_start = zond_dbase_get_link( zond->dbase_zond->zond_dbase_work, ID_start, &baum, &node_id,
             &project, &baum_target, &node_id_target, errmsg );
         if ( ID_start == -1 ) ERROR_SOND( "zond_dbase_get_link" )
         else if ( !ID_start ) break;
 
-        //iter wo link hinkommt ermitteln
-
         //iter_target ermitteln
+        iter_target = baum_abfragen_iter( zond->treeview[baum_target], node_id_target );
+        if ( !iter_target )
+        {
+            g_free( project );
+            continue;
+        }
 
-        zond_tree_store_insert_link( iter_target->user_data, )
+        //iter wo link hinkommt ermitteln (iter_dest)
+        tree_store = ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) ));
+
+        gint older_sibling = zond_dbase_get_older_sibling( zond->dbase_zond->zond_dbase_work, baum, node_id, errmsg );
+        if ( older_sibling < 0 )
+        {
+            g_free( project );
+            gtk_tree_iter_free( iter_target );
+            ERROR_SOND( "zond_dbase_get_older_sibling" )
+        }
+        else if ( older_sibling == 0 ) //erstes Kind
+        {
+            gint parent = 0;
+
+            child = TRUE;
+
+            parent = zond_dbase_get_parent( zond->dbase_zond->zond_dbase_work, baum, node_id, errmsg );
+            if ( parent < 0 )
+            {
+                g_free( project );
+                gtk_tree_iter_free( iter_target );
+                ERROR_SOND( "zond_dbase_get_parent" )
+            }
+            // else if ( parent == 0 ) -> überflüssig, da iter_dest dann = NULL
+            else if ( parent > 0 )
+            {
+                iter_dest = baum_abfragen_iter( zond->treeview[baum], parent );
+                if ( !iter_dest )
+                {
+                    g_free( project );
+                    gtk_tree_iter_free( iter_target );
+                    ERROR_SOND( "baum_abfragen_iter" )
+                }
+            }
+        }
+        else if ( older_sibling > 0 )
+        {
+            iter_dest = baum_abfragen_iter( zond->treeview[baum], older_sibling );
+            if ( !iter_dest )
+            {
+                g_free( project );
+                gtk_tree_iter_free( iter_target );
+                ERROR_SOND( "baum_abfragen_iter" )
+            }
+        }
+
+        zond_tree_store_insert_link( iter_target->user_data, node_id_target,
+                tree_store, iter_dest, child, NULL );
     }
 
     return 0;

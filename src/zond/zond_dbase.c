@@ -1294,8 +1294,8 @@ zond_dbase_set_ziel( ZondDBase* zond_dbase, Ziel* ziel, gint anchor_id, gchar** 
 
         const gchar* sql[] = {
         //...
-            "INSERT INTO ziele "
-            "(ziel_id_bis, index_bis, rel_path, node_id) "
+            "INSERT INTO ziele (ziel_id_von, index_von, "
+            "ziel_id_bis, index_bis, rel_path, node_id) "
             "VALUES (?, ?, ?, ?,"
             "(SELECT dateien.rel_path FROM dateien "
             "LEFT JOIN ziele "
