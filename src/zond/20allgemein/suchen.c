@@ -34,7 +34,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../99conv/db_zu_baum.h"
 
 #include "project.h"
-#include "dbase_full.h"
 
 
 //Prototype
@@ -81,7 +80,7 @@ suchen_fuellen_row( Projekt* zond, GtkWidget* list_box, ZondSuchen zond_suchen, 
 
         rc = abfragen_rel_path_and_anbindung( zond, baum, node_id, &rel_path,
                 NULL, errmsg );
-        if ( rc == -1 ) ERROR_PAO( "abfragen_rel_path_and_anbindung" )
+        if ( rc == -1 ) ERROR_SOND( "abfragen_rel_path_and_anbindung" )
 
         text_label = add_string( g_strdup( "Dateiname: "), rel_path );
     }
@@ -92,7 +91,7 @@ suchen_fuellen_row( Projekt* zond, GtkWidget* list_box, ZondSuchen zond_suchen, 
 
         rc = zond_dbase_get_icon_name_and_node_text( zond->dbase_zond->zond_dbase_work, baum, node_id,
                 NULL, &node_text, errmsg );
-        if ( rc ) ERROR_PAO( "zond_dbase_get_icon_name_and_node_text" )
+        if ( rc ) ERROR_SOND( "zond_dbase_get_icon_name_and_node_text" )
 
         if ( zond_suchen == ZOND_SUCHEN_NODE_TEXT_BAUM_INHALT )
                 text_label = add_string( g_strdup( "BAUM_INHALT: " ), node_text );
@@ -128,7 +127,7 @@ suchen_fuellen_ergebnisfenster( Projekt* zond, GtkWidget* ergebnisfenster,
     {
         node = g_array_index( arr_treffer, Node, i );
         rc = suchen_fuellen_row( zond, list_box, node.zond_suchen, node.node_id, errmsg );
-        if ( rc ) ERROR_PAO( "suchen_fuellen_row" )
+        if ( rc ) ERROR_SOND( "suchen_fuellen_row" )
     }
 
     gtk_widget_show_all( list_box );
@@ -344,11 +343,15 @@ suchen_anzeigen_ergebnisse( Projekt* zond, const gchar* titel, GArray* arr_treff
 
     rc = suchen_fuellen_ergebnisfenster( zond, ergebnisfenster, arr_treffer,
             errmsg );
-    if ( rc ) ERROR_PAO( "suchen_fuellen_ergebnisfenster" )
+    if ( rc ) ERROR_SOND( "suchen_fuellen_ergebnisfenster" )
 
     return 0;
 }
 
+
+#define ERROR_SQL(x) { if ( errmsg ) *errmsg = add_string( g_strconcat( "Bei Aufruf " x ":\n", \
+                       sqlite3_errmsg(zond_dbase_get_dbase( zond->dbase_zond->zond_dbase_work ) ), NULL ), *errmsg ); \
+                       return -1; }
 
 static gint
 suchen_db( Projekt* zond, const gchar* text, GArray* arr_treffer, gchar** errmsg )
@@ -357,7 +360,7 @@ suchen_db( Projekt* zond, const gchar* text, GArray* arr_treffer, gchar** errmsg
     Node node = { 0, };
     sqlite3_stmt* stmt = NULL;
 
-    rc = sqlite3_prepare_v2( zond->dbase_zond->dbase_work->dbase.db,
+    rc = sqlite3_prepare_v2( zond_dbase_get_dbase( zond->dbase_zond->zond_dbase_work ),
             "SELECT ?2, node_id FROM dateien WHERE LOWER(rel_path) LIKE LOWER(?1) "
             "UNION "
             "SELECT ?3, node_id FROM baum_inhalt WHERE LOWER(node_text) LIKE LOWER(?1) "
@@ -438,7 +441,7 @@ suchen_treeviews( Projekt* zond, const gchar* text, gchar** errmsg )
     if ( rc )
     {
         g_array_unref( arr_treffer );
-        ERROR_PAO( "suchen_db" )
+        ERROR_SOND( "suchen_db" )
     }
 
     if ( arr_treffer->len )
@@ -447,7 +450,7 @@ suchen_treeviews( Projekt* zond, const gchar* text, gchar** errmsg )
         rc = suchen_anzeigen_ergebnisse( zond, titel, arr_treffer, errmsg );
     }
     g_array_unref( arr_treffer );
-    if ( rc ) ERROR_PAO( "suchen_anzeigen_ergebnisse" );
+    if ( rc ) ERROR_SOND( "suchen_anzeigen_ergebnisse" );
 
     return 0;
 }

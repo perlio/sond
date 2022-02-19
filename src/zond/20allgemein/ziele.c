@@ -33,12 +33,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "../40viewer/document.h"
 
-#include "dbase_full.h"
 #include "zieleplus.h"
 #include "project.h"
 
 #include "../../misc.h"
 #include "../../sond_treeview.h"
+#include "../../dbase.h"
 
 
 
@@ -95,12 +95,12 @@ ziele_verschieben_kinder( Projekt* zond,
     while ( (younger_sibling = zond_dbase_get_younger_sibling( zond->dbase_zond->zond_dbase_work, BAUM_INHALT,
             node_id, errmsg )) )
     {
-        if ( younger_sibling < 0 ) ERROR_PAO( "zond_dbase_get_younger_sibling" )
+        if ( younger_sibling < 0 ) ERROR_SOND( "zond_dbase_get_younger_sibling" )
 
         Anbindung* anbindung_younger_sibling = NULL;
         rc = abfragen_rel_path_and_anbindung( zond, BAUM_INHALT, younger_sibling,
                 NULL, &anbindung_younger_sibling, errmsg );
-        if ( rc == -1 ) ERROR_PAO( "abfragen_rel_path_and_anbindung" )
+        if ( rc == -1 ) ERROR_SOND( "abfragen_rel_path_and_anbindung" )
         else if ( rc )
         {
             if ( errmsg ) *errmsg = g_strdup( "Keine Anbindung gespeichert" );
@@ -117,7 +117,7 @@ ziele_verschieben_kinder( Projekt* zond,
 
         rc = knoten_verschieben( zond, BAUM_INHALT, younger_sibling, node_id,
                 older_sibling, errmsg );
-        if ( rc ) ERROR_PAO( "knoten_verschieben" )
+        if ( rc ) ERROR_SOND( "knoten_verschieben" )
         older_sibling = younger_sibling;
     }
 
@@ -135,7 +135,7 @@ ziele_einfuegen_db( Projekt* zond, gint anchor_id, gboolean kind, Ziel* ziel,
     //zuerst in baum_inhalt-Tabelle (weil FK in Tabelle "ziele" darauf Bezug nimmt)
     new_node = zond_dbase_insert_node( zond->dbase_zond->zond_dbase_work, BAUM_INHALT, anchor_id, kind,
             zond->icon[ICON_ANBINDUNG].icon_name, node_text, errmsg );
-    if ( new_node == -1 ) ERROR_PAO( "zond_dbase_insert_node" )
+    if ( new_node == -1 ) ERROR_SOND( "zond_dbase_insert_node" )
 
     rc = zond_dbase_set_ziel( zond->dbase_zond->zond_dbase_work, ziel, anchor_id, errmsg );
     if ( rc ) ERROR_SOND( "zond_dbase_set_ziel" )
@@ -215,7 +215,7 @@ ziele_erzeugen_ziel( GtkWidget* window, const DisplayedDocument* dd,
     {
         zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
 
-        ERROR_PAO( "pdf_document_get_dest" )
+        ERROR_SOND( "pdf_document_get_dest" )
     }
 
     //nameddest herausfinden bzw. einfügen
@@ -225,7 +225,7 @@ ziele_erzeugen_ziel( GtkWidget* window, const DisplayedDocument* dd,
     {
         zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
 
-        ERROR_PAO( "pdf_document_get_dest" )
+        ERROR_SOND( "pdf_document_get_dest" )
     }
 
     gint page_number1 = -1;
@@ -246,7 +246,7 @@ ziele_erzeugen_ziel( GtkWidget* window, const DisplayedDocument* dd,
                 if ( rc )
                 {
                     zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
-                    ERROR_PAO_R( "zond_pdf_document_save", -2 )
+                    ERROR_SOND_VAL( "zond_pdf_document_save", -2 )
                 }
             }
             else
@@ -269,7 +269,7 @@ ziele_erzeugen_ziel( GtkWidget* window, const DisplayedDocument* dd,
 
             rc = zond_pdf_document_reopen_doc_and_pages( dd->zond_pdf_document, errmsg );
             zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
-            if ( rc ) ERROR_PAO_R( "zond_pdf_document_reopen_doc_and_pages", -2 )
+            if ( rc ) ERROR_SOND_VAL( "zond_pdf_document_reopen_doc_and_pages", -2 )
 
             return 1;
         }
@@ -278,7 +278,7 @@ ziele_erzeugen_ziel( GtkWidget* window, const DisplayedDocument* dd,
         if ( rc )
         {
             zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
-            ERROR_PAO_R( "zond_pdf_document_reopen_doc_and_pages", -2 )
+            ERROR_SOND_VAL( "zond_pdf_document_reopen_doc_and_pages", -2 )
         }
     }
 
@@ -304,7 +304,7 @@ ziele_abfragen_anker_rek( Projekt* zond, gint node_id, Anbindung anbindung,
     Anbindung* anbindung_node_id = NULL;
     rc = abfragen_rel_path_and_anbindung( zond, BAUM_INHALT, node_id, NULL,
             &anbindung_node_id, errmsg );
-    if ( rc == -1 ) ERROR_PAO( "abfragen_rel_path_and_anbindung" )
+    if ( rc == -1 ) ERROR_SOND( "abfragen_rel_path_and_anbindung" )
     else if ( rc ) //Datei, hat ja kein ziel gespeichert
     {
         *kind = TRUE;
@@ -312,7 +312,7 @@ ziele_abfragen_anker_rek( Projekt* zond, gint node_id, Anbindung anbindung,
 
         first_child_id = zond_dbase_get_first_child( zond->dbase_zond->zond_dbase_work, BAUM_INHALT,
                 node_id, errmsg );
-        if ( first_child_id < 0 ) ERROR_PAO( "zond_dbase_get_first_child" )
+        if ( first_child_id < 0 ) ERROR_SOND( "zond_dbase_get_first_child" )
         else if ( first_child_id > 0 ) //hat kind
         {
             gint res = ziele_abfragen_anker_rek( zond, first_child_id, anbindung,
@@ -329,7 +329,7 @@ ziele_abfragen_anker_rek( Projekt* zond, gint node_id, Anbindung anbindung,
         {
             g_free( anbindung_node_id );
 
-            ERROR_PAO( "Einzufügendes Ziel mit bestehendem Ziel identisch" )
+            ERROR_SOND( "Einzufügendes Ziel mit bestehendem Ziel identisch" )
         }
 
         //Knoten kommt als parent in Beracht
@@ -344,7 +344,7 @@ ziele_abfragen_anker_rek( Projekt* zond, gint node_id, Anbindung anbindung,
             {
                 g_free( anbindung_node_id );
 
-                ERROR_PAO( "zond_dbase_get_first_child" )
+                ERROR_SOND( "zond_dbase_get_first_child" )
             }
             else if ( first_child_id > 0 ) //hat kind
             {
@@ -372,7 +372,7 @@ ziele_abfragen_anker_rek( Projekt* zond, gint node_id, Anbindung anbindung,
             {
                 g_free( anbindung_node_id );
 
-                ERROR_PAO( "zond_dbase_get_younger_sibling" )
+                ERROR_SOND( "zond_dbase_get_younger_sibling" )
             }
 
             if ( younger_sibling_id != 0 )
@@ -431,26 +431,26 @@ ziele_erzeugen_anbindung( PdfViewer* pv, gint* ptr_new_node, gchar** errmsg )
 
     node_id = zond_dbase_get_node_id_from_rel_path( pv->zond->dbase_zond->zond_dbase_work,
             zond_pdf_document_get_path( dd_von->zond_pdf_document ), errmsg );
-    if ( node_id == -1 ) ERROR_PAO( "zond_dbase_get_node_id_from_rel_path" )
-    else if ( node_id == 0 ) ERROR_PAO( "Datei nicht vorhanden" )
+    if ( node_id == -1 ) ERROR_SOND( "zond_dbase_get_node_id_from_rel_path" )
+    else if ( node_id == 0 ) ERROR_SOND( "Datei nicht vorhanden" )
 
     //Kinder von Knoten mit DateiID=datei_id durchgehen
     anchor_id = ziele_abfragen_anker_rek( pv->zond, node_id, anbindung, &kind, errmsg );
-    if ( anchor_id == -1 ) ERROR_PAO( "ziele_abfragen_anker_rek" )
+    if ( anchor_id == -1 ) ERROR_SOND( "ziele_abfragen_anker_rek" )
 
     ziel = g_malloc0( sizeof( Ziel ) );
 
     rc = ziele_erzeugen_ziel( pv->vf, dd_von, anbindung, ziel, errmsg );
     if ( rc ) ziele_free( ziel );
     if ( rc == 1 ) return 1;
-    else if ( rc == -1 ) ERROR_PAO( "ziele_erzeugen_ziel" )
-    else if ( rc == -2 ) ERROR_PAO_R( "ziele_erzeugen_ziel", -2 )
+    else if ( rc == -1 ) ERROR_SOND( "ziele_erzeugen_ziel" )
+    else if ( rc == -2 ) ERROR_SOND_VAL( "ziele_erzeugen_ziel", -2 )
 
     rc = ziele_einfuegen_anbindung( pv->zond,
             zond_pdf_document_get_path( dd_von->zond_pdf_document ), anchor_id, kind,
             anbindung, ziel, errmsg );
     ziele_free( ziel );
-    if ( rc == -1 ) ERROR_PAO( "ziele_einfuegen_anbindung" )
+    if ( rc == -1 ) ERROR_SOND( "ziele_einfuegen_anbindung" )
 
     if ( ptr_new_node ) *ptr_new_node = rc;
 

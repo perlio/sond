@@ -19,6 +19,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <gtk/gtk.h>
 #include <mupdf/fitz.h>
 
+#include "../../misc.h"
+
 #include "../zond_pdf_document.h"
 
 #include "../global_types.h"
@@ -78,7 +80,7 @@ oeffnen_auszug( Projekt* zond, gint node_id, gchar** errmsg )
 
     first_child = zond_dbase_get_first_child( zond->dbase_zond->zond_dbase_work, BAUM_AUSWERTUNG, node_id, errmsg );
 
-    if ( first_child < 0 ) ERROR_PAO( "zond_dbase_get_first_child" )
+    if ( first_child < 0 ) ERROR_SOND( "zond_dbase_get_first_child" )
     else if ( first_child == 0 )
     {
         if ( errmsg ) *errmsg = g_strdup( "Auszug anzeigen nicht möglich:\n"
@@ -95,7 +97,7 @@ oeffnen_auszug( Projekt* zond, gint node_id, gchar** errmsg )
 
         rc = abfragen_rel_path_and_anbindung( zond, BAUM_AUSWERTUNG,
                 younger_sibling, &rel_path, &anbindung, errmsg );
-        if ( rc == -1 ) ERROR_PAO( "abfragen_rel_path_and_anbindung" )
+        if ( rc == -1 ) ERROR_SOND( "abfragen_rel_path_and_anbindung" )
 
         if ( rc < 2 && is_pdf( rel_path ) )//rel_path existiert
         {
@@ -107,7 +109,7 @@ oeffnen_auszug( Projekt* zond, gint node_id, gchar** errmsg )
             if ( !dd_new )
             {
                 document_free_displayed_documents( dd );
-                ERROR_PAO( "document_new_displayed_document" );
+                ERROR_SOND( "document_new_displayed_document" );
             }
 
             if ( !dd )
@@ -126,7 +128,7 @@ oeffnen_auszug( Projekt* zond, gint node_id, gchar** errmsg )
 
         younger_sibling = zond_dbase_get_younger_sibling( zond->dbase_zond->zond_dbase_work, BAUM_AUSWERTUNG,
                 first_child, errmsg );
-        if ( younger_sibling < 0 ) ERROR_PAO( "zond_dbase_get_younger_sibling" )
+        if ( younger_sibling < 0 ) ERROR_SOND( "zond_dbase_get_younger_sibling" )
     }
     while ( younger_sibling > 0 );
 
@@ -199,7 +201,7 @@ oeffnen_internal_viewer( Projekt* zond, const gchar* rel_path, Anbindung* anbind
 
     DisplayedDocument* dd = document_new_displayed_document( rel_path,
             anbindung, errmsg );
-    if ( !dd ) ERROR_PAO( "document_new_displayed_document" );
+    if ( !dd ) ERROR_SOND( "document_new_displayed_document" );
 
     if ( pos_pdf ) pos_von = *pos_pdf;
 
@@ -235,7 +237,7 @@ oeffnen_datei( Projekt* zond, const gchar* rel_path, Anbindung* anbindung,
         if ( g_settings_get_boolean( zond->settings, "internalviewer" ) )
         {
             rc = oeffnen_internal_viewer( zond, rel_path, anbindung, pos_pdf, errmsg );
-            if ( rc ) ERROR_PAO( "oeffnen_internal_viewer" )
+            if ( rc ) ERROR_SOND( "oeffnen_internal_viewer" )
 
             return 0;
         }
@@ -322,11 +324,18 @@ oeffnen_datei( Projekt* zond, const gchar* rel_path, Anbindung* anbindung,
     //wenn keine pdf-Datei oder nicht win32+Adobe:
 #ifdef _WIN32 //glib funktioniert nicht; daher Windows-Api verwenden
     HINSTANCE ret = 0;
+    gchar* local_rel_path_win32 = NULL;
 
     gchar* current_dir = g_get_current_dir( );
-    gchar* rel_path_win32 = g_strdelimit( g_strdup( rel_path ), "/", '\\' );
-    gchar* local_rel_path_win32 = utf8_to_local_filename( rel_path_win32 );
-    g_free( rel_path_win32 );
+    if ( rel_path )
+    {
+        gchar* rel_path_win32 = NULL;
+
+        rel_path_win32 = g_strdelimit( g_strdup( rel_path ), "/", '\\' );
+        local_rel_path_win32 = utf8_to_local_filename( rel_path_win32 );
+        g_free( rel_path_win32 );
+    }
+
     ret = ShellExecute( NULL, NULL, local_rel_path_win32, current_dir, NULL, SW_SHOWNORMAL );
     g_free( current_dir );
     g_free( local_rel_path_win32 );
@@ -380,12 +389,12 @@ oeffnen_node( Projekt* zond, Baum baum, gint node_id, gchar** errmsg )
 
     rc = abfragen_rel_path_and_anbindung( zond, baum, node_id, &rel_path,
             &anbindung, errmsg );
-    if ( rc == -1 ) ERROR_PAO( "abfragen_rel_path_and_anbindung" )
+    if ( rc == -1 ) ERROR_SOND( "abfragen_rel_path_and_anbindung" )
 
     if ( rc == 2 && baum == BAUM_AUSWERTUNG )
     {
         rc = oeffnen_auszug( zond, node_id, errmsg );
-        if ( rc ) ERROR_PAO( "oeffnen_auszug" )
+        if ( rc ) ERROR_SOND( "oeffnen_auszug" )
 
         return 0;
     }
@@ -422,7 +431,7 @@ oeffnen_node( Projekt* zond, Baum baum, gint node_id, gchar** errmsg )
     rc = oeffnen_datei( zond, rel_path, anbindung, &pos_pdf, errmsg );
     g_free( rel_path );
     g_free( anbindung );
-    if ( rc ) ERROR_PAO( "oeffnen_datei" )
+    if ( rc ) ERROR_SOND( "oeffnen_datei" )
 
     return 0;
 }

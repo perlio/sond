@@ -24,6 +24,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "app_window.h"
 
 #include "../../misc.h"
+#include "../../dbase.h"
+
 #include "../global_types.h"
 #include "../error.h"
 #include "../zond_tree_store.h"
@@ -35,7 +37,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../20allgemein/oeffnen.h"
 #include "../20allgemein/ziele.h"
 #include "../20allgemein/project.h"
-#include "../20allgemein/dbase_full.h"
 
 #include "../40viewer/viewer.h"
 
@@ -93,16 +94,16 @@ treeviews_foreach_entfernen_anbindung( SondTreeview* stv,
             2, &node_id, -1 );
 
     rc = zond_dbase_get_ziel( zond->dbase_zond->zond_dbase_work, BAUM_INHALT, node_id, NULL, errmsg );
-    if ( rc == -1 ) ERROR_PAO ( "zond_dbase_get_ziel" )
+    if ( rc == -1 ) ERROR_SOND ( "zond_dbase_get_ziel" )
     if ( rc == 1 ) return 0; //Knoten ist keine Anbindung
 
     //herausfinden, ob zu löschender Knoten älteres Geschwister hat
     older_sibling = zond_dbase_get_older_sibling( zond->dbase_zond->zond_dbase_work, BAUM_INHALT, node_id, errmsg );
-    if ( older_sibling < 0 ) ERROR_PAO( "zond_dbase_get_older_sibling" )
+    if ( older_sibling < 0 ) ERROR_SOND( "zond_dbase_get_older_sibling" )
 
     //Elternknoten ermitteln
     parent = zond_dbase_get_parent( zond->dbase_zond->zond_dbase_work, BAUM_INHALT, node_id, errmsg );
-    if ( parent < 0 ) ERROR_PAO( "zond_dbase_get_parent" )
+    if ( parent < 0 ) ERROR_SOND( "zond_dbase_get_parent" )
 
     rc = dbase_begin( (DBase*) zond->dbase_zond->dbase_work, errmsg );
     if ( rc ) ERROR_SOND( "db_begin" )
@@ -208,8 +209,8 @@ treeviews_foreach_selection_loeschen( SondTreeview* tree_view, GtkTreeIter* iter
                     rc = zond_dbase_remove_node( s_selection->zond->dbase_zond->zond_dbase_work, baum_link, head_nr, errmsg );
                     if ( rc ) ERROR_ROLLBACK( (DBase*) s_selection->zond->dbase_zond->dbase_work, "zond_dbase_remove_node" )
 
-                    rc = dbase_full_remove_link( s_selection->zond->dbase_zond->dbase_work, baum_link, head_nr, errmsg );
-                    if ( rc ) ERROR_ROLLBACK( (DBase*) s_selection->zond->dbase_zond->dbase_work, "dbase_full_remove_link" )
+                    rc = zond_dbase_remove_link( s_selection->zond->dbase_zond->zond_dbase_work, baum_link, head_nr, errmsg );
+                    if ( rc ) ERROR_ROLLBACK( (DBase*) s_selection->zond->dbase_zond->dbase_work, "zond_dbase_remove_link" )
 
                     rc = dbase_commit( (DBase*) s_selection->zond->dbase_zond->dbase_work, errmsg );
                     if ( rc ) ERROR_ROLLBACK( (DBase*) s_selection->zond->dbase_zond->dbase_work, "dbase_commit" )
@@ -221,7 +222,7 @@ treeviews_foreach_selection_loeschen( SondTreeview* tree_view, GtkTreeIter* iter
         }
 
         rc = zond_dbase_remove_node( s_selection->zond->dbase_zond->zond_dbase_work, baum, node_id, errmsg );
-        if ( rc ) ERROR_PAO ( "zond_dbase_remove_node" )
+        if ( rc ) ERROR_SOND ( "zond_dbase_remove_node" )
 
         zond_tree_store_remove( ZOND_TREE_STORE(gtk_tree_view_get_model(
         GTK_TREE_VIEW(tree_view) )), iter );
@@ -230,9 +231,9 @@ treeviews_foreach_selection_loeschen( SondTreeview* tree_view, GtkTreeIter* iter
     {
         gint rc = 0;
 
-        rc = dbase_full_remove_link( s_selection->zond->dbase_zond->dbase_work,
+        rc = zond_dbase_remove_link( s_selection->zond->dbase_zond->zond_dbase_work,
                 baum_get_baum_from_treeview( s_selection->zond, GTK_WIDGET(tree_view)), node_id, errmsg );
-        if ( rc ) ERROR_PAO("db_remove_link" )
+        if ( rc ) ERROR_SOND("zond_dbase_remove_link" )
 
         zond_tree_store_remove_link( ZOND_TREE_STORE(gtk_tree_view_get_model(
         GTK_TREE_VIEW(tree_view) )), iter );
@@ -278,8 +279,8 @@ treeviews_foreach_change_icon_id( SondTreeview* tree_view, GtkTreeIter* iter,
     rc = treeviews_get_baum_and_node_id( s_selection->zond, iter, &baum, &node_id );
     if ( rc ) return 0;
 
-    rc = dbase_full_set_icon_id( s_selection->zond->dbase_zond->dbase_work, baum, node_id, s_selection->icon_name, errmsg );
-    if ( rc ) ERROR_SOND( "dbase_full_set_icon_id" )
+    rc = zond_dbase_set_icon_name( s_selection->zond->dbase_zond->zond_dbase_work, baum, node_id, s_selection->icon_name, errmsg );
+    if ( rc ) ERROR_SOND( "zond_dbase_set_icon_name" )
 
     //neuen icon_name im tree speichern
     zond_tree_store_set( iter, s_selection->icon_name, NULL, 0 );

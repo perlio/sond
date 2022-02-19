@@ -243,20 +243,24 @@ zond_pdf_document_page_get_rotate( PdfDocumentPage* pdf_document_page, gchar** e
 static gint
 zond_pdf_document_load_page( ZondPdfDocument* self, gint page_doc, gchar** errmsg )
 {
+    fz_context* ctx = NULL;
+
     ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
     PdfDocumentPage* pdf_document_page = g_ptr_array_index( priv->pages, page_doc );
 
-    fz_try( priv->ctx ) pdf_document_page->page =
-            pdf_load_page( priv->ctx, priv->doc, page_doc );
-    fz_catch( priv->ctx ) ERROR_MUPDF_CTX( "pdf_load_page", priv->ctx );
+    ctx = priv->ctx;
 
-    pdf_document_page->rect = pdf_bound_page( priv->ctx, pdf_document_page->page );
+    fz_try( ctx ) pdf_document_page->page =
+            pdf_load_page( ctx, priv->doc, page_doc );
+    fz_catch( ctx ) ERROR_MUPDF( "pdf_load_page" );
+
+    pdf_document_page->rect = pdf_bound_page( ctx, pdf_document_page->page );
 
     pdf_document_page->rotate = zond_pdf_document_page_get_rotate( pdf_document_page, errmsg );
     if ( pdf_document_page->rotate == -1 )
     {
-        fz_drop_page( priv->ctx, &(pdf_document_page->page->super) );
-        ERROR_PAO( "zond_pdf_document_page_get_rotate" )
+        fz_drop_page( ctx, &(pdf_document_page->page->super) );
+        ERROR_SOND( "zond_pdf_document_page_get_rotate" )
     }
 
     return 0;
@@ -569,19 +573,23 @@ zond_pdf_document_is_open( const gchar* path )
 gint
 zond_pdf_document_reopen_doc_and_pages( ZondPdfDocument* self, gchar** errmsg )
 {
+    fz_context* ctx = NULL;
+
     ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
 
-    fz_try( priv->ctx ) priv->doc = pdf_open_document( priv->ctx, priv->path );
-    fz_catch( priv->ctx ) ERROR_MUPDF_CTX( "pdf_open_document", priv->ctx )
+    ctx = priv->ctx;
+
+    fz_try( ctx ) priv->doc = pdf_open_document( ctx, priv->path );
+    fz_catch( ctx ) ERROR_MUPDF( "pdf_open_document" )
 
     //ToDo: Überprüfen, ob nicht alle privs neu initialisiert werden müssen?!
 
     //Seiten wieder laden
     for ( gint i = 0; i < priv->pages->len; i++ )
     {
-        fz_try( priv->ctx ) ((PdfDocumentPage*) ((priv->pages)->pdata)[i])->page =
-                pdf_load_page( priv->ctx, priv->doc, i );
-        fz_catch( priv->ctx ) ERROR_MUPDF_CTX( "pdf_load_page", priv->ctx )
+        fz_try( ctx ) ((PdfDocumentPage*) ((priv->pages)->pdata)[i])->page =
+                pdf_load_page( ctx, priv->doc, i );
+        fz_catch( ctx ) ERROR_MUPDF( "pdf_load_page" )
     }
 
     return 0;
@@ -670,7 +678,7 @@ zond_pdf_document_save( ZondPdfDocument* self, gchar** errmsg )
         fz_catch( priv->ctx ) ERROR_MUPDF( "fz_save_buffer" )
 
         rc = zond_pdf_document_reopen_doc_and_pages( self, errmsg );
-        if ( rc ) ERROR_PAO( "zond_pdf_document_reopen_doc_pages" )
+        if ( rc ) ERROR_SOND( "zond_pdf_document_reopen_doc_pages" )
 
         priv->dirty = FALSE;
     }

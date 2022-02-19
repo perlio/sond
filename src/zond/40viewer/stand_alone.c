@@ -129,7 +129,7 @@ pv_oeffnen_datei( PdfViewer* pv, gchar* path, gchar** errmsg )
     DisplayedDocument* dd = NULL;
 
     dd = document_new_displayed_document( path, NULL, errmsg );
-    if ( !dd ) ERROR_PAO( "document_new_displayed_document" )
+    if ( !dd ) ERROR_SOND( "document_new_displayed_document" )
 
     viewer_display_document( pv, dd, 0, 0 );
 

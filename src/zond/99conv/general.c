@@ -165,7 +165,7 @@ hat_vorfahre_datei( Projekt* zond, Baum baum, gint anchor_id, gboolean child, gc
     if ( !child )
     {
         anchor_id = zond_dbase_get_parent( zond->dbase_zond->zond_dbase_work, baum, anchor_id, errmsg );
-        if ( anchor_id < 0 ) ERROR_PAO( "zond_dbase_get_parent" )
+        if ( anchor_id < 0 ) ERROR_SOND( "zond_dbase_get_parent" )
     }
 
     while ( anchor_id != 0 )
@@ -173,11 +173,11 @@ hat_vorfahre_datei( Projekt* zond, Baum baum, gint anchor_id, gboolean child, gc
         gint rc = 0;
 
         rc = zond_dbase_get_rel_path( zond->dbase_zond->zond_dbase_work, baum, anchor_id, NULL, errmsg );
-        if ( rc == -1 ) ERROR_PAO( "zond_dbase_get_rel_path" )
+        if ( rc == -1 ) ERROR_SOND( "zond_dbase_get_rel_path" )
         else if ( rc == 0 ) return 1; //nicht mal datei!
 
         anchor_id = zond_dbase_get_parent( zond->dbase_zond->zond_dbase_work, baum, anchor_id, errmsg );
-        if ( anchor_id < 0 ) ERROR_PAO( "zond_dbase_get_parent" )
+        if ( anchor_id < 0 ) ERROR_SOND( "zond_dbase_get_parent" )
     }
 
     return 0;
@@ -194,7 +194,7 @@ knoten_verschieben( Projekt* zond, Baum baum, gint node_id, gint new_parent,
     //kind verschieben
     rc = zond_dbase_verschieben_knoten( zond->dbase_zond->zond_dbase_work, baum, node_id, new_parent,
             new_older_sibling, errmsg );
-    if ( rc ) ERROR_PAO (" zond_dbase_verschieben_knoten" )
+    if ( rc ) ERROR_SOND (" zond_dbase_verschieben_knoten" )
 
     //Knoten im tree löschen
     //hierzu iter des verschobenen Kindknotens herausfinden
@@ -267,7 +267,7 @@ general_get_page_num_from_dest( fz_context* ctx, const gchar* rel_path,
 
     page_num = general_get_page_num_from_dest_doc( ctx, doc, dest, errmsg );
 	pdf_drop_document( ctx, doc );
-    if ( page_num < 0 ) ERROR_PAO( "get_page_num_from_dest_doc" )
+    if ( page_num < 0 ) ERROR_SOND( "get_page_num_from_dest_doc" )
 
     return page_num;
 }
@@ -285,7 +285,7 @@ ziel_zu_anbindung( fz_context* ctx, const gchar* rel_path, Ziel* ziel, gchar** e
     if ( page_num == -1 )
     {
         g_free( anbindung );
-        ERROR_PAO_R( "general_get_page_num_from_dest", NULL )
+        ERROR_SOND_VAL( "general_get_page_num_from_dest", NULL )
     }
     else if ( page_num == -2 )
     {
@@ -302,7 +302,7 @@ ziel_zu_anbindung( fz_context* ctx, const gchar* rel_path, Ziel* ziel, gchar** e
     {
         g_free( anbindung );
 
-        ERROR_PAO_R( "general_get_page_num_from_dest", NULL )
+        ERROR_SOND_VAL( "general_get_page_num_from_dest", NULL )
     }
     else if ( page_num == -2 )
     {
@@ -336,14 +336,14 @@ abfragen_rel_path_and_anbindung( Projekt* zond, Baum baum, gint node_id,
     Anbindung* anbindung_intern = NULL;
 
     rc = zond_dbase_get_rel_path( zond->dbase_zond->zond_dbase_work, baum, node_id, &rel_path_intern, errmsg );
-    if ( rc == -1 ) ERROR_PAO( "zond_dbase_get_rel_path" )
+    if ( rc == -1 ) ERROR_SOND( "zond_dbase_get_rel_path" )
     else if ( rc == 1 ) return 2;
 
     rc = zond_dbase_get_ziel( zond->dbase_zond->zond_dbase_work, baum, node_id, &ziel, errmsg );
     if ( rc == -1 )
     {
         g_free( rel_path_intern );
-        ERROR_PAO( "zond_dbase_get_ziel" )
+        ERROR_SOND( "zond_dbase_get_ziel" )
     }
     else if ( rc == 1 )
     {
@@ -365,7 +365,7 @@ abfragen_rel_path_and_anbindung( Projekt* zond, Baum baum, gint node_id,
     if ( !anbindung_intern )
     {
         g_free( rel_path_intern );
-        ERROR_PAO( "ziel_zu_anbindung" )
+        ERROR_SOND( "ziel_zu_anbindung" )
     }
 
     if ( rel_path ) *rel_path = rel_path_intern;

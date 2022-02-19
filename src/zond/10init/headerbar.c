@@ -29,6 +29,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../../sond_treeviewfm.h"
 #include "../../dbase.h"
 #include "../../eingang.h"
+#include "../../misc.h"
 
 #include "../global_types.h"
 #include "../error.h"
@@ -47,7 +48,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../20allgemein/suchen.h"
 #include "../20allgemein/project.h"
 #include "../20allgemein/export.h"
-#include "../20allgemein/dbase_full.h"
 
 #include "../40viewer/document.h"
 
@@ -129,7 +129,7 @@ selection_abfragen_pdf( Projekt* zond, gchar** errmsg )
             g_list_free_full( selected, (GDestroyNotify) gtk_tree_path_free );
             g_ptr_array_free( arr_rel_path, TRUE );
 
-            ERROR_PAO_R( "zond_dbase_get_rel_path", NULL )
+            ERROR_SOND_VAL( "zond_dbase_get_rel_path", NULL )
         }
 
         //Sonderbehandung, falls pdf-Datei

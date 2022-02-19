@@ -48,7 +48,6 @@ typedef unsigned long gulong;
 typedef void* gpointer;
 typedef double gdouble;
 
-
 typedef struct _Icon
 {
     const gchar* icon_name;

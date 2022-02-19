@@ -484,14 +484,14 @@ seiten_drehen( PdfViewer* pv, GPtrArray* arr_document_page, gint winkel, gchar**
         if ( rc == -1 )
         {
             zond_pdf_document_mutex_unlock( pdf_document_page->document );
-            ERROR_PAO( "seiten_drehen_pdf" )
+            ERROR_SOND( "seiten_drehen_pdf" )
         }
 
         rc = zond_pdf_document_page_refresh( pdf_document_page->document, page_doc, 3, errmsg );
         if ( rc )
         {
             zond_pdf_document_mutex_unlock( pdf_document_page->document );
-            ERROR_PAO( "zond_pdf_document_mutex_unlock" )
+            ERROR_SOND( "zond_pdf_document_mutex_unlock" )
         }
 
         zond_pdf_document_mutex_unlock( pdf_document_page->document );
@@ -502,7 +502,7 @@ seiten_drehen( PdfViewer* pv, GPtrArray* arr_document_page, gint winkel, gchar**
         {
             viewer_save_and_close( pv );
 
-            ERROR_PAO( "viewer_foreach" )
+            ERROR_SOND( "viewer_foreach" )
         }
     }
 
@@ -618,7 +618,7 @@ seiten_anbindung( PdfViewer* pv, GPtrArray* arr_document_page, gchar** errmsg )
         {
             g_ptr_array_free( arr_dests, TRUE );
 
-            ERROR_PAO( "pdf_document_get_dest" )
+            ERROR_SOND( "pdf_document_get_dest" )
         }
     }
 #ifdef VIEWER
@@ -640,7 +640,7 @@ seiten_anbindung( PdfViewer* pv, GPtrArray* arr_document_page, gchar** errmsg )
         if ( rc == -1 )
         {
             g_ptr_array_free( arr_dests, TRUE );
-            ERROR_PAO( "zond_dbase_check_id" )
+            ERROR_SOND( "zond_dbase_check_id" )
         }
         if ( rc == 1 )
         {
@@ -665,7 +665,7 @@ seiten_loeschen( PdfViewer* pv, GPtrArray* arr_document_page, gchar** errmsg )
     rc = seiten_anbindung( pv, arr_document_page, errmsg );
     if ( rc )
     {
-        if ( rc == -1 ) ERROR_PAO( "seiten_anbindung" );
+        if ( rc == -1 ) ERROR_SOND( "seiten_anbindung" );
         if ( rc == 1 ) return -2;
     }
 
@@ -998,7 +998,7 @@ seiten_create_document( PdfViewer* pv, GArray* arr_page_pv, gchar** errmsg )
         {
             pdf_drop_document( pv->zond->ctx, doc_dest );
 
-            ERROR_PAO_R( "pdf_copy_page", NULL )
+            ERROR_SOND_VAL( "pdf_copy_page", NULL )
         }
     }
 
@@ -1013,7 +1013,7 @@ seiten_set_clipboard( PdfViewer* pv, GArray* arr_page_pv, gchar** errmsg )
     pv->zond->pv_clip = NULL;
 
     pv->zond->pv_clip = seiten_create_document( pv, arr_page_pv, errmsg );
-    if ( !pv->zond->pv_clip ) ERROR_PAO( "seiten_create_document" )
+    if ( !pv->zond->pv_clip ) ERROR_SOND( "seiten_create_document" )
 
     return 0;
 }

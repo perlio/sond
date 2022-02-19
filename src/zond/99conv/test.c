@@ -4,6 +4,7 @@
 #include "../zond_database.h"
 #include "../zond_tree_store.h"
 #include "../../sond_treeview.h"
+#include "../../misc.h"
 
 #include "../99conv/general.h"
 #include "pdf.h"
@@ -214,7 +215,7 @@ pdf_print_content_stream( fz_context* ctx, pdf_obj* page_ref, gchar** errmsg )
     size_t size = 0;
 
     buf = pdf_ocr_get_content_stream_as_buffer( ctx, page_ref, errmsg );
-    if ( !buf ) ERROR_PAO( "pdf_ocr_get_content_stream_as_buffer" )
+    if ( !buf ) ERROR_SOND( "pdf_ocr_get_content_stream_as_buffer" )
 
     size = fz_buffer_storage( ctx, buf, (guchar**) &data );
     pos = data;

@@ -37,12 +37,18 @@ gint zond_dbase_kopieren_nach_auswertung( ZondDBase*, Baum, gint, gint, gboolean
 
 gint zond_dbase_verschieben_knoten( ZondDBase*, Baum, gint, gint, gint, gchar** );
 
+gint zond_dbase_set_icon_name( ZondDBase*, Baum, gint, const gchar*, gchar** );
+
 gint zond_dbase_get_icon_name_and_node_text( ZondDBase*, Baum, gint, gchar**,
         gchar**, gchar** );
+
+gint zond_dbase_set_text( ZondDBase*, gint, gchar*, gchar** );
 
 gint zond_dbase_get_text( ZondDBase*, gint, gchar**, gchar** );
 
 gint zond_dbase_set_ziel( ZondDBase*, Ziel*, gint, gchar** );
+
+gint zond_dbase_set_datei( ZondDBase*, gint, const gchar*, gchar** );
 
 gint zond_dbase_get_parent( ZondDBase*, Baum, gint, gchar** );
 
@@ -64,10 +70,15 @@ gint zond_dbase_check_id( ZondDBase*, const gchar*, gchar** );
 
 gint zond_dbase_set_node_text( ZondDBase*, Baum, gint, const gchar*, gchar** );
 
+gint zond_dbase_set_link( ZondDBase*, const gint, const gint, const gchar*,
+        const gint, const gint, gchar** );
+
 gint zond_dbase_check_link( ZondDBase*, Baum, gint, gchar** );
 
 gint zond_dbase_get_link( ZondDBase*, gint*, Baum*, gint*, gchar**, Baum*, gint*,
         gchar** );
+
+gint zond_dbase_remove_link( ZondDBase*, const gint, const gint, gchar** );
 
 G_END_DECLS
 

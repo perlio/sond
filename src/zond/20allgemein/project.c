@@ -37,7 +37,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../zond_tree_store.h"
 
 #include "project.h"
-#include "dbase_full.h"
 
 
 
@@ -138,8 +137,7 @@ project_create_dbase_zond( Projekt* zond, const gchar* path, gboolean create,
     }
 
     rc = project_backup( zond_dbase_get_dbase( zond_dbase_store ),
-            zond_dbase_get_dbase( zond_dbase_work ),
-            errmsg );
+            zond_dbase_get_dbase( zond_dbase_work ), errmsg );
     if ( rc )
     {
         zond_dbase_close( zond_dbase_store );
@@ -152,18 +150,14 @@ project_create_dbase_zond( Projekt* zond, const gchar* path, gboolean create,
 
 
     DBase* dbase = NULL;
-    DBaseFull* dbase_full = NULL;
 
     rc = dbase_create_with_stmts( path, &dbase, zond_dbase_get_dbase( zond_dbase_store ), errmsg );
     if ( rc == -1 ) ERROR_SOND( "dbase_create_with_stmts" )
 
-    rc = dbase_full_create_with_stmts( path_tmp, &dbase_full, zond_dbase_get_dbase( zond_dbase_work ), errmsg );
-    if ( rc ) ERROR_SOND( "dbase_full_create" )
-
     *dbase_zond = g_malloc0( sizeof( DBaseZond ) );
 
     (*dbase_zond)->dbase_store = dbase;
-    (*dbase_zond)->dbase_work = dbase_full;
+    (*dbase_zond)->dbase_work = dbase;
     (*dbase_zond)->zond_dbase_store = zond_dbase_store;
     (*dbase_zond)->zond_dbase_work = zond_dbase_work;
     (*dbase_zond)->project_name = g_strdup( strrchr( path, '/' ) + 1 );
@@ -202,7 +196,6 @@ projekt_aktivieren( Projekt* zond )
 static void
 project_clear_dbase_zond( DBaseZond** dbase_zond )
 {
-    g_free( (*dbase_zond)->dbase_work );
     g_free( (*dbase_zond)->dbase_store );
 
     g_free( (*dbase_zond)->project_dir );
@@ -225,8 +218,8 @@ project_speichern( Projekt* zond, gchar** errmsg )
 
     if ( !(zond->dbase_zond->changed) ) return 0;
 
-    rc = project_backup( zond->dbase_zond->dbase_work->dbase.db,
-            zond->dbase_zond->dbase_store->db,errmsg );
+    rc = project_backup( zond_dbase_get_dbase( zond->dbase_zond->zond_dbase_work ),
+            zond_dbase_get_dbase( zond->dbase_zond->zond_dbase_store ), errmsg );
     if ( rc ) ERROR_SOND( "project_backup" )
 
     project_reset_changed( zond );
@@ -349,7 +342,7 @@ cb_menu_datei_schliessen_activate( GtkMenuItem* item, gpointer user_data )
     Projekt* zond = (Projekt*) user_data;
 
     rc = projekt_schliessen( zond, &errmsg );
-    if ( rc )
+    if ( rc == -1 )
     {
         display_message( zond->app_window, "Fehler bei Schließen des Projekts -\n\n"
                 "Bei Aufruf projekt_schliessen:\n", errmsg, NULL );
@@ -367,10 +360,6 @@ project_oeffnen( Projekt* zond, const gchar* abs_path, gboolean create,
     gint rc = 0;
     DBaseZond* dbase_zond = NULL;
 
-    rc = project_create_dbase_zond( zond, abs_path, create, &dbase_zond, errmsg );
-    if ( rc == -1 ) ERROR_SOND( "project_create_dbase_zond" )
-    else if ( rc == 1 ) return 1;
-
     rc = projekt_schliessen( zond, errmsg );
     if ( rc )
     {
@@ -378,6 +367,9 @@ project_oeffnen( Projekt* zond, const gchar* abs_path, gboolean create,
         if ( rc == -1 ) ERROR_SOND( "project_schliessen" )
         else return 1;
     }
+
+    rc = project_create_dbase_zond( zond, abs_path, create, &dbase_zond, errmsg );
+    if ( rc ) ERROR_SOND( "project_create_dbase_zond" )
 
     sond_treeviewfm_set_dbase( SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
             (DBase*) dbase_zond->dbase_work );

@@ -16,8 +16,8 @@ typedef char gchar;
 
 typedef struct _DBase_Zond
 {
-    DBaseFull* dbase_work;
     DBase* dbase_store;
+    DBase* dbase_work;
     ZondDBase* zond_dbase_store;
     ZondDBase* zond_dbase_work;
     gchar* project_name;

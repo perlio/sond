@@ -27,6 +27,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../99conv/general.h"
 #include "../99conv/pdf.h"
 
+#include "render.h"
 #include "viewer.h"
 #include "document.h"
 #include "viewer_pixbuf.h"

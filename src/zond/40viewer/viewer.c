@@ -1340,7 +1340,7 @@ viewer_foreach( GPtrArray* arr_pv, PdfDocumentPage* pdf_document_page,
                         gint rc = 0;
 
                         rc = cb_foreach_pv( pv_vergleich, zaehler + i, data, errmsg );
-                        if ( rc ) ERROR_PAO( "cb_foreach_pv" )
+                        if ( rc ) ERROR_SOND( "cb_foreach_pv" )
                         dirty = TRUE;
                         break;
                     }

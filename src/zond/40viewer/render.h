@@ -1,6 +1,9 @@
 #ifndef RENDER_H_INCLUDED
 #define RENDER_H_INCLUDED
 
+#define ERROR_THREAD(x) { fprintf( stderr, "Thread error: %s\n", x); \
+                          fz_drop_context( ctx ); return; }
+
 typedef struct _Pdf_Viewer PdfViewer;
 typedef struct _Pdf_Document_Page PdfDocumentPage;
 

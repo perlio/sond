@@ -22,12 +22,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../../misc.h"
 
 #include "../global_types.h"
+#include "../zond_dbase.h"
 
 #include "../99conv/general.h"
 
 #include "../20allgemein/project.h"
 #include "../20allgemein/suchen.h"
-#include "../20allgemein/dbase_full.h"
 
 #include "treeviews.h"
 
@@ -151,12 +151,12 @@ cb_textview_focus_out( GtkWidget* textview, GdkEvent* event, gpointer user_data 
         gint node_id = GPOINTER_TO_INT(g_object_get_data( G_OBJECT(zond->textview),
                 "node-id" ) );
 
-        rc = dbase_full_speichern_textview( zond->dbase_zond->dbase_work, node_id, text, &errmsg );
+        rc = zond_dbase_set_text( zond->dbase_zond->zond_dbase_work, node_id, text, &errmsg );
         g_free( text );
         if ( rc )
         {
             meldung( zond->app_window, "Fehler in cb_textview_focus_out:\n\n"
-                    "Bei Aufruf dbase_full_speichern_textview:\n", errmsg, NULL );
+                    "Bei Aufruf zond_dbase_set_text:\n", errmsg, NULL );
             g_free( errmsg );
 
             return FALSE;

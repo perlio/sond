@@ -28,7 +28,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
 #include "project.h"
-#include "dbase_full.h"
 
 #include "../../misc.h"
 #include "../../eingang.h"
@@ -67,13 +66,13 @@ selection_foreach_verschieben( SondTreeview* tree_view, GtkTreeIter* iter,
 
         rc = zond_dbase_get_ziel( s_selection->zond->dbase_zond->zond_dbase_work, s_selection->baum,
                 node_id, NULL, errmsg );
-        if ( rc == -1 ) ERROR_PAO( "zond_dbase_get_ziel" )
+        if ( rc == -1 ) ERROR_SOND( "zond_dbase_get_ziel" )
         else if ( rc == 1 ) return 0;
     }
 
     rc = knoten_verschieben( s_selection->zond, s_selection->baum, node_id, s_selection->parent_id,
             s_selection->older_sibling_id, errmsg );
-    if ( rc ) ERROR_PAO ( "knoten_verschieben" )
+    if ( rc ) ERROR_SOND ( "knoten_verschieben" )
 
     s_selection->older_sibling_id = node_id;
 
@@ -94,14 +93,14 @@ selection_verschieben( Projekt* zond, Baum baum, gint anchor_id, gboolean kind,
     else
     {
         s_selection.parent_id = zond_dbase_get_parent( zond->dbase_zond->zond_dbase_work, baum, anchor_id, errmsg );
-        if ( s_selection.parent_id < 0 ) ERROR_PAO( "zond_dbase_get_parent" )
+        if ( s_selection.parent_id < 0 ) ERROR_SOND( "zond_dbase_get_parent" )
 
         s_selection.older_sibling_id = anchor_id;
     }
 
     rc = sond_treeview_clipboard_foreach( zond->treeview[baum],
             selection_foreach_verschieben, &s_selection, errmsg );
-    if ( rc == -1 ) ERROR_PAO( "somd_treeview_selection_foreach" )
+    if ( rc == -1 ) ERROR_SOND( "somd_treeview_selection_foreach" )
 
     //Alte Auswahl löschen
     clipboard = sond_treeview_get_clipboard( zond->treeview[baum] );
@@ -143,27 +142,27 @@ selection_copy_node_db( Projekt* zond, gboolean with_younger_siblings, Baum baum
 
     new_node_id = zond_dbase_kopieren_nach_auswertung( zond->dbase_zond->zond_dbase_work, baum_von, node_von,
             node_nach, kind, errmsg );
-    if ( new_node_id == -1 ) ERROR_PAO( "zond_dbase_kopieren_nach_auswertung" )
+    if ( new_node_id == -1 ) ERROR_SOND( "zond_dbase_kopieren_nach_auswertung" )
 
     //Prüfen, ob Kind- oder Geschwisterknoten vorhanden
     first_child_id = zond_dbase_get_first_child( zond->dbase_zond->zond_dbase_work, baum_von, node_von, errmsg );
-    if ( first_child_id < 0 ) ERROR_PAO( "zond_dbase_get_first_child" )
+    if ( first_child_id < 0 ) ERROR_SOND( "zond_dbase_get_first_child" )
     if ( first_child_id > 0 )
     {
         rc = selection_copy_node_db( zond, TRUE, baum_von,
                 first_child_id, new_node_id, TRUE, errmsg );
-        if ( rc == -1  ) ERROR_PAO( "selection_copy_node_db" )
+        if ( rc == -1  ) ERROR_SOND( "selection_copy_node_db" )
     }
 
     gint younger_sibling_id = 0;
     younger_sibling_id = zond_dbase_get_younger_sibling( zond->dbase_zond->zond_dbase_work, baum_von, node_von,
             errmsg );
-    if ( younger_sibling_id < 0 ) ERROR_PAO( "zond_dbase_get_younger_sibling" )
+    if ( younger_sibling_id < 0 ) ERROR_SOND( "zond_dbase_get_younger_sibling" )
     if ( younger_sibling_id > 0 && with_younger_siblings )
     {
         rc = selection_copy_node_db( zond, TRUE, baum_von,
                 younger_sibling_id, new_node_id, FALSE, errmsg );
-        if ( rc == -1 ) ERROR_PAO( "selection_copy_node_db" )
+        if ( rc == -1 ) ERROR_SOND( "selection_copy_node_db" )
     }
 
     return new_node_id;
@@ -230,7 +229,7 @@ selection_kopieren( Projekt* zond, Baum baum_von, gint anchor_id, gboolean kind,
 
     if ( s_selection.iter_dest ) gtk_tree_iter_free( s_selection.iter_dest );
 
-    if ( rc == -1 ) ERROR_PAO( "treeview_selection_foreach" )
+    if ( rc == -1 ) ERROR_SOND( "treeview_selection_foreach" )
 
     return 0;
 }
@@ -328,8 +327,8 @@ selection_datei_einfuegen_in_db( Projekt* zond, gchar* rel_path, GFile* file, gi
         return -1;
     }
 
-    rc = dbase_full_set_datei( zond->dbase_zond->dbase_work, new_node_id, rel_path, errmsg );
-    if ( rc ) ERROR_SOND( "dbase_full_set_datei" )
+    rc = zond_dbase_set_datei( zond->dbase_zond->zond_dbase_work, new_node_id, rel_path, errmsg );
+    if ( rc ) ERROR_SOND( "zond_dbase_set_datei" )
 
     return new_node_id;
 }
@@ -353,7 +352,7 @@ selection_datei_anbinden( Projekt* zond, InfoWindow* info_window, GFile* file, g
     if ( rc == -1 )
     {
         g_free( rel_path );
-        ERROR_PAO( "zond_dbase_get_node_id_from_rel_path" )
+        ERROR_SOND( "zond_dbase_get_node_id_from_rel_path" )
     }
     else if ( rc > 0 )
     {
@@ -369,7 +368,7 @@ selection_datei_anbinden( Projekt* zond, InfoWindow* info_window, GFile* file, g
     new_node_id = selection_datei_einfuegen_in_db( zond, rel_path, file, node_id,
             child, errmsg );
     g_free( rel_path );
-    if ( new_node_id == -1 ) ERROR_PAO( "selection_datei_einfuegen_in_db" )
+    if ( new_node_id == -1 ) ERROR_SOND( "selection_datei_einfuegen_in_db" )
 
     (*zaehler)++;
 
@@ -401,7 +400,7 @@ selection_ordner_anbinden_rekursiv( Projekt* zond, InfoWindow* info_window,
 
     g_free( basename );
 
-    if ( new_node_id == -1 ) ERROR_SQL( "zond_dbase_insert_node" )
+    if ( new_node_id == -1 ) ERROR_SOND( "zond_dbase_insert_node" )
 
     GFileEnumerator* enumer = g_file_enumerate_children( file, "*", G_FILE_QUERY_INFO_NONE, NULL, &error );
     if ( !enumer )
@@ -514,7 +513,7 @@ selection_foreach_anbinden( SondTreeview* tree_view, GtkTreeIter* iter,
                 s_selection->kind, &s_selection->zaehler, errmsg );
         g_object_unref( file );
         if ( new_node_id == -1 )
-                ERROR_PAO( "selection_datei_ordner_anbinden_rekursiv" )
+                ERROR_SOND( "selection_datei_ordner_anbinden_rekursiv" )
     }
     else
     {
@@ -522,7 +521,7 @@ selection_foreach_anbinden( SondTreeview* tree_view, GtkTreeIter* iter,
                 s_selection->info_window, file, s_selection->anchor_id, s_selection->kind,
                 &s_selection->zaehler, errmsg );
         g_object_unref( file );
-        if ( new_node_id == -1 ) ERROR_PAO( "selection_datei_anbinden" )
+        if ( new_node_id == -1 ) ERROR_SOND( "selection_datei_anbinden" )
         else if ( new_node_id == 0 ) return 0;
     }
 
@@ -620,11 +619,11 @@ selection_foreach_link( SondTreeview* tree_view, GtkTreeIter* iter, gpointer dat
     if ( node_new < 0 ) ERROR_ROLLBACK( (DBase*) s_selection->zond->dbase_zond->dbase_work,
             "zond_dbase_insert_node" )
 
-    rc = dbase_full_set_link( s_selection->zond->dbase_zond->dbase_work,
+    rc = zond_dbase_set_link( s_selection->zond->dbase_zond->zond_dbase_work,
             s_selection->baum_dest, node_new, NULL, s_selection->baum_selection,
             node_id, errmsg );
     if ( rc ) ERROR_ROLLBACK( (DBase*) s_selection->zond->dbase_zond->dbase_work,
-            "dbase_full_set_link" )
+            "zond_dbase_set_link" )
 
     rc = dbase_commit( (DBase*) s_selection->zond->dbase_zond->dbase_work, errmsg );
     if ( rc ) ERROR_ROLLBACK( (DBase*) s_selection->zond->dbase_zond->dbase_work,
@@ -662,7 +661,7 @@ selection_link( Projekt* zond, Baum baum_selection, Baum baum_dest, gint anchor_
     sond_treeview_set_cursor( zond->treeview[baum_dest], s_selection.iter_dest );
 
     if ( s_selection.iter_dest ) gtk_tree_iter_free( s_selection.iter_dest );
-    if ( rc == -1 ) ERROR_PAO( "treeview_selection_foreach" )
+    if ( rc == -1 ) ERROR_SOND( "treeview_selection_foreach" )
 
     return 0;
 }
