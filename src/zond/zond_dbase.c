@@ -289,55 +289,7 @@ zond_dbase_create_db( sqlite3* db, gchar** errmsg )
 
         return -1;
     }
-/*
-    sql = sond_database_sql_create_database( );
-    rc = sqlite3_exec( db, sql, NULL, NULL, &errmsg_ii );
-    if ( rc != SQLITE_OK )
-    {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_exec\nsql: ",
-                sql, "\nresult code: ", sqlite3_errstr( rc ), "\nerrmsg: ",
-                errmsg_ii, NULL );
-        sqlite3_free( errmsg_ii );
 
-        return -1;
-    }
-
-    sql = sond_database_sql_create_database( );
-    rc = sqlite3_exec( db, sql, NULL, NULL, &errmsg_ii );
-    if ( rc != SQLITE_OK )
-    {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_exec\nsql: ",
-                sql, "\nresult code: ", sqlite3_errstr( rc ), "\nerrmsg: ",
-                errmsg_ii, NULL );
-        sqlite3_free( errmsg_ii );
-
-        return -1;
-    }
-
-    sql = sond_database_sql_insert_labels( );
-    rc = sqlite3_exec( db, sql, NULL, NULL, &errmsg_ii );
-    if ( rc != SQLITE_OK )
-    {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_exec\nsql: ",
-                sql, "\nresult code: ", sqlite3_errstr( rc ), "\nerrmsg: ",
-                errmsg_ii, NULL );
-        sqlite3_free( errmsg_ii );
-
-        return -1;
-    }
-
-    sql = sond_database_sql_insert_adm_rels( );
-    rc = sqlite3_exec( db, sql, NULL, NULL, &errmsg_ii );
-    if ( rc != SQLITE_OK )
-    {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_exec\nsql: ",
-                sql, "\nresult code: ", sqlite3_errstr( rc ), "\nerrmsg: ",
-                errmsg_ii, NULL );
-        sqlite3_free( errmsg_ii );
-
-        return -1;
-    }
-*/
     return 0;
 }
 
@@ -469,6 +421,35 @@ zond_dbase_convert_from_v0_8( sqlite3* db_convert, gchar** errmsg )
 }
 
 
+//v0.9 Tabellen eingang und eingang_rel_path fehlen ggü. v0.8
+static gint
+zond_dbase_convert_from_v0_9( sqlite3* db_convert, gchar** errmsg )
+{
+    gint rc = 0;
+
+    gchar* sql =
+            "INSERT INTO baum_inhalt SELECT node_id, parent_id, older_sibling_id, "
+                    "icon_name, node_text FROM old.baum_inhalt WHERE node_id != 0; "
+            "INSERT INTO baum_auswertung SELECT * FROM old.baum_auswertung WHERE node_id != 0; "
+            "INSERT INTO dateien SELECT * FROM old.dateien; "
+            "INSERT Into ziele SELECT * FROM old.ziele; "
+            "INSERT INTO eingang SELECT * FROM old.eingang; "
+            "INSERT INTO eingang_rel_path SELECT * FROM old.eingang_rel_path; "
+            ;
+
+    rc = sqlite3_exec( db_convert, sql, NULL, NULL, errmsg );
+    if ( rc != SQLITE_OK )
+    {
+        if ( errmsg ) *errmsg = add_string( g_strdup( "Bei Aufruf sqlite3_exec:\n" ),
+                *errmsg );
+
+        return -1;
+    }
+
+    return 0;
+}
+
+
 static gint
 zond_dbase_convert_to_actual_version( const gchar* path, gchar* v_string,
         gchar** errmsg ) //eingang hinzugefügt
@@ -532,6 +513,16 @@ zond_dbase_convert_to_actual_version( const gchar* path, gchar* v_string,
             sqlite3_close( db );
             g_free( path_new );
             ERROR_SOND( "convert_from_v0_8" )
+        }
+    }
+    else if ( !g_strcmp0( v_string , "v0.9" ) )
+    {
+        rc = zond_dbase_convert_from_v0_9( db, errmsg );
+        if ( rc )
+        {
+            sqlite3_close( db );
+            g_free( path_new );
+            ERROR_SOND( "convert_from_v0_9" )
         }
     }
     else
@@ -667,7 +658,7 @@ zond_dbase_open( const gchar* path, gboolean create_file, gboolean create, sqlit
             rc = zond_dbase_convert_to_actual_version( path, v_string, errmsg );
             if ( rc ) ERROR_SOND( "zond_dbase_convert_to_actual_version" )
             else display_message( NULL, "Datei von ", v_string, " zu "ZOND_DBASE_VERSION
-                    "konvertiert", NULL );
+                    " konvertiert", NULL );
 
             rc = sqlite3_open_v2( path, db, SQLITE_OPEN_READWRITE, NULL );
             if ( rc ) ERROR_SOND( "sqlite3_open_v2" )
