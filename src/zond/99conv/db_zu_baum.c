@@ -27,15 +27,19 @@ db_baum_insert_links( Projekt* zond, gchar** errmsg )
 
     while ( 1 )
     {
+        gint rc = 0;
         ZondTreeStore* tree_store = NULL;
         GtkTreeIter* iter_dest = NULL;
         GtkTreeIter* iter_target = NULL;
         gboolean child = FALSE;
+        gint older_sibling = 0;
 
-        ID_start = zond_dbase_get_link( zond->dbase_zond->zond_dbase_work, ID_start, &baum, &node_id,
+        rc = zond_dbase_get_link( zond->dbase_zond->zond_dbase_work, &ID_start, &baum, &node_id,
             &project, &baum_target, &node_id_target, errmsg );
-        if ( ID_start == -1 ) ERROR_SOND( "zond_dbase_get_link" )
-        else if ( !ID_start ) break;
+        if ( rc == -1 ) ERROR_SOND( "zond_dbase_get_link" )
+        else if ( rc == 1 ) break;
+
+        ID_start++;
 
         //iter_target ermitteln
         iter_target = baum_abfragen_iter( zond->treeview[baum_target], node_id_target );
@@ -48,7 +52,7 @@ db_baum_insert_links( Projekt* zond, gchar** errmsg )
         //iter wo link hinkommt ermitteln (iter_dest)
         tree_store = ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) ));
 
-        gint older_sibling = zond_dbase_get_older_sibling( zond->dbase_zond->zond_dbase_work, baum, node_id, errmsg );
+        older_sibling = zond_dbase_get_older_sibling( zond->dbase_zond->zond_dbase_work, baum, node_id, errmsg );
         if ( older_sibling < 0 )
         {
             g_free( project );
@@ -90,6 +94,8 @@ db_baum_insert_links( Projekt* zond, gchar** errmsg )
                 ERROR_SOND( "baum_abfragen_iter" )
             }
         }
+
+        g_free( project );
 
         zond_tree_store_insert_link( iter_target->user_data, node_id_target,
                 tree_store, iter_dest, child, NULL );

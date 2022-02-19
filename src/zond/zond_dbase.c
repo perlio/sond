@@ -776,7 +776,7 @@ zond_dbase_prepare_stmts( ZondDBase* zond_dbase, gint num, const gchar** sql,
         rc = sqlite3_prepare_v2( priv->dbase, sql[i], -1, &stmt[i], NULL );
         if ( rc != SQLITE_OK && errmsg )
         {
-            *errmsg = g_strconcat( "Bei Aufruf sqlite3_prepare_v2 (", sql, "):\n",
+            *errmsg = g_strconcat( "Bei Aufruf sqlite3_prepare_v2 (", sql[i], "):\n",
                     sqlite3_errstr( rc ), NULL );
 
             //aufräumen
@@ -803,7 +803,7 @@ zond_dbase_prepare( ZondDBase* zond_dbase, const gchar* func, const gchar** sql,
         rc = zond_dbase_prepare_stmts( zond_dbase, num_stmts, sql, *stmt, errmsg );
         if ( rc )
         {
-            g_free( stmt );
+            g_free( *stmt );
             ERROR_SOND( "zond_dbase_prepare_stmts" )
         }
 
@@ -858,8 +858,7 @@ zond_dbase_insert_node( ZondDBase* zond_dbase, Baum baum, gint node_id, gboolean
                 "?3, " //icon_name
                 "?4); ", //node_text
 
-                "UPDATE baum_inhalt SET "
-                    "older_sibling_id=last_insert_rowid() "
+            "UPDATE baum_inhalt SET older_sibling_id=last_insert_rowid() "
                 "WHERE "
                     "parent_id=(SELECT parent_id FROM baum_inhalt WHERE node_id=last_insert_rowid()) "
                 "AND "
@@ -869,8 +868,7 @@ zond_dbase_insert_node( ZondDBase* zond_dbase, Baum baum, gint node_id, gboolean
                 "AND "
                     "node_id!=0; ",
 
-                "UPDATE baum_auswertung SET "
-                    "older_sibling_id=last_insert_rowid() "
+            "UPDATE baum_auswertung SET older_sibling_id=last_insert_rowid() "
                 "WHERE "
                     "parent_id=(SELECT parent_id FROM baum_auswertung WHERE node_id=last_insert_rowid()) "
                 "AND "
@@ -1872,18 +1870,19 @@ zond_dbase_check_link( ZondDBase* zond_dbase, Baum baum, gint node_id, gchar** e
 
     const gchar* sql[] = {
     //...
-        "SELECT ID FROM baum_inhalt WHERE node_id = ?1;",
-
-        "SELECT ID FROM baum_auswertung WHERE node_id = ?1;"
+        "SELECT ID FROM links WHERE baum_id=?1 AND node_id=?2;"
     };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
     if ( rc ) ERROR_SOND( "zond_dbase_prepare" )
 
-    rc = sqlite3_bind_int( stmt[0 + (gint) baum], 1, node_id );
+    rc = sqlite3_bind_int( stmt[0], 1, baum );
+    if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (baum)" )
+
+    rc = sqlite3_bind_int( stmt[0], 2, node_id );
     if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (node_id)" )
 
-    rc = sqlite3_step( stmt[0 + (gint) baum] );
+    rc = sqlite3_step( stmt[0] );
     if ( (rc != SQLITE_ROW) && rc != SQLITE_DONE ) ERROR_ZOND_DBASE( "sqlite3_step" )
 
     if ( rc == SQLITE_ROW ) return sqlite3_column_int( stmt[0], 0 );
@@ -1892,6 +1891,40 @@ zond_dbase_check_link( ZondDBase* zond_dbase, Baum baum, gint node_id, gchar** e
 }
 
 
+gint
+zond_dbase_get_link( ZondDBase* zond_dbase, gint* ID_start, Baum* baum,
+        gint* node_id, gchar** project, Baum* baum_target, gint* node_id_target,
+        gchar** errmsg )
+{
+    gint rc = 0;
+    sqlite3_stmt** stmt = NULL;
+
+    const gchar* sql[] = {
+    //...
+        "SELECT ID, baum_id, node_id, projekt_target, baum_id_target, node_id_target FROM links "
+            "WHERE ID>=?1 ORDER BY ID asc;"
+    };
+
+    rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
+    if ( rc ) ERROR_SOND( "zond_dbase_prepare" )
+
+    rc = sqlite3_bind_int( stmt[0], 1, *ID_start );
+    if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (node_id)" )
+
+    rc = sqlite3_step( stmt[0] );
+    if ( (rc != SQLITE_ROW) && rc != SQLITE_DONE ) ERROR_ZOND_DBASE( "sqlite3_step" )
+
+    if ( rc == SQLITE_DONE ) return 1;
+
+    *ID_start = sqlite3_column_int( stmt[0], 0 );
+    *baum = sqlite3_column_int( stmt[0], 1 );
+    *node_id = sqlite3_column_int( stmt[0], 2 );
+    *project = g_strdup( (const gchar*) sqlite3_column_text( stmt[0], 3 ) );
+    *baum_target = sqlite3_column_int( stmt[0], 4 );
+    *node_id_target = sqlite3_column_int( stmt[0], 5 );
+
+    return 0;
+}
 
 /*
     gint rc = 0;
