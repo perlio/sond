@@ -900,51 +900,8 @@ zond_tree_store_insert( ZondTreeStore* tree_store, GtkTreeIter* iter, gboolean c
 
 
 void
-zond_tree_store_insert_link_at_pos( ZondTreeStore* tree_store, GNode* node_parent,
-        gint pos, GNode* node_target, gint node_id_target, GtkTreeIter* iter_new )
-{
-    GtkTreeIter iter_dest_new = { 0 };
-    RowData* row_data = NULL;
-
-    //Hauptknoten erzeugen
-    _do_zond_tree_store_insert( tree_store, node_parent, pos, &iter_dest_new );
-    if ( iter_new ) *iter_new = iter_dest_new;
-
-    //Daten
-    row_data = G_NODE(iter_dest_new.user_data)->data;
-
-    row_data->data = ((RowData*) node_target->data)->data;
-    row_data->target = node_target;
-    row_data->head_nr = node_id_target;
-
-    ((RowData*) node_target->data)->links =
-            g_list_append( ((RowData*) node_target->data)->links,
-            iter_dest_new.user_data );
-
-    //iter link hat Kinder?
-    if ( (node_target = node_target->children) )
-    {
-        gboolean child = TRUE;
-        GtkTreeIter iter_child_new = { 0, };
-
-        //dann: Kinder durchgehen
-        do
-        {
-            zond_tree_store_insert_link( node_target, 0, tree_store, &iter_dest_new, child, &iter_child_new );
-
-            child = FALSE;
-            iter_dest_new = iter_child_new;
-        }
-        while ( (node_target = node_target->next) );
-    }
-
-    return;
-}
-
-
-void
 zond_tree_store_insert_link (GNode* node_target,
-                             gint node_id_target,
+                             gint head_nr,
                              ZondTreeStore* tree_store,
                        GtkTreeIter* iter_dest,
                        gboolean child,
@@ -952,6 +909,8 @@ zond_tree_store_insert_link (GNode* node_target,
 {
     GNode* node_parent = NULL;
     gint pos = 0;
+    GtkTreeIter iter_dest_new = { 0 };
+    RowData* row_data = NULL;
 
     if ( iter_dest )
     {
@@ -973,7 +932,37 @@ zond_tree_store_insert_link (GNode* node_target,
         node_parent = tree_store->priv->root;
     }
 
-    zond_tree_store_insert_link_at_pos( tree_store, node_parent, pos, node_target, node_id_target, iter_new );
+    //Hauptknoten erzeugen
+    _do_zond_tree_store_insert( tree_store, node_parent, pos, &iter_dest_new );
+    if ( iter_new ) *iter_new = iter_dest_new;
+
+    //Daten
+    row_data = G_NODE(iter_dest_new.user_data)->data;
+
+    row_data->data = ((RowData*) node_target->data)->data;
+    row_data->target = node_target;
+    row_data->head_nr = head_nr;
+
+    ((RowData*) node_target->data)->links =
+            g_list_append( ((RowData*) node_target->data)->links,
+            iter_dest_new.user_data );
+
+    //iter link hat Kinder?
+    if ( (node_target = node_target->children) )
+    {
+        gboolean child = TRUE;
+        GtkTreeIter iter_child_new = { 0, };
+
+        //dann: Kinder durchgehen
+        do
+        {
+            zond_tree_store_insert_link( node_target, 0, tree_store, &iter_dest_new, child, &iter_child_new );
+
+            child = FALSE;
+            iter_dest_new = iter_child_new;
+        }
+        while ( (node_target = node_target->next) );
+    }
 
     return;
 }

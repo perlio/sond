@@ -19,17 +19,17 @@ static gint
 db_baum_insert_links( Projekt* zond, gchar** errmsg )
 {
     gint ID_start = 0;
-    Baum baum = KEIN_BAUM;
-    gint node_id = 0;
-    gchar* project = NULL;
-    Baum baum_target = KEIN_BAUM;
-    gint node_id_target = 0;
 
     while ( 1 )
     {
         gint rc = 0;
         ZondTreeStore* tree_store = NULL;
         GtkTreeIter* iter_dest = NULL;
+        Baum baum = KEIN_BAUM;
+        gint node_id = 0;
+        gchar* project = NULL;
+        Baum baum_target = KEIN_BAUM;
+        gint node_id_target = 0;
         GtkTreeIter* iter_target = NULL;
         gboolean child = FALSE;
         gint older_sibling = 0;
