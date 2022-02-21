@@ -226,7 +226,7 @@ zond_dbase_create_db( sqlite3* db, gchar** errmsg )
             "); "
 
             "INSERT INTO baum_inhalt (node_id, parent_id, older_sibling_id, "
-            "node_text) VALUES (0, 0, 0, 'v0.9');"
+            "node_text) VALUES (0, 0, 0, '"ZOND_DBASE_VERSION"');"
 
             //Hilfstabelle "dateien"
             //hier werden angebundene Dateien erfaßt
