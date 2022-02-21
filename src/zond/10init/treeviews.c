@@ -49,7 +49,7 @@ treeviews_get_baum_and_node_id( Projekt* zond, GtkTreeIter* iter, Baum* baum,
     GtkTreeIter iter_orig = { 0, };
     ZondTreeStore* tree_store = NULL;
 
-    zond_tree_store_get_orig( iter, &iter_orig );
+    zond_tree_store_get_target( iter, &iter_orig );
     tree_store = zond_tree_store_get_tree_store( iter_orig.user_data );
 
     gtk_tree_model_get( GTK_TREE_MODEL(tree_store), &iter_orig, 2, node_id, -1 );
@@ -57,22 +57,6 @@ treeviews_get_baum_and_node_id( Projekt* zond, GtkTreeIter* iter, Baum* baum,
     if ( tree_store == ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]) )) ) *baum = BAUM_INHALT;
     else if ( tree_store == ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_AUSWERTUNG]) )) ) *baum = BAUM_AUSWERTUNG;
     else return 1;
-
-    return 0;
-}
-
-
-static gint
-treeviews_get_actual_baum_and_node_id( Projekt* zond, SondTreeview* stv, Baum* baum,
-        gint* node_id )
-{
-    GtkTreeIter iter = { 0, };
-    gint rc = 0;
-
-    if ( !sond_treeview_get_cursor( stv, &iter ) ) return 1; //kein cursor gesetzt
-
-    rc = treeviews_get_baum_and_node_id( zond, &iter, baum, node_id );
-    if ( rc == 1 ) return 2; //weder BAUM_INHALT noch BAUM_AUSWERTUNG
 
     return 0;
 }
@@ -459,10 +443,14 @@ treeviews_row_activated( SondTreeview* tv, GtkTreePath* tp, GtkTreeViewColumn* t
     gchar* errmsg = NULL;
     gint node_id = 0;
     Baum baum = KEIN_BAUM;
+    GtkTreeIter iter = { 0, };
 
     Projekt* zond = (Projekt*) user_data;
 
-    rc = treeviews_get_actual_baum_and_node_id( zond, tv, &baum, &node_id );
+    if ( !gtk_tree_model_get_iter( gtk_tree_view_get_model( GTK_TREE_VIEW(tv) ),
+            &iter, tp ) ) return;
+
+    rc = treeviews_get_baum_and_node_id( zond, &iter, &baum, &node_id );
     if ( rc ) return;
 
     rc = oeffnen_node( zond, baum, node_id, &errmsg );
@@ -484,29 +472,32 @@ cb_cursor_changed( SondTreeview* treeview, gpointer user_data )
     gint node_id = 0;
     GtkTreeIter iter = { 0, };
     Baum baum = KEIN_BAUM;
-
-    Projekt* zond = (Projekt*) user_data;
-
-    if ( treeview == zond->treeview[BAUM_AUSWERTUNG] &&
-            gtk_tree_model_get_iter_first( gtk_tree_view_get_model(
-            GTK_TREE_VIEW(treeview) ), &iter ) )
-            gtk_widget_set_sensitive( GTK_WIDGET(zond->textview), TRUE );
-
-    rc = treeviews_get_actual_baum_and_node_id( zond, treeview, &baum, &node_id );
-    if ( rc ) //letzter Knoten gelöscht oder kein Cursor gewählt
-    {
-        gtk_widget_set_sensitive( GTK_WIDGET(zond->textview), FALSE );
-        gtk_text_buffer_set_text( gtk_text_view_get_buffer( zond->textview ), "", -1 );
-
-        return;
-    }
-
-//status_label setzen
     gchar* rel_path = NULL;
     Anbindung* anbindung = NULL;
     gchar* text_label = NULL;
     gchar* text = NULL;
 
+    Projekt* zond = (Projekt*) user_data;
+/*
+    //wenn BAUM_AUSWERTUNG, in dem sich bereits row befindet: textview anschalten
+    if ( treeview == zond->treeview[BAUM_AUSWERTUNG] &&
+            gtk_tree_model_get_iter_first( gtk_tree_view_get_model(
+            GTK_TREE_VIEW(treeview) ), &iter ) )
+            gtk_widget_set_sensitive( GTK_WIDGET(zond->textview), TRUE );
+*/
+    //wenn kein cursor gesetzt ist
+    if ( !sond_treeview_get_cursor( treeview, &iter ) || treeviews_get_baum_and_node_id( zond, &iter, &baum, &node_id ) )
+    {
+        gtk_label_set_text( zond->label_status, "" ); //statur-label leeren
+        gtk_text_buffer_set_text( gtk_text_view_get_buffer( zond->textview ), "", -1 );
+        gtk_widget_set_sensitive( GTK_WIDGET(zond->textview), FALSE );
+
+        return;
+    }
+    else if ( baum == BAUM_AUSWERTUNG ) gtk_widget_set_sensitive( GTK_WIDGET(zond->textview), TRUE );
+    else gtk_widget_set_sensitive( GTK_WIDGET(zond->textview), FALSE );
+
+    //status_label setzen
     rc = abfragen_rel_path_and_anbindung( zond, baum, node_id, &rel_path,
             &anbindung, &errmsg );
     if ( rc == -1 )
@@ -728,9 +719,6 @@ treeviews_render_node_text( SondTreeview* stv, GtkTreeIter* iter, gpointer data 
 
     Projekt* zond = (Projekt*) data;
 
-    rc = treeviews_get_actual_baum_and_node_id( zond, stv, &baum, &node_id );
-    if ( rc ) return;
-
     if ( zond_tree_store_is_link( iter ) )
     {
         gchar *label = NULL;
@@ -746,6 +734,9 @@ treeviews_render_node_text( SondTreeview* stv, GtkTreeIter* iter, gpointer data 
 
         g_free(markuptxt);
     }
+
+    rc = treeviews_get_baum_and_node_id( zond, iter, &baum, &node_id );
+    if ( rc ) return;
 
     if ( baum == BAUM_AUSWERTUNG )
     {

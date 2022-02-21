@@ -1383,20 +1383,20 @@ zond_tree_store_get_linked_nodes( GtkTreeIter* iter )
 
 
 void
-zond_tree_store_get_orig( GtkTreeIter* iter, GtkTreeIter* iter_orig )
+zond_tree_store_get_target( GtkTreeIter* iter, GtkTreeIter* iter_target)
 {
     GNode* node = NULL;
     GNode* node_orig = NULL;
 
     g_return_if_fail( iter );
-    g_return_if_fail( iter_orig );
+    g_return_if_fail( iter_target );
 
     node = iter->user_data;
 
     while ( (node_orig = ((RowData*) node->data)->target) ) node = node_orig;
 
-    iter_orig->stamp = ((RowData*) node->data)->tree_store->priv->stamp;
-    iter_orig->user_data = node;
+    iter_target->stamp = ((RowData*) node->data)->tree_store->priv->stamp;
+    iter_target->user_data = node;
 
     return;
 }

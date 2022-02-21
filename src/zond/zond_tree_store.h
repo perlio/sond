@@ -98,7 +98,7 @@ zond_tree_store_is_link( GtkTreeIter* );
 
 GList* zond_tree_store_get_linked_nodes( GtkTreeIter* );
 
-void zond_tree_store_get_orig( GtkTreeIter*, GtkTreeIter* );
+void zond_tree_store_get_target( GtkTreeIter*, GtkTreeIter* );
 
 ZondTreeStore* zond_tree_store_get_tree_store( GNode* );
 
