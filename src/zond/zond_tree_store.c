@@ -709,7 +709,7 @@ zond_tree_store_remove_node( GNode* node )
 
 
 static void
-zond_tree_store_remove_links( GNode* node )
+zond_tree_store_remove_node_with_links( GNode* node )
 {
     GList* list = NULL;
 
@@ -718,7 +718,7 @@ zond_tree_store_remove_links( GNode* node )
         GList* ptr = NULL;
 
         ptr = list;
-        do zond_tree_store_remove_links( ptr->data );
+        do zond_tree_store_remove_node_with_links( ptr->data );
         while ( (ptr = ptr->next) );
     }
 
@@ -736,13 +736,14 @@ zond_tree_store_remove( ZondTreeStore* tree_store, GtkTreeIter* iter )
 
     g_return_if_fail( ZOND_IS_TREE_STORE(tree_store));
     g_return_if_fail( VALID_ITER(iter, tree_store) );
+    g_return_if_fail ( ((RowData*) G_NODE(iter->user_data)->data)->target == NULL );
 
     //zu Grunde liegenden node ermitteln
     node = iter->user_data;
     while ( (node_orig = ((RowData*) node->data)->target) ) node = node_orig;
 
     //remove linked nodes
-    zond_tree_store_remove_links( node );
+    zond_tree_store_remove_node_with_links( node );
 
     return;
 }
@@ -750,11 +751,18 @@ zond_tree_store_remove( ZondTreeStore* tree_store, GtkTreeIter* iter )
 void
 zond_tree_store_remove_link( ZondTreeStore* tree_store, GtkTreeIter* link )
 {
+    GNode* node_target = NULL;
+    GList* links = NULL;
+
     g_return_if_fail( ZOND_IS_TREE_STORE(tree_store));
     g_return_if_fail( VALID_ITER(link, tree_store) );
-    g_return_if_fail( zond_tree_store_is_link( link ) );
+    g_return_if_fail( ((RowData*) G_NODE(link->user_data)->data)->head_nr ); //muß link-Kopf sein
 
-    zond_tree_store_remove_links( link->user_data );
+    node_target = ((RowData*) G_NODE(link->user_data)->data)->target;
+    links = ((RowData*) node_target->data)->links;
+    ((RowData*) node_target->data)->links = g_list_remove( links, link->user_data );
+
+    zond_tree_store_remove_node_with_links( link->user_data );
 
     return;
 }
