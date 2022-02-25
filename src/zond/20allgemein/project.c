@@ -312,6 +312,8 @@ projekt_schliessen( Projekt* zond, gchar** errmsg )
     gchar* working_copy = g_strconcat( zond->dbase_zond->project_dir, "/",
             zond->dbase_zond->project_name, ".tmp", NULL );
 
+    sond_treeviewfm_set_root( SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), NULL, NULL );
+
     sond_treeviewfm_set_dbase( SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), NULL );
     project_clear_dbase_zond( &(zond->dbase_zond) );
 
@@ -375,6 +377,9 @@ project_oeffnen( Projekt* zond, const gchar* abs_path, gboolean create,
             (DBase*) dbase_zond->dbase_work );
 
     zond->dbase_zond = dbase_zond;
+    rc = sond_treeviewfm_set_root( SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
+            zond->dbase_zond->project_dir, errmsg );
+    if ( rc ) ERROR_SOND( "sond_treeviewfm_set_root" )
 
     projekt_aktivieren( zond );
 

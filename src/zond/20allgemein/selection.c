@@ -209,27 +209,38 @@ selection_foreach_kopieren( SondTreeview* tree_view, GtkTreeIter* iter, gpointer
 }
 
 
-//Ziel ist immer BAUM_AUSWERTUNG
 static gint
-selection_kopieren( Projekt* zond, Baum baum_von, gint anchor_id, gboolean kind, gchar** errmsg )
+selection_kopieren( Projekt* zond, Baum baum_von, Baum baum_dest, gint anchor_id, gboolean kind, gchar** errmsg )
 {
     gint rc = 0;
     GtkTreeIter iter = { 0 };
     gboolean success = FALSE;
-
     SSelectionKopieren s_selection = { zond, baum_von, NULL, anchor_id, kind };
-    success = sond_treeview_get_cursor( zond->treeview[BAUM_AUSWERTUNG], &iter );
+
+    success = sond_treeview_get_cursor( zond->treeview[baum_dest], &iter );
+    if ( success )
+    { //test auf link, darein soll nix eingefügt werden
+        if ( zond_tree_store_is_link( &iter ) )
+        {
+            gint head_nr = 0;
+
+            head_nr = zond_tree_store_get_link_head_nr( iter.user_data );
+
+            if ( !head_nr && !kind ) return 0;
+        }
+    }
+
     s_selection.iter_dest = (success) ? gtk_tree_iter_copy( &iter ) : NULL;
 
     rc = sond_treeview_clipboard_foreach( zond->treeview[baum_von],
             selection_foreach_kopieren, &s_selection, errmsg );
 
-    sond_treeview_expand_row( zond->treeview[BAUM_AUSWERTUNG], s_selection.iter_dest );
-    sond_treeview_set_cursor( zond->treeview[BAUM_AUSWERTUNG], s_selection.iter_dest );
+    sond_treeview_expand_row( zond->treeview[baum_dest], s_selection.iter_dest );
+    sond_treeview_set_cursor( zond->treeview[baum_dest], s_selection.iter_dest );
 
     if ( s_selection.iter_dest ) gtk_tree_iter_free( s_selection.iter_dest );
 
-    if ( rc == -1 ) ERROR_SOND( "treeview_selection_foreach" )
+    if ( rc == -1 ) ERROR_SOND( "sond_treeview_selection_foreach" )
 
     return 0;
 }
@@ -805,7 +816,7 @@ selection_paste( Projekt* zond, gboolean kind, gboolean link )
         }
         else if ( baum == BAUM_AUSWERTUNG && !clipboard->ausschneiden && !link )
         {
-            rc = selection_kopieren( zond, baum_selection, anchor_id, kind, &errmsg );
+            rc = selection_kopieren( zond, baum_selection, BAUM_AUSWERTUNG, anchor_id, kind, &errmsg );
             if ( rc == -1 )
             {
                 meldung( zond->app_window, "Fehler in Kopieren:\n\n"
@@ -846,7 +857,7 @@ selection_paste( Projekt* zond, gboolean kind, gboolean link )
         }
         else if ( baum == BAUM_AUSWERTUNG && !clipboard->ausschneiden && !link )
         {
-            rc = selection_kopieren( zond, baum_selection, anchor_id, kind, &errmsg );
+            rc = selection_kopieren( zond, baum_selection, BAUM_AUSWERTUNG, anchor_id, kind, &errmsg );
             if ( rc == -1 )
             {
                 meldung( zond->app_window, "Fehler in Kopieren:\n\n"

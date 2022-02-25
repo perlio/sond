@@ -1216,9 +1216,6 @@ cb_button_mode_toggled( GtkToggleButton* button, gpointer data )
 
     if ( gtk_toggle_button_get_active( button ) )
     {
-        gint rc = 0;
-        gchar* errmsg = NULL;
-
         GtkWidget* baum_fs = NULL;
         GtkWidget* baum_auswertung = NULL;
 
@@ -1227,15 +1224,6 @@ cb_button_mode_toggled( GtkToggleButton* button, gpointer data )
 
         baum_auswertung = gtk_paned_get_child2( GTK_PANED(gtk_paned_get_child2( GTK_PANED(zond->hpaned) )) );
         gtk_widget_hide( baum_auswertung );
-
-        rc = sond_treeviewfm_set_root( SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
-                zond->dbase_zond->project_dir, &errmsg );
-        if ( rc )
-        {
-            meldung( zond->app_window, "Fehler beim Laden Root-Verzeichnis -\n\n",
-                    "Bei Aufruf fm_set_root:\n", errmsg, NULL );
-            g_free( errmsg );
-        }
     }
     else
     {
@@ -1250,8 +1238,6 @@ cb_button_mode_toggled( GtkToggleButton* button, gpointer data )
 
         baum_auswertung = gtk_paned_get_child2( GTK_PANED(gtk_paned_get_child2( GTK_PANED(zond->hpaned) )) );
         gtk_widget_show_all( baum_auswertung );
-
-        sond_treeviewfm_set_root( SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), NULL, NULL );
     }
 
     return;
