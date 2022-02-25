@@ -362,48 +362,42 @@ treeviews_insert_node( Projekt* zond, Baum baum_active, gboolean child, gchar** 
     //Knoten in baum_inhalt einfuegen
     success = sond_treeview_get_cursor( zond->treeview[baum_active], &iter );
 
-    if ( !success ) baum = baum_active;
-    else if ( child )
+    if ( !success )
     {
-        gint rc = 0;
-
-        rc = treeviews_get_baum_and_node_id( zond, &iter, &baum, &node_id );
-        if ( rc == 1 ) return 1; //weder BAUM_INHALT noch BAUM_AUSWERTUNG
+        baum = baum_active;
+        child = TRUE;
     }
-    else
+    else //cursor zeigt auf row#
     {
-        GtkTreeIter iter_parent = { 0, };
+        gint head_nr = 0;
 
-        if ( gtk_tree_model_iter_parent( GTK_TREE_MODEL(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum_active]) )), &iter_parent, &iter ) )
+        head_nr = zond_tree_store_get_link_head_nr( iter.user_data );
+        if ( head_nr )
+        {
+            baum = baum_active;
+            node_id = head_nr;
+        }
+        else
         {
             gint rc = 0;
 
-            rc = treeviews_get_baum_and_node_id( zond, &iter_parent, &baum, &node_id );
-            if ( rc == 1 ) return 1;
-        }
-        else //muß ja link-Kopf sein oder kein link
-        {
-            gint head_nr = 0;
-
-            baum = baum_active;
-
-            if ( (head_nr = zond_tree_store_get_link_head_nr( iter.user_data )) )
-                    node_id = head_nr;
-            else gtk_tree_model_get( GTK_TREE_MODEL(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum_active]) )), &iter, 2, &node_id, -1 );
+            rc = treeviews_get_baum_and_node_id( zond, &iter, &baum, &node_id );
+            if ( rc == 1 ) return 1; //weder BAUM_INHALT noch BAUM_AUSWERTUNG
         }
     }
 
-    if ( node_id == 0 ) child = TRUE;
-    else if ( baum == BAUM_INHALT )
+    //child = TRUE; //, weil ja node_id schon der unmittelbare Vorfahre ist!
+    if ( baum == BAUM_INHALT )
     {
-        //child = TRUE; //, weil ja node_id schon der unmittelbare Vorfahre ist!
+        gint rc = 0;
+
         rc = hat_vorfahre_datei( zond, baum, node_id, child, errmsg );
         if ( rc == -1 ) ERROR_SOND( "hat_vorfahre_datei" )
         else if ( rc == 1 )
         {
             meldung( zond->app_window, "Einfügen als Unterpunkt von Datei nicht zulässig", NULL );
 
-            return 1;
+            return 1; //Abbruch ohne Fählermeldung
         }
     }
 
@@ -419,7 +413,7 @@ treeviews_insert_node( Projekt* zond, Baum baum_active, gboolean child, gchar** 
     if ( rc ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "dbase_commit" )
 
     //Knoten in baum_inhalt einfuegen
-    success = sond_treeview_get_cursor( zond->treeview[baum], &iter );
+    //success = sond_treeview_get_cursor( zond->treeview[baum], &iter ); - falsch!!!
 
     tree_store = ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) ));
     zond_tree_store_insert( tree_store, (success) ? &iter : NULL, child, &new_iter );

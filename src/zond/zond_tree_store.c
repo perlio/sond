@@ -758,6 +758,7 @@ zond_tree_store_remove_link( ZondTreeStore* tree_store, GtkTreeIter* link )
     g_return_if_fail( VALID_ITER(link, tree_store) );
     g_return_if_fail( ((RowData*) G_NODE(link->user_data)->data)->head_nr ); //muß link-Kopf sein
 
+    //link aus liste löschen, die bei Target geführt wird
     node_target = ((RowData*) G_NODE(link->user_data)->data)->target;
     links = ((RowData*) node_target->data)->links;
     ((RowData*) node_target->data)->links = g_list_remove( links, link->user_data );

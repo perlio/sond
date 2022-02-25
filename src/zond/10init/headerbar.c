@@ -486,7 +486,7 @@ cb_punkt_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
     Baum baum = baum_abfragen_aktiver_treeview( zond );
 
     if ( baum == KEIN_BAUM ) return;
-    if ( baum == BAUM_FS )
+    else if ( baum == BAUM_FS )
     {
         rc = sond_treeviewfm_create_dir( SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), child, &errmsg );
         if ( rc )
