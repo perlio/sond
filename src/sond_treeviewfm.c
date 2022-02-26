@@ -1468,9 +1468,12 @@ sond_treeviewfm_paste_clipboard( SondTreeviewFM* stvfm, gboolean kind, gchar** e
         ERROR_SOND( "sond_treeview_clipboard_foreach" )
     }
 
-    //Wenn in nicht ausgeklapptes Verzeichnis etwas eingefügt wurde:
+    //Wenn in nicht ausgeklapptes Verzeichnis etwas eingefügt wurde und
+    //Verzeichnis leer ist:
     //Dummy einfügen
-    if ( s_fm_paste_selection.inserted && kind && !expanded )
+    if ( s_fm_paste_selection.inserted && kind && !expanded &&
+            !gtk_tree_model_iter_has_child( gtk_tree_view_get_model(
+            GTK_TREE_VIEW(stvfm) ), s_fm_paste_selection.iter_cursor ) )
     {
         GtkTreeIter iter_tmp;
         gtk_tree_store_insert( GTK_TREE_STORE(gtk_tree_view_get_model(

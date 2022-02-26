@@ -84,12 +84,14 @@ zond_treeviewfm_dbase_begin( SondTreeviewFM* stvfm, gchar** errmsg )
     gint rc = 0;
 
     ZondTreeviewFMPrivate* priv = zond_treeviewfm_get_instance_private( ZOND_TREEVIEWFM(stvfm) );
+    DBase* dbase_work = sond_treeviewfm_get_dbase( stvfm );
+    DBase* dbase_store = (DBase*) priv->zond->dbase_zond->dbase_store;
 
     rc = SOND_TREEVIEWFM_CLASS(zond_treeviewfm_parent_class)->dbase_begin( SOND_TREEVIEWFM(stvfm), errmsg );
     if ( rc ) ERROR_SOND( "dbase_begin (work)" )
 
-    rc = dbase_begin( (DBase*) priv->zond->dbase_zond->dbase_store, errmsg );
-    if ( rc ) ERROR_ROLLBACK ( sond_treeviewfm_get_dbase( stvfm ), "dbase_begin (store)" ) //dbase_store
+    rc = dbase_begin( (DBase*) dbase_store, errmsg );
+    if ( rc ) ERROR_ROLLBACK ( dbase_work, "dbase_begin (store)" ) //dbase_store
 
     return 0;
 }
