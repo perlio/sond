@@ -725,9 +725,9 @@ selection_paste( Projekt* zond, gboolean kind, gboolean link )
                     kind, &errmsg );
             if ( rc )
             {
-                meldung( zond->app_window, "Selection kann nicht kopiert/verschoben "
+                meldung( zond->app_window, "Selection kann nicht kopiert oder verschoben "
                         "werden\n\nBei Aufruf fm_paste_clipboard:\n",
-                        kind, errmsg, NULL );
+                        errmsg, NULL );
                 g_free( errmsg );
 
                 return;

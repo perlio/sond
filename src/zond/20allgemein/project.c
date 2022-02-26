@@ -149,15 +149,19 @@ project_create_dbase_zond( Projekt* zond, const gchar* path, gboolean create,
             (void*) project_set_changed, (gpointer) zond );
 
 
-    DBase* dbase = NULL;
+    DBase* dbase_store = NULL;
+    DBase* dbase_work = NULL;
 
-    rc = dbase_create_with_stmts( path, &dbase, zond_dbase_get_dbase( zond_dbase_store ), errmsg );
+    rc = dbase_create_with_stmts( path, &dbase_store, zond_dbase_get_dbase( zond_dbase_store ), errmsg );
+    if ( rc == -1 ) ERROR_SOND( "dbase_create_with_stmts" )
+
+    rc = dbase_create_with_stmts( path, &dbase_work, zond_dbase_get_dbase( zond_dbase_work ), errmsg );
     if ( rc == -1 ) ERROR_SOND( "dbase_create_with_stmts" )
 
     *dbase_zond = g_malloc0( sizeof( DBaseZond ) );
 
-    (*dbase_zond)->dbase_store = dbase;
-    (*dbase_zond)->dbase_work = dbase;
+    (*dbase_zond)->dbase_store = dbase_store;
+    (*dbase_zond)->dbase_work = dbase_work;
     (*dbase_zond)->zond_dbase_store = zond_dbase_store;
     (*dbase_zond)->zond_dbase_work = zond_dbase_work;
     (*dbase_zond)->project_name = g_strdup( strrchr( path, '/' ) + 1 );

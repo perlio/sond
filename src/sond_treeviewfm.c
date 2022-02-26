@@ -1346,7 +1346,7 @@ sond_treeviewfm_paste_clipboard_foreach( SondTreeview* stv, GtkTreeIter* iter,
             NULL, s_fm_paste_selection, errmsg );
     g_object_unref( file_source );
 
-    if ( rc == -1 ) ERROR_SOND( "selection_move_file" )
+    if ( rc == -1 ) ERROR_SOND( "sond_treeviewfm_move_or_copy_node" )
     else if ( rc == 1 ) return 0; //Ünerspringen gewählt - einfach weiter
     else if ( rc == 2 ) return 1; //nur bei selection_move_file/_dir möglich
 
