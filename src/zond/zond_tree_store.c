@@ -729,13 +729,11 @@ zond_tree_store_remove_node_with_links( GNode* node )
 
 
 void
-zond_tree_store_remove( ZondTreeStore* tree_store, GtkTreeIter* iter )
+zond_tree_store_remove( GtkTreeIter* iter )
 {
     GNode* node = NULL;
     GNode* node_orig = NULL;
 
-    g_return_if_fail( ZOND_IS_TREE_STORE(tree_store));
-    g_return_if_fail( VALID_ITER(iter, tree_store) );
     g_return_if_fail ( ((RowData*) G_NODE(iter->user_data)->data)->target == NULL );
 
     //zu Grunde liegenden node ermitteln
@@ -1048,14 +1046,14 @@ zond_tree_store_clear_traverse (GNode        *node,
         {
           iter.stamp = store->priv->stamp;
           iter.user_data = node;
-          zond_tree_store_remove (store, &iter);
+          zond_tree_store_remove (&iter);
         }
     }
   else if (node->parent)
     {
       iter.stamp = store->priv->stamp;
       iter.user_data = node;
-      zond_tree_store_remove (store, &iter);
+      zond_tree_store_remove (&iter);
     }
   return FALSE;
 }
@@ -1141,8 +1139,7 @@ zond_tree_store_drag_data_delete (GtkTreeDragSource *drag_source,
                                &iter,
                                path))
     {
-      zond_tree_store_remove (ZOND_TREE_STORE (drag_source),
-                             &iter);
+      zond_tree_store_remove (&iter);
       return TRUE;
     }
   else

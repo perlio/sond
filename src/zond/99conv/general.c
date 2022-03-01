@@ -200,8 +200,7 @@ knoten_verschieben( Projekt* zond, Baum baum, gint node_id, gint new_parent,
     //hierzu iter des verschobenen Kindknotens herausfinden
     iter = baum_abfragen_iter( zond->treeview[baum], node_id );
 
-    zond_tree_store_remove( ZOND_TREE_STORE(gtk_tree_view_get_model(
-            GTK_TREE_VIEW(zond->treeview[baum]) ) ), iter );
+    zond_tree_store_remove( iter );
     gtk_tree_iter_free( iter );
 
     //jetzt neuen kindknoten aus db erzeugen

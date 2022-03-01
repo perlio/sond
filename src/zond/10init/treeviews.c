@@ -110,8 +110,7 @@ treeviews_foreach_entfernen_anbindung( SondTreeview* stv,
     rc = zond_dbase_remove_node( zond->dbase_zond->zond_dbase_work,BAUM_INHALT, node_id, errmsg );
     if ( rc ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "zond_dbase_remove_node" )
 
-    zond_tree_store_remove( ZOND_TREE_STORE(gtk_tree_view_get_model(
-            GTK_TREE_VIEW(stv) )), iter );
+    zond_tree_store_remove( iter );
 
     rc = dbase_commit( (DBase*) zond->dbase_zond->dbase_work, errmsg );
     if ( rc ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "db_commit" )
@@ -208,8 +207,7 @@ treeviews_foreach_selection_loeschen( SondTreeview* tree_view, GtkTreeIter* iter
         rc = zond_dbase_remove_node( s_selection->zond->dbase_zond->zond_dbase_work, baum, node_id, errmsg );
         if ( rc ) ERROR_SOND ( "zond_dbase_remove_node" )
 
-        zond_tree_store_remove( ZOND_TREE_STORE(gtk_tree_view_get_model(
-        GTK_TREE_VIEW(tree_view) )), iter );
+        zond_tree_store_remove( iter );
     }//... Gesamt-Links
     else if ( (head_nr = zond_tree_store_get_link_head_nr( iter->user_data )) )
     {

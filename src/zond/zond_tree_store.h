@@ -58,8 +58,7 @@ void          zond_tree_store_set              (GtkTreeIter  *iter,
                                                 const gint node_id );
 
 GDK_AVAILABLE_IN_ALL
-void      zond_tree_store_remove           (ZondTreeStore *tree_store,
-                                               GtkTreeIter  *iter);
+void      zond_tree_store_remove           (GtkTreeIter  *iter);
 
 void zond_tree_store_remove_link( ZondTreeStore*, GtkTreeIter* );
 

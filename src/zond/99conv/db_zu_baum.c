@@ -53,7 +53,7 @@ db_baum_insert_links( Projekt* zond, gchar** errmsg )
         tree_store = ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) ));
 
         //dann löschen
-        zond_tree_store_remove( tree_store, iter_dest );
+        zond_tree_store_remove( iter_dest );
         gtk_tree_iter_free( iter_dest );
 
         //iter_target ermitteln
@@ -128,8 +128,8 @@ db_baum_knoten( Projekt* zond, Baum baum, gint node_id, GtkTreeIter* iter,
     GtkTreeIter iter_inserted = { 0, };
 
     //test auf link nicht erforderlich; Knoten wird dann nur mit node_id eingefügt
-        rc = zond_dbase_get_icon_name_and_node_text( zond->dbase_zond->zond_dbase_work, baum, node_id, &icon_name,
-            &node_text, errmsg );
+    rc = zond_dbase_get_icon_name_and_node_text( zond->dbase_zond->zond_dbase_work,
+            baum, node_id, &icon_name, &node_text, errmsg );
     if ( rc == -1 ) ERROR_S
     else if ( rc == 1 ) ERROR_S_MESSAGE( "node_id existiert nicht" )
 
