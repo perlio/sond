@@ -708,6 +708,11 @@ sond_treeviewfm_load_dir( SondTreeviewFM* stvfm, GtkTreeIter* iter, gchar** errm
     }
     else file = g_file_new_for_path( stvfm_priv->root );
 
+    //erst ganzes dir laden, dann ordnen, nach Kriterium,
+
+
+
+
     //fm_load_dir_foreach gibt 0 oder -1 zurück
     rc = sond_treeviewfm_dir_foreach( stvfm, iter, file,
             sond_treeviewfm_load_dir_foreach, iter, errmsg );

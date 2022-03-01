@@ -89,10 +89,6 @@ gint dbase_get_num_of_refs_to_eingang( DBase*, const gint, gchar** );
 
 gint dbase_delete_eingang( DBase*, const gint, gchar** );
 
-sqlite3_stmt* dbase_prepare_stmt( sqlite3*, const gchar*, gchar** );
-
-gint dbase_prepare_stmts( DBase*, gchar** );
-
 gint dbase_create_with_stmts( const gchar*, DBase**, sqlite3*, gchar** );
 
 #endif // DBASE_H_INCLUDED

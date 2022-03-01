@@ -173,8 +173,7 @@ open_file( Projekt* zond, gpointer files )
     rc = db_baum_refresh( zond, &errmsg );
     if ( rc )
     {
-        meldung( zond->app_window, "Fehler in open_app:\nBei Aufruf db_baum_"
-                "refresh:\n", errmsg, NULL );
+        meldung( zond->app_window, "Fehler beim Öffnen Datei:\n\n", errmsg, NULL );
         g_free( errmsg );
     }
 

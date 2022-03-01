@@ -80,14 +80,9 @@ oeffnen_auszug( Projekt* zond, gint node_id, gchar** errmsg )
 
     first_child = zond_dbase_get_first_child( zond->dbase_zond->zond_dbase_work, BAUM_AUSWERTUNG, node_id, errmsg );
 
-    if ( first_child < 0 ) ERROR_SOND( "zond_dbase_get_first_child" )
-    else if ( first_child == 0 )
-    {
-        if ( errmsg ) *errmsg = g_strdup( "Auszug anzeigen nicht möglich:\n"
-                "Knoten hat keine Kinder" );
-
-        return -1;
-    }
+    if ( first_child < 0 ) ERROR_S
+    else if ( first_child == 0 ) ERROR_S_MESSAGE( "Auszug anzeigen nicht möglich:\n"
+                "Knoten hat keine Kinder" )
 
     younger_sibling = first_child;
     do
@@ -394,7 +389,8 @@ oeffnen_node( Projekt* zond, Baum baum, gint node_id, gchar** errmsg )
     if ( rc == 2 && baum == BAUM_AUSWERTUNG )
     {
         rc = oeffnen_auszug( zond, node_id, errmsg );
-        if ( rc ) ERROR_SOND( "oeffnen_auszug" )
+        if ( rc ) ERROR_S
+            //_SOND( "oeffnen_auszug" )
 
         return 0;
     }

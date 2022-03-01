@@ -226,7 +226,8 @@ selection_kopieren( Projekt* zond, Baum baum_von, Baum baum_dest, gint anchor_id
 
             head_nr = zond_tree_store_get_link_head_nr( iter.user_data );
 
-            if ( !head_nr && !kind ) return 0;
+            if ( !head_nr || kind ) return 0;
+            else if ( head_nr && !kind ) s_selection.anchor_id = head_nr;
         }
     }
 
@@ -662,6 +663,17 @@ selection_link( Projekt* zond, Baum baum_selection, Baum baum_dest, gint anchor_
 
     SSelectionLink s_selection = { zond, baum_selection, baum_dest, NULL, kind };
     success = sond_treeview_get_cursor( zond->treeview[baum_dest], &iter );
+    if ( success )
+    { //test auf link, darein soll nix eingefügt werden
+        if ( zond_tree_store_is_link( &iter ) )
+        {
+            gint head_nr = 0;
+
+            head_nr = zond_tree_store_get_link_head_nr( iter.user_data );
+
+            if ( !head_nr || kind ) return 0;
+        }
+    }
 
     s_selection.iter_dest = (success) ? gtk_tree_iter_copy( &iter ) : NULL;
 

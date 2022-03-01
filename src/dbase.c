@@ -11,8 +11,6 @@
 
 #include "misc.h"
 
-#define DB_VERSION "v0.9"
-
 
 gint
 dbase_begin( DBase* dbase, gchar** errmsg )
@@ -307,7 +305,7 @@ dbase_get_num_of_refs_to_eingang( DBase* dbase, const gint eingang_id, gchar** e
 }
 
 
-sqlite3_stmt*
+static sqlite3_stmt*
 dbase_prepare_stmt( sqlite3* db, const gchar* sql, gchar** errmsg )
 {
     gint rc = 0;
@@ -326,7 +324,7 @@ dbase_prepare_stmt( sqlite3* db, const gchar* sql, gchar** errmsg )
 }
 
 
-gint
+static gint
 dbase_prepare_stmts( DBase* dbase, gchar** errmsg )
 {
     gint zaehler = 0;

@@ -187,7 +187,7 @@ treeviews_foreach_selection_loeschen( SondTreeview* tree_view, GtkTreeIter* iter
                             baum_link = BAUM_AUSWERTUNG;
                     else return 0; //???
 
-                    rc = dbase_begin( (DBase*) s_selection->zond->dbase_zond, errmsg );
+                    rc = dbase_begin( (DBase*) s_selection->zond->dbase_zond->dbase_work, errmsg );
                     if ( rc ) ERROR_SOND( "dbase_begin" )
 
                     rc = zond_dbase_remove_node( s_selection->zond->dbase_zond->zond_dbase_work, baum_link, head_nr, errmsg );
@@ -202,7 +202,7 @@ treeviews_foreach_selection_loeschen( SondTreeview* tree_view, GtkTreeIter* iter
 
             } while ( (ptr = ptr->next) );
 
-            g_list_free( list_links );
+//            g_list_free( list_links );
         }
 
         rc = zond_dbase_remove_node( s_selection->zond->dbase_zond->zond_dbase_work, baum, node_id, errmsg );
@@ -450,7 +450,7 @@ treeviews_row_activated( SondTreeview* tv, GtkTreePath* tp, GtkTreeViewColumn* t
     rc = oeffnen_node( zond, baum, node_id, &errmsg );
     if ( rc )
     {
-        meldung( zond->app_window, "Fehler - Öffnen\n\n", errmsg, NULL );
+        meldung( zond->app_window, "Fehler beim Öffnen Knoten:\n\n", errmsg, NULL );
         g_free( errmsg );
     }
 

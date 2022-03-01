@@ -738,13 +738,10 @@ zond_dbase_prepare_stmts( ZondDBase* zond_dbase, gint num, const gchar** sql,
         rc = sqlite3_prepare_v2( priv->dbase, sql[i], -1, &stmt[i], NULL );
         if ( rc != SQLITE_OK && errmsg )
         {
-            *errmsg = g_strconcat( "Bei Aufruf sqlite3_prepare_v2 (", sql[i], "):\n",
-                    sqlite3_errstr( rc ), NULL );
-
             //aufräumen
             for ( gint u = 0; u < i; u++ ) sqlite3_finalize( stmt[u] );
 
-            return -1;
+            ERROR_S_MESSAGE( " ("", sql[i], "")\n"", sqlite3_errstr( rc )" )
         }
     }
 
@@ -766,7 +763,7 @@ zond_dbase_prepare( ZondDBase* zond_dbase, const gchar* func, const gchar** sql,
         if ( rc )
         {
             g_free( *stmt );
-            ERROR_SOND( "zond_dbase_prepare_stmts" )
+            ERROR_S
         }
 
         g_object_set_data_full( G_OBJECT(zond_dbase), func, *stmt, g_free );
@@ -1431,7 +1428,7 @@ zond_dbase_get_first_child( ZondDBase* zond_dbase, Baum baum, gint node_id, gcha
         };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
-    if ( rc ) ERROR_SOND( "zond_dbase_prepare" )
+    if ( rc ) ERROR_S
 
     rc = sqlite3_bind_int( stmt[0 + (gint) baum], 1, node_id );
     if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (node_id)" )
@@ -1442,12 +1439,7 @@ zond_dbase_get_first_child( ZondDBase* zond_dbase, Baum baum, gint node_id, gcha
     if ( rc == SQLITE_ROW ) first_child_id =
             sqlite3_column_int( stmt[0 + (gint) baum], 1 );
 
-    if ( rc == SQLITE_DONE )
-    {
-        if ( errmsg ) *errmsg = g_strdup( "node_id existiert nicht" );
-
-        return -2;
-    }
+    if ( rc == SQLITE_DONE ) ERROR_MESSAGE_VAL( "node_id existiert nicht", -2 )
 
     return first_child_id;
 }
