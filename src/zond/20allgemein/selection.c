@@ -21,6 +21,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../zond_tree_store.h"
 #include "../zond_dbase.h"
 
+#include "../10init/treeviews.h"
 
 #include "../99conv/baum.h"
 #include "../99conv/general.h"
@@ -125,7 +126,6 @@ selection_verschieben( Projekt* zond, Baum baum, gint anchor_id, gboolean kind,
 
 typedef struct {
     Projekt* zond;
-    Baum baum;
     GtkTreeIter* iter_dest;
     gint anchor_id;
     gboolean kind;
@@ -175,17 +175,18 @@ selection_foreach_kopieren( SondTreeview* tree_view, GtkTreeIter* iter, gpointer
     gint rc = 0;
     GtkTreeIter iter_new = { 0, };
     gint node_id = 0;
+    Baum baum = KEIN_BAUM;
     gint new_node_id = 0;
 
     SSelectionKopieren* s_selection = (SSelectionKopieren*) data;
 
+    rc = treeviews_get_baum_and_node_id( s_selection->zond, iter, &baum, &node_id );
+    if ( rc ) ERROR_S_MESSAGE( "Bei treeviews_get_baum_and_node_id:\nKein Baum gefunden" )
+
     rc = dbase_begin( (DBase*) s_selection->zond->dbase_zond->dbase_work, errmsg );
     if ( rc ) ERROR_SOND( "db_begin" )
 
-    gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(tree_view) ), iter,
-            2, &node_id, -1 );
-
-    new_node_id = selection_copy_node_db( s_selection->zond, FALSE, s_selection->baum,
+    new_node_id = selection_copy_node_db( s_selection->zond, FALSE, baum,
             node_id, s_selection->anchor_id, s_selection->kind, errmsg );
     if ( new_node_id == -1 ) ERROR_ROLLBACK( (DBase*) s_selection->zond->dbase_zond->dbase_work,
             "selection_copy_node_db (urspr. Aufruf)" )
@@ -215,7 +216,7 @@ selection_kopieren( Projekt* zond, Baum baum_von, Baum baum_dest, gint anchor_id
     gint rc = 0;
     GtkTreeIter iter = { 0 };
     gboolean success = FALSE;
-    SSelectionKopieren s_selection = { zond, baum_von, NULL, anchor_id, kind };
+    SSelectionKopieren s_selection = { zond, NULL, anchor_id, kind };
 
     success = sond_treeview_get_cursor( zond->treeview[baum_dest], &iter );
     if ( success )
@@ -604,6 +605,7 @@ selection_foreach_link( SondTreeview* tree_view, GtkTreeIter* iter, gpointer dat
 {
     gint rc = 0;
     gint node_new = 0;
+    Baum baum = KEIN_BAUM;
     gint node_id = 0;
     gint node_id_anchor = 0;
     ZondTreeStore* tree_store_dest = NULL;
@@ -619,8 +621,8 @@ selection_foreach_link( SondTreeview* tree_view, GtkTreeIter* iter, gpointer dat
             &node_id_anchor, -1 );
 
     //node ID, auf den link zeigen soll
-    gtk_tree_model_get( gtk_tree_view_get_model(
-            GTK_TREE_VIEW(tree_view) ), iter, 2, &node_id, -1 );
+    rc = treeviews_get_baum_and_node_id( s_selection->zond, iter, &baum, &node_id );
+    if ( rc ) ERROR_S_MESSAGE( "Bei treeviews_get_baum_and_node_id:\nKein Baum gefunden" )
 
     rc = dbase_begin( (DBase*) s_selection->zond->dbase_zond->dbase_work, errmsg );
     if ( rc ) ERROR_SOND( "dbase_begin" )

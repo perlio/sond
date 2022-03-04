@@ -42,7 +42,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
 
-static gint
+gint
 treeviews_get_baum_and_node_id( Projekt* zond, GtkTreeIter* iter, Baum* baum,
         gint* node_id )
 {
@@ -52,11 +52,11 @@ treeviews_get_baum_and_node_id( Projekt* zond, GtkTreeIter* iter, Baum* baum,
     zond_tree_store_get_target( iter, &iter_orig );
     tree_store = zond_tree_store_get_tree_store( iter_orig.user_data );
 
-    gtk_tree_model_get( GTK_TREE_MODEL(tree_store), &iter_orig, 2, node_id, -1 );
-
     if ( tree_store == ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]) )) ) *baum = BAUM_INHALT;
     else if ( tree_store == ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_AUSWERTUNG]) )) ) *baum = BAUM_AUSWERTUNG;
     else return 1;
+
+    gtk_tree_model_get( GTK_TREE_MODEL(tree_store), &iter_orig, 2, node_id, -1 );
 
     return 0;
 }

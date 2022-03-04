@@ -1,7 +1,5 @@
 /*
 Bugs:
-- fm:
-    - manchmal (nach Verschieben) wird leeres child angezeigt
 
 ToDo:
 - Synchron-Punkte

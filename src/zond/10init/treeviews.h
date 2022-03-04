@@ -6,6 +6,8 @@ typedef int gint;
 typedef struct _Projekt Projekt;
 typedef enum BAEUME Baum;
 
+gint treeviews_get_baum_and_node_id( Projekt*, GtkTreeIter*, Baum*, gint* );
+
 gint treeviews_entfernen_anbindung( Projekt*, Baum, gchar** );
 
 gint treeviews_selection_loeschen( Projekt*, Baum, gchar** );
