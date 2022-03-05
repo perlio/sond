@@ -121,7 +121,7 @@ pdf_ocr_free_zond_token( gpointer data )
 
     if ( zond_token->tok == PDF_TOK_KEYWORD || zond_token->tok == PDF_TOK_NAME )
             g_free( zond_token->s );
-    else if ( zond_token->tok == PDF_TOK_INLINE_STREAM || zond_token->tok == PDF_TOK_STRING ) g_byte_array_unref( zond_token->gba );
+    else if ( zond_token->tok == (pdf_token) PDF_TOK_INLINE_STREAM || zond_token->tok == PDF_TOK_STRING ) g_byte_array_unref( zond_token->gba );
 
     return;
 }

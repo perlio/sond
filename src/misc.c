@@ -35,7 +35,6 @@ void display_message( GtkWidget* window, const gchar* text1, ... )
             GTK_BUTTONS_CLOSE, message );
     g_free( message );
 
-    gtk_widget_show_all( dialog );
     gtk_dialog_run ( GTK_DIALOG (dialog) );
 
     gtk_widget_destroy( dialog );

@@ -243,7 +243,7 @@ cb_menu_datei_speichern_activate( GtkMenuItem* item, gpointer user_data )
     rc = project_speichern( zond, &errmsg );
     if ( rc )
     {
-        meldung( zond->app_window, "Fehler beim Speichern -\n\nBei Aufruf "
+        display_message( zond->app_window, "Fehler beim Speichern -\n\nBei Aufruf "
                 "project_speichern:\n", errmsg, NULL );
         g_free( errmsg );
     }
@@ -322,7 +322,7 @@ projekt_schliessen( Projekt* zond, gchar** errmsg )
     project_clear_dbase_zond( &(zond->dbase_zond) );
 
     gint res = g_remove( working_copy );
-    if ( res == -1 ) meldung( zond->app_window, "Fehler beim Löschen der "
+    if ( res == -1 ) display_message( zond->app_window, "Fehler beim Löschen der "
             "temporären Datenbank:\n", strerror( errno ), NULL );
     g_free( working_copy );
 
@@ -428,7 +428,7 @@ cb_menu_datei_oeffnen_activate( GtkMenuItem* item, gpointer user_data )
     g_free( abs_path );
     if ( rc == -1 )
     {
-        meldung( zond->app_window, "Fehler beim Öffnen-\n\nBei Aufruf "
+        display_message( zond->app_window, "Fehler beim Öffnen-\n\nBei Aufruf "
                 "project_oeffnen:\n", errmsg, NULL );
         g_free( errmsg );
 
@@ -439,7 +439,7 @@ cb_menu_datei_oeffnen_activate( GtkMenuItem* item, gpointer user_data )
     rc = db_baum_refresh( zond, &errmsg );
     if ( rc == -1 )
     {
-        meldung( zond->app_window, "Fehler beim Öffnen des Projekts:\nBei "
+        display_message( zond->app_window, "Fehler beim Öffnen des Projekts:\nBei "
                 "Aufruf db_baum_refresh:\n", errmsg, NULL );
         g_free( errmsg );
     }
@@ -467,7 +467,7 @@ cb_menu_datei_neu_activate( GtkMenuItem* item, gpointer user_data )
     g_free( abs_path );
     if ( rc == -1 )
     {
-        meldung( zond->app_window, "Fehler beim Öffnen-\n\nBei Aufruf "
+        display_message( zond->app_window, "Fehler beim Öffnen-\n\nBei Aufruf "
                 "project_oeffnen:\n", errmsg, NULL );
         g_free( errmsg );
     }

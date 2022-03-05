@@ -97,25 +97,6 @@ sond_treeviewfm_dbase_end( SondTreeviewFM* stvfm, gboolean suc, gchar** errmsg )
 }
 
 
-static void
-sond_treeviewfm_finalize( GObject* g_object )
-{
-    Clipboard* clipboard = NULL;
-
-    SondTreeviewFMPrivate* stvfm_priv = sond_treeviewfm_get_instance_private( SOND_TREEVIEWFM(g_object) );
-
-    g_free( stvfm_priv->root );
-
-    clipboard = sond_treeview_get_clipboard(SOND_TREEVIEW(g_object) );
-    if ( G_OBJECT(clipboard->tree_view) == g_object )
-            g_ptr_array_remove_range( clipboard->arr_ref, 0, clipboard->arr_ref->len );
-
-    G_OBJECT_CLASS (sond_treeviewfm_parent_class)->finalize (g_object);
-
-    return;
-}
-
-
 static gboolean
 sond_treeviewfm_other_fm( SondTreeviewFM* stvfm )
 {
@@ -341,8 +322,8 @@ sond_treeviewfm_move_copy_create_delete( SondTreeviewFM* stvfm, GFile* file_sour
 }
 
 
-void
-sond_treeviewfm_row_text_edited( GtkCellRenderer* cell, gchar* path_string, gchar* new_text,
+static void
+sond_treeviewfm_text_edited( GtkCellRenderer* cell, gchar* path_string, gchar* new_text,
         gpointer data )
 {
     gchar* errmsg = NULL;
@@ -893,17 +874,51 @@ sond_treeviewfm_render_file_name( SondTreeview* stv, GtkTreeIter* iter, gpointer
 
 
 static void
+sond_treeviewfm_finalize( GObject* g_object )
+{
+    Clipboard* clipboard = NULL;
+
+    SondTreeviewFMPrivate* stvfm_priv = sond_treeviewfm_get_instance_private( SOND_TREEVIEWFM(g_object) );
+
+    g_free( stvfm_priv->root );
+
+    clipboard = sond_treeview_get_clipboard(SOND_TREEVIEW(g_object) );
+    if ( G_OBJECT(clipboard->tree_view) == g_object )
+            g_ptr_array_remove_range( clipboard->arr_ref, 0, clipboard->arr_ref->len );
+
+    G_OBJECT_CLASS (sond_treeviewfm_parent_class)->finalize (g_object);
+
+    return;
+}
+
+
+static void
+sond_treeviewfm_constructed( GObject* self )
+{
+    //Text-Spalte wird editiert
+    g_signal_connect( sond_treeview_get_cell_renderer_text( SOND_TREEVIEW(self) ),
+            "edited", G_CALLBACK(SOND_TREEVIEWFM_GET_CLASS(self)->text_edited), self); //Klick in textzelle = Datei umbenennen
+
+    G_OBJECT_CLASS(sond_treeviewfm_parent_class)->constructed( self );
+
+    return;
+}
+
+
+static void
 sond_treeviewfm_class_init( SondTreeviewFMClass* klass )
 {
+    GObjectClass *object_class = G_OBJECT_CLASS(klass);
+
+    object_class->finalize = sond_treeviewfm_finalize;
+    object_class->constructed = sond_treeviewfm_constructed;
+
     klass->dbase_begin = sond_treeviewfm_dbase_begin;
     klass->dbase_test = sond_treeviewfm_dbase_test;
     klass->dbase_update_path = sond_treeviewfm_dbase_update_path;
     klass->dbase_update_eingang = sond_treeviewfm_dbase_update_eingang;
-    klass->dbase_end= sond_treeviewfm_dbase_end;
-
-    GObjectClass *object_class = G_OBJECT_CLASS(klass);
-
-    object_class->finalize = sond_treeviewfm_finalize;
+    klass->dbase_end = sond_treeviewfm_dbase_end;
+    klass->text_edited = sond_treeviewfm_text_edited;
 
     return;
 }
@@ -981,10 +996,6 @@ SondTreeviewFM*
 sond_treeviewfm_new( void )
 {
     SondTreeviewFM* stvfm = g_object_new( SOND_TYPE_TREEVIEWFM, NULL );
-
-    //Text-Spalte wird editiert
-    g_signal_connect( sond_treeview_get_cell_renderer_text( SOND_TREEVIEW(stvfm) ),
-            "edited", G_CALLBACK(sond_treeviewfm_row_text_edited), stvfm ); //Klick in textzelle = Datei umbenennen
 
     return stvfm;
 }

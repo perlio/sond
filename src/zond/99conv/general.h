@@ -24,14 +24,10 @@ gchar* utf8_to_local_filename( const gchar* );
 
 gint string_to_guint( const gchar*, guint* );
 
-gchar* prepend_string( gchar*, gchar* );
-
 /* Sonst. */
 gchar* filename_speichern( GtkWindow*, const gchar* );
 
 gchar* filename_oeffnen( GtkWindow* );
-
-void meldung( GtkWidget*, const gchar*, ... );
 
 gint hat_vorfahre_datei( Projekt*, Baum, gint, gboolean, gchar** );
 

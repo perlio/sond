@@ -4,7 +4,6 @@
 typedef char gchar;
 
 gchar* add_string( gchar*, gchar* );
-gchar* prepend_string( gchar*, gchar* );
 
 
 //Fehlerbehandlung

@@ -59,18 +59,6 @@ string_to_guint( const gchar* string, guint* zahl )
 }
 
 
-gchar*
-prepend_string( gchar* old_string, gchar* prepend )
-{
-    gchar* new_string = g_strconcat( prepend, old_string, NULL );
-    g_free( old_string );
-    g_free( prepend );
-
-    return new_string;
-}
-
-
-
 /** Andere Sachen **/
 gchar*
 filename_speichern( GtkWindow* window, const gchar* titel )
@@ -107,37 +95,6 @@ filename_oeffnen( GtkWindow* window )
     g_free( uri_unescaped );
 
     return abs_path; //muß g_freed werden
-}
-
-
-/*
-**  Zeigt Fenster mit Liste übergebener Strings.
-**  Muß mit NULL abgeschlossen werden.
-**  text1 darf nicht NULL sein!  */
-void
-meldung( GtkWidget* window, const gchar* text1, ... )
-{
-    va_list ap;
-    gchar* message = g_strdup( "" );
-    gchar* str = NULL;
-
-    str = (gchar*) text1;
-    va_start( ap, text1 );
-    while ( str )
-    {
-        message = add_string( message, g_strdup( str ) );
-        str = va_arg( ap, gchar* );
-    }
-
-    GtkWidget* dialog = gtk_message_dialog_new( GTK_WINDOW(window),
-            GTK_DIALOG_DESTROY_WITH_PARENT, GTK_MESSAGE_INFO,
-            GTK_BUTTONS_CLOSE, message );
-    gtk_dialog_run ( GTK_DIALOG (dialog) );
-    gtk_widget_destroy( dialog );
-
-    g_free( message );
-
-    return;
 }
 
 

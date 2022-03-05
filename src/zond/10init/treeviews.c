@@ -393,7 +393,7 @@ treeviews_insert_node( Projekt* zond, Baum baum_active, gboolean child, gchar** 
         if ( rc == -1 ) ERROR_SOND( "hat_vorfahre_datei" )
         else if ( rc == 1 )
         {
-            meldung( zond->app_window, "Einfügen als Unterpunkt von Datei nicht zulässig", NULL );
+            display_message( zond->app_window, "Einfügen als Unterpunkt von Datei nicht zulässig", NULL );
 
             return 1; //Abbruch ohne Fählermeldung
         }
@@ -448,7 +448,7 @@ treeviews_row_activated( SondTreeview* tv, GtkTreePath* tp, GtkTreeViewColumn* t
     rc = oeffnen_node( zond, baum, node_id, &errmsg );
     if ( rc )
     {
-        meldung( zond->app_window, "Fehler beim Öffnen Knoten:\n\n", errmsg, NULL );
+        display_message( zond->app_window, "Fehler beim Öffnen Knoten:\n\n", errmsg, NULL );
         g_free( errmsg );
     }
 
@@ -636,7 +636,7 @@ treeviews_cb_cell_edited( GtkCellRenderer* cell, gchar* path_string, gchar* new_
     rc = zond_dbase_set_node_text( zond->dbase_zond->zond_dbase_work, baum, node_id, new_text, &errmsg );
     if ( rc )
     {
-        meldung( gtk_widget_get_toplevel( GTK_WIDGET(stv) ), "Knoten umbenennen nicht möglich\n\n"
+        display_message( gtk_widget_get_toplevel( GTK_WIDGET(stv) ), "Knoten umbenennen nicht möglich\n\n"
                 "Bei Aufruf zond_dbase_set_node_text:\n", errmsg, NULL );
         g_free( errmsg );
     }

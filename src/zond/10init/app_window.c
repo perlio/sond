@@ -155,7 +155,7 @@ cb_textview_focus_out( GtkWidget* textview, GdkEvent* event, gpointer user_data 
         g_free( text );
         if ( rc )
         {
-            meldung( zond->app_window, "Fehler in cb_textview_focus_out:\n\n"
+            display_message( zond->app_window, "Fehler in cb_textview_focus_out:\n\n"
                     "Bei Aufruf zond_dbase_set_text:\n", errmsg, NULL );
             g_free( errmsg );
 

@@ -121,13 +121,13 @@ cb_textsuche_changed( GtkListBox* box, GtkListBoxRow* row, gpointer data )
     node_id = zond_dbase_get_node_id_from_rel_path( zond->dbase_zond->zond_dbase_work, pdf_text_occ.rel_path, &errmsg );
     if ( node_id == 0 )
     {
-        meldung( zond->app_window, "Fehler -\n\n"
+        display_message( zond->app_window, "Fehler -\n\n"
                 "Datei ", pdf_text_occ.rel_path, " nicht vorhanden", NULL );
         return;
     }
     else if ( node_id < 0 )
     {
-        meldung( zond->app_window, "Fehler - \n\n"
+        display_message( zond->app_window, "Fehler - \n\n"
                 "Bei Aufruf zond_dbase_get_node_id_from_rel_path:\n", errmsg, NULL );
         g_free( errmsg );
 
@@ -145,7 +145,7 @@ cb_textsuche_changed( GtkListBox* box, GtkListBoxRow* row, gpointer data )
     node_id = ziele_abfragen_anker_rek( zond, node_id, anbindung, &kind, &errmsg );
     if ( node_id == -1 )
     {
-        meldung( zond->app_window, "Fehler -\n\nBei Aufruf ziele_abfragen_anker_"
+        display_message( zond->app_window, "Fehler -\n\nBei Aufruf ziele_abfragen_anker_"
                 "rek:\n", errmsg, NULL );
         g_free( errmsg );
 
@@ -158,7 +158,7 @@ cb_textsuche_changed( GtkListBox* box, GtkListBoxRow* row, gpointer data )
         node_id = zond_dbase_get_parent( zond->dbase_zond->zond_dbase_work, BAUM_INHALT, node_id, &errmsg );
         if ( node_id < 0 )
         {
-            meldung( zond->app_window, "Fehler - \n\nBei Aufruf zond_dbase_get_parent:\n",
+            display_message( zond->app_window, "Fehler - \n\nBei Aufruf zond_dbase_get_parent:\n",
                     errmsg, NULL );
             g_free( errmsg );
 
@@ -198,7 +198,7 @@ cb_textsuche_act( GtkListBox* box, GtkListBoxRow* row, gpointer data )
     rc = oeffnen_datei( zond, pdf_text_occ.rel_path, NULL, &pos_pdf, &errmsg );
     if ( rc )
     {
-        meldung( zond->app_window, "Fehler in Textsuche -\n\n"
+        display_message( zond->app_window, "Fehler in Textsuche -\n\n"
                 "Bei Aufruf oeffnen_datei:\n", errmsg, NULL );
         g_free( errmsg );
 

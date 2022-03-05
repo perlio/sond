@@ -173,7 +173,7 @@ cb_datei_oeffnen( GtkWidget* item, gpointer data )
     g_free( filename );
     if ( rc )
     {
-        meldung( pv->vf, "Fehler - Datei öffnen\n\n"
+        display_message( pv->vf, "Fehler - Datei öffnen\n\n"
                 "Bei Aufruf pv_oeffnen_datei:\n", errmsg, NULL );
         g_free( errmsg );
     }
@@ -218,7 +218,7 @@ open_app( GtkApplication* app, gpointer files, gint n_files, gchar *hint,
     g_free( uri_unesc );
     if ( rc )
     {
-        meldung( pv->vf, "Fehler - Datei öffnen:\n", errmsg, NULL );
+        display_message( pv->vf, "Fehler - Datei öffnen:\n", errmsg, NULL );
         g_free( errmsg );
     }
 

@@ -373,6 +373,11 @@
 		</Unit>
 		<Unit filename="src/sond_treeview.c">
 			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Viewer (Testing)" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
 		</Unit>
 		<Unit filename="src/sond_treeview.h">
 			<Option target="zond (Release)" />
@@ -382,8 +387,19 @@
 		</Unit>
 		<Unit filename="src/sond_treeviewfm.c">
 			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Viewer (Testing)" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
 		</Unit>
-		<Unit filename="src/sond_treeviewfm.h" />
+		<Unit filename="src/sond_treeviewfm.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Viewer (Testing)" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
 		<Unit filename="src/zond/10init/app_window.c">
 			<Option compilerVar="CC" />
 			<Option target="zond (Release)" />
@@ -644,15 +660,11 @@
 		<Unit filename="src/zond/99conv/test.h">
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
-			<Option target="Viewer (Release)" />
-			<Option target="Viewer (Testing)" />
 		</Unit>
 		<Unit filename="src/zond/ToDo.c">
 			<Option compilerVar="CC" />
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
-			<Option target="Viewer (Release)" />
-			<Option target="Viewer (Testing)" />
 		</Unit>
 		<Unit filename="src/zond/enums.h">
 			<Option target="zond (Release)" />
@@ -676,14 +688,29 @@
 		</Unit>
 		<Unit filename="src/zond/zond_dbase.c">
 			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
 		</Unit>
-		<Unit filename="src/zond/zond_dbase.h" />
+		<Unit filename="src/zond/zond_dbase.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
 		<Unit filename="src/zond/zond_pdf_document.c">
 			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Viewer (Testing)" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
 		</Unit>
 		<Unit filename="src/zond/zond_pdf_document.h">
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
+			<Option target="Viewer (Testing)" />
 		</Unit>
 		<Unit filename="src/zond/zond_tree_store.c">
 			<Option compilerVar="CC" />

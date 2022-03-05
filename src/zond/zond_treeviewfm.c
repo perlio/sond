@@ -186,7 +186,7 @@ zond_treeviewfm_dbase_end( SondTreeviewFM* stvfm, gboolean suc, gchar** errmsg )
 
 
 static void
-zond_treeviewfm_row_text_edited( GtkCellRenderer* cell, gchar* path_string, gchar* new_text,
+zond_treeviewfm_text_edited( GtkCellRenderer* cell, gchar* path_string, gchar* new_text,
         gpointer data )
 {
     gboolean changed = FALSE;
@@ -200,7 +200,7 @@ zond_treeviewfm_row_text_edited( GtkCellRenderer* cell, gchar* path_string, gcha
     if ( ztvfm_priv->zond->dbase_zond->changed ) changed = TRUE;
 
     //chain-up
-    sond_treeviewfm_row_text_edited( cell, path_string, new_text, data );
+    SOND_TREEVIEWFM_CLASS(zond_treeviewfm_parent_class)->text_edited( cell, path_string, new_text, data );
 
     if ( !changed ) project_reset_changed( ztvfm_priv->zond );
 
@@ -249,6 +249,7 @@ zond_treeviewfm_class_init( ZondTreeviewFMClass* klass )
     SOND_TREEVIEWFM_CLASS(klass)->dbase_update_path = zond_treeviewfm_dbase_update_path;
     SOND_TREEVIEWFM_CLASS(klass)->dbase_update_eingang = zond_treeviewfm_dbase_update_eingang;
     SOND_TREEVIEWFM_CLASS(klass)->dbase_end = zond_treeviewfm_dbase_end;
+    SOND_TREEVIEWFM_CLASS(klass)->text_edited = zond_treeviewfm_text_edited;
 
     return;
 }
@@ -265,10 +266,6 @@ ZondTreeviewFM*
 zond_treeviewfm_new( Projekt* zond )
 {
     ZondTreeviewFM* ztvfm = g_object_new( ZOND_TYPE_TREEVIEWFM, "Projekt", zond, NULL );
-
-    //Text-Spalte wird editiert
-    g_signal_connect( sond_treeview_get_cell_renderer_text( SOND_TREEVIEW(ztvfm) ),
-            "edited", G_CALLBACK(zond_treeviewfm_row_text_edited), ztvfm ); //Klick in textzelle = Datei umbenennen
 
     return ztvfm;
 }

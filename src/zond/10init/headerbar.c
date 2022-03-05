@@ -159,7 +159,7 @@ cb_item_clean_pdf( GtkMenuItem* item, gpointer data )
     {
         if ( errmsg )
         {
-            meldung( zond->app_window, "PDF kann nicht gereinigt werden\n\nBei "
+            display_message( zond->app_window, "PDF kann nicht gereinigt werden\n\nBei "
                     "Aufruf selection_abfragen_pdf:\n", errmsg, NULL );
             g_free( errmsg );
         }
@@ -169,7 +169,7 @@ cb_item_clean_pdf( GtkMenuItem* item, gpointer data )
 
     if ( arr_rel_path->len == 0 )
     {
-        meldung( zond->app_window, "Keine PDF-Datei ausgewählt", NULL );
+        display_message( zond->app_window, "Keine PDF-Datei ausgewählt", NULL );
         g_ptr_array_free( arr_rel_path, TRUE );
 
         return;
@@ -204,7 +204,7 @@ cb_item_clean_pdf( GtkMenuItem* item, gpointer data )
         //prüfen, ob in Viewer geöffnet
         if ( zond_pdf_document_is_open( g_ptr_array_index( arr_rel_path, i ) ) )
         {
-            meldung( zond->app_window, "PDF ", g_ptr_array_index( arr_rel_path, i ), " säubern nicht möglich\n\n"
+            display_message( zond->app_window, "PDF ", g_ptr_array_index( arr_rel_path, i ), " säubern nicht möglich\n\n"
                     "PDF bereits geöffnet - zunächst schließen", NULL );
 
             continue;
@@ -213,7 +213,7 @@ cb_item_clean_pdf( GtkMenuItem* item, gpointer data )
         fz_try( zond->ctx ) doc = pdf_open_document( zond->ctx, g_ptr_array_index( arr_rel_path, i ) );
         fz_catch( zond->ctx )
         {
-            meldung( zond->app_window, "PDF ", g_ptr_array_index( arr_rel_path, i ), " säubern nicht möglich\n\n"
+            display_message( zond->app_window, "PDF ", g_ptr_array_index( arr_rel_path, i ), " säubern nicht möglich\n\n"
                     "Bei Aufruf pdf_open_document:\n", fz_caught_message( zond->ctx ), NULL );
 
             continue;
@@ -223,7 +223,7 @@ cb_item_clean_pdf( GtkMenuItem* item, gpointer data )
         fz_catch( zond->ctx )
         {
             pdf_drop_document( zond->ctx, doc );
-            meldung( zond->app_window, "PDF ", g_ptr_array_index( arr_rel_path, i ), " säubern nicht möglich\n\n"
+            display_message( zond->app_window, "PDF ", g_ptr_array_index( arr_rel_path, i ), " säubern nicht möglich\n\n"
                     "Bei Aufruf pdf_clean_document:\n", fz_caught_message( zond->ctx ), NULL );
 
             continue;
@@ -236,7 +236,7 @@ cb_item_clean_pdf( GtkMenuItem* item, gpointer data )
         fz_catch( zond->ctx )
         {
             g_free( path_tmp );
-            meldung( zond->app_window, "PDF ", g_ptr_array_index( arr_rel_path, i ), " säubern nicht möglich\n\n"
+            display_message( zond->app_window, "PDF ", g_ptr_array_index( arr_rel_path, i ), " säubern nicht möglich\n\n"
                     "Bei Aufruf pdf_save_document:\n", fz_caught_message( zond->ctx ), NULL );
 
             continue;
@@ -245,7 +245,7 @@ cb_item_clean_pdf( GtkMenuItem* item, gpointer data )
         if ( g_remove( g_ptr_array_index( arr_rel_path, i ) ) )
         {
             g_free( path_tmp );
-            meldung( zond->app_window, "PDF ", g_ptr_array_index( arr_rel_path, i ), " säubern nicht möglich\n\n"
+            display_message( zond->app_window, "PDF ", g_ptr_array_index( arr_rel_path, i ), " säubern nicht möglich\n\n"
                     "Bei Aufruf g_remove (old):\n", strerror( errno ), NULL );
 
             continue;
@@ -253,7 +253,7 @@ cb_item_clean_pdf( GtkMenuItem* item, gpointer data )
         if ( g_rename( path_tmp, g_ptr_array_index( arr_rel_path, i ) ) )
         {
             g_free( path_tmp );
-            meldung( zond->app_window, "PDF ", g_ptr_array_index( arr_rel_path, i ), " säubern nicht möglich\n\n"
+            display_message( zond->app_window, "PDF ", g_ptr_array_index( arr_rel_path, i ), " säubern nicht möglich\n\n"
                     "Bei Aufruf g_rename (*.tmp_clean->.pdf):\n", strerror( errno ), NULL );
 
             continue;
@@ -282,7 +282,7 @@ cb_item_textsuche( GtkMenuItem* item, gpointer data )
     {
         if ( errmsg )
         {
-            meldung( zond->app_window, "Textsuche nicht möglich\n\nBei "
+            display_message( zond->app_window, "Textsuche nicht möglich\n\nBei "
                     "Aufruf selection_abfragen_pdf:\n", errmsg, NULL );
             g_free( errmsg );
         }
@@ -292,7 +292,7 @@ cb_item_textsuche( GtkMenuItem* item, gpointer data )
 
     if ( arr_rel_path->len == 0 )
     {
-        meldung( zond->app_window, "Keine PDF-Datei ausgewählt", NULL );
+        display_message( zond->app_window, "Keine PDF-Datei ausgewählt", NULL );
         g_ptr_array_free( arr_rel_path, TRUE );
 
         return;
@@ -323,7 +323,7 @@ cb_item_textsuche( GtkMenuItem* item, gpointer data )
     {
         if ( rc == -1 )
         {
-            meldung( zond->app_window, "Fehler in Textsuche in PDF -\n\n"
+            display_message( zond->app_window, "Fehler in Textsuche in PDF -\n\n"
                     "Bei Aufruf pdf_textsuche:\n", errmsg, NULL );
             g_free( errmsg );
         }
@@ -337,7 +337,7 @@ cb_item_textsuche( GtkMenuItem* item, gpointer data )
 
     if ( arr_pdf_text_occ->len == 0 )
     {
-        meldung( zond->app_window, "Keine Treffer", NULL );
+        display_message( zond->app_window, "Keine Treffer", NULL );
         g_ptr_array_free( arr_rel_path, TRUE );
         g_array_free( arr_pdf_text_occ, TRUE );
         g_free( search_text );
@@ -350,7 +350,7 @@ cb_item_textsuche( GtkMenuItem* item, gpointer data )
             arr_pdf_text_occ, &errmsg );
     if ( rc )
     {
-        meldung( zond->app_window, "Fehler in Textsuche in PDF -\n\n"
+        display_message( zond->app_window, "Fehler in Textsuche in PDF -\n\n"
                 "Bei Aufruf pdf_text_anzeigen_ergebnisse:\n",
                 errmsg, NULL );
         g_free( errmsg );
@@ -381,7 +381,7 @@ cb_datei_ocr( GtkMenuItem* item, gpointer data )
     {
         if ( errmsg )
         {
-            meldung( zond->app_window, "Texterkennung nicht möglich\n\nBei "
+            display_message( zond->app_window, "Texterkennung nicht möglich\n\nBei "
                     "Aufruf selection_abfragen_pdf:\n", errmsg, NULL );
             g_free( errmsg );
         }
@@ -391,7 +391,7 @@ cb_datei_ocr( GtkMenuItem* item, gpointer data )
 
     if ( arr_rel_path->len == 0 )
     {
-        meldung( zond->app_window, "Keine PDF-Datei ausgewählt", NULL );
+        display_message( zond->app_window, "Keine PDF-Datei ausgewählt", NULL );
         g_ptr_array_unref( arr_rel_path );
 
         return;
@@ -407,7 +407,7 @@ cb_datei_ocr( GtkMenuItem* item, gpointer data )
         //prüfen, ob in Viewer geöffnet
         if ( zond_pdf_document_is_open( g_ptr_array_index( arr_rel_path, i ) ) )
         {
-            meldung( info_window->dialog, "Datei in Viewer geöffnet", NULL );
+            display_message( info_window->dialog, "Datei in Viewer geöffnet", NULL );
 
             continue;
         }
@@ -491,7 +491,7 @@ cb_punkt_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
         rc = sond_treeviewfm_create_dir( SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), child, &errmsg );
         if ( rc )
         {
-            meldung( zond->app_window, "Verzeichnis kann nicht eingefügt werden\n\n"
+            display_message( zond->app_window, "Verzeichnis kann nicht eingefügt werden\n\n"
                     "Bei Aufruf fm_create_dir:\n", errmsg, NULL );
             g_free( errmsg );
         }
@@ -501,7 +501,7 @@ cb_punkt_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
         rc = treeviews_insert_node( zond, baum, child, &errmsg );
         if ( rc == -1 )
         {
-            meldung( zond->app_window, "Punkt einfügen fehlgeschlagen\n\n"
+            display_message( zond->app_window, "Punkt einfügen fehlgeschlagen\n\n"
                     "Bei Aufruf treeviews_insert_node:\n", errmsg, NULL );
             g_free( errmsg );
         }
@@ -527,7 +527,7 @@ cb_item_text_anbindung( GtkMenuItem* item, gpointer data )
     rc = treeviews_node_text_nach_anbindung( zond, baum, &errmsg );
     if ( rc == -1 )
     {
-        meldung( zond->app_window, "Knotentext anpassen fehlgeschlagen:\n\n"
+        display_message( zond->app_window, "Knotentext anpassen fehlgeschlagen:\n\n"
                 "Bei Aufruf treeviews_node_text_nach_anbindung:\n", errmsg, NULL );
         g_free( errmsg );
     }
@@ -555,7 +555,7 @@ cb_change_icon_item( GtkMenuItem* item, gpointer data )
     rc = treeviews_change_icon_id( zond, baum, zond->icon[icon_id].icon_name, &errmsg );
     if ( rc == -1 )
     {
-        meldung( zond->app_window, "Icon ändern fehlgeschlagen:\n\n"
+        display_message( zond->app_window, "Icon ändern fehlgeschlagen:\n\n"
                 "Bei Aufruf treeviews_change_icon_id:\n", errmsg, NULL );
         g_free( errmsg );
     }
@@ -579,7 +579,7 @@ cb_eingang_activate( GtkMenuItem* item, gpointer data )
         rc = eingang_set( SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), &errmsg );
         if ( rc )
         {
-            meldung( zond->app_window, "Eingang ändern fehlgeschlagen -\n\nBei Aufruf "
+            display_message( zond->app_window, "Eingang ändern fehlgeschlagen -\n\nBei Aufruf "
                     "fm_set_eingang:\n", errmsg, NULL );
             g_free( errmsg );
         }
@@ -655,7 +655,7 @@ cb_loeschen_activate( GtkMenuItem* item, gpointer user_data )
             treeviews_selection_loeschen( zond, baum, &errmsg );
     if ( rc == -1 )
     {
-        meldung( zond->app_window, "Löschen fehlgeschlagen -\n\nBei Aufruf "
+        display_message( zond->app_window, "Löschen fehlgeschlagen -\n\nBei Aufruf "
                 "sond_treeviewfm_selection/treeviews_loeschen:\n", errmsg, NULL );
         g_free( errmsg );
     }
@@ -679,7 +679,7 @@ cb_anbindung_entfernenitem_activate( GtkMenuItem* item, gpointer user_data )
     rc = treeviews_entfernen_anbindung( zond, baum, &errmsg );
     if ( rc )
     {
-        meldung( zond->app_window, "Fehler bei löschen von Anbindungen - \n\n",
+        display_message( zond->app_window, "Fehler bei löschen von Anbindungen - \n\n",
                 errmsg, NULL );
         g_free( errmsg );
     }
@@ -756,7 +756,7 @@ cb_menu_test_activate( GtkMenuItem* item, gpointer zond )
     rc = test( (Projekt*) zond, &errmsg );
     if ( rc )
     {
-        meldung( ((Projekt*) zond)->app_window, "Test:\n\n", errmsg, NULL );
+        display_message( ((Projekt*) zond)->app_window, "Test:\n\n", errmsg, NULL );
         g_free( errmsg );
     }
 
@@ -824,7 +824,7 @@ cb_settings_zoom( GtkMenuItem* item, gpointer data )
     rc = string_to_guint( text, &zoom );
     if ( rc == 0 && zoom >= ZOOM_MIN && zoom <= ZOOM_MAX )
             g_settings_set_double( zond->settings, "zoom", (gdouble) zoom );
-    else meldung( zond->app_window, "Eingabe nicht gültig", NULL );
+    else display_message( zond->app_window, "Eingabe nicht gültig", NULL );
 
     g_free( text );
 

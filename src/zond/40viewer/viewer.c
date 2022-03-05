@@ -515,7 +515,7 @@ viewer_save_dirty_docs( PdfViewer* pdfv, gboolean ask )
                 zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
                 if ( rc )
                 {
-                    meldung( pdfv->vf, "Dokument ", zond_pdf_document_get_path( dd->zond_pdf_document ),
+                    display_message( pdfv->vf, "Dokument ", zond_pdf_document_get_path( dd->zond_pdf_document ),
                             "\nkonnte nicht gespeichert werden:\n", errmsg, NULL );
 
                     g_free( errmsg );
@@ -1020,7 +1020,7 @@ cb_viewer_text_search( GtkWidget* widget, gpointer data )
     if ( pv->arr_text_occ->len == 0 )
     {
         pv->text_occ_search_completed = -1;
-        meldung( pv->vf, "Kein Treffer", NULL );
+        display_message( pv->vf, "Kein Treffer", NULL );
 
         return;
     }
@@ -1391,7 +1391,7 @@ cb_viewer_swindow_key_press( GtkWidget* swindow, GdkEvent* event, gpointer user_
         rc = viewer_annot_delete( pdf_document_page, pv->clicked_annot, &errmsg );
         if ( rc )
         {
-            meldung( pv->vf, "Fehler -Annotation löschen\n\n"
+            display_message( pv->vf, "Fehler -Annotation löschen\n\n"
                     "Bei Aufruf annot_delete", errmsg, NULL );
             g_free( errmsg );
         }
@@ -1401,7 +1401,7 @@ cb_viewer_swindow_key_press( GtkWidget* swindow, GdkEvent* event, gpointer user_
                     zond_pdf_document_get_index( pdf_document_page ), 2, &errmsg );
             if ( rc )
             {
-                meldung( pv->vf, "Fehler - Annotation löschen\n\n"
+                display_message( pv->vf, "Fehler - Annotation löschen\n\n"
                         "Bei Aufruf zond_pdf_document_page_refresh:\n", errmsg, NULL );
                 g_free( errmsg );
                 zond_pdf_document_mutex_unlock( pdf_document_page->document );
@@ -1413,7 +1413,7 @@ cb_viewer_swindow_key_press( GtkWidget* swindow, GdkEvent* event, gpointer user_
                     viewer_cb_change_annot, NULL, &errmsg );
             if ( rc )
             {
-                meldung( pv->vf, "Fehler -\n\n",
+                display_message( pv->vf, "Fehler -\n\n",
                         "Bei Aufruf viewer_refresh_changed_page:\n", errmsg, NULL );
                 g_free( errmsg );
 
@@ -1571,7 +1571,7 @@ cb_viewer_layout_release_button( GtkWidget* layout, GdkEvent* event, gpointer da
             rc = viewer_annot_create( pdf_document_page, pv->highlight, pv->state, &errmsg );
             if ( rc )
             {
-                meldung( pv->vf, "Fehler - Annotation einfügen:\n\nBei Aufruf "
+                display_message( pv->vf, "Fehler - Annotation einfügen:\n\nBei Aufruf "
                         "annot_create:\n", errmsg, NULL );
                 g_free( errmsg );
             }
@@ -1581,7 +1581,7 @@ cb_viewer_layout_release_button( GtkWidget* layout, GdkEvent* event, gpointer da
                         zond_pdf_document_get_index( pdf_document_page ), 2, &errmsg );
                 if ( rc )
                 {
-                    meldung( pv->vf, "Fehler - Annotation einfügen\n\n"
+                    display_message( pv->vf, "Fehler - Annotation einfügen\n\n"
                             "Bei Aufruf zond_pdf_document_page_refresh:\n", errmsg, NULL );
                     g_free( errmsg );
                 }
@@ -1590,7 +1590,7 @@ cb_viewer_layout_release_button( GtkWidget* layout, GdkEvent* event, gpointer da
                         viewer_cb_change_annot, NULL, &errmsg );
                 if ( rc )
                 {
-                    meldung( pv->vf, "Fehler -\n\n",
+                    display_message( pv->vf, "Fehler -\n\n",
                             "Bei Aufruf viewer_refresh_changed_page:\n", errmsg, NULL );
                     g_free( errmsg );
 
@@ -1709,7 +1709,7 @@ cb_viewer_layout_press_button( GtkWidget* layout, GdkEvent* event, gpointer
             rc = ziele_erzeugen_anbindung( pv, &new_node, &errmsg );
             if ( rc == -2 )
             {
-                meldung( pv->vf, "Fehler - Dokument konnte nicht gespeichert/"
+                display_message( pv->vf, "Fehler - Dokument konnte nicht gespeichert/"
                         "erneut geöffnet werden\n\nBei Aufruf ziele_erzeugen_"
                         "anbindung:\n", errmsg, "\n\nViewer wird geschlossen", NULL );
                 g_free( errmsg );
@@ -1717,7 +1717,7 @@ cb_viewer_layout_press_button( GtkWidget* layout, GdkEvent* event, gpointer
             }
             else if ( rc == -1 )
             {
-                meldung( pv->vf, "Fehler - Anbinden per Doppelklick nicht möglich:\n\n"
+                display_message( pv->vf, "Fehler - Anbinden per Doppelklick nicht möglich:\n\n"
                         "Bei Aufruf ziele_erzeugen_anbindung:\n", errmsg, NULL );
                 g_free( errmsg );
             }

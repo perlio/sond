@@ -263,7 +263,7 @@ ziele_erzeugen_ziel( GtkWidget* window, const DisplayedDocument* dd,
                 &ziel->ziel_id_von, &ziel->ziel_id_bis, errmsg );
         if ( rc )
         {
-            meldung( window, "Anbindung konnte nicht erzeugt "
+            display_message( window, "Anbindung konnte nicht erzeugt "
                     "werden\n\nBei Aufruf SetDestPage:\n", *errmsg, NULL );
             g_free( *errmsg );
 

@@ -270,23 +270,6 @@ sond_treeview_expand_row( SondTreeview* stv, GtkTreeIter* iter )
 }
 
 
-GtkTreeIter*
-sond_treeview_insert_node( SondTreeview* stv, GtkTreeIter* iter, gboolean child )
-{
-    GtkTreeIter new_iter;
-    GtkTreeStore* treestore = GTK_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(stv) ));
-
-    //Hauptknoten erzeugen
-    if ( !child ) gtk_tree_store_insert_after( treestore, &new_iter, NULL, iter );
-    //Unterknoten erzeugen
-    else gtk_tree_store_insert_after( treestore, &new_iter, iter, NULL );
-
-    GtkTreeIter* ret_iter = gtk_tree_iter_copy( &new_iter );
-
-    return ret_iter; //muß nach Gebrauch gtk_tree_iter_freed werden!!!
-}
-
-
 gboolean
 sond_treeview_get_cursor( SondTreeview* stv, GtkTreeIter* iter )
 {

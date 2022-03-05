@@ -193,7 +193,7 @@ cb_suchen_nach_auswertung( GtkMenuItem* item, gpointer user_data )
 
     if ( !selected )
     {
-        meldung( zond->app_window, "Kopieren nicht möglich - keine Punkte "
+        display_message( zond->app_window, "Kopieren nicht möglich - keine Punkte "
                 "ausgewählt", NULL );
 
         return;
@@ -212,7 +212,7 @@ cb_suchen_nach_auswertung( GtkMenuItem* item, gpointer user_data )
         rc = suchen_kopieren_listenpunkt( zond, list, anchor_id, child, &errmsg );
         if ( rc )
         {
-            meldung( zond->app_window, "Fehler in Suchen/Kopieren in Auswertung -\n\n"
+            display_message( zond->app_window, "Fehler in Suchen/Kopieren in Auswertung -\n\n"
                     "Bei Aufruf suchen_kopieren_listenpunkt:\n", errmsg, NULL );
             g_free( errmsg );
 

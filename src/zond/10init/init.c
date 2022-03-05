@@ -59,15 +59,15 @@ recover( Projekt* zond, gchar* project, GApplication* app )
     {
         path_bak = g_strconcat( project, ".bak", NULL);
         rc = g_rename( project, path_bak );
-        if ( rc ) meldung( zond->app_window, "g_rename .ZND to .bak:\n",
+        if ( rc ) display_message( zond->app_window, "g_rename .ZND to .bak:\n",
                 strerror( errno ), NULL );
         g_free( path_bak );
 
         path_tmp = g_strconcat( project, ".tmp", NULL );
         rc = g_rename( path_tmp, project );
-        if ( rc ) meldung( zond->app_window, "rename .tmp to .ZND:\n",
+        if ( rc ) display_message( zond->app_window, "rename .tmp to .ZND:\n",
                 strerror( errno ), NULL );
-        else meldung( zond->app_window, project, " erfolgreich wiederhergestellt",
+        else display_message( zond->app_window, project, " erfolgreich wiederhergestellt",
                 NULL );
         g_free( path_tmp );
     }
@@ -163,7 +163,7 @@ open_file( Projekt* zond, gpointer files )
     g_free( uri_unesc );
     if ( rc )
     {
-        meldung( zond->app_window, "Fehler - Projekt kann nicht geöffnet "
+        display_message( zond->app_window, "Fehler - Projekt kann nicht geöffnet "
                 "werden\n\nBei Aufruf projekt_oeffnen:\n", errmsg, NULL );
         g_free( errmsg );
 
@@ -173,7 +173,7 @@ open_file( Projekt* zond, gpointer files )
     rc = db_baum_refresh( zond, &errmsg );
     if ( rc )
     {
-        meldung( zond->app_window, "Fehler beim Öffnen Datei:\n\n", errmsg, NULL );
+        display_message( zond->app_window, "Fehler beim Öffnen Datei:\n\n", errmsg, NULL );
         g_free( errmsg );
     }
 
@@ -224,7 +224,7 @@ init( GtkApplication* app )
     zond->ctx = fz_new_context( NULL, NULL, FZ_STORE_UNLIMITED );
     if ( !zond->ctx )
     {
-        meldung( zond->app_window, "zond->ctx konnte nicht initialisiert werden",
+        display_message( zond->app_window, "zond->ctx konnte nicht initialisiert werden",
                 NULL );
         gboolean ret = FALSE;
         g_signal_emit_by_name( zond->app_window, "delete-event", NULL, &ret );

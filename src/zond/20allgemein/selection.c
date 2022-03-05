@@ -334,8 +334,8 @@ selection_datei_einfuegen_in_db( Projekt* zond, gchar* rel_path, GFile* file, gi
 
     if ( new_node_id == -1 )
     {
-        if ( errmsg ) *errmsg = prepend_string( *errmsg,
-                g_strdup( "Bei Aufruf zond_dbase_insert_node:\n" ) );
+        if ( errmsg ) *errmsg = add_string( g_strdup(
+                "Bei Aufruf zond_dbase_insert_node:\n" ), *errmsg );
 
         return -1;
     }
@@ -474,8 +474,8 @@ selection_ordner_anbinden_rekursiv( Projekt* zond, InfoWindow* info_window,
                 {
                     g_object_unref( enumer );
 
-                    if ( errmsg ) *errmsg = prepend_string( *errmsg, g_strdup(
-                            "Bei Aufruf datei_anbinden:\n" ) );
+                    if ( errmsg ) *errmsg = add_string( g_strdup(
+                            "Bei Aufruf datei_anbinden:\n" ), *errmsg );
 
                     return -1;
                 }
@@ -719,7 +719,7 @@ selection_paste( Projekt* zond, gboolean kind, gboolean link )
     {
         if ( sond_treeview_test_cursor_descendant( zond->treeview[baum] ) )
         {
-            meldung( zond->app_window, "Clipboard kann dorthin nicht "
+            display_message( zond->app_window, "Clipboard kann dorthin nicht "
                     "verschoben werden\nAbkömmling von zu verschiebendem "
                     "Knoten", NULL );
             return;
@@ -739,7 +739,7 @@ selection_paste( Projekt* zond, gboolean kind, gboolean link )
                     kind, &errmsg );
             if ( rc )
             {
-                meldung( zond->app_window, "Selection kann nicht kopiert oder verschoben "
+                display_message( zond->app_window, "Selection kann nicht kopiert oder verschoben "
                         "werden\n\nBei Aufruf fm_paste_clipboard:\n",
                         errmsg, NULL );
                 g_free( errmsg );
@@ -758,7 +758,7 @@ selection_paste( Projekt* zond, gboolean kind, gboolean link )
                 rc = hat_vorfahre_datei( zond, baum, anchor_id, kind, &errmsg );
                 if ( rc == -1 )
                 {
-                    meldung( zond->app_window, "Bei Aufruf hat_vorfahre_datei:\n\n",
+                    display_message( zond->app_window, "Bei Aufruf hat_vorfahre_datei:\n\n",
                             errmsg, NULL );
                     g_free( errmsg );
 
@@ -766,7 +766,7 @@ selection_paste( Projekt* zond, gboolean kind, gboolean link )
                 }
                 else if ( rc == 1 )
                 {
-                    meldung( zond->app_window, "Clipboard kann dorthin nicht "
+                    display_message( zond->app_window, "Clipboard kann dorthin nicht "
                             "verschoben werden\nAbkömmling von Anbindung",
                             NULL );
 
@@ -798,7 +798,7 @@ selection_paste( Projekt* zond, gboolean kind, gboolean link )
                 rc = hat_vorfahre_datei( zond, baum, anchor_id, kind, &errmsg );
                 if ( rc == -1 )
                 {
-                    meldung( zond->app_window, "Bei Aufruf hat_vorfahre_datei\n\n",
+                    display_message( zond->app_window, "Bei Aufruf hat_vorfahre_datei\n\n",
                             errmsg, NULL );
                     g_free( errmsg );
 
@@ -806,7 +806,7 @@ selection_paste( Projekt* zond, gboolean kind, gboolean link )
                 }
                 else if ( rc == 1 )
                 {
-                    meldung( zond->app_window, "Clipboard kann dorthin nicht "
+                    display_message( zond->app_window, "Clipboard kann dorthin nicht "
                             "verschoben werden\nAbkömmling von Anbindung",
                             NULL );
 
@@ -817,7 +817,7 @@ selection_paste( Projekt* zond, gboolean kind, gboolean link )
             rc = selection_verschieben( zond, baum_selection, anchor_id, kind, &errmsg );
             if ( rc == -1 )
             {
-                meldung( zond->app_window, "Verschieben nicht möglich -\n\n"
+                display_message( zond->app_window, "Verschieben nicht möglich -\n\n"
                         "Bei Aufruf selection_verschieben:\n", errmsg, NULL );
                 g_free( errmsg );
 
@@ -833,7 +833,7 @@ selection_paste( Projekt* zond, gboolean kind, gboolean link )
             rc = selection_kopieren( zond, baum_selection, BAUM_AUSWERTUNG, anchor_id, kind, &errmsg );
             if ( rc == -1 )
             {
-                meldung( zond->app_window, "Fehler in Kopieren:\n\n"
+                display_message( zond->app_window, "Fehler in Kopieren:\n\n"
                         "Bei Aufruf selection_kopieren:\n", errmsg, NULL );
                 g_free( errmsg );
 
@@ -847,7 +847,7 @@ selection_paste( Projekt* zond, gboolean kind, gboolean link )
             rc = selection_link( zond, baum_selection, baum, anchor_id, kind, &errmsg );
             if ( rc )
             {
-                meldung( zond->app_window, "Selection kann nicht kopiert/verschoben "
+                display_message( zond->app_window, "Selection kann nicht kopiert/verschoben "
                         "werden\n\nBei Aufruf selection_link:\n", errmsg, NULL );
                 g_free( errmsg );
             }
@@ -862,7 +862,7 @@ selection_paste( Projekt* zond, gboolean kind, gboolean link )
             rc = selection_verschieben( zond, baum_selection, anchor_id, kind, &errmsg );
             if ( rc == -1 )
             {
-                meldung( zond->app_window, "Bei Aufruf selection_"
+                display_message( zond->app_window, "Bei Aufruf selection_"
                         "verschieben:\n\n", errmsg, NULL );
                 g_free( errmsg );
 
@@ -874,7 +874,7 @@ selection_paste( Projekt* zond, gboolean kind, gboolean link )
             rc = selection_kopieren( zond, baum_selection, BAUM_AUSWERTUNG, anchor_id, kind, &errmsg );
             if ( rc == -1 )
             {
-                meldung( zond->app_window, "Fehler in Kopieren:\n\n"
+                display_message( zond->app_window, "Fehler in Kopieren:\n\n"
                         "Bei Aufruf selection_kopieren:\n", errmsg, NULL );
                 g_free( errmsg );
 
@@ -888,7 +888,7 @@ selection_paste( Projekt* zond, gboolean kind, gboolean link )
             rc = selection_link( zond, baum_selection, baum, anchor_id, kind, &errmsg );
             if ( rc )
             {
-                meldung( zond->app_window, "Selection kann nicht kopiert/verschoben "
+                display_message( zond->app_window, "Selection kann nicht kopiert/verschoben "
                         "werden\n\nBei Aufruf fm_paste_clipboard:\n", errmsg, NULL );
                 g_free( errmsg );
             }

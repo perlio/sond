@@ -318,7 +318,7 @@ cb_pv_seiten_ocr( GtkMenuItem* item, gpointer data )
     info_window_close( info_window );
     if ( rc == -1 )
     {
-        meldung( pv->vf, "Fehler - OCR\n\nBei Aufruf pdf_ocr_pages:\n", errmsg,
+        display_message( pv->vf, "Fehler - OCR\n\nBei Aufruf pdf_ocr_pages:\n", errmsg,
                 NULL );
         g_free( errmsg );
         g_ptr_array_unref( arr_document_page );
@@ -339,7 +339,7 @@ cb_pv_seiten_ocr( GtkMenuItem* item, gpointer data )
         zond_pdf_document_mutex_unlock( pdf_document_page->document );
         if ( rc )
         {
-            meldung( pv->vf, "Fehler - OCR\n\nBei Aufruf viewer_reload_fz_page:\n",
+            display_message( pv->vf, "Fehler - OCR\n\nBei Aufruf viewer_reload_fz_page:\n",
                     errmsg, NULL );
             g_free( errmsg );
         }
@@ -348,7 +348,7 @@ cb_pv_seiten_ocr( GtkMenuItem* item, gpointer data )
                 NULL, &errmsg );
         if ( rc )
         {
-            meldung( pv->vf, "Fehler - OCR\n\nBei Aufruf viewer_foreach:\n",
+            display_message( pv->vf, "Fehler - OCR\n\nBei Aufruf viewer_foreach:\n",
                     errmsg, NULL );
             g_free( errmsg );
         }
@@ -532,7 +532,7 @@ cb_pv_seiten_drehen( GtkMenuItem* item, gpointer data )
     g_ptr_array_unref( arr_document_page );
     if ( rc )
     {
-        meldung( pv->vf, "Fehler in Seiten drehen -\n\nBei Aufruf "
+        display_message( pv->vf, "Fehler in Seiten drehen -\n\nBei Aufruf "
                 "seiten_drehen\n", errmsg, NULL );
         g_free( errmsg );
 
@@ -734,7 +734,7 @@ cb_pv_seiten_loeschen( GtkMenuItem* item, gpointer data )
     //Seiten löschen nur in "ganzen" Pdfs
     if ( pv->dd->next != NULL || pv->dd->anbindung != NULL )
     {
-        meldung( pv->vf, "Seiten aus Auszug löschen nicht möglich" , NULL );
+        display_message( pv->vf, "Seiten aus Auszug löschen nicht möglich" , NULL );
         return;
     }
     count = pv->arr_pages->len;
@@ -749,7 +749,7 @@ cb_pv_seiten_loeschen( GtkMenuItem* item, gpointer data )
     rc = seiten_loeschen( pv, arr_document_page, &errmsg );
     if ( rc == -1 )
     {
-        meldung( pv->vf, "Fehler in Seiten löschen -\n\nBei Aufruf "
+        display_message( pv->vf, "Fehler in Seiten löschen -\n\nBei Aufruf "
                 "seiten_loeschen:\n", errmsg, "\n\nViewer wird geschlossen", NULL );
         g_free( errmsg );
 
@@ -758,7 +758,7 @@ cb_pv_seiten_loeschen( GtkMenuItem* item, gpointer data )
         return;
     }
 #ifndef VIEWER
-    else if ( rc == -2 ) meldung( pv->vf, "Fehler in Seiten löschen -\n\n"
+    else if ( rc == -2 ) display_message( pv->vf, "Fehler in Seiten löschen -\n\n"
             "Zu löschende Seiten enthalten Anbindungen", NULL );
 #endif // VIEWER
 
@@ -882,7 +882,7 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
     count_old = zond_pdf_document_get_number_of_pages( pv->dd->zond_pdf_document );
     if ( pos > count_old )
     {
-        meldung( pv->vf, "Dokument hat ja gar \nnicht so viele Seiten", NULL );
+        display_message( pv->vf, "Dokument hat ja gar \nnicht so viele Seiten", NULL );
 
         return;
     }
@@ -896,7 +896,7 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
         path_merge = filename_oeffnen( GTK_WINDOW(pv->vf) );
         if ( !is_pdf( path_merge ) )
         {
-            meldung( pv->vf, "Keine PDF-Datei", NULL );
+            display_message( pv->vf, "Keine PDF-Datei", NULL );
             g_free( path_merge );
 
             return;
@@ -906,7 +906,7 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
         fz_always( pv->zond->ctx ) g_free( path_merge );
         fz_catch( pv->zond->ctx )
         {
-            meldung( pv->vf, "Fehler Datei einfügen -\n\nBei Aufruf "
+            display_message( pv->vf, "Fehler Datei einfügen -\n\nBei Aufruf "
                     "pdf_open_document:\n", fz_caught_message( pv->zond->ctx ), NULL );
 
             return;
@@ -940,7 +940,7 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
             pos - 1 ), seiten_cb_einfuegen, GINT_TO_POINTER(count), &errmsg );
     if ( rc )
     {
-        meldung( pv->vf, "Fehler Einfügen -\n\nBei Aufruf viewer_foreach:\n",
+        display_message( pv->vf, "Fehler Einfügen -\n\nBei Aufruf viewer_foreach:\n",
                 errmsg, "\n\nViewer wird geschlossen", NULL );
         g_free( errmsg );
         viewer_save_and_close( pv );
@@ -1033,7 +1033,7 @@ cb_seiten_kopieren( GtkMenuItem* item, gpointer data )
     rc = seiten_set_clipboard( pv, arr_page_pv, &errmsg );
     if ( rc )
     {
-        meldung( pv->vf, "Fehler Kopieren -\n\nBei Aufruf seiten_set_clipboard:\n",
+        display_message( pv->vf, "Fehler Kopieren -\n\nBei Aufruf seiten_set_clipboard:\n",
                 errmsg, NULL );
         g_free( errmsg );
     }
@@ -1061,7 +1061,7 @@ cb_seiten_ausschneiden( GtkMenuItem* item, gpointer data )
     rc = seiten_set_clipboard( pv, arr_page_pv, &errmsg );
     if ( rc )
     {
-        meldung( pv->vf, "Fehler Kopieren -\n\nBei Aufruf seiten_set_clipboard:\n",
+        display_message( pv->vf, "Fehler Kopieren -\n\nBei Aufruf seiten_set_clipboard:\n",
                 errmsg, NULL );
         g_free( errmsg );
         g_array_unref( arr_page_pv );
@@ -1075,7 +1075,7 @@ cb_seiten_ausschneiden( GtkMenuItem* item, gpointer data )
     g_ptr_array_unref( arr_document_page );
     if ( rc )
     {
-        meldung( pv->vf, "Fehler Ausschneiden -\n\nBei Aufruf seiten_loeschen:\n",
+        display_message( pv->vf, "Fehler Ausschneiden -\n\nBei Aufruf seiten_loeschen:\n",
                 errmsg, NULL );
         g_free( errmsg );
     }

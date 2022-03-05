@@ -349,7 +349,7 @@ cb_menu_datei_export_activate( GtkMenuItem*item, gpointer user_data )
             G_FILE_CREATE_NONE, NULL, &error );
     if ( !stream )
     {
-        meldung( zond->app_window, "Export nicht möglich\n\nBei Aufruf g_file_"
+        display_message( zond->app_window, "Export nicht möglich\n\nBei Aufruf g_file_"
                 "replace:\n", error->message, NULL );
         g_error_free( error );
         g_object_unref( file );
@@ -364,7 +364,7 @@ cb_menu_datei_export_activate( GtkMenuItem*item, gpointer user_data )
     gint res = export_html( zond, stream, umfang, &errmsg );
     if ( res )
     {
-        meldung( zond->app_window, "Export nicht möglich\n\nFehler bei Aufruf "
+        display_message( zond->app_window, "Export nicht möglich\n\nFehler bei Aufruf "
                 "export_html:\n", errmsg, NULL );
         g_free( errmsg );
         g_object_unref( file );
@@ -390,7 +390,7 @@ cb_menu_datei_export_activate( GtkMenuItem*item, gpointer user_data )
             &bufferlen );
     if ( rc != S_OK )
     {
-        meldung( zond->app_window, "Export nicht möglich:\n\nFehler bei Aufruf "
+        display_message( zond->app_window, "Export nicht möglich:\n\nFehler bei Aufruf "
                 "AssocQueryString", NULL );
 
         g_object_unref( file );
@@ -415,7 +415,7 @@ cb_menu_datei_export_activate( GtkMenuItem*item, gpointer user_data )
             NULL, NULL, &error );
     if ( !ret )
     {
-        meldung( zond->app_window, "Export nicht möglich:\n\nFehler bei Aufruf "
+        display_message( zond->app_window, "Export nicht möglich:\n\nFehler bei Aufruf "
                 "g_spawn_sync:\n", error->message, NULL );
         g_error_free( error );
         error = NULL;
@@ -423,7 +423,7 @@ cb_menu_datei_export_activate( GtkMenuItem*item, gpointer user_data )
 
     if ( !g_file_delete( file, NULL, &error ) )
     {
-        meldung( zond->app_window, "Löschen der bei Export im Arbeitsverzeichnis "
+        display_message( zond->app_window, "Löschen der bei Export im Arbeitsverzeichnis "
                 "erzeugten Datei 'export_tmp.htm' nicht möglich:\n\n",
                 error->message, NULL );
         g_error_free( error );
@@ -439,7 +439,7 @@ cb_menu_datei_export_activate( GtkMenuItem*item, gpointer user_data )
     if ( !g_file_move( source, dest, G_FILE_COPY_OVERWRITE, NULL, NULL, NULL,
             &error ) )
     {
-        meldung( zond->app_window, "Exportierte Datei konnte nicht umbenannt "
+        display_message( zond->app_window, "Exportierte Datei konnte nicht umbenannt "
                 "werden\n\n", error->message, "\nErzeugte Datei 'export_tmp.odt' "
                 "von Hand umbenennen", NULL );
         g_error_free( error );
