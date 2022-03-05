@@ -28,6 +28,12 @@ void zond_dbase_close( ZondDBase* );
 
 sqlite3* zond_dbase_get_dbase( ZondDBase* );
 
+gint zond_dbase_begin( ZondDBase*, gchar** );
+
+gint zond_dbase_commit( ZondDBase*, gchar** );
+
+gint zond_dbase_rollback( ZondDBase*, gchar** );
+
 gint zond_dbase_insert_node( ZondDBase*, Baum, gint, gboolean, const gchar*,
         const gchar*, gchar** );
 

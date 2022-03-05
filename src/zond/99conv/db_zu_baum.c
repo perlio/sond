@@ -202,7 +202,6 @@ void cb_cursor_changed( GtkTreeView*, gpointer );
 static gint
 db_baum_neu_laden( Projekt* zond, Baum baum, gchar** errmsg )
 {
-#ifndef VIEWER
     gint first_node_id = 0;
 
     zond_tree_store_clear( ZOND_TREE_STORE(gtk_tree_view_get_model(
@@ -218,15 +217,8 @@ db_baum_neu_laden( Projekt* zond, Baum baum, gchar** errmsg )
         rc = db_baum_knoten_mit_kindern( zond, TRUE, baum, first_node_id, NULL,
                 TRUE, NULL, errmsg );
         if ( rc ) ERROR_S
-
-/*        //kurz Signal verbinden, damit label und textview angezeigt werden
-        gulong signal = g_signal_connect( zond->treeview[baum], "cursor-changed",
-                G_CALLBACK(cb_cursor_changed), zond );
-        sond_treeview_set_cursor( zond->treeview[baum], iter );
-        g_signal_handler_disconnect( zond->treeview[baum], signal );
-*/
     }
-#endif // VIEWER
+
     return 0;
 }
 

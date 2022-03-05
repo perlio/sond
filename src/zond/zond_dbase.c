@@ -776,6 +776,66 @@ zond_dbase_prepare( ZondDBase* zond_dbase, const gchar* func, const gchar** sql,
 
 
 gint
+zond_dbase_begin( ZondDBase* zond_dbase, gchar** errmsg )
+{
+    gint rc = 0;
+    sqlite3_stmt** stmt = NULL;
+
+    const gchar* sql[] = {
+            "BEGIN; "
+        };
+
+    rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
+    if ( rc ) ERROR_S
+
+    rc = sqlite3_step( stmt[0] );
+    if ( rc != SQLITE_DONE ) ERROR_ZOND_DBASE( "sqlite3_step" )
+
+    return 0;
+}
+
+
+gint
+zond_dbase_commit( ZondDBase* zond_dbase, gchar** errmsg )
+{
+    gint rc = 0;
+    sqlite3_stmt** stmt = NULL;
+
+    const gchar* sql[] = {
+            "COMMIT; "
+        };
+
+    rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
+    if ( rc ) ERROR_S
+
+    rc = sqlite3_step( stmt[0] );
+    if ( rc != SQLITE_DONE ) ERROR_ZOND_DBASE( "sqlite3_step" )
+
+    return 0;
+}
+
+
+gint
+zond_dbase_rollback( ZondDBase* zond_dbase, gchar** errmsg )
+{
+    gint rc = 0;
+    sqlite3_stmt** stmt = NULL;
+
+    const gchar* sql[] = {
+            "ROLLBACK; "
+        };
+
+    rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
+    if ( rc ) ERROR_S
+
+    rc = sqlite3_step( stmt[0] );
+    if ( rc != SQLITE_DONE ) ERROR_ZOND_DBASE( "sqlite3_step" )
+
+    return 0;
+}
+
+
+gint
 zond_dbase_insert_node( ZondDBase* zond_dbase, Baum baum, gint node_id, gboolean child,
         const gchar* icon_name, const gchar* node_text, gchar** errmsg )
 {
