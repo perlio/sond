@@ -240,8 +240,8 @@ get_path_from_base( const gchar* path, gchar** errmsg )
 
     if ( readlink( proc, buff, PATH_MAX ) == -1 )
     {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf readling:\n",
-                strerror( errno ), NULL );
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf ", __func__, ":\n "
+                "Bei Aufruf readlink:\n", strerror( errno ), NULL );
 
         return NULL;
     }

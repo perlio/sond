@@ -1680,7 +1680,11 @@ pdf_ocr_create_pdf_only_text( InfoWindow* info_window,
             if ( rc == GTK_RESPONSE_CANCEL || rc == GTK_RESPONSE_DELETE_EVENT )
                     break;
             if ( rc == 1 ) rc = 0; //damit, falls bereits rendered, keine Fehlermeldung
-            if ( rc == 2 ) alle = 1;
+            if ( rc == 2 )
+            {
+                rc = 0; //s.o. unter rc == 1
+                alle = 1;
+            }
             if ( rc == 3 ) //Nein
             {
                 //Seite an Stelle in Array "setzen"
@@ -1764,14 +1768,11 @@ pdf_ocr_pages( Projekt* zond, InfoWindow* info_window, GPtrArray* arr_document_p
     gchar* path_tmp = NULL;
 
     path_tmp = get_path_from_base( "tmp/tess_tmp", errmsg );
-    if ( !path_tmp ) ERROR_SOND( "get_path_from_base" );
+    if ( !path_tmp ) ERROR_S
 
     rc = init_tesseract( &handle, &renderer, path_tmp, errmsg );
-    if ( rc )
-    {
-        g_free( path_tmp );
-        ERROR_SOND( "init_tesseract" )
-    }
+    g_free( path_tmp );
+    if ( rc ) ERROR_S
 
     rc = pdf_ocr_create_pdf_only_text( info_window, arr_document_pages, handle,
             renderer, errmsg );
@@ -1781,14 +1782,15 @@ pdf_ocr_pages( Projekt* zond, InfoWindow* info_window, GPtrArray* arr_document_p
     TessBaseAPIEnd( handle );
     TessBaseAPIDelete( handle );
 
-    if ( rc )
-    {
-        g_free( path_tmp );
-        ERROR_SOND( "pdf_ocr_create_pdf_only_text" )
-    }
+    if ( rc ) ERROR_S
+
+    if ( !arr_document_pages->len ) return 0;
 
     //erzeugtes PDF mit nur Text mit muPDF öffnen
     pdf_document* doc_text = NULL;
+
+    path_tmp = get_path_from_base( "tmp/tess_tmp", errmsg );
+    if ( !path_tmp ) ERROR_S
     path_tmp = add_string( path_tmp, g_strdup( ".pdf" ) );
 
     ctx = zond->ctx;
