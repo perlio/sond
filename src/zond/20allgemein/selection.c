@@ -706,8 +706,7 @@ selection_paste( Projekt* zond, gboolean kind, gboolean link )
 
     clipboard = sond_treeview_get_clipboard( zond->treeview[baum] );
 
-    Baum baum_selection = baum_get_baum_from_treeview( zond,
-            GTK_WIDGET(clipboard->tree_view) );
+    Baum baum_selection = (Baum) sond_treeview_get_id( clipboard->tree_view );
 
     //Todo: kopieren so ändern, daß zukünftig diese Beschränkung nur für
     //ausschneiden erforderlich ist (erst Knoten mit Kindern komplett kopieren,

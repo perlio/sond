@@ -19,17 +19,19 @@ typedef struct _Clipboard {
 struct _SondTreeviewClass
 {
     GtkTreeViewClass parent_class;
-
     Clipboard* clipboard;
+    void (*render_text_cell) ( GtkTreeViewColumn*, GtkCellRenderer*, GtkTreeModel*,
+            GtkTreeIter*, gpointer );
 };
 
 
-SondTreeview* sond_treeview_new( );
+SondTreeview* sond_treeview_new( gint );
+
+void sond_treeview_set_id( SondTreeview*, gint );
+
+gint sond_treeview_get_id( SondTreeview* );
 
 Clipboard* sond_treeview_get_clipboard( SondTreeview* );
-
-void sond_treeview_set_render_text_cell_func( SondTreeview*, void (*)
-        ( SondTreeview*, GtkTreeIter*, gpointer ), gpointer );
 
 GtkTreeViewColumn* sond_treeview_get_column( SondTreeview* );
 

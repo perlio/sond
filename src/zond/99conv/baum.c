@@ -102,13 +102,3 @@ baum_abfragen_iter( SondTreeview* treeview, gint node_id )
     return iter;
 }
 
-
-Baum
-baum_get_baum_from_treeview( Projekt* zond, GtkWidget* tree_view )
-{
-    if ( tree_view == GTK_WIDGET(zond->treeview[BAUM_FS]) ) return BAUM_FS;
-    if ( tree_view == GTK_WIDGET(zond->treeview[BAUM_INHALT]) ) return BAUM_INHALT;
-    if ( tree_view == GTK_WIDGET(zond->treeview[BAUM_AUSWERTUNG]) ) return BAUM_AUSWERTUNG;
-
-    return KEIN_BAUM;
-}

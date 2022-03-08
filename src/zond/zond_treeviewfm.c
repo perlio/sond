@@ -209,27 +209,9 @@ zond_treeviewfm_text_edited( GtkCellRenderer* cell, gchar* path_string, gchar* n
 
 
 static void
-zond_treeviewfm_constructed( GObject* self )
-{
-    ZondTreeviewFMPrivate* ztvfm_priv = zond_treeviewfm_get_instance_private( ZOND_TREEVIEWFM(self) );
-
-    g_signal_connect( sond_treeview_get_cell_renderer_text( SOND_TREEVIEW(self) ),
-            "editing-started", G_CALLBACK(treeviews_cb_editing_started), ztvfm_priv->zond );
-    g_signal_connect( sond_treeview_get_cell_renderer_text( SOND_TREEVIEW(self) ),
-            "editing-canceled", G_CALLBACK(treeviews_cb_editing_canceled), ztvfm_priv->zond );
-
-    G_OBJECT_CLASS(zond_treeviewfm_parent_class)->constructed( self );
-
-    return;
-}
-
-
-static void
 zond_treeviewfm_class_init( ZondTreeviewFMClass* klass )
 {
     GObjectClass *object_class = G_OBJECT_CLASS(klass);
-
-    object_class->constructed = zond_treeviewfm_constructed;
 
     object_class->set_property = zond_treeviewfm_set_property;
     object_class->get_property = zond_treeviewfm_get_property;

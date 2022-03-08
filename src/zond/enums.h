@@ -42,10 +42,10 @@ typedef enum _ICON_NUMS
 typedef enum BAEUME
 {
     KEIN_BAUM = -1,
-    BAUM_INHALT = 0,
+    BAUM_FS = 0,
+    BAUM_INHALT,
     BAUM_AUSWERTUNG,
-    BAUM_FS,
-    BAUM_ANZAHL
+    NUM_BAUM
 } Baum;
 
 

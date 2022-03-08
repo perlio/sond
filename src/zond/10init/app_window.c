@@ -223,7 +223,6 @@ init_app_window( Projekt* zond )
 
     //TreeView erzeugen und in das scrolled window
     init_treeviews( zond );
-    treeviews_init_fs_tree( zond );
 
     //BAUM_FS
     GtkWidget* swindow_baum_fs = gtk_scrolled_window_new( NULL, NULL );

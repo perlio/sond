@@ -840,33 +840,36 @@ sond_treeviewfm_render_file_icon( GtkTreeViewColumn* column, GtkCellRenderer* re
 
 
 static void
-sond_treeviewfm_render_file_name( SondTreeview* stv, GtkTreeIter* iter, gpointer data )
+sond_treeviewfm_render_file_name( GtkTreeViewColumn* column,
+        GtkCellRenderer* renderer, GtkTreeModel* model, GtkTreeIter* iter, gpointer data )
 {
-    g_object_set( G_OBJECT(sond_treeview_get_cell_renderer_text( stv )), "text",
-            sond_treeviewfm_get_name( SOND_TREEVIEWFM(stv), iter ), NULL );
+    SondTreeviewFM* stvfm = SOND_TREEVIEWFM(data);
+
+    g_object_set( G_OBJECT(sond_treeview_get_cell_renderer_text( SOND_TREEVIEW(stvfm) )), "text",
+            sond_treeviewfm_get_name( SOND_TREEVIEWFM(stvfm), iter ), NULL );
 
     gchar* rel_path = NULL;
 
-    rel_path = sond_treeviewfm_get_rel_path( SOND_TREEVIEWFM(stv), iter );
+    rel_path = sond_treeviewfm_get_rel_path( stvfm, iter );
     if ( rel_path )
     {
         gint rc = 0;
         gchar* errmsg = NULL;
 
-        rc = SOND_TREEVIEWFM_GET_CLASS(SOND_TREEVIEWFM(stv))->dbase_test( SOND_TREEVIEWFM(stv), rel_path, &errmsg );
+        rc = SOND_TREEVIEWFM_GET_CLASS(stvfm)->dbase_test( stvfm, rel_path, &errmsg );
         g_free( rel_path );
         if ( rc == -1 )
         {
-            display_message( gtk_widget_get_toplevel( GTK_WIDGET(stv) ),
+            display_message( gtk_widget_get_toplevel( GTK_WIDGET(stvfm) ),
                     "Warnung -\n\nBei Aufruf dbase_test:\n",
                     errmsg, NULL );
             g_free( errmsg );
         }
         else if ( rc == 0 ) g_object_set(
-                G_OBJECT(sond_treeview_get_cell_renderer_text( stv )),
+                G_OBJECT(sond_treeview_get_cell_renderer_text( SOND_TREEVIEW(stvfm) )),
                 "background-set", FALSE, NULL );
         else g_object_set( G_OBJECT(sond_treeview_get_cell_renderer_text(
-                stv )), "background-set", TRUE, NULL );
+                SOND_TREEVIEW(stvfm) )), "background-set", TRUE, NULL );
     }
 
     return;
@@ -908,10 +911,10 @@ sond_treeviewfm_constructed( GObject* self )
 static void
 sond_treeviewfm_class_init( SondTreeviewFMClass* klass )
 {
-    GObjectClass *object_class = G_OBJECT_CLASS(klass);
+    G_OBJECT_CLASS(klass)->finalize = sond_treeviewfm_finalize;
+    G_OBJECT_CLASS(klass)->constructed = sond_treeviewfm_constructed;
 
-    object_class->finalize = sond_treeviewfm_finalize;
-    object_class->constructed = sond_treeviewfm_constructed;
+    SOND_TREEVIEW_CLASS(klass)->render_text_cell = sond_treeviewfm_render_file_name;
 
     klass->dbase_begin = sond_treeviewfm_dbase_begin;
     klass->dbase_test = sond_treeviewfm_dbase_test;
@@ -933,9 +936,6 @@ sond_treeviewfm_init( SondTreeviewFM* stvfm )
             SOND_TREEVIEW(stvfm) ),
             sond_treeview_get_cell_renderer_icon( SOND_TREEVIEW(stvfm) ),
             sond_treeviewfm_render_file_icon, NULL, NULL );
-
-    sond_treeview_set_render_text_cell_func( SOND_TREEVIEW(stvfm),
-            sond_treeviewfm_render_file_name, stvfm );
 
     //Größe
     GtkCellRenderer* renderer_size = gtk_cell_renderer_text_new( );
@@ -995,6 +995,7 @@ sond_treeviewfm_init( SondTreeviewFM* stvfm )
 SondTreeviewFM*
 sond_treeviewfm_new( void )
 {
+    //hier könnte man auch die id setzten; derzeit reicht aber id(BAUM_FS) = 0
     SondTreeviewFM* stvfm = g_object_new( SOND_TYPE_TREEVIEWFM, NULL );
 
     return stvfm;

@@ -195,10 +195,6 @@ db_baum_knoten_mit_kindern( Projekt* zond, gboolean with_younger_siblings,
 }
 
 
-//Prototype
-void cb_cursor_changed( GtkTreeView*, gpointer );
-
-
 static gint
 db_baum_neu_laden( Projekt* zond, Baum baum, gchar** errmsg )
 {

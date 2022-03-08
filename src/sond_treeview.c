@@ -26,8 +26,7 @@ typedef struct
     GtkTreeViewColumn* first_column;
     GtkCellRenderer* renderer_icon;
     GtkCellRenderer* renderer_text;
-    void (* render_text_cell) ( SondTreeview*, GtkTreeIter*, gpointer );
-    gpointer render_text_cell_data;
+    gint id;
 } SondTreeviewPrivate;
 
 G_DEFINE_TYPE_WITH_PRIVATE(SondTreeview, sond_treeview, GTK_TYPE_TREE_VIEW)
@@ -40,6 +39,8 @@ sond_treeview_class_init( SondTreeviewClass* klass )
     klass->clipboard->arr_ref = g_ptr_array_new_with_free_func( (GDestroyNotify) gtk_tree_row_reference_free );
     //class_finalize muß nicht definiert werden -
     //statisch registrierte Klasse wird zurLaufzeit niemals finalisiert!
+
+    klass->render_text_cell = NULL;
 
     return;
 }
@@ -106,13 +107,13 @@ static void
 sond_treeview_render_text( GtkTreeViewColumn* column, GtkCellRenderer* renderer,
         GtkTreeModel* treemodel, GtkTreeIter* iter, gpointer data )
 {
-    SondTreeview* stv = SOND_TREEVIEW(gtk_tree_view_column_get_tree_view( column ));
-    SondTreeviewPrivate* stv_priv = sond_treeview_get_instance_private( stv );
+    SondTreeview* stv = SOND_TREEVIEW(data);
 
     sond_treeview_grey_cut_cell( stv, iter );
     sond_treeview_underline_cursor( stv, iter );
 
-    stv_priv->render_text_cell( stv, iter, stv_priv->render_text_cell_data );
+    if ( SOND_TREEVIEW_GET_CLASS(stv)->render_text_cell )
+           SOND_TREEVIEW_GET_CLASS(stv)->render_text_cell( column, renderer, treemodel, iter, data );
 
     return;
 }
@@ -189,7 +190,7 @@ sond_treeview_init( SondTreeview* stv )
 
     gtk_tree_view_column_set_cell_data_func( stv_private->first_column,
             stv_private->renderer_text, (GtkTreeCellDataFunc)
-            sond_treeview_render_text, NULL, NULL );
+            sond_treeview_render_text, stv, NULL );
 
     gtk_tree_view_columns_autosize( GTK_TREE_VIEW(stv) );
 
@@ -198,9 +199,41 @@ sond_treeview_init( SondTreeview* stv )
 
 
 SondTreeview*
-sond_treeview_new( )
+sond_treeview_new( gint id )
 {
-    return g_object_new( SOND_TYPE_TREEVIEW, NULL );
+    SondTreeview* stv = NULL;
+    SondTreeviewPrivate* stv_priv = NULL;
+
+    stv = g_object_new( SOND_TYPE_TREEVIEW, NULL );
+    stv_priv = sond_treeview_get_instance_private( stv );
+    stv_priv->id = id;
+
+    return stv;
+}
+
+
+void
+sond_treeview_set_id( SondTreeview* stv, gint id )
+{
+    SondTreeviewPrivate* stv_priv = NULL;
+
+    stv_priv = sond_treeview_get_instance_private( stv );
+    stv_priv->id = id;
+
+    return;
+}
+
+
+gint
+sond_treeview_get_id( SondTreeview* stv )
+{
+    gint id = 0;
+    SondTreeviewPrivate* stv_priv = NULL;
+
+    stv_priv = sond_treeview_get_instance_private( stv );
+    id = stv_priv->id;
+
+    return id;
 }
 
 
@@ -210,19 +243,6 @@ sond_treeview_get_clipboard( SondTreeview* stv )
     SondTreeviewClass* stv_klass = SOND_TREEVIEW_GET_CLASS( stv );
 
     return stv_klass->clipboard;
-}
-
-
-void
-sond_treeview_set_render_text_cell_func( SondTreeview* stv, void (* render_text_cell)
-        ( SondTreeview*, GtkTreeIter*, gpointer ), gpointer func_data )
-{
-    SondTreeviewPrivate* stv_priv = sond_treeview_get_instance_private( stv );
-
-    stv_priv->render_text_cell = render_text_cell;
-    stv_priv->render_text_cell_data = func_data;
-
-    return;
 }
 
 

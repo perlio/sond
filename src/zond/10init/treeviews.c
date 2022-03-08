@@ -20,6 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <mupdf/fitz.h>
 
 #include "../zond_treeviewfm.h"
+#include "../zond_treeview.h"
 
 #include "app_window.h"
 
@@ -214,7 +215,7 @@ treeviews_foreach_selection_loeschen( SondTreeview* tree_view, GtkTreeIter* iter
         gint rc = 0;
 
         rc = zond_dbase_remove_link( s_selection->zond->dbase_zond->zond_dbase_work,
-                baum_get_baum_from_treeview( s_selection->zond, GTK_WIDGET(tree_view)), node_id, errmsg );
+                sond_treeview_get_id( tree_view ), node_id, errmsg );
         if ( rc ) ERROR_SOND("zond_dbase_remove_link" )
 
         zond_tree_store_remove_link( ZOND_TREE_STORE(gtk_tree_view_get_model(
@@ -427,35 +428,6 @@ treeviews_insert_node( Projekt* zond, Baum baum_active, gboolean child, gchar** 
 }
 
 
-static void
-treeviews_row_activated( SondTreeview* tv, GtkTreePath* tp, GtkTreeViewColumn* tvc,
-        gpointer user_data )
-{
-    gint rc = 0;
-    gchar* errmsg = NULL;
-    gint node_id = 0;
-    Baum baum = KEIN_BAUM;
-    GtkTreeIter iter = { 0, };
-
-    Projekt* zond = (Projekt*) user_data;
-
-    if ( !gtk_tree_model_get_iter( gtk_tree_view_get_model( GTK_TREE_VIEW(tv) ),
-            &iter, tp ) ) return;
-
-    rc = treeviews_get_baum_and_node_id( zond, &iter, &baum, &node_id );
-    if ( rc ) return;
-
-    rc = oeffnen_node( zond, baum, node_id, &errmsg );
-    if ( rc )
-    {
-        display_message( zond->app_window, "Fehler beim Öffnen Knoten:\n\n", errmsg, NULL );
-        g_free( errmsg );
-    }
-
-    return;
-}
-
-
 void
 cb_cursor_changed( SondTreeview* treeview, gpointer user_data )
 {
@@ -470,13 +442,7 @@ cb_cursor_changed( SondTreeview* treeview, gpointer user_data )
     gchar* text = NULL;
 
     Projekt* zond = (Projekt*) user_data;
-/*
-    //wenn BAUM_AUSWERTUNG, in dem sich bereits row befindet: textview anschalten
-    if ( treeview == zond->treeview[BAUM_AUSWERTUNG] &&
-            gtk_tree_model_get_iter_first( gtk_tree_view_get_model(
-            GTK_TREE_VIEW(treeview) ), &iter ) )
-            gtk_widget_set_sensitive( GTK_WIDGET(zond->textview), TRUE );
-*/
+
     //wenn kein cursor gesetzt ist
     if ( !sond_treeview_get_cursor( treeview, &iter ) || treeviews_get_baum_and_node_id( zond, &iter, &baum, &node_id ) )
     {
@@ -553,7 +519,7 @@ cb_focus_out( GtkWidget* treeview, GdkEvent* event, gpointer user_data )
 {
     Projekt* zond = (Projekt*) user_data;
 
-    Baum baum = baum_get_baum_from_treeview( zond, treeview );
+    Baum baum = (Baum) sond_treeview_get_id( SOND_TREEVIEW(treeview) );
 
     //cursor-changed-signal ausschalten
     if ( baum != BAUM_FS && zond->cursor_changed_signal )
@@ -576,14 +542,16 @@ cb_focus_in( GtkWidget* treeview, GdkEvent* event, gpointer user_data )
 {
     Projekt* zond = (Projekt*) user_data;
 
-    Baum baum = baum_get_baum_from_treeview( zond, treeview );
+    Baum baum = (Baum) sond_treeview_get_id( SOND_TREEVIEW(treeview) );
 
     //cursor-changed-signal für den aktivierten treeview anschalten
-    if ( baum != BAUM_FS ) zond->cursor_changed_signal =
-            g_signal_connect( treeview, "cursor-changed",
+    if ( baum != BAUM_FS )
+    {
+        zond->cursor_changed_signal = g_signal_connect( treeview, "cursor-changed",
             G_CALLBACK(cb_cursor_changed), zond );
 
-    if ( baum != BAUM_FS ) cb_cursor_changed( (SondTreeview*) treeview, user_data );
+        g_signal_emit_by_name( treeview, "cursor-changed", user_data, NULL );
+    }
 
     if ( baum != zond->last_baum )
     {
@@ -613,46 +581,6 @@ cb_focus_in( GtkWidget* treeview, GdkEvent* event, gpointer user_data )
 }
 
 
-static void
-treeviews_cb_cell_edited( GtkCellRenderer* cell, gchar* path_string, gchar* new_text,
-        gpointer user_data )
-{
-    gint rc = 0;
-    gchar* errmsg = NULL;
-    Baum baum = KEIN_BAUM;
-    gint node_id = 0;
-    GtkTreeIter iter = { 0, };
-
-
-    SondTreeview* stv = (SondTreeview*) user_data;
-    Projekt* zond = g_object_get_data( G_OBJECT(stv), "zond" );
-
-    gtk_tree_model_get_iter_from_string( gtk_tree_view_get_model( GTK_TREE_VIEW(stv) ), &iter, path_string );
-
-    rc = treeviews_get_baum_and_node_id( zond, &iter, &baum, &node_id );
-    if ( rc ) return;
-
-    //node_id holen, node_text in db ändern
-    rc = zond_dbase_set_node_text( zond->dbase_zond->zond_dbase_work, baum, node_id, new_text, &errmsg );
-    if ( rc )
-    {
-        display_message( gtk_widget_get_toplevel( GTK_WIDGET(stv) ), "Knoten umbenennen nicht möglich\n\n"
-                "Bei Aufruf zond_dbase_set_node_text:\n", errmsg, NULL );
-        g_free( errmsg );
-    }
-    else
-    {
-        zond_tree_store_set( &iter, NULL, new_text, 0 );
-        gtk_tree_view_columns_autosize( GTK_TREE_VIEW(stv) );
-    }
-
-    zond->key_press_signal = g_signal_connect( zond->app_window, "key-press-event",
-            G_CALLBACK(cb_key_press), zond );
-
-    return;
-}
-
-
 void
 treeviews_cb_editing_canceled( GtkCellRenderer* renderer,
                               gpointer data)
@@ -679,132 +607,19 @@ treeviews_cb_editing_started( GtkCellRenderer* renderer, GtkEditable* editable,
     return;
 }
 
-static gboolean
-cb_show_popupmenu( GtkTreeView* treeview, GdkEventButton* event,
-        GtkMenu* contextmenu_tv )
-{
-    //Rechtsklick
-    if ( ((event->button) == 3) && (event->type == GDK_BUTTON_PRESS) )
-    {
-        GtkTreePath* path;
-        gtk_tree_view_get_cursor( treeview, &path, NULL );
-        if ( !path ) return FALSE;
-        gtk_tree_path_free( path );
-
-        gtk_menu_popup_at_pointer( contextmenu_tv, NULL );
-
-        return TRUE;
-    }
-
-    return FALSE;
-}
-
-
-
-static void
-treeviews_render_node_text( SondTreeview* stv, GtkTreeIter* iter, gpointer data )
-{
-    gint rc = 0;
-    gchar* errmsg = NULL;
-    Baum baum = KEIN_BAUM;
-    gint node_id = 0;
-
-    Projekt* zond = (Projekt*) data;
-
-    if ( zond_tree_store_is_link( iter ) )
-    {
-        gchar *label = NULL;
-        gchar *markuptxt = NULL;
-
-        // Retrieve the current label
-        gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(stv) ), iter, 1, &label, -1);
-
-        markuptxt = g_strdup_printf("<i>%s</i>", label);
-
-        g_object_set( G_OBJECT(sond_treeview_get_cell_renderer_text( stv )),
-                "markup", markuptxt, NULL);  // markup isn't showing and text field is blank due to "text" == NULL
-
-        g_free(markuptxt);
-    }
-
-    rc = treeviews_get_baum_and_node_id( zond, iter, &baum, &node_id );
-    if ( rc ) return;
-
-    if ( baum == BAUM_AUSWERTUNG )
-    {
-        gchar* text = NULL;
-
-        //Hintergrund icon rot wenn Text in textview
-        rc = zond_dbase_get_text( zond->dbase_zond->zond_dbase_work, node_id, &text, &errmsg );
-        if ( rc )
-        {
-            gchar* text_label = NULL;
-            text_label = g_strconcat( "Fehler in treeviews_render_node_text -\n\n"
-                    "Bei Aufruf zond_dbase_get_text:\n", errmsg, NULL );
-            g_free( errmsg );
-            gtk_label_set_text( zond->label_status, text_label );
-            g_free( text_label );
-        }
-        else if ( !text || !g_strcmp0( text, "" ) )
-                g_object_set( G_OBJECT(sond_treeview_get_cell_renderer_text( stv )),
-                "background-set", FALSE, NULL );
-        else g_object_set( G_OBJECT(sond_treeview_get_cell_renderer_text( stv )),
-                "background-set", TRUE, NULL );
-
-        g_free( text );
-    }
-
-    return;
-}
-
-
 void
 init_treeviews( Projekt* zond )
 {
-    for ( Baum baum = BAUM_INHALT; baum <= BAUM_AUSWERTUNG; baum++ )
+    //der treeview
+    zond->treeview[BAUM_FS] = SOND_TREEVIEW(zond_treeviewfm_new( zond ));
+    zond->treeview[BAUM_INHALT] = SOND_TREEVIEW(zond_treeview_new( zond, (gint) BAUM_INHALT));
+    zond->treeview[BAUM_AUSWERTUNG] = SOND_TREEVIEW(zond_treeview_new( zond, (gint) BAUM_AUSWERTUNG ));
+
+    for ( Baum baum = BAUM_FS; baum < NUM_BAUM; baum++ )
     {
-        //der treeview
-        zond->treeview[baum] = sond_treeview_new( );
-
-        sond_treeview_set_render_text_cell_func( zond->treeview[baum],
-                treeviews_render_node_text, zond );
-
-        //Tree-Model erzeugen und verbinden
-        ZondTreeStore* tree_store = zond_tree_store_new( );
-
-        gtk_tree_view_set_model( GTK_TREE_VIEW(zond->treeview[baum]), GTK_TREE_MODEL(tree_store) );
-        g_object_unref( tree_store );
-
-        gtk_tree_view_set_headers_visible( GTK_TREE_VIEW(zond->treeview[baum]), FALSE );
-
-        gtk_tree_view_column_set_attributes(
-                sond_treeview_get_column( zond->treeview[baum] ),
-                sond_treeview_get_cell_renderer_icon( zond->treeview[baum] ),
-                "icon-name", 0, NULL);
-        gtk_tree_view_column_set_attributes(
-                sond_treeview_get_column(zond->treeview[baum] ),
-                sond_treeview_get_cell_renderer_text( zond->treeview[baum] ),
-                "text", 1, NULL);
-
-                g_object_set_data( G_OBJECT(zond->treeview[baum]), "zond", zond );
         //die Selection
         zond->selection[baum] = gtk_tree_view_get_selection(
                 GTK_TREE_VIEW(zond->treeview[baum]) );
-
-        //Kontextmenu erzeugen, welches bei Rechtsklick auf treeview angezeigt wird
-        GtkWidget* contextmenu_tv = gtk_menu_new();
-
-        GtkWidget* datei_oeffnen_item = gtk_menu_item_new_with_label( "Öffnen" );
-        gtk_menu_shell_append( GTK_MENU_SHELL(contextmenu_tv), datei_oeffnen_item );
-        gtk_widget_show( datei_oeffnen_item );
-
-        //Die Signale
-        //Rechtsklick - Kontextmenu
-        g_signal_connect( zond->treeview[baum], "button-press-event",
-                G_CALLBACK(cb_show_popupmenu), (gpointer) contextmenu_tv );
-
-//        g_signal_connect( datei_oeffnen_item, "activate",
-//                G_CALLBACK(cb_datei_oeffnen), (gpointer) zond );
 
         //Text-Spalte wird editiert
         //Beginn
@@ -812,18 +627,6 @@ init_treeviews( Projekt* zond )
                 "editing-started", G_CALLBACK(treeviews_cb_editing_started), zond );
         g_signal_connect( sond_treeview_get_cell_renderer_text( zond->treeview[baum] ),
                 "editing-canceled", G_CALLBACK(treeviews_cb_editing_canceled), zond );
-        g_signal_connect( sond_treeview_get_cell_renderer_text( zond->treeview[baum] ),
-                "edited", G_CALLBACK(treeviews_cb_cell_edited), (gpointer) zond->treeview[baum] ); //Klick in textzelle = Inhalt editieren
-
-        // Doppelklick = angebundene Datei anzeigen
-        g_signal_connect( zond->treeview[baum], "row-activated",
-                G_CALLBACK(treeviews_row_activated), (gpointer) zond );
-
-        //Zeile expandiert oder kollabiert
-        g_signal_connect( zond->treeview[baum], "row-expanded",
-                G_CALLBACK(gtk_tree_view_columns_autosize), NULL );
-        g_signal_connect( zond->treeview[baum], "row-collapsed",
-                G_CALLBACK(gtk_tree_view_columns_autosize), NULL );
 
         //focus-in
         zond->treeview_focus_in_signal[baum] = g_signal_connect( zond->treeview[baum],
@@ -835,21 +638,3 @@ init_treeviews( Projekt* zond )
     return;
 }
 
-
-void
-treeviews_init_fs_tree( Projekt* zond )
-{
-    zond->treeview[BAUM_FS] = SOND_TREEVIEW(zond_treeviewfm_new( zond ));
-
-    //die Selection
-    zond->selection[BAUM_FS] = gtk_tree_view_get_selection(
-            GTK_TREE_VIEW(zond->treeview[BAUM_FS]) );
-
-    //focus-in
-    zond->treeview_focus_in_signal[BAUM_FS] = g_signal_connect( zond->treeview[BAUM_FS],
-            "focus-in-event", G_CALLBACK(cb_focus_in), (gpointer) zond );
-    g_signal_connect( zond->treeview[BAUM_FS], "focus-out-event",
-            G_CALLBACK(cb_focus_out), (gpointer) zond );
-
-    return;
-}

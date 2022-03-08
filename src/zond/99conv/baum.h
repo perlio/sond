@@ -22,6 +22,4 @@ GtkTreePath* baum_abfragen_path( SondTreeview*, gint );
 
 GtkTreeIter* baum_abfragen_iter( SondTreeview*, gint );
 
-Baum baum_get_baum_from_treeview( Projekt*, GtkWidget* );
-
 #endif // BAUM_H_INCLUDED

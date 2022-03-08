@@ -723,6 +723,15 @@
 			<Option target="zond (Testing)" />
 			<Option target="Sojus (Testing)" />
 		</Unit>
+		<Unit filename="src/zond/zond_treeview.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/zond_treeview.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
 		<Unit filename="src/zond/zond_treeviewfm.c">
 			<Option compilerVar="CC" />
 			<Option target="zond (Release)" />
