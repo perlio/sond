@@ -25,10 +25,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../error.h"
 #include "../global_types.h"
 #include "../zond_dbase.h"
+#include "../zond_treeview.h"
 
 #include "../99conv/general.h"
 #include "../../misc.h"
-#include "../99conv/baum.h"
 #include "../99conv/pdf.h"
 
 #include "../20allgemein/ziele.h"
@@ -166,7 +166,7 @@ cb_textsuche_changed( GtkListBox* box, GtkListBoxRow* row, gpointer data )
         }
     }
 
-    GtkTreePath* path = baum_abfragen_path( zond->treeview[BAUM_INHALT], node_id );
+    GtkTreePath* path = zond_treeview_get_path( zond->treeview[BAUM_INHALT], node_id );
     gtk_tree_view_expand_to_path( GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]), path );
     gtk_tree_view_set_cursor( GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]), path, NULL, FALSE );
     gtk_tree_path_free( path );

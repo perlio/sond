@@ -17,12 +17,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 #include "../global_types.h"
-#include "../error.h"
-
-#include "init.h"
 
 #include <gtk/gtk.h>
 #include <glib.h>
+
+#include "init.h"
 
 
 
@@ -31,19 +30,10 @@ open_app( GtkApplication* app, gpointer files, gint n_files, gchar *hint,
         gpointer user_data )
 {
     Projekt** zond = (Projekt**) user_data;
-
-    if ( !(*zond) ) return;
-
-    if ( (*zond)->dbase_zond ) return;
+    if ( !(*zond) || (*zond)->dbase_zond ) return;
 
     open_file( *zond, files );
 
-    return;
-}
-
-
-void activate_app (GtkApplication* app, gpointer user_data)
-{
     return;
 }
 

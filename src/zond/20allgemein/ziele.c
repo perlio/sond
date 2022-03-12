@@ -20,6 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <sqlite3.h>
 #include <gtk/gtk.h>
 
+#include "../10init/treeviews.h"
 #include "../zond_pdf_document.h"
 
 #include "../global_types.h"
@@ -29,7 +30,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../99conv/general.h"
 #include "../99conv/pdf.h"
 #include "../99conv/db_zu_baum.h"
-#include "../99conv/baum.h"
+//#include "../99conv/baum.h"
 
 #include "../40viewer/document.h"
 
@@ -37,7 +38,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "project.h"
 
 #include "../../misc.h"
-#include "../../sond_treeview.h"
+#include "../zond_treeview.h"
 #include "../../dbase.h"
 
 
@@ -98,7 +99,7 @@ ziele_verschieben_kinder( Projekt* zond,
         if ( younger_sibling < 0 ) ERROR_SOND( "zond_dbase_get_younger_sibling" )
 
         Anbindung* anbindung_younger_sibling = NULL;
-        rc = abfragen_rel_path_and_anbindung( zond, BAUM_INHALT, younger_sibling,
+        rc = treeviews_get_rel_path_and_anbindung( zond, BAUM_INHALT, younger_sibling,
                 NULL, &anbindung_younger_sibling, errmsg );
         if ( rc == -1 ) ERROR_SOND( "abfragen_rel_path_and_anbindung" )
         else if ( rc )
@@ -115,7 +116,7 @@ ziele_verschieben_kinder( Projekt* zond,
             if ( !kind ) break;
         }
 
-        rc = knoten_verschieben( zond, BAUM_INHALT, younger_sibling, node_id,
+        rc = treeviews_knoten_verschieben( zond, BAUM_INHALT, younger_sibling, node_id,
                 older_sibling, errmsg );
         if ( rc ) ERROR_SOND( "knoten_verschieben" )
         older_sibling = younger_sibling;
@@ -173,7 +174,7 @@ ziele_einfuegen_anbindung( Projekt* zond, const gchar* rel_path, gint anchor_id,
             "ziele_einfuegen_db" )
 
     //eingefügtes ziel in Baum
-    GtkTreeIter* iter = baum_abfragen_iter( zond->treeview[BAUM_INHALT], anchor_id );
+    GtkTreeIter* iter = zond_treeview_abfragen_iter( ZOND_TREEVIEW(zond->treeview[BAUM_INHALT]), anchor_id );
     rc = db_baum_knoten( zond, BAUM_INHALT, new_node, iter, kind, &iter_new,
             errmsg );
     gtk_tree_iter_free( iter );
@@ -302,7 +303,7 @@ ziele_abfragen_anker_rek( Projekt* zond, gint node_id, Anbindung anbindung,
     if ( node_id == 0 ) return 0;
 
     Anbindung* anbindung_node_id = NULL;
-    rc = abfragen_rel_path_and_anbindung( zond, BAUM_INHALT, node_id, NULL,
+    rc = treeviews_get_rel_path_and_anbindung( zond, BAUM_INHALT, node_id, NULL,
             &anbindung_node_id, errmsg );
     if ( rc == -1 ) ERROR_SOND( "abfragen_rel_path_and_anbindung" )
     else if ( rc ) //Datei, hat ja kein ziel gespeichert
@@ -402,6 +403,20 @@ ziele_abfragen_anker_rek( Projekt* zond, gint node_id, Anbindung anbindung,
     }
 
     return new_node_id;
+}
+
+
+void
+ziele_free( Ziel* ziel )
+{
+    if ( !ziel ) return;
+
+    g_free( ziel->ziel_id_von );
+    g_free( ziel->ziel_id_bis );
+
+    g_free( ziel );
+
+    return;
 }
 
 

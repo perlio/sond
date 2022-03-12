@@ -20,8 +20,13 @@ struct _ZondTreeviewClass
     SondTreeviewClass parent_class;
 };
 
+void zond_treeview_cursor_changed( ZondTreeview*, gpointer );
+
 ZondTreeview* zond_treeview_new( Projekt*, gint );
 
+GtkTreeIter* zond_treeview_abfragen_iter( ZondTreeview*, gint );
+
+GtkTreePath* zond_treeview_get_path( SondTreeview*, gint );
 
 G_END_DECLS
 

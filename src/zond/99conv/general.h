@@ -29,17 +29,9 @@ gchar* filename_speichern( GtkWindow*, const gchar* );
 
 gchar* filename_oeffnen( GtkWindow* );
 
-gint hat_vorfahre_datei( Projekt*, Baum, gint, gboolean, gchar** );
-
-gint knoten_verschieben( Projekt*, Baum, gint, gint, gint, gchar** );
-
 gint update_db_before_path_change( const GFile*, const GFile*, gpointer, gchar** );
 
 gint update_db_after_path_change( const gint, gpointer, gchar** );
-
-void ziele_free( Ziel* );
-
-gint abfragen_rel_path_and_anbindung( Projekt*, Baum, gint, gchar**, Anbindung**, gchar** );
 
 gboolean is_pdf( const gchar* );
 

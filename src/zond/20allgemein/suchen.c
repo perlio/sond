@@ -21,7 +21,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "../../misc.h"
 #include "../../dbase.h"
-#include "../../sond_treeview.h"
+#include "../zond_treeview.h"
+
+#include "../10init/treeviews.h"
 
 #include "../global_types.h"
 #include "../enums.h"
@@ -34,10 +36,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../99conv/db_zu_baum.h"
 
 #include "project.h"
+#include "selection.h"
 
 
 //Prototype
-void cb_cursor_changed( GtkTreeView*, gpointer );
+void zond_treeview_cursor_changed( ZondTreeview*, gpointer );
 
 
 typedef enum _Zond_Suchen
@@ -78,7 +81,7 @@ suchen_fuellen_row( Projekt* zond, GtkWidget* list_box, ZondSuchen zond_suchen, 
         gint rc = 0;
         gchar* rel_path = NULL;
 
-        rc = abfragen_rel_path_and_anbindung( zond, baum, node_id, &rel_path,
+        rc = treeviews_get_rel_path_and_anbindung( zond, baum, node_id, &rel_path,
                 NULL, errmsg );
         if ( rc == -1 ) ERROR_SOND( "abfragen_rel_path_and_anbindung" )
 
@@ -137,41 +140,35 @@ suchen_fuellen_ergebnisfenster( Projekt* zond, GtkWidget* ergebnisfenster,
 
 
 static gint
-suchen_kopieren_listenpunkt( Projekt* zond, GList* list, gint anchor_id,
-        gboolean child, gchar** errmsg )
+suchen_kopieren_listenpunkt( Projekt* zond, GList* list, GtkTreeIter* iter, gint* anchor_id,
+        gboolean* child, GtkTreeIter* iter_new, gchar** errmsg )
 {
     gint rc = 0;
     Baum baum = KEIN_BAUM;
     gint node_id = 0;
     gint new_node_id = 0;
-    GtkTreeIter iter_new = { 0, };
 
     baum = (Baum) GPOINTER_TO_INT(g_object_get_data( G_OBJECT(list->data), "baum" ));
     node_id = GPOINTER_TO_INT(g_object_get_data( G_OBJECT(list->data), "node-id" ));
 
     rc = dbase_begin( (DBase*) zond->dbase_zond->dbase_work, errmsg );
-    if ( rc ) ERROR_SOND( "dbase_begin" )
+    if ( rc ) ERROR_S
 
     new_node_id = zond_dbase_kopieren_nach_auswertung( zond->dbase_zond->zond_dbase_work, baum, node_id,
-            anchor_id, child, errmsg );
+            *anchor_id, *child, errmsg );
     if ( new_node_id == -1 ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work,
             "zond_dbase_kopieren_nach_auswertung" )
 
     rc = dbase_commit( (DBase*) zond->dbase_zond->dbase_work, errmsg );
     if ( rc ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "dbase_commit" )
 
-    GtkTreeIter* iter = baum_abfragen_iter( zond->treeview[BAUM_AUSWERTUNG],
-            anchor_id );
+    rc = db_baum_knoten( zond, BAUM_AUSWERTUNG, new_node_id, iter, *child, iter_new, errmsg );
+    if ( rc ) ERROR_S
 
-    gboolean success = db_baum_knoten( zond, BAUM_AUSWERTUNG,
-            new_node_id, iter, child, &iter_new, errmsg );
-    if ( iter ) gtk_tree_iter_free( iter );
-    if ( !success ) ERROR_SOND( "db_baum_knoten" )
+    sond_treeview_expand_row( zond->treeview[BAUM_AUSWERTUNG], iter_new );
+    sond_treeview_set_cursor( zond->treeview[BAUM_AUSWERTUNG], iter_new );
 
-    sond_treeview_expand_row( zond->treeview[BAUM_AUSWERTUNG], &iter_new );
-    sond_treeview_set_cursor( zond->treeview[BAUM_AUSWERTUNG], &iter_new );
-
-    anchor_id = new_node_id;
+    *anchor_id = new_node_id;
     child = FALSE;
 
     return 0;
@@ -183,8 +180,12 @@ cb_suchen_nach_auswertung( GtkMenuItem* item, gpointer user_data )
 {
     GList* selected = NULL;
     GList* list = NULL;
+    gint anchor_id = 0;
+    GtkTreeIter iter = { 0, };
+    GtkTreeIter iter_new = { 0, };
 
     Projekt* zond =(Projekt*) user_data;
+
     GtkWidget* list_box = g_object_get_data( G_OBJECT(item), "list-box" );
     gboolean child = (gboolean) GPOINTER_TO_INT(g_object_get_data(
             G_OBJECT(item), "child" ));
@@ -200,16 +201,17 @@ cb_suchen_nach_auswertung( GtkMenuItem* item, gpointer user_data )
     }
 
     //aktuellen cursor im BAUM_AUSWERTUNG: node_id und iter abfragen
-    gint anchor_id = baum_abfragen_aktuelle_node_id( zond->treeview[BAUM_AUSWERTUNG] );
-
-    gchar* errmsg = NULL;
+    if ( sond_treeview_get_cursor( zond->treeview[BAUM_AUSWERTUNG], &iter ) &&
+            !selection_anchor_no_link( &iter, child, &anchor_id ) ) return;
 
     list = selected;
     do
     {
         gint rc = 0;
+        gchar* errmsg = NULL;
 
-        rc = suchen_kopieren_listenpunkt( zond, list, anchor_id, child, &errmsg );
+        rc = suchen_kopieren_listenpunkt( zond, list, (anchor_id ? &iter : NULL),
+                &anchor_id, &child, &iter_new, &errmsg );
         if ( rc )
         {
             display_message( zond->app_window, "Fehler in Suchen/Kopieren in Auswertung -\n\n"
@@ -218,6 +220,8 @@ cb_suchen_nach_auswertung( GtkMenuItem* item, gpointer user_data )
 
             return;
         }
+
+        iter = iter_new;
     } while ( (list = list->next) );
 
     g_list_free( selected );
@@ -239,12 +243,12 @@ cb_lb_row_activated( GtkWidget* listbox, GtkWidget* row, gpointer user_data )
     gtk_tree_selection_unselect_all( zond->selection[BAUM_INHALT] );
     gtk_tree_selection_unselect_all( zond->selection[BAUM_AUSWERTUNG] );
 
-    GtkTreePath* path = baum_abfragen_path( zond->treeview[baum], node_id );
+    GtkTreePath* path = zond_treeview_get_path( zond->treeview[baum], node_id );
     gtk_tree_view_expand_to_path( GTK_TREE_VIEW(zond->treeview[baum]), path );
 
     //kurz Signal verbinden, damit label und textview angezeigt werden
     gulong signal = g_signal_connect( zond->treeview[baum], "cursor-changed",
-            G_CALLBACK(cb_cursor_changed), zond );
+            G_CALLBACK(zond_treeview_cursor_changed), zond );
     gtk_tree_view_set_cursor( GTK_TREE_VIEW(zond->treeview[baum]), path, NULL, FALSE );
     g_signal_handler_disconnect( zond->treeview[baum], signal );
 

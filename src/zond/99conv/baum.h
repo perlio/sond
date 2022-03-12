@@ -14,12 +14,6 @@ typedef int gint;
 typedef char gchar;
 
 
-gint baum_abfragen_aktuelle_node_id( SondTreeview* );
-
 Baum baum_abfragen_aktiver_treeview( Projekt* );
-
-GtkTreePath* baum_abfragen_path( SondTreeview*, gint );
-
-GtkTreeIter* baum_abfragen_iter( SondTreeview*, gint );
 
 #endif // BAUM_H_INCLUDED

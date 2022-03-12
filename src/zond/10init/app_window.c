@@ -77,7 +77,7 @@ cb_pao_button_event( GtkWidget* app_window, GdkEvent* event, gpointer data )
 }
 
 
-void
+static void
 cb_text_buffer_changed( GtkTextBuffer* buffer, gpointer zond )
 {
     g_object_set_data( G_OBJECT(gtk_text_view_get_buffer(
@@ -87,7 +87,7 @@ cb_text_buffer_changed( GtkTextBuffer* buffer, gpointer zond )
 }
 
 
-gboolean
+static gboolean
 cb_textview_focus_in( GtkWidget* textview, GdkEvent* event, gpointer user_data )
 {
     Projekt* zond = (Projekt*) user_data;

@@ -26,6 +26,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../global_types.h"
 #include "../error.h"
 #include "../zond_dbase.h"
+#include "../10init/treeviews.h"
 
 #include "../99conv/pdf.h"
 #include "../99conv/general.h"
@@ -90,7 +91,7 @@ oeffnen_auszug( Projekt* zond, gint node_id, gchar** errmsg )
         gchar* rel_path = NULL;
         Anbindung* anbindung = NULL;
 
-        rc = abfragen_rel_path_and_anbindung( zond, BAUM_AUSWERTUNG,
+        rc = treeviews_get_rel_path_and_anbindung( zond, BAUM_AUSWERTUNG,
                 younger_sibling, &rel_path, &anbindung, errmsg );
         if ( rc == -1 ) ERROR_SOND( "abfragen_rel_path_and_anbindung" )
 
@@ -382,7 +383,7 @@ oeffnen_node( Projekt* zond, Baum baum, gint node_id, gchar** errmsg )
     Anbindung* anbindung = NULL;
     PdfPos pos_pdf = { 0 };
 
-    rc = abfragen_rel_path_and_anbindung( zond, baum, node_id, &rel_path,
+    rc = treeviews_get_rel_path_and_anbindung( zond, baum, node_id, &rel_path,
             &anbindung, errmsg );
     if ( rc == -1 ) ERROR_SOND( "abfragen_rel_path_and_anbindung" )
 

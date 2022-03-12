@@ -58,6 +58,93 @@ zond_treeview_show_popupmenu( GtkTreeView* treeview, GdkEventButton* event,
 }
 
 
+void
+zond_treeview_cursor_changed( ZondTreeview* treeview, gpointer user_data )
+{
+    gint rc = 0;
+    gchar* errmsg = NULL;
+    gint node_id = 0;
+    GtkTreeIter iter = { 0, };
+    Baum baum = KEIN_BAUM;
+    gchar* rel_path = NULL;
+    Anbindung* anbindung = NULL;
+    gchar* text_label = NULL;
+    gchar* text = NULL;
+
+    Projekt* zond = (Projekt*) user_data;
+
+    //wenn kein cursor gesetzt ist
+    if ( !sond_treeview_get_cursor( SOND_TREEVIEW(treeview), &iter ) ||
+            treeviews_get_baum_and_node_id( zond, &iter, &baum, &node_id ) )
+    {
+        gtk_label_set_text( zond->label_status, "" ); //statur-label leeren
+        gtk_text_buffer_set_text( gtk_text_view_get_buffer( zond->textview ), "", -1 );
+        gtk_widget_set_sensitive( GTK_WIDGET(zond->textview), FALSE );
+
+        return;
+    }
+    else if ( baum == BAUM_AUSWERTUNG ) gtk_widget_set_sensitive( GTK_WIDGET(zond->textview), TRUE );
+    else gtk_widget_set_sensitive( GTK_WIDGET(zond->textview), FALSE );
+
+    //status_label setzen
+    rc = treeviews_get_rel_path_and_anbindung( zond, baum, node_id, &rel_path,
+            &anbindung, &errmsg );
+    if ( rc == -1 )
+    {
+        text_label = g_strconcat( "Fehler in ", __func__, ":\n\n Bei Aufruf "
+                "abfragen_rel_path_and_anbindung:", errmsg, NULL );
+        g_free( errmsg );
+    }
+
+    if ( rc == 2 ) text_label = g_strdup( "Keine Anbindung" );
+    else if ( rc == 1 ) text_label = g_strdup( rel_path );
+    else if ( rc == 0 )
+    {
+        text_label = g_strdup_printf( "%s, von Seite %i, "
+                "Index %i, bis Seite %i, index %i", rel_path,
+                anbindung->von.seite + 1, anbindung->von.index, anbindung->bis.seite + 1,
+                anbindung->bis.index );
+        g_free( anbindung );
+    }
+
+    gtk_label_set_text( zond->label_status, text_label );
+    g_free( text_label );
+    g_free( rel_path );
+
+    if ( baum == BAUM_INHALT || rc == -1 ) return;
+
+    //TextBuffer laden
+    GtkTextBuffer* buffer = gtk_text_view_get_buffer( zond->textview );
+
+    //neuen text einfügen
+    rc = zond_dbase_get_text( zond->dbase_zond->zond_dbase_work, node_id, &text, &errmsg );
+    if ( rc )
+    {
+        text_label = g_strconcat( "Fehler in ", __func__, ": Bei Aufruf "
+                "zond_dbase_get_text: ", errmsg, NULL );
+        g_free( errmsg );
+        gtk_label_set_text( zond->label_status, text_label );
+        g_free( text_label );
+
+        return;
+    }
+
+    if ( text )
+    {
+        gtk_text_buffer_set_text( buffer, text, -1 );
+        g_free( text );
+    }
+    else gtk_text_buffer_set_text( buffer, "", -1 );
+
+    g_object_set_data( G_OBJECT(gtk_text_view_get_buffer( zond->textview )),
+            "changed", NULL );
+    g_object_set_data( G_OBJECT(zond->textview),
+            "node-id", GINT_TO_POINTER(node_id) );
+
+    return;
+}
+
+
 static void
 zond_treeview_row_activated( GtkWidget* ztv, GtkTreePath* tp, GtkTreeViewColumn* tvc,
         gpointer user_data )
@@ -270,6 +357,74 @@ zond_treeview_new( Projekt* zond, gint id )
 
 
     return ztv;
+}
+
+
+static gboolean
+zond_treeview_iter_foreach_node_id( GtkTreeModel* model, GtkTreePath* path,
+        GtkTreeIter* iter, gpointer user_data )
+{
+    GtkTreeIter** new_iter = (GtkTreeIter**) user_data;
+    gint node_id = GPOINTER_TO_INT(g_object_get_data( G_OBJECT(model),
+            "node_id" ));
+
+    gint node_id_tree = 0;
+    gtk_tree_model_get( model, iter, 2, &node_id_tree, -1 );
+
+    if ( node_id == node_id_tree )
+    {
+        *new_iter = gtk_tree_iter_copy( iter );
+        return TRUE;
+    }
+    else return FALSE;
+}
+
+
+GtkTreeIter*
+zond_treeview_abfragen_iter( ZondTreeview* treeview, gint node_id )
+{
+    GtkTreeIter* iter = NULL;
+    GtkTreeModel* model = gtk_tree_view_get_model( GTK_TREE_VIEW(treeview) );
+
+    g_object_set_data( G_OBJECT(model), "node_id", GINT_TO_POINTER(node_id) );
+    gtk_tree_model_foreach( model, (GtkTreeModelForeachFunc)
+            zond_treeview_iter_foreach_node_id, &iter );
+
+    return iter;
+}
+
+
+static gboolean
+zond_treeview_foreach_path( GtkTreeModel* model, GtkTreePath* path, GtkTreeIter* iter,
+        gpointer user_data )
+{
+    GtkTreePath** new_path = (GtkTreePath**) user_data;
+    gint node_id = GPOINTER_TO_INT(g_object_get_data( G_OBJECT(model),
+            "node_id" ));
+
+    gint node_id_tree = 0;
+    gtk_tree_model_get( model, iter, 2, &node_id_tree, -1 );
+
+    if ( node_id == node_id_tree )
+    {
+        *new_path = gtk_tree_path_copy( path );
+        return TRUE;
+    }
+    else return FALSE;
+}
+
+//Ggf. ausschleichen oder vereinheitlichen mit ...abfragen_iter
+GtkTreePath*
+zond_treeview_get_path( SondTreeview* treeview, gint node_id )
+{
+    GtkTreePath* path = NULL;
+    GtkTreeModel* model = gtk_tree_view_get_model( GTK_TREE_VIEW(treeview) );
+
+    g_object_set_data( G_OBJECT(model), "node_id", GINT_TO_POINTER(node_id) );
+    gtk_tree_model_foreach( model, (GtkTreeModelForeachFunc)
+            zond_treeview_foreach_path, &path );
+
+    return path;
 }
 
 

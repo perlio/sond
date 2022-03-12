@@ -170,13 +170,6 @@ open_file( Projekt* zond, gpointer files )
         return;
     }
 
-    rc = db_baum_refresh( zond, &errmsg );
-    if ( rc )
-    {
-        display_message( zond->app_window, "Fehler beim Öffnen Datei:\n\n", errmsg, NULL );
-        g_free( errmsg );
-    }
-
     return;
 }
 

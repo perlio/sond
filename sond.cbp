@@ -741,6 +741,17 @@
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
 		</Unit>
+		<Unit filename="src/zond/zond_treeviews.c">
+			<Option compilerVar="CC" />
+			<Option compile="0" />
+			<Option link="0" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/zond_treeviews.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
 		<Extensions>
 			<AutoVersioning>
 				<Scheme minor_max="10" build_max="0" rev_max="0" rev_rand_max="10" build_times_to_increment_minor="100" />

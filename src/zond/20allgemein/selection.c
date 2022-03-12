@@ -33,7 +33,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../../misc.h"
 #include "../../eingang.h"
 #include "../../sond_treeviewfm.h"
-#include "../../sond_treeview.h"
+#include "../zond_treeview.h"
 #include "../../dbase.h"
 
 #include <gtk/gtk.h>
@@ -71,7 +71,7 @@ selection_foreach_verschieben( SondTreeview* tree_view, GtkTreeIter* iter,
         else if ( rc == 1 ) return 0;
     }
 
-    rc = knoten_verschieben( s_selection->zond, s_selection->baum, node_id, s_selection->parent_id,
+    rc = treeviews_knoten_verschieben( s_selection->zond, s_selection->baum, node_id, s_selection->parent_id,
             s_selection->older_sibling_id, errmsg );
     if ( rc ) ERROR_SOND ( "knoten_verschieben" )
 
@@ -110,7 +110,7 @@ selection_verschieben( Projekt* zond, Baum baum, gint anchor_id, gboolean kind,
 
     gtk_widget_queue_draw( GTK_WIDGET(zond->treeview[baum]) );
 
-    GtkTreeIter* iter = baum_abfragen_iter( zond->treeview[baum], s_selection.older_sibling_id );
+    GtkTreeIter* iter = zond_treeview_abfragen_iter( ZOND_TREEVIEW(zond->treeview[baum]), s_selection.older_sibling_id );
 
     if ( iter )
     {
@@ -655,6 +655,24 @@ selection_foreach_link( SondTreeview* tree_view, GtkTreeIter* iter, gpointer dat
 }
 
 
+gboolean
+selection_anchor_no_link( GtkTreeIter* iter, gboolean child, gint* anchor_id )
+{
+    if ( zond_tree_store_is_link( iter ) )
+    {
+        gint head_nr = 0;
+
+        head_nr = zond_tree_store_get_link_head_nr( iter->user_data );
+
+        if ( !head_nr || child ) return FALSE;
+        else *anchor_id = head_nr;
+    }
+    else gtk_tree_model_get( GTK_TREE_MODEL(zond_tree_store_get_tree_store(
+            iter->user_data )), iter, 2, anchor_id, -1 );
+
+    return TRUE;
+}
+
 //Ziel ist immer BAUM_AUSWERTUNG
 static gint
 selection_link( Projekt* zond, Baum baum_selection, Baum baum_dest, gint anchor_id, gboolean kind, gchar** errmsg )
@@ -695,10 +713,10 @@ selection_link( Projekt* zond, Baum baum_selection, Baum baum_dest, gint anchor_
 void
 selection_paste( Projekt* zond, gboolean kind, gboolean link )
 {
-    gint rc = 0;
-    gchar* errmsg = NULL;
     Baum baum = KEIN_BAUM;
     Clipboard* clipboard = NULL;
+    GtkTreeIter iter = { 0, };
+    gint anchor_id = 0;
 
     baum = baum_abfragen_aktiver_treeview( zond );
 
@@ -725,15 +743,20 @@ selection_paste( Projekt* zond, gboolean kind, gboolean link )
         }
     }
 
-    gint anchor_id = 0;
-    if ( baum != BAUM_FS ) anchor_id =
-            baum_abfragen_aktuelle_node_id( zond->treeview[baum] );
+    if ( baum != BAUM_FS && sond_treeview_get_cursor( zond->treeview[baum], &iter ) &&
+            !selection_anchor_no_link( &iter, kind, &anchor_id ) ) return;
+
+    //else: anchor_id bleibt 0
+
 
     //Jetzt die einzelnen Varianten
     if ( baum_selection == BAUM_FS )
     {
         if ( baum == BAUM_FS )
         {
+            gint rc = 0;
+            gchar* errmsg = NULL;
+
             rc = sond_treeviewfm_paste_clipboard( SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
                     kind, &errmsg );
             if ( rc )
@@ -748,13 +771,18 @@ selection_paste( Projekt* zond, gboolean kind, gboolean link )
         }
         else if ( baum == BAUM_INHALT && !clipboard->ausschneiden )
         {
+            gint rc = 0;
+            gchar* errmsg = NULL;
             InfoWindow* info_window = NULL;
             GArray* arr_new_nodes = NULL;
 
             if ( anchor_id == 0 ) kind = TRUE;
             else
             {
-                rc = hat_vorfahre_datei( zond, baum, anchor_id, kind, &errmsg );
+                gint rc = 0;
+                gchar* errmsg = NULL;
+
+                rc = treeviews_hat_vorfahre_datei( zond, baum, anchor_id, kind, &errmsg );
                 if ( rc == -1 )
                 {
                     display_message( zond->app_window, "Bei Aufruf hat_vorfahre_datei:\n\n",
@@ -791,10 +819,16 @@ selection_paste( Projekt* zond, gboolean kind, gboolean link )
     {
         if ( baum == BAUM_INHALT && clipboard->ausschneiden )
         {
+            gint rc = 0;
+            gchar* errmsg = NULL;
+
             if ( anchor_id == 0 ) kind = TRUE;
             else
             {
-                rc = hat_vorfahre_datei( zond, baum, anchor_id, kind, &errmsg );
+                gint rc = 0;
+                gchar* errmsg = NULL;
+
+                rc = treeviews_hat_vorfahre_datei( zond, baum, anchor_id, kind, &errmsg );
                 if ( rc == -1 )
                 {
                     display_message( zond->app_window, "Bei Aufruf hat_vorfahre_datei\n\n",
@@ -829,6 +863,9 @@ selection_paste( Projekt* zond, gboolean kind, gboolean link )
         }
         else if ( baum == BAUM_AUSWERTUNG && !clipboard->ausschneiden && !link )
         {
+            gint rc = 0;
+            gchar* errmsg = NULL;
+
             rc = selection_kopieren( zond, baum_selection, BAUM_AUSWERTUNG, anchor_id, kind, &errmsg );
             if ( rc == -1 )
             {
@@ -842,6 +879,7 @@ selection_paste( Projekt* zond, gboolean kind, gboolean link )
         else if ( baum == BAUM_AUSWERTUNG && !clipboard->ausschneiden && link )
         {
             gint rc = 0;
+            gchar* errmsg = NULL;
 
             rc = selection_link( zond, baum_selection, baum, anchor_id, kind, &errmsg );
             if ( rc )
@@ -858,6 +896,9 @@ selection_paste( Projekt* zond, gboolean kind, gboolean link )
     {
         if ( baum == BAUM_AUSWERTUNG && clipboard->ausschneiden && !link )
         {
+            gint rc = 0;
+            gchar* errmsg = NULL;
+
             rc = selection_verschieben( zond, baum_selection, anchor_id, kind, &errmsg );
             if ( rc == -1 )
             {
@@ -870,6 +911,9 @@ selection_paste( Projekt* zond, gboolean kind, gboolean link )
         }
         else if ( baum == BAUM_AUSWERTUNG && !clipboard->ausschneiden && !link )
         {
+            gint rc = 0;
+            gchar* errmsg = NULL;
+
             rc = selection_kopieren( zond, baum_selection, BAUM_AUSWERTUNG, anchor_id, kind, &errmsg );
             if ( rc == -1 )
             {
@@ -883,6 +927,7 @@ selection_paste( Projekt* zond, gboolean kind, gboolean link )
         else if ( baum == BAUM_AUSWERTUNG && !clipboard->ausschneiden && link )
         {
             gint rc = 0;
+            gchar* errmsg = NULL;
 
             rc = selection_link( zond, baum_selection, baum, anchor_id, kind, &errmsg );
             if ( rc )

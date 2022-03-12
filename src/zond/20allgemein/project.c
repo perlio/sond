@@ -391,6 +391,12 @@ project_oeffnen( Projekt* zond, const gchar* abs_path, gboolean create,
     zond->key_press_signal = g_signal_connect( zond->app_window,
             "key-press-event", G_CALLBACK(cb_key_press), zond );
 
+    if ( !create )
+    {
+        rc = db_baum_refresh( zond, errmsg );
+        if ( rc == -1 ) ERROR_S
+    }
+
     return 0;
 }
 
@@ -435,14 +441,6 @@ cb_menu_datei_oeffnen_activate( GtkMenuItem* item, gpointer user_data )
         return;
     }
     else if ( rc == 1 ) return;
-
-    rc = db_baum_refresh( zond, &errmsg );
-    if ( rc == -1 )
-    {
-        display_message( zond->app_window, "Fehler beim Öffnen des Projekts:\nBei "
-                "Aufruf db_baum_refresh:\n", errmsg, NULL );
-        g_free( errmsg );
-    }
 
     return;
 }
