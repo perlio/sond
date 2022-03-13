@@ -5,6 +5,13 @@
 
 #include <stdio.h>
 
+typedef struct _Info_Window
+{
+    GtkWidget* dialog;
+    GtkWidget* content;
+    gboolean cancel;
+} InfoWindow;
+
 typedef struct _GFile GFile;
 typedef struct _GSList GSList;
 typedef struct _GtkWindow GtkWindow;
@@ -18,20 +25,6 @@ typedef int gint;
 typedef unsigned int guint;
 typedef const void* gconstpointer;
 
-
-/* String-Utils */
-gchar* utf8_to_local_filename( const gchar* );
-
-gint string_to_guint( const gchar*, guint* );
-
-/* Sonst. */
-gchar* filename_speichern( GtkWindow*, const gchar* );
-
-gchar* filename_oeffnen( GtkWindow* );
-
-gint update_db_before_path_change( const GFile*, const GFile*, gpointer, gchar** );
-
-gint update_db_after_path_change( const gint, gpointer, gchar** );
 
 gboolean is_pdf( const gchar* );
 

@@ -25,9 +25,11 @@ typedef struct _GtkWidget GtkWidget;
 typedef struct _GtkCalendar GtkCalendar;
 typedef struct _SondTreeview SondTreeview;
 typedef struct _GFile GFile;
+typedef struct _GtkWindow GtkWindow;
 
 typedef char gchar;
 typedef int gint;
+typedef unsigned int guint;
 typedef int gboolean;
 
 
@@ -44,7 +46,15 @@ gint allg_string_array_index_holen( GPtrArray*, gchar* );
 
 gchar* add_string( gchar*, gchar* );
 
+gchar* utf8_to_local_filename( const gchar* );
+
+gint string_to_guint( const gchar*, guint* );
+
 GSList* choose_files( const GtkWidget*, const gchar*, const gchar*, gchar*, gint, gboolean );
+
+gchar* filename_speichern( GtkWindow*, const gchar* );
+
+gchar* filename_oeffnen( GtkWindow* );
 
 gchar* get_path_from_base( const gchar*, gchar** );
 

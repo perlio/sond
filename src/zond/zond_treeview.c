@@ -23,10 +23,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "global_types.h"
 #include "../misc.h"
-#include "10init/treeviews.h"
 #include "10init/app_window.h"
 #include "20allgemein/oeffnen.h"
 #include "20allgemein/project.h"
+#include "20allgemein/treeviews.h"
 
 
 typedef struct

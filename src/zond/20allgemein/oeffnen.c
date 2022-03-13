@@ -24,15 +24,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../zond_pdf_document.h"
 
 #include "../global_types.h"
-#include "../error.h"
 #include "../zond_dbase.h"
-#include "../10init/treeviews.h"
 
 #include "../99conv/pdf.h"
 #include "../99conv/general.h"
 
 #include "ziele.h"
 #include "project.h"
+#include "treeviews.h"
 
 #include "../40viewer/document.h"
 #include "../40viewer/viewer.h"

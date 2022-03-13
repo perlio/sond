@@ -24,12 +24,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../zond_pdf_document.h"
 
 #include "../global_types.h"
-#include "../error.h"
 #include "../zond_dbase.h"
 
 #include "../99conv/general.h"
 #include "../99conv/pdf.h"
-#include "../99conv/pdf_ocr.h"
+#include "../pdf_ocr.h"
 
 #include "../20allgemein/ziele.h"
 #include "../20allgemein/project.h"

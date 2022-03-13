@@ -69,7 +69,7 @@ gint zond_dbase_get_ref_id( ZondDBase*, gint, gchar** );
 
 gint zond_dbase_get_rel_path( ZondDBase*, Baum, gint, gchar**, gchar** );
 
-gint zond_dbase_get_ziel( ZondDBase*, Baum, gint, Ziel**, gchar** );
+gint zond_dbase_get_ziel( ZondDBase*, Baum, gint, Ziel*, gchar** );
 
 gint zond_dbase_get_node_id_from_rel_path( ZondDBase*, const gchar*, gchar** );
 

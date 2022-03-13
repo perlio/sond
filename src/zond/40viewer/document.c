@@ -8,7 +8,6 @@
 #include "../99conv/pdf.h"
 
 #include "../global_types.h"
-#include "../error.h"
 
 #include"../../misc.h"
 

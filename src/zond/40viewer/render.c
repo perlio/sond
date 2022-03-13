@@ -22,7 +22,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "../zond_pdf_document.h"
 #include "../global_types.h"
-#include "../error.h"
 
 #include "../99conv/general.h"
 #include "../99conv/pdf.h"
@@ -30,9 +29,49 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "render.h"
 #include "viewer.h"
 #include "document.h"
-#include "viewer_pixbuf.h"
 #include "viewer_page.h"
 
+
+typedef struct
+{
+    fz_context* ctx;
+    fz_pixmap* pixmap;
+} ViewerPixbufPrivate;
+
+
+static void
+render_pixbuf_finalize( guchar *pixels, gpointer data )
+{
+    ViewerPixbufPrivate* viewer_pixbuf_priv = (ViewerPixbufPrivate*) data;
+
+    fz_drop_pixmap( viewer_pixbuf_priv->ctx, viewer_pixbuf_priv->pixmap );
+//    fz_drop_context( viewer_pixbuf_priv->ctx );
+
+    g_free( viewer_pixbuf_priv );
+
+    return;
+}
+
+
+GdkPixbuf*
+render_pixbuf_new_from_pixmap( fz_context* ctx, fz_pixmap* pixmap )
+{
+    GdkPixbuf* pixbuf = NULL;
+    ViewerPixbufPrivate* viewer_pixbuf_priv = NULL;
+
+    viewer_pixbuf_priv = g_try_malloc0( sizeof( ViewerPixbufPrivate ) );
+    if ( !viewer_pixbuf_priv ) return NULL;
+
+    viewer_pixbuf_priv->ctx = ctx;
+
+    viewer_pixbuf_priv->pixmap = pixmap;
+
+    pixbuf = gdk_pixbuf_new_from_data( pixmap->samples,
+            GDK_COLORSPACE_RGB, FALSE, 8, pixmap->w, pixmap->h,
+            pixmap->stride, render_pixbuf_finalize, viewer_pixbuf_priv );
+
+    return pixbuf;
+}
 
 
 static gint
@@ -82,11 +121,11 @@ render_thumbnail( fz_context* ctx, ViewerPage* viewer_page,
         ERROR_MUPDF( "fz_run_display_list" )
     }
 
-    pixbuf = viewer_pixbuf_new_from_pixmap( zond_pdf_document_get_ctx( pdf_document_page->document ), pixmap );
+    pixbuf = render_pixbuf_new_from_pixmap( zond_pdf_document_get_ctx( pdf_document_page->document ), pixmap );
     if ( !pixbuf )
     {
         fz_drop_pixmap( ctx, pixmap );
-        if ( errmsg ) *errmsg = g_strdup( "Bei Aufruf viewer_pixbuf_new_from_pixmap:\n"
+        if ( errmsg ) *errmsg = g_strdup( "Bei Aufruf render_pixbuf_new_from_pixmap:\n"
                 "Out of memory" );
 
         return -1;
@@ -146,11 +185,11 @@ render_pixmap( fz_context* ctx, ViewerPage* viewer_page, gdouble zoom,
         ERROR_MUPDF( "fz_run_display_list" )
     }
 
-    pixbuf = viewer_pixbuf_new_from_pixmap( zond_pdf_document_get_ctx( pdf_document_page->document ), pixmap );
+    pixbuf = render_pixbuf_new_from_pixmap( zond_pdf_document_get_ctx( pdf_document_page->document ), pixmap );
     if ( !pixbuf )
     {
         fz_drop_pixmap( ctx, pixmap );
-        if ( errmsg ) *errmsg = g_strdup( "Bei Aufruf viewer_pixbuf_new_from_pixmap:\n"
+        if ( errmsg ) *errmsg = g_strdup( "Bei Aufruf render_pixbuf_new_from_pixmap:\n"
                 "Out of memory" );
 
         return -1;

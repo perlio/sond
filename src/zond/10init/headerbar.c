@@ -20,7 +20,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <mupdf/fitz.h>
 #include <mupdf/pdf.h>
 #include <sqlite3.h>
-#include <tesseract/capi.h>
 #include <glib/gstdio.h>
 
 #include "../zond_pdf_document.h"
@@ -32,15 +31,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../../misc.h"
 
 #include "../global_types.h"
-#include "../error.h"
 #include "../zond_tree_store.h"
 #include "../zond_dbase.h"
 
 #include "../99conv/general.h"
-#include "../99conv/baum.h"
-#include "../99conv/db_zu_baum.h"
+#include "../99conv/pdf.h"
 #include "../99conv/test.h"
-#include "../99conv/pdf_ocr.h"
+#include "../pdf_ocr.h"
 
 #include "../20allgemein/pdf_text.h"
 #include "../20allgemein/ziele.h"
@@ -48,11 +45,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../20allgemein/suchen.h"
 #include "../20allgemein/project.h"
 #include "../20allgemein/export.h"
+#include "../20allgemein/treeviews.h"
 
 #include "../40viewer/document.h"
 
 #include "app_window.h"
-#include "treeviews.h"
 
 #include "../../misc.h"
 
@@ -89,16 +86,14 @@ pdf_rel_path_in_array( GPtrArray* arr_rel_path, gchar* rel_path )
 static GPtrArray*
 selection_abfragen_pdf( Projekt* zond, gchar** errmsg )
 {
-    Baum baum = KEIN_BAUM;
     GList* selected = NULL;
     GList* list = NULL;
 
     GPtrArray* arr_rel_path = g_ptr_array_new_with_free_func( (GDestroyNotify) g_free );
 
-    baum = baum_abfragen_aktiver_treeview( zond );
-    if ( baum == KEIN_BAUM ) return NULL;
+    if ( zond->baum_active == KEIN_BAUM ) return NULL;
 
-    selected = gtk_tree_selection_get_selected_rows( zond->selection[baum], NULL );
+    selected = gtk_tree_selection_get_selected_rows( zond->selection[zond->baum_active], NULL );
     if( !selected ) return NULL;
 
     list = selected;
@@ -109,7 +104,7 @@ selection_abfragen_pdf( Projekt* zond, gchar** errmsg )
         gint node_id = 0;
         gchar* rel_path = NULL;
 
-        if ( !gtk_tree_model_get_iter( gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) ), &iter, list->data ) )
+        if ( !gtk_tree_model_get_iter( gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[zond->baum_active]) ), &iter, list->data ) )
         {
             g_list_free_full( selected, (GDestroyNotify) gtk_tree_path_free );
             g_ptr_array_unref( arr_rel_path );
@@ -120,9 +115,9 @@ selection_abfragen_pdf( Projekt* zond, gchar** errmsg )
             return NULL;
         }
 
-        gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) ), &iter, 2, &node_id, -1 );
+        gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[zond->baum_active]) ), &iter, 2, &node_id, -1 );
 
-        rc = zond_dbase_get_rel_path( zond->dbase_zond->zond_dbase_work, baum, node_id, &rel_path, errmsg );
+        rc = zond_dbase_get_rel_path( zond->dbase_zond->zond_dbase_work, zond->baum_active, node_id, &rel_path, errmsg );
         if ( rc == 1 ) continue;
         else if ( rc )
         {
@@ -177,89 +172,19 @@ cb_item_clean_pdf( GtkMenuItem* item, gpointer data )
 
     for ( gint i = 0; i < arr_rel_path->len; i++ )
     {
-        gchar* path_tmp = NULL;
-        pdf_document* doc = NULL;
+        gint rc = 0;
+        gchar* errmsg = NULL;
 
-        pdf_write_options opts = {
-                0, // do_incremental
-                1, // do_pretty
-                1, // do_ascii
-                0, // do_compress
-                1, // do_compress_images
-                1, // do_compress_fonts
-                0, // do_decompress
-                4, // do_garbage
-                0, // do_linear
-                1, // do_clean
-                0, // do_sanitize
-                0, // do_appearance
-                0, // do_encrypt
-                0, // dont_regenerate_id  Don't regenerate ID if set (used for clean)
-                ~0, // permissions
-                "", // opwd_utf8[128]
-                "", // upwd_utf8[128]
-                0 //do snapshot
-                };
-
-        //prüfen, ob in Viewer geöffnet
-        if ( zond_pdf_document_is_open( g_ptr_array_index( arr_rel_path, i ) ) )
+        rc = pdf_clean( zond->ctx, g_ptr_array_index( arr_rel_path, i ), &errmsg );
+        if ( rc )
         {
-            display_message( zond->app_window, "PDF ", g_ptr_array_index( arr_rel_path, i ), " säubern nicht möglich\n\n"
-                    "PDF bereits geöffnet - zunächst schließen", NULL );
+            display_message( zond->app_window, "PDF ",
+                    g_ptr_array_index( arr_rel_path, i ), " säubern nicht möglich\n\n",
+                    errmsg, NULL );
+            g_free( errmsg );
 
             continue;
         }
-
-        fz_try( zond->ctx ) doc = pdf_open_document( zond->ctx, g_ptr_array_index( arr_rel_path, i ) );
-        fz_catch( zond->ctx )
-        {
-            display_message( zond->app_window, "PDF ", g_ptr_array_index( arr_rel_path, i ), " säubern nicht möglich\n\n"
-                    "Bei Aufruf pdf_open_document:\n", fz_caught_message( zond->ctx ), NULL );
-
-            continue;
-        }
-
-        fz_try( zond->ctx ) pdf_clean_document( zond->ctx, doc );
-        fz_catch( zond->ctx )
-        {
-            pdf_drop_document( zond->ctx, doc );
-            display_message( zond->app_window, "PDF ", g_ptr_array_index( arr_rel_path, i ), " säubern nicht möglich\n\n"
-                    "Bei Aufruf pdf_clean_document:\n", fz_caught_message( zond->ctx ), NULL );
-
-            continue;
-        }
-
-        path_tmp = g_strconcat( g_ptr_array_index( arr_rel_path, i ), ".tmp_clean", NULL );
-
-        fz_try( zond->ctx ) pdf_save_document( zond->ctx, doc, path_tmp, &opts );
-        fz_always( zond->ctx ) pdf_drop_document( zond->ctx, doc );
-        fz_catch( zond->ctx )
-        {
-            g_free( path_tmp );
-            display_message( zond->app_window, "PDF ", g_ptr_array_index( arr_rel_path, i ), " säubern nicht möglich\n\n"
-                    "Bei Aufruf pdf_save_document:\n", fz_caught_message( zond->ctx ), NULL );
-
-            continue;
-        }
-
-        if ( g_remove( g_ptr_array_index( arr_rel_path, i ) ) )
-        {
-            g_free( path_tmp );
-            display_message( zond->app_window, "PDF ", g_ptr_array_index( arr_rel_path, i ), " säubern nicht möglich\n\n"
-                    "Bei Aufruf g_remove (old):\n", strerror( errno ), NULL );
-
-            continue;
-        }
-        if ( g_rename( path_tmp, g_ptr_array_index( arr_rel_path, i ) ) )
-        {
-            g_free( path_tmp );
-            display_message( zond->app_window, "PDF ", g_ptr_array_index( arr_rel_path, i ), " säubern nicht möglich\n\n"
-                    "Bei Aufruf g_rename (*.tmp_clean->.pdf):\n", strerror( errno ), NULL );
-
-            continue;
-        }
-
-        g_free( path_tmp );
     }
 
     g_ptr_array_free( arr_rel_path, TRUE );
@@ -483,10 +408,8 @@ cb_punkt_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
     gboolean child = (gboolean) GPOINTER_TO_INT(g_object_get_data(
             G_OBJECT(item), "kind" ));
 
-    Baum baum = baum_abfragen_aktiver_treeview( zond );
-
-    if ( baum == KEIN_BAUM ) return;
-    else if ( baum == BAUM_FS )
+    if ( zond->baum_active== KEIN_BAUM ) return;
+    else if ( zond->baum_active == BAUM_FS )
     {
         rc = sond_treeviewfm_create_dir( SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), child, &errmsg );
         if ( rc )
@@ -498,7 +421,7 @@ cb_punkt_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
     }
     else
     {
-        rc = treeviews_insert_node( zond, baum, child, &errmsg );
+        rc = treeviews_insert_node( zond, zond->baum_active, child, &errmsg );
         if ( rc == -1 )
         {
             display_message( zond->app_window, "Punkt einfügen fehlgeschlagen\n\n"
@@ -515,16 +438,13 @@ cb_punkt_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
 static void
 cb_item_text_anbindung( GtkMenuItem* item, gpointer data )
 {
-    Baum baum = KEIN_BAUM;
     gint rc = 0;
     gchar* errmsg = NULL;
     Projekt* zond = (Projekt*) data;
 
-    baum = baum_abfragen_aktiver_treeview( zond );
+    if ( zond->baum_active == KEIN_BAUM || zond->baum_active == BAUM_FS ) return;
 
-    if ( baum == KEIN_BAUM || baum == BAUM_FS ) return;
-
-    rc = treeviews_node_text_nach_anbindung( zond, baum, &errmsg );
+    rc = treeviews_selection_set_node_text( zond, zond->baum_active, &errmsg );
     if ( rc == -1 )
     {
         display_message( zond->app_window, "Knotentext anpassen fehlgeschlagen:\n\n"
@@ -542,17 +462,15 @@ cb_change_icon_item( GtkMenuItem* item, gpointer data )
     gchar* errmsg = NULL;
     gint icon_id = 0;
     Projekt* zond = NULL;
-    Baum baum = KEIN_BAUM;
 
     zond = (Projekt*) data;
 
-    baum = baum_abfragen_aktiver_treeview( zond );
-    if ( baum == KEIN_BAUM || baum == BAUM_FS ) return;
+    if ( zond->baum_active == KEIN_BAUM || zond->baum_active == BAUM_FS ) return;
 
     icon_id = GPOINTER_TO_INT(g_object_get_data( G_OBJECT(item),
             "icon-id" ));
 
-    rc = treeviews_change_icon_id( zond, baum, zond->icon[icon_id].icon_name, &errmsg );
+    rc = treeviews_selection_change_icon( zond, zond->baum_active, zond->icon[icon_id].icon_name, &errmsg );
     if ( rc == -1 )
     {
         display_message( zond->app_window, "Icon ändern fehlgeschlagen:\n\n"
@@ -569,9 +487,8 @@ cb_eingang_activate( GtkMenuItem* item, gpointer data )
 {
     Projekt* zond = (Projekt*) data;
 
-    Baum baum = baum_abfragen_aktiver_treeview( zond );
-    if ( baum == KEIN_BAUM ) return;
-    else if ( baum == BAUM_FS )
+    if ( zond->baum_active == KEIN_BAUM ) return;
+    else if ( zond->baum_active == BAUM_FS )
     {
         gint rc = 0;
         gchar* errmsg = NULL;
@@ -598,10 +515,9 @@ cb_kopieren_activate( GtkMenuItem* item, gpointer user_data )
 {
     Projekt* zond = (Projekt*) user_data;
 
-    Baum baum = baum_abfragen_aktiver_treeview( zond );
-    if ( baum == KEIN_BAUM ) return;
+    if ( zond->baum_active == KEIN_BAUM ) return;
 
-    sond_treeview_copy_or_cut_selection( zond->treeview[baum], FALSE );
+    sond_treeview_copy_or_cut_selection( zond->treeview[zond->baum_active], FALSE );
 
     return;
 }
@@ -612,10 +528,9 @@ cb_ausschneiden_activate( GtkMenuItem* item, gpointer user_data )
 {
     Projekt* zond = (Projekt*) user_data;
 
-    Baum baum = baum_abfragen_aktiver_treeview( zond );
-    if ( baum == KEIN_BAUM ) return;
+    if ( zond->baum_active == KEIN_BAUM ) return;
 
-    sond_treeview_copy_or_cut_selection( zond->treeview[baum], TRUE );
+    sond_treeview_copy_or_cut_selection( zond->treeview[zond->baum_active], TRUE );
 
     return;
 }
@@ -644,15 +559,13 @@ cb_loeschen_activate( GtkMenuItem* item, gpointer user_data )
     gchar* errmsg = NULL;
 
     Projekt* zond = (Projekt*) user_data;
- //   static SFMForeachLoeschen s_fm_foreach_loeschen = {};
 
-    Baum baum = baum_abfragen_aktiver_treeview( zond );
-    if ( baum == KEIN_BAUM ) return;
+    if ( zond->baum_active == KEIN_BAUM ) return;
 
-    if ( baum == BAUM_FS ) rc = sond_treeviewfm_selection_loeschen(
-            SOND_TREEVIEWFM(zond->treeview[baum]), &errmsg );
-    else if ( baum == BAUM_INHALT ||baum == BAUM_AUSWERTUNG ) rc =
-            treeviews_selection_loeschen( zond, baum, &errmsg );
+    if ( zond->baum_active == BAUM_FS ) rc = sond_treeviewfm_selection_loeschen(
+            SOND_TREEVIEWFM(zond->treeview[zond->baum_active]), &errmsg );
+    else if ( zond->baum_active == BAUM_INHALT || zond->baum_active == BAUM_AUSWERTUNG ) rc =
+            treeviews_selection_loeschen( zond, zond->baum_active, &errmsg );
     if ( rc == -1 )
     {
         display_message( zond->app_window, "Löschen fehlgeschlagen -\n\nBei Aufruf "
@@ -669,14 +582,12 @@ cb_anbindung_entfernenitem_activate( GtkMenuItem* item, gpointer user_data )
 {
     gint rc = 0;
     gchar* errmsg = NULL;
-    Baum baum = KEIN_BAUM;
 
     Projekt* zond = (Projekt*) user_data;
 
-    baum = baum_abfragen_aktiver_treeview( zond );
-    if ( baum == BAUM_FS ) return;
+    if ( zond->baum_active == KEIN_BAUM || zond->baum_active == BAUM_FS ) return;
 
-    rc = treeviews_entfernen_anbindung( zond, baum, &errmsg );
+    rc = treeviews_selection_entfernen_anbindung( zond, zond->baum_active, &errmsg );
     if ( rc )
     {
         display_message( zond->app_window, "Fehler bei löschen von Anbindungen - \n\n",
@@ -702,24 +613,25 @@ cb_suchen_text( GtkMenuItem* item, gpointer data )
 /*  Callbacks des Menus "Ansicht" */
 
 static void
-cb_alle_erweitern_activated( GtkMenuItem* item, gpointer zond )
+cb_alle_erweitern_activated( GtkMenuItem* item, gpointer data )
 {
-    gtk_tree_view_expand_all( GTK_TREE_VIEW(((Projekt*) zond)->treeview[baum_abfragen_aktiver_treeview(
-            (Projekt*) zond )]) );
+    Projekt* zond = (Projekt*) data;
+
+    gtk_tree_view_expand_all( GTK_TREE_VIEW(zond->treeview[zond->baum_active]) );
 
     return;
 }
 
 
 static void
-cb_aktueller_zweig_erweitern_activated( GtkMenuItem* item, gpointer zond )
+cb_aktueller_zweig_erweitern_activated( GtkMenuItem* item, gpointer data )
 {
     GtkTreePath *path;
 
-    gtk_tree_view_get_cursor( GTK_TREE_VIEW(((Projekt*) zond)->treeview[baum_abfragen_aktiver_treeview(
-            (Projekt*) zond )]), &path, NULL );
-    gtk_tree_view_expand_row( GTK_TREE_VIEW(((Projekt*) zond)->treeview[baum_abfragen_aktiver_treeview(
-            (Projekt*) zond )]), path, TRUE );
+    Projekt* zond = (Projekt*) data;
+
+    gtk_tree_view_get_cursor( GTK_TREE_VIEW(zond->treeview[zond->baum_active]), &path, NULL );
+    gtk_tree_view_expand_row( GTK_TREE_VIEW(zond->treeview[zond->baum_active]), path, TRUE );
 
     gtk_tree_path_free(path);
 
@@ -728,10 +640,11 @@ cb_aktueller_zweig_erweitern_activated( GtkMenuItem* item, gpointer zond )
 
 
 static void
-cb_reduzieren_activated( GtkMenuItem* item, gpointer zond )
+cb_reduzieren_activated( GtkMenuItem* item, gpointer data )
 {
-    gtk_tree_view_collapse_all( GTK_TREE_VIEW(((Projekt*) zond)->treeview[baum_abfragen_aktiver_treeview(
-            (Projekt*) zond )]) );
+    Projekt* zond = (Projekt*) data;
+
+    gtk_tree_view_collapse_all( GTK_TREE_VIEW(zond->treeview[zond->baum_active]) );
 
     return;
 }
@@ -740,7 +653,7 @@ cb_reduzieren_activated( GtkMenuItem* item, gpointer zond )
 static void
 cb_refresh_view_activated( GtkMenuItem* item, gpointer zond )
 {
-    db_baum_refresh( (Projekt*) zond, NULL );
+    treeviews_reload_baeume( (Projekt*) zond, NULL );
 
     return;
 }
@@ -760,26 +673,6 @@ cb_menu_test_activate( GtkMenuItem* item, gpointer zond )
         g_free( errmsg );
     }
 
-    return;
-}
-
-
-static void
-cb_menu_convert_activate( GtkMenuItem* item, gpointer data )
-{/*
-    Projekt* zond = (Projekt*) data;
-
-    gint rc = 0;
-    gchar* errmsg = NULL;
-
-    rc = convert_09_to_1( zond, &errmsg );
-    if ( rc )
-    {
-        meldung( zond->app_window, "Konvertieren nicht möglich -\n\nBei "
-                "Aufruf convert_09_to_1:\n", errmsg, NULL );
-        g_free( errmsg );
-    }
-*/
     return;
 }
 
@@ -1163,15 +1056,10 @@ init_menu( Projekt* zond )
     GtkWidget* testitem = gtk_menu_item_new_with_label ("Test");
     g_signal_connect( testitem, "activate", G_CALLBACK(cb_menu_test_activate), (gpointer) zond );
 
-    //convert
-    GtkWidget* convertitem = gtk_menu_item_new_with_label( "Konvertieren .9->1.0" );
-    g_signal_connect( convertitem, "activate", G_CALLBACK(cb_menu_convert_activate), (gpointer) zond );
-
     GtkWidget* addeingangitem = gtk_menu_item_new_with_label( "Konvertieren ->eingang" );
     g_signal_connect( addeingangitem , "activate", G_CALLBACK(cb_menu_addeingang_activate), (gpointer) zond );
 
     gtk_menu_shell_append( GTK_MENU_SHELL(extrasmenu), testitem);
-    gtk_menu_shell_append( GTK_MENU_SHELL(extrasmenu), convertitem);
     gtk_menu_shell_append( GTK_MENU_SHELL(extrasmenu), addeingangitem );
 
 /*  Menu Einstellungen */

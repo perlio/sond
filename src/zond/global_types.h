@@ -56,14 +56,6 @@ typedef struct _Icon
 
 
 
-typedef struct _Info_Window
-{
-    GtkWidget* dialog;
-    GtkWidget* content;
-    gboolean cancel;
-} InfoWindow;
-
-
 struct _Menu
 {
     GtkWidget* projekt;
@@ -105,7 +97,8 @@ typedef struct _Projekt
     SondTreeview* treeview[3];
     GtkTreeSelection* selection[3];
 
-    Baum last_baum;
+    Baum baum_active;
+    Baum baum_prev;
 
     gulong cursor_changed_signal;
     gulong text_buffer_changed_signal;

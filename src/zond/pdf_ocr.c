@@ -23,17 +23,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <allheaders.h>
 #include <glib/gstdio.h>
 
-#include "../zond_pdf_document.h"
+#include "zond_pdf_document.h"
 
-#include "../../misc.h"
+#include "../misc.h"
 
-#include "../error.h"
+//#include "40viewer/document.h"
 
-#include "../40viewer/document.h"
-
-#include "pdf.h"
-#include "general.h"
-#include "test.h"
+#include "99conv/pdf.h"
+#include "99conv/general.h"
 
 #ifdef _WIN32
 #include <errhandlingapi.h>

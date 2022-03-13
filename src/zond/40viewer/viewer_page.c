@@ -17,7 +17,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 #include "viewer_page.h"
-#include "viewer_pixbuf.h"
 
 #include <gtk/gtk.h>
 #include <mupdf/fitz.h>

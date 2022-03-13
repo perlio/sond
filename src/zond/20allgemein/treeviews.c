@@ -16,157 +16,23 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+
 #include <gtk/gtk.h>
 #include <mupdf/fitz.h>
 
-#include "../zond_treeviewfm.h"
+#include "treeviews.h"
+#include "project.h"
+
+#include "../global_types.h"
+#include "../zond_tree_store.h"
+#include "../zond_dbase.h"
 #include "../zond_treeview.h"
 #include "../zond_pdf_document.h"
 
-#include "app_window.h"
+#include "../99conv/pdf.h"
 
 #include "../../misc.h"
 #include "../../dbase.h"
-
-#include "../global_types.h"
-#include "../error.h"
-#include "../zond_tree_store.h"
-#include "../zond_dbase.h"
-
-#include "../99conv/baum.h"
-#include "../99conv/db_zu_baum.h"
-#include "../99conv/general.h"
-
-#include "../20allgemein/oeffnen.h"
-#include "../20allgemein/ziele.h"
-#include "../20allgemein/project.h"
-
-#include "../40viewer/viewer.h"
-
-
-static gboolean
-cb_focus_out( GtkWidget* treeview, GdkEvent* event, gpointer user_data )
-{
-    Projekt* zond = (Projekt*) user_data;
-
-    Baum baum = (Baum) sond_treeview_get_id( SOND_TREEVIEW(treeview) );
-
-    //cursor-changed-signal ausschalten
-    if ( baum != BAUM_FS && zond->cursor_changed_signal )
-    {
-        g_signal_handler_disconnect( treeview, zond->cursor_changed_signal );
-        zond->cursor_changed_signal = 0;
-    }
-
-    g_object_set( sond_treeview_get_cell_renderer_text( zond->treeview[baum] ),
-            "editable", FALSE, NULL);
-
-    zond->last_baum = baum;
-
-    return FALSE;
-}
-
-
-static gboolean
-cb_focus_in( GtkWidget* treeview, GdkEvent* event, gpointer user_data )
-{
-    Projekt* zond = (Projekt*) user_data;
-
-    Baum baum = (Baum) sond_treeview_get_id( SOND_TREEVIEW(treeview) );
-
-    //cursor-changed-signal für den aktivierten treeview anschalten
-    if ( baum != BAUM_FS )
-    {
-        zond->cursor_changed_signal = g_signal_connect( treeview, "cursor-changed",
-            G_CALLBACK(zond_treeview_cursor_changed), zond );
-
-        g_signal_emit_by_name( treeview, "cursor-changed", user_data, NULL );
-    }
-
-    if ( baum != zond->last_baum )
-    {
-        //selection in "altem" treeview löschen
-        gtk_tree_selection_unselect_all( zond->selection[zond->last_baum] );
-/* wennüberhaupt, dann in cb row_collapse oder _expand verschieben, aber eher besser so!!!
-        //Cursor gewählter treeview selektieren
-        GtkTreePath* path = NULL;
-        GtkTreeViewColumn* focus_column = NULL;
-        gtk_tree_view_get_cursor( GTK_TREE_VIEW(treeview), &path, &focus_column );
-        if ( path )
-        {
-            gtk_tree_view_set_cursor( GTK_TREE_VIEW(treeview), path,
-                    focus_column, FALSE );
-            gtk_tree_path_free( path );
-        }
-*/
-    }
-
-    g_object_set( sond_treeview_get_cell_renderer_text( zond->treeview[baum] ),
-            "editable", TRUE, NULL);
-
-    if ( baum != BAUM_AUSWERTUNG )
-            gtk_widget_set_sensitive( GTK_WIDGET(zond->textview), FALSE );
-
-    return FALSE;
-}
-
-
-static void
-treeviews_cb_editing_canceled( GtkCellRenderer* renderer,
-                              gpointer data)
-{
-    Projekt* zond = (Projekt*) data;
-
-    zond->key_press_signal = g_signal_connect( zond->app_window, "key-press-event",
-            G_CALLBACK(cb_key_press), zond );
-
-    return;
-}
-
-
-static void
-treeviews_cb_editing_started( GtkCellRenderer* renderer, GtkEditable* editable,
-                             const gchar* path,
-                             gpointer data )
-{
-    Projekt* zond = (Projekt*) data;
-
-    g_signal_handler_disconnect( zond->app_window, zond->key_press_signal );
-    zond->key_press_signal = 0;
-
-    return;
-}
-
-void
-init_treeviews( Projekt* zond )
-{
-    //der treeview
-    zond->treeview[BAUM_FS] = SOND_TREEVIEW(zond_treeviewfm_new( zond ));
-    zond->treeview[BAUM_INHALT] = SOND_TREEVIEW(zond_treeview_new( zond, (gint) BAUM_INHALT));
-    zond->treeview[BAUM_AUSWERTUNG] = SOND_TREEVIEW(zond_treeview_new( zond, (gint) BAUM_AUSWERTUNG ));
-
-    for ( Baum baum = BAUM_FS; baum < NUM_BAUM; baum++ )
-    {
-        //die Selection
-        zond->selection[baum] = gtk_tree_view_get_selection(
-                GTK_TREE_VIEW(zond->treeview[baum]) );
-
-        //Text-Spalte wird editiert
-        //Beginn
-        g_signal_connect( sond_treeview_get_cell_renderer_text( zond->treeview[baum] ),
-                "editing-started", G_CALLBACK(treeviews_cb_editing_started), zond );
-        g_signal_connect( sond_treeview_get_cell_renderer_text( zond->treeview[baum] ),
-                "editing-canceled", G_CALLBACK(treeviews_cb_editing_canceled), zond );
-
-        //focus-in
-        zond->treeview_focus_in_signal[baum] = g_signal_connect( zond->treeview[baum],
-                "focus-in-event", G_CALLBACK(cb_focus_in), (gpointer) zond );
-        g_signal_connect( zond->treeview[baum], "focus-out-event",
-                G_CALLBACK(cb_focus_out), (gpointer) zond );
-    }
-
-    return;
-}
 
 
 /** Wenn Fehler: -1
@@ -192,50 +58,6 @@ treeviews_hat_vorfahre_datei( Projekt* zond, Baum baum, gint anchor_id, gboolean
         anchor_id = zond_dbase_get_parent( zond->dbase_zond->zond_dbase_work, baum, anchor_id, errmsg );
         if ( anchor_id < 0 ) ERROR_SOND( "zond_dbase_get_parent" )
     }
-
-    return 0;
-}
-
-
-gint
-treeviews_knoten_verschieben( Projekt* zond, Baum baum, gint node_id, gint new_parent,
-        gint new_older_sibling, gchar** errmsg )
-{
-    gint rc = 0;
-    GtkTreeIter* iter = NULL;
-
-    //kind verschieben
-    rc = zond_dbase_verschieben_knoten( zond->dbase_zond->zond_dbase_work, baum, node_id, new_parent,
-            new_older_sibling, errmsg );
-    if ( rc ) ERROR_SOND (" zond_dbase_verschieben_knoten" )
-
-    //Knoten im tree löschen
-    //hierzu iter des verschobenen Kindknotens herausfinden
-    iter = zond_treeview_abfragen_iter( ZOND_TREEVIEW(zond->treeview[baum]), node_id );
-
-    zond_tree_store_remove( iter );
-    gtk_tree_iter_free( iter );
-
-    //jetzt neuen kindknoten aus db erzeugen
-    //hierzu zunächst iter des Anker-Knotens ermitteln
-    gboolean kind = FALSE;
-    if ( new_older_sibling )
-    {
-        iter = zond_treeview_abfragen_iter( ZOND_TREEVIEW(zond->treeview[baum]), new_older_sibling );
-        kind = FALSE;
-    }
-    else
-    {
-        iter = zond_treeview_abfragen_iter( ZOND_TREEVIEW(zond->treeview[baum]), new_parent );
-        kind = TRUE;
-    }
-
-    //Knoten erzeugen
-    rc = db_baum_knoten_mit_kindern( zond, FALSE,
-            baum, node_id, iter, kind, NULL, errmsg );
-    gtk_tree_iter_free( iter );
-
-    if ( rc ) ERROR_SOND( "db_baum_knoten_mit_kindern" )
 
     return 0;
 }
@@ -363,7 +185,7 @@ treeviews_get_rel_path_and_anbindung( Projekt* zond, Baum baum, gint node_id,
         gchar** rel_path, Anbindung** anbindung, gchar** errmsg )
 {
     gint rc = 0;
-    Ziel* ziel = NULL;
+    Ziel ziel = { 0, };
     gchar* rel_path_intern = NULL;
     Anbindung* anbindung_intern = NULL;
 
@@ -388,11 +210,9 @@ treeviews_get_rel_path_and_anbindung( Projekt* zond, Baum baum, gint node_id,
     const ZondPdfDocument* zond_pdf_document = zond_pdf_document_is_open( rel_path_intern );
     if ( zond_pdf_document ) zond_pdf_document_mutex_lock( zond_pdf_document );
 
-    anbindung_intern = treeviews_ziel_zu_anbindung( zond->ctx, rel_path_intern, ziel, errmsg );
+    anbindung_intern = treeviews_ziel_zu_anbindung( zond->ctx, rel_path_intern, &ziel, errmsg );
 
     if ( zond_pdf_document ) zond_pdf_document_mutex_unlock( zond_pdf_document );
-
-    ziele_free( ziel );
 
     if ( !anbindung_intern )
     {
@@ -411,7 +231,7 @@ treeviews_get_rel_path_and_anbindung( Projekt* zond, Baum baum, gint node_id,
 
 
 static gint
-treeviews_foreach_entfernen_anbindung( SondTreeview* stv,
+treeviews_selection_entfernen_anbindung_foreach( SondTreeview* stv,
         GtkTreeIter* iter, gpointer data, gchar** errmsg )
 {
     gint rc = 0;
@@ -469,14 +289,14 @@ treeviews_foreach_entfernen_anbindung( SondTreeview* stv,
 
 //Funktioniert nur im BAUM_INHALT - Abfrage im cb schließt nur BAUM_FS aus
 gint
-treeviews_entfernen_anbindung( Projekt* zond, Baum baum_active, gchar** errmsg )
+treeviews_selection_entfernen_anbindung( Projekt* zond, Baum baum_active, gchar** errmsg )
 {
     gint rc = 0;
 
     if ( baum_active != BAUM_INHALT ) return 0;
 
     rc = sond_treeview_selection_foreach( zond->treeview[BAUM_INHALT],
-            treeviews_foreach_entfernen_anbindung, zond, errmsg );
+            treeviews_selection_entfernen_anbindung_foreach, zond, errmsg );
     if ( rc == -1 ) ERROR_SOND( "treeview_selection_foreach" )
 
     return 0;
@@ -491,7 +311,7 @@ typedef struct _S_Selection_Loeschen
 
 
 static gint
-treeviews_foreach_selection_loeschen( SondTreeview* tree_view, GtkTreeIter* iter,
+treeviews_selection_loeschen_foreach( SondTreeview* tree_view, GtkTreeIter* iter,
         gpointer data, gchar** errmsg )
 {
     gint rc = 0;
@@ -582,7 +402,7 @@ treeviews_selection_loeschen( Projekt* zond, Baum baum_active, gchar** errmsg )
     SSelectionLoeschen s_selection = { zond, baum_active };
 
     rc = sond_treeview_selection_foreach( zond->treeview[baum_active],
-            treeviews_foreach_selection_loeschen, &s_selection, errmsg );
+            treeviews_selection_loeschen_foreach, &s_selection, errmsg );
     if ( rc == -1 ) ERROR_SOND( "sond_treeview_selection_foreach" )
 
     return 0;
@@ -596,7 +416,7 @@ typedef struct _S_Selection_Change_Icon
 } SSelectionChangeIcon;
 
 static gint
-treeviews_foreach_change_icon_id( SondTreeview* tree_view, GtkTreeIter* iter,
+treeviews_selection_change_icon_foreach( SondTreeview* tree_view, GtkTreeIter* iter,
         gpointer data, gchar** errmsg )
 {
     gint rc = 0;
@@ -620,13 +440,13 @@ treeviews_foreach_change_icon_id( SondTreeview* tree_view, GtkTreeIter* iter,
 
 
 gint
-treeviews_change_icon_id( Projekt* zond, Baum baum_active, const gchar* icon_name, gchar** errmsg )
+treeviews_selection_change_icon( Projekt* zond, Baum baum_active, const gchar* icon_name, gchar** errmsg )
 {
     gint rc = 0;
     SSelectionChangeIcon s_selection = { zond, icon_name };
 
     rc = sond_treeview_selection_foreach( zond->treeview[baum_active],
-            treeviews_foreach_change_icon_id, (gpointer) &s_selection, errmsg );
+            treeviews_selection_change_icon_foreach, (gpointer) &s_selection, errmsg );
     if ( rc == -1 ) ERROR_S
 
     return 0;
@@ -634,7 +454,7 @@ treeviews_change_icon_id( Projekt* zond, Baum baum_active, const gchar* icon_nam
 
 
 static gint
-treeviews_node_text_nach_anbindung_foreach( SondTreeview* stv, GtkTreeIter* iter,
+treeviews_selection_set_node_text_foreach( SondTreeview* stv, GtkTreeIter* iter,
         gpointer data, gchar** errmsg )
 {
     gint rc = 0;
@@ -681,14 +501,14 @@ treeviews_node_text_nach_anbindung_foreach( SondTreeview* stv, GtkTreeIter* iter
 }
 
 gint
-treeviews_node_text_nach_anbindung( Projekt* zond, Baum baum_active, gchar** errmsg )
+treeviews_selection_set_node_text( Projekt* zond, Baum baum_active, gchar** errmsg )
 {
     gint rc = 0;
 
     g_return_val_if_fail( baum_active == BAUM_INHALT || baum_active == BAUM_AUSWERTUNG, -1 );
 
     rc = sond_treeview_selection_foreach( zond->treeview[baum_active],
-            treeviews_node_text_nach_anbindung_foreach, zond, errmsg );
+            treeviews_selection_set_node_text_foreach, zond, errmsg );
     if ( rc ) ERROR_SOND( "sond_treeview_selection_foreach" )
 
     return 0;
@@ -774,6 +594,274 @@ treeviews_insert_node( Projekt* zond, Baum baum_active, gboolean child, gchar** 
     zond_tree_store_set( &new_iter, zond->icon[ICON_NORMAL].icon_name, "Neuer Punkt", node_id_new );
 
     sond_treeview_set_cursor( zond->treeview[baum], &new_iter );
+
+    return 0;
+}
+
+
+static gint
+treeviews_db_to_baum_links( Projekt* zond, gchar** errmsg )
+{
+    gint ID_start = 0;
+
+    while ( 1 )
+    {
+        gint rc = 0;
+        ZondTreeStore* tree_store = NULL;
+        GtkTreeIter* iter_link = NULL;
+        GtkTreeIter* iter_dest = NULL;
+        Baum baum = KEIN_BAUM;
+        gint node_id = 0;
+        gchar* project = NULL;
+        Baum baum_target = KEIN_BAUM;
+        gint node_id_target = 0;
+        GtkTreeIter* iter_target = NULL;
+        gboolean child = FALSE;
+        gint older_sibling = 0;
+
+        rc = zond_dbase_get_link( zond->dbase_zond->zond_dbase_work, &ID_start, &baum, &node_id,
+            &project, &baum_target, &node_id_target, errmsg );
+        g_free( project ); //einstweilen, bis wir project brauchen
+        if ( rc == -1 ) ERROR_S
+        else if ( rc == 1 ) break;
+
+        ID_start++;
+
+        //"leeren" iter, der link werden soll, rauslöschen
+        //erst herausfinden
+        iter_link = zond_treeview_abfragen_iter( ZOND_TREEVIEW(zond->treeview[baum]), node_id );
+        if ( !iter_link ) ERROR_S_MESSAGE( "baum_abfragen_iter (link) gibt NULL zurück" )
+
+        tree_store = ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) ));
+
+        //dann löschen
+        zond_tree_store_remove( iter_link );
+        gtk_tree_iter_free( iter_link );
+
+        //iter_target ermitteln
+        iter_target = zond_treeview_abfragen_iter( ZOND_TREEVIEW(zond->treeview[baum_target]), node_id_target );
+        if ( !iter_target ) ERROR_S_MESSAGE( "baum_abfragen_iter (target) gibt NULL zurück" )
+
+        //iter wo link hinkommt ermitteln (iter_dest)
+        older_sibling = zond_dbase_get_older_sibling( zond->dbase_zond->zond_dbase_work, baum, node_id, errmsg );
+        if ( older_sibling < 0 )
+        {
+            gtk_tree_iter_free( iter_target );
+            ERROR_S
+        }
+        else if ( older_sibling == 0 ) //erstes Kind
+        {
+            gint parent = 0;
+
+            child = TRUE;
+
+            parent = zond_dbase_get_parent( zond->dbase_zond->zond_dbase_work, baum, node_id, errmsg );
+            if ( parent < 0 )
+            {
+                gtk_tree_iter_free( iter_target );
+                ERROR_S
+            }
+            // else if ( parent == 0 ) -> überflüssig, da iter_dest dann = NULL
+            else if ( parent > 0 )
+            {
+                iter_dest = zond_treeview_abfragen_iter( ZOND_TREEVIEW(zond->treeview[baum]), parent );
+                if ( !iter_dest )
+                {
+                    gtk_tree_iter_free( iter_target );
+                    ERROR_S_MESSAGE( "baum_abfragen_iter gibt NULL zurück (I)" )
+                }
+            }
+        }
+        else if ( older_sibling > 0 )
+        {
+            iter_dest = zond_treeview_abfragen_iter( ZOND_TREEVIEW(zond->treeview[baum]), older_sibling );
+            if ( !iter_dest )
+            {
+                gtk_tree_iter_free( iter_target );
+                ERROR_S_MESSAGE( "baum_abfragen_iter gibt NULL zurück (II)" )
+            }
+        }
+
+        zond_tree_store_insert_link( iter_target->user_data, node_id_target,
+                tree_store, iter_dest, child, NULL );
+
+        gtk_tree_iter_free( iter_target );
+        if ( iter_dest ) gtk_tree_iter_free( iter_dest );
+
+    }
+
+    return 0;
+}
+
+gint
+treeviews_db_to_baum( Projekt* zond, Baum baum, gint node_id, GtkTreeIter* iter,
+        gboolean child, GtkTreeIter* iter_new, gchar** errmsg )
+{
+    //Inhalt des Datensatzes mit node_id == node_id abfragen
+    gint rc = 0;
+    gchar* icon_name = NULL;
+    gchar* node_text = NULL;
+    GtkTreeIter iter_inserted = { 0, };
+
+    //test auf link nicht erforderlich; Knoten wird dann nur mit node_id eingefügt
+    rc = zond_dbase_get_icon_name_and_node_text( zond->dbase_zond->zond_dbase_work,
+            baum, node_id, &icon_name, &node_text, errmsg );
+    if ( rc == -1 ) ERROR_S
+    else if ( rc == 1 ) ERROR_S_MESSAGE( "node_id existiert nicht" )
+
+    //neuen Knoten einfügen
+    zond_tree_store_insert( ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) )),
+            iter, child, &iter_inserted );
+
+    //Daten rein
+    zond_tree_store_set( &iter_inserted, icon_name, node_text, node_id );
+
+    g_free( icon_name );
+    g_free( node_text );
+
+    if ( iter_new ) *iter_new = iter_inserted;
+
+    return 0;
+}
+
+
+//rekursive Funktion; gibt Zeiger auf 1. eingefügten Iter zurück (g_free)
+gint
+treeviews_db_to_baum_rec( Projekt* zond, gboolean with_younger_siblings,
+        Baum baum, gint node_id, GtkTreeIter* iter, gboolean child, GtkTreeIter* iter_new,
+        gchar** errmsg )
+{
+    gint rc = 0;
+    GtkTreeIter iter_inserted = { 0, };
+    gint first_child_id = 0;
+    gint younger_sibling_id = 0;
+
+    rc = treeviews_db_to_baum( zond, baum, node_id, iter, child, &iter_inserted, errmsg );
+    if ( rc == 1 ) return 0;
+    else if ( rc == -1 ) ERROR_S
+
+    //Prüfen, ob Kind- oder Geschwisterknoten vorhanden
+    first_child_id = zond_dbase_get_first_child( zond->dbase_zond->zond_dbase_work, baum, node_id, errmsg );
+    if ( first_child_id < 0 ) ERROR_S
+
+    if ( first_child_id > 0 )
+    {
+        gint rc = 0;
+        rc = treeviews_db_to_baum_rec( zond, TRUE, baum, first_child_id,
+                &iter_inserted, TRUE, NULL, errmsg );
+        if ( rc ) ERROR_S
+    }
+
+    younger_sibling_id = zond_dbase_get_younger_sibling( zond->dbase_zond->zond_dbase_work, baum, node_id, errmsg );
+    if ( younger_sibling_id < 0 ) ERROR_S
+
+    if ( younger_sibling_id > 0 && with_younger_siblings )
+    {
+        gint rc = 0;
+
+        rc = treeviews_db_to_baum_rec( zond, TRUE, baum,
+                younger_sibling_id, &iter_inserted, FALSE, NULL, errmsg );
+        if ( rc ) ERROR_S
+    }
+
+    if ( iter_new ) *iter_new = iter_inserted;
+
+    return 0;
+}
+
+
+static gint
+treeviews_reload_baum( Projekt* zond, Baum baum, gchar** errmsg )
+{
+    gint first_node_id = 0;
+
+    zond_tree_store_clear( ZOND_TREE_STORE(gtk_tree_view_get_model(
+            GTK_TREE_VIEW(zond->treeview[baum]) )) );
+
+    first_node_id = zond_dbase_get_first_child( zond->dbase_zond->zond_dbase_work, baum, 0, errmsg );
+    if ( first_node_id < 0 ) ERROR_S
+
+    if ( first_node_id )
+    {
+        gint rc = 0;
+
+        rc = treeviews_db_to_baum_rec( zond, TRUE, baum, first_node_id, NULL,
+                TRUE, NULL, errmsg );
+        if ( rc ) ERROR_S
+    }
+
+    return 0;
+}
+
+
+gint
+treeviews_reload_baeume( Projekt* zond, gchar** errmsg )
+{
+    gint rc = 0;
+
+    rc = treeviews_reload_baum( zond, BAUM_INHALT, errmsg );
+    if ( rc ) ERROR_S
+
+    rc = treeviews_reload_baum( zond, BAUM_AUSWERTUNG, errmsg );
+    if ( rc ) ERROR_S
+
+    rc = treeviews_db_to_baum_links( zond, errmsg );
+    if ( rc ) ERROR_S
+
+    gtk_tree_selection_unselect_all( zond->selection[BAUM_AUSWERTUNG] );
+
+    g_object_set( sond_treeview_get_cell_renderer_text( zond->treeview[BAUM_AUSWERTUNG] ),
+            "editable", FALSE, NULL);
+    g_object_set( sond_treeview_get_cell_renderer_text( zond->treeview[BAUM_INHALT] ),
+            "editable", TRUE, NULL);
+
+    gtk_widget_grab_focus( GTK_WIDGET(zond->treeview[BAUM_INHALT]) );
+
+    gtk_widget_set_sensitive( GTK_WIDGET(zond->textview), FALSE );
+
+    return 0;
+}
+
+
+gint
+treeviews_knoten_verschieben( Projekt* zond, Baum baum, gint node_id, gint new_parent,
+        gint new_older_sibling, gchar** errmsg )
+{
+    gint rc = 0;
+    GtkTreeIter* iter = NULL;
+
+    //kind verschieben
+    rc = zond_dbase_verschieben_knoten( zond->dbase_zond->zond_dbase_work, baum, node_id, new_parent,
+            new_older_sibling, errmsg );
+    if ( rc ) ERROR_SOND (" zond_dbase_verschieben_knoten" )
+
+    //Knoten im tree löschen
+    //hierzu iter des verschobenen Kindknotens herausfinden
+    iter = zond_treeview_abfragen_iter( ZOND_TREEVIEW(zond->treeview[baum]), node_id );
+
+    zond_tree_store_remove( iter );
+    gtk_tree_iter_free( iter );
+
+    //jetzt neuen kindknoten aus db erzeugen
+    //hierzu zunächst iter des Anker-Knotens ermitteln
+    gboolean kind = FALSE;
+    if ( new_older_sibling )
+    {
+        iter = zond_treeview_abfragen_iter( ZOND_TREEVIEW(zond->treeview[baum]), new_older_sibling );
+        kind = FALSE;
+    }
+    else
+    {
+        iter = zond_treeview_abfragen_iter( ZOND_TREEVIEW(zond->treeview[baum]), new_parent );
+        kind = TRUE;
+    }
+
+    //Knoten erzeugen
+    rc = treeviews_db_to_baum_rec( zond, FALSE,
+            baum, node_id, iter, kind, NULL, errmsg );
+    gtk_tree_iter_free( iter );
+
+    if ( rc ) ERROR_SOND( "db_baum_knoten_mit_kindern" )
 
     return 0;
 }

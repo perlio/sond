@@ -1,21 +1,17 @@
+#include <mupdf/fitz.h>
+#include <mupdf/pdf.h>
+#include <gtk/gtk.h>
+#include <sqlite3.h>
+
 #include "../global_types.h"
-#include "../error.h"
 #include "../zond_pdf_document.h"
 #include "../zond_database.h"
 #include "../zond_tree_store.h"
 #include "../../sond_treeview.h"
 #include "../../misc.h"
 
-#include "../99conv/general.h"
+#include "general.h"
 #include "pdf.h"
-#include "pdf_ocr.h"
-
-#include "../20allgemein/project.h"
-
-#include <mupdf/fitz.h>
-#include <mupdf/pdf.h>
-#include <gtk/gtk.h>
-#include <sqlite3.h>
 
 
 /*
@@ -204,7 +200,7 @@ datei_query_filesystem( const gchar* filename, gchar** errmsg )
 
     return ret;
 }
-*/
+
 
 gint
 pdf_print_content_stream( fz_context* ctx, pdf_obj* page_ref, gchar** errmsg )
@@ -236,7 +232,7 @@ pdf_print_content_stream( fz_context* ctx, pdf_obj* page_ref, gchar** errmsg )
     return 0;
 }
 
-
+*/
 gint
 test( Projekt* zond, gchar** errmsg )
 {
@@ -245,6 +241,4 @@ test( Projekt* zond, gchar** errmsg )
 
     return 0;
 }
-
-
 

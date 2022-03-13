@@ -427,26 +427,8 @@
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
 		</Unit>
-		<Unit filename="src/zond/10init/init.c">
-			<Option compilerVar="CC" />
-			<Option target="zond (Release)" />
-			<Option target="zond (Testing)" />
-		</Unit>
-		<Unit filename="src/zond/10init/init.h">
-			<Option target="zond (Release)" />
-			<Option target="zond (Testing)" />
-		</Unit>
 		<Unit filename="src/zond/10init/main.c">
 			<Option compilerVar="CC" />
-			<Option target="zond (Release)" />
-			<Option target="zond (Testing)" />
-		</Unit>
-		<Unit filename="src/zond/10init/treeviews.c">
-			<Option compilerVar="CC" />
-			<Option target="zond (Release)" />
-			<Option target="zond (Testing)" />
-		</Unit>
-		<Unit filename="src/zond/10init/treeviews.h">
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
 		</Unit>
@@ -501,6 +483,15 @@
 			<Option target="zond (Testing)" />
 		</Unit>
 		<Unit filename="src/zond/20allgemein/suchen.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/20allgemein/treeviews.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/20allgemein/treeviews.h">
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
 		</Unit>
@@ -608,15 +599,6 @@
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
 		</Unit>
-		<Unit filename="src/zond/99conv/db_zu_baum.c">
-			<Option compilerVar="CC" />
-			<Option target="zond (Release)" />
-			<Option target="zond (Testing)" />
-		</Unit>
-		<Unit filename="src/zond/99conv/db_zu_baum.h">
-			<Option target="zond (Release)" />
-			<Option target="zond (Testing)" />
-		</Unit>
 		<Unit filename="src/zond/99conv/general.c">
 			<Option compilerVar="CC" />
 			<Option target="zond (Release)" />
@@ -634,19 +616,6 @@
 			<Option compilerVar="CC" />
 		</Unit>
 		<Unit filename="src/zond/99conv/pdf.h">
-			<Option target="zond (Release)" />
-			<Option target="zond (Testing)" />
-			<Option target="Viewer (Release)" />
-			<Option target="Viewer (Testing)" />
-		</Unit>
-		<Unit filename="src/zond/99conv/pdf_ocr.c">
-			<Option compilerVar="CC" />
-			<Option target="zond (Release)" />
-			<Option target="zond (Testing)" />
-			<Option target="Viewer (Release)" />
-			<Option target="Viewer (Testing)" />
-		</Unit>
-		<Unit filename="src/zond/99conv/pdf_ocr.h">
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
 			<Option target="Viewer (Release)" />
@@ -670,8 +639,20 @@
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
 		</Unit>
-		<Unit filename="src/zond/error.h" />
 		<Unit filename="src/zond/global_types.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Viewer (Release)" />
+			<Option target="Viewer (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/pdf_ocr.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Viewer (Release)" />
+			<Option target="Viewer (Testing)" />
+		</Unit>
+		<Unit filename="src/zond/pdf_ocr.h">
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
 			<Option target="Viewer (Release)" />

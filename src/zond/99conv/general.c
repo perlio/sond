@@ -1,101 +1,11 @@
 #include <stdlib.h>
-
 #include <gtk/gtk.h>
 #include <ctype.h>
 
-#include "../zond_pdf_document.h"
-#include "../zond_tree_store.h"
-#include "../zond_dbase.h"
-
-#include "../global_types.h"
-#include "../error.h"
+#include "general.h"
 
 #include "../../misc.h"
-#include "../../dbase.h"
 
-#include "../99conv/baum.h"
-#include "../99conv/db_zu_baum.h"
-#include "../99conv/pdf.h"
-#include "../20allgemein/project.h"
-
-
-#include "../40viewer/document.h"
-
-
-
-/** String Utilities **/
-gchar*
-utf8_to_local_filename( const gchar* utf8 )
-{
-    //utf8 in filename konvertieren
-    gsize written;
-    gchar* charset = g_get_codeset();
-    gchar* local_filename = g_convert( utf8, -1, charset, "UTF-8", NULL, &written,
-            NULL );
-    g_free( charset );
-
-    return local_filename; //muß g_freed werden!
-}
-
-
-gint
-string_to_guint( const gchar* string, guint* zahl )
-{
-    gboolean is_guint = TRUE;
-    if ( !strlen( string ) ) is_guint = FALSE;
-    gint i = 0;
-    while ( i < (gint) strlen( string ) && is_guint )
-    {
-        if ( !isdigit( (int) *(string + i) ) ) is_guint = FALSE;
-        i++;
-    }
-
-    if ( is_guint )
-    {
-        *zahl = atoi( string );
-        return 0;
-    }
-    else return -1;
-}
-
-
-/** Andere Sachen **/
-gchar*
-filename_speichern( GtkWindow* window, const gchar* titel )
-{
-    GSList* list = choose_files( GTK_WIDGET(window), NULL, titel, "Speichern",
-            GTK_FILE_CHOOSER_ACTION_SAVE, FALSE );
-
-    if ( !list ) return NULL;
-
-    gchar* uri_unescaped = g_uri_unescape_string( list->data, NULL );
-    g_free( list->data );
-    g_slist_free( list );
-
-    gchar* abs_path = g_strdup( uri_unescaped + 8 );
-    g_free( uri_unescaped );
-
-    return abs_path; //muß g_freed werden
-}
-
-
-gchar*
-filename_oeffnen( GtkWindow* window )
-{
-    GSList* list = choose_files( GTK_WIDGET(window), NULL, "Datei auswählen", "Öffnen",
-            GTK_FILE_CHOOSER_ACTION_OPEN, FALSE );
-
-    if ( !list ) return NULL;
-
-    gchar* uri_unescaped = g_uri_unescape_string( list->data, NULL );
-    g_free( list->data );
-    g_slist_free( list );
-
-    gchar* abs_path = g_strdup( uri_unescaped + 8);
-    g_free( uri_unescaped );
-
-    return abs_path; //muß g_freed werden
-}
 
 
 gboolean

@@ -20,22 +20,19 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <sqlite3.h>
 #include <gtk/gtk.h>
 
-#include "../10init/treeviews.h"
 #include "../zond_pdf_document.h"
 
 #include "../global_types.h"
-#include "../error.h"
 #include "../zond_dbase.h"
 
 #include "../99conv/general.h"
 #include "../99conv/pdf.h"
-#include "../99conv/db_zu_baum.h"
-//#include "../99conv/baum.h"
 
 #include "../40viewer/document.h"
 
 #include "zieleplus.h"
 #include "project.h"
+#include "treeviews.h"
 
 #include "../../misc.h"
 #include "../zond_treeview.h"
@@ -175,7 +172,7 @@ ziele_einfuegen_anbindung( Projekt* zond, const gchar* rel_path, gint anchor_id,
 
     //eingefügtes ziel in Baum
     GtkTreeIter* iter = zond_treeview_abfragen_iter( ZOND_TREEVIEW(zond->treeview[BAUM_INHALT]), anchor_id );
-    rc = db_baum_knoten( zond, BAUM_INHALT, new_node, iter, kind, &iter_new,
+    rc = treeviews_db_to_baum( zond, BAUM_INHALT, new_node, iter, kind, &iter_new,
             errmsg );
     gtk_tree_iter_free( iter );
     if ( rc ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work,
@@ -406,7 +403,7 @@ ziele_abfragen_anker_rek( Projekt* zond, gint node_id, Anbindung anbindung,
 }
 
 
-void
+static void
 ziele_free( Ziel* ziel )
 {
     if ( !ziel ) return;

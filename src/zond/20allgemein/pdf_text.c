@@ -22,7 +22,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "project.h"
 
 #include "../zond_pdf_document.h"
-#include "../error.h"
 #include "../global_types.h"
 #include "../zond_dbase.h"
 #include "../zond_treeview.h"
@@ -34,7 +33,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../20allgemein/ziele.h"
 #include "../20allgemein/oeffnen.h"
 
-#include "../40viewer/document.h"
 #include "../40viewer/render.h"
 
 

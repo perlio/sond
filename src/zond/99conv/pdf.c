@@ -1,15 +1,12 @@
-#include "../error.h"
-
-#include "../zond_pdf_document.h"
-
-#include "../99conv/general.h"
-#include "pdf_ocr.h"
-
 #include <mupdf/fitz.h>
 #include <mupdf/pdf.h>
 #include <glib/gstdio.h>
 
-#include <stdio.h>
+#include "pdf.h"
+#include "../zond_pdf_document.h"
+
+#include "../../misc.h"
+
 
 
 /** Nicht thread-safe  **/
@@ -170,3 +167,68 @@ pdf_copy_page( fz_context* ctx, pdf_document* doc_src, gint page_from,
 }
 
 
+gint
+pdf_clean( fz_context* ctx, const gchar* rel_path, gchar** errmsg )
+{
+    gchar* path_tmp = NULL;
+    pdf_document* doc = NULL;
+
+    pdf_write_options opts = {
+            0, // do_incremental
+            1, // do_pretty
+            1, // do_ascii
+            0, // do_compress
+            1, // do_compress_images
+            1, // do_compress_fonts
+            0, // do_decompress
+            4, // do_garbage
+            0, // do_linear
+            1, // do_clean
+            0, // do_sanitize
+            0, // do_appearance
+            0, // do_encrypt
+            0, // dont_regenerate_id  Don't regenerate ID if set (used for clean)
+            ~0, // permissions
+            "", // opwd_utf8[128]
+            "", // upwd_utf8[128]
+            0 //do snapshot
+            };
+
+    //prüfen, ob in Viewer geöffnet
+    if ( zond_pdf_document_is_open( rel_path ) ) ERROR_S_MESSAGE( "Dokument ist geöffnet" )
+
+    fz_try( ctx ) doc = pdf_open_document( ctx, rel_path );
+    fz_catch( ctx ) ERROR_MUPDF( "pdf_document_open" )
+
+    fz_try( ctx ) pdf_clean_document( ctx, doc );
+    fz_catch( ctx )
+    {
+        pdf_drop_document( ctx, doc );
+        ERROR_MUPDF( "pdf_clean_document" )
+    }
+
+    path_tmp = g_strconcat( rel_path, ".tmp_clean", NULL );
+
+    fz_try( ctx ) pdf_save_document( ctx, doc, path_tmp, &opts );
+    fz_always( ctx ) pdf_drop_document( ctx, doc );
+    fz_catch( ctx )
+    {
+        g_free( path_tmp );
+        ERROR_MUPDF( "pdf_save_document" )
+    }
+
+    if ( g_remove( rel_path ) )
+    {
+        g_free( path_tmp );
+        ERROR_S_MESSAGE( "g_remove" )
+    }
+    if ( g_rename( path_tmp, rel_path ) )
+    {
+        g_free( path_tmp );
+        ERROR_S_MESSAGE( "g_rename" )
+    }
+
+    g_free( path_tmp );
+
+    return 0;
+}

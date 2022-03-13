@@ -1605,7 +1605,7 @@ zond_dbase_get_rel_path( ZondDBase* zond_dbase, Baum baum, gint node_id, gchar**
     Fehler: -1
 **/
 gint
-zond_dbase_get_ziel( ZondDBase* zond_dbase, Baum baum, gint node_id, Ziel** ziel, gchar** errmsg )
+zond_dbase_get_ziel( ZondDBase* zond_dbase, Baum baum, gint node_id, Ziel* ziel, gchar** errmsg )
 {
     gint rc = 0;
     sqlite3_stmt** stmt = NULL;
@@ -1634,20 +1634,19 @@ zond_dbase_get_ziel( ZondDBase* zond_dbase, Baum baum, gint node_id, Ziel** ziel
 
     if ( !ziel ) return 0;
 
-    *ziel = g_malloc0( sizeof( Ziel ) );
     gchar* buf = NULL;
 
     //ziel_id_von
     buf = (gchar*) sqlite3_column_text( stmt[0], 0 );
-    (*ziel)->ziel_id_von = g_strdup( buf );
+    ziel->ziel_id_von = g_strdup( buf );
 
     //ziel_id_bis
     buf = (gchar*) sqlite3_column_text( stmt[0], 2 );
-    (*ziel)->ziel_id_bis = g_strdup( buf );
+    ziel->ziel_id_bis = g_strdup( buf );
 
     //index_von und -bis
-    (*ziel)->index_von = sqlite3_column_int( stmt[0], 1 );
-    (*ziel)->index_bis = sqlite3_column_int( stmt[0], 3 );
+    ziel->index_von = sqlite3_column_int( stmt[0], 1 );
+    ziel->index_bis = sqlite3_column_int( stmt[0], 3 );
 
     return 0;
 }

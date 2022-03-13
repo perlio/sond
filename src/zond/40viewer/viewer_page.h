@@ -5,12 +5,11 @@
 #include <gtk/gtk.h>
 #include <mupdf/fitz.h>
 
-#include "viewer_pixbuf.h"
-
 G_BEGIN_DECLS
 
 typedef struct _Pdf_Viewer PdfViewer;
 typedef struct _Pdf_Document_Page PdfDocumentPage;
+typedef struct _GdkPixbuf ViewerPixbuf;
 
 
 #define VIEWER_TYPE_PAGE viewer_page_get_type( )

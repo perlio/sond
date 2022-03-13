@@ -23,20 +23,16 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../../dbase.h"
 #include "../zond_treeview.h"
 
-#include "../10init/treeviews.h"
-
 #include "../global_types.h"
 #include "../enums.h"
-#include "../error.h"
 #include "../zond_dbase.h"
 
 #include "../99conv/general.h"
 #include "../20allgemein/ziele.h"
-#include "../99conv/baum.h"
-#include "../99conv/db_zu_baum.h"
 
 #include "project.h"
 #include "selection.h"
+#include "treeviews.h"
 
 
 //Prototype
@@ -162,7 +158,7 @@ suchen_kopieren_listenpunkt( Projekt* zond, GList* list, GtkTreeIter* iter, gint
     rc = dbase_commit( (DBase*) zond->dbase_zond->dbase_work, errmsg );
     if ( rc ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "dbase_commit" )
 
-    rc = db_baum_knoten( zond, BAUM_AUSWERTUNG, new_node_id, iter, *child, iter_new, errmsg );
+    rc = treeviews_db_to_baum( zond, BAUM_AUSWERTUNG, new_node_id, iter, *child, iter_new, errmsg );
     if ( rc ) ERROR_S
 
     sond_treeview_expand_row( zond->treeview[BAUM_AUSWERTUNG], iter_new );

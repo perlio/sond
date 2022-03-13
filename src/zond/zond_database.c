@@ -24,7 +24,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "../misc.h"
 
-#include "error.h"
 #include "global_types.h"
 
 #include "20allgemein/project.h"

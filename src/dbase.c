@@ -2,9 +2,7 @@
 #include <gtk/gtk.h>
 #include <glib/gstdio.h>
 
-#include "sond_database.h"
-
-#include "zond/error.h"
+//#include "sond_database.h"
 
 #include "dbase.h"
 #include "eingang.h"

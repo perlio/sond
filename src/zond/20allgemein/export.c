@@ -26,12 +26,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "../enums.h"
 #include "../global_types.h"
-#include "../error.h"
 #include "../zond_dbase.h"
 
 #include "project.h"
 
-#include "../99conv/baum.h"
 #include "../99conv/general.h"
 
 
@@ -271,10 +269,8 @@ export_html( Projekt* zond, GFileOutputStream* stream, gint umfang, gchar** errm
 {
     GError* error = NULL;
     gint rc = 0;
-    Baum baum = 0;
 
-    baum = baum_abfragen_aktiver_treeview( zond );
-    if ( baum == KEIN_BAUM )
+    if ( zond->baum_active == KEIN_BAUM )
     {
         if ( errmsg ) *errmsg = g_strdup( "Kein Baum aufgewählt" );
 
@@ -285,7 +281,7 @@ export_html( Projekt* zond, GFileOutputStream* stream, gint umfang, gchar** errm
             "<html>"
             "<head><title>Export</title></head>"
             "<body>"
-            "<h1>Projekt: ", zond->dbase_zond->project_name, "\nBaum: ", (baum = BAUM_INHALT) ? "Inhalt" : "Auswertung",
+            "<h1>Projekt: ", zond->dbase_zond->project_name, "\nBaum: ", (zond->baum_active = BAUM_INHALT) ? "Inhalt" : "Auswertung",
             "</h1>", NULL );
 
     //Hier htm-Datei in stream schreiben
@@ -307,15 +303,15 @@ export_html( Projekt* zond, GFileOutputStream* stream, gint umfang, gchar** errm
     switch ( umfang )
     {
         case 1:
-            rc = export_alles( zond, baum, stream, &errmsg_ii );
+            rc = export_alles( zond, zond->baum_active, stream, &errmsg_ii );
             funktion = "export_alles";
             break;
         case 2:
-            rc = export_selektierte_zweige( zond, baum, stream, &errmsg_ii );
+            rc = export_selektierte_zweige( zond, zond->baum_active, stream, &errmsg_ii );
             funktion = "export_selektierte_zweige";
             break;
         case 3:
-            rc = export_selektierte_punkte( zond, baum, stream, &errmsg_ii );
+            rc = export_selektierte_punkte( zond, zond->baum_active, stream, &errmsg_ii );
             funktion = "export_selektierte_punkte";
             break;
         default: funktion = "";

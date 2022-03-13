@@ -25,18 +25,17 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../../sond_treeviewfm.h"
 
 #include "../global_types.h"
-#include "../error.h"
 #include "../zond_dbase.h"
 
 #include "../10init/app_window.h"
 
 #include "../99conv/general.h"
-#include "../99conv/db_zu_baum.h"
 
 #include "../40viewer/viewer.h"
 #include "../zond_tree_store.h"
 
 #include "project.h"
+#include "treeviews.h"
 
 
 
@@ -393,7 +392,7 @@ project_oeffnen( Projekt* zond, const gchar* abs_path, gboolean create,
 
     if ( !create )
     {
-        rc = db_baum_refresh( zond, errmsg );
+        rc = treeviews_reload_baeume( zond, errmsg );
         if ( rc == -1 ) ERROR_S
     }
 
