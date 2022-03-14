@@ -198,7 +198,7 @@ cb_suchen_nach_auswertung( GtkMenuItem* item, gpointer user_data )
 
     //aktuellen cursor im BAUM_AUSWERTUNG: node_id und iter abfragen
     if ( sond_treeview_get_cursor( zond->treeview[BAUM_AUSWERTUNG], &iter ) &&
-            !selection_anchor_no_link( &iter, child, &anchor_id ) ) return;
+            !treeviews_get_anchor_id( zond, &child, &iter, &anchor_id ) ) return;
 
     list = selected;
     do

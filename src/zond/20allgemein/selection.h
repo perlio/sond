@@ -11,8 +11,6 @@ typedef char gchar;
 typedef int gboolean;
 
 
-gboolean selection_anchor_no_link( GtkTreeIter*, gboolean, gint* );
-
-void selection_paste( Projekt*, gboolean, gboolean );
+gint three_treeviews_paste_clipboard( Projekt*, gboolean, gboolean, gchar** );
 
 #endif // SELECTION_H_INCLUDED

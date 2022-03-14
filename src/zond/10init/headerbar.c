@@ -539,6 +539,9 @@ cb_ausschneiden_activate( GtkMenuItem* item, gpointer user_data )
 static void
 cb_clipboard_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
 {
+    gint rc = 0;
+    gchar* errmsg = NULL;
+
     Projekt* zond = (Projekt*) user_data;
 
     gboolean kind = (gboolean) GPOINTER_TO_INT(g_object_get_data( G_OBJECT(item),
@@ -546,7 +549,13 @@ cb_clipboard_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
     gboolean link = (gboolean) GPOINTER_TO_INT(g_object_get_data( G_OBJECT(item),
             "link" ));
 
-    selection_paste( zond, kind, link );
+    rc = three_treeviews_paste_clipboard( zond, kind, link, &errmsg );
+    if ( rc )
+    {
+        display_message( zond->app_window, "Fehler Einfügen Clipboard\n\n", errmsg,
+                NULL );
+        g_free( errmsg );
+    }
 
     return;
 }

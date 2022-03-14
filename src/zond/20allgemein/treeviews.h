@@ -37,4 +37,12 @@ gint treeviews_reload_baeume( Projekt*, gchar** );
 
 gint treeviews_knoten_verschieben( Projekt*, Baum, gint, gint, gint, gchar** );
 
+gboolean treeviews_get_anchor_id( Projekt*, gboolean*, GtkTreeIter*, gint* );
+
+gint treeviews_paste_clipboard_as_link( Projekt*, Baum, gint, gboolean,
+        GtkTreeIter*, gchar** );
+
+gint treeviews_clipboard_kopieren( Projekt*, Baum, gint, gboolean, GtkTreeIter*,
+        gchar** );
+
 #endif // TREEVIEWS_H_INCLUDED
