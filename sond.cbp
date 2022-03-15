@@ -89,8 +89,6 @@
 			<Add option="`pkg-config --libs libmariadb`" />
 			<Add option="-Wl,--allow-multiple-definition" />
 			<Add library="C:/msys64/mingw64/bin/libpodofo.dll" />
-			<Add library="C:/msys64/mingw64/x86_64-w64-mingw32/lib/libgdi32.a" />
-			<Add library="C:/msys64/mingw64/x86_64-w64-mingw32/lib/libws2_32.a" />
 			<Add library="C:/Windows/System32/shlwapi.dll" />
 			<Add library="C:/msys64/mingw64/lib/libmupdf.a" />
 			<Add library="C:/msys64/mingw64/lib/libmupdf-third.a" />
