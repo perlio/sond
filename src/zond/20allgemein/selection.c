@@ -36,89 +36,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <sqlite3.h>
 
 
-typedef struct {
-    Projekt* zond;
-    Baum baum;
-    gint parent_id;
-    gint older_sibling_id;
-} SSelectionVerschieben;
-
-
-static gint
-selection_foreach_verschieben( SondTreeview* tree_view, GtkTreeIter* iter,
-        gpointer data, gchar** errmsg )
-{
-    gint rc = 0;
-    gint node_id = 0;
-
-    SSelectionVerschieben* s_selection = (SSelectionVerschieben*) data;
-
-    gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(tree_view) ), iter,
-            2, &node_id, -1 );
-
-    if ( s_selection->baum == BAUM_INHALT )
-    {
-        gint rc = 0;
-
-        rc = zond_dbase_get_ziel( s_selection->zond->dbase_zond->zond_dbase_work, s_selection->baum,
-                node_id, NULL, errmsg );
-        if ( rc == -1 ) ERROR_SOND( "zond_dbase_get_ziel" )
-        else if ( rc == 1 ) return 0;
-    }
-
-    rc = treeviews_knoten_verschieben( s_selection->zond, s_selection->baum, node_id, s_selection->parent_id,
-            s_selection->older_sibling_id, errmsg );
-    if ( rc ) ERROR_SOND ( "knoten_verschieben" )
-
-    s_selection->older_sibling_id = node_id;
-
-    return 0;
-}
-
-
-//Ist immer verschieben innerhalb des Baums
-static gint
-selection_verschieben( Projekt* zond, Baum baum, gint anchor_id, gboolean kind,
-        gchar** errmsg )
-{
-    gint rc = 0;
-    Clipboard* clipboard = NULL;
-    SSelectionVerschieben s_selection = { zond, baum, 0, 0 };
-
-    if ( kind ) s_selection.parent_id = anchor_id;
-    else
-    {
-        s_selection.parent_id = zond_dbase_get_parent( zond->dbase_zond->zond_dbase_work, baum, anchor_id, errmsg );
-        if ( s_selection.parent_id < 0 ) ERROR_SOND( "zond_dbase_get_parent" )
-
-        s_selection.older_sibling_id = anchor_id;
-    }
-
-    rc = sond_treeview_clipboard_foreach( zond->treeview[baum],
-            selection_foreach_verschieben, &s_selection, errmsg );
-    if ( rc == -1 ) ERROR_SOND( "somd_treeview_selection_foreach" )
-
-    //Alte Auswahl löschen
-    clipboard = sond_treeview_get_clipboard( zond->treeview[baum] );
-    if ( clipboard->arr_ref->len > 0 ) g_ptr_array_remove_range( clipboard->arr_ref,
-            0, clipboard->arr_ref->len );
-
-    gtk_widget_queue_draw( GTK_WIDGET(zond->treeview[baum]) );
-
-    GtkTreeIter* iter = zond_treeview_abfragen_iter( ZOND_TREEVIEW(zond->treeview[baum]), s_selection.older_sibling_id );
-
-    if ( iter )
-    {
-        sond_treeview_expand_row( zond->treeview[baum], iter );
-        sond_treeview_set_cursor( zond->treeview[baum], iter );
-
-        gtk_tree_iter_free( iter );
-    }
-
-    return 0;
-}
-
-
 /** Dateien oder Ordner anbinden **/
 static gint
 selection_anbinden_zu_baum( Projekt* zond, GtkTreeIter* iter, gboolean kind,
@@ -377,7 +294,7 @@ typedef struct {
 
 
 static gint
-selection_foreach_anbinden( SondTreeview* tree_view, GtkTreeIter* iter,
+three_treeviews_clipboard_anbinden_foreach( SondTreeview* tree_view, GtkTreeIter* iter,
         gpointer data, gchar** errmsg )
 {
     SSelectionAnbinden* s_selection = (SSelectionAnbinden*) data;
@@ -443,7 +360,7 @@ three_treeviews_clipboard_anbinden( Projekt* zond, gint anchor_id, gboolean kind
     if ( rc ) ERROR_SOND( "db_begin" )
 
     rc = sond_treeview_clipboard_foreach( zond->treeview[BAUM_FS],
-            selection_foreach_anbinden, &s_selection, errmsg );
+            three_treeviews_clipboard_anbinden_foreach, &s_selection, errmsg );
     if ( rc == -1 ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "treeview_selection_foreach" )
 
     rc = selection_anbinden_zu_baum( zond, (success) ? &iter : NULL, kind, arr_new_nodes, errmsg );
@@ -539,7 +456,7 @@ three_treeviews_paste_clipboard( Projekt* zond, gboolean kind, gboolean link, gc
             else if ( rc == 1 ) ERROR_S_MESSAGE( "Unzulässiges Ziel: "
                     "Abkömmling von Anbindung" )
 
-            rc = selection_verschieben( zond, baum_selection, anchor_id, kind, errmsg );
+            rc = treeviews_clipboard_verschieben( zond, baum_selection, anchor_id, kind, errmsg );
             if ( rc == -1 ) ERROR_S
         }
         else if ( zond->baum_active == BAUM_INHALT && !clipboard->ausschneiden )
@@ -570,7 +487,7 @@ three_treeviews_paste_clipboard( Projekt* zond, gboolean kind, gboolean link, gc
         {
             gint rc = 0;
 
-            rc = selection_verschieben( zond, baum_selection, anchor_id, kind, errmsg );
+            rc = treeviews_clipboard_verschieben( zond, baum_selection, anchor_id, kind, errmsg );
             if ( rc == -1 ) ERROR_S
         }
         else if ( zond->baum_active == BAUM_AUSWERTUNG && !clipboard->ausschneiden && !link )

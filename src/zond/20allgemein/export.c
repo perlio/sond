@@ -30,8 +30,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "project.h"
 
-#include "../99conv/general.h"
-
 
 static gint
 export_node( Projekt* zond, GtkTreeModel* model, GtkTreePath* path, gint depth,

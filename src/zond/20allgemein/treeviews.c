@@ -1081,3 +1081,86 @@ treeviews_clipboard_kopieren( Projekt* zond, Baum baum_dest, gint anchor_id,
 }
 
 
+typedef struct {
+    Projekt* zond;
+    Baum baum;
+    gint parent_id;
+    gint older_sibling_id;
+} SSelectionVerschieben;
+
+
+static gint
+treeeviews_clipboard_verschieben_foreach( SondTreeview* tree_view, GtkTreeIter* iter,
+        gpointer data, gchar** errmsg )
+{
+    gint rc = 0;
+    gint node_id = 0;
+
+    SSelectionVerschieben* s_selection = (SSelectionVerschieben*) data;
+
+    gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(tree_view) ), iter,
+            2, &node_id, -1 );
+
+    if ( s_selection->baum == BAUM_INHALT )
+    {
+        gint rc = 0;
+
+        rc = zond_dbase_get_ziel( s_selection->zond->dbase_zond->zond_dbase_work, s_selection->baum,
+                node_id, NULL, errmsg );
+        if ( rc == -1 ) ERROR_SOND( "zond_dbase_get_ziel" )
+        else if ( rc == 1 ) return 0;
+    }
+
+    rc = treeviews_knoten_verschieben( s_selection->zond, s_selection->baum, node_id, s_selection->parent_id,
+            s_selection->older_sibling_id, errmsg );
+    if ( rc ) ERROR_SOND ( "knoten_verschieben" )
+
+    s_selection->older_sibling_id = node_id;
+
+    return 0;
+}
+
+
+//Ist immer verschieben innerhalb des Baums
+gint
+treeviews_clipboard_verschieben( Projekt* zond, Baum baum, gint anchor_id, gboolean kind,
+        gchar** errmsg )
+{
+    gint rc = 0;
+    Clipboard* clipboard = NULL;
+    SSelectionVerschieben s_selection = { zond, baum, 0, 0 };
+
+    if ( kind ) s_selection.parent_id = anchor_id;
+    else
+    {
+        s_selection.parent_id = zond_dbase_get_parent( zond->dbase_zond->zond_dbase_work, baum, anchor_id, errmsg );
+        if ( s_selection.parent_id < 0 ) ERROR_SOND( "zond_dbase_get_parent" )
+
+        s_selection.older_sibling_id = anchor_id;
+    }
+
+    rc = sond_treeview_clipboard_foreach( zond->treeview[baum],
+            treeeviews_clipboard_verschieben_foreach, &s_selection, errmsg );
+    if ( rc == -1 ) ERROR_SOND( "somd_treeview_selection_foreach" )
+
+    //Alte Auswahl löschen
+    clipboard = sond_treeview_get_clipboard( zond->treeview[baum] );
+    if ( clipboard->arr_ref->len > 0 ) g_ptr_array_remove_range( clipboard->arr_ref,
+            0, clipboard->arr_ref->len );
+
+    gtk_widget_queue_draw( GTK_WIDGET(zond->treeview[baum]) );
+
+    GtkTreeIter* iter = zond_treeview_abfragen_iter( ZOND_TREEVIEW(zond->treeview[baum]), s_selection.older_sibling_id );
+
+    if ( iter )
+    {
+        sond_treeview_expand_row( zond->treeview[baum], iter );
+        sond_treeview_set_cursor( zond->treeview[baum], iter );
+
+        gtk_tree_iter_free( iter );
+    }
+
+    return 0;
+}
+
+
