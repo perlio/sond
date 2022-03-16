@@ -8,13 +8,13 @@
 #define ERROR_SOND(x) ERROR_SOND_VAL(x,-1)
 
 #define ERROR_VAL(y) { if ( errmsg ) *errmsg = add_string( \
-                         g_strconcat( "Bei Aufruf ", __func__, ":\n", NULL ), *errmsg );\
+                         g_strconcat( "Bei Aufruf ", __func__, ":\n", NULL ), *errmsg ); \
                          return y; }
 
 #define ERROR_S ERROR_VAL(-1)
 
 #define ERROR_MESSAGE_VAL(x,y) { if ( errmsg ) *errmsg = add_string( \
-                         g_strconcat( "Bei Aufruf ",__func__, ":\n", x, NULL ), *errmsg );\
+                         g_strconcat( "Bei Aufruf ",__func__, ":\n", x, NULL ), *errmsg ); \
                          return y; }
 
 #define ERROR_S_MESSAGE(x) ERROR_MESSAGE_VAL(x,-1)

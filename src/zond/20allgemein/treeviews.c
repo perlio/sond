@@ -1108,7 +1108,7 @@ treeeviews_clipboard_verschieben_foreach( SondTreeview* tree_view, GtkTreeIter* 
         rc = zond_dbase_get_ziel( s_selection->zond->dbase_zond->zond_dbase_work, s_selection->baum,
                 node_id, NULL, errmsg );
         if ( rc == -1 ) ERROR_S
-        else if ( rc == 1 ) return 0;
+        else if ( rc == 0 ) return 0;
     }
 
     rc = treeviews_knoten_verschieben( s_selection->zond, s_selection->baum, node_id, s_selection->parent_id,
