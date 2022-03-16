@@ -1107,13 +1107,13 @@ treeeviews_clipboard_verschieben_foreach( SondTreeview* tree_view, GtkTreeIter* 
 
         rc = zond_dbase_get_ziel( s_selection->zond->dbase_zond->zond_dbase_work, s_selection->baum,
                 node_id, NULL, errmsg );
-        if ( rc == -1 ) ERROR_SOND( "zond_dbase_get_ziel" )
+        if ( rc == -1 ) ERROR_S
         else if ( rc == 1 ) return 0;
     }
 
     rc = treeviews_knoten_verschieben( s_selection->zond, s_selection->baum, node_id, s_selection->parent_id,
             s_selection->older_sibling_id, errmsg );
-    if ( rc ) ERROR_SOND ( "knoten_verschieben" )
+    if ( rc ) ERROR_S
 
     s_selection->older_sibling_id = node_id;
 
@@ -1134,14 +1134,14 @@ treeviews_clipboard_verschieben( Projekt* zond, Baum baum, gint anchor_id, gbool
     else
     {
         s_selection.parent_id = zond_dbase_get_parent( zond->dbase_zond->zond_dbase_work, baum, anchor_id, errmsg );
-        if ( s_selection.parent_id < 0 ) ERROR_SOND( "zond_dbase_get_parent" )
+        if ( s_selection.parent_id < 0 ) ERROR_S
 
         s_selection.older_sibling_id = anchor_id;
     }
 
     rc = sond_treeview_clipboard_foreach( zond->treeview[baum],
             treeeviews_clipboard_verschieben_foreach, &s_selection, errmsg );
-    if ( rc == -1 ) ERROR_SOND( "somd_treeview_selection_foreach" )
+    if ( rc == -1 ) ERROR_S
 
     //Alte Auswahl löschen
     clipboard = sond_treeview_get_clipboard( zond->treeview[baum] );
@@ -1150,7 +1150,8 @@ treeviews_clipboard_verschieben( Projekt* zond, Baum baum, gint anchor_id, gbool
 
     gtk_widget_queue_draw( GTK_WIDGET(zond->treeview[baum]) );
 
-    GtkTreeIter* iter = zond_treeview_abfragen_iter( ZOND_TREEVIEW(zond->treeview[baum]), s_selection.older_sibling_id );
+    GtkTreeIter* iter = zond_treeview_abfragen_iter(
+            ZOND_TREEVIEW(zond->treeview[baum]), s_selection.older_sibling_id );
 
     if ( iter )
     {
