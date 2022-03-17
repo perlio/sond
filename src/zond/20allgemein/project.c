@@ -369,12 +369,12 @@ project_oeffnen( Projekt* zond, const gchar* abs_path, gboolean create,
     if ( rc )
     {
         project_clear_dbase_zond( &dbase_zond );
-        if ( rc == -1 ) ERROR_SOND( "project_schliessen" )
+        if ( rc == -1 ) ERROR_S
         else return 1;
     }
 
     rc = project_create_dbase_zond( zond, abs_path, create, &dbase_zond, errmsg );
-    if ( rc ) ERROR_SOND( "project_create_dbase_zond" )
+    if ( rc ) ERROR_S
 
     sond_treeviewfm_set_dbase( SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
             (DBase*) dbase_zond->dbase_work );
@@ -382,7 +382,7 @@ project_oeffnen( Projekt* zond, const gchar* abs_path, gboolean create,
     zond->dbase_zond = dbase_zond;
     rc = sond_treeviewfm_set_root( SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
             zond->dbase_zond->project_dir, errmsg );
-    if ( rc ) ERROR_SOND( "sond_treeviewfm_set_root" )
+    if ( rc ) ERROR_S
 
     projekt_aktivieren( zond );
 
