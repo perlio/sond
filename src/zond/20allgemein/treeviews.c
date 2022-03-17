@@ -688,7 +688,7 @@ treeviews_db_to_baum_links( Projekt* zond, gchar** errmsg )
         }
 
         zond_tree_store_insert_link_at_pos( iter_target->user_data, node_id_target,
-                tree_store, iter_parent, pos, NULL );
+                tree_store, iter_parent, pos + 1, NULL );
 
         gtk_tree_iter_free( iter_target );
         if ( iter_parent ) gtk_tree_iter_free( iter_parent );
@@ -872,7 +872,7 @@ treeviews_knoten_verschieben( Projekt* zond, Baum baum, gint node_id, gint new_p
 }
 
 
-//ermittelt node_id des anchors, falls nicht in link eingefügt werden würde
+//ermittelt node_id und iter des anchors, falls nicht in link eingefügt werden würde
 gboolean
 treeviews_get_anchor_id( Projekt* zond, gboolean* child, GtkTreeIter* iter, gint* anchor_id )
 {

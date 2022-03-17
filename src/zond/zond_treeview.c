@@ -235,9 +235,16 @@ zond_treeview_render_node_text( GtkTreeViewColumn* column, GtkCellRenderer* rend
 
         markuptxt = g_strdup_printf("<i>%s</i>", label);
 
+        if ( zond_tree_store_get_link_head_nr( iter->user_data ) )
+        {
+            markuptxt = add_string( g_strdup( "<span style=\"oblique\">" ), markuptxt );
+            markuptxt = add_string( markuptxt, g_strdup( "</span>" ) );
+        }
+
         g_object_set( renderer, "markup", markuptxt, NULL);  // markup isn't showing and text field is blank due to "text" == NULL
 
         g_free( markuptxt );
+
     }
 
     rc = treeviews_get_baum_and_node_id( ztv_priv->zond, iter, &baum, &node_id );
@@ -354,7 +361,6 @@ zond_treeview_new( Projekt* zond, gint id )
     // Doppelklick = angebundene Datei anzeigen
     g_signal_connect( ztv, "row-activated",
             G_CALLBACK(zond_treeview_row_activated), (gpointer) ztv_priv->zond );
-
 
     return ztv;
 }

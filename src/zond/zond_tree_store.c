@@ -944,7 +944,7 @@ zond_tree_store_insert_link_at_pos (GNode* node_target,
         //dann: Kinder durchgehen
         do
         {
-            zond_tree_store_insert_link_at_pos( node_target, 0, tree_store, iter_parent, pos_child, NULL );
+            zond_tree_store_insert_link_at_pos( node_target, 0, tree_store, &iter_dest_new, pos_child, NULL );
             pos_child++;
         }
         while ( (node_target = node_target->next) );
