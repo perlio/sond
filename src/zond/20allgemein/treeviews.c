@@ -322,14 +322,14 @@ treeviews_selection_loeschen_foreach( SondTreeview* tree_view, GtkTreeIter* iter
 
     SSelectionLoeschen* s_selection = data;
 
-    rc = treeviews_get_baum_and_node_id( s_selection->zond, iter, &baum, &node_id );
-    if ( rc ) return 0;
-
     //Nur "nomale" Knoten oder ...
     if ( !zond_tree_store_is_link( iter ) )
     {
         gint rc = 0;
         GList* list_links = NULL;
+
+        rc = treeviews_get_baum_and_node_id( s_selection->zond, iter, &baum, &node_id );
+        if ( rc ) return 0;
 
         list_links = zond_tree_store_get_linked_nodes( iter );
 
@@ -382,9 +382,19 @@ treeviews_selection_loeschen_foreach( SondTreeview* tree_view, GtkTreeIter* iter
     {
         gint rc = 0;
 
+        rc = dbase_begin( (DBase*) s_selection->zond->dbase_zond->dbase_work, errmsg );
+        if ( rc ) ERROR_SOND( "dbase_begin" )
+
         rc = zond_dbase_remove_link( s_selection->zond->dbase_zond->zond_dbase_work,
-                sond_treeview_get_id( tree_view ), node_id, errmsg );
+                sond_treeview_get_id( tree_view ), head_nr, errmsg );
         if ( rc ) ERROR_SOND("zond_dbase_remove_link" )
+
+        rc = zond_dbase_remove_node( s_selection->zond->dbase_zond->zond_dbase_work,
+                sond_treeview_get_id( tree_view ), head_nr, errmsg );
+        if ( rc ) ERROR_ROLLBACK( (DBase*) s_selection->zond->dbase_zond->dbase_work, "zond_dbase_remove_node" )
+
+        rc = dbase_commit( (DBase*) s_selection->zond->dbase_zond->dbase_work, errmsg );
+        if ( rc ) ERROR_ROLLBACK( (DBase*) s_selection->zond->dbase_zond->dbase_work, "dbase_commit" )
 
         zond_tree_store_remove_link( ZOND_TREE_STORE(gtk_tree_view_get_model(
         GTK_TREE_VIEW(tree_view) )), iter );
@@ -687,7 +697,7 @@ treeviews_db_to_baum_links( Projekt* zond, gchar** errmsg )
             while ( (older_sibling = noch_olderer_sibling) );
         }
 
-        zond_tree_store_insert_link_at_pos( iter_target->user_data, node_id_target,
+        zond_tree_store_insert_link_at_pos( iter_target->user_data, node_id,
                 tree_store, iter_parent, pos + 1, NULL );
 
         gtk_tree_iter_free( iter_target );
@@ -810,8 +820,10 @@ treeviews_reload_baeume( Projekt* zond, gchar** errmsg )
     rc = treeviews_reload_baum( zond, BAUM_AUSWERTUNG, errmsg );
     if ( rc ) ERROR_S
 
+/*
     rc = treeviews_db_to_baum_links( zond, errmsg );
     if ( rc ) ERROR_S
+*/
 
     gtk_tree_selection_unselect_all( zond->selection[BAUM_AUSWERTUNG] );
 

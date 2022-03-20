@@ -945,7 +945,7 @@ zond_dbase_remove_node( ZondDBase* zond_dbase, Baum baum, gint node_id, gchar** 
 
             "DELETE FROM baum_inhalt WHERE node_id = ?;",
 
-            "DELETE FROM baum_auswertung WHERE node_id = ?; "};
+            "DELETE FROM baum_auswertung WHERE node_id = ?; " };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
     if ( rc ) ERROR_SOND( "zond_dbase_prepare" )
@@ -1874,33 +1874,3 @@ zond_dbase_remove_link( ZondDBase* zond_dbase, const gint baum_id, const gint
 }
 
 
-
-/*
-    gint rc = 0;
-    sqlite3_stmt** stmt = NULL;
-    const gint num_stmts = 1;
-
-    if ( !(stmt = g_object_get_data( G_OBJECT(zond_dbase), __func__ )) )
-    {
-        gint rc = 0;
-
-        stmt = g_malloc0( sizeof( sqlite3_stmt* ) * num_stmts );
-
-        const gchar* sql[] = {
-        //...
-        };
-
-        rc = zond_dbase_prepare_stmts( zond_dbase, num_stmts, sql, stmt, errmsg );
-        if ( rc )
-        {
-            g_free( stmt );
-            ERROR_SOND( "zond_dbase_prepare_stmts" )
-        }
-
-        g_object_set_data_full( G_OBJECT(zond_dbase), __func__, stmt, g_free );
-    }
-
-    for ( gint i = 0; i < num_stmts; i++ ) sqlite3_reset( stmt[i] );
-
-
-*/

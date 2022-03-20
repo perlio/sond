@@ -236,8 +236,15 @@ pdf_print_content_stream( fz_context* ctx, pdf_obj* page_ref, gchar** errmsg )
 gint
 test( Projekt* zond, gchar** errmsg )
 {
+    GtkTreeIter iter = { 0, };
 
+    if ( sond_treeview_get_cursor( zond->treeview[zond->baum_active], &iter ) )
+    {
+        gint head_nr = 0;
 
+        head_nr = zond_tree_store_get_link_head_nr( iter.user_data );
+        printf("%i\n", head_nr );
+    }
 
     return 0;
 }
