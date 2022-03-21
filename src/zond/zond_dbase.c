@@ -271,7 +271,7 @@ zond_dbase_create_db( sqlite3* db, gchar** errmsg )
 
             "INSERT INTO baum_auswertung (node_id, parent_id, older_sibling_id) "
             "VALUES (0, 0, 0); " //mit eingang
-
+/*
             "CREATE TABLE links ( "
             "ID INTEGER PRIMARY KEY AUTOINCREMENT, " //order of appe...
             "baum_id INTEGER, "
@@ -279,7 +279,8 @@ zond_dbase_create_db( sqlite3* db, gchar** errmsg )
             "projekt_target VARCHAR (200), "
             "baum_id_target INTEGER, "
             "node_id_target INTEGER "
-            " ); ";
+            " ); "
+*/            ;
 
     rc = sqlite3_exec( db, sql, NULL, NULL, &errmsg_ii );
     if ( rc != SQLITE_OK )
