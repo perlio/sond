@@ -320,6 +320,7 @@ zond_pdf_document_init_pages( ZondPdfDocument* self, gint von, gint bis, gchar**
     {
         gint rc = 0;
 
+        //wenn schon initialisiert -> weiter
         if ( g_ptr_array_index( priv->pages, i ) ) continue;
 
         rc = zond_pdf_document_page_init( self, i, errmsg );

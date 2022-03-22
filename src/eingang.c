@@ -25,7 +25,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "sond_treeviewfm.h"
 
 
-void
+static void
 eingang_free( Eingang* eingang )
 {
     if ( !eingang ) return;

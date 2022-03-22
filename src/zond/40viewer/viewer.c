@@ -311,8 +311,8 @@ viewer_thread_render( PdfViewer* pv, gint page )
 
     if ( !still_rendering ) pv->thread_pool_page =
             g_thread_pool_new( (GFunc) render_page_thread, pv, 4, FALSE, NULL );
-
-    if ( page == -1 ) for ( gint i = 0; i < pv->arr_pages->len; i++ )
+//Max Begrenzung
+    if ( page == -1 ) for ( gint i = 0; i < ((pv->arr_pages->len < 1000) ? pv->arr_pages->len : 1000); i++ )
             g_thread_pool_push( pv->thread_pool_page, GINT_TO_POINTER(i + 1), NULL );
     else  g_thread_pool_push( pv->thread_pool_page, GINT_TO_POINTER(page + 1), NULL );
 

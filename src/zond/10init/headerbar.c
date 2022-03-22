@@ -892,6 +892,7 @@ init_menu( Projekt* zond )
     g_signal_connect( G_OBJECT(eingang_item), "activate",
             G_CALLBACK(cb_eingang_activate), (gpointer) zond );
 
+    gtk_widget_set_sensitive( eingang_item, FALSE );
 
     GtkWidget* sep_struktur0item = gtk_separator_menu_item_new();
 

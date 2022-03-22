@@ -25,8 +25,6 @@ typedef struct _Eingang_DBase
     gint* last_inserted_ID;
 } EingangDBase;
 
-void eingang_free( Eingang* );
-
 gint eingang_for_rel_path( DBase*, const gchar*, gint*, Eingang*, gint*, gchar** );
 
 gint eingang_update_rel_path( DBase*, const gchar*, DBase*, const gchar*, gboolean, gchar** );
