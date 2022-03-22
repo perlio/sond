@@ -43,7 +43,7 @@ selection_anbinden_zu_baum( Projekt* zond, GtkTreeIter* iter, gboolean kind,
 {
     GtkTreeIter iter_loop = { 0, };
 
-    iter_loop = *iter;
+    if ( iter ) iter_loop = *iter;
 
     for ( gint i = 0; i < arr_new_nodes->len; i++ )
     {
@@ -55,7 +55,7 @@ selection_anbinden_zu_baum( Projekt* zond, GtkTreeIter* iter, gboolean kind,
 
         //datei in baum_inhalt einfügen
         rc = treeviews_db_to_baum_rec( zond, FALSE, BAUM_INHALT, node_id_new,
-                &iter_loop, kind, &iter_new, errmsg );
+                ((!iter && kind) ? NULL : &iter_loop), kind, &iter_new, errmsg );
         if ( rc ) ERROR_S
 
         sond_treeview_expand_row( zond->treeview[BAUM_INHALT], &iter_new );

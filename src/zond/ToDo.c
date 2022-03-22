@@ -11,12 +11,8 @@ ToDo:
 
 - Abschnitte neu organisieren
 
-- DBase
-    -Fehler beim schließen loggen
-
 - suchen
     - Menu Struktur verschieben
-    - Einheitliche Suche (Dateiname, node_text, text)
     - ggf. Beschränkbarkeit auf Bäume/Zweige/Punkte
 
 - BAUM_INHALT
