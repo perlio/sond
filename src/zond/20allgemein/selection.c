@@ -41,7 +41,9 @@ static gint
 selection_anbinden_zu_baum( Projekt* zond, GtkTreeIter* iter, gboolean kind,
         GArray* arr_new_nodes, gchar** errmsg )
 {
-    GtkTreeIter* iter_loop = NULL;
+    GtkTreeIter iter_loop = { 0, };
+
+    iter_loop = *iter;
 
     for ( gint i = 0; i < arr_new_nodes->len; i++ )
     {
@@ -53,18 +55,15 @@ selection_anbinden_zu_baum( Projekt* zond, GtkTreeIter* iter, gboolean kind,
 
         //datei in baum_inhalt einfügen
         rc = treeviews_db_to_baum_rec( zond, FALSE, BAUM_INHALT, node_id_new,
-                iter_loop, kind, &iter_new, errmsg );
-        if ( iter_loop ) gtk_tree_iter_free( iter_loop );
-        if ( rc ) ERROR_SOND( "db_baum_knoten_mit_kindern" )
+                &iter_loop, kind, &iter_new, errmsg );
+        if ( rc ) ERROR_S
 
         sond_treeview_expand_row( zond->treeview[BAUM_INHALT], &iter_new );
         gtk_tree_view_columns_autosize( GTK_TREE_VIEW(((Projekt*) zond)->treeview[BAUM_INHALT]) );
 
-        iter_loop = gtk_tree_iter_copy( &iter_new );
+        iter_loop = iter_new;
         kind = FALSE;
     }
-
-    if ( iter_loop ) gtk_tree_iter_free( iter_loop );
 
     return 0;
 }
