@@ -95,6 +95,8 @@
 		</Linker>
 		<Unit filename="src/dbase.c">
 			<Option compilerVar="CC" />
+			<Option compile="0" />
+			<Option link="0" />
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
 			<Option target="Sojus (Release)" />
