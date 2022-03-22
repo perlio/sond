@@ -20,7 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <sqlite3.h>
 
 #include "../../misc.h"
-#include "../../dbase.h"
+#include "../zond_dbase.h"
 #include "../zond_treeview.h"
 
 #include "../global_types.h"
@@ -147,16 +147,15 @@ suchen_kopieren_listenpunkt( Projekt* zond, GList* list, GtkTreeIter* iter, gint
     baum = (Baum) GPOINTER_TO_INT(g_object_get_data( G_OBJECT(list->data), "baum" ));
     node_id = GPOINTER_TO_INT(g_object_get_data( G_OBJECT(list->data), "node-id" ));
 
-    rc = dbase_begin( (DBase*) zond->dbase_zond->dbase_work, errmsg );
+    rc = zond_dbase_begin( zond->dbase_zond->zond_dbase_work, errmsg );
     if ( rc ) ERROR_S
 
     new_node_id = zond_dbase_kopieren_nach_auswertung( zond->dbase_zond->zond_dbase_work, baum, node_id,
             *anchor_id, *child, errmsg );
-    if ( new_node_id == -1 ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work,
-            "zond_dbase_kopieren_nach_auswertung" )
+    if ( new_node_id == -1 ) ERROR_ROLLBACK( zond->dbase_zond->zond_dbase_work )
 
-    rc = dbase_commit( (DBase*) zond->dbase_zond->dbase_work, errmsg );
-    if ( rc ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "dbase_commit" )
+    rc = zond_dbase_commit( zond->dbase_zond->zond_dbase_work, errmsg );
+    if ( rc ) ERROR_ROLLBACK( zond->dbase_zond->zond_dbase_work )
 
     rc = treeviews_db_to_baum( zond, BAUM_AUSWERTUNG, new_node_id, iter, *child, iter_new, errmsg );
     if ( rc ) ERROR_S

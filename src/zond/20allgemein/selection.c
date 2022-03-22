@@ -356,18 +356,18 @@ three_treeviews_clipboard_anbinden( Projekt* zond, gint anchor_id, gboolean kind
     s_selection.zaehler = 0;
     s_selection.info_window = info_window;
 
-    rc = dbase_begin( (DBase*) zond->dbase_zond->dbase_work, errmsg );
-    if ( rc ) ERROR_SOND( "db_begin" )
+    rc = zond_dbase_begin( zond->dbase_zond->zond_dbase_work, errmsg );
+    if ( rc ) ERROR_S
 
     rc = sond_treeview_clipboard_foreach( zond->treeview[BAUM_FS],
             three_treeviews_clipboard_anbinden_foreach, &s_selection, errmsg );
-    if ( rc == -1 ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "treeview_selection_foreach" )
+    if ( rc == -1 ) ERROR_ROLLBACK( zond->dbase_zond->zond_dbase_work )
 
     rc = selection_anbinden_zu_baum( zond, (success) ? &iter : NULL, kind, arr_new_nodes, errmsg );
-    if ( rc ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "selection_anbinden_zu_baum" );
+    if ( rc ) ERROR_ROLLBACK( zond->dbase_zond->zond_dbase_work )
 
-    rc = dbase_commit( (DBase*) zond->dbase_zond->dbase_work, errmsg );
-    if ( rc ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "db_commit" )
+    rc = zond_dbase_commit( zond->dbase_zond->zond_dbase_work, errmsg );
+    if ( rc ) ERROR_ROLLBACK( zond->dbase_zond->zond_dbase_work )
 
     if ( success ) sond_treeview_set_cursor( zond->treeview[BAUM_INHALT], &iter );
 

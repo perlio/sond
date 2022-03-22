@@ -3,100 +3,17 @@
 #include <glib/gstdio.h>
 
 //#include "sond_database.h"
-
+#include "zond/zond_dbase.h"
 #include "dbase.h"
 #include "eingang.h"
 
 #include "misc.h"
 
 
-gint
-dbase_begin( DBase* dbase, gchar** errmsg )
-{
-    gint rc = 0;
-
-    sqlite3_reset( dbase->begin_transaction );
-
-    rc = sqlite3_step( dbase->begin_transaction );
-    if ( rc != SQLITE_DONE ) ERROR_DBASE( "sqlite3_step" )
-
-    return 0;
-}
-
-
-gint
-dbase_commit( DBase* dbase, gchar** errmsg )
-{
-    gint rc = 0;
-
-    sqlite3_reset( dbase->commit );
-
-    rc = sqlite3_step( dbase->commit );
-    if ( rc != SQLITE_DONE ) ERROR_DBASE( "sqlite3_step" )
-
-    return 0;
-}
-
-
-gint
-dbase_rollback( DBase* dbase, gchar** errmsg )
-{
-    gint rc = 0;
-
-    sqlite3_reset( dbase->rollback );
-
-    rc = sqlite3_step( dbase->rollback );
-    if ( rc != SQLITE_DONE ) ERROR_DBASE( "sqlite3_step(rollback)" )
-
-    return 0;
-}
-
-
-gint
-dbase_update_path( DBase* dbase, const gchar* old_path, const gchar* new_path, gchar** errmsg )
-{
-    gint rc = 0;
-
-    sqlite3_reset( dbase->update_path );
-
-    rc = sqlite3_bind_text( dbase->update_path, 1, old_path, -1, NULL );
-    if ( rc != SQLITE_OK ) ERROR_DBASE( "sqlite3_bind_text (old_path)" )
-
-    rc = sqlite3_bind_text( dbase->update_path, 2, new_path, -1, NULL );
-    if ( rc != SQLITE_OK ) ERROR_DBASE( "sqlite3_bind_text (new_path)" )
-
-    rc = sqlite3_step( dbase->update_path );
-    if ( rc != SQLITE_DONE ) ERROR_DBASE( "sqlite3_step" )
-
-    return 0;
-}
-
-
-/*  Gibt 0 zurück, wenn rel_path in db nicht vorhanden, wenn doch: 1
-**  Bei Fehler: -1  */
-gint
-dbase_test_path( DBase* dbase, const gchar* rel_path, gchar** errmsg )
-{
-    gint rc = 0;
-
-    sqlite3_reset( dbase->test_path );
-
-    rc = sqlite3_bind_text( dbase->test_path, 1, rel_path, -1, NULL );
-    if ( rc != SQLITE_OK ) ERROR_DBASE( "sqlite3_bind_text" )
-
-    rc = sqlite3_step( dbase->test_path );
-    if ( (rc != SQLITE_ROW) && rc != SQLITE_DONE ) ERROR_DBASE( "sqlite3_step" )
-
-    if ( rc == SQLITE_ROW ) return 1;
-
-    return 0;
-}
-
-
 /*  eingang: Zeiger auf initialisierte Eingang-Struktur
 */
 gint
-dbase_get_eingang_for_rel_path( DBase* dbase, const gchar* rel_path, gint* ID,
+dbase_get_eingang_for_rel_path( ZondDBase* zond_dbase, const gchar* rel_path, gint* ID,
         Eingang* eingang, gint* ID_eingang_rel_path, gchar** errmsg )
 {
     gint rc = 0;
@@ -104,10 +21,10 @@ dbase_get_eingang_for_rel_path( DBase* dbase, const gchar* rel_path, gint* ID,
     sqlite3_reset( dbase->get_eingang_for_rel_path );
 
     rc = sqlite3_bind_text( dbase->get_eingang_for_rel_path, 1, rel_path, -1, NULL );
-    if ( rc != SQLITE_OK ) ERROR_DBASE( "sqlite3_bind_text" )
+    if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_text (rel_path)" )
 
     rc = sqlite3_step( dbase->get_eingang_for_rel_path );
-    if ( (rc != SQLITE_ROW) && rc != SQLITE_DONE ) ERROR_DBASE( "sqlite3_step" )
+    if ( (rc != SQLITE_ROW) && rc != SQLITE_DONE ) ERROR_ZOND_DBASE( "sqlite3_step" )
 
     if ( rc == SQLITE_DONE ) return 1; //rel_path nicht vorhanden
 
@@ -328,18 +245,6 @@ dbase_prepare_stmts( DBase* dbase, gchar** errmsg )
     gint zaehler = 0;
     sqlite3_stmt* stmt = NULL;
     gchar* sql[] = {
-            "BEGIN;",
-
-            "COMMIT;",
-
-            "ROLLBACK;",
-
-            "UPDATE dateien SET rel_path = "
-            "REPLACE( SUBSTR( rel_path, 1, LENGTH( ?1 ) ), ?1, ?2 ) || "
-            "SUBSTR( rel_path, LENGTH( ?1 ) + 1 );",
-
-            "SELECT node_id FROM dateien WHERE rel_path=?1;",
-
             //get_eingang_for_rel_path
             "SELECT eingangsdatum, transport, traeger, ort, "
             "absender, absendedatum, erfassungsdatum, eingang_rel_path.ID, eingang.ID "
@@ -388,19 +293,14 @@ dbase_prepare_stmts( DBase* dbase, gchar** errmsg )
             return -1;
         }
 
-        if ( zaehler == 0 ) dbase->begin_transaction = stmt;
-        else if ( zaehler == 1 ) dbase->commit = stmt;
-        else if ( zaehler == 2  ) dbase->rollback = stmt;
-        else if ( zaehler == 3  ) dbase->update_path = stmt;
-        else if ( zaehler == 4 ) dbase->test_path = stmt;
-        else if ( zaehler == 5 ) dbase->get_eingang_for_rel_path = stmt;
-        else if ( zaehler == 6 ) dbase->insert_eingang = stmt;
-        else if ( zaehler == 7 ) dbase->update_eingang = stmt;
-        else if ( zaehler == 8 ) dbase->delete_eingang = stmt;
-        else if ( zaehler == 9 ) dbase->insert_eingang_rel_path = stmt;
-        else if ( zaehler == 10 ) dbase->update_eingang_rel_path = stmt;
-        else if ( zaehler == 11 ) dbase->delete_eingang_rel_path = stmt;
-        else if ( zaehler == 12 ) dbase->get_num_of_refs_to_eingang = stmt;
+        if ( zaehler == 0 ) dbase->get_eingang_for_rel_path = stmt;
+        else if ( zaehler == 1 ) dbase->insert_eingang = stmt;
+        else if ( zaehler == 2 ) dbase->update_eingang = stmt;
+        else if ( zaehler == 3 ) dbase->delete_eingang = stmt;
+        else if ( zaehler == 4 ) dbase->insert_eingang_rel_path = stmt;
+        else if ( zaehler == 5 ) dbase->update_eingang_rel_path = stmt;
+        else if ( zaehler == 6 ) dbase->delete_eingang_rel_path = stmt;
+        else if ( zaehler == 7 ) dbase->get_num_of_refs_to_eingang = stmt;
 
         zaehler++;
     }

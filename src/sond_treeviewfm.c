@@ -1,5 +1,5 @@
 #include "misc.h"
-#include "dbase.h"
+#include "zond/zond_dbase.h"
 #include "eingang.h"
 
 #include "sond_treeviewfm.h"
@@ -15,7 +15,7 @@ typedef struct
 {
     gchar* root;
     GtkTreeViewColumn* column_eingang;
-    DBase* dbase;
+    ZondDBase* zond_dbase;
 } SondTreeviewFMPrivate;
 
 G_DEFINE_TYPE_WITH_PRIVATE(SondTreeviewFM, sond_treeviewfm, SOND_TYPE_TREEVIEW)
@@ -27,8 +27,8 @@ sond_treeviewfm_dbase_begin( SondTreeviewFM* stvfm, gchar** errmsg )
     gint rc = 0;
     SondTreeviewFMPrivate* priv = sond_treeviewfm_get_instance_private( stvfm );
 
-    rc = dbase_begin( priv->dbase, errmsg );
-    if ( rc ) ERROR_SOND( "dbase_begin" )
+    rc = zond_dbase_begin( priv->zond_dbase, errmsg );
+    if ( rc ) ERROR_S
 
     return 0;
 }
@@ -41,8 +41,8 @@ sond_treeviewfm_dbase_test( SondTreeviewFM* stvfm, const gchar* source, gchar** 
 
     SondTreeviewFMPrivate* priv = sond_treeviewfm_get_instance_private( stvfm );
 
-    rc = dbase_test_path( priv->dbase, source, errmsg );
-    if ( rc == -1 ) ERROR_SOND( "dbase_test_path" )
+    rc = zond_dbase_test_path( priv->zond_dbase, source, errmsg );
+    if ( rc == -1 ) ERROR_S
 
     return rc;
 }
@@ -56,8 +56,8 @@ sond_treeviewfm_dbase_update_path( SondTreeviewFM* stvfm, const gchar* source,
 
     SondTreeviewFMPrivate* priv = sond_treeviewfm_get_instance_private( stvfm );
 
-    rc = dbase_update_path( priv->dbase, source, dest, errmsg );
-    if ( rc ) ERROR_ROLLBACK( priv->dbase, "dbase_update_path" )
+    rc = zond_dbase_update_path( priv->zond_dbase, source, dest, errmsg );
+    if ( rc ) ERROR_ROLLBACK( priv->zond_dbase )
 
     return 0;
 }
@@ -72,8 +72,8 @@ sond_treeviewfm_dbase_update_eingang( SondTreeviewFM* stvfm, const gchar* source
     Clipboard* clipboard = sond_treeview_get_clipboard( SOND_TREEVIEW(stvfm) );
     SondTreeviewFMPrivate* priv = sond_treeviewfm_get_instance_private( stvfm );
 
-    rc = eingang_update_rel_path( sond_treeviewfm_get_dbase( SOND_TREEVIEWFM(clipboard->tree_view) ), source, priv->dbase, dest, del, errmsg );
-    if ( rc ) ERROR_ROLLBACK( priv->dbase, "eingang_update_rel_path" )
+    rc = eingang_update_rel_path( sond_treeviewfm_get_dbase( SOND_TREEVIEWFM(clipboard->tree_view) ), source, priv->zond_dbase, dest, del, errmsg );
+    if ( rc ) ERROR_ROLLBACK( priv->zond_dbase )
 
     return 0;
 }
@@ -88,10 +88,16 @@ sond_treeviewfm_dbase_end( SondTreeviewFM* stvfm, gboolean suc, gchar** errmsg )
     {
         gint rc = 0;
 
-        rc = dbase_commit( priv->dbase, errmsg );
-        if ( rc ) ERROR_ROLLBACK( priv->dbase, "dbase_commit" )
+        rc = zond_dbase_commit( priv->zond_dbase, errmsg );
+        if ( rc ) ERROR_ROLLBACK( priv->zond_dbase )
     }
-    else ROLLBACK(priv->dbase)
+    else
+    {
+        gint rc = 0;
+
+        rc = zond_dbase_rollback( priv->zond_dbase, errmsg );
+        if ( rc ) ERROR_S
+    }
 
     return 0;
 }
@@ -101,15 +107,15 @@ static gboolean
 sond_treeviewfm_other_fm( SondTreeviewFM* stvfm )
 {
     Clipboard* clipboard = NULL;
-    DBase* dbase_source = NULL;
-    DBase* dbase_dest = NULL;
+    ZondDBase* dbase_source = NULL;
+    ZondDBase* dbase_dest = NULL;
 
     SondTreeviewFMPrivate* stvfm_priv = sond_treeviewfm_get_instance_private( stvfm );
 
     clipboard = sond_treeview_get_clipboard( SOND_TREEVIEW(stvfm) );
     dbase_source = sond_treeviewfm_get_dbase( SOND_TREEVIEWFM(clipboard->tree_view) );
 
-    dbase_dest = stvfm_priv->dbase;
+    dbase_dest = stvfm_priv->zond_dbase;
 
     if ( dbase_dest == dbase_source ) return FALSE;
 
@@ -131,7 +137,7 @@ sond_treeviewfm_dbase( SondTreeviewFM* stvfm, gint mode, const gchar* rel_path_s
         rc = SOND_TREEVIEWFM_GET_CLASS(stvfm)->dbase_test( SOND_TREEVIEWFM(clipboard->tree_view), rel_path_source, errmsg );
         if ( rc ) //aufräumen...
         {
-            if ( rc == -1 ) ERROR_SOND( "dbase_test" )
+            if ( rc == -1 ) ERROR_S
             else if ( rc == 1 ) return 1;
         }
     }
@@ -143,21 +149,21 @@ sond_treeviewfm_dbase( SondTreeviewFM* stvfm, gint mode, const gchar* rel_path_s
         rc = SOND_TREEVIEWFM_GET_CLASS(stvfm)->dbase_test( stvfm, rel_path_dest, errmsg );
         if ( rc )
         {
-            if ( rc == -1 ) ERROR_SOND( "dbase_test" )
+            if ( rc == -1 ) ERROR_S
             else if ( rc == 1 ) return 1;
         }
     }
 
     rc = SOND_TREEVIEWFM_GET_CLASS(stvfm)->dbase_begin( stvfm, errmsg );
-    if ( rc ) ERROR_SOND( "dbase_begin" )
+    if ( rc ) ERROR_S
 
     if ( mode == 2 || mode == 3 ) //mode == 2: beyond wurde schon ausgeschlossen - mode == 3: ausgeschlossen
     {
         rc = SOND_TREEVIEWFM_GET_CLASS(stvfm)->dbase_update_path( stvfm,
                 rel_path_source, rel_path_dest, errmsg );
-        if ( rc ) ERROR_SOND( "dbase_update_path" )
+        if ( rc ) ERROR_S
     }
-/*
+/* (Eingang abgeklemmt)
     if ( mode == 1 || mode == 2 )
     {
         rc = SOND_TREEVIEWFM_GET_CLASS(stvfm)->dbase_update_eingang( stvfm,
@@ -758,7 +764,7 @@ sond_treeviewfm_render_eingang( GtkTreeViewColumn* column, GtkCellRenderer* rend
     rel_path = sond_treeviewfm_get_rel_path( stvfm, iter );
     if ( !rel_path ) return;
 
-    rc = eingang_for_rel_path( stvfm_priv->dbase, rel_path, &eingang_id, &eingang, NULL, &errmsg );
+    rc = eingang_for_rel_path( stvfm_priv->zond_dbase, rel_path, &eingang_id, &eingang, NULL, &errmsg );
     g_free( rel_path );
     if ( rc == -1 )
     {
@@ -1041,24 +1047,24 @@ sond_treeviewfm_get_root( SondTreeviewFM* stvfm )
 
 
 void
-sond_treeviewfm_set_dbase( SondTreeviewFM* stvfm, DBase* dbase )
+sond_treeviewfm_set_dbase( SondTreeviewFM* stvfm, ZondDBase* zond_dbase )
 {
     SondTreeviewFMPrivate* stvfm_priv = sond_treeviewfm_get_instance_private( stvfm );
 
-    stvfm_priv->dbase = dbase;
+    stvfm_priv->zond_dbase = zond_dbase;
 
     return;
 }
 
 
-DBase*
+ZondDBase*
 sond_treeviewfm_get_dbase( SondTreeviewFM* stvfm )
 {
-    if ( ! stvfm ) return NULL;
+    if ( !stvfm ) return NULL;
 
     SondTreeviewFMPrivate* stvfm_priv = sond_treeviewfm_get_instance_private( stvfm );
 
-    return stvfm_priv->dbase;
+    return stvfm_priv->zond_dbase;
 }
 
 

@@ -9,7 +9,7 @@
 
 G_BEGIN_DECLS
 
-typedef struct _DBase DBase;
+typedef struct _ZondDBase ZondDBase;
 
 
 #define SOND_TYPE_TREEVIEWFM sond_treeviewfm_get_type( )
@@ -34,9 +34,9 @@ gint sond_treeviewfm_set_root( SondTreeviewFM*, const gchar*, gchar** );
 
 const gchar* sond_treeviewfm_get_root( SondTreeviewFM* );
 
-void sond_treeviewfm_set_dbase( SondTreeviewFM*, DBase* );
+void sond_treeviewfm_set_dbase( SondTreeviewFM*, ZondDBase* );
 
-DBase* sond_treeviewfm_get_dbase( SondTreeviewFM* );
+ZondDBase* sond_treeviewfm_get_dbase( SondTreeviewFM* );
 
 void sond_treeviewfm_column_eingang_set_visible( SondTreeviewFM*, gboolean );
 

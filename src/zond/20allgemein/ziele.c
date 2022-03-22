@@ -157,33 +157,30 @@ ziele_einfuegen_anbindung( Projekt* zond, const gchar* rel_path, gint anchor_id,
     else node_text = g_strdup_printf( "S. %i, %s", anbindung.von.seite + 1,
             rel_path );
 
-    rc = dbase_begin( (DBase*) zond->dbase_zond->dbase_work, errmsg );
+    rc = zond_dbase_begin( zond->dbase_zond->zond_dbase_work, errmsg );
     if ( rc )
     {
         g_free( node_text );
 
-        ERROR_SOND( "db_begin" )
+        ERROR_S
     }
 
     new_node = ziele_einfuegen_db( zond, anchor_id, kind, ziel, node_text, errmsg );
     g_free( node_text );
-    if ( new_node == -1) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work,
-            "ziele_einfuegen_db" )
+    if ( new_node == -1) ERROR_ROLLBACK( zond->dbase_zond->zond_dbase_work )
 
     //eingefügtes ziel in Baum
     GtkTreeIter* iter = zond_treeview_abfragen_iter( ZOND_TREEVIEW(zond->treeview[BAUM_INHALT]), anchor_id );
     rc = treeviews_db_to_baum( zond, BAUM_INHALT, new_node, iter, kind, &iter_new,
             errmsg );
     gtk_tree_iter_free( iter );
-    if ( rc ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work,
-            "db_baum_knoten" )
+    if ( rc ) ERROR_ROLLBACK( zond->dbase_zond->zond_dbase_work )
 
     rc = ziele_verschieben_kinder( zond, new_node, anbindung, errmsg );
-    if ( rc ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work,
-            "ziele_verschieben_kinder" )
+    if ( rc ) ERROR_ROLLBACK( zond->dbase_zond->zond_dbase_work )
 
-    rc = dbase_commit( (DBase*) zond->dbase_zond->dbase_work, errmsg );
-    if ( rc ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "db_commit" )
+    rc = zond_dbase_commit( zond->dbase_zond->zond_dbase_work, errmsg );
+    if ( rc ) ERROR_ROLLBACK( zond->dbase_zond->zond_dbase_work )
 
     sond_treeview_expand_row( zond->treeview[BAUM_INHALT], &iter_new );
     sond_treeview_set_cursor_on_text_cell( zond->treeview[BAUM_INHALT], &iter_new );
@@ -213,7 +210,7 @@ ziele_erzeugen_ziel( GtkWidget* window, const DisplayedDocument* dd,
     {
         zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
 
-        ERROR_SOND( "pdf_document_get_dest" )
+        ERROR_S
     }
 
     //nameddest herausfinden bzw. einfügen
@@ -223,7 +220,7 @@ ziele_erzeugen_ziel( GtkWidget* window, const DisplayedDocument* dd,
     {
         zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
 
-        ERROR_SOND( "pdf_document_get_dest" )
+        ERROR_S
     }
 
     gint page_number1 = -1;
@@ -244,7 +241,7 @@ ziele_erzeugen_ziel( GtkWidget* window, const DisplayedDocument* dd,
                 if ( rc )
                 {
                     zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
-                    ERROR_SOND_VAL( "zond_pdf_document_save", -2 )
+                    ERROR_VAL( -2 )
                 }
             }
             else

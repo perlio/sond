@@ -5,8 +5,6 @@
 typedef struct _Projekt Projekt;
 typedef struct _GtkMenuItem GtkMenuItem;
 typedef struct _GFile GFile;
-typedef struct _DBase DBase;
-typedef struct _DBase_Full DBaseFull;
 typedef struct _ZondDBase ZondDBase;
 typedef struct _SondTreeviewFM SondTreeviewFM;
 
@@ -16,8 +14,6 @@ typedef char gchar;
 
 typedef struct _DBase_Zond
 {
-    DBase* dbase_store;
-    DBase* dbase_work;
     ZondDBase* zond_dbase_store;
     ZondDBase* zond_dbase_work;
     gchar* project_name;

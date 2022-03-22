@@ -1887,3 +1887,58 @@ zond_dbase_remove_link( ZondDBase* zond_dbase, const gint baum_id, const gint
 }
 
 
+gint
+zond_dbase_update_path( ZondDBase* zond_dbase, const gchar* old_path, const gchar* new_path, gchar** errmsg )
+{
+    gint rc = 0;
+    sqlite3_stmt** stmt = NULL;
+
+    const gchar* sql[] = {
+            "UPDATE dateien SET rel_path = "
+            "REPLACE( SUBSTR( rel_path, 1, LENGTH( ?1 ) ), ?1, ?2 ) || "
+            "SUBSTR( rel_path, LENGTH( ?1 ) + 1 );"
+    };
+
+    rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
+    if ( rc ) ERROR_SOND( "zond_dbase_prepare" )
+
+    rc = sqlite3_bind_text( stmt[0], 1, old_path, -1, NULL );
+    if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_text (old_path)" )
+
+    rc = sqlite3_bind_text( stmt[0], 2, new_path, -1, NULL );
+    if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_text (new_path)" )
+
+    rc = sqlite3_step( stmt[0] );
+    if ( rc != SQLITE_DONE ) ERROR_ZOND_DBASE( "sqlite3_step" )
+
+    return 0;
+}
+
+
+/*  Gibt 0 zurück, wenn rel_path in db nicht vorhanden, wenn doch: 1
+**  Bei Fehler: -1  */
+gint
+zond_dbase_test_path( ZondDBase* zond_dbase, const gchar* rel_path, gchar** errmsg )
+{
+    gint rc = 0;
+    sqlite3_stmt** stmt = NULL;
+
+    const gchar* sql[] = {
+            "SELECT node_id FROM dateien WHERE rel_path=?1;"
+    };
+
+    rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
+    if ( rc ) ERROR_SOND( "zond_dbase_prepare" )
+
+    rc = sqlite3_bind_text( stmt[0], 1, rel_path, -1, NULL );
+    if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_text" )
+
+    rc = sqlite3_step( stmt[0] );
+    if ( (rc != SQLITE_ROW) && rc != SQLITE_DONE ) ERROR_ZOND_DBASE( "sqlite3_step" )
+
+    if ( rc == SQLITE_ROW ) return 1;
+
+    return 0;
+}
+
+

@@ -4,7 +4,7 @@
 typedef int gint;
 typedef char gchar;
 typedef struct _GDate GDate;
-typedef struct _DBase DBase;
+typedef struct _ZondDBase ZondDBase;
 typedef struct _SondTreeviewFM SondTreeviewFM;
 
 typedef struct _Eingang
@@ -21,13 +21,13 @@ typedef struct _Eingang
 typedef struct _Eingang_DBase
 {
     Eingang** eingang;
-    DBase* dbase;
+    ZondDBase* zond_dbase;
     gint* last_inserted_ID;
 } EingangDBase;
 
-gint eingang_for_rel_path( DBase*, const gchar*, gint*, Eingang*, gint*, gchar** );
+gint eingang_for_rel_path( ZondDBase*, const gchar*, gint*, Eingang*, gint*, gchar** );
 
-gint eingang_update_rel_path( DBase*, const gchar*, DBase*, const gchar*, gboolean, gchar** );
+gint eingang_update_rel_path( ZondDBase*, const gchar*, ZondDBase*, const gchar*, gboolean, gchar** );
 
 gint eingang_set( SondTreeviewFM*, gchar** );
 

@@ -11,6 +11,25 @@
                        sqlite3_errmsg(zond_dbase_get_dbase(zond_dbase)), NULL ), *errmsg ); \
                        return -1; }
 
+#define ERROR_ROLLBACK(zond_dbase) \
+          { if ( errmsg ) *errmsg = add_string( \
+            g_strconcat( "Bei Aufruf ", __func__, ":\n", NULL ), *errmsg ); \
+            \
+            gchar* err_rollback = NULL; \
+            gint rc_rollback = 0; \
+            rc_rollback = zond_dbase_rollback( zond_dbase, &err_rollback ); \
+            if ( errmsg ) \
+            { \
+                if ( !rc_rollback ) *errmsg = add_string( *errmsg, \
+                        g_strdup( "\n\nRollback durchgeführt" ) ); \
+                else *errmsg = add_string( *errmsg, g_strconcat( "\n\nRollback " \
+                        "fehlgeschlagen\n\nBei Aufruf dbase_rollback:\n", \
+                        err_rollback, "\n\nDatenbankverbindung trennen", NULL ) ); \
+            } \
+            g_free( err_rollback ); \
+            \
+            return -1; }
+
 G_BEGIN_DECLS
 
 #define ZOND_TYPE_DBASE zond_dbase_get_type( )
@@ -86,6 +105,10 @@ gint zond_dbase_get_link( ZondDBase*, gint*, Baum*, gint*, gchar**, Baum*, gint*
         gchar** );
 
 gint zond_dbase_remove_link( ZondDBase*, const gint, const gint, gchar** );
+
+gint zond_dbase_update_path( ZondDBase*, const gchar*, const gchar*, gchar** );
+
+gint zond_dbase_test_path( ZondDBase*, const gchar*, gchar** );
 
 G_END_DECLS
 

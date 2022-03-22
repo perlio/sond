@@ -21,6 +21,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "misc.h"
 #include "eingang.h"
+#include "zond/zond_dbase.h"
 #include "dbase.h"
 #include "sond_treeviewfm.h"
 
@@ -47,13 +48,13 @@ eingang_free( Eingang* eingang )
      1: row in Tabelle eingang mit Verweis von rel_path
      2ff.: Grad der Elternverzeichnisse eingetragen         **/
 gint
-eingang_for_rel_path( DBase* dbase, const gchar* rel_path, gint* ID,
+eingang_for_rel_path( ZondDBase* zond_dbase, const gchar* rel_path, gint* ID,
         Eingang* eingang, gint* ID_eingang_rel_path, gchar** errmsg )
-{
+{/*
     gchar* buf = NULL;
     gint zaehler = 1;
 
-    if ( !dbase ) return 0;
+    if ( !zond_dbase ) return 0;
 
     buf = g_strdup( rel_path );
 
@@ -63,14 +64,14 @@ eingang_for_rel_path( DBase* dbase, const gchar* rel_path, gint* ID,
         gchar* buf_int = NULL;
         gchar* ptr_buf = NULL;
 
-        rc = dbase_get_eingang_for_rel_path( dbase, buf, ID, eingang,
+        rc = dbase_get_eingang_for_rel_path( zond_dbase, buf, ID, eingang,
                 ID_eingang_rel_path, errmsg );
         if ( rc == -1 )
         {
             g_free( buf );
-            ERROR_SOND( "dbase_get_eingang_for_rel_path" )
+            ERROR_S
         }
-        else if ( rc == 0 ) //*eingang wurde gesetzt
+        else if ( rc == 0 ) //eingang wurde gesetzt
         {
             g_free( buf );
             if ( zaehler > 1 && ID_eingang_rel_path ) *ID_eingang_rel_path = 0; //buf != rel_path
@@ -90,42 +91,42 @@ eingang_for_rel_path( DBase* dbase, const gchar* rel_path, gint* ID,
     while ( 1 );
 
     g_free( buf );
-
+*/
     return 0;
 }
 
 
 gint
-eingang_update_rel_path( DBase* dbase_src, const gchar* rel_path_src,
-        DBase* dbase_dest, const gchar* rel_path_dest, gboolean del, gchar** errmsg )
-{
+eingang_update_rel_path( ZondDBase* zond_dbase_src, const gchar* rel_path_src,
+        ZondDBase* zond_dbase_dest, const gchar* rel_path_dest, gboolean del, gchar** errmsg )
+{/*
     gint rc_src = 0, rc_dest = 0;
     gint ID_src = 0, ID_dest = 0;
     Eingang eingang_src = { 0 };
     gint ID_eingang_rel_path_src = 0;
 
-    rc_dest = eingang_for_rel_path( dbase_dest, rel_path_dest, &ID_dest, NULL, NULL, errmsg );
-    if ( rc_dest == -1 ) ERROR_SOND( "eingang_for_rel_path(dest)" )
+    rc_dest = eingang_for_rel_path( zond_dbase_dest, rel_path_dest, &ID_dest, NULL, NULL, errmsg );
+    if ( rc_dest == -1 ) ERROR_S
 
-    rc_src = eingang_for_rel_path( dbase_src, rel_path_src, &ID_src, &eingang_src, &ID_eingang_rel_path_src, errmsg );
-    if ( rc_src == -1 ) ERROR_SOND( "eingang_for_rel_path (source)" )
+    rc_src = eingang_for_rel_path( zond_dbase_src, rel_path_src, &ID_src, &eingang_src, &ID_eingang_rel_path_src, errmsg );
+    if ( rc_src == -1 ) ERROR_S
 
-    if ( dbase_dest == dbase_src )
+    if ( zond_dbase_dest == zond_dbase_src )
     {
         if ( rc_src == 1 && ID_src == ID_dest && del ) //unmittelbar markierte Datei in identischen scope verschieben
         {
             gint rc = 0;
 
-            rc = dbase_delete_eingang_rel_path( dbase_src, ID_eingang_rel_path_src, errmsg );
-            if ( rc ) ERROR_SOND( "dbase_delete_eingang_rel_path" )
+            rc = dbase_delete_eingang_rel_path( zond_dbase_src, ID_eingang_rel_path_src, errmsg );
+            if ( rc ) ERROR_S
         }
         else if ( rc_src == 1 && del ) //unmittelbar markierte Datei in anderen scope verschieben
         {
             gint rc = 0;
 
             //Markierung bleibt, nur rel_path wird angepaßt
-            rc = dbase_update_eingang_rel_path( dbase_dest, ID_eingang_rel_path_src, ID_src, rel_path_dest, errmsg );
-            if ( rc ) ERROR_SOND( "dbase_update_eingang_rel_path" )
+            rc = dbase_update_eingang_rel_path( zond_dbase_dest, ID_eingang_rel_path_src, ID_src, rel_path_dest, errmsg );
+            if ( rc ) ERROR_S
         }
         else if ( (rc_src == 0 && rc_dest != 0) || (rc_src > 1 && ID_src != ID_dest )
                 || (!del && (rc_src == 1 && ID_src != ID_dest)) )
@@ -133,8 +134,8 @@ eingang_update_rel_path( DBase* dbase_src, const gchar* rel_path_src,
             gint rc = 0;
 
             //Datei muß eigene Markierung enthalten
-            rc = dbase_insert_eingang_rel_path( dbase_dest, ID_src, rel_path_dest, errmsg );
-            if ( rc ) ERROR_SOND( "dbase_insert_eingang_rel_path" )
+            rc = dbase_insert_eingang_rel_path( zond_dbase_dest, ID_src, rel_path_dest, errmsg );
+            if ( rc ) ERROR_S
         }
     }
     else
@@ -146,33 +147,32 @@ eingang_update_rel_path( DBase* dbase_src, const gchar* rel_path_src,
         {
             gint rc = 0;
 
-            rc = dbase_delete_eingang_rel_path( dbase_src, ID_eingang_rel_path_src, errmsg );
-            if ( rc ) ERROR_SOND( "dbase_delete_eingang_rel_path" )
+            rc = dbase_delete_eingang_rel_path( zond_dbase_src, ID_eingang_rel_path_src, errmsg );
+            if ( rc ) ERROR_S
 
             //letzte reference auf eingang ID_scr -> dann ID_scr löschen
-            rc = dbase_get_num_of_refs_to_eingang( dbase_src, ID_src, errmsg );
-            if ( rc == -1 ) ERROR_SOND( "dbase_eingang_ist_waise" )
+            rc = dbase_get_num_of_refs_to_eingang( zond_dbase_src, ID_src, errmsg );
+            if ( rc == -1 ) ERROR_S
 
             if ( rc > 0 )
             {
                 gint rc = 0;
 
-                rc = dbase_delete_eingang( dbase_src, ID_src, errmsg );
-                if ( rc == -1 ) ERROR_SOND( "dbase_delete_eingang" )
+                rc = dbase_delete_eingang( zond_dbase_src, ID_src, errmsg );
+                if ( rc == -1 ) ERROR_S
             }
         }
 
         //neuen eingang einfügen
-        ID_eingang_dest_new = dbase_insert_eingang( dbase_dest, &eingang_src, errmsg );
-        if ( ID_eingang_dest_new == -1 ) ERROR_SOND( "dbase_insert_eingang" )
+        ID_eingang_dest_new = dbase_insert_eingang( zond_dbase_dest, &eingang_src, errmsg );
+        if ( ID_eingang_dest_new == -1 ) ERROR_S
 
         //neuen eingang_rel_path einfügen
-        ID_eingang_rel_path_dest_new = dbase_insert_eingang_rel_path( dbase_dest,
+        ID_eingang_rel_path_dest_new = dbase_insert_eingang_rel_path( zond_dbase_dest,
                 ID_eingang_dest_new, rel_path_dest, errmsg );
-        if ( ID_eingang_rel_path_dest_new == -1 )
-                ERROR_SOND( "dbase_insert_eingang_rel_path" )
+        if ( ID_eingang_rel_path_dest_new == -1 ) ERROR_S
     }
-
+*/
     return 0;
 }
 
@@ -300,21 +300,21 @@ eingang_fenster( GtkWidget* widget, Eingang* eingang, const gboolean sens,
 static gint
 eingang_insert_or_update( SondTreeviewFM* stvfm, EingangDBase* eingang_dbase,
         const gchar* rel_path, gchar** errmsg )
-{
+{/*
     gint rc = 0;
     gint ret = 0;
     gint eingang_id = 0;
     gint eingang_rel_path_id = 0;
     Eingang eingang = { 0 };
-    DBase* dbase = NULL;
+    ZondDBase* zond_dbase = NULL;
     Eingang** eingang_loop = NULL;
     gint* last_inserted_ID = NULL;
 
-    dbase = eingang_dbase->dbase;
+    zond_dbase = eingang_dbase->zond_dbase;
     eingang_loop = eingang_dbase->eingang;
     last_inserted_ID = eingang_dbase->last_inserted_ID;
 
-    ret = eingang_for_rel_path( dbase, rel_path, &eingang_id, &eingang, &eingang_rel_path_id, errmsg );
+    ret = eingang_for_rel_path( zond_dbase, rel_path, &eingang_id, &eingang, &eingang_rel_path_id, errmsg );
     if ( ret == -1 ) ERROR_SOND( "eingang_for_rel_path" )
     else if ( ret > 0 ) //es gibt - mittelbar oder unmittelbar - Eingangsdaten
     {
@@ -342,46 +342,46 @@ eingang_insert_or_update( SondTreeviewFM* stvfm, EingangDBase* eingang_dbase,
         if ( rc != GTK_RESPONSE_OK ) return 1;
     }
 
-    rc = dbase_begin( dbase, errmsg );
-    if ( rc ) ERROR_SOND( "dbase_begin" )
+    rc = dbase_begin( zond_dbase, errmsg );
+    if ( rc ) ERROR_S
 
     //hier Abfrage, was bei drohender Kollision gemacht werden soll
     if ( ret == 1 ) //zu rel_path selbst ist Eingang gespeichert
     {
         gint refs = 0;
 
-        refs = dbase_get_num_of_refs_to_eingang( dbase, eingang_id, errmsg );
-        if ( refs == -1 ) ERROR_ROLLBACK( dbase, "dbase_get_num_of_refs_to_eingang" )
+        refs = dbase_get_num_of_refs_to_eingang( zond_dbase, eingang_id, errmsg );
+        if ( refs == -1 ) ERROR_ROLLBACK( zond_dbase )
 
         if ( !(*last_inserted_ID) && refs == 1 )
         {
             gint rc = 0;
 
-            rc = dbase_update_eingang( dbase, eingang_id, *eingang_loop, errmsg );
-            if ( rc ) ERROR_ROLLBACK( dbase, "dbase_update_eingang" );
+            rc = dbase_update_eingang( zond_dbase, eingang_id, *eingang_loop, errmsg );
+            if ( rc ) ERROR_ROLLBACK( zond_dbase )
 
             *last_inserted_ID = eingang_id;
         }
-        else //*last_inserted_ID oder refs > 1
+        else //Zeiger auf last_inserted_ID oder refs > 1
         {
             gint rc = 0;
 
             if ( !(*last_inserted_ID) ) //&& refs > 1
             {
-                *last_inserted_ID = dbase_insert_eingang( dbase, *eingang_loop, errmsg );
-                if ( *last_inserted_ID == -1 ) ERROR_ROLLBACK( dbase, "dbase_insert_eingang" )
+                *last_inserted_ID = dbase_insert_eingang( zond_dbase, *eingang_loop, errmsg );
+                if ( *last_inserted_ID == -1 ) ERROR_ROLLBACK( zond_dbase )
             }
 
-            rc = dbase_update_eingang_rel_path( dbase, eingang_rel_path_id,
+            rc = dbase_update_eingang_rel_path( zond_dbase, eingang_rel_path_id,
                     *last_inserted_ID, rel_path, errmsg );
-            if ( rc ) ERROR_ROLLBACK( dbase, "dbase_update_eingang" )
+            if ( rc ) ERROR_ROLLBACK( zond_dbase )
 
             if ( refs == 1 )
             {
                 gint rc = 0;
 
-                rc = dbase_delete_eingang( dbase, eingang_id, errmsg );
-                if ( rc == -1 ) ERROR_ROLLBACK( dbase, "dbase_delete_eingang" )
+                rc = dbase_delete_eingang( zond_dbase, eingang_id, errmsg );
+                if ( rc == -1 ) ERROR_ROLLBACK( zond_dbase )
             }
         }
     }
@@ -389,18 +389,18 @@ eingang_insert_or_update( SondTreeviewFM* stvfm, EingangDBase* eingang_dbase,
     {//eingang_rel_path_id ist 0, wenn ret > 1
         if ( !(*last_inserted_ID) )
         {
-            *last_inserted_ID = dbase_insert_eingang( dbase, *eingang_loop, errmsg );
-            if ( *last_inserted_ID == -1 ) ERROR_ROLLBACK( dbase, "dbase_insert_eingang" )
+            *last_inserted_ID = dbase_insert_eingang( zond_dbase, *eingang_loop, errmsg );
+            if ( *last_inserted_ID == -1 ) ERROR_ROLLBACK( zond_dbase )
         }
 
-        eingang_rel_path_id = dbase_insert_eingang_rel_path( dbase,
+        eingang_rel_path_id = dbase_insert_eingang_rel_path( zond_dbase,
                 *last_inserted_ID, rel_path, errmsg );
-        if ( eingang_rel_path_id == -1 ) ERROR_ROLLBACK( dbase, "dbase_insert_eingang_rel_path" )
+        if ( eingang_rel_path_id == -1 ) ERROR_ROLLBACK( zond_dbase )
     }
 
-    rc = dbase_commit( dbase, errmsg );
-    if ( rc ) ERROR_ROLLBACK( dbase, "dbase_commit" );
-
+    rc = zond_dbase_commit( zond_dbase, errmsg );
+    if ( rc ) ERROR_ROLLBACK( zond_dbase )
+*/
     return 0;
 }
 
@@ -418,7 +418,7 @@ eingang_set_for_rel_path( SondTreeview* stv, GtkTreeIter* iter, gpointer data,
 
     rc = eingang_insert_or_update( SOND_TREEVIEWFM(stv), eingang_dbase, rel_path, errmsg );
     g_free( rel_path );
-    if ( rc == -1 ) ERROR_SOND( "eingang_insert_or_update" )
+    if ( rc == -1 ) ERROR_S
 
     return 1;
 }
@@ -437,7 +437,7 @@ eingang_set( SondTreeviewFM* stvfm, gchar** errmsg )
     rc = sond_treeview_selection_foreach( SOND_TREEVIEW(stvfm),
             eingang_set_for_rel_path, &eingang_dbase, errmsg );
     eingang_free( *(eingang_dbase.eingang) );
-    if ( rc == -1 ) ERROR_SOND( "sond_treeview_selection_foreach" )
+    if ( rc == -1 ) ERROR_S
 
     return 0;
 }

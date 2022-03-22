@@ -247,42 +247,40 @@ treeviews_selection_entfernen_anbindung_foreach( SondTreeview* stv,
             2, &node_id, -1 );
 
     rc = zond_dbase_get_ziel( zond->dbase_zond->zond_dbase_work, BAUM_INHALT, node_id, NULL, errmsg );
-    if ( rc == -1 ) ERROR_SOND ( "zond_dbase_get_ziel" )
+    if ( rc == -1 ) ERROR_S
     if ( rc == 1 ) return 0; //Knoten ist keine Anbindung
 
     //herausfinden, ob zu löschender Knoten älteres Geschwister hat
     older_sibling = zond_dbase_get_older_sibling( zond->dbase_zond->zond_dbase_work, BAUM_INHALT, node_id, errmsg );
-    if ( older_sibling < 0 ) ERROR_SOND( "zond_dbase_get_older_sibling" )
+    if ( older_sibling < 0 ) ERROR_S
 
     //Elternknoten ermitteln
     parent = zond_dbase_get_parent( zond->dbase_zond->zond_dbase_work, BAUM_INHALT, node_id, errmsg );
-    if ( parent < 0 ) ERROR_SOND( "zond_dbase_get_parent" )
+    if ( parent < 0 ) ERROR_S
 
-    rc = dbase_begin( (DBase*) zond->dbase_zond->dbase_work, errmsg );
-    if ( rc ) ERROR_SOND( "db_begin" )
+    rc = zond_dbase_begin( zond->dbase_zond->zond_dbase_work, errmsg );
+    if ( rc ) ERROR_S
 
     child = 0;
     while ( (child = zond_dbase_get_first_child( zond->dbase_zond->zond_dbase_work, BAUM_INHALT, node_id,
             errmsg )) )
     {
-        if ( child < 0 ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work,
-                "zond_dbase_get_first_child" )
+        if ( child < 0 ) ERROR_ROLLBACK( zond->dbase_zond->zond_dbase_work )
 
         rc = treeviews_knoten_verschieben( zond, BAUM_INHALT, child, parent,
                 older_sibling, errmsg );
-        if ( rc == -1 ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work,
-                "knoten_verschieben" )
+        if ( rc == -1 ) ERROR_ROLLBACK( zond->dbase_zond->zond_dbase_work )
 
         older_sibling = child;
     }
 
     rc = zond_dbase_remove_node( zond->dbase_zond->zond_dbase_work,BAUM_INHALT, node_id, errmsg );
-    if ( rc ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "zond_dbase_remove_node" )
+    if ( rc ) ERROR_ROLLBACK( zond->dbase_zond->zond_dbase_work )
 
     zond_tree_store_remove( iter );
 
-    rc = dbase_commit( (DBase*) zond->dbase_zond->dbase_work, errmsg );
-    if ( rc ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "db_commit" )
+    rc = zond_dbase_commit( zond->dbase_zond->zond_dbase_work, errmsg );
+    if ( rc ) ERROR_ROLLBACK( zond->dbase_zond->zond_dbase_work )
 
     return 0;
 }
@@ -298,7 +296,7 @@ treeviews_selection_entfernen_anbindung( Projekt* zond, Baum baum_active, gchar*
 
     rc = sond_treeview_selection_foreach( zond->treeview[BAUM_INHALT],
             treeviews_selection_entfernen_anbindung_foreach, zond, errmsg );
-    if ( rc == -1 ) ERROR_SOND( "treeview_selection_foreach" )
+    if ( rc == -1 ) ERROR_S
 
     return 0;
 }
@@ -315,7 +313,6 @@ static gint
 treeviews_selection_loeschen_foreach( SondTreeview* tree_view, GtkTreeIter* iter,
         gpointer data, gchar** errmsg )
 {
-    gint rc = 0;
     gint node_id = 0;
     gint head_nr = 0;
     Baum baum = KEIN_BAUM;
@@ -355,17 +352,17 @@ treeviews_selection_loeschen_foreach( SondTreeview* tree_view, GtkTreeIter* iter
                             baum_link = BAUM_AUSWERTUNG;
                     else return 0; //???
 
-                    rc = dbase_begin( (DBase*) s_selection->zond->dbase_zond->dbase_work, errmsg );
-                    if ( rc ) ERROR_SOND( "dbase_begin" )
+                    rc = zond_dbase_begin( s_selection->zond->dbase_zond->zond_dbase_work, errmsg );
+                    if ( rc ) ERROR_S
 
                     rc = zond_dbase_remove_node( s_selection->zond->dbase_zond->zond_dbase_work, baum_link, head_nr, errmsg );
-                    if ( rc ) ERROR_ROLLBACK( (DBase*) s_selection->zond->dbase_zond->dbase_work, "zond_dbase_remove_node" )
+                    if ( rc ) ERROR_ROLLBACK( s_selection->zond->dbase_zond->zond_dbase_work )
 
                     rc = zond_dbase_remove_link( s_selection->zond->dbase_zond->zond_dbase_work, baum_link, head_nr, errmsg );
-                    if ( rc ) ERROR_ROLLBACK( (DBase*) s_selection->zond->dbase_zond->dbase_work, "zond_dbase_remove_link" )
+                    if ( rc ) ERROR_ROLLBACK( s_selection->zond->dbase_zond->zond_dbase_work )
 
-                    rc = dbase_commit( (DBase*) s_selection->zond->dbase_zond->dbase_work, errmsg );
-                    if ( rc ) ERROR_ROLLBACK( (DBase*) s_selection->zond->dbase_zond->dbase_work, "dbase_commit" )
+                    rc = zond_dbase_commit( s_selection->zond->dbase_zond->zond_dbase_work, errmsg );
+                    if ( rc ) ERROR_ROLLBACK( s_selection->zond->dbase_zond->zond_dbase_work )
                 }
 
             } while ( (ptr = ptr->next) );
@@ -374,7 +371,7 @@ treeviews_selection_loeschen_foreach( SondTreeview* tree_view, GtkTreeIter* iter
         }
 
         rc = zond_dbase_remove_node( s_selection->zond->dbase_zond->zond_dbase_work, baum, node_id, errmsg );
-        if ( rc ) ERROR_SOND ( "zond_dbase_remove_node" )
+        if ( rc ) ERROR_S
 
         zond_tree_store_remove( iter );
     }//... Gesamt-Links
@@ -382,19 +379,19 @@ treeviews_selection_loeschen_foreach( SondTreeview* tree_view, GtkTreeIter* iter
     {
         gint rc = 0;
 
-        rc = dbase_begin( (DBase*) s_selection->zond->dbase_zond->dbase_work, errmsg );
-        if ( rc ) ERROR_SOND( "dbase_begin" )
+        rc = zond_dbase_begin( s_selection->zond->dbase_zond->zond_dbase_work, errmsg );
+        if ( rc ) ERROR_S
 
         rc = zond_dbase_remove_link( s_selection->zond->dbase_zond->zond_dbase_work,
                 sond_treeview_get_id( tree_view ), head_nr, errmsg );
-        if ( rc ) ERROR_SOND("zond_dbase_remove_link" )
+        if ( rc ) ERROR_S
 
         rc = zond_dbase_remove_node( s_selection->zond->dbase_zond->zond_dbase_work,
                 sond_treeview_get_id( tree_view ), head_nr, errmsg );
-        if ( rc ) ERROR_ROLLBACK( (DBase*) s_selection->zond->dbase_zond->dbase_work, "zond_dbase_remove_node" )
+        if ( rc ) ERROR_ROLLBACK( s_selection->zond->dbase_zond->zond_dbase_work )
 
-        rc = dbase_commit( (DBase*) s_selection->zond->dbase_zond->dbase_work, errmsg );
-        if ( rc ) ERROR_ROLLBACK( (DBase*) s_selection->zond->dbase_zond->dbase_work, "dbase_commit" )
+        rc = zond_dbase_commit( s_selection->zond->dbase_zond->zond_dbase_work, errmsg );
+        if ( rc ) ERROR_ROLLBACK( s_selection->zond->dbase_zond->zond_dbase_work  )
 
         zond_tree_store_remove_link( ZOND_TREE_STORE(gtk_tree_view_get_model(
         GTK_TREE_VIEW(tree_view) )), iter );
@@ -414,7 +411,7 @@ treeviews_selection_loeschen( Projekt* zond, Baum baum_active, gchar** errmsg )
 
     rc = sond_treeview_selection_foreach( zond->treeview[baum_active],
             treeviews_selection_loeschen_foreach, &s_selection, errmsg );
-    if ( rc == -1 ) ERROR_SOND( "sond_treeview_selection_foreach" )
+    if ( rc == -1 ) ERROR_S
 
     return 0;
 }
@@ -500,7 +497,7 @@ treeviews_selection_set_node_text_foreach( SondTreeview* stv, GtkTreeIter* iter,
     if ( rc )
     {
         g_free( node_text );
-        ERROR_SOND( "zond_dbase_set_node_text" )
+        ERROR_S
     }
 
     //neuen text im tree speichern
@@ -520,7 +517,7 @@ treeviews_selection_set_node_text( Projekt* zond, Baum baum_active, gchar** errm
 
     rc = sond_treeview_selection_foreach( zond->treeview[baum_active],
             treeviews_selection_set_node_text_foreach, zond, errmsg );
-    if ( rc ) ERROR_SOND( "sond_treeview_selection_foreach" )
+    if ( rc ) ERROR_S
 
     return 0;
 }
@@ -573,7 +570,7 @@ treeviews_insert_node( Projekt* zond, Baum baum_active, gboolean child, gchar** 
         gint rc = 0;
 
         rc = treeviews_hat_vorfahre_datei( zond, baum, node_id, child, errmsg );
-        if ( rc == -1 ) ERROR_SOND( "hat_vorfahre_datei" )
+        if ( rc == -1 ) ERROR_S
         else if ( rc == 1 )
         {
             display_message( zond->app_window, "Einfügen als Unterpunkt von Datei nicht zulässig", NULL );
@@ -582,16 +579,16 @@ treeviews_insert_node( Projekt* zond, Baum baum_active, gboolean child, gchar** 
         }
     }
 
-    rc = dbase_begin( (DBase*) zond->dbase_zond->dbase_work, errmsg );
-    if ( rc ) ERROR_SOND( "dbase_begin" )
+    rc = zond_dbase_begin( zond->dbase_zond->zond_dbase_work, errmsg );
+    if ( rc ) ERROR_S
 
     //Knoten in Datenbank einfügen
     node_id_new = zond_dbase_insert_node( zond->dbase_zond->zond_dbase_work, baum,
             node_id, child, zond->icon[ICON_NORMAL].icon_name, "Neuer Punkt", errmsg );
-    if ( node_id_new == -1 ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "zond_dbase_insert_node" )
+    if ( node_id_new == -1 ) ERROR_ROLLBACK( zond->dbase_zond->zond_dbase_work )
 
-    rc = dbase_commit( (DBase*) zond->dbase_zond->dbase_work, errmsg );
-    if ( rc ) ERROR_ROLLBACK( (DBase*) zond->dbase_zond->dbase_work, "dbase_commit" )
+    rc = zond_dbase_commit( zond->dbase_zond->zond_dbase_work, errmsg );
+    if ( rc ) ERROR_ROLLBACK( zond->dbase_zond->zond_dbase_work )
 
     //Knoten in baum_inhalt einfuegen
     //success = sond_treeview_get_cursor( zond->treeview[baum], &iter ); - falsch!!!
@@ -942,24 +939,21 @@ treeviews_paste_clipboard_as_link_foreach( SondTreeview* tree_view, GtkTreeIter*
     rc = treeviews_get_baum_and_node_id( s_selection->zond, iter, &baum, &node_id );
     if ( rc ) ERROR_S_MESSAGE( "Bei treeviews_get_baum_and_node_id:\nKein Baum gefunden" )
 
-    rc = dbase_begin( (DBase*) s_selection->zond->dbase_zond->dbase_work, errmsg );
+    rc = zond_dbase_begin( s_selection->zond->dbase_zond->zond_dbase_work, errmsg );
     if ( rc ) ERROR_S
 
     node_new = zond_dbase_insert_node( s_selection->zond->dbase_zond->zond_dbase_work,
             s_selection->baum_dest, s_selection->anchor_id, s_selection->kind, NULL,
             NULL, errmsg );
-    if ( node_new < 0 ) ERROR_ROLLBACK( (DBase*) s_selection->zond->dbase_zond->dbase_work,
-            "zond_dbase_insert_node" )
+    if ( node_new < 0 ) ERROR_ROLLBACK( s_selection->zond->dbase_zond->zond_dbase_work )
 
     rc = zond_dbase_set_link( s_selection->zond->dbase_zond->zond_dbase_work,
             s_selection->baum_dest, node_new, NULL, sond_treeview_get_id( tree_view ),
             node_id, errmsg );
-    if ( rc ) ERROR_ROLLBACK( (DBase*) s_selection->zond->dbase_zond->dbase_work,
-            "zond_dbase_set_link" )
+    if ( rc ) ERROR_ROLLBACK( s_selection->zond->dbase_zond->zond_dbase_work )
 
-    rc = dbase_commit( (DBase*) s_selection->zond->dbase_zond->dbase_work, errmsg );
-    if ( rc ) ERROR_ROLLBACK( (DBase*) s_selection->zond->dbase_zond->dbase_work,
-            "dbase_commit" )
+    rc = zond_dbase_commit( s_selection->zond->dbase_zond->zond_dbase_work, errmsg );
+    if ( rc ) ERROR_ROLLBACK( s_selection->zond->dbase_zond->zond_dbase_work )
 
     tree_store_dest = ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(s_selection->zond->treeview[s_selection->baum_dest]) ));
     zond_tree_store_insert_link( iter->user_data, node_new, tree_store_dest,
@@ -1028,12 +1022,12 @@ treeviews_clipboard_kopieren_db( Projekt* zond, gboolean with_younger_siblings, 
     gint younger_sibling_id = 0;
     younger_sibling_id = zond_dbase_get_younger_sibling( zond->dbase_zond->zond_dbase_work, baum_von, node_von,
             errmsg );
-    if ( younger_sibling_id < 0 ) ERROR_SOND( "zond_dbase_get_younger_sibling" )
+    if ( younger_sibling_id < 0 ) ERROR_S
     if ( younger_sibling_id > 0 && with_younger_siblings )
     {
         rc = treeviews_clipboard_kopieren_db( zond, TRUE, baum_von,
                 younger_sibling_id, new_node_id, FALSE, errmsg );
-        if ( rc == -1 ) ERROR_SOND( "selection_copy_node_db" )
+        if ( rc == -1 ) ERROR_S
     }
 
     return new_node_id;
@@ -1054,22 +1048,19 @@ treeviews_clipboard_kopieren_foreach( SondTreeview* tree_view, GtkTreeIter* iter
     rc = treeviews_get_baum_and_node_id( s_selection->zond, iter, &baum, &node_id );
     if ( rc ) ERROR_S_MESSAGE( "Bei treeviews_get_baum_and_node_id:\nKein Baum gefunden" )
 
-    rc = dbase_begin( (DBase*) s_selection->zond->dbase_zond->dbase_work, errmsg );
+    rc = zond_dbase_begin( s_selection->zond->dbase_zond->zond_dbase_work, errmsg );
     if ( rc ) ERROR_S
 
     new_node_id = treeviews_clipboard_kopieren_db( s_selection->zond, FALSE, baum,
             node_id, s_selection->anchor_id, s_selection->kind, errmsg );
-    if ( new_node_id == -1 ) ERROR_ROLLBACK( (DBase*) s_selection->zond->dbase_zond->dbase_work,
-            "selection_copy_node_db (urspr. Aufruf)" )
+    if ( new_node_id == -1 ) ERROR_ROLLBACK( s_selection->zond->dbase_zond->zond_dbase_work )
 
     rc = treeviews_db_to_baum_rec( s_selection->zond, FALSE,
             BAUM_AUSWERTUNG, new_node_id, (s_selection->anchor_id) ? s_selection->iter_dest : NULL, s_selection->kind, &iter_new, errmsg );
-    if ( rc ) ERROR_ROLLBACK( (DBase*) s_selection->zond->dbase_zond->dbase_work,
-            "db_baum_knoten_mit_kindern (urspr. Aufruf)" )
+    if ( rc ) ERROR_ROLLBACK( s_selection->zond->dbase_zond->zond_dbase_work )
 
-    rc = dbase_commit( (DBase*) s_selection->zond->dbase_zond->dbase_work, errmsg );
-    if ( rc ) ERROR_ROLLBACK( (DBase*) s_selection->zond->dbase_zond->dbase_work,
-            "db_commit" )
+    rc = zond_dbase_commit( s_selection->zond->dbase_zond->zond_dbase_work, errmsg );
+    if ( rc ) ERROR_ROLLBACK( s_selection->zond->dbase_zond->zond_dbase_work )
 
     *(s_selection->iter_dest) = iter_new;
     s_selection->anchor_id = new_node_id;

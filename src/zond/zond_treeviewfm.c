@@ -1,7 +1,7 @@
 #include "zond_treeviewfm.h"
 
 #include "../misc.h"
-#include "../dbase.h"
+#include "zond_dbase.h"
 #include "../eingang.h"
 #include "../sond_treeviewfm.h"
 
@@ -83,14 +83,14 @@ zond_treeviewfm_dbase_begin( SondTreeviewFM* stvfm, gchar** errmsg )
     gint rc = 0;
 
     ZondTreeviewFMPrivate* priv = zond_treeviewfm_get_instance_private( ZOND_TREEVIEWFM(stvfm) );
-    DBase* dbase_work = sond_treeviewfm_get_dbase( stvfm );
-    DBase* dbase_store = (DBase*) priv->zond->dbase_zond->dbase_store;
+    ZondDBase* dbase_work = sond_treeviewfm_get_dbase( stvfm );
+    ZondDBase* dbase_store = priv->zond->dbase_zond->zond_dbase_store;
 
     rc = SOND_TREEVIEWFM_CLASS(zond_treeviewfm_parent_class)->dbase_begin( SOND_TREEVIEWFM(stvfm), errmsg );
-    if ( rc ) ERROR_SOND( "dbase_begin (work)" )
+    if ( rc ) ERROR_S
 
-    rc = dbase_begin( (DBase*) dbase_store, errmsg );
-    if ( rc ) ERROR_ROLLBACK ( dbase_work, "dbase_begin (store)" ) //dbase_store
+    rc = zond_dbase_begin( dbase_store, errmsg );
+    if ( rc ) ERROR_ROLLBACK ( dbase_work ) //dbase_store
 
     return 0;
 }
@@ -103,15 +103,15 @@ zond_treeviewfm_dbase_test( SondTreeviewFM* stvfm, const gchar* rel_path_source,
     gint rc = 0;
 
     ZondTreeviewFMPrivate* priv = zond_treeviewfm_get_instance_private( ZOND_TREEVIEWFM(stvfm) );
-    DBase* dbase = sond_treeviewfm_get_dbase( stvfm );
-    DBase* dbase_work = (DBase*) priv->zond->dbase_zond->dbase_work;
+    ZondDBase* dbase_store = sond_treeviewfm_get_dbase( stvfm );
+    ZondDBase* dbase_work = priv->zond->dbase_zond->zond_dbase_work;
 
-    rc = dbase_test_path( dbase, rel_path_source, errmsg );
-    if ( rc == -1 ) ERROR_SOND( "dbase_test_path" )
+    rc = zond_dbase_test_path( dbase_store, rel_path_source, errmsg );
+    if ( rc == -1 ) ERROR_S
     else if ( rc == 1 ) return 1;
 
-    rc = dbase_test_path( dbase_work, rel_path_source, errmsg );
-    if ( rc == -1 ) ERROR_SOND( "dbase_test (work)" )
+    rc = zond_dbase_test_path( dbase_work, rel_path_source, errmsg );
+    if ( rc == -1 ) ERROR_S
     else if ( rc == 1 ) return 1;
 
     return 0;
@@ -127,13 +127,13 @@ zond_treeviewfm_dbase_update_path( SondTreeviewFM* stvfm,
 
     ZondTreeviewFMPrivate* priv = zond_treeviewfm_get_instance_private( ZOND_TREEVIEWFM(stvfm) );
 
-    DBase* dbase_work = sond_treeviewfm_get_dbase( stvfm );
-    DBase* dbase = (DBase*)  priv->zond->dbase_zond->dbase_store;
+    ZondDBase* dbase_work = sond_treeviewfm_get_dbase( stvfm );
+    ZondDBase* dbase_store = priv->zond->dbase_zond->zond_dbase_store;
 
-    rc1 = dbase_update_path( dbase, rel_path_source, rel_path_dest, errmsg );
-    rc2 = dbase_update_path( dbase_work, rel_path_source, rel_path_dest, errmsg );
+    rc1 = zond_dbase_update_path( dbase_store, rel_path_source, rel_path_dest, errmsg );
+    rc2 = zond_dbase_update_path( dbase_work, rel_path_source, rel_path_dest, errmsg );
 
-    if ( rc1 || rc2 ) ERROR_ROLLBACK_BOTH( "dbase_update_path" )
+    if ( rc1 || rc2 ) ERROR_ROLLBACK_BOTH( dbase_work, dbase_store )
 
     return 0;
 }
@@ -149,13 +149,13 @@ zond_treeviewfm_dbase_update_eingang( SondTreeviewFM* stvfm,
 
     ZondTreeviewFMPrivate* priv = zond_treeviewfm_get_instance_private( ZOND_TREEVIEWFM(stvfm) );
 
-    DBase* dbase_work = sond_treeviewfm_get_dbase( stvfm );
-    DBase* dbase = (DBase*)  priv->zond->dbase_zond->dbase_store;
+    ZondDBase* dbase_work = sond_treeviewfm_get_dbase( stvfm );
+    ZondDBase* dbase_store = priv->zond->dbase_zond->zond_dbase_store;
 
-    rc1 = eingang_update_rel_path( dbase, rel_path_source, dbase, rel_path_dest, del, errmsg );
+    rc1 = eingang_update_rel_path( dbase_store, rel_path_source, dbase_store, rel_path_dest, del, errmsg );
     rc2 = eingang_update_rel_path( dbase_work, rel_path_source, dbase_work, rel_path_dest, del, errmsg );
 
-    if ( rc1 || rc2 ) ERROR_ROLLBACK_BOTH( "eingang_update_path" )
+    if ( rc1 || rc2 ) ERROR_ROLLBACK_BOTH( dbase_work, dbase_store )
 
     return 0;
 }
@@ -168,17 +168,26 @@ zond_treeviewfm_dbase_end( SondTreeviewFM* stvfm, gboolean suc, gchar** errmsg )
 
     ZondTreeviewFMPrivate* priv = zond_treeviewfm_get_instance_private( ZOND_TREEVIEWFM(stvfm) );
 
+    ZondDBase* dbase_work = sond_treeviewfm_get_dbase( stvfm );
+    ZondDBase* dbase_store = priv->zond->dbase_zond->zond_dbase_store;
+
     rc = SOND_TREEVIEWFM_CLASS(zond_treeviewfm_parent_class)->dbase_end( stvfm, suc, errmsg );
-    if ( rc == -1 ) ERROR_ROLLBACK( (DBase*) priv->zond->dbase_zond->dbase_store,"dbase_end (work)" )
+    if ( rc == -1 ) ERROR_ROLLBACK_BOTH( dbase_work, dbase_store )
 
     if ( suc )
     {
         gint rc = 0;
 
-        rc = dbase_commit( (DBase*) priv->zond->dbase_zond->dbase_store, errmsg );
-        if ( rc ) ERROR_ROLLBACK( (DBase*) priv->zond->dbase_zond->dbase_store, "dbase_commit (store)" )
+        rc = zond_dbase_commit( priv->zond->dbase_zond->zond_dbase_store, errmsg );
+        if ( rc ) ERROR_ROLLBACK_BOTH( dbase_work, dbase_store )
     }
-    else ROLLBACK( (DBase*) priv->zond->dbase_zond->dbase_store )
+    else
+    {
+        gint rc = 0;
+
+        rc = zond_dbase_rollback( dbase_store, errmsg );
+        if ( rc ) ERROR_S
+    }
 
     return 0;
 }

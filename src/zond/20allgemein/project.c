@@ -148,19 +148,8 @@ project_create_dbase_zond( Projekt* zond, const gchar* path, gboolean create,
             (void*) project_set_changed, (gpointer) zond );
 
 
-    DBase* dbase_store = NULL;
-    DBase* dbase_work = NULL;
-
-    rc = dbase_create_with_stmts( path, &dbase_store, zond_dbase_get_dbase( zond_dbase_store ), errmsg );
-    if ( rc == -1 ) ERROR_SOND( "dbase_create_with_stmts" )
-
-    rc = dbase_create_with_stmts( path, &dbase_work, zond_dbase_get_dbase( zond_dbase_work ), errmsg );
-    if ( rc == -1 ) ERROR_SOND( "dbase_create_with_stmts" )
-
     *dbase_zond = g_malloc0( sizeof( DBaseZond ) );
 
-    (*dbase_zond)->dbase_store = dbase_store;
-    (*dbase_zond)->dbase_work = dbase_work;
     (*dbase_zond)->zond_dbase_store = zond_dbase_store;
     (*dbase_zond)->zond_dbase_work = zond_dbase_work;
     (*dbase_zond)->project_name = g_strdup( strrchr( path, '/' ) + 1 );
@@ -199,8 +188,6 @@ projekt_aktivieren( Projekt* zond )
 static void
 project_clear_dbase_zond( DBaseZond** dbase_zond )
 {
-    g_free( (*dbase_zond)->dbase_store );
-
     g_free( (*dbase_zond)->project_dir );
     g_free( (*dbase_zond)->project_name );
 
@@ -377,7 +364,7 @@ project_oeffnen( Projekt* zond, const gchar* abs_path, gboolean create,
     if ( rc ) ERROR_S
 
     sond_treeviewfm_set_dbase( SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
-            (DBase*) dbase_zond->dbase_work );
+            dbase_zond->zond_dbase_work );
 
     zond->dbase_zond = dbase_zond;
     rc = sond_treeviewfm_set_root( SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),

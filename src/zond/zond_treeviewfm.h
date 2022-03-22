@@ -9,31 +9,31 @@
 #include "20allgemein/project.h"
 
 
-#define ERROR_ROLLBACK_BOTH(x) \
+#define ERROR_ROLLBACK_BOTH(zond_dbase_work,zond_dbase_store) \
           { if ( errmsg ) *errmsg = add_string( \
-            g_strdup( "Bei Aufruf " x ":\n" ), *errmsg ); \
+            g_strconcat( "Bei Aufruf ", __func__, ":\n", NULL ), *errmsg ); \
             \
             gint rc_rollback1 = 0; \
             gint rc_rollback2 = 0; \
             gchar* err_rollback = NULL; \
             \
-            rc_rollback1 = dbase_rollback( dbase, &err_rollback ); \
+            rc_rollback1 = zond_dbase_rollback( zond_dbase_work, &err_rollback ); \
             if ( errmsg ) \
             { \
                 if ( !rc_rollback1 ) *errmsg = add_string( *errmsg, \
                         g_strdup( "\n\nRollback dbase_store durchgeführt" ) ); \
                 else *errmsg = add_string( *errmsg, g_strconcat( "\n\nRollback " \
-                        "dbase_store fehlgeschlagen\n\nBei Aufruf dbase_rollback:\n", \
+                        "zond_dbase_work fehlgeschlagen\n\nBei Aufruf dbase_rollback:\n", \
                         err_rollback, NULL ) ); \
             } \
             g_free( err_rollback ); \
             \
-            rc_rollback2 = dbase_rollback( dbase_work, &err_rollback ); \
+            rc_rollback2 = zond_dbase_rollback( zond_dbase_store, &err_rollback ); \
             { \
                 if ( !rc_rollback2 ) *errmsg = add_string( *errmsg, \
                         g_strdup( "\n\nRollback dbase_work durchgeführt" ) ); \
                 else *errmsg = add_string( *errmsg, g_strconcat( "\n\nRollback " \
-                        "dbase_work fehlgeschlagen\n\nBei Aufruf dbase_rollback:\n", \
+                        "zond_dbase_store fehlgeschlagen\n\nBei Aufruf dbase_rollback:\n", \
                         err_rollback, NULL ) ); \
             } \
             g_free( err_rollback ); \
