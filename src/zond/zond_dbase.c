@@ -280,6 +280,21 @@ zond_dbase_create_db( sqlite3* db, gchar** errmsg )
             "baum_id_target INTEGER, "
             "node_id_target INTEGER "
             " ); "
+<<<<<<< HEAD
+=======
+
+            "CREATE TRIGGER delete_links_baum_inhalt_trigger BEFORE DELETE ON baum_inhalt "
+            "WHEN old.node_id=(SELECT node_id FROM links WHERE node_id=old.node_id AND baum_id=1) "
+            "BEGIN "
+            "DELETE FROM links WHERE node_id=old.node_id AND baum_id=1; "
+            "END; "
+
+            "CREATE TRIGGER delete_links_baum_auswertung_trigger BEFORE DELETE ON baum_auswertung "
+            "WHEN old.node_id=(SELECT node_id FROM links WHERE node_id=old.node_id AND baum_id=2) "
+            "BEGIN "
+            "DELETE FROM links WHERE node_id=old.node_id AND baum_id=2; "
+            "END; "
+>>>>>>> dev
 */            ;
 
     rc = sqlite3_exec( db, sql, NULL, NULL, &errmsg_ii );

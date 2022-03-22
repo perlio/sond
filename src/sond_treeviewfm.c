@@ -157,14 +157,14 @@ sond_treeviewfm_dbase( SondTreeviewFM* stvfm, gint mode, const gchar* rel_path_s
                 rel_path_source, rel_path_dest, errmsg );
         if ( rc ) ERROR_SOND( "dbase_update_path" )
     }
-
+/*
     if ( mode == 1 || mode == 2 )
     {
         rc = SOND_TREEVIEWFM_GET_CLASS(stvfm)->dbase_update_eingang( stvfm,
                 rel_path_source, rel_path_dest, (gboolean) mode - 1, errmsg );
-        if ( rc ) ERROR_SOND( "dbase_update_eingang" )
+        if ( rc ) ERROR_S
     }
-
+*/
     return 0;
 }
 
