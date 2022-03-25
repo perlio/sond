@@ -30,6 +30,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 typedef enum
 {
     PROP_PATH = 1,
+    PROP_PASSWORD,
     N_PROPERTIES
 } ZondPdfDocumentProperty;
 
@@ -38,6 +39,7 @@ typedef struct
     GMutex mutex_doc;
     fz_context* ctx;
     pdf_document* doc;
+    gchar* password;
     gboolean dirty;
     gchar* path;
     GPtrArray* pages; //array von DocumentPage*
@@ -62,6 +64,10 @@ zond_pdf_document_set_property (GObject      *object,
       priv->path = g_strdup( g_value_get_string(value) );
       break;
 
+    case PROP_PASSWORD:
+      priv->password = g_strdup( g_value_get_string(value) );
+      break;
+
     default:
       /* We don't have any other property... */
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
@@ -83,6 +89,10 @@ zond_pdf_document_get_property (GObject    *object,
     {
         case PROP_PATH:
                 g_value_set_string( value, priv->path );
+                break;
+
+        case PROP_PASSWORD:
+                g_value_set_string( value, priv->password );
                 break;
 
         default:
@@ -349,6 +359,14 @@ zond_pdf_document_constructed( GObject* self )
         return;
     }
 
+    if ( pdf_needs_password( priv->ctx, priv->doc ) )
+    {
+        priv->errmsg = g_strdup( "Password erforderlich" );
+        G_OBJECT_CLASS(zond_pdf_document_parent_class)->constructed( self );
+
+        return;
+    }
+
     number_of_pages = pdf_count_pages( priv->ctx, priv->doc );
     if ( number_of_pages == 0 )
     {
@@ -387,6 +405,13 @@ zond_pdf_document_class_init( ZondPdfDocumentClass* klass )
                                  "Pfad zur Datei.",
                                  NULL,
                                   G_PARAM_CONSTRUCT | G_PARAM_READWRITE);
+
+    obj_properties[PROP_PASSWORD] =
+            g_param_spec_string( "password",
+                                 "gchar*",
+                                 "Passwort.",
+                                 NULL,
+                                  G_PARAM_CONSTRUCT | G_PARAM_WRITABLE );
 
     g_object_class_install_properties(object_class,
                                       N_PROPERTIES,
@@ -498,7 +523,7 @@ zond_pdf_document_init( ZondPdfDocument* self )
 
 
 ZondPdfDocument*
-zond_pdf_document_open( const gchar* path, gint von, gint bis, gchar** errmsg )
+zond_pdf_document_open( const gchar* path, const gchar* password, gint von, gint bis, gchar** errmsg )
 {
     gint rc = 0;
     ZondPdfDocument* zond_pdf_document = NULL;
@@ -525,7 +550,7 @@ zond_pdf_document_open( const gchar* path, gint von, gint bis, gchar** errmsg )
         }
     }
 
-    zond_pdf_document = g_object_new( ZOND_TYPE_PDF_DOCUMENT, "path", path, NULL );
+    zond_pdf_document = g_object_new( ZOND_TYPE_PDF_DOCUMENT, "path", path, "password", password, NULL );
 
     priv = zond_pdf_document_get_instance_private( zond_pdf_document );
     if ( priv->errmsg )
@@ -639,7 +664,7 @@ zond_pdf_document_save( ZondPdfDocument* self, gchar** errmsg )
                 4, // do_garbage
                 0, // do_linear
                 1, // do_clean
-                0, // do_sanitize
+                1, // do_sanitize
                 0, // do_appearance
                 0, // do_encrypt
                 0, // dont_regenerate_id  Don't regenerate ID if set (used for clean)
@@ -678,7 +703,7 @@ zond_pdf_document_save( ZondPdfDocument* self, gchar** errmsg )
         fz_catch( priv->ctx ) ERROR_MUPDF( "fz_save_buffer" )
 
         rc = zond_pdf_document_reopen_doc_and_pages( self, errmsg );
-        if ( rc ) ERROR_SOND( "zond_pdf_document_reopen_doc_pages" )
+        if ( rc ) ERROR_S
 
         priv->dirty = FALSE;
     }
@@ -827,7 +852,7 @@ zond_pdf_document_page_refresh( ZondPdfDocument* self, gint page_doc,
     pdf_document_page->display_list = NULL;
 
     rc = zond_pdf_document_load_page( self, page_doc, errmsg );
-    if ( rc == -1 ) ERROR_SOND( "zond_pdf_document_load_page" )
+    if ( rc == -1 ) ERROR_S
 
     if ( flags & 1 )
     {
@@ -859,7 +884,7 @@ zond_pdf_document_insert_pages( ZondPdfDocument* zond_pdf_document, gint pos,
     //einfügen in doc
     rc = pdf_copy_page( ctx, pdf_doc, 0, pdf_count_pages( ctx, pdf_doc ) - 1,
             zond_pdf_document_get_pdf_doc( zond_pdf_document ), pos, errmsg );
-    if ( rc ) ERROR_SOND( "pdf_copy-page" )
+    if ( rc ) ERROR_S
 
     for ( gint i = 0; i < count; i++ )
     {
@@ -868,7 +893,7 @@ zond_pdf_document_insert_pages( ZondPdfDocument* zond_pdf_document, gint pos,
         g_ptr_array_insert( priv->pages, pos + i, NULL );
 
         rc = zond_pdf_document_page_init( zond_pdf_document, pos + i, errmsg );
-        if ( rc == -1 ) ERROR_SOND( "zond_pdf_document_page_init" )
+        if ( rc == -1 ) ERROR_S
     }
 
     for ( gint i = pos + count; i < priv->pages->len; i++ )
@@ -876,7 +901,7 @@ zond_pdf_document_insert_pages( ZondPdfDocument* zond_pdf_document, gint pos,
         gint rc = 0;
 
         rc = zond_pdf_document_page_refresh( zond_pdf_document, i, 2, errmsg );
-        if ( rc == -1 ) ERROR_SOND( "zond_pdf_document_page_refresh" )
+        if ( rc == -1 ) ERROR_S
     }
 
     return 0;

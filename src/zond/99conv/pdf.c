@@ -17,7 +17,7 @@ pdf_document_get_dest( fz_context* ctx, pdf_document* doc, gint page_doc,
     pdf_obj* obj_dest_tree = NULL;
     pdf_obj* obj_key = NULL;
     pdf_obj* obj_val = NULL;
-    pdf_obj* obj_array = NULL;
+    pdf_obj* obj_val_resolved = NULL;
     pdf_obj* obj_page = NULL;
     gint num = 0;
     const gchar* dest_found = NULL;
@@ -31,7 +31,7 @@ pdf_document_get_dest( fz_context* ctx, pdf_document* doc, gint page_doc,
         obj_key = pdf_dict_get_key( ctx, obj_dest_tree, i );
         obj_val = pdf_dict_get_val( ctx, obj_dest_tree, i );
 
-        fz_try( ctx ) obj_array = pdf_resolve_indirect( ctx, obj_val );
+        fz_try( ctx ) obj_val_resolved = pdf_resolve_indirect( ctx, obj_val );
         fz_catch( ctx )
         {
             pdf_drop_obj( ctx, obj_dest_tree );
@@ -39,7 +39,21 @@ pdf_document_get_dest( fz_context* ctx, pdf_document* doc, gint page_doc,
             ERROR_MUPDF( "pdf_resolve_indirect" )
         }
 
-        obj_page = pdf_array_get( ctx, obj_array, 0 );
+        //Altmodische PDF verweisen im NameTree auf ein Dict mit dem Schlüssel /D
+        if ( pdf_is_array( ctx, obj_val_resolved ) ) obj_page =
+                pdf_array_get( ctx, obj_val_resolved, 0 );
+        else if ( pdf_is_dict( ctx, obj_val_resolved ) )
+        {
+            pdf_obj* obj_array = NULL;
+
+            obj_array = pdf_dict_get( ctx, obj_val_resolved, PDF_NAME(D) );
+            obj_page = pdf_array_get( ctx, obj_array, 0 );
+        }
+        else //Name-Tree-Val ist weder array noch dict - es widerspricht der obersten Direktive
+        {
+            pdf_drop_obj( ctx, obj_dest_tree );
+            ERROR_S_MESSAGE( "NamedTree für NamedDests irregulär" )
+        }
 
         fz_try( ctx ) num = pdf_lookup_page_number( ctx, doc, obj_page );
         fz_catch( ctx )
@@ -172,10 +186,31 @@ pdf_clean( fz_context* ctx, const gchar* rel_path, gchar** errmsg )
 {
     gchar* path_tmp = NULL;
     pdf_document* doc = NULL;
-
+/*
     pdf_write_options opts = {
             0, // do_incremental
-            1, // do_pretty
+            0, // do_pretty
+            0, // do_ascii
+            0, // do_compress
+            0, // do_compress_images
+            0, // do_compress_fonts
+            0, // do_decompress
+            0, // do_garbage
+            0, // do_linear
+            0, // do_clean
+            0, // do_sanitize
+            0, // do_appearance
+            PDF_ENCRYPT_NONE, // do_encrypt
+            0, // dont_regenerate_id  Don't regenerate ID if set (used for clean)
+            ~0, // permissions
+            "", // opwd_utf8[128]
+            "", // upwd_utf8[128]
+            0 //do snapshot
+            };
+*/
+    pdf_write_options opts = {
+            0, // do_incremental
+            0, // do_pretty
             1, // do_ascii
             0, // do_compress
             1, // do_compress_images
@@ -184,9 +219,9 @@ pdf_clean( fz_context* ctx, const gchar* rel_path, gchar** errmsg )
             4, // do_garbage
             0, // do_linear
             1, // do_clean
-            0, // do_sanitize
+            1, // do_sanitize
             0, // do_appearance
-            0, // do_encrypt
+            PDF_ENCRYPT_NONE, // do_encrypt
             0, // dont_regenerate_id  Don't regenerate ID if set (used for clean)
             ~0, // permissions
             "", // opwd_utf8[128]
@@ -199,6 +234,16 @@ pdf_clean( fz_context* ctx, const gchar* rel_path, gchar** errmsg )
 
     fz_try( ctx ) doc = pdf_open_document( ctx, rel_path );
     fz_catch( ctx ) ERROR_MUPDF( "pdf_document_open" )
+
+    printf("%12x\n", pdf_document_permissions( ctx, doc ) );
+    printf("%i\n", pdf_authenticate_password( ctx, doc, "" ) );
+    if ( pdf_needs_password( ctx, doc ) )
+    {
+        pdf_drop_document( ctx, doc );
+        ERROR_S_MESSAGE( "Dokument ist passwortgesichert" )
+    }
+//        if ( !pdf_authenticate_password( ctx, doc, password))
+//				fz_throw(glo.ctx, FZ_ERROR_GENERIC, "cannot authenticate password: %s", infile);
 
     fz_try( ctx ) pdf_clean_document( ctx, doc );
     fz_catch( ctx )

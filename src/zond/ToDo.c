@@ -6,6 +6,7 @@ ToDo:
     - Riesen-PDFs handhabbar machen
     - Markieren über mehrere Seiten
     - Kommentare
+    - Passwörter
 
 - Synchron-Punkte
 
