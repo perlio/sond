@@ -1793,7 +1793,7 @@ pdf_ocr_pages( Projekt* zond, InfoWindow* info_window, GPtrArray* arr_document_p
     ctx = zond->ctx;
 
     //doc mit text öffnen
-    fz_try( ctx ) doc_text = pdf_open_document( ctx, path_tmp );
+    fz_try( ctx ) doc_text = pdf_open_document( ctx, path_tmp );//keine Passwortabfrage
     fz_always( ctx ) g_free( path_tmp );
     fz_catch( ctx ) ERROR_MUPDF( "pdf_open_document" )
 

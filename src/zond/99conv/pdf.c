@@ -1,8 +1,7 @@
-#include <mupdf/fitz.h>
-#include <mupdf/pdf.h>
+#include "pdf.h"
+
 #include <glib/gstdio.h>
 
-#include "pdf.h"
 #include "../zond_pdf_document.h"
 
 #include "../../misc.h"
@@ -28,8 +27,11 @@ pdf_document_get_dest( fz_context* ctx, pdf_document* doc, gint page_doc,
 
     for ( gint i = 0; i < pdf_dict_len( ctx, obj_dest_tree ); i++ )
     {
-        obj_key = pdf_dict_get_key( ctx, obj_dest_tree, i );
-        obj_val = pdf_dict_get_val( ctx, obj_dest_tree, i );
+        fz_try( ctx ) obj_key = pdf_dict_get_key( ctx, obj_dest_tree, i );
+        fz_catch( ctx ) ERROR_MUPDF( "pdf_dict_get_key" )
+
+        fz_try( ctx ) obj_val = pdf_dict_get_val( ctx, obj_dest_tree, i );
+        fz_catch( ctx ) ERROR_MUPDF( "pdf_dict_get_val" )
 
         fz_try( ctx ) obj_val_resolved = pdf_resolve_indirect( ctx, obj_val );
         fz_catch( ctx )
@@ -182,68 +184,55 @@ pdf_copy_page( fz_context* ctx, pdf_document* doc_src, gint page_from,
 
 
 gint
+pdf_open_and_authen_document( fz_context* ctx, gboolean prompt,
+        const gchar* path, gchar** password, pdf_document** doc, gint* auth,
+        gchar** errmsg )
+{
+    gchar* password_try = NULL;
+
+    fz_try( ctx ) *doc = pdf_open_document( ctx, path );
+    fz_catch( ctx ) ERROR_MUPDF( "pdf_open_document" )
+
+    if ( password ) password_try = *password;
+
+    do
+    {
+        gint res_auth = 0;
+        gint res_dialog = 0;
+
+        res_auth = pdf_authenticate_password( ctx, *doc, password_try );
+        if ( res_auth ) //erfolgreich!
+        {
+            if ( auth ) *auth = res_auth;
+            if ( password ) *password = password_try;
+            break;
+        }
+        else if ( !prompt ) return 1;
+
+        res_dialog = dialog_with_buttons( NULL, path, "Passwort eingeben:",
+                &password_try, "Ok", GTK_RESPONSE_OK, "Abbrechen",
+                GTK_RESPONSE_CANCEL, NULL );
+        if ( res_dialog != GTK_RESPONSE_OK ) return 1; //Abbruch
+    } while ( 1 );
+
+    return 0;
+}
+
+
+gint
 pdf_clean( fz_context* ctx, const gchar* rel_path, gchar** errmsg )
 {
     gchar* path_tmp = NULL;
     pdf_document* doc = NULL;
-/*
-    pdf_write_options opts = {
-            0, // do_incremental
-            0, // do_pretty
-            0, // do_ascii
-            0, // do_compress
-            0, // do_compress_images
-            0, // do_compress_fonts
-            0, // do_decompress
-            0, // do_garbage
-            0, // do_linear
-            0, // do_clean
-            0, // do_sanitize
-            0, // do_appearance
-            PDF_ENCRYPT_NONE, // do_encrypt
-            0, // dont_regenerate_id  Don't regenerate ID if set (used for clean)
-            ~0, // permissions
-            "", // opwd_utf8[128]
-            "", // upwd_utf8[128]
-            0 //do snapshot
-            };
-*/
-    pdf_write_options opts = {
-            0, // do_incremental
-            0, // do_pretty
-            1, // do_ascii
-            0, // do_compress
-            1, // do_compress_images
-            1, // do_compress_fonts
-            0, // do_decompress
-            4, // do_garbage
-            0, // do_linear
-            1, // do_clean
-            1, // do_sanitize
-            0, // do_appearance
-            PDF_ENCRYPT_NONE, // do_encrypt
-            0, // dont_regenerate_id  Don't regenerate ID if set (used for clean)
-            ~0, // permissions
-            "", // opwd_utf8[128]
-            "", // upwd_utf8[128]
-            0 //do snapshot
-            };
+    gint rc = 0;
+    pdf_write_options opts = opts_default;
 
     //prüfen, ob in Viewer geöffnet
     if ( zond_pdf_document_is_open( rel_path ) ) ERROR_S_MESSAGE( "Dokument ist geöffnet" )
 
-    fz_try( ctx ) doc = pdf_open_document( ctx, rel_path );
-    fz_catch( ctx ) ERROR_MUPDF( "pdf_document_open" )
-
-    printf("%12x\n", pdf_document_permissions( ctx, doc ) );
-    printf("%i\n", pdf_authenticate_password( ctx, doc, "" ) );
-    if ( pdf_needs_password( ctx, doc ) )
-    {
-        pdf_drop_document( ctx, doc );
-        ERROR_S_MESSAGE( "Dokument ist passwortgesichert" )
-    }
-//        if ( !pdf_authenticate_password( ctx, doc, password))
-//				fz_throw(glo.ctx, FZ_ERROR_GENERIC, "cannot authenticate password: %s", infile);
+    rc = pdf_open_and_authen_document( ctx, TRUE, rel_path, NULL, &doc, NULL, errmsg );
+    if ( rc == -1 ) ERROR_S
+    else if ( rc == 1 ) return 1;
 
     fz_try( ctx ) pdf_clean_document( ctx, doc );
     fz_catch( ctx )
@@ -253,6 +242,8 @@ pdf_clean( fz_context* ctx, const gchar* rel_path, gchar** errmsg )
     }
 
     path_tmp = g_strconcat( rel_path, ".tmp_clean", NULL );
+
+    if ( !doc->crypt ) opts.do_garbage = 4;
 
     fz_try( ctx ) pdf_save_document( ctx, doc, path_tmp, &opts );
     fz_always( ctx ) pdf_drop_document( ctx, doc );

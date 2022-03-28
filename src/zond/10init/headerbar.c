@@ -176,14 +176,12 @@ cb_item_clean_pdf( GtkMenuItem* item, gpointer data )
         gchar* errmsg = NULL;
 
         rc = pdf_clean( zond->ctx, g_ptr_array_index( arr_rel_path, i ), &errmsg );
-        if ( rc )
+        if ( rc == -1 )
         {
             display_message( zond->app_window, "PDF ",
                     g_ptr_array_index( arr_rel_path, i ), " säubern nicht möglich\n\n",
                     errmsg, NULL );
             g_free( errmsg );
-
-            continue;
         }
     }
 
@@ -246,12 +244,9 @@ cb_item_textsuche( GtkMenuItem* item, gpointer data )
     rc = pdf_textsuche( zond, info_window, arr_rel_path, search_text, &arr_pdf_text_occ, &errmsg );
     if ( rc )
     {
-        if ( rc == -1 )
-        {
-            display_message( zond->app_window, "Fehler in Textsuche in PDF -\n\n"
-                    "Bei Aufruf pdf_textsuche:\n", errmsg, NULL );
-            g_free( errmsg );
-        }
+        display_message( zond->app_window, "Fehler in Textsuche in PDF -\n\n"
+                "Bei Aufruf pdf_textsuche:\n", errmsg, NULL );
+        g_free( errmsg );
         g_free( search_text );
         info_window_close( info_window );
 
@@ -341,10 +336,13 @@ cb_datei_ocr( GtkMenuItem* item, gpointer data )
                 g_ptr_array_index( arr_rel_path, i ), NULL, &errmsg );
         if ( !dd )
         {
-            info_window_set_message( info_window, "OCR nicht möglich - "
-                    "Fehler bei Aufruf document_new_displayed_document:\n" );
-            info_window_set_message( info_window, errmsg );
-            g_free( errmsg );
+            if ( *errmsg )
+            {
+                info_window_set_message( info_window, "OCR nicht möglich - "
+                        "Fehler bei Aufruf document_new_displayed_document:\n" );
+                info_window_set_message( info_window, errmsg );
+                g_free( errmsg );
+            }
 
             continue;
         }

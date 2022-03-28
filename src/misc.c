@@ -46,7 +46,7 @@ void display_message( GtkWidget* window, const gchar* text1, ... )
 static void
 cb_entry_text( GtkEntry* entry, gpointer data )
 {
-    gtk_widget_grab_focus( (GtkWidget*) data );
+    gtk_dialog_response( (GtkDialog*) data, GTK_RESPONSE_OK );
 
     return;
 }
@@ -62,8 +62,6 @@ dialog_with_buttons( GtkWidget* window, const gchar* message,
     GtkWidget* entry = NULL;
     va_list arg_pointer;
     gchar* button_text = NULL;
-    GtkWidget* button = NULL;
-    gboolean first_button = TRUE;
 
     va_start( arg_pointer, first_button_text );
 
@@ -77,17 +75,11 @@ dialog_with_buttons( GtkWidget* window, const gchar* message,
     button_text = first_button_text;
     while ( button_text )
     {
-        GtkWidget* tmp = NULL;
         gint response_id = 0;
 
         response_id = va_arg( arg_pointer, gint );
 
-        tmp = gtk_dialog_add_button( GTK_DIALOG(dialog), button_text, response_id );
-        if ( first_button )
-        {
-            button = tmp;
-            first_button = FALSE;
-        }
+        gtk_dialog_add_button( GTK_DIALOG(dialog), button_text, response_id );
 
         button_text = va_arg( arg_pointer, gchar* );
     }
@@ -104,7 +96,7 @@ dialog_with_buttons( GtkWidget* window, const gchar* message,
         gtk_widget_show_all( content );
 
         g_signal_connect( entry, "activate", G_CALLBACK(cb_entry_text),
-                (gpointer) button );
+                (gpointer) dialog );
     }
 
     res = gtk_dialog_run( GTK_DIALOG(dialog) );

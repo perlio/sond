@@ -92,7 +92,7 @@ oeffnen_auszug( Projekt* zond, gint node_id, gchar** errmsg )
 
         rc = treeviews_get_rel_path_and_anbindung( zond, BAUM_AUSWERTUNG,
                 younger_sibling, &rel_path, &anbindung, errmsg );
-        if ( rc == -1 ) ERROR_SOND( "abfragen_rel_path_and_anbindung" )
+        if ( rc == -1 ) ERROR_S
 
         if ( rc < 2 && is_pdf( rel_path ) )//rel_path existiert
         {
@@ -103,19 +103,24 @@ oeffnen_auszug( Projekt* zond, gint node_id, gchar** errmsg )
             g_free( anbindung );
             if ( !dd_new )
             {
-                document_free_displayed_documents( dd );
-                ERROR_SOND( "document_new_displayed_document" );
-            }
-
-            if ( !dd )
-            {
-                dd = dd_new;
-                dd_next = dd_new;
+                if ( *errmsg )
+                {
+                    document_free_displayed_documents( dd );
+                    ERROR_S
+                }
             }
             else
             {
-                dd_next->next = dd_new;
-                dd_next = dd_next->next;
+                if ( !dd )
+                {
+                    dd = dd_new;
+                    dd_next = dd_new;
+                }
+                else
+                {
+                    dd_next->next = dd_new;
+                    dd_next = dd_next->next;
+                }
             }
         }
 
@@ -123,7 +128,7 @@ oeffnen_auszug( Projekt* zond, gint node_id, gchar** errmsg )
 
         younger_sibling = zond_dbase_get_younger_sibling( zond->dbase_zond->zond_dbase_work, BAUM_AUSWERTUNG,
                 first_child, errmsg );
-        if ( younger_sibling < 0 ) ERROR_SOND( "zond_dbase_get_younger_sibling" )
+        if ( younger_sibling < 0 ) ERROR_S
     }
     while ( younger_sibling > 0 );
 
@@ -196,7 +201,8 @@ oeffnen_internal_viewer( Projekt* zond, const gchar* rel_path, Anbindung* anbind
 
     DisplayedDocument* dd = document_new_displayed_document( rel_path,
             anbindung, errmsg );
-    if ( !dd ) ERROR_SOND( "document_new_displayed_document" );
+    if ( !dd && *errmsg ) ERROR_S
+    else if ( !dd ) return 0;
 
     if ( pos_pdf ) pos_von = *pos_pdf;
 

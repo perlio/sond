@@ -49,7 +49,7 @@ struct _ZondPdfDocumentClass
 };
 
 
-ZondPdfDocument* zond_pdf_document_open( const gchar*, const gchar*, gint, gint, gchar** );
+ZondPdfDocument* zond_pdf_document_open( const gchar*, gint, gint, gchar** );
 
 //Gibt Zeiger auf geöffnetes document mit gchar* == path zurück; keine neue ref!
 const ZondPdfDocument* zond_pdf_document_is_open( const gchar* );

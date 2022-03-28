@@ -18,8 +18,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "zond_pdf_document.h"
 
-#include <mupdf/fitz.h>
-#include <mupdf/pdf.h>
 #include <glib/gstdio.h>
 
 #include "99conv/pdf.h"
@@ -40,6 +38,7 @@ typedef struct
     fz_context* ctx;
     pdf_document* doc;
     gchar* password;
+    gint auth;
     gboolean dirty;
     gchar* path;
     GPtrArray* pages; //array von DocumentPage*
@@ -129,7 +128,7 @@ zond_pdf_document_finalize( GObject* self )
     zond_pdf_document_close_context( priv->ctx ); //drop_context reicht nicht aus!
 
     g_free( priv->path );
-    g_free( priv->errmsg );
+    g_free( priv->password );
     g_mutex_clear( &priv->mutex_doc );
 
     ZondPdfDocumentClass* klass = ZOND_PDF_DOCUMENT_GET_CLASS(self);
@@ -344,24 +343,19 @@ zond_pdf_document_init_pages( ZondPdfDocument* self, gint von, gint bis, gchar**
 static void
 zond_pdf_document_constructed( GObject* self )
 {
+    gint rc = 0;
+    gchar* errmsg = NULL;
     gint number_of_pages = 0;
 
     ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( ZOND_PDF_DOCUMENT(self) );
 
-    fz_try( priv->ctx ) priv->doc = pdf_open_document( priv->ctx, priv->path );
-    fz_catch( priv->ctx )
+    rc = pdf_open_and_authen_document( priv->ctx, TRUE, priv->path,
+            &priv->password, &priv->doc, &priv->auth, &errmsg );
+    if ( rc )
     {
-        priv->errmsg = g_strconcat( "Bei Aufruf pdf_open_document:\n",
-                fz_caught_message( priv->ctx ), NULL );
+        if ( rc == -1 ) priv->errmsg = add_string( g_strdup( "Bei Aufruf pdf_open_and_authen_document:\n" ),
+                errmsg );
         priv->doc = NULL;
-        G_OBJECT_CLASS(zond_pdf_document_parent_class)->constructed( self );
-
-        return;
-    }
-
-    if ( pdf_needs_password( priv->ctx, priv->doc ) )
-    {
-        priv->errmsg = g_strdup( "Password erforderlich" );
         G_OBJECT_CLASS(zond_pdf_document_parent_class)->constructed( self );
 
         return;
@@ -411,7 +405,7 @@ zond_pdf_document_class_init( ZondPdfDocumentClass* klass )
                                  "gchar*",
                                  "Passwort.",
                                  NULL,
-                                  G_PARAM_CONSTRUCT | G_PARAM_WRITABLE );
+                                  G_PARAM_CONSTRUCT_ONLY | G_PARAM_READWRITE );
 
     g_object_class_install_properties(object_class,
                                       N_PROPERTIES,
@@ -523,7 +517,7 @@ zond_pdf_document_init( ZondPdfDocument* self )
 
 
 ZondPdfDocument*
-zond_pdf_document_open( const gchar* path, const gchar* password, gint von, gint bis, gchar** errmsg )
+zond_pdf_document_open( const gchar* path, gint von, gint bis, gchar** errmsg )
 {
     gint rc = 0;
     ZondPdfDocument* zond_pdf_document = NULL;
@@ -550,15 +544,22 @@ zond_pdf_document_open( const gchar* path, const gchar* password, gint von, gint
         }
     }
 
-    zond_pdf_document = g_object_new( ZOND_TYPE_PDF_DOCUMENT, "path", path, "password", password, NULL );
+    zond_pdf_document = g_object_new( ZOND_TYPE_PDF_DOCUMENT, "path", path, NULL );
 
     priv = zond_pdf_document_get_instance_private( zond_pdf_document );
+
     if ( priv->errmsg )
     {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_object_new:\n\n",
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf ", __func__, ":\n\n",
                 priv->errmsg, NULL );
+        g_free( priv->errmsg );
         g_object_unref( zond_pdf_document );
 
+        return NULL;
+    }
+    else if ( priv->auth == 0 )
+    {
+        g_object_unref( zond_pdf_document );
         return NULL;
     }
 
@@ -598,23 +599,25 @@ zond_pdf_document_is_open( const gchar* path )
 gint
 zond_pdf_document_reopen_doc_and_pages( ZondPdfDocument* self, gchar** errmsg )
 {
+    gint rc = 0;
     fz_context* ctx = NULL;
 
     ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
 
     ctx = priv->ctx;
 
-    fz_try( ctx ) priv->doc = pdf_open_document( ctx, priv->path );
-    fz_catch( ctx ) ERROR_MUPDF( "pdf_open_document" )
+    rc = pdf_open_and_authen_document( priv->ctx, FALSE, priv->path, &priv->password, &priv->doc, &priv->auth, errmsg );
+    if ( rc == -1 ) ERROR_S
+    else if ( rc == 1 ) ERROR_S_MESSAGE( "Passwort konnte nicht authentifiziert werden")
 
     //ToDo: Überprüfen, ob nicht alle privs neu initialisiert werden müssen?!
 
     //Seiten wieder laden
     for ( gint i = 0; i < priv->pages->len; i++ )
     {
-        fz_try( ctx ) ((PdfDocumentPage*) ((priv->pages)->pdata)[i])->page =
-                pdf_load_page( ctx, priv->doc, i );
-        fz_catch( ctx ) ERROR_MUPDF( "pdf_load_page" )
+        fz_try( priv->ctx ) ((PdfDocumentPage*) ((priv->pages)->pdata)[i])->page =
+                pdf_load_page( priv->ctx, priv->doc, i );
+        fz_catch( priv->ctx ) ERROR_MUPDF( "pdf_load_page" )
     }
 
     return 0;
@@ -650,29 +653,9 @@ zond_pdf_document_save( ZondPdfDocument* self, gchar** errmsg )
         gint rc = 0;
         fz_buffer* buf = NULL;
         fz_output* out = NULL;
+        pdf_write_options opts = opts_default;
 
         fz_context* ctx = priv->ctx;
-
-        pdf_write_options opts = {
-                0, // do_incremental
-                1, // do_pretty
-                1, // do_ascii
-                0, // do_compress
-                1, // do_compress_images
-                1, // do_compress_fonts
-                0, // do_decompress
-                4, // do_garbage
-                0, // do_linear
-                1, // do_clean
-                1, // do_sanitize
-                0, // do_appearance
-                0, // do_encrypt
-                0, // dont_regenerate_id  Don't regenerate ID if set (used for clean)
-                ~0, // permissions
-                "", // opwd_utf8[128]
-                "", // upwd_utf8[128]
-                0 //do snapshot
-                };
 
         fz_try( priv->ctx ) buf = fz_new_buffer( priv->ctx, 1024 );
         fz_catch( priv->ctx ) ERROR_MUPDF( "fz_new_buffer" )
@@ -683,6 +666,8 @@ zond_pdf_document_save( ZondPdfDocument* self, gchar** errmsg )
             fz_drop_buffer( priv->ctx, buf );
             ERROR_MUPDF( "fz_new_output_with_buffer" )
         }
+
+        if ( !priv->doc->crypt ) opts.do_garbage = 4;
 
         fz_try( priv->ctx ) pdf_write_document( priv->ctx, priv->doc, out, &opts );
         fz_always( priv->ctx )
@@ -698,7 +683,7 @@ zond_pdf_document_save( ZondPdfDocument* self, gchar** errmsg )
             ERROR_MUPDF( "pdf_write_document" )
         }
 
-        fz_try( priv->ctx ) fz_save_buffer( priv->ctx, buf, priv->path );
+        fz_try( priv->ctx ) fz_save_buffer( priv->ctx, buf, "hilfe.pdf" );
         fz_always( priv->ctx ) fz_drop_buffer( priv->ctx, buf );
         fz_catch( priv->ctx ) ERROR_MUPDF( "fz_save_buffer" )
 

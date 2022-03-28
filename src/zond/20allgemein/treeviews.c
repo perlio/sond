@@ -122,7 +122,7 @@ treeviews_get_page_num_from_dest( fz_context* ctx, const gchar* rel_path,
 
     page_num = treeviews_get_page_num_from_dest_doc( ctx, doc, dest, errmsg );
 	pdf_drop_document( ctx, doc );
-    if ( page_num < 0 ) ERROR_SOND( "get_page_num_from_dest_doc" )
+    if ( page_num < 0 ) ERROR_S
 
     return page_num;
 }

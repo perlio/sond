@@ -356,8 +356,12 @@ pdf_textsuche_pdf( Projekt* zond, const gchar* rel_path, const gchar* search_tex
     GPtrArray* arr_pdf_document_pages = NULL;
     fz_context* ctx = NULL;
 
-    zond_pdf_document = zond_pdf_document_open( rel_path, "", 0, -1, errmsg );
-    if ( !zond_pdf_document ) ERROR_SOND( "pdf_textsuche_pdf" )
+    zond_pdf_document = zond_pdf_document_open( rel_path, 0, -1, errmsg );
+    if ( !zond_pdf_document )
+    {
+        if ( errmsg && *errmsg ) ERROR_S
+        else return 0;
+    }
 
     ctx = zond_pdf_document_get_ctx( zond_pdf_document );
     arr_pdf_document_pages = zond_pdf_document_get_arr_pages( zond_pdf_document );
@@ -529,9 +533,7 @@ pdf_textsuche( Projekt* zond, InfoWindow* info_window, GPtrArray* array_rel_path
         if ( rc )
         {
             g_array_free( *arr_pdf_text_occ, TRUE );
-
-            if ( rc == -1 ) ERROR_SOND( "pdf_textsuche_pdf" )
-            if ( rc == -2 ) return -2;
+            ERROR_S
         }
     }
 
