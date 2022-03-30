@@ -234,13 +234,6 @@ pdf_clean( fz_context* ctx, const gchar* rel_path, gchar** errmsg )
     if ( rc == -1 ) ERROR_S
     else if ( rc == 1 ) return 1;
 
-    fz_try( ctx ) pdf_clean_document( ctx, doc );
-    fz_catch( ctx )
-    {
-        pdf_drop_document( ctx, doc );
-        ERROR_MUPDF( "pdf_clean_document" )
-    }
-
     path_tmp = g_strconcat( rel_path, ".tmp_clean", NULL );
 
     if ( !doc->crypt ) opts.do_garbage = 4;

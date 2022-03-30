@@ -659,6 +659,7 @@ static gint
 seiten_loeschen( PdfViewer* pv, GPtrArray* arr_document_page, gchar** errmsg )
 {
     gint rc = 0;
+    gchar* argv[2] = { "1-N", NULL };
 
     //Abfrage, ob Anbindung mit Seite verknüpft
     rc = seiten_anbindung( pv, arr_document_page, errmsg );
@@ -695,13 +696,16 @@ seiten_loeschen( PdfViewer* pv, GPtrArray* arr_document_page, gchar** errmsg )
             g_ptr_array_unref( arr_pv );
             ERROR_MUPDF( "pdf_delete_page" )
         }
+    }
 
-        fz_try( ctx ) pdf_clean_document( ctx, zond_pdf_document_get_pdf_doc( pv->dd->zond_pdf_document ) );
-        fz_catch( ctx )
-        {
-            g_ptr_array_unref( arr_pv );
-            ERROR_MUPDF( "pdf_clean_document" )
-        }
+    //säubern, um ins Leere gehende Outlines etc. zu entfernen
+    fz_try( ctx ) retainpages( ctx,
+            zond_pdf_document_get_pdf_doc( pv->dd->zond_pdf_document ), 1,
+            &argv[0] );
+    fz_catch( ctx )
+    {
+        g_ptr_array_unref( arr_pv );
+        ERROR_MUPDF( "retainpages" )
     }
 
     seiten_refresh_layouts( pv->zond->arr_pv );

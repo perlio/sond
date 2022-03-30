@@ -439,14 +439,14 @@ mupdf_lock( void* user, gint lock )
 static void*
 mupdf_malloc( void* user, size_t size )
 {
-    return g_try_malloc( size );
+    return g_malloc( size );
 }
 
 
 static void*
 mupdf_realloc( void* user, void* old, size_t size )
 {
-    return g_try_realloc( old, size );
+    return g_realloc( old, size );
 }
 
 
@@ -683,7 +683,7 @@ zond_pdf_document_save( ZondPdfDocument* self, gchar** errmsg )
             ERROR_MUPDF( "pdf_write_document" )
         }
 
-        fz_try( priv->ctx ) fz_save_buffer( priv->ctx, buf, "hilfe.pdf" );
+        fz_try( priv->ctx ) fz_save_buffer( priv->ctx, buf, priv->path );
         fz_always( priv->ctx ) fz_drop_buffer( priv->ctx, buf );
         fz_catch( priv->ctx ) ERROR_MUPDF( "fz_save_buffer" )
 
