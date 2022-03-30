@@ -6,7 +6,6 @@ ToDo:
     - Riesen-PDFs handhabbar machen
     - Markieren über mehrere Seiten
     - Kommentare
-    - Passwörter
 
 - Synchron-Punkte
 
@@ -47,33 +46,8 @@ ToDo:
 
 pdf_clean_file.c:
 
-    void pdf_clean_document(fz_context *ctx, pdf_document *doc)
-    {
-        globals glo = { 0 };
-
-        glo.ctx = ctx;
-        glo.doc = doc;
-        char *pages[1];
-
-        pages[0] = "1-N";
-
-        fz_try(ctx) retainpages(ctx, &glo, 1, pages);
-        fz_catch(ctx)
-        {
-            fz_rethrow(ctx);
-        }
-
-        return;
-    }
-
-einfügen
-
-
-pdf/clean.h:
-
-    void pdf_clean_document(fz_context *ctx, pdf_document *doc);
-
-einfügen
+    retainfiles extern machen (.h)
+    globals überflüssig
 
 
 Makefile für  mupdf modifizieren:
@@ -84,11 +58,5 @@ $(OUT)/%.a :
 	$(file >arscript.sh,@$(AR_CMD))
 	bash -x arscript.sh
 	$(RANLIB_CMD)
-
-Makethird modifizieren:
-- in Abschnitt jbig2dec:
-- DHAVE_ ??? memento entfernen
-- alle includes mit stddef.h und stdlib.h aus allen files entfernen
-    - jbig2dec und momento.h
 
 */
