@@ -172,7 +172,8 @@ viewer_page_draw( GtkWidget* viewer_page, cairo_t* cr, gpointer data )
     //wenn annot angeclickt wurde
     if ( pdfv->clicked_annot )
     {
-        GArray* arr_quads = pdfv->clicked_annot->arr_quads;
+        //Testauf type nicht erforderlich, da clicked_annot nur gesetzt wird, wenn HIGHLIGH oder UNDERLINE
+        GArray* arr_quads = pdfv->clicked_annot->annot_text_markup.arr_quads;
 
         for ( gint i = 0; i < arr_quads->len; i++ )
         {

@@ -1241,7 +1241,7 @@ inside_quad( fz_quad quad, fz_point punkt )
 
 
 static PdfDocumentPageAnnot*
-viewer_on_annot( PdfViewer* pv, PdfPunkt pdf_punkt )
+viewer_on_annot_text_markup( PdfViewer* pv, PdfPunkt pdf_punkt )
 {
     PdfDocumentPage* pdf_document_page = NULL;
 
@@ -1252,14 +1252,21 @@ viewer_on_annot( PdfViewer* pv, PdfPunkt pdf_punkt )
 
     for ( gint i = 0; i < pdf_document_page->arr_annots->len; i++ )
     {
-        PdfDocumentPageAnnot* pdf_document_page_annot = g_ptr_array_index( pdf_document_page->arr_annots, i );
-        for ( gint u = 0; u < pdf_document_page_annot->arr_quads->len; u++ )
+        PdfDocumentPageAnnot* pdf_document_page_annot = NULL;
+        pdf_document_page_annot = g_ptr_array_index( pdf_document_page->arr_annots, i );
+
+        if ( pdf_document_page_annot->type == PDF_ANNOT_HIGHLIGHT ||
+                pdf_document_page_annot->type == PDF_ANNOT_UNDERLINE ||
+                pdf_document_page_annot->type == PDF_ANNOT_STRIKE_OUT ||
+                pdf_document_page_annot->type == PDF_ANNOT_SQUIGGLY )
         {
-            fz_quad quad = g_array_index( pdf_document_page_annot->arr_quads, fz_quad, u );
-            if ( inside_quad( quad, pdf_punkt.punkt ) ) return pdf_document_page_annot;
+            for ( gint u = 0; u < pdf_document_page_annot->annot_text_markup.arr_quads->len; u++ )
+            {
+                fz_quad quad = g_array_index( pdf_document_page_annot->annot_text_markup.arr_quads, fz_quad, u );
+                if ( inside_quad( quad, pdf_punkt.punkt ) ) return pdf_document_page_annot;
+            }
         }
     }
-
     return NULL;
 }
 
@@ -1271,7 +1278,7 @@ viewer_set_cursor( PdfViewer* pv, gint rc, PdfPunkt pdf_punkt )
     gint on_text = 0;
 
     if ( rc ) gdk_window_set_cursor( pv->gdk_window, pv->cursor_default );
-    else if ( (pdf_document_page_annot = viewer_on_annot( pv, pdf_punkt )) )
+    else if ( (pdf_document_page_annot = viewer_on_annot_text_markup( pv, pdf_punkt )) )
     {
         if ( (pv->state == 1 && pdf_document_page_annot->type == PDF_ANNOT_HIGHLIGHT ) ||
                 (pv->state == 2 && pdf_document_page_annot->type == PDF_ANNOT_UNDERLINE) )
@@ -1390,11 +1397,7 @@ viewer_annot_delete( PdfDocumentPage* pdf_document_page, PdfDocumentPageAnnot* p
 {
     fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
 
-    pdf_annot* annot = pdf_first_annot( ctx, pdf_document_page->page );
-
-    for ( gint i = 0; i < pdf_document_page_annot->idx; i++ ) annot = pdf_next_annot( ctx, annot );
-
-    fz_try( ctx ) pdf_delete_annot( ctx, pdf_document_page->page, annot );
+    fz_try( ctx ) pdf_delete_annot( ctx, pdf_document_page->page, pdf_document_page_annot->annot );
     fz_catch( ctx ) ERROR_MUPDF( "pdf_delete_annot" )
 
     return 0;
@@ -1719,7 +1722,7 @@ cb_viewer_layout_press_button( GtkWidget* layout, GdkEvent* event, gpointer
 
         if ( !rc )
         {
-            PdfDocumentPageAnnot* pdf_document_page_annot = viewer_on_annot( pv, pdf_punkt );
+            PdfDocumentPageAnnot* pdf_document_page_annot = viewer_on_annot_text_markup( pv, pdf_punkt );
             if ( pdf_document_page_annot )
             {
                 if ( (pv->state == 1 && pdf_document_page_annot->type == PDF_ANNOT_HIGHLIGHT) ||

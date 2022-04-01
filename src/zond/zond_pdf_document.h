@@ -13,17 +13,25 @@ G_BEGIN_DECLS
 #define ZOND_TYPE_PDF_DOCUMENT zond_pdf_document_get_type( )
 G_DECLARE_DERIVABLE_TYPE (ZondPdfDocument, zond_pdf_document, ZOND, PDF_DOCUMENT, GObject)
 
-
+typedef struct _Annot_Text_Markup
+{
+    gint n_quad;
+    GArray* arr_quads;
+} AnnotTextMarkup;
 
 typedef struct _Pdf_Document_Page_Annot
 {
-    gint idx;
+    pdf_annot* annot;
     enum pdf_annot_type type;
     fz_rect rect;
     gchar* content; //Text der Annot gem. Dict-Entry /Content
 
-    gint n_quad;
-    GArray* arr_quads;
+    union
+    {
+        AnnotTextMarkup annot_text_markup;
+//        AnnotText annot_text;
+//        AnnotFreeText annot_free_text;
+    };
 } PdfDocumentPageAnnot;
 
 typedef struct _Pdf_Document_Page
