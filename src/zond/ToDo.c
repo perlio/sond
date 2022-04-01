@@ -4,7 +4,6 @@ Bugs:
 ToDo:
 - Viewer
     - Riesen-PDFs handhabbar machen
-    - Markieren über mehrere Seiten
     - Kommentare
 
 - Synchron-Punkte

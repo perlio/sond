@@ -1153,7 +1153,7 @@ cb_pv_copy_text( GtkMenuItem* item, gpointer data )
                 ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
 
                 add = fz_copy_selection( ctx, pdf_document_page->stext_page,
-                        pv->highlight.quad[start].ur, pv->highlight.quad[end].ll,
+                        pv->highlight.quad[start].ul, pv->highlight.quad[end].lr,
                         FALSE );
 
                 if ( text )
