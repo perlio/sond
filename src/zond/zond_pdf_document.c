@@ -161,7 +161,8 @@ zond_pdf_document_page_annot_free( gpointer data )
 {
     PdfDocumentPageAnnot* pdf_document_page_annot = (PdfDocumentPageAnnot*) data;
 
-    g_array_unref( pdf_document_page_annot->arr_quads ),
+    g_array_unref( pdf_document_page_annot->arr_quads );
+    g_free( pdf_document_page_annot->content );
 
     g_free( pdf_document_page_annot );
 
@@ -183,25 +184,34 @@ zond_pdf_document_page_annot_load( PdfDocumentPage* pdf_document_page,
     pdf_document_page_annot->idx = idx;
     pdf_document_page_annot->type = pdf_annot_type( priv->ctx, annot );
     pdf_document_page_annot->rect = pdf_annot_rect( priv->ctx, annot );
+    pdf_document_page_annot->content = g_strdup( pdf_annot_contents( priv->ctx, annot ) );
 
-    fz_try( priv->ctx ) pdf_document_page_annot->n_quad = pdf_annot_quad_point_count( priv->ctx, annot );
-    fz_catch( priv->ctx )
+    //Text-Markup-annots
+    if ( pdf_document_page_annot->type == PDF_ANNOT_HIGHLIGHT ||
+            pdf_document_page_annot->type == PDF_ANNOT_UNDERLINE ||
+            pdf_document_page_annot->type == PDF_ANNOT_STRIKE_OUT ||
+            pdf_document_page_annot->type == PDF_ANNOT_SQUIGGLY )
     {
-        g_free( pdf_document_page_annot );
-        fz_warn( priv->ctx, "Warnung: Funktion pdf_annot_quad_point_count gab "
-                "Fehler zurück: %s", fz_caught_message( priv->ctx ) );
-        return;
+        fz_try( priv->ctx ) pdf_document_page_annot->n_quad = pdf_annot_quad_point_count( priv->ctx, annot );
+        fz_catch( priv->ctx )
+        {
+            g_free( pdf_document_page_annot );
+            fz_warn( priv->ctx, "Warnung: Funktion pdf_annot_quad_point_count gab "
+                    "Fehler zurück: %s", fz_caught_message( priv->ctx ) );
+            return;
+        }
+
+        pdf_document_page_annot->arr_quads = g_array_new( FALSE, FALSE, sizeof( fz_quad ) );
+
+        for ( gint i = 0; i < pdf_document_page_annot->n_quad; i++ )
+        {
+            fz_quad quad = pdf_annot_quad_point( priv->ctx, annot, i );
+            g_array_append_val( pdf_document_page_annot->arr_quads, quad );
+        }
+
+        g_ptr_array_add( pdf_document_page->arr_annots, pdf_document_page_annot );
     }
 
-    pdf_document_page_annot->arr_quads = g_array_new( FALSE, FALSE, sizeof( fz_quad ) );
-
-    for ( gint i = 0; i < pdf_document_page_annot->n_quad; i++ )
-    {
-        fz_quad quad = pdf_annot_quad_point( priv->ctx, annot, i );
-        g_array_append_val( pdf_document_page_annot->arr_quads, quad );
-    }
-
-    g_ptr_array_add( pdf_document_page->arr_annots, pdf_document_page_annot );
 
     return;
 }

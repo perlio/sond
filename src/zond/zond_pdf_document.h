@@ -19,8 +19,8 @@ typedef struct _Pdf_Document_Page_Annot
 {
     gint idx;
     enum pdf_annot_type type;
-
     fz_rect rect;
+    gchar* content; //Text der Annot gem. Dict-Entry /Content
 
     gint n_quad;
     GArray* arr_quads;
