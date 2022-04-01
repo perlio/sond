@@ -2,10 +2,6 @@
 Bugs:
 
 ToDo:
-- Viewer
-    - Riesen-PDFs handhabbar machen
-    - Kommentare
-
 - Synchron-Punkte
 
 - Abschnitte neu organisieren
@@ -19,6 +15,8 @@ ToDo:
     - Anbindungen in PDF löschen
 
 - Viewer
+    - Riesen-PDFs handhabbar machen
+    - Kommentare
     - Farben für Markieren
     - Rummalen
     - TextTreffer in Fenster anzeigen

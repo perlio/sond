@@ -26,8 +26,6 @@ typedef struct _Pdf_Document_Page_Annot
     GArray* arr_quads;
 } PdfDocumentPageAnnot;
 
-typedef struct _Document Document;
-
 typedef struct _Pdf_Document_Page
 {
     ZondPdfDocument* document; //erhält keine ref - muß das mal mit dem const kapieren...
