@@ -26,14 +26,16 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../zond_dbase.h"
 #include "../zond_treeview.h"
 
-#include "../99conv/general.h"
-#include "../../misc.h"
-#include "../99conv/pdf.h"
-
 #include "../20allgemein/ziele.h"
 #include "../20allgemein/oeffnen.h"
 
 #include "../40viewer/render.h"
+#include "../40viewer/viewer.h"
+
+#include "../99conv/general.h"
+#include "../../misc.h"
+#include "../99conv/pdf.h"
+
 
 
 typedef struct _Pdf_Viewer PdfViewer;
@@ -209,9 +211,10 @@ cb_textsuche_act( GtkListBox* box, GtkListBoxRow* row, gpointer data )
     {
         PdfViewer* pv = g_ptr_array_index( zond->arr_pv, (zond->arr_pv->len) - 1 );
 
-        pv->highlight[0] = pdf_text_occ.quad;
+        pv->highlight.page[0] = pdf_text_occ.page;
+        pv->highlight.quad[0] = pdf_text_occ.quad;
         //Sentinel!
-        pv->highlight[1].ul.x = -1;
+        pv->highlight.page[1] = -1;
 
         //Trick: click_pdf_punkt mißbraucht, damit highlight richtiger Seite
         //zugeordnet wird - in echt nix geclickt!

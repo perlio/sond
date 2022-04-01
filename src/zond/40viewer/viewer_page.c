@@ -160,13 +160,14 @@ viewer_page_mark_quad( cairo_t* cr, fz_quad quad, fz_matrix transform )
 static gboolean
 viewer_page_draw( GtkWidget* viewer_page, cairo_t* cr, gpointer data )
 {
+    fz_matrix transform = { 0, };
+    fz_rect crop = { 0, };
+
     PdfViewer* pdfv = (PdfViewer*) data;
 
-    fz_matrix transform = fz_translate( 0.0, -pdfv->click_pdf_punkt.delta_y );
+    crop = viewer_page_get_crop( VIEWER_PAGE(viewer_page) );
+    transform = fz_translate( 0.0, -crop.y0 );
     transform = fz_post_scale( transform, pdfv->zoom / 100, pdfv->zoom / 100 );
-
-    if ( viewer_page != g_ptr_array_index( pdfv->arr_pages, pdfv->click_pdf_punkt.seite ) )
-            return FALSE;
 
     //wenn annot angeclickt wurde
     if ( pdfv->clicked_annot )
@@ -189,9 +190,11 @@ viewer_page_draw( GtkWidget* viewer_page, cairo_t* cr, gpointer data )
     else //ansonsten etwaige highlights zeichnen
     {
         gint i = 0;
-        while ( pdfv->highlight[i].ul.x >= 0 )
+        while ( pdfv->highlight.page[i] >= 0 )
         {
-            viewer_page_mark_quad( cr, pdfv->highlight[i], transform );
+            if ( viewer_page == g_ptr_array_index( pdfv->arr_pages,
+                    pdfv->highlight.page[i] ) )
+                    viewer_page_mark_quad( cr, pdfv->highlight.quad[i], transform );
 
             i++;
         }

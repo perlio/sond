@@ -1,5 +1,6 @@
 #include <gtk/gtk.h>
 
+#include "viewer.h"
 #include "../zond_pdf_document.h"
 
 #include "../99conv/general.h"
@@ -38,7 +39,6 @@ document_new_displayed_document( const gchar* rel_path,
 {
     ZondPdfDocument* zond_pdf_document = NULL;
     DisplayedDocument* dd = NULL;
-    gchar* password = NULL;
 
     zond_pdf_document = zond_pdf_document_open( rel_path,
                 (anbindung) ? anbindung->von.seite : 0, (anbindung) ?
@@ -46,7 +46,7 @@ document_new_displayed_document( const gchar* rel_path,
     if ( !zond_pdf_document )
     {
         if ( errmsg && *errmsg ) ERROR_MESSAGE_VAL( "zond_pdf_document_open", NULL )
-        else return 0; //Fehler: Passwort funktioniert nicht
+        else return NULL; //Fehler: Passwort funktioniert nicht
     }
 
     dd = g_malloc0( sizeof( DisplayedDocument ) );

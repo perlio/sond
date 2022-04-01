@@ -411,7 +411,8 @@ seiten_drehen_foreach( PdfViewer* pv, gint page_pv, gpointer data, gchar** errms
 
     rendered_page = (gtk_image_get_storage_type( GTK_IMAGE(viewer_page) ) == GTK_IMAGE_PIXBUF );
 
-    if ( !(rendered_page && rendered_thumb) ) viewer_close_thread_pool( pv );
+    if ( !(rendered_page && rendered_thumb) )
+            viewer_close_thread_pool_and_transfer( pv );
 
     gtk_image_clear( GTK_IMAGE(viewer_page) );
     viewer_page_set_pixbuf_page( viewer_page, NULL );
@@ -569,7 +570,7 @@ seiten_cb_loesche_seite( PdfViewer* pv, gint page_pv, gpointer data, gchar** err
     //Falls noch nicht: erstmal thread_pool abstellen
     if ( closed == FALSE )
     {
-        viewer_close_thread_pool( pv );
+        viewer_close_thread_pool_and_transfer( pv );
         g_ptr_array_add( *p_arr_pv, pv );
     }
 
@@ -926,7 +927,10 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
         do
         {
             if ( dd->zond_pdf_document == pv->dd->zond_pdf_document )
-                    viewer_close_thread_pool( pv_vergleich );
+            {
+                viewer_close_thread_pool_and_transfer( pv_vergleich );
+                break;
+            }
         } while ( (dd = dd->next) );
     }
 
