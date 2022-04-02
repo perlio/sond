@@ -7,6 +7,9 @@
 
 G_BEGIN_DECLS
 
+#define ANNOT_ICON_WIDTH 20
+#define ANNOT_ICON_HEIGHT 20
+
 typedef struct _Pdf_Viewer PdfViewer;
 typedef struct _Pdf_Document_Page PdfDocumentPage;
 typedef struct _GdkPixbuf ViewerPixbuf;
@@ -37,6 +40,8 @@ ViewerPixbuf* viewer_page_get_pixbuf_page( ViewerPage* );
 void viewer_page_set_pixbuf_thumb( ViewerPage*, ViewerPixbuf* );
 
 ViewerPixbuf* viewer_page_get_pixbuf_thumb( ViewerPage* );
+
+fz_rect viewer_page_clamp_icon_rect( ViewerPage*, fz_rect );
 
 G_END_DECLS
 

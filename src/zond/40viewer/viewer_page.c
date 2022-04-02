@@ -401,4 +401,24 @@ viewer_page_get_pixbuf_thumb( ViewerPage* self )
 }
 
 
+fz_rect
+viewer_page_clamp_icon_rect( ViewerPage* viewer_page, fz_rect rect )
+{
+    fz_rect crop = { 0, };
+
+    crop = viewer_page_get_crop( viewer_page );
+
+    if ( rect.x0 < crop.x0 ) rect.x0 = crop.x0;
+    if ( rect.x0 + ANNOT_ICON_WIDTH > crop.x1 ) rect.x0 = crop.x1 - ANNOT_ICON_WIDTH;
+
+    if ( rect.y0 < crop.y0 ) rect.y0 = crop.y0;
+    if ( rect.y0 + ANNOT_ICON_HEIGHT > crop.y1 ) rect.y0 = crop.y1 - ANNOT_ICON_HEIGHT;
+
+    rect.x1 = rect.x0 + ANNOT_ICON_WIDTH;
+    rect.y1 = rect.y0 + ANNOT_ICON_HEIGHT;
+
+    return rect;
+}
+
+
 
