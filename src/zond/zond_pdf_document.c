@@ -161,8 +161,6 @@ zond_pdf_document_page_annot_free( gpointer data )
 {
     PdfDocumentPageAnnot* pdf_document_page_annot = (PdfDocumentPageAnnot*) data;
 
-    g_free( pdf_document_page_annot->content );
-
     //Text-Markup-annots
     if ( pdf_document_page_annot->type == PDF_ANNOT_HIGHLIGHT ||
             pdf_document_page_annot->type == PDF_ANNOT_UNDERLINE ||
@@ -190,7 +188,7 @@ zond_pdf_document_page_annot_load( PdfDocumentPage* pdf_document_page,
     pdf_document_page_annot->annot = annot;
     pdf_document_page_annot->type = pdf_annot_type( priv->ctx, annot );
     pdf_document_page_annot->rect = pdf_annot_rect( priv->ctx, annot );
-    pdf_document_page_annot->content = g_strdup( pdf_annot_contents( priv->ctx, annot ) );
+    pdf_document_page_annot->content = pdf_annot_contents( priv->ctx, annot );
 
     //Text-Markup-annots
     if ( pdf_document_page_annot->type == PDF_ANNOT_HIGHLIGHT ||
@@ -198,7 +196,8 @@ zond_pdf_document_page_annot_load( PdfDocumentPage* pdf_document_page,
             pdf_document_page_annot->type == PDF_ANNOT_STRIKE_OUT ||
             pdf_document_page_annot->type == PDF_ANNOT_SQUIGGLY )
     {
-        fz_try( priv->ctx ) pdf_document_page_annot->annot_text_markup.n_quad = pdf_annot_quad_point_count( priv->ctx, annot );
+        fz_try( priv->ctx ) pdf_document_page_annot->annot_text_markup.n_quad =
+                pdf_annot_quad_point_count( priv->ctx, annot );
         fz_catch( priv->ctx )
         {
             g_free( pdf_document_page_annot );
@@ -207,7 +206,8 @@ zond_pdf_document_page_annot_load( PdfDocumentPage* pdf_document_page,
             return;
         }
 
-        pdf_document_page_annot->annot_text_markup.arr_quads = g_array_new( FALSE, FALSE, sizeof( fz_quad ) );
+        pdf_document_page_annot->annot_text_markup.arr_quads =
+                g_array_new( FALSE, FALSE, sizeof( fz_quad ) );
 
         for ( gint i = 0; i < pdf_document_page_annot->annot_text_markup.n_quad; i++ )
         {
@@ -215,8 +215,14 @@ zond_pdf_document_page_annot_load( PdfDocumentPage* pdf_document_page,
             g_array_append_val( pdf_document_page_annot->annot_text_markup.arr_quads, quad );
         }
 
-        g_ptr_array_add( pdf_document_page->arr_annots, pdf_document_page_annot );
     }
+    else if ( pdf_document_page_annot->type == PDF_ANNOT_TEXT )
+    {
+        pdf_document_page_annot->annot_text.open = pdf_annot_is_open( priv->ctx, annot );
+        pdf_document_page_annot->annot_text.name = pdf_annot_icon_name( priv->ctx, annot );
+    }
+
+    g_ptr_array_add( pdf_document_page->arr_annots, pdf_document_page_annot );
 
     return;
 }
@@ -275,11 +281,7 @@ zond_pdf_document_load_page( ZondPdfDocument* self, gint page_doc, gchar** errms
     pdf_document_page->rect = pdf_bound_page( ctx, pdf_document_page->page );
 
     pdf_document_page->rotate = zond_pdf_document_page_get_rotate( pdf_document_page, errmsg );
-    if ( pdf_document_page->rotate == -1 )
-    {
-        fz_drop_page( ctx, &(pdf_document_page->page->super) );
-        ERROR_SOND( "zond_pdf_document_page_get_rotate" )
-    }
+    if ( pdf_document_page->rotate == -1 ) ERROR_S
 
     return 0;
 }
@@ -289,6 +291,7 @@ static gint
 zond_pdf_document_page_init( ZondPdfDocument* self, gint index, gchar** errmsg )
 {
     gint rc = 0;
+    fz_context* ctx = NULL;
 
     ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( ZOND_PDF_DOCUMENT(self) );
 
@@ -307,6 +310,7 @@ zond_pdf_document_page_init( ZondPdfDocument* self, gint index, gchar** errmsg )
     rc = zond_pdf_document_load_page( self, index, errmsg );
     if ( rc == -1 )
     {
+        fz_drop_page( ctx, &pdf_document_page->page->super );
         g_free( ((priv->pages)->pdata)[index] );
         ((priv->pages)->pdata)[index] = NULL;
         ERROR_SOND( "zond_pdf_document_load_page" )

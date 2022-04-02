@@ -19,17 +19,23 @@ typedef struct _Annot_Text_Markup
     GArray* arr_quads;
 } AnnotTextMarkup;
 
+typedef struct _Annot_Text
+{
+    gboolean open;
+    const gchar* name;
+} AnnotText;
+
 typedef struct _Pdf_Document_Page_Annot
 {
     pdf_annot* annot;
     enum pdf_annot_type type;
     fz_rect rect;
-    gchar* content; //Text der Annot gem. Dict-Entry /Content
+    const gchar* content; //Text der Annot gem. Dict-Entry /Content
 
     union
     {
         AnnotTextMarkup annot_text_markup;
-//        AnnotText annot_text;
+        AnnotText annot_text;
 //        AnnotFreeText annot_free_text;
     };
 } PdfDocumentPageAnnot;

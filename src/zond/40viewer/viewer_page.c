@@ -172,18 +172,37 @@ viewer_page_draw( GtkWidget* viewer_page, cairo_t* cr, gpointer data )
     //wenn annot angeclickt wurde
     if ( pdfv->clicked_annot )
     {
-        //Testauf type nicht erforderlich, da clicked_annot nur gesetzt wird, wenn HIGHLIGH oder UNDERLINE
-        GArray* arr_quads = pdfv->clicked_annot->annot_text_markup.arr_quads;
-
-        for ( gint i = 0; i < arr_quads->len; i++ )
+        if ( pdfv->clicked_annot->type == PDF_ANNOT_HIGHLIGHT ||
+                pdfv->clicked_annot->type == PDF_ANNOT_UNDERLINE )
         {
-            fz_quad quad = g_array_index( arr_quads, fz_quad, i );
-            quad = fz_transform_quad( quad, transform );
-            cairo_move_to( cr, quad.ul.x, quad.ul.y );
-            cairo_line_to( cr, quad.ur.x, quad.ur.y );
-            cairo_line_to( cr, quad.lr.x, quad.lr.y );
-            cairo_line_to( cr, quad.ll.x, quad.ll.y );
-            cairo_line_to( cr, quad.ul.x, quad.ul.y );
+            //Test auf type nicht erforderlich, da clicked_annot nur gesetzt wird, wenn HIGHLIGH oder UNDERLINE
+            GArray* arr_quads = pdfv->clicked_annot->annot_text_markup.arr_quads;
+
+            for ( gint i = 0; i < arr_quads->len; i++ )
+            {
+                fz_quad quad = g_array_index( arr_quads, fz_quad, i );
+                quad = fz_transform_quad( quad, transform );
+                cairo_move_to( cr, quad.ul.x, quad.ul.y );
+                cairo_line_to( cr, quad.ur.x, quad.ur.y );
+                cairo_line_to( cr, quad.lr.x, quad.lr.y );
+                cairo_line_to( cr, quad.ll.x, quad.ll.y );
+                cairo_line_to( cr, quad.ul.x, quad.ul.y );
+                cairo_set_source_rgb(cr, 0, 1, 0 );
+                cairo_stroke( cr );
+            }
+        }
+        else if ( pdfv->clicked_annot->type == PDF_ANNOT_TEXT )
+        {
+            fz_rect rect = { 0, };
+
+            rect = pdfv->clicked_annot->rect;
+            rect = fz_transform_rect( rect, transform );
+
+            cairo_move_to( cr, rect.x0, rect.y0 );
+            cairo_line_to( cr, rect.x1, rect.y0 );
+            cairo_line_to( cr, rect.x1, rect.y1 );
+            cairo_line_to( cr, rect.x0, rect.y1 );
+            cairo_line_to( cr, rect.x0, rect.y0 );
             cairo_set_source_rgb(cr, 0, 1, 0 );
             cairo_stroke( cr );
         }

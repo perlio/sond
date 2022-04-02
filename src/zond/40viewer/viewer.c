@@ -844,8 +844,6 @@ viewer_anzeigen_text_occ( PdfViewer* pv )
     pv->highlight.quad[0] = text_occ.quad;
     pv->highlight.page[1] = -1;
 
-    pv->click_pdf_punkt.seite = text_occ.page;
-
     pdf_pos.seite = text_occ.page;
     pdf_pos.index = (gint) text_occ.quad.ul.y;
 
@@ -1241,7 +1239,7 @@ inside_quad( fz_quad quad, fz_point punkt )
 
 
 static PdfDocumentPageAnnot*
-viewer_on_annot_text_markup( PdfViewer* pv, PdfPunkt pdf_punkt )
+viewer_on_annot( PdfViewer* pv, PdfPunkt pdf_punkt )
 {
     PdfDocumentPage* pdf_document_page = NULL;
 
@@ -1266,6 +1264,11 @@ viewer_on_annot_text_markup( PdfViewer* pv, PdfPunkt pdf_punkt )
                 if ( inside_quad( quad, pdf_punkt.punkt ) ) return pdf_document_page_annot;
             }
         }
+        else if ( pdf_document_page_annot->type == PDF_ANNOT_TEXT )
+        {
+            fz_rect rect = pdf_document_page_annot->rect;
+            if ( fz_is_point_inside_rect( pdf_punkt.punkt, rect ) ) return pdf_document_page_annot;
+        }
     }
     return NULL;
 }
@@ -1278,12 +1281,13 @@ viewer_set_cursor( PdfViewer* pv, gint rc, PdfPunkt pdf_punkt )
     gint on_text = 0;
 
     if ( rc ) gdk_window_set_cursor( pv->gdk_window, pv->cursor_default );
-    else if ( (pdf_document_page_annot = viewer_on_annot_text_markup( pv, pdf_punkt )) )
+    else if ( (pdf_document_page_annot = viewer_on_annot( pv, pdf_punkt )) )
     {
         if ( (pv->state == 1 && pdf_document_page_annot->type == PDF_ANNOT_HIGHLIGHT ) ||
-                (pv->state == 2 && pdf_document_page_annot->type == PDF_ANNOT_UNDERLINE) )
+                (pv->state == 2 && pdf_document_page_annot->type == PDF_ANNOT_UNDERLINE) ||
+                (pv->state == 3 && pdf_document_page_annot->type == PDF_ANNOT_TEXT) )
                 gdk_window_set_cursor( pv->gdk_window, pv->cursor_annot );
-        else gdk_window_set_cursor( pv->gdk_window, pv->cursor_text );
+        else if ( pdf_document_page_annot->type != PDF_ANNOT_TEXT ) gdk_window_set_cursor( pv->gdk_window, pv->cursor_text );
     }
     else if ( (on_text = viewer_on_text( pv, pdf_punkt )) )
     {
@@ -1492,6 +1496,7 @@ cb_viewer_layout_motion_notify( GtkWidget* layout, GdkEvent* event, gpointer dat
     rc = viewer_abfragen_pdf_punkt( pv,
             fz_make_point( event->motion.x, event->motion.y ), &pdf_punkt );
 
+    //Text erfassen, wenn linker button gehalten
     if ( event->motion.state == GDK_BUTTON1_MASK )
     {
         if ( pv->click_on_text && !pv->clicked_annot )
@@ -1558,8 +1563,24 @@ cb_viewer_layout_motion_notify( GtkWidget* layout, GdkEvent* event, gpointer dat
                         i )) );
             }
         }
-        else if ( !pv->clicked_annot )
+        else if ( pv->clicked_annot && pv->clicked_annot->type == PDF_ANNOT_TEXT )
         {
+            fz_rect rect_tmp = { 0, };
+
+            rect_tmp = pv->clicked_annot->rect;
+            pv->clicked_annot->rect.x0 -= (pv->x - event->motion.x_root) /pv->zoom * 100;
+            pv->clicked_annot->rect.x1 -= (pv->x - event->motion.x_root) /pv->zoom * 100;
+            pv->clicked_annot->rect.y0 -= (pv->y - event->motion.y_root) /pv->zoom * 100;
+            pv->clicked_annot->rect.y1 -= (pv->y - event->motion.y_root) /pv->zoom * 100;
+
+            pv->y = event->motion.y_root;
+            pv->x = event->motion.x_root;
+
+            gtk_widget_queue_draw( GTK_WIDGET(g_ptr_array_index( pv->arr_pages,
+                    pv->click_pdf_punkt.seite )) );
+        }
+        else //nicht auf Text und nicht auf Text-annot
+        { //layout wird mit Mauszeiger geschoben
             gdouble y = gtk_adjustment_get_value( pv->v_adj );
             gdouble x = gtk_adjustment_get_value(pv->h_adj );
             gtk_adjustment_set_value( pv->v_adj, y + pv->y - event->motion.y_root );
@@ -1567,9 +1588,48 @@ cb_viewer_layout_motion_notify( GtkWidget* layout, GdkEvent* event, gpointer dat
             pv->y = event->motion.y_root;
             pv->x = event->motion.x_root;
         }
-
     }
-    else viewer_set_cursor( pv, rc, pdf_punkt ); //Kein Knopf gedrückt
+    //kein Button, Mauszeiger wird über annot bewegt
+    else
+    {
+        PdfDocumentPageAnnot* pdf_document_page_annot = NULL;
+
+        if ( (pdf_document_page_annot = viewer_on_annot( pv, pdf_punkt )) )
+        {
+            //Popover anzeigen, falls /Contents text enthält
+            if ( pdf_document_page_annot->content )
+            {
+                GdkRectangle gdk_rectangle = { 0, };
+                gint x = 0, y = 0, width = 0, height = 0;
+                ViewerPage* viewer_page = NULL;
+
+                viewer_page = g_ptr_array_index( pv->arr_pages, pdf_punkt.seite );
+
+                gtk_container_child_get( GTK_CONTAINER(pv->layout), GTK_WIDGET(viewer_page), "y", &y, NULL );
+                y += (gint) (pdf_document_page_annot->rect.y0 * pv->zoom / 100 );
+                y -= gtk_adjustment_get_value( pv->v_adj );
+
+                gtk_container_child_get( GTK_CONTAINER(pv->layout), GTK_WIDGET(viewer_page), "x", &x, NULL );
+                x += (gint) (pdf_document_page_annot->rect.x0 * pv->zoom / 100 );
+                x -= gtk_adjustment_get_value( pv->h_adj );
+
+                height = (gint) ((pdf_document_page_annot->rect.y1 - pdf_document_page_annot->rect.y0) * pv->zoom / 100);
+                width = (gint) ((pdf_document_page_annot->rect.x1 - pdf_document_page_annot->rect.x0) * pv->zoom / 100);
+
+                gdk_rectangle.x = x;
+                gdk_rectangle.y = y;
+                gdk_rectangle.width = width;
+                gdk_rectangle.height = height;
+
+                gtk_popover_set_pointing_to( GTK_POPOVER(pv->annot_pop), &gdk_rectangle );
+                gtk_label_set_text( GTK_LABEL(pv->annot_label), pdf_document_page_annot->content );
+                gtk_popover_popup( GTK_POPOVER(pv->annot_pop) );
+            }
+        }
+        else gtk_popover_popdown( GTK_POPOVER(pv->annot_pop) );
+
+        viewer_set_cursor( pv, rc, pdf_punkt ); //Kein Knopf gedrückt
+    }
 
     return TRUE;
 }
@@ -1581,6 +1641,9 @@ viewer_annot_create( PdfDocumentPage* pdf_document_page, PdfViewer* pdfv, gint s
 {
     pdf_annot* annot = NULL;
     enum pdf_annot_type art = 0;
+    gint i = 0;
+    fz_rect rect = fz_empty_rect;
+
     fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
 
     if ( state == 1 ) art = PDF_ANNOT_HIGHLIGHT;
@@ -1595,8 +1658,6 @@ viewer_annot_create( PdfDocumentPage* pdf_document_page, PdfViewer* pdfv, gint s
         pdf_set_annot_color( ctx, annot, 3, color );
     }
 
-    gint i = 0;
-    fz_rect rect = { 0 };
     while ( pdfv->highlight.page[i] != -1 )
     {
         fz_try( ctx )
@@ -1647,6 +1708,7 @@ cb_viewer_layout_release_button( GtkWidget* layout, GdkEvent* event, gpointer da
 
             zond_pdf_document_mutex_lock( pdf_document_page->document );
 
+            //ToDo: Annot über mehrere Seiten
             rc = viewer_annot_create( pdf_document_page, pv, pv->state, &errmsg );
             if ( rc )
             {
@@ -1685,6 +1747,60 @@ cb_viewer_layout_release_button( GtkWidget* layout, GdkEvent* event, gpointer da
         }
         else if ( pv->state == 0 ) gtk_widget_set_sensitive( pv->item_copy, TRUE );
     }
+    //Button wir losgelassen, nachdem auf Text-Annot geklickt wurde
+    else if ( pv->clicked_annot && pv->clicked_annot->type == PDF_ANNOT_TEXT )
+    {
+        fz_context* ctx = NULL;
+        ViewerPage* viewer_page = NULL;
+        PdfDocumentPage* pdf_document_page = NULL;
+        fz_rect rect = { 0, };
+
+        viewer_page = g_ptr_array_index( pv->arr_pages, pv->click_pdf_punkt.seite );
+        pdf_document_page = viewer_page_get_document_page( viewer_page );
+        ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
+
+        rect = pdf_annot_rect( ctx, pv->clicked_annot->annot );
+        //verschoben?
+        if ( rect.x0 != pv->clicked_annot->rect.x0 || rect.y0 != pv->clicked_annot->rect.y0 )
+        {
+            zond_pdf_document_mutex_lock( pdf_document_page->document );
+printf("change");
+            //neues rect speichert
+            fz_try( ctx ) pdf_set_annot_rect( ctx, pv->clicked_annot->annot, pv->clicked_annot->rect );
+            fz_catch( ctx )
+            {
+                zond_pdf_document_mutex_unlock( pdf_document_page->document );
+                display_message( pv->vf, "Fehler -Änderung Annot kann nicht "
+                        "gespeichert werden\n\nBeiAufruf pdf_set_annot_rect:\n",
+                        fz_caught_message( ctx ), NULL );
+                pv->clicked_annot->rect = pdf_annot_rect( ctx, pv->clicked_annot->annot );
+
+                return FALSE;
+            }
+
+                rc = zond_pdf_document_page_refresh( pdf_document_page->document,
+                        zond_pdf_document_get_index( pdf_document_page ), 2, &errmsg );
+                if ( rc )
+                {
+                    display_message( pv->vf, "Fehler - Annotation einfügen\n\n"
+                            "Bei Aufruf zond_pdf_document_page_refresh:\n", errmsg, NULL );
+                    g_free( errmsg );
+                }
+
+                rc = viewer_foreach( pv->zond->arr_pv, pdf_document_page,
+                        viewer_cb_change_annot, NULL, &errmsg );
+                if ( rc )
+                {
+                    display_message( pv->vf, "Fehler -\n\n",
+                            "Bei Aufruf viewer_refresh_changed_page:\n", errmsg, NULL );
+                    g_free( errmsg );
+
+                    zond_pdf_document_mutex_unlock( pdf_document_page->document );
+                }
+
+            zond_pdf_document_mutex_unlock( pdf_document_page->document );
+        }
+    }
 
     return TRUE;
 }
@@ -1722,16 +1838,19 @@ cb_viewer_layout_press_button( GtkWidget* layout, GdkEvent* event, gpointer
 
         if ( !rc )
         {
-            PdfDocumentPageAnnot* pdf_document_page_annot = viewer_on_annot_text_markup( pv, pdf_punkt );
+            PdfDocumentPageAnnot* pdf_document_page_annot = viewer_on_annot( pv, pdf_punkt );
             if ( pdf_document_page_annot )
             {
                 if ( (pv->state == 1 && pdf_document_page_annot->type == PDF_ANNOT_HIGHLIGHT) ||
-                    (pv->state == 2 && pdf_document_page_annot->type == PDF_ANNOT_UNDERLINE) )
-                    pv->clicked_annot = pdf_document_page_annot;
+                    (pv->state == 2 && pdf_document_page_annot->type == PDF_ANNOT_UNDERLINE) ||
+                    (pv->state == 3 && pdf_document_page_annot->type == PDF_ANNOT_TEXT) )
+                    {
+                        pv->clicked_annot = pdf_document_page_annot;
+                        if ( pv->state != 3 ) gdk_window_set_cursor( pv->gdk_window, pv->cursor_grab );
+                    }
             }
 
-            if ( pv->clicked_annot );
-            else
+            if ( !pv->clicked_annot )
             {
                 gint on_text = 0;
 
@@ -2286,6 +2405,13 @@ viewer_einrichten_fenster( PdfViewer* pv )
     gtk_box_pack_start( GTK_BOX(hbox), paned, TRUE, TRUE, 0 );
 
     gtk_container_add( GTK_CONTAINER(pv->vf), hbox );
+
+    //Popover für Annot-Inhalte
+    pv->annot_pop = gtk_popover_new( pv->layout );
+    pv->annot_label = gtk_label_new( NULL );
+    gtk_widget_show( pv->annot_label );
+    gtk_container_add( GTK_CONTAINER(pv->annot_pop), pv->annot_label );
+    gtk_popover_set_modal( GTK_POPOVER(pv->annot_pop), FALSE );
 
     gtk_widget_show_all( pv->vf );
     gtk_widget_hide( pv->swindow_tree );

@@ -216,10 +216,6 @@ cb_textsuche_act( GtkListBox* box, GtkListBoxRow* row, gpointer data )
         //Sentinel!
         pv->highlight.page[1] = -1;
 
-        //Trick: click_pdf_punkt mißbraucht, damit highlight richtiger Seite
-        //zugeordnet wird - in echt nix geclickt!
-        pv->click_pdf_punkt.seite = pos_pdf.seite;
-
         //draw-Befehl nicht notwendig, da main-loop noch nicht idle war und widgets
         //daher noch nicht dargestelt wurde
     }

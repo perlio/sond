@@ -71,8 +71,11 @@ typedef struct _Pdf_Viewer
 
     //Beim Klick
     gboolean click_on_text;
-    PdfDocumentPageAnnot* clicked_annot;
     PdfPunkt click_pdf_punkt;
+
+    PdfDocumentPageAnnot* clicked_annot;
+    GtkWidget* annot_pop;
+    GtkWidget* annot_label;
 
     DisplayedDocument* dd;
     GPtrArray* arr_pages; //array von ViewerPage*
