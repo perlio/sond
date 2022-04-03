@@ -77,6 +77,9 @@ typedef struct _Pdf_Viewer
     GtkWidget* annot_pop;
     GtkWidget* annot_label;
 
+    GtkWidget* annot_pop_edit;
+    GtkWidget* annot_textview;
+
     DisplayedDocument* dd;
     GPtrArray* arr_pages; //array von ViewerPage*
     GArray* arr_text_occ;

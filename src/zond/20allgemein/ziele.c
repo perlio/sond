@@ -199,10 +199,10 @@ ziele_erzeugen_ziel( GtkWidget* window, const DisplayedDocument* dd,
     fz_context* ctx = NULL;
     pdf_document* doc = NULL;
 
-    zond_pdf_document_mutex_lock( dd->zond_pdf_document );
-
     ctx = zond_pdf_document_get_ctx( dd->zond_pdf_document );
     doc = zond_pdf_document_get_pdf_doc( dd->zond_pdf_document );
+
+    zond_pdf_document_mutex_lock( dd->zond_pdf_document );
 
     //schon nameddest zur Seite?
     rc = pdf_document_get_dest( ctx, doc, anbindung.von.seite,

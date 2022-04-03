@@ -1701,6 +1701,20 @@ viewer_annot_create( PdfDocumentPage* pdf_document_page, PdfViewer* pdfv,
 }
 
 
+static void
+viewer_annot_edit_closed( GtkWidget* popover, gpointer data )
+{
+    gchar* text = NULL;
+
+    PdfViewer* pdfv= (PdfViewer*) data;
+
+    text = gtk_text_buffer_get_text( gtk_text_view_get_buffer( GTK_TEXT_VIEW(pdfv->annot_textview) ), NULL, NULL, TRUE );
+
+    pdf_set_annot_contents( ctx, pv->clicked_annot->annot, text );
+
+}
+
+
 static gboolean
 cb_viewer_layout_release_button( GtkWidget* layout, GdkEvent* event, gpointer data )
 {
@@ -1772,15 +1786,17 @@ cb_viewer_layout_release_button( GtkWidget* layout, GdkEvent* event, gpointer da
 
     else if (pv->state == 3 )
     {
+        ViewerPage* viewer_page = NULL;
+
+        viewer_page = g_ptr_array_index( pv->arr_pages, pv->click_pdf_punkt.seite );
+
         //Button wird losgelassen, nachdem auf Text-Annot geklickt wurde
         if ( pv->clicked_annot ) // && pv->clicked_annot->type == PDF_ANNOT_TEXT ) überflüssig, da sonsst nicht clicked_annot!
         {
             fz_context* ctx = NULL;
-            ViewerPage* viewer_page = NULL;
             PdfDocumentPage* pdf_document_page = NULL;
             fz_rect rect = { 0, };
 
-            viewer_page = g_ptr_array_index( pv->arr_pages, pv->click_pdf_punkt.seite );
             pdf_document_page = viewer_page_get_document_page( viewer_page );
             ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
 
@@ -1800,7 +1816,7 @@ cb_viewer_layout_release_button( GtkWidget* layout, GdkEvent* event, gpointer da
                     display_message( pv->vf, "Fehler -Änderung Annot kann nicht "
                             "gespeichert werden\n\nBeiAufruf pdf_set_annot_rect:\n",
                             fz_caught_message( ctx ), NULL );
-                    pv->clicked_annot->rect = pdf_annot_rect( ctx, pv->clicked_annot->annot );
+                    pv->clicked_annot->rect = rect;
 
                     return TRUE;
                 }
@@ -1814,6 +1830,7 @@ cb_viewer_layout_release_button( GtkWidget* layout, GdkEvent* event, gpointer da
                     g_free( errmsg );
 
                     zond_pdf_document_mutex_unlock( pdf_document_page->document );
+                    pv->clicked_annot->rect = rect;
 
                     return TRUE;
                 }
@@ -1827,10 +1844,35 @@ cb_viewer_layout_release_button( GtkWidget* layout, GdkEvent* event, gpointer da
                     display_message( pv->vf, "Fehler -\n\n",
                             "Bei Aufruf viewer_refresh_changed_page:\n", errmsg, NULL );
                     g_free( errmsg );
+                    pv->clicked_annot->rect = rect;
 
                     return TRUE;
                 }
             }
+
+            //angeklickt -> textview öffnen
+            GdkRectangle gdk_rectangle = { 0, };
+            gint x = 0, y = 0, width = 0, height = 0;
+
+            gtk_container_child_get( GTK_CONTAINER(pv->layout), GTK_WIDGET(viewer_page), "y", &y, NULL );
+            y += (gint) (pv->clicked_annot->rect.y0 * pv->zoom / 100 );
+            y -= gtk_adjustment_get_value( pv->v_adj );
+
+            gtk_container_child_get( GTK_CONTAINER(pv->layout), GTK_WIDGET(viewer_page), "x", &x, NULL );
+            x += (gint) (pv->clicked_annot->rect.x0 * pv->zoom / 100 );
+            x -= gtk_adjustment_get_value( pv->h_adj );
+
+            height = (gint) ((pv->clicked_annot->rect.y1 - pv->clicked_annot->rect.y0) * pv->zoom / 100);
+            width = (gint) ((pv->clicked_annot->rect.x1 - pv->clicked_annot->rect.x0) * pv->zoom / 100);
+
+            gdk_rectangle.x = x;
+            gdk_rectangle.y = y;
+            gdk_rectangle.width = width;
+            gdk_rectangle.height = height;
+
+            gtk_popover_set_pointing_to( GTK_POPOVER(pv->annot_pop_edit), &gdk_rectangle );
+            gtk_text_buffer_set_text( gtk_text_view_get_buffer( GTK_TEXT_VIEW(pv->annot_textview) ), pv->clicked_annot->content, -1 );
+            gtk_popover_popup( GTK_POPOVER(pv->annot_pop_edit) );
         }
         else // !clicked_annot - annot_text neu erzeugen
         {
@@ -2487,6 +2529,13 @@ viewer_einrichten_fenster( PdfViewer* pv )
     gtk_widget_show( pv->annot_label );
     gtk_container_add( GTK_CONTAINER(pv->annot_pop), pv->annot_label );
     gtk_popover_set_modal( GTK_POPOVER(pv->annot_pop), FALSE );
+
+    //popover mit textview
+    pv->annot_pop_edit = gtk_popover_new( pv->layout );
+    pv->annot_textview = gtk_text_view_new( );
+    gtk_widget_show( pv->annot_textview );
+    gtk_container_add( GTK_CONTAINER(pv->annot_pop_edit), pv->annot_textview );
+    g_signal_connect( pv->annot_pop_edit, "closed", G_CALLBACK(viewer_annot_edit_closed), pv->annot_textview );
 
     gtk_widget_show_all( pv->vf );
     gtk_widget_hide( pv->swindow_tree );
