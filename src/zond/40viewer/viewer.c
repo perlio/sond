@@ -329,8 +329,8 @@ viewer_thread_render( PdfViewer* pv, gint page )
 
     if ( !still_rendering ) pv->thread_pool_page =
             g_thread_pool_new( (GFunc) render_page_thread, pv, 4, FALSE, NULL );
-//Max Begrenzung
-    if ( page == -1 ) for ( gint i = 0; i < ((pv->arr_pages->len < 1000) ? pv->arr_pages->len : 1000); i++ )
+
+    if ( page == -1 ) for ( gint i = 0; i < pv->arr_pages->len; i++ )
             g_thread_pool_push( pv->thread_pool_page, GINT_TO_POINTER(i + 1), NULL );
     else  g_thread_pool_push( pv->thread_pool_page, GINT_TO_POINTER(page + 1), NULL );
 
@@ -1705,13 +1705,46 @@ static void
 viewer_annot_edit_closed( GtkWidget* popover, gpointer data )
 {
     gchar* text = NULL;
+    ViewerPage* viewer_page = NULL;
+    fz_context* ctx = NULL;
+    PdfDocumentPageAnnot* pdf_document_page_annot = NULL;
+    PdfDocumentPage* pdf_document_page = NULL;
+    GtkTextIter start = { 0, };
+    GtkTextIter end = { 0, };
+    GtkTextBuffer* text_buffer = NULL;
 
-    PdfViewer* pdfv= (PdfViewer*) data;
+    PdfViewer* pdfv = (PdfViewer*) data;
 
-    text = gtk_text_buffer_get_text( gtk_text_view_get_buffer( GTK_TEXT_VIEW(pdfv->annot_textview) ), NULL, NULL, TRUE );
+    viewer_page = VIEWER_PAGE(g_object_get_data( G_OBJECT(popover), "viewer-page" ));
+    pdf_document_page = viewer_page_get_document_page( viewer_page );
 
-    pdf_set_annot_contents( ctx, pv->clicked_annot->annot, text );
+    ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
+    pdf_document_page_annot = g_object_get_data( G_OBJECT(popover), "pdf-document-page-annot" );
 
+    text_buffer = gtk_text_view_get_buffer( GTK_TEXT_VIEW(pdfv->annot_textview) );
+    gtk_text_buffer_get_start_iter( text_buffer, &start );
+    gtk_text_buffer_get_end_iter( text_buffer, &end );
+
+    text = gtk_text_buffer_get_text( text_buffer, &start, &end, TRUE );
+
+    zond_pdf_document_mutex_lock( pdf_document_page->document );
+
+    fz_try( ctx )
+    {
+        pdf_set_annot_contents( ctx, pdf_document_page_annot->annot, text );
+        pdf_document_page_annot->content = pdf_annot_contents( ctx, pdf_document_page_annot->annot );
+    }
+    fz_catch( ctx )
+    {
+        display_message( pdfv->vf, "Fehler speichern TextAnnot -\n\nBei Aufruf "
+                "pdf_set_annot_contents/pdf_annot_contents:\n", fz_caught_message( ctx ), NULL );
+
+        return;
+    }
+
+    zond_pdf_document_mutex_unlock( pdf_document_page->document );
+
+    return;
 }
 
 
@@ -1723,6 +1756,7 @@ cb_viewer_layout_release_button( GtkWidget* layout, GdkEvent* event, gpointer da
 
     PdfViewer* pv = (PdfViewer*) data;
 
+    if ( event->button.button != GDK_BUTTON_PRIMARY ) return FALSE;
     if ( !(pv->dd) ) return TRUE;
 
     PdfPunkt pdf_punkt = { 0 };
@@ -1870,6 +1904,10 @@ cb_viewer_layout_release_button( GtkWidget* layout, GdkEvent* event, gpointer da
             gdk_rectangle.width = width;
             gdk_rectangle.height = height;
 
+            gtk_popover_popdown( GTK_POPOVER(pv->annot_pop) );
+
+            g_object_set_data( G_OBJECT(pv->annot_pop_edit), "viewer-page", viewer_page );
+            g_object_set_data( G_OBJECT(pv->annot_pop_edit), "pdf-document-page-annot", pv->clicked_annot );
             gtk_popover_set_pointing_to( GTK_POPOVER(pv->annot_pop_edit), &gdk_rectangle );
             gtk_text_buffer_set_text( gtk_text_view_get_buffer( GTK_TEXT_VIEW(pv->annot_textview) ), pv->clicked_annot->content, -1 );
             gtk_popover_popup( GTK_POPOVER(pv->annot_pop_edit) );
@@ -2072,7 +2110,7 @@ cb_viewer_layout_press_button( GtkWidget* layout, GdkEvent* event, gpointer
 
 
 static void
-viewer_cb_draw_page( GtkPrintOperation* op, GtkPrintContext* context, gint page_nr, gpointer user_data )
+viewer_cb_draw_page_for_printing( GtkPrintOperation* op, GtkPrintContext* context, gint page_nr, gpointer user_data )
 {
     PdfViewer* pdfv = NULL;
     ViewerPage* viewer_page = NULL;
@@ -2243,7 +2281,8 @@ viewer_cb_print( GtkButton* button, gpointer data )
     gtk_print_operation_set_default_page_setup( print, page_setup );
     g_object_unref( page_setup );
 
-    g_signal_connect (print, "draw_page", G_CALLBACK (viewer_cb_draw_page), pdfv );
+    g_signal_connect (print, "draw_page",
+            G_CALLBACK (viewer_cb_draw_page_for_printing), pdfv );
 
     res = gtk_print_operation_run (print, GTK_PRINT_OPERATION_ACTION_PRINT_DIALOG,
                                  GTK_WINDOW(pdfv->vf), NULL);
@@ -2535,7 +2574,7 @@ viewer_einrichten_fenster( PdfViewer* pv )
     pv->annot_textview = gtk_text_view_new( );
     gtk_widget_show( pv->annot_textview );
     gtk_container_add( GTK_CONTAINER(pv->annot_pop_edit), pv->annot_textview );
-    g_signal_connect( pv->annot_pop_edit, "closed", G_CALLBACK(viewer_annot_edit_closed), pv->annot_textview );
+    g_signal_connect( pv->annot_pop_edit, "closed", G_CALLBACK(viewer_annot_edit_closed), pv );
 
     gtk_widget_show_all( pv->vf );
     gtk_widget_hide( pv->swindow_tree );

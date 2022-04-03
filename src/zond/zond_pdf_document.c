@@ -186,9 +186,19 @@ zond_pdf_document_page_annot_load( PdfDocumentPage* pdf_document_page,
     if ( !pdf_document_page_annot ) printf("Error!\n");
 
     pdf_document_page_annot->annot = annot;
-    pdf_document_page_annot->type = pdf_annot_type( priv->ctx, annot );
-    pdf_document_page_annot->rect = pdf_annot_rect( priv->ctx, annot );
-    pdf_document_page_annot->content = pdf_annot_contents( priv->ctx, annot );
+    fz_try( priv->ctx )
+    {
+        pdf_document_page_annot->type = pdf_annot_type( priv->ctx, annot );
+        pdf_document_page_annot->rect = pdf_annot_rect( priv->ctx, annot );
+        pdf_document_page_annot->content = pdf_annot_contents( priv->ctx, annot );
+    }
+    fz_catch( priv->ctx )
+    {
+        g_free( pdf_document_page_annot );
+        fz_warn( priv->ctx, "Warnung: Funktion pdf_annot_quad_point_count gab "
+                "Fehler zurück: %s", fz_caught_message( priv->ctx ) );
+        return;
+    }
 
     //Text-Markup-annots
     if ( pdf_document_page_annot->type == PDF_ANNOT_HIGHLIGHT ||

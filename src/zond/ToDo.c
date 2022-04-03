@@ -1,5 +1,7 @@
 /*
 Bugs:
+    - Kopieren aus suchen-Fenster klappt nicht richtig
+    - Auszug stürzt ab
 
 ToDo:
 - Synchron-Punkte
@@ -17,6 +19,7 @@ ToDo:
 - Viewer
     - Riesen-PDFs handhabbar machen
     - Kommentare
+        - geht, aber _motion und so schöner machen
     - Farben für Markieren
     - Rummalen
     - TextTreffer in Fenster anzeigen
