@@ -1597,8 +1597,6 @@ cb_viewer_layout_motion_notify( GtkWidget* layout, GdkEvent* event, gpointer dat
 
             gtk_widget_queue_draw( GTK_WIDGET(g_ptr_array_index( pv->arr_pages,
                     pv->click_pdf_punkt.seite )) );
-
-            //ToDo: etwaig geöffnetes edit-Fenster mitschieben
         }
         else //nicht auf Text und nicht auf Text-annot
         { //layout wird mit Mauszeiger geschoben
