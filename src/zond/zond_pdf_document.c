@@ -635,8 +635,6 @@ zond_pdf_document_reopen_doc_and_pages( ZondPdfDocument* self, gchar** errmsg )
     if ( rc == -1 ) ERROR_S
     else if ( rc == 1 ) ERROR_S_MESSAGE( "Passwort konnte nicht authentifiziert werden")
 
-    //ToDo: Überprüfen, ob nicht alle privs neu initialisiert werden müssen?!
-
     //Seiten wieder laden
     for ( gint i = 0; i < priv->pages->len; i++ )
     {
