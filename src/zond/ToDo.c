@@ -18,8 +18,8 @@ ToDo:
 
 - Viewer
     - Riesen-PDFs handhabbar machen
-    - Kommentare
-        - geht, aber _motion und so schöner machen
+    - Annots
+        - Text-Annots über alle viewer verteilen, wenn Text editiert wird
     - Farben für Markieren
     - Rummalen
     - TextTreffer in Fenster anzeigen

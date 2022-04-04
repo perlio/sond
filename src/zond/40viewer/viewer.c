@@ -1324,18 +1324,38 @@ viewer_thumblist_render_textcell( GtkTreeViewColumn* column, GtkCellRenderer* ce
 static gint
 viewer_cb_change_annot( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg )
 {
+    gint rc = 0;
     gboolean page_rendered = FALSE;
+    GtkTreeIter iter = { 0, };
+    ViewerPixbuf* pix = NULL;
+    gboolean rendered_thumb = FALSE;
 
     ViewerPage* viewer_page = g_ptr_array_index( pv->arr_pages, page_pv );
-
     page_rendered = (gtk_image_get_storage_type( GTK_IMAGE(viewer_page) ) == GTK_IMAGE_PIXBUF );
 
-    if ( !page_rendered ) viewer_close_thread_pool_and_transfer( pv );
+    //thumb gerenderd?
+    rc = viewer_get_iter_thumb( pv, page_pv, &iter );
+    if ( rc ) ERROR_S_MESSAGE( "Bei Aufruf viewer_get_iter_thumb:\n"
+                "Kein Iter ermittelt" )
+
+    gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(pv->tree_thumb) ), &iter, 0, &pix, -1 );
+    if ( pix )
+    {
+        rendered_thumb = TRUE;
+        g_object_unref( pix );
+    }
+
+    if ( !page_rendered || !rendered_thumb ) viewer_close_thread_pool_and_transfer( pv );
 
     gtk_image_clear( GTK_IMAGE(viewer_page) );
     viewer_page_set_pixbuf_page( viewer_page, NULL );
 
-    if ( !page_rendered ) viewer_thread_render( pv, -1 );
+    //thumb löschen
+    gtk_list_store_set( GTK_LIST_STORE( gtk_tree_view_get_model(
+            GTK_TREE_VIEW(pv->tree_thumb) ) ), &iter, 0, NULL, -1 );
+    viewer_page_set_pixbuf_thumb( viewer_page, NULL );
+
+    if ( !page_rendered || !rendered_thumb ) viewer_thread_render( pv, -1 );
     else viewer_thread_render( pv, page_pv );
 
     return 0;
@@ -1381,7 +1401,7 @@ viewer_foreach( GPtrArray* arr_pv, PdfDocumentPage* pdf_document_page,
                         gint rc = 0;
 
                         rc = cb_foreach_pv( pv_vergleich, zaehler + i, data, errmsg );
-                        if ( rc ) ERROR_SOND( "cb_foreach_pv" )
+                        if ( rc ) ERROR_S
                         dirty = TRUE;
                         break;
                     }
@@ -1704,6 +1724,8 @@ viewer_annot_create( PdfDocumentPage* pdf_document_page, PdfViewer* pdfv,
 static void
 viewer_annot_edit_closed( GtkWidget* popover, gpointer data )
 {
+    gint rc = 0;
+    gchar* errmsg = NULL;
     gchar* text = NULL;
     ViewerPage* viewer_page = NULL;
     fz_context* ctx = NULL;
@@ -1729,20 +1751,25 @@ viewer_annot_edit_closed( GtkWidget* popover, gpointer data )
 
     zond_pdf_document_mutex_lock( pdf_document_page->document );
 
-    fz_try( ctx )
-    {
-        pdf_set_annot_contents( ctx, pdf_document_page_annot->annot, text );
-        pdf_document_page_annot->content = pdf_annot_contents( ctx, pdf_document_page_annot->annot );
-    }
+    fz_try( ctx ) pdf_set_annot_contents( ctx, pdf_document_page_annot->annot, text );
     fz_catch( ctx )
     {
         display_message( pdfv->vf, "Fehler speichern TextAnnot -\n\nBei Aufruf "
                 "pdf_set_annot_contents/pdf_annot_contents:\n", fz_caught_message( ctx ), NULL );
+        zond_pdf_document_mutex_unlock( pdf_document_page->document );
 
         return;
     }
 
+    rc = zond_pdf_document_page_refresh( pdf_document_page->document,
+            zond_pdf_document_get_index( pdf_document_page ), 2, &errmsg );
     zond_pdf_document_mutex_unlock( pdf_document_page->document );
+    if ( rc )
+    {
+        display_message( pdfv->vf, "Fehler - Annotation einfügen\n\n"
+                "Bei Aufruf zond_pdf_document_page_refresh:\n", errmsg, NULL );
+        g_free( errmsg );
+    }
 
     return;
 }
@@ -1789,19 +1816,19 @@ cb_viewer_layout_release_button( GtkWidget* layout, GdkEvent* event, gpointer da
             display_message( pv->vf, "Fehler - Annotation einfügen:\n\nBei Aufruf "
                     "annot_create:\n", errmsg, NULL );
             g_free( errmsg );
+            zond_pdf_document_mutex_lock( pdf_document_page->document );
         }
         else //Wenn annot eingefügt werden konnte
         {
             rc = zond_pdf_document_page_refresh( pdf_document_page->document,
                     zond_pdf_document_get_index( pdf_document_page ), 2, &errmsg );
+            zond_pdf_document_mutex_unlock( pdf_document_page->document );
             if ( rc )
             {
                 display_message( pv->vf, "Fehler - Annotation einfügen\n\n"
                         "Bei Aufruf zond_pdf_document_page_refresh:\n", errmsg, NULL );
                 g_free( errmsg );
             }
-
-            zond_pdf_document_mutex_unlock( pdf_document_page->document );
 
             rc = viewer_foreach( pv->zond->arr_pv, pdf_document_page,
                     viewer_cb_change_annot, NULL, &errmsg );
@@ -1883,34 +1910,36 @@ cb_viewer_layout_release_button( GtkWidget* layout, GdkEvent* event, gpointer da
                     return TRUE;
                 }
             }
+            else //nicht verschoben -> dann öffnen
+            {
+                //angeklickt -> textview öffnen
+                GdkRectangle gdk_rectangle = { 0, };
+                gint x = 0, y = 0, width = 0, height = 0;
 
-            //angeklickt -> textview öffnen
-            GdkRectangle gdk_rectangle = { 0, };
-            gint x = 0, y = 0, width = 0, height = 0;
+                gtk_container_child_get( GTK_CONTAINER(pv->layout), GTK_WIDGET(viewer_page), "y", &y, NULL );
+                y += (gint) (pv->clicked_annot->rect.y0 * pv->zoom / 100 );
+                y -= gtk_adjustment_get_value( pv->v_adj );
 
-            gtk_container_child_get( GTK_CONTAINER(pv->layout), GTK_WIDGET(viewer_page), "y", &y, NULL );
-            y += (gint) (pv->clicked_annot->rect.y0 * pv->zoom / 100 );
-            y -= gtk_adjustment_get_value( pv->v_adj );
+                gtk_container_child_get( GTK_CONTAINER(pv->layout), GTK_WIDGET(viewer_page), "x", &x, NULL );
+                x += (gint) (pv->clicked_annot->rect.x0 * pv->zoom / 100 );
+                x -= gtk_adjustment_get_value( pv->h_adj );
 
-            gtk_container_child_get( GTK_CONTAINER(pv->layout), GTK_WIDGET(viewer_page), "x", &x, NULL );
-            x += (gint) (pv->clicked_annot->rect.x0 * pv->zoom / 100 );
-            x -= gtk_adjustment_get_value( pv->h_adj );
+                height = (gint) ((pv->clicked_annot->rect.y1 - pv->clicked_annot->rect.y0) * pv->zoom / 100);
+                width = (gint) ((pv->clicked_annot->rect.x1 - pv->clicked_annot->rect.x0) * pv->zoom / 100);
 
-            height = (gint) ((pv->clicked_annot->rect.y1 - pv->clicked_annot->rect.y0) * pv->zoom / 100);
-            width = (gint) ((pv->clicked_annot->rect.x1 - pv->clicked_annot->rect.x0) * pv->zoom / 100);
+                gdk_rectangle.x = x;
+                gdk_rectangle.y = y;
+                gdk_rectangle.width = width;
+                gdk_rectangle.height = height;
 
-            gdk_rectangle.x = x;
-            gdk_rectangle.y = y;
-            gdk_rectangle.width = width;
-            gdk_rectangle.height = height;
+                gtk_popover_popdown( GTK_POPOVER(pv->annot_pop) );
 
-            gtk_popover_popdown( GTK_POPOVER(pv->annot_pop) );
-
-            g_object_set_data( G_OBJECT(pv->annot_pop_edit), "viewer-page", viewer_page );
-            g_object_set_data( G_OBJECT(pv->annot_pop_edit), "pdf-document-page-annot", pv->clicked_annot );
-            gtk_popover_set_pointing_to( GTK_POPOVER(pv->annot_pop_edit), &gdk_rectangle );
-            gtk_text_buffer_set_text( gtk_text_view_get_buffer( GTK_TEXT_VIEW(pv->annot_textview) ), pv->clicked_annot->content, -1 );
-            gtk_popover_popup( GTK_POPOVER(pv->annot_pop_edit) );
+                g_object_set_data( G_OBJECT(pv->annot_pop_edit), "viewer-page", viewer_page );
+                g_object_set_data( G_OBJECT(pv->annot_pop_edit), "pdf-document-page-annot", pv->clicked_annot );
+                gtk_popover_set_pointing_to( GTK_POPOVER(pv->annot_pop_edit), &gdk_rectangle );
+                gtk_text_buffer_set_text( gtk_text_view_get_buffer( GTK_TEXT_VIEW(pv->annot_textview) ), pv->clicked_annot->content, -1 );
+                gtk_popover_popup( GTK_POPOVER(pv->annot_pop_edit) );
+            }
         }
         else // !clicked_annot - annot_text neu erzeugen
         {
