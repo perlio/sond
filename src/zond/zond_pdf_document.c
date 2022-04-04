@@ -191,6 +191,7 @@ zond_pdf_document_page_annot_load( PdfDocumentPage* pdf_document_page,
         pdf_document_page_annot->type = pdf_annot_type( priv->ctx, annot );
         pdf_document_page_annot->rect = pdf_annot_rect( priv->ctx, annot );
         pdf_document_page_annot->content = pdf_annot_contents( priv->ctx, annot );
+        pdf_document_page_annot->annot_text.activ = FALSE;
     }
     fz_catch( priv->ctx )
     {

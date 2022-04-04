@@ -72,6 +72,7 @@ typedef struct _Pdf_Viewer
     //Beim Klick
     gboolean click_on_text;
     PdfPunkt click_pdf_punkt;
+    PdfPunkt release_pdf_punkt;
 
     PdfDocumentPageAnnot* clicked_annot;
     GtkWidget* annot_pop;

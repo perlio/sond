@@ -21,6 +21,7 @@ typedef struct _Annot_Text_Markup
 
 typedef struct _Annot_Text
 {
+    gboolean activ;
     gboolean open;
     const gchar* name;
 } AnnotText;
@@ -59,7 +60,6 @@ struct _ZondPdfDocumentClass
 
     GPtrArray* arr_pdf_documents;
 };
-
 
 ZondPdfDocument* zond_pdf_document_open( const gchar*, gint, gint, gchar** );
 
