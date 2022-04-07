@@ -410,11 +410,13 @@ static void
 viewer_create_layout( PdfViewer* pv )
 {
     DisplayedDocument* dd = pv->dd;
+    gint arr_size = 0;
 
     do
     {
         gint von = 0;
         gint bis = 0;
+        gint zaehler = 0;
 
         if ( dd->anbindung )
         {
@@ -422,6 +424,9 @@ viewer_create_layout( PdfViewer* pv )
             bis = dd->anbindung->bis.seite;
         }
         else bis = zond_pdf_document_get_number_of_pages( dd->zond_pdf_document ) - 1;
+
+        arr_size = pv->arr_pages->len;
+        g_ptr_array_set_size( pv->arr_pages, bis - von + 1 + arr_size );
 
         while ( von <= bis )
         {
@@ -442,10 +447,11 @@ viewer_create_layout( PdfViewer* pv )
             //ViewerPage erstellen und einfügen
             ViewerPage* viewer_page = viewer_page_new_full( pv, pdf_document_page, crop );
             gtk_layout_put( GTK_LAYOUT(pv->layout), GTK_WIDGET(viewer_page), 0, 0 );
-            g_ptr_array_add( pv->arr_pages, viewer_page );
+            ((pv->arr_pages)->pdata)[arr_size - bis + zaehler] = viewer_page;
             viewer_insert_thumb( pv, -1 );
 
             von++;
+            zaehler++;
         }
 
     } while ( (dd = dd->next) );

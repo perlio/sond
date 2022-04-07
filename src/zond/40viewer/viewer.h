@@ -82,6 +82,9 @@ typedef struct _Pdf_Viewer
 
     DisplayedDocument* dd;
     GPtrArray* arr_pages; //array von ViewerPage*
+    GArray* arr_pages_pos;
+    gfloat layout_x_max;
+
     GArray* arr_text_occ;
     gint text_occ_act;
     gint text_occ_search_completed;

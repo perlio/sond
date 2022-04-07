@@ -317,7 +317,7 @@ zond_pdf_document_page_init( ZondPdfDocument* self, gint index, gchar** errmsg )
     ((priv->pages)->pdata)[index] = pdf_document_page;
 
     pdf_document_page->document = self; //keine ref!
-
+/*
     rc = zond_pdf_document_load_page( self, index, errmsg );
     if ( rc == -1 )
     {
@@ -332,7 +332,7 @@ zond_pdf_document_page_init( ZondPdfDocument* self, gint index, gchar** errmsg )
     g_mutex_init( &pdf_document_page->mutex_page );
 
     zond_pdf_document_page_load_annots( pdf_document_page );
-
+*/
     return 0;
 }
 
