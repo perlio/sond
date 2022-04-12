@@ -122,6 +122,8 @@ gint viewer_get_iter_thumb( PdfViewer*, gint, GtkTreeIter* );
 gint viewer_foreach( GPtrArray*, PdfDocumentPage*, gint (*) (PdfViewer*, gint,
         gpointer, gchar**), gpointer, gchar** errmsg );
 
+fz_rect viewer_transform_rect_no_rotate( fz_rect, gint );
+
 PdfViewer* viewer_start_pv( Projekt* );
 
 #endif // VIEWER_H_INCLUDED

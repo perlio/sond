@@ -41,8 +41,6 @@ void viewer_page_set_pixbuf_thumb( ViewerPage*, ViewerPixbuf* );
 
 ViewerPixbuf* viewer_page_get_pixbuf_thumb( ViewerPage* );
 
-fz_rect viewer_page_clamp_icon_rect( ViewerPage*, fz_rect );
-
 G_END_DECLS
 
 

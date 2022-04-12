@@ -186,10 +186,13 @@ zond_pdf_document_page_annot_load( PdfDocumentPage* pdf_document_page,
     if ( !pdf_document_page_annot ) printf("Error!\n");
 
     pdf_document_page_annot->annot = annot;
+    pdf_document_page_annot->pdf_document_page = pdf_document_page;
+
     fz_try( priv->ctx )
     {
         pdf_document_page_annot->type = pdf_annot_type( priv->ctx, annot );
-        pdf_document_page_annot->rect = pdf_annot_rect( priv->ctx, annot );
+        pdf_document_page_annot->flags = pdf_annot_flags( priv->ctx, annot );
+        pdf_document_page_annot->rect = pdf_bound_annot( priv->ctx, annot );
         pdf_document_page_annot->content = pdf_annot_contents( priv->ctx, annot );
         pdf_document_page_annot->annot_text.activ = FALSE;
     }
@@ -317,7 +320,7 @@ zond_pdf_document_page_init( ZondPdfDocument* self, gint index, gchar** errmsg )
     ((priv->pages)->pdata)[index] = pdf_document_page;
 
     pdf_document_page->document = self; //keine ref!
-/*
+
     rc = zond_pdf_document_load_page( self, index, errmsg );
     if ( rc == -1 )
     {
@@ -332,7 +335,7 @@ zond_pdf_document_page_init( ZondPdfDocument* self, gint index, gchar** errmsg )
     g_mutex_init( &pdf_document_page->mutex_page );
 
     zond_pdf_document_page_load_annots( pdf_document_page );
-*/
+
     return 0;
 }
 
@@ -638,9 +641,23 @@ zond_pdf_document_reopen_doc_and_pages( ZondPdfDocument* self, gchar** errmsg )
     //Seiten wieder laden
     for ( gint i = 0; i < priv->pages->len; i++ )
     {
-        fz_try( priv->ctx ) ((PdfDocumentPage*) ((priv->pages)->pdata)[i])->page =
+        PdfDocumentPage* pdf_document_page = NULL;
+        pdf_annot* annot = NULL;
+
+        pdf_document_page = g_ptr_array_index( priv->pages, i );
+        fz_try( priv->ctx ) pdf_document_page->page =
                 pdf_load_page( priv->ctx, priv->doc, i );
         fz_catch( priv->ctx ) ERROR_MUPDF( "pdf_load_page" )
+
+        annot = pdf_first_annot( priv->ctx, pdf_document_page->page );
+        for ( gint u = 0; u < pdf_document_page->arr_annots->len; u++ )
+        {
+            PdfDocumentPageAnnot* pdf_document_page_annot = NULL;
+
+            pdf_document_page_annot = g_ptr_array_index( pdf_document_page->arr_annots, u );
+            pdf_document_page_annot->annot = annot;
+            pdf_document_page_annot->content = pdf_annot_contents( priv->ctx, annot );
+        }
     }
 
     return 0;
@@ -843,43 +860,8 @@ zond_pdf_document_mutex_unlock( const ZondPdfDocument* self )
 
 
 gint
-zond_pdf_document_page_refresh( ZondPdfDocument* self, gint page_doc,
-        gint flags, gchar** errmsg )
-{
-    gint rc = 0;
-
-    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
-
-    fz_context* ctx = priv->ctx;
-
-    PdfDocumentPage* pdf_document_page = g_ptr_array_index( priv->pages, page_doc );
-
-    //Seite clearen
-    fz_drop_page( ctx, &(pdf_document_page->page->super) );
-    fz_drop_display_list( ctx, pdf_document_page->display_list );
-    pdf_document_page->display_list = NULL;
-
-    rc = zond_pdf_document_load_page( self, page_doc, errmsg );
-    if ( rc == -1 ) ERROR_S
-
-    if ( flags & 1 )
-    {
-        fz_drop_stext_page( ctx, pdf_document_page->stext_page );
-        pdf_document_page->stext_page = NULL;
-    }
-    if ( flags & 2 )
-    {
-        g_ptr_array_remove_range( pdf_document_page->arr_annots, 0, pdf_document_page->arr_annots->len );
-        zond_pdf_document_page_load_annots( pdf_document_page );
-    }
-
-    return 0;
-}
-
-
-gint
 zond_pdf_document_insert_pages( ZondPdfDocument* zond_pdf_document, gint pos,
-        gint num, fz_context* ctx, pdf_document* pdf_doc, gchar** errmsg )
+        fz_context* ctx, pdf_document* pdf_doc, gchar** errmsg )
 {
     gint rc = 0;
     gint count = 0;
@@ -889,27 +871,49 @@ zond_pdf_document_insert_pages( ZondPdfDocument* zond_pdf_document, gint pos,
     count = pdf_count_pages( ctx, pdf_doc );
     if ( count == 0 ) return 0;
 
+    for ( gint i = pos; i < priv->pages->len; i++ )
+    {
+        PdfDocumentPage* pdf_document_page = g_ptr_array_index( priv->pages, i );
+        fz_drop_page( ctx, &pdf_document_page->page->super );
+    }
+
     //einfügen in doc
     rc = pdf_copy_page( ctx, pdf_doc, 0, pdf_count_pages( ctx, pdf_doc ) - 1,
-            zond_pdf_document_get_pdf_doc( zond_pdf_document ), pos, errmsg );
+            priv->doc, pos, errmsg );
     if ( rc ) ERROR_S
 
-    for ( gint i = 0; i < count; i++ )
+//    pdf_drop_page_tree( ctx, priv->doc );
+//    pdf_load_page_tree( ctx, priv->doc );
+
+    for ( gint i = pos; i < pos + count; i++ )
     {
         gint rc = 0;
 
-        g_ptr_array_insert( priv->pages, pos + i, NULL );
+        g_ptr_array_insert( priv->pages, i, NULL );
 
-        rc = zond_pdf_document_page_init( zond_pdf_document, pos + i, errmsg );
+        rc = zond_pdf_document_page_init( zond_pdf_document, i, errmsg );
         if ( rc == -1 ) ERROR_S
     }
 
     for ( gint i = pos + count; i < priv->pages->len; i++ )
     {
-        gint rc = 0;
+        pdf_annot* annot = NULL;
 
-        rc = zond_pdf_document_page_refresh( zond_pdf_document, i, 2, errmsg );
-        if ( rc == -1 ) ERROR_S
+        PdfDocumentPage* pdf_document_page = g_ptr_array_index( priv->pages, i );
+
+        fz_try( priv->ctx ) pdf_document_page->page =
+                pdf_load_page( priv->ctx, priv->doc, i );
+        fz_catch( priv->ctx ) ERROR_MUPDF( "pdf_load_page" )
+
+        annot = pdf_first_annot( priv->ctx, pdf_document_page->page );
+        for ( gint u = 0; u < pdf_document_page->arr_annots->len; u++ )
+        {
+            PdfDocumentPageAnnot* pdf_document_page_annot = NULL;
+
+            pdf_document_page_annot = g_ptr_array_index( pdf_document_page->arr_annots, u );
+            pdf_document_page_annot->annot = annot;
+            pdf_document_page_annot->content = pdf_annot_contents( priv->ctx, annot );
+        }
     }
 
     return 0;

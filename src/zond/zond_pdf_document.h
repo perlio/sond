@@ -13,6 +13,18 @@ G_BEGIN_DECLS
 #define ZOND_TYPE_PDF_DOCUMENT zond_pdf_document_get_type( )
 G_DECLARE_DERIVABLE_TYPE (ZondPdfDocument, zond_pdf_document, ZOND, PDF_DOCUMENT, GObject)
 
+typedef struct _Pdf_Document_Page
+{
+    ZondPdfDocument* document; //erhält keine ref - muß das mal mit dem const kapieren...
+    pdf_page* page;
+    fz_rect rect;
+    gint rotate;
+    fz_display_list* display_list;
+    fz_stext_page* stext_page;
+    GMutex mutex_page;
+    GPtrArray* arr_annots;
+} PdfDocumentPage;
+
 typedef struct _Annot_Text_Markup
 {
     gint n_quad;
@@ -28,8 +40,10 @@ typedef struct _Annot_Text
 
 typedef struct _Pdf_Document_Page_Annot
 {
+    PdfDocumentPage* pdf_document_page;
     pdf_annot* annot;
     enum pdf_annot_type type;
+    gint flags;
     fz_rect rect;
     const gchar* content; //Text der Annot gem. Dict-Entry /Content
 
@@ -40,18 +54,6 @@ typedef struct _Pdf_Document_Page_Annot
 //        AnnotFreeText annot_free_text;
     };
 } PdfDocumentPageAnnot;
-
-typedef struct _Pdf_Document_Page
-{
-    ZondPdfDocument* document; //erhält keine ref - muß das mal mit dem const kapieren...
-    pdf_page* page;
-    fz_rect rect;
-    gint rotate;
-    fz_display_list* display_list;
-    fz_stext_page* stext_page;
-    GMutex mutex_page;
-    GPtrArray* arr_annots;
-} PdfDocumentPage;
 
 
 struct _ZondPdfDocumentClass
@@ -96,9 +98,7 @@ void zond_pdf_document_mutex_lock( const ZondPdfDocument* );
 
 void zond_pdf_document_mutex_unlock( const ZondPdfDocument* );
 
-gint zond_pdf_document_page_refresh( ZondPdfDocument*, gint, gint, gchar** );
-
-gint zond_pdf_document_insert_pages( ZondPdfDocument*, gint, gint, fz_context*,
+gint zond_pdf_document_insert_pages( ZondPdfDocument*, gint, fz_context*,
         pdf_document*, gchar** );
 
 
