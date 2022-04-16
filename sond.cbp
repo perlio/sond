@@ -584,19 +584,6 @@
 			<Option target="Viewer (Release)" />
 			<Option target="Viewer (Testing)" />
 		</Unit>
-		<Unit filename="src/zond/40viewer/viewer_page.c">
-			<Option compilerVar="CC" />
-			<Option target="zond (Release)" />
-			<Option target="zond (Testing)" />
-			<Option target="Viewer (Release)" />
-			<Option target="Viewer (Testing)" />
-		</Unit>
-		<Unit filename="src/zond/40viewer/viewer_page.h">
-			<Option target="zond (Release)" />
-			<Option target="zond (Testing)" />
-			<Option target="Viewer (Release)" />
-			<Option target="Viewer (Testing)" />
-		</Unit>
 		<Unit filename="src/zond/99conv/general.c">
 			<Option compilerVar="CC" />
 			<Option target="zond (Release)" />

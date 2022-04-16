@@ -36,7 +36,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "viewer.h"
 #include "render.h"
 #include "document.h"
-#include "viewer_page.h"
 
 #include "../../misc.h"
 
@@ -50,11 +49,11 @@ seiten_get_document_pages( PdfViewer* pv, GArray* arr_seiten_pv )
     {
         for ( gint i = 0; i < arr_seiten_pv->len; i++ )
         {
-            ViewerPage* viewer_page = g_ptr_array_index( pv->arr_pages,
+            ViewerPageNew* viewer_page = g_ptr_array_index( pv->arr_pages,
                     g_array_index( arr_seiten_pv, gint, i ) );
 
-            if ( !g_ptr_array_find( arr_document_page, viewer_page_get_document_page( viewer_page ), NULL ) )
-                    g_ptr_array_add( arr_document_page, viewer_page_get_document_page( viewer_page ) );
+            if ( !g_ptr_array_find( arr_document_page, viewer_page->pdf_document_page, NULL ) )
+                    g_ptr_array_add( arr_document_page, (gpointer) viewer_page->pdf_document_page );
         }
     }
 
@@ -287,7 +286,9 @@ seiten_abfrage_seiten( PdfViewer* pv, const gchar* title, gint* winkel )
 static gint
 seiten_ocr_foreach( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg )
 {
-    viewer_thread_render( pv, page_pv );
+    g_signal_emit_by_name( pv->v_adj, "value-changed", NULL );
+    //Nö, statt dessen v_adj-signal auslösen
+//    viewer_thread_render( pv, page_pv );
 
     return 0;
 }
@@ -327,6 +328,8 @@ cb_pv_seiten_ocr( GtkMenuItem* item, gpointer data )
 
     for ( gint i = 0; i < arr_document_page->len; i++ )
     {
+        fz_context* ctx = NULL;
+
         PdfDocumentPage* pdf_document_page = g_ptr_array_index( arr_document_page, i );
 
         //mit mutex sichern...
@@ -335,6 +338,24 @@ cb_pv_seiten_ocr( GtkMenuItem* item, gpointer data )
                 pdf_document_page->display_list );
         pdf_document_page->display_list = NULL;
         zond_pdf_document_mutex_unlock( pdf_document_page->document );
+
+        //fz_text_list droppen und auf NULL setzen, mit mutex_page sichern
+        g_mutex_lock( &pdf_document_page->mutex_page );
+
+        ctx = fz_clone_context( zond_pdf_document_get_ctx( pdf_document_page->document ) );
+        if ( !ctx )
+        {
+            g_mutex_unlock( &pdf_document_page->mutex_page );
+            display_message( pv->vf, "Fehler OCR - Context konnte nicht geklont werden", NULL );
+            continue;
+        }
+
+        fz_drop_stext_page( ctx, pdf_document_page->stext_page );
+        pdf_document_page->stext_page = NULL;
+
+        fz_drop_context( ctx );
+
+        g_mutex_unlock( &pdf_document_page->mutex_page );
 
         rc = viewer_foreach( pv->zond->arr_pv, pdf_document_page, seiten_ocr_foreach,
                 NULL, &errmsg );
@@ -361,7 +382,7 @@ seiten_refresh_layouts( GPtrArray* arr_pv )
 
         if ( g_object_get_data( G_OBJECT(pv->layout), "dirty" ) )
         {
-            viewer_einrichten_layout( pv );
+            viewer_refresh_layout( pv );
             g_object_set_data( G_OBJECT(pv->layout), "dirty", NULL );
             gtk_widget_queue_draw( pv->layout );
         }
@@ -374,6 +395,22 @@ seiten_refresh_layouts( GPtrArray* arr_pv )
 /*
 **      Seiten drehen
 */
+static void
+seiten_page_tilt( ViewerPageNew* viewer_page)
+{
+    float x1_tmp = 0.0;
+    float y1_tmp = 0.0;
+
+    x1_tmp = viewer_page->crop.x0 + (viewer_page->crop.y1 - viewer_page->crop.y0);
+    y1_tmp = viewer_page->crop.y0 + (viewer_page->crop.x1 - viewer_page->crop.x0);
+
+    viewer_page->crop.x1 = x1_tmp;
+    viewer_page->crop.y1 = y1_tmp;
+
+    return;
+}
+
+
 static gint
 seiten_drehen_foreach( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg )
 {
@@ -381,7 +418,7 @@ seiten_drehen_foreach( PdfViewer* pv, gint page_pv, gpointer data, gchar** errms
     gint winkel = 0;
     GtkTreeIter iter = { 0 };
     winkel = GPOINTER_TO_INT(data);
-    ViewerPage* viewer_page = g_ptr_array_index( pv->arr_pages, page_pv );
+    ViewerPageNew* viewer_page = NULL;
     gboolean rendered_page = FALSE;
     gboolean rendered_thumb = FALSE;
     GdkPixbuf* pix = NULL;
@@ -402,26 +439,27 @@ seiten_drehen_foreach( PdfViewer* pv, gint page_pv, gpointer data, gchar** errms
         g_object_unref( pix );
     }
 
+    viewer_page = g_ptr_array_index( pv->arr_pages, page_pv );
     rendered_page = (gtk_image_get_storage_type( GTK_IMAGE(viewer_page) ) == GTK_IMAGE_PIXBUF );
 
     if ( !(rendered_page && rendered_thumb) )
             viewer_close_thread_pool_and_transfer( pv );
 
-    gtk_image_clear( GTK_IMAGE(viewer_page) );
-    viewer_page_set_pixbuf_page( viewer_page, NULL );
+    gtk_image_clear( GTK_IMAGE(viewer_page->image_page) );
+    viewer_page->pixbuf_page = NULL;
     gtk_list_store_set( GTK_LIST_STORE( gtk_tree_view_get_model(
             GTK_TREE_VIEW(pv->tree_thumb) ) ), &iter, 0, NULL, -1 );
-    viewer_page_set_pixbuf_thumb( viewer_page, NULL );
+    viewer_page->pixbuf_thumb = NULL;
 
     if ( winkel == 90 || winkel == -90 )
     {
-        viewer_page_tilt( viewer_page );
+        seiten_page_tilt( viewer_page );
         g_object_set_data( G_OBJECT(pv->layout), "dirty", GINT_TO_POINTER(1) );
     }
-
+/*
     if ( !(rendered_page && rendered_thumb) ) viewer_thread_render( pv, -1 );
     else viewer_thread_render( pv, page_pv );
-
+*/
     return 0;
 }
 
@@ -699,11 +737,11 @@ seiten_loeschen( PdfViewer* pv, GPtrArray* arr_document_page, gchar** errmsg )
     }
 
     seiten_refresh_layouts( pv->zond->arr_pv );
-
+/*
     //abgeschaltete thread_pools wieder anschalten
     for ( gint i = 0; i < arr_pv->len; i++ )
             viewer_thread_render( g_ptr_array_index( arr_pv, i ), -1 );
-
+*/
     g_ptr_array_unref( arr_pv );
 
     gtk_tree_selection_unselect_all(
@@ -782,14 +820,11 @@ seiten_cb_einfuegen( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg 
 
     for ( gint u = 0; u < count; u++ )
     {
-        PdfDocumentPage* pdf_document_page = NULL;
+        ViewerPageNew* viewer_page = NULL;
 
-        pdf_document_page = zond_pdf_document_get_pdf_document_page( dd->zond_pdf_document, page_doc + u );
+        viewer_page = viewer_new_page( pv, dd->zond_pdf_document, page_doc + u );
 
-        ViewerPage* viewer_page = viewer_page_new_full( pv, pdf_document_page,
-                pdf_document_page->rect );
         g_ptr_array_insert( pv->arr_pages, page_pv + u, viewer_page );
-        gtk_layout_put( GTK_LAYOUT(pv->layout), GTK_WIDGET(viewer_page), 0, 0 );
 
         viewer_insert_thumb( pv, page_pv + u  );
     }
@@ -939,7 +974,7 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
     }
 
     seiten_refresh_layouts( pv->zond->arr_pv );
-
+/*
     //thread_pools anschalten
     for ( gint i = 0; i < pv->zond->arr_pv->len; i++ )
     {
@@ -952,7 +987,7 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
                     viewer_thread_render( pv_vergleich, -1 );
         } while ( (dd = dd->next) );
     }
-
+*/
     return;
 }
 

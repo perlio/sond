@@ -279,56 +279,25 @@ zond_pdf_document_page_get_rotate( PdfDocumentPage* pdf_document_page, gchar** e
 
 
 static gint
-zond_pdf_document_load_page( ZondPdfDocument* self, gint page_doc, gchar** errmsg )
+zond_pdf_document_page_init( ZondPdfDocument* self,
+        PdfDocumentPage* pdf_document_page, gint index, gchar** errmsg )
 {
-    fz_context* ctx = NULL;
-
-    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
-    PdfDocumentPage* pdf_document_page = g_ptr_array_index( priv->pages, page_doc );
-
-    ctx = priv->ctx;
-
-    fz_try( ctx ) pdf_document_page->page =
-            pdf_load_page( ctx, priv->doc, page_doc );
-    fz_catch( ctx ) ERROR_MUPDF( "pdf_load_page" );
-
-    pdf_document_page->rect = pdf_bound_page( ctx, pdf_document_page->page );
-
-    pdf_document_page->rotate = zond_pdf_document_page_get_rotate( pdf_document_page, errmsg );
-    if ( pdf_document_page->rotate == -1 ) ERROR_S
-
-    return 0;
-}
-
-
-static gint
-zond_pdf_document_page_init( ZondPdfDocument* self, gint index, gchar** errmsg )
-{
-    gint rc = 0;
     fz_context* ctx = NULL;
 
     ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( ZOND_PDF_DOCUMENT(self) );
 
-    PdfDocumentPage* pdf_document_page = g_try_malloc0( sizeof( PdfDocumentPage ) );
-    if ( !pdf_document_page )
-    {
-        if ( errmsg ) *errmsg = g_strdup( "Bei Aufruf g_try_malloc0:\nOut of memory" );
-
-        return -1;
-    }
-
-    ((priv->pages)->pdata)[index] = pdf_document_page;
-
     pdf_document_page->document = self; //keine ref!
 
-    rc = zond_pdf_document_load_page( self, index, errmsg );
-    if ( rc == -1 )
-    {
-        fz_drop_page( ctx, &pdf_document_page->page->super );
-        g_free( ((priv->pages)->pdata)[index] );
-        ((priv->pages)->pdata)[index] = NULL;
-        ERROR_SOND( "zond_pdf_document_load_page" )
-    }
+    ctx = priv->ctx;
+    fz_try( ctx ) pdf_document_page->page =
+            pdf_load_page( ctx, priv->doc, index );
+    fz_catch( ctx ) ERROR_MUPDF( "pdf_load_page" );
+
+    fz_try( ctx ) pdf_document_page->rect = pdf_bound_page( ctx, pdf_document_page->page );
+    fz_catch( ctx ) ERROR_MUPDF( "pdf_bound_page" )
+
+    pdf_document_page->rotate = zond_pdf_document_page_get_rotate( pdf_document_page, errmsg );
+    if ( pdf_document_page->rotate == -1 ) ERROR_S
 
     pdf_document_page->arr_annots = g_ptr_array_new_with_free_func( zond_pdf_document_page_annot_free );
 
@@ -356,12 +325,21 @@ zond_pdf_document_init_pages( ZondPdfDocument* self, gint von, gint bis, gchar**
     for ( gint i = von; i < bis; i++ )
     {
         gint rc = 0;
+        PdfDocumentPage* pdf_document_page = NULL;
 
         //wenn schon initialisiert -> weiter
         if ( g_ptr_array_index( priv->pages, i ) ) continue;
 
-        rc = zond_pdf_document_page_init( self, i, errmsg );
-        if ( rc == -1 ) ERROR_SOND( "zond_pdf_document_page_init" )
+        pdf_document_page = g_malloc0( sizeof( PdfDocumentPage ) );
+        ((priv->pages)->pdata)[i] = pdf_document_page;
+
+        rc = zond_pdf_document_page_init( self, pdf_document_page, i, errmsg );
+        if ( rc == -1 )
+        {
+            g_free( pdf_document_page );
+            ((priv->pages)->pdata)[i] = NULL;
+            ERROR_SOND( "zond_pdf_document_page_init" )
+        }
     }
 
     return 0;
@@ -882,16 +860,16 @@ zond_pdf_document_insert_pages( ZondPdfDocument* zond_pdf_document, gint pos,
             priv->doc, pos, errmsg );
     if ( rc ) ERROR_S
 
-//    pdf_drop_page_tree( ctx, priv->doc );
-//    pdf_load_page_tree( ctx, priv->doc );
-
     for ( gint i = pos; i < pos + count; i++ )
     {
         gint rc = 0;
+        PdfDocumentPage* pdf_document_page = NULL;
 
-        g_ptr_array_insert( priv->pages, i, NULL );
+        pdf_document_page = g_malloc0( sizeof( PdfDocumentPage ) );
 
-        rc = zond_pdf_document_page_init( zond_pdf_document, i, errmsg );
+        g_ptr_array_insert( priv->pages, i, pdf_document_page );
+
+        rc = zond_pdf_document_page_init( zond_pdf_document, pdf_document_page, i, errmsg );
         if ( rc == -1 ) ERROR_S
     }
 

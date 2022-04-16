@@ -29,7 +29,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "render.h"
 #include "viewer.h"
 #include "document.h"
-#include "viewer_page.h"
 
 
 typedef struct
@@ -45,15 +44,13 @@ render_pixbuf_finalize( guchar *pixels, gpointer data )
     ViewerPixbufPrivate* viewer_pixbuf_priv = (ViewerPixbufPrivate*) data;
 
     fz_drop_pixmap( viewer_pixbuf_priv->ctx, viewer_pixbuf_priv->pixmap );
-//    fz_drop_context( viewer_pixbuf_priv->ctx );
 
     g_free( viewer_pixbuf_priv );
 
     return;
 }
 
-
-GdkPixbuf*
+static GdkPixbuf*
 render_pixbuf_new_from_pixmap( fz_context* ctx, fz_pixmap* pixmap )
 {
     GdkPixbuf* pixbuf = NULL;
@@ -75,17 +72,16 @@ render_pixbuf_new_from_pixmap( fz_context* ctx, fz_pixmap* pixmap )
 
 
 static gint
-render_thumbnail( fz_context* ctx, ViewerPage* viewer_page,
-        PdfDocumentPage* pdf_document_page, gchar** errmsg )
+render_thumbnail( fz_context* ctx, ViewerPageNew* viewer_page, gchar** errmsg )
 {
     fz_pixmap* pixmap = NULL;
-    ViewerPixbuf* pixbuf = NULL;
+    GdkPixbuf* pixbuf = NULL;
 
-    if ( viewer_page_get_pixbuf_thumb( viewer_page ) ) return 1;
+    if ( viewer_page->pixbuf_thumb ) return 1;
 
     fz_matrix transform = fz_scale( 0.15, 0.15 );
 
-    fz_rect rect = fz_transform_rect( viewer_page_get_crop( viewer_page ), transform );
+    fz_rect rect = fz_transform_rect( viewer_page->crop, transform );
     fz_irect irect = fz_round_rect( rect );
 
 //per draw-device to pixmap
@@ -108,7 +104,7 @@ render_thumbnail( fz_context* ctx, ViewerPage* viewer_page,
         ERROR_MUPDF( "fz_new_draw_device" )
     }
 
-    fz_try( ctx ) fz_run_display_list( ctx, pdf_document_page->display_list,
+    fz_try( ctx ) fz_run_display_list( ctx, viewer_page->pdf_document_page->display_list,
             draw_device, transform, rect, NULL );
     fz_always( ctx )
     {
@@ -121,7 +117,7 @@ render_thumbnail( fz_context* ctx, ViewerPage* viewer_page,
         ERROR_MUPDF( "fz_run_display_list" )
     }
 
-    pixbuf = render_pixbuf_new_from_pixmap( zond_pdf_document_get_ctx( pdf_document_page->document ), pixmap );
+    pixbuf = render_pixbuf_new_from_pixmap( zond_pdf_document_get_ctx( viewer_page->pdf_document_page->document ), pixmap );
     if ( !pixbuf )
     {
         fz_drop_pixmap( ctx, pixmap );
@@ -131,25 +127,25 @@ render_thumbnail( fz_context* ctx, ViewerPage* viewer_page,
         return -1;
     }
 
-    viewer_page_set_pixbuf_thumb( viewer_page, pixbuf );
+    viewer_page->pixbuf_thumb = pixbuf;
 
     return 0;
 }
 
 
 static gint
-render_pixmap( fz_context* ctx, ViewerPage* viewer_page, gdouble zoom,
-        PdfDocumentPage* pdf_document_page, gchar** errmsg )
+render_pixmap( fz_context* ctx, ViewerPageNew* viewer_page, gdouble zoom,
+        gchar** errmsg )
 {
     fz_pixmap* pixmap = NULL;
-    ViewerPixbuf* pixbuf = NULL;
+    GdkPixbuf* pixbuf = NULL;
 
     //schon gerendert?
-    if ( viewer_page_get_pixbuf_page( viewer_page ) ) return 1;
+    if ( viewer_page->pixbuf_page ) return 1;
 
     fz_matrix transform = fz_scale( zoom / 100, zoom / 100);
 
-    fz_rect rect = fz_transform_rect( viewer_page_get_crop( viewer_page ), transform );
+    fz_rect rect = fz_transform_rect( viewer_page->crop, transform );
     fz_irect irect = fz_round_rect( rect );
 
     //per draw-device to pixmap
@@ -172,7 +168,7 @@ render_pixmap( fz_context* ctx, ViewerPage* viewer_page, gdouble zoom,
         ERROR_MUPDF( "fz_new_draw_device" )
     }
 
-    fz_try( ctx ) fz_run_display_list( ctx, pdf_document_page->display_list,
+    fz_try( ctx ) fz_run_display_list( ctx, viewer_page->pdf_document_page->display_list,
             draw_device, transform, rect, NULL );
     fz_always( ctx )
     {
@@ -185,7 +181,8 @@ render_pixmap( fz_context* ctx, ViewerPage* viewer_page, gdouble zoom,
         ERROR_MUPDF( "fz_run_display_list" )
     }
 
-    pixbuf = render_pixbuf_new_from_pixmap( zond_pdf_document_get_ctx( pdf_document_page->document ), pixmap );
+    pixbuf = render_pixbuf_new_from_pixmap( zond_pdf_document_get_ctx(
+            viewer_page->pdf_document_page->document ), pixmap );
     if ( !pixbuf )
     {
         fz_drop_pixmap( ctx, pixmap );
@@ -195,7 +192,7 @@ render_pixmap( fz_context* ctx, ViewerPage* viewer_page, gdouble zoom,
         return -1;
     }
 
-    viewer_page_set_pixbuf_page( viewer_page, pixbuf );
+    viewer_page->pixbuf_page = pixbuf;
 
     return 0;
 }
@@ -275,8 +272,7 @@ render_page_thread( gpointer data, gpointer user_data )
 {
     gint rc = 0;
     gchar* errmsg = NULL;
-    ViewerPage* viewer_page = NULL;
-    PdfDocumentPage* pdf_document_page = NULL;
+    ViewerPageNew* viewer_page = NULL;
     fz_context* ctx = NULL;
     gint page = 0;
 
@@ -284,22 +280,21 @@ render_page_thread( gpointer data, gpointer user_data )
 
     page = GPOINTER_TO_INT( data );
     viewer_page = g_ptr_array_index( pv->arr_pages, page - 1 );
-    pdf_document_page = viewer_page_get_document_page( viewer_page );
 
-    ctx = fz_clone_context( zond_pdf_document_get_ctx( pdf_document_page->document ) );
+    ctx = fz_clone_context( zond_pdf_document_get_ctx( viewer_page->pdf_document_page->document ) );
     if ( !ctx ) ERROR_THREAD( "fz_clone_context" )
 
-    zond_pdf_document_mutex_lock( pdf_document_page->document );
-    rc = render_display_list( ctx, pdf_document_page, &errmsg );
-    zond_pdf_document_mutex_unlock( pdf_document_page->document );
+    zond_pdf_document_mutex_lock( viewer_page->pdf_document_page->document );
+    rc = render_display_list( ctx, viewer_page->pdf_document_page, &errmsg );
+    zond_pdf_document_mutex_unlock( viewer_page->pdf_document_page->document );
     if ( rc == -1 ) ERROR_THREAD( "render_display_list" )
 
-    g_mutex_lock( &pdf_document_page->mutex_page );
-    rc = render_display_list_to_stext_page( ctx, pdf_document_page, &errmsg );
-    g_mutex_unlock( &pdf_document_page->mutex_page );
+    g_mutex_lock( &viewer_page->pdf_document_page->mutex_page );
+    rc = render_display_list_to_stext_page( ctx, viewer_page->pdf_document_page, &errmsg );
+    g_mutex_unlock( &viewer_page->pdf_document_page->mutex_page );
     if ( rc == -1 ) ERROR_THREAD( "render_diaplay_list_to_stext_page" )
 
-    rc = render_pixmap( ctx, viewer_page, pv->zoom, pdf_document_page, &errmsg );
+    rc = render_pixmap( ctx, viewer_page, pv->zoom, &errmsg );
     if ( rc == -1 ) ERROR_THREAD( "render_pixmap" )
     else if ( rc == 0 )
     {
@@ -308,7 +303,7 @@ render_page_thread( gpointer data, gpointer user_data )
         g_mutex_unlock( &pv->mutex_arr_rendered );
     }
 
-    rc = render_thumbnail( ctx, viewer_page, pdf_document_page, &errmsg );
+    rc = render_thumbnail( ctx, viewer_page, &errmsg );
     if ( rc == -1 ) ERROR_THREAD( "render_thumbnail" )
     else if ( rc == 0 )
     {

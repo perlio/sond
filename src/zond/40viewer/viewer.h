@@ -1,6 +1,12 @@
 #ifndef VIEWER_H_INCLUDED
 #define VIEWER_H_INCLUDED
 
+#define PAGE_SPACE 10
+#define VIEWER_WIDTH 950
+#define VIEWER_HEIGHT 1050
+
+#define ANNOT_ICON_WIDTH 20
+#define ANNOT_ICON_HEIGHT 20
 
 #include "../global_types.h"
 
@@ -82,8 +88,7 @@ typedef struct _Pdf_Viewer
 
     DisplayedDocument* dd;
     GPtrArray* arr_pages; //array von ViewerPage*
-    GArray* arr_pages_pos;
-    gfloat layout_x_max;
+    gint x_max; //breiteste Seite, mit zoom
 
     GArray* arr_text_occ;
     gint text_occ_act;
@@ -96,33 +101,39 @@ typedef struct _Pdf_Viewer
     PageQuad highlight;
 } PdfViewer;
 
+typedef struct _Viewer_Page_New
+{
+    PdfViewer* pdfv;
+    PdfDocumentPage* pdf_document_page;
+    fz_rect crop;
+    gint y_pos;
+    GdkPixbuf* pixbuf_page;
+    GdkPixbuf* pixbuf_thumb;
+    GtkWidget* image_page;
+} ViewerPageNew;
+
+
 
 void viewer_springen_zu_pos_pdf( PdfViewer*, PdfPos, gdouble );
-
-void viewer_abfragen_sichtbare_seiten( PdfViewer*, gint*, gint* );
 
 void viewer_close_thread_pool( PdfViewer* );
 
 void viewer_close_thread_pool_and_transfer( PdfViewer* );
 
-void viewer_thread_render( PdfViewer*, gint );
-
-void viewer_einrichten_layout( PdfViewer* );
+void viewer_refresh_layout( PdfViewer* );
 
 void viewer_insert_thumb( PdfViewer*, gint );
+
+ViewerPageNew* viewer_new_page( PdfViewer*, ZondPdfDocument*, gint );
 
 void viewer_display_document( PdfViewer*, DisplayedDocument*, gint, gint );
 
 void viewer_save_and_close( PdfViewer* );
 
-gint viewer_get_visible_thumbs( PdfViewer*, gint*, gint* );
-
 gint viewer_get_iter_thumb( PdfViewer*, gint, GtkTreeIter* );
 
 gint viewer_foreach( GPtrArray*, PdfDocumentPage*, gint (*) (PdfViewer*, gint,
         gpointer, gchar**), gpointer, gchar** errmsg );
-
-fz_rect viewer_transform_rect_no_rotate( fz_rect, gint );
 
 PdfViewer* viewer_start_pv( Projekt* );
 
