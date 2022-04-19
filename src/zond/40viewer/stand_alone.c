@@ -65,7 +65,7 @@ pv_schliessen_datei( PdfViewer* pv )
     gint rc = 0;
     gchar* errmsg = NULL;
 
-    viewer_close_thread_pool( pv );
+    viewer_close_thread_pool_and_transfer( pv );
 
     if ( gtk_widget_get_sensitive( pv->button_speichern ) )
     {

@@ -97,6 +97,23 @@ viewer_abfragen_sichtbare_seiten( PdfViewer* pv, gint* von, gint* bis )
 }
 
 
+gint
+viewer_get_iter_thumb( PdfViewer* pv, gint page_pv, GtkTreeIter* iter )
+{
+    GtkTreeModel* model = NULL;
+    GtkTreePath* path = NULL;
+    gboolean exists = FALSE;
+
+    path = gtk_tree_path_new_from_indices( page_pv, -1 );
+    model = gtk_tree_view_get_model( GTK_TREE_VIEW(pv->tree_thumb) );
+    exists = gtk_tree_model_get_iter( model, iter, path );
+    gtk_tree_path_free( path );
+    if ( !exists ) return -1;
+
+    return 0;
+}
+
+
 static inline void
 viewer_transfer_rendered( PdfViewer* pdfv )
 {
@@ -119,10 +136,10 @@ viewer_transfer_rendered( PdfViewer* pdfv )
             gtk_widget_show( viewer_page->image_page );
 
             gtk_widget_get_size_request( pdfv->layout, &width, NULL );
-            x_pos = (width - (viewer_page->crop.x1 - viewer_page->crop.x0)) / 2;
+            x_pos = (width - (viewer_page->crop.x1 - viewer_page->crop.x0) * pdfv->zoom / 100) / 2;
 
             gtk_layout_put( GTK_LAYOUT(pdfv->layout), GTK_WIDGET(viewer_page->image_page), x_pos, viewer_page->y_pos );
-            g_object_unref( viewer_page->pixbuf_page);
+            g_object_unref( viewer_page->pixbuf_page );
         }
         else if ( page < 0 )
         {
@@ -143,22 +160,14 @@ viewer_transfer_rendered( PdfViewer* pdfv )
 
 
 void
-viewer_close_thread_pool( PdfViewer* pv )
-{
-    if ( pv->thread_pool_page )
-    {
-        g_thread_pool_free( pv->thread_pool_page, TRUE, TRUE );
-        pv->thread_pool_page = NULL;
-    }
-
-    return;
-}
-
-
-void
 viewer_close_thread_pool_and_transfer( PdfViewer* pdfv )
 {
-    viewer_close_thread_pool( pdfv );
+    if ( pdfv->thread_pool_page )
+    {
+        g_thread_pool_free( pdfv->thread_pool_page, TRUE, TRUE );
+        pdfv->thread_pool_page = NULL;
+    }
+
     viewer_transfer_rendered( pdfv );
 
     return;
@@ -191,64 +200,42 @@ viewer_get_visible_thumbs( PdfViewer* pv, gint* start, gint* end )
 }
 
 
-gint
-viewer_get_iter_thumb( PdfViewer* pv, gint page_pv, GtkTreeIter* iter )
-{
-    GtkTreeModel* model = NULL;
-    GtkTreePath* path = NULL;
-    gboolean exists = FALSE;
-
-    path = gtk_tree_path_new_from_indices( page_pv, -1 );
-    model = gtk_tree_view_get_model( GTK_TREE_VIEW(pv->tree_thumb) );
-    exists = gtk_tree_model_get_iter( model, iter, path );
-    gtk_tree_path_free( path );
-    if ( !exists ) return -1;
-
-    return 0;
-}
-
-
 static gboolean
 viewer_check_rendering( gpointer data )
 {
-    gboolean ret = G_SOURCE_REMOVE;
+    gboolean protect = FALSE;
 
     PdfViewer* pv = (PdfViewer*) data;
 
-    if ( !(pv->thread_pool_page) ) ret = G_SOURCE_REMOVE;
-//    else if ( g_thread_pool_unprocessed( pv->thread_pool_page ) == 0 )
-//            viewer_close_thread_pool( pv );
-    else ret = G_SOURCE_CONTINUE;
-
-    if ( ret == G_SOURCE_REMOVE ) g_mutex_lock( &pv->mutex_arr_rendered );
+    if ( pv->thread_pool_page && g_thread_pool_unprocessed( pv->thread_pool_page ) != 0 )
+    {
+        protect = TRUE;
+        g_mutex_lock( &pv->mutex_arr_rendered );
+    }
 
     viewer_transfer_rendered( pv );
 
-    if ( ret == G_SOURCE_REMOVE ) g_mutex_unlock( &pv->mutex_arr_rendered );
+    if ( protect ) g_mutex_unlock( &pv->mutex_arr_rendered );
 
-    return ret;
+    return G_SOURCE_CONTINUE;
 }
 
 
 static void
 viewer_thread_render( PdfViewer* pv, gint page )
 {
-    gboolean still_rendering = FALSE;
+    ViewerPageNew* viewer_page = NULL;
 
-    still_rendering = (pv->thread_pool_page != NULL);
+    viewer_page = g_ptr_array_index( pv->arr_pages, page );
 
-    if ( !still_rendering ) pv->thread_pool_page =
+    if ( viewer_page->thread_started ) return;
+
+    if ( !pv->thread_pool_page ) pv->thread_pool_page =
             g_thread_pool_new( (GFunc) render_page_thread, pv, 4, FALSE, NULL );
 
-    if ( page == -1 ) for ( gint i = 0; i < pv->arr_pages->len; i++ )
-            g_thread_pool_push( pv->thread_pool_page, GINT_TO_POINTER(i + 1), NULL );
-    else  g_thread_pool_push( pv->thread_pool_page, GINT_TO_POINTER(page + 1), NULL );
-
-    if ( page != -1 )//&& (viewer_page_ist_sichtbar( pv, page ) ||
-            //viewer_thumb_ist_sichtbar( pv, page )) )
-            g_thread_pool_move_to_front( pv->thread_pool_page, GINT_TO_POINTER(page + 1) );
-
-    if ( !still_rendering ) g_idle_add( (GSourceFunc) viewer_check_rendering, pv );
+    g_thread_pool_push( pv->thread_pool_page, GINT_TO_POINTER(page + 1), NULL );
+    g_thread_pool_move_to_front( pv->thread_pool_page, GINT_TO_POINTER(page + 1) );
+    viewer_page->thread_started = TRUE;
 
     return;
 }
@@ -293,7 +280,7 @@ viewer_render_sichtbare_seiten( PdfViewer* pv )
     gtk_entry_set_text( GTK_ENTRY(pv->entry), text );
     g_free( text );
 
-    for ( gint i = letzte; i >= erste; i-- ) viewer_thread_render( pv, i ); //g_thread_pool_move_to_front( pv->thread_pool_page, GINT_TO_POINTER(i + 1) );
+    for ( gint i = letzte; i >= erste; i-- ) viewer_thread_render( pv, i );
 
     //thumb-Leiste anpassen
     path = gtk_tree_path_new_from_indices( erste, -1 );
@@ -303,35 +290,6 @@ viewer_render_sichtbare_seiten( PdfViewer* pv )
     return;
 }
 
-/*
-static gboolean
-viewer_thumb_ist_sichtbar( PdfViewer* pv, gint page_pv )
-{
-    gint rc = 0;
-    gint start = 0;
-    gint end = 0;
-
-    rc = viewer_get_visible_thumbs( pv, &start, &end );
-
-    if ( rc == 0 && page_pv >= start && page_pv <= end ) return TRUE;
-
-    return FALSE;
-}
-
-
-static gboolean
-viewer_page_ist_sichtbar( PdfViewer* pv, gint page )
-{
-    gint von = 0;
-    gint bis = 0;
-
-    viewer_abfragen_sichtbare_seiten( pv, &von, &bis );
-
-    if ( (page < von) || (page > bis) ) return FALSE;
-
-    return TRUE;
-}
-*/
 
 void
 viewer_refresh_layout( PdfViewer* pv )
@@ -346,8 +304,8 @@ viewer_refresh_layout( PdfViewer* pv )
         ViewerPageNew* viewer_page = NULL;
 
         viewer_page = g_ptr_array_index( pv->arr_pages, u );
-        if ( (gint) (viewer_page->crop.x1 - viewer_page->crop.x0) > x_max )
-                x_max = (gint) (viewer_page->crop.x1 - viewer_page->crop.x0);
+        if ( (viewer_page->crop.x1 - viewer_page->crop.x0) > x_max )
+                x_max = viewer_page->crop.x1 - viewer_page->crop.x0;
 
         viewer_page->y_pos = (gint) (y_pos + .5);
 
@@ -355,30 +313,31 @@ viewer_refresh_layout( PdfViewer* pv )
                 pv->zoom / 100 + PAGE_SPACE;
     }
 
-    pv->x_max = (gint) ((x_max * pv->zoom / 100) + .5);
+    x_max = x_max * pv->zoom / 100;
 
     y_pos -= PAGE_SPACE;
 
-    gtk_layout_set_size( GTK_LAYOUT(pv->layout), pv->x_max, (gint) (y_pos + .5) );
+    gtk_layout_set_size( GTK_LAYOUT(pv->layout), (gint) (x_max + .5), (gint) (y_pos + .5) );
 
     //label mit Gesamtseitenzahl erzeugen
     gchar* text = g_strdup_printf( "/ %i ", pv->arr_pages->len );
     gtk_label_set_text( GTK_LABEL(pv->label_anzahl), text );
     g_free( text );
 
-    gtk_widget_set_size_request( pv->layout, pv->x_max, (gint) (y_pos + .5) );
+    gtk_widget_set_size_request( pv->layout, (gint) (x_max+ .5), (gint) (y_pos + .5) );
 
-    gtk_adjustment_set_value( pv->h_adj, (gdouble) ((pv->x_max - VIEWER_WIDTH) / 2) );
+    gtk_adjustment_set_value( pv->h_adj, (x_max - VIEWER_WIDTH) / 2 );
 
-    return;
-}
+    for ( gint u = 0; u < pv->arr_pages->len; u++ )
+    {
+        ViewerPageNew* viewer_page = NULL;
 
-
-void
-viewer_insert_thumb( PdfViewer* pv, gint page_pv )
-{
-    gtk_list_store_insert_with_values( GTK_LIST_STORE(gtk_tree_view_get_model(
-            GTK_TREE_VIEW(pv->tree_thumb) )), NULL, page_pv, 0, NULL, -1 );
+        viewer_page = g_ptr_array_index( pv->arr_pages, u );
+        if ( viewer_page->image_page &&
+                gtk_image_get_storage_type( GTK_IMAGE(viewer_page->image_page) ) == GTK_IMAGE_PIXBUF )
+                gtk_layout_move( GTK_LAYOUT(pv->layout), viewer_page->image_page,
+                (gint) (x_max - (viewer_page->crop.x1 - viewer_page->crop.x0)) / 2, viewer_page->y_pos );
+    }
 
     return;
 }
@@ -402,8 +361,8 @@ static void
 viewer_create_layout( PdfViewer* pv )
 {
     DisplayedDocument* dd = pv->dd;
-    gint x_max = 0;
-    gint y_pos = 0;
+    gdouble x_max = 0;
+    gdouble y_pos = 0;
 
     do
     {
@@ -422,10 +381,11 @@ viewer_create_layout( PdfViewer* pv )
         for ( gint i = von; i <= bis; i++ )
         {
             ViewerPageNew* viewer_page = NULL;
+            GtkTreeIter iter_tmp;
 
             viewer_page = viewer_new_page( pv, dd->zond_pdf_document, i );
 
-            viewer_page->y_pos = y_pos;
+            viewer_page->y_pos = (gint) (y_pos + .5);
             if ( dd->anbindung )
             {
                 viewer_page->crop.y0 = (von == dd->anbindung->von.seite) ?
@@ -437,20 +397,21 @@ viewer_create_layout( PdfViewer* pv )
 
             ((pv->arr_pages)->pdata)[pv->arr_pages->len - 1 - (bis - i)] = viewer_page;
 
-            viewer_insert_thumb( pv, -1 );
+            gtk_list_store_insert( GTK_LIST_STORE(gtk_tree_view_get_model(
+                    GTK_TREE_VIEW(pv->tree_thumb) )), &iter_tmp, -1 );
 
-            y_pos += (viewer_page->crop.y1 - viewer_page->crop.y0) * pv->zoom / 100 + PAGE_SPACE;
+            y_pos += ((viewer_page->crop.y1 - viewer_page->crop.y0) * pv->zoom / 100) + PAGE_SPACE;
             if ( (viewer_page->crop.x1 - viewer_page->crop.x0) > x_max )
                     x_max = viewer_page->crop.x1 - viewer_page->crop.x0;
         }
 
     } while ( (dd = dd->next) );
 
-    pv->x_max = x_max * pv->zoom / 100;
+    x_max = x_max * pv->zoom / 100;
 
     y_pos -= PAGE_SPACE;
 
-    gtk_layout_set_size( GTK_LAYOUT(pv->layout), (gint) (x_max + 0.5), (gint) (y_pos + 0.5) );
+    gtk_layout_set_size( GTK_LAYOUT(pv->layout), (gint) (x_max + .5), (gint) (y_pos + .5 ) );
 
     //label mit Gesamtseitenzahl erzeugen
     gchar* text = g_strdup_printf( "/ %i ", pv->arr_pages->len );
@@ -459,9 +420,7 @@ viewer_create_layout( PdfViewer* pv )
 
     gtk_widget_set_size_request( pv->layout, (gint) (x_max + 0.5), (gint) (y_pos + 0.5) );
 
-    gtk_adjustment_set_value( pv->h_adj, (gdouble) (((gint) (x_max + 0.5) - VIEWER_WIDTH) / 2) );
-
-    pv->x_max = x_max;
+    gtk_adjustment_set_value( pv->h_adj, (x_max - VIEWER_WIDTH) / 2);
 
     return;
 }
@@ -476,10 +435,10 @@ viewer_display_document( PdfViewer* pv, DisplayedDocument* dd, gint page, gint i
 
     viewer_create_layout( pv );
 
-//    viewer_thread_render( pv, -1 );
-
     if ( page || index ) viewer_springen_zu_pos_pdf( pv, pdf_pos, 0.0 );
     else viewer_render_sichtbare_seiten( pv );
+
+    g_idle_add( (GSourceFunc) viewer_check_rendering, pv );
 
     gtk_widget_grab_focus( pv->layout );
 
@@ -490,7 +449,7 @@ viewer_display_document( PdfViewer* pv, DisplayedDocument* dd, gint page, gint i
 static void
 viewer_schliessen( PdfViewer* pv )
 {
-    viewer_close_thread_pool( pv );
+    viewer_close_thread_pool_and_transfer( pv ); //..._and_transfer, damit etwaig noch gerenderte GdkPixbufs verarztet werden
     g_idle_remove_by_data( pv );
 
     g_array_unref( pv->arr_rendered );
@@ -602,47 +561,6 @@ cb_thumb_activated(GtkTreeView* tv, GtkTreePath* path, GtkTreeViewColumn* column
 }
 
 
-static void
-viewer_render_sichtbare_thumbs( PdfViewer* pv )
-{
-    gint rc = 0;
-    gint start = 0;
-    gint end = 0;
-
-    if ( !(pv->thread_pool_page) ) return;
-
-    rc = viewer_get_visible_thumbs( pv, &start, &end );
-    if ( rc == 0 ) for ( gint i = start; i <= end; i++ ) viewer_thread_render( pv, i );
-            //g_thread_pool_move_to_front( pv->thread_pool_page, GINT_TO_POINTER(i + 1) );
-
-    return;
-}
-
-
-static void
-cb_viewer_vadj_thumb( GtkAdjustment* vadj_thumb, gpointer data )
-{
-    PdfViewer* pv = (PdfViewer*) data;
-
-    viewer_render_sichtbare_thumbs( pv );
-
-    return;
-}
-
-
-static void
-cb_viewer_vadjustment_value_changed( GtkAdjustment* vadjustment, gpointer data )
-{
-    PdfViewer* pv = (PdfViewer*) data;
-
-    if ( pv->arr_pages->len == 0 ) return;
-
-    viewer_render_sichtbare_seiten( pv );
-
-    return;
-}
-
-
 #ifndef VIEWER
 static void
 cb_viewer_loeschen_anbindung_button_clicked( GtkButton* button, gpointer data )
@@ -726,6 +644,22 @@ cb_pv_speichern( GtkButton* button, gpointer data )
 
 
 static void
+viewer_render_sichtbare_thumbs( PdfViewer* pv )
+{
+    gint rc = 0;
+    gint start = 0;
+    gint end = 0;
+
+    if ( !(pv->thread_pool_page) ) return;
+
+    rc = viewer_get_visible_thumbs( pv, &start, &end );
+    if ( rc == 0 ) for ( gint i = start; i <= end; i++ ) viewer_thread_render( pv, i );
+
+    return;
+}
+
+
+static void
 cb_tree_thumb( GtkToggleButton* button, gpointer data )
 {
     PdfViewer* pdfv= (PdfViewer*) data;
@@ -733,6 +667,7 @@ cb_tree_thumb( GtkToggleButton* button, gpointer data )
     if ( gtk_toggle_button_get_active( button ) )
     {
         gtk_widget_show( pdfv->swindow_tree );
+        viewer_render_sichtbare_thumbs( pdfv );
     }
     else
     {
@@ -1090,8 +1025,6 @@ cb_viewer_spinbutton_value_changed( GtkSpinButton* spin_button, gpointer user_da
             h_pos );
 
     gtk_widget_grab_focus( pv->layout );
-
-//    viewer_thread_render( pv, -1 );
 
     return;
 }
@@ -2795,12 +2728,12 @@ viewer_einrichten_fenster( PdfViewer* pv )
             G_CALLBACK(cb_viewer_loeschen_anbindung_button_clicked), pv );
 #endif // VIEWER
     //und des vadjustments
-    g_signal_connect( pv->v_adj, "value-changed",
-            G_CALLBACK(cb_viewer_vadjustment_value_changed), pv );
+    g_signal_connect_swapped( pv->v_adj, "value-changed",
+            G_CALLBACK(viewer_render_sichtbare_seiten), pv );
 
     //vadjustment von thumbnail-leiste
-    g_signal_connect( vadj_thumb, "value-changed",
-            G_CALLBACK(cb_viewer_vadj_thumb), pv );
+    g_signal_connect_swapped( vadj_thumb, "value-changed",
+            G_CALLBACK(viewer_render_sichtbare_thumbs), pv );
 
     //thumb-tree
     g_signal_connect( pv->tree_thumb, "row-activated",

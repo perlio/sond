@@ -456,6 +456,10 @@ seiten_drehen_foreach( PdfViewer* pv, gint page_pv, gpointer data, gchar** errms
         seiten_page_tilt( viewer_page );
         g_object_set_data( G_OBJECT(pv->layout), "dirty", GINT_TO_POINTER(1) );
     }
+
+    viewer_page->thread_started = FALSE;
+
+//    g_signal_emit_by_name( pv->v_adj, "value-changed", NULL );
 /*
     if ( !(rendered_page && rendered_thumb) ) viewer_thread_render( pv, -1 );
     else viewer_thread_render( pv, page_pv );
@@ -821,12 +825,14 @@ seiten_cb_einfuegen( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg 
     for ( gint u = 0; u < count; u++ )
     {
         ViewerPageNew* viewer_page = NULL;
+        GtkTreeIter iter_tmp;
 
         viewer_page = viewer_new_page( pv, dd->zond_pdf_document, page_doc + u );
 
         g_ptr_array_insert( pv->arr_pages, page_pv + u, viewer_page );
 
-        viewer_insert_thumb( pv, page_pv + u  );
+        gtk_list_store_insert( GTK_LIST_STORE(gtk_tree_view_get_model(
+                GTK_TREE_VIEW(pv->tree_thumb) )), &iter_tmp, page_pv + u );
     }
 
     g_object_set_data( G_OBJECT(pv->layout), "dirty", GINT_TO_POINTER(1) );

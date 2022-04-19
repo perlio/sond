@@ -88,7 +88,6 @@ typedef struct _Pdf_Viewer
 
     DisplayedDocument* dd;
     GPtrArray* arr_pages; //array von ViewerPage*
-    gint x_max; //breiteste Seite, mit zoom
 
     GArray* arr_text_occ;
     gint text_occ_act;
@@ -110,19 +109,16 @@ typedef struct _Viewer_Page_New
     GdkPixbuf* pixbuf_page;
     GdkPixbuf* pixbuf_thumb;
     GtkWidget* image_page;
+    gboolean thread_started;
 } ViewerPageNew;
 
 
 
 void viewer_springen_zu_pos_pdf( PdfViewer*, PdfPos, gdouble );
 
-void viewer_close_thread_pool( PdfViewer* );
-
 void viewer_close_thread_pool_and_transfer( PdfViewer* );
 
 void viewer_refresh_layout( PdfViewer* );
-
-void viewer_insert_thumb( PdfViewer*, gint );
 
 ViewerPageNew* viewer_new_page( PdfViewer*, ZondPdfDocument*, gint );
 
