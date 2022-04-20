@@ -220,12 +220,54 @@ pdf_open_and_authen_document( fz_context* ctx, gboolean prompt,
 
 
 gint
-pdf_clean( fz_context* ctx, const gchar* rel_path, gchar** errmsg )
+pdf_save( fz_context* ctx, pdf_document* pdf_doc, const gchar* path,
+        void (*drop_func) (gpointer data1, gpointer data2), gpointer data1,
+        gpointer data2, gchar** errmsg )
 {
     gchar* path_tmp = NULL;
+    pdf_write_options opts =
+            { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, ~0, "", "", 0 };
+
+    if ( pdf_count_pages( ctx, pdf_doc ) < BIG_PDF )
+    {
+        opts = opts_default;
+        if ( !pdf_doc->crypt ) opts.do_garbage = 4;
+    }
+
+    path_tmp = g_strconcat( path, ".tmp_clean", NULL );
+
+    fz_try( ctx ) pdf_save_document( ctx, pdf_doc, path_tmp, &opts );
+    fz_always( ctx ) drop_func( data1, data2 );
+    fz_catch( ctx )
+    {
+        g_free( path_tmp );
+        ERROR_MUPDF( "pdf_write_document" )
+    }
+
+    if ( g_remove( path ) )
+    {
+        g_free( path_tmp );
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_remove", strerror( errno ), NULL );
+        return -1;
+    }
+    if ( g_rename( path_tmp, path ) )
+    {
+        g_free( path_tmp );
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_rename", strerror( errno ), NULL );
+        return -1;
+    }
+
+    g_free( path_tmp );
+
+    return 0;
+}
+
+
+gint
+pdf_clean( fz_context* ctx, const gchar* rel_path, gchar** errmsg )
+{
     pdf_document* doc = NULL;
     gint rc = 0;
-    pdf_write_options opts = opts_default;
 
     //prüfen, ob in Viewer geöffnet
     if ( zond_pdf_document_is_open( rel_path ) ) ERROR_S_MESSAGE( "Dokument ist geöffnet" )
@@ -234,30 +276,10 @@ pdf_clean( fz_context* ctx, const gchar* rel_path, gchar** errmsg )
     if ( rc == -1 ) ERROR_S
     else if ( rc == 1 ) return 1;
 
-    path_tmp = g_strconcat( rel_path, ".tmp_clean", NULL );
-
-    if ( !doc->crypt ) opts.do_garbage = 4;
-
-    fz_try( ctx ) pdf_save_document( ctx, doc, path_tmp, &opts );
-    fz_always( ctx ) pdf_drop_document( ctx, doc );
-    fz_catch( ctx )
-    {
-        g_free( path_tmp );
-        ERROR_MUPDF( "pdf_save_document" )
-    }
-
-    if ( g_remove( rel_path ) )
-    {
-        g_free( path_tmp );
-        ERROR_S_MESSAGE( "g_remove" )
-    }
-    if ( g_rename( path_tmp, rel_path ) )
-    {
-        g_free( path_tmp );
-        ERROR_S_MESSAGE( "g_rename" )
-    }
-
-    g_free( path_tmp );
+    rc = pdf_save( ctx, doc, rel_path, (void (*) (gpointer, gpointer)) pdf_drop_document, ctx, doc, errmsg );
+    if ( rc ) ERROR_S
 
     return 0;
 }
+
+

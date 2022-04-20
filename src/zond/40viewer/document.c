@@ -45,7 +45,7 @@ document_new_displayed_document( const gchar* rel_path,
                 anbindung->bis.seite : -1, errmsg );
     if ( !zond_pdf_document )
     {
-        if ( errmsg && *errmsg ) ERROR_MESSAGE_VAL( "zond_pdf_document_open", NULL )
+        if ( errmsg && *errmsg ) ERROR_S_MESSAGE_VAL( "zond_pdf_document_open", NULL )
         else return NULL; //Fehler: Passwort funktioniert nicht
     }
 

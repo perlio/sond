@@ -286,9 +286,10 @@ seiten_abfrage_seiten( PdfViewer* pv, const gchar* title, gint* winkel )
 static gint
 seiten_ocr_foreach( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg )
 {
-    g_signal_emit_by_name( pv->v_adj, "value-changed", NULL );
-    //Nö, statt dessen v_adj-signal auslösen
-//    viewer_thread_render( pv, page_pv );
+    ViewerPageNew* viewer_page = NULL;
+
+    viewer_page = g_ptr_array_index( pv->arr_pages, page_pv );
+    viewer_page->thread_started = FALSE;
 
     return 0;
 }
@@ -328,8 +329,6 @@ cb_pv_seiten_ocr( GtkMenuItem* item, gpointer data )
 
     for ( gint i = 0; i < arr_document_page->len; i++ )
     {
-        fz_context* ctx = NULL;
-
         PdfDocumentPage* pdf_document_page = g_ptr_array_index( arr_document_page, i );
 
         //mit mutex sichern...
@@ -342,21 +341,12 @@ cb_pv_seiten_ocr( GtkMenuItem* item, gpointer data )
         //fz_text_list droppen und auf NULL setzen, mit mutex_page sichern
         g_mutex_lock( &pdf_document_page->mutex_page );
 
-        ctx = fz_clone_context( zond_pdf_document_get_ctx( pdf_document_page->document ) );
-        if ( !ctx )
-        {
-            g_mutex_unlock( &pdf_document_page->mutex_page );
-            display_message( pv->vf, "Fehler OCR - Context konnte nicht geklont werden", NULL );
-            continue;
-        }
-
-        fz_drop_stext_page( ctx, pdf_document_page->stext_page );
+        fz_drop_stext_page( zond_pdf_document_get_ctx( pdf_document_page->document ),
+                pdf_document_page->stext_page );
         pdf_document_page->stext_page = NULL;
-
-        fz_drop_context( ctx );
-
         g_mutex_unlock( &pdf_document_page->mutex_page );
 
+        //Flag ViewerPage auf unvollständig gerendert setzen
         rc = viewer_foreach( pv->zond->arr_pv, pdf_document_page, seiten_ocr_foreach,
                 NULL, &errmsg );
         if ( rc )
@@ -382,10 +372,11 @@ seiten_refresh_layouts( GPtrArray* arr_pv )
 
         if ( g_object_get_data( G_OBJECT(pv->layout), "dirty" ) )
         {
-            viewer_refresh_layout( pv );
+            viewer_refresh_layout( pv, 0 );
             g_object_set_data( G_OBJECT(pv->layout), "dirty", NULL );
-            gtk_widget_queue_draw( pv->layout );
         }
+
+        g_signal_emit_by_name( pv->v_adj, "value-changed", NULL );
     }
 
     return;
@@ -414,39 +405,23 @@ seiten_page_tilt( ViewerPageNew* viewer_page)
 static gint
 seiten_drehen_foreach( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg )
 {
-    gint rc = 0;
     gint winkel = 0;
+    gint rc = 0;
     GtkTreeIter iter = { 0 };
     winkel = GPOINTER_TO_INT(data);
     ViewerPageNew* viewer_page = NULL;
-    gboolean rendered_page = FALSE;
-    gboolean rendered_thumb = FALSE;
-    GdkPixbuf* pix = NULL;
 
-    //thumb gerenderd?
-    rc = viewer_get_iter_thumb( pv, page_pv, &iter );
-    if ( rc )
-    {
-        if ( errmsg ) *errmsg = g_strdup( "Bei Aufruf viewer_get_iter_thumb:\n"
-                "Konnte keinen iter ermitteln" );
-        return -1;
-    }
-
-    gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(pv->tree_thumb) ), &iter, 0, &pix, -1 );
-    if ( pix )
-    {
-        rendered_thumb = TRUE;
-        g_object_unref( pix );
-    }
+    viewer_close_thread_pool_and_transfer( pv );
 
     viewer_page = g_ptr_array_index( pv->arr_pages, page_pv );
-    rendered_page = (gtk_image_get_storage_type( GTK_IMAGE(viewer_page) ) == GTK_IMAGE_PIXBUF );
 
-    if ( !(rendered_page && rendered_thumb) )
-            viewer_close_thread_pool_and_transfer( pv );
-
-    gtk_image_clear( GTK_IMAGE(viewer_page->image_page) );
+    if ( viewer_page->image_page ) gtk_image_clear( GTK_IMAGE(viewer_page->image_page) );
     viewer_page->pixbuf_page = NULL;
+
+    rc = viewer_get_iter_thumb( pv, page_pv, &iter );
+    if ( rc ) ERROR_S_MESSAGE( "Bei Aufruf viewer_get_iter:\niter konnte "
+            "nicht ermittelt werden" );
+
     gtk_list_store_set( GTK_LIST_STORE( gtk_tree_view_get_model(
             GTK_TREE_VIEW(pv->tree_thumb) ) ), &iter, 0, NULL, -1 );
     viewer_page->pixbuf_thumb = NULL;
@@ -459,11 +434,6 @@ seiten_drehen_foreach( PdfViewer* pv, gint page_pv, gpointer data, gchar** errms
 
     viewer_page->thread_started = FALSE;
 
-//    g_signal_emit_by_name( pv->v_adj, "value-changed", NULL );
-/*
-    if ( !(rendered_page && rendered_thumb) ) viewer_thread_render( pv, -1 );
-    else viewer_thread_render( pv, page_pv );
-*/
     return 0;
 }
 
@@ -587,6 +557,7 @@ seiten_cb_loesche_seite( PdfViewer* pv, gint page_pv, gpointer data, gchar** err
     gint rc = 0;
     gboolean closed = FALSE;
     GtkTreeIter iter;
+    ViewerPageNew* viewer_page = NULL;
 
     //in Array suchen, ob pv schon vorhanden
     for ( gint i = 0; i < (*p_arr_pv)->len; i++ )
@@ -608,16 +579,13 @@ seiten_cb_loesche_seite( PdfViewer* pv, gint page_pv, gpointer data, gchar** err
     //pv muß neues layout haben!
     g_object_set_data( G_OBJECT(pv->layout), "dirty", GINT_TO_POINTER(1) );
 
-    gtk_widget_destroy( GTK_WIDGET(g_ptr_array_index( pv->arr_pages, page_pv )) );
+    viewer_page = g_ptr_array_index( pv->arr_pages, page_pv );
+    if ( viewer_page->image_page ) gtk_widget_destroy( GTK_WIDGET(viewer_page->image_page) );
     g_ptr_array_remove_index( pv->arr_pages, page_pv ); //viewer_page wird freed!
 
     rc = viewer_get_iter_thumb( pv, page_pv, &iter );
-    if ( rc )
-    {
-        if ( errmsg ) *errmsg = g_strdup( "Bei Aufruf viewer_get_iter_thumb:\n"
+    if ( rc ) ERROR_S_MESSAGE( "Bei Aufruf viewer_get_iter_thumb:\n"
                 "Konnte keinen iter ermitteln" );
-        return -1;
-    }
 
     gtk_list_store_remove( GTK_LIST_STORE( gtk_tree_view_get_model(
             GTK_TREE_VIEW(pv->tree_thumb) ) ), &iter );
@@ -729,7 +697,7 @@ seiten_loeschen( PdfViewer* pv, GPtrArray* arr_document_page, gchar** errmsg )
             ERROR_MUPDF( "pdf_delete_page" )
         }
     }
-
+/*
     //säubern, um ins Leere gehende Outlines etc. zu entfernen
     fz_try( ctx ) retainpages( ctx,
             zond_pdf_document_get_pdf_doc( pv->dd->zond_pdf_document ), 1,
@@ -739,13 +707,9 @@ seiten_loeschen( PdfViewer* pv, GPtrArray* arr_document_page, gchar** errmsg )
         g_ptr_array_unref( arr_pv );
         ERROR_MUPDF( "retainpages" )
     }
-
-    seiten_refresh_layouts( pv->zond->arr_pv );
-/*
-    //abgeschaltete thread_pools wieder anschalten
-    for ( gint i = 0; i < arr_pv->len; i++ )
-            viewer_thread_render( g_ptr_array_index( arr_pv, i ), -1 );
 */
+    seiten_refresh_layouts( arr_pv );
+
     g_ptr_array_unref( arr_pv );
 
     gtk_tree_selection_unselect_all(
@@ -980,20 +944,7 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
     }
 
     seiten_refresh_layouts( pv->zond->arr_pv );
-/*
-    //thread_pools anschalten
-    for ( gint i = 0; i < pv->zond->arr_pv->len; i++ )
-    {
-        PdfViewer* pv_vergleich = g_ptr_array_index( pv->zond->arr_pv, i );
-        DisplayedDocument* dd = pv_vergleich->dd;
 
-        do
-        {
-            if ( dd->zond_pdf_document == pv->dd->zond_pdf_document )
-                    viewer_thread_render( pv_vergleich, -1 );
-        } while ( (dd = dd->next) );
-    }
-*/
     return;
 }
 

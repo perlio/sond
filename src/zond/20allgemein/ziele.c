@@ -242,7 +242,7 @@ ziele_erzeugen_ziel( GtkWidget* window, const DisplayedDocument* dd,
                 if ( rc )
                 {
                     zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
-                    ERROR_VAL( -2 )
+                    ERROR_S_VAL( -2 )
                 }
             }
             else

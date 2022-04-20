@@ -669,41 +669,10 @@ zond_pdf_document_save( ZondPdfDocument* self, gchar** errmsg )
     if ( priv->dirty )
     {
         gint rc = 0;
-        fz_buffer* buf = NULL;
-        fz_output* out = NULL;
-        pdf_write_options opts = opts_default;
 
-        fz_context* ctx = priv->ctx;
-
-        fz_try( priv->ctx ) buf = fz_new_buffer( priv->ctx, 1024 );
-        fz_catch( priv->ctx ) ERROR_MUPDF( "fz_new_buffer" )
-
-        fz_try( priv->ctx ) out = fz_new_output_with_buffer(priv->ctx, buf );
-        fz_catch( priv->ctx )
-        {
-            fz_drop_buffer( priv->ctx, buf );
-            ERROR_MUPDF( "fz_new_output_with_buffer" )
-        }
-
-        if ( !priv->doc->crypt ) opts.do_garbage = 4;
-
-        fz_try( priv->ctx ) pdf_write_document( priv->ctx, priv->doc, out, &opts );
-        fz_always( priv->ctx )
-        {
-            fz_close_output( priv->ctx, out );
-            fz_drop_output( priv->ctx, out );
-
-            zond_pdf_document_close_doc_and_pages( self );
-        }
-        fz_catch( priv->ctx )
-        {
-            fz_drop_buffer( priv->ctx, buf );
-            ERROR_MUPDF( "pdf_write_document" )
-        }
-
-        fz_try( priv->ctx ) fz_save_buffer( priv->ctx, buf, priv->path );
-        fz_always( priv->ctx ) fz_drop_buffer( priv->ctx, buf );
-        fz_catch( priv->ctx ) ERROR_MUPDF( "fz_save_buffer" )
+        rc = pdf_save( priv->ctx, priv->doc, priv->path,
+                (void (*) (gpointer, gpointer)) zond_pdf_document_close_doc_and_pages, self, NULL, errmsg );
+        if ( rc ) ERROR_S
 
         rc = zond_pdf_document_reopen_doc_and_pages( self, errmsg );
         if ( rc ) ERROR_S

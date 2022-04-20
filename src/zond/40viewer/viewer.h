@@ -118,7 +118,7 @@ void viewer_springen_zu_pos_pdf( PdfViewer*, PdfPos, gdouble );
 
 void viewer_close_thread_pool_and_transfer( PdfViewer* );
 
-void viewer_refresh_layout( PdfViewer* );
+void viewer_refresh_layout( PdfViewer*, gint );
 
 ViewerPageNew* viewer_new_page( PdfViewer*, ZondPdfDocument*, gint );
 

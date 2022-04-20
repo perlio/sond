@@ -1515,7 +1515,7 @@ zond_dbase_get_first_child( ZondDBase* zond_dbase, Baum baum, gint node_id, gcha
     if ( rc == SQLITE_ROW ) first_child_id =
             sqlite3_column_int( stmt[0 + OFFSET], 1 );
 
-    if ( rc == SQLITE_DONE ) ERROR_MESSAGE_VAL( "node_id existiert nicht", -2 )
+    if ( rc == SQLITE_DONE ) ERROR_S_MESSAGE_VAL( "node_id existiert nicht", -2 )
 
     return first_child_id;
 }

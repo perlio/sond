@@ -155,6 +155,8 @@ viewer_transfer_rendered( PdfViewer* pdfv )
         idx--;
     }
 
+    gtk_widget_queue_draw( pdfv->layout );
+
     return;
 }
 
@@ -235,6 +237,7 @@ viewer_thread_render( PdfViewer* pv, gint page )
 
     g_thread_pool_push( pv->thread_pool_page, GINT_TO_POINTER(page + 1), NULL );
     g_thread_pool_move_to_front( pv->thread_pool_page, GINT_TO_POINTER(page + 1) );
+
     viewer_page->thread_started = TRUE;
 
     return;
@@ -292,17 +295,23 @@ viewer_render_sichtbare_seiten( PdfViewer* pv )
 
 
 void
-viewer_refresh_layout( PdfViewer* pv )
+viewer_refresh_layout( PdfViewer* pv, gint pos )
 {
-    if ( pv->arr_pages->len == 0 ) return;
-
+    ViewerPageNew* viewer_page = NULL;
     gdouble y_pos = 0;
     gdouble x_max = 0;
 
-    for ( gint u = 0; u < pv->arr_pages->len; u++ )
-    {
-        ViewerPageNew* viewer_page = NULL;
+    if ( pv->arr_pages->len == 0 ) return;
 
+    if ( pos > 0 )
+    {
+        viewer_page = g_ptr_array_index( pv->arr_pages, pos - 1 );
+
+        y_pos = viewer_page->y_pos + (viewer_page->crop.y1 - viewer_page->crop.y0) * pv->zoom / 100 + PAGE_SPACE;
+    }
+
+    for ( gint u = pos; u < pv->arr_pages->len; u++ )
+    {
         viewer_page = g_ptr_array_index( pv->arr_pages, u );
         if ( (viewer_page->crop.x1 - viewer_page->crop.x0) > x_max )
                 x_max = viewer_page->crop.x1 - viewer_page->crop.x0;
@@ -328,15 +337,14 @@ viewer_refresh_layout( PdfViewer* pv )
 
     gtk_adjustment_set_value( pv->h_adj, (x_max - VIEWER_WIDTH) / 2 );
 
-    for ( gint u = 0; u < pv->arr_pages->len; u++ )
+    for ( gint u = pos; u < pv->arr_pages->len; u++ )
     {
         ViewerPageNew* viewer_page = NULL;
 
         viewer_page = g_ptr_array_index( pv->arr_pages, u );
-        if ( viewer_page->image_page &&
-                gtk_image_get_storage_type( GTK_IMAGE(viewer_page->image_page) ) == GTK_IMAGE_PIXBUF )
+        if ( viewer_page->image_page )
                 gtk_layout_move( GTK_LAYOUT(pv->layout), viewer_page->image_page,
-                (gint) (x_max - (viewer_page->crop.x1 - viewer_page->crop.x0)) / 2, viewer_page->y_pos );
+                (gint) (x_max - (viewer_page->crop.x1 - viewer_page->crop.x0) * pv->zoom / 100) / 2, viewer_page->y_pos );
     }
 
     return;
@@ -1009,6 +1017,7 @@ cb_viewer_spinbutton_value_changed( GtkSpinButton* spin_button, gpointer user_da
         viewer_page = g_ptr_array_index( pv->arr_pages, i );
         if ( viewer_page->image_page ) gtk_image_clear( GTK_IMAGE(viewer_page->image_page) );
         viewer_page->pixbuf_page = NULL;
+        viewer_page->thread_started = FALSE;
     }
 
     //Alte Position merken
@@ -1017,7 +1026,7 @@ cb_viewer_spinbutton_value_changed( GtkSpinButton* spin_button, gpointer user_da
     gdouble h_pos =  gtk_adjustment_get_value( pv->h_adj )/
             gtk_adjustment_get_upper( pv->h_adj );
 
-    viewer_refresh_layout( pv );
+    viewer_refresh_layout( pv, 0 );
 
     gtk_adjustment_set_value( pv->v_adj, gtk_adjustment_get_upper( pv->v_adj ) *
             v_pos );

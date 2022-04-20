@@ -1,6 +1,8 @@
 #ifndef PDF_DATEIEN_H_INCLUDED
 #define PDF_DATEIEN_H_INCLUDED
 
+#define BIG_PDF 2000
+
 #include <mupdf/fitz.h>
 #include <mupdf/pdf.h>
 
@@ -52,6 +54,9 @@ gint pdf_copy_page( fz_context*, pdf_document*, gint, gint, pdf_document*,
 
 gint pdf_open_and_authen_document( fz_context*, gboolean, const gchar*, gchar**,
         pdf_document**, gint*, gchar** );
+
+gint pdf_save( fz_context*, pdf_document*, const gchar*, void (*) (gpointer,
+        gpointer), gpointer, gpointer, gchar** );
 
 gint pdf_clean( fz_context*, const gchar*, gchar** );
 
