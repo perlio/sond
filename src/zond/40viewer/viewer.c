@@ -114,6 +114,14 @@ viewer_get_iter_thumb( PdfViewer* pv, gint page_pv, GtkTreeIter* iter )
 }
 
 
+static gboolean
+viewer_draw_image_page( GtkWidget* image, cairo_t* cr )
+{
+
+    return FALSE;
+}
+
+
 static inline void
 viewer_transfer_rendered( PdfViewer* pdfv )
 {
@@ -134,6 +142,7 @@ viewer_transfer_rendered( PdfViewer* pdfv )
             //Dann ist aber ausgeschlossen, daß ein thread auf viewer_page->pixbuf_page zugreift
             viewer_page->image_page = gtk_image_new_from_pixbuf( viewer_page->pixbuf_page );
             gtk_widget_show( viewer_page->image_page );
+            g_signal_connect( viewer_page->image_page, "draw", G_CALLBACK(viewer_draw_image_page), pdfv );
 
             gtk_widget_get_size_request( pdfv->layout, &width, NULL );
             x_pos = (width - (viewer_page->crop.x1 - viewer_page->crop.x0) * pdfv->zoom / 100) / 2;
@@ -1139,18 +1148,16 @@ static gint
 viewer_on_text( PdfViewer* pv, PdfPunkt pdf_punkt )
 {
     ViewerPageNew* viewer_page = NULL;
+    gboolean rendered = FALSE;
 
     viewer_page = g_ptr_array_index( pv->arr_pages, pdf_punkt.seite );
 
-    if ( pv->thread_pool_page )
-    {
-        gboolean rendered = FALSE;
-
-        g_mutex_lock( &viewer_page->pdf_document_page->mutex_page );
-        rendered = (viewer_page->pdf_document_page->stext_page != NULL);
-        g_mutex_unlock( &viewer_page->pdf_document_page->mutex_page );
-        if ( !rendered ) return 0;
-    }
+    //Test, ob stext_page schon gerendert; falls ja, kein weiteres mutex erforderlich,
+    //weil nur durch odf_ocr zurückgesetzt werden kann
+    g_mutex_lock( &viewer_page->pdf_document_page->mutex_page );
+    rendered = (viewer_page->pdf_document_page->stext_page != NULL);
+    g_mutex_unlock( &viewer_page->pdf_document_page->mutex_page );
+    if ( !rendered ) return 0;
 
 	for ( fz_stext_block* block = viewer_page->pdf_document_page->stext_page->first_block; block;
             block = block->next)
@@ -1284,7 +1291,9 @@ viewer_cb_change_annot( PdfViewer* pv, gint page_pv, gpointer data, gchar** errm
     gboolean rendered_thumb = FALSE;
 
     ViewerPageNew* viewer_page = g_ptr_array_index( pv->arr_pages, page_pv );
-    page_rendered = (gtk_image_get_storage_type( GTK_IMAGE(viewer_page->image_page) ) == GTK_IMAGE_PIXBUF );
+    if ( viewer_page->image_page &&
+            gtk_image_get_storage_type( GTK_IMAGE(viewer_page->image_page) )
+            == GTK_IMAGE_PIXBUF ) page_rendered = TRUE;
 
     //thumb gerenderd?
     rc = viewer_get_iter_thumb( pv, page_pv, &iter );
@@ -1307,10 +1316,9 @@ viewer_cb_change_annot( PdfViewer* pv, gint page_pv, gpointer data, gchar** errm
     gtk_list_store_set( GTK_LIST_STORE( gtk_tree_view_get_model(
             GTK_TREE_VIEW(pv->tree_thumb) ) ), &iter, 0, NULL, -1 );
     viewer_page->pixbuf_thumb = NULL;
-/*
-    if ( !page_rendered || !rendered_thumb ) viewer_thread_render( pv, -1 );
-    else viewer_thread_render( pv, page_pv );
-*/
+
+    viewer_page->thread_started = FALSE;
+
     return 0;
 }
 

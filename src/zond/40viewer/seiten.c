@@ -282,7 +282,6 @@ seiten_abfrage_seiten( PdfViewer* pv, const gchar* title, gint* winkel )
 /*
 **  Seiten OCR
 */
-//wrapper, weil viewer_thread_render void ist; viewer_foreach gibt dann Fehler zurück
 static gint
 seiten_ocr_foreach( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg )
 {
