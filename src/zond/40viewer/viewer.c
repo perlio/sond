@@ -237,8 +237,6 @@ viewer_transfer_rendered( PdfViewer* pdfv )
         idx--;
     }
 
-//    gtk_widget_queue_draw( pdfv->layout );
-
     return;
 }
 
@@ -526,7 +524,7 @@ viewer_display_document( PdfViewer* pv, DisplayedDocument* dd, gint page, gint i
     viewer_create_layout( pv );
 
     if ( page || index ) viewer_springen_zu_pos_pdf( pv, pdf_pos, 0.0 );
-    else viewer_render_sichtbare_seiten( pv );
+    else g_signal_emit_by_name( pv->v_adj, "value-changed", NULL ); // falls pos == 0
 
     g_idle_add( (GSourceFunc) viewer_check_rendering, pv );
 
@@ -1115,6 +1113,8 @@ cb_viewer_spinbutton_value_changed( GtkSpinButton* spin_button, gpointer user_da
     gtk_adjustment_set_value( pv->h_adj, gtk_adjustment_get_upper( pv->h_adj ) *
             h_pos );
 
+    g_signal_emit_by_name( pv->v_adj, "value-changed", NULL );
+
     gtk_widget_grab_focus( pv->layout );
 
     return;
@@ -1391,8 +1391,7 @@ viewer_cb_change_annot( PdfViewer* pv, gint page_pv, gpointer data, gchar** errm
     viewer_page->pixbuf_thumb = NULL;
 
     viewer_page->thread_started = FALSE;
-
-    viewer_thread_render( pv, page_pv );
+    g_signal_emit_by_name( pv->v_adj, "value-changed", NULL );
 
     return 0;
 }

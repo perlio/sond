@@ -289,6 +289,7 @@ seiten_ocr_foreach( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg )
 
     viewer_page = g_ptr_array_index( pv->arr_pages, page_pv );
     viewer_page->thread_started = FALSE;
+    g_signal_emit_by_name( pv->v_adj, "value-changed", NULL );
 
     return 0;
 }
@@ -432,6 +433,7 @@ seiten_drehen_foreach( PdfViewer* pv, gint page_pv, gpointer data, gchar** errms
     }
 
     viewer_page->thread_started = FALSE;
+    g_signal_emit_by_name( pv->v_adj, "value-changed", NULL );
 
     return 0;
 }
