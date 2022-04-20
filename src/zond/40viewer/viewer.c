@@ -114,11 +114,26 @@ viewer_get_iter_thumb( PdfViewer* pv, gint page_pv, GtkTreeIter* iter )
 }
 
 
+static void
+viewer_page_mark_quad( cairo_t* cr, fz_quad quad, fz_matrix transform )
+{
+    fz_rect rect = fz_transform_rect( fz_rect_from_quad( quad ), transform );
+
+    float x = rect.x0;
+    float y = rect.y0;
+    float width = rect.x1 - x;
+    float heigth = rect.y1 - y;
+
+    cairo_rectangle( cr, x, y, width, heigth );
+    cairo_set_source_rgba (cr, 0, .1, .8, 0.5);
+    cairo_fill(cr);
+}
+
+
 static gboolean
 viewer_draw_image_page( GtkWidget* image, cairo_t* cr, gpointer data )
 {
     fz_matrix transform = { 0, };
-    fz_rect crop = { 0, };
 
     ViewerPageNew* viewer_page = (ViewerPageNew*) data;
 
@@ -176,7 +191,6 @@ viewer_draw_image_page( GtkWidget* image, cairo_t* cr, gpointer data )
         }
     }
 
-
     return FALSE;
 }
 
@@ -201,7 +215,7 @@ viewer_transfer_rendered( PdfViewer* pdfv )
             //Dann ist aber ausgeschlossen, daß ein thread auf viewer_page->pixbuf_page zugreift
             viewer_page->image_page = gtk_image_new_from_pixbuf( viewer_page->pixbuf_page );
             gtk_widget_show( viewer_page->image_page );
-            g_signal_connect( viewer_page->image_page, "draw", G_CALLBACK(viewer_draw_image_page), viewer_page );
+            g_signal_connect_after( viewer_page->image_page, "draw", G_CALLBACK(viewer_draw_image_page), viewer_page );
 
             gtk_widget_get_size_request( pdfv->layout, &width, NULL );
             x_pos = (width - (viewer_page->crop.x1 - viewer_page->crop.x0) * pdfv->zoom / 100) / 2;
@@ -223,7 +237,7 @@ viewer_transfer_rendered( PdfViewer* pdfv )
         idx--;
     }
 
-    gtk_widget_queue_draw( pdfv->layout );
+//    gtk_widget_queue_draw( pdfv->layout );
 
     return;
 }
@@ -1378,6 +1392,8 @@ viewer_cb_change_annot( PdfViewer* pv, gint page_pv, gpointer data, gchar** errm
 
     viewer_page->thread_started = FALSE;
 
+    viewer_thread_render( pv, page_pv );
+
     return 0;
 }
 
@@ -1533,7 +1549,7 @@ viewer_clamp_icon_rect( ViewerPageNew* viewer_page, fz_rect rect )
     fz_rect rect_cropped = { 0, };
 
     //clamp
-    rect_cropped = viewer_page->crop;
+    rect_cropped = rect;
 
     if ( rect_cropped.x0 < viewer_page->crop.x0 ) rect_cropped.x0 = viewer_page->crop.x0;
     if ( rect_cropped.x0 + ANNOT_ICON_WIDTH > viewer_page->crop.x1 ) rect_cropped.x0 = viewer_page->crop.x1 - ANNOT_ICON_WIDTH;
@@ -1970,6 +1986,8 @@ cb_viewer_layout_motion_notify( GtkWidget* layout, GdkEvent* event, gpointer dat
         }
         else if ( pv->clicked_annot && pv->clicked_annot->type == PDF_ANNOT_TEXT )
         {
+            ViewerPageNew* viewer_page = NULL;
+
             gtk_popover_popdown( GTK_POPOVER(pv->annot_pop) );
 
             pv->clicked_annot->rect.x0 -= (pv->x - event->motion.x_root) / pv->zoom * 100;
@@ -1977,8 +1995,8 @@ cb_viewer_layout_motion_notify( GtkWidget* layout, GdkEvent* event, gpointer dat
             pv->clicked_annot->rect.y0 -= (pv->y - event->motion.y_root) / pv->zoom * 100;
             pv->clicked_annot->rect.y1 -= (pv->y - event->motion.y_root) / pv->zoom * 100;
 
-            gtk_widget_queue_draw( GTK_WIDGET(g_ptr_array_index( pv->arr_pages,
-                    pv->click_pdf_punkt.seite )) );
+            viewer_page = g_ptr_array_index( pv->arr_pages, pv->click_pdf_punkt.seite );
+            gtk_widget_queue_draw( viewer_page->image_page );
         }
         else //nicht auf Text und nicht auf Text-annot
         { //layout wird mit Mauszeiger geschoben
