@@ -115,8 +115,67 @@ viewer_get_iter_thumb( PdfViewer* pv, gint page_pv, GtkTreeIter* iter )
 
 
 static gboolean
-viewer_draw_image_page( GtkWidget* image, cairo_t* cr )
+viewer_draw_image_page( GtkWidget* image, cairo_t* cr, gpointer data )
 {
+    fz_matrix transform = { 0, };
+    fz_rect crop = { 0, };
+
+    ViewerPageNew* viewer_page = (ViewerPageNew*) data;
+
+    transform = fz_translate( 0.0, -viewer_page->crop.y0 );
+    transform = fz_post_scale( transform, viewer_page->pdfv->zoom / 100, viewer_page->pdfv->zoom / 100 );
+
+    //wenn annot angeclickt wurde
+    if ( viewer_page->pdfv->clicked_annot )
+    {
+        if ( viewer_page->pdfv->clicked_annot->type == PDF_ANNOT_HIGHLIGHT ||
+                viewer_page->pdfv->clicked_annot->type == PDF_ANNOT_UNDERLINE )
+        {
+            //Test auf type nicht erforderlich, da clicked_annot nur gesetzt wird, wenn HIGHLIGH oder UNDERLINE
+            GArray* arr_quads = viewer_page->pdfv->clicked_annot->annot_text_markup.arr_quads;
+
+            for ( gint i = 0; i < arr_quads->len; i++ )
+            {
+                fz_quad quad = g_array_index( arr_quads, fz_quad, i );
+                quad = fz_transform_quad( quad, transform );
+                cairo_move_to( cr, quad.ul.x, quad.ul.y );
+                cairo_line_to( cr, quad.ur.x, quad.ur.y );
+                cairo_line_to( cr, quad.lr.x, quad.lr.y );
+                cairo_line_to( cr, quad.ll.x, quad.ll.y );
+                cairo_line_to( cr, quad.ul.x, quad.ul.y );
+                cairo_set_source_rgb(cr, 0, 1, 0 );
+                cairo_stroke( cr );
+            }
+        }
+        else if ( viewer_page->pdfv->clicked_annot->type == PDF_ANNOT_TEXT &&
+                viewer_page->pdfv->clicked_annot->pdf_document_page == viewer_page->pdf_document_page )
+        {
+            fz_rect rect = { 0, };
+
+            rect = fz_transform_rect( viewer_page->pdfv->clicked_annot->rect, transform );
+
+            cairo_move_to( cr, rect.x0, rect.y0 );
+            cairo_line_to( cr, rect.x1, rect.y0 );
+            cairo_line_to( cr, rect.x1, rect.y1 );
+            cairo_line_to( cr, rect.x0, rect.y1 );
+            cairo_line_to( cr, rect.x0, rect.y0 );
+            cairo_set_source_rgb(cr, 0, 1, 0 );
+            cairo_stroke( cr );
+        }
+    }
+    else //ansonsten etwaige highlights zeichnen
+    {
+        gint i = 0;
+        while ( viewer_page->pdfv->highlight.page[i] >= 0 )
+        {
+            if ( viewer_page == g_ptr_array_index( viewer_page->pdfv->arr_pages,
+                    viewer_page->pdfv->highlight.page[i] ) )
+                    viewer_page_mark_quad( cr, viewer_page->pdfv->highlight.quad[i], transform );
+
+            i++;
+        }
+    }
+
 
     return FALSE;
 }
@@ -142,7 +201,7 @@ viewer_transfer_rendered( PdfViewer* pdfv )
             //Dann ist aber ausgeschlossen, daß ein thread auf viewer_page->pixbuf_page zugreift
             viewer_page->image_page = gtk_image_new_from_pixbuf( viewer_page->pixbuf_page );
             gtk_widget_show( viewer_page->image_page );
-            g_signal_connect( viewer_page->image_page, "draw", G_CALLBACK(viewer_draw_image_page), pdfv );
+            g_signal_connect( viewer_page->image_page, "draw", G_CALLBACK(viewer_draw_image_page), viewer_page );
 
             gtk_widget_get_size_request( pdfv->layout, &width, NULL );
             x_pos = (width - (viewer_page->crop.x1 - viewer_page->crop.x0) * pdfv->zoom / 100) / 2;
