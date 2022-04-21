@@ -319,7 +319,7 @@ pdf_text_occ_free( gpointer data )
 }
 
 
-static gint
+gint
 pdf_text_render_stext_page_direct( fz_context* ctx, PdfDocumentPage* pdf_document_page, gchar** errmsg )
 {
     //structured text-device

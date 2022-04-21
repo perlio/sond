@@ -236,14 +236,35 @@ pdf_print_content_stream( fz_context* ctx, pdf_obj* page_ref, gchar** errmsg )
 gint
 test( Projekt* zond, gchar** errmsg )
 {
-    GtkTreeIter iter = { 0, };
+    ZondPdfDocument* zond_pdf_document = NULL;
 
-    if ( sond_treeview_get_cursor( zond->treeview[zond->baum_active], &iter ) )
+    zond_pdf_document = zond_pdf_document_open( "Kelmis.pdf", 0, 20, errmsg );
+
+    for ( gint i = 0; i < 20; i++ )
     {
-        gint head_nr = 0;
+        gint rc = 0;
+        PdfDocumentPage* pdf_document_page = NULL;
 
-        head_nr = zond_tree_store_get_link_head_nr( iter.user_data );
-        printf("%i\n", head_nr );
+        pdf_document_page = zond_pdf_document_get_pdf_document_page( zond_pdf_document, i );
+
+        rc = pdf_text_render_stext_page_direct( zond_pdf_document_get_ctx( zond_pdf_document ), pdf_document_page, errmsg );
+        if ( rc ) ERROR_S
+
+        for ( fz_stext_block* block = pdf_document_page->stext_page->first_block; block;
+        block = block->next)
+        {
+            if (block->type != FZ_STEXT_BLOCK_TEXT) continue;
+
+            for ( fz_stext_line* line = block->u.t.first_line; line; line = line->next)
+            {
+                for ( fz_stext_char* stext_char = line->first_char; stext_char; stext_char = stext_char->next )
+                {
+                    printf( "%c", stext_char->c );
+                }
+                printf( "<line>\n" );
+            }
+            printf( "\n<block>\n" );
+        }
     }
 
     return 0;

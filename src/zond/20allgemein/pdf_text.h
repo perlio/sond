@@ -14,6 +14,8 @@ typedef char gchar;
 
 gint pdf_text_anzeigen_ergebnisse( Projekt*, gchar*, GPtrArray*, GArray*, gchar** );
 
+gint pdf_text_render_stext_page_direct( fz_context*, PdfDocumentPage*, gchar** );
+
 gint pdf_textsuche( Projekt*, InfoWindow*, GPtrArray*, const gchar*, GArray**, gchar** );
 
 #endif // PDF_TEXT_H_INCLUDED

@@ -17,9 +17,8 @@ ToDo:
     - Anbindungen in PDF löschen
 
 - Viewer
-    - Riesen-PDFs handhabbar machen
-    - Annots
-        - Text-Annots über alle viewer verteilen, wenn Text editiert wird
+    - pdf_document_page und viewer_page erst bei Anforderung erzeugen
+        (kompliziertes y_pos-Management erforderlich)
     - Farben für Markieren
     - Rummalen
     - TextTreffer in Fenster anzeigen
