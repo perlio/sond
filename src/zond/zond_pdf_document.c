@@ -144,6 +144,8 @@ zond_pdf_document_finalize( GObject* self )
 static void
 zond_pdf_document_page_free( PdfDocumentPage* pdf_document_page )
 {
+    if ( !pdf_document_page ) return;
+
     ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( pdf_document_page->document );
 
     fz_drop_page( priv->ctx, &(pdf_document_page->page->super) );
@@ -314,15 +316,15 @@ zond_pdf_document_init_pages( ZondPdfDocument* self, gint von, gint bis, gchar**
 {
     ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
 
-    if ( bis == -1 ) bis = priv->pages->len;
+    if ( bis == -1 ) bis = priv->pages->len - 1;
 
-    if ( von < 0 || von > bis || bis > priv->pages->len )
+    if ( von < 0 || von > bis || bis > priv->pages->len - 1 )
     {
         if ( errmsg ) *errmsg = g_strdup( "Seitengrenzen nicht eingehalten" );
         return -1;
     }
 
-    for ( gint i = von; i < bis; i++ )
+    for ( gint i = von; i <= bis; i++ )
     {
         gint rc = 0;
         PdfDocumentPage* pdf_document_page = NULL;
