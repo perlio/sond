@@ -51,10 +51,10 @@ viewer_springen_zu_pos_pdf( PdfViewer* pv, PdfPos pdf_pos, gdouble delta )
 
     //Länge aktueller Seite ermitteln
     gdouble page = viewer_page->crop.y1 - viewer_page->crop.y0;
-    if ( pdf_pos.index <= page ) value = viewer_page->y_pos + pdf_pos.index;
-    else value = viewer_page->y_pos + page;
+    if ( pdf_pos.index <= page ) value = viewer_page->y_pos + pdf_pos.index * pv->zoom / 100;
+    else value = viewer_page->y_pos + page * pv->zoom / 100;
 
-    value = value * pv->zoom / 100;
+//    value = value * pv->zoom / 100;
 #ifndef VIEWER
     if ( pv->zond->state & GDK_MOD1_MASK )
     {
@@ -926,7 +926,7 @@ cb_viewer_text_search( GtkWidget* widget, gpointer data )
 {
     gint dir = 0;
     PdfPos pdf_pos = { -1, -1 };
-    gchar* search_text = NULL;
+    const gchar* search_text = NULL;
     gint page_act = 0;
 
     PdfViewer* pv = (PdfViewer*) data;
@@ -996,7 +996,7 @@ cb_viewer_text_search( GtkWidget* widget, gpointer data )
         return;
     }
 
-    search_text = (gchar*) gtk_entry_get_text( GTK_ENTRY(pv->entry_search) );
+    search_text = gtk_entry_get_text( GTK_ENTRY(pv->entry_search) );
 
     //wenn entry leer: nichts machen
     if ( !g_strcmp0( search_text, "" ) ) return;
@@ -1016,25 +1016,28 @@ cb_viewer_text_search( GtkWidget* widget, gpointer data )
         ViewerPageNew* viewer_page = g_ptr_array_index( pv->arr_pages, page_act );
         fz_context* ctx = zond_pdf_document_get_ctx( viewer_page->pdf_document_page->document );
 
-        if ( pv->thread_pool_page )
+        gboolean rendered = FALSE;
+
+        viewer_thread_render( pv, page_act );
+
+        do //warten, bis page gerendert ist
         {
-            gboolean rendered = FALSE;
-
-            g_thread_pool_move_to_front( pv->thread_pool_page, GINT_TO_POINTER(page_act + 1) );
-
-            do //warten, bis page gerendert ist
-            {
-                g_mutex_lock( &viewer_page->pdf_document_page->mutex_page );
-                rendered = (viewer_page->pdf_document_page->stext_page != NULL);
-                g_mutex_unlock( &viewer_page->pdf_document_page->mutex_page );
-            } while ( !rendered );
-        }
+            g_mutex_lock( &viewer_page->pdf_document_page->mutex_page );
+            rendered = (viewer_page->pdf_document_page->stext_page != NULL);
+            g_mutex_unlock( &viewer_page->pdf_document_page->mutex_page );
+        } while ( !rendered );
 
         //prüfen, ob Seite Suchtext enthält
-        //ToDo: muß mit fz_try abgesichert werden
-        //macht lock!!!
-        anzahl = fz_search_stext_page( ctx, viewer_page->pdf_document_page->stext_page,
-                search_text, NULL, quads, 99 );
+        fz_try( ctx ) anzahl = fz_search_stext_page( ctx,
+                viewer_page->pdf_document_page->stext_page, search_text, NULL,
+                quads, 99 );
+        fz_catch( ctx )
+        {
+            pv->text_occ_search_completed = -1;
+            display_message( pv->vf, "Fehler Textsuche -\n\nBei Aufruf fz_search_"
+                    "stext_page:\n", fz_caught_message( ctx ), NULL );
+            return;
+        }
 
         for ( gint u = 0; u < anzahl; u++ )
         {
@@ -1057,10 +1060,11 @@ cb_viewer_text_search( GtkWidget* widget, gpointer data )
 
         //vorspulen
         page_act += dir;
+
         //Überlauf?
         if ( page_act < 0 || page_act >= pv->arr_pages->len )
                 page_act = (dir == 1) ? 0 : pv->arr_pages->len - 1;
-    } while ( page_act != pdf_pos.seite && !((pv->arr_text_occ->len > 0) && pv->thread_pool_page) );
+    } while ( page_act != pdf_pos.seite ); //&& !(pv->arr_text_occ->len > 0) );
 
     //nur nächstes Vorkommen suchen
     if ( pv->arr_text_occ->len == 0 )
