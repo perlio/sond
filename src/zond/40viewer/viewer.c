@@ -667,30 +667,18 @@ cb_viewer_loeschen_anbindung_button_clicked( GtkButton* button, gpointer data )
 #endif // VIEWER
 
 
-static gboolean
-cb_viewer_auswahlwerkzeug( GtkButton* button, GdkEvent* event, gpointer data )
+static void
+cb_viewer_auswahlwerkzeug( GtkButton* button, gpointer data )
 {
     gint button_ID = 0;
-    GtkToggleButton* button_other_1 = NULL;
-    GtkToggleButton* button_other_2 = NULL;
-    GtkToggleButton* button_other_3 = NULL;
 
     PdfViewer* pv = (PdfViewer*) data;
 
     button_ID = GPOINTER_TO_INT(g_object_get_data( G_OBJECT(button), "ID" ));
-    button_other_1 = g_object_get_data( G_OBJECT(button), "button-other-1" );
-    button_other_2 = g_object_get_data( G_OBJECT(button), "button-other-2" );
-    button_other_3 = g_object_get_data( G_OBJECT(button), "button-other-3" );
-
-    gtk_toggle_button_set_active( GTK_TOGGLE_BUTTON(button), TRUE );
-    gtk_toggle_button_set_active( button_other_1, FALSE );
-    gtk_toggle_button_set_active( button_other_2, FALSE );
-    gtk_toggle_button_set_active( button_other_3, FALSE );
 
     pv->state = button_ID;
-    gtk_toggle_button_set_active( button_other_2, FALSE );
 
-    return TRUE;
+    return;
 }
 
 
@@ -2104,7 +2092,6 @@ cb_viewer_layout_press_button( GtkWidget* layout, GdkEvent* event, gpointer
             {
                 gint rc = 0;
                 gchar* errmsg = NULL;
-                gboolean ret = FALSE;
 
                 ViewerPageNew* viewer_page = g_ptr_array_index( pv->arr_pages, pdf_punkt.seite );
 
@@ -2145,7 +2132,7 @@ cb_viewer_layout_press_button( GtkWidget* layout, GdkEvent* event, gpointer
                         viewer_page->pdf_document_page->arr_annots->len - 1 );
 
                 //Nach Einfügen von annot-text: auf Zeiger zurückflitschen
-                g_signal_emit_by_name( pv->button_zeiger, "button-press-event", pv, &ret );
+                gtk_toggle_button_set_active( GTK_TOGGLE_BUTTON(pv->button_zeiger), TRUE );
             }
             else if ( viewer_on_text( pv, pdf_punkt ) ) pv->click_on_text = TRUE;
             else gdk_window_set_cursor( pv->gdk_window, pv->cursor_grab );
@@ -2514,10 +2501,10 @@ viewer_einrichten_fenster( PdfViewer* pv )
     pv->button_speichern = gtk_toggle_button_new( );
     gtk_widget_set_sensitive( pv->button_speichern, FALSE );
     GtkWidget* button_print = gtk_button_new_from_icon_name( "document-print", GTK_ICON_SIZE_BUTTON );
-    pv->button_zeiger = gtk_toggle_button_new( );
-    GtkWidget* button_highlight = gtk_toggle_button_new( );
-    GtkWidget* button_underline = gtk_toggle_button_new( );
-    GtkWidget* button_paint = gtk_toggle_button_new( );
+    pv->button_zeiger = gtk_radio_button_new( NULL );
+    GtkWidget* button_highlight = gtk_radio_button_new_from_widget( GTK_RADIO_BUTTON(pv->button_zeiger) );
+    GtkWidget* button_underline = gtk_radio_button_new_from_widget( GTK_RADIO_BUTTON(button_highlight) );
+    GtkWidget* button_paint = gtk_radio_button_new_from_widget( GTK_RADIO_BUTTON(button_underline) );
 
     GtkWidget* image_speichern = gtk_image_new_from_icon_name( "document-save",
             GTK_ICON_SIZE_BUTTON );
@@ -2551,24 +2538,9 @@ viewer_einrichten_fenster( PdfViewer* pv )
 
     gtk_toggle_button_set_active( GTK_TOGGLE_BUTTON(pv->button_zeiger), TRUE );
 
-    g_object_set_data( G_OBJECT(pv->button_zeiger), "button-other-1", button_highlight );
-    g_object_set_data( G_OBJECT(pv->button_zeiger), "button-other-2", button_underline );
-    g_object_set_data( G_OBJECT(pv->button_zeiger), "button-other-3", button_paint );
-
     g_object_set_data( G_OBJECT(button_highlight), "ID", GINT_TO_POINTER(1) );
-    g_object_set_data( G_OBJECT(button_highlight), "button-other-1", pv->button_zeiger );
-    g_object_set_data( G_OBJECT(button_highlight), "button-other-2", button_underline );
-    g_object_set_data( G_OBJECT(button_highlight), "button-other-3", button_paint );
-
     g_object_set_data( G_OBJECT(button_underline), "ID", GINT_TO_POINTER(2) );
-    g_object_set_data( G_OBJECT(button_underline), "button-other-1", pv->button_zeiger );
-    g_object_set_data( G_OBJECT(button_underline), "button-other-2", button_highlight );
-    g_object_set_data( G_OBJECT(button_underline), "button-other-3", button_paint );
-
     g_object_set_data( G_OBJECT(button_paint), "ID", GINT_TO_POINTER(3) );
-    g_object_set_data( G_OBJECT(button_paint), "button-other-1", pv->button_zeiger );
-    g_object_set_data( G_OBJECT(button_paint), "button-other-2", button_highlight );
-    g_object_set_data( G_OBJECT(button_paint), "button-other-3", button_underline );
 
 #ifndef VIEWER
     //button löschenAnbindung Anfangsposition
@@ -2765,13 +2737,14 @@ viewer_einrichten_fenster( PdfViewer* pv )
     g_signal_connect( button_print, "clicked", G_CALLBACK(viewer_cb_print), pv );
     g_signal_connect( button_thumb, "toggled", G_CALLBACK(cb_tree_thumb),
             pv );
-    g_signal_connect( pv->button_zeiger, "button-press-event",
+    g_signal_connect( pv->button_zeiger, "toggled",
             G_CALLBACK(cb_viewer_auswahlwerkzeug), (gpointer) pv );
-    g_signal_connect( button_highlight, "button-press-event",
+            printf("%p\n", pv);
+    g_signal_connect( button_highlight, "toggled",
             G_CALLBACK(cb_viewer_auswahlwerkzeug), (gpointer) pv );
-    g_signal_connect( button_underline, "button-press-event",
+    g_signal_connect( button_underline, "toggled",
             G_CALLBACK(cb_viewer_auswahlwerkzeug), (gpointer) pv );
-    g_signal_connect( button_paint, "button-press-event",
+    g_signal_connect( button_paint, "toggled",
             G_CALLBACK(cb_viewer_auswahlwerkzeug), (gpointer) pv );
 #ifndef VIEWER
     //Anbindung löschen
