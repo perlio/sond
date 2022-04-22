@@ -52,6 +52,7 @@ typedef struct _Pdf_Viewer
     GtkWidget* entry;
     GtkWidget* label_anzahl;
     GtkWidget* button_speichern;
+    GtkWidget* button_zeiger;
     GtkWidget* button_anbindung;
     GtkWidget* button_vorher;
     GtkWidget* entry_search;
