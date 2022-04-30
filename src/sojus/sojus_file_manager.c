@@ -47,7 +47,7 @@ cb_file_manager_delete_event( GtkWidget* window, GdkEvent* event, gpointer data 
         OpenFM* open_fm = g_ptr_array_index( sojus->arr_open_fm, i );
         if ( open_fm->window == window )
         {
-            dbase_destroy( sond_treeviewfm_get_dbase( open_fm->stvfm ) );
+//            dbase_destroy( sond_treeviewfm_get_dbase( open_fm->stvfm ) );
 
             g_ptr_array_remove_index_fast( sojus->arr_open_fm, i );
             break;
@@ -211,7 +211,7 @@ file_manager_open_dbase( SondTreeviewFM* stvfm, DBase** dbase,
 
     db_name = g_strconcat( sond_treeviewfm_get_root( stvfm ), "/doc_db.ZND", NULL );
 
-    rc = dbase_create_with_stmts( db_name, dbase, FALSE, FALSE, errmsg );
+//    rc = dbase_create_with_stmts( db_name, dbase, FALSE, FALSE, errmsg );
     g_free( db_name );
     if ( rc ) // da FALSE, kann nur -1 oder 0 zurückgegeben werden
     {

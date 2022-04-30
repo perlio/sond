@@ -35,9 +35,10 @@ typedef struct _Pdf_Document_Page_Annot PdfDocumentPageAnnot;
 typedef struct sqlite3_stmt sqlite3_stmt;
 typedef struct sqlite3 sqlite3;
 
+typedef struct _ZondDBase ZondDBase;
+
 typedef struct pdf_document pdf_document;
 
-typedef struct _DBase_Zond DBaseZond;
 typedef struct _FM FM;
 
 typedef int gboolean;
@@ -53,6 +54,15 @@ typedef struct _Icon
     const gchar* icon_name;
     const gchar* display_name;
 } Icon;
+
+typedef struct _DBase_Zond
+{
+    ZondDBase* zond_dbase_store;
+    ZondDBase* zond_dbase_work;
+    gchar* project_name;
+    gchar* project_dir;
+    gboolean changed;
+} DBaseZond;
 
 
 

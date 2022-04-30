@@ -193,6 +193,9 @@ zond_dbase_create_db( sqlite3* db, gchar** errmsg )
             "DROP TABLE IF EXISTS baum_inhalt;"
             "DROP TABLE IF EXISTS baum_auswertung; "
             "DROP TABLE IF EXISTS links; "
+            "DROP TABLE IF EXISTS entities; "
+            "DROP TABLE IF EXISTS rels; "
+            "DROP TABLE IF EXISTS properties; "
 
             "CREATE TABLE eingang ("
                 "ID INTEGER NOT NULL, "
@@ -755,8 +758,7 @@ zond_dbase_prepare_stmts( ZondDBase* zond_dbase, gint num, const gchar** sql,
         {
             //aufräumen
             for ( gint u = 0; u < i; u++ ) sqlite3_finalize( stmt[u] );
-
-            ERROR_S_MESSAGE( " ("", sql[i], "")\n"", sqlite3_errstr( rc )" )
+            ERROR_ZOND_DBASE( "sqlite3_prepare_v2" )
         }
     }
 
@@ -764,7 +766,7 @@ zond_dbase_prepare_stmts( ZondDBase* zond_dbase, gint num, const gchar** sql,
 }
 
 
-static gint
+gint
 zond_dbase_prepare( ZondDBase* zond_dbase, const gchar* func, const gchar** sql,
         gint num_stmts, sqlite3_stmt*** stmt, gchar** errmsg )
 {

@@ -389,7 +389,7 @@ pdf_textsuche_pdf( Projekt* zond, const gchar* rel_path, const gchar* search_tex
                 if ( rc )
                 {
                     zond_pdf_document_close( zond_pdf_document );
-                    ERROR_SOND( "render_display_list_to_stext_page" )
+                    ERROR_S
                 }
             }
             else //wenn display_list noch nicht erzeugt, dann direkt aus page erzeugen
@@ -401,7 +401,7 @@ pdf_textsuche_pdf( Projekt* zond, const gchar* rel_path, const gchar* search_tex
                 if ( rc )
                 {
                     zond_pdf_document_close( zond_pdf_document );
-                    ERROR_SOND( "pdf_text_render_stext_page_direct" )
+                    ERROR_S
                 }
             }
         }

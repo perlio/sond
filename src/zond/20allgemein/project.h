@@ -12,15 +12,6 @@ typedef void* gpointer;
 typedef int gint;
 typedef char gchar;
 
-typedef struct _DBase_Zond
-{
-    ZondDBase* zond_dbase_store;
-    ZondDBase* zond_dbase_work;
-    gchar* project_name;
-    gchar* project_dir;
-    gboolean changed;
-} DBaseZond;
-
 
 void project_reset_changed( Projekt* );
 

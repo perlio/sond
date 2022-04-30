@@ -41,10 +41,19 @@ typedef struct _Statement
 
 
 
-const gchar* sond_database_sql_create_database( void );
+gint sond_database_add_to_database( gpointer, gchar** );
 
-const gchar* sond_database_sql_insert_labels( void );
+gint sond_database_insert_entity( gpointer, gint, gchar** );
 
-const gchar* sond_database_sql_insert_adm_rels( void );
+gint sond_database_is_admitted_edge( gpointer, gint, gint, gint, gchar** );
+
+gint sond_database_is_admitted_rel( gpointer, gint, gint, gchar** );
+
+gint sond_database_get_ID_label_for_entity( gpointer, gint, gchar** );
+
+gint sond_database_insert_property( gpointer, gint, gint, const gchar*, gchar** );
+
+gint sond_database_get_entities_for_property( gpointer, gint, const gchar*,
+        GArray**, gchar** );
 
 #endif //SOND_DATABASE_H_INCLUDED
