@@ -19,10 +19,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include <gtk/gtk.h>
 #include <sqlite3.h>
+#include <mysql/mysql.h>
 
 #include "misc.h"
 #include "sond_database.h"
 #include "zond/zond_dbase.h"
+
 
 /*
 gboolean
@@ -74,7 +76,7 @@ sond_database_add_to_database( gpointer database, gchar** errmsg )
                 "parent INTEGER NOT NULL, "
                 "FOREIGN KEY (parent) REFERENCES labels (ID), "
                 "PRIMARY KEY (ID) "
-            "); "
+            "); ",
 
             "CREATE TABLE IF NOT EXISTS adm_rels ( "
                 "subject INTEGER NOT NULL, "
@@ -84,13 +86,13 @@ sond_database_add_to_database( gpointer database, gchar** errmsg )
                 "FOREIGN KEY (rel) REFERENCES labels (ID), "
                 "FOREIGN KEY (object) REFERENCES labels (ID), "
                 "UNIQUE (subject,rel,object) "
-            "); "
+            "); ",
 
             "CREATE TABLE IF NOT EXISTS entities( "
                 "ID INTEGER PRIMARY KEY AUTOINCREMENT, "
                 "ID_label INTEGER NOT NULL, "
                 "FOREIGN KEY (ID_label) REFERENCES labels (ID) "
-            "); "
+            "); ",
 
             "CREATE TABLE IF NOT EXISTS rels ( "
                 "entity_subject INTEGER NOT NULL, "
@@ -99,13 +101,13 @@ sond_database_add_to_database( gpointer database, gchar** errmsg )
                 "FOREIGN KEY (entity_subject) REFERENCES entities (ID), "
                 "FOREIGN KEY (entity_rel) REFERENCES entities (ID), "
                 "FOREIGN KEY (entity_object) REFERENCES entities (ID) "
-            "); "
+            "); ",
 
             "CREATE TABLE IF NOT EXISTS properties ( "
                 "entity_subject INTEGER NOT NULL, "
                 "entity_property INTEGER NOT NULL, "
                 "value TEXT, "
-                "FOREIGN KEY (entity_subject) REFERENCES entities (ID) "
+                "FOREIGN KEY (entity_subject) REFERENCES entities (ID), "
                 "FOREIGN KEY (entity_property) REFERENCES entities (ID) "
             "); ",
 
@@ -290,7 +292,9 @@ sond_database_add_to_database( gpointer database, gchar** errmsg )
 
                 //p für TKÜ-Ereignis
                 "(11065, '_Korrelationsnummer_', 2), "
-                "(11070, '_Geokoordinaten_', 2), "
+                "(11067, '_Art_', 2), "
+                "(11070, '_GIS-Link_', 2), "
+                "(11072, '_Standort Funkmast ÜA_', 2), "
                 "(11075, '_Richtung_', 2), "
                 "(11080, '_Text_', 2), "
 
@@ -387,8 +391,10 @@ sond_database_add_to_database( gpointer database, gchar** errmsg )
             "(1010, 10010, 425), " //TKÜ-Ereignis _hat_ Rufnummer [Partnernummer]
             "(1010, 10010, 834), " //TKÜ-Ereignis _hat_ TKÜ-Protokoll
             "(1010, 10025, 100004), " //TKÜ-Ereignis _Zeitpunkt_ (date)
-            "(1010, 11065, 100001), " //TKÜ-Ereignis _Korrelationsnummer (string)
-            "(1010, 11070, 100001), " //TKÜ-Ereignis _Geokoordinaten_ (string)
+            "(1010, 11065, 100001), " //TKÜ-Ereignis _Korrelationsnummer_ (string)
+            "(1010, 11067, 100001), " //TKÜ-Ereignis _Art_ (string)
+            "(1010, 11070, 100001), " //TKÜ-Ereignis _GIS-Link_ (string)
+            "(1010, 11072, 100001), " //TKÜ-Ereignis _Funkmast_ (string)
             "(1010, 11075, 100001), " //TKÜ-Ereignis _Richtung_ (string)
             "(1015, 11080, 100001), " //SMS _Text_ (string)
 
@@ -441,7 +447,36 @@ sond_database_add_to_database( gpointer database, gchar** errmsg )
     }
     else //mysql
     {
+        MYSQL* con = (MYSQL*) database;
+        sql[2] = "CREATE TABLE IF NOT EXISTS entities( "
+                "ID INTEGER PRIMARY KEY AUTO_INCREMENT, "
+                "ID_label INTEGER NOT NULL, "
+                "FOREIGN KEY (ID_label) REFERENCES labels (ID) "
+            "); ";
 
+        //OR ausradieren
+        sql[5][7] = ' ';
+        sql[5][8] = ' ';
+        sql[6][7] = ' ';
+        sql[6][8] = ' ';
+
+        for ( gint i = 0; i < nelem( sql ); i++ )
+        {
+            gint rc = 0;
+
+            rc = mysql_query( con, sql[i] );
+            while ( rc ) //>0 = error, -1 = weitere res ?!?
+            {
+                if ( rc > 0 )
+                {
+                    if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf ", __func__,
+                            ":\n", mysql_error( con ), NULL );
+                    return -1;
+                }
+
+                rc = mysql_next_result( con );
+            }
+        }
     }
 
     return 0;

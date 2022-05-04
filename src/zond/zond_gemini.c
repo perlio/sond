@@ -45,10 +45,10 @@ typedef struct _Ereignis
 static void
 zond_gemini_free_ereignis( Ereignis* ereignis )
 {
-    g_free( ereignis->leitungsnr );
-    g_free( ereignis->ueA );
-    g_free( ereignis->ueAI );
-    g_free( ereignis->uePerson );
+    g_free( ereignis->leitungsnr ); //
+    g_free( ereignis->ueA ); //
+    g_free( ereignis->ueAI ); //
+    g_free( ereignis->uePerson ); //
     g_free( ereignis->korrelations_nr );
     g_free( ereignis->art );
     g_free( ereignis->gis_link );
@@ -65,6 +65,43 @@ zond_gemini_free_ereignis( Ereignis* ereignis )
 }
 
 
+static gchar*
+zond_gemini_format_time( const gchar* datum, const gchar* zeit, gchar** errmsg )
+{
+    gchar time[20] = { 0 };
+
+    if ( strlen( datum ) != 10 ) ERROR_S_MESSAGE_VAL( "Datum irregulär", NULL )
+
+    time[0] = datum[6];
+    time[1] = datum[7];
+    time[2] = datum[8];
+    time[3] = datum[9];
+    time[4] = '-';
+    time[5] = datum[3];
+    time[6] = datum[4];
+    time[7] = '-';
+    time[8] = datum[0];
+    time[9] = datum[1];
+
+    if ( zeit )
+    {
+        if ( strlen( zeit ) != 8 ) ERROR_S_MESSAGE_VAL( "Zeit irregulär", NULL )
+
+        time[10] = ' ';
+        time[11] = zeit[6];
+        time[12] = zeit[7];
+        time[13] = ':';
+        time[14] = zeit[3];
+        time[15] = zeit[4];
+        time[16] = ':';
+        time[17] = zeit[0];
+        time[18] = zeit[1];
+    }
+
+    return g_strdup( time );
+}
+
+
 static gint
 zond_gemini_save_ereignis( Projekt* zond, Ereignis* ereignis, gchar** errmsg )
 {
@@ -73,6 +110,8 @@ zond_gemini_save_ereignis( Projekt* zond, Ereignis* ereignis, gchar** errmsg )
     gint ID_entity_TKUE_massnahme = 0;
     gint ID_entity_TKUE_ereignis = 0;
     gint ID_label_ereignis = 0;
+
+    if ( !ereignis || !ereignis->leitungsnr ) return 0;
 
     //TKÜ-Maßnahme ermitteln bzw. eintragen
     rc = sond_database_get_entities_for_property( zond->dbase_zond->zond_dbase_work,
@@ -150,6 +189,79 @@ zond_gemini_save_ereignis( Projekt* zond, Ereignis* ereignis, gchar** errmsg )
     if ( rc == -1 ) ERROR_S
 
     //Properties eintragen
+    if ( ereignis->korrelations_nr )
+    {
+        gint rc = 0;
+
+        rc = sond_database_insert_property( zond->dbase_zond->zond_dbase_work,
+                ID_entity_TKUE_ereignis, 11065, ereignis->korrelations_nr, errmsg );
+        if ( rc == -1 ) ERROR_S
+    }
+
+    if ( ereignis->art )
+    {
+        gint rc = 0;
+
+        rc = sond_database_insert_property( zond->dbase_zond->zond_dbase_work,
+                ID_entity_TKUE_ereignis, 11067, ereignis->art, errmsg );
+        if ( rc == -1 ) ERROR_S
+    }
+
+    if ( ereignis->gis_link )
+    {
+        gint rc = 0;
+
+        rc = sond_database_insert_property( zond->dbase_zond->zond_dbase_work,
+                ID_entity_TKUE_ereignis, 11070, ereignis->gis_link, errmsg );
+        if ( rc == -1 ) ERROR_S
+    }
+
+    if ( ereignis->standort_funkmast_uea )
+    {
+        gint rc = 0;
+
+        rc = sond_database_insert_property( zond->dbase_zond->zond_dbase_work,
+                ID_entity_TKUE_ereignis, 11072, ereignis->standort_funkmast_uea, errmsg );
+        if ( rc == -1 ) ERROR_S
+    }
+
+    if ( ereignis->beginndatum )
+    {
+        gint rc = 0;
+        gchar* time = NULL;
+
+        time = zond_gemini_format_time( ereignis->beginndatum, ereignis->beginnzeit, errmsg );
+        if ( !time ) ERROR_S
+
+        rc = sond_database_insert_property( zond->dbase_zond->zond_dbase_work,
+                ID_entity_TKUE_ereignis, 10030, time, errmsg );
+        if ( rc == -1 ) ERROR_S
+
+        g_free( time );
+    }
+    if ( ereignis->endedatum )
+    {
+        gint rc = 0;
+        gchar* time = NULL;
+
+        time = zond_gemini_format_time( ereignis->endedatum, ereignis->endezeit, errmsg );
+        if ( !time ) ERROR_S
+
+        rc = sond_database_insert_property( zond->dbase_zond->zond_dbase_work,
+                ID_entity_TKUE_ereignis, 10040, time, errmsg );
+        if ( rc == -1 ) ERROR_S
+
+        g_free( time );
+    }
+
+    if ( ereignis->richtung )
+    {
+        gint rc = 0;
+
+        rc = sond_database_insert_property( zond->dbase_zond->zond_dbase_work,
+                ID_entity_TKUE_ereignis, 11075, ereignis->richtung, errmsg );
+        if ( rc == -1 ) ERROR_S
+    }
 
 
     return 0;
@@ -415,84 +527,55 @@ zond_gemini_read_zond_pdf_document( Projekt* zond, ZondPdfDocument* zond_pdf_doc
         }
         else if ( !g_strcmp0( line_string, "Richtung" ) )
         {
+            gfloat y_richtung = 0;
+
             g_clear_pointer( &line_string, g_free );
 
             if ( !ereignis ) ERROR_S_MESSAGE( "Gemini malformed" )
 
-            line_string = zond_gemini_get_next_line_string( zond_pdf_document, &line_at_pos, errmsg );
-            if ( !line_string )
+            y_richtung = line_at_pos.line->bbox.y1;
+
+            do
             {
-                zond_gemini_free_ereignis( ereignis );
-                ERROR_S
-            }
+                gfloat y = 0.0;
+                gfloat x = 0.0;
+                LineAtPos line_at_pos_prev = { 0 };
 
-            ereignis->beginndatum = line_string;
+                line_at_pos_prev = line_at_pos; //zwischenspeichern
 
-            line_string = zond_gemini_get_next_line_string( zond_pdf_document, &line_at_pos, errmsg );
-            if ( !line_string )
-            {
-                zond_gemini_free_ereignis( ereignis );
-                ERROR_S
-            }
+                line_string = zond_gemini_get_next_line_string( zond_pdf_document, &line_at_pos, errmsg );
+                if ( !line_string )
+                {
+                    zond_gemini_free_ereignis( ereignis );
+                    ERROR_S
+                }
 
-            ereignis->beginnzeit= line_string;
+                y = line_at_pos.line->bbox.y0;
+                x = line_at_pos.line->bbox.x0;
 
-            line_string = zond_gemini_get_next_line_string( zond_pdf_document, &line_at_pos, errmsg );
-            if ( !line_string )
-            {
-                zond_gemini_free_ereignis( ereignis );
-                ERROR_S
-            }
+                if ( y < y_richtung || y > y_richtung + 8 )
+                {
+                    //zurückspringen, da schon zu weit...
+                    line_at_pos = line_at_pos_prev;
+                    break; //und raus
+                }
 
-            ereignis->endedatum = line_string;
-
-            line_string = zond_gemini_get_next_line_string( zond_pdf_document, &line_at_pos, errmsg );
-            if ( !line_string )
-            {
-                zond_gemini_free_ereignis( ereignis );
-                ERROR_S
-            }
-
-            ereignis->endezeit = line_string;
-
-            line_string = zond_gemini_get_next_line_string( zond_pdf_document, &line_at_pos, errmsg );
-            if ( !line_string )
-            {
-                zond_gemini_free_ereignis( ereignis );
-                ERROR_S
-            }
-
-            ereignis->richtung = line_string;
+                if ( x > 70 && x < 77 ) ereignis->beginndatum = line_string;
+                else if ( x > 168 && x < 175 ) ereignis->beginnzeit = line_string;
+                else if ( x > 268 && x < 276 ) ereignis->endedatum = line_string;
+                else if ( x > 365 && x < 375 ) ereignis->endezeit = line_string;
+                else if ( x > 465 && x < 475 ) ereignis->richtung = line_string;
+                else
+                {
+                    g_clear_pointer( &line_string, g_free );
+                    zond_gemini_free_ereignis( ereignis );
+                    ERROR_S_MESSAGE( "Gemini malformed" )
+                }
+            } while ( 1 );
         }
-        else if ( !g_strcmp0( line_string, "Anschlußinhaber:" ) )
+        else if ( !g_strcmp0( line_string, "") )
         {
-            g_clear_pointer( &line_string, g_free );
 
-            if ( !ereignis ) ERROR_S_MESSAGE( "Gemini malformed" )
-
-            line_string = zond_gemini_get_next_line_string( zond_pdf_document, &line_at_pos, errmsg );
-            if ( !line_string )
-            {
-                zond_gemini_free_ereignis( ereignis );
-                ERROR_S
-            }
-
-            ereignis->ueAI = line_string;
-        }
-        else if ( !g_strcmp0( line_string, "Überwachte Person:" ) )
-        {
-            g_clear_pointer( &line_string, g_free );
-
-            if ( !ereignis ) ERROR_S_MESSAGE( "Gemini malformed" )
-
-            line_string = zond_gemini_get_next_line_string( zond_pdf_document, &line_at_pos, errmsg );
-            if ( !line_string )
-            {
-                zond_gemini_free_ereignis( ereignis );
-                ERROR_S
-            }
-
-            ereignis->uePerson = line_string;
         }
         else g_clear_pointer( &line_string, g_free );
 
