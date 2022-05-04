@@ -2739,7 +2739,6 @@ viewer_einrichten_fenster( PdfViewer* pv )
             pv );
     g_signal_connect( pv->button_zeiger, "toggled",
             G_CALLBACK(cb_viewer_auswahlwerkzeug), (gpointer) pv );
-            printf("%p\n", pv);
     g_signal_connect( button_highlight, "toggled",
             G_CALLBACK(cb_viewer_auswahlwerkzeug), (gpointer) pv );
     g_signal_connect( button_underline, "toggled",
