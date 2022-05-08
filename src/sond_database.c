@@ -113,9 +113,10 @@ sond_database_add_to_database( gpointer database, gchar** errmsg )
 
             "INSERT OR IGNORE INTO labels (ID, label, parent) VALUES "
                 "(0, 'root', 0), "
-                "(1, 'Knoten', 0), "
-                "(2, 'Prädikat', 0), "
-                "(3, 'Wert', 0), "
+                "(1, 'node', 0), "
+                "(2, 'edge', 0), "
+                "(3, 'property', 0), "
+                "(4, 'value', 0), "
 
                 //100 - 999: Knoten, allgemein
                 "(100, 'Subjekt', 1), "
@@ -246,57 +247,57 @@ sond_database_add_to_database( gpointer database, gchar** errmsg )
                 "(10020, '_arbeitet an_', 2), "
 
                 //Properties allgemein
-                "(10025, '_Zeitpunkt_', 2), "
+                "(10025, '_Zeitpunkt_', 3), "
                 "(10030, '_Beginn_', 10025), "
                 "(10040, '_Ende_', 10025), "
-                "(10050, '_Bemerkung_', 2), "
-                "(10100, '_Name_', 2), "
-                "(10110, '_Kürzel_', 2), "
+                "(10050, '_Bemerkung_', 3), "
+                "(10100, '_Name_', 3), "
+                "(10110, '_Kürzel_', 3), "
 
                 //Properties für Subjekt
-                "(10120, '_E-Mail-Adresse_', 2), "
-                "(10130, '_Homepage_', 2), "
+                "(10120, '_E-Mail-Adresse_', 3), "
+                "(10130, '_Homepage_', 3), "
 
                 //Properties für natürliche Person
-                "(11010, '_Vorname_', 2), "
-                "(11020, '_Titel_', 2), "
+                "(11010, '_Vorname_', 3), "
+                "(11020, '_Titel_', 3), "
 
                 //Properties für Kontoverbindung
-                "(11025, '_BIC_', 2), "
-                "(11027, '_IBAN_', 2), "
+                "(11025, '_BIC_', 3), "
+                "(11027, '_IBAN_', 3), "
 
                 //Für Sitz
-                "(11030, '_Hausnr_', 2), "
-                "(11035, '_PLZ_', 2), "
-                "(11040, '_Adresszusatz_', 2), "
+                "(11030, '_Hausnr_', 3), "
+                "(11035, '_PLZ_', 3), "
+                "(11040, '_Adresszusatz_', 3), "
 
                 //für Sitz und _arbeitet an_
-                "(11050, '_Durchwahl_', 2), "
+                "(11050, '_Durchwahl_', 3), "
 
                 //prop für Fundstelle
-                "(11051, '_Dateipfad_', 2), "
-                "(11052, '_Seite von_', 2), "
+                "(11051, '_Dateipfad_', 3), "
+                "(11052, '_Seite von_', 3), "
                 //"(11053, '_nameddest von_',2 ), "
-                "(11054, '_index von_', 2), "
-                "(11055, '_Seite bis_', 2), "
+                "(11054, '_index von_', 3), "
+                "(11055, '_Seite bis_', 3), "
                 //"(11056, '_nameddest bis_',2 ), "
-                "(11057, '_index bis_', 2), "
+                "(11057, '_index bis_', 3), "
                 //"(11058, '_node id_', 2), "
 
 
                 //Property für TKÜ-Maßnahme
-                "(11059, '_Leitungsnummer_', 2), "
-                "(11060, '_überwachter Anschluß_', 2), "
-                "(11061, '_AI überwachter Anschluß_', 2), "
-                "(11062, '_überwachte Person_', 2), "
+                "(11059, '_Leitungsnummer_', 3), "
+                "(11060, '_überwachter Anschluß_', 3), "
+                "(11061, '_AI überwachter Anschluß_', 3), "
+                "(11062, '_überwachte Person_', 3), "
 
                 //p für TKÜ-Ereignis
-                "(11065, '_Korrelationsnummer_', 2), "
-                "(11067, '_Art_', 2), "
-                "(11070, '_GIS-Link_', 2), "
-                "(11072, '_Standort Funkmast ÜA_', 2), "
-                "(11075, '_Richtung_', 2), "
-                "(11080, '_Text_', 2), "
+                "(11065, '_Korrelationsnummer_', 3), "
+                "(11067, '_Art_', 3), "
+                "(11070, '_GIS-Link_', 3), "
+                "(11072, '_Standort Funkmast ÜA_', 3), "
+                "(11075, '_Richtung_', 3), "
+                "(11080, '_Text_', 3), "
 
 /*                //15000-19999: Prädikate zond
                 "(15150, '_befindet sich_', 2), "
@@ -317,136 +318,136 @@ sond_database_add_to_database( gpointer database, gchar** errmsg )
                 "(20032, '_hat als Betreff_', 2), "
 */
                 //Wert
-                "(100001, 'string', 3), "
-                "(100002, 'int', 3), "
-                "(100003, 'real', 3), "
-                "(100004, 'time', 3) "
+                "(100001, 'string', 4), "
+                "(100002, 'int', 4), "
+                "(100003, 'real', 4), "
+                "(100004, 'time', 4) "
                 "; ",
 
             "INSERT OR IGNORE INTO adm_rels (subject,rel,object) VALUES "
 
-            "(100, 10010, 420), " //Subjekt _hat_ Teilnehmernummer
-            "(100, 10010, 440), " //Subjekt _hat_ Kontoverbindung
-            "(100, 10030, 100004), " //Subjekt _Beginn_(date)
-            "(100, 10040, 100004), " //Subjekt _Ende_(date)
-            "(100, 10050, 100001), " //Subjekt _Bemerkung_(string)
-            "(100, 10100, 100001), " //Subjekt Name(string)
-            "(100, 10120, 100001), " //Subjekt _E-Mail-Adresse_(string)
-            "(100, 10130, 100001), " //Subjekt _Homepage_(string)
+                "(100, 10010, 420), " //Subjekt _hat_ Teilnehmernummer
+                "(100, 10010, 440), " //Subjekt _hat_ Kontoverbindung
+                "(100, 10030, 100004), " //Subjekt _Beginn_(date)
+                "(100, 10040, 100004), " //Subjekt _Ende_(date)
+                "(100, 10050, 100001), " //Subjekt _Bemerkung_(string)
+                "(100, 10100, 100001), " //Subjekt Name(string)
+                "(100, 10120, 100001), " //Subjekt _E-Mail-Adresse_(string)
+                "(100, 10130, 100001), " //Subjekt _Homepage_(string)
 
-            "(110, 10010, 460), " //Subjekt des öffentlichen Rechts _hat_ Dienstsitz
-            "(300, 10010, 452), " //Subjekt des Privatrechts _hat_Geschäftssitz
-            "(310, 10010, 456), " //natürliche Person _hat_ Wohnsitz
-            "(310, 10010, 372), " //natürliche Person _hat_ Geschlecht
-            "(310, 10010, 470), " //natürliche Person _hat_ Beruf/Dienstgrad
-            "(310, 10020, 450), " //natürliche Person _arbeitet an_ Sitz
-            "(310, 11010, 100001), " //natürliche Person Vorname(string)
-            "(310, 11020, 100001), " //natürliche Person Titel(string)
+                "(110, 10010, 460), " //Subjekt des öffentlichen Rechts _hat_ Dienstsitz
+                "(300, 10010, 452), " //Subjekt des Privatrechts _hat_Geschäftssitz
+                "(310, 10010, 456), " //natürliche Person _hat_ Wohnsitz
+                "(310, 10010, 372), " //natürliche Person _hat_ Geschlecht
+                "(310, 10010, 470), " //natürliche Person _hat_ Beruf/Dienstgrad
+                "(310, 10020, 450), " //natürliche Person _arbeitet an_ Sitz
+                "(310, 11010, 100001), " //natürliche Person Vorname(string)
+                "(310, 11020, 100001), " //natürliche Person Titel(string)
 
-            "(375, 10100, 100001), " //Adressbestandteil Name(string)
-            "(380, 10110, 100001), " //Land Kürzel(string)
-            "(390, 10000, 380), " //Ort _gehört zu_ Land
-            "(400, 10000, 390), " //Straße gehört zu Ort
-//geht
-            "(405, 10100, 100001), " //Telefonnummer Name(string) - meint: Telefonnr lautet "..."
-            "(413, 10000, 412), " //Teilnetzvorwahll _gehört zu_ Ländervorwahl
-            "(420, 10000, 413), " //Teilnehmernr _gehört zu_ Teilnetzvorwahl
+                "(375, 10100, 100001), " //Adressbestandteil Name(string)
+                "(380, 10110, 100001), " //Land Kürzel(string)
+                "(390, 10000, 380), " //Ort _gehört zu_ Land
+                "(400, 10000, 390), " //Straße gehört zu Ort
+    //geht
+                "(405, 10100, 100001), " //Telefonnummer Name(string) - meint: Telefonnr lautet "..."
+                "(413, 10000, 412), " //Teilnetzvorwahll _gehört zu_ Ländervorwahl
+                "(420, 10000, 413), " //Teilnehmernr _gehört zu_ Teilnetzvorwahl
 
-            "(435, 10010, 425), " //IMSI _hat_ Rufnummer
-            "(437, 10010, 435), " //IMEI _hat_ IMSI
+                "(435, 10010, 425), " //IMSI _hat_ Rufnummer
+                "(437, 10010, 435), " //IMEI _hat_ IMSI
 
-            "(440, 10000, 100), " //Kontoverbindung _gehört zu_ Subjekt (Bank)
-            "(440, 11025, 100001), " //Kontoverbindung _BIC_ (string)
-            "(440, 11027, 100001), " //Kontoverbidnung _IBAN_ (string)
+                "(440, 10000, 100), " //Kontoverbindung _gehört zu_ Subjekt (Bank)
+                "(440, 11025, 100001), " //Kontoverbindung _BIC_ (string)
+                "(440, 11027, 100001), " //Kontoverbidnung _IBAN_ (string)
 
-            "(450, 10000, 400), " //Sitz _gehört zu_ Straße
-            "(450, 10010, 420), " //Sitz _hat_ Teilnehmernr
-            "(450, 10120, 100001), " //Sitz _E-Mail-Adresse_(string)
-            "(450, 10130, 100001), " //Sitz _Homepage_(string)
-            "(450, 11030, 100001), " //Sitz Hausnr(string)
-            "(450, 11035, 100001), " //Sitz _PLZ_(string)
-            "(450, 11040, 100001), " //Sitz _Adresszusatz_(string)
-            "(450, 11050, 100001), " //Sitz _Durchwahl_(string) (nicht nat. Personen zuzuordnende Durchwahlen)
+                "(450, 10000, 400), " //Sitz _gehört zu_ Straße
+                "(450, 10010, 420), " //Sitz _hat_ Teilnehmernr
+                "(450, 10120, 100001), " //Sitz _E-Mail-Adresse_(string)
+                "(450, 10130, 100001), " //Sitz _Homepage_(string)
+                "(450, 11030, 100001), " //Sitz Hausnr(string)
+                "(450, 11035, 100001), " //Sitz _PLZ_(string)
+                "(450, 11040, 100001), " //Sitz _Adresszusatz_(string)
+                "(450, 11050, 100001), " //Sitz _Durchwahl_(string) (nicht nat. Personen zuzuordnende Durchwahlen, z.B. -0, -10,)
 
-            "(470, 10100, 100001), " //Beruf-Dienstgrad _Name_(string)
-            "(470, 10110, 100001), " //Beruf-Dienstgrad _Kürzel_(string)
+                "(470, 10100, 100001), " //Beruf-Dienstgrad _Name_(string)
+                "(470, 10110, 100001), " //Beruf-Dienstgrad _Kürzel_(string)
 
-            "(650, 11051, 100001), " //Fundstelle _Dateipfad_ (string)
-            "(650, 11052, 100002), " //Fundstelle _Seite von_ (int)
-            "(650, 11054, 100002), " //Fundstelle _index von_ (int)
-            "(650, 11055, 100002), " //Fundstelle _Seite bis_ (int)
-            "(650, 11057, 100002), " //Fundstelle _index bis_ (int)
+                "(650, 11051, 100001), " //Fundstelle _Dateipfad_ (string)
+                "(650, 11052, 100002), " //Fundstelle _Seite von_ (int)
+                "(650, 11054, 100002), " //Fundstelle _index von_ (int)
+                "(650, 11055, 100002), " //Fundstelle _Seite bis_ (int)
+                "(650, 11057, 100002), " //Fundstelle _index bis_ (int)
 
-            "(750, 10010, 650), " //Urkunde _hat_ Fundstelle
+                "(750, 10010, 650), " //Urkunde _hat_ Fundstelle
 
-            "(1000, 10010, 310), " //TKÜ-Maßnahme _hat_ natürliche Person (Überwachte Person=)
-            "(1000, 10010, 425), " //TKÜ-Maßnahme _hat_ Rufnummer
-            "(1000, 10010, 435), " //TKÜ-Maßnahme _hat_ IMSI
-            "(1000, 10010, 437), " //TKÜ-Maßnahme _hat_ IMEI
-            "(1000, 10030, 100004), " //TKÜ-Maßnahme _Beginn_ (date)
-            "(1000, 10030, 100004), " //TKÜ-Maßnahme _Ende_ (date)
-            "(1000, 11059, 100001), " //TKÜ-Maßnahme _Leitungsnummer_ (string)
+                "(1000, 10010, 310), " //TKÜ-Maßnahme _hat_ natürliche Person (Überwachte Person=)
+                "(1000, 10010, 425), " //TKÜ-Maßnahme _hat_ Rufnummer
+                "(1000, 10010, 435), " //TKÜ-Maßnahme _hat_ IMSI
+                "(1000, 10010, 437), " //TKÜ-Maßnahme _hat_ IMEI
+                "(1000, 10030, 100004), " //TKÜ-Maßnahme _Beginn_ (date)
+                "(1000, 10030, 100004), " //TKÜ-Maßnahme _Ende_ (date)
+                "(1000, 11059, 100001), " //TKÜ-Maßnahme _Leitungsnummer_ (string)
 
-            "(1010, 10000, 1000), " //TKÜ-Ereignis _gehört zu_ TKÜ-Maßnahme
-            "(1010, 10010, 425), " //TKÜ-Ereignis _hat_ Rufnummer [Partnernummer]
-            "(1010, 10010, 834), " //TKÜ-Ereignis _hat_ TKÜ-Protokoll
-            "(1010, 10025, 100004), " //TKÜ-Ereignis _Zeitpunkt_ (date)
-            "(1010, 11065, 100001), " //TKÜ-Ereignis _Korrelationsnummer_ (string)
-            "(1010, 11067, 100001), " //TKÜ-Ereignis _Art_ (string)
-            "(1010, 11070, 100001), " //TKÜ-Ereignis _GIS-Link_ (string)
-            "(1010, 11072, 100001), " //TKÜ-Ereignis _Funkmast_ (string)
-            "(1010, 11075, 100001), " //TKÜ-Ereignis _Richtung_ (string)
-            "(1015, 11080, 100001), " //SMS _Text_ (string)
+                "(1010, 10000, 1000), " //TKÜ-Ereignis _gehört zu_ TKÜ-Maßnahme
+                "(1010, 10010, 425), " //TKÜ-Ereignis _hat_ Rufnummer [Partnernummer]
+                "(1010, 10010, 834), " //TKÜ-Ereignis _hat_ TKÜ-Protokoll
+                "(1010, 10025, 100004), " //TKÜ-Ereignis _Zeitpunkt_ (date)
+                "(1010, 11065, 100001), " //TKÜ-Ereignis _Korrelationsnummer_ (string)
+                "(1010, 11067, 100001), " //TKÜ-Ereignis _Art_ (string)
+                "(1010, 11070, 100001), " //TKÜ-Ereignis _GIS-Link_ (string)
+                "(1010, 11072, 100001), " //TKÜ-Ereignis _Funkmast_ (string)
+                "(1010, 11075, 100001), " //TKÜ-Ereignis _Richtung_ (string)
+                "(1015, 11080, 100001), " //SMS _Text_ (string)
 
-            "(10010, 10025, 100004), " //_hat_ _Zeitpunkt_(date)
-            "(10010, 10050, 100001), " //_hat_ _Bemerkung_(string)
-            "(10020, 10025, 100004), " //_arbeitet an_ _Zeitpunkt_(date)
-            "(10020, 10050, 100001), " //_arbeitet an_ _Bemerkung_(string)
-            "(10020, 11050, 100001), " //_arbeitet an_ _Durchwahl_(string)
-            "(10025, 10050, 100001), " //_Zeitpunkt_ _Bemerkung_(string)
+                "(10010, 10025, 100004), " //_hat_ _Zeitpunkt_(date)
+                "(10010, 10050, 100001), " //_hat_ _Bemerkung_(string)
+                "(10020, 10025, 100004), " //_arbeitet an_ _Zeitpunkt_(date)
+                "(10020, 10050, 100001), " //_arbeitet an_ _Bemerkung_(string)
+                "(10020, 11050, 100001), " //_arbeitet an_ _Durchwahl_(string)
+                "(10025, 10050, 100001), " //_Zeitpunkt_ _Bemerkung_(string)
 
-            "(10100, 10030, 100004), " //_Name_ _Beginn_(date)
-            "(10100, 10040, 100004), " //_Name_ _Ende_(date)
-            "(10100, 10050, 100001), " //_Name_ _Bemerkung_(date)
+                "(10100, 10030, 100004), " //_Name_ _Beginn_(date)
+                "(10100, 10040, 100004), " //_Name_ _Ende_(date)
+                "(10100, 10050, 100001), " //_Name_ _Bemerkung_(date)
 
-            "(10120, 10030, 100004), " //_E-Mail-Adresse_ _Beginn_(date)
-            "(10120, 10040, 100004), " //_E-Mail-Adresse_ _Ende_(date)
-            "(10120, 10050, 100001), " //_E-Mail-Adresse_ _Bemerkung_(date)
+                "(10120, 10030, 100004), " //_E-Mail-Adresse_ _Beginn_(date)
+                "(10120, 10040, 100004), " //_E-Mail-Adresse_ _Ende_(date)
+                "(10120, 10050, 100001), " //_E-Mail-Adresse_ _Bemerkung_(date)
 
-            "(10130, 10030, 100004), " //_Homepage_ _Beginn_(date)
-            "(10130, 10040, 100004), " //_Homepage_ _Ende_(date)
-            "(10130, 10050, 100001), " //_Homepage_ _Bemerkung_(date)
+                "(10130, 10030, 100004), " //_Homepage_ _Beginn_(date)
+                "(10130, 10040, 100004), " //_Homepage_ _Ende_(date)
+                "(10130, 10050, 100001), " //_Homepage_ _Bemerkung_(date)
 
-            "(11010, 10030, 100004), " //_Vorname_ _Beginn_(date)
-            "(11010, 10040, 100004), " //_Vorname_ _Ende_(date)
-            "(11010, 10050, 100001), " //_Vorname_ _Bemerkung_(date)
+                "(11010, 10030, 100004), " //_Vorname_ _Beginn_(date)
+                "(11010, 10040, 100004), " //_Vorname_ _Ende_(date)
+                "(11010, 10050, 100001), " //_Vorname_ _Bemerkung_(date)
 
-            "(11020, 10030, 100004), " //_Titel_ _Beginn_(date)
-            "(11020, 10040, 100004), " //_Titel_ _Ende_(date)
-            "(11020, 10050, 100001), " //_Titel_ _Bemerkung_(date)
+                "(11020, 10030, 100004), " //_Titel_ _Beginn_(date)
+                "(11020, 10040, 100004), " //_Titel_ _Ende_(date)
+                "(11020, 10050, 100001), " //_Titel_ _Bemerkung_(date)
 
-            "(11050, 10030, 100004), " //_Durchwahl_ _Beginn_(date)
-            "(11050, 10040, 100004), " //_Durchwahl_ _Ende_(date)
-            "(11050, 10050, 100001) " //_Durchwahl_ _Bemerkung_(date)
+                "(11050, 10030, 100004), " //_Durchwahl_ _Beginn_(date)
+                "(11050, 10040, 100004), " //_Durchwahl_ _Ende_(date)
+                "(11050, 10050, 100001) " //_Durchwahl_ _Bemerkung_(date)
 
-
-            "; "
-    };
+            "; " };
 
     if ( ZOND_IS_DBASE(database) )
     {
-        gint rc = 0;
-
         ZondDBase* zond_dbase = ZOND_DBASE(database);
 
         for ( gint i = 0; i < nelem( sql ); i++ )
         {
+            gint rc = 0;
+
             rc = sqlite3_exec( zond_dbase_get_dbase( zond_dbase ), sql[i], NULL, NULL, errmsg );
             if ( rc != SQLITE_OK ) ERROR_S
         }
     }
     else //mysql
     {
+        gint rc = 0;
+        gchar* sql_mysql = NULL;
         MYSQL* con = (MYSQL*) database;
         sql[2] = "CREATE TABLE IF NOT EXISTS entities( "
                 "ID INTEGER PRIMARY KEY AUTO_INCREMENT, "
@@ -454,13 +455,7 @@ sond_database_add_to_database( gpointer database, gchar** errmsg )
                 "FOREIGN KEY (ID_label) REFERENCES labels (ID) "
             "); ";
 
-        //OR ausradieren
-        sql[5][7] = ' ';
-        sql[5][8] = ' ';
-        sql[6][7] = ' ';
-        sql[6][8] = ' ';
-
-        for ( gint i = 0; i < nelem( sql ); i++ )
+        for ( gint i = 0; i < nelem( sql ) - 2; i++ )
         {
             gint rc = 0;
 
@@ -476,6 +471,36 @@ sond_database_add_to_database( gpointer database, gchar** errmsg )
 
                 rc = mysql_next_result( con );
             }
+        }
+
+        sql_mysql = g_strdup( sql[5] );
+
+        //OR ausradieren
+        sql_mysql[7] = ' ';
+        sql_mysql[8] = ' ';
+
+        rc = mysql_query( con, sql_mysql );
+        g_free( sql_mysql );
+        if ( rc )
+        {
+            if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf ", __func__, ":\n",
+                    mysql_error( con ), NULL );
+            return -1;
+        }
+
+        sql_mysql = g_strdup( sql[6] );
+
+        //OR ausradieren
+        sql_mysql[7] = ' ';
+        sql_mysql[8] = ' ';
+
+        rc = mysql_query( con, sql_mysql );
+        g_free( sql_mysql );
+        if ( rc )
+        {
+            if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf ", __func__, ":\n",
+                    mysql_error( con ), NULL );
+            return -1;
         }
     }
 
@@ -811,6 +836,235 @@ sond_database_get_entities_for_property( gpointer database,
     }
 
     return cnt;
+}
+
+
+gint
+sond_database_get_label_for_ID_label( gpointer database, gint ID_label, gchar** label, gchar** errmsg )
+{
+    const gchar* sql[] = {
+            "SELECT label FROM labels WHERE ID=@1; "
+    };
+
+    if ( ZOND_IS_DBASE(database) )
+    {
+        gint rc = 0;
+        sqlite3_stmt** stmt = NULL;
+
+        ZondDBase* zond_dbase = ZOND_DBASE(database);
+
+        rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
+        if ( rc ) ERROR_S
+
+        rc = sqlite3_bind_int( stmt[0], 1, ID_label );
+        if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (ID_label)" )
+
+        rc = sqlite3_step( stmt[0] );
+        if ( rc != SQLITE_ROW && rc != SQLITE_DONE ) ERROR_ZOND_DBASE( "sqlite3_step" )
+        else if ( rc == SQLITE_DONE ) ERROR_S_MESSAGE( "ID_label existiert nicht" )
+
+        if ( label ) *label = g_strdup( (const gchar*) sqlite3_column_text( stmt[0], 0 ) );
+    }
+    else //mysql
+    {
+        gint rc = 0;
+        MYSQL* con = NULL;
+        MYSQL_RES* mysql_res = NULL;
+        MYSQL_ROW row = NULL;
+        gchar* sql_mariadb = NULL;
+
+        con = (MYSQL*) database;
+
+        sql_mariadb = g_strdup_printf( "SET @1=%i; ", ID_label );
+        sql_mariadb = add_string( sql_mariadb, g_strdup( sql[0] ) );
+
+        rc = mysql_query( con, sql_mariadb );
+        g_free( sql_mariadb );
+        if ( rc )
+        {
+            if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf ", __func__, ":\n",
+                    mysql_error( con ), NULL );
+            return -1;
+        }
+
+        mysql_res = mysql_store_result( con );
+        if ( !mysql_res )
+        {
+            if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf mysql_store_result:\n",
+                    mysql_error( con ), NULL );
+
+            return -1;
+        }
+
+        row = mysql_fetch_row( mysql_res );
+        if ( !row )
+        {
+            mysql_free_result( mysql_res );
+            ERROR_S_MESSAGE( "ID_label existiert nicht" )
+        }
+
+        if ( label ) *label = g_strdup( row[0] );
+
+        mysql_free_result( mysql_res );
+    }
+
+    return 0;
+}
+
+
+gint
+sond_database_get_property_value( gpointer database, gint ID_property, gchar** value, gchar** errmsg )
+{
+    const gchar* sql[] = {
+            "SELECT value FROM properties WHERE entity_property=@1; "
+    };
+
+    if ( ZOND_IS_DBASE(database) )
+    {
+        gint rc = 0;
+        sqlite3_stmt** stmt = NULL;
+
+        ZondDBase* zond_dbase = ZOND_DBASE(database);
+
+        rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
+        if ( rc ) ERROR_S
+
+        rc = sqlite3_bind_int( stmt[0], 1, ID_property );
+        if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (ID_property)" )
+
+        rc = sqlite3_step( stmt[0] );
+        if ( rc != SQLITE_ROW && rc != SQLITE_DONE ) ERROR_ZOND_DBASE( "sqlite3_step" )
+        else if ( rc == SQLITE_DONE ) ERROR_S_MESSAGE( "ID_property existiert nicht" )
+
+        if ( value ) *value = g_strdup( (const gchar*) sqlite3_column_text( stmt[0], 0 ) );
+    }
+    else //mysql
+    {
+        gint rc = 0;
+        MYSQL* con = NULL;
+        MYSQL_RES* mysql_res = NULL;
+        MYSQL_ROW row = NULL;
+        gchar* sql_mariadb = NULL;
+
+        con = (MYSQL*) database;
+
+        sql_mariadb = g_strdup_printf( "SET @1=%i; ", ID_property );
+        sql_mariadb = add_string( sql_mariadb, g_strdup( sql[0] ) );
+
+        rc = mysql_query( con, sql_mariadb );
+        g_free( sql_mariadb );
+        if ( rc )
+        {
+            if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf ", __func__, ":\n",
+                    mysql_error( con ), NULL );
+            return -1;
+        }
+
+        mysql_res = mysql_store_result( con );
+        if ( !mysql_res )
+        {
+            if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf mysql_store_result:\n",
+                    mysql_error( con ), NULL );
+
+            return -1;
+        }
+
+        row = mysql_fetch_row( mysql_res );
+        if ( !row )
+        {
+            mysql_free_result( mysql_res );
+            ERROR_S_MESSAGE( "ID_property existiert nicht" )
+        }
+
+        if ( value ) *value = g_strdup( row[0] );
+
+        mysql_free_result( mysql_res );
+    }
+
+    return 0;
+}
+
+
+gint
+sond_database_get_properties( gpointer database, gint ID_entity, GArray** arr_properties, gchar** errmsg )
+{
+    const gchar* sql[] = {
+            "SELECT entity_property FROM properties WHERE entity_subject=@1; "
+    };
+
+    if ( ZOND_IS_DBASE(database) )
+    {
+        gint rc = 0;
+        sqlite3_stmt** stmt = NULL;
+
+        ZondDBase* zond_dbase = ZOND_DBASE(database);
+
+        rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
+        if ( rc ) ERROR_S
+
+        rc = sqlite3_bind_int( stmt[0], 1, ID_entity );
+        if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (ID_entity)" )
+
+        *arr_properties = g_array_new( FALSE, FALSE, sizeof( gint ) );
+        do
+        {
+            gint ID_property = 0;
+
+            rc = sqlite3_step( stmt[0] );
+            if ( rc != SQLITE_ROW && rc != SQLITE_DONE )
+            {
+                g_array_unref( *arr_properties );
+                ERROR_ZOND_DBASE( "sqlite3_step" )
+            }
+            else if ( rc == SQLITE_DONE ) break;
+
+            ID_property = sqlite3_column_int( stmt[0], 0 );
+            g_array_append_val( *arr_properties, ID_property );
+        } while ( rc == SQLITE_ROW );
+    }
+    else //mysql
+    {
+        gint rc = 0;
+        MYSQL* con = NULL;
+        MYSQL_RES* mysql_res = NULL;
+        MYSQL_ROW row = NULL;
+        gchar* sql_mariadb = NULL;
+
+        con = (MYSQL*) database;
+
+        sql_mariadb = g_strdup_printf( "SET @1=%i; ", ID_entity );
+        sql_mariadb = add_string( sql_mariadb, g_strdup( sql[0] ) );
+
+        rc = mysql_query( con, sql_mariadb );
+        g_free( sql_mariadb );
+        if ( rc )
+        {
+            if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf ", __func__, ":\n",
+                    mysql_error( con ), NULL );
+            return -1;
+        }
+
+        mysql_res = mysql_store_result( con );
+        if ( !mysql_res )
+        {
+            if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf mysql_store_result:\n",
+                    mysql_error( con ), NULL );
+
+            return -1;
+        }
+
+        while ( (row = mysql_fetch_row( mysql_res )) )
+        {
+            gint ID_property = 0;
+
+            ID_property = atoi( row[0] );
+            g_array_append_val( *arr_properties, ID_property );
+        }
+
+        mysql_free_result( mysql_res );
+    }
+
+    return 0;
 }
 
 

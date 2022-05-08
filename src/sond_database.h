@@ -58,4 +58,8 @@ gint sond_database_insert_property( gpointer, gint, gint, const gchar*, gchar** 
 gint sond_database_get_entities_for_property( gpointer, gint, const gchar*,
         GArray**, gchar** );
 
+gint sond_database_get_label_for_ID_label( gpointer, gint, gchar**, gchar** );
+
+gint sond_database_get_property_value( gpointer, gint, gchar**, gchar** );
+
 #endif //SOND_DATABASE_H_INCLUDED
