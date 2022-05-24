@@ -1,7 +1,6 @@
 /*
 Bugs:
     - Kopieren aus suchen-Fenster klappt nicht richtig
-    - Auszug stürzt ab
 
 ToDo:
 - Synchron-Punkte

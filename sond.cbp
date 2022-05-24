@@ -345,11 +345,6 @@
 			<Option target="Sojus (Release)" />
 			<Option target="Sojus (Testing)" />
 		</Unit>
-		<Unit filename="src/sojus/sojus_database.c">
-			<Option compilerVar="CC" />
-			<Option target="Sojus (Release)" />
-			<Option target="Sojus (Testing)" />
-		</Unit>
 		<Unit filename="src/sojus/sojus_database.h">
 			<Option target="Sojus (Release)" />
 			<Option target="Sojus (Testing)" />
@@ -737,17 +732,6 @@
 			<Option target="zond (Testing)" />
 		</Unit>
 		<Unit filename="src/zond/zond_treeviewfm.h">
-			<Option target="zond (Release)" />
-			<Option target="zond (Testing)" />
-		</Unit>
-		<Unit filename="src/zond/zond_treeviews.c">
-			<Option compilerVar="CC" />
-			<Option compile="0" />
-			<Option link="0" />
-			<Option target="zond (Release)" />
-			<Option target="zond (Testing)" />
-		</Unit>
-		<Unit filename="src/zond/zond_treeviews.h">
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
 		</Unit>

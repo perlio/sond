@@ -153,6 +153,9 @@ sond_database_add_to_database( gpointer database, gchar** errmsg )
                 "(300, 'Subjekt des Privatrechts', 100), "
 
                 "(310, 'natürliche Person', 300), "
+                "(312, 'Mann', 310), "
+                "(313, 'Frau', 310), "
+                "(314, 'diverse natürliche Person', 310), "
                 "(320, 'juristische Person', 300), "
                 "(325, 'GmbH', 320), "
                 "(330, 'UG', 320), "
@@ -166,22 +169,13 @@ sond_database_add_to_database( gpointer database, gchar** errmsg )
                 "(365, 'KG', 354), "
                 "(370, 'Partnerschaft', 354), "
 
-                "(372, 'Geschlecht', 1), "
-
                 "(375, 'Adressbestandteil', 1), "
                 "(380, 'Land', 375), "
                 "(390, 'Ort', 375), "
                 "(400, 'Straße', 375), "
 
-                "(405, 'Telefonnummer', 1), "
-                "(410, 'Vorwahl', 405), "
-                "(412, 'Ländervorwahl', 410), "
-                "(413, 'Teilnetzvorwahl', 410), "
-                "(414, 'Ortsvorwahl', 413), "
-                "(416, 'Mobilfunknetzvorwahl', 413), "
-                "(420, 'Teilnehmernummer', 405), "
-                "(425, 'Rufnummer', 420), "
-                "(430, 'Stammrufnummer', 420), "
+                "(425, 'Rufnummer', 1), "
+                "(430, 'Stammrufnummer', 425), "
 
                 "(435, 'IMSI', 1), "
                 "(437, 'IMEI', 1), "
@@ -287,9 +281,6 @@ sond_database_add_to_database( gpointer database, gchar** errmsg )
 
                 //Property für TKÜ-Maßnahme
                 "(11059, '_Leitungsnummer_', 3), "
-                "(11060, '_überwachter Anschluß_', 3), "
-                "(11061, '_AI überwachter Anschluß_', 3), "
-                "(11062, '_überwachte Person_', 3), "
 
                 //p für TKÜ-Ereignis
                 "(11065, '_Korrelationsnummer_', 3), "
@@ -299,6 +290,9 @@ sond_database_add_to_database( gpointer database, gchar** errmsg )
                 "(11075, '_Richtung_', 3), "
                 "(11080, '_Text_', 3), "
 
+                //Prädikate Gemini
+                "(12000, '_hat als Sprecher am ÜA_', 2), "
+                "(12005, '_hat als Sprecher am PA_', 2), "
 /*                //15000-19999: Prädikate zond
                 "(15150, '_befindet sich_', 2), "
 
@@ -326,7 +320,7 @@ sond_database_add_to_database( gpointer database, gchar** errmsg )
 
             "INSERT OR IGNORE INTO adm_rels (subject,rel,object) VALUES "
 
-                "(100, 10010, 420), " //Subjekt _hat_ Teilnehmernummer
+                "(100, 10010, 425), " //Subjekt _hat_ Teilnehmernummer
                 "(100, 10010, 440), " //Subjekt _hat_ Kontoverbindung
                 "(100, 10030, 100004), " //Subjekt _Beginn_(date)
                 "(100, 10040, 100004), " //Subjekt _Ende_(date)
@@ -338,7 +332,6 @@ sond_database_add_to_database( gpointer database, gchar** errmsg )
                 "(110, 10010, 460), " //Subjekt des öffentlichen Rechts _hat_ Dienstsitz
                 "(300, 10010, 452), " //Subjekt des Privatrechts _hat_Geschäftssitz
                 "(310, 10010, 456), " //natürliche Person _hat_ Wohnsitz
-                "(310, 10010, 372), " //natürliche Person _hat_ Geschlecht
                 "(310, 10010, 470), " //natürliche Person _hat_ Beruf/Dienstgrad
                 "(310, 10020, 450), " //natürliche Person _arbeitet an_ Sitz
                 "(310, 11010, 100001), " //natürliche Person Vorname(string)
@@ -348,20 +341,18 @@ sond_database_add_to_database( gpointer database, gchar** errmsg )
                 "(380, 10110, 100001), " //Land Kürzel(string)
                 "(390, 10000, 380), " //Ort _gehört zu_ Land
                 "(400, 10000, 390), " //Straße gehört zu Ort
-    //geht
-                "(405, 10100, 100001), " //Telefonnummer Name(string) - meint: Telefonnr lautet "..."
-                "(413, 10000, 412), " //Teilnetzvorwahll _gehört zu_ Ländervorwahl
-                "(420, 10000, 413), " //Teilnehmernr _gehört zu_ Teilnetzvorwahl
 
-                "(435, 10010, 425), " //IMSI _hat_ Rufnummer
-                "(437, 10010, 435), " //IMEI _hat_ IMSI
+                "(425, 10100, 100001), " //Telefonnummer Name(string) - meint: Telefonnr lautet "..."
+
+                "(435, 10100, 100001), " //IMSI _hat_ Rufnummer
+                "(437, 10100, 100001), " //IMEI _hat_ IMSI
 
                 "(440, 10000, 100), " //Kontoverbindung _gehört zu_ Subjekt (Bank)
                 "(440, 11025, 100001), " //Kontoverbindung _BIC_ (string)
                 "(440, 11027, 100001), " //Kontoverbidnung _IBAN_ (string)
 
                 "(450, 10000, 400), " //Sitz _gehört zu_ Straße
-                "(450, 10010, 420), " //Sitz _hat_ Teilnehmernr
+                "(450, 10010, 425), " //Sitz _hat_ Teilnehmernr
                 "(450, 10120, 100001), " //Sitz _E-Mail-Adresse_(string)
                 "(450, 10130, 100001), " //Sitz _Homepage_(string)
                 "(450, 11030, 100001), " //Sitz Hausnr(string)
@@ -380,7 +371,7 @@ sond_database_add_to_database( gpointer database, gchar** errmsg )
 
                 "(750, 10010, 650), " //Urkunde _hat_ Fundstelle
 
-                "(1000, 10010, 310), " //TKÜ-Maßnahme _hat_ natürliche Person (Überwachte Person=)
+                "(1000, 10010, 310), " //TKÜ-Maßnahme _hat_ natürliche Person (= Überwachte Person)
                 "(1000, 10010, 425), " //TKÜ-Maßnahme _hat_ Rufnummer
                 "(1000, 10010, 435), " //TKÜ-Maßnahme _hat_ IMSI
                 "(1000, 10010, 437), " //TKÜ-Maßnahme _hat_ IMEI
@@ -397,6 +388,9 @@ sond_database_add_to_database( gpointer database, gchar** errmsg )
                 "(1010, 11070, 100001), " //TKÜ-Ereignis _GIS-Link_ (string)
                 "(1010, 11072, 100001), " //TKÜ-Ereignis _Funkmast_ (string)
                 "(1010, 11075, 100001), " //TKÜ-Ereignis _Richtung_ (string)
+                "(1010, 12000, 310), " //TKÜ-Ereignis _hat Sprecher am ÜA_ natürliche Person
+                "(1010, 12005, 310), " //TKÜ-Ereignis _hat Sprecher am PA_ natürliche Person
+
                 "(1015, 11080, 100001), " //SMS _Text_ (string)
 
                 "(10010, 10025, 100004), " //_hat_ _Zeitpunkt_(date)
@@ -652,6 +646,50 @@ sond_database_is_admitted_rel( gpointer database, gint ID_label_subject,
 
 
 gint
+sond_database_label_is_equal_or_parent( gpointer database, gint ID_label_parent, gint ID_label_test, gchar** errmsg )
+{
+    const gchar* sql[] = {
+            "(WITH RECURSIVE cte_labels (ID) AS ( "
+                "VALUES (@1) "
+                "UNION ALL "
+                "SELECT labels.ID "
+                    "FROM labels JOIN cte_labels WHERE "
+                    "labels.parent = cte_labels.ID "
+                ") SELECT ID AS ID_CTE FROM cte_labels) "
+                "WHERE ID=@2; "
+    };
+
+    if ( ZOND_IS_DBASE(database) )
+    {
+        gint rc = 0;
+        sqlite3_stmt** stmt = NULL;
+
+        ZondDBase* zond_dbase = ZOND_DBASE(database);
+
+        rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
+        if ( rc ) ERROR_S
+
+        rc = sqlite3_bind_int( stmt[0], 1, ID_label_parent );
+        if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (ID_label_parent)" )
+
+        rc = sqlite3_bind_int( stmt[0], 2, ID_label_test );
+        if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (ID_label_test)" )
+
+        rc = sqlite3_step( stmt[0] );
+        if ( rc != SQLITE_ROW && rc != SQLITE_DONE ) ERROR_ZOND_DBASE( "sqlite3_step" )
+
+        if ( rc == SQLITE_DONE ) return 1;
+    }
+    else //mysql
+    {
+
+    }
+
+    return 0;
+}
+
+
+gint
 sond_database_get_ID_label_for_entity( gpointer database, gint ID_entity, gchar** errmsg )
 {
     const gchar* sql[] = {
@@ -683,7 +721,6 @@ sond_database_get_ID_label_for_entity( gpointer database, gint ID_entity, gchar*
     }
 
     return 0;
-
 }
 
 
@@ -737,6 +774,7 @@ gint
 sond_database_insert_property( gpointer database, gint ID_entity_subject, gint ID_label_property,
         const gchar* value_property, gchar** errmsg )
 {
+    gint rc = 0;
     gint ID_new_entity_property = 0;
 
     const gchar* sql[] = {
@@ -744,16 +782,18 @@ sond_database_insert_property( gpointer database, gint ID_entity_subject, gint I
             "VALUES (?1,?2,?3); "
     };
 
+    if ( !value_property ) return 0;
+
+    rc = sond_database_insert_entity( database, ID_label_property, errmsg );
+    if ( rc == -1 ) ERROR_S
+    else ID_new_entity_property = rc;
+
     if ( ZOND_IS_DBASE(database) )
     {
         gint rc = 0;
         sqlite3_stmt** stmt = NULL;
 
         ZondDBase* zond_dbase = ZOND_DBASE(database);
-
-        rc = sond_database_insert_entity( database, ID_label_property, errmsg );
-        if ( rc == -1 ) ERROR_S
-        else ID_new_entity_property = rc;
 
         rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
         if ( rc ) ERROR_S
@@ -774,6 +814,118 @@ sond_database_insert_property( gpointer database, gint ID_entity_subject, gint I
     {
 
     }
+
+    return 0;
+}
+
+
+static gint
+sond_database_get_object_for_subject_one_step( gpointer database, gint ID_entity_subject,
+        gint ID_label_rel, gint ID_label_object, GArray** arr_objects, gchar** errmsg )
+{
+    gint cnt = 0;
+    const gchar* sql[] = {
+            "SELECT rels.entity_object FROM "
+                "rels JOIN "
+                "entities AS e1 JOIN "
+                "entities AS e2 JOIN "
+                "WHERE "
+                    "rels.entity_subject=@1 AND "
+                    "rels.entity_rel=e1.ID AND "
+                    "e1.ID_label=@2 AND "
+                    "rels.entity_object=e2.ID AND "
+                    "e2.ID_label=@3; "
+    };
+
+    if ( ZOND_IS_DBASE(database) )
+    {
+        gint rc = 0;
+        sqlite3_stmt** stmt = NULL;
+
+        ZondDBase* zond_dbase = ZOND_DBASE(database);
+
+        rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
+        if ( rc ) ERROR_S
+
+        rc = sqlite3_bind_int( stmt[0], 1, ID_entity_subject );
+        if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (ID_entity_subject)" )
+
+        rc = sqlite3_bind_int( stmt[0], 2, ID_label_rel );
+        if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (ID_label_rel)" )
+
+        rc = sqlite3_bind_int( stmt[0], 3, ID_label_object );
+        if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (ID_label_object)" )
+
+        do
+        {
+            rc = sqlite3_step( stmt[0] );
+            if ( rc != SQLITE_ROW && rc != SQLITE_DONE ) ERROR_ZOND_DBASE( "sqlite3_step" )
+            else if ( rc == SQLITE_ROW )
+            {
+                gint ID_entity = 0;
+
+                ID_entity = sqlite3_column_int( stmt[0], 0 );
+                g_array_append_val( *arr_objects, ID_entity );
+                cnt++;
+            }
+        } while ( rc == SQLITE_ROW );
+    }
+    else //mysql
+    {
+
+    }
+
+    return cnt;
+
+}
+
+
+gint
+sond_database_get_object_for_subject( gpointer database, gint ID_entity_subject,
+        GArray** arr_objects, gchar** errmsg, ... )
+{
+    va_list ap;
+    gint ID_label_rel = 0;
+    GArray* arr_objects_tmp = NULL;
+
+    arr_objects_tmp = g_array_new( FALSE, FALSE, sizeof( gint ) );
+    g_array_append_val( arr_objects_tmp, ID_entity_subject );
+
+    va_start( ap, errmsg );
+
+    while ( (ID_label_rel = va_arg( ap, gint )) != -1 )
+    {
+        gint ID_label_object = 0;
+        GArray* arr_results = NULL;
+
+        arr_results = g_array_new( FALSE, FALSE, sizeof( gint ) );
+
+        ID_label_object = va_arg( ap, gint );
+
+        for ( gint i = 0; i < arr_objects_tmp->len; i++ )
+        {
+            gint rc = 0;
+            gint ID_entity_subject_tmp = 0;
+
+            ID_entity_subject_tmp= g_array_index( arr_objects_tmp, gint, i );
+
+            rc = sond_database_get_object_for_subject_one_step( database,
+                    ID_entity_subject_tmp, ID_label_rel, ID_label_object, &arr_results, errmsg );
+            if ( rc == -1 )
+            {
+                g_array_unref( arr_results );
+                g_array_unref( arr_objects_tmp );
+                va_end( ap );
+                ERROR_S
+            }
+        }
+        g_array_unref( arr_objects_tmp );
+        arr_objects_tmp = arr_results;
+    }
+
+    va_end( ap );
+
+    *arr_objects = arr_objects_tmp;
 
     return 0;
 }
@@ -836,6 +988,90 @@ sond_database_get_entities_for_property( gpointer database,
     }
 
     return cnt;
+}
+
+
+gint
+sond_database_get_entities_for_properties_and( gpointer database,
+        GArray** arr_res, gchar** errmsg, ... )
+{
+    va_list arg_pointer;
+    GArray* arr_first = NULL;
+    gint ID_label = 0;
+    GPtrArray* arr_arrays = NULL;
+
+    arr_arrays = g_ptr_array_new_full( 0, (GDestroyNotify) g_ptr_array_unref );
+
+    va_start( arg_pointer, errmsg );
+
+    while ( (ID_label = va_arg( arg_pointer, gint )) != -1 )
+    {
+        const gchar* value = NULL;
+        gint rc = 0;
+        GArray* arr_prop = NULL;
+
+        arr_prop = g_array_new( FALSE, FALSE, sizeof( gint ) );
+        g_ptr_array_add( arr_arrays, arr_prop );
+
+        value = va_arg( arg_pointer, const gchar* );
+
+        rc = sond_database_get_entities_for_property( database, ID_label, value,
+                &arr_prop, errmsg );
+        if ( rc == -1 )
+        {
+            va_end( arg_pointer );
+            g_ptr_array_unref( arr_arrays );
+            ERROR_S
+        }
+    }
+
+    va_end( arg_pointer );
+
+    if ( arr_arrays->len == 0 ) return 0;
+
+    arr_first = g_ptr_array_index( arr_arrays, 0 );
+    for ( gint i = 0; i < arr_first->len; i++ )
+    {
+        gint ID_first_array = 0;
+
+        ID_first_array = g_array_index( arr_first, gint, i );
+
+        for ( gint a = 1; a < arr_arrays->len; a++ )
+        {
+            GArray* arr_n = NULL;
+            gboolean found = FALSE;
+
+            arr_n = g_ptr_array_index( arr_arrays, a );
+
+            for ( gint u = 0; u < arr_n->len; u++ )
+            {
+                gint ID = 0;
+
+                ID = g_array_index( arr_n, gint, u );
+                if ( ID == ID_first_array )
+                {
+                    found = TRUE;
+                    break;
+                }
+            }
+
+            if ( found == FALSE )
+            {
+                g_array_remove_index( arr_first, i );
+                break;
+            }
+        }
+    }
+
+    if ( arr_res )
+    {
+        *arr_res = g_array_new( FALSE, FALSE, sizeof ( gint ) );
+        *arr_res = g_array_ref( arr_first );
+    }
+
+    g_ptr_array_unref( arr_arrays ); //arr_first wird nicht gelöscht, da ref == 2 (hoffe ich)
+
+    return 0;
 }
 
 
@@ -1040,6 +1276,87 @@ sond_database_get_properties( gpointer database, gint ID_entity, GArray** arr_pr
         if ( rc )
         {
             if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf ", __func__, ":\n",
+                    "Bei Aufruf mysql_query:\n", mysql_error( con ), NULL );
+            return -1;
+        }
+
+        mysql_res = mysql_store_result( con );
+        if ( !mysql_res )
+        {
+            if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf ", __func__, ":\n",
+                    "Bei Aufruf mysql_store_result:\n",
+                    mysql_error( con ), NULL );
+
+            return -1;
+        }
+
+        while ( (row = mysql_fetch_row( mysql_res )) )
+        {
+            gint ID_property = 0;
+
+            ID_property = atoi( row[0] );
+            g_array_append_val( *arr_properties, ID_property );
+        }
+
+        mysql_free_result( mysql_res );
+    }
+
+    return 0;
+}
+
+
+gint
+sond_database_get_first_property_value_for_subject( gpointer database,
+        gint ID_entity_subject, gint ID_label_property, gchar** value, gchar** errmsg )
+{
+    const gchar* sql[] = {
+            "SELECT properties.value FROM properties JOIN entities  "
+            "ON properties.entity_property=entities.ID "
+            "AND properties.entity_subject=@1 "
+            "AND entities.ID_label=@2; "
+    };
+
+    if ( ZOND_IS_DBASE(database) )
+    {
+        gint rc = 0;
+        sqlite3_stmt** stmt = NULL;
+
+        ZondDBase* zond_dbase = ZOND_DBASE(database);
+
+        rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
+        if ( rc ) ERROR_S
+
+        rc = sqlite3_bind_int( stmt[0], 1, ID_entity_subject );
+        if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (ID_entity_subject)" )
+
+        rc = sqlite3_bind_int( stmt[0], 2, ID_label_property );
+        if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (ID_label_property)" )
+
+        rc = sqlite3_step( stmt[0] );
+        if ( rc != SQLITE_ROW && rc != SQLITE_DONE ) ERROR_ZOND_DBASE( "sqlite3_step" )
+        else if ( rc == SQLITE_DONE ) return 1;
+
+        *value = g_strdup( (const gchar*) sqlite3_column_text( stmt[0], 0 ) );
+    }
+    else //mysql
+    {
+        gint rc = 0;
+        MYSQL* con = NULL;
+        MYSQL_RES* mysql_res = NULL;
+        MYSQL_ROW row = NULL;
+        gchar* sql_mariadb = NULL;
+
+        con = (MYSQL*) database;
+
+        sql_mariadb = g_strdup_printf( "SET @1=%i; ", ID_entity_subject );
+        sql_mariadb = add_string( sql_mariadb, g_strdup_printf( "SET @2=%i; ", ID_label_property ) );
+        sql_mariadb = add_string( sql_mariadb, g_strdup( sql[0] ) );
+
+        rc = mysql_query( con, sql_mariadb );
+        g_free( sql_mariadb );
+        if ( rc )
+        {
+            if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf ", __func__, ":\n",
                     mysql_error( con ), NULL );
             return -1;
         }
@@ -1053,12 +1370,98 @@ sond_database_get_properties( gpointer database, gint ID_entity, GArray** arr_pr
             return -1;
         }
 
+        row = mysql_fetch_row( mysql_res );
+        if ( !row )
+        {
+            mysql_free_result( mysql_res );
+            return 1;
+        }
+
+        *value = g_strdup( row[0] );
+
+        mysql_free_result( mysql_res );
+    }
+
+    return 0;
+}
+
+
+gint
+sond_database_get_outgoing_rels( gpointer database, gint ID_entity, GArray** arr_o_rels, gchar** errmsg )
+{
+    const gchar* sql[] = {
+            "SELECT entity_rel FROM rels WHERE entity_subject=@1; "
+    };
+
+    if ( ZOND_IS_DBASE(database) )
+    {
+        gint rc = 0;
+        sqlite3_stmt** stmt = NULL;
+
+        ZondDBase* zond_dbase = ZOND_DBASE(database);
+
+        rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
+        if ( rc ) ERROR_S
+
+        rc = sqlite3_bind_int( stmt[0], 1, ID_entity );
+        if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (ID_entity)" )
+
+        *arr_o_rels = g_array_new( FALSE, FALSE, sizeof( gint ) );
+        do
+        {
+            gint ID_entity_rel = 0;
+
+            rc = sqlite3_step( stmt[0] );
+            if ( rc != SQLITE_ROW && rc != SQLITE_DONE )
+            {
+                g_array_unref( *arr_o_rels );
+                ERROR_ZOND_DBASE( "sqlite3_step" )
+            }
+            else if ( rc == SQLITE_DONE ) break;
+
+            ID_entity_rel = sqlite3_column_int( stmt[0], 0 );
+            g_array_append_val( *arr_o_rels, ID_entity_rel );
+        } while ( rc == SQLITE_ROW );
+    }
+    else //mysql
+    {
+        gint rc = 0;
+        MYSQL* con = NULL;
+        MYSQL_RES* mysql_res = NULL;
+        MYSQL_ROW row = NULL;
+        gchar* sql_mariadb = NULL;
+
+        con = (MYSQL*) database;
+
+        sql_mariadb = g_strdup_printf( "SET @1=%i; ", ID_entity );
+        sql_mariadb = add_string( sql_mariadb, g_strdup( sql[0] ) );
+
+        rc = mysql_query( con, sql_mariadb );
+        g_free( sql_mariadb );
+        if ( rc )
+        {
+            if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf ", __func__, ":\n",
+                    "Bei Aufruf mysql_query:\n", mysql_error( con ), NULL );
+            return -1;
+        }
+
+        mysql_res = mysql_store_result( con );
+        if ( !mysql_res )
+        {
+            if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf ", __func__, ":\n"
+                    "Bei Aufruf mysql_store_result:\n",
+                    mysql_error( con ), NULL );
+
+            return -1;
+        }
+
+        *arr_o_rels = g_array_new( FALSE, FALSE, sizeof( gint ) );
         while ( (row = mysql_fetch_row( mysql_res )) )
         {
-            gint ID_property = 0;
+            gint ID_entity_rel = 0;
 
-            ID_property = atoi( row[0] );
-            g_array_append_val( *arr_properties, ID_property );
+            ID_entity_rel = atoi( row[0] );
+            g_array_append_val( *arr_o_rels, ID_entity_rel );
         }
 
         mysql_free_result( mysql_res );
@@ -1487,6 +1890,86 @@ dbase_full_get_entity( DBaseFull* dbase_full, gint ID_entity, Entity** entity, g
 
 //  insert_edge (53)
             "INSERT INTO edges (entity,subject,object) VALUES (?1,?2,?3); ",
+
+
+gint
+sojus_database_update_property( MYSQL* con, gint ID_property, const gchar* value, gchar** errmsg )
+{
+    gchar* sql = NULL;
+    gint rc = 0;
+
+    sql = g_strdup_printf( "UPDATE properties SET value=%s WHERE entity=%i;",
+            value, ID_property );
+
+    rc = mysql_query( con, sql );
+    g_free( sql );
+    if ( rc )
+    {
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf mysql_query:\n",
+                mysql_error( con ), NULL );
+
+        return -1;
+    }
+
+    return 0;
+}
+
+
+gint
+sojus_database_delete_property( MYSQL* con, gint ID_property, gchar** errmsg )
+{
+    gchar* sql = NULL;
+    gint rc = 0;
+    MYSQL_RES* mysql_res = NULL;
+    MYSQL_ROW row = NULL;
+
+    sql = g_strdup_printf( "DELETE FROM properties WHERE entity=%i; "
+            "DELETE vom rels WHERE object=%i;", ID_property, ID_property );
+
+    rc = mysql_query( con, sql );
+    g_free( sql );
+    if ( rc )
+    {
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf mysql_query:\n",
+                mysql_error( con ), NULL );
+
+        return -1;
+    }
+
+    sql = g_strdup_printf( "SELECT object FROM rels WHERE subject=%i;", ID_property );
+
+    rc = mysql_query( con, sql );
+    g_free( sql );
+    if ( rc )
+    {
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf mysql_query:\n",
+                mysql_error( con ), NULL );
+
+        return -1;
+    }
+
+    mysql_res = mysql_store_result( con );
+    if ( !mysql_res )
+    {
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf mysql_store_result:\n",
+                mysql_error( con ), NULL );
+
+        return -1;
+    }
+
+    while ( (row = mysql_fetch_row( mysql_res )) )
+    {
+        gint rc = 0;
+
+        rc = sojus_database_delete_property( con, atoi( row[0] ), errmsg );
+        if ( rc ) ERROR_SOND( "sojus_database_detete_property" )
+    }
+
+    mysql_free_result( mysql_res );
+
+    return 0;
+}
+
 */
 
 

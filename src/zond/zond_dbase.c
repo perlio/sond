@@ -743,6 +743,54 @@ zond_dbase_get_dbase( ZondDBase* zond_dbase )
 }
 
 
+const gchar*
+zond_dbase_get_path( ZondDBase* zond_dbase )
+{
+    ZondDBasePrivate* priv = zond_dbase_get_instance_private( zond_dbase );
+
+    return priv->path;
+}
+
+
+gint
+zond_dbase_backup( ZondDBase* src, ZondDBase* dst, gchar** errmsg )
+{
+    gint rc = 0;
+    sqlite3* db_src = NULL;
+    sqlite3* db_dst = NULL;
+    sqlite3_backup* backup = NULL;
+
+    db_src = zond_dbase_get_dbase( src );
+    db_dst = zond_dbase_get_dbase( dst );
+
+    //Datenbank öffnen
+    backup = sqlite3_backup_init( db_dst, "main", db_src, "main" );
+    if ( !backup )
+    {
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf ", __func__,
+                ":\nBei Aufruf sqlite3_backup_init\nresult code: ",
+                sqlite3_errstr( sqlite3_errcode( db_dst ) ), "\n",
+                sqlite3_errmsg( db_dst ), NULL);
+
+        return -1;
+    }
+    rc = sqlite3_backup_step( backup, -1 );
+    sqlite3_backup_finish( backup );
+    if ( rc != SQLITE_DONE )
+    {
+        if ( errmsg && rc == SQLITE_NOTADB ) *errmsg = g_strdup( "Datei ist "
+                "keine SQLITE-Datenbank" );
+        else if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf ", __func__,
+                "Bei Aufruf sqlite3_backup_step:\nresult code: ",
+                sqlite3_errstr( rc ), "\n", sqlite3_errmsg( db_dst ), NULL );
+
+        return -1;
+    }
+
+    return 0;
+}
+
+
 static gint
 zond_dbase_prepare_stmts( ZondDBase* zond_dbase, gint num, const gchar** sql,
         sqlite3_stmt** stmt, gchar** errmsg )

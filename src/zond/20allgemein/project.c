@@ -79,39 +79,6 @@ projekt_set_widgets_sensitiv( Projekt* zond, gboolean active )
 
 
 static gint
-project_backup( sqlite3* db_orig, sqlite3* db_dest, gchar** errmsg )
-{
-    gint rc = 0;
-
-    //Datenbank öffnen
-    sqlite3_backup* backup = NULL;
-    backup = sqlite3_backup_init( db_dest, "main", db_orig, "main" );
-
-    if ( !backup )
-    {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_backup_init\nresult code: ",
-                sqlite3_errstr( sqlite3_errcode( db_dest ) ), "\n",
-                sqlite3_errmsg( db_dest ), NULL );
-
-        return -1;
-    }
-    rc = sqlite3_backup_step( backup, -1 );
-    sqlite3_backup_finish( backup );
-    if ( rc != SQLITE_DONE )
-    {
-        if ( errmsg && rc == SQLITE_NOTADB ) *errmsg = g_strdup( "Datei ist "
-                "keine SQLITE-Datenbank" );
-        else if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_backup_step:\nresult code: ",
-                sqlite3_errstr( rc ), "\n", sqlite3_errmsg( db_dest ), NULL );
-
-        return -1;
-    }
-
-    return 0;
-}
-
-
-static gint
 project_create_dbase_zond( Projekt* zond, const gchar* path, gboolean create,
         DBaseZond** dbase_zond, gchar** errmsg )
 {
@@ -135,13 +102,12 @@ project_create_dbase_zond( Projekt* zond, const gchar* path, gboolean create,
         else if ( rc == 1 ) return 1;
     }
 
-    rc = project_backup( zond_dbase_get_dbase( zond_dbase_store ),
-            zond_dbase_get_dbase( zond_dbase_work ), errmsg );
+    rc = zond_dbase_backup( zond_dbase_store, zond_dbase_work, errmsg );
     if ( rc )
     {
         zond_dbase_close( zond_dbase_store );
         zond_dbase_close( zond_dbase_work );
-        ERROR_SOND( "project_backup" )
+        ERROR_S
     }
 
     sqlite3_update_hook( zond_dbase_get_dbase( zond_dbase_work ),
@@ -208,9 +174,9 @@ project_speichern( Projekt* zond, gchar** errmsg )
 
     if ( !(zond->dbase_zond->changed) ) return 0;
 
-    rc = project_backup( zond_dbase_get_dbase( zond->dbase_zond->zond_dbase_work ),
-            zond_dbase_get_dbase( zond->dbase_zond->zond_dbase_store ), errmsg );
-    if ( rc ) ERROR_SOND( "project_backup" )
+    rc = zond_dbase_backup( zond->dbase_zond->zond_dbase_work,
+            zond->dbase_zond->zond_dbase_store, errmsg );
+    if ( rc ) ERROR_S
 
     project_reset_changed( zond );
 

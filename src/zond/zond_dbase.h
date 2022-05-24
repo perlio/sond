@@ -47,6 +47,10 @@ void zond_dbase_close( ZondDBase* );
 
 sqlite3* zond_dbase_get_dbase( ZondDBase* );
 
+const gchar* zond_dbase_get_path( ZondDBase* );
+
+gint zond_dbase_backup( ZondDBase*, ZondDBase*, gchar** );
+
 gint zond_dbase_prepare( ZondDBase*, const gchar*, const gchar**,gint,
         sqlite3_stmt***, gchar** );
 

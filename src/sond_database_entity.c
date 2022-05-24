@@ -137,7 +137,7 @@ sond_database_entity_load( SondDatabaseEntity* sde, gpointer database, gint ID_e
     gtk_label_set_text( GTK_LABEL(priv->label_label), label );
     g_free( label );
 
-    arr_properties = sond_database_get_properties( database, ID_entity, errmsg );
+    rc = sond_database_get_properties( database, ID_entity, &arr_properties, errmsg );
     if ( !arr_properties ) ERROR_S
 
     for ( gint i = 0; i < arr_properties->len; i++ )

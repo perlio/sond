@@ -33,10 +33,10 @@ typedef unsigned int guint;
 typedef int gboolean;
 
 
-void display_message( GtkWidget*, const gchar*, ... );
+void display_message( GtkWidget*, ... );
 
 gint dialog_with_buttons( GtkWidget*, const gchar*, const gchar*, gchar**,
-        gchar*, ... );
+        ... );
 
 gint abfrage_frage( GtkWidget*, const gchar*, const gchar*, gchar** );
 
