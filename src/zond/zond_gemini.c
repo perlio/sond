@@ -176,11 +176,7 @@ zond_gemini_get_or_create_person( gpointer database, const gchar* person, gchar*
         }
     }
 
-    if ( geb_datum )
-    {
-        geb_datum_formatted = zond_gemini_format_time( geb_datum, NULL, errmsg );
-        if ( !geb_datum_formatted ) printf("%s\n", person);
-    }
+    if ( geb_datum ) geb_datum_formatted = zond_gemini_format_time( geb_datum, NULL, errmsg );
 
     // if ( Person == ueAI vorhanden ) ID_entity herausfinden
     rc = sond_database_get_entities_for_properties_and( database, &arr_entities,
@@ -1160,7 +1156,7 @@ zond_gemini_read_gemini( Projekt* zond, gchar** errmsg )
 
     file = filename_oeffnen( GTK_WINDOW(zond->app_window) );
     if ( !file ) return 0;
-
+/*
     //speichern
     rc = zond_dbase_backup( zond->dbase_zond->zond_dbase_work, zond->dbase_zond->zond_dbase_store, errmsg );
     if ( rc )
@@ -1187,7 +1183,7 @@ zond_gemini_read_gemini( Projekt* zond, gchar** errmsg )
         g_free( file );
         ERROR_S
     }
-
+*/
     zond_pdf_document = zond_pdf_document_open( file, 0, -1, errmsg );
     g_free( file );
     if ( !zond_pdf_document ) ERROR_S
@@ -1198,7 +1194,7 @@ zond_gemini_read_gemini( Projekt* zond, gchar** errmsg )
         g_object_unref( zond_pdf_document );
         ERROR_S
     }
-
+/*
     rc = zond_dbase_new( ":memory:", TRUE, TRUE, &zond_dbase, errmsg );
     if ( rc )
     {
@@ -1213,19 +1209,25 @@ zond_gemini_read_gemini( Projekt* zond, gchar** errmsg )
         zond_dbase_close( zond_dbase );
         ERROR_S
     }
-
-    rc = zond_gemini_read_zond_pdf_document( zond_dbase, zond_pdf_document, errmsg );
+*/
+clock_t begin, end;
+gdouble total = 0;
+begin = clock( );
+    rc = zond_gemini_read_zond_pdf_document( zond->dbase_zond->zond_dbase_work, zond_pdf_document, errmsg );
     g_object_unref( zond_pdf_document );
     if ( rc )
     {
         zond_dbase_close( zond_dbase );
         ERROR_S
     }
+end = clock( );
 
+printf("%f\n", (gdouble) end-begin);
+/*
     rc = zond_dbase_backup( zond_dbase, zond->dbase_zond->zond_dbase_work, errmsg );
     zond_dbase_close( zond_dbase );
     if ( rc ) ERROR_S
-
+*/
     return 0;
 }
 

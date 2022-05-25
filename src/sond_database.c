@@ -937,9 +937,9 @@ sond_database_get_entities_for_property( gpointer database,
 {
     gint cnt = 0;
     const gchar* sql[] = {
-            "SELECT properties.entity_subject FROM properties JOIN entities "
+            "SELECT properties.entity_subject FROM entities JOIN properties "
             "ON properties.entity_property=entities.ID "
-            "WHERE entities.ID_label=?1 AND properties.value=?2; "
+            "AND entities.ID_label=?1 AND properties.value=?2; "
     };
 
     if ( ZOND_IS_DBASE(database) )
@@ -991,6 +991,65 @@ sond_database_get_entities_for_property( gpointer database,
 }
 
 
+static gint
+sond_database_get_entities_for_no_property( gpointer database,
+        gint ID_label_property, GArray** arr_res, gchar** errmsg )
+{
+    gint cnt = 0;
+    const gchar* sql[] = {
+            "SELECT properties.entity_subject FROM entities JOIN properties "
+            "ON properties.entity_property=entities.ID "
+            "AND entities.ID_label IS NOT ?1; "
+    };
+
+    if ( ZOND_IS_DBASE(database) )
+    {
+        gint rc = 0;
+        sqlite3_stmt** stmt = NULL;
+
+        ZondDBase* zond_dbase = ZOND_DBASE(database);
+
+        rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
+        if ( rc ) ERROR_S
+
+        rc = sqlite3_bind_int( stmt[0], 1, ID_label_property );
+        if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (ID_label_property)" )
+
+        if ( arr_res ) *arr_res = g_array_new( FALSE, FALSE, sizeof( gint ) );
+
+        do
+        {
+            rc = sqlite3_step( stmt[0] );
+            if ( rc != SQLITE_ROW && rc != SQLITE_DONE )
+            {
+                if ( arr_res )
+                {
+                    g_array_unref( *arr_res );
+                    *arr_res = NULL;
+                }
+                ERROR_ZOND_DBASE( "sqlite3_step" )
+            }
+            else if ( rc == SQLITE_ROW )
+            {
+                gint ID_entity = 0;
+
+                ID_entity = sqlite3_column_int( stmt[0], 0 );
+                if ( arr_res ) g_array_append_val( *arr_res, ID_entity );
+                cnt++;
+            }
+        } while ( rc == SQLITE_ROW );
+    }
+    else //mysql
+    {
+
+    }
+
+    return cnt;
+}
+
+
+//Value einer property darf nicht NULL sein, macht ja auch keinen Sinn
+//wenn value == NULL übergeben wird dann soll das heißen: entity must not irgendeine property haben!
 gint
 sond_database_get_entities_for_properties_and( gpointer database,
         GArray** arr_res, gchar** errmsg, ... )
@@ -1010,12 +1069,11 @@ sond_database_get_entities_for_properties_and( gpointer database,
         gint rc = 0;
         GArray* arr_prop = NULL;
 
-        arr_prop = g_array_new( FALSE, FALSE, sizeof( gint ) );
-        g_ptr_array_add( arr_arrays, arr_prop );
-
         value = va_arg( arg_pointer, const gchar* );
 
-        rc = sond_database_get_entities_for_property( database, ID_label, value,
+        if ( value ) rc = sond_database_get_entities_for_property( database, ID_label, value,
+                &arr_prop, errmsg );
+        else rc = sond_database_get_entities_for_no_property( database, ID_label,
                 &arr_prop, errmsg );
         if ( rc == -1 )
         {
@@ -1023,6 +1081,8 @@ sond_database_get_entities_for_properties_and( gpointer database,
             g_ptr_array_unref( arr_arrays );
             ERROR_S
         }
+
+        g_ptr_array_add( arr_arrays, arr_prop );
     }
 
     va_end( arg_pointer );
