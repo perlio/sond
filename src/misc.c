@@ -284,14 +284,17 @@ get_path_from_base( const gchar* path, gchar** errmsg )
     TCHAR buff[MAX_PATH] = { 0 };
 
     ret = GetModuleFileName(NULL, buff, _countof(buff));
-    if ( !ret && errmsg )
+    if ( !ret )
     {
-        DWORD error_code = 0;
+        if ( errmsg )
+        {
+            DWORD error_code = 0;
 
-        error_code = GetLastError( );
+            error_code = GetLastError( );
 
-        *errmsg = add_string( *errmsg, g_strdup_printf( "Bei Aufruf GetModuleFileName:\n"
-                "Error Code: %li", error_code ) );
+            *errmsg = add_string( *errmsg, g_strdup_printf( "Bei Aufruf GetModuleFileName:\n"
+                    "Error Code: %li", error_code ) );
+        }
         return NULL;
     }
 

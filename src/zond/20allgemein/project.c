@@ -167,7 +167,7 @@ project_clear_dbase_zond( DBaseZond** dbase_zond )
 }
 
 
-static gint
+gint
 project_speichern( Projekt* zond, gchar** errmsg )
 {
     gint rc = 0;

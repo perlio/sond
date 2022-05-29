@@ -2397,7 +2397,7 @@ viewer_cb_print( GtkButton* button, gpointer data )
     g_signal_connect (print, "draw_page",
             G_CALLBACK (viewer_cb_draw_page_for_printing), pdfv );
 
-    res = gtk_print_operation_run (print, GTK_PRINT_OPERATION_ACTION_PRINT_DIALOG,
+    res = gtk_print_operation_run( print, GTK_PRINT_OPERATION_ACTION_PRINT_DIALOG,
                                  GTK_WINDOW(pdfv->vf), &error );
     g_object_unref( print );
     if ( res == GTK_PRINT_OPERATION_RESULT_ERROR )

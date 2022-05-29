@@ -13,7 +13,7 @@ G_DECLARE_DERIVABLE_TYPE (SondDatabaseProperty, sond_database_property, SOND, DA
 
 struct _SondDatabasePropertyClass
 {
-
+    SondDatabaseEntityClass parent_class;
 };
 
 G_END_DECLS

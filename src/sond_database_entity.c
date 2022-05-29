@@ -96,7 +96,7 @@ sond_database_entity_init( SondDatabaseEntity* self )
 }
 
 
-static SondDatabaseEntity*
+GtkWidget*
 sond_database_entity_new( void )
 {
     SondDatabaseEntity* sde = NULL;
@@ -104,7 +104,7 @@ sond_database_entity_new( void )
     sde = g_object_new( SOND_TYPE_DATABASE_ENTITY, NULL, NULL );
     gtk_orientable_set_orientation( GTK_ORIENTABLE(sde), GTK_ORIENTATION_VERTICAL );
 
-    return sde;
+    return GTK_WIDGET(sde);
 }
 
 
@@ -158,15 +158,15 @@ sond_database_entity_load( SondDatabaseEntity* sde, gpointer database, gint ID_e
 }
 
 
-SondDatabaseEntity*
+GtkWidget*
 sond_database_entity_load_new( gpointer database, gint ID, gchar** errmsg )
 {
-    SondDatabaseEntity* sde = NULL;
+    GtkWidget* sde = NULL;
     gint rc = 0;
 
     sde = sond_database_entity_new( );
 
-    rc = sond_database_entity_load( sde, database, ID, errmsg );
+    rc = sond_database_entity_load( SOND_DATABASE_ENTITY(sde), database, ID, errmsg );
     if ( rc )
     {
         g_object_unref( sde );

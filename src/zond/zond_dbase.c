@@ -101,19 +101,8 @@ static void
 zond_dbase_finalize_stmts( sqlite3* db)
 {
     sqlite3_stmt* stmt = NULL;
-    sqlite3_stmt* next_stmt = NULL;
 
-    stmt = sqlite3_next_stmt( db, NULL );
-
-    if ( !stmt ) return;
-
-    do
-    {
-        next_stmt = sqlite3_next_stmt( db, stmt );
-        sqlite3_finalize( stmt );
-        stmt = next_stmt;
-    }
-    while ( stmt );
+    while ( (stmt = sqlite3_next_stmt( db, NULL )) ) sqlite3_finalize( stmt );
 
     return;
 }

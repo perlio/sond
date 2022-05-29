@@ -12,12 +12,14 @@ G_DECLARE_DERIVABLE_TYPE (SondDatabaseEntity, sond_database_entity, SOND, DATABA
 
 struct _SondDatabaseEntityClass
 {
-
+    GtkBoxClass parent_class;
 };
+
+GtkWidget* sond_database_entity_new( void );
 
 gint sond_database_entity_load( SondDatabaseEntity*, gpointer, gint, gchar** );
 
-SondDatabaseEntity* sond_database_entity_load_new( gpointer, gint, gchar** );
+GtkWidget* sond_database_entity_load_new( gpointer, gint, gchar** );
 
 GtkWidget* sond_database_entity_get_prop_box( SondDatabaseEntity* );
 

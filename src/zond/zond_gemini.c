@@ -24,7 +24,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "global_types.h"
 #include "../misc.h"
 #include "../sond_database.h"
+#include "../sond_checkbox.h"
+
 #include "20allgemein/pdf_text.h"
+#include "20allgemein/project.h"
+
 #include "99conv/pdf.h"
 
 #include "zond_pdf_document.h"
@@ -506,7 +510,7 @@ zond_gemini_save_ereignis( gpointer database, Ereignis* ereignis, gchar** errmsg
 
             //rel TKÜ-Maßnahme - uePerson einfügen
             rc = sond_database_insert_rel( database,
-                    ID_entity_TKUE_massnahme, 12000, ID_entity_person, errmsg );
+                    ID_entity_TKUE_ereignis, 12000, ID_entity_person, errmsg );
             if ( rc == -1 ) ERROR_S
         } while ( (ereignis->sprecher_uea = ereignis->sprecher_uea->next) );
     }
@@ -525,7 +529,7 @@ zond_gemini_save_ereignis( gpointer database, Ereignis* ereignis, gchar** errmsg
 
             //rel TKÜ-Maßnahme - uePerson einfügen
             rc = sond_database_insert_rel( database,
-                    ID_entity_TKUE_massnahme, 12005, ID_entity_person, errmsg );
+                    ID_entity_TKUE_ereignis, 12005, ID_entity_person, errmsg );
             if ( rc == -1 ) ERROR_S
         } while ( (ereignis->sprecher_pa = ereignis->sprecher_pa->next) );
     }
@@ -564,7 +568,7 @@ zond_gemini_save_ereignis( gpointer database, Ereignis* ereignis, gchar** errmsg
 
             //rel zwischen ueA und TKÜ-Maßnahme erzeugen
             rc = sond_database_insert_rel( database,
-                    ID_entity_TKUE_massnahme, 10010, ID_entity_anschluss, errmsg );
+                    ID_entity_TKUE_ereignis, 10010, ID_entity_anschluss, errmsg );
             if ( rc == -1 ) ERROR_S
         }
     }
@@ -598,9 +602,9 @@ zond_gemini_save_ereignis( gpointer database, Ereignis* ereignis, gchar** errmsg
 
         ID_entity_anschluss = rc;
 
-        //rel zwischen ueA und TKÜ-Maßnahme erzeugen
+        //rel TKÜ-Ereignis und Anschluß verb Nr erzeugen
         rc = sond_database_insert_rel( database,
-                ID_entity_TKUE_massnahme, 10010, ID_entity_anschluss, errmsg );
+                ID_entity_TKUE_ereignis, 10010, ID_entity_anschluss, errmsg );
         if ( rc == -1 ) ERROR_S
     }
 
@@ -1135,6 +1139,38 @@ zond_gemini_read_zond_pdf_document( gpointer database, ZondPdfDocument* zond_pdf
 }
 
 
+static gint
+zond_gemini_copy_back_memory_database( ZondDBase* zdb_memory, ZondDBase* zdb_work,
+        gchar** errmsg )
+{
+    gint rc = 0;
+    sqlite3* db_memory = NULL;
+    const gchar* path_work = NULL;
+    gchar* sql = NULL;
+    sqlite3_stmt* stmt = NULL;
+
+    sqlite3* db_work = NULL;
+
+    db_work = zond_dbase_get_dbase( zdb_work );
+
+    db_memory = zond_dbase_get_dbase( zdb_memory );
+    path_work = zond_dbase_get_path( zdb_work );
+
+    while ( (stmt = sqlite3_next_stmt( db_work, NULL )) ) sqlite3_finalize( stmt );
+
+    sql = g_strdup_printf( "ATTACH '%s' AS work; "
+            "INSERT OR IGNORE INTO work.entities SELECT * FROM main.entities; "
+            "INSERT OR IGNORE INTO work.rels SELECT * FROM main.rels; "
+            "INSERT OR IGNORE INTO work.properties SELECT * FROM main.properties; "
+            "DETACH work; ", path_work );
+    rc = sqlite3_exec( db_memory, sql, NULL, NULL, errmsg );
+    g_free( sql );
+    if ( rc ) ERROR_S
+
+    return 0;
+}
+
+
 gint
 zond_gemini_read_gemini( Projekt* zond, gchar** errmsg )
 {
@@ -1142,62 +1178,25 @@ zond_gemini_read_gemini( Projekt* zond, gchar** errmsg )
     ZondPdfDocument* zond_pdf_document = NULL;
     gchar* file = NULL;
     ZondDBase* zond_dbase = NULL;
-    gchar* path = NULL;
-
-    if ( zond->dbase_zond->changed )
-    {
-        gint rc = 0;
-
-        rc = abfrage_frage( zond->app_window, "Gemini-Liste einlesen", "Änderungen "
-                "aktuelles Projekt speichern?", NULL );
-
-        if ( rc != GTK_RESPONSE_NO) return 0;
-    }
 
     file = filename_oeffnen( GTK_WINDOW(zond->app_window) );
     if ( !file ) return 0;
-/*
-    //speichern
-    rc = zond_dbase_backup( zond->dbase_zond->zond_dbase_work, zond->dbase_zond->zond_dbase_store, errmsg );
-    if ( rc )
-    {
-        g_free( file );
-        ERROR_S
-    }
 
-    path = g_strdup( zond_dbase_get_path( zond->dbase_zond->zond_dbase_work ) );
-    zond_dbase_close( zond->dbase_zond->zond_dbase_work );
-
-    rc = zond_dbase_new( path, TRUE, FALSE, &zond->dbase_zond->zond_dbase_work, errmsg );
-    g_free( path );
-    if ( rc )
-    {
-        g_free( file );
-        ERROR_S
-    }
-
-    //speichern
-    rc = zond_dbase_backup( zond->dbase_zond->zond_dbase_store, zond->dbase_zond->zond_dbase_work, errmsg );
-    if ( rc )
-    {
-        g_free( file );
-        ERROR_S
-    }
-*/
     zond_pdf_document = zond_pdf_document_open( file, 0, -1, errmsg );
     g_free( file );
     if ( !zond_pdf_document ) ERROR_S
 
-    rc = sond_database_add_to_database( zond->dbase_zond->zond_dbase_work, errmsg );
+    rc = zond_dbase_new( ":memory:", TRUE, TRUE, &zond_dbase, errmsg );
     if ( rc )
     {
         g_object_unref( zond_pdf_document );
         ERROR_S
     }
-/*
-    rc = zond_dbase_new( ":memory:", TRUE, TRUE, &zond_dbase, errmsg );
+
+    rc = sond_database_add_to_database( zond->dbase_zond->zond_dbase_work, errmsg );
     if ( rc )
     {
+        zond_dbase_close( zond_dbase );
         g_object_unref( zond_pdf_document );
         ERROR_S
     }
@@ -1209,25 +1208,21 @@ zond_gemini_read_gemini( Projekt* zond, gchar** errmsg )
         zond_dbase_close( zond_dbase );
         ERROR_S
     }
-*/
-clock_t begin, end;
-gdouble total = 0;
-begin = clock( );
-    rc = zond_gemini_read_zond_pdf_document( zond->dbase_zond->zond_dbase_work, zond_pdf_document, errmsg );
+
+    //in memory-database, die inhaltlich mit ...work identisch ist, einfügen
+    rc = zond_gemini_read_zond_pdf_document( zond_dbase, zond_pdf_document, errmsg );
     g_object_unref( zond_pdf_document );
     if ( rc )
     {
         zond_dbase_close( zond_dbase );
         ERROR_S
     }
-end = clock( );
 
-printf("%f\n", (gdouble) end-begin);
-/*
-    rc = zond_dbase_backup( zond_dbase, zond->dbase_zond->zond_dbase_work, errmsg );
+    //zurückkopieren und schließen
+    rc = zond_gemini_copy_back_memory_database( zond_dbase, zond->dbase_zond->zond_dbase_work, errmsg );
     zond_dbase_close( zond_dbase );
     if ( rc ) ERROR_S
-*/
+
     return 0;
 }
 
@@ -1314,6 +1309,9 @@ zond_gemini_select( Projekt* zond, gchar** errmsg )
     gint rc = 0;
     GtkWidget* gemini = NULL;
     GtkWidget* box = NULL;
+    GtkWidget* grid = NULL;
+    GtkWidget* checkbox = NULL;
+    GArray* arr_ID_massnahmen = NULL;
 
     gemini = gtk_dialog_new_with_buttons( "Gemini", GTK_WINDOW(zond->app_window),
             GTK_DIALOG_DESTROY_WITH_PARENT | GTK_DIALOG_MODAL, "Ok",
@@ -1321,5 +1319,40 @@ zond_gemini_select( Projekt* zond, gchar** errmsg )
 
     box = gtk_dialog_get_content_area( GTK_DIALOG(gemini) );
 
+    grid = gtk_grid_new( );
+    checkbox = sond_checkbox_new( );
+    gtk_grid_attach( GTK_GRID(grid), checkbox, 0, 0, 1, 1 );
+    gtk_box_pack_start( GTK_BOX(box), grid, TRUE, TRUE, 0 );
 
+    //Leitungsnrn. sammeln
+    rc = sond_database_get_entities_for_label( zond->dbase_zond->zond_dbase_work,
+            1000, &arr_ID_massnahmen, errmsg );
+    if ( rc == -1 ) ERROR_S
+
+    for ( gint i = 0; i < arr_ID_massnahmen->len; i++ )
+    {
+        gint ID_entity_massnahme = 0;
+        gchar* leitungs_nr = NULL;
+
+        ID_entity_massnahme = g_array_index( arr_ID_massnahmen, gint, i );
+
+        rc = sond_database_get_first_property_value_for_subject(
+                zond->dbase_zond->zond_dbase_work, ID_entity_massnahme, 11059,
+                &leitungs_nr, errmsg );
+        if ( rc == -1 )
+        {
+            g_array_unref( arr_ID_massnahmen );
+            ERROR_S
+        }
+
+        sond_checkbox_add_entry( SOND_CHECKBOX(checkbox), leitungs_nr, ID_entity_massnahme );
+    }
+
+    g_array_unref( arr_ID_massnahmen );
+
+    gtk_widget_show_all( gemini );
+
+    rc = gtk_dialog_run( GTK_DIALOG(gemini) );
+
+    return 0;
 }

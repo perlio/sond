@@ -19,6 +19,8 @@ void projekt_set_widgets_sensitiv( Projekt*, gboolean );
 
 gint projekt_schliessen( Projekt*, gchar** );
 
+gint project_speichern( Projekt*, gchar** );
+
 void cb_menu_datei_speichern_activate( GtkMenuItem*, gpointer );
 
 void cb_menu_datei_schliessen_activate( GtkMenuItem*, gpointer );

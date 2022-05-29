@@ -525,7 +525,6 @@ pdf_textsuche( Projekt* zond, InfoWindow* info_window, GPtrArray* array_rel_path
         message = g_strconcat( "Suche in ", rel_path, NULL );
         info_window_set_message( info_window, message );
         g_free( message );
-        while ( gtk_events_pending( ) ) gtk_main_iteration( );
 
         rc = pdf_textsuche_pdf( zond, rel_path, search_text, *arr_pdf_text_occ,
                 info_window, errmsg );

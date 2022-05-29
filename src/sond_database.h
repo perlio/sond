@@ -44,6 +44,8 @@ gint sond_database_insert_rel( gpointer, gint, gint, gint, gchar** );
 
 gint sond_database_insert_property( gpointer, gint, gint, const gchar*, gchar** );
 
+gint sond_database_get_entities_for_label( gpointer, gint, GArray**, gchar** );
+
 gint sond_database_get_object_for_subject( gpointer, gint, GArray**, gchar**, ... );
 
 gint sond_database_get_entities_for_property( gpointer, gint, const gchar*,
@@ -60,5 +62,9 @@ gint sond_database_get_properties( gpointer, gint, GArray**, gchar** );
 
 gint sond_database_get_first_property_value_for_subject( gpointer, gint, gint,
         gchar**, gchar** );
+
+gint sond_database_get_outgoing_rels( gpointer, gint, GArray**, gchar** );
+
+gint sond_database_get_object_from_rel( gpointer, gint, gchar** );
 
 #endif //SOND_DATABASE_H_INCLUDED

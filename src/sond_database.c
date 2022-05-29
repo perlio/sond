@@ -819,6 +819,58 @@ sond_database_insert_property( gpointer database, gint ID_entity_subject, gint I
 }
 
 
+gint
+sond_database_get_entities_for_label( gpointer database, gint ID_label,
+        GArray** arr_entities, gchar** errmsg )
+{
+    const gchar* sql[] = {
+            "SELECT entities.ID FROM entities JOIN "
+            "(WITH RECURSIVE cte_labels (ID) AS ( "
+                "VALUES (@1) "
+                "UNION ALL "
+                "SELECT labels.ID "
+                    "FROM labels JOIN cte_labels WHERE "
+                    "labels.parent = cte_labels.ID "
+                ") SELECT ID AS ID_CTE FROM cte_labels) "
+                "ON entities.ID_label = ID_CTE; "
+    };
+
+    if ( ZOND_IS_DBASE(database) )
+    {
+        gint rc = 0;
+        sqlite3_stmt** stmt = NULL;
+
+        ZondDBase* zond_dbase = ZOND_DBASE(database);
+
+        rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
+        if ( rc ) ERROR_S
+
+        rc = sqlite3_bind_int( stmt[0], 1, ID_label );
+        if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (ID_label)" )
+
+        *arr_entities = g_array_new( FALSE, FALSE, sizeof( gint ) );
+        do
+        {
+            rc = sqlite3_step( stmt[0] );
+            if ( rc != SQLITE_ROW && rc != SQLITE_DONE ) ERROR_ZOND_DBASE( "sqlite3_step" )
+            else if ( rc == SQLITE_ROW )
+            {
+                gint ID_entity = 0;
+
+                ID_entity = sqlite3_column_int( stmt[0], 0 );
+                g_array_append_val( *arr_entities, ID_entity );
+            }
+        } while ( rc == SQLITE_ROW );
+    }
+    else //mysql
+    {
+
+    }
+
+    return 0;
+}
+
+
 static gint
 sond_database_get_object_for_subject_one_step( gpointer database, gint ID_entity_subject,
         gint ID_label_rel, gint ID_label_object, GArray** arr_objects, gchar** errmsg )
@@ -1049,7 +1101,7 @@ sond_database_get_entities_for_no_property( gpointer database,
 
 
 //Value einer property darf nicht NULL sein, macht ja auch keinen Sinn
-//wenn value == NULL übergeben wird dann soll das heißen: entity must not irgendeine property haben!
+//wenn value == NULL übergeben wird dann soll das heißen: entity must not eine solche property haben!
 gint
 sond_database_get_entities_for_properties_and( gpointer database,
         GArray** arr_res, gchar** errmsg, ... )
@@ -1528,6 +1580,42 @@ sond_database_get_outgoing_rels( gpointer database, gint ID_entity, GArray** arr
     }
 
     return 0;
+}
+
+
+gint
+sond_database_get_object_from_rel( gpointer database, gint ID_entity_rel, gchar** errmsg )
+{
+    gint ID_entity_object = 0;
+    const gchar* sql[] = {
+            "SELECT entity_object FROM rels WHERE entity_rel=@1; "
+    };
+
+    if ( ZOND_IS_DBASE(database) )
+    {
+        gint rc = 0;
+        sqlite3_stmt** stmt = NULL;
+
+        ZondDBase* zond_dbase = ZOND_DBASE(database);
+
+        rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
+        if ( rc ) ERROR_S
+
+        rc = sqlite3_bind_int( stmt[0], 1, ID_entity_rel );
+        if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (ID_entity_rel)" )
+
+        rc = sqlite3_step( stmt[0] );
+        if ( rc != SQLITE_ROW && rc != SQLITE_DONE ) ERROR_ZOND_DBASE( "sqlite3_step" )
+        else if ( rc == SQLITE_DONE ) ERROR_S_MESSAGE( "Rel nicht vorhanden" );
+
+        ID_entity_object = sqlite3_column_int( stmt[0], 0 );
+    }
+    else //mysql
+    {
+
+    }
+
+    return ID_entity_object;
 }
 
 

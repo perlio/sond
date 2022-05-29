@@ -1214,6 +1214,11 @@ pdf_ocr_tess_page( InfoWindow* info_window, TessBaseAPI* handle,
     gint progress = 0;
 
     TessBaseAPISetImage( handle, pixmap->samples, pixmap->w, pixmap->h, pixmap->n, pixmap->stride );
+
+    TessRecog tess_recog = { handle, monitor };
+    rc = GPOINTER_TO_INT( pdf_ocr_tess_recog( &tess_recog ) );
+    if ( rc ) ERROR_S_MESSAGE( "Seite konnte nicht gerendert werden" );
+/*
     monitor = TessMonitorCreate( );
     TessMonitorSetCancelThis( monitor, &(info_window->cancel) );
     TessMonitorSetCancelFunc( monitor, (TessCancelFunc) pdf_ocr_cancel );
@@ -1242,7 +1247,7 @@ pdf_ocr_tess_page( InfoWindow* info_window, TessBaseAPI* handle,
     TessMonitorDelete( monitor );
 
     if ( rc && !(info_window->cancel) ) ERROR_SOND( "TessAPIPRecognize:\nFehler!" )
-
+*/
     return 0;
 }
 
@@ -1545,7 +1550,7 @@ pdf_ocr_show_text( InfoWindow* info_window, PdfDocumentPage* pdf_document_page,
     //Bisherigen versteckten Text
     //gerenderte Seite ohne sichtbaren Text
     pixmap_orig = pdf_ocr_render_images( pdf_document_page, errmsg ); //thread-safe
-    if ( !pixmap_orig ) ERROR_SOND( "pdf_ocr_render_images" )
+    if ( !pixmap_orig ) ERROR_S
 
     //Eigene OCR
     //Wenn angezeigt werden soll, dann muß Seite erstmal OCRed werden
@@ -1554,7 +1559,7 @@ pdf_ocr_show_text( InfoWindow* info_window, PdfDocumentPage* pdf_document_page,
     if ( rc )
     {
         fz_drop_pixmap( ctx, pixmap_orig );
-        ERROR_SOND( "pdf_ocr_page" )
+        ERROR_S
     }
     text_neu = TessBaseAPIGetUTF8Text( handle );
 
@@ -1619,7 +1624,7 @@ pdf_ocr_show_text( InfoWindow* info_window, PdfDocumentPage* pdf_document_page,
     rc = gtk_dialog_run( GTK_DIALOG(dialog) );
 
     gtk_widget_destroy( dialog );
-//    fz_drop_pixmap( ctx, pixmap_orig ); //wird mit widget zerstört
+    fz_drop_pixmap( ctx, pixmap_orig ); //wird nicht (!) mit widget zerstört
 
     return rc;
 }
@@ -1743,9 +1748,9 @@ init_tesseract( TessBaseAPI** handle, TessResultRenderer** renderer, gchar* path
         TessBaseAPIEnd( *handle );
         TessBaseAPIDelete( *handle );
 
-        ERROR_SOND( "TessPDFRendererCreate" )
+        ERROR_S_MESSAGE( "TessPdfRenderer konnte nicht initialisiert werden" )
     }
-    TessResultRendererBeginDocument( *renderer, NULL );
+    TessResultRendererBeginDocument( *renderer, "title" );
 
     return 0;
 }

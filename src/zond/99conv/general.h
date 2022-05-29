@@ -9,6 +9,7 @@ typedef struct _Info_Window
 {
     GtkWidget* dialog;
     GtkWidget* content;
+    GtkWidget* last_inserted_widget;
     gboolean cancel;
 } InfoWindow;
 
@@ -32,6 +33,10 @@ gboolean is_pdf( const gchar* );
 void info_window_scroll( InfoWindow* );
 
 void info_window_close( InfoWindow* );
+
+void info_window_set_progress_bar_fraction( InfoWindow*, gdouble );
+
+void info_window_set_progress_bar( InfoWindow* );
 
 void info_window_set_message( InfoWindow*, const gchar* );
 
