@@ -67,9 +67,9 @@ sond_database_node_init( SondDatabaseNode* self )
     priv->sde = sond_database_entity_new( );
     priv->box_outgoing = gtk_box_new( GTK_ORIENTATION_VERTICAL, 0 );
 
-    gtk_box_pack_start( GTK_BOX(self), priv->box_incoming, TRUE, FALSE, 0 );
-    gtk_box_pack_start( GTK_BOX(self), priv->sde, TRUE, FALSE, 0 );
-    gtk_box_pack_start( GTK_BOX(self), priv->box_outgoing, TRUE, FALSE, 0 );
+    gtk_box_pack_start( GTK_BOX(self), priv->box_incoming, FALSE, FALSE, 0 );
+    gtk_box_pack_start( GTK_BOX(self), priv->sde, FALSE, FALSE, 0 );
+    gtk_box_pack_start( GTK_BOX(self), priv->box_outgoing, FALSE, FALSE, 0 );
 
     return;
 }
@@ -112,7 +112,7 @@ sond_database_node_load( SondDatabaseNode* sdn, gpointer database, gint ID_entit
         GtkWidget* box_segment = NULL;
 
         box_segment = gtk_box_new( GTK_ORIENTATION_HORIZONTAL, 0 );
-        gtk_box_pack_start( GTK_BOX(priv->box_outgoing),box_segment, TRUE, FALSE, 0 );
+        gtk_box_pack_start( GTK_BOX(priv->box_outgoing),box_segment, FALSE, FALSE, 0 );
 
         ID_entity_rel = g_array_index( arr_o_rels, gint, i );
 
@@ -123,12 +123,12 @@ sond_database_node_load( SondDatabaseNode* sdn, gpointer database, gint ID_entit
         sde_rel = sond_database_entity_load_new( database, ID_entity_rel, errmsg );
         if ( !sde_rel ) ERROR_S
 
-        gtk_box_pack_start( GTK_BOX(box_segment), sde_rel, TRUE, FALSE, 0 );
+        gtk_box_pack_start( GTK_BOX(box_segment), sde_rel, FALSE, FALSE, 0 );
 
         sde_object = sond_database_entity_load_new( database, ID_entity_object, errmsg );
         if ( !sde_object ) ERROR_S
 
-        gtk_box_pack_start( GTK_BOX(box_segment), sde_object, TRUE, FALSE, 0 );
+        gtk_box_pack_start( GTK_BOX(box_segment), sde_object, FALSE, FALSE, 0 );
     }
 
     //incoming rels

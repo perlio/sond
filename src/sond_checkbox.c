@@ -139,7 +139,7 @@ sond_checkbox_init( SondCheckbox* self )
     priv->box_entries = gtk_box_new( GTK_ORIENTATION_VERTICAL, 0 );
     gtk_container_add( GTK_CONTAINER(swindow_entries), priv->box_entries );
 
-    gtk_box_pack_start( GTK_BOX(self), swindow_entries, TRUE, TRUE, 0 );
+    gtk_box_pack_start( GTK_BOX(self), swindow_entries, FALSE, FALSE, 0 );
 
     return;
 }

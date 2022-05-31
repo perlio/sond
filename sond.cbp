@@ -380,6 +380,19 @@
 			<Option target="Sojus (Release)" />
 			<Option target="Sojus (Testing)" />
 		</Unit>
+		<Unit filename="src/sond_checkbox_entry.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sond_checkbox_entry.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
 		<Unit filename="src/sond_database.c">
 			<Option compilerVar="CC" />
 			<Option target="zond (Release)" />
@@ -401,6 +414,19 @@
 			<Option target="Sojus (Testing)" />
 		</Unit>
 		<Unit filename="src/sond_database_entity.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sond_database_node.c">
+			<Option compilerVar="CC" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sond_database_node.h">
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
 			<Option target="Sojus (Release)" />

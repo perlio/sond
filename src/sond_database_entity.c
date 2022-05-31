@@ -83,14 +83,14 @@ sond_database_entity_init( SondDatabaseEntity* self )
     gtk_container_add( GTK_CONTAINER(frame_ID_label), priv->label_ID_label );
 
     box_ID_and_label = gtk_box_new( GTK_ORIENTATION_HORIZONTAL, 0 );
-    gtk_box_pack_start( GTK_BOX(box_ID_and_label), frame_ID, TRUE, FALSE, 0 );
-    gtk_box_pack_start( GTK_BOX(box_ID_and_label), frame_label, TRUE, FALSE, 0 );
-    gtk_box_pack_start( GTK_BOX(box_ID_and_label), frame_ID_label, TRUE, FALSE, 0 );
+    gtk_box_pack_start( GTK_BOX(box_ID_and_label), frame_ID, FALSE, FALSE, 0 );
+    gtk_box_pack_start( GTK_BOX(box_ID_and_label), frame_label, FALSE, FALSE, 0 );
+    gtk_box_pack_start( GTK_BOX(box_ID_and_label), frame_ID_label, FALSE, FALSE, 0 );
 
-    gtk_box_pack_start( GTK_BOX(self), box_ID_and_label, TRUE, FALSE, 0 );
+    gtk_box_pack_start( GTK_BOX(self), box_ID_and_label, FALSE, FALSE, 0 );
 
     priv->box_properties = gtk_box_new( GTK_ORIENTATION_VERTICAL, 0 );
-    gtk_box_pack_start( GTK_BOX(self), priv->box_properties, TRUE, FALSE, 0 );
+    gtk_box_pack_start( GTK_BOX(self), priv->box_properties, FALSE, FALSE, 0 );
 
     return;
 }
@@ -137,6 +137,14 @@ sond_database_entity_load( SondDatabaseEntity* sde, gpointer database, gint ID_e
     gtk_label_set_text( GTK_LABEL(priv->label_label), label );
     g_free( label );
 
+    //width
+    gint min = 0;
+    gint nat = 0;
+    GtkWidget* box = gtk_widget_get_parent( gtk_widget_get_parent( priv->label_ID ) );
+    gtk_widget_show_all( box );
+    gtk_widget_get_preferred_width( box, &min, &nat );
+    printf("min: %i  nat: %i\n", min, nat);
+
     rc = sond_database_get_properties( database, ID_entity, &arr_properties, errmsg );
     if ( !arr_properties ) ERROR_S
 
@@ -149,7 +157,7 @@ sond_database_entity_load( SondDatabaseEntity* sde, gpointer database, gint ID_e
         sdp = sond_database_property_load_new( database, ID_property, errmsg );
 
         //in sde einfügen
-        gtk_box_pack_start( GTK_BOX(priv->box_properties), GTK_WIDGET(sdp), TRUE, FALSE, 0 );
+        gtk_box_pack_start( GTK_BOX(priv->box_properties), GTK_WIDGET(sdp), FALSE, FALSE, 0 );
     }
 
     g_array_unref( arr_properties );

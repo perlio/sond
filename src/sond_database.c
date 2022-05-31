@@ -199,6 +199,7 @@ sond_database_add_to_database( gpointer database, gchar** errmsg )
                 "(630, 'Aktenband', 610), "
 
                 "(650, 'Fundstelle', 1), "
+                "(660, 'Datei', 1), "
 
                 "(750, 'Urkunde', 1), "
                 "(760, 'Urkunde ohne Adressat', 750), "
@@ -959,7 +960,7 @@ sond_database_get_object_for_subject( gpointer database, gint ID_entity_subject,
             gint rc = 0;
             gint ID_entity_subject_tmp = 0;
 
-            ID_entity_subject_tmp= g_array_index( arr_objects_tmp, gint, i );
+            ID_entity_subject_tmp = g_array_index( arr_objects_tmp, gint, i );
 
             rc = sond_database_get_object_for_subject_one_step( database,
                     ID_entity_subject_tmp, ID_label_rel, ID_label_object, &arr_results, errmsg );
