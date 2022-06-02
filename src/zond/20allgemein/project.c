@@ -39,7 +39,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
 
-static void
+void
 project_set_changed( gpointer user_data )
 {
     Projekt* zond = (Projekt*) user_data;

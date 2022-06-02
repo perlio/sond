@@ -7,12 +7,12 @@
 G_BEGIN_DECLS
 
 #define SOND_TYPE_CHECKBOX sond_checkbox_get_type( )
-G_DECLARE_DERIVABLE_TYPE (SondCheckbox, sond_checkbox, SOND, CHECKBOX, GtkBox)
+G_DECLARE_DERIVABLE_TYPE (SondCheckbox, sond_checkbox, SOND, CHECKBOX, GtkFrame)
 
 
 struct _SondCheckboxClass
 {
-    GtkBoxClass parent_class;
+    GtkFrameClass parent_class;
 
     //Signale
     guint signal_alle_toggled;
@@ -21,7 +21,7 @@ struct _SondCheckboxClass
 
 void sond_checkbox_add_entry( SondCheckbox*, const gchar*, gint );
 
-GtkWidget* sond_checkbox_new( void );
+GtkWidget* sond_checkbox_new( const gchar* title );
 
 G_END_DECLS
 

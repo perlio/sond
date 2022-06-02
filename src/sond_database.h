@@ -8,7 +8,7 @@ typedef struct _Entity
 {
     gint ID;
     gint label;
-    GPtrArray* arr_properties;
+    GArray* arr_properties;
 } Entity;
 
 typedef struct _Property
@@ -25,8 +25,15 @@ typedef struct _Segment
         Entity entity_subject;
         Entity entity_object;
     };
+    Entity entity_rel;
 } Segment;
 
+typedef struct _Node
+{
+    Entity entity_subject;
+    GArray* arr_properties;
+
+} Node;
 
 gint sond_database_add_to_database( gpointer, gchar** );
 
@@ -62,6 +69,9 @@ gint sond_database_get_properties( gpointer, gint, GArray**, gchar** );
 
 gint sond_database_get_first_property_value_for_subject( gpointer, gint, gint,
         gchar**, gchar** );
+
+gint sond_database_get_subject_and_first_property_value_for_labels( gpointer,
+        gint, gint, GArray**, GPtrArray**, gchar** );
 
 gint sond_database_get_outgoing_rels( gpointer, gint, GArray**, gchar** );
 

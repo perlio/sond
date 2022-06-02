@@ -27,7 +27,7 @@ typedef struct
     gulong signal_handler_entry_toggled;
 } SondCheckboxPrivate;
 
-G_DEFINE_TYPE_WITH_PRIVATE(SondCheckbox, sond_checkbox, GTK_TYPE_BOX)
+G_DEFINE_TYPE_WITH_PRIVATE(SondCheckbox, sond_checkbox, GTK_TYPE_FRAME)
 
 
 static void
@@ -125,21 +125,26 @@ static void
 sond_checkbox_init( SondCheckbox* self )
 {
     SondCheckboxPrivate* priv = NULL;
+    GtkWidget* box = NULL;
     GtkWidget* swindow_entries = NULL;
 
     priv = sond_checkbox_get_instance_private( self );
-    priv->check_alle = gtk_check_button_new_with_label( "Alle" );
-    gtk_box_pack_start( GTK_BOX(self), priv->check_alle, FALSE, FALSE, 1 );
 
-    g_signal_connect( priv->check_alle, "toggled", G_CALLBACK(sond_checkbox_check_alle_toggled), self );
+    box = gtk_box_new( GTK_ORIENTATION_VERTICAL, 0 );
+    gtk_container_add( GTK_CONTAINER(self), box );
+
+    priv->check_alle = gtk_check_button_new_with_label( "Alle" );
+    gtk_box_pack_start( GTK_BOX(box), priv->check_alle, FALSE, FALSE, 1 );
 
     swindow_entries = gtk_scrolled_window_new( NULL, NULL );
-    gtk_widget_set_hexpand( swindow_entries, TRUE );
+    gtk_scrolled_window_set_propagate_natural_height( GTK_SCROLLED_WINDOW(swindow_entries), TRUE );
+    gtk_scrolled_window_set_propagate_natural_width( GTK_SCROLLED_WINDOW(swindow_entries), TRUE );
+    gtk_box_pack_start( GTK_BOX(box), swindow_entries, FALSE, FALSE, 0 );
 
     priv->box_entries = gtk_box_new( GTK_ORIENTATION_VERTICAL, 0 );
     gtk_container_add( GTK_CONTAINER(swindow_entries), priv->box_entries );
 
-    gtk_box_pack_start( GTK_BOX(self), swindow_entries, FALSE, FALSE, 0 );
+    g_signal_connect( priv->check_alle, "toggled", G_CALLBACK(sond_checkbox_check_alle_toggled), self );
 
     return;
 }
@@ -153,7 +158,7 @@ sond_checkbox_add_entry( SondCheckbox* scb, const gchar* label, gint ID_entity )
     SondCheckboxPrivate* priv = sond_checkbox_get_instance_private( scb );
 
     check_entry = sond_checkbox_entry_new_full( label, ID_entity );
-    gtk_box_pack_start( GTK_BOX(priv->box_entries), check_entry, TRUE, TRUE, 0 );
+    gtk_box_pack_start( GTK_BOX(priv->box_entries), check_entry, FALSE, FALSE, 0 );
 
     g_signal_connect( check_entry, "toggled", G_CALLBACK(sond_checkbox_check_entry_toggled), scb );
 
@@ -162,12 +167,11 @@ sond_checkbox_add_entry( SondCheckbox* scb, const gchar* label, gint ID_entity )
 
 
 GtkWidget*
-sond_checkbox_new( void )
+sond_checkbox_new( const gchar* title )
 {
     SondCheckbox* scb = NULL;
 
-    scb = g_object_new( SOND_TYPE_CHECKBOX, NULL, NULL );
-    gtk_orientable_set_orientation( GTK_ORIENTABLE(scb), GTK_ORIENTATION_VERTICAL );
+    scb = g_object_new( SOND_TYPE_CHECKBOX, "label", title, NULL );
 
     return GTK_WIDGET(scb);
 }

@@ -13,6 +13,8 @@ typedef int gint;
 typedef char gchar;
 
 
+void project_set_changed( gpointer );
+
 void project_reset_changed( Projekt* );
 
 void projekt_set_widgets_sensitiv( Projekt*, gboolean );

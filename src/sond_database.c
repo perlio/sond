@@ -872,6 +872,9 @@ sond_database_get_entities_for_label( gpointer database, gint ID_label,
 }
 
 
+/** findet zu subject alle obejcts mit
+    - ID_label_rel und
+    - ID_label_object (einschließlich dessen Kinder) heraus **/
 static gint
 sond_database_get_object_for_subject_one_step( gpointer database, gint ID_entity_subject,
         gint ID_label_rel, gint ID_label_object, GArray** arr_objects, gchar** errmsg )
@@ -882,12 +885,19 @@ sond_database_get_object_for_subject_one_step( gpointer database, gint ID_entity
                 "rels JOIN "
                 "entities AS e1 JOIN "
                 "entities AS e2 JOIN "
+                "(WITH RECURSIVE cte_labels (ID) AS ( "
+                    "VALUES (@1) "
+                    "UNION ALL "
+                    "SELECT labels.ID "
+                        "FROM labels JOIN cte_labels WHERE "
+                        "labels.parent = cte_labels.ID "
+                    ") SELECT ID AS ID_CTE FROM cte_labels) "
                 "WHERE "
-                    "rels.entity_subject=@1 AND "
+                    "rels.entity_subject=@2 AND "
                     "rels.entity_rel=e1.ID AND "
-                    "e1.ID_label=@2 AND "
+                    "e1.ID_label=@3 AND "
                     "rels.entity_object=e2.ID AND "
-                    "e2.ID_label=@3; "
+                    "e2.ID_label=ID_CTE; "
     };
 
     if ( ZOND_IS_DBASE(database) )
@@ -900,14 +910,14 @@ sond_database_get_object_for_subject_one_step( gpointer database, gint ID_entity
         rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
         if ( rc ) ERROR_S
 
-        rc = sqlite3_bind_int( stmt[0], 1, ID_entity_subject );
+        rc = sqlite3_bind_int( stmt[0], 1, ID_label_object );
+        if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (ID_label_object)" )
+
+        rc = sqlite3_bind_int( stmt[0], 2, ID_entity_subject );
         if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (ID_entity_subject)" )
 
-        rc = sqlite3_bind_int( stmt[0], 2, ID_label_rel );
+        rc = sqlite3_bind_int( stmt[0], 3, ID_label_rel );
         if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (ID_label_rel)" )
-
-        rc = sqlite3_bind_int( stmt[0], 3, ID_label_object );
-        if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (ID_label_object)" )
 
         do
         {
@@ -933,6 +943,11 @@ sond_database_get_object_for_subject_one_step( gpointer database, gint ID_entity
 }
 
 
+/** findet zu subject alle objects mit
+    - ID_label_rel und
+    - ID_label_object (einschließlich dessen Kinder) heraus
+
+    Sofern mehrere Parameter-Paare angegeben sind, werden Ketten gebildet **/
 gint
 sond_database_get_object_for_subject( gpointer database, gint ID_entity_subject,
         GArray** arr_objects, gchar** errmsg, ... )
@@ -992,7 +1007,8 @@ sond_database_get_entities_for_property( gpointer database,
     const gchar* sql[] = {
             "SELECT properties.entity_subject FROM entities JOIN properties "
             "ON properties.entity_property=entities.ID "
-            "AND entities.ID_label=?1 AND properties.value=?2; "
+            "AND entities.ID_label=?1 AND properties.value=?2 "
+            "ORDER BY properties.entity_subject ASC; "
     };
 
     if ( ZOND_IS_DBASE(database) )
@@ -1493,6 +1509,78 @@ sond_database_get_first_property_value_for_subject( gpointer database,
         *value = g_strdup( row[0] );
 
         mysql_free_result( mysql_res );
+    }
+
+    return 0;
+}
+
+
+gint
+sond_database_get_subject_and_first_property_value_for_labels( gpointer database,
+        gint ID_label_subject, gint ID_label_property, GArray** arr_IDs, GPtrArray** arr_values, gchar** errmsg )
+{
+    const gchar* sql[] = {
+            "SELECT e1.ID, properties.value "
+            "FROM properties JOIN entities AS e1 JOIN entities AS e2 WHERE "
+            "e1.ID_label=@1 AND "
+            "e1.ID=properties.entity_subject AND "
+            "properties.entity_property=e2.ID AND "
+            "e2.ID_label=@2 "
+            "ORDER BY properties.value ASC; "
+    };
+
+    if ( ZOND_IS_DBASE(database) )
+    {
+        gint rc = 0;
+        sqlite3_stmt** stmt = NULL;
+
+        ZondDBase* zond_dbase = ZOND_DBASE(database);
+
+        rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
+        if ( rc ) ERROR_S
+
+        rc = sqlite3_bind_int( stmt[0], 1, ID_label_subject );
+        if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (ID_label_subject)" )
+
+        rc = sqlite3_bind_int( stmt[0], 2, ID_label_property );
+        if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (ID_label_property)" )
+
+        *arr_IDs = g_array_new( FALSE, FALSE, sizeof( gint ) );
+        *arr_values = g_ptr_array_new_full( 0, g_free );
+
+        do
+        {
+            rc = sqlite3_step( stmt[0] );
+            if ( rc != SQLITE_ROW && rc != SQLITE_DONE )
+            {
+                g_array_unref( *arr_IDs );
+                g_ptr_array_unref( *arr_values );
+                ERROR_ZOND_DBASE( "sqlite3_step" )
+            }
+
+            if ( rc == SQLITE_ROW )
+            {
+                gchar* value = NULL;
+                gint ID = 0;
+
+                ID = sqlite3_column_int( stmt[0], 0 );
+                g_array_append_val( *arr_IDs, ID );
+
+                value = g_strdup( (const gchar*) sqlite3_column_text( stmt[0], 1 ) );
+                g_ptr_array_add( *arr_values, value );
+            }
+        } while ( rc == SQLITE_ROW );
+    }
+    else //mysql
+    {
+        gint rc = 0;
+        MYSQL* con = NULL;
+        MYSQL_RES* mysql_res = NULL;
+        MYSQL_ROW row = NULL;
+        gchar* sql_mariadb = NULL;
+
+        con = (MYSQL*) database;
+
     }
 
     return 0;
