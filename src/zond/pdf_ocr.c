@@ -1215,10 +1215,14 @@ pdf_ocr_tess_page( InfoWindow* info_window, TessBaseAPI* handle,
 
     TessBaseAPISetImage( handle, pixmap->samples, pixmap->w, pixmap->h, pixmap->n, pixmap->stride );
 
+/* fallback,wenn threads wieder mal nicht gehen
     TessRecog tess_recog = { handle, monitor };
     rc = GPOINTER_TO_INT( pdf_ocr_tess_recog( &tess_recog ) );
     if ( rc ) ERROR_S_MESSAGE( "Seite konnte nicht gerendert werden" );
-/*
+
+    im Moment geht's aber wieder
+*/
+
     monitor = TessMonitorCreate( );
     TessMonitorSetCancelThis( monitor, &(info_window->cancel) );
     TessMonitorSetCancelFunc( monitor, (TessCancelFunc) pdf_ocr_cancel );
@@ -1226,28 +1230,19 @@ pdf_ocr_tess_page( InfoWindow* info_window, TessBaseAPI* handle,
     TessRecog tess_recog = { handle, monitor };
     GThread* thread_recog = g_thread_new( "recog", pdf_ocr_tess_recog, &tess_recog );
 
-    GtkWidget* bar_progress = gtk_progress_bar_new( );
-    gtk_box_pack_start( GTK_BOX(info_window->content), bar_progress, FALSE, FALSE, 0 );
-
-    gtk_widget_show_all( bar_progress );
-
-    while ( gtk_events_pending( ) ) gtk_main_iteration( );
-    info_window_scroll( info_window );
+    info_window_set_progress_bar( info_window );
 
     while ( progress < 100 && !(info_window->cancel) )
     {
         progress = TessMonitorGetProgress( monitor );
-        gtk_progress_bar_set_fraction( GTK_PROGRESS_BAR(bar_progress),
-                ((gdouble) progress) / 100 );
-
-        while ( gtk_events_pending( ) ) gtk_main_iteration( );
+        info_window_set_progress_bar_fraction( info_window, ((gdouble) progress) / 100 );
     }
 
     rc = GPOINTER_TO_INT(g_thread_join( thread_recog ));
     TessMonitorDelete( monitor );
 
     if ( rc && !(info_window->cancel) ) ERROR_SOND( "TessAPIPRecognize:\nFehler!" )
-*/
+
     return 0;
 }
 

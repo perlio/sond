@@ -46,7 +46,7 @@ cb_entry_text( GtkEntry* entry, gpointer data )
 
     dialog = GTK_WIDGET(data);
 
-    gtk_dialog_response( data, GTK_RESPONSE_YES );
+    gtk_dialog_response( dialog, GTK_RESPONSE_YES );
 
     return;
 }

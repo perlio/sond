@@ -66,7 +66,7 @@ sond_database_property_init( SondDatabaseProperty* self )
     priv->entry_value = gtk_entry_new( );
     gtk_container_add( GTK_CONTAINER(frame_value), priv->entry_value );
 
-    gtk_box_pack_start( GTK_BOX(self), frame_value, TRUE, FALSE, 0 );
+    gtk_box_pack_start( GTK_BOX(self), frame_value, FALSE, FALSE, 0 );
     gtk_box_reorder_child( GTK_BOX(self), frame_value, 1 );
 
     gtk_widget_set_sensitive( priv->entry_value, FALSE );

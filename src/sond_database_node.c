@@ -82,6 +82,7 @@ sond_database_node_new( void )
 
     sdn = g_object_new( SOND_TYPE_DATABASE_NODE, NULL, NULL );
     gtk_orientable_set_orientation( GTK_ORIENTABLE(sdn), GTK_ORIENTATION_HORIZONTAL );
+    gtk_box_set_spacing( GTK_BOX(sdn), 10 );
 
     return GTK_WIDGET(sdn);
 }

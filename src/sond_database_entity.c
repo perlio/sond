@@ -25,6 +25,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 typedef struct
 {
+    GtkWidget* box_entity;
     GtkWidget* label_ID;
     GtkWidget* label_label;
     GtkWidget* label_ID_label;
@@ -65,7 +66,8 @@ sond_database_entity_init( SondDatabaseEntity* self )
     GtkWidget* frame_ID = NULL;
     GtkWidget* frame_label = NULL;
     GtkWidget* frame_ID_label = NULL;
-    GtkWidget* box_ID_and_label = NULL;
+    GtkWidget* box_padding = NULL;
+    GtkWidget* label_padding = NULL;
 
     frame_ID = gtk_frame_new( "ID" );
     frame_label = gtk_frame_new( "Label" );
@@ -82,15 +84,23 @@ sond_database_entity_init( SondDatabaseEntity* self )
     priv->label_ID_label = gtk_label_new( "" );
     gtk_container_add( GTK_CONTAINER(frame_ID_label), priv->label_ID_label );
 
-    box_ID_and_label = gtk_box_new( GTK_ORIENTATION_HORIZONTAL, 0 );
-    gtk_box_pack_start( GTK_BOX(box_ID_and_label), frame_ID, FALSE, FALSE, 0 );
-    gtk_box_pack_start( GTK_BOX(box_ID_and_label), frame_label, FALSE, FALSE, 0 );
-    gtk_box_pack_start( GTK_BOX(box_ID_and_label), frame_ID_label, FALSE, FALSE, 0 );
+    priv->box_entity = gtk_box_new( GTK_ORIENTATION_HORIZONTAL, 2 );
+    gtk_box_pack_start( GTK_BOX(priv->box_entity), frame_ID, FALSE, FALSE, 0 );
+    gtk_box_pack_start( GTK_BOX(priv->box_entity), frame_label, FALSE, FALSE, 0 );
+    gtk_box_pack_start( GTK_BOX(priv->box_entity), frame_ID_label, FALSE, FALSE, 0 );
 
-    gtk_box_pack_start( GTK_BOX(self), box_ID_and_label, FALSE, FALSE, 0 );
+    gtk_box_pack_start( GTK_BOX(self), priv->box_entity, FALSE, FALSE, 0 );
+
+    label_padding = gtk_label_new( NULL );
+    gtk_widget_set_size_request( label_padding, 20, -1 );
 
     priv->box_properties = gtk_box_new( GTK_ORIENTATION_VERTICAL, 0 );
-    gtk_box_pack_start( GTK_BOX(self), priv->box_properties, FALSE, FALSE, 0 );
+
+    box_padding = gtk_box_new( GTK_ORIENTATION_HORIZONTAL, 0 );
+    gtk_box_pack_start( GTK_BOX(box_padding), label_padding, FALSE, FALSE, 0 );
+    gtk_box_pack_start( GTK_BOX(box_padding), priv->box_properties, FALSE, FALSE, 0 );
+
+    gtk_box_pack_start( GTK_BOX(self), box_padding, FALSE, FALSE, 0 );
 
     return;
 }
@@ -137,14 +147,6 @@ sond_database_entity_load( SondDatabaseEntity* sde, gpointer database, gint ID_e
     gtk_label_set_text( GTK_LABEL(priv->label_label), label );
     g_free( label );
 
-    //width
-    gint min = 0;
-    gint nat = 0;
-    GtkWidget* box = gtk_widget_get_parent( gtk_widget_get_parent( priv->label_ID ) );
-    gtk_widget_show_all( box );
-    gtk_widget_get_preferred_width( box, &min, &nat );
-    printf("min: %i  nat: %i\n", min, nat);
-
     rc = sond_database_get_properties( database, ID_entity, &arr_properties, errmsg );
     if ( !arr_properties ) ERROR_S
 
@@ -159,6 +161,8 @@ sond_database_entity_load( SondDatabaseEntity* sde, gpointer database, gint ID_e
         //in sde einfügen
         gtk_box_pack_start( GTK_BOX(priv->box_properties), GTK_WIDGET(sdp), FALSE, FALSE, 0 );
     }
+
+    //width
 
     g_array_unref( arr_properties );
 
