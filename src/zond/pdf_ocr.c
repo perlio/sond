@@ -40,6 +40,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <errno.h>
 #endif // _WIN32
 
+#define TESS_SCALE 5
 
 static gint
 pdf_ocr_update_content_stream( fz_context* ctx, pdf_obj* page_ref,
@@ -1214,13 +1215,13 @@ pdf_ocr_tess_page( InfoWindow* info_window, TessBaseAPI* handle,
     gint progress = 0;
 
     TessBaseAPISetImage( handle, pixmap->samples, pixmap->w, pixmap->h, pixmap->n, pixmap->stride );
-
-/* fallback,wenn threads wieder mal nicht gehen
+/*
+// fallback,wenn threads wieder mal nicht gehen
     TessRecog tess_recog = { handle, monitor };
     rc = GPOINTER_TO_INT( pdf_ocr_tess_recog( &tess_recog ) );
     if ( rc ) ERROR_S_MESSAGE( "Seite konnte nicht gerendert werden" );
 
-    im Moment geht's aber wieder
+    //im Moment geht's aber wieder
 */
 
     monitor = TessMonitorCreate( );
@@ -1248,8 +1249,8 @@ pdf_ocr_tess_page( InfoWindow* info_window, TessBaseAPI* handle,
 
 
 static fz_pixmap*
-pdf_ocr_render_pixmap( fz_context* ctx, pdf_document* doc, gint num,
-        float scale, gchar** errmsg )
+pdf_ocr_render_pixmap( fz_context* ctx, pdf_document* doc, float scale,
+        gchar** errmsg )
 {
     pdf_page* page = NULL;
     fz_pixmap* pixmap = NULL;
@@ -1363,17 +1364,17 @@ pdf_ocr_page( PdfDocumentPage* pdf_document_page, InfoWindow* info_window,
     pdf_document* doc_new = NULL;
 
     doc_new = pdf_ocr_create_doc_from_page( pdf_document_page, 3, errmsg ); //thread-safe
-    if ( !doc_new ) ERROR_SOND( "pdf_ocr_create_doc_with_page" )
+    if ( !doc_new ) ERROR_S
 
     fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
 
-    pixmap = pdf_ocr_render_pixmap( ctx, doc_new, 0, 4, errmsg );
+    pixmap = pdf_ocr_render_pixmap( ctx, doc_new, TESS_SCALE, errmsg );
     pdf_drop_document( ctx, doc_new );
-    if ( !pixmap ) ERROR_SOND( "pdf_render_pixmap" )
+    if ( !pixmap ) ERROR_S
 
     rc = pdf_ocr_tess_page( info_window, handle, pixmap, errmsg );
     fz_drop_pixmap( ctx, pixmap );
-    if ( rc ) ERROR_SOND( "pdf_ocr_tess_page" )
+    if ( rc ) ERROR_S
 
     return 0;
 }
@@ -1403,14 +1404,13 @@ pdf_ocr_render_images( PdfDocumentPage* pdf_document_page, gchar** errmsg )
     fz_pixmap* pixmap = NULL;
 
     doc_tmp_orig = pdf_ocr_create_doc_from_page( pdf_document_page, 3, errmsg ); //thread-safe
-    if ( !doc_tmp_orig ) ERROR_SOND_VAL( "pdf_ocr_create_doc_with_page", NULL )
+    if ( !doc_tmp_orig ) ERROR_S_VAL( NULL )
 
     fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
 
-    pixmap = pdf_ocr_render_pixmap( ctx, doc_tmp_orig,
-            0, 1.2, errmsg );
+    pixmap = pdf_ocr_render_pixmap( ctx, doc_tmp_orig, 1.2, errmsg );
     pdf_drop_document( ctx, doc_tmp_orig );
-    if ( !pixmap ) ERROR_SOND_VAL( "pdf_ocr_render_pixmap", NULL )
+    if ( !pixmap ) ERROR_S_VAL( NULL )
 
     return pixmap;
 }
@@ -1592,22 +1592,23 @@ pdf_ocr_show_text( InfoWindow* info_window, PdfDocumentPage* pdf_document_page,
 
     GtkWidget* hbox2 = gtk_box_new( GTK_ORIENTATION_HORIZONTAL, 0 );
     gtk_box_pack_start( GTK_BOX(hbox2), swindow_alt, TRUE, TRUE, 0 );
-    gtk_box_pack_start( GTK_BOX(hbox2), image_orig, TRUE, TRUE, 0 );
+    gtk_box_pack_start( GTK_BOX(hbox2), image_orig, FALSE, FALSE, 0 );
     gtk_box_pack_start( GTK_BOX(hbox2), swindow_neu, TRUE, TRUE, 0 );
 
     GtkWidget* swindow = gtk_scrolled_window_new( NULL, NULL );
+    gtk_scrolled_window_set_propagate_natural_height( GTK_SCROLLED_WINDOW(swindow), TRUE );
     gtk_container_add( GTK_CONTAINER(swindow), hbox2 );
 
     GtkWidget* vbox = gtk_box_new( GTK_ORIENTATION_VERTICAL, 0 );
     gtk_box_pack_start( GTK_BOX(vbox), hbox, FALSE, FALSE, 0 );
-    gtk_box_pack_start( GTK_BOX(vbox), swindow, TRUE, TRUE, 0 );
+    gtk_box_pack_start( GTK_BOX(vbox), swindow, FALSE, FALSE, 0 );
 
     gint page = zond_pdf_document_get_index( pdf_document_page );
     GtkWidget* dialog = pdf_ocr_create_dialog( info_window, page + 1 );
 
     GtkWidget* content_area =
             gtk_dialog_get_content_area( GTK_DIALOG(dialog) );
-    gtk_box_pack_start( GTK_BOX(content_area), vbox, TRUE, TRUE, 0 );
+    gtk_box_pack_start( GTK_BOX(content_area), vbox, FALSE, FALSE, 0 );
 
     gtk_dialog_set_response_sensitive( GTK_DIALOG(dialog), 5, FALSE );
 

@@ -1,8 +1,6 @@
 #ifndef SELECTION_H_INCLUDED
 #define SELECTION_H_INCLUDED
 
-#include "../enums.h"
-
 typedef struct _Projekt Projekt;
 typedef struct _GList GList;
 

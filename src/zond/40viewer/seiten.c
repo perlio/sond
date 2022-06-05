@@ -43,10 +43,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 static GPtrArray*
 seiten_get_document_pages( PdfViewer* pv, GArray* arr_seiten_pv )
 {
-    GPtrArray* arr_document_page = g_ptr_array_new( );
+    GPtrArray* arr_document_page = NULL;
 
     if ( arr_seiten_pv )
     {
+        arr_document_page = g_ptr_array_new( );
+
         for ( gint i = 0; i < arr_seiten_pv->len; i++ )
         {
             ViewerPageNew* viewer_page = g_ptr_array_index( pv->arr_pages,

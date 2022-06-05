@@ -20,7 +20,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <glib/gstdio.h>
 
 #include "../zond_pdf_document.h"
-#include "../zond_database.h"
 
 #include "../global_types.h"
 

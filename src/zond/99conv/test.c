@@ -5,7 +5,6 @@
 
 #include "../global_types.h"
 #include "../zond_pdf_document.h"
-#include "../zond_database.h"
 #include "../zond_tree_store.h"
 #include "../../sond_treeview.h"
 #include "../../misc.h"

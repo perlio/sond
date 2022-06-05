@@ -24,7 +24,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "../../misc.h"
 
-#include "../enums.h"
 #include "../global_types.h"
 #include "../zond_dbase.h"
 

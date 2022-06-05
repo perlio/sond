@@ -6,8 +6,6 @@
 
 #define EOP 99999
 
-#include "enums.h"
-
 #include <mupdf/fitz.h>
 #include <mupdf/pdf.h>
 #include <glib.h>
@@ -49,6 +47,16 @@ typedef unsigned long gulong;
 typedef void* gpointer;
 typedef double gdouble;
 
+
+typedef enum BAEUME
+{
+    KEIN_BAUM = -1,
+    BAUM_FS = 0,
+    BAUM_INHALT,
+    BAUM_AUSWERTUNG,
+    NUM_BAUM
+} Baum;
+
 typedef struct _Icon
 {
     const gchar* icon_name;
@@ -64,6 +72,41 @@ typedef struct _DBase_Zond
     gboolean changed;
 } DBaseZond;
 
+enum
+{
+    ICON_NOTHING = 0,
+    ICON_NORMAL,
+    ICON_ORDNER,
+    ICON_DATEI,
+    ICON_PDF,
+    ICON_ANBINDUNG,
+    ICON_AKTE,
+    ICON_EXE,
+    ICON_TEXT,
+    ICON_DOC,
+    ICON_PPP,
+    ICON_SPREAD,
+    ICON_IMAGE,
+    ICON_VIDEO,
+    ICON_AUDIO,
+    ICON_EMAIL,
+    ICON_HTML, //16
+    ICON_DURCHS = 25,
+    ICON_ORT,
+    ICON_PHONE,
+    ICON_WICHTIG,
+    ICON_OBS,
+    ICON_CD,
+    ICON_PERSON,
+    ICON_PERSONEN,
+    ICON_ORANGE,
+    ICON_BLAU,
+    ICON_ROT,
+    ICON_GRUEN,
+    ICON_TUERKIS,
+    ICON_MAGENTA,
+    NUMBER_OF_ICONS
+};
 
 
 struct _Menu

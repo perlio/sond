@@ -79,6 +79,7 @@ set_icon( Icon* icon, const gchar* icon_name,
 }
 
 
+
 static void
 init_icons( Projekt* zond )
 {

@@ -24,7 +24,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../zond_treeview.h"
 
 #include "../global_types.h"
-#include "../enums.h"
 #include "../zond_dbase.h"
 
 #include "../99conv/general.h"
