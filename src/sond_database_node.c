@@ -82,7 +82,7 @@ sond_database_node_new( void )
 
     sdn = g_object_new( SOND_TYPE_DATABASE_NODE, NULL, NULL );
     gtk_orientable_set_orientation( GTK_ORIENTABLE(sdn), GTK_ORIENTATION_HORIZONTAL );
-    gtk_box_set_spacing( GTK_BOX(sdn), 10 );
+    gtk_box_set_spacing( GTK_BOX(sdn), 15 );
 
     return GTK_WIDGET(sdn);
 }
@@ -93,6 +93,7 @@ sond_database_node_load( SondDatabaseNode* sdn, gpointer database, gint ID_entit
 {
     SondDatabaseNodePrivate* priv = NULL;
     gint rc = 0;
+    GArray* arr_i_rels = NULL;
     GArray* arr_o_rels = NULL;
 
     priv = sond_database_node_get_instance_private( sdn );
@@ -100,10 +101,55 @@ sond_database_node_load( SondDatabaseNode* sdn, gpointer database, gint ID_entit
     rc = sond_database_entity_load( SOND_DATABASE_ENTITY(priv->sde), database, ID_entity, errmsg );
     if ( rc ) ERROR_S
 
+    rc = sond_database_get_incoming_rels( database, ID_entity, &arr_i_rels, errmsg );
+    if ( rc ) ERROR_S
+
+    for ( gint i = 0; i < ((arr_i_rels->len <= 10) ? arr_i_rels->len : 10); i++ )
+    {
+        gint ID_entity_rel = 0;
+        gint ID_entity_subject = 0;
+        gint rc = 0;
+        GtkWidget* sde_rel = NULL;
+        GtkWidget* sde_object = NULL;
+        GtkWidget* box_segment = NULL;
+
+        box_segment = gtk_box_new( GTK_ORIENTATION_HORIZONTAL, 10 );
+        gtk_box_pack_start( GTK_BOX(priv->box_incoming), box_segment, FALSE, FALSE, 0 );
+
+        ID_entity_rel = g_array_index( arr_i_rels, gint, i );
+
+        rc = sond_database_get_subject_from_rel( database, ID_entity_rel, errmsg );
+        if ( rc == -1 )
+        {
+            g_array_unref( arr_i_rels );
+            ERROR_S
+        }
+        else ID_entity_subject = rc;
+
+        sde_object = sond_database_entity_load_new( database, ID_entity_subject, errmsg );
+        if ( !sde_object )
+        {
+            g_array_unref( arr_i_rels );
+            ERROR_S
+        }
+
+        gtk_box_pack_start( GTK_BOX(box_segment), sde_object, FALSE, FALSE, 0 );
+
+        sde_rel = sond_database_entity_load_new( database, ID_entity_rel, errmsg );
+        if ( !sde_rel )
+        {
+            g_array_unref( arr_i_rels );
+            ERROR_S
+        }
+
+        gtk_box_pack_start( GTK_BOX(box_segment), sde_rel, FALSE, FALSE, 0 );
+    }
+    g_array_unref( arr_i_rels );
+
     rc = sond_database_get_outgoing_rels( database, ID_entity, &arr_o_rels, errmsg );
     if ( rc ) ERROR_S
 
-    for ( gint i = 0; i < arr_o_rels->len; i++ )
+    for ( gint i = 0; i < ((arr_o_rels->len <= 10) ? arr_o_rels->len : 10); i++ )
     {
         gint ID_entity_rel = 0;
         gint ID_entity_object = 0;
@@ -112,25 +158,38 @@ sond_database_node_load( SondDatabaseNode* sdn, gpointer database, gint ID_entit
         GtkWidget* sde_object = NULL;
         GtkWidget* box_segment = NULL;
 
-        box_segment = gtk_box_new( GTK_ORIENTATION_HORIZONTAL, 0 );
-        gtk_box_pack_start( GTK_BOX(priv->box_outgoing),box_segment, FALSE, FALSE, 0 );
+        box_segment = gtk_box_new( GTK_ORIENTATION_HORIZONTAL, 10 );
+        gtk_box_pack_start( GTK_BOX(priv->box_outgoing), box_segment, FALSE, FALSE, 0 );
 
         ID_entity_rel = g_array_index( arr_o_rels, gint, i );
 
         rc = sond_database_get_object_from_rel( database, ID_entity_rel, errmsg );
-        if ( rc == -1 ) ERROR_S
+        if ( rc == -1 )
+        {
+            g_array_unref( arr_o_rels );
+            ERROR_S
+        }
         else ID_entity_object = rc;
 
         sde_rel = sond_database_entity_load_new( database, ID_entity_rel, errmsg );
-        if ( !sde_rel ) ERROR_S
+        if ( !sde_rel )
+        {
+            g_array_unref( arr_o_rels );
+            ERROR_S
+        }
 
         gtk_box_pack_start( GTK_BOX(box_segment), sde_rel, FALSE, FALSE, 0 );
 
         sde_object = sond_database_entity_load_new( database, ID_entity_object, errmsg );
-        if ( !sde_object ) ERROR_S
+        if ( !sde_object )
+        {
+            g_array_unref( arr_o_rels );
+            ERROR_S
+        }
 
         gtk_box_pack_start( GTK_BOX(box_segment), sde_object, FALSE, FALSE, 0 );
     }
+    g_array_unref( arr_o_rels );
 
     //incoming rels
     return 0;

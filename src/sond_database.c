@@ -270,7 +270,6 @@ sond_database_add_to_database( gpointer database, gchar** errmsg )
                 "(11050, '_Durchwahl_', 3), "
 
                 //prop für Fundstelle
-                "(11051, '_Dateipfad_', 3), "
                 "(11052, '_Seite von_', 3), "
                 //"(11053, '_nameddest von_',2 ), "
                 "(11054, '_index von_', 3), "
@@ -364,7 +363,6 @@ sond_database_add_to_database( gpointer database, gchar** errmsg )
                 "(470, 10100, 100001), " //Beruf-Dienstgrad _Name_(string)
                 "(470, 10110, 100001), " //Beruf-Dienstgrad _Kürzel_(string)
 
-                "(650, 11051, 100001), " //Fundstelle _Dateipfad_ (string)
                 "(650, 11052, 100002), " //Fundstelle _Seite von_ (int)
                 "(650, 11054, 100002), " //Fundstelle _index von_ (int)
                 "(650, 11055, 100002), " //Fundstelle _Seite bis_ (int)
@@ -636,6 +634,42 @@ sond_database_is_admitted_rel( gpointer database, gint ID_label_subject,
         else if ( rc == SQLITE_DONE ) ERROR_S_MESSAGE( "Kein Ergebnis" )
 
         return (gboolean) sqlite3_column_int( stmt[0], 0 );
+    }
+    else //mysql
+    {
+
+    }
+
+    return 0;
+}
+
+
+gint
+sond_database_update_label( gpointer database, gint ID_entity, gint ID_label,
+        gchar** errmsg )
+{
+    const gchar* sql[] = {
+            "UPDATE entities SET ID_label=@1 WHERE ID=@2; "
+    };
+
+    if ( ZOND_IS_DBASE(database) )
+    {
+        gint rc = 0;
+        sqlite3_stmt** stmt = NULL;
+
+        ZondDBase* zond_dbase = ZOND_DBASE(database);
+
+        rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
+        if ( rc ) ERROR_S
+
+        rc = sqlite3_bind_int( stmt[0], 1, ID_label );
+        if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (ID_label)" )
+
+        rc = sqlite3_bind_int( stmt[0], 2, ID_entity );
+        if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (ID_entity)" )
+
+        rc = sqlite3_step( stmt[0] );
+        if ( rc != SQLITE_DONE ) ERROR_ZOND_DBASE( "sqlite3_step" )
     }
     else //mysql
     {
@@ -1128,7 +1162,7 @@ sond_database_get_entities_for_properties_and( gpointer database,
     gint ID_label = 0;
     GPtrArray* arr_arrays = NULL;
 
-    arr_arrays = g_ptr_array_new_full( 0, (GDestroyNotify) g_ptr_array_unref );
+    arr_arrays = g_ptr_array_new_full( 0, (GDestroyNotify) g_array_unref );
 
     va_start( arg_pointer, errmsg );
 
@@ -1187,16 +1221,13 @@ sond_database_get_entities_for_properties_and( gpointer database,
             if ( found == FALSE )
             {
                 g_array_remove_index( arr_first, i );
+                i--;
                 break;
             }
         }
     }
 
-    if ( arr_res )
-    {
-        *arr_res = g_array_new( FALSE, FALSE, sizeof ( gint ) );
-        *arr_res = g_array_ref( arr_first );
-    }
+    if ( arr_res ) *arr_res = g_array_ref( arr_first );
 
     g_ptr_array_unref( arr_arrays ); //arr_first wird nicht gelöscht, da ref == 2 (hoffe ich)
 
@@ -1465,7 +1496,7 @@ sond_database_get_first_property_value_for_subject( gpointer database,
         if ( rc != SQLITE_ROW && rc != SQLITE_DONE ) ERROR_ZOND_DBASE( "sqlite3_step" )
         else if ( rc == SQLITE_DONE ) return 1;
 
-        *value = g_strdup( (const gchar*) sqlite3_column_text( stmt[0], 0 ) );
+        if ( value ) *value = g_strdup( (const gchar*) sqlite3_column_text( stmt[0], 0 ) );
     }
     else //mysql
     {
@@ -1506,7 +1537,7 @@ sond_database_get_first_property_value_for_subject( gpointer database,
             return 1;
         }
 
-        *value = g_strdup( row[0] );
+        if ( value ) *value = g_strdup( row[0] );
 
         mysql_free_result( mysql_res );
     }
@@ -1580,6 +1611,97 @@ sond_database_get_subject_and_first_property_value_for_labels( gpointer database
         gchar* sql_mariadb = NULL;
 
         con = (MYSQL*) database;
+
+    }
+
+    return 0;
+}
+
+
+gint
+sond_database_get_objects_from_labels( gpointer database, gint ID_label_subject,
+        gint ID_label_rel, gint ID_label_object, GArray** arr_objects,
+        gchar** errmsg )
+{
+    const gchar* sql[] = {
+            "SELECT DISTINCT e3.ID FROM "
+                "rels JOIN "
+                "entities AS e1 JOIN "
+                "(WITH RECURSIVE cte_labels (ID) AS ( "
+                    "VALUES (@1) "
+                    "UNION ALL "
+                    "SELECT labels.ID "
+                        "FROM labels JOIN cte_labels WHERE "
+                        "labels.parent = cte_labels.ID "
+                    ") SELECT ID AS ID_CTE_1 FROM cte_labels) "
+
+                "JOIN entities AS e2 JOIN "
+                "(WITH RECURSIVE cte_labels (ID) AS ( "
+                    "VALUES (@2) "
+                    "UNION ALL "
+                    "SELECT labels.ID "
+                        "FROM labels JOIN cte_labels WHERE "
+                        "labels.parent = cte_labels.ID "
+                    ") SELECT ID AS ID_CTE_2 FROM cte_labels) "
+
+                "JOIN entities AS e3 JOIN"
+                "(WITH RECURSIVE cte_labels (ID) AS ( "
+                    "VALUES (@3) "
+                    "UNION ALL "
+                    "SELECT labels.ID "
+                        "FROM labels JOIN cte_labels WHERE "
+                        "labels.parent = cte_labels.ID "
+                    ") SELECT ID AS ID_CTE_3 FROM cte_labels) "
+            "WHERE "
+                "e1.ID_label=ID_CTE_1 AND "
+                "e1.ID=rels.entity_subject AND "
+                "e2.ID_label=ID_CTE_2 AND "
+                "e2.ID=rels.entity_rel AND "
+                "e3.ID_label=ID_CTE_3 AND "
+                "e3.ID=rels.entity_object; "
+    };
+
+    if ( ZOND_IS_DBASE(database) )
+    {
+        gint rc = 0;
+        sqlite3_stmt** stmt = NULL;
+
+        ZondDBase* zond_dbase = ZOND_DBASE(database);
+
+        rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
+        if ( rc ) ERROR_S
+
+        rc = sqlite3_bind_int( stmt[0], 1, ID_label_subject );
+        if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (ID_label_subject)" )
+
+        rc = sqlite3_bind_int( stmt[0], 2, ID_label_rel );
+        if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (ID_label_rel)" )
+
+        rc = sqlite3_bind_int( stmt[0], 3, ID_label_object );
+        if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (ID_label_object)" )
+
+        *arr_objects = g_array_new( FALSE, FALSE, sizeof( gint ) );
+
+        do
+        {
+            rc = sqlite3_step( stmt[0] );
+            if ( rc != SQLITE_ROW && rc != SQLITE_DONE )
+            {
+                g_array_unref( *arr_objects );
+                ERROR_ZOND_DBASE( "sqlite3_step" )
+            }
+
+            if ( rc == SQLITE_ROW )
+            {
+                gint ID_entity_object = 0;
+
+                ID_entity_object = sqlite3_column_int( stmt[0], 0 );
+                g_array_append_val( *arr_objects, ID_entity_object );
+            }
+        } while ( rc == SQLITE_ROW );
+    }
+    else //mysql
+    {
 
     }
 
@@ -1669,6 +1791,127 @@ sond_database_get_outgoing_rels( gpointer database, gint ID_entity, GArray** arr
     }
 
     return 0;
+}
+
+
+gint
+sond_database_get_incoming_rels( gpointer database, gint ID_entity, GArray** arr_i_rels, gchar** errmsg )
+{
+    const gchar* sql[] = {
+            "SELECT entity_rel FROM rels WHERE entity_object=@1; "
+    };
+
+    if ( ZOND_IS_DBASE(database) )
+    {
+        gint rc = 0;
+        sqlite3_stmt** stmt = NULL;
+
+        ZondDBase* zond_dbase = ZOND_DBASE(database);
+
+        rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
+        if ( rc ) ERROR_S
+
+        rc = sqlite3_bind_int( stmt[0], 1, ID_entity );
+        if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (ID_entity)" )
+
+        *arr_i_rels = g_array_new( FALSE, FALSE, sizeof( gint ) );
+        do
+        {
+            gint ID_entity_rel = 0;
+
+            rc = sqlite3_step( stmt[0] );
+            if ( rc != SQLITE_ROW && rc != SQLITE_DONE )
+            {
+                g_array_unref( *arr_i_rels );
+                ERROR_ZOND_DBASE( "sqlite3_step" )
+            }
+            else if ( rc == SQLITE_DONE ) break;
+
+            ID_entity_rel = sqlite3_column_int( stmt[0], 0 );
+            g_array_append_val( *arr_i_rels, ID_entity_rel );
+        } while ( rc == SQLITE_ROW );
+    }
+    else //mysql
+    {
+        gint rc = 0;
+        MYSQL* con = NULL;
+        MYSQL_RES* mysql_res = NULL;
+        MYSQL_ROW row = NULL;
+        gchar* sql_mariadb = NULL;
+
+        con = (MYSQL*) database;
+
+        sql_mariadb = g_strdup_printf( "SET @1=%i; ", ID_entity );
+        sql_mariadb = add_string( sql_mariadb, g_strdup( sql[0] ) );
+
+        rc = mysql_query( con, sql_mariadb );
+        g_free( sql_mariadb );
+        if ( rc )
+        {
+            if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf ", __func__, ":\n",
+                    "Bei Aufruf mysql_query:\n", mysql_error( con ), NULL );
+            return -1;
+        }
+
+        mysql_res = mysql_store_result( con );
+        if ( !mysql_res )
+        {
+            if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf ", __func__, ":\n"
+                    "Bei Aufruf mysql_store_result:\n",
+                    mysql_error( con ), NULL );
+
+            return -1;
+        }
+
+        *arr_i_rels = g_array_new( FALSE, FALSE, sizeof( gint ) );
+        while ( (row = mysql_fetch_row( mysql_res )) )
+        {
+            gint ID_entity_rel = 0;
+
+            ID_entity_rel = atoi( row[0] );
+            g_array_append_val( *arr_i_rels, ID_entity_rel );
+        }
+
+        mysql_free_result( mysql_res );
+    }
+
+    return 0;
+}
+
+
+gint
+sond_database_get_subject_from_rel( gpointer database, gint ID_entity_rel, gchar** errmsg )
+{
+    gint ID_entity_object = 0;
+    const gchar* sql[] = {
+            "SELECT entity_subject FROM rels WHERE entity_rel=@1; "
+    };
+
+    if ( ZOND_IS_DBASE(database) )
+    {
+        gint rc = 0;
+        sqlite3_stmt** stmt = NULL;
+
+        ZondDBase* zond_dbase = ZOND_DBASE(database);
+
+        rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
+        if ( rc ) ERROR_S
+
+        rc = sqlite3_bind_int( stmt[0], 1, ID_entity_rel );
+        if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (ID_entity_rel)" )
+
+        rc = sqlite3_step( stmt[0] );
+        if ( rc != SQLITE_ROW && rc != SQLITE_DONE ) ERROR_ZOND_DBASE( "sqlite3_step" )
+        else if ( rc == SQLITE_DONE ) ERROR_S_MESSAGE( "Rel nicht vorhanden" );
+
+        ID_entity_object = sqlite3_column_int( stmt[0], 0 );
+    }
+    else //mysql
+    {
+
+    }
+
+    return ID_entity_object;
 }
 
 

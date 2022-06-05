@@ -67,7 +67,7 @@ info_window_set_progress_bar_fraction( InfoWindow* info_window, gdouble fraction
 
     gtk_progress_bar_set_fraction( GTK_PROGRESS_BAR(info_window->last_inserted_widget), fraction );
 
-//    while ( gtk_events_pending( ) ) gtk_main_iteration( );
+    while ( gtk_events_pending( ) ) gtk_main_iteration( );
 
     return;
 }
@@ -79,7 +79,7 @@ info_window_show_widget( InfoWindow* info_window )
     gtk_box_pack_start( GTK_BOX(info_window->content), info_window->last_inserted_widget, FALSE, FALSE, 0 );
     gtk_widget_show_all( info_window->last_inserted_widget );
 
-//    while ( gtk_events_pending( ) ) gtk_main_iteration( );
+    while ( gtk_events_pending( ) ) gtk_main_iteration( );
 
     info_window_scroll( info_window );
 

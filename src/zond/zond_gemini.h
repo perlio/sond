@@ -15,6 +15,8 @@ typedef struct _Fundstelle
 
 gint zond_gemini_read_gemini( Projekt*, gchar** );
 
+void zond_gemini_free_fundstelle( Fundstelle* );
+
 gint zond_gemini_select( Projekt*, gchar** );
 
 #endif //ZOND_GEMINI_H_INCLUDED

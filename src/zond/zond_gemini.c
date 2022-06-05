@@ -277,28 +277,29 @@ zond_gemini_get_or_create_person( gpointer database, Arrays* arrays,
 
     //ueAI normalisieren
     ueai = g_strsplit( person_text, ",", -1 );
-    if ( ueai[0] )
+    if ( ueai[0] && ueai[0][0] != '\0' )
     {
         name = g_strchug( ueai[0] );
-        if ( ueai[1] )
+        if ( ueai[1] && ueai[1][0] != '\0' )
         {
             vorname = g_strchug( ueai[1] );
-            if ( ueai[2] )
+            if ( ueai[2] && ueai[2][0] != '\0')
             {
                 geb_datum = g_strchug( ueai[2] );
                 geb_datum_formatted = zond_gemini_format_time( geb_datum, NULL, NULL );
                 if ( !geb_datum_formatted ) geschlecht = geb_datum;
-                else if ( ueai[3] ) geschlecht = g_strchug( ueai[3] );
+                else if ( ueai[3] && ueai[3][0] != '\0' ) geschlecht = g_strchug( ueai[3] );
             }
         }
     }
-
-    if ( !geschlecht || g_strcmp0( geschlecht, "unbekannt" ) ) *ID_label_person = 310;
+    //Geschlecht ermitteln
+    if ( !geschlecht || !g_strcmp0( geschlecht, "unbekannt" ) ) *ID_label_person = 310;
     else if ( !g_strcmp0( geschlecht, "männlich" ) ) *ID_label_person = 312;
     else if ( !g_strcmp0( geschlecht, "weiblich" ) ) *ID_label_person = 313;
     else *ID_label_person = 314; //divers!
 
-    arr_persons = g_array_new( FALSE, FALSE, sizeof( person ) );
+    //prüfen, ob schon in diesem Dokument vorhanden
+    arr_persons = g_array_new( FALSE, FALSE, sizeof( gint ) );
 
     for ( gint i = 0; i < arrays->arr_personen->len; i++ )
     {
@@ -318,39 +319,105 @@ zond_gemini_get_or_create_person( gpointer database, Arrays* arrays,
         if ( person_loop.ID_label_person != 310 && *ID_label_person != 310 &&
                 person_loop.ID_label_person != *ID_label_person ) continue;
 
-        g_array_append_val( arr_persons, person_loop );
+        g_array_append_val( arr_persons, i );
     }
 
     if ( arr_persons->len == 1 )
     {
         Person person_best_match = { 0 };
-        gint ID_entity_person_best_match = 0;
+        gint index = 0;
 
-        person_best_match = g_array_index( arr_persons, Person, 0 );
+        //index zu arrays->arr_personen gespeichert
+        index = g_array_index( arr_persons, gint, 0 );
+        g_array_unref( arr_persons );
+        person_best_match = g_array_index( arrays->arr_personen, Person, index );
 
         if ( !person_best_match.name && name )
-                g_array_index( arr_persons, Person, 0).name = g_strdup( name );
+        {
+            gint rc = 0;
+
+            g_array_index( arrays->arr_personen, Person, index ).name = g_strdup( name );
+
+            //in database speichern
+            //vielleicht schon drin!!!
+            rc = sond_database_insert_property( database, person_best_match.ID_entity,
+                    _NAME_, name, errmsg );
+            if ( rc )
+            {
+                g_strfreev( ueai );
+                g_free( geb_datum_formatted );
+                ERROR_S
+            }
+        }
+
         if ( !person_best_match.vorname && vorname )
-                g_array_index( arr_persons, Person, 0).vorname = g_strdup( vorname );
+        {
+            gint rc = 0;
+
+            g_array_index( arrays->arr_personen, Person, index ).vorname = g_strdup( vorname );
+
+            //in database speichern
+            rc = sond_database_insert_property( database, person_best_match.ID_entity,
+                    _VORNAME_, vorname, errmsg );
+            if ( rc )
+            {
+                g_strfreev( ueai );
+                g_free( geb_datum_formatted );
+                ERROR_S
+            }
+        }
+
         if ( !person_best_match.geb_datum_formatted && geb_datum_formatted )
-                g_array_index( arr_persons, Person, 0).geb_datum_formatted = g_strdup( geb_datum_formatted );
+        {
+            gint rc = 0;
+
+            g_array_index( arrays->arr_personen, Person, index ).geb_datum_formatted =
+                    g_strdup( geb_datum_formatted );
+
+            //in database speichern
+            rc = sond_database_insert_property( database, person_best_match.ID_entity,
+                    _BEGINN_, geb_datum_formatted, errmsg );
+            if ( rc )
+            {
+                g_strfreev( ueai );
+                g_free( geb_datum_formatted );
+                ERROR_S
+            }
+        }
+
         if ( person_best_match.ID_label_person == 310 && *ID_label_person != 310 )
-                g_array_index( arr_persons, Person, 0).ID_label_person = *ID_label_person;
+        {
+            gint rc = 0;
 
-        ID_entity_person_best_match = g_array_index( arr_persons, Person, 0 ).ID_entity;
+            g_array_index( arrays->arr_personen, Person, index ).ID_label_person =
+                    *ID_label_person;
 
-        g_array_unref( arr_persons );
+            //in database speichern
+            rc = sond_database_update_label( database, person_best_match.ID_entity,
+                    *ID_label_person, errmsg );
+            if ( rc )
+            {
+                g_strfreev( ueai );
+                g_free( geb_datum_formatted );
+                ERROR_S
+            }
+        }
 
-        return ID_entity_person_best_match;
+        g_strfreev( ueai );
+        g_free( geb_datum_formatted );
+
+        return person_best_match.ID_entity;
     }
     else if ( arr_persons->len > 1 )
     {
-        //auswählen lassen#
+        //auswählen lassen
         for ( gint i = 0; i < arr_persons->len; i++ )
         {
             Person person = { 0 };
+            gint index = 0;
 
-            person = g_array_index( arr_persons, Person, i );
+            index = g_array_index( arr_persons, gint, i );
+            person = g_array_index( arrays->arr_personen, Person, index );
 
             printf( "%i %i %s %s %s\n", person.ID_entity, person.ID_label_person, person.name, person.vorname, person.geb_datum_formatted );
         }
@@ -358,15 +425,32 @@ zond_gemini_get_or_create_person( gpointer database, Arrays* arrays,
 
         //einstweilen Fehlermeldung
         g_array_unref( arr_persons );
+        g_strfreev( ueai );
+        g_free( geb_datum_formatted );
         ERROR_S_MESSAGE( "Mehrere in Frage kommende Personen eingelesen" )
     }
+    else g_array_unref( arr_persons ); //len == 0
 
-    //vielleicht in db?
+    //DATABASE?
+    arr_persons = NULL;
     //wir haben nur name
     if ( name && !vorname && !geb_datum_formatted )
     {
-        rc = sond_database_get_entities_for_property( database, 10100, name,
+        rc = sond_database_get_entities_for_property( database, _NAME_, name,
             &arr_persons, errmsg );
+        if ( rc == -1 )
+        {
+            g_strfreev( ueai );
+            g_free( geb_datum_formatted );
+            ERROR_S
+        }
+    }
+    else if ( !name && vorname && !geb_datum_formatted )
+    {
+        gint rc = 0;
+
+        rc = sond_database_get_entities_for_property( database, _VORNAME_,
+                vorname, &arr_persons, errmsg );
         if ( rc == -1 )
         {
             g_strfreev( ueai );
@@ -414,57 +498,136 @@ zond_gemini_get_or_create_person( gpointer database, Arrays* arrays,
         }
     }
 
-    for ( gint i = 0; i < arr_persons->len; i++ )
+    if ( arr_persons )
     {
-        gint rc = 0;
-        gint ID_entity_person = 0;
-        gint ID_label_person_loop = 0;
-
-        ID_entity_person = g_array_index( arr_persons, gint, i );
-
-        rc = sond_database_get_ID_label_for_entity( database, ID_entity_person, errmsg );
-        if ( rc == -1 )
+        for ( gint i = 0; i < arr_persons->len; i++ )
         {
+            gint rc = 0;
+            gint ID_entity_person = 0;
+            gint ID_label_person_loop = 0;
+
+            ID_entity_person = g_array_index( arr_persons, gint, i );
+
+            rc = sond_database_get_ID_label_for_entity( database, ID_entity_person, errmsg );
+            if ( rc == -1 )
+            {
+                g_strfreev( ueai );
+                g_free( geb_datum_formatted );
+                g_array_unref( arr_persons );
+                ERROR_S
+            }
+            else ID_label_person_loop = rc;
+
+            if ( ID_label_person_loop != 310 && *ID_label_person != 310 &&
+                    ID_label_person_loop != *ID_label_person )
+            {
+                //rausschmeißen
+                g_array_remove_index( arr_persons, i );
+                i--;
+                continue;
+            }
+        }
+
+        if ( arr_persons->len > 1 )
+        {
+            for ( gint i = 0; i < arr_persons->len; i++ )
+            {
+                printf( "ID_entity: %i\n", g_array_index( arr_persons, gint, i ) );
+            }
+            //auswählen lassen
+            printf( "%i %s %s %s\n", *ID_label_person, name, vorname, geb_datum_formatted );
+        }
+        else if ( arr_persons->len == 1 ) //genau einer paßt!
+        {
+            person.ID_entity = g_array_index( arr_persons, gint, 0 );
+            person.ID_label_person = *ID_label_person;
+            person.name = g_strdup( name );
+            person.vorname = g_strdup( vorname );
+            person.geb_datum_formatted = g_strdup( geb_datum_formatted );
+
+            g_array_append_val( arrays->arr_personen, person );
+
             g_strfreev( ueai );
             g_free( geb_datum_formatted );
             g_array_unref( arr_persons );
-            ERROR_S
+
+            //ggf. database ergänzen
+            if ( person.name )
+            {
+                gint rc = 0;
+
+                //prüfen, ob zur ID property "Name" vorliegt
+                rc = sond_database_get_first_property_value_for_subject( database,
+                        person.ID_entity, _NAME_, NULL, errmsg );
+                if ( rc == -1 ) ERROR_S
+                else if ( rc == 0 ) //noch keine property gespeichert
+                {
+                    gint rc = 0;
+
+                    rc = sond_database_insert_property( database, person.ID_entity,
+                            _NAME_, person.name, errmsg );
+                    if ( rc ) ERROR_S
+                }
+                //else rc == 1 -> schon was gespeichert, hier keine Kontrolle, ob gleich
+            }
+
+            if ( person.vorname )
+            {
+                gint rc = 0;
+
+                //prüfen, ob zur ID property "Name" vorliegt
+                rc = sond_database_get_first_property_value_for_subject( database,
+                        person.ID_entity, _VORNAME_, NULL, errmsg );
+                if ( rc == -1 ) ERROR_S
+                else if ( rc == 0 ) //noch keine property gespeichert
+                {
+                    gint rc = 0;
+
+                    rc = sond_database_insert_property( database, person.ID_entity,
+                            _VORNAME_, person.vorname, errmsg );
+                    if ( rc ) ERROR_S
+                }
+            }
+
+            if ( person.geb_datum_formatted )
+            {
+                gint rc = 0;
+
+                //prüfen, ob zur ID property "Name" vorliegt
+                rc = sond_database_get_first_property_value_for_subject( database,
+                        person.ID_entity, _BEGINN_, NULL, errmsg );
+                if ( rc == -1 ) ERROR_S
+                else if ( rc == 0 ) //noch keine property gespeichert
+                {
+                    gint rc = 0;
+
+                    rc = sond_database_insert_property( database, person.ID_entity,
+                            _BEGINN_, person.geb_datum_formatted, errmsg );
+                    if ( rc ) ERROR_S
+                }
+            }
+
+            if ( person.ID_label_person != 310 )
+            {
+                gint rc = 0;
+
+                rc = sond_database_get_ID_label_for_entity( database, person.ID_entity, errmsg );
+                if ( rc == -1 ) ERROR_S
+                else if ( rc == 310 )
+                {
+                    gint rc = 0;
+
+                    rc = sond_database_update_label( database, person.ID_entity,
+                            person.ID_label_person, errmsg );
+                    if ( rc == -1 ) ERROR_S
+                }
+                //else: Prüfung Paranoia, haben wir oben schon getestet!
+            }
+
+            return person.ID_entity;
         }
-        else ID_label_person_loop = rc;
-
-        if ( ID_label_person_loop != 310 && *ID_label_person != 310 &&
-                ID_label_person_loop != *ID_label_person )
-        {
-            //rausschmeißen
-            g_array_remove_index( arr_persons, i );
-            i--;
-            continue;
-        }
+        else g_array_unref( arr_persons );
     }
-
-    if ( arr_persons->len > 1 )
-    {
-        //Auswählen oder neu
-        printf("mehrere Personen name: %s  vorname: %s  geb_datum: %s\n", name, vorname, geb_datum_formatted );
-    }
-    else if ( arr_persons->len == 1 ) //genau einer paßt!
-    {
-        person.ID_entity = g_array_index( arr_persons, gint, 0 );
-        person.ID_label_person = *ID_label_person;
-        person.name = g_strdup( name );
-        person.vorname = g_strdup( vorname );
-        person.geb_datum_formatted = g_strdup( geb_datum_formatted );
-
-        g_array_append_val( arrays->arr_personen, person );
-
-        g_strfreev( ueai );
-        g_free( geb_datum_formatted );
-        g_array_unref( arr_persons );
-
-        return person.ID_entity;
-    }
-
-    g_array_unref( arr_persons );
 
     //Person einfügen
     rc = sond_database_insert_entity( database, *ID_label_person, errmsg );
@@ -478,15 +641,18 @@ zond_gemini_get_or_create_person( gpointer database, Arrays* arrays,
 
     person.ID_label_person = *ID_label_person;
 
-    rc = sond_database_insert_property( database, person.ID_entity, 10100, name, errmsg );
-    if ( rc == -1 )
+    if ( name )
     {
-        g_strfreev( ueai );
-        g_free( geb_datum_formatted );
-        ERROR_S
-    }
+        rc = sond_database_insert_property( database, person.ID_entity, 10100, name, errmsg );
+        if ( rc == -1 )
+        {
+            g_strfreev( ueai );
+            g_free( geb_datum_formatted );
+            ERROR_S
+        }
 
-    person.name = g_strdup( name );
+        person.name = g_strdup( name );
+    }
 
     if ( vorname )
     {
@@ -738,6 +904,8 @@ zond_gemini_get_or_create_tkue_massnahme( gpointer database, Arrays* arrays,
 
     if ( ereignis->uePerson )
     {
+        gint rc = 0;
+
         rc = zond_gemini_get_or_create_person( database, arrays,
                 ereignis->uePerson, &ID_label_uePerson, errmsg );
         if( rc == -1 ) ERROR_S
@@ -772,7 +940,8 @@ zond_gemini_get_or_create_tkue_massnahme( gpointer database, Arrays* arrays,
             g_array_index( arrays->arr_massnahmen, Massnahme, i ).ID_entity_uePerson = ID_entity_uePerson;
 
             //in database verknüpfen
-            rc = sond_database_insert_rel( database, ID_entity_anschluss, 10010, ID_entity_uePerson, errmsg );
+            rc = sond_database_insert_rel( database, massnahme_loop.ID_entity,
+                    10010, ID_entity_uePerson, errmsg );
             if ( rc == -1 ) ERROR_S
         }
         //ebenso soll nicht nachgefragt werden, ob, wenn nix aktuell und nix gespeichert ist
@@ -936,20 +1105,17 @@ zond_gemini_get_or_create_tkue_massnahme( gpointer database, Arrays* arrays,
     else massnahme.ID_entity = rc;
 
     //Leitungsnummer eintragen
+    massnahme.leitungs_nr = g_strdup( ereignis->leitungsnr );
+
     rc = sond_database_insert_property( database,
             massnahme.ID_entity, 11059, ereignis->leitungsnr, errmsg );
     if ( rc == -1 ) ERROR_S
-
-    massnahme.leitungs_nr = g_strdup( ereignis->leitungsnr );
 
     if ( ereignis->ueA )
     {
         gint rc = 0;
 
-        rc = zond_gemini_get_or_create_anschluss( database, arrays,
-            ID_label_anschluss, ereignis->ueA, ereignis->ueAI, errmsg );
-        if ( rc == -1 ) ERROR_S
-        else massnahme.ID_entity_anschluss = rc;
+        massnahme.ID_entity_anschluss = ID_entity_anschluss;
 
         //rel zwischen ueA und TKÜ-Maßnahme erzeugen
         rc = sond_database_insert_rel( database,
@@ -959,11 +1125,13 @@ zond_gemini_get_or_create_tkue_massnahme( gpointer database, Arrays* arrays,
 
     if ( ID_entity_uePerson )
     {
+        gint rc = 0;
+
         massnahme.ID_entity_uePerson = ID_entity_uePerson;
 
         //rel TKÜ-Maßnahme - uePerson einfügen
         rc = sond_database_insert_rel( database,
-                massnahme.ID_entity, 10010, massnahme.ID_entity_uePerson, errmsg );
+                massnahme.ID_entity, _HAT_, massnahme.ID_entity_uePerson, errmsg );
         if ( rc == -1 ) ERROR_S
     }
 
@@ -1369,6 +1537,7 @@ zond_gemini_read_zond_pdf_document( Projekt* zond, InfoWindow* info_window,
         if ( !line_string ) ERROR_S
 
         //Beginn/Abschluß alt
+        //"Kopfblock beginnt"
         if ( !g_strcmp0( line_string, "TKÜ-Leitungsnummer:" ) )
         {
             g_clear_pointer( &line_string, g_free );
@@ -1442,17 +1611,22 @@ zond_gemini_read_zond_pdf_document( Projekt* zond, InfoWindow* info_window,
 
             ereignis->ueA = line_string;
 
-            line_string = zond_gemini_get_next_line_string( zond_pdf_document, &line_at_pos, errmsg );
-            if ( !line_string )
+            do
             {
-                zond_gemini_free_ereignis( ereignis );
-                ERROR_S
-            }
+                line_string = zond_gemini_get_next_line_string( zond_pdf_document, &line_at_pos, errmsg );
+                if ( !line_string )
+                {
+                    zond_gemini_free_ereignis( ereignis );
+                    ERROR_S
+                }
 
-            //Balken, nicht "Anschlußinhaber"
-            if ( !g_strcmp0( line_string, "." ) ) g_clear_pointer( &line_string, g_free );
-            else
-            {
+                //Balken, nicht "Anschlußinhaber"
+                if ( !g_strcmp0( line_string, "." ) )
+                {
+                    g_clear_pointer( &line_string, g_free );
+                    break; //Kopf zu Ende!
+                }
+
                 if ( !g_strcmp0( line_string, "Anschlussinhaber:" ) )
                 {
                     line_string = zond_gemini_get_next_line_string( zond_pdf_document, &line_at_pos, errmsg );
@@ -1483,7 +1657,7 @@ zond_gemini_read_zond_pdf_document( Projekt* zond, InfoWindow* info_window,
 
                     ereignis->uePerson = line_string;
                 }
-            }
+            } while ( 1 );
         }
         else if ( !g_strcmp0( line_string, "Korrelations-Nr.:" ) )
         {
@@ -1841,6 +2015,19 @@ zond_gemini_read_gemini( Projekt* zond, gchar** errmsg )
 }
 
 
+void
+zond_gemini_free_fundstelle( Fundstelle* fundstelle )
+{
+    if ( !fundstelle ) return;
+
+    g_free( fundstelle->dateipfad );
+
+    g_free( fundstelle );
+
+    return;
+}
+
+
 static Fundstelle*
 zond_gemini_get_fundstelle( Projekt* zond, gint ID_entity_tkue_ereignis, gchar** errmsg )
 {
@@ -1853,6 +2040,7 @@ zond_gemini_get_fundstelle( Projekt* zond, gint ID_entity_tkue_ereignis, gchar**
     gchar* page_end = NULL;
     gchar* index_end = NULL;
     gint ID_entity_fundstelle = 0;
+    gint ID_entity_datei = 0;
 
     rc = sond_database_get_ID_label_for_entity( zond->dbase_zond->zond_dbase_work, ID_entity_tkue_ereignis, errmsg );
     if ( rc == -1 ) ERROR_S_VAL( NULL )
@@ -1876,8 +2064,16 @@ zond_gemini_get_fundstelle( Projekt* zond, gint ID_entity_tkue_ereignis, gchar**
 
     g_array_unref( arr_objects );
 
+    //datei zur Fundstelle
+    rc = sond_database_get_object_for_subject( zond->dbase_zond->zond_dbase_work,
+            ID_entity_fundstelle, &arr_objects, errmsg, 10000, 660, -1 );
+    if ( rc == -1 ) ERROR_S_VAL( NULL )
+
+    ID_entity_datei = g_array_index( arr_objects, gint, 0 );
+    g_array_unref( arr_objects );
+
     rc = sond_database_get_first_property_value_for_subject(
-            zond->dbase_zond->zond_dbase_work, ID_entity_fundstelle, 11051,
+            zond->dbase_zond->zond_dbase_work, ID_entity_datei, 10100,
             &pfad, errmsg );
     if ( rc == -1 ) ERROR_S_VAL( NULL )
     else if ( rc == 1 ) ERROR_S_MESSAGE_VAL( "Kein Pfad gefunden", NULL )
@@ -1913,7 +2109,83 @@ zond_gemini_get_fundstelle( Projekt* zond, gint ID_entity_tkue_ereignis, gchar**
     fundstelle->anbindung.bis.seite = atoi( page_end );
     fundstelle->anbindung.bis.index = atoi( index_end );
 
+    g_free( page_begin );
+    g_free( index_begin );
+    g_free( page_end );
+    g_free( index_end );
+
     return fundstelle;
+}
+
+
+gint
+zond_gemini_select_get_ue_personen( gpointer database, GPtrArray** arr_ue_personen,
+        gchar** errmsg )
+{
+    gint rc = 0;
+    GArray* arr_ID_entity_ue_person = NULL;
+    gint ID_label_ue_person = 0;
+
+    //sammeln
+    rc = sond_database_get_objects_from_labels( database,
+            1000, _HAT_, 310, &arr_ID_entity_ue_person, errmsg );
+    if ( rc ) ERROR_S
+
+    *arr_ue_personen = g_ptr_array_new_full( 0, g_free );
+
+    for ( gint i = 0; i < arr_ID_entity_ue_person->len; i++ )
+    {
+        gint rc = 0;
+        gint ID_entity_ue_person = 0;
+        gchar* name = NULL;
+        gchar* vorname = NULL;
+        gchar* geb_datum = NULL;
+        gchar* text = NULL;
+
+        ID_entity_ue_person = g_array_index( arr_ID_entity_ue_person, gint, i );
+
+        rc = sond_database_get_first_property_value_for_subject( database,
+                ID_entity_ue_person, _NAME_, &name, errmsg );
+        if ( rc == -1 ) ERROR_S
+        else if ( rc == 1 ) ERROR_S_MESSAGE( "Keinen Namen gefunden" )
+
+        rc = sond_database_get_first_property_value_for_subject( database,
+                ID_entity_ue_person, _VORNAME_, &vorname, errmsg );
+        if ( rc == -1 )
+        {
+            g_free( name );
+            ERROR_S
+        }
+
+        rc = sond_database_get_first_property_value_for_subject( database,
+                ID_entity_ue_person, _BEGINN_, &geb_datum, errmsg );
+        if ( rc == -1 )
+        {
+            g_free( name );
+            g_free( vorname );
+            ERROR_S
+        }
+
+        text = g_strconcat( name,", ", vorname, ", ", geb_datum, NULL );
+        g_free( name );
+        g_free( vorname );
+        g_free( geb_datum );
+
+        rc = sond_database_get_ID_label_for_entity( database, ID_entity_ue_person,
+                errmsg );
+        if ( rc == -1 ) ERROR_S
+        else ID_label_ue_person = rc;
+
+        if ( ID_label_ue_person == MANN ) text = add_string( text, g_strdup( " (männlich)" ) );
+        if ( ID_label_ue_person == FRAU ) text = add_string( text, g_strdup( " (weiblich)" ) );
+        if ( ID_label_ue_person == DIVERS ) text = add_string( text, g_strdup( " (divers)" ) );
+
+        g_ptr_array_add( *arr_ue_personen, text );
+    }
+
+    g_ptr_array_sort( *arr_ue_personen, (GCompareFunc) g_strcmp0 );
+
+    return 0;
 }
 
 
@@ -1924,7 +2196,9 @@ zond_gemini_select( Projekt* zond, gchar** errmsg )
     GtkWidget* gemini = NULL;
     GtkWidget* box = NULL;
     GtkWidget* grid = NULL;
-    GtkWidget* checkbox = NULL;
+    GtkWidget* checkbox_uePerson = NULL;
+    GPtrArray* arr_ue_personen = NULL;
+    GtkWidget* checkbox_leitungsnr = NULL;
     GPtrArray* arr_leitungs_nrn = NULL;
     GArray* arr_ID_entity_massnahmen = NULL;
 
@@ -1936,15 +2210,38 @@ zond_gemini_select( Projekt* zond, gchar** errmsg )
     box = gtk_dialog_get_content_area( GTK_DIALOG(gemini) );
 
     grid = gtk_grid_new( );
-    checkbox = sond_checkbox_new( "Leitungs-Nr." );
-    gtk_grid_attach( GTK_GRID(grid), checkbox, 0, 0, 1, 1 );
     gtk_box_pack_start( GTK_BOX(box), grid, FALSE, FALSE, 0 );
+
+    //überwachte Personen
+    checkbox_uePerson = sond_checkbox_new( "Überwachte Person" );
+    gtk_grid_attach( GTK_GRID(grid), checkbox_uePerson, 0, 0, 1, 1 );
+
+    rc = zond_gemini_select_get_ue_personen( zond->dbase_zond->zond_dbase_work,
+            &arr_ue_personen, errmsg );
+    if ( rc ) ERROR_S
+
+    for ( gint i = 0; i < arr_ue_personen->len; i++ )
+    {
+        gchar* ue_person = NULL;
+        gint ID_entity_ue_person = 0;
+
+        ue_person = g_ptr_array_index( arr_ue_personen, i );
+
+        sond_checkbox_add_entry( SOND_CHECKBOX(checkbox_uePerson), ue_person, 0 );
+    }
+    g_ptr_array_unref( arr_ue_personen );
+
+    //Leitungsnrn.
+    //checkbox erzeugen und ins grid
+    checkbox_leitungsnr = sond_checkbox_new( "Leitungs-Nr." );
+    gtk_grid_attach( GTK_GRID(grid), checkbox_leitungsnr, 1, 0, 1, 1 );
 
     //Leitungsnrn. sammeln
     rc = sond_database_get_subject_and_first_property_value_for_labels( zond->dbase_zond->zond_dbase_work,
             1000, 11059, &arr_ID_entity_massnahmen, &arr_leitungs_nrn, errmsg );
     if ( rc == -1 ) ERROR_S
 
+    //einfügen in checkbox
     for ( gint i = 0; i < arr_leitungs_nrn->len; i++ )
     {
         gchar* leitungs_nr = NULL;
@@ -1953,17 +2250,43 @@ zond_gemini_select( Projekt* zond, gchar** errmsg )
         leitungs_nr = g_ptr_array_index( arr_leitungs_nrn, i );
         ID_entity_massnahme = g_array_index( arr_ID_entity_massnahmen, gint, i );
 
-        sond_checkbox_add_entry( SOND_CHECKBOX(checkbox), leitungs_nr, ID_entity_massnahme );
+        sond_checkbox_add_entry( SOND_CHECKBOX(checkbox_leitungsnr), leitungs_nr, ID_entity_massnahme );
     }
 
     g_array_unref( arr_ID_entity_massnahmen );
     g_ptr_array_unref( arr_leitungs_nrn );
+/*
+    g_signal_connect( checkbox_leitungsnr, "alle-toggled",
+                     G_CALLBACK(zond_gemini_leitungsnr_alle_toggled), gemini );
+    g_signal_connect( checkbox_leitungsnr, "entry-toggled",
+                     G_CALLBACK(zond_gemini_leitungsnr_entry_toggled), gemini );
+*/
 
     gtk_widget_show_all( gemini );
 
     gtk_window_resize( GTK_WINDOW(gemini), 250, 200 );
 
     rc = gtk_dialog_run( GTK_DIALOG(gemini) );
+
+    gtk_widget_destroy( gemini );
+
+    if ( rc == GTK_RESPONSE_OK )
+    {
+
+        //DDs bilden und anzeigen
+            //auslesen, was gecheckt ist
+    //derzeit nur leitungsnr
+
+            //sql-String bilden
+            //TKÜ-Ereignisse abfragem
+            //ggf. ordnen
+            //Schleife:
+                //Fundstelle suchen
+                //dd bilden und an vorangegangenes dd hängen
+
+            //viewer öffnen
+            //document anzeigen
+    }
 
     return 0;
 }

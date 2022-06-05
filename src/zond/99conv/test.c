@@ -44,6 +44,8 @@ test( Projekt* zond, gchar** errmsg )
 
     gtk_widget_show_all( window );
 
+    gtk_window_resize(GTK_WINDOW(window), 500, 300 );
+
     return 0;
 }
 

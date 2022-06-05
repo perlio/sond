@@ -4,6 +4,19 @@
 typedef char gchar;
 typedef int gint;
 
+typedef enum
+{
+    NATUERLICHE_PERSON = 310,
+    MANN = 312,
+    FRAU = 313,
+    DIVERS = 314,
+    _GEHOERT_ZU_ = 10000,
+    _HAT_ = 10010,
+    _BEGINN_ = 10030,
+    _NAME_ = 10100,
+    _VORNAME_ = 11010
+} labels;
+
 typedef struct _Entity
 {
     gint ID;
@@ -35,6 +48,7 @@ typedef struct _Node
 
 } Node;
 
+
 gint sond_database_add_to_database( gpointer, gchar** );
 
 gint sond_database_insert_entity( gpointer, gint, gchar** );
@@ -42,6 +56,8 @@ gint sond_database_insert_entity( gpointer, gint, gchar** );
 gint sond_database_is_admitted_edge( gpointer, gint, gint, gint, gchar** );
 
 gint sond_database_is_admitted_rel( gpointer, gint, gint, gchar** );
+
+gint sond_database_update_label( gpointer, gint, gint, gchar** );
 
 gint sond_database_label_is_equal_or_parent( gpointer, gint, gint, gchar** );
 
@@ -73,7 +89,14 @@ gint sond_database_get_first_property_value_for_subject( gpointer, gint, gint,
 gint sond_database_get_subject_and_first_property_value_for_labels( gpointer,
         gint, gint, GArray**, GPtrArray**, gchar** );
 
+gint sond_database_get_objects_from_labels( gpointer, gint, gint, gint,
+        GArray**, gchar** );
+
 gint sond_database_get_outgoing_rels( gpointer, gint, GArray**, gchar** );
+
+gint sond_database_get_incoming_rels( gpointer, gint, GArray**, gchar** );
+
+gint sond_database_get_subject_from_rel( gpointer, gint, gchar** );
 
 gint sond_database_get_object_from_rel( gpointer, gint, gchar** );
 
