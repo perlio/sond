@@ -866,7 +866,7 @@ zond_tree_store_insert( ZondTreeStore* tree_store, GtkTreeIter* iter, gboolean c
                     node = node_orig;
 
             node_parent = node;
-            pos = -1;
+            pos = 0; //sonst funktioniert neue Anbindung einfügen ggf. nicht!
         }
         else
         {
