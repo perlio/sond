@@ -842,7 +842,8 @@ zond_tree_store_insert_linked_nodes( GNode* node_parent, gint pos, GNode* orig_n
 
 
 void
-zond_tree_store_insert( ZondTreeStore* tree_store, GtkTreeIter* iter, gboolean child, GtkTreeIter* iter_inserted )
+zond_tree_store_insert( ZondTreeStore* tree_store, GtkTreeIter* iter,
+        gboolean child, GtkTreeIter* iter_inserted )
 {
     GNode* node_parent = NULL;
     gint pos = 0;
@@ -866,7 +867,7 @@ zond_tree_store_insert( ZondTreeStore* tree_store, GtkTreeIter* iter, gboolean c
                     node = node_orig;
 
             node_parent = node;
-            pos = -1;
+            pos = 0; //als erstes Kind; sonst funktioniert einfügen von neuen Anbindungen nicht
         }
         else
         {

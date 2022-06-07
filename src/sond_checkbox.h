@@ -23,6 +23,8 @@ void sond_checkbox_add_entry( SondCheckbox*, const gchar*, gint );
 
 GtkWidget* sond_checkbox_new( const gchar* title );
 
+GArray* sond_checkbox_get_active_IDs( SondCheckbox* );
+
 G_END_DECLS
 
 

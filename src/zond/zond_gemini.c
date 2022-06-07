@@ -1952,6 +1952,10 @@ zond_gemini_read_gemini( Projekt* zond, gchar** errmsg )
     g_free( file );
     if ( !zond_pdf_document ) ERROR_S
 
+    rc = sqlite3_exec( zond_dbase_get_dbase( zond->dbase_zond->zond_dbase_work ),
+            "DROP TABLE IF EXISTS temp.tkue;", NULL, NULL, errmsg );
+    if ( rc != SQLITE_OK ) ERROR_S
+
     rc = zond_dbase_new( ":memory:", TRUE, TRUE, &zond_dbase, errmsg );
     if ( rc )
     {
@@ -2118,7 +2122,28 @@ zond_gemini_get_fundstelle( Projekt* zond, gint ID_entity_tkue_ereignis, gchar**
 }
 
 
-gint
+static void
+zond_gemini_leitungsnr_entry_toggled( GtkWidget* checkbox_leitungsnr,
+        GtkWidget* entry_leitungsnr, gboolean active, const gchar* label,
+        gint ID_entity_leitungsnr, gpointer data )
+{
+    printf( "%s  %i\n", label, active);
+
+    return;
+}
+
+
+static gint
+zond_gemini_comp_text( gconstpointer a, gconstpointer b )
+{
+    const gchar* entry1 = *((gchar**) a);
+    const gchar* entry2 = *((gchar**) b);
+
+    return g_ascii_strcasecmp (entry1, entry2);
+}
+
+
+static gint
 zond_gemini_select_get_ue_personen( gpointer database, GPtrArray** arr_ue_personen,
         gchar** errmsg )
 {
@@ -2183,9 +2208,91 @@ zond_gemini_select_get_ue_personen( gpointer database, GPtrArray** arr_ue_person
         g_ptr_array_add( *arr_ue_personen, text );
     }
 
-    g_ptr_array_sort( *arr_ue_personen, (GCompareFunc) g_strcmp0 );
+    g_ptr_array_sort( *arr_ue_personen, (GCompareFunc) zond_gemini_comp_text );
 
     return 0;
+}
+
+
+static gpointer
+zond_gemini_create_tkue_table( gpointer data )
+{
+    ZondDBase* zond_dbase = NULL;
+    gint rc = 0;
+    gchar* errmsg = NULL;
+    const gchar* sql = g_strdup_printf(
+            "CREATE TEMP TABLE IF NOT EXISTS tkue AS "
+            "SELECT p_tkue_ereignis_beginn AS beginn, p_datei_name.value AS datei, p1.value AS page_begin, "
+                "p2.value AS index_begin, p3.value AS page_end, p4.value AS index_end, FROM "
+            "entities AS e_fundstelle JOIN "
+            "properties AS p1 JOIN "
+            "entities AS e1 JOIN "
+            "properties AS p2 JOIN "
+            "entities AS e2 JOIN "
+            "properties AS p3 JOIN "
+            "entities AS e3 JOIN "
+            "properties AS p4 JOIN "
+            "entities AS e4 JOIN "
+            "rels AS r_gemini_hat_fundstelle JOIN "
+            "entities AS e_hat_1 JOIN "
+            "entities AS e_gemini JOIN "
+            "rels AS r_tkue_ereignis_hat_gemini JOIN "
+            "entities AS e_hat_2 JOIN "
+            "entities AS e_tkue_ereignis JOIN "
+            "properties AS p_tkue_ereignis_beginn JOIN "
+            "entities AS e_beginn JOIN "
+            "rels AS r_tkue_ereignis_gehoert_zu_massnahme JOIN "
+            "entities AS e_gehoert_zu JOIN "
+            "entities AS e_massnahme JOIN "
+            "properties AS p_massnahme_leitungsnr JOIN "
+            "entities AS e_leitungsnr JOIN "
+            "rels AS r_fundstelle_gehoert_zu_datei JOIN "
+            "entities AS e_gehoert_zu_2 JOIN "
+            "entities AS e_datei JOIN "
+            "properties AS p_datei_name JOIN "
+            "entities AS e_name "
+
+            "WHERE "
+            "e_fundstelle.ID_label=650 AND "
+            "p1.entity_subject=e_fundstelle.ID AND e1.ID=p1.entity_property AND e1.ID_label=11052 AND "
+            "p2.entity_subject=e_fundstelle.ID AND e2.ID=p2.entity_property AND e2.ID_label=11054 AND "
+            "p3.entity_subject=e_fundstelle.ID AND e3.ID=p3.entity_property AND e3.ID_label=11055 AND "
+            "p4.entity_subject=e_fundstelle.ID AND e4.ID=p4.entity_property AND e4.ID_label=11057 AND "
+            "r_gemini_hat_fundstelle.entity_object=e_fundstelle.ID AND "
+            "r_gemini_hat_fundstelle.entity_rel=e_hat_1.ID AND e_hat_1.ID_label=10010 AND "
+            "r_gemini_hat_fundstelle.entity_subject=e_gemini.ID AND e_gemini.ID_label=836 AND "
+            "r_tkue_ereignis_hat_gemini.entity_object=e_gemini.ID AND "
+            "r_tkue_ereignis_hat_gemini.entity_rel=e_hat_2.ID AND e_hat_2.ID_label=10010 AND "
+            "r_tkue_ereignis_hat_gemini.entity_subject=e_tkue_ereignis.ID AND "
+            "(e_tkue_ereignis.ID_label=1010 OR e_tkue_ereignis.ID_label=1012 OR e_tkue_ereignis.ID_label=1015 OR e_tkue_ereignis.ID_label=1020) AND "
+            "p_tkue_ereignis_beginn.entity_subject=e_tkue_ereignis.ID AND "
+            "p_tkue_ereignis_beginn.entity_property=e_beginn.ID AND e_beginn.ID_label=10030 AND "
+            "r_tkue_ereignis_gehoert_zu_massnahme.entity_subject=e_tkue_ereignis.ID AND "
+            "r_tkue_ereignis_gehoert_zu_massnahme.entity_rel=e_gehoert_zu.ID AND e_gehoert_zu.ID_label=10000 AND "
+            "r_tkue_ereignis_gehoert_zu_massnahme.entity_object=e_massnahme.ID AND e_massnahme.ID_label=1000 AND "
+            "p_massnahme_leitungsnr.entity_subject=e_massnahme.ID AND "
+            "p_massnahme_leitungsnr.entity_property=e_leitungsnr.ID AND e_leitungsnr.ID_label=11059 AND "
+            "r_fundstelle_gehoert_zu_datei.entity_subject=e_fundstelle.ID AND "
+            "r_fundstelle_gehoert_zu_datei.entity_rel=e_gehoert_zu_2.ID AND e_gehoert_zu_2.ID_label=10000 AND "
+            "r_fundstelle_gehoert_zu_datei.entity_object=e_datei.ID AND e_datei.ID_label=660 AND "
+            "p_datei_name.entity_subject=e_datei.ID AND "
+            "p_datei_name.entity_property=e_name.ID AND e_name.ID_label=10100 "
+            "ORDER by beginn ASC; "
+            );
+
+    zond_dbase = ZOND_DBASE(data);
+
+    rc = sqlite3_exec( zond_dbase_get_dbase( zond_dbase ), sql, NULL, NULL, &errmsg );
+    if ( rc )
+    {
+        gchar* text = NULL;
+
+        text = g_strconcat( "Bei Aufruf ", __func__, ":\nBei Aufruf sqlite3_exec:\n", NULL );
+        errmsg = add_string( text, errmsg );
+        g_free( text );
+    }
+
+    return (gpointer) errmsg;
 }
 
 
@@ -2201,6 +2308,7 @@ zond_gemini_select( Projekt* zond, gchar** errmsg )
     GtkWidget* checkbox_leitungsnr = NULL;
     GPtrArray* arr_leitungs_nrn = NULL;
     GArray* arr_ID_entity_massnahmen = NULL;
+    GThread* thread_tkue_table = NULL;
 
     gemini = gtk_dialog_new_with_buttons( "Gemini", GTK_WINDOW(zond->app_window),
             GTK_DIALOG_DESTROY_WITH_PARENT | GTK_DIALOG_MODAL, "Ok",
@@ -2258,10 +2366,12 @@ zond_gemini_select( Projekt* zond, gchar** errmsg )
 /*
     g_signal_connect( checkbox_leitungsnr, "alle-toggled",
                      G_CALLBACK(zond_gemini_leitungsnr_alle_toggled), gemini );
+*/
     g_signal_connect( checkbox_leitungsnr, "entry-toggled",
                      G_CALLBACK(zond_gemini_leitungsnr_entry_toggled), gemini );
-*/
 
+    //temp-table im Hintergrund erzeugen
+    thread_tkue_table = g_thread_new( "tkue", zond_gemini_create_tkue_table, zond->dbase_zond->zond_dbase_work );
     gtk_widget_show_all( gemini );
 
     gtk_window_resize( GTK_WINDOW(gemini), 250, 200 );
@@ -2272,12 +2382,38 @@ zond_gemini_select( Projekt* zond, gchar** errmsg )
 
     if ( rc == GTK_RESPONSE_OK )
     {
+        gint rc = 0;
+        GArray* arr_tkue_ereignisse = NULL; //ID_entities der Gespräche, wird nach und nach ergänzt
+        gchar* begin = NULL;
+        gchar* end = NULL;
+        gchar* sql = NULL;
+        gchar* sql_leitungsnrn = NULL;
+        GArray* arr_leitungsnrn = NULL;
+        gchar* errmsg = NULL;
 
-        //DDs bilden und anzeigen
-            //auslesen, was gecheckt ist
-    //derzeit nur leitungsnr
+        //leitungs_nr auslesen
+        arr_leitungsnrn = sond_checkbox_get_active_IDs( SOND_CHECKBOX(checkbox_leitungsnr) );
+        if ( arr_leitungsnrn )
+        {
+            for ( gint i = 0; i < arr_leitungsnrn->len; i++ )
+            {
+                gint rc = 0;
+                GArray* arr_ID_objects = NULL;
+                gint ID_entity_massnahme = 0;
 
-            //sql-String bilden
+                ID_entity_massnahme = g_array_index( arr_leitungsnrn, gint, i );
+
+            }
+        }
+
+
+        errmsg = (gchar*) g_thread_join( thread_tkue_table );
+        if ( errmsg )
+        {
+            errmsg = add_string( g_strdup( "Bei Aufruf zond_gemini_select:\n"
+                    "TEMP TABLE tkue konnte nicht erzeugt werden:\n " ), errmsg );
+            return -1;
+        }
             //TKÜ-Ereignisse abfragem
             //ggf. ordnen
             //Schleife:
@@ -2286,6 +2422,17 @@ zond_gemini_select( Projekt* zond, gchar** errmsg )
 
             //viewer öffnen
             //document anzeigen
+    }
+    else
+    {
+        gpointer res = NULL;
+        res = g_thread_join( thread_tkue_table );
+        if ( errmsg )
+        {
+            *errmsg = add_string( g_strdup( "Bei Aufruf zond_gemini_select:\n"
+                    "TEMP TABLE tkue konnte nicht erzeugt werden:\n " ), res );
+            return -1;
+        }
     }
 
     return 0;

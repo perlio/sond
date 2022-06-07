@@ -680,10 +680,6 @@
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
 		</Unit>
-		<Unit filename="src/zond/enums.h">
-			<Option target="zond (Release)" />
-			<Option target="zond (Testing)" />
-		</Unit>
 		<Unit filename="src/zond/global_types.h">
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />

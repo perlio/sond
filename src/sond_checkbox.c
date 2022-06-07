@@ -67,9 +67,9 @@ sond_checkbox_class_init( SondCheckboxClass* klass )
                                                NULL,
                                                G_TYPE_NONE,
                                                4,
-                                               G_TYPE_BOOLEAN, //ob active oder nicht
                                                GTK_TYPE_CHECK_BUTTON,
-                                               G_TYPE_CHAR, //label von CheckButton
+                                               G_TYPE_BOOLEAN, //ob active oder nicht
+                                               G_TYPE_STRING, //label von CheckButton
                                                G_TYPE_INT //ID_entity
                                                );
 
@@ -83,7 +83,8 @@ static void
 sond_checkbox_check_entry_toggled( GtkWidget* check_entry, gpointer data )
 {
     g_signal_emit( data, SOND_CHECKBOX_GET_CLASS(data)->signal_entry_toggled, 0,
-            check_entry, gtk_button_get_label( GTK_BUTTON(check_entry) ),
+            check_entry, gtk_toggle_button_get_active( GTK_TOGGLE_BUTTON(check_entry) ),
+            gtk_button_get_label( GTK_BUTTON(check_entry) ),
             sond_checkbox_entry_get_ID( SOND_CHECKBOX_ENTRY(check_entry) ) );
 
     return;
@@ -174,6 +175,40 @@ sond_checkbox_new( const gchar* title )
     scb = g_object_new( SOND_TYPE_CHECKBOX, "label", title, NULL );
 
     return GTK_WIDGET(scb);
+}
+
+
+GArray*
+sond_checkbox_get_active_IDs( SondCheckbox* scb )
+{
+    SondCheckboxPrivate* priv = NULL;
+    GList* list_entries = NULL;
+    GList* ptr = NULL;
+    GArray* arr_IDs = NULL;
+
+    priv = sond_checkbox_get_instance_private( scb );
+
+    list_entries = gtk_container_get_children( GTK_CONTAINER( priv->box_entries ) );
+
+    if ( !list_entries ) return NULL;
+
+    arr_IDs = g_array_new( FALSE, FALSE, sizeof( gint ) );
+
+    ptr = list_entries;
+    do
+    {
+        GtkWidget* checkbox_entry = NULL;
+        gint ID_entry = 0;
+
+        checkbox_entry = ptr->data;
+        ID_entry = sond_checkbox_entry_get_ID( SOND_CHECKBOX_ENTRY(checkbox_entry) );
+
+        g_array_append_val( arr_IDs, ID_entry );
+    } while ( (ptr = ptr->next) );
+
+    g_list_free( list_entries );
+
+    return arr_IDs;
 }
 
 
