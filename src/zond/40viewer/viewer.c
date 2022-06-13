@@ -475,9 +475,9 @@ viewer_create_layout( PdfViewer* pv )
             viewer_page->y_pos = (gint) (y_pos + .5);
             if ( dd->anbindung )
             {
-                viewer_page->crop.y0 = (von == dd->anbindung->von.seite) ?
+                viewer_page->crop.y0 = (i == dd->anbindung->von.seite) ?
                         (gfloat) dd->anbindung->von.index : viewer_page->crop.y0;
-                viewer_page->crop.y1 = ((von == dd->anbindung->bis.seite) &&
+                viewer_page->crop.y1 = ((i == dd->anbindung->bis.seite) &&
                         (dd->anbindung->bis.index < EOP)) ?
                         (gfloat) dd->anbindung->bis.index : viewer_page->crop.y1;
             }

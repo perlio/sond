@@ -201,9 +201,13 @@ sond_checkbox_get_active_IDs( SondCheckbox* scb )
         gint ID_entry = 0;
 
         checkbox_entry = ptr->data;
-        ID_entry = sond_checkbox_entry_get_ID( SOND_CHECKBOX_ENTRY(checkbox_entry) );
 
-        g_array_append_val( arr_IDs, ID_entry );
+        if ( gtk_toggle_button_get_active( GTK_TOGGLE_BUTTON(checkbox_entry) ) )
+        {
+            ID_entry = sond_checkbox_entry_get_ID( SOND_CHECKBOX_ENTRY(checkbox_entry) );
+
+            g_array_append_val( arr_IDs, ID_entry );
+        }
     } while ( (ptr = ptr->next) );
 
     g_list_free( list_entries );

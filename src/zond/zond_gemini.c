@@ -28,7 +28,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "20allgemein/pdf_text.h"
 #include "20allgemein/project.h"
-
+#include "40viewer/document.h"
+#include "40viewer/viewer.h"
 #include "99conv/general.h"
 #include "99conv/pdf.h"
 
@@ -1430,13 +1431,8 @@ zond_gemini_close_ereignis( gpointer database, Arrays* arrays, Ereignis* ereigni
     ereignis->index_end = g_strdup_printf("%i", (gint) last_line_at_pos.line->bbox.y1 );
 
     rc = zond_gemini_save_ereignis( database, arrays, ereignis, ID_entity_datei, errmsg );
-    if ( rc )
-    {
-        printf("page/index (begin): %s/%s  (end): %s/%s\n", ereignis->page_num_begin, ereignis->index_begin, ereignis->page_num_end, ereignis->index_end);
-        g_clear_pointer( &ereignis, zond_gemini_free_ereignis );
-        ERROR_S
-    }
     g_clear_pointer( &ereignis, zond_gemini_free_ereignis );
+    if ( rc ) ERROR_S
 
     return 0;
 }
@@ -2134,17 +2130,7 @@ zond_gemini_leitungsnr_entry_toggled( GtkWidget* checkbox_leitungsnr,
 
 
 static gint
-zond_gemini_comp_text( gconstpointer a, gconstpointer b )
-{
-    const gchar* entry1 = *((gchar**) a);
-    const gchar* entry2 = *((gchar**) b);
-
-    return g_ascii_strcasecmp (entry1, entry2);
-}
-
-
-static gint
-zond_gemini_select_get_ue_personen( gpointer database, GPtrArray** arr_ue_personen,
+zond_gemini_select_fill_checkbox_ue_person( Projekt* zond, GtkWidget* scb,
         gchar** errmsg )
 {
     gint rc = 0;
@@ -2152,11 +2138,9 @@ zond_gemini_select_get_ue_personen( gpointer database, GPtrArray** arr_ue_person
     gint ID_label_ue_person = 0;
 
     //sammeln
-    rc = sond_database_get_objects_from_labels( database,
+    rc = sond_database_get_objects_from_labels( zond->dbase_zond->zond_dbase_work,
             1000, _HAT_, 310, &arr_ID_entity_ue_person, errmsg );
     if ( rc ) ERROR_S
-
-    *arr_ue_personen = g_ptr_array_new_full( 0, g_free );
 
     for ( gint i = 0; i < arr_ID_entity_ue_person->len; i++ )
     {
@@ -2169,23 +2153,29 @@ zond_gemini_select_get_ue_personen( gpointer database, GPtrArray** arr_ue_person
 
         ID_entity_ue_person = g_array_index( arr_ID_entity_ue_person, gint, i );
 
-        rc = sond_database_get_first_property_value_for_subject( database,
+        rc = sond_database_get_first_property_value_for_subject( zond->dbase_zond->zond_dbase_work,
                 ID_entity_ue_person, _NAME_, &name, errmsg );
-        if ( rc == -1 ) ERROR_S
-        else if ( rc == 1 ) ERROR_S_MESSAGE( "Keinen Namen gefunden" )
+        if ( rc )
+        {
+            g_array_unref( arr_ID_entity_ue_person );
+            if ( rc == -1 ) ERROR_S
+            else if ( rc == 1 ) ERROR_S_MESSAGE( "Keinen Namen gefunden" )
+        }
 
-        rc = sond_database_get_first_property_value_for_subject( database,
+        rc = sond_database_get_first_property_value_for_subject( zond->dbase_zond->zond_dbase_work,
                 ID_entity_ue_person, _VORNAME_, &vorname, errmsg );
         if ( rc == -1 )
         {
+            g_array_unref( arr_ID_entity_ue_person );
             g_free( name );
             ERROR_S
         }
 
-        rc = sond_database_get_first_property_value_for_subject( database,
+        rc = sond_database_get_first_property_value_for_subject( zond->dbase_zond->zond_dbase_work,
                 ID_entity_ue_person, _BEGINN_, &geb_datum, errmsg );
         if ( rc == -1 )
         {
+            g_array_unref( arr_ID_entity_ue_person );
             g_free( name );
             g_free( vorname );
             ERROR_S
@@ -2196,103 +2186,179 @@ zond_gemini_select_get_ue_personen( gpointer database, GPtrArray** arr_ue_person
         g_free( vorname );
         g_free( geb_datum );
 
-        rc = sond_database_get_ID_label_for_entity( database, ID_entity_ue_person,
+        rc = sond_database_get_ID_label_for_entity( zond->dbase_zond->zond_dbase_work, ID_entity_ue_person,
                 errmsg );
-        if ( rc == -1 ) ERROR_S
+        if ( rc == -1 )
+        {
+            g_array_unref( arr_ID_entity_ue_person );
+            ERROR_S
+        }
         else ID_label_ue_person = rc;
 
         if ( ID_label_ue_person == MANN ) text = add_string( text, g_strdup( " (männlich)" ) );
         if ( ID_label_ue_person == FRAU ) text = add_string( text, g_strdup( " (weiblich)" ) );
         if ( ID_label_ue_person == DIVERS ) text = add_string( text, g_strdup( " (divers)" ) );
 
-        g_ptr_array_add( *arr_ue_personen, text );
+        sond_checkbox_add_entry( SOND_CHECKBOX(scb), text, ID_entity_ue_person );
+        g_free( text );
     }
+    g_array_unref( arr_ID_entity_ue_person );
 
-    g_ptr_array_sort( *arr_ue_personen, (GCompareFunc) zond_gemini_comp_text );
+//    sond_checkbox_sort_entries( SOND_CHECKBOX(scb), 0 );
 
     return 0;
 }
 
 
-static gpointer
-zond_gemini_create_tkue_table( gpointer data )
+static gint
+zond_gemini_create_tkue_table( ZondDBase* zond_dbase, gchar** errmsg )
 {
-    ZondDBase* zond_dbase = NULL;
     gint rc = 0;
-    gchar* errmsg = NULL;
-    const gchar* sql = g_strdup_printf(
-            "CREATE TEMP TABLE IF NOT EXISTS tkue AS "
-            "SELECT p_tkue_ereignis_beginn AS beginn, p_datei_name.value AS datei, p1.value AS page_begin, "
-                "p2.value AS index_begin, p3.value AS page_end, p4.value AS index_end, FROM "
-            "entities AS e_fundstelle JOIN "
-            "properties AS p1 JOIN "
-            "entities AS e1 JOIN "
-            "properties AS p2 JOIN "
-            "entities AS e2 JOIN "
-            "properties AS p3 JOIN "
-            "entities AS e3 JOIN "
-            "properties AS p4 JOIN "
-            "entities AS e4 JOIN "
-            "rels AS r_gemini_hat_fundstelle JOIN "
-            "entities AS e_hat_1 JOIN "
-            "entities AS e_gemini JOIN "
-            "rels AS r_tkue_ereignis_hat_gemini JOIN "
-            "entities AS e_hat_2 JOIN "
-            "entities AS e_tkue_ereignis JOIN "
-            "properties AS p_tkue_ereignis_beginn JOIN "
-            "entities AS e_beginn JOIN "
-            "rels AS r_tkue_ereignis_gehoert_zu_massnahme JOIN "
-            "entities AS e_gehoert_zu JOIN "
-            "entities AS e_massnahme JOIN "
-            "properties AS p_massnahme_leitungsnr JOIN "
-            "entities AS e_leitungsnr JOIN "
-            "rels AS r_fundstelle_gehoert_zu_datei JOIN "
-            "entities AS e_gehoert_zu_2 JOIN "
-            "entities AS e_datei JOIN "
-            "properties AS p_datei_name JOIN "
-            "entities AS e_name "
+    const gchar* sql =
+            "CREATE TABLE IF NOT EXISTS tkue AS "
 
-            "WHERE "
-            "e_fundstelle.ID_label=650 AND "
-            "p1.entity_subject=e_fundstelle.ID AND e1.ID=p1.entity_property AND e1.ID_label=11052 AND "
-            "p2.entity_subject=e_fundstelle.ID AND e2.ID=p2.entity_property AND e2.ID_label=11054 AND "
-            "p3.entity_subject=e_fundstelle.ID AND e3.ID=p3.entity_property AND e3.ID_label=11055 AND "
-            "p4.entity_subject=e_fundstelle.ID AND e4.ID=p4.entity_property AND e4.ID_label=11057 AND "
-            "r_gemini_hat_fundstelle.entity_object=e_fundstelle.ID AND "
-            "r_gemini_hat_fundstelle.entity_rel=e_hat_1.ID AND e_hat_1.ID_label=10010 AND "
-            "r_gemini_hat_fundstelle.entity_subject=e_gemini.ID AND e_gemini.ID_label=836 AND "
-            "r_tkue_ereignis_hat_gemini.entity_object=e_gemini.ID AND "
-            "r_tkue_ereignis_hat_gemini.entity_rel=e_hat_2.ID AND e_hat_2.ID_label=10010 AND "
-            "r_tkue_ereignis_hat_gemini.entity_subject=e_tkue_ereignis.ID AND "
-            "(e_tkue_ereignis.ID_label=1010 OR e_tkue_ereignis.ID_label=1012 OR e_tkue_ereignis.ID_label=1015 OR e_tkue_ereignis.ID_label=1020) AND "
-            "p_tkue_ereignis_beginn.entity_subject=e_tkue_ereignis.ID AND "
-            "p_tkue_ereignis_beginn.entity_property=e_beginn.ID AND e_beginn.ID_label=10030 AND "
-            "r_tkue_ereignis_gehoert_zu_massnahme.entity_subject=e_tkue_ereignis.ID AND "
-            "r_tkue_ereignis_gehoert_zu_massnahme.entity_rel=e_gehoert_zu.ID AND e_gehoert_zu.ID_label=10000 AND "
-            "r_tkue_ereignis_gehoert_zu_massnahme.entity_object=e_massnahme.ID AND e_massnahme.ID_label=1000 AND "
-            "p_massnahme_leitungsnr.entity_subject=e_massnahme.ID AND "
-            "p_massnahme_leitungsnr.entity_property=e_leitungsnr.ID AND e_leitungsnr.ID_label=11059 AND "
-            "r_fundstelle_gehoert_zu_datei.entity_subject=e_fundstelle.ID AND "
-            "r_fundstelle_gehoert_zu_datei.entity_rel=e_gehoert_zu_2.ID AND e_gehoert_zu_2.ID_label=10000 AND "
-            "r_fundstelle_gehoert_zu_datei.entity_object=e_datei.ID AND e_datei.ID_label=660 AND "
-            "p_datei_name.entity_subject=e_datei.ID AND "
-            "p_datei_name.entity_property=e_name.ID AND e_name.ID_label=10100 "
-            "ORDER by beginn ASC; "
-            );
+            "SELECT datei_name, page_begin, index_begin, page_end, index_end, beginn, ID_massnahme, ID_uePerson "
+                "FROM "
+                "(SELECT tkue_ereignis, beginn "
+                    "FROM "
+                    "(SELECT entities.ID AS tkue_ereignis "
+                        "FROM entities "
+                        "WHERE entities.ID_label=1010 OR entities.ID_label=1012 OR entities.ID_label=1015 OR entities.ID_label=1020) "
+                    "JOIN "
+                    "(SELECT properties.entity_subject AS subject_property, properties.value AS beginn "
+                        "FROM "
+                        "properties "
+                        "JOIN "
+                        "(SELECT entities.ID AS property FROM entities WHERE entities.ID_label=10030) "
+                        "ON properties.entity_property=property) "
+                    "ON tkue_ereignis=subject_property) "
+                "JOIN "
+                "(SELECT subject_tkue_ereignis, datei_name, page_begin, index_begin, page_end, index_end "
+                    "FROM "
+                    "(SELECT rels.entity_subject AS subject_tkue_ereignis, rels.entity_object AS object_gemini "
+                        "FROM "
+                        "rels "
+                        "JOIN "
+                        "(SELECT entities.ID AS rel FROM entities WHERE entities.ID_label=10010) "
+                        "ON rels.entity_rel=rel) /*alle rels _hat_ */ "
+                    "JOIN "
+                    "(SELECT gemini, datei_name, page_begin, index_begin, page_end, index_end "
+                        "FROM "
+                        "(SELECT gemini, object_fundstelle "
+                            "FROM "
+                            "(SELECT entities.ID AS gemini FROM entities WHERE entities.ID_label=836) "
+                            "JOIN "
+                            "(SELECT rels.entity_subject AS subject_gemini, rels.entity_object AS object_fundstelle "
+                                "FROM "
+                                "rels "
+                                "JOIN "
+                                "(SELECT entities.ID AS rel FROM entities WHERE entities.ID_label=10010) "
+                                "ON rels.entity_rel=rel) /*alle rels _hat_ */ "
+                            "ON gemini=subject_gemini) "
+                        "JOIN "
+                        "(SELECT fundstelle, datei_name, page_begin, index_begin, page_end, index_end  "
+                            "FROM "
+                            "(SELECT entities.ID AS fundstelle FROM entities WHERE entities.ID_label=650) "
+                            "JOIN "
+                            "(SELECT properties.entity_subject AS subject_property_1, properties.value AS page_begin "
+                                "FROM "
+                                "properties "
+                                "JOIN "
+                                "(SELECT entities.ID AS property FROM entities WHERE entities.ID_label=11052) "
+                                "ON properties.entity_property=property) "
+                            "ON fundstelle=subject_property_1 "
+                            "JOIN "
+                            "(SELECT properties.entity_subject AS subject_property_2, properties.value AS index_begin "
+                                "FROM "
+                                "properties "
+                                "JOIN "
+                                "(SELECT entities.ID AS property FROM entities WHERE entities.ID_label=11054) "
+                                "ON properties.entity_property=property) "
+                            "ON fundstelle=subject_property_2 "
+                            "JOIN "
+                            "(SELECT properties.entity_subject AS subject_property_3, properties.value AS page_end "
+                                "FROM "
+                                "properties "
+                                "JOIN "
+                                "(SELECT entities.ID AS property FROM entities WHERE entities.ID_label=11055) "
+                                "ON properties.entity_property=property) "
+                            "ON fundstelle=subject_property_3 "
+                            "JOIN "
+                            "(SELECT properties.entity_subject AS subject_property_4, properties.value AS index_end "
+                                "FROM "
+                                "properties "
+                                "JOIN "
+                                "(SELECT entities.ID AS property FROM entities WHERE entities.ID_label=11057) "
+                                "ON properties.entity_property=property) "
+                            "ON fundstelle=subject_property_4 "
+                            "JOIN "
+                            "(SELECT rels.entity_subject AS subject_fundstelle, rels.entity_object AS object_datei "
+                                "FROM "
+                                "rels "
+                                "JOIN "
+                                "(SELECT entities.ID AS rel FROM entities WHERE entities.ID_label=10000) "
+                                "ON rels.entity_rel=rel) "
+                            "ON fundstelle=subject_fundstelle "
+                            "JOIN "
+                            "(SELECT entities.ID AS datei FROM entities WHERE entities.ID_label=660) "
+                            "ON datei=object_datei "
+                            "JOIN "
+                            "(SELECT properties.entity_subject AS subject_property, properties.value AS datei_name "
+                                "FROM "
+                                "properties "
+                                "JOIN "
+                                "(SELECT entities.ID AS property FROM entities WHERE entities.ID_label=10100) "
+                                "ON properties.entity_property=property) "
+                            "ON datei=subject_property) "
+                        "ON fundstelle=object_fundstelle) "
+                    "ON gemini=object_gemini) "
+                "ON tkue_ereignis=subject_tkue_ereignis "
+                "JOIN /* mit massnahme!*/ "
+                "(SELECT subject_tkue_ereignis AS subject_tkue_ereignis_ii, ID_massnahme, ID_uePerson "
+                    "FROM "
+                    "(SELECT rels.entity_subject AS subject_tkue_ereignis, rels.entity_object AS object_massnahme "
+                        "FROM "
+                        "rels "
+                        "JOIN "
+                        "(SELECT entities.ID AS rel FROM entities WHERE entities.ID_label=10000) "
+                        "ON rels.entity_rel=rel) "
+                    "JOIN "
+                    "(SELECT entities.ID AS ID_massnahme FROM entities WHERE entities.ID_label=1000) "
+                    "ON ID_massnahme=object_massnahme "
+                    "LEFT JOIN "
+                    "(SELECT ID_uePerson, subject_massnahme "
+                        "FROM "
+                        "(SELECT rels.entity_subject AS subject_massnahme, rels.entity_object AS object_uePerson "
+                            "FROM "
+                            "rels "
+                            "JOIN "
+                            "(SELECT entities.ID AS rel FROM entities WHERE entities.ID_label=10010) "
+                            "ON rels.entity_rel=rel) "
+                        "JOIN "
+                        "(SELECT entities.ID AS ID_uePerson "
+                            "FROM entities "
+                            " WHERE entities.ID_label=310 OR entities.ID_label=312 OR entities.ID_label=313 OR entities.ID_label=314) "
+                        "ON ID_ueperson=object_uePerson) "
+                    "ON ID_massnahme=subject_massnahme) "
+                "ON tkue_ereignis=subject_tkue_ereignis_ii "
+                "ORDER BY beginn ASC "
+                ";";
 
-    zond_dbase = ZOND_DBASE(data);
-
-    rc = sqlite3_exec( zond_dbase_get_dbase( zond_dbase ), sql, NULL, NULL, &errmsg );
-    if ( rc )
+    rc = sqlite3_exec( zond_dbase_get_dbase( zond_dbase ), sql, NULL, NULL, errmsg );
+    if ( rc != SQLITE_OK )
     {
         gchar* text = NULL;
 
-        text = g_strconcat( "Bei Aufruf ", __func__, ":\nBei Aufruf sqlite3_exec:\n", NULL );
-        errmsg = add_string( text, errmsg );
-        g_free( text );
+        if ( errmsg )
+        {
+            text = g_strconcat( "Bei Aufruf ", __func__, ":\nBei Aufruf sqlite3_exec:\n", NULL );
+            *errmsg = add_string( text, *errmsg );
+        }
+
+        return -1;
     }
 
-    return (gpointer) errmsg;
+    return 0;
 }
 
 
@@ -2304,7 +2370,6 @@ zond_gemini_select( Projekt* zond, gchar** errmsg )
     GtkWidget* box = NULL;
     GtkWidget* grid = NULL;
     GtkWidget* checkbox_uePerson = NULL;
-    GPtrArray* arr_ue_personen = NULL;
     GtkWidget* checkbox_leitungsnr = NULL;
     GPtrArray* arr_leitungs_nrn = NULL;
     GArray* arr_ID_entity_massnahmen = NULL;
@@ -2324,20 +2389,13 @@ zond_gemini_select( Projekt* zond, gchar** errmsg )
     checkbox_uePerson = sond_checkbox_new( "Überwachte Person" );
     gtk_grid_attach( GTK_GRID(grid), checkbox_uePerson, 0, 0, 1, 1 );
 
-    rc = zond_gemini_select_get_ue_personen( zond->dbase_zond->zond_dbase_work,
-            &arr_ue_personen, errmsg );
-    if ( rc ) ERROR_S
-
-    for ( gint i = 0; i < arr_ue_personen->len; i++ )
+    rc = zond_gemini_select_fill_checkbox_ue_person( zond, checkbox_uePerson,
+            errmsg );
+    if ( rc )
     {
-        gchar* ue_person = NULL;
-        gint ID_entity_ue_person = 0;
-
-        ue_person = g_ptr_array_index( arr_ue_personen, i );
-
-        sond_checkbox_add_entry( SOND_CHECKBOX(checkbox_uePerson), ue_person, 0 );
+        gtk_widget_destroy( gemini );
+        ERROR_S
     }
-    g_ptr_array_unref( arr_ue_personen );
 
     //Leitungsnrn.
     //checkbox erzeugen und ins grid
@@ -2371,25 +2429,29 @@ zond_gemini_select( Projekt* zond, gchar** errmsg )
                      G_CALLBACK(zond_gemini_leitungsnr_entry_toggled), gemini );
 
     //temp-table im Hintergrund erzeugen
-    thread_tkue_table = g_thread_new( "tkue", zond_gemini_create_tkue_table, zond->dbase_zond->zond_dbase_work );
+    rc = zond_gemini_create_tkue_table( zond->dbase_zond->zond_dbase_work, errmsg );
+    if ( rc ) ERROR_S
+
     gtk_widget_show_all( gemini );
 
     gtk_window_resize( GTK_WINDOW(gemini), 250, 200 );
 
     rc = gtk_dialog_run( GTK_DIALOG(gemini) );
 
-    gtk_widget_destroy( gemini );
-
     if ( rc == GTK_RESPONSE_OK )
     {
         gint rc = 0;
-        GArray* arr_tkue_ereignisse = NULL; //ID_entities der Gespräche, wird nach und nach ergänzt
-        gchar* begin = NULL;
-        gchar* end = NULL;
         gchar* sql = NULL;
-        gchar* sql_leitungsnrn = NULL;
         GArray* arr_leitungsnrn = NULL;
-        gchar* errmsg = NULL;
+        sqlite3_stmt* stmt = NULL;
+        DisplayedDocument* dd = NULL;
+        DisplayedDocument* dd_act = NULL;
+        PdfViewer* pdfv = NULL;
+
+        //Grund-SQL-String
+        sql = g_strdup( "SELECT datei_name, page_begin, index_begin, page_end, index_end FROM "
+                "tkue WHERE "
+                "ID_massnahme=-1 " ); //alles erstmal ausschließen...
 
         //leitungs_nr auslesen
         arr_leitungsnrn = sond_checkbox_get_active_IDs( SOND_CHECKBOX(checkbox_leitungsnr) );
@@ -2397,43 +2459,114 @@ zond_gemini_select( Projekt* zond, gchar** errmsg )
         {
             for ( gint i = 0; i < arr_leitungsnrn->len; i++ )
             {
-                gint rc = 0;
-                GArray* arr_ID_objects = NULL;
                 gint ID_entity_massnahme = 0;
+                gchar* text = NULL;
 
                 ID_entity_massnahme = g_array_index( arr_leitungsnrn, gint, i );
-
+                text = g_strdup_printf( "OR ID_massnahme=%i ", ID_entity_massnahme );
+                sql = add_string( sql, text );
             }
+            g_array_unref( arr_leitungsnrn );
         }
 
+        //uePersonen
+        //...
 
-        errmsg = (gchar*) g_thread_join( thread_tkue_table );
-        if ( errmsg )
+        gtk_widget_destroy( gemini );
+
+        sql = add_string( sql, g_strdup( "ORDER BY beginn ASC;" ) );
+
+        //Abfrage in temporärer Tabelle
+        rc = sqlite3_prepare_v2( zond_dbase_get_dbase( zond->dbase_zond->zond_dbase_work ),
+                sql, -1, &stmt, NULL );
+        g_free( sql );
+        if ( rc != SQLITE_OK )
         {
-            errmsg = add_string( g_strdup( "Bei Aufruf zond_gemini_select:\n"
-                    "TEMP TABLE tkue konnte nicht erzeugt werden:\n " ), errmsg );
+            sqlite3_finalize( stmt );
+            if ( errmsg ) *errmsg = add_string( g_strconcat( "Bei Aufruf ",
+                        __func__, ":\nBei Aufruf sqlite3_prepare_v2:\n",
+                       sqlite3_errmsg( zond_dbase_get_dbase( zond->dbase_zond->zond_dbase_work ) ),
+                        NULL ), *errmsg );
+
             return -1;
         }
-            //TKÜ-Ereignisse abfragem
-            //ggf. ordnen
-            //Schleife:
-                //Fundstelle suchen
-                //dd bilden und an vorangegangenes dd hängen
 
-            //viewer öffnen
-            //document anzeigen
-    }
-    else
-    {
-        gpointer res = NULL;
-        res = g_thread_join( thread_tkue_table );
-        if ( errmsg )
+        do
         {
-            *errmsg = add_string( g_strdup( "Bei Aufruf zond_gemini_select:\n"
-                    "TEMP TABLE tkue konnte nicht erzeugt werden:\n " ), res );
-            return -1;
-        }
+            const gchar* datei = NULL;
+            gint page_begin = 0;
+            gint index_begin = 0;
+            gint page_end = 0;
+            gint index_end = 0;
+            DisplayedDocument* dd_new = 0;
+
+            rc = sqlite3_step( stmt );
+            if ( rc != SQLITE_DONE && rc != SQLITE_ROW )
+            {
+                sqlite3_finalize( stmt );
+                if ( errmsg ) *errmsg = add_string( g_strconcat( "Bei Aufruf ",
+                            __func__, ":\nBei Aufruf sqlite3_prepare_v2:\n",
+                           sqlite3_errmsg( zond_dbase_get_dbase( zond->dbase_zond->zond_dbase_work ) ),
+                            NULL ), *errmsg );
+
+                return -1;
+            }
+
+            if ( rc == SQLITE_DONE ) continue;
+
+            datei = (const gchar*) sqlite3_column_text( stmt, 0 );
+            page_begin = atoi( (const gchar*) sqlite3_column_text( stmt, 1 ) );
+            index_begin = atoi( (const gchar*) sqlite3_column_text( stmt, 2 ) );
+            page_end = atoi( (const gchar*) sqlite3_column_text( stmt, 3 ) );
+            index_end = atoi( (const gchar*) sqlite3_column_text( stmt, 4 ) );
+/*
+            if ( dd_act && !g_strcmp0( zond_pdf_document_get_path(
+                    dd_act->zond_pdf_document ), datei ) &&
+                    ((dd_act->anbindung->bis.seite == page_begin &&
+                    dd_act->anbindung->bis.index < index_begin &&
+                    dd_act->anbindung->bis.index + 100 > index_begin) ||
+                    (dd_act->anbindung->bis.seite + 1 == page_begin &&
+                    index_begin < 100)) ) //schließt sich unmittelbar an
+            {
+                dd_act->anbindung->bis.seite = page_end;
+                dd_act->anbindung->bis.index = index_end;
+            }
+            else
+            {*/
+                Anbindung anbindung = { 0 };
+
+                anbindung.von.seite = page_begin;
+                anbindung.von.index = index_begin;
+                anbindung.bis.seite = page_end;
+                anbindung.bis.index = index_end;
+
+                dd_new = document_new_displayed_document( datei, &anbindung, errmsg );
+                if ( !dd_new )
+                {
+                    document_free_displayed_documents( dd );
+                    sqlite3_finalize( stmt );
+                    ERROR_S
+                }
+
+                if ( !dd )
+                {
+                    dd = dd_new;
+                    dd_act = dd_new;
+                }
+                else
+                {
+                    dd_act->next = dd_new;
+                    dd_act = dd_act->next;
+                }
+//            }
+        } while ( rc == SQLITE_ROW );
+
+        sqlite3_finalize( stmt );
+
+        pdfv = viewer_start_pv( zond );
+        viewer_display_document( pdfv, dd, 0, 0 );
     }
+    else gtk_widget_destroy( gemini );
 
     return 0;
 }
