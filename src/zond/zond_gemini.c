@@ -1949,7 +1949,7 @@ zond_gemini_read_gemini( Projekt* zond, gchar** errmsg )
     if ( !zond_pdf_document ) ERROR_S
 
     rc = sqlite3_exec( zond_dbase_get_dbase( zond->dbase_zond->zond_dbase_work ),
-            "DROP TABLE IF EXISTS temp.tkue;", NULL, NULL, errmsg );
+            "DROP TABLE IF EXISTS tkue;", NULL, NULL, errmsg );
     if ( rc != SQLITE_OK ) ERROR_S
 
     rc = zond_dbase_new( ":memory:", TRUE, TRUE, &zond_dbase, errmsg );
@@ -2015,115 +2015,11 @@ zond_gemini_read_gemini( Projekt* zond, gchar** errmsg )
 }
 
 
-void
-zond_gemini_free_fundstelle( Fundstelle* fundstelle )
-{
-    if ( !fundstelle ) return;
-
-    g_free( fundstelle->dateipfad );
-
-    g_free( fundstelle );
-
-    return;
-}
-
-
-static Fundstelle*
-zond_gemini_get_fundstelle( Projekt* zond, gint ID_entity_tkue_ereignis, gchar** errmsg )
-{
-    gint rc = 0;
-    Fundstelle* fundstelle = NULL;
-    GArray* arr_objects = NULL;
-    gchar* pfad = NULL;
-    gchar* page_begin = NULL;
-    gchar* index_begin = NULL;
-    gchar* page_end = NULL;
-    gchar* index_end = NULL;
-    gint ID_entity_fundstelle = 0;
-    gint ID_entity_datei = 0;
-
-    rc = sond_database_get_ID_label_for_entity( zond->dbase_zond->zond_dbase_work, ID_entity_tkue_ereignis, errmsg );
-    if ( rc == -1 ) ERROR_S_VAL( NULL )
-
-    rc = sond_database_label_is_equal_or_parent( zond->dbase_zond->zond_dbase_work,
-            1010, rc, errmsg );
-    if ( rc == -1 ) ERROR_S_VAL( NULL )
-    else if ( rc == 1 ) ERROR_S_MESSAGE_VAL( "Keine TKÜ-Maßnahme", NULL )
-
-    rc = sond_database_get_object_for_subject( zond->dbase_zond->zond_dbase_work,
-            ID_entity_tkue_ereignis, &arr_objects, errmsg, 10010, 836, 10010, 650, -1 );
-    if ( rc == -1 ) ERROR_S_VAL( NULL )
-
-    if ( arr_objects->len == 0 )
-    {
-        g_array_unref( arr_objects );
-        ERROR_S_MESSAGE_VAL( "Kein Objekt gefunden", NULL )
-    }
-
-    ID_entity_fundstelle = g_array_index( arr_objects, gint, 0 );
-
-    g_array_unref( arr_objects );
-
-    //datei zur Fundstelle
-    rc = sond_database_get_object_for_subject( zond->dbase_zond->zond_dbase_work,
-            ID_entity_fundstelle, &arr_objects, errmsg, 10000, 660, -1 );
-    if ( rc == -1 ) ERROR_S_VAL( NULL )
-
-    ID_entity_datei = g_array_index( arr_objects, gint, 0 );
-    g_array_unref( arr_objects );
-
-    rc = sond_database_get_first_property_value_for_subject(
-            zond->dbase_zond->zond_dbase_work, ID_entity_datei, 10100,
-            &pfad, errmsg );
-    if ( rc == -1 ) ERROR_S_VAL( NULL )
-    else if ( rc == 1 ) ERROR_S_MESSAGE_VAL( "Kein Pfad gefunden", NULL )
-
-    rc = sond_database_get_first_property_value_for_subject(
-            zond->dbase_zond->zond_dbase_work, ID_entity_fundstelle, 11052,
-            &page_begin, errmsg );
-    if ( rc == -1 ) ERROR_S_VAL( NULL )
-    else if ( rc == 1 ) ERROR_S_MESSAGE_VAL( "Keine Anfangssseite gefunden", NULL )
-
-    rc = sond_database_get_first_property_value_for_subject(
-            zond->dbase_zond->zond_dbase_work, ID_entity_fundstelle, 11054,
-            &index_begin, errmsg );
-    if ( rc == -1 ) ERROR_S_VAL( NULL )
-    else if ( rc == 1 ) ERROR_S_MESSAGE_VAL( "Keinen Anfangsindex gefunden", NULL )
-
-    rc = sond_database_get_first_property_value_for_subject(
-            zond->dbase_zond->zond_dbase_work, ID_entity_fundstelle, 11055,
-            &page_end, errmsg );
-    if ( rc == -1 ) ERROR_S_VAL( NULL )
-    else if ( rc == 1 ) ERROR_S_MESSAGE_VAL( "Keine Endseite gefunden", NULL )
-
-    rc = sond_database_get_first_property_value_for_subject(
-            zond->dbase_zond->zond_dbase_work, ID_entity_fundstelle, 11057,
-            &index_end, errmsg );
-    if ( rc == -1 ) ERROR_S_VAL( NULL )
-    else if ( rc == 1 ) ERROR_S_MESSAGE_VAL( "Keinen Endindex gefunden", NULL )
-
-    fundstelle = g_new( Fundstelle, 1 );
-    fundstelle->dateipfad = pfad;
-    fundstelle->anbindung.von.seite = atoi( page_begin );
-    fundstelle->anbindung.von.index = atoi( index_begin );
-    fundstelle->anbindung.bis.seite = atoi( page_end );
-    fundstelle->anbindung.bis.index = atoi( index_end );
-
-    g_free( page_begin );
-    g_free( index_begin );
-    g_free( page_end );
-    g_free( index_end );
-
-    return fundstelle;
-}
-
-
 static void
 zond_gemini_leitungsnr_entry_toggled( GtkWidget* checkbox_leitungsnr,
         GtkWidget* entry_leitungsnr, gboolean active, const gchar* label,
         gint ID_entity_leitungsnr, gpointer data )
 {
-    printf( "%s  %i\n", label, active);
 
     return;
 }
@@ -2519,7 +2415,7 @@ zond_gemini_select( Projekt* zond, gchar** errmsg )
             index_begin = atoi( (const gchar*) sqlite3_column_text( stmt, 2 ) );
             page_end = atoi( (const gchar*) sqlite3_column_text( stmt, 3 ) );
             index_end = atoi( (const gchar*) sqlite3_column_text( stmt, 4 ) );
-/*
+
             if ( dd_act && !g_strcmp0( zond_pdf_document_get_path(
                     dd_act->zond_pdf_document ), datei ) &&
                     ((dd_act->anbindung->bis.seite == page_begin &&
@@ -2528,11 +2424,21 @@ zond_gemini_select( Projekt* zond, gchar** errmsg )
                     (dd_act->anbindung->bis.seite + 1 == page_begin &&
                     index_begin < 100)) ) //schließt sich unmittelbar an
             {
+                if ( page_end > dd_act->anbindung->bis.seite )
+                {
+                    ZondPdfDocument* zpd = NULL;
+
+                    zpd = zond_pdf_document_open( zond_pdf_document_get_path(
+                            dd_act->zond_pdf_document ),
+                            dd_act->anbindung->bis.seite + 1, page_end, errmsg );
+                    if ( !zpd ) ERROR_S
+                    g_object_unref( zpd ); //reference schon in dd_act!
+                }
                 dd_act->anbindung->bis.seite = page_end;
                 dd_act->anbindung->bis.index = index_end;
             }
             else
-            {*/
+            {
                 Anbindung anbindung = { 0 };
 
                 anbindung.von.seite = page_begin;
@@ -2558,13 +2464,16 @@ zond_gemini_select( Projekt* zond, gchar** errmsg )
                     dd_act->next = dd_new;
                     dd_act = dd_act->next;
                 }
-//            }
+            }
         } while ( rc == SQLITE_ROW );
 
         sqlite3_finalize( stmt );
 
-        pdfv = viewer_start_pv( zond );
-        viewer_display_document( pdfv, dd, 0, 0 );
+        if ( dd )
+        {
+            pdfv = viewer_start_pv( zond );
+            viewer_display_document( pdfv, dd, 0, 0 );
+        }
     }
     else gtk_widget_destroy( gemini );
 

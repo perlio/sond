@@ -7,15 +7,7 @@ typedef char gchar;
 typedef int gint;
 typedef struct _Projekt Projekt;
 
-typedef struct _Fundstelle
-{
-    gchar* dateipfad;
-    Anbindung anbindung;
-} Fundstelle;
-
 gint zond_gemini_read_gemini( Projekt*, gchar** );
-
-void zond_gemini_free_fundstelle( Fundstelle* );
 
 gint zond_gemini_select( Projekt*, gchar** );
 

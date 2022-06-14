@@ -297,7 +297,10 @@ zond_pdf_document_page_init( ZondPdfDocument* self,
 
     fz_try( ctx ) pdf_document_page->rect = pdf_bound_page( ctx, pdf_document_page->page );
     fz_catch( ctx ) ERROR_MUPDF( "pdf_bound_page" )
-
+if ( index == 32478 )
+{
+    printf("%f  %f\n", pdf_document_page->rect.y0, pdf_document_page->rect.y1);
+}
     pdf_document_page->rotate = zond_pdf_document_page_get_rotate( pdf_document_page, errmsg );
     if ( pdf_document_page->rotate == -1 ) ERROR_S
 
@@ -340,7 +343,7 @@ zond_pdf_document_init_pages( ZondPdfDocument* self, gint von, gint bis, gchar**
         {
             g_free( pdf_document_page );
             ((priv->pages)->pdata)[i] = NULL;
-            ERROR_SOND( "zond_pdf_document_page_init" )
+            ERROR_S
         }
     }
 
