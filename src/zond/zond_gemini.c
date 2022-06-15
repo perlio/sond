@@ -2339,6 +2339,7 @@ zond_gemini_select( Projekt* zond, gchar** errmsg )
         gint rc = 0;
         gchar* sql = NULL;
         GArray* arr_leitungsnrn = NULL;
+        GArray* arr_ue_personen = NULL;
         sqlite3_stmt* stmt = NULL;
         DisplayedDocument* dd = NULL;
         DisplayedDocument* dd_act = NULL;
@@ -2366,7 +2367,20 @@ zond_gemini_select( Projekt* zond, gchar** errmsg )
         }
 
         //uePersonen
-        //...
+        arr_ue_personen = sond_checkbox_get_active_IDs( SOND_CHECKBOX(checkbox_uePerson ) );
+        if ( arr_ue_personen )
+        {
+            for ( gint i = 0; i < arr_ue_personen->len; i++ )
+            {
+                gint ID_entity_ue_person = 0;
+                gchar* text = NULL;
+
+                ID_entity_ue_person = g_array_index( arr_ue_personen, gint, i );
+                text = g_strdup_printf( "OR ID_uePerson=%i ", ID_entity_ue_person );
+                sql = add_string( sql, text );
+            }
+            g_array_unref( arr_ue_personen );
+        }
 
         gtk_widget_destroy( gemini );
 
