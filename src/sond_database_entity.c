@@ -36,22 +36,9 @@ G_DEFINE_TYPE_WITH_PRIVATE(SondDatabaseEntity, sond_database_entity, GTK_TYPE_BO
 
 
 static void
-sond_database_entity_finalize( GObject* self )
-{
-    SondDatabaseEntityPrivate* priv = sond_database_entity_get_instance_private( SOND_DATABASE_ENTITY(self) );
-
-    // ...
-
-    G_OBJECT_CLASS(sond_database_entity_parent_class)->finalize( self );
-
-    return;
-}
-
-
-static void
 sond_database_entity_class_init( SondDatabaseEntityClass* klass )
 {
-    GObjectClass *object_class = G_OBJECT_CLASS(klass);
+//    GObjectClass *object_class = G_OBJECT_CLASS(klass);
 
 //    object_class->finalize = zond_dbase_finalize;
 

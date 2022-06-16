@@ -410,7 +410,7 @@ cb_menu_datei_neu_activate( GtkMenuItem* item, gpointer user_data )
     if ( rc ) return;
 
     gchar* abs_path = filename_speichern( GTK_WINDOW(zond->app_window),
-            "Projekt anlegen" );
+            "Projekt anlegen", ".ZND" );
     if ( !abs_path ) return;
 
     rc = project_oeffnen( zond, abs_path, TRUE, &errmsg );

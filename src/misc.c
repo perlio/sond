@@ -199,7 +199,7 @@ string_to_guint( const gchar* string, guint* zahl )
 
 GSList*
 choose_files( const GtkWidget* window, const gchar* path, const gchar* title_text, gchar* accept_text,
-        gint action, gboolean multiple )
+        gint action, const gchar* ext, gboolean multiple )
 {
     GtkWidget *dialog = NULL;
     gint rc = 0;
@@ -218,9 +218,9 @@ choose_files( const GtkWidget* window, const gchar* path, const gchar* title_tex
     gtk_file_chooser_set_select_multiple( GTK_FILE_CHOOSER(dialog), multiple );
     gtk_file_chooser_set_do_overwrite_confirmation( GTK_FILE_CHOOSER(dialog),
             TRUE );
-    if ( action == GTK_FILE_CHOOSER_ACTION_SAVE )
+    if ( action == GTK_FILE_CHOOSER_ACTION_SAVE && ext )
             gtk_file_chooser_set_current_name( GTK_FILE_CHOOSER(dialog),
-            ".ZND" );
+            ext );
 
     rc = gtk_dialog_run( GTK_DIALOG(dialog) );
     if ( rc == GTK_RESPONSE_ACCEPT ) list = gtk_file_chooser_get_uris( GTK_FILE_CHOOSER(dialog) );
@@ -233,10 +233,10 @@ choose_files( const GtkWidget* window, const gchar* path, const gchar* title_tex
 
 
 gchar*
-filename_speichern( GtkWindow* window, const gchar* titel )
+filename_speichern( GtkWindow* window, const gchar* titel, const gchar* ext )
 {
     GSList* list = choose_files( GTK_WIDGET(window), NULL, titel, "Speichern",
-            GTK_FILE_CHOOSER_ACTION_SAVE, FALSE );
+            GTK_FILE_CHOOSER_ACTION_SAVE, ext, FALSE );
 
     if ( !list ) return NULL;
 
@@ -255,7 +255,7 @@ gchar*
 filename_oeffnen( GtkWindow* window )
 {
     GSList* list = choose_files( GTK_WIDGET(window), NULL, "Datei auswählen", "Öffnen",
-            GTK_FILE_CHOOSER_ACTION_OPEN, FALSE );
+            GTK_FILE_CHOOSER_ACTION_OPEN, NULL, FALSE );
 
     if ( !list ) return NULL;
 

@@ -316,7 +316,7 @@ cb_menu_datei_export_activate( GtkMenuItem*item, gpointer user_data )
 {
     Projekt* zond = (Projekt*) user_data;
 
-    gchar* filename = filename_speichern( GTK_WINDOW(zond->app_window), "Datei wählen" );
+    gchar* filename = filename_speichern( GTK_WINDOW(zond->app_window), "Datei wählen", ".odt" );
     if ( !filename ) return;
 
     GError* error = NULL;
