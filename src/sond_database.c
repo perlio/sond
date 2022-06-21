@@ -1604,14 +1604,6 @@ sond_database_get_subject_and_first_property_value_for_labels( gpointer database
     }
     else //mysql
     {
-        gint rc = 0;
-        MYSQL* con = NULL;
-        MYSQL_RES* mysql_res = NULL;
-        MYSQL_ROW row = NULL;
-        gchar* sql_mariadb = NULL;
-
-        con = (MYSQL*) database;
-
     }
 
     return 0;

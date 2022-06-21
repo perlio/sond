@@ -32,24 +32,8 @@ G_DEFINE_TYPE_WITH_PRIVATE(SondDatabaseProperty, sond_database_property, SOND_TY
 
 
 static void
-sond_database_property_finalize( GObject* self )
-{
-    SondDatabasePropertyPrivate* priv = sond_database_property_get_instance_private( SOND_DATABASE_PROPERTY(self) );
-
-    // ...
-
-    G_OBJECT_CLASS(sond_database_property_parent_class)->finalize( self );
-
-    return;
-}
-
-
-static void
 sond_database_property_class_init( SondDatabasePropertyClass* klass )
 {
-    GObjectClass *object_class = G_OBJECT_CLASS(klass);
-
-//    object_class->finalize = zond_dbase_finalize;
 
     return;
 }

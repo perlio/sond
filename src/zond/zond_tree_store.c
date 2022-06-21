@@ -1176,11 +1176,14 @@ zond_tree_store_drag_data_get (GtkTreeDragSource *drag_source,
     */
   return FALSE;
 }
+
+
+/*
 static void
 copy_node_data (ZondTreeStore *tree_store,
                 GtkTreeIter  *src_iter,
                 GtkTreeIter  *dest_iter)
-{/*
+{
   GtkTreeDataList *dl = G_NODE (src_iter->user_data)->data;
   GtkTreeDataList *copy_head = NULL;
   GtkTreeDataList *copy_prev = NULL;
@@ -1203,13 +1206,15 @@ copy_node_data (ZondTreeStore *tree_store,
   path = zond_tree_store_get_path (GTK_TREE_MODEL (tree_store), dest_iter);
   gtk_tree_model_row_changed (GTK_TREE_MODEL (tree_store), path, dest_iter);
   gtk_tree_path_free (path);
-  */
+
 }
+*/
+/*
 static void
 recursive_node_copy (ZondTreeStore *tree_store,
                      GtkTreeIter  *src_iter,
                      GtkTreeIter  *dest_iter)
-{ /*
+{
   GtkTreeIter child;
   GtkTreeModel *model;
   model = GTK_TREE_MODEL (tree_store);
@@ -1232,8 +1237,9 @@ recursive_node_copy (ZondTreeStore *tree_store,
         }
       while (zond_tree_store_iter_next (model, &child));
     }
-    */
+
 }
+*/
 
 static gboolean
 zond_tree_store_drag_data_received (GtkTreeDragDest   *drag_dest,

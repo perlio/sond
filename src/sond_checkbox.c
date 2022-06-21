@@ -31,18 +31,6 @@ G_DEFINE_TYPE_WITH_PRIVATE(SondCheckbox, sond_checkbox, GTK_TYPE_FRAME)
 
 
 static void
-sond_checkbox_finalize( GObject* self )
-{
-//    SondCheckboxPrivate* priv = sond_checkbox_get_instance_private( SOND_CHECKBOX(self) );
-
-    //chain-up
-//    G_OBJECT_CLASS(sond_checkbox_parent_class)->finalize( self );
-
-    return;
-}
-
-
-static void
 sond_checkbox_class_init( SondCheckboxClass* klass )
 {
 //    GObjectClass *object_class = G_OBJECT_CLASS(klass);

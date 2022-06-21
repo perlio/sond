@@ -35,24 +35,8 @@ G_DEFINE_TYPE_WITH_PRIVATE(SondDatabaseNode, sond_database_node, GTK_TYPE_BOX )
 
 
 static void
-sond_database_node_finalize( GObject* self )
-{
-    SondDatabaseNodePrivate* priv = sond_database_node_get_instance_private( SOND_DATABASE_NODE(self) );
-
-    // ...
-
-    G_OBJECT_CLASS(sond_database_node_parent_class)->finalize( self );
-
-    return;
-}
-
-
-static void
 sond_database_node_class_init( SondDatabaseNodeClass* klass )
 {
-    GObjectClass *object_class = G_OBJECT_CLASS(klass);
-
-//    object_class->finalize = sond_database_node_finalize;
 
     return;
 }
