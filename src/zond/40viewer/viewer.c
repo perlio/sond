@@ -2249,7 +2249,6 @@ viewer_cb_draw_page_for_printing( GtkPrintOperation* op, GtkPrintContext* contex
     viewer_thread_render( pdfv, page_nr );
     do //warten, bis display_list erzeugt worden ist
     {
-        printf("%i\n", page_nr);
         zond_pdf_document_mutex_lock( viewer_page->pdf_document_page->document );
         rendered = (viewer_page->pdf_document_page->display_list != NULL);
         zond_pdf_document_mutex_unlock( viewer_page->pdf_document_page->document );

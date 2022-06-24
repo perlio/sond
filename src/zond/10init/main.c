@@ -91,7 +91,7 @@ init_icons( Projekt* zond )
 
 //    zond->icon[ICON_NOTHING] = { "dialog-error", "Nix" };
     set_icon( &zond->icon[ICON_NOTHING], "dialog-error", "Nix" );
-    set_icon( &zond->icon[ICON_NORMAL], "emblem-new", "Punkt" );
+    set_icon( &zond->icon[ICON_NORMAL], "media-record", "Punkt" );
     set_icon( &zond->icon[ICON_ORDNER], "folder", "Ordner" );
     set_icon( &zond->icon[ICON_DATEI], "document-open", "Datei" );
     set_icon( &zond->icon[ICON_PDF], "pdf", "PDF" );

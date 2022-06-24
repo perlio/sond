@@ -445,6 +445,21 @@
 			<Option target="Sojus (Release)" />
 			<Option target="Sojus (Testing)" />
 		</Unit>
+		<Unit filename="src/sond_template_object.c">
+			<Option compilerVar="CC" />
+			<Option compile="0" />
+			<Option link="0" />
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
+		<Unit filename="src/sond_template_object.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Sojus (Release)" />
+			<Option target="Sojus (Testing)" />
+		</Unit>
 		<Unit filename="src/sond_treeview.c">
 			<Option compilerVar="CC" />
 			<Option target="zond (Release)" />

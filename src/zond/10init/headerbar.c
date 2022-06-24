@@ -1089,7 +1089,7 @@ init_menu( Projekt* zond )
     GtkWidget* item_gemini_read = gtk_menu_item_new_with_label( "Gemini-Ausdruck einlesen" );
     g_signal_connect( item_gemini_read, "activate", G_CALLBACK(cb_menu_gemini_einlesen), (gpointer) zond );
 
-    GtkWidget* item_gemini_select = gtk_menu_item_new_with_label( "Gemini - Auswahl" );
+    GtkWidget* item_gemini_select = gtk_menu_item_new_with_label( "Gemini-Protokolle anzeigen" );
     g_signal_connect( item_gemini_select, "activate", G_CALLBACK(cb_menu_gemini_select), (gpointer) zond );
 
     //Test

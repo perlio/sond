@@ -2015,16 +2015,6 @@ zond_gemini_read_gemini( Projekt* zond, gchar** errmsg )
 }
 
 
-static void
-zond_gemini_leitungsnr_entry_toggled( GtkWidget* checkbox_leitungsnr,
-        GtkWidget* entry_leitungsnr, gboolean active, const gchar* label,
-        gint ID_entity_leitungsnr, gpointer data )
-{
-
-    return;
-}
-
-
 static gint
 zond_gemini_select_fill_checkbox_ue_person( Projekt* zond, GtkWidget* scb,
         gchar** errmsg )
@@ -2107,7 +2097,7 @@ zond_gemini_select_fill_checkbox_ue_person( Projekt* zond, GtkWidget* scb,
 
 
 static gint
-zond_gemini_create_tkue_table( ZondDBase* zond_dbase, gchar** errmsg )
+zond_gemini_create_tkue_table( Projekt* zond, gchar** errmsg )
 {
     gint rc = 0;
     const gchar* sql =
@@ -2240,7 +2230,7 @@ zond_gemini_create_tkue_table( ZondDBase* zond_dbase, gchar** errmsg )
                 "ORDER BY beginn ASC "
                 ";";
 
-    rc = sqlite3_exec( zond_dbase_get_dbase( zond_dbase ), sql, NULL, NULL, errmsg );
+    rc = sqlite3_exec( zond_dbase_get_dbase( zond->dbase_zond->zond_dbase_work ), sql, NULL, NULL, errmsg );
     if ( rc != SQLITE_OK )
     {
         gchar* text = NULL;
@@ -2253,6 +2243,8 @@ zond_gemini_create_tkue_table( ZondDBase* zond_dbase, gchar** errmsg )
 
         return -1;
     }
+
+    project_set_changed( (gpointer) zond );
 
     return 0;
 }
@@ -2269,7 +2261,9 @@ zond_gemini_select( Projekt* zond, gchar** errmsg )
     GtkWidget* checkbox_leitungsnr = NULL;
     GPtrArray* arr_leitungs_nrn = NULL;
     GArray* arr_ID_entity_massnahmen = NULL;
-    GThread* thread_tkue_table = NULL;
+    GtkWidget* box_entries = NULL;
+    GtkWidget* entry_von = NULL;
+    GtkWidget* entry_bis = NULL;
 
     gemini = gtk_dialog_new_with_buttons( "Gemini", GTK_WINDOW(zond->app_window),
             GTK_DIALOG_DESTROY_WITH_PARENT | GTK_DIALOG_MODAL, "Ok",
@@ -2298,6 +2292,18 @@ zond_gemini_select( Projekt* zond, gchar** errmsg )
     checkbox_leitungsnr = sond_checkbox_new( "Leitungs-Nr." );
     gtk_grid_attach( GTK_GRID(grid), checkbox_leitungsnr, 1, 0, 1, 1 );
 
+    box_entries = gtk_box_new( GTK_ORIENTATION_VERTICAL, 0 );
+    gtk_widget_set_valign( box_entries, GTK_ALIGN_START );
+    gtk_grid_attach( GTK_GRID(grid), box_entries, 2, 0, 1, 1 );
+
+    entry_von = gtk_entry_new( );
+    gtk_entry_set_placeholder_text( GTK_ENTRY(entry_von), "Beginn" );
+    gtk_box_pack_start( GTK_BOX(box_entries), entry_von, FALSE, FALSE, 0 );
+
+    entry_bis = gtk_entry_new( );
+    gtk_entry_set_placeholder_text( GTK_ENTRY(entry_bis), "Ende" );
+    gtk_box_pack_start( GTK_BOX(box_entries), entry_bis, FALSE, FALSE, 0 );
+
     //Leitungsnrn. sammeln
     rc = sond_database_get_subject_and_first_property_value_for_labels( zond->dbase_zond->zond_dbase_work,
             1000, 11059, &arr_ID_entity_massnahmen, &arr_leitungs_nrn, errmsg );
@@ -2320,17 +2326,17 @@ zond_gemini_select( Projekt* zond, gchar** errmsg )
 /*
     g_signal_connect( checkbox_leitungsnr, "alle-toggled",
                      G_CALLBACK(zond_gemini_leitungsnr_alle_toggled), gemini );
-*/
+
     g_signal_connect( checkbox_leitungsnr, "entry-toggled",
                      G_CALLBACK(zond_gemini_leitungsnr_entry_toggled), gemini );
-
+*/
     //temp-table im Hintergrund erzeugen
-    rc = zond_gemini_create_tkue_table( zond->dbase_zond->zond_dbase_work, errmsg );
+    rc = zond_gemini_create_tkue_table( zond, errmsg );
     if ( rc ) ERROR_S
 
-    gtk_widget_show_all( gemini );
+    gtk_widget_grab_focus( gtk_dialog_get_widget_for_response( GTK_DIALOG(gemini), GTK_RESPONSE_CANCEL ) );
 
-    gtk_window_resize( GTK_WINDOW(gemini), 250, 200 );
+    gtk_widget_show_all( gemini );
 
     rc = gtk_dialog_run( GTK_DIALOG(gemini) );
 
@@ -2344,9 +2350,11 @@ zond_gemini_select( Projekt* zond, gchar** errmsg )
         DisplayedDocument* dd = NULL;
         DisplayedDocument* dd_act = NULL;
         PdfViewer* pdfv = NULL;
+        const gchar* beginn = NULL;
+        const gchar* ende = NULL;
 
         //Grund-SQL-String
-        sql = g_strdup( "SELECT datei_name, page_begin, index_begin, page_end, index_end FROM "
+        sql = g_strdup( "SELECT datei_name, page_begin, index_begin, page_end, index_end, beginn FROM "
                 "tkue WHERE "
                 "ID_massnahme=-1 " ); //alles erstmal ausschließen...
 
@@ -2380,6 +2388,26 @@ zond_gemini_select( Projekt* zond, gchar** errmsg )
                 sql = add_string( sql, text );
             }
             g_array_unref( arr_ue_personen );
+        }
+
+        //Anfang und Ende
+        beginn = gtk_entry_get_text( GTK_ENTRY(entry_von) );
+        ende = gtk_entry_get_text( GTK_ENTRY(entry_bis) );
+
+        if ( g_strcmp0( beginn, "" ) )
+        {
+            gchar* text = NULL;
+
+            text = g_strdup_printf( "AND beginn>=%s ", beginn );
+            sql = add_string( sql, text );
+        }
+
+        if ( g_strcmp0( ende, "" ) )
+        {
+            gchar* text = NULL;
+
+            text = g_strdup_printf( "AND beginn<=%s ", ende );
+            sql = add_string( sql, text );
         }
 
         gtk_widget_destroy( gemini );
@@ -2488,6 +2516,7 @@ zond_gemini_select( Projekt* zond, gchar** errmsg )
             pdfv = viewer_start_pv( zond );
             viewer_display_document( pdfv, dd, 0, 0 );
         }
+        else display_message( zond->app_window, "Keine Treffer", NULL );
     }
     else gtk_widget_destroy( gemini );
 
