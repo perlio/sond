@@ -9,6 +9,7 @@ typedef int gboolean;
 typedef struct _Pdf_Viewer PdfViewer;
 
 
+
 gboolean ziele_1_gleich_2( const Anbindung, const Anbindung );
 
 gint ziele_abfragen_anker_rek( Projekt*, gint, Anbindung, gboolean*, gchar** );

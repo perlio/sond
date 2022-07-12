@@ -1105,10 +1105,12 @@ sojus_adressen_cb_fenster( GtkButton* button, gpointer data )
     }
 
     outer_box = gtk_box_new( GTK_ORIENTATION_VERTICAL, 0 );
-    gtk_widget_set_valign( outer_box, GTK_ALIGN_BASELINE );
+//    gtk_widget_set_valign( outer_box, GTK_ALIGN_BASELINE );
     gtk_container_add( GTK_CONTAINER(adresse->adresse), outer_box );
+
     adresse->swindow = gtk_scrolled_window_new( NULL, NULL );
     gtk_box_pack_start( GTK_BOX(outer_box), adresse->swindow, TRUE, TRUE, 0 );
+
     box_buttons = gtk_box_new( GTK_ORIENTATION_HORIZONTAL, 2 );
     gtk_widget_set_halign( box_buttons, GTK_ALIGN_END );
     gtk_box_pack_start( GTK_BOX(outer_box), box_buttons, FALSE, FALSE, 0 );
@@ -1116,10 +1118,10 @@ sojus_adressen_cb_fenster( GtkButton* button, gpointer data )
     adresse->button_speichern = gtk_button_new_with_label( "Speichern" );
     button_ok = gtk_button_new_with_label( "ok" );
     button_abbrechen = gtk_button_new_with_label( "Abbrechen" );
-    gtk_box_pack_start( GTK_BOX(box_buttons), adresse->button_andere_adresse, FALSE, FALSE, 0 );
-    gtk_box_pack_start( GTK_BOX(box_buttons), adresse->button_speichern, FALSE, FALSE, 0 );
-    gtk_box_pack_start( GTK_BOX(box_buttons), button_ok, FALSE, FALSE, 0 );
-    gtk_box_pack_start( GTK_BOX(box_buttons), button_abbrechen, FALSE, FALSE, 0 );
+    gtk_box_pack_start( GTK_BOX(box_buttons), adresse->button_andere_adresse, TRUE, FALSE, 0 );
+    gtk_box_pack_start( GTK_BOX(box_buttons), adresse->button_speichern, TRUE, FALSE, 0 );
+    gtk_box_pack_start( GTK_BOX(box_buttons), button_ok, TRUE, FALSE, 0 );
+    gtk_box_pack_start( GTK_BOX(box_buttons), button_abbrechen, TRUE, FALSE, 0 );
 
     //entry-completion fettig machen
     sojus_adressen_create_entry_completion( adresse->sojus, adresse->entry_adressnr );

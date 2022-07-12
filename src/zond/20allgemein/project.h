@@ -12,21 +12,16 @@ typedef void* gpointer;
 typedef int gint;
 typedef char gchar;
 
-typedef struct _DBase_Zond
-{
-    ZondDBase* zond_dbase_store;
-    ZondDBase* zond_dbase_work;
-    gchar* project_name;
-    gchar* project_dir;
-    gboolean changed;
-} DBaseZond;
 
+void project_set_changed( gpointer );
 
 void project_reset_changed( Projekt* );
 
 void projekt_set_widgets_sensitiv( Projekt*, gboolean );
 
 gint projekt_schliessen( Projekt*, gchar** );
+
+gint project_speichern( Projekt*, gchar** );
 
 void cb_menu_datei_speichern_activate( GtkMenuItem*, gpointer );
 

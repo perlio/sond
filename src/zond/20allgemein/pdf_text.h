@@ -7,6 +7,7 @@ typedef struct _GArray GArray;
 typedef struct _Info_Window InfoWindow;
 typedef struct _GtkWindow GtkWindow;
 typedef struct fz_context fz_context;
+typedef struct _Pdf_Document_Page PdfDocumentPage;
 
 typedef int gint;
 typedef char gchar;

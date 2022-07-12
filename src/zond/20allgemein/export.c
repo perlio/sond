@@ -24,7 +24,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "../../misc.h"
 
-#include "../enums.h"
 #include "../global_types.h"
 #include "../zond_dbase.h"
 
@@ -115,17 +114,17 @@ export_selektierte_punkte( Projekt* zond, Baum baum, GFileOutputStream* stream,
 {
     GList* selected = NULL;
     GList* list = NULL;
+    GtkTreeModel* model = NULL;
 
-    selected = gtk_tree_selection_get_selected_rows(
-            zond->selection[baum], NULL );
+    model = gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) );
+
+    selected = gtk_tree_selection_get_selected_rows( zond->selection[baum], NULL );
     if( !selected )
     {
         if ( errmsg ) *errmsg = g_strdup( "Keine Punkte ausgewählt" );
 
         return -1;
     }
-
-    GtkTreeModel* model = gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) );
 
     g_object_set_data( G_OBJECT(model), "stream", (gpointer) stream );
     g_object_set_data( G_OBJECT(model), "errmsg", (gpointer) errmsg );
@@ -268,9 +267,9 @@ export_html( Projekt* zond, GFileOutputStream* stream, gint umfang, gchar** errm
     GError* error = NULL;
     gint rc = 0;
 
-    if ( zond->baum_active == KEIN_BAUM )
+    if ( zond->baum_prev == KEIN_BAUM )
     {
-        if ( errmsg ) *errmsg = g_strdup( "Kein Baum aufgewählt" );
+        if ( errmsg ) *errmsg = g_strdup( "Kein Baum ausgewählt" );
 
         return -1;
     }
@@ -279,7 +278,7 @@ export_html( Projekt* zond, GFileOutputStream* stream, gint umfang, gchar** errm
             "<html>"
             "<head><title>Export</title></head>"
             "<body>"
-            "<h1>Projekt: ", zond->dbase_zond->project_name, "\nBaum: ", (zond->baum_active = BAUM_INHALT) ? "Inhalt" : "Auswertung",
+            "<h1>Projekt: ", zond->dbase_zond->project_name, "\nBaum: ", (zond->baum_prev == BAUM_INHALT) ? "Inhalt" : "Auswertung",
             "</h1>", NULL );
 
     //Hier htm-Datei in stream schreiben
@@ -294,35 +293,19 @@ export_html( Projekt* zond, GFileOutputStream* stream, gint umfang, gchar** errm
         return -1;
     }
 
-    gchar* errmsg_ii = NULL;
-
-    gchar* funktion = NULL;
-
     switch ( umfang )
     {
         case 1:
-            rc = export_alles( zond, zond->baum_active, stream, &errmsg_ii );
-            funktion = "export_alles";
+            rc = export_alles( zond, zond->baum_prev, stream, errmsg );
             break;
         case 2:
-            rc = export_selektierte_zweige( zond, zond->baum_active, stream, &errmsg_ii );
-            funktion = "export_selektierte_zweige";
+            rc = export_selektierte_zweige( zond, zond->baum_prev, stream, errmsg );
             break;
         case 3:
-            rc = export_selektierte_punkte( zond, zond->baum_active, stream, &errmsg_ii );
-            funktion = "export_selektierte_punkte";
+            rc = export_selektierte_punkte( zond, zond->baum_prev, stream, errmsg );
             break;
-        default: funktion = "";
     }
-
-    if ( rc )
-    {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf ", funktion, ":\n",
-                errmsg_ii, NULL );
-        g_free( errmsg_ii );
-
-        return -1;
-    }
+    if ( rc ) ERROR_S
 
     return 0;
 }
@@ -333,7 +316,7 @@ cb_menu_datei_export_activate( GtkMenuItem*item, gpointer user_data )
 {
     Projekt* zond = (Projekt*) user_data;
 
-    gchar* filename = filename_speichern( GTK_WINDOW(zond->app_window), "Datei wählen" );
+    gchar* filename = filename_speichern( GTK_WINDOW(zond->app_window), "Datei wählen", ".odt" );
     if ( !filename ) return;
 
     GError* error = NULL;

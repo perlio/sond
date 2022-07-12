@@ -28,7 +28,7 @@ cb_button_dokument_dir( GtkButton* button, gpointer data )
 
     path = g_settings_get_string( sojus->settings, "dokument-dir" );
 
-    list = choose_files( sojus->app_window, path, "Dokumentenverzeichnis auswählen", "Ok", GTK_FILE_CHOOSER_ACTION_CREATE_FOLDER, FALSE );
+    list = choose_files( sojus->app_window, path, "Dokumentenverzeichnis auswählen", "Ok", GTK_FILE_CHOOSER_ACTION_CREATE_FOLDER, NULL, FALSE );
     if ( list )
     {
         gchar* uri_unescaped = g_uri_unescape_string( list->data, NULL );

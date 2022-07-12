@@ -61,18 +61,49 @@ info_window_scroll( InfoWindow* info_window )
 
 
 void
+info_window_set_progress_bar_fraction( InfoWindow* info_window, gdouble fraction )
+{
+    if ( !GTK_IS_PROGRESS_BAR(info_window->last_inserted_widget) ) return;
+
+    gtk_progress_bar_set_fraction( GTK_PROGRESS_BAR(info_window->last_inserted_widget), fraction );
+
+//    while ( gtk_events_pending( ) ) gtk_main_iteration( );
+gtk_main_iteration( );
+    return;
+}
+
+
+static void
+info_window_show_widget( InfoWindow* info_window )
+{
+    gtk_box_pack_start( GTK_BOX(info_window->content), info_window->last_inserted_widget, FALSE, FALSE, 0 );
+    gtk_widget_show_all( info_window->last_inserted_widget );
+
+//    while ( gtk_events_pending( ) ) gtk_main_iteration( );
+gtk_main_iteration( );
+    info_window_scroll( info_window );
+
+    return;
+}
+
+void
+info_window_set_progress_bar( InfoWindow* info_window )
+{
+    info_window->last_inserted_widget = gtk_progress_bar_new( );
+
+    info_window_show_widget( info_window );
+
+    return;
+}
+
+
+void
 info_window_set_message( InfoWindow* info_window, const gchar* message )
 {
-    GtkWidget* label = NULL;
+    info_window->last_inserted_widget = gtk_label_new( message );
+    gtk_widget_set_halign( info_window->last_inserted_widget, GTK_ALIGN_START );
 
-    label = gtk_label_new( message );
-    gtk_widget_set_halign( label, GTK_ALIGN_START );
-    gtk_box_pack_start( GTK_BOX(info_window->content), label, FALSE, FALSE, 0 );
-    gtk_widget_show_all( label );
-
-    while ( gtk_events_pending( ) ) gtk_main_iteration( );
-
-    info_window_scroll( info_window );
+    info_window_show_widget( info_window );
 
     return;
 }

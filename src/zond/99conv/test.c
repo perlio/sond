@@ -5,13 +5,48 @@
 
 #include "../global_types.h"
 #include "../zond_pdf_document.h"
-#include "../zond_database.h"
 #include "../zond_tree_store.h"
 #include "../../sond_treeview.h"
 #include "../../misc.h"
+#include "../../sond_database_node.h"
+#include "../../sond_database_entity.h"
+#include "../zond_gemini.h"
 
 #include "general.h"
 #include "pdf.h"
+#include "../20allgemein/pdf_text.h"
+
+
+gint
+test( Projekt* zond, gchar** errmsg )
+{
+    gint rc = 0;
+    gchar* text = NULL;
+    gint ID_entity = 0;
+    GtkWidget* window = NULL;
+    GtkWidget* swindow = NULL;
+    GtkWidget* sdn = NULL;
+
+    rc = abfrage_frage( zond->app_window, "ID_entity eingeben", NULL, &text );
+    if ( rc != GTK_RESPONSE_YES ) return 0;
+
+    ID_entity = atoi( text );
+
+    window = gtk_window_new( GTK_WINDOW_TOPLEVEL );
+    swindow = gtk_scrolled_window_new( NULL, NULL );
+
+    sdn = sond_database_node_load_new( zond->dbase_zond->zond_dbase_work, ID_entity, errmsg );
+    if ( !sdn ) ERROR_S
+
+    gtk_container_add( GTK_CONTAINER(swindow), sdn );
+    gtk_container_add( GTK_CONTAINER(window), swindow );
+
+    gtk_widget_show_all( window );
+
+    gtk_window_resize(GTK_WINDOW(window), 500, 300 );
+
+    return 0;
+}
 
 
 /*
@@ -233,40 +268,3 @@ pdf_print_content_stream( fz_context* ctx, pdf_obj* page_ref, gchar** errmsg )
 }
 
 */
-gint
-test( Projekt* zond, gchar** errmsg )
-{
-    ZondPdfDocument* zond_pdf_document = NULL;
-
-    zond_pdf_document = zond_pdf_document_open( "Kelmis.pdf", 0, 20, errmsg );
-
-    for ( gint i = 0; i < 20; i++ )
-    {
-        gint rc = 0;
-        PdfDocumentPage* pdf_document_page = NULL;
-
-        pdf_document_page = zond_pdf_document_get_pdf_document_page( zond_pdf_document, i );
-
-        rc = pdf_text_render_stext_page_direct( zond_pdf_document_get_ctx( zond_pdf_document ), pdf_document_page, errmsg );
-        if ( rc ) ERROR_S
-
-        for ( fz_stext_block* block = pdf_document_page->stext_page->first_block; block;
-        block = block->next)
-        {
-            if (block->type != FZ_STEXT_BLOCK_TEXT) continue;
-
-            for ( fz_stext_line* line = block->u.t.first_line; line; line = line->next)
-            {
-                for ( fz_stext_char* stext_char = line->first_char; stext_char; stext_char = stext_char->next )
-                {
-                    printf( "%c", stext_char->c );
-                }
-                printf( "<line>\n" );
-            }
-            printf( "\n<block>\n" );
-        }
-    }
-
-    return 0;
-}
-

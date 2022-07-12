@@ -39,7 +39,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
 
-static void
+void
 project_set_changed( gpointer user_data )
 {
     Projekt* zond = (Projekt*) user_data;
@@ -72,42 +72,9 @@ projekt_set_widgets_sensitiv( Projekt* zond, gboolean active )
     gtk_widget_set_sensitive( GTK_WIDGET(zond->menu.struktur), active );
     gtk_widget_set_sensitive( GTK_WIDGET(zond->menu.ansicht), active );
     gtk_widget_set_sensitive( GTK_WIDGET(zond->fs_button), active );
-//    gtk_widget_set_sensitive( GTK_WIDGET(zond->menu.extras), TRUE );
+    gtk_widget_set_sensitive( GTK_WIDGET(zond->menu.extras), active );
 
     return;
-}
-
-
-static gint
-project_backup( sqlite3* db_orig, sqlite3* db_dest, gchar** errmsg )
-{
-    gint rc = 0;
-
-    //Datenbank öffnen
-    sqlite3_backup* backup = NULL;
-    backup = sqlite3_backup_init( db_dest, "main", db_orig, "main" );
-
-    if ( !backup )
-    {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_backup_init\nresult code: ",
-                sqlite3_errstr( sqlite3_errcode( db_dest ) ), "\n",
-                sqlite3_errmsg( db_dest ), NULL );
-
-        return -1;
-    }
-    rc = sqlite3_backup_step( backup, -1 );
-    sqlite3_backup_finish( backup );
-    if ( rc != SQLITE_DONE )
-    {
-        if ( errmsg && rc == SQLITE_NOTADB ) *errmsg = g_strdup( "Datei ist "
-                "keine SQLITE-Datenbank" );
-        else if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_backup_step:\nresult code: ",
-                sqlite3_errstr( rc ), "\n", sqlite3_errmsg( db_dest ), NULL );
-
-        return -1;
-    }
-
-    return 0;
 }
 
 
@@ -135,13 +102,12 @@ project_create_dbase_zond( Projekt* zond, const gchar* path, gboolean create,
         else if ( rc == 1 ) return 1;
     }
 
-    rc = project_backup( zond_dbase_get_dbase( zond_dbase_store ),
-            zond_dbase_get_dbase( zond_dbase_work ), errmsg );
+    rc = zond_dbase_backup( zond_dbase_store, zond_dbase_work, errmsg );
     if ( rc )
     {
         zond_dbase_close( zond_dbase_store );
         zond_dbase_close( zond_dbase_work );
-        ERROR_SOND( "project_backup" )
+        ERROR_S
     }
 
     sqlite3_update_hook( zond_dbase_get_dbase( zond_dbase_work ),
@@ -201,16 +167,16 @@ project_clear_dbase_zond( DBaseZond** dbase_zond )
 }
 
 
-static gint
+gint
 project_speichern( Projekt* zond, gchar** errmsg )
 {
     gint rc = 0;
 
     if ( !(zond->dbase_zond->changed) ) return 0;
 
-    rc = project_backup( zond_dbase_get_dbase( zond->dbase_zond->zond_dbase_work ),
-            zond_dbase_get_dbase( zond->dbase_zond->zond_dbase_store ), errmsg );
-    if ( rc ) ERROR_SOND( "project_backup" )
+    rc = zond_dbase_backup( zond->dbase_zond->zond_dbase_work,
+            zond->dbase_zond->zond_dbase_store, errmsg );
+    if ( rc ) ERROR_S
 
     project_reset_changed( zond );
 
@@ -444,7 +410,7 @@ cb_menu_datei_neu_activate( GtkMenuItem* item, gpointer user_data )
     if ( rc ) return;
 
     gchar* abs_path = filename_speichern( GTK_WINDOW(zond->app_window),
-            "Projekt anlegen" );
+            "Projekt anlegen", ".ZND" );
     if ( !abs_path ) return;
 
     rc = project_oeffnen( zond, abs_path, TRUE, &errmsg );

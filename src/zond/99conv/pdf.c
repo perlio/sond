@@ -283,3 +283,27 @@ pdf_clean( fz_context* ctx, const gchar* rel_path, gchar** errmsg )
 }
 
 
+gchar*
+pdf_get_string_from_line( fz_context* ctx, fz_stext_line* line, gchar** errmsg )
+{
+    gchar* line_string = NULL;
+    fz_buffer* buf = NULL;
+
+    fz_try( ctx ) buf = fz_new_buffer( ctx, 128 );
+    fz_catch( ctx ) ERROR_MUPDF_R( "fz_new_buffer", NULL )
+
+    //string aus Zeile bilden
+    for ( fz_stext_char* stext_char = line->first_char; stext_char; stext_char = stext_char->next )
+    {
+        fz_try( ctx ) fz_append_rune( ctx, buf, stext_char->c );
+        fz_catch( ctx ) ERROR_MUPDF_R( "fz_append_rune", NULL )
+    }
+
+    line_string = g_strdup( fz_string_from_buffer( ctx, buf ) );
+
+    fz_drop_buffer( ctx, buf );
+
+    return line_string;
+}
+
+

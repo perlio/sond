@@ -14,21 +14,17 @@
 *   text1 darf nicht NULL sein
 *   Abschluß der Liste mit NULL
 */
-void display_message( GtkWidget* window, const gchar* text1, ... )
+void display_message( GtkWidget* window, ... )
 {
     va_list ap;
-    gchar* message = g_strdup( "" );
-    gchar* str = NULL;
+    gchar* message = NULL;
+    const gchar* str = NULL;
 
-    str = (gchar*) text1;
-    va_start( ap, text1 );
-    while ( str )
-    {
-        gchar* tmp_str = g_strdup( message );
-        g_free( message );
-        message = g_strconcat( tmp_str, str, NULL );
-        str = va_arg( ap, gchar* );
-    }
+    va_start( ap, window);
+    while ( (str = va_arg( ap, const gchar* )) )
+            message = add_string( message, g_strdup( str ) );
+
+    va_end( ap );
 
     GtkWidget* dialog = gtk_message_dialog_new( GTK_WINDOW(window),
             GTK_DIALOG_DESTROY_WITH_PARENT, GTK_MESSAGE_INFO,
@@ -46,7 +42,11 @@ void display_message( GtkWidget* window, const gchar* text1, ... )
 static void
 cb_entry_text( GtkEntry* entry, gpointer data )
 {
-    gtk_dialog_response( (GtkDialog*) data, GTK_RESPONSE_OK );
+    GtkWidget* dialog = NULL;
+
+    dialog = GTK_WIDGET(data);
+
+    gtk_dialog_response( GTK_DIALOG(dialog), GTK_RESPONSE_YES );
 
     return;
 }
@@ -56,14 +56,12 @@ cb_entry_text( GtkEntry* entry, gpointer data )
 **/
 gint
 dialog_with_buttons( GtkWidget* window, const gchar* message,
-        const gchar* secondary, gchar** text, gchar* first_button_text, ... )
+        const gchar* secondary, gchar** text, ... )
 {
     gint res;
     GtkWidget* entry = NULL;
     va_list arg_pointer;
-    gchar* button_text = NULL;
-
-    va_start( arg_pointer, first_button_text );
+    const gchar* button_text = NULL;
 
     GtkWidget* dialog = gtk_message_dialog_new( GTK_WINDOW(window),
             GTK_DIALOG_DESTROY_WITH_PARENT, GTK_MESSAGE_QUESTION,
@@ -72,17 +70,18 @@ dialog_with_buttons( GtkWidget* window, const gchar* message,
             secondary );
 
     //buttons einfügen
-    button_text = first_button_text;
-    while ( button_text )
+    va_start( arg_pointer, text);
+
+    while ( (button_text = va_arg( arg_pointer, const gchar* )) )
     {
         gint response_id = 0;
 
         response_id = va_arg( arg_pointer, gint );
 
         gtk_dialog_add_button( GTK_DIALOG(dialog), button_text, response_id );
-
-        button_text = va_arg( arg_pointer, gchar* );
     }
+
+    va_end( arg_pointer );
 
     if ( text )
     {
@@ -152,6 +151,7 @@ gchar*
 add_string( gchar* old_string, gchar* add_string )
 {
     gchar* new_string = NULL;
+
     if ( old_string ) new_string = g_strconcat( old_string, add_string, NULL );
     else new_string = g_strdup( add_string );
     g_free( old_string );
@@ -199,7 +199,7 @@ string_to_guint( const gchar* string, guint* zahl )
 
 GSList*
 choose_files( const GtkWidget* window, const gchar* path, const gchar* title_text, gchar* accept_text,
-        gint action, gboolean multiple )
+        gint action, const gchar* ext, gboolean multiple )
 {
     GtkWidget *dialog = NULL;
     gint rc = 0;
@@ -218,9 +218,9 @@ choose_files( const GtkWidget* window, const gchar* path, const gchar* title_tex
     gtk_file_chooser_set_select_multiple( GTK_FILE_CHOOSER(dialog), multiple );
     gtk_file_chooser_set_do_overwrite_confirmation( GTK_FILE_CHOOSER(dialog),
             TRUE );
-    if ( action == GTK_FILE_CHOOSER_ACTION_SAVE )
+    if ( action == GTK_FILE_CHOOSER_ACTION_SAVE && ext )
             gtk_file_chooser_set_current_name( GTK_FILE_CHOOSER(dialog),
-            ".ZND" );
+            ext );
 
     rc = gtk_dialog_run( GTK_DIALOG(dialog) );
     if ( rc == GTK_RESPONSE_ACCEPT ) list = gtk_file_chooser_get_uris( GTK_FILE_CHOOSER(dialog) );
@@ -233,10 +233,10 @@ choose_files( const GtkWidget* window, const gchar* path, const gchar* title_tex
 
 
 gchar*
-filename_speichern( GtkWindow* window, const gchar* titel )
+filename_speichern( GtkWindow* window, const gchar* titel, const gchar* ext )
 {
     GSList* list = choose_files( GTK_WIDGET(window), NULL, titel, "Speichern",
-            GTK_FILE_CHOOSER_ACTION_SAVE, FALSE );
+            GTK_FILE_CHOOSER_ACTION_SAVE, ext, FALSE );
 
     if ( !list ) return NULL;
 
@@ -255,7 +255,7 @@ gchar*
 filename_oeffnen( GtkWindow* window )
 {
     GSList* list = choose_files( GTK_WIDGET(window), NULL, "Datei auswählen", "Öffnen",
-            GTK_FILE_CHOOSER_ACTION_OPEN, FALSE );
+            GTK_FILE_CHOOSER_ACTION_OPEN, NULL, FALSE );
 
     if ( !list ) return NULL;
 
@@ -284,14 +284,17 @@ get_path_from_base( const gchar* path, gchar** errmsg )
     TCHAR buff[MAX_PATH] = { 0 };
 
     ret = GetModuleFileName(NULL, buff, _countof(buff));
-    if ( !ret && errmsg )
+    if ( !ret )
     {
-        DWORD error_code = 0;
+        if ( errmsg )
+        {
+            DWORD error_code = 0;
 
-        error_code = GetLastError( );
+            error_code = GetLastError( );
 
-        *errmsg = add_string( *errmsg, g_strdup_printf( "Bei Aufruf GetModuleFileName:\n"
-                "Error Code: %li", error_code ) );
+            *errmsg = add_string( *errmsg, g_strdup_printf( "Bei Aufruf GetModuleFileName:\n"
+                    "Error Code: %li", error_code ) );
+        }
         return NULL;
     }
 

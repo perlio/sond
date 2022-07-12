@@ -389,7 +389,7 @@ pdf_textsuche_pdf( Projekt* zond, const gchar* rel_path, const gchar* search_tex
                 if ( rc )
                 {
                     zond_pdf_document_close( zond_pdf_document );
-                    ERROR_SOND( "render_display_list_to_stext_page" )
+                    ERROR_S
                 }
             }
             else //wenn display_list noch nicht erzeugt, dann direkt aus page erzeugen
@@ -401,7 +401,7 @@ pdf_textsuche_pdf( Projekt* zond, const gchar* rel_path, const gchar* search_tex
                 if ( rc )
                 {
                     zond_pdf_document_close( zond_pdf_document );
-                    ERROR_SOND( "pdf_text_render_stext_page_direct" )
+                    ERROR_S
                 }
             }
         }
@@ -525,7 +525,6 @@ pdf_textsuche( Projekt* zond, InfoWindow* info_window, GPtrArray* array_rel_path
         message = g_strconcat( "Suche in ", rel_path, NULL );
         info_window_set_message( info_window, message );
         g_free( message );
-        while ( gtk_events_pending( ) ) gtk_main_iteration( );
 
         rc = pdf_textsuche_pdf( zond, rel_path, search_text, *arr_pdf_text_occ,
                 info_window, errmsg );

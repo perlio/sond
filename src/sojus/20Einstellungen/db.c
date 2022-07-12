@@ -36,7 +36,6 @@ db_create( MYSQL* con, gchar* db_name, gchar** errmsg )
 {
     gint rc = 0;
     gchar* sql = NULL;
-    gint res = 0;
 
     //prüfen, ob db "db_name" schon existiert
     if ( !mysql_select_db( con, db_name ) ) return 1;//Falls nicht:
@@ -66,47 +65,11 @@ db_create( MYSQL* con, gchar* db_name, gchar** errmsg )
         return -1;
     }
 
-    sql = add_string( g_strdup( sond_database_sql_create_database( ) ),
-            g_strdup( sond_database_sql_insert_labels( ) ) );
-    sql = add_string( sql, g_strdup( sond_database_sql_insert_adm_rels( ) ) );
-    rc = mysql_query( con, sql );
-    g_free( sql );
-    if ( !rc ) do
+    rc = sond_database_add_to_database( con, errmsg );
+    if ( rc )
     {
-/*        MYSQL_RES* result = NULL;
-
-      // did current statement return data?
-      result = mysql_store_result(con);
-      if (result)
-      {
-        // yes; process rows and free the result set
-        printf("result!\n");
-        mysql_free_result(result);
-      }
-      else          // no result set or error
-      {
-        if (mysql_field_count(con) == 0)
-        {
-          printf("%lld rows affected\n",
-                mysql_affected_rows(con));
-        }
-        else  // some error occurred
-        {
-          printf("Could not retrieve result set\n%s\n", mysql_error( con ) );
-          break;
-        }
-      }*/
-      /* more results? -1 = no, >0 = error, 0 = yes (keep looping) */
-        res = mysql_next_result( con );
-    } while (res == 0);
-
-    if ( rc || res > 0 )
-    {
-        gint ret = 0;
         gchar* sql_drop = NULL;
-
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Einrichtung db:\n",
-                mysql_error( con ), NULL );
+        gint ret = 0;
 
         sql_drop = g_strdup_printf( "DROP DATABASE `%s`", db_name );
         ret = mysql_query( con, sql_drop );
@@ -119,6 +82,8 @@ db_create( MYSQL* con, gchar* db_name, gchar** errmsg )
 
         return -1;
     }
+
+
 
     return 0;
 }

@@ -33,6 +33,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../global_types.h"
 #include "../zond_tree_store.h"
 #include "../zond_dbase.h"
+#include "../zond_gemini.h"
 
 #include "../99conv/general.h"
 #include "../99conv/pdf.h"
@@ -685,21 +686,41 @@ cb_menu_test_activate( GtkMenuItem* item, gpointer zond )
 
 
 static void
-cb_menu_addeingang_activate( GtkMenuItem* item, gpointer data )
-{/*
+cb_menu_gemini_einlesen( GtkMenuItem* item, gpointer data )
+{
     Projekt* zond = (Projekt*) data;
 
     gint rc = 0;
     gchar* errmsg = NULL;
 
-    rc = convert_addeingang( zond, &errmsg );
+    rc = zond_gemini_read_gemini( zond, &errmsg );
     if ( rc )
     {
-        meldung( zond->app_window, "Unterstützung Eingang hinzufügen nicht möglich-\n\nBei "
-                "Aufruf convert_addeingang:\n", errmsg, NULL );
+        display_message( zond->app_window, "Fehler bei Einlesen Gemini\n\n",
+                errmsg, NULL );
         g_free( errmsg );
     }
-*/
+
+    return;
+}
+
+
+static void
+cb_menu_gemini_select( GtkWidget* item, gpointer data )
+{
+    Projekt* zond = (Projekt*) data;
+
+    gint rc = 0;
+    gchar* errmsg = NULL;
+
+    rc = zond_gemini_select( zond, &errmsg );
+    if ( rc )
+    {
+        display_message( zond->app_window, "Fehler bei Auswahl Gemini\n\n",
+                errmsg, NULL );
+        g_free( errmsg );
+    }
+
     return;
 }
 
@@ -1064,15 +1085,20 @@ init_menu( Projekt* zond )
 /*  Menu Extras */
     GtkWidget* extrasmenu = gtk_menu_new( );
 
+    //Gemini
+    GtkWidget* item_gemini_read = gtk_menu_item_new_with_label( "Gemini-Ausdruck einlesen" );
+    g_signal_connect( item_gemini_read, "activate", G_CALLBACK(cb_menu_gemini_einlesen), (gpointer) zond );
+
+    GtkWidget* item_gemini_select = gtk_menu_item_new_with_label( "Gemini-Protokolle anzeigen" );
+    g_signal_connect( item_gemini_select, "activate", G_CALLBACK(cb_menu_gemini_select), (gpointer) zond );
+
     //Test
     GtkWidget* testitem = gtk_menu_item_new_with_label ("Test");
     g_signal_connect( testitem, "activate", G_CALLBACK(cb_menu_test_activate), (gpointer) zond );
 
-    GtkWidget* addeingangitem = gtk_menu_item_new_with_label( "Konvertieren ->eingang" );
-    g_signal_connect( addeingangitem , "activate", G_CALLBACK(cb_menu_addeingang_activate), (gpointer) zond );
-
+    gtk_menu_shell_append( GTK_MENU_SHELL(extrasmenu), item_gemini_read );
+    gtk_menu_shell_append( GTK_MENU_SHELL(extrasmenu), item_gemini_select );
     gtk_menu_shell_append( GTK_MENU_SHELL(extrasmenu), testitem);
-    gtk_menu_shell_append( GTK_MENU_SHELL(extrasmenu), addeingangitem );
 
 /*  Menu Einstellungen */
     GtkWidget* einstellungenmenu = gtk_menu_new( );

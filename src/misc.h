@@ -33,10 +33,10 @@ typedef unsigned int guint;
 typedef int gboolean;
 
 
-void display_message( GtkWidget*, const gchar*, ... );
+void display_message( GtkWidget*, ... );
 
 gint dialog_with_buttons( GtkWidget*, const gchar*, const gchar*, gchar**,
-        gchar*, ... );
+        ... );
 
 gint abfrage_frage( GtkWidget*, const gchar*, const gchar*, gchar** );
 
@@ -50,9 +50,9 @@ gchar* utf8_to_local_filename( const gchar* );
 
 gint string_to_guint( const gchar*, guint* );
 
-GSList* choose_files( const GtkWidget*, const gchar*, const gchar*, gchar*, gint, gboolean );
+GSList* choose_files( const GtkWidget*, const gchar*, const gchar*, gchar*, gint, const gchar*, gboolean );
 
-gchar* filename_speichern( GtkWindow*, const gchar* );
+gchar* filename_speichern( GtkWindow*, const gchar*, const gchar* );
 
 gchar* filename_oeffnen( GtkWindow* );
 

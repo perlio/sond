@@ -32,12 +32,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../40viewer/document.h"
 
 #include "zieleplus.h"
-#include "project.h"
 #include "treeviews.h"
 
 #include "../../misc.h"
 #include "../zond_treeview.h"
-#include "../../dbase.h"
 
 
 
@@ -134,10 +132,10 @@ ziele_einfuegen_db( Projekt* zond, gint anchor_id, gboolean kind, Ziel* ziel,
     //zuerst in baum_inhalt-Tabelle (weil FK in Tabelle "ziele" darauf Bezug nimmt)
     new_node = zond_dbase_insert_node( zond->dbase_zond->zond_dbase_work, BAUM_INHALT, anchor_id, kind,
             zond->icon[ICON_ANBINDUNG].icon_name, node_text, errmsg );
-    if ( new_node == -1 ) ERROR_SOND( "zond_dbase_insert_node" )
+    if ( new_node == -1 ) ERROR_S
 
     rc = zond_dbase_set_ziel( zond->dbase_zond->zond_dbase_work, ziel, anchor_id, errmsg );
-    if ( rc ) ERROR_SOND( "zond_dbase_set_ziel" )
+    if ( rc ) ERROR_S
 
     return new_node;
 }
@@ -172,6 +170,8 @@ ziele_einfuegen_anbindung( Projekt* zond, const gchar* rel_path, gint anchor_id,
 
     //eingefügtes ziel in Baum
     GtkTreeIter* iter = zond_treeview_abfragen_iter( ZOND_TREEVIEW(zond->treeview[BAUM_INHALT]), anchor_id );
+    if ( !iter ) ERROR_S_MESSAGE( "node_id nicht gefunden" )
+
     rc = treeviews_db_to_baum( zond, BAUM_INHALT, new_node, iter, kind, &iter_new,
             errmsg );
     gtk_tree_iter_free( iter );

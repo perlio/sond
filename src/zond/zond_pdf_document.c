@@ -340,7 +340,7 @@ zond_pdf_document_init_pages( ZondPdfDocument* self, gint von, gint bis, gchar**
         {
             g_free( pdf_document_page );
             ((priv->pages)->pdata)[i] = NULL;
-            ERROR_SOND( "zond_pdf_document_page_init" )
+            ERROR_S
         }
     }
 

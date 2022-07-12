@@ -20,7 +20,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <glib/gstdio.h>
 
 #include "../zond_pdf_document.h"
-#include "../zond_database.h"
 
 #include "../global_types.h"
 
@@ -476,9 +475,9 @@ viewer_create_layout( PdfViewer* pv )
             viewer_page->y_pos = (gint) (y_pos + .5);
             if ( dd->anbindung )
             {
-                viewer_page->crop.y0 = (von == dd->anbindung->von.seite) ?
+                viewer_page->crop.y0 = (i == dd->anbindung->von.seite) ?
                         (gfloat) dd->anbindung->von.index : viewer_page->crop.y0;
-                viewer_page->crop.y1 = ((von == dd->anbindung->bis.seite) &&
+                viewer_page->crop.y1 = ((i == dd->anbindung->bis.seite) &&
                         (dd->anbindung->bis.index < EOP)) ?
                         (gfloat) dd->anbindung->bis.index : viewer_page->crop.y1;
             }
@@ -2199,7 +2198,7 @@ cb_viewer_layout_press_button( GtkWidget* layout, GdkEvent* event, gpointer
                     "Dokumenten", NULL );
             else if ( rc == 0 )
             {
-                gint rc = 0;
+//                gint rc = 0;
 
                 gtk_window_present( GTK_WINDOW(pv->zond->app_window) );
 /*
@@ -2240,25 +2239,20 @@ viewer_cb_draw_page_for_printing( GtkPrintOperation* op, GtkPrintContext* contex
     gdouble zoom_x = 0;
     gdouble zoom_y = 0;
     gdouble zoom = 0;
+    gboolean rendered = FALSE;
 
     pdfv = (PdfViewer*) user_data;
 
     //page_act durchsuchen
     viewer_page = g_ptr_array_index( pdfv->arr_pages, page_nr );
 
-    if ( pdfv->thread_pool_page )
+    viewer_thread_render( pdfv, page_nr );
+    do //warten, bis display_list erzeugt worden ist
     {
-        gboolean rendered = FALSE;
-
-        g_thread_pool_move_to_front( pdfv->thread_pool_page, GINT_TO_POINTER(page_nr + 1) );
-
-        do //warten, bis display_list erzeugt worden ist
-        {
-            zond_pdf_document_mutex_lock( viewer_page->pdf_document_page->document );
-            rendered = (viewer_page->pdf_document_page->display_list != NULL);
-            zond_pdf_document_mutex_unlock( viewer_page->pdf_document_page->document );
-        } while ( !rendered );
-    }
+        zond_pdf_document_mutex_lock( viewer_page->pdf_document_page->document );
+        rendered = (viewer_page->pdf_document_page->display_list != NULL);
+        zond_pdf_document_mutex_unlock( viewer_page->pdf_document_page->document );
+    } while ( !rendered );
 
     width = gtk_print_context_get_width( context );
     height = gtk_print_context_get_height( context );
@@ -2382,6 +2376,7 @@ viewer_cb_print( GtkButton* button, gpointer data )
     GtkPrintOperation* print = NULL;
     GtkPrintOperationResult res;
     GtkPageSetup* page_setup = NULL;
+    GError* error = NULL;
 
     PdfViewer* pdfv = (PdfViewer*) data;
 
@@ -2400,10 +2395,15 @@ viewer_cb_print( GtkButton* button, gpointer data )
     g_signal_connect (print, "draw_page",
             G_CALLBACK (viewer_cb_draw_page_for_printing), pdfv );
 
-    res = gtk_print_operation_run (print, GTK_PRINT_OPERATION_ACTION_PRINT_DIALOG,
-                                 GTK_WINDOW(pdfv->vf), NULL);
-
+    res = gtk_print_operation_run( print, GTK_PRINT_OPERATION_ACTION_PRINT_DIALOG,
+                                 GTK_WINDOW(pdfv->vf), &error );
     g_object_unref( print );
+    if ( res == GTK_PRINT_OPERATION_RESULT_ERROR )
+    {
+        display_message( pdfv->vf, "Fehler Ausdruck -\n\nBei Aufruf gtk_print_operation_run:\n",
+                error->message, NULL );
+        g_clear_error( &error );
+    }
 
     return;
 }
@@ -2512,13 +2512,13 @@ viewer_einrichten_fenster( PdfViewer* pv )
     GtkWidget* image_zeiger = gtk_image_new_from_icon_name( "accessories-text-editor",
             GTK_ICON_SIZE_BUTTON );
     gtk_button_set_image( GTK_BUTTON(pv->button_zeiger), image_zeiger );
-    GtkWidget* image_highlight = gtk_image_new_from_icon_name( "edit-clear-all",
+    GtkWidget* image_highlight = gtk_image_new_from_icon_name( "edit-select-all",
             GTK_ICON_SIZE_BUTTON );
     gtk_button_set_image( GTK_BUTTON(button_highlight), image_highlight );
     GtkWidget* image_underline = gtk_image_new_from_icon_name( "format-text-underline",
             GTK_ICON_SIZE_BUTTON );
     gtk_button_set_image( GTK_BUTTON(button_underline), image_underline );
-    GtkWidget* image_paint = gtk_image_new_from_icon_name( "input-tablet",
+    GtkWidget* image_paint = gtk_image_new_from_icon_name( "edit-paste",
             GTK_ICON_SIZE_BUTTON );
     gtk_button_set_image( GTK_BUTTON(button_paint), image_paint );
 

@@ -101,19 +101,8 @@ static void
 zond_dbase_finalize_stmts( sqlite3* db)
 {
     sqlite3_stmt* stmt = NULL;
-    sqlite3_stmt* next_stmt = NULL;
 
-    stmt = sqlite3_next_stmt( db, NULL );
-
-    if ( !stmt ) return;
-
-    do
-    {
-        next_stmt = sqlite3_next_stmt( db, stmt );
-        sqlite3_finalize( stmt );
-        stmt = next_stmt;
-    }
-    while ( stmt );
+    while ( (stmt = sqlite3_next_stmt( db, NULL )) ) sqlite3_finalize( stmt );
 
     return;
 }
@@ -193,6 +182,9 @@ zond_dbase_create_db( sqlite3* db, gchar** errmsg )
             "DROP TABLE IF EXISTS baum_inhalt;"
             "DROP TABLE IF EXISTS baum_auswertung; "
             "DROP TABLE IF EXISTS links; "
+            "DROP TABLE IF EXISTS entities; "
+            "DROP TABLE IF EXISTS rels; "
+            "DROP TABLE IF EXISTS properties; "
 
             "CREATE TABLE eingang ("
                 "ID INTEGER NOT NULL, "
@@ -740,6 +732,54 @@ zond_dbase_get_dbase( ZondDBase* zond_dbase )
 }
 
 
+const gchar*
+zond_dbase_get_path( ZondDBase* zond_dbase )
+{
+    ZondDBasePrivate* priv = zond_dbase_get_instance_private( zond_dbase );
+
+    return priv->path;
+}
+
+
+gint
+zond_dbase_backup( ZondDBase* src, ZondDBase* dst, gchar** errmsg )
+{
+    gint rc = 0;
+    sqlite3* db_src = NULL;
+    sqlite3* db_dst = NULL;
+    sqlite3_backup* backup = NULL;
+
+    db_src = zond_dbase_get_dbase( src );
+    db_dst = zond_dbase_get_dbase( dst );
+
+    //Datenbank öffnen
+    backup = sqlite3_backup_init( db_dst, "main", db_src, "main" );
+    if ( !backup )
+    {
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf ", __func__,
+                ":\nBei Aufruf sqlite3_backup_init\nresult code: ",
+                sqlite3_errstr( sqlite3_errcode( db_dst ) ), "\n",
+                sqlite3_errmsg( db_dst ), NULL);
+
+        return -1;
+    }
+    rc = sqlite3_backup_step( backup, -1 );
+    sqlite3_backup_finish( backup );
+    if ( rc != SQLITE_DONE )
+    {
+        if ( errmsg && rc == SQLITE_NOTADB ) *errmsg = g_strdup( "Datei ist "
+                "keine SQLITE-Datenbank" );
+        else if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf ", __func__,
+                "Bei Aufruf sqlite3_backup_step:\nresult code: ",
+                sqlite3_errstr( rc ), "\n", sqlite3_errmsg( db_dst ), NULL );
+
+        return -1;
+    }
+
+    return 0;
+}
+
+
 static gint
 zond_dbase_prepare_stmts( ZondDBase* zond_dbase, gint num, const gchar** sql,
         sqlite3_stmt** stmt, gchar** errmsg )
@@ -755,8 +795,7 @@ zond_dbase_prepare_stmts( ZondDBase* zond_dbase, gint num, const gchar** sql,
         {
             //aufräumen
             for ( gint u = 0; u < i; u++ ) sqlite3_finalize( stmt[u] );
-
-            ERROR_S_MESSAGE( " ("", sql[i], "")\n"", sqlite3_errstr( rc )" )
+            ERROR_ZOND_DBASE( "sqlite3_prepare_v2" )
         }
     }
 
@@ -764,7 +803,7 @@ zond_dbase_prepare_stmts( ZondDBase* zond_dbase, gint num, const gchar** sql,
 }
 
 
-static gint
+gint
 zond_dbase_prepare( ZondDBase* zond_dbase, const gchar* func, const gchar** sql,
         gint num_stmts, sqlite3_stmt*** stmt, gchar** errmsg )
 {
