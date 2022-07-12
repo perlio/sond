@@ -1434,6 +1434,8 @@ zond_gemini_close_ereignis( gpointer database, Arrays* arrays, Ereignis* ereigni
     g_clear_pointer( &ereignis, zond_gemini_free_ereignis );
     if ( rc ) ERROR_S
 
+    while ( gtk_events_pending( ) ) gtk_main_iteration( );
+
     return 0;
 }
 
@@ -1526,7 +1528,7 @@ zond_gemini_read_zond_pdf_document( Projekt* zond, InfoWindow* info_window,
         if ( info_window->cancel )
         {
             zond_gemini_free_ereignis( ereignis );
-            return 0;
+            return 1;
         }
 
         line_string = pdf_get_string_from_line( ctx, line_at_pos.line, errmsg );
@@ -1931,171 +1933,6 @@ zond_gemini_read_zond_pdf_document( Projekt* zond, InfoWindow* info_window,
 }
 
 
-gint
-zond_gemini_read_gemini( Projekt* zond, gchar** errmsg )
-{
-    gint rc = 0;
-    ZondPdfDocument* zond_pdf_document = NULL;
-    gchar* file = NULL;
-    ZondDBase* zond_dbase = NULL;
-    InfoWindow* info_window = NULL;
-    Arrays arrays = { 0 };
-
-    file = filename_oeffnen( GTK_WINDOW(zond->app_window) );
-    if ( !file ) return 0;
-
-    zond_pdf_document = zond_pdf_document_open( file, 0, -1, errmsg );
-    g_free( file );
-    if ( !zond_pdf_document ) ERROR_S
-
-    rc = sqlite3_exec( zond_dbase_get_dbase( zond->dbase_zond->zond_dbase_work ),
-            "DROP TABLE IF EXISTS tkue;", NULL, NULL, errmsg );
-    if ( rc != SQLITE_OK ) ERROR_S
-
-    rc = zond_dbase_new( ":memory:", TRUE, TRUE, &zond_dbase, errmsg );
-    if ( rc )
-    {
-        g_object_unref( zond_pdf_document );
-        ERROR_S
-    }
-
-    rc = sond_database_add_to_database( zond->dbase_zond->zond_dbase_work, errmsg );
-    if ( rc )
-    {
-        zond_dbase_close( zond_dbase );
-        g_object_unref( zond_pdf_document );
-        ERROR_S
-    }
-
-    rc = zond_dbase_backup( zond->dbase_zond->zond_dbase_work, zond_dbase, errmsg );
-    if ( rc )
-    {
-        g_object_unref( zond_pdf_document );
-        zond_dbase_close( zond_dbase );
-        ERROR_S
-    }
-
-    info_window = info_window_open( zond->app_window, "Einlesen Gemnini-Datei" );
-    info_window_set_progress_bar( info_window );
-
-    arrays.arr_anschluesse = g_array_new( FALSE, FALSE, sizeof( Anschluss ) );
-    g_array_set_clear_func( arrays.arr_anschluesse, (GDestroyNotify) zond_gemini_free_anschluss );
-
-    arrays.arr_personen = g_array_new( FALSE, FALSE, sizeof( Person ) );
-    g_array_set_clear_func( arrays.arr_personen, (GDestroyNotify) zond_gemini_free_person );
-
-    arrays.arr_massnahmen = g_array_new( FALSE, FALSE, sizeof( Massnahme ) );
-    g_array_set_clear_func( arrays.arr_massnahmen, (GDestroyNotify) zond_gemini_free_massnahme );
-
-    //in memory-database, die inhaltlich mit ...work identisch ist, einfügen
-    rc = zond_gemini_read_zond_pdf_document( zond, info_window, zond_dbase,
-            zond_pdf_document, &arrays, errmsg );
-    g_array_unref( arrays.arr_massnahmen );
-    g_array_unref( arrays.arr_anschluesse );
-    g_array_unref( arrays.arr_personen );
-    info_window_close( info_window );
-    g_object_unref( zond_pdf_document );
-    if ( rc )
-    {
-        zond_dbase_close( zond_dbase );
-        ERROR_S
-    }
-
-    sqlite3_stmt* stmt = NULL;
-    while ( (stmt = sqlite3_next_stmt( zond_dbase_get_dbase( zond->dbase_zond->zond_dbase_work ), stmt )) ) sqlite3_reset( stmt );
-
-    rc = zond_dbase_backup( zond_dbase, zond->dbase_zond->zond_dbase_work, errmsg );
-    zond_dbase_close( zond_dbase );
-    if ( rc ) ERROR_S
-
-    //da backup, wird Änderung nicht verzeichnet
-    if ( !zond->dbase_zond->changed ) project_set_changed( zond );
-
-    return 0;
-}
-
-
-static gint
-zond_gemini_select_fill_checkbox_ue_person( Projekt* zond, GtkWidget* scb,
-        gchar** errmsg )
-{
-    gint rc = 0;
-    GArray* arr_ID_entity_ue_person = NULL;
-    gint ID_label_ue_person = 0;
-
-    //sammeln
-    rc = sond_database_get_objects_from_labels( zond->dbase_zond->zond_dbase_work,
-            1000, _HAT_, 310, &arr_ID_entity_ue_person, errmsg );
-    if ( rc ) ERROR_S
-
-    for ( gint i = 0; i < arr_ID_entity_ue_person->len; i++ )
-    {
-        gint rc = 0;
-        gint ID_entity_ue_person = 0;
-        gchar* name = NULL;
-        gchar* vorname = NULL;
-        gchar* geb_datum = NULL;
-        gchar* text = NULL;
-
-        ID_entity_ue_person = g_array_index( arr_ID_entity_ue_person, gint, i );
-
-        rc = sond_database_get_first_property_value_for_subject( zond->dbase_zond->zond_dbase_work,
-                ID_entity_ue_person, _NAME_, &name, errmsg );
-        if ( rc )
-        {
-            g_array_unref( arr_ID_entity_ue_person );
-            if ( rc == -1 ) ERROR_S
-            else if ( rc == 1 ) ERROR_S_MESSAGE( "Keinen Namen gefunden" )
-        }
-
-        rc = sond_database_get_first_property_value_for_subject( zond->dbase_zond->zond_dbase_work,
-                ID_entity_ue_person, _VORNAME_, &vorname, errmsg );
-        if ( rc == -1 )
-        {
-            g_array_unref( arr_ID_entity_ue_person );
-            g_free( name );
-            ERROR_S
-        }
-
-        rc = sond_database_get_first_property_value_for_subject( zond->dbase_zond->zond_dbase_work,
-                ID_entity_ue_person, _BEGINN_, &geb_datum, errmsg );
-        if ( rc == -1 )
-        {
-            g_array_unref( arr_ID_entity_ue_person );
-            g_free( name );
-            g_free( vorname );
-            ERROR_S
-        }
-
-        text = g_strconcat( name,", ", vorname, ", ", geb_datum, NULL );
-        g_free( name );
-        g_free( vorname );
-        g_free( geb_datum );
-
-        rc = sond_database_get_ID_label_for_entity( zond->dbase_zond->zond_dbase_work, ID_entity_ue_person,
-                errmsg );
-        if ( rc == -1 )
-        {
-            g_array_unref( arr_ID_entity_ue_person );
-            ERROR_S
-        }
-        else ID_label_ue_person = rc;
-
-        if ( ID_label_ue_person == MANN ) text = add_string( text, g_strdup( " (männlich)" ) );
-        if ( ID_label_ue_person == FRAU ) text = add_string( text, g_strdup( " (weiblich)" ) );
-        if ( ID_label_ue_person == DIVERS ) text = add_string( text, g_strdup( " (divers)" ) );
-
-        sond_checkbox_add_entry( SOND_CHECKBOX(scb), text, ID_entity_ue_person );
-        g_free( text );
-    }
-    g_array_unref( arr_ID_entity_ue_person );
-
-//    sond_checkbox_sort_entries( SOND_CHECKBOX(scb), 0 );
-
-    return 0;
-}
-
-
 static gint
 zond_gemini_create_tkue_table( Projekt* zond, gchar** errmsg )
 {
@@ -2230,6 +2067,21 @@ zond_gemini_create_tkue_table( Projekt* zond, gchar** errmsg )
                 "ORDER BY beginn ASC "
                 ";";
 
+    rc = sqlite3_exec( zond_dbase_get_dbase( zond->dbase_zond->zond_dbase_work ),
+            "DROP TABLE IF EXISTS tkue;", NULL, NULL, errmsg );
+    if ( rc != SQLITE_OK )
+    {
+        gchar* text = NULL;
+
+        if ( errmsg )
+        {
+            text = g_strconcat( "Bei Aufruf ", __func__, ":\nBei Aufruf sqlite3_exec:\n", NULL );
+            *errmsg = add_string( text, *errmsg );
+        }
+
+        return -1;
+    }
+
     rc = sqlite3_exec( zond_dbase_get_dbase( zond->dbase_zond->zond_dbase_work ), sql, NULL, NULL, errmsg );
     if ( rc != SQLITE_OK )
     {
@@ -2244,7 +2096,197 @@ zond_gemini_create_tkue_table( Projekt* zond, gchar** errmsg )
         return -1;
     }
 
-    project_set_changed( (gpointer) zond );
+    return 0;
+}
+
+
+gint
+zond_gemini_read_gemini( Projekt* zond, gchar** errmsg )
+{
+    gint rc = 0;
+    ZondPdfDocument* zond_pdf_document = NULL;
+    ZondDBase* zond_dbase = NULL;
+    InfoWindow* info_window = NULL;
+    Arrays arrays = { 0 };
+    GSList* list = NULL;
+    GSList* list_ptr = NULL;
+
+    list = choose_files( zond->app_window, NULL,
+            "Gemini-Protokoll auswählen", "Einlesen",
+            GTK_FILE_CHOOSER_ACTION_OPEN, NULL, TRUE );
+    if ( !list ) return 0;
+
+    list_ptr = list;
+
+    rc = zond_dbase_new( ":memory:", TRUE, TRUE, &zond_dbase, errmsg );
+    if ( rc )
+    {
+        g_slist_free_full( list, g_free );
+        ERROR_S
+    }
+
+    rc = zond_dbase_backup( zond->dbase_zond->zond_dbase_work, zond_dbase, errmsg );
+    if ( rc )
+    {
+        zond_dbase_close( zond_dbase );
+        g_slist_free_full( list, g_free );
+        ERROR_S
+    }
+
+    rc = sond_database_add_to_database( zond_dbase, errmsg );
+    if ( rc )
+    {
+        zond_dbase_close( zond_dbase );
+        g_slist_free_full( list, g_free );
+        ERROR_S
+    }
+
+    info_window = info_window_open( zond->app_window, "Einlesen Gemnini-Datei" );
+
+    arrays.arr_anschluesse = g_array_new( FALSE, FALSE, sizeof( Anschluss ) );
+    g_array_set_clear_func( arrays.arr_anschluesse, (GDestroyNotify) zond_gemini_free_anschluss );
+
+    arrays.arr_personen = g_array_new( FALSE, FALSE, sizeof( Person ) );
+    g_array_set_clear_func( arrays.arr_personen, (GDestroyNotify) zond_gemini_free_person );
+
+    arrays.arr_massnahmen = g_array_new( FALSE, FALSE, sizeof( Massnahme ) );
+    g_array_set_clear_func( arrays.arr_massnahmen, (GDestroyNotify) zond_gemini_free_massnahme );
+
+    do
+    {
+        gchar* uri = NULL;
+
+        uri = g_uri_unescape_string( list_ptr->data, NULL );
+
+        info_window_set_message( info_window, uri + 8 );
+        info_window_set_progress_bar( info_window );
+
+        zond_pdf_document = zond_pdf_document_open( uri + 8, 0,
+                -1, errmsg );
+        if ( !zond_pdf_document )
+        {
+            info_window_set_message( info_window, "Öffnen nicht möglich:" );
+            info_window_set_message( info_window, *errmsg );
+
+            g_free( uri );
+            g_clear_pointer( errmsg, g_free );
+            continue;
+        }
+
+        //in memory-database, die inhaltlich mit ...work identisch ist, einfügen
+        rc = zond_gemini_read_zond_pdf_document( zond, info_window, zond_dbase,
+                zond_pdf_document, &arrays, errmsg );
+        g_free( uri );
+        g_object_unref( zond_pdf_document );
+        if ( rc == -1 )
+        {
+            info_window_set_message( info_window, "Vollständiges Einlesen nicht möglich:" );
+            info_window_set_message( info_window, *errmsg );
+
+            g_clear_pointer( errmsg, g_free );
+            continue;
+        }
+        else if ( rc == 1 ) break;
+    } while ( (list_ptr = list_ptr->next) );
+
+    g_slist_free_full( list, g_free );
+    g_array_unref( arrays.arr_massnahmen );
+    g_array_unref( arrays.arr_anschluesse );
+    g_array_unref( arrays.arr_personen );
+    info_window_close( info_window );
+    sqlite3_stmt* stmt = NULL;
+    while ( (stmt = sqlite3_next_stmt( zond_dbase_get_dbase( zond->dbase_zond->zond_dbase_work ), stmt )) ) sqlite3_reset( stmt );
+
+    rc = zond_dbase_backup( zond_dbase, zond->dbase_zond->zond_dbase_work, errmsg );
+    zond_dbase_close( zond_dbase );
+    if ( rc ) ERROR_S
+
+    rc = zond_gemini_create_tkue_table( zond, errmsg );
+    if ( rc ) ERROR_S
+
+    //da backup, wird Änderung nicht verzeichnet
+    if ( !zond->dbase_zond->changed ) project_set_changed( zond );
+
+    return 0;
+}
+
+
+static gint
+zond_gemini_select_fill_checkbox_ue_person( Projekt* zond, GtkWidget* scb,
+        gchar** errmsg )
+{
+    gint rc = 0;
+    GArray* arr_ID_entity_ue_person = NULL;
+    gint ID_label_ue_person = 0;
+
+    //sammeln
+    rc = sond_database_get_objects_from_labels( zond->dbase_zond->zond_dbase_work,
+            1000, _HAT_, 310, &arr_ID_entity_ue_person, errmsg );
+    if ( rc ) ERROR_S
+
+    for ( gint i = 0; i < arr_ID_entity_ue_person->len; i++ )
+    {
+        gint rc = 0;
+        gint ID_entity_ue_person = 0;
+        gchar* name = NULL;
+        gchar* vorname = NULL;
+        gchar* geb_datum = NULL;
+        gchar* text = NULL;
+
+        ID_entity_ue_person = g_array_index( arr_ID_entity_ue_person, gint, i );
+
+        rc = sond_database_get_first_property_value_for_subject( zond->dbase_zond->zond_dbase_work,
+                ID_entity_ue_person, _NAME_, &name, errmsg );
+        if ( rc )
+        {
+            g_array_unref( arr_ID_entity_ue_person );
+            if ( rc == -1 ) ERROR_S
+            else if ( rc == 1 ) ERROR_S_MESSAGE( "Keinen Namen gefunden" )
+        }
+
+        rc = sond_database_get_first_property_value_for_subject( zond->dbase_zond->zond_dbase_work,
+                ID_entity_ue_person, _VORNAME_, &vorname, errmsg );
+        if ( rc == -1 )
+        {
+            g_array_unref( arr_ID_entity_ue_person );
+            g_free( name );
+            ERROR_S
+        }
+
+        rc = sond_database_get_first_property_value_for_subject( zond->dbase_zond->zond_dbase_work,
+                ID_entity_ue_person, _BEGINN_, &geb_datum, errmsg );
+        if ( rc == -1 )
+        {
+            g_array_unref( arr_ID_entity_ue_person );
+            g_free( name );
+            g_free( vorname );
+            ERROR_S
+        }
+
+        text = g_strconcat( name,", ", vorname, ", ", geb_datum, NULL );
+        g_free( name );
+        g_free( vorname );
+        g_free( geb_datum );
+
+        rc = sond_database_get_ID_label_for_entity( zond->dbase_zond->zond_dbase_work, ID_entity_ue_person,
+                errmsg );
+        if ( rc == -1 )
+        {
+            g_array_unref( arr_ID_entity_ue_person );
+            ERROR_S
+        }
+        else ID_label_ue_person = rc;
+
+        if ( ID_label_ue_person == MANN ) text = add_string( text, g_strdup( " (männlich)" ) );
+        if ( ID_label_ue_person == FRAU ) text = add_string( text, g_strdup( " (weiblich)" ) );
+        if ( ID_label_ue_person == DIVERS ) text = add_string( text, g_strdup( " (divers)" ) );
+
+        sond_checkbox_add_entry( SOND_CHECKBOX(scb), text, ID_entity_ue_person );
+        g_free( text );
+    }
+    g_array_unref( arr_ID_entity_ue_person );
+
+//    sond_checkbox_sort_entries( SOND_CHECKBOX(scb), 0 );
 
     return 0;
 }
@@ -2330,9 +2372,6 @@ zond_gemini_select( Projekt* zond, gchar** errmsg )
     g_signal_connect( checkbox_leitungsnr, "entry-toggled",
                      G_CALLBACK(zond_gemini_leitungsnr_entry_toggled), gemini );
 */
-    //temp-table im Hintergrund erzeugen
-    rc = zond_gemini_create_tkue_table( zond, errmsg );
-    if ( rc ) ERROR_S
 
     gtk_widget_grab_focus( gtk_dialog_get_widget_for_response( GTK_DIALOG(gemini), GTK_RESPONSE_CANCEL ) );
 
