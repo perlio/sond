@@ -1215,14 +1215,6 @@ pdf_ocr_tess_page( InfoWindow* info_window, TessBaseAPI* handle,
     gint progress = 0;
 
     TessBaseAPISetImage( handle, pixmap->samples, pixmap->w, pixmap->h, pixmap->n, pixmap->stride );
-/*
-// fallback,wenn threads wieder mal nicht gehen
-    TessRecog tess_recog = { handle, monitor };
-    rc = GPOINTER_TO_INT( pdf_ocr_tess_recog( &tess_recog ) );
-    if ( rc ) ERROR_S_MESSAGE( "Seite konnte nicht gerendert werden" );
-
-    //im Moment geht's aber wieder
-*/
 
     monitor = TessMonitorCreate( );
     TessMonitorSetCancelThis( monitor, &(info_window->cancel) );

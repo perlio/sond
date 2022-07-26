@@ -30,7 +30,6 @@ typedef const void* gconstpointer;
 gboolean is_pdf( const gchar* );
 
 /*  info_window  */
-void info_window_scroll( InfoWindow* );
 
 void info_window_close( InfoWindow* );
 

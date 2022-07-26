@@ -281,7 +281,7 @@ viewer_get_visible_thumbs( PdfViewer* pv, gint* start, gint* end )
 }
 
 
-static gboolean
+gboolean
 viewer_check_rendering( gpointer data )
 {
     gboolean protect = FALSE;
