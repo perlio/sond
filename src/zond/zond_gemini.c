@@ -1434,8 +1434,6 @@ zond_gemini_close_ereignis( gpointer database, Arrays* arrays, Ereignis* ereigni
     g_clear_pointer( &ereignis, zond_gemini_free_ereignis );
     if ( rc ) ERROR_S
 
-    while ( gtk_events_pending( ) ) gtk_main_iteration( );
-
     return 0;
 }
 

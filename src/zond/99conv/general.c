@@ -51,7 +51,7 @@ info_window_set_progress_bar_fraction( InfoWindow* info_window, gdouble fraction
 
     gtk_progress_bar_set_fraction( GTK_PROGRESS_BAR(info_window->last_inserted_widget), fraction );
 
-    gtk_main_iteration( );
+    while ( gtk_events_pending( ) ) gtk_main_iteration( );
 
     return;
 }
