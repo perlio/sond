@@ -1040,7 +1040,7 @@ pdf_ocr_sandwich_page( PdfDocumentPage* pdf_document_page,
     if ( rc ) ERROR_SOND( "pdf_zond_filter_content_stream" )
 
 //    fz_rect rect = pdf_ocr_get_mediabox( ctx, pdf_document_page->page->obj );
-    float scale = 1./4./72.*70.;
+    float scale = 1./TESS_SCALE/72.*70.;
 
     fz_matrix ctm = pdf_ocr_create_matrix( ctx, pdf_document_page->rect, scale, pdf_document_page->rotate );
 

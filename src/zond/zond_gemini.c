@@ -2437,7 +2437,7 @@ zond_gemini_select( Projekt* zond, gchar** errmsg )
         {
             gchar* text = NULL;
 
-            text = g_strdup_printf( "AND beginn>=%s ", beginn );
+            text = g_strdup_printf( "AND beginn>='%s' ", beginn );
             sql = add_string( sql, text );
         }
 
@@ -2445,7 +2445,7 @@ zond_gemini_select( Projekt* zond, gchar** errmsg )
         {
             gchar* text = NULL;
 
-            text = g_strdup_printf( "AND beginn<=%s ", ende );
+            text = g_strdup_printf( "AND beginn<='%s' ", ende );
             sql = add_string( sql, text );
         }
 
