@@ -2139,7 +2139,7 @@ zond_gemini_read_gemini( Projekt* zond, gchar** errmsg )
         ERROR_S
     }
 
-    info_window = info_window_open( zond->app_window, "Einlesen Gemnini-Datei" );
+    info_window = zond_info_window_open( zond, "Einlesen Gemnini-Datei" );
 
     arrays.arr_anschluesse = g_array_new( FALSE, FALSE, sizeof( Anschluss ) );
     g_array_set_clear_func( arrays.arr_anschluesse, (GDestroyNotify) zond_gemini_free_anschluss );
@@ -2191,7 +2191,7 @@ zond_gemini_read_gemini( Projekt* zond, gchar** errmsg )
     g_array_unref( arrays.arr_massnahmen );
     g_array_unref( arrays.arr_anschluesse );
     g_array_unref( arrays.arr_personen );
-    info_window_close( info_window );
+    zond_info_window_close( zond, info_window );
     sqlite3_stmt* stmt = NULL;
     while ( (stmt = sqlite3_next_stmt( zond_dbase_get_dbase( zond->dbase_zond->zond_dbase_work ), stmt )) ) sqlite3_reset( stmt );
 

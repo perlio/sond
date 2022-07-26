@@ -39,7 +39,9 @@ void info_window_set_progress_bar( InfoWindow* );
 
 void info_window_set_message( InfoWindow*, const gchar* );
 
-InfoWindow* info_window_open( GtkWidget*, const gchar* );
+InfoWindow* zond_info_window_open( Projekt*, const gchar* );
+
+void zond_info_window_close( Projekt*, InfoWindow* );
 
 #endif // GENERAL_H_INCLUDED
 

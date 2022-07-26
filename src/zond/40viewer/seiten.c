@@ -315,28 +315,10 @@ cb_pv_seiten_ocr( GtkMenuItem* item, gpointer data )
 
     if ( !arr_document_page ) return;
 
-    //alle idle-Funktionen ausschalten
-    for ( gint i = 0; i < pv->zond->arr_pv->len; i++ )
-    {
-        PdfViewer* pdfv = NULL;
-
-        pdfv = g_ptr_array_index( pv->zond->arr_pv, i );
-        g_idle_remove_by_data( (gpointer) pdfv );
-    }
-
-    info_window = info_window_open( pv->vf, "OCR" );
+    info_window = zond_info_window_open( pv->zond, "OCR" );
 
     rc = pdf_ocr_pages( pv->zond, info_window, arr_document_page, &errmsg );
-    info_window_close( info_window );
-
-    //und wieder anschalten
-    for ( gint i = 0; i < pv->zond->arr_pv->len; i++ )
-    {
-        PdfViewer* pdfv = NULL;
-
-        pdfv = g_ptr_array_index( pv->zond->arr_pv, i );
-        g_idle_add( (GSourceFunc) viewer_check_rendering, pdfv );
-    }
+    zond_info_window_close( pv->zond, info_window );
 
     if ( rc == -1 )
     {

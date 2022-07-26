@@ -240,7 +240,7 @@ cb_item_textsuche( GtkMenuItem* item, gpointer data )
 
     InfoWindow* info_window = NULL;
 
-    info_window = info_window_open( zond->app_window, "Textsuche" );
+    info_window = zond_info_window_open( zond, "Textsuche" );
 
     rc = pdf_textsuche( zond, info_window, arr_rel_path, search_text, &arr_pdf_text_occ, &errmsg );
     if ( rc )
@@ -249,12 +249,12 @@ cb_item_textsuche( GtkMenuItem* item, gpointer data )
                 "Bei Aufruf pdf_textsuche:\n", errmsg, NULL );
         g_free( errmsg );
         g_free( search_text );
-        info_window_close( info_window );
+        zond_info_window_close( zond, info_window );
 
         return;
     }
 
-    info_window_close( info_window );
+    zond_info_window_close( zond, info_window );
 
     if ( arr_pdf_text_occ->len == 0 )
     {
@@ -319,7 +319,7 @@ cb_datei_ocr( GtkMenuItem* item, gpointer data )
     }
 
     //TessInit
-    info_window = info_window_open( zond->app_window, "OCR" );
+    info_window = zond_info_window_open( zond, "OCR" );
 
     for ( gint i = 0; i < arr_rel_path->len; i++ )
     {
@@ -387,7 +387,7 @@ cb_datei_ocr( GtkMenuItem* item, gpointer data )
         document_free_displayed_documents( dd );
     }
 
-    info_window_close( info_window );
+    zond_info_window_close( zond, info_window );
 
     g_ptr_array_unref( arr_rel_path );
 

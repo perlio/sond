@@ -431,7 +431,7 @@ three_treeviews_paste_clipboard( Projekt* zond, gboolean kind, gboolean link, gc
                     "Abkömmling von Anbindung" )
 
             arr_new_nodes = g_array_new( FALSE, FALSE, sizeof( gint ) );
-            info_window = info_window_open( zond->app_window, "Dateien anbinden" );
+            info_window = zond_info_window_open( zond, "Dateien anbinden" );
 
             rc = three_treeviews_clipboard_anbinden( zond, anchor_id, kind, arr_new_nodes, info_window, errmsg );
             if ( rc == -1 )
@@ -441,7 +441,7 @@ three_treeviews_paste_clipboard( Projekt* zond, gboolean kind, gboolean link, gc
             }
 
             g_array_unref( arr_new_nodes );
-            info_window_close( info_window );
+            zond_info_window_close( zond, info_window );
         }
     }
     else if ( baum_selection == BAUM_INHALT )
