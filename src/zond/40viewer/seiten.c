@@ -315,10 +315,10 @@ cb_pv_seiten_ocr( GtkMenuItem* item, gpointer data )
 
     if ( !arr_document_page ) return;
 
-    info_window = zond_info_window_open( pv->zond, "OCR" );
+    info_window = info_window_open( pv->vf, "OCR" );
 
     rc = pdf_ocr_pages( pv->zond, info_window, arr_document_page, &errmsg );
-    zond_info_window_close( pv->zond, info_window );
+    info_window_close( info_window );
 
     if ( rc == -1 )
     {

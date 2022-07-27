@@ -153,25 +153,3 @@ info_window_open( GtkWidget* window, const gchar* title )
 }
 
 
-InfoWindow*
-zond_info_window_open( Projekt* zond, const gchar* title )
-{
-    //alle idle-Funktionen ausschalten
-    for ( gint i = 0; i < zond->arr_pv->len; i++ )
-            g_idle_remove_by_data( g_ptr_array_index( zond->arr_pv, i ) );
-
-    return info_window_open( zond->app_window, title );
-}
-
-
-void
-zond_info_window_close( Projekt* zond, InfoWindow* info_window )
-{
-    info_window_close( info_window );
-
-    //und wieder anschalten
-    for ( gint i = 0; i < zond->arr_pv->len; i++ )
-            g_idle_add( (GSourceFunc) viewer_check_rendering, g_ptr_array_index( zond->arr_pv, i ) );
-
-    return;
-}

@@ -97,6 +97,7 @@ typedef struct _Pdf_Viewer
     GThreadPool* thread_pool_page;
     GArray* arr_rendered;
     GMutex mutex_arr_rendered;
+    guint idle_source;
 
     PageQuad highlight;
 } PdfViewer;

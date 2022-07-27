@@ -255,32 +255,6 @@ viewer_close_thread_pool_and_transfer( PdfViewer* pdfv )
 }
 
 
-static gint
-viewer_get_visible_thumbs( PdfViewer* pv, gint* start, gint* end )
-{
-    GtkTreePath* path_start = NULL;
-    GtkTreePath* path_end = NULL;
-    gint* index_start = NULL;
-    gint* index_end = NULL;
-
-    if ( pv->arr_pages->len == 0 ) return 1;
-
-    if ( !gtk_tree_view_get_visible_range( GTK_TREE_VIEW(pv->tree_thumb),
-            &path_start, &path_end ) ) return 1;
-
-    index_start = gtk_tree_path_get_indices( path_start );
-    index_end = gtk_tree_path_get_indices( path_end );
-
-    *start = index_start[0];
-    *end = index_end[0];
-
-    gtk_tree_path_free( path_start );
-    gtk_tree_path_free( path_end );
-
-    return 0;
-}
-
-
 gboolean
 viewer_check_rendering( gpointer data )
 {
@@ -297,6 +271,11 @@ viewer_check_rendering( gpointer data )
     viewer_transfer_rendered( pv );
 
     if ( protect ) g_mutex_unlock( &pv->mutex_arr_rendered );
+    else
+    {
+        pv->idle_source = 0;
+        return G_SOURCE_REMOVE;
+    }
 
     return G_SOURCE_CONTINUE;
 }
@@ -308,6 +287,8 @@ viewer_thread_render( PdfViewer* pv, gint page )
     ViewerPageNew* viewer_page = NULL;
 
     viewer_page = g_ptr_array_index( pv->arr_pages, page );
+
+    if ( !pv->idle_source ) pv->idle_source = g_idle_add( (GSourceFunc) viewer_check_rendering, pv );
 
     if ( viewer_page->thread_started ) return;
 
@@ -525,8 +506,6 @@ viewer_display_document( PdfViewer* pv, DisplayedDocument* dd, gint page, gint i
     if ( page || index ) viewer_springen_zu_pos_pdf( pv, pdf_pos, 0.0 );
     else g_signal_emit_by_name( pv->v_adj, "value-changed", NULL ); // falls pos == 0
 
-    g_idle_add( (GSourceFunc) viewer_check_rendering, pv );
-
     gtk_widget_grab_focus( pv->layout );
 
     return;
@@ -715,6 +694,32 @@ cb_pv_speichern( GtkButton* button, gpointer data )
     viewer_set_clean( pv->zond->arr_pv );
 
     return;
+}
+
+
+static gint
+viewer_get_visible_thumbs( PdfViewer* pv, gint* start, gint* end )
+{
+    GtkTreePath* path_start = NULL;
+    GtkTreePath* path_end = NULL;
+    gint* index_start = NULL;
+    gint* index_end = NULL;
+
+    if ( pv->arr_pages->len == 0 ) return 1;
+
+    if ( !gtk_tree_view_get_visible_range( GTK_TREE_VIEW(pv->tree_thumb),
+            &path_start, &path_end ) ) return 1;
+
+    index_start = gtk_tree_path_get_indices( path_start );
+    index_end = gtk_tree_path_get_indices( path_end );
+
+    *start = index_start[0];
+    *end = index_end[0];
+
+    gtk_tree_path_free( path_start );
+    gtk_tree_path_free( path_end );
+
+    return 0;
 }
 
 
