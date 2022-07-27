@@ -1,8 +1,6 @@
 /*
 Bugs:
     - Kopieren aus suchen-Fenster klappt nicht richtig
-    - info_window: gtk_pending geht (nur bei viewer) nicht
-    - print-operation-dialog wird nicht angezeigt - friert ein?!
 
 ToDo:
 - Synchron-Punkte
