@@ -2393,7 +2393,7 @@ zond_gemini_select( Projekt* zond, gchar** errmsg )
         //Grund-SQL-String
         sql = g_strdup( "SELECT datei_name, page_begin, index_begin, page_end, index_end, beginn FROM "
                 "tkue WHERE "
-                "ID_massnahme=-1 " ); //alles erstmal ausschließen...
+                "(ID_massnahme=-1 " ); //alles erstmal ausschließen...
 
         //leitungs_nr auslesen
         arr_leitungsnrn = sond_checkbox_get_active_IDs( SOND_CHECKBOX(checkbox_leitungsnr) );
@@ -2426,6 +2426,8 @@ zond_gemini_select( Projekt* zond, gchar** errmsg )
             }
             g_array_unref( arr_ue_personen );
         }
+
+        sql = add_string( sql, g_strdup( ") " ) );
 
         //Anfang und Ende
         beginn = gtk_entry_get_text( GTK_ENTRY(entry_von) );

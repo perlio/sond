@@ -21,7 +21,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <gtk/gtk.h>
 
 #include "sojus_init.h"
-#include "sojus_database.h"
 
 #include "../misc.h"
 
