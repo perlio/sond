@@ -266,15 +266,18 @@ viewer_check_rendering( gpointer data )
     {
         protect = TRUE;
         g_mutex_lock( &pv->mutex_arr_rendered );
+        pv->idle_fresh = FALSE; //wenn die threads schon arbeiten, ist die idle nicht mehr frisch
     }
 
     viewer_transfer_rendered( pv );
 
     if ( protect ) g_mutex_unlock( &pv->mutex_arr_rendered );
-    else
+    else if ( !pv->idle_fresh ) //die nicht frische idle kann abgeschaltet werden,
+    //wenn alle threads abgearbeitet sind
+    //idle_fresh muß gesetzt/gelöscht werden, weil die idle-Funktion schon laufen kann,
+    //der aus dem Hauptthread gestartete thread als unprocessed im pool eingetragen ist
     {
         pv->idle_source = 0;
-        g_timeout_add( 20, G_SOURCE_FUNC(viewer_check_rendering), pv );
         return G_SOURCE_REMOVE;
     }
 
@@ -289,9 +292,13 @@ viewer_thread_render( PdfViewer* pv, gint page )
 
     viewer_page = g_ptr_array_index( pv->arr_pages, page );
 
-    if ( !pv->idle_source ) pv->idle_source = g_idle_add( G_SOURCE_FUNC(viewer_check_rendering), pv );
-
     if ( viewer_page->thread_started ) return;
+
+    if ( !pv->idle_source )
+    {
+        pv->idle_source = g_idle_add( G_SOURCE_FUNC(viewer_check_rendering), pv );
+        pv->idle_fresh = TRUE; //wenn idle gestartet wird, ist sie noch frisch!
+    }
 
     if ( !pv->thread_pool_page ) pv->thread_pool_page =
             g_thread_pool_new( (GFunc) render_page_thread, pv, 4, FALSE, NULL );
