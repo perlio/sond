@@ -274,6 +274,7 @@ viewer_check_rendering( gpointer data )
     else
     {
         pv->idle_source = 0;
+        g_timeout_add( 20, G_SOURCE_FUNC(viewer_check_rendering), pv );
         return G_SOURCE_REMOVE;
     }
 
@@ -288,7 +289,7 @@ viewer_thread_render( PdfViewer* pv, gint page )
 
     viewer_page = g_ptr_array_index( pv->arr_pages, page );
 
-    if ( !pv->idle_source ) pv->idle_source = g_idle_add( (GSourceFunc) viewer_check_rendering, pv );
+    if ( !pv->idle_source ) pv->idle_source = g_idle_add( G_SOURCE_FUNC(viewer_check_rendering), pv );
 
     if ( viewer_page->thread_started ) return;
 
