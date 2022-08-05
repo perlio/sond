@@ -36,8 +36,6 @@ gint sond_treeview_get_id( SondTreeview* );
 
 Clipboard* sond_treeview_get_clipboard( SondTreeview* );
 
-GtkTreeViewColumn* sond_treeview_get_column( SondTreeview* );
-
 GtkCellRenderer* sond_treeview_get_cell_renderer_icon( SondTreeview* );
 
 GtkCellRenderer* sond_treeview_get_cell_renderer_text( SondTreeview* );

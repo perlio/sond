@@ -956,8 +956,7 @@ sond_treeviewfm_init( SondTreeviewFM* stvfm )
 {
     SondTreeviewFMPrivate* stvfm_priv = sond_treeviewfm_get_instance_private( stvfm );
 
-    gtk_tree_view_column_set_cell_data_func( sond_treeview_get_column(
-            SOND_TREEVIEW(stvfm) ),
+    gtk_tree_view_column_set_cell_data_func( gtk_tree_view_get_column( GTK_TREE_VIEW(stvfm), 0 ),
             sond_treeview_get_cell_renderer_icon( SOND_TREEVIEW(stvfm) ),
             sond_treeviewfm_render_file_icon, NULL, NULL );
 
@@ -996,7 +995,7 @@ sond_treeviewfm_init( SondTreeviewFM* stvfm )
     gtk_tree_view_append_column( GTK_TREE_VIEW(stvfm), fs_tree_column_size );
     gtk_tree_view_append_column( GTK_TREE_VIEW(stvfm), fs_tree_column_modify );
 
-    gtk_tree_view_column_set_title( sond_treeview_get_column( SOND_TREEVIEW(stvfm) ), "Datei" );
+    gtk_tree_view_column_set_title( gtk_tree_view_get_column( GTK_TREE_VIEW(stvfm), 0 ), "Datei" );
     gtk_tree_view_column_set_title( fs_tree_column_size, "Größe" );
     gtk_tree_view_column_set_title( fs_tree_column_modify, "Änderungsdatum" );
     gtk_tree_view_column_set_title( stvfm_priv->column_eingang, "Eingang" );

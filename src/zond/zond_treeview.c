@@ -333,11 +333,11 @@ zond_treeview_init( ZondTreeview* ztv )
     gtk_tree_view_set_headers_visible( GTK_TREE_VIEW(ztv), FALSE );
 
     gtk_tree_view_column_set_attributes(
-            sond_treeview_get_column( SOND_TREEVIEW(ztv) ),
+            gtk_tree_view_get_column( GTK_TREE_VIEW(ztv), 0 ),
             sond_treeview_get_cell_renderer_icon( SOND_TREEVIEW(ztv) ),
             "icon-name", 0, NULL);
     gtk_tree_view_column_set_attributes(
-            sond_treeview_get_column( SOND_TREEVIEW(ztv) ),
+            gtk_tree_view_get_column( GTK_TREE_VIEW(ztv), 0 ),
             sond_treeview_get_cell_renderer_text( SOND_TREEVIEW(ztv) ),
             "text", 1, NULL);
 

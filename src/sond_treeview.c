@@ -23,7 +23,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 typedef struct
 {
-    GtkTreeViewColumn* first_column;
     GtkCellRenderer* renderer_icon;
     GtkCellRenderer* renderer_text;
     gint id;
@@ -148,6 +147,8 @@ sond_treeview_selection_select_func( GtkTreeSelection* selection, GtkTreeModel* 
 static void
 sond_treeview_init( SondTreeview* stv )
 {
+    GtkTreeViewColumn* tvc = NULL;
+
     SondTreeviewPrivate* stv_private = sond_treeview_get_instance_private( stv );
 
     gtk_tree_view_set_fixed_height_mode( GTK_TREE_VIEW(stv), TRUE );
@@ -176,19 +177,19 @@ sond_treeview_init( SondTreeview* stv )
             "background-set", FALSE, NULL );
 
     //die column
-    stv_private->first_column = gtk_tree_view_column_new();
-    gtk_tree_view_column_set_resizable( stv_private->first_column, TRUE);
-    gtk_tree_view_column_set_sizing( stv_private->first_column,
+    tvc = gtk_tree_view_column_new();
+    gtk_tree_view_column_set_resizable( tvc, TRUE);
+    gtk_tree_view_column_set_sizing( tvc,
             GTK_TREE_VIEW_COLUMN_FIXED);
 
-    gtk_tree_view_column_pack_start( stv_private->first_column,
+    gtk_tree_view_column_pack_start( tvc,
             stv_private->renderer_icon, FALSE );
-    gtk_tree_view_column_pack_start( stv_private->first_column,
+    gtk_tree_view_column_pack_start( tvc,
             stv_private->renderer_text, TRUE );
 
-    gtk_tree_view_append_column( GTK_TREE_VIEW(stv), stv_private->first_column );
+    gtk_tree_view_append_column( GTK_TREE_VIEW(stv), tvc );
 
-    gtk_tree_view_column_set_cell_data_func( stv_private->first_column,
+    gtk_tree_view_column_set_cell_data_func( tvc,
             stv_private->renderer_text, (GtkTreeCellDataFunc)
             sond_treeview_render_text, stv, NULL );
 
@@ -243,15 +244,6 @@ sond_treeview_get_clipboard( SondTreeview* stv )
     SondTreeviewClass* stv_klass = SOND_TREEVIEW_GET_CLASS( stv );
 
     return stv_klass->clipboard;
-}
-
-
-GtkTreeViewColumn*
-sond_treeview_get_column( SondTreeview* stv )
-{
-    SondTreeviewPrivate* stv_priv = sond_treeview_get_instance_private( stv );
-
-        return stv_priv->first_column;
 }
 
 
@@ -330,7 +322,8 @@ sond_treeview_set_cursor_on_text_cell( SondTreeview* stv, GtkTreeIter* iter )
     GtkTreePath* path = gtk_tree_model_get_path( gtk_tree_view_get_model(
             GTK_TREE_VIEW(stv) ), iter );
     gtk_tree_view_set_cursor_on_cell( GTK_TREE_VIEW(stv), path,
-            stv_priv->first_column, stv_priv->renderer_text, FALSE );
+            gtk_tree_view_get_column( GTK_TREE_VIEW(stv), 0 ),
+            stv_priv->renderer_text, FALSE );
     gtk_tree_path_free( path );
 
     return;
