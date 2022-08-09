@@ -199,13 +199,13 @@ viewer_transfer_rendered( PdfViewer* pdfv )
 {
     gint idx = 0;
 
-    idx = pdfv->arr_rendered->len - 1;
+    if ( (idx = pdfv->arr_rendered->len - 1) < 0 ) return;
+
     while( idx >= 0 )
     {
         gint page = g_array_index( pdfv->arr_rendered, gint, idx );
         ViewerPageNew* viewer_page = g_ptr_array_index( pdfv->arr_pages, abs( page ) - 1 );
 
-        pdfv->idle_fresh = FALSE;
 
         if ( page > 0 )
         {
@@ -241,6 +241,8 @@ viewer_transfer_rendered( PdfViewer* pdfv )
         g_array_remove_index_fast( pdfv->arr_rendered, idx );
         idx--;
     }
+
+    pdfv->idle_fresh = FALSE;
 
     return;
 }
