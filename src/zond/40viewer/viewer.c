@@ -206,7 +206,6 @@ viewer_transfer_rendered( PdfViewer* pdfv )
         gint page = g_array_index( pdfv->arr_rendered, gint, idx );
         ViewerPageNew* viewer_page = g_ptr_array_index( pdfv->arr_pages, abs( page ) - 1 );
 
-
         if ( page > 0 )
         {
             gint x_pos = 0;
