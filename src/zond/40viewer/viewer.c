@@ -205,6 +205,8 @@ viewer_transfer_rendered( PdfViewer* pdfv )
         gint page = g_array_index( pdfv->arr_rendered, gint, idx );
         ViewerPageNew* viewer_page = g_ptr_array_index( pdfv->arr_pages, abs( page ) - 1 );
 
+        pdfv->idle_fresh = FALSE;
+
         if ( page > 0 )
         {
             gint x_pos = 0;
@@ -221,6 +223,8 @@ viewer_transfer_rendered( PdfViewer* pdfv )
 
             gtk_layout_put( GTK_LAYOUT(pdfv->layout), GTK_WIDGET(viewer_page->image_page), x_pos, viewer_page->y_pos );
             g_object_unref( viewer_page->pixbuf_page );
+
+            viewer_page->thread = viewer_page->thread | 2; //bit 1: image gerendert
         }
         else if ( page < 0 )
         {
@@ -230,26 +234,13 @@ viewer_transfer_rendered( PdfViewer* pdfv )
             if ( rc == 0 ) gtk_list_store_set( GTK_LIST_STORE( gtk_tree_view_get_model(
                     GTK_TREE_VIEW(pdfv->tree_thumb) ) ), &iter, 0, viewer_page->pixbuf_thumb, -1 );
             g_object_unref( viewer_page->pixbuf_thumb );
+
+            viewer_page->thread = viewer_page->thread | 4; //bit 2: thumb gerendert
         }
 
         g_array_remove_index_fast( pdfv->arr_rendered, idx );
         idx--;
     }
-
-    return;
-}
-
-
-void
-viewer_close_thread_pool_and_transfer( PdfViewer* pdfv )
-{
-    if ( pdfv->thread_pool_page )
-    {
-        g_thread_pool_free( pdfv->thread_pool_page, TRUE, TRUE );
-        pdfv->thread_pool_page = NULL;
-    }
-
-    viewer_transfer_rendered( pdfv );
 
     return;
 }
@@ -266,13 +257,12 @@ viewer_check_rendering( gpointer data )
     {
         protect = TRUE;
         g_mutex_lock( &pv->mutex_arr_rendered );
-        pv->idle_fresh = FALSE; //wenn die threads schon arbeiten, ist die idle nicht mehr frisch
     }
 
     viewer_transfer_rendered( pv );
 
     if ( protect ) g_mutex_unlock( &pv->mutex_arr_rendered );
-    else if ( !pv->idle_fresh ) //die nicht frische idle kann abgeschaltet werden,
+    else if ( pv->idle_fresh == FALSE) //die nicht frische idle kann abgeschaltet werden,
     //wenn alle threads abgearbeitet sind
     //idle_fresh muß gesetzt/gelöscht werden, weil die idle-Funktion schon laufen kann,
     //der aus dem Hauptthread gestartete thread als unprocessed im pool eingetragen ist
@@ -292,13 +282,13 @@ viewer_thread_render( PdfViewer* pv, gint page )
 
     viewer_page = g_ptr_array_index( pv->arr_pages, page );
 
-    if ( viewer_page->thread_started ) return;
-
-    if ( !pv->idle_source )
+    if ( !pv->idle_source && viewer_page->thread != 7 )
     {
         pv->idle_source = g_idle_add( G_SOURCE_FUNC(viewer_check_rendering), pv );
         pv->idle_fresh = TRUE; //wenn idle gestartet wird, ist sie noch frisch!
     }
+
+    if ( viewer_page->thread ) return;
 
     if ( !pv->thread_pool_page ) pv->thread_pool_page =
             g_thread_pool_new( (GFunc) render_page_thread, pv, 4, FALSE, NULL );
@@ -306,7 +296,7 @@ viewer_thread_render( PdfViewer* pv, gint page )
     g_thread_pool_push( pv->thread_pool_page, GINT_TO_POINTER(page + 1), NULL );
     g_thread_pool_move_to_front( pv->thread_pool_page, GINT_TO_POINTER(page + 1) );
 
-    viewer_page->thread_started = TRUE;
+    viewer_page->thread = 1; //bit 1: thread gestartet
 
     return;
 }
@@ -515,6 +505,21 @@ viewer_display_document( PdfViewer* pv, DisplayedDocument* dd, gint page, gint i
     else g_signal_emit_by_name( pv->v_adj, "value-changed", NULL ); // falls pos == 0
 
     gtk_widget_grab_focus( pv->layout );
+
+    return;
+}
+
+
+void
+viewer_close_thread_pool_and_transfer( PdfViewer* pdfv )
+{
+    if ( pdfv->thread_pool_page )
+    {
+        g_thread_pool_free( pdfv->thread_pool_page, TRUE, TRUE );
+        pdfv->thread_pool_page = NULL;
+    }
+
+    viewer_transfer_rendered( pdfv );
 
     return;
 }
@@ -738,7 +743,7 @@ viewer_render_sichtbare_thumbs( PdfViewer* pv )
     gint start = 0;
     gint end = 0;
 
-    if ( !(pv->thread_pool_page) ) return;
+//    if ( !(pv->thread_pool_page) ) return;
 
     rc = viewer_get_visible_thumbs( pv, &start, &end );
     if ( rc == 0 ) for ( gint i = start; i <= end; i++ ) viewer_thread_render( pv, i );
@@ -1101,7 +1106,7 @@ cb_viewer_spinbutton_value_changed( GtkSpinButton* spin_button, gpointer user_da
         viewer_page = g_ptr_array_index( pv->arr_pages, i );
         if ( viewer_page->image_page ) gtk_image_clear( GTK_IMAGE(viewer_page->image_page) );
         viewer_page->pixbuf_page = NULL;
-        viewer_page->thread_started = FALSE;
+        viewer_page->thread = 0;
     }
 
     //Alte Position merken
@@ -1386,7 +1391,7 @@ viewer_cb_change_annot( PdfViewer* pv, gint page_pv, gpointer data, gchar** errm
             GTK_TREE_VIEW(pv->tree_thumb) ) ), &iter, 0, NULL, -1 );
     viewer_page->pixbuf_thumb = NULL;
 
-    viewer_page->thread_started = FALSE;
+    viewer_page->thread = 0;
     g_signal_emit_by_name( pv->v_adj, "value-changed", NULL );
 
     return 0;

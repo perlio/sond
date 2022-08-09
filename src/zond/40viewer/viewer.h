@@ -112,7 +112,7 @@ typedef struct _Viewer_Page_New
     GdkPixbuf* pixbuf_page;
     GdkPixbuf* pixbuf_thumb;
     GtkWidget* image_page;
-    gboolean thread_started;
+    gint thread;
 } ViewerPageNew;
 
 
