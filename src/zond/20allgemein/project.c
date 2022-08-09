@@ -88,7 +88,7 @@ project_create_dbase_zond( Projekt* zond, const gchar* path, gboolean create,
     gchar* path_tmp = NULL;
 
     rc  = zond_dbase_new( path, FALSE, create, &zond_dbase_store, errmsg );
-    if ( rc == -1 ) ERROR_SOND( "zond_dbase_new" )
+    if ( rc == -1 ) ERROR_S
     else if ( rc == 1 ) return 1;
 
     path_tmp = g_strconcat( path, ".tmp", NULL );
@@ -98,7 +98,7 @@ project_create_dbase_zond( Projekt* zond, const gchar* path, gboolean create,
     if ( rc )
     {
         zond_dbase_close( zond_dbase_store );
-        if ( rc == -1 ) ERROR_SOND( "zond_dbase_new" )
+        if ( rc == -1 ) ERROR_S
         else if ( rc == 1 ) return 1;
     }
 
@@ -220,7 +220,7 @@ projekt_schliessen( Projekt* zond, gchar** errmsg )
         {
             gint rc = 0;
             rc = project_speichern( zond, errmsg );
-            if ( rc ) ERROR_SOND( "projekt_speichern" )
+            if ( rc ) ERROR_S
         }
         else if ( rc != GTK_RESPONSE_NO) return 1;
     }
@@ -321,7 +321,6 @@ project_oeffnen( Projekt* zond, const gchar* abs_path, gboolean create,
     rc = projekt_schliessen( zond, errmsg );
     if ( rc )
     {
-        project_clear_dbase_zond( &dbase_zond );
         if ( rc == -1 ) ERROR_S
         else return 1;
     }
@@ -392,7 +391,6 @@ cb_menu_datei_oeffnen_activate( GtkMenuItem* item, gpointer user_data )
 
         return;
     }
-    else if ( rc == 1 ) return;
 
     return;
 }
