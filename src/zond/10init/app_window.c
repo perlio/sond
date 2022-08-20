@@ -240,7 +240,7 @@ cb_focus_in( GtkWidget* treeview, GdkEvent* event, gpointer user_data )
     {
         //selection in "altem" treeview löschen
         gtk_tree_selection_unselect_all( zond->selection[zond->baum_prev] );
-/* wennüberhaupt, dann in cb row_collapse oder _expand verschieben, aber eher besser so!!!
+// wennüberhaupt, dann in cb row_collapse oder _expand verschieben, aber eher besser so!!!
         //Cursor gewählter treeview selektieren
         GtkTreePath* path = NULL;
         GtkTreeViewColumn* focus_column = NULL;
@@ -251,14 +251,10 @@ cb_focus_in( GtkWidget* treeview, GdkEvent* event, gpointer user_data )
                     focus_column, FALSE );
             gtk_tree_path_free( path );
         }
-*/
     }
 
     g_object_set( sond_treeview_get_cell_renderer_text( zond->treeview[zond->baum_active] ),
             "editable", TRUE, NULL);
-
-    if ( zond->baum_active != BAUM_AUSWERTUNG )
-            gtk_widget_set_sensitive( GTK_WIDGET(zond->textview), FALSE );
 
     return FALSE;
 }
@@ -381,7 +377,6 @@ init_app_window( Projekt* zond )
     zond->textview = GTK_TEXT_VIEW(gtk_text_view_new( ));
     gtk_text_view_set_wrap_mode( zond->textview, GTK_WRAP_WORD );
     gtk_text_view_set_accepts_tab( zond->textview, FALSE );
-    gtk_widget_set_sensitive( GTK_WIDGET(zond->textview), FALSE );
 
     //Und dann in untere Hälfte des übergebenen vpaned reinpacken
     gtk_container_add( GTK_CONTAINER(swindow_textview),

@@ -810,19 +810,13 @@ gint
 treeviews_reload_baeume( Projekt* zond, gchar** errmsg )
 {
     gint rc = 0;
+    GtkTreeIter iter = { 0 };
 
     rc = treeviews_reload_baum( zond, BAUM_INHALT, errmsg );
     if ( rc ) ERROR_S
 
     rc = treeviews_reload_baum( zond, BAUM_AUSWERTUNG, errmsg );
     if ( rc ) ERROR_S
-
-/*
-    rc = treeviews_db_to_baum_links( zond, errmsg );
-    if ( rc ) ERROR_S
-*/
-
-    gtk_tree_selection_unselect_all( zond->selection[BAUM_AUSWERTUNG] );
 
     g_object_set( sond_treeview_get_cell_renderer_text( zond->treeview[BAUM_AUSWERTUNG] ),
             "editable", FALSE, NULL);
@@ -831,7 +825,12 @@ treeviews_reload_baeume( Projekt* zond, gchar** errmsg )
 
     gtk_widget_grab_focus( GTK_WIDGET(zond->treeview[BAUM_INHALT]) );
 
-    gtk_widget_set_sensitive( GTK_WIDGET(zond->textview), FALSE );
+    if ( gtk_tree_model_get_iter_first( gtk_tree_view_get_model(
+            GTK_TREE_VIEW(zond->treeview[BAUM_AUSWERTUNG]) ), &iter ) )
+    {
+        sond_treeview_set_cursor( zond->treeview[BAUM_AUSWERTUNG], &iter );
+        gtk_tree_selection_unselect_all( zond->selection[BAUM_AUSWERTUNG] );
+    }
 
     return 0;
 }

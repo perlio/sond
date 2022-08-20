@@ -65,7 +65,7 @@ zond_treeview_cursor_changed( ZondTreeview* treeview, gpointer user_data )
     gchar* errmsg = NULL;
     gint node_id = 0;
     GtkTreeIter iter = { 0, };
-    Baum baum = KEIN_BAUM;
+    Baum baum_target = KEIN_BAUM;
     gchar* rel_path = NULL;
     Anbindung* anbindung = NULL;
     gchar* text_label = NULL;
@@ -73,21 +73,30 @@ zond_treeview_cursor_changed( ZondTreeview* treeview, gpointer user_data )
 
     Projekt* zond = (Projekt*) user_data;
 
+
     //wenn kein cursor gesetzt ist
-    if ( !sond_treeview_get_cursor( SOND_TREEVIEW(treeview), &iter ) ||
-            treeviews_get_baum_and_node_id( zond, &iter, &baum, &node_id ) )
+    if ( !sond_treeview_get_cursor( SOND_TREEVIEW(treeview), &iter ) )
     {
-        gtk_label_set_text( zond->label_status, "" ); //statur-label leeren
-        gtk_text_buffer_set_text( gtk_text_view_get_buffer( zond->textview ), "", -1 );
+        Baum baum = KEIN_BAUM;
+
+        if ( SOND_TREEVIEW(treeview) == zond->treeview[BAUM_INHALT] ) baum = BAUM_INHALT;
+        else if ( SOND_TREEVIEW(treeview) == zond->treeview[BAUM_AUSWERTUNG] ) baum = BAUM_AUSWERTUNG;
+
+        gtk_label_set_text( zond->label_status, "" ); //status-label leeren
+        if ( baum == BAUM_AUSWERTUNG ) gtk_text_buffer_set_text(
+                gtk_text_view_get_buffer( zond->textview ), "", -1 );
+
         gtk_widget_set_sensitive( GTK_WIDGET(zond->textview), FALSE );
 
         return;
     }
-    else if ( baum == BAUM_AUSWERTUNG ) gtk_widget_set_sensitive( GTK_WIDGET(zond->textview), TRUE );
+    else treeviews_get_baum_and_node_id( zond, &iter, &baum_target, &node_id );
+
+    if ( baum_target == BAUM_AUSWERTUNG ) gtk_widget_set_sensitive( GTK_WIDGET(zond->textview), TRUE );
     else gtk_widget_set_sensitive( GTK_WIDGET(zond->textview), FALSE );
 
     //status_label setzen
-    rc = treeviews_get_rel_path_and_anbindung( zond, baum, node_id, &rel_path,
+    rc = treeviews_get_rel_path_and_anbindung( zond, baum_target, node_id, &rel_path,
             &anbindung, &errmsg );
     if ( rc == -1 )
     {
@@ -111,7 +120,7 @@ zond_treeview_cursor_changed( ZondTreeview* treeview, gpointer user_data )
     g_free( text_label );
     g_free( rel_path );
 
-    if ( baum == BAUM_INHALT || rc == -1 ) return;
+    if ( baum_target == BAUM_INHALT || rc == -1 ) return;
 
     //TextBuffer laden
     GtkTextBuffer* buffer = gtk_text_view_get_buffer( zond->textview );
@@ -131,7 +140,12 @@ zond_treeview_cursor_changed( ZondTreeview* treeview, gpointer user_data )
 
     if ( text )
     {
+        GtkTextIter text_iter = { 0 };
+
         gtk_text_buffer_set_text( buffer, text, -1 );
+        gtk_text_buffer_get_end_iter( buffer, &text_iter );
+        while ( gtk_events_pending( ) ) gtk_main_iteration( );
+        gtk_text_view_scroll_to_iter( zond->textview, &text_iter, 0, FALSE, 0, 0 );
         g_free( text );
     }
     else gtk_text_buffer_set_text( buffer, "", -1 );
