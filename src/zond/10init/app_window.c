@@ -243,12 +243,10 @@ cb_focus_in( GtkWidget* treeview, GdkEvent* event, gpointer user_data )
 // wennüberhaupt, dann in cb row_collapse oder _expand verschieben, aber eher besser so!!!
         //Cursor gewählter treeview selektieren
         GtkTreePath* path = NULL;
-        GtkTreeViewColumn* focus_column = NULL;
-        gtk_tree_view_get_cursor( GTK_TREE_VIEW(treeview), &path, &focus_column );
+        gtk_tree_view_get_cursor( GTK_TREE_VIEW(treeview), &path, NULL );
         if ( path )
         {
-            gtk_tree_view_set_cursor( GTK_TREE_VIEW(treeview), path,
-                    focus_column, FALSE );
+            gtk_tree_selection_select_path( zond->selection[zond->baum_active], path );
             gtk_tree_path_free( path );
         }
     }
