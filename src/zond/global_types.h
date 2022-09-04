@@ -155,7 +155,6 @@ typedef struct _Projekt
 
     gulong cursor_changed_signal;
     gulong text_buffer_changed_signal;
-    gulong treeview_focus_in_signal[3];
     gulong key_press_signal;
 
     GtkTextView* textview;

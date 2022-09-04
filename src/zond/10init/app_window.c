@@ -307,7 +307,7 @@ init_treeviews( Projekt* zond )
                 "editing-canceled", G_CALLBACK(treeviews_cb_editing_canceled), zond );
 
         //focus-in
-        zond->treeview_focus_in_signal[baum] = g_signal_connect( zond->treeview[baum],
+        g_signal_connect( zond->treeview[baum],
                 "focus-in-event", G_CALLBACK(cb_focus_in), (gpointer) zond );
         g_signal_connect( zond->treeview[baum], "focus-out-event",
                 G_CALLBACK(cb_focus_out), (gpointer) zond );

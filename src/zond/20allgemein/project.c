@@ -243,24 +243,11 @@ projekt_schliessen( Projekt* zond, gchar** errmsg )
 
     project_reset_changed( zond );
 
-    //Vor leeren der treeviews: focus-in-callback blocken
-    //darin wird cursor-changed-callback angeschaltet --> Absturz
-    g_signal_handler_block( zond->treeview[BAUM_INHALT],
-            zond->treeview_focus_in_signal[BAUM_INHALT] );
-    g_signal_handler_block( zond->treeview[BAUM_AUSWERTUNG],
-            zond->treeview_focus_in_signal[BAUM_AUSWERTUNG] );
-
     //treeviews leeren
     zond_tree_store_clear( ZOND_TREE_STORE(gtk_tree_view_get_model(
             GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]) )) );
     zond_tree_store_clear( ZOND_TREE_STORE(gtk_tree_view_get_model(
             GTK_TREE_VIEW(zond->treeview[BAUM_AUSWERTUNG]) )) );
-
-    //Wieder anschalten
-    g_signal_handler_unblock( zond->treeview[BAUM_INHALT],
-            zond->treeview_focus_in_signal[BAUM_INHALT] );
-    g_signal_handler_unblock( zond->treeview[BAUM_AUSWERTUNG],
-            zond->treeview_focus_in_signal[BAUM_AUSWERTUNG] );
 
     //muß vor project_destroy..., weil callback ausgelöst wird, der db_get_node_id... aufruft
     gtk_toggle_button_set_active( GTK_TOGGLE_BUTTON(zond->fs_button), FALSE );
