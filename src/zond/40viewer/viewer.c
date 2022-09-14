@@ -599,6 +599,8 @@ viewer_save_dirty_docs( PdfViewer* pdfv, gboolean ask )
 void
 viewer_save_and_close( PdfViewer* pdfv )
 {
+    gtk_popover_popdown( GTK_POPOVER(pdfv->annot_pop_edit) );
+
     viewer_save_dirty_docs( pdfv, TRUE );
     viewer_schliessen( pdfv );
 
@@ -1717,6 +1719,7 @@ viewer_annot_edit_closed( GtkWidget* popover, gpointer data )
 
     zond_pdf_document_mutex_unlock( viewer_page->pdf_document_page->document );
 
+    gtk_text_buffer_set_text( text_buffer, "", -1 );
     rc = viewer_foreach( pdfv->zond->arr_pv, viewer_page->pdf_document_page,
             NULL, NULL, &errmsg );
     if ( rc )
