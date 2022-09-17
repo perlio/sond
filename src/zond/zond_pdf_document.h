@@ -33,7 +33,6 @@ typedef struct _Annot_Text_Markup
 
 typedef struct _Annot_Text
 {
-    gboolean activ;
     gboolean open;
     const gchar* name;
 } AnnotText;

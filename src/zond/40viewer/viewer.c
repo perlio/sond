@@ -550,11 +550,11 @@ viewer_schliessen( PdfViewer* pv )
 }
 
 
-static void
+static gint
 viewer_save_dirty_docs( PdfViewer* pdfv, gboolean ask )
 {
     DisplayedDocument* dd = pdfv->dd;
-    if ( !dd ) return;
+    if ( !dd ) return 0;
 
     do
     {
@@ -581,26 +581,31 @@ viewer_save_dirty_docs( PdfViewer* pdfv, gboolean ask )
                 zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
                 if ( rc )
                 {
-                    display_message( pdfv->vf, "Dokument ", zond_pdf_document_get_path( dd->zond_pdf_document ),
-                            "\nkonnte nicht gespeichert werden:\n", errmsg, NULL );
+                    display_message( pdfv->vf, "Fehler bei Speichern:\n\n",
+                            errmsg, NULL );
 
                     g_free( errmsg );
                 }
-                else zond_pdf_document_set_dirty( dd->zond_pdf_document, FALSE );
+                zond_pdf_document_set_dirty( dd->zond_pdf_document, FALSE );
             }
+            else if ( rc == GTK_RESPONSE_DELETE_EVENT ) return 1;
         }
     } while ( (dd = dd->next) );
 
-    return;
+    return 0;
 }
 
 
 void
 viewer_save_and_close( PdfViewer* pdfv )
 {
+    gint rc = 0;
+
     gtk_popover_popdown( GTK_POPOVER(pdfv->annot_pop_edit) );
 
-    viewer_save_dirty_docs( pdfv, TRUE );
+    rc = viewer_save_dirty_docs( pdfv, TRUE );
+    if ( rc ) return;
+
     viewer_schliessen( pdfv );
 
     return;
@@ -1841,12 +1846,8 @@ cb_viewer_layout_release_button( GtkWidget* layout, GdkEvent* event, gpointer da
 
                 return TRUE;
             }
-
-            pv->clicked_annot->annot_text.activ = TRUE;
         }
-        else if ( !pv->clicked_annot->annot_text.activ )//nicht verschoben ->
-                pv->clicked_annot->annot_text.activ = TRUE; //dann erstmal nur markieren
-        else
+        else if ( pv->clicked_annot->annot_text.open )  //nicht verschoben, edit-popup geöffnet
         {
             //angeklickt -> textview öffnen
             GdkRectangle gdk_rectangle = { 0, };
@@ -1877,7 +1878,7 @@ cb_viewer_layout_release_button( GtkWidget* layout, GdkEvent* event, gpointer da
                     gtk_text_buffer_set_text( gtk_text_view_get_buffer(
                     GTK_TEXT_VIEW(pv->annot_textview) ),
                     pv->clicked_annot->content, -1 );
-//            gtk_popover_popup( GTK_POPOVER(pv->annot_pop_edit) );
+            gtk_popover_popup( GTK_POPOVER(pv->annot_pop_edit) );
             gtk_widget_grab_focus( pv->annot_pop_edit );
         }
     }
@@ -1897,7 +1898,7 @@ cb_viewer_motion_notify( GtkWidget* window, GdkEvent* event, gpointer data )
     //Vielleicht Fehler in GDK? Oder extra?
     gdk_window_set_cursor( pv->gdk_window, pv->cursor_default );
 
-    return FALSE;
+    return TRUE;
 }
 
 
@@ -2081,7 +2082,7 @@ cb_viewer_layout_press_button( GtkWidget* layout, GdkEvent* event, gpointer
 
         gtk_widget_set_sensitive( pv->item_copy, FALSE );
 
-        gtk_popover_popdown( GTK_POPOVER(pv->annot_pop_edit) );
+//        gtk_popover_popdown( GTK_POPOVER(pv->annot_pop_edit) );
 
         PdfDocumentPageAnnot* pdf_document_page_annot = NULL;
 
@@ -2090,8 +2091,8 @@ cb_viewer_layout_press_button( GtkWidget* layout, GdkEvent* event, gpointer
             if ( pv->clicked_annot && pv->clicked_annot->type == PDF_ANNOT_TEXT )
             {
                 if ( pdf_document_page_annot != pv->clicked_annot )
-                        pv->clicked_annot->annot_text.activ = FALSE;
-                else pv->clicked_annot->annot_text.activ = TRUE;
+                        pv->clicked_annot->annot_text.open = FALSE;
+                else pv->clicked_annot->annot_text.open = TRUE;
             }
 
             pv->clicked_annot = pdf_document_page_annot;
@@ -2101,12 +2102,9 @@ cb_viewer_layout_press_button( GtkWidget* layout, GdkEvent* event, gpointer
             //wird weiter unten geprüft, ob click_on_text wieder angeschaltet werden soll
             pv->click_on_text = FALSE;
 
-            if ( pv->clicked_annot ) //annot war aktiv
-            {
-                if ( pv->clicked_annot->type == PDF_ANNOT_TEXT )
-                        pv->clicked_annot->annot_text.activ = FALSE;
-                pv->clicked_annot = NULL;
-            }
+            if ( pv->clicked_annot && pv->clicked_annot->type == PDF_ANNOT_TEXT )
+                    pv->clicked_annot->annot_text.open = FALSE;
+            pv->clicked_annot = NULL;
 
             if ( pv->state == 3 ) //Neue AnnotText einfügen
             {
@@ -2150,6 +2148,7 @@ cb_viewer_layout_press_button( GtkWidget* layout, GdkEvent* event, gpointer
                 pv->clicked_annot = g_ptr_array_index(
                         viewer_page->pdf_document_page->arr_annots,
                         viewer_page->pdf_document_page->arr_annots->len - 1 );
+                pv->clicked_annot->annot_text.open = TRUE;
 
                 //Nach Einfügen von annot-text: auf Zeiger zurückflitschen
                 gtk_toggle_button_set_active( GTK_TOGGLE_BUTTON(pv->button_zeiger), TRUE );
@@ -2245,7 +2244,7 @@ cb_viewer_layout_press_button( GtkWidget* layout, GdkEvent* event, gpointer
     }
 #endif
 
-    return FALSE;
+    return TRUE;
 }
 
 
@@ -2696,7 +2695,7 @@ viewer_einrichten_fenster( PdfViewer* pv )
     pv->annot_textview = gtk_text_view_new( );
     gtk_widget_show( pv->annot_textview );
     gtk_container_add( GTK_CONTAINER(pv->annot_pop_edit), pv->annot_textview );
-    gtk_popover_set_modal( GTK_POPOVER(pv->annot_pop_edit), FALSE );
+    gtk_popover_set_modal( GTK_POPOVER(pv->annot_pop_edit), TRUE );
     g_signal_connect( pv->annot_pop_edit, "closed", G_CALLBACK(viewer_annot_edit_closed), pv );
 
     gtk_widget_show_all( pv->vf );
