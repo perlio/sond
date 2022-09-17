@@ -416,6 +416,10 @@ seiten_drehen_foreach( PdfViewer* pv, gint page_pv, gpointer data, gchar** errms
 
     viewer_close_thread_pool_and_transfer( pv );
 
+    //damit in Seite gezeichnete Markierungen nach dem Drehen nicht an falscher Stelle sind
+    pv->clicked_annot = NULL;
+    pv->highlight.page[0] = -1;
+
     viewer_page = g_ptr_array_index( pv->arr_pages, page_pv );
 
     if ( viewer_page->image_page ) gtk_image_clear( GTK_IMAGE(viewer_page->image_page) );
@@ -473,6 +477,8 @@ seiten_drehen_pdf( PdfDocumentPage* pdf_document_page, gint winkel, gchar** errm
         pdf_set_int( ctx, rotate_obj, (int64_t) rotate );
     }
 
+    pdf_document_page->rotate = rotate;
+
     return 0;
 }
 
@@ -499,7 +505,19 @@ seiten_drehen( PdfViewer* pv, GPtrArray* arr_document_page, gint winkel, gchar**
                 pdf_document_page->display_list );
         pdf_document_page->display_list = NULL;
 
+        //annots neu laden
+        g_ptr_array_remove_range( pdf_document_page->arr_annots, 0, pdf_document_page->arr_annots->len );
+        zond_pdf_document_page_load_annots( pdf_document_page );
+
         zond_pdf_document_mutex_unlock( pdf_document_page->document );
+
+        //fz_text_list droppen und auf NULL setzen, mit mutex_page sichern
+        g_mutex_lock( &pdf_document_page->mutex_page );
+
+        fz_drop_stext_page( zond_pdf_document_get_ctx( pdf_document_page->document ),
+                pdf_document_page->stext_page );
+        pdf_document_page->stext_page = NULL;
+        g_mutex_unlock( &pdf_document_page->mutex_page );
 
         rc = viewer_foreach( pv->zond->arr_pv, pdf_document_page,
                 seiten_drehen_foreach, GINT_TO_POINTER(winkel), errmsg );

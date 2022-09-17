@@ -63,6 +63,8 @@ struct _ZondPdfDocumentClass
     GPtrArray* arr_pdf_documents;
 };
 
+void zond_pdf_document_page_load_annots( PdfDocumentPage* );
+
 ZondPdfDocument* zond_pdf_document_open( const gchar*, gint, gint, gchar** );
 
 //Gibt Zeiger auf geöffnetes document mit gchar* == path zurück; keine neue ref!

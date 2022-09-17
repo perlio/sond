@@ -244,7 +244,7 @@ zond_pdf_document_page_annot_load( PdfDocumentPage* pdf_document_page,
 }
 
 
-static void
+void
 zond_pdf_document_page_load_annots( PdfDocumentPage* pdf_document_page )
 {
     pdf_annot* annot = NULL;

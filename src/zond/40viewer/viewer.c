@@ -140,12 +140,12 @@ viewer_draw_image_page( GtkWidget* image, cairo_t* cr, gpointer data )
     transform = fz_post_scale( transform, viewer_page->pdfv->zoom / 100, viewer_page->pdfv->zoom / 100 );
 
     //wenn annot angeclickt wurde
-    if ( viewer_page->pdfv->clicked_annot )
+    if ( viewer_page->pdfv->clicked_annot &&
+            viewer_page->pdfv->clicked_annot->pdf_document_page == viewer_page->pdf_document_page)
     {
         if ( viewer_page->pdfv->clicked_annot->type == PDF_ANNOT_HIGHLIGHT ||
                 viewer_page->pdfv->clicked_annot->type == PDF_ANNOT_UNDERLINE )
         {
-            //Test auf type nicht erforderlich, da clicked_annot nur gesetzt wird, wenn HIGHLIGH oder UNDERLINE
             GArray* arr_quads = viewer_page->pdfv->clicked_annot->annot_text_markup.arr_quads;
 
             for ( gint i = 0; i < arr_quads->len; i++ )
@@ -161,8 +161,7 @@ viewer_draw_image_page( GtkWidget* image, cairo_t* cr, gpointer data )
                 cairo_stroke( cr );
             }
         }
-        else if ( viewer_page->pdfv->clicked_annot->type == PDF_ANNOT_TEXT &&
-                viewer_page->pdfv->clicked_annot->pdf_document_page == viewer_page->pdf_document_page )
+        else if ( viewer_page->pdfv->clicked_annot->type == PDF_ANNOT_TEXT )
         {
             fz_rect rect = { 0, };
 
@@ -1878,7 +1877,7 @@ cb_viewer_layout_release_button( GtkWidget* layout, GdkEvent* event, gpointer da
                     gtk_text_buffer_set_text( gtk_text_view_get_buffer(
                     GTK_TEXT_VIEW(pv->annot_textview) ),
                     pv->clicked_annot->content, -1 );
-            gtk_popover_popup( GTK_POPOVER(pv->annot_pop_edit) );
+//            gtk_popover_popup( GTK_POPOVER(pv->annot_pop_edit) );
             gtk_widget_grab_focus( pv->annot_pop_edit );
         }
     }
