@@ -74,10 +74,35 @@ cb_pao_button_event( GtkWidget* app_window, GdkEvent* event, gpointer data )
 
 
 static void
-cb_text_buffer_changed( GtkTextBuffer* buffer, gpointer zond )
+cb_text_buffer_changed( GtkTextBuffer* buffer, gpointer data )
 {
-    g_object_set_data( G_OBJECT(gtk_text_view_get_buffer(
-            ((Projekt*) zond)->textview )), "changed", GINT_TO_POINTER(1) );
+    gint rc = 0;
+    gchar* errmsg = NULL;
+
+    Projekt* zond = (Projekt*) data;
+
+    //inhalt textview abspeichern
+    GtkTextIter start;
+    GtkTextIter end;
+
+    gtk_text_buffer_get_start_iter( buffer, &start );
+    gtk_text_buffer_get_end_iter( buffer, &end );
+
+    gchar* text = gtk_text_buffer_get_text( buffer, &start, &end, FALSE );
+
+    gint node_id = GPOINTER_TO_INT(g_object_get_data( G_OBJECT(zond->textview),
+            "node-id" ) );
+
+    rc = zond_dbase_set_text( zond->dbase_zond->zond_dbase_work, node_id, text, &errmsg );
+    g_free( text );
+    if ( rc )
+    {
+        display_message( zond->app_window, "Fehler in cb_textview_focus_out:\n\n"
+                "Bei Aufruf zond_dbase_set_text:\n", errmsg, NULL );
+        g_free( errmsg );
+
+        return;
+    }
 
     return;
 }
@@ -118,46 +143,16 @@ cb_key_press( GtkWidget* treeview, GdkEventKey* event, gpointer data )
 static gboolean
 cb_textview_focus_out( GtkWidget* textview, GdkEvent* event, gpointer user_data )
 {
-    gint rc = 0;
-    gchar* errmsg = NULL;
-
     Projekt* zond = (Projekt*) user_data;
 
     //key_press-event-signal einschalten
     zond->key_press_signal = g_signal_connect( zond->app_window,
             "key-press-event", G_CALLBACK(cb_key_press), zond );
 
-    g_signal_handler_disconnect( gtk_text_view_get_buffer( GTK_TEXT_VIEW(textview) ),
+    g_signal_handler_disconnect(
+            gtk_text_view_get_buffer( GTK_TEXT_VIEW(textview) ),
             zond->text_buffer_changed_signal );
     zond->text_buffer_changed_signal = 0;
-
-    GtkTextBuffer* buffer = gtk_text_view_get_buffer( GTK_TEXT_VIEW(textview) );
-
-    if ( g_object_get_data( G_OBJECT(buffer), "changed" ) )
-    {
-        //inhalt textview abspeichern
-        GtkTextIter start;
-        GtkTextIter end;
-
-        gtk_text_buffer_get_start_iter( buffer, &start );
-        gtk_text_buffer_get_end_iter( buffer, &end );
-
-        gchar* text = gtk_text_buffer_get_text( buffer, &start, &end, FALSE );
-
-        gint node_id = GPOINTER_TO_INT(g_object_get_data( G_OBJECT(zond->textview),
-                "node-id" ) );
-
-        rc = zond_dbase_set_text( zond->dbase_zond->zond_dbase_work, node_id, text, &errmsg );
-        g_free( text );
-        if ( rc )
-        {
-            display_message( zond->app_window, "Fehler in cb_textview_focus_out:\n\n"
-                    "Bei Aufruf zond_dbase_set_text:\n", errmsg, NULL );
-            g_free( errmsg );
-
-            return FALSE;
-        }
-    }
 
     gtk_widget_queue_draw( GTK_WIDGET(zond->treeview[BAUM_AUSWERTUNG]) );
 
