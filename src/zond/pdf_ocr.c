@@ -1717,7 +1717,7 @@ init_tesseract( TessBaseAPI** handle, TessResultRenderer** renderer, gchar* path
     if ( !tessdata_dir )
     {
         TessBaseAPIDelete( *handle );
-        ERROR_SOND( "get_path_from_base" )
+        ERROR_S
     }
 
     rc = TessBaseAPIInit3( *handle, tessdata_dir, "deu" );
@@ -1726,7 +1726,7 @@ init_tesseract( TessBaseAPI** handle, TessResultRenderer** renderer, gchar* path
     {
         TessBaseAPIEnd( *handle );
         TessBaseAPIDelete( *handle );
-        ERROR_SOND( "TessBaseAPIInit3:\nFehler bei Initialisierung" )
+        ERROR_S_MESSAGE( "TessBaseAPIInit3:\nFehler bei Initialisierung" )
     }
 
     //TessPdfRenderer
@@ -1757,7 +1757,7 @@ pdf_ocr_pages( Projekt* zond, InfoWindow* info_window, GPtrArray* arr_document_p
     TessResultRenderer* renderer = NULL;
     gchar* path_tmp = NULL;
 
-    path_tmp = get_path_from_base( "tmp/tess_tmp", errmsg );
+    path_tmp = g_strconcat( g_get_tmp_dir(), "\\tess_tmp", NULL );
     if ( !path_tmp ) ERROR_S
 
     rc = init_tesseract( &handle, &renderer, path_tmp, errmsg );
@@ -1779,9 +1779,7 @@ pdf_ocr_pages( Projekt* zond, InfoWindow* info_window, GPtrArray* arr_document_p
     //erzeugtes PDF mit nur Text mit muPDF öffnen
     pdf_document* doc_text = NULL;
 
-    path_tmp = get_path_from_base( "tmp/tess_tmp", errmsg );
-    if ( !path_tmp ) ERROR_S
-    path_tmp = add_string( path_tmp, g_strdup( ".pdf" ) );
+    path_tmp = g_strconcat( g_get_tmp_dir(), "\\tess_tmp.pdf", NULL );
 
     ctx = zond->ctx;
 

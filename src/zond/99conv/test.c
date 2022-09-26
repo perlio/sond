@@ -20,31 +20,7 @@
 gint
 test( Projekt* zond, gchar** errmsg )
 {
-    gint rc = 0;
-    gchar* text = NULL;
-    gint ID_entity = 0;
-    GtkWidget* window = NULL;
-    GtkWidget* swindow = NULL;
-    GtkWidget* sdn = NULL;
-
-    rc = abfrage_frage( zond->app_window, "ID_entity eingeben", NULL, &text );
-    if ( rc != GTK_RESPONSE_YES ) return 0;
-
-    ID_entity = atoi( text );
-
-    window = gtk_window_new( GTK_WINDOW_TOPLEVEL );
-    swindow = gtk_scrolled_window_new( NULL, NULL );
-
-    sdn = sond_database_node_load_new( zond->dbase_zond->zond_dbase_work, ID_entity, errmsg );
-    if ( !sdn ) ERROR_S
-
-    gtk_container_add( GTK_CONTAINER(swindow), sdn );
-    gtk_container_add( GTK_CONTAINER(window), swindow );
-
-    gtk_widget_show_all( window );
-
-    gtk_window_resize(GTK_WINDOW(window), 500, 300 );
-
+    printf("%s\n", g_get_tmp_dir() );
     return 0;
 }
 
