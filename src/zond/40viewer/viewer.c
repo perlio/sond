@@ -1898,7 +1898,7 @@ cb_viewer_motion_notify( GtkWidget* window, GdkEvent* event, gpointer data )
     //Vielleicht Fehler in GDK? Oder extra?
     gdk_window_set_cursor( pv->gdk_window, pv->cursor_default );
 
-    return TRUE;
+    return FALSE;
 }
 
 
@@ -2503,9 +2503,9 @@ viewer_einrichten_fenster( PdfViewer* pv )
     pv->headerbar = gtk_header_bar_new( );
     gtk_header_bar_set_show_close_button( GTK_HEADER_BAR(pv->headerbar),
             TRUE );
-    gtk_header_bar_set_has_subtitle(GTK_HEADER_BAR(pv->headerbar), TRUE);
+    gtk_header_bar_set_has_subtitle(GTK_HEADER_BAR(pv->headerbar), TRUE );
     gtk_header_bar_set_decoration_layout(GTK_HEADER_BAR(pv->headerbar),
-            ":minimize,close" );
+            ":minimize,maximize,close" );
     gtk_header_bar_set_show_close_button(GTK_HEADER_BAR(pv->headerbar),
             TRUE);
     gtk_window_set_titlebar( GTK_WINDOW(pv->vf), pv->headerbar );
