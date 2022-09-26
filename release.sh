@@ -1,8 +1,6 @@
 rm -fr release
 mkdir release
 
-mkdir release/tmp
-
 mkdir release/bin
 cp bin/zond.exe release/bin/zond.exe
 cp bin/viewer.exe release/bin/viewer.exe
