@@ -1326,7 +1326,7 @@ zond_gemini_save_ereignis( gpointer database, Arrays* arrays, Ereignis* ereignis
             if ( rc == -1 ) ERROR_S
             else ID_entity_PA = rc;
 
-            //rel zwischen ueA und TKÜ-Maßnahme erzeugen
+            //rel zwischen TKÜ-Ereignis und PA erzeugen
             rc = sond_database_insert_rel( database, ID_entity_TKUE_ereignis,
                     10010, ID_entity_PA, errmsg );
             if ( rc == -1 ) ERROR_S
@@ -1938,7 +1938,7 @@ zond_gemini_create_tkue_table( Projekt* zond, gchar** errmsg )
     const gchar* sql =
             "CREATE TABLE IF NOT EXISTS tkue AS "
 
-            "SELECT datei_name, page_begin, index_begin, page_end, index_end, beginn, ID_massnahme, ID_uePerson "
+            "SELECT datei_name, page_begin, index_begin, page_end, index_end, beginn, ID_massnahme, ID_uePerson, ID_PA, rufnr_pa "
                 "FROM "
                 "(SELECT tkue_ereignis, beginn "
                     "FROM "
@@ -1961,7 +1961,7 @@ zond_gemini_create_tkue_table( Projekt* zond, gchar** errmsg )
                         "rels "
                         "JOIN "
                         "(SELECT entities.ID AS rel FROM entities WHERE entities.ID_label=10010) "
-                        "ON rels.entity_rel=rel) /*alle rels _hat_ */ "
+                        "ON rels.entity_rel=rel) "//alle rels _hat_
                     "JOIN "
                     "(SELECT gemini, datei_name, page_begin, index_begin, page_end, index_end "
                         "FROM "
@@ -1974,7 +1974,7 @@ zond_gemini_create_tkue_table( Projekt* zond, gchar** errmsg )
                                 "rels "
                                 "JOIN "
                                 "(SELECT entities.ID AS rel FROM entities WHERE entities.ID_label=10010) "
-                                "ON rels.entity_rel=rel) /*alle rels _hat_ */ "
+                                "ON rels.entity_rel=rel) " //alle rels _hat_
                             "ON gemini=subject_gemini) "
                         "JOIN "
                         "(SELECT fundstelle, datei_name, page_begin, index_begin, page_end, index_end  "
@@ -2034,7 +2034,7 @@ zond_gemini_create_tkue_table( Projekt* zond, gchar** errmsg )
                         "ON fundstelle=object_fundstelle) "
                     "ON gemini=object_gemini) "
                 "ON tkue_ereignis=subject_tkue_ereignis "
-                "JOIN /* mit massnahme!*/ "
+                "LEFT JOIN " // mit massnahme!
                 "(SELECT subject_tkue_ereignis AS subject_tkue_ereignis_ii, ID_massnahme, ID_uePerson "
                     "FROM "
                     "(SELECT rels.entity_subject AS subject_tkue_ereignis, rels.entity_object AS object_massnahme "
@@ -2062,6 +2062,33 @@ zond_gemini_create_tkue_table( Projekt* zond, gchar** errmsg )
                         "ON ID_ueperson=object_uePerson) "
                     "ON ID_massnahme=subject_massnahme) "
                 "ON tkue_ereignis=subject_tkue_ereignis_ii "
+
+                "LEFT JOIN " // mit PA!
+                "(SELECT subject_tkue_ereignis AS subject_tkue_ereignis_iii, ID_PA, rufnr_pa "
+                    "FROM "
+                    "(SELECT rels.entity_subject AS subject_tkue_ereignis, rels.entity_object AS object_PA "
+                        "FROM "
+                        "rels "
+                        "JOIN "
+                        "(SELECT entities.ID AS rel FROM entities WHERE entities.ID_label=10010) "
+                        "ON rels.entity_rel=rel) "
+                    "JOIN "
+                    "(SELECT entities.ID AS ID_PA FROM entities WHERE entities.ID_label=425) "
+                    "ON ID_PA=object_PA "
+                    "JOIN "
+
+                    "(SELECT properties.entity_subject AS subject_property, properties.value AS rufnr_pa "
+                        "FROM "
+                        "properties "
+                        "JOIN "
+                        "(SELECT entities.ID AS property FROM entities WHERE entities.ID_label=10100) "
+                        "ON properties.entity_property=property) "
+                    "ON ID_PA=subject_property) "
+
+
+
+                "ON tkue_ereignis=subject_tkue_ereignis_iii "
+
                 "ORDER BY beginn ASC "
                 ";";
 
@@ -2304,6 +2331,7 @@ zond_gemini_select( Projekt* zond, gchar** errmsg )
     GtkWidget* box_entries = NULL;
     GtkWidget* entry_von = NULL;
     GtkWidget* entry_bis = NULL;
+    GtkWidget* entry_PA = NULL;
 
     gemini = gtk_dialog_new_with_buttons( "Gemini", GTK_WINDOW(zond->app_window),
             GTK_DIALOG_DESTROY_WITH_PARENT | GTK_DIALOG_MODAL, "Ok",
@@ -2343,6 +2371,10 @@ zond_gemini_select( Projekt* zond, gchar** errmsg )
     entry_bis = gtk_entry_new( );
     gtk_entry_set_placeholder_text( GTK_ENTRY(entry_bis), "Ende" );
     gtk_box_pack_start( GTK_BOX(box_entries), entry_bis, FALSE, FALSE, 0 );
+
+    entry_PA = gtk_entry_new( );
+    gtk_entry_set_placeholder_text( GTK_ENTRY(entry_PA), "Partnernr[[,Partnernr]...]" );
+    gtk_box_pack_start( GTK_BOX(box_entries), entry_PA, FALSE, FALSE, 0 );
 
     //Leitungsnrn. sammeln
     rc = sond_database_get_subject_and_first_property_value_for_labels( zond->dbase_zond->zond_dbase_work,
@@ -2389,6 +2421,7 @@ zond_gemini_select( Projekt* zond, gchar** errmsg )
         PdfViewer* pdfv = NULL;
         const gchar* beginn = NULL;
         const gchar* ende = NULL;
+        const gchar* PAs = NULL;
 
         //Grund-SQL-String
         sql = g_strdup( "SELECT datei_name, page_begin, index_begin, page_end, index_end, beginn FROM "
@@ -2447,6 +2480,31 @@ zond_gemini_select( Projekt* zond, gchar** errmsg )
 
             text = g_strdup_printf( "AND beginn<='%s' ", ende );
             sql = add_string( sql, text );
+        }
+
+        PAs = gtk_entry_get_text( GTK_ENTRY(entry_PA) );
+
+        if ( g_strcmp0( PAs, "" ) )
+        {
+            gchar** PA_split = NULL;
+            gint zaehler = 0;
+
+            PA_split = g_strsplit( PAs, ",", 0 );
+
+            while ( PA_split[zaehler] )
+            {
+                gchar* text = NULL;
+
+                if ( zaehler == 0 ) text = g_strdup_printf( "AND (rufnr_pa='%s' ", PA_split[zaehler] );
+                else text = g_strdup_printf( "OR rufnr_pa='%s' ", PA_split[zaehler] );
+                sql = add_string( sql, text );
+
+                zaehler++;
+            }
+
+            if ( zaehler ) sql = add_string( sql, g_strdup( ") " ) ); //if zaehler, weil text_entry "," sein könnte, dann zwei leere strings
+
+            g_strfreev( PA_split );
         }
 
         gtk_widget_destroy( gemini );

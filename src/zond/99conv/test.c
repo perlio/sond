@@ -6,6 +6,7 @@
 #include "../global_types.h"
 #include "../zond_pdf_document.h"
 #include "../zond_tree_store.h"
+#include "../zond_gemini.h"
 #include "../../sond_treeview.h"
 #include "../../misc.h"
 #include "../../sond_database_node.h"
