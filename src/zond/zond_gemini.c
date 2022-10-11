@@ -2337,6 +2337,7 @@ zond_gemini_select( Projekt* zond, gchar** errmsg )
             GTK_DIALOG_DESTROY_WITH_PARENT | GTK_DIALOG_MODAL, "Ok",
             GTK_RESPONSE_OK, "Abbrechen", GTK_RESPONSE_CANCEL, NULL );
     gtk_widget_set_vexpand( gemini, FALSE );
+    gtk_window_set_default_size( GTK_WINDOW(gemini), -1, 400 );
 
     box = gtk_dialog_get_content_area( GTK_DIALOG(gemini) );
 
