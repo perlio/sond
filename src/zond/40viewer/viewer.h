@@ -26,6 +26,14 @@ typedef struct _Page_Quad
     fz_quad quad[1000];
 } PageQuad;
 
+typedef struct _Text_Occ
+{
+    gint page_act;
+    GArray* arr_quad;
+    gint index_act;
+    gboolean not_found;
+} TextOcc;
+
 typedef struct _Pdf_Viewer
 {
     Projekt* zond;
@@ -90,9 +98,7 @@ typedef struct _Pdf_Viewer
     DisplayedDocument* dd;
     GPtrArray* arr_pages; //array von ViewerPage*
 
-    GArray* arr_text_occ;
-    gint text_occ_act;
-    gint text_occ_search_completed;
+    TextOcc text_occ;
 
     GThreadPool* thread_pool_page;
     GArray* arr_rendered;

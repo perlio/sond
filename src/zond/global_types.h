@@ -219,12 +219,4 @@ typedef struct _Displayed_Document
 } DisplayedDocument;
 
 
-typedef struct _Text_Occ
-{
-    fz_quad quad;
-    gint page;
-} TextOcc;
-
-
-
 #endif // GLOBAL_TYPES_H_INCLUDED
