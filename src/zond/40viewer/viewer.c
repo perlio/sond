@@ -937,7 +937,13 @@ viewer_render_stext_page( PdfViewer* pv, ViewerPageNew* viewer_page, gchar** err
     //structured text-device
     fz_try( ctx ) s_t_device = fz_new_stext_device( ctx,
             viewer_page->pdf_document_page->stext_page, &opts );
-    fz_catch( ctx ) ERROR_MUPDF( "fz_new_stext_device" )
+    fz_catch( ctx )
+    {
+        fz_drop_stext_page( ctx, viewer_page->pdf_document_page->stext_page );
+        viewer_page->pdf_document_page->stext_page = NULL;
+
+        ERROR_MUPDF( "fz_new_stext_device" )
+    }
 
     //und durchs stext-device laufen lassen
     fz_try( ctx ) fz_run_page( ctx, (fz_page*) viewer_page->pdf_document_page->page, s_t_device,
@@ -947,7 +953,13 @@ viewer_render_stext_page( PdfViewer* pv, ViewerPageNew* viewer_page, gchar** err
         fz_close_device( ctx, s_t_device );
         fz_drop_device( ctx, s_t_device );
     }
-    fz_catch( ctx ) ERROR_MUPDF( "fz_run_display_list" )
+    fz_catch( ctx )
+    {
+        fz_drop_stext_page( ctx, viewer_page->pdf_document_page->stext_page );
+        viewer_page->pdf_document_page->stext_page = NULL;
+
+        ERROR_MUPDF( "fz_run_page" )
+    }
 
 return 0;
 }
