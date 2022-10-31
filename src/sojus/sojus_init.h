@@ -21,7 +21,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #define SOJUS_INIT_H_INCLUDED
 
 #include <gtk/gtk.h>
-#include <mysql/mysql.h>
+#include <mysql.h>
 
 
 typedef struct _Sojus

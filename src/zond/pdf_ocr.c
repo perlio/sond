@@ -20,14 +20,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <mupdf/pdf.h>
 #include <gtk/gtk.h>
 #include <tesseract/capi.h>
-#include <allheaders.h>
 #include <glib/gstdio.h>
 
 #include "zond_pdf_document.h"
 
 #include "../misc.h"
-
-//#include "40viewer/document.h"
 
 #include "99conv/pdf.h"
 #include "99conv/general.h"
@@ -1707,18 +1704,39 @@ static gint
 init_tesseract( TessBaseAPI** handle, TessResultRenderer** renderer, gchar* path_tmp, gchar** errmsg )
 {
     gint rc = 0;
+    gchar* base_dir = NULL;
     gchar* tessdata_dir = NULL;
 
     //TessBaseAPI
     *handle = TessBaseAPICreate( );
     if ( !(*handle) ) ERROR_SOND( "TessBaseApiCreate" )
 
-    tessdata_dir = get_path_from_base( "share/tessdata", errmsg );
-    if ( !tessdata_dir )
+#ifdef _WIN32
+    DWORD ret = 0;
+    TCHAR buff[MAX_PATH] = { 0 };
+
+    ret = GetModuleFileName(NULL, buff, _countof(buff));
+    if ( !ret )
     {
-        TessBaseAPIDelete( *handle );
-        ERROR_S
+        if ( errmsg )
+        {
+            DWORD error_code = 0;
+
+            error_code = GetLastError( );
+
+            *errmsg = add_string( *errmsg, g_strdup_printf( "Bei Aufruf GetModuleFileName:\n"
+                    "Error Code: %li", error_code ) );
+        }
+        return -1;
     }
+
+    base_dir = g_strndup( (const gchar*) buff, strlen( buff ) -
+            strlen( g_strrstr( (const gchar*) buff, "\\" ) ) - 3 );
+#elif defined( __linux__ )
+    base_dir = g_strdup( "/usr/share/" );
+#endif // _WIN32
+
+    tessdata_dir = add_string( base_dir, g_strdup( "share/tessdata" ) );
 
     rc = TessBaseAPIInit3( *handle, tessdata_dir, "deu" );
     g_free( tessdata_dir );

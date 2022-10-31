@@ -226,13 +226,12 @@ pdf_save( fz_context* ctx, pdf_document* pdf_doc, const gchar* path,
 {
     gchar* path_tmp = NULL;
     pdf_write_options opts =
+#ifdef __WIN32
             { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, ~0, "", "", 0 };
-
-    if ( pdf_count_pages( ctx, pdf_doc ) < BIG_PDF )
-    {
-        opts = opts_default;
-        if ( !pdf_doc->crypt ) opts.do_garbage = 4;
-    }
+#elif defined(__linux__)
+            { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, ~0, "", "" };
+#endif // __win32
+    if ( pdf_count_pages( ctx, pdf_doc ) < BIG_PDF && !pdf_doc->crypt ) opts.do_garbage = 4;
 
     path_tmp = g_strconcat( path, ".tmp_clean", NULL );
 

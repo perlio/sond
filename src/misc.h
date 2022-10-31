@@ -56,8 +56,6 @@ gchar* filename_speichern( GtkWindow*, const gchar*, const gchar* );
 
 gchar* filename_oeffnen( GtkWindow* );
 
-gchar* get_path_from_base( const gchar*, gchar** );
-
 gchar* get_rel_path_from_file( const gchar*, const GFile* );
 
 void misc_set_calendar( GtkCalendar*, const gchar* );

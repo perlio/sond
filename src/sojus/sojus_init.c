@@ -37,7 +37,7 @@ cb_socket_incoming(GSocketService *service,
     GError* error = NULL;
 
     Sojus* sojus = (Sojus*) data;
-
+display_message( sojus->app_window, "Nachricht erhalten", NULL );
     GOutputStream * ostream = g_io_stream_get_output_stream(G_IO_STREAM (connection));
 
     gchar* host = g_settings_get_string( sojus->settings, "host" );

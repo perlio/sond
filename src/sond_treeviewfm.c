@@ -459,6 +459,7 @@ sond_treeviewfm_datei_oeffnen( const gchar* path, gchar** errmsg )
         return -1;
     }
 #else //Linux/Mac
+/*
     gchar* exe = NULL;
     gchar* argv[3] = { NULL };
 
@@ -479,7 +480,7 @@ sond_treeviewfm_datei_oeffnen( const gchar* path, gchar** errmsg )
     }
 
     g_child_watch_add( g_pid, (GChildWatchFunc) close_pid, NULL );
-
+*/
 #endif // _WIN32
 
     return 0;
@@ -838,7 +839,7 @@ sond_treeviewfm_render_file_size( GtkTreeViewColumn* column, GtkCellRenderer* re
     size = g_file_info_get_size( info );
     g_object_unref( info );
 
-    text = g_strdup_printf( "%lld", size );
+    text = g_strdup_printf( "%ld", size );
 
     g_object_set( G_OBJECT(renderer), "text", text, NULL );
     g_free( text );

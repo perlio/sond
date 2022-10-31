@@ -73,9 +73,11 @@
 		<Compiler>
 			<Add option="-Wall" />
 			<Add option="`pkg-config --cflags gtk+-3.0`" />
+			<Add option="`pkg-config --cflags glib-2.0`" />
 			<Add option="`pkg-config --cflags freetype2`" />
 			<Add option="`pkg-config --cflags tesseract`" />
 			<Add option="`pkg-config --cflags lept`" />
+			<Add option="`pkg-config --cflags libmariadb`" />
 			<Add option="--verbose" />
 		</Compiler>
 		<Linker>
@@ -85,7 +87,6 @@
 			<Add option="`pkg-config --libs libssl`" />
 			<Add option="`pkg-config --libs tesseract`" />
 			<Add option="`pkg-config --libs lept`" />
-			<Add option="`pkg-config --libs mariadb`" />
 			<Add option="`pkg-config --libs libmariadb`" />
 			<Add option="-Wl,--allow-multiple-definition" />
 			<Add library="C:/msys64/mingw64/bin/libpodofo.dll" />

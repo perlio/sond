@@ -226,7 +226,6 @@ gint
 oeffnen_datei( Projekt* zond, const gchar* rel_path, Anbindung* anbindung,
         const PdfPos* pos_pdf, gchar** errmsg )
 {
-    gint rc = 0;
     GError* error = NULL;
     GPid g_pid = 0;
 
@@ -237,6 +236,8 @@ oeffnen_datei( Projekt* zond, const gchar* rel_path, Anbindung* anbindung,
         //Wenn pdf-Datei und internalviewer gewählt
         if ( g_settings_get_boolean( zond->settings, "internalviewer" ) )
         {
+            gint rc = 0;
+
             rc = oeffnen_internal_viewer( zond, rel_path, anbindung, pos_pdf, errmsg );
             if ( rc ) ERROR_SOND( "oeffnen_internal_viewer" )
 

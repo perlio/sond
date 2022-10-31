@@ -19,7 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include <gtk/gtk.h>
 #include <sqlite3.h>
-#include <mysql/mysql.h>
+#include <mysql.h>
 
 #include "misc.h"
 #include "sond_database.h"

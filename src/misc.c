@@ -270,60 +270,6 @@ filename_oeffnen( GtkWindow* window )
 }
 
 
-/*
- *  Gibt "...xxx\" zurück
- */
-gchar*
-get_path_from_base( const gchar* path, gchar** errmsg )
-{
-    gchar* base_dir = NULL;
-    gchar* path_from_base = NULL;
-
-#ifdef _WIN32
-    DWORD ret = 0;
-    TCHAR buff[MAX_PATH] = { 0 };
-
-    ret = GetModuleFileName(NULL, buff, _countof(buff));
-    if ( !ret )
-    {
-        if ( errmsg )
-        {
-            DWORD error_code = 0;
-
-            error_code = GetLastError( );
-
-            *errmsg = add_string( *errmsg, g_strdup_printf( "Bei Aufruf GetModuleFileName:\n"
-                    "Error Code: %li", error_code ) );
-        }
-        return NULL;
-    }
-
-    base_dir = g_strndup( (const gchar*) buff, strlen( buff ) -
-            strlen( g_strrstr( (const gchar*) buff, "\\" ) ) - 3 );
-#elif defined( __linux__ )
-    gchar buff[PATH_MAX] = { 0 };
-    gchar proc[PATH_MAX] = { 0 };
-    pid_t pid = getpid();
-    sprintf( proc, "/proc/%d/exe", pid );
-
-    if ( readlink( proc, buff, PATH_MAX ) == -1 )
-    {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf ", __func__, ":\n "
-                "Bei Aufruf readlink:\n", strerror( errno ), NULL );
-
-        return NULL;
-    }
-
-    base_dir = g_strndup( (const gchar*) buff, strlen( buff ) -
-            strlen( g_strrstr( (const gchar*) buff, "\\" ) ) - 3 );
-#endif // _WIN32
-
-    path_from_base = add_string( base_dir, g_strdup( path ) );
-
-    return path_from_base;
-}
-
-
 gchar*
 get_rel_path_from_file( const gchar* root, const GFile* file )
 {
