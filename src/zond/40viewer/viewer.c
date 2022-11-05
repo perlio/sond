@@ -1762,8 +1762,7 @@ viewer_annot_edit_closed( GtkWidget* popover, gpointer data )
     pdf_document_page_annot = g_object_get_data( G_OBJECT(popover), "pdf-document-page-annot" );
 
     text_buffer = gtk_text_view_get_buffer( GTK_TEXT_VIEW(pdfv->annot_textview) );
-    gtk_text_buffer_get_start_iter( text_buffer, &start );
-    gtk_text_buffer_get_end_iter( text_buffer, &end );
+    gtk_text_buffer_get_bounds( buffer, &start, &end );
 
     text = gtk_text_buffer_get_text( text_buffer, &start, &end, TRUE );
 

@@ -84,9 +84,7 @@ cb_text_buffer_changed( GtkTextBuffer* buffer, gpointer data )
     //inhalt textview abspeichern
     GtkTextIter start;
     GtkTextIter end;
-
-    gtk_text_buffer_get_start_iter( buffer, &start );
-    gtk_text_buffer_get_end_iter( buffer, &end );
+    gtk_text_buffer_get_bounds( buffer, &start, &end );
 
     gchar* text = gtk_text_buffer_get_text( buffer, &start, &end, FALSE );
 

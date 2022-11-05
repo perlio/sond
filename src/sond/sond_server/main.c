@@ -12,7 +12,44 @@ typedef struct _Sond_Server
     gchar* base_dir;
     gchar* log_file;
     GMainLoop* loop;
+    MYSQL* con;
 } SondServer;
+
+
+gint static
+get_auth_level( const gchar* auth )
+{
+    gchar* user = NULL;
+    gchar* password = NULL;
+
+}
+
+
+static gchar*
+parse_imessage( const gchar* auth, const gchar* command, const gchar* params )
+{
+    gint auth_level = 0;
+
+    auth_level = get_auth_level( auth );
+    if ( auth_level == 0 ) return g_strdup( "AUTHENTIFICATION FAILED" );
+
+    if ( g_strcmp0( command, "SHUTDOWN" ) )
+    {
+        g_main_loop_quit( sond_server->loop );
+        omessage = g_strdup( "SondServer wird beendet" );
+    }
+    else if ( g_strcmp0( command, "NEUE_AKTE" ) )
+    {
+
+    }
+    else
+    {
+        g_warning( "Nachricht enthält keinen bekannten Befehl" );
+        omessage = g_strdup( "NO_KNOWN_COMMAND" );
+    }
+
+    return omessage;
+}
 
 
 #define MAX_MSG_SIZE 2048
@@ -30,6 +67,7 @@ callback_socket_incoming( GSocketService *service,
     gchar imessage[MAX_MSG_SIZE] = { 0 };
     gchar* omessage = NULL;
     SondServer* sond_server = NULL;
+    gchar** imessage_strv = NULL;
 
     sond_server = data;
 
@@ -46,27 +84,44 @@ callback_socket_incoming( GSocketService *service,
     else if ( ret == 0 )
     {
         g_warning( "input-stream hat keinen Inhalt" );
-        omessage = g_strdup( "NO_MESSAGE" );
+        omessage = g_strdup( "COULD_NOT_READ_MESSAGE" );
     }
     else if ( ret > MAX_MSG_SIZE )
     {
-        g_message( "Nachricht abgeschnitten" );
+        g_warning( "Nachricht abgeschnitten" );
         omessage = g_strdup( "MESSAGE_TRUNCATED" );
     }
 
-    if ( g_str_has_prefix( imessage, "SHUTDOWN" ) )
-    {
-        g_main_loop_quit( sond_server->loop );
-        return FALSE;
-    }
-    else if ( g_str_has_prefix( imessage, "AKTE_ANLEGEN" ) )
-    {
+    imessage_strv = g_strsplit( imessage, ":", 3 );
 
+    if ( imessage_strv[0] == NULL ) //empty vector
+    {
+        g_warning( "input-stream ist leer" );
+        omessage = g_strdup( "EMPTY_MESSAGE" );
     }
     else
     {
-        g_warning( "Nachricht enthält keinen bekannten Befehl" );
-        omessage = g_strdup( "NO_KNOWN_COMMAND" );
+        if ( imessage_strv[1] == NULL ) //
+        {
+            g_warning( "no-command" );
+            g_strfreev( imessage_strv );
+            omessage = g_strdup( "NO COMMAND" );
+        }
+        else
+        {
+            if ( imessage_strv[2] == NULL )
+            {
+                g_warning( "no params" );
+                g_strfreev( imessage_strv );
+                omessage = g_strdup( "NO PARAMS" );
+            }
+            else
+            {
+                omessage = parse_imessage( imessage_strv[0], imessage_strv[1],
+                        imessage_strv[2] );
+                g_strfreev( imessage_strv );
+            }
+        }
     }
 
     ret = g_output_stream_write( ostream, omessage, strlen( omessage ), NULL, &error );
@@ -87,6 +142,7 @@ sond_server_free( SondServer* sond_server )
 {
     g_free( sond_server->base_dir );
     g_free( sond_server->log_file );
+    mysql_close( sond_server->con );
 
     return;
 }
@@ -134,6 +190,8 @@ main( gint argc, gchar** argv )
     gchar result[PATH_MAX] = { 0 };
     ssize_t count = 0;
 
+    if ( argc != 2 ) g_error( "Usage: SondServer [mariadb-password]" );
+
     //Arbeitserzeichnis ermitteln
     count = readlink("/proc/self/exe", result, PATH_MAX);
     if (count == -1) g_error( "Programmverzeichnis konnte nicht ermittelt werden - %s", strerror( errno ) );
@@ -149,6 +207,28 @@ main( gint argc, gchar** argv )
     g_free( conf_file );
     if ( success )
     {
+        gchar* host = NULL;
+        gint port = 0;
+        gchar* user = NULL;
+
+        host = g_key_file_get_string( keyfile, "MARIADB", "host", &error );
+        if ( error ) g_error( "MariaDB-host konnte nicht ermittelt werden:\n%s",
+                error->message );
+
+        port = g_key_file_get_integer( keyfile, "MARIADB", "port", &error );
+        if ( error ) g_error( "MariaDB-port konnte nicht ermittelt werden:\n%s",
+                error->message );
+
+        user = g_key_file_get_string( keyfile, "MARIADB", "user", &error );
+        if ( error ) g_error( "MariaDB-user konnte nicht ermittelt werden:\n%s",
+                error->message );
+
+        sond_server.con = mysql_init( NULL );
+        if ( !mysql_real_connect( sond_server.con, host, user, argv[1], "Sond",
+                port, NULL, CLIENT_MULTI_STATEMENTS ) )
+                g_error( "Verbindung zur Datenbank konnte nicht hergestellt "
+                "werden:\n%s", mysql_error( sond_server.con ) );
+
         ip_address = g_key_file_get_string( keyfile, "SOCKET", "bind", &error );
         if ( error )
         {
