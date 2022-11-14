@@ -9,6 +9,6 @@
 !.gitignore
 !LICENSE
 !sond.cbp
-!sond_debian.cbp
+!sond debian.cbp
 !release.sh
 
