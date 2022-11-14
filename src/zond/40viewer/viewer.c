@@ -165,7 +165,7 @@ viewer_draw_image_page( GtkWidget* image, cairo_t* cr, gpointer data )
         {
             fz_rect rect = { 0, };
 
-            rect = fz_transform_rect( viewer_page->pdfv->clicked_annot->rect, transform );
+            rect = fz_transform_rect( viewer_page->pdfv->clicked_annot->annot_text.rect, transform );
 
             cairo_move_to( cr, rect.x0, rect.y0 );
             cairo_line_to( cr, rect.x1, rect.y0 );
@@ -1379,7 +1379,7 @@ viewer_on_annot( PdfViewer* pv, PdfPunkt pdf_punkt )
         }
         else if ( pdf_document_page_annot->type == PDF_ANNOT_TEXT )
                 {if ( fz_is_point_inside_rect( pdf_punkt.punkt,
-                pdf_document_page_annot->rect ) ) return pdf_document_page_annot;}
+                pdf_document_page_annot->annot_text.rect ) ) return pdf_document_page_annot;}
     }
 
     return NULL;
@@ -1692,11 +1692,16 @@ viewer_annot_create( ViewerPageNew* viewer_page, PdfViewer* pdfv,
             pdf_drop_annot( ctx, annot );
             ERROR_MUPDF( "pdf_set_annot_icon_name" )
         }
+
+        fz_try( ctx ) pdf_set_annot_rect( ctx, annot, viewer_rotate_rect( viewer_page, rect ) );
+        fz_catch( ctx )
+        {
+            pdf_drop_annot( ctx, annot );
+            ERROR_MUPDF( "pdf_set_annot_rect" )
+        }
     }
 
-    fz_try( ctx ) pdf_set_annot_rect( ctx, annot, viewer_rotate_rect( viewer_page, rect ) );
-    fz_always( ctx ) pdf_drop_annot( ctx, annot );
-    fz_catch( ctx ) ERROR_MUPDF( "pdf_set_annot_rect" )
+    pdf_drop_annot( ctx, annot );
 
     pdf_update_page( ctx, viewer_page->pdf_document_page->page );
 
@@ -1706,7 +1711,6 @@ viewer_annot_create( ViewerPageNew* viewer_page, PdfViewer* pdfv,
     pdf_document_page_annot->type = art;
     pdf_document_page_annot->flags = 28; //scheint so'n default zu sein...
     pdf_document_page_annot->pdf_document_page = viewer_page->pdf_document_page;
-    pdf_document_page_annot->rect = rect;
 
     //Text-Markup-annots
     if ( art == PDF_ANNOT_HIGHLIGHT || art == PDF_ANNOT_UNDERLINE )
@@ -1731,6 +1735,7 @@ viewer_annot_create( ViewerPageNew* viewer_page, PdfViewer* pdfv,
     }
     else if ( pdf_document_page_annot->type == PDF_ANNOT_TEXT )
     {
+        pdf_document_page_annot->annot_text.rect = rect;
         pdf_document_page_annot->annot_text.open = FALSE;
         pdf_document_page_annot->annot_text.name = "Comment";
     }
@@ -1873,15 +1878,15 @@ cb_viewer_layout_release_button( GtkWidget* layout, GdkEvent* event, gpointer da
 
             ctx = zond_pdf_document_get_ctx( viewer_page->pdf_document_page->document );
 
-            pv->clicked_annot->rect =
+            pv->clicked_annot->annot_text.rect =
                     viewer_clamp_icon_rect( viewer_page,
-                    pv->clicked_annot->rect );
+                    pv->clicked_annot->annot_text.rect );
 
             zond_pdf_document_mutex_lock( viewer_page->pdf_document_page->document );
 
             //neues rect speichert
             fz_try( ctx ) pdf_set_annot_rect( ctx, pv->clicked_annot->annot,
-                    viewer_rotate_rect( viewer_page, pv->clicked_annot->rect ) );
+                    viewer_rotate_rect( viewer_page, pv->clicked_annot->annot_text.rect ) );
             fz_catch( ctx )
             {
                 zond_pdf_document_mutex_unlock( viewer_page->pdf_document_page->document );
@@ -1916,15 +1921,15 @@ cb_viewer_layout_release_button( GtkWidget* layout, GdkEvent* event, gpointer da
             gint x = 0, y = 0, width = 0, height = 0;
 
             gtk_container_child_get( GTK_CONTAINER(pv->layout), GTK_WIDGET(viewer_page->image_page), "y", &y, NULL );
-            y += (gint) (pv->clicked_annot->rect.y0 * pv->zoom / 100 );
+            y += (gint) (pv->clicked_annot->annot_text.rect.y0 * pv->zoom / 100 );
             y -= gtk_adjustment_get_value( pv->v_adj );
 
             gtk_container_child_get( GTK_CONTAINER(pv->layout), GTK_WIDGET(viewer_page->image_page), "x", &x, NULL );
-            x += (gint) (pv->clicked_annot->rect.x0 * pv->zoom / 100 );
+            x += (gint) (pv->clicked_annot->annot_text.rect.x0 * pv->zoom / 100 );
             x -= gtk_adjustment_get_value( pv->h_adj );
 
-            height = (gint) ((pv->clicked_annot->rect.y1 - pv->clicked_annot->rect.y0) * pv->zoom / 100);
-            width = (gint) ((pv->clicked_annot->rect.x1 - pv->clicked_annot->rect.x0) * pv->zoom / 100);
+            height = (gint) ((pv->clicked_annot->annot_text.rect.y1 - pv->clicked_annot->annot_text.rect.y0) * pv->zoom / 100);
+            width = (gint) ((pv->clicked_annot->annot_text.rect.x1 - pv->clicked_annot->annot_text.rect.x0) * pv->zoom / 100);
 
             gdk_rectangle.x = x;
             gdk_rectangle.y = y;
@@ -2046,10 +2051,10 @@ cb_viewer_layout_motion_notify( GtkWidget* layout, GdkEvent* event, gpointer dat
 
             gtk_popover_popdown( GTK_POPOVER(pv->annot_pop) );
 
-            pv->clicked_annot->rect.x0 -= (pv->x - event->motion.x_root) / pv->zoom * 100;
-            pv->clicked_annot->rect.x1 -= (pv->x - event->motion.x_root) / pv->zoom * 100;
-            pv->clicked_annot->rect.y0 -= (pv->y - event->motion.y_root) / pv->zoom * 100;
-            pv->clicked_annot->rect.y1 -= (pv->y - event->motion.y_root) / pv->zoom * 100;
+            pv->clicked_annot->annot_text.rect.x0 -= (pv->x - event->motion.x_root) / pv->zoom * 100;
+            pv->clicked_annot->annot_text.rect.x1 -= (pv->x - event->motion.x_root) / pv->zoom * 100;
+            pv->clicked_annot->annot_text.rect.y0 -= (pv->y - event->motion.y_root) / pv->zoom * 100;
+            pv->clicked_annot->annot_text.rect.y1 -= (pv->y - event->motion.y_root) / pv->zoom * 100;
 
             viewer_page = g_ptr_array_index( pv->arr_pages, pv->click_pdf_punkt.seite );
             gtk_widget_queue_draw( viewer_page->image_page );
@@ -2072,7 +2077,8 @@ cb_viewer_layout_motion_notify( GtkWidget* layout, GdkEvent* event, gpointer dat
         if ( (pdf_document_page_annot = viewer_on_annot( pv, pdf_punkt )) )
         {
             //Popover anzeigen, falls /Contents text enthält
-            if ( pdf_document_page_annot->content && //Inhalt?
+            if ( pdf_document_page_annot->type == PDF_ANNOT_TEXT &&
+                    pdf_document_page_annot->content && //Inhalt?
                     g_strcmp0( pdf_document_page_annot->content, "" ) && //gefüllt?
                     !( pdf_document_page_annot == pv->clicked_annot && //nicht angeklickt und...
                     gtk_widget_is_visible( pv->annot_pop_edit )) )//...geöffnet
@@ -2085,16 +2091,16 @@ cb_viewer_layout_motion_notify( GtkWidget* layout, GdkEvent* event, gpointer dat
 
                 gtk_container_child_get( GTK_CONTAINER(pv->layout),
                         viewer_page->image_page, "y", &y, NULL );
-                y += (gint) (pdf_document_page_annot->rect.y0 * pv->zoom / 100 );
+                y += (gint) (pdf_document_page_annot->annot_text.rect.y0 * pv->zoom / 100 );
                 y -= gtk_adjustment_get_value( pv->v_adj );
 
                 gtk_container_child_get( GTK_CONTAINER(pv->layout),
                         viewer_page->image_page, "x", &x, NULL );
-                x += (gint) (pdf_document_page_annot->rect.x0 * pv->zoom / 100 );
+                x += (gint) (pdf_document_page_annot->annot_text.rect.x0 * pv->zoom / 100 );
                 x -= gtk_adjustment_get_value( pv->h_adj );
 
-                height = (gint) ((pdf_document_page_annot->rect.y1 - pdf_document_page_annot->rect.y0) * pv->zoom / 100);
-                width = (gint) ((pdf_document_page_annot->rect.x1 - pdf_document_page_annot->rect.x0) * pv->zoom / 100);
+                height = (gint) ((pdf_document_page_annot->annot_text.rect.y1 - pdf_document_page_annot->annot_text.rect.y0) * pv->zoom / 100);
+                width = (gint) ((pdf_document_page_annot->annot_text.rect.x1 - pdf_document_page_annot->annot_text.rect.x0) * pv->zoom / 100);
 
                 gdk_rectangle.x = x;
                 gdk_rectangle.y = y;

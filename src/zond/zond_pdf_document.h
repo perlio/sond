@@ -33,6 +33,7 @@ typedef struct _Annot_Text_Markup
 
 typedef struct _Annot_Text
 {
+    fz_rect rect;
     gboolean open;
     const gchar* name;
 } AnnotText;
@@ -43,7 +44,6 @@ typedef struct _Pdf_Document_Page_Annot
     pdf_annot* annot;
     enum pdf_annot_type type;
     gint flags;
-    fz_rect rect;
     const gchar* content; //Text der Annot gem. Dict-Entry /Content
 
     union
