@@ -1762,7 +1762,7 @@ viewer_annot_edit_closed( GtkWidget* popover, gpointer data )
     pdf_document_page_annot = g_object_get_data( G_OBJECT(popover), "pdf-document-page-annot" );
 
     text_buffer = gtk_text_view_get_buffer( GTK_TEXT_VIEW(pdfv->annot_textview) );
-    gtk_text_buffer_get_bounds( buffer, &start, &end );
+    gtk_text_buffer_get_bounds( text_buffer, &start, &end );
 
     text = gtk_text_buffer_get_text( text_buffer, &start, &end, TRUE );
 
@@ -1831,7 +1831,7 @@ cb_viewer_layout_release_button( GtkWidget* layout, GdkEvent* event, gpointer da
             pv->highlight.page[0] = -1;
             if ( rc )
             {
-                zond_pdf_document_mutex_lock( viewer_page->pdf_document_page->document );
+                zond_pdf_document_mutex_unlock( viewer_page->pdf_document_page->document );
                 display_message( pv->vf, "Fehler - Annotation einfügen:\n\nBei Aufruf "
                         "annot_create:\n", errmsg, NULL );
                 g_free( errmsg );
