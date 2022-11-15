@@ -1589,6 +1589,27 @@ cb_viewer_swindow_key_press( GtkWidget* swindow, GdkEvent* event, gpointer user_
 
 
 static fz_rect
+viewer_clamp_icon_rect( ViewerPageNew* viewer_page, fz_rect rect )
+{
+    fz_rect rect_cropped = { 0, };
+
+    //clamp
+    rect_cropped = rect;
+
+    if ( rect_cropped.x0 < viewer_page->crop.x0 ) rect_cropped.x0 = viewer_page->crop.x0;
+    if ( rect_cropped.x0 + ANNOT_ICON_WIDTH > viewer_page->crop.x1 ) rect_cropped.x0 = viewer_page->crop.x1 - ANNOT_ICON_WIDTH;
+
+    if ( rect_cropped.y0 < viewer_page->crop.y0 ) rect_cropped.y0 = viewer_page->crop.y0;
+    if ( rect_cropped.y0 + ANNOT_ICON_HEIGHT > viewer_page->crop.y1 ) rect_cropped.y0 = viewer_page->crop.y1 - ANNOT_ICON_HEIGHT;
+
+    rect_cropped.x1 = rect_cropped.x0 + ANNOT_ICON_WIDTH;
+    rect_cropped.y1 = rect_cropped.y0 + ANNOT_ICON_HEIGHT;
+
+    return rect_cropped;
+}
+
+
+static fz_rect
 viewer_rotate_rect( ViewerPageNew* viewer_page, fz_rect rect )
 {
     if ( viewer_page->pdf_document_page->rotate == 90 )
@@ -1610,27 +1631,6 @@ viewer_rotate_rect( ViewerPageNew* viewer_page, fz_rect rect )
     }
 
     return rect;
-}
-
-
-static fz_rect
-viewer_clamp_icon_rect( ViewerPageNew* viewer_page, fz_rect rect )
-{
-    fz_rect rect_cropped = { 0, };
-
-    //clamp
-    rect_cropped = rect;
-
-    if ( rect_cropped.x0 < viewer_page->crop.x0 ) rect_cropped.x0 = viewer_page->crop.x0;
-    if ( rect_cropped.x0 + ANNOT_ICON_WIDTH > viewer_page->crop.x1 ) rect_cropped.x0 = viewer_page->crop.x1 - ANNOT_ICON_WIDTH;
-
-    if ( rect_cropped.y0 < viewer_page->crop.y0 ) rect_cropped.y0 = viewer_page->crop.y0;
-    if ( rect_cropped.y0 + ANNOT_ICON_HEIGHT > viewer_page->crop.y1 ) rect_cropped.y0 = viewer_page->crop.y1 - ANNOT_ICON_HEIGHT;
-
-    rect_cropped.x1 = rect_cropped.x0 + ANNOT_ICON_WIDTH;
-    rect_cropped.y1 = rect_cropped.y0 + ANNOT_ICON_HEIGHT;
-
-    return rect_cropped;
 }
 
 

@@ -232,7 +232,7 @@ zond_pdf_document_page_annot_load( PdfDocumentPage* pdf_document_page,
     }
     else if ( pdf_document_page_annot->type == PDF_ANNOT_TEXT )
     {
-        pdf_document_page_annot->annot_text.rect = pdf_annot_rect( priv->ctx, annot );
+        pdf_document_page_annot->annot_text.rect = pdf_bound_annot( priv->ctx, annot );
         pdf_document_page_annot->annot_text.open = pdf_annot_is_open( priv->ctx, annot );
         pdf_document_page_annot->annot_text.name = pdf_annot_icon_name( priv->ctx, annot );
     }
