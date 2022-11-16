@@ -1,54 +1,69 @@
 #include <libgen.h>         // dirname
 #include <unistd.h>         // readlink
 #include <linux/limits.h>   // PATH_MAX
-#include <gtk/gtk.h>
+#include <gio/gio.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <mysql.h>
+#include <libsoup/soup.h>
+#include <json-glib/json-glib.h>
+
 
 #define G_LOG_DOMAIN "SondServer"
 
 typedef struct _Sond_Server
 {
+    gchar* password;
     gchar* base_dir;
     gchar* log_file;
-    GMainLoop* loop;
     MYSQL* con;
+    gchar* seafile_user;
+    gchar* seafile_password;
+    gchar* seafile_root_url;
+    gchar* auth_token;
 } SondServer;
 
 
-gint static
+static gint
 get_auth_level( const gchar* auth )
 {
     gchar* user = NULL;
     gchar* password = NULL;
 
+    return 1;
 }
 
 
-static gchar*
-parse_imessage( const gchar* auth, const gchar* command, const gchar* params )
+static gint
+process_imessage( SondServer* sond_server, const gchar* auth, const gchar* command, const gchar* params,
+        gchar** omessage )
 {
     gint auth_level = 0;
 
     auth_level = get_auth_level( auth );
-    if ( auth_level == 0 ) return g_strdup( "AUTHENTIFICATION FAILED" );
+    if ( auth_level == 0 )
+    {
+        *omessage = g_strdup( "ERROR *** AUTHENTICATION FAILED" );
+        return 0;
+    }
 
     if ( g_strcmp0( command, "SHUTDOWN" ) )
     {
-        g_main_loop_quit( sond_server->loop );
-        omessage = g_strdup( "SondServer wird beendet" );
+        *omessage = g_strdup( "SONDSERVER_OK" );
+
+        return 1;
     }
-    else if ( g_strcmp0( command, "NEUE_AKTE" ) )
+    if ( g_strcmp0( command, "NEUE_AKTE" ) )
     {
 
     }
     else
     {
         g_warning( "Nachricht enthält keinen bekannten Befehl" );
-        omessage = g_strdup( "NO_KNOWN_COMMAND" );
+        *omessage = g_strdup( "ERROR *** NO_KNOWN_COMMAND" );
     }
 
-    return omessage;
+    return 0;
 }
 
 
@@ -68,6 +83,7 @@ callback_socket_incoming( GSocketService *service,
     gchar* omessage = NULL;
     SondServer* sond_server = NULL;
     gchar** imessage_strv = NULL;
+    gint rc = 0;
 
     sond_server = data;
 
@@ -84,12 +100,12 @@ callback_socket_incoming( GSocketService *service,
     else if ( ret == 0 )
     {
         g_warning( "input-stream hat keinen Inhalt" );
-        omessage = g_strdup( "COULD_NOT_READ_MESSAGE" );
+        omessage = g_strdup( "ERROR *** COULD_NOT_READ_MESSAGE" );
     }
     else if ( ret > MAX_MSG_SIZE )
     {
         g_warning( "Nachricht abgeschnitten" );
-        omessage = g_strdup( "MESSAGE_TRUNCATED" );
+        omessage = g_strdup( "ERROR *** MESSAGE_TRUNCATED" );
     }
 
     imessage_strv = g_strsplit( imessage, ":", 3 );
@@ -97,7 +113,7 @@ callback_socket_incoming( GSocketService *service,
     if ( imessage_strv[0] == NULL ) //empty vector
     {
         g_warning( "input-stream ist leer" );
-        omessage = g_strdup( "EMPTY_MESSAGE" );
+        omessage = g_strdup( "ERROR *** EMPTY_MESSAGE" );
     }
     else
     {
@@ -105,7 +121,7 @@ callback_socket_incoming( GSocketService *service,
         {
             g_warning( "no-command" );
             g_strfreev( imessage_strv );
-            omessage = g_strdup( "NO COMMAND" );
+            omessage = g_strdup( "ERROR *** NO COMMAND" );
         }
         else
         {
@@ -113,24 +129,30 @@ callback_socket_incoming( GSocketService *service,
             {
                 g_warning( "no params" );
                 g_strfreev( imessage_strv );
-                omessage = g_strdup( "NO PARAMS" );
+                omessage = g_strdup( "ERROR *** NO PARAMS" );
             }
             else
             {
-                omessage = parse_imessage( imessage_strv[0], imessage_strv[1],
-                        imessage_strv[2] );
+                rc = process_imessage( sond_server, imessage_strv[0], imessage_strv[1],
+                        imessage_strv[2], &omessage );
                 g_strfreev( imessage_strv );
             }
         }
     }
 
-    ret = g_output_stream_write( ostream, omessage, strlen( omessage ), NULL, &error );
+    rc = g_output_stream_write( ostream, omessage, strlen( omessage ), NULL, &error );
     g_free( omessage );
     if ( error )
     {
         g_warning( "Antwort '%s' konnte nicht an client geschickt werden: %s",
                 omessage, error->message );
         g_error_free( error );
+    }
+
+    if ( rc )
+    {
+        g_message( "Server wird heruntergefahren " );
+        exit( 1 );
     }
 
     return FALSE;
@@ -140,9 +162,14 @@ callback_socket_incoming( GSocketService *service,
 static void
 sond_server_free( SondServer* sond_server )
 {
+    g_free( sond_server->password );
     g_free( sond_server->base_dir );
     g_free( sond_server->log_file );
     mysql_close( sond_server->con );
+    g_free( sond_server->seafile_password );
+    g_free( sond_server->seafile_user );
+    g_free( sond_server->seafile_root_url );
+    g_free( sond_server->auth_token );
 
     return;
 }
@@ -173,6 +200,97 @@ log_init( SondServer* sond_server )
 }
 
 
+static void
+get_auth_token( GKeyFile* key_file, SondServer* sond_server )
+{
+    GError* error = NULL;
+    SoupSession* soup_session = NULL;
+    SoupMessage* soup_message = NULL;
+    gchar* url_text = NULL;
+    gchar* body_text = NULL;
+    GBytes* body = NULL;
+    GBytes* response = NULL;
+    JsonParser* parser = NULL;
+    JsonNode* node = NULL;
+
+    sond_server->seafile_user = g_key_file_get_string( key_file, "SEAFILE", "user", &error );
+    if ( error ) g_error( "Seafile-user konnte nicht ermittelt werden:\n%s",
+            error->message );
+
+    sond_server->seafile_root_url = g_key_file_get_string( key_file, "SEAFILE", "url", &error );
+    if ( error ) g_error( "SEAFILE-host konnte nicht ermittelt werden:\n%s",
+            error->message );
+
+    url_text = g_strdup_printf( "%s/api2/auth-token", sond_server->seafile_root_url );
+    soup_session = soup_session_new( );
+    soup_message = soup_message_new( SOUP_METHOD_POST, url_text );
+    g_free( url_text );
+
+    body_text = g_strdup_printf( "user=%s&password=%s", sond_server->seafile_user,sond_server->seafile_password );
+    body = g_bytes_new( body_text, strlen( body_text ) );
+    g_free( body_text );
+    soup_message_set_request_body_from_bytes( soup_message, NULL, body );
+    g_bytes_unref( body );
+
+    response = soup_session_send_and_read( soup_session, soup_message, NULL, &error );
+    g_object_unref( soup_message );
+    g_object_unref( soup_session );
+    if ( error ) g_error( "Auth-Token konnte nicht gelesen werden:\n%s", error->message );
+
+    parser = json_parser_new( );
+    if ( !json_parser_load_from_data( parser, g_bytes_get_data( response, NULL ), -1, &error ) )
+            g_error( "Auth-Token konnte nicht geparst werden:\n%s", error->message );
+
+    g_bytes_unref( response );
+
+    node = json_parser_get_root( parser );
+    sond_server->auth_token = json_node_dup_string( node );
+
+    g_object_unref( parser );
+
+    return;
+}
+
+
+static void
+get_con( GKeyFile* key_file, const gchar* mariadb_password, SondServer* sond_server )
+{
+    GError* error = NULL;
+    gchar* host = NULL;
+    gint port = 0;
+    gchar* user = NULL;
+    gchar* db = NULL;
+
+    host = g_key_file_get_string( key_file, "MARIADB", "host", &error );
+    if ( error ) g_error( "MariaDB-host konnte nicht ermittelt werden:\n%s",
+            error->message );
+
+    port = g_key_file_get_integer( key_file, "MARIADB", "port", &error );
+    if ( error ) g_error( "MariaDB-port konnte nicht ermittelt werden:\n%s",
+            error->message );
+
+    user = g_key_file_get_string( key_file, "MARIADB", "user", &error );
+    if ( error ) g_error( "MariaDB-user konnte nicht ermittelt werden:\n%s",
+            error->message );
+
+    db = g_key_file_get_string( key_file, "MARIADB", "db", &error );
+    if ( error ) g_error( "MariaDB-db-Name konnte nicht ermittelt werden:\n%s",
+            error->message );
+
+    sond_server->con = mysql_init( NULL );
+    if ( !mysql_real_connect( sond_server->con, host, user, mariadb_password,
+            "Sond", port, NULL, CLIENT_MULTI_STATEMENTS ) )
+            g_error( "Verbindung zur Datenbank konnte nicht hergestellt "
+            "werden:\n%s", mysql_error( sond_server->con ) );
+
+    g_free( host );
+    g_free( user );
+    g_free( db );
+
+    return;
+}
+
+
 gint
 main( gint argc, gchar** argv )
 {
@@ -190,14 +308,14 @@ main( gint argc, gchar** argv )
     gchar result[PATH_MAX] = { 0 };
     ssize_t count = 0;
 
-    if ( argc != 2 ) g_error( "Usage: SondServer [mariadb-password]" );
+    if ( argc != 4 ) g_error( "Usage: SondServer [password SondServer] [password Mariadb-user] [password Seafile-user]" );
+    sond_server.password = argv[1];
+    sond_server.seafile_password = argv[3];
 
     //Arbeitserzeichnis ermitteln
     count = readlink("/proc/self/exe", result, PATH_MAX);
     if (count == -1) g_error( "Programmverzeichnis konnte nicht ermittelt werden - %s", strerror( errno ) );
     sond_server.base_dir = g_path_get_dirname( result );
-
-    log_init( &sond_server );
 
     keyfile = g_key_file_new( );
 
@@ -205,29 +323,12 @@ main( gint argc, gchar** argv )
     success = g_key_file_load_from_file( keyfile, conf_file,
             G_KEY_FILE_KEEP_COMMENTS | G_KEY_FILE_KEEP_TRANSLATIONS, &error );
     g_free( conf_file );
-    if ( success )
+    if ( !success ) g_error( "SondServer.conf konnte nicht gelesen werden:\n%s",
+            error->message );
+    else
     {
-        gchar* host = NULL;
-        gint port = 0;
-        gchar* user = NULL;
-
-        host = g_key_file_get_string( keyfile, "MARIADB", "host", &error );
-        if ( error ) g_error( "MariaDB-host konnte nicht ermittelt werden:\n%s",
-                error->message );
-
-        port = g_key_file_get_integer( keyfile, "MARIADB", "port", &error );
-        if ( error ) g_error( "MariaDB-port konnte nicht ermittelt werden:\n%s",
-                error->message );
-
-        user = g_key_file_get_string( keyfile, "MARIADB", "user", &error );
-        if ( error ) g_error( "MariaDB-user konnte nicht ermittelt werden:\n%s",
-                error->message );
-
-        sond_server.con = mysql_init( NULL );
-        if ( !mysql_real_connect( sond_server.con, host, user, argv[1], "Sond",
-                port, NULL, CLIENT_MULTI_STATEMENTS ) )
-                g_error( "Verbindung zur Datenbank konnte nicht hergestellt "
-                "werden:\n%s", mysql_error( sond_server.con ) );
+        get_con( keyfile, argv[2], &sond_server );
+        get_auth_token( keyfile, &sond_server );
 
         ip_address = g_key_file_get_string( keyfile, "SOCKET", "bind", &error );
         if ( error )
@@ -248,15 +349,6 @@ main( gint argc, gchar** argv )
 
         g_key_file_free( keyfile );
 
-    }
-    else
-    {
-        g_message( "SondServer.conf konnte nicht gelesen werden: %s "
-                "- Default Interface (localhost) und Port (35002) werden verwendet",
-                error->message );
-        g_clear_error ( &error );
-        ip_address = g_strdup( "127.0.0.1" );
-        port = 35002;
     }
 
     inet_address = g_inet_address_new_from_string( ip_address );
@@ -281,17 +373,18 @@ main( gint argc, gchar** argv )
 
     g_signal_connect (socket, "incoming", G_CALLBACK (callback_socket_incoming), &sond_server );
 
-    loop = g_main_loop_new(NULL, FALSE);
-    sond_server.loop = loop;
+    log_init( &sond_server );
 
-    g_main_loop_run(loop);
+    loop = g_main_loop_new( NULL, FALSE );
+
+    g_main_loop_run( loop );
 
     g_message( "Shutdown" );
     sond_server_free( &sond_server );
 
     g_socket_listener_close( G_SOCKET_LISTENER(socket) );
     g_object_unref( socket );
-    g_main_loop_unref(loop);
+    g_main_loop_unref( loop );
 
     return 0;
 }

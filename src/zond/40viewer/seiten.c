@@ -106,7 +106,7 @@ seiten_parse_text( PdfViewer* pv, gint max, const gchar* text )
 {
     gint start = 0;
     gint end = 0;
-    gchar* range = NULL;
+    const gchar* range = NULL;
     gint i = 0;
     gint page = 0;
     gint last_inserted = -1;
@@ -116,8 +116,8 @@ seiten_parse_text( PdfViewer* pv, gint max, const gchar* text )
     GArray* arr_tmp = g_array_new( FALSE, FALSE, sizeof( gint ) );
     GArray* arr_pages = g_array_new( FALSE, FALSE, sizeof( gint ) );
 
-    range = (gchar*) text;
-    while ((range = (gchar*) fz_parse_page_range( NULL, range, &start, &end, max )) )
+    range = text;
+    while ((range = fz_parse_page_range( NULL, range, &start, &end, max )) )
     {
         if ( start < end )
         {
