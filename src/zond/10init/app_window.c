@@ -58,8 +58,6 @@ cb_delete_event( GtkWidget* app_window, GdkEvent* event, gpointer user_data )
 
     g_ptr_array_unref( zond->arr_pv );
 
-    g_free( zond );
-
     return TRUE;
 }
 

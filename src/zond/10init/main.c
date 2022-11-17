@@ -137,13 +137,9 @@ init_icons( Projekt* zond )
 }
 
 
-static Projekt*
-init( GtkApplication* app )
+static void
+init( GtkApplication* app, Projekt* zond )
 {
-    Projekt* zond = NULL;
-
-    zond = g_malloc0( sizeof( Projekt ) );
-
     //benötigte Arrays erzeugen
     zond->arr_pv = g_ptr_array_new( );
 
@@ -185,10 +181,10 @@ init( GtkApplication* app )
         gboolean ret = FALSE;
         g_signal_emit_by_name( zond->app_window, "delete-event", NULL, &ret );
 
-        return NULL;
+        return;
     }
 
-    return zond;
+    return;
 }
 
 
@@ -202,9 +198,9 @@ open_app( GtkApplication* app, gpointer files, gint n_files, gchar *hint,
     gchar* uri = NULL;
     gchar* uri_unesc = NULL;
 
-    Projekt** zond = (Projekt**) user_data;
+    Projekt* zond = (Projekt*) user_data;
 
-    if ( !(*zond) || (*zond)->dbase_zond ) return;
+    if ( !zond || zond->dbase_zond ) return;
 
     g_file = (GFile**) files;
 
@@ -212,11 +208,11 @@ open_app( GtkApplication* app, gpointer files, gint n_files, gchar *hint,
     uri_unesc = g_uri_unescape_string( uri, NULL );
     g_free( uri );
 
-    rc = project_oeffnen( *zond, uri_unesc + 8, FALSE, &errmsg );
+    rc = project_oeffnen( zond, uri_unesc + 8, FALSE, &errmsg );
     g_free( uri_unesc );
     if ( rc )
     {
-        display_message( (*zond)->app_window, "Fehler - Projekt kann nicht geöffnet "
+        display_message( zond->app_window, "Fehler - Projekt kann nicht geöffnet "
                 "werden\n\nBei Aufruf projekt_oeffnen:\n", errmsg, NULL );
         g_free( errmsg );
 
@@ -230,16 +226,20 @@ open_app( GtkApplication* app, gpointer files, gint n_files, gchar *hint,
 static void
 activate_app( GtkApplication* app, gpointer data )
 {
+    Projekt* zond = (Projekt*) data;
+
+    gtk_window_present( GTK_WINDOW(zond->app_window) );
+
     return;
 }
 
 
 static void
-startup_app( GtkApplication* app, gpointer user_data )
+startup_app( GtkApplication* app, gpointer data )
 {
-    Projekt** zond = (Projekt**) user_data;
+    Projekt* zond = (Projekt*) data;
 
-    *zond = init( app );
+    init( app, zond );
 
     return;
 }
@@ -248,14 +248,14 @@ startup_app( GtkApplication* app, gpointer user_data )
 int main(int argc, char **argv)
 {
     GtkApplication* app = NULL;
-    Projekt* zond = NULL;
+    Projekt zond = { 0 };
 
     //ApplicationApp erzeugen
     app = gtk_application_new ( "de.perlio.zond", G_APPLICATION_HANDLES_OPEN );
 
     //und starten
     g_signal_connect( app, "startup", G_CALLBACK (startup_app), &zond );
-    g_signal_connect( app, "activate", G_CALLBACK (activate_app), NULL );
+    g_signal_connect( app, "activate", G_CALLBACK (activate_app), &zond );
     g_signal_connect( app, "open", G_CALLBACK (open_app), &zond );
 
     gint status = g_application_run( G_APPLICATION(app), argc, argv );
