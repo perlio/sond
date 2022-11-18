@@ -200,7 +200,8 @@ open_app( GtkApplication* app, gpointer files, gint n_files, gchar *hint,
 
     Projekt* zond = (Projekt*) user_data;
 
-    if ( !zond || zond->dbase_zond ) return;
+//    if ( zond->dbase_zond ) return; //Verhindert, daß neue Datei geladen wird,
+//wenn bereits Project geöffnet
 
     g_file = (GFile**) files;
 
@@ -239,10 +240,6 @@ startup_app( GtkApplication* app, gpointer data )
 {
     Projekt* zond = (Projekt*) data;
 
-        display_message( NULL, "Fehler - Projekt kann nicht geöffnet "
-                "werden\n\nBei Aufruf projekt_oeffnen:\n", NULL );
-
-        return;
     init( app, zond );
 
     return;

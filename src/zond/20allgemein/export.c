@@ -30,6 +30,32 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "project.h"
 
 
+
+static gchar*
+export_get_buffer( gint left_indent, gchar* node_text,
+        gchar* rel_path, Anbindung* anbindung, gchar* text )
+{
+    gchar* buffer = NULL;
+
+    buffer = g_strdup_printf( "{\\li%i\\fs28\\b %s \\b0", left_indent, node_text );
+
+    if ( rel_path ) buffer = add_string( buffer, g_strdup_printf( "\\par\\fs20 %s", rel_path ) );
+    {
+        if ( anbindung ) buffer = add_string( buffer,
+                    g_strdup_printf(" - von Seite %i, Index %i, bis Seite %i, Index %i",
+                    anbindung->von.seite, anbindung->von.index, anbindung->bis.seite,
+                    anbindung->bis.index ) );
+        buffer = add_string( buffer, g_strdup( "\\par" ) );
+    }
+
+    if ( text ) buffer = add_string( buffer, g_strdup_printf( "\\par\\fs24\\par\\ %s\\par", text ) );
+
+    buffer = add_string( buffer, g_strdup( "}" ) );
+
+    return buffer;
+}
+
+
 static gint
 export_node( Projekt* zond, GtkTreeModel* model, GtkTreePath* path, gint depth,
         GFileOutputStream* stream, gchar** errmsg )
@@ -41,6 +67,7 @@ export_node( Projekt* zond, GtkTreeModel* model, GtkTreePath* path, gint depth,
     gint node_id = 0;
     gchar* text = NULL;
     gchar* buffer = NULL;
+    gint left_indent = 0;
 
     GtkTreeIter iter;
     if ( !gtk_tree_model_get_iter( model, &iter, path ) )
@@ -53,56 +80,34 @@ export_node( Projekt* zond, GtkTreeModel* model, GtkTreePath* path, gint depth,
 
     gtk_tree_model_get( model, &iter, 1, &node_text, 2, &node_id, -1 );
 
-    buffer = g_strdup_printf( "<h%i>%s</h%i>", depth, node_text, depth );
+    left_indent = 200 * depth;
+
+    if ( !(model == gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]) ) ||
+            (GTK_IS_TREE_MODEL_FILTER(model) && (gtk_tree_model_filter_get_model( GTK_TREE_MODEL_FILTER(model) ) ==
+                gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]) )))) )
+    {
+        rc = zond_dbase_get_text( zond->dbase_zond->zond_dbase_work, node_id, &text, errmsg );
+        if ( rc )
+        {
+            g_free( node_text );
+            ERROR_S
+        }
+    }
+
+    buffer = export_get_buffer( left_indent, node_text, NULL, NULL, text );
     g_free( node_text );
-
-    rc = g_output_stream_write( G_OUTPUT_STREAM(stream), (const void*) buffer,
-            strlen( buffer ), NULL, &error );
-    if ( rc == -1 )
-    {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_output_stream_write "
-                "(header):\n", error->message, NULL );
-        g_error_free( error );
-        g_free( buffer );
-
-        return -1;
-    }
-
-    g_free( buffer );
-
-    if ( model == gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]) ) )
-            return 0;
-    if ( GTK_IS_TREE_MODEL_FILTER(model) )
-    {
-        if ( gtk_tree_model_filter_get_model( GTK_TREE_MODEL_FILTER(model) ) ==
-                gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]) ) ) return 0;
-    }
-
-    rc = zond_dbase_get_text( zond->dbase_zond->zond_dbase_work, node_id, &text, errmsg );
-    if ( rc ) ERROR_SOND( "zond_dbase_get_text" )
-
-    if ( !text || !g_strcmp0( text, "" ) )
-    {
-        g_free( text );
-
-        return 0;
-    }
-
-    buffer = g_strdup_printf( "<p>%s</p>", text );
     g_free( text );
     rc = g_output_stream_write( G_OUTPUT_STREAM(stream), (const void*) buffer,
             strlen( buffer ), NULL, &error );
+    g_free( buffer );
     if ( rc == -1 )
     {
         if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_output_stream_"
                 "write (header):\n", error->message, NULL );
         g_error_free( error );
-        g_free( buffer );
 
         return -1;
     }
-
-    g_free( buffer );
 
     return 0;
 }
@@ -164,8 +169,6 @@ export_foreach( GtkTreeModel* model, GtkTreePath* path, GtkTreeIter* iter,
     gint offset = GPOINTER_TO_INT(g_object_get_data( G_OBJECT(model), "offset" ));
 
     gint depth = gtk_tree_path_get_depth( path );
-    if ( depth > 6 ) depth = 6;
-    if ( (depth + offset) > 6 ) offset = 0;
 
     gint rc = 0;
     rc = export_node( zond, model, path, depth + offset, stream, &errmsg_ii );
@@ -274,12 +277,9 @@ export_html( Projekt* zond, GFileOutputStream* stream, gint umfang, gchar** errm
         return -1;
     }
 
-    const gchar* buffer = g_strconcat( "<!DOCTYPE html>\n"
-            "<html>"
-            "<head><title>Export</title></head>"
-            "<body>"
-            "<h1>Projekt: ", zond->dbase_zond->project_name, "\nBaum: ", (zond->baum_prev == BAUM_INHALT) ? "Inhalt" : "Auswertung",
-            "</h1>", NULL );
+    const gchar* buffer = g_strconcat( "{\\rtf1 "
+            "{\\fs50\\b\\ul ", zond->dbase_zond->project_name, "\\par\\plain ",
+            NULL );
 
     //Hier htm-Datei in stream schreiben
     rc = g_output_stream_write( G_OUTPUT_STREAM(stream), (const void*) buffer,
@@ -321,7 +321,7 @@ cb_menu_datei_export_activate( GtkMenuItem*item, gpointer user_data )
 
     GError* error = NULL;
 
-    GFile* file = g_file_new_for_path( "export_tmp.htm" );
+    GFile* file = g_file_new_for_path( "export_tmp.rtf" );
     GFileOutputStream* stream = g_file_replace( file, NULL, FALSE,
             G_FILE_CREATE_NONE, NULL, &error );
     if ( !stream )
@@ -385,7 +385,7 @@ cb_menu_datei_export_activate( GtkMenuItem*item, gpointer user_data )
     argv[0] = soffice_exe;
     argv[1] = "--convert-to";
     argv[2] = "odt:writer8";
-    argv[3] = "export_tmp.htm";
+    argv[3] = "export_tmp.rtf";
     argv[4] = "--headless";
 
     ret = g_spawn_sync( NULL, argv, NULL, G_SPAWN_DEFAULT, NULL, NULL, NULL,
@@ -401,7 +401,7 @@ cb_menu_datei_export_activate( GtkMenuItem*item, gpointer user_data )
     if ( !g_file_delete( file, NULL, &error ) )
     {
         display_message( zond->app_window, "Löschen der bei Export im Arbeitsverzeichnis "
-                "erzeugten Datei 'export_tmp.htm' nicht möglich:\n\n",
+                "erzeugten Datei 'export_tmp.rtf' nicht möglich:\n\n",
                 error->message, NULL );
         g_error_free( error );
         error = NULL;
@@ -417,7 +417,7 @@ cb_menu_datei_export_activate( GtkMenuItem*item, gpointer user_data )
             &error ) )
     {
         display_message( zond->app_window, "Exportierte Datei konnte nicht umbenannt "
-                "werden\n\n", error->message, "\nErzeugte Datei 'export_tmp.odt' "
+                "werden:\n\n", error->message, "\nErzeugte Datei 'export_tmp.odt' "
                 "von Hand umbenennen", NULL );
         g_error_free( error );
     }
