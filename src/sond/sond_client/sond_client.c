@@ -10,10 +10,6 @@ activate_app( GtkApplication* app, gpointer data )
 static void
 startup_app( GtkApplication* app, gpointer data )
 {
-    Sojus** sojus = (Sojus**) data;
-
-    *sojus = sojus_init( app );
-    if ( !(*sojus) ) return;
 
     return;
 }
@@ -23,15 +19,15 @@ gint
 main( int argc, char **argv)
 {
     GtkApplication* app = NULL;
-    Sojus* sojus = NULL;
+    SondClient sond_client = { 0 };
     gint status = 0;
 
     //ApplicationApp erzeugen
     app = gtk_application_new ( "de.rubarth-krieger.sond_client", G_APPLICATION_FLAGS_NONE );
 
     //und starten
-    g_signal_connect( app, "startup", G_CALLBACK(startup_app), &sojus );
-    g_signal_connect( app, "activate", G_CALLBACK (activate_app), &sojus );
+    g_signal_connect( app, "startup", G_CALLBACK(startup_app), &sond_client );
+    g_signal_connect( app, "activate", G_CALLBACK (activate_app), &sond_client );
 
     status = g_application_run( G_APPLICATION (app), argc, argv );
 

@@ -335,6 +335,11 @@
 			<Option target="SondClient (Testing)" />
 			<Option target="SondServer (Release)" />
 		</Unit>
+		<Unit filename="src/sond/sond_client/sond_client.c">
+			<Option compilerVar="CC" />
+			<Option target="SondClient (Release)" />
+			<Option target="SondClient (Testing)" />
+		</Unit>
 		<Unit filename="src/sond/sond_person.c">
 			<Option compilerVar="CC" />
 			<Option target="SondClient (Release)" />
@@ -349,7 +354,7 @@
 		<Unit filename="src/sond/sond_server/SondServer.conf">
 			<Option target="SondServer (Release)" />
 		</Unit>
-		<Unit filename="src/sond/sond_server/main.c">
+		<Unit filename="src/sond/sond_server/sond_server.c">
 			<Option compilerVar="CC" />
 			<Option target="SondServer (Release)" />
 		</Unit>

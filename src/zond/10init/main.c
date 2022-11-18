@@ -239,6 +239,10 @@ startup_app( GtkApplication* app, gpointer data )
 {
     Projekt* zond = (Projekt*) data;
 
+        display_message( NULL, "Fehler - Projekt kann nicht geöffnet "
+                "werden\n\nBei Aufruf projekt_oeffnen:\n", NULL );
+
+        return;
     init( app, zond );
 
     return;
