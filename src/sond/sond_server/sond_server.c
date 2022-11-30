@@ -3,7 +3,6 @@
 #include <linux/limits.h>   // PATH_MAX
 #include <gio/gio.h>
 #include <stdio.h>
-#include <unistd.h>
 #include <mysql.h>
 #include <libsoup/soup.h>
 #include <json-glib/json-glib.h>
@@ -53,7 +52,7 @@ process_imessage( SondServer* sond_server, const gchar* auth, const gchar* comma
 
         return 1;
     }
-    if ( g_strcmp0( command, "NEUE_AKTE" ) )
+    else if ( g_strcmp0( command, "NEUE_AKTE" ) )
     {
 
     }

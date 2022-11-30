@@ -16,9 +16,15 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+//#include <stdio.h>
+#include <unistd.h>
 #include <gtk/gtk.h>
-#include <glib.h>
 #include <glib/gstdio.h>
+
+#ifdef __WIN32
+#include <libloaderapi.h>
+#include <errhandlingapi.h>
+#endif // __WIN32
 
 #include "../global_types.h"
 
@@ -138,8 +144,87 @@ init_icons( Projekt* zond )
 
 
 static void
+log_init( Projekt* zond )
+{
+    gchar* logfile = NULL;
+    FILE* file = NULL;
+    FILE* file_tmp = NULL;
+    GDateTime* date_time = NULL;
+
+    date_time = g_date_time_new_now_local( );
+    logfile = g_strdup_printf( "%slogs/log_%i_%i.log", zond->base_dir,
+            g_date_time_get_year( date_time ), g_date_time_get_month( date_time ) );
+    g_date_time_unref( date_time );
+
+    file = freopen( logfile, "a", stdout );
+    if ( !file )
+    {
+        g_free( logfile );
+        display_message( zond->app_window, "stout konnte nicht in "
+                "Datei %s umgeleitet werden: %s", logfile, strerror( errno ) );
+        exit( -1 );
+    }
+
+    file_tmp = freopen( logfile, "a", stderr );
+    g_free( logfile );
+    if ( !file_tmp )
+    {
+        display_message( zond->app_window, "sterr konnte nicht in "
+                "Datei %s umgeleitet werden: %s", logfile, strerror( errno ) );
+        exit( -1 );
+    }
+/*
+    ret = dup2( fileno( stdout ), fileno( stderr ) );
+    if ( ret == -1 )
+    {
+        display_message( zond->app_window, "stderr konnte nicht auf stdout "
+                "umgeleitet werden: %s", strerror( errno ) );
+        exit( -1 );
+    }
+    */
+
+    return;
+}
+
+
+static void
+get_base_dir( Projekt* zond )
+{
+#ifdef _WIN32
+    DWORD ret = 0;
+    TCHAR buff[MAX_PATH] = { 0 };
+
+    ret = GetModuleFileName(NULL, buff, _countof(buff));
+    if ( !ret )
+    {
+        DWORD error_code = 0;
+
+        error_code = GetLastError( );
+
+        display_message( zond->app_window, "Bei Aufruf GetModuleFileName:\n"
+                "Error Code: ", error_code, NULL );
+
+        exit( -1 );;
+    }
+
+    zond->base_dir = g_strndup( (const gchar*) buff, strlen( buff ) -
+            strlen( g_strrstr( (const gchar*) buff, "\\" ) ) - 3 );
+#elif defined( __linux__ )
+    char result[PATH_MAX];
+    ssize_t count = readlink("/proc/self/exe", result, PATH_MAX);
+    if (count != -1) zond->base_dir = g_strdup( dirname( result ) );
+#endif // _WIN32
+
+    return;
+}
+
+
+static void
 init( GtkApplication* app, Projekt* zond )
 {
+    log_init( zond );
+    get_base_dir( zond );
+
     //benötigte Arrays erzeugen
     zond->arr_pv = g_ptr_array_new( );
 
@@ -242,6 +327,8 @@ startup_app( GtkApplication* app, gpointer data )
 
     init( app, zond );
 
+    g_message( "zond gestartet" );
+
     return;
 }
 
@@ -250,6 +337,8 @@ int main(int argc, char **argv)
 {
     GtkApplication* app = NULL;
     Projekt zond = { 0 };
+
+    zond.base_dir = "C:\\msys64\\home\\pkrieger\\Projekte\\sond\\";
 
     //ApplicationApp erzeugen
     app = gtk_application_new ( "de.perlio.zond", G_APPLICATION_HANDLES_OPEN );
@@ -260,6 +349,8 @@ int main(int argc, char **argv)
     g_signal_connect( app, "open", G_CALLBACK (open_app), &zond );
 
     gint status = g_application_run( G_APPLICATION(app), argc, argv );
+
+    g_message( "zond beendet" );
 
     g_object_unref(app);
 

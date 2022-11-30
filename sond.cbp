@@ -13,6 +13,7 @@
 				<Option compiler="gcc" />
 				<Compiler>
 					<Add option="-O2" />
+					<Add option="-DGUI" />
 				</Compiler>
 				<Linker>
 					<Add option="-s" />
@@ -40,6 +41,7 @@
 				<Option compiler="gcc" />
 				<Compiler>
 					<Add option="-DVIEWER" />
+					<Add option="-DGUI" />
 				</Compiler>
 			</Target>
 			<Target title="Viewer (Testing)">
@@ -58,6 +60,9 @@
 				<Option object_output="objsond_client" />
 				<Option type="0" />
 				<Option compiler="gcc" />
+				<Compiler>
+					<Add option="-DGUI" />
+				</Compiler>
 			</Target>
 			<Target title="SondClient (Testing)">
 				<Option output="bin/sond_testing" prefix_auto="1" extension_auto="1" />
@@ -125,12 +130,16 @@
 			<Option target="zond (Testing)" />
 			<Option target="Viewer (Release)" />
 			<Option target="Viewer (Testing)" />
+			<Option target="SondClient (Testing)" />
+			<Option target="SondClient (Release)" />
 		</Unit>
 		<Unit filename="src/misc.h">
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
 			<Option target="Viewer (Release)" />
 			<Option target="Viewer (Testing)" />
+			<Option target="SondClient (Testing)" />
+			<Option target="SondClient (Release)" />
 		</Unit>
 		<Unit filename="src/sojus/00misc/auswahl.c">
 			<Option compilerVar="CC" />
@@ -340,6 +349,29 @@
 			<Option target="SondClient (Release)" />
 			<Option target="SondClient (Testing)" />
 		</Unit>
+		<Unit filename="src/sond/sond_client/sond_client.h">
+			<Option compile="1" />
+			<Option target="SondClient (Release)" />
+			<Option target="SondClient (Testing)" />
+		</Unit>
+		<Unit filename="src/sond/sond_client/sond_client_dok.c">
+			<Option compilerVar="CC" />
+			<Option target="SondClient (Release)" />
+			<Option target="SondClient (Testing)" />
+		</Unit>
+		<Unit filename="src/sond/sond_client/sond_client_dok.h">
+			<Option target="SondClient (Release)" />
+			<Option target="SondClient (Testing)" />
+		</Unit>
+		<Unit filename="src/sond/sond_client/sond_client_misc.c">
+			<Option compilerVar="CC" />
+			<Option target="SondClient (Release)" />
+			<Option target="SondClient (Testing)" />
+		</Unit>
+		<Unit filename="src/sond/sond_client/sond_client_misc.h">
+			<Option target="SondClient (Release)" />
+			<Option target="SondClient (Testing)" />
+		</Unit>
 		<Unit filename="src/sond/sond_person.c">
 			<Option compilerVar="CC" />
 			<Option target="SondClient (Release)" />
@@ -399,6 +431,8 @@
 		</Unit>
 		<Unit filename="src/sond_database_entity.c">
 			<Option compilerVar="CC" />
+			<Option compile="0" />
+			<Option link="0" />
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
 			<Option target="SondClient (Release)" />
@@ -412,6 +446,8 @@
 		</Unit>
 		<Unit filename="src/sond_database_node.c">
 			<Option compilerVar="CC" />
+			<Option compile="0" />
+			<Option link="0" />
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
 			<Option target="SondClient (Release)" />
@@ -425,6 +461,8 @@
 		</Unit>
 		<Unit filename="src/sond_database_property.c">
 			<Option compilerVar="CC" />
+			<Option compile="0" />
+			<Option link="0" />
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
 			<Option target="SondClient (Release)" />

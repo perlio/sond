@@ -5,6 +5,8 @@ mkdir release/bin
 cp bin/zond.exe release/bin/zond.exe
 cp bin/viewer.exe release/bin/viewer.exe
 
+mkdir release/logs
+
 ldd release/bin/zond.exe | grep '\/mingw.*\.dll' -o | xargs -I{} cp "{}" release/bin
 cp /mingw64/bin/gspawn-win64-helper.exe release/bin
 cp /mingw64/bin/gspawn-win64-helper-console.exe release/bin

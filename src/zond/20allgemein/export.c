@@ -36,8 +36,19 @@ export_get_buffer( gint left_indent, gchar* node_text,
         gchar* rel_path, Anbindung* anbindung, gchar* text )
 {
     gchar* buffer = NULL;
+    gchar* node_text_locale = NULL;
+    GError* error = NULL;
 
-    buffer = g_strdup_printf( "{\\li%i\\fs28\\b %s \\b0", left_indent, node_text );
+    node_text_locale = g_locale_from_utf8( node_text, -1, NULL, NULL, &error );
+    if ( error )
+    {
+        g_free( node_text_locale );
+        node_text_locale = g_strdup_printf( "Fehler: %s", error->message );
+        g_error_free( error );
+    }
+
+    buffer = g_strdup_printf( "{\\li%i\\fs28\\b %s \\b0", left_indent, node_text_locale );
+    g_free( node_text_locale );
 
     if ( rel_path ) buffer = add_string( buffer, g_strdup_printf( "\\par\\fs20 %s", rel_path ) );
     {
@@ -48,7 +59,39 @@ export_get_buffer( gint left_indent, gchar* node_text,
         buffer = add_string( buffer, g_strdup( "\\par" ) );
     }
 
-    if ( text ) buffer = add_string( buffer, g_strdup_printf( "\\par\\fs24\\par\\ %s\\par", text ) );
+    if ( text )
+    {
+        gchar** strv = NULL;
+        gint zaehler = 0;
+        gchar* text_locale = NULL;
+        GError* error = NULL;
+
+        text_locale = g_locale_from_utf8( text, -1, NULL, NULL, &error );
+        if ( error )
+        {
+            g_free( text_locale );
+            text_locale = g_strdup_printf( "Fehler: %s", error->message );
+            g_error_free( error );
+        }
+
+        buffer = add_string( buffer, g_strdup_printf( "\\par\\fs24\\par\\ " ) );
+        strv = g_strsplit( text_locale, "\n", -1 );
+
+        while ( strv[zaehler] )
+        {
+            gchar* zeile = NULL;
+
+            zeile = g_strconcat( strv[zaehler], "\\line ", NULL );
+            buffer = add_string( buffer, zeile );
+
+            zaehler++;
+        }
+
+        g_strfreev( strv );
+        g_free( text_locale );
+
+        buffer = add_string( buffer, g_strdup( "\\par" ) );
+    }
 
     buffer = add_string( buffer, g_strdup( "}" ) );
 
@@ -307,6 +350,17 @@ export_html( Projekt* zond, GFileOutputStream* stream, gint umfang, gchar** errm
     }
     if ( rc ) ERROR_S
 
+    //Hier htm-Datei in stream schreiben
+    rc = g_output_stream_write( G_OUTPUT_STREAM(stream), "}}",
+            strlen( "}}" ), NULL, &error );
+    if ( rc == -1 )
+    {
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_output_stream_write "
+                "(end):\n", error->message, NULL );
+        g_error_free( error );
+
+        return -1;
+    }
     return 0;
 }
 

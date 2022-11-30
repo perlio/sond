@@ -1701,42 +1701,17 @@ pdf_ocr_create_pdf_only_text( InfoWindow* info_window,
 
 
 static gint
-init_tesseract( TessBaseAPI** handle, TessResultRenderer** renderer, gchar* path_tmp, gchar** errmsg )
+init_tesseract( Projekt* zond, TessBaseAPI** handle,
+        TessResultRenderer** renderer, gchar* path_tmp, gchar** errmsg )
 {
     gint rc = 0;
-    gchar* base_dir = NULL;
     gchar* tessdata_dir = NULL;
 
     //TessBaseAPI
     *handle = TessBaseAPICreate( );
     if ( !(*handle) ) ERROR_SOND( "TessBaseApiCreate" )
 
-#ifdef _WIN32
-    DWORD ret = 0;
-    TCHAR buff[MAX_PATH] = { 0 };
-
-    ret = GetModuleFileName(NULL, buff, _countof(buff));
-    if ( !ret )
-    {
-        if ( errmsg )
-        {
-            DWORD error_code = 0;
-
-            error_code = GetLastError( );
-
-            *errmsg = add_string( *errmsg, g_strdup_printf( "Bei Aufruf GetModuleFileName:\n"
-                    "Error Code: %li", error_code ) );
-        }
-        return -1;
-    }
-
-    base_dir = g_strndup( (const gchar*) buff, strlen( buff ) -
-            strlen( g_strrstr( (const gchar*) buff, "\\" ) ) - 3 );
-#elif defined( __linux__ )
-    base_dir = g_strdup( "/usr/share/" );
-#endif // _WIN32
-
-    tessdata_dir = add_string( base_dir, g_strdup( "share/tessdata" ) );
+    tessdata_dir = g_strconcat( zond->base_dir, "share/tessdata", NULL );
 
     rc = TessBaseAPIInit3( *handle, tessdata_dir, "deu" );
     g_free( tessdata_dir );
@@ -1778,7 +1753,7 @@ pdf_ocr_pages( Projekt* zond, InfoWindow* info_window, GPtrArray* arr_document_p
     path_tmp = g_strconcat( g_get_tmp_dir(), "\\tess_tmp", NULL );
     if ( !path_tmp ) ERROR_S
 
-    rc = init_tesseract( &handle, &renderer, path_tmp, errmsg );
+    rc = init_tesseract( zond, &handle, &renderer, path_tmp, errmsg );
     g_free( path_tmp );
     if ( rc ) ERROR_S
 

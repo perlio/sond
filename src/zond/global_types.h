@@ -135,6 +135,7 @@ typedef struct _Clipboard Clipboard;
 
 typedef struct _Projekt
 {
+    gchar* base_dir;
 #ifndef VIEWER
     guint state; //Modifier Mask
 
