@@ -222,8 +222,8 @@ get_base_dir( Projekt* zond )
 static void
 init( GtkApplication* app, Projekt* zond )
 {
-    log_init( zond );
     get_base_dir( zond );
+    log_init( zond );
 
     //benötigte Arrays erzeugen
     zond->arr_pv = g_ptr_array_new( );
