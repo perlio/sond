@@ -6,21 +6,21 @@
 #include "sond_person.h"
 
 
-typedef struct _Akte_Lebenszeit
+typedef struct _AkteLebenszeit
 {
     GDateTime* von;
     GDateTime* bis;
     gint ablagenr;
 } AkteLebenszeit;
 
-typedef struct _Akte_Beteiligter
+typedef struct _AkteBeteiligter
 {
     PersonKurz* person_kurz;
     gint code_betart; //property der rel _hat_ zwischen akte und person
     GPtrArray* arr_betreffs; //sind properties der rel akte _hat_ person; vielleicht zur Markieruhg der Reihenfolge Ziffer voranstellen?!
 } AkteBeteiligter;
 
-typedef struct _Akte_Sachbearbeiter
+typedef struct _AkteSachbearbeiter
 {
     gint id; //
     PersonKurz* person_kurz; //sb _ist_ person
@@ -29,7 +29,7 @@ typedef struct _Akte_Sachbearbeiter
     GDateTime* bis;
 } AkteSachbearbeiter;
 
-typedef struct _Akte_Kurz
+typedef struct _AkteKurz
 {
     gint id;
     gint regjahr;
@@ -47,20 +47,14 @@ typedef struct _Akte
 } Akte;
 
 
+void akte_kurz_free( AkteKurz* );
+
+AkteKurz* akte_kurz_new( void );
+
 void akte_free( Akte* );
 
 Akte* akte_new( );
 
-Akte* akte_load( MYSQL*, gint, gint );
-
-gint akte_save( MYSQL*, gint, gint );
-
-JsonNode* akte_serialize( Akte* );
-
-Akte* akte_deserialize( JsonNode* );
-
-GPtrArray* akte_liste_load( MYSQL*, const gchar* );
-
-JsonNode* akte_liste_serialize( GPtrArray* );
+GList* akte_load_list_kurz( const gchar*, GError** );
 
 #endif //SOND_AKTE_H_INCLUDED

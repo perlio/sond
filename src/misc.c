@@ -331,6 +331,45 @@ misc_get_calendar( GtkCalendar* calendar )
 }
 
 
+gchar*
+get_base_dir( gchar** errmsg )
+{
+#ifdef _WIN32
+    DWORD ret = 0;
+    TCHAR buff[MAX_PATH] = { 0 };
+
+    ret = GetModuleFileName(NULL, buff, _countof(buff));
+    if ( !ret )
+    {
+        if ( errmsg )
+        {
+            DWORD error_code = 0;
+
+            error_code = GetLastError( );
+            *errmsg = g_strdup_printf( "Bei Aufruf GetModuleFileName:\n"
+                    "Error-Code: %li", error_code );
+        }
+
+        return NULL;
+    }
+
+    return g_strndup( (const gchar*) buff, strlen( buff ) -
+            strlen( g_strrstr( (const gchar*) buff, "\\" ) ) - 3 );
+#elif defined( __linux__ )
+    char result[PATH_MAX];
+    ssize_t count = readlink("/proc/self/exe", result, PATH_MAX);
+    if (count == -1)
+    {
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf readlink:\n", strerror( errno ), NULL );
+
+        return NULL;
+    }
+
+    return g_strdup( dirname( result ) );
+#endif // _WIN32
+}
+
+
 
 
 

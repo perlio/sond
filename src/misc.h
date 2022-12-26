@@ -62,4 +62,6 @@ void misc_set_calendar( GtkCalendar*, const gchar* );
 
 gchar* misc_get_calendar( GtkCalendar* );
 
+gchar* get_base_dir( gchar** );
+
 #endif // MISC_H_INCLUDED

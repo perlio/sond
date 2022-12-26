@@ -188,41 +188,18 @@ log_init( Projekt* zond )
 
 
 static void
-get_base_dir( Projekt* zond )
-{
-#ifdef _WIN32
-    DWORD ret = 0;
-    TCHAR buff[MAX_PATH] = { 0 };
-
-    ret = GetModuleFileName(NULL, buff, _countof(buff));
-    if ( !ret )
-    {
-        DWORD error_code = 0;
-
-        error_code = GetLastError( );
-
-        display_message( zond->app_window, "Bei Aufruf GetModuleFileName:\n"
-                "Error Code: ", error_code, NULL );
-
-        exit( -1 );;
-    }
-
-    zond->base_dir = g_strndup( (const gchar*) buff, strlen( buff ) -
-            strlen( g_strrstr( (const gchar*) buff, "\\" ) ) - 3 );
-#elif defined( __linux__ )
-    char result[PATH_MAX];
-    ssize_t count = readlink("/proc/self/exe", result, PATH_MAX);
-    if (count != -1) zond->base_dir = g_strdup( dirname( result ) );
-#endif // _WIN32
-
-    return;
-}
-
-
-static void
 init( GtkApplication* app, Projekt* zond )
 {
-    get_base_dir( zond );
+    gchar* errmsg = NULL;
+
+    if ( !(zond->base_dir = get_base_dir( &errmsg )) )
+    {
+        display_message( NULL, "Base-Dir konnte nicht ermittelt werden:\n",
+        errmsg, NULL );
+
+        exit( -1 );
+    }
+
     log_init( zond );
 
     //benötigte Arrays erzeugen
@@ -337,8 +314,6 @@ int main(int argc, char **argv)
 {
     GtkApplication* app = NULL;
     Projekt zond = { 0 };
-
-    zond.base_dir = "C:\\msys64\\home\\pkrieger\\Projekte\\sond\\";
 
     //ApplicationApp erzeugen
     app = gtk_application_new ( "de.perlio.zond", G_APPLICATION_HANDLES_OPEN );

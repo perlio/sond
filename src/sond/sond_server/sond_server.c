@@ -12,6 +12,7 @@
 
 typedef struct _Sond_Server
 {
+    GMainLoop* loop;
     gchar* password;
     gchar* base_dir;
     gchar* log_file;
@@ -46,7 +47,8 @@ process_imessage( SondServer* sond_server, const gchar* auth, const gchar* comma
         return 0;
     }
 
-    if ( g_strcmp0( command, "SHUTDOWN" ) )
+    if ( g_strcmp0( command, "PING" ) ) *omessage = g_strdup( "PONG" );
+    else if ( g_strcmp0( command, "SHUTDOWN" ) )
     {
         *omessage = g_strdup( "SONDSERVER_OK" );
 
@@ -139,7 +141,7 @@ callback_socket_incoming( GSocketService *service,
         }
     }
 
-    rc = g_output_stream_write( ostream, omessage, strlen( omessage ), NULL, &error );
+    ret = g_output_stream_write( ostream, omessage, strlen( omessage ), NULL, &error );
     g_free( omessage );
     if ( error )
     {
@@ -151,7 +153,7 @@ callback_socket_incoming( GSocketService *service,
     if ( rc )
     {
         g_message( "Server wird heruntergefahren " );
-        exit( 1 );
+        g_main_loop_quit( sond_server->loop );
     }
 
     return FALSE;
@@ -374,9 +376,9 @@ main( gint argc, gchar** argv )
 
     log_init( &sond_server );
 
-    loop = g_main_loop_new( NULL, FALSE );
+    sond_server.loop = g_main_loop_new( NULL, FALSE );
 
-    g_main_loop_run( loop );
+    g_main_loop_run( sond_server.loop );
 
     g_message( "Shutdown" );
     sond_server_free( &sond_server );

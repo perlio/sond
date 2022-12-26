@@ -4,6 +4,25 @@
 #include "sond_akte.h"
 
 
+void
+akte_kurz_free( AkteKurz* akte_kurz )
+{
+    g_free( akte_kurz->bezeichnung );
+    g_free( akte_kurz->gegenstand );
+
+    g_free( akte_kurz );
+
+    return;
+}
+
+
+AkteKurz*
+akte_kurz_new( void )
+{
+    return g_malloc0( sizeof( AkteKurz ) );
+}
+
+
 static void
 akte_lebenszeit_free( AkteLebenszeit* akte_lebenszeit )
 {
@@ -39,18 +58,6 @@ akte_sachbearbeiter_free( AkteSachbearbeiter* akte_sachbearbeiter )
     return;
 }
 
-static void
-akte_kurz_free( AkteKurz* akte_kurz )
-{
-    g_free( akte_kurz->bezeichnung );
-    g_free( akte_kurz->gegenstand );
-
-    g_free( akte_kurz );
-
-    return;
-}
-
-
 void
 akte_free( Akte* akte )
 {
@@ -76,6 +83,14 @@ akte_new( void )
     akte->arr_lebenszeiten = g_ptr_array_new_with_free_func( (GDestroyNotify) akte_lebenszeit_free );
 
     return akte;
+}
+
+
+//lädt Liste aller Kurz-Akten, deren Bezeichnung "paßt"
+GList*
+akte_load_list_kurz( const gchar* bez, GError** error )
+{
+
 }
 
 

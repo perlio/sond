@@ -1,5 +1,8 @@
-#include "sond_client_misc.h"
 #include <glib.h>
+
+#include "sond_client.h"
+#include "libsearpc/searpc-client.h"
+
 
 #define JAHRHUNDERT_GRENZE 1960
 
@@ -52,4 +55,48 @@ sond_client_misc_regnr_wohlgeformt( const gchar* entry )
     return TRUE;
 }
 
+
+void
+sond_client_seadrive_test_seadrive_server( SondClient* sond_client )
+{
+    json_t* json = NULL;
+    GError* error = NULL;
+do{
+        gchar* text = NULL;
+
+    json = searpc_client_call__json( sond_client->searpc_client,
+            "seafile_get_sync_notification", &error, 0 );
+    text = json_dumps( json, JSON_INDENT(2) );
+    json_decref( json );
+    printf("%s\n", (error) ? error->message : text);
+    g_free( text );
+    g_clear_error( &error );
+
+    json = searpc_client_call__json( sond_client->searpc_client,
+            "seafile_get_global_sync_status", &error, 0 );
+    text = json_dumps( json, JSON_INDENT(2) );
+    json_decref( json );
+    printf("%s\n", (error) ? error->message : text);
+    g_free( text );
+    g_clear_error( &error );
+
+    json = searpc_client_call__json( sond_client->searpc_client,
+            "seafile_get_download_progress", &error, 0 );
+    text = json_dumps( json, JSON_INDENT(2) );
+    json_decref( json );
+    printf("%s\n", (error) ? error->message : text);
+    g_free( text );
+    g_clear_error( &error );
+
+sleep(4);
+}while(1);
+    return;
+}
+
+
+gboolean
+sond_client_misc_ping_server( SondClient* sond_client, GError** error )
+{
+
+}
 
