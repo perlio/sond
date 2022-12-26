@@ -140,12 +140,9 @@ zond_treeview_cursor_changed( ZondTreeview* treeview, gpointer user_data )
 
     if ( text )
     {
-        GtkTextIter text_iter = { 0 };
-
         gtk_text_buffer_set_text( buffer, text, -1 );
-        gtk_text_buffer_get_end_iter( buffer, &text_iter );
-        while ( gtk_events_pending( ) ) gtk_main_iteration( );
-        gtk_text_view_scroll_to_iter( zond->textview, &text_iter, 0, FALSE, 0, 0 );
+        gtk_text_view_scroll_to_mark( zond->textview, zond->textview_mark, 0.0,
+                FALSE, 0.0, 0.0 );
         g_free( text );
     }
     else gtk_text_buffer_set_text( buffer, "", -1 );

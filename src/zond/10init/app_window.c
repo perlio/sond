@@ -363,9 +363,13 @@ init_app_window( Projekt* zond )
     gtk_paned_pack2( GTK_PANED(paned_baum_auswertung), swindow_textview, TRUE, TRUE );
 
     //text_view erzeugen
+    GtkTextIter text_iter = { 0 };
     zond->textview = GTK_TEXT_VIEW(gtk_text_view_new( ));
     gtk_text_view_set_wrap_mode( zond->textview, GTK_WRAP_WORD );
     gtk_text_view_set_accepts_tab( zond->textview, FALSE );
+    gtk_text_buffer_get_end_iter( gtk_text_view_get_buffer( zond->textview ), &text_iter );
+    zond->textview_mark = gtk_text_buffer_create_mark( gtk_text_view_get_buffer( zond->textview ),
+            NULL, &text_iter, FALSE );
 
     //Und dann in untere Hälfte des übergebenen vpaned reinpacken
     gtk_container_add( GTK_CONTAINER(swindow_textview),

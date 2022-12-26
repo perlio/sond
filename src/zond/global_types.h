@@ -19,6 +19,7 @@ typedef struct _GtkTreeView GtkTreeView;
 typedef struct _GtkTreeSelection GtkTreeSelection;
 typedef struct _GtkCellRenderer GtkCellRenderer;
 typedef struct _GtkTextView GtkTextView;
+typedef struct _GtkTextMark GtkTextMark;
 typedef struct _GArray GArray;
 typedef struct _GPtrArray GPtrArray;
 typedef struct _GdkWindow GdkWindow;
@@ -159,6 +160,7 @@ typedef struct _Projekt
     gulong key_press_signal;
 
     GtkTextView* textview;
+    GtkTextMark* textview_mark;
 
     DBaseZond* dbase_zond;
 
