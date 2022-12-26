@@ -73,7 +73,6 @@ zond_treeview_cursor_changed( ZondTreeview* treeview, gpointer user_data )
 
     Projekt* zond = (Projekt*) user_data;
 
-
     //wenn kein cursor gesetzt ist
     if ( !sond_treeview_get_cursor( SOND_TREEVIEW(treeview), &iter ) )
     {

@@ -187,7 +187,7 @@ export_selektierte_punkte( Projekt* zond, Baum baum, GFileOutputStream* stream,
         if ( rc )
         {
             g_list_free_full( selected, (GDestroyNotify) gtk_tree_path_free );
-            ERROR_SOND( "export_node" )
+            ERROR_S
         }
     }
     while ( (list = list->next) );
@@ -249,12 +249,13 @@ export_selektierte_zweige( Projekt* zond, Baum baum, GFileOutputStream* stream,
     do //alle rows aus der Liste
     {
         gint rc = 0;
+        gchar* errmsg_ii = NULL;
 
         rc = export_node( zond, model, list->data, 1, stream, errmsg );
         if ( rc )
         {
             g_list_free_full( selected, (GDestroyNotify) gtk_tree_path_free );
-            ERROR_SOND( "export_node" )
+            ERROR_S
         }
 
         //neuen treeview mit root_node
@@ -262,16 +263,19 @@ export_selektierte_zweige( Projekt* zond, Baum baum, GFileOutputStream* stream,
                 list->data );
 
         g_object_set_data( G_OBJECT(new_model), "stream", (gpointer) stream );
-        g_object_set_data( G_OBJECT(new_model), "errmsg", (gpointer) errmsg );
+        g_object_set_data( G_OBJECT(new_model), "errmsg", (gpointer) &errmsg_ii );
         g_object_set_data( G_OBJECT(new_model), "offset", GINT_TO_POINTER(1) );
 
         gtk_tree_model_foreach( new_model, (GtkTreeModelForeachFunc) export_foreach,
                 (gpointer) zond );
         g_object_unref( new_model );
-        if ( errmsg )
+        if ( errmsg_ii )
         {
-            g_list_free_full( selected, (GDestroyNotify) gtk_tree_path_free );
-            ERROR_SOND( "foreach: export_foreach" )
+            if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf gtk_tree_model_foreach:\n",
+                    errmsg_ii, NULL );
+            g_free( errmsg_ii );
+
+            return -1;
         }
     }
     while ( (list = list->next) );
