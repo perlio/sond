@@ -29,6 +29,8 @@
 				<Option parameters='&quot;C:\lfd Akten\Test\Test.ZND&quot;' />
 				<Compiler>
 					<Add option="-g" />
+					<Add option="-DTESTING" />
+					<Add option="-DZOND_TESTING" />
 				</Compiler>
 				<Linker>
 					<Add option="-mconsole" />
@@ -53,6 +55,8 @@
 				<Compiler>
 					<Add option="-g" />
 					<Add option="-DVIEWER" />
+					<Add option="-DTESTING" />
+					<Add option="-DVIEWER_TESTING" />
 				</Compiler>
 			</Target>
 			<Target title="SondClient (Release)">
@@ -354,6 +358,20 @@
 			<Option target="SondClient (Testing)" />
 			<Option target="SondServer (Release)" />
 		</Unit>
+		<Unit filename="src/sond/sond_client/SeafileRepo/repo.c">
+			<Option compilerVar="CC" />
+			<Option target="SondClient (Release)" />
+			<Option target="SondClient (Testing)" />
+		</Unit>
+		<Unit filename="src/sond/sond_client/SeafileRepo/seafile-object.h">
+			<Option target="SondClient (Release)" />
+			<Option target="SondClient (Testing)" />
+		</Unit>
+		<Unit filename="src/sond/sond_client/SeafileRepo/task.c">
+			<Option compilerVar="CC" />
+			<Option target="SondClient (Release)" />
+			<Option target="SondClient (Testing)" />
+		</Unit>
 		<Unit filename="src/sond/sond_client/libsearpc/searpc-client.c">
 			<Option compilerVar="CC" />
 			<Option target="SondClient (Release)" />
@@ -519,19 +537,27 @@
 			<Option compilerVar="CC" />
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
+			<Option target="SondClient (Release)" />
+			<Option target="SondClient (Testing)" />
 		</Unit>
 		<Unit filename="src/sond_treeview.h">
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
+			<Option target="SondClient (Release)" />
+			<Option target="SondClient (Testing)" />
 		</Unit>
 		<Unit filename="src/sond_treeviewfm.c">
 			<Option compilerVar="CC" />
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
+			<Option target="SondClient (Testing)" />
+			<Option target="SondClient (Release)" />
 		</Unit>
 		<Unit filename="src/sond_treeviewfm.h">
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
+			<Option target="SondClient (Testing)" />
+			<Option target="SondClient (Release)" />
 		</Unit>
 		<Unit filename="src/zond/10init/app_window.c">
 			<Option compilerVar="CC" />
@@ -767,10 +793,14 @@
 			<Option compilerVar="CC" />
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
+			<Option target="SondClient (Release)" />
+			<Option target="SondClient (Testing)" />
 		</Unit>
 		<Unit filename="src/zond/zond_dbase.h">
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
+			<Option target="SondClient (Release)" />
+			<Option target="SondClient (Testing)" />
 		</Unit>
 		<Unit filename="src/zond/zond_gemini.c">
 			<Option compilerVar="CC" />

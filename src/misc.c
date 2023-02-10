@@ -9,6 +9,46 @@
 #endif // _WIN32
 
 
+void
+sond_error_free( SondError* sond_error )
+{
+    g_error_free( sond_error->error );
+    g_free( sond_error->origin );
+    g_free( sond_error->function_stack );
+
+    g_free( sond_error );
+
+    return;
+}
+
+
+SondError*
+sond_error_new( GError* error, const gchar* origin )
+{
+    SondError* sond_error = NULL;
+
+    sond_error = g_malloc0( sizeof( SondError ) );
+    sond_error->error = error;
+    sond_error->origin = g_strdup( origin );
+
+    return sond_error;
+}
+
+
+SondError*
+sond_error_new_full( GQuark domain, gint code, const gchar* error_message,
+        const gchar* origin )
+{
+    GError* error = NULL;
+    SondError* sond_error = NULL;
+
+    error = g_error_new( domain, code, "%s", error_message );
+    sond_error = sond_error_new( error, origin );
+
+    return sond_error;
+}
+
+
 /** Zeigt Fenster, in dem Liste übergebener strings angezeigt wird.
 *   parent-window kann NULL sein, dann Warnung
 *   text1 darf nicht NULL sein
@@ -332,7 +372,7 @@ misc_get_calendar( GtkCalendar* calendar )
 
 
 gchar*
-get_base_dir( gchar** errmsg )
+get_base_dir( void )
 {
 #ifdef _WIN32
     DWORD ret = 0;
@@ -341,16 +381,11 @@ get_base_dir( gchar** errmsg )
     ret = GetModuleFileName(NULL, buff, _countof(buff));
     if ( !ret )
     {
-        if ( errmsg )
-        {
-            DWORD error_code = 0;
+        DWORD error_code = 0;
 
-            error_code = GetLastError( );
-            *errmsg = g_strdup_printf( "Bei Aufruf GetModuleFileName:\n"
-                    "Error-Code: %li", error_code );
-        }
-
-        return NULL;
+        error_code = GetLastError( );
+        g_error( "Basedir konnte nicht ermittelt werden. Bei Aufruf GetModuleFileName:\n"
+                "Error-Code: %li", error_code );
     }
 
     return g_strndup( (const gchar*) buff, strlen( buff ) -
@@ -358,12 +393,8 @@ get_base_dir( gchar** errmsg )
 #elif defined( __linux__ )
     char result[PATH_MAX];
     ssize_t count = readlink("/proc/self/exe", result, PATH_MAX);
-    if (count == -1)
-    {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf readlink:\n", strerror( errno ), NULL );
-
-        return NULL;
-    }
+    if (count == -1) g_error( "Basedir konnte nicht ermittelt werden - Bei Aufruf "
+            "readlink:\n%s", strerror( errno ) );
 
     return g_strdup( dirname( result ) );
 #endif // _WIN32

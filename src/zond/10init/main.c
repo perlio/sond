@@ -192,15 +192,11 @@ init( GtkApplication* app, Projekt* zond )
 {
     gchar* errmsg = NULL;
 
-    if ( !(zond->base_dir = get_base_dir( &errmsg )) )
-    {
-        display_message( NULL, "Base-Dir konnte nicht ermittelt werden:\n",
-        errmsg, NULL );
+    get_base_dir( );
 
-        exit( -1 );
-    }
-
+#ifndef TESTING
     log_init( zond );
+#endif // TESTING
 
     //benötigte Arrays erzeugen
     zond->arr_pv = g_ptr_array_new( );

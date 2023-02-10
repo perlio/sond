@@ -1,6 +1,8 @@
 #include <gtk/gtk.h>
 
 #include "../../misc.h"
+#include "../../sond_treeviewfm.h"
+
 #include "sond_client.h"
 #include "sond_client_connection.h"
 #include "sond_client_misc.h"
@@ -23,9 +25,10 @@ sond_client_file_manager_free( FileManager* file_manager )
     return;
 }
 
+
 static void
 sond_client_file_manager_set_headerbar( GtkWidget* fm_window, SondTreeviewFM* stvfm, const gchar* path )
-{
+{/*
     GtkWidget* headerbar = gtk_header_bar_new( );
     GtkWidget* menu_fm = gtk_menu_new( );
     GtkWidget* menu_button = gtk_menu_button_new( );
@@ -107,7 +110,7 @@ sond_client_file_manager_set_headerbar( GtkWidget* fm_window, SondTreeviewFM* st
     gtk_header_bar_set_show_close_button(GTK_HEADER_BAR(headerbar), TRUE);
 
     gtk_window_set_titlebar( GTK_WINDOW(fm_window), headerbar );
-
+*/
     return;
 }
 
@@ -174,7 +177,7 @@ sond_client_file_manager_entry_activate( GtkEntry* entry, gpointer data )
         //ansonsten: File_manager-Fenster öffnen
         if ( !sond_client_file_manager_create( sond_client, jahr, regnr, &error ) )
         {
-            if ( error->code == SOND_CLIENT_ERROR_KEINEAKTE )
+            if ( 0 ) //error->code == SOND_CLIENT_ERROR_KEINEAKTE )
             {
                 g_clear_error( &error );
 
@@ -214,10 +217,6 @@ sond_client_file_manager_entry_activate( GtkEntry* entry, gpointer data )
     else //Text
     {
         //Prüfen, ob online
-        if ( sond_client_connection_ping( sond_client ) )
-        {
-
-        }
             //Falls ja:
                 //auf Server alle passenden Akten suchen, auswählen,
                 //Auf Synchro?

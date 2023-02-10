@@ -1,15 +1,17 @@
 #include <glib.h>
 #include <gio/gio.h>
 
+#include "../../misc.h"
+
 #include "sond_client.h"
 
 #define MAX_MSG_SIZE 2048
 
 gchar*
 sond_client_connection_send_and_read( SondClient* sond_client, const gchar*
-        message, GError** error )
+        message, SondError** sond_error )
 {
-    GError * error_tmp = NULL;
+    GError * error = NULL;
     GSocketConnection * connection = NULL;
     GSocketClient * client = NULL;
     gchar imessage[MAX_MSG_SIZE] = { 0 };
@@ -20,97 +22,59 @@ sond_client_connection_send_and_read( SondClient* sond_client, const gchar*
 
     /* connect to the host */
     connection = g_socket_client_connect_to_host (client, sond_client->server_host,
-            sond_client->server_port, NULL, &error_tmp );
-    if ( error_tmp )
+            sond_client->server_port, NULL, &error );
+    if ( *sond_error )
     {
-        g_set_error( error, SOND_CLIENT_ERROR, SOND_CLIENT_ERROR_KEINSERVER,
-                "Keine Verbindung zum Server:\n%s",
-                error_tmp->message );
-        g_error_free( error_tmp );
         g_object_unref( client );
-
-        return NULL;
+        *sond_error = sond_error_new( error, "g_socket_client_connect_to_host" );
+        SOND_ERROR_VAL(NULL)
     }
+
     /* use the connection */
     GInputStream * istream = g_io_stream_get_input_stream (G_IO_STREAM (connection));
     GOutputStream * ostream = g_io_stream_get_output_stream (G_IO_STREAM (connection));
 
-    g_output_stream_write( ostream, message, strlen( message ), NULL, &error_tmp );
-    if ( error_tmp )
+    g_output_stream_write( ostream, message, strlen( message ), NULL, &error );
+    if ( *sond_error )
     {
-        g_set_error( error, SOND_CLIENT_ERROR, SOND_CLIENT_ERROR_OMESSAGE,
-                "Senden Nachricht an Server fehlgeschlagen:\n%s",
-                error_tmp->message );
-        g_error_free( error_tmp );
         g_object_unref( connection );
         g_object_unref( client );
-
-        return NULL;
+        *sond_error = sond_error_new( error, "g_output_stream_write" );
+        SOND_ERROR_VAL(NULL)
     }
 
-    ret = g_input_stream_read( istream, imessage, MAX_MSG_SIZE, NULL, &error_tmp );
+    ret = g_input_stream_read( istream, imessage, MAX_MSG_SIZE, NULL, &error );
+    g_object_unref( connection );
+    g_object_unref( client );
     if ( error )
     {
-        g_set_error( error, SOND_CLIENT_ERROR, SOND_CLIENT_ERROR_IMESSAGE,
-                "Empfang Nachricht von Server fehlgeschlagen:\n%s",
-                error_tmp->message );
-        g_error_free( error_tmp );
-        g_object_unref( connection );
-        g_object_unref( client );
-
-        return NULL;
+        *sond_error = sond_error_new( error, "g_input_stream_write" );
+        SOND_ERROR_VAL(NULL)
     }
     else if ( ret == 0 )
     {
-        g_set_error( error, SOND_CLIENT_ERROR, SOND_CLIENT_ERROR_IMESSAGE,
-                "%s:\ng_input_stream_read liest 0 Byte", __func__ );
-        g_object_unref( connection );
-        g_object_unref( client );
-
-        return NULL;
+        *sond_error = sond_error_new_full( SOND_CLIENT_ERROR,
+                SOND_CLIENT_ERROR_NOINPUT, "Antwort leer", __func__ );
+        SOND_ERROR_VAL(NULL)
     }
     else if ( ret > MAX_MSG_SIZE )
     {
-        g_set_error( error, SOND_CLIENT_ERROR, SOND_CLIENT_ERROR_IMESSAGE,
-                "Empfang Nachricht von Server fehlgeschlagen:\n"
-                "Nachricht abgeschnitten" );
-        g_object_unref( connection );
-        g_object_unref( client );
-
-        return NULL;
+        *sond_error = sond_error_new_full( SOND_CLIENT_ERROR,
+                SOND_CLIENT_ERROR_INPTRUNC, "Antwort abgeschnitten", __func__ );
+        SOND_ERROR_VAL(NULL)
     }
-
-    g_object_unref( connection );
-    g_object_unref( client );
 
     return g_strdup( imessage );
 }
 
 
 gboolean
-sond_client_connection_ping( SondClient* sond_client, GError** error )
+sond_client_connection_ping( SondClient* sond_client, SondError** sond_error )
 {
-    GError* error_tmp = NULL;
     gchar* rcv_message = NULL;
 
-    rcv_message = sond_client_connection_send_and_read( sond_client, "PING::", &error_tmp );
-    if ( error_tmp )
-    {
-        if ( error_tmp->code == SOND_CLIENT_ERROR_KEINSERVER )
-        {
-            g_error_free( error_tmp );
-
-            return FALSE;
-        }
-        else
-        {
-            g_set_error( error, SOND_CLIENT_ERROR, error_tmp->code, "%s:\n%s",
-                    __func__, error_tmp->message );
-            g_error_free( error_tmp );
-
-            return FALSE;
-        }
-    }
+    rcv_message = sond_client_connection_send_and_read( sond_client, "PING::", sond_error );
+    if ( *sond_error ) SOND_ERROR
 
     if ( !g_strcmp0( rcv_message, "PONG" ) )
     {
@@ -121,8 +85,8 @@ sond_client_connection_ping( SondClient* sond_client, GError** error )
     else
     {
         g_free( rcv_message );
-        g_set_error( error, SOND_CLIENT_ERROR, SOND_CLIENT_ERROR_INVRESPONSE,
-                "%s:\nUngültige Antwort von Server", __func__ );
+        *sond_error = sond_error_new_full( SOND_CLIENT_ERROR, SOND_CLIENT_ERROR_INVALRESP,
+                "Server antwortet nicht mit 'PONG'", __func__ );
 
         return FALSE;
     }

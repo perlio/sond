@@ -2,6 +2,7 @@
 
 #include "sond_client.h"
 #include "libsearpc/searpc-client.h"
+#include "SeafileRepo/repo.c"
 
 
 #define JAHRHUNDERT_GRENZE 1960
@@ -48,7 +49,8 @@ sond_client_misc_regnr_wohlgeformt( const gchar* entry )
         pos++;
     }
 
-    if ( slashes == 0 ) return FALSE;
+    if ( slashes
+        == 0 ) return FALSE;
 
     if ( strlen( g_strrstr( entry, "/" ) ) != 3 ) return FALSE;
 
@@ -57,15 +59,46 @@ sond_client_misc_regnr_wohlgeformt( const gchar* entry )
 
 
 void
-sond_client_seadrive_test_seadrive_server( SondClient* sond_client )
+sond_client_seadrive_test_seafile_server( SondClient* sond_client )
 {
+    GList* list = NULL;
+    GList* ptr = NULL;
+    GError* error = NULL;
+
+    list = searpc_client_call__objlist( sond_client->searpc_client,
+            "seafile_get_repo_list", SEAFILE_TYPE_REPO, &error, 2, "int", 0, "int", 0 );
+if ( error ) printf("%s\n", error->message );
+    if ( !list )
+    {
+        g_message( "Keine repos" );
+        return;
+    }
+
+    ptr = list;
+
+    while ( ptr )
+    {
+        gchar* id = NULL;
+        gchar* name = NULL;
+        gchar* desc = NULL;
+        gchar* root = NULL;
+        gchar* worktree = NULL;
+        gchar* origin_path = NULL;
+
+        g_object_get( ptr->data, "id", &id, "repo-name", &name, "repo-desc", &desc,
+                "root", &root, "worktree", &worktree, "user", &origin_path, NULL );
+        printf("%s  %s  %s  %s  %s  %s\n", id, name, desc, root, worktree, origin_path );
+        ptr = ptr->next;
+    }
+
+/*
     json_t* json = NULL;
     GError* error = NULL;
 do{
         gchar* text = NULL;
 
-    json = searpc_client_call__json( sond_client->searpc_client,
-            "seafile_get_sync_notification", &error, 0 );
+    list = searpc_client_call__objlist( sond_client->searpc_client,
+            "seafile_get_repo_list", SEAFILE_TYPE_REPO, &error, 2, "int", 0, "int", 0 );
     text = json_dumps( json, JSON_INDENT(2) );
     json_decref( json );
     printf("%s\n", (error) ? error->message : text);
@@ -91,6 +124,7 @@ do{
 sleep(4);
 }while(1);
     return;
+*/
 }
 
 

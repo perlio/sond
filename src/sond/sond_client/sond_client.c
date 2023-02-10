@@ -22,7 +22,7 @@ sond_client_close( GtkWidget* app_window, GdkEvent* event, gpointer data )
     SondClient* sond_client = (SondClient*) data;
     g_free( sond_client->base_dir );
     g_free( sond_client->seadrive_root );
-    g_free( sond_client->seadrive );
+    g_free( sond_client->seafile_root );
     g_free( sond_client->server_host );
     g_free( sond_client->server_user );
 
@@ -78,9 +78,9 @@ sond_client_init_rpc_client( SondClient* sond_client )
         return;
     }
 
-    path = g_strdup_printf("\\\\.\\pipe\\seadrive_%s", b64encode(userNameBuf));
+    path = g_strdup_printf("\\\\.\\pipe\\seafile_%s", b64encode(userNameBuf));
 #else
-    path = g_build_filename ( sond_client->seadrive, SEAFILE_SOCKET_NAME, NULL);
+    path = g_build_filename ( sond_client->seafile, SEAFILE_SOCKET_NAME, NULL);
 #endif
 
     searpc_named_pipe_client = searpc_create_named_pipe_client( path );
@@ -88,15 +88,12 @@ sond_client_init_rpc_client( SondClient* sond_client )
     ret = searpc_named_pipe_client_connect( searpc_named_pipe_client );
     if ( ret == -1 )
     {
-        display_message( sond_client->app_window, "Fehler - RPC-Client konnte "
-                "nicht mit Server verbunden werden", NULL );
-        g_free( searpc_named_pipe_client->path );
-        g_free( searpc_named_pipe_client );
-
-        sond_client_quit( sond_client );
+        //seaf-daemon starten
+        g_error( "Verbindung zum RPC-Server kann nicht hergestellt werden" );
     }
+
     sond_client->searpc_client = searpc_client_with_named_pipe_transport( searpc_named_pipe_client,
-            "seadrive-rpcserver" );
+            "seafile-rpcserver" );
 
     return;
 }
@@ -162,7 +159,7 @@ sond_client_get_conf( SondClient* sond_client )
     sond_client->seadrive_root = g_key_file_get_string( key_file, "SEADRIVE", "root", &error );
     if ( error ) g_error( "Seadrive-Root-Dir konnte nicht ermittelt werden:\n%s", error->message );
 
-    sond_client->seadrive = g_key_file_get_string( key_file, "SEADRIVE", "seadrive", &error );
+    sond_client->seafile_root = g_key_file_get_string( key_file, "SEAFILE", "root", &error );
     if ( error ) g_error( "Seadrive-Dir konnte nicht ermittelt werden:\n%s", error->message );
 
     g_key_file_free( key_file );
@@ -174,29 +171,19 @@ sond_client_get_conf( SondClient* sond_client )
 static void
 sond_client_init( GtkApplication* app, SondClient* sond_client )
 {
-    gchar* errmsg = NULL;
-
     sond_client->arr_file_manager = g_ptr_array_new( );
     g_ptr_array_set_free_func( sond_client->arr_file_manager,
             (GDestroyNotify) sond_client_file_manager_free );
 
     sond_client_init_app_window( app, sond_client );
 
-    sond_client->base_dir = get_base_dir( &errmsg );
-    if ( !sond_client->base_dir )
-    {
-        display_message( sond_client->app_window, "Fehler - base_dir konnte "
-                "nicht ermittelt werden:\n", errmsg, NULL );
-        g_free( errmsg );
-
-        sond_client_quit( sond_client );
-    }
+    sond_client->base_dir = get_base_dir( );
 
     sond_client_get_conf( sond_client );
 
     sond_client_init_rpc_client( sond_client );
 
-    sond_client_seadrive_test_seadrive_server( sond_client );
+    sond_client_seadrive_test_seafile_server( sond_client );
 
     return;
 }

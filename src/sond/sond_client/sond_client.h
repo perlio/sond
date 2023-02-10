@@ -1,17 +1,15 @@
 #ifndef SOND_CLIENT_H_INCLUDED
 #define SOND_CLIENT_H_INCLUDED
 
-
 #define SOND_CLIENT_ERROR sond_client_error_quark()
-G_DEFINE_QUARK(sond-client-error-quark, sond_client_error)
+G_DEFINE_QUARK(sond-client-error-quark,sond_client_error)
 
 enum SondClientError
 {
-    SOND_CLIENT_ERROR_KEINSERVER,
-    SOND_CLIENT_ERROR_OMESSAGE,
-    SOND_CLIENT_ERROR_IMESSAGE,
-    SOND_CLIENT_ERROR_INVRESPONSE,
-    SOND_CLIENT_ERROR_KEINEAKTE
+    SOND_CLIENT_ERROR_INVALRESP,
+    SOND_CLIENT_ERROR_NOINPUT,
+    SOND_CLIENT_ERROR_INPTRUNC,
+    NUM_SOND_CLIENT_ERROR
 };
 
 typedef struct _GtkWidget GtkWidget;
@@ -26,7 +24,7 @@ typedef struct _Sond_Client
     gchar* base_dir;
     SearpcClient* searpc_client;
     gchar* seadrive_root;
-    gchar* seadrive;
+    gchar* seafile_root;
 
     gchar* server_host;
     guint16 server_port;

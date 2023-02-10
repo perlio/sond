@@ -90,7 +90,7 @@ sond_treeviewfm_dbase_update_eingang( SondTreeviewFM* stvfm, const gchar* source
     Clipboard* clipboard = sond_treeview_get_clipboard( SOND_TREEVIEW(stvfm) );
     SondTreeviewFMPrivate* priv = sond_treeviewfm_get_instance_private( stvfm );
 
-    rc = eingang_update_rel_path( sond_treeviewfm_get_dbase( SOND_TREEVIEWFM(clipboard->tree_view) ), source, priv->zond_dbase, dest, del, errmsg );
+//    rc = eingang_update_rel_path( sond_treeviewfm_get_dbase( SOND_TREEVIEWFM(clipboard->tree_view) ), source, priv->zond_dbase, dest, del, errmsg );
     if ( rc ) ERROR_ROLLBACK( priv->zond_dbase )
 
     return 0;
@@ -783,7 +783,7 @@ sond_treeviewfm_render_eingang( GtkTreeViewColumn* column, GtkCellRenderer* rend
     rel_path = sond_treeviewfm_get_rel_path( stvfm, iter );
     if ( !rel_path ) return;
 
-    rc = eingang_for_rel_path( stvfm_priv->zond_dbase, rel_path, &eingang_id, &eingang, NULL, &errmsg );
+//    rc = eingang_for_rel_path( stvfm_priv->zond_dbase, rel_path, &eingang_id, &eingang, NULL, &errmsg );
     g_free( rel_path );
     if ( rc == -1 )
     {
