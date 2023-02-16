@@ -190,9 +190,7 @@ log_init( Projekt* zond )
 static void
 init( GtkApplication* app, Projekt* zond )
 {
-    gchar* errmsg = NULL;
-
-    get_base_dir( );
+    zond->base_dir = get_base_dir( );
 
 #ifndef TESTING
     log_init( zond );

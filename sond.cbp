@@ -275,6 +275,7 @@
 		<Unit filename="src/sojus/03Adressen/adressenfenster.c">
 			<Option compilerVar="CC" />
 			<Option compile="0" />
+			<Option link="0" />
 			<Option target="&lt;{~None~}&gt;" />
 		</Unit>
 		<Unit filename="src/sojus/03Adressen/adressenfenster.h">
