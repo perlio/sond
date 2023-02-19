@@ -246,7 +246,7 @@ viewer_transfer_rendered( PdfViewer* pdfv )
 }
 
 
-gboolean
+static gboolean
 viewer_check_rendering( gpointer data )
 {
     gboolean protect = FALSE;

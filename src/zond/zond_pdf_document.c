@@ -636,6 +636,8 @@ zond_pdf_document_reopen_doc_and_pages( ZondPdfDocument* self, gchar** errmsg )
             pdf_document_page_annot = g_ptr_array_index( pdf_document_page->arr_annots, u );
             pdf_document_page_annot->annot = annot;
             pdf_document_page_annot->content = pdf_annot_contents( priv->ctx, annot );
+
+            annot = pdf_next_annot( priv->ctx, annot );
         }
     }
 
