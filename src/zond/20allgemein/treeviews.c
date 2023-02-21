@@ -393,8 +393,7 @@ treeviews_selection_loeschen_foreach( SondTreeview* tree_view, GtkTreeIter* iter
         rc = zond_dbase_commit( s_selection->zond->dbase_zond->zond_dbase_work, errmsg );
         if ( rc ) ERROR_ROLLBACK( s_selection->zond->dbase_zond->zond_dbase_work  )
 
-        zond_tree_store_remove_link( ZOND_TREE_STORE(gtk_tree_view_get_model(
-        GTK_TREE_VIEW(tree_view) )), iter );
+        zond_tree_store_remove_link( iter );
     }
     //else: link, aber nicht head->nix machen
 

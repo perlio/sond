@@ -114,5 +114,7 @@ ZondTreeStore* zond_tree_store_get_tree_store( GtkTreeIter* );
 
 gint zond_tree_store_get_root_id( ZondTreeStore* );
 
+GList* zond_tree_store_get_linked_nodes( GtkTreeIter* );
+
 G_END_DECLS
 #endif /* ZOND_TREE_STORE_H_INCLUDED */

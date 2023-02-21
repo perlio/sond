@@ -335,7 +335,7 @@ static void
 zond_treeview_init( ZondTreeview* ztv )
 {
     //Tree-Model erzeugen und verbinden
-    ZondTreeStore* tree_store = zond_tree_store_new( );
+    ZondTreeStore* tree_store = zond_tree_store_new( 0 );
 
     gtk_tree_view_set_model( GTK_TREE_VIEW(ztv), GTK_TREE_MODEL(tree_store) );
     g_object_unref( tree_store );
