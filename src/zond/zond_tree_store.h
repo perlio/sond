@@ -49,7 +49,7 @@ struct _ZondTreeStoreClass
 GDK_AVAILABLE_IN_ALL
 GType         zond_tree_store_get_type         (void) G_GNUC_CONST;
 GDK_AVAILABLE_IN_ALL
-ZondTreeStore *zond_tree_store_new              ( void );
+ZondTreeStore *zond_tree_store_new              ( gint );
 
 GDK_AVAILABLE_IN_ALL
 void          zond_tree_store_set              (GtkTreeIter  *iter,
@@ -60,7 +60,7 @@ void          zond_tree_store_set              (GtkTreeIter  *iter,
 GDK_AVAILABLE_IN_ALL
 void      zond_tree_store_remove           (GtkTreeIter  *iter);
 
-void zond_tree_store_remove_link( ZondTreeStore*, GtkTreeIter* );
+void zond_tree_store_remove_link( GtkTreeIter* );
 
 GDK_AVAILABLE_IN_ALL
 void zond_tree_store_insert(ZondTreeStore* tree_store,
@@ -77,7 +77,7 @@ zond_tree_store_insert_link_at_pos (GNode* node_target,
                                     GtkTreeIter* iter_new );
 
 GDK_AVAILABLE_IN_ALL
-void         zond_tree_store_insert_link (GNode*,
+void         zond_tree_store_insert_link (GtkTreeIter*,
                                           gint,
                                           ZondTreeStore*,
                                           GtkTreeIter*,
@@ -85,7 +85,7 @@ void         zond_tree_store_insert_link (GNode*,
                                           GtkTreeIter* );
 
 gint
-zond_tree_store_get_link_head_nr( GNode* );
+zond_tree_store_get_link_head_nr( GtkTreeIter* );
 
 GDK_AVAILABLE_IN_ALL
 gboolean      zond_tree_store_is_ancestor      (ZondTreeStore *tree_store,
@@ -100,14 +100,19 @@ GDK_AVAILABLE_IN_ALL
 gboolean      zond_tree_store_iter_is_valid    (ZondTreeStore *tree_store,
                                                GtkTreeIter  *iter);
 
+void zond_tree_store_copy_node( GtkTreeIter*, ZondTreeStore*, GtkTreeIter*,
+        gboolean, GtkTreeIter* );
+
+void zond_tree_store_move_node( GtkTreeIter*, GtkTreeIter*, gboolean );
+
 gboolean
 zond_tree_store_is_link( GtkTreeIter* );
 
-GList* zond_tree_store_get_linked_nodes( GtkTreeIter* );
-
 void zond_tree_store_get_target( GtkTreeIter*, GtkTreeIter* );
 
-ZondTreeStore* zond_tree_store_get_tree_store( GNode* );
+ZondTreeStore* zond_tree_store_get_tree_store( GtkTreeIter* );
+
+gint zond_tree_store_get_root_id( ZondTreeStore* );
 
 G_END_DECLS
 #endif /* ZOND_TREE_STORE_H_INCLUDED */
