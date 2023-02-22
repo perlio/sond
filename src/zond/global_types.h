@@ -136,10 +136,10 @@ typedef struct _Clipboard Clipboard;
 
 typedef struct _Projekt
 {
-#ifndef VIEWER
-    guint state; //Modifier Mask
     gchar* base_dir;
 
+#ifndef VIEWER
+    guint state; //Modifier Mask
     Icon icon[NUMBER_OF_ICONS];
 
     GtkWidget* app_window;
