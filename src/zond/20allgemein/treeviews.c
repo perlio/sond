@@ -72,7 +72,7 @@ treeviews_get_baum_and_node_id( Projekt* zond, GtkTreeIter* iter, Baum* baum,
     ZondTreeStore* tree_store = NULL;
 
     zond_tree_store_get_target( iter, &iter_orig );
-    tree_store = zond_tree_store_get_tree_store( iter_orig.user_data );
+    tree_store = zond_tree_store_get_tree_store( &iter_orig );
 
     if ( tree_store == ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]) )) ) *baum = BAUM_INHALT;
     else if ( tree_store == ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_AUSWERTUNG]) )) ) *baum = BAUM_AUSWERTUNG;
@@ -548,7 +548,7 @@ treeviews_insert_node( Projekt* zond, Baum baum_active, gboolean child, gchar** 
     {
         gint head_nr = 0;
 
-        head_nr = zond_tree_store_get_link_head_nr( iter.user_data );
+        head_nr = zond_tree_store_get_link_head_nr( &iter );
         if ( head_nr )
         {
             baum = baum_active;
@@ -903,7 +903,7 @@ treeviews_get_anchor_id( Projekt* zond, gboolean* child, GtkTreeIter* iter, gint
         else *anchor_id = head_nr;
     }
     else gtk_tree_model_get( GTK_TREE_MODEL(zond_tree_store_get_tree_store(
-            iter_cursor.user_data )), &iter_cursor, 2, anchor_id, -1 );
+            &iter_cursor )), &iter_cursor, 2, anchor_id, -1 );
 
     *iter = iter_cursor;
 
