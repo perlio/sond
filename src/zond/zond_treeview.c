@@ -74,18 +74,15 @@ zond_treeview_cursor_changed( ZondTreeview* treeview, gpointer user_data )
     Projekt* zond = (Projekt*) user_data;
 
     //wenn kein cursor gesetzt ist
+    //also letzter Punkt gelöscht wirf
     if ( !sond_treeview_get_cursor( SOND_TREEVIEW(treeview), &iter ) )
     {
-        Baum baum = KEIN_BAUM;
-
-        if ( SOND_TREEVIEW(treeview) == zond->treeview[BAUM_INHALT] ) baum = BAUM_INHALT;
-        else if ( SOND_TREEVIEW(treeview) == zond->treeview[BAUM_AUSWERTUNG] ) baum = BAUM_AUSWERTUNG;
-
         gtk_label_set_text( zond->label_status, "" ); //status-label leeren
-        if ( baum == BAUM_AUSWERTUNG ) gtk_text_buffer_set_text(
-                gtk_text_view_get_buffer( zond->textview ), "", -1 );
-
+        //textview deaktivieren - egal welcher baum
         gtk_widget_set_sensitive( GTK_WIDGET(zond->textview), FALSE );
+        //wenn letzter Punkt in baum_auswertung gelöscht: textview leeren
+        if ( SOND_TREEVIEW(treeview) == zond->treeview[BAUM_AUSWERTUNG] ) gtk_text_buffer_set_text(
+                gtk_text_view_get_buffer( zond->textview ), "", -1 );
 
         return;
     }
