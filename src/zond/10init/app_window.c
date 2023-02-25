@@ -50,6 +50,7 @@ cb_delete_event( GtkWidget* app_window, GdkEvent* event, gpointer user_data )
     }
     else if ( rc == 1 ) return TRUE;
 
+    gtk_widget_destroy( zond->textview_window );
     gtk_widget_destroy( zond->app_window );
 
     pdf_drop_document( zond->ctx, zond->pv_clip );
@@ -57,6 +58,18 @@ cb_delete_event( GtkWidget* app_window, GdkEvent* event, gpointer user_data )
     fz_drop_context( zond->ctx );
 
     g_ptr_array_unref( zond->arr_pv );
+
+    return TRUE;
+}
+
+
+static gboolean
+cb_close_textview( GtkWidget* window_textview, GdkEvent* event, gpointer user_data )
+{
+    Projekt* zond = (Projekt*) user_data;
+
+    gtk_widget_hide( window_textview );
+    gtk_widget_set_sensitive( zond->menu.textview_extra, TRUE );
 
     return TRUE;
 }
@@ -308,6 +321,29 @@ init_treeviews( Projekt* zond )
 }
 
 
+static GtkTextView*
+init_create_text_view( Projekt* zond )
+{
+    GtkTextView* text_view = NULL;
+    GtkTextIter text_iter = { 0 };
+
+    text_view = GTK_TEXT_VIEW(gtk_text_view_new( ));
+    gtk_text_view_set_wrap_mode( text_view, GTK_WRAP_WORD );
+    gtk_text_view_set_accepts_tab( text_view, FALSE );
+    gtk_text_buffer_get_end_iter( gtk_text_view_get_buffer( text_view ), &text_iter );
+    gtk_text_buffer_create_mark( gtk_text_view_get_buffer( text_view ),
+            "ende-text", &text_iter, FALSE );
+
+    //Hört die Signale
+    g_signal_connect( text_view, "focus-in-event",
+            G_CALLBACK(cb_textview_focus_in), (gpointer) zond );
+    g_signal_connect( text_view, "focus-out-event",
+            G_CALLBACK(cb_textview_focus_out), (gpointer) zond );
+
+    return text_view;
+}
+
+
 void
 init_app_window( Projekt* zond )
 {
@@ -363,13 +399,7 @@ init_app_window( Projekt* zond )
     gtk_paned_pack2( GTK_PANED(paned_baum_auswertung), swindow_textview, TRUE, TRUE );
 
     //text_view erzeugen
-    GtkTextIter text_iter = { 0 };
-    zond->textview = GTK_TEXT_VIEW(gtk_text_view_new( ));
-    gtk_text_view_set_wrap_mode( zond->textview, GTK_WRAP_WORD );
-    gtk_text_view_set_accepts_tab( zond->textview, FALSE );
-    gtk_text_buffer_get_end_iter( gtk_text_view_get_buffer( zond->textview ), &text_iter );
-    zond->textview_mark = gtk_text_buffer_create_mark( gtk_text_view_get_buffer( zond->textview ),
-            NULL, &text_iter, FALSE );
+    zond->textview = init_create_text_view( zond );
 
     //Und dann in untere Hälfte des übergebenen vpaned reinpacken
     gtk_container_add( GTK_CONTAINER(swindow_textview),
@@ -378,12 +408,6 @@ init_app_window( Projekt* zond )
     //Zum Start: links BAUM_INHALT, rechts BAUM_AUSWERTUNG
     gtk_paned_pack1( GTK_PANED(hpaned_inner), swindow_baum_inhalt, TRUE, TRUE );
     gtk_paned_pack2( GTK_PANED(hpaned_inner), paned_baum_auswertung, TRUE, TRUE );
-
-    //Hört die Signale
-    g_signal_connect( zond->textview, "focus-in-event",
-            G_CALLBACK(cb_textview_focus_in), (gpointer) zond );
-    g_signal_connect( zond->textview, "focus-out-event",
-            G_CALLBACK(cb_textview_focus_out), (gpointer) zond );
 
     g_signal_connect( zond->app_window, "button-press-event",
             G_CALLBACK(cb_pao_button_event), zond );
@@ -407,6 +431,24 @@ init_app_window( Projekt* zond )
     //Signal für App-Fenster schließen
     g_signal_connect( zond->app_window, "delete-event",
             G_CALLBACK(cb_delete_event), zond );
+
+
+//Und jetzt gesondertes text-view:
+
+    //neues Fenster
+    zond->textview_window = gtk_window_new( GTK_WINDOW_TOPLEVEL );
+    //muß in Kontext gespeichert werden, damit Fenster vor Beendigung der App
+    //geschlossen wird. Sonst geht der focus rein und alles wird schlimm
+
+    //scrolled_window darein
+    GtkWidget* swindow = gtk_scrolled_window_new( NULL, NULL );
+    gtk_container_add( GTK_CONTAINER(zond->textview_window), swindow );
+
+    //Text-view erzeugen und in scrolled-window
+    zond->textview_ii = GTK_TEXT_VIEW(init_create_text_view( zond ));
+    gtk_container_add( GTK_CONTAINER(swindow), GTK_WIDGET(zond->textview_ii) );
+
+    g_signal_connect( zond->textview_window, "delete-event", G_CALLBACK(cb_close_textview), NULL );
 
     return;
 }

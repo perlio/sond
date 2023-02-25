@@ -123,6 +123,9 @@ struct _Menu
 
     GtkWidget* ansicht;
 
+    //Menuitem, mit dem Textview aus app-Fenster gelöst werden kann
+    GtkWidget* textview_extra;
+
     GtkWidget* extras;
 
     GtkWidget* internal_vieweritem;
@@ -143,6 +146,7 @@ typedef struct _Projekt
     Icon icon[NUMBER_OF_ICONS];
 
     GtkWidget* app_window;
+    GtkWidget* textview_window;
     GtkLabel* label_status;
     GtkWidget* label_project;
     GtkWidget* popover;
@@ -160,7 +164,7 @@ typedef struct _Projekt
     gulong key_press_signal;
 
     GtkTextView* textview;
-    GtkTextMark* textview_mark;
+    GtkTextView* textview_ii;
 
     DBaseZond* dbase_zond;
 

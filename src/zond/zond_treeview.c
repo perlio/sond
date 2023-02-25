@@ -74,7 +74,7 @@ zond_treeview_cursor_changed( ZondTreeview* treeview, gpointer user_data )
     Projekt* zond = (Projekt*) user_data;
 
     //wenn kein cursor gesetzt ist
-    //also letzter Punkt gelöscht wirf
+    //also letzter Punkt gelöscht wird
     if ( !sond_treeview_get_cursor( SOND_TREEVIEW(treeview), &iter ) )
     {
         gtk_label_set_text( zond->label_status, "" ); //status-label leeren
@@ -88,6 +88,7 @@ zond_treeview_cursor_changed( ZondTreeview* treeview, gpointer user_data )
     }
     else treeviews_get_baum_and_node_id( zond, &iter, &baum_target, &node_id );
 
+    //textview deaktivieren/aktivieren je nach baum
     if ( baum_target == BAUM_AUSWERTUNG ) gtk_widget_set_sensitive( GTK_WIDGET(zond->textview), TRUE );
     else gtk_widget_set_sensitive( GTK_WIDGET(zond->textview), FALSE );
 
@@ -118,6 +119,8 @@ zond_treeview_cursor_changed( ZondTreeview* treeview, gpointer user_data )
 
     if ( baum_target == BAUM_INHALT || rc == -1 ) return;
 
+    //hier geht's nur mit baum_auswertung weiter:
+
     //TextBuffer laden
     GtkTextBuffer* buffer = gtk_text_view_get_buffer( zond->textview );
 
@@ -137,7 +140,7 @@ zond_treeview_cursor_changed( ZondTreeview* treeview, gpointer user_data )
     if ( text )
     {
         gtk_text_buffer_set_text( buffer, text, -1 );
-        gtk_text_view_scroll_to_mark( zond->textview, zond->textview_mark, 0.0,
+        gtk_text_view_scroll_to_mark( zond->textview, gtk_text_buffer_get_mark( gtk_text_view_get_buffer( zond->textview ), "ende-text" ), 0.0,
                 FALSE, 0.0, 0.0 );
         g_free( text );
     }

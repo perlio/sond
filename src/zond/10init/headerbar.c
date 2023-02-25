@@ -753,6 +753,17 @@ cb_settings_zoom( GtkMenuItem* item, gpointer data )
 }
 
 
+static void
+cb_textview_extra( GtkMenuItem* item, gpointer data )
+{
+    Projekt* zond = (Projekt*) data;
+
+    gtk_widget_show_all( zond->textview_window );
+
+    return;
+}
+
+
 /*  Funktion init_menu - ganze Kopfzeile! */
 static GtkWidget*
 init_menu( Projekt* zond )
@@ -1077,10 +1088,20 @@ init_menu( Projekt* zond )
     GtkWidget* refreshitem = gtk_menu_item_new_with_label ("Refresh");
     g_signal_connect( refreshitem, "activate", G_CALLBACK(cb_refresh_view_activated), (gpointer) zond );
 
+    GtkWidget* sep_item_2 = gtk_separator_menu_item_new();
+
+    //Menu-Punkt, mit dem Textfenster losgelöst werden kann
+    //zunächst inaktiv, da bei Start auf baun_inhalt
+    zond->menu.textview_extra = gtk_menu_item_new_with_label( "Textfenster" );
+    gtk_widget_set_sensitive( zond->menu.textview_extra, FALSE );
+    g_signal_connect( zond->menu.textview_extra, "activate", G_CALLBACK(cb_textview_extra), zond );
+
     gtk_menu_shell_append( GTK_MENU_SHELL(ansichtmenu), erweiternitem);
     gtk_menu_shell_append( GTK_MENU_SHELL(ansichtmenu), einklappenitem);
     gtk_menu_shell_append( GTK_MENU_SHELL(ansichtmenu), sep_ansicht1item);
     gtk_menu_shell_append( GTK_MENU_SHELL(ansichtmenu), refreshitem);
+    gtk_menu_shell_append( GTK_MENU_SHELL(ansichtmenu), sep_item_2 );
+    gtk_menu_shell_append( GTK_MENU_SHELL(ansichtmenu), zond->menu.textview_extra );
 
 /*  Menu Extras */
     GtkWidget* extrasmenu = gtk_menu_new( );
