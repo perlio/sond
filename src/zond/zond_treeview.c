@@ -81,16 +81,23 @@ zond_treeview_cursor_changed( ZondTreeview* treeview, gpointer user_data )
         //textview deaktivieren - egal welcher baum
         gtk_widget_set_sensitive( GTK_WIDGET(zond->textview), FALSE );
         //wenn letzter Punkt in baum_auswertung gelöscht: textview leeren
-        if ( SOND_TREEVIEW(treeview) == zond->treeview[BAUM_AUSWERTUNG] ) gtk_text_buffer_set_text(
-                gtk_text_view_get_buffer( zond->textview ), "", -1 );
+        if ( SOND_TREEVIEW(treeview) == zond->treeview[BAUM_AUSWERTUNG] )
+        {
+            gtk_text_buffer_set_text( gtk_text_view_get_buffer( GTK_TEXT_VIEW(zond->textview) ),
+                    "", -1 );
+            gtk_text_buffer_set_text( gtk_text_view_get_buffer( GTK_TEXT_VIEW(zond->textview_ii) ),
+                    "", -1 );
+
+            //Text-Fenster verstecken (falls nicht schn ist, Überprüfung aber überflüssig
+            gtk_widget_hide( zond->textview_window );
+
+            //Vorsichtshalber auch Menüpunkt deaktivieren
+            gtk_widget_set_sensitive( zond->menu.textview_extra, FALSE );
+        }
 
         return;
     }
     else treeviews_get_baum_and_node_id( zond, &iter, &baum_target, &node_id );
-
-    //textview deaktivieren/aktivieren je nach baum
-    if ( baum_target == BAUM_AUSWERTUNG ) gtk_widget_set_sensitive( GTK_WIDGET(zond->textview), TRUE );
-    else gtk_widget_set_sensitive( GTK_WIDGET(zond->textview), FALSE );
 
     //status_label setzen
     rc = treeviews_get_rel_path_and_anbindung( zond, baum_target, node_id, &rel_path,
@@ -116,40 +123,77 @@ zond_treeview_cursor_changed( ZondTreeview* treeview, gpointer user_data )
     gtk_label_set_text( zond->label_status, text_label );
     g_free( text_label );
     g_free( rel_path );
+printf("node_id: %i   id_act: %i    id_extra: %i\n", node_id, zond->node_id_act, zond->node_id_extra );
 
-    if ( baum_target == BAUM_INHALT || rc == -1 ) return;
-
-    //hier geht's nur mit baum_auswertung weiter:
-
-    //TextBuffer laden
-    GtkTextBuffer* buffer = gtk_text_view_get_buffer( zond->textview );
-
-    //neuen text einfügen
-    rc = zond_dbase_get_text( zond->dbase_zond->zond_dbase_work, node_id, &text, &errmsg );
-    if ( rc )
+    if ( baum_target == BAUM_INHALT || rc == -1 )
     {
-        text_label = g_strconcat( "Fehler in ", __func__, ": Bei Aufruf "
-                "zond_dbase_get_text: ", errmsg, NULL );
-        g_free( errmsg );
-        gtk_label_set_text( zond->label_status, text_label );
-        g_free( text_label );
+        gtk_widget_set_sensitive( zond->textview, FALSE );
+        gtk_widget_set_sensitive( zond->menu.textview_extra, FALSE );
 
         return;
     }
+    //else if ( baum_target == BAUM_AUSWERTUNG ) - BAUM_FS löst diesen cb nicht aus
 
-    if ( text )
+    //textview aktivieren je nach baum
+    gtk_widget_set_sensitive( zond->textview, TRUE );
+
+    //Wenn gesondertes Textfenster nicht geöffnet ist: Menüpunkt aktivieren
+    if ( !(zond->node_id_extra) )
+            gtk_widget_set_sensitive( zond->menu.textview_extra, TRUE );
+
+    //neuer Knoten == Extra-Fenster und vorheriger Knoten nicht
+    if ( zond->node_id_extra && node_id == zond->node_id_extra &&
+            zond->node_id_act != zond->node_id_extra )
+            gtk_text_view_set_buffer( GTK_TEXT_VIEW(zond->textview),
+            gtk_text_view_get_buffer( GTK_TEXT_VIEW(zond->textview_ii) ) );
+    else //alle anderen Fälle:
+            //1. Extra-Fenster geschlossen (!zond->node_id_extra)
+            //2. vorher Extra-Fenster, jetzt nicht mehr
+            //3. vorher nicht Extra-Fenster, jetzt auch nicht
     {
-        gtk_text_buffer_set_text( buffer, text, -1 );
-        gtk_text_view_scroll_to_mark( zond->textview, gtk_text_buffer_get_mark( gtk_text_view_get_buffer( zond->textview ), "ende-text" ), 0.0,
-                FALSE, 0.0, 0.0 );
-        g_free( text );
-    }
-    else gtk_text_buffer_set_text( buffer, "", -1 );
+        GtkTextBuffer* buffer = NULL;
 
-    g_object_set_data( G_OBJECT(gtk_text_view_get_buffer( zond->textview )),
-            "changed", NULL );
-    g_object_set_data( G_OBJECT(zond->textview),
-            "node-id", GINT_TO_POINTER(node_id) );
+        //Falls vorher Extra-Fenster: neuen Buffer erzeugen
+        if ( zond->node_id_act == zond->node_id_extra ) //vorher extra-Fenster
+        {
+            //neuen Buffer erzeugen und ins "normale" Textview
+            GtkTextIter text_iter = { 0 };
+
+            buffer = gtk_text_buffer_new( NULL );
+            gtk_text_buffer_get_end_iter( buffer, &text_iter );
+            gtk_text_buffer_create_mark( buffer, "ende-text", &text_iter, FALSE );
+
+            gtk_text_view_set_buffer( GTK_TEXT_VIEW(zond->textview), buffer );
+        }
+        //ansonsten: alten buffer nehmen
+        else buffer = gtk_text_view_get_buffer( GTK_TEXT_VIEW(zond->textview) );
+
+        //neuen text einfügen
+        rc = zond_dbase_get_text( zond->dbase_zond->zond_dbase_work, node_id, &text, &errmsg );
+        if ( rc )
+        {
+            text_label = g_strconcat( "Fehler in ", __func__, ": Bei Aufruf "
+                    "zond_dbase_get_text: ", errmsg, NULL );
+            g_free( errmsg );
+            gtk_label_set_text( zond->label_status, text_label );
+            g_free( text_label );
+
+            return;
+        }
+
+        if ( text )
+        {
+            gtk_text_buffer_set_text( buffer, text, -1 );
+            gtk_text_view_scroll_to_mark( GTK_TEXT_VIEW(zond->textview),
+                    gtk_text_buffer_get_mark( gtk_text_view_get_buffer(
+                    GTK_TEXT_VIEW(zond->textview) ), "ende-text" ), 0.0,
+                    FALSE, 0.0, 0.0 );
+            g_free( text );
+        }
+        else gtk_text_buffer_set_text( buffer, "", -1 );
+    }
+
+    zond->node_id_act = node_id;
 
     return;
 }

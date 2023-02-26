@@ -160,11 +160,13 @@ typedef struct _Projekt
     Baum baum_prev;
 
     gulong cursor_changed_signal;
+    gint node_id_act;
+    gint node_id_extra;
     gulong text_buffer_changed_signal;
     gulong key_press_signal;
 
-    GtkTextView* textview;
-    GtkTextView* textview_ii;
+    GtkWidget* textview;
+    GtkWidget* textview_ii;
 
     DBaseZond* dbase_zond;
 

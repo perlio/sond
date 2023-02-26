@@ -760,6 +760,14 @@ cb_textview_extra( GtkMenuItem* item, gpointer data )
 
     gtk_widget_show_all( zond->textview_window );
 
+    //Menüpunkt deaktivieren
+    gtk_widget_set_sensitive( zond->menu.textview_extra, FALSE );
+
+    //TextView-extra laden
+    zond->node_id_extra = zond->node_id_act;
+    gtk_text_view_set_buffer( GTK_TEXT_VIEW(zond->textview_ii),
+            gtk_text_view_get_buffer( GTK_TEXT_VIEW(zond->textview) ) );
+
     return;
 }
 

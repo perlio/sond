@@ -71,6 +71,8 @@ cb_close_textview( GtkWidget* window_textview, GdkEvent* event, gpointer user_da
     gtk_widget_hide( window_textview );
     gtk_widget_set_sensitive( zond->menu.textview_extra, TRUE );
 
+    zond->node_id_extra = 0;
+
     return TRUE;
 }
 
@@ -89,6 +91,7 @@ cb_text_buffer_changed( GtkTextBuffer* buffer, gpointer data )
 {
     gint rc = 0;
     gchar* errmsg = NULL;
+    gint node_id = 0;
 
     Projekt* zond = (Projekt*) data;
 
@@ -99,10 +102,11 @@ cb_text_buffer_changed( GtkTextBuffer* buffer, gpointer data )
 
     gchar* text = gtk_text_buffer_get_text( buffer, &start, &end, FALSE );
 
-    gint node_id = GPOINTER_TO_INT(g_object_get_data( G_OBJECT(zond->textview),
-            "node-id" ) );
+    if ( buffer == gtk_text_view_get_buffer( GTK_TEXT_VIEW(zond->textview) ) ) node_id = zond->node_id_act;
+    else node_id = zond->node_id_extra;
 
-    rc = zond_dbase_set_text( zond->dbase_zond->zond_dbase_work, node_id, text, &errmsg );
+    rc = zond_dbase_set_text( zond->dbase_zond->zond_dbase_work,
+            node_id, text, &errmsg );
     g_free( text );
     if ( rc )
     {
@@ -321,18 +325,14 @@ init_treeviews( Projekt* zond )
 }
 
 
-static GtkTextView*
+static GtkWidget*
 init_create_text_view( Projekt* zond )
 {
-    GtkTextView* text_view = NULL;
-    GtkTextIter text_iter = { 0 };
+    GtkWidget* text_view = NULL;
 
-    text_view = GTK_TEXT_VIEW(gtk_text_view_new( ));
-    gtk_text_view_set_wrap_mode( text_view, GTK_WRAP_WORD );
-    gtk_text_view_set_accepts_tab( text_view, FALSE );
-    gtk_text_buffer_get_end_iter( gtk_text_view_get_buffer( text_view ), &text_iter );
-    gtk_text_buffer_create_mark( gtk_text_view_get_buffer( text_view ),
-            "ende-text", &text_iter, FALSE );
+    text_view = gtk_text_view_new( );
+    gtk_text_view_set_wrap_mode( GTK_TEXT_VIEW(text_view), GTK_WRAP_WORD );
+    gtk_text_view_set_accepts_tab( GTK_TEXT_VIEW(text_view), FALSE );
 
     //Hört die Signale
     g_signal_connect( text_view, "focus-in-event",
@@ -348,6 +348,7 @@ void
 init_app_window( Projekt* zond )
 {
     GtkWidget* entry_search = NULL;
+    GtkTextIter text_iter = { 0 };
 
     //ApplicationWindow erzeugen
     zond->app_window = gtk_window_new( GTK_WINDOW_TOPLEVEL );
@@ -401,6 +402,11 @@ init_app_window( Projekt* zond )
     //text_view erzeugen
     zond->textview = init_create_text_view( zond );
 
+    //der buffer des "normalen" TextViews wird präpariert,
+    gtk_text_buffer_get_end_iter( gtk_text_view_get_buffer( GTK_TEXT_VIEW(zond->textview) ), &text_iter );
+    gtk_text_buffer_create_mark( gtk_text_view_get_buffer( GTK_TEXT_VIEW(zond->textview) ),
+            "ende-text", &text_iter, FALSE );
+
     //Und dann in untere Hälfte des übergebenen vpaned reinpacken
     gtk_container_add( GTK_CONTAINER(swindow_textview),
             GTK_WIDGET(zond->textview) );
@@ -445,10 +451,10 @@ init_app_window( Projekt* zond )
     gtk_container_add( GTK_CONTAINER(zond->textview_window), swindow );
 
     //Text-view erzeugen und in scrolled-window
-    zond->textview_ii = GTK_TEXT_VIEW(init_create_text_view( zond ));
+    zond->textview_ii = init_create_text_view( zond );
     gtk_container_add( GTK_CONTAINER(swindow), GTK_WIDGET(zond->textview_ii) );
 
-    g_signal_connect( zond->textview_window, "delete-event", G_CALLBACK(cb_close_textview), NULL );
+    g_signal_connect( zond->textview_window, "delete-event", G_CALLBACK(cb_close_textview), zond );
 
     return;
 }

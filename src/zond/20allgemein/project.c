@@ -235,11 +235,10 @@ projekt_schliessen( Projekt* zond, gchar** errmsg )
     gtk_widget_grab_focus( GTK_WIDGET(zond->treeview[BAUM_INHALT]) );
 
     //textview leeren
-    GtkTextBuffer* buffer = gtk_text_view_get_buffer( zond->textview );
+    GtkTextBuffer* buffer = gtk_text_view_get_buffer( GTK_TEXT_VIEW(zond->textview) );
     gtk_text_buffer_set_text( buffer, "", -1 );
 
-    g_object_set_data( G_OBJECT(buffer), "changed", NULL );
-    g_object_set_data( G_OBJECT(zond->textview), "node-id", NULL );
+    zond->node_id_act = 0;
 
     project_reset_changed( zond );
 
