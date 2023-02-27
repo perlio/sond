@@ -324,6 +324,7 @@ treeviews_selection_loeschen_foreach( SondTreeview* tree_view, GtkTreeIter* iter
     {
         gint rc = 0;
         GList* list_links = NULL;
+        gboolean response = FALSE;
 
         rc = treeviews_get_baum_and_node_id( s_selection->zond, iter, &baum, &node_id );
         if ( rc ) return 0;
@@ -369,6 +370,10 @@ treeviews_selection_loeschen_foreach( SondTreeview* tree_view, GtkTreeIter* iter
 
 //            g_list_free( list_links );
         }
+
+        if ( node_id == s_selection->zond->node_id_extra )
+                g_signal_emit_by_name( s_selection->zond->textview_window,
+                "delete-event", s_selection->zond, &response );
 
         rc = zond_dbase_remove_node( s_selection->zond->dbase_zond->zond_dbase_work, baum, node_id, errmsg );
         if ( rc ) ERROR_S

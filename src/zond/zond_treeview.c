@@ -93,6 +93,9 @@ zond_treeview_cursor_changed( ZondTreeview* treeview, gpointer user_data )
 
             //Vorsichtshalber auch Menüpunkt deaktivieren
             gtk_widget_set_sensitive( zond->menu.textview_extra, FALSE );
+
+            zond->node_id_act = 0;
+            zond->node_id_extra = 0;
         }
 
         return;
@@ -123,23 +126,35 @@ zond_treeview_cursor_changed( ZondTreeview* treeview, gpointer user_data )
     gtk_label_set_text( zond->label_status, text_label );
     g_free( text_label );
     g_free( rel_path );
-printf("node_id: %i   id_act: %i    id_extra: %i\n", node_id, zond->node_id_act, zond->node_id_extra );
 
     if ( baum_target == BAUM_INHALT || rc == -1 )
     {
         gtk_widget_set_sensitive( zond->textview, FALSE );
         gtk_widget_set_sensitive( zond->menu.textview_extra, FALSE );
 
+        //marker setzen, wenn Knoten in baum_inhalt aktiviert wird
+        //node_id_act negativ
+        if ( zond->node_id_act > 0 ) zond->node_id_act *= -1;
+
         return;
     }
     //else if ( baum_target == BAUM_AUSWERTUNG ) - BAUM_FS löst diesen cb nicht aus
 
-    //textview aktivieren je nach baum
-    gtk_widget_set_sensitive( zond->textview, TRUE );
+    //wenn von baum_inhalt in baum_auswertung gesprungen wird:
+    if ( zond->node_id_act <= 0 )
+    {
+        //textview aktivieren je nach baum
+        gtk_widget_set_sensitive( zond->textview, TRUE );
 
-    //Wenn gesondertes Textfenster nicht geöffnet ist: Menüpunkt aktivieren
-    if ( !(zond->node_id_extra) )
-            gtk_widget_set_sensitive( zond->menu.textview_extra, TRUE );
+        //Wenn gesondertes Textfenster nicht geöffnet ist: Menüpunkt aktivieren
+        if ( !(zond->node_id_extra) )
+                gtk_widget_set_sensitive( zond->menu.textview_extra, TRUE );
+
+        zond->node_id_act *= -1;
+    }
+
+    //Wenn gleicher Knoten: direkt zurück
+    if ( node_id == zond->node_id_act ) return;
 
     //neuer Knoten == Extra-Fenster und vorheriger Knoten nicht
     if ( zond->node_id_extra && node_id == zond->node_id_extra &&
@@ -154,7 +169,8 @@ printf("node_id: %i   id_act: %i    id_extra: %i\n", node_id, zond->node_id_act,
         GtkTextBuffer* buffer = NULL;
 
         //Falls vorher Extra-Fenster: neuen Buffer erzeugen
-        if ( zond->node_id_act == zond->node_id_extra ) //vorher extra-Fenster
+        //(Daß gleicher Knoten wurde oben schon ausgeschlossen)
+        if ( zond->node_id_act == zond->node_id_extra )
         {
             //neuen Buffer erzeugen und ins "normale" Textview
             GtkTextIter text_iter = { 0 };

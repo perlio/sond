@@ -102,7 +102,10 @@ cb_text_buffer_changed( GtkTextBuffer* buffer, gpointer data )
 
     gchar* text = gtk_text_buffer_get_text( buffer, &start, &end, FALSE );
 
+    //wenn text_buffer aus normalem Fenster:
+    //dessen node_id, wo cursor gerade steht
     if ( buffer == gtk_text_view_get_buffer( GTK_TEXT_VIEW(zond->textview) ) ) node_id = zond->node_id_act;
+    //sonst: node_id aus Extra-Fenster
     else node_id = zond->node_id_extra;
 
     rc = zond_dbase_set_text( zond->dbase_zond->zond_dbase_work,
