@@ -959,7 +959,7 @@ treeviews_paste_clipboard_as_link_foreach( SondTreeview* tree_view, GtkTreeIter*
     if ( rc ) ERROR_ROLLBACK( s_selection->zond->dbase_zond->zond_dbase_work )
 
     tree_store_dest = ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(s_selection->zond->treeview[s_selection->baum_dest]) ));
-    zond_tree_store_insert_link( iter->user_data, node_new, tree_store_dest,
+    zond_tree_store_insert_link( iter, node_new, tree_store_dest,
             (s_selection->anchor_id) ? s_selection->iter_dest : NULL, s_selection->kind, &iter_new );
 
     *(s_selection->iter_dest) = iter_new;
