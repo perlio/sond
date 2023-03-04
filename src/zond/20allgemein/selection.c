@@ -37,7 +37,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
 /** Dateien oder Ordner anbinden **/
-static gint
+static GtkTreeIter*
 selection_anbinden_zu_baum( Projekt* zond, GtkTreeIter* iter, gboolean kind,
         GArray* arr_new_nodes, gchar** errmsg )
 {
@@ -56,7 +56,7 @@ selection_anbinden_zu_baum( Projekt* zond, GtkTreeIter* iter, gboolean kind,
         //datei in baum_inhalt einfügen
         rc = treeviews_db_to_baum_rec( zond, FALSE, BAUM_INHALT, node_id_new,
                 ((!iter && kind) ? NULL : &iter_loop), kind, &iter_new, errmsg );
-        if ( rc ) ERROR_S
+        if ( rc ) ERROR_S_VAL( NULL )
 
         sond_treeview_expand_row( zond->treeview[BAUM_INHALT], &iter_new );
         gtk_tree_view_columns_autosize( GTK_TREE_VIEW(((Projekt*) zond)->treeview[BAUM_INHALT]) );
@@ -65,7 +65,7 @@ selection_anbinden_zu_baum( Projekt* zond, GtkTreeIter* iter, gboolean kind,
         kind = FALSE;
     }
 
-    return 0;
+    return gtk_tree_iter_copy( &iter_loop );
 }
 
 
@@ -344,6 +344,7 @@ three_treeviews_clipboard_anbinden( Projekt* zond, gint anchor_id, gboolean kind
     GtkTreeIter iter = { 0 };
     gboolean success = FALSE;
     SSelectionAnbinden s_selection = { 0 };
+    GtkTreeIter* iter_last_inserted = NULL;
 
     //cursor in baum_inhalt ermitteln
     success = sond_treeview_get_cursor( zond->treeview[BAUM_INHALT], &iter );
@@ -362,13 +363,18 @@ three_treeviews_clipboard_anbinden( Projekt* zond, gint anchor_id, gboolean kind
             three_treeviews_clipboard_anbinden_foreach, &s_selection, errmsg );
     if ( rc == -1 ) ERROR_ROLLBACK( zond->dbase_zond->zond_dbase_work )
 
-    rc = selection_anbinden_zu_baum( zond, (success) ? &iter : NULL, kind, arr_new_nodes, errmsg );
-    if ( rc ) ERROR_ROLLBACK( zond->dbase_zond->zond_dbase_work )
+    iter_last_inserted = selection_anbinden_zu_baum( zond, (success) ? &iter : NULL, kind, arr_new_nodes, errmsg );
+    if ( !iter_last_inserted ) ERROR_ROLLBACK( zond->dbase_zond->zond_dbase_work )
 
     rc = zond_dbase_commit( zond->dbase_zond->zond_dbase_work, errmsg );
-    if ( rc ) ERROR_ROLLBACK( zond->dbase_zond->zond_dbase_work )
+    if ( rc )
+    {
+        gtk_tree_iter_free( iter_last_inserted );
+        ERROR_ROLLBACK( zond->dbase_zond->zond_dbase_work )
+    }
 
-    if ( success ) sond_treeview_set_cursor( zond->treeview[BAUM_INHALT], &iter );
+    if ( success ) sond_treeview_set_cursor( zond->treeview[BAUM_INHALT], iter_last_inserted );
+    gtk_tree_iter_free( iter_last_inserted );
 
     gchar* text = g_strdup_printf( "%i Datei(en) angebunden", s_selection.zaehler );
     info_window_set_message( info_window, text );

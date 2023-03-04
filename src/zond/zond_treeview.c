@@ -305,7 +305,7 @@ zond_treeview_render_node_text( GtkTreeViewColumn* column, GtkCellRenderer* rend
 
         markuptxt = g_strdup_printf("<i>%s</i>", label);
 
-        if ( zond_tree_store_get_link_head_nr( iter->user_data ) )
+        if ( zond_tree_store_get_link_head_nr( iter ) )
         {
             markuptxt = add_string( g_strdup( "<span weight=\"bold\">" ), markuptxt );
             markuptxt = add_string( markuptxt, g_strdup( "</span>" ) );

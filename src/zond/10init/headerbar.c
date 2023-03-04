@@ -980,7 +980,7 @@ init_menu( Projekt* zond )
     GtkWidget* pasteitem_link = gtk_menu_item_new_with_label("Link");
 
     //abgeklemmt...
-    gtk_widget_set_sensitive( pasteitem_link, FALSE );
+    //gtk_widget_set_sensitive( pasteitem_link, FALSE );
 
     GtkWidget* pastemenu_link = gtk_menu_new();
     GtkWidget* alspunkt_einfuegenitem_link = gtk_menu_item_new_with_label(

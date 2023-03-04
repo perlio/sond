@@ -380,7 +380,7 @@ treeviews_selection_loeschen_foreach( SondTreeview* tree_view, GtkTreeIter* iter
 
         zond_tree_store_remove( iter );
     }//... Gesamt-Links
-    else if ( (head_nr = zond_tree_store_get_link_head_nr( iter->user_data )) )
+    else if ( (head_nr = zond_tree_store_get_link_head_nr( iter )) )
     {
         gint rc = 0;
 
@@ -902,7 +902,7 @@ treeviews_get_anchor_id( Projekt* zond, gboolean* child, GtkTreeIter* iter, gint
     {
         gint head_nr = 0;
 
-        head_nr = zond_tree_store_get_link_head_nr( iter_cursor.user_data );
+        head_nr = zond_tree_store_get_link_head_nr( &iter_cursor );
 
         if ( !head_nr || *child ) return FALSE;
         else *anchor_id = head_nr;
