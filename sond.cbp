@@ -84,6 +84,12 @@
 				<Option type="0" />
 				<Option compiler="gcc" />
 			</Target>
+			<Target title="sojus">
+				<Option output="bin/sojus" prefix_auto="1" extension_auto="1" />
+				<Option type="1" />
+				<Option compiler="gcc" />
+				<Option use_console_runner="0" />
+			</Target>
 		</Build>
 		<Compiler>
 			<Add option="-Wall" />
@@ -146,6 +152,7 @@
 			<Option target="Viewer (Testing)" />
 			<Option target="SondClient (Testing)" />
 			<Option target="SondClient (Release)" />
+			<Option target="sojus" />
 		</Unit>
 		<Unit filename="src/misc.h">
 			<Option target="zond (Release)" />
@@ -154,6 +161,7 @@
 			<Option target="Viewer (Testing)" />
 			<Option target="SondClient (Testing)" />
 			<Option target="SondClient (Release)" />
+			<Option target="sojus" />
 		</Unit>
 		<Unit filename="src/sojus/00misc/auswahl.c">
 			<Option compilerVar="CC" />
@@ -311,14 +319,11 @@
 			<Option target="&lt;{~None~}&gt;" />
 		</Unit>
 		<Unit filename="src/sojus/global_types_sojus.h">
-			<Option target="&lt;{~None~}&gt;" />
-		</Unit>
-		<Unit filename="src/sojus/globals.h">
-			<Option target="&lt;{~None~}&gt;" />
+			<Option target="sojus" />
 		</Unit>
 		<Unit filename="src/sojus/main.c">
 			<Option compilerVar="CC" />
-			<Option target="&lt;{~None~}&gt;" />
+			<Option target="sojus" />
 		</Unit>
 		<Unit filename="src/sojus/sojus_adressen.c">
 			<Option compilerVar="CC" />
@@ -334,6 +339,13 @@
 		<Unit filename="src/sojus/sojus_adressen_histbox.h">
 			<Option target="&lt;{~None~}&gt;" />
 		</Unit>
+		<Unit filename="src/sojus/sojus_dir.c">
+			<Option compilerVar="CC" />
+			<Option target="sojus" />
+		</Unit>
+		<Unit filename="src/sojus/sojus_dir.h">
+			<Option target="sojus" />
+		</Unit>
 		<Unit filename="src/sojus/sojus_file_manager.c">
 			<Option compilerVar="CC" />
 			<Option target="&lt;{~None~}&gt;" />
@@ -343,10 +355,10 @@
 		</Unit>
 		<Unit filename="src/sojus/sojus_init.c">
 			<Option compilerVar="CC" />
-			<Option target="&lt;{~None~}&gt;" />
+			<Option target="sojus" />
 		</Unit>
 		<Unit filename="src/sojus/sojus_init.h">
-			<Option target="&lt;{~None~}&gt;" />
+			<Option target="sojus" />
 		</Unit>
 		<Unit filename="src/sond/sond_akte.c">
 			<Option compilerVar="CC" />

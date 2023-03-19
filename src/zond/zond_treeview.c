@@ -215,6 +215,20 @@ zond_treeview_cursor_changed( ZondTreeview* treeview, gpointer user_data )
 }
 
 
+static gboolean
+zond_treeviewfm_row_expanded( GtkTreeView* tree_view, GtkTreeIter* iter,
+        GtkTreePath* path, gpointer data )
+{
+    //link ist kein linkkopf
+    if ( !zond_tree_store_get_link_head_nr( iter ) ) return FALSE;
+
+    //link hat Kind das ist noch dummy: link laden
+    if ( zond_tree_store_link_is_unloaded( iter ) ) zond_tree_store_load_link( iter );
+
+    return FALSE;
+}
+
+
 static void
 zond_treeview_row_activated( GtkWidget* ztv, GtkTreePath* tp, GtkTreeViewColumn* tvc,
         gpointer user_data )
@@ -430,6 +444,9 @@ zond_treeview_new( Projekt* zond, gint id )
     // Doppelklick = angebundene Datei anzeigen
     g_signal_connect( ztv, "row-activated",
             G_CALLBACK(zond_treeview_row_activated), (gpointer) ztv_priv->zond );
+    //Zeile expandiert
+    g_signal_connect( ztv, "test-expand-row",
+                G_CALLBACK(zond_treeviewfm_row_expanded), zond );
 
     return ztv;
 }

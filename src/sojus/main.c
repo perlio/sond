@@ -18,7 +18,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
 #include <gtk/gtk.h>
-
+#include "global_types_sojus.h"
 #include "sojus_init.h"
 
 
@@ -26,6 +26,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 static void
 activate_app( GtkApplication* app, gpointer data )
 {
+    Sojus* sojus = *((Sojus**) data);
+
+    gtk_window_present( GTK_WINDOW(sojus->app_window) );
+
     return;
 }
 

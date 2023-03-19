@@ -1,6 +1,6 @@
 /*
-sojus (sojus.c) - softkanzlei
-Copyright (C) 2021  pelo america
+sojus (sojus_init.c) - softkanzlei
+Copyright (C) 2023  pelo america
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU Affero General Public License as
@@ -16,77 +16,210 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+#include <gtk/gtk.h>
+
 #include "../misc.h"
 
+#include "global_types_sojus.h"
+#include "sojus_dir.h"
 #include "sojus_init.h"
-#include "sojus_adressen.h"
-#include "sojus_file_manager.h"
-
-#include "20Einstellungen/db.h"
-#include "20Einstellungen/einstellungen.h"
 
 
-static gboolean
-cb_socket_incoming(GSocketService *service,
-                    GSocketConnection *connection,
-                    GObject *source_object,
-                    gpointer data)
+static void
+sojus_init_monitor_changed( GFileMonitor* monitor, GFile* file, GFile* other_file,
+        GFileMonitorEvent type, gpointer data )
 {
-    gssize ret = 0;
-    gchar* buffer = NULL;
-    GError* error = NULL;
+    gchar* str_file = NULL;
+    gchar* str_other_file = NULL;
+//    const gchar* str_type = NULL;
 
     Sojus* sojus = (Sojus*) data;
-display_message( sojus->app_window, "Nachricht erhalten", NULL );
-    GOutputStream * ostream = g_io_stream_get_output_stream(G_IO_STREAM (connection));
 
-    gchar* host = g_settings_get_string( sojus->settings, "host" );
-    gint port = g_settings_get_int( sojus->settings, "port" );
-    gchar* user = g_settings_get_string( sojus->settings, "user" );
-    gchar* password = g_settings_get_string( sojus->settings, "password" );
-    gchar* db_name = g_settings_get_string( sojus->settings, "dbname" );
+    if ( file ) str_file = g_file_get_basename( file );
+    if ( other_file ) str_other_file = g_file_get_basename( other_file );
 
-    buffer = g_strdup_printf( "%s;%i;%s;%s;%s", host, port, user, password, db_name );
-
-    g_free( host );
-    g_free( user );
-    g_free( password );
-    g_free( db_name );
-
-    ret = g_output_stream_write( ostream, buffer, strlen( buffer ), NULL, &error );
-    g_free( buffer );
-    if ( ret == -1 )
+    if ( type == G_FILE_MONITOR_EVENT_CREATED )
     {
-        display_message( sojus->app_window, "Fehler -\n\n"
-                "Zugangsdaten SQL-Database konnten nicht gesendet werden:\n"
-                "Bei Aufruf g_output_stream_write:\n", error->message, NULL );
-        g_error_free( error );
+        const gchar* last_inserted = NULL;
+
+        last_inserted = (const gchar*) g_object_get_data( G_OBJECT(monitor), "last-inserted" );
+
+        //Bei SMB-Zugriff kommt es zur doppeltenAuslsung des created-Signals
+        //war als letztes schon created - Doppel
+        if ( !g_strcmp0( last_inserted, str_file ) ) g_object_set_data( G_OBJECT(monitor),
+                "last-inserted", NULL );
+        //wirklich neu
+        else g_ptr_array_add( sojus->arr_dirs, g_strdup( str_file ) );
+    }
+    else if ( type == G_FILE_MONITOR_EVENT_DELETED || type == G_FILE_MONITOR_EVENT_RENAMED )
+    {
+        gint i = 0;
+
+        //index ermitteln
+        for ( i = 0; i < sojus->arr_dirs->len; i++ )
+                if ( !g_strcmp0( g_ptr_array_index( sojus->arr_dirs, i ),
+                str_file ) ) break;
+
+        if ( i == sojus->arr_dirs->len ) //nicht gefunden
+                display_message( sojus->app_window, "Verzeichnis """, str_file,
+                """ wurde nicht gefunden", NULL );
+
+        else
+        {
+            g_ptr_array_remove_index_fast( sojus->arr_dirs, i );
+
+            if ( type == G_FILE_MONITOR_EVENT_RENAMED )
+                    g_ptr_array_add( sojus->arr_dirs, g_strdup( str_other_file ) );
+        }
     }
 
-    return FALSE;
+    g_free( str_file );
+    g_free( str_other_file );
+
+/*
+    switch( type )
+    {
+        case G_FILE_MONITOR_EVENT_CHANGED: str_type = "G_FILE_MONITOR_EVENT_CHANGED"; break;
+        case G_FILE_MONITOR_EVENT_CHANGES_DONE_HINT: str_type = "G_FILE_MONITOR_EVENT_CHANGES_NONE_HINT"; break;
+        case G_FILE_MONITOR_EVENT_DELETED: str_type = "G_FILE_MONITOR_EVENT_DELETED"; break;
+        case G_FILE_MONITOR_EVENT_CREATED: str_type = "G_FILE_MONITOR_EVENT_CREATED"; break;
+        case G_FILE_MONITOR_EVENT_ATTRIBUTE_CHANGED: str_type = "G_FILE_MONITOR_EVENT_ATTRIBUTE_CHANGED"; break;
+        case G_FILE_MONITOR_EVENT_PRE_UNMOUNT: str_type = "G_FILE_MONITOR_EVENT_PRE_UNMOUNT"; break;
+        case G_FILE_MONITOR_EVENT_UNMOUNTED: str_type = "G_FILE_MONITOR_EVENT_UNMOUNTED"; break;
+        case G_FILE_MONITOR_EVENT_MOVED: str_type = "G_FILE_MONITOR_EVENT_MOVED"; break;
+        case G_FILE_MONITOR_EVENT_RENAMED: str_type = "G_FILE_MONITOR_EVENT_RENAMED"; break;
+        case G_FILE_MONITOR_EVENT_MOVED_IN: str_type = "G_FILE_MONITOR_EVENT_MOVED_IN"; break;
+        case G_FILE_MONITOR_EVENT_MOVED_OUT: str_type = "G_FILE_MONITOR_EVENT_MOVED_OUT"; break;
+    }
+
+    printf("%s  %s  %s\n", str_file, str_other_file, str_type );
+*/
+    return;
 }
 
 
-static gint
-sojus_init_socket( Sojus* sojus, gchar** errmsg )
+//Directory einlesen und Monitor installieren
+static void
+sojus_init_load_dirs( Sojus* sojus )
 {
+    //root-dir herausfinden
+    gchar* base_dir = NULL;
+    GKeyFile* key_file = NULL;
+    gchar* conf_path = NULL;
+    gboolean success = FALSE;
     GError* error = NULL;
+    gchar* root_dir = NULL;
+    gboolean ret = FALSE;
 
-    sojus->socket = g_socket_service_new ( );
+    key_file = g_key_file_new( );
 
-    if ( !g_socket_listener_add_inet_port( G_SOCKET_LISTENER(sojus->socket),
-            61339, NULL, &error ) )
+    base_dir = get_base_dir( );
+    conf_path = g_build_filename( base_dir, "Sojus.conf", NULL );
+    g_free( base_dir );
+    success = g_key_file_load_from_file( key_file, conf_path,
+            G_KEY_FILE_KEEP_COMMENTS | G_KEY_FILE_KEEP_TRANSLATIONS, &error );
+    g_free( conf_path );
+    if ( !success )
     {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_socket_listener_add_inet_port:\n",
+        display_message( sojus->app_window, "Sojus.conf konnte nicht gelesen werden:\n",
+                error->message, NULL );
+        g_error_free( error );
+        g_key_file_free( key_file );
+
+        g_signal_emit_by_name( sojus->app_window, "delete-event", NULL, &ret );
+    }
+
+    root_dir = g_key_file_get_string( key_file, "SOJUS", "root", &error );
+    if ( error )
+    {
+        display_message( sojus->app_window, "Sojus root-dir konnte nicht ermittelt werden:\n",
+                error->message, NULL );
+        g_error_free( error );
+        g_key_file_free( key_file );
+
+        g_signal_emit_by_name( sojus->app_window, "delete-event", NULL, &ret );
+    }
+
+    g_key_file_free( key_file );
+
+    //Verzeichnisse einlesen
+    GFile* root = NULL;
+    GFileEnumerator* enumer = NULL;
+
+    root = g_file_new_for_path( root_dir );
+
+    enumer = g_file_enumerate_children( root, "*", G_FILE_QUERY_INFO_NONE,
+            NULL, &error );
+    if ( !enumer )
+    {
+        display_message( sojus->app_window, "Root-Verzeichnis ", root_dir,
+                "kann nicht gelesen werden:\n", error->message, NULL );
+        g_error_free( error );
+        g_free( root_dir );
+        g_object_unref( root );
+
+        g_signal_emit_by_name( sojus->app_window, "delete-event", NULL, &ret );
+    }
+
+    g_free( root_dir );
+
+    //durchgehen
+    //new_anchor kopieren, da in der Schleife verändert wird
+    //es soll aber der soeben erzeugte Punkt zurückgegegen werden
+
+    while ( 1 )
+    {
+        GFile* file_child = NULL;
+
+        if ( !g_file_enumerator_iterate( enumer, NULL, &file_child, NULL, &error ) )
+        {
+            display_message( sojus->app_window, "Bei Aufruf g_file_enumerator_iterate:\n",
+                    error->message, NULL );
+            g_error_free( error );
+            g_object_unref( enumer );
+            g_object_unref( root );
+
+            g_signal_emit_by_name( sojus->app_window, "delete-event", NULL, &ret );
+        }
+
+        if ( file_child ) //es gibt noch Datei in Verzeichnis
+        {
+            GFileType type = g_file_query_file_type( file_child, G_FILE_QUERY_INFO_NONE, NULL );
+            if ( type == G_FILE_TYPE_DIRECTORY ) g_ptr_array_add( sojus->arr_dirs,
+                    g_file_get_basename( file_child ) );
+            //else continue;
+        } //ende if ( child )
+        else break;
+    }
+
+    g_object_unref( enumer );
+
+    //Monitor für Dir
+    sojus->monitor = g_file_monitor_directory( root, G_FILE_MONITOR_WATCH_MOVES, NULL, &error );
+    g_object_unref( root );
+    if ( !(sojus->monitor) )
+    {
+        display_message( sojus->app_window, "Root-Dir kann nicht überwacht werden:\n",
                 error->message, NULL );
         g_error_free( error );
 
-        return -1;
+        g_signal_emit_by_name( sojus->app_window, "delete-event", NULL, &ret );
     }
 
-    g_signal_connect (sojus->socket, "incoming", G_CALLBACK (cb_socket_incoming), sojus );
+    g_signal_connect( sojus->monitor, "changed", G_CALLBACK(sojus_init_monitor_changed), sojus );
 
-    return 0;
+
+
+
+}
+
+
+static void
+sojus_init_entry_activated( GtkWidget* entry, gpointer data )
+{
+    sojus_dir_open( (Sojus*) data, gtk_entry_get_text( GTK_ENTRY(entry) ) );
+
+    return;
 }
 
 
@@ -97,12 +230,8 @@ cb_desktop_delete_event( GtkWidget* app_window, GdkEvent* event, gpointer data )
 
     gtk_widget_destroy( app_window );
 
-    mysql_close( sojus->con );
-
-    g_object_unref( sojus->socket );
-    g_object_unref( sojus->settings );
-
-    g_ptr_array_unref( sojus->arr_open_fm );
+    g_ptr_array_unref( sojus->arr_dirs );
+    g_object_unref( sojus->monitor );
 
     g_free( sojus );
 
@@ -117,64 +246,13 @@ sojus_init_app_window( Sojus* sojus )
 **  Widgets erzeugen  */
     //app-window
     sojus->app_window = gtk_window_new( GTK_WINDOW_TOPLEVEL );
-//    gtk_window_set_keep_above( GTK_WINDOW(sojus->app_window), TRUE );
-    GtkWidget* grid = gtk_grid_new( );
-    gtk_container_add( GTK_CONTAINER(sojus->app_window), grid );
-
-    GtkWidget* frame_dok = gtk_frame_new( "Dokumentenverzeichnis öffnen" );
     GtkWidget* entry_dok = gtk_entry_new( );
-    gtk_container_add( GTK_CONTAINER(frame_dok), entry_dok );
-
-    //Akten
-    GtkWidget* bu_akte_fenster = gtk_button_new_with_mnemonic( "_Aktenfenster" );
-    GtkWidget* bu_akte_suchen = gtk_button_new_with_mnemonic( "Akte _suchen" );
-
-    //Adressen
-    GtkWidget* bu_adressen_fenster = gtk_button_new_with_mnemonic( "A_dressenfenster" );
-    GtkWidget* bu_adresse_suchen = gtk_button_new_with_mnemonic( "Adresse s_uchen" );
-
-    //Termine
-    GtkWidget* bu_kalender = gtk_button_new_with_mnemonic( "_Kalender" );
-    GtkWidget* bu_termine_zur_akte = gtk_button_new_with_mnemonic( "_Termine zur Akte" );
-    GtkWidget* bu_fristen = gtk_button_new_with_mnemonic( "_Fristen" );
-    GtkWidget* bu_wiedervorlagen = gtk_button_new_with_mnemonic( "_Wiedervorlagen" );
-
-    //Einstellungen
-    GtkWidget* bu_einstellungen = gtk_button_new_with_mnemonic( "_Einstellungen" );
-
-/*
-**  in grid einfügen  */
-    gtk_grid_attach( GTK_GRID(grid), frame_dok, 0, 0, 1, 1 );
-    gtk_grid_attach( GTK_GRID(grid), bu_akte_fenster, 0, 1, 1, 1 );
-    gtk_grid_attach( GTK_GRID(grid), bu_akte_suchen, 0, 2, 1, 1 );
-
-    gtk_grid_attach( GTK_GRID(grid), bu_adressen_fenster, 0, 4, 1, 1 );
-    gtk_grid_attach( GTK_GRID(grid), bu_adresse_suchen, 0, 5, 1, 1 );
-
-    gtk_grid_attach( GTK_GRID(grid), bu_kalender, 0, 6, 1, 1 );
-    gtk_grid_attach( GTK_GRID(grid), bu_termine_zur_akte, 0, 7, 1, 1 );
-    gtk_grid_attach( GTK_GRID(grid), bu_fristen, 0, 8, 1, 1 );
-    gtk_grid_attach( GTK_GRID(grid), bu_wiedervorlagen, 0, 9, 1, 1 );
-
-    gtk_grid_attach( GTK_GRID(grid), bu_einstellungen, 0, 10, 1, 1 );
+    gtk_container_add( GTK_CONTAINER(sojus->app_window), entry_dok );
 
 /*
 **  callbacks  */
     g_signal_connect( entry_dok, "activate",
-            G_CALLBACK(file_manager_entry_activate), sojus );
-/*    g_signal_connect( bu_akte_fenster, "clicked",
-            G_CALLBACK(cb_button_aktenfenster_clicked), sojus );
-    g_signal_connect( bu_akte_suchen, "clicked",
-            G_CALLBACK(cb_button_akte_suchen_clicked), sojus );
-*/
-    g_signal_connect( bu_adressen_fenster, "clicked",
-            G_CALLBACK(sojus_adressen_cb_fenster), sojus );
-/*    g_signal_connect( bu_adresse_suchen, "clicked",
-            G_CALLBACK(cb_bu_adresse_suchen_clicked), sojus );
-*/
-    g_signal_connect( bu_einstellungen, "clicked",
-            G_CALLBACK(einstellungen), sojus );
-
+            G_CALLBACK(sojus_init_entry_activated), sojus );
     //Signal für App-Fenster schließen
     g_signal_connect( sojus->app_window, "delete-event",
             G_CALLBACK(cb_desktop_delete_event), sojus );
@@ -188,38 +266,13 @@ sojus_init_app_window( Sojus* sojus )
 Sojus*
 sojus_init( GtkApplication* app )
 {
-    gint rc = 0;
-    gchar* errmsg = NULL;
-
     Sojus* sojus = g_malloc0( sizeof( Sojus ) );
 
     sojus_init_app_window( sojus );
     gtk_application_add_window( app, GTK_WINDOW(sojus->app_window) );
 
-    rc = sojus_init_socket( sojus, &errmsg );
-    if ( rc )
-    {
-        display_message( sojus->app_window, "Fehler Init -\n\nBei Aufruf "
-                "sojus_init_socket:\n", errmsg, NULL );
-        g_free( errmsg );
-        gboolean ret = FALSE;
-        g_signal_emit_by_name( sojus->app_window, "delete-event", NULL, &ret );
-
-        return NULL;
-    }
-
-    sojus->settings = g_settings_new( "de.perlio.Sojus" );
-
-    db_connect_database( sojus );
-    if ( !sojus->con )
-    {
-        gboolean ret = FALSE;
-        g_signal_emit_by_name( sojus->app_window, "delete-event", NULL, &ret );
-
-        return NULL;
-    }
-
-    sojus->arr_open_fm = g_ptr_array_new_with_free_func( (GDestroyNotify) g_free );
+    sojus->arr_dirs = g_ptr_array_new_full( 0, (GDestroyNotify) g_free );
+    sojus_init_load_dirs( sojus );
 
     return sojus;
 }

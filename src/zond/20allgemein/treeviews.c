@@ -68,17 +68,17 @@ gint
 treeviews_get_baum_and_node_id( Projekt* zond, GtkTreeIter* iter, Baum* baum,
         gint* node_id )
 {
-    GtkTreeIter iter_orig = { 0, };
+    GtkTreeIter iter_target = { 0, };
     ZondTreeStore* tree_store = NULL;
 
-    zond_tree_store_get_target( iter, &iter_orig );
-    tree_store = zond_tree_store_get_tree_store( &iter_orig );
+    zond_tree_store_get_iter_target( iter, &iter_target );
+    tree_store = zond_tree_store_get_tree_store( &iter_target );
 
     if ( tree_store == ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]) )) ) *baum = BAUM_INHALT;
     else if ( tree_store == ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_AUSWERTUNG]) )) ) *baum = BAUM_AUSWERTUNG;
     else return 1;
 
-    gtk_tree_model_get( GTK_TREE_MODEL(tree_store), &iter_orig, 2, node_id, -1 );
+    gtk_tree_model_get( GTK_TREE_MODEL(tree_store), &iter_target, 2, node_id, -1 );
 
     return 0;
 }
@@ -699,7 +699,7 @@ treeviews_db_to_baum_links( Projekt* zond, gchar** errmsg )
         }
 
         zond_tree_store_insert_link_at_pos( iter_target->user_data, node_id,
-                tree_store, iter_parent, pos + 1, NULL );
+                tree_store, (iter_parent) ? iter_parent->user_data : NULL, pos + 1, NULL );
 
         gtk_tree_iter_free( iter_target );
         if ( iter_parent ) gtk_tree_iter_free( iter_parent );
@@ -715,25 +715,36 @@ treeviews_db_to_baum( Projekt* zond, Baum baum, gint node_id, GtkTreeIter* iter,
 {
     //Inhalt des Datensatzes mit node_id == node_id abfragen
     gint rc = 0;
-    gchar* icon_name = NULL;
-    gchar* node_text = NULL;
     GtkTreeIter iter_inserted = { 0, };
 
-    //test auf link nicht erforderlich; Knoten wird dann nur mit node_id eingefügt
-    rc = zond_dbase_get_icon_name_and_node_text( zond->dbase_zond->zond_dbase_work,
-            baum, node_id, &icon_name, &node_text, errmsg );
+    rc = zond_dbase_check_link( zond->dbase_zond->zond_dbase_work, baum, node_id,
+            errmsg );
     if ( rc == -1 ) ERROR_S
-    else if ( rc == 1 ) ERROR_S_MESSAGE( "node_id existiert nicht" )
+    else if ( rc == 0 )
+    {
+        gint rc = 0;
+        gchar* icon_name = NULL;
+        gchar* node_text = NULL;
 
-    //neuen Knoten einfügen
-    zond_tree_store_insert( ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) )),
-            iter, child, &iter_inserted );
+        rc = zond_dbase_get_icon_name_and_node_text( zond->dbase_zond->zond_dbase_work,
+                baum, node_id, &icon_name, &node_text, errmsg );
+        if ( rc == -1 ) ERROR_S
+        else if ( rc == 1 ) ERROR_S_MESSAGE( "node_id existiert nicht" )
 
-    //Daten rein
-    zond_tree_store_set( &iter_inserted, icon_name, node_text, node_id );
+        //neuen Knoten einfügen
+        zond_tree_store_insert( ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) )),
+                iter, child, &iter_inserted );
 
-    g_free( icon_name );
-    g_free( node_text );
+        //Daten rein
+        zond_tree_store_set( &iter_inserted, icon_name, node_text, node_id );
+
+        g_free( icon_name );
+        g_free( node_text );
+    }
+    else
+    {
+       // zond_tree_store_insert_link( iter_target, node_id, )
+    }
 
     if ( iter_new ) *iter_new = iter_inserted;
 
@@ -983,8 +994,8 @@ treeviews_paste_clipboard_as_link( Projekt* zond, Baum baum_dest, gint anchor_id
             treeviews_paste_clipboard_as_link_foreach, &s_selection, errmsg );
     if ( rc == -1 ) ERROR_S
 
-    sond_treeview_expand_row( zond->treeview[baum_dest], s_selection.iter_dest );
-    sond_treeview_set_cursor( zond->treeview[baum_dest], s_selection.iter_dest );
+//    sond_treeview_expand_row( zond->treeview[baum_dest], s_selection.iter_dest );
+//    sond_treeview_set_cursor( zond->treeview[baum_dest], s_selection.iter_dest );
 
     return 0;
 }

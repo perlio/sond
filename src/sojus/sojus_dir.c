@@ -1,6 +1,6 @@
 /*
-sojus (sojus_init.h) - softkanzlei
-Copyright (C) 2021  pelo america
+sojus (sojus_dir.c) - softkanzlei
+Copyright (C) 2023  pelo america
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU Affero General Public License as
@@ -16,13 +16,14 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+#include "global_types_sojus.h"
+#include "sojus_init.h"
 
-#ifndef SOJUS_INIT_H_INCLUDED
-#define SOJUS_INIT_H_INCLUDED
+#include <gtk/gtk.h>
 
-typedef struct _Sojus Sojus;
-typedef struct _GtkApplication GtkApplication;
 
-Sojus* sojus_init( GtkApplication* );
+void
+sojus_dir_open( Sojus* sojus, const gchar* text )
+{
 
-#endif // SOJUS_INIT_H_INCLUDED
+}
