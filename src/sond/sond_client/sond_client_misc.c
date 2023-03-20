@@ -57,7 +57,7 @@ sond_client_misc_regnr_wohlgeformt( const gchar* entry )
     return TRUE;
 }
 
-
+/*
 void
 sond_client_seadrive_test_seafile_server( SondClient* sond_client )
 {
@@ -125,8 +125,8 @@ sleep(4);
 }while(1);
     return;
 */
-}
-
+/*}
+*/
 
 gboolean
 sond_client_misc_ping_server( SondClient* sond_client, GError** error )

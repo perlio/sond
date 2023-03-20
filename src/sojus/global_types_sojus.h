@@ -5,11 +5,13 @@ typedef struct _GtkWidget GtkWidget;
 typedef struct _GFile GFile;
 typedef struct _GPtrArray GPtrArray;
 typedef struct _GFileMonitor GFileMonitor;
+typedef char gchar;
 
 
 typedef struct _Sojus
 {
     GtkWidget* app_window;
+    gchar* root;
 
     GFileMonitor* monitor;
 

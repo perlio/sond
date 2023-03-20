@@ -108,7 +108,6 @@ sojus_init_load_dirs( Sojus* sojus )
     gchar* conf_path = NULL;
     gboolean success = FALSE;
     GError* error = NULL;
-    gchar* root_dir = NULL;
     gboolean ret = FALSE;
 
     key_file = g_key_file_new( );
@@ -129,7 +128,7 @@ sojus_init_load_dirs( Sojus* sojus )
         g_signal_emit_by_name( sojus->app_window, "delete-event", NULL, &ret );
     }
 
-    root_dir = g_key_file_get_string( key_file, "SOJUS", "root", &error );
+    sojus->root = g_key_file_get_string( key_file, "SOJUS", "root", &error );
     if ( error )
     {
         display_message( sojus->app_window, "Sojus root-dir konnte nicht ermittelt werden:\n",
@@ -146,22 +145,19 @@ sojus_init_load_dirs( Sojus* sojus )
     GFile* root = NULL;
     GFileEnumerator* enumer = NULL;
 
-    root = g_file_new_for_path( root_dir );
+    root = g_file_new_for_path( sojus->root );
 
     enumer = g_file_enumerate_children( root, "*", G_FILE_QUERY_INFO_NONE,
             NULL, &error );
     if ( !enumer )
     {
-        display_message( sojus->app_window, "Root-Verzeichnis ", root_dir,
+        display_message( sojus->app_window, "Root-Verzeichnis ", sojus->root,
                 "kann nicht gelesen werden:\n", error->message, NULL );
         g_error_free( error );
-        g_free( root_dir );
         g_object_unref( root );
 
         g_signal_emit_by_name( sojus->app_window, "delete-event", NULL, &ret );
     }
-
-    g_free( root_dir );
 
     //durchgehen
     //new_anchor kopieren, da in der Schleife verändert wird
@@ -208,16 +204,19 @@ sojus_init_load_dirs( Sojus* sojus )
 
     g_signal_connect( sojus->monitor, "changed", G_CALLBACK(sojus_init_monitor_changed), sojus );
 
-
-
-
+    return;
 }
 
 
 static void
 sojus_init_entry_activated( GtkWidget* entry, gpointer data )
 {
-    sojus_dir_open( (Sojus*) data, gtk_entry_get_text( GTK_ENTRY(entry) ) );
+    const gchar* text = NULL;
+
+    text = gtk_entry_get_text( GTK_ENTRY(entry) );
+    if ( strlen( text ) < 3 ) return;
+
+    sojus_dir_open( (Sojus*) data, text );
 
     return;
 }
@@ -229,6 +228,8 @@ cb_desktop_delete_event( GtkWidget* app_window, GdkEvent* event, gpointer data )
     Sojus* sojus = (Sojus*) data;
 
     gtk_widget_destroy( app_window );
+
+    g_free( sojus->root );
 
     g_ptr_array_unref( sojus->arr_dirs );
     g_object_unref( sojus->monitor );

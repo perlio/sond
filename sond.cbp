@@ -452,10 +452,12 @@
 			<Option compilerVar="CC" />
 			<Option target="SondClient (Release)" />
 			<Option target="SondClient (Testing)" />
+			<Option target="sojus" />
 		</Unit>
 		<Unit filename="src/sond/sond_client/sond_client_misc.h">
 			<Option target="SondClient (Release)" />
 			<Option target="SondClient (Testing)" />
+			<Option target="sojus" />
 		</Unit>
 		<Unit filename="src/sond/sond_person.c">
 			<Option compilerVar="CC" />

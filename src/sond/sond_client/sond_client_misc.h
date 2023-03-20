@@ -4,6 +4,7 @@
 typedef int gint;
 typedef int gboolean;
 typedef char gchar;
+typedef struct _Sond_Client SondClient;
 
 void sond_client_misc_parse_regnr( const gchar*, gint*, gint* );
 
