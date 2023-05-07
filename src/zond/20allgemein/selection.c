@@ -58,7 +58,7 @@ selection_anbinden_zu_baum( Projekt* zond, GtkTreeIter* iter, gboolean kind,
                 ((!iter && kind) ? NULL : &iter_loop), kind, &iter_new, errmsg );
         if ( rc ) ERROR_S_VAL( NULL )
 
-        sond_treeview_expand_row( zond->treeview[BAUM_INHALT], &iter_new );
+//        sond_treeview_expand_row( zond->treeview[BAUM_INHALT], &iter_new );
         gtk_tree_view_columns_autosize( GTK_TREE_VIEW(((Projekt*) zond)->treeview[BAUM_INHALT]) );
 
         iter_loop = iter_new;

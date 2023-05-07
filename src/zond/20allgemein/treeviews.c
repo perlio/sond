@@ -1095,7 +1095,7 @@ treeviews_clipboard_kopieren( Projekt* zond, Baum baum_dest, gint anchor_id,
             treeviews_clipboard_kopieren_foreach, &s_selection, errmsg );
     if ( rc == -1 ) ERROR_S
 
-    sond_treeview_expand_row( zond->treeview[baum_dest], s_selection.iter_dest );
+//    sond_treeview_expand_row( zond->treeview[baum_dest], s_selection.iter_dest );
     sond_treeview_set_cursor( zond->treeview[baum_dest], s_selection.iter_dest );
 
     return 0;
@@ -1176,7 +1176,7 @@ treeviews_clipboard_verschieben( Projekt* zond, Baum baum, gint anchor_id, gbool
 
     if ( iter )
     {
-        sond_treeview_expand_row( zond->treeview[baum], iter );
+//        sond_treeview_expand_row( zond->treeview[baum], iter );
         sond_treeview_set_cursor( zond->treeview[baum], iter );
 
         gtk_tree_iter_free( iter );
