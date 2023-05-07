@@ -716,13 +716,13 @@ treeviews_db_to_baum( Projekt* zond, Baum baum, gint node_id, GtkTreeIter* iter,
     //Inhalt des Datensatzes mit node_id == node_id abfragen
     gint rc = 0;
     GtkTreeIter iter_inserted = { 0, };
-
+/*
     rc = zond_dbase_check_link( zond->dbase_zond->zond_dbase_work, baum, node_id,
             errmsg );
     if ( rc == -1 ) ERROR_S
     else if ( rc == 0 )
     {
-        gint rc = 0;
+        gint rc = 0; */
         gchar* icon_name = NULL;
         gchar* node_text = NULL;
 
@@ -740,12 +740,12 @@ treeviews_db_to_baum( Projekt* zond, Baum baum, gint node_id, GtkTreeIter* iter,
 
         g_free( icon_name );
         g_free( node_text );
-    }
+/*    }
     else
     {
        // zond_tree_store_insert_link( iter_target, node_id, )
     }
-
+*/
     if ( iter_new ) *iter_new = iter_inserted;
 
     return 0;
