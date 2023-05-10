@@ -207,6 +207,8 @@ cb_menu_datei_speichern_activate( GtkMenuItem* item, gpointer user_data )
 gint
 projekt_schliessen( Projekt* zond, gchar** errmsg )
 {
+    gboolean ret = FALSE;
+
     if ( !zond->dbase_zond ) return 0;
 
     if ( zond->dbase_zond->changed )
@@ -237,6 +239,9 @@ projekt_schliessen( Projekt* zond, gchar** errmsg )
     //textview leeren
     GtkTextBuffer* buffer = gtk_text_view_get_buffer( GTK_TEXT_VIEW(zond->textview) );
     gtk_text_buffer_set_text( buffer, "", -1 );
+
+    //Text-Fenster verstecken (falls nicht schn ist, Überprüfung aber überflüssig
+    g_signal_emit_by_name( zond->textview_window, "delete-event", zond, &ret );
 
     zond->node_id_act = 0;
 

@@ -83,13 +83,15 @@ zond_treeview_cursor_changed( ZondTreeview* treeview, gpointer user_data )
         //wenn letzter Punkt in baum_auswertung gelöscht: textview leeren
         if ( SOND_TREEVIEW(treeview) == zond->treeview[BAUM_AUSWERTUNG] )
         {
+            gboolean ret = FALSE;
+
             gtk_text_buffer_set_text( gtk_text_view_get_buffer( GTK_TEXT_VIEW(zond->textview) ),
                     "", -1 );
             gtk_text_buffer_set_text( gtk_text_view_get_buffer( GTK_TEXT_VIEW(zond->textview_ii) ),
                     "", -1 );
 
             //Text-Fenster verstecken (falls nicht schn ist, Überprüfung aber überflüssig
-            gtk_widget_hide( zond->textview_window );
+            g_signal_emit_by_name( zond->textview_window, "delete-event", zond, &ret );
 
             //Vorsichtshalber auch Menüpunkt deaktivieren
             gtk_widget_set_sensitive( zond->menu.textview_extra, FALSE );

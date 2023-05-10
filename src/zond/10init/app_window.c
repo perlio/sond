@@ -449,6 +449,8 @@ init_app_window( Projekt* zond )
     //muß in Kontext gespeichert werden, damit Fenster vor Beendigung der App
     //geschlossen wird. Sonst geht der focus rein und alles wird schlimm
 
+    gtk_widget_set_size_request( zond->textview_window, 400, 250 );
+
     //scrolled_window darein
     GtkWidget* swindow = gtk_scrolled_window_new( NULL, NULL );
     gtk_container_add( GTK_CONTAINER(zond->textview_window), swindow );
