@@ -216,7 +216,7 @@ zond_dbase_create_db( sqlite3* db, gchar** errmsg )
                 "FOREIGN KEY (parent_id) REFERENCES baum_inhalt (node_id) "
                 "ON DELETE CASCADE ON UPDATE CASCADE, "
                 "FOREIGN KEY (older_sibling_id) REFERENCES baum_inhalt (node_id) "
-                "ON DELETE RESTRICT ON UPDATE CASCADE "
+                "ON DELETE CASCADE ON UPDATE CASCADE "
             "); "
 
             "INSERT INTO baum_inhalt (node_id, parent_id, older_sibling_id, "
