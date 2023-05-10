@@ -181,11 +181,12 @@ zond_dbase_create_db( sqlite3* db, gchar** errmsg )
             "DROP TABLE IF EXISTS ziele;"
             "DROP TABLE IF EXISTS baum_inhalt;"
             "DROP TABLE IF EXISTS baum_auswertung; "
+/*
             "DROP TABLE IF EXISTS links; "
             "DROP TABLE IF EXISTS entities; "
             "DROP TABLE IF EXISTS rels; "
             "DROP TABLE IF EXISTS properties; "
-
+*/
             "CREATE TABLE eingang ("
                 "ID INTEGER NOT NULL, "
                 "eingangsdatum VARCHAR(20), "
@@ -523,7 +524,7 @@ zond_dbase_convert_to_actual_version( const gchar* path, gchar* v_string,
             ERROR_SOND( "convert_from_v0_8" )
         }
     }
-/*
+
     else if ( !g_strcmp0( v_string , "v0.9" ) )
     {
         rc = zond_dbase_convert_from_v0_9( db, errmsg );
@@ -534,7 +535,6 @@ zond_dbase_convert_to_actual_version( const gchar* path, gchar* v_string,
             ERROR_S
         }
     }
-*/
     else
     {
         //Mitteilung, daß keine Versionsangabe
