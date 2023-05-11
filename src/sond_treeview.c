@@ -272,8 +272,8 @@ sond_treeview_expand_row( SondTreeview* stv, GtkTreeIter* iter )
 
     GtkTreePath* path = gtk_tree_model_get_path( gtk_tree_view_get_model(
             GTK_TREE_VIEW(stv) ), iter );
-    gtk_tree_view_expand_to_path( GTK_TREE_VIEW(stv), path );
-    gtk_tree_view_expand_row( GTK_TREE_VIEW(stv), path, TRUE );
+//    gtk_tree_view_expand_to_path( GTK_TREE_VIEW(stv), path );
+    gtk_tree_view_expand_row( GTK_TREE_VIEW(stv), path, FALSE );
     gtk_tree_path_free( path );
 
     gtk_tree_view_columns_autosize( GTK_TREE_VIEW(stv) );

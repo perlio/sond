@@ -1089,13 +1089,18 @@ treeviews_clipboard_kopieren( Projekt* zond, Baum baum_dest, gint anchor_id,
         gboolean kind, GtkTreeIter* iter, gchar** errmsg )
 {
     gint rc = 0;
+    GtkTreeIter iter_origin = { 0 };
     SSelectionKopieren s_selection = { zond, baum_dest, anchor_id, kind, iter };
+
+    //falls in existierenden iter eigenfügt wird: diesen merken
+    if ( kind && iter ) iter_origin = *iter;
 
     rc = sond_treeview_clipboard_foreach( zond->treeview[baum_dest],
             treeviews_clipboard_kopieren_foreach, &s_selection, errmsg );
     if ( rc == -1 ) ERROR_S
 
-//    sond_treeview_expand_row( zond->treeview[baum_dest], s_selection.iter_dest );
+    if ( kind && iter_origin.stamp ) sond_treeview_expand_row(
+            zond->treeview[baum_dest], &iter_origin );
     sond_treeview_set_cursor( zond->treeview[baum_dest], s_selection.iter_dest );
 
     return 0;
@@ -1172,15 +1177,13 @@ treeviews_clipboard_verschieben( Projekt* zond, Baum baum, gint anchor_id, gbool
     gtk_widget_queue_draw( GTK_WIDGET(zond->treeview[baum]) );
 
     GtkTreeIter* iter = zond_treeview_abfragen_iter(
-            ZOND_TREEVIEW(zond->treeview[baum]), s_selection.older_sibling_id );
+            ZOND_TREEVIEW(zond->treeview[baum]), anchor_id );
+    if ( !iter ) ERROR_S_MESSAGE( "zond_treeview_abfrageb_iter findet node_id nicht" )
 
-    if ( iter )
-    {
-//        sond_treeview_expand_row( zond->treeview[baum], iter );
-        sond_treeview_set_cursor( zond->treeview[baum], iter );
+    if ( kind && anchor_id ) sond_treeview_expand_row( zond->treeview[baum], iter );
+    sond_treeview_set_cursor( zond->treeview[baum], iter );
 
-        gtk_tree_iter_free( iter );
-    }
+    gtk_tree_iter_free( iter );
 
     return 0;
 }

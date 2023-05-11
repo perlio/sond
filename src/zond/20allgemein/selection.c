@@ -58,9 +58,6 @@ selection_anbinden_zu_baum( Projekt* zond, GtkTreeIter* iter, gboolean kind,
                 ((!iter && kind) ? NULL : &iter_loop), kind, &iter_new, errmsg );
         if ( rc ) ERROR_S_VAL( NULL )
 
-//        sond_treeview_expand_row( zond->treeview[BAUM_INHALT], &iter_new );
-        gtk_tree_view_columns_autosize( GTK_TREE_VIEW(((Projekt*) zond)->treeview[BAUM_INHALT]) );
-
         iter_loop = iter_new;
         kind = FALSE;
     }
@@ -373,8 +370,11 @@ three_treeviews_clipboard_anbinden( Projekt* zond, gint anchor_id, gboolean kind
         ERROR_ROLLBACK( zond->dbase_zond->zond_dbase_work )
     }
 
-    if ( success ) sond_treeview_set_cursor( zond->treeview[BAUM_INHALT], iter_last_inserted );
+    if ( success ) sond_treeview_expand_row( zond->treeview[BAUM_INHALT], &iter );
+    sond_treeview_set_cursor( zond->treeview[BAUM_INHALT], iter_last_inserted );
     gtk_tree_iter_free( iter_last_inserted );
+
+    gtk_tree_view_columns_autosize( GTK_TREE_VIEW(((Projekt*) zond)->treeview[BAUM_INHALT]) );
 
     gchar* text = g_strdup_printf( "%i Datei(en) angebunden", s_selection.zaehler );
     info_window_set_message( info_window, text );
