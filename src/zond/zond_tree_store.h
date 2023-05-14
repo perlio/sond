@@ -71,7 +71,6 @@ void zond_tree_store_insert(ZondTreeStore* tree_store,
 void
 zond_tree_store_insert_link_at_pos (GNode* node_target,
                                     gint head_nr,
-                                    ZondTreeStore* tree_store,
                                     GNode* node_parent,
                                     gint pos,
                                     GtkTreeIter* iter_new );

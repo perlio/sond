@@ -479,7 +479,7 @@ three_treeviews_paste_clipboard( Projekt* zond, gboolean kind, gboolean link, gc
         else if ( zond->baum_active == BAUM_AUSWERTUNG && !clipboard->ausschneiden && link )
         {
             gint rc = 0;
-return 0;
+
             rc = treeviews_paste_clipboard_as_link( zond, zond->baum_active, anchor_id, kind, &iter, errmsg );
             if ( rc ) ERROR_S
 
@@ -506,7 +506,7 @@ return 0;
         else if ( zond->baum_active == BAUM_AUSWERTUNG && !clipboard->ausschneiden && link )
         {
             gint rc = 0;
-return 0;
+
             rc = treeviews_paste_clipboard_as_link( zond, zond->baum_active, anchor_id, kind, &iter, errmsg );
             if ( rc ) ERROR_S
         }

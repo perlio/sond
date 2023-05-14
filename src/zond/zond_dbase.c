@@ -264,7 +264,7 @@ zond_dbase_create_db( sqlite3* db, gchar** errmsg )
 
             "INSERT INTO baum_auswertung (node_id, parent_id, older_sibling_id) "
             "VALUES (0, 0, 0); " //mit eingang
-/*
+
             "CREATE TABLE links ( "
             "ID INTEGER PRIMARY KEY AUTOINCREMENT, " //order of appe...
             "baum_id INTEGER, "
@@ -285,7 +285,7 @@ zond_dbase_create_db( sqlite3* db, gchar** errmsg )
             "BEGIN "
             "DELETE FROM links WHERE node_id=old.node_id AND baum_id=2; "
             "END; "
-*/
+
             ;
 
     rc = sqlite3_exec( db, sql, NULL, NULL, &errmsg_ii );
@@ -525,7 +525,7 @@ zond_dbase_convert_to_actual_version( const gchar* path, gchar* v_string,
         }
     }
 
-    else if ( !g_strcmp0( v_string , "v0.9" ) )
+    else if ( !g_strcmp0( v_string , "v0.9" ) || !g_strcmp0( v_string, "v0.9a" ) )
     {
         rc = zond_dbase_convert_from_v0_9( db, errmsg );
         if ( rc )

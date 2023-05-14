@@ -338,13 +338,16 @@ treeviews_selection_loeschen_foreach( SondTreeview* tree_view, GtkTreeIter* iter
             ptr = list_links;
             do
             {
-                head_nr = zond_tree_store_get_link_head_nr( ptr->data );
+                GtkTreeIter iter_link = { 0 };
+
+                iter_link.user_data = ptr->data; //stamp ist in der Funktion egal...
+                head_nr = zond_tree_store_get_link_head_nr( &iter_link );
                 if ( head_nr )
                 {
                     Baum baum_link = KEIN_BAUM;
                     ZondTreeStore* tree_store = NULL;
 
-                    tree_store = zond_tree_store_get_tree_store( ptr->data );
+                    tree_store = zond_tree_store_get_tree_store( &iter_link );
                     if ( tree_store == ZOND_TREE_STORE(gtk_tree_view_get_model(
                             GTK_TREE_VIEW(s_selection->zond->treeview[BAUM_INHALT]) )) )
                             baum_link = BAUM_INHALT;
@@ -699,7 +702,7 @@ treeviews_db_to_baum_links( Projekt* zond, gchar** errmsg )
         }
 
         zond_tree_store_insert_link_at_pos( iter_target->user_data, node_id,
-                tree_store, (iter_parent) ? iter_parent->user_data : NULL, pos + 1, NULL );
+                (iter_parent) ? iter_parent->user_data : NULL, pos + 1, NULL );
 
         gtk_tree_iter_free( iter_target );
         if ( iter_parent ) gtk_tree_iter_free( iter_parent );
@@ -987,15 +990,18 @@ treeviews_paste_clipboard_as_link( Projekt* zond, Baum baum_dest, gint anchor_id
         gboolean kind, GtkTreeIter* iter, gchar** errmsg )
 {
     gint rc = 0;
+    GtkTreeIter iter_anchor = { 0 };
 
     SSelectionLink s_selection = { zond, baum_dest, anchor_id, iter, kind };
+
+    if ( iter ) iter_anchor = *iter;
 
     rc = sond_treeview_clipboard_foreach( zond->treeview[baum_dest],
             treeviews_paste_clipboard_as_link_foreach, &s_selection, errmsg );
     if ( rc == -1 ) ERROR_S
 
-//    sond_treeview_expand_row( zond->treeview[baum_dest], s_selection.iter_dest );
-//    sond_treeview_set_cursor( zond->treeview[baum_dest], s_selection.iter_dest );
+    if ( iter_anchor.stamp ) sond_treeview_expand_row( zond->treeview[baum_dest], &iter_anchor );
+    sond_treeview_set_cursor( zond->treeview[baum_dest], s_selection.iter_dest );
 
     return 0;
 }
