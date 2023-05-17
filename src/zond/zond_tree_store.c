@@ -853,8 +853,13 @@ zond_tree_store_insert_linked_nodes( GNode* node_parent, gint pos, GNode* orig_n
 
         parent_link = list->data;
 
-        //nur wenn parent link kein dummy-child hat
-        if ( !parent_link->children || ((RowData*) parent_link->children->data)->head_nr != -1 )
+        //wenn link-head und noch kein Kind: dummy einfügen
+        if ( ((RowData*) parent_link->data)->head_nr && !parent_link->children )
+                zond_tree_store_insert_dummy( parent_link );
+        //oder link-head, aber schon geladen, oder kein link-head: volles programm
+        else if ( (((RowData*) parent_link->data)->head_nr && parent_link->children
+                && ((RowData*) parent_link->children->data)->head_nr != -1) ||
+                ((RowData*) parent_link->data)->head_nr == 0 )
         {
             //nur einfügen, wenn orig_new nicht schon child ist
             _do_zond_tree_store_insert( parent_link, pos, &iter_link );
@@ -871,6 +876,7 @@ zond_tree_store_insert_linked_nodes( GNode* node_parent, gint pos, GNode* orig_n
         }
 
         //when parent_link iter-head, dann können ja seinerseits links auf ihn zeigen
+        //braucht man aber nicht abzufragen, weil sonst hat parent_link keine Liste mit auf ihn zeigenden Links, ne
         zond_tree_store_insert_linked_nodes( parent_link, pos, orig_new );
 
         list = list->next;
