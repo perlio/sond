@@ -701,8 +701,8 @@ treeviews_db_to_baum_links( Projekt* zond, gchar** errmsg )
             while ( (older_sibling = noch_olderer_sibling) );
         }
 
-        zond_tree_store_insert_link_at_pos( iter_target->user_data, node_id,
-                (iter_parent) ? iter_parent->user_data : NULL, pos + 1, NULL );
+        zond_tree_store_insert_link( iter_target->user_data, node_id, tree_store,
+                iter_parent, (older_sibling) ? FALSE : TRUE, NULL );
 
         gtk_tree_iter_free( iter_target );
         if ( iter_parent ) gtk_tree_iter_free( iter_parent );
