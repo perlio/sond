@@ -624,7 +624,7 @@ treeviews_db_to_baum_links( Projekt* zond, gchar** errmsg )
         gint rc = 0;
         ZondTreeStore* tree_store = NULL;
         GtkTreeIter* iter_link = NULL;
-        GtkTreeIter* iter_parent = NULL;
+        GtkTreeIter* iter_anchor = NULL;
         Baum baum = KEIN_BAUM;
         gint node_id = 0;
         gchar* project = NULL;
@@ -632,8 +632,6 @@ treeviews_db_to_baum_links( Projekt* zond, gchar** errmsg )
         gint node_id_target = 0;
         GtkTreeIter* iter_target = NULL;
         gint older_sibling = 0;
-        gint parent = 0;
-        gint pos = 0;
 
         rc = zond_dbase_get_link( zond->dbase_zond->zond_dbase_work, &ID_start, &baum, &node_id,
             &project, &baum_target, &node_id_target, errmsg );
@@ -658,59 +656,56 @@ treeviews_db_to_baum_links( Projekt* zond, gchar** errmsg )
         iter_target = zond_treeview_abfragen_iter( ZOND_TREEVIEW(zond->treeview[baum_target]), node_id_target );
         if ( !iter_target ) ERROR_S_MESSAGE( "zond_treeview_abfragen_iter (target) gibt NULL zurück" )
 
-        //iter wo link hinkommt ermitteln (iter_dest
-        //zuerst iter_parent
-        parent = zond_dbase_get_parent( zond->dbase_zond->zond_dbase_work, baum, node_id, errmsg );
-        if ( parent < 0 )
-        {
-            gtk_tree_iter_free( iter_target );
-            ERROR_S
-        }
-        // else if ( parent == 0 ) -> überflüssig, da iter_parent dann = NULL
-        else if ( parent > 0 )
-        {
-            iter_parent = zond_treeview_abfragen_iter( ZOND_TREEVIEW(zond->treeview[baum]), parent );
-            if ( !iter_parent )
-            {
-                gtk_tree_iter_free( iter_target );
-                ERROR_S_MESSAGE( "zond_treeview_abfragen_iter gibt NULL zurück (I)" )
-            }
-        }
-
-        //jetzt pos
+        //iter wo link hinkommt ermitteln (iter_anchor
+        //older sibling? dann child = FALSE
         older_sibling = zond_dbase_get_older_sibling( zond->dbase_zond->zond_dbase_work, baum, node_id, errmsg );
         if ( older_sibling < 0 )
         {
             gtk_tree_iter_free( iter_target );
-            if ( iter_parent ) gtk_tree_iter_free( iter_parent );
             ERROR_S
         }
-        // else if ( older_sibling == 0 ) //erstes Kind -> pos = 0
+        else if ( older_sibling == 0 ) //erstes Kind -> pos = 0->parent ermitteln
+        {
+            gint parent = 0;
+
+            parent = zond_dbase_get_parent( zond->dbase_zond->zond_dbase_work, baum, node_id, errmsg );
+            if ( parent < 0 )
+            {
+                gtk_tree_iter_free( iter_target );
+                ERROR_S
+            }
+            // else if ( parent == 0 ) -> überflüssig, da iter_anchor dann = NULL
+            else if ( parent > 0 )
+            {
+                iter_anchor = zond_treeview_abfragen_iter( ZOND_TREEVIEW(zond->treeview[baum]), parent );
+                if ( !iter_anchor )
+                {
+                    gtk_tree_iter_free( iter_target );
+                    ERROR_S_MESSAGE( "zond_treeview_abfragen_iter gibt NULL zurück (I)" )
+                }
+            }
+
+        }
         else if ( older_sibling > 0 )
         {
-            gint noch_olderer_sibling = 0;
-
-            do
+            iter_anchor = zond_treeview_abfragen_iter( ZOND_TREEVIEW(zond->treeview[baum]), older_sibling );
+            if ( !iter_anchor )
             {
-
-                pos++;
-                noch_olderer_sibling = zond_dbase_get_older_sibling(
-                        zond->dbase_zond->zond_dbase_work, baum, older_sibling, errmsg );
-                if ( noch_olderer_sibling < 0 ) ERROR_S
+                gtk_tree_iter_free( iter_target );
+                ERROR_S_MESSAGE( "zond_treeview_abfragen_iter gibt NULL zurück (II)" )
             }
-            while ( (older_sibling = noch_olderer_sibling) );
         }
 
-        zond_tree_store_insert_link( iter_target->user_data, node_id, tree_store,
-                iter_parent, (older_sibling) ? FALSE : TRUE, NULL );
+        zond_tree_store_insert_link( iter_target, node_id, tree_store,
+                iter_anchor, (older_sibling) ? FALSE : TRUE, NULL );
 
         gtk_tree_iter_free( iter_target );
-        if ( iter_parent ) gtk_tree_iter_free( iter_parent );
-
+        gtk_tree_iter_free( iter_anchor );
     }
 
     return 0;
 }
+
 
 gint
 treeviews_db_to_baum( Projekt* zond, Baum baum, gint node_id, GtkTreeIter* iter,
@@ -719,13 +714,13 @@ treeviews_db_to_baum( Projekt* zond, Baum baum, gint node_id, GtkTreeIter* iter,
     //Inhalt des Datensatzes mit node_id == node_id abfragen
     gint rc = 0;
     GtkTreeIter iter_inserted = { 0, };
-/*
+
     rc = zond_dbase_check_link( zond->dbase_zond->zond_dbase_work, baum, node_id,
             errmsg );
     if ( rc == -1 ) ERROR_S
     else if ( rc == 0 )
     {
-        gint rc = 0; */
+        gint rc = 0;
         gchar* icon_name = NULL;
         gchar* node_text = NULL;
 
@@ -743,12 +738,16 @@ treeviews_db_to_baum( Projekt* zond, Baum baum, gint node_id, GtkTreeIter* iter,
 
         g_free( icon_name );
         g_free( node_text );
-/*    }
+    }
     else
     {
-       // zond_tree_store_insert_link( iter_target, node_id, )
+        zond_tree_store_insert( ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) )),
+                iter, child, &iter_inserted );
+
+        //Nur node_id rein
+        zond_tree_store_set( &iter_inserted, NULL, NULL, node_id );
     }
-*/
+
     if ( iter_new ) *iter_new = iter_inserted;
 
     return 0;
@@ -834,6 +833,9 @@ treeviews_reload_baeume( Projekt* zond, gchar** errmsg )
     if ( rc ) ERROR_S
 
     rc = treeviews_reload_baum( zond, BAUM_AUSWERTUNG, errmsg );
+    if ( rc ) ERROR_S
+
+    rc = treeviews_db_to_baum_links( zond, errmsg );
     if ( rc ) ERROR_S
 
     g_object_set( sond_treeview_get_cell_renderer_text( zond->treeview[BAUM_AUSWERTUNG] ),

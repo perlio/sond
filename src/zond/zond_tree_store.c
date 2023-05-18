@@ -215,7 +215,7 @@ zond_tree_store_init (ZondTreeStore *tree_store)
   priv = zond_tree_store_get_instance_private (tree_store);
   tree_store->priv = priv;
   priv->root = g_node_new (NULL);
-  priv->root->data = g_malloc0( sizeof( GNode ) );
+  priv->root->data = g_malloc0( sizeof( RowData ) );
   ((RowData*) priv->root->data)->tree_store = tree_store;
 
   /* While the odds are against us getting 0...  */
@@ -257,9 +257,10 @@ zond_tree_store_new ( gint root_node_id )
 static gboolean
 node_free (GNode *node, gpointer data)
 {
-    if (node->data)
+    RowData* row_data = (RowData*) node->data;
+
+    if ( row_data )
     {
-        RowData* row_data = (RowData*) node->data;
         if ( row_data->target ) //ist link
         {
             GNode* node_target = NULL;
@@ -268,7 +269,7 @@ node_free (GNode *node, gpointer data)
             ((RowData*) node_target->data)->links =
                     g_list_remove( ((RowData*) node_target->data)->links, node );
         }
-        else //nur wenn kein link
+        else if ( row_data->data )//nur wenn kein link und nicht root
         {
             g_free( row_data->data->icon_name );
             g_free( row_data->data->node_text );
@@ -292,9 +293,9 @@ zond_tree_store_finalize (GObject *object)
 {
   ZondTreeStore *tree_store = ZOND_TREE_STORE (object);
   ZondTreeStorePrivate *priv = tree_store->priv;
+
   g_node_traverse (priv->root, G_POST_ORDER, G_TRAVERSE_ALL, -1,
                    node_free, NULL);
-    g_free( priv->root->data );
   g_node_destroy (priv->root);
 
   /* must chain up */
@@ -1156,38 +1157,24 @@ zond_tree_store_iter_depth (ZondTreeStore *tree_store,
 }
 
 /* simple ripoff from g_node_traverse_post_order */
-static gboolean
+static void
 zond_tree_store_clear_traverse (GNode        *node,
                                ZondTreeStore *store)
 {
-  GtkTreeIter iter;
-  if (node->children)
+    GtkTreeIter iter = { 0 };
+
+    iter.stamp = store->priv->stamp;
+
+    while ( node->children )
     {
-      GNode *child;
-      child = node->children;
-      while (child)
-        {
-          register GNode *current;
-          current = child;
-          child = current->next;
-          if (zond_tree_store_clear_traverse (current, store))
-            return TRUE;
-        }
-      if (node->parent)
-        {
-          iter.stamp = store->priv->stamp;
-          iter.user_data = node;
-          zond_tree_store_remove (&iter);
-        }
+        iter.user_data = node->children;
+        zond_tree_store_remove( &iter );
     }
-  else if (node->parent)
-    {
-      iter.stamp = store->priv->stamp;
-      iter.user_data = node;
-      zond_tree_store_remove (&iter);
-    }
-  return FALSE;
+
+    return;
 }
+
+
 static void
 zond_tree_store_increment_stamp (ZondTreeStore *tree_store)
 {
