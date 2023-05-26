@@ -1130,7 +1130,10 @@ treeeviews_clipboard_verschieben_foreach( SondTreeview* tree_view, GtkTreeIter* 
 
     SSelectionVerschieben* s_selection = (SSelectionVerschieben*) data;
 
-    if ( zond_tree_store_is_link( iter ) ) node_id = zond_tree_store_get_link_head_nr( iter );
+    if ( zond_tree_store_is_link( iter ) )
+    {
+        if ( (node_id = zond_tree_store_get_link_head_nr( iter )) <= 0 ) return 0;
+    }
     else gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(tree_view) ), iter,
             2, &node_id, -1 );
 
@@ -1195,8 +1198,11 @@ treeviews_clipboard_verschieben( Projekt* zond, GtkTreeIter* iter_anchor, gint a
 
     gtk_widget_queue_draw( GTK_WIDGET(zond->treeview[zond->baum_active]) );
 
-    if ( kind && anchor_id ) sond_treeview_expand_row( zond->treeview[zond->baum_active], iter_anchor );
-    sond_treeview_set_cursor( zond->treeview[zond->baum_active], &iter_new );
+    if ( iter_new.stamp ) //nur wenn iter eingefügt wurde
+    {
+        if ( kind && anchor_id ) sond_treeview_expand_row( zond->treeview[zond->baum_active], iter_anchor );
+        sond_treeview_set_cursor( zond->treeview[zond->baum_active], &iter_new );
+    }
 
     return 0;
 }
