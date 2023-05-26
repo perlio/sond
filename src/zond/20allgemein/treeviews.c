@@ -401,7 +401,7 @@ treeviews_selection_loeschen_foreach( SondTreeview* tree_view, GtkTreeIter* iter
         rc = zond_dbase_commit( s_selection->zond->dbase_zond->zond_dbase_work, errmsg );
         if ( rc ) ERROR_ROLLBACK( s_selection->zond->dbase_zond->zond_dbase_work  )
 
-        zond_tree_store_remove_link( iter );
+        zond_tree_store_remove( iter );
     }
     //else: link, aber nicht head->nix machen
 
@@ -857,44 +857,38 @@ treeviews_reload_baeume( Projekt* zond, gchar** errmsg )
 
 
 gint
-treeviews_knoten_verschieben( Projekt* zond, Baum baum, gint node_id, gint new_parent,
-        gint new_older_sibling, gchar** errmsg )
+treeviews_knoten_verschieben( Projekt* zond, Baum baum, gint node_id, gint parent_id,
+        gint older_sibling_id, gchar** errmsg )
 {
     gint rc = 0;
-    GtkTreeIter* iter = NULL;
+    gboolean child = FALSE;
+    GtkTreeIter* iter_src = NULL;
+    GtkTreeIter* iter_dest = NULL;
 
     //kind verschieben
-    rc = zond_dbase_verschieben_knoten( zond->dbase_zond->zond_dbase_work, baum, node_id, new_parent,
-            new_older_sibling, errmsg );
-    if ( rc ) ERROR_SOND (" zond_dbase_verschieben_knoten" )
+    rc = zond_dbase_verschieben_knoten( zond->dbase_zond->zond_dbase_work, baum, node_id, parent_id,
+            older_sibling_id, errmsg );
+    if ( rc ) ERROR_S
 
     //Knoten im tree löschen
     //hierzu iter des verschobenen Kindknotens herausfinden
-    iter = zond_treeview_abfragen_iter( ZOND_TREEVIEW(zond->treeview[baum]), node_id );
+    iter_src = zond_treeview_abfragen_iter( ZOND_TREEVIEW(zond->treeview[baum]), node_id );
 
-    zond_tree_store_remove( iter );
-    gtk_tree_iter_free( iter );
+    //zunächst iter des Anker-Knotens ermitteln
+    if ( !older_sibling_id ) child = TRUE;
 
-    //jetzt neuen kindknoten aus db erzeugen
-    //hierzu zunächst iter des Anker-Knotens ermitteln
-    gboolean kind = FALSE;
-    if ( new_older_sibling )
-    {
-        iter = zond_treeview_abfragen_iter( ZOND_TREEVIEW(zond->treeview[baum]), new_older_sibling );
-        kind = FALSE;
-    }
-    else
-    {
-        iter = zond_treeview_abfragen_iter( ZOND_TREEVIEW(zond->treeview[baum]), new_parent );
-        kind = TRUE;
-    }
+    //zunächst iter des Anker-Knotens ermitteln
+    if ( child ) iter_dest =
+            zond_treeview_abfragen_iter( ZOND_TREEVIEW(zond->treeview[baum]),
+            parent_id );
+    else iter_dest =
+            zond_treeview_abfragen_iter( ZOND_TREEVIEW(zond->treeview[baum]),
+            older_sibling_id );
 
-    //Knoten erzeugen
-    rc = treeviews_db_to_baum_rec( zond, FALSE,
-            baum, node_id, iter, kind, NULL, errmsg );
-    gtk_tree_iter_free( iter );
+    zond_tree_store_move_node( iter_src, iter_dest, child, NULL );
 
-    if ( rc ) ERROR_SOND( "db_baum_knoten_mit_kindern" )
+    gtk_tree_iter_free( iter_dest );
+    gtk_tree_iter_free( iter_src );
 
     return 0;
 }
@@ -920,7 +914,7 @@ treeviews_get_anchor_id( Projekt* zond, gboolean* child, GtkTreeIter* iter, gint
 
         head_nr = zond_tree_store_get_link_head_nr( &iter_cursor );
 
-        if ( !head_nr || *child ) return FALSE;
+        if ( !head_nr || *child ) return FALSE; //kann kein dummy sein, weil dann geöffnet und dann geladen...
         else *anchor_id = head_nr;
     }
     else gtk_tree_model_get( GTK_TREE_MODEL(zond_tree_store_get_tree_store(
@@ -1117,9 +1111,10 @@ treeviews_clipboard_kopieren( Projekt* zond, Baum baum_dest, gint anchor_id,
 
 typedef struct {
     Projekt* zond;
-    Baum baum;
-    gint parent_id;
-    gint older_sibling_id;
+    GtkTreeIter* iter_anchor;
+    gint anchor_id;
+    gboolean child;
+    GtkTreeIter* iter_new;
 } SSelectionVerschieben;
 
 
@@ -1127,29 +1122,52 @@ static gint
 treeeviews_clipboard_verschieben_foreach( SondTreeview* tree_view, GtkTreeIter* iter,
         gpointer data, gchar** errmsg )
 {
-    gint rc = 0;
     gint node_id = 0;
+    Baum baum_anchor = KEIN_BAUM;
+    gint id_parent = 0;
+    gint id_older_sibling = 0;
+    gint rc = 0;
 
     SSelectionVerschieben* s_selection = (SSelectionVerschieben*) data;
 
-    gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(tree_view) ), iter,
+    if ( zond_tree_store_is_link( iter ) ) node_id = zond_tree_store_get_link_head_nr( iter );
+    else gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(tree_view) ), iter,
             2, &node_id, -1 );
 
-    if ( s_selection->baum == BAUM_INHALT )
+    if ( GTK_TREE_MODEL(zond_tree_store_get_tree_store( s_selection->iter_anchor )) ==
+            gtk_tree_view_get_model( GTK_TREE_VIEW(s_selection->zond->treeview[BAUM_INHALT]) ) )
+            baum_anchor = BAUM_INHALT;
+    else if ( GTK_TREE_MODEL(zond_tree_store_get_tree_store( s_selection->iter_anchor )) ==
+            gtk_tree_view_get_model( GTK_TREE_VIEW(s_selection->zond->treeview[BAUM_AUSWERTUNG]) ) )
+            baum_anchor = BAUM_AUSWERTUNG;
+
+    if ( baum_anchor == BAUM_INHALT )
     {
         gint rc = 0;
 
-        rc = zond_dbase_get_ziel( s_selection->zond->dbase_zond->zond_dbase_work, s_selection->baum,
+        rc = zond_dbase_get_ziel( s_selection->zond->dbase_zond->zond_dbase_work, BAUM_INHALT,
                 node_id, NULL, errmsg );
         if ( rc == -1 ) ERROR_S
         else if ( rc == 0 ) return 0;
     }
 
-    rc = treeviews_knoten_verschieben( s_selection->zond, s_selection->baum, node_id, s_selection->parent_id,
-            s_selection->older_sibling_id, errmsg );
+    if ( s_selection->child ) id_parent = s_selection->anchor_id;
+    else
+    {
+        id_older_sibling = s_selection->anchor_id;
+        id_parent = zond_dbase_get_parent( s_selection->zond->dbase_zond->zond_dbase_work, baum_anchor, id_older_sibling, errmsg );
+        if ( id_parent < 0 ) ERROR_S
+    }
+
+    //kind verschieben
+    rc = zond_dbase_verschieben_knoten( s_selection->zond->dbase_zond->zond_dbase_work, baum_anchor,
+            node_id, id_parent, id_older_sibling, errmsg );
     if ( rc ) ERROR_S
 
-    s_selection->older_sibling_id = node_id;
+    zond_tree_store_move_node( iter, s_selection->iter_anchor, s_selection->child, s_selection->iter_new );
+
+    s_selection->child = FALSE;
+    s_selection->anchor_id = node_id;
 
     return 0;
 }
@@ -1157,41 +1175,28 @@ treeeviews_clipboard_verschieben_foreach( SondTreeview* tree_view, GtkTreeIter* 
 
 //Ist immer verschieben innerhalb des Baums
 gint
-treeviews_clipboard_verschieben( Projekt* zond, Baum baum, gint anchor_id, gboolean kind,
+treeviews_clipboard_verschieben( Projekt* zond, GtkTreeIter* iter_anchor, gint anchor_id, gboolean kind,
         gchar** errmsg )
 {
     gint rc = 0;
     Clipboard* clipboard = NULL;
-    SSelectionVerschieben s_selection = { zond, baum, 0, 0 };
+    GtkTreeIter iter_new = { 0 };
 
-    if ( kind ) s_selection.parent_id = anchor_id;
-    else
-    {
-        s_selection.parent_id = zond_dbase_get_parent( zond->dbase_zond->zond_dbase_work, baum, anchor_id, errmsg );
-        if ( s_selection.parent_id < 0 ) ERROR_S
+    SSelectionVerschieben s_selection = { zond, iter_anchor, anchor_id, kind, &iter_new };
 
-        s_selection.older_sibling_id = anchor_id;
-    }
-
-    rc = sond_treeview_clipboard_foreach( zond->treeview[baum],
+    rc = sond_treeview_clipboard_foreach( zond->treeview[BAUM_INHALT], //irgendein Baum, ist nur für's cclipborad wichtig
             treeeviews_clipboard_verschieben_foreach, &s_selection, errmsg );
     if ( rc == -1 ) ERROR_S
 
     //Alte Auswahl löschen
-    clipboard = sond_treeview_get_clipboard( zond->treeview[baum] );
+    clipboard = sond_treeview_get_clipboard( zond->treeview[BAUM_INHALT] ); //dto.
     if ( clipboard->arr_ref->len > 0 ) g_ptr_array_remove_range( clipboard->arr_ref,
             0, clipboard->arr_ref->len );
 
-    gtk_widget_queue_draw( GTK_WIDGET(zond->treeview[baum]) );
+    gtk_widget_queue_draw( GTK_WIDGET(zond->treeview[zond->baum_active]) );
 
-    GtkTreeIter* iter = zond_treeview_abfragen_iter(
-            ZOND_TREEVIEW(zond->treeview[baum]), anchor_id );
-    if ( !iter ) ERROR_S_MESSAGE( "zond_treeview_abfrageb_iter findet node_id nicht" )
-
-    if ( kind && anchor_id ) sond_treeview_expand_row( zond->treeview[baum], iter );
-    sond_treeview_set_cursor( zond->treeview[baum], iter );
-
-    gtk_tree_iter_free( iter );
+    if ( kind && anchor_id ) sond_treeview_expand_row( zond->treeview[zond->baum_active], iter_anchor );
+    sond_treeview_set_cursor( zond->treeview[zond->baum_active], &iter_new );
 
     return 0;
 }

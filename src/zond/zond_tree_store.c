@@ -253,39 +253,47 @@ zond_tree_store_new ( gint root_node_id )
     return tree_store;
 }
 
+void zond_tree_store_remove_node( GNode* node );
 
 static gboolean
 node_free (GNode *node, gpointer data)
 {
-    RowData* row_data = (RowData*) node->data;
+    GList* list_links = NULL;
+    RowData* row_data = NULL;
 
-    if ( row_data )
+    row_data = node->data;
+
+    if ( row_data->target ) //ist link
     {
-        if ( row_data->target ) //ist link
-        {
-            GNode* node_target = NULL;
+        GNode* node_target = NULL;
 
-            node_target = row_data->target;
-            ((RowData*) node_target->data)->links =
-                    g_list_remove( ((RowData*) node_target->data)->links, node );
-        }
-        else if ( row_data->data )//nur wenn kein link und nicht root
-        {
-            g_free( row_data->data->icon_name );
-            g_free( row_data->data->node_text );
+        //link-Ziel abkoppeln
+        node_target = row_data->target;
+        ((RowData*) node_target->data)->links =
+                g_list_remove( ((RowData*) node_target->data)->links, node );
+    }
+    else if ( row_data->data )//nur wenn kein link und nicht root
+    {
+        g_free( row_data->data->icon_name );
+        g_free( row_data->data->node_text );
 
-            g_free( row_data->data );
-            row_data->data = NULL;
-        }
+        g_free( row_data->data );
+    }
 
-        g_list_free( row_data->links );
-        row_data->links = NULL;
+    //selbert link-Ziel
+    list_links = row_data->links;
+    while ( list_links )
+    {
+        //link, der auf uns verweist, löschen
+        zond_tree_store_remove_node( list_links->data );
+        list_links = row_data->links; //weiterspulen
+    }
 
-      g_free( row_data );
-      node->data = NULL;
-  }
+    //g_list_free überflüssig, da alle Elemente gelöscht werden und daherlist_links NULL ist
 
-  return FALSE;
+    g_free( row_data );
+
+    return FALSE;
 }
 
 static void
@@ -688,7 +696,7 @@ zond_tree_store_set (GtkTreeIter  *iter,
  *
  * Returns: %TRUE if @iter is still valid, %FALSE if not.
  **/
-static void
+void
 zond_tree_store_remove_node( GNode* node )
 {
     GtkTreePath *path;
@@ -730,52 +738,15 @@ zond_tree_store_remove_node( GNode* node )
 }
 
 
-static void
-zond_tree_store_remove_node_with_links( GNode* node )
-{
-    GList* list = NULL;
-
-    while ( (list = ((RowData*) node->data)->links) )
-            zond_tree_store_remove_node_with_links( list->data );
-
-    zond_tree_store_remove_node( node );
-
-    return;
-}
-
-
 void
 zond_tree_store_remove( GtkTreeIter* iter )
 {
     if ( !iter ) return;
 
-    //Test, ob kein link
-    g_return_if_fail ( ((RowData*) G_NODE(iter->user_data)->data)->target == NULL );
-
-    zond_tree_store_remove_node_with_links( iter->user_data );
+    zond_tree_store_remove_node( iter->user_data );
 
     return;
 }
-
-
-void
-zond_tree_store_remove_link( GtkTreeIter* link )
-{
-    GNode* node_target = NULL;
-    GList* links = NULL;
-
-    g_return_if_fail( ((RowData*) G_NODE(link->user_data)->data)->head_nr ); //muß link-Kopf sein
-
-    //link aus liste löschen, die bei Target geführt wird
-    node_target = ((RowData*) G_NODE(link->user_data)->data)->target;
-    links = ((RowData*) node_target->data)->links;
-    ((RowData*) node_target->data)->links = g_list_remove( links, link->user_data );
-
-    zond_tree_store_remove_node_with_links( link->user_data );
-
-    return;
-}
-
 
 
 static void
@@ -1100,197 +1071,6 @@ zond_tree_store_load_link( GtkTreeIter* iter_head )
 }
 
 
-gint
-zond_tree_store_get_link_head_nr( GtkTreeIter* iter )
-{
-    gint head_nr = 0;
-
-    if ( !iter ) return 0;
-
-    head_nr = ((RowData*) (G_NODE(iter->user_data)->data))->head_nr;
-
-    //head_nr == -1 bei dummy
-    return (head_nr > 0) ? head_nr : 0;
-}
-
-
-/**
- * gtk_tree_store_is_ancestor:
- * @tree_store: A #GtkTreeStore
- * @iter: A valid #GtkTreeIter
- * @descendant: A valid #GtkTreeIter
- *
- * Returns %TRUE if @iter is an ancestor of @descendant.  That is, @iter is the
- * parent (or grandparent or great-grandparent) of @descendant.
- *
- * Returns: %TRUE, if @iter is an ancestor of @descendant
- **/
-gboolean
-zond_tree_store_is_ancestor (ZondTreeStore *tree_store,
-                            GtkTreeIter  *iter,
-                            GtkTreeIter  *descendant)
-{
-  g_return_val_if_fail (ZOND_IS_TREE_STORE (tree_store), FALSE);
-  g_return_val_if_fail (VALID_ITER (iter, tree_store), FALSE);
-  g_return_val_if_fail (VALID_ITER (descendant, tree_store), FALSE);
-  return g_node_is_ancestor (G_NODE (iter->user_data),
-                             G_NODE (descendant->user_data));
-}
-
-/**
- * gtk_tree_store_iter_depth:
- * @tree_store: A #GtkTreeStore
- * @iter: A valid #GtkTreeIter
- *
- * Returns the depth of @iter.  This will be 0 for anything on the root level, 1
- * for anything down a level, etc.
- *
- * Returns: The depth of @iter
- **/
-gint
-zond_tree_store_iter_depth (ZondTreeStore *tree_store,
-                           GtkTreeIter  *iter)
-{
-  g_return_val_if_fail (GTK_IS_TREE_STORE (tree_store), 0);
-  g_return_val_if_fail (VALID_ITER (iter, tree_store), 0);
-  return g_node_depth (G_NODE (iter->user_data)) - 2;
-}
-
-/* simple ripoff from g_node_traverse_post_order */
-static void
-zond_tree_store_clear_traverse (GNode        *node,
-                               ZondTreeStore *store)
-{
-    GtkTreeIter iter = { 0 };
-
-    iter.stamp = store->priv->stamp;
-
-    while ( node->children )
-    {
-        iter.user_data = node->children;
-        zond_tree_store_remove( &iter );
-    }
-
-    return;
-}
-
-
-static void
-zond_tree_store_increment_stamp (ZondTreeStore *tree_store)
-{
-  ZondTreeStorePrivate *priv = tree_store->priv;
-  do
-    {
-      priv->stamp++;
-    }
-  while (priv->stamp == 0);
-}
-
-/**
- * gtk_tree_store_clear:
- * @tree_store: a #GtkTreeStore
- *
- * Removes all rows from @tree_store
- **/
-void
-zond_tree_store_clear (ZondTreeStore *tree_store)
-{
-  g_return_if_fail (ZOND_IS_TREE_STORE (tree_store));
-  zond_tree_store_clear_traverse (tree_store->priv->root, tree_store);
-  zond_tree_store_increment_stamp (tree_store);
-}
-static gboolean
-zond_tree_store_iter_is_valid_helper (GtkTreeIter *iter,
-                                     GNode       *first)
-{
-  GNode *node;
-  node = first;
-  do
-    {
-      if (node == iter->user_data)
-        return TRUE;
-      if (node->children)
-        if (zond_tree_store_iter_is_valid_helper (iter, node->children))
-          return TRUE;
-      node = node->next;
-    }
-  while (node);
-  return FALSE;
-}
-/**
- * gtk_tree_store_iter_is_valid:
- * @tree_store: A #GtkTreeStore.
- * @iter: A #GtkTreeIter.
- *
- * WARNING: This function is slow. Only use it for debugging and/or testing
- * purposes.
- *
- * Checks if the given iter is a valid iter for this #GtkTreeStore.
- *
- * Returns: %TRUE if the iter is valid, %FALSE if the iter is invalid.
- *
- * Since: 2.2
- **/
-gboolean
-zond_tree_store_iter_is_valid (ZondTreeStore *tree_store,
-                              GtkTreeIter  *iter)
-{
-  g_return_val_if_fail (ZOND_IS_TREE_STORE (tree_store), FALSE);
-  g_return_val_if_fail (iter != NULL, FALSE);
-  if (!VALID_ITER (iter, tree_store))
-    return FALSE;
-  return zond_tree_store_iter_is_valid_helper (iter, tree_store->priv->root);
-}
-/* DND */
-static gboolean real_zond_tree_store_row_draggable (GtkTreeDragSource *drag_source,
-                                                   GtkTreePath       *path)
-{
-  return TRUE;
-}
-
-static gboolean
-zond_tree_store_drag_data_delete (GtkTreeDragSource *drag_source,
-                                 GtkTreePath       *path)
-{
-  GtkTreeIter iter;
-  if (zond_tree_store_get_iter (GTK_TREE_MODEL (drag_source),
-                               &iter,
-                               path))
-    {
-      zond_tree_store_remove (&iter);
-      return TRUE;
-    }
-  else
-    {
-      return FALSE;
-    }
-}
-static gboolean
-zond_tree_store_drag_data_get (GtkTreeDragSource *drag_source,
-                              GtkTreePath       *path,
-                              GtkSelectionData  *selection_data)
-{/*
-  // Note that we don't need to handle the GTK_TREE_MODEL_ROW
-   * target, because the default handler does it for us, but
-   * we do anyway for the convenience of someone maybe overriding the
-   * default handler.
-
-  if (zond_tree_set_row_drag_data (selection_data,
-                                  GTK_TREE_MODEL (drag_source),
-                                  path))
-    {
-      return TRUE;
-    }
-  else
-    {
-      // FIXME handle text targets at least.
-    }
-    */
-  return FALSE;
-}
-
-
-
 static void
 copy_node_data ( GtkTreeIter  *src_iter, ZondTreeStore* tree_store_dest,
         GtkTreeIter *dest_iter)
@@ -1355,35 +1135,46 @@ zond_tree_store_walk_tree( GNode* node )
     GtkTreeModel* model = NULL;
 
     model = GTK_TREE_MODEL(((RowData*) node->data)->tree_store);
+    iter.stamp = ((RowData*) node->data)->tree_store->priv->stamp;
     iter.user_data = node;
     path = gtk_tree_model_get_path( model, &iter );
 
     gtk_tree_model_row_inserted( model, path, &iter );
 
-    if ( !(child = node->children) )
+    if ( node->parent != ((RowData*) node->data)->tree_store->priv->root )
     {
-        gtk_tree_path_free( path );
-        return;
+        /* child_toggled */
+        if ( node->prev == NULL && node->next == NULL ) //keineGeschwister
+        {
+            GtkTreeIter new_iter = {0,};
+            gtk_tree_path_up (path);
+            new_iter.stamp = ((RowData*) node->data)->tree_store->priv->stamp;
+            new_iter.user_data = node->parent;
+            gtk_tree_model_row_has_child_toggled( model, path, &new_iter );
+        }
     }
+    gtk_tree_path_free (path);
 
-    do zond_tree_store_walk_tree( child );
-    while ( (child = child->next) );
+    child = node->children;
+    while ( child )
+    {
+        zond_tree_store_walk_tree( child );
 
-    gtk_tree_model_row_has_child_toggled( model, path, &iter );
-    gtk_tree_path_free( path );
+        child = child->next;
+    }
 
     return;
 }
 
 
 void
-zond_tree_store_move_node( GtkTreeIter* iter_src, GtkTreeIter* iter_anchor, gboolean child )
+zond_tree_store_move_node( GtkTreeIter* iter_src, GtkTreeIter* iter_anchor,
+        gboolean child, GtkTreeIter* iter_new )
 {
     GNode* node_src = NULL;
     GNode* node_src_parent = NULL;
     GtkTreePath* path = NULL;
     GtkTreeModel* model_src = NULL;
-    GtkTreeModel* model_anchor = NULL;
 
     node_src = iter_src->user_data;
     node_src_parent = node_src->parent;
@@ -1398,7 +1189,7 @@ zond_tree_store_move_node( GtkTreeIter* iter_src, GtkTreeIter* iter_anchor, gboo
     if( node_src_parent != G_NODE(ZOND_TREE_STORE(model_src)->priv->root) )
     {
         /* child_toggled */
-        if (node_src_parent->children != NULL ) //keineGeschwister
+        if (node_src_parent->children == NULL ) //keineGeschwister
         {
             GtkTreeIter new_iter = {0,};
             gtk_tree_path_up (path);
@@ -1409,18 +1200,130 @@ zond_tree_store_move_node( GtkTreeIter* iter_src, GtkTreeIter* iter_anchor, gboo
     }
     gtk_tree_path_free (path);
 
-    model_anchor = GTK_TREE_MODEL(((RowData*) G_NODE(iter_anchor->user_data)->data)->tree_store);
-
-    ((RowData*) node_src->data)->tree_store = ZOND_TREE_STORE(model_anchor);
+    ((RowData*) node_src->data)->tree_store = ((RowData*) G_NODE(iter_anchor->user_data)->data)->tree_store;
 
     if ( child ) g_node_insert_after( G_NODE(iter_anchor->user_data), NULL, node_src );
     else g_node_insert_after( G_NODE(iter_anchor->user_data)->parent, G_NODE(iter_anchor->user_data), node_src );
 
     zond_tree_store_walk_tree( node_src );
 
+    if ( iter_new )
+    {
+        gint stamp = iter_anchor->stamp;
+        iter_new->stamp = iter_anchor->stamp;
+        iter_new->user_data = node_src;
+    }
+
     return;
 }
 
+
+gint
+zond_tree_store_get_link_head_nr( GtkTreeIter* iter )
+{
+    gint head_nr = 0;
+
+    if ( !iter ) return 0;
+
+    head_nr = ((RowData*) (G_NODE(iter->user_data)->data))->head_nr;
+
+    //head_nr == -1 bei dummy
+    return (head_nr > 0) ? head_nr : 0;
+}
+
+
+/* simple ripoff from g_node_traverse_post_order */
+static void
+zond_tree_store_clear_traverse (GNode        *node,
+                               ZondTreeStore *store)
+{
+    GtkTreeIter iter = { 0 };
+
+    iter.stamp = store->priv->stamp;
+
+    while ( node->children )
+    {
+        iter.user_data = node->children;
+        zond_tree_store_remove( &iter );
+    }
+
+    return;
+}
+
+
+static void
+zond_tree_store_increment_stamp (ZondTreeStore *tree_store)
+{
+  ZondTreeStorePrivate *priv = tree_store->priv;
+  do
+    {
+      priv->stamp++;
+    }
+  while (priv->stamp == 0);
+}
+
+/**
+ * gtk_tree_store_clear:
+ * @tree_store: a #GtkTreeStore
+ *
+ * Removes all rows from @tree_store
+ **/
+void
+zond_tree_store_clear (ZondTreeStore *tree_store)
+{
+  g_return_if_fail (ZOND_IS_TREE_STORE (tree_store));
+  zond_tree_store_clear_traverse (tree_store->priv->root, tree_store);
+  zond_tree_store_increment_stamp (tree_store);
+}
+
+
+/* DND */
+static gboolean real_zond_tree_store_row_draggable (GtkTreeDragSource *drag_source,
+                                                   GtkTreePath       *path)
+{
+  return TRUE;
+}
+
+static gboolean
+zond_tree_store_drag_data_delete (GtkTreeDragSource *drag_source,
+                                 GtkTreePath       *path)
+{
+  GtkTreeIter iter;
+  if (zond_tree_store_get_iter (GTK_TREE_MODEL (drag_source),
+                               &iter,
+                               path))
+    {
+      zond_tree_store_remove (&iter);
+      return TRUE;
+    }
+  else
+    {
+      return FALSE;
+    }
+}
+static gboolean
+zond_tree_store_drag_data_get (GtkTreeDragSource *drag_source,
+                              GtkTreePath       *path,
+                              GtkSelectionData  *selection_data)
+{/*
+  // Note that we don't need to handle the GTK_TREE_MODEL_ROW
+   * target, because the default handler does it for us, but
+   * we do anyway for the convenience of someone maybe overriding the
+   * default handler.
+
+  if (zond_tree_set_row_drag_data (selection_data,
+                                  GTK_TREE_MODEL (drag_source),
+                                  path))
+    {
+      return TRUE;
+    }
+  else
+    {
+      // FIXME handle text targets at least.
+    }
+    */
+  return FALSE;
+}
 
 
 static gboolean
@@ -1627,4 +1530,20 @@ zond_tree_store_link_is_unloaded( GtkTreeIter* iter )
     if ( ((RowData*) node_children->data)->head_nr != -1 ) return FALSE;
 
     return TRUE;
+}
+
+
+gint
+zond_tree_store_get_node_id( GtkTreeIter* iter )
+{
+    gint node_id = 0;
+
+    if ( ((RowData*) G_NODE(iter->user_data)->data)->target )
+    {
+        node_id = ((RowData*) G_NODE(iter->user_data)->data)->head_nr;
+        if ( node_id <= 0 ) return 0;
+    }
+    else node_id = ((RowData*) G_NODE(iter->user_data)->data)->data->node_id;
+
+    return node_id;
 }

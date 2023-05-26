@@ -60,8 +60,6 @@ void          zond_tree_store_set              (GtkTreeIter  *iter,
 GDK_AVAILABLE_IN_ALL
 void      zond_tree_store_remove           (GtkTreeIter  *iter);
 
-void zond_tree_store_remove_link( GtkTreeIter* );
-
 GDK_AVAILABLE_IN_ALL
 void zond_tree_store_insert(ZondTreeStore* tree_store,
                                          GtkTreeIter* iter,
@@ -80,22 +78,12 @@ gint
 zond_tree_store_get_link_head_nr( GtkTreeIter* );
 
 GDK_AVAILABLE_IN_ALL
-gboolean      zond_tree_store_is_ancestor      (ZondTreeStore *tree_store,
-                                               GtkTreeIter  *iter,
-                                               GtkTreeIter  *descendant);
-GDK_AVAILABLE_IN_ALL
-gint          zond_tree_store_iter_depth       (ZondTreeStore *tree_store,
-                                               GtkTreeIter  *iter);
-GDK_AVAILABLE_IN_ALL
 void          zond_tree_store_clear            (ZondTreeStore *tree_store);
-GDK_AVAILABLE_IN_ALL
-gboolean      zond_tree_store_iter_is_valid    (ZondTreeStore *tree_store,
-                                               GtkTreeIter  *iter);
 
 void zond_tree_store_copy_node( GtkTreeIter*, ZondTreeStore*, GtkTreeIter*,
         gboolean, GtkTreeIter* );
 
-void zond_tree_store_move_node( GtkTreeIter*, GtkTreeIter*, gboolean );
+void zond_tree_store_move_node( GtkTreeIter*, GtkTreeIter*, gboolean, GtkTreeIter* );
 
 gboolean
 zond_tree_store_is_link( GtkTreeIter* );
@@ -111,6 +99,8 @@ GList* zond_tree_store_get_linked_nodes( GtkTreeIter* );
 gboolean zond_tree_store_link_is_unloaded( GtkTreeIter* );
 
 void zond_tree_store_load_link( GtkTreeIter* );
+
+gint zond_tree_store_get_node_id( GtkTreeIter* );
 
 G_END_DECLS
 #endif /* ZOND_TREE_STORE_H_INCLUDED */

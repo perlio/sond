@@ -461,7 +461,7 @@ three_treeviews_paste_clipboard( Projekt* zond, gboolean kind, gboolean link, gc
             else if ( rc == 1 ) ERROR_S_MESSAGE( "Unzulässiges Ziel: "
                     "Abkömmling von Anbindung" )
 
-            rc = treeviews_clipboard_verschieben( zond, zond->baum_active, anchor_id, kind, errmsg );
+            rc = treeviews_clipboard_verschieben( zond, &iter, anchor_id, kind, errmsg );
             if ( rc == -1 ) ERROR_S
         }
         else if ( zond->baum_active == BAUM_INHALT && !clipboard->ausschneiden )
@@ -492,7 +492,7 @@ three_treeviews_paste_clipboard( Projekt* zond, gboolean kind, gboolean link, gc
         {
             gint rc = 0;
 
-            rc = treeviews_clipboard_verschieben( zond, baum_selection, anchor_id, kind, errmsg );
+            rc = treeviews_clipboard_verschieben( zond, &iter, anchor_id, kind, errmsg );
             if ( rc == -1 ) ERROR_S
         }
         else if ( zond->baum_active == BAUM_AUSWERTUNG && !clipboard->ausschneiden && !link )

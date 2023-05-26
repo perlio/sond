@@ -38,8 +38,6 @@ typedef struct _ZondDBase ZondDBase;
 
 typedef struct pdf_document pdf_document;
 
-typedef struct _FM FM;
-
 typedef int gboolean;
 typedef char gchar;
 typedef int gint;
