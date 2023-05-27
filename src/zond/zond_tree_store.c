@@ -1209,7 +1209,6 @@ zond_tree_store_move_node( GtkTreeIter* iter_src, GtkTreeIter* iter_anchor,
 
     if ( iter_new )
     {
-        gint stamp = iter_anchor->stamp;
         iter_new->stamp = iter_anchor->stamp;
         iter_new->user_data = node_src;
     }
