@@ -356,8 +356,7 @@ three_treeviews_clipboard_anbinden( Projekt* zond, gint anchor_id, gboolean kind
     rc = zond_dbase_begin( zond->dbase_zond->zond_dbase_work, errmsg );
     if ( rc ) ERROR_S
 
-    rc = sond_treeview_clipboard_foreach( zond->treeview[BAUM_FS],
-            three_treeviews_clipboard_anbinden_foreach, &s_selection, errmsg );
+    rc = sond_treeview_clipboard_foreach( three_treeviews_clipboard_anbinden_foreach, &s_selection, errmsg );
     if ( rc == -1 ) ERROR_ROLLBACK( zond->dbase_zond->zond_dbase_work )
 
     iter_last_inserted = selection_anbinden_zu_baum( zond, (success) ? &iter : NULL, kind, arr_new_nodes, errmsg );
@@ -393,7 +392,7 @@ three_treeviews_paste_clipboard( Projekt* zond, gboolean kind, gboolean link, gc
 
     if ( zond->baum_active == KEIN_BAUM ) return 0;
 
-    clipboard = sond_treeview_get_clipboard( zond->treeview[zond->baum_active] );
+    clipboard = ((SondTreeviewClass*) g_type_class_peek( SOND_TYPE_TREEVIEW ))->clipboard;
 
     Baum baum_selection = (Baum) sond_treeview_get_id( clipboard->tree_view );
 

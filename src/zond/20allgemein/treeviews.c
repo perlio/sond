@@ -1021,8 +1021,7 @@ treeviews_paste_clipboard_as_link( Projekt* zond, Baum baum_dest, gint anchor_id
 
     if ( iter ) iter_anchor = *iter;
 
-    rc = sond_treeview_clipboard_foreach( zond->treeview[baum_dest],
-            treeviews_paste_clipboard_as_link_foreach, &s_selection, errmsg );
+    rc = sond_treeview_clipboard_foreach( treeviews_paste_clipboard_as_link_foreach, &s_selection, errmsg );
     if ( rc == -1 ) ERROR_S
 
     if ( iter_anchor.stamp && kind ) sond_treeview_expand_row( zond->treeview[baum_dest], &iter_anchor );
@@ -1154,8 +1153,8 @@ treeviews_clipboard_kopieren( Projekt* zond, Baum baum_dest, gint anchor_id,
     //falls in existierenden iter eigenfügt wird: diesen merken
     if ( kind && iter ) iter_origin = *iter;
 
-    rc = sond_treeview_clipboard_foreach( zond->treeview[baum_dest],
-            treeviews_clipboard_kopieren_foreach, &s_selection, errmsg );
+    rc = sond_treeview_clipboard_foreach( treeviews_clipboard_kopieren_foreach,
+            &s_selection, errmsg );
     if ( rc == -1 ) ERROR_S
 
     if ( kind && iter_origin.stamp ) sond_treeview_expand_row(
@@ -1176,7 +1175,7 @@ typedef struct {
 
 
 static gint
-treeeviews_clipboard_verschieben_foreach( SondTreeview* tree_view, GtkTreeIter* iter,
+treeviews_clipboard_verschieben_foreach( SondTreeview* tree_view, GtkTreeIter* iter,
         gpointer data, gchar** errmsg )
 {
     gint node_id = 0;
@@ -1250,12 +1249,11 @@ treeviews_clipboard_verschieben( Projekt* zond, GtkTreeIter* iter_anchor, gint a
 
     SSelectionVerschieben s_selection = { zond, iter_anchor, anchor_id, kind, &iter_new };
 
-    rc = sond_treeview_clipboard_foreach( zond->treeview[BAUM_INHALT], //irgendein Baum, ist nur für's cclipborad wichtig
-            treeeviews_clipboard_verschieben_foreach, &s_selection, errmsg );
+    rc = sond_treeview_clipboard_foreach( treeviews_clipboard_verschieben_foreach, &s_selection, errmsg );
     if ( rc == -1 ) ERROR_S
 
     //Alte Auswahl löschen
-    clipboard = sond_treeview_get_clipboard( zond->treeview[BAUM_INHALT] ); //dto.
+    clipboard = ((SondTreeviewClass*) g_type_class_peek( SOND_TYPE_TREEVIEW ))->clipboard;
     if ( clipboard->arr_ref->len > 0 ) g_ptr_array_remove_range( clipboard->arr_ref,
             0, clipboard->arr_ref->len );
 

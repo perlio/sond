@@ -238,15 +238,6 @@ sond_treeview_get_id( SondTreeview* stv )
 }
 
 
-Clipboard*
-sond_treeview_get_clipboard( SondTreeview* stv )
-{
-    SondTreeviewClass* stv_klass = SOND_TREEVIEW_GET_CLASS( stv );
-
-    return stv_klass->clipboard;
-}
-
-
 GtkCellRenderer*
 sond_treeview_get_cell_renderer_icon( SondTreeview* stv )
 {
@@ -335,7 +326,7 @@ sond_treeview_set_cursor_on_text_cell( SondTreeview* stv, GtkTreeIter* iter )
 gboolean
 sond_treeview_test_cursor_descendant( SondTreeview* stv )
 {
-    Clipboard* clipboard = SOND_TREEVIEW_GET_CLASS( stv )->clipboard;
+    Clipboard* clipboard = ((SondTreeviewClass*) g_type_class_peek( SOND_TYPE_TREEVIEW ))->clipboard;
 
     GtkTreePath* path = NULL;
 
@@ -392,7 +383,7 @@ sond_treeview_selection_get_refs( SondTreeview* stv )
 void
 sond_treeview_copy_or_cut_selection( SondTreeview* stv, gboolean ausschneiden )
 {
-    Clipboard* clipboard = SOND_TREEVIEW_GET_CLASS( stv )->clipboard;
+    Clipboard* clipboard = ((SondTreeviewClass*) g_type_class_peek( SOND_TYPE_TREEVIEW ))->clipboard;
 
     GPtrArray* refs = sond_treeview_selection_get_refs( stv );
     if ( !refs ) return;
@@ -453,17 +444,17 @@ sond_treeview_refs_foreach( SondTreeview* stv_orig, GPtrArray* refs,
 
 
 gint
-sond_treeview_clipboard_foreach( SondTreeview* stv, gint (*foreach)
+sond_treeview_clipboard_foreach( gint (*foreach)
         ( SondTreeview*, GtkTreeIter*, gpointer, gchar** ), gpointer data,
         gchar** errmsg )
 {
     gint rc = 0;
 
-    Clipboard* clipboard = SOND_TREEVIEW_GET_CLASS( stv )->clipboard;
+    Clipboard* clipboard = ((SondTreeviewClass*) g_type_class_peek( SOND_TYPE_TREEVIEW ))->clipboard;
 
     rc = sond_treeview_refs_foreach( clipboard->tree_view, clipboard->arr_ref,
             foreach, data, errmsg );
-    if ( rc == -1 ) ERROR_SOND( "sond_treeview_refs_foreach" )
+    if ( rc == -1 ) ERROR_S
     else if ( rc >= 1 ) return rc;
 
     return 0;

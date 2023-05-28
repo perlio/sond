@@ -87,7 +87,7 @@ sond_treeviewfm_dbase_update_eingang( SondTreeviewFM* stvfm, const gchar* source
 {
     gint rc = 0;
 
-    Clipboard* clipboard = sond_treeview_get_clipboard( SOND_TREEVIEW(stvfm) );
+    Clipboard* clipboard = ((SondTreeviewClass*) g_type_class_peek( SOND_TYPE_TREEVIEW ))->clipboard;
     SondTreeviewFMPrivate* priv = sond_treeviewfm_get_instance_private( stvfm );
 
 //    rc = eingang_update_rel_path( sond_treeviewfm_get_dbase( SOND_TREEVIEWFM(clipboard->tree_view) ), source, priv->zond_dbase, dest, del, errmsg );
@@ -130,7 +130,7 @@ sond_treeviewfm_other_fm( SondTreeviewFM* stvfm )
 
     SondTreeviewFMPrivate* stvfm_priv = sond_treeviewfm_get_instance_private( stvfm );
 
-    clipboard = sond_treeview_get_clipboard( SOND_TREEVIEW(stvfm) );
+    clipboard = ((SondTreeviewClass*) g_type_class_peek( SOND_TYPE_TREEVIEW ))->clipboard;
     dbase_source = sond_treeviewfm_get_dbase( SOND_TREEVIEWFM(clipboard->tree_view) );
 
     dbase_dest = stvfm_priv->zond_dbase;
@@ -148,7 +148,7 @@ sond_treeviewfm_dbase( SondTreeviewFM* stvfm, gint mode, const gchar* rel_path_s
     gint rc = 0;
     Clipboard* clipboard = NULL;
 
-    clipboard = sond_treeview_get_clipboard( SOND_TREEVIEW(stvfm) );
+    clipboard = ((SondTreeviewClass*) g_type_class_peek( SOND_TYPE_TREEVIEW ))->clipboard;
 
     if ( mode == 2 && sond_treeviewfm_other_fm( stvfm ) )
     {
@@ -227,7 +227,7 @@ sond_treeviewfm_move_copy_create_delete( SondTreeviewFM* stvfm, GFile* file_sour
             gchar* rel_path_source = NULL;
             gchar* rel_path_dest = NULL;
 
-            clipboard = sond_treeview_get_clipboard( SOND_TREEVIEW(stvfm) );
+            clipboard = ((SondTreeviewClass*) g_type_class_peek( SOND_TYPE_TREEVIEW ))->clipboard;
 
             if ( mode == 1 || mode == 2 ) rel_path_source =
                     get_rel_path_from_file( sond_treeviewfm_get_root(
@@ -910,7 +910,7 @@ sond_treeviewfm_finalize( GObject* g_object )
 
     g_free( stvfm_priv->root );
 
-    clipboard = sond_treeview_get_clipboard(SOND_TREEVIEW(g_object) );
+    clipboard = ((SondTreeviewClass*) g_type_class_peek( SOND_TYPE_TREEVIEW ))->clipboard;
     if ( G_OBJECT(clipboard->tree_view) == g_object )
             g_ptr_array_remove_range( clipboard->arr_ref, 0, clipboard->arr_ref->len );
 
@@ -1246,7 +1246,7 @@ sond_treeviewfm_move_or_copy_node( SondTreeviewFM* stvfm, GtkTreeIter* iter, GFi
     gchar* basename_file = NULL;
 
     SFMPasteSelection* s_fm_paste_selection = (SFMPasteSelection*) data;
-    Clipboard* clipboard = sond_treeview_get_clipboard( SOND_TREEVIEW(stvfm) );
+    Clipboard* clipboard = ((SondTreeviewClass*) g_type_class_peek( SOND_TYPE_TREEVIEW ))->clipboard;
 
     g_clear_object( &s_fm_paste_selection->file_dest );
 
@@ -1324,7 +1324,7 @@ sond_treeviewfm_paste_clipboard_foreach( SondTreeview* stv, GtkTreeIter* iter,
     GFileType file_type = G_FILE_TYPE_UNKNOWN;
 
     SFMPasteSelection* s_fm_paste_selection = (SFMPasteSelection*) data;
-    Clipboard* clipboard = sond_treeview_get_clipboard( stv );
+    Clipboard* clipboard = ((SondTreeviewClass*) g_type_class_peek( SOND_TYPE_TREEVIEW ))->clipboard;
 
     //Namen der Datei holen
     path_source = sond_treeviewfm_get_full_path( SOND_TREEVIEWFM(stv), iter );
@@ -1454,7 +1454,7 @@ sond_treeviewfm_paste_clipboard( SondTreeviewFM* stvfm, gboolean kind, gchar** e
     gboolean expanded = FALSE;
     Clipboard* clipboard = NULL;
 
-    clipboard = sond_treeview_get_clipboard( SOND_TREEVIEW(stvfm) );
+    clipboard = ((SondTreeviewClass*) g_type_class_peek( SOND_TYPE_TREEVIEW ))->clipboard;
 
     if ( clipboard->arr_ref->len == 0 ) return 0;
 
@@ -1500,13 +1500,13 @@ sond_treeviewfm_paste_clipboard( SondTreeviewFM* stvfm, gboolean kind, gchar** e
     SFMPasteSelection s_fm_paste_selection = { file_parent, NULL,
             &iter_cursor, kind, expanded, FALSE };
 
-    rc = sond_treeview_clipboard_foreach( SOND_TREEVIEW(stvfm),
-            sond_treeviewfm_paste_clipboard_foreach, (gpointer) &s_fm_paste_selection, errmsg );
+    rc = sond_treeview_clipboard_foreach( sond_treeviewfm_paste_clipboard_foreach,
+            (gpointer) &s_fm_paste_selection, errmsg );
     g_object_unref( file_parent );
     if ( rc == -1 )
     {
         gtk_tree_iter_free( s_fm_paste_selection.iter_cursor );
-        ERROR_SOND( "sond_treeview_clipboard_foreach" )
+        ERROR_S
     }
 
     //Wenn in nicht ausgeklapptes Verzeichnis etwas eingefügt wurde und
@@ -1597,7 +1597,7 @@ sond_treeviewfm_selection_loeschen( SondTreeviewFM* stvfm, gchar** errmsg )
 
     rc = sond_treeview_selection_foreach( SOND_TREEVIEW(stvfm),
             sond_treeviewfm_foreach_loeschen, NULL, errmsg );
-    if ( rc == -1 ) ERROR_SOND( "sond_treeview_clipboard_foreach" )
+    if ( rc == -1 ) ERROR_S
 
     return 0;
 }

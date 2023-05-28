@@ -34,8 +34,6 @@ void sond_treeview_set_id( SondTreeview*, gint );
 
 gint sond_treeview_get_id( SondTreeview* );
 
-Clipboard* sond_treeview_get_clipboard( SondTreeview* );
-
 GtkCellRenderer* sond_treeview_get_cell_renderer_icon( SondTreeview* );
 
 GtkCellRenderer* sond_treeview_get_cell_renderer_text( SondTreeview* );
@@ -54,7 +52,7 @@ GPtrArray* sond_treeview_selection_get_refs( SondTreeview* );
 
 void sond_treeview_copy_or_cut_selection( SondTreeview*, gboolean );
 
-gint sond_treeview_clipboard_foreach( SondTreeview*, gint (*)
+gint sond_treeview_clipboard_foreach( gint (*)
         ( SondTreeview*, GtkTreeIter*, gpointer, gchar** ), gpointer, gchar** );
 
 gint sond_treeview_selection_foreach( SondTreeview*, gint (*)
