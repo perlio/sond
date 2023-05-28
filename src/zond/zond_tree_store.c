@@ -1510,6 +1510,12 @@ zond_tree_store_get_root_id( ZondTreeStore* tree_store )
 }
 
 
+GNode*
+zond_tree_store_get_root_node( GtkTreeIter* iter )
+{
+    return ((RowData*) G_NODE(iter->user_data)->data)->tree_store->priv->root;
+}
+
 GList*
 zond_tree_store_get_linked_nodes( GtkTreeIter* iter )
 {

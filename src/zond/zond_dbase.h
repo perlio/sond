@@ -108,7 +108,7 @@ gint zond_dbase_set_link( ZondDBase*, const gint, const gint, const gchar*,
 
 gint zond_dbase_check_link( ZondDBase*, Baum, gint, gchar** );
 
-gint zond_dbase_get_link( ZondDBase*, gint*, Baum*, gint*, gchar**, Baum*, gint*,
+gint zond_dbase_get_link( ZondDBase*, gint, Baum*, gint*, gchar**, Baum*, gint*,
         gchar** );
 
 gint zond_dbase_remove_link( ZondDBase*, const gint, const gint, gchar** );

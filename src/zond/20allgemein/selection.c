@@ -54,7 +54,7 @@ selection_anbinden_zu_baum( Projekt* zond, GtkTreeIter* iter, gboolean kind,
         node_id_new = g_array_index( arr_new_nodes, gint, i );
 
         //datei in baum_inhalt einfügen
-        rc = treeviews_db_to_baum_rec( zond, FALSE, BAUM_INHALT, node_id_new,
+        rc = treeviews_load_node( zond, FALSE, BAUM_INHALT, node_id_new,
                 ((!iter && kind) ? NULL : &iter_loop), kind, &iter_new, errmsg );
         if ( rc ) ERROR_S_VAL( NULL )
 

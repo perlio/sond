@@ -1866,7 +1866,7 @@ zond_dbase_check_link( ZondDBase* zond_dbase, Baum baum, gint node_id, gchar** e
 
 
 gint
-zond_dbase_get_link( ZondDBase* zond_dbase, gint* ID_start, Baum* baum,
+zond_dbase_get_link( ZondDBase* zond_dbase, gint ID, Baum* baum,
         gint* node_id, gchar** project, Baum* baum_target, gint* node_id_target,
         gchar** errmsg )
 {
@@ -1875,14 +1875,14 @@ zond_dbase_get_link( ZondDBase* zond_dbase, gint* ID_start, Baum* baum,
 
     const gchar* sql[] = {
     //...
-        "SELECT ID, baum_id, node_id, projekt_target, baum_id_target, node_id_target FROM links "
-            "WHERE ID>=?1 ORDER BY ID asc;"
+        "SELECT baum_id, node_id, projekt_target, baum_id_target, node_id_target FROM links "
+            "WHERE ID=?1;"
     };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
     if ( rc ) ERROR_SOND( "zond_dbase_prepare" )
 
-    rc = sqlite3_bind_int( stmt[0], 1, *ID_start );
+    rc = sqlite3_bind_int( stmt[0], 1, ID );
     if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (node_id)" )
 
     rc = sqlite3_step( stmt[0] );
@@ -1890,12 +1890,11 @@ zond_dbase_get_link( ZondDBase* zond_dbase, gint* ID_start, Baum* baum,
 
     if ( rc == SQLITE_DONE ) return 1;
 
-    *ID_start = sqlite3_column_int( stmt[0], 0 );
-    *baum = sqlite3_column_int( stmt[0], 1 );
-    *node_id = sqlite3_column_int( stmt[0], 2 );
-    *project = g_strdup( (const gchar*) sqlite3_column_text( stmt[0], 3 ) );
-    *baum_target = sqlite3_column_int( stmt[0], 4 );
-    *node_id_target = sqlite3_column_int( stmt[0], 5 );
+    if ( baum ) *baum = sqlite3_column_int( stmt[0], 0 );
+    if ( node_id ) *node_id = sqlite3_column_int( stmt[0], 1 );
+    if ( project ) *project = g_strdup( (const gchar*) sqlite3_column_text( stmt[0], 2 ) );
+    if ( baum_target ) *baum_target = sqlite3_column_int( stmt[0], 3 );
+    if ( node_id_target ) *node_id_target = sqlite3_column_int( stmt[0], 4 );
 
     return 0;
 }
