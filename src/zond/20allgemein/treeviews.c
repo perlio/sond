@@ -1025,7 +1025,7 @@ treeviews_paste_clipboard_as_link( Projekt* zond, Baum baum_dest, gint anchor_id
             treeviews_paste_clipboard_as_link_foreach, &s_selection, errmsg );
     if ( rc == -1 ) ERROR_S
 
-    if ( iter_anchor.stamp ) sond_treeview_expand_row( zond->treeview[baum_dest], &iter_anchor );
+    if ( iter_anchor.stamp && kind ) sond_treeview_expand_row( zond->treeview[baum_dest], &iter_anchor );
     sond_treeview_set_cursor( zond->treeview[baum_dest], s_selection.iter_dest );
 
     return 0;
