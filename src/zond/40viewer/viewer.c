@@ -976,6 +976,8 @@ cb_viewer_text_search( GtkWidget* widget, gpointer data )
 
     PdfViewer* pv = (PdfViewer*) data;
 
+TextOcc text_occ = pv->text_occ;
+
     //dokument durchsucht und kein Fund: return
     if ( pv->text_occ.not_found == TRUE )
     {
@@ -1012,6 +1014,11 @@ cb_viewer_text_search( GtkWidget* widget, gpointer data )
                 pdf_pos.index = EOP;
                 if ( pv->text_occ.page_act == 0 ) pdf_pos.seite = pv->arr_pages->len - 1;
             }
+
+            //damit festgestellt werden kann, ob einmal durch...
+            //pdf_punkt sonst 0
+            pdf_punkt.seite = pdf_pos.seite;
+            pdf_punkt.punkt.y = (float) pdf_pos.index;
         }
     }
     else //kein Fund angezeigt: pdf_pos ermitteln
@@ -1133,8 +1140,9 @@ cb_viewer_text_search( GtkWidget* widget, gpointer data )
         if ( dir == 1 ) pdf_pos.index = 0;
         else pdf_pos.index = EOP;
 
+        //Überlauf
         if ( dir == 1 && pdf_pos.seite == pv->arr_pages->len ) pdf_pos.seite = 0;
-        else if ( dir == -1 && pdf_pos.seite == 0 ) pdf_pos.seite = pv->arr_pages->len - 1;
+        else if ( dir == -1 && pdf_pos.seite == -1 ) pdf_pos.seite = pv->arr_pages->len - 1;
 
         if ( pdf_pos.seite == pdf_punkt.seite ) //Ausgangsseite wieder erreicht?
         {
