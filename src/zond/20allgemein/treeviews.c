@@ -1144,14 +1144,14 @@ treeviews_clipboard_kopieren_foreach( SondTreeview* tree_view, GtkTreeIter* iter
 
 gint
 treeviews_clipboard_kopieren( Projekt* zond, Baum baum_dest, gint anchor_id,
-        gboolean kind, GtkTreeIter* iter, gchar** errmsg )
+        gboolean kind, GtkTreeIter* iter_anchor, gchar** errmsg )
 {
     gint rc = 0;
     GtkTreeIter iter_origin = { 0 };
-    SSelectionKopieren s_selection = { zond, anchor_id, kind, iter };
+    SSelectionKopieren s_selection = { zond, anchor_id, kind, iter_anchor };
 
-    //falls in existierenden iter eigenfügt wird: diesen merken
-    if ( kind && iter ) iter_origin = *iter;
+    //falls in existierenden iter_anchor eigenfügt wird: diesen merken
+    if ( kind && iter_anchor ) iter_origin = *iter_anchor;
 
     rc = sond_treeview_clipboard_foreach( treeviews_clipboard_kopieren_foreach,
             &s_selection, errmsg );
@@ -1170,7 +1170,6 @@ typedef struct {
     GtkTreeIter* iter_anchor;
     gint anchor_id;
     gboolean child;
-    GtkTreeIter* iter_new;
 } SSelectionVerschieben;
 
 
@@ -1245,10 +1244,11 @@ treeviews_clipboard_verschieben( Projekt* zond, GtkTreeIter* iter_anchor, gint a
 {
     gint rc = 0;
     Clipboard* clipboard = NULL;
-    GtkTreeIter iter_new = { 0 };
+    GtkTreeIter iter_origin = { 0 };
 
-    SSelectionVerschieben s_selection = { zond, iter_anchor, anchor_id, kind, &iter_new };
+    SSelectionVerschieben s_selection = { zond, iter_anchor, anchor_id, kind };
 
+    if ( kind && iter_anchor ) iter_origin = *iter_anchor;
     rc = sond_treeview_clipboard_foreach( treeviews_clipboard_verschieben_foreach, &s_selection, errmsg );
     if ( rc == -1 ) ERROR_S
 
@@ -1259,11 +1259,8 @@ treeviews_clipboard_verschieben( Projekt* zond, GtkTreeIter* iter_anchor, gint a
 
     gtk_widget_queue_draw( GTK_WIDGET(zond->treeview[zond->baum_active]) );
 
-    if ( iter_new.stamp ) //nur wenn iter eingefügt wurde
-    {
-        if ( kind && anchor_id ) sond_treeview_expand_row( zond->treeview[zond->baum_active], iter_anchor );
-        sond_treeview_set_cursor( zond->treeview[zond->baum_active], &iter_new );
-    }
+    if ( kind && iter_origin.stamp ) sond_treeview_expand_row( zond->treeview[zond->baum_active], &iter_origin );
+    sond_treeview_set_cursor( zond->treeview[zond->baum_active], s_selection.iter_anchor );
 
     return 0;
 }
