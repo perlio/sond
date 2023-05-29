@@ -47,6 +47,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../20allgemein/project.h"
 #include "../20allgemein/export.h"
 #include "../20allgemein/treeviews.h"
+#include "../20allgemein/oeffnen.h"
 
 #include "../40viewer/document.h"
 
@@ -432,7 +433,7 @@ cb_punkt_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
     return;
 }
 
-
+/*
 //Knoten-Text anpassen
 static void
 cb_item_text_anbindung( GtkMenuItem* item, gpointer data )
@@ -453,6 +454,28 @@ cb_item_text_anbindung( GtkMenuItem* item, gpointer data )
 
     return;
 }
+*/
+
+
+static void
+cb_item_datei_oeffnen( GtkMenuItem* item, gpointer data )
+{
+    gint rc = 0;
+    gchar* errmsg = NULL;
+    Projekt* zond = (Projekt*) data;
+
+    rc = oeffnen_actual_node( zond, &errmsg );
+    if ( rc == -1 )
+    {
+        display_message( zond->app_window, "Datei öffnen fehlgeschlagen:\n\n",
+                errmsg, NULL );
+        g_free( errmsg );
+    }
+
+
+    return;
+}
+
 
 static void
 cb_change_icon_item( GtkMenuItem* item, gpointer data )
@@ -890,12 +913,12 @@ init_menu( Projekt* zond )
             punkterzeugenmenu );
 
     //node_text anpassen (rel_path/Anbindung)
-    GtkWidget* item_text_anbindung = gtk_menu_item_new_with_label(
-            "Text von Anbindung" );
-    gtk_widget_add_accelerator(item_text_anbindung, "activate", accel_group,
-            GDK_KEY_T, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
-    g_signal_connect( G_OBJECT(item_text_anbindung), "activate",
-            G_CALLBACK(cb_item_text_anbindung), (gpointer) zond );
+    GtkWidget* item_datei_oeffnen = gtk_menu_item_new_with_label(
+            "Datei öffnen" );
+    gtk_widget_add_accelerator(item_datei_oeffnen, "activate", accel_group,
+            GDK_KEY_o, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
+    g_signal_connect( G_OBJECT(item_datei_oeffnen), "activate",
+            G_CALLBACK(cb_item_datei_oeffnen), (gpointer) zond );
 
     //Icons ändern
     GtkWidget* icon_change_item = gtk_menu_item_new_with_label( "Icons" );
@@ -1044,7 +1067,7 @@ init_menu( Projekt* zond )
     gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), sep_struktur2item );
     gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), suchenitem );
     gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), sep_struktur3item );
-    gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), item_text_anbindung );
+    gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), item_datei_oeffnen );
     gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), icon_change_item );
     gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), eingang_item );
 

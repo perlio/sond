@@ -24,6 +24,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "global_types.h"
 #include "../misc.h"
 #include "10init/app_window.h"
+#include "10init/headerbar.h"
+
 #include "20allgemein/oeffnen.h"
 #include "20allgemein/project.h"
 #include "20allgemein/treeviews.h"
@@ -234,8 +236,6 @@ zond_treeview_row_activated( GtkWidget* ztv, GtkTreePath* tp, GtkTreeViewColumn*
 {
     gint rc = 0;
     gchar* errmsg = NULL;
-    gint node_id = 0;
-    Baum baum = KEIN_BAUM;
     GtkTreeIter iter = { 0, };
 
     Projekt* zond = (Projekt*) user_data;
@@ -243,10 +243,7 @@ zond_treeview_row_activated( GtkWidget* ztv, GtkTreePath* tp, GtkTreeViewColumn*
     if ( !gtk_tree_model_get_iter( gtk_tree_view_get_model( GTK_TREE_VIEW(ztv) ),
             &iter, tp ) ) return;
 
-    rc = treeviews_get_baum_and_node_id( zond, &iter, &baum, &node_id );
-    if ( rc ) return;
-
-    rc = oeffnen_node( zond, baum, node_id, &errmsg );
+    rc = oeffnen_node( zond, &iter, &errmsg );
     if ( rc )
     {
         display_message( zond->app_window, "Fehler beim Öffnen Knoten:\n\n", errmsg, NULL );

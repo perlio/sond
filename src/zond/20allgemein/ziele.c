@@ -148,6 +148,7 @@ ziele_einfuegen_anbindung( Projekt* zond, const gchar* rel_path, gint anchor_id,
     gint rc = 0;
     gint new_node = 0;
     GtkTreeIter iter_new = { 0, };
+    GtkTreeIter iter_origin = { 0 };
 
     gchar* node_text = NULL;
     if ( anbindung.bis.seite > anbindung.von.seite) node_text =
@@ -172,9 +173,11 @@ ziele_einfuegen_anbindung( Projekt* zond, const gchar* rel_path, gint anchor_id,
     GtkTreeIter* iter = zond_treeview_abfragen_iter( ZOND_TREEVIEW(zond->treeview[BAUM_INHALT]), anchor_id );
     if ( !iter ) ERROR_S_MESSAGE( "node_id nicht gefunden" )
 
-    rc = treeviews_db_to_baum( zond, BAUM_INHALT, new_node, iter, kind, &iter_new,
-            errmsg );
+    iter_origin = *iter;
     gtk_tree_iter_free( iter );
+
+    rc = treeviews_db_to_baum( zond, BAUM_INHALT, new_node, &iter_origin, kind, &iter_new,
+            errmsg );
     if ( rc ) ERROR_ROLLBACK( zond->dbase_zond->zond_dbase_work )
 
     rc = ziele_verschieben_kinder( zond, new_node, anbindung, errmsg );
@@ -183,7 +186,7 @@ ziele_einfuegen_anbindung( Projekt* zond, const gchar* rel_path, gint anchor_id,
     rc = zond_dbase_commit( zond->dbase_zond->zond_dbase_work, errmsg );
     if ( rc ) ERROR_ROLLBACK( zond->dbase_zond->zond_dbase_work )
 
-    sond_treeview_expand_row( zond->treeview[BAUM_INHALT], &iter_new );
+    if ( kind ) sond_treeview_expand_row( zond->treeview[BAUM_INHALT], &iter_origin);
     sond_treeview_set_cursor_on_text_cell( zond->treeview[BAUM_INHALT], &iter_new );
     gtk_widget_grab_focus( GTK_WIDGET(zond->treeview[BAUM_INHALT]) );
 

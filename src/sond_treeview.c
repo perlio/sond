@@ -358,7 +358,7 @@ sond_treeview_test_cursor_descendant( SondTreeview* stv )
 }
 
 
-GPtrArray*
+static GPtrArray*
 sond_treeview_selection_get_refs( SondTreeview* stv )
 {
     GList* selected = gtk_tree_selection_get_selected_rows(

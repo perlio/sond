@@ -20,6 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <mupdf/fitz.h>
 
 #include "../../misc.h"
+#include "../../sond_treeview.h"
 
 #include "../zond_pdf_document.h"
 
@@ -382,22 +383,26 @@ oeffnen_datei( Projekt* zond, const gchar* rel_path, Anbindung* anbindung,
 
 
 gint
-oeffnen_node( Projekt* zond, Baum baum, gint node_id, gchar** errmsg )
+oeffnen_node( Projekt* zond, GtkTreeIter* iter, gchar** errmsg )
 {
     gint rc = 0;
     gchar* rel_path = NULL;
     Anbindung* anbindung = NULL;
     PdfPos pos_pdf = { 0 };
+    Baum baum = KEIN_BAUM;
+    gint node_id = 0;
+
+    rc = treeviews_get_baum_and_node_id( zond, iter, &baum, &node_id );
+    if ( rc ) return 0;
 
     rc = treeviews_get_rel_path_and_anbindung( zond, baum, node_id, &rel_path,
             &anbindung, errmsg );
-    if ( rc == -1 ) ERROR_SOND( "abfragen_rel_path_and_anbindung" )
+    if ( rc == -1 ) ERROR_S
 
     if ( rc == 2 && baum == BAUM_AUSWERTUNG )
     {
         rc = oeffnen_auszug( zond, node_id, errmsg );
         if ( rc ) ERROR_S
-            //_SOND( "oeffnen_auszug" )
 
         return 0;
     }
@@ -434,7 +439,24 @@ oeffnen_node( Projekt* zond, Baum baum, gint node_id, gchar** errmsg )
     rc = oeffnen_datei( zond, rel_path, anbindung, &pos_pdf, errmsg );
     g_free( rel_path );
     g_free( anbindung );
-    if ( rc ) ERROR_SOND( "oeffnen_datei" )
+    if ( rc ) ERROR_S
+
+    return 0;
+}
+
+
+gint
+oeffnen_actual_node( Projekt* zond, gchar** errmsg )
+{
+    GtkTreeIter iter = { 0 };
+    gint rc = 0;
+
+    if ( zond->baum_active == KEIN_BAUM || zond->baum_active == BAUM_FS ) return 0;
+
+    if ( !sond_treeview_get_cursor( zond->treeview[zond->baum_active], &iter ) ) return 0;
+
+    rc = oeffnen_node( zond, &iter, errmsg );
+    if ( rc ) ERROR_S
 
     return 0;
 }
