@@ -1175,6 +1175,7 @@ zond_tree_store_move_node( GtkTreeIter* iter_src, GtkTreeIter* iter_anchor,
     GNode* node_src_parent = NULL;
     GtkTreePath* path = NULL;
     GtkTreeModel* model_src = NULL;
+    GList* list = NULL;
 
     node_src = iter_src->user_data;
     node_src_parent = node_src->parent;
@@ -1182,8 +1183,10 @@ zond_tree_store_move_node( GtkTreeIter* iter_src, GtkTreeIter* iter_anchor,
 
     path = zond_tree_store_get_path( model_src, iter_src );
 
+    //node ausklinken
     g_node_unlink( node_src );
 
+    //und im treeview bekanntgeben
     gtk_tree_model_row_deleted( model_src, path);
 
     if( node_src_parent != G_NODE(ZOND_TREE_STORE(model_src)->priv->root) )
@@ -1202,9 +1205,30 @@ zond_tree_store_move_node( GtkTreeIter* iter_src, GtkTreeIter* iter_anchor,
 
     ((RowData*) node_src->data)->tree_store = ((RowData*) G_NODE(iter_anchor->user_data)->data)->tree_store;
 
+    //jetzt Knoten, die auf ausgelösten Knoten zeigen, löschen
+    list = ((RowData*) node_src->data)->links;
+    while ( list )
+    {
+        GNode* link = NULL;
+        GtkTreeIter iter_link = { 0 };
+
+        link = list->data;
+
+        if ( ((RowData*) link->data)->head_nr <= 0 )
+        {
+            iter_link.stamp = ((RowData*) node_src->data)->tree_store->priv->stamp;
+            iter_link.user_data = link;
+
+            zond_tree_store_remove( &iter_link );
+        }
+        list = list->next;
+    }
+
+    //jetzt Knoten wieder einfügen
     if ( child ) g_node_insert_after( G_NODE(iter_anchor->user_data), NULL, node_src );
     else g_node_insert_after( G_NODE(iter_anchor->user_data)->parent, G_NODE(iter_anchor->user_data), node_src );
 
+    //im treeview bekannt geben
     zond_tree_store_walk_tree( node_src );
 
     if ( iter_new )

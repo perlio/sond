@@ -8,8 +8,9 @@ cp bin/viewer.exe release/bin/viewer.exe
 mkdir release/logs
 
 ldd release/bin/zond.exe | grep '\/mingw.*\.dll' -o | xargs -I{} cp "{}" release/bin
-cp /mingw64/bin/gspawn-win64-helper.exe release/bin
-cp /mingw64/bin/gspawn-win64-helper-console.exe release/bin
+# cp /mingw64/bin/gspawn-win64-helper.exe release/bin
+# cp /mingw64/bin/gspawn-win64-helper-console.exe release/bin
+cp /mingw64/bin/* release/bin
 
 mkdir -p release/share/glib-2.0/schemas
 cp /mingw64/share/glib-2.0/schemas/gschemas.compiled release/share/glib-2.0/schemas

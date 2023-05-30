@@ -1250,12 +1250,14 @@ treeviews_clipboard_verschieben_foreach( SondTreeview* tree_view, GtkTreeIter* i
             node_id, id_parent, id_older_sibling, errmsg );
     if ( rc ) ERROR_S
 
+    zond_tree_store_move_node( iter, s_selection->iter_anchor, s_selection->child, &iter_new );
+/*
     zond_tree_store_remove( iter );
 
     rc = treeviews_load_node( s_selection->zond, FALSE, baum_anchor, node_id,
             s_selection->iter_anchor, s_selection->child, &iter_new, errmsg );
     if ( rc ) ERROR_S
-
+*/
     s_selection->child = FALSE;
     s_selection->anchor_id = node_id;
     *(s_selection->iter_anchor) = iter_new;
