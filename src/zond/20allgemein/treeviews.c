@@ -64,21 +64,35 @@ treeviews_hat_vorfahre_datei( Projekt* zond, Baum baum, gint anchor_id, gboolean
 }
 
 
+static Baum
+treeviews_get_baum_iter( Projekt* zond, GtkTreeIter* iter )
+{
+    ZondTreeStore* tree_store = NULL;
+
+    tree_store = zond_tree_store_get_tree_store( iter );
+
+    if ( tree_store == ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]) )) ) return BAUM_INHALT;
+    else if ( tree_store == ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_AUSWERTUNG]) )) ) return BAUM_AUSWERTUNG;
+
+    return KEIN_BAUM;
+}
+
+
 gint
 treeviews_get_baum_and_node_id( Projekt* zond, GtkTreeIter* iter, Baum* baum,
         gint* node_id )
 {
+    Baum baum_target = KEIN_BAUM;
     GtkTreeIter iter_target = { 0, };
-    ZondTreeStore* tree_store = NULL;
 
     zond_tree_store_get_iter_target( iter, &iter_target );
-    tree_store = zond_tree_store_get_tree_store( &iter_target );
+    baum_target = treeviews_get_baum_iter( zond, &iter_target );
 
-    if ( tree_store == ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]) )) ) *baum = BAUM_INHALT;
-    else if ( tree_store == ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_AUSWERTUNG]) )) ) *baum = BAUM_AUSWERTUNG;
-    else return 1;
+    if ( baum_target == KEIN_BAUM ) return 1;
+    else *baum = baum_target;
 
-    gtk_tree_model_get( GTK_TREE_MODEL(tree_store), &iter_target, 2, node_id, -1 );
+    gtk_tree_model_get( GTK_TREE_MODEL(zond_tree_store_get_tree_store( &iter_target )),
+            &iter_target, 2, node_id, -1 );
 
     return 0;
 }
@@ -1265,4 +1279,33 @@ treeviews_clipboard_verschieben( Projekt* zond, GtkTreeIter* iter_anchor, gint a
     return 0;
 }
 
+
+static void
+treeviews_jump_to_iter( Projekt* zond, GtkTreeIter* iter )
+{
+    Baum baum_target = KEIN_BAUM;
+
+    baum_target = treeviews_get_baum_iter( zond, iter );
+
+    gtk_widget_grab_focus( GTK_WIDGET(zond->treeview[baum_target]) );
+
+    sond_treeview_set_cursor( zond->treeview[baum_target], iter );
+
+    return;
+}
+
+
+void
+treeviews_jump_to_link_target( Projekt* zond )
+{
+    GtkTreeIter iter = { 0 };
+    GtkTreeIter iter_target = { 0 };
+
+    sond_treeview_get_cursor( zond->treeview[zond->baum_active], &iter );
+    zond_tree_store_get_iter_target( &iter, &iter_target );
+
+    treeviews_jump_to_iter( zond, &iter_target );
+
+    return;
+}
 

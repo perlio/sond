@@ -976,8 +976,6 @@ cb_viewer_text_search( GtkWidget* widget, gpointer data )
 
     PdfViewer* pv = (PdfViewer*) data;
 
-TextOcc text_occ = pv->text_occ;
-
     //dokument durchsucht und kein Fund: return
     if ( pv->text_occ.not_found == TRUE )
     {

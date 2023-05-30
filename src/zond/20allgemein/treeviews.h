@@ -47,4 +47,6 @@ gint treeviews_clipboard_kopieren( Projekt*, Baum, gint, gboolean, GtkTreeIter*,
 
 gint treeviews_clipboard_verschieben( Projekt*, GtkTreeIter*, gint, gboolean, gchar** );
 
+void treeviews_jump_to_link_target( Projekt* );
+
 #endif // TREEVIEWS_H_INCLUDED

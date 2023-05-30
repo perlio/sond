@@ -641,6 +641,17 @@ cb_suchen_text( GtkMenuItem* item, gpointer data )
 }
 
 
+static void
+cb_jumpitem( GtkMenuItem* item, gpointer data )
+{
+    Projekt* zond = (Projekt*) data;
+
+    treeviews_jump_to_link_target( zond );
+
+    return;
+}
+
+
 /*  Callbacks des Menus "Ansicht" */
 
 static void
@@ -1000,10 +1011,7 @@ init_menu( Projekt* zond )
             (gpointer) zond );
 
     //Link Einfügen
-    GtkWidget* pasteitem_link = gtk_menu_item_new_with_label("Link");
-
-    //abgeklemmt...
-    //gtk_widget_set_sensitive( pasteitem_link, FALSE );
+    GtkWidget* pasteitem_link = gtk_menu_item_new_with_label("Als Link einfügen");
 
     GtkWidget* pastemenu_link = gtk_menu_new();
     GtkWidget* alspunkt_einfuegenitem_link = gtk_menu_item_new_with_label(
@@ -1050,8 +1058,14 @@ init_menu( Projekt* zond )
 
     GtkWidget* suchenitem = gtk_menu_item_new_with_label(
             "Suchen");
-    GtkWidget* sep_struktur3item = gtk_separator_menu_item_new();
     g_signal_connect( suchenitem, "activate", G_CALLBACK(cb_suchen_text), zond );
+
+    GtkWidget* jumpitem = gtk_menu_item_new_with_label( "Zu Linkziel springen" );
+    gtk_widget_add_accelerator(jumpitem, "activate", accel_group,
+            GDK_KEY_j, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
+    g_signal_connect( jumpitem, "activate", G_CALLBACK(cb_jumpitem), zond );
+
+    GtkWidget* sep_struktur3item = gtk_separator_menu_item_new();
 
     //Menus "Bearbeiten" anbinden
 //Menus in dateienmenu
@@ -1066,6 +1080,7 @@ init_menu( Projekt* zond )
     gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), anbindung_entfernenitem );
     gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), sep_struktur2item );
     gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), suchenitem );
+    gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), jumpitem );
     gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), sep_struktur3item );
     gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), item_datei_oeffnen );
     gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), icon_change_item );
