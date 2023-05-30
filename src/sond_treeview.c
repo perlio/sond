@@ -61,6 +61,8 @@ sond_treeview_grey_cut_cell( SondTreeview* stv, GtkTreeIter* iter )
         for ( gint i = 0; i < clipboard->arr_ref->len; i++ )
         {
             path_sel = gtk_tree_row_reference_get_path( g_ptr_array_index( clipboard->arr_ref, i ) );
+            if ( !path_sel ) continue;
+
             enthalten = !gtk_tree_path_compare( path, path_sel );
             gtk_tree_path_free( path_sel );
             if ( enthalten ) break;
@@ -388,7 +390,7 @@ sond_treeview_copy_or_cut_selection( SondTreeview* stv, gboolean ausschneiden )
     GPtrArray* refs = sond_treeview_selection_get_refs( stv );
     if ( !refs ) return;
 
-    //wenn ausgeschnitten war, alle rows wieder normal zeichnen
+    //wenn ausschneiden, alle rows ausgrauen
     if ( clipboard->ausschneiden )
             gtk_widget_queue_draw( GTK_WIDGET(clipboard->tree_view) );
 
