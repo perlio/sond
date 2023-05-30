@@ -646,7 +646,8 @@ treeviews_insert_node( Projekt* zond, Baum baum_active, gboolean child, gchar** 
 
 
 static gint
-treeviews_db_to_baum_link( Projekt* zond, Baum baum, gint node_id, gchar** errmsg )
+treeviews_db_to_baum_link( Projekt* zond, Baum baum, gint node_id,
+        GtkTreeIter* iter_new, gchar** errmsg )
 {
     gint rc = 0;
     gint ID_link = 0;
@@ -656,10 +657,11 @@ treeviews_db_to_baum_link( Projekt* zond, Baum baum, gint node_id, gchar** errms
     GtkTreeIter* iter_target = NULL;
     GtkTreeIter iter_anchor = { 0 };
     gboolean child = FALSE;
+    GtkTreeIter iter_new_intern = { 0 };
 
     ID_link = zond_dbase_check_link( zond->dbase_zond->zond_dbase_work, baum, node_id, errmsg );
     if ( ID_link == -1 ) ERROR_S
-    else if ( ID_link == 0 ) return 0; //halt kein link
+    else if ( ID_link == 0 ) return 1; //halt kein link
 
     //wenn link:
     rc = zond_dbase_get_link( zond->dbase_zond->zond_dbase_work, ID_link, NULL, NULL,
@@ -695,9 +697,11 @@ treeviews_db_to_baum_link( Projekt* zond, Baum baum, gint node_id, gchar** errms
 
     zond_tree_store_insert_link( iter_target, node_id, zond_tree_store_get_tree_store( &iter_anchor ),
             ((GNode*) (iter_anchor.user_data) == zond_tree_store_get_root_node( &iter_anchor )) ? NULL :
-             &iter_anchor, child, NULL );
+             &iter_anchor, child, &iter_new_intern );
 
     gtk_tree_iter_free( iter_target );
+
+    if ( iter_new ) *iter_new = iter_new_intern;
 
     return 0;
 }
@@ -705,17 +709,17 @@ treeviews_db_to_baum_link( Projekt* zond, Baum baum, gint node_id, gchar** errms
 
 static gint
 treeviews_db_to_baum_rec_links( Projekt* zond, gboolean with_younger_siblings,
-        Baum baum, gint node_id, gchar** errmsg )
+        Baum baum, gint node_id, GtkTreeIter* iter_new, gchar** errmsg )
 {
-    gint rc = 0;
     gint first_child_id = 0;
-    gint younger_sibling_id = 0;
 
     if ( node_id )
     {
-        rc = treeviews_db_to_baum_link( zond, baum, node_id, errmsg );
-        if ( rc == 1 ) return 0;
-        else if ( rc == -1 ) ERROR_S
+        gint rc = 0;
+
+        rc = treeviews_db_to_baum_link( zond, baum, node_id, iter_new, errmsg );
+        if ( rc == -1 ) ERROR_S
+        //else if ( rc == 1 ) -> nix machen, weiter laufen lassen
     }
 
     //Prüfen, ob Kind- oder Geschwisterknoten vorhanden
@@ -726,12 +730,14 @@ treeviews_db_to_baum_rec_links( Projekt* zond, gboolean with_younger_siblings,
         gint rc = 0;
 
         rc = treeviews_db_to_baum_rec_links( zond, TRUE, baum, first_child_id,
-                errmsg );
+                NULL, errmsg );
         if ( rc ) ERROR_S
     }
 
     if ( with_younger_siblings )
     {
+        gint younger_sibling_id = 0;
+
         younger_sibling_id = zond_dbase_get_younger_sibling( zond->dbase_zond->zond_dbase_work, baum, node_id, errmsg );
         if ( younger_sibling_id < 0 ) ERROR_S
         else if ( younger_sibling_id > 0 )
@@ -739,7 +745,7 @@ treeviews_db_to_baum_rec_links( Projekt* zond, gboolean with_younger_siblings,
             gint rc = 0;
 
             rc = treeviews_db_to_baum_rec_links( zond, TRUE, baum,
-                    younger_sibling_id, errmsg );
+                    younger_sibling_id, NULL, errmsg );
             if ( rc ) ERROR_S
         }
     }
@@ -842,13 +848,20 @@ treeviews_load_node( Projekt* zond, gboolean with_younger_siblings,
         GtkTreeIter* iter_new, gchar** errmsg )
 {
     gint rc = 0;
+    GtkTreeIter iter_node = { 0 };
+    GtkTreeIter iter_link = { 0 };
+
     rc = treeviews_db_to_baum_rec( zond, with_younger_siblings, baum, node_id,
-            iter_anchor, child, iter_new, errmsg );
+            iter_anchor, child, &iter_node, errmsg );
     if ( rc ) ERROR_S
 
+    if ( iter_new ) *iter_new = iter_node;
+
     rc = treeviews_db_to_baum_rec_links( zond, with_younger_siblings, baum,
-            node_id, errmsg );
+            node_id, &iter_link, errmsg );
     if ( rc ) ERROR_S
+
+    if ( iter_link.stamp && iter_new ) *iter_new = iter_link;
 
     return 0;
 }
@@ -1131,7 +1144,7 @@ treeviews_clipboard_kopieren_foreach( SondTreeview* tree_view, GtkTreeIter* iter
     SSelectionKopieren* s_selection = (SSelectionKopieren*) data;
 
     rc = treeviews_get_baum_and_node_id( s_selection->zond, iter, &baum, &node_id );
-    if ( rc ) ERROR_S_MESSAGE( "Bei treeviews_get_baum_and_node_id:\nKein Baum gefunden" )
+    if ( rc ) ERROR_S_MESSAGE( "Bei Aufruf treeviews_get_baum_and_node_id:\nKein Baum gefunden" )
 
     rc = zond_dbase_begin( s_selection->zond->dbase_zond->zond_dbase_work, errmsg );
     if ( rc ) ERROR_S
