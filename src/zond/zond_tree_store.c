@@ -992,11 +992,11 @@ zond_tree_store_load_node( GNode* node_parent, GNode* node_parent_target )
 {
     gint pos = 0;
     GNode* node_target_child = NULL;
-
-    //Falls node_parent_target auf
+/*
+    //Falls node_parent_target auf head_link zeigt
     if ( ((RowData*) node_parent_target->data)->head_nr > 0 )
             node_parent_target = ((RowData*) node_parent_target->data)->target;
-
+*/
     node_target_child = node_parent_target->children;
 
     while ( node_target_child )

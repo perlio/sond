@@ -337,56 +337,10 @@ treeviews_selection_loeschen_foreach( SondTreeview* tree_view, GtkTreeIter* iter
     if ( !zond_tree_store_is_link( iter ) )
     {
         gint rc = 0;
-        GList* list_links = NULL;
         gboolean response = FALSE;
 
         rc = treeviews_get_baum_and_node_id( s_selection->zond, iter, &baum, &node_id );
         if ( rc ) return 0;
-
-        list_links = zond_tree_store_get_linked_nodes( iter );
-
-        if ( list_links )
-        {
-            GList* ptr = NULL;
-
-            ptr = list_links;
-            do
-            {
-                GtkTreeIter iter_link = { 0 };
-
-                iter_link.user_data = ptr->data; //stamp ist in der Funktion egal...
-                head_nr = zond_tree_store_get_link_head_nr( &iter_link );
-                if ( head_nr )
-                {
-                    Baum baum_link = KEIN_BAUM;
-                    ZondTreeStore* tree_store = NULL;
-
-                    tree_store = zond_tree_store_get_tree_store( &iter_link );
-                    if ( tree_store == ZOND_TREE_STORE(gtk_tree_view_get_model(
-                            GTK_TREE_VIEW(s_selection->zond->treeview[BAUM_INHALT]) )) )
-                            baum_link = BAUM_INHALT;
-                    else if ( tree_store == ZOND_TREE_STORE(gtk_tree_view_get_model(
-                            GTK_TREE_VIEW(s_selection->zond->treeview[BAUM_AUSWERTUNG]) )) )
-                            baum_link = BAUM_AUSWERTUNG;
-                    else return 0; //???
-
-                    rc = zond_dbase_begin( s_selection->zond->dbase_zond->zond_dbase_work, errmsg );
-                    if ( rc ) ERROR_S
-
-                    rc = zond_dbase_remove_node( s_selection->zond->dbase_zond->zond_dbase_work, baum_link, head_nr, errmsg );
-                    if ( rc ) ERROR_ROLLBACK( s_selection->zond->dbase_zond->zond_dbase_work )
-
-                    rc = zond_dbase_remove_link( s_selection->zond->dbase_zond->zond_dbase_work, baum_link, head_nr, errmsg );
-                    if ( rc ) ERROR_ROLLBACK( s_selection->zond->dbase_zond->zond_dbase_work )
-
-                    rc = zond_dbase_commit( s_selection->zond->dbase_zond->zond_dbase_work, errmsg );
-                    if ( rc ) ERROR_ROLLBACK( s_selection->zond->dbase_zond->zond_dbase_work )
-                }
-
-            } while ( (ptr = ptr->next) );
-
-//            g_list_free( list_links );
-        }
 
         if ( node_id == s_selection->zond->node_id_extra )
                 g_signal_emit_by_name( s_selection->zond->textview_window,
@@ -394,6 +348,8 @@ treeviews_selection_loeschen_foreach( SondTreeview* tree_view, GtkTreeIter* iter
 
         rc = zond_dbase_remove_node( s_selection->zond->dbase_zond->zond_dbase_work, baum, node_id, errmsg );
         if ( rc ) ERROR_S
+
+        zond_tree_store_remove( iter );
     }//... Gesamt-Links
     else if ( (head_nr = zond_tree_store_get_link_head_nr( iter )) )
     {
@@ -412,10 +368,10 @@ treeviews_selection_loeschen_foreach( SondTreeview* tree_view, GtkTreeIter* iter
 
         rc = zond_dbase_commit( s_selection->zond->dbase_zond->zond_dbase_work, errmsg );
         if ( rc ) ERROR_ROLLBACK( s_selection->zond->dbase_zond->zond_dbase_work )
+
+        zond_tree_store_remove( iter );
     }
     //else: link, aber nicht head->nix machen
-
-    zond_tree_store_remove( iter );
 
     return 0;
 }
@@ -999,12 +955,13 @@ treeviews_paste_clipboard_as_link_foreach( SondTreeview* tree_view, GtkTreeIter*
     Baum baum = KEIN_BAUM;
     gint node_id = 0;
     ZondTreeStore* tree_store_dest = NULL;
+    GtkTreeIter iter_target = { 0 };
     GtkTreeIter iter_new = { 0, };
 
     SSelectionLink* s_selection = (SSelectionLink*) data;
 
-    //anchor, im dest-baum
     //node ID, auf den link zeigen soll
+    //falls link im clipboard, baum und node_id des target ermitteln
     rc = treeviews_get_baum_and_node_id( s_selection->zond, iter, &baum, &node_id );
     if ( rc ) ERROR_S_MESSAGE( "Bei treeviews_get_baum_and_node_id:\nKein Baum gefunden" )
 
@@ -1025,7 +982,10 @@ treeviews_paste_clipboard_as_link_foreach( SondTreeview* tree_view, GtkTreeIter*
     if ( rc ) ERROR_ROLLBACK( s_selection->zond->dbase_zond->zond_dbase_work )
 
     tree_store_dest = ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(s_selection->zond->treeview[s_selection->baum_dest]) ));
-    zond_tree_store_insert_link( iter, node_new, tree_store_dest,
+
+    //falls link im clipboard: iter_target ermitteln, damit nicht link auf link zeigt
+    zond_tree_store_get_iter_target( iter, &iter_target );
+    zond_tree_store_insert_link( &iter_target, node_new, tree_store_dest,
             (s_selection->anchor_id) ? s_selection->iter_dest : NULL, s_selection->kind, &iter_new );
 
     *(s_selection->iter_dest) = iter_new;
@@ -1143,13 +1103,8 @@ treeviews_clipboard_kopieren_foreach( SondTreeview* tree_view, GtkTreeIter* iter
 
     SSelectionKopieren* s_selection = (SSelectionKopieren*) data;
 
-    if ( (node_id = zond_tree_store_get_link_head_nr( iter )) <= 0 )
-    {
-        gint rc = 0;
-
-        rc = treeviews_get_baum_and_node_id( s_selection->zond, iter, &baum, &node_id );
-        if ( rc ) ERROR_S_MESSAGE( "Bei Aufruf treeviews_get_baum_and_node_id:\nKein Baum gefunden" )
-    }
+    rc = treeviews_get_baum_and_node_id( s_selection->zond, iter, &baum, &node_id );
+    if ( rc ) ERROR_S_MESSAGE( "Bei Aufruf treeviews_get_baum_and_node_id:\nKein Baum gefunden" )
 
     rc = zond_dbase_begin( s_selection->zond->dbase_zond->zond_dbase_work, errmsg );
     if ( rc ) ERROR_S
