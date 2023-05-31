@@ -1143,8 +1143,13 @@ treeviews_clipboard_kopieren_foreach( SondTreeview* tree_view, GtkTreeIter* iter
 
     SSelectionKopieren* s_selection = (SSelectionKopieren*) data;
 
-    rc = treeviews_get_baum_and_node_id( s_selection->zond, iter, &baum, &node_id );
-    if ( rc ) ERROR_S_MESSAGE( "Bei Aufruf treeviews_get_baum_and_node_id:\nKein Baum gefunden" )
+    if ( (node_id = zond_tree_store_get_link_head_nr( iter )) <= 0 )
+    {
+        gint rc = 0;
+
+        rc = treeviews_get_baum_and_node_id( s_selection->zond, iter, &baum, &node_id );
+        if ( rc ) ERROR_S_MESSAGE( "Bei Aufruf treeviews_get_baum_and_node_id:\nKein Baum gefunden" )
+    }
 
     rc = zond_dbase_begin( s_selection->zond->dbase_zond->zond_dbase_work, errmsg );
     if ( rc ) ERROR_S
@@ -1220,12 +1225,7 @@ treeviews_clipboard_verschieben_foreach( SondTreeview* tree_view, GtkTreeIter* i
     else gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(tree_view) ), iter,
             2, &node_id, -1 );
 
-    if ( GTK_TREE_MODEL(zond_tree_store_get_tree_store( s_selection->iter_anchor )) ==
-            gtk_tree_view_get_model( GTK_TREE_VIEW(s_selection->zond->treeview[BAUM_INHALT]) ) )
-            baum_anchor = BAUM_INHALT;
-    else if ( GTK_TREE_MODEL(zond_tree_store_get_tree_store( s_selection->iter_anchor )) ==
-            gtk_tree_view_get_model( GTK_TREE_VIEW(s_selection->zond->treeview[BAUM_AUSWERTUNG]) ) )
-            baum_anchor = BAUM_AUSWERTUNG;
+    baum_anchor = treeviews_get_baum_iter( s_selection->zond, s_selection->iter_anchor );
 
     if ( baum_anchor == BAUM_INHALT )
     {
@@ -1251,13 +1251,7 @@ treeviews_clipboard_verschieben_foreach( SondTreeview* tree_view, GtkTreeIter* i
     if ( rc ) ERROR_S
 
     zond_tree_store_move_node( iter, s_selection->iter_anchor, s_selection->child, &iter_new );
-/*
-    zond_tree_store_remove( iter );
 
-    rc = treeviews_load_node( s_selection->zond, FALSE, baum_anchor, node_id,
-            s_selection->iter_anchor, s_selection->child, &iter_new, errmsg );
-    if ( rc ) ERROR_S
-*/
     s_selection->child = FALSE;
     s_selection->anchor_id = node_id;
     *(s_selection->iter_anchor) = iter_new;

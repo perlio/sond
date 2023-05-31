@@ -1071,6 +1071,7 @@ zond_tree_store_load_link( GtkTreeIter* iter_head )
 }
 
 
+
 static void
 copy_node_data ( GtkTreeIter  *src_iter, ZondTreeStore* tree_store_dest,
         GtkTreeIter *dest_iter)
@@ -1108,7 +1109,7 @@ zond_tree_store_copy_node( GtkTreeIter* iter_src, ZondTreeStore* tree_store_dest
                                     iter_src))
     {
       // Need to create children and recurse. Note our
-      //* dependence on persistent iterators here.
+      // dependence on persistent iterators here.
       kind = TRUE;
 
         do
@@ -1126,13 +1127,15 @@ zond_tree_store_copy_node( GtkTreeIter* iter_src, ZondTreeStore* tree_store_dest
 }
 
 
+
 static void
-zond_tree_store_walk_tree( GNode* node )
+zond_tree_store_walk_tree( GNode* node, gint pos )
 {
     GNode* child = NULL;
     GtkTreeIter iter = { 0 };
     GtkTreePath* path = NULL;
     GtkTreeModel* model = NULL;
+    gint pos_child = 0;
 
     model = GTK_TREE_MODEL(((RowData*) node->data)->tree_store);
     iter.stamp = ((RowData*) node->data)->tree_store->priv->stamp;
@@ -1155,12 +1158,17 @@ zond_tree_store_walk_tree( GNode* node )
     }
     gtk_tree_path_free (path);
 
+    //wenn Knoten in link eingefügt wirf...
+    zond_tree_store_insert_linked_nodes( node->parent, pos, node );
+
+    //Kinder durchgehen
     child = node->children;
     while ( child )
     {
-        zond_tree_store_walk_tree( child );
+        zond_tree_store_walk_tree( child, pos_child );
 
         child = child->next;
+        pos_child++;
     }
 
     return;
@@ -1176,6 +1184,7 @@ zond_tree_store_move_node( GtkTreeIter* iter_src, GtkTreeIter* iter_anchor,
     GtkTreePath* path = NULL;
     GtkTreeModel* model_src = NULL;
     GList* list = NULL;
+    gint pos = 0;
 
     node_src = iter_src->user_data;
     node_src_parent = node_src->parent;
@@ -1226,10 +1235,14 @@ zond_tree_store_move_node( GtkTreeIter* iter_src, GtkTreeIter* iter_anchor,
 
     //jetzt Knoten wieder einfügen
     if ( child ) g_node_insert_after( G_NODE(iter_anchor->user_data), NULL, node_src );
-    else g_node_insert_after( G_NODE(iter_anchor->user_data)->parent, G_NODE(iter_anchor->user_data), node_src );
+    else
+    {
+        g_node_insert_after( G_NODE(iter_anchor->user_data)->parent, G_NODE(iter_anchor->user_data), node_src );
+        pos = g_node_child_position( G_NODE(iter_anchor->user_data)->parent, node_src );
+    }
 
     //im treeview bekannt geben
-    zond_tree_store_walk_tree( node_src );
+    zond_tree_store_walk_tree( node_src, pos );
 
     if ( iter_new )
     {
