@@ -428,6 +428,8 @@ cb_punkt_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
                     "Bei Aufruf treeviews_insert_node:\n", errmsg, NULL );
             g_free( errmsg );
         }
+        else if ( rc == 1 ) display_message( zond->app_window, "Punkt darf nicht "
+                "in Bestandsverzeichnis eingefügt weden", NULL );
     }
 
     return;
@@ -572,12 +574,14 @@ cb_clipboard_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
             "link" ));
 
     rc = three_treeviews_paste_clipboard( zond, kind, link, &errmsg );
-    if ( rc )
+    if ( rc == -1 )
     {
         display_message( zond->app_window, "Fehler Einfügen Clipboard\n\n", errmsg,
                 NULL );
         g_free( errmsg );
     }
+    else if ( rc == 1 ) display_message( zond->app_window, "Einfügen als "
+                "Unterpunkt einer Datei nicht zulässig", NULL );
 
     return;
 }

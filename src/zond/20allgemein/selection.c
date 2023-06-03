@@ -384,11 +384,14 @@ three_treeviews_clipboard_anbinden( Projekt* zond, gint anchor_id, gboolean kind
 
 
 gint
-three_treeviews_paste_clipboard( Projekt* zond, gboolean kind, gboolean link, gchar** errmsg )
+three_treeviews_paste_clipboard( Projekt* zond, gboolean child, gboolean link, gchar** errmsg )
 {
     Clipboard* clipboard = NULL;
-    GtkTreeIter iter = { 0, };
+    GtkTreeIter iter_cursor = { 0, };
+    GtkTreeIter iter_anchor = { 0 };
+    Baum baum_anchor = KEIN_BAUM;
     gint anchor_id = 0;
+    gboolean success = FALSE;
 
     if ( zond->baum_active == KEIN_BAUM ) return 0;
 
@@ -409,36 +412,42 @@ three_treeviews_paste_clipboard( Projekt* zond, gboolean kind, gboolean link, gc
                 "Knoten" )
     }
 
-    if ( zond->baum_active != BAUM_FS &&
-            !treeviews_get_anchor_id( zond, &kind, &iter, &anchor_id ) ) return 0;
-    //else: anchor_id bleibt 0
-
-    //Jetzt die einzelnen Varianten
-    if ( baum_selection == BAUM_FS )
+    if ( zond->baum_active == BAUM_FS )
     {
-        if ( zond->baum_active == BAUM_FS )
+        if ( baum_selection == BAUM_FS )
         {
             gint rc = 0;
 
             rc = sond_treeviewfm_paste_clipboard( SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
-                    kind, errmsg );
+                    child, errmsg );
             if ( rc ) ERROR_S
         }
-        else if ( zond->baum_active == BAUM_INHALT && !clipboard->ausschneiden )
+
+        return 0;
+    }
+
+    //Damit sind alle wo Ziel-Baum == BAUM_FS sind raus!
+
+    success = treeviews_get_anchor( zond, child, &iter_cursor, &iter_anchor, &baum_anchor, &anchor_id );
+    if ( !success ) child = TRUE;
+
+    if ( baum_anchor == BAUM_INHALT )
+    {
+        gint rc = 0;
+
+        rc = treeviews_hat_vorfahre_datei( zond, baum_anchor, anchor_id, child, errmsg );
+        if ( rc == -1 ) ERROR_S
+        else if ( rc == 1 ) return 1; //unzulässiges Ziel
+
+        if ( baum_selection == BAUM_FS )
         {
-            gint rc = 0;
             InfoWindow* info_window = NULL;
             GArray* arr_new_nodes = NULL;
-
-            rc = treeviews_hat_vorfahre_datei( zond, zond->baum_active, anchor_id, kind, errmsg );
-            if ( rc == -1 ) ERROR_S
-            else if ( rc == 1 ) ERROR_S_MESSAGE( "Unzulässiges Ziel: "
-                    "Abkömmling von Anbindung" )
 
             arr_new_nodes = g_array_new( FALSE, FALSE, sizeof( gint ) );
             info_window = info_window_open( zond->app_window, "Dateien anbinden" );
 
-            rc = three_treeviews_clipboard_anbinden( zond, anchor_id, kind, arr_new_nodes, info_window, errmsg );
+            rc = three_treeviews_clipboard_anbinden( zond, anchor_id, child, arr_new_nodes, info_window, errmsg );
             if ( rc == -1 )
             {
                 info_window_set_message( info_window, *errmsg );
@@ -447,69 +456,36 @@ three_treeviews_paste_clipboard( Projekt* zond, gboolean kind, gboolean link, gc
 
             g_array_unref( arr_new_nodes );
             info_window_close( info_window );
-        }
-    }
-    else if ( baum_selection == BAUM_INHALT )
-    {
-        if ( zond->baum_active == BAUM_INHALT && clipboard->ausschneiden && !link)
-        {
-            gint rc = 0;
-
-            rc = treeviews_hat_vorfahre_datei( zond, zond->baum_active, anchor_id, kind, errmsg );
-            if ( rc == -1 ) ERROR_S
-            else if ( rc == 1 ) ERROR_S_MESSAGE( "Unzulässiges Ziel: "
-                    "Abkömmling von Anbindung" )
-
-            rc = treeviews_clipboard_verschieben( zond, &iter, anchor_id, kind, errmsg );
-            if ( rc == -1 ) ERROR_S
-        }
-        else if ( zond->baum_active == BAUM_INHALT && !clipboard->ausschneiden )
-        {//kopieren innerhalb BAUM_INHALT = verschieben von Anbindungen
-
-        }
-        else if ( zond->baum_active == BAUM_AUSWERTUNG && !clipboard->ausschneiden && !link )
-        {
-            gint rc = 0;
-
-            rc = treeviews_clipboard_kopieren( zond, BAUM_AUSWERTUNG, anchor_id,
-                    kind, &iter, errmsg );
-            if ( rc == -1 ) ERROR_S
-        }
-        else if ( zond->baum_active == BAUM_AUSWERTUNG && !clipboard->ausschneiden && link )
-        {
-            gint rc = 0;
-
-            rc = treeviews_paste_clipboard_as_link( zond, zond->baum_active, anchor_id, kind, &iter, errmsg );
-            if ( rc ) ERROR_S
 
             return 0;
         }
     }
-    else if ( baum_selection == BAUM_AUSWERTUNG )
+
+    if ( clipboard->ausschneiden && !link)
     {
-        if ( zond->baum_active == BAUM_AUSWERTUNG && clipboard->ausschneiden && !link )
-        {
-            gint rc = 0;
+        gint rc = 0;
 
-            rc = treeviews_clipboard_verschieben( zond, &iter, anchor_id, kind, errmsg );
-            if ( rc == -1 ) ERROR_S
-        }
-        else if ( zond->baum_active == BAUM_AUSWERTUNG && !clipboard->ausschneiden && !link )
-        {
-            gint rc = 0;
-
-            rc = treeviews_clipboard_kopieren( zond, BAUM_AUSWERTUNG, anchor_id,
-                    kind, &iter, errmsg );
-            if ( rc == -1 ) ERROR_S
-        }
-        else if ( zond->baum_active == BAUM_AUSWERTUNG && !clipboard->ausschneiden && link )
-        {
-            gint rc = 0;
-
-            rc = treeviews_paste_clipboard_as_link( zond, zond->baum_active, anchor_id, kind, &iter, errmsg );
-            if ( rc ) ERROR_S
-        }
+        rc = treeviews_clipboard_verschieben( zond, child, &iter_cursor,
+                &iter_anchor, baum_anchor, anchor_id, errmsg );
+        if ( rc == -1 ) ERROR_S
     }
+    else if ( !clipboard->ausschneiden && !link )
+    {
+        gint rc = 0;
+
+        rc = treeviews_clipboard_kopieren( zond, child, &iter_cursor,
+                &iter_anchor, baum_anchor, anchor_id, errmsg );
+        if ( rc == -1 ) ERROR_S
+    }
+    else if ( !clipboard->ausschneiden && link )
+    {
+        gint rc = 0;
+
+        rc = treeviews_paste_clipboard_as_link( zond, child, &iter_cursor,
+                &iter_anchor, baum_anchor, anchor_id, errmsg );
+        if ( rc ) ERROR_S
+    }
+    //ausschneiden und link geht ja nicht...
 
     return 0;
 }

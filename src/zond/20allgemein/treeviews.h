@@ -37,15 +37,16 @@ gint treeviews_reload_baeume( Projekt*, gchar** );
 
 gint treeviews_knoten_verschieben( Projekt*, Baum, gint, gint, gint, gchar** );
 
-gboolean treeviews_get_anchor_id( Projekt*, gboolean*, GtkTreeIter*, gint* );
+gboolean treeviews_get_anchor( Projekt*, gboolean, GtkTreeIter*, GtkTreeIter*, Baum*, gint* );
 
-gint treeviews_paste_clipboard_as_link( Projekt*, Baum, gint, gboolean,
-        GtkTreeIter*, gchar** );
+gint treeviews_paste_clipboard_as_link( Projekt*, gboolean, GtkTreeIter*, GtkTreeIter*,
+        Baum, gint, gchar** );
 
-gint treeviews_clipboard_kopieren( Projekt*, Baum, gint, gboolean, GtkTreeIter*,
-        gchar** );
+gint treeviews_clipboard_kopieren( Projekt*, gboolean, GtkTreeIter*, GtkTreeIter*,
+        Baum, gint, gchar** );
 
-gint treeviews_clipboard_verschieben( Projekt*, GtkTreeIter*, gint, gboolean, gchar** );
+gint treeviews_clipboard_verschieben( Projekt*, gboolean, GtkTreeIter*, GtkTreeIter*,
+        Baum, gint, gchar** );
 
 void treeviews_jump_to_link_target( Projekt* );
 

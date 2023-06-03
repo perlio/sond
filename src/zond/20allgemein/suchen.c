@@ -115,12 +115,11 @@ cb_suchen_nach_auswertung( GtkMenuItem* item, gpointer user_data )
     }
 
     //zond->baum_active ist KEIN_BAUM, weil focus-out
-    //Deshalb für treeviews_get_anchor_id:
+    //Deshalb für treeviews_get_anchor:
     zond->baum_active = BAUM_AUSWERTUNG;
 
     //aktuellen cursor im BAUM_AUSWERTUNG: node_id und iter abfragen
-    if ( sond_treeview_get_cursor( zond->treeview[BAUM_AUSWERTUNG], &iter ) &&
-            !treeviews_get_anchor_id( zond, &child, &iter, &anchor_id ) ) return;
+    if ( !treeviews_get_anchor( zond, child, &iter, NULL, NULL, &anchor_id ) ) return;
 
     //Und wieder Ursprungszustand:
     zond->baum_active = KEIN_BAUM;

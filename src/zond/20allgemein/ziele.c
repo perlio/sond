@@ -92,18 +92,13 @@ ziele_verschieben_kinder( Projekt* zond,
     while ( (younger_sibling = zond_dbase_get_younger_sibling( zond->dbase_zond->zond_dbase_work, BAUM_INHALT,
             node_id, errmsg )) )
     {
-        if ( younger_sibling < 0 ) ERROR_SOND( "zond_dbase_get_younger_sibling" )
+        if ( younger_sibling < 0 ) ERROR_S
 
         Anbindung* anbindung_younger_sibling = NULL;
         rc = treeviews_get_rel_path_and_anbindung( zond, BAUM_INHALT, younger_sibling,
                 NULL, &anbindung_younger_sibling, errmsg );
-        if ( rc == -1 ) ERROR_SOND( "abfragen_rel_path_and_anbindung" )
-        else if ( rc )
-        {
-            if ( errmsg ) *errmsg = g_strdup( "Keine Anbindung gespeichert" );
-
-            return -1;
-        }
+        if ( rc == -1 ) ERROR_S
+        else if ( rc ) ERROR_S_MESSAGE( "Keine Anbindung gespeichert" )
         else
         {
             gboolean kind = ziele_1_eltern_von_2( anbindung,
@@ -114,7 +109,7 @@ ziele_verschieben_kinder( Projekt* zond,
 
         rc = treeviews_knoten_verschieben( zond, BAUM_INHALT, younger_sibling, node_id,
                 older_sibling, errmsg );
-        if ( rc ) ERROR_SOND( "knoten_verschieben" )
+        if ( rc ) ERROR_S
         older_sibling = younger_sibling;
     }
 

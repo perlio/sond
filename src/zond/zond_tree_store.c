@@ -985,8 +985,6 @@ zond_tree_store_insert_link (GtkTreeIter* iter_target,
 }
 
 
-
-
 static void
 zond_tree_store_load_node( GNode* node_parent, GNode* node_parent_target )
 {
@@ -1548,9 +1546,15 @@ zond_tree_store_get_root_id( ZondTreeStore* tree_store )
 
 
 GNode*
-zond_tree_store_get_root_node( GtkTreeIter* iter )
+zond_tree_store_get_root_node( ZondTreeStore* tree_store )
 {
-    return ((RowData*) G_NODE(iter->user_data)->data)->tree_store->priv->root;
+    return tree_store->priv->root;
+}
+
+gint
+zond_tree_store_get_stamp( ZondTreeStore* tree_store )
+{
+    return tree_store->priv->stamp;
 }
 
 GList*
