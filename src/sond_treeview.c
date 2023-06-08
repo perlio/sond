@@ -26,9 +26,43 @@ typedef struct
     GtkCellRenderer* renderer_icon;
     GtkCellRenderer* renderer_text;
     gint id;
+    GtkWidget* contextmenu;
 } SondTreeviewPrivate;
 
 G_DEFINE_TYPE_WITH_PRIVATE(SondTreeview, sond_treeview, GTK_TYPE_TREE_VIEW)
+
+
+static gboolean
+sond_treeview_show_popupmenu( SondTreeview* stv, GdkEventButton* event,
+        GtkMenu* contextmenu )
+{
+    GtkTreePath* path = NULL;
+    gboolean ret = FALSE;
+
+   //wenn was anderes als Rechtsklick:
+    if ( ((event->button) != 3) || (event->type != GDK_BUTTON_PRESS) ) return FALSE;
+
+    gtk_tree_view_get_path_at_pos( GTK_TREE_VIEW(stv), event->x, event->y,
+            &path, NULL, NULL, NULL );
+    if ( !path ) return FALSE; //wenn nicht auf Zelle geclickt -> default-handler
+
+    if ( !gtk_widget_has_focus( GTK_WIDGET(stv) ) )
+    {
+        //zunächst cursor setzen, damit der bei Focus-Wechsel direkt markiet wird
+        gtk_tree_view_set_cursor( GTK_TREE_VIEW(stv), path, NULL, FALSE );
+
+        //focus auf neuen Baum...
+        gtk_widget_grab_focus( GTK_WIDGET(stv) );
+    }
+    //angeklickte schon markiert: dann kein default-handler (selection soll bleiben)
+    else if ( gtk_tree_selection_path_is_selected( gtk_tree_view_get_selection( GTK_TREE_VIEW(stv) ), path ) ) ret = TRUE;
+
+    gtk_tree_path_free( path );
+
+    gtk_menu_popup_at_pointer( contextmenu, NULL );
+
+    return ret;
+}
 
 
 static void
@@ -147,6 +181,28 @@ sond_treeview_selection_select_func( GtkTreeSelection* selection, GtkTreeModel* 
 
 
 static void
+sond_treeview_item_kopieren_activate( GtkMenuItem* item, gpointer user_data )
+{
+    SondTreeview* stv = (SondTreeview*) user_data;
+
+    sond_treeview_copy_or_cut_selection( stv, FALSE );
+
+    return;
+}
+
+
+static void
+sond_treeview_item_ausschneiden_activate( GtkMenuItem* item, gpointer user_data )
+{
+    SondTreeview* stv = (SondTreeview*) user_data;
+
+    sond_treeview_copy_or_cut_selection( stv, TRUE );
+
+    return;
+}
+
+
+static void
 sond_treeview_init( SondTreeview* stv )
 {
     GtkTreeViewColumn* tvc = NULL;
@@ -196,6 +252,30 @@ sond_treeview_init( SondTreeview* stv )
             sond_treeview_render_text, stv, NULL );
 
     gtk_tree_view_columns_autosize( GTK_TREE_VIEW(stv) );
+
+    //Contextmenu
+    //Rechtsklick - Kontextmenu
+    //Kontextmenu erzeugen, welches bei Rechtsklick auf treeview angezeigt wird
+    stv_private->contextmenu = gtk_menu_new();
+
+    //Kopieren
+    GtkWidget* item_kopieren = gtk_menu_item_new_with_label("Kopieren");
+    g_signal_connect( G_OBJECT(item_kopieren), "activate",
+            G_CALLBACK(sond_treeview_item_kopieren_activate), (gpointer) stv );
+    gtk_menu_shell_append( GTK_MENU_SHELL(stv_private->contextmenu), item_kopieren );
+
+    //Verschieben
+    GtkWidget* item_ausschneiden = gtk_menu_item_new_with_label("Ausschneiden");
+    g_object_set_data( G_OBJECT(item_ausschneiden), "ausschneiden",
+            GINT_TO_POINTER(1) );
+    g_signal_connect( G_OBJECT(item_ausschneiden), "activate",
+            G_CALLBACK(sond_treeview_item_ausschneiden_activate), (gpointer) stv );
+    gtk_menu_shell_append( GTK_MENU_SHELL(stv_private->contextmenu), item_ausschneiden );
+
+    gtk_widget_show_all( stv_private->contextmenu );
+
+    g_signal_connect( stv, "button-press-event",
+            G_CALLBACK(sond_treeview_show_popupmenu), (gpointer) stv_private->contextmenu );
 
     return;
 }
@@ -255,6 +335,15 @@ sond_treeview_get_cell_renderer_text( SondTreeview* stv )
     SondTreeviewPrivate* stv_priv = sond_treeview_get_instance_private( stv );
 
     return stv_priv->renderer_text;
+}
+
+
+GtkWidget*
+sond_treeview_get_contextmenu( SondTreeview* stv )
+{
+    SondTreeviewPrivate* stv_priv = sond_treeview_get_instance_private( stv );
+
+    return stv_priv->contextmenu;
 }
 
 

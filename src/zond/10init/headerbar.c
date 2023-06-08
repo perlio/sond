@@ -32,6 +32,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "../global_types.h"
 #include "../zond_tree_store.h"
+#include "../zond_treeview.h"
 #include "../zond_dbase.h"
 #include "../zond_gemini.h"
 
@@ -398,7 +399,7 @@ cb_datei_ocr( GtkMenuItem* item, gpointer data )
 
 /*  Callbacks des Menus "Struktur" */
 static void
-cb_punkt_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
+cb_item_punkt_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
 {
     gint rc = 0;
     gchar* errmsg = NULL;
@@ -419,18 +420,12 @@ cb_punkt_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
             g_free( errmsg );
         }
     }
-    else
-    {
-        rc = treeviews_insert_node( zond, zond->baum_active, child, &errmsg );
-        if ( rc == -1 )
-        {
-            display_message( zond->app_window, "Punkt einfügen fehlgeschlagen\n\n"
-                    "Bei Aufruf treeviews_insert_node:\n", errmsg, NULL );
-            g_free( errmsg );
-        }
-        else if ( rc == 1 ) display_message( zond->app_window, "Punkt darf nicht "
-                "in Bestandsverzeichnis eingefügt weden", NULL );
-    }
+    else if ( !child ) g_signal_emit_by_name( g_object_get_data(
+            G_OBJECT(sond_treeview_get_contextmenu( zond->treeview[zond->baum_active] )),
+            "item-punkt-einfuegen-ge" ), "activate", zond );
+    else if ( child ) g_signal_emit_by_name( g_object_get_data(
+            G_OBJECT(sond_treeview_get_contextmenu( zond->treeview[zond->baum_active] )),
+            "item-punkt-einfuegen-up" ), "activate", zond );
 
     return;
 }
@@ -462,18 +457,11 @@ cb_item_text_anbindung( GtkMenuItem* item, gpointer data )
 static void
 cb_item_datei_oeffnen( GtkMenuItem* item, gpointer data )
 {
-    gint rc = 0;
-    gchar* errmsg = NULL;
     Projekt* zond = (Projekt*) data;
 
-    rc = oeffnen_actual_node( zond, &errmsg );
-    if ( rc == -1 )
-    {
-        display_message( zond->app_window, "Datei öffnen fehlgeschlagen:\n\n",
-                errmsg, NULL );
-        g_free( errmsg );
-    }
-
+    g_signal_emit_by_name( g_object_get_data(
+            G_OBJECT(sond_treeview_get_contextmenu( zond->treeview[zond->baum_active] )),
+            "item-datei-oeffnen" ), "activate", zond );
 
     return;
 }
@@ -563,9 +551,6 @@ cb_ausschneiden_activate( GtkMenuItem* item, gpointer user_data )
 static void
 cb_clipboard_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
 {
-    gint rc = 0;
-    gchar* errmsg = NULL;
-
     Projekt* zond = (Projekt*) user_data;
 
     gboolean kind = (gboolean) GPOINTER_TO_INT(g_object_get_data( G_OBJECT(item),
@@ -573,15 +558,53 @@ cb_clipboard_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
     gboolean link = (gboolean) GPOINTER_TO_INT(g_object_get_data( G_OBJECT(item),
             "link" ));
 
-    rc = three_treeviews_paste_clipboard( zond, kind, link, &errmsg );
-    if ( rc == -1 )
+    if ( zond->baum_active == KEIN_BAUM ) return;
+    else if ( zond->baum_active == BAUM_FS )
     {
-        display_message( zond->app_window, "Fehler Einfügen Clipboard\n\n", errmsg,
-                NULL );
-        g_free( errmsg );
+        gint rc = 0;
+        gchar* errmsg = NULL;
+
+        Clipboard* clipboard = ((SondTreeviewClass*) g_type_class_peek( SOND_TYPE_TREEVIEW ))->clipboard;
+
+        Baum baum_selection = (Baum) sond_treeview_get_id( clipboard->tree_view );
+
+        if ( baum_selection != BAUM_FS ) return;
+        if ( link ) return;
+
+        if ( sond_treeview_test_cursor_descendant( zond->treeview[zond->baum_active] ) )
+                display_message( zond->app_window, "Unzulässiges Ziel: Abkömmling von zu verschiebendem "
+                "Knoten", NULL );
+
+        rc = sond_treeviewfm_paste_clipboard( SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
+                kind, &errmsg );
+        if ( rc )
+        {
+            display_message( zond->app_window, "Einfügen nicht möglich\n\n"
+                    "Bei Aufruf sond_treeviewfm_paste_clipboard:\n", errmsg, NULL );
+            g_free( errmsg );
+        }
     }
-    else if ( rc == 1 ) display_message( zond->app_window, "Einfügen als "
-                "Unterpunkt einer Datei nicht zulässig", NULL );
+    else //baum == INHALT oder AUSWERTUNG
+    {
+        if ( !link ) //"normal" einfügen
+        {
+            if ( !kind ) g_signal_emit_by_name( g_object_get_data(
+                    G_OBJECT(sond_treeview_get_contextmenu( zond->treeview[zond->baum_active] )),
+                    "item-paste-ge" ), "activate", zond );
+            else g_signal_emit_by_name( g_object_get_data(
+                    G_OBJECT(sond_treeview_get_contextmenu( zond->treeview[zond->baum_active] )),
+                    "item-paste-up" ), "activate", zond );
+        }
+        else
+        {
+            if ( !kind ) g_signal_emit_by_name( g_object_get_data(
+                    G_OBJECT(sond_treeview_get_contextmenu( zond->treeview[zond->baum_active] )),
+                    "item-paste-as_link_ge" ), "activate", zond );
+            else g_signal_emit_by_name( g_object_get_data(
+                    G_OBJECT(sond_treeview_get_contextmenu( zond->treeview[zond->baum_active] )),
+                    "item-paste-as-link-up" ), "activate", zond );
+        }
+    }
 
     return;
 }
@@ -821,8 +844,8 @@ init_menu( Projekt* zond )
     GtkWidget* menubar = gtk_menu_bar_new();
 
     zond->menu.projekt = gtk_menu_item_new_with_label ( "Projekt" );
-    zond->menu.pdf = gtk_menu_item_new_with_label("PDF-Dateien");
     zond->menu.struktur = gtk_menu_item_new_with_label( "Struktur" );
+    zond->menu.pdf = gtk_menu_item_new_with_label("PDF-Dateien");
     zond->menu.ansicht = gtk_menu_item_new_with_label("Ansicht");
     zond->menu.extras = gtk_menu_item_new_with_label( "Extras" );
     GtkWidget* einstellungen = gtk_menu_item_new_with_label(
@@ -909,7 +932,7 @@ init_menu( Projekt* zond )
     gtk_widget_add_accelerator( ge_punkterzeugenitem, "activate", accel_group,
             GDK_KEY_p, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
     g_signal_connect( G_OBJECT(ge_punkterzeugenitem), "activate",
-            G_CALLBACK(cb_punkt_einfuegen_activate), (gpointer) zond );
+            G_CALLBACK(cb_item_punkt_einfuegen_activate), (gpointer) zond );
 
     GtkWidget* up_punkterzeugenitem = gtk_menu_item_new_with_label(
             "Unterebene" );
@@ -917,7 +940,7 @@ init_menu( Projekt* zond )
     gtk_widget_add_accelerator(up_punkterzeugenitem, "activate", accel_group,
             GDK_KEY_p, GDK_CONTROL_MASK | GDK_SHIFT_MASK, GTK_ACCEL_VISIBLE);
     g_signal_connect( G_OBJECT(up_punkterzeugenitem), "activate",
-            G_CALLBACK(cb_punkt_einfuegen_activate), (gpointer) zond );
+            G_CALLBACK(cb_item_punkt_einfuegen_activate), (gpointer) zond );
 
     gtk_menu_shell_append( GTK_MENU_SHELL(punkterzeugenmenu),
             ge_punkterzeugenitem );

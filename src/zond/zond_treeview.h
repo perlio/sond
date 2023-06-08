@@ -22,6 +22,12 @@ struct _ZondTreeviewClass
 
 void zond_treeview_cursor_changed( ZondTreeview*, gpointer );
 
+void item_loeschen_activate( GtkMenuItem*, gpointer );
+
+void item_anbindung_entfernen_activate( GtkMenuItem*, gpointer );
+
+void item_jump_activate( GtkMenuItem*, gpointer );
+
 ZondTreeview* zond_treeview_new( Projekt*, gint );
 
 GtkTreeIter* zond_treeview_abfragen_iter( ZondTreeview*, gint );

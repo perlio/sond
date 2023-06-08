@@ -38,6 +38,8 @@ GtkCellRenderer* sond_treeview_get_cell_renderer_icon( SondTreeview* );
 
 GtkCellRenderer* sond_treeview_get_cell_renderer_text( SondTreeview* );
 
+GtkWidget* sond_treeview_get_contextmenu( SondTreeview* );
+
 void sond_treeview_expand_row( SondTreeview*, GtkTreeIter* );
 
 gboolean sond_treeview_get_cursor( SondTreeview*, GtkTreeIter* );

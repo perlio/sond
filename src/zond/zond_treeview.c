@@ -29,6 +29,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "20allgemein/oeffnen.h"
 #include "20allgemein/project.h"
 #include "20allgemein/treeviews.h"
+#include "20allgemein/selection.h"
 
 
 typedef struct
@@ -37,27 +38,6 @@ typedef struct
 } ZondTreeviewPrivate;
 
 G_DEFINE_TYPE_WITH_PRIVATE(ZondTreeview, zond_treeview, SOND_TYPE_TREEVIEW)
-
-
-static gboolean
-zond_treeview_show_popupmenu( GtkTreeView* treeview, GdkEventButton* event,
-        GtkMenu* contextmenu_tv )
-{
-    //Rechtsklick
-    if ( ((event->button) == 3) && (event->type == GDK_BUTTON_PRESS) )
-    {
-        GtkTreePath* path;
-        gtk_tree_view_get_cursor( treeview, &path, NULL );
-        if ( !path ) return FALSE;
-        gtk_tree_path_free( path );
-
-        gtk_menu_popup_at_pointer( contextmenu_tv, NULL );
-
-        return TRUE;
-    }
-
-    return FALSE;
-}
 
 
 void
@@ -360,20 +340,6 @@ static void
 zond_treeview_constructed( GObject* self )
 {
     //Die Signale
-    //Rechtsklick - Kontextmenu
-    //Kontextmenu erzeugen, welches bei Rechtsklick auf treeview angezeigt wird
-    GtkWidget* contextmenu_tv = gtk_menu_new();
-
-    GtkWidget* datei_oeffnen_item = gtk_menu_item_new_with_label( "Öffnen" );
-    gtk_menu_shell_append( GTK_MENU_SHELL(contextmenu_tv), datei_oeffnen_item );
-    gtk_widget_show( datei_oeffnen_item );
-
-    g_signal_connect( self, "button-press-event",
-            G_CALLBACK(zond_treeview_show_popupmenu), (gpointer) contextmenu_tv );
-
-//        g_signal_connect( datei_oeffnen_item, "activate",
-//                G_CALLBACK(cb_datei_oeffnen), (gpointer) zond );
-
     //Zeile expandiert oder kollabiert
     g_signal_connect( self, "row-expanded",
             G_CALLBACK(gtk_tree_view_columns_autosize), NULL );
@@ -425,6 +391,265 @@ zond_treeview_init( ZondTreeview* ztv )
 }
 
 
+void
+zond_treeview_punkt_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
+{
+    gint rc = 0;
+    gboolean child = FALSE;
+    gchar* errmsg = NULL;
+
+    Projekt* zond = (Projekt*) user_data;
+
+    child = (gboolean) GPOINTER_TO_INT(g_object_get_data( G_OBJECT(item), "kind" ));
+
+    rc = treeviews_insert_node( zond, zond->baum_active, child, &errmsg );
+    if ( rc == -1 )
+    {
+        display_message( zond->app_window, "Punkt einfügen fehlgeschlagen\n\n"
+                "Bei Aufruf treeviews_insert_node:\n", errmsg, NULL );
+        g_free( errmsg );
+    }
+    else if ( rc == 1 ) display_message( zond->app_window, "Punkt darf nicht "
+            "in Bestandsverzeichnis eingefügt weden", NULL );
+
+    return;
+}
+
+
+static void
+zond_treeview_paste_activate( GtkMenuItem* item, gpointer user_data )
+{
+    gint rc = 0;
+    gchar* errmsg = NULL;
+    gboolean child = FALSE;
+
+    Projekt* zond = (Projekt*) user_data;
+
+    child = (gboolean) GPOINTER_TO_INT(g_object_get_data( G_OBJECT(item), "kind" ));
+
+    rc = three_treeviews_paste_clipboard( zond, child, FALSE, &errmsg );
+    if ( rc == -1 )
+    {
+        display_message( zond->app_window, "Fehler Einfügen Clipboard\n\n", errmsg,
+                NULL );
+        g_free( errmsg );
+    }
+    else if ( rc == 1 ) display_message( zond->app_window, "Einfügen als "
+                "Unterpunkt einer Datei nicht zulässig", NULL );
+
+    return;
+}
+
+
+static void
+zond_treeview_paste_as_link_activate( GtkMenuItem* item, gpointer user_data )
+{
+    gint rc = 0;
+    gchar* errmsg = NULL;
+    gboolean child = FALSE;
+
+    Projekt* zond = (Projekt*) user_data;
+
+    child = (gboolean) GPOINTER_TO_INT(g_object_get_data( G_OBJECT(item), "kind" ));
+
+    rc = three_treeviews_paste_clipboard( zond, child, TRUE, &errmsg );
+    if ( rc == -1 )
+    {
+        display_message( zond->app_window, "Fehler Einfügen Clipboard\n\n", errmsg,
+                NULL );
+        g_free( errmsg );
+    }
+    else if ( rc == 1 ) display_message( zond->app_window, "Einfügen als "
+                "Unterpunkt einer Datei nicht zulässig", NULL );
+
+    return;
+}
+
+
+void
+item_loeschen_activate( GtkMenuItem* item, gpointer user_data )
+{
+    gint rc = 0;
+    gchar* errmsg = NULL;
+
+    Projekt* zond = (Projekt*) user_data;
+
+}
+
+
+void
+item_anbindung_entfernen_activate( GtkMenuItem* item, gpointer user_data )
+{
+    gint rc = 0;
+    gchar* errmsg = NULL;
+
+    Projekt* zond = (Projekt*) user_data;
+
+}
+
+
+void
+item_jump_activate( GtkMenuItem* item, gpointer user_data )
+{
+    gint rc = 0;
+    gchar* errmsg = NULL;
+
+    Projekt* zond = (Projekt*) user_data;
+
+}
+
+
+static void
+zond_treeview_datei_oeffnen_activate( GtkMenuItem* item, gpointer user_data )
+{
+    GtkTreePath* path = NULL;
+
+    Projekt* zond = (Projekt*) user_data;
+
+    gtk_tree_view_get_cursor( GTK_TREE_VIEW(zond->treeview[zond->baum_active]), &path, NULL );
+
+    g_signal_emit_by_name( zond->treeview[zond->baum_active], "row-activated", path, NULL, zond );
+
+    gtk_tree_path_free( path );
+
+    return;
+}
+
+
+static void
+zond_treeview_init_contextmenu( ZondTreeview* ztv )
+{
+    GtkWidget* contextmenu = NULL;
+
+    ZondTreeviewPrivate* ztv_priv = zond_treeview_get_instance_private( ztv );
+    Projekt* zond = ztv_priv->zond;
+
+    contextmenu = sond_treeview_get_contextmenu( SOND_TREEVIEW(ztv) );
+
+    //Trennblatt
+    GtkWidget* item_separator_0 = gtk_separator_menu_item_new();
+    gtk_menu_shell_prepend( GTK_MENU_SHELL(contextmenu), item_separator_0 );
+
+    //Punkt einfügen
+    GtkWidget* item_punkt_einfuegen = gtk_menu_item_new_with_label( "Punkt einfügen" );
+
+    GtkWidget* menu_punkt_einfuegen = gtk_menu_new();
+
+    GtkWidget* item_punkt_einfuegen_ge = gtk_menu_item_new_with_label(
+            "Gleiche Ebene" );
+    g_object_set_data( G_OBJECT(contextmenu), "item-punkt-einfuegen-ge",
+            item_punkt_einfuegen_ge );
+    g_signal_connect( G_OBJECT(item_punkt_einfuegen_ge), "activate",
+            G_CALLBACK(zond_treeview_punkt_einfuegen_activate), (gpointer) zond );
+
+    GtkWidget* item_punkt_einfuegen_up = gtk_menu_item_new_with_label(
+            "Unterebene" );
+    g_object_set_data( G_OBJECT(contextmenu), "item-punkt-einfuegen-up",
+            item_punkt_einfuegen_up );
+    g_object_set_data( G_OBJECT(item_punkt_einfuegen_up), "kind", GINT_TO_POINTER(1) );
+    g_signal_connect( G_OBJECT(item_punkt_einfuegen_up), "activate",
+            G_CALLBACK(zond_treeview_punkt_einfuegen_activate), (gpointer) zond );
+
+    gtk_menu_shell_append( GTK_MENU_SHELL(menu_punkt_einfuegen),
+            item_punkt_einfuegen_ge );
+    gtk_menu_shell_append( GTK_MENU_SHELL(menu_punkt_einfuegen),
+            item_punkt_einfuegen_up );
+
+    gtk_menu_item_set_submenu( GTK_MENU_ITEM(item_punkt_einfuegen),
+            menu_punkt_einfuegen );
+
+    gtk_menu_shell_prepend( GTK_MENU_SHELL(contextmenu), item_punkt_einfuegen );
+
+    //Einfügen
+    GtkWidget* item_paste = gtk_menu_item_new_with_label("Einfügen");
+
+    GtkWidget* menu_paste = gtk_menu_new();
+
+    GtkWidget* item_paste_ge = gtk_menu_item_new_with_label( "Gleiche Ebene");
+    g_object_set_data( G_OBJECT(sond_treeview_get_contextmenu( SOND_TREEVIEW(ztv) )),
+            "item-paste-ge", item_paste_ge );
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu_paste), item_paste_ge );
+    g_signal_connect( G_OBJECT(item_paste_ge), "activate",
+            G_CALLBACK(zond_treeview_paste_activate), (gpointer) zond );
+
+    GtkWidget* item_paste_up = gtk_menu_item_new_with_label( "Unterebene");
+    g_object_set_data( G_OBJECT(item_paste_up), "kind",
+            GINT_TO_POINTER(1) );
+    g_object_set_data( G_OBJECT(sond_treeview_get_contextmenu( SOND_TREEVIEW(ztv) )),
+            "item-paste-up", item_paste_up );
+    g_signal_connect( G_OBJECT(item_paste_up), "activate",
+            G_CALLBACK(zond_treeview_paste_activate), (gpointer) zond );
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu_paste), item_paste_up );
+
+    gtk_menu_item_set_submenu( GTK_MENU_ITEM(item_paste), menu_paste );
+
+    gtk_menu_shell_append( GTK_MENU_SHELL(contextmenu), item_paste );
+
+    //Link Einfügen
+    GtkWidget* item_paste_as_link = gtk_menu_item_new_with_label("Als Link einfügen");
+
+    GtkWidget* menu_paste_as_link = gtk_menu_new();
+
+    GtkWidget* item_paste_as_link_ge = gtk_menu_item_new_with_label(
+            "Gleiche Ebene");
+    g_object_set_data( G_OBJECT(item_paste_as_link_ge), "link",
+            GINT_TO_POINTER(1) );
+    g_signal_connect( G_OBJECT(item_paste_as_link_ge), "activate",
+            G_CALLBACK(zond_treeview_paste_as_link_activate), (gpointer) zond );
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu_paste_as_link), item_paste_as_link_ge );
+
+    GtkWidget* item_paste_as_link_up = gtk_menu_item_new_with_label(
+            "Unterebene");
+    g_object_set_data( G_OBJECT(item_paste_as_link_up), "kind",
+            GINT_TO_POINTER(1) );
+    g_object_set_data( G_OBJECT(item_paste_as_link_up), "link",
+            GINT_TO_POINTER(1) );
+    g_signal_connect( G_OBJECT(item_paste_as_link_up), "activate",
+            G_CALLBACK(zond_treeview_paste_as_link_activate), (gpointer) zond );
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu_paste_as_link),
+            item_paste_as_link_up);
+
+    gtk_menu_item_set_submenu(GTK_MENU_ITEM(item_paste_as_link), menu_paste_as_link );
+
+    gtk_menu_shell_append( GTK_MENU_SHELL(contextmenu), item_paste_as_link );
+
+    GtkWidget* item_separator_1 = gtk_separator_menu_item_new();
+    gtk_menu_shell_append( GTK_MENU_SHELL(contextmenu), item_separator_1 );
+
+    //Punkt(e) löschen
+    GtkWidget* item_loeschen = gtk_menu_item_new_with_label("Punkte löschen");
+    g_signal_connect( G_OBJECT(item_loeschen), "activate",
+            G_CALLBACK(item_loeschen_activate), (gpointer) zond );
+    gtk_menu_shell_append( GTK_MENU_SHELL(contextmenu), item_loeschen );
+
+    //Speichern als Projektdatei
+    GtkWidget* item_anbindung_entfernen = gtk_menu_item_new_with_label(
+            "Anbindung entfernen");
+    g_signal_connect( G_OBJECT(item_anbindung_entfernen), "activate",
+            G_CALLBACK(item_anbindung_entfernen_activate), zond );
+    gtk_menu_shell_append( GTK_MENU_SHELL(contextmenu), item_anbindung_entfernen );
+
+    GtkWidget* item_jump = gtk_menu_item_new_with_label( "Zu Linkziel springen" );
+    g_signal_connect( item_jump, "activate", G_CALLBACK(item_jump_activate), zond );
+    gtk_menu_shell_append( GTK_MENU_SHELL(contextmenu), item_jump );
+
+    GtkWidget* item_separator_2 = gtk_separator_menu_item_new();
+    gtk_menu_shell_append( GTK_MENU_SHELL(contextmenu), item_separator_2 );
+
+    //Datei Öffnen
+    GtkWidget* item_datei_oeffnen = gtk_menu_item_new_with_label( "Öffnen" );
+    g_object_set_data( G_OBJECT(sond_treeview_get_contextmenu( SOND_TREEVIEW(ztv) )),
+            "item-datei-oeffnen", item_datei_oeffnen );
+    g_signal_connect( item_datei_oeffnen, "activate",
+                G_CALLBACK(zond_treeview_datei_oeffnen_activate), (gpointer) zond );
+    gtk_menu_shell_append( GTK_MENU_SHELL(contextmenu), item_datei_oeffnen );
+
+    gtk_widget_show_all( contextmenu );
+
+    return;
+}
+
+
 ZondTreeview*
 zond_treeview_new( Projekt* zond, gint id )
 {
@@ -436,6 +661,8 @@ zond_treeview_new( Projekt* zond, gint id )
     ztv_priv = zond_treeview_get_instance_private( ztv );
     ztv_priv->zond = zond;
     sond_treeview_set_id( SOND_TREEVIEW(ztv), id );
+
+    zond_treeview_init_contextmenu( ztv );
 
     // Doppelklick = angebundene Datei anzeigen
     g_signal_connect( ztv, "row-activated",

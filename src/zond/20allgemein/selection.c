@@ -393,7 +393,7 @@ three_treeviews_paste_clipboard( Projekt* zond, gboolean child, gboolean link, g
     gint anchor_id = 0;
     gboolean success = FALSE;
 
-    if ( zond->baum_active == KEIN_BAUM ) return 0;
+    if ( zond->baum_active == KEIN_BAUM || zond->baum_active == BAUM_FS ) return 0;
 
     clipboard = ((SondTreeviewClass*) g_type_class_peek( SOND_TYPE_TREEVIEW ))->clipboard;
 
@@ -411,22 +411,6 @@ three_treeviews_paste_clipboard( Projekt* zond, gboolean child, gboolean link, g
                 ERROR_S_MESSAGE( "Unzulässiges Ziel: Abkömmling von zu verschiebendem "
                 "Knoten" )
     }
-
-    if ( zond->baum_active == BAUM_FS )
-    {
-        if ( baum_selection == BAUM_FS )
-        {
-            gint rc = 0;
-
-            rc = sond_treeviewfm_paste_clipboard( SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
-                    child, errmsg );
-            if ( rc ) ERROR_S
-        }
-
-        return 0;
-    }
-
-    //Damit sind alle wo Ziel-Baum == BAUM_FS sind raus!
 
     success = treeviews_get_anchor( zond, child, &iter_cursor, &iter_anchor, &baum_anchor, &anchor_id );
     if ( !success ) child = TRUE;

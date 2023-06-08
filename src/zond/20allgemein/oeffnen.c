@@ -444,19 +444,3 @@ oeffnen_node( Projekt* zond, GtkTreeIter* iter, gchar** errmsg )
     return 0;
 }
 
-
-gint
-oeffnen_actual_node( Projekt* zond, gchar** errmsg )
-{
-    GtkTreeIter iter = { 0 };
-    gint rc = 0;
-
-    if ( zond->baum_active == KEIN_BAUM || zond->baum_active == BAUM_FS ) return 0;
-
-    if ( !sond_treeview_get_cursor( zond->treeview[zond->baum_active], &iter ) ) return 0;
-
-    rc = oeffnen_node( zond, &iter, errmsg );
-    if ( rc ) ERROR_S
-
-    return 0;
-}
