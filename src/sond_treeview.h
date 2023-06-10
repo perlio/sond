@@ -24,9 +24,6 @@ struct _SondTreeviewClass
             GtkTreeIter*, gpointer );
 };
 
-
-SondTreeview* sond_treeview_new( gint );
-
 void sond_treeview_set_render_text_cell_func( SondTreeview*, void (*render_text_cell)
         ( GtkTreeViewColumn*, GtkCellRenderer*, GtkTreeModel*, GtkTreeIter*, gpointer ) );
 
@@ -41,6 +38,8 @@ GtkCellRenderer* sond_treeview_get_cell_renderer_text( SondTreeview* );
 GtkWidget* sond_treeview_get_contextmenu( SondTreeview* );
 
 void sond_treeview_expand_row( SondTreeview*, GtkTreeIter* );
+
+void sond_treeview_expand_to_row( SondTreeview*, GtkTreeIter* );
 
 gboolean sond_treeview_get_cursor( SondTreeview*, GtkTreeIter* );
 

@@ -300,7 +300,7 @@ static void
 init_treeviews( Projekt* zond )
 {
     //der treeview
-    zond->treeview[BAUM_FS] = SOND_TREEVIEW(zond_treeviewfm_new( zond ));
+    zond->treeview[BAUM_FS] = SOND_TREEVIEW(g_object_new( ZOND_TYPE_TREEVIEWFM, "Projekt", zond, NULL ));
     zond->treeview[BAUM_INHALT] = SOND_TREEVIEW(zond_treeview_new( zond, (gint) BAUM_INHALT));
     zond->treeview[BAUM_AUSWERTUNG] = SOND_TREEVIEW(zond_treeview_new( zond, (gint) BAUM_AUSWERTUNG ));
 

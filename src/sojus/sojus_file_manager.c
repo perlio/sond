@@ -383,7 +383,7 @@ file_manager_entry_activate( GtkWidget* entry, gpointer data )
     path = add_string( path, g_strdup_printf( " %i-%i", sojus->regnr_akt,
             sojus->jahr_akt % 100 ) );
 
-    SondTreeviewFM* stvfm = sond_treeviewfm_new( );
+    SondTreeviewFM* stvfm = g_object_new( SOND_TYPE_TREEVIEWFM, NULL );
 
     file_manager_set_window( sojus, fm_window, stvfm );
 

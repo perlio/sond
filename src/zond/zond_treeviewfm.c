@@ -252,16 +252,6 @@ zond_treeviewfm_init( ZondTreeviewFM* ztvfm )
 }
 
 
-ZondTreeviewFM*
-zond_treeviewfm_new( Projekt* zond )
-{
-    ZondTreeviewFM* ztvfm = g_object_new( ZOND_TYPE_TREEVIEWFM, "Projekt", zond, NULL );
-
-    return ztvfm;
-}
-
-
-
 
 
 

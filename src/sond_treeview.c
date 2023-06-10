@@ -181,7 +181,7 @@ sond_treeview_selection_select_func( GtkTreeSelection* selection, GtkTreeModel* 
 
 
 static void
-sond_treeview_item_kopieren_activate( GtkMenuItem* item, gpointer user_data )
+sond_treeview_kopieren_activate( GtkMenuItem* item, gpointer user_data )
 {
     SondTreeview* stv = (SondTreeview*) user_data;
 
@@ -192,7 +192,7 @@ sond_treeview_item_kopieren_activate( GtkMenuItem* item, gpointer user_data )
 
 
 static void
-sond_treeview_item_ausschneiden_activate( GtkMenuItem* item, gpointer user_data )
+sond_treeview_ausschneiden_activate( GtkMenuItem* item, gpointer user_data )
 {
     SondTreeview* stv = (SondTreeview*) user_data;
 
@@ -260,16 +260,18 @@ sond_treeview_init( SondTreeview* stv )
 
     //Kopieren
     GtkWidget* item_kopieren = gtk_menu_item_new_with_label("Kopieren");
+    g_object_set_data( G_OBJECT(stv_private->contextmenu),
+            "item-kopieren", item_kopieren );
     g_signal_connect( G_OBJECT(item_kopieren), "activate",
-            G_CALLBACK(sond_treeview_item_kopieren_activate), (gpointer) stv );
+            G_CALLBACK(sond_treeview_kopieren_activate), (gpointer) stv );
     gtk_menu_shell_append( GTK_MENU_SHELL(stv_private->contextmenu), item_kopieren );
 
     //Verschieben
     GtkWidget* item_ausschneiden = gtk_menu_item_new_with_label("Ausschneiden");
-    g_object_set_data( G_OBJECT(item_ausschneiden), "ausschneiden",
-            GINT_TO_POINTER(1) );
+    g_object_set_data( G_OBJECT(stv_private->contextmenu),
+            "item-ausschneiden", item_ausschneiden );
     g_signal_connect( G_OBJECT(item_ausschneiden), "activate",
-            G_CALLBACK(sond_treeview_item_ausschneiden_activate), (gpointer) stv );
+            G_CALLBACK(sond_treeview_ausschneiden_activate), (gpointer) stv );
     gtk_menu_shell_append( GTK_MENU_SHELL(stv_private->contextmenu), item_ausschneiden );
 
     gtk_widget_show_all( stv_private->contextmenu );
@@ -278,20 +280,6 @@ sond_treeview_init( SondTreeview* stv )
             G_CALLBACK(sond_treeview_show_popupmenu), (gpointer) stv_private->contextmenu );
 
     return;
-}
-
-
-SondTreeview*
-sond_treeview_new( gint id )
-{
-    SondTreeview* stv = NULL;
-    SondTreeviewPrivate* stv_priv = NULL;
-
-    stv = g_object_new( SOND_TYPE_TREEVIEW, NULL );
-    stv_priv = sond_treeview_get_instance_private( stv );
-    stv_priv->id = id;
-
-    return stv;
 }
 
 
@@ -354,8 +342,25 @@ sond_treeview_expand_row( SondTreeview* stv, GtkTreeIter* iter )
 
     GtkTreePath* path = gtk_tree_model_get_path( gtk_tree_view_get_model(
             GTK_TREE_VIEW(stv) ), iter );
-//    gtk_tree_view_expand_to_path( GTK_TREE_VIEW(stv), path );
-    gtk_tree_view_expand_row( GTK_TREE_VIEW(stv), path, FALSE );
+    gtk_tree_view_expand_to_path( GTK_TREE_VIEW(stv), path );
+//    gtk_tree_view_expand_row( GTK_TREE_VIEW(stv), path, FALSE );
+    gtk_tree_path_free( path );
+
+    gtk_tree_view_columns_autosize( GTK_TREE_VIEW(stv) );
+
+    return;
+}
+
+
+void
+sond_treeview_expand_to_row( SondTreeview* stv, GtkTreeIter* iter )
+{
+    if ( !iter ) return;
+
+    GtkTreePath* path = gtk_tree_model_get_path( gtk_tree_view_get_model(
+            GTK_TREE_VIEW(stv) ), iter );
+    if ( gtk_tree_path_up( path ) )
+            gtk_tree_view_expand_to_path( GTK_TREE_VIEW(stv), path );
     gtk_tree_path_free( path );
 
     gtk_tree_view_columns_autosize( GTK_TREE_VIEW(stv) );

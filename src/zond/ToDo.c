@@ -3,13 +3,11 @@ Bugs:
     - Kopieren aus suchen-Fenster klappt nicht richtig
 
 ToDo:
-- Synchron-Punkte
-
 - Abschnitte neu organisieren
 
 - suchen
-    - Menu Struktur verschieben
-    - ggf. Beschränkbarkeit auf Bäume/Zweige/Punkte
+    - Beschränkbarkeit auf Zweige
+    - FS durchssuchen
 
 - BAUM_INHALT
     - Anbindungen in PDF einfügen
@@ -20,20 +18,15 @@ ToDo:
         (kompliziertes y_pos-Management erforderlich)
     - Farben für Markieren
     - Rummalen
-    - TextTreffer in Fenster anzeigen
     - angezeigte Seiten als Datei speichern
 
 - Kontextmenu Trees
-    - icons
     - öffnen
-        - öffnen
         - öffnen mit
-    - Copy/Paste
     - PDF: OCR/Reparieren/Textsuche
 
 - PDF
-    - mupdf/tesseract
-    - wenn ich namestrees rebalancieren könnte: auch podofo ersetzen (niedrig)
+    - Fundstellen auf Seitenzahlen umstellen
 
 - datei_oeffnen:
     - nicht-Win32 (niedrig)

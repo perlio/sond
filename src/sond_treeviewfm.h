@@ -28,8 +28,6 @@ struct _SondTreeviewFMClass
 };
 
 
-SondTreeviewFM* sond_treeviewfm_new( void );
-
 gint sond_treeviewfm_set_root( SondTreeviewFM*, const gchar*, gchar** );
 
 const gchar* sond_treeviewfm_get_root( SondTreeviewFM* );
@@ -50,6 +48,8 @@ gint sond_treeviewfm_paste_clipboard( SondTreeviewFM*, gboolean, gchar** );
 
 gint sond_treeviewfm_selection_loeschen( SondTreeviewFM*, gchar** );
 
+gint sond_treeviewfm_search( SondTreeviewFM*, GtkTreeIter*, const gchar*,
+        gboolean, GPtrArray**, gchar** );
 
 
 #endif // SOND_TREEVIEWFM_H_INCLUDED

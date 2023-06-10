@@ -140,7 +140,7 @@ sond_client_file_manager_create( SondClient* sond_client, gint jahr, gint regnr,
     swindow = gtk_scrolled_window_new( NULL, NULL );
     gtk_container_add( GTK_CONTAINER(file_manager->window), swindow );
 
-    file_manager->sond_treeviewfm = sond_treeviewfm_new( );
+    file_manager->sond_treeviewfm = g_object_new( SOND_TYPE_TREEVIEWFM, NULL );
 
 
     return TRUE;

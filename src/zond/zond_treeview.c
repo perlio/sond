@@ -467,35 +467,53 @@ zond_treeview_paste_as_link_activate( GtkMenuItem* item, gpointer user_data )
 
 
 void
-item_loeschen_activate( GtkMenuItem* item, gpointer user_data )
+zond_treeview_loeschen_activate( GtkMenuItem* item, gpointer user_data )
 {
     gint rc = 0;
     gchar* errmsg = NULL;
 
     Projekt* zond = (Projekt*) user_data;
 
+    rc = treeviews_selection_loeschen( zond, zond->baum_active, &errmsg );
+    if ( rc == -1 )
+    {
+        display_message( zond->app_window, "Löschen fehlgeschlagen -\n\nBei Aufruf "
+                "sond_treeviewfm_selection/treeviews_loeschen:\n", errmsg, NULL );
+        g_free( errmsg );
+    }
+
+    return;
 }
 
 
 void
-item_anbindung_entfernen_activate( GtkMenuItem* item, gpointer user_data )
+zond_treeview_anbindung_entfernen_activate( GtkMenuItem* item, gpointer user_data )
 {
     gint rc = 0;
     gchar* errmsg = NULL;
 
     Projekt* zond = (Projekt*) user_data;
 
+    rc = treeviews_selection_entfernen_anbindung( zond, zond->baum_active, &errmsg );
+    if ( rc )
+    {
+        display_message( zond->app_window, "Löschen von Anbindungen fehlgeschlagen\n\n",
+                errmsg, NULL );
+        g_free( errmsg );
+    }
+
+    return;
 }
 
 
 void
-item_jump_activate( GtkMenuItem* item, gpointer user_data )
+zond_treeview_jump_activate( GtkMenuItem* item, gpointer user_data )
 {
-    gint rc = 0;
-    gchar* errmsg = NULL;
-
     Projekt* zond = (Projekt*) user_data;
 
+    treeviews_jump_to_link_target( zond );
+
+    return;
 }
 
 
@@ -511,6 +529,29 @@ zond_treeview_datei_oeffnen_activate( GtkMenuItem* item, gpointer user_data )
     g_signal_emit_by_name( zond->treeview[zond->baum_active], "row-activated", path, NULL, zond );
 
     gtk_tree_path_free( path );
+
+    return;
+}
+
+
+static void
+zond_treeview_icon_activate( GtkMenuItem* item, gpointer user_data )
+{
+    gint rc = 0;
+    gint icon_id = 0;
+    gchar* errmsg = NULL;
+
+    Projekt* zond = (Projekt*) user_data;
+
+    icon_id = GPOINTER_TO_INT(g_object_get_data( G_OBJECT(item), "icon-id" ));
+
+    rc = treeviews_selection_change_icon( zond, zond->baum_active, zond->icon[icon_id].icon_name, &errmsg );
+    if ( rc == -1 )
+    {
+        display_message( zond->app_window, "Icon ändern fehlgeschlagen\n\n",
+                errmsg, NULL );
+        g_free( errmsg );
+    }
 
     return;
 }
@@ -566,8 +607,7 @@ zond_treeview_init_contextmenu( ZondTreeview* ztv )
     GtkWidget* menu_paste = gtk_menu_new();
 
     GtkWidget* item_paste_ge = gtk_menu_item_new_with_label( "Gleiche Ebene");
-    g_object_set_data( G_OBJECT(sond_treeview_get_contextmenu( SOND_TREEVIEW(ztv) )),
-            "item-paste-ge", item_paste_ge );
+    g_object_set_data( G_OBJECT(contextmenu), "item-paste-ge", item_paste_ge );
     gtk_menu_shell_append(GTK_MENU_SHELL(menu_paste), item_paste_ge );
     g_signal_connect( G_OBJECT(item_paste_ge), "activate",
             G_CALLBACK(zond_treeview_paste_activate), (gpointer) zond );
@@ -575,8 +615,7 @@ zond_treeview_init_contextmenu( ZondTreeview* ztv )
     GtkWidget* item_paste_up = gtk_menu_item_new_with_label( "Unterebene");
     g_object_set_data( G_OBJECT(item_paste_up), "kind",
             GINT_TO_POINTER(1) );
-    g_object_set_data( G_OBJECT(sond_treeview_get_contextmenu( SOND_TREEVIEW(ztv) )),
-            "item-paste-up", item_paste_up );
+    g_object_set_data( G_OBJECT(contextmenu), "item-paste-up", item_paste_up );
     g_signal_connect( G_OBJECT(item_paste_up), "activate",
             G_CALLBACK(zond_treeview_paste_activate), (gpointer) zond );
     gtk_menu_shell_append(GTK_MENU_SHELL(menu_paste), item_paste_up );
@@ -592,6 +631,8 @@ zond_treeview_init_contextmenu( ZondTreeview* ztv )
 
     GtkWidget* item_paste_as_link_ge = gtk_menu_item_new_with_label(
             "Gleiche Ebene");
+    g_object_set_data( G_OBJECT(contextmenu), "item-paste-as-link-ge",
+            item_paste_as_link_ge );
     g_object_set_data( G_OBJECT(item_paste_as_link_ge), "link",
             GINT_TO_POINTER(1) );
     g_signal_connect( G_OBJECT(item_paste_as_link_ge), "activate",
@@ -600,6 +641,8 @@ zond_treeview_init_contextmenu( ZondTreeview* ztv )
 
     GtkWidget* item_paste_as_link_up = gtk_menu_item_new_with_label(
             "Unterebene");
+    g_object_set_data( G_OBJECT(contextmenu), "item-paste-as-link-up",
+            item_paste_as_link_up );
     g_object_set_data( G_OBJECT(item_paste_as_link_up), "kind",
             GINT_TO_POINTER(1) );
     g_object_set_data( G_OBJECT(item_paste_as_link_up), "link",
@@ -617,29 +660,67 @@ zond_treeview_init_contextmenu( ZondTreeview* ztv )
     gtk_menu_shell_append( GTK_MENU_SHELL(contextmenu), item_separator_1 );
 
     //Punkt(e) löschen
-    GtkWidget* item_loeschen = gtk_menu_item_new_with_label("Punkte löschen");
+    GtkWidget* item_loeschen = gtk_menu_item_new_with_label("Löschen");
+    g_object_set_data( G_OBJECT(contextmenu), "item-loeschen", item_loeschen );
     g_signal_connect( G_OBJECT(item_loeschen), "activate",
-            G_CALLBACK(item_loeschen_activate), (gpointer) zond );
+            G_CALLBACK(zond_treeview_loeschen_activate), (gpointer) zond );
     gtk_menu_shell_append( GTK_MENU_SHELL(contextmenu), item_loeschen );
 
-    //Speichern als Projektdatei
+    //Anbindung entfernen
     GtkWidget* item_anbindung_entfernen = gtk_menu_item_new_with_label(
             "Anbindung entfernen");
+    g_object_set_data( G_OBJECT(contextmenu), "item-anbindung-entfernen",
+            item_anbindung_entfernen );
     g_signal_connect( G_OBJECT(item_anbindung_entfernen), "activate",
-            G_CALLBACK(item_anbindung_entfernen_activate), zond );
+            G_CALLBACK(zond_treeview_anbindung_entfernen_activate), zond );
     gtk_menu_shell_append( GTK_MENU_SHELL(contextmenu), item_anbindung_entfernen );
 
     GtkWidget* item_jump = gtk_menu_item_new_with_label( "Zu Linkziel springen" );
-    g_signal_connect( item_jump, "activate", G_CALLBACK(item_jump_activate), zond );
+    g_object_set_data( G_OBJECT(contextmenu), "item-jump", item_jump );
+    g_signal_connect( item_jump, "activate", G_CALLBACK(zond_treeview_jump_activate), zond );
     gtk_menu_shell_append( GTK_MENU_SHELL(contextmenu), item_jump );
 
     GtkWidget* item_separator_2 = gtk_separator_menu_item_new();
     gtk_menu_shell_append( GTK_MENU_SHELL(contextmenu), item_separator_2 );
 
+    //Icons ändern
+    GtkWidget* item_icon = gtk_menu_item_new_with_label( "Icon ändern" );
+
+    GtkWidget* menu_icon = gtk_menu_new( );
+
+    for ( gint i = 0; i < NUMBER_OF_ICONS; i++ )
+    {
+        gchar* key = NULL;
+
+        GtkWidget *icon = gtk_image_new_from_icon_name( zond->icon[i].icon_name, GTK_ICON_SIZE_MENU );
+        GtkWidget *box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
+        GtkWidget *label = gtk_label_new ( zond->icon[i].display_name );
+        GtkWidget *item_menu_icons = gtk_menu_item_new ( );
+        gtk_container_add (GTK_CONTAINER (box), icon);
+        gtk_container_add (GTK_CONTAINER (box), label);
+        gtk_container_add (GTK_CONTAINER (item_menu_icons), box);
+
+        key = g_strdup_printf( "item-menu-icons-%i", i );
+        g_object_set_data( G_OBJECT(contextmenu), key, item_menu_icons );
+        g_free( key );
+
+        g_object_set_data( G_OBJECT(item_menu_icons), "icon-id",
+                GINT_TO_POINTER(i) );
+        g_signal_connect( item_menu_icons, "activate",
+                G_CALLBACK(zond_treeview_icon_activate), (gpointer) zond );
+
+        gtk_menu_shell_append( GTK_MENU_SHELL(menu_icon), item_menu_icons );
+    }
+
+    gtk_menu_item_set_submenu( GTK_MENU_ITEM(item_icon),
+            menu_icon );
+
+    gtk_menu_shell_append( GTK_MENU_SHELL(contextmenu), item_icon );
+
     //Datei Öffnen
     GtkWidget* item_datei_oeffnen = gtk_menu_item_new_with_label( "Öffnen" );
-    g_object_set_data( G_OBJECT(sond_treeview_get_contextmenu( SOND_TREEVIEW(ztv) )),
-            "item-datei-oeffnen", item_datei_oeffnen );
+    g_object_set_data( G_OBJECT(contextmenu), "item-datei-oeffnen",
+            item_datei_oeffnen );
     g_signal_connect( item_datei_oeffnen, "activate",
                 G_CALLBACK(zond_treeview_datei_oeffnen_activate), (gpointer) zond );
     gtk_menu_shell_append( GTK_MENU_SHELL(contextmenu), item_datei_oeffnen );

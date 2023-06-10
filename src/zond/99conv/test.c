@@ -8,6 +8,7 @@
 #include "../zond_tree_store.h"
 #include "../zond_gemini.h"
 #include "../../sond_treeview.h"
+#include "../../sond_treeviewfm.h"
 #include "../../misc.h"
 #include "../../sond_database_node.h"
 #include "../../sond_database_entity.h"
@@ -21,6 +22,9 @@
 gint
 test( Projekt* zond, gchar** errmsg )
 {
+    GPtrArray* arr_hits = NULL;
+
+    sond_treeviewfm_search( SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), NULL, "", FALSE, &arr_hits, errmsg );
     printf("%s\n", g_get_tmp_dir() );
     return 0;
 }

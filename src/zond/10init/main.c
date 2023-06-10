@@ -199,10 +199,10 @@ init( GtkApplication* app, Projekt* zond )
     //benötigte Arrays erzeugen
     zond->arr_pv = g_ptr_array_new( );
 
+    init_icons( zond );
+
     init_app_window( zond );
     gtk_application_add_window( app, GTK_WINDOW(zond->app_window) );
-
-    init_icons( zond );
 
     init_headerbar( zond );
 

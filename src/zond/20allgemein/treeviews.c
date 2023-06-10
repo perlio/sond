@@ -1257,6 +1257,7 @@ treeviews_jump_to_iter( Projekt* zond, GtkTreeIter* iter )
 
     gtk_widget_grab_focus( GTK_WIDGET(zond->treeview[baum_target]) );
 
+    sond_treeview_expand_to_row( zond->treeview[baum_target], iter );
     sond_treeview_set_cursor( zond->treeview[baum_target], iter );
 
     return;
@@ -1269,10 +1270,12 @@ treeviews_jump_to_link_target( Projekt* zond )
     GtkTreeIter iter = { 0 };
     GtkTreeIter iter_target = { 0 };
 
-    sond_treeview_get_cursor( zond->treeview[zond->baum_active], &iter );
-    zond_tree_store_get_iter_target( &iter, &iter_target );
+    if ( sond_treeview_get_cursor( zond->treeview[zond->baum_active], &iter ) )
+    {
+        zond_tree_store_get_iter_target( &iter, &iter_target );
 
-    treeviews_jump_to_iter( zond, &iter_target );
+        treeviews_jump_to_iter( zond, &iter_target );
+    }
 
     return;
 }

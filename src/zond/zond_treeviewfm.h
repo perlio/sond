@@ -63,10 +63,5 @@ struct _ZondTreeviewFMClass
 };
 
 
-ZondTreeviewFM* zond_treeviewfm_new( Projekt* );
-
-
-
-
 
 #endif // ZOND_TREEVIEWFM_H_INCLUDED
