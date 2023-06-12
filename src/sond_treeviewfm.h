@@ -46,10 +46,5 @@ gint sond_treeviewfm_create_dir( SondTreeviewFM*, gboolean, gchar** );
 
 gint sond_treeviewfm_paste_clipboard( SondTreeviewFM*, gboolean, gchar** );
 
-gint sond_treeviewfm_selection_loeschen( SondTreeviewFM*, gchar** );
-
-gint sond_treeviewfm_search( SondTreeviewFM*, GtkTreeIter*, const gchar*,
-        gboolean, GPtrArray**, gchar** );
-
 
 #endif // SOND_TREEVIEWFM_H_INCLUDED

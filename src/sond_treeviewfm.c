@@ -1040,6 +1040,60 @@ sond_treeviewfm_paste_activate( GtkMenuItem* item, gpointer data )
 }
 
 
+static gint
+sond_treeviewfm_remove_node( SondTreeviewFM* stvfm, GtkTreeIter* iter_file, GFile* file,
+        GFileInfo* info_file, gpointer data, gchar** errmsg )
+{
+    gint rc = 0;
+    GFileType type = G_FILE_TYPE_UNKNOWN;
+
+    type = g_file_info_get_file_type( info_file );
+
+    if ( type == G_FILE_TYPE_DIRECTORY )
+    {
+        rc = sond_treeviewfm_dir_foreach( stvfm, iter_file, file, FALSE,
+                sond_treeviewfm_remove_node, data, errmsg );
+        if ( rc == -1 ) ERROR_S
+        else if ( rc ) return rc; //Verzeichnis nicht leer, weil
+                                    //Datei angebunden war, übersprungen wurde oder Abbruch gewählt
+    }
+
+    rc = sond_treeviewfm_move_copy_create_delete( stvfm, NULL, &file, 4, errmsg );
+    if ( rc == -1 ) ERROR_SOND( "sond_treeviewfm_move_copy_create_delete" )
+    else if ( rc == 1 ) return 1;
+
+    if ( iter_file ) gtk_tree_store_remove( GTK_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(stvfm) )),
+            iter_file );
+
+    return 0;
+}
+
+
+static gint
+sond_treeviewfm_foreach_loeschen( SondTreeview* stv, GtkTreeIter* iter,
+        gpointer data, gchar** errmsg )
+{
+    gint rc = 0;
+    GFileInfo* info = NULL;
+    GFile* file = NULL;
+    gchar* full_path = NULL;
+
+    gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(stv) ), iter, 0, &info, -1 );
+
+    full_path = sond_treeviewfm_get_full_path( SOND_TREEVIEWFM(stv), iter );
+    file = g_file_new_for_path( full_path );
+    g_free( full_path );
+
+    rc = sond_treeviewfm_remove_node( SOND_TREEVIEWFM(stv), iter, file, info, data, errmsg );
+    g_object_unref( info );
+    g_object_unref( file );
+    if ( rc == -1 ) ERROR_SOND( "sond_treeviewfm_remove_node" )
+    else if ( rc == 2 ) return 1;
+
+    return 0;
+}
+
+
 static void
 sond_treeviewfm_loeschen_activate( GtkMenuItem* item, gpointer data )
 {
@@ -1048,8 +1102,9 @@ sond_treeviewfm_loeschen_activate( GtkMenuItem* item, gpointer data )
 
     SondTreeviewFM* stvfm = (SondTreeviewFM*) data;
 
-    rc = sond_treeviewfm_selection_loeschen( stvfm, &errmsg );
-    if ( rc )
+    rc = sond_treeview_selection_foreach( SOND_TREEVIEW(stvfm),
+            sond_treeviewfm_foreach_loeschen, NULL, &errmsg );
+    if ( rc == -1 )
     {
         display_message( gtk_widget_get_toplevel( GTK_WIDGET(stvfm) ),
                 "Löschen nicht möglich\n\n", errmsg, NULL );
@@ -1072,6 +1127,143 @@ sond_treeviewfm_datei_oeffnen_activate( GtkMenuItem* item, gpointer data )
     g_signal_emit_by_name( stvfm, "row-activated", path, NULL, NULL );
 
     gtk_tree_path_free( path );
+
+    return;
+}
+
+
+typedef struct _SearchFS
+{
+    const gchar* needle;
+    gboolean exact_match;
+    GPtrArray* arr_hits;
+} SearchFS;
+
+
+static gint
+sond_treeviewfm_search_needle( SondTreeviewFM* stvfm, GtkTreeIter* iter,
+        GFile* file, GFileInfo* info, gpointer data, gchar** errmsg )
+{
+    gchar* path = NULL;
+    gchar* basename = NULL;
+    gboolean found = FALSE;
+
+    SearchFS* search_fs = (SearchFS*) data;
+
+    basename = g_file_get_basename( file );
+
+    if ( search_fs->exact_match == TRUE )
+    {
+        if ( !g_strcmp0( basename, search_fs->needle ) ) found = TRUE;
+    }
+    else if ( strstr( basename, search_fs->needle ) ) found = TRUE;
+    g_free( basename );
+
+    if ( found )
+    {
+        path = g_file_get_path( file );
+        g_ptr_array_add( search_fs->arr_hits, path );
+    }
+
+    return 0;
+}
+
+
+static gint
+sond_treeviewfm_search( SondTreeview* stv, GtkTreeIter* iter, gpointer data,
+        gchar** errmsg )
+{
+    gint rc = 0;
+    GFile* file = NULL;
+    gchar* path_root = NULL;
+
+    path_root = sond_treeviewfm_get_full_path( SOND_TREEVIEWFM(stv), iter );
+    file = g_file_new_for_path( path_root );
+    g_free( path_root );
+
+    rc = sond_treeviewfm_search_needle( SOND_TREEVIEWFM(stv), iter, file,
+            NULL, data, errmsg );
+    if ( rc )
+    {
+        g_object_unref( file );
+        ERROR_S
+    }
+
+    if ( g_file_query_file_type( file, G_FILE_QUERY_INFO_NONE, NULL )
+            == G_FILE_TYPE_DIRECTORY )
+    {
+        rc = sond_treeviewfm_dir_foreach( SOND_TREEVIEWFM(stv), iter, file, TRUE,
+                sond_treeviewfm_search_needle, data, errmsg );
+        if ( rc == -1 )
+        {
+            g_object_unref( file );
+            ERROR_S
+        }
+    }
+
+    g_object_unref( file );
+
+    return rc;
+}
+
+
+static void
+sond_treeviewfm_search_activate( GtkMenuItem* item, gpointer data )
+{
+    gboolean only_sel = FALSE;
+    gint rc = 0;
+    gchar* errmsg = NULL;
+    gchar* search_text = NULL;
+    gboolean exact_match = FALSE;
+    SearchFS search_fs = { 0 };
+
+    SondTreeviewFM* stvfm = (SondTreeviewFM*) data;
+
+    rc = abfrage_frage( gtk_widget_get_toplevel( GTK_WIDGET(stvfm) ),
+            "Dateisuche", "Bitte Suchtext eingeben", &search_text );
+    if ( rc != GTK_RESPONSE_YES ) return;
+    else if ( !g_strcmp0( search_text, "" ) )
+    {
+        g_free( search_text );
+
+        return;
+    }
+
+    only_sel = (gboolean) GPOINTER_TO_INT(g_object_get_data( G_OBJECT(item), "sel" ));
+
+    search_fs.arr_hits = g_ptr_array_new_with_free_func( g_free );
+    search_fs.exact_match = FALSE;
+    search_fs.needle = search_text;
+
+    if ( only_sel ) rc = sond_treeview_selection_foreach( SOND_TREEVIEW(stvfm),
+            sond_treeviewfm_search, &search_fs, &errmsg );
+    else rc = sond_treeviewfm_search(SOND_TREEVIEW(stvfm), NULL, &search_fs, &errmsg );
+    if ( rc == -1 )
+    {
+        display_message( gtk_widget_get_toplevel( GTK_WIDGET(stvfm) ),
+                "Fehler bei Dateisuche\n\n", errmsg, NULL );
+        g_free( errmsg );
+        g_ptr_array_unref( search_fs.arr_hits );
+
+        return;
+    }
+
+    if ( search_fs.arr_hits->len == 0 )
+    {
+        display_message( gtk_widget_get_toplevel( GTK_WIDGET(stvfm) ),
+                "Keine Datei gefunden", NULL );
+        g_ptr_array_unref( search_fs.arr_hits );
+
+        return;
+    }
+
+    //Ergebnisse anzeigen
+    for ( gint i = 0; i < search_fs.arr_hits->len; i++ )
+    {
+        printf( "%s\n", (gchar*) g_ptr_array_index( search_fs.arr_hits, i ) );
+    }
+
+    g_ptr_array_unref( search_fs.arr_hits );
 
     return;
 }
@@ -1148,6 +1340,10 @@ sond_treeviewfm_init_contextmenu( SondTreeviewFM* stvfm )
             G_CALLBACK(sond_treeviewfm_loeschen_activate), (gpointer) stvfm );
     gtk_menu_shell_append( GTK_MENU_SHELL(contextmenu), item_loeschen );
 
+    //Trennblatt
+    GtkWidget* item_separator_1 = gtk_separator_menu_item_new();
+    gtk_menu_shell_append( GTK_MENU_SHELL(contextmenu), item_separator_1 );
+
     //Datei Öffnen
     GtkWidget* item_datei_oeffnen = gtk_menu_item_new_with_label( "Öffnen" );
     g_object_set_data( G_OBJECT(contextmenu), "item-datei-oeffnen",
@@ -1155,6 +1351,29 @@ sond_treeviewfm_init_contextmenu( SondTreeviewFM* stvfm )
     g_signal_connect( item_datei_oeffnen, "activate",
                 G_CALLBACK(sond_treeviewfm_datei_oeffnen_activate), (gpointer) stvfm );
     gtk_menu_shell_append( GTK_MENU_SHELL(contextmenu), item_datei_oeffnen );
+
+    //In Projektverzeichnis suchen
+    GtkWidget* item_search = gtk_menu_item_new_with_label("Suchen in Projektverzeichnis");
+
+    GtkWidget* menu_search = gtk_menu_new();
+
+    GtkWidget* item_search_all = gtk_menu_item_new_with_label( "Gesamtes Verzeichnis");
+    g_object_set_data( G_OBJECT(contextmenu), "item-search-all", item_search_all );
+    g_signal_connect( G_OBJECT(item_search_all), "activate",
+            G_CALLBACK(sond_treeviewfm_search_activate), (gpointer) stvfm );
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu_search), item_search_all );
+
+    GtkWidget* item_search_sel = gtk_menu_item_new_with_label( "Nur markierte Punkte");
+    g_object_set_data( G_OBJECT(item_search_sel), "sel",
+            GINT_TO_POINTER(1) );
+    g_object_set_data( G_OBJECT(contextmenu), "item-search-sel", item_search_sel );
+    g_signal_connect( G_OBJECT(item_search_sel), "activate",
+            G_CALLBACK(sond_treeviewfm_search_activate), (gpointer) stvfm );
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu_search), item_search_sel );
+
+    gtk_menu_item_set_submenu( GTK_MENU_ITEM(item_search), menu_search );
+
+    gtk_menu_shell_append( GTK_MENU_SHELL(contextmenu), item_search );
 
     gtk_widget_show_all( contextmenu );
 
@@ -1731,122 +1950,4 @@ sond_treeviewfm_paste_clipboard( SondTreeviewFM* stvfm, gboolean kind, gchar** e
 
     return 0;
 }
-
-
-static gint
-sond_treeviewfm_remove_node( SondTreeviewFM* stvfm, GtkTreeIter* iter_file, GFile* file,
-        GFileInfo* info_file, gpointer data, gchar** errmsg )
-{
-    gint rc = 0;
-    GFileType type = G_FILE_TYPE_UNKNOWN;
-
-    type = g_file_info_get_file_type( info_file );
-
-    if ( type == G_FILE_TYPE_DIRECTORY )
-    {
-        rc = sond_treeviewfm_dir_foreach( stvfm, iter_file, file, FALSE,
-                sond_treeviewfm_remove_node, data, errmsg );
-        if ( rc == -1 ) ERROR_S
-        else if ( rc ) return rc; //Verzeichnis nicht leer, weil
-                                    //Datei angebunden war, übersprungen wurde oder Abbruch gewählt
-    }
-
-    rc = sond_treeviewfm_move_copy_create_delete( stvfm, NULL, &file, 4, errmsg );
-    if ( rc == -1 ) ERROR_SOND( "sond_treeviewfm_move_copy_create_delete" )
-    else if ( rc == 1 ) return 1;
-
-    if ( iter_file ) gtk_tree_store_remove( GTK_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(stvfm) )),
-            iter_file );
-
-    return 0;
-}
-
-
-static gint
-sond_treeviewfm_foreach_loeschen( SondTreeview* stv, GtkTreeIter* iter,
-        gpointer data, gchar** errmsg )
-{
-    gint rc = 0;
-    GFileInfo* info = NULL;
-    GFile* file = NULL;
-    gchar* full_path = NULL;
-
-    gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(stv) ), iter, 0, &info, -1 );
-
-    full_path = sond_treeviewfm_get_full_path( SOND_TREEVIEWFM(stv), iter );
-    file = g_file_new_for_path( full_path );
-    g_free( full_path );
-
-    rc = sond_treeviewfm_remove_node( SOND_TREEVIEWFM(stv), iter, file, info, data, errmsg );
-    g_object_unref( info );
-    g_object_unref( file );
-    if ( rc == -1 ) ERROR_SOND( "sond_treeviewfm_remove_node" )
-    else if ( rc == 2 ) return 1;
-
-    return 0;
-}
-
-
-gint
-sond_treeviewfm_selection_loeschen( SondTreeviewFM* stvfm, gchar** errmsg )
-{
-    gint rc = 0;
-
-    rc = sond_treeview_selection_foreach( SOND_TREEVIEW(stvfm),
-            sond_treeviewfm_foreach_loeschen, NULL, errmsg );
-    if ( rc == -1 ) ERROR_S
-
-    return 0;
-}
-
-typedef struct _SearchFS
-{
-    gchar* needle;
-    gboolean exact_match;
-    GPtrArray* arr_hits;
-} SearchFS;
-
-
-static gint
-sond_treeviewfm_search_needle( SondTreeviewFM* stvfm, GtkTreeIter* iter,
-        GFile* file, GFileInfo* info, gpointer data, gchar** errmsg )
-{
-    SearchFS* search_fs = (SearchFS*) data;
-
-    printf("%s\n", g_file_info_get_name( info ) );
-
-    return 0;
-}
-
-
-gint
-sond_treeviewfm_search( SondTreeviewFM* stvfm, GtkTreeIter* iter,
-        const gchar* needle, gboolean exact_match, GPtrArray** arr_hits, gchar** errmsg )
-{
-    gint rc = 0;
-    GFile* file = NULL;
-    gchar* path_root = NULL;
-
-    *arr_hits = g_ptr_array_new( );
-
-    SearchFS search_fs = { needle, exact_match, *arr_hits };
-
-    path_root = sond_treeviewfm_get_full_path( stvfm, iter );
-    file = g_file_new_for_path( path_root );
-    g_free( path_root );
-
-    rc = sond_treeviewfm_dir_foreach( stvfm, iter, file, TRUE,
-            sond_treeviewfm_search_needle, &search_fs, errmsg );
-    g_object_unref( file );
-    if ( rc == -1 ) ERROR_S
-
-    if ( (*arr_hits)->len == 0 )
-    {
-        g_ptr_array_unref( *arr_hits );
-        *arr_hits = NULL;
-    }
-
-    return rc;
-}
-
 

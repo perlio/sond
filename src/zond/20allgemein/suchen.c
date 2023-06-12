@@ -100,7 +100,7 @@ cb_suchen_nach_auswertung( GtkMenuItem* item, gpointer user_data )
 
     Projekt* zond =(Projekt*) user_data;
 
-    GtkWidget* list_box = g_object_get_data( G_OBJECT(item), "list-box" );
+    GtkWidget* list_box = g_object_get_data( G_OBJECT(item), "listbox" );
     gboolean child = (gboolean) GPOINTER_TO_INT(g_object_get_data(
             G_OBJECT(item), "child" ));
 
@@ -243,7 +243,7 @@ suchen_fuellen_ergebnisfenster( Projekt* zond, GtkWidget* ergebnisfenster,
     GtkWidget* list_box = NULL;
     Node node = { 0 };
 
-    list_box = g_object_get_data( G_OBJECT(ergebnisfenster), "list-box" );
+    list_box = g_object_get_data( G_OBJECT(ergebnisfenster), "listbox" );
 
     for ( gint i = 0; i < arr_treffer->len; i++ )
     {
@@ -261,27 +261,12 @@ suchen_fuellen_ergebnisfenster( Projekt* zond, GtkWidget* ergebnisfenster,
 static GtkWidget*
 suchen_erzeugen_ergebnisfenster( Projekt* zond, const gchar* titel )
 {
+    GtkWidget* window = NULL;
+    GtkWidget* listbox = NULL;
+    GtkWidget* headerbar = NULL;
+
     //Fenster erzeugen
-    GtkWidget* window = gtk_window_new( GTK_WINDOW_TOPLEVEL );
-    gtk_window_set_default_size( GTK_WINDOW(window), 1000, 400 );
-    gtk_window_set_transient_for( GTK_WINDOW(window), GTK_WINDOW(zond->app_window) );
-
-    GtkWidget* swindow = gtk_scrolled_window_new( NULL, NULL );
-    GtkWidget* list_box = gtk_list_box_new( );
-    gtk_list_box_set_selection_mode( GTK_LIST_BOX(list_box),
-            GTK_SELECTION_MULTIPLE );
-    gtk_list_box_set_activate_on_single_click( GTK_LIST_BOX(list_box), FALSE );
-
-    g_object_set_data( G_OBJECT(window), "list-box", list_box );
-
-    gtk_container_add( GTK_CONTAINER(swindow), list_box );
-    gtk_container_add( GTK_CONTAINER(window), swindow );
-
-    //Headerbar erzeugen
-    GtkWidget* headerbar = gtk_header_bar_new( );
-    gtk_header_bar_set_decoration_layout(GTK_HEADER_BAR(headerbar), ":minimize,close");
-    gtk_header_bar_set_show_close_button(GTK_HEADER_BAR(headerbar), TRUE);
-    gtk_header_bar_set_title( GTK_HEADER_BAR(headerbar), titel );
+    window = result_listbox_new( GTK_WINDOW(zond->app_window), titel );
 
     //Menu Button
     GtkWidget* suchen_menu_button = gtk_menu_button_new( );
@@ -311,21 +296,22 @@ suchen_erzeugen_ergebnisfenster( Projekt* zond, const gchar* titel )
     gtk_menu_item_set_submenu( GTK_MENU_ITEM(suchen_nach_auswertung),
             suchen_nach_auswertung_ebene );
 
-    g_object_set_data( G_OBJECT(gleiche_ebene), "list-box", list_box );
-    g_object_set_data( G_OBJECT(unterpunkt), "list-box", list_box );
-    g_object_set_data( G_OBJECT(unterpunkt), "child", GINT_TO_POINTER(1) );
-
     //menu sichtbar machen
     gtk_widget_show_all( suchen_menu );
 
+    listbox = (GtkWidget*) g_object_get_data( G_OBJECT(window), "listbox" );
+    g_object_set_data( G_OBJECT(gleiche_ebene), "listbox", listbox );
+    g_object_set_data( G_OBJECT(unterpunkt), "listbox", listbox );
+    g_object_set_data( G_OBJECT(unterpunkt), "child", GINT_TO_POINTER(1) );
+
     //einfügen
+    headerbar = (GtkWidget*) g_object_get_data( G_OBJECT(window), "headerbar" );
     gtk_menu_button_set_popup( GTK_MENU_BUTTON(suchen_menu_button), suchen_menu );
     gtk_header_bar_pack_start( GTK_HEADER_BAR(headerbar), suchen_menu_button );
-    gtk_window_set_titlebar( GTK_WINDOW(window), headerbar );
 
     gtk_widget_show_all( window );
 
-    g_signal_connect( list_box, "row-activated", G_CALLBACK(cb_lb_row_activated),
+    g_signal_connect( listbox, "row-activated", G_CALLBACK(cb_lb_row_activated),
             (gpointer) zond );
     g_signal_connect( gleiche_ebene, "activate",
             G_CALLBACK(cb_suchen_nach_auswertung), (gpointer) zond );

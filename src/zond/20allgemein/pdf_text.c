@@ -228,32 +228,17 @@ static GtkWidget*
 pdf_text_oeffnen_fenster( Projekt* zond, GPtrArray* arr_rel_path,
         GArray* arr_pdf_text_occ, gchar* search_text )
 {
-    //Fenster erzeugen
-    GtkWidget* window = gtk_window_new( GTK_WINDOW_TOPLEVEL );
-    gtk_window_set_default_size( GTK_WINDOW(window), 1000, 400 );
-//    gtk_window_set_transient_for( GTK_WINDOW(window), GTK_WINDOW(zond->app_window) );
+    gchar* title = NULL;
+    GtkWidget* window = NULL;
+    GtkWidget* listbox = NULL;
+    GtkWidget* headerbar = NULL;
 
-    GtkWidget* swindow = gtk_scrolled_window_new( NULL, NULL );
-    GtkWidget* list_box = gtk_list_box_new( );
-    gtk_list_box_set_selection_mode( GTK_LIST_BOX(list_box),
-            GTK_SELECTION_MULTIPLE );
-    gtk_list_box_set_activate_on_single_click( GTK_LIST_BOX(list_box), FALSE );
-
-    g_object_set_data( G_OBJECT(window), "list-box", list_box );
-    g_object_set_data( G_OBJECT(list_box), "arr-pdf-text-occ", arr_pdf_text_occ );
-
-    gtk_container_add( GTK_CONTAINER(swindow), list_box );
-    gtk_container_add( GTK_CONTAINER(window), swindow );
-
-    //Headerbar erzeugen
-    GtkWidget* headerbar = gtk_header_bar_new( );
-    gtk_header_bar_set_decoration_layout(GTK_HEADER_BAR(headerbar), ":minimize,close");
-    gtk_header_bar_set_show_close_button(GTK_HEADER_BAR(headerbar), TRUE);
-    gchar* title = g_strconcat( "Suchtext: ", search_text, NULL );
-    gtk_header_bar_set_title( GTK_HEADER_BAR(headerbar), title );
+    title = g_strconcat( "Suchtext: ", search_text, NULL );
+    window = result_listbox_new( NULL, title );
     g_free( title );
 
-    gtk_window_set_titlebar( GTK_WINDOW(window), headerbar );
+    listbox = (GtkWidget*) g_object_get_data( G_OBJECT(window), "listbox" );
+    g_object_set_data( G_OBJECT(listbox), "arr-pdf-text-occ", arr_pdf_text_occ );
 
     //popover
     GtkWidget* button_sql = gtk_button_new_with_label( "Duchsuchte PDFs" );
@@ -273,13 +258,14 @@ pdf_text_oeffnen_fenster( Projekt* zond, GPtrArray* arr_rel_path,
     GtkWidget* label = gtk_label_new( text );
     g_free( text );
     gtk_widget_show_all( label );
+    headerbar = (GtkWidget*) g_object_get_data( G_OBJECT(window), "headerbar" );
     gtk_header_bar_pack_end( GTK_HEADER_BAR(headerbar), button_sql );
 
     gtk_container_add( GTK_CONTAINER(popover), label );
 
-    g_signal_connect( list_box, "row-activated", G_CALLBACK(cb_textsuche_act),
+    g_signal_connect( listbox, "row-activated", G_CALLBACK(cb_textsuche_act),
             (gpointer) zond );
-    g_signal_connect( list_box, "row-selected",
+    g_signal_connect( listbox, "row-selected",
             G_CALLBACK(cb_textsuche_changed), (gpointer) zond );
     g_signal_connect( button_sql, "clicked", G_CALLBACK(cb_button_pdf_popover),
             (gpointer) popover );
@@ -297,7 +283,7 @@ pdf_text_anzeigen_ergebnisse( Projekt* zond, gchar* search_text, GPtrArray* arr_
 {
     GtkWidget* window = pdf_text_oeffnen_fenster( zond, arr_rel_path, arr_pdf_text_occ, search_text );
 
-    GtkListBox* list_box = g_object_get_data( G_OBJECT(window), "list-box" );
+    GtkListBox* list_box = g_object_get_data( G_OBJECT(window), "listbox" );
 
     pdf_text_fuellen_fenster( zond, list_box, arr_pdf_text_occ );
 

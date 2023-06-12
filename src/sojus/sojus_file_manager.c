@@ -170,13 +170,9 @@ file_manager_cb_loeschen( GtkWidget* item, gpointer data )
 
     SondTreeviewFM* stvfm = (SondTreeviewFM*) data;
 
-    rc = sond_treeviewfm_selection_loeschen( stvfm, &errmsg );
-    if ( rc == -1 )
-    {
-        display_message( gtk_widget_get_toplevel( GTK_WIDGET(stvfm) ), "Fehler bei Löschen -\n\nBei Aufruf "
-                "treeview_selection_foreach:\n", errmsg, NULL );
-        g_free( errmsg );
-    }
+    g_signal_emit_by_name( g_object_get_data( G_OBJECT(
+            sond_treeview_get_contextmenu( SOND_TREEVIEW(stvfm) )),
+            "item-loeschen" ), "activate", stvfm );
 
     return;
 }

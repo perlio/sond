@@ -98,4 +98,6 @@ gchar* misc_get_calendar( GtkCalendar* );
 
 gchar* get_base_dir( void );
 
+GtkWidget* result_listbox_new( GtkWindow*, const gchar* );
+
 #endif // MISC_H_INCLUDED

@@ -401,6 +401,40 @@ get_base_dir( void )
 }
 
 
+GtkWidget*
+result_listbox_new( GtkWindow* parent_window, const gchar* titel )
+{
+    GtkWidget* window = NULL;
+    GtkWidget* scrolled_window = NULL;
+    GtkWidget* listbox = NULL;
+    GtkWidget* headerbar = NULL;
 
+    //Fenster erzeugen
+    window = gtk_window_new( GTK_WINDOW_TOPLEVEL );
+    gtk_window_set_default_size( GTK_WINDOW(window), 1000, 400 );
+    if ( parent_window ) gtk_window_set_transient_for( GTK_WINDOW(window), parent_window );
+
+    scrolled_window = gtk_scrolled_window_new( NULL, NULL );
+    listbox = gtk_list_box_new( );
+    gtk_list_box_set_selection_mode( GTK_LIST_BOX(listbox), GTK_SELECTION_MULTIPLE );
+    gtk_list_box_set_activate_on_single_click( GTK_LIST_BOX(listbox), FALSE );
+
+    gtk_container_add( GTK_CONTAINER(scrolled_window), listbox );
+    gtk_container_add( GTK_CONTAINER(window), scrolled_window );
+
+    //Headerbar erzeugen
+    headerbar = gtk_header_bar_new( );
+    gtk_header_bar_set_decoration_layout(GTK_HEADER_BAR(headerbar), ":minimize,close");
+    gtk_header_bar_set_show_close_button(GTK_HEADER_BAR(headerbar), TRUE);
+    gtk_header_bar_set_title( GTK_HEADER_BAR(headerbar), titel );
+    gtk_window_set_titlebar( GTK_WINDOW(window), headerbar );
+
+    gtk_widget_show_all( window );
+
+    g_object_set_data( G_OBJECT(window), "listbox", listbox );
+    g_object_set_data( G_OBJECT(window), "headerbar", headerbar );
+
+    return window;
+}
 
 
