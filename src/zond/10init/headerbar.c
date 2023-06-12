@@ -401,7 +401,6 @@ cb_datei_ocr( GtkMenuItem* item, gpointer data )
 static void
 cb_item_punkt_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
 {
-    gpointer ptr = NULL;
     gchar* key_item = NULL;
 
     Projekt* zond = (Projekt*) user_data;
@@ -410,15 +409,13 @@ cb_item_punkt_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
             G_OBJECT(item), "kind" ));
 
     if ( zond->baum_active== KEIN_BAUM ) return;
-    else if ( zond->baum_active == BAUM_FS ) ptr = zond->treeview[zond->baum_active];
-    else ptr = zond;
 
     if ( !child ) key_item = "item-punkt-einfuegen-ge";
     else key_item = "item-punkt-einfuegen-up";
 
-    g_signal_emit_by_name( g_object_get_data(
+    gtk_menu_item_activate( g_object_get_data(
             G_OBJECT(sond_treeview_get_contextmenu( zond->treeview[zond->baum_active] )),
-            key_item ), "activate", ptr );
+            key_item ) );
 
     return;
 }
@@ -454,9 +451,9 @@ cb_kopieren_activate( GtkMenuItem* item, gpointer user_data )
 
     if ( zond->baum_active == KEIN_BAUM ) return;
 
-    g_signal_emit_by_name( g_object_get_data( G_OBJECT(
+    gtk_menu_item_activate( g_object_get_data( G_OBJECT(
             sond_treeview_get_contextmenu( zond->treeview[zond->baum_active] )),
-            "item-kopieren" ), "activate", zond->treeview[zond->baum_active] );
+            "item-kopieren" ) );
 
     return;
 }
@@ -469,9 +466,9 @@ cb_ausschneiden_activate( GtkMenuItem* item, gpointer user_data )
 
     if ( zond->baum_active == KEIN_BAUM ) return;
 
-    g_signal_emit_by_name( g_object_get_data( G_OBJECT(
+    gtk_menu_item_activate( g_object_get_data( G_OBJECT(
             sond_treeview_get_contextmenu( zond->treeview[zond->baum_active] )),
-            "item-ausschneiden" ), "activate", zond->treeview[zond->baum_active] );
+            "item-ausschneiden" ) );
 
     return;
 }
@@ -491,26 +488,21 @@ cb_clipboard_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
     else if ( zond->baum_active == BAUM_FS && link ) return;
     else if ( !link )
     {
-        gpointer data = NULL;
-
-        if ( zond->baum_active == BAUM_FS ) data = zond->treeview[BAUM_FS];
-        else data = zond;
-
-        if ( !kind ) g_signal_emit_by_name( g_object_get_data(
+        if ( !kind ) gtk_menu_item_activate( g_object_get_data(
                 G_OBJECT(sond_treeview_get_contextmenu( zond->treeview[zond->baum_active] )),
-                "item-paste-ge" ), "activate", data );
-        else g_signal_emit_by_name( g_object_get_data(
+                "item-paste-ge" ) );
+        else gtk_menu_item_activate( g_object_get_data(
                 G_OBJECT(sond_treeview_get_contextmenu( zond->treeview[zond->baum_active] )),
-                "item-paste-up" ), "activate", data );
+                "item-paste-up" ) );
     }
     else //baum == INHALT oder AUSWERTUNG
     {
-        if ( !kind ) g_signal_emit_by_name( g_object_get_data(
+        if ( !kind ) gtk_menu_item_activate( g_object_get_data(
                 G_OBJECT(sond_treeview_get_contextmenu( zond->treeview[zond->baum_active] )),
-                "item-paste-as-link_ge" ), "activate", zond );
-        else g_signal_emit_by_name( g_object_get_data(
+                "item-paste-as-link_ge" ) );
+        else gtk_menu_item_activate( g_object_get_data(
                 G_OBJECT(sond_treeview_get_contextmenu( zond->treeview[zond->baum_active] )),
-                "item-paste-as-link-up" ), "activate", zond );
+                "item-paste-as-link-up" ) );
     }
 
     return;
@@ -520,18 +512,13 @@ cb_clipboard_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
 static void
 cb_loeschen_activate( GtkMenuItem* item, gpointer user_data )
 {
-    gpointer data = NULL;
-
     Projekt* zond = (Projekt*) user_data;
 
     if ( zond->baum_active == KEIN_BAUM ) return;
 
-    if ( zond->baum_active == BAUM_FS ) data = zond->treeview[zond->baum_active];
-    else data = zond;
-
-    g_signal_emit_by_name( g_object_get_data(
+    gtk_menu_item_activate( g_object_get_data(
             G_OBJECT(sond_treeview_get_contextmenu( zond->treeview[zond->baum_active] )),
-            "item-loeschen" ), "activate", data );
+            "item-loeschen" ) );
 
     return;
 }
@@ -544,9 +531,9 @@ cb_anbindung_entfernenitem_activate( GtkMenuItem* item, gpointer user_data )
 
     if ( zond->baum_active == KEIN_BAUM || zond->baum_active == BAUM_FS ) return;
 
-    g_signal_emit_by_name( g_object_get_data(
+    gtk_menu_item_activate( g_object_get_data(
             G_OBJECT(sond_treeview_get_contextmenu( zond->treeview[zond->baum_active] )),
-            "item-anbindung-entfernen" ), "activate", zond );
+            "item-anbindung-entfernen" ) );
 
     return;
 }
@@ -560,9 +547,9 @@ cb_jumpitem( GtkMenuItem* item, gpointer data )
     //nur bei "richtigen" Bäumen
     if ( zond->baum_active != BAUM_INHALT && zond->baum_active != BAUM_AUSWERTUNG ) return;
 
-    g_signal_emit_by_name( g_object_get_data(
+    gtk_menu_item_activate( g_object_get_data(
             G_OBJECT(sond_treeview_get_contextmenu( zond->treeview[zond->baum_active] )),
-            "item-jump" ), "activate", zond );
+            "item-jump" ) );
 
     return;
 }
@@ -571,17 +558,11 @@ cb_jumpitem( GtkMenuItem* item, gpointer data )
 static void
 cb_item_datei_oeffnen( GtkMenuItem* item, gpointer data )
 {
-    gpointer ptr = NULL;
-
     Projekt* zond = (Projekt*) data;
 
-    if ( zond->baum_active == KEIN_BAUM ) return;
-    else if ( zond->baum_active == BAUM_FS ) ptr = zond->treeview[zond->baum_active];
-    else ptr = zond;
-
-    g_signal_emit_by_name( g_object_get_data( //BAUM_INHALT od. AUSWERTUNG
+    gtk_menu_item_activate( g_object_get_data( //BAUM_INHALT od. AUSWERTUNG
             G_OBJECT(sond_treeview_get_contextmenu( zond->treeview[zond->baum_active] )),
-            "item-datei-oeffnen" ), "activate", ptr );
+            "item-datei-oeffnen" ) );
 
     return;
 }
@@ -602,9 +583,9 @@ cb_change_icon_item( GtkMenuItem* item, gpointer data )
             "icon-id" ));
 
     key = g_strdup_printf( "item-menu-icons-%i", icon_id );
-    g_signal_emit_by_name( g_object_get_data(
+    gtk_menu_item_activate( g_object_get_data(
             G_OBJECT(sond_treeview_get_contextmenu( zond->treeview[zond->baum_active] )),
-            key ), "activate", zond );
+            key ) );
     g_free( key );
 
     return;

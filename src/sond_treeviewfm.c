@@ -1136,6 +1136,7 @@ typedef struct _SearchFS
 {
     const gchar* needle;
     gboolean exact_match;
+    gboolean case_sens;
     GPtrArray* arr_hits;
 } SearchFS;
 
