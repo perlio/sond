@@ -149,7 +149,7 @@ selection_datei_anbinden( Projekt* zond, InfoWindow* info_window, GFile* file, g
     if ( rc == -1 )
     {
         g_free( rel_path );
-        ERROR_SOND( "zond_dbase_get_node_id_from_rel_path" )
+        ERROR_S
     }
     else if ( rc > 0 )
     {

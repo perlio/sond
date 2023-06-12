@@ -439,12 +439,12 @@ ziele_erzeugen_anbindung( PdfViewer* pv, gint* ptr_new_node, gchar** errmsg )
 
     node_id = zond_dbase_get_node_id_from_rel_path( pv->zond->dbase_zond->zond_dbase_work,
             zond_pdf_document_get_path( dd_von->zond_pdf_document ), errmsg );
-    if ( node_id == -1 ) ERROR_SOND( "zond_dbase_get_node_id_from_rel_path" )
-    else if ( node_id == 0 ) ERROR_SOND( "Datei nicht vorhanden" )
+    if ( node_id == -1 ) ERROR_S
+    else if ( node_id == 0 ) ERROR_S_MESSAGE( "Datei nicht vorhanden" )
 
     //Kinder von Knoten mit DateiID=datei_id durchgehen
     anchor_id = ziele_abfragen_anker_rek( pv->zond, node_id, anbindung, &kind, errmsg );
-    if ( anchor_id == -1 ) ERROR_SOND( "ziele_abfragen_anker_rek" )
+    if ( anchor_id == -1 ) ERROR_S
 
     ziel = g_malloc0( sizeof( Ziel ) );
 

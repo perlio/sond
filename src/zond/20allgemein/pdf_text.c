@@ -127,8 +127,8 @@ cb_textsuche_changed( GtkListBox* box, GtkListBoxRow* row, gpointer data )
     }
     else if ( node_id < 0 )
     {
-        display_message( zond->app_window, "Fehler - \n\n"
-                "Bei Aufruf zond_dbase_get_node_id_from_rel_path:\n", errmsg, NULL );
+        display_message( zond->app_window, "Kann Knoten nicht ermitteln\n\n",
+                errmsg, NULL );
         g_free( errmsg );
 
         return;
