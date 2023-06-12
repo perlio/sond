@@ -62,6 +62,26 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 *   Callbacks des Menus "Projekt"
 */
 static void
+cb_item_search_fs_activate( GtkMenuItem* item, gpointer data )
+{
+    gint sel = 0;
+    gchar* key = NULL;
+
+    Projekt* zond = (Projekt*) data;
+
+    sel = GPOINTER_TO_INT(g_object_get_data( G_OBJECT(item), "sel" ));
+
+    if ( sel ) key = "item-search-sel";
+    else key = "item-search-all";
+
+    gtk_menu_item_activate( g_object_get_data(
+            G_OBJECT(sond_treeview_get_contextmenu( zond->treeview[BAUM_FS] )), key ) );
+
+    return;
+}
+
+
+static void
 cb_menu_datei_beenden_activate( gpointer data )
 {
     Projekt* zond = (Projekt*) data;
@@ -840,6 +860,22 @@ init_menu( Projekt* zond )
     gtk_menu_shell_append( GTK_MENU_SHELL(exportmenu), ausgewaehlte_zweige );
     gtk_menu_item_set_submenu( GTK_MENU_ITEM(zond->menu.exportitem), exportmenu );
 
+    //Durchsuchen
+    zond->menu.item_search_fs= gtk_menu_item_new_with_label( "Projektverzeichnis durchsuchen" );
+
+    GtkWidget* menu_search_fs = gtk_menu_new( );
+
+    GtkWidget* item_all = gtk_menu_item_new_with_label( "Vollständig" );
+    g_signal_connect( item_all, "activate", G_CALLBACK(cb_item_search_fs_activate), (gpointer) zond );
+
+    GtkWidget* item_sel = gtk_menu_item_new_with_label( "Ausgewählte Punkte" );
+    g_object_set_data( G_OBJECT(item_sel), "sel", GINT_TO_POINTER(1) );
+    g_signal_connect( item_sel, "activate", G_CALLBACK(cb_item_search_fs_activate), (gpointer) zond );
+
+    gtk_menu_shell_append( GTK_MENU_SHELL(menu_search_fs), item_all );
+    gtk_menu_shell_append( GTK_MENU_SHELL(menu_search_fs), item_sel );
+    gtk_menu_item_set_submenu( GTK_MENU_ITEM(zond->menu.item_search_fs), menu_search_fs );
+
     GtkWidget* sep_projekt1item_2 = gtk_separator_menu_item_new();
 
     GtkWidget* beendenitem = gtk_menu_item_new_with_label ("Beenden");
@@ -854,6 +890,7 @@ init_menu( Projekt* zond )
     gtk_menu_shell_append ( GTK_MENU_SHELL(projektmenu), zond->menu.schliessenitem );
     gtk_menu_shell_append ( GTK_MENU_SHELL(projektmenu), sep_projekt1item );
     gtk_menu_shell_append ( GTK_MENU_SHELL(projektmenu), zond->menu.exportitem );
+    gtk_menu_shell_append ( GTK_MENU_SHELL(projektmenu), zond->menu.item_search_fs );
     gtk_menu_shell_append ( GTK_MENU_SHELL(projektmenu), sep_projekt1item_2);
     gtk_menu_shell_append ( GTK_MENU_SHELL(projektmenu), beendenitem );
 
@@ -1046,11 +1083,11 @@ init_menu( Projekt* zond )
     gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), loeschenitem );
     gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), anbindung_entfernenitem );
     gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), sep_struktur2item );
+    gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), icon_change_item );
+    gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), sep_struktur3item );
     gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), suchenitem );
     gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), jumpitem );
     gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), item_datei_oeffnen );
-    gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), sep_struktur3item );
-    gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), icon_change_item );
     gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), eingang_item );
 
 /*********************
