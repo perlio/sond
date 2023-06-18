@@ -1,8 +1,9 @@
 /*
 Bugs:
-    - Kopieren aus suchen-Fenster klappt nicht richtig
 
 ToDo:
+- Updater
+
 - Abschnitte neu organisieren
 
 - BAUM_INHALT
