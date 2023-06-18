@@ -44,20 +44,30 @@ sond_treeview_show_popupmenu( SondTreeview* stv, GdkEventButton* event,
 
     gtk_tree_view_get_path_at_pos( GTK_TREE_VIEW(stv), event->x, event->y,
             &path, NULL, NULL, NULL );
-    if ( !path ) return FALSE; //wenn nicht auf Zelle geclickt -> default-handler
-
-    if ( !gtk_widget_has_focus( GTK_WIDGET(stv) ) )
+    if ( !path )
     {
-        //zunächst cursor setzen, damit der bei Focus-Wechsel direkt markiet wird
-        gtk_tree_view_set_cursor( GTK_TREE_VIEW(stv), path, NULL, FALSE );
+        GtkTreeIter iter = { 0 };
 
-        //focus auf neuen Baum...
-        gtk_widget_grab_focus( GTK_WIDGET(stv) );
+        if ( gtk_tree_model_get_iter_first(
+                gtk_tree_view_get_model( GTK_TREE_VIEW(stv) ), &iter ) ) return FALSE;
+        else if ( !gtk_widget_has_focus( GTK_WIDGET(stv) ) )
+                gtk_widget_grab_focus( GTK_WIDGET(stv) );
     }
-    //angeklickte schon markiert: dann kein default-handler (selection soll bleiben)
-    else if ( gtk_tree_selection_path_is_selected( gtk_tree_view_get_selection( GTK_TREE_VIEW(stv) ), path ) ) ret = TRUE;
+    else
+    {
+        if ( !gtk_widget_has_focus( GTK_WIDGET(stv) ) )
+        {
+            //zunächst cursor setzen, damit der bei Focus-Wechsel direkt markiet wird
+            gtk_tree_view_set_cursor( GTK_TREE_VIEW(stv), path, NULL, FALSE );
 
-    gtk_tree_path_free( path );
+           //focus auf neuen Baum...
+            gtk_widget_grab_focus( GTK_WIDGET(stv) );
+        }
+        //angeklickte schon markiert: dann kein default-handler (selection soll bleiben)
+        else if ( gtk_tree_selection_path_is_selected( gtk_tree_view_get_selection( GTK_TREE_VIEW(stv) ), path ) ) ret = TRUE;
+
+        gtk_tree_path_free( path );
+    }
 
     gtk_menu_popup_at_pointer( contextmenu, NULL );
 
