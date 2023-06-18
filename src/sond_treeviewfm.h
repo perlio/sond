@@ -25,8 +25,11 @@ struct _SondTreeviewFMClass
     gint (*dbase_update_eingang) (SondTreeviewFM*, const gchar*, const gchar*, gboolean, gchar**);
     gint (*dbase_end) (SondTreeviewFM*, gboolean, gchar**);
     void (*text_edited) (GtkCellRenderer*, gchar*, gchar*, gpointer);
+    void (*results_row_activated) (GtkWidget*, GtkWidget*, gpointer);
 };
 
+
+gint sond_treeviewfm_set_cursor_on_path( SondTreeviewFM*, const gchar*, gchar** );
 
 gint sond_treeviewfm_set_root( SondTreeviewFM*, const gchar*, gchar** );
 

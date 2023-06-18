@@ -26,7 +26,7 @@
 				<Option type="1" />
 				<Option compiler="gcc" />
 				<Option use_console_runner="0" />
-				<Option parameters='&quot;C:\lfd Akten\Test\Test.ZND&quot;' />
+				<Option parameters='&quot;C:\Users\nc-kr\laufende Akten\Test\Test.ZND&quot;' />
 				<Compiler>
 					<Add option="-g" />
 					<Add option="-DTESTING" />
@@ -114,10 +114,10 @@
 			<Add option="`pgk-config --libs json-glib-1.0`" />
 			<Add option="`pkg-config --libs jansson`" />
 			<Add option="-Wl,--allow-multiple-definition" />
-			<Add library="C:/msys64/mingw64/bin/libpodofo.dll" />
+			<Add library="C:/msys64/ucrt64/bin/libpodofo.dll" />
 			<Add library="C:/Windows/System32/shlwapi.dll" />
-			<Add library="C:/msys64/mingw64/lib/libmupdf.a" />
-			<Add library="C:/msys64/mingw64/lib/libmupdf-third.a" />
+			<Add library="C:/msys64/ucrt64/lib/libmupdf.a" />
+			<Add library="C:/msys64/ucrt64/lib/libmupdf-third.a" />
 			<Add library="C:/Windows/System32/crypt32.dll" />
 		</Linker>
 		<Unit filename="SondClient.conf">

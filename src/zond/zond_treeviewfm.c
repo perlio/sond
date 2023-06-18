@@ -217,6 +217,23 @@ zond_treeviewfm_text_edited( GtkCellRenderer* cell, gchar* path_string, gchar* n
 
 
 static void
+zond_treeviewfm_results_row_activated( GtkWidget* listbox, GtkWidget* row, gpointer data )
+{
+    ZondTreeviewFM* ztvfm = (ZondTreeviewFM*) data;
+    ZondTreeviewFMPrivate* ztvfm_priv = zond_treeviewfm_get_instance_private( ztvfm );
+
+    //wenn FS nicht angezeigt: erst einschalten, damit man was sieht
+    if ( !gtk_toggle_button_get_active( GTK_TOGGLE_BUTTON(ztvfm_priv->zond->fs_button) ) )
+            gtk_toggle_button_set_active( GTK_TOGGLE_BUTTON(ztvfm_priv->zond->fs_button), TRUE );
+
+    //chain-up
+    SOND_TREEVIEWFM_CLASS(zond_treeviewfm_parent_class)->results_row_activated( listbox, row, data );
+
+    return;
+}
+
+
+static void
 zond_treeviewfm_class_init( ZondTreeviewFMClass* klass )
 {
     GObjectClass *object_class = G_OBJECT_CLASS(klass);
@@ -240,6 +257,7 @@ zond_treeviewfm_class_init( ZondTreeviewFMClass* klass )
     SOND_TREEVIEWFM_CLASS(klass)->dbase_update_eingang = zond_treeviewfm_dbase_update_eingang;
     SOND_TREEVIEWFM_CLASS(klass)->dbase_end = zond_treeviewfm_dbase_end;
     SOND_TREEVIEWFM_CLASS(klass)->text_edited = zond_treeviewfm_text_edited;
+    SOND_TREEVIEWFM_CLASS(klass)->results_row_activated = zond_treeviewfm_results_row_activated;
 
     return;
 }

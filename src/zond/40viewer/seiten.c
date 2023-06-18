@@ -719,7 +719,7 @@ seiten_loeschen( PdfViewer* pv, GPtrArray* arr_document_page, gchar** errmsg )
             ERROR_MUPDF( "pdf_delete_page" )
         }
     }
-
+/*
     //säubern, um ins Leere gehende Outlines etc. zu entfernen
     fz_try( ctx ) retainpages( ctx,
             zond_pdf_document_get_pdf_doc( pv->dd->zond_pdf_document ), 1,
@@ -729,7 +729,7 @@ seiten_loeschen( PdfViewer* pv, GPtrArray* arr_document_page, gchar** errmsg )
         g_ptr_array_unref( arr_pv );
         ERROR_MUPDF( "retainpages" )
     }
-
+*/
     seiten_refresh_layouts( arr_pv );
 
     g_ptr_array_unref( arr_pv );

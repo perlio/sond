@@ -71,7 +71,8 @@ cb_item_search_fs_activate( GtkMenuItem* item, gpointer data )
 
     sel = GPOINTER_TO_INT(g_object_get_data( G_OBJECT(item), "sel" ));
 
-    if ( sel ) key = "item-search-sel";
+    if ( sel && !gtk_toggle_button_get_active( GTK_TOGGLE_BUTTON(zond->fs_button) ) ) return;
+    else if ( sel ) key = "item-search-sel";
     else key = "item-search-all";
 
     gtk_menu_item_activate( g_object_get_data(

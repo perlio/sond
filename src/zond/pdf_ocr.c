@@ -385,7 +385,6 @@ pdf_ocr_free_gs( gpointer data )
 }
 
 
-
 static GArray*
 pdf_ocr_get_cleaned_tokens( fz_context* ctx, fz_stream* stream, gint flags, gchar** errmsg )
 {
@@ -839,7 +838,7 @@ pdf_ocr_prepare_content_stream( fz_context* ctx, pdf_page* page, gchar** errmsg 
 	pdf_filter_options filter = { 0 };
 
 	filter.recurse = 1;
-	filter.sanitize = 0;
+//	filter.sanitize = 0;
 	filter.ascii = 1;
 
     fz_try(ctx) pdf_filter_page_contents(ctx, page->doc, page, &filter);

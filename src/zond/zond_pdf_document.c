@@ -19,7 +19,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "zond_pdf_document.h"
 
 #include <glib/gstdio.h>
-
 #include "99conv/pdf.h"
 
 #include "../misc.h"

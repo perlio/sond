@@ -17,7 +17,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 
-#include <stdlib.h>
 #include <gtk/gtk.h>
 
 #include "sojus_init.h"

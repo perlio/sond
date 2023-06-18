@@ -5,10 +5,6 @@ Bugs:
 ToDo:
 - Abschnitte neu organisieren
 
-- suchen
-    - Beschränkbarkeit auf Zweige
-    - FS durchssuchen
-
 - BAUM_INHALT
     - Anbindungen in PDF einfügen
     - Anbindungen in PDF löschen
@@ -34,6 +30,11 @@ ToDo:
 - Textsuche PDF:
     - silbengetrennte Wörte als ein Treffer erfassen und anzeigen
 
+
+Build mupdf:
+
+- clonen von github
+- git submodule update --init
 
 pdf_clean_file.c:
 

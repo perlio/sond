@@ -159,18 +159,18 @@ log_init( Projekt* zond )
     file = freopen( logfile, "a", stdout );
     if ( !file )
     {
+        display_message( zond->app_window, "stout konnte nicht in Datei %s "
+                "umgeleitet werden:\n%s", logfile, strerror( errno ), NULL );
         g_free( logfile );
-        display_message( zond->app_window, "stout konnte nicht in "
-                "Datei %s umgeleitet werden: %s", logfile, strerror( errno ) );
         exit( -1 );
     }
 
     file_tmp = freopen( logfile, "a", stderr );
-    g_free( logfile );
     if ( !file_tmp )
     {
         display_message( zond->app_window, "sterr konnte nicht in "
-                "Datei %s umgeleitet werden: %s", logfile, strerror( errno ) );
+                "Datei %s umgeleitet werden:\n%s", logfile, strerror( errno ), NULL );
+        g_free( logfile );
         exit( -1 );
     }
 /*
@@ -182,6 +182,7 @@ log_init( Projekt* zond )
         exit( -1 );
     }
     */
+    g_free( logfile );
 
     return;
 }

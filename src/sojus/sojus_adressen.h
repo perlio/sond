@@ -1,7 +1,6 @@
 #ifndef SOJUS_ADRESSEN_H_INCLUDED
 #define SOJUS_ADRESSEN_H_INCLUDED
 
-#include <time.h>
 
 
 void sojus_adressen_cb_fenster( GtkButton* , gpointer );

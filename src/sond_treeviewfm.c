@@ -245,7 +245,7 @@ sond_treeviewfm_move_copy_create_delete( SondTreeviewFM* stvfm, GFile* file_sour
             if ( rc == -1 )
             {
                 g_free( basename );
-                ERROR_SOND( "sond_treeviewfm_dbase" )
+                ERROR_S
             }
             else if ( rc == 1 ) return 1;
 
@@ -426,92 +426,6 @@ sond_treeviewfm_text_edited( GtkCellRenderer* cell, gchar* path_string, gchar* n
 }
 
 
-static gint
-sond_treeviewfm_datei_oeffnen( const gchar* path, gchar** errmsg )
-{
-#ifdef _WIN32 //glib funktioniert nicht; daher Windows-Api verwenden
-    HINSTANCE ret = 0;
-
-    gchar* path_win32 = g_strdelimit( g_strdup( path ), "/", '\\' );
-
-    //utf8 in filename konvertieren
-    gsize written;
-    gchar* charset = g_get_codeset();
-    gchar* local_filename = g_convert( path_win32, -1, charset, "UTF-8", NULL, &written,
-            NULL );
-    g_free( charset );
-
-    g_free( path_win32 );
-    ret = ShellExecute( NULL, NULL, local_filename, NULL, NULL, SW_SHOWNORMAL );
-    g_free( local_filename );
-    if ( ret == (HINSTANCE) 31 ) //no app associated
-    {
-        if ( errmsg ) *errmsg = g_strdup( "Bei Aufruf ShellExecute:\n"
-                "Keine Anwendung mit Datei verbunden" );
-
-        return -1;
-    }
-    else if ( ret <= (HINSTANCE) 32 )
-    {
-        if ( errmsg ) *errmsg = g_strdup_printf( "Bei Aufruf "
-                "ShellExecute:\nErrCode: %p", ret );
-
-        return -1;
-    }
-#else //Linux/Mac
-/*
-    gchar* exe = NULL;
-    gchar* argv[3] = { NULL };
-
-    //exe herausfinden, vielleicht mit xdgopen???!
-
-    argv[0] = exe;
-    argv[1] = path;
-
-    gboolean rc = g_spawn_async( NULL, argv, NULL, G_SPAWN_DO_NOT_REAP_CHILD,
-            NULL, NULL, &g_pid, &error );
-    if ( !rc )
-    {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_spawn_async:\n",
-                error->message, NULL );
-        g_error_free( error );
-
-        return -1;
-    }
-
-    g_child_watch_add( g_pid, (GChildWatchFunc) close_pid, NULL );
-*/
-#endif // _WIN32
-
-    return 0;
-}
-
-
-static void
-sond_treeviewfm_row_activated( GtkTreeView* tree_view, GtkTreePath* tree_path,
-        GtkTreeViewColumn* column, gpointer data )
-{
-    GtkTreeIter iter;
-    gchar* path = NULL;
-    gint rc = 0;
-    gchar* errmsg = NULL;
-
-    gtk_tree_model_get_iter( gtk_tree_view_get_model( tree_view ), &iter, tree_path );
-
-    path = sond_treeviewfm_get_full_path( SOND_TREEVIEWFM(tree_view), &iter );
-    rc = sond_treeviewfm_datei_oeffnen( path, &errmsg );
-    g_free( path );
-    if ( rc )
-    {
-        display_message( gtk_widget_get_toplevel( GTK_WIDGET(tree_view) ),
-                "Öffnen nicht möglich\n\nBei Aufruf oeffnen_datei:\n", errmsg, NULL );
-        g_free( errmsg );
-    }
-
-    return;
-}
-
-
 static void
 sond_treeviewfm_row_collapsed( GtkTreeView* tree_view, GtkTreeIter* iter,
         GtkTreePath* path, gpointer data )
@@ -663,11 +577,11 @@ sond_treeviewfm_dir_foreach( SondTreeviewFM* stvfm, GtkTreeIter* iter_dir,
 
             if ( !iter_dir )
             {
-                gchar* path = NULL;
+                GFile* file_root = NULL;
 
-                path = g_file_get_path( file );
-                if ( !g_strcmp0( stvfm_priv->root, path ) ) root = TRUE;
-                g_free( path );
+                file_root = g_file_new_for_path( stvfm_priv->root );
+                if ( g_file_equal( file, file_root ) ) root = TRUE;
+                g_object_unref( file_root );
             }
 
             if ( (iter_dir || root) && gtk_tree_model_iter_children(
@@ -693,8 +607,8 @@ sond_treeviewfm_dir_foreach( SondTreeviewFM* stvfm, GtkTreeIter* iter_dir,
 
                 return -1;
             }
-            else if ( rc == 1 ) flag = TRUE;//Abbruch gewählt
-            else if ( rc == 2 )
+            else if ( rc == 1 ) flag = TRUE;
+            else if ( rc == 2 ) //Abbruch gewählt
             {
                 g_object_unref( enumer );
                 return 2;
@@ -782,7 +696,7 @@ sond_treeviewfm_row_expanded( GtkTreeView* tree_view, GtkTreeIter* iter,
 
     gtk_tree_model_iter_nth_child( gtk_tree_view_get_model( tree_view ), &new_iter, iter, 0 );
     gtk_tree_model_get( gtk_tree_view_get_model( tree_view ), &new_iter, 0, &info, -1 );
-    if ( !info )
+    if ( !info ) //child ist dummy
     {
         rc = sond_treeviewfm_load_dir( SOND_TREEVIEWFM(tree_view), iter, &errmsg );
         if ( rc )
@@ -803,98 +717,127 @@ sond_treeviewfm_row_expanded( GtkTreeView* tree_view, GtkTreeIter* iter,
 }
 
 
-static void
-sond_treeviewfm_render_eingang( GtkTreeViewColumn* column, GtkCellRenderer* renderer,
-        GtkTreeModel* model, GtkTreeIter* iter, gpointer data )
-{
-    gint rc = 0;
-    Eingang eingang = { 0 };
-    gint eingang_id = 0;
-    gchar* rel_path = NULL;
-    gchar* errmsg = NULL;
 
-    SondTreeviewFM* stvfm = (SondTreeviewFM*) data;
+
+typedef struct _FindPath
+{
+    const gchar* basename;
+    GtkTreeIter* iter;
+} FindPath;
+
+
+static gint
+sond_treeviewfm_find_path( SondTreeviewFM* stvfm, GtkTreeIter* iter,
+        GFile* file, GFileInfo* info, gpointer data, gchar** errmsg )
+{
+    FindPath* find_path = (FindPath*) data;
+    gchar* basename = NULL;
+
+    basename = g_file_get_basename( file );
+
+    if ( !g_strcmp0( find_path->basename, basename ) )
+    {
+        *(find_path->iter) = *iter;
+
+        g_free( basename );
+
+        return 2; //kann sofort abgebrochen werden
+    }
+
+    g_free( basename );
+
+    return 0;
+}
+
+
+gint
+sond_treeviewfm_set_cursor_on_path( SondTreeviewFM* stvfm, const gchar* path, gchar** errmsg )
+{
+    gchar** arr_path_segs = NULL;
+    GtkTreeIter iter_file = { 0 };
+    GFile* file = NULL;
+    FindPath find_path = { 0 };
+    gint i = 0;
+
     SondTreeviewFMPrivate* stvfm_priv = sond_treeviewfm_get_instance_private( stvfm );
 
-    rel_path = sond_treeviewfm_get_rel_path( stvfm, iter );
-    if ( !rel_path ) return;
+    find_path.iter = &iter_file;
 
-//    rc = eingang_for_rel_path( stvfm_priv->zond_dbase, rel_path, &eingang_id, &eingang, NULL, &errmsg );
-    g_free( rel_path );
-    if ( rc == -1 )
+    arr_path_segs = g_strsplit_set( path, "/\\", -1 );
+
+    if ( !arr_path_segs[0] ) return 0;
+
+    file = g_file_new_for_path( stvfm_priv->root );
+
+    do
+    {
+        gint rc = 0;
+        GFile* file_tmp = NULL;
+
+        find_path.basename = arr_path_segs[i];
+
+        rc = sond_treeviewfm_dir_foreach( stvfm, (i == 0) ? NULL : find_path.iter,
+                file, FALSE, sond_treeviewfm_find_path, &find_path, errmsg );
+        if ( rc == -1 )
+        {
+            g_object_unref( file );
+            ERROR_S
+        }
+        else if ( rc == 0 )
+        {
+            g_object_unref( file );
+            ERROR_S_MESSAGE( "Pfad nicht gefunden" )
+        }
+        else if ( rc == 2 && arr_path_segs[i + 1] )
+        {
+            rc = sond_treeviewfm_load_dir( stvfm, find_path.iter, errmsg );
+            if ( rc )
+            {
+                g_object_unref( file );
+                ERROR_S
+            }
+
+            file_tmp = g_file_get_child( file, arr_path_segs[i] );
+            g_object_unref( file );
+            file = file_tmp;
+        }
+    } while ( arr_path_segs[++i] );
+
+    g_object_unref( file );
+    g_strfreev( arr_path_segs );
+
+    //cursor setzen
+    sond_treeview_expand_to_row( SOND_TREEVIEW(stvfm), find_path.iter );
+    sond_treeview_set_cursor( SOND_TREEVIEW(stvfm), find_path.iter );
+
+    return 0;
+}
+
+
+static void
+sond_treeviewfm_results_row_activated( GtkWidget* listbox, GtkWidget* row, gpointer user_data )
+{
+    gint rc = 0;
+    gchar* errmsg = NULL;
+    GtkWidget* label = NULL;
+    const gchar* path = NULL;
+    const gchar* path_rel = NULL;
+
+    SondTreeviewFM* stvfm = (SondTreeviewFM*) user_data;
+    SondTreeviewFMPrivate* stvfm_priv = sond_treeviewfm_get_instance_private( stvfm );
+
+    label = gtk_bin_get_child( GTK_BIN(row) );
+    path = gtk_label_get_label( GTK_LABEL(label) );
+    path_rel = path + strlen( stvfm_priv->root ) + 1;
+
+    rc = sond_treeviewfm_set_cursor_on_path( stvfm, path_rel, &errmsg );
+    if ( rc )
     {
         display_message( gtk_widget_get_toplevel( GTK_WIDGET(stvfm) ),
-                "Warnung -\n\nBei Aufruf eingang_for_rel_path:\n",
-                errmsg, NULL );
+                "Datei nicht gefunden\n\n", errmsg, NULL );
+
         g_free( errmsg );
     }
-    else if ( rc == 1 )
-    {
-        if ( eingang_id ) g_object_set( G_OBJECT(renderer), "text",
-            eingang.eingangsdatum, NULL );
-        else g_object_set( G_OBJECT(renderer), "text", "----", NULL );
-    }
-    else g_object_set( G_OBJECT(renderer), "text", "", NULL );
-
-    return;
-}
-
-
-static void
-sond_treeviewfm_render_file_modify( GtkTreeViewColumn* column, GtkCellRenderer* renderer,
-        GtkTreeModel* model, GtkTreeIter* iter, gpointer data )
-{
-    GFileInfo* info = NULL;
-    GDateTime* datetime = NULL;
-    gchar* text = NULL;
-
-    gtk_tree_model_get( model, iter, 0, &info, -1 );
-
-    datetime = g_file_info_get_modification_date_time( info );
-    g_object_unref( info );
-
-    text = g_date_time_format( datetime, "%d.%m.%Y %T" );
-    g_date_time_unref( datetime );
-    g_object_set( G_OBJECT(renderer), "text", text, NULL );
-    g_free( text );
-
-    return;
-}
-
-
-static void
-sond_treeviewfm_render_file_size( GtkTreeViewColumn* column, GtkCellRenderer* renderer,
-        GtkTreeModel* model, GtkTreeIter* iter, gpointer data )
-{
-    GFileInfo* info = NULL;
-    goffset size = 0;
-    gchar* text = NULL;
-
-    gtk_tree_model_get( model, iter, 0, &info, -1 );
-
-    size = g_file_info_get_size( info );
-    g_object_unref( info );
-
-    text = g_strdup_printf( "%ld", size );
-
-    g_object_set( G_OBJECT(renderer), "text", text, NULL );
-    g_free( text );
-
-    return;
-}
-
-
-static void
-sond_treeviewfm_render_file_icon( GtkTreeViewColumn* column, GtkCellRenderer* renderer,
-        GtkTreeModel* model, GtkTreeIter* iter, gpointer data )
-{
-    GFileInfo* info = NULL;
-
-    gtk_tree_model_get( model, iter, 0, &info, -1 );
-
-    g_object_set( G_OBJECT(renderer), "gicon", g_file_info_get_icon( info ), NULL );
-
-    g_object_unref( info );
 
     return;
 }
@@ -983,6 +926,7 @@ sond_treeviewfm_class_init( SondTreeviewFMClass* klass )
     klass->dbase_update_eingang = sond_treeviewfm_dbase_update_eingang;
     klass->dbase_end = sond_treeviewfm_dbase_end;
     klass->text_edited = sond_treeviewfm_text_edited;
+    klass->results_row_activated = sond_treeviewfm_results_row_activated;
 
     return;
 }
@@ -1217,9 +1161,42 @@ sond_treeviewfm_datei_oeffnen_activate( GtkMenuItem* item, gpointer data )
 }
 
 
+static void
+sond_treeviewfm_show_hits( SondTreeviewFM* stvfm, GPtrArray* arr_hits )
+{
+    GtkWidget* window = NULL;
+    GtkWidget* listbox = NULL;
+    SondTreeviewFMClass* klass = SOND_TREEVIEWFM_GET_CLASS(stvfm);
+
+    //Fenster erzeugen
+    window = result_listbox_new( GTK_WINDOW(gtk_widget_get_toplevel( GTK_WIDGET(stvfm) )), "Suchergebnis" );
+
+    listbox = (GtkWidget*) g_object_get_data( G_OBJECT(window), "listbox" );
+
+    g_signal_connect( listbox, "row-activated", G_CALLBACK(klass->results_row_activated),
+            (gpointer) stvfm );
+
+    for ( gint i = 0; i < arr_hits->len; i++ )
+    {
+        gchar* path = NULL;
+        GtkWidget* label = NULL;
+
+        path = g_ptr_array_index( arr_hits, i );
+
+        label = gtk_label_new( (const gchar*) path );
+
+        gtk_list_box_insert( GTK_LIST_BOX(listbox), label, -1 );
+    }
+
+    gtk_widget_show_all( window );
+
+    return;
+}
+
+
 typedef struct _SearchFS
 {
-    const gchar* needle;
+    gchar* needle;
     gboolean exact_match;
     gboolean case_sens;
     GPtrArray* arr_hits;
@@ -1237,6 +1214,15 @@ sond_treeviewfm_search_needle( SondTreeviewFM* stvfm, GtkTreeIter* iter,
     SearchFS* search_fs = (SearchFS*) data;
 
     basename = g_file_get_basename( file );
+
+    if ( !search_fs->case_sens )
+    {
+        gchar* basename_tmp = NULL;
+
+        basename_tmp = g_ascii_strdown( basename, -1 );
+        g_free( basename );
+        basename = basename_tmp;
+    }
 
     if ( search_fs->exact_match == TRUE )
     {
@@ -1267,12 +1253,15 @@ sond_treeviewfm_search( SondTreeview* stv, GtkTreeIter* iter, gpointer data,
     file = g_file_new_for_path( path_root );
     g_free( path_root );
 
-    rc = sond_treeviewfm_search_needle( SOND_TREEVIEWFM(stv), iter, file,
-            NULL, data, errmsg );
-    if ( rc )
+    if ( iter ) //nur, wenn nicht root-Verzeichnis
     {
-        g_object_unref( file );
-        ERROR_S
+        rc = sond_treeviewfm_search_needle( SOND_TREEVIEWFM(stv), iter, file,
+                NULL, data, errmsg );
+        if ( rc )
+        {
+            g_object_unref( file );
+            ERROR_S
+        }
     }
 
     if ( g_file_query_file_type( file, G_FILE_QUERY_INFO_NONE, NULL )
@@ -1300,7 +1289,6 @@ sond_treeviewfm_search_activate( GtkMenuItem* item, gpointer data )
     gint rc = 0;
     gchar* errmsg = NULL;
     gchar* search_text = NULL;
-    gboolean exact_match = FALSE;
     SearchFS search_fs = { 0 };
 
     SondTreeviewFM* stvfm = (SondTreeviewFM*) data;
@@ -1327,11 +1315,19 @@ sond_treeviewfm_search_activate( GtkMenuItem* item, gpointer data )
 
     search_fs.arr_hits = g_ptr_array_new_with_free_func( g_free );
     search_fs.exact_match = FALSE;
-    search_fs.needle = search_text;
+    search_fs.case_sens = FALSE;
+
+    if ( !search_fs.case_sens ) search_fs.needle = g_utf8_strdown( search_text, -1 );
+    else search_fs.needle = g_strdup( search_text );
+
+    g_free( search_text );
 
     if ( only_sel ) rc = sond_treeview_selection_foreach( SOND_TREEVIEW(stvfm),
             sond_treeviewfm_search, &search_fs, &errmsg );
     else rc = sond_treeviewfm_search(SOND_TREEVIEW(stvfm), NULL, &search_fs, &errmsg );
+
+    g_free( search_fs.needle );
+
     if ( rc == -1 )
     {
         display_message( gtk_widget_get_toplevel( GTK_WIDGET(stvfm) ),
@@ -1351,11 +1347,7 @@ sond_treeviewfm_search_activate( GtkMenuItem* item, gpointer data )
         return;
     }
 
-    //Ergebnisse anzeigen
-    for ( gint i = 0; i < search_fs.arr_hits->len; i++ )
-    {
-        printf( "%s\n", (gchar*) g_ptr_array_index( search_fs.arr_hits, i ) );
-    }
+    sond_treeviewfm_show_hits( stvfm, search_fs.arr_hits );
 
     g_ptr_array_unref( search_fs.arr_hits );
 
@@ -1447,7 +1439,7 @@ sond_treeviewfm_init_contextmenu( SondTreeviewFM* stvfm )
     gtk_menu_shell_append( GTK_MENU_SHELL(contextmenu), item_datei_oeffnen );
 
     //In Projektverzeichnis suchen
-    GtkWidget* item_search = gtk_menu_item_new_with_label("Suchen in Projektverzeichnis");
+    GtkWidget* item_search = gtk_menu_item_new_with_label("Dateisuche");
 
     GtkWidget* menu_search = gtk_menu_new();
 
@@ -1470,6 +1462,189 @@ sond_treeviewfm_init_contextmenu( SondTreeviewFM* stvfm )
     gtk_menu_shell_append( GTK_MENU_SHELL(contextmenu), item_search );
 
     gtk_widget_show_all( contextmenu );
+
+    return;
+}
+
+
+static gint
+sond_treeviewfm_datei_oeffnen( const gchar* path, gchar** errmsg )
+{
+#ifdef _WIN32 //glib funktioniert nicht; daher Windows-Api verwenden
+    HINSTANCE ret = 0;
+
+    gchar* path_win32 = g_strdelimit( g_strdup( path ), "/", '\\' );
+
+    //utf8 in filename konvertieren
+    gsize written;
+    gchar* charset = g_get_codeset();
+    gchar* local_filename = g_convert( path_win32, -1, charset, "UTF-8", NULL, &written,
+            NULL );
+    g_free( charset );
+
+    g_free( path_win32 );
+    ret = ShellExecute( NULL, NULL, local_filename, NULL, NULL, SW_SHOWNORMAL );
+    g_free( local_filename );
+    if ( ret == (HINSTANCE) 31 ) //no app associated
+    {
+        if ( errmsg ) *errmsg = g_strdup( "Bei Aufruf ShellExecute:\n"
+                "Keine Anwendung mit Datei verbunden" );
+
+        return -1;
+    }
+    else if ( ret <= (HINSTANCE) 32 )
+    {
+        if ( errmsg ) *errmsg = g_strdup_printf( "Bei Aufruf "
+                "ShellExecute:\nErrCode: %p", ret );
+
+        return -1;
+    }
+#else //Linux/Mac
+/*
+    gchar* exe = NULL;
+    gchar* argv[3] = { NULL };
+
+    //exe herausfinden, vielleicht mit xdgopen???!
+
+    argv[0] = exe;
+    argv[1] = path;
+
+    gboolean rc = g_spawn_async( NULL, argv, NULL, G_SPAWN_DO_NOT_REAP_CHILD,
+            NULL, NULL, &g_pid, &error );
+    if ( !rc )
+    {
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_spawn_async:\n",
+                error->message, NULL );
+        g_error_free( error );
+
+        return -1;
+    }
+
+    g_child_watch_add( g_pid, (GChildWatchFunc) close_pid, NULL );
+*/
+#endif // _WIN32
+
+    return 0;
+}
+
+
+static void
+sond_treeviewfm_row_activated( GtkTreeView* tree_view, GtkTreePath* tree_path,
+        GtkTreeViewColumn* column, gpointer data )
+{
+    GtkTreeIter iter;
+    gchar* path = NULL;
+    gint rc = 0;
+    gchar* errmsg = NULL;
+
+    gtk_tree_model_get_iter( gtk_tree_view_get_model( tree_view ), &iter, tree_path );
+
+    path = sond_treeviewfm_get_full_path( SOND_TREEVIEWFM(tree_view), &iter );
+    rc = sond_treeviewfm_datei_oeffnen( path, &errmsg );
+    g_free( path );
+    if ( rc )
+    {
+        display_message( gtk_widget_get_toplevel( GTK_WIDGET(tree_view) ),
+                "Öffnen nicht möglich\n\nBei Aufruf oeffnen_datei:\n", errmsg, NULL );
+        g_free( errmsg );
+    }
+
+    return;
+}
+
+
+static void
+sond_treeviewfm_render_eingang( GtkTreeViewColumn* column, GtkCellRenderer* renderer,
+        GtkTreeModel* model, GtkTreeIter* iter, gpointer data )
+{
+    gint rc = 0;
+    Eingang eingang = { 0 };
+    gint eingang_id = 0;
+    gchar* rel_path = NULL;
+    gchar* errmsg = NULL;
+
+    SondTreeviewFM* stvfm = (SondTreeviewFM*) data;
+    SondTreeviewFMPrivate* stvfm_priv = sond_treeviewfm_get_instance_private( stvfm );
+
+    rel_path = sond_treeviewfm_get_rel_path( stvfm, iter );
+    if ( !rel_path ) return;
+
+//    rc = eingang_for_rel_path( stvfm_priv->zond_dbase, rel_path, &eingang_id, &eingang, NULL, &errmsg );
+    g_free( rel_path );
+    if ( rc == -1 )
+    {
+        display_message( gtk_widget_get_toplevel( GTK_WIDGET(stvfm) ),
+                "Warnung -\n\nBei Aufruf eingang_for_rel_path:\n",
+                errmsg, NULL );
+        g_free( errmsg );
+    }
+    else if ( rc == 1 )
+    {
+        if ( eingang_id ) g_object_set( G_OBJECT(renderer), "text",
+            eingang.eingangsdatum, NULL );
+        else g_object_set( G_OBJECT(renderer), "text", "----", NULL );
+    }
+    else g_object_set( G_OBJECT(renderer), "text", "", NULL );
+
+    return;
+}
+
+
+static void
+sond_treeviewfm_render_file_modify( GtkTreeViewColumn* column, GtkCellRenderer* renderer,
+        GtkTreeModel* model, GtkTreeIter* iter, gpointer data )
+{
+    GFileInfo* info = NULL;
+    GDateTime* datetime = NULL;
+    gchar* text = NULL;
+
+    gtk_tree_model_get( model, iter, 0, &info, -1 );
+
+    datetime = g_file_info_get_modification_date_time( info );
+    g_object_unref( info );
+
+    text = g_date_time_format( datetime, "%d.%m.%Y %T" );
+    g_date_time_unref( datetime );
+    g_object_set( G_OBJECT(renderer), "text", text, NULL );
+    g_free( text );
+
+    return;
+}
+
+
+static void
+sond_treeviewfm_render_file_size( GtkTreeViewColumn* column, GtkCellRenderer* renderer,
+        GtkTreeModel* model, GtkTreeIter* iter, gpointer data )
+{
+    GFileInfo* info = NULL;
+    goffset size = 0;
+    gchar* text = NULL;
+
+    gtk_tree_model_get( model, iter, 0, &info, -1 );
+
+    size = g_file_info_get_size( info );
+    g_object_unref( info );
+
+    text = g_strdup_printf( "%ld", size );
+
+    g_object_set( G_OBJECT(renderer), "text", text, NULL );
+    g_free( text );
+
+    return;
+}
+
+
+static void
+sond_treeviewfm_render_file_icon( GtkTreeViewColumn* column, GtkCellRenderer* renderer,
+        GtkTreeModel* model, GtkTreeIter* iter, gpointer data )
+{
+    GFileInfo* info = NULL;
+
+    gtk_tree_model_get( model, iter, 0, &info, -1 );
+
+    g_object_set( G_OBJECT(renderer), "gicon", g_file_info_get_icon( info ), NULL );
+
+    g_object_unref( info );
 
     return;
 }
