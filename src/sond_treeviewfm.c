@@ -17,10 +17,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 #include "misc.h"
-#include "zond/zond_dbase.h"
 #include "eingang.h"
 
 #include "sond_treeviewfm.h"
+
+#include "zond/zond_dbase.h"
+#include "zond/99conv/general.h"
+
 
 #ifdef _WIN32
 #include <windows.h>
@@ -1200,6 +1203,9 @@ typedef struct _SearchFS
     gboolean exact_match;
     gboolean case_sens;
     GPtrArray* arr_hits;
+    InfoWindow* info_window;
+    volatile gint* atom_ready;
+    volatile gint* atom_cancelled;
 } SearchFS;
 
 
@@ -1237,7 +1243,58 @@ sond_treeviewfm_search_needle( SondTreeviewFM* stvfm, GtkTreeIter* iter,
         g_ptr_array_add( search_fs->arr_hits, path );
     }
 
+    if ( g_atomic_int_get( search_fs->atom_cancelled ) ) g_atomic_int_set( search_fs->atom_ready, 1 );
+
     return 0;
+}
+
+
+typedef struct _DataThread
+{
+    SearchFS* search_fs;
+    SondTreeview* stv;
+    GtkTreeIter* iter;
+    GFile* file;
+    gchar** errmsg;
+} DataThread;
+
+
+static gpointer
+sond_treeviewfm_thread_search( gpointer data )
+{
+    DataThread* data_thread = (DataThread*) data;
+    gchar** errmsg = data_thread->errmsg;
+
+    if ( data_thread->iter ) //nur, wenn nicht root-Verzeichnis
+    {
+        gint rc = 0;
+
+        rc = sond_treeviewfm_search_needle( SOND_TREEVIEWFM(data_thread->stv), data_thread->iter, data_thread->file,
+                NULL, data_thread->search_fs, data_thread->errmsg );
+        if ( rc )
+        {
+            g_atomic_int_set( data_thread->search_fs->atom_ready, 1 );
+            ERROR_S_VAL(GINT_TO_POINTER(-1))
+        }
+    }
+
+    if ( g_file_query_file_type( data_thread->file, G_FILE_QUERY_INFO_NONE, NULL )
+            == G_FILE_TYPE_DIRECTORY )
+    {
+        gint rc = 0;
+
+        rc = sond_treeviewfm_dir_foreach( SOND_TREEVIEWFM(data_thread->stv), data_thread->iter, data_thread->file, TRUE,
+                sond_treeviewfm_search_needle, data_thread->search_fs, data_thread->errmsg );
+        if ( rc == -1 )
+        {
+            g_atomic_int_set( data_thread->search_fs->atom_ready, 1 );
+            ERROR_S_VAL(GINT_TO_POINTER(-1))
+        }
+    }
+
+    g_atomic_int_set( data_thread->search_fs->atom_ready, 1 );
+
+    return NULL;
 }
 
 
@@ -1245,40 +1302,30 @@ static gint
 sond_treeviewfm_search( SondTreeview* stv, GtkTreeIter* iter, gpointer data,
         gchar** errmsg )
 {
-    gint rc = 0;
     GFile* file = NULL;
     gchar* path_root = NULL;
+    GThread* thread_search = NULL;
+    gpointer res_thread = NULL;
+
+    SearchFS* search_fs = (SearchFS*) data;
 
     path_root = sond_treeviewfm_get_full_path( SOND_TREEVIEWFM(stv), iter );
+    info_window_set_message( search_fs->info_window, path_root );
     file = g_file_new_for_path( path_root );
     g_free( path_root );
 
-    if ( iter ) //nur, wenn nicht root-Verzeichnis
-    {
-        rc = sond_treeviewfm_search_needle( SOND_TREEVIEWFM(stv), iter, file,
-                NULL, data, errmsg );
-        if ( rc )
-        {
-            g_object_unref( file );
-            ERROR_S
-        }
-    }
+    DataThread data_thread = { search_fs, stv, iter, file, errmsg };
+    thread_search = g_thread_new( NULL, sond_treeviewfm_thread_search, &data_thread );
 
-    if ( g_file_query_file_type( file, G_FILE_QUERY_INFO_NONE, NULL )
-            == G_FILE_TYPE_DIRECTORY )
-    {
-        rc = sond_treeviewfm_dir_foreach( SOND_TREEVIEWFM(stv), iter, file, TRUE,
-                sond_treeviewfm_search_needle, data, errmsg );
-        if ( rc == -1 )
-        {
-            g_object_unref( file );
-            ERROR_S
-        }
-    }
+    while( !g_atomic_int_get( search_fs->atom_ready ) )
+           { if ( search_fs->info_window->cancel )
+            g_atomic_int_set( search_fs->atom_cancelled, 1 );}
 
+    res_thread = g_thread_join( thread_search );
     g_object_unref( file );
+    if ( GPOINTER_TO_INT(res_thread) == -1 ) ERROR_S
 
-    return rc;
+    return 0;
 }
 
 
@@ -1290,6 +1337,8 @@ sond_treeviewfm_search_activate( GtkMenuItem* item, gpointer data )
     gchar* errmsg = NULL;
     gchar* search_text = NULL;
     SearchFS search_fs = { 0 };
+    gint ready = 0;
+    gint cancelled = 0;
 
     SondTreeviewFM* stvfm = (SondTreeviewFM*) data;
 
@@ -1316,15 +1365,22 @@ sond_treeviewfm_search_activate( GtkMenuItem* item, gpointer data )
     search_fs.arr_hits = g_ptr_array_new_with_free_func( g_free );
     search_fs.exact_match = FALSE;
     search_fs.case_sens = FALSE;
+    search_fs.atom_ready = &ready;
+    search_fs.atom_cancelled = &cancelled;
 
     if ( !search_fs.case_sens ) search_fs.needle = g_utf8_strdown( search_text, -1 );
     else search_fs.needle = g_strdup( search_text );
 
     g_free( search_text );
 
+    search_fs.info_window = info_window_open( gtk_widget_get_toplevel( GTK_WIDGET(stvfm) ),
+            "Projektverzeichnis durchduchen" );
+
     if ( only_sel ) rc = sond_treeview_selection_foreach( SOND_TREEVIEW(stvfm),
             sond_treeviewfm_search, &search_fs, &errmsg );
     else rc = sond_treeviewfm_search(SOND_TREEVIEW(stvfm), NULL, &search_fs, &errmsg );
+
+    info_window_kill( search_fs.info_window );
 
     g_free( search_fs.needle );
 

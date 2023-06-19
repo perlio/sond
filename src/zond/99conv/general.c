@@ -26,6 +26,17 @@ is_pdf( const gchar* path )
 
 
 void
+info_window_kill( InfoWindow* info_window )
+{
+    gtk_widget_destroy( info_window->dialog );
+
+    g_free( info_window );
+
+    return;
+}
+
+
+void
 info_window_close( InfoWindow* info_window )
 {
     GtkWidget* button =
@@ -36,9 +47,7 @@ info_window_close( InfoWindow* info_window )
 
     gtk_dialog_run( GTK_DIALOG(info_window->dialog) );
 
-    gtk_widget_destroy( info_window->dialog );
-
-    g_free( info_window );
+    info_window_kill( info_window );
 
     return;
 }

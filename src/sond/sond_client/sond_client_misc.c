@@ -1,8 +1,8 @@
 #include <glib.h>
 
 #include "sond_client.h"
-#include "libsearpc/searpc-client.h"
-#include "SeafileRepo/repo.c"
+//#include "libsearpc/searpc-client.h"
+//#include "SeafileRepo/repo.c"
 
 
 #define JAHRHUNDERT_GRENZE 1960
@@ -91,7 +91,7 @@ if ( error ) printf("%s\n", error->message );
         ptr = ptr->next;
     }
 
-/*
+
     json_t* json = NULL;
     GError* error = NULL;
 do{

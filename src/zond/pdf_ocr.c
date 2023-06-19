@@ -1230,7 +1230,7 @@ pdf_ocr_tess_page( InfoWindow* info_window, TessBaseAPI* handle,
     rc = GPOINTER_TO_INT(g_thread_join( thread_recog ));
     TessMonitorDelete( monitor );
 
-    if ( rc && !(info_window->cancel) ) ERROR_SOND( "TessAPIPRecognize:\nFehler!" )
+    if ( rc && !(info_window->cancel) ) ERROR_SOND( "TessAPIRecognize:\nFehler!" )
 
     return 0;
 }

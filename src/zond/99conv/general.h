@@ -31,6 +31,8 @@ gboolean is_pdf( const gchar* );
 
 /*  info_window  */
 
+void info_window_kill( InfoWindow* );
+
 void info_window_close( InfoWindow* );
 
 void info_window_set_progress_bar_fraction( InfoWindow*, gdouble );
