@@ -23,6 +23,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "global_types.h"
 #include "../misc.h"
+#include "../sond_treeviewfm.h"
 #include "10init/app_window.h"
 #include "10init/headerbar.h"
 
@@ -718,8 +719,6 @@ zond_treeview_jump_to_iter( Projekt* zond, GtkTreeIter* iter )
 
     baum_target = treeviews_get_baum_iter( zond, iter );
 
-    gtk_widget_grab_focus( GTK_WIDGET(zond->treeview[baum_target]) );
-
     sond_treeview_expand_to_row( zond->treeview[baum_target], iter );
     sond_treeview_set_cursor( zond->treeview[baum_target], iter );
 
@@ -728,17 +727,13 @@ zond_treeview_jump_to_iter( Projekt* zond, GtkTreeIter* iter )
 
 
 static void
-zond_treeview_jump_to_link_target( Projekt* zond )
+zond_treeview_jump_to_link_target( Projekt* zond, GtkTreeIter* iter )
 {
-    GtkTreeIter iter = { 0 };
     GtkTreeIter iter_target = { 0 };
 
-    if ( sond_treeview_get_cursor( zond->treeview[zond->baum_active], &iter ) )
-    {
-        zond_tree_store_get_iter_target( &iter, &iter_target );
+    zond_tree_store_get_iter_target( iter, &iter_target );
 
-        zond_treeview_jump_to_iter( zond, &iter_target );
-    }
+    zond_treeview_jump_to_iter( zond, &iter_target );
 
     return;
 }
@@ -747,9 +742,87 @@ zond_treeview_jump_to_link_target( Projekt* zond )
 static void
 zond_treeview_jump_activate( GtkMenuItem* item, gpointer user_data )
 {
+    GtkTreeIter iter = { 0 };
+    gchar* errmsg = NULL;
+
     Projekt* zond = (Projekt*) user_data;
 
-    zond_treeview_jump_to_link_target( zond );
+    if ( !sond_treeview_get_cursor( zond->treeview[zond->baum_active], &iter ) ) return;
+
+    if ( zond_tree_store_is_link( &iter ) ) zond_treeview_jump_to_link_target( zond, &iter );
+    else
+    {
+        gint node_id = 0;
+        gint ref_id = 0;
+        gchar* rel_path = NULL;
+
+        gtk_tree_model_get( gtk_tree_view_get_model(
+                GTK_TREE_VIEW(zond->treeview[zond->baum_active]) ),
+                &iter, 2, &node_id, -1 );
+
+        if ( zond->baum_active == BAUM_AUSWERTUNG &&
+                (ref_id = zond_dbase_get_ref_id( zond->dbase_zond->zond_dbase_work,
+                node_id, &errmsg )) )
+        {
+            if ( ref_id < 0 )
+            {
+                display_message( zond->app_window, "Fehler bei Springen zu Ursprung:\n\n",
+                        errmsg, NULL );
+                g_free( errmsg );
+
+                return;
+            }
+            else //iter in BAUM_INHALT mit node_id ermitteln
+            {
+                GtkTreeIter* iter_inhalt = NULL;
+
+                iter_inhalt = zond_treeview_abfragen_iter( ZOND_TREEVIEW(zond->treeview[BAUM_INHALT]), node_id );
+                if ( !iter_inhalt )
+                {
+                    display_message( zond->app_window, "Fehler bei Springen zu Urprung\n\n"
+                            "Konnte keinen Iter zu node_id ermitteln", NULL );
+
+                    return;
+                }
+
+                zond_treeview_jump_to_iter( zond, iter_inhalt );
+                gtk_tree_iter_free( iter_inhalt );
+
+                return;
+            }
+        }
+        else if ( zond->baum_active == BAUM_INHALT )
+        {
+            gint rc = 0;
+
+            rc = zond_dbase_get_rel_path( zond->dbase_zond->zond_dbase_work,
+                    BAUM_INHALT, node_id, &rel_path, &errmsg );
+            if ( rc == -1 )
+            {
+                display_message( zond->app_window, "Fehler bei Springen zu Ursprung:\n\n",
+                        errmsg, NULL );
+                g_free( errmsg );
+
+                return;
+            }
+            else if ( rc == 1 ) return; //keine Datei
+
+
+            //wenn FS nicht angezeigt: erst einschalten, damit man was sieht
+            if ( !gtk_toggle_button_get_active( GTK_TOGGLE_BUTTON(zond->fs_button) ) )
+                    gtk_toggle_button_set_active( GTK_TOGGLE_BUTTON(zond->fs_button), TRUE );
+
+            rc = sond_treeviewfm_set_cursor_on_path( SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), rel_path, &errmsg );
+            if ( rc )
+            {
+                display_message( zond->app_window, "Fehler bei Springen zu Ursprung:\n\n",
+                        errmsg, NULL );
+                g_free( errmsg );
+
+                return;
+            }
+        }
+    }
 
     return;
 }
@@ -945,7 +1018,7 @@ zond_treeview_init_contextmenu( ZondTreeview* ztv )
             G_CALLBACK(zond_treeview_anbindung_entfernen_activate), zond );
     gtk_menu_shell_append( GTK_MENU_SHELL(contextmenu), item_anbindung_entfernen );
 
-    GtkWidget* item_jump = gtk_menu_item_new_with_label( "Zu Linkziel springen" );
+    GtkWidget* item_jump = gtk_menu_item_new_with_label( "Zu Ursprung springen" );
     g_object_set_data( G_OBJECT(contextmenu), "item-jump", item_jump );
     g_signal_connect( item_jump, "activate", G_CALLBACK(zond_treeview_jump_activate), zond );
     gtk_menu_shell_append( GTK_MENU_SHELL(contextmenu), item_jump );

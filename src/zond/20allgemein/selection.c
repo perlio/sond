@@ -397,6 +397,9 @@ three_treeviews_paste_clipboard( Projekt* zond, gboolean child, gboolean link, g
 
     clipboard = ((SondTreeviewClass*) g_type_class_peek( SOND_TYPE_TREEVIEW ))->clipboard;
 
+    //Wenn clipboard leer - ganz am Anfang oder nach Einfügen von Ausschneiden
+    if ( clipboard->arr_ref->len == 0 ) return 0;
+
     Baum baum_selection = (Baum) sond_treeview_get_id( clipboard->tree_view );
 
     //Todo: kopieren so ändern, daß zukünftig diese Beschränkung nur für

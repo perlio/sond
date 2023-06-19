@@ -520,7 +520,7 @@ cb_clipboard_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
     {
         if ( !kind ) gtk_menu_item_activate( g_object_get_data(
                 G_OBJECT(sond_treeview_get_contextmenu( zond->treeview[zond->baum_active] )),
-                "item-paste-as-link_ge" ) );
+                "item-paste-as-link-ge" ) );
         else gtk_menu_item_activate( g_object_get_data(
                 G_OBJECT(sond_treeview_get_contextmenu( zond->treeview[zond->baum_active] )),
                 "item-paste-as-link-up" ) );
@@ -1065,7 +1065,7 @@ init_menu( Projekt* zond )
             "Suchen");
     g_signal_connect_swapped( suchenitem, "activate", G_CALLBACK(gtk_popover_popup), zond->popover );
 
-    GtkWidget* jumpitem = gtk_menu_item_new_with_label( "Zu Linkziel springen" );
+    GtkWidget* jumpitem = gtk_menu_item_new_with_label( "Zu Ursprung springen" );
     gtk_widget_add_accelerator(jumpitem, "activate", accel_group,
             GDK_KEY_j, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
     g_signal_connect( jumpitem, "activate", G_CALLBACK(cb_jumpitem), zond );

@@ -405,6 +405,8 @@ sond_treeview_set_cursor( SondTreeview* stv, GtkTreeIter* iter )
     gtk_tree_view_set_cursor( GTK_TREE_VIEW(stv), path, NULL, FALSE );
     gtk_tree_path_free( path );
 
+    gtk_widget_grab_focus( GTK_WIDGET(stv) );
+
     return;
 }
 
