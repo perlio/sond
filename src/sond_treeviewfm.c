@@ -1,5 +1,5 @@
 /*
-sond (sond_treeviewfm.c) - Akten, BeweisstÃ¼cke, Unterlagen
+sond (sond_treeviewfm.c) - Akten, Beweisstücke, Unterlagen
 Copyright (C) 2022  pelo america
 
 This program is free software: you can redistribute it and/or modify
@@ -156,7 +156,7 @@ sond_treeviewfm_dbase( SondTreeviewFM* stvfm, gint mode, const gchar* rel_path_s
     if ( mode == 2 && sond_treeviewfm_other_fm( stvfm ) )
     {
         rc = SOND_TREEVIEWFM_GET_CLASS(stvfm)->dbase_test( SOND_TREEVIEWFM(clipboard->tree_view), rel_path_source, errmsg );
-        if ( rc ) //aufrÃ¤umen...
+        if ( rc ) //aufräumen...
         {
             if ( rc == -1 ) ERROR_S
             else if ( rc == 1 ) return 1;
@@ -202,11 +202,11 @@ sond_treeviewfm_dbase( SondTreeviewFM* stvfm, gint mode, const gchar* rel_path_s
     2 - move file oder dir
     3 - row edited
     4 - delete
-    RÃ¼ckgabe:
-    -1- Fehler - *errmsg wird "gefÃ¼llt"
+    Rückgabe:
+    -1- Fehler - *errmsg wird "gefüllt"
     0 - Aktion erfolgreich abgeschlossen
-    1 - keine VerÃ¤nderung am Filesystem
-    2 - keine VerÃ¤nderung am Filesystem - Abbruch gewÃ¤hlt
+    1 - keine Veränderung am Filesystem
+    2 - keine Veränderung am Filesystem - Abbruch gewählt
 **/
 static gint
 sond_treeviewfm_move_copy_create_delete( SondTreeviewFM* stvfm, GFile* file_source,
@@ -277,7 +277,7 @@ sond_treeviewfm_move_copy_create_delete( SondTreeviewFM* stvfm, GFile* file_sour
                 if ( mode == 3 ) //Filename editiert
                 {
                     g_free( basename );
-                    return 1; //nichts geÃ¤ndert!
+                    return 1; //nichts geändert!
                 }
 
                 gchar* basename_new_try = NULL;
@@ -316,14 +316,14 @@ sond_treeviewfm_move_copy_create_delete( SondTreeviewFM* stvfm, GFile* file_sour
 
                 gint res = dialog_with_buttons( gtk_widget_get_toplevel(
                         GTK_WIDGET(stvfm) ), "Zugriff nicht erlaubt",
-                        "Datei mÃ¶glicherweise geÃ¶ffnet", NULL, "Erneut versuchen", 1,
-                        "Ãœberspringen", 2, "Abbrechen", 3, NULL );
+                        "Datei möglicherweise geöffnet", NULL, "Erneut versuchen", 1,
+                        "Überspringen", 2, "Abbrechen", 3, NULL );
 
                 if ( res == 1 ) continue; //Namensgleichheit - wird oben behandelt
                 else if ( res == 2 )
                 {
                     g_free( basename );
-                    return 1; //Ãœberspringen
+                    return 1; //Überspringen
                 }
                 else if ( res == 3)
                 {
@@ -400,7 +400,7 @@ sond_treeviewfm_text_edited( GtkCellRenderer* cell, gchar* path_string, gchar* n
 
     if ( rc == -1 )
             display_message( gtk_widget_get_toplevel( GTK_WIDGET(stvfm) ),
-            "Umbenennen nicht mÃ¶glich\n\nBei Aufruf sond_treeviewfm_move_copy_create_delete:\n",
+            "Umbenennen nicht möglich\n\nBei Aufruf sond_treeviewfm_move_copy_create_delete:\n",
             errmsg, NULL );
     else if ( rc == 0 )
     {
@@ -411,7 +411,7 @@ sond_treeviewfm_text_edited( GtkCellRenderer* cell, gchar* path_string, gchar* n
         if ( !info )
         {
             display_message( gtk_widget_get_toplevel( GTK_WIDGET(stvfm) ),
-            "Umbenennen nicht mÃ¶glich\n\nBei Aufruf g_file_query_info:\n",
+            "Umbenennen nicht möglich\n\nBei Aufruf g_file_query_info:\n",
             error->message, NULL );
             g_error_free( error );
         }
@@ -421,7 +421,7 @@ sond_treeviewfm_text_edited( GtkCellRenderer* cell, gchar* path_string, gchar* n
             gtk_tree_view_columns_autosize( GTK_TREE_VIEW(stvfm) );
             g_object_unref( info );
         }
-    } //wenn rc_edit == 1 oder 2: einfach zurÃ¼ck
+    } //wenn rc_edit == 1 oder 2: einfach zurück
 
     g_object_unref( file_dest );
 
@@ -444,7 +444,7 @@ sond_treeviewfm_row_collapsed( GtkTreeView* tree_view, GtkTreeIter* iter,
                 GTK_TREE_STORE(gtk_tree_view_get_model( tree_view )), &iter_child );
     } while ( not_empty );
 
-    //dummy einfÃ¼gen, dir ist ja nicht leer
+    //dummy einfügen, dir ist ja nicht leer
     gtk_tree_store_insert( GTK_TREE_STORE(gtk_tree_view_get_model( tree_view )),
             &iter_child, iter, -1 );
 
@@ -472,7 +472,7 @@ sond_treeviewfm_get_name( SondTreeviewFM* stvfm, GtkTreeIter* iter )
 }
 
 
-/** iter zeigt auf Verzeichnis, was zu fÃ¼llen ist
+/** iter zeigt auf Verzeichnis, was zu füllen ist
     Es wurde bereits getestet, ob das Verzeichnis bereits geladen wurde
 **/
 static gint
@@ -483,13 +483,13 @@ sond_treeviewfm_load_dir_foreach( SondTreeviewFM* stvfm, GtkTreeIter* iter, GFil
 
     GtkTreeIter* iter_dir = (GtkTreeIter*) data;
 
-    //child in tree einfÃ¼gen
+    //child in tree einfügen
     gtk_tree_store_insert( GTK_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(stvfm) )),
             &iter_new, iter_dir, -1 );
     gtk_tree_store_set( GTK_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(stvfm) )),
             &iter_new, 0, info , -1 );
 
-    //falls directory: Ã¼berprÃ¼fen ob leer, falls nicht, dummy als child
+    //falls directory: überprüfen ob leer, falls nicht, dummy als child
     GFileType type = g_file_info_get_file_type( info );
     if ( type == G_FILE_TYPE_DIRECTORY )
     {
@@ -529,10 +529,10 @@ sond_treeviewfm_load_dir_foreach( SondTreeviewFM* stvfm, GtkTreeIter* iter, GFil
 }
 
 
-/** rc == -1: FÃ¤hler
-    rc == 0: alles ausgefÃ¼hrt, sÃ¤mtliche Callbacks haben 0 zurÃ¼ckgegeben
-    rc == 1: alles ausgefÃ¼hrt, mindestens ein Callback hat 1 zurÃ¼ckgegeben
-    rc == 2: nicht alles ausgefÃ¼hrt, Callback hat 2 zurÃ¼ckgegeben -> sofortiger Abbruch
+/** rc == -1: Fähler
+    rc == 0: alles ausgeführt, sämtliche Callbacks haben 0 zurückgegeben
+    rc == 1: alles ausgeführt, mindestens ein Callback hat 1 zurückgegeben
+    rc == 2: nicht alles ausgeführt, Callback hat 2 zurückgegeben -> sofortiger Abbruch
     **/
 static gint
 sond_treeviewfm_dir_foreach( SondTreeviewFM* stvfm, GtkTreeIter* iter_dir,
@@ -595,7 +595,7 @@ sond_treeviewfm_dir_foreach( SondTreeviewFM* stvfm, GtkTreeIter* iter_dir,
                     //den Namen des aktuellen Kindes holen
                     if ( !g_strcmp0( sond_treeviewfm_get_name( stvfm, &iter_file ),
                             g_file_info_get_name( info_child ) ) )
-                            found = TRUE;//paÃŸt?
+                            found = TRUE;//paßt?
 
                     if ( found ) break;
                 } while ( gtk_tree_model_iter_next( gtk_tree_view_get_model( GTK_TREE_VIEW(stvfm) ), &iter_file ) );
@@ -611,7 +611,7 @@ sond_treeviewfm_dir_foreach( SondTreeviewFM* stvfm, GtkTreeIter* iter_dir,
                 return -1;
             }
             else if ( rc == 1 ) flag = TRUE;
-            else if ( rc == 2 ) //Abbruch gewÃ¤hlt
+            else if ( rc == 2 ) //Abbruch gewählt
             {
                 g_object_unref( enumer );
                 return 2;
@@ -632,7 +632,7 @@ sond_treeviewfm_dir_foreach( SondTreeviewFM* stvfm, GtkTreeIter* iter_dir,
 
                     return -1;
                 }
-                else if ( rc == 1 ) flag = TRUE;//Abbruch gewÃ¤hlt
+                else if ( rc == 1 ) flag = TRUE;//Abbruch gewählt
                 else if ( rc == 2 )
                 {
                     g_object_unref( enumer );
@@ -672,7 +672,7 @@ sond_treeviewfm_load_dir( SondTreeviewFM* stvfm, GtkTreeIter* iter, gchar** errm
 
 
 
-    //fm_load_dir_foreach gibt 0 oder -1 zurÃ¼ck
+    //fm_load_dir_foreach gibt 0 oder -1 zurück
     rc = sond_treeviewfm_dir_foreach( stvfm, iter, file, FALSE,
             sond_treeviewfm_load_dir_foreach, iter, errmsg );
     g_object_unref( file );
@@ -948,7 +948,7 @@ sond_treeviewfm_insert_node( SondTreeviewFM* stvfm, GtkTreeIter* iter, gboolean 
 
     GtkTreeIter* ret_iter = gtk_tree_iter_copy( &new_iter );
 
-    return ret_iter; //muÃŸ nach Gebrauch gtk_tree_iter_freed werden!!!
+    return ret_iter; //muß nach Gebrauch gtk_tree_iter_freed werden!!!
 }
 
 
@@ -980,7 +980,7 @@ sond_treeviewfm_create_dir( SondTreeviewFM* stvfm, gboolean child, gchar** errms
     {
         parent = g_file_get_parent( file );
         g_object_unref( file );
-    } //nur noch parent muÃŸ unrefed werden - file wurde Ã¼bernommen
+    } //nur noch parent muß unrefed werden - file wurde übernommen
 
     GFile* file_dir = g_file_get_child( parent, "Neues Verzeichnis" );
     g_object_unref( parent );
@@ -1036,7 +1036,7 @@ sond_treeviewfm_punkt_einfuegen_activate( GtkMenuItem* item, gpointer data )
     if ( rc )
     {
         display_message( gtk_widget_get_toplevel( GTK_WIDGET(stvfm) ),
-                "Verzeichnis kann nicht eingefÃ¼gt werden\n\n", errmsg, NULL );
+                "Verzeichnis kann nicht eingefügt werden\n\n", errmsg, NULL );
         g_free( errmsg );
     }
 
@@ -1053,18 +1053,18 @@ sond_treeviewfm_paste_activate( GtkMenuItem* item, gpointer data )
 
     SondTreeviewFM* stvfm = (SondTreeviewFM*) data;
 
-    if ( sond_treeview_test_cursor_descendant( SOND_TREEVIEW(stvfm) ) )
-            display_message( gtk_widget_get_toplevel( GTK_WIDGET(stvfm) ),
-            "UnzulÃ¤ssiges Ziel: AbkÃ¶mmling von zu verschiebendem Knoten", NULL );
-
     kind = (gboolean) GPOINTER_TO_INT(g_object_get_data( G_OBJECT(item),
             "kind" ));
+
+    if ( sond_treeview_test_cursor_descendant( SOND_TREEVIEW(stvfm), kind ) )
+            display_message( gtk_widget_get_toplevel( GTK_WIDGET(stvfm) ),
+            "Unzulässiges Ziel: Abkömmling von zu verschiebendem Knoten", NULL );
 
     rc = sond_treeviewfm_paste_clipboard( stvfm , kind, &errmsg );
     if ( rc )
     {
         display_message( gtk_widget_get_toplevel( GTK_WIDGET(stvfm) ),
-                "EinfÃ¼gen nicht mÃ¶glich\n\n", errmsg, NULL );
+                "Einfügen nicht möglich\n\n", errmsg, NULL );
         g_free( errmsg );
     }
 
@@ -1087,7 +1087,7 @@ sond_treeviewfm_remove_node( SondTreeviewFM* stvfm, GtkTreeIter* iter_file, GFil
                 sond_treeviewfm_remove_node, data, errmsg );
         if ( rc == -1 ) ERROR_S
         else if ( rc ) return rc; //Verzeichnis nicht leer, weil
-                                    //Datei angebunden war, Ã¼bersprungen wurde oder Abbruch gewÃ¤hlt
+                                    //Datei angebunden war, übersprungen wurde oder Abbruch gewählt
     }
 
     rc = sond_treeviewfm_move_copy_create_delete( stvfm, NULL, &file, 4, errmsg );
@@ -1139,7 +1139,7 @@ sond_treeviewfm_loeschen_activate( GtkMenuItem* item, gpointer data )
     if ( rc == -1 )
     {
         display_message( gtk_widget_get_toplevel( GTK_WIDGET(stvfm) ),
-                "LÃ¶schen nicht mÃ¶glich\n\n", errmsg, NULL );
+                "Löschen nicht möglich\n\n", errmsg, NULL );
         g_free( errmsg );
     }
 
@@ -1348,7 +1348,7 @@ sond_treeviewfm_search_activate( GtkMenuItem* item, gpointer data )
             gtk_tree_view_get_selection( GTK_TREE_VIEW(stvfm) ) ) )
     {
         display_message( gtk_widget_get_toplevel( GTK_WIDGET(stvfm) ),
-                "Keine Punkte ausgewÃ¤hlt", NULL );
+                "Keine Punkte ausgewählt", NULL );
         return;
     }
 
@@ -1422,8 +1422,8 @@ sond_treeviewfm_init_contextmenu( SondTreeviewFM* stvfm )
     GtkWidget* item_separator_0 = gtk_separator_menu_item_new();
     gtk_menu_shell_prepend( GTK_MENU_SHELL(contextmenu), item_separator_0 );
 
-    //Punkt einfÃ¼gen
-    GtkWidget* item_punkt_einfuegen = gtk_menu_item_new_with_label( "Punkt einfÃ¼gen" );
+    //Punkt einfügen
+    GtkWidget* item_punkt_einfuegen = gtk_menu_item_new_with_label( "Punkt einfügen" );
 
     GtkWidget* menu_punkt_einfuegen = gtk_menu_new();
 
@@ -1452,8 +1452,8 @@ sond_treeviewfm_init_contextmenu( SondTreeviewFM* stvfm )
 
     gtk_menu_shell_prepend( GTK_MENU_SHELL(contextmenu), item_punkt_einfuegen );
 
-    //EinfÃ¼gen
-    GtkWidget* item_paste = gtk_menu_item_new_with_label("EinfÃ¼gen");
+    //Einfügen
+    GtkWidget* item_paste = gtk_menu_item_new_with_label("Einfügen");
 
     GtkWidget* menu_paste = gtk_menu_new();
 
@@ -1475,8 +1475,8 @@ sond_treeviewfm_init_contextmenu( SondTreeviewFM* stvfm )
 
     gtk_menu_shell_append( GTK_MENU_SHELL(contextmenu), item_paste );
 
-    //Punkt(e) lÃ¶schen
-    GtkWidget* item_loeschen = gtk_menu_item_new_with_label("LÃ¶schen");
+    //Punkt(e) löschen
+    GtkWidget* item_loeschen = gtk_menu_item_new_with_label("Löschen");
     g_object_set_data( G_OBJECT(contextmenu), "item-loeschen", item_loeschen );
     g_signal_connect( G_OBJECT(item_loeschen), "activate",
             G_CALLBACK(sond_treeviewfm_loeschen_activate), (gpointer) stvfm );
@@ -1486,8 +1486,8 @@ sond_treeviewfm_init_contextmenu( SondTreeviewFM* stvfm )
     GtkWidget* item_separator_1 = gtk_separator_menu_item_new();
     gtk_menu_shell_append( GTK_MENU_SHELL(contextmenu), item_separator_1 );
 
-    //Datei Ã–ffnen
-    GtkWidget* item_datei_oeffnen = gtk_menu_item_new_with_label( "Ã–ffnen" );
+    //Datei Öffnen
+    GtkWidget* item_datei_oeffnen = gtk_menu_item_new_with_label( "Öffnen" );
     g_object_set_data( G_OBJECT(contextmenu), "item-datei-oeffnen",
             item_datei_oeffnen );
     g_signal_connect( item_datei_oeffnen, "activate",
@@ -1601,7 +1601,7 @@ sond_treeviewfm_row_activated( GtkTreeView* tree_view, GtkTreePath* tree_path,
     if ( rc )
     {
         display_message( gtk_widget_get_toplevel( GTK_WIDGET(tree_view) ),
-                "Ã–ffnen nicht mÃ¶glich\n\nBei Aufruf oeffnen_datei:\n", errmsg, NULL );
+                "Öffnen nicht möglich\n\nBei Aufruf oeffnen_datei:\n", errmsg, NULL );
         g_free( errmsg );
     }
 
@@ -1715,7 +1715,7 @@ sond_treeviewfm_init( SondTreeviewFM* stvfm )
             sond_treeview_get_cell_renderer_icon( SOND_TREEVIEW(stvfm) ),
             sond_treeviewfm_render_file_icon, NULL, NULL );
 
-    //GrÃ¶ÃŸe
+    //Größe
     GtkCellRenderer* renderer_size = gtk_cell_renderer_text_new( );
 
     GtkTreeViewColumn* fs_tree_column_size = gtk_tree_view_column_new( );
@@ -1725,7 +1725,7 @@ sond_treeviewfm_init( SondTreeviewFM* stvfm )
     gtk_tree_view_column_set_cell_data_func( fs_tree_column_size, renderer_size,
             sond_treeviewfm_render_file_size, NULL, NULL );
 
-    //Ã„nderungsdatum
+    //Änderungsdatum
     GtkCellRenderer* renderer_modify = gtk_cell_renderer_text_new( );
 
     GtkTreeViewColumn* fs_tree_column_modify = gtk_tree_view_column_new( );
@@ -1751,8 +1751,8 @@ sond_treeviewfm_init( SondTreeviewFM* stvfm )
     gtk_tree_view_append_column( GTK_TREE_VIEW(stvfm), fs_tree_column_modify );
 
     gtk_tree_view_column_set_title( gtk_tree_view_get_column( GTK_TREE_VIEW(stvfm), 0 ), "Datei" );
-    gtk_tree_view_column_set_title( fs_tree_column_size, "GrÃ¶ÃŸe" );
-    gtk_tree_view_column_set_title( fs_tree_column_modify, "Ã„nderungsdatum" );
+    gtk_tree_view_column_set_title( fs_tree_column_size, "Größe" );
+    gtk_tree_view_column_set_title( fs_tree_column_modify, "Änderungsdatum" );
     gtk_tree_view_column_set_title( stvfm_priv->column_eingang, "Eingang" );
 
     GtkTreeStore* tree_store = gtk_tree_store_new( 1, G_TYPE_OBJECT );
@@ -1989,7 +1989,7 @@ sond_treeviewfm_paste_clipboard_foreach( SondTreeview* stv, GtkTreeIter* iter,
     file_source = g_file_new_for_path( path_source );
     g_free( path_source );
 
-    //prÃ¼fen, ob innerhalb des gleichen Verzeichnisses verschoben/kopiert werden
+    //prüfen, ob innerhalb des gleichen Verzeichnisses verschoben/kopiert werden
     //soll - dann: same_dir = TRUE
     GFile* file_parent_source = g_file_get_parent( file_source );
     same_dir = g_file_equal( s_fm_paste_selection->file_parent, file_parent_source );
@@ -2004,7 +2004,7 @@ sond_treeviewfm_paste_clipboard_foreach( SondTreeview* stv, GtkTreeIter* iter,
 
     file_type = g_file_query_file_type( file_source, G_FILE_QUERY_INFO_NONE, NULL );
 
-    //Falls Verzeichnis: PrÃ¼fen, ob Datei drinne, dann dir_with_children = TRUE
+    //Falls Verzeichnis: Prüfen, ob Datei drinne, dann dir_with_children = TRUE
     if (  file_type == G_FILE_TYPE_DIRECTORY &&
             (!s_fm_paste_selection->kind || s_fm_paste_selection->expanded) )
     {
@@ -2044,12 +2044,12 @@ sond_treeviewfm_paste_clipboard_foreach( SondTreeview* stv, GtkTreeIter* iter,
     g_object_unref( file_source );
 
     if ( rc == -1 ) ERROR_S
-    else if ( rc == 1 ) return 0; //Ãœnerspringen gewÃ¤hlt - einfach weiter
-    else if ( rc == 2 ) return 1; //nur bei selection_move_file/_dir mÃ¶glich
+    else if ( rc == 1 ) return 0; //Ünerspringen gewählt - einfach weiter
+    else if ( rc == 2 ) return 1; //nur bei selection_move_file/_dir möglich
 
     s_fm_paste_selection->inserted = TRUE;
 
-    //Knoten mÃ¼ssen nur eingefÃ¼gt werden, wenn Row expanded ist; sonst passiert das im callback beim Ã–ffnen
+    //Knoten müssen nur eingefügt werden, wenn Row expanded ist; sonst passiert das im callback beim Öffnen
     if ( (!s_fm_paste_selection->kind) || s_fm_paste_selection->expanded )
     {
         //Ziel-FS-tree eintragen
@@ -2063,7 +2063,7 @@ sond_treeviewfm_paste_clipboard_foreach( SondTreeview* stv, GtkTreeIter* iter,
         gtk_tree_iter_free( iter_new );
         s_fm_paste_selection->kind = FALSE;
 
-        //Falls Verzeichnis mit Datei innendrin, Knoten in tree einfÃ¼gen
+        //Falls Verzeichnis mit Datei innendrin, Knoten in tree einfügen
         if ( dir_with_children )
         {
             GtkTreeIter iter_tmp;
@@ -2128,8 +2128,8 @@ sond_treeviewfm_paste_clipboard( SondTreeviewFM* stvfm, gboolean kind, gchar** e
     if ( (file_type != G_FILE_TYPE_DIRECTORY) && kind )
     {
         g_object_unref( file_cursor );
-        if ( errmsg ) *errmsg = g_strdup( "EinfÃ¼gen als Unterpunkt von Dateien "
-                "nicht zulÃ¤ssig" );
+        if ( errmsg ) *errmsg = g_strdup( "Einfügen als Unterpunkt von Dateien "
+                "nicht zulässig" );
 
         return -1;
     }
@@ -2138,7 +2138,7 @@ sond_treeviewfm_paste_clipboard( SondTreeviewFM* stvfm, gboolean kind, gchar** e
         //dann ist Datei unter cursor parent
         file_parent = file_cursor;
 
-        //prÃ¼fen, ob geÃ¶ffnet ist
+        //prüfen, ob geöffnet ist
         GtkTreePath* path = NULL;
 
         path = gtk_tree_model_get_path( gtk_tree_view_get_model( GTK_TREE_VIEW(stvfm) ),
@@ -2146,7 +2146,7 @@ sond_treeviewfm_paste_clipboard( SondTreeviewFM* stvfm, gboolean kind, gchar** e
         expanded = gtk_tree_view_row_expanded( GTK_TREE_VIEW(stvfm), path );
         gtk_tree_path_free( path );
     }
-    else //unterhalb angefÃ¼gt
+    else //unterhalb angefügt
     {
         //dann ist parent parent!
         file_parent = g_file_get_parent( file_cursor );
@@ -2165,9 +2165,9 @@ sond_treeviewfm_paste_clipboard( SondTreeviewFM* stvfm, gboolean kind, gchar** e
         ERROR_S
     }
 
-    //Wenn in nicht ausgeklapptes Verzeichnis etwas eingefÃ¼gt wurde und
+    //Wenn in nicht ausgeklapptes Verzeichnis etwas eingefügt wurde und
     //Verzeichnis leer ist:
-    //Dummy einfÃ¼gen
+    //Dummy einfügen
     if ( s_fm_paste_selection.inserted && kind && !expanded &&
             !gtk_tree_model_iter_has_child( gtk_tree_view_get_model(
             GTK_TREE_VIEW(stvfm) ), s_fm_paste_selection.iter_cursor ) )
@@ -2177,7 +2177,7 @@ sond_treeviewfm_paste_clipboard( SondTreeviewFM* stvfm, gboolean kind, gchar** e
                 GTK_TREE_VIEW(stvfm) )), &iter_tmp, s_fm_paste_selection.iter_cursor, -1 );
     }
 
-    //Alte Auswahl lÃ¶schen - muÃŸ vor baum_setzen_cursor geschehen,
+    //Alte Auswahl löschen - muß vor baum_setzen_cursor geschehen,
     //da in change_row-callback ref abgefragt wird
     if ( clipboard->ausschneiden && clipboard->arr_ref->len > 0 )
             g_ptr_array_remove_range( clipboard->arr_ref,

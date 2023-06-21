@@ -47,7 +47,7 @@ void sond_treeview_set_cursor( SondTreeview*, GtkTreeIter* );
 
 void sond_treeview_set_cursor_on_text_cell( SondTreeview* stv, GtkTreeIter* iter );
 
-gboolean sond_treeview_test_cursor_descendant( SondTreeview* );
+gboolean sond_treeview_test_cursor_descendant( SondTreeview*, gboolean );
 
 void sond_treeview_copy_or_cut_selection( SondTreeview*, gboolean );
 

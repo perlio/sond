@@ -433,7 +433,7 @@ sond_treeview_set_cursor_on_text_cell( SondTreeview* stv, GtkTreeIter* iter )
 //überprüft beim verschieben, ob auf zu verschiebenden Knoten oder dessen
 //Nachfahren verschoben werden soll
 gboolean
-sond_treeview_test_cursor_descendant( SondTreeview* stv )
+sond_treeview_test_cursor_descendant( SondTreeview* stv, gboolean child )
 {
     Clipboard* clipboard = ((SondTreeviewClass*) g_type_class_peek( SOND_TYPE_TREEVIEW ))->clipboard;
 
@@ -445,18 +445,21 @@ sond_treeview_test_cursor_descendant( SondTreeview* stv )
     if ( !path ) return FALSE;
 
     GtkTreePath* path_sel = NULL;
-    gboolean descend = FALSE;
     for ( gint i = 0; i < clipboard->arr_ref->len; i++ )
     {
+        gboolean res = FALSE;
+
         path_sel = gtk_tree_row_reference_get_path( g_ptr_array_index(
                 clipboard->arr_ref, i ) );
         if ( !path_sel ) continue;
-        descend = gtk_tree_path_is_descendant( path, path_sel );
+
+        if ( child && !gtk_tree_path_compare( path_sel, path ) ) res = TRUE;
+        else if ( gtk_tree_path_is_descendant( path, path_sel ) ) res = TRUE;
         gtk_tree_path_free( path_sel );
-        if ( descend )
+
+        if ( res == TRUE )
         {
             gtk_tree_path_free( path );
-
             return TRUE;
         }
     }

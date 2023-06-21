@@ -1010,9 +1010,8 @@ zond_tree_store_load_node( GNode* node_parent, GNode* node_parent_target )
                 node_parent, pos, NULL, FALSE );
         else if ( ((RowData*) node_target_child->data)->head_nr == -1 ) //Kind ist dummy
         { //kommt vor, wenn link auf Knoten, der Kind hat, das auf Knoten verweist ...
-            //dann kind von Ziel als Link einfügen
-            zond_tree_store_insert_link_at_pos(
-                    node_parent_target, //->data)->target->children,
+            //dann kind von Ziel von Ziel als Link einfügen
+            zond_tree_store_insert_link_at_pos( node_parent_target,
                     0, node_parent, pos, NULL, FALSE );
         }
         else //Kind ist kein link

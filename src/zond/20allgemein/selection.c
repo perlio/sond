@@ -1,5 +1,5 @@
 /*
-zond (selection.c) - Akten, BeweisstÃ¼cke, Unterlagen
+zond (selection.c) - Akten, Beweisstücke, Unterlagen
 Copyright (C) 2020  pelo america
 
 This program is free software: you can redistribute it and/or modify
@@ -53,7 +53,7 @@ selection_anbinden_zu_baum( Projekt* zond, GtkTreeIter* iter, gboolean kind,
 
         node_id_new = g_array_index( arr_new_nodes, gint, i );
 
-        //datei in baum_inhalt einfÃ¼gen
+        //datei in baum_inhalt einfügen
         rc = treeviews_load_node( zond, FALSE, BAUM_INHALT, node_id_new,
                 ((!iter && kind) ? NULL : &iter_loop), kind, &iter_new, errmsg );
         if ( rc ) ERROR_S_VAL( NULL )
@@ -132,8 +132,8 @@ selection_datei_einfuegen_in_db( Projekt* zond, gchar* rel_path, GFile* file, gi
 
 
 /** Fehler: -1
-    eingefÃ¼gt: node_id
-    nicht eingefÃ¼gt, weil schon angebunden: 0 **/
+    eingefügt: node_id
+    nicht eingefügt, weil schon angebunden: 0 **/
 static gint
 selection_datei_anbinden( Projekt* zond, InfoWindow* info_window, GFile* file, gint node_id,
         gboolean child, gint* zaehler, gchar** errmsg )
@@ -143,7 +143,7 @@ selection_datei_anbinden( Projekt* zond, InfoWindow* info_window, GFile* file, g
 
     if ( info_window->cancel ) return -2;
 
-    //PrÃ¼fen, ob Datei schon angebunden
+    //Prüfen, ob Datei schon angebunden
     gchar* rel_path = get_rel_path_from_file( zond->dbase_zond->project_dir, file );
     rc = zond_dbase_get_node_id_from_rel_path( zond->dbase_zond->zond_dbase_work, rel_path, errmsg );
     if ( rc == -1 )
@@ -173,8 +173,8 @@ selection_datei_anbinden( Projekt* zond, InfoWindow* info_window, GFile* file, g
 }
 
 
-/*  Fehler: RÃ¼ckgabe -1
-**  ansonsten: Id des zunÃ¤chst erzeugten Knotens  */
+/*  Fehler: Rückgabe -1
+**  ansonsten: Id des zunächst erzeugten Knotens  */
 static gint
 selection_ordner_anbinden_rekursiv( Projekt* zond, InfoWindow* info_window,
         GFile* file, gint node_id, gboolean child, gint* zaehler, gchar** errmsg )
@@ -191,7 +191,7 @@ selection_ordner_anbinden_rekursiv( Projekt* zond, InfoWindow* info_window,
     new_node_id = zond_dbase_insert_node( zond->dbase_zond->zond_dbase_work, BAUM_INHALT, node_id, child, "folder",
             basename, errmsg );
 
-    text = g_strconcat( "Verzeichnis eingefÃ¼gt: ", basename, NULL );
+    text = g_strconcat( "Verzeichnis eingefügt: ", basename, NULL );
     info_window_set_message( info_window, text );
     g_free( text );
 
@@ -209,8 +209,8 @@ selection_ordner_anbinden_rekursiv( Projekt* zond, InfoWindow* info_window,
         return -1;
     }
 
-    //new_anchor kopieren, da in der Schleife verÃ¤ndert wird
-    //es soll aber der soeben erzeugte Punkt zurÃ¼ckgegegen werden
+    //new_anchor kopieren, da in der Schleife verändert wird
+    //es soll aber der soeben erzeugte Punkt zurückgegegen werden
     GFile* file_child = NULL;
     GFileInfo* info_child = NULL;
     gint new_node_id_loop_tmp = 0;
@@ -397,21 +397,21 @@ three_treeviews_paste_clipboard( Projekt* zond, gboolean child, gboolean link, g
 
     clipboard = ((SondTreeviewClass*) g_type_class_peek( SOND_TYPE_TREEVIEW ))->clipboard;
 
-    //Wenn clipboard leer - ganz am Anfang oder nach EinfÃ¼gen von Ausschneiden
+    //Wenn clipboard leer - ganz am Anfang oder nach Einfügen von Ausschneiden
     if ( clipboard->arr_ref->len == 0 ) return 0;
 
     Baum baum_selection = (Baum) sond_treeview_get_id( clipboard->tree_view );
 
-    //Todo: kopieren so Ã¤ndern, daÃŸ zukÃ¼nftig diese BeschrÃ¤nkung nur fÃ¼r
+    //Todo: kopieren so ändern, daß zukünftig diese Beschränkung nur für
     //ausschneiden erforderlich ist (erst Knoten mit Kindern komplett kopieren,
-    //und dann erst einfÃ¼gen
-    //MuÃŸ auf jeden Fall geprÃ¼ft werden (derzeit)
+    //und dann erst einfügen
+    //Muß auf jeden Fall geprüft werden (derzeit)
             //will ich das wirklich?
 
     if ( zond->baum_active == baum_selection ) //wenn innerhalb des gleichen Baums
     {
-        if ( sond_treeview_test_cursor_descendant( zond->treeview[zond->baum_active] ) )
-                ERROR_S_MESSAGE( "UnzulÃ¤ssiges Ziel: AbkÃ¶mmling von zu verschiebendem "
+        if ( sond_treeview_test_cursor_descendant( zond->treeview[zond->baum_active], child ) )
+                ERROR_S_MESSAGE( "Unzulässiges Ziel: Abkömmling von zu verschiebendem "
                 "Knoten" )
     }
 
@@ -424,7 +424,7 @@ three_treeviews_paste_clipboard( Projekt* zond, gboolean child, gboolean link, g
 
         rc = treeviews_hat_vorfahre_datei( zond, baum_anchor, anchor_id, child, errmsg );
         if ( rc == -1 ) ERROR_S
-        else if ( rc == 1 ) return 1; //unzulÃ¤ssiges Ziel
+        else if ( rc == 1 ) return 1; //unzulässiges Ziel
 
         if ( baum_selection == BAUM_FS )
         {
