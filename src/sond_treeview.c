@@ -1,5 +1,5 @@
 /*
-sond (sond_treeview.c) - Akten, BeweisstÃ¼cke, Unterlagen
+sond (sond_treeview.c) - Akten, Beweisstücke, Unterlagen
 Copyright (C) 2021  pelo america
 
 This program is free software: you can redistribute it and/or modify
@@ -57,7 +57,7 @@ sond_treeview_show_popupmenu( SondTreeview* stv, GdkEventButton* event,
     {
         if ( !gtk_widget_has_focus( GTK_WIDGET(stv) ) )
         {
-            //zunÃ¤chst cursor setzen, damit der bei Focus-Wechsel direkt markiet wird
+            //zunächst cursor setzen, damit der bei Focus-Wechsel direkt markiet wird
             gtk_tree_view_set_cursor( GTK_TREE_VIEW(stv), path, NULL, FALSE );
 
            //focus auf neuen Baum...
@@ -80,7 +80,7 @@ sond_treeview_class_init( SondTreeviewClass* klass )
 {
     klass->clipboard = g_malloc0( sizeof( Clipboard ) );
     klass->clipboard->arr_ref = g_ptr_array_new_with_free_func( (GDestroyNotify) gtk_tree_row_reference_free );
-    //class_finalize muÃŸ nicht definiert werden -
+    //class_finalize muß nicht definiert werden -
     //statisch registrierte Klasse wird zurLaufzeit niemals finalisiert!
 
     klass->render_text_cell = NULL;
@@ -387,7 +387,8 @@ sond_treeview_get_cursor( SondTreeview* stv, GtkTreeIter* iter )
     gtk_tree_view_get_cursor( GTK_TREE_VIEW(stv), &path, NULL );
     if ( !path ) return FALSE;
 
-    gtk_tree_model_get_iter( gtk_tree_view_get_model( GTK_TREE_VIEW(stv) ), iter, path );
+    if ( iter ) gtk_tree_model_get_iter( gtk_tree_view_get_model(
+            GTK_TREE_VIEW(stv) ), iter, path );
 
     gtk_tree_path_free( path );
 
@@ -429,7 +430,7 @@ sond_treeview_set_cursor_on_text_cell( SondTreeview* stv, GtkTreeIter* iter )
 }
 
 
-//Ã¼berprÃ¼ft beim verschieben, ob auf zu verschiebenden Knoten oder dessen
+//überprüft beim verschieben, ob auf zu verschiebenden Knoten oder dessen
 //Nachfahren verschoben werden soll
 gboolean
 sond_treeview_test_cursor_descendant( SondTreeview* stv )
@@ -500,7 +501,7 @@ sond_treeview_copy_or_cut_selection( SondTreeview* stv, gboolean ausschneiden )
     if ( clipboard->ausschneiden )
             gtk_widget_queue_draw( GTK_WIDGET(clipboard->tree_view) );
 
-    //Alte Auswahl lÃ¶schen, falls vorhanden
+    //Alte Auswahl löschen, falls vorhanden
     g_ptr_array_unref( clipboard->arr_ref );
 
     //clipboard setzen
@@ -538,13 +539,13 @@ sond_treeview_refs_foreach( SondTreeview* stv_orig, GPtrArray* refs,
         if ( !success )
         {
             if ( errmsg ) *errmsg = g_strdup( "Bei Aufruf gtk_tree_model_get_"
-                    "iter:\nKonnte keinen gÃ¼ltigen Iter ermitteln" );
+                    "iter:\nKonnte keinen gültigen Iter ermitteln" );
             return -1;
         }
 
         rc = foreach( stv_orig, &iter_ref, data, errmsg );
         if ( rc == -1 ) ERROR_SOND( "foreach" )
-        else if ( rc >= 1 ) return rc; //Abbruch gewÃ¤hlt
+        else if ( rc >= 1 ) return rc; //Abbruch gewählt
     }
 
     return 0;

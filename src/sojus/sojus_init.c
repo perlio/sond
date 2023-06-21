@@ -126,6 +126,8 @@ sojus_init_load_dirs( Sojus* sojus )
         g_key_file_free( key_file );
 
         g_signal_emit_by_name( sojus->app_window, "delete-event", NULL, &ret );
+
+        return;
     }
 
     sojus->root = g_key_file_get_string( key_file, "SOJUS", "root", &error );
@@ -137,6 +139,8 @@ sojus_init_load_dirs( Sojus* sojus )
         g_key_file_free( key_file );
 
         g_signal_emit_by_name( sojus->app_window, "delete-event", NULL, &ret );
+
+        return;
     }
 
     g_key_file_free( key_file );
@@ -152,16 +156,18 @@ sojus_init_load_dirs( Sojus* sojus )
     if ( !enumer )
     {
         display_message( sojus->app_window, "Root-Verzeichnis ", sojus->root,
-                "kann nicht gelesen werden:\n", error->message, NULL );
+                " kann nicht gelesen werden:\n", error->message, NULL );
         g_error_free( error );
         g_object_unref( root );
 
         g_signal_emit_by_name( sojus->app_window, "delete-event", NULL, &ret );
+
+        return;
     }
 
     //durchgehen
-    //new_anchor kopieren, da in der Schleife verÃ¤ndert wird
-    //es soll aber der soeben erzeugte Punkt zurÃ¼ckgegegen werden
+    //new_anchor kopieren, da in der Schleife verändert wird
+    //es soll aber der soeben erzeugte Punkt zurückgegegen werden
 
     while ( 1 )
     {
@@ -190,12 +196,12 @@ sojus_init_load_dirs( Sojus* sojus )
 
     g_object_unref( enumer );
 
-    //Monitor fÃ¼r Dir
+    //Monitor für Dir
     sojus->monitor = g_file_monitor_directory( root, G_FILE_MONITOR_WATCH_MOVES, NULL, &error );
     g_object_unref( root );
     if ( !(sojus->monitor) )
     {
-        display_message( sojus->app_window, "Root-Dir kann nicht Ã¼berwacht werden:\n",
+        display_message( sojus->app_window, "Root-Dir kann nicht überwacht werden:\n",
                 error->message, NULL );
         g_error_free( error );
 
@@ -230,10 +236,8 @@ cb_desktop_delete_event( GtkWidget* app_window, GdkEvent* event, gpointer data )
     gtk_widget_destroy( app_window );
 
     g_free( sojus->root );
-
     g_ptr_array_unref( sojus->arr_dirs );
-    g_object_unref( sojus->monitor );
-
+    if ( sojus->monitor ) g_object_unref( sojus->monitor );
     g_free( sojus );
 
     return TRUE;
@@ -254,7 +258,7 @@ sojus_init_app_window( Sojus* sojus )
 **  callbacks  */
     g_signal_connect( entry_dok, "activate",
             G_CALLBACK(sojus_init_entry_activated), sojus );
-    //Signal fÃ¼r App-Fenster schlieÃŸen
+    //Signal für App-Fenster schließen
     g_signal_connect( sojus->app_window, "delete-event",
             G_CALLBACK(cb_desktop_delete_event), sojus );
 

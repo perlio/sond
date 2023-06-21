@@ -54,7 +54,7 @@ main( int argc, char **argv)
     gint status = 0;
 
     //ApplicationApp erzeugen
-    app = gtk_application_new ( "de.rubarth-krieger.sojus", G_APPLICATION_FLAGS_NONE );
+    app = gtk_application_new ( "de.rubarth-krieger.sojus", G_APPLICATION_DEFAULT_FLAGS );
 
     //und starten
     g_signal_connect( app, "startup", G_CALLBACK(startup_app), &sojus );
