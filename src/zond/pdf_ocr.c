@@ -915,7 +915,7 @@ pdf_ocr_get_cleaned_tokens( fz_context* ctx, pdf_page* page, fz_stream* stream, 
     return arr_zond_token;
 }
 
-
+/*
 static gint
 pdf_ocr_prepare_content_stream( fz_context* ctx, pdf_page* page, gchar** errmsg )
 {
@@ -938,7 +938,7 @@ pdf_ocr_prepare_content_stream( fz_context* ctx, pdf_page* page, gchar** errmsg 
 
     return 0;
 }
-
+*/
 
 static gint
 pdf_ocr_filter_content_stream( fz_context* ctx, pdf_page* page, gint flags, gchar** errmsg )
@@ -949,8 +949,9 @@ pdf_ocr_filter_content_stream( fz_context* ctx, pdf_page* page, gint flags, gcha
     GArray* arr_zond_token = NULL;
 
     //erst den vorhandenen stream schön machen, insbesondere für inline-images!!!
-    rc = pdf_ocr_prepare_content_stream( ctx, page, errmsg );
-    if ( rc ) ERROR_SOND( "pdf_zond_prepare_content_stream" )
+        //Quatsch, ergibt keinen Sinn
+//    rc = pdf_ocr_prepare_content_stream( ctx, page, errmsg );
+//    if ( rc ) ERROR_SOND( "pdf_zond_prepare_content_stream" )
 
     //Stream doc_text
     fz_try( ctx ) stream = pdf_open_contents_stream( ctx, page->doc, pdf_dict_get( ctx, page->obj, PDF_NAME(Contents) ) );
