@@ -22,9 +22,6 @@
 gint
 test( Projekt* zond, gchar** errmsg )
 {
-    GPtrArray* arr_hits = NULL;
-
-//    sond_treeviewfm_search( SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), NULL, "", FALSE, &arr_hits, errmsg );
 
     return 0;
 }

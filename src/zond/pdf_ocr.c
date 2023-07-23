@@ -135,18 +135,6 @@ pdf_ocr_insert_keyword_in_stream( GArray* arr_zond_token, const gchar* keyword, 
 }
 
 
-static void
-pdf_ocr_invalidate_token( GArray* arr_zond_token, gint index, gint len )
-{
-    for ( gint u = index; u > index - len; u-- )
-    {
-        g_array_index(arr_zond_token, ZondToken, u ).tok = PDF_NUM_TOKENS;
-    }
-
-    return;
-}
-
-
 static fz_buffer*
 pdf_ocr_reassemble_buffer( fz_context* ctx, GArray* arr_zond_token, gchar** errmsg )
 {
@@ -264,9 +252,8 @@ pdf_ocr_reassemble_buffer( fz_context* ctx, GArray* arr_zond_token, gchar** errm
                 break;
             case PDF_TOK_INLINE_STREAM:
                 fz_append_byte( ctx, fzbuf, 0 );
-                fz_append_data(ctx, fzbuf, zond_token.gba->data, zond_token.gba->len );
-                fz_append_byte( ctx, fzbuf, '>' );
-                fz_append_byte( ctx, fzbuf, ' ' );
+                fz_append_data( ctx, fzbuf, zond_token.gba->data, zond_token.gba->len );
+                fz_append_printf( ctx, fzbuf, " \n" );
                 break;
             case PDF_TOK_TRUE:
                 fz_append_printf(ctx, fzbuf, "true " );
@@ -385,8 +372,20 @@ pdf_ocr_free_gs( gpointer data )
 }
 
 
+static void
+pdf_ocr_invalidate_token( GArray* arr_zond_token, gint index, gint len )
+{
+    for ( gint u = index; u > index - len; u-- )
+    {
+        g_array_index(arr_zond_token, ZondToken, u ).tok = PDF_NUM_TOKENS;
+    }
+
+    return;
+}
+
+
 static GArray*
-pdf_ocr_get_cleaned_tokens( fz_context* ctx, fz_stream* stream, gint flags, gchar** errmsg )
+pdf_ocr_get_cleaned_tokens( fz_context* ctx, pdf_page* page, fz_stream* stream, gint flags, gchar** errmsg )
 {
     GArray* arr_zond_token = NULL;
     gint idx = -1; //damit idx immer aktueller Stand des arrays ist
@@ -416,8 +415,6 @@ pdf_ocr_get_cleaned_tokens( fz_context* ctx, fz_stream* stream, gint flags, gcha
         gint Tm;
         gint TAst;
     } BT = { -1, -1, -1, -1, -1 };
-
-    gint BI = -1;
 
     GArray* arr_marked_content = g_array_new( FALSE, FALSE, sizeof( gint ) );
 
@@ -643,58 +640,147 @@ pdf_ocr_get_cleaned_tokens( fz_context* ctx, fz_stream* stream, gint flags, gcha
             }
 
             //InlineImages
-            else if ( !g_strcmp0( zond_token.s, "BI" ) ) BI = idx;
-            else if ( !g_strcmp0( zond_token.s, "ID" ) )
+            else if ( !g_strcmp0( zond_token.s, "BI" ) )
             {
-                //jetzt den inline-stream
-                zond_token.tok = PDF_TOK_INLINE_STREAM; //Wert für inline-image-stream
+                pdf_lexbuf lxb;
+                pdf_obj* dict = NULL;
+                gint w = 0;
+                gint h = 0;
+                gint n = 0;
+                gint bpc = 0;
+                gboolean imagemask = FALSE;
+                gboolean found = FALSE;
+                fz_stream *istm = NULL;
+                fz_colorspace *colorspace = NULL;
+                unsigned char* ptr = NULL;
                 gint ch = 0;
+                gint len = 0;
 
-                //white nach ID
-                ch = fz_read_byte(ctx, stream);
+                //Anfang im ungefilterten stream merken
+                ptr = stream->rp; //direkt nach BI + WHITE
+
+                //folgendes dict lesen
+                pdf_lexbuf_init( ctx, &lxb, PDF_LEXBUF_SMALL );
+                fz_try( ctx ) dict = pdf_parse_dict( ctx, page->doc, stream, &lxb );
+                fz_always( ctx ) pdf_lexbuf_fin( ctx, &lxb );
+                fz_catch( ctx ) ERROR_MUPDF_R( "pdf_parse_dict", NULL )
+
+                /* read whitespace after ID keyword */
+                ch = fz_read_byte( ctx, stream );
                 if (ch == '\r')
-                    if (fz_peek_byte(ctx, stream) == '\n')
-                        fz_read_byte(ctx, stream);
+                        if (fz_peek_byte(ctx, stream ) == '\n')
+                                fz_read_byte(ctx, stream );
 
-                zond_token.gba = g_byte_array_new( );
-                while ( (ch = fz_read_byte( ctx, stream )) != '>' )
-                        g_byte_array_append( zond_token.gba, (guint8*) &ch, 1 );
+                //n ermitteln
+                fz_var(colorspace);
+                fz_try(ctx)
+                {
+                    pdf_obj* obj = NULL;
 
-                //Zond Token mit stream abspeichern
+                    obj = pdf_dict_geta(ctx, dict, PDF_NAME(ColorSpace), PDF_NAME(CS));
+                    if (obj && !imagemask )
+                    {
+                        /* colorspace resource lookup is only done for inline images */
+                        if (pdf_is_name(ctx, obj))
+                        {
+                            pdf_obj* rdb = NULL;
+                            pdf_obj* res = NULL;
+
+                            rdb = pdf_page_resources(ctx, page);
+
+                            res = pdf_dict_get(ctx, pdf_dict_get(ctx, rdb, PDF_NAME(ColorSpace)), obj);
+                            if (res) obj = res;
+                        }
+
+                        colorspace = pdf_load_colorspace(ctx, obj);
+                        n = fz_colorspace_n(ctx, colorspace);
+                    }
+                    else
+                    {
+                        n = 1;
+                    }
+                }
+                fz_always(ctx) fz_drop_colorspace(ctx, colorspace);
+                fz_catch(ctx)
+                {
+                    pdf_drop_obj( ctx, dict );
+                    ERROR_MUPDF_R( "Colorspace kann nicht ermittelt werden", NULL )
+                }
+
+                //w, h und bpx ermitteln
+                w = pdf_to_int(ctx, pdf_dict_geta(ctx, dict, PDF_NAME(Width), PDF_NAME(W)));
+                h = pdf_to_int(ctx, pdf_dict_geta(ctx, dict, PDF_NAME(Height), PDF_NAME(H)));
+                bpc = pdf_to_int(ctx, pdf_dict_geta(ctx, dict, PDF_NAME(BitsPerComponent), PDF_NAME(BPC)));
+                if (bpc == 0) bpc = 8;
+
+                imagemask = pdf_to_bool(ctx, pdf_dict_geta(ctx, dict, PDF_NAME(ImageMask), PDF_NAME(IM)));
+
+                if (imagemask) bpc = 1;
+
+                if (w <= 0) ERROR_MUPDF_R( "image width is zero (or less)", NULL )
+                if (h <= 0)ERROR_MUPDF_R( "image height is zero (or less)", NULL )
+                if (bpc <= 0) ERROR_MUPDF_R( "image depth is zero (or less)", NULL )
+                if (bpc > 16) ERROR_MUPDF_R( "image depth is to large", NULL )
+                if (SIZE_MAX / w < (size_t)(bpc+7)/8)
+                        ERROR_MUPDF_R( "image is too large", NULL )
+                if (SIZE_MAX / h < w * (size_t)((bpc+7)/8))
+                        ERROR_MUPDF_R( "image is too large", NULL )
+                if (SIZE_MAX / n < h * ((size_t)w) * ((bpc+7)/8))
+                        ERROR_MUPDF_R( "image is too large", NULL )
+
+                len = (w * n * bpc + 7) / 8 * h;
+
+                //inline-stream öffnen
+                fz_try(ctx) istm = pdf_open_inline_stream( ctx, page->doc, dict, len, stream, NULL );
+                fz_always(ctx) pdf_drop_obj( ctx, dict );
+                fz_catch( ctx ) ERROR_MUPDF_R( "pdf_open_inline_stream", NULL )
+
+                //vorspulen...
+                fz_try( ctx )
+                {
+                    size_t res = 0;
+
+                    res = fz_skip( ctx, istm, len );
+                    if ( res < len ) fz_throw( ctx, FZ_ERROR_GENERIC, "Stream zu kurz" );
+
+                }
+                fz_always( ctx ) fz_drop_stream(ctx, istm);
+                fz_catch( ctx ) ERROR_MUPDF_R( "Inline-Stream konnte nicht gelesen werden", NULL )
+
+                /* find EI */
+                found = FALSE;
+                ch = fz_read_byte(ctx, stream);
+                do
+                {
+                    while (ch != 'E' && ch != EOF)
+                        ch = fz_read_byte(ctx, stream);
+                    if (ch == 'E')
+                    {
+                        ch = fz_read_byte(ctx, stream);
+                        if (ch == 'I')
+                        {
+                            ch = fz_peek_byte(ctx, stream);
+                            if (ch == ' ' || ch <= 32 || ch == '<' || ch == '/')
+                            {
+                                found = 1;
+                                break;
+                            }
+                        }
+                    }
+                } while (ch != EOF);
+                if ( !found ) ERROR_S_MESSAGE_VAL( "syntax error after inline image", NULL )
+
+                //von ptr bis aktuelle Pos stream (nach BI bis nach EI) als gbytearray
+                zond_token.tok = PDF_TOK_INLINE_STREAM;
+                zond_token.gba = g_byte_array_new_take( ptr, stream->rp - ptr );
+
                 g_array_append_val( arr_zond_token, zond_token );
                 idx++;
 
-                //EI suchen
-                do
-                {
-                    ch = fz_read_byte( ctx, stream );
-                    if ( ch == EOF )
-                    {
-                        g_ptr_array_unref( arr_gs );
-                        g_array_unref( arr_marked_content );
-                        g_array_unref( arr_zond_token );
-                        if ( errmsg ) *errmsg = g_strdup( "Syntax Error in ContentStream:\n"
-                                "EI nicht gefunden" );
-                        return NULL;
-                    }
-                    else if ( ch == 'E' && fz_peek_byte( ctx, stream ) == 'I' ) break;
-
-                } while ( 1 );
-                fz_read_byte( ctx, stream ); //auf das I vorgehen
-
                 if ( flags & 4 ) //inline-images werden herausgefiltert
-                {
-                    pdf_ocr_invalidate_token( arr_zond_token, idx, idx - BI + 1 );
-                    BI = -1;
-                }
+                        pdf_ocr_invalidate_token( arr_zond_token, idx, 2 );
                 else //bleibt drin
-                {
-                    zond_token.tok = PDF_TOK_KEYWORD;
-                    zond_token.s = g_strdup( "\nEI" );
-
-                    g_array_append_val( arr_zond_token, zond_token );
-                    idx++;
-
+                { //ToDo: verstehen, ob das hier nötig ist - ist ja ein "Durchgang"
                     //"vorgespannte" Operatoren resetten
                     pdf_ocr_reset_gs( arr_gs, 0 );
                     for ( gint i = 0; i < arr_marked_content->len; i++ )
@@ -870,9 +956,9 @@ pdf_ocr_filter_content_stream( fz_context* ctx, pdf_page* page, gint flags, gcha
     fz_try( ctx ) stream = pdf_open_contents_stream( ctx, page->doc, pdf_dict_get( ctx, page->obj, PDF_NAME(Contents) ) );
     fz_catch( ctx ) ERROR_MUPDF( "pdf_open_contents_stream" )
 
-    arr_zond_token = pdf_ocr_get_cleaned_tokens( ctx, stream, flags, errmsg );
+    arr_zond_token = pdf_ocr_get_cleaned_tokens( ctx, page, stream, flags, errmsg );
     fz_drop_stream( ctx, stream );
-    if ( !arr_zond_token ) ERROR_SOND( "pdf_ocr_get_cleaned_tokens" )
+    if ( !arr_zond_token ) ERROR_S
 
     buf = pdf_ocr_reassemble_buffer( ctx, arr_zond_token, errmsg );
     g_array_unref( arr_zond_token );
