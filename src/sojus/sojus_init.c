@@ -215,6 +215,54 @@ sojus_init_load_dirs( Sojus* sojus )
 
 
 static void
+log_init( Sojus* sojus )
+{
+    gchar* logfile = NULL;
+    FILE* file = NULL;
+    FILE* file_tmp = NULL;
+    GDateTime* date_time = NULL;
+    gchar* base_dir = NULL;
+
+    base_dir = get_base_dir( );
+    date_time = g_date_time_new_now_local( );
+    logfile = g_strdup_printf( "%slogs/log_sojus_%i_%i.log", base_dir,
+            g_date_time_get_year( date_time ), g_date_time_get_month( date_time ) );
+    g_date_time_unref( date_time );
+    g_free( base_dir );
+
+    file = freopen( logfile, "a", stdout );
+    if ( !file )
+    {
+        display_message( sojus->app_window, "stout konnte nicht in Datei %s "
+                "umgeleitet werden:\n%s", logfile, strerror( errno ), NULL );
+        g_free( logfile );
+        exit( -1 );
+    }
+
+    file_tmp = freopen( logfile, "a", stderr );
+    if ( !file_tmp )
+    {
+        display_message( sojus->app_window, "sterr konnte nicht in "
+                "Datei %s umgeleitet werden:\n%s", logfile, strerror( errno ), NULL );
+        g_free( logfile );
+        exit( -1 );
+    }
+/*
+    ret = dup2( fileno( stdout ), fileno( stderr ) );
+    if ( ret == -1 )
+    {
+        display_message( zond->app_window, "stderr konnte nicht auf stdout "
+                "umgeleitet werden: %s", strerror( errno ) );
+        exit( -1 );
+    }
+    */
+    g_free( logfile );
+
+    return;
+}
+
+
+static void
 sojus_init_entry_activated( GtkWidget* entry, gpointer data )
 {
     const gchar* text = NULL;
@@ -275,6 +323,8 @@ sojus_init( GtkApplication* app )
 
     sojus_init_app_window( sojus );
     gtk_application_add_window( app, GTK_WINDOW(sojus->app_window) );
+
+    log_init( sojus );
 
     sojus->arr_dirs = g_ptr_array_new_full( 0, (GDestroyNotify) g_free );
     sojus_init_load_dirs( sojus );

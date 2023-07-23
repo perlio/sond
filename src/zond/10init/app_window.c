@@ -39,6 +39,8 @@ cb_delete_event( GtkWidget* app_window, GdkEvent* event, gpointer user_data )
 
     Projekt* zond = (Projekt*) user_data;
 
+    g_free( zond->base_dir );
+
     rc = projekt_schliessen( zond, &errmsg );
     if ( rc == -1 )
     {
