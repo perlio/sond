@@ -66,6 +66,10 @@ project_reset_changed( Projekt* zond )
 void
 projekt_set_widgets_sensitiv( Projekt* zond, gboolean active )
 {
+    gtk_widget_set_sensitive( GTK_WIDGET(zond->treeview[BAUM_FS]), active );
+    gtk_widget_set_sensitive( GTK_WIDGET(zond->treeview[BAUM_INHALT]), active );
+    gtk_widget_set_sensitive( GTK_WIDGET(zond->treeview[BAUM_AUSWERTUNG]), active );
+
     gtk_widget_set_sensitive( GTK_WIDGET(zond->menu.schliessenitem), active );
     gtk_widget_set_sensitive( GTK_WIDGET(zond->menu.exportitem), active );
     gtk_widget_set_sensitive( GTK_WIDGET(zond->menu.item_search_fs), active );
