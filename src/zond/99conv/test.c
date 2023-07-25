@@ -4,6 +4,7 @@
 #include <sqlite3.h>
 
 #include "../global_types.h"
+#include "../pdf_ocr.h"
 #include "../zond_pdf_document.h"
 #include "../zond_tree_store.h"
 #include "../zond_gemini.h"
@@ -19,9 +20,208 @@
 #include "../20allgemein/pdf_text.h"
 
 
+typedef struct _Zond_Token
+{
+    pdf_token tok;
+    union
+    {
+        gint i;
+        gfloat f;
+        gchar* s;
+        GByteArray* gba;
+    };
+} ZondToken;
+
+#define PDF_TOK_INLINE_STREAM 99
+
+static gint
+test_pdf( GFile* file, GFileInfo* info, gpointer data, gchar** errmsg )
+{
+    gchar* path = NULL;
+    ZondPdfDocument* zpdfd = NULL;
+    GPtrArray* arr_pages = NULL;
+    fz_context* ctx = NULL;
+    InfoWindow* info_window = (InfoWindow*) data;
+
+    path = g_file_get_path( file );
+    info_window_set_message( info_window, path );
+
+    if ( !is_pdf( path ) )
+    {
+        g_free( path );
+        return 0;
+    }
+
+    zpdfd = zond_pdf_document_open( path, 0, -1, errmsg );
+    g_free( path );
+    if ( !zpdfd ) ERROR_S
+
+    arr_pages = zond_pdf_document_get_arr_pages( zpdfd );
+    ctx = zond_pdf_document_get_ctx( zpdfd );
+
+    for ( gint i = 0; i < arr_pages->len; i++ )
+    {
+        PdfDocumentPage* pdfp = NULL;
+        fz_stream* stream = NULL;
+        GArray* arr_zond_token = NULL;
+
+        pdfp = g_ptr_array_index( arr_pages, i );
+
+        //Stream doc_text
+        fz_try( ctx ) stream = pdf_open_contents_stream( ctx, pdfp->page->doc,
+                pdf_dict_get( ctx, pdfp->page->obj, PDF_NAME(Contents) ) );
+        fz_catch( ctx )
+        {
+            g_object_unref( zpdfd );
+            ERROR_MUPDF( "pdf_open_contents_stream" )
+        }
+
+        arr_zond_token = pdf_ocr_get_cleaned_tokens( ctx, pdfp->page, stream, 0, errmsg );
+        fz_drop_stream( ctx, stream );
+        if ( !arr_zond_token )
+        {
+            g_object_unref( zpdfd );
+            ERROR_S
+        }
+
+        for ( gint u = 0; u < arr_zond_token->len; u++ )
+        {
+            ZondToken zond_token = g_array_index( arr_zond_token, ZondToken, u );
+
+            if ( zond_token.tok == PDF_TOK_KEYWORD && !g_strcmp0( zond_token.s, "BI" ) )
+            {
+                gchar* message = NULL;
+
+                message = g_strdup_printf( "Seite %i\nBI\n", i );
+                info_window_set_message( info_window, message );
+                g_free( message );
+
+                u++;
+
+                zond_token = g_array_index( arr_zond_token, ZondToken, u );
+                if ( zond_token.tok != PDF_TOK_INLINE_STREAM )
+                {
+                    g_object_unref( zpdfd );
+                    g_array_unref( arr_zond_token );
+                    ERROR_S_MESSAGE( "Nach BI kein Inline-Stream" )
+                }
+
+                for ( gint z = 0; z < zond_token.gba->len; z++ )
+                {
+                    printf("%c", zond_token.gba->data[z]);
+                }
+            }
+        }
+        g_array_unref( arr_zond_token );
+    }
+
+    g_object_unref( zpdfd );
+
+    return 0;
+}
+
+
+/** rc == -1: Fähler
+    rc == 0: alles ausgeführt, sämtliche Callbacks haben 0 zurückgegeben
+    rc == 1: alles ausgeführt, mindestens ein Callback hat 1 zurückgegeben
+    rc == 2: nicht alles ausgeführt, Callback hat 2 zurückgegeben -> sofortiger Abbruch
+    **/
+static gint
+dir_foreach( GFile* file, gboolean rec, gint (*foreach) ( GFile*, GFileInfo*, gpointer, gchar** ),
+        gpointer data, gchar** errmsg )
+{
+    GError* error = NULL;
+    gboolean flag = FALSE;
+    GFileEnumerator* enumer = NULL;
+
+    enumer = g_file_enumerate_children( file, "*", G_FILE_QUERY_INFO_NONE, NULL, &error );
+    if ( !enumer )
+    {
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_file_enumerate_children:\n",
+                error->message, NULL );
+        g_error_free( error );
+
+        return -1;
+    }
+
+    while ( 1 )
+    {
+        GFile* file_child = NULL;
+        GFileInfo* info_child = NULL;
+
+        if ( !g_file_enumerator_iterate( enumer, &info_child, &file_child, NULL, &error ) )
+        {
+            if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_file_enumerator_iterate:\n",
+                    error->message, NULL );
+            g_error_free( error );
+            g_object_unref( enumer );
+
+            return -1;
+        }
+
+        if ( file_child ) //es gibt noch Datei in Verzeichnis
+        {
+            gint rc = 0;
+
+            rc = foreach( file_child, info_child, data, errmsg );
+            if ( rc == -1 )
+            {
+                g_object_unref( enumer );
+                if ( errmsg ) *errmsg = add_string( g_strdup( "Bei Aufruf foreach:\n" ),
+                        *errmsg );
+
+                return -1;
+            }
+            else if ( rc == 1 ) flag = TRUE;
+            else if ( rc == 2 ) //Abbruch gewählt
+            {
+                g_object_unref( enumer );
+                return 2;
+            }
+
+            if ( rec && g_file_info_get_file_type( info_child ) == G_FILE_TYPE_DIRECTORY )
+            {
+                gint rc = 0;
+
+                rc = dir_foreach( file_child, TRUE, foreach, data, errmsg );
+                if ( rc == -1 )
+                {
+                    g_object_unref( enumer );
+                    if ( errmsg ) *errmsg = add_string( g_strdup( "Bei Aufruf foreach:\n" ),
+                            *errmsg );
+
+                    return -1;
+                }
+                else if ( rc == 1 ) flag = TRUE;//Abbruch gewählt
+                else if ( rc == 2 )
+                {
+                    g_object_unref( enumer );
+                    return 2;
+                }
+            }
+        } //ende if ( file_child )
+        else break;
+    }
+
+    g_object_unref( enumer );
+
+    return (flag) ? 1 : 0;
+}
+
+
 gint
 test( Projekt* zond, gchar** errmsg )
 {
+    GFile* file_root = NULL;
+    const gchar* root = "C:/Users/nc-kr/laufende Akten";
+    InfoWindow* info_window = NULL;
+    gint rc = 0;
+
+    file_root = g_file_new_for_path( root );
+    info_window = info_window_open( zond->app_window, "Untersuchung auf InlineImages" );
+    rc = dir_foreach( file_root, TRUE, test_pdf, info_window, errmsg );
+    info_window_close( info_window );
+    if ( rc == -1 ) ERROR_S
 
     return 0;
 }
@@ -213,7 +413,11 @@ datei_query_filesystem( const gchar* filename, gchar** errmsg )
 
     return ret;
 }
+*/
 
+fz_buffer*
+pdf_ocr_get_content_stream_as_buffer( fz_context* ctx, pdf_obj* page_ref,
+        gchar** errmsg );
 
 gint
 pdf_print_content_stream( fz_context* ctx, pdf_obj* page_ref, gchar** errmsg )
@@ -245,4 +449,4 @@ pdf_print_content_stream( fz_context* ctx, pdf_obj* page_ref, gchar** errmsg )
     return 0;
 }
 
-*/
+

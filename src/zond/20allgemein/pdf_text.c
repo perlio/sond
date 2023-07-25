@@ -405,10 +405,14 @@ pdf_textsuche_pdf( Projekt* zond, const gchar* rel_path, const gchar* search_tex
             pdf_text_occ.quad = quads[u];
 
             //Text der gesamten line
-            /*  ToDo: fz_try!!! */
             //line herausfinden, in der sich rect befindet
             fz_buffer* buf = NULL;
-            buf = fz_new_buffer( ctx, 128 );
+            fz_try( ctx ) buf = fz_new_buffer( ctx, 128 );
+            fz_catch( ctx )
+            {
+                g_free( pdf_text_occ.rel_path );
+                ERROR_MUPDF( "fz_new_buffer" )
+            }
 
             gboolean found_line = FALSE;
 
@@ -431,8 +435,8 @@ pdf_textsuche_pdf( Projekt* zond, const gchar* rel_path, const gchar* search_tex
                         if ( line->prev )
                         {
                             for (ch = line->prev->first_char; ch; ch = ch->next)
-                                    fz_append_rune( ctx, buf, ch->c );
-                            fz_append_byte( ctx, buf, 10 );
+                                    fz_append_rune( ctx, buf, ch->c ); //keine exception, die nur bei shared buffer
+                            fz_append_byte( ctx, buf, 10 ); //dto.
                         }
                         //die Zeile mit Fundort selbst
                         for (ch = line->first_char; ch; ch = ch->next)

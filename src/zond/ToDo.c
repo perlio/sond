@@ -1,7 +1,11 @@
 /*
 Bugs:
 
+- OCR bei leerer Pixmap: TessBaseApiRecognize geht in Endlosschleife
+
+
 ToDo:
+
 - Updater
 
 - Abschnitte neu organisieren

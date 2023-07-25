@@ -143,7 +143,7 @@ info_window_open( GtkWidget* window, const gchar* title )
             GTK_DIALOG_DESTROY_WITH_PARENT | GTK_DIALOG_MODAL, "Abbrechen",
             GTK_RESPONSE_CANCEL, NULL );
 
-    gtk_window_set_default_size( GTK_WINDOW(info_window->dialog), 450, 110 );
+    gtk_window_set_default_size( GTK_WINDOW(info_window->dialog), 900, 190 );
 
     content = gtk_dialog_get_content_area( GTK_DIALOG(info_window->dialog) );
     swindow = gtk_scrolled_window_new( NULL, NULL );

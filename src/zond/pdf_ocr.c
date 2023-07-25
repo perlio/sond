@@ -72,7 +72,7 @@ pdf_ocr_update_content_stream( fz_context* ctx, pdf_obj* page_ref,
 }
 
 
-static fz_buffer*
+fz_buffer*
 pdf_ocr_get_content_stream_as_buffer( fz_context* ctx, pdf_obj* page_ref,
         gchar** errmsg )
 {
@@ -251,9 +251,8 @@ pdf_ocr_reassemble_buffer( fz_context* ctx, GArray* arr_zond_token, gchar** errm
                 fz_append_printf(ctx, fzbuf, "%s \n", zond_token.s);
                 break;
             case PDF_TOK_INLINE_STREAM:
-                fz_append_byte( ctx, fzbuf, 0 );
                 fz_append_data( ctx, fzbuf, zond_token.gba->data, zond_token.gba->len );
-                fz_append_printf( ctx, fzbuf, " \n" );
+                fz_append_printf( ctx, fzbuf, "\n" );
                 break;
             case PDF_TOK_TRUE:
                 fz_append_printf(ctx, fzbuf, "true " );
@@ -384,7 +383,7 @@ pdf_ocr_invalidate_token( GArray* arr_zond_token, gint index, gint len )
 }
 
 
-static GArray*
+GArray*
 pdf_ocr_get_cleaned_tokens( fz_context* ctx, pdf_page* page, fz_stream* stream, gint flags, gchar** errmsg )
 {
     GArray* arr_zond_token = NULL;
@@ -772,7 +771,8 @@ pdf_ocr_get_cleaned_tokens( fz_context* ctx, pdf_page* page, fz_stream* stream, 
 
                 //von ptr bis aktuelle Pos stream (nach BI bis nach EI) als gbytearray
                 zond_token.tok = PDF_TOK_INLINE_STREAM;
-                zond_token.gba = g_byte_array_new_take( ptr, stream->rp - ptr );
+                zond_token.gba = g_byte_array_new( );
+                zond_token.gba = g_byte_array_append( zond_token.gba, ptr, stream->rp - ptr );
 
                 g_array_append_val( arr_zond_token, zond_token );
                 idx++;
@@ -940,6 +940,7 @@ pdf_ocr_prepare_content_stream( fz_context* ctx, pdf_page* page, gchar** errmsg 
 }
 */
 
+
 static gint
 pdf_ocr_filter_content_stream( fz_context* ctx, pdf_page* page, gint flags, gchar** errmsg )
 {
@@ -1012,7 +1013,7 @@ pdf_ocr_process_tess_tmp( fz_context* ctx, pdf_obj* page_ref,
     if ( !buf )
     {
         g_free( cm );
-        ERROR_SOND( "pdf_ocr_get_content_stream_as_buffer" )
+        ERROR_S
     }
 
     size = fz_buffer_storage( ctx, buf, (guchar**) &data );
@@ -1424,7 +1425,6 @@ pdf_ocr_create_doc_from_page( PdfDocumentPage* pdf_document_page, gint flag, gch
         pdf_drop_document( ctx, doc_new );
         ERROR_MUPDF_R( "pdf_zond_filter_content_stream", NULL );
     }
-
     return doc_new;
 }
 
@@ -1538,75 +1538,6 @@ pdf_ocr_get_text_from_stext_page( fz_context* ctx, fz_stext_page* stext_page,
 
 
 //thread-safe
-static gchar*
-pdf_ocr_get_hidden_text( PdfDocumentPage* pdf_document_page, gchar** errmsg )
-{
-    pdf_document* doc_tmp_alt = NULL;
-    pdf_page* page = NULL;
-    fz_stext_page* stext_page = NULL;
-    fz_device* s_t_device = NULL;
-    gchar* text = NULL;
-
-    //flag == 1: nur sichtbaren Text entfernen
-    doc_tmp_alt = pdf_ocr_create_doc_from_page( pdf_document_page, 1, errmsg ); //thread-safe
-    if ( !doc_tmp_alt ) ERROR_SOND_VAL( "pdf_create_doc_with_page", NULL )
-
-    fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
-
-    fz_try( ctx ) page = pdf_load_page( ctx, doc_tmp_alt, 0 );
-    fz_catch( ctx )
-    {
-        pdf_drop_document( ctx, doc_tmp_alt );
-        ERROR_MUPDF_R( "fz_load_page", NULL );
-
-        return NULL;
-    }
-
-    //structured text-device
-    fz_try( ctx ) stext_page = fz_new_stext_page( ctx, pdf_bound_page( ctx, page ) );
-    fz_catch( ctx )
-    {
-        fz_drop_page( ctx, &page->super );
-        pdf_drop_document( ctx, doc_tmp_alt );
-        ERROR_MUPDF_R( "fz_new_stext_page", NULL )
-    }
-
-    fz_try( ctx ) s_t_device = fz_new_stext_device( ctx, stext_page, NULL );
-    fz_catch( ctx )
-    {
-        fz_drop_stext_page( ctx, stext_page );
-        fz_drop_page( ctx, &page->super );
-        pdf_drop_document( ctx, doc_tmp_alt );
-        ERROR_MUPDF_R( "fz_new_stext_device", NULL )
-
-        return NULL;
-    }
-
-//Seite durch's device laufen lassen
-    fz_try( ctx ) pdf_run_page( ctx, page, s_t_device, fz_identity, NULL );
-    fz_always( ctx )
-    {
-        fz_close_device( ctx, s_t_device );
-        fz_drop_device( ctx, s_t_device );
-        fz_drop_page( ctx, &page->super );
-        pdf_drop_document( ctx, doc_tmp_alt );
-    }
-    fz_catch( ctx )
-    {
-        fz_drop_stext_page( ctx, stext_page );
-        ERROR_MUPDF_R( "fz_run_page", NULL )
-    }
-
-    //bisheriger versteckter Text
-    text = pdf_ocr_get_text_from_stext_page( ctx, stext_page, errmsg );
-    fz_drop_stext_page( ctx, stext_page );
-    if ( !text ) ERROR_SOND_VAL( "pdf_get_text_from_stext_page", NULL )
-
-    return text;
-}
-
-
-//thread-safe
 static gint
 pdf_ocr_show_text( InfoWindow* info_window, PdfDocumentPage* pdf_document_page,
         gchar* text_alt, TessBaseAPI* handle, TessResultRenderer* renderer, gchar** errmsg )
@@ -1701,6 +1632,75 @@ pdf_ocr_show_text( InfoWindow* info_window, PdfDocumentPage* pdf_document_page,
 }
 
 
+//thread-safe
+static gchar*
+pdf_ocr_get_hidden_text( PdfDocumentPage* pdf_document_page, gchar** errmsg )
+{
+    pdf_document* doc_tmp_alt = NULL;
+    pdf_page* page = NULL;
+    fz_stext_page* stext_page = NULL;
+    fz_device* s_t_device = NULL;
+    gchar* text = NULL;
+
+    //flag == 1: nur sichtbaren Text entfernen
+    doc_tmp_alt = pdf_ocr_create_doc_from_page( pdf_document_page, 1, errmsg ); //thread-safe
+    if ( !doc_tmp_alt ) ERROR_SOND_VAL( "pdf_ocr_create_doc_from_page", NULL )
+
+    fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
+
+    fz_try( ctx ) page = pdf_load_page( ctx, doc_tmp_alt, 0 );
+    fz_catch( ctx )
+    {
+        pdf_drop_document( ctx, doc_tmp_alt );
+        ERROR_MUPDF_R( "fz_load_page", NULL );
+
+        return NULL;
+    }
+
+    //structured text-device
+    fz_try( ctx ) stext_page = fz_new_stext_page( ctx, pdf_bound_page( ctx, page ) );
+    fz_catch( ctx )
+    {
+        fz_drop_page( ctx, &page->super );
+        pdf_drop_document( ctx, doc_tmp_alt );
+        ERROR_MUPDF_R( "fz_new_stext_page", NULL )
+    }
+
+    fz_try( ctx ) s_t_device = fz_new_stext_device( ctx, stext_page, NULL );
+    fz_catch( ctx )
+    {
+        fz_drop_stext_page( ctx, stext_page );
+        fz_drop_page( ctx, &page->super );
+        pdf_drop_document( ctx, doc_tmp_alt );
+        ERROR_MUPDF_R( "fz_new_stext_device", NULL )
+
+        return NULL;
+    }
+
+//Seite durch's device laufen lassen
+    fz_try( ctx ) pdf_run_page( ctx, page, s_t_device, fz_identity, NULL );
+    fz_always( ctx )
+    {
+        fz_close_device( ctx, s_t_device );
+        fz_drop_device( ctx, s_t_device );
+        fz_drop_page( ctx, &page->super );
+        pdf_drop_document( ctx, doc_tmp_alt );
+    }
+    fz_catch( ctx )
+    {
+        fz_drop_stext_page( ctx, stext_page );
+        ERROR_MUPDF_R( "fz_run_page", NULL )
+    }
+
+    //bisheriger versteckter Text
+    text = pdf_ocr_get_text_from_stext_page( ctx, stext_page, errmsg );
+    fz_drop_stext_page( ctx, stext_page );
+    if ( !text ) ERROR_SOND_VAL( "pdf_get_text_from_stext_page", NULL )
+
+    return text;
+}
+
+
 static gint
 pdf_ocr_create_pdf_only_text( InfoWindow* info_window,
         GPtrArray* arr_document_pages, TessBaseAPI* handle,
@@ -1745,7 +1745,7 @@ pdf_ocr_create_pdf_only_text( InfoWindow* info_window,
                 rc = pdf_ocr_show_text( info_window, pdf_document_page, page_text, handle,
                         renderer, errmsg ); //thread-safe
                 g_free( page_text );
-                if ( rc == -1 ) ERROR_SOND( "pdf_ocr_show_text" )
+                if ( rc == -1 ) ERROR_S
                 rendered = TRUE;
             }
             else g_free( page_text );
@@ -1771,7 +1771,7 @@ pdf_ocr_create_pdf_only_text( InfoWindow* info_window,
 
         if ( !rendered ) rc = pdf_ocr_page( pdf_document_page, info_window, handle,
                 renderer, errmsg ); //thread-safe
-        if ( rc ) ERROR_SOND( "pdf_ocr_page" )
+        if ( rc ) ERROR_S
 
         if ( info_window->cancel ) break;
 
@@ -1870,7 +1870,7 @@ pdf_ocr_pages( Projekt* zond, InfoWindow* info_window, GPtrArray* arr_document_p
     //Text in PDF übertragen
     rc = pdf_ocr_sandwich_doc( arr_document_pages, doc_text, info_window, errmsg ); //thread-safe
     pdf_drop_document( ctx, doc_text );
-    if ( rc ) ERROR_SOND( "pdf_ocr_sandwich_doc" )
+    if ( rc ) ERROR_S
 
     return 0;
 }
