@@ -211,20 +211,32 @@ zond_treeview_row_expanded( GtkTreeView* tree_view, GtkTreeIter* iter,
 }
 
 
+static gint
+zond_treeview_open_path( Projekt* zond, GtkTreeView* tree_view, GtkTreePath* tree_path,
+        gboolean open_with, gchar** errmsg )
+{
+    gint rc = 0;
+    GtkTreeIter iter = { 0 };
+
+    gtk_tree_model_get_iter( gtk_tree_view_get_model( tree_view ), &iter, tree_path );
+
+    rc = oeffnen_node( zond, &iter, open_with, errmsg );
+    if ( rc ) ERROR_S
+
+    return 0;
+}
+
+
 static void
 zond_treeview_row_activated( GtkWidget* ztv, GtkTreePath* tp, GtkTreeViewColumn* tvc,
         gpointer user_data )
 {
     gint rc = 0;
     gchar* errmsg = NULL;
-    GtkTreeIter iter = { 0, };
 
     Projekt* zond = (Projekt*) user_data;
 
-    if ( !gtk_tree_model_get_iter( gtk_tree_view_get_model( GTK_TREE_VIEW(ztv) ),
-            &iter, tp ) ) return;
-
-    rc = oeffnen_node( zond, &iter, &errmsg );
+    rc = zond_treeview_open_path( zond, GTK_TREE_VIEW(ztv), tp, FALSE, &errmsg );
     if ( rc )
     {
         display_message( zond->app_window, "Fehler beim Öffnen Knoten:\n\n", errmsg, NULL );
@@ -837,9 +849,32 @@ zond_treeview_datei_oeffnen_activate( GtkMenuItem* item, gpointer user_data )
 
     gtk_tree_view_get_cursor( GTK_TREE_VIEW(zond->treeview[zond->baum_active]), &path, NULL );
 
-    g_signal_emit_by_name( zond->treeview[zond->baum_active], "row-activated", path, NULL, zond );
+    g_signal_emit_by_name( zond->treeview[zond->baum_active], "row-activated", path, NULL );
 
     gtk_tree_path_free( path );
+
+    return;
+}
+
+
+static void
+zond_treeview_datei_oeffnen_mit_activate( GtkMenuItem* item, gpointer user_data )
+{
+    GtkTreePath* path = NULL;
+    gint rc = 0;
+    gchar* errmsg = NULL;
+
+    Projekt* zond = (Projekt*) user_data;
+
+    gtk_tree_view_get_cursor( GTK_TREE_VIEW(zond->treeview[zond->baum_active]), &path, NULL );
+
+    rc = zond_treeview_open_path( zond, GTK_TREE_VIEW(zond->treeview[zond->baum_active]), path, TRUE, &errmsg );
+    gtk_tree_path_free( path );
+    if ( rc )
+    {
+        display_message( zond->app_window, "Fehler beim Öffnen Knoten:\n\n", errmsg, NULL );
+        g_free( errmsg );
+    }
 
     return;
 }
@@ -1067,6 +1102,14 @@ zond_treeview_init_contextmenu( ZondTreeview* ztv )
     g_signal_connect( item_datei_oeffnen, "activate",
                 G_CALLBACK(zond_treeview_datei_oeffnen_activate), (gpointer) zond );
     gtk_menu_shell_append( GTK_MENU_SHELL(contextmenu), item_datei_oeffnen );
+
+    //Datei Öffnen
+    GtkWidget* item_datei_oeffnen_mit = gtk_menu_item_new_with_label( "Öffnen mit" );
+    g_object_set_data( G_OBJECT(contextmenu), "item-datei-oeffnen-mit",
+            item_datei_oeffnen_mit );
+    g_signal_connect( item_datei_oeffnen_mit, "activate",
+                G_CALLBACK(zond_treeview_datei_oeffnen_mit_activate), (gpointer) zond );
+    gtk_menu_shell_append( GTK_MENU_SHELL(contextmenu), item_datei_oeffnen_mit );
 
     gtk_widget_show_all( contextmenu );
 

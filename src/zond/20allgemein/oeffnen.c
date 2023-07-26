@@ -37,12 +37,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../40viewer/document.h"
 #include "../40viewer/viewer.h"
 
-#ifdef _WIN32
-#include <windows.h>
-//#include <shellapi.h>
-#include <shlwapi.h>
-#endif // _WIN32
-
 
 static gboolean
 oeffnen_dd_sind_gleich( DisplayedDocument* dd1, DisplayedDocument* dd2 )
@@ -165,7 +159,7 @@ oeffnen_auszug( Projekt* zond, gint node_id, gchar** errmsg )
 }
 
 
-static gint
+gint
 oeffnen_internal_viewer( Projekt* zond, const gchar* rel_path, Anbindung* anbindung,
         const PdfPos* pos_pdf, gchar** errmsg )
 {
@@ -214,176 +208,8 @@ oeffnen_internal_viewer( Projekt* zond, const gchar* rel_path, Anbindung* anbind
 }
 
 
-static void
-close_pid( GPid pid, gint status, gpointer user_data )
-{
-    g_spawn_close_pid( pid );
-
-    return;
-}
-
-
 gint
-oeffnen_datei( Projekt* zond, const gchar* rel_path, Anbindung* anbindung,
-        const PdfPos* pos_pdf, gchar** errmsg )
-{
-    GError* error = NULL;
-    GPid g_pid = 0;
-
-    //Typ der Datei ermitteln
-    //Sonderbehandung, falls pdf-Datei
-    if ( is_pdf( rel_path ) )
-    {
-        //Wenn pdf-Datei und internalviewer gewählt
-        if ( g_settings_get_boolean( zond->settings, "internalviewer" ) )
-        {
-            gint rc = 0;
-
-            rc = oeffnen_internal_viewer( zond, rel_path, anbindung, pos_pdf, errmsg );
-            if ( rc ) ERROR_SOND( "oeffnen_internal_viewer" )
-
-            return 0;
-        }
-//Falls WIN32 (und Application ist Acrobat (Reader oder nicht): Argument-String
-//bilden und starten
-        else //herausfinden, ob Adobe-Produkt in registry gepseichertes Anzeigeprogramm ist
-            //und zu einer dest gesprungen werden soll: dann nicht ShellExecute
-        {
-#ifdef _WIN32
-            HRESULT res = 0;
-            DWORD dwSize = MAX_PATH;
-
-            gchar exe[512] = { 0 };
-
-            res = AssocQueryString( ASSOCF_REMAPRUNDLL || ASSOCF_NOTRUNCATE,
-                    ASSOCSTR_FRIENDLYAPPNAME, ".pdf", NULL, (LPSTR) exe,
-                    &dwSize );
-            if ( res != S_OK )
-            {
-                if ( errmsg ) *errmsg = g_strdup_printf( "Bei Aufruf AssocQueryString:\n"
-                        "Error Code: %li", res );
-
-                return -1;
-            }
-
-            if ( g_str_has_prefix( exe, "Adobe" ) )
-            {
-                dwSize = MAX_PATH;
-
-                res = AssocQueryString( ASSOCF_REMAPRUNDLL || ASSOCF_NOTRUNCATE,
-                        ASSOCSTR_EXECUTABLE, ".pdf", NULL, (LPSTR) exe,
-                        &dwSize );
-                if ( res != S_OK )
-                {
-                    if ( errmsg ) *errmsg = g_strdup_printf( "Bei Aufruf AssocQueryString:\n"
-                            "Error Code: %li", res );
-
-                    return -1;
-                }
-
-                gchar* argv[6] = { NULL };
-                argv[0] = exe;
-
-                argv[1] = "/A";
-                if ( anbindung )
-                {
-                    argv[2] = g_strdup_printf( "page=%i", anbindung->von.seite + 1 );
-                    argv[3] = "/n";
-                    argv[4] = (gchar*) rel_path;
-                }
-                else if ( pos_pdf )
-                {
-                    argv[2] = g_strdup_printf( "page=%i", pos_pdf->seite + 1 );
-                    argv[3] = "/n";
-                    argv[4] = (gchar*) rel_path;
-                }
-                else
-                {
-                    argv[2] = g_strdup( "/n" );
-                    argv[3] = (gchar*) rel_path;
-                }
-
-                gboolean rc = g_spawn_async( NULL, argv, NULL, G_SPAWN_DO_NOT_REAP_CHILD,
-                        NULL, NULL, &g_pid, &error );
-                g_free( argv[2] );
-                if ( !rc )
-                {
-                    if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_spawn_async:\n",
-                            error->message, NULL );
-                    g_error_free( error );
-
-                    return -1;
-                }
-
-                g_child_watch_add( g_pid, (GChildWatchFunc) close_pid, NULL );
-
-                return 0;
-            }
-#endif // _WIN32
-
-        }
-    }
-
-    //wenn keine pdf-Datei oder nicht win32+Adobe:
-#ifdef _WIN32 //glib funktioniert nicht; daher Windows-Api verwenden
-    HINSTANCE ret = 0;
-    gchar* local_rel_path_win32 = NULL;
-
-    gchar* current_dir = g_get_current_dir( );
-    if ( rel_path )
-    {
-        gchar* rel_path_win32 = NULL;
-
-        rel_path_win32 = g_strdelimit( g_strdup( rel_path ), "/", '\\' );
-        local_rel_path_win32 = utf8_to_local_filename( rel_path_win32 );
-        g_free( rel_path_win32 );
-    }
-
-    ret = ShellExecute( NULL, NULL, local_rel_path_win32, current_dir, NULL, SW_SHOWNORMAL );
-    g_free( current_dir );
-    g_free( local_rel_path_win32 );
-    if ( ret == (HINSTANCE) 31 ) //no app associated
-    {
-        if ( errmsg ) *errmsg = g_strdup( "Bei Aufruf ShellExecute:\nErrCode:\n"
-                "Keine Anwendung in Registry gespeichert" );
-        return -1;
-    }
-    else if ( ret <= (HINSTANCE) 32 )
-    {
-        if ( errmsg ) *errmsg = g_strdup_printf( "Bei Aufruf "
-                "ShellExecute:\nErrCode: %p", ret );
-        return -1;
-    }
-#else
-
-    // Hier für Linux/Mac mit Glib executable ermitteln
-    //Mit xdg-open, möglicherweise
-
-    gchar* argv[3] = { NULL };
-    argv[0] = exe;
-    argv[1] = rel_path;
-
-    gboolean rc = g_spawn_async( NULL, argv, NULL, G_SPAWN_DO_NOT_REAP_CHILD,
-            NULL, NULL, &g_pid, &error );
-    if ( !rc )
-    {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_spawn_async:\n",
-                error->message, NULL );
-        g_error_free( error );
-
-        return -1;
-    }
-
-    g_child_watch_add( g_pid, (GChildWatchFunc) close_pid, NULL );
-
-#endif // _WIN32
-
-    return 0;
-}
-
-
-gint
-oeffnen_node( Projekt* zond, GtkTreeIter* iter, gchar** errmsg )
+oeffnen_node( Projekt* zond, GtkTreeIter* iter, gboolean open_with, gchar** errmsg )
 {
     gint rc = 0;
     gchar* rel_path = NULL;
@@ -399,15 +225,27 @@ oeffnen_node( Projekt* zond, GtkTreeIter* iter, gchar** errmsg )
             &anbindung, errmsg );
     if ( rc == -1 ) ERROR_S
 
-    if ( rc == 2 && baum == BAUM_AUSWERTUNG )
+    if ( rc == 2 ) //keine Datei angeklickt
     {
-        rc = oeffnen_auszug( zond, node_id, errmsg );
+        if ( baum == BAUM_AUSWERTUNG )
+        {
+            rc = oeffnen_auszug( zond, node_id, errmsg );
+            if ( rc ) ERROR_S
+
+            return 0;
+        }
+        else return 0;
+    }
+    else if ( open_with || !is_pdf( rel_path ) ) //wenn kein pdf oder mit Programmauswahl zu öffnen:
+    {
+        gint rc = 0;
+
+        rc = misc_datei_oeffnen( rel_path, open_with, errmsg );
         if ( rc ) ERROR_S
 
         return 0;
     }
-
-    if ( rc == 0 && !(zond->state & GDK_CONTROL_MASK) )
+    else if ( rc == 0 && !(zond->state & GDK_CONTROL_MASK) )
     {
         if ( zond->state & GDK_MOD1_MASK )
         {
@@ -436,7 +274,7 @@ oeffnen_node( Projekt* zond, GtkTreeIter* iter, gchar** errmsg )
         pos_pdf.index = EOP;
     }
 
-    rc = oeffnen_datei( zond, rel_path, anbindung, &pos_pdf, errmsg );
+    rc = oeffnen_internal_viewer( zond, rel_path, anbindung, &pos_pdf, errmsg );
     g_free( rel_path );
     g_free( anbindung );
     if ( rc ) ERROR_S

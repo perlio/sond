@@ -195,11 +195,11 @@ cb_textsuche_act( GtkListBox* box, GtkListBoxRow* row, gpointer data )
     pos_pdf.seite = pdf_text_occ.page;
     pos_pdf.index = (gint) (pdf_text_occ.quad.ul.y);
 
-    rc = oeffnen_datei( zond, pdf_text_occ.rel_path, NULL, &pos_pdf, &errmsg );
+    rc = oeffnen_internal_viewer( zond, pdf_text_occ.rel_path, NULL, &pos_pdf, &errmsg );
     if ( rc )
     {
-        display_message( zond->app_window, "Fehler in Textsuche -\n\n"
-                "Bei Aufruf oeffnen_datei:\n", errmsg, NULL );
+        display_message( zond->app_window, "Fehler in Textsuche -\n\n",
+                errmsg, NULL );
         g_free( errmsg );
 
         return;

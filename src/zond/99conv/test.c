@@ -210,7 +210,7 @@ dir_foreach( GFile* file, gboolean rec, gint (*foreach) ( GFile*, GFileInfo*, gp
 
 
 gint
-test( Projekt* zond, gchar** errmsg )
+test_II( Projekt* zond, gchar** errmsg )
 {
     GFile* file_root = NULL;
     const gchar* root = "C:/Users/nc-kr/laufende Akten";
@@ -226,6 +226,35 @@ test( Projekt* zond, gchar** errmsg )
     return 0;
 }
 
+
+gint
+test( Projekt* zond, gchar** errmsg )
+{
+    GList* list_app_info = NULL;
+
+    list_app_info = g_app_info_get_all( );
+
+    while ( list_app_info )
+    {
+        gchar** list_type = NULL;
+
+        printf( "%s   %s\n", g_app_info_get_commandline( G_APP_INFO(list_app_info->data) ),
+                g_app_info_get_executable( G_APP_INFO(list_app_info->data) ) );
+
+        list_type = g_app_info_get_supported_types( G_APP_INFO(list_app_info->data) );
+        while ( *list_type )
+        {
+            printf("%s\n", *list_type );
+            list_type++;
+        }
+
+        list_app_info = list_app_info->next;
+    }
+
+    g_list_free_full( list_app_info, g_object_unref );
+
+    return 0;
+}
 
 /*
 static gint

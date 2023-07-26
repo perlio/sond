@@ -438,3 +438,88 @@ result_listbox_new( GtkWindow* parent_window, const gchar* titel )
 }
 
 
+void
+close_pid( GPid pid, gint status, gpointer user_data )
+{
+    g_spawn_close_pid( pid );
+
+    return;
+}
+
+
+gint
+misc_datei_oeffnen( const gchar* path, gboolean open_with, gchar** errmsg )
+{
+#ifdef _WIN32 //glib funktioniert nicht; daher Windows-Api verwenden
+    gboolean ret = FALSE;
+
+    gchar* path_win32 = g_strdelimit( g_strdup( path ), "/", '\\' );
+
+    //utf8 in filename konvertieren
+    gsize written;
+    gchar* charset = g_get_codeset();
+    gchar* local_filename = g_convert( path_win32, -1, charset, "UTF-8", NULL, &written,
+            NULL );
+    g_free( charset );
+    g_free( path_win32 );
+
+//    public const uint SEE_MASK_INVOKEIDLIST = 12;
+
+    CoInitializeEx( NULL, COINIT_APARTMENTTHREADED|COINIT_DISABLE_OLE1DDE );
+    SHELLEXECUTEINFO sei = { sizeof( sei ) };
+    sei.nShow = SW_SHOWNORMAL;
+    sei.lpVerb = (open_with) ? "openas" : NULL;
+    sei.lpFile = local_filename;
+    sei.fMask = SEE_MASK_INVOKEIDLIST;
+
+    ret = ShellExecuteEx( &sei );
+    g_free( local_filename );
+    if ( !ret ) //Fähler
+    {
+        if ( errmsg )
+        {
+            LPVOID lpMsgBuf = NULL;
+            DWORD dw = 0;
+
+            dw = GetLastError( );
+            FormatMessage( FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+                    FORMAT_MESSAGE_IGNORE_INSERTS,
+                    NULL, dw, MAKELANGID( LANG_NEUTRAL, SUBLANG_DEFAULT ),
+                    (LPTSTR) &lpMsgBuf, 0, NULL );
+            *errmsg = g_strdup_printf( "Bei Aufruf ShellExecuteEx:\n"
+                    "Fehlercode: %li\n%s", dw, (LPTSTR) lpMsgBuf );
+
+            LocalFree( lpMsgBuf );
+        }
+
+        return -1;
+    }
+#else //Linux/Mac
+/*
+    gchar* exe = NULL;
+    gchar* argv[3] = { NULL };
+
+    //exe herausfinden, vielleicht mit xdgopen???!
+
+    argv[0] = exe;
+    argv[1] = path;
+
+    gboolean rc = g_spawn_async( NULL, argv, NULL, G_SPAWN_DO_NOT_REAP_CHILD,
+            NULL, NULL, &g_pid, &error );
+    if ( !rc )
+    {
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_spawn_async:\n",
+                error->message, NULL );
+        g_error_free( error );
+
+        return -1;
+    }
+
+    g_child_watch_add( g_pid, (GChildWatchFunc) close_pid, NULL );
+*/
+#endif // _WIN32
+
+    return 0;
+}
+
+

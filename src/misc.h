@@ -52,6 +52,8 @@ typedef char gchar;
 typedef int gint;
 typedef unsigned int guint;
 typedef int gboolean;
+typedef void* GPid;
+typedef void* gpointer;
 
 typedef struct _SondError
 {
@@ -99,5 +101,9 @@ gchar* misc_get_calendar( GtkCalendar* );
 gchar* get_base_dir( void );
 
 GtkWidget* result_listbox_new( GtkWindow*, const gchar* );
+
+void close_pid( GPid, gint, gpointer );
+
+gint misc_datei_oeffnen( const gchar*, gboolean, gchar** );
 
 #endif // MISC_H_INCLUDED

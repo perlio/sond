@@ -126,8 +126,6 @@ struct _Menu
     GtkWidget* textview_extra;
 
     GtkWidget* extras;
-
-    GtkWidget* internal_vieweritem;
 };
 
 typedef struct _Menu Menu;

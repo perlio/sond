@@ -22,8 +22,7 @@ ToDo:
     - angezeigte Seiten als Datei speichern
 
 - Kontextmenu Trees
-    - öffnen
-        - öffnen mit
+    - öffnen mit
     - PDF: OCR/Reparieren/Textsuche
 
 - PDF

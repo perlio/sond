@@ -590,6 +590,19 @@ cb_item_datei_oeffnen( GtkMenuItem* item, gpointer data )
 
 
 static void
+cb_item_datei_oeffnen_mit( GtkMenuItem* item, gpointer data )
+{
+    Projekt* zond = (Projekt*) data;
+
+    gtk_menu_item_activate( g_object_get_data( //BAUM_INHALT od. AUSWERTUNG
+            G_OBJECT(sond_treeview_get_contextmenu( zond->treeview[zond->baum_active] )),
+            "item-datei-oeffnen-mit" ) );
+
+    return;
+}
+
+
+static void
 cb_change_icon_item( GtkMenuItem* item, gpointer data )
 {
     gint icon_id = 0;
@@ -929,13 +942,19 @@ init_menu( Projekt* zond )
     gtk_menu_item_set_submenu( GTK_MENU_ITEM(punkterzeugenitem),
             punkterzeugenmenu );
 
-    //node_text anpassen (rel_path/Anbindung)
+    //Datei öffnen
     GtkWidget* item_datei_oeffnen = gtk_menu_item_new_with_label(
-            "Datei öffnen" );
+            "Öffnen" );
     gtk_widget_add_accelerator(item_datei_oeffnen, "activate", accel_group,
             GDK_KEY_o, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
     g_signal_connect( G_OBJECT(item_datei_oeffnen), "activate",
             G_CALLBACK(cb_item_datei_oeffnen), (gpointer) zond );
+
+    //Datei öffnen
+    GtkWidget* item_datei_oeffnen_mit = gtk_menu_item_new_with_label(
+            "Öffnen mit" );
+    g_signal_connect( G_OBJECT(item_datei_oeffnen_mit), "activate",
+            G_CALLBACK(cb_item_datei_oeffnen_mit), (gpointer) zond );
 
     //Icons ändern
     GtkWidget* icon_change_item = gtk_menu_item_new_with_label( "Icon ändern" );
@@ -1089,6 +1108,7 @@ init_menu( Projekt* zond )
     gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), suchenitem );
     gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), jumpitem );
     gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), item_datei_oeffnen );
+    gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), item_datei_oeffnen_mit );
     gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), eingang_item );
 
 /*********************
@@ -1175,15 +1195,10 @@ init_menu( Projekt* zond )
 /*  Menu Einstellungen */
     GtkWidget* einstellungenmenu = gtk_menu_new( );
 
-    zond->menu.internal_vieweritem = gtk_check_menu_item_new_with_label(
-            "Interner PDF-Viewer" );
-
     GtkWidget* zoom_item = gtk_menu_item_new_with_label( "Zoom Interner Viewer" );
 
     GtkWidget* root_item = gtk_menu_item_new_with_label( "root-Verzeichnis" );
 
-    gtk_menu_shell_append( GTK_MENU_SHELL(einstellungenmenu),
-            zond->menu.internal_vieweritem );
     gtk_menu_shell_append( GTK_MENU_SHELL(einstellungenmenu),
             zoom_item );
     gtk_menu_shell_append( GTK_MENU_SHELL(einstellungenmenu),

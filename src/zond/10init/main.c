@@ -209,9 +209,6 @@ init( GtkApplication* app, Projekt* zond )
 
     //GSettings
     zond->settings = g_settings_new( "de.perlio.zond" );
-    g_settings_bind( zond->settings, "internalviewer",
-            G_OBJECT(zond->menu.internal_vieweritem), "active",
-            G_SETTINGS_BIND_DEFAULT );
 
     //Wiederherstellung bei Absturz
     //(d.h. in den Settings wurde project nicht auf "" gesetzt)
