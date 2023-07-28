@@ -39,59 +39,31 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #define TESS_SCALE 5
 
+
 static gint
 pdf_ocr_update_content_stream( fz_context* ctx, pdf_obj* page_ref,
         fz_buffer* buf, gchar** errmsg )
 {
+    pdf_obj* obj_content_stream = NULL;
     pdf_document* doc = NULL;
-    pdf_obj* contents_dict = NULL;
-    pdf_obj* ind = NULL;
 
-    doc = pdf_get_bound_document( ctx, page_ref );
+    doc = pdf_pin_document( ctx, page_ref );
+    if ( !doc ) ERROR_S_MESSAGE( "pdf_pin_document gibt NULL zurück" )
 
-    fz_var( contents_dict );
-    fz_var( ind );
-    fz_try( ctx )
+    obj_content_stream = pdf_dict_get( ctx, page_ref, PDF_NAME(Contents) );
+
+    /* If contents is not a stream it's an array of streams or missing. */
+    if (!pdf_is_stream(ctx, obj_content_stream))
     {
-        pdf_dict_del( ctx, page_ref, PDF_NAME(Contents) );
-        contents_dict = pdf_new_dict( ctx, doc, 2 );
-        gint num = pdf_create_object( ctx, doc );
-        pdf_update_object( ctx, doc, num, contents_dict );
-        ind = pdf_new_indirect( ctx, doc, num, 0 );
-        pdf_dict_put( ctx, page_ref, PDF_NAME(Contents), ind );
-        pdf_update_stream( ctx, doc, ind, buf, 0 );
+        /* Create a new stream object to replace the array of streams or missing object. */
+        obj_content_stream = pdf_add_object_drop( ctx, doc, pdf_new_dict( ctx, doc, 1 ) );
+        pdf_dict_put_drop( ctx, page_ref, PDF_NAME(Contents), obj_content_stream );
     }
-    fz_always( ctx )
-    {
-        pdf_drop_obj( ctx, contents_dict );
-        pdf_drop_obj( ctx, ind );
-    }
-    fz_catch( ctx ) ERROR_MUPDF( "update stream" )
+    fz_try( ctx ) pdf_update_stream(ctx, doc, obj_content_stream, buf, 0);
+    fz_always( ctx ) pdf_drop_document( ctx, doc );
+    fz_catch( ctx ) ERROR_MUPDF( "pdf_update_stream" )
 
     return 0;
-}
-
-
-fz_buffer*
-pdf_ocr_get_content_stream_as_buffer( fz_context* ctx, pdf_obj* page_ref,
-        gchar** errmsg )
-{
-    pdf_obj* obj_contents = NULL;
-    fz_stream* stream = NULL;
-    fz_buffer* buf = NULL;
-
-    //Stream doc_text
-    obj_contents = pdf_dict_get( ctx, page_ref, PDF_NAME(Contents) );
-
-    fz_try( ctx )
-    {
-        stream = pdf_open_contents_stream( ctx, pdf_get_bound_document( ctx, page_ref ), obj_contents );
-        buf = fz_read_all( ctx, stream, 1024 );
-    }
-    fz_always( ctx ) fz_drop_stream( ctx, stream );
-    fz_catch( ctx ) ERROR_MUPDF_R( "open and read stream", NULL )
-
-    return buf;
 }
 
 
@@ -944,10 +916,10 @@ pdf_ocr_prepare_content_stream( fz_context* ctx, pdf_page* page, gchar** errmsg 
 static gint
 pdf_ocr_filter_content_stream( fz_context* ctx, pdf_page* page, gint flags, gchar** errmsg )
 {
-    gint rc = 0;
     fz_buffer* buf = NULL;
     fz_stream* stream = NULL;
     GArray* arr_zond_token = NULL;
+    gint rc = 0;
 
     //erst den vorhandenen stream schön machen, insbesondere für inline-images!!!
         //Quatsch, ergibt keinen Sinn
@@ -964,11 +936,11 @@ pdf_ocr_filter_content_stream( fz_context* ctx, pdf_page* page, gint flags, gcha
 
     buf = pdf_ocr_reassemble_buffer( ctx, arr_zond_token, errmsg );
     g_array_unref( arr_zond_token );
-    if ( !buf ) ERROR_SOND( "pdf_zond_reassemble_buffer" )
+    if ( !buf ) ERROR_S
 
     rc = pdf_ocr_update_content_stream( ctx, page->obj, buf, errmsg );
     fz_drop_buffer( ctx, buf );
-    if ( rc ) ERROR_SOND( "pdf_ocr_update_content_stream" )
+    if ( rc ) ERROR_S
 
     return 0;
 }
@@ -990,17 +962,40 @@ pdf_ocr_find_BT( gchar* buf, size_t size )
 }
 
 
+fz_buffer*
+pdf_ocr_get_content_stream_as_buffer( fz_context* ctx, pdf_obj* page_ref,
+        gchar** errmsg )
+{
+    pdf_obj* obj_contents = NULL;
+    fz_stream* stream = NULL;
+    fz_buffer* buf = NULL;
+
+    //Stream doc_text
+    obj_contents = pdf_dict_get( ctx, page_ref, PDF_NAME(Contents) );
+
+    fz_try( ctx )
+    {
+        stream = pdf_open_contents_stream( ctx, pdf_get_bound_document( ctx, page_ref ), obj_contents );
+        buf = fz_read_all( ctx, stream, 1024 );
+    }
+    fz_always( ctx ) fz_drop_stream( ctx, stream );
+    fz_catch( ctx ) ERROR_MUPDF_R( "open and read stream", NULL )
+
+    return buf;
+}
+
+
 static gint
 pdf_ocr_process_tess_tmp( fz_context* ctx, pdf_obj* page_ref,
         fz_matrix ctm, gchar** errmsg )
 {
-    gint rc = 0;
     fz_buffer* buf = NULL;
     fz_buffer* buf_new = NULL;
     size_t size = 0;
     gchar* data = NULL;
     gchar* cm = NULL;
     gchar* BT = NULL;
+    gint rc = 0;
 
     cm = g_strdup_printf( "\nq\n%g %g %g %g %g %g cm\nBT",
             ctm.a, ctm.b, ctm.c, ctm.d, ctm.e, ctm.f );
@@ -1052,9 +1047,10 @@ pdf_ocr_process_tess_tmp( fz_context* ctx, pdf_obj* page_ref,
         fz_drop_buffer( ctx, buf_new );
         ERROR_MUPDF( "append buffer" )
     }
+
     rc = pdf_ocr_update_content_stream( ctx, page_ref, buf_new, errmsg );
     fz_drop_buffer( ctx, buf_new );
-    if ( rc ) ERROR_SOND( "pdf_ocr_update_content_stream" )
+    if ( rc ) ERROR_S
 
     return 0;
 }
@@ -1100,7 +1096,6 @@ pdf_ocr_sandwich_page( PdfDocumentPage* pdf_document_page,
     pdf_graft_map *graft_map = NULL;
     pdf_obj *obj = NULL;
     pdf_obj* contents_arr = NULL;
-    gint zaehler = 0;
 
     pdf_obj* resources = NULL;
     pdf_obj* resources_text = NULL;
@@ -1121,7 +1116,7 @@ pdf_ocr_sandwich_page( PdfDocumentPage* pdf_document_page,
     fz_catch( ctx ) ERROR_MUPDF_R( "pdf_flatten_inheritable_page_items (text)", -2 );
 
     rc = pdf_ocr_filter_content_stream( ctx, pdf_document_page->page, 3, errmsg );
-    if ( rc ) ERROR_SOND( "pdf_zond_filter_content_stream" )
+    if ( rc ) ERROR_S
 
 //    fz_rect rect = pdf_ocr_get_mediabox( ctx, pdf_document_page->page->obj );
     float scale = 1./TESS_SCALE/72.*70.;
@@ -1138,57 +1133,27 @@ pdf_ocr_sandwich_page( PdfDocumentPage* pdf_document_page,
     {
         //Contents aus Ursrpungs-Pdf in neues Array umkopieren
         //graft nicht erforderlich, da selbes Dokument - Referenzen bleiben
+        //obj ist immer stream-object, da Content-stream neu geschrieben wird als dict
+        //in pdf_ocr_update_content_stream, wird von _filter_content_stream aufgerufen
         obj = pdf_dict_get( ctx, pdf_document_page->page->obj, PDF_NAME(Contents) ); //keine exception
-        if ( pdf_is_array( ctx, obj ) )
-        {
-            for ( gint i = 0; i < pdf_array_len( ctx, obj ); i++ )
-            {
-                pdf_obj* content_stream = pdf_array_get( ctx, obj, i );
-                if ( content_stream != NULL )
-                {
-                    pdf_array_put( ctx, contents_arr, zaehler, content_stream );
-                    zaehler++;
-                }
-            }
-        }
-        else if ( pdf_is_stream( ctx, obj ) )
-        {
-            pdf_array_put( ctx, contents_arr, zaehler, obj );
-            zaehler++;
-        }
+
+        pdf_array_put( ctx, contents_arr, 0, obj );
 
         //Jetzt aus Text-PDF - graft map erforderlich
+        //ToDo: Prüfen, ob wirklich nötig - pdf_pin_document
         graft_map = pdf_new_graft_map( ctx, pdf_get_bound_document( ctx, pdf_document_page->page->obj ) ); //keine exception
 
+        //kein array, s.o,
         obj = pdf_dict_get( ctx, page_ref_text, PDF_NAME(Contents) );
-        if ( pdf_is_array( ctx, obj ) )
-        {
-            for ( gint i = 0; i < pdf_array_len( ctx, obj ); i++ )
-            {
-                pdf_obj* content_stream = pdf_array_get( ctx, obj, i );
-                if ( content_stream != NULL )
-                {
-                    pdf_array_put_drop( ctx, contents_arr, zaehler,
-                            pdf_graft_mapped_object( ctx, graft_map,
-                            content_stream ) );
-                    zaehler++;
-                }
-            }
-        }
-        else if ( pdf_is_stream( ctx, obj ) )
-        {
-            pdf_array_put_drop( ctx, contents_arr, zaehler,
-                    pdf_graft_mapped_object( ctx, graft_map, obj ) );
-            zaehler++;
-        }
 
-        //alte Contents raus, neue rein
-        pdf_dict_del( ctx, pdf_document_page->page->obj, PDF_NAME(Contents) );
+        pdf_array_put_drop( ctx, contents_arr, 1, pdf_graft_mapped_object( ctx, graft_map, obj ) );
+
+        //neue contents rein
         pdf_dict_put( ctx, pdf_document_page->page->obj, PDF_NAME(Contents), contents_arr );
 
         //Resources aus pdf_text hizukopieren
         resources = pdf_dict_get( ctx, pdf_document_page->page->obj, PDF_NAME(Resources) );
-        //Zunächst testen, ob Page-Object Font enthält
+        //Zunächst testen, ob Resources Font enthalten
         font_dict = pdf_dict_get( ctx, resources, PDF_NAME(Font) );
         if ( !font_dict )
         {
@@ -1880,13 +1845,13 @@ pdf_ocr_pages( Projekt* zond, InfoWindow* info_window, GPtrArray* arr_document_p
 gint
 pdf_change_hidden_text( fz_context* ctx, pdf_obj* page_ref, gchar** errmsg )
 {
-    gint rc = 0;
     pdf_obj* obj_contents = NULL;
     fz_stream* stream = NULL;
     pdf_token tok = PDF_TOK_NULL;
     gint idx = -1;
     GArray* arr_zond_token = NULL;
     fz_buffer* buf = NULL;
+    gint rc = 0;
 
     //Stream doc_text
     obj_contents = pdf_dict_get( ctx, page_ref, PDF_NAME(Contents) );
@@ -1935,7 +1900,8 @@ pdf_change_hidden_text( fz_context* ctx, pdf_obj* page_ref, gchar** errmsg )
 
     rc = pdf_ocr_update_content_stream( ctx, page_ref, buf, errmsg );
     fz_drop_buffer( ctx, buf );
-    if ( rc ) ERROR_SOND( "pdf_update_content_stream" )
+    if ( rc ) ERROR_S
+
 
     //Dann Font-Dict
     pdf_obj* f_0_0 = NULL;
