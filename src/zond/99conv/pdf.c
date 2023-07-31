@@ -2,6 +2,8 @@
 
 #include <glib/gstdio.h>
 
+#include "test.h"
+
 #include "../zond_pdf_document.h"
 
 #include "../../misc.h"
@@ -227,9 +229,9 @@ pdf_save( fz_context* ctx, pdf_document* pdf_doc, const gchar* path,
     gchar* path_tmp = NULL;
     pdf_write_options opts =
 #ifdef __WIN32
-            { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, ~0, "", "", 0 };
+            { 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, ~0, "", "", 0 };
 #elif defined(__linux__)
-            { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, ~0, "", "" };
+            { 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, ~0, "", "" };
 #endif // __win32
     if ( pdf_count_pages( ctx, pdf_doc ) < BIG_PDF && !pdf_doc->crypt ) opts.do_garbage = 4;
 
@@ -303,6 +305,269 @@ pdf_get_string_from_line( fz_context* ctx, fz_stext_line* line, gchar** errmsg )
     fz_drop_buffer( ctx, buf );
 
     return line_string;
+}
+
+
+/* PDF-Text-Filter */
+typedef struct resources_stack
+{
+	struct resources_stack *next;
+	pdf_obj *res;
+} resources_stack;
+
+typedef struct
+{
+	pdf_processor super;
+	fz_output *out;
+	int ahxencode;
+	int extgstate;
+	pdf_obj *res;
+	pdf_obj *last_res;
+	resources_stack *rstack;
+} pdf_output_processor;
+
+typedef struct
+{
+	pdf_output_processor super;
+	void (* pdf_drop_buffer_processor) (fz_context* ctx, pdf_processor* proc );
+
+	void (* pdf_buffer_processor_op_q) (fz_context* ctx, pdf_processor* proc );
+	void (* pdf_buffer_processor_op_Q) (fz_context* ctx, pdf_processor* proc );
+
+	void (* pdf_buffer_processor_op_Tr) (fz_context* ctx, pdf_processor* proc, gint );
+
+	void (* pdf_buffer_processor_op_TJ) (fz_context*, pdf_processor*, pdf_obj* );
+	void (* pdf_buffer_processor_op_Tj) (fz_context*, pdf_processor*, gchar*, size_t );
+	void (* pdf_buffer_processor_op_squote) (fz_context*, pdf_processor*,
+            gchar*, size_t );
+	void (* pdf_buffer_processor_op_dquote) (fz_context*, pdf_processor*,
+            float, float, gchar*, size_t );
+
+	GArray* arr_Tr;
+	gint flags;
+} pdf_text_filter_processor;
+
+
+static void
+pdf_drop_text_filter_processor(fz_context *ctx, pdf_processor *proc)
+{
+	pdf_text_filter_processor* p = (pdf_text_filter_processor*) proc;
+
+	g_array_unref( p->arr_Tr );
+
+	p->pdf_drop_buffer_processor( ctx, proc );
+
+//	fz_free( ctx, proc );
+
+    return;
+}
+
+
+static void
+pdf_text_filter_op_q(fz_context *ctx, pdf_processor *proc)
+{
+    gint Tr = 0;
+
+	pdf_text_filter_processor* p = (pdf_text_filter_processor*) proc;
+
+    Tr = g_array_index( p->arr_Tr, gint, p->arr_Tr->len - 1 );
+
+    g_array_append_val( p->arr_Tr, Tr );
+
+    //chain-up
+	p->pdf_buffer_processor_op_q( ctx, proc );
+
+    return;
+}
+
+
+static void
+pdf_text_filter_op_Q( fz_context* ctx, pdf_processor* proc )
+{
+    pdf_text_filter_processor* p = (pdf_text_filter_processor*) proc;
+
+    if ( p->arr_Tr->len ) //wenn mehr Q als q, dann braucht man auch nicht weiterleiten...
+    {
+        g_array_remove_index( p->arr_Tr, p->arr_Tr->len - 1 );
+
+        p->pdf_buffer_processor_op_Q( ctx, proc );
+    }
+
+    return;
+}
+
+
+static void
+pdf_text_filter_op_Tr( fz_context* ctx, pdf_processor* proc, gint render )
+{
+    pdf_text_filter_processor* p = (pdf_text_filter_processor*) proc;
+
+    (((gint*) (void *) (p->arr_Tr)->data) [(p->arr_Tr->len - 1)]) = render;
+
+    p->pdf_buffer_processor_op_Tr( ctx, proc, render );
+
+    return;
+}
+
+
+static void
+pdf_text_filter_op_TJ( fz_context* ctx, pdf_processor* proc, pdf_obj* array )
+{
+    gint Tr = 0;
+
+    pdf_text_filter_processor* p = (pdf_text_filter_processor*) proc;
+
+    Tr = g_array_index( p->arr_Tr, gint, p->arr_Tr->len - 1 );
+
+    if ( p->flags & 1 && Tr != 3 ) return;
+    if ( p->flags & 2 && Tr == 3 ) return;
+
+    p->pdf_buffer_processor_op_TJ( ctx, proc, array );
+
+    return;
+}
+
+
+static void
+pdf_text_filter_op_Tj( fz_context* ctx, pdf_processor* proc, gchar* str, size_t len )
+{
+    gint Tr = 0;
+
+    pdf_text_filter_processor* p = (pdf_text_filter_processor*) proc;
+
+    Tr = g_array_index( p->arr_Tr, gint, p->arr_Tr->len - 1 );
+
+    if ( p->flags & 1 && Tr != 3 ) return;
+    if ( p->flags & 2 && Tr == 3 ) return;
+
+    p->pdf_buffer_processor_op_Tj( ctx, proc, str, len );
+
+    return;
+}
+
+
+static void
+pdf_text_filter_op_squote( fz_context* ctx, pdf_processor* proc, gchar* str, size_t len )
+{
+    gint Tr = 0;
+
+    pdf_text_filter_processor* p = (pdf_text_filter_processor*) proc;
+
+    Tr = g_array_index( p->arr_Tr, gint, p->arr_Tr->len - 1 );
+
+    if ( p->flags & 1 && Tr != 3 ) return;
+    if ( p->flags & 2 && Tr == 3 ) return;
+
+    p->pdf_buffer_processor_op_squote( ctx, proc, str, len );
+
+    return;
+}
+
+
+static void
+pdf_text_filter_op_dquote( fz_context* ctx, pdf_processor* proc, float aw, float ac,
+        gchar* str, size_t len )
+{
+    gint Tr = 0;
+
+    pdf_text_filter_processor* p = (pdf_text_filter_processor*) proc;
+
+    Tr = g_array_index( p->arr_Tr, gint, p->arr_Tr->len - 1 );
+
+    if ( p->flags & 1 && Tr != 3 ) return;
+    if ( p->flags & 2 && Tr == 3 ) return;
+
+    p->pdf_buffer_processor_op_dquote( ctx, proc, aw, ac, str, len );
+
+    return;
+}
+
+pdf_processor *
+pdf_new_text_filter_processor( fz_context *ctx, fz_buffer** buf, gint flags,
+        gchar** errmsg )
+{
+    *buf = NULL;
+    gint zero = 0; //wg g_array_append_val
+    pdf_text_filter_processor* proc = NULL;
+    pdf_output_processor* proc_output = NULL;
+
+	fz_try( ctx ) *buf = fz_new_buffer( ctx, 1024 );
+	fz_catch( ctx ) ERROR_MUPDF_R( "fz_new_buffer", NULL )
+
+	fz_try( ctx ) proc_output = (pdf_output_processor*) pdf_new_buffer_processor( ctx, *buf, 0 );
+	fz_catch( ctx )
+	{
+	    fz_drop_buffer( ctx, *buf );
+	    ERROR_MUPDF_R( "pdf_new_output_processor", NULL )
+	}
+
+	proc = 	Memento_label(fz_calloc(ctx, 1, sizeof( pdf_text_filter_processor ) ), "pdf_processor");
+
+	//output-processor in super-Struktur kopieren
+	proc->super = *proc_output;
+
+	//Hülle kann freigegeben werden
+	fz_free( ctx, proc_output );
+
+	proc->arr_Tr = g_array_new( FALSE, FALSE, sizeof( gint ) );
+	g_array_append_val( proc->arr_Tr, zero );
+
+	proc->flags = flags;
+
+	//Funktionen "umleiten"
+	proc->pdf_drop_buffer_processor = proc->super.super.drop_processor;
+	proc->super.super.drop_processor = pdf_drop_text_filter_processor;
+
+	/* special graphics state */
+	proc->pdf_buffer_processor_op_q = proc->super.super.op_q;
+	proc->super.super.op_q = pdf_text_filter_op_q;
+
+	proc->pdf_buffer_processor_op_Q = proc->super.super.op_Q;
+	proc->super.super.op_Q = pdf_text_filter_op_Q;
+
+	proc->pdf_buffer_processor_op_Tr = proc->super.super.op_Tr;
+	proc->super.super.op_Tr = pdf_text_filter_op_Tr;
+
+	proc->pdf_buffer_processor_op_TJ = proc->super.super.op_TJ;
+	proc->super.super.op_TJ = pdf_text_filter_op_TJ;
+	proc->pdf_buffer_processor_op_Tj = proc->super.super.op_Tj;
+	proc->super.super.op_Tj = pdf_text_filter_op_Tj;
+	proc->pdf_buffer_processor_op_squote = proc->super.super.op_squote;
+	proc->super.super.op_squote = pdf_text_filter_op_squote;
+	proc->pdf_buffer_processor_op_dquote = proc->super.super.op_dquote;
+	proc->super.super.op_dquote = pdf_text_filter_op_dquote;
+
+	return (pdf_processor*) proc;
+}
+
+
+fz_buffer*
+pdf_text_filter_page( fz_context* ctx, pdf_page* page, gint flags, gchar** errmsg )
+{
+    pdf_obj* contents = NULL;
+    pdf_obj* res = NULL;
+    pdf_processor* proc = NULL;
+    fz_buffer* buf = NULL;
+
+	contents = pdf_page_contents(ctx, page);
+	res = pdf_page_resources(ctx, page);
+
+	proc = pdf_new_text_filter_processor( ctx, &buf, flags, errmsg );
+	if ( !proc ) ERROR_S_VAL( NULL )
+
+    fz_try( ctx ) pdf_process_contents( ctx, proc, page->doc, res, contents, NULL, NULL );
+    fz_always( ctx )
+    {
+        pdf_close_processor( ctx, proc );
+        pdf_drop_processor( ctx, proc );
+    }
+    fz_catch( ctx )
+    {
+        fz_drop_buffer( ctx, buf );
+        ERROR_S_VAL( NULL )
+    }
+
+    return buf;
 }
 
 

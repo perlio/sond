@@ -20,106 +20,6 @@
 #include "../20allgemein/pdf_text.h"
 
 
-typedef struct _Zond_Token
-{
-    pdf_token tok;
-    union
-    {
-        gint i;
-        gfloat f;
-        gchar* s;
-        GByteArray* gba;
-    };
-} ZondToken;
-
-#define PDF_TOK_INLINE_STREAM 99
-
-static gint
-test_pdf( GFile* file, GFileInfo* info, gpointer data, gchar** errmsg )
-{
-    gchar* path = NULL;
-    ZondPdfDocument* zpdfd = NULL;
-    GPtrArray* arr_pages = NULL;
-    fz_context* ctx = NULL;
-    InfoWindow* info_window = (InfoWindow*) data;
-
-    path = g_file_get_path( file );
-    info_window_set_message( info_window, path );
-
-    if ( !is_pdf( path ) )
-    {
-        g_free( path );
-        return 0;
-    }
-
-    zpdfd = zond_pdf_document_open( path, 0, -1, errmsg );
-    g_free( path );
-    if ( !zpdfd ) ERROR_S
-
-    arr_pages = zond_pdf_document_get_arr_pages( zpdfd );
-    ctx = zond_pdf_document_get_ctx( zpdfd );
-
-    for ( gint i = 0; i < arr_pages->len; i++ )
-    {
-        PdfDocumentPage* pdfp = NULL;
-        fz_stream* stream = NULL;
-        GArray* arr_zond_token = NULL;
-
-        pdfp = g_ptr_array_index( arr_pages, i );
-
-        //Stream doc_text
-        fz_try( ctx ) stream = pdf_open_contents_stream( ctx, pdfp->page->doc,
-                pdf_dict_get( ctx, pdfp->page->obj, PDF_NAME(Contents) ) );
-        fz_catch( ctx )
-        {
-            g_object_unref( zpdfd );
-            ERROR_MUPDF( "pdf_open_contents_stream" )
-        }
-
-        arr_zond_token = pdf_ocr_get_cleaned_tokens( ctx, pdfp->page, stream, 0, errmsg );
-        fz_drop_stream( ctx, stream );
-        if ( !arr_zond_token )
-        {
-            g_object_unref( zpdfd );
-            ERROR_S
-        }
-
-        for ( gint u = 0; u < arr_zond_token->len; u++ )
-        {
-            ZondToken zond_token = g_array_index( arr_zond_token, ZondToken, u );
-
-            if ( zond_token.tok == PDF_TOK_KEYWORD && !g_strcmp0( zond_token.s, "BI" ) )
-            {
-                gchar* message = NULL;
-
-                message = g_strdup_printf( "Seite %i\nBI\n", i );
-                info_window_set_message( info_window, message );
-                g_free( message );
-
-                u++;
-
-                zond_token = g_array_index( arr_zond_token, ZondToken, u );
-                if ( zond_token.tok != PDF_TOK_INLINE_STREAM )
-                {
-                    g_object_unref( zpdfd );
-                    g_array_unref( arr_zond_token );
-                    ERROR_S_MESSAGE( "Nach BI kein Inline-Stream" )
-                }
-
-                for ( gint z = 0; z < zond_token.gba->len; z++ )
-                {
-                    printf("%c", zond_token.gba->data[z]);
-                }
-            }
-        }
-        g_array_unref( arr_zond_token );
-    }
-
-    g_object_unref( zpdfd );
-
-    return 0;
-}
-
 
 /** rc == -1: Fähler
     rc == 0: alles ausgeführt, sämtliche Callbacks haben 0 zurückgegeben
@@ -219,7 +119,7 @@ test_II( Projekt* zond, gchar** errmsg )
 
     file_root = g_file_new_for_path( root );
     info_window = info_window_open( zond->app_window, "Untersuchung auf InlineImages" );
-    rc = dir_foreach( file_root, TRUE, test_pdf, info_window, errmsg );
+ //   rc = dir_foreach( file_root, TRUE, test_pdf, info_window, errmsg );
     info_window_close( info_window );
     if ( rc == -1 ) ERROR_S
 
@@ -444,20 +344,13 @@ datei_query_filesystem( const gchar* filename, gchar** errmsg )
 }
 */
 
-fz_buffer*
-pdf_ocr_get_content_stream_as_buffer( fz_context* ctx, pdf_obj* page_ref,
-        gchar** errmsg );
 
-gint
-pdf_print_content_stream( fz_context* ctx, pdf_obj* page_ref, gchar** errmsg )
+void
+pdf_print_buffer( fz_context* ctx, fz_buffer* buf )
 {
-    fz_buffer* buf = NULL;
     gchar* data = NULL;
     gchar* pos = NULL;
     size_t size = 0;
-
-    buf = pdf_ocr_get_content_stream_as_buffer( ctx, page_ref, errmsg );
-    if ( !buf ) ERROR_SOND( "pdf_ocr_get_content_stream_as_buffer" )
 
     size = fz_buffer_storage( ctx, buf, (guchar**) &data );
     pos = data;
@@ -474,6 +367,23 @@ pdf_print_content_stream( fz_context* ctx, pdf_obj* page_ref, gchar** errmsg )
         else printf(" ");
         pos++;
     }
+
+    return;
+}
+
+
+fz_buffer*
+pdf_ocr_get_content_stream_as_buffer( fz_context* ctx, pdf_obj* page_ref,
+        gchar** errmsg );
+
+gint
+pdf_print_content_stream( fz_context* ctx, pdf_obj* page_ref, gchar** errmsg )
+{
+    fz_buffer* buf = NULL;
+    buf = pdf_ocr_get_content_stream_as_buffer( ctx, page_ref, errmsg );
+    if ( !buf ) ERROR_SOND( "pdf_ocr_get_content_stream_as_buffer" )
+
+    pdf_print_buffer( ctx, buf );
 
     return 0;
 }
