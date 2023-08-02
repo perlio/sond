@@ -293,7 +293,6 @@ render_display_list( fz_context* ctx, PdfDocumentPage* pdf_document_page, gint p
 
     g_mutex_lock( &pdf_document_page->mutex_page );
     display_list = pdf_document_page->display_list;
-    page = pdf_document_page->page;
     g_mutex_unlock( &pdf_document_page->mutex_page );
 
     if ( display_list ) return 0;
@@ -311,7 +310,7 @@ render_display_list( fz_context* ctx, PdfDocumentPage* pdf_document_page, gint p
 
     zond_pdf_document_mutex_lock( pdf_document_page->document );
 
-    if ( !page )
+    if ( !pdf_document_page->page )
     {
         gint rc = 0;
 

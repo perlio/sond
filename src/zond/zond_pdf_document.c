@@ -908,7 +908,7 @@ zond_pdf_document_render_stext_page( PdfDocumentPage* pdf_document_page, gchar**
     //doc-lock muß gesetzt werden, da _load_page auf document zugreift
     zond_pdf_document_mutex_lock( pdf_document_page->document );
 
-    if ( pdf_document_page->page )
+    if ( !pdf_document_page->page )
     {
         gint rc = 0;
 
