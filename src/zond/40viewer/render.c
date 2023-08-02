@@ -76,6 +76,7 @@ render_thumbnail( fz_context* ctx, ViewerPageNew* viewer_page, gchar** errmsg )
 {
     fz_pixmap* pixmap = NULL;
     GdkPixbuf* pixbuf = NULL;
+    fz_display_list* display_list = NULL;
 
     if ( viewer_page->pixbuf_thumb ) return 1;
 
@@ -104,7 +105,11 @@ render_thumbnail( fz_context* ctx, ViewerPageNew* viewer_page, gchar** errmsg )
         ERROR_MUPDF( "fz_new_draw_device" )
     }
 
-    fz_try( ctx ) fz_run_display_list( ctx, viewer_page->pdf_document_page->display_list,
+    g_mutex_lock( &viewer_page->pdf_document_page->mutex_page );
+    display_list = viewer_page->pdf_document_page->display_list;
+    g_mutex_unlock( &viewer_page->pdf_document_page->mutex_page );
+
+    fz_try( ctx ) fz_run_display_list( ctx, display_list,
             draw_device, transform, rect, NULL );
     fz_always( ctx )
     {
@@ -139,6 +144,7 @@ render_pixmap( fz_context* ctx, ViewerPageNew* viewer_page, gdouble zoom,
 {
     fz_pixmap* pixmap = NULL;
     GdkPixbuf* pixbuf = NULL;
+    fz_display_list* display_list = NULL;
 
     //schon gerendert?
     if ( viewer_page->pixbuf_page ) return 1;
@@ -168,7 +174,11 @@ render_pixmap( fz_context* ctx, ViewerPageNew* viewer_page, gdouble zoom,
         ERROR_MUPDF( "fz_new_draw_device" )
     }
 
-    fz_try( ctx ) fz_run_display_list( ctx, viewer_page->pdf_document_page->display_list,
+    g_mutex_lock( &viewer_page->pdf_document_page->mutex_page );
+    display_list = viewer_page->pdf_document_page->display_list;
+    g_mutex_unlock( &viewer_page->pdf_document_page->mutex_page );
+
+    fz_try( ctx ) fz_run_display_list( ctx, display_list,
             draw_device, transform, rect, NULL );
     fz_always( ctx )
     {
@@ -199,24 +209,64 @@ render_pixmap( fz_context* ctx, ViewerPageNew* viewer_page, gdouble zoom,
 
 
 gint
-render_display_list_to_stext_page( fz_context* ctx, PdfDocumentPage* pdf_document_page,
-        gchar** errmsg )
+render_stext_page_direct( fz_context* ctx, PdfDocumentPage* pdf_document_page, gchar** errmsg )
 {
+    //structured text-device
     fz_device* s_t_device = NULL;
 
     fz_stext_options opts = { FZ_STEXT_DEHYPHENATE };
 
-    if ( pdf_document_page->stext_page != NULL ) return 0;
-
     fz_try( ctx ) pdf_document_page->stext_page = fz_new_stext_page( ctx, pdf_document_page->rect );
     fz_catch( ctx ) ERROR_MUPDF( "fz_new_stext_page" )
 
-    //structured text-device
     fz_try( ctx ) s_t_device = fz_new_stext_device( ctx, pdf_document_page->stext_page, &opts );
     fz_catch( ctx ) ERROR_MUPDF( "fz_new_stext_device" )
 
+    zond_pdf_document_mutex_lock( pdf_document_page->document );
+    //Seite durch's device laufen lassen
+    fz_try( ctx ) pdf_run_page( ctx, pdf_document_page->page, s_t_device, fz_identity, NULL );
+    fz_always( ctx )
+    {
+        zond_pdf_document_mutex_unlock( pdf_document_page->document );
+        fz_close_device( ctx, s_t_device );
+        fz_drop_device( ctx, s_t_device );
+    }
+    fz_catch( ctx ) ERROR_MUPDF( "fz_run_page" )
+
+    return 0;
+}
+
+
+gint
+render_display_list_to_stext_page( fz_context* ctx, PdfDocumentPage* pdf_document_page,
+        gchar** errmsg )
+{
+    fz_stext_page* stext_page = NULL;
+    fz_device* s_t_device = NULL;
+    fz_display_list* display_list = NULL;
+
+    fz_stext_options opts = { FZ_STEXT_DEHYPHENATE };
+
+    g_mutex_lock( &pdf_document_page->mutex_page );
+    display_list = pdf_document_page->display_list;
+    stext_page = pdf_document_page->stext_page;
+    g_mutex_unlock( &pdf_document_page->mutex_page );
+
+    if ( stext_page ) return 0;
+
+    fz_try( ctx ) stext_page = fz_new_stext_page( ctx, pdf_document_page->rect );
+    fz_catch( ctx ) ERROR_MUPDF( "fz_new_stext_page" )
+
+    //structured text-device
+    fz_try( ctx ) s_t_device = fz_new_stext_device( ctx, stext_page, &opts );
+    fz_catch( ctx )
+    {
+        fz_drop_stext_page( ctx, stext_page );
+        ERROR_MUPDF( "fz_new_stext_device" )
+    }
+
     //und durchs stext-device laufen lassen
-    fz_try( ctx ) fz_run_display_list( ctx, pdf_document_page->display_list, s_t_device,
+    fz_try( ctx ) fz_run_display_list( ctx, display_list, s_t_device,
             fz_identity, pdf_document_page->rect, NULL );
     fz_always( ctx )
     {
@@ -225,43 +275,73 @@ render_display_list_to_stext_page( fz_context* ctx, PdfDocumentPage* pdf_documen
     }
     fz_catch( ctx ) ERROR_MUPDF( "fz_run_display_list" )
 
+    g_mutex_lock( &pdf_document_page->mutex_page );
+    pdf_document_page->stext_page = stext_page;
+    g_mutex_unlock( &pdf_document_page->mutex_page );
+
     return 0;
 }
 
 
 static gint
-render_display_list( fz_context* ctx, PdfDocumentPage* pdf_document_page,
+render_display_list( fz_context* ctx, PdfDocumentPage* pdf_document_page, gint page_nr,
         gchar** errmsg )
 {
+    fz_display_list* display_list = NULL;
     fz_device* list_device = NULL;
+    pdf_page* page = NULL;
 
-    if ( pdf_document_page->display_list != NULL ) return 0;
+    g_mutex_lock( &pdf_document_page->mutex_page );
+    display_list = pdf_document_page->display_list;
+    page = pdf_document_page->page;
+    g_mutex_unlock( &pdf_document_page->mutex_page );
 
-    fz_try( ctx ) pdf_document_page->display_list = fz_new_display_list( ctx, pdf_document_page->rect );
+    if ( display_list ) return 0;
+
+    fz_try( ctx ) display_list = fz_new_display_list( ctx, pdf_document_page->rect );
     fz_catch( ctx ) ERROR_MUPDF( "fz_new_display_list" )
 
     //list_device für die Seite erzeugen
-    fz_try( ctx ) list_device = fz_new_list_device( ctx, pdf_document_page->display_list );
+    fz_try( ctx ) list_device = fz_new_list_device( ctx, display_list );
     fz_catch( ctx )
     {
-        fz_drop_display_list( ctx, pdf_document_page->display_list );
-        pdf_document_page->display_list = NULL;
+        fz_drop_display_list( ctx, display_list );
         ERROR_MUPDF( "fz_new_list_device" )
+    }
+
+    zond_pdf_document_mutex_lock( pdf_document_page->document );
+
+    if ( !page )
+    {
+        gint rc = 0;
+
+        rc = zond_pdf_document_load_page( pdf_document_page, page_nr - 1, errmsg );
+        if ( rc )
+        {
+            zond_pdf_document_mutex_unlock( pdf_document_page->document );
+            fz_drop_device( ctx, list_device );
+            fz_drop_display_list( ctx, display_list );
+            ERROR_S
+        }
     }
 
     //page durchs list-device laufen lassen
     fz_try( ctx ) pdf_run_page( ctx, pdf_document_page->page, list_device, fz_identity, NULL );
     fz_always( ctx )
     {
+        zond_pdf_document_mutex_unlock( pdf_document_page->document );
         fz_close_device( ctx, list_device );
         fz_drop_device( ctx, list_device );
     }
     fz_catch( ctx )
     {
-        fz_drop_display_list( ctx, pdf_document_page->display_list );
-        pdf_document_page->display_list = NULL;
+        fz_drop_display_list( ctx, display_list );
         ERROR_MUPDF( "fz_drop_display_list" )
     }
+
+    g_mutex_lock( &pdf_document_page->mutex_page );
+    pdf_document_page->display_list = display_list;
+    g_mutex_unlock( &pdf_document_page->mutex_page );
 
     return 0;
 }
@@ -284,14 +364,10 @@ render_page_thread( gpointer data, gpointer user_data )
     ctx = fz_clone_context( zond_pdf_document_get_ctx( viewer_page->pdf_document_page->document ) );
     if ( !ctx ) ERROR_THREAD( "fz_clone_context" )
 
-    zond_pdf_document_mutex_lock( viewer_page->pdf_document_page->document );
-    rc = render_display_list( ctx, viewer_page->pdf_document_page, &errmsg );
-    zond_pdf_document_mutex_unlock( viewer_page->pdf_document_page->document );
+    rc = render_display_list( ctx, viewer_page->pdf_document_page, page, &errmsg );
     if ( rc == -1 ) ERROR_THREAD( "render_display_list" )
 
-    g_mutex_lock( &viewer_page->pdf_document_page->mutex_page );
     rc = render_display_list_to_stext_page( ctx, viewer_page->pdf_document_page, &errmsg );
-    g_mutex_unlock( &viewer_page->pdf_document_page->mutex_page );
     if ( rc == -1 ) ERROR_THREAD( "render_diaplay_list_to_stext_page" )
 
     rc = render_pixmap( ctx, viewer_page, pv->zoom, &errmsg );

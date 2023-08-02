@@ -170,16 +170,10 @@ pdf_copy_page( fz_context* ctx, pdf_document* doc_src, gint page_from,
         {
             pdf_drop_obj( ctx, page_dict );
             pdf_drop_obj( ctx, ref );
-        }
-        fz_catch( ctx )
-        {
             pdf_drop_graft_map( ctx, graft_map );
-
-            ERROR_MUPDF( "pdf_add_object/_insert_page" )
         }
+        fz_catch( ctx ) ERROR_MUPDF( "pdf_add_object/_insert_page" )
     }
-
-    pdf_drop_graft_map( ctx, graft_map );
 
     return 0;
 }
@@ -542,22 +536,30 @@ pdf_new_text_filter_processor( fz_context *ctx, fz_buffer** buf, gint flags,
 
 
 fz_buffer*
-pdf_text_filter_page( fz_context* ctx, pdf_page* page, gint flags, gchar** errmsg )
+pdf_text_filter_page( fz_context* ctx, pdf_obj* obj, gint flags, gchar** errmsg )
 {
     pdf_obj* contents = NULL;
     pdf_obj* res = NULL;
     pdf_processor* proc = NULL;
     fz_buffer* buf = NULL;
+    pdf_document* doc = NULL;
 
-	contents = pdf_page_contents(ctx, page);
-	res = pdf_page_resources(ctx, page);
+	fz_try( ctx ) contents = pdf_dict_get( ctx, obj, PDF_NAME(Contents) );
+	fz_catch( ctx ) ERROR_MUPDF_R( "pdf_dict_get (Contents)", NULL )
+	if ( !contents ) ERROR_S_MESSAGE_VAL( "Kein Contents-Dict", NULL )
+
+	fz_try( ctx ) res = pdf_dict_get_inheritable( ctx, obj, PDF_NAME(Resources) );
+    fz_catch( ctx ) ERROR_MUPDF_R( "pdf_dict_get_inheritable (Ressources)", NULL )
+    if ( !res ) ERROR_S_MESSAGE_VAL( "Kein Ressources-Dict", NULL )
 
 	proc = pdf_new_text_filter_processor( ctx, &buf, flags, errmsg );
 	if ( !proc ) ERROR_S_VAL( NULL )
 
-    fz_try( ctx ) pdf_process_contents( ctx, proc, page->doc, res, contents, NULL, NULL );
+	doc = pdf_pin_document( ctx, obj );
+    fz_try( ctx ) pdf_process_contents( ctx, proc, doc, res, contents, NULL, NULL );
     fz_always( ctx )
     {
+        pdf_drop_document( ctx, doc );
         pdf_close_processor( ctx, proc );
         pdf_drop_processor( ctx, proc );
     }

@@ -334,15 +334,11 @@ cb_pv_seiten_ocr( GtkMenuItem* item, gpointer data )
     {
         PdfDocumentPage* pdf_document_page = g_ptr_array_index( arr_document_page, i );
 
-        //mit mutex sichern...
-        zond_pdf_document_mutex_lock( pdf_document_page->document );
+        //fz_text_list droppen und auf NULL setzen, mit mutex_page sichern
+        g_mutex_lock( &pdf_document_page->mutex_page );
         fz_drop_display_list( zond_pdf_document_get_ctx( pdf_document_page->document ),
                 pdf_document_page->display_list );
         pdf_document_page->display_list = NULL;
-        zond_pdf_document_mutex_unlock( pdf_document_page->document );
-
-        //fz_text_list droppen und auf NULL setzen, mit mutex_page sichern
-        g_mutex_lock( &pdf_document_page->mutex_page );
 
         fz_drop_stext_page( zond_pdf_document_get_ctx( pdf_document_page->document ),
                 pdf_document_page->stext_page );
@@ -455,7 +451,7 @@ seiten_drehen_pdf( PdfDocumentPage* pdf_document_page, gint winkel, gchar** errm
 
     fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
 
-    page_obj = pdf_document_page->page->obj;
+    page_obj = pdf_document_page->obj;
 
     fz_try( ctx ) rotate_obj = pdf_dict_get_inheritable( ctx, page_obj, PDF_NAME(Rotate) );
     fz_catch( ctx ) ERROR_MUPDF( "pdf_dict_get_inheritable" )
@@ -501,22 +497,26 @@ seiten_drehen( PdfViewer* pv, GPtrArray* arr_document_page, gint winkel, gchar**
             ERROR_SOND( "seiten_drehen_pdf" )
         }
 
-        fz_drop_display_list( zond_pdf_document_get_ctx( pdf_document_page->document ),
-                pdf_document_page->display_list );
-        pdf_document_page->display_list = NULL;
-
         //annots neu laden
-        g_ptr_array_remove_range( pdf_document_page->arr_annots, 0, pdf_document_page->arr_annots->len );
-        zond_pdf_document_page_load_annots( pdf_document_page );
+        if ( pdf_document_page->arr_annots )
+        {
+            g_ptr_array_remove_range( pdf_document_page->arr_annots, 0, pdf_document_page->arr_annots->len );
+            zond_pdf_document_page_load_annots( pdf_document_page );
+        }
 
         zond_pdf_document_mutex_unlock( pdf_document_page->document );
 
         //fz_text_list droppen und auf NULL setzen, mit mutex_page sichern
         g_mutex_lock( &pdf_document_page->mutex_page );
 
+        fz_drop_display_list( zond_pdf_document_get_ctx( pdf_document_page->document ),
+                pdf_document_page->display_list );
+        pdf_document_page->display_list = NULL;
+
         fz_drop_stext_page( zond_pdf_document_get_ctx( pdf_document_page->document ),
                 pdf_document_page->stext_page );
         pdf_document_page->stext_page = NULL;
+
         g_mutex_unlock( &pdf_document_page->mutex_page );
 
         rc = viewer_foreach( pv->zond->arr_pv, pdf_document_page,
@@ -687,7 +687,7 @@ seiten_loeschen( PdfViewer* pv, GPtrArray* arr_document_page, gchar** errmsg )
     rc = seiten_anbindung( pv, arr_document_page, errmsg );
     if ( rc )
     {
-        if ( rc == -1 ) ERROR_SOND( "seiten_anbindung" );
+        if ( rc == -1 ) ERROR_S
         if ( rc == 1 ) return -2;
     }
 

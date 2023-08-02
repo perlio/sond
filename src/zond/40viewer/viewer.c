@@ -922,49 +922,6 @@ viewer_text_occ_search_next( PdfViewer* pv, gint index, gint dir )
 }
 
 
-static gint
-viewer_render_stext_page( PdfViewer* pv, ViewerPageNew* viewer_page, gchar** errmsg )
-{
-    fz_device* s_t_device = NULL;
-    fz_stext_options opts = { FZ_STEXT_DEHYPHENATE };
-
-    fz_context* ctx = zond_pdf_document_get_ctx( viewer_page->pdf_document_page->document );
-
-    fz_try( ctx ) viewer_page->pdf_document_page->stext_page =
-            fz_new_stext_page( ctx, viewer_page->pdf_document_page->rect );
-    fz_catch( ctx ) ERROR_MUPDF( "fz_new_stext_page" )
-
-    //structured text-device
-    fz_try( ctx ) s_t_device = fz_new_stext_device( ctx,
-            viewer_page->pdf_document_page->stext_page, &opts );
-    fz_catch( ctx )
-    {
-        fz_drop_stext_page( ctx, viewer_page->pdf_document_page->stext_page );
-        viewer_page->pdf_document_page->stext_page = NULL;
-
-        ERROR_MUPDF( "fz_new_stext_device" )
-    }
-
-    //und durchs stext-device laufen lassen
-    fz_try( ctx ) fz_run_page( ctx, (fz_page*) viewer_page->pdf_document_page->page, s_t_device,
-            fz_identity, NULL );
-    fz_always( ctx )
-    {
-        fz_close_device( ctx, s_t_device );
-        fz_drop_device( ctx, s_t_device );
-    }
-    fz_catch( ctx )
-    {
-        fz_drop_stext_page( ctx, viewer_page->pdf_document_page->stext_page );
-        viewer_page->pdf_document_page->stext_page = NULL;
-
-        ERROR_MUPDF( "fz_run_page" )
-    }
-
-return 0;
-}
-
-
 static void
 cb_viewer_text_search( GtkWidget* widget, gpointer data )
 {
@@ -1069,7 +1026,7 @@ cb_viewer_text_search( GtkWidget* widget, gpointer data )
             {
                 gint rc = 0;
 
-                rc = viewer_render_stext_page( pv, viewer_page, &errmsg );
+                rc = zond_pdf_document_render_stext_page( viewer_page->pdf_document_page, &errmsg );
                 if ( rc )
                 {
                     display_message( pv->vf, "Fehler Textsuche -\n\nBei Aufruf viewer_"

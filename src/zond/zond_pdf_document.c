@@ -151,7 +151,7 @@ zond_pdf_document_page_free( PdfDocumentPage* pdf_document_page )
     fz_drop_stext_page( priv->ctx, pdf_document_page->stext_page );
     fz_drop_display_list( priv->ctx, pdf_document_page->display_list );
     g_mutex_clear( &pdf_document_page->mutex_page );
-    g_ptr_array_unref( pdf_document_page->arr_annots );
+    if ( pdf_document_page->arr_annots ) g_ptr_array_unref( pdf_document_page->arr_annots );
 
     return;
 }
@@ -260,50 +260,54 @@ zond_pdf_document_page_load_annots( PdfDocumentPage* pdf_document_page )
 }
 
 
-static gint
-zond_pdf_document_page_get_rotate( PdfDocumentPage* pdf_document_page, gchar** errmsg )
+gint
+zond_pdf_document_load_page( PdfDocumentPage* pdf_document_page, gint index, gchar** errmsg )
 {
-    pdf_obj* rotate_obj = NULL;
-    gint rotate = 0;
+    fz_context* ctx = NULL;
 
-    fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
+    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( pdf_document_page->document );
 
-    fz_try( ctx ) rotate_obj = pdf_dict_get( ctx, pdf_document_page->page->obj, PDF_NAME(Rotate) );
-    fz_catch( ctx ) ERROR_MUPDF( "pdf_dict_get" )
+    ctx = priv->ctx;
 
-    fz_try( ctx ) rotate = pdf_to_int( ctx, rotate_obj );
-    fz_catch( ctx ) ERROR_MUPDF( "pdf_to_int" )
+    fz_try( ctx ) pdf_document_page->page = pdf_load_page( ctx, priv->doc, index );
+    fz_catch( ctx ) ERROR_MUPDF( "pdf_load_page" );
 
-    return rotate;
+    pdf_document_page->arr_annots = g_ptr_array_new_with_free_func( zond_pdf_document_page_annot_free );
+
+    zond_pdf_document_page_load_annots( pdf_document_page );
+
+    return 0;
 }
 
 
 static gint
-zond_pdf_document_page_init( ZondPdfDocument* self,
+zond_pdf_document_init_page( ZondPdfDocument* self,
         PdfDocumentPage* pdf_document_page, gint index, gchar** errmsg )
 {
     fz_context* ctx = NULL;
+    pdf_obj* rotate_obj = NULL;
+    fz_rect mediabox = { 0 };
+    fz_matrix page_ctm = { 0 };
 
     ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( ZOND_PDF_DOCUMENT(self) );
 
     pdf_document_page->document = self; //keine ref!
 
-    ctx = priv->ctx;
-    fz_try( ctx ) pdf_document_page->page =
-            pdf_load_page( ctx, priv->doc, index );
-    fz_catch( ctx ) ERROR_MUPDF( "pdf_load_page" );
-
-    fz_try( ctx ) pdf_document_page->rect = pdf_bound_page( ctx, pdf_document_page->page );
-    fz_catch( ctx ) ERROR_MUPDF( "pdf_bound_page" )
-
-    pdf_document_page->rotate = zond_pdf_document_page_get_rotate( pdf_document_page, errmsg );
-    if ( pdf_document_page->rotate == -1 ) ERROR_S
-
-    pdf_document_page->arr_annots = g_ptr_array_new_with_free_func( zond_pdf_document_page_annot_free );
-
     g_mutex_init( &pdf_document_page->mutex_page );
 
-    zond_pdf_document_page_load_annots( pdf_document_page );
+    ctx = priv->ctx;
+
+    fz_try( ctx )
+    {
+        pdf_document_page->obj = pdf_lookup_page_obj( ctx, priv->doc, index );
+        pdf_page_obj_transform( ctx, pdf_document_page->obj, &mediabox, &page_ctm);
+        pdf_document_page->rect = fz_transform_rect(mediabox, page_ctm);
+
+        rotate_obj = pdf_dict_get( ctx, pdf_document_page->obj, PDF_NAME(Rotate) );
+        if ( rotate_obj ) pdf_document_page->rotate = pdf_to_int( ctx, rotate_obj );
+        //else: 0
+    }
+    fz_catch( ctx ) ERROR_MUPDF( "pdf_lookup_page_obj etc." );
 
     return 0;
 }
@@ -333,8 +337,8 @@ zond_pdf_document_init_pages( ZondPdfDocument* self, gint von, gint bis, gchar**
         pdf_document_page = g_malloc0( sizeof( PdfDocumentPage ) );
         ((priv->pages)->pdata)[i] = pdf_document_page;
 
-        rc = zond_pdf_document_page_init( self, pdf_document_page, i, errmsg );
-        if ( rc == -1 )
+        rc = zond_pdf_document_init_page( self, pdf_document_page, i, errmsg );
+        if ( rc )
         {
             g_free( pdf_document_page );
             ((priv->pages)->pdata)[i] = NULL;
@@ -808,6 +812,7 @@ zond_pdf_document_mutex_unlock( const ZondPdfDocument* self )
 }
 
 
+//wird nur aufgerufen, wenn alle threadpools aus sind!
 gint
 zond_pdf_document_insert_pages( ZondPdfDocument* zond_pdf_document, gint pos,
         fz_context* ctx, pdf_document* pdf_doc, gchar** errmsg )
@@ -840,7 +845,7 @@ zond_pdf_document_insert_pages( ZondPdfDocument* zond_pdf_document, gint pos,
 
         g_ptr_array_insert( priv->pages, i, pdf_document_page );
 
-        rc = zond_pdf_document_page_init( zond_pdf_document, pdf_document_page, i, errmsg );
+        rc = zond_pdf_document_init_page( zond_pdf_document, pdf_document_page, i, errmsg );
         if ( rc == -1 ) ERROR_S
     }
 
@@ -864,6 +869,71 @@ zond_pdf_document_insert_pages( ZondPdfDocument* zond_pdf_document, gint pos,
             pdf_document_page_annot->content = pdf_annot_contents( priv->ctx, annot );
         }
     }
+
+    return 0;
+}
+
+
+gint
+zond_pdf_document_render_stext_page( PdfDocumentPage* pdf_document_page, gchar** errmsg )
+{
+    fz_device* s_t_device = NULL;
+    gint index = 0;
+    fz_stext_page* stext_page = NULL;
+
+    fz_stext_options opts = { FZ_STEXT_DEHYPHENATE };
+
+    g_mutex_lock( &pdf_document_page->mutex_page );
+    stext_page = pdf_document_page->stext_page;
+    g_mutex_unlock( &pdf_document_page->mutex_page );
+
+    if ( stext_page ) return 0;
+
+    fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
+
+    fz_try( ctx ) stext_page =
+            fz_new_stext_page( ctx, pdf_document_page->rect );
+    fz_catch( ctx ) ERROR_MUPDF( "fz_new_stext_page" )
+
+    //structured text-device
+    fz_try( ctx ) s_t_device = fz_new_stext_device( ctx, stext_page, &opts );
+    fz_catch( ctx )
+    {
+        fz_drop_stext_page( ctx, stext_page );
+        ERROR_MUPDF( "fz_new_stext_device" )
+    }
+
+    index = zond_pdf_document_get_index( pdf_document_page );
+
+    //doc-lock muß gesetzt werden, da _load_page auf document zugreift
+    zond_pdf_document_mutex_lock( pdf_document_page->document );
+
+    if ( pdf_document_page->page )
+    {
+        gint rc = 0;
+
+        rc = zond_pdf_document_load_page( pdf_document_page, index, errmsg );
+        if ( rc )
+        {
+            zond_pdf_document_mutex_unlock( pdf_document_page->document );
+            fz_drop_device( ctx, s_t_device );
+            ERROR_S
+        }
+    }
+
+    //page durchs list-device laufen lassen
+    fz_try( ctx ) pdf_run_page( ctx, pdf_document_page->page, s_t_device, fz_identity, NULL );
+    fz_always( ctx )
+    {
+        zond_pdf_document_mutex_unlock( pdf_document_page->document );
+        fz_close_device( ctx, s_t_device );
+        fz_drop_device( ctx, s_t_device );
+    }
+    fz_catch( ctx ) ERROR_MUPDF( "pdf_run_page" )
+
+    g_mutex_lock( &pdf_document_page->mutex_page );
+    pdf_document_page->stext_page = stext_page;
+    g_mutex_unlock( &pdf_document_page->mutex_page );
 
     return 0;
 }

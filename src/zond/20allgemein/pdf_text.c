@@ -305,33 +305,6 @@ pdf_text_occ_free( gpointer data )
 }
 
 
-gint
-pdf_text_render_stext_page_direct( fz_context* ctx, PdfDocumentPage* pdf_document_page, gchar** errmsg )
-{
-    //structured text-device
-    fz_device* s_t_device = NULL;
-
-    fz_stext_options opts = { FZ_STEXT_DEHYPHENATE };
-
-    fz_try( ctx ) pdf_document_page->stext_page = fz_new_stext_page( ctx, pdf_document_page->rect );
-    fz_catch( ctx ) ERROR_MUPDF( "fz_new_stext_page" )
-
-    fz_try( ctx ) s_t_device = fz_new_stext_device( ctx, pdf_document_page->stext_page, &opts );
-    fz_catch( ctx ) ERROR_MUPDF( "fz_new_stext_device" )
-
-//Seite durch's device laufen lassen
-    fz_try( ctx ) pdf_run_page( ctx, pdf_document_page->page, s_t_device, fz_identity, NULL );
-    fz_always( ctx )
-    {
-        fz_close_device( ctx, s_t_device );
-        fz_drop_device( ctx, s_t_device );
-    }
-    fz_catch( ctx ) ERROR_MUPDF( "fz_run_page" )
-
-    return 0;
-}
-
-
 static gint
 pdf_textsuche_pdf( Projekt* zond, const gchar* rel_path, const gchar* search_text,
         GArray* arr_pdf_text_occ, InfoWindow* info_window, gchar** errmsg )
@@ -355,40 +328,30 @@ pdf_textsuche_pdf( Projekt* zond, const gchar* rel_path, const gchar* search_tex
     {
         gint anzahl = 0;
         fz_quad quads[100] = { 0 };
-        gboolean rendered = FALSE;
+        gboolean dl_ready = FALSE;
 
         PdfDocumentPage* pdf_document_page = g_ptr_array_index( arr_pdf_document_pages, i );
 
         g_mutex_lock( &pdf_document_page->mutex_page );
-        rendered = (pdf_document_page->stext_page != NULL);
+        dl_ready = (pdf_document_page->display_list != NULL);
         g_mutex_unlock( &pdf_document_page->mutex_page );
 
-        if ( !rendered )
+        if ( dl_ready )
         {
-            zond_pdf_document_mutex_lock( zond_pdf_document );
-            if ( pdf_document_page->display_list )
+            rc = render_display_list_to_stext_page( ctx, pdf_document_page, errmsg );
+            if ( rc )
             {
-                zond_pdf_document_mutex_unlock( zond_pdf_document );
-                g_mutex_lock( &pdf_document_page->mutex_page );
-                rc = render_display_list_to_stext_page( ctx, pdf_document_page, errmsg );
-                g_mutex_unlock( &pdf_document_page->mutex_page );
-                if ( rc )
-                {
-                    zond_pdf_document_close( zond_pdf_document );
-                    ERROR_S
-                }
+                zond_pdf_document_close( zond_pdf_document );
+                ERROR_S
             }
-            else //wenn display_list noch nicht erzeugt, dann direkt aus page erzeugen
+        }
+        else //wenn display_list noch nicht erzeugt, dann direkt aus page erzeugen
+        {
+            rc = zond_pdf_document_render_stext_page( pdf_document_page, errmsg );
+            if ( rc )
             {
-                g_mutex_lock( &pdf_document_page->mutex_page );
-                rc = pdf_text_render_stext_page_direct( ctx, pdf_document_page, errmsg );
-                g_mutex_unlock( &pdf_document_page->mutex_page );
-                zond_pdf_document_mutex_unlock( zond_pdf_document );
-                if ( rc )
-                {
-                    zond_pdf_document_close( zond_pdf_document );
-                    ERROR_S
-                }
+                zond_pdf_document_close( zond_pdf_document );
+                ERROR_S
             }
         }
 

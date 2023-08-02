@@ -16,9 +16,10 @@ G_DECLARE_DERIVABLE_TYPE (ZondPdfDocument, zond_pdf_document, ZOND, PDF_DOCUMENT
 typedef struct _Pdf_Document_Page
 {
     ZondPdfDocument* document; //erhält keine ref - muß das mal mit dem const kapieren...
-    pdf_page* page;
+    pdf_obj* obj;
     fz_rect rect;
     gint rotate;
+    pdf_page* page;
     fz_display_list* display_list;
     fz_stext_page* stext_page;
     GMutex mutex_page;
@@ -64,6 +65,8 @@ struct _ZondPdfDocumentClass
 
 void zond_pdf_document_page_load_annots( PdfDocumentPage* );
 
+gint zond_pdf_document_load_page( PdfDocumentPage*, gint, gchar** );
+
 ZondPdfDocument* zond_pdf_document_open( const gchar*, gint, gint, gchar** );
 
 //Gibt Zeiger auf geöffnetes document mit gchar* == path zurück; keine neue ref!
@@ -102,6 +105,7 @@ void zond_pdf_document_mutex_unlock( const ZondPdfDocument* );
 gint zond_pdf_document_insert_pages( ZondPdfDocument*, gint, fz_context*,
         pdf_document*, gchar** );
 
+gint zond_pdf_document_render_stext_page( PdfDocumentPage*, gchar** );
 
 G_END_DECLS
 

@@ -1460,9 +1460,9 @@ zond_gemini_get_next_line( ZondPdfDocument* zond_pdf_document,
             pdf_document_page = zond_pdf_document_get_pdf_document_page(
                     zond_pdf_document, line_at_pos->page_num );
 
-            rc = pdf_text_render_stext_page_direct(
-                    zond_pdf_document_get_ctx( zond_pdf_document ),
-                    pdf_document_page, errmsg );
+//            rc = pdf_text_render_stext_page_direct(
+//                    zond_pdf_document_get_ctx( zond_pdf_document ),
+//                    pdf_document_page, errmsg );
             if ( rc ) ERROR_S
 
             line_at_pos->page = pdf_document_page->stext_page;

@@ -43,5 +43,5 @@ gchar* pdf_get_string_from_line( fz_context*, fz_stext_line*, gchar** );
 
 pdf_processor* pdf_new_text_filter_processor( fz_context*, fz_buffer**, gint, gchar** );
 
-fz_buffer* pdf_text_filter_page( fz_context*, pdf_page*, gint, gchar** );
+fz_buffer* pdf_text_filter_page( fz_context*, pdf_obj*, gint, gchar** );
 #endif // PDF_DATEIEN_H_INCLUDED
