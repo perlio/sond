@@ -315,11 +315,7 @@ pdf_textsuche_pdf( Projekt* zond, const gchar* rel_path, const gchar* search_tex
     fz_context* ctx = NULL;
 
     zond_pdf_document = zond_pdf_document_open( rel_path, 0, -1, errmsg );
-    if ( !zond_pdf_document )
-    {
-        if ( errmsg && *errmsg ) ERROR_S
-        else return 0;
-    }
+    if ( !zond_pdf_document ) ERROR_S
 
     ctx = zond_pdf_document_get_ctx( zond_pdf_document );
     arr_pdf_document_pages = zond_pdf_document_get_arr_pages( zond_pdf_document );
@@ -328,32 +324,11 @@ pdf_textsuche_pdf( Projekt* zond, const gchar* rel_path, const gchar* search_tex
     {
         gint anzahl = 0;
         fz_quad quads[100] = { 0 };
-        gboolean dl_ready = FALSE;
 
         PdfDocumentPage* pdf_document_page = g_ptr_array_index( arr_pdf_document_pages, i );
 
-        g_mutex_lock( &pdf_document_page->mutex_page );
-        dl_ready = (pdf_document_page->display_list != NULL);
-        g_mutex_unlock( &pdf_document_page->mutex_page );
-
-        if ( dl_ready )
-        {
-            rc = render_display_list_to_stext_page( ctx, pdf_document_page, errmsg );
-            if ( rc )
-            {
-                zond_pdf_document_close( zond_pdf_document );
-                ERROR_S
-            }
-        }
-        else //wenn display_list noch nicht erzeugt, dann direkt aus page erzeugen
-        {
-            rc = zond_pdf_document_render_stext_page( pdf_document_page, errmsg );
-            if ( rc )
-            {
-                zond_pdf_document_close( zond_pdf_document );
-                ERROR_S
-            }
-        }
+        rc = viewer_render_stext_page_fast( ctx, pdf_document_page, errmsg );
+        if ( rc ) ERROR_S
 
         anzahl = fz_search_stext_page( ctx,
                 pdf_document_page->stext_page, search_text, NULL, quads, 99 );
@@ -464,26 +439,30 @@ gint
 pdf_textsuche( Projekt* zond, InfoWindow* info_window, GPtrArray* array_rel_path,
         const gchar* search_text, GArray** arr_pdf_text_occ, gchar** errmsg )
 {
-    gint rc = 0;
-    gchar* rel_path = NULL;
-    gchar* message = NULL;
-
     *arr_pdf_text_occ = g_array_new( FALSE, FALSE, sizeof( PDFTextOcc ) );
     g_array_set_clear_func( *arr_pdf_text_occ, (GDestroyNotify) pdf_text_occ_free );
 
     for ( gint i = 0; i < array_rel_path->len; i++ )
     {
+        gchar* rel_path = NULL;
+        gint rc = 0;
+
         rel_path = g_ptr_array_index( array_rel_path, i );
 
-        message = g_strconcat( "Suche in ", rel_path, NULL );
-        info_window_set_message( info_window, message );
-        g_free( message );
+        info_window_set_message( info_window, rel_path );
+
+        //prüfen, ob in Viewer geöffnet
+        if ( zond_pdf_document_is_open( rel_path ) )
+        {
+            info_window_set_message( info_window, "... in Viewer geöffnet - übersprungen" );
+            continue;
+        }
 
         rc = pdf_textsuche_pdf( zond, rel_path, search_text, *arr_pdf_text_occ,
                 info_window, errmsg );
         if ( rc )
         {
-            g_array_free( *arr_pdf_text_occ, TRUE );
+            g_array_unref( *arr_pdf_text_occ );
             ERROR_S
         }
     }

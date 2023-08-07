@@ -33,6 +33,12 @@ typedef struct _Text_Occ
     gint index_act;
     gboolean not_found;
 } TextOcc;
+typedef struct _RenderResponse
+{
+    gint page;
+    gint error;
+    gchar* error_message;
+} RenderResponse;
 
 typedef struct _Pdf_Viewer
 {
@@ -136,6 +142,10 @@ void viewer_display_document( PdfViewer*, DisplayedDocument*, gint, gint );
 void viewer_save_and_close( PdfViewer* );
 
 gint viewer_get_iter_thumb( PdfViewer*, gint, GtkTreeIter* );
+
+void viewer_transfer_rendered( PdfViewer*, gboolean );
+
+gint viewer_render_stext_page_fast( fz_context*, PdfDocumentPage*, gchar** );
 
 gint viewer_foreach( GPtrArray*, PdfDocumentPage*, gint (*) (PdfViewer*, gint,
         gpointer, gchar**), gpointer, gchar** errmsg );

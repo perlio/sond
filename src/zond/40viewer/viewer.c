@@ -193,19 +193,48 @@ viewer_draw_image_page( GtkWidget* image, cairo_t* cr, gpointer data )
 }
 
 
-static inline void
-viewer_transfer_rendered( PdfViewer* pdfv )
+void
+viewer_transfer_rendered( PdfViewer* pdfv, gboolean protect )
 {
     gint idx = 0;
 
-    if ( (idx = pdfv->arr_rendered->len - 1) < 0 ) return;
+    if ( protect ) g_mutex_lock( &pdfv->mutex_arr_rendered );
+
+    if ( (idx = pdfv->arr_rendered->len - 1) < 0 )
+    {
+        if ( protect ) g_mutex_unlock( &pdfv->mutex_arr_rendered );
+
+        return;
+    }
 
     while( idx >= 0 )
     {
-        gint page = g_array_index( pdfv->arr_rendered, gint, idx );
-        ViewerPageNew* viewer_page = g_ptr_array_index( pdfv->arr_pages, abs( page ) - 1 );
+        RenderResponse render_response = { 0 };
+        ViewerPageNew* viewer_page = NULL;
 
-        if ( page > 0 )
+        render_response = g_array_index( pdfv->arr_rendered, RenderResponse, idx );
+
+        viewer_page = g_ptr_array_index( pdfv->arr_pages, render_response.page );
+
+        //thread von viewer_page und pdf_document_page fertig: bit 1 löschen
+        viewer_page->thread &= 6;
+        viewer_page->pdf_document_page->thread &= 6;
+        viewer_page->pdf_document_page->thread_pv = NULL;
+
+        //Beim rendern ein Fehler aufgetreten
+        if ( render_response.error )
+        {
+            display_message( pdfv->vf, "Fehler beim Rendern:\n\nBei Aufruf render_page_thread",
+                    render_response.error_message, NULL );
+        }
+
+        if ( render_response.error == 0 || render_response.error > 2 )
+                viewer_page->pdf_document_page->thread |= 2;
+
+        if ( render_response.error == 0 || render_response.error > 3 )
+                viewer_page->pdf_document_page->thread |= 4;
+
+        if ( render_response.error == 0 || render_response.error > 4 )
         {
             gint x_pos = 0;
             gint width = 0;
@@ -222,25 +251,28 @@ viewer_transfer_rendered( PdfViewer* pdfv )
             gtk_layout_put( GTK_LAYOUT(pdfv->layout), GTK_WIDGET(viewer_page->image_page), x_pos, viewer_page->y_pos );
             g_object_unref( viewer_page->pixbuf_page );
 
-            viewer_page->thread = viewer_page->thread | 2; //bit 1: image gerendert
+            viewer_page->thread |= 2; //bit 1: image gerendert
         }
-        else if ( page < 0 )
+
+        if ( render_response.error == 0 )
         {
             //tree_thumb
             GtkTreeIter iter;
-            gint rc = viewer_get_iter_thumb( pdfv, -page - 1, &iter );
+            gint rc = viewer_get_iter_thumb( pdfv, render_response.page, &iter );
             if ( rc == 0 ) gtk_list_store_set( GTK_LIST_STORE( gtk_tree_view_get_model(
                     GTK_TREE_VIEW(pdfv->tree_thumb) ) ), &iter, 0, viewer_page->pixbuf_thumb, -1 );
             g_object_unref( viewer_page->pixbuf_thumb );
 
-            viewer_page->thread = viewer_page->thread | 4; //bit 2: thumb gerendert
+            viewer_page->thread |= 4; //bit 2: thumb gerendert
         }
 
         g_array_remove_index_fast( pdfv->arr_rendered, idx );
         idx--;
+
+        pdfv->idle_fresh = FALSE;
     }
 
-    pdfv->idle_fresh = FALSE;
+    if ( protect ) g_mutex_unlock( &pdfv->mutex_arr_rendered );
 
     return;
 }
@@ -254,18 +286,13 @@ viewer_check_rendering( gpointer data )
     PdfViewer* pv = (PdfViewer*) data;
 
     if ( pv->thread_pool_page && g_thread_pool_unprocessed( pv->thread_pool_page ) != 0 )
-    {
-        protect = TRUE;
-        g_mutex_lock( &pv->mutex_arr_rendered );
-    }
+            protect = TRUE;
+    viewer_transfer_rendered( pv, protect );
 
-    viewer_transfer_rendered( pv );
-
-    if ( protect ) g_mutex_unlock( &pv->mutex_arr_rendered );
-    else if ( pv->idle_fresh == FALSE) //die nicht frische idle kann abgeschaltet werden,
+    if ( !protect && pv->idle_fresh == FALSE) //die nicht frische idle kann abgeschaltet werden,
     //wenn alle threads abgearbeitet sind
     //idle_fresh muß gesetzt/gelöscht werden, weil die idle-Funktion schon laufen kann,
-    //der aus dem Hauptthread gestartete thread als unprocessed im pool eingetragen ist
+    //bevor der aus dem Hauptthread gestartete thread als unprocessed im pool eingetragen ist
     {
         pv->idle_source = 0;
         return G_SOURCE_REMOVE;
@@ -279,24 +306,70 @@ static void
 viewer_thread_render( PdfViewer* pv, gint page )
 {
     ViewerPageNew* viewer_page = NULL;
+    gint thread_data = 0;
+    GError* error = NULL;
 
     viewer_page = g_ptr_array_index( pv->arr_pages, page );
 
-    if ( !pv->idle_source && viewer_page->thread != 7 )
+    if ( viewer_page->thread == 6 && viewer_page->pdf_document_page->thread == 6 )
+            return; //alles fertig, nix zu tun
+
+    if ( viewer_page->thread & 1 ) return; //Seite läuft schon
+
+    if ( viewer_page->pdf_document_page->thread & 1 ) //pdf_document_page wird gerade in anderem viewer gerendert
+    {
+        if ( viewer_page->thread == 6 ) return; //im viewer alles gerendert, pdf_document_page läuft-> nix zu tun
+        else
+        {
+            while ( viewer_page->pdf_document_page->thread & 1 )
+                    viewer_transfer_rendered( (PdfViewer*) viewer_page->pdf_document_page->thread_pv, TRUE );
+
+            //könnte ja viewer_page sein, die gerendert wurde
+            if ( viewer_page->thread == 6 ) return;
+        }
+    }
+
+    if ( !pv->idle_source )
     {
         pv->idle_source = g_idle_add( G_SOURCE_FUNC(viewer_check_rendering), pv );
         pv->idle_fresh = TRUE; //wenn idle gestartet wird, ist sie noch frisch!
     }
+    if ( !pv->thread_pool_page )
+    {
+        GError* error = NULL;
 
-    if ( viewer_page->thread ) return;
+        if ( !(pv->thread_pool_page =
+                g_thread_pool_new( (GFunc) render_page_thread, pv, 4, FALSE, &error )) )
+        {
+            display_message( pv->vf, "Thread-Pool kann nicht erzeugt werden\n\n"
+                    "Bei Aufruf g_thread_pool_new:\n", error->message, NULL );
+            g_error_free( error );
 
-    if ( !pv->thread_pool_page ) pv->thread_pool_page =
-            g_thread_pool_new( (GFunc) render_page_thread, pv, 4, FALSE, NULL );
+            return;
+        }
+    }
 
-    g_thread_pool_push( pv->thread_pool_page, GINT_TO_POINTER(page + 1), NULL );
-    g_thread_pool_move_to_front( pv->thread_pool_page, GINT_TO_POINTER(page + 1) );
+    if ( !(viewer_page->pdf_document_page->thread & 2) ) thread_data += 1;
+    if ( !(viewer_page->pdf_document_page->thread & 4) ) thread_data += 2;
+    if ( !(viewer_page->thread & 2) ) thread_data += 4;
+    if ( !(viewer_page->thread & 4) ) thread_data += 8;
 
-    viewer_page->thread = 1; //bit 1: thread gestartet
+    thread_data += page << 4;
+
+    if ( !g_thread_pool_push( pv->thread_pool_page, GINT_TO_POINTER(thread_data), &error ) )
+    {
+        display_message( pv->vf, "Fehler Start Thread\n\n"
+                "Bei Aufruf g_thread_pool_push:\n", error->message, NULL );
+        g_error_free( error );
+
+        return;
+    }
+
+    g_thread_pool_move_to_front( pv->thread_pool_page, GINT_TO_POINTER(thread_data) );
+
+    viewer_page->thread |= 1; //bit 1: thread gestartet
+    viewer_page->pdf_document_page->thread |= 1;
+    viewer_page->pdf_document_page->thread_pv = (gpointer) pv;
 
     return;
 }
@@ -342,7 +415,6 @@ viewer_render_sichtbare_seiten( PdfViewer* pv )
     g_free( text );
 
     for ( gint i = letzte; i >= erste; i-- ) viewer_thread_render( pv, i );
-
     //thumb-Leiste anpassen
     path = gtk_tree_path_new_from_indices( erste, -1 );
     gtk_tree_view_scroll_to_cell( GTK_TREE_VIEW(pv->tree_thumb), path, NULL, FALSE, 0, 0 );
@@ -519,11 +591,20 @@ viewer_close_thread_pool_and_transfer( PdfViewer* pdfv )
         pdfv->thread_pool_page = NULL;
     }
 
-    viewer_transfer_rendered( pdfv );
+    viewer_transfer_rendered( pdfv, FALSE );
 
     return;
 }
 
+static void
+viewer_free_render_response( gpointer data )
+{
+    RenderResponse* render_response = (RenderResponse*) data;
+
+    g_free( render_response->error_message );
+
+    return;
+}
 
 static void
 viewer_schliessen( PdfViewer* pv )
@@ -922,6 +1003,94 @@ viewer_text_occ_search_next( PdfViewer* pv, gint index, gint dir )
 }
 
 
+static gint
+viewer_render_stext_page_from_page( PdfDocumentPage* pdf_document_page, gchar** errmsg )
+{
+    fz_device* s_t_device = NULL;
+    gint index = 0;
+    fz_stext_page* stext_page = NULL;
+
+    fz_stext_options opts = { FZ_STEXT_DEHYPHENATE };
+
+    fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
+
+    fz_try( ctx ) stext_page =
+            fz_new_stext_page( ctx, pdf_document_page->rect );
+    fz_catch( ctx ) ERROR_MUPDF( "fz_new_stext_page" )
+
+    //structured text-device
+    fz_try( ctx ) s_t_device = fz_new_stext_device( ctx, stext_page, &opts );
+    fz_catch( ctx )
+    {
+        fz_drop_stext_page( ctx, stext_page );
+        ERROR_MUPDF( "fz_new_stext_device" )
+    }
+
+    index = zond_pdf_document_get_index( pdf_document_page );
+
+    //doc-lock muß gesetzt werden, da _load_page auf document zugreift
+    zond_pdf_document_mutex_lock( pdf_document_page->document );
+
+    if ( !pdf_document_page->page )
+    {
+        gint rc = 0;
+
+        rc = zond_pdf_document_load_page( pdf_document_page, index, errmsg );
+        if ( rc )
+        {
+            zond_pdf_document_mutex_unlock( pdf_document_page->document );
+            fz_drop_device( ctx, s_t_device );
+            ERROR_S
+        }
+    }
+
+    //page durchs list-device laufen lassen
+    fz_try( ctx ) pdf_run_page( ctx, pdf_document_page->page, s_t_device, fz_identity, NULL );
+    fz_always( ctx )
+    {
+        zond_pdf_document_mutex_unlock( pdf_document_page->document );
+        fz_close_device( ctx, s_t_device );
+        fz_drop_device( ctx, s_t_device );
+    }
+    fz_catch( ctx ) ERROR_MUPDF( "pdf_run_page" )
+
+    pdf_document_page->stext_page = stext_page;
+
+    return 0;
+}
+
+
+gint
+viewer_render_stext_page_fast( fz_context* ctx, PdfDocumentPage* pdf_document_page, gchar** errmsg )
+{
+    //thread für Seite gestartet?
+    while ( pdf_document_page->thread & 1 )
+            viewer_transfer_rendered( pdf_document_page->thread_pv, TRUE );
+
+    if ( pdf_document_page->thread & 4 ) return 0;
+
+    if ( !(pdf_document_page->thread & 2) )
+    {
+        gint rc = 0;
+
+        rc = viewer_render_stext_page_from_page( pdf_document_page, errmsg );
+        if ( rc ) ERROR_S
+    }
+    else //display_list fertig
+    {
+        gint rc = 0;
+
+        rc = render_stext_page_from_display_list( ctx, pdf_document_page, errmsg );
+        if ( rc ) ERROR_S
+    }
+
+    pdf_document_page->thread |= 4;
+
+    return 0;
+}
+
+
+
 static void
 cb_viewer_text_search( GtkWidget* widget, gpointer data )
 {
@@ -929,7 +1098,6 @@ cb_viewer_text_search( GtkWidget* widget, gpointer data )
     PdfPos pdf_pos = { 0 };
     PdfPunkt pdf_punkt = { 0 };
     const gchar* search_text = NULL;
-    gchar* errmsg = NULL;
 
     PdfViewer* pv = (PdfViewer*) data;
 
@@ -999,8 +1167,11 @@ cb_viewer_text_search( GtkWidget* widget, gpointer data )
         //Seite ist aktuell nicht durchsucht - durchsuchen
         if ( pdf_pos.seite != pv->text_occ.page_act )
         {
+            gint rc = 0;
             gint anzahl = 0;
             fz_quad quads[100] = { 0 };
+            fz_context* ctx = NULL;
+            gchar* errmsg = NULL;
 
             //array leeren
             g_array_remove_range( pv->text_occ.arr_quad, 0, pv->text_occ.arr_quad->len );
@@ -1009,37 +1180,17 @@ cb_viewer_text_search( GtkWidget* widget, gpointer data )
             ViewerPageNew* viewer_page = g_ptr_array_index( pv->arr_pages,
                     pdf_pos.seite );
 
-            //thread für Seite gestartet?
-            if ( viewer_page->thread == 1 )
+            ctx = zond_pdf_document_get_ctx( viewer_page->pdf_document_page->document );
+
+            rc = viewer_render_stext_page_fast( ctx, viewer_page->pdf_document_page, &errmsg );
+            if ( rc )
             {
-                gboolean rendered = FALSE;
+                display_message( pv->vf, "Fehler Textsuche -\n\n",
+                        errmsg, NULL );
+                g_free( errmsg );
 
-                do //warten, bis page gerendert ist
-                {
-                    g_mutex_lock( &viewer_page->pdf_document_page->mutex_page );
-                    rendered = (viewer_page->pdf_document_page->stext_page != NULL);
-                    g_mutex_unlock( &viewer_page->pdf_document_page->mutex_page );
-                } while ( !rendered );
+                return;
             }
-            //ansonsten nur s_text_page rendern, falls noch nicht wegen Textsuche ohnehin schon
-            else if ( viewer_page->thread == 0 && viewer_page->pdf_document_page->stext_page == NULL )
-            {
-                gint rc = 0;
-
-                rc = zond_pdf_document_render_stext_page( viewer_page->pdf_document_page, &errmsg );
-                if ( rc )
-                {
-                    display_message( pv->vf, "Fehler Textsuche -\n\nBei Aufruf viewer_"
-                            "render_stext_page:\n", errmsg, NULL );
-                    g_free( errmsg );
-
-                    return;
-                }
-            }
-            //else > 1 - dann ja auf jeden Fall stext_page fertig!
-
-            //prüfen, ob Seite Suchtext enthält
-            fz_context* ctx = zond_pdf_document_get_ctx( viewer_page->pdf_document_page->document );
 
             fz_try( ctx ) anzahl = fz_search_stext_page( ctx,
                     viewer_page->pdf_document_page->stext_page, search_text, NULL,
@@ -1263,16 +1414,13 @@ static gint
 viewer_on_text( PdfViewer* pv, PdfPunkt pdf_punkt )
 {
     ViewerPageNew* viewer_page = NULL;
-    gboolean rendered = FALSE;
 
     viewer_page = g_ptr_array_index( pv->arr_pages, pdf_punkt.seite );
 
     //Test, ob stext_page schon gerendert; falls ja, kein weiteres mutex erforderlich,
     //weil nur durch odf_ocr zurückgesetzt werden kann
-    g_mutex_lock( &viewer_page->pdf_document_page->mutex_page );
-    rendered = (viewer_page->pdf_document_page->stext_page != NULL);
-    g_mutex_unlock( &viewer_page->pdf_document_page->mutex_page );
-    if ( !rendered ) return 0;
+    if ( !(viewer_page->pdf_document_page->thread & 4) ||
+            (viewer_page->pdf_document_page->thread & 1) ) return 0;
 
 	for ( fz_stext_block* block = viewer_page->pdf_document_page->stext_page->first_block; block;
             block = block->next)
@@ -1322,7 +1470,8 @@ viewer_on_annot( PdfViewer* pv, PdfPunkt pdf_punkt )
 
     viewer_page = g_ptr_array_index( pv->arr_pages, pdf_punkt.seite);
 
-    if ( !(viewer_page->pdf_document_page->arr_annots->len) ) return NULL;
+    if ( !(viewer_page->pdf_document_page->thread & 2) ||
+            (viewer_page->pdf_document_page->thread & 1) ) return NULL;
 
     for ( gint i = 0; i < viewer_page->pdf_document_page->arr_annots->len; i++ )
     {
@@ -1391,41 +1540,34 @@ viewer_thumblist_render_textcell( GtkTreeViewColumn* column, GtkCellRenderer* ce
 static gint
 viewer_cb_change_annot( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg )
 {
-    gint rc = 0;
-    gboolean page_rendered = FALSE;
-    GtkTreeIter iter = { 0, };
-    GdkPixbuf* pix = NULL;
-    gboolean rendered_thumb = FALSE;
-
     ViewerPageNew* viewer_page = g_ptr_array_index( pv->arr_pages, page_pv );
-    if ( viewer_page->image_page &&
-            gtk_image_get_storage_type( GTK_IMAGE(viewer_page->image_page) )
-            == GTK_IMAGE_PIXBUF ) page_rendered = TRUE;
 
-    //thumb gerenderd?
-    rc = viewer_get_iter_thumb( pv, page_pv, &iter );
-    if ( rc ) ERROR_S_MESSAGE( "Bei Aufruf viewer_get_iter_thumb:\n"
-                "Kein Iter ermittelt" )
+    while ( viewer_page->thread & 1 )
+            viewer_transfer_rendered( pv, TRUE );
 
-    gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(pv->tree_thumb) ), &iter, 0, &pix, -1 );
-    if ( pix )
+    if ( viewer_page->thread & 2 )
     {
-        rendered_thumb = TRUE;
-        g_object_unref( pix );
+        gtk_image_clear( GTK_IMAGE(viewer_page->image_page) );
+        viewer_page->pixbuf_page = NULL;
     }
 
-    if ( !page_rendered || !rendered_thumb ) viewer_close_thread_pool_and_transfer( pv );
+    if ( viewer_page->thread & 4 )
+    {
+        GtkTreeIter iter = { 0 };
+        gint rc = 0;
 
-    gtk_image_clear( GTK_IMAGE(viewer_page->image_page) );
-    viewer_page->pixbuf_page = NULL;
+        rc = viewer_get_iter_thumb( pv, page_pv, &iter );
+        if ( rc ) ERROR_S_MESSAGE( "Iter für thumbnail konnte nicht ermittelt werden" )
 
-    //thumb löschen
-    gtk_list_store_set( GTK_LIST_STORE( gtk_tree_view_get_model(
-            GTK_TREE_VIEW(pv->tree_thumb) ) ), &iter, 0, NULL, -1 );
-    viewer_page->pixbuf_thumb = NULL;
+        //thumb löschen
+        gtk_list_store_set( GTK_LIST_STORE( gtk_tree_view_get_model(
+                GTK_TREE_VIEW(pv->tree_thumb) ) ), &iter, 0, NULL, -1 );
+        viewer_page->pixbuf_thumb = NULL;
+    }
 
     viewer_page->thread = 0;
-    g_signal_emit_by_name( pv->v_adj, "value-changed", NULL );
+
+    viewer_thread_render( pv, page_pv );
 
     return 0;
 }
@@ -1516,21 +1658,24 @@ cb_viewer_swindow_key_press( GtkWidget* swindow, GdkEvent* event, gpointer user_
 
         zond_pdf_document_mutex_lock( viewer_page->pdf_document_page->document );
         rc = viewer_annot_delete( viewer_page->pdf_document_page, pv->clicked_annot, &errmsg );
+        zond_pdf_document_mutex_unlock( viewer_page->pdf_document_page->document );
         if ( rc )
         {
             display_message( pv->vf, "Fehler -Annotation löschen\n\n"
                     "Bei Aufruf annot_delete", errmsg, NULL );
             g_free( errmsg );
-            zond_pdf_document_mutex_unlock( viewer_page->pdf_document_page->document );
 
             return FALSE;
         }
 
+        while ( viewer_page->pdf_document_page->thread & 1 )
+                viewer_transfer_rendered( viewer_page->pdf_document_page->thread_pv, TRUE );
+
         fz_drop_display_list( zond_pdf_document_get_ctx( viewer_page->pdf_document_page->document ),
                 viewer_page->pdf_document_page->display_list );
         viewer_page->pdf_document_page->display_list = NULL;
+        viewer_page->pdf_document_page->thread &= 4;
 
-        zond_pdf_document_mutex_unlock( viewer_page->pdf_document_page->document );
 
         g_ptr_array_remove( viewer_page->pdf_document_page->arr_annots, pv->clicked_annot );
         pv->clicked_annot = NULL;
@@ -1796,10 +1941,10 @@ cb_viewer_layout_release_button( GtkWidget* layout, GdkEvent* event, gpointer da
 
             //ToDo: Annot über mehrere Seiten
             rc = viewer_annot_create( viewer_page, pv, &errmsg );
+            zond_pdf_document_mutex_unlock( viewer_page->pdf_document_page->document );
             pv->highlight.page[0] = -1;
             if ( rc )
             {
-                zond_pdf_document_mutex_unlock( viewer_page->pdf_document_page->document );
                 display_message( pv->vf, "Fehler - Annotation einfügen:\n\nBei Aufruf "
                         "annot_create:\n", errmsg, NULL );
                 g_free( errmsg );
@@ -1807,11 +1952,13 @@ cb_viewer_layout_release_button( GtkWidget* layout, GdkEvent* event, gpointer da
                 return TRUE;
             }
 
+            while ( viewer_page->pdf_document_page->thread & 1 )
+                    viewer_transfer_rendered( viewer_page->pdf_document_page->thread_pv, TRUE );
+
             fz_drop_display_list( zond_pdf_document_get_ctx( viewer_page->pdf_document_page->document ),
                     viewer_page->pdf_document_page->display_list );
             viewer_page->pdf_document_page->display_list = NULL;
-
-            zond_pdf_document_mutex_unlock( viewer_page->pdf_document_page->document );
+            viewer_page->pdf_document_page->thread &= 4;
 
             rc = viewer_foreach( pv->zond->arr_pv, viewer_page->pdf_document_page,
                     viewer_cb_change_annot, NULL, &errmsg );
@@ -1850,9 +1997,9 @@ cb_viewer_layout_release_button( GtkWidget* layout, GdkEvent* event, gpointer da
             //neues rect speichert
             fz_try( ctx ) pdf_set_annot_rect( ctx, pv->clicked_annot->annot,
                     viewer_rotate_rect( viewer_page, pv->clicked_annot->annot_text.rect ) );
+            fz_always( ctx ) zond_pdf_document_mutex_unlock( viewer_page->pdf_document_page->document );
             fz_catch( ctx )
             {
-                zond_pdf_document_mutex_unlock( viewer_page->pdf_document_page->document );
                 display_message( pv->vf, "Fehler -Änderung Annot kann nicht "
                         "gespeichert werden\n\nBeiAufruf pdf_set_annot_rect:\n",
                         fz_caught_message( ctx ), NULL );
@@ -1861,10 +2008,12 @@ cb_viewer_layout_release_button( GtkWidget* layout, GdkEvent* event, gpointer da
                 return TRUE;
             }
 
+            while ( viewer_page->pdf_document_page->thread & 1 )
+                    viewer_transfer_rendered( viewer_page->pdf_document_page->thread_pv, TRUE );
+
             fz_drop_display_list( ctx, viewer_page->pdf_document_page->display_list );
             viewer_page->pdf_document_page->display_list = NULL;
-
-            zond_pdf_document_mutex_unlock( viewer_page->pdf_document_page->document );
+            viewer_page->pdf_document_page->thread &= 4;
 
             rc = viewer_foreach( pv->zond->arr_pv, viewer_page->pdf_document_page,
                     viewer_cb_change_annot, NULL, &errmsg );
@@ -2145,24 +2294,26 @@ cb_viewer_layout_press_button( GtkWidget* layout, GdkEvent* event, gpointer
                 ViewerPageNew* viewer_page = g_ptr_array_index( pv->arr_pages, pdf_punkt.seite );
 
                 zond_pdf_document_mutex_lock( viewer_page->pdf_document_page->document );
-
                 rc = viewer_annot_create( viewer_page, pv, &errmsg );
+                zond_pdf_document_mutex_unlock( viewer_page->pdf_document_page->document );
                 if ( rc )
                 {
                     display_message( pv->vf, "Fehler - Annotation einfügen:\n\nBei Aufruf "
                             "viewer_annot_create:\n", errmsg, NULL );
                     g_free( errmsg );
-                    zond_pdf_document_mutex_unlock( viewer_page->pdf_document_page->document );
 
                     return TRUE;
                 }
+
+                while ( viewer_page->pdf_document_page->thread & 1 )
+                        viewer_transfer_rendered( viewer_page->pdf_document_page->thread_pv, TRUE );
 
                 fz_drop_display_list( zond_pdf_document_get_ctx(
                         viewer_page->pdf_document_page->document ),
                         viewer_page->pdf_document_page->display_list );
                 viewer_page->pdf_document_page->display_list = NULL;
 
-                zond_pdf_document_mutex_unlock( viewer_page->pdf_document_page->document );
+                viewer_page->pdf_document_page->thread &= 4;
 
                 rc = viewer_foreach( pv->zond->arr_pv, viewer_page->pdf_document_page,
                         viewer_cb_change_annot, NULL, &errmsg );
@@ -2290,7 +2441,6 @@ viewer_cb_draw_page_for_printing( GtkPrintOperation* op, GtkPrintContext* contex
     gdouble zoom_x = 0;
     gdouble zoom_y = 0;
     gdouble zoom = 0;
-    gboolean rendered = FALSE;
 
     pdfv = (PdfViewer*) user_data;
 
@@ -2298,12 +2448,8 @@ viewer_cb_draw_page_for_printing( GtkPrintOperation* op, GtkPrintContext* contex
     viewer_page = g_ptr_array_index( pdfv->arr_pages, page_nr );
 
     viewer_thread_render( pdfv, page_nr );
-    do //warten, bis display_list erzeugt worden ist
-    {
-        zond_pdf_document_mutex_lock( viewer_page->pdf_document_page->document );
-        rendered = (viewer_page->pdf_document_page->display_list != NULL);
-        zond_pdf_document_mutex_unlock( viewer_page->pdf_document_page->document );
-    } while ( !rendered );
+    while ( viewer_page->pdf_document_page->thread & 1 )
+            viewer_transfer_rendered( (PdfViewer*) viewer_page->pdf_document_page->thread_pv, TRUE );
 
     width = gtk_print_context_get_width( context );
     height = gtk_print_context_get_height( context );
@@ -2854,7 +3000,9 @@ viewer_start_pv( Projekt* zond )
 
     pv->text_occ.arr_quad = g_array_new( FALSE, FALSE, sizeof( fz_quad ) );
 
-    pv->arr_rendered = g_array_new( FALSE, FALSE, sizeof( gint ) );
+    pv->arr_rendered = g_array_new( FALSE, FALSE, sizeof( RenderResponse ) );
+    g_array_set_clear_func( pv->arr_rendered, (GDestroyNotify) viewer_free_render_response );
+
     g_mutex_init( &pv->mutex_arr_rendered );
 
     //  Fenster erzeugen und anzeigen

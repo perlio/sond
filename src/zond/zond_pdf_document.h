@@ -22,7 +22,8 @@ typedef struct _Pdf_Document_Page
     pdf_page* page;
     fz_display_list* display_list;
     fz_stext_page* stext_page;
-    GMutex mutex_page;
+    gint thread;
+    gpointer thread_pv;
     GPtrArray* arr_annots;
 } PdfDocumentPage;
 
@@ -104,8 +105,6 @@ void zond_pdf_document_mutex_unlock( const ZondPdfDocument* );
 
 gint zond_pdf_document_insert_pages( ZondPdfDocument*, gint, fz_context*,
         pdf_document*, gchar** );
-
-gint zond_pdf_document_render_stext_page( PdfDocumentPage*, gchar** );
 
 G_END_DECLS
 

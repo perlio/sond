@@ -258,12 +258,12 @@ ziele_erzeugen_ziel( GtkWidget* window, const DisplayedDocument* dd,
         if ( rc )
         {
             display_message( window, "Anbindung konnte nicht erzeugt "
-                    "werden\n\nBei Aufruf SetDestPage:\n", *errmsg, NULL );
+                    "werden\n\n", *errmsg, NULL );
             g_free( *errmsg );
 
             rc = zond_pdf_document_reopen_doc_and_pages( dd->zond_pdf_document, errmsg );
             zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
-            if ( rc ) ERROR_SOND_VAL( "zond_pdf_document_reopen_doc_and_pages", -2 )
+            if ( rc ) ERROR_S_VAL( -2 )
 
             return 1;
         }

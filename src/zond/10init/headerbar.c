@@ -346,18 +346,21 @@ cb_datei_ocr( GtkMenuItem* item, gpointer data )
 
     for ( gint i = 0; i < arr_rel_path->len; i++ )
     {
-        info_window_set_message(info_window, g_ptr_array_index( arr_rel_path, i ) );
+        gchar* rel_path = NULL;
+
+        rel_path = g_ptr_array_index( arr_rel_path, i );
+
+        info_window_set_message(info_window, rel_path );
 
         //prüfen, ob in Viewer geöffnet
-        if ( zond_pdf_document_is_open( g_ptr_array_index( arr_rel_path, i ) ) )
+        if ( zond_pdf_document_is_open( rel_path ) )
         {
-            display_message( info_window->dialog, "Datei in Viewer geöffnet", NULL );
-
+            info_window_set_message( info_window, "... in Viewer geöffnet - übersprungen" );
             continue;
         }
 
         DisplayedDocument* dd = document_new_displayed_document(
-                g_ptr_array_index( arr_rel_path, i ), NULL, &errmsg );
+                rel_path, NULL, &errmsg );
         if ( !dd )
         {
             if ( *errmsg )

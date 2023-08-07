@@ -334,8 +334,10 @@ cb_pv_seiten_ocr( GtkMenuItem* item, gpointer data )
     {
         PdfDocumentPage* pdf_document_page = g_ptr_array_index( arr_document_page, i );
 
-        //fz_text_list droppen und auf NULL setzen, mit mutex_page sichern
-        g_mutex_lock( &pdf_document_page->mutex_page );
+        //fz_text_list droppen und auf NULL setzen
+        while ( pdf_document_page->thread & 1 )
+                viewer_transfer_rendered( pdf_document_page->thread_pv, TRUE );
+
         fz_drop_display_list( zond_pdf_document_get_ctx( pdf_document_page->document ),
                 pdf_document_page->display_list );
         pdf_document_page->display_list = NULL;
@@ -343,7 +345,8 @@ cb_pv_seiten_ocr( GtkMenuItem* item, gpointer data )
         fz_drop_stext_page( zond_pdf_document_get_ctx( pdf_document_page->document ),
                 pdf_document_page->stext_page );
         pdf_document_page->stext_page = NULL;
-        g_mutex_unlock( &pdf_document_page->mutex_page );
+
+        pdf_document_page->thread = 0;
 
         //Flag ViewerPage auf unvollständig gerendert setzen
         rc = viewer_foreach( pv->zond->arr_pv, pdf_document_page, seiten_ocr_foreach,
@@ -506,8 +509,8 @@ seiten_drehen( PdfViewer* pv, GPtrArray* arr_document_page, gint winkel, gchar**
 
         zond_pdf_document_mutex_unlock( pdf_document_page->document );
 
-        //fz_text_list droppen und auf NULL setzen, mit mutex_page sichern
-        g_mutex_lock( &pdf_document_page->mutex_page );
+        while ( pdf_document_page->thread &= 1 )
+                viewer_transfer_rendered( (PdfViewer*) pdf_document_page->thread_pv, TRUE );
 
         fz_drop_display_list( zond_pdf_document_get_ctx( pdf_document_page->document ),
                 pdf_document_page->display_list );
@@ -517,7 +520,7 @@ seiten_drehen( PdfViewer* pv, GPtrArray* arr_document_page, gint winkel, gchar**
                 pdf_document_page->stext_page );
         pdf_document_page->stext_page = NULL;
 
-        g_mutex_unlock( &pdf_document_page->mutex_page );
+        pdf_document_page->thread = 0;
 
         rc = viewer_foreach( pv->zond->arr_pv, pdf_document_page,
                 seiten_drehen_foreach, GINT_TO_POINTER(winkel), errmsg );

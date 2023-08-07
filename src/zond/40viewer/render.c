@@ -76,9 +76,6 @@ render_thumbnail( fz_context* ctx, ViewerPageNew* viewer_page, gchar** errmsg )
 {
     fz_pixmap* pixmap = NULL;
     GdkPixbuf* pixbuf = NULL;
-    fz_display_list* display_list = NULL;
-
-    if ( viewer_page->pixbuf_thumb ) return 1;
 
     fz_matrix transform = fz_scale( 0.15, 0.15 );
 
@@ -105,11 +102,7 @@ render_thumbnail( fz_context* ctx, ViewerPageNew* viewer_page, gchar** errmsg )
         ERROR_MUPDF( "fz_new_draw_device" )
     }
 
-    g_mutex_lock( &viewer_page->pdf_document_page->mutex_page );
-    display_list = viewer_page->pdf_document_page->display_list;
-    g_mutex_unlock( &viewer_page->pdf_document_page->mutex_page );
-
-    fz_try( ctx ) fz_run_display_list( ctx, display_list,
+    fz_try( ctx ) fz_run_display_list( ctx, viewer_page->pdf_document_page->display_list,
             draw_device, transform, rect, NULL );
     fz_always( ctx )
     {
@@ -144,10 +137,6 @@ render_pixmap( fz_context* ctx, ViewerPageNew* viewer_page, gdouble zoom,
 {
     fz_pixmap* pixmap = NULL;
     GdkPixbuf* pixbuf = NULL;
-    fz_display_list* display_list = NULL;
-
-    //schon gerendert?
-    if ( viewer_page->pixbuf_page ) return 1;
 
     fz_matrix transform = fz_scale( zoom / 100, zoom / 100);
 
@@ -174,11 +163,7 @@ render_pixmap( fz_context* ctx, ViewerPageNew* viewer_page, gdouble zoom,
         ERROR_MUPDF( "fz_new_draw_device" )
     }
 
-    g_mutex_lock( &viewer_page->pdf_document_page->mutex_page );
-    display_list = viewer_page->pdf_document_page->display_list;
-    g_mutex_unlock( &viewer_page->pdf_document_page->mutex_page );
-
-    fz_try( ctx ) fz_run_display_list( ctx, display_list,
+    fz_try( ctx ) fz_run_display_list( ctx, viewer_page->pdf_document_page->display_list,
             draw_device, transform, rect, NULL );
     fz_always( ctx )
     {
@@ -209,50 +194,13 @@ render_pixmap( fz_context* ctx, ViewerPageNew* viewer_page, gdouble zoom,
 
 
 gint
-render_stext_page_direct( fz_context* ctx, PdfDocumentPage* pdf_document_page, gchar** errmsg )
-{
-    //structured text-device
-    fz_device* s_t_device = NULL;
-
-    fz_stext_options opts = { FZ_STEXT_DEHYPHENATE };
-
-    fz_try( ctx ) pdf_document_page->stext_page = fz_new_stext_page( ctx, pdf_document_page->rect );
-    fz_catch( ctx ) ERROR_MUPDF( "fz_new_stext_page" )
-
-    fz_try( ctx ) s_t_device = fz_new_stext_device( ctx, pdf_document_page->stext_page, &opts );
-    fz_catch( ctx ) ERROR_MUPDF( "fz_new_stext_device" )
-
-    zond_pdf_document_mutex_lock( pdf_document_page->document );
-    //Seite durch's device laufen lassen
-    fz_try( ctx ) pdf_run_page( ctx, pdf_document_page->page, s_t_device, fz_identity, NULL );
-    fz_always( ctx )
-    {
-        zond_pdf_document_mutex_unlock( pdf_document_page->document );
-        fz_close_device( ctx, s_t_device );
-        fz_drop_device( ctx, s_t_device );
-    }
-    fz_catch( ctx ) ERROR_MUPDF( "fz_run_page" )
-
-    return 0;
-}
-
-
-gint
-render_display_list_to_stext_page( fz_context* ctx, PdfDocumentPage* pdf_document_page,
+render_stext_page_from_display_list( fz_context* ctx, PdfDocumentPage* pdf_document_page,
         gchar** errmsg )
 {
     fz_stext_page* stext_page = NULL;
     fz_device* s_t_device = NULL;
-    fz_display_list* display_list = NULL;
 
     fz_stext_options opts = { FZ_STEXT_DEHYPHENATE };
-
-    g_mutex_lock( &pdf_document_page->mutex_page );
-    display_list = pdf_document_page->display_list;
-    stext_page = pdf_document_page->stext_page;
-    g_mutex_unlock( &pdf_document_page->mutex_page );
-
-    if ( stext_page ) return 0;
 
     fz_try( ctx ) stext_page = fz_new_stext_page( ctx, pdf_document_page->rect );
     fz_catch( ctx ) ERROR_MUPDF( "fz_new_stext_page" )
@@ -266,18 +214,20 @@ render_display_list_to_stext_page( fz_context* ctx, PdfDocumentPage* pdf_documen
     }
 
     //und durchs stext-device laufen lassen
-    fz_try( ctx ) fz_run_display_list( ctx, display_list, s_t_device,
+    fz_try( ctx ) fz_run_display_list( ctx, pdf_document_page->display_list, s_t_device,
             fz_identity, pdf_document_page->rect, NULL );
     fz_always( ctx )
     {
         fz_close_device( ctx, s_t_device );
         fz_drop_device( ctx, s_t_device );
     }
-    fz_catch( ctx ) ERROR_MUPDF( "fz_run_display_list" )
+    fz_catch( ctx )
+    {
+        fz_drop_stext_page( ctx, stext_page );
+        ERROR_MUPDF( "fz_run_display_list" )
+    }
 
-    g_mutex_lock( &pdf_document_page->mutex_page );
     pdf_document_page->stext_page = stext_page;
-    g_mutex_unlock( &pdf_document_page->mutex_page );
 
     return 0;
 }
@@ -289,13 +239,6 @@ render_display_list( fz_context* ctx, PdfDocumentPage* pdf_document_page, gint p
 {
     fz_display_list* display_list = NULL;
     fz_device* list_device = NULL;
-    pdf_page* page = NULL;
-
-    g_mutex_lock( &pdf_document_page->mutex_page );
-    display_list = pdf_document_page->display_list;
-    g_mutex_unlock( &pdf_document_page->mutex_page );
-
-    if ( display_list ) return 0;
 
     fz_try( ctx ) display_list = fz_new_display_list( ctx, pdf_document_page->rect );
     fz_catch( ctx ) ERROR_MUPDF( "fz_new_display_list" )
@@ -314,7 +257,7 @@ render_display_list( fz_context* ctx, PdfDocumentPage* pdf_document_page, gint p
     {
         gint rc = 0;
 
-        rc = zond_pdf_document_load_page( pdf_document_page, page_nr - 1, errmsg );
+        rc = zond_pdf_document_load_page( pdf_document_page, page_nr, errmsg );
         if ( rc )
         {
             zond_pdf_document_mutex_unlock( pdf_document_page->document );
@@ -338,9 +281,7 @@ render_display_list( fz_context* ctx, PdfDocumentPage* pdf_document_page, gint p
         ERROR_MUPDF( "fz_drop_display_list" )
     }
 
-    g_mutex_lock( &pdf_document_page->mutex_page );
     pdf_document_page->display_list = display_list;
-    g_mutex_unlock( &pdf_document_page->mutex_page );
 
     return 0;
 }
@@ -353,40 +294,109 @@ render_page_thread( gpointer data, gpointer user_data )
     gchar* errmsg = NULL;
     ViewerPageNew* viewer_page = NULL;
     fz_context* ctx = NULL;
-    gint page = 0;
+    gint thread_data = 0;
+    RenderResponse render_response = { 0 };
 
     PdfViewer* pv =(PdfViewer*) user_data;
 
-    page = GPOINTER_TO_INT( data );
-    viewer_page = g_ptr_array_index( pv->arr_pages, page - 1 );
+    thread_data = GPOINTER_TO_INT( data );
+    viewer_page = g_ptr_array_index( pv->arr_pages, thread_data >> 4 );
+    render_response.page = thread_data >> 4;
 
     ctx = fz_clone_context( zond_pdf_document_get_ctx( viewer_page->pdf_document_page->document ) );
-    if ( !ctx ) ERROR_THREAD( "fz_clone_context" )
-
-    rc = render_display_list( ctx, viewer_page->pdf_document_page, page, &errmsg );
-    if ( rc == -1 ) ERROR_THREAD( "render_display_list" )
-
-    rc = render_display_list_to_stext_page( ctx, viewer_page->pdf_document_page, &errmsg );
-    if ( rc == -1 ) ERROR_THREAD( "render_diaplay_list_to_stext_page" )
-
-    rc = render_pixmap( ctx, viewer_page, pv->zoom, &errmsg );
-    if ( rc == -1 ) ERROR_THREAD( "render_pixmap" )
-    else if ( rc == 0 )
+    if ( !ctx )
     {
+        render_response.error = 1;
+        render_response.error_message = g_strconcat( "Bei Aufruf ", __func__,
+                ":\n", errmsg, NULL );
+        g_free( errmsg );
+
         g_mutex_lock( &pv->mutex_arr_rendered );
-        g_array_append_val( pv->arr_rendered, page );
+        g_array_append_val( pv->arr_rendered, render_response );
         g_mutex_unlock( &pv->mutex_arr_rendered );
+
+        return;
     }
 
-    rc = render_thumbnail( ctx, viewer_page, &errmsg );
-    if ( rc == -1 ) ERROR_THREAD( "render_thumbnail" )
-    else if ( rc == 0 )
+    if ( thread_data & 1 )
     {
-        page = page * -1;
-        g_mutex_lock( &pv->mutex_arr_rendered );
-        g_array_append_val( pv->arr_rendered, page );
-        g_mutex_unlock( &pv->mutex_arr_rendered );
+        rc = render_display_list( ctx, viewer_page->pdf_document_page, thread_data >> 4, &errmsg );
+        if ( rc == -1 )
+        {
+            render_response.error = 2;
+            render_response.error_message = g_strconcat( "Bei Aufruf ", __func__,
+                    ":\n", errmsg, NULL );
+            g_free( errmsg );
+
+            g_mutex_lock( &pv->mutex_arr_rendered );
+            g_array_append_val( pv->arr_rendered, render_response );
+            g_mutex_unlock( &pv->mutex_arr_rendered );
+
+            return;
+        }
     }
+
+    if ( thread_data & 2 )
+    {
+        rc = render_stext_page_from_display_list( ctx, viewer_page->pdf_document_page, &errmsg );
+        if ( rc == -1 )
+        {
+            render_response.error = 3;
+            render_response.error_message = g_strconcat( "Bei Aufruf ", __func__,
+                    ":\n", errmsg, NULL );
+            g_free( errmsg );
+
+            g_mutex_lock( &pv->mutex_arr_rendered );
+            g_array_append_val( pv->arr_rendered, render_response );
+            g_mutex_unlock( &pv->mutex_arr_rendered );
+
+            return;
+        }
+    }
+
+    if ( thread_data & 4 )
+    {
+        gint rc = 0;
+
+        rc = render_pixmap( ctx, viewer_page, pv->zoom, &errmsg );
+        if ( rc == -1 )
+        {
+            render_response.error = 4;
+            render_response.error_message = g_strconcat( "Bei Aufruf ", __func__,
+                    ":\n", errmsg, NULL );
+            g_free( errmsg );
+
+            g_mutex_lock( &pv->mutex_arr_rendered );
+            g_array_append_val( pv->arr_rendered, render_response );
+            g_mutex_unlock( &pv->mutex_arr_rendered );
+
+            return;
+        }
+    }
+
+    if ( thread_data & 8 )
+    {
+        gint rc = 0;
+
+        rc = render_thumbnail( ctx, viewer_page, &errmsg );
+        if ( rc == -1 )
+        {
+            render_response.error = 5;
+            render_response.error_message = g_strconcat( "Bei Aufruf ", __func__,
+                    ":\n", errmsg, NULL );
+            g_free( errmsg );
+
+            g_mutex_lock( &pv->mutex_arr_rendered );
+            g_array_append_val( pv->arr_rendered, render_response );
+            g_mutex_unlock( &pv->mutex_arr_rendered );
+
+            return;
+        }
+    }
+
+    g_mutex_lock( &pv->mutex_arr_rendered );
+    g_array_append_val( pv->arr_rendered, render_response );
+    g_mutex_unlock( &pv->mutex_arr_rendered );
 
     fz_drop_context( ctx );
 

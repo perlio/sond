@@ -150,7 +150,6 @@ zond_pdf_document_page_free( PdfDocumentPage* pdf_document_page )
     fz_drop_page( priv->ctx, &(pdf_document_page->page->super) );
     fz_drop_stext_page( priv->ctx, pdf_document_page->stext_page );
     fz_drop_display_list( priv->ctx, pdf_document_page->display_list );
-    g_mutex_clear( &pdf_document_page->mutex_page );
     if ( pdf_document_page->arr_annots ) g_ptr_array_unref( pdf_document_page->arr_annots );
 
     return;
@@ -292,8 +291,6 @@ zond_pdf_document_init_page( ZondPdfDocument* self,
     ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( ZOND_PDF_DOCUMENT(self) );
 
     pdf_document_page->document = self; //keine ref!
-
-    g_mutex_init( &pdf_document_page->mutex_page );
 
     ctx = priv->ctx;
 
@@ -624,24 +621,11 @@ zond_pdf_document_reopen_doc_and_pages( ZondPdfDocument* self, gchar** errmsg )
     for ( gint i = 0; i < priv->pages->len; i++ )
     {
         PdfDocumentPage* pdf_document_page = NULL;
-        pdf_annot* annot = NULL;
 
         pdf_document_page = g_ptr_array_index( priv->pages, i );
-        fz_try( priv->ctx ) pdf_document_page->page =
-                pdf_load_page( priv->ctx, priv->doc, i );
-        fz_catch( priv->ctx ) ERROR_MUPDF( "pdf_load_page" )
 
-        annot = pdf_first_annot( priv->ctx, pdf_document_page->page );
-        for ( gint u = 0; u < pdf_document_page->arr_annots->len; u++ )
-        {
-            PdfDocumentPageAnnot* pdf_document_page_annot = NULL;
-
-            pdf_document_page_annot = g_ptr_array_index( pdf_document_page->arr_annots, u );
-            pdf_document_page_annot->annot = annot;
-            pdf_document_page_annot->content = pdf_annot_contents( priv->ctx, annot );
-
-            annot = pdf_next_annot( priv->ctx, annot );
-        }
+        fz_try( ctx ) pdf_document_page->obj = pdf_lookup_page_obj( ctx, priv->doc, i );
+        fz_catch( ctx ) ERROR_MUPDF( "pdf_lookup_page_obj" );
     }
 
     return 0;
@@ -869,71 +853,6 @@ zond_pdf_document_insert_pages( ZondPdfDocument* zond_pdf_document, gint pos,
             pdf_document_page_annot->content = pdf_annot_contents( priv->ctx, annot );
         }
     }
-
-    return 0;
-}
-
-
-gint
-zond_pdf_document_render_stext_page( PdfDocumentPage* pdf_document_page, gchar** errmsg )
-{
-    fz_device* s_t_device = NULL;
-    gint index = 0;
-    fz_stext_page* stext_page = NULL;
-
-    fz_stext_options opts = { FZ_STEXT_DEHYPHENATE };
-
-    g_mutex_lock( &pdf_document_page->mutex_page );
-    stext_page = pdf_document_page->stext_page;
-    g_mutex_unlock( &pdf_document_page->mutex_page );
-
-    if ( stext_page ) return 0;
-
-    fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
-
-    fz_try( ctx ) stext_page =
-            fz_new_stext_page( ctx, pdf_document_page->rect );
-    fz_catch( ctx ) ERROR_MUPDF( "fz_new_stext_page" )
-
-    //structured text-device
-    fz_try( ctx ) s_t_device = fz_new_stext_device( ctx, stext_page, &opts );
-    fz_catch( ctx )
-    {
-        fz_drop_stext_page( ctx, stext_page );
-        ERROR_MUPDF( "fz_new_stext_device" )
-    }
-
-    index = zond_pdf_document_get_index( pdf_document_page );
-
-    //doc-lock muß gesetzt werden, da _load_page auf document zugreift
-    zond_pdf_document_mutex_lock( pdf_document_page->document );
-
-    if ( !pdf_document_page->page )
-    {
-        gint rc = 0;
-
-        rc = zond_pdf_document_load_page( pdf_document_page, index, errmsg );
-        if ( rc )
-        {
-            zond_pdf_document_mutex_unlock( pdf_document_page->document );
-            fz_drop_device( ctx, s_t_device );
-            ERROR_S
-        }
-    }
-
-    //page durchs list-device laufen lassen
-    fz_try( ctx ) pdf_run_page( ctx, pdf_document_page->page, s_t_device, fz_identity, NULL );
-    fz_always( ctx )
-    {
-        zond_pdf_document_mutex_unlock( pdf_document_page->document );
-        fz_close_device( ctx, s_t_device );
-        fz_drop_device( ctx, s_t_device );
-    }
-    fz_catch( ctx ) ERROR_MUPDF( "pdf_run_page" )
-
-    g_mutex_lock( &pdf_document_page->mutex_page );
-    pdf_document_page->stext_page = stext_page;
-    g_mutex_unlock( &pdf_document_page->mutex_page );
 
     return 0;
 }

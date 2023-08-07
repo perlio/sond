@@ -11,7 +11,7 @@ typedef int gint;
 typedef char gchar;
 
 
-gint render_display_list_to_stext_page( fz_context* ctx, PdfDocumentPage*, gchar** );
+gint render_stext_page_from_display_list( fz_context* ctx, PdfDocumentPage*, gchar** );
 
 void render_page_thread( gpointer, gpointer );
 

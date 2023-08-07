@@ -15,14 +15,12 @@ ToDo:
     - Anbindungen in PDF löschen
 
 - Viewer
-    - pdf_document_page und viewer_page erst bei Anforderung erzeugen
-        (kompliziertes y_pos-Management erforderlich)
+    - iter_thumb in viewer_page speichern; macht viewer_get_iter_thumb überflüssig
     - Farben für Markieren
     - Rummalen
     - angezeigte Seiten als Datei speichern
 
 - Kontextmenu Trees
-    - öffnen mit
     - PDF: OCR/Reparieren/Textsuche
 
 - PDF

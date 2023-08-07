@@ -216,13 +216,15 @@ treeviews_get_rel_path_and_anbindung( Projekt* zond, Baum baum, gint node_id,
 
         return 1;
     }
+/*  Muß nicht mit mutex geschützt werden
+        ->Zugriff auf gleiche Datei aus mehreren threads m.E. zulässig, wenn unterschiedliches pdf_document
 
     const ZondPdfDocument* zond_pdf_document = zond_pdf_document_is_open( rel_path_intern );
     if ( zond_pdf_document ) zond_pdf_document_mutex_lock( zond_pdf_document );
-
+*/
     anbindung_intern = treeviews_ziel_zu_anbindung( zond->ctx, rel_path_intern, &ziel, errmsg );
 
-    if ( zond_pdf_document ) zond_pdf_document_mutex_unlock( zond_pdf_document );
+//    if ( zond_pdf_document ) zond_pdf_document_mutex_unlock( zond_pdf_document );
 
     if ( !anbindung_intern )
     {
