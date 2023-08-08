@@ -16,6 +16,7 @@ G_DECLARE_DERIVABLE_TYPE (ZondPdfDocument, zond_pdf_document, ZOND, PDF_DOCUMENT
 typedef struct _Pdf_Document_Page
 {
     ZondPdfDocument* document; //erhält keine ref - muß das mal mit dem const kapieren...
+    gint page_doc;
     pdf_obj* obj;
     fz_rect rect;
     gint rotate;
@@ -66,7 +67,7 @@ struct _ZondPdfDocumentClass
 
 void zond_pdf_document_page_load_annots( PdfDocumentPage* );
 
-gint zond_pdf_document_load_page( PdfDocumentPage*, gint, gchar** );
+gint zond_pdf_document_load_page( PdfDocumentPage*, gchar** );
 
 ZondPdfDocument* zond_pdf_document_open( const gchar*, gint, gint, gchar** );
 

@@ -260,7 +260,7 @@ zond_pdf_document_page_load_annots( PdfDocumentPage* pdf_document_page )
 
 
 gint
-zond_pdf_document_load_page( PdfDocumentPage* pdf_document_page, gint index, gchar** errmsg )
+zond_pdf_document_load_page( PdfDocumentPage* pdf_document_page, gchar** errmsg )
 {
     fz_context* ctx = NULL;
 
@@ -268,7 +268,7 @@ zond_pdf_document_load_page( PdfDocumentPage* pdf_document_page, gint index, gch
 
     ctx = priv->ctx;
 
-    fz_try( ctx ) pdf_document_page->page = pdf_load_page( ctx, priv->doc, index );
+    fz_try( ctx ) pdf_document_page->page = pdf_load_page( ctx, priv->doc, pdf_document_page->page_doc );
     fz_catch( ctx ) ERROR_MUPDF( "pdf_load_page" );
 
     pdf_document_page->arr_annots = g_ptr_array_new_with_free_func( zond_pdf_document_page_annot_free );
@@ -296,6 +296,7 @@ zond_pdf_document_init_page( ZondPdfDocument* self,
 
     fz_try( ctx )
     {
+        pdf_document_page->page_doc = index;
         pdf_document_page->obj = pdf_lookup_page_obj( ctx, priv->doc, index );
         pdf_page_obj_transform( ctx, pdf_document_page->obj, &mediabox, &page_ctm);
         pdf_document_page->rect = fz_transform_rect(mediabox, page_ctm);

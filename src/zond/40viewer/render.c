@@ -234,7 +234,7 @@ render_stext_page_from_display_list( fz_context* ctx, PdfDocumentPage* pdf_docum
 
 
 static gint
-render_display_list( fz_context* ctx, PdfDocumentPage* pdf_document_page, gint page_nr,
+render_display_list( fz_context* ctx, PdfDocumentPage* pdf_document_page,
         gchar** errmsg )
 {
     fz_display_list* display_list = NULL;
@@ -257,7 +257,7 @@ render_display_list( fz_context* ctx, PdfDocumentPage* pdf_document_page, gint p
     {
         gint rc = 0;
 
-        rc = zond_pdf_document_load_page( pdf_document_page, page_nr, errmsg );
+        rc = zond_pdf_document_load_page( pdf_document_page, errmsg );
         if ( rc )
         {
             zond_pdf_document_mutex_unlock( pdf_document_page->document );
@@ -320,7 +320,7 @@ render_page_thread( gpointer data, gpointer user_data )
 
     if ( thread_data & 1 )
     {
-        rc = render_display_list( ctx, viewer_page->pdf_document_page, thread_data >> 4, &errmsg );
+        rc = render_display_list( ctx, viewer_page->pdf_document_page, &errmsg );
         if ( rc == -1 )
         {
             render_response.error = 2;

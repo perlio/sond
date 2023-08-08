@@ -316,14 +316,8 @@ viewer_thread_render( PdfViewer* pv, gint page )
     if ( viewer_page->pdf_document_page->thread & 1 ) //pdf_document_page wird gerade in anderem viewer gerendert
     {
         if ( viewer_page->thread == 6 ) return; //im viewer alles gerendert, pdf_document_page läuft-> nix zu tun
-        else
-        {
-            while ( viewer_page->pdf_document_page->thread & 1 )
-                    viewer_transfer_rendered( (PdfViewer*) viewer_page->pdf_document_page->thread_pv, TRUE );
-
-            //könnte ja viewer_page sein, die gerendert wurde
-            if ( viewer_page->thread == 6 ) return;
-        }
+        else while ( viewer_page->pdf_document_page->thread & 1 )
+                viewer_transfer_rendered( (PdfViewer*) viewer_page->pdf_document_page->thread_pv, TRUE );
     }
 
     if ( !pv->idle_source ) pv->idle_source = g_idle_add( G_SOURCE_FUNC(viewer_check_rendering), pv );
@@ -1003,7 +997,6 @@ static gint
 viewer_render_stext_page_from_page( PdfDocumentPage* pdf_document_page, gchar** errmsg )
 {
     fz_device* s_t_device = NULL;
-    gint index = 0;
     fz_stext_page* stext_page = NULL;
 
     fz_stext_options opts = { FZ_STEXT_DEHYPHENATE };
@@ -1022,8 +1015,6 @@ viewer_render_stext_page_from_page( PdfDocumentPage* pdf_document_page, gchar** 
         ERROR_MUPDF( "fz_new_stext_device" )
     }
 
-    index = zond_pdf_document_get_index( pdf_document_page );
-
     //doc-lock muß gesetzt werden, da _load_page auf document zugreift
     zond_pdf_document_mutex_lock( pdf_document_page->document );
 
@@ -1031,7 +1022,7 @@ viewer_render_stext_page_from_page( PdfDocumentPage* pdf_document_page, gchar** 
     {
         gint rc = 0;
 
-        rc = zond_pdf_document_load_page( pdf_document_page, index, errmsg );
+        rc = zond_pdf_document_load_page( pdf_document_page, errmsg );
         if ( rc )
         {
             zond_pdf_document_mutex_unlock( pdf_document_page->document );

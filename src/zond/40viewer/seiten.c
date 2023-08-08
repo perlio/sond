@@ -800,7 +800,7 @@ seiten_cb_einfuegen( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg 
     gint page_doc = 0;
 
     gint count = GPOINTER_TO_INT(data);
-
+//ToDo: ordentlich machen!
     dd = document_get_dd( pv, page_pv, NULL, NULL, &page_doc );
     if ( dd->anbindung )
     {
