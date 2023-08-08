@@ -269,7 +269,7 @@ viewer_transfer_rendered( PdfViewer* pdfv, gboolean protect )
         g_array_remove_index_fast( pdfv->arr_rendered, idx );
         idx--;
 
-        pdfv->idle_fresh = FALSE;
+        pdfv->count_active_thread--;
     }
 
     if ( protect ) g_mutex_unlock( &pdfv->mutex_arr_rendered );
@@ -289,10 +289,7 @@ viewer_check_rendering( gpointer data )
             protect = TRUE;
     viewer_transfer_rendered( pv, protect );
 
-    if ( !protect && pv->idle_fresh == FALSE) //die nicht frische idle kann abgeschaltet werden,
-    //wenn alle threads abgearbeitet sind
-    //idle_fresh muß gesetzt/gelöscht werden, weil die idle-Funktion schon laufen kann,
-    //bevor der aus dem Hauptthread gestartete thread als unprocessed im pool eingetragen ist
+    if ( pv->count_active_thread == 0 )
     {
         pv->idle_source = 0;
         return G_SOURCE_REMOVE;
@@ -329,17 +326,14 @@ viewer_thread_render( PdfViewer* pv, gint page )
         }
     }
 
-    if ( !pv->idle_source )
-    {
-        pv->idle_source = g_idle_add( G_SOURCE_FUNC(viewer_check_rendering), pv );
-        pv->idle_fresh = TRUE; //wenn idle gestartet wird, ist sie noch frisch!
-    }
+    if ( !pv->idle_source ) pv->idle_source = g_idle_add( G_SOURCE_FUNC(viewer_check_rendering), pv );
+
     if ( !pv->thread_pool_page )
     {
         GError* error = NULL;
 
         if ( !(pv->thread_pool_page =
-                g_thread_pool_new( (GFunc) render_page_thread, pv, 4, FALSE, &error )) )
+                g_thread_pool_new( (GFunc) render_page_thread, pv, -1, FALSE, &error )) )
         {
             display_message( pv->vf, "Thread-Pool kann nicht erzeugt werden\n\n"
                     "Bei Aufruf g_thread_pool_new:\n", error->message, NULL );
@@ -364,8 +358,8 @@ viewer_thread_render( PdfViewer* pv, gint page )
 
         return;
     }
-
     g_thread_pool_move_to_front( pv->thread_pool_page, GINT_TO_POINTER(thread_data) );
+    pv->count_active_thread++;
 
     viewer_page->thread |= 1; //bit 1: thread gestartet
     viewer_page->pdf_document_page->thread |= 1;
@@ -414,7 +408,9 @@ viewer_render_sichtbare_seiten( PdfViewer* pv )
     gtk_entry_set_text( GTK_ENTRY(pv->entry), text );
     g_free( text );
 
+    //rendern in Auftrag
     for ( gint i = letzte; i >= erste; i-- ) viewer_thread_render( pv, i );
+
     //thumb-Leiste anpassen
     path = gtk_tree_path_new_from_indices( erste, -1 );
     gtk_tree_view_scroll_to_cell( GTK_TREE_VIEW(pv->tree_thumb), path, NULL, FALSE, 0, 0 );
