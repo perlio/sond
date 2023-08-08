@@ -462,7 +462,6 @@ pdf_ocr_create_doc_from_page( PdfDocumentPage* pdf_document_page, gint flag, gch
 {
     gint rc = 0;
     pdf_document* doc_new = NULL;
-    gint page_doc = 0;
     pdf_page* page = NULL;
 
     fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
@@ -471,10 +470,9 @@ pdf_ocr_create_doc_from_page( PdfDocumentPage* pdf_document_page, gint flag, gch
     fz_try( ctx ) doc_new = pdf_create_document( ctx );
     fz_catch( ctx ) ERROR_MUPDF_R( "pdf_create_document", NULL )
 
-    page_doc = zond_pdf_document_get_index( pdf_document_page );
-
     zond_pdf_document_mutex_lock( pdf_document_page->document );
-    rc = pdf_copy_page( ctx, doc, page_doc, page_doc, doc_new, 0, errmsg );
+    rc = pdf_copy_page( ctx, doc, pdf_document_page->page_doc,
+            pdf_document_page->page_doc, doc_new, 0, errmsg );
     zond_pdf_document_mutex_unlock( pdf_document_page->document );
     if ( rc )
     {
@@ -681,8 +679,7 @@ pdf_ocr_show_text( InfoWindow* info_window, PdfDocumentPage* pdf_document_page,
     gtk_box_pack_start( GTK_BOX(vbox), hbox, FALSE, FALSE, 0 );
     gtk_box_pack_start( GTK_BOX(vbox), swindow, FALSE, FALSE, 0 );
 
-    gint page = zond_pdf_document_get_index( pdf_document_page );
-    GtkWidget* dialog = pdf_ocr_create_dialog( info_window, page + 1 );
+    GtkWidget* dialog = pdf_ocr_create_dialog( info_window, pdf_document_page->page_doc + 1 );
 
     GtkWidget* content_area =
             gtk_dialog_get_content_area( GTK_DIALOG(dialog) );
@@ -791,11 +788,10 @@ pdf_ocr_create_pdf_only_text( InfoWindow* info_window,
         zaehler++;
 
         PdfDocumentPage* pdf_document_page = g_ptr_array_index( arr_document_pages, i );
-        gint index = zond_pdf_document_get_index( pdf_document_page );
 
         gchar* info_text = g_strdup_printf( "(%i/%i) %s, Seite %i",
                 zaehler, arr_document_pages->len, zond_pdf_document_get_path( pdf_document_page->document ),
-                index + 1 );
+                pdf_document_page->page_doc + 1 );
         info_window_set_message( info_window, info_text );
         g_free( info_text );
 
@@ -804,7 +800,7 @@ pdf_ocr_create_pdf_only_text( InfoWindow* info_window,
 
         if ( g_strcmp0( page_text, "" ) && alle == 0 )
         {
-            GtkWidget* dialog = pdf_ocr_create_dialog( info_window, index + 1 );
+            GtkWidget* dialog = pdf_ocr_create_dialog( info_window, pdf_document_page->page_doc + 1 );
             //braucht nicht thread_safe zu sein
             rc = 0;
             rc = gtk_dialog_run( GTK_DIALOG(dialog) );

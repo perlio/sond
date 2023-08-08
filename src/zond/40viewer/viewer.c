@@ -367,7 +367,6 @@ static void
 viewer_render_sichtbare_seiten( PdfViewer* pv )
 {
     GtkTreePath* path = NULL;
-    gint page_doc = 0;
     ViewerPageNew* viewer_page = NULL;
     const gchar* path_doc = NULL;
     const gchar* file = NULL;
@@ -389,8 +388,8 @@ viewer_render_sichtbare_seiten( PdfViewer* pv )
     else file = path_doc;
     dir = g_strndup( path_doc, strlen( path_doc ) - strlen( file ) );
 
-    page_doc = zond_pdf_document_get_index( viewer_page->pdf_document_page );
-    title = g_strdup_printf( "%s [Seite %i]", file, page_doc + 1 );
+    title = g_strdup_printf( "%s [Seite %i]", file,
+            viewer_page->pdf_document_page->page_doc + 1 );
     gtk_header_bar_set_title( GTK_HEADER_BAR(pv->headerbar), title );
     g_free( title );
 

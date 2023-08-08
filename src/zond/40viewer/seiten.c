@@ -634,9 +634,7 @@ seiten_anbindung( PdfViewer* pv, GPtrArray* arr_document_page, gchar** errmsg )
         fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
         pdf_document* doc = zond_pdf_document_get_pdf_doc( pdf_document_page->document );
 
-        gint page_doc = zond_pdf_document_get_index( pdf_document_page );
-
-        rc = pdf_document_get_dest( ctx, doc, page_doc, (gpointer*) &arr_dests,
+        rc = pdf_document_get_dest( ctx, doc, pdf_document_page->page_doc, (gpointer*) &arr_dests,
                 FALSE, errmsg );
         if ( rc )
         {
@@ -702,8 +700,6 @@ seiten_loeschen( PdfViewer* pv, GPtrArray* arr_document_page, gchar** errmsg )
     {
         PdfDocumentPage* pdf_document_page = g_ptr_array_index( arr_document_page, i );
 
-        gint page_doc = zond_pdf_document_get_index( pdf_document_page ); //ist gleich page_pv, da löschen nur bei einem Dokument mglich
-
         //macht - sofern noch nicht geschehen - thread_pool des pv dicht, in dem Seite angezeigt wird
         //Dann wird Seite aus pv gelöscht
         //seiten_cb_loesche_seite gibt niemals Fehler zurück
@@ -712,10 +708,12 @@ seiten_loeschen( PdfViewer* pv, GPtrArray* arr_document_page, gchar** errmsg )
 
         //Seite aus document entfernen
         //vor pdf_delete_page, da ansonsten noch ref auf page?!
-        g_ptr_array_remove_index( zond_pdf_document_get_arr_pages( pv->dd->zond_pdf_document ), page_doc ); //ist gleich page_pv
+        g_ptr_array_remove_index( zond_pdf_document_get_arr_pages( pv->dd->zond_pdf_document ),
+                pdf_document_page->page_doc ); //ist gleich page_pv
 
         //Seite aus PDF entfernen
-        fz_try( ctx ) pdf_delete_page( ctx, zond_pdf_document_get_pdf_doc( pv->dd->zond_pdf_document ), page_doc );
+        fz_try( ctx ) pdf_delete_page( ctx, zond_pdf_document_get_pdf_doc( pv->dd->zond_pdf_document ),
+                pdf_document_page->page_doc );
         fz_catch( ctx )
         {
             g_ptr_array_unref( arr_pv );
@@ -991,16 +989,18 @@ seiten_create_document( PdfViewer* pv, GArray* arr_page_pv, gchar** errmsg )
 
     for ( gint i = 0; i < arr_page_pv->len; i++ )
     {
-        DisplayedDocument* dd = NULL;
-        gint page_doc = 0;
+        ViewerPageNew* viewer_page = NULL;
+        PdfDocumentPage* pdf_document_page = NULL;
 
         gint page_pv = g_array_index( arr_page_pv, gint, i );
+        viewer_page = g_ptr_array_index( pv->arr_pages, page_pv );
+        pdf_document_page = viewer_page->pdf_document_page;
 
-        dd = document_get_dd( pv, page_pv, NULL, NULL, &page_doc );
-
-        zond_pdf_document_mutex_lock( dd->zond_pdf_document );
-        rc = pdf_copy_page( pv->zond->ctx, zond_pdf_document_get_pdf_doc( dd->zond_pdf_document ), page_doc, page_doc, doc_dest, -1, errmsg );
-        zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
+        zond_pdf_document_mutex_lock( pdf_document_page->document );
+        rc = pdf_copy_page( pv->zond->ctx,
+                zond_pdf_document_get_pdf_doc( pdf_document_page->document ),
+                pdf_document_page->page_doc, pdf_document_page->page_doc, doc_dest, -1, errmsg );
+        zond_pdf_document_mutex_unlock( pdf_document_page->document );
         if ( rc )
         {
             pdf_drop_document( pv->zond->ctx, doc_dest );

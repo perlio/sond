@@ -761,20 +761,6 @@ zond_pdf_document_get_path( ZondPdfDocument* self )
 }
 
 
-gint
-zond_pdf_document_get_index( PdfDocumentPage* pdf_document_page )
-{
-    guint index = 0;
-
-    ZondPdfDocumentPrivate* priv =
-            zond_pdf_document_get_instance_private( pdf_document_page->document );
-
-    if ( g_ptr_array_find( priv->pages, pdf_document_page, &index ) ) return index;
-
-    return -1;
-}
-
-
 void
 zond_pdf_document_mutex_lock( const ZondPdfDocument* self )
 {
