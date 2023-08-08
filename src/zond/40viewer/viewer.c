@@ -827,7 +827,7 @@ viewer_render_sichtbare_thumbs( PdfViewer* pv )
     gint start = 0;
     gint end = 0;
 
-//    if ( !(pv->thread_pool_page) ) return;
+    if ( !gtk_widget_get_visible( pv->swindow_tree ) ) return;
 
     rc = viewer_get_visible_thumbs( pv, &start, &end );
     if ( rc == 0 ) for ( gint i = start; i <= end; i++ ) viewer_thread_render( pv, i );
