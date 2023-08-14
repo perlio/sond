@@ -200,27 +200,19 @@ ziele_erzeugen_ziel( GtkWidget* window, const DisplayedDocument* dd,
     ctx = zond_pdf_document_get_ctx( dd->zond_pdf_document );
     doc = zond_pdf_document_get_pdf_doc( dd->zond_pdf_document );
 
-    zond_pdf_document_mutex_lock( dd->zond_pdf_document );
-
     //schon nameddest zur Seite?
+    zond_pdf_document_mutex_lock( dd->zond_pdf_document );
     rc = pdf_document_get_dest( ctx, doc, anbindung.von.seite,
             (gpointer*) &ziel->ziel_id_von, TRUE, errmsg );
-    if ( rc )
-    {
-        zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
-
-        ERROR_S
-    }
+    zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
+    if ( rc ) ERROR_S
 
     //nameddest herausfinden bzw. einfügen
+    zond_pdf_document_mutex_lock( dd->zond_pdf_document );
     rc = pdf_document_get_dest( ctx, doc, anbindung.bis.seite,
             (gpointer*) &ziel->ziel_id_bis, TRUE, errmsg );
-    if ( rc )
-    {
-        zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
-
-        ERROR_S
-    }
+    zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
+    if ( rc ) ERROR_S
 
     gint page_number1 = -1;
     gint page_number2 = -1;
@@ -236,47 +228,32 @@ ziele_erzeugen_ziel( GtkWidget* window, const DisplayedDocument* dd,
                     "Anbindungen gespeichert werden", "Änderungen speichern?", NULL );
             if ( rc == GTK_RESPONSE_YES )
             {
+                zond_pdf_document_mutex_lock( dd->zond_pdf_document );
                 rc = zond_pdf_document_save( dd->zond_pdf_document, errmsg );
-                if ( rc )
-                {
-                    zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
-                    ERROR_S_VAL( -2 )
-                }
-            }
-            else
-            {
                 zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
-
-                return 1;
+                if ( rc ) ERROR_S_VAL( -2 )
             }
+            else return 1;
         }
-        else zond_pdf_document_close_doc_and_pages( dd->zond_pdf_document );
+        else
+        {
+            zond_pdf_document_mutex_lock( dd->zond_pdf_document );
+            zond_pdf_document_close_doc_and_pages( dd->zond_pdf_document );
+            zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
+        }
 
         //namedDest einfügen
+        zond_pdf_document_mutex_lock( dd->zond_pdf_document );
         rc = SetDestPage( dd, page_number1, page_number2,
                 &ziel->ziel_id_von, &ziel->ziel_id_bis, errmsg );
-        if ( rc )
-        {
-            display_message( window, "Anbindung konnte nicht erzeugt "
-                    "werden\n\n", *errmsg, NULL );
-            g_free( *errmsg );
+        zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
+        if ( rc ) ERROR_S_VAL( -2 )
 
-            rc = zond_pdf_document_reopen_doc_and_pages( dd->zond_pdf_document, errmsg );
-            zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
-            if ( rc ) ERROR_S_VAL( -2 )
-
-            return 1;
-        }
-
+        zond_pdf_document_mutex_lock( dd->zond_pdf_document );
         rc = zond_pdf_document_reopen_doc_and_pages( dd->zond_pdf_document, errmsg );
-        if ( rc )
-        {
-            zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
-            ERROR_SOND_VAL( "zond_pdf_document_reopen_doc_and_pages", -2 )
-        }
+        zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
+        if ( rc ) ERROR_S_VAL( -2 )
     }
-
-    zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
 
     ziel->index_von = anbindung.von.index;
     ziel->index_bis = anbindung.bis.index;
@@ -451,14 +428,14 @@ ziele_erzeugen_anbindung( PdfViewer* pv, gint* ptr_new_node, gchar** errmsg )
     rc = ziele_erzeugen_ziel( pv->vf, dd_von, anbindung, ziel, errmsg );
     if ( rc ) ziele_free( ziel );
     if ( rc == 1 ) return 1;
-    else if ( rc == -1 ) ERROR_SOND( "ziele_erzeugen_ziel" )
-    else if ( rc == -2 ) ERROR_SOND_VAL( "ziele_erzeugen_ziel", -2 )
+    else if ( rc == -1 ) ERROR_S
+    else if ( rc == -2 ) ERROR_S_VAL( -2 )
 
     rc = ziele_einfuegen_anbindung( pv->zond,
             zond_pdf_document_get_path( dd_von->zond_pdf_document ), anchor_id, kind,
             anbindung, ziel, errmsg );
     ziele_free( ziel );
-    if ( rc == -1 ) ERROR_SOND( "ziele_einfuegen_anbindung" )
+    if ( rc == -1 ) ERROR_S
 
     if ( ptr_new_node ) *ptr_new_node = rc;
 

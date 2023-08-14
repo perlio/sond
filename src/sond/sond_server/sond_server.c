@@ -1,12 +1,16 @@
 #include <libgen.h>         // dirname
 #include <unistd.h>         // readlink
-#include <linux/limits.h>   // PATH_MAX
 #include <gio/gio.h>
 #include <stdio.h>
 #include <mysql.h>
 #include <libsoup/soup.h>
 #include <json-glib/json-glib.h>
 
+#ifdef __linux__
+#include <linux/limits.h>   // PATH_MAX
+#endif // __linux__
+
+#include "../../misc.h"
 
 #define G_LOG_DOMAIN "SondServer"
 
@@ -187,8 +191,8 @@ log_init( SondServer* sond_server )
     date_time = g_date_time_new_now_local( );
     datetime_iso = g_date_time_format_iso8601( date_time );
     g_date_time_unref( date_time );
-    sond_server->log_file = g_strconcat( sond_server->base_dir, "/logs/log_",
-            datetime_iso, ".log", NULL );
+    sond_server->log_file = g_strconcat( sond_server->base_dir, "logs/log_SondServer_", NULL);
+            //datetime_iso, ".log", NULL );
     g_free( datetime_iso );
 
     file = freopen( sond_server->log_file, "a", stdout );
@@ -227,7 +231,7 @@ get_auth_token( GKeyFile* key_file, SondServer* sond_server )
     soup_message = soup_message_new( SOUP_METHOD_POST, url_text );
     g_free( url_text );
 
-    body_text = g_strdup_printf( "user=%s&password=%s", sond_server->seafile_user,sond_server->seafile_password );
+    body_text = g_strdup_printf( "username=%s&password=%s", sond_server->seafile_user,sond_server->seafile_password );
     body = g_bytes_new( body_text, strlen( body_text ) );
     g_free( body_text );
     soup_message_set_request_body_from_bytes( soup_message, NULL, body );
@@ -237,7 +241,7 @@ get_auth_token( GKeyFile* key_file, SondServer* sond_server )
     g_object_unref( soup_message );
     g_object_unref( soup_session );
     if ( error ) g_error( "Auth-Token konnte nicht gelesen werden:\n%s", error->message );
-
+printf( "%s\n", g_bytes_get_data( response, NULL));
     parser = json_parser_new( );
     if ( !json_parser_load_from_data( parser, g_bytes_get_data( response, NULL ), -1, &error ) )
             g_error( "Auth-Token konnte nicht geparst werden:\n%s", error->message );
@@ -306,7 +310,6 @@ main( gint argc, gchar** argv )
     gchar* ip_address = NULL;
     guint16 port = 0;
     gchar* conf_file = NULL;
-    gchar result[PATH_MAX] = { 0 };
     ssize_t count = 0;
 
     if ( argc != 4 ) g_error( "Usage: SondServer [password SondServer] [password Mariadb-user] [password Seafile-user]" );
@@ -314,13 +317,16 @@ main( gint argc, gchar** argv )
     sond_server.seafile_password = argv[3];
 
     //Arbeitserzeichnis ermitteln
-    count = readlink("/proc/self/exe", result, PATH_MAX);
-    if (count == -1) g_error( "Programmverzeichnis konnte nicht ermittelt werden - %s", strerror( errno ) );
-    sond_server.base_dir = g_path_get_dirname( result );
+    sond_server.base_dir = get_base_dir( );
+
+#ifdef TESTING
+//    log_init( &sond_server );
+#endif // TESTING
 
     keyfile = g_key_file_new( );
 
-    conf_file = g_strconcat( sond_server.base_dir, "/SondServer.conf", NULL );
+    conf_file = g_strconcat( sond_server.base_dir, "SondServer.conf", NULL );
+    printf("%s\n", conf_file);
     success = g_key_file_load_from_file( keyfile, conf_file,
             G_KEY_FILE_KEEP_COMMENTS | G_KEY_FILE_KEEP_TRANSLATIONS, &error );
     g_free( conf_file );
@@ -373,8 +379,6 @@ main( gint argc, gchar** argv )
     if ( !success ) g_error( "g_socket_listener_add_address gibt Fehler zurück: %s", error->message );
 
     g_signal_connect (socket, "incoming", G_CALLBACK (callback_socket_incoming), &sond_server );
-
-    log_init( &sond_server );
 
     sond_server.loop = g_main_loop_new( NULL, FALSE );
 

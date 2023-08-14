@@ -284,19 +284,6 @@ seiten_abfrage_seiten( PdfViewer* pv, const gchar* title, gint* winkel )
 /*
 **  Seiten OCR
 */
-static gint
-seiten_ocr_foreach( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg )
-{
-    ViewerPageNew* viewer_page = NULL;
-
-    viewer_page = g_ptr_array_index( pv->arr_pages, page_pv );
-    viewer_page->thread = 0;
-    g_signal_emit_by_name( pv->v_adj, "value-changed", NULL );
-
-    return 0;
-}
-
-
 void
 cb_pv_seiten_ocr( GtkMenuItem* item, gpointer data )
 {
@@ -346,17 +333,16 @@ cb_pv_seiten_ocr( GtkMenuItem* item, gpointer data )
                 pdf_document_page->stext_page );
         pdf_document_page->stext_page = NULL;
 
-        pdf_document_page->thread = 0;
+        pdf_document_page->thread &= 2;
 
-        //Flag ViewerPage auf unvollständig gerendert setzen
-        rc = viewer_foreach( pv->zond->arr_pv, pdf_document_page, seiten_ocr_foreach,
-                NULL, &errmsg );
-        if ( rc )
+        //Damit speichern angeht - gibt keinen Fehler zurück, wenn func == NULL
+        viewer_foreach( pv, pdf_document_page, NULL, NULL, &errmsg );
+/*        if ( rc )
         {
-            display_message( pv->vf, "Fehler - OCR\n\nBei Aufruf viewer_foreach:\n",
-                    errmsg, NULL );
+            display_message( pv->vf, "Fehler - OCR\n\n", errmsg, NULL );
             g_free( errmsg );
         }
+*/
     }
 
     g_ptr_array_unref( arr_document_page );
@@ -376,9 +362,9 @@ seiten_refresh_layouts( GPtrArray* arr_pv )
         {
             viewer_refresh_layout( pv, 0 );
             g_object_set_data( G_OBJECT(pv->layout), "dirty", NULL );
-        }
 
-        g_signal_emit_by_name( pv->v_adj, "value-changed", NULL );
+            g_signal_emit_by_name( pv->v_adj, "value-changed", NULL );
+        }
     }
 
     return;
@@ -439,7 +425,7 @@ seiten_drehen_foreach( PdfViewer* pv, gint page_pv, gpointer data, gchar** errms
     }
 
     viewer_page->thread = 0;
-    g_signal_emit_by_name( pv->v_adj, "value-changed", NULL );
+//    g_signal_emit_by_name( pv->v_adj, "value-changed", NULL );
 
     return 0;
 }
@@ -500,16 +486,11 @@ seiten_drehen( PdfViewer* pv, GPtrArray* arr_document_page, gint winkel, gchar**
             ERROR_SOND( "seiten_drehen_pdf" )
         }
 
-        //annots neu laden
-        if ( pdf_document_page->arr_annots )
-        {
-            g_ptr_array_remove_range( pdf_document_page->arr_annots, 0, pdf_document_page->arr_annots->len );
-            zond_pdf_document_page_load_annots( pdf_document_page );
-        }
+//        zond_pdf_document_unload_page( pdf_document_page );
 
         zond_pdf_document_mutex_unlock( pdf_document_page->document );
 
-        while ( pdf_document_page->thread &= 1 )
+        while ( pdf_document_page->thread & 1 )
                 viewer_transfer_rendered( (PdfViewer*) pdf_document_page->thread_pv, TRUE );
 
         fz_drop_display_list( zond_pdf_document_get_ctx( pdf_document_page->document ),
@@ -520,15 +501,15 @@ seiten_drehen( PdfViewer* pv, GPtrArray* arr_document_page, gint winkel, gchar**
                 pdf_document_page->stext_page );
         pdf_document_page->stext_page = NULL;
 
-        pdf_document_page->thread = 0;
+        pdf_document_page->thread &= 2;
 
-        rc = viewer_foreach( pv->zond->arr_pv, pdf_document_page,
+        rc = viewer_foreach( pv, pdf_document_page,
                 seiten_drehen_foreach, GINT_TO_POINTER(winkel), errmsg );
         if ( rc )
         {
             viewer_save_and_close( pv );
 
-            ERROR_SOND( "viewer_foreach" )
+            ERROR_S
         }
     }
 
@@ -577,29 +558,11 @@ cb_pv_seiten_drehen( GtkMenuItem* item, gpointer data )
 static gint
 seiten_cb_loesche_seite( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg )
 {
-    GPtrArray** p_arr_pv = data;
-
     gint rc = 0;
-    gboolean closed = FALSE;
     GtkTreeIter iter;
     ViewerPageNew* viewer_page = NULL;
 
-    //in Array suchen, ob pv schon vorhanden
-    for ( gint i = 0; i < (*p_arr_pv)->len; i++ )
-    {
-        if ( g_ptr_array_index( *p_arr_pv, i ) == pv )
-        {
-            closed = TRUE;
-            break;
-        }
-    }
-
-    //Falls noch nicht: erstmal thread_pool abstellen
-    if ( closed == FALSE )
-    {
-        viewer_close_thread_pool_and_transfer( pv );
-        g_ptr_array_add( *p_arr_pv, pv );
-    }
+    viewer_close_thread_pool_and_transfer( pv );
 
     //pv muß neues layout haben!
     g_object_set_data( G_OBJECT(pv->layout), "dirty", GINT_TO_POINTER(1) );
@@ -689,36 +652,44 @@ seiten_loeschen( PdfViewer* pv, GPtrArray* arr_document_page, gchar** errmsg )
     if ( rc )
     {
         if ( rc == -1 ) ERROR_S
-        if ( rc == 1 ) return -2;
+        if ( rc == 1 ) return 1;
     }
 
     fz_context* ctx = zond_pdf_document_get_ctx( pv->dd->zond_pdf_document );
 
-    GPtrArray* arr_pv = g_ptr_array_new( );
-
     for ( gint i = arr_document_page->len - 1; i >= 0; i-- )
     {
-        PdfDocumentPage* pdf_document_page = g_ptr_array_index( arr_document_page, i );
+        PdfDocumentPage* pdf_document_page = NULL;
+        gint page_doc = 0;
+
+        pdf_document_page = g_ptr_array_index( arr_document_page, i );
+        page_doc = pdf_document_page->page_doc;
 
         //macht - sofern noch nicht geschehen - thread_pool des pv dicht, in dem Seite angezeigt wird
         //Dann wird Seite aus pv gelöscht
-        //seiten_cb_loesche_seite gibt niemals Fehler zurück
-        viewer_foreach( pv->zond->arr_pv, pdf_document_page,
-                seiten_cb_loesche_seite, (gpointer) &arr_pv, errmsg );
+        rc = viewer_foreach( pv, pdf_document_page, seiten_cb_loesche_seite, NULL,
+                errmsg );
+        if ( rc ) ERROR_S
+
+        //index anschleßender Seiten um 1 reduzieren
+        for ( gint o = page_doc; o < zond_pdf_document_get_number_of_pages( pv->dd->zond_pdf_document ); o++ )
+        {
+            PdfDocumentPage* pdf_document_page_ = NULL;
+
+            pdf_document_page_ = zond_pdf_document_get_pdf_document_page( pv->dd->zond_pdf_document, o );
+
+//            zond_pdf_document_unload_page( pdf_document_page_ );
+            pdf_document_page_->page_doc--;
+        }
 
         //Seite aus document entfernen
         //vor pdf_delete_page, da ansonsten noch ref auf page?!
-        g_ptr_array_remove_index( zond_pdf_document_get_arr_pages( pv->dd->zond_pdf_document ),
-                pdf_document_page->page_doc ); //ist gleich page_pv
+        g_ptr_array_remove_index( zond_pdf_document_get_arr_pages( pv->dd->zond_pdf_document ), page_doc ); //ist gleich page_pv
 
         //Seite aus PDF entfernen
         fz_try( ctx ) pdf_delete_page( ctx, zond_pdf_document_get_pdf_doc( pv->dd->zond_pdf_document ),
-                pdf_document_page->page_doc );
-        fz_catch( ctx )
-        {
-            g_ptr_array_unref( arr_pv );
-            ERROR_MUPDF( "pdf_delete_page" )
-        }
+                page_doc );
+        fz_catch( ctx ) ERROR_MUPDF( "pdf_delete_page" )
     }
 /*
     //säubern, um ins Leere gehende Outlines etc. zu entfernen
@@ -731,9 +702,7 @@ seiten_loeschen( PdfViewer* pv, GPtrArray* arr_document_page, gchar** errmsg )
         ERROR_MUPDF( "retainpages" )
     }
 */
-    seiten_refresh_layouts( arr_pv );
-
-    g_ptr_array_unref( arr_pv );
+    seiten_refresh_layouts( pv->zond->arr_pv );
 
     gtk_tree_selection_unselect_all(
             gtk_tree_view_get_selection( GTK_TREE_VIEW(pv->tree_thumb) ) );
@@ -759,6 +728,7 @@ cb_pv_seiten_loeschen( GtkMenuItem* item, gpointer data )
         display_message( pv->vf, "Seiten aus Auszug löschen nicht möglich" , NULL );
         return;
     }
+
     count = pv->arr_pages->len;
 
     //zu löschende Seiten holen
@@ -780,7 +750,7 @@ cb_pv_seiten_loeschen( GtkMenuItem* item, gpointer data )
         return;
     }
 #ifndef VIEWER
-    else if ( rc == -2 ) display_message( pv->vf, "Fehler in Seiten löschen -\n\n"
+    else if ( rc == 1 ) display_message( pv->vf, "Fehler in Seiten löschen -\n\n"
             "Zu löschende Seiten enthalten Anbindungen", NULL );
 #endif // VIEWER
 
@@ -791,30 +761,43 @@ cb_pv_seiten_loeschen( GtkMenuItem* item, gpointer data )
 /*
 **      Seiten einfügen
 */
+typedef struct _InfoInsert
+{
+    guint pos;
+    gint count;
+} InfoInsert;
+
 static gint
 seiten_cb_einfuegen( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg )
 {
     DisplayedDocument* dd = NULL;
-    gint page_doc = 0;
+    InfoInsert* info_insert = NULL;
 
-    gint count = GPOINTER_TO_INT(data);
-//ToDo: ordentlich machen!
-    dd = document_get_dd( pv, page_pv, NULL, NULL, &page_doc );
-    if ( dd->anbindung )
+    info_insert = (InfoInsert*) data;
+
+    if ( pv->dd->next || pv->dd->anbindung )
     {
-        //Seite, nach der eingefügt wird, ist ist erste oder letzte Seite der Anbindung
-        if ( (page_doc == dd->anbindung->von.seite) || (dd->anbindung->bis.seite) ) return 0;
+        gint page_dd = 0;
 
-        //wenn mittendrin: anbindung "aufweiten"
-        dd->anbindung->bis.seite += count;
+        if ( info_insert->pos == 0 ) return 0;
+        if ( page_pv == 0 ) return 0; //ist ja am Rand (Anfang) von Anbindung
+
+        dd = document_get_dd( pv, page_pv, NULL, &page_dd, NULL );
+        if ( page_dd == 0 ) return 0; //auch am Anfang von Anbindung!
+        //auf am Ende von Anbindung muß nicht geprüft werden, da
+            //- page_pv - außer wenn pos == 0, schon ausgeschlossen - nach einzufügenden Seiten liegt
+            //- also wenn page_pv am Rand ist eins davor nicht am Rand
+        //wenn in Anbindung, dann Anbindung aufbiegen
+        if ( dd->anbindung ) dd->anbindung->bis.seite += info_insert->count;
     }
+    else dd = pv->dd;
 
-    for ( gint u = 0; u < count; u++ )
+    for ( gint u = 0; u < info_insert->count; u++ )
     {
         ViewerPageNew* viewer_page = NULL;
         GtkTreeIter iter_tmp;
 
-        viewer_page = viewer_new_page( pv, dd->zond_pdf_document, page_doc + u );
+        viewer_page = viewer_new_page( pv, dd->zond_pdf_document, info_insert->pos + u );
 
         g_ptr_array_insert( pv->arr_pages, page_pv + u, viewer_page );
 
@@ -883,24 +866,42 @@ void
 cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
 {
     PdfViewer* pv = (PdfViewer*) data;
-
-    //in Auszug soll nix eingefügt werden
-    //ansonsten Zweideutigkeiten betr. Seite, nach der eingefügt werden soll, unvermeidlich
-    if ( pv->dd->next != NULL || pv->dd->anbindung != NULL ) return;
-
+    DisplayedDocument* dd = NULL;
+    gint page_doc = 0;
     gint ret = 0;
     gint rc = 0;
     guint pos = 0;
     pdf_document* doc_merge = NULL;
     gint count = 0;
-    gint count_old = 0;
     gchar* errmsg = NULL;
+    InfoInsert info_insert = { 0 };
 
     ret = seiten_abfrage_seitenzahl( pv, &pos );
     if ( ret == -1 ) return;
 
-    count_old = zond_pdf_document_get_number_of_pages( pv->dd->zond_pdf_document );
-    if ( pos > count_old || pos < 0 ) pos = count_old;
+    if ( pos > pv->arr_pages->len ) pos = pv->arr_pages->len;
+    if ( pos < 0 ) pos = 0;
+
+    //Falls Auszug: nicht zwischen "Grenzen" des dd einfügen - doppeldeutig
+    if ( pv->dd->next != NULL || pv->dd->anbindung != NULL )
+    {
+        gint page_dd = 0;
+        gint dd_len = 0;
+
+        dd = document_get_dd( pv, pos - 1, NULL, &page_dd, &page_doc );
+        dd_len = document_get_num_of_pages_of_dd( dd );
+
+        if ( page_dd == 0 && page_dd == dd_len - 1 )
+        {
+            display_message( pv->vf, "In Auszug darf nicht an den Rändern der "
+                    "Abschnitte eingefügt werden", NULL );
+
+            return;
+        }
+
+        pos = page_doc + 1;
+    }
+    else dd = pv->dd;
 
     //komplette Datei wird eingefügt
     if ( ret == 1 )
@@ -929,37 +930,35 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
     }
     else if ( ret == 2 ) doc_merge = pdf_keep_document( pv->zond->ctx, pv->zond->pv_clip ); //Clipboard
 
-    //Erstmal alle thread_pools abstellen, soweit eingefügt werden muß
-    for ( gint i = 0; i < pv->zond->arr_pv->len; i++ )
-    {
-        PdfViewer* pv_vergleich = g_ptr_array_index( pv->zond->arr_pv, i );
-        DisplayedDocument* dd = pv_vergleich->dd;
-
-        do
-        {
-            if ( dd->zond_pdf_document == pv->dd->zond_pdf_document )
-            {
-                viewer_close_thread_pool_and_transfer( pv_vergleich );
-                break;
-            }
-        } while ( (dd = dd->next) );
-    }
-
     count = pdf_count_pages( pv->zond->ctx, doc_merge );
 
     //Seiten einfügen - kein mutex, weil alle thread-pools aus
-    rc = zond_pdf_document_insert_pages( pv->dd->zond_pdf_document, pos,
+    zond_pdf_document_mutex_lock( dd->zond_pdf_document );
+    rc = zond_pdf_document_insert_pages( dd->zond_pdf_document, pos,
             pv->zond->ctx, doc_merge, &errmsg );
+    zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
     pdf_drop_document(pv->zond->ctx, doc_merge );
-
-    //betroffene viewer-seiten einfügen
-    rc = viewer_foreach( pv->zond->arr_pv,
-            zond_pdf_document_get_pdf_document_page( pv->dd->zond_pdf_document,
-            pos ), seiten_cb_einfuegen, GINT_TO_POINTER(count), &errmsg );
     if ( rc )
     {
-        display_message( pv->vf, "Fehler Einfügen -\n\nBei Aufruf viewer_foreach:\n",
-                errmsg, "\n\nViewer wird geschlossen", NULL );
+        display_message( pv->vf, "Fehler Einfügen\n\n", errmsg,
+                "\n\nViewer wird geschlossen", NULL );
+        g_free( errmsg );
+        viewer_save_and_close( pv );
+
+        return;
+    }
+
+    info_insert.pos = pos;
+    info_insert.count = count;
+
+    //betroffene viewer-seiten einfügen
+    rc = viewer_foreach( pv, zond_pdf_document_get_pdf_document_page(
+            pv->dd->zond_pdf_document, (pos) ? pos - 1 : pos + count ), seiten_cb_einfuegen,
+            &info_insert, &errmsg );
+    if ( rc )
+    {
+        display_message( pv->vf, "Fehler Einfügen -\n\n", errmsg,
+                "\n\nViewer wird geschlossen", NULL );
         g_free( errmsg );
         viewer_save_and_close( pv );
 
@@ -1005,7 +1004,7 @@ seiten_create_document( PdfViewer* pv, GArray* arr_page_pv, gchar** errmsg )
         {
             pdf_drop_document( pv->zond->ctx, doc_dest );
 
-            ERROR_SOND_VAL( "pdf_copy_page", NULL )
+            ERROR_S_VAL( NULL )
         }
     }
 

@@ -152,6 +152,8 @@ zond_pdf_document_page_free( PdfDocumentPage* pdf_document_page )
     fz_drop_display_list( priv->ctx, pdf_document_page->display_list );
     if ( pdf_document_page->arr_annots ) g_ptr_array_unref( pdf_document_page->arr_annots );
 
+    g_free( pdf_document_page );
+
     return;
 }
 
@@ -604,6 +606,25 @@ zond_pdf_document_is_open( const gchar* path )
 }
 
 
+void
+zond_pdf_document_unload_page( PdfDocumentPage* pdf_document_page )
+{
+    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( pdf_document_page->document );
+
+    if ( pdf_document_page->arr_annots )
+    {
+        g_ptr_array_unref( pdf_document_page->arr_annots );
+        pdf_document_page->arr_annots = NULL;
+    }
+    fz_drop_page( priv->ctx, &(pdf_document_page->page->super) );
+    pdf_document_page->page = NULL;
+
+    pdf_document_page->thread &= 12; //bit 2 ausschalten
+
+    return;
+}
+
+
 gint
 zond_pdf_document_reopen_doc_and_pages( ZondPdfDocument* self, gchar** errmsg )
 {
@@ -639,11 +660,7 @@ zond_pdf_document_close_doc_and_pages( ZondPdfDocument* self )
     ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
 
     for ( gint i = 0; i < priv->pages->len; i++ )
-    {
-        PdfDocumentPage* pdf_document_page = g_ptr_array_index( priv->pages, i );
-        fz_drop_page( priv->ctx, &(pdf_document_page->page->super) );
-        pdf_document_page->page = NULL;
-    }
+            zond_pdf_document_unload_page( g_ptr_array_index( priv->pages, i ) );
 
     pdf_drop_document( priv->ctx, priv->doc );
     priv->doc = NULL;
@@ -657,19 +674,13 @@ zond_pdf_document_save( ZondPdfDocument* self, gchar** errmsg )
 {
     ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
 
-    if ( priv->dirty )
-    {
-        gint rc = 0;
+    gint rc = 0;
 
-        rc = pdf_save( priv->ctx, priv->doc, priv->path,
-                (void (*) (gpointer, gpointer)) zond_pdf_document_close_doc_and_pages, self, NULL, errmsg );
-        if ( rc ) ERROR_S
+    rc = pdf_save( priv->ctx, priv->doc, priv->path,
+            (void (*) (gpointer, gpointer)) zond_pdf_document_close_doc_and_pages, self, NULL, errmsg );
+    if ( rc ) ERROR_S
 
-        rc = zond_pdf_document_reopen_doc_and_pages( self, errmsg );
-        if ( rc ) ERROR_S
-
-        priv->dirty = FALSE;
-    }
+    priv->dirty = FALSE;
 
     return 0;
 }
@@ -795,18 +806,17 @@ zond_pdf_document_insert_pages( ZondPdfDocument* zond_pdf_document, gint pos,
 
     count = pdf_count_pages( ctx, pdf_doc );
     if ( count == 0 ) return 0;
-
+/*
+    //Seiten, die nach hinten verschoben werden, droppen
     for ( gint i = pos; i < priv->pages->len; i++ )
-    {
-        PdfDocumentPage* pdf_document_page = g_ptr_array_index( priv->pages, i );
-        fz_drop_page( ctx, &pdf_document_page->page->super );
-    }
-
+            zond_pdf_document_unload_page( g_ptr_array_index( priv->pages, i ) );
+*/
     //einfügen in doc
     rc = pdf_copy_page( ctx, pdf_doc, 0, pdf_count_pages( ctx, pdf_doc ) - 1,
             priv->doc, pos, errmsg );
     if ( rc ) ERROR_S
 
+    //eingefügte Seiten als pdf_document_page erzeugen und initiieren
     for ( gint i = pos; i < pos + count; i++ )
     {
         gint rc = 0;
@@ -820,25 +830,15 @@ zond_pdf_document_insert_pages( ZondPdfDocument* zond_pdf_document, gint pos,
         if ( rc == -1 ) ERROR_S
     }
 
+    //verschobene Seiten haben neuen index
     for ( gint i = pos + count; i < priv->pages->len; i++ )
     {
-        pdf_annot* annot = NULL;
-
         PdfDocumentPage* pdf_document_page = g_ptr_array_index( priv->pages, i );
-
-        fz_try( priv->ctx ) pdf_document_page->page =
-                pdf_load_page( priv->ctx, priv->doc, i );
-        fz_catch( priv->ctx ) ERROR_MUPDF( "pdf_load_page" )
-
-        annot = pdf_first_annot( priv->ctx, pdf_document_page->page );
-        for ( gint u = 0; u < pdf_document_page->arr_annots->len; u++ )
-        {
-            PdfDocumentPageAnnot* pdf_document_page_annot = NULL;
-
-            pdf_document_page_annot = g_ptr_array_index( pdf_document_page->arr_annots, u );
-            pdf_document_page_annot->annot = annot;
-            pdf_document_page_annot->content = pdf_annot_contents( priv->ctx, annot );
-        }
+/*      vielleicht nicht erforderlich, wenn page_obj bleibt; nur index ändern
+        rc = zond_pdf_document_init_page( zond_pdf_document, pdf_document_page, i, errmsg );
+        if ( rc == -1 ) ERROR_S
+*/
+        pdf_document_page->page_doc = i;
     }
 
     return 0;

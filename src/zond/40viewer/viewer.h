@@ -147,7 +147,7 @@ void viewer_transfer_rendered( PdfViewer*, gboolean );
 
 gint viewer_render_stext_page_fast( fz_context*, PdfDocumentPage*, gchar** );
 
-gint viewer_foreach( GPtrArray*, PdfDocumentPage*, gint (*) (PdfViewer*, gint,
+gint viewer_foreach( PdfViewer*, PdfDocumentPage*, gint (*) (PdfViewer*, gint,
         gpointer, gchar**), gpointer, gchar** errmsg );
 
 PdfViewer* viewer_start_pv( Projekt* );

@@ -147,14 +147,21 @@ pdf_copy_page( fz_context* ctx, pdf_document* doc_src, gint page_from,
         for ( gint i = 0; i < nelem(copy_list); i++ )
         {
             obj = pdf_dict_get( ctx, page_ref, copy_list[i] ); //ctx wird gar nicht gebraucht
-            fz_try( ctx ) if (obj != NULL)
-                    pdf_dict_put_drop( ctx, page_dict, copy_list[i],
-                    pdf_graft_mapped_object( ctx, graft_map, obj ) );
-            fz_catch( ctx )
+            if (obj != NULL)
             {
-                pdf_drop_graft_map( ctx, graft_map );
-                pdf_drop_obj( ctx, page_dict );
-                ERROR_MUPDF( "pdf_dict_put_drop" )
+                fz_try( ctx )
+                {
+                    pdf_obj* grafted_obj = NULL;
+
+                    grafted_obj = pdf_graft_mapped_object( ctx, graft_map, obj );
+                    pdf_dict_put_drop( ctx, page_dict, copy_list[i], grafted_obj );
+                }
+                fz_catch( ctx )
+                {
+                    pdf_drop_graft_map( ctx, graft_map );
+                    pdf_drop_obj( ctx, page_dict );
+                    ERROR_MUPDF( "pdf_dict_put_drop" )
+                }
             }
         }
 
@@ -170,10 +177,15 @@ pdf_copy_page( fz_context* ctx, pdf_document* doc_src, gint page_from,
         {
             pdf_drop_obj( ctx, page_dict );
             pdf_drop_obj( ctx, ref );
-            pdf_drop_graft_map( ctx, graft_map );
         }
-        fz_catch( ctx ) ERROR_MUPDF( "pdf_add_object/_insert_page" )
+        fz_catch( ctx )
+        {
+            pdf_drop_graft_map( ctx, graft_map );
+            ERROR_MUPDF( "pdf_add_object/_insert_page" )
+        }
     }
+
+    pdf_drop_graft_map( ctx, graft_map );
 
     return 0;
 }
@@ -242,13 +254,13 @@ pdf_save( fz_context* ctx, pdf_document* pdf_doc, const gchar* path,
     if ( g_remove( path ) )
     {
         g_free( path_tmp );
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_remove", strerror( errno ), NULL );
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_remove:\n", strerror( errno ), NULL );
         return -1;
     }
     if ( g_rename( path_tmp, path ) )
     {
         g_free( path_tmp );
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_rename", strerror( errno ), NULL );
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_rename:\n", strerror( errno ), NULL );
         return -1;
     }
 

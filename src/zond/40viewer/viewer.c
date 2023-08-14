@@ -218,15 +218,12 @@ viewer_transfer_rendered( PdfViewer* pdfv, gboolean protect )
 
         //thread von viewer_page und pdf_document_page fertig: bit 1 löschen
         viewer_page->thread &= 6;
-        viewer_page->pdf_document_page->thread &= 6;
+        viewer_page->pdf_document_page->thread &= 14;
         viewer_page->pdf_document_page->thread_pv = NULL;
 
         //Beim rendern ein Fehler aufgetreten
-        if ( render_response.error )
-        {
-            display_message( pdfv->vf, "Fehler beim Rendern:\n\nBei Aufruf render_page_thread",
-                    render_response.error_message, NULL );
-        }
+        if ( render_response.error ) display_message( pdfv->vf,
+                "Fehler beim Rendern\n\n", render_response.error_message, NULL );
 
         if ( render_response.error == 0 || render_response.error > 2 )
                 viewer_page->pdf_document_page->thread |= 2;
@@ -235,6 +232,9 @@ viewer_transfer_rendered( PdfViewer* pdfv, gboolean protect )
                 viewer_page->pdf_document_page->thread |= 4;
 
         if ( render_response.error == 0 || render_response.error > 4 )
+                viewer_page->pdf_document_page->thread |= 8;
+
+        if ( !(viewer_page->thread & 2) && (render_response.error == 0 || render_response.error > 5) )
         {
             gint x_pos = 0;
             gint width = 0;
@@ -251,10 +251,10 @@ viewer_transfer_rendered( PdfViewer* pdfv, gboolean protect )
             gtk_layout_put( GTK_LAYOUT(pdfv->layout), GTK_WIDGET(viewer_page->image_page), x_pos, viewer_page->y_pos );
             g_object_unref( viewer_page->pixbuf_page );
 
-            viewer_page->thread |= 2; //bit 1: image gerendert
+            viewer_page->thread |= 2; //bit 2: image gerendert
         }
 
-        if ( render_response.error == 0 )
+        if ( !(viewer_page->thread & 4) && render_response.error == 0 )
         {
             //tree_thumb
             GtkTreeIter iter;
@@ -308,7 +308,7 @@ viewer_thread_render( PdfViewer* pv, gint page )
 
     viewer_page = g_ptr_array_index( pv->arr_pages, page );
 
-    if ( viewer_page->thread == 6 && viewer_page->pdf_document_page->thread == 6 )
+    if ( viewer_page->thread == 6 && viewer_page->pdf_document_page->thread == 14 )
             return; //alles fertig, nix zu tun
 
     if ( viewer_page->thread & 1 ) return; //Seite läuft schon
@@ -339,10 +339,11 @@ viewer_thread_render( PdfViewer* pv, gint page )
 
     if ( !(viewer_page->pdf_document_page->thread & 2) ) thread_data += 1;
     if ( !(viewer_page->pdf_document_page->thread & 4) ) thread_data += 2;
-    if ( !(viewer_page->thread & 2) ) thread_data += 4;
-    if ( !(viewer_page->thread & 4) ) thread_data += 8;
+    if ( !(viewer_page->pdf_document_page->thread & 8) ) thread_data += 4;
+    if ( !(viewer_page->thread & 2) ) thread_data += 8;
+    if ( !(viewer_page->thread & 4) ) thread_data += 16;
 
-    thread_data += page << 4;
+    thread_data += page << 5;
 
     if ( !g_thread_pool_push( pv->thread_pool_page, GINT_TO_POINTER(thread_data), &error ) )
     {
@@ -478,6 +479,7 @@ viewer_new_page( PdfViewer* pdfv, ZondPdfDocument* zond_pdf_document, gint page_
     viewer_page->pdfv = pdfv;
     viewer_page->pdf_document_page =
             zond_pdf_document_get_pdf_document_page( zond_pdf_document, page_doc );
+
     viewer_page->crop = viewer_page->pdf_document_page->rect;
 
     return viewer_page;
@@ -644,19 +646,39 @@ viewer_save_dirty_docs( PdfViewer* pdfv, gboolean ask )
 
             if ( rc == GTK_RESPONSE_YES )
             {
+                gint rc = 0;
                 gchar* errmsg = NULL;
 
                 zond_pdf_document_mutex_lock( dd->zond_pdf_document );
-                gint rc = zond_pdf_document_save( dd->zond_pdf_document, &errmsg );
-                zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
+
+                rc = zond_pdf_document_save( dd->zond_pdf_document, &errmsg );
                 if ( rc )
                 {
                     display_message( pdfv->vf, "Fehler bei Speichern:\n\n",
                             errmsg, NULL );
-
                     g_free( errmsg );
+                    zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
+
+                    continue;
                 }
-                zond_pdf_document_set_dirty( dd->zond_pdf_document, FALSE );
+
+                if ( !ask )
+                {
+                    gint rc = 0;
+                    gchar* errmsg = NULL;
+
+                    rc = zond_pdf_document_reopen_doc_and_pages( dd->zond_pdf_document, &errmsg );
+                    if ( rc )
+                    {
+                        display_message( pdfv->vf, "Fehler bei Speichern:\n\n",
+                                errmsg, NULL );
+                        g_free( errmsg );
+                        zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
+
+                        continue;
+                    }
+                }
+                zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
             }
             else if ( rc == GTK_RESPONSE_DELETE_EVENT ) return 1;
         }
@@ -1053,14 +1075,26 @@ viewer_render_stext_page_fast( fz_context* ctx, PdfDocumentPage* pdf_document_pa
     while ( pdf_document_page->thread & 1 )
             viewer_transfer_rendered( pdf_document_page->thread_pv, TRUE );
 
-    if ( pdf_document_page->thread & 4 ) return 0;
+    if ( pdf_document_page->thread & 8 ) return 0;
 
-    if ( !(pdf_document_page->thread & 2) )
+    //page oder display_list nicht geladen
+    if ( !(pdf_document_page->thread & 4) )
     {
         gint rc = 0;
 
+        if ( !(pdf_document_page->thread & 2) )
+        {
+            gint rc = 0;
+
+            rc = zond_pdf_document_load_page( pdf_document_page, errmsg );
+            if ( rc ) ERROR_S
+
+            pdf_document_page->thread |= 2;
+        }
+
         rc = viewer_render_stext_page_from_page( pdf_document_page, errmsg );
         if ( rc ) ERROR_S
+
     }
     else //display_list fertig
     {
@@ -1070,7 +1104,7 @@ viewer_render_stext_page_fast( fz_context* ctx, PdfDocumentPage* pdf_document_pa
         if ( rc ) ERROR_S
     }
 
-    pdf_document_page->thread |= 4;
+    pdf_document_page->thread |= 8;
 
     return 0;
 }
@@ -1181,11 +1215,6 @@ cb_viewer_text_search( GtkWidget* widget, gpointer data )
             fz_try( ctx ) anzahl = fz_search_stext_page( ctx,
                     viewer_page->pdf_document_page->stext_page, search_text, NULL,
                     quads, 99 );
-//            fz_always( ctx ) if ( viewer_page->thread == 0 )
-//            {
-//                fz_drop_stext_page( ctx, viewer_page->pdf_document_page->stext_page );
-//                viewer_page->pdf_document_page->stext_page = NULL;
-//            }
             fz_catch( ctx )
             {
                 pv->text_occ.not_found = TRUE;
@@ -1276,7 +1305,7 @@ cb_viewer_spinbutton_value_changed( GtkSpinButton* spin_button, gpointer user_da
         viewer_page = g_ptr_array_index( pv->arr_pages, i );
         if ( viewer_page->image_page ) gtk_image_clear( GTK_IMAGE(viewer_page->image_page) );
         viewer_page->pixbuf_page = NULL;
-        viewer_page->thread = 0;
+        viewer_page->thread &= 4; //thumb bleibt
     }
 
     //Alte Position merken
@@ -1397,17 +1426,8 @@ cb_pv_copy_text( GtkMenuItem* item, gpointer data )
 
 
 static gint
-viewer_on_text( PdfViewer* pv, PdfPunkt pdf_punkt )
+viewer_on_text( PdfViewer* pv, ViewerPageNew* viewer_page, fz_point punkt )
 {
-    ViewerPageNew* viewer_page = NULL;
-
-    viewer_page = g_ptr_array_index( pv->arr_pages, pdf_punkt.seite );
-
-    //Test, ob stext_page schon gerendert; falls ja, kein weiteres mutex erforderlich,
-    //weil nur durch odf_ocr zurückgesetzt werden kann
-    if ( !(viewer_page->pdf_document_page->thread & 4) ||
-            (viewer_page->pdf_document_page->thread & 1) ) return 0;
-
 	for ( fz_stext_block* block = viewer_page->pdf_document_page->stext_page->first_block; block;
             block = block->next)
 	{
@@ -1416,8 +1436,8 @@ viewer_on_text( PdfViewer* pv, PdfPunkt pdf_punkt )
 		for ( fz_stext_line* line = block->u.t.first_line; line; line = line->next)
 		{
 			fz_rect box = line->bbox;
-			if ( pdf_punkt.punkt.x >= box.x0 && pdf_punkt.punkt.x <= box.x1 &&
-                    pdf_punkt.punkt.y >= box.y0 && pdf_punkt.punkt.y <= box.y1 )
+			if ( punkt.x >= box.x0 && punkt.x <= box.x1 &&
+                    punkt.y >= box.y0 && punkt.y <= box.y1 )
             {
                 gboolean quer = FALSE;
                 gint rotate = 0;
@@ -1448,17 +1468,8 @@ inside_quad( fz_quad quad, fz_point punkt )
 
 
 static PdfDocumentPageAnnot*
-viewer_on_annot( PdfViewer* pv, PdfPunkt pdf_punkt )
+viewer_on_annot( PdfViewer* pv, ViewerPageNew* viewer_page, fz_point point )
 {
-    ViewerPageNew* viewer_page = NULL;
-
-    if ( pdf_punkt.seite >= pv->arr_pages->len ) return NULL;
-
-    viewer_page = g_ptr_array_index( pv->arr_pages, pdf_punkt.seite);
-
-    if ( !(viewer_page->pdf_document_page->thread & 2) ||
-            (viewer_page->pdf_document_page->thread & 1) ) return NULL;
-
     for ( gint i = 0; i < viewer_page->pdf_document_page->arr_annots->len; i++ )
     {
         PdfDocumentPageAnnot* pdf_document_page_annot = NULL;
@@ -1472,11 +1483,11 @@ viewer_on_annot( PdfViewer* pv, PdfPunkt pdf_punkt )
             for ( gint u = 0; u < pdf_document_page_annot->annot_text_markup.arr_quads->len; u++ )
             {
                 fz_quad quad = g_array_index( pdf_document_page_annot->annot_text_markup.arr_quads, fz_quad, u );
-                if ( inside_quad( quad, pdf_punkt.punkt ) ) return pdf_document_page_annot;
+                if ( inside_quad( quad, point ) ) return pdf_document_page_annot;
             }
         }
         else if ( pdf_document_page_annot->type == PDF_ANNOT_TEXT )
-                {if ( fz_is_point_inside_rect( pdf_punkt.punkt,
+                {if ( fz_is_point_inside_rect( point,
                 pdf_document_page_annot->annot_text.rect ) ) return pdf_document_page_annot;}
     }
 
@@ -1485,14 +1496,14 @@ viewer_on_annot( PdfViewer* pv, PdfPunkt pdf_punkt )
 
 
 static void
-viewer_set_cursor( PdfViewer* pv, gint rc,
+viewer_set_cursor( PdfViewer* pv, gint rc, ViewerPageNew* viewer_page,
         PdfDocumentPageAnnot* pdf_document_page_annot, PdfPunkt pdf_punkt )
 {
     gint on_text = 0;
 
     if ( rc ) gdk_window_set_cursor( pv->gdk_window, pv->cursor_default );
     else if ( pdf_document_page_annot ) gdk_window_set_cursor( pv->gdk_window, pv->cursor_annot );
-    else if ( (on_text = viewer_on_text( pv, pdf_punkt )) )
+    else if ( (viewer_page->pdf_document_page->thread & 8) && (on_text = viewer_on_text( pv, viewer_page, pdf_punkt.punkt )) )
     {
         if ( on_text == 1 ) gdk_window_set_cursor( pv->gdk_window, pv->cursor_text );
         else if ( on_text == 2 ) gdk_window_set_cursor( pv->gdk_window, pv->cursor_vtext );
@@ -1560,18 +1571,18 @@ viewer_cb_change_annot( PdfViewer* pv, gint page_pv, gpointer data, gchar** errm
 
 
 gint
-viewer_foreach( GPtrArray* arr_pv, PdfDocumentPage* pdf_document_page,
+viewer_foreach( PdfViewer* pdfv, PdfDocumentPage* pdf_document_page,
         gint (*cb_foreach_pv) (PdfViewer*, gint, gpointer, gchar**),
         gpointer data, gchar** errmsg )
 {
     zond_pdf_document_set_dirty( pdf_document_page->document, TRUE );
 
-    for ( gint p = 0; p < arr_pv->len; p++ )
+    for ( gint p = 0; p < pdfv->zond->arr_pv->len; p++ )
     {
         gint zaehler = 0;
         gboolean dirty = FALSE;
 
-        PdfViewer* pv_vergleich = g_ptr_array_index( arr_pv, p );
+        PdfViewer* pv_vergleich = g_ptr_array_index( pdfv->zond->arr_pv, p );
         DisplayedDocument* dd_vergleich = pv_vergleich->dd;
 
         do
@@ -1660,13 +1671,13 @@ cb_viewer_swindow_key_press( GtkWidget* swindow, GdkEvent* event, gpointer user_
         fz_drop_display_list( zond_pdf_document_get_ctx( viewer_page->pdf_document_page->document ),
                 viewer_page->pdf_document_page->display_list );
         viewer_page->pdf_document_page->display_list = NULL;
-        viewer_page->pdf_document_page->thread &= 4;
+        viewer_page->pdf_document_page->thread &= 10; //4 löschen
 
 
         g_ptr_array_remove( viewer_page->pdf_document_page->arr_annots, pv->clicked_annot );
         pv->clicked_annot = NULL;
 
-        rc = viewer_foreach( pv->zond->arr_pv, viewer_page->pdf_document_page,
+        rc = viewer_foreach( pv, viewer_page->pdf_document_page,
                 viewer_cb_change_annot, NULL, &errmsg );
         if ( rc )
         {
@@ -1885,7 +1896,7 @@ viewer_annot_edit_closed( GtkWidget* popover, gpointer data )
     zond_pdf_document_mutex_unlock( viewer_page->pdf_document_page->document );
 
     gtk_text_buffer_set_text( text_buffer, "", -1 );
-    rc = viewer_foreach( pdfv->zond->arr_pv, viewer_page->pdf_document_page,
+    rc = viewer_foreach( pdfv, viewer_page->pdf_document_page,
             NULL, NULL, &errmsg );
     if ( rc )
     {
@@ -1903,31 +1914,32 @@ cb_viewer_layout_release_button( GtkWidget* layout, GdkEvent* event, gpointer da
 {
     gint rc = 0;
     gchar* errmsg = NULL;
+    ViewerPageNew* viewer_page = NULL;
+    PdfPunkt pdf_punkt = { 0 };
 
     PdfViewer* pv = (PdfViewer*) data;
 
     if ( event->button.button != GDK_BUTTON_PRIMARY ) return FALSE;
     if ( !(pv->dd) ) return TRUE;
 
-    ViewerPageNew* viewer_page = g_ptr_array_index( pv->arr_pages, pv->click_pdf_punkt.seite );
-
-    PdfPunkt pdf_punkt = { 0 };
     rc = viewer_abfragen_pdf_punkt( pv,
             fz_make_point( event->motion.x, event->motion.y ), &pdf_punkt );
+    viewer_page = g_ptr_array_index( pv->arr_pages, pdf_punkt.seite );
+    while ( viewer_page->pdf_document_page->thread & 1 )
+            viewer_transfer_rendered( viewer_page->pdf_document_page->thread_pv, TRUE );
 
     pv->click_on_text = FALSE;
 
-    viewer_set_cursor( pv, rc, pv->clicked_annot, pdf_punkt );
+    viewer_set_cursor( pv, rc, viewer_page, pv->clicked_annot, pdf_punkt );
 
     if ( pv->highlight.page[0] != -1 )
     {
         if ( (pv->state == 1 || pv->state == 2) )
         {
-            zond_pdf_document_mutex_lock( viewer_page->pdf_document_page->document );
+            if ( !(viewer_page->pdf_document_page->thread & 2) ) return TRUE;
 
             //ToDo: Annot über mehrere Seiten
             rc = viewer_annot_create( viewer_page, pv, &errmsg );
-            zond_pdf_document_mutex_unlock( viewer_page->pdf_document_page->document );
             pv->highlight.page[0] = -1;
             if ( rc )
             {
@@ -1938,15 +1950,12 @@ cb_viewer_layout_release_button( GtkWidget* layout, GdkEvent* event, gpointer da
                 return TRUE;
             }
 
-            while ( viewer_page->pdf_document_page->thread & 1 )
-                    viewer_transfer_rendered( viewer_page->pdf_document_page->thread_pv, TRUE );
-
             fz_drop_display_list( zond_pdf_document_get_ctx( viewer_page->pdf_document_page->document ),
                     viewer_page->pdf_document_page->display_list );
             viewer_page->pdf_document_page->display_list = NULL;
-            viewer_page->pdf_document_page->thread &= 4;
+            viewer_page->pdf_document_page->thread &= 10;
 
-            rc = viewer_foreach( pv->zond->arr_pv, viewer_page->pdf_document_page,
+            rc = viewer_foreach( pv, viewer_page->pdf_document_page,
                     viewer_cb_change_annot, NULL, &errmsg );
             if ( rc )
             {
@@ -1978,12 +1987,9 @@ cb_viewer_layout_release_button( GtkWidget* layout, GdkEvent* event, gpointer da
                     viewer_clamp_icon_rect( viewer_page,
                     pv->clicked_annot->annot_text.rect );
 
-            zond_pdf_document_mutex_lock( viewer_page->pdf_document_page->document );
-
             //neues rect speichert
             fz_try( ctx ) pdf_set_annot_rect( ctx, pv->clicked_annot->annot,
                     viewer_rotate_rect( viewer_page, pv->clicked_annot->annot_text.rect ) );
-            fz_always( ctx ) zond_pdf_document_mutex_unlock( viewer_page->pdf_document_page->document );
             fz_catch( ctx )
             {
                 display_message( pv->vf, "Fehler -Änderung Annot kann nicht "
@@ -1994,14 +2000,11 @@ cb_viewer_layout_release_button( GtkWidget* layout, GdkEvent* event, gpointer da
                 return TRUE;
             }
 
-            while ( viewer_page->pdf_document_page->thread & 1 )
-                    viewer_transfer_rendered( viewer_page->pdf_document_page->thread_pv, TRUE );
-
             fz_drop_display_list( ctx, viewer_page->pdf_document_page->display_list );
             viewer_page->pdf_document_page->display_list = NULL;
-            viewer_page->pdf_document_page->thread &= 4;
+            viewer_page->pdf_document_page->thread &= 10;
 
-            rc = viewer_foreach( pv->zond->arr_pv, viewer_page->pdf_document_page,
+            rc = viewer_foreach( pv, viewer_page->pdf_document_page,
                     viewer_cb_change_annot, NULL, &errmsg );
             if ( rc )
             {
@@ -2071,81 +2074,96 @@ static gboolean
 cb_viewer_layout_motion_notify( GtkWidget* layout, GdkEvent* event, gpointer data )
 {
     gint rc = 0;
+    PdfPunkt pdf_punkt = { 0 };
+    ViewerPageNew* viewer_page = NULL;
 
     PdfViewer* pv = (PdfViewer*) data;
 
     if ( !(pv->dd) ) return TRUE;
 
-    PdfPunkt pdf_punkt = { 0 };
     rc = viewer_abfragen_pdf_punkt( pv, fz_make_point( event->motion.x,
             event->motion.y ), &pdf_punkt );
+
+    viewer_page = g_ptr_array_index( pv->arr_pages, pdf_punkt.seite );
+    while ( (viewer_page->pdf_document_page->thread & 1 ) )
+            viewer_transfer_rendered( viewer_page->pdf_document_page->thread_pv, TRUE );
 
     //Text erfassen, wenn linker button gehalten
     if ( event->motion.state == GDK_BUTTON1_MASK )
     {
         if ( pv->click_on_text && !pv->clicked_annot )
         {
-            PdfPunkt start = { 0, };
-            PdfPunkt end = { 0, };
             gint zaehler = 0;
+            fz_context* ctx = NULL;
+            gint n = 0;
+            fz_point point_start = { 0, };
+            fz_point point_end = { 0, };
 
-            if (pv->click_pdf_punkt.seite <= pdf_punkt.seite )
+            if ( !(viewer_page->pdf_document_page->thread & 8) ||
+                    !(viewer_page->thread & 2) ) return TRUE;
+
+            if ( pv->click_pdf_punkt.seite < pdf_punkt.seite )
             {
-                start = pv->click_pdf_punkt;
-                end = pdf_punkt;
+                //zum ersten von der aktuellen Seite vorspulen
+                while ( pv->highlight.page[zaehler] < pdf_punkt.seite ) zaehler++;
+
+                //Anfangspunkt = oben links
+                point_start = fz_make_point( 0, 0 );
+                point_end = pdf_punkt.punkt;
             }
-            else
+            else if ( pv->click_pdf_punkt.seite > pdf_punkt.seite )
             {
-                start = pdf_punkt;
-                end = pv->click_pdf_punkt;
-            }
+                while ( pv->highlight.page[zaehler] > pdf_punkt.seite ) zaehler++;
 
-            for ( gint i = start.seite; i <= end.seite; i++ )
+                point_start = pdf_punkt.punkt;
+                point_end = fz_make_point( viewer_page->crop.x1, viewer_page->crop.y1 );
+            }
+            else //gleiche Seite
             {
-                ViewerPageNew* viewer_page = NULL;
-                fz_context* ctx = NULL;
-                gint n = 0;
-                fz_point point_start = { 0, };
-                fz_point point_end = { 0, };
-
-                viewer_page = g_ptr_array_index( pv->arr_pages, i );
-                ctx = zond_pdf_document_get_ctx( viewer_page->pdf_document_page->document );
-
-                if ( i == start.seite )
+                if ( pv->click_pdf_punkt.punkt.y < pdf_punkt.punkt.y )
                 {
-                    point_start = start.punkt;
-
-                    if ( i == end.seite ) point_end = end.punkt;
-                    else if ( i < end.seite )
-                            point_end = fz_make_point( viewer_page->crop.x1, viewer_page->crop.y1 );
+                    point_start = pv->click_pdf_punkt.punkt;
+                    point_end = pdf_punkt.punkt;
                 }
-                else if ( i == end.seite ) // && != start.seite, s.o.
+                else if ( pv->click_pdf_punkt.punkt.y > pdf_punkt.punkt.y )
                 {
-                    point_start = fz_make_point( 0, 0 );
-                    point_end = end.punkt;
+                    point_start = pdf_punkt.punkt;
+                    point_end = pv->click_pdf_punkt.punkt;
                 }
-                else //zwischendrin
+                else
                 {
-                    point_start = fz_make_point( 0, 0 );
-                    point_end = fz_make_point( viewer_page->crop.x1, viewer_page->crop.y1 );
+                    if ( pv->click_pdf_punkt.punkt.x < pdf_punkt.punkt.x )
+                    {
+                        point_start = pv->click_pdf_punkt.punkt;
+                        point_end = pdf_punkt.punkt;
+                    }
+                    else //>=, weil gleich ist egal
+                    {
+                        point_start = pdf_punkt.punkt;
+                        point_end = pv->click_pdf_punkt.punkt;
+                    }
                 }
-
-                n = fz_highlight_selection( ctx, viewer_page->pdf_document_page->stext_page,
-                        point_start, point_end, &pv->highlight.quad[zaehler],
-                        999 - zaehler );
-
-                for ( gint u = 0; u < n; u++ ) pv->highlight.page[u + zaehler] = i;
-
-                zaehler += n;
-
-                pv->highlight.page[zaehler] = -1;
-
-                gtk_widget_queue_draw( viewer_page->image_page );
             }
+            ctx = zond_pdf_document_get_ctx( viewer_page->pdf_document_page->document );
+
+            n = fz_highlight_selection( ctx, viewer_page->pdf_document_page->stext_page,
+                    point_start, point_end, &pv->highlight.quad[zaehler],
+                    999 - zaehler );
+
+            for ( gint u = 0; u < n; u++ ) pv->highlight.page[u + zaehler] = pdf_punkt.seite;
+
+            zaehler += n;
+
+            pv->highlight.page[zaehler] = -1;
+
+            gtk_widget_queue_draw( viewer_page->image_page );
+            //ToDo: ggf. Nachbarseiten neu zeichnen, wenn ruckartig bewegt wird
         }
         else if ( pv->clicked_annot && pv->clicked_annot->type == PDF_ANNOT_TEXT )
         {
-            ViewerPageNew* viewer_page = NULL;
+            if ( rc || pdf_punkt.seite != pv->click_pdf_punkt.seite ) return TRUE;
+
+            if ( !(viewer_page->thread & 2) ) return TRUE;
 
             gtk_popover_popdown( GTK_POPOVER(pv->annot_pop) );
 
@@ -2154,7 +2172,6 @@ cb_viewer_layout_motion_notify( GtkWidget* layout, GdkEvent* event, gpointer dat
             pv->clicked_annot->annot_text.rect.y0 -= (pv->y - event->motion.y_root) / pv->zoom * 100;
             pv->clicked_annot->annot_text.rect.y1 -= (pv->y - event->motion.y_root) / pv->zoom * 100;
 
-            viewer_page = g_ptr_array_index( pv->arr_pages, pv->click_pdf_punkt.seite );
             gtk_widget_queue_draw( viewer_page->image_page );
         }
         else //nicht auf Text und nicht auf Text-annot
@@ -2172,7 +2189,9 @@ cb_viewer_layout_motion_notify( GtkWidget* layout, GdkEvent* event, gpointer dat
     {
         PdfDocumentPageAnnot* pdf_document_page_annot = NULL;
 
-        if ( (pdf_document_page_annot = viewer_on_annot( pv, pdf_punkt )) )
+        if ( (viewer_page->pdf_document_page->thread & 2) &&
+                (viewer_page->thread & 2) &&
+                (pdf_document_page_annot = viewer_on_annot( pv, viewer_page, pdf_punkt.punkt )) )
         {
             //Popover anzeigen, falls /Contents text enthält
             if ( pdf_document_page_annot->type == PDF_ANNOT_TEXT &&
@@ -2183,9 +2202,6 @@ cb_viewer_layout_motion_notify( GtkWidget* layout, GdkEvent* event, gpointer dat
             {
                 GdkRectangle gdk_rectangle = { 0, };
                 gint x = 0, y = 0, width = 0, height = 0;
-                ViewerPageNew* viewer_page = NULL;
-
-                viewer_page = g_ptr_array_index( pv->arr_pages, pdf_punkt.seite );
 
                 gtk_container_child_get( GTK_CONTAINER(pv->layout),
                         viewer_page->image_page, "y", &y, NULL );
@@ -2212,7 +2228,7 @@ cb_viewer_layout_motion_notify( GtkWidget* layout, GdkEvent* event, gpointer dat
         }
         else gtk_popover_popdown( GTK_POPOVER(pv->annot_pop) );
 
-        viewer_set_cursor( pv, rc, pdf_document_page_annot, pdf_punkt ); //Kein Knopf gedrückt
+        viewer_set_cursor( pv, rc, viewer_page, pdf_document_page_annot, pdf_punkt ); //Kein Knopf gedrückt
     }
 
     return TRUE;
@@ -2239,6 +2255,8 @@ cb_viewer_layout_press_button( GtkWidget* layout, GdkEvent* event, gpointer
     if ( event->button.type == GDK_BUTTON_PRESS &&
             event->button.button == 1 )
     {
+        ViewerPageNew* viewer_page = NULL;
+
         pv->click_pdf_punkt = pdf_punkt;
         pv->highlight.page[0] = -1;
         pv->text_occ.index_act = -1;
@@ -2248,11 +2266,14 @@ cb_viewer_layout_press_button( GtkWidget* layout, GdkEvent* event, gpointer
 
         gtk_widget_set_sensitive( pv->item_copy, FALSE );
 
-//        gtk_popover_popdown( GTK_POPOVER(pv->annot_pop_edit) );
+        viewer_page = g_ptr_array_index( pv->arr_pages, pdf_punkt.seite );
+        while ( (viewer_page->pdf_document_page->thread & 1) )
+                viewer_transfer_rendered( viewer_page->pdf_document_page->thread_pv, TRUE );
 
         PdfDocumentPageAnnot* pdf_document_page_annot = NULL;
 
-        if ( !rc && (pdf_document_page_annot = viewer_on_annot( pv, pdf_punkt )) )
+        if ( (viewer_page->pdf_document_page->thread & 2) &&
+                (pdf_document_page_annot = viewer_on_annot( pv, viewer_page, pdf_punkt.punkt )) )
         {
             if ( pv->clicked_annot && pv->clicked_annot->type == PDF_ANNOT_TEXT )
             {
@@ -2272,36 +2293,29 @@ cb_viewer_layout_press_button( GtkWidget* layout, GdkEvent* event, gpointer
                     pv->clicked_annot->annot_text.open = FALSE;
             pv->clicked_annot = NULL;
 
-            if ( pv->state == 3 ) //Neue AnnotText einfügen
+            if ( (viewer_page->pdf_document_page->thread & 2) && pv->state == 3 ) //Neue AnnotText einfügen
             {
                 gint rc = 0;
                 gchar* errmsg = NULL;
 
-                ViewerPageNew* viewer_page = g_ptr_array_index( pv->arr_pages, pdf_punkt.seite );
-
-                zond_pdf_document_mutex_lock( viewer_page->pdf_document_page->document );
                 rc = viewer_annot_create( viewer_page, pv, &errmsg );
-                zond_pdf_document_mutex_unlock( viewer_page->pdf_document_page->document );
                 if ( rc )
                 {
-                    display_message( pv->vf, "Fehler - Annotation einfügen:\n\nBei Aufruf "
-                            "viewer_annot_create:\n", errmsg, NULL );
+                    display_message( pv->vf, "Fehler - Annotation einfügen:\n\n",
+                            errmsg, NULL );
                     g_free( errmsg );
 
                     return TRUE;
                 }
-
-                while ( viewer_page->pdf_document_page->thread & 1 )
-                        viewer_transfer_rendered( viewer_page->pdf_document_page->thread_pv, TRUE );
 
                 fz_drop_display_list( zond_pdf_document_get_ctx(
                         viewer_page->pdf_document_page->document ),
                         viewer_page->pdf_document_page->display_list );
                 viewer_page->pdf_document_page->display_list = NULL;
 
-                viewer_page->pdf_document_page->thread &= 4;
+                viewer_page->pdf_document_page->thread &= 10;
 
-                rc = viewer_foreach( pv->zond->arr_pv, viewer_page->pdf_document_page,
+                rc = viewer_foreach( pv, viewer_page->pdf_document_page,
                         viewer_cb_change_annot, NULL, &errmsg );
                 if ( rc )
                 {
@@ -2321,7 +2335,8 @@ cb_viewer_layout_press_button( GtkWidget* layout, GdkEvent* event, gpointer
                 //Nach Einfügen von annot-text: auf Zeiger zurückflitschen
                 gtk_toggle_button_set_active( GTK_TOGGLE_BUTTON(pv->button_zeiger), TRUE );
             }
-            else if ( viewer_on_text( pv, pdf_punkt ) ) pv->click_on_text = TRUE;
+            else if ( (viewer_page->pdf_document_page->thread & 4) &&
+                    viewer_on_text( pv, viewer_page, pdf_punkt.punkt ) ) pv->click_on_text = TRUE;
             else gdk_window_set_cursor( pv->gdk_window, pv->cursor_grab );
         }
 
@@ -2370,8 +2385,8 @@ cb_viewer_layout_press_button( GtkWidget* layout, GdkEvent* event, gpointer
             if ( rc == -2 )
             {
                 display_message( pv->vf, "Fehler - Dokument konnte nicht gespeichert/"
-                        "erneut geöffnet werden\n\nBei Aufruf ziele_erzeugen_"
-                        "anbindung:\n", errmsg, "\n\nViewer wird geschlossen", NULL );
+                        "erneut geöffnet werden\n\n", errmsg,
+                        "\n\nViewer wird geschlossen", NULL );
                 g_free( errmsg );
                 viewer_schliessen( pv );
             }

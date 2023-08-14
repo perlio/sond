@@ -395,8 +395,6 @@ cb_datei_ocr( GtkMenuItem* item, gpointer data )
             continue;
         }
 
-        zond_pdf_document_set_dirty( dd->zond_pdf_document, TRUE );
-
         rc = zond_pdf_document_save( dd->zond_pdf_document, &errmsg );
         if ( rc )
         {

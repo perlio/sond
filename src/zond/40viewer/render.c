@@ -252,21 +252,6 @@ render_display_list( fz_context* ctx, PdfDocumentPage* pdf_document_page,
     }
 
     zond_pdf_document_mutex_lock( pdf_document_page->document );
-
-    if ( !pdf_document_page->page )
-    {
-        gint rc = 0;
-
-        rc = zond_pdf_document_load_page( pdf_document_page, errmsg );
-        if ( rc )
-        {
-            zond_pdf_document_mutex_unlock( pdf_document_page->document );
-            fz_drop_device( ctx, list_device );
-            fz_drop_display_list( ctx, display_list );
-            ERROR_S
-        }
-    }
-
     //page durchs list-device laufen lassen
     fz_try( ctx ) pdf_run_page( ctx, pdf_document_page->page, list_device, fz_identity, NULL );
     fz_always( ctx )
@@ -300,8 +285,8 @@ render_page_thread( gpointer data, gpointer user_data )
     PdfViewer* pv =(PdfViewer*) user_data;
 
     thread_data = GPOINTER_TO_INT( data );
-    viewer_page = g_ptr_array_index( pv->arr_pages, thread_data >> 4 );
-    render_response.page = thread_data >> 4;
+    render_response.page = thread_data >> 5;
+    viewer_page = g_ptr_array_index( pv->arr_pages, render_response.page );
 
     ctx = fz_clone_context( zond_pdf_document_get_ctx( viewer_page->pdf_document_page->document ) );
     if ( !ctx )
@@ -320,7 +305,11 @@ render_page_thread( gpointer data, gpointer user_data )
 
     if ( thread_data & 1 )
     {
-        rc = render_display_list( ctx, viewer_page->pdf_document_page, &errmsg );
+        gint rc = 0;
+
+        zond_pdf_document_mutex_lock( viewer_page->pdf_document_page->document );
+        rc = zond_pdf_document_load_page( viewer_page->pdf_document_page, &errmsg );
+        zond_pdf_document_mutex_unlock( viewer_page->pdf_document_page->document );
         if ( rc == -1 )
         {
             render_response.error = 2;
@@ -338,7 +327,7 @@ render_page_thread( gpointer data, gpointer user_data )
 
     if ( thread_data & 2 )
     {
-        rc = render_stext_page_from_display_list( ctx, viewer_page->pdf_document_page, &errmsg );
+        rc = render_display_list( ctx, viewer_page->pdf_document_page, &errmsg );
         if ( rc == -1 )
         {
             render_response.error = 3;
@@ -356,9 +345,7 @@ render_page_thread( gpointer data, gpointer user_data )
 
     if ( thread_data & 4 )
     {
-        gint rc = 0;
-
-        rc = render_pixmap( ctx, viewer_page, pv->zoom, &errmsg );
+        rc = render_stext_page_from_display_list( ctx, viewer_page->pdf_document_page, &errmsg );
         if ( rc == -1 )
         {
             render_response.error = 4;
@@ -378,10 +365,30 @@ render_page_thread( gpointer data, gpointer user_data )
     {
         gint rc = 0;
 
-        rc = render_thumbnail( ctx, viewer_page, &errmsg );
+        rc = render_pixmap( ctx, viewer_page, pv->zoom, &errmsg );
         if ( rc == -1 )
         {
             render_response.error = 5;
+            render_response.error_message = g_strconcat( "Bei Aufruf ", __func__,
+                    ":\n", errmsg, NULL );
+            g_free( errmsg );
+
+            g_mutex_lock( &pv->mutex_arr_rendered );
+            g_array_append_val( pv->arr_rendered, render_response );
+            g_mutex_unlock( &pv->mutex_arr_rendered );
+
+            return;
+        }
+    }
+
+    if ( thread_data & 16 )
+    {
+        gint rc = 0;
+
+        rc = render_thumbnail( ctx, viewer_page, &errmsg );
+        if ( rc == -1 )
+        {
+            render_response.error = 6;
             render_response.error_message = g_strconcat( "Bei Aufruf ", __func__,
                     ":\n", errmsg, NULL );
             g_free( errmsg );
