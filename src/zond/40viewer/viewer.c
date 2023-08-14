@@ -916,6 +916,8 @@ viewer_abfragen_pdf_punkt( PdfViewer* pv, fz_point punkt, PdfPunkt* pdf_punkt )
         pdf_punkt->seite = 0;
         pdf_punkt->punkt.y = 0;
         ret = -1;
+
+        viewer_page = g_ptr_array_index( pv->arr_pages, 0 );
     }
     else
     {
