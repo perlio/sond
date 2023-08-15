@@ -78,8 +78,6 @@ gboolean zond_pdf_document_is_dirty( ZondPdfDocument* );
 
 void zond_pdf_document_set_dirty( ZondPdfDocument*, gboolean );
 
-void zond_pdf_document_unload_page( PdfDocumentPage* );
-
 gint zond_pdf_document_reopen_doc_and_pages( ZondPdfDocument*, gchar** );
 
 void zond_pdf_document_close_doc_and_pages( ZondPdfDocument* );

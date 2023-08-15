@@ -1041,19 +1041,6 @@ viewer_render_stext_page_from_page( PdfDocumentPage* pdf_document_page, gchar** 
     //doc-lock muß gesetzt werden, da _load_page auf document zugreift
     zond_pdf_document_mutex_lock( pdf_document_page->document );
 
-    if ( !pdf_document_page->page )
-    {
-        gint rc = 0;
-
-        rc = zond_pdf_document_load_page( pdf_document_page, errmsg );
-        if ( rc )
-        {
-            zond_pdf_document_mutex_unlock( pdf_document_page->document );
-            fz_drop_device( ctx, s_t_device );
-            ERROR_S
-        }
-    }
-
     //page durchs list-device laufen lassen
     fz_try( ctx ) pdf_run_page( ctx, pdf_document_page->page, s_t_device, fz_identity, NULL );
     fz_always( ctx )
@@ -1088,7 +1075,9 @@ viewer_render_stext_page_fast( fz_context* ctx, PdfDocumentPage* pdf_document_pa
         {
             gint rc = 0;
 
+            zond_pdf_document_mutex_lock( pdf_document_page->document );
             rc = zond_pdf_document_load_page( pdf_document_page, errmsg );
+            zond_pdf_document_mutex_unlock( pdf_document_page->document );
             if ( rc ) ERROR_S
 
             pdf_document_page->thread |= 2;
@@ -1392,24 +1381,19 @@ cb_pv_copy_text( GtkMenuItem* item, gpointer data )
                 end = i - 1;
                 //text sammeln von page_prev von start - end
                 viewer_page = g_ptr_array_index( pv->arr_pages, page_prev );
+                while ( viewer_page->pdf_document_page->thread & 1 )
+                        viewer_transfer_rendered( viewer_page->pdf_document_page->thread_pv, TRUE );
 
                 ctx = zond_pdf_document_get_ctx( viewer_page->pdf_document_page->document );
 
-                add = fz_copy_selection( ctx, viewer_page->pdf_document_page->stext_page,
+                if ( viewer_page->pdf_document_page->thread & 8 )
+                {
+                    add = fz_copy_selection( ctx, viewer_page->pdf_document_page->stext_page,
                         pv->highlight.quad[start].ul, pv->highlight.quad[end].lr,
                         FALSE );
 
-                if ( text )
-                {
-                    tmp = g_strconcat( text, add, NULL );
-                    g_free( text );
+                    text = add_string( text, add );
                 }
-                else tmp = g_strdup( add );
-
-                fz_free( ctx, add );
-
-                text = g_strdup( tmp );
-                g_free( tmp );
             }
 
             page_prev = pv->highlight.page[i];
@@ -1653,6 +1637,9 @@ cb_viewer_swindow_key_press( GtkWidget* swindow, GdkEvent* event, gpointer user_
 
         ViewerPageNew* viewer_page = g_ptr_array_index( pv->arr_pages, pv->click_pdf_punkt.seite );
 
+        while ( viewer_page->pdf_document_page->thread & 1 )
+                viewer_transfer_rendered( viewer_page->pdf_document_page->thread_pv, TRUE );
+
         gtk_popover_popdown( GTK_POPOVER(pv->annot_pop_edit) );
 
         zond_pdf_document_mutex_lock( viewer_page->pdf_document_page->document );
@@ -1666,9 +1653,6 @@ cb_viewer_swindow_key_press( GtkWidget* swindow, GdkEvent* event, gpointer user_
 
             return FALSE;
         }
-
-        while ( viewer_page->pdf_document_page->thread & 1 )
-                viewer_transfer_rendered( viewer_page->pdf_document_page->thread_pv, TRUE );
 
         fz_drop_display_list( zond_pdf_document_get_ctx( viewer_page->pdf_document_page->document ),
                 viewer_page->pdf_document_page->display_list );
@@ -1756,8 +1740,14 @@ viewer_annot_create( ViewerPageNew* viewer_page, PdfViewer* pdfv,
     else if ( pdfv->state == 2 ) art = PDF_ANNOT_UNDERLINE;
     else if ( pdfv->state == 3 ) art = PDF_ANNOT_TEXT;
 
+    zond_pdf_document_mutex_lock( viewer_page->pdf_document_page->document );
+
     fz_try( ctx ) annot = pdf_create_annot( ctx, viewer_page->pdf_document_page->page, art );
-    fz_catch( ctx ) ERROR_MUPDF( "pdf_create_annot/pdf_set_annot_color" )
+    fz_catch( ctx )
+    {
+        zond_pdf_document_mutex_unlock( viewer_page->pdf_document_page->document );
+        ERROR_MUPDF( "pdf_create_annot/pdf_set_annot_color" )
+    }
 
     if ( pdfv->state == 1 || pdfv->state == 2 )
     {
@@ -1776,6 +1766,7 @@ viewer_annot_create( ViewerPageNew* viewer_page, PdfViewer* pdfv,
             fz_catch( ctx )
             {
                 pdf_drop_annot( ctx, annot );
+                zond_pdf_document_mutex_unlock( viewer_page->pdf_document_page->document );
                 ERROR_MUPDF( "pdf_annot_quad_point" )
             }
 
@@ -1797,6 +1788,7 @@ viewer_annot_create( ViewerPageNew* viewer_page, PdfViewer* pdfv,
         fz_catch( ctx )
         {
             pdf_drop_annot( ctx, annot );
+            zond_pdf_document_mutex_unlock( viewer_page->pdf_document_page->document );
             ERROR_MUPDF( "pdf_set_annot_icon_name" )
         }
 
@@ -1804,6 +1796,7 @@ viewer_annot_create( ViewerPageNew* viewer_page, PdfViewer* pdfv,
         fz_catch( ctx )
         {
             pdf_drop_annot( ctx, annot );
+            zond_pdf_document_mutex_unlock( viewer_page->pdf_document_page->document );
             ERROR_MUPDF( "pdf_set_annot_rect" )
         }
     }
@@ -1811,6 +1804,8 @@ viewer_annot_create( ViewerPageNew* viewer_page, PdfViewer* pdfv,
     pdf_drop_annot( ctx, annot );
 
     pdf_update_page( ctx, viewer_page->pdf_document_page->page );
+
+    zond_pdf_document_mutex_unlock( viewer_page->pdf_document_page->document );
 
     pdf_document_page_annot = g_malloc0( sizeof( PdfDocumentPageAnnot ) );
 
@@ -1822,11 +1817,15 @@ viewer_annot_create( ViewerPageNew* viewer_page, PdfViewer* pdfv,
     //Text-Markup-annots
     if ( art == PDF_ANNOT_HIGHLIGHT || art == PDF_ANNOT_UNDERLINE )
     {
+        zond_pdf_document_mutex_lock( viewer_page->pdf_document_page->document );
+
         fz_try( ctx ) pdf_document_page_annot->annot_text_markup.n_quad =
                 pdf_annot_quad_point_count( ctx, annot );
         fz_catch( ctx )
         {
             g_free( pdf_document_page_annot );
+            zond_pdf_document_mutex_unlock( viewer_page->pdf_document_page->document );
+
             ERROR_MUPDF( "pdf_annot_quad_point_count" )
         }
 
@@ -1838,7 +1837,7 @@ viewer_annot_create( ViewerPageNew* viewer_page, PdfViewer* pdfv,
             fz_quad quad = pdf_annot_quad_point( ctx, annot, i );
             g_array_append_val( pdf_document_page_annot->annot_text_markup.arr_quads, quad );
         }
-
+        zond_pdf_document_mutex_unlock( viewer_page->pdf_document_page->document );
     }
     else if ( pdf_document_page_annot->type == PDF_ANNOT_TEXT )
     {
@@ -1983,6 +1982,15 @@ cb_viewer_layout_release_button( GtkWidget* layout, GdkEvent* event, gpointer da
         {
             fz_context* ctx = NULL;
 
+            if ( pv->click_pdf_punkt.seite != pdf_punkt.seite )
+            {
+                viewer_page = g_ptr_array_index( pv->arr_pages, pv->click_pdf_punkt.seite );
+                while ( (viewer_page->pdf_document_page->thread & 1) )
+                        viewer_transfer_rendered( viewer_page->pdf_document_page->thread_pv, TRUE );
+
+                if ( !(viewer_page->pdf_document_page->thread & 2) ) return TRUE;
+            }
+
             ctx = zond_pdf_document_get_ctx( viewer_page->pdf_document_page->document );
 
             pv->clicked_annot->annot_text.rect =
@@ -2115,7 +2123,7 @@ cb_viewer_layout_motion_notify( GtkWidget* layout, GdkEvent* event, gpointer dat
             }
             else if ( pv->click_pdf_punkt.seite > pdf_punkt.seite )
             {
-                while ( pv->highlight.page[zaehler] > pdf_punkt.seite ) zaehler++;
+                while ( pv->highlight.page[zaehler] < pdf_punkt.seite ) zaehler++;
 
                 point_start = pdf_punkt.punkt;
                 point_end = fz_make_point( viewer_page->crop.x1, viewer_page->crop.y1 );
@@ -2163,7 +2171,7 @@ cb_viewer_layout_motion_notify( GtkWidget* layout, GdkEvent* event, gpointer dat
         }
         else if ( pv->clicked_annot && pv->clicked_annot->type == PDF_ANNOT_TEXT )
         {
-            if ( rc || pdf_punkt.seite != pv->click_pdf_punkt.seite ) return TRUE;
+//            if ( rc || pdf_punkt.seite != pv->click_pdf_punkt.seite ) return TRUE;
 
             if ( !(viewer_page->thread & 2) ) return TRUE;
 

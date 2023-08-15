@@ -486,8 +486,6 @@ seiten_drehen( PdfViewer* pv, GPtrArray* arr_document_page, gint winkel, gchar**
             ERROR_SOND( "seiten_drehen_pdf" )
         }
 
-//        zond_pdf_document_unload_page( pdf_document_page );
-
         zond_pdf_document_mutex_unlock( pdf_document_page->document );
 
         while ( pdf_document_page->thread & 1 )
@@ -678,7 +676,6 @@ seiten_loeschen( PdfViewer* pv, GPtrArray* arr_document_page, gchar** errmsg )
 
             pdf_document_page_ = zond_pdf_document_get_pdf_document_page( pv->dd->zond_pdf_document, o );
 
-//            zond_pdf_document_unload_page( pdf_document_page_ );
             pdf_document_page_->page_doc--;
         }
 
@@ -932,11 +929,8 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
 
     count = pdf_count_pages( pv->zond->ctx, doc_merge );
 
-    //Seiten einfügen - kein mutex, weil alle thread-pools aus
-    zond_pdf_document_mutex_lock( dd->zond_pdf_document );
     rc = zond_pdf_document_insert_pages( dd->zond_pdf_document, pos,
             pv->zond->ctx, doc_merge, &errmsg );
-    zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
     pdf_drop_document(pv->zond->ctx, doc_merge );
     if ( rc )
     {

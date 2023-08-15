@@ -606,7 +606,7 @@ zond_pdf_document_is_open( const gchar* path )
 }
 
 
-void
+static void
 zond_pdf_document_unload_page( PdfDocumentPage* pdf_document_page )
 {
     ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( pdf_document_page->document );
@@ -811,9 +811,11 @@ zond_pdf_document_insert_pages( ZondPdfDocument* zond_pdf_document, gint pos,
     for ( gint i = pos; i < priv->pages->len; i++ )
             zond_pdf_document_unload_page( g_ptr_array_index( priv->pages, i ) );
 */
+    zond_pdf_document_mutex_lock( zond_pdf_document );
     //einfügen in doc
     rc = pdf_copy_page( ctx, pdf_doc, 0, pdf_count_pages( ctx, pdf_doc ) - 1,
             priv->doc, pos, errmsg );
+    zond_pdf_document_mutex_unlock( zond_pdf_document );
     if ( rc ) ERROR_S
 
     //eingefügte Seiten als pdf_document_page erzeugen und initiieren
