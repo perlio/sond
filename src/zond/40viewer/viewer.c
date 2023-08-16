@@ -1933,8 +1933,10 @@ cb_viewer_layout_release_button( GtkWidget* layout, GdkEvent* event, gpointer da
 
     viewer_set_cursor( pv, rc, viewer_page, pv->clicked_annot, pdf_punkt );
 
+    //Text ist markiert
     if ( pv->highlight.page[0] != -1 )
     {
+        //Annot ist gewählt
         if ( (pv->state == 1 || pv->state == 2) )
         {
             if ( !(viewer_page->pdf_document_page->thread & 2) ) return TRUE;
@@ -1998,8 +2000,10 @@ cb_viewer_layout_release_button( GtkWidget* layout, GdkEvent* event, gpointer da
                     pv->clicked_annot->annot_text.rect );
 
             //neues rect speichert
+            zond_pdf_document_mutex_lock( viewer_page->pdf_document_page->document );
             fz_try( ctx ) pdf_set_annot_rect( ctx, pv->clicked_annot->annot,
                     viewer_rotate_rect( viewer_page, pv->clicked_annot->annot_text.rect ) );
+            fz_always( ctx ) zond_pdf_document_mutex_unlock( viewer_page->pdf_document_page->document );
             fz_catch( ctx )
             {
                 display_message( pv->vf, "Fehler -Änderung Annot kann nicht "
@@ -2109,8 +2113,7 @@ cb_viewer_layout_motion_notify( GtkWidget* layout, GdkEvent* event, gpointer dat
             fz_point point_start = { 0, };
             fz_point point_end = { 0, };
 
-            if ( !(viewer_page->pdf_document_page->thread & 8) ||
-                    !(viewer_page->thread & 2) ) return TRUE;
+            if ( !(viewer_page->pdf_document_page->thread & 8) ) return TRUE;
 
             if ( pv->click_pdf_punkt.seite < pdf_punkt.seite )
             {
@@ -2200,7 +2203,6 @@ cb_viewer_layout_motion_notify( GtkWidget* layout, GdkEvent* event, gpointer dat
         PdfDocumentPageAnnot* pdf_document_page_annot = NULL;
 
         if ( (viewer_page->pdf_document_page->thread & 2) &&
-                (viewer_page->thread & 2) &&
                 (pdf_document_page_annot = viewer_on_annot( pv, viewer_page, pdf_punkt.punkt )) )
         {
             //Popover anzeigen, falls /Contents text enthält

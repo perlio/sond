@@ -226,7 +226,7 @@ get_auth_token( GKeyFile* key_file, SondServer* sond_server )
     if ( error ) g_error( "SEAFILE-host konnte nicht ermittelt werden:\n%s",
             error->message );
 
-    url_text = g_strdup_printf( "%s/api2/auth-token", sond_server->seafile_root_url );
+    url_text = g_strdup_printf( "%s/api2/auth-token/", sond_server->seafile_root_url );
     soup_session = soup_session_new( );
     soup_message = soup_message_new( SOUP_METHOD_POST, url_text );
     g_free( url_text );
@@ -234,14 +234,14 @@ get_auth_token( GKeyFile* key_file, SondServer* sond_server )
     body_text = g_strdup_printf( "username=%s&password=%s", sond_server->seafile_user,sond_server->seafile_password );
     body = g_bytes_new( body_text, strlen( body_text ) );
     g_free( body_text );
-    soup_message_set_request_body_from_bytes( soup_message, NULL, body );
+    soup_message_set_request_body_from_bytes( soup_message, "application/x-www-form-urlencoded", body );
     g_bytes_unref( body );
 
     response = soup_session_send_and_read( soup_session, soup_message, NULL, &error );
     g_object_unref( soup_message );
     g_object_unref( soup_session );
     if ( error ) g_error( "Auth-Token konnte nicht gelesen werden:\n%s", error->message );
-printf( "%s\n", g_bytes_get_data( response, NULL));
+
     parser = json_parser_new( );
     if ( !json_parser_load_from_data( parser, g_bytes_get_data( response, NULL ), -1, &error ) )
             g_error( "Auth-Token konnte nicht geparst werden:\n%s", error->message );
@@ -326,7 +326,6 @@ main( gint argc, gchar** argv )
     keyfile = g_key_file_new( );
 
     conf_file = g_strconcat( sond_server.base_dir, "SondServer.conf", NULL );
-    printf("%s\n", conf_file);
     success = g_key_file_load_from_file( keyfile, conf_file,
             G_KEY_FILE_KEEP_COMMENTS | G_KEY_FILE_KEEP_TRANSLATIONS, &error );
     g_free( conf_file );

@@ -337,13 +337,10 @@ cb_pv_seiten_ocr( GtkMenuItem* item, gpointer data )
 
         //Damit speichern angeht - gibt keinen Fehler zurück, wenn func == NULL
         viewer_foreach( pv, pdf_document_page, NULL, NULL, &errmsg );
-/*        if ( rc )
-        {
-            display_message( pv->vf, "Fehler - OCR\n\n", errmsg, NULL );
-            g_free( errmsg );
-        }
-*/
     }
+
+    //damit Text von Cursor "erkannt" wird
+    g_signal_emit_by_name( pv->v_adj, "value-changed", NULL );
 
     g_ptr_array_unref( arr_document_page );
 
