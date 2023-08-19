@@ -94,6 +94,10 @@ typedef struct _Pdf_Viewer
     gboolean click_on_text;
     PdfPunkt click_pdf_punkt;
 
+    //hier werden die Seitenzahlen gespeichert, die zwischen Click und letzter Mausbewgung liegen
+    gint von_alt;
+    gint bis_alt;
+
     PdfDocumentPageAnnot* clicked_annot;
     GtkWidget* annot_pop;
     GtkWidget* annot_label;
