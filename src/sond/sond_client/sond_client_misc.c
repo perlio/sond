@@ -57,14 +57,14 @@ sond_client_misc_regnr_wohlgeformt( const gchar* entry )
     return TRUE;
 }
 
-/*
+
 void
 sond_client_seadrive_test_seafile_server( SondClient* sond_client )
 {
     GList* list = NULL;
     GList* ptr = NULL;
     GError* error = NULL;
-
+/*
     list = searpc_client_call__objlist( sond_client->searpc_client,
             "seafile_get_repo_list", SEAFILE_TYPE_REPO, &error, 2, "int", 0, "int", 0 );
 if ( error ) printf("%s\n", error->message );
@@ -123,10 +123,10 @@ do{
 
 sleep(4);
 }while(1);
+*/
     return;
-*/
-/*}
-*/
+}
+
 
 gboolean
 sond_client_misc_ping_server( SondClient* sond_client, GError** error )

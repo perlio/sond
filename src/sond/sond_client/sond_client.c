@@ -5,9 +5,11 @@
 #endif // __WIN32
 
 #include "../../misc.h"
+#include "../../zond/99conv/general.h"
 
 #include "sond_client.h"
 #include "sond_client_file_manager.h"
+#include "sond_client_misc.h"
 
 //#include "libsearpc/searpc-client.h"
 #include "libsearpc/searpc-named-pipe-transport.h"

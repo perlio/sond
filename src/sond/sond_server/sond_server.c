@@ -23,9 +23,92 @@ typedef struct _Sond_Server
     MYSQL* con;
     gchar* seafile_user;
     gchar* seafile_password;
-    gchar* seafile_root_url;
+    gchar* seafile_url;
     gchar* auth_token;
+    GSocketService* socket;
 } SondServer;
+
+
+gchar*
+sond_seafile_get_auth_token( SondServer* sond_server, const gchar* user, const gchar* password, gchar** errmsg )
+{
+    SoupSession* soup_session = NULL;
+    SoupMessage* soup_message = NULL;
+    gchar* url_text = NULL;
+    gchar* body_text = NULL;
+    GBytes* body = NULL;
+    GBytes* response = NULL;
+    JsonParser* parser = NULL;
+    JsonNode* node = NULL;
+    GError* error = NULL;
+    gchar* auth_token = NULL;
+
+    url_text = g_strdup_printf( "%s/api2/auth-token/", sond_server->seafile_url );
+    soup_session = soup_session_new( );
+    soup_message = soup_message_new( SOUP_METHOD_POST, url_text );
+    g_free( url_text );
+
+    body_text = g_strdup_printf( "username=%s&password=%s", user, password );
+    body = g_bytes_new( body_text, strlen( body_text ) );
+    g_free( body_text );
+    soup_message_set_request_body_from_bytes( soup_message, "application/x-www-form-urlencoded", body );
+    g_bytes_unref( body );
+
+    response = soup_session_send_and_read( soup_session, soup_message, NULL, &error );
+    g_object_unref( soup_message );
+    g_object_unref( soup_session );
+    if ( error )
+    {
+        if ( errmsg ) *errmsg = g_strconcat( "Keine Antwort vom SeafileServer\n\n"
+                "Bei Aufruf soup_session_send_and_read:\n", error->message, NULL );
+        g_error_free( error );
+
+        return NULL;
+    }
+
+    parser = json_parser_new( );
+    if ( !json_parser_load_from_data( parser, g_bytes_get_data( response, NULL ), -1, &error ) )
+    {
+        if ( errmsg ) *errmsg = g_strconcat( "Antwort vom SeafileServer nicht im json-Format\n\n"
+                "Bei Aufruf json_parser_load_from_data:\n", error->message,
+                "\n\nEmpfangene Nachricht:\n", g_bytes_get_data( response, NULL ), NULL );
+        g_error_free( error );
+
+        return NULL;
+    }
+
+    node = json_parser_get_root( parser );
+    if ( JSON_NODE_HOLDS_OBJECT(node) )
+    {
+        JsonObject* object = NULL;
+
+        object = json_node_get_object( node );
+
+        if ( json_object_has_member( object, "token" ) )
+                auth_token = g_strdup( json_object_get_string_member( object, "token" ) );
+        else
+        {
+            if ( errmsg ) *errmsg = g_strconcat( "Antwort vom SeafileServer\n\n"
+                    "json hat keim member ""token""\n\nEmpfangene Nachricht:\n",
+                    g_bytes_get_data( response, NULL ), NULL );
+
+            return NULL;
+        }
+    }
+    else
+    {
+        if ( errmsg ) *errmsg = g_strconcat( "Antwort vom SeafileServer\n\n"
+                "json ist kein object\n\nEmpfangene Nachricht:\n",
+                g_bytes_get_data( response, NULL ), NULL );
+
+        return NULL;
+    }
+
+    g_object_unref( parser );
+    g_bytes_unref( response );
+
+    return auth_token;
+}
 
 
 static gint
@@ -173,7 +256,7 @@ sond_server_free( SondServer* sond_server )
     mysql_close( sond_server->con );
     g_free( sond_server->seafile_password );
     g_free( sond_server->seafile_user );
-    g_free( sond_server->seafile_root_url );
+    g_free( sond_server->seafile_url );
     g_free( sond_server->auth_token );
 
     return;
@@ -206,59 +289,81 @@ log_init( SondServer* sond_server )
 
 
 static void
-get_auth_token( GKeyFile* key_file, SondServer* sond_server )
+init_socket_service( GKeyFile* keyfile, SondServer* sond_server )
 {
+    GInetAddress* inet_address = NULL;
+    GSocketAddress* socket_address = NULL;
+    gboolean success = FALSE;
+    gchar* ip_address = NULL;
+    guint16 port = 0;
     GError* error = NULL;
-    SoupSession* soup_session = NULL;
-    SoupMessage* soup_message = NULL;
-    gchar* url_text = NULL;
-    gchar* body_text = NULL;
-    GBytes* body = NULL;
-    GBytes* response = NULL;
-    JsonParser* parser = NULL;
-    JsonNode* node = NULL;
 
-    sond_server->seafile_user = g_key_file_get_string( key_file, "SEAFILE", "user", &error );
-    if ( error ) g_error( "Seafile-user konnte nicht ermittelt werden:\n%s",
-            error->message );
+    ip_address = g_key_file_get_string( keyfile, "SOCKET", "bind", &error );
+    if ( error )
+    {
+        g_message( "bind-address konnte nicht ermittelt werden: %s - bind to localhost", error->message );
+        g_clear_error( &error );
+        ip_address = g_strdup( "127.0.0.1" );
+    }
 
-    sond_server->seafile_root_url = g_key_file_get_string( key_file, "SEAFILE", "url", &error );
-    if ( error ) g_error( "SEAFILE-host konnte nicht ermittelt werden:\n%s",
-            error->message );
+    port = g_key_file_get_uint64( keyfile, "SOCKET", "port", &error );
+    if ( error )
+    {
+        g_message( "port konnte nicht ermittelt werden: %s "
+            "- default port (35002) wird verwendet", error->message );
+        g_clear_error( &error );
+        port = 35002;
+    }
 
-    url_text = g_strdup_printf( "%s/api2/auth-token/", sond_server->seafile_root_url );
-    soup_session = soup_session_new( );
-    soup_message = soup_message_new( SOUP_METHOD_POST, url_text );
-    g_free( url_text );
+    inet_address = g_inet_address_new_from_string( ip_address );
+    g_free( ip_address );
+    if ( !inet_address )
+    {
+        g_message( "bind-address %s konnte nicht geparst werden - verwende localhost", ip_address );
+        inet_address = g_inet_address_new_from_string( "127.0.0.1" );
+        if ( !inet_address ) g_error( "GInetAddress konte nicht erzeugt werden" );
+    }
 
-    body_text = g_strdup_printf( "username=%s&password=%s", sond_server->seafile_user,sond_server->seafile_password );
-    body = g_bytes_new( body_text, strlen( body_text ) );
-    g_free( body_text );
-    soup_message_set_request_body_from_bytes( soup_message, "application/x-www-form-urlencoded", body );
-    g_bytes_unref( body );
+    socket_address = g_inet_socket_address_new( inet_address, port );
+    g_object_unref( inet_address );
+    if ( !socket_address ) g_error( "GSocketAddress konnte nicht erzeugt werden" );
 
-    response = soup_session_send_and_read( soup_session, soup_message, NULL, &error );
-    g_object_unref( soup_message );
-    g_object_unref( soup_session );
-    if ( error ) g_error( "Auth-Token konnte nicht gelesen werden:\n%s", error->message );
+    sond_server->socket = g_socket_service_new ( );
 
-    parser = json_parser_new( );
-    if ( !json_parser_load_from_data( parser, g_bytes_get_data( response, NULL ), -1, &error ) )
-            g_error( "Auth-Token konnte nicht geparst werden:\n%s", error->message );
+    success = g_socket_listener_add_address( G_SOCKET_LISTENER(sond_server->socket), socket_address,
+            G_SOCKET_TYPE_STREAM, G_SOCKET_PROTOCOL_TCP, NULL, NULL, &error );
+    g_object_unref( socket_address );
+    if ( !success ) g_error( "g_socket_listener_add_address gibt Fehler zurück: %s", error->message );
 
-    g_bytes_unref( response );
-
-    node = json_parser_get_root( parser );
-    sond_server->auth_token = json_node_dup_string( node );
-
-    g_object_unref( parser );
+    g_signal_connect (sond_server->socket, "incoming", G_CALLBACK (callback_socket_incoming), sond_server );
 
     return;
 }
 
 
 static void
-get_con( GKeyFile* key_file, const gchar* mariadb_password, SondServer* sond_server )
+get_auth_token( GKeyFile* keyfile, SondServer* sond_server )
+{
+    GError* error = NULL;
+    gchar* errmsg = NULL;
+
+    sond_server->seafile_user = g_key_file_get_string( keyfile, "SEAFILE", "user", &error );
+    if ( error ) g_error( "Seafile-user konnte nicht ermittelt werden:\n%s",
+            error->message );
+
+    sond_server->seafile_url = g_key_file_get_string( keyfile, "SEAFILE", "url", &error );
+    if ( error ) g_error( "SEAFILE-host konnte nicht ermittelt werden:\n%s",
+            error->message );
+
+    sond_server->auth_token = sond_seafile_get_auth_token( sond_server, sond_server->seafile_user, sond_server->seafile_password, &errmsg );
+    if ( !sond_server->auth_token ) g_error( "AuthToken konnte nicht ermittelt werden:\n%s", errmsg );
+
+    return;
+}
+
+
+static void
+init_con( GKeyFile* key_file, const gchar* mariadb_password, SondServer* sond_server )
 {
     GError* error = NULL;
     gchar* host = NULL;
@@ -304,13 +409,8 @@ main( gint argc, gchar** argv )
     GMainLoop *loop = NULL;
     SondServer sond_server = { 0 };
     GKeyFile* keyfile = NULL;
-    GInetAddress* inet_address = NULL;
-    GSocketAddress* socket_address = NULL;
-    gboolean success = FALSE;
-    gchar* ip_address = NULL;
-    guint16 port = 0;
     gchar* conf_file = NULL;
-    ssize_t count = 0;
+    gboolean success = FALSE;
 
     if ( argc != 4 ) g_error( "Usage: SondServer [password SondServer] [password Mariadb-user] [password Seafile-user]" );
     sond_server.password = argv[1];
@@ -331,53 +431,12 @@ main( gint argc, gchar** argv )
     g_free( conf_file );
     if ( !success ) g_error( "SondServer.conf konnte nicht gelesen werden:\n%s",
             error->message );
-    else
-    {
-        get_con( keyfile, argv[2], &sond_server );
-        get_auth_token( keyfile, &sond_server );
 
-        ip_address = g_key_file_get_string( keyfile, "SOCKET", "bind", &error );
-        if ( error )
-        {
-            g_message( "bind-address konnte nicht ermittelt werden: %s - bind to localhost", error->message );
-            g_clear_error( &error );
-            ip_address = g_strdup( "127.0.0.1" );
-        }
+    get_auth_token( keyfile, &sond_server );
+    init_con( keyfile, argv[2], &sond_server );
+    init_socket_service( keyfile, &sond_server );
 
-        port = g_key_file_get_uint64( keyfile, "SOCKET", "port", &error );
-        if ( error )
-        {
-            g_message( "port konnte nicht ermittelt werden: %s "
-                "- default port (35002) wird verwendet", error->message );
-            g_clear_error( &error );
-            port = 35002;
-        }
-
-        g_key_file_free( keyfile );
-
-    }
-
-    inet_address = g_inet_address_new_from_string( ip_address );
-    g_free( ip_address );
-    if ( !inet_address )
-    {
-        g_message( "bind-address %s konnte nicht geparst werden - verwende localhost", ip_address );
-        inet_address = g_inet_address_new_from_string( "127.0.0.1" );
-        if ( !inet_address ) g_error( "GInetAddress konte nicht erzeugt werden" );
-    }
-
-    socket_address = g_inet_socket_address_new( inet_address, port );
-    g_object_unref( inet_address );
-    if ( !socket_address ) g_error( "GSocketAddress konnte nicht erzeugt werden" );
-
-    socket = g_socket_service_new ( );
-
-    success = g_socket_listener_add_address( G_SOCKET_LISTENER(socket), socket_address,
-            G_SOCKET_TYPE_STREAM, G_SOCKET_PROTOCOL_TCP, NULL, NULL, &error );
-    g_object_unref( socket_address );
-    if ( !success ) g_error( "g_socket_listener_add_address gibt Fehler zurück: %s", error->message );
-
-    g_signal_connect (socket, "incoming", G_CALLBACK (callback_socket_incoming), &sond_server );
+    g_key_file_free( keyfile );
 
     sond_server.loop = g_main_loop_new( NULL, FALSE );
 

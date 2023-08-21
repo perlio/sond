@@ -1973,7 +1973,6 @@ cb_viewer_layout_release_button( GtkWidget* layout, GdkEvent* event, gpointer da
 
                 if ( !(viewer_page_loop->pdf_document_page->thread & 2) ) return TRUE;
 
-                //ToDo: Annot über mehrere Seiten
                 rc = viewer_annot_create( viewer_page_loop, pv, &errmsg );
                 if ( rc )
                 {
