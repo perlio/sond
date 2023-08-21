@@ -116,6 +116,7 @@
 			<Add option="`pkg-config --cflags libmariadb`" />
 			<Add option="`pkg-config --cflags json-glib-1.0`" />
 			<Add option="`pkg-config --cflags libsoup-3.0`" />
+			<Add option="`pkg-config --cflags jansson`" />
 			<Add option="--verbose" />
 		</Compiler>
 		<Linker>
@@ -128,6 +129,7 @@
 			<Add option="`pkg-config --libs libmariadb`" />
 			<Add option="`pkg-config --libs libsoup-3.0`" />
 			<Add option="`pkg-config --libs json-glib-1.0`" />
+			<Add option="`pkg-config --libs jansson`" />
 			<Add option="-Wl,--allow-multiple-definition" />
 			<Add library="C:/msys64/ucrt64/bin/libpodofo.dll" />
 			<Add library="C:/Windows/System32/shlwapi.dll" />
@@ -558,8 +560,6 @@
 			<Option compilerVar="CC" />
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
-			<Option target="SondClient (Release)" />
-			<Option target="SondClient (Testing)" />
 		</Unit>
 		<Unit filename="src/sond_treeview.h">
 			<Option target="zond (Release)" />
@@ -759,12 +759,16 @@
 			<Option target="zond (Testing)" />
 			<Option target="Viewer (Release)" />
 			<Option target="Viewer (Testing)" />
+			<Option target="SondClient (Release)" />
+			<Option target="SondClient (Testing)" />
 		</Unit>
 		<Unit filename="src/zond/99conv/general.h">
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
 			<Option target="Viewer (Release)" />
 			<Option target="Viewer (Testing)" />
+			<Option target="SondClient (Release)" />
+			<Option target="SondClient (Testing)" />
 		</Unit>
 		<Unit filename="src/zond/99conv/pdf.c">
 			<Option compilerVar="CC" />

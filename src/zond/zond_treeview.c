@@ -788,7 +788,7 @@ zond_treeview_jump_activate( GtkMenuItem* item, gpointer user_data )
             {
                 GtkTreeIter* iter_inhalt = NULL;
 
-                iter_inhalt = zond_treeview_abfragen_iter( ZOND_TREEVIEW(zond->treeview[BAUM_INHALT]), node_id );
+                iter_inhalt = zond_treeview_abfragen_iter( ZOND_TREEVIEW(zond->treeview[BAUM_INHALT]), ref_id );
                 if ( !iter_inhalt )
                 {
                     display_message( zond->app_window, "Fehler bei Springen zu Urprung\n\n"
