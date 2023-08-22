@@ -787,12 +787,7 @@ sond_treeviewfm_set_cursor_on_path( SondTreeviewFM* stvfm, const gchar* path, gc
         }
         else if ( rc == 2 && arr_path_segs[i + 1] )
         {
-            rc = sond_treeviewfm_load_dir( stvfm, find_path.iter, errmsg );
-            if ( rc )
-            {
-                g_object_unref( file );
-                ERROR_S
-            }
+            sond_treeview_expand_row( SOND_TREEVIEW(stvfm), find_path.iter );
 
             file_tmp = g_file_get_child( file, arr_path_segs[i] );
             g_object_unref( file );
@@ -804,7 +799,6 @@ sond_treeviewfm_set_cursor_on_path( SondTreeviewFM* stvfm, const gchar* path, gc
     g_strfreev( arr_path_segs );
 
     //cursor setzen
-    sond_treeview_expand_to_row( SOND_TREEVIEW(stvfm), find_path.iter );
     sond_treeview_set_cursor( SOND_TREEVIEW(stvfm), find_path.iter );
 
     return 0;
