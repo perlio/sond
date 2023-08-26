@@ -247,10 +247,12 @@ gboolean
 treeviews_get_anchor( Projekt* zond, gboolean child, GtkTreeIter* iter_cursor,
         GtkTreeIter* iter_anchor, Baum* baum_anchor, gint* anchor_id )
 {
+    GtkTreeIter iter_cursor_intern = { 0 };
     GtkTreeIter iter_anchor_intern = { 0 };
+    gint head_nr = 0;
 
     if ( !sond_treeview_get_cursor( zond->treeview[zond->baum_active],
-            iter_cursor ) )
+            &iter_cursor_intern ) )
     {
         if ( baum_anchor ) *baum_anchor = zond->baum_active;
 
@@ -275,17 +277,24 @@ treeviews_get_anchor( Projekt* zond, gboolean child, GtkTreeIter* iter_cursor,
         return FALSE; //heißt: eigentlich kein cursor - fake-iter mit root gebildet
     }
 
-    if ( child ) zond_tree_store_get_iter_target( iter_cursor, &iter_anchor_intern );
+    if ( child ) zond_tree_store_get_iter_target( &iter_cursor_intern, &iter_anchor_intern );
     else
     {
-        if ( zond_tree_store_get_link_head_nr( iter_cursor ) <= 0 )
-                zond_tree_store_get_iter_target( iter_cursor, &iter_anchor_intern );
-        else iter_anchor_intern = *iter_cursor; //wenn iter_cursor head-link, dann ist link und nicht target anchor
+        if ( (head_nr = zond_tree_store_get_link_head_nr( &iter_cursor_intern )) <= 0 )
+                zond_tree_store_get_iter_target( &iter_cursor_intern, &iter_anchor_intern );
+        else iter_anchor_intern = iter_cursor_intern; //wenn iter_cursor head-link, dann ist link und nicht target anchor
     }
 
+    if ( iter_cursor ) *iter_cursor = iter_cursor_intern;
+
     if ( baum_anchor ) *baum_anchor = treeviews_get_baum_iter( zond, &iter_anchor_intern );
-    if ( anchor_id )  gtk_tree_model_get( GTK_TREE_MODEL(zond_tree_store_get_tree_store(
-            &iter_anchor_intern )), &iter_anchor_intern, 2, anchor_id, -1 );
+
+    if ( anchor_id )
+    {
+        if ( head_nr <= 0 ) gtk_tree_model_get( GTK_TREE_MODEL(zond_tree_store_get_tree_store(
+                &iter_anchor_intern )), &iter_anchor_intern, 2, anchor_id, -1 );
+        else *anchor_id = head_nr;
+    }
 
     if ( iter_anchor ) *iter_anchor = iter_anchor_intern;
 
