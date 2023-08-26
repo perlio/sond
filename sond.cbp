@@ -476,10 +476,6 @@
 			<Option target="SondServer (Release)" />
 			<Option target="SondServer (Testing)" />
 		</Unit>
-		<Unit filename="src/sond/sond_server/SondServer.conf">
-			<Option target="SondServer (Release)" />
-			<Option target="SondServer (Testing)" />
-		</Unit>
 		<Unit filename="src/sond/sond_server/sond_server.c">
 			<Option compilerVar="CC" />
 			<Option target="SondServer (Release)" />

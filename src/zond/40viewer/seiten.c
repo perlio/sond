@@ -568,7 +568,7 @@ seiten_cb_loesche_seite( PdfViewer* pv, gint page_pv, gpointer data, gchar** err
 
     rc = viewer_get_iter_thumb( pv, page_pv, &iter );
     if ( rc ) ERROR_S_MESSAGE( "Bei Aufruf viewer_get_iter_thumb:\n"
-                "Konnte keinen iter ermitteln" );
+                "Iter konnte nicht ermittelt werden" );
 
     gtk_list_store_remove( GTK_LIST_STORE( gtk_tree_view_get_model(
             GTK_TREE_VIEW(pv->tree_thumb) ) ), &iter );
