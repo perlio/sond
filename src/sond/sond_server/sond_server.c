@@ -95,7 +95,7 @@ sond_server_seafile_get_auth_token( SondServer* sond_server, const gchar* user, 
         else
         {
             if ( errmsg ) *errmsg = g_strconcat( "Antwort vom SeafileServer\n\n"
-                    "json hat keim member ""token""\n\nEmpfangene Nachricht:\n",
+                    "json hat kein member ""token""\n\nEmpfangene Nachricht:\n",
                     g_bytes_get_data( response, NULL ), NULL );
 
             return NULL;
@@ -206,14 +206,14 @@ process_imessage( SondServer* sond_server, const gchar* auth, const gchar* comma
         return 0;
     }
 
-    if ( g_strcmp0( command, "PING" ) ) *omessage = g_strdup( "PONG" );
-    else if ( g_strcmp0( command, "SHUTDOWN" ) )
+    if ( !g_strcmp0( command, "PING" ) ) *omessage = g_strdup( "PONG" );
+    else if ( !g_strcmp0( command, "SHUTDOWN" ) )
     {
         *omessage = g_strdup( "SONDSERVER_OK" );
 
         return 1;
     }
-    else if ( g_strcmp0( command, "NEUE_AKTE" ) )
+    else if ( !g_strcmp0( command, "NEUE_AKTE" ) )
     {
 
     }
@@ -243,8 +243,8 @@ sond_server_process_message( gpointer data, gpointer user_data )
     gchar** imessage_strv = NULL;
     gint rc = 0;
 
-    sond_server = data;
-    connection = user_data;
+    sond_server = user_data;
+    connection = data;
 
     istream = g_io_stream_get_input_stream( G_IO_STREAM(connection) );
     ostream = g_io_stream_get_output_stream( G_IO_STREAM (connection) );
@@ -311,7 +311,7 @@ sond_server_process_message( gpointer data, gpointer user_data )
         g_error_free( error );
     }
 
-    if ( rc )
+    if ( rc == 1 )
     {
         g_message( "Server wird heruntergefahren " );
         g_main_loop_quit( sond_server->loop );
@@ -376,32 +376,6 @@ sond_server_free( SondServer* sond_server )
 
     return;
 }
-
-
-static void
-log_init( SondServer* sond_server )
-{
-    gint ret = 0;
-    FILE* file = NULL;
-    GDateTime* date_time = NULL;
-    gchar* datetime_iso = NULL;
-
-    date_time = g_date_time_new_now_local( );
-    datetime_iso = g_date_time_format_iso8601( date_time );
-    g_date_time_unref( date_time );
-    sond_server->log_file = g_strconcat( sond_server->base_dir, "logs/log_SondServer_", NULL);
-            //datetime_iso, ".log", NULL );
-    g_free( datetime_iso );
-
-    file = freopen( sond_server->log_file, "a", stdout );
-    if ( !file ) g_error( "stout konnte nicht in Datei %s umgeleitet werden: %s", sond_server->log_file, strerror( errno ) );
-
-    ret = dup2( fileno( stdout ), fileno( stderr ) );
-    if ( ret == -1 ) g_error( "stderr konnte nicht umgeleitet werden: %s", strerror( errno ) );
-
-    return;
-}
-
 
 static void
 init_socket_service( GKeyFile* keyfile, SondServer* sond_server )
@@ -499,19 +473,43 @@ init_con( GKeyFile* key_file, SondServer* sond_server )
     sond_server->mysql_db = g_key_file_get_string( key_file, "MARIADB", "db", &error );
     if ( error ) g_error( "MariaDB-db-Name konnte nicht ermittelt werden:\n%s",
             error->message );
-g_message( "init sql-con..." );
+
     con = mysql_init( NULL );
-    mysql_ssl_set( con, NULL, NULL, "C:\\msys64\\home\\nc-kr\\sond\\rubarth-krieger-crt.pem", NULL, NULL );
+    mysql_optionsv( con, MYSQL_OPT_SSL_CA, (void*) "C:\\msys64\\home\\nc-kr\\Projekte\\Sond\\rubarth-krieger-crt.pem" );
     if ( !mysql_real_connect( con, sond_server->mysql_host, sond_server->mysql_user, sond_server->mysql_password,
             sond_server->mysql_db, sond_server->mysql_port, NULL, CLIENT_MULTI_STATEMENTS ) )
             g_error( "Verbindung zur Datenbank konnte nicht hergestellt "
             "werden:\n%s", mysql_error( con ) );
-g_message( "con initialised" );
+
     //wenn klappt, dann schließen
     mysql_close( con );
 
     return;
 }
+
+
+#ifndef TESTING
+static void
+log_init( SondServer* sond_server )
+{
+    gint ret = 0;
+    FILE* file = NULL;
+    GDateTime* date_time = NULL;
+
+    date_time = g_date_time_new_now_local( );
+    sond_server->log_file = g_strdup_printf( "%slogs/SondServer_log_%i_%i.log", sond_server->base_dir,
+            g_date_time_get_year( date_time ), g_date_time_get_month( date_time ) );
+    g_date_time_unref( date_time );
+
+    file = freopen( sond_server->log_file, "a", stdout );
+    if ( !file ) g_error( "stout konnte nicht in Datei %s umgeleitet werden: %s", sond_server->log_file, strerror( errno ) );
+
+    ret = dup2( fileno( stdout ), fileno( stderr ) );
+    if ( ret == -1 ) g_error( "stderr konnte nicht umgeleitet werden: %s", strerror( errno ) );
+
+    return;
+}
+#endif // TESTING
 
 
 gint
@@ -533,8 +531,8 @@ main( gint argc, gchar** argv )
     //Arbeitserzeichnis ermitteln
     sond_server.base_dir = get_base_dir( );
 
-#ifdef TESTING
-//    log_init( &sond_server );
+#ifndef TESTING
+    log_init( &sond_server );
 #endif // TESTING
 
     keyfile = g_key_file_new( );

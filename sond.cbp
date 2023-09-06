@@ -541,6 +541,19 @@
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
 		</Unit>
+		<Unit filename="src/sond_graph.c">
+			<Option compilerVar="CC" />
+			<Option target="SondClient (Release)" />
+			<Option target="SondClient (Testing)" />
+			<Option target="SondServer (Release)" />
+			<Option target="SondServer (Testing)" />
+		</Unit>
+		<Unit filename="src/sond_graph.h">
+			<Option target="SondClient (Release)" />
+			<Option target="SondClient (Testing)" />
+			<Option target="SondServer (Release)" />
+			<Option target="SondServer (Testing)" />
+		</Unit>
 		<Unit filename="src/sond_template_object.c">
 			<Option compilerVar="CC" />
 			<Option compile="0" />
@@ -556,6 +569,8 @@
 			<Option compilerVar="CC" />
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
+			<Option target="SondClient (Release)" />
+			<Option target="SondClient (Testing)" />
 		</Unit>
 		<Unit filename="src/sond_treeview.h">
 			<Option target="zond (Release)" />

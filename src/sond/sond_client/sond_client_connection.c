@@ -18,12 +18,12 @@ sond_client_connection_send_and_read( SondClient* sond_client, const gchar*
     gssize ret = 0;
 
     client = g_socket_client_new();
-    g_socket_client_set_tls( client, TRUE );
+//    g_socket_client_set_tls( client, TRUE );
 
     /* connect to the host */
     connection = g_socket_client_connect_to_host (client, sond_client->server_host,
             sond_client->server_port, NULL, &error );
-    if ( *sond_error )
+    if ( error )
     {
         g_object_unref( client );
         *sond_error = sond_error_new( error, "g_socket_client_connect_to_host" );
@@ -35,7 +35,7 @@ sond_client_connection_send_and_read( SondClient* sond_client, const gchar*
     GOutputStream * ostream = g_io_stream_get_output_stream (G_IO_STREAM (connection));
 
     g_output_stream_write( ostream, message, strlen( message ), NULL, &error );
-    if ( *sond_error )
+    if ( error )
     {
         g_object_unref( connection );
         g_object_unref( client );
@@ -48,7 +48,7 @@ sond_client_connection_send_and_read( SondClient* sond_client, const gchar*
     g_object_unref( client );
     if ( error )
     {
-        *sond_error = sond_error_new( error, "g_input_stream_write" );
+        *sond_error = sond_error_new( error, "g_input_stream_read" );
         SOND_ERROR_VAL(NULL)
     }
     else if ( ret == 0 )
@@ -72,9 +72,13 @@ gboolean
 sond_client_connection_ping( SondClient* sond_client, SondError** sond_error )
 {
     gchar* rcv_message = NULL;
+    gchar* out_message = NULL;
 
-    rcv_message = sond_client_connection_send_and_read( sond_client, "PING::", sond_error );
-    if ( *sond_error ) SOND_ERROR
+    out_message = g_strdup_printf( "%s&%s:PING:", sond_client->user, sond_client->password );
+
+    rcv_message = sond_client_connection_send_and_read( sond_client, out_message, sond_error );
+    g_free( out_message );
+    if ( !rcv_message ) SOND_ERROR_VAL(FALSE)
 
     if ( !g_strcmp0( rcv_message, "PONG" ) )
     {

@@ -125,10 +125,8 @@ sond_client_file_manager_create( SondClient* sond_client, gint jahr, gint regnr,
     gchar* root = NULL;
 
     dir = g_strdup_printf( "%2i-%i", jahr, regnr );
-    root = g_build_filename( sond_client->seadrive_root, dir, NULL );
+    root = g_build_filename( sond_client->seafile_root, dir, NULL );
     g_free( dir );
-
-
 
     file_manager = g_malloc0( sizeof( FileManager ) );
     file_manager->jahr = jahr;

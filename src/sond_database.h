@@ -3,7 +3,21 @@
 
 typedef char gchar;
 typedef int gint;
-
+/*
+typedef enum
+{
+    AKTE = 1,
+    _HAT_ = 1000,
+    _BEGINN_ = 10000,
+    _ENDE_,
+    _NAME_,
+    _VORNAME_,
+    _JAHR_,
+    _REG_NR_,
+    _KURZBEZ_,
+    NUM_TYPES
+} Type;
+*/
 typedef enum
 {
     NATUERLICHE_PERSON = 310,

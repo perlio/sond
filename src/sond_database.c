@@ -69,6 +69,19 @@ sond_database_is_valid_time( const gchar* time )
 gint
 sond_database_add_to_database( gpointer database, gchar** errmsg )
 {
+    const gchar* sql_ii[] = {
+            "CREATE TABLE IF NOT EXISTS entities ( "
+                "ID INTEGER, "
+                "type INTEGER, "
+                "rel_subject INTEGER, "
+                "rel_object INTEGER, "
+                "prop_value TEXT, "
+                "FOREIGN KEY (rel_subject) REFERENCES entities (ID), "
+                "FOREIGN KEY (rel_object) REFRENCES entities (ID), "
+                "PRIMARY KEY (ID) "
+            "); "
+            };
+
     const gchar* sql[] = {
             "CREATE TABLE IF NOT EXISTS labels ( "
                 "ID INTEGER, "

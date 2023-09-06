@@ -8,6 +8,7 @@
 #include "../../zond/99conv/general.h"
 
 #include "sond_client.h"
+#include "sond_client_connection.h"
 #include "sond_client_file_manager.h"
 #include "sond_client_misc.h"
 
@@ -27,6 +28,8 @@ sond_client_close( GtkWidget* app_window, GdkEvent* event, gpointer data )
     g_free( sond_client->seafile_root );
     g_free( sond_client->server_host );
     g_free( sond_client->server_user );
+    g_free( sond_client->user );
+    g_free( sond_client->password );
 
     g_ptr_array_unref( sond_client->arr_file_manager );
 
@@ -132,8 +135,53 @@ sond_client_init_app_window( GtkApplication* app, SondClient* sond_client )
 }
 
 
+static gint
+sond_client_get_creds( SondClient* sond_client )
+{
+    GtkWidget* dialog = gtk_dialog_new_with_buttons( "Verbindung zu SQL-Server",
+            GTK_WINDOW(sond_client->app_window), GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
+            "Ok", GTK_RESPONSE_OK, "Abbrechen", GTK_RESPONSE_CANCEL, NULL );
+
+    GtkWidget* content = gtk_dialog_get_content_area( GTK_DIALOG(dialog) );
+
+    //User
+    GtkWidget* frame_user = gtk_frame_new( "Benutzername" );
+    GtkWidget* entry_user = gtk_entry_new( );
+    gtk_container_add( GTK_CONTAINER(frame_user), entry_user );
+    gtk_box_pack_start( GTK_BOX(content), frame_user, FALSE, FALSE, 0 );
+
+    //password
+    GtkWidget* frame_password = gtk_frame_new( "Passwort" );
+    GtkWidget* entry_password = gtk_entry_new( );
+    gtk_container_add( GTK_CONTAINER(frame_password), entry_password );
+    gtk_box_pack_start( GTK_BOX(content), frame_password, FALSE, FALSE, 0 );
+
+    g_signal_connect_swapped( entry_user, "activate",
+            G_CALLBACK(gtk_widget_grab_focus), entry_password );
+
+    g_signal_connect_swapped( entry_password, "activate",
+            G_CALLBACK(gtk_widget_grab_focus),
+            gtk_dialog_get_widget_for_response( GTK_DIALOG(dialog), GTK_RESPONSE_OK ) );
+
+    gtk_widget_grab_focus( entry_user );
+    gtk_widget_show_all( dialog );
+
+    gint res = gtk_dialog_run( GTK_DIALOG(dialog) );
+
+    if ( res == GTK_RESPONSE_OK )
+    {
+        sond_client->user = g_strdup( gtk_entry_get_text( GTK_ENTRY(entry_user) ) );
+        sond_client->password = g_strdup( gtk_entry_get_text( GTK_ENTRY(entry_password) ) );
+    }
+
+    gtk_widget_destroy( dialog );
+
+    return res;
+}
+
+
 static void
-sond_client_get_conf( SondClient* sond_client )
+sond_client_read_conf( SondClient* sond_client )
 {
     GKeyFile* key_file = NULL;
     gchar* conf_path = NULL;
@@ -158,10 +206,10 @@ sond_client_get_conf( SondClient* sond_client )
     sond_client->server_user = g_key_file_get_string( key_file, "SERVER", "user", &error );
     if ( error ) g_error( "Server User konnte nicht ermittelt werden:\n%s", error->message );
 
-    sond_client->seadrive_root = g_key_file_get_string( key_file, "SEADRIVE", "root", &error );
-    if ( error ) g_error( "Seadrive-Root-Dir konnte nicht ermittelt werden:\n%s", error->message );
-
     sond_client->seafile_root = g_key_file_get_string( key_file, "SEAFILE", "root", &error );
+    if ( error ) g_error( "Seadrive-Dir konnte nicht ermittelt werden:\n%s", error->message );
+
+    sond_client->seadrive_root = g_key_file_get_string( key_file, "SEADRIVE", "root", &error );
     if ( error ) g_error( "Seadrive-Dir konnte nicht ermittelt werden:\n%s", error->message );
 
     g_key_file_free( key_file );
@@ -173,6 +221,8 @@ sond_client_get_conf( SondClient* sond_client )
 static void
 sond_client_init( GtkApplication* app, SondClient* sond_client )
 {
+    SondError* sond_error = NULL;
+
     sond_client->arr_file_manager = g_ptr_array_new( );
     g_ptr_array_set_free_func( sond_client->arr_file_manager,
             (GDestroyNotify) sond_client_file_manager_free );
@@ -181,11 +231,15 @@ sond_client_init( GtkApplication* app, SondClient* sond_client )
 
     sond_client->base_dir = get_base_dir( );
 
-    sond_client_get_conf( sond_client );
+    sond_client_read_conf( sond_client );
+
+    sond_client_get_creds( sond_client );
 
     sond_client_init_rpc_client( sond_client );
 
-    sond_client_seadrive_test_seafile_server( sond_client );
+    if ( !sond_client_connection_ping( sond_client, &sond_error ) ) DISPLAY_SOND_ERROR
+    else printf( "PONG" );
+//    sond_client_seadrive_test_seafile_server( sond_client );
 
     return;
 }

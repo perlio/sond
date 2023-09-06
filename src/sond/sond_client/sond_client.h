@@ -4,6 +4,14 @@
 #define SOND_CLIENT_ERROR sond_client_error_quark()
 G_DEFINE_QUARK(sond-client-error-quark,sond_client_error)
 
+#define DISPLAY_SOND_ERROR {display_message( sond_client->app_window, \
+        "function stack:\n", \
+        (sond_error->function_stack) ? (sond_error->function_stack) : "", \
+        sond_error->origin, "\nerror-message:\n", \
+        sond_error->error->message, NULL ); \
+        sond_error_free( sond_error ); \
+}
+
 enum SondClientError
 {
     SOND_CLIENT_ERROR_INVALRESP,
@@ -23,8 +31,11 @@ typedef struct _Sond_Client
     GPtrArray* arr_file_manager;
     gchar* base_dir;
     SearpcClient* searpc_client;
-    gchar* seadrive_root;
     gchar* seafile_root;
+    gchar* seadrive_root;
+
+    gchar* user;
+    gchar* password;
 
     gchar* server_host;
     guint16 server_port;

@@ -1,8 +1,8 @@
 #include <glib.h>
 
 #include "sond_client.h"
-//#include "libsearpc/searpc-client.h"
-//#include "SeafileRepo/repo.c"
+#include "libsearpc/searpc-client.h"
+#include "SeafileRepo/seafile-object.h"
 
 
 #define JAHRHUNDERT_GRENZE 1960
@@ -64,10 +64,10 @@ sond_client_seadrive_test_seafile_server( SondClient* sond_client )
     GList* list = NULL;
     GList* ptr = NULL;
     GError* error = NULL;
-/*
+
     list = searpc_client_call__objlist( sond_client->searpc_client,
             "seafile_get_repo_list", SEAFILE_TYPE_REPO, &error, 2, "int", 0, "int", 0 );
-if ( error ) printf("%s\n", error->message );
+    if ( error ) printf("%s\n", error->message );
     if ( !list )
     {
         g_message( "Keine repos" );
@@ -91,9 +91,8 @@ if ( error ) printf("%s\n", error->message );
         ptr = ptr->next;
     }
 
-
     json_t* json = NULL;
-    GError* error = NULL;
+
 do{
         gchar* text = NULL;
 
@@ -121,9 +120,8 @@ do{
     g_free( text );
     g_clear_error( &error );
 
-sleep(4);
 }while(1);
-*/
+
     return;
 }
 
@@ -133,4 +131,5 @@ sond_client_misc_ping_server( SondClient* sond_client, GError** error )
 {
 
 }
+
 
