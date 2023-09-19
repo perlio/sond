@@ -9,59 +9,67 @@
 
 gchar*
 sond_client_connection_send_and_read( SondClient* sond_client, const gchar*
-        message, SondError** sond_error )
+        command, const gchar* params, GError** error )
 {
-    GError * error = NULL;
     GSocketConnection * connection = NULL;
     GSocketClient * client = NULL;
     gchar imessage[MAX_MSG_SIZE] = { 0 };
     gssize ret = 0;
+    gchar* omessage = NULL;
 
     client = g_socket_client_new();
 //    g_socket_client_set_tls( client, TRUE );
 
     /* connect to the host */
     connection = g_socket_client_connect_to_host (client, sond_client->server_host,
-            sond_client->server_port, NULL, &error );
-    if ( error )
+            sond_client->server_port, NULL, error );
+    if ( *error )
     {
         g_object_unref( client );
-        *sond_error = sond_error_new( error, "g_socket_client_connect_to_host" );
-        SOND_ERROR_VAL(NULL)
+        g_prefix_error( error, "%s\n", __func__ );
+
+        return NULL;
     }
 
     /* use the connection */
     GInputStream * istream = g_io_stream_get_input_stream (G_IO_STREAM (connection));
     GOutputStream * ostream = g_io_stream_get_output_stream (G_IO_STREAM (connection));
 
-    g_output_stream_write( ostream, message, strlen( message ), NULL, &error );
-    if ( error )
+    omessage = g_strconcat( sond_client->user, "&", sond_client->password, ":",
+            command, ":", params, NULL );
+
+    g_output_stream_write( ostream, omessage, strlen( omessage ), NULL, error );
+    g_free( omessage );
+    if ( *error )
     {
         g_object_unref( connection );
         g_object_unref( client );
-        *sond_error = sond_error_new( error, "g_output_stream_write" );
-        SOND_ERROR_VAL(NULL)
+        g_prefix_error( error, "%s\n", __func__ );
+
+        return NULL;
     }
 
-    ret = g_input_stream_read( istream, imessage, MAX_MSG_SIZE, NULL, &error );
+    ret = g_input_stream_read( istream, imessage, MAX_MSG_SIZE, NULL, error );
     g_object_unref( connection );
     g_object_unref( client );
-    if ( error )
+    if ( *error )
     {
-        *sond_error = sond_error_new( error, "g_input_stream_read" );
-        SOND_ERROR_VAL(NULL)
+        g_prefix_error( error, "%s\n", __func__ );
+
+        return NULL;
     }
     else if ( ret == 0 )
     {
-        *sond_error = sond_error_new_full( SOND_CLIENT_ERROR,
-                SOND_CLIENT_ERROR_NOINPUT, "Antwort leer", __func__ );
-        SOND_ERROR_VAL(NULL)
+        *error = g_error_new( SOND_CLIENT_ERROR, SOND_CLIENT_ERROR_NOANSWER, "%s\ninput-stream leer", __func__ );
+
+        return NULL;
     }
     else if ( ret > MAX_MSG_SIZE )
     {
-        *sond_error = sond_error_new_full( SOND_CLIENT_ERROR,
-                SOND_CLIENT_ERROR_INPTRUNC, "Antwort abgeschnitten", __func__ );
-        SOND_ERROR_VAL(NULL)
+        *error = g_error_new( SOND_CLIENT_ERROR, SOND_CLIENT_ERROR_MESSAGETOOLONG,
+                "%s\ninput-stream leer", __func__ );
+
+        return NULL;
     }
 
     return g_strdup( imessage );
@@ -69,16 +77,12 @@ sond_client_connection_send_and_read( SondClient* sond_client, const gchar*
 
 
 gboolean
-sond_client_connection_ping( SondClient* sond_client, SondError** sond_error )
+sond_client_connection_ping( SondClient* sond_client, GError** error )
 {
     gchar* rcv_message = NULL;
-    gchar* out_message = NULL;
 
-    out_message = g_strdup_printf( "%s&%s:PING:", sond_client->user, sond_client->password );
-
-    rcv_message = sond_client_connection_send_and_read( sond_client, out_message, sond_error );
-    g_free( out_message );
-    if ( !rcv_message ) SOND_ERROR_VAL(FALSE)
+    rcv_message = sond_client_connection_send_and_read( sond_client, "PING", "", error );
+    if ( !rcv_message ) return FALSE;
 
     if ( !g_strcmp0( rcv_message, "PONG" ) )
     {
@@ -89,8 +93,8 @@ sond_client_connection_ping( SondClient* sond_client, SondError** sond_error )
     else
     {
         g_free( rcv_message );
-        *sond_error = sond_error_new_full( SOND_CLIENT_ERROR, SOND_CLIENT_ERROR_INVALRESP,
-                "Server antwortet nicht mit 'PONG'", __func__ );
+        *error = g_error_new( SOND_CLIENT_ERROR, SOND_CLIENT_ERROR_INVALRESP,
+                "%s\nServer antwortet nicht mit 'PONG'", __func__ );
 
         return FALSE;
     }

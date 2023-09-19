@@ -65,7 +65,7 @@ db_create( MYSQL* con, gchar* db_name, gchar** errmsg )
         return -1;
     }
 
-    rc = sond_database_add_to_database( con, errmsg );
+//    rc = sond_database_add_to_database( con, errmsg );
     if ( rc )
     {
         gchar* sql_drop = NULL;

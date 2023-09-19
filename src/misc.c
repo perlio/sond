@@ -9,46 +9,6 @@
 #endif // _WIN32
 
 
-void
-sond_error_free( SondError* sond_error )
-{
-    g_error_free( sond_error->error );
-    g_free( sond_error->origin );
-    g_free( sond_error->function_stack );
-
-    g_free( sond_error );
-
-    return;
-}
-
-
-SondError*
-sond_error_new( GError* error, const gchar* origin )
-{
-    SondError* sond_error = NULL;
-
-    sond_error = g_malloc0( sizeof( SondError ) );
-    sond_error->error = error;
-    sond_error->origin = g_strdup( origin );
-
-    return sond_error;
-}
-
-
-SondError*
-sond_error_new_full( GQuark domain, gint code, const gchar* error_message,
-        const gchar* origin )
-{
-    GError* error = NULL;
-    SondError* sond_error = NULL;
-
-    error = g_error_new( domain, code, "%s", error_message );
-    sond_error = sond_error_new( error, origin );
-
-    return sond_error;
-}
-
-
 /** Zeigt Fenster, in dem Liste übergebener strings angezeigt wird.
 *   parent-window kann NULL sein, dann Warnung
 *   text1 darf nicht NULL sein

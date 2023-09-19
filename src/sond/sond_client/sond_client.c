@@ -8,6 +8,7 @@
 #include "../../zond/99conv/general.h"
 
 #include "sond_client.h"
+#include "sond_client_akte.h"
 #include "sond_client_connection.h"
 #include "sond_client_file_manager.h"
 #include "sond_client_misc.h"
@@ -16,7 +17,6 @@
 #include "libsearpc/searpc-named-pipe-transport.h"
 
 #define SEAFILE_SOCKET_NAME "seadrive.sock"
-
 
 
 static gboolean
@@ -110,6 +110,7 @@ sond_client_init_app_window( GtkApplication* app, SondClient* sond_client )
     GtkWidget* grid = NULL;
     GtkWidget* frame_dok = NULL;
     GtkWidget* entry_dok = NULL;
+    GtkWidget* button_akte = NULL;
 
     sond_client->app_window = gtk_window_new( GTK_WINDOW_TOPLEVEL );
     gtk_window_set_title( GTK_WINDOW(sond_client->app_window), "SondClient" );
@@ -124,12 +125,18 @@ sond_client_init_app_window( GtkApplication* app, SondClient* sond_client )
     gtk_container_add( GTK_CONTAINER(frame_dok), entry_dok );
     gtk_grid_attach( GTK_GRID(grid), frame_dok, 0, 0, 1, 1 );
 
+    button_akte = gtk_button_new_with_label( "Akte" );
+    gtk_grid_attach( GTK_GRID(grid), button_akte, 0, 1, 1, 1 );
+
     gtk_widget_show_all( sond_client->app_window );
 
     g_signal_connect( sond_client->app_window, "delete-event",
             G_CALLBACK(sond_client_close), sond_client );
+
     g_signal_connect( entry_dok, "activate",
             G_CALLBACK(sond_client_file_manager_entry_activate), sond_client );
+    g_signal_connect( button_akte, "clicked",
+            G_CALLBACK(sond_client_akte_init), sond_client );
 
     return;
 }
@@ -221,7 +228,7 @@ sond_client_read_conf( SondClient* sond_client )
 static void
 sond_client_init( GtkApplication* app, SondClient* sond_client )
 {
-    SondError* sond_error = NULL;
+    GError* error = NULL;
 
     sond_client->arr_file_manager = g_ptr_array_new( );
     g_ptr_array_set_free_func( sond_client->arr_file_manager,
@@ -237,8 +244,8 @@ sond_client_init( GtkApplication* app, SondClient* sond_client )
 
     sond_client_init_rpc_client( sond_client );
 
-    if ( !sond_client_connection_ping( sond_client, &sond_error ) ) DISPLAY_SOND_ERROR
-    else printf( "PONG" );
+//    if ( !sond_client_connection_ping( sond_client, &sond_error ) ) DISPLAY_SOND_ERROR
+//    else printf( "PONG" );
 //    sond_client_seadrive_test_seafile_server( sond_client );
 
     return;

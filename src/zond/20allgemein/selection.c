@@ -26,10 +26,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "treeviews.h"
 
 #include "../../misc.h"
-#include "../../eingang.h"
 #include "../../sond_treeviewfm.h"
 #include "../zond_treeview.h"
-#include "../../dbase.h"
 
 #include <gtk/gtk.h>
 #include <glib/gstdio.h>

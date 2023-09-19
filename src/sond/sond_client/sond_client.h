@@ -17,6 +17,8 @@ enum SondClientError
     SOND_CLIENT_ERROR_INVALRESP,
     SOND_CLIENT_ERROR_NOINPUT,
     SOND_CLIENT_ERROR_INPTRUNC,
+    SOND_CLIENT_ERROR_NOANSWER,
+    SOND_CLIENT_ERROR_MESSAGETOOLONG,
     NUM_SOND_CLIENT_ERROR
 };
 
@@ -40,6 +42,9 @@ typedef struct _Sond_Client
     gchar* server_host;
     guint16 server_port;
     gchar* server_user;
+
+    gint reg_jahr_akt;
+    gint reg_nr_akt;
 } SondClient;
 
 void sond_client_quit( SondClient* );

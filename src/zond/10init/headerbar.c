@@ -26,8 +26,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "../../sond_treeview.h"
 #include "../../sond_treeviewfm.h"
-#include "../../dbase.h"
-#include "../../eingang.h"
 #include "../../misc.h"
 
 #include "../global_types.h"
@@ -626,35 +624,6 @@ cb_change_icon_item( GtkMenuItem* item, gpointer data )
     return;
 }
 
-
-static void
-cb_eingang_activate( GtkMenuItem* item, gpointer data )
-{
-    Projekt* zond = (Projekt*) data;
-
-    if ( zond->baum_active == KEIN_BAUM ) return;
-    else if ( zond->baum_active == BAUM_FS )
-    {
-        gint rc = 0;
-        gchar* errmsg = NULL;
-
-        rc = eingang_set( SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), &errmsg );
-        if ( rc )
-        {
-            display_message( zond->app_window, "Eingang ändern fehlgeschlagen -\n\nBei Aufruf "
-                    "fm_set_eingang:\n", errmsg, NULL );
-            g_free( errmsg );
-        }
-    }
-    else
-    {
-
-    }
-
-    return;
-}
-
-
 /*  Callbacks des Menus "Ansicht" */
 
 static void
@@ -983,14 +952,6 @@ init_menu( Projekt* zond )
     gtk_menu_item_set_submenu( GTK_MENU_ITEM(icon_change_item),
             icon_change_menu );
 
-    GtkWidget* eingang_item = gtk_menu_item_new_with_label( "Eingangsdaten setzen" );
-    gtk_widget_add_accelerator(eingang_item, "activate", accel_group, GDK_KEY_e,
-            GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
-    g_signal_connect( G_OBJECT(eingang_item), "activate",
-            G_CALLBACK(cb_eingang_activate), (gpointer) zond );
-
-    gtk_widget_set_sensitive( eingang_item, FALSE );
-
     GtkWidget* sep_struktur0item = gtk_separator_menu_item_new();
 
     //Kopieren
@@ -1110,7 +1071,6 @@ init_menu( Projekt* zond )
     gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), jumpitem );
     gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), item_datei_oeffnen );
     gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), item_datei_oeffnen_mit );
-    gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), eingang_item );
 
 /*********************
 *  Menu Pdf-Dateien

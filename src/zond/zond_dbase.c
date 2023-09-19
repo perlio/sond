@@ -181,32 +181,6 @@ zond_dbase_create_db( sqlite3* db, gchar** errmsg )
             "DROP TABLE IF EXISTS ziele;"
             "DROP TABLE IF EXISTS baum_inhalt;"
             "DROP TABLE IF EXISTS baum_auswertung; "
-/*
-            "DROP TABLE IF EXISTS links; "
-            "DROP TABLE IF EXISTS entities; "
-            "DROP TABLE IF EXISTS rels; "
-            "DROP TABLE IF EXISTS properties; "
-*/
-            "CREATE TABLE eingang ("
-                "ID INTEGER NOT NULL, "
-                "eingangsdatum VARCHAR(20), "
-                "transport VARCHAR(30), " //Post, Fax, pers.,
-                "traeger VARCHAR(30), " //CD, Papier, USB
-                "ort VARCHAR(30), " //Kanzlei, HV-Saal
-                "absender VARCHAR(30), " //LG Buxtehude, RA Meier
-                "absendedatum VARCHAR(20), "
-                "erfassungsdatum VARCHAR(20), "
-                "PRIMARY KEY(ID) "
-            "); "
-
-            "CREATE TABLE eingang_rel_path ( "
-                "ID INTEGER NOT NULL, "
-                "eingang_id INTEGER NOT NULL, "
-                "rel_path VARCHAR(200), "
-                "PRIMARY KEY(ID), "
-                "FOREIGN KEY (eingang_id) REFERENCES eingang (ID) "
-                "ON DELETE CASCADE ON UPDATE CASCADE "
-            "); "
 
             "CREATE TABLE baum_inhalt ("
                 "node_id INTEGER PRIMARY KEY,"

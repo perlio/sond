@@ -2,7 +2,6 @@
 
 #include "../misc.h"
 #include "zond_dbase.h"
-#include "../eingang.h"
 #include "../sond_treeviewfm.h"
 
 #include "10init/app_window.h"
@@ -140,28 +139,6 @@ zond_treeviewfm_dbase_update_path( SondTreeviewFM* stvfm,
 
 
 static gint
-zond_treeviewfm_dbase_update_eingang( SondTreeviewFM* stvfm,
-        const gchar* rel_path_source, const gchar* rel_path_dest, gboolean del,
-        gchar** errmsg )
-{
-    gint rc1 = 0;
-    gint rc2 = 0;
-
-    ZondTreeviewFMPrivate* priv = zond_treeviewfm_get_instance_private( ZOND_TREEVIEWFM(stvfm) );
-
-    ZondDBase* dbase_work = sond_treeviewfm_get_dbase( stvfm );
-    ZondDBase* dbase_store = priv->zond->dbase_zond->zond_dbase_store;
-
-    rc1 = eingang_update_rel_path( dbase_store, rel_path_source, dbase_store, rel_path_dest, del, errmsg );
-    rc2 = eingang_update_rel_path( dbase_work, rel_path_source, dbase_work, rel_path_dest, del, errmsg );
-
-    if ( rc1 || rc2 ) ERROR_ROLLBACK_BOTH( dbase_work, dbase_store )
-
-    return 0;
-}
-
-
-static gint
 zond_treeviewfm_dbase_end( SondTreeviewFM* stvfm, gboolean suc, gchar** errmsg )
 {
     gint rc = 0;
@@ -254,7 +231,6 @@ zond_treeviewfm_class_init( ZondTreeviewFMClass* klass )
     SOND_TREEVIEWFM_CLASS(klass)->dbase_begin = zond_treeviewfm_dbase_begin;
     SOND_TREEVIEWFM_CLASS(klass)->dbase_test = zond_treeviewfm_dbase_test;
     SOND_TREEVIEWFM_CLASS(klass)->dbase_update_path = zond_treeviewfm_dbase_update_path;
-    SOND_TREEVIEWFM_CLASS(klass)->dbase_update_eingang = zond_treeviewfm_dbase_update_eingang;
     SOND_TREEVIEWFM_CLASS(klass)->dbase_end = zond_treeviewfm_dbase_end;
     SOND_TREEVIEWFM_CLASS(klass)->text_edited = zond_treeviewfm_text_edited;
     SOND_TREEVIEWFM_CLASS(klass)->results_row_activated = zond_treeviewfm_results_row_activated;

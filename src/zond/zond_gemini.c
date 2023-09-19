@@ -2157,13 +2157,17 @@ zond_gemini_read_gemini( Projekt* zond, gchar** errmsg )
         g_slist_free_full( list, g_free );
         ERROR_S
     }
-
-    rc = sond_database_add_to_database( zond_dbase, errmsg );
+GError* error = NULL;
+    rc = sond_database_add_to_database( zond_dbase, &error );
     if ( rc )
     {
         zond_dbase_close( zond_dbase );
         g_slist_free_full( list, g_free );
-        ERROR_S
+        if ( errmsg ) *errmsg = g_strconcat( __func__, ":\n",
+                error->message, NULL );
+        g_error_free( error );
+
+        return -1;
     }
 
     info_window = info_window_open( zond->app_window, "Einlesen Gemnini-Datei" );
@@ -2302,9 +2306,10 @@ zond_gemini_select_fill_checkbox_ue_person( Projekt* zond, GtkWidget* scb,
         }
         else ID_label_ue_person = rc;
 
-        if ( ID_label_ue_person == MANN ) text = add_string( text, g_strdup( " (männlich)" ) );
-        if ( ID_label_ue_person == FRAU ) text = add_string( text, g_strdup( " (weiblich)" ) );
-        if ( ID_label_ue_person == DIVERS ) text = add_string( text, g_strdup( " (divers)" ) );
+        //folgende Werte sind Quatsch
+        if ( ID_label_ue_person == 100 ) text = add_string( text, g_strdup( " (männlich)" ) );
+        if ( ID_label_ue_person == 101 ) text = add_string( text, g_strdup( " (weiblich)" ) );
+        if ( ID_label_ue_person == 102 ) text = add_string( text, g_strdup( " (divers)" ) );
 
         sond_checkbox_add_entry( SOND_CHECKBOX(scb), text, ID_entity_ue_person );
         g_free( text );

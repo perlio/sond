@@ -4,25 +4,7 @@
 #include "sond_akte.h"
 
 
-void
-akte_kurz_free( AkteKurz* akte_kurz )
-{
-    g_free( akte_kurz->bezeichnung );
-    g_free( akte_kurz->gegenstand );
-
-    g_free( akte_kurz );
-
-    return;
-}
-
-
-AkteKurz*
-akte_kurz_new( void )
-{
-    return g_malloc0( sizeof( AkteKurz ) );
-}
-
-
+/*
 static void
 akte_lebenszeit_free( AkteLebenszeit* akte_lebenszeit )
 {
@@ -57,40 +39,102 @@ akte_sachbearbeiter_free( AkteSachbearbeiter* akte_sachbearbeiter )
 
     return;
 }
+*/
 
 void
-akte_free( Akte* akte )
+sond_akte_free( SondAkte* sond_akte )
 {
+    g_free( sond_akte->aktenrubrum );
+    g_free( sond_akte->aktenkurzbez );
+/*
     akte_kurz_free( akte->akte_kurz );
     akte_sachbearbeiter_free( akte->akte_sachbearbeiter );
 
     g_ptr_array_unref( akte->arr_beteiligte );
     g_ptr_array_unref( akte->arr_lebenszeiten );
-
-    g_free( akte );
+*/
+    g_free( sond_akte );
 
     return;
 }
 
 
-Akte*
-akte_new( void )
+SondAkte*
+sond_akte_new( void )
 {
-    Akte* akte = g_malloc0( sizeof( Akte ) );
-
+    SondAkte* sond_akte = g_malloc0( sizeof( SondAkte ) );
+/*
     akte->arr_beteiligte = g_ptr_array_new_with_free_func( (GDestroyNotify) akte_beteiligter_free );
 
     akte->arr_lebenszeiten = g_ptr_array_new_with_free_func( (GDestroyNotify) akte_lebenszeit_free );
-
-    return akte;
+*/
+    return sond_akte;
 }
 
 
-//lädt Liste aller Kurz-Akten, deren Bezeichnung "paßt"
-GList*
-akte_load_list_kurz( const gchar* bez, GError** error )
+SondAkte*
+sond_akte_new_from_json( const gchar* json, GError** error )
 {
+    JsonNode* node = NULL;
+    JsonObject* object = NULL;
+    SondAkte* sond_akte = NULL;
 
+    node = json_from_string( json, error );
+    if ( !node )
+    {
+        g_prefix_error( error, "%s\n%s\n", __func__, "json_from_string" );
+        return NULL;
+    }
+
+    if ( !JSON_NODE_HOLDS_OBJECT(node) )
+    {
+        *error = g_error_new( SOND_AKTE_ERROR, SOND_AKTE_ERROR_PARSEJSON, "%s\n%s",
+                __func__, "Root-Knoten ist kein object" );
+
+        return NULL;
+    }
+
+    object = json_node_get_object( node );
+
+    sond_akte = sond_akte_new( );
+
+    if ( json_object_has_member( object, "reg_nr" ) )
+            sond_akte->reg_nr = (gint) json_object_get_int_member( object, "reg_nr" );
+    if ( json_object_has_member( object, "reg_jahr" ) )
+            sond_akte->reg_nr = (gint) json_object_get_int_member( object, "reg_jahr" );
+
+    if ( json_object_has_member( object, "aktenrubrum" ) )
+            sond_akte->aktenrubrum = g_strdup( json_object_get_string_member( object, "aktenrubrum" ) );
+
+    if ( json_object_has_member( object, "aktenkurzbez" ) )
+            sond_akte->aktenkurzbez = g_strdup( json_object_get_string_member( object, "aktenkurzbez" ) );
+
+    json_node_unref( node );
+
+    return sond_akte;
 }
 
 
+gchar*
+sond_akte_to_json( SondAkte* sond_akte )
+{
+    JsonObject* object = NULL;
+    JsonNode* node = NULL;
+    gchar* json_string = NULL;
+
+    object = json_object_new( );
+
+    json_object_set_int_member( object, "reg_jahr", (gint64) sond_akte->reg_jahr );
+    json_object_set_int_member( object, "reg_nr", (gint64) sond_akte->reg_nr );
+
+    json_object_set_string_member( object, "aktenrubrum", sond_akte->aktenrubrum );
+    json_object_set_string_member( object, "aktenkurzbez", sond_akte->aktenkurzbez );
+
+    node = json_node_alloc( );
+    json_node_init_object( node, object );
+    json_string = json_to_string( node, FALSE );
+    json_node_unref( node );
+    json_object_unref( object );
+
+    return json_string;
+}

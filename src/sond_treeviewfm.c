@@ -17,7 +17,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
 #include "misc.h"
-#include "eingang.h"
 
 #include "sond_treeviewfm.h"
 
@@ -72,22 +71,6 @@ sond_treeviewfm_dbase_update_path( SondTreeviewFM* stvfm, const gchar* source,
     SondTreeviewFMPrivate* priv = sond_treeviewfm_get_instance_private( stvfm );
 
     rc = zond_dbase_update_path( priv->zond_dbase, source, dest, errmsg );
-    if ( rc ) ERROR_ROLLBACK( priv->zond_dbase )
-
-    return 0;
-}
-
-
-static gint
-sond_treeviewfm_dbase_update_eingang( SondTreeviewFM* stvfm, const gchar* source,
-        const gchar* dest, gboolean del, gchar** errmsg )
-{
-    gint rc = 0;
-
-    Clipboard* clipboard = ((SondTreeviewClass*) g_type_class_peek( SOND_TYPE_TREEVIEW ))->clipboard;
-    SondTreeviewFMPrivate* priv = sond_treeviewfm_get_instance_private( stvfm );
-
-//    rc = eingang_update_rel_path( sond_treeviewfm_get_dbase( SOND_TREEVIEWFM(clipboard->tree_view) ), source, priv->zond_dbase, dest, del, errmsg );
     if ( rc ) ERROR_ROLLBACK( priv->zond_dbase )
 
     return 0;
@@ -178,14 +161,7 @@ sond_treeviewfm_dbase( SondTreeviewFM* stvfm, gint mode, const gchar* rel_path_s
                 rel_path_source, rel_path_dest, errmsg );
         if ( rc ) ERROR_S
     }
-/* (Eingang abgeklemmt)
-    if ( mode == 1 || mode == 2 )
-    {
-        rc = SOND_TREEVIEWFM_GET_CLASS(stvfm)->dbase_update_eingang( stvfm,
-                rel_path_source, rel_path_dest, (gboolean) mode - 1, errmsg );
-        if ( rc ) ERROR_S
-    }
-*/
+
     return 0;
 }
 
@@ -914,7 +890,6 @@ sond_treeviewfm_class_init( SondTreeviewFMClass* klass )
     klass->dbase_begin = sond_treeviewfm_dbase_begin;
     klass->dbase_test = sond_treeviewfm_dbase_test;
     klass->dbase_update_path = sond_treeviewfm_dbase_update_path;
-    klass->dbase_update_eingang = sond_treeviewfm_dbase_update_eingang;
     klass->dbase_end = sond_treeviewfm_dbase_end;
     klass->text_edited = sond_treeviewfm_text_edited;
     klass->results_row_activated = sond_treeviewfm_results_row_activated;
@@ -1587,7 +1562,6 @@ sond_treeviewfm_render_eingang( GtkTreeViewColumn* column, GtkCellRenderer* rend
         GtkTreeModel* model, GtkTreeIter* iter, gpointer data )
 {
     gint rc = 0;
-    Eingang eingang = { 0 };
     gint eingang_id = 0;
     gchar* rel_path = NULL;
     gchar* errmsg = NULL;
@@ -1610,7 +1584,7 @@ sond_treeviewfm_render_eingang( GtkTreeViewColumn* column, GtkCellRenderer* rend
     else if ( rc == 1 )
     {
         if ( eingang_id ) g_object_set( G_OBJECT(renderer), "text",
-            eingang.eingangsdatum, NULL );
+            "Datum", NULL );
         else g_object_set( G_OBJECT(renderer), "text", "----", NULL );
     }
     else g_object_set( G_OBJECT(renderer), "text", "", NULL );

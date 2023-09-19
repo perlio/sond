@@ -21,7 +21,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <glib/gstdio.h>
 
 #include "../../misc.h"
-#include "../../dbase.h"
 #include "../../sond_treeviewfm.h"
 
 #include "../global_types.h"

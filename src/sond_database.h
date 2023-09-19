@@ -1,9 +1,18 @@
 #ifndef SOND_DATABASE_H_INCLUDED
 #define SOND_DATABASE_H_INCLUDED
 
-typedef char gchar;
-typedef int gint;
-/*
+#include <glib.h>
+
+#define SOND_DATABASE_ERROR sond_database_error_quark()
+G_DEFINE_QUARK(sond-database-error-quark,sond_database_error)
+
+enum SondDatabaseError
+{
+    SOND_DATABASE_ERROR_NORESULT,
+    SOND_DATABASE_ERROR_ROLLBACKFAILED,
+    NUM_SOND_DATABASE_ERROR
+};
+
 typedef enum
 {
     AKTE = 1,
@@ -12,24 +21,12 @@ typedef enum
     _ENDE_,
     _NAME_,
     _VORNAME_,
-    _JAHR_,
+    _REG_JAHR_,
     _REG_NR_,
-    _KURZBEZ_,
+    _AKTENRUBRUM_,
+    _AKTENKURZBEZ_,
     NUM_TYPES
 } Type;
-*/
-typedef enum
-{
-    NATUERLICHE_PERSON = 310,
-    MANN = 312,
-    FRAU = 313,
-    DIVERS = 314,
-    _GEHOERT_ZU_ = 10000,
-    _HAT_ = 10010,
-    _BEGINN_ = 10030,
-    _NAME_ = 10100,
-    _VORNAME_ = 11010
-} labels;
 
 typedef struct _Entity
 {
@@ -63,23 +60,27 @@ typedef struct _Node
 } Node;
 
 
-gint sond_database_add_to_database( gpointer, gchar** );
+gint sond_database_add_to_database( gpointer, GError** );
 
-gint sond_database_insert_entity( gpointer, gint, gchar** );
+gint sond_database_begin( gpointer, GError** );
 
-gint sond_database_is_admitted_edge( gpointer, gint, gint, gint, gchar** );
+gint sond_database_commit( gpointer, GError** );
 
-gint sond_database_is_admitted_rel( gpointer, gint, gint, gchar** );
+gint sond_database_rollback( gpointer, GError** );
+
+gint sond_database_insert_entity( gpointer, Type, GError** );
+
+gint sond_database_insert_rel( gpointer, Type, gint, gint, GError** );
+
+gint sond_database_insert_property( gpointer, Type, gint, const gchar*, GError** );
+
+
 
 gint sond_database_update_label( gpointer, gint, gint, gchar** );
 
 gint sond_database_label_is_equal_or_parent( gpointer, gint, gint, gchar** );
 
 gint sond_database_get_ID_label_for_entity( gpointer, gint, gchar** );
-
-gint sond_database_insert_rel( gpointer, gint, gint, gint, gchar** );
-
-gint sond_database_insert_property( gpointer, gint, gint, const gchar*, gchar** );
 
 gint sond_database_get_entities_for_label( gpointer, gint, GArray**, gchar** );
 

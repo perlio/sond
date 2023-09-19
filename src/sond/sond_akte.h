@@ -5,6 +5,15 @@
 #include <mysql.h>
 #include "sond_person.h"
 
+#define SOND_AKTE_ERROR sond_akte_error_quark()
+G_DEFINE_QUARK(sond-akte-error-quark,sond_akte_error)
+
+
+enum SondAkteError
+{
+    SOND_AKTE_ERROR_PARSEJSON,
+    NUM_SOND_AKTE_ERROR
+};
 
 typedef struct _AkteLebenszeit
 {
@@ -29,15 +38,15 @@ typedef struct _AkteSachbearbeiter
     GDateTime* bis;
 } AkteSachbearbeiter;
 
-typedef struct _AkteKurz
+typedef struct _SondAkte
 {
-    gint id;
-    gint regjahr;
-    gint regnr;
-    gchar* bezeichnung;
-    gchar* gegenstand;
-} AkteKurz;
+    gint reg_jahr;
+    gint reg_nr;
+    gchar* aktenrubrum;
+    gchar* aktenkurzbez;
+} SondAkte;
 
+/*
 typedef struct _Akte
 {
     AkteKurz* akte_kurz;
@@ -50,11 +59,14 @@ typedef struct _Akte
 void akte_kurz_free( AkteKurz* );
 
 AkteKurz* akte_kurz_new( void );
+*/
 
-void akte_free( Akte* );
+void sond_akte_free( SondAkte* );
 
-Akte* akte_new( );
+SondAkte* sond_akte_new( );
 
-GList* akte_load_list_kurz( const gchar*, GError** );
+SondAkte* sond_akte_new_from_json( const gchar*, GError** );
+
+gchar* sond_akte_to_json( SondAkte* );
 
 #endif //SOND_AKTE_H_INCLUDED
