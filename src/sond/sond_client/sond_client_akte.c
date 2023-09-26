@@ -407,5 +407,7 @@ sond_client_akte_init( GtkButton* button, gpointer data )
 
     gtk_widget_show_all( sond_client_akte->window );
 
+    gtk_widget_grab_focus( sond_client_akte->entry_reg_nr );
+
     return;
 }

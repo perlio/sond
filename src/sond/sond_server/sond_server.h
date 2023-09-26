@@ -60,7 +60,6 @@ typedef struct _SondServer
     gchar* mysql_password;
     gchar* mysql_db;
     gchar* mysql_path_ca;
-    MYSQL* mysql_con;
     GArray* arr_locks;
     GMutex mysql_mutex_con;
 
@@ -73,7 +72,7 @@ typedef struct _SondServer
 } SondServer;
 
 
-gint sond_server_init_mysql_con( SondServer*, GError** );
+MYSQL* sond_server_get_mysql_con( SondServer*, GError** );
 
 
 #endif // SOND_SERVER_H_INCLUDED

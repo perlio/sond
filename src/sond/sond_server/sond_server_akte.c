@@ -29,7 +29,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
 static gint
-sond_server_akte_write( SondServer* sond_server, SondAkte* sond_akte, GError** error )
+sond_server_akte_write( SondServer* sond_server, MYSQL* con, SondAkte* sond_akte, GError** error )
 {
     gchar* sql_1 = NULL;
     gchar* sql_2 = NULL;
@@ -43,25 +43,27 @@ sond_server_akte_write( SondServer* sond_server, SondAkte* sond_akte, GError** e
             "(SELECT rel_subject AS ID_reg_jahr FROM entities WHERE type=%i AND prop_value='%i') AS t1 "
             "JOIN "
             "(SELECT rel_subject AS ID_reg_nr FROM entities WHERE type=%i AND prop_value='%i') AS t2 "
-            "ON t1.ID_reg_jahr=t2.reg_nr; ", _REG_JAHR_, sond_akte->reg_jahr, _REG_NR_, sond_akte->reg_nr );
+            "ON t1.ID_reg_jahr=t2.ID_reg_nr; ", _REG_JAHR_, sond_akte->reg_jahr, _REG_NR_, sond_akte->reg_nr );
 
-    rc = mysql_query( sond_server->mysql_con, sql_1 );
+    rc = mysql_query( con, sql_1 );
     g_free( sql_1 );
     if ( rc )
     {
         if ( error ) *error = g_error_new( g_quark_from_static_string( "MARIADB" ),
-                mysql_errno( sond_server->mysql_con ), "%s\n%s\n\nFehlermeldung: %s",
-                __func__, "mysql_query", mysql_error( sond_server->mysql_con ) );
+                mysql_errno( con ), "%s\n%s\n\nFehlermeldung: %s",
+                __func__, "mysql_query", mysql_error( con ) );
+
         return -1;
     }
 
     //abfrägen
-    mysql_res = mysql_store_result( sond_server->mysql_con );
+    mysql_res = mysql_store_result( con );
     if ( !mysql_res )
     {
         if ( error ) *error = g_error_new( g_quark_from_static_string( "MARIADB" ),
-                mysql_errno( sond_server->mysql_con ), "%s\n%s\n\nFehlermeldung: %s",
-                __func__, "mysql_store_results", mysql_error( sond_server->mysql_con ) );
+                mysql_errno( con ), "%s\n%s\n\nFehlermeldung: %s",
+                __func__, "mysql_store_results", mysql_error( con ) );
+
         return -1;
     }
 
@@ -79,25 +81,27 @@ sond_server_akte_write( SondServer* sond_server, SondAkte* sond_akte, GError** e
 
     sql_2 = g_strdup_printf( "UPDATE entities SET prop_value='%s' "
             "WHERE type=%i AND rel_subject=%i; ", sond_akte->aktenrubrum, _AKTENRUBRUM_, ID_akte );
-    rc = mysql_query( sond_server->mysql_con, sql_2 );
+    rc = mysql_query( con, sql_2 );
     g_free( sql_2 );
     if ( rc )
     {
         if ( error ) *error = g_error_new( g_quark_from_static_string( "MARIADB" ),
-                mysql_errno( sond_server->mysql_con ), "%s\n%s\nError: %s",
-                __func__, "mysql_query", mysql_error( sond_server->mysql_con ) );
+                mysql_errno( con ), "%s\n%s\nError: %s",
+                __func__, "mysql_query", mysql_error( con ) );
+
         return -1;
     }
 
     sql_3 = g_strdup_printf( "UPDATE entities SET prop_value='%s' "
             "WHERE type=%i AND rel_subject=%i; ", sond_akte->aktenkurzbez, _AKTENKURZBEZ_, ID_akte );
-    rc = mysql_query( sond_server->mysql_con, sql_3 );
+    rc = mysql_query( con, sql_3 );
     g_free( sql_3 );
     if ( rc )
     {
         if ( error ) *error = g_error_new( g_quark_from_static_string( "MARIADB" ),
-                mysql_errno( sond_server->mysql_con ), "%s\n%s\nError: %s",
-                __func__, "mysql_query", mysql_error( sond_server->mysql_con ) );
+                mysql_errno( con ), "%s\n%s\nError: %s",
+                __func__, "mysql_query", mysql_error( con ) );
+
         return -1;
     }
 
@@ -106,16 +110,14 @@ sond_server_akte_write( SondServer* sond_server, SondAkte* sond_akte, GError** e
 
 
 static gint
-sond_server_akte_create( SondServer* sond_server, const gchar* aktenrubrum,
-        const gchar* aktenkurzbez, gint* reg_jahr, gint* reg_nr, GError** error )
+sond_server_akte_create( SondServer* sond_server, MYSQL* con, SondAkte* sond_akte, GError** error )
 {
     gint rc = 0;
     gchar* sql = NULL;
-    gchar* text_jahr = NULL;
     GDateTime* date_time = NULL;
     gint year = 0;
-    gchar* year_text = NULL;
     gint num = 0;
+    gchar* year_text = NULL;
     gchar* num_text = NULL;
     MYSQL_RES* mysql_res = NULL;
     MYSQL_ROW row = NULL;
@@ -124,33 +126,31 @@ sond_server_akte_create( SondServer* sond_server, const gchar* aktenrubrum,
     date_time = g_date_time_new_now_local( );
     year = g_date_time_get_year( date_time );
     g_date_time_unref( date_time );
-    text_jahr = g_strdup_printf( "%i", year );
 
     sql = g_strdup_printf( "SELECT MAX(t2.reg_nr) FROM "
-            "(SELECT rel_subject AS ID_reg_jahr from entities WHERE type=%i AND prop_value='%s') AS t1 "
+            "(SELECT rel_subject AS ID_reg_jahr from entities WHERE type=%i AND prop_value='%i') AS t1 "
             "JOIN "
             "(SELECT prop_value AS reg_nr, rel_subject AS ID_reg_nr FROM entities WHERE type=%i) t2 "
-            "ON t1.ID_reg_jahr=t2.ID_reg_nr; ", _REG_JAHR_, text_jahr, _REG_NR_ );
-    g_free( text_jahr );
+            "ON t1.ID_reg_jahr=t2.ID_reg_nr; ", _REG_JAHR_, year, _REG_NR_ );
 
-    rc = mysql_query( sond_server->mysql_con, sql );
+    rc = mysql_query( con, sql );
     g_free( sql );
     if ( rc )
     {
         *error = g_error_new( g_quark_from_static_string( "MARIADB" ),
-                mysql_errno( sond_server->mysql_con ), "%s\n%s\n\nFehlermeldung: %s",
-                __func__, "mysql_query", mysql_error( sond_server->mysql_con ) );
+                mysql_errno( con ), "%s\n%s\n\nFehlermeldung: %s",
+                __func__, "mysql_query", mysql_error( con ) );
         g_warning( (*error)->message );
         return -1;
     }
 
     //abfrägen
-    mysql_res = mysql_store_result( sond_server->mysql_con );
+    mysql_res = mysql_store_result( con );
     if ( !mysql_res )
     {
         if ( error ) *error = g_error_new( g_quark_from_static_string( "MARIADB" ),
-                mysql_errno( sond_server->mysql_con ), "%s\n%s\n\nFehlermeldung: %s",
-                __func__, "mysql_store_results", mysql_error( sond_server->mysql_con ) );
+                mysql_errno( con ), "%s\n%s\n\nFehlermeldung: %s",
+                __func__, "mysql_store_results", mysql_error( con ) );
         g_warning( (*error)->message );
         return -1;
     }
@@ -160,23 +160,23 @@ sond_server_akte_create( SondServer* sond_server, const gchar* aktenrubrum,
     else num = 1; //noch keine Akte in diesem Jahr
     mysql_free_result( mysql_res );
 
-    ID_akte = sond_database_insert_entity( sond_server->mysql_con, AKTE, error );
+    ID_akte = sond_database_insert_entity( con, AKTE, error );
     if ( ID_akte == -1 )
     {
         g_prefix_error( error, "%s\n", __func__ );
         return -1;
     }
 
-    rc = sond_database_insert_property( sond_server->mysql_con, _AKTENRUBRUM_,
-            ID_akte, aktenrubrum, error );
+    rc = sond_database_insert_property( con, _AKTENRUBRUM_,
+            ID_akte, sond_akte->aktenrubrum, error );
     if ( rc == -1 )
     {
         g_prefix_error( error, "%s\n", __func__ );
         return -1;
     }
 
-    rc = sond_database_insert_property( sond_server->mysql_con, _AKTENKURZBEZ_,
-            ID_akte, aktenkurzbez, error );
+    rc = sond_database_insert_property( con, _AKTENKURZBEZ_,
+            ID_akte, sond_akte->aktenkurzbez, error );
     if ( rc == -1 )
     {
         g_prefix_error( error, "%s\n", __func__ );
@@ -184,7 +184,7 @@ sond_server_akte_create( SondServer* sond_server, const gchar* aktenrubrum,
     }
 
     year_text = g_strdup_printf( "%i", year );
-    rc = sond_database_insert_property( sond_server->mysql_con, _REG_JAHR_,
+    rc = sond_database_insert_property( con, _REG_JAHR_,
             ID_akte, year_text, error );
     g_free( year_text );
     if ( rc == -1 )
@@ -194,7 +194,7 @@ sond_server_akte_create( SondServer* sond_server, const gchar* aktenrubrum,
     }
 
     num_text = g_strdup_printf( "%i", num );
-    rc = sond_database_insert_property( sond_server->mysql_con, _REG_NR_,
+    rc = sond_database_insert_property( con, _REG_NR_,
             ID_akte, num_text, error );
     g_free( num_text );
     if ( rc == -1 )
@@ -203,8 +203,8 @@ sond_server_akte_create( SondServer* sond_server, const gchar* aktenrubrum,
         return -1;
     }
 
-    *reg_jahr = year;
-    *reg_nr = num;
+    sond_akte->reg_jahr = year;
+    sond_akte->reg_nr = num;
 
     return 0;
 }
@@ -212,15 +212,16 @@ sond_server_akte_create( SondServer* sond_server, const gchar* aktenrubrum,
 
 void
 sond_server_akte_schreiben( SondServer* sond_server,
-        const gchar* params, gchar** omessage )
+        const gchar** imessage_strv, gchar** omessage )
 {
     GError* error = NULL;
-    gint reg_jahr = 0;
-    gint reg_nr = 0;
     gint rc = 0;
     SondAkte* sond_akte = NULL;
+    MYSQL* con = NULL;
+    gint reg_jahr = 0;
+    gint reg_nr = 0;
 
-    sond_akte = sond_akte_new_from_json( params, &error );
+    sond_akte = sond_akte_new_from_json( imessage_strv[3], &error );
     if ( !sond_akte )
     {
         *omessage = g_strconcat( "ERROR *** Nachricht konnte nicht geparst werden\n\n",
@@ -229,32 +230,23 @@ sond_server_akte_schreiben( SondServer* sond_server,
 
         return;
     }
-    //mutex für Benutzung con setzen
-    g_mutex_lock( &sond_server->mysql_mutex_con );
 
-    if ( !sond_server->mysql_con )
+    con = sond_server_get_mysql_con( sond_server, &error );
+    if ( !con )
     {
-        gint rc = 0;
+        *omessage = g_strconcat( "ERROR *** Keine Verbindung zu MYSQL-Server\n\n",
+                error->message, NULL );
+        g_warning( "Conn zum MariaDB-Server konnte nicht hergestellt werden\n\n%s",
+                error->message );
+        g_error_free( error );
+        sond_akte_free( sond_akte );
 
-        rc = sond_server_init_mysql_con( sond_server, &error );
-        if ( rc )
-        {
-            g_mutex_unlock( &sond_server->mysql_mutex_con );
-            *omessage = g_strconcat( "ERROR *** Keine Verbindung zu MYSQL-Server\n\n",
-                    error->message, NULL );
-            g_warning( "Conn zum MariaDB-Server konnte nicht hergestellt werden\n\n%s",
-                    error->message );
-            g_error_free( error );
-            sond_akte_free( sond_akte );
-
-            return;
-        }
+        return;
     }
 
-    rc = sond_database_begin( sond_server->mysql_con, &error );
+    rc = sond_database_begin( con, &error );
     if ( rc )
     {
-        g_mutex_unlock( &sond_server->mysql_mutex_con );
         *omessage = g_strconcat( "ERROR *** Akte konnte nicht angelegt werden\n\n",
                 error->message, NULL );
         g_warning( "Transaction konnte nicht gestartet werden\n\n%s",
@@ -265,10 +257,13 @@ sond_server_akte_schreiben( SondServer* sond_server,
         return;
     }
 
-    if ( sond_akte->reg_nr == 0 ) rc = sond_server_akte_create( sond_server,
-            sond_akte->aktenrubrum, sond_akte->aktenkurzbez,
-            &reg_jahr, &reg_nr, &error);
-    else rc = sond_server_akte_write( sond_server, sond_akte, &error );
+    if ( sond_akte->reg_nr == 0 )
+    {
+        rc = sond_server_akte_create( sond_server, con, sond_akte, &error);
+        reg_jahr = sond_akte->reg_jahr;
+        reg_nr = sond_akte->reg_nr;
+    }
+    else rc = sond_server_akte_write( sond_server, con, sond_akte, &error );
     sond_akte_free( sond_akte );
     if ( rc )
     {
@@ -277,21 +272,19 @@ sond_server_akte_schreiben( SondServer* sond_server,
 
         *omessage = g_strconcat( "ERROR *** Akte konnte nicht angelegt/geändert werden\n\n",
                 error->message, NULL );
-        g_error_free( error );
+        g_clear_error( &error );
 
-        res = sond_database_rollback( sond_server->mysql_con, &error_tmp );
+        res = sond_database_rollback( con, &error_tmp );
         if ( res )
         {
             g_message( "Rollback gescheitert\n\n%s", error_tmp->message );
-            mysql_close( sond_server->mysql_con );
-            sond_server->mysql_con = NULL;
+            mysql_close( con );
         }
-        g_mutex_unlock( &sond_server->mysql_mutex_con );
 
         return;
     }
 
-    rc = sond_database_commit( sond_server->mysql_con, &error );
+    rc = sond_database_commit( con, &error );
     if ( rc )
     {
         gint res = 0;
@@ -300,22 +293,19 @@ sond_server_akte_schreiben( SondServer* sond_server,
                 error->message, NULL );
         g_clear_error( &error );
 
-        res = sond_database_rollback( sond_server->mysql_con, &error );
+        res = sond_database_rollback( con, &error );
         if ( res )
         {
             g_message( "Rollback gescheitert\n\n%s", error->message );
             g_error_free( error );
-            mysql_close( sond_server->mysql_con );
-            sond_server->mysql_con = NULL;
+            mysql_close( con );
         }
-        g_mutex_unlock( &sond_server->mysql_mutex_con );
 
         return;
     }
 
-    g_mutex_unlock( &sond_server->mysql_mutex_con );
-
-    *omessage = g_strdup_printf( "%i-%i", reg_nr, reg_jahr );
+//    if ( reg_nr )
+        *omessage = g_strdup_printf( "%i-%i", reg_nr, reg_jahr );
 
     return;
 }
@@ -324,6 +314,7 @@ sond_server_akte_schreiben( SondServer* sond_server,
 static gint
 sond_server_akte_laden( SondServer* sond_server, SondAkte* sond_akte, GError** error )
 {
+    MYSQL* con = NULL;
     MYSQL_RES* mysql_res = NULL;
     MYSQL_ROW row = NULL;
     gchar* sql_1 = NULL;
@@ -332,30 +323,39 @@ sond_server_akte_laden( SondServer* sond_server, SondAkte* sond_akte, GError** e
     gint ID_akte = 0;
     gint rc = 0;
 
+    con = sond_server_get_mysql_con( sond_server, error );
+    if ( !con )
+    {
+        g_prefix_error( error, "%s\n", __func__ );
+        return -1;
+    }
+
     sql_1 = g_strdup_printf( "SELECT t1.ID_reg_jahr FROM "
             "(SELECT rel_subject AS ID_reg_jahr FROM entities WHERE type=%i AND prop_value='%i') AS t1 "
             "JOIN "
             "(SELECT rel_subject AS ID_reg_nr FROM entities WHERE type=%i AND prop_value='%i') AS t2 "
             "ON t1.ID_reg_jahr=t2.ID_reg_nr; ", _REG_JAHR_, sond_akte->reg_jahr, _REG_NR_, sond_akte->reg_nr );
 
-    rc = mysql_query( sond_server->mysql_con, sql_1 );
+    rc = mysql_query( con, sql_1 );
     g_free( sql_1 );
     if ( rc )
     {
         if ( error ) *error = g_error_new( g_quark_from_static_string( "MARIADB" ),
-                mysql_errno( sond_server->mysql_con ), "%s\n%s\n\nFehlermeldung: %s",
-                __func__, "mysql_query", mysql_error( sond_server->mysql_con ) );
+                mysql_errno( con ), "%s\n%s\n\nFehlermeldung: %s",
+                __func__, "mysql_query", mysql_error( con ) );
+        mysql_close( con );
         g_warning( (*error)->message );
         return -1;
     }
 
     //abfrägen
-    mysql_res = mysql_store_result( sond_server->mysql_con );
+    mysql_res = mysql_store_result( con );
     if ( !mysql_res )
     {
         if ( error ) *error = g_error_new( g_quark_from_static_string( "MARIADB" ),
-                mysql_errno( sond_server->mysql_con ), "%s\n%s\n\nFehlermeldung: %s",
-                __func__, "mysql_store_results", mysql_error( sond_server->mysql_con ) );
+                mysql_errno( con ), "%s\n%s\n\nFehlermeldung: %s",
+                __func__, "mysql_store_results", mysql_error( con ) );
+        mysql_close( con );
         g_warning( (*error)->message );
         return -1;
     }
@@ -366,6 +366,7 @@ sond_server_akte_laden( SondServer* sond_server, SondAkte* sond_akte, GError** e
     {
         *error = g_error_new( SOND_SERVER_ERROR, SOND_SERVER_ERROR_NOTFOUND, "Keine Akte zur Registernummer" );
         mysql_free_result( mysql_res );
+        mysql_close( con );
 
         return -1;
     }
@@ -375,24 +376,26 @@ sond_server_akte_laden( SondServer* sond_server, SondAkte* sond_akte, GError** e
     sql_2 = g_strdup_printf( "SELECT prop_value FROM entities WHERE rel_subject=%i AND type=%i; ",
             ID_akte, _AKTENRUBRUM_ );
 
-    rc = mysql_query( sond_server->mysql_con, sql_2 );
+    rc = mysql_query( con, sql_2 );
     g_free( sql_2 );
     if ( rc )
     {
         if ( error ) *error = g_error_new( g_quark_from_static_string( "MARIADB" ),
-                mysql_errno( sond_server->mysql_con ), "%s\n%s\n\nFehlermeldung: %s",
-                __func__, "mysql_query", mysql_error( sond_server->mysql_con ) );
+                mysql_errno( con ), "%s\n%s\n\nFehlermeldung: %s",
+                __func__, "mysql_query", mysql_error( con ) );
+        mysql_close( con );
         g_warning( (*error)->message );
         return -1;
     }
 
     //abfrägen
-    mysql_res = mysql_store_result( sond_server->mysql_con );
+    mysql_res = mysql_store_result( con );
     if ( !mysql_res )
     {
         if ( error ) *error = g_error_new( g_quark_from_static_string( "MARIADB" ),
-                mysql_errno( sond_server->mysql_con ), "%s\n%s\n\nFehlermeldung: %s",
-                __func__, "mysql_store_results", mysql_error( sond_server->mysql_con ) );
+                mysql_errno( con ), "%s\n%s\n\nFehlermeldung: %s",
+                __func__, "mysql_store_results", mysql_error( con ) );
+        mysql_close( con );
         g_warning( (*error)->message );
         return -1;
     }
@@ -403,6 +406,7 @@ sond_server_akte_laden( SondServer* sond_server, SondAkte* sond_akte, GError** e
     {
         *error = g_error_new( SOND_SERVER_ERROR, SOND_SERVER_ERROR_NOTFOUND, "Keine Aktenrubrum gespeichert" );
         mysql_free_result( mysql_res );
+        mysql_close( con );
 
         return -1;
     }
@@ -412,24 +416,26 @@ sond_server_akte_laden( SondServer* sond_server, SondAkte* sond_akte, GError** e
     sql_3 = g_strdup_printf( "SELECT prop_value FROM entities WHERE rel_subject=%i AND type=%i; ",
             ID_akte, _AKTENKURZBEZ_);
 
-    rc = mysql_query( sond_server->mysql_con, sql_3 );
+    rc = mysql_query( con, sql_3 );
     g_free( sql_3 );
     if ( rc )
     {
         if ( error ) *error = g_error_new( g_quark_from_static_string( "MARIADB" ),
-                mysql_errno( sond_server->mysql_con ), "%s\n%s\n\nFehlermeldung: %s",
-                __func__, "mysql_query", mysql_error( sond_server->mysql_con ) );
+                mysql_errno( con ), "%s\n%s\n\nFehlermeldung: %s",
+                __func__, "mysql_query", mysql_error( con ) );
+        mysql_close( con );
         g_warning( (*error)->message );
         return -1;
     }
 
     //abfrägen
-    mysql_res = mysql_store_result( sond_server->mysql_con );
+    mysql_res = mysql_store_result( con );
     if ( !mysql_res )
     {
         if ( error ) *error = g_error_new( g_quark_from_static_string( "MARIADB" ),
-                mysql_errno( sond_server->mysql_con ), "%s\n%s\n\nFehlermeldung: %s",
-                __func__, "mysql_store_results", mysql_error( sond_server->mysql_con ) );
+                mysql_errno( con ), "%s\n%s\n\nFehlermeldung: %s",
+                __func__, "mysql_store_results", mysql_error( con ) );
+        mysql_close( con );
         g_warning( (*error)->message );
         return -1;
     }
@@ -439,12 +445,14 @@ sond_server_akte_laden( SondServer* sond_server, SondAkte* sond_akte, GError** e
 
     mysql_free_result( mysql_res );
 
+    mysql_close( con );
+
     return 0;
 }
 
 
 void
-sond_server_akte_holen( SondServer* sond_server, const gchar* params,
+sond_server_akte_holen( SondServer* sond_server, const gchar** imessage_strv,
         gchar** omessage )
 {
     gint reg_nr = 0;
@@ -454,8 +462,8 @@ sond_server_akte_holen( SondServer* sond_server, const gchar* params,
     gint rc = 0;
     GError* error = NULL;
 
-    reg_jahr = atoi( g_strrstr( params, "-" ) + 1 );
-    reg_nr = atoi( g_strndup( params, sizeof( g_strrstr( params, "-" ) ) ) );
+    reg_jahr = atoi( g_strrstr( imessage_strv[3], "-" ) + 1 );
+    reg_nr = atoi( g_strndup( imessage_strv[3], sizeof( g_strrstr( imessage_strv[3], "-" ) ) ) );
 
     //lock
     g_mutex_lock( &sond_server->mysql_mutex_con );
@@ -478,13 +486,14 @@ sond_server_akte_holen( SondServer* sond_server, const gchar* params,
         g_array_append_val( sond_server->arr_locks, reg_nr_jahr );
     }
 
+    g_mutex_unlock( &sond_server->mysql_mutex_con );
+
     sond_akte = sond_akte_new( );
 
     sond_akte->reg_nr = reg_nr;
     sond_akte->reg_jahr = reg_jahr;
 
     rc = sond_server_akte_laden( sond_server, sond_akte, &error );
-    g_mutex_unlock( &sond_server->mysql_mutex_con );
     if ( rc )
     {
         *omessage = g_strconcat( "ERROR *** Akte kann nicht geladen werden\n\n",

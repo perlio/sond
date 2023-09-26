@@ -35,7 +35,7 @@ sond_client_connection_send_and_read( SondClient* sond_client, const gchar*
     GInputStream * istream = g_io_stream_get_input_stream (G_IO_STREAM (connection));
     GOutputStream * ostream = g_io_stream_get_output_stream (G_IO_STREAM (connection));
 
-    omessage = g_strconcat( sond_client->user, "&", sond_client->password, ":",
+    omessage = g_strconcat( sond_client->user, ":", sond_client->password, ":",
             command, ":", params, NULL );
 
     g_output_stream_write( ostream, omessage, strlen( omessage ), NULL, error );
@@ -82,9 +82,12 @@ sond_client_connection_ping( SondClient* sond_client, GError** error )
     gchar* rcv_message = NULL;
 
     rcv_message = sond_client_connection_send_and_read( sond_client, "PING", "", error );
-    if ( !rcv_message ) return FALSE;
-
-    if ( !g_strcmp0( rcv_message, "PONG" ) )
+    if ( !rcv_message )
+    {
+        g_prefix_error( error, "%s\n", __func__ );
+        return FALSE;
+    }
+    else if ( !g_strcmp0( rcv_message, "PONG" ) )
     {
         g_free( rcv_message );
 
@@ -92,9 +95,9 @@ sond_client_connection_ping( SondClient* sond_client, GError** error )
     }
     else
     {
-        g_free( rcv_message );
         *error = g_error_new( SOND_CLIENT_ERROR, SOND_CLIENT_ERROR_INVALRESP,
-                "%s\nServer antwortet nicht mit 'PONG'", __func__ );
+                "%s\n%s", __func__, rcv_message );
+        g_free( rcv_message );
 
         return FALSE;
     }

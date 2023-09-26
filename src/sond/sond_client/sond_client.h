@@ -19,6 +19,8 @@ enum SondClientError
     SOND_CLIENT_ERROR_INPTRUNC,
     SOND_CLIENT_ERROR_NOANSWER,
     SOND_CLIENT_ERROR_MESSAGETOOLONG,
+    SOND_CLIENT_ERROR_NOUSERNAME,
+    SOND_CLIENT_ERROR_NOSEAFRPC,
     NUM_SOND_CLIENT_ERROR
 };
 
@@ -38,10 +40,11 @@ typedef struct _Sond_Client
 
     gchar* user;
     gchar* password;
+    gchar* password_hash;
+    gchar* password_salt;
 
     gchar* server_host;
     guint16 server_port;
-    gchar* server_user;
 
     gint reg_jahr_akt;
     gint reg_nr_akt;

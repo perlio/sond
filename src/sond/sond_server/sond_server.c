@@ -125,17 +125,17 @@ free_cred( Cred* cred )
 
 
 static gint
-get_auth_level( SondServer* sond_server, const gchar* auth )
+get_auth_level( SondServer* sond_server, const gchar** imessage_strv )
 {
-    gchar* user = NULL;
-    gchar* password = NULL;
+    const gchar* user = NULL;
+    const gchar* password = NULL;
     Cred cred = { 0 };
     gchar* errmsg = NULL;
     gchar* auth_token = NULL;
     gint i = 0;
 
-    password = g_strrstr( auth, "&" ) + 1;
-    user = g_strndup( auth, strlen( auth ) - strlen( password ) - 1 );
+    user = imessage_strv[0];
+    password = imessage_strv[1];
 
     //mutex user
     g_mutex_lock( &sond_server->mutex_arr_creds );
@@ -185,33 +185,32 @@ get_auth_level( SondServer* sond_server, const gchar* auth )
 
 
 static gint
-process_imessage( SondServer* sond_server, const gchar* auth, const gchar* command, const gchar* params,
-        gchar** omessage )
+process_imessage( SondServer* sond_server, const gchar** imessage_strv, gchar** omessage )
 {
     gint auth_level = 0;
 
-    auth_level = get_auth_level( sond_server, auth );
+    auth_level = get_auth_level( sond_server, imessage_strv );
     if ( auth_level == 0 )
     {
         *omessage = g_strdup( "ERROR *** AUTHENTICATION FAILED" );
         return 0;
     }
 
-    if ( !g_strcmp0( command, "PING" ) ) *omessage = g_strdup( "PONG" );
-    else if ( !g_strcmp0( command, "SHUTDOWN" ) )
+    if ( !g_strcmp0( imessage_strv[2], "PING" ) ) *omessage = g_strdup( "PONG" );
+    else if ( !g_strcmp0( imessage_strv[2], "SHUTDOWN" ) )
     {
         *omessage = g_strdup( "SONDSERVER_OK" );
 
         return 1;
     }
-    else if ( !g_strcmp0( command, "AKTE_SCHREIBEN" ) )
-            sond_server_akte_schreiben( sond_server, params, omessage );
-    else if ( !g_strcmp0( command, "AKTE_HOLEN" ) )
-            sond_server_akte_holen( sond_server, params, omessage );
+    else if ( !g_strcmp0( imessage_strv[2], "AKTE_SCHREIBEN" ) )
+            sond_server_akte_schreiben( sond_server, imessage_strv, omessage );
+    else if ( !g_strcmp0( imessage_strv[2], "AKTE_HOLEN" ) )
+            sond_server_akte_holen( sond_server, imessage_strv, omessage );
 /*
-    else if ( !g_strcmp0( command, "AKTE_SUCHEN" ) )
+    else if ( !g_strcmp0( imessage_strv[2], "AKTE_SUCHEN" ) )
             sond_server_akte_suchen( sond_server, params, omessage );
-    else if ( !g_strcmp0( command, "AKTE_UNLOCK" ) )
+    else if ( !g_strcmp0( imessage_strv[2], "AKTE_UNLOCK" ) )
             sond_server_akte_unlock( sond_server, params, omessage );
     */
     else
@@ -237,7 +236,6 @@ sond_server_process_message( gpointer data, gpointer user_data )
     gchar* omessage = NULL;
     SondServer* sond_server = NULL;
     GSocketConnection* connection = NULL;
-    gchar** imessage_strv = NULL;
     gint rc = 0;
 
     sond_server = user_data;
@@ -250,7 +248,7 @@ sond_server_process_message( gpointer data, gpointer user_data )
     if ( error )
     {
         g_warning( "input-stream konnte nicht gelesen werden: %s", error->message );
-        g_error_free( error );
+        g_clear_error( &error );
 
         omessage = g_strdup( "ERROR *** COULD_NOT_READ_MESSAGE" );
     }
@@ -258,32 +256,18 @@ sond_server_process_message( gpointer data, gpointer user_data )
     else if ( ret > MAX_MSG_SIZE ) omessage = g_strdup( "ERROR *** MESSAGE_TRUNCATED" );
     else
     {
-        imessage_strv = g_strsplit( imessage, ":", 3 );
+        gchar** imessage_strv = NULL;
+
+        imessage_strv = g_strsplit( imessage, ":", 4 );
 
         //empty vector
         if ( imessage_strv[0] == NULL ) omessage = g_strdup( "ERROR *** EMPTY_MESSAGE" );
-        else
-        {
-            if ( imessage_strv[1] == NULL ) //
-            {
-                g_strfreev( imessage_strv );
-                omessage = g_strdup( "ERROR *** NO COMMAND" );
-            }
-            else
-            {
-                if ( imessage_strv[2] == NULL )
-                {
-                    g_strfreev( imessage_strv );
-                    omessage = g_strdup( "ERROR *** NO PARAMS" );
-                }
-                else
-                {
-                    rc = process_imessage( sond_server, imessage_strv[0], imessage_strv[1],
-                            imessage_strv[2], &omessage );
-                    g_strfreev( imessage_strv );
-                }
-            }
-        }
+        else if ( imessage_strv[1] == NULL ||
+                imessage_strv[2] == NULL ||
+                imessage_strv[3] == NULL ) omessage = g_strdup( "ERROR *** NO COMMAND" );
+        else rc = process_imessage( sond_server, imessage_strv, &omessage );
+
+        g_strfreev( imessage_strv );
     }
 
     ret = g_output_stream_write( ostream, omessage, strlen( omessage ), NULL, &error );
@@ -352,7 +336,6 @@ sond_server_free( SondServer* sond_server )
     g_free( sond_server->mysql_user );
     g_free( sond_server->mysql_db );
     g_free( sond_server->mysql_path_ca );
-    mysql_close( sond_server->mysql_con );
     g_mutex_clear( &sond_server->mysql_mutex_con );
 
     g_free( sond_server->password );
@@ -444,29 +427,46 @@ get_auth_token( GKeyFile* keyfile, SondServer* sond_server )
 }
 
 
-gint
-sond_server_init_mysql_con( SondServer* sond_server, GError** error )
+MYSQL*
+sond_server_get_mysql_con( SondServer* sond_server, GError** error )
 {
-    gint rc = 0;
-    g_return_val_if_fail( sond_server->mysql_con == NULL, -2 );
+    MYSQL* con = NULL;
 
-    sond_server->mysql_con = mysql_init( NULL );
-    mysql_optionsv( sond_server->mysql_con, MYSQL_OPT_SSL_CA,
+    con = mysql_init( NULL );
+    mysql_optionsv( con, MYSQL_OPT_SSL_CA,
             (void*) sond_server->mysql_path_ca );
-    if ( !mysql_real_connect( sond_server->mysql_con, sond_server->mysql_host,
+    if ( !mysql_real_connect( con, sond_server->mysql_host,
             sond_server->mysql_user, sond_server->mysql_password,
             sond_server->mysql_db, sond_server->mysql_port, NULL, CLIENT_MULTI_STATEMENTS ) )
     {
         if ( error ) *error = g_error_new( g_quark_from_static_string( "MYSQL" ),
-                mysql_errno( sond_server->mysql_con ), "%s\n%s\nFehlermeldung: %s",
-                __func__, "mysql_real_connect", mysql_error( sond_server->mysql_con ) );
-        mysql_close( sond_server->mysql_con );
-        sond_server->mysql_con = NULL;
+                mysql_errno( con ), "%s\n%s\nFehlermeldung: %s",
+                __func__, "mysql_real_connect", mysql_error( con ) );
+        mysql_close( con );
+
+        return NULL;
+    }
+
+    return con;
+}
+
+
+static gint
+sond_server_init_mysql_con( SondServer* sond_server, GError** error )
+{
+    gint rc = 0;
+    MYSQL* con = NULL;
+
+    con = sond_server_get_mysql_con( sond_server, error );
+    if ( !con )
+    {
+        g_prefix_error( error, "%s\n", __func__ );
 
         return -1;
     }
 
-    rc = sond_database_add_to_database( sond_server->mysql_con, error );
+    rc = sond_database_add_to_database( con, error );
+    mysql_close( con );
     if ( rc )
     {
         g_prefix_error( error, "%s\n", __func__ );
