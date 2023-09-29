@@ -80,6 +80,8 @@ void zond_pdf_document_set_dirty( ZondPdfDocument*, gboolean );
 
 gint zond_pdf_document_reopen_doc_and_pages( ZondPdfDocument*, gchar** );
 
+void zond_pdf_document_unload_page( PdfDocumentPage* );
+
 void zond_pdf_document_close_doc_and_pages( ZondPdfDocument* );
 
 gint zond_pdf_document_save( ZondPdfDocument*, gchar** );

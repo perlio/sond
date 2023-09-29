@@ -563,7 +563,7 @@ seiten_cb_loesche_seite( PdfViewer* pv, gint page_pv, gpointer data, gchar** err
     g_object_set_data( G_OBJECT(pv->layout), "dirty", GINT_TO_POINTER(1) );
 
     viewer_page = g_ptr_array_index( pv->arr_pages, page_pv );
-    if ( viewer_page->image_page ) gtk_widget_destroy( GTK_WIDGET(viewer_page->image_page) );
+    if ( viewer_page->image_page ) gtk_widget_destroy( viewer_page->image_page );
     g_ptr_array_remove_index( pv->arr_pages, page_pv ); //viewer_page wird freed!
 
     rc = viewer_get_iter_thumb( pv, page_pv, &iter );
@@ -666,16 +666,6 @@ seiten_loeschen( PdfViewer* pv, GPtrArray* arr_document_page, gchar** errmsg )
                 errmsg );
         if ( rc ) ERROR_S
 
-        //index anschleßender Seiten um 1 reduzieren
-        for ( gint o = page_doc; o < zond_pdf_document_get_number_of_pages( pv->dd->zond_pdf_document ); o++ )
-        {
-            PdfDocumentPage* pdf_document_page_ = NULL;
-
-            pdf_document_page_ = zond_pdf_document_get_pdf_document_page( pv->dd->zond_pdf_document, o );
-
-            pdf_document_page_->page_doc--;
-        }
-
         //Seite aus document entfernen
         //vor pdf_delete_page, da ansonsten noch ref auf page?!
         g_ptr_array_remove_index( zond_pdf_document_get_arr_pages( pv->dd->zond_pdf_document ), page_doc ); //ist gleich page_pv
@@ -684,6 +674,17 @@ seiten_loeschen( PdfViewer* pv, GPtrArray* arr_document_page, gchar** errmsg )
         fz_try( ctx ) pdf_delete_page( ctx, zond_pdf_document_get_pdf_doc( pv->dd->zond_pdf_document ),
                 page_doc );
         fz_catch( ctx ) ERROR_MUPDF( "pdf_delete_page" )
+
+        //index anschleßender Seiten um 1 reduzieren
+        for ( gint o = page_doc; o < zond_pdf_document_get_number_of_pages( pv->dd->zond_pdf_document ); o++ )
+        {
+            PdfDocumentPage* pdf_document_page_ = NULL;
+
+            pdf_document_page_ = zond_pdf_document_get_pdf_document_page( pv->dd->zond_pdf_document, o );
+            pdf_document_page_->page_doc--;
+
+            zond_pdf_document_unload_page( pdf_document_page_ );
+        }
     }
 /*
     //säubern, um ins Leere gehende Outlines etc. zu entfernen

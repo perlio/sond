@@ -606,25 +606,6 @@ zond_pdf_document_is_open( const gchar* path )
 }
 
 
-static void
-zond_pdf_document_unload_page( PdfDocumentPage* pdf_document_page )
-{
-    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( pdf_document_page->document );
-
-    if ( pdf_document_page->arr_annots )
-    {
-        g_ptr_array_unref( pdf_document_page->arr_annots );
-        pdf_document_page->arr_annots = NULL;
-    }
-    fz_drop_page( priv->ctx, &(pdf_document_page->page->super) );
-    pdf_document_page->page = NULL;
-
-    pdf_document_page->thread &= 12; //bit 2 ausschalten
-
-    return;
-}
-
-
 gint
 zond_pdf_document_reopen_doc_and_pages( ZondPdfDocument* self, gchar** errmsg )
 {
@@ -651,6 +632,27 @@ zond_pdf_document_reopen_doc_and_pages( ZondPdfDocument* self, gchar** errmsg )
     }
 
     return 0;
+}
+
+
+void
+zond_pdf_document_unload_page( PdfDocumentPage* pdf_document_page )
+{
+    if ( !pdf_document_page ) return;
+
+    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( pdf_document_page->document );
+
+    if ( pdf_document_page->arr_annots )
+    {
+        g_ptr_array_unref( pdf_document_page->arr_annots );
+        pdf_document_page->arr_annots = NULL;
+    }
+    fz_drop_page( priv->ctx, &(pdf_document_page->page->super) );
+    pdf_document_page->page = NULL;
+
+    pdf_document_page->thread &= 12; //bit 2 ausschalten
+
+    return;
 }
 
 
