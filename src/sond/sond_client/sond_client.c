@@ -21,6 +21,136 @@
 #define SEAFILE_SOCKET_NAME "seadrive.sock"
 
 
+#define MAX_MSG_SIZE 2048
+
+gchar*
+sond_client_send_and_read( SondClient* sond_client, const gchar*
+        command, const gchar* params, GError** error )
+{
+    GSocketConnection * connection = NULL;
+    GSocketClient * client = NULL;
+    gchar imessage[MAX_MSG_SIZE] = { 0 };
+    gssize ret = 0;
+    gchar* omessage = NULL;
+
+    client = g_socket_client_new();
+//    g_socket_client_set_tls( client, TRUE );
+
+    /* connect to the host */
+    connection = g_socket_client_connect_to_host (client, sond_client->server_host,
+            sond_client->server_port, NULL, error );
+    if ( *error )
+    {
+        g_object_unref( client );
+        g_prefix_error( error, "%s\n", __func__ );
+
+        return NULL;
+    }
+
+    /* use the connection */
+    GInputStream * istream = g_io_stream_get_input_stream (G_IO_STREAM (connection));
+    GOutputStream * ostream = g_io_stream_get_output_stream (G_IO_STREAM (connection));
+
+    omessage = g_strconcat( sond_client->user, "&", sond_client->password, "&",
+            command, "&", params, NULL );
+
+    g_output_stream_write( ostream, omessage, strlen( omessage ), NULL, error );
+    g_free( omessage );
+    if ( *error )
+    {
+        g_object_unref( connection );
+        g_object_unref( client );
+        g_prefix_error( error, "%s\n", __func__ );
+
+        return NULL;
+    }
+
+    ret = g_input_stream_read( istream, imessage, MAX_MSG_SIZE, NULL, error );
+    g_object_unref( connection );
+    g_object_unref( client );
+    if ( *error )
+    {
+        g_prefix_error( error, "%s\n", __func__ );
+
+        return NULL;
+    }
+    else if ( ret == 0 )
+    {
+        *error = g_error_new( SOND_CLIENT_ERROR, SOND_CLIENT_ERROR_NOANSWER, "%s\ninput-stream leer", __func__ );
+
+        return NULL;
+    }
+    else if ( ret > MAX_MSG_SIZE )
+    {
+        *error = g_error_new( SOND_CLIENT_ERROR, SOND_CLIENT_ERROR_MESSAGETOOLONG,
+                "%s\ninput-stream leer", __func__ );
+
+        return NULL;
+    }
+
+    return g_strdup( imessage );
+}
+
+
+gint
+sond_client_unlock( SondClient* sond_client, gint ID_entity, GError** error )
+{
+    gchar* resp = NULL;
+    gchar* params = NULL;
+
+    params = g_strdup_printf( "%i", ID_entity );
+    resp = sond_client_send_and_read( sond_client, "UNLOCK", params, error );
+    g_free( params );
+
+    if ( !resp )
+    {
+        g_prefix_error( error, "%s\n", __func__ );
+        return -1;
+    }
+    else if ( g_strcmp0( resp, "OK" ) )
+    {
+        *error = g_error_new( SOND_CLIENT_ERROR, SOND_CLIENT_ERROR_INVALRESP,
+                "Server antwortet: %s", resp );
+        g_free( resp );
+
+        return -1;
+    }
+
+    g_free( resp );
+
+    return 0;
+}
+
+
+gint
+sond_client_get_lock( SondClient* sond_client, gint ID_entity, GError** error )
+{
+    gchar* params = NULL;
+    gchar* resp = NULL;
+
+    //Lock auf uns holen
+    params = g_strdup_printf( "%i", ID_entity );
+    resp = sond_client_send_and_read( sond_client, "GET_LOCK", params, error );
+    g_free( params );
+    if ( !resp )
+    {
+        g_prefix_error( error, "%s\n", __func__ );
+
+        return -1; //Fenster bleibt geöffnet; je nach Fehler kann man es nochmal versuchen
+    }
+    if ( g_strcmp0( resp, "OK" ) )
+    {
+        *error = g_error_new( SOND_CLIENT_ERROR, SOND_CLIENT_ERROR_INVALRESP,
+                "Server antwortet: %s", resp );
+        g_free( resp );
+
+        return -1;
+    }
+
+    return 0;
+}
+
+
 static gboolean
 sond_client_close( GtkWidget* app_window, GdkEvent* event, gpointer data )
 {
@@ -34,7 +164,7 @@ sond_client_close( GtkWidget* app_window, GdkEvent* event, gpointer data )
     g_free( sond_client->password_hash );
     g_free( sond_client->password_salt );
 
-    g_ptr_array_unref( sond_client->arr_file_manager );
+    g_ptr_array_unref( sond_client->arr_children_windows );
 
     if ( sond_client->searpc_client )
             searpc_free_client_with_pipe_transport( sond_client->searpc_client );
@@ -188,10 +318,6 @@ sond_client_get_creds( SondClient* sond_client, GError** error )
     gtk_container_add( GTK_CONTAINER(frame_user), entry_user );
     gtk_box_pack_start( GTK_BOX(content), frame_user, FALSE, FALSE, 0 );
 
-    if ( sond_client->user )
-            gtk_entry_set_text( GTK_ENTRY(entry_user), sond_client->user );
-    gtk_widget_grab_focus( entry_user );
-
     //password
     GtkWidget* frame_password = gtk_frame_new( "Passwort" );
     GtkWidget* entry_password = gtk_entry_new( );
@@ -208,6 +334,13 @@ sond_client_get_creds( SondClient* sond_client, GError** error )
 
     gtk_widget_grab_focus( entry_user );
     gtk_widget_show_all( dialog );
+
+    if ( sond_client->user )
+    {
+        gtk_entry_set_text( GTK_ENTRY(entry_user), sond_client->user );
+        gtk_widget_grab_focus( entry_password );
+    }
+    else gtk_widget_grab_focus( entry_user );
 
     gint res = gtk_dialog_run( GTK_DIALOG(dialog) );
 
@@ -226,6 +359,9 @@ sond_client_get_creds( SondClient* sond_client, GError** error )
             GKeyFile* key_file = NULL;
             gchar* conf_path = NULL;
             gboolean success = FALSE;
+
+            g_free( sond_client->user );
+            sond_client->user = g_strdup( user );
 
             //versuchen, online zu authentifizieren
             if ( !sond_client_connection_ping( sond_client, error ) )
@@ -271,8 +407,6 @@ sond_client_get_creds( SondClient* sond_client, GError** error )
             }
 
             g_key_file_set_string( key_file, "CREDS", "user", user );
-            g_free( sond_client->user );
-            sond_client->user = g_strdup( user );
 
             g_key_file_set_string( key_file, "CREDS", "password_hash", hash_b64 );
             g_free( hash_b64 );
@@ -441,9 +575,7 @@ sond_client_init( GtkApplication* app, SondClient* sond_client )
     gint rc = 0;
     GError* error = NULL;
 
-    sond_client->arr_file_manager = g_ptr_array_new( );
-    g_ptr_array_set_free_func( sond_client->arr_file_manager,
-            (GDestroyNotify) sond_client_file_manager_free );
+    sond_client->arr_children_windows = g_ptr_array_new( );
 
     sond_client_init_app_window( app, sond_client );
 

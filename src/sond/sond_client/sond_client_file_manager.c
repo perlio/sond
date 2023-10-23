@@ -16,16 +16,6 @@ typedef struct _FileManager
 } FileManager;
 
 
-void
-sond_client_file_manager_free( FileManager* file_manager )
-{
-
-    g_free( file_manager );
-
-    return;
-}
-
-
 static void
 sond_client_file_manager_set_headerbar( GtkWidget* fm_window, SondTreeviewFM* stvfm, const gchar* path )
 {/*
@@ -155,22 +145,21 @@ sond_client_file_manager_entry_activate( GtkEntry* entry, gpointer data )
 
     if ( sond_client_misc_regnr_wohlgeformt( gtk_entry_get_text( entry ) ) )
     {
-        gint rc = 0;
         GError* error = NULL;
 
         sond_client_misc_parse_regnr( gtk_entry_get_text( entry ), &regnr, &jahr );
 
         //prüfen, ob File-Manager zu dieser Akte bereits geöffnet
-        for ( gint i = 0; i < sond_client->arr_file_manager->len; i++ )
-        {
+        for ( gint i = 0; i < sond_client->arr_children_windows->len; i++ )
+        {/*
             FileManager* file_manager =
-                    g_ptr_array_index( sond_client->arr_file_manager, i );
+                    g_ptr_array_index( sond_client->arr_open_windows, i );
             if ( file_manager->jahr == jahr && file_manager->reg_nr == regnr )
             {
                 gtk_window_present( GTK_WINDOW(file_manager->window) );
                 return;
             }
-        }
+*/        }
 
         //ansonsten: File_manager-Fenster öffnen
         if ( !sond_client_file_manager_create( sond_client, jahr, regnr, &error ) )

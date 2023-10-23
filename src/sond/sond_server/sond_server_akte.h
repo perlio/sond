@@ -22,8 +22,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 typedef struct _SondServer SondServer;
 typedef char gchar;
 
-void sond_server_akte_schreiben( SondServer*, const gchar**, gchar** );
+void sond_server_akte_schreiben( SondServer*, gint, const gchar*, gchar** );
 
-void sond_server_akte_holen( SondServer*, const gchar**, gchar** );
+void sond_server_akte_holen( SondServer*, gint, const gchar*, gchar** );
 
 #endif // SOND_SERVER_AKTE_H_INCLUDED

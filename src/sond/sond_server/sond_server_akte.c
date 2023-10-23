@@ -29,7 +29,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
 static gint
-sond_server_akte_write( SondServer* sond_server, MYSQL* con, SondAkte* sond_akte, GError** error )
+sond_server_akte_update( SondServer* sond_server, MYSQL* con, SondAkte* sond_akte, GError** error )
 {
     gchar* sql_1 = NULL;
     gchar* sql_2 = NULL;
@@ -211,8 +211,8 @@ sond_server_akte_create( SondServer* sond_server, MYSQL* con, SondAkte* sond_akt
 
 
 void
-sond_server_akte_schreiben( SondServer* sond_server,
-        const gchar** imessage_strv, gchar** omessage )
+sond_server_akte_schreiben( SondServer* sond_server, gint auth,
+        const gchar* params, gchar** omessage )
 {
     GError* error = NULL;
     gint rc = 0;
@@ -220,8 +220,9 @@ sond_server_akte_schreiben( SondServer* sond_server,
     MYSQL* con = NULL;
     gint reg_jahr = 0;
     gint reg_nr = 0;
+    gboolean create = FALSE;
 
-    sond_akte = sond_akte_new_from_json( imessage_strv[3], &error );
+    sond_akte = sond_akte_new_from_json( params, &error );
     if ( !sond_akte )
     {
         *omessage = g_strconcat( "ERROR *** Nachricht konnte nicht geparst werden\n\n",
@@ -229,6 +230,23 @@ sond_server_akte_schreiben( SondServer* sond_server,
         g_error_free( error );
 
         return;
+    }
+
+    if ( sond_akte->reg_nr == 0 ) create = TRUE;
+    else //Update - prüfen, ob lock besteht
+    {
+        Lock lock = { 0 };
+
+        lock = sond_server_has_lock( sond_server, sond_akte->ID_entity );
+        if ( lock.ID_entity == 0 || lock.index != auth )
+        {
+            sond_akte_free( sond_akte );
+
+            if ( lock.ID_entity == 0 ) *omessage = g_strdup( "NO_LOCK" );
+            else *omessage = g_strdup_printf( "NO_LOCK%s", lock.user );
+
+            return;
+        }
     }
 
     con = sond_server_get_mysql_con( sond_server, &error );
@@ -257,13 +275,8 @@ sond_server_akte_schreiben( SondServer* sond_server,
         return;
     }
 
-    if ( sond_akte->reg_nr == 0 )
-    {
-        rc = sond_server_akte_create( sond_server, con, sond_akte, &error);
-        reg_jahr = sond_akte->reg_jahr;
-        reg_nr = sond_akte->reg_nr;
-    }
-    else rc = sond_server_akte_write( sond_server, con, sond_akte, &error );
+    if ( create ) rc = sond_server_akte_create( sond_server, con, sond_akte, &error);
+    else rc = sond_server_akte_update( sond_server, con, sond_akte, &error );
     sond_akte_free( sond_akte );
     if ( rc )
     {
@@ -304,8 +317,8 @@ sond_server_akte_schreiben( SondServer* sond_server,
         return;
     }
 
-//    if ( reg_nr )
-        *omessage = g_strdup_printf( "%i-%i", reg_nr, reg_jahr );
+    if ( create ) *omessage = g_strdup_printf( "NEU%i-%i", reg_nr, reg_jahr );
+    else *omessage = g_strdup( "OK" );
 
     return;
 }
@@ -320,7 +333,6 @@ sond_server_akte_laden( SondServer* sond_server, SondAkte* sond_akte, GError** e
     gchar* sql_1 = NULL;
     gchar* sql_2 = NULL;
     gchar* sql_3 = NULL;
-    gint ID_akte = 0;
     gint rc = 0;
 
     con = sond_server_get_mysql_con( sond_server, error );
@@ -361,7 +373,7 @@ sond_server_akte_laden( SondServer* sond_server, SondAkte* sond_akte, GError** e
     }
 
     row = mysql_fetch_row( mysql_res );
-    if ( row ) ID_akte = atoi( row[0] );
+    if ( row ) sond_akte->ID_entity = atoi( row[0] );
     else
     {
         *error = g_error_new( SOND_SERVER_ERROR, SOND_SERVER_ERROR_NOTFOUND, "Keine Akte zur Registernummer" );
@@ -374,7 +386,7 @@ sond_server_akte_laden( SondServer* sond_server, SondAkte* sond_akte, GError** e
     mysql_free_result( mysql_res );
 
     sql_2 = g_strdup_printf( "SELECT prop_value FROM entities WHERE rel_subject=%i AND type=%i; ",
-            ID_akte, _AKTENRUBRUM_ );
+            sond_akte->ID_entity, _AKTENRUBRUM_ );
 
     rc = mysql_query( con, sql_2 );
     g_free( sql_2 );
@@ -404,7 +416,7 @@ sond_server_akte_laden( SondServer* sond_server, SondAkte* sond_akte, GError** e
     if ( row ) sond_akte->aktenrubrum = g_strdup( row[0] );
     else
     {
-        *error = g_error_new( SOND_SERVER_ERROR, SOND_SERVER_ERROR_NOTFOUND, "Keine Aktenrubrum gespeichert" );
+        *error = g_error_new( SOND_SERVER_ERROR, SOND_SERVER_ERROR_NOTFOUND, "Kein Aktenrubrum gespeichert" );
         mysql_free_result( mysql_res );
         mysql_close( con );
 
@@ -414,7 +426,7 @@ sond_server_akte_laden( SondServer* sond_server, SondAkte* sond_akte, GError** e
     mysql_free_result( mysql_res );
 
     sql_3 = g_strdup_printf( "SELECT prop_value FROM entities WHERE rel_subject=%i AND type=%i; ",
-            ID_akte, _AKTENKURZBEZ_);
+            sond_akte->ID_entity, _AKTENKURZBEZ_);
 
     rc = mysql_query( con, sql_3 );
     g_free( sql_3 );
@@ -452,41 +464,18 @@ sond_server_akte_laden( SondServer* sond_server, SondAkte* sond_akte, GError** e
 
 
 void
-sond_server_akte_holen( SondServer* sond_server, const gchar** imessage_strv,
-        gchar** omessage )
+sond_server_akte_holen( SondServer* sond_server, gint auth,
+        const gchar* params, gchar** omessage )
 {
     gint reg_nr = 0;
     gint reg_jahr = 0;
-    gboolean already_locked = FALSE;
     SondAkte* sond_akte = NULL;
     gint rc = 0;
     GError* error = NULL;
+    const gchar* user = NULL;
 
-    reg_jahr = atoi( g_strrstr( imessage_strv[3], "-" ) + 1 );
-    reg_nr = atoi( g_strndup( imessage_strv[3], sizeof( g_strrstr( imessage_strv[3], "-" ) ) ) );
-
-    //lock
-    g_mutex_lock( &sond_server->mysql_mutex_con );
-
-    for ( gint i = 0; i < sond_server->arr_locks->len; i++ )
-    {
-        RegNrJahr reg_nr_jahr = g_array_index( sond_server->arr_locks, RegNrJahr, i );
-
-        if ( reg_nr_jahr.reg_nr == reg_nr && reg_nr_jahr.reg_jahr == reg_jahr )
-        {
-            already_locked = TRUE;
-            break;
-        }
-    }
-
-    if ( !already_locked )
-    {
-        RegNrJahr reg_nr_jahr = { reg_nr, reg_jahr };
-
-        g_array_append_val( sond_server->arr_locks, reg_nr_jahr );
-    }
-
-    g_mutex_unlock( &sond_server->mysql_mutex_con );
+    reg_jahr = atoi( g_strrstr( params, "-" ) + 1 );
+    reg_nr = atoi( g_strndup( params, sizeof( g_strrstr( params, "-" ) ) ) );
 
     sond_akte = sond_akte_new( );
 
@@ -504,7 +493,9 @@ sond_server_akte_holen( SondServer* sond_server, const gchar** imessage_strv,
         return;
     }
 
-    if ( !already_locked ) *omessage = g_strdup( "LOCKED" );
+    //lock
+    rc = sond_server_get_lock( sond_server, sond_akte->ID_entity, auth, FALSE, &user );
+    if ( rc == 1 ) *omessage = g_strdup_printf( "LOCKED%s&", user );
 
     *omessage = add_string( *omessage, sond_akte_to_json( sond_akte ) );
 

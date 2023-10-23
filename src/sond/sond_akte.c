@@ -47,7 +47,6 @@ sond_akte_free( SondAkte* sond_akte )
     g_free( sond_akte->aktenrubrum );
     g_free( sond_akte->aktenkurzbez );
 /*
-    akte_kurz_free( akte->akte_kurz );
     akte_sachbearbeiter_free( akte->akte_sachbearbeiter );
 
     g_ptr_array_unref( akte->arr_beteiligte );
@@ -98,6 +97,9 @@ sond_akte_new_from_json( const gchar* json, GError** error )
 
     sond_akte = sond_akte_new( );
 
+    if ( json_object_has_member( object, "ID_entity" ) )
+            sond_akte->ID_entity = (gint) json_object_get_int_member( object, "ID_entity" );
+
     if ( json_object_has_member( object, "reg_nr" ) )
             sond_akte->reg_nr = (gint) json_object_get_int_member( object, "reg_nr" );
     if ( json_object_has_member( object, "reg_jahr" ) )
@@ -123,6 +125,8 @@ sond_akte_to_json( SondAkte* sond_akte )
     gchar* json_string = NULL;
 
     object = json_object_new( );
+
+    json_object_set_int_member( object, "ID_entity", (gint64) sond_akte->ID_entity );
 
     json_object_set_int_member( object, "reg_jahr", (gint64) sond_akte->reg_jahr );
     json_object_set_int_member( object, "reg_nr", (gint64) sond_akte->reg_nr );

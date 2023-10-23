@@ -32,7 +32,7 @@ typedef struct _GList GList;
 typedef struct _Sond_Client
 {
     GtkWidget* app_window;
-    GPtrArray* arr_file_manager;
+    GPtrArray* arr_children_windows;
     gchar* base_dir;
     SearpcClient* searpc_client;
     gchar* seafile_root;
@@ -49,6 +49,26 @@ typedef struct _Sond_Client
     gint reg_jahr_akt;
     gint reg_nr_akt;
 } SondClient;
+
+
+typedef enum
+{
+    SOND_CLIENT_TYPE_AKTE,
+    NUM_SOND_CLIENT_TYPE
+} SondClientType;
+
+typedef struct _SondClientAny
+{
+    SondClientType type;
+    GtkWidget* window;
+    SondClient* sond_client;
+} SondClientAny;
+
+gint sond_client_unlock( SondClient*, gint, GError** );
+
+gint sond_client_get_lock( SondClient*, gint, GError** );
+
+gchar* sond_client_send_and_read( SondClient*, const gchar*, const gchar*, GError** );
 
 void sond_client_quit( SondClient* );
 

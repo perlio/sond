@@ -40,6 +40,7 @@ typedef struct _AkteSachbearbeiter
 
 typedef struct _SondAkte
 {
+    gint ID_entity;
     gint reg_jahr;
     gint reg_nr;
     gchar* aktenrubrum;

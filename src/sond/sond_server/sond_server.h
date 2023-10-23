@@ -38,11 +38,12 @@ enum SondServerError
 
 typedef struct st_mysql MYSQL;
 
-typedef struct _RegNrJahr
+typedef struct _Lock
 {
-    gint reg_nr;
-    gint reg_jahr;
-} RegNrJahr;
+    gint ID_entity;
+    gint index;
+    const gchar* user; //Zeiger auf user in SondServer.arr_creds
+} Lock;
 
 typedef struct _SondServer
 {
@@ -54,14 +55,15 @@ typedef struct _SondServer
     GArray* arr_creds;
     GMutex mutex_arr_creds;
 
+    GArray* arr_locks;
+    GMutex mutex_arr_locks;
+
     gchar* mysql_host;
     gint mysql_port;
     gchar* mysql_user;
     gchar* mysql_password;
     gchar* mysql_db;
     gchar* mysql_path_ca;
-    GArray* arr_locks;
-    GMutex mysql_mutex_con;
 
     gchar* seafile_user;
     gchar* seafile_password;
@@ -71,6 +73,10 @@ typedef struct _SondServer
     GThreadPool* thread_pool;
 } SondServer;
 
+
+Lock sond_server_has_lock( SondServer*, gint );
+
+gint sond_server_get_lock( SondServer*, gint, gint, gboolean, const gchar** );
 
 MYSQL* sond_server_get_mysql_con( SondServer*, GError** );
 

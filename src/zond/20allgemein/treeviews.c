@@ -32,7 +32,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../99conv/pdf.h"
 
 #include "../../misc.h"
-#include "../../dbase.h"
 
 
 /** Wenn Fehler: -1

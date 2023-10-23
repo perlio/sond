@@ -129,7 +129,7 @@ do{
 gboolean
 sond_client_misc_ping_server( SondClient* sond_client, GError** error )
 {
-
+    return FALSE;
 }
 
 
