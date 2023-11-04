@@ -177,6 +177,7 @@ zond_dbase_create_db( sqlite3* db, gchar** errmsg )
     sql = //Haupttabelle
             "DROP TABLE IF EXISTS eingang; "
             "DROP TABLE IF EXISTS eingang_rel_path; "
+            "DROP TABLE IF EXISTS links; "
             "DROP TABLE IF EXISTS dateien;"
             "DROP TABLE IF EXISTS ziele;"
             "DROP TABLE IF EXISTS baum_inhalt;"
@@ -267,8 +268,8 @@ zond_dbase_create_db( sqlite3* db, gchar** errmsg )
     rc = sqlite3_exec( db, sql, NULL, NULL, &errmsg_ii );
     if ( rc != SQLITE_OK )
     {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_exec\nsql: ",
-                sql, "\nresult code: ", sqlite3_errstr( rc ), "\nerrmsg: ",
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_exec (create db): "
+                "\nresult code: ", sqlite3_errstr( rc ), "\nerrmsg: ",
                 errmsg_ii, NULL );
         sqlite3_free( errmsg_ii );
 
