@@ -111,8 +111,6 @@ gint zond_dbase_check_link( ZondDBase*, Baum, gint, gchar** );
 gint zond_dbase_get_link( ZondDBase*, gint, Baum*, gint*, gchar**, Baum*, gint*,
         gchar** );
 
-gint zond_dbase_remove_link( ZondDBase*, const gint, const gint, gchar** );
-
 gint zond_dbase_update_path( ZondDBase*, const gchar*, const gchar*, gchar** );
 
 gint zond_dbase_test_path( ZondDBase*, const gchar*, gchar** );

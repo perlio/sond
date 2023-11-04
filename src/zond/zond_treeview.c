@@ -548,8 +548,8 @@ static gint
 zond_treeview_selection_loeschen_foreach( SondTreeview* tree_view, GtkTreeIter* iter,
         gpointer data, gchar** errmsg )
 {
+    gint rc = 0;
     gint node_id = 0;
-    gint head_nr = 0;
     Baum baum = KEIN_BAUM;
 
     SSelectionLoeschen* s_selection = data;
@@ -566,33 +566,24 @@ zond_treeview_selection_loeschen_foreach( SondTreeview* tree_view, GtkTreeIter* 
         if ( node_id == s_selection->zond->node_id_extra )
                 g_signal_emit_by_name( s_selection->zond->textview_window,
                 "delete-event", s_selection->zond, &response );
-
-        rc = zond_dbase_remove_node( s_selection->zond->dbase_zond->zond_dbase_work, baum, node_id, errmsg );
-        if ( rc ) ERROR_S
-
-        zond_tree_store_remove( iter );
-    }//... Gesamt-Links
-    else if ( (head_nr = zond_tree_store_get_link_head_nr( iter )) )
-    {
-        gint rc = 0;
-
-        rc = zond_dbase_begin( s_selection->zond->dbase_zond->zond_dbase_work, errmsg );
-        if ( rc ) ERROR_S
-
-        rc = zond_dbase_remove_link( s_selection->zond->dbase_zond->zond_dbase_work,
-                sond_treeview_get_id( tree_view ), head_nr, errmsg );
-        if ( rc ) ERROR_S
-
-        rc = zond_dbase_remove_node( s_selection->zond->dbase_zond->zond_dbase_work,
-                sond_treeview_get_id( tree_view ), head_nr, errmsg );
-        if ( rc ) ERROR_ROLLBACK( s_selection->zond->dbase_zond->zond_dbase_work )
-
-        rc = zond_dbase_commit( s_selection->zond->dbase_zond->zond_dbase_work, errmsg );
-        if ( rc ) ERROR_ROLLBACK( s_selection->zond->dbase_zond->zond_dbase_work )
-
-        zond_tree_store_remove( iter );
     }
-    //else: link, aber nicht head->nix machen
+    else
+    {
+        if ( !(node_id = zond_tree_store_get_link_head_nr( iter )) ) return 0;
+        baum = sond_treeview_get_id( tree_view );
+    }
+
+    rc = zond_dbase_begin( s_selection->zond->dbase_zond->zond_dbase_work, errmsg );
+    if ( rc ) ERROR_S
+
+    rc = zond_dbase_remove_node( s_selection->zond->dbase_zond->zond_dbase_work,
+            baum, node_id, errmsg );
+    if ( rc ) ERROR_ROLLBACK( s_selection->zond->dbase_zond->zond_dbase_work )
+
+    rc = zond_dbase_commit( s_selection->zond->dbase_zond->zond_dbase_work, errmsg );
+    if ( rc ) ERROR_ROLLBACK( s_selection->zond->dbase_zond->zond_dbase_work )
+
+    zond_tree_store_remove( iter );
 
     return 0;
 }
