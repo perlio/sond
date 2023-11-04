@@ -143,17 +143,26 @@ init_icons( Projekt* zond )
 }
 
 
+#ifndef TESTING
 static void
 log_init( Projekt* zond )
 {
     gchar* logfile = NULL;
+    gchar* logdir = NULL;
     FILE* file = NULL;
     FILE* file_tmp = NULL;
     GDateTime* date_time = NULL;
 
+#ifdef _WIN32
+    logdir = g_strdup_printf( "%s\\zond", getenv( "LOCALAPPDATA" ) );
+#elifdef __linux__
+    logdir = g_strdup( "/var/log/zond" );
+#endif // _WIN32
+
     date_time = g_date_time_new_now_local( );
-    logfile = g_strdup_printf( "%slogs/log_%i_%i.log", zond->base_dir,
+    logfile = g_strdup_printf( "%s/log_%i_%i.log", logdir,
             g_date_time_get_year( date_time ), g_date_time_get_month( date_time ) );
+    g_free( logdir );
     g_date_time_unref( date_time );
 
     file = freopen( logfile, "a", stdout );
@@ -173,19 +182,12 @@ log_init( Projekt* zond )
         g_free( logfile );
         exit( -1 );
     }
-/*
-    ret = dup2( fileno( stdout ), fileno( stderr ) );
-    if ( ret == -1 )
-    {
-        display_message( zond->app_window, "stderr konnte nicht auf stdout "
-                "umgeleitet werden: %s", strerror( errno ) );
-        exit( -1 );
-    }
-    */
+
     g_free( logfile );
 
     return;
 }
+#endif // TESTING
 
 
 static void

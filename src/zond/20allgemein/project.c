@@ -268,8 +268,6 @@ projekt_schliessen( Projekt* zond, gchar** errmsg )
     sond_treeviewfm_set_dbase( SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), NULL );
     project_clear_dbase_zond( &(zond->dbase_zond) );
 
-    g_message( "Projekt geschlossen" );
-
     gint res = g_remove( working_copy );
     if ( res == -1 ) display_message( zond->app_window, "Fehler beim Löschen der "
             "temporären Datenbank:\n", strerror( errno ), NULL );
@@ -335,7 +333,6 @@ project_oeffnen( Projekt* zond, const gchar* abs_path, gboolean create,
 
     projekt_aktivieren( zond );
 
-    g_message( "Projekt %s geöffnet", zond->dbase_zond->project_name );
     //key_press-event-signal einschalten
     zond->key_press_signal = g_signal_connect( zond->app_window,
             "key-press-event", G_CALLBACK(cb_key_press), zond );

@@ -398,7 +398,7 @@ result_listbox_new( GtkWindow* parent_window, const gchar* titel )
 }
 
 
-void
+static void
 close_pid( GPid pid, gint status, gpointer user_data )
 {
     g_spawn_close_pid( pid );

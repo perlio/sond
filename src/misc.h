@@ -71,8 +71,6 @@ gchar* get_base_dir( void );
 
 GtkWidget* result_listbox_new( GtkWindow*, const gchar* );
 
-void close_pid( GPid, gint, gpointer );
-
 gint misc_datei_oeffnen( const gchar*, gboolean, gchar** );
 
 #endif // MISC_H_INCLUDED
