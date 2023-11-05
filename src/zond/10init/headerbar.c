@@ -1167,6 +1167,15 @@ init_menu( Projekt* zond )
 
     g_signal_connect( zoom_item, "activate", G_CALLBACK(cb_settings_zoom), zond );
 
+/*  Menu Hilfe  */
+    GtkWidget* hilfemenu = gtk_menu_new( );
+
+    GtkWidget* hilfe_about = gtk_menu_item_new_with_label( "Über" );
+    gtk_menu_shell_append( GTK_MENU_SHELL(hilfemenu), hilfe_about );
+
+    GtkWidget* hilfe_update = gtk_menu_item_new_with_label( "Update" );
+    gtk_menu_shell_append( GTK_MENU_SHELL(hilfemenu), hilfe_update );
+
 /*  Gesamtmenu:
 *   Die erzeugten Menus als Untermenu der Menuitems aus der menubar
 */
@@ -1178,6 +1187,7 @@ init_menu( Projekt* zond )
     gtk_menu_item_set_submenu( GTK_MENU_ITEM(zond->menu.extras), extrasmenu );
     gtk_menu_item_set_submenu( GTK_MENU_ITEM(einstellungen),
             einstellungenmenu );
+    gtk_menu_item_set_submenu( GTK_MENU_ITEM(hilfeitem), hilfemenu );
 
     return menubar;
 }

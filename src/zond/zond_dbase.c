@@ -167,7 +167,7 @@ zond_dbase_init( ZondDBase* self )
 
 
 static gint
-zond_dbase_create_db( sqlite3* db, gchar** errmsg )
+zond_dbase_create_db_maj_0( sqlite3* db, gchar** errmsg )
 {
     gchar* errmsg_ii = NULL;
     gchar* sql = NULL;
@@ -175,8 +175,6 @@ zond_dbase_create_db( sqlite3* db, gchar** errmsg )
 
     //Tabellenstruktur erstellen
     sql = //Haupttabelle
-            "DROP TABLE IF EXISTS eingang; "
-            "DROP TABLE IF EXISTS eingang_rel_path; "
             "DROP TABLE IF EXISTS links; "
             "DROP TABLE IF EXISTS dateien;"
             "DROP TABLE IF EXISTS ziele;"
@@ -196,7 +194,7 @@ zond_dbase_create_db( sqlite3* db, gchar** errmsg )
             "); "
 
             "INSERT INTO baum_inhalt (node_id, parent_id, older_sibling_id, "
-            "node_text) VALUES (0, 0, 0, '"ZOND_DBASE_VERSION"');"
+            "node_text) VALUES (0, 0, 0, '" MAJOR "');"
 
             //Hilfstabelle "dateien"
             //hier werden angebundene Dateien erfaßt
@@ -381,9 +379,9 @@ zond_dbase_convert_from_v0_7( sqlite3* db_convert, gchar** errmsg )
 }
 
 
-//v0.8 Tabellen eingang und eingang_rel_path fehlen ggü. v0.9
-static gint
-zond_dbase_convert_from_v0_8( sqlite3* db_convert, gchar** errmsg )
+//v0.10 enthält die Tabelle links, die die Vorgänger nicht enthalten
+static gint //aus heutiger Sicht alles ok
+zond_dbase_convert_from_v0_8_or_v0_9( sqlite3* db_convert, gchar** errmsg )
 {
     gint rc = 0;
 
@@ -392,36 +390,7 @@ zond_dbase_convert_from_v0_8( sqlite3* db_convert, gchar** errmsg )
                     "icon_name, node_text FROM old.baum_inhalt WHERE node_id != 0; "
             "INSERT INTO baum_auswertung SELECT * FROM old.baum_auswertung WHERE node_id != 0; "
             "INSERT INTO dateien SELECT * FROM old.dateien; "
-            "INSERT Into ziele SELECT * FROM old.ziele; ";
-
-    rc = sqlite3_exec( db_convert, sql, NULL, NULL, errmsg );
-    if ( rc != SQLITE_OK )
-    {
-        if ( errmsg ) *errmsg = add_string( g_strdup( "Bei Aufruf sqlite3_exec:\n" ),
-                *errmsg );
-
-        return -1;
-    }
-
-    return 0;
-}
-
-
-//v0.9 Tabellen eingang und eingang_rel_path fehlen ggü. v0.8
-static gint
-zond_dbase_convert_from_v0_9( sqlite3* db_convert, gchar** errmsg )
-{
-    gint rc = 0;
-
-    gchar* sql =
-            "INSERT INTO baum_inhalt SELECT node_id, parent_id, older_sibling_id, "
-                    "icon_name, node_text FROM old.baum_inhalt WHERE node_id != 0; "
-            "INSERT INTO baum_auswertung SELECT * FROM old.baum_auswertung WHERE node_id != 0; "
-            "INSERT INTO dateien SELECT * FROM old.dateien; "
-            "INSERT Into ziele SELECT * FROM old.ziele; "
-            "INSERT INTO eingang SELECT * FROM old.eingang; "
-            "INSERT INTO eingang_rel_path SELECT * FROM old.eingang_rel_path; "
-            ;
+            "INSERT INTO ziele SELECT * FROM old.ziele; ";
 
     rc = sqlite3_exec( db_convert, sql, NULL, NULL, errmsg );
     if ( rc != SQLITE_OK )
@@ -437,14 +406,13 @@ zond_dbase_convert_from_v0_9( sqlite3* db_convert, gchar** errmsg )
 
 
 static gint
-zond_dbase_convert_to_actual_version( const gchar* path, gchar* v_string,
+zond_dbase_convert_to_maj_0( const gchar* path, gchar* v_string,
         gchar** errmsg ) //eingang hinzugefügt
 {
     gint rc = 0;
     sqlite3* db = NULL;
     gchar* sql = NULL;
     gchar* path_old = NULL;
-    sqlite3_stmt* stmt = NULL;
     gchar* path_new = NULL;
 
     path_new = g_strconcat( path, ".tmp", NULL );
@@ -458,7 +426,7 @@ zond_dbase_convert_to_actual_version( const gchar* path, gchar* v_string,
         return -1;
     }
 
-    if ( zond_dbase_create_db( db, errmsg ) )
+    if ( zond_dbase_create_db_maj_0( db, errmsg ) )
     {
         sqlite3_close( db);
         g_free( path_new );
@@ -488,63 +456,18 @@ zond_dbase_convert_to_actual_version( const gchar* path, gchar* v_string,
             sqlite3_close( db );
             g_free( path_new );
 
-            ERROR_SOND( "convert_from_v0_7" )
+            ERROR_S
         }
     }
-    else if ( !g_strcmp0( v_string , "v0.8" ) )
+    else if ( g_strcmp0( v_string , "v0.10" ) )
     {
-        rc = zond_dbase_convert_from_v0_8( db, errmsg );
-        if ( rc )
-        {
-            sqlite3_close( db );
-            g_free( path_new );
-            ERROR_SOND( "convert_from_v0_8" )
-        }
-    }
-
-    else if ( !g_strcmp0( v_string , "v0.9" ) || !g_strcmp0( v_string, "v0.9a" ) )
-    {
-        rc = zond_dbase_convert_from_v0_9( db, errmsg );
+        rc = zond_dbase_convert_from_v0_8_or_v0_9( db, errmsg );
         if ( rc )
         {
             sqlite3_close( db );
             g_free( path_new );
             ERROR_S
         }
-    }
-    else
-    {
-        //Mitteilung, daß keine Versionsangabe
-        if ( errmsg ) *errmsg = g_strdup( "Keine Version erkannt - ggf. händisch überprüfen" );
-        sqlite3_close( db );
-        g_free( path_new );
-
-        return -1;
-    }
-
-    //updaten#
-    sql = "UPDATE baum_inhalt SET node_text = '"ZOND_DBASE_VERSION"' WHERE node_id = 0;";
-    rc = sqlite3_prepare_v2( db, sql, -1, &stmt, NULL );
-    if ( rc != SQLITE_OK )
-    {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_prepare_v2:\n",
-                sqlite3_errstr( rc ), NULL );
-        sqlite3_close( db );
-        g_free( path_new );
-
-        return -1;
-    }
-
-    rc = sqlite3_step( stmt );
-    sqlite3_finalize( stmt );
-    if ( rc != SQLITE_DONE )
-    {
-        sqlite3_close( db );
-        g_free( path_new );
-        if ( errmsg ) *errmsg = add_string( g_strconcat( "Bei Aufruf sqlite3_step:\n",
-                sqlite3_errmsg( db ), NULL ), *errmsg );
-
-        return -1;
     }
 
     sqlite3_close( db );
@@ -570,6 +493,18 @@ zond_dbase_convert_to_actual_version( const gchar* path, gchar* v_string,
 
         return -1;
     }
+
+    return 0;
+}
+
+
+static gint
+zond_dbase_create_db( sqlite3* db, gchar** errmsg )
+{
+    gint rc = 0;
+
+    rc = zond_dbase_create_db_maj_0( db, errmsg );
+    if ( rc ) ERROR_S
 
     return 0;
 }
@@ -601,6 +536,12 @@ zond_dbase_get_version( sqlite3* db, gchar** errmsg )
         return NULL;
     }
 
+    if ( !sqlite3_column_text( stmt, 0 ) || !g_strcmp0( (const gchar*) sqlite3_column_text( stmt, 0 ), "" ) )
+    {
+        sqlite3_finalize( stmt );
+        ERROR_S_MESSAGE_VAL( "ZND-Datei enthält keine Versionsnummer", NULL )
+    }
+
     v_string = g_strdup( (const gchar*) sqlite3_column_text( stmt, 0 ) );
 
     sqlite3_finalize( stmt );
@@ -616,7 +557,7 @@ zond_dbase_open( const gchar* path, gboolean create_file, gboolean create, sqlit
 
     rc = sqlite3_open_v2( path, db, SQLITE_OPEN_READWRITE |
             ((create_file || create) ? SQLITE_OPEN_CREATE : 0), NULL );
-    if ( rc != SQLITE_OK ) //Datei nicht vorhanden und weder create_file noch file
+    if ( rc != SQLITE_OK ) //Datei nicht vorhanden und weder create_file noch create
     {
         sqlite3_close( *db );
 
@@ -636,20 +577,48 @@ zond_dbase_open( const gchar* path, gboolean create_file, gboolean create, sqlit
             ERROR_SOND( "zond_dbase_get_version" );
         }
 
-        if ( g_strcmp0( v_string, ZOND_DBASE_VERSION ) ) //alte version
+        if ( v_string[0] == 'v' ) //legacy...
         {
             gint rc = 0;
 
             sqlite3_close( *db );
 
-            rc = zond_dbase_convert_to_actual_version( path, v_string, errmsg );
-            if ( rc ) ERROR_SOND( "zond_dbase_convert_to_actual_version" )
-            else display_message( NULL, "Datei von ", v_string, " zu "ZOND_DBASE_VERSION
-                    " konvertiert", NULL );
+            rc = zond_dbase_convert_to_maj_0( path, v_string, errmsg );
+            g_free( v_string );
+            if ( rc ) ERROR_S
 
             rc = sqlite3_open_v2( path, db, SQLITE_OPEN_READWRITE, NULL );
             if ( rc ) ERROR_SOND( "sqlite3_open_v2" )
+
+            //zu MAJOR-Version 0 ändern
+            rc = sqlite3_exec( *db, "UPDATE baum_inhalt SET node_text = '" MAJOR "' "
+                    "WHERE node_id = 0;", NULL, NULL, errmsg );
+            if ( rc != SQLITE_OK )
+            {
+                sqlite3_close( *db );
+                ERROR_S
+            }
+
+            v_string = g_strdup( MAJOR );
         }
+
+        if ( !g_ascii_isdigit( v_string[0] ) )
+        {
+            g_free( v_string );
+            sqlite3_close( *db );
+            ERROR_S_MESSAGE( "Unbekannte Versionsbezeichnung" )
+        }
+        else if ( atoi( v_string ) > atoi( MAJOR ) )
+        {
+            g_free( v_string );
+            sqlite3_close( *db );
+            ERROR_S_MESSAGE( "Version gibt's noch gar nicht" )
+        }
+        if ( atoi( v_string ) < atoi( MAJOR ) )
+        {
+            //aktewalisieren
+        }
+
     }
     else if ( create ) //Datenbank soll neu angelegt werden
     {
