@@ -778,6 +778,17 @@ cb_textview_extra( GtkMenuItem* item, gpointer data )
 }
 
 
+static  void
+headerbar_hilfe_about( GtkWidget* item, gpointer data )
+{
+    Projekt* zond = (Projekt*) data;
+
+    display_message( zond->app_window, "Version: " MAJOR "." MINOR "." PATCH, NULL );
+
+    return;
+}
+
+
 /*  Funktion init_menu - ganze Kopfzeile! */
 static GtkWidget*
 init_menu( Projekt* zond )
@@ -1172,6 +1183,7 @@ init_menu( Projekt* zond )
 
     GtkWidget* hilfe_about = gtk_menu_item_new_with_label( "Über" );
     gtk_menu_shell_append( GTK_MENU_SHELL(hilfemenu), hilfe_about );
+    g_signal_connect( hilfe_about, "activate", G_CALLBACK(headerbar_hilfe_about), zond );
 
     GtkWidget* hilfe_update = gtk_menu_item_new_with_label( "Update" );
     gtk_menu_shell_append( GTK_MENU_SHELL(hilfemenu), hilfe_update );
