@@ -734,6 +734,7 @@ cb_pv_seiten_loeschen( GtkMenuItem* item, gpointer data )
     if ( !arr_document_page ) return;
 
     rc = seiten_loeschen( pv, arr_document_page, &errmsg );
+    g_ptr_array_unref( arr_document_page );
     if ( rc == -1 )
     {
         display_message( pv->vf, "Fehler in Seiten löschen -\n\nBei Aufruf "
