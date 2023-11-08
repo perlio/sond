@@ -21,6 +21,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <mupdf/pdf.h>
 #include <sqlite3.h>
 #include <glib/gstdio.h>
+#include <libsoup/soup.h>
+#include <json-glib/json-glib.h>
 
 #include "../zond_pdf_document.h"
 
@@ -789,6 +791,135 @@ headerbar_hilfe_about( GtkWidget* item, gpointer data )
 }
 
 
+static void
+headerbar_hilfe_update( GtkWidget* item, gpointer data )
+{
+    SoupSession* soup_session = NULL;
+    SoupMessage* soup_message = NULL;
+    GBytes* response = NULL;
+    gboolean ret = FALSE;
+    JsonParser* parser = NULL;
+    JsonNode* node = NULL;
+    GError* error = NULL;
+    gchar* tag = NULL;
+    gchar** strv_tags = NULL;
+    gchar* title = NULL;
+    gint rc = 0;
+    gchar* argv[2] = { NULL };
+    GPid pid = 0;
+
+    Projekt* zond = (Projekt*) data;
+
+    soup_session = soup_session_new_with_options( "user-agent", "perlio", NULL );
+    soup_message = soup_message_new( SOUP_METHOD_GET, "https://api.github.com/repos/perlio/sond/releases/latest" );
+
+    response = soup_session_send_and_read( soup_session, soup_message, NULL, &error );
+    g_object_unref( soup_message );
+    g_object_unref( soup_session );
+    if ( error )
+    {
+        display_message( zond->app_window, "Repository nicht erreicht - ggf. offline\n\n",
+                error->message, NULL );
+        g_error_free( error );
+
+        return;
+    }
+
+    parser = json_parser_new( );
+    ret = json_parser_load_from_data( parser, g_bytes_get_data( response, NULL ), -1, &error );
+    g_bytes_unref( response );
+    if ( !ret )
+    {
+        display_message( zond->app_window, "Antwort nicht in json-Format\n\n",
+                error->message, NULL );
+        g_error_free( error );
+        g_object_unref( parser );
+
+        return;
+    }
+
+    node = json_parser_get_root( parser );
+    if ( JSON_NODE_HOLDS_OBJECT(node) )
+    {
+        JsonObject* object = NULL;
+
+        object = json_node_get_object( node );
+
+        if ( json_object_has_member( object, "tag_name" ) )
+                tag = g_strdup( json_object_get_string_member( object, "tag_name" ) );
+        else
+        {
+            display_message( zond->app_window, "tag_name nicht gefunden", NULL );
+
+            g_object_unref( parser );
+
+            return;
+        }
+    }
+    else
+    {
+        display_message( zond->app_window, "json ist kein object", NULL );
+
+        g_object_unref( parser );
+
+        return;
+    }
+
+    g_object_unref( parser );
+
+    //tag mit aktueller version vergleichen
+    strv_tags = g_strsplit( tag + 1, ".", -1 );
+    g_free( tag );
+
+    if ( atoi( strv_tags[0] ) <= atoi( MAJOR ) )
+    {
+        if ( atoi( strv_tags[1] ) <= atoi( MINOR ) )
+        {
+            if ( atoi( strv_tags[2] ) <= atoi( PATCH ) )
+            {
+                g_strfreev( strv_tags );
+                display_message( zond->app_window, "Version aktuell", NULL );
+
+                return;
+            }
+        }
+    }
+
+    title = g_strconcat( "Aktuellere Version vorhanden (v",
+            strv_tags[0], ".", strv_tags[1], ".", strv_tags[2], ")", NULL );
+    g_strfreev( strv_tags );
+
+    rc = abfrage_frage( zond->app_window, title, "Herunterladen und installieren?",
+            NULL );
+    g_free( title );
+    if ( rc != GTK_RESPONSE_YES ) return;
+
+    //Projekt schließen und zond beenden
+    g_signal_emit_by_name( zond->app_window, "delete-event", NULL, &ret );
+
+    //installer starten
+#ifdef __WIN32
+    argv[0] = "bin/updater.exe";
+#elifdef __linux__
+    argv[0] = "bin/updater";
+#endif // __linux__
+
+    ret = g_spawn_async( NULL, argv, NULL, G_SPAWN_DO_NOT_REAP_CHILD,
+            NULL, NULL, &pid, &error );
+    if ( !ret )
+    {
+        display_message( NULL, "Updater konnte nicht gestartet werden\n\n",
+                error->message, NULL );
+        g_error_free( error );
+    }
+
+    g_child_watch_add( pid, (GChildWatchFunc) g_spawn_close_pid, NULL );
+
+
+    return;
+}
+
+
 /*  Funktion init_menu - ganze Kopfzeile! */
 static GtkWidget*
 init_menu( Projekt* zond )
@@ -1187,6 +1318,7 @@ init_menu( Projekt* zond )
 
     GtkWidget* hilfe_update = gtk_menu_item_new_with_label( "Update" );
     gtk_menu_shell_append( GTK_MENU_SHELL(hilfemenu), hilfe_update );
+    g_signal_connect( hilfe_update, "activate", G_CALLBACK(headerbar_hilfe_update), zond );
 
 /*  Gesamtmenu:
 *   Die erzeugten Menus als Untermenu der Menuitems aus der menubar

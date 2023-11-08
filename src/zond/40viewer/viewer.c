@@ -2790,7 +2790,7 @@ viewer_einrichten_fenster( PdfViewer* pv )
     gtk_button_set_image( GTK_BUTTON(button_thumb), image_thumb );
 
     //  Werkzeug Zeiger
-    pv->button_speichern = gtk_toggle_button_new( );
+    pv->button_speichern = gtk_button_new_from_icon_name( "document-save", GTK_ICON_SIZE_BUTTON );
     gtk_widget_set_sensitive( pv->button_speichern, FALSE );
     GtkWidget* button_print = gtk_button_new_from_icon_name( "document-print", GTK_ICON_SIZE_BUTTON );
     pv->button_zeiger = gtk_radio_button_new( NULL );
@@ -2798,9 +2798,6 @@ viewer_einrichten_fenster( PdfViewer* pv )
     GtkWidget* button_underline = gtk_radio_button_new_from_widget( GTK_RADIO_BUTTON(button_highlight) );
     GtkWidget* button_paint = gtk_radio_button_new_from_widget( GTK_RADIO_BUTTON(button_underline) );
 
-    GtkWidget* image_speichern = gtk_image_new_from_icon_name( "document-save",
-            GTK_ICON_SIZE_BUTTON );
-    gtk_button_set_image( GTK_BUTTON(pv->button_speichern), image_speichern );
     GtkWidget* image_zeiger = gtk_image_new_from_icon_name( "accessories-text-editor",
             GTK_ICON_SIZE_BUTTON );
     gtk_button_set_image( GTK_BUTTON(pv->button_zeiger), image_zeiger );

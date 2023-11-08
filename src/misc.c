@@ -398,15 +398,6 @@ result_listbox_new( GtkWindow* parent_window, const gchar* titel )
 }
 
 
-static void
-close_pid( GPid pid, gint status, gpointer user_data )
-{
-    g_spawn_close_pid( pid );
-
-    return;
-}
-
-
 gint
 misc_datei_oeffnen( const gchar* path, gboolean open_with, gchar** errmsg )
 {
@@ -475,7 +466,7 @@ misc_datei_oeffnen( const gchar* path, gboolean open_with, gchar** errmsg )
         return -1;
     }
 
-    g_child_watch_add( g_pid, (GChildWatchFunc) close_pid, NULL );
+    g_child_watch_add( g_pid, (GChildWatchFunc) g_spawn_close_pid, NULL );
 */
 #endif // _WIN32
 
