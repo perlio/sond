@@ -33,7 +33,7 @@ G_DEFINE_QUARK(sond-server-error-quark,sond_server_error)
 enum SondServerError
 {
     SOND_SERVER_ERROR_NOTFOUND,
-    NUM_SOND_CLIENT_ERROR
+    NUM_SOND_SERVER_ERROR
 };
 
 typedef struct st_mysql MYSQL;

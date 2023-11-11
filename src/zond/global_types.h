@@ -7,12 +7,24 @@
 #define EOP 99999
 
 #define MAJOR "0" //wenn sich Struktur der .znd-Datei ändert
-#define MINOR "11" //neues Feature
-#define PATCH "0" //irjendwatt
+#define MINOR "10" //neues Feature
+#define PATCH "3" //irjendwatt
 
 #include <mupdf/fitz.h>
 #include <mupdf/pdf.h>
 #include <glib.h>
+
+#define ZOND_ERROR zond_error_quark()
+G_DEFINE_QUARK(zond-error-quark,zond_error)
+
+enum ZondError
+{
+    ZOND_ERROR_IO,
+    ZOND_ERROR_JSON_NO_OBJECT,
+    ZOND_ERROR_VTAG_NOT_FOUND,
+    ZOND_ERROR_CURL,
+    NUM_ZOND_ERROR
+};
 
 
 typedef struct _GdkPixbuf GdkPixbuf;

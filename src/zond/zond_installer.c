@@ -1,5 +1,5 @@
 /*
-zond (zond_updater.c) - Akten, Beweisstücke, Unterlagen
+zond (zond_installer.c) - Akten, Beweisstücke, Unterlagen
 Copyright (C) 2023  pelo america
 
 This program is free software: you can redistribute it and/or modify
@@ -18,18 +18,18 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include <gtk/gtk.h>
 
-typedef struct _Updater
+typedef struct _Installer
 {
     GtkWidget* window;
-} Updater;
+} Installer;
 
 
 static void
 activate_app( GtkApplication* app, gpointer data )
 {
-    Updater* upd = (Updater*) data;
+    Installer* inst = (Installer*) data;
 
-    gtk_window_present( GTK_WINDOW(upd->window) );
+    gtk_window_present( GTK_WINDOW(inst->window) );
 
     return;
 }
@@ -38,9 +38,9 @@ activate_app( GtkApplication* app, gpointer data )
 static void
 startup_app( GtkApplication* app, gpointer data )
 {
-    Updater* upd = (Updater*) data;
+    Installer* inst = (Installer*) data;
 
-    upd->window = gtk_application_window_new( app );
+    inst->window = gtk_application_window_new( app );
 
     return;
 }
@@ -50,16 +50,16 @@ int
 main( int argc, char **argv)
 {
     GtkApplication* app = NULL;
-    Updater upd = { 0 };
+    Installer inst = { 0 };
 
     //ApplicationApp erzeugen
     app = gtk_application_new ( "de.perlio.zond_updater", G_APPLICATION_DEFAULT_FLAGS );
 
     //und starten
-    g_signal_connect( app, "startup", G_CALLBACK (startup_app), &upd );
-    g_signal_connect( app, "activate", G_CALLBACK (activate_app), &upd );
+    g_signal_connect( app, "startup", G_CALLBACK (startup_app), &inst );
+    g_signal_connect( app, "activate", G_CALLBACK (activate_app), &inst );
 
-    if ( argc == 2 || !g_strcmp0( argv[1], "-update" ) ) upd.update = TRUE;
+    if ( argc == 2 || !g_strcmp0( argv[1], "-update" ) ) inst.update = TRUE;
     else if ( argc != 1 ) return -1;
 
     gint status = g_application_run( G_APPLICATION(app), argc, argv );
