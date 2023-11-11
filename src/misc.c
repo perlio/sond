@@ -356,7 +356,7 @@ get_base_dir( void )
     if (count == -1) g_error( "Basedir konnte nicht ermittelt werden - Bei Aufruf "
             "readlink:\n%s", strerror( errno ) );
 
-    return g_strdup( dirname( result ) );
+    return g_strdup( dirname( dirname( result ) ) ); //zond/bin/zond.exe
 #endif // _WIN32
 }
 
