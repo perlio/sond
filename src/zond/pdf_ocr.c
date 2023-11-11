@@ -405,7 +405,7 @@ pdf_ocr_render_pixmap( fz_context* ctx, pdf_document* doc, float scale,
 
     page = pdf_load_page( ctx, doc, 0 );
 
-    fz_rect rect = pdf_bound_page( ctx, page );
+    fz_rect rect = pdf_bound_page( ctx, page, FZ_CROP_BOX );
     fz_matrix ctm = pdf_ocr_create_matrix( ctx, rect, scale, 0 );
 
     rect = fz_transform_rect( rect, ctm );
@@ -727,7 +727,7 @@ pdf_ocr_get_hidden_text( PdfDocumentPage* pdf_document_page, gchar** errmsg )
     }
 
     //structured text-device
-    fz_try( ctx ) stext_page = fz_new_stext_page( ctx, pdf_bound_page( ctx, page ) );
+    fz_try( ctx ) stext_page = fz_new_stext_page( ctx, pdf_bound_page( ctx, page, FZ_CROP_BOX ) );
     fz_catch( ctx )
     {
         fz_drop_page( ctx, &page->super );

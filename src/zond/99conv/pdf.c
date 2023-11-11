@@ -283,6 +283,9 @@ pdf_clean( fz_context* ctx, const gchar* rel_path, gchar** errmsg )
     if ( rc == -1 ) ERROR_S
     else if ( rc == 1 ) return 1;
 
+    fz_try( ctx ) retainpages( ctx, doc );
+    fz_catch( ctx ) ERROR_MUPDF( "retainpages" )
+
     rc = pdf_save( ctx, doc, rel_path, (void (*) (gpointer, gpointer)) pdf_drop_document, ctx, doc, errmsg );
     if ( rc ) ERROR_S
 

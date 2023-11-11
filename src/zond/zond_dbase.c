@@ -459,7 +459,7 @@ zond_dbase_convert_to_maj_0( const gchar* path, gchar* v_string,
             ERROR_S
         }
     }
-    else if ( g_strcmp0( v_string , "v0.10" ) )
+    else if ( !g_strcmp0( v_string , "v0.10" ) )
     {
         rc = zond_dbase_convert_from_v0_8_or_v0_9( db, errmsg );
         if ( rc )
@@ -539,7 +539,7 @@ zond_dbase_get_version( sqlite3* db, gchar** errmsg )
     if ( !sqlite3_column_text( stmt, 0 ) || !g_strcmp0( (const gchar*) sqlite3_column_text( stmt, 0 ), "" ) )
     {
         sqlite3_finalize( stmt );
-        ERROR_S_MESSAGE_VAL( "ZND-Datei enthält keine Versionsnummer", NULL )
+        ERROR_S_MESSAGE_VAL( "ZND-Datei enthält keine Versionsbezeichnung", NULL )
     }
 
     v_string = g_strdup( (const gchar*) sqlite3_column_text( stmt, 0 ) );
@@ -590,15 +590,6 @@ zond_dbase_open( const gchar* path, gboolean create_file, gboolean create, sqlit
             rc = sqlite3_open_v2( path, db, SQLITE_OPEN_READWRITE, NULL );
             if ( rc ) ERROR_SOND( "sqlite3_open_v2" )
 
-            //zu MAJOR-Version 0 ändern
-            rc = sqlite3_exec( *db, "UPDATE baum_inhalt SET node_text = '" MAJOR "' "
-                    "WHERE node_id = 0;", NULL, NULL, errmsg );
-            if ( rc != SQLITE_OK )
-            {
-                sqlite3_close( *db );
-                ERROR_S
-            }
-
             v_string = g_strdup( MAJOR );
         }
 
@@ -614,8 +605,10 @@ zond_dbase_open( const gchar* path, gboolean create_file, gboolean create, sqlit
             sqlite3_close( *db );
             ERROR_S_MESSAGE( "Version gibt's noch gar nicht" )
         }
-        if ( atoi( v_string ) < atoi( MAJOR ) )
+        else if ( atoi( v_string ) < atoi( MAJOR ) )
         {
+            gint rc = 0;
+
             //aktewalisieren
         }
 
