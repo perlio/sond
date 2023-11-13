@@ -154,7 +154,7 @@ log_init( Projekt* zond )
     GDateTime* date_time = NULL;
 
 #ifdef _WIN32
-    logdir = g_strdup_printf( "%s\\zond", getenv( "LOCALAPPDATA" ) );
+    logdir = g_strconcat( zond->base_dir, "logs", NULL );
 #elifdef __linux__
     logdir = g_strdup( "/var/log/zond" );
 #endif // _WIN32
