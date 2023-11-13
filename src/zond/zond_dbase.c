@@ -431,7 +431,7 @@ zond_dbase_convert_to_maj_0( const gchar* path, gchar* v_string,
         sqlite3_close( db);
         g_free( path_new );
 
-        ERROR_SOND( "zond_dbase_create_db" );
+        ERROR_S
     }
 
     sql = g_strdup_printf( "ATTACH DATABASE '%s' AS old;", path );
@@ -574,7 +574,7 @@ zond_dbase_open( const gchar* path, gboolean create_file, gboolean create, sqlit
         if ( !v_string )
         {
             sqlite3_close( *db );
-            ERROR_SOND( "zond_dbase_get_version" );
+            ERROR_S
         }
 
         if ( v_string[0] == 'v' ) //legacy...
@@ -588,7 +588,7 @@ zond_dbase_open( const gchar* path, gboolean create_file, gboolean create, sqlit
             if ( rc ) ERROR_S
 
             rc = sqlite3_open_v2( path, db, SQLITE_OPEN_READWRITE, NULL );
-            if ( rc ) ERROR_SOND( "sqlite3_open_v2" )
+            if ( rc ) ERROR_S
 
             v_string = g_strdup( MAJOR );
         }
@@ -622,7 +622,7 @@ zond_dbase_open( const gchar* path, gboolean create_file, gboolean create, sqlit
         if ( rc )
         {
             sqlite3_close( *db );
-            ERROR_SOND( "zond_dbase_create_db" )
+            ERROR_S
         }
     }
 
@@ -631,7 +631,7 @@ zond_dbase_open( const gchar* path, gboolean create_file, gboolean create, sqlit
     if ( rc != SQLITE_OK )
     {
         sqlite3_close( *db );
-        ERROR_SOND( "sqlite3_exec (PRAGMA)" )
+        ERROR_S
     }
 
     return 0;
@@ -648,7 +648,7 @@ zond_dbase_new( const gchar* path, gboolean create_file, gboolean create,
     g_return_val_if_fail( zond_dbase, -1 );
 
     rc = zond_dbase_open( path, create_file, create, &db, errmsg );
-    if ( rc ) ERROR_SOND( "zond_dbase_open" )
+    if ( rc ) ERROR_S
 
     *zond_dbase = g_object_new( ZOND_TYPE_DBASE, "path", path, "dbase", db, NULL );
 
@@ -891,7 +891,7 @@ zond_dbase_insert_node( ZondDBase* zond_dbase, Baum baum, gint node_id, gboolean
                 "VALUES (last_insert_rowid()); " };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
-    if ( rc ) ERROR_SOND( "zond_dbase_prepare" )
+    if ( rc ) ERROR_S
 
     rc = sqlite3_bind_int( stmt[0 + OFFSET], 1, child );
     if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (child)" )
@@ -950,7 +950,7 @@ zond_dbase_remove_node( ZondDBase* zond_dbase, Baum baum, gint node_id, gchar** 
         };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
-    if ( rc ) ERROR_SOND( "zond_dbase_prepare" )
+    if ( rc ) ERROR_S
 
     rc = sqlite3_bind_int( stmt[0 + OFFSET], 1, node_id );
     if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (node_id)" )
@@ -1048,7 +1048,7 @@ zond_dbase_kopieren_nach_auswertung( ZondDBase* zond_dbase, Baum baum, gint node
                 "node_id!=0; " };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
-    if ( rc ) ERROR_SOND( "zond_dbase_prepare" )
+    if ( rc ) ERROR_S
 
     rc = sqlite3_bind_int( stmt[0 + OFFSET], 1, child );
     if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (child)" )
@@ -1096,7 +1096,7 @@ zond_dbase_verschieben_knoten( ZondDBase* zond_dbase, Baum baum, gint node_id, g
             "UPDATE baum_auswertung SET parent_id=?1, older_sibling_id=?2 WHERE node_id=?3; " };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
-    if ( rc ) ERROR_SOND( "zond_dbase_prepare" )
+    if ( rc ) ERROR_S
 
     rc = sqlite3_bind_int( stmt[0 + OFFSET], 1, node_id );
     if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int [0, 1]" )
@@ -1148,7 +1148,7 @@ zond_dbase_set_icon_name( ZondDBase* zond_dbase, Baum baum, gint node_id, const 
        };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
-    if ( rc ) ERROR_SOND( "zond_dbase_prepare" )
+    if ( rc ) ERROR_S
 
     rc = sqlite3_bind_text( stmt[0 + OFFSET], 1,
             icon_name, -1, NULL );
@@ -1179,7 +1179,7 @@ zond_dbase_get_icon_name_and_node_text( ZondDBase* zond_dbase, Baum baum, gint n
         };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
-    if ( rc ) ERROR_SOND( "zond_dbase_prepare" )
+    if ( rc ) ERROR_S
 
     rc = sqlite3_bind_int( stmt[0 + OFFSET], 1, node_id );
     if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (node_id)" )
@@ -1220,7 +1220,7 @@ zond_dbase_set_text( ZondDBase* zond_dbase, gint node_id, gchar* text, gchar** e
        };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
-    if ( rc ) ERROR_SOND( "zond_dbase_prepare" )
+    if ( rc ) ERROR_S
 
     rc = sqlite3_bind_text( stmt[0], 1, text, -1, NULL );
     if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_text (text)" )
@@ -1248,7 +1248,7 @@ zond_dbase_get_text( ZondDBase* zond_dbase, gint node_id, gchar** text, gchar** 
        };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
-    if ( rc ) ERROR_SOND( "zond_dbase_prepare" )
+    if ( rc ) ERROR_S
 
     rc = sqlite3_bind_int( stmt[0], 1, node_id );
     if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (node_id)" )
@@ -1292,7 +1292,7 @@ zond_dbase_set_ziel( ZondDBase* zond_dbase, Ziel* ziel, gint anchor_id, gchar** 
         };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
-    if ( rc ) ERROR_SOND( "zond_dbase_prepare" )
+    if ( rc ) ERROR_S
 
     rc = sqlite3_bind_text( stmt[0], 1,
             ziel->ziel_id_von, -1, NULL );
@@ -1330,7 +1330,7 @@ zond_dbase_set_datei( ZondDBase* zond_dbase, gint node_id, const gchar* rel_path
         };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
-    if ( rc ) ERROR_SOND( "zond_dbase_prepare" )
+    if ( rc ) ERROR_S
 
     rc = sqlite3_bind_text( stmt[0], 1, rel_path,
             -1, NULL );
@@ -1365,7 +1365,7 @@ zond_dbase_get_parent( ZondDBase* zond_dbase, Baum baum, gint node_id, gchar** e
         };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
-    if ( rc ) ERROR_SOND( "zond_dbase_prepare" )
+    if ( rc ) ERROR_S
 
     rc = sqlite3_bind_int( stmt[0 + OFFSET], 1, node_id );
     if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (node_id)" )
@@ -1409,7 +1409,7 @@ zond_dbase_get_older_sibling( ZondDBase* zond_dbase, Baum baum, gint node_id, gc
         };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
-    if ( rc ) ERROR_SOND( "zond_dbase_prepare" )
+    if ( rc ) ERROR_S
 
     rc = sqlite3_bind_int( stmt[0 + OFFSET], 1, node_id );
     if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (node_id)" )
@@ -1454,7 +1454,7 @@ zond_dbase_get_younger_sibling( ZondDBase* zond_dbase, Baum baum, gint node_id, 
         };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
-    if ( rc ) ERROR_SOND( "zond_dbase_prepare" )
+    if ( rc ) ERROR_S
 
     rc = sqlite3_bind_int( stmt[0 + OFFSET], 1, node_id );
     if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (node_id)" )
@@ -1529,7 +1529,7 @@ zond_dbase_get_ref_id( ZondDBase* zond_dbase, gint node_id, gchar** errmsg )
         };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
-    if ( rc ) ERROR_SOND( "zond_dbase_prepare" )
+    if ( rc ) ERROR_S
 
     rc = sqlite3_bind_int( stmt[0], 1, node_id );
     if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (node_id)" )
@@ -1577,12 +1577,12 @@ zond_dbase_get_rel_path( ZondDBase* zond_dbase, Baum baum, gint node_id, gchar**
         };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
-    if ( rc ) ERROR_SOND( "zond_dbase_prepare" )
+    if ( rc ) ERROR_S
 
     if ( baum == BAUM_AUSWERTUNG )
     {
         node_id = zond_dbase_get_ref_id( zond_dbase, node_id, errmsg );
-        if ( node_id < 0 ) ERROR_SOND( "db_get_ref_id" )
+        if ( node_id < 0 ) ERROR_S
     }
 
     rc = sqlite3_bind_int( stmt[0], 1, node_id );
@@ -1625,12 +1625,12 @@ zond_dbase_get_ziel( ZondDBase* zond_dbase, Baum baum, gint node_id, Ziel* ziel,
         };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
-    if ( rc ) ERROR_SOND( "zond_dbase_prepare" )
+    if ( rc ) ERROR_S
 
     if ( baum == BAUM_AUSWERTUNG )
     {
         node_id = zond_dbase_get_ref_id( zond_dbase, node_id, errmsg );
-        if ( node_id < 0 ) ERROR_SOND( "db_get_ref_id" )
+        if ( node_id < 0 ) ERROR_S
     }
 
     rc = sqlite3_bind_int( stmt[0], 1, node_id );
@@ -1675,7 +1675,7 @@ zond_dbase_get_node_id_from_rel_path( ZondDBase* zond_dbase, const gchar* rel_pa
     };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
-    if ( rc ) ERROR_SOND( "zond_dbase_prepare" )
+    if ( rc ) ERROR_S
 
     rc = sqlite3_bind_text( stmt[0], 1, rel_path, -1, NULL );
     if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_text (rel_path)" )
@@ -1703,7 +1703,7 @@ zond_dbase_check_id( ZondDBase* zond_dbase, const gchar* id, gchar** errmsg )
     };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
-    if ( rc ) ERROR_SOND( "zond_dbase_prepare" )
+    if ( rc ) ERROR_S
 
     rc = sqlite3_bind_text( stmt[0], 1, id, -1, NULL );
     if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_text (id)" )
@@ -1732,7 +1732,7 @@ zond_dbase_set_node_text( ZondDBase* zond_dbase, Baum baum, gint node_id,
     };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
-    if ( rc ) ERROR_SOND( "zond_dbase_prepare" )
+    if ( rc ) ERROR_S
 
     rc = sqlite3_bind_text( stmt[0 + OFFSET], 1,
             node_text, -1, NULL );
@@ -1764,7 +1764,7 @@ zond_dbase_set_link( ZondDBase* zond_dbase, const gint baum_id,
             };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
-    if ( rc ) ERROR_SOND( "zond_dbase_prepare" )
+    if ( rc ) ERROR_S
 
     rc = sqlite3_bind_int( stmt[0], 1, baum_id );
     if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (baum_id)" )
@@ -1801,7 +1801,7 @@ zond_dbase_check_link( ZondDBase* zond_dbase, Baum baum, gint node_id, gchar** e
     };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
-    if ( rc ) ERROR_SOND( "zond_dbase_prepare" )
+    if ( rc ) ERROR_S
 
     rc = sqlite3_bind_int( stmt[0], 1, baum );
     if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (baum)" )
@@ -1833,7 +1833,7 @@ zond_dbase_get_link( ZondDBase* zond_dbase, gint ID, Baum* baum,
     };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
-    if ( rc ) ERROR_SOND( "zond_dbase_prepare" )
+    if ( rc ) ERROR_S
 
     rc = sqlite3_bind_int( stmt[0], 1, ID );
     if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (node_id)" )
@@ -1866,7 +1866,7 @@ zond_dbase_remove_link( ZondDBase* zond_dbase, const gint baum_id, const gint
     };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
-    if ( rc ) ERROR_SOND( "zond_dbase_prepare" )
+    if ( rc ) ERROR_S
 
     rc = sqlite3_bind_int( stmt[0], 1, baum_id );
     if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (baum_id)" )
@@ -1894,7 +1894,7 @@ zond_dbase_update_path( ZondDBase* zond_dbase, const gchar* old_path, const gcha
     };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
-    if ( rc ) ERROR_SOND( "zond_dbase_prepare" )
+    if ( rc ) ERROR_S
 
     rc = sqlite3_bind_text( stmt[0], 1, old_path, -1, NULL );
     if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_text (old_path)" )
@@ -1922,7 +1922,7 @@ zond_dbase_test_path( ZondDBase* zond_dbase, const gchar* rel_path, gchar** errm
     };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
-    if ( rc ) ERROR_SOND( "zond_dbase_prepare" )
+    if ( rc ) ERROR_S
 
     rc = sqlite3_bind_text( stmt[0], 1, rel_path, -1, NULL );
     if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_text" )

@@ -202,7 +202,7 @@ suchen_fuellen_row( Projekt* zond, GtkWidget* list_box, ZondSuchen zond_suchen, 
 
         rc = treeviews_get_rel_path_and_anbindung( zond, baum, node_id, &rel_path,
                 NULL, errmsg );
-        if ( rc == -1 ) ERROR_SOND( "abfragen_rel_path_and_anbindung" )
+        if ( rc == -1 ) ERROR_S
 
         text_label = add_string( g_strdup( "Dateiname: "), rel_path );
     }
@@ -213,7 +213,7 @@ suchen_fuellen_row( Projekt* zond, GtkWidget* list_box, ZondSuchen zond_suchen, 
 
         rc = zond_dbase_get_icon_name_and_node_text( zond->dbase_zond->zond_dbase_work, baum, node_id,
                 NULL, &node_text, errmsg );
-        if ( rc ) ERROR_SOND( "zond_dbase_get_icon_name_and_node_text" )
+        if ( rc ) ERROR_S
 
         if ( zond_suchen == ZOND_SUCHEN_NODE_TEXT_BAUM_INHALT )
                 text_label = add_string( g_strdup( "BAUM_INHALT: " ), node_text );
@@ -249,7 +249,7 @@ suchen_fuellen_ergebnisfenster( Projekt* zond, GtkWidget* ergebnisfenster,
     {
         node = g_array_index( arr_treffer, Node, i );
         rc = suchen_fuellen_row( zond, list_box, node.zond_suchen, node.node_id, errmsg );
-        if ( rc ) ERROR_SOND( "suchen_fuellen_row" )
+        if ( rc ) ERROR_S
     }
 
     gtk_widget_show_all( list_box );
@@ -333,7 +333,7 @@ suchen_anzeigen_ergebnisse( Projekt* zond, const gchar* titel, GArray* arr_treff
 
     rc = suchen_fuellen_ergebnisfenster( zond, ergebnisfenster, arr_treffer,
             errmsg );
-    if ( rc ) ERROR_SOND( "suchen_fuellen_ergebnisfenster" )
+    if ( rc ) ERROR_S
 
     return 0;
 }
@@ -431,7 +431,7 @@ suchen_treeviews( Projekt* zond, const gchar* text, gchar** errmsg )
     if ( rc )
     {
         g_array_unref( arr_treffer );
-        ERROR_SOND( "suchen_db" )
+        ERROR_S
     }
 
     if ( arr_treffer->len )
@@ -440,7 +440,7 @@ suchen_treeviews( Projekt* zond, const gchar* text, gchar** errmsg )
         rc = suchen_anzeigen_ergebnisse( zond, titel, arr_treffer, errmsg );
     }
     g_array_unref( arr_treffer );
-    if ( rc ) ERROR_SOND( "suchen_anzeigen_ergebnisse" );
+    if ( rc ) ERROR_S
 
     return 0;
 }

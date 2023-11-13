@@ -148,7 +148,7 @@ treeviews_ziel_zu_anbindung( fz_context* ctx, const gchar* rel_path, Ziel* ziel,
     if ( page_num == -1 )
     {
         g_free( anbindung );
-        ERROR_SOND_VAL( "general_get_page_num_from_dest", NULL )
+        ERROR_S_VAL( NULL )
     }
     else if ( page_num == -2 )
     {
@@ -165,7 +165,7 @@ treeviews_ziel_zu_anbindung( fz_context* ctx, const gchar* rel_path, Ziel* ziel,
     {
         g_free( anbindung );
 
-        ERROR_SOND_VAL( "general_get_page_num_from_dest", NULL )
+        ERROR_S_VAL( NULL )
     }
     else if ( page_num == -2 )
     {
@@ -199,14 +199,14 @@ treeviews_get_rel_path_and_anbindung( Projekt* zond, Baum baum, gint node_id,
     Anbindung* anbindung_intern = NULL;
 
     rc = zond_dbase_get_rel_path( zond->dbase_zond->zond_dbase_work, baum, node_id, &rel_path_intern, errmsg );
-    if ( rc == -1 ) ERROR_SOND( "zond_dbase_get_rel_path" )
+    if ( rc == -1 ) ERROR_S
     else if ( rc == 1 ) return 2;
 
     rc = zond_dbase_get_ziel( zond->dbase_zond->zond_dbase_work, baum, node_id, &ziel, errmsg );
     if ( rc == -1 )
     {
         g_free( rel_path_intern );
-        ERROR_SOND( "zond_dbase_get_ziel" )
+        ERROR_S
     }
     else if ( rc == 1 )
     {
@@ -228,7 +228,7 @@ treeviews_get_rel_path_and_anbindung( Projekt* zond, Baum baum, gint node_id,
     if ( !anbindung_intern )
     {
         g_free( rel_path_intern );
-        ERROR_SOND( "ziel_zu_anbindung" )
+        ERROR_S
     }
 
     if ( rel_path ) *rel_path = rel_path_intern;
@@ -825,7 +825,7 @@ treeviews_clipboard_kopieren_db( Projekt* zond, gboolean with_younger_siblings,
     {
         rc = treeviews_clipboard_kopieren_db( zond, TRUE, baum_von,
                 first_child_id, node_id_new, TRUE, errmsg );
-        if ( rc == -1  ) ERROR_SOND( "selection_copy_node_db" )
+        if ( rc == -1  ) ERROR_S
     }
 
     if ( with_younger_siblings )

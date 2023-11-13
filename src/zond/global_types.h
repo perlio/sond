@@ -8,7 +8,7 @@
 
 #define MAJOR "0" //wenn sich Struktur der .znd-Datei ändert
 #define MINOR "10" //neues Feature
-#define PATCH "3" //irjendwatt
+#define PATCH "2" //irjendwatt
 
 #include <mupdf/fitz.h>
 #include <mupdf/pdf.h>
@@ -23,6 +23,7 @@ enum ZondError
     ZOND_ERROR_JSON_NO_OBJECT,
     ZOND_ERROR_VTAG_NOT_FOUND,
     ZOND_ERROR_CURL,
+    ZOND_ERROR_ZIP,
     NUM_ZOND_ERROR
 };
 

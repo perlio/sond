@@ -2066,7 +2066,7 @@ sojus_database_delete_property( MYSQL* con, gint ID_property, gchar** errmsg )
         gint rc = 0;
 
         rc = sojus_database_delete_property( con, atoi( row[0] ), errmsg );
-        if ( rc ) ERROR_SOND( "sojus_database_detete_property" )
+        if ( rc ) ERROR_S
     }
 
     mysql_free_result( mysql_res );

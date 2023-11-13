@@ -123,7 +123,7 @@ selection_datei_einfuegen_in_db( Projekt* zond, gchar* rel_path, GFile* file, gi
     }
 
     rc = zond_dbase_set_datei( zond->dbase_zond->zond_dbase_work, new_node_id, rel_path, errmsg );
-    if ( rc ) ERROR_SOND( "zond_dbase_set_datei" )
+    if ( rc ) ERROR_S
 
     return new_node_id;
 }
@@ -163,7 +163,7 @@ selection_datei_anbinden( Projekt* zond, InfoWindow* info_window, GFile* file, g
     new_node_id = selection_datei_einfuegen_in_db( zond, rel_path, file, node_id,
             child, errmsg );
     g_free( rel_path );
-    if ( new_node_id == -1 ) ERROR_SOND( "selection_datei_einfuegen_in_db" )
+    if ( new_node_id == -1 ) ERROR_S
 
     (*zaehler)++;
 
@@ -195,7 +195,7 @@ selection_ordner_anbinden_rekursiv( Projekt* zond, InfoWindow* info_window,
 
     g_free( basename );
 
-    if ( new_node_id == -1 ) ERROR_SOND( "zond_dbase_insert_node" )
+    if ( new_node_id == -1 ) ERROR_S
 
     GFileEnumerator* enumer = g_file_enumerate_children( file, "*", G_FILE_QUERY_INFO_NONE, NULL, &error );
     if ( !enumer )
@@ -308,7 +308,7 @@ three_treeviews_clipboard_anbinden_foreach( SondTreeview* tree_view, GtkTreeIter
                 s_selection->kind, &s_selection->zaehler, errmsg );
         g_object_unref( file );
         if ( new_node_id == -1 )
-                ERROR_SOND( "selection_datei_ordner_anbinden_rekursiv" )
+                ERROR_S
     }
     else
     {
@@ -316,7 +316,7 @@ three_treeviews_clipboard_anbinden_foreach( SondTreeview* tree_view, GtkTreeIter
                 s_selection->info_window, file, s_selection->anchor_id, s_selection->kind,
                 &s_selection->zaehler, errmsg );
         g_object_unref( file );
-        if ( new_node_id == -1 ) ERROR_SOND( "selection_datei_anbinden" )
+        if ( new_node_id == -1 ) ERROR_S
         else if ( new_node_id == 0 ) return 0;
     }
 

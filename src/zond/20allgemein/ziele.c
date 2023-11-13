@@ -275,7 +275,7 @@ ziele_abfragen_anker_rek( Projekt* zond, gint node_id, Anbindung anbindung,
     Anbindung* anbindung_node_id = NULL;
     rc = treeviews_get_rel_path_and_anbindung( zond, BAUM_INHALT, node_id, NULL,
             &anbindung_node_id, errmsg );
-    if ( rc == -1 ) ERROR_SOND( "abfragen_rel_path_and_anbindung" )
+    if ( rc == -1 ) ERROR_S
     else if ( rc ) //Datei, hat ja kein ziel gespeichert
     {
         *kind = TRUE;
@@ -283,7 +283,7 @@ ziele_abfragen_anker_rek( Projekt* zond, gint node_id, Anbindung anbindung,
 
         first_child_id = zond_dbase_get_first_child( zond->dbase_zond->zond_dbase_work, BAUM_INHALT,
                 node_id, errmsg );
-        if ( first_child_id < 0 ) ERROR_SOND( "zond_dbase_get_first_child" )
+        if ( first_child_id < 0 ) ERROR_S
         else if ( first_child_id > 0 ) //hat kind
         {
             gint res = ziele_abfragen_anker_rek( zond, first_child_id, anbindung,
@@ -300,7 +300,7 @@ ziele_abfragen_anker_rek( Projekt* zond, gint node_id, Anbindung anbindung,
         {
             g_free( anbindung_node_id );
 
-            ERROR_SOND( "Einzufügendes Ziel mit bestehendem Ziel identisch" )
+            ERROR_S
         }
 
         //Knoten kommt als parent in Beracht
@@ -315,7 +315,7 @@ ziele_abfragen_anker_rek( Projekt* zond, gint node_id, Anbindung anbindung,
             {
                 g_free( anbindung_node_id );
 
-                ERROR_SOND( "zond_dbase_get_first_child" )
+                ERROR_S
             }
             else if ( first_child_id > 0 ) //hat kind
             {
@@ -343,7 +343,7 @@ ziele_abfragen_anker_rek( Projekt* zond, gint node_id, Anbindung anbindung,
             {
                 g_free( anbindung_node_id );
 
-                ERROR_SOND( "zond_dbase_get_younger_sibling" )
+                ERROR_S
             }
 
             if ( younger_sibling_id != 0 )

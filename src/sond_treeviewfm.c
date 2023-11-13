@@ -232,7 +232,7 @@ sond_treeviewfm_move_copy_create_delete( SondTreeviewFM* stvfm, GFile* file_sour
             if ( rc )
             {
                 g_free( basename );
-                ERROR_SOND( "dbase_end" )
+                ERROR_S
             }
         }
 
@@ -1054,7 +1054,7 @@ sond_treeviewfm_remove_node( SondTreeviewFM* stvfm, GtkTreeIter* iter_file, GFil
     }
 
     rc = sond_treeviewfm_move_copy_create_delete( stvfm, NULL, &file, 4, errmsg );
-    if ( rc == -1 ) ERROR_SOND( "sond_treeviewfm_move_copy_create_delete" )
+    if ( rc == -1 ) ERROR_S
     else if ( rc == 1 ) return 1;
 
     if ( iter_file ) gtk_tree_store_remove( GTK_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(stvfm) )),
@@ -1082,7 +1082,7 @@ sond_treeviewfm_foreach_loeschen( SondTreeview* stv, GtkTreeIter* iter,
     rc = sond_treeviewfm_remove_node( SOND_TREEVIEWFM(stv), iter, file, info, data, errmsg );
     g_object_unref( info );
     g_object_unref( file );
-    if ( rc == -1 ) ERROR_SOND( "sond_treeviewfm_remove_node" )
+    if ( rc == -1 ) ERROR_S
     else if ( rc == 2 ) return 1;
 
     return 0;
@@ -2065,7 +2065,7 @@ sond_treeviewfm_paste_clipboard( SondTreeviewFM* stvfm, gboolean kind, gchar** e
     if ( !sond_treeview_get_cursor( SOND_TREEVIEW(stvfm), &iter_cursor ) ) return 0;
 
     path = sond_treeviewfm_get_full_path( stvfm, &iter_cursor );
-    if ( !path ) ERROR_SOND( "sond_treeviewfm_get_full_path:\nKein Pfadname" )
+    if ( !path ) ERROR_S
 
     file_cursor = g_file_new_for_path( path );
     g_free( path );

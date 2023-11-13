@@ -1,12 +1,6 @@
 #ifndef MISC_H_INCLUDED
 #define MISC_H_INCLUDED
 
-#define ERROR_SOND_VAL(x,y) { if ( errmsg ) *errmsg = add_string( \
-                       g_strdup( "Bei Aufruf " x ":\n" ), *errmsg ); \
-                       return y; }
-
-#define ERROR_SOND(x) ERROR_SOND_VAL(x,-1)
-
 #define ERROR_S_VAL(y) { if ( errmsg ) *errmsg = add_string( \
                          g_strconcat( "Bei Aufruf ", __func__, ":\n", NULL ), *errmsg ); \
                          return y; }
@@ -37,6 +31,7 @@ typedef int gboolean;
 typedef void* GPid;
 typedef void* gpointer;
 
+int mkdir_p( const char* );
 
 void display_message( GtkWidget*, ... );
 

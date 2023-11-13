@@ -147,7 +147,7 @@ selection_abfragen_pdf( Projekt* zond, gchar** errmsg )
             g_list_free_full( selected, (GDestroyNotify) gtk_tree_path_free );
             g_ptr_array_free( arr_rel_path, TRUE );
 
-            ERROR_SOND_VAL( "zond_dbase_get_rel_path", NULL )
+            ERROR_S_VAL( NULL )
         }
 
         //Sonderbehandung, falls pdf-Datei

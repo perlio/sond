@@ -238,7 +238,7 @@ pdf_ocr_sandwich_page( PdfDocumentPage* pdf_document_page,
     if ( !buf_text )
     {
         fz_drop_buffer( ctx, buf );
-        ERROR_SOND_VAL( "pdf_ocr_process_tess_tmp", -2 )
+        ERROR_S_VAL( -2 )
     }
 
     fz_try( ctx ) fz_append_buffer( ctx, buf, buf_text );
@@ -312,7 +312,7 @@ pdf_ocr_sandwich_doc( GPtrArray* arr_document_pages, pdf_document* doc_text,
         rc = pdf_ocr_sandwich_page( pdf_document_page, doc_text, zaehler, errmsg );
         zond_pdf_document_mutex_unlock( pdf_document_page->document );
         zaehler++;
-        if ( rc == -1 ) ERROR_SOND( "pdf_ocr_sandwich" )
+        if ( rc == -1 ) ERROR_S
         else if ( rc == -2 )
         {
             message = g_strdup_printf( "Seite konnte nicht eingelesen werden -\n%s",
@@ -390,7 +390,7 @@ pdf_ocr_tess_page( InfoWindow* info_window, TessBaseAPI* handle,
     rc = GPOINTER_TO_INT(g_thread_join( thread_recog ));
     TessMonitorDelete( monitor );
 
-    if ( rc && !(info_window->cancel) ) ERROR_SOND( "TessAPIRecognize:\nFehler!" )
+    if ( rc && !(info_window->cancel) ) ERROR_S
 
     return 0;
 }
@@ -477,7 +477,7 @@ pdf_ocr_create_doc_from_page( PdfDocumentPage* pdf_document_page, gint flag, gch
     if ( rc )
     {
         pdf_drop_document( ctx, doc_new );
-        ERROR_SOND_VAL( "pdf_copy_page", NULL )
+        ERROR_S_VAL( NULL )
     }
 
     fz_try( ctx ) page = pdf_load_page( ctx, doc_new, 0 );
@@ -764,7 +764,7 @@ pdf_ocr_get_hidden_text( PdfDocumentPage* pdf_document_page, gchar** errmsg )
     //bisheriger versteckter Text
     text = pdf_ocr_get_text_from_stext_page( ctx, stext_page, errmsg );
     fz_drop_stext_page( ctx, stext_page );
-    if ( !text ) ERROR_SOND_VAL( "pdf_get_text_from_stext_page", NULL )
+    if ( !text ) ERROR_S_VAL( NULL )
 
     return text;
 }
@@ -796,7 +796,7 @@ pdf_ocr_create_pdf_only_text( InfoWindow* info_window,
         g_free( info_text );
 
         page_text = pdf_ocr_get_hidden_text( pdf_document_page, errmsg );
-        if ( !page_text ) ERROR_SOND( "pdf_ocr_get_hidden_text" )
+        if ( !page_text ) ERROR_S
 
         if ( g_strcmp0( page_text, "" ) && alle == 0 )
         {
@@ -863,7 +863,7 @@ init_tesseract( Projekt* zond, TessBaseAPI** handle,
 
     //TessBaseAPI
     *handle = TessBaseAPICreate( );
-    if ( !(*handle) ) ERROR_SOND( "TessBaseApiCreate" )
+    if ( !(*handle) ) ERROR_S
 
     tessdata_dir = g_strconcat( zond->base_dir, "share/tessdata", NULL );
 
@@ -999,7 +999,7 @@ pdf_change_hidden_text( fz_context* ctx, pdf_obj* page_ref, gchar** errmsg )
 
     buf = pdf_ocr_reassemble_buffer( ctx, arr_zond_token, errmsg );
     g_array_unref( arr_zond_token );
-    if ( !buf ) ERROR_SOND( "pdf_zond_reassemble_buffer" )
+    if ( !buf ) ERROR_S
 
     rc = pdf_ocr_update_content_stream( ctx, page_ref, buf, errmsg );
     fz_drop_buffer( ctx, buf );

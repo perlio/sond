@@ -547,7 +547,7 @@ zond_pdf_document_open( const gchar* path, gint von, gint bis, gchar** errmsg )
                 gint rc = 0;
 
                 rc = zond_pdf_document_init_pages( zond_pdf_document, von, bis, errmsg );
-                if ( rc ) ERROR_SOND_VAL( "zond_pdf_init_pages", NULL )
+                if ( rc ) ERROR_S_VAL( NULL )
 
                 return g_object_ref( zond_pdf_document );
             }
@@ -577,7 +577,7 @@ zond_pdf_document_open( const gchar* path, gint von, gint bis, gchar** errmsg )
     if ( rc )
     {
         g_object_unref( zond_pdf_document );
-        ERROR_SOND_VAL( "zond_pdf_init_pages", NULL )
+        ERROR_S_VAL( NULL )
     }
 
     if ( !klass ) klass = ZOND_PDF_DOCUMENT_GET_CLASS( zond_pdf_document );

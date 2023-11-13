@@ -480,7 +480,7 @@ seiten_drehen( PdfViewer* pv, GPtrArray* arr_document_page, gint winkel, gchar**
         if ( rc == -1 )
         {
             zond_pdf_document_mutex_unlock( pdf_document_page->document );
-            ERROR_SOND( "seiten_drehen_pdf" )
+            ERROR_S
         }
 
         zond_pdf_document_mutex_unlock( pdf_document_page->document );
@@ -598,7 +598,7 @@ seiten_anbindung( PdfViewer* pv, GPtrArray* arr_document_page, gchar** errmsg )
         {
             g_ptr_array_free( arr_dests, TRUE );
 
-            ERROR_SOND( "pdf_document_get_dest" )
+            ERROR_S
         }
     }
 #ifdef VIEWER
@@ -620,7 +620,7 @@ seiten_anbindung( PdfViewer* pv, GPtrArray* arr_document_page, gchar** errmsg )
         if ( rc == -1 )
         {
             g_ptr_array_free( arr_dests, TRUE );
-            ERROR_SOND( "zond_dbase_check_id" )
+            ERROR_S
         }
         if ( rc == 1 )
         {
@@ -1006,7 +1006,7 @@ seiten_set_clipboard( PdfViewer* pv, GArray* arr_page_pv, gchar** errmsg )
     pv->zond->pv_clip = NULL;
 
     pv->zond->pv_clip = seiten_create_document( pv, arr_page_pv, errmsg );
-    if ( !pv->zond->pv_clip ) ERROR_SOND( "seiten_create_document" )
+    if ( !pv->zond->pv_clip ) ERROR_S
 
     return 0;
 }

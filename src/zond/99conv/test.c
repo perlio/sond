@@ -381,7 +381,7 @@ pdf_print_content_stream( fz_context* ctx, pdf_obj* page_ref, gchar** errmsg )
 {
     fz_buffer* buf = NULL;
     buf = pdf_ocr_get_content_stream_as_buffer( ctx, page_ref, errmsg );
-    if ( !buf ) ERROR_SOND( "pdf_ocr_get_content_stream_as_buffer" )
+    if ( !buf ) ERROR_S
 
     pdf_print_buffer( ctx, buf );
 

@@ -547,7 +547,7 @@ sond_treeview_refs_foreach( SondTreeview* stv_orig, GPtrArray* refs,
         }
 
         rc = foreach( stv_orig, &iter_ref, data, errmsg );
-        if ( rc == -1 ) ERROR_SOND( "foreach" )
+        if ( rc == -1 ) ERROR_S
         else if ( rc >= 1 ) return rc; //Abbruch gewählt
     }
 
@@ -586,7 +586,7 @@ sond_treeview_selection_foreach( SondTreeview* stv, gint (*foreach)
 
     rc = sond_treeview_refs_foreach( stv, refs, foreach, data, errmsg );
     g_ptr_array_unref( refs );
-    if ( rc == -1 ) ERROR_SOND( "sond_treeview_refs_foreach" )
+    if ( rc == -1 ) ERROR_S
     else if ( rc >= 1 ) return rc;
 
     return 0;

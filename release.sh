@@ -1,29 +1,19 @@
-rm -fr release
-mkdir release
+zip zond-x86_64-$1.zip bin bin/zond.exe bin/viewer.exe
 
-mkdir release/bin
-cp bin/zond.exe release/bin/zond.exe
-cp bin/viewer.exe release/bin/viewer.exe
-cp bin/sojus.exe release/bin/sojus.exe
+zip zond-x86_64-$1.zip logs
 
-mkdir release/logs
+zip zond-x86_64-$1.zip share/glib-2.0/schemas/gschemas.compiled
+
+cd /ucrt64 
+
+zip -r ~/Projekte/sond/zond-x86_64-$1.zip bin
+
+zip -r ~/Projekte/sond/zond-x86_64-$1.zip share/tessdata
+
+zip -r ~/Projekte/sond/zond-x86_64-$1.zip share/icons/Adwaita
+
+zip -r ~/Projekte/sond/zond-x86_64-$1.zip lib/gdk-pixbuf-2.0
 
 #ldd release/bin/zond.exe | grep '\/ucrt64.*\.dll' -o | xargs -I{} cp "{}" release/bin
 #cp /ucrt64/bin/gspawn-win64-helper.exe release/bin
 #cp /ucrt64/bin/gspawn-win64-helper-console.exe release/bin
-cp /ucrt64/bin/* release/bin
-
-mkdir -p release/share/glib-2.0/schemas
-cp /ucrt64/share/glib-2.0/schemas/gschemas.compiled release/share/glib-2.0/schemas
-
-mkdir -p release/share/icons/Adwaita
-# cp /ucrt64/share/icons/Adwaita/icon-theme.cache release/share/icons/Adwaita
-# cp /ucrt64/share/icons/Adwaita/index.theme release/share/icons/Adwaita
-cp -r /ucrt64/share/icons/Adwaita/* release/share/icons/Adwaita
-
-mkdir -p release/lib/gdk-pixbuf-2.0/2.10.0/loaders
-cp /ucrt64/lib/gdk-pixbuf-2.0/2.10.0/loaders/*.dll release/lib/gdk-pixbuf-2.0/2.10.0/loaders
-cp /ucrt64/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache release/lib/gdk-pixbuf-2.0/2.10.0
-
-mkdir release/share/tessdata
-cp -r /ucrt64/share/tessdata/* release/share/tessdata
