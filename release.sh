@@ -1,7 +1,10 @@
-zip zond-x86_64-$1.zip bin bin/zond.exe bin/viewer.exe
+zip zond-x86_64-$1.zip bin bin/zond.exe bin/viewer.exe bin/zond_installer.exe
 
 zip zond-x86_64-$1.zip logs
 
+zip zond-x86_64-$1.zip share/
+zip zond-x86_64-$1.zip share/glib-2.0/
+zip zond-x86_64-$1.zip share/glib-2.0/schemas/
 zip zond-x86_64-$1.zip share/glib-2.0/schemas/gschemas.compiled
 
 cd /ucrt64 

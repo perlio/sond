@@ -18,7 +18,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include <gtk/gtk.h>
 #include <glib/gstdio.h>
-#include <libsoup/soup.h>
 #include <json-glib/json-glib.h>
 #include <curl/curl.h>
 #include <zip.h>
@@ -28,6 +27,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../../misc.h"
 
 #include "../global_types.h"
+#include "../99conv/general.h"
 
 
 static gint
@@ -36,20 +36,6 @@ zond_update_unzip( Projekt* zond, const gchar* vtag, GError** error )
 	gchar* zipname = NULL; // File path
 	struct zip *za; // Zip archive
 	int err; // Stores error code
-	gchar* dir_update = NULL;
-	gint rc = 0;
-
-    //Verzeichnis schaffen, in das entpackt werden soll
-    dir_update = g_strconcat( zond->base_dir, vtag, NULL );
-    rc = g_mkdir( dir_update, S_IRWXU | S_IRWXG );
-    g_free( dir_update );
-    if ( rc == -1 && errno != EEXIST )
-    {
-        *error = g_error_new( ZOND_ERROR, ZOND_ERROR_IO, "%s\ng_mkdir\n%s",
-                __func__, strerror( errno ) );
-
-        return -1;
-    }
 
 	zipname = g_strconcat( zond->base_dir, "zond-x86_64-", vtag, ".zip", NULL );
 	// Open the zip file
@@ -94,7 +80,9 @@ zond_update_unzip( Projekt* zond, const gchar* vtag, GError** error )
             gchar* dir = NULL;
             gint rc = 0;
 
-            dir = g_strconcat( zond->base_dir, vtag, "/", sb.name, NULL );
+            if ( !g_strcmp0( sb.name, "logs" ) ) continue;
+
+            dir = g_strconcat( zond->base_dir, "a", sb.name + 1, NULL );
             rc = mkdir_p( dir );
             g_free( dir );
             if ( rc && errno != EEXIST )
@@ -127,8 +115,9 @@ zond_update_unzip( Projekt* zond, const gchar* vtag, GError** error )
                 return -1;
             }
 
-            filename = g_strconcat( zond->base_dir, vtag, "/", sb.name, NULL );
+            filename = g_strconcat( zond->base_dir, "a", sb.name + 1, NULL );
             fd = fopen( filename, "wb" ); // Create new file
+            printf("%s\n", filename);
             g_free( filename );
             if (fd == NULL)
             {
@@ -187,7 +176,7 @@ zond_update_download_newest( Projekt* zond, const gchar* vtag, GError** error )
     if ( !curl )
     {
         *error = g_error_new( ZOND_ERROR, ZOND_ERROR_CURL,
-                "curl_easy_init nicht erfolgreich" );
+                "%s\ncurl_easy_init nicht erfolgreich", __func__ );
         return -1;
     }
 
@@ -209,6 +198,7 @@ zond_update_download_newest( Projekt* zond, const gchar* vtag, GError** error )
             filename, NULL );
     curl_easy_setopt( curl, CURLOPT_URL, url );
     g_free( url );
+    curl_easy_setopt( curl, CURLOPT_SSL_OPTIONS, (long)CURLSSLOPT_NATIVE_CA );
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L );
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
 
@@ -230,36 +220,67 @@ zond_update_download_newest( Projekt* zond, const gchar* vtag, GError** error )
 }
 
 
+struct memory {
+  gchar *response;
+  size_t size;
+};
+
+
+static size_t
+write_cb( void *data, size_t size, size_t nmemb, void *clientp )
+{
+  size_t realsize = size * nmemb;
+  struct memory *mem = (struct memory *)clientp;
+
+  char *ptr = realloc(mem->response, mem->size + realsize + 1);
+  if(ptr == NULL)
+    return 0;  /* out of memory! */
+
+  mem->response = ptr;
+  memcpy(&(mem->response[mem->size]), data, realsize);
+  mem->size += realsize;
+  mem->response[mem->size] = 0;
+
+  return realsize;
+}
+
+
+
+
 static gchar*
 zond_update_get_vtag( Projekt* zond, GError** error )
 {
-    SoupSession* soup_session = NULL;
-    SoupMessage* soup_message = NULL;
-    GBytes* response = NULL;
+    CURL* curl = NULL;
+    CURLcode res = 0;
+    struct memory mem = { 0 };
+
     gboolean ret = FALSE;
     JsonParser* parser = NULL;
     JsonNode* node = NULL;
     gchar* vtag = NULL;
 
-    soup_session = soup_session_new_with_options( "user-agent", "perlio", NULL );
-    soup_message = soup_message_new( SOUP_METHOD_GET, "https://api.github.com/repos/perlio/sond/releases/latest" );
+    curl = curl_easy_init( );
+    curl_easy_setopt( curl, CURLOPT_SSL_OPTIONS, (long)CURLSSLOPT_NATIVE_CA );
+    curl_easy_setopt( curl, CURLOPT_USERAGENT, "perlio" );
+    curl_easy_setopt( curl, CURLOPT_URL, "https://api.github.com/repos/perlio/sond/releases/latest" );
+    curl_easy_setopt( curl, CURLOPT_WRITEFUNCTION, write_cb);
+    curl_easy_setopt( curl, CURLOPT_WRITEDATA, &mem);
 
-    response = soup_session_send_and_read( soup_session, soup_message, NULL, error );
-    g_object_unref( soup_message );
-    g_object_unref( soup_session );
-    if ( !response )
+    res = curl_easy_perform( curl );
+    curl_easy_cleanup( curl );
+    if ( res != CURLE_OK )
     {
-        g_prefix_error( error, "%s\n", __func__ );
-
+        *error = g_error_new( ZOND_ERROR, ZOND_ERROR_CURL,
+                "%s\ncurl_easy_perform:\n%s", __func__, curl_easy_strerror( res ) );
         return NULL;
     }
 
     parser = json_parser_new( );
-    ret = json_parser_load_from_data( parser, g_bytes_get_data( response, NULL ), -1, error );
-    g_bytes_unref( response );
+    ret = json_parser_load_from_data( parser, mem.response, -1, error );
+    g_free( mem.response );
     if ( !ret )
     {
-        g_prefix_error( error, "%s\n", __func__ );
+        g_prefix_error( error, "%s\njson_parser_load_from_data\n", __func__ );
         g_object_unref( parser );
 
         return NULL;
@@ -309,6 +330,8 @@ zond_update( Projekt* zond, GError** error )
     gchar* vtag = NULL;
     gboolean ret = FALSE;
     gboolean res = FALSE;
+    gchar* zipname = NULL;
+    InfoWindow* info_window = NULL;
 
     vtag = zond_update_get_vtag( zond, error );
     if ( !vtag )
@@ -348,43 +371,67 @@ zond_update( Projekt* zond, GError** error )
         g_free( vtag );
         return 0;
     }
-/*
+
+    info_window = info_window_open( zond->app_window, "Update zond" );
+
+    info_window_set_message( info_window, "Neueste Version wird heruntergeladen..." );
     //herunterladen
     rc = zond_update_download_newest( zond, vtag, error );
     if ( rc )
     {
         g_prefix_error( error, "%s\n", __func__ );
         g_free( vtag );
+        info_window_kill( info_window );
 
         return -1;
     }
-*/
+
+    info_window_set_message( info_window, "Zip-Datei wird entpackt..." );
     //entpacken
     rc = zond_update_unzip( zond, vtag, error );
     if ( rc )
     {
         g_prefix_error( error, "%s\n", __func__ );
         g_free( vtag );
+        info_window_kill( info_window );
 
         return -1;
     }
 
+    //zip-Datei löschen
+    zipname = g_strconcat( zond->base_dir, "zond-x86_64-", vtag, ".zip", NULL );
+
+    if ( g_remove( zipname ) )
+    {
+        gchar* message = NULL;
+
+        message = g_strconcat( "Zip-Datei konnte nicht gelöscht werden - ", strerror( errno ), NULL );
+        info_window_set_message( info_window, message );
+        g_free( message );
+    };
+
+    info_window_set_message( info_window, "Starte Installer..." );
     //installer starten
 #ifdef __WIN32
-    argv[0] = g_strconcat( zond->base_dir, "bin/zond_installer.exe", NULL );
+    argv[0] = g_strconcat( zond->base_dir, "ain/zond_installer.exe", NULL );
 #elifdef __linux__
     argv[0] = g_strdup( "bin/zond_installer" );
 #endif // __linux__
+    g_free( vtag );
 
-    argv[1] = vtag;
+    if ( zond->dbase_zond ) argv[1] =
+            g_strconcat( zond->dbase_zond->project_dir, "/", zond->dbase_zond->project_name, NULL );
 
     res = g_spawn_async( NULL, argv, NULL, G_SPAWN_DO_NOT_REAP_CHILD,
             NULL, NULL, &pid, error );
-    g_free( vtag );
+
+    info_window_kill( info_window );
+
     g_free( argv[0] );
     if ( !res )
     {
         g_prefix_error( error, "%s\n", __func__ );
+
         return -1;
     }
 

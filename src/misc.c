@@ -4,12 +4,34 @@
 #include <glib/gstdio.h>
 #include <errno.h>
 #include <sys/stat.h>
+#include <ftw.h>
 
 #ifdef _WIN32
 #include <windows.h>
 //#include <shellapi.h>
 #include <shlwapi.h>
 #endif // _WIN32
+
+
+static gint
+rm( const gchar *path, const struct stat *s, gint flag, struct FTW *f)
+{
+    gint (*rm_func)(const gchar *);
+
+    rm_func = (flag == FTW_DP) ? rmdir : unlink;
+    if( rm_func(path) ) return -1;
+
+    return 0;
+}
+
+
+gint
+rm_r( const gchar* path )
+{
+    if ( nftw( path, rm, 10, FTW_DEPTH) ) return -1;
+
+    return 0;
+}
 
 
 /* Make a directory; already existing dir okay */

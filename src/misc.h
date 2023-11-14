@@ -31,6 +31,8 @@ typedef int gboolean;
 typedef void* GPid;
 typedef void* gpointer;
 
+gint rm_r( const gchar* );
+
 int mkdir_p( const char* );
 
 void display_message( GtkWidget*, ... );

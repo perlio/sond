@@ -7,8 +7,8 @@
 #define EOP 99999
 
 #define MAJOR "0" //wenn sich Struktur der .znd-Datei ändert
-#define MINOR "10" //neues Feature
-#define PATCH "2" //irjendwatt
+#define MINOR "11" //neues Feature
+#define PATCH "0" //irjendwatt
 
 #include <mupdf/fitz.h>
 #include <mupdf/pdf.h>
