@@ -437,8 +437,8 @@ get_base_dir( void )
         DWORD error_code = 0;
 
         error_code = GetLastError( );
-        g_error( "Basedir konnte nicht ermittelt werden. Bei Aufruf GetModuleFileName:\n"
-                "Error-Code: %li", error_code );
+
+        return NULL;
     }
 
     return g_strndup( (const gchar*) buff, strlen( buff ) -
@@ -446,9 +446,7 @@ get_base_dir( void )
 #elif defined( __linux__ )
     char result[PATH_MAX];
     ssize_t count = readlink("/proc/self/exe", result, PATH_MAX);
-    if (count == -1) g_error( "Basedir konnte nicht ermittelt werden - Bei Aufruf "
-            "readlink:\n%s", strerror( errno ) );
-
+    if (count == -1) return NULL; //errno is set
     return g_strdup( dirname( dirname( result ) ) ); //zond/bin/zond.exe
 #endif // _WIN32
 }

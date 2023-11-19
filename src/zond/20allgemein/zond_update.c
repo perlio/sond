@@ -80,7 +80,7 @@ zond_update_unzip( Projekt* zond, const gchar* vtag, GError** error )
             gchar* dir = NULL;
             gint rc = 0;
 
-            if ( !g_strcmp0( sb.name, "logs" ) ) continue;
+            if ( g_str_has_prefix( sb.name, "logs" ) ) continue;
 
             dir = g_strconcat( zond->base_dir, "a", sb.name + 1, NULL );
             rc = mkdir_p( dir );
@@ -117,7 +117,6 @@ zond_update_unzip( Projekt* zond, const gchar* vtag, GError** error )
 
             filename = g_strconcat( zond->base_dir, "a", sb.name + 1, NULL );
             fd = fopen( filename, "wb" ); // Create new file
-            printf("%s\n", filename);
             g_free( filename );
             if (fd == NULL)
             {
@@ -151,6 +150,7 @@ zond_update_unzip( Projekt* zond, const gchar* vtag, GError** error )
                 sum += len;
             }
             // Finished copying file
+            fflush( fd );
             fclose(fd); //ToDo: Fehler...
             zip_fclose(zf); //ToDo: Fehler...
         }
@@ -326,7 +326,6 @@ zond_update( Projekt* zond, GError** error )
     gchar* title = NULL;
     gint rc = 0;
     gchar* argv[3] = { NULL };
-    GPid pid = 0;
     gchar* vtag = NULL;
     gboolean ret = FALSE;
     gboolean res = FALSE;
@@ -361,7 +360,7 @@ zond_update( Projekt* zond, GError** error )
 
     g_strfreev( strv_tags );
 
-    title = g_strconcat( "Aktuellere Version vorhanden (", vtag, ")", NULL );
+    title = g_strconcat( "Aktewellere Version vorhanden (", vtag, ")", NULL );
 
     rc = abfrage_frage( zond->app_window, title, "Herunterladen und installieren?",
             NULL );
@@ -373,8 +372,9 @@ zond_update( Projekt* zond, GError** error )
     }
 
     info_window = info_window_open( zond->app_window, "Update zond" );
-
+    Sleep( 500 );
     info_window_set_message( info_window, "Neueste Version wird heruntergeladen..." );
+
     //herunterladen
     rc = zond_update_download_newest( zond, vtag, error );
     if ( rc )
@@ -387,6 +387,7 @@ zond_update( Projekt* zond, GError** error )
     }
 
     info_window_set_message( info_window, "Zip-Datei wird entpackt..." );
+
     //entpacken
     rc = zond_update_unzip( zond, vtag, error );
     if ( rc )
@@ -411,23 +412,23 @@ zond_update( Projekt* zond, GError** error )
     };
 
     info_window_set_message( info_window, "Starte Installer..." );
+    Sleep( 2000 );
+    info_window_kill( info_window );
+
+
     //installer starten
 #ifdef __WIN32
     argv[0] = g_strconcat( zond->base_dir, "ain/zond_installer.exe", NULL );
 #elifdef __linux__
-    argv[0] = g_strdup( "bin/zond_installer" );
+    argv[0] = g_strdup( "ain/zond_installer" );
 #endif // __linux__
     g_free( vtag );
 
     if ( zond->dbase_zond ) argv[1] =
             g_strconcat( zond->dbase_zond->project_dir, "/", zond->dbase_zond->project_name, NULL );
 
-    res = g_spawn_async( NULL, argv, NULL, G_SPAWN_DO_NOT_REAP_CHILD,
-            NULL, NULL, &pid, error );
-
-    info_window_kill( info_window );
-
-    g_free( argv[0] );
+    res = g_spawn_async( NULL, argv, NULL, G_SPAWN_DEFAULT,
+            NULL, NULL, NULL, error );
     if ( !res )
     {
         g_prefix_error( error, "%s\n", __func__ );
@@ -435,7 +436,7 @@ zond_update( Projekt* zond, GError** error )
         return -1;
     }
 
-    g_child_watch_add( pid, (GChildWatchFunc) g_spawn_close_pid, NULL );
+    g_free( argv[0] );
 
     //Projekt schließen und zond beenden
     g_signal_emit_by_name( zond->app_window, "delete-event", NULL, &ret );

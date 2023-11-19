@@ -1,5 +1,5 @@
 /*
-zond (zond_installer.c) - Akten, Beweisst¸cke, Unterlagen
+zond (zond_installer.c) - Akten, Beweisst√ºcke, Unterlagen
 Copyright (C) 2023  pelo america
 
 This program is free software: you can redistribute it and/or modify
@@ -16,59 +16,100 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <glib.h>
-#include <stdio.h>
-#include <unistd.h>
+#include <errno.h>
+#include <sys/stat.h>
+#include <ftw.h>
 
-#include "../misc.h"
+#ifdef _WIN32
+#include <windows.h>
+#include <shlwapi.h>
+#endif // _WIN32
 
 
-gint
-main( gint argc, gchar **argv)
+
+static int
+rm( const char *path, const struct stat *s, int flag, struct FTW *f)
 {
-    gint rc = 0;
-    gchar* base_dir = NULL;
-    gchar* argv_spawn[3] = { NULL };
-    GError* error = NULL;
-    GPid pid = 0;
+    int (*rm_func)(const char *);
+
+    rm_func = (flag == FTW_DP) ? rmdir : unlink;
+    if( rm_func(path) ) return -1;
+
+    return 0;
+}
+
+
+int
+rm_r( const char* path )
+{
+    if ( nftw( path, rm, 10, FTW_DEPTH) ) return -1;
+
+    return 0;
+}
+
+
+char*
+get_base_dir( void )
+{
+#ifdef _WIN32
+    DWORD ret = 0;
+    TCHAR buff[MAX_PATH] = { 0 };
+    char base_dir[MAX_PATH] = { 0 };
+
+    ret = GetModuleFileName(NULL, buff, _countof(buff));
+    if ( !ret )
+    {
+        DWORD error_code = 0;
+
+        error_code = GetLastError( );
+
+        return NULL;
+    }
+
+    strncpy( base_dir,(const char*) buff, strlen( buff ) -
+            strlen( strrchr( (const char*) buff, '\\' ) ) - 3 );
+
+    return strdup( base_dir );
+#elif defined( __linux__ )
+    char result[PATH_MAX];
+    ssize_t count = readlink("/proc/self/exe", result, PATH_MAX);
+    if (count == -1) return NULL; //errno is set
+    return strdup( dirname( dirname( result ) ) ); //zond/bin/zond.exe
+#endif // _WIN32
+}
+
+
+int main()
+{
+    int rc = 0;
+    char* base_dir = NULL;
 
     base_dir = get_base_dir( );
+    if ( !base_dir )
+    {
+        printf( "Konnte base-dir nicht setzen" );
+        goto end;
+    }
+
     rc = chdir( base_dir );
-    g_free( base_dir );
     if ( rc )
     {
         printf( "Konnte Arbeitsverzeichnis nicht festlegen - %s",
                 strerror( errno ) );
 
-    }
-
-    rc = rm_r( "bin" );
-    if ( rc )
-    {
-        printf( "Konnte altes bin-Verzeichnis nicht lˆschen - %s",
-                strerror( errno ) );
-
-        return -1;
-    }
-
-    rc = rename( "ain", "bin" );
-    if ( rc )
-    {
-        printf( "Konnte heruntergeladenes bin-Verzeichnis nicht umbenennen - %s",
-                strerror( errno ) );
-
-        return -1;
+        goto end;
     }
 
     rc = rm_r( "share" );
     if ( rc )
     {
-        printf( "Konnte altes share-Verzeichnis nicht lˆschen - %s",
+        printf( "Konnte altes share-Verzeichnis nicht l√∂schen - %s",
                 strerror( errno ) );
 
-        return -1;
+        goto end;
     }
 
     rc = rename( "ahare", "share" );
@@ -77,16 +118,16 @@ main( gint argc, gchar **argv)
         printf( "Konnte heruntergeladenes share-Verzeichnis nicht umbenennen - %s",
                 strerror( errno ) );
 
-        return -1;
+        goto end;
     }
 
     rc = rm_r( "lib" );
     if ( rc )
     {
-        printf( "Konnte altes lib-Verzeichnis nicht lˆschen - %s",
+        printf( "Konnte altes lib-Verzeichnis nicht l√∂schen - %s",
                 strerror( errno ) );
 
-        return -1;
+        goto end;
     }
 
     rc = rename( "aib", "lib" );
@@ -95,28 +136,31 @@ main( gint argc, gchar **argv)
         printf( "Konnte heruntergeladenes lib-Verzeichnis nicht umbenennen - %s",
                 strerror( errno ) );
 
-        return -1;
+        goto end;
     }
 
-#ifdef __WIN32
-    argv_spawn[0] = "bin/zond.exe";
-#elifdef __linux__
-    argv_spawn[0] = "bin/zond";
-#endif // __WIN32
-
-    argv_spawn[1] = argv[1];
-
-    if ( !g_spawn_async( NULL, argv_spawn, NULL, G_SPAWN_DO_NOT_REAP_CHILD,
-            NULL, NULL, &pid, &error ) )
+    rc = rm_r( "bin" );
+    if ( rc )
     {
-        printf( "zond konnte nicht gestartet werden - %s",
-                error->message );
-        g_error_free( error );
+        printf( "Konnte altes bin-Verzeichnis nicht l√∂schen - %s",
+                strerror( errno ) );
 
-        return -1;
+        goto end;
     }
 
-    g_child_watch_add( pid, (GChildWatchFunc) g_spawn_close_pid, NULL );
+    rc = rename( "ain", "bin" );
+    if ( rc )
+    {
+        printf( "Konnte heruntergeladenes bin-Verzeichnis nicht umbenennen - %s",
+                strerror( errno ) );
+
+        goto end;
+    }
+
+end:
+    free( base_dir );
+    printf( "Bitte Fenster schlie√üen" );
+    while ( 1 ) { };
 
     return 0;
 }
