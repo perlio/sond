@@ -82,83 +82,106 @@ get_base_dir( void )
 }
 
 
-int main()
+static int
+rename_files( const char* filename, const struct stat* stat_new_file, int flag,
+        struct FTW* ftwbuf )
+{
+    if ( flag == FTW_F )
+    {
+        struct stat stat_old_file = { 0 };
+        int rc = 0;
+        char* ptr = NULL;
+
+
+        ptr = strchr( filename, '/' ) + 1;
+        rc = stat( ptr, &stat_old_file );
+        if ( rc ) printf( "Konnte Eigenschaften von Datei %s nicht lesen - %s\n",
+                ptr, strerror( errno ) );
+
+        if ( stat_new_file->st_mtime > stat_old_file.st_mtime + 1 ) //+1 wg. Rundungsfehlern
+        {//Datei aus zip ist neuer -> verschieben
+            int rc = 0;
+
+            rc = remove( ptr );
+            if ( rc ) printf( "Konnte Datei %s nicht löschen - %s\n", ptr, strerror( errno ) );
+            else
+            {
+                int rc = 0;
+
+                rc = rename( filename, ptr );
+                if ( rc ) printf( "Konnte downgeloadetes File %s nicht verschieben - %s\n",
+                        filename, strerror( errno ) );
+            }
+        }
+        else //downgeloadetes File nicht neuer
+        {
+            int rc = 0;
+
+            rc = remove( filename );
+            if ( rc ) printf( "Konnte downgeloadetes File %s, das nicht neuer ist, nicht löschen - %s\n",
+                    filename, strerror( errno ) );
+        }
+    }
+    else if ( flag == FTW_DP )
+    {
+        int rc = 0;
+
+        rc = rmdir( filename );
+        if ( rc && errno != ENOTEMPTY ) printf( "Konnte directory %s nicht löschen - %s\n",
+                filename, strerror( errno ) );
+    }
+    else printf( "Flag %i zurückgegeben\n", flag );
+
+    return 0;
+}
+
+
+int main( int argc, char** argv )
 {
     int rc = 0;
     char* base_dir = NULL;
+    char base[PATH_MAX] = { 0 };
 
     base_dir = get_base_dir( );
     if ( !base_dir )
     {
-        printf( "Konnte base-dir nicht setzen" );
+        printf( "Konnte base-dir nicht setzen\n" );
         goto end;
     }
 
-    rc = chdir( base_dir );
+    strncpy( base, (const char*) base_dir, strlen( base_dir ) - 1 -
+            strlen( argv[1] ) );
+    free( base_dir );
+
+    rc = chdir( base );
     if ( rc )
     {
-        printf( "Konnte Arbeitsverzeichnis nicht festlegen - %s",
+        printf( "Konnte Arbeitsverzeichnis nicht festlegen - %s\n",
                 strerror( errno ) );
 
         goto end;
     }
 
-    rc = rm_r( "share" );
+    rc = nftw( argv[1], rename_files, 10, FTW_DEPTH );
     if ( rc )
     {
-        printf( "Konnte altes share-Verzeichnis nicht löschen - %s",
-                strerror( errno ) );
-
-        goto end;
-    }
-
-    rc = rename( "ahare", "share" );
-    if ( rc )
-    {
-        printf( "Konnte heruntergeladenes share-Verzeichnis nicht umbenennen - %s",
-                strerror( errno ) );
-
-        goto end;
-    }
-
-    rc = rm_r( "lib" );
-    if ( rc )
-    {
-        printf( "Konnte altes lib-Verzeichnis nicht löschen - %s",
-                strerror( errno ) );
-
-        goto end;
-    }
-
-    rc = rename( "aib", "lib" );
-    if ( rc )
-    {
-        printf( "Konnte heruntergeladenes lib-Verzeichnis nicht umbenennen - %s",
-                strerror( errno ) );
-
-        goto end;
-    }
-
-    rc = rm_r( "bin" );
-    if ( rc )
-    {
-        printf( "Konnte altes bin-Verzeichnis nicht löschen - %s",
-                strerror( errno ) );
-
-        goto end;
-    }
-
-    rc = rename( "ain", "bin" );
-    if ( rc )
-    {
-        printf( "Konnte heruntergeladenes bin-Verzeichnis nicht umbenennen - %s",
+        printf( "Fehler beim Verschieben der heruntergeladenen Dateien - %s\n\n",
                 strerror( errno ) );
 
         goto end;
     }
 
 end:
-    free( base_dir );
+    rc = rmdir( argv[1] );
+    if ( rc )
+    {
+        if ( errno == ENOTEMPTY ) printf( "Dateien im Verzeichnis %s "
+                "nach Beendigung des Programms von Hand umkopieren!\n\n",
+                argv[1] );
+        else if ( errno != ENOENT ) printf( "Fehler beim Löschen des Verzeichnisses %s - %s\n\n",
+                argv[1], strerror( errno ) );
+    }
+
     printf( "Bitte Fenster schließen" );
     while ( 1 ) { };
 

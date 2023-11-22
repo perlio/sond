@@ -8,7 +8,6 @@
 
 #ifdef _WIN32
 #include <windows.h>
-//#include <shellapi.h>
 #include <shlwapi.h>
 #endif // _WIN32
 

@@ -23,6 +23,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <zip.h>
 #include <sys/stat.h>
 #include <errno.h>
+#include <utime.h>
 
 #include "../../misc.h"
 
@@ -82,7 +83,7 @@ zond_update_unzip( Projekt* zond, const gchar* vtag, GError** error )
 
             if ( g_str_has_prefix( sb.name, "logs" ) ) continue;
 
-            dir = g_strconcat( zond->base_dir, "a", sb.name + 1, NULL );
+            dir = g_strconcat( zond->base_dir, vtag, "/", sb.name, NULL );
             rc = mkdir_p( dir );
             g_free( dir );
             if ( rc && errno != EEXIST )
@@ -100,6 +101,7 @@ zond_update_unzip( Projekt* zond, const gchar* vtag, GError** error )
             FILE * fd; // Where file is extracted to
             long long sum; // How much file has been copied so far
             gchar* filename = NULL;
+            struct utimbuf s_time ={ 0 };
 
             zf = zip_fopen_index(za, i, 0); // Open file within zip
             if ( !zf )
@@ -115,18 +117,19 @@ zond_update_unzip( Projekt* zond, const gchar* vtag, GError** error )
                 return -1;
             }
 
-            filename = g_strconcat( zond->base_dir, "a", sb.name + 1, NULL );
+            filename = g_strconcat( zond->base_dir, vtag, "/", sb.name, NULL );
             fd = fopen( filename, "wb" ); // Create new file
-            g_free( filename );
             if (fd == NULL)
             {
-                *error = g_error_new( ZOND_ERROR, ZOND_ERROR_IO, "%s\nfopen\n%s",
-                        __func__, strerror( errno ) );
+                *error = g_error_new( ZOND_ERROR, ZOND_ERROR_IO, "%s\nfopen (%s)\n%s",
+                        __func__, filename, strerror( errno ) );
                 zip_fclose( zf ); //ToDo: Fehlerabfrage
                 zip_discard( za );
+                g_free( filename );
 
                 return -1;
             }
+            g_free( filename );
 
             sum = 0;
             while (sum != sb.size)
@@ -149,10 +152,25 @@ zond_update_unzip( Projekt* zond, const gchar* vtag, GError** error )
                 fwrite(buf, 1, len, fd); //ToDo: Fehlerabfrage
                 sum += len;
             }
+
             // Finished copying file
             fflush( fd );
             fclose(fd); //ToDo: Fehler...
             zip_fclose(zf); //ToDo: Fehler...
+
+            //Änderungsdatum anpassen
+            s_time.actime = time( NULL );
+            s_time.modtime = sb.mtime;
+            filename = g_strconcat( zond->base_dir, vtag, "/", sb.name, NULL );
+            rc = utime( filename, &s_time );
+            if ( rc )
+            {
+                *error = g_error_new( ZOND_ERROR, ZOND_ERROR_IO,
+                        "%s\nutime (file: %s)\n%s", __func__, filename, strerror( errno ) );
+                g_free( filename );
+                return -1;
+            }
+            g_free( filename );
         }
     }
 
@@ -245,8 +263,6 @@ write_cb( void *data, size_t size, size_t nmemb, void *clientp )
 }
 
 
-
-
 static gchar*
 zond_update_get_vtag( Projekt* zond, GError** error )
 {
@@ -330,7 +346,6 @@ zond_update( Projekt* zond, GError** error )
     gboolean ret = FALSE;
     gboolean res = FALSE;
     gchar* zipname = NULL;
-    InfoWindow* info_window = NULL;
 
     vtag = zond_update_get_vtag( zond, error );
     if ( !vtag )
@@ -371,22 +386,15 @@ zond_update( Projekt* zond, GError** error )
         return 0;
     }
 
-    info_window = info_window_open( zond->app_window, "Update zond" );
-    Sleep( 500 );
-    info_window_set_message( info_window, "Neueste Version wird heruntergeladen..." );
-
     //herunterladen
     rc = zond_update_download_newest( zond, vtag, error );
     if ( rc )
     {
         g_prefix_error( error, "%s\n", __func__ );
         g_free( vtag );
-        info_window_kill( info_window );
 
         return -1;
     }
-
-    info_window_set_message( info_window, "Zip-Datei wird entpackt..." );
 
     //entpacken
     rc = zond_update_unzip( zond, vtag, error );
@@ -394,7 +402,6 @@ zond_update( Projekt* zond, GError** error )
     {
         g_prefix_error( error, "%s\n", __func__ );
         g_free( vtag );
-        info_window_kill( info_window );
 
         return -1;
     }
@@ -407,25 +414,17 @@ zond_update( Projekt* zond, GError** error )
         gchar* message = NULL;
 
         message = g_strconcat( "Zip-Datei konnte nicht gelöscht werden - ", strerror( errno ), NULL );
-        info_window_set_message( info_window, message );
         g_free( message );
     };
-
-    info_window_set_message( info_window, "Starte Installer..." );
-    Sleep( 2000 );
-    info_window_kill( info_window );
 
 
     //installer starten
 #ifdef __WIN32
-    argv[0] = g_strconcat( zond->base_dir, "ain/zond_installer.exe", NULL );
+    argv[0] = g_strconcat( zond->base_dir, vtag, "/bin/zond_installer.exe", NULL );
 #elifdef __linux__
     argv[0] = g_strdup( "ain/zond_installer" );
 #endif // __linux__
-    g_free( vtag );
-
-    if ( zond->dbase_zond ) argv[1] =
-            g_strconcat( zond->dbase_zond->project_dir, "/", zond->dbase_zond->project_name, NULL );
+    argv[1] = vtag;
 
     res = g_spawn_async( NULL, argv, NULL, G_SPAWN_DEFAULT,
             NULL, NULL, NULL, error );
@@ -437,6 +436,7 @@ zond_update( Projekt* zond, GError** error )
     }
 
     g_free( argv[0] );
+    g_free( argv[1] );
 
     //Projekt schließen und zond beenden
     g_signal_emit_by_name( zond->app_window, "delete-event", NULL, &ret );
