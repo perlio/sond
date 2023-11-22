@@ -16,11 +16,13 @@ cd ~/Projekte/sond/
 rm -r tmp
 
 cd /ucrt64
-zip ~/Projekte/sond/zond-x86_64-$1.zip bin/gdbus.exe
+#zip ~/Projekte/sond/zond-x86_64-$1.zip bin/gdbus.exe
 #ldd ~/Projekte/sond/bin/zond.exe | grep '\/ucrt64.*\.dll' -o | xargs -I{} basename {} | xargs -I{} echo bin/{} | xargs zip ~/Projekte/sond/zond-x86_64-$1.zip {}
 #ldd bin/gdbus.exe | grep '\/ucrt64.*\.dll' -o | xargs -I{} basename {} | xargs -I{} echo bin/{} | xargs zip ~/Projekte/sond/zond-x86_64-$1.zip {}
 
-zip ~/Projekte/sond/zond-x86_64-$1.zip bin/*.dll
+#zip ~/Projekte/sond/zond-x86_64-$1.zip bin/*.dll
+
+zip -r ~/Projekte/sond/zond-x86_64-$1.zip bin/
 
 zip -r ~/Projekte/sond/zond-x86_64-$1.zip share/tessdata
 
@@ -29,6 +31,7 @@ zip ~/Projekte/sond/zond-x86_64-$1.zip share/icons/Adwaita/
 zip ~/Projekte/sond/zond-x86_64-$1.zip share/icons/Adwaita/icon-theme.cache
 zip ~/Projekte/sond/zond-x86_64-$1.zip share/icons/Adwaita/index.theme
 zip -r ~/Projekte/sond/zond-x86_64-$1.zip share/icons/Adwaita/scalable
+zip -r ~/Projekte/sond/zond-x86_64-$1.zip share/icons/Adwaita/symbolic
 zip -r ~/Projekte/sond/zond-x86_64-$1.zip share/icons/hicolor/
 
 zip ~/Projekte/sond/zond-x86_64-$1.zip lib/

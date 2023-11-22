@@ -8,7 +8,7 @@
 
 #define MAJOR "0" //wenn sich Struktur der .znd-Datei ändert
 #define MINOR "11" //neues Feature
-#define PATCH "1" //irjendwatt
+#define PATCH "2" //irjendwatt
 
 #include <mupdf/fitz.h>
 #include <mupdf/pdf.h>

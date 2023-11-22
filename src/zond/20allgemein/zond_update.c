@@ -75,13 +75,14 @@ zond_update_unzip( Projekt* zond, const gchar* vtag, GError** error )
             return -1;
         }
 
+        if ( g_str_has_prefix( sb.name, "logs" ) ) continue;
+        if ( g_str_has_prefix( sb.name, "share/glib-2.0" ) ) continue;
+
         len_name = strlen(sb.name);
         if (sb.name[len_name - 1] == '/')// Check if directory
         {
             gchar* dir = NULL;
             gint rc = 0;
-
-            if ( g_str_has_prefix( sb.name, "logs" ) ) continue;
 
             dir = g_strconcat( zond->base_dir, vtag, "/", sb.name, NULL );
             rc = mkdir_p( dir );
