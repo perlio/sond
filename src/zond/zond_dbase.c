@@ -379,8 +379,9 @@ zond_dbase_convert_from_v0_7( sqlite3* db_convert, gchar** errmsg )
 }
 
 
-//v0.10 enthält die Tabelle links, die die Vorgänger nicht enthalten
-static gint //aus heutiger Sicht alles ok
+//v0.8 ist wie Maj_0, aber ohne links
+//v0.9 ist wie 0.8, aber mit Tabelle eingang
+static gint
 zond_dbase_convert_from_v0_8_or_v0_9( sqlite3* db_convert, gchar** errmsg )
 {
     gint rc = 0;
@@ -389,6 +390,33 @@ zond_dbase_convert_from_v0_8_or_v0_9( sqlite3* db_convert, gchar** errmsg )
             "INSERT INTO baum_inhalt SELECT node_id, parent_id, older_sibling_id, "
                     "icon_name, node_text FROM old.baum_inhalt WHERE node_id != 0; "
             "INSERT INTO baum_auswertung SELECT * FROM old.baum_auswertung WHERE node_id != 0; "
+            "INSERT INTO dateien SELECT * FROM old.dateien; "
+            "INSERT INTO ziele SELECT * FROM old.ziele; ";
+
+    rc = sqlite3_exec( db_convert, sql, NULL, NULL, errmsg );
+    if ( rc != SQLITE_OK )
+    {
+        if ( errmsg ) *errmsg = add_string( g_strdup( "Bei Aufruf sqlite3_exec:\n" ),
+                *errmsg );
+
+        return -1;
+    }
+
+    return 0;
+}
+
+
+//v0.10 ist wie v0.9, aber mit links
+static gint
+zond_dbase_convert_from_v0_10( sqlite3* db_convert, gchar** errmsg )
+{
+    gint rc = 0;
+
+    gchar* sql =
+            "INSERT INTO baum_inhalt SELECT node_id, parent_id, older_sibling_id, "
+                    "icon_name, node_text FROM old.baum_inhalt WHERE node_id != 0; "
+            "INSERT INTO baum_auswertung SELECT * FROM old.baum_auswertung WHERE node_id != 0; "
+            "INSERT INTO links SELECT * FROM old.links; "
             "INSERT INTO dateien SELECT * FROM old.dateien; "
             "INSERT INTO ziele SELECT * FROM old.ziele; ";
 
@@ -459,9 +487,19 @@ zond_dbase_convert_to_maj_0( const gchar* path, gchar* v_string,
             ERROR_S
         }
     }
-    else if ( !g_strcmp0( v_string , "v0.10" ) )
+    else if ( !g_strcmp0( v_string , "v0.8" ) || !g_strcmp0( v_string , "v0.9" ) )
     {
         rc = zond_dbase_convert_from_v0_8_or_v0_9( db, errmsg );
+        if ( rc )
+        {
+            sqlite3_close( db );
+            g_free( path_new );
+            ERROR_S
+        }
+    }
+    else if ( !g_strcmp0( v_string , "v0.10" ) )
+    {
+        rc = zond_dbase_convert_from_v0_10( db, errmsg );
         if ( rc )
         {
             sqlite3_close( db );
