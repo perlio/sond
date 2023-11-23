@@ -16,7 +16,7 @@
       <default>false</default>
     </key>
 
-    <key name='internalviewer' type='b'>
+    <key name='autosave' type='b'>
       <default>false</default>
     </key>
 

@@ -6,8 +6,6 @@ Bugs:
 
 ToDo:
 
-- Updater
-
 - Abschnitte neu organisieren
 
 - BAUM_INHALT

@@ -92,8 +92,7 @@ rename_files( const char* filename, const struct stat* stat_new_file, int flag,
         int rc = 0;
         char* ptr = NULL;
 
-
-        ptr = strchr( filename, '/' ) + 1;
+        ptr = strchr( filename, '/' ) + 1; //vtag abschneiden
         rc = stat( ptr, &stat_old_file );
         if ( rc ) printf( "Konnte Eigenschaften von Datei %s nicht lesen - %s\n",
                 ptr, strerror( errno ) );

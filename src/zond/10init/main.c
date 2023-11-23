@@ -199,6 +199,9 @@ init( GtkApplication* app, Projekt* zond )
     log_init( zond );
 #endif // TESTING
 
+    //GSettings
+    zond->settings = g_settings_new( "de.perlio.zond" );
+
     //benötigte Arrays erzeugen
     zond->arr_pv = g_ptr_array_new( );
 
@@ -208,9 +211,6 @@ init( GtkApplication* app, Projekt* zond )
     gtk_application_add_window( app, GTK_WINDOW(zond->app_window) );
 
     init_headerbar( zond );
-
-    //GSettings
-    zond->settings = g_settings_new( "de.perlio.zond" );
 
     //Wiederherstellung bei Absturz
     //(d.h. in den Settings wurde project nicht auf "" gesetzt)

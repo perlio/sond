@@ -2,6 +2,10 @@
 #define HEADERBAR_H_INCLUDED
 
 typedef struct _Projekt Projekt;
+typedef int gboolean;
+typedef void* gpointer;
+
+gboolean timeout_autosave( gpointer );
 
 void init_headerbar ( Projekt* );
 
