@@ -26,6 +26,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <utime.h>
 
 #include "../../misc.h"
+#include "../../misc_stdlib.h"
+
 
 #include "../global_types.h"
 #include "../99conv/general.h"

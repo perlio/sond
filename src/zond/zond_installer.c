@@ -28,59 +28,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <shlwapi.h>
 #endif // _WIN32
 
-
-
-static int
-rm( const char *path, const struct stat *s, int flag, struct FTW *f)
-{
-    int (*rm_func)(const char *);
-
-    rm_func = (flag == FTW_DP) ? rmdir : unlink;
-    if( rm_func(path) ) return -1;
-
-    return 0;
-}
-
-
-int
-rm_r( const char* path )
-{
-    if ( nftw( path, rm, 10, FTW_DEPTH) ) return -1;
-
-    return 0;
-}
-
-
-char*
-get_base_dir( void )
-{
-#ifdef _WIN32
-    DWORD ret = 0;
-    TCHAR buff[MAX_PATH] = { 0 };
-    char base_dir[MAX_PATH] = { 0 };
-
-    ret = GetModuleFileName(NULL, buff, _countof(buff));
-    if ( !ret )
-    {
-        DWORD error_code = 0;
-
-        error_code = GetLastError( );
-
-        return NULL;
-    }
-
-    strncpy( base_dir,(const char*) buff, strlen( buff ) -
-            strlen( strrchr( (const char*) buff, '\\' ) ) - 3 );
-
-    return strdup( base_dir );
-#elif defined( __linux__ )
-    char result[PATH_MAX];
-    ssize_t count = readlink("/proc/self/exe", result, PATH_MAX);
-    if (count == -1) return NULL; //errno is set
-    return strdup( dirname( dirname( result ) ) ); //zond/bin/zond.exe
-#endif // _WIN32
-}
-
+#include "../misc_stdlib.h"
 
 static int
 rename_files( const char* filename, const struct stat* stat_new_file, int flag,

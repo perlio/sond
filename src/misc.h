@@ -31,10 +31,6 @@ typedef int gboolean;
 typedef void* GPid;
 typedef void* gpointer;
 
-gint rm_r( const gchar* );
-
-int mkdir_p( const char* );
-
 void display_message( GtkWidget*, ... );
 
 gint dialog_with_buttons( GtkWidget*, const gchar*, const gchar*, gchar**,
@@ -63,8 +59,6 @@ gchar* get_rel_path_from_file( const gchar*, const GFile* );
 void misc_set_calendar( GtkCalendar*, const gchar* );
 
 gchar* misc_get_calendar( GtkCalendar* );
-
-gchar* get_base_dir( void );
 
 GtkWidget* result_listbox_new( GtkWindow*, const gchar* );
 
