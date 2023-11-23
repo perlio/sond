@@ -188,6 +188,30 @@ project_speichern( Projekt* zond, gchar** errmsg )
 }
 
 
+gboolean
+project_timeout_autosave( gpointer data )
+{
+    gchar* errmsg = NULL;
+
+    Projekt* zond = (Projekt*) data;
+
+    if ( zond->dbase_zond )
+    {
+        gint rc = 0;
+
+        rc = project_speichern( zond, &errmsg );
+        if ( rc )
+        {
+            display_message( zond->app_window, "Automatisches Speichern fehlgeschlagen\n\n"
+                    "Bei Aufruf project_speichern:\n", errmsg, NULL );
+            g_free( errmsg );
+        }
+    }
+
+    return TRUE;
+}
+
+
 void
 cb_menu_datei_speichern_activate( GtkMenuItem* item, gpointer user_data )
 {
@@ -268,6 +292,14 @@ projekt_schliessen( Projekt* zond, gchar** errmsg )
     sond_treeviewfm_set_dbase( SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), NULL );
     project_clear_dbase_zond( &(zond->dbase_zond) );
 
+    //Ggf. autosave abschalten
+    if ( g_settings_get_boolean( zond->settings, "autosave" ) )
+    {
+        if ( !g_source_remove_by_user_data( zond ) )
+            display_message( zond->app_window,
+            "autosave-Timeout konnte nicht entfernt werdern", NULL );
+    }
+
     gint res = g_remove( working_copy );
     if ( res == -1 ) display_message( zond->app_window, "Fehler beim Löschen der "
             "temporären Datenbank:\n", strerror( errno ), NULL );
@@ -336,6 +368,9 @@ project_oeffnen( Projekt* zond, const gchar* abs_path, gboolean create,
     //key_press-event-signal einschalten
     zond->key_press_signal = g_signal_connect( zond->app_window,
             "key-press-event", G_CALLBACK(cb_key_press), zond );
+
+    if ( g_settings_get_boolean( zond->settings, "autosave" ) )
+            g_timeout_add_seconds( 10 * 60, project_timeout_autosave, zond );
 
     if ( !create )
     {

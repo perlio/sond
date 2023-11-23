@@ -23,6 +23,8 @@ gint projekt_schliessen( Projekt*, gchar** );
 
 gint project_speichern( Projekt*, gchar** );
 
+gboolean project_timeout_autosave( gpointer );
+
 void cb_menu_datei_speichern_activate( GtkMenuItem*, gpointer );
 
 void cb_menu_datei_schliessen_activate( GtkMenuItem*, gpointer );

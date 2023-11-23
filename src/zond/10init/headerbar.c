@@ -760,37 +760,15 @@ cb_settings_zoom( GtkMenuItem* item, gpointer data )
 }
 
 
-gboolean
-timeout_autosave( gpointer data )
-{
-    gchar* errmsg = NULL;
-
-    Projekt* zond = (Projekt*) data;
-
-    if ( zond->dbase_zond )
-    {
-        gint rc = 0;
-
-        rc = project_speichern( zond, &errmsg );
-        if ( rc )
-        {
-            display_message( zond->app_window, "Automatisches Speichern fehlgeschlagen\n\n"
-                    "Bei Aufruf project_speichern:\n", errmsg, NULL );
-            g_free( errmsg );
-        }
-    }
-
-    return TRUE;
-}
-
-
 static void
 prefs_autosave_toggled( GtkCheckMenuItem* item, gpointer data )
 {
     Projekt* zond = (Projekt*) data;
 
+    if ( !zond->dbase_zond ) return;
+
     if ( gtk_check_menu_item_get_active( item ) )
-            g_timeout_add_seconds( 10 * 60, timeout_autosave, zond );
+            g_timeout_add_seconds( 10 * 60, project_timeout_autosave, zond );
     else if ( !g_source_remove_by_user_data( zond ) )
             display_message( zond->app_window,
             "autosave-Timeout konnte nicht entfernt werdern", NULL );
@@ -1230,7 +1208,6 @@ init_menu( Projekt* zond )
 
     GtkWidget* zoom_item = gtk_menu_item_new_with_label( "Zoom Interner Viewer" );
     g_signal_connect( zoom_item, "activate", G_CALLBACK(cb_settings_zoom), zond );
-
     GtkWidget* prefs_autosave = gtk_check_menu_item_new_with_label( "Automatisches Speichern" );
     g_signal_connect( prefs_autosave, "toggled", G_CALLBACK(prefs_autosave_toggled), zond );
     g_settings_bind( zond->settings, "autosave", prefs_autosave, "active", G_SETTINGS_BIND_GET );

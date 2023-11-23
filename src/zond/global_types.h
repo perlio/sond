@@ -8,7 +8,7 @@
 
 #define MAJOR "0" //wenn sich Struktur der .znd-Datei ändert
 #define MINOR "11" //neues Feature
-#define PATCH "3" //irjendwatt
+#define PATCH "2" //irjendwatt
 
 #include <mupdf/fitz.h>
 #include <mupdf/pdf.h>
@@ -143,6 +143,8 @@ struct _Menu
     GtkWidget* textview_extra;
 
     GtkWidget* extras;
+
+    GtkWidget* autosave;
 };
 
 typedef struct _Menu Menu;
