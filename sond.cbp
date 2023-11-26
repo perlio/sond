@@ -119,6 +119,19 @@
 					<Add option="-Wall" />
 				</Compiler>
 			</Target>
+			<Target title="test">
+				<Option output="test/test" prefix_auto="1" extension_auto="1" />
+				<Option object_output="obj/test" />
+				<Option type="1" />
+				<Option compiler="gcc" />
+				<Option use_console_runner="0" />
+				<Option projectCompilerOptionsRelation="1" />
+				<Option projectLinkerOptionsRelation="1" />
+				<Option projectIncludeDirsRelation="1" />
+				<Compiler>
+					<Add option="-Wall" />
+				</Compiler>
+			</Target>
 		</Build>
 		<Compiler>
 			<Add option="-Wall" />
@@ -171,7 +184,21 @@
 			<Option target="SondServer (Testing)" />
 			<Option target="sojus" />
 		</Unit>
-		<Unit filename="src/misc.h" />
+		<Unit filename="src/misc.h">
+			<Option target="zond (Release)" />
+			<Option target="zond (Testing)" />
+			<Option target="Viewer (Release)" />
+			<Option target="Viewer (Testing)" />
+			<Option target="SondClient (Release)" />
+			<Option target="SondClient (Testing)" />
+			<Option target="SondServer (Release)" />
+			<Option target="SondServer (Testing)" />
+			<Option target="sojus" />
+		</Unit>
+		<Unit filename="src/misc_stdlib.c">
+			<Option compilerVar="CC" />
+		</Unit>
+		<Unit filename="src/misc_stdlib.h" />
 		<Unit filename="src/sojus/00misc/auswahl.c">
 			<Option compilerVar="CC" />
 			<Option target="&lt;{~None~}&gt;" />
@@ -617,6 +644,10 @@
 			<Option target="zond (Testing)" />
 			<Option target="SondClient (Testing)" />
 			<Option target="SondClient (Release)" />
+		</Unit>
+		<Unit filename="src/test.c">
+			<Option compilerVar="CC" />
+			<Option target="test" />
 		</Unit>
 		<Unit filename="src/zond/10init/app_window.c">
 			<Option compilerVar="CC" />

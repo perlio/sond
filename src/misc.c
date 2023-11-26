@@ -352,34 +352,6 @@ misc_get_calendar( GtkCalendar* calendar )
 }
 
 
-gchar*
-get_base_dir( void )
-{
-#ifdef _WIN32
-    DWORD ret = 0;
-    TCHAR buff[MAX_PATH] = { 0 };
-
-    ret = GetModuleFileName(NULL, buff, _countof(buff));
-    if ( !ret )
-    {
-        DWORD error_code = 0;
-
-        error_code = GetLastError( );
-
-        return NULL;
-    }
-
-    return g_strndup( (const gchar*) buff, strlen( buff ) -
-            strlen( g_strrstr( (const gchar*) buff, "\\" ) ) - 3 );
-#elif defined( __linux__ )
-    char result[PATH_MAX];
-    ssize_t count = readlink("/proc/self/exe", result, PATH_MAX);
-    if (count == -1) return NULL; //errno is set
-    return g_strdup( dirname( dirname( result ) ) ); //zond/bin/zond.exe
-#endif // _WIN32
-}
-
-
 GtkWidget*
 result_listbox_new( GtkWindow* parent_window, const gchar* titel )
 {

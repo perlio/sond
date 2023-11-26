@@ -23,6 +23,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifdef _WIN32
 #include <windows.h>
 #include <shlwapi.h>
+#elifdef __linux__
+#include <limits.h>
 #endif // _WIN32
 
 static int
@@ -115,30 +117,37 @@ out:
 
 
 char*
-get_base_dir( void )
+get_exe_dir( void )
 {
     char buff[PATH_MAX] = { 0 };
-    char base_dir[MAX_PATH] = { 0 };
+    char exe_dir[MAX_PATH] = { 0 };
 
 #ifdef _WIN32
     DWORD ret = 0;
 
     ret = GetModuleFileName(NULL, buff, _countof(buff));
-    if ( !ret )
-    {
-//        DWORD error_code = 0;
-//        error_code = GetLastError( );
-//errno nicht set!
-        return NULL;
-    }
+    if ( !ret ) return NULL;
 #elif defined( __linux__ )
     ssize_t count = readlink("/proc/self/exe", buff, PATH_MAX);
     if (count == -1) return NULL; //errno is set
 #endif // _WIN32
-    strncpy( base_dir,(const char*) buff, strlen( buff ) -
-            strlen( strrchr( (const char*) buff, '\\' ) ) - 3 );
+    strncpy( exe_dir,(const char*) buff, strlen( buff ) -
+            strlen( strrchr( (const char*) buff, '\\' ) ) );
 
-    return strdup( base_dir );
+    return strdup( exe_dir ); //ohne /
+}
+
+char*
+get_base_dir( void )
+{
+    char* exe_dir = NULL;
+    char base_dir[PATH_MAX] = { 0 };
+
+    exe_dir = get_exe_dir( );
+    strncpy( base_dir,(const char*) exe_dir, strlen( exe_dir ) - 3 );
+    free( exe_dir );
+
+    return strdup( base_dir ); //mit /
 }
 
 

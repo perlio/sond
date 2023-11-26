@@ -29,6 +29,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../global_types.h"
 
 #include "../../misc.h"
+#include "../../misc_stdlib.h"
 #include "../20allgemein/project.h"
 #include "../20allgemein/zieleplus.h"
 

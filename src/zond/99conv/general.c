@@ -85,8 +85,8 @@ info_window_scroll( InfoWindow* info_window )
 static void
 info_window_show_widget( InfoWindow* info_window )
 {
+    gtk_widget_show( info_window->last_inserted_widget );
     gtk_box_pack_start( GTK_BOX(info_window->content), info_window->last_inserted_widget, FALSE, FALSE, 0 );
-    gtk_widget_show_all( info_window->last_inserted_widget );
 
     while ( gtk_events_pending( ) ) gtk_main_iteration( );
 

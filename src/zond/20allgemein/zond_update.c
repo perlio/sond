@@ -336,7 +336,7 @@ zond_update_get_vtag( Projekt* zond, GError** error )
 
 
 gint
-zond_update( Projekt* zond, GError** error )
+zond_update( Projekt* zond, InfoWindow* info_window, GError** error )
 {
     gchar** strv_tags = NULL;
     gchar* title = NULL;
@@ -354,7 +354,6 @@ zond_update( Projekt* zond, GError** error )
 
         return -1;
     }
-
 
     //tag mit aktueller version vergleichen
     strv_tags = g_strsplit( vtag + 1, ".", -1 );
@@ -386,6 +385,8 @@ zond_update( Projekt* zond, GError** error )
         return 0;
     }
 
+    info_window_set_message( info_window, "Neueste Version wird heruntergeladen" );
+/*
     //herunterladen
     rc = zond_update_download_newest( zond, vtag, error );
     if ( rc )
@@ -395,7 +396,9 @@ zond_update( Projekt* zond, GError** error )
 
         return -1;
     }
+*/
 
+    info_window_set_message( info_window, "Update wird entpackt" );
     //entpacken
     rc = zond_update_unzip( zond, vtag, error );
     if ( rc )
@@ -406,6 +409,7 @@ zond_update( Projekt* zond, GError** error )
         return -1;
     }
 
+    info_window_set_message( info_window, "Download wird gelöscht" );
     //zip-Datei löschen
     zipname = g_strconcat( zond->base_dir, "zond-x86_64-", vtag, ".zip", NULL );
 
@@ -417,14 +421,13 @@ zond_update( Projekt* zond, GError** error )
         g_free( message );
     };
 
-
+    info_window_set_message( info_window, "Starte Installer und schließe Programm" );
     //installer starten
 #ifdef __WIN32
     argv[0] = g_strconcat( zond->base_dir, vtag, "/bin/zond_installer.exe", NULL );
 #elifdef __linux__
     argv[0] = g_strdup( "ain/zond_installer" );
 #endif // __linux__
-    argv[1] = vtag;
 
     res = g_spawn_async( NULL, argv, NULL, G_SPAWN_DEFAULT,
             NULL, NULL, NULL, error );
@@ -436,7 +439,6 @@ zond_update( Projekt* zond, GError** error )
     }
 
     g_free( argv[0] );
-    g_free( argv[1] );
 
     //Projekt schließen und zond beenden
     g_signal_emit_by_name( zond->app_window, "delete-event", NULL, &ret );

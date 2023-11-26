@@ -811,10 +811,16 @@ headerbar_hilfe_update( GtkWidget* item, gpointer data )
 {
     gint rc = 0;
     GError* error = NULL;
+    InfoWindow* info_window = NULL;
 
     Projekt* zond = (Projekt*) data;
 
-    rc = zond_update( zond, &error );
+    info_window = info_window_open( zond->app_window, "Zond Updater" );
+
+    rc = zond_update( zond, info_window, &error );
+
+    info_window_kill( info_window );
+
     if ( rc == -1 )
     {
         display_message( zond->app_window, "Update fehlgeschlagen\n\n",
