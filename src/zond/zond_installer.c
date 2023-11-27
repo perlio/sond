@@ -158,11 +158,53 @@ int main( int argc, char** argv )
     rc = mkdir( "garbage" );
     if ( rc )
     {
-        printf( "Konnte Verzeichnis ""garbage"" nicht erzeugen - %s", strerror( errno ) );
+        printf( "Konnte Verzeichnis ""garbage"" nicht erzeugen - %s\n", strerror( errno ) );
 
         goto end;
     }
 
+    //prüfen, ob gschemas.compiled ersetzt werden muß
+    if ( argv[1] ) //argv[1] ist die Version des Programms, das upgedated werden soll
+    { //schema wurde zuletzt geändert nach Version v0.11.2
+        //d.h.: wenn Version < 0.11.3, dann muß geändert werden
+
+        int rc = 0;
+        char* major = NULL;
+        char* minor = NULL;
+        char* patch = NULL;
+        char tmp[PATH_MAX] = { 0 };
+        char schema[PATH_MAX] = { 0 };
+
+        major = argv[1] + 1; //"x.y.z", reicht für atoi!
+
+        patch = strrchr( argv[1], '.' ) + 1;
+
+        strncpy( tmp, argv[1], strlen( argv[1] ) - strlen( patch ) - 1 );
+        minor = strrchr( tmp, '.' ) + 1;
+
+        if ( atoi( major ) < 0 ) goto del_schemas;
+        else if ( atoi( major ) > 0 ) goto skip;
+        else
+        {
+            if ( atoi( minor ) <  11 ) goto del_schemas;
+            else if ( atoi( minor ) > 11 ) goto skip;
+            else
+            {
+                if ( atoi( patch ) < 3 ) goto del_schemas;
+                else goto skip;
+            }
+        }
+
+    del_schemas:
+        strcpy( schema, vtag );
+        strcat( schema, "/share/glib-2.0/schemas/gschemas.compiled" );
+        rc = remove( schema );
+        if ( rc ) printf( "gschema.compiled konnte nicht entfernt werden - %s", strerror( errno ) );
+
+    }
+
+skip:
+    //kopieren/löschen
     nftw( vtag, rename_files, 10, FTW_DEPTH );
 
 end:
@@ -175,6 +217,7 @@ end:
                 strerror( errno ) );
     }
 
+    //ToDo: neuen Prozeß starten, der garbage löscht (ggf. zond_installer) und zond wieder startet
     printf( "Bitte Fenster schließen" );
 
     while ( 1 );

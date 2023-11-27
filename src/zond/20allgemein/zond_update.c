@@ -31,6 +31,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "../global_types.h"
 #include "../99conv/general.h"
+#include "../zond_dbase.h"
+
+#include "project.h"
 
 
 static gint
@@ -341,7 +344,7 @@ zond_update( Projekt* zond, InfoWindow* info_window, GError** error )
     gchar** strv_tags = NULL;
     gchar* title = NULL;
     gint rc = 0;
-    gchar* argv[3] = { NULL };
+    gchar* argv[4] = { NULL };
     gchar* vtag = NULL;
     gboolean ret = FALSE;
     gboolean res = FALSE;
@@ -358,20 +361,26 @@ zond_update( Projekt* zond, InfoWindow* info_window, GError** error )
     //tag mit aktueller version vergleichen
     strv_tags = g_strsplit( vtag + 1, ".", -1 );
 
-    if ( atoi( strv_tags[0] ) <= atoi( MAJOR ) )
+    if ( atoi( strv_tags[0] ) < atoi( MAJOR ) ) goto no_update;
+    else if ( atoi( strv_tags[0] ) > atoi( MAJOR ) ) goto update;
+    else
     {
-        if ( atoi( strv_tags[1] ) <= atoi( MINOR ) )
+        if ( atoi( strv_tags[1] ) < atoi( MINOR ) ) goto no_update;
+        else if ( atoi( strv_tags[1] ) > atoi( MINOR ) ) goto update;
+        else
         {
-            if ( atoi( strv_tags[2] ) <= atoi( PATCH ) )
-            {
-                g_strfreev( strv_tags );
-                g_free( vtag );
-
-                return 1;
-            }
+            if ( atoi( strv_tags[2] ) <= atoi( PATCH ) ) goto no_update;
+            else if ( atoi( strv_tags[2] ) > atoi( PATCH ) ) goto update;
         }
     }
 
+no_update:
+    g_strfreev( strv_tags );
+    g_free( vtag );
+
+    return 1;
+
+update:
     g_strfreev( strv_tags );
 
     title = g_strconcat( "Aktewellere Version vorhanden (", vtag, ")", NULL );
@@ -386,7 +395,7 @@ zond_update( Projekt* zond, InfoWindow* info_window, GError** error )
     }
 
     info_window_set_message( info_window, "Neueste Version wird heruntergeladen" );
-/*
+
     //herunterladen
     rc = zond_update_download_newest( zond, vtag, error );
     if ( rc )
@@ -396,7 +405,6 @@ zond_update( Projekt* zond, InfoWindow* info_window, GError** error )
 
         return -1;
     }
-*/
 
     info_window_set_message( info_window, "Update wird entpackt" );
     //entpacken
@@ -410,6 +418,7 @@ zond_update( Projekt* zond, InfoWindow* info_window, GError** error )
     }
 
     info_window_set_message( info_window, "Download wird gelöscht" );
+
     //zip-Datei löschen
     zipname = g_strconcat( zond->base_dir, "zond-x86_64-", vtag, ".zip", NULL );
 
@@ -417,11 +426,39 @@ zond_update( Projekt* zond, InfoWindow* info_window, GError** error )
     {
         gchar* message = NULL;
 
-        message = g_strconcat( "Zip-Datei konnte nicht gelöscht werden - ", strerror( errno ), NULL );
+        message = g_strconcat( "Zip-Datei konnte nicht gelöscht werden - ",
+                strerror( errno ), NULL );
+        info_window_set_message( info_window, message );
         g_free( message );
     };
 
     info_window_set_message( info_window, "Starte Installer und schließe Programm" );
+
+    //Projekt schliessen
+    if ( zond->dbase_zond )
+    {
+        gint rc = 0;
+        gchar* errmsg = NULL;
+
+        argv[2] = g_strdup( zond_dbase_get_path( zond->dbase_zond->zond_dbase_store ) );
+
+        rc = projekt_schliessen( zond, &errmsg );
+        if ( rc )
+        {
+            g_free( vtag );
+            g_free( argv[2] );
+
+            if ( rc == -1 )
+            {
+                *error = g_error_new( ZOND_ERROR, ZOND_ERROR_IO, "%s\nproject_schliessen\n%s",
+                        __func__, errmsg );
+                g_free( errmsg );
+                return -1;
+            }
+            else return 0;// if ( rc == 1 )
+        }
+    }
+
     //installer starten
 #ifdef __WIN32
     argv[0] = g_strconcat( zond->base_dir, vtag, "/bin/zond_installer.exe", NULL );
@@ -429,16 +466,17 @@ zond_update( Projekt* zond, InfoWindow* info_window, GError** error )
     argv[0] = g_strdup( "ain/zond_installer" );
 #endif // __linux__
 
+    argv[1] = "v" MAJOR "." MINOR "." PATCH;
+
     res = g_spawn_async( NULL, argv, NULL, G_SPAWN_DEFAULT,
             NULL, NULL, NULL, error );
+    g_free( argv[0] );
     if ( !res )
     {
         g_prefix_error( error, "%s\n", __func__ );
 
         return -1;
     }
-
-    g_free( argv[0] );
 
     //Projekt schließen und zond beenden
     g_signal_emit_by_name( zond->app_window, "delete-event", NULL, &ret );

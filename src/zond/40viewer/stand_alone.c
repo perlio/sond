@@ -20,6 +20,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <mupdf/fitz.h>
 #include <mupdf/pdf.h>
 
+#include "../../misc.h"
+#include "../../misc_stdlib.h"
+
 #include "../zond_pdf_document.h"
 #include "../global_types.h"
 
@@ -27,8 +30,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "viewer.h"
 #include "document.h"
-
-#include "../../misc.h"
 
 
 
