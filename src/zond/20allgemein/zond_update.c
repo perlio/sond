@@ -37,7 +37,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
 static gint
-zond_update_unzip( Projekt* zond, const gchar* vtag, GError** error )
+zond_update_unzip( Projekt* zond, InfoWindow* info_window,
+        const gchar* vtag, GError** error )
 {
 	gchar* zipname = NULL; // File path
 	struct zip *za; // Zip archive
@@ -65,6 +66,14 @@ zond_update_unzip( Projekt* zond, const gchar* vtag, GError** error )
         struct zip_stat sb; // Stores file info
         gint rc = 0;
         gint len_name = 0;
+
+        if ( info_window->cancel )
+        {
+            zip_discard( za );
+            return 1;
+        }
+
+        if ( !(i % 10) )info_window_set_progress_bar_fraction( info_window, (gdouble) i / (gdouble) num );
 
 		rc = zip_stat_index(za, i, 0, &sb);
 		if ( rc )
@@ -184,7 +193,24 @@ zond_update_unzip( Projekt* zond, const gchar* vtag, GError** error )
 
 
 static gint
-zond_update_download_newest( Projekt* zond, const gchar* vtag, GError** error )
+curl_progress( gpointer ptr, curl_off_t dltotal, curl_off_t dlnow,
+        curl_off_t ultotal, curl_off_t ulnow )
+{
+    InfoWindow* info_window = (InfoWindow*) ptr;
+
+    if ( info_window->cancel ) return -1; //abbrechen
+
+    if ( dltotal == 0 ) return 0;
+
+    info_window_set_progress_bar_fraction( info_window, (gdouble) dlnow / (gdouble) dltotal );
+
+    return 0;
+}
+
+
+static gint
+zond_update_download_newest( Projekt* zond, InfoWindow* info_window,
+        const gchar* vtag, GError** error )
 {
     CURL *curl = NULL;
     FILE *fp= NULL;
@@ -220,8 +246,11 @@ zond_update_download_newest( Projekt* zond, const gchar* vtag, GError** error )
     curl_easy_setopt( curl, CURLOPT_URL, url );
     g_free( url );
     curl_easy_setopt( curl, CURLOPT_SSL_OPTIONS, (long)CURLSSLOPT_NATIVE_CA );
-    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L );
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
+    curl_easy_setopt( curl, CURLOPT_FOLLOWLOCATION, 1L );
+    curl_easy_setopt( curl, CURLOPT_WRITEDATA, fp);
+    curl_easy_setopt( curl, CURLOPT_NOPROGRESS, 0 );
+    curl_easy_setopt( curl, CURLOPT_XFERINFODATA, info_window );
+    curl_easy_setopt( curl, CURLOPT_XFERINFOFUNCTION, curl_progress );
 
     g_free( filename );
 
@@ -230,7 +259,13 @@ zond_update_download_newest( Projekt* zond, const gchar* vtag, GError** error )
     curl_easy_cleanup(curl);
     fclose(fp);
 
-    if ( res != CURLE_OK )
+    if ( res == CURLE_ABORTED_BY_CALLBACK )
+    {
+        //ToDo: Aufräumen
+
+        return 1;
+    }
+    else if ( res != CURLE_OK )
     {
         *error = g_error_new( ZOND_ERROR, ZOND_ERROR_CURL,
                 "%s\ncurl_easy_perform:\n%s", __func__, curl_easy_strerror( res ) );
@@ -395,26 +430,38 @@ update:
     }
 
     info_window_set_message( info_window, "Neueste Version wird heruntergeladen" );
+    info_window_set_progress_bar( info_window );
 
     //herunterladen
-    rc = zond_update_download_newest( zond, vtag, error );
+    rc = zond_update_download_newest( zond, info_window, vtag, error );
     if ( rc )
     {
-        g_prefix_error( error, "%s\n", __func__ );
         g_free( vtag );
 
-        return -1;
+        if ( rc == -1 )
+        {
+            g_prefix_error( error, "%s\n", __func__ );
+
+            return -1;
+        }
+        else return 0; //abgebrochen
     }
 
     info_window_set_message( info_window, "Update wird entpackt" );
+    info_window_set_progress_bar( info_window );
+
     //entpacken
-    rc = zond_update_unzip( zond, vtag, error );
+    rc = zond_update_unzip( zond, info_window, vtag, error );
     if ( rc )
     {
-        g_prefix_error( error, "%s\n", __func__ );
         g_free( vtag );
+        if ( rc == -1 )
+        {
+            g_prefix_error( error, "%s\n", __func__ );
 
-        return -1;
+            return -1;
+        }
+        else return 0; //ToDo: saubermachen
     }
 
     info_window_set_message( info_window, "Download wird gelöscht" );

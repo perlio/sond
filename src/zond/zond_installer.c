@@ -155,6 +155,14 @@ int main( int argc, char** argv )
         goto end;
     }
 
+    rc = rm_r( "garbage" );
+    if ( rc && errno != ENOENT )
+    {
+        printf( "Konnte Verzeichnis ""garbage"" nicht löschen - %s", strerror( errno ) );
+
+        goto end;
+    }
+
     rc = mkdir( "garbage" );
     if ( rc )
     {

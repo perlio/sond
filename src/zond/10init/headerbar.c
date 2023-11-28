@@ -1216,7 +1216,7 @@ init_menu( Projekt* zond )
     g_signal_connect( zoom_item, "activate", G_CALLBACK(cb_settings_zoom), zond );
     GtkWidget* prefs_autosave = gtk_check_menu_item_new_with_label( "Automatisches Speichern" );
     g_signal_connect( prefs_autosave, "toggled", G_CALLBACK(prefs_autosave_toggled), zond );
-    g_settings_bind( zond->settings, "autosave", prefs_autosave, "active", G_SETTINGS_BIND_GET );
+    g_settings_bind( zond->settings, "autosave", prefs_autosave, "active", G_SETTINGS_BIND_DEFAULT );
 
     gtk_menu_shell_append( GTK_MENU_SHELL(einstellungenmenu),
             zoom_item );
