@@ -226,7 +226,7 @@ end:
     rc = rmdir( "garbage" );
     if ( rc )
     {
-        if ( errno == ENOTEMPTY ) printf( "Verzeichnis ""%s\garbage"" "
+        if ( errno == ENOTEMPTY ) printf( "Verzeichnis ""%s\\garbage"" "
                 "nach Beendigung des Updaters von Hand löschen!\n\n", base_dir );
         else printf( "Fehler beim Löschen des Verzeichnisses ""garbage"" - %s\n\n",
                 strerror( errno ) );
