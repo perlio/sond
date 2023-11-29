@@ -173,7 +173,7 @@ int main( int argc, char** argv )
 
     //prüfen, ob gschemas.compiled ersetzt werden muß
     if ( argv[1] ) //argv[1] ist die Version des Programms, das upgedated werden soll
-    { //schema wurde zuletzt geändert nach Version v0.11.2
+    { //schema wurde zuletzt geändert nach Version v0.11.2, d.h. mit v0.11.3
         //d.h.: wenn Version < 0.11.3, dann muß geändert werden
 
         int rc = 0;
@@ -212,6 +212,13 @@ int main( int argc, char** argv )
     }
 
 skip:
+    //zond_installer.exe aus altem Bestand löschen,
+    //damit auf jeden Fall neue Datei in bin und nicht in garbage verschoben wird
+    //denn die läuft und kann nicht gelöscht werden
+    rc = remove( "bin/zond_installer.exe" );
+    if ( rc ) printf( "Alte Datei ""zond_installer.exe"" konnte nicht gelöscht werden - %s",
+            strerror( errno ) );
+
     //kopieren/löschen
     nftw( vtag, rename_files, 10, FTW_DEPTH );
 
