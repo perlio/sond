@@ -44,6 +44,8 @@ akte_sachbearbeiter_free( AkteSachbearbeiter* akte_sachbearbeiter )
 void
 sond_akte_free( SondAkte* sond_akte )
 {
+    if ( !sond_akte ) return;
+
     g_free( sond_akte->aktenrubrum );
     g_free( sond_akte->aktenkurzbez );
 /*
@@ -81,7 +83,10 @@ sond_akte_new_from_json( const gchar* json, GError** error )
     node = json_from_string( json, error );
     if ( !node )
     {
-        g_prefix_error( error, "%s\n%s\n", __func__, "json_from_string" );
+        if ( error ) g_prefix_error( error, "%s\n%s\n",
+                __func__, "json_from_string" );
+        else *error = g_error_new( g_quark_from_string( "GLIB_JSON" ), 0,
+                "%s\njson == NULL", __func__ );
         return NULL;
     }
 
@@ -103,7 +108,7 @@ sond_akte_new_from_json( const gchar* json, GError** error )
     if ( json_object_has_member( object, "reg_nr" ) )
             sond_akte->reg_nr = (gint) json_object_get_int_member( object, "reg_nr" );
     if ( json_object_has_member( object, "reg_jahr" ) )
-            sond_akte->reg_nr = (gint) json_object_get_int_member( object, "reg_jahr" );
+            sond_akte->reg_jahr = (gint) json_object_get_int_member( object, "reg_jahr" );
 
     if ( json_object_has_member( object, "aktenrubrum" ) )
             sond_akte->aktenrubrum = g_strdup( json_object_get_string_member( object, "aktenrubrum" ) );

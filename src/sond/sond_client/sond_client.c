@@ -7,6 +7,7 @@
 #include <openssl/rand.h>
 
 #include "../../misc.h"
+#include "../../misc_stdlib.h"
 #include "../../zond/99conv/general.h"
 
 #include "sond_client.h"

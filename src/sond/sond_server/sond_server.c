@@ -10,7 +10,7 @@
 #include <linux/limits.h>   // PATH_MAX
 #endif // __linux__
 
-#include "../../misc.h"
+#include "../../misc_stdlib.h"
 #include "../../sond_database.h"
 
 #include "sond_server.h"
