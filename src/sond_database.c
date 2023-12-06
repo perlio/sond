@@ -308,6 +308,7 @@ sond_database_insert_row( gpointer database, Type type, gint rel_subject, gint r
         MYSQL_ROW mysql_row = NULL;
         gchar* string_subject = NULL;
         gchar* string_object = NULL;
+        gchar* prop_value_sql = NULL;
 
         MYSQL* con = (MYSQL*) database;
 
@@ -317,8 +318,12 @@ sond_database_insert_row( gpointer database, Type type, gint rel_subject, gint r
         if ( rel_object ) string_object = g_strdup_printf( "%i", rel_object );
         else string_object = g_strdup( "NULL" );
 
+        if ( prop_value ) prop_value_sql = g_strdup_printf( "'%s'", prop_value );
+
         sql_1 = g_strdup_printf( "INSERT INTO entities (type, rel_subject, rel_object, prop_value) "
-                "VALUES (%i,%s,%s,'%s');", type, string_subject, string_object, (prop_value) ? prop_value : "NULL" );
+                "VALUES (%i,%s,%s,%s);", type, string_subject, string_object, (prop_value) ? prop_value_sql : "NULL" );
+
+        g_free( prop_value_sql );
 
         g_free( string_subject );
         g_free( string_object );
