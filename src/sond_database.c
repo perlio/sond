@@ -204,7 +204,7 @@ sond_database_insert_row( gpointer database, Type type, gint rel_subject, gint r
         rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, &errmsg );
         if ( rc )
         {
-            if ( error ) *error = g_error_new( g_quark_from_static_string( "ZOND" ), 0,
+            if ( error ) *error = g_error_new( ZOND_ERROR, 0,
                     "%s\n%s\n\nFehlermeldung: %s", __func__, "zond_dbase_prepare", errmsg );
             g_free( errmsg );
 
@@ -402,6 +402,159 @@ sond_database_insert_property( gpointer database, Type type, gint rel_subject,
 
     return rc;
 }
+
+
+GArray*
+sond_database_get_properties( gpointer database, gint ID_subject, GError** error )
+{
+    GArray* arr_properties = NULL;
+
+    const gchar* sql[] = {
+            "SELECT ID, type, prop_value FROM entities WHERE rel_subject=@1; "
+    };
+
+    if ( ZOND_IS_DBASE(database) )
+    {
+        gint rc = 0;
+        gchar* errmsg = NULL;
+        sqlite3_stmt** stmt = NULL;
+
+        ZondDBase* zond_dbase = ZOND_DBASE(database);
+
+        rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, &errmsg );
+        if ( rc )
+        {
+            if ( error ) *error = g_error_new( ZOND_ERROR, 0,
+                    "%s\nzond_dbase_prepare\n%s", __func__, errmsg );
+            g_free( errmsg );
+
+            return NULL;
+        }
+
+        rc = sqlite3_bind_int( stmt[0], 1, ID_subject );
+        if ( rc != SQLITE_OK )
+        {
+            if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
+                    sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
+                    "%s\nzond_dbase_prepare\n%s", __func__,
+                    sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
+
+            return NULL;
+        }
+
+        arr_properties = g_array_new( FALSE, FALSE, sizeof( Property ) );
+        do
+        {
+            Property property = { 0 };
+
+            rc = sqlite3_step( stmt[0] );
+            if ( rc != SQLITE_ROW && rc != SQLITE_DONE )
+            {
+                g_array_unref( arr_properties );
+                *error = g_error_new( g_quark_from_static_string( "SQLITE" ),
+                        sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
+                        "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
+
+                return NULL;
+            }
+            else if ( rc == SQLITE_DONE ) break;
+
+            property.entity.ID = sqlite3_column_int( stmt[0], 0 );
+            property.entity.type = sqlite3_column_int( stmt[0], 1 );
+            property.value = g_strdup( (const gchar*) sqlite3_column_text( stmt[0], 2 ) );
+            g_array_append_val( arr_properties, property );
+        } while ( rc == SQLITE_ROW );
+    }
+    else //mysql
+    {
+        gint rc = 0;
+        MYSQL* con = NULL;
+        MYSQL_RES* mysql_res = NULL;
+        MYSQL_ROW row = NULL;
+        gchar* sql_mariadb = NULL;
+
+        con = (MYSQL*) database;
+
+        sql_mariadb = g_strdup_printf( "SET @1=%i; ", ID_subject );
+        sql_mariadb = add_string( sql_mariadb, g_strdup( sql[0] ) );
+
+        rc = mysql_query( con, sql_mariadb );
+        g_free( sql_mariadb );
+        if ( rc )
+        {
+            if ( error ) *error = g_error_new( g_quark_from_static_string( "MARIADB" ),
+                    mysql_errno( con ), "%s\nmysql_query\n%s", __func__, mysql_error( con ) );
+
+            return NULL;
+        }
+
+        mysql_res = mysql_store_result( con );
+        if ( !mysql_res && mysql_field_count( con ) != 0 )
+        {
+            if ( error ) *error = g_error_new( g_quark_from_static_string( "MARIADB" ),
+                    mysql_errno( con ), "%s\nmysql_store_results\n%s", __func__, mysql_error( con ) );
+
+            return NULL;
+        }
+
+        mysql_free_result( mysql_res );
+
+        rc = mysql_next_result( con );
+        if ( rc == - 1 )
+        {
+            if ( error ) *error = g_error_new( g_quark_from_static_string( "SOND" ), 0,
+                    "%s\nKein weiteres result-set vorhanden", __func__ );
+
+            return NULL;
+        }
+        else if ( rc == - 1 )
+        {
+            if ( error ) *error = g_error_new( g_quark_from_static_string( "MARIADB" ),
+                    mysql_errno( con ), "%s\nmysql_next_result\n%s", __func__, mysql_error( con ) );
+
+            return NULL;
+        }
+
+        mysql_res = mysql_store_result( con );
+        if ( !mysql_res && mysql_field_count( con ) != 0 )
+        {
+            if ( error ) *error = g_error_new( g_quark_from_static_string( "MARIADB" ),
+                    mysql_errno( con ), "%s\nmysql_store_results\n%s", __func__, mysql_error( con ) );
+
+            return NULL;
+        }
+        else if ( mysql_field_count( con ) == 0 )
+        {
+            if ( error ) *error = g_error_new( g_quark_from_static_string( "SOND" ), 0,
+                    "%s\nresult_set ist leer", __func__ );
+
+            return NULL;
+        }
+
+        arr_properties = g_array_new( FALSE, FALSE, sizeof( Property ) );
+        while ( (row = mysql_fetch_row( mysql_res )) )
+        {
+            Property property = { 0 };
+
+            property.entity.ID = atoi( row[0] );
+            property.entity.type = atoi( row[1] );
+            property.value = g_strdup( row[2] );
+            g_array_append_val( arr_properties, property );
+        }
+
+        mysql_free_result( mysql_res );
+    }
+
+    return arr_properties;
+}
+
+
+
+
+
+
+
+
 
 
 
@@ -903,79 +1056,6 @@ sond_database_get_entities_for_properties_and( gpointer database,
 
 
 gint
-sond_database_get_label_for_ID_label( gpointer database, gint ID_label, gchar** label, gchar** errmsg )
-{
-    const gchar* sql[] = {
-            "SELECT label FROM labels WHERE ID=@1; "
-    };
-
-    if ( ZOND_IS_DBASE(database) )
-    {
-        gint rc = 0;
-        sqlite3_stmt** stmt = NULL;
-
-        ZondDBase* zond_dbase = ZOND_DBASE(database);
-
-        rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
-        if ( rc ) ERROR_S
-
-        rc = sqlite3_bind_int( stmt[0], 1, ID_label );
-        if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (ID_label)" )
-
-        rc = sqlite3_step( stmt[0] );
-        if ( rc != SQLITE_ROW && rc != SQLITE_DONE ) ERROR_ZOND_DBASE( "sqlite3_step" )
-        else if ( rc == SQLITE_DONE ) ERROR_S_MESSAGE( "ID_label existiert nicht" )
-
-        if ( label ) *label = g_strdup( (const gchar*) sqlite3_column_text( stmt[0], 0 ) );
-    }
-    else //mysql
-    {
-        gint rc = 0;
-        MYSQL* con = NULL;
-        MYSQL_RES* mysql_res = NULL;
-        MYSQL_ROW row = NULL;
-        gchar* sql_mariadb = NULL;
-
-        con = (MYSQL*) database;
-
-        sql_mariadb = g_strdup_printf( "SET @1=%i; ", ID_label );
-        sql_mariadb = add_string( sql_mariadb, g_strdup( sql[0] ) );
-
-        rc = mysql_query( con, sql_mariadb );
-        g_free( sql_mariadb );
-        if ( rc )
-        {
-            if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf ", __func__, ":\n",
-                    mysql_error( con ), NULL );
-            return -1;
-        }
-
-        mysql_res = mysql_store_result( con );
-        if ( !mysql_res )
-        {
-            if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf mysql_store_result:\n",
-                    mysql_error( con ), NULL );
-
-            return -1;
-        }
-
-        row = mysql_fetch_row( mysql_res );
-        if ( !row )
-        {
-            mysql_free_result( mysql_res );
-            ERROR_S_MESSAGE( "ID_label existiert nicht" )
-        }
-
-        if ( label ) *label = g_strdup( row[0] );
-
-        mysql_free_result( mysql_res );
-    }
-
-    return 0;
-}
-
-
-gint
 sond_database_get_property_value( gpointer database, gint ID_property, gchar** value, gchar** errmsg )
 {
     const gchar* sql[] = {
@@ -1040,90 +1120,6 @@ sond_database_get_property_value( gpointer database, gint ID_property, gchar** v
         }
 
         if ( value ) *value = g_strdup( row[0] );
-
-        mysql_free_result( mysql_res );
-    }
-
-    return 0;
-}
-
-
-gint
-sond_database_get_properties( gpointer database, gint ID_entity, GArray** arr_properties, gchar** errmsg )
-{
-    const gchar* sql[] = {
-            "SELECT entity_property FROM properties WHERE entity_subject=@1; "
-    };
-
-    if ( ZOND_IS_DBASE(database) )
-    {
-        gint rc = 0;
-        sqlite3_stmt** stmt = NULL;
-
-        ZondDBase* zond_dbase = ZOND_DBASE(database);
-
-        rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
-        if ( rc ) ERROR_S
-
-        rc = sqlite3_bind_int( stmt[0], 1, ID_entity );
-        if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (ID_entity)" )
-
-        *arr_properties = g_array_new( FALSE, FALSE, sizeof( gint ) );
-        do
-        {
-            gint ID_property = 0;
-
-            rc = sqlite3_step( stmt[0] );
-            if ( rc != SQLITE_ROW && rc != SQLITE_DONE )
-            {
-                g_array_unref( *arr_properties );
-                ERROR_ZOND_DBASE( "sqlite3_step" )
-            }
-            else if ( rc == SQLITE_DONE ) break;
-
-            ID_property = sqlite3_column_int( stmt[0], 0 );
-            g_array_append_val( *arr_properties, ID_property );
-        } while ( rc == SQLITE_ROW );
-    }
-    else //mysql
-    {
-        gint rc = 0;
-        MYSQL* con = NULL;
-        MYSQL_RES* mysql_res = NULL;
-        MYSQL_ROW row = NULL;
-        gchar* sql_mariadb = NULL;
-
-        con = (MYSQL*) database;
-
-        sql_mariadb = g_strdup_printf( "SET @1=%i; ", ID_entity );
-        sql_mariadb = add_string( sql_mariadb, g_strdup( sql[0] ) );
-
-        rc = mysql_query( con, sql_mariadb );
-        g_free( sql_mariadb );
-        if ( rc )
-        {
-            if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf ", __func__, ":\n",
-                    "Bei Aufruf mysql_query:\n", mysql_error( con ), NULL );
-            return -1;
-        }
-
-        mysql_res = mysql_store_result( con );
-        if ( !mysql_res )
-        {
-            if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf ", __func__, ":\n",
-                    "Bei Aufruf mysql_store_result:\n",
-                    mysql_error( con ), NULL );
-
-            return -1;
-        }
-
-        while ( (row = mysql_fetch_row( mysql_res )) )
-        {
-            gint ID_property = 0;
-
-            ID_property = atoi( row[0] );
-            g_array_append_val( *arr_properties, ID_property );
-        }
 
         mysql_free_result( mysql_res );
     }

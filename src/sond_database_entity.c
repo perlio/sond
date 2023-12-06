@@ -120,7 +120,7 @@ sond_database_entity_load( SondDatabaseEntity* sde, gpointer database, gint ID_e
     ID_label = sond_database_get_ID_label_for_entity( database, ID_entity, errmsg );
     if ( ID_label == -1 ) ERROR_S
 
-    rc = sond_database_get_label_for_ID_label( database, ID_label, &label, errmsg );
+//    rc = sond_database_get_label_for_ID_label( database, ID_label, &label, errmsg );
     if ( rc ) ERROR_S
 
     label_text = g_strdup_printf( "%i", ID_entity );

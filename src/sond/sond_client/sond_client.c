@@ -21,8 +21,7 @@
 
 #define SEAFILE_SOCKET_NAME "seadrive.sock"
 
-
-#define MAX_MSG_SIZE 2048
+#define MAX_MSG_SIZE 4096
 
 gchar*
 sond_client_send_and_read( SondClient* sond_client, const gchar*
@@ -30,9 +29,11 @@ sond_client_send_and_read( SondClient* sond_client, const gchar*
 {
     GSocketConnection * connection = NULL;
     GSocketClient * client = NULL;
-    gchar imessage[MAX_MSG_SIZE] = { 0 };
-    gssize ret = 0;
+    gchar* imessage = NULL;
     gchar* omessage = NULL;
+    gpointer ptr = NULL;
+    gssize ret = 0;
+    gint factor = 1;
 
     client = g_socket_client_new();
 //    g_socket_client_set_tls( client, TRUE );
@@ -66,30 +67,29 @@ sond_client_send_and_read( SondClient* sond_client, const gchar*
         return NULL;
     }
 
-    ret = g_input_stream_read( istream, imessage, MAX_MSG_SIZE, NULL, error );
-    g_object_unref( connection );
-    g_object_unref( client );
-    if ( *error )
+    ptr = g_malloc0( MAX_MSG_SIZE );
+
+    do
     {
-        g_prefix_error( error, "%s\n", __func__ );
+        ret = g_input_stream_read( istream, ptr, MAX_MSG_SIZE, NULL, error );
+        if ( ret == -1 )
+        {
+            g_object_unref( connection );
+            g_object_unref( client );
+            g_prefix_error( error, "%s\n", __func__ );
 
-        return NULL;
-    }
-    else if ( ret == 0 )
-    {
-        *error = g_error_new( SOND_CLIENT_ERROR, SOND_CLIENT_ERROR_NOANSWER, "%s\ninput-stream leer", __func__ );
+            return NULL;
+        }
+        else if ( ret < MAX_MSG_SIZE ) break;
 
-        return NULL;
-    }
-    else if ( ret > MAX_MSG_SIZE )
-    {
-        *error = g_error_new( SOND_CLIENT_ERROR, SOND_CLIENT_ERROR_MESSAGETOOLONG,
-                "%s\ninput-stream leer", __func__ );
+        factor++;
+        ptr = g_realloc( ptr, factor * MAX_MSG_SIZE );
+    } while ( 1 );
 
-        return NULL;
-    }
+    //ist ja sicher 0-terminated, deshalb geht strdup
+    imessage = g_strdup( ptr );
 
-    return g_strdup( imessage );
+    return imessage;
 }
 
 

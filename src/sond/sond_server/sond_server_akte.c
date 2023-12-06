@@ -1,5 +1,5 @@
 /*
-sond (sond_server_akte.c) - Akten, Beweisstücke, Unterlagen
+sond (sond_server_akte.c) - Akten, BeweisstÃ¼cke, Unterlagen
 Copyright (C) 2023  pelo america
 
 This program is free software: you can redistribute it and/or modify
@@ -16,6 +16,7 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
+#include <stdio.h>
 #include <mariadb/mysql.h>
 #include <json-glib/json-glib.h>
 
@@ -26,6 +27,183 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "sond_server.h"
 #include "sond_server_akte.h"
+
+
+static SondAkte*
+sond_server_akte_from_ID( MYSQL* con, gint ID_entity, GError** error )
+{
+    SondAkte* sond_akte = NULL;
+    GArray* arr_props = NULL;
+
+    arr_props = sond_database_get_properties( con, ID_entity, error );
+    if ( !arr_props )
+    {
+        if ( error ) g_prefix_error( error, "%s\n", __func__ );
+
+        return NULL;
+    }
+    else if ( arr_props->len == 0 )
+    {
+        g_array_unref( arr_props );
+        *error = g_error_new( SOND_SERVER_ERROR, SOND_SERVER_ERROR_NOTFOUND,
+                "%s\nZur Akte konnten keine Eigenschaften gefunden werden", __func__ );
+
+        return NULL;
+    }
+
+    sond_akte = sond_akte_new( );
+
+    for ( gint i = 0; i < arr_props->len; i++ )
+    {
+        Property property = { 0 };
+
+        property = g_array_index( arr_props, Property, i );
+
+        sond_akte->ID_entity = ID_entity;
+        if ( property.entity.type == _REG_JAHR_ ) sond_akte->reg_jahr = atoi( property.value );
+        else if ( property.entity.type == _REG_NR_ ) sond_akte->reg_nr = atoi( property.value );
+        else if ( property.entity.type == _AKTENRUBRUM_) sond_akte->aktenrubrum = g_strdup( property.value );
+        else if ( property.entity.type == _AKTENKURZBEZ_ ) sond_akte->aktenkurzbez = g_strdup( property.value );
+
+        g_free( property.value );
+    }
+
+    g_array_unref( arr_props );
+
+    return sond_akte;
+}
+
+
+static GArray*
+sond_server_akte_search_rubrum( MYSQL* con, const gchar* params, GError** error )
+{
+    gint rc = 0;
+    gchar* sql = NULL;
+    MYSQL_RES* mysql_res = NULL;
+    MYSQL_ROW row = NULL;
+    GArray* arr_res = NULL;
+
+    sql = g_strdup_printf( "SELECT rel_subject FROM entities WHERE type=%i AND prop_value LIKE '%%%s%%'; ",
+            _AKTENRUBRUM_, params );
+
+    rc = mysql_query( con, sql );
+    g_free( sql );
+    if ( rc )
+    {
+        if ( error ) *error = g_error_new( g_quark_from_static_string( "MARIADB" ),
+                mysql_errno( con ), "%s\nmysql_query\n%s",
+                __func__, mysql_error( con ) );
+
+        return NULL;
+    }
+
+    //abfrÃ¤gen
+    mysql_res = mysql_store_result( con );
+    if ( !mysql_res )
+    {
+        if ( !mysql_field_count( con ) ) return g_array_new( FALSE, FALSE, sizeof( gint ) );
+        else if ( error ) *error = g_error_new( g_quark_from_static_string( "MARIADB" ),
+                mysql_errno( con ), "%s\nmysql_store_results\n%s",
+                __func__, mysql_error( con ) );
+
+        return NULL;
+    }
+
+    arr_res = g_array_new( FALSE, FALSE, sizeof( gint ) );
+
+    while ( (row = mysql_fetch_row( mysql_res )) )
+    {
+        gint ID_akte = 0;
+
+        ID_akte = atoi( row[0] );
+        g_array_append_val( arr_res, ID_akte );
+    }
+
+    mysql_free_result( mysql_res );
+
+    return arr_res;
+}
+
+
+void
+sond_server_akte_suchen( SondServer* sond_server, const gchar* params, gchar** omessage )
+{
+    GError* error = NULL;
+    GArray* arr_res = NULL;
+    MYSQL* con = NULL;
+    JsonArray* jarray = NULL;
+    JsonNode* jnode = NULL;
+
+    con = sond_server_get_mysql_con( sond_server, &error );
+    if ( !con )
+    {
+        *omessage = g_strconcat( "ERROR *** Keine Verbindung zu MYSQL-Server\n\n",
+                error->message, NULL );
+        g_warning( "Conn zum MariaDB-Server konnte nicht hergestellt werden\n\n%s",
+                error->message );
+        g_error_free( error );
+
+        return;
+    }
+
+    arr_res = sond_server_akte_search_rubrum( con, params, &error );
+    if ( !arr_res )
+    {
+        *omessage = g_strconcat( "ERROR *** Suche in DB\n\n",
+                error->message, NULL );
+        g_warning( "Fehler Suche in DB\n\n%s",
+                error->message );
+        g_error_free( error );
+        mysql_close( con );
+
+        return;
+    }
+
+    if ( arr_res->len == 0 ) //einfach kein Treffer
+    {
+        g_array_unref( arr_res );
+        *omessage = g_strdup( "NOT_FOUND" );
+        mysql_close( con );
+
+        return;
+    }
+
+    jarray = json_array_new( );
+
+    for ( gint i = 0; i < arr_res->len; i++ )
+    {
+        SondAkte* sond_akte = NULL;
+        JsonObject* jobject = NULL;
+
+        sond_akte = sond_server_akte_from_ID( con, g_array_index( arr_res, gint, i ), &error );
+        if ( !sond_akte )
+        {
+            g_array_unref( arr_res );
+            *omessage = g_strdup_printf( "ERROR *** Akten kÃ¶nnen nicht eingelesen werden - %s",
+                    error->message );
+            g_error_free( error );
+            json_array_unref( jarray );
+            mysql_close( con );
+
+            return;
+        }
+
+        jobject = sond_akte_to_json_object( sond_akte );
+        sond_akte_free( sond_akte );
+
+        json_array_add_object_element( jarray, jobject );
+    }
+
+    mysql_close( con );
+    g_array_unref( arr_res );
+
+    jnode = json_node_alloc( );
+    json_node_init_array( jnode, jarray );
+    *omessage = json_to_string( jnode, FALSE );
+    json_node_unref( jnode );
+
+    return;
+}
 
 
 static gint
@@ -56,7 +234,7 @@ sond_server_akte_update( SondServer* sond_server, MYSQL* con, SondAkte* sond_akt
         return -1;
     }
 
-    //abfrägen
+    //abfrÃ¤gen
     mysql_res = mysql_store_result( con );
     if ( !mysql_res )
     {
@@ -144,7 +322,7 @@ sond_server_akte_create( SondServer* sond_server, MYSQL* con, SondAkte* sond_akt
         return -1;
     }
 
-    //abfrägen
+    //abfrÃ¤gen
     mysql_res = mysql_store_result( con );
     if ( !mysql_res )
     {
@@ -233,7 +411,7 @@ sond_server_akte_schreiben( SondServer* sond_server, gint auth,
     }
 
     if ( sond_akte->reg_nr == 0 ) create = TRUE;
-    else //Update - prüfen, ob lock besteht
+    else //Update - prÃ¼fen, ob lock besteht
     {
         Lock lock = { 0 };
 
@@ -283,7 +461,7 @@ sond_server_akte_schreiben( SondServer* sond_server, gint auth,
         gint res = 0;
         GError* error_tmp = NULL;
 
-        *omessage = g_strconcat( "ERROR *** Akte konnte nicht angelegt/geändert werden\n\n",
+        *omessage = g_strconcat( "ERROR *** Akte konnte nicht angelegt/geÃ¤ndert werden\n\n",
                 error->message, NULL );
         g_clear_error( &error );
 
@@ -302,7 +480,7 @@ sond_server_akte_schreiben( SondServer* sond_server, gint auth,
     {
         gint res = 0;
 
-        *omessage = g_strconcat( "ERROR *** Akte konnte nicht angelegt/geändert werden\n\n",
+        *omessage = g_strconcat( "ERROR *** Akte konnte nicht angelegt/geÃ¤ndert werden\n\n",
                 error->message, NULL );
         g_clear_error( &error );
 
@@ -325,65 +503,94 @@ sond_server_akte_schreiben( SondServer* sond_server, gint auth,
 
 
 static gint
-sond_server_akte_laden( SondServer* sond_server, SondAkte* sond_akte, GError** error )
+sond_server_akte_get_ID_from_regnr( SondServer* sond_server, MYSQL* con,
+        gint reg_nr, gint reg_jahr, GError** error )
 {
-    MYSQL* con = NULL;
+    gint rc = 0;
     MYSQL_RES* mysql_res = NULL;
     MYSQL_ROW row = NULL;
-    gchar* sql_1 = NULL;
-    gchar* sql_2 = NULL;
-    gchar* sql_3 = NULL;
-    gint rc = 0;
+    gchar* sql = NULL;
+    gint ID_entity = 0;
 
-    con = sond_server_get_mysql_con( sond_server, error );
-    if ( !con )
-    {
-        g_prefix_error( error, "%s\n", __func__ );
-        return -1;
-    }
-
-    sql_1 = g_strdup_printf( "SELECT t1.ID_reg_jahr FROM "
+    sql = g_strdup_printf( "SELECT t1.ID_reg_jahr FROM "
             "(SELECT rel_subject AS ID_reg_jahr FROM entities WHERE type=%i AND prop_value='%i') AS t1 "
             "JOIN "
             "(SELECT rel_subject AS ID_reg_nr FROM entities WHERE type=%i AND prop_value='%i') AS t2 "
-            "ON t1.ID_reg_jahr=t2.ID_reg_nr; ", _REG_JAHR_, sond_akte->reg_jahr, _REG_NR_, sond_akte->reg_nr );
+            "ON t1.ID_reg_jahr=t2.ID_reg_nr; ", _REG_JAHR_, reg_jahr, _REG_NR_, reg_nr );
 
-    rc = mysql_query( con, sql_1 );
-    g_free( sql_1 );
+    rc = mysql_query( con, sql );
+    g_free( sql );
     if ( rc )
     {
         if ( error ) *error = g_error_new( g_quark_from_static_string( "MARIADB" ),
-                mysql_errno( con ), "%s\n%s\n\nFehlermeldung: %s",
-                __func__, "mysql_query", mysql_error( con ) );
-        mysql_close( con );
+                mysql_errno( con ), "%s\nmysql_query\n%s",
+                __func__, mysql_error( con ) );
         g_warning( (*error)->message );
         return -1;
     }
 
-    //abfrägen
+    //abfrÃ¤gen
     mysql_res = mysql_store_result( con );
     if ( !mysql_res )
     {
         if ( error ) *error = g_error_new( g_quark_from_static_string( "MARIADB" ),
-                mysql_errno( con ), "%s\n%s\n\nFehlermeldung: %s",
-                __func__, "mysql_store_results", mysql_error( con ) );
-        mysql_close( con );
+                mysql_errno( con ), "%s\nmysql_store_results\n%s",
+                __func__, mysql_error( con ) );
         g_warning( (*error)->message );
+
         return -1;
     }
 
     row = mysql_fetch_row( mysql_res );
-    if ( row ) sond_akte->ID_entity = atoi( row[0] );
+    if ( row ) ID_entity = atoi( row[0] );
     else
     {
         *error = g_error_new( SOND_SERVER_ERROR, SOND_SERVER_ERROR_NOTFOUND, "Keine Akte zur Registernummer" );
         mysql_free_result( mysql_res );
-        mysql_close( con );
 
         return -1;
     }
 
     mysql_free_result( mysql_res );
+
+    return ID_entity;
+}
+
+
+static SondAkte*
+sond_server_akte_laden( SondServer* sond_server, gint reg_nr, gint reg_jahr, GError** error )
+{
+    MYSQL* con = NULL;
+    MYSQL_RES* mysql_res = NULL;
+    MYSQL_ROW row = NULL;
+    gchar* sql_2 = NULL;
+    gchar* sql_3 = NULL;
+    gint rc = 0;
+    gint ID_entity = 0;
+    SondAkte* sond_akte = NULL;
+
+    con = sond_server_get_mysql_con( sond_server, error );
+    if ( !con )
+    {
+        g_prefix_error( error, "%s\n", __func__ );
+        return NULL;
+    }
+
+    ID_entity = sond_server_akte_get_ID_from_regnr( sond_server,
+            con, reg_nr, reg_jahr, error );
+    if ( !ID_entity )
+    {
+        *error = g_error_new( SOND_SERVER_ERROR, SOND_SERVER_ERROR_NOTFOUND,
+                "Keine Akte zur Registernummer" );
+        mysql_close( con );
+
+        return NULL;
+    }
+
+    sond_akte = sond_akte_new( );
+    sond_akte->reg_jahr = reg_jahr;
+    sond_akte->reg_nr = reg_nr;
+    sond_akte->ID_entity = ID_entity;
 
     sql_2 = g_strdup_printf( "SELECT prop_value FROM entities WHERE rel_subject=%i AND type=%i; ",
             sond_akte->ID_entity, _AKTENRUBRUM_ );
@@ -397,10 +604,12 @@ sond_server_akte_laden( SondServer* sond_server, SondAkte* sond_akte, GError** e
                 __func__, "mysql_query", mysql_error( con ) );
         mysql_close( con );
         g_warning( (*error)->message );
-        return -1;
+        sond_akte_free( sond_akte );
+
+        return NULL;
     }
 
-    //abfrägen
+    //abfrÃ¤gen
     mysql_res = mysql_store_result( con );
     if ( !mysql_res )
     {
@@ -409,7 +618,9 @@ sond_server_akte_laden( SondServer* sond_server, SondAkte* sond_akte, GError** e
                 __func__, "mysql_store_results", mysql_error( con ) );
         mysql_close( con );
         g_warning( (*error)->message );
-        return -1;
+        sond_akte_free( sond_akte );
+
+        return NULL;
     }
 
     row = mysql_fetch_row( mysql_res );
@@ -419,8 +630,9 @@ sond_server_akte_laden( SondServer* sond_server, SondAkte* sond_akte, GError** e
         *error = g_error_new( SOND_SERVER_ERROR, SOND_SERVER_ERROR_NOTFOUND, "Kein Aktenrubrum gespeichert" );
         mysql_free_result( mysql_res );
         mysql_close( con );
+        sond_akte_free( sond_akte );
 
-        return -1;
+        return NULL;
     }
 
     mysql_free_result( mysql_res );
@@ -437,10 +649,12 @@ sond_server_akte_laden( SondServer* sond_server, SondAkte* sond_akte, GError** e
                 __func__, "mysql_query", mysql_error( con ) );
         mysql_close( con );
         g_warning( (*error)->message );
-        return -1;
+        sond_akte_free( sond_akte );
+
+        return NULL;
     }
 
-    //abfrägen
+    //abfrÃ¤gen
     mysql_res = mysql_store_result( con );
     if ( !mysql_res )
     {
@@ -449,7 +663,9 @@ sond_server_akte_laden( SondServer* sond_server, SondAkte* sond_akte, GError** e
                 __func__, "mysql_store_results", mysql_error( con ) );
         mysql_close( con );
         g_warning( (*error)->message );
-        return -1;
+        sond_akte_free( sond_akte );
+
+        return NULL;
     }
 
     row = mysql_fetch_row( mysql_res );
@@ -459,7 +675,7 @@ sond_server_akte_laden( SondServer* sond_server, SondAkte* sond_akte, GError** e
 
     mysql_close( con );
 
-    return 0;
+    return sond_akte;
 }
 
 
@@ -477,18 +693,12 @@ sond_server_akte_holen( SondServer* sond_server, gint auth,
     reg_jahr = atoi( g_strrstr( params, "-" ) + 1 );
     reg_nr = atoi( g_strndup( params, sizeof( g_strrstr( params, "-" ) ) ) );
 
-    sond_akte = sond_akte_new( );
-
-    sond_akte->reg_nr = reg_nr;
-    sond_akte->reg_jahr = reg_jahr;
-
-    rc = sond_server_akte_laden( sond_server, sond_akte, &error );
-    if ( rc )
+    sond_akte = sond_server_akte_laden( sond_server, reg_nr, reg_jahr, &error );
+    if ( !sond_akte )
     {
         *omessage = g_strconcat( "ERROR *** Akte kann nicht geladen werden\n\n",
                 error->message, NULL );
         g_error_free( error );
-        sond_akte_free( sond_akte );
 
         return;
     }
@@ -497,7 +707,7 @@ sond_server_akte_holen( SondServer* sond_server, gint auth,
     rc = sond_server_get_lock( sond_server, sond_akte->ID_entity, auth, FALSE, &user );
     if ( rc == 1 ) *omessage = g_strdup_printf( "LOCKED%s&", user );
 
-    *omessage = add_string( *omessage, sond_akte_to_json( sond_akte ) );
+    *omessage = add_string( *omessage, sond_akte_to_json_string( sond_akte ) );
 
     sond_akte_free( sond_akte );
 

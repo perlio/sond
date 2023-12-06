@@ -257,11 +257,13 @@ pdf_text_oeffnen_fenster( Projekt* zond, GPtrArray* arr_rel_path,
 
     GtkWidget* label = gtk_label_new( text );
     g_free( text );
-    gtk_widget_show_all( label );
+
     headerbar = (GtkWidget*) g_object_get_data( G_OBJECT(window), "headerbar" );
     gtk_header_bar_pack_end( GTK_HEADER_BAR(headerbar), button_sql );
 
     gtk_container_add( GTK_CONTAINER(popover), label );
+
+    gtk_widget_show_all( window );
 
     g_signal_connect( listbox, "row-activated", G_CALLBACK(cb_textsuche_act),
             (gpointer) zond );

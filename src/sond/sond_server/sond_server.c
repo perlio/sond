@@ -100,7 +100,6 @@ sond_server_get_lock( SondServer* sond_server, gint ID_entity, gint auth,
 
         if ( lock.ID_entity == ID_entity )
         {
-
             if ( force )
             {
                 if ( lock.index != auth )
@@ -320,12 +319,9 @@ process_imessage( SondServer* sond_server, gchar** imessage_strv, gchar** omessa
             sond_server_lock_ID( sond_server, auth, imessage_strv[3], omessage );
     else if ( !g_strcmp0( imessage_strv[2], "UNLOCK" ) )
             sond_server_unlock_ID( sond_server, auth, imessage_strv[3], omessage );
-/*
     else if ( !g_strcmp0( imessage_strv[2], "AKTE_SUCHEN" ) )
-            sond_server_akte_suchen( sond_server, params, omessage );
-    else if ( !g_strcmp0( imessage_strv[2], "AKTE_UNLOCK" ) )
-            sond_server_akte_unlock( sond_server, params, omessage );
-    */
+            sond_server_akte_suchen( sond_server, imessage_strv[3], omessage );
+
     else
     {
         g_warning( "Nachricht enthält keinen bekannten Befehl" );
@@ -552,9 +548,9 @@ sond_server_get_mysql_con( SondServer* sond_server, GError** error )
             sond_server->mysql_user, sond_server->mysql_password,
             sond_server->mysql_db, sond_server->mysql_port, NULL, CLIENT_MULTI_STATEMENTS ) )
     {
-        if ( error ) *error = g_error_new( g_quark_from_static_string( "MYSQL" ),
-                mysql_errno( con ), "%s\n%s\nFehlermeldung: %s",
-                __func__, "mysql_real_connect", mysql_error( con ) );
+        if ( error ) *error = g_error_new( g_quark_from_static_string( "MARIADB" ),
+                mysql_errno( con ), "%s\nmysql_real_connect\n%s",
+                __func__, mysql_error( con ) );
         mysql_close( con );
 
         return NULL;
@@ -667,6 +663,7 @@ main( gint argc, gchar** argv )
 
     //Arbeitserzeichnis ermitteln
     sond_server.base_dir = get_base_dir( );
+gint rc = chdir( sond_server.base_dir);
 
 #ifndef TESTING
     log_init( &sond_server );
@@ -675,6 +672,7 @@ main( gint argc, gchar** argv )
     keyfile = g_key_file_new( );
 
     conf_file = g_strconcat( sond_server.base_dir, "SondServer.conf", NULL );
+
     success = g_key_file_load_from_file( keyfile, conf_file,
             G_KEY_FILE_KEEP_COMMENTS | G_KEY_FILE_KEEP_TRANSLATIONS, &error );
     g_free( conf_file );
@@ -682,7 +680,9 @@ main( gint argc, gchar** argv )
             error->message );
 
     get_auth_token( keyfile, &sond_server );
+
     init_con( keyfile, &sond_server );
+
     init_socket_service( keyfile, &sond_server );
 
     g_key_file_free( keyfile );

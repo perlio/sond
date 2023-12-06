@@ -68,6 +68,8 @@ SondAkte* sond_akte_new( );
 
 SondAkte* sond_akte_new_from_json( const gchar*, GError** );
 
-gchar* sond_akte_to_json( SondAkte* );
+JsonObject* sond_akte_to_json_object( SondAkte* );
+
+gchar* sond_akte_to_json_string( SondAkte* );
 
 #endif //SOND_AKTE_H_INCLUDED

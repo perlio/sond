@@ -1,5 +1,5 @@
 /*
-sond (sond_server_akte.h) - Akten, Beweisstücke, Unterlagen
+sond (sond_server_akte.h) - Akten, BeweisstÃ¼cke, Unterlagen
 Copyright (C) 2023  pelo america
 
 This program is free software: you can redistribute it and/or modify
@@ -21,6 +21,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 typedef struct _SondServer SondServer;
 typedef char gchar;
+
+void sond_server_akte_suchen( SondServer*, const gchar*, gchar** );
 
 void sond_server_akte_schreiben( SondServer*, gint, const gchar*, gchar** );
 

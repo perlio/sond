@@ -24,14 +24,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../misc.h"
 
 
-typedef struct _Property
-{
-    GtkWidget* entry_value;
-    gint ID_value;
-    gint label;
-} Property;
-
-
 typedef struct _Telefonnummer
 {
     gint ID_rel;

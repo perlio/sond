@@ -380,8 +380,6 @@ result_listbox_new( GtkWindow* parent_window, const gchar* titel )
     gtk_header_bar_set_title( GTK_HEADER_BAR(headerbar), titel );
     gtk_window_set_titlebar( GTK_WINDOW(window), headerbar );
 
-    gtk_widget_show_all( window );
-
     g_object_set_data( G_OBJECT(window), "listbox", listbox );
     g_object_set_data( G_OBJECT(window), "headerbar", headerbar );
 

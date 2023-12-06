@@ -1,5 +1,5 @@
 /*
-sond (sond_client_akte.c) - Akten, Beweisstücke, Unterlagen
+sond (sond_client_akte.c) - Akten, BeweisstÃ¼cke, Unterlagen
 Copyright (C) 2023  pelo america
 
 This program is free software: you can redistribute it and/or modify
@@ -64,7 +64,7 @@ sond_client_akte_close( SondClientAkte* sond_client_akte )
         if ( rc )
         {
             display_message( sond_client_akte->window,
-                    "Aktenlock konnte nicht gelöst werden\n\n%s", error->message, NULL );
+                    "Aktenlock konnte nicht gelÃ¶st werden\n\n%s", error->message, NULL );
             g_error_free( error );
         }
     }
@@ -111,14 +111,14 @@ sond_client_akte_button_ok_clicked( GtkButton* button, gpointer data )
     if ( strlen( gtk_entry_get_text( GTK_ENTRY(sond_client_akte->entry_aktenrubrum) ) ) < 3 )
     {
         display_message( sond_client_akte->window,
-                "Aktenrubrum muß mindestens drei Zeichen umfassen", NULL );
+                "Aktenrubrum muÃŸ mindestens drei Zeichen umfassen", NULL );
 
         return;
     }
 
     if ( g_strcmp0( sond_client_akte->sond_akte->aktenrubrum,
             gtk_entry_get_text( GTK_ENTRY(sond_client_akte->entry_aktenrubrum) ) ) )
-    { //daß ins entry nichts eingetragen ist (""), wurde bereits zuvor abgefragt
+    { //daÃŸ ins entry nichts eingetragen ist (""), wurde bereits zuvor abgefragt
         changed = TRUE;
         g_free( sond_client_akte->sond_akte->aktenrubrum );
         sond_client_akte->sond_akte->aktenrubrum =
@@ -138,7 +138,7 @@ sond_client_akte_button_ok_clicked( GtkButton* button, gpointer data )
     {
         GError* error = NULL;
 
-        params = sond_akte_to_json( sond_client_akte->sond_akte );
+        params = sond_akte_to_json_string( sond_client_akte->sond_akte );
 
         resp = sond_client_send_and_read( sond_client_akte->sond_client,
                 "AKTE_SCHREIBEN", params, &error );
@@ -149,7 +149,7 @@ sond_client_akte_button_ok_clicked( GtkButton* button, gpointer data )
                     "Akte konnte nicht geschrieben werden\n\n", error->message, NULL );
             g_error_free( error );
 
-            return; //Fenster bleibt geöffnet; je nach Fehler kann man es nochmal versuchen
+            return; //Fenster bleibt geÃ¶ffnet; je nach Fehler kann man es nochmal versuchen
         }
         else if ( g_str_has_prefix( resp, "ERROR ***" ) )
         {
@@ -158,7 +158,7 @@ sond_client_akte_button_ok_clicked( GtkButton* button, gpointer data )
                     "Server antwortet:", resp, NULL );
             g_free( resp );
 
-            return; //Fenster bleibt geöffnet; je nach Fehler kann man es nochmal versuchen
+            return; //Fenster bleibt geÃ¶ffnet; je nach Fehler kann man es nochmal versuchen
         }
         else if ( g_str_has_prefix( resp, "NEU" ) )
         {
@@ -183,13 +183,13 @@ sond_client_akte_button_ok_clicked( GtkButton* button, gpointer data )
 
             if ( strlen( resp ) > 7 )
             {
-                title = g_strconcat( "Schreibschutz für ", resp + 7, " besteht", NULL );
+                title = g_strconcat( "Schreibschutz fÃ¼r ", resp + 7, " besteht", NULL );
                 second = g_strdup( "Trotzdem speichern?" );
             }
             else
             {
-                title = g_strdup( "Zwischenzeitliche Änderungen durch anderen user" );
-                second = g_strdup( "Änderungen überschreiben?" );
+                title = g_strdup( "Zwischenzeitliche Ã„nderungen durch anderen user" );
+                second = g_strdup( "Ã„nderungen Ã¼berschreiben?" );
             }
 
             rc = abfrage_frage( sond_client_akte->window, title, second, NULL );
@@ -213,7 +213,7 @@ sond_client_akte_button_ok_clicked( GtkButton* button, gpointer data )
                     g_error_free( error );
                     g_free( resp );
 
-                    return; //Fenster bleibt geöffnet; je nach Fehler kann man es nochmal versuchen
+                    return; //Fenster bleibt geÃ¶ffnet; je nach Fehler kann man es nochmal versuchen
                 }
             }
         }
@@ -325,6 +325,77 @@ sond_client_akte_holen( SondClientAkte* sond_client_akte, gint reg_nr, gint reg_
 }
 
 
+static gint
+sond_client_akte_auswahlfenster( SondClientAkte* sond_client_akte,
+        const gchar* resp, GError** error )
+{
+    GtkWidget* window = NULL;
+    GtkWidget* listbox = NULL;
+    JsonParser* jparser = NULL;
+    JsonNode* jnode = NULL;
+    JsonArray* jarray = NULL;
+
+    window = result_listbox_new( GTK_WINDOW(sond_client_akte->window), "Akten" );
+
+    listbox = g_object_get_data( G_OBJECT(window), "listbox" );
+printf("%s\n", resp);
+    jparser = json_parser_new( );
+    if ( !json_parser_load_from_data( jparser, resp, -1, error ) )
+    {
+        g_prefix_error( error, "%s\n", __func__ );
+        g_object_unref( jparser );
+        gtk_widget_destroy( window );
+
+        return -1;
+    }
+
+    jnode = json_parser_get_root( jparser );
+
+    if ( !JSON_NODE_HOLDS_ARRAY(jnode) )
+    {
+        if ( error ) *error = g_error_new( SOND_CLIENT_ERROR, 0,
+                "%s\nJson-Knoten ist kein Array", __func__ );
+        g_object_unref( jparser );
+        gtk_widget_destroy( window );
+
+        return -1;
+    }
+
+    jarray = json_node_get_array( jnode );
+
+    for ( guint i = 0; i < json_array_get_length( jarray ); i++ )
+    {
+        JsonObject* jobject = NULL;
+        gint ID_entity = 0;
+        gint reg_jahr = 0;
+        gint reg_nr = 0;
+        gchar* aktenrubrum = NULL;
+        gchar* aktenkurzbez = NULL;
+        gchar* label_text = NULL;
+        GtkWidget* label = NULL;
+
+        jobject = json_array_get_object_element( jarray, i );
+
+        ID_entity = json_object_get_int_member( jobject, "ID_entity" );
+        reg_jahr = json_object_get_int_member( jobject, "reg_jahr" );
+        reg_nr= json_object_get_int_member( jobject, "reg_nr" );
+        aktenrubrum = json_object_get_string_member( jobject, "aktenrubrum" );
+        aktenkurzbez = json_object_get_string_member( jobject, "aktenkurzbez" );
+
+        label_text = g_strdup_printf( "%5d  %4i/%i  %s  (%s)",
+                ID_entity, reg_nr, reg_jahr % 100, aktenrubrum, aktenkurzbez );
+        label = gtk_label_new( label_text );
+        g_free( label_text );
+
+        gtk_list_box_insert( GTK_LIST_BOX(listbox), label, -1 );
+    }
+
+    gtk_widget_show_all( window );
+
+    return 0;
+}
+
+
 static void
 sond_client_akte_entry_reg_nr_activate( GtkEntry* entry, gpointer data )
 {
@@ -336,6 +407,10 @@ sond_client_akte_entry_reg_nr_activate( GtkEntry* entry, gpointer data )
 
         return;
     }
+    else if ( !g_strcmp0( gtk_entry_get_text( entry ), "./." ) ||
+            !g_strcmp0( gtk_entry_get_text( entry ), " ./" ) ||
+            !g_strcmp0( gtk_entry_get_text( entry ), "/. " ) ||
+            !g_strcmp0( gtk_entry_get_text( entry ), " ./. " ) ) return; //wÃ¤re Quatsch
 
     if ( sond_client_misc_regnr_wohlgeformt( gtk_entry_get_text( entry ) ) )
     {
@@ -347,7 +422,7 @@ sond_client_akte_entry_reg_nr_activate( GtkEntry* entry, gpointer data )
 
         sond_client_misc_parse_regnr( gtk_entry_get_text( entry ), &reg_nr, &reg_jahr );
 
-        //test auf schon geöffnetes Aktenfenster
+        //test auf schon geÃ¶ffnetes Aktenfenster
         for ( gint i = 0; i < sond_client_akte->sond_client->arr_children_windows->len; i++ )
         {
             SondClientAny* sond_client_any = NULL;
@@ -374,7 +449,7 @@ sond_client_akte_entry_reg_nr_activate( GtkEntry* entry, gpointer data )
                     error->message, NULL );
             g_error_free( error );
 
-            return; //Fenster bleibt geöffnet; je nach Fehler kann man es nochmal versuchen
+            return; //Fenster bleibt geÃ¶ffnet; je nach Fehler kann man es nochmal versuchen
         }
 
         sond_client_akte->sond_client->reg_nr_akt = reg_nr;
@@ -404,17 +479,23 @@ sond_client_akte_entry_reg_nr_activate( GtkEntry* entry, gpointer data )
             display_message( sond_client_akte->window, "Fehler\n\n", error->message, NULL );
             g_error_free( error );
 
-            return; //Fenster bleibt geöffnet; je nach Fehler kann man es nochmal versuchen
+            return; //Fenster bleibt geÃ¶ffnet; je nach Fehler kann man es nochmal versuchen
         }
         else if ( g_str_has_prefix( resp, "ERROR ***" ) )
         {
             display_message( sond_client_akte->window, "Fehler\n\nServer antwortet:\n", resp, NULL );
             g_free( resp );
 
-            return; //Fenster bleibt geöffnet; je nach Fehler kann man es nochmal versuchen
+            return; //Fenster bleibt geÃ¶ffnet; je nach Fehler kann man es nochmal versuchen
+        }
+        else if ( g_str_has_prefix( resp, "NOT_FOUND" ) )
+        {
+            display_message( sond_client_akte->window, "Kein Treffer", NULL );
+
+            return;
         }
 
-//        rc = sond_client_akte_auswahlfenster( sond_client_akte, resp, &error );
+        rc = sond_client_akte_auswahlfenster( sond_client_akte, resp, &error );
         if ( rc )
         {
             display_message( sond_client_akte->window,

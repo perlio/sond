@@ -31,13 +31,12 @@ typedef enum
 typedef struct _Entity
 {
     gint ID;
-    gint label;
-    GArray* arr_properties;
+    gint type;
 } Entity;
 
 typedef struct _Property
 {
-    Entity entity_property;
+    Entity entity;
     gchar* value;
 } Property;
 
@@ -74,6 +73,8 @@ gint sond_database_insert_rel( gpointer, Type, gint, gint, GError** );
 
 gint sond_database_insert_property( gpointer, Type, gint, const gchar*, GError** );
 
+GArray* sond_database_get_properties( gpointer, gint, GError** );
+
 
 
 gint sond_database_update_label( gpointer, gint, gint, gchar** );
@@ -91,12 +92,6 @@ gint sond_database_get_entities_for_property( gpointer, gint, const gchar*,
 
 gint sond_database_get_entities_for_properties_and( gpointer, GArray**, gchar**,
         ... );
-
-gint sond_database_get_label_for_ID_label( gpointer, gint, gchar**, gchar** );
-
-gint sond_database_get_property_value( gpointer, gint, gchar**, gchar** );
-
-gint sond_database_get_properties( gpointer, gint, GArray**, gchar** );
 
 gint sond_database_get_first_property_value_for_subject( gpointer, gint, gint,
         gchar**, gchar** );

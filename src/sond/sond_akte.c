@@ -122,12 +122,10 @@ sond_akte_new_from_json( const gchar* json, GError** error )
 }
 
 
-gchar*
-sond_akte_to_json( SondAkte* sond_akte )
+JsonObject*
+sond_akte_to_json_object( SondAkte* sond_akte )
 {
     JsonObject* object = NULL;
-    JsonNode* node = NULL;
-    gchar* json_string = NULL;
 
     object = json_object_new( );
 
@@ -138,6 +136,19 @@ sond_akte_to_json( SondAkte* sond_akte )
 
     json_object_set_string_member( object, "aktenrubrum", sond_akte->aktenrubrum );
     json_object_set_string_member( object, "aktenkurzbez", sond_akte->aktenkurzbez );
+
+    return object;
+}
+
+
+gchar*
+sond_akte_to_json_string( SondAkte* sond_akte )
+{
+    JsonObject* object = NULL;
+    JsonNode* node = NULL;
+    gchar* json_string = NULL;
+
+    object = sond_akte_to_json_object( sond_akte );
 
     node = json_node_alloc( );
     json_node_init_object( node, object );
