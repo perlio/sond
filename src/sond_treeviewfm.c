@@ -1178,7 +1178,8 @@ sond_treeviewfm_show_hits( SondTreeviewFM* stvfm, GPtrArray* arr_hits )
     SondTreeviewFMClass* klass = SOND_TREEVIEWFM_GET_CLASS(stvfm);
 
     //Fenster erzeugen
-    window = result_listbox_new( GTK_WINDOW(gtk_widget_get_toplevel( GTK_WIDGET(stvfm) )), "Suchergebnis" );
+    window = result_listbox_new( GTK_WINDOW(gtk_widget_get_toplevel( GTK_WIDGET(stvfm) )),
+            "Suchergebnis", GTK_SELECTION_MULTIPLE );
 
     listbox = (GtkWidget*) g_object_get_data( G_OBJECT(window), "listbox" );
 

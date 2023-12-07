@@ -266,7 +266,7 @@ suchen_erzeugen_ergebnisfenster( Projekt* zond, const gchar* titel )
     GtkWidget* headerbar = NULL;
 
     //Fenster erzeugen
-    window = result_listbox_new( GTK_WINDOW(zond->app_window), titel );
+    window = result_listbox_new( GTK_WINDOW(zond->app_window), titel, GTK_SELECTION_MULTIPLE );
 
     //Menu Button
     GtkWidget* suchen_menu_button = gtk_menu_button_new( );

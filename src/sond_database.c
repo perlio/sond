@@ -299,7 +299,7 @@ sond_database_insert_row( gpointer database, Type type, gint rel_subject, gint r
             return -1;
         }
     }
-    else //maySQL-con wird übergeben
+    else //mySQL-con wird übergeben
     {
         gint rc = 0;
         gchar* sql_1 = NULL;
@@ -512,7 +512,7 @@ sond_database_get_properties( gpointer database, gint ID_subject, GError** error
 
             return NULL;
         }
-        else if ( rc == - 1 )
+        else if ( rc > 0 )
         {
             if ( error ) *error = g_error_new( g_quark_from_static_string( "MARIADB" ),
                     mysql_errno( con ), "%s\nmysql_next_result\n%s", __func__, mysql_error( con ) );
@@ -531,7 +531,7 @@ sond_database_get_properties( gpointer database, gint ID_subject, GError** error
         else if ( mysql_field_count( con ) == 0 )
         {
             if ( error ) *error = g_error_new( g_quark_from_static_string( "SOND" ), 0,
-                    "%s\nresult_set ist leer", __func__ );
+                    "%s\nresult_set ist leer", __func__ ); //heißt nicht, daß keine Ergebnisse!
 
             return NULL;
         }

@@ -234,7 +234,7 @@ pdf_text_oeffnen_fenster( Projekt* zond, GPtrArray* arr_rel_path,
     GtkWidget* headerbar = NULL;
 
     title = g_strconcat( "Suchtext: ", search_text, NULL );
-    window = result_listbox_new( NULL, title );
+    window = result_listbox_new( NULL, title, GTK_SELECTION_MULTIPLE );
     g_free( title );
 
     listbox = (GtkWidget*) g_object_get_data( G_OBJECT(window), "listbox" );

@@ -353,7 +353,7 @@ misc_get_calendar( GtkCalendar* calendar )
 
 
 GtkWidget*
-result_listbox_new( GtkWindow* parent_window, const gchar* titel )
+result_listbox_new( GtkWindow* parent_window, const gchar* titel, GtkSelectionMode mode )
 {
     GtkWidget* window = NULL;
     GtkWidget* scrolled_window = NULL;
@@ -362,12 +362,16 @@ result_listbox_new( GtkWindow* parent_window, const gchar* titel )
 
     //Fenster erzeugen
     window = gtk_window_new( GTK_WINDOW_TOPLEVEL );
-    gtk_window_set_default_size( GTK_WINDOW(window), 1000, 400 );
-    if ( parent_window ) gtk_window_set_transient_for( GTK_WINDOW(window), parent_window );
+    gtk_window_set_default_size( GTK_WINDOW(window), 800, 350 );
+    if ( parent_window )
+    {
+        gtk_window_set_transient_for( GTK_WINDOW(window), parent_window );
+        gtk_window_set_modal( GTK_WINDOW(window), TRUE );
+    }
 
     scrolled_window = gtk_scrolled_window_new( NULL, NULL );
     listbox = gtk_list_box_new( );
-    gtk_list_box_set_selection_mode( GTK_LIST_BOX(listbox), GTK_SELECTION_MULTIPLE );
+    gtk_list_box_set_selection_mode( GTK_LIST_BOX(listbox), mode );
     gtk_list_box_set_activate_on_single_click( GTK_LIST_BOX(listbox), FALSE );
 
     gtk_container_add( GTK_CONTAINER(scrolled_window), listbox );

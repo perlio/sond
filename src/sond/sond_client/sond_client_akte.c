@@ -325,6 +325,77 @@ sond_client_akte_holen( SondClientAkte* sond_client_akte, gint reg_nr, gint reg_
 }
 
 
+static void
+sond_client_akte_load( SondClientAkte* sond_client_akte, gint reg_nr, gint reg_jahr )
+{
+    gchar* user = FALSE;
+    GError* error = NULL;
+    gint rc = 0;
+
+    //test auf schon geöffnetes Aktenfenster
+    for ( gint i = 0; i < sond_client_akte->sond_client->arr_children_windows->len; i++ )
+    {
+        SondClientAny* sond_client_any = NULL;
+
+        sond_client_any =
+                g_ptr_array_index( sond_client_akte->sond_client->arr_children_windows, i );
+
+        if ( sond_client_any->type == SOND_CLIENT_TYPE_AKTE &&
+                ((SondClientAkte*) sond_client_any)->sond_akte &&
+                ((SondClientAkte*) sond_client_any)->sond_akte->reg_nr == reg_nr &&
+                ((SondClientAkte*) sond_client_any)->sond_akte->reg_jahr == reg_jahr )
+        {
+            sond_client_akte_close( sond_client_akte );
+            gtk_window_present( GTK_WINDOW(sond_client_any->window) );
+
+            return;
+        }
+    }
+
+    rc = sond_client_akte_holen( sond_client_akte, reg_nr, reg_jahr, &user, &error );
+    if ( rc )
+    {
+        display_message( sond_client_akte->window, "Akte kann nicht geladen werden\n\n",
+                error->message, NULL );
+        g_error_free( error );
+
+        return; //Fenster bleibt geöffnet; je nach Fehler kann man es nochmal versuchen
+    }
+
+    sond_client_akte->sond_client->reg_nr_akt = reg_nr;
+    sond_client_akte->sond_client->reg_jahr_akt= reg_jahr;
+
+    gtk_entry_set_text( GTK_ENTRY(sond_client_akte->entry_aktenrubrum),
+            sond_client_akte->sond_akte->aktenrubrum );
+    gtk_entry_set_text( GTK_ENTRY(sond_client_akte->entry_aktenkurzbez),
+            sond_client_akte->sond_akte->aktenkurzbez );
+
+    if ( user ) display_message( sond_client_akte->window, "Akte ist zur "
+            "Bearbeitung durch Benutzer \n", user, " gesperrt", NULL );
+
+    sond_client_akte_loaded( sond_client_akte, (user) ? FALSE : TRUE );
+    g_free( user );
+}
+
+
+static void
+sond_client_akte_auswahlfenster_row_activated( GtkListBox* listbox,
+        GtkListBoxRow* row, gpointer data )
+{
+    gint reg_jahr = 0;
+    gint reg_nr = 0;
+
+    reg_jahr = GPOINTER_TO_INT(g_object_get_data( G_OBJECT(row), "reg_jahr" ));
+    reg_nr = GPOINTER_TO_INT(g_object_get_data( G_OBJECT(row), "reg_nr" ));
+
+    sond_client_akte_load( (SondClientAkte*) data, reg_nr, reg_jahr );
+
+    gtk_widget_destroy( gtk_widget_get_toplevel( GTK_WIDGET(listbox) ) );
+
+    return;
+}
+
+
 static gint
 sond_client_akte_auswahlfenster( SondClientAkte* sond_client_akte,
         const gchar* resp, GError** error )
@@ -335,10 +406,12 @@ sond_client_akte_auswahlfenster( SondClientAkte* sond_client_akte,
     JsonNode* jnode = NULL;
     JsonArray* jarray = NULL;
 
-    window = result_listbox_new( GTK_WINDOW(sond_client_akte->window), "Akten" );
+    window = result_listbox_new( GTK_WINDOW(sond_client_akte->window), "Akten", GTK_SELECTION_BROWSE );
 
     listbox = g_object_get_data( G_OBJECT(window), "listbox" );
-printf("%s\n", resp);
+    g_signal_connect( listbox, "row-activated", G_CALLBACK(sond_client_akte_auswahlfenster_row_activated),
+            sond_client_akte );
+
     jparser = json_parser_new( );
     if ( !json_parser_load_from_data( jparser, resp, -1, error ) )
     {
@@ -366,28 +439,33 @@ printf("%s\n", resp);
     for ( guint i = 0; i < json_array_get_length( jarray ); i++ )
     {
         JsonObject* jobject = NULL;
-        gint ID_entity = 0;
+//        gint ID_entity = 0;
         gint reg_jahr = 0;
         gint reg_nr = 0;
-        gchar* aktenrubrum = NULL;
-        gchar* aktenkurzbez = NULL;
+        const gchar* aktenrubrum = NULL;
+        const gchar* aktenkurzbez = NULL;
         gchar* label_text = NULL;
         GtkWidget* label = NULL;
+        GtkListBoxRow* row = NULL;
 
         jobject = json_array_get_object_element( jarray, i );
 
-        ID_entity = json_object_get_int_member( jobject, "ID_entity" );
+//        ID_entity = json_object_get_int_member( jobject, "ID_entity" );
         reg_jahr = json_object_get_int_member( jobject, "reg_jahr" );
         reg_nr= json_object_get_int_member( jobject, "reg_nr" );
         aktenrubrum = json_object_get_string_member( jobject, "aktenrubrum" );
         aktenkurzbez = json_object_get_string_member( jobject, "aktenkurzbez" );
 
-        label_text = g_strdup_printf( "%5d  %4i/%i  %s  (%s)",
-                ID_entity, reg_nr, reg_jahr % 100, aktenrubrum, aktenkurzbez );
+        label_text = g_strdup_printf( " %4i/%i  %s  (%s)",
+                reg_nr, reg_jahr % 100, aktenrubrum, aktenkurzbez );
         label = gtk_label_new( label_text );
+        gtk_widget_set_halign( label, GTK_ALIGN_START );
         g_free( label_text );
 
         gtk_list_box_insert( GTK_LIST_BOX(listbox), label, -1 );
+        row = gtk_list_box_get_row_at_index( GTK_LIST_BOX(listbox), i );
+        g_object_set_data( G_OBJECT(row), "reg_jahr", GINT_TO_POINTER(reg_jahr) );
+        g_object_set_data( G_OBJECT(row), "reg_nr", GINT_TO_POINTER(reg_nr) );
     }
 
     gtk_widget_show_all( window );
@@ -414,57 +492,13 @@ sond_client_akte_entry_reg_nr_activate( GtkEntry* entry, gpointer data )
 
     if ( sond_client_misc_regnr_wohlgeformt( gtk_entry_get_text( entry ) ) )
     {
-        GError* error = NULL;
         gint reg_nr = 0;
         gint reg_jahr = 0;
-        gchar* user = FALSE;
-        gint rc = 0;
 
         sond_client_misc_parse_regnr( gtk_entry_get_text( entry ), &reg_nr, &reg_jahr );
 
-        //test auf schon geöffnetes Aktenfenster
-        for ( gint i = 0; i < sond_client_akte->sond_client->arr_children_windows->len; i++ )
-        {
-            SondClientAny* sond_client_any = NULL;
+        sond_client_akte_load( sond_client_akte, reg_nr, reg_jahr );
 
-            sond_client_any =
-                    g_ptr_array_index( sond_client_akte->sond_client->arr_children_windows, i );
-
-            if ( sond_client_any->type == SOND_CLIENT_TYPE_AKTE &&
-                    ((SondClientAkte*) sond_client_any)->sond_akte &&
-                    ((SondClientAkte*) sond_client_any)->sond_akte->reg_nr == reg_nr &&
-                    ((SondClientAkte*) sond_client_any)->sond_akte->reg_jahr == reg_jahr )
-            {
-                sond_client_akte_close( sond_client_akte );
-                gtk_window_present( GTK_WINDOW(sond_client_any->window) );
-
-                return;
-            }
-        }
-
-        rc = sond_client_akte_holen( sond_client_akte, reg_nr, reg_jahr, &user, &error );
-        if ( rc )
-        {
-            display_message( sond_client_akte->window, "Akte kann nicht geladen werden\n\n",
-                    error->message, NULL );
-            g_error_free( error );
-
-            return; //Fenster bleibt geöffnet; je nach Fehler kann man es nochmal versuchen
-        }
-
-        sond_client_akte->sond_client->reg_nr_akt = reg_nr;
-        sond_client_akte->sond_client->reg_jahr_akt= reg_jahr;
-
-        gtk_entry_set_text( GTK_ENTRY(sond_client_akte->entry_aktenrubrum),
-                sond_client_akte->sond_akte->aktenrubrum );
-        gtk_entry_set_text( GTK_ENTRY(sond_client_akte->entry_aktenkurzbez),
-                sond_client_akte->sond_akte->aktenkurzbez );
-
-        if ( user ) display_message( sond_client_akte->window, "Akte ist zur "
-                "Bearbeitung durch Benutzer \n", user, " gesperrt", NULL );
-
-        sond_client_akte_loaded( sond_client_akte, (user) ? FALSE : TRUE );
-        g_free( user );
     }
     else //text in aktenrubrum suchen
     {

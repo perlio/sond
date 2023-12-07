@@ -13,6 +13,8 @@
 
 #define ERROR_S_MESSAGE(x) ERROR_S_MESSAGE_VAL(x,-1)
 
+#include <gtk/gtk.h>
+
 typedef struct _GSList GSList;
 typedef struct _GPtrArray GPtrArray;
 typedef struct _GtkWidget GtkWidget;
@@ -23,7 +25,6 @@ typedef struct _GtkWindow GtkWindow;
 typedef struct _GError GError;
 typedef unsigned int guint32;
 typedef guint32 GQuark;
-
 typedef char gchar;
 typedef int gint;
 typedef unsigned int guint;
@@ -60,7 +61,7 @@ void misc_set_calendar( GtkCalendar*, const gchar* );
 
 gchar* misc_get_calendar( GtkCalendar* );
 
-GtkWidget* result_listbox_new( GtkWindow*, const gchar* );
+GtkWidget* result_listbox_new( GtkWindow*, const gchar*, GtkSelectionMode );
 
 gint misc_datei_oeffnen( const gchar*, gboolean, gchar** );
 
