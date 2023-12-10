@@ -33,16 +33,10 @@ ToDo:
 
 Build mupdf:
 
-- clonen von github
+- git clone --recursive git://git.ghostscript.com/mupdf.git
+- cd mupdf
 - git submodule update --init
-
-pdf_clean_file.c:
-
-    retainfiles extern machen (.h)
-    globals überflüssig
-
-
-Makefile für  mupdf modifizieren:
+- Makefile für  mupdf modifizieren:
 
 # --- Rules ---
 
@@ -50,5 +44,9 @@ $(OUT)/%.a :
 	$(file >arscript.sh,@$(AR_CMD))
 	bash -x arscript.sh
 	$(RANLIB_CMD)
+
+
+- mingw32-make libs
+
 
 */

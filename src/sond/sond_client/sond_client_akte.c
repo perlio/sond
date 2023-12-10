@@ -388,8 +388,6 @@ sond_client_akte_auswahlfenster_row_activated( GtkListBox* listbox,
     reg_jahr = GPOINTER_TO_INT(g_object_get_data( G_OBJECT(row), "reg_jahr" ));
     reg_nr = GPOINTER_TO_INT(g_object_get_data( G_OBJECT(row), "reg_nr" ));
 
-    sond_client_akte_load( (SondClientAkte*) data, reg_nr, reg_jahr );
-
     gtk_widget_destroy( gtk_widget_get_toplevel( GTK_WIDGET(listbox) ) );
 
     return;
@@ -398,7 +396,7 @@ sond_client_akte_auswahlfenster_row_activated( GtkListBox* listbox,
 
 static gint
 sond_client_akte_auswahlfenster( SondClientAkte* sond_client_akte,
-        const gchar* resp, GError** error )
+        const gchar* resp, gint* reg_nr, gint* reg_jahr, GError** error )
 {
     GtkWidget* window = NULL;
     GtkWidget* listbox = NULL;
@@ -406,11 +404,11 @@ sond_client_akte_auswahlfenster( SondClientAkte* sond_client_akte,
     JsonNode* jnode = NULL;
     JsonArray* jarray = NULL;
 
-    window = result_listbox_new( GTK_WINDOW(sond_client_akte->window), "Akten", GTK_SELECTION_BROWSE );
+    window = result_listbox_new( GTK_WINDOW(sond_client_akte->window), "Akte auswählen", GTK_SELECTION_BROWSE );
 
     listbox = g_object_get_data( G_OBJECT(window), "listbox" );
     g_signal_connect( listbox, "row-activated", G_CALLBACK(sond_client_akte_auswahlfenster_row_activated),
-            sond_client_akte );
+            NULL );
 
     jparser = json_parser_new( );
     if ( !json_parser_load_from_data( jparser, resp, -1, error ) )
@@ -477,6 +475,9 @@ sond_client_akte_auswahlfenster( SondClientAkte* sond_client_akte,
 static void
 sond_client_akte_entry_reg_nr_activate( GtkEntry* entry, gpointer data )
 {
+    gint reg_nr = 0;
+    gint reg_jahr = 0;
+
     SondClientAkte* sond_client_akte = (SondClientAkte*) data;
 
     if ( strlen( gtk_entry_get_text( entry ) ) < 3 )
@@ -491,15 +492,7 @@ sond_client_akte_entry_reg_nr_activate( GtkEntry* entry, gpointer data )
             !g_strcmp0( gtk_entry_get_text( entry ), " ./. " ) ) return; //wäre Quatsch
 
     if ( sond_client_misc_regnr_wohlgeformt( gtk_entry_get_text( entry ) ) )
-    {
-        gint reg_nr = 0;
-        gint reg_jahr = 0;
-
-        sond_client_misc_parse_regnr( gtk_entry_get_text( entry ), &reg_nr, &reg_jahr );
-
-        sond_client_akte_load( sond_client_akte, reg_nr, reg_jahr );
-
-    }
+            sond_client_misc_parse_regnr( gtk_entry_get_text( entry ), &reg_nr, &reg_jahr );
     else //text in aktenrubrum suchen
     {
         gchar* resp = NULL;
@@ -525,11 +518,13 @@ sond_client_akte_entry_reg_nr_activate( GtkEntry* entry, gpointer data )
         else if ( g_str_has_prefix( resp, "NOT_FOUND" ) )
         {
             display_message( sond_client_akte->window, "Kein Treffer", NULL );
+            g_free( resp );
 
             return;
         }
 
-        rc = sond_client_akte_auswahlfenster( sond_client_akte, resp, &error );
+        rc = sond_client_akte_auswahlfenster( sond_client_akte, resp, &reg_nr, &reg_jahr, &error );
+        g_free( resp );
         if ( rc )
         {
             display_message( sond_client_akte->window,
@@ -539,6 +534,8 @@ sond_client_akte_entry_reg_nr_activate( GtkEntry* entry, gpointer data )
             return;
         }
     }
+
+    sond_client_akte_load( sond_client_akte, reg_nr, reg_jahr );
 
     return;
 }

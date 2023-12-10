@@ -40,7 +40,7 @@ typedef struct
     gint auth;
     gboolean dirty;
     gchar* path;
-    GPtrArray* pages; //array von DocumentPage*
+    GPtrArray* pages; //array von PdfDocumentPage*
     gchar* errmsg;
 } ZondPdfDocumentPrivate;
 

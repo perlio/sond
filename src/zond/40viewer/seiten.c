@@ -639,57 +639,69 @@ seiten_anbindung( PdfViewer* pv, GPtrArray* arr_document_page, gchar** errmsg )
 static gint
 seiten_loeschen( PdfViewer* pv, GPtrArray* arr_document_page, gchar** errmsg )
 {
-    gint rc = 0;
+    GPtrArray* arr_docs = NULL;
 
-    //Abfrage, ob Anbindung mit Seite verknüpft
-    rc = seiten_anbindung( pv, arr_document_page, errmsg );
-    if ( rc )
-    {
-        if ( rc == -1 ) ERROR_S
-        if ( rc == 1 ) return 1;
-    }
-
-    fz_context* ctx = zond_pdf_document_get_ctx( pv->dd->zond_pdf_document );
-
-    for ( gint i = arr_document_page->len - 1; i >= 0; i-- )
+    arr_docs = g_ptr_array_new( );
+    for ( gint i = 0; i < arr_document_page->len; i++ )
     {
         PdfDocumentPage* pdf_document_page = NULL;
-        gint page_doc = 0;
+        gint rc = 0;
 
         pdf_document_page = g_ptr_array_index( arr_document_page, i );
-        page_doc = pdf_document_page->page_doc;
+
+        if ( !g_ptr_array_find( arr_docs, pdf_document_page->document, NULL ) )
+                g_ptr_array_add( arr_docs, pdf_document_page->document );
 
         //macht - sofern noch nicht geschehen - thread_pool des pv dicht, in dem Seite angezeigt wird
         //Dann wird Seite aus pv gelöscht
         rc = viewer_foreach( pv, pdf_document_page, seiten_cb_loesche_seite, NULL,
                 errmsg );
-        if ( rc ) ERROR_S
+        if ( rc )
+        {
+            g_ptr_array_unref( arr_docs );
+            ERROR_S
+        }
 
         //Seite aus document entfernen
-        //vor pdf_delete_page, da ansonsten noch ref auf page?!
-        g_ptr_array_remove_index( zond_pdf_document_get_arr_pages( pv->dd->zond_pdf_document ), page_doc ); //ist gleich page_pv
+        g_ptr_array_remove( zond_pdf_document_get_arr_pages( pdf_document_page->document ),
+                pdf_document_page );
+    }
 
-        //Seite aus PDF entfernen
-        fz_try( ctx ) pdf_delete_page( ctx, zond_pdf_document_get_pdf_doc( pv->dd->zond_pdf_document ),
-                page_doc );
-        fz_catch( ctx ) ERROR_MUPDF( "pdf_delete_page" )
+    //jetzt jedes document durchgehen
+    for ( gint i = 0; i < arr_docs->len; i++ )
+    {
+        ZondPdfDocument* zond_pdf_document = NULL;
+        gint* pages = NULL;
+        GPtrArray* arr_pages = NULL;
+        fz_context* ctx = NULL;
 
-        //index anschleßender Seiten um 1 reduzieren
-        for ( gint o = page_doc; o < zond_pdf_document_get_number_of_pages( pv->dd->zond_pdf_document ); o++ )
+        zond_pdf_document = g_ptr_array_index( arr_docs, i );
+        arr_pages = zond_pdf_document_get_arr_pages( zond_pdf_document );
+        ctx = zond_pdf_document_get_ctx( zond_pdf_document );
+
+        pages = g_malloc( sizeof( gint ) * arr_pages->len );
+        for ( gint u = 0; u < arr_pages->len; u++ )
         {
-            PdfDocumentPage* pdf_document_page_ = NULL;
+            PdfDocumentPage* pdf_document_page = NULL;
 
-            pdf_document_page_ = zond_pdf_document_get_pdf_document_page( pv->dd->zond_pdf_document, o );
-            pdf_document_page_->page_doc--;
+            pdf_document_page = g_ptr_array_index( arr_pages, u );
+            pages[u] = pdf_document_page->page_doc;
 
-            zond_pdf_document_unload_page( pdf_document_page_ );
+            zond_pdf_document_unload_page( pdf_document_page );
+            pdf_document_page->page_doc = u;
+        }
+
+        fz_try( ctx ) pdf_rearrange_pages( ctx,
+                zond_pdf_document_get_pdf_doc( zond_pdf_document ), arr_pages->len, pages );
+        fz_always( ctx ) g_free( pages );
+        fz_catch( ctx )
+        {
+            g_ptr_array_unref( arr_docs );
+            ERROR_MUPDF( "pdf_rearrange_pages" )
         }
     }
 
-    //säubern, um ins Leere gehende Outlines etc. zu entfernen
-    fz_try( ctx ) retainpages( ctx,
-            zond_pdf_document_get_pdf_doc( pv->dd->zond_pdf_document ) );
-    fz_catch( ctx ) ERROR_MUPDF( "retainpages" )
+    g_ptr_array_unref( arr_docs );
 
     seiten_refresh_layouts( pv->zond->arr_pv );
 
@@ -711,13 +723,14 @@ cb_pv_seiten_loeschen( GtkMenuItem* item, gpointer data )
 
     PdfViewer* pv = (PdfViewer*) data;
 
+/*
     //Seiten löschen nur in "ganzen" Pdfs
     if ( pv->dd->next != NULL || pv->dd->anbindung != NULL )
     {
         display_message( pv->vf, "Seiten aus Auszug löschen nicht möglich" , NULL );
         return;
     }
-
+*/
     count = pv->arr_pages->len;
 
     //zu löschende Seiten holen
@@ -726,6 +739,24 @@ cb_pv_seiten_loeschen( GtkMenuItem* item, gpointer data )
     g_free( title );
 
     if ( !arr_document_page ) return;
+
+    //Abfrage, ob Anbindung mit Seite verknüpft
+    rc = seiten_anbindung( pv, arr_document_page, &errmsg );
+    if ( rc )
+    {
+        if ( rc == -1 )
+        {
+            display_message( pv->vf, "Fehler Seiten löschen - \n",
+                    errmsg, NULL );
+            g_free( errmsg );
+        }
+        else if ( rc == 1 ) display_message( pv->vf, "Seiten enthalten Anbindungen - \n"
+                "Löschen nicht zulässig", NULL );
+
+        g_ptr_array_unref( arr_document_page );
+
+        return;
+    }
 
     rc = seiten_loeschen( pv, arr_document_page, &errmsg );
     g_ptr_array_unref( arr_document_page );
@@ -1066,12 +1097,14 @@ cb_seiten_ausschneiden( GtkMenuItem* item, gpointer data )
     g_array_unref( arr_page_pv );
     rc = seiten_loeschen( pv, arr_document_page, &errmsg );
     g_ptr_array_unref( arr_document_page );
-    if ( rc )
+    if ( rc == -1 )
     {
         display_message( pv->vf, "Fehler Ausschneiden -\n\nBei Aufruf seiten_loeschen:\n",
                 errmsg, NULL );
         g_free( errmsg );
     }
+    else if ( rc == 1 ) display_message( pv->vf, "Fehler Ausschneiden -\n\nSeiten enthalten Anbindungen\n",
+            NULL );
 
     return;
 }
