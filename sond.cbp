@@ -475,15 +475,6 @@
 			<Option target="SondClient (Release)" />
 			<Option target="SondClient (Testing)" />
 		</Unit>
-		<Unit filename="src/sond/sond_client/sond_client_connection.c">
-			<Option compilerVar="CC" />
-			<Option target="SondClient (Release)" />
-			<Option target="SondClient (Testing)" />
-		</Unit>
-		<Unit filename="src/sond/sond_client/sond_client_connection.h">
-			<Option target="SondClient (Release)" />
-			<Option target="SondClient (Testing)" />
-		</Unit>
 		<Unit filename="src/sond/sond_client/sond_client_file_manager.c">
 			<Option compilerVar="CC" />
 			<Option target="SondClient (Release)" />

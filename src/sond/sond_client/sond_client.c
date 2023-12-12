@@ -301,6 +301,34 @@ sond_client_create_hash(const gchar* password, const gchar* salt_b64, GError** e
 }
 
 
+static gboolean
+sond_client_ping_server( SondClient* sond_client, GError** error )
+{
+    gchar* rcv_message = NULL;
+
+    rcv_message = sond_client_send_and_read( sond_client, "PING", "", error );
+    if ( !rcv_message )
+    {
+        g_prefix_error( error, "%s\n", __func__ );
+        return FALSE;
+    }
+    else if ( !g_strcmp0( rcv_message, "PONG" ) )
+    {
+        g_free( rcv_message );
+
+        return TRUE;
+    }
+    else
+    {
+        *error = g_error_new( SOND_CLIENT_ERROR, SOND_CLIENT_ERROR_INVALRESP,
+                "%s\n%s", __func__, rcv_message );
+        g_free( rcv_message );
+
+        return FALSE;
+    }
+}
+
+
 static gint
 sond_client_get_creds( SondClient* sond_client, GError** error )
 {
@@ -365,7 +393,7 @@ sond_client_get_creds( SondClient* sond_client, GError** error )
             sond_client->user = g_strdup( user );
 
             //versuchen, online zu authentifizieren
-            if ( !sond_client_connection_ping( sond_client, error ) )
+            if ( !sond_client_ping_server( sond_client, error ) )
             {
                 g_prefix_error( error, "%s\n", __func__ );
 

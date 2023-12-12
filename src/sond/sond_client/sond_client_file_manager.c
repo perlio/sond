@@ -169,7 +169,7 @@ sond_client_file_manager_entry_activate( GtkEntry* entry, gpointer data )
                 g_clear_error( &error );
 
                 //Abfrage, ob Akte angelegt werden soll
-                if ( sond_client_connection_ping( sond_client, &error ) )
+//                if ( sond_client_connection_ping( sond_client, &error ) )
                 {
 
 
