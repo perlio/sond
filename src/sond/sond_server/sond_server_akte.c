@@ -83,7 +83,7 @@ sond_server_akte_search_rubrum( MYSQL* con, const gchar* params, GError** error 
     MYSQL_ROW row = NULL;
     GArray* arr_res = NULL;
 
-    sql = g_strdup_printf( "SELECT rel_subject FROM entities WHERE type=%i AND prop_value LIKE '%%%s%%'; ",
+    sql = g_strdup_printf( "SELECT ID_subject FROM entities WHERE type=%i AND prop_value LIKE '%%%s%%'; ",
             _AKTENRUBRUM_, params );
 
     rc = mysql_query( con, sql );
@@ -218,9 +218,9 @@ sond_server_akte_update( SondServer* sond_server, MYSQL* con, SondAkte* sond_akt
     MYSQL_ROW row = NULL;
 
     sql_1 = g_strdup_printf( "SELECT t1.ID_reg_jahr AS ID_akte FROM "
-            "(SELECT rel_subject AS ID_reg_jahr FROM entities WHERE type=%i AND prop_value='%i') AS t1 "
+            "(SELECT ID_subject AS ID_reg_jahr FROM entities WHERE type=%i AND prop_value='%i') AS t1 "
             "JOIN "
-            "(SELECT rel_subject AS ID_reg_nr FROM entities WHERE type=%i AND prop_value='%i') AS t2 "
+            "(SELECT ID_subject AS ID_reg_nr FROM entities WHERE type=%i AND prop_value='%i') AS t2 "
             "ON t1.ID_reg_jahr=t2.ID_reg_nr; ", _REG_JAHR_, sond_akte->reg_jahr, _REG_NR_, sond_akte->reg_nr );
 
     rc = mysql_query( con, sql_1 );
@@ -258,7 +258,7 @@ sond_server_akte_update( SondServer* sond_server, MYSQL* con, SondAkte* sond_akt
     mysql_free_result( mysql_res );
 
     sql_2 = g_strdup_printf( "UPDATE entities SET prop_value='%s' "
-            "WHERE type=%i AND rel_subject=%i; ", sond_akte->aktenrubrum, _AKTENRUBRUM_, ID_akte );
+            "WHERE type=%i AND ID_subject=%i; ", sond_akte->aktenrubrum, _AKTENRUBRUM_, ID_akte );
     rc = mysql_query( con, sql_2 );
     g_free( sql_2 );
     if ( rc )
@@ -271,7 +271,7 @@ sond_server_akte_update( SondServer* sond_server, MYSQL* con, SondAkte* sond_akt
     }
 
     sql_3 = g_strdup_printf( "UPDATE entities SET prop_value='%s' "
-            "WHERE type=%i AND rel_subject=%i; ", sond_akte->aktenkurzbez, _AKTENKURZBEZ_, ID_akte );
+            "WHERE type=%i AND ID_subject=%i; ", sond_akte->aktenkurzbez, _AKTENKURZBEZ_, ID_akte );
     rc = mysql_query( con, sql_3 );
     g_free( sql_3 );
     if ( rc )
@@ -306,9 +306,9 @@ sond_server_akte_create( SondServer* sond_server, MYSQL* con, SondAkte* sond_akt
     g_date_time_unref( date_time );
 
     sql = g_strdup_printf( "SELECT MAX(t2.reg_nr) FROM "
-            "(SELECT rel_subject AS ID_reg_jahr from entities WHERE type=%i AND prop_value='%i') AS t1 "
+            "(SELECT ID_subject AS ID_reg_jahr from entities WHERE type=%i AND prop_value='%i') AS t1 "
             "JOIN "
-            "(SELECT prop_value AS reg_nr, rel_subject AS ID_reg_nr FROM entities WHERE type=%i) t2 "
+            "(SELECT prop_value AS reg_nr, ID_subject AS ID_reg_nr FROM entities WHERE type=%i) t2 "
             "ON t1.ID_reg_jahr=t2.ID_reg_nr; ", _REG_JAHR_, year, _REG_NR_ );
 
     rc = mysql_query( con, sql );
@@ -513,9 +513,9 @@ sond_server_akte_get_ID_from_regnr( SondServer* sond_server, MYSQL* con,
     gint ID_entity = 0;
 
     sql = g_strdup_printf( "SELECT t1.ID_reg_jahr FROM "
-            "(SELECT rel_subject AS ID_reg_jahr FROM entities WHERE type=%i AND prop_value='%i') AS t1 "
+            "(SELECT ID_subject AS ID_reg_jahr FROM entities WHERE type=%i AND prop_value='%i') AS t1 "
             "JOIN "
-            "(SELECT rel_subject AS ID_reg_nr FROM entities WHERE type=%i AND prop_value='%i') AS t2 "
+            "(SELECT ID_subject AS ID_reg_nr FROM entities WHERE type=%i AND prop_value='%i') AS t2 "
             "ON t1.ID_reg_jahr=t2.ID_reg_nr; ", _REG_JAHR_, reg_jahr, _REG_NR_, reg_nr );
 
     rc = mysql_query( con, sql );
@@ -561,11 +561,8 @@ static SondAkte*
 sond_server_akte_laden( SondServer* sond_server, gint reg_nr, gint reg_jahr, GError** error )
 {
     MYSQL* con = NULL;
-    MYSQL_RES* mysql_res = NULL;
-    MYSQL_ROW row = NULL;
-    gchar* sql_2 = NULL;
-    gchar* sql_3 = NULL;
-    gint rc = 0;
+    GArray* arr_aktenrubrum = NULL;
+    GArray* arr_aktenkurzbez = NULL;
     gint ID_entity = 0;
     SondAkte* sond_akte = NULL;
 
@@ -592,88 +589,52 @@ sond_server_akte_laden( SondServer* sond_server, gint reg_nr, gint reg_jahr, GEr
     sond_akte->reg_nr = reg_nr;
     sond_akte->ID_entity = ID_entity;
 
-    sql_2 = g_strdup_printf( "SELECT prop_value FROM entities WHERE rel_subject=%i AND type=%i; ",
-            sond_akte->ID_entity, _AKTENRUBRUM_ );
-
-    rc = mysql_query( con, sql_2 );
-    g_free( sql_2 );
-    if ( rc )
+    arr_aktenrubrum = sond_database_get_properties_of_type( con, _AKTENRUBRUM_,
+            sond_akte->ID_entity, error );
+    if ( !arr_aktenrubrum )
     {
-        if ( error ) *error = g_error_new( g_quark_from_static_string( "MARIADB" ),
-                mysql_errno( con ), "%s\n%s\n\nFehlermeldung: %s",
-                __func__, "mysql_query", mysql_error( con ) );
-        mysql_close( con );
-        g_warning( (*error)->message );
+        g_prefix_error( error, "%s\n", __func__ );
         sond_akte_free( sond_akte );
+        mysql_close( con );
+
+        return NULL;
+    }
+    else if ( arr_aktenrubrum->len != 1 )
+    {
+        if ( error ) *error = g_error_new( SOND_SERVER_ERROR, 0, "%s\nAkte hat %i Rubräi",
+                __func__, arr_aktenrubrum->len );
+        sond_akte_free( sond_akte );
+        mysql_close( con );
+        g_array_unref( arr_aktenrubrum );
 
         return NULL;
     }
 
-    //abfrägen
-    mysql_res = mysql_store_result( con );
-    if ( !mysql_res )
+    sond_akte->aktenrubrum = g_strdup( g_array_index( arr_aktenrubrum, Property, 0).value );
+    g_array_unref( arr_aktenrubrum );
+
+    arr_aktenkurzbez = sond_database_get_properties_of_type( con, _AKTENKURZBEZ_,
+            sond_akte->ID_entity, error );
+
+    if ( !arr_aktenkurzbez )
     {
-        if ( error ) *error = g_error_new( g_quark_from_static_string( "MARIADB" ),
-                mysql_errno( con ), "%s\n%s\n\nFehlermeldung: %s",
-                __func__, "mysql_store_results", mysql_error( con ) );
-        mysql_close( con );
-        g_warning( (*error)->message );
+        g_prefix_error( error, "%s\n", __func__ );
         sond_akte_free( sond_akte );
 
         return NULL;
     }
-
-    row = mysql_fetch_row( mysql_res );
-    if ( row ) sond_akte->aktenrubrum = g_strdup( row[0] );
-    else
+    else if ( arr_aktenkurzbez->len != 1 )
     {
-        *error = g_error_new( SOND_SERVER_ERROR, SOND_SERVER_ERROR_NOTFOUND, "Kein Aktenrubrum gespeichert" );
-        mysql_free_result( mysql_res );
-        mysql_close( con );
+        if ( error ) *error = g_error_new( SOND_SERVER_ERROR, 0, "%s\nAkte hat %i Aktenkurzbezeichnungen",
+                __func__, arr_aktenkurzbez->len );
         sond_akte_free( sond_akte );
+        g_array_unref( arr_aktenkurzbez );
 
         return NULL;
     }
 
-    mysql_free_result( mysql_res );
-
-    sql_3 = g_strdup_printf( "SELECT prop_value FROM entities WHERE rel_subject=%i AND type=%i; ",
-            sond_akte->ID_entity, _AKTENKURZBEZ_);
-
-    rc = mysql_query( con, sql_3 );
-    g_free( sql_3 );
-    if ( rc )
-    {
-        if ( error ) *error = g_error_new( g_quark_from_static_string( "MARIADB" ),
-                mysql_errno( con ), "%s\n%s\n\nFehlermeldung: %s",
-                __func__, "mysql_query", mysql_error( con ) );
-        mysql_close( con );
-        g_warning( (*error)->message );
-        sond_akte_free( sond_akte );
-
-        return NULL;
-    }
-
-    //abfrägen
-    mysql_res = mysql_store_result( con );
-    if ( !mysql_res )
-    {
-        if ( error ) *error = g_error_new( g_quark_from_static_string( "MARIADB" ),
-                mysql_errno( con ), "%s\n%s\n\nFehlermeldung: %s",
-                __func__, "mysql_store_results", mysql_error( con ) );
-        mysql_close( con );
-        g_warning( (*error)->message );
-        sond_akte_free( sond_akte );
-
-        return NULL;
-    }
-
-    row = mysql_fetch_row( mysql_res );
-    if ( row ) sond_akte->aktenkurzbez = g_strdup( row[0] );
-
-    mysql_free_result( mysql_res );
-
-    mysql_close( con );
+    sond_akte->aktenkurzbez = g_strdup( g_array_index( arr_aktenkurzbez, Property, 0 ).value );
+    g_array_unref( arr_aktenkurzbez );
 
     return sond_akte;
 }

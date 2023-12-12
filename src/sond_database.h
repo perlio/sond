@@ -37,8 +37,18 @@ typedef struct _Entity
 typedef struct _Property
 {
     Entity entity;
+    gint ID_subject;
     gchar* value;
 } Property;
+
+void
+sond_database_clear_property( Property* property )
+{
+    g_free( property->value );
+
+    return;
+}
+
 
 typedef struct _Segment
 {
@@ -74,6 +84,8 @@ gint sond_database_insert_rel( gpointer, Type, gint, gint, GError** );
 gint sond_database_insert_property( gpointer, Type, gint, const gchar*, GError** );
 
 GArray* sond_database_get_properties( gpointer, gint, GError** );
+
+GArray* sond_database_get_properties_of_type( gpointer, gint, gint, GError** );
 
 
 

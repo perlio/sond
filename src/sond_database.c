@@ -77,11 +77,11 @@ sond_database_add_to_database( gpointer database, GError** error )
         const gchar* sql = "CREATE TABLE IF NOT EXISTS entities ( "
                 "ID INTEGER, "
                 "type INTEGER NOT NULL, "
-                "rel_subject INTEGER, "
-                "rel_object INTEGER, "
+                "ID_subject INTEGER, "
+                "ID_object INTEGER, "
                 "prop_value TEXT, "
-                "FOREIGN KEY (rel_subject) REFERENCES entities (ID), "
-                "FOREIGN KEY (rel_object) REFERENCES entities (ID), "
+                "FOREIGN KEY (ID_subject) REFERENCES entities (ID), "
+                "FOREIGN KEY (ID_object) REFERENCES entities (ID), "
                 "PRIMARY KEY (ID) "
                 "); ";
 
@@ -100,11 +100,11 @@ sond_database_add_to_database( gpointer database, GError** error )
         const gchar* sql = "CREATE TABLE IF NOT EXISTS entities( "
                 "ID INTEGER PRIMARY KEY AUTO_INCREMENT, "
                 "type INTEGER NOT NULL, "
-                "rel_subject INTEGER, "
-                "rel_object INTEGER, "
+                "ID_subject INTEGER, "
+                "ID_object INTEGER, "
                 "prop_value TEXT, "
-                "FOREIGN KEY (rel_subject) REFERENCES entities (ID), "
-                "FOREIGN KEY (rel_object) REFERENCES entities (ID) "
+                "FOREIGN KEY (ID_subject) REFERENCES entities (ID), "
+                "FOREIGN KEY (ID_object) REFERENCES entities (ID) "
                 "); ";
 
         rc = mysql_query( con, sql );
@@ -182,7 +182,7 @@ sond_database_rollback( gpointer database, GError** error )
 
 
 static gint
-sond_database_insert_row( gpointer database, Type type, gint rel_subject, gint rel_object,
+sond_database_insert_row( gpointer database, Type type, gint ID_subject, gint ID_object,
         const gchar* prop_value, GError** error )
 {
     gint new_node_id = 0;
@@ -192,7 +192,7 @@ sond_database_insert_row( gpointer database, Type type, gint rel_subject, gint r
         gint rc = 0;
         gchar* errmsg = NULL;
         const gchar* sql[] = {
-                "INSERT INTO entities (type, rel_subject, rel_object, prop_value) "
+                "INSERT INTO entities (type, ID_subject, ID_object, prop_value) "
                 "VALUES (?1,?2,?3,?4);",
 
                 "SELECT (last_insert_rowid()); " };
@@ -220,14 +220,14 @@ sond_database_insert_row( gpointer database, Type type, gint rel_subject, gint r
             return -1;
         }
 
-        if ( rel_subject )
+        if ( ID_subject )
         {
             gint rc = 0;
-            rc = sqlite3_bind_int( stmt[0], 2, rel_subject );
+            rc = sqlite3_bind_int( stmt[0], 2, ID_subject );
             if ( rc != SQLITE_OK )
             {
                 if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
-                        rc, "%s\n%s\n\nFehlermeldung: %s", __func__, "sqlite3_bind_int (rel_subject)",
+                        rc, "%s\n%s\n\nFehlermeldung: %s", __func__, "sqlite3_bind_int (ID_subject)",
                         sqlite3_errmsg( database ) );
                 return -1;
             }
@@ -243,13 +243,13 @@ sond_database_insert_row( gpointer database, Type type, gint rel_subject, gint r
             }
         }
 
-        if ( rel_object )
+        if ( ID_object )
         {
-            rc = sqlite3_bind_int( stmt[0], 3, rel_object );
+            rc = sqlite3_bind_int( stmt[0], 3, ID_object );
             if ( rc != SQLITE_OK )
             {
                 if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
-                        rc, "%s\n%s\n\nFehlermeldung: %s", __func__, "sqlite3_bind_int (rel_object)", sqlite3_errmsg( database ) );
+                        rc, "%s\n%s\n\nFehlermeldung: %s", __func__, "sqlite3_bind_int (ID_object)", sqlite3_errmsg( database ) );
                 return -1;
             }
         }
@@ -312,15 +312,15 @@ sond_database_insert_row( gpointer database, Type type, gint rel_subject, gint r
 
         MYSQL* con = (MYSQL*) database;
 
-        if ( rel_subject ) string_subject = g_strdup_printf( "%i", rel_subject );
+        if ( ID_subject ) string_subject = g_strdup_printf( "%i", ID_subject );
         else string_subject = g_strdup( "NULL" );
 
-        if ( rel_object ) string_object = g_strdup_printf( "%i", rel_object );
+        if ( ID_object ) string_object = g_strdup_printf( "%i", ID_object );
         else string_object = g_strdup( "NULL" );
 
         if ( prop_value ) prop_value_sql = g_strdup_printf( "'%s'", prop_value );
 
-        sql_1 = g_strdup_printf( "INSERT INTO entities (type, rel_subject, rel_object, prop_value) "
+        sql_1 = g_strdup_printf( "INSERT INTO entities (type, ID_subject, ID_object, prop_value) "
                 "VALUES (%i,%s,%s,%s);", type, string_subject, string_object, (prop_value) ? prop_value_sql : "NULL" );
 
         g_free( prop_value_sql );
@@ -384,12 +384,12 @@ sond_database_insert_entity( gpointer database, Type type, GError** error )
 
 
 gint
-sond_database_insert_rel( gpointer database, Type type, gint rel_subject,
-        gint rel_object, GError** error )
+sond_database_insert_rel( gpointer database, Type type, gint ID_subject,
+        gint ID_object, GError** error )
 {
     gint rc = 0;
 
-    rc = sond_database_insert_row( database, type, rel_subject, rel_object, NULL, error );
+    rc = sond_database_insert_row( database, type, ID_subject, ID_object, NULL, error );
     g_prefix_error( error, "%s\n", __func__ );
 
     return rc;
@@ -397,12 +397,12 @@ sond_database_insert_rel( gpointer database, Type type, gint rel_subject,
 
 
 gint
-sond_database_insert_property( gpointer database, Type type, gint rel_subject,
+sond_database_insert_property( gpointer database, Type type, gint ID_subject,
         const gchar* prop_value, GError** error )
 {
     gint rc = 0;
 
-    rc = sond_database_insert_row( database, type, rel_subject, 0, prop_value, error );
+    rc = sond_database_insert_row( database, type, ID_subject, 0, prop_value, error );
     g_prefix_error( error, "%s\n", __func__ );
 
     return rc;
@@ -415,7 +415,7 @@ sond_database_get_properties( gpointer database, gint ID_subject, GError** error
     GArray* arr_properties = NULL;
 
     const gchar* sql[] = {
-            "SELECT ID, type, prop_value FROM entities WHERE rel_subject=@1; "
+            "SELECT ID, type, prop_value FROM entities WHERE ID_subject=@1; "
     };
 
     if ( ZOND_IS_DBASE(database) )
@@ -448,6 +448,7 @@ sond_database_get_properties( gpointer database, gint ID_subject, GError** error
         }
 
         arr_properties = g_array_new( FALSE, FALSE, sizeof( Property ) );
+        g_array_set_clear_func( arr_properties, (GDestroyNotify) sond_database_clear_property );
         do
         {
             Property property = { 0 };
@@ -466,6 +467,7 @@ sond_database_get_properties( gpointer database, gint ID_subject, GError** error
 
             property.entity.ID = sqlite3_column_int( stmt[0], 0 );
             property.entity.type = sqlite3_column_int( stmt[0], 1 );
+            property.ID_subject = ID_subject;
             property.value = g_strdup( (const gchar*) sqlite3_column_text( stmt[0], 2 ) );
             g_array_append_val( arr_properties, property );
         } while ( rc == SQLITE_ROW );
@@ -537,13 +539,205 @@ sond_database_get_properties( gpointer database, gint ID_subject, GError** error
         }
 
         arr_properties = g_array_new( FALSE, FALSE, sizeof( Property ) );
+        g_array_set_clear_func( arr_properties, (GDestroyNotify) sond_database_clear_property );
         while ( (row = mysql_fetch_row( mysql_res )) )
         {
             Property property = { 0 };
 
             property.entity.ID = atoi( row[0] );
             property.entity.type = atoi( row[1] );
+            property.ID_subject = ID_subject;
             property.value = g_strdup( row[2] );
+            g_array_append_val( arr_properties, property );
+        }
+
+        mysql_free_result( mysql_res );
+    }
+
+    return arr_properties;
+}
+
+
+GArray*
+sond_database_get_properties_of_type( gpointer database, gint type, gint ID_subject, GError** error )
+{
+    GArray* arr_properties = NULL;
+
+    const gchar* sql[] = {
+            "SELECT ID, prop_value FROM entities WHERE type=@1 AND rel_subject=@2; "
+    };
+
+    if ( ZOND_IS_DBASE(database) )
+    {
+        gint rc = 0;
+        gchar* errmsg = NULL;
+        sqlite3_stmt** stmt = NULL;
+
+        ZondDBase* zond_dbase = ZOND_DBASE(database);
+
+        rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, &errmsg );
+        if ( rc )
+        {
+            if ( error ) *error = g_error_new( ZOND_ERROR, 0,
+                    "%s\nzond_dbase_prepare\n%s", __func__, errmsg );
+            g_free( errmsg );
+
+            return NULL;
+        }
+
+        rc = sqlite3_bind_int( stmt[0], 1, type );
+        if ( rc != SQLITE_OK )
+        {
+            if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
+                    sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
+                    "%s\nzond_dbase_prepare\n%s", __func__,
+                    sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
+
+            return NULL;
+        }
+
+        rc = sqlite3_bind_int( stmt[0], 2, ID_subject );
+        if ( rc != SQLITE_OK )
+        {
+            if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
+                    sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
+                    "%s\nzond_dbase_prepare\n%s", __func__,
+                    sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
+
+            return NULL;
+        }
+
+        arr_properties = g_array_new( FALSE, FALSE, sizeof( Property ) );
+        g_array_set_clear_func( arr_properties, (GDestroyNotify) sond_database_clear_property );
+        do
+        {
+            Property property = { 0 };
+
+            rc = sqlite3_step( stmt[0] );
+            if ( rc != SQLITE_ROW && rc != SQLITE_DONE )
+            {
+                g_array_unref( arr_properties );
+                *error = g_error_new( g_quark_from_static_string( "SQLITE" ),
+                        sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
+                        "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
+
+                return NULL;
+            }
+            else if ( rc == SQLITE_DONE ) break;
+
+            property.entity.ID = sqlite3_column_int( stmt[0], 0 );
+            property.entity.type = type;
+            property.ID_subject = ID_subject;
+            property.value = g_strdup( (const gchar*) sqlite3_column_text( stmt[0], 1 ) );
+            g_array_append_val( arr_properties, property );
+        } while ( rc == SQLITE_ROW );
+    }
+    else //mysql
+    {
+        gint rc = 0;
+        MYSQL* con = NULL;
+        MYSQL_RES* mysql_res = NULL;
+        MYSQL_ROW row = NULL;
+        gchar* sql_mariadb = NULL;
+
+        con = (MYSQL*) database;
+
+        sql_mariadb = g_strdup_printf( "SET @1=%i; SET @2=%i; ", type, ID_subject );
+        sql_mariadb = add_string( sql_mariadb, g_strdup( sql[0] ) );
+
+        rc = mysql_query( con, sql_mariadb );
+        g_free( sql_mariadb );
+        if ( rc )
+        {
+            if ( error ) *error = g_error_new( g_quark_from_static_string( "MARIADB" ),
+                    mysql_errno( con ), "%s\nmysql_query\n%s", __func__, mysql_error( con ) );
+
+            return NULL;
+        }
+
+        //SET = @1;
+        mysql_res = mysql_store_result( con );
+        if ( !mysql_res && mysql_field_count( con ) != 0 )
+        {
+            if ( error ) *error = g_error_new( g_quark_from_static_string( "MARIADB" ),
+                    mysql_errno( con ), "%s\nmysql_store_results\n%s", __func__, mysql_error( con ) );
+
+            return NULL;
+        }
+
+        mysql_free_result( mysql_res );
+
+        rc = mysql_next_result( con );
+        if ( rc == - 1 )
+        {
+            if ( error ) *error = g_error_new( g_quark_from_static_string( "SOND" ), 0,
+                    "%s\nKein weiteres result-set vorhanden", __func__ );
+
+            return NULL;
+        }
+        else if ( rc > 0 )
+        {
+            if ( error ) *error = g_error_new( g_quark_from_static_string( "MARIADB" ),
+                    mysql_errno( con ), "%s\nmysql_next_result\n%s", __func__, mysql_error( con ) );
+
+            return NULL;
+        }
+
+        //SET = @2;
+        mysql_res = mysql_store_result( con );
+        if ( !mysql_res && mysql_field_count( con ) != 0 )
+        {
+            if ( error ) *error = g_error_new( g_quark_from_static_string( "MARIADB" ),
+                    mysql_errno( con ), "%s\nmysql_store_results\n%s", __func__, mysql_error( con ) );
+
+            return NULL;
+        }
+
+        mysql_free_result( mysql_res );
+
+        rc = mysql_next_result( con );
+        if ( rc == - 1 )
+        {
+            if ( error ) *error = g_error_new( g_quark_from_static_string( "SOND" ), 0,
+                    "%s\nKein weiteres result-set vorhanden", __func__ );
+
+            return NULL;
+        }
+        else if ( rc > 0 )
+        {
+            if ( error ) *error = g_error_new( g_quark_from_static_string( "MARIADB" ),
+                    mysql_errno( con ), "%s\nmysql_next_result\n%s", __func__, mysql_error( con ) );
+
+            return NULL;
+        }
+
+        //SELECT ...
+        mysql_res = mysql_store_result( con );
+        if ( !mysql_res && mysql_field_count( con ) != 0 )
+        {
+            if ( error ) *error = g_error_new( g_quark_from_static_string( "MARIADB" ),
+                    mysql_errno( con ), "%s\nmysql_store_results\n%s", __func__, mysql_error( con ) );
+
+            return NULL;
+        }
+        else if ( mysql_field_count( con ) == 0 )
+        {
+            if ( error ) *error = g_error_new( g_quark_from_static_string( "SOND" ), 0,
+                    "%s\nresult_set ist leer", __func__ ); //heißt nicht, daß keine Ergebnisse!
+
+            return NULL;
+        }
+
+        arr_properties = g_array_new( FALSE, FALSE, sizeof( Property ) );
+        g_array_set_clear_func( arr_properties, (GDestroyNotify) sond_database_clear_property );
+        while ( (row = mysql_fetch_row( mysql_res )) )
+        {
+            Property property = { 0 };
+
+            property.entity.ID = atoi( row[0] );
+            property.entity.type = type;
+            property.ID_subject = ID_subject;
+            property.value = g_strdup( row[1] );
             g_array_append_val( arr_properties, property );
         }
 

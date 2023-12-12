@@ -663,7 +663,6 @@ main( gint argc, gchar** argv )
 
     //Arbeitserzeichnis ermitteln
     sond_server.base_dir = get_base_dir( );
-gint rc = chdir( sond_server.base_dir);
 
 #ifndef TESTING
     log_init( &sond_server );
