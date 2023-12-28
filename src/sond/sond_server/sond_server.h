@@ -33,6 +33,7 @@ G_DEFINE_QUARK(sond-server-error-quark,sond_server_error)
 enum SondServerError
 {
     SOND_SERVER_ERROR_NOTFOUND,
+    SOND_SERVER_ERROR_OVERFLOW,
     NUM_SOND_SERVER_ERROR
 };
 
@@ -54,6 +55,8 @@ typedef struct _SondServer
 
     GArray* arr_creds;
     GMutex mutex_arr_creds;
+
+    GMutex mutex_create_akte;
 
     GArray* arr_locks;
     GMutex mutex_arr_locks;

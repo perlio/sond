@@ -4,7 +4,6 @@
 #include "../../sond_treeviewfm.h"
 
 #include "sond_client.h"
-#include "sond_client_connection.h"
 #include "sond_client_misc.h"
 
 typedef struct _FileManager
@@ -174,7 +173,7 @@ sond_client_file_manager_entry_activate( GtkEntry* entry, gpointer data )
 
 
                 }
-                else
+//                else
                 {
                     display_message( sond_client->app_window, "Akte "
                             "ist nicht angelegt -\n\nNeuanlage nicht "

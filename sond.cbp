@@ -30,7 +30,6 @@
 				<Compiler>
 					<Add option="-g" />
 					<Add option="-DTESTING" />
-					<Add option="-DZOND_TESTING" />
 				</Compiler>
 				<Linker>
 					<Add option="-mconsole" />
@@ -76,6 +75,7 @@
 				<Option use_console_runner="0" />
 				<Compiler>
 					<Add option="-g" />
+					<Add option="-DTESTING" />
 				</Compiler>
 			</Target>
 			<Target title="SondServer (Release)">

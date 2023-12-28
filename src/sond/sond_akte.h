@@ -45,6 +45,7 @@ typedef struct _SondAkte
     gint reg_nr;
     gchar* aktenrubrum;
     gchar* aktenkurzbez;
+    GPtrArray* arr_leben;
 } SondAkte;
 
 /*

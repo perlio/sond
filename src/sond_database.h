@@ -9,6 +9,7 @@ G_DEFINE_QUARK(sond-database-error-quark,sond_database_error)
 enum SondDatabaseError
 {
     SOND_DATABASE_ERROR_NORESULT,
+    SOND_DATABASE_ERROR_TOOMANYRESULTS,
     SOND_DATABASE_ERROR_ROLLBACKFAILED,
     NUM_SOND_DATABASE_ERROR
 };
@@ -25,9 +26,11 @@ typedef enum
     _REG_NR_,
     _AKTENRUBRUM_,
     _AKTENKURZBEZ_,
+    _ABLAGENR_,
     NUM_TYPES
 } Type;
 
+//Folgende Strukturen beschreiben den Datensatz, nicht unbedingt den "Knoten" oder die "Kante"
 typedef struct _Entity
 {
     gint ID;
@@ -40,6 +43,13 @@ typedef struct _Property
     gint ID_subject;
     gchar* value;
 } Property;
+
+typedef struct _Rel
+{
+    Entity entity;
+    gint ID_subject;
+    gint ID_object;
+} Rel;
 
 void
 sond_database_clear_property( Property* property )
@@ -86,6 +96,8 @@ gint sond_database_insert_property( gpointer, Type, gint, const gchar*, GError**
 GArray* sond_database_get_properties( gpointer, gint, GError** );
 
 GArray* sond_database_get_properties_of_type( gpointer, gint, gint, GError** );
+
+gint sond_database_get_only_property_of_type( gpointer, gint, gint, Property*, GError** );
 
 
 

@@ -3,18 +3,7 @@
 
 #include "sond_akte.h"
 
-
 /*
-static void
-akte_lebenszeit_free( AkteLebenszeit* akte_lebenszeit )
-{
-    g_date_time_unref( akte_lebenszeit->von );
-    g_date_time_unref( akte_lebenszeit->bis );
-
-    g_free( akte_lebenszeit );
-}
-
-
 static void
 akte_beteiligter_free( AkteBeteiligter* akte_beteiligter )
 {
@@ -48,11 +37,12 @@ sond_akte_free( SondAkte* sond_akte )
 
     g_free( sond_akte->aktenrubrum );
     g_free( sond_akte->aktenkurzbez );
+
+    g_ptr_array_unref( sond_akte->arr_leben );
 /*
     akte_sachbearbeiter_free( akte->akte_sachbearbeiter );
 
     g_ptr_array_unref( akte->arr_beteiligte );
-    g_ptr_array_unref( akte->arr_lebenszeiten );
 */
     g_free( sond_akte );
 
@@ -64,10 +54,11 @@ SondAkte*
 sond_akte_new( void )
 {
     SondAkte* sond_akte = g_malloc0( sizeof( SondAkte ) );
+
+    sond_akte->arr_leben = g_ptr_array_new( );
 /*
     akte->arr_beteiligte = g_ptr_array_new_with_free_func( (GDestroyNotify) akte_beteiligter_free );
 
-    akte->arr_lebenszeiten = g_ptr_array_new_with_free_func( (GDestroyNotify) akte_lebenszeit_free );
 */
     return sond_akte;
 }
@@ -116,6 +107,16 @@ sond_akte_new_from_json( const gchar* json, GError** error )
     if ( json_object_has_member( object, "aktenkurzbez" ) )
             sond_akte->aktenkurzbez = g_strdup( json_object_get_string_member( object, "aktenkurzbez" ) );
 
+    if ( json_object_has_member( object, "leben" ) )
+    {
+        JsonArray* array = NULL;
+
+        array = json_object_get_array_member( object, "leben" );
+        for ( gint i = 0; i < json_array_get_length( array ); i++ )
+                g_ptr_array_add( sond_akte->arr_leben,
+                GUINT_TO_POINTER((guint) json_array_get_int_element( array, i )) );
+    }
+
     json_node_unref( node );
 
     return sond_akte;
@@ -136,6 +137,18 @@ sond_akte_to_json_object( SondAkte* sond_akte )
 
     json_object_set_string_member( object, "aktenrubrum", sond_akte->aktenrubrum );
     json_object_set_string_member( object, "aktenkurzbez", sond_akte->aktenkurzbez );
+
+    if ( sond_akte->arr_leben->len > 0 )
+    {
+        JsonArray* array = NULL;
+
+        array = json_array_new( );
+        for ( gint i = 0; i < sond_akte->arr_leben->len; i++ )
+                json_array_add_int_element( array,
+                (gint64) GPOINTER_TO_UINT(g_ptr_array_index( sond_akte->arr_leben, i )) );
+
+        json_object_set_array_member( object, "leben", array ); //takes ownership
+    }
 
     return object;
 }

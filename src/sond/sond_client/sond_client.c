@@ -12,7 +12,6 @@
 
 #include "sond_client.h"
 #include "sond_client_akte.h"
-#include "sond_client_connection.h"
 #include "sond_client_file_manager.h"
 #include "sond_client_misc.h"
 

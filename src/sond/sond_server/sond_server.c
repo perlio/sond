@@ -455,6 +455,7 @@ sond_server_free( SondServer* sond_server )
     g_free( sond_server->auth_token );
 
     g_mutex_clear( &sond_server->mutex_arr_creds );
+    g_mutex_clear( &sond_server->mutex_create_akte );
     g_mutex_clear( &sond_server->mutex_arr_locks );
 
     return;
@@ -694,7 +695,10 @@ main( gint argc, gchar** argv )
     g_array_set_clear_func( sond_server.arr_creds, (GDestroyNotify) free_cred );
     g_mutex_init( &sond_server.mutex_arr_creds );
 
-    //mutex
+    //mutex create akte
+    g_mutex_init( &sond_server.mutex_create_akte );
+
+    //arr_locks
     sond_server.arr_locks = g_array_new( FALSE, FALSE, sizeof( Lock ) );
     g_mutex_init( &sond_server.mutex_arr_locks );
 

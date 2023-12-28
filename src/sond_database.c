@@ -558,13 +558,24 @@ sond_database_get_properties( gpointer database, gint ID_subject, GError** error
 }
 
 
+
+static gint
+sond_database_compare_property_value( gconstpointer a, gconstpointer b )
+{
+    Property* prop_a = (Property*) a;
+    Property* prop_b = (Property*) b;
+
+    return g_strcmp0( prop_a->value, prop_b->value );
+}
+
+
 GArray*
 sond_database_get_properties_of_type( gpointer database, gint type, gint ID_subject, GError** error )
 {
     GArray* arr_properties = NULL;
 
     const gchar* sql[] = {
-            "SELECT ID, prop_value FROM entities WHERE type=@1 AND rel_subject=@2; "
+            "SELECT ID, prop_value FROM entities WHERE type=@1 AND ID_subject=@2; "
     };
 
     if ( ZOND_IS_DBASE(database) )
@@ -744,10 +755,50 @@ sond_database_get_properties_of_type( gpointer database, gint type, gint ID_subj
         mysql_free_result( mysql_res );
     }
 
+    g_array_sort( arr_properties, sond_database_compare_property_value );
+
     return arr_properties;
 }
 
 
+gint
+sond_database_get_only_property_of_type( gpointer database, gint type, gint ID_subject,
+        Property* property, GError** error )
+{
+    GArray* arr_properties = NULL;
+
+    arr_properties = sond_database_get_properties_of_type( database, type, ID_subject, error );
+    if ( !arr_properties )
+    {
+        g_prefix_error( error, "%s\n", __func__ );
+
+        return -1;
+    }
+
+    if ( arr_properties->len != 1 )
+    {
+        if ( error )
+        {
+            gint code = 0;
+
+            if ( arr_properties->len == 0 ) code = SOND_DATABASE_ERROR_NORESULT;
+            else code = SOND_DATABASE_ERROR_TOOMANYRESULTS;
+
+            *error = g_error_new( SOND_DATABASE_ERROR, code,
+                    "%s\nNicht genau eine property vom Typ %i", __func__, type );
+        }
+
+        g_array_unref( arr_properties );
+
+        return -1;
+    }
+
+    *property = g_array_index( arr_properties, Property, 0 );
+    property->value = g_strdup( property->value ); //deep-copy
+    g_array_unref( arr_properties );
+
+    return 0;
+}
 
 
 

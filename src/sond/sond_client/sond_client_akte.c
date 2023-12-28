@@ -23,7 +23,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "sond_client.h"
 #include "sond_client_misc.h"
-#include "sond_client_connection.h"
 
 
 typedef struct _SondClientAkte
@@ -37,11 +36,15 @@ typedef struct _SondClientAkte
     //Widgets
     GtkWidget* entry_reg_nr;
     GtkWidget* button_neu;
-    GtkWidget* button_ok;
     GtkWidget* button_unlock;
 
     GtkWidget* entry_aktenrubrum;
     GtkWidget* entry_aktenkurzbez;
+
+    GtkWidget* button_activ;
+    GtkWidget* label_popover_hist;
+
+    GtkWidget* button_ok;
 } SondClientAkte;
 
 
@@ -125,6 +128,7 @@ sond_client_akte_button_ok_clicked( GtkButton* button, gpointer data )
                 g_strdup( gtk_entry_get_text( GTK_ENTRY(sond_client_akte->entry_aktenrubrum) ) );
 
     }
+
     if ( g_strcmp0( sond_client_akte->sond_akte->aktenkurzbez,
             gtk_entry_get_text( GTK_ENTRY(sond_client_akte->entry_aktenkurzbez) ) ) )
     {
@@ -132,6 +136,17 @@ sond_client_akte_button_ok_clicked( GtkButton* button, gpointer data )
         g_free( sond_client_akte->sond_akte->aktenkurzbez );
         sond_client_akte->sond_akte->aktenkurzbez =
                 g_strdup( gtk_entry_get_text( GTK_ENTRY(sond_client_akte->entry_aktenkurzbez) ) );
+    }
+
+    //Aktivierungszustand hat sich geändert
+    if ( sond_client_akte->sond_akte->arr_leben->len && //Akte wird nicht neu angelegt
+            (((sond_client_akte->sond_akte->arr_leben->len % 3) == 0) == //Abgelegt == TRUE
+            gtk_widget_get_sensitive( gtk_widget_get_parent( sond_client_akte->entry_aktenrubrum ) )) ) //Akte editable
+    {
+        changed = TRUE;
+
+        //Marker ans Ende des Lebens-array setzen
+        g_ptr_array_add( sond_client_akte->sond_akte->arr_leben, GUINT_TO_POINTER(1) );
     }
 
     if ( changed ) do
@@ -217,6 +232,36 @@ sond_client_akte_button_ok_clicked( GtkButton* button, gpointer data )
                 }
             }
         }
+        else if ( g_str_has_prefix( resp, "EXISTS" ) ) //Akte mit angegebener RegNr sollte erzeugt werden und wurde zwischenzeitlich schon erzeugt
+        {
+            gint rc = 0;
+            gint ID_akte = 0;
+            GError* error = NULL;
+
+            rc = abfrage_frage( sond_client_akte->window,
+                    "Akte wurde in der Zwischenzeit erzeugt",
+                    "Etwaige Änderungen überschreiben?", NULL );
+            if ( rc == GTK_RESPONSE_NO )
+            {
+                g_free( resp );
+                break;
+            }
+
+            ID_akte = atoi( resp + 6 );
+            rc = sond_client_get_lock( sond_client_akte->sond_client, ID_akte, &error );
+            if ( rc )
+            {
+                display_message( sond_client_akte->window,
+                        "Lock konnte nicht geholt werden\n\n", error->message, NULL );
+                g_error_free( error );
+                g_free( resp );
+
+                return; //Fenster bleibt geöffnet; je nach Fehler kann man es nochmal versuchen
+            }
+
+            //Marker, daß Akte upgedatet werden soll und keine Änderung an Historie
+            g_ptr_array_add( sond_client_akte->sond_akte->arr_leben, GUINT_TO_POINTER(0) );
+        }
         else
         {
             g_free( resp );
@@ -231,16 +276,32 @@ sond_client_akte_button_ok_clicked( GtkButton* button, gpointer data )
 
 
 static void
-sond_client_akte_loaded( SondClientAkte* sond_client_akte, gboolean editable )
+sond_client_akte_set_activ( SondClientAkte* sond_client_akte, gboolean activ )
+{
+    gtk_widget_set_sensitive( gtk_widget_get_parent( sond_client_akte->entry_aktenrubrum ), activ );
+    gtk_widget_set_sensitive( gtk_widget_get_parent( sond_client_akte->entry_aktenkurzbez ), activ );
+
+    if ( activ ) gtk_button_set_label( GTK_BUTTON(sond_client_akte->button_activ), "Ablegen" );
+    else gtk_button_set_label( GTK_BUTTON(sond_client_akte->button_activ), "Reaktivieren" );
+
+    return;
+}
+
+
+static void
+sond_client_akte_loaded( SondClientAkte* sond_client_akte, gboolean unlocked,
+        gboolean neu )
 {
     gtk_widget_set_sensitive( sond_client_akte->button_neu, FALSE );
     gtk_widget_set_sensitive( sond_client_akte->entry_reg_nr, FALSE );
 
-    gtk_widget_set_sensitive( sond_client_akte->button_unlock, !editable );
+    sond_client_akte_set_activ( sond_client_akte, neu || (unlocked && (sond_client_akte->sond_akte->arr_leben->len % 3)) );
 
-    gtk_widget_set_sensitive( gtk_widget_get_parent( sond_client_akte->entry_aktenrubrum ), editable );
-    gtk_widget_set_sensitive( gtk_widget_get_parent( sond_client_akte->entry_aktenkurzbez ), editable );
-    gtk_widget_set_sensitive( sond_client_akte->button_ok, editable );
+    gtk_widget_set_sensitive( sond_client_akte->button_unlock, !unlocked );
+
+    gtk_widget_set_sensitive( sond_client_akte->button_activ, (!neu) && unlocked );
+
+    gtk_widget_set_sensitive( sond_client_akte->button_ok, unlocked );
 
     return;
 }
@@ -266,7 +327,9 @@ sond_client_akte_button_unlock_clicked( GtkButton* button, gpointer data )
 
     gtk_widget_set_sensitive( sond_client_akte->button_unlock, FALSE );
 
-    sond_client_akte_loaded( sond_client_akte, TRUE );
+    sond_client_akte_set_activ( sond_client_akte, (sond_client_akte->sond_akte->arr_leben->len % 3) );
+    gtk_widget_set_sensitive( sond_client_akte->button_activ, TRUE );
+    gtk_widget_set_sensitive( sond_client_akte->button_ok, TRUE );
 
     return;
 }
@@ -295,6 +358,14 @@ sond_client_akte_holen( SondClientAkte* sond_client_akte, gint reg_nr, gint reg_
                 "%s\nServer antwortet: %s", __func__, resp );
         g_free( resp );
         return -1;
+    }
+    else if ( !g_strcmp0( resp, "NOT_FOUND" ) )
+    {
+        sond_client_akte->sond_akte = sond_akte_new( );
+        sond_client_akte->sond_akte->reg_nr = reg_nr;
+        sond_client_akte->sond_akte->reg_jahr = reg_jahr;
+
+        return 1;
     }
 
     if ( g_str_has_prefix( resp, "LOCKED" ) )
@@ -353,13 +424,22 @@ sond_client_akte_load( SondClientAkte* sond_client_akte, gint reg_nr, gint reg_j
     }
 
     rc = sond_client_akte_holen( sond_client_akte, reg_nr, reg_jahr, &user, &error );
-    if ( rc )
+    if ( rc == -1 )
     {
         display_message( sond_client_akte->window, "Akte kann nicht geladen werden\n\n",
                 error->message, NULL );
         g_error_free( error );
 
         return; //Fenster bleibt geöffnet; je nach Fehler kann man es nochmal versuchen
+    }
+    else if ( rc == 1 ) //Akte nicht gefunden
+    {
+        gint res = 0;
+        res = abfrage_frage( sond_client_akte->window, "Akte existiert nicht", "Erstellen?", NULL );
+        if ( res != GTK_RESPONSE_YES ) gtk_entry_set_text( GTK_ENTRY(sond_client_akte->entry_reg_nr), "" );
+        else sond_client_akte_loaded( sond_client_akte, TRUE, TRUE );
+
+        return;
     }
 
     sond_client_akte->sond_client->reg_nr_akt = reg_nr;
@@ -370,11 +450,19 @@ sond_client_akte_load( SondClientAkte* sond_client_akte, gint reg_nr, gint reg_j
     gtk_entry_set_text( GTK_ENTRY(sond_client_akte->entry_aktenkurzbez),
             sond_client_akte->sond_akte->aktenkurzbez );
 
+    //Lebenslauf der Akte einlesen
+    for ( gint i = 0; i < sond_client_akte->sond_akte->arr_leben->len; i += 3 )
+    {
+
+    }
+
     if ( user ) display_message( sond_client_akte->window, "Akte ist zur "
             "Bearbeitung durch Benutzer \n", user, " gesperrt", NULL );
 
-    sond_client_akte_loaded( sond_client_akte, (user) ? FALSE : TRUE );
+    sond_client_akte_loaded( sond_client_akte, (user) ? FALSE : TRUE, FALSE );
     g_free( user );
+
+    return;
 }
 
 
@@ -478,6 +566,21 @@ sond_client_akte_auswahlfenster( SondClientAkte* sond_client_akte,
 
 
 static void
+sond_client_akte_button_activ_clicked( GtkButton* button, gpointer data )
+{
+    gboolean active = FALSE;
+
+    SondClientAkte* sond_client_akte = (SondClientAkte*) data;
+
+    active = gtk_widget_get_sensitive( gtk_widget_get_parent( sond_client_akte->entry_aktenrubrum ) );
+
+    sond_client_akte_set_activ( sond_client_akte, !active );
+
+    return;
+}
+
+
+static void
 sond_client_akte_entry_reg_nr_activate( GtkEntry* entry, gpointer data )
 {
     SondClientAkte* sond_client_akte = (SondClientAkte*) data;
@@ -556,7 +659,7 @@ sond_client_akte_button_neu_clicked( GtkButton* button, gpointer data )
 
     sond_client_akte->sond_akte = sond_akte_new( );
 
-    sond_client_akte_loaded( sond_client_akte, TRUE );
+    sond_client_akte_loaded( sond_client_akte, TRUE, TRUE );
 
     return;
 }
@@ -608,16 +711,35 @@ sond_client_akte_init( GtkButton* button, gpointer data )
     GtkWidget* frame_aktenrubrum = gtk_frame_new( "Rubrum" );
     sond_client_akte->entry_aktenrubrum = gtk_entry_new( );
     gtk_container_add( GTK_CONTAINER(frame_aktenrubrum), sond_client_akte->entry_aktenrubrum );
-    gtk_grid_attach( GTK_GRID(grid), frame_aktenrubrum, 1, 2, 1, 1 );
+    gtk_grid_attach( GTK_GRID(grid), frame_aktenrubrum, 1, 1, 1, 1 );
     gtk_widget_set_sensitive( frame_aktenrubrum, FALSE );
 
     //Entry "Aktenkurzbez"
     GtkWidget* frame_aktenkurzbez = gtk_frame_new( "Kurzbezeichnung" );
     sond_client_akte->entry_aktenkurzbez = gtk_entry_new( );
     gtk_container_add( GTK_CONTAINER(frame_aktenkurzbez), sond_client_akte->entry_aktenkurzbez );
-    gtk_grid_attach( GTK_GRID(grid), frame_aktenkurzbez, 1, 3, 1, 1 );
+    gtk_grid_attach( GTK_GRID(grid), frame_aktenkurzbez, 1, 2, 1, 1 );
     gtk_widget_set_sensitive( frame_aktenkurzbez, FALSE );
 
+    //aktivieren/ablegen
+    sond_client_akte->button_activ = gtk_button_new_with_label( "Ablegen" );
+    gtk_grid_attach( GTK_GRID(grid), sond_client_akte->button_activ, 5, 0, 1, 1 );
+    g_signal_connect( sond_client_akte->button_activ, "clicked",
+            G_CALLBACK(sond_client_akte_button_activ_clicked), sond_client_akte );
+    gtk_widget_set_sensitive( sond_client_akte->button_activ, FALSE );
+
+    //aktenhistorie
+    GtkWidget* popover_hist = gtk_popover_new( sond_client_akte->button_activ );
+    sond_client_akte->label_popover_hist = gtk_label_new( NULL );
+    gtk_container_add( GTK_CONTAINER(popover_hist), sond_client_akte->label_popover_hist );
+    g_signal_connect_swapped( sond_client_akte->button_activ,
+            "enter-notify-event", G_CALLBACK(gtk_popover_popup),
+            popover_hist );
+    g_signal_connect_swapped( sond_client_akte->button_activ,
+            "leave-notify-event", G_CALLBACK(gtk_popover_popdown),
+            popover_hist );
+
+    gtk_popover_set_modal( GTK_POPOVER(popover_hist), FALSE );
 
     sond_client_akte->button_ok = gtk_button_new_with_label(
             "OK" );
