@@ -18,6 +18,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include <gtk/gtk.h>
 #include <json-glib/json-glib.h>
+#include <time.h>
+
 #include "../../misc.h"
 #include "../sond_akte.h"
 
@@ -402,6 +404,7 @@ sond_client_akte_load( SondClientAkte* sond_client_akte, gint reg_nr, gint reg_j
     gchar* user = FALSE;
     GError* error = NULL;
     gint rc = 0;
+    gchar* text_label = NULL;
 
     //test auf schon geöffnetes Aktenfenster
     for ( gint i = 0; i < sond_client_akte->sond_client->arr_children_windows->len; i++ )
@@ -453,8 +456,41 @@ sond_client_akte_load( SondClientAkte* sond_client_akte, gint reg_nr, gint reg_j
     //Lebenslauf der Akte einlesen
     for ( gint i = 0; i < sond_client_akte->sond_akte->arr_leben->len; i += 3 )
     {
+        time_t val = 0;
+        struct tm* s_tm = NULL;
+        gchar time_text[64] = { 0 };
+        gchar* text = NULL;
 
+        val = GPOINTER_TO_UINT(g_ptr_array_index( sond_client_akte->sond_akte->arr_leben, i ));
+        s_tm = localtime( &val );
+        strftime( time_text, 64, "%d. %b %Y", s_tm );
+        text = g_strdup_printf( "Anlage: %s", time_text );
+        text_label = add_string( NULL, text );
+
+        if ( i + 1 >= sond_client_akte->sond_akte->arr_leben->len ) break;
+
+        val = GPOINTER_TO_UINT(g_ptr_array_index( sond_client_akte->sond_akte->arr_leben, i + 1 ));
+        s_tm = localtime( &val );
+        strftime( time_text, 64, "%d. %b %Y", s_tm );
+        text = g_strdup_printf( "\nAblage: %s", time_text );
+        text_label = add_string( text_label, text );
+
+        if ( i + 2 >= sond_client_akte->sond_akte->arr_leben->len )
+        {
+            g_free( text_label );
+            display_message( sond_client_akte->window, "Aktenablage ohne Ablagenummer",
+                    NULL );
+
+            break; //Fenster bleibt geöffnet; je nach Fehler kann man es nochmal versuchen
+        }
+
+        val = GPOINTER_TO_UINT(g_ptr_array_index( sond_client_akte->sond_akte->arr_leben, i + 2 ));
+        text = g_strdup_printf( " - Ablagenr: %lld", val );
+        text_label = add_string( text_label, text );
     }
+
+    gtk_label_set_text( GTK_LABEL(sond_client_akte->label_popover_hist), text_label );
+    g_free( text_label );
 
     if ( user ) display_message( sond_client_akte->window, "Akte ist zur "
             "Bearbeitung durch Benutzer \n", user, " gesperrt", NULL );
@@ -732,6 +768,10 @@ sond_client_akte_init( GtkButton* button, gpointer data )
     GtkWidget* popover_hist = gtk_popover_new( sond_client_akte->button_activ );
     sond_client_akte->label_popover_hist = gtk_label_new( NULL );
     gtk_container_add( GTK_CONTAINER(popover_hist), sond_client_akte->label_popover_hist );
+
+    gtk_widget_show_all( popover_hist );
+    gtk_popover_popdown( GTK_POPOVER(popover_hist) );
+
     g_signal_connect_swapped( sond_client_akte->button_activ,
             "enter-notify-event", G_CALLBACK(gtk_popover_popup),
             popover_hist );
