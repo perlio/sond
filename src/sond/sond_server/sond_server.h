@@ -69,6 +69,7 @@ typedef struct _SondServer
     gchar* mysql_path_ca;
 
     gchar* seafile_user;
+    gint seafile_group_id;
     gchar* seafile_password;
     gchar* seafile_url;
     gchar* auth_token;

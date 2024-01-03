@@ -524,6 +524,15 @@
 			<Option target="SondServer (Release)" />
 			<Option target="SondServer (Testing)" />
 		</Unit>
+		<Unit filename="src/sond/sond_server/sond_server_seafile.c">
+			<Option compilerVar="CC" />
+			<Option target="SondServer (Release)" />
+			<Option target="SondServer (Testing)" />
+		</Unit>
+		<Unit filename="src/sond/sond_server/sond_server_seafile.h">
+			<Option target="SondServer (Release)" />
+			<Option target="SondServer (Testing)" />
+		</Unit>
 		<Unit filename="src/sond_checkbox.c">
 			<Option compilerVar="CC" />
 			<Option target="zond (Release)" />

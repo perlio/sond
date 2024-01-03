@@ -429,7 +429,6 @@ callback_socket_incoming( GSocketService *service,
         }
     }
 
-
     return FALSE;
 }
 
@@ -516,14 +515,23 @@ init_socket_service( GKeyFile* keyfile, SondServer* sond_server )
 
 
 static void
-get_auth_token( GKeyFile* keyfile, SondServer* sond_server )
+sond_server_init_seafile( GKeyFile* keyfile, SondServer* sond_server )
 {
     GError* error = NULL;
     gchar* errmsg = NULL;
+    gchar* seafile_group = NULL;
 
     sond_server->seafile_user = g_key_file_get_string( keyfile, "SEAFILE", "user", &error );
     if ( error ) g_error( "Seafile-user konnte nicht ermittelt werden:\n%s",
             error->message );
+
+    seafile_group = g_key_file_get_string( keyfile, "SEAFILE", "group", &error );
+    if ( error ) g_error( "Seafile-group konnte nicht ermittelt werden:\n%s",
+            error->message );
+
+    //ToDo: group-id abfragen
+    sond_server->seafile_group_id = 1;
+    g_free( seafile_group );
 
     sond_server->seafile_url = g_key_file_get_string( keyfile, "SEAFILE", "url", &error );
     if ( error ) g_error( "SEAFILE-host konnte nicht ermittelt werden:\n%s",
@@ -679,7 +687,7 @@ main( gint argc, gchar** argv )
     if ( !success ) g_error( "SondServer.conf konnte nicht gelesen werden:\n%s",
             error->message );
 
-    get_auth_token( keyfile, &sond_server );
+    sond_server_init_seafile( keyfile, &sond_server );
 
     init_con( keyfile, &sond_server );
 

@@ -27,6 +27,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "sond_server.h"
 #include "sond_server_akte.h"
+#include "sond_server_seafile.h"
 
 
 static SondAkte*
@@ -649,6 +650,7 @@ sond_server_akte_schreiben( SondServer* sond_server, gint auth,
             g_error_free( error );
             sond_akte_free( sond_akte );
             g_mutex_unlock( &sond_server->mutex_create_akte );
+            mysql_close( con );
 
             return;
         }
@@ -657,6 +659,7 @@ sond_server_akte_schreiben( SondServer* sond_server, gint auth,
             *omessage = g_strdup_printf( "EXISTS%d", ID_akte );
             sond_akte_free( sond_akte );
             g_mutex_unlock( &sond_server->mutex_create_akte );
+            mysql_close( con );
 
             return;
         }
@@ -672,6 +675,7 @@ sond_server_akte_schreiben( SondServer* sond_server, gint auth,
         g_error_free( error );
         sond_akte_free( sond_akte );
         if ( create ) g_mutex_unlock( &sond_server->mutex_create_akte );
+        mysql_close( con );
 
         return;
     }
@@ -698,32 +702,81 @@ sond_server_akte_schreiben( SondServer* sond_server, gint auth,
         res = sond_database_rollback( con, &error_tmp );
         if ( res )
         {
-            g_message( "Rollback gescheitert\n\n%s", error_tmp->message );
-            mysql_close( con );
+            gchar* message = NULL;
+
+            message = g_strdup_printf( "\n\nRollback gescheitert\n\n%s\n\nAnlage Akte %d-%d",
+                    error_tmp->message, reg_jahr, reg_nr );
+            g_clear_error( &error_tmp );
+
+            g_warning( message );
+            *omessage = add_string( *omessage, message );
+            g_free( message );
         }
+        mysql_close( con );
 
         return;
+    }
+
+    if ( create )
+    {
+        rc = sond_server_seafile_create_akte( sond_server, reg_nr, reg_jahr, &error );
+        if ( rc )
+        {
+            gint res = 0;
+            GError* error_tmp = NULL;
+
+            *omessage = g_strconcat( "ERROR *** Akte konnte nicht angelegt/geändert werden\n\n",
+                    "sond_server_seafile_akte_schreiben\n", error->message, NULL );
+            g_error_free( error );
+
+            res = sond_database_rollback( con, &error_tmp );
+            if ( res )
+            {
+                gchar* message = NULL;
+
+                message = g_strdup_printf( "\n\nRollback gescheitert\n\n%s\n\nAnlage Akte %d-%d",
+                        error_tmp->message, reg_jahr, reg_nr );
+                g_clear_error( &error_tmp );
+
+                g_warning( message );
+                *omessage = add_string( *omessage, message );
+                g_free( message );
+            }
+            mysql_close( con );
+
+            return;
+        }
     }
 
     rc = sond_database_commit( con, &error );
     if ( rc )
     {
         gint res = 0;
+        GError* error_tmp = NULL;
 
         *omessage = g_strconcat( "ERROR *** Akte konnte nicht angelegt/geändert werden\n\n",
-                error->message, NULL );
+                "sond_database_commit\n%s", error->message, NULL );
         g_clear_error( &error );
 
-        res = sond_database_rollback( con, &error );
+        res = sond_database_rollback( con, &error_tmp );
         if ( res )
         {
-            g_message( "Rollback gescheitert\n\n%s", error->message );
-            g_error_free( error );
-            mysql_close( con );
+            gchar* message = NULL;
+
+            message = g_strdup_printf( "\n\nRollback gescheitert\n\n%s\n\nAnlage Akte %d-%d",
+                    error_tmp->message, reg_jahr, reg_nr );
+            g_clear_error( &error_tmp );
+
+            g_warning( message );
+            *omessage = add_string( *omessage, message );
+            g_free( message );
         }
+        mysql_close( con );
 
         return;
     }
+
+    mysql_close( con );
 
     if ( create ) *omessage = g_strdup_printf( "NEU%i-%i", reg_nr, reg_jahr );
     else *omessage = g_strdup( "OK" );

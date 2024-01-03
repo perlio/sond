@@ -306,7 +306,7 @@ zond_update_get_vtag( Projekt* zond, GError** error )
 {
     CURL* curl = NULL;
     CURLcode res = 0;
-    struct memory mem = { 0 };
+    CurlUserData mem = { 0 };
 
     gboolean ret = FALSE;
     JsonParser* parser = NULL;
@@ -317,7 +317,7 @@ zond_update_get_vtag( Projekt* zond, GError** error )
     curl_easy_setopt( curl, CURLOPT_SSL_OPTIONS, (long)CURLSSLOPT_NATIVE_CA );
     curl_easy_setopt( curl, CURLOPT_USERAGENT, "perlio" );
     curl_easy_setopt( curl, CURLOPT_URL, "https://api.github.com/repos/perlio/sond/releases/latest" );
-    curl_easy_setopt( curl, CURLOPT_WRITEFUNCTION, write_cb);
+    curl_easy_setopt( curl, CURLOPT_WRITEFUNCTION, curl_write_cb );
     curl_easy_setopt( curl, CURLOPT_WRITEDATA, &mem);
 
     res = curl_easy_perform( curl );
@@ -326,12 +326,14 @@ zond_update_get_vtag( Projekt* zond, GError** error )
     {
         *error = g_error_new( ZOND_ERROR, ZOND_ERROR_CURL,
                 "%s\ncurl_easy_perform:\n%s", __func__, curl_easy_strerror( res ) );
+        free( mem.response );
+
         return NULL;
     }
 
     parser = json_parser_new( );
     ret = json_parser_load_from_data( parser, mem.response, -1, error );
-    g_free( mem.response );
+    free( mem.response );
     if ( !ret )
     {
         g_prefix_error( error, "%s\njson_parser_load_from_data\n", __func__ );
