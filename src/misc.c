@@ -46,7 +46,7 @@ void display_message( GtkWidget* window, ... )
             message = add_string( message, g_strdup( str ) );
 
     va_end( ap );
-printf("Message: %s\n", message);
+
     GtkWidget* dialog = gtk_message_dialog_new( GTK_WINDOW(window),
             GTK_DIALOG_DESTROY_WITH_PARENT, GTK_MESSAGE_INFO,
             GTK_BUTTONS_CLOSE, message );

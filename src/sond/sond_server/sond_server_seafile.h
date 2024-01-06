@@ -19,8 +19,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifndef SOND_SERVER_SEAFILE_H_INCLUDED
 #define SOND_SERVER_SEAFILE_H_INCLUDED
 
-gint sond_server_seafile_delete_lib( SondServer*, const gchar*, GError** );
-
 gint sond_server_seafile_create_akte( SondServer*, gint, gint, GError** );
 
 #endif // SOND_SERVER_SEAFILE_H_INCLUDED
