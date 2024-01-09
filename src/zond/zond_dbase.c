@@ -25,8 +25,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "../misc.h"
 
-#define OFFSET ((baum == BAUM_INHALT) ? 0 : 1)
-
 typedef enum
 {
     PROP_PATH = 1,
@@ -163,6 +161,126 @@ zond_dbase_init( ZondDBase* self )
 //    ZondDBasePrivate* priv = zond_dbase_get_instance_private( self );
 
     return;
+}
+
+
+static gint
+zond_dbase_create_db_maj_1( sqlite3* db, gchar** errmsg )
+{
+    gchar* errmsg_ii = NULL;
+    gchar* sql = NULL;
+    gint rc = 0;
+/*
+
+
+type = FILE_PDF_ABSCHNITT
+parent_ID und older_sibling_ID, angebunden an 0,0
+rel_path
+ziel_id_von, index_von, ziel_id_bis, index_bis nach Abschnitt
+icon_name
+node_text
+text
+
+type = FILE_PDF_PUNKT
+parent_ID und older_sibling_ID je nach parent/older_sibling
+ziel_id_von, index_von nach Abschnitt
+icon_name
+node_text
+text
+
+ID = 1 (Inhalt) oder 2 (Auswertung)
+parent_ID = 0 und older_sibling_ID = 0
+Rest = NULL
+
+type = STRUKT (inhalt und auswertung)
+parent_ID und older_sibling_ID
+icon_name
+node_text
+text
+
+type = INHALT_FILE
+parent_ID und older_sibling_ID
+rel_path
+icon_name
+node_text
+text
+
+type = INHALT_PDF_ABSCHNITT
+parent_ID und older_sibling_ID
+link = ID von Abschnitt
+Rest = NULL
+
+type = INHALT_LINK
+parent_ID und older_sibling_ID
+link = ID von INHALT_FILE oder _PDF_ABSCHNITT
+Rest = NULL
+
+type = AUSWERTUNG_COPY
+parent_ID und older_sibling_ID
+link = ID von INHALT_FILE oder_PDF_ABSCHNITT
+rel_path
+icon_name
+node_text
+text
+
+type = AUSWERTUNG_LINK
+parent_ID und older_sibling_ID
+link = ID von STRUKT, INHALT_FILE, INHALT_PDF_ABSCHNITT oder AUSWERTUNG_COPY
+Rest = 0
+
+*/
+    //Tabellenstruktur erstellen
+    sql = //Haupttabelle
+            "DROP TABLE IF EXISTS knoten; "
+
+            "CREATE TABLE knoten ("
+            "ID INTEGER PRIMARY KEY, "
+            "parent_ID INTEGER NOT NULL, "
+            "older_sibling_ID INTEGER NOT NULL, "
+            "type INTEGER, "
+            "link INTEGER, "
+            "rel_path VARCHAR(250), "
+            "ziel_id_von VARCHAR(50), "
+            "index_von INTEGER, "
+            "ziel_id_bis VARCHAR(50), "
+            "index_bis INTEGER, "
+            "icon_name VARCHAR(50), "
+            "node_text VARCHAR(50), "
+            "text VARCHAR "
+            "); "
+
+            "INSERT INTO knoten (ID, parent_id, older_sibling_id, "
+            "node_text) VALUES (0, 0, 0, '" MAJOR "');"
+
+/*
+            "CREATE TRIGGER delete_links_baum_inhalt_trigger BEFORE DELETE ON baum_inhalt "
+            "BEGIN "
+            "DELETE FROM links WHERE node_id=old.node_id AND baum_id=1; "
+            //etwaige Links, die auf gelöschten Knoten zeigen, auch löschen
+            "DELETE FROM baum_inhalt WHERE node_id = "
+                "(SELECT node_id FROM links WHERE node_id_target = old.node_id);"
+            "END; "
+
+            "CREATE TRIGGER delete_links_baum_auswertung_trigger BEFORE DELETE ON baum_auswertung "
+            "BEGIN "
+            "DELETE FROM links WHERE node_id=old.node_id AND baum_id=2; "
+            "DELETE FROM baum_auswertung WHERE node_id = "
+                "(SELECT node_id FROM links WHERE node_id_target = old.node_id);"
+            "END; " */
+            ;
+
+    rc = sqlite3_exec( db, sql, NULL, NULL, &errmsg_ii );
+    if ( rc != SQLITE_OK )
+    {
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_exec (create db): "
+                "\nresult code: ", sqlite3_errstr( rc ), "\nerrmsg: ",
+                errmsg_ii, NULL );
+        sqlite3_free( errmsg_ii );
+
+        return -1;
+    }
+
+    return 0;
 }
 
 
@@ -434,7 +552,7 @@ zond_dbase_convert_from_v0_10( sqlite3* db_convert, gchar** errmsg )
 
 
 static gint
-zond_dbase_convert_to_maj_0( const gchar* path, gchar* v_string,
+zond_dbase_convert_from_legacy_to_maj_0( const gchar* path, gchar* v_string,
         gchar** errmsg ) //eingang hinzugefügt
 {
     gint rc = 0;
@@ -537,11 +655,19 @@ zond_dbase_convert_to_maj_0( const gchar* path, gchar* v_string,
 
 
 static gint
+zond_dbase_convert_from_maj_0_to_1( const gchar* path, gchar** errmsg )
+{
+
+    return 0;
+}
+
+
+static gint
 zond_dbase_create_db( sqlite3* db, gchar** errmsg )
 {
     gint rc = 0;
 
-    rc = zond_dbase_create_db_maj_0( db, errmsg );
+    rc = zond_dbase_create_db_maj_1( db, errmsg );
     if ( rc ) ERROR_S
 
     return 0;
@@ -555,7 +681,7 @@ zond_dbase_get_version( sqlite3* db, gchar** errmsg )
     sqlite3_stmt* stmt = NULL;
     gchar* v_string = NULL;
 
-    rc = sqlite3_prepare_v2( db, "SELECT node_text FROM baum_inhalt WHERE node_id = 0;", -1, &stmt, NULL );
+    rc = sqlite3_prepare_v2( db, "SELECT node_text FROM knoten WHERE ID = 0;", -1, &stmt, NULL );
     if ( rc != SQLITE_OK )
     {
         if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_prepare_v2:\n",
@@ -621,14 +747,14 @@ zond_dbase_open( const gchar* path, gboolean create_file, gboolean create, sqlit
 
             sqlite3_close( *db );
 
-            rc = zond_dbase_convert_to_maj_0( path, v_string, errmsg );
+            rc = zond_dbase_convert_from_legacy_to_maj_0( path, v_string, errmsg );
             g_free( v_string );
             if ( rc ) ERROR_S
 
             rc = sqlite3_open_v2( path, db, SQLITE_OPEN_READWRITE, NULL );
             if ( rc ) ERROR_S
 
-            v_string = g_strdup( MAJOR );
+            v_string = g_strdup( "0" );
         }
 
         if ( !g_ascii_isdigit( v_string[0] ) )
@@ -643,13 +769,24 @@ zond_dbase_open( const gchar* path, gboolean create_file, gboolean create, sqlit
             sqlite3_close( *db );
             ERROR_S_MESSAGE( "Version gibt's noch gar nicht" )
         }
-        else if ( atoi( v_string ) < atoi( MAJOR ) )
+
+        if ( atoi( v_string ) == 0 )
         {
             gint rc = 0;
 
-            //aktewalisieren
-        }
+            g_free( v_string );
 
+            //aktewalisieren von maj_0 auf maj_1
+            rc = zond_dbase_convert_from_maj_0_to_1( path, errmsg );
+            if ( rc )
+            {
+                sqlite3_close( *db );
+                ERROR_S
+            }
+
+            v_string = g_strdup( "1" );
+        }
+        //später: if ( atoi( v_string ) == 1 ) ...
     }
     else if ( create ) //Datenbank soll neu angelegt werden
     {
