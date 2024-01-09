@@ -205,20 +205,15 @@ cb_textsuche_act( GtkListBox* box, GtkListBoxRow* row, gpointer data )
         return;
     }
 
-    //gefundene Stelle markieren, wenn internalviewer
-    //zuletzt geöffneter pv
-    if ( g_settings_get_boolean( zond->settings, "internalviewer" ) )
-    {
-        PdfViewer* pv = g_ptr_array_index( zond->arr_pv, (zond->arr_pv->len) - 1 );
+    PdfViewer* pv = g_ptr_array_index( zond->arr_pv, (zond->arr_pv->len) - 1 );
 
-        pv->highlight.page[0] = pdf_text_occ.page;
-        pv->highlight.quad[0] = pdf_text_occ.quad;
-        //Sentinel!
-        pv->highlight.page[1] = -1;
+    pv->highlight.page[0] = pdf_text_occ.page;
+    pv->highlight.quad[0] = pdf_text_occ.quad;
+    //Sentinel!
+    pv->highlight.page[1] = -1;
 
-        //draw-Befehl nicht notwendig, da main-loop noch nicht idle war und widgets
-        //daher noch nicht dargestelt wurde
-    }
+    //draw-Befehl nicht notwendig, da main-loop noch nicht idle war und widgets
+    //daher noch nicht dargestelt wurde
 
     return;
 }
