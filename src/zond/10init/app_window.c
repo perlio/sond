@@ -272,33 +272,6 @@ cb_focus_in( GtkWidget* treeview, GdkEvent* event, gpointer user_data )
 
 
 static void
-treeviews_cb_editing_canceled( GtkCellRenderer* renderer,
-                              gpointer data)
-{
-    Projekt* zond = (Projekt*) data;
-
-    zond->key_press_signal = g_signal_connect( zond->app_window, "key-press-event",
-            G_CALLBACK(cb_key_press), zond );
-
-    return;
-}
-
-
-static void
-treeviews_cb_editing_started( GtkCellRenderer* renderer, GtkEditable* editable,
-                             const gchar* path,
-                             gpointer data )
-{
-    Projekt* zond = (Projekt*) data;
-
-    g_signal_handler_disconnect( zond->app_window, zond->key_press_signal );
-    zond->key_press_signal = 0;
-
-    return;
-}
-
-
-static void
 init_treeviews( Projekt* zond )
 {
     //der treeview
@@ -311,13 +284,6 @@ init_treeviews( Projekt* zond )
         //die Selection
         zond->selection[baum] = gtk_tree_view_get_selection(
                 GTK_TREE_VIEW(zond->treeview[baum]) );
-
-        //Text-Spalte wird editiert
-        //Beginn
-        g_signal_connect( sond_treeview_get_cell_renderer_text( zond->treeview[baum] ),
-                "editing-started", G_CALLBACK(treeviews_cb_editing_started), zond );
-        g_signal_connect( sond_treeview_get_cell_renderer_text( zond->treeview[baum] ),
-                "editing-canceled", G_CALLBACK(treeviews_cb_editing_canceled), zond );
 
         //focus-in
         g_signal_connect( zond->treeview[baum],

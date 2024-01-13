@@ -246,11 +246,20 @@ Rest = 0
             "index_bis INTEGER, "
             "icon_name VARCHAR(50), "
             "node_text VARCHAR(50), "
-            "text VARCHAR "
+            "text VARCHAR, "
+            "FOREIGN KEY (parent_ID) REFERENCES knoten (ID) "
+            "ON DELETE CASCADE ON UPDATE CASCADE, "
+            "FOREIGN KEY (older_sibling_ID) REFERENCES knoten (ID) "
+            "ON DELETE CASCADE ON UPDATE CASCADE "
             "); "
 
             "INSERT INTO knoten (ID, parent_id, older_sibling_id, "
             "node_text) VALUES (0, 0, 0, '" MAJOR "');"
+            "INSERT INTO knoten (ID, parent_id, older_sibling_id) "
+            "VALUES (1, 0, 0);" //root baum_inhalt
+            "INSERT INTO knoten (ID, parent_id, older_sibling_id) "
+            "VALUES (2, 0, 0);" //root baum_auswertung
+
 
 /*
             "CREATE TRIGGER delete_links_baum_inhalt_trigger BEFORE DELETE ON baum_inhalt "

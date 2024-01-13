@@ -25,6 +25,7 @@ typedef struct
 {
     GtkCellRenderer* renderer_icon;
     GtkCellRenderer* renderer_text;
+    gulong signal_key;
     gint id;
     GtkWidget* contextmenu;
 } SondTreeviewPrivate;
@@ -84,6 +85,43 @@ sond_treeview_class_init( SondTreeviewClass* klass )
     //statisch registrierte Klasse wird zurLaufzeit niemals finalisiert!
 
     klass->render_text_cell = NULL;
+
+    return;
+}
+
+
+static gboolean
+stv_key_press_event( GtkWidget* treeview, GdkEventKey* event, gpointer data )
+{
+    //nix machen; nur wenn angeschaltet Tastendruck nicht durchlassen
+    return GDK_EVENT_STOP;
+}
+
+
+static void
+renderer_text_editing_canceled( GtkCellRenderer* renderer,
+                              gpointer data)
+{
+    SondTreeview* stv = (SondTreeview*) data;
+    SondTreeviewPrivate* stv_priv = sond_treeview_get_instance_private( stv );
+
+    g_signal_handler_disconnect( stv, stv_priv->signal_key );
+    stv_priv->signal_key = 0;
+
+    return;
+}
+
+
+static void
+renderer_text_editing_started( GtkCellRenderer* renderer, GtkEditable* editable,
+                             const gchar* path,
+                             gpointer data )
+{
+    SondTreeview* stv = (SondTreeview*) data;
+    SondTreeviewPrivate* stv_priv = sond_treeview_get_instance_private( stv );
+
+    stv_priv->signal_key = g_signal_connect( stv, "key-press-event",
+            G_CALLBACK(stv_key_press_event), NULL );
 
     return;
 }
@@ -288,6 +326,14 @@ sond_treeview_init( SondTreeview* stv )
 
     g_signal_connect( stv, "button-press-event",
             G_CALLBACK(sond_treeview_show_popupmenu), (gpointer) stv_private->contextmenu );
+
+    //hiermit sollen die Momente abgefangen werden, in denen im treeview herumgetippt wird
+    //dann soll key-press-event abgefangen werden und Callback gibt TRUE zurück
+    //damit übergeordnete Widgets nicht mehr reagieren
+    g_signal_connect( stv_private->renderer_text, "editing-started",
+            G_CALLBACK(renderer_text_editing_started), stv );
+    g_signal_connect( stv_private->renderer_text, "editing-canceled",
+            G_CALLBACK(renderer_text_editing_canceled), stv );
 
     return;
 }

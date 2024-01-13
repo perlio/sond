@@ -494,6 +494,7 @@ sond_treeviewfm_load_dir_foreach( SondTreeviewFM* stvfm, GtkTreeIter* iter, GFil
                 GTK_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(stvfm) )),
                 &newest_iter, &iter_new, -1 );
     }
+//    else if ( pdf && Abschnittskind ) -
 
     return 0;
 }
@@ -1117,9 +1118,28 @@ sond_treeviewfm_open_path( GtkTreeView* tree_view, GtkTreePath* tree_path,
     gint rc = 0;
     GtkTreeIter iter;
     gchar* path = NULL;
+    GFileInfo* info = NULL;
+    gint ID = 0;
 
     gtk_tree_model_get_iter( gtk_tree_view_get_model( tree_view ), &iter, tree_path );
+    gtk_tree_model_get( gtk_tree_view_get_model( tree_view ), &iter, 0, &info, 1, &ID, -1 );
 
+    if ( info && ID ) //E-Mail-Part
+    {
+
+    }
+    else if ( info ) //normale Datei
+    {
+        if ( !open_with && g_file_info_has_attribute( info, G_FILE_ATTRIBUTE_STANDARD_TYPE ) )
+        {
+            const gchar* type = NULL;
+
+            type = g_file_info_get_content_type( info );
+            if ( g_content_type_is_mime_type( type, "application/pdf" ) )
+            {
+
+            }
+    }
     path = sond_treeviewfm_get_full_path( SOND_TREEVIEWFM(tree_view), &iter );
     rc = misc_datei_oeffnen( path, open_with, errmsg );
     g_free( path );
@@ -1643,12 +1663,58 @@ sond_treeviewfm_render_file_icon( GtkTreeViewColumn* column, GtkCellRenderer* re
         GtkTreeModel* model, GtkTreeIter* iter, gpointer data )
 {
     GFileInfo* info = NULL;
+    gint ID = 0;
 
-    gtk_tree_model_get( model, iter, 0, &info, -1 );
+    SondTreeviewFM* stvfm = (SondTreeviewFM*) data;
 
-    g_object_set( G_OBJECT(renderer), "gicon", g_file_info_get_icon( info ), NULL );
+    gtk_tree_model_get( model, iter, 0, &info, 1, &ID, -1 );
 
-    g_object_unref( info );
+    if ( info && ID ) //Email-Part
+    {
+    }
+    else if ( info ) //Datei
+    {
+        if ( g_file_info_has_attribute( info, G_FILE_ATTRIBUTE_STANDARD_ICON ) )
+        {
+            GIcon* icon = NULL;
+            gchar* icon_name = NULL;
+
+            icon = g_file_info_get_icon( info );
+            icon_name = g_icon_to_string( icon );
+
+            g_object_set( G_OBJECT(renderer),
+                    "icon-name", icon_name, NULL );
+            g_free( icon_name );
+        }
+        else g_object_set( G_OBJECT(renderer),
+                "icon-name", "image-missing", NULL );
+
+        g_object_unref( info );
+    }
+    else //PDF-Abschnitt
+    {
+        ZondDBase* zond_dbase = NULL;
+        gint rc = 0;
+        gchar icon_name[250] = { 0 };
+        GError* error = NULL;
+
+        zond_dbase = sond_treeviewfm_get_dbase( stvfm );
+        rc = zond_dbase_get_knoten( zond_dbase, ID, NULL, NULL, &type, NULL,
+                NULL, NULL, NULL, NULL, NULL, NULL, icon_name, NULL, NULL, &error );
+        if ( rc )
+        {
+            display_message( gtk_widget_get_toplevel( szvfm ),
+                    "Icon konnte nicht abgefragt werden\n\n"
+                    "zond_dbase_get_knoten\n", error->message, NULL );
+            g_error_free( error );
+
+            return;
+        }
+
+        g_object_set( G_OBJECT(renderer), "icon-name", icon_name, NULL );M
+
+        g_free( icon_name );
+    }
 
     return;
 }
@@ -1661,7 +1727,7 @@ sond_treeviewfm_init( SondTreeviewFM* stvfm )
 
     gtk_tree_view_column_set_cell_data_func( gtk_tree_view_get_column( GTK_TREE_VIEW(stvfm), 0 ),
             sond_treeview_get_cell_renderer_icon( SOND_TREEVIEW(stvfm) ),
-            sond_treeviewfm_render_file_icon, NULL, NULL );
+            sond_treeviewfm_render_file_icon, stvfm, NULL );
 
     //Größe
     GtkCellRenderer* renderer_size = gtk_cell_renderer_text_new( );
@@ -1703,7 +1769,7 @@ sond_treeviewfm_init( SondTreeviewFM* stvfm )
     gtk_tree_view_column_set_title( fs_tree_column_modify, "Änderungsdatum" );
     gtk_tree_view_column_set_title( stvfm_priv->column_eingang, "Eingang" );
 
-    GtkTreeStore* tree_store = gtk_tree_store_new( 1, G_TYPE_OBJECT );
+    GtkTreeStore* tree_store = gtk_tree_store_new( 2, G_TYPE_OBJECT, G_TYPE_INT );
     gtk_tree_view_set_model( GTK_TREE_VIEW(stvfm), GTK_TREE_MODEL(tree_store) );
     g_object_unref( tree_store );
 
