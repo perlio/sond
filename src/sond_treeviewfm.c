@@ -24,7 +24,61 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "zond/99conv/general.h"
 
 
+//ZOND_PDF_ABSCHNITT definieren - lokales GObject-Derivat
+#define ZOND_TYPE_PDF_ABSCHNITT zond_pdf_abschnitt_get_type( )
+G_DECLARE_DERIVABLE_TYPE (ZondPdfAbschnitt, zond_pdf_abschnitt, ZOND, PDF_ABSCHNITT, GObject)
 
+
+struct _ZondPdfAbschnittClass
+{
+    GObjectClass parent_class;
+};
+
+typedef struct
+{
+    gint ID;
+    gchar* rel_path;
+    gchar* icon_name;
+    gchar* node_text;
+    gint page_begin;
+    gint index_beginn;
+    gint page_end;
+    gint index_end;
+} ZondPdfAbschnittPrivate;
+
+G_DEFINE_TYPE_WITH_PRIVATE(ZondPdfAbschnitt, zond_pdf_abschnitt, ZOND_TYPE_PDF_ABSCHNITT)
+
+
+static void
+zond_pdf_abschnitt_finalize( GObject* self )
+{
+    ZondPdfAbschnittPrivate* zond_pdf_abschnitt_priv = zond_pdf_abschnitt_get_instance_private( self );
+
+    g_free( zond_pdf_abschnitt_priv->rel_path );
+    g_free( zond_pdf_abschnitt_priv->icon_name );
+    g_free( zond_pdf_abschnitt_priv->node_text );
+
+    G_OBJECT_CLASS(zond_pdf_absdchnitt_parent_class)->finalize( self );
+
+    return;
+}
+
+static void
+zond_pdf_abschnitt_class_init( ZondPdfAbschnittClass* klass )
+{
+    object_class->finalize = zond_pdf_abschnitt_finalize;
+
+    return;
+}
+
+
+static void
+zond_pdf_abschnitt_init( ZondPdfAbschnitt* self )
+{
+    return;
+}
+
+//Nun geht's mit SondTreeviewFM weiter
 typedef struct
 {
     gchar* root;
@@ -55,6 +109,8 @@ sond_treeviewfm_dbase_test( SondTreeviewFM* stvfm, const gchar* source, gchar** 
 
     SondTreeviewFMPrivate* priv = sond_treeviewfm_get_instance_private( stvfm );
 
+    if ( !priv->zond_dbase ) return 0;
+
     rc = zond_dbase_test_path( priv->zond_dbase, source, errmsg );
     if ( rc == -1 ) ERROR_S
 
@@ -70,6 +126,8 @@ sond_treeviewfm_dbase_update_path( SondTreeviewFM* stvfm, const gchar* source,
 
     SondTreeviewFMPrivate* priv = sond_treeviewfm_get_instance_private( stvfm );
 
+    if ( !priv->zond_dbase ) return 0;
+
     rc = zond_dbase_update_path( priv->zond_dbase, source, dest, errmsg );
     if ( rc ) ERROR_ROLLBACK( priv->zond_dbase )
 
@@ -81,6 +139,8 @@ static gint
 sond_treeviewfm_dbase_end( SondTreeviewFM* stvfm, gboolean suc, gchar** errmsg )
 {
     SondTreeviewFMPrivate* priv = sond_treeviewfm_get_instance_private( stvfm );
+
+    if ( !priv->zond_dbase ) return 0;
 
     if ( suc )
     {
@@ -450,6 +510,9 @@ sond_treeviewfm_load_dir_foreach( SondTreeviewFM* stvfm, GtkTreeIter* iter, GFil
         GFileInfo* info, gpointer data, gchar** errmsg )
 {
     GtkTreeIter iter_new = { 0 };
+    GError* error = NULL;
+    gint rc = 0;
+    GFileType type = 0;
 
     GtkTreeIter* iter_dir = (GtkTreeIter*) data;
 
@@ -460,30 +523,25 @@ sond_treeviewfm_load_dir_foreach( SondTreeviewFM* stvfm, GtkTreeIter* iter, GFil
             &iter_new, 0, info , -1 );
 
     //falls directory: überprüfen ob leer, falls nicht, dummy als child
-    GFileType type = g_file_info_get_file_type( info );
+    type = g_file_info_get_file_type( info );
     if ( type == G_FILE_TYPE_DIRECTORY )
     {
-        GError* error = NULL;
+        GFileEnumerator* enumer_child = NULL;
+        GFile* grand_child = NULL;
+        GtkTreeIter newest_iter = { 0 };
 
-        GFileEnumerator* enumer_child = g_file_enumerate_children( file, "*",
-                G_FILE_QUERY_INFO_NONE, NULL, &error );
+        enumer_child = g_file_enumerate_children( file, "*",
+                G_FILE_QUERY_INFO_NONE, NULL, error );
         if ( !enumer_child )
         {
-            if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_file_enumerate_children:\n",
-                    error->message, NULL );
-            g_error_free( error );
+            g_prefix_error( error, "%s\n", __func__ );
 
             return -1;
         }
 
-        GFile* grand_child = NULL;
-        GtkTreeIter newest_iter;
-
         if ( !g_file_enumerator_iterate( enumer_child, NULL, &grand_child, NULL, &error ) )
         {
-            if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_file_enumerator_iterate:\n",
-                    error->message, NULL );
-            g_error_free( error );
+            g_prefix_error( error, "%s\n", __func__ );
             g_object_unref( enumer_child );
 
             return -1;
@@ -492,9 +550,27 @@ sond_treeviewfm_load_dir_foreach( SondTreeviewFM* stvfm, GtkTreeIter* iter, GFil
 
         if ( grand_child ) gtk_tree_store_insert(
                 GTK_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(stvfm) )),
-                &newest_iter, &iter_new, -1 );
+                &newest_iter, iter, -1 );
     }
-//    else if ( pdf && Abschnittskind ) -
+    else
+    {
+        const gchar* content_type = NULL;
+        gint rc = 0;
+
+        SondTreeviewFMPrivate* stvfm_priv = sond_treeviewfm_get_instance_private( stvfm );
+
+        content_type = g_file_info_get_content_type( info );
+
+        rc = SOND_TREEVIEWFM_GET_CLASS(stvfm)->insert_dummy( stvfm, &iter_new,
+                content_type, &error );
+        if ( rc )
+        {
+            if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+            g_error_free( error );
+
+            return -1;
+        }
+    }
 
     return 0;
 }
@@ -631,17 +707,17 @@ sond_treeviewfm_load_dir( SondTreeviewFM* stvfm, GtkTreeIter* iter, gchar** errm
     if ( iter )
     {
         gchar* full_path = NULL;
+        GError* error = NULL;
 
-        full_path = sond_treeviewfm_get_full_path( stvfm, iter );
+        full_path = sond_treeviewfm_get_full_path( stvfm, iter, &error );
+        if ( !full_path ) ERROR_S
+
         file = g_file_new_for_path( full_path );
         g_free( full_path );
     }
     else file = g_file_new_for_path( stvfm_priv->root );
 
-    //erst ganzes dir laden, dann ordnen, nach Kriterium,
-
-
-
+    //ToDo: erst ganzes dir laden, dann ordnen, nach Kriterium,
 
     //fm_load_dir_foreach gibt 0 oder -1 zurück
     rc = sond_treeviewfm_dir_foreach( stvfm, iter, file, FALSE,
@@ -664,33 +740,42 @@ sond_treeviewfm_row_expanded( GtkTreeView* tree_view, GtkTreeIter* iter,
         GtkTreePath* path, gpointer data )
 {
     gint rc = 0;
-    gchar* errmsg = NULL;
     GtkTreeIter new_iter = { 0 };
-    GFileInfo* info = NULL;
+    GFileInfo* info_child = NULL;
+    GObject* object = NULL;
+    GError* error = NULL;
 
     gtk_tree_model_iter_nth_child( gtk_tree_view_get_model( tree_view ), &new_iter, iter, 0 );
-    gtk_tree_model_get( gtk_tree_view_get_model( tree_view ), &new_iter, 0, &info, -1 );
-    if ( !info ) //child ist dummy
+    gtk_tree_model_get( gtk_tree_view_get_model( tree_view ), &new_iter, 0, &info_child, -1 );
+
+    if ( info_child ) //kein dummy
     {
-        rc = sond_treeviewfm_load_dir( SOND_TREEVIEWFM(tree_view), iter, &errmsg );
-        if ( rc )
-        {
-            display_message( gtk_widget_get_toplevel( GTK_WIDGET(tree_view) ),
-                    "Directory konnte nicht geladen werden\n\n"
-                    "Bei Aufruf fm_load_dir:\n", errmsg, NULL );
-            g_free( errmsg );
-        }
-        gtk_tree_store_remove( GTK_TREE_STORE(gtk_tree_view_get_model( tree_view )),
-                &new_iter );
+        g_object_unref( info_child );
+
+        return;
     }
-    else g_object_unref( info );
+
+    //child ist dummy
+    gtk_tree_model_get( gtk_tree_view_get_model( tree_view ), iter, 0, &object, -1 );
+
+    rc = SOND_TREEVIEWFM_GET_CLASS( treeview )->expand_dummy( SOND_TREEVIEWFM(tree_view), iter, object, &error );
+    if ( rc )
+    {
+        display_message( gtk_widget_get_toplevel( GTK_WIDGET(tree_view) ),
+                "Zeile konnte nicht expandiert werden\n\n",
+                error->message, NULL );
+        g_error_free( error );
+
+        return;
+    }
+
+    gtk_tree_store_remove( GTK_TREE_STORE(gtk_tree_view_get_model( tree_view )),
+            &new_iter );
 
     gtk_tree_view_columns_autosize( tree_view );
 
     return;
 }
-
-
 
 
 typedef struct _FindPath
@@ -880,6 +965,53 @@ sond_treeviewfm_constructed( GObject* self )
 }
 
 
+static gint
+sond_treeview_expand_dummy( SondTreeviewFM* stvfm, GtkTreeIter* iter, GObject* object, GError** error )
+{
+    if ( g_file_info_get_file_type( G_FILE_INFO(object) ) == G_FILE_TYPE_DIRECTORY )
+    {
+        gint rc = 0;
+        gchar* errmsg = NULL;
+
+        rc = sond_treeviewfm_load_dir( stvfm, iter, &errmsg );
+        if ( rc )
+        {
+            display_message( gtk_widget_get_toplevel( GTK_WIDGET(tree_view) ),
+                    "Zeile konnte nicht expandiert werden\n\n",
+                    errmsg, NULL );
+            g_free( errmsg );
+
+            return;
+        }
+    }
+    else
+    {
+        const gchar* content_type = NULL;
+
+        content_type = g_file_info_get_content_type( G_FILE_INFO(object) );
+        if ( g_content_type_is_mime_type( content_type, "message/rfc822" )
+        {
+
+        }
+    }
+
+    return 0;
+}
+
+
+static gint
+sond_treeviewfm_insert_dummy( SondTreeviewFM* stvfm,
+        GtkTreeIter* iter, const gchar* content_type, GError** error )
+{
+    if ( g_content_type_is_mime_type( type, "message/rfc822" ) )
+    {
+
+    }
+
+    return 0;
+}
+
+
 static void
 sond_treeviewfm_class_init( SondTreeviewFMClass* klass )
 {
@@ -894,12 +1026,14 @@ sond_treeviewfm_class_init( SondTreeviewFMClass* klass )
     klass->dbase_end = sond_treeviewfm_dbase_end;
     klass->text_edited = sond_treeviewfm_text_edited;
     klass->results_row_activated = sond_treeviewfm_results_row_activated;
+    klass->insert_dummy = sond_treeviewfm_insert_dummy;
+    klass->expand_dummy = sond_treeviewfm_expand_dummy;
 
     return;
 }
 
 
-GtkTreeIter*
+static GtkTreeIter*
 sond_treeviewfm_insert_node( SondTreeviewFM* stvfm, GtkTreeIter* iter, gboolean child )
 {
     GtkTreeIter new_iter;
@@ -916,7 +1050,7 @@ sond_treeviewfm_insert_node( SondTreeviewFM* stvfm, GtkTreeIter* iter, gboolean 
 }
 
 
-gint
+static gint
 sond_treeviewfm_create_dir( SondTreeviewFM* stvfm, gboolean child, gchar** errmsg )
 {
     gint rc = 0;
@@ -1117,14 +1251,13 @@ sond_treeviewfm_open_path( GtkTreeView* tree_view, GtkTreePath* tree_path,
 {
     gint rc = 0;
     GtkTreeIter iter;
-    gchar* path = NULL;
-    GFileInfo* info = NULL;
-    gint ID = 0;
+    const gchar* path = NULL;
+    GObject* object = NULL;
 
     gtk_tree_model_get_iter( gtk_tree_view_get_model( tree_view ), &iter, tree_path );
-    gtk_tree_model_get( gtk_tree_view_get_model( tree_view ), &iter, 0, &info, 1, &ID, -1 );
+    gtk_tree_model_get( gtk_tree_view_get_model( tree_view ), &iter, 0, &object, -1 );
 
-    if ( info && ID ) //E-Mail-Part
+    if ( G_IS_FILE_INFO(object) ) //E-Mail-Part
     {
 
     }
@@ -1618,19 +1751,24 @@ static void
 sond_treeviewfm_render_file_modify( GtkTreeViewColumn* column, GtkCellRenderer* renderer,
         GtkTreeModel* model, GtkTreeIter* iter, gpointer data )
 {
-    GFileInfo* info = NULL;
-    GDateTime* datetime = NULL;
-    gchar* text = NULL;
+    GObject* object = NULL;
 
-    gtk_tree_model_get( model, iter, 0, &info, -1 );
+    gtk_tree_model_get( model, iter, 0, &object, -1 );
 
-    datetime = g_file_info_get_modification_date_time( info );
+    if ( G_IS_FILE_TYPE(object) )
+    {
+        GDateTime* datetime = NULL;
+        gchar* text = NULL;
+
+        datetime = g_file_info_get_modification_date_time( info );
+
+        text = g_date_time_format( datetime, "%d.%m.%Y %T" );
+        g_date_time_unref( datetime );
+        g_object_set( G_OBJECT(renderer), "text", text, NULL );
+        g_free( text );
+    }
+
     g_object_unref( info );
-
-    text = g_date_time_format( datetime, "%d.%m.%Y %T" );
-    g_date_time_unref( datetime );
-    g_object_set( G_OBJECT(renderer), "text", text, NULL );
-    g_free( text );
 
     return;
 }
@@ -1640,19 +1778,24 @@ static void
 sond_treeviewfm_render_file_size( GtkTreeViewColumn* column, GtkCellRenderer* renderer,
         GtkTreeModel* model, GtkTreeIter* iter, gpointer data )
 {
-    GFileInfo* info = NULL;
-    goffset size = 0;
-    gchar* text = NULL;
+    GObject* object = NULL;
 
-    gtk_tree_model_get( model, iter, 0, &info, -1 );
+    gtk_tree_model_get( model, iter, 0, &object, -1 );
 
-    size = g_file_info_get_size( info );
+    if ( G_IS_FILE_TYPE(object) )
+    {
+        goffset size = 0;
+        gchar* text = NULL;
+
+        size = g_file_info_get_size( info );
+
+        text = g_strdup_printf( "%lld", size );
+
+        g_object_set( G_OBJECT(renderer), "text", text, NULL );
+        g_free( text );
+    }
+
     g_object_unref( info );
-
-    text = g_strdup_printf( "%lld", size );
-
-    g_object_set( G_OBJECT(renderer), "text", text, NULL );
-    g_free( text );
 
     return;
 }
@@ -1662,24 +1805,18 @@ static void
 sond_treeviewfm_render_file_icon( GtkTreeViewColumn* column, GtkCellRenderer* renderer,
         GtkTreeModel* model, GtkTreeIter* iter, gpointer data )
 {
-    GFileInfo* info = NULL;
-    gint ID = 0;
+    GObject* obnject = NULL;
 
-    SondTreeviewFM* stvfm = (SondTreeviewFM*) data;
+    gtk_tree_model_get( model, iter, 0, &object, 1, &ID, -1 );
 
-    gtk_tree_model_get( model, iter, 0, &info, 1, &ID, -1 );
-
-    if ( info && ID ) //Email-Part
+    if ( G_IS_FILE_INFO(object) ) //Datei
     {
-    }
-    else if ( info ) //Datei
-    {
-        if ( g_file_info_has_attribute( info, G_FILE_ATTRIBUTE_STANDARD_ICON ) )
+        if ( g_file_info_has_attribute( G_FILE_INFO(object), G_FILE_ATTRIBUTE_STANDARD_ICON ) )
         {
             GIcon* icon = NULL;
             gchar* icon_name = NULL;
 
-            icon = g_file_info_get_icon( info );
+            icon = g_file_info_get_icon( G_FILE_INFO(object) );
             icon_name = g_icon_to_string( icon );
 
             g_object_set( G_OBJECT(renderer),
@@ -1688,33 +1825,16 @@ sond_treeviewfm_render_file_icon( GtkTreeViewColumn* column, GtkCellRenderer* re
         }
         else g_object_set( G_OBJECT(renderer),
                 "icon-name", "image-missing", NULL );
-
-        g_object_unref( info );
     }
-    else //PDF-Abschnitt
+    else if ( ZOND_IS_PDF_ABSCHNITT(object) )//PDF-Abschnitt
     {
-        ZondDBase* zond_dbase = NULL;
-        gint rc = 0;
-        gchar icon_name[250] = { 0 };
-        GError* error = NULL;
+        ZondPdfAbschnittPrivate* zond_pdf_abschnitt_priv =
+                zond_pdf_abschnitt_get_instance_private( ZOND_PDF_ABSCHNITT(object) );
 
-        zond_dbase = sond_treeviewfm_get_dbase( stvfm );
-        rc = zond_dbase_get_knoten( zond_dbase, ID, NULL, NULL, &type, NULL,
-                NULL, NULL, NULL, NULL, NULL, NULL, icon_name, NULL, NULL, &error );
-        if ( rc )
-        {
-            display_message( gtk_widget_get_toplevel( szvfm ),
-                    "Icon konnte nicht abgefragt werden\n\n"
-                    "zond_dbase_get_knoten\n", error->message, NULL );
-            g_error_free( error );
-
-            return;
-        }
-
-        g_object_set( G_OBJECT(renderer), "icon-name", icon_name, NULL );M
-
-        g_free( icon_name );
+        g_object_set( G_OBJECT(renderer), "icon-name", zond_pdf_abschnitt_priv->icon_name, NULL );
     }
+
+    g_object_unref( object );
 
     return;
 }
@@ -1769,7 +1889,7 @@ sond_treeviewfm_init( SondTreeviewFM* stvfm )
     gtk_tree_view_column_set_title( fs_tree_column_modify, "Änderungsdatum" );
     gtk_tree_view_column_set_title( stvfm_priv->column_eingang, "Eingang" );
 
-    GtkTreeStore* tree_store = gtk_tree_store_new( 2, G_TYPE_OBJECT, G_TYPE_INT );
+    GtkTreeStore* tree_store = gtk_tree_store_new( 1, G_TYPE_OBJECT );
     gtk_tree_view_set_model( GTK_TREE_VIEW(stvfm), GTK_TREE_MODEL(tree_store) );
     g_object_unref( tree_store );
 

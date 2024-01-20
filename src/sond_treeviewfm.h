@@ -25,6 +25,8 @@ struct _SondTreeviewFMClass
     gint (*dbase_end) (SondTreeviewFM*, gboolean, gchar**);
     void (*text_edited) (GtkCellRenderer*, gchar*, gchar*, gpointer);
     void (*results_row_activated) (GtkWidget*, GtkWidget*, gpointer);
+    gint (*insert_dummy) ( SondTreeviewFM*, GtkTreeIter*, const gchar*, Gerror** );
+    gint (*insert_dummy) ( SondTreeviewFM*, GtkTreeIter*, GObject*, Gerror** );
 };
 
 
@@ -43,8 +45,6 @@ void sond_treeviewfm_column_eingang_set_visible( SondTreeviewFM*, gboolean );
 gchar* sond_treeviewfm_get_full_path( SondTreeviewFM*, GtkTreeIter* );
 
 gchar* sond_treeviewfm_get_rel_path( SondTreeviewFM*, GtkTreeIter* );
-
-gint sond_treeviewfm_create_dir( SondTreeviewFM*, gboolean, gchar** );
 
 gint sond_treeviewfm_paste_clipboard( SondTreeviewFM*, gboolean, gchar** );
 

@@ -210,6 +210,63 @@ zond_treeviewfm_results_row_activated( GtkWidget* listbox, GtkWidget* row, gpoin
 }
 
 
+static gint
+zond_treeviewfm_expand_dummy( SondTreeviewFM* stvfm,
+        GtkTreeIter* iter, GObject* object, GError** error )
+{
+    if ( ZOND_IS_PDF_ABSCHNITT(object) )
+    {
+
+    }
+    else if ( G_IS_FILE_TYPE(object) )
+    {
+
+    }
+    //chain-up, nur wenn nicht behandelt
+    SOND_TREEVIEWFM_CLASS(zond_treeviewfm_parent_class)->results_row_activated( listbox, row, data );
+
+    return;
+}
+
+
+static gint
+zond_treeviewfm_insert_dummy( SondTreeviewFM* stvfm,
+        GtkTreeIter* iter, const gchar* content_type, GError** error )
+{
+    if ( g_content_type_is_mime_type( content_type, "application/pdf" ) )
+    {
+        gchar* rel_path = NULL;
+        gint rc = 0;
+        GtkTreeiter iter_newest = { 0 };
+
+        ZondTreeviewFMPrivate* priv = zond_treeviewfm_get_instance_private( ZOND_TREEVIEWFM(stvfm) );
+
+        rel_path = sond_treeviewfm_get_rel_path( stvfm, iter );
+
+        rc = zond_dbase_get_first_pdf_abschnitt( priv->zond->dbase_zond->zond_dbase_work,
+                rel_path, NULL, &error );
+        g_free( rel_path );
+
+        if ( rc == -1 )
+        {
+            if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_file_enumerate_children:\n",
+                    error->message, NULL );
+            g_error_free( error );
+
+            return -1;
+        }
+        else if ( rc == 1 ) gtk_tree_store_insert(
+            GTK_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(stvfm) )),
+            &iter_newest, &iter_new, -1 );
+    }
+
+    //chain-up
+    SOND_TREEVIEWFM_CLASS(zond_treeviewfm_parent_class)->insert_dummy( stvfm, iter, content_type, error );
+
+    return 0;
+}
+
+
 static void
 zond_treeviewfm_class_init( ZondTreeviewFMClass* klass )
 {
@@ -234,6 +291,8 @@ zond_treeviewfm_class_init( ZondTreeviewFMClass* klass )
     SOND_TREEVIEWFM_CLASS(klass)->dbase_end = zond_treeviewfm_dbase_end;
     SOND_TREEVIEWFM_CLASS(klass)->text_edited = zond_treeviewfm_text_edited;
     SOND_TREEVIEWFM_CLASS(klass)->results_row_activated = zond_treeviewfm_results_row_activated;
+    SOND_TREEVIEWDM_CLASS(klass)->insert_dummy = zond_treeviewfm_insert_dummy;
+    SOND_TREEVIEWDM_CLASS(klass)->expand_dummy = zond_treeviewfm_expand_dummy;
 
     return;
 }
