@@ -227,7 +227,7 @@ pdf_ocr_sandwich_page( PdfDocumentPage* pdf_document_page,
     fz_try( ctx ) page_ref_text = pdf_lookup_page_obj( ctx, doc_text, page_text );
     fz_catch( ctx ) ERROR_MUPDF_R( "pdf_lookup_page_obj", -2 )
 
-    buf = pdf_text_filter_page( ctx, pdf_document_page->obj, 3, errmsg );
+    buf = pdf_text_filter_page( ctx, pdf_document_page->obj, 2, errmsg );
     if ( !buf ) ERROR_S
 
     float scale = 1./TESS_SCALE/72.*70.;
