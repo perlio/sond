@@ -4,6 +4,39 @@
 #include <glib-object.h>
 #include "global_types.h"
 
+typedef enum
+{
+    ZOND_DBASE_TYPE_ROOT,
+    ZOND_DBASE_TYPE_STRUKT,
+    ZOND_DBASE_TYPE_INHALT_FILE,
+    ZOND_DBASE_TYPE_INHALT_FILE_PART,
+    ZOND_DBASE_TYPE_INHALT_PDF,
+    ZOND_DBASE_TYPE_INHALT_PDF_ABSCHNITT,
+    ZOND_DBASE_TYPE_INHALT_PDF_PUNKT,
+    ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_COPY,
+    ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_LINK,
+    ZOND_DBASE_TYPE_PDF_ABSCHNITT,
+    NUM_ZOND_DBASE_TYPES
+} NodeType;
+
+typedef struct _ZondDBaseKnoten
+{
+    gint ID;
+    gint parent_ID;
+    gint older_sibling_ID;
+    NodeType type;
+    gint link;
+    gchar* rel_path;
+    gint seite_von;
+    gint index_von;
+    gint seite_bis;
+    gint index_bis;
+    gchar* icon_name;
+    gchar* node_text;
+    gchar* text;
+} ZondDBaseKnoten;
+
+
 #define ERROR_ZOND_DBASE(x) { if ( errmsg ) *errmsg = add_string( g_strconcat( "Bei Aufruf ", __func__, ":\n", \
                        "Bei Aufruf " x ":\n", \
                        sqlite3_errmsg(zond_dbase_get_dbase(zond_dbase)), NULL ), *errmsg ); \

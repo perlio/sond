@@ -14,6 +14,63 @@
 #endif // _WIN32
 
 
+//ZOND_PDF_ABSCHNITT definieren - lokales GObject-Derivat
+#define ZOND_TYPE_PDF_ABSCHNITT zond_pdf_abschnitt_get_type( )
+G_DECLARE_DERIVABLE_TYPE (ZondPdfAbschnitt, zond_pdf_abschnitt, ZOND, PDF_ABSCHNITT, GObject)
+
+struct _ZondPdfAbschnittClass
+{
+    GObjectClass parent_class;
+};
+
+typedef struct
+{
+    gint ID;
+    gchar* rel_path;
+    gchar* icon_name;
+    gchar* node_text;
+    gint page_begin;
+    gint index_beginn;
+    gint page_end;
+    gint index_end;
+} ZondPdfAbschnittPrivate;
+
+G_DEFINE_TYPE_WITH_PRIVATE(ZondPdfAbschnitt, zond_pdf_abschnitt, ZOND_TYPE_PDF_ABSCHNITT)
+
+
+static void
+zond_pdf_abschnitt_finalize( GObject* self )
+{
+    ZondPdfAbschnittPrivate* zond_pdf_abschnitt_priv =
+            zond_pdf_abschnitt_get_instance_private( ZOND_PDF_ABSCHNITT(self) );
+
+    g_free( zond_pdf_abschnitt_priv->rel_path );
+    g_free( zond_pdf_abschnitt_priv->icon_name );
+    g_free( zond_pdf_abschnitt_priv->node_text );
+
+    G_OBJECT_CLASS(zond_pdf_abschnitt_parent_class)->finalize( self );
+
+    return;
+}
+
+static void
+zond_pdf_abschnitt_class_init( ZondPdfAbschnittClass* klass )
+{
+    GObjectClass *object_class = G_OBJECT_CLASS(klass);
+
+    object_class->finalize = zond_pdf_abschnitt_finalize;
+
+    return;
+}
+
+
+static void
+zond_pdf_abschnitt_init( ZondPdfAbschnitt* self )
+{
+    return;
+}
+
+//nun mit ZondTreeviewFM weiter
 typedef enum
 {
     PROP_PROJEKT = 1,
@@ -210,22 +267,61 @@ zond_treeviewfm_results_row_activated( GtkWidget* listbox, GtkWidget* row, gpoin
 }
 
 
+static void
+zond_treeviewfm_render_icon( SondTreeviewFM* stvfm, GtkTreeIter* iter, GObject* object )
+{
+    if ( ZOND_IS_PDF_ABSCHNITT(object) )//PDF-Abschnitt
+    {
+        GtkCellRenderer* renderer = NULL;
+
+        ZondPdfAbschnittPrivate* zond_pdf_abschnitt_priv =
+                zond_pdf_abschnitt_get_instance_private( ZOND_PDF_ABSCHNITT(object) );
+
+        renderer = sond_treeview_get_cell_renderer_icon( SOND_TREEVIEW(stvfm) );
+
+        g_object_set( G_OBJECT(renderer), "icon-name", zond_pdf_abschnitt_priv->icon_name, NULL );
+    }
+
+    g_object_unref( object );
+
+    return;
+}
+
+
+
 static gint
 zond_treeviewfm_expand_dummy( SondTreeviewFM* stvfm,
         GtkTreeIter* iter, GObject* object, GError** error )
 {
+    gint rc = 0;
+
     if ( ZOND_IS_PDF_ABSCHNITT(object) )
     {
 
+        return 0;
     }
-    else if ( G_IS_FILE_TYPE(object) )
+    else if ( G_IS_FILE_INFO(object) )
     {
+        const gchar* content_type = NULL;
 
+        content_type = g_file_info_get_content_type( G_FILE_INFO(object) );
+        if ( g_content_type_is_mime_type( content_type, "application/pdf" ) )
+        {
+
+            return 0;
+        }
     }
-    //chain-up, nur wenn nicht behandelt
-    SOND_TREEVIEWFM_CLASS(zond_treeviewfm_parent_class)->results_row_activated( listbox, row, data );
 
-    return;
+    //chain-up, nur wenn nicht behandelt...
+    rc = SOND_TREEVIEWFM_CLASS(zond_treeviewfm_parent_class)->expand_dummy( stvfm, iter, object, error );
+    if ( rc )
+    {
+        g_prefix_error( error, "%s\n", __func__ );
+
+        return -1;
+    }
+
+    return 0;
 }
 
 
@@ -237,7 +333,7 @@ zond_treeviewfm_insert_dummy( SondTreeviewFM* stvfm,
     {
         gchar* rel_path = NULL;
         gint rc = 0;
-        GtkTreeiter iter_newest = { 0 };
+        GtkTreeIter iter_newest = { 0 };
 
         ZondTreeviewFMPrivate* priv = zond_treeviewfm_get_instance_private( ZOND_TREEVIEWFM(stvfm) );
 
@@ -249,15 +345,13 @@ zond_treeviewfm_insert_dummy( SondTreeviewFM* stvfm,
 
         if ( rc == -1 )
         {
-            if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_file_enumerate_children:\n",
-                    error->message, NULL );
-            g_error_free( error );
+            g_prefix_error( error, "%s\n", __func__ );
 
             return -1;
         }
         else if ( rc == 1 ) gtk_tree_store_insert(
             GTK_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(stvfm) )),
-            &iter_newest, &iter_new, -1 );
+            &iter_newest, iter, -1 );
     }
 
     //chain-up
@@ -291,8 +385,9 @@ zond_treeviewfm_class_init( ZondTreeviewFMClass* klass )
     SOND_TREEVIEWFM_CLASS(klass)->dbase_end = zond_treeviewfm_dbase_end;
     SOND_TREEVIEWFM_CLASS(klass)->text_edited = zond_treeviewfm_text_edited;
     SOND_TREEVIEWFM_CLASS(klass)->results_row_activated = zond_treeviewfm_results_row_activated;
-    SOND_TREEVIEWDM_CLASS(klass)->insert_dummy = zond_treeviewfm_insert_dummy;
-    SOND_TREEVIEWDM_CLASS(klass)->expand_dummy = zond_treeviewfm_expand_dummy;
+    SOND_TREEVIEWFM_CLASS(klass)->insert_dummy = zond_treeviewfm_insert_dummy;
+    SOND_TREEVIEWFM_CLASS(klass)->expand_dummy = zond_treeviewfm_expand_dummy;
+    SOND_TREEVIEWFM_CLASS(klass)->render_icon = zond_treeviewfm_render_icon;
 
     return;
 }

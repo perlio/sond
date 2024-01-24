@@ -25,8 +25,10 @@ struct _SondTreeviewFMClass
     gint (*dbase_end) (SondTreeviewFM*, gboolean, gchar**);
     void (*text_edited) (GtkCellRenderer*, gchar*, gchar*, gpointer);
     void (*results_row_activated) (GtkWidget*, GtkWidget*, gpointer);
-    gint (*insert_dummy) ( SondTreeviewFM*, GtkTreeIter*, const gchar*, Gerror** );
-    gint (*insert_dummy) ( SondTreeviewFM*, GtkTreeIter*, GObject*, Gerror** );
+    gint (*insert_dummy) ( SondTreeviewFM*, GtkTreeIter*, const gchar*, GError** );
+    gint (*expand_dummy) ( SondTreeviewFM*, GtkTreeIter*, GObject*, GError** );
+    void (*render_icon) ( SondTreeviewFM*, GtkTreeIter*, GObject* );
+    gint (*open_row) ( SondTreeviewFM*, GtkTreeIter*, gboolean, GError** );
 };
 
 
