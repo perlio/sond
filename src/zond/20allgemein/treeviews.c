@@ -473,128 +473,16 @@ treeviews_db_to_baum_rec_links( Projekt* zond, gboolean with_younger_siblings,
 }
 
 
-gint
-treeviews_db_to_baum( Projekt* zond, Baum baum, gint node_id, GtkTreeIter* iter,
-        gboolean child, GtkTreeIter* iter_new, gchar** errmsg )
-{
-    //Inhalt des Datensatzes mit node_id == node_id abfragen
-    gint rc = 0;
-    GtkTreeIter iter_inserted = { 0, };
-    gchar* icon_name = NULL;
-    gchar* node_text = NULL;
-
-    rc = zond_dbase_check_link( zond->dbase_zond->zond_dbase_work, baum, node_id,
-            errmsg );
-    if ( rc == -1 ) ERROR_S
-    else if ( rc == 0 )
-    {
-        gint rc = 0;
-
-        rc = zond_dbase_get_icon_name_and_node_text( zond->dbase_zond->zond_dbase_work,
-                baum, node_id, &icon_name, &node_text, errmsg );
-        if ( rc == -1 ) ERROR_S
-        else if ( rc == 1 ) ERROR_S_MESSAGE( "node_id existiert nicht" )
-    }
-
-    //neuen Knoten einfügen
-    zond_tree_store_insert( ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[baum]) )),
-            iter, child, &iter_inserted );
-
-    //Daten rein
-    zond_tree_store_set( &iter_inserted, icon_name, node_text, node_id );
-
-    g_free( icon_name );
-    g_free( node_text );
-
-    if ( iter_new ) *iter_new = iter_inserted;
-
-    return 0;
-}
-
-
 //rekursive Funktion; gibt Zeiger auf 1. eingefügten Iter zurück (g_free)
 static gint
-treeviews_db_to_baum_rec( Projekt* zond, gboolean with_younger_siblings,
-        Baum baum, gint node_id, GtkTreeIter* iter, gboolean child, GtkTreeIter* iter_new,
-        gchar** errmsg )
-{
-    gint rc = 0;
-    GtkTreeIter iter_inserted = { 0, };
-    gint first_child_id = 0;
-    gint younger_sibling_id = 0;
-
-    if ( node_id )
-    {
-        rc = treeviews_db_to_baum( zond, baum, node_id, iter, child, &iter_inserted, errmsg );
-        if ( rc == 1 ) return 0;
-        else if ( rc == -1 ) ERROR_S
-    }
-
-    //Prüfen, ob Kind- oder Geschwisterknoten vorhanden
-    first_child_id = zond_dbase_get_first_child( zond->dbase_zond->zond_dbase_work, baum, node_id, errmsg );
-    if ( first_child_id < 0 ) ERROR_S
-    else if ( first_child_id > 0 )
-    {
-        gint rc = 0;
-        rc = treeviews_db_to_baum_rec( zond, TRUE, baum, first_child_id,
-                (iter_inserted.stamp) ? &iter_inserted : NULL, TRUE, NULL, errmsg );
-        if ( rc ) ERROR_S
-    }
-
-    if ( with_younger_siblings )
-    {
-        younger_sibling_id = zond_dbase_get_younger_sibling( zond->dbase_zond->zond_dbase_work, baum, node_id, errmsg );
-        if ( younger_sibling_id < 0 ) ERROR_S
-        else if ( younger_sibling_id > 0 )
-        {
-            gint rc = 0;
-
-            rc = treeviews_db_to_baum_rec( zond, TRUE, baum,
-                    younger_sibling_id, (iter_inserted.stamp) ? &iter_inserted : NULL, FALSE, NULL, errmsg );
-            if ( rc ) ERROR_S
-        }
-    }
-
-    if ( iter_new ) *iter_new = iter_inserted;
-
-    return 0;
-}
-
-
-gint
-treeviews_load_node( Projekt* zond, gboolean with_younger_siblings,
-        Baum baum, gint node_id, GtkTreeIter* iter_anchor, gboolean child,
-        GtkTreeIter* iter_new, gchar** errmsg )
-{
-    gint rc = 0;
-    GtkTreeIter iter_node = { 0 };
-    GtkTreeIter iter_link = { 0 };
-
-    rc = treeviews_db_to_baum_rec( zond, with_younger_siblings, baum, node_id,
-            iter_anchor, child, &iter_node, errmsg );
-    if ( rc ) ERROR_S
-
-    if ( iter_new ) *iter_new = iter_node;
-
-    rc = treeviews_db_to_baum_rec_links( zond, with_younger_siblings, baum,
-            node_id, &iter_link, errmsg );
-    if ( rc ) ERROR_S
-
-    if ( iter_link.stamp && iter_new ) *iter_new = iter_link;
-
-    return 0;
-}
-
-
-static gint
-treeviews_reload_baum( Projekt* zond, Baum baum, gchar** errmsg )
+treeviews_reload_baum( Projekt* zond, gint root, gchar** errmsg )
 {
     gint rc = 0;
 
     zond_tree_store_clear( ZOND_TREE_STORE(gtk_tree_view_get_model(
             GTK_TREE_VIEW(zond->treeview[baum]) )) );
 
-    rc = treeviews_load_node( zond, FALSE, baum, 0, NULL, TRUE, NULL, errmsg );
+    rc = treeviews_load_node( zond, FALSE, root, NULL, TRUE, NULL, errmsg );
     if ( rc ) ERROR_S
 
     return 0;

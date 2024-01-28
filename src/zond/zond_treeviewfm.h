@@ -6,7 +6,7 @@
 
 #include "../sond_treeviewfm.h"
 
-#include "20allgemein/project.h"
+//#include "20allgemein/project.h"
 
 
 #define ERROR_ROLLBACK_BOTH(zond_dbase_work,zond_dbase_store) \
@@ -48,11 +48,17 @@
 
 G_BEGIN_DECLS
 
-typedef struct _DBase DBase;
-typedef struct _Clipboard Clipboard;
-typedef struct _Projekt Projekt;
+//ZOND_PDF_ABSCHNITT definieren - lokales GObject-Derivat
+#define ZOND_TYPE_PDF_ABSCHNITT zond_pdf_abschnitt_get_type( )
+G_DECLARE_DERIVABLE_TYPE (ZondPdfAbschnitt, zond_pdf_abschnitt, ZOND, PDF_ABSCHNITT, GObject)
+
+struct _ZondPdfAbschnittClass
+{
+    GObjectClass parent_class;
+};
 
 
+//ZOND_TYPE_TREEVIEWFM definieren
 #define ZOND_TYPE_TREEVIEWFM zond_treeviewfm_get_type( )
 G_DECLARE_DERIVABLE_TYPE (ZondTreeviewFM, zond_treeviewfm, ZOND, TREEVIEWFM, SondTreeviewFM)
 
@@ -62,6 +68,6 @@ struct _ZondTreeviewFMClass
     SondTreeviewFMClass parent_class;
 };
 
-
+G_END_DECLS
 
 #endif // ZOND_TREEVIEWFM_H_INCLUDED

@@ -30,7 +30,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../20allgemein/ziele.h"
 
 #include "project.h"
-#include "selection.h"
 #include "treeviews.h"
 
 

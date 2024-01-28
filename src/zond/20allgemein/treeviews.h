@@ -28,7 +28,7 @@ gint treeviews_selection_set_node_text( Projekt*, Baum, gchar** );
 gint treeviews_db_to_baum( Projekt*, Baum, gint, GtkTreeIter*, gboolean,
         GtkTreeIter*, gchar** );
 
-gint treeviews_load_node( Projekt*, gboolean, Baum, gint,
+gint treeviews_load_node( Projekt*, gboolean, gint,
         GtkTreeIter*, gboolean, GtkTreeIter*, gchar** );
 
 gint treeviews_reload_baeume( Projekt*, gchar** );

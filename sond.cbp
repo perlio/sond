@@ -706,15 +706,6 @@
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
 		</Unit>
-		<Unit filename="src/zond/20allgemein/selection.c">
-			<Option compilerVar="CC" />
-			<Option target="zond (Release)" />
-			<Option target="zond (Testing)" />
-		</Unit>
-		<Unit filename="src/zond/20allgemein/selection.h">
-			<Option target="zond (Release)" />
-			<Option target="zond (Testing)" />
-		</Unit>
 		<Unit filename="src/zond/20allgemein/suchen.c">
 			<Option compilerVar="CC" />
 			<Option target="zond (Release)" />
@@ -923,11 +914,6 @@
 			<Option target="zond (Testing)" />
 			<Option target="Viewer (Release)" />
 			<Option target="Viewer (Testing)" />
-		</Unit>
-		<Unit filename="src/zond/zond_textview.c">
-			<Option compilerVar="CC" />
-			<Option target="zond (Release)" />
-			<Option target="zond (Testing)" />
 		</Unit>
 		<Unit filename="src/zond/zond_tree_store.c">
 			<Option compilerVar="CC" />

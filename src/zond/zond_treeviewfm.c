@@ -14,15 +14,7 @@
 #endif // _WIN32
 
 
-//ZOND_PDF_ABSCHNITT definieren - lokales GObject-Derivat
-#define ZOND_TYPE_PDF_ABSCHNITT zond_pdf_abschnitt_get_type( )
-G_DECLARE_DERIVABLE_TYPE (ZondPdfAbschnitt, zond_pdf_abschnitt, ZOND, PDF_ABSCHNITT, GObject)
-
-struct _ZondPdfAbschnittClass
-{
-    GObjectClass parent_class;
-};
-
+//ZOND_PDF_ABSCHNITT
 typedef struct
 {
     gint ID;
@@ -178,18 +170,18 @@ static gint
 zond_treeviewfm_dbase_update_path( SondTreeviewFM* stvfm,
         const gchar* rel_path_source, const gchar* rel_path_dest, gchar** errmsg )
 {
-    gint rc1 = 0;
-    gint rc2 = 0;
+    gint rc = 0;
 
     ZondTreeviewFMPrivate* priv = zond_treeviewfm_get_instance_private( ZOND_TREEVIEWFM(stvfm) );
 
     ZondDBase* dbase_work = sond_treeviewfm_get_dbase( stvfm );
     ZondDBase* dbase_store = priv->zond->dbase_zond->zond_dbase_store;
 
-    rc1 = zond_dbase_update_path( dbase_store, rel_path_source, rel_path_dest, errmsg );
-    rc2 = zond_dbase_update_path( dbase_work, rel_path_source, rel_path_dest, errmsg );
+    rc = zond_dbase_update_path( dbase_store, rel_path_source, rel_path_dest, errmsg );
+    if ( rc ) ERROR_ROLLBACK( dbase_store )
 
-    if ( rc1 || rc2 ) ERROR_ROLLBACK_BOTH( dbase_work, dbase_store )
+    rc = zond_dbase_update_path( dbase_work, rel_path_source, rel_path_dest, errmsg );
+    if ( rc ) ERROR_ROLLBACK_BOTH( dbase_work, dbase_store )
 
     return 0;
 }

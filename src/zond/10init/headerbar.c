@@ -41,7 +41,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "../20allgemein/pdf_text.h"
 #include "../20allgemein/ziele.h"
-#include "../20allgemein/selection.h"
 #include "../20allgemein/suchen.h"
 #include "../20allgemein/project.h"
 #include "../20allgemein/export.h"

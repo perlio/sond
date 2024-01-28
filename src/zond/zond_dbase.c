@@ -195,12 +195,9 @@ parent_ID und older_sibling_ID
 index_von = Part-Nr.
 Rest = NULL
 
-type = BAUM_INHALT_PDF
-parent_ID und older_sibling_ID
-rel_path
-icon_name
-node_text
-text
+type = BAUM_INHALT_PDF_ABSCHNITT
+link = PDF_ABSCHNITT
+parent_ID und older_sibling_ID zu BAUM_INHALT_FILE
 
 type = BAUM_INHALT_VIRT_PDF
 link = BAUM_INHALT_VIRT_PDF_PART
@@ -271,10 +268,10 @@ Rest = 0
 
             "INSERT INTO knoten (ID, parent_id, older_sibling_id, "
             "node_text) VALUES (0, 0, 0, '" MAJOR "');"
-            "INSERT INTO knoten (ID, parent_id, older_sibling_id) "
-            "VALUES (1, 0, 0);" //root baum_inhalt
-            "INSERT INTO knoten (ID, parent_id, older_sibling_id) "
-            "VALUES (2, 0, 0);" //root baum_auswertung
+            "INSERT INTO knoten (ID, parent_id, older_sibling_id, type) "
+            "VALUES (1, 0, 0, 0);" //root baum_inhalt
+            "INSERT INTO knoten (ID, parent_id, older_sibling_id, type) "
+            "VALUES (2, 0, 0, 0);" //root baum_auswertung
 
 
 /*
@@ -1032,8 +1029,10 @@ zond_dbase_rollback( ZondDBase* zond_dbase, gchar** errmsg )
 
 
 gint
-zond_dbase_insert_node( ZondDBase* zond_dbase, gint ID, gboolean child,
-        ZondDBaseRow* row, GError** error )
+zond_dbase_insert_node( ZondDBase* zond_dbase, gint anchor_ID, gboolean child,
+        gint type, gint link, const gchar* rel_path, gint seite_von, gint index_vor,
+        gint seite_bis, gint index_bis, const gchar* icon_name, const gchar* node_text,
+        const gchar* text, GError** error )
 {
     gint rc = 0;
     gint new_node_id = 0;
@@ -1045,8 +1044,8 @@ zond_dbase_insert_node( ZondDBase* zond_dbase, gint ID, gboolean child,
             "seite_bis, index_bis, icon_name, node_text, text ) "
             "VALUES ("
                 "CASE ?1 " //child
-                    "WHEN 0 THEN (SELECT parent_id FROM baum_inhalt WHERE node_id=?2) "
-                    "WHEN 1 THEN ?2 " //node_id
+                    "WHEN 0 THEN (SELECT parent_ID FROM knoten WHERE ID=?2) "
+                    "WHEN 1 THEN ?2 " //anchor_id
                 "END, "
                 "CASE ?1 " //child
                     "WHEN 0 THEN ?2 "
@@ -1090,7 +1089,7 @@ zond_dbase_insert_node( ZondDBase* zond_dbase, gint ID, gboolean child,
         return -1;
     }
 
-    rc = sqlite3_bind_int( stmt[0], 2, ID );
+    rc = sqlite3_bind_int( stmt[0], 2, anchor_ID );
     {
         if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
                 sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
@@ -1099,7 +1098,37 @@ zond_dbase_insert_node( ZondDBase* zond_dbase, gint ID, gboolean child,
         return -1;
     }
 
+    rc = sqlite3_bind_int( stmt[0], 3, type );
+    {
+        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
+                sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
+                "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
 
+        return -1;
+    }
+
+    if ( link )
+    {
+        rc = sqlite3_bind_int( stmt[0], 4, link );
+        {
+            if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
+                    sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
+                    "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
+
+            return -1;
+        }
+    }
+    else
+    {
+        rc = sqlite3_bind_null( stmt[0], 4 );
+        {
+            if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
+                    sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
+                    "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
+
+            return -1;
+        }
+    }
 
     rc = sqlite3_bind_text( stmt[0], 3,
             icon_name, -1, NULL );
@@ -1125,30 +1154,21 @@ zond_dbase_insert_node( ZondDBase* zond_dbase, gint ID, gboolean child,
 
 
 gint
-zond_dbase_remove_node( ZondDBase* zond_dbase, Baum baum, gint node_id, gchar** errmsg )
+zond_dbase_remove_node( ZondDBase* zond_dbase, gint id, GError** error )
 {
     gint rc = 0;
     sqlite3_stmt** stmt = NULL;
 
     const gchar* sql[] = {
-            "UPDATE baum_inhalt SET older_sibling_id=(SELECT older_sibling_id FROM baum_inhalt "
-            "WHERE node_id=?1) WHERE "
-            "older_sibling_id=?1; ",
+            "UPDATE knoten SET older_sibling_ID=(SELECT older_sibling_id FROM knoten "
+            "WHERE ID=?1) WHERE "
+            "older_sibling_ID=?1; ",
 
-            "UPDATE baum_auswertung SET older_sibling_id=(SELECT older_sibling_id FROM baum_auswertung "
-            "WHERE node_id=?1) WHERE "
-            "older_sibling_id=?1; ",
-
-            "DELETE FROM baum_inhalt WHERE node_id = ?;",
-
-            "DELETE FROM baum_auswertung WHERE node_id = ?; ",
+            "DELETE FROM knoten WHERE node_id = ?1;",
 
             //etwaige Links, die auf gelöschten Knoten zeigen, auch löschen
-            "DELETE FROM baum_inhalt WHERE node_id = "
+            "DELETE FROM knoten WHERE node_id = "
                 "(SELECT node_id FROM links WHERE node_id_target = ?);",
-
-            "DELETE FROM baum_auswertung WHERE node_id = "
-                "(SELECT node_id FROM links WHERE node_id_target = ?); "
         };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );

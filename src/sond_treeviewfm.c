@@ -2199,6 +2199,8 @@ sond_treeviewfm_paste_clipboard( SondTreeviewFM* stvfm, gboolean kind, gchar** e
 
     clipboard = ((SondTreeviewClass*) g_type_class_peek( SOND_TYPE_TREEVIEW ))->clipboard;
 
+    if ( clipboard->tree_view != SOND_TREEVIEW(stvfm) ) return 0;
+
     if ( clipboard->arr_ref->len == 0 ) return 0;
 
     //iter unter cursor holen
