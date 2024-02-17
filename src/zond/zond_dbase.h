@@ -6,14 +6,13 @@
 
 typedef enum
 {
-    ZOND_DBASE_TYPE_ROOT,
-    ZOND_DBASE_TYPE_STRUKT,
-    ZOND_DBASE_TYPE_INHALT_FILE,
-    ZOND_DBASE_TYPE_INHALT_FILE_PART,
-    ZOND_DBASE_TYPE_INHALT_PDF,
-    ZOND_DBASE_TYPE_INHALT_PDF_ABSCHNITT,
-    ZOND_DBASE_TYPE_INHALT_VIRT_PDF,
-    ZOND_DBASE_TYPE_INHALT_VIRT_PDF_PART,
+    ZOND_DBASE_TYPE_BAUM_ROOT,
+    ZOND_DBASE_TYPE_BAUM_STRUKT,
+    ZOND_DBASE_TYPE_BAUM_INHALT_FILE,
+    ZOND_DBASE_TYPE_BAUM_INHALT_FILE_PART,
+    ZOND_DBASE_TYPE_BAUM_INHALT_PDF_ABSCHNITT,
+    ZOND_DBASE_TYPE_BAUM_INHALT_VIRT_PDF,
+    ZOND_DBASE_TYPE_BAUM_INHALT_VIRT_PDF_SECTION,
     ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_COPY,
     ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_LINK,
     ZOND_DBASE_TYPE_PDF_ABSCHNITT,
@@ -116,13 +115,13 @@ gint zond_dbase_set_ziel( ZondDBase*, Ziel*, gint, gchar** );
 
 gint zond_dbase_set_datei( ZondDBase*, gint, const gchar*, gchar** );
 
-gint zond_dbase_get_parent( ZondDBase*, Baum, gint, gchar** );
+gint zond_dbase_get_parent( ZondDBase*, gint, gchar** );
 
 gint zond_dbase_get_older_sibling( ZondDBase*, Baum, gint, gchar** );
 
-gint zond_dbase_get_younger_sibling( ZondDBase*, Baum, gint, gchar** );
+gint zond_dbase_get_younger_sibling( ZondDBase*, gint, gchar** );
 
-gint zond_dbase_get_first_child( ZondDBase*, Baum, gint, gchar** );
+gint zond_dbase_get_first_child( ZondDBase*, gint, gchar** );
 
 gint zond_dbase_get_ref_id( ZondDBase*, gint, gchar** );
 

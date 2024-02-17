@@ -48,8 +48,6 @@ struct _ZondTreeStoreClass
 };
 GDK_AVAILABLE_IN_ALL
 GType         zond_tree_store_get_type         (void) G_GNUC_CONST;
-GDK_AVAILABLE_IN_ALL
-ZondTreeStore *zond_tree_store_new              ( gint );
 
 GDK_AVAILABLE_IN_ALL
 void          zond_tree_store_set              (GtkTreeIter  *iter,
@@ -92,7 +90,9 @@ void zond_tree_store_get_iter_target( GtkTreeIter*, GtkTreeIter* );
 
 ZondTreeStore* zond_tree_store_get_tree_store( GtkTreeIter* );
 
-gint zond_tree_store_get_root_id( ZondTreeStore* );
+void zond_tree_store_set_root( ZondTreeStore*, gint );
+
+gint zond_tree_store_get_root( ZondTreeStore* );
 
 GNode* zond_tree_store_get_root_node( ZondTreeStore* );
 

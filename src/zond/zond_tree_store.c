@@ -226,33 +226,6 @@ zond_tree_store_init (ZondTreeStore *tree_store)
   while (priv->stamp == 0);
 }
 
-/**
- * gtk_tree_store_new:
- * @n_columns: number of columns in the tree store
- * @...: all #GType types for the columns, from first to last
- *
- * Creates a new tree store as with @n_columns columns each of the types passed
- * in.  Note that only types derived from standard GObject fundamental types
- * are supported.
- *
- * As an example, `gtk_tree_store_new (3, G_TYPE_INT, G_TYPE_STRING,
- * GDK_TYPE_PIXBUF);` will create a new #GtkTreeStore with three columns, of type
- * #gint, #gchararray, and #GdkPixbuf respectively.
- *
- * Returns: a new #GtkTreeStore
- **/
-ZondTreeStore *
-zond_tree_store_new ( gint root_node_id )
-{
-    ZondTreeStore* tree_store = NULL;
-
-    tree_store = g_object_new (ZOND_TYPE_TREE_STORE, NULL);
-
-    tree_store->priv->root_node_id = root_node_id;
-
-    return tree_store;
-}
-
 void zond_tree_store_remove_node( GNode* node );
 
 static gboolean
@@ -1544,8 +1517,17 @@ zond_tree_store_get_tree_store( GtkTreeIter* iter )
 }
 
 
+void
+zond_tree_store_set_root( ZondTreeStore* tree_store, gint root_node_id )
+{
+    tree_store->priv->root_node_id = root_node_id;
+
+    return ;
+}
+
+
 gint
-zond_tree_store_get_root_id( ZondTreeStore* tree_store )
+zond_tree_store_get_root( ZondTreeStore* tree_store )
 {
     return tree_store->priv->root_node_id;
 }

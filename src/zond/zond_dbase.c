@@ -172,7 +172,7 @@ zond_dbase_create_db_maj_1( sqlite3* db, gchar** errmsg )
     gint rc = 0;
 
 /*
-type = ROOT
+type = BAUM_ROOT
 ID = 1 (Inhalt) oder 2 (Auswertung)
 parent_ID = 0 und older_sibling_ID = 0
 Rest = NULL
@@ -197,17 +197,17 @@ Rest = NULL
 
 type = BAUM_INHALT_PDF_ABSCHNITT
 link = PDF_ABSCHNITT
-parent_ID und older_sibling_ID zu BAUM_INHALT_FILE
+parent_ID und older_sibling_ID
 
 type = BAUM_INHALT_VIRT_PDF
-link = BAUM_INHALT_VIRT_PDF_PART
+link = BAUM_INHALT_VIRT_PDF_SECTION
 parent_ID und older_sibling_ID
 rel_path = UUID
 icon_name
 node_text
 text
 
-type = BAUM_INHALT_VIRT_PDF_PART
+type = BAUM_INHALT_VIRT_PDF_SECTION
 link = next oder 0
 parent_ID und older_sibling_ID = 0
 rel_path
@@ -230,7 +230,7 @@ text
 
 type = BAUM_AUSWERTUNG_COPY
 parent_ID und older_sibling_ID
-link = ID von BAUM_INHALT_FILE, _FILE_PART, _PDF, _VIRT_PDF oder PDF_ABSCHNITT oder PDF_PUNKT
+link = ID von BAUM_INHALT_FILE, _FILE_PART, _PDF, _PDF_ABSCHNITT, _VIRT_PDF oder PDF_ABSCHNITT oder PDF_PUNKT
 rel_path
 icon_name
 node_text
@@ -263,6 +263,8 @@ Rest = 0
             "FOREIGN KEY (parent_ID) REFERENCES knoten (ID) "
             "ON DELETE CASCADE ON UPDATE CASCADE, "
             "FOREIGN KEY (older_sibling_ID) REFERENCES knoten (ID) "
+            "ON DELETE CASCADE ON UPDATE CASCADE, "
+            "FOREIGN KEY (link) REFERENCES knoten (ID) "
             "ON DELETE CASCADE ON UPDATE CASCADE "
             "); "
 
@@ -274,21 +276,6 @@ Rest = 0
             "VALUES (2, 0, 0, 0);" //root baum_auswertung
 
 
-/*
-            "CREATE TRIGGER delete_links_baum_inhalt_trigger BEFORE DELETE ON baum_inhalt "
-            "BEGIN "
-            "DELETE FROM links WHERE node_id=old.node_id AND baum_id=1; "
-            //etwaige Links, die auf gelöschten Knoten zeigen, auch löschen
-            "DELETE FROM baum_inhalt WHERE node_id = "
-                "(SELECT node_id FROM links WHERE node_id_target = old.node_id);"
-            "END; "
-
-            "CREATE TRIGGER delete_links_baum_auswertung_trigger BEFORE DELETE ON baum_auswertung "
-            "BEGIN "
-            "DELETE FROM links WHERE node_id=old.node_id AND baum_id=2; "
-            "DELETE FROM baum_auswertung WHERE node_id = "
-                "(SELECT node_id FROM links WHERE node_id_target = old.node_id);"
-            "END; " */
             ;
 
     rc = sqlite3_exec( db, sql, NULL, NULL, &errmsg_ii );
@@ -961,8 +948,11 @@ zond_dbase_prepare( ZondDBase* zond_dbase, const gchar* func, const gchar** sql,
 
         g_object_set_data_full( G_OBJECT(zond_dbase), func, *stmt, g_free );
     }
-
-    for ( gint i = 0; i < num_stmts; i++ ) sqlite3_reset( (*stmt)[i] );
+    else for ( gint i = 0; i < num_stmts; i++ )
+    {
+        sqlite3_reset( (*stmt)[i] );
+        sqlite3_clear_bindings( (*stmt)[i] );
+    }
 
     return 0;
 }
@@ -1090,6 +1080,7 @@ zond_dbase_insert_node( ZondDBase* zond_dbase, gint anchor_ID, gboolean child,
     }
 
     rc = sqlite3_bind_int( stmt[0], 2, anchor_ID );
+    if ( rc != SQLITE_OK )
     {
         if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
                 sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
@@ -1099,6 +1090,7 @@ zond_dbase_insert_node( ZondDBase* zond_dbase, gint anchor_ID, gboolean child,
     }
 
     rc = sqlite3_bind_int( stmt[0], 3, type );
+    if ( rc != SQLITE_OK )
     {
         if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
                 sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
@@ -1110,6 +1102,7 @@ zond_dbase_insert_node( ZondDBase* zond_dbase, gint anchor_ID, gboolean child,
     if ( link )
     {
         rc = sqlite3_bind_int( stmt[0], 4, link );
+        if ( rc != SQLITE_OK )
         {
             if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
                     sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
@@ -1121,6 +1114,7 @@ zond_dbase_insert_node( ZondDBase* zond_dbase, gint anchor_ID, gboolean child,
     else
     {
         rc = sqlite3_bind_null( stmt[0], 4 );
+        if ( rc != SQLITE_OK )
         {
             if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
                     sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
@@ -1130,13 +1124,52 @@ zond_dbase_insert_node( ZondDBase* zond_dbase, gint anchor_ID, gboolean child,
         }
     }
 
-    rc = sqlite3_bind_text( stmt[0], 3,
-            icon_name, -1, NULL );
-    if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_int (icon_name)" )
+    rc = sqlite3_bind_text( stmt[0], 5,
+            rel_path, -1, NULL );
+    if ( rc != SQLITE_OK )
+    {
+        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
+                sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
+                "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
 
-    rc = sqlite3_bind_text( stmt[0], 4, node_text,
+        return -1;
+    }
+
+
+
+
+    rc = sqlite3_bind_text( stmt[0], 10, icon_name,
             -1, NULL );
-    if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_text (node_text)" )
+    if ( rc != SQLITE_OK )
+    {
+        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
+                sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
+                "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
+
+        return -1;
+    }
+
+    rc = sqlite3_bind_text( stmt[0], 11, node_text,
+            -1, NULL );
+    if ( rc != SQLITE_OK )
+    {
+        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
+                sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
+                "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
+
+        return -1;
+    }
+
+    rc = sqlite3_bind_text( stmt[0], 12, text,
+            -1, NULL );
+    if ( rc != SQLITE_OK )
+    {
+        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
+                sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
+                "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
+
+        return -1;
+    }
 
     rc = sqlite3_step( stmt[0] );
     if ( rc != SQLITE_DONE ) ERROR_ZOND_DBASE( "sqlite3_step [0]" )

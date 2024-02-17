@@ -19,8 +19,6 @@ gint treeviews_get_baum_and_node_id( Projekt*, GtkTreeIter*, Baum*, gint* );
 gint treeviews_get_rel_path_and_anbindung( Projekt*, Baum, gint, gchar**,
         Anbindung**, gchar** );
 
-gboolean treeviews_get_anchor( Projekt*, gboolean, GtkTreeIter*, GtkTreeIter*, Baum*, gint* );
-
 gint treeviews_selection_entfernen_anbindung( Projekt*, Baum, gchar** );
 
 gint treeviews_selection_set_node_text( Projekt*, Baum, gchar** );

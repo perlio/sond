@@ -440,29 +440,6 @@ cb_item_punkt_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
     return;
 }
 
-/*
-//Knoten-Text anpassen
-static void
-cb_item_text_anbindung( GtkMenuItem* item, gpointer data )
-{
-    gint rc = 0;
-    gchar* errmsg = NULL;
-    Projekt* zond = (Projekt*) data;
-
-    if ( zond->baum_active == KEIN_BAUM || zond->baum_active == BAUM_FS ) return;
-
-    rc = treeviews_selection_set_node_text( zond, zond->baum_active, &errmsg );
-    if ( rc == -1 )
-    {
-        display_message( zond->app_window, "Knotentext anpassen fehlgeschlagen:\n\n"
-                "Bei Aufruf treeviews_node_text_nach_anbindung:\n", errmsg, NULL );
-        g_free( errmsg );
-    }
-
-    return;
-}
-*/
-
 
 static void
 cb_kopieren_activate( GtkMenuItem* item, gpointer user_data )

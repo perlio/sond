@@ -110,7 +110,7 @@ cb_text_buffer_changed( GtkTextBuffer* buffer, gpointer data )
     //sonst: node_id aus Extra-Fenster
     else node_id = zond->node_id_extra;
 
-    rc = zond_dbase_set_text( zond->dbase_zond->zond_dbase_work,
+    rc = zond_dbase_update_text( zond->dbase_zond->zond_dbase_work,
             node_id, text, &errmsg );
     g_free( text );
     if ( rc )
