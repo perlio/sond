@@ -329,21 +329,6 @@ treeviews_db_to_baum_rec_links( Projekt* zond, gboolean with_younger_siblings,
 
 
 //rekursive Funktion; gibt Zeiger auf 1. eingefügten Iter zurück (g_free)
-static gint
-treeviews_reload_baum( Projekt* zond, gint root, gchar** errmsg )
-{
-    gint rc = 0;
-
-    zond_tree_store_clear( ZOND_TREE_STORE(gtk_tree_view_get_model(
-            GTK_TREE_VIEW(zond->treeview[baum]) )) );
-
-    rc = treeviews_load_node( zond, FALSE, root, NULL, TRUE, NULL, errmsg );
-    if ( rc ) ERROR_S
-
-    return 0;
-}
-
-
 gint
 treeviews_reload_baeume( Projekt* zond, gchar** errmsg )
 {

@@ -339,6 +339,46 @@ cb_menu_datei_schliessen_activate( GtkMenuItem* item, gpointer user_data )
 
 
 gint
+project_load_baeume( Projekt* zond, GError** error )
+{
+    gint rc = 0;
+
+    rc = zond_treeview_load_baum( zond->treeview[BAUM_INHALT], &error );
+    if ( rc == -1 )
+    {
+        if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+        g_error_free( error );
+
+        return -1;
+    }
+
+    rc = zond_treeview_load_baum( zond->treeview[BAUM_AUSWERTUNG], &error );
+    if ( rc == -1 )
+    {
+        g_prefix_error( error, "%s\n", __func__ );
+
+        return -1;
+    }
+
+    g_object_set( sond_treeview_get_cell_renderer_text( zond->treeview[BAUM_AUSWERTUNG] ),
+            "editable", FALSE, NULL);
+    g_object_set( sond_treeview_get_cell_renderer_text( zond->treeview[BAUM_INHALT] ),
+            "editable", TRUE, NULL);
+
+    gtk_widget_grab_focus( GTK_WIDGET(zond->treeview[BAUM_INHALT]) );
+
+    if ( gtk_tree_model_get_iter_first( gtk_tree_view_get_model(
+            GTK_TREE_VIEW(zond->treeview[BAUM_AUSWERTUNG]) ), &iter ) )
+    {
+        sond_treeview_set_cursor( zond->treeview[BAUM_AUSWERTUNG], &iter );
+        gtk_tree_selection_unselect_all( zond->selection[BAUM_AUSWERTUNG] );
+    }
+
+    return 0;
+}
+
+
+gint
 project_oeffnen( Projekt* zond, const gchar* abs_path, gboolean create,
         gchar** errmsg )
 {
@@ -374,8 +414,17 @@ project_oeffnen( Projekt* zond, const gchar* abs_path, gboolean create,
 
     if ( !create )
     {
-        rc = treeviews_reload_baeume( zond, errmsg );
-        if ( rc == -1 ) ERROR_S
+        GError* error = NULL;
+        gint rc = 0;
+
+        rc = project_load_baeume( zond, &error );
+        if ( rc )
+        {
+            if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+            g_error_free( error );
+
+            return -1;
+        }
     }
 
     return 0;

@@ -54,6 +54,7 @@ zond_treeview_cursor_changed( ZondTreeview* treeview, gpointer user_data )
     Anbindung* anbindung = NULL;
     gchar* text_label = NULL;
     gchar* text = NULL;
+    GError* error = NULL;
 
     Projekt* zond = (Projekt*) user_data;
 
@@ -70,22 +71,36 @@ zond_treeview_cursor_changed( ZondTreeview* treeview, gpointer user_data )
         zond->node_id_act = 0;
 
         //falls extra-textview auf gelöschten Punkt
-        if ( zond->node_id_extra &&
-                (zond_dbase_get_root( zond->dbase_zond->zond_dbase_work, zond->node_id_extra ) ==
-                sond_treeview_get_id( SOND_TREEVIEW(treeview) )) )
+        if ( zond->node_id_extra )
         {
-            gboolean ret = FALSE;
+            gint root = 0;
+            gint rc = 0;
 
-            gtk_text_buffer_set_text( gtk_text_view_get_buffer( GTK_TEXT_VIEW(zond->textview_ii) ),
-                    "", -1 );
+            rc = zond_dbase_get_root( zond->dbase_zond->zond_dbase_work,
+                    zond->node_id_extra, &root, &error );
+            if ( rc )
+            {
+                display_message( zond->app_window, "Fehler\n\n", error->message, NULL );
+                g_error_free( error );
 
-            //Text-Fenster verstecken (falls nicht schn ist, Überprüfung aber überflüssig
-            g_signal_emit_by_name( zond->textview_window, "delete-event", zond, &ret );
+                return;
+            }
 
-            //Vorsichtshalber auch Menüpunkt deaktivieren
-            gtk_widget_set_sensitive( zond->menu.textview_extra, FALSE );
+            if ( root == sond_treeview_get_id( SOND_TREEVIEW(treeview) ) )
+            {
+                gboolean ret = FALSE;
 
-            zond->node_id_extra = 0;
+                gtk_text_buffer_set_text( gtk_text_view_get_buffer( GTK_TEXT_VIEW(zond->textview_ii) ),
+                        "", -1 );
+
+                //Text-Fenster verstecken (falls nicht schn ist, Überprüfung aber überflüssig
+                g_signal_emit_by_name( zond->textview_window, "delete-event", zond, &ret );
+
+                //Vorsichtshalber auch Menüpunkt deaktivieren
+                gtk_widget_set_sensitive( zond->menu.textview_extra, FALSE );
+
+                zond->node_id_extra = 0;
+            }
         }
 
         return;
@@ -154,12 +169,12 @@ zond_treeview_cursor_changed( ZondTreeview* treeview, gpointer user_data )
         else buffer = gtk_text_view_get_buffer( GTK_TEXT_VIEW(zond->textview) );
 
         //neuen text einfügen
-        rc = zond_dbase_get_text( zond->dbase_zond->zond_dbase_work, node_id, &text, &errmsg );
+        rc = zond_dbase_get_text( zond->dbase_zond->zond_dbase_work, node_id, &text, &error );
         if ( rc )
         {
             text_label = g_strconcat( "Fehler in ", __func__, ": Bei Aufruf "
-                    "zond_dbase_get_text: ", errmsg, NULL );
-            g_free( errmsg );
+                    "zond_dbase_get_text: ", error->message, NULL );
+            g_error_free( error );
             gtk_label_set_text( zond->label_status, text_label );
             g_free( text_label );
 
@@ -236,7 +251,7 @@ zond_treeview_cell_edited( GtkCellRenderer* cell, gchar* path_string, gchar* new
         gpointer user_data )
 {
     gint rc = 0;
-    gchar* errmsg = NULL;
+    GError* error = NULL;
     gint node_id = 0;
     GtkTreeIter iter = { 0, };
 
@@ -247,12 +262,12 @@ zond_treeview_cell_edited( GtkCellRenderer* cell, gchar* path_string, gchar* new
     gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(ztv) ), &iter, 2, &node_id, -1 );
 
     //node_id holen, node_text in db ändern
-    rc = zond_dbase_update_node_text( ztv_priv->zond->dbase_zond->zond_dbase_work, node_id, new_text, &errmsg );
+    rc = zond_dbase_update_node_text( ztv_priv->zond->dbase_zond->zond_dbase_work, node_id, new_text, &error );
     if ( rc )
     {
         display_message( gtk_widget_get_toplevel( GTK_WIDGET(ztv) ), "Knoten umbenennen nicht möglich\n\n"
-                "Bei Aufruf zond_dbase_set_node_text:\n", errmsg, NULL );
-        g_free( errmsg );
+                "Bei Aufruf zond_dbase_set_node_text:\n", error->message, NULL );
+        g_error_free( error );
     }
     else
     {
@@ -272,9 +287,9 @@ zond_treeview_render_node_text( GtkTreeViewColumn* column, GtkCellRenderer* rend
         GtkTreeModel* model, GtkTreeIter* iter, gpointer data )
 {
     gint rc = 0;
-    gchar* errmsg = NULL;
     gint node_id = 0;
     gchar* text = NULL;
+    GError* error = NULL;
 
     ZondTreeview* ztv = (ZondTreeview*) data;
     ZondTreeviewPrivate* ztv_priv = zond_treeview_get_instance_private( ztv );
@@ -302,13 +317,13 @@ zond_treeview_render_node_text( GtkTreeViewColumn* column, GtkCellRenderer* rend
 
     //Hintergrund icon rot wenn Text in textview
     rc = zond_dbase_get_text( ztv_priv->zond->dbase_zond->zond_dbase_work,
-            node_id, &text, &errmsg );
+            node_id, &text, &error );
     if ( rc )
     {
         gchar* text_label = NULL;
         text_label = g_strconcat( "Fehler in treeviews_render_node_text -\n\n"
-                "Bei Aufruf zond_dbase_get_text:\n", errmsg, NULL );
-        g_free( errmsg );
+                "Bei Aufruf zond_dbase_get_text:\n", error->message, NULL );
+        g_error_free( error );
         gtk_label_set_text( ztv_priv->zond->label_status, text_label );
         g_free( text_label );
     }
@@ -439,18 +454,36 @@ zond_treeview_hat_vorfahre_datei( Projekt* zond, gint anchor_id, gboolean child,
 {
     gint rc = 0;
     gint type = 0;
+    GError* error = NULL;
 
     if ( anchor_id == 0 ) return 0;
 
     if ( !child )
     {
-        anchor_id = zond_dbase_get_parent( zond->dbase_zond->zond_dbase_work, anchor_id, errmsg );
-        if ( anchor_id < 0 ) ERROR_S
+        gint parent_id = 0;
+
+        rc = zond_dbase_get_parent( zond->dbase_zond->zond_dbase_work, anchor_id,
+                &parent_id, &error );
+        if ( rc )
+        {
+            if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+            g_error_free( error );
+
+            return -1;
+        }
+
+        anchor_id = parent_id;
     }
 
     rc = zond_dbase_get_type_and_link( zond->dbase_zond->zond_dbase_work,
-            anchor_id, &type, NULL, errmsg );
-    if ( rc == -1 ) ERROR_S
+            anchor_id, &type, NULL, &error );
+    if ( rc == -1 )
+    {
+        if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+        g_error_free( error );
+
+        return -1;
+    }
 
     if ( type != ZOND_DBASE_TYPE_BAUM_STRUKT &&
             type != ZOND_DBASE_TYPE_BAUM_ROOT ) return 1;
@@ -471,6 +504,7 @@ zond_treeview_insert_node( Projekt* zond, gboolean child, gchar** errmsg )
     GtkTreeIter iter_new = { 0 };
     gboolean success = FALSE;
     ZondTreeStore* tree_store = NULL;
+    GError* error = NULL;
 
     g_return_val_if_fail( zond->baum_active == BAUM_INHALT || zond->baum_active == BAUM_AUSWERTUNG, -1);
 
@@ -492,9 +526,15 @@ zond_treeview_insert_node( Projekt* zond, gboolean child, gchar** errmsg )
     if ( rc ) ERROR_S
 
     //Knoten in Datenbank einfügen
-    node_id_new = zond_dbase_insert_strukt( zond->dbase_zond->zond_dbase_work,
-            anchor_id, child, zond->icon[ICON_NORMAL].icon_name, "Neuer Punkt", errmsg );
-    if ( node_id_new == -1 ) ERROR_ROLLBACK( zond->dbase_zond->zond_dbase_work )
+    node_id_new = zond_dbase_insert_node( zond->dbase_zond->zond_dbase_work,
+            anchor_id, child, ZOND_DBASE_TYPE_BAUM_STRUKT, 0, NULL, 0, 0, 0, 0,
+            zond->icon[ICON_NORMAL].icon_name, "Neuer Punkt", NULL, &error );
+    if ( node_id_new == -1 )
+    {
+        if ( errmsg ) *errmsg = g_strdup( error->message );
+        g_error_free( error );
+        ERROR_ROLLBACK( zond->dbase_zond->zond_dbase_work )
+    }
 
     rc = zond_dbase_commit( zond->dbase_zond->zond_dbase_work, errmsg );
     if ( rc ) ERROR_ROLLBACK( zond->dbase_zond->zond_dbase_work )
@@ -579,9 +619,9 @@ zond_treeview_walk_tree( ZondTreeview* ztv, gboolean with_younger_siblings,
         return -1;
     }
 
-    first_child = zond_dbase_get_first_child( ztv_priv->zond->dbase_zond->zond_dbase_work,
-            node_id, error );
-    if ( first_child == -1 )
+    rc = zond_dbase_get_first_child( ztv_priv->zond->dbase_zond->zond_dbase_work,
+            node_id, &first_child, error );
+    if ( rc )
     {
         g_prefix_error( error, "%s\n", __func__ );
 
@@ -605,9 +645,9 @@ zond_treeview_walk_tree( ZondTreeview* ztv, gboolean with_younger_siblings,
     {
         gint younger_sibling = 0;
 
-        younger_sibling = zond_dbase_get_younger_sibling( ztv_priv->zond->dbase_zond->zond_dbase_work,
-                node_id, error );
-        if ( younger_sibling == -1 )
+        rc = zond_dbase_get_younger_sibling( ztv_priv->zond->dbase_zond->zond_dbase_work,
+                node_id, &younger_sibling, error );
+        if ( rc )
         {
             g_prefix_error( error, "%s\n", __func__ );
 
@@ -632,7 +672,7 @@ zond_treeview_walk_tree( ZondTreeview* ztv, gboolean with_younger_siblings,
 
 
 static gint
-zond_treeview_load_pdf_abschnitt( ZondTreeview* ztv, gint node_id,
+zond_treeview_insert_pdf_abschnitt( ZondTreeview* ztv, gint node_id,
         GtkTreeIter* iter, gboolean child, GtkTreeIter* iter_inserted,
         gint anchor_id, gint* node_id_inserted, GError** error )
 {
@@ -642,8 +682,8 @@ zond_treeview_load_pdf_abschnitt( ZondTreeview* ztv, gint node_id,
 
     ZondTreeviewPrivate* ztv_priv = zond_treeview_get_instance_private( ztv );
 
-    rc = zond_dbase_get_visual_node( ztv_priv->zond->dbase_zond->zond_dbase_work,
-            node_id, &icon_name, &node_text, error );
+    rc = zond_dbase_get_node( ztv_priv->zond->dbase_zond->zond_dbase_work,
+            node_id, 0, 0, NULL, 0, 0, 0, 0, &icon_name, &node_text, NULL, error );
     if ( rc )
     {
         g_prefix_error( error, "%s\n", __func__ );
@@ -680,8 +720,14 @@ zond_treeview_load_baum_inhalt_file( ZondTreeview* ztv,
 
     zond_tree_store_set( iter_new, icon_name, node_text, node_id );
 
-    rc = zond_dbase_get_rel_path( ztv_priv->zond->dbase_zond->zond_dbase_work, node_id, &rel_path, errmsg );
-    if ( rc == - 1 ) ERROR_S
+    rc = zond_dbase_get_rel_path( ztv_priv->zond->dbase_zond->zond_dbase_work, node_id, &rel_path, &error );
+    if ( rc == - 1 )
+    {
+        if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+        g_error_free( error );
+
+        return -1;
+    }
     else if ( rc == 1 )
     {
         if ( errmsg ) *errmsg = g_strdup_printf( "%s\nKeine Datei mit Knoten verknüpft", __func__ );
@@ -702,7 +748,7 @@ zond_treeview_load_baum_inhalt_file( ZondTreeview* ztv,
     else if ( node_id_pdf_abschnitt == 0 ) return 0;
 
     rc = zond_treeview_walk_tree( ztv, TRUE, node_id_pdf_abschnitt, iter_new, TRUE,
-            NULL, node_id, NULL, zond_treeview_load_pdf_abschnitt, &error );
+            NULL, 0, NULL, zond_treeview_insert_pdf_abschnitt, &error );
     if ( rc )
     {
         if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
@@ -727,6 +773,7 @@ zond_treeview_datei_anbinden( ZondTreeview* ztv, GtkTreeIter* anchor_iter,
     gint new_node_id = 0;
     const gchar* icon_name = NULL;
     GtkTreeIter iter_new = { 0 };
+    GError* error = NULL;
 
     ZondTreeviewPrivate* ztv_priv = zond_treeview_get_instance_private( ztv );
 
@@ -749,9 +796,15 @@ zond_treeview_datei_anbinden( ZondTreeview* ztv, GtkTreeIter* anchor_iter,
     rc = zond_dbase_begin( ztv_priv->zond->dbase_zond->zond_dbase_work, errmsg );
     if ( rc ) ERROR_S
 
-    new_node_id = zond_dbase_insert_baum_inhalt_file( ztv_priv->zond->dbase_zond->zond_dbase_work,
-            anchor_id, child, icon_name, rel_path, NULL, errmsg );
-    if ( new_node_id == -1 ) ERROR_ROLLBACK( ztv_priv->zond->dbase_zond->zond_dbase_work )
+    new_node_id = zond_dbase_insert_node( ztv_priv->zond->dbase_zond->zond_dbase_work,
+            anchor_id, child, ZOND_DBASE_TYPE_BAUM_INHALT_FILE, 0, rel_path, 0, 0, 0, 0,
+            icon_name, rel_path, NULL, &error );
+    if ( new_node_id == -1 )
+    {
+        if ( errmsg ) *errmsg = g_strdup( error->message );
+        g_error_free( error );
+        ERROR_ROLLBACK( ztv_priv->zond->dbase_zond->zond_dbase_work )
+    }
 
     rc = zond_treeview_load_baum_inhalt_file( ztv, (anchor_iter->user_data ==
             zond_tree_store_get_root_node( ZOND_TREE_STORE(gtk_tree_view_get_model(
@@ -793,9 +846,16 @@ zond_treeview_ordner_anbinden_rekursiv( ZondTreeview* ztv, GtkTreeIter* anchor_i
 
     basename = g_file_info_get_name( info );
 
-    new_node_id = zond_dbase_insert_strukt( ztv_priv->zond->dbase_zond->zond_dbase_work,
-            anchor_id, child, "folder", basename, NULL, errmsg );
-    if ( new_node_id == -1 ) ERROR_S
+    new_node_id = zond_dbase_insert_node( ztv_priv->zond->dbase_zond->zond_dbase_work,
+            anchor_id, child, ZOND_DBASE_TYPE_BAUM_STRUKT, 0, NULL, 0, 0, 0, 0,
+            "folder", basename, NULL, &error );
+    if ( new_node_id == -1 )
+    {
+        if( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+        g_error_free( error );
+
+        return -1;
+    }
 
     tree_store = ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(ztv) ));
     zond_tree_store_insert( tree_store, (anchor_iter->user_data ==
@@ -1016,10 +1076,9 @@ zond_treeview_clipboard_verschieben_foreach( SondTreeview* tree_view, GtkTreeIte
         gpointer data, gchar** errmsg )
 {
     gint node_id = 0;
-    gint id_parent = 0;
-    gint id_older_sibling = 0;
     gint rc = 0;
     GtkTreeIter iter_new = { 0 };
+    GError* error = NULL;
 
     SSelection* s_selection = (SSelection*) data;
 
@@ -1039,27 +1098,29 @@ zond_treeview_clipboard_verschieben_foreach( SondTreeview* tree_view, GtkTreeIte
         gint type = 0;
 
         rc = zond_dbase_get_type_and_link( s_selection->zond->dbase_zond->zond_dbase_work,
-                node_id, &type, NULL, errmsg );
-        if ( rc == -1 ) ERROR_S
+                node_id, &type, NULL, &error );
+        if ( rc == -1 )
+        {
+            if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+            g_error_free( error );
+
+            return -1;
+        }
 
         if ( type == ZOND_DBASE_TYPE_PDF_ABSCHNITT ||
                 type == ZOND_DBASE_TYPE_PDF_PUNKT ) return 0;
     }
 
-    //parent und older sibling des neu einzufügenden Knotens bestimmen
-    if ( s_selection->child ) id_parent = s_selection->anchor_id;
-    else
-    {
-        id_older_sibling = s_selection->anchor_id;
-        id_parent = zond_dbase_get_parent( s_selection->zond->dbase_zond->zond_dbase_work,
-                id_older_sibling, errmsg );
-        if ( id_parent < 0 ) ERROR_S
-    }
-
     //Knoten verschieben verschieben
     rc = zond_dbase_verschieben_knoten( s_selection->zond->dbase_zond->zond_dbase_work,
-            node_id, id_parent, id_older_sibling, errmsg );
-    if ( rc ) ERROR_S
+            node_id, s_selection->anchor_id, s_selection->child, &error );
+    if ( rc )
+    {
+        if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+        g_error_free( error );
+
+        return -1;
+    }
 
     zond_tree_store_move_node( iter_src, s_selection->iter_anchor, s_selection->child, &iter_new );
 
@@ -1120,7 +1181,7 @@ zond_treeview_copy_pdf_abschnitt( ZondTreeview* ztv,
     ZondTreeviewPrivate* ztv_priv = zond_treeview_get_instance_private( ztv );
 
     rc = zond_dbase_get_node( ztv_priv->zond->dbase_zond->zond_dbase_work,
-            node_id, &type, &link, NULL, NULL, &icon_name, &node_text,
+            node_id, &type, &link, NULL, NULL, NULL, NULL, NULL, &icon_name, &node_text,
             &text, error );
     if ( rc )
     {
@@ -1172,7 +1233,7 @@ zond_treeview_copy_node_to_baum_auswertung( ZondTreeview* ztv,
     ZondTreeviewPrivate* ztv_priv = zond_treeview_get_instance_private( ztv );
 
     rc = zond_dbase_get_node( ztv_priv->zond->dbase_zond->zond_dbase_work,
-            node_id, &type, &link, NULL, NULL, &icon_name, &node_text,
+            node_id, &type, &link, NULL, NULL, NULL, NULL, NULL, &icon_name, &node_text,
             &text, error );
     if ( rc )
     {
@@ -1223,9 +1284,10 @@ zond_treeview_copy_node_to_baum_auswertung( ZondTreeview* ztv,
         //ersten PDF-Abschnitt
         if ( type == ZOND_DBASE_TYPE_BAUM_INHALT_PDF_ABSCHNITT )
         {
-            first_pdf_abschnitt = zond_dbase_get_first_child(
-                    ztv_priv->zond->dbase_zond->zond_dbase_work, node_id_new, error );
-            if ( first_pdf_abschnitt == -1 )
+            rc = zond_dbase_get_first_child(
+                    ztv_priv->zond->dbase_zond->zond_dbase_work, node_id_new,
+                    &first_pdf_abschnitt, error );
+            if ( rc )
             {
                 g_prefix_error( error, "%s\n", __func__ );
 
@@ -1361,7 +1423,7 @@ zond_treeview_paste_clipboard_as_link_foreach( SondTreeview* tree_view, GtkTreeI
             node_id, NULL, 0, 0, 0, 0, NULL, NULL, NULL, &error );
     if ( node_id_new < 0 )
     {
-        if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__ error->message );
+        if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
         g_error_free( error );
 
         ERROR_ROLLBACK( s_selection->zond->dbase_zond->zond_dbase_work )
@@ -1403,7 +1465,7 @@ zond_treeview_paste_clipboard_as_link( Projekt* zond, gboolean child,
             zond_tree_store_get_root_node(
             zond_tree_store_get_tree_store( &iter_origin ) )) )
             sond_treeview_expand_row( zond->treeview[zond->baum_active], &iter_origin );
-    sond_treeview_set_cursor( zond->treeview[zond->baum_active], s_selection.iter_cursor );
+    sond_treeview_set_cursor( zond->treeview[zond->baum_active], s_selection.iter_anchor );
 
     return 0;
 }
@@ -1562,6 +1624,7 @@ zond_treeview_selection_loeschen_foreach( SondTreeview* tree_view, GtkTreeIter* 
     gint rc = 0;
     gint node_id = 0;
     gboolean response = FALSE;
+    GError* error = NULL;
 
     Projekt* zond = (Projekt*) data;
 
@@ -1578,8 +1641,13 @@ zond_treeview_selection_loeschen_foreach( SondTreeview* tree_view, GtkTreeIter* 
     if ( rc ) ERROR_S
 
     rc = zond_dbase_remove_node( zond->dbase_zond->zond_dbase_work,
-            node_id, errmsg );
-    if ( rc ) ERROR_ROLLBACK( zond->dbase_zond->zond_dbase_work )
+            node_id, &error );
+    if ( rc )
+    {
+        if ( errmsg ) *errmsg = g_strdup( error->message );
+        g_error_free( error );
+        ERROR_ROLLBACK( zond->dbase_zond->zond_dbase_work )
+    }
 
     rc = zond_dbase_commit( zond->dbase_zond->zond_dbase_work, errmsg );
     if ( rc ) ERROR_ROLLBACK( zond->dbase_zond->zond_dbase_work )
@@ -1612,44 +1680,26 @@ zond_treeview_loeschen_activate( GtkMenuItem* item, gpointer user_data )
 
 
 static gint
-zond_treeview_knoten_verschieben( ZondTreeview* ztv, gint node_id, gint parent_id,
-        gint older_sibling_id, gchar** errmsg )
+zond_treeview_knoten_verschieben( ZondTreeview* ztv, gint node_id, GtkTreeIter* iter_src,
+        gint anchor_id, GtkTreeIter* iter_dest, gboolean child, gchar** errmsg )
 {
     gint rc = 0;
-    gboolean child = FALSE;
-    GtkTreeIter* iter_src = NULL;
-    GtkTreeIter* iter_dest = NULL;
+    GError* error = NULL;
 
     ZondTreeviewPrivate* ztv_priv = zond_treeview_get_instance_private( ztv );
 
     //kind verschieben
     rc = zond_dbase_verschieben_knoten( ztv_priv->zond->dbase_zond->zond_dbase_work,
-            node_id, parent_id, older_sibling_id, errmsg );
-    if ( rc ) ERROR_S
-
-    //Knoten im tree verschieben
-    //hierzu iter des verschobenen Kindknotens herausfinden
-    iter_src = zond_treeview_abfragen_iter( ztv, node_id );
-    if ( !iter_src ) ERROR_S_MESSAGE( "node_id des zu verschiebenden Knotens nicht im Baum gefunden" )
-
-    //zunächst iter des Anker-Knotens ermitteln
-    if ( !older_sibling_id ) child = TRUE;
-
-    //zunächst iter des Anker-Knotens ermitteln
-    if ( child ) iter_dest =
-            zond_treeview_abfragen_iter( ztv, parent_id );
-    else iter_dest =
-            zond_treeview_abfragen_iter( ztv, older_sibling_id );
-    if ( !iter_dest )
+            node_id, anchor_id, child, &error );
+    if ( rc )
     {
-        gtk_tree_iter_free( iter_src );
-        ERROR_S_MESSAGE( "anchor_id nicht im Baum gefunden" )
+        if ( errmsg ) *errmsg = g_strdup( error->message );
+        g_error_free( error );
+
+        ERROR_S
     }
 
     zond_tree_store_move_node( iter_src, iter_dest, child, NULL );
-
-    gtk_tree_iter_free( iter_dest );
-    gtk_tree_iter_free( iter_src );
 
     return 0;
 }
@@ -1662,9 +1712,12 @@ zond_treeview_selection_entfernen_anbindung_foreach( SondTreeview* stv,
     gint rc = 0;
     gint older_sibling = 0;
     gint parent = 0;
-    gint child = 0;
     gint node_id = 0;
+    gint anchor_id = 0;
     gint type = 0;
+    GtkTreeIter iter_dest = { 0 };
+    gboolean child = FALSE;
+    GError* error = NULL;
 
     Projekt* zond = data;
 
@@ -1673,40 +1726,99 @@ zond_treeview_selection_entfernen_anbindung_foreach( SondTreeview* stv,
     gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(stv) ), iter,
             2, &node_id, -1 );
 
-    rc = zond_dbase_get_type( zond->dbase_zond->zond_dbase_work,
-            node_id, &type, errmsg );
-    if ( rc ) ERROR_S
+    rc = zond_dbase_get_type_and_link( zond->dbase_zond->zond_dbase_work,
+            node_id, &type, NULL, &error );
+    if ( rc )
+    {
+        if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+        g_error_free( error );
+
+        return -1;
+    }
 
     if ( type != ZOND_DBASE_TYPE_PDF_ABSCHNITT ) return 0;
 
+    iter_dest = *iter;
+
     //herausfinden, ob zu löschender Knoten älteres Geschwister hat
-    older_sibling = zond_dbase_get_older_sibling( zond->dbase_zond->zond_dbase_work,
-            node_id, errmsg );
-    if ( older_sibling < 0 ) ERROR_S
+    rc = zond_dbase_get_older_sibling( zond->dbase_zond->zond_dbase_work,
+            node_id, &older_sibling, &error);
+    if ( rc )
+    {
+        if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+        g_error_free( error );
+
+        return -1;
+    }
 
     //Elternknoten ermitteln
-    parent = zond_dbase_get_parent( zond->dbase_zond->zond_dbase_work,
-            node_id, errmsg );
-    if ( parent < 0 ) ERROR_S
+    rc = zond_dbase_get_parent( zond->dbase_zond->zond_dbase_work,
+            node_id, &parent, &error );
+    if ( rc )
+    {
+        if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+        g_error_free( error );
+
+        return -1;
+    }
+
+    if ( older_sibling )
+    {
+        if ( !gtk_tree_model_iter_previous( gtk_tree_view_get_model(
+                GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]) ), &iter_dest ) )
+                ERROR_S_MESSAGE( "Kann älteres Geschwister nicht im tree finden" )
+
+        child = FALSE;
+        anchor_id = older_sibling;
+    }
+    else
+    {
+        if ( !gtk_tree_model_iter_parent( gtk_tree_view_get_model(
+                GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]) ), &iter_dest, iter ) )
+                ERROR_S_MESSAGE( "Kann Elternknoten nicht finden" )
+
+        child = TRUE;
+        anchor_id = parent;
+    }
 
     rc = zond_dbase_begin( zond->dbase_zond->zond_dbase_work, errmsg );
     if ( rc ) ERROR_S
 
-    child = 0;
-    while ( (child = zond_dbase_get_first_child( zond->dbase_zond->zond_dbase_work, node_id,
-            errmsg )) )
+    do
     {
-        if ( child < 0 ) ERROR_ROLLBACK( zond->dbase_zond->zond_dbase_work )
+        GtkTreeIter iter_src = { 0 };
+        gint rc = 0;
+        gint first_child_id = 0;
 
-        rc = zond_treeview_knoten_verschieben( ZOND_TREEVIEW(stv), child, parent,
-                older_sibling, errmsg );
+        rc = zond_dbase_get_first_child( zond->dbase_zond->zond_dbase_work, node_id,
+                &first_child_id, &error );
+        if ( rc )
+        {
+            if ( errmsg ) *errmsg = g_strdup( error->message );
+            g_error_free( error );
+            ERROR_ROLLBACK( zond->dbase_zond->zond_dbase_work )
+        }
+
+        if ( first_child_id == 0 ) break;
+
+        if ( !gtk_tree_model_get_iter_first( gtk_tree_view_get_model(
+                GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]) ), &iter_src ) )
+                ERROR_S_MESSAGE( "Kann iter Kindknoten nicht finden" )
+
+        rc = zond_treeview_knoten_verschieben( ZOND_TREEVIEW(stv), first_child_id, &iter_src,
+                anchor_id, &iter_dest, child, errmsg );
         if ( rc == -1 ) ERROR_ROLLBACK( zond->dbase_zond->zond_dbase_work )
 
-        older_sibling = child;
-    }
+        anchor_id = first_child_id;
+    } while ( 1 );
 
-    rc = zond_dbase_remove_node( zond->dbase_zond->zond_dbase_work, node_id, errmsg );
-    if ( rc ) ERROR_ROLLBACK( zond->dbase_zond->zond_dbase_work )
+    rc = zond_dbase_remove_node( zond->dbase_zond->zond_dbase_work, node_id, &error );
+    if ( rc )
+    {
+        if ( errmsg ) *errmsg = g_strdup( error->message );
+        g_error_free( error );
+        ERROR_ROLLBACK( zond->dbase_zond->zond_dbase_work )
+    }
 
     zond_tree_store_remove( iter );
 
@@ -1773,6 +1885,7 @@ zond_treeview_jump_to_origin( ZondTreeview* ztv, GtkTreeIter* iter, GError** err
 {
     gint node_id = 0;
     gint type = 0;
+    gint link = 0;
     gint rc = 0;
 
     ZondTreeviewPrivate* ztv_priv = zond_treeview_get_instance_private( ztv );
@@ -1781,8 +1894,8 @@ zond_treeview_jump_to_origin( ZondTreeview* ztv, GtkTreeIter* iter, GError** err
             GTK_TREE_VIEW(ztv_priv->zond->treeview[ztv_priv->zond->baum_active]) ),
             iter, 2, &node_id, -1 );
 
-    rc = zond_dbase_get_node_type( ztv_priv->zond->dbase_zond->zond_dbase_work, node_id,
-            &type, &error );
+    rc = zond_dbase_get_type_and_link( ztv_priv->zond->dbase_zond->zond_dbase_work, node_id,
+            &type, &link, error );
     if ( rc )
     {
         g_prefix_error( error, "%s\n", __func__ );
@@ -1792,22 +1905,12 @@ zond_treeview_jump_to_origin( ZondTreeview* ztv, GtkTreeIter* iter, GError** err
 
     if ( type == ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_COPY )
     {
-        gint link = 0;
-        gint rc = 0;
-
-        rc = zond_dbase_get_link( ztv_priv->zond->dbase_zond->zond_dbase_work,
-                node_id, &link, error );
-        if ( rc )
-        {
-            g_prefix_error( error, "%s\n", __func__ );
-            return -1;
-        }
 
     }
     else if ( type == ZOND_DBASE_TYPE_BAUM_INHALT_FILE )
     {
         /*
-                //Sprung auf FILE/FILE_PART/PDF_ABSCHNITT
+                //Sprung auf FILE/FILE_PART
             //wenn FS nicht angezeigt: erst einschalten, damit man was sieht
             if ( !gtk_toggle_button_get_active( GTK_TOGGLE_BUTTON(zond->fs_button) ) )
                     gtk_toggle_button_set_active( GTK_TOGGLE_BUTTON(zond->fs_button), TRUE );
@@ -1927,13 +2030,20 @@ zond_treeview_selection_change_icon_foreach( SondTreeview* tree_view, GtkTreeIte
     gint rc = 0;
     gint node_id = 0;
     SSelectionChangeIcon* s_selection = NULL;
+    GError* error = NULL;
 
     s_selection = data;
 
     gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(tree_view) ), iter, 2, &node_id, -1 );
 
-    rc = zond_dbase_update_icon_name( s_selection->zond_dbase, node_id, s_selection->icon_name, errmsg );
-    if ( rc ) ERROR_S
+    rc = zond_dbase_update_icon_name( s_selection->zond_dbase, node_id, s_selection->icon_name, &error );
+    if ( rc )
+    {
+        if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+        g_error_free( error );
+
+        return -1;
+    }
 
     //neuen icon_name im tree speichern
     zond_tree_store_set( iter, s_selection->icon_name, NULL, 0 );
@@ -2243,6 +2353,184 @@ zond_treeview_get_path( SondTreeview* treeview, gint node_id )
             zond_treeview_foreach_path, &path );
 
     return path;
+}
+
+
+static gint
+zond_treeview_load_node( ZondTreeview* ztv, gint node_id, GtkTreeIter* iter_anchor,
+        gboolean child, GtkTreeIter* iter_inserted, gint anchor_id,
+        gint* node_id_inserted, GError** error )
+{
+    gint type = 0;
+    gint link = 0;
+    gchar* icon_name = NULL;
+    gchar* node_text = NULL;
+    gint rc = 0;
+    GtkTreeIter iter_new = { 0 };
+
+    ZondTreeviewPrivate* ztv_priv = zond_treeview_get_instance_private( ztv );
+
+    rc = zond_dbase_get_node( ztv_priv->zond->dbase_zond->zond_dbase_work,
+            node_id, &type, &link, NULL, NULL, NULL, NULL, NULL, &icon_name, &node_text,
+            NULL, error );
+    if ( rc )
+    {
+        g_prefix_error( error, "%s\n", __func__ );
+
+        return -1;
+    }
+
+    if ( type == ZOND_DBASE_TYPE_BAUM_INHALT_FILE )
+    {
+        gint rc = 0;
+        gchar* errmsg = NULL;
+
+        rc = zond_treeview_load_baum_inhalt_file( ztv, iter_anchor, child, node_id,
+                icon_name, node_text, NULL, &errmsg );
+        if ( rc )
+        {
+            if ( error ) g_error_new( ZOND_ERROR, 0, "%s\n%s", __func__, errmsg );
+            g_free( errmsg );
+
+            return -1;
+        }
+    }
+    else if ( type == ZOND_DBASE_TYPE_BAUM_INHALT_PDF_ABSCHNITT )
+    {
+        gint rc = 0;
+
+        rc = zond_treeview_walk_tree( ztv, FALSE, link, iter_anchor, child, NULL,
+                0, NULL, zond_treeview_insert_pdf_abschnitt, error );
+        if ( rc )
+        {
+            g_prefix_error( error, "%s\n", __func__ );
+
+            return -1;
+        }
+    }
+    else
+    {
+        zond_tree_store_insert( ZOND_TREE_STORE(gtk_tree_view_get_model(
+                GTK_TREE_VIEW(ztv) )), iter_anchor, child, &iter_new );
+        if ( type == ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_LINK )
+        {
+            icon_name = g_strdup_printf( "%d", node_id ); //head_nr wird hier gespeichert
+            node_id = link * -1;
+        }
+
+        zond_tree_store_set( &iter_new, icon_name, node_text, node_id );
+    }
+
+    g_free( icon_name );
+    g_free( node_text );
+
+    return 0;
+}
+
+
+static gboolean
+zond_treeview_insert_links_foreach( GtkTreeModel* model, GtkTreePath* path,
+        GtkTreeIter* iter, gpointer user_data )
+{
+    gchar* icon_name = NULL;
+    gint node_id = 0;
+    gint root = 0;
+    GtkTreeIter iter_anchor = { 0 };
+    gboolean child = FALSE;
+    GtkTreeIter* iter_target = NULL;
+    GError* error = NULL;
+    gint rc = 0;
+
+    Projekt* zond = (Projekt*) user_data;
+
+    gtk_tree_model_get( model, iter, 0, &icon_name, 2, &node_id, -1 );
+
+    if ( node_id > 0 ) return FALSE;
+
+    node_id *= -1;
+
+    rc = zond_dbase_get_root( zond->dbase_zond->zond_dbase_work, node_id, &root, &error );
+    if ( rc )
+    {
+        display_message( zond->app_window, error->message, NULL );
+        g_error_free( error );
+
+        return FALSE;
+    }
+
+    //iter_anchor basteln
+    iter_anchor = *iter;
+    if ( ((GNode*) (iter->user_data))->prev == NULL )
+    {
+        iter_anchor.user_data = ((GNode*) (iter->user_data))->parent;
+        child = TRUE;
+    }
+    else
+    {
+        iter_anchor.user_data = ((GNode*) (iter->user_data))->prev;
+        child = FALSE;
+    }
+
+    zond_tree_store_remove( iter );
+
+    //iter_target ermitteln
+    iter_target = zond_treeview_abfragen_iter( ZOND_TREEVIEW(zond->treeview[root]), node_id );
+    if ( !iter_target )
+    {
+        display_message( zond->app_window, "zond_treeview_abfragen_iter (target) gibt NULL zurück", NULL );
+        g_free( icon_name );
+
+        return FALSE;
+    }
+
+    zond_tree_store_insert_link( iter_target, atoi( icon_name ),
+            zond_tree_store_get_tree_store( &iter_anchor ),
+            ((GNode*) (iter_anchor.user_data) == zond_tree_store_get_root_node( zond_tree_store_get_tree_store( &iter_anchor ) )) ? NULL :
+             &iter_anchor, child, NULL );
+
+    g_free( icon_name );
+    gtk_tree_iter_free( iter_target );
+
+    return FALSE;
+}
+
+
+static gint
+zond_treeview_reload_baum( ZondTreeview* ztv, GError** error )
+{
+    gint first_child = 0;
+    gint rc = 0;
+
+    ZondTreeviewPrivate* ztv_priv = zond_treeview_get_instance_private( ztv );
+
+    zond_tree_store_clear( ZOND_TREE_STORE(gtk_tree_view_get_model(
+            GTK_TREE_VIEW(ztv) )) );
+
+    rc = zond_dbase_get_first_child( ztv_priv->zond->dbase_zond->zond_dbase_work,
+            zond_tree_store_get_root( ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(ztv) )) ),
+            &first_child, error );
+    if ( rc )
+    {
+        g_prefix_error( error, "%s\n", __func__ );
+
+        return -1;
+    }
+    else if ( first_child == 0 ) return 0; //Baum leer
+
+    rc = zond_treeview_walk_tree( ztv, TRUE, first_child, NULL, TRUE, NULL,
+            zond_tree_store_get_root( ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(ztv) )) ),
+            NULL, zond_treeview_load_node, error );
+    if ( rc )
+    {
+        g_prefix_error( error, "%s\n", __func__ );
+
+        return -1;
+    }
+
+    gtk_tree_model_foreach( gtk_tree_view_get_model( GTK_TREE_VIEW(ztv) ),
+            zond_treeview_insert_links_foreach, ztv_priv->zond );
+
+    return 0;
 }
 
 

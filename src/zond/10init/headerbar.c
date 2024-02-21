@@ -644,7 +644,17 @@ cb_reduzieren_activated( GtkMenuItem* item, gpointer data )
 static void
 cb_refresh_view_activated( GtkMenuItem* item, gpointer zond )
 {
-    treeviews_reload_baeume( (Projekt*) zond, NULL );
+    GError* error = NULL;
+    gint rc = 0;
+
+    rc = project_load_baeume( zond, &error );
+    if ( rc == -1 )
+    {
+        display_message( zond->app_window, "Fehler refesh\n\n", error->message, NULL );
+        g_error_free( error );
+
+        return;
+    }
 
     return;
 }
