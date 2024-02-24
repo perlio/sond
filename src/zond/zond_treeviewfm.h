@@ -9,39 +9,38 @@
 //#include "20allgemein/project.h"
 
 
-#define ERROR_ROLLBACK_BOTH(zond_dbase_work,zond_dbase_store) \
-          { if ( errmsg ) *errmsg = add_string( \
-            g_strconcat( "Bei Aufruf ", __func__, ":\n", NULL ), *errmsg ); \
+#define ERROR_ROLLBACK_BOTH(zond_dbase_work, zond_dbase_store) \
+          { g_prefix_error( error, "%s\n", __func__ ); \
             \
             gint rc_rollback1 = 0; \
             gint rc_rollback2 = 0; \
-            gchar* err_rollback = NULL; \
+            GError* err_rollback = NULL; \
             \
             rc_rollback1 = zond_dbase_rollback( zond_dbase_work, &err_rollback ); \
-            if ( errmsg ) \
+            if ( error ) \
             { \
-                if ( !rc_rollback1 ) *errmsg = add_string( *errmsg, \
+                if ( !rc_rollback1 ) (*error)->message = add_string( (*error)->message, \
                         g_strdup( "\n\nRollback dbase_store durchgeführt" ) ); \
-                else *errmsg = add_string( *errmsg, g_strconcat( "\n\nRollback " \
+                else (*error)->message = add_string( (*error)->message, g_strconcat( "\n\nRollback " \
                         "zond_dbase_work fehlgeschlagen\n\nBei Aufruf dbase_rollback:\n", \
-                        err_rollback, NULL ) ); \
+                        err_rollback->message, NULL ) ); \
             } \
-            g_free( err_rollback ); \
+            g_clear_error( &err_rollback ); \
             \
             rc_rollback2 = zond_dbase_rollback( zond_dbase_store, &err_rollback ); \
             { \
-                if ( !rc_rollback2 ) *errmsg = add_string( *errmsg, \
+                if ( !rc_rollback2 ) (*error)->message = add_string( (*error)->message, \
                         g_strdup( "\n\nRollback dbase_work durchgeführt" ) ); \
-                else *errmsg = add_string( *errmsg, g_strconcat( "\n\nRollback " \
+                else (*error)->message = add_string( (*error)->message, g_strconcat( "\n\nRollback " \
                         "zond_dbase_store fehlgeschlagen\n\nBei Aufruf dbase_rollback:\n", \
-                        err_rollback, NULL ) ); \
+                        err_rollback->message, NULL ) ); \
             } \
-            g_free( err_rollback ); \
+            g_error_free( err_rollback ); \
             \
-            if ( errmsg ) \
+            if ( error ) \
             { \
-                if ( rc_rollback1 || rc_rollback2 ) *errmsg = \
-                        add_string( *errmsg, g_strdup( "\n\nDatenbank inkonsistent" ) ); \
+                if ( rc_rollback1 || rc_rollback2 ) (*error)->message = \
+                        add_string( (*error)->message, g_strdup( "\n\nDatenbank inkonsistent" ) ); \
             } \
           }
 

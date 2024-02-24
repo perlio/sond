@@ -25,6 +25,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "../global_types.h"
 #include "../zond_dbase.h"
+#include "../zond_treeview.h"
 
 #include "../10init/app_window.h"
 
@@ -34,7 +35,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../zond_tree_store.h"
 
 #include "project.h"
-#include "treeviews.h"
 
 
 
@@ -342,17 +342,17 @@ gint
 project_load_baeume( Projekt* zond, GError** error )
 {
     gint rc = 0;
+    GtkTreeIter iter = { 0 };
 
-    rc = zond_treeview_load_baum( zond->treeview[BAUM_INHALT], &error );
+    rc = zond_treeview_load_baum( ZOND_TREEVIEW(zond->treeview[BAUM_INHALT]), error );
     if ( rc == -1 )
     {
-        if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
-        g_error_free( error );
+        g_prefix_error( error, "%s\n", __func__ );
 
         return -1;
     }
 
-    rc = zond_treeview_load_baum( zond->treeview[BAUM_AUSWERTUNG], &error );
+    rc = zond_treeview_load_baum( ZOND_TREEVIEW(zond->treeview[BAUM_AUSWERTUNG]), error );
     if ( rc == -1 )
     {
         g_prefix_error( error, "%s\n", __func__ );

@@ -12,8 +12,8 @@ typedef struct _Pdf_Viewer PdfViewer;
 
 gboolean ziele_1_gleich_2( const Anbindung, const Anbindung );
 
-gint ziele_abfragen_anker_rek( Projekt*, gint, Anbindung, gboolean*, gchar** );
+gint ziele_abfragen_anker_rek( ZondDBase*, Anbindung, gint, gint*, gboolean*, GError** );
 
-gint ziele_erzeugen_anbindung( PdfViewer* pv, gint* ptr_new_node, gchar** );
+gint zond_anbindung_erzeugen( PdfViewer* pv, GError** );
 
 #endif // ZIELE_H_INCLUDED

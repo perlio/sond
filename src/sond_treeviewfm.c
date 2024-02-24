@@ -36,20 +36,21 @@ G_DEFINE_TYPE_WITH_PRIVATE(SondTreeviewFM, sond_treeviewfm, SOND_TYPE_TREEVIEW)
 
 
 static gint
-sond_treeviewfm_dbase_begin( SondTreeviewFM* stvfm, gchar** errmsg )
+sond_treeviewfm_dbase_begin( SondTreeviewFM* stvfm, GError** error )
 {
     gint rc = 0;
+
     SondTreeviewFMPrivate* priv = sond_treeviewfm_get_instance_private( stvfm );
 
-    rc = zond_dbase_begin( priv->zond_dbase, errmsg );
-    if ( rc ) ERROR_S
+    rc = zond_dbase_begin( priv->zond_dbase, error );
+    if ( rc ) ERROR_Z
 
     return 0;
 }
 
 
 static gint
-sond_treeviewfm_dbase_test( SondTreeviewFM* stvfm, const gchar* source, gchar** errmsg )
+sond_treeviewfm_dbase_test( SondTreeviewFM* stvfm, const gchar* source, GError** error )
 {
     gint rc = 0;
 
@@ -57,8 +58,8 @@ sond_treeviewfm_dbase_test( SondTreeviewFM* stvfm, const gchar* source, gchar** 
 
     if ( !priv->zond_dbase ) return 0;
 
-    rc = zond_dbase_test_path( priv->zond_dbase, source, errmsg );
-    if ( rc == -1 ) ERROR_S
+    rc = zond_dbase_test_path( priv->zond_dbase, source, error );
+    if ( rc == -1 ) ERROR_Z
 
     return rc;
 }
@@ -66,7 +67,7 @@ sond_treeviewfm_dbase_test( SondTreeviewFM* stvfm, const gchar* source, gchar** 
 
 static gint
 sond_treeviewfm_dbase_update_path( SondTreeviewFM* stvfm, const gchar* source,
-        const gchar* dest, gchar** errmsg )
+        const gchar* dest, GError** error)
 {
     gint rc = 0;
 
@@ -74,15 +75,15 @@ sond_treeviewfm_dbase_update_path( SondTreeviewFM* stvfm, const gchar* source,
 
     if ( !priv->zond_dbase ) return 0;
 
-    rc = zond_dbase_update_path( priv->zond_dbase, source, dest, errmsg );
-    if ( rc ) ERROR_ROLLBACK( priv->zond_dbase )
+    rc = zond_dbase_update_path( priv->zond_dbase, source, dest, error );
+    if ( rc ) ERROR_ROLLBACK_Z( priv->zond_dbase )
 
     return 0;
 }
 
 
 static gint
-sond_treeviewfm_dbase_end( SondTreeviewFM* stvfm, gboolean suc, gchar** errmsg )
+sond_treeviewfm_dbase_end( SondTreeviewFM* stvfm, gboolean suc, GError** error )
 {
     SondTreeviewFMPrivate* priv = sond_treeviewfm_get_instance_private( stvfm );
 
@@ -92,15 +93,15 @@ sond_treeviewfm_dbase_end( SondTreeviewFM* stvfm, gboolean suc, gchar** errmsg )
     {
         gint rc = 0;
 
-        rc = zond_dbase_commit( priv->zond_dbase, errmsg );
-        if ( rc ) ERROR_ROLLBACK( priv->zond_dbase )
+        rc = zond_dbase_commit( priv->zond_dbase, error );
+        if ( rc ) ERROR_ROLLBACK_Z( priv->zond_dbase )
     }
     else
     {
         gint rc = 0;
 
-        rc = zond_dbase_rollback( priv->zond_dbase, errmsg );
-        if ( rc ) ERROR_S
+        rc = zond_dbase_rollback( priv->zond_dbase, error );
+        if ( rc ) ERROR_Z
     }
 
     return 0;
@@ -129,7 +130,7 @@ sond_treeviewfm_other_fm( SondTreeviewFM* stvfm )
 
 static gint
 sond_treeviewfm_dbase( SondTreeviewFM* stvfm, gint mode, const gchar* rel_path_source,
-        const gchar* rel_path_dest, gchar** errmsg )
+        const gchar* rel_path_dest, GError** error)
 {
     gint rc = 0;
     Clipboard* clipboard = NULL;
@@ -138,10 +139,10 @@ sond_treeviewfm_dbase( SondTreeviewFM* stvfm, gint mode, const gchar* rel_path_s
 
     if ( mode == 2 && sond_treeviewfm_other_fm( stvfm ) )
     {
-        rc = SOND_TREEVIEWFM_GET_CLASS(stvfm)->dbase_test( SOND_TREEVIEWFM(clipboard->tree_view), rel_path_source, errmsg );
+        rc = SOND_TREEVIEWFM_GET_CLASS(stvfm)->dbase_test( SOND_TREEVIEWFM(clipboard->tree_view), rel_path_source, error );
         if ( rc ) //aufräumen...
         {
-            if ( rc == -1 ) ERROR_S
+            if ( rc == -1 ) ERROR_Z
             else if ( rc == 1 ) return 1;
         }
     }
@@ -150,22 +151,22 @@ sond_treeviewfm_dbase( SondTreeviewFM* stvfm, gint mode, const gchar* rel_path_s
     {
         gint rc = 0;
 
-        rc = SOND_TREEVIEWFM_GET_CLASS(stvfm)->dbase_test( stvfm, rel_path_dest, errmsg );
+        rc = SOND_TREEVIEWFM_GET_CLASS(stvfm)->dbase_test( stvfm, rel_path_dest, error );
         if ( rc )
         {
-            if ( rc == -1 ) ERROR_S
+            if ( rc == -1 ) ERROR_Z
             else if ( rc == 1 ) return 1;
         }
     }
 
-    rc = SOND_TREEVIEWFM_GET_CLASS(stvfm)->dbase_begin( stvfm, errmsg );
-    if ( rc ) ERROR_S
+    rc = SOND_TREEVIEWFM_GET_CLASS(stvfm)->dbase_begin( stvfm, error );
+    if ( rc ) ERROR_Z
 
     if ( mode == 2 || mode == 3 ) //mode == 2: beyond wurde schon ausgeschlossen - mode == 3: ausgeschlossen
     {
         rc = SOND_TREEVIEWFM_GET_CLASS(stvfm)->dbase_update_path( stvfm,
-                rel_path_source, rel_path_dest, errmsg );
-        if ( rc ) ERROR_S
+                rel_path_source, rel_path_dest, error );
+        if ( rc ) ERROR_Z
     }
 
     return 0;
@@ -216,7 +217,7 @@ sond_treeviewfm_move_copy_create_delete( SondTreeviewFM* stvfm, GFile* file_sour
             rel_path_dest = get_rel_path_from_file( sond_treeviewfm_get_root( stvfm ), *file_dest );
 
             rc = sond_treeviewfm_dbase( stvfm, mode, rel_path_source, rel_path_dest,
-                    errmsg );
+                    &error );
 
             g_free( rel_path_dest );
             g_free( rel_path_source );
@@ -224,7 +225,10 @@ sond_treeviewfm_move_copy_create_delete( SondTreeviewFM* stvfm, GFile* file_sour
             if ( rc == -1 )
             {
                 g_free( basename );
-                ERROR_S
+                if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+                g_error_free( error );
+
+                return -1;
             }
             else if ( rc == 1 ) return 1;
 
@@ -234,11 +238,14 @@ sond_treeviewfm_move_copy_create_delete( SondTreeviewFM* stvfm, GFile* file_sour
                     *file_dest, G_FILE_COPY_NONE, NULL, NULL, NULL, &error );
             else if ( mode == 4 ) suc = g_file_delete( *file_dest, NULL, &error );
 
-            rc = SOND_TREEVIEWFM_GET_CLASS(stvfm)->dbase_end( stvfm, suc, errmsg );
+            rc = SOND_TREEVIEWFM_GET_CLASS(stvfm)->dbase_end( stvfm, suc, &error );
             if ( rc )
             {
                 g_free( basename );
-                ERROR_S
+                if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+                g_error_free( error );
+
+                return -1;
             }
         }
 
@@ -862,16 +869,16 @@ sond_treeviewfm_render_file_name( GtkTreeViewColumn* column,
     if ( rel_path )
     {
         gint rc = 0;
-        gchar* errmsg = NULL;
+        GError* error = NULL;
 
-        rc = SOND_TREEVIEWFM_GET_CLASS(stvfm)->dbase_test( stvfm, rel_path, &errmsg );
+        rc = SOND_TREEVIEWFM_GET_CLASS(stvfm)->dbase_test( stvfm, rel_path, &error );
         g_free( rel_path );
         if ( rc == -1 )
         {
             display_message( gtk_widget_get_toplevel( GTK_WIDGET(stvfm) ),
                     "Warnung -\n\nBei Aufruf dbase_test:\n",
-                    errmsg, NULL );
-            g_free( errmsg );
+                    error->message, NULL );
+            g_error_free( error );
         }
         else if ( rc == 0 ) g_object_set(
                 G_OBJECT(sond_treeview_get_cell_renderer_text( SOND_TREEVIEW(stvfm) )),

@@ -92,8 +92,8 @@ static void
 cb_text_buffer_changed( GtkTextBuffer* buffer, gpointer data )
 {
     gint rc = 0;
-    gchar* errmsg = NULL;
     gint node_id = 0;
+    GError* error = NULL;
 
     Projekt* zond = (Projekt*) data;
 
@@ -111,13 +111,13 @@ cb_text_buffer_changed( GtkTextBuffer* buffer, gpointer data )
     else node_id = zond->node_id_extra;
 
     rc = zond_dbase_update_text( zond->dbase_zond->zond_dbase_work,
-            node_id, text, &errmsg );
+            node_id, text, &error );
     g_free( text );
     if ( rc )
     {
         display_message( zond->app_window, "Fehler in cb_textview_focus_out:\n\n"
-                "Bei Aufruf zond_dbase_set_text:\n", errmsg, NULL );
-        g_free( errmsg );
+                "Bei Aufruf zond_dbase_set_text:\n", error->message, NULL );
+        g_error_free( error );
 
         return;
     }

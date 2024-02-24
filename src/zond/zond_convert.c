@@ -1,3 +1,17 @@
+static void
+ziele_free( Ziel* ziel )
+{
+    if ( !ziel ) return;
+
+    g_free( ziel->ziel_id_von );
+    g_free( ziel->ziel_id_bis );
+
+    g_free( ziel );
+
+    return;
+}
+
+
 
 //Baum ist Baum Von!
 gint
@@ -822,5 +836,205 @@ zond_dbase_test_path( ZondDBase* zond_dbase, const gchar* rel_path, gchar** errm
 
     return 0;
 }
+
+
+/*
+zond (treeviews.c) - Akten, Beweisstücke, Unterlagen
+Copyright (C) 2020  pelo america
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+*/
+
+
+#include <gtk/gtk.h>
+#include <mupdf/fitz.h>
+
+#include "treeviews.h"
+#include "project.h"
+
+#include "../global_types.h"
+#include "../zond_tree_store.h"
+#include "../zond_dbase.h"
+#include "../zond_treeview.h"
+#include "../zond_pdf_document.h"
+
+#include "../99conv/pdf.h"
+
+#include "../../misc.h"
+
+
+Baum
+treeviews_get_baum_iter( Projekt* zond, GtkTreeIter* iter )
+{
+    ZondTreeStore* tree_store = NULL;
+
+    tree_store = zond_tree_store_get_tree_store( iter );
+
+    if ( tree_store == ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]) )) ) return BAUM_INHALT;
+    else if ( tree_store == ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_AUSWERTUNG]) )) ) return BAUM_AUSWERTUNG;
+
+    return KEIN_BAUM;
+}
+
+
+static gint
+treeviews_get_page_num_from_dest_doc( fz_context* ctx, pdf_document* doc, const gchar* dest, gchar** errmsg )
+{
+    pdf_obj* obj_dest_string = NULL;
+    pdf_obj* obj_dest = NULL;
+    pdf_obj* pageobj = NULL;
+    gint page_num = 0;
+
+    obj_dest_string = pdf_new_string( ctx, dest, strlen( dest ) );
+    fz_try( ctx ) obj_dest = pdf_lookup_dest( ctx, doc, obj_dest_string);
+    fz_always( ctx ) pdf_drop_obj( ctx, obj_dest_string );
+    fz_catch( ctx ) ERROR_MUPDF( "pdf_lookup_dest" )
+
+	pageobj = pdf_array_get( ctx, obj_dest, 0 );
+
+	if ( pdf_is_int( ctx, pageobj ) ) page_num = pdf_to_int( ctx, pageobj );
+	else
+	{
+		fz_try( ctx ) page_num = pdf_lookup_page_number( ctx, doc, pageobj );
+		fz_catch( ctx ) ERROR_MUPDF( "pdf_lookup_page_number" )
+	}
+
+    return page_num;
+}
+
+
+static gint
+treeviews_get_page_num_from_dest( fz_context* ctx, const gchar* rel_path,
+        const gchar* dest, gchar** errmsg )
+{
+    pdf_document* doc = NULL;
+    gint page_num = 0;
+
+    fz_try( ctx ) doc = pdf_open_document( ctx, rel_path );
+    fz_catch( ctx ) ERROR_MUPDF( "fz_open_document" )
+
+    page_num = treeviews_get_page_num_from_dest_doc( ctx, doc, dest, errmsg );
+	pdf_drop_document( ctx, doc );
+    if ( page_num < 0 ) ERROR_S
+
+    return page_num;
+}
+
+
+/** Gibt nur bei Fehler NULL zurück, sonst immer Zeiger auf Anbindung **/
+static Anbindung*
+treeviews_ziel_zu_anbindung( fz_context* ctx, const gchar* rel_path, Ziel* ziel, gchar** errmsg )
+{
+    gint page_num = 0;
+
+    Anbindung* anbindung = g_malloc0( sizeof( Anbindung ) );
+
+    page_num = treeviews_get_page_num_from_dest( ctx, rel_path, ziel->ziel_id_von, errmsg );
+    if ( page_num == -1 )
+    {
+        g_free( anbindung );
+        ERROR_S_VAL( NULL )
+    }
+    else if ( page_num == -2 )
+    {
+        if ( errmsg ) *errmsg = g_strdup( "NamedDest nicht in Dokument vohanden" );
+        g_free( anbindung );
+
+        return NULL;
+    }
+    else anbindung->von.seite = page_num;
+
+    page_num = treeviews_get_page_num_from_dest( ctx, rel_path, ziel->ziel_id_bis,
+            errmsg );
+    if ( page_num == -1 )
+    {
+        g_free( anbindung );
+
+        ERROR_S_VAL( NULL )
+    }
+    else if ( page_num == -2 )
+    {
+        if ( errmsg ) *errmsg = g_strdup( "NamedDest nicht in Dokument vohanden" );
+        g_free( anbindung );
+
+        return NULL;
+    }
+    else anbindung->bis.seite = page_num;
+
+    anbindung->von.index = ziel->index_von;
+    anbindung->bis.index = ziel->index_bis;
+
+    return anbindung;
+}
+
+
+/** Keine Datei mit node_id verknüpft: 2
+    Kein ziel mit node_id verknüpft: 1
+    Datei und ziel verknüpft: 0
+    Fehler (inkl. node_id existiert nicht): -1
+
+    Funktion sollte thread-safe sein! **/
+gint
+treeviews_get_rel_path_and_anbindung( Projekt* zond, Baum baum, gint node_id,
+        gchar** rel_path, Anbindung** anbindung, gchar** errmsg )
+{
+    gint rc = 0;
+    Ziel ziel = { 0, };
+    gchar* rel_path_intern = NULL;
+    Anbindung* anbindung_intern = NULL;
+
+    rc = zond_dbase_get_rel_path( zond->dbase_zond->zond_dbase_work, baum, node_id, &rel_path_intern, errmsg );
+    if ( rc == -1 ) ERROR_S
+    else if ( rc == 1 ) return 2;
+
+    rc = zond_dbase_get_ziel( zond->dbase_zond->zond_dbase_work, baum, node_id, &ziel, errmsg );
+    if ( rc == -1 )
+    {
+        g_free( rel_path_intern );
+        ERROR_S
+    }
+    else if ( rc == 1 )
+    {
+        if ( rel_path ) *rel_path = rel_path_intern;
+        else g_free( rel_path_intern );
+
+        return 1;
+    }
+/*  Muß nicht mit mutex geschützt werden
+        ->Zugriff auf gleiche Datei aus mehreren threads m.E. zulässig, wenn unterschiedliches pdf_document
+
+    const ZondPdfDocument* zond_pdf_document = zond_pdf_document_is_open( rel_path_intern );
+    if ( zond_pdf_document ) zond_pdf_document_mutex_lock( zond_pdf_document );
+*/
+    anbindung_intern = treeviews_ziel_zu_anbindung( zond->ctx, rel_path_intern, &ziel, errmsg );
+
+//    if ( zond_pdf_document ) zond_pdf_document_mutex_unlock( zond_pdf_document );
+
+    if ( !anbindung_intern )
+    {
+        g_free( rel_path_intern );
+        ERROR_S
+    }
+
+    if ( rel_path ) *rel_path = rel_path_intern;
+    else g_free( rel_path_intern );
+
+    if ( anbindung ) *anbindung = anbindung_intern;
+    else g_free( anbindung_intern );
+
+    return 0;
+}
+
 
 

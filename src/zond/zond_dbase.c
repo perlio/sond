@@ -1115,7 +1115,7 @@ zond_dbase_insert_node( ZondDBase* zond_dbase, gint anchor_ID, gboolean child,
     }
 
     //Damit alles auf NULL gestellt wird
-    sqlite3_clear_bindings( (*stmt)[0] );
+    sqlite3_clear_bindings( stmt[0] );
 
     rc = sqlite3_bind_int( stmt[0], 1, child );
     if ( rc != SQLITE_OK )
@@ -1320,7 +1320,7 @@ zond_dbase_update_icon_name( ZondDBase* zond_dbase, gint node_id,
     }
 
     rc = sqlite3_bind_text( stmt[0], 2,
-            node_text, -1, NULL );
+            icon_name, -1, NULL );
     if ( rc != SQLITE_OK )
     {
         if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
@@ -1430,7 +1430,7 @@ zond_dbase_update_text( ZondDBase* zond_dbase, gint node_id,
     }
 
     rc = sqlite3_bind_text( stmt[0], 2,
-            node_text, -1, NULL );
+            text, -1, NULL );
     if ( rc != SQLITE_OK )
     {
         if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
@@ -1472,7 +1472,7 @@ zond_dbase_verschieben_knoten( ZondDBase* zond_dbase, gint node_id, gint new_par
             "UPDATE knoten SET parent_ID=?1, older_sibling_ID=?2 WHERE ID=?3; "
             };
 
-    rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
+    rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, error );
     if ( rc )
     {
         if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
@@ -1490,7 +1490,7 @@ zond_dbase_verschieben_knoten( ZondDBase* zond_dbase, gint node_id, gint new_par
                 "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
 
         return -1;
-
+    }
 
     rc = sqlite3_step( stmt[0] );
     if ( rc != SQLITE_DONE )
@@ -1653,7 +1653,7 @@ zond_dbase_remove_node( ZondDBase* zond_dbase, gint node_id, GError** error )
 
 
 gint
-zond_dbase_get_node( ZondDbase* zond_dbase, gint node_id, gint* type, gint* link,
+zond_dbase_get_node( ZondDBase* zond_dbase, gint node_id, gint* type, gint* link,
         gchar** rel_path, gint* seite_von, gint* index_von, gint* seite_bis, gint* index_bis,
         gchar** icon_name, gchar** node_text, gchar** text, GError** error )
 {
@@ -1662,7 +1662,7 @@ zond_dbase_get_node( ZondDbase* zond_dbase, gint node_id, gint* type, gint* link
 
     const gchar* sql[] = {
             "SELECT (type, link, rel_path, seite_von, index_von, seite_bis, index_bis, "
-            "icon_name, node_text, text)
+            "icon_name, node_text, text) "
             "FROM knoten WHERE ID=?1;"
             };
 
@@ -1703,14 +1703,14 @@ zond_dbase_get_node( ZondDbase* zond_dbase, gint node_id, gint* type, gint* link
 
     if ( type ) *type = sqlite3_column_int( stmt[0], 0 );
     if ( link ) *link= sqlite3_column_int( stmt[0], 1 );
-    if ( rel_path ) *rel_path = g_strdup( sqlite3_column_text( stmt[0], 2 ) );
+    if ( rel_path ) *rel_path = g_strdup( (const gchar*) sqlite3_column_text( stmt[0], 2 ) );
     if ( seite_von ) *seite_von = sqlite3_column_int( stmt[0], 3 );
     if ( index_von ) *index_von = sqlite3_column_int( stmt[0], 4 );
     if ( seite_bis ) *seite_bis = sqlite3_column_int( stmt[0], 5 );
     if ( index_bis ) *index_bis = sqlite3_column_int( stmt[0], 6 );
-    if ( icon_name ) *icon_name = g_strdup( sqlite3_column_text( stmt[0], 7 ) );
-    if ( node_text ) *node_text = g_strdup( sqlite3_column_text( stmt[0], 8 ) );
-    if ( text ) *text = g_strdup( sqlite3_column_text( stmt[0], 9 ) );
+    if ( icon_name ) *icon_name = g_strdup( (const gchar*) sqlite3_column_text( stmt[0], 7 ) );
+    if ( node_text ) *node_text = g_strdup( (const gchar*) sqlite3_column_text( stmt[0], 8 ) );
+    if ( text ) *text = g_strdup( (const gchar*) sqlite3_column_text( stmt[0], 9 ) );
 
     return 0;
 }
@@ -1771,7 +1771,52 @@ zond_dbase_get_text( ZondDBase* zond_dbase, gint node_id,
 
 
 gint
-zond_dbase_get_root( ZondDBase* zond_dbase, gint node_id, gint* root, GError** error )
+zond_dbase_get_pdf_root( ZondDBase* zond_dbase, const gchar* rel_path, gint* pdf_root, GError** error )
+{
+    gint rc = 0;
+    sqlite3_stmt** stmt = NULL;
+
+    const gchar* sql[] = {
+            "SELECT (ID) "
+            "FROM knoten WHERE parent_ID=0 AND older_sibling_id=0 AND rel_path=?1;"
+            };
+
+    rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, error );
+    if ( rc )
+    {
+        g_prefix_error( error, "%s\n", __func__ );
+
+        return -1;
+    }
+
+    rc = sqlite3_bind_text( stmt[0], 1, rel_path, -1, NULL );
+    if ( rc != SQLITE_OK )
+    {
+        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
+                sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
+                "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
+
+        return -1;
+    }
+
+    rc = sqlite3_step( stmt[0] );
+    if ( rc != SQLITE_ROW && rc != SQLITE_DONE ) //richtiger Fähler
+    {
+        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
+                sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
+                "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
+
+        return -1;
+    }
+
+    if ( pdf_root ) *pdf_root = sqlite3_column_int( stmt[0], 0 );
+
+    return 0;
+}
+
+
+gint
+zond_dbase_get_tree_root( ZondDBase* zond_dbase, gint node_id, gint* root, GError** error )
 {
     gint rc = 0;
     sqlite3_stmt** stmt = NULL;
@@ -1782,9 +1827,9 @@ zond_dbase_get_root( ZondDBase* zond_dbase, gint node_id, gint* root, GError** e
                 "UNION ALL "
                 "SELECT knoten.ID "
                     "FROM knoten JOIN cte_knoten WHERE "
-                    "knoten.parent = cte_knoten.ID "
+                    "knoten.parent_ID = cte_knoten.ID "
                 ") SELECT ID AS ID_CTE FROM cte_knoten "
-                "WHERE knoten.parent = 0; "
+                "WHERE knoten.parent_ID=0 AND knoten.older_sibling_ID=0; "
             };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, error );
@@ -1829,7 +1874,7 @@ zond_dbase_get_root( ZondDBase* zond_dbase, gint node_id, gint* root, GError** e
 
 
 gint
-zond_dbase_get_parent( ZondDbase* zond_dbase, gint node_id, gint* parent_id, GError** error )
+zond_dbase_get_parent( ZondDBase* zond_dbase, gint node_id, gint* parent_id, GError** error )
 {
     gint rc = 0;
     sqlite3_stmt** stmt = NULL;
@@ -1884,7 +1929,6 @@ gint
 zond_dbase_get_first_child( ZondDBase* zond_dbase, gint node_id, gint* first_child, GError** error )
 {
     gint rc = 0;
-    gint first_child_id = 0;
     sqlite3_stmt** stmt = NULL;
 
     const gchar* sql[] = {
@@ -1906,7 +1950,7 @@ zond_dbase_get_first_child( ZondDBase* zond_dbase, gint node_id, gint* first_chi
         return -1;
     }
 
-    rc = sqlite3_bind_int( stmt[0 + OFFSET], 1, node_id );
+    rc = sqlite3_bind_int( stmt[0], 1, node_id );
     if ( rc != SQLITE_OK )
     {
         if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
@@ -1916,7 +1960,7 @@ zond_dbase_get_first_child( ZondDBase* zond_dbase, gint node_id, gint* first_chi
         return -1;
     }
 
-    rc = sqlite3_step( stmt[0 + OFFSET] );
+    rc = sqlite3_step( stmt[0] );
     if ( rc == SQLITE_DONE )
     {
         if ( error ) *error = g_error_new( g_quark_from_static_string( "ZOND_DBASE" ),
@@ -1933,7 +1977,7 @@ zond_dbase_get_first_child( ZondDBase* zond_dbase, gint node_id, gint* first_chi
         return -1;
     }
 
-    if ( first_child_id ) *first_child_id =
+    if ( first_child ) *first_child =
             sqlite3_column_int( stmt[0], 1 );
 
     return 0;
@@ -1941,7 +1985,7 @@ zond_dbase_get_first_child( ZondDBase* zond_dbase, gint node_id, gint* first_chi
 
 
 gint
-zond_dbase_get_older_sibling( ZondDbase* zond_dbase, gint node_id, gint* older_sibling_id, GError** error )
+zond_dbase_get_older_sibling( ZondDBase* zond_dbase, gint node_id, gint* older_sibling_id, GError** error )
 {
     gint rc = 0;
     sqlite3_stmt** stmt = NULL;
@@ -1993,7 +2037,7 @@ zond_dbase_get_older_sibling( ZondDbase* zond_dbase, gint node_id, gint* older_s
 
 
 gint
-zond_dbase_get_younger_sibling( ZondDbase* zond_dbase, gint node_id, gint* younger_sibling_id, GError** error )
+zond_dbase_get_younger_sibling( ZondDBase* zond_dbase, gint node_id, gint* younger_sibling_id, GError** error )
 {
     gint rc = 0;
     sqlite3_stmt** stmt = NULL;

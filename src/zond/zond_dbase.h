@@ -47,7 +47,7 @@ typedef struct _ZondDBaseKnoten
           { if ( errmsg ) *errmsg = add_string( \
             g_strconcat( "Bei Aufruf ", __func__, ":\n", NULL ), *errmsg ); \
             \
-            gchar* err_rollback = NULL; \
+            GError* err_rollback = NULL; \
             gint rc_rollback = 0; \
             rc_rollback = zond_dbase_rollback( zond_dbase, &err_rollback ); \
             if ( errmsg ) \
@@ -56,9 +56,32 @@ typedef struct _ZondDBaseKnoten
                         g_strdup( "\n\nRollback durchgeführt" ) ); \
                 else *errmsg = add_string( *errmsg, g_strconcat( "\n\nRollback " \
                         "fehlgeschlagen\n\nBei Aufruf dbase_rollback:\n", \
-                        err_rollback, "\n\nDatenbankverbindung trennen", NULL ) ); \
+                        err_rollback->message, "\n\nDatenbankverbindung trennen", NULL ) ); \
             } \
-            g_free( err_rollback ); \
+            g_error_free( err_rollback ); \
+            \
+            return -1; }
+
+#define ERROR_ROLLBACK_Z(zond_dbase) \
+          { GError* error_tmp; \
+            \
+            gint rc_rollback = 0; \
+            g_prefix_error( error, "%s\n", __func__ ); \
+            \
+            rc_rollback = zond_dbase_rollback( zond_dbase, &error_tmp); \
+            if ( error ) \
+            { \
+                if ( !rc_rollback ) (*error)->message = add_string( (*error)->message, \
+                        g_strdup( "\n\nRollback durchgeführt" ) ); \
+                else \
+                { \
+                    (*error)->message = add_string( (*error)->message, \
+                            g_strdup_printf( "\n\nRollback fehlgeschlagen\n\n" \
+                            "Bei Aufruf dbase_rollback:\n%s\n\nDatenbankverbindung trennen", \
+                            error_tmp->message ) ); \
+                    g_error_free( error_tmp ); \
+                } \
+            } \
             \
             return -1; }
 
@@ -84,13 +107,13 @@ const gchar* zond_dbase_get_path( ZondDBase* );
 gint zond_dbase_backup( ZondDBase*, ZondDBase*, gchar** );
 
 gint zond_dbase_prepare( ZondDBase*, const gchar*, const gchar**,gint,
-        sqlite3_stmt***, gchar** );
+        sqlite3_stmt***, GError** );
 
-gint zond_dbase_begin( ZondDBase*, gchar** );
+gint zond_dbase_begin( ZondDBase*, GError** );
 
-gint zond_dbase_commit( ZondDBase*, gchar** );
+gint zond_dbase_commit( ZondDBase*, GError** );
 
-gint zond_dbase_rollback( ZondDBase*, gchar** );
+gint zond_dbase_rollback( ZondDBase*, GError** );
 
 gint zond_dbase_insert_node( ZondDBase*, gint, gboolean, gint, gint,
         const gchar*, gint, gint, gint, gint, const gchar*, const gchar*,
@@ -115,7 +138,9 @@ gint zond_dbase_get_rel_path( ZondDBase*, gint, gchar**, GError** );
 
 gint zond_dbase_get_text( ZondDBase*, gint, gchar**, GError** );
 
-gint zond_dbase_get_root( ZondDBase*, gint, gint*, GError** );
+gint zond_dbase_get_pdf_root( ZondDBase*, const gchar*, gint*, GError** );
+
+gint zond_dbase_get_tree_root( ZondDBase*, gint, gint*, GError** );
 
 gint zond_dbase_get_parent( ZondDBase*, gint, gint*, GError** );
 

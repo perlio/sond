@@ -129,11 +129,14 @@ export_node( Projekt* zond, GtkTreeModel* model, GtkTreePath* path, gint depth,
             (GTK_IS_TREE_MODEL_FILTER(model) && (gtk_tree_model_filter_get_model( GTK_TREE_MODEL_FILTER(model) ) ==
                 gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]) )))) )
     {
-        rc = zond_dbase_get_text( zond->dbase_zond->zond_dbase_work, node_id, &text, errmsg );
+        rc = zond_dbase_get_text( zond->dbase_zond->zond_dbase_work, node_id, &text, &error );
         if ( rc )
         {
+            if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+            g_error_free( error );
             g_free( node_text );
-            ERROR_S
+
+            return -1;
         }
     }
 

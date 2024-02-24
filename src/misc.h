@@ -13,6 +13,8 @@
 
 #define ERROR_S_MESSAGE(x) ERROR_S_MESSAGE_VAL(x,-1)
 
+#define ERROR_Z { g_prefix_error( error, "%s\n", __func__ ); return -1; }
+
 #include <gtk/gtk.h>
 
 typedef struct _GSList GSList;

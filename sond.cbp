@@ -553,6 +553,8 @@
 		</Unit>
 		<Unit filename="src/sond_database.c">
 			<Option compilerVar="CC" />
+			<Option compile="0" />
+			<Option link="0" />
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
 			<Option target="SondServer (Testing)" />
@@ -715,15 +717,6 @@
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
 		</Unit>
-		<Unit filename="src/zond/20allgemein/treeviews.c">
-			<Option compilerVar="CC" />
-			<Option target="zond (Release)" />
-			<Option target="zond (Testing)" />
-		</Unit>
-		<Unit filename="src/zond/20allgemein/treeviews.h">
-			<Option target="zond (Release)" />
-			<Option target="zond (Testing)" />
-		</Unit>
 		<Unit filename="src/zond/20allgemein/ziele.c">
 			<Option compilerVar="CC" />
 			<Option target="zond (Release)" />
@@ -734,6 +727,8 @@
 			<Option target="zond (Testing)" />
 		</Unit>
 		<Unit filename="src/zond/20allgemein/zieleplus.cpp">
+			<Option compile="0" />
+			<Option link="0" />
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
 		</Unit>
@@ -875,6 +870,7 @@
 		<Unit filename="src/zond/zond_convert.c">
 			<Option compilerVar="CC" />
 			<Option compile="0" />
+			<Option link="0" />
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
 		</Unit>
@@ -901,6 +897,8 @@
 		</Unit>
 		<Unit filename="src/zond/zond_gemini.c">
 			<Option compilerVar="CC" />
+			<Option compile="0" />
+			<Option link="0" />
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
 		</Unit>
