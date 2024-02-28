@@ -153,7 +153,26 @@ cb_textsuche_changed( GtkListBox* box, GtkListBoxRow* row, gpointer data )
             return;
         }
 
-        node_id = anchor_id;
+        if ( anchor_id != pdf_root )
+        {
+            gint rc = 0;
+            gint baum_inhalt_pdf_abschnitt = 0;
+
+            //prüfen, ob Abschnitt vielleicht direkt angebunden (BAUM_INHALT_PDF_ABSCHNITT (link->)
+            rc = zond_dbase_get_baum_inhalt_pdf_abschnitt_from_pdf_abschnitt( zond->dbase_zond->zond_dbase_work,
+                    anchor_id, &baum_inhalt_pdf_abschnitt, &error );
+            if ( rc )
+            {
+                display_message( zond->app_window, "Fehler Abfrage\n\n",
+                        error->message, NULL );
+                g_error_free( error );
+
+                return;
+            }
+
+            if ( baum_inhalt_pdf_abschnitt ) node_id = baum_inhalt_pdf_abschnitt;
+            else node_id = anchor_id;
+        }
     }
 
     if ( !node_id )//Wenn pdf_abschnitt nicht existiert: BAUM_INHALT_PDF nehmen
@@ -161,7 +180,8 @@ cb_textsuche_changed( GtkListBox* box, GtkListBoxRow* row, gpointer data )
         gint rc = 0;
 
         rc = zond_dbase_get_baum_inhalt_file_from_rel_path(
-            zond->dbase_zond->zond_dbase_work, pdf_text_occ.rel_path, &node_id, &error );
+                zond->dbase_zond->zond_dbase_work, pdf_text_occ.rel_path,
+                &node_id, &error );
         if ( rc )
         {
             display_message( zond->app_window, "Fehler Abfrage\n\n",

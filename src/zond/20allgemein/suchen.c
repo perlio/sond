@@ -59,27 +59,25 @@ suchen_kopieren_listenpunkt( Projekt* zond, GList* list, GtkTreeIter* iter, gint
 {
     gint rc = 0;
     gint node_id = 0;
-    gint new_node_id = 0;
+    gint node_id_new = 0;
 
     node_id = GPOINTER_TO_INT(g_object_get_data( G_OBJECT(list->data), "node-id" ));
 
     rc = zond_dbase_begin( zond->dbase_zond->zond_dbase_work, error );
     if ( rc ) ERROR_Z
 
-    new_node_id = zond_dbase_copy_node( zond->dbase_zond->zond_dbase_work,
-            node_id, *anchor_id, *child, error );
-    if ( new_node_id == -1 ) ERROR_ROLLBACK_Z( zond->dbase_zond->zond_dbase_work )
+    rc = zond_treeview_walk_tree( ZOND_TREEVIEW(zond->treeview[BAUM_AUSWERTUNG]),
+            FALSE, node_id, iter, *child, iter_new, *anchor_id, &node_id_new,
+            zond_treeview_copy_node_to_baum_auswertung, error );
+    if ( rc ) ERROR_Z
 
     rc = zond_dbase_commit( zond->dbase_zond->zond_dbase_work, error );
     if ( rc ) ERROR_ROLLBACK_Z( zond->dbase_zond->zond_dbase_work )
 
-//    rc = treeviews_db_to_baum( zond, BAUM_AUSWERTUNG, new_node_id, iter, *child, iter_new, error );
-    if ( rc ) ERROR_Z
-
     sond_treeview_expand_row( zond->treeview[BAUM_AUSWERTUNG], iter_new );
     sond_treeview_set_cursor( zond->treeview[BAUM_AUSWERTUNG], iter_new );
 
-    *anchor_id = new_node_id;
+    *anchor_id = node_id_new;
     *child = FALSE;
 
     return 0;

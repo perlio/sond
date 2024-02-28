@@ -225,8 +225,6 @@ init( GtkApplication* app, Projekt* zond )
     gtk_widget_set_sensitive( zond->menu.speichernitem, FALSE );
     g_settings_set_boolean( zond->settings, "speichern", FALSE );
 
-    DisableDebug( );
-
     gtk_widget_show_all( zond->app_window );
     gtk_widget_hide( gtk_paned_get_child1( GTK_PANED(zond->hpaned) ) );
 

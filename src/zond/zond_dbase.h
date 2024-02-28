@@ -20,22 +20,6 @@ typedef enum
     NUM_ZOND_DBASE_TYPES
 } NodeType;
 
-typedef struct _ZondDBaseKnoten
-{
-    gint ID;
-    gint parent_ID;
-    gint older_sibling_ID;
-    NodeType type;
-    gint link;
-    gchar* rel_path;
-    gint seite_von;
-    gint index_von;
-    gint seite_bis;
-    gint index_bis;
-    gchar* icon_name;
-    gchar* node_text;
-    gchar* text;
-} ZondDBaseKnoten;
 
 
 #define ERROR_ZOND_DBASE(x) { if ( errmsg ) *errmsg = add_string( g_strconcat( "Bei Aufruf ", __func__, ":\n", \
@@ -115,15 +99,21 @@ gint zond_dbase_commit( ZondDBase*, GError** );
 
 gint zond_dbase_rollback( ZondDBase*, GError** );
 
+gint zond_dbase_test_path( ZondDBase*, const gchar*, GError** );
+
 gint zond_dbase_insert_node( ZondDBase*, gint, gboolean, gint, gint,
         const gchar*, gint, gint, gint, gint, const gchar*, const gchar*,
         const gchar*, GError** );
+
+gint zond_dbase_insert_pdf_root( ZondDBase*, const gchar*, gint*, GError** );
 
 gint zond_dbase_update_icon_name( ZondDBase*, gint, const gchar*, GError** );
 
 gint zond_dbase_update_node_text( ZondDBase*, gint, const gchar*, GError** );
 
 gint zond_dbase_update_text( ZondDBase*, gint, const gchar*, GError** );
+
+gint zond_dbase_update_path( ZondDBase*, const gchar*, const gchar*, GError** );
 
 gint zond_dbase_verschieben_knoten( ZondDBase*, gint, gint, gint, GError** );
 
@@ -149,6 +139,12 @@ gint zond_dbase_get_first_child( ZondDBase*, gint, gint*, GError** );
 gint zond_dbase_get_older_sibling( ZondDBase*, gint, gint*, GError** );
 
 gint zond_dbase_get_younger_sibling( ZondDBase*, gint, gint*, GError** );
+
+gint zond_dbase_get_baum_inhalt_pdf_abschnitt_from_pdf_abschnitt( ZondDBase*,
+                    gint, gint*, GError** );
+
+gint zond_dbase_get_baum_inhalt_file_from_rel_path( ZondDBase*,
+        const gchar*, gint*, GError** );
 
 G_END_DECLS
 

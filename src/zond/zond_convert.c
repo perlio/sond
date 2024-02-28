@@ -813,31 +813,6 @@ zond_dbase_update_path( ZondDBase* zond_dbase, const gchar* old_path, const gcha
 
 /*  Gibt 0 zurück, wenn rel_path in db nicht vorhanden, wenn doch: 1
 **  Bei Fehler: -1  */
-gint
-zond_dbase_test_path( ZondDBase* zond_dbase, const gchar* rel_path, gchar** errmsg )
-{
-    gint rc = 0;
-    sqlite3_stmt** stmt = NULL;
-
-    const gchar* sql[] = {
-            "SELECT node_id FROM dateien WHERE rel_path=?1;"
-    };
-
-    rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, errmsg );
-    if ( rc ) ERROR_S
-
-    rc = sqlite3_bind_text( stmt[0], 1, rel_path, -1, NULL );
-    if ( rc != SQLITE_OK ) ERROR_ZOND_DBASE( "sqlite3_bind_text" )
-
-    rc = sqlite3_step( stmt[0] );
-    if ( (rc != SQLITE_ROW) && rc != SQLITE_DONE ) ERROR_ZOND_DBASE( "sqlite3_step" )
-
-    if ( rc == SQLITE_ROW ) return 1;
-
-    return 0;
-}
-
-
 /*
 zond (treeviews.c) - Akten, Beweisstücke, Unterlagen
 Copyright (C) 2020  pelo america

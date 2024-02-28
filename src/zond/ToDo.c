@@ -13,16 +13,12 @@ ToDo:
     - Anbindungen in PDF löschen
 
 - Viewer
-    - iter_thumb in viewer_page speichern; macht viewer_get_iter_thumb überflüssig
     - Farben für Markieren
     - Rummalen
     - angezeigte Seiten als Datei speichern
 
 - Kontextmenu Trees
     - PDF: OCR/Reparieren/Textsuche
-
-- PDF
-    - Fundstellen auf Seitenzahlen umstellen
 
 - datei_oeffnen:
     - nicht-Win32 (niedrig)

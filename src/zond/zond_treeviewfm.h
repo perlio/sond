@@ -6,6 +6,8 @@
 
 #include "../sond_treeviewfm.h"
 
+#include "global_types.h"
+
 //#include "20allgemein/project.h"
 
 
@@ -56,6 +58,15 @@ struct _ZondPdfAbschnittClass
     GObjectClass parent_class;
 };
 
+void zond_pdf_abschnitt_set( ZondPdfAbschnitt*, gint, const gchar*,
+        Anbindung, const gchar*, const gchar* );
+
+gint zond_pdf_abschnitt_get_ID( ZondPdfAbschnitt* );
+
+void zond_pdf_abschnitt_get( ZondPdfAbschnitt*, gint*, gchar const **,
+        Anbindung*, gchar const**, gchar const** );
+
+void zond_pdf_abschnitt_set_node_text( ZondPdfAbschnitt*, gchar const* );
 
 //ZOND_TYPE_TREEVIEWFM definieren
 #define ZOND_TYPE_TREEVIEWFM zond_treeviewfm_get_type( )

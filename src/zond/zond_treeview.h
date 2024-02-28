@@ -25,11 +25,13 @@ void zond_treeview_cursor_changed( ZondTreeview*, gpointer );
 gboolean zond_treeview_get_anchor( Projekt*, gboolean, GtkTreeIter*,
         GtkTreeIter*, gint* );
 
-void item_loeschen_activate( GtkMenuItem*, gpointer );
+gint zond_treeview_walk_tree( ZondTreeview*, gboolean, gint,
+        GtkTreeIter*, gboolean, GtkTreeIter*, gint, gint*,
+        gint (*) (ZondTreeview*, gint, GtkTreeIter*, gboolean,
+        GtkTreeIter*, gint, gint*, GError**), GError** );
 
-void item_anbindung_entfernen_activate( GtkMenuItem*, gpointer );
-
-void item_jump_activate( GtkMenuItem*, gpointer );
+gint zond_treeview_copy_node_to_baum_auswertung( ZondTreeview*,
+        gint, GtkTreeIter*, gboolean, GtkTreeIter*, gint, gint*, GError** );
 
 ZondTreeview* zond_treeview_new( Projekt*, gint );
 
