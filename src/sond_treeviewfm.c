@@ -1304,7 +1304,7 @@ sond_treeviewfm_datei_oeffnen_activate( GtkMenuItem* item, gpointer data )
 {
     SondTreeviewFM* stvfm = (SondTreeviewFM*) data;
 
-    g_signal_emit_by_name( stvfm, "row-activated", NULL, NULL );
+    g_signal_emit_by_name( stvfm, "row-activated", NULL, NULL, NULL );
 
     return;
 }
@@ -1315,7 +1315,7 @@ sond_treeviewfm_datei_oeffnen_mit_activate( GtkMenuItem* item, gpointer data )
 {
     SondTreeviewFM* stvfm = (SondTreeviewFM*) data;
 
-    g_signal_emit_by_name( stvfm, "row-activated", GINT_TO_POINTER(1), NULL );
+    g_signal_emit_by_name( stvfm, "row-activated", NULL, NULL, GINT_TO_POINTER(1) );
 
     return;
 }
@@ -1700,14 +1700,15 @@ sond_treeviewfm_row_activated( GtkTreeView* tree_view, GtkTreePath* tree_path,
     GObject* object = NULL;
     GtkTreeIter iter = { 0 };
 
-    if ( tree_path ) gtk_tree_path_copy( tree_path );
+    if ( tree_path ) path = gtk_tree_path_copy( tree_path );
     else gtk_tree_view_get_cursor( tree_view, &path, NULL );
 
     gtk_tree_model_get_iter( gtk_tree_view_get_model( tree_view ), &iter, path );
     gtk_tree_path_free( path );
     gtk_tree_model_get( gtk_tree_view_get_model( tree_view ), &iter, 0, &object, -1 );
 
-    rc = SOND_TREEVIEWFM_GET_CLASS(tree_view)->open_row( SOND_TREEVIEWFM(tree_view), &iter, (GPOINTER_TO_INT(data) == 1) ? TRUE : FALSE, &error );
+    rc = SOND_TREEVIEWFM_GET_CLASS(tree_view)->open_row( SOND_TREEVIEWFM(tree_view),
+            &iter, (GPOINTER_TO_INT(data) == 1) ? TRUE : FALSE, &error );
     if ( rc )
     {
         display_message( gtk_widget_get_toplevel( GTK_WIDGET(tree_view) ),
@@ -1832,11 +1833,11 @@ static void
 sond_treeviewfm_init( SondTreeviewFM* stvfm )
 {
     SondTreeviewFMPrivate* stvfm_priv = sond_treeviewfm_get_instance_private( stvfm );
-/*
+
     gtk_tree_view_column_set_cell_data_func( gtk_tree_view_get_column( GTK_TREE_VIEW(stvfm), 0 ),
             sond_treeview_get_cell_renderer_icon( SOND_TREEVIEW(stvfm) ),
             sond_treeviewfm_render_file_icon, stvfm, NULL );
-*/
+
     //Größe
     GtkCellRenderer* renderer_size = gtk_cell_renderer_text_new( );
 
@@ -2303,11 +2304,7 @@ sond_treeviewfm_paste_clipboard( SondTreeviewFM* stvfm, gboolean kind, gchar** e
     rc = sond_treeview_clipboard_foreach( sond_treeviewfm_paste_clipboard_foreach,
             (gpointer) &s_fm_paste_selection, errmsg );
     g_object_unref( file_parent );
-    if ( rc == -1 )
-    {
-        gtk_tree_iter_free( s_fm_paste_selection.iter_cursor );
-        ERROR_S
-    }
+    if ( rc == -1 ) ERROR_S
 
     //Wenn in nicht ausgeklapptes Verzeichnis etwas eingefügt wurde und
     //Verzeichnis leer ist:

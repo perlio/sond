@@ -216,7 +216,7 @@ oeffnen_internal_viewer( Projekt* zond, const gchar* rel_path, Anbindung* anbind
 
     if ( pos_pdf ) pos_von = *pos_pdf;
 
-    PdfViewer* pv = viewer_start_pv( zond );
+    PdfViewer* pv = viewer_start_pv( zond, rel_path );
     viewer_display_document( pv, dd, pos_von.seite, pos_von.index );
 
     return 0;
@@ -234,6 +234,7 @@ oeffnen_node( Projekt* zond, GtkTreeIter* iter, gboolean open_with, gchar** errm
     GError* error = NULL;
     gint type = 0;
     gint link = 0;
+    Anbindung* anbindung_int = NULL;
 
     gtk_tree_model_get( GTK_TREE_MODEL(zond_tree_store_get_tree_store( iter ) ), iter, 2, &node_id, -1 );
 
@@ -263,8 +264,10 @@ oeffnen_node( Projekt* zond, GtkTreeIter* iter, gboolean open_with, gchar** errm
         return -1;
     }
 
-    if ( !rel_path ) return 0;
-    else if ( open_with || !is_pdf( rel_path ) ) //wenn kein pdf oder mit Programmauswahl zu öffnen:
+    if ( !rel_path ) return 0; //keine Datei angebunden
+
+    //mit externem Programm öffnen
+    if ( open_with || !is_pdf( rel_path ) ) //wenn kein pdf oder mit Programmauswahl zu öffnen:
     {
         gint rc = 0;
 
@@ -274,12 +277,13 @@ oeffnen_node( Projekt* zond, GtkTreeIter* iter, gboolean open_with, gchar** errm
 
         return 0;
     }
-    else if ( !(zond->state & GDK_CONTROL_MASK) )
+
+    if ( !(zond->state & GDK_CONTROL_MASK) )
     {
         if ( zond->state & GDK_MOD1_MASK )
         {
-            pos_pdf.seite = anbindung.bis.seite;
-            pos_pdf.index = anbindung.bis.index;
+            pos_pdf.seite = (anbindung.bis.seite) ? anbindung.bis.seite : EOP;
+            pos_pdf.index = (anbindung.bis.index) ? anbindung.bis.index : EOP;
         }
         else
         {
@@ -287,18 +291,16 @@ oeffnen_node( Projekt* zond, GtkTreeIter* iter, gboolean open_with, gchar** errm
             pos_pdf.index = anbindung.von.index;
         }
     }
-    else if ( (zond->state & GDK_CONTROL_MASK) && (zond->state & GDK_MOD1_MASK) )
-    {
-        pos_pdf.seite = EOP;
-        pos_pdf.index = EOP;
-    }
-    if ( zond->state & GDK_MOD1_MASK ) //am Ende öffnen
+    else if ( zond->state & GDK_MOD1_MASK )
     {
         pos_pdf.seite = EOP;
         pos_pdf.index = EOP;
     }
 
-    rc = oeffnen_internal_viewer( zond, rel_path, &anbindung, &pos_pdf, errmsg );
+    if ( (anbindung.bis.seite || anbindung.bis.index) &&
+            (zond->state & GDK_CONTROL_MASK) ) anbindung_int = &anbindung;
+
+    rc = oeffnen_internal_viewer( zond, rel_path, anbindung_int, &pos_pdf, errmsg );
     g_free( rel_path );
     if ( rc ) ERROR_S
 

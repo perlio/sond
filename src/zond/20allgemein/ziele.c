@@ -262,6 +262,7 @@ zond_anbindung_insert_pdf_abschnitt_in_dbase( Projekt* zond,
     gint pdf_root = 0;
     gint node_id_new = 0;
     gint rc = 0;
+    gint anchor_id_dbase = 0;
 
     rc = zond_dbase_get_pdf_root( zond->dbase_zond->zond_dbase_work,
             rel_path, &pdf_root, error );
@@ -276,7 +277,7 @@ zond_anbindung_insert_pdf_abschnitt_in_dbase( Projekt* zond,
                 rel_path, &root_new, error );
         if ( rc ) ERROR_Z
 
-        *anchor_id = root_new;
+        anchor_id_dbase = root_new;
         *child = TRUE;
     }
     else
@@ -285,15 +286,20 @@ zond_anbindung_insert_pdf_abschnitt_in_dbase( Projekt* zond,
 
         //ansonsten: vergleichen,
         rc = ziele_abfragen_anker_rek( zond->dbase_zond->zond_dbase_work, anbindung,
-                pdf_root, anchor_id, child, error );
+                pdf_root, &anchor_id_dbase, child, error );
         if ( rc ) ERROR_Z
     }
+
+    if ( !pdf_root || pdf_root == anchor_id_dbase )
+            zond_dbase_get_baum_inhalt_file_from_rel_path( zond->dbase_zond->zond_dbase_work,
+            rel_path, anchor_id, error );
+    else *anchor_id = anchor_id_dbase;
 
     *node_text = g_strdup_printf( "S. %i (%i) - %i (%i), %s",
             anbindung.von.seite + 1, anbindung.von.index,
             anbindung.bis.seite + 1, anbindung.bis.index, rel_path );
 
-    node_id_new = zond_dbase_insert_node( zond->dbase_zond->zond_dbase_work, *anchor_id, *child,
+    node_id_new = zond_dbase_insert_node( zond->dbase_zond->zond_dbase_work, anchor_id_dbase, *child,
             ZOND_DBASE_TYPE_PDF_ABSCHNITT, 0, rel_path,
             anbindung.von.seite, anbindung.von.index,
             anbindung.bis.seite, anbindung.bis.index,

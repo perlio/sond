@@ -44,7 +44,7 @@ typedef struct _Pdf_Viewer
 {
     Projekt* zond;
 
-    const gchar* rel_path;
+    gchar* rel_path;
 
     GtkWidget* vf;
     GdkWindow* gdk_window;
@@ -156,6 +156,6 @@ gint viewer_render_stext_page_fast( fz_context*, PdfDocumentPage*, gchar** );
 gint viewer_foreach( PdfViewer*, PdfDocumentPage*, gint (*) (PdfViewer*, gint,
         gpointer, gchar**), gpointer, gchar** errmsg );
 
-PdfViewer* viewer_start_pv( Projekt* );
+PdfViewer* viewer_start_pv( Projekt*, gchar const* );
 
 #endif // VIEWER_H_INCLUDED

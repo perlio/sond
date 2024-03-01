@@ -616,6 +616,8 @@ viewer_schliessen( PdfViewer* pv )
     //pv aus Liste der geöffneten pvs entfernen
     g_ptr_array_remove_fast( pv->zond->arr_pv, pv );
 
+    g_free( pv->rel_path );
+
     g_free( pv );
 
     return;
@@ -3060,12 +3062,13 @@ viewer_einrichten_fenster( PdfViewer* pv )
 
 
 PdfViewer*
-viewer_start_pv( Projekt* zond )
+viewer_start_pv( Projekt* zond, gchar const* rel_path )
 {
     PdfViewer* pv = g_malloc0( sizeof( PdfViewer ) );
 
     pv->zond = zond;
     pv->zoom = g_settings_get_double( zond->settings, "zoom" );
+    pv->rel_path = g_strdup( rel_path );
 
     g_ptr_array_add( zond->arr_pv, pv );
 

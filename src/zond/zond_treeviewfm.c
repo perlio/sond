@@ -28,7 +28,7 @@ typedef struct
     gchar* node_text;
 } ZondPdfAbschnittPrivate;
 
-G_DEFINE_TYPE_WITH_PRIVATE(ZondPdfAbschnitt, zond_pdf_abschnitt, ZOND_TYPE_PDF_ABSCHNITT)
+G_DEFINE_TYPE_WITH_PRIVATE(ZondPdfAbschnitt, zond_pdf_abschnitt, G_TYPE_OBJECT)
 
 
 static void
@@ -347,7 +347,7 @@ static gint
 zond_treeviewfm_render_text( SondTreeviewFM* stvfm, GtkTreeIter* iter, GObject* object, GError** error )
 {
     gint rc = 0;
-/*
+
     if ( ZOND_IS_PDF_ABSCHNITT(object) )
     {
         gchar const* rel_path = NULL;
@@ -365,7 +365,7 @@ zond_treeviewfm_render_text( SondTreeviewFM* stvfm, GtkTreeIter* iter, GObject* 
 
         return 0;
     }
-*/
+
     //nur, wenn nicht erledigt
     rc = SOND_TREEVIEWFM_CLASS(zond_treeviewfm_parent_class)->render_text( stvfm, iter, object, error );
     if ( rc ) ERROR_Z

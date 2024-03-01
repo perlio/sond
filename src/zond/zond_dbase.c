@@ -1337,8 +1337,8 @@ zond_dbase_insert_pdf_root( ZondDBase* zond_dbase,
 
     const gchar* sql[] = {
             "INSERT INTO knoten "
-            "(parent_id, older_sibling_id, type, link, rel_path) "
-            "VALUES (0, 0, 9, 0, ?1); ",
+            "(parent_id, older_sibling_id, type, rel_path) "
+            "VALUES (0, 0, 9, ?1); ",
 
             "VALUES (last_insert_rowid()); "
             };
@@ -1567,7 +1567,7 @@ zond_dbase_update_path( ZondDBase* zond_dbase, const gchar* old_path,
     sqlite3_stmt** stmt = NULL;
 
     const gchar* sql[] = {
-            "UPDATE dateien SET rel_path = "
+            "UPDATE knoten SET rel_path = "
             "REPLACE( SUBSTR( rel_path, 1, LENGTH( ?1 ) ), ?1, ?2 ) || "
             "SUBSTR( rel_path, LENGTH( ?1 ) + 1 );"
     };
