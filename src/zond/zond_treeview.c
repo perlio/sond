@@ -994,7 +994,6 @@ typedef struct {
     gint anchor_id;
     GtkTreeIter anchor_iter;
     gboolean child;
-    gboolean kind;
     gint zaehler;
     InfoWindow* info_window;
 } SSelectionAnbinden;
@@ -1065,7 +1064,7 @@ zond_treeview_clipboard_anbinden_foreach( SondTreeview* stv, GtkTreeIter* iter,
         zond_pdf_abschnitt_get( zpa, &ID, &rel_path, &anbindung, &icon_name, &node_text );
 
         node_inserted = zond_dbase_insert_node( ztv_priv->zond->dbase_zond->zond_dbase_work,
-                s_selection->anchor_id, s_selection->kind, ZOND_DBASE_TYPE_BAUM_INHALT_PDF_ABSCHNITT,
+                s_selection->anchor_id, s_selection->child, ZOND_DBASE_TYPE_BAUM_INHALT_PDF_ABSCHNITT,
                 ID, NULL, 0, 0, 0, 0, NULL, NULL, NULL, &error );
         if ( node_inserted == -1 )
         {
@@ -1076,7 +1075,7 @@ zond_treeview_clipboard_anbinden_foreach( SondTreeview* stv, GtkTreeIter* iter,
         }
 
         zond_tree_store_insert( ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(s_selection->ztv) )),
-                &s_selection->anchor_iter, s_selection->kind, &iter_inserted );
+                &s_selection->anchor_iter, s_selection->child, &iter_inserted );
         zond_tree_store_set( &iter_inserted, icon_name, node_text, node_inserted );
 
         rc = zond_dbase_get_first_child( ztv_priv->zond->dbase_zond->zond_dbase_work,
@@ -1105,7 +1104,7 @@ zond_treeview_clipboard_anbinden_foreach( SondTreeview* stv, GtkTreeIter* iter,
 
     if ( new_node_id == -2 ) return 1; //abgebrochen!
 
-    s_selection->kind = FALSE;
+    s_selection->child = FALSE;
     s_selection->anchor_id = new_node_id;
 
     return 0;
@@ -1114,7 +1113,7 @@ zond_treeview_clipboard_anbinden_foreach( SondTreeview* stv, GtkTreeIter* iter,
 
 static gint
 zond_treeview_clipboard_anbinden( Projekt* zond, gint anchor_id, GtkTreeIter* anchor_iter,
-        gboolean kind, InfoWindow* info_window, gchar** errmsg )
+        gboolean child, InfoWindow* info_window, gchar** errmsg )
 {
     gint rc = 0;
     gboolean success = FALSE;
@@ -1124,7 +1123,7 @@ zond_treeview_clipboard_anbinden( Projekt* zond, gint anchor_id, GtkTreeIter* an
     s_selection.ztv = ZOND_TREEVIEW(zond->treeview[BAUM_INHALT]);
     s_selection.anchor_id = anchor_id;
     s_selection.anchor_iter = *anchor_iter;
-    s_selection.kind = kind;
+    s_selection.child = child;
     s_selection.zaehler = 0;
     s_selection.info_window = info_window;
 

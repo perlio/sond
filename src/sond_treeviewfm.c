@@ -1272,6 +1272,8 @@ sond_treeviewfm_foreach_loeschen( SondTreeview* stv, GtkTreeIter* iter,
 
     gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(stv) ), iter, 0, &info, -1 );
 
+    if ( !G_IS_FILE_INFO(info) ) return 0;
+
     full_path = sond_treeviewfm_get_full_path( SOND_TREEVIEWFM(stv), iter );
     file = g_file_new_for_path( full_path );
     g_free( full_path );
@@ -1280,7 +1282,7 @@ sond_treeviewfm_foreach_loeschen( SondTreeview* stv, GtkTreeIter* iter,
     g_object_unref( info );
     g_object_unref( file );
     if ( rc == -1 ) ERROR_S
-    else if ( rc == 2 ) return 1;
+    else if ( rc == 2 ) return 1; //bedeutet Abbruch
 
     return 0;
 }
