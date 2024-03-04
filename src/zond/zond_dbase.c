@@ -1621,7 +1621,7 @@ zond_dbase_verschieben_knoten( ZondDBase* zond_dbase, gint node_id, gint new_par
             "(SELECT older_sibling_ID FROM knoten WHERE ID=?1)" //node_id
             "WHERE older_sibling_ID=?1; ",
 
-            "UPDATE knoten SET older_sibling_ID=?1 WHERE node_id=" //node_id
+            "UPDATE knoten SET older_sibling_ID=?1 WHERE ID=" //node_id
                 "(SELECT ID FROM knoten WHERE parent_ID=?2 AND older_sibling_ID=?3); ", //new_parent_id/new_older_s_id
 
             "UPDATE knoten SET parent_ID=?1, older_sibling_ID=?2 WHERE ID=?3; "

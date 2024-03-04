@@ -191,17 +191,19 @@ ziele_abfragen_anker_rek( ZondDBase* zond_dbase, Anbindung anbindung,
 
         return -1;
     }
-    //Knoten kommt als parent in Beracht
-    else if ( ziele_1_eltern_von_2( anbindung_anchor, anbindung ) )
+    //Knoten kommt ist kind - anchor "weiter" oder root
+    else if ( ziele_1_eltern_von_2( anbindung_anchor, anbindung ) ||
+            (anbindung_anchor.von.seite == 0 && anbindung_anchor.von.index == 0 &&
+             anbindung_anchor.bis.seite == 0 && anbindung_anchor.bis.index == 0) )
     {
         gint rc = 0;
         gint first_child_id = 0;
 
+        *kind = TRUE;
+        *anchor_id_new = anchor_id;
+
         rc = zond_dbase_get_first_child( zond_dbase, anchor_id, &first_child_id, error );
         if ( rc ) ERROR_Z
-
-        *anchor_id_new = anchor_id;
-        *kind = TRUE;
 
         if ( first_child_id > 0 ) //hat kind
         {
@@ -227,8 +229,8 @@ ziele_abfragen_anker_rek( ZondDBase* zond_dbase, Anbindung anbindung,
                 error );
         if ( rc ) ERROR_Z
 
-        *anchor_id_new = anchor_id;
         *kind = FALSE;
+        *anchor_id_new = anchor_id;
 
         if ( younger_sibling_id > 0 )
         {

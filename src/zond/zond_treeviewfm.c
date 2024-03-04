@@ -311,7 +311,7 @@ zond_treeviewfm_text_edited( SondTreeviewFM* stvfm, GtkTreeIter* iter, GObject* 
 
         zond_pdf_abschnitt_set_node_text( ZOND_PDF_ABSCHNITT(object), new_text );
 
-        if ( !changed ) project_reset_changed( ztvfm_priv->zond );
+        if ( !changed ) project_reset_changed( ztvfm_priv->zond, FALSE );
 
         return 0;
     }
@@ -320,7 +320,7 @@ zond_treeviewfm_text_edited( SondTreeviewFM* stvfm, GtkTreeIter* iter, GObject* 
     SOND_TREEVIEWFM_CLASS(zond_treeviewfm_parent_class)->text_edited( stvfm, iter, object, new_text, error );
 
     //unschön
-    if ( !changed ) project_reset_changed( ztvfm_priv->zond );
+    if ( !changed ) project_reset_changed( ztvfm_priv->zond, FALSE );
 
     return 0;
 }
@@ -447,6 +447,7 @@ zond_treeviewfm_expand_dummy( SondTreeviewFM* stvfm,
             gchar* node_text = NULL;
             GtkTreeIter iter_new = { 0 };
             gint younger_sibling = 0;
+            gint first_grandchild = 0;
 
             rc = zond_dbase_get_node( ztvfm_priv->zond->dbase_zond->zond_dbase_work,
                     child, NULL, NULL, &rel_path, &anbindung.von.seite,
@@ -466,6 +467,19 @@ zond_treeviewfm_expand_dummy( SondTreeviewFM* stvfm,
                     &iter_new, 0, zpa, -1 );
 
             g_object_unref( zpa );
+
+            //insert dummy
+            rc = zond_dbase_get_first_child( ztvfm_priv->zond->dbase_zond->zond_dbase_work,
+                    child, &first_grandchild, error );
+            if ( rc ) ERROR_Z
+
+            if ( first_grandchild )
+            {
+                GtkTreeIter iter_tmp = { 0 };
+
+                gtk_tree_store_insert( GTK_TREE_STORE(gtk_tree_view_get_model(
+                    GTK_TREE_VIEW(stvfm) )), &iter_tmp, &iter_new, -1 );
+            }
 
             //nächstes Geschwister
             rc = zond_dbase_get_younger_sibling( ztvfm_priv->zond->dbase_zond->zond_dbase_work,

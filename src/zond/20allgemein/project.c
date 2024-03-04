@@ -39,24 +39,22 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
 void
-project_set_changed( gpointer user_data )
+project_reset_changed( Projekt* zond, gboolean changed )
 {
-    Projekt* zond = (Projekt*) user_data;
-
-    zond->dbase_zond->changed = TRUE;
-    gtk_widget_set_sensitive( zond->menu.speichernitem, TRUE );
-    g_settings_set_boolean( zond->settings, "speichern", TRUE );
+    zond->dbase_zond->changed = changed;
+    gtk_widget_set_sensitive( zond->menu.speichernitem, changed );
+    g_settings_set_boolean( zond->settings, "speichern", changed );
 
     return;
 }
 
 
 void
-project_reset_changed( Projekt* zond )
+project_set_changed( gpointer user_data )
 {
-    zond->dbase_zond->changed = FALSE;
-    gtk_widget_set_sensitive( zond->menu.speichernitem, FALSE );
-    g_settings_set_boolean( zond->settings, "speichern", FALSE );
+    Projekt* zond = (Projekt*) user_data;
+
+    project_reset_changed( zond, TRUE );
 
     return;
 }
@@ -149,7 +147,7 @@ projekt_aktivieren( Projekt* zond )
     g_settings_set_string( zond->settings, "project", set );
     g_free( set );
 
-    project_reset_changed( zond );
+    project_reset_changed( zond, FALSE );
 
     return;
 }
@@ -182,7 +180,7 @@ project_speichern( Projekt* zond, gchar** errmsg )
             zond->dbase_zond->zond_dbase_store, errmsg );
     if ( rc ) ERROR_S
 
-    project_reset_changed( zond );
+    project_reset_changed( zond, FALSE );
 
     return 0;
 }
@@ -273,7 +271,7 @@ projekt_schliessen( Projekt* zond, gchar** errmsg )
 
     zond->node_id_act = 0;
 
-    project_reset_changed( zond );
+    project_reset_changed( zond, FALSE );
 
     //treeviews leeren
     zond_tree_store_clear( ZOND_TREE_STORE(gtk_tree_view_get_model(
