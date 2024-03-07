@@ -29,11 +29,11 @@ struct _SondTreeviewFMClass
     gint (*expand_dummy) ( SondTreeviewFM*, GtkTreeIter*, GObject*, GError** );
     void (*render_icon) ( SondTreeviewFM*, GtkCellRenderer*, GtkTreeIter*, GObject* );
     gint (*render_text) ( SondTreeviewFM*, GtkTreeIter*, GObject*, GError** );
-    gint (*open_row) ( SondTreeviewFM*, GtkTreeIter*, gboolean, GError** );
+    gint (*open_row) ( SondTreeviewFM*, GtkTreeIter*, GObject*, gboolean, GError** );
 };
 
 
-gint sond_treeviewfm_set_cursor_on_path( SondTreeviewFM*, const gchar*, gchar** );
+gint sond_treeviewfm_set_cursor_on_path( SondTreeviewFM*, const gchar*, GtkTreeIter*, gchar** );
 
 gint sond_treeviewfm_set_root( SondTreeviewFM*, const gchar*, gchar** );
 

@@ -2029,21 +2029,23 @@ cb_viewer_layout_release_button( GtkWidget* layout, GdkEvent* event, gpointer da
 
             ctx = zond_pdf_document_get_ctx( viewer_page->pdf_document_page->document );
 
-            pv->clicked_annot->annot_text.rect =
-                    viewer_clamp_icon_rect( viewer_page,
-                    pv->clicked_annot->annot_text.rect );
-
             //neues rect speichert
             zond_pdf_document_mutex_lock( viewer_page->pdf_document_page->document );
-            fz_try( ctx ) pdf_set_annot_rect( ctx, pv->clicked_annot->annot,
-                    viewer_rotate_rect( viewer_page, pv->clicked_annot->annot_text.rect ) );
+            fz_try( ctx )
+            {
+                pv->clicked_annot->annot_text.rect =
+                        viewer_clamp_icon_rect( viewer_page,
+                        pv->clicked_annot->annot_text.rect );
+
+                pdf_set_annot_rect( ctx, pv->clicked_annot->annot,
+                        viewer_rotate_rect( viewer_page, pv->clicked_annot->annot_text.rect ) );
+            }
             fz_always( ctx ) zond_pdf_document_mutex_unlock( viewer_page->pdf_document_page->document );
             fz_catch( ctx )
             {
                 display_message( pv->vf, "Fehler -Änderung Annot kann nicht "
                         "gespeichert werden\n\nBeiAufruf pdf_set_annot_rect:\n",
                         fz_caught_message( ctx ), NULL );
-                //ToDo: pdf_document_page_annot->rect wieder zurücksetzen
 
                 return TRUE;
             }

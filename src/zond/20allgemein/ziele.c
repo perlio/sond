@@ -53,16 +53,26 @@ ziele_1_gleich_2( const Anbindung anbindung1, const Anbindung anbindung2 )
 static gboolean
 ziele_1_vor_2( Anbindung anbindung1, Anbindung anbindung2 )
 {
-    if ( (anbindung1.bis.seite < anbindung2.von.seite) ||
-            ((anbindung1.bis.seite == anbindung2.von.seite) &&
-            (anbindung1.bis.index < anbindung2.von.index)) ) return TRUE;
+        //anbindung1.von muß auch verglichen werden, falls es sich um Pdf_punkt handelt
+        //sonst wäre PdfPunkt nämlich immer vor jeder Anbindung
+    if ( anbindung1.von.seite > anbindung2.von.seite ||
+            (anbindung1.von.seite == anbindung2.von.seite &&
+            anbindung1.von.index > anbindung2.von.index ) ) return FALSE;
+
+    if ( (anbindung1.bis.seite == 0 && anbindung1.bis.index == 0) ) return TRUE; //Pdf-Punkt
+    else if ( anbindung1.bis.seite < anbindung2.von.seite ||
+            (anbindung1.bis.seite == anbindung2.bis.seite &&
+             anbindung1.bis.index < anbindung2.bis.index) ) return TRUE;
     else return FALSE;
 }
 
 
-static gboolean
+gboolean
 ziele_1_eltern_von_2( Anbindung anbindung1, Anbindung anbindung2 )
 {
+    //PdfPunkt kann niemals Eltern sein.
+    if ( anbindung1.bis.seite == 0 && anbindung2.bis.index == 0 ) return FALSE;
+
     if ( ((anbindung1.von.seite < anbindung2.von.seite) ||
             ((anbindung1.von.seite == anbindung2.von.seite) &&
             (anbindung1.von.index <= anbindung2.von.index)))
@@ -131,12 +141,33 @@ zond_anbindung_verschieben_kinder( Projekt* zond,
 
 
 static gint
-zond_anbindung_baum_inhalt( Projekt* zond, gint anchor_id, gboolean child,
-        gint id_inserted, Anbindung anbindung, const gchar* node_text, GError** error )
+zond_anbindung_baum_inhalt( Projekt* zond, gint anchor_id_pdf_abschnitt, gboolean child,
+        gint id_inserted, Anbindung anbindung, gchar const* rel_path, gchar const* node_text, GError** error )
 {
+    gint rc = 0;
     GtkTreeIter* iter = NULL;
     GtkTreeIter iter_anchor = { 0 };
     GtkTreeIter iter_inserted = { 0 };
+    gint id_baum_inhalt = 0;
+    gint anchor_id = 0;
+
+    //Gucken, ob Anbindung im Baum-Inhalt aufscheint
+    rc = zond_dbase_get_baum_inhalt_file_from_rel_path( zond->dbase_zond->zond_dbase_work,
+            rel_path, &id_baum_inhalt, error );
+    if ( rc ) ERROR_Z
+    if ( !id_baum_inhalt )
+    {
+        gint rc = 0;
+
+        rc = zond_dbase_get_baum_inhalt_pdf_abschnitt( zond->dbase_zond->zond_dbase_work,
+                rel_path, anbindung, &id_baum_inhalt, error );
+        if ( rc ) ERROR_Z
+    }
+
+    if ( !id_baum_inhalt ) return 0;
+
+    if ( !anchor_id_pdf_abschnitt ) anchor_id = id_baum_inhalt;
+    else anchor_id = anchor_id_pdf_abschnitt;
 
     //eingefügtes ziel in Baum
     iter = zond_treeview_abfragen_iter( ZOND_TREEVIEW(zond->treeview[BAUM_INHALT]), anchor_id );
@@ -258,7 +289,7 @@ ziele_abfragen_anker_rek( ZondDBase* zond_dbase, Anbindung anbindung,
 
 static gint
 zond_anbindung_insert_pdf_abschnitt_in_dbase( Projekt* zond,
-        const gchar* rel_path, Anbindung anbindung, gint* anchor_id,
+        const gchar* rel_path, Anbindung anbindung, gint* anchor_pdf_abschnitt,
         gboolean* child, gint* node_inserted, gchar** node_text, GError** error )
 {
     gint pdf_root = 0;
@@ -290,12 +321,9 @@ zond_anbindung_insert_pdf_abschnitt_in_dbase( Projekt* zond,
         rc = ziele_abfragen_anker_rek( zond->dbase_zond->zond_dbase_work, anbindung,
                 pdf_root, &anchor_id_dbase, child, error );
         if ( rc ) ERROR_Z
-    }
 
-    if ( !pdf_root || pdf_root == anchor_id_dbase )
-            zond_dbase_get_baum_inhalt_file_from_rel_path( zond->dbase_zond->zond_dbase_work,
-            rel_path, anchor_id, error );
-    else *anchor_id = anchor_id_dbase;
+        if ( anchor_id_dbase != pdf_root ) *anchor_pdf_abschnitt = anchor_id_dbase;
+    }
 
     *node_text = g_strdup_printf( "S. %i (%i) - %i (%i), %s",
             anbindung.von.seite + 1, anbindung.von.index,
@@ -318,21 +346,21 @@ gint
 zond_anbindung_erzeugen( PdfViewer* pv, GError** error )
 {
     gint rc = 0;
-    gint anchor_id = 0;
     gboolean child = FALSE;
     gint node_inserted = 0;
     gchar* node_text = NULL;
+    gint anchor_pdf_abschnitt = 0;
 
     rc = zond_anbindung_insert_pdf_abschnitt_in_dbase( pv->zond,
-            pv->rel_path, pv->anbindung, &anchor_id, &child,
+            pv->rel_path, pv->anbindung, &anchor_pdf_abschnitt, &child,
             &node_inserted, &node_text, error );
     if ( rc ) ERROR_Z
 
     //rc = zond_anbindung_fm( pv->zond, pv->rel_path, pv->anbindung, error );
     if ( rc ) ERROR_Z
 
-    rc = zond_anbindung_baum_inhalt( pv->zond, anchor_id, child, node_inserted, pv->anbindung, node_text,
-            error );
+    rc = zond_anbindung_baum_inhalt( pv->zond, anchor_pdf_abschnitt, child, node_inserted, pv->anbindung,
+            pv->rel_path, node_text, error );
     if ( rc ) ERROR_Z
 
     g_free( node_text );

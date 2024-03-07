@@ -109,11 +109,12 @@ zond_update_unzip( Projekt* zond, InfoWindow* info_window,
         }
         else
         {
-            struct zip_file *zf; // Stores file to be extracted
-            FILE * fd; // Where file is extracted to
+            struct zip_file *zf = NULL; // Stores file to be extracted
+            FILE * fd = NULL; // Where file is extracted to
             long long sum; // How much file has been copied so far
             gchar* filename = NULL;
-            struct utimbuf s_time ={ 0 };
+            struct utimbuf s_time = { 0 };
+            gint ret = 0;
 
             zf = zip_fopen_index(za, i, 0); // Open file within zip
             if ( !zf )
@@ -131,44 +132,160 @@ zond_update_unzip( Projekt* zond, InfoWindow* info_window,
 
             filename = g_strconcat( zond->base_dir, vtag, "/", sb.name, NULL );
             fd = fopen( filename, "wb" ); // Create new file
+            g_free( filename );
             if (fd == NULL)
             {
-                *error = g_error_new( ZOND_ERROR, ZOND_ERROR_IO, "%s\nfopen (%s)\n%s",
-                        __func__, filename, strerror( errno ) );
-                zip_fclose( zf ); //ToDo: Fehlerabfrage
+                gint ret = 0;
+
+                if ( error ) *error = g_error_new( ZOND_ERROR, ZOND_ERROR_IO, "%s\nfopen\n%s",
+                        __func__, strerror( errno ) );
+                ret = zip_fclose( zf );
                 zip_discard( za );
-                g_free( filename );
+                if ( ret )
+                {
+                    zip_error_t zip_error = { 0 };
+
+                    zip_error_init_with_code( &zip_error, ret );
+                    if ( error ) (*error)->message = add_string( (*error)->message,
+                            g_strdup_printf( "\nFehler zip_fclose:\n%s",
+                            zip_error_strerror( &zip_error ) ) );
+                    zip_error_fini( &zip_error );
+                }
 
                 return -1;
             }
-            g_free( filename );
 
             sum = 0;
             while (sum != sb.size)
             { // Copy bytes to new file
                 char buf[100]; // Buffer to write stuff
                 int len;
+                gint resp = 0;
 
                 len = zip_fread(zf, buf, 100);
                 if (len < 0)
                 {
-                    *error = g_error_new( ZOND_ERROR, ZOND_ERROR_ZIP,
-                            "%s\nzip_fread\nKann Datei nicht lesen", __func__ );
-                    fclose( fd ); //ToDo: Fehler...
-                    zip_fclose( zf ); //ToDo: Fehler...
+                    gint ret = 0;
+                    zip_error_t* zip_error = NULL;
+
+                    zip_error = zip_file_get_error( zf );
+
+                    if ( error ) *error = g_error_new( g_quark_from_static_string( "ZIP" ),
+                            zip_error_code_zip( zip_error ), "%s\n%s", __func__, zip_error_strerror( zip_error ) );
+                    zip_error_fini( zip_error );
+
+                    ret = fclose( fd );
+                    if ( ret && error ) (*error)->message = add_string( (*error)->message,
+                                g_strdup_printf( "\nFehler fclose:\n%s", strerror( errno ) ) );
+                    ret = zip_fclose( zf );
                     zip_discard( za );
+                    if ( ret )
+                    {
+                        zip_error_t zip_error = { 0 };
+
+                        zip_error_init_with_code( &zip_error, ret );
+                        if ( error ) (*error)->message = add_string( (*error)->message,
+                                g_strdup_printf( "\nFehler zip_fclose:\n%s",
+                                zip_error_strerror( &zip_error ) ) );
+                        zip_error_fini( &zip_error );
+                    }
 
                     return -1;
                 }
 
-                fwrite(buf, 1, len, fd); //ToDo: Fehlerabfrage
+                resp = fwrite(buf, 1, len, fd);
+                if ( resp != len )
+                {
+                    gint ret = 0;
+
+                    if ( error ) *error = g_error_new( g_quark_from_static_string( "stdlib" ), errno, strerror( errno ) );
+
+                    ret = fclose( fd );
+                    if ( ret && error ) (*error)->message = add_string( (*error)->message,
+                                g_strdup_printf( "\nFehler fclose:\n%s", strerror( errno ) ) );
+                    ret = zip_fclose( zf );
+                    zip_discard( za );
+                    if ( ret )
+                    {
+                        zip_error_t zip_error = { 0 };
+
+                        zip_error_init_with_code( &zip_error, ret );
+                        if ( error ) (*error)->message = add_string( (*error)->message,
+                                g_strdup_printf( "\nFehler zip_fclose:\n%s",
+                                zip_error_strerror( &zip_error ) ) );
+                        zip_error_fini( &zip_error );
+                    }
+
+                    return -1;
+
+                }
                 sum += len;
             }
 
             // Finished copying file
-            fflush( fd );
-            fclose(fd); //ToDo: Fehler...
-            zip_fclose(zf); //ToDo: Fehler...
+            ret = fflush( fd );
+            if ( ret )
+            {
+                gint res = 0;
+
+                if ( error ) *error = g_error_new( g_quark_from_static_string( "stdlib" ), errno, strerror( errno ) );
+
+                res = fclose( fd );
+                if ( res )
+                {
+                    gint res2 = 0;
+
+                    if ( error ) (*error)->message = add_string( (*error)->message,
+                            g_strdup_printf( "\nFehler fclose:\n%s", strerror( errno ) ) );
+
+                    res2 = zip_fclose( zf );
+                    zip_discard( za );
+                    if ( res2 )
+                    {
+                        zip_error_t zip_error = { 0 };
+
+                        zip_error_init_with_code( &zip_error, res2 );
+                        if ( error ) (*error)->message = add_string( (*error)->message,
+                                g_strdup_printf( "\nFehler zip_fclose:\n%s",
+                                zip_error_strerror( &zip_error ) ) );
+                        zip_error_fini( &zip_error );
+                    }
+                }
+            }
+            ret = fclose( fd );
+            if ( ret )
+            {
+                gint res2 = 0;
+
+                if ( error ) (*error)->message = add_string( (*error)->message,
+                        g_strdup_printf( "\nFehler fclose:\n%s", strerror( errno ) ) );
+
+                res2 = zip_fclose( zf );
+                zip_discard( za );
+                if ( res2 )
+                {
+                    zip_error_t zip_error = { 0 };
+
+                    zip_error_init_with_code( &zip_error, res2 );
+                    if ( error ) (*error)->message = add_string( (*error)->message,
+                            g_strdup_printf( "\nFehler zip_fclose:\n%s",
+                            zip_error_strerror( &zip_error ) ) );
+                    zip_error_fini( &zip_error );
+                }
+            }
+
+            ret = zip_fclose(zf);
+            zip_discard( za );
+            if ( ret )
+            {
+                zip_error_t zip_error = { 0 };
+
+                zip_error_init_with_code( &zip_error, ret );
+                if ( error ) (*error)->message = add_string( (*error)->message,
+                        g_strdup_printf( "\nFehler zip_fclose:\n%s",
+                        zip_error_strerror( &zip_error ) ) );
+                zip_error_fini( &zip_error );
+            }
 
             //Änderungsdatum anpassen
             s_time.actime = time( NULL );
@@ -259,12 +376,7 @@ zond_update_download_newest( Projekt* zond, InfoWindow* info_window,
     curl_easy_cleanup(curl);
     fclose(fp);
 
-    if ( res == CURLE_ABORTED_BY_CALLBACK )
-    {
-        //ToDo: Aufräumen
-
-        return 1;
-    }
+    if ( res == CURLE_ABORTED_BY_CALLBACK ) return 1;
     else if ( res != CURLE_OK )
     {
         *error = g_error_new( ZOND_ERROR, ZOND_ERROR_CURL,

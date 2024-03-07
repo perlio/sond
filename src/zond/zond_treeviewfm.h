@@ -78,6 +78,9 @@ struct _ZondTreeviewFMClass
     SondTreeviewFMClass parent_class;
 };
 
+gint zond_treeviewfm_set_cursor_on_anbindung( ZondTreeviewFM*, gchar const*,
+        Anbindung, GError** );
+
 G_END_DECLS
 
 #endif // ZOND_TREEVIEWFM_H_INCLUDED

@@ -146,6 +146,9 @@ gint zond_dbase_get_baum_inhalt_pdf_abschnitt_from_pdf_abschnitt( ZondDBase*,
 gint zond_dbase_get_baum_inhalt_file_from_rel_path( ZondDBase*,
         const gchar*, gint*, GError** );
 
+gint zond_dbase_get_baum_inhalt_pdf_abschnitt( ZondDBase*,
+        gchar const*, Anbindung, gint*, GError** );
+
 G_END_DECLS
 
 #endif // ZOND_DBASE_H_INCLUDED

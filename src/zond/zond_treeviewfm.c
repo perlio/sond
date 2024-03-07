@@ -6,6 +6,7 @@
 
 #include "10init/app_window.h"
 #include "20allgemein/project.h"
+#include "20allgemein/oeffnen.h"
 
 #include "global_types.h"
 
@@ -350,18 +351,11 @@ zond_treeviewfm_render_text( SondTreeviewFM* stvfm, GtkTreeIter* iter, GObject* 
 
     if ( ZOND_IS_PDF_ABSCHNITT(object) )
     {
-        gchar const* rel_path = NULL;
-        Anbindung anbindung = { 0 };
-        gchar* label = NULL;
+        ZondPdfAbschnittPrivate* zond_pdf_abschnitt_priv =
+                zond_pdf_abschnitt_get_instance_private( ZOND_PDF_ABSCHNITT(object) );
 
-        zond_pdf_abschnitt_get( ZOND_PDF_ABSCHNITT(object), NULL, &rel_path, &anbindung, NULL, NULL );
-
-        label = g_strdup_printf( "%s, S. %i (Index %i)", rel_path, anbindung.von.seite, anbindung.von.index );
-        if ( anbindung.bis.seite || anbindung.bis.index ) label = add_string( label,
-                g_strdup_printf( "- S. %i (Index %i)", anbindung.bis.seite, anbindung.bis.index ) );
         g_object_set( G_OBJECT(sond_treeview_get_cell_renderer_text( SOND_TREEVIEW(stvfm) )), "text",
-                label, NULL );
-        g_free( label );
+                zond_pdf_abschnitt_priv->node_text, NULL );
 
         return 0;
     }
@@ -543,6 +537,71 @@ zond_treeviewfm_insert_dummy( SondTreeviewFM* stvfm,
 }
 
 
+static gint
+zond_treeviewfm_open_row( SondTreeviewFM* stvfm,
+        GtkTreeIter* iter, GObject* object, gboolean open_with, GError** error )
+{
+    ZondTreeviewFMPrivate* ztvfm_priv =
+            zond_treeviewfm_get_instance_private( ZOND_TREEVIEWFM(stvfm) );
+
+    if ( G_IS_FILE_INFO(object) && !open_with )
+    {
+        const gchar* content_type = NULL;
+
+        content_type = g_file_info_get_content_type( G_FILE_INFO(object) );
+        if ( g_content_type_is_mime_type( content_type, "application/pdf" ) )
+        {
+            gint rc = 0;
+            gchar* rel_path = NULL;
+            gchar* errmsg = NULL;
+
+            rel_path = sond_treeviewfm_get_rel_path( stvfm, iter );
+
+            rc = oeffnen_internal_viewer( ztvfm_priv->zond, rel_path, NULL, NULL, &errmsg );
+            g_free( rel_path );
+            if ( rc )
+            {
+                g_prefix_error( error, "%s\n%s", __func__, errmsg );
+                g_free( errmsg );
+
+                return -1;
+            }
+
+            return 0;
+        }
+    }
+    else if ( ZOND_IS_PDF_ABSCHNITT(object) )
+    {
+        gchar* errmsg = NULL;
+        gint rc = 0;
+        PdfPos pdf_pos = { 0 };
+
+        ZondPdfAbschnitt* zpa = ZOND_PDF_ABSCHNITT(object);
+        ZondPdfAbschnittPrivate* zpa_priv = zond_pdf_abschnitt_get_instance_private( zpa );
+
+        pdf_pos.seite = zpa_priv->seite_von;
+        pdf_pos.index = zpa_priv->index_von;
+
+        rc = oeffnen_internal_viewer( ztvfm_priv->zond, zpa_priv->rel_path, NULL, &pdf_pos, &errmsg );
+        if ( rc )
+        {
+            g_prefix_error( error, "%s\n%s", __func__, errmsg );
+            g_free( errmsg );
+
+            return -1;
+        }
+
+        return 0;
+    }
+
+    //chain-up, falls nicht bearbeitet
+    SOND_TREEVIEWFM_CLASS(zond_treeviewfm_parent_class)->open_row( stvfm,
+            iter, object, open_with, error );
+
+    return 0;
+}
+
+
 static void
 zond_treeviewfm_class_init( ZondTreeviewFMClass* klass )
 {
@@ -571,6 +630,7 @@ zond_treeviewfm_class_init( ZondTreeviewFMClass* klass )
     SOND_TREEVIEWFM_CLASS(klass)->expand_dummy = zond_treeviewfm_expand_dummy;
     SOND_TREEVIEWFM_CLASS(klass)->render_icon = zond_treeviewfm_render_icon;
     SOND_TREEVIEWFM_CLASS(klass)->render_text = zond_treeviewfm_render_text;
+    SOND_TREEVIEWFM_CLASS(klass)->open_row = zond_treeviewfm_open_row;
 
     return;
 }
@@ -583,6 +643,25 @@ zond_treeviewfm_init( ZondTreeviewFM* ztvfm )
 }
 
 
+gint
+zond_treeviewfm_set_cursor_on_anbindung( ZondTreeviewFM* ztvfm, gchar const* rel_path,
+        Anbindung anbindung, GError** error )
+{
+    gint rc = 0;
+    gchar* errmsg = NULL;
+    GtkTreeIter iter_path = { 0 };
+
+    rc = sond_treeviewfm_set_cursor_on_path( SOND_TREEVIEWFM(ztvfm), rel_path, &iter_path, &errmsg );
+    if ( rc )
+    {
+        if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\n%s", __func__, errmsg );
+        g_free( errmsg );
+
+        return -1;
+    }
+
+    return 0;
+}
 
 
 
