@@ -200,8 +200,8 @@ project_timeout_autosave( gpointer data )
         rc = project_speichern( zond, &errmsg );
         if ( rc )
         {
-            display_message( zond->app_window, "Automatisches Speichern fehlgeschlagen\n\n"
-                    "Bei Aufruf project_speichern:\n", errmsg, NULL );
+            display_message( zond->app_window, "Automatisches Speichern fehlgeschlagen\n\n",
+                    errmsg, NULL );
             g_free( errmsg );
         }
     }
@@ -221,8 +221,7 @@ cb_menu_datei_speichern_activate( GtkMenuItem* item, gpointer user_data )
     rc = project_speichern( zond, &errmsg );
     if ( rc )
     {
-        display_message( zond->app_window, "Fehler beim Speichern -\n\nBei Aufruf "
-                "project_speichern:\n", errmsg, NULL );
+        display_message( zond->app_window, "Fehler beim Speichern -\n\n", errmsg, NULL );
         g_free( errmsg );
     }
 

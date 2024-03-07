@@ -2,7 +2,7 @@
 #define MISC_H_INCLUDED
 
 #define ERROR_S_VAL(y) { if ( errmsg ) *errmsg = add_string( \
-                         g_strconcat( "Bei Aufruf ", __func__, ":\n", NULL ), *errmsg ); \
+                         g_strconcat( __func__, "\n", NULL ), *errmsg ); \
                          return y; }
 
 #define ERROR_S ERROR_S_VAL(-1)

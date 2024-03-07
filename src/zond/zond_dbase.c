@@ -884,9 +884,7 @@ zond_dbase_backup( ZondDBase* src, ZondDBase* dst, gchar** errmsg )
     backup = sqlite3_backup_init( db_dst, "main", db_src, "main" );
     if ( !backup )
     {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf ", __func__,
-                ":\nBei Aufruf sqlite3_backup_init\nresult code: ",
-                sqlite3_errstr( sqlite3_errcode( db_dst ) ), "\n",
+        if ( errmsg ) *errmsg = g_strconcat( __func__, "\nsqlite3_backup_init\n",
                 sqlite3_errmsg( db_dst ), NULL);
 
         return -1;
@@ -897,9 +895,8 @@ zond_dbase_backup( ZondDBase* src, ZondDBase* dst, gchar** errmsg )
     {
         if ( errmsg && rc == SQLITE_NOTADB ) *errmsg = g_strdup( "Datei ist "
                 "keine SQLITE-Datenbank" );
-        else if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf ", __func__,
-                "Bei Aufruf sqlite3_backup_step:\nresult code: ",
-                sqlite3_errstr( rc ), "\n", sqlite3_errmsg( db_dst ), NULL );
+        else if ( errmsg ) *errmsg = g_strconcat( __func__,
+                "\nsqlite3_backup_step:\n", sqlite3_errmsg( db_dst ), NULL );
 
         return -1;
     }

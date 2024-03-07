@@ -342,6 +342,24 @@ zond_anbindung_insert_pdf_abschnitt_in_dbase( Projekt* zond,
 }
 
 
+static gint
+zond_anbindung_fm( Projekt* zond, gchar const* rel_path, Anbindung anbindung,
+        gchar const* node_text, GError** error )
+{
+    //ist rel_path sichtbar?
+    //nein: return
+
+    //hat rel_path Kinder?
+    //nein: dummy einfügen
+    //ja:
+        //ist rel_path expanded?
+        //nein: return
+        //ja: Kinder durchgehen: Anbindung Eltern?
+
+    return 0;
+}
+
+
 gint
 zond_anbindung_erzeugen( PdfViewer* pv, GError** error )
 {
@@ -356,7 +374,7 @@ zond_anbindung_erzeugen( PdfViewer* pv, GError** error )
             &node_inserted, &node_text, error );
     if ( rc ) ERROR_Z
 
-    //rc = zond_anbindung_fm( pv->zond, pv->rel_path, pv->anbindung, error );
+    rc = zond_anbindung_fm( pv->zond, pv->rel_path, pv->anbindung, node_text, error );
     if ( rc ) ERROR_Z
 
     rc = zond_anbindung_baum_inhalt( pv->zond, anchor_pdf_abschnitt, child, node_inserted, pv->anbindung,

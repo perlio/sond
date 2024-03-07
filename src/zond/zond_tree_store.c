@@ -840,7 +840,9 @@ zond_tree_store_insert( ZondTreeStore* tree_store, GtkTreeIter* iter,
     GtkTreeIter iter_new = { 0, };
 
     g_return_if_fail (ZOND_IS_TREE_STORE (tree_store));
-    g_return_if_fail( iter == NULL || ((RowData*) G_NODE(iter->user_data)->data)->tree_store == tree_store );
+    g_return_if_fail( iter == NULL || iter->user_data );
+
+//            G_NODE(iter->user_data)->data || ((RowData*) (G_NODE(iter->user_data)->data))->tree_store == tree_store );
 
     if ( iter )
     {
