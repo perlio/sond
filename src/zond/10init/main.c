@@ -31,7 +31,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../../misc.h"
 #include "../../misc_stdlib.h"
 #include "../20allgemein/project.h"
-#include "../20allgemein/zieleplus.h"
 
 #include "icons.h"
 #include "app_window.h"

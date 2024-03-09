@@ -291,10 +291,6 @@ zond_treeviewfm_text_edited( SondTreeviewFM* stvfm, GtkTreeIter* iter, GObject* 
 
     ZondTreeviewFMPrivate* ztvfm_priv = zond_treeviewfm_get_instance_private( ZOND_TREEVIEWFM(stvfm) );
 
-//überflüssig?
-//    ztvfm_priv->zond->key_press_signal = g_signal_connect( ztvfm_priv->zond->app_window, "key-press-event",
-//            G_CALLBACK(cb_key_press), ztvfm_priv->zond );
-
     if ( ztvfm_priv->zond->dbase_zond->changed ) changed = TRUE;
 
     if ( ZOND_IS_PDF_ABSCHNITT(object) )

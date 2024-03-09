@@ -1747,11 +1747,11 @@ zond_dbase_remove_node( ZondDBase* zond_dbase, gint node_id, GError** error )
     sqlite3_stmt** stmt = NULL;
 
     const gchar* sql[] = {
-            "UPDATE knoten SET older_sibling_ID=(SELECT older_sibling_id FROM knoten "
+            "UPDATE knoten SET older_sibling_ID=(SELECT older_sibling_ID FROM knoten "
             "WHERE ID=?1) WHERE "
             "older_sibling_ID=?1; ",
 
-            "DELETE FROM knoten WHERE node_id = ?1; "
+            "DELETE FROM knoten WHERE ID=?1; "
         };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, error );
@@ -1792,7 +1792,7 @@ zond_dbase_remove_node( ZondDBase* zond_dbase, gint node_id, GError** error )
         return -1;
     }
 
-    rc = sqlite3_step( stmt[2] );
+    rc = sqlite3_step( stmt[1] );
     if ( rc != SQLITE_DONE )
     {
         if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
@@ -1976,14 +1976,13 @@ zond_dbase_get_tree_root( ZondDBase* zond_dbase, gint node_id, gint* root, GErro
     sqlite3_stmt** stmt = NULL;
 
     const gchar* sql[] = {
-            "WITH RECURSIVE cte_knoten (ID) AS ( "
-                "VALUES (?1) "
+            "WITH RECURSIVE cte_knoten (ID, parent_ID, older_sibling_ID) AS ( "
+                "VALUES (?1,(SELECT parent_ID FROM knoten WHERE ID=?1),(SELECT older_sibling_ID FROM knoten WHERE ID=?1)) "
                 "UNION ALL "
-                "SELECT knoten.ID "
-                    "FROM knoten JOIN cte_knoten WHERE "
-                    "knoten.parent_ID = cte_knoten.ID "
+                "SELECT knoten.ID, knoten.parent_id, knoten.older_sibling_ID FROM knoten JOIN cte_knoten "
+                    "WHERE knoten.ID = cte_knoten.parent_ID "
                 ") SELECT ID AS ID_CTE FROM cte_knoten "
-                "WHERE knoten.parent_ID=0 AND knoten.older_sibling_ID=0; "
+                "WHERE cte_knoten.parent_ID=0 AND cte_knoten.older_sibling_ID=0; "
             };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, error );

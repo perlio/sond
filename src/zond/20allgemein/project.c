@@ -309,8 +309,6 @@ projekt_schliessen( Projekt* zond, gchar** errmsg )
     //project in settings auf leeren String setzen
     g_settings_set_string( zond->settings, "project", "" );
 
-    g_signal_handler_disconnect( zond->app_window, zond->key_press_signal );
-
     return 0;
 }
 
@@ -401,10 +399,6 @@ project_oeffnen( Projekt* zond, const gchar* abs_path, gboolean create,
     if ( rc ) ERROR_S
 
     projekt_aktivieren( zond );
-
-    //key_press-event-signal einschalten
-    zond->key_press_signal = g_signal_connect( zond->app_window,
-            "key-press-event", G_CALLBACK(cb_key_press), zond );
 
     if ( g_settings_get_boolean( zond->settings, "autosave" ) )
             g_timeout_add_seconds( 10 * 60, project_timeout_autosave, zond );

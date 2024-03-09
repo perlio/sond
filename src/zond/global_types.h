@@ -179,7 +179,6 @@ typedef struct _Projekt
     gint node_id_act;
     gint node_id_extra;
     gulong text_buffer_changed_signal;
-    gulong key_press_signal;
 
     GtkWidget* textview;
     GtkWidget* textview_ii;

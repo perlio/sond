@@ -1648,7 +1648,7 @@ cb_viewer_swindow_key_press( GtkWidget* swindow, GdkEvent* event, gpointer user_
         zond_pdf_document_mutex_unlock( viewer_page->pdf_document_page->document );
         if ( rc )
         {
-            display_message( pv->vf, "Fehler -Annotation löschen\n\n"
+            display_message( pv->vf, "Fehler - Annotation löschen\n\n"
                     "Bei Aufruf annot_delete", errmsg, NULL );
             g_free( errmsg );
 
@@ -2417,8 +2417,8 @@ cb_viewer_layout_press_button( GtkWidget* layout, GdkEvent* event, gpointer
                         viewer_cb_change_annot, NULL, &errmsg );
                 if ( rc )
                 {
-                    display_message( pv->vf, "Fehler -\n\n",
-                            "Bei Aufruf viewer_refresh_changed_page:\n", errmsg, NULL );
+                    display_message( pv->vf, "Fehler - in ", __func__, "\n\n",
+                            errmsg, NULL );
                     g_free( errmsg );
 
                     return TRUE;

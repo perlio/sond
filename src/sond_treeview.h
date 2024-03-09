@@ -22,6 +22,9 @@ struct _SondTreeviewClass
     Clipboard* clipboard;
     void (*render_text_cell) ( GtkTreeViewColumn*, GtkCellRenderer*, GtkTreeModel*,
             GtkTreeIter*, gpointer );
+    void (*text_edited) ( SondTreeview* stv, GtkTreeIter* iter, gchar const* new_text );
+    gboolean (*callback_key_press_event) ( GtkWidget*, GdkEventKey, gpointer );
+    gpointer callback_key_press_event_func_data;
 };
 
 void sond_treeview_set_render_text_cell_func( SondTreeview*, void (*render_text_cell)
