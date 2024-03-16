@@ -81,6 +81,8 @@ struct _ZondTreeviewFMClass
 gint zond_treeviewfm_set_cursor_on_anbindung( ZondTreeviewFM*, gchar const*,
         Anbindung, GError** );
 
+void zond_treeviewfm_set_pdf_abschnitt( ZondTreeviewFM*, gint, gchar const*, GError** );
+
 G_END_DECLS
 
 #endif // ZOND_TREEVIEWFM_H_INCLUDED

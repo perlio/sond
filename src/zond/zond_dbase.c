@@ -1609,8 +1609,8 @@ zond_dbase_update_path( ZondDBase* zond_dbase, const gchar* old_path,
 
 
 gint
-zond_dbase_verschieben_knoten( ZondDBase* zond_dbase, gint node_id, gint new_parent_id,
-        gint new_older_sibling_id, GError** error )
+zond_dbase_verschieben_knoten( ZondDBase* zond_dbase, gint node_id, gint anchor_id,
+        gboolean child, GError** error )
 {
     gint rc = 0;
     sqlite3_stmt** stmt = NULL;
@@ -1620,10 +1620,34 @@ zond_dbase_verschieben_knoten( ZondDBase* zond_dbase, gint node_id, gint new_par
             "(SELECT older_sibling_ID FROM knoten WHERE ID=?1)" //node_id
             "WHERE older_sibling_ID=?1; ",
 
-            "UPDATE knoten SET older_sibling_ID=?1 WHERE ID=" //node_id
-                "(SELECT ID FROM knoten WHERE parent_ID=?2 AND older_sibling_ID=?3); ", //new_parent_id/new_older_s_id
+            //zunächst Knoten, vor den eingefügt wird, ändern
+            "UPDATE knoten SET "
+                "older_sibling_ID=?1 WHERE "
+                    "parent_ID= "
+                        "CASE ?3 "
+                            "WHEN 0 THEN (SELECT parent_ID FROM knoten WHERE ID=?2) " //anchor
+                            "WHEN 1 THEN ?2 "
+                        "END "
+                    "AND "
+                    "older_sibling_ID= "
+                        "CASE ?3 "
+                            "WHEN 0 THEN ?2 "
+                            "WHEN 1 THEN ?1 "
+                        "END; ",
 
-            "UPDATE knoten SET parent_ID=?1, older_sibling_ID=?2 WHERE ID=?3; "
+            //zu verschiebenden Knoten einfügen
+            "UPDATE knoten SET "
+                "parent_ID= "
+                    "CASE ?3 " //child
+                    "WHEN 0 THEN (SELECT parent_ID FROM knoten WHERE ID=?2) " //anchor_id
+                    "WHEN 1 THEN ?2 "
+                    "END, "
+                "older_sibling_ID="
+                    "CASE ?3 "
+                    "WHEN 0 THEN ?2 "
+                    "WHEN 1 THEN 0 "
+                    "END "
+                "WHERE ID=?1; "
             };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, error );
@@ -1666,7 +1690,7 @@ zond_dbase_verschieben_knoten( ZondDBase* zond_dbase, gint node_id, gint new_par
         return -1;
     }
 
-    rc = sqlite3_bind_int( stmt[1], 2, new_parent_id );
+    rc = sqlite3_bind_int( stmt[1], 2, anchor_id );
     if ( rc != SQLITE_OK )
     {
         if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
@@ -1676,7 +1700,7 @@ zond_dbase_verschieben_knoten( ZondDBase* zond_dbase, gint node_id, gint new_par
         return -1;
     }
 
-    rc = sqlite3_bind_int( stmt[1], 3, new_older_sibling_id );
+    rc = sqlite3_bind_int( stmt[1], 3, child );
     if ( rc != SQLITE_OK )
     {
         if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
@@ -1696,7 +1720,7 @@ zond_dbase_verschieben_knoten( ZondDBase* zond_dbase, gint node_id, gint new_par
         return -1;
     }
 
-    rc = sqlite3_bind_int( stmt[2], 1, new_parent_id );
+    rc = sqlite3_bind_int( stmt[2], 1, node_id );
     if ( rc != SQLITE_OK )
     {
         if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
@@ -1706,7 +1730,7 @@ zond_dbase_verschieben_knoten( ZondDBase* zond_dbase, gint node_id, gint new_par
         return -1;
     }
 
-    rc = sqlite3_bind_int( stmt[2], 2, new_older_sibling_id );
+    rc = sqlite3_bind_int( stmt[2], 2, anchor_id );
     if ( rc != SQLITE_OK )
     {
         if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
@@ -1716,7 +1740,7 @@ zond_dbase_verschieben_knoten( ZondDBase* zond_dbase, gint node_id, gint new_par
         return -1;
     }
 
-    rc = sqlite3_bind_int( stmt[2], 3, node_id );
+    rc = sqlite3_bind_int( stmt[2], 3, child );
     if ( rc != SQLITE_OK )
     {
         if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),

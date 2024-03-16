@@ -27,9 +27,6 @@ struct _SondTreeviewClass
     gpointer callback_key_press_event_func_data;
 };
 
-void sond_treeview_set_render_text_cell_func( SondTreeview*, void (*render_text_cell)
-        ( GtkTreeViewColumn*, GtkCellRenderer*, GtkTreeModel*, GtkTreeIter*, gpointer ) );
-
 void sond_treeview_set_id( SondTreeview*, gint );
 
 gint sond_treeview_get_id( SondTreeview* );

@@ -41,6 +41,9 @@ GtkTreePath* zond_treeview_get_path( SondTreeview*, gint );
 
 gint zond_treeview_load_baum( ZondTreeview*, GError** );
 
+void zond_treeview_set_text_pdf_abschnitt( ZondTreeview*, gint,
+        gchar const* );
+
 G_END_DECLS
 
 #endif // SOND_TREEVIEW_H_INCLUDED

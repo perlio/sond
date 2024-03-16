@@ -92,7 +92,8 @@ zond_anbindung_verschieben_kinder( Projekt* zond,
                           Anbindung anbindung,
                           GError** error )
 {
-    gint older_sibling = 0;
+    gboolean child = TRUE;
+    gint anchor_id = node_id;
 
     do
     {
@@ -117,7 +118,7 @@ zond_anbindung_verschieben_kinder( Projekt* zond,
             GtkTreeIter iter_younger_sibling = { 0 };
 
             rc = zond_dbase_verschieben_knoten( zond->dbase_zond->zond_dbase_work,
-                    younger_sibling, node_id, older_sibling, error );
+                    younger_sibling, anchor_id, child, error );
             if ( rc ) ERROR_Z
 
             iter_younger_sibling = *iter;
@@ -129,9 +130,12 @@ zond_anbindung_verschieben_kinder( Projekt* zond,
                 return -1;
             }
 
-            zond_tree_store_move_node( &iter_younger_sibling, iter, TRUE, NULL );
+            zond_tree_store_move_node(
+                    &iter_younger_sibling, ZOND_TREE_STORE(gtk_tree_view_get_model(
+                    GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]) )), iter, TRUE, NULL );
 
-            older_sibling = younger_sibling;
+            anchor_id = younger_sibling;
+            child = FALSE;
         }
         else break;
     } while ( 1 );

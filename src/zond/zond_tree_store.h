@@ -81,7 +81,7 @@ void          zond_tree_store_clear            (ZondTreeStore *tree_store);
 void zond_tree_store_copy_node( GtkTreeIter*, ZondTreeStore*, GtkTreeIter*,
         gboolean, GtkTreeIter* );
 
-void zond_tree_store_move_node( GtkTreeIter*, GtkTreeIter*, gboolean, GtkTreeIter* );
+void zond_tree_store_move_node( GtkTreeIter*, ZondTreeStore*, GtkTreeIter*, gboolean, GtkTreeIter* );
 
 gboolean
 zond_tree_store_is_link( GtkTreeIter* );

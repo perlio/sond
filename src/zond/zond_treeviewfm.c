@@ -1,8 +1,10 @@
 #include "zond_treeviewfm.h"
 
 #include "../misc.h"
-#include "zond_dbase.h"
 #include "../sond_treeviewfm.h"
+
+#include "zond_dbase.h"
+#include "zond_treeview.h"
 
 #include "10init/app_window.h"
 #include "20allgemein/project.h"
@@ -202,7 +204,7 @@ zond_treeviewfm_dbase_begin( SondTreeviewFM* stvfm, GError** error )
     if ( rc ) ERROR_Z
 
     rc = zond_dbase_begin( dbase_store, error );
-    if ( rc ) ERROR_Z
+    if ( rc ) ERROR_ROLLBACK_Z( dbase_work );
 
     return 0;
 }
@@ -215,12 +217,7 @@ zond_treeviewfm_dbase_test( SondTreeviewFM* stvfm, const gchar* rel_path_source,
     gint rc = 0;
 
     ZondTreeviewFMPrivate* priv = zond_treeviewfm_get_instance_private( ZOND_TREEVIEWFM(stvfm) );
-    ZondDBase* dbase_store = sond_treeviewfm_get_dbase( stvfm );
-    ZondDBase* dbase_work = priv->zond->dbase_zond->zond_dbase_work;
-
-    rc = zond_dbase_test_path( dbase_store, rel_path_source, error);
-    if ( rc == -1 ) ERROR_Z
-    else if ( rc == 1 ) return 1;
+    ZondDBase* dbase_work = sond_treeviewfm_get_dbase( stvfm );
 
     rc = zond_dbase_test_path( dbase_work, rel_path_source, error );
     if ( rc == -1 ) ERROR_Z
@@ -303,20 +300,15 @@ zond_treeviewfm_text_edited( SondTreeviewFM* stvfm, GtkTreeIter* iter, GObject* 
                 ID_pdf_abschnitt, new_text, error );
         if ( rc ) ERROR_Z
 
-        //ToDo
-        //zond_treeview ändern
-
         zond_pdf_abschnitt_set_node_text( ZOND_PDF_ABSCHNITT(object), new_text );
 
-        if ( !changed ) project_reset_changed( ztvfm_priv->zond, FALSE );
-
-        return 0;
+        //zond_treeview ändern
+        zond_treeview_set_text_pdf_abschnitt( ZOND_TREEVIEW(ztvfm_priv->zond->treeview[BAUM_INHALT]),
+                ID_pdf_abschnitt, new_text );
     }
-
     //chain-up, wenn nicht erledigt
-    SOND_TREEVIEWFM_CLASS(zond_treeviewfm_parent_class)->text_edited( stvfm, iter, object, new_text, error );
+    else SOND_TREEVIEWFM_CLASS(zond_treeviewfm_parent_class)->text_edited( stvfm, iter, object, new_text, error );
 
-    //unschön
     if ( !changed ) project_reset_changed( ztvfm_priv->zond, FALSE );
 
     return 0;
@@ -660,5 +652,50 @@ zond_treeviewfm_set_cursor_on_anbindung( ZondTreeviewFM* ztvfm, gchar const* rel
 }
 
 
+typedef struct
+{
+    gint ID;
+    gchar const* text_new;
+    ZondTreeviewFM* ztvfm;
+} FMForeach;
+
+static gboolean
+zond_treeviewfm_foreach_pdf_abschnitt( GtkTreeModel* model, GtkTreePath* path,
+        GtkTreeIter* iter, gpointer data )
+{
+    gboolean ret = FALSE;
+    GObject* object = NULL;
+
+    FMForeach* fm_foreach = (FMForeach*) data;
+
+    gtk_tree_model_get( model, iter, 0, &object, -1 );
+
+    if ( ZOND_IS_PDF_ABSCHNITT(object) )
+    {
+        if ( fm_foreach->ID == zond_pdf_abschnitt_get_ID( ZOND_PDF_ABSCHNITT(object) ) )
+        {
+            zond_pdf_abschnitt_set_node_text( ZOND_PDF_ABSCHNITT(object), fm_foreach->text_new );
+            gtk_tree_view_columns_autosize( GTK_TREE_VIEW(fm_foreach->ztvfm) );
+
+            ret = TRUE;
+        }
+    }
+
+    g_object_unref( object );
+
+    return ret;
+}
+
+
+void
+zond_treeviewfm_set_pdf_abschnitt( ZondTreeviewFM* ztvfm, gint ID, gchar const* text_new, GError** error )
+{
+    FMForeach fm_foreach = { ID, text_new, ztvfm };
+
+    gtk_tree_model_foreach( gtk_tree_view_get_model( GTK_TREE_VIEW(ztvfm) ),
+            zond_treeviewfm_foreach_pdf_abschnitt, &fm_foreach );
+
+    return;
+}
 
 

@@ -180,7 +180,7 @@ sond_treeviewfm_dbase( SondTreeviewFM* stvfm, gint mode, const gchar* rel_path_s
     3 - row edited
     4 - delete
     Rückgabe:
-    -1- Fehler - *errmsg wird "gefüllt"
+    -1 - Fehler - *errmsg wird "gefüllt"
     0 - Aktion erfolgreich abgeschlossen
     1 - keine Veränderung am Filesystem
     2 - keine Veränderung am Filesystem - Abbruch gewählt
@@ -892,8 +892,7 @@ sond_treeviewfm_render_text_cell( GtkTreeViewColumn* column,
     if ( rc )
     {
         display_message( gtk_widget_get_toplevel( GTK_WIDGET(stvfm) ),
-                "Warnung -\n\nBei Aufruf dbase_test:\n",
-                error->message, NULL );
+                "Fehler - in ", __func__, "\n\n", error->message, NULL );
         g_error_free( error );
     }
 
