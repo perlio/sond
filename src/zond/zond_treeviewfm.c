@@ -648,6 +648,8 @@ zond_treeviewfm_set_cursor_on_anbindung( ZondTreeviewFM* ztvfm, gchar const* rel
         return -1;
     }
 
+    //ToDo: genauer auf Anbindung springen
+
     return 0;
 }
 

@@ -31,12 +31,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../40viewer/viewer.h"
 #include "../40viewer/document.h"
 
-#include "zieleplus.h"
-
 #include "../../misc.h"
 #include "../zond_treeview.h"
 #include "../zond_tree_store.h"
-
 
 
 gboolean
@@ -50,38 +47,84 @@ ziele_1_gleich_2( const Anbindung anbindung1, const Anbindung anbindung2 )
 }
 
 
+static gint
+ziele_vergleiche_pdf_pos( PdfPos pdf_pos1, PdfPos pdf_pos2 )
+{
+    if ( pdf_pos1.seite < pdf_pos2.seite ) return -1;
+    else if ( pdf_pos1.seite > pdf_pos2.seite ) return 1;
+    //wenn gleiche Seite:
+    else if ( pdf_pos1.index < pdf_pos2.index ) return -1;
+    else if ( pdf_pos1.index > pdf_pos2.index ) return 1;
+
+    return 0;
+}
+
+
+static gboolean
+ziele_anbindung_is_pdf_punkt( Anbindung anbindung )
+{
+    if ( (anbindung.von.seite || anbindung.von.index) &&
+            !anbindung.bis.seite && !anbindung.bis.index ) return TRUE;
+
+    return FALSE;
+}
+
+
 static gboolean
 ziele_1_vor_2( Anbindung anbindung1, Anbindung anbindung2 )
 {
-        //anbindung1.von muß auch verglichen werden, falls es sich um Pdf_punkt handelt
-        //sonst wäre PdfPunkt nämlich immer vor jeder Anbindung
-    if ( anbindung1.von.seite > anbindung2.von.seite ||
-            (anbindung1.von.seite == anbindung2.von.seite &&
-            anbindung1.von.index > anbindung2.von.index ) ) return FALSE;
+    if ( ziele_1_gleich_2( anbindung1, anbindung2 ) ) return FALSE;
 
-    if ( (anbindung1.bis.seite == 0 && anbindung1.bis.index == 0) ) return TRUE; //Pdf-Punkt
-    else if ( anbindung1.bis.seite < anbindung2.von.seite ||
-            (anbindung1.bis.seite == anbindung2.bis.seite &&
-             anbindung1.bis.index < anbindung2.bis.index) ) return TRUE;
-    else return FALSE;
+    if ( ziele_anbindung_is_pdf_punkt( anbindung1 ) )
+    {
+        if ( ziele_vergleiche_pdf_pos( anbindung1.von, anbindung2.von ) == -1 ) return TRUE;
+        else return FALSE;
+    }
+    else if ( ziele_anbindung_is_pdf_punkt( anbindung2 ) )
+    {
+        if ( ziele_vergleiche_pdf_pos( anbindung1.bis, anbindung2.von ) == -1 ) return TRUE;
+        else return FALSE;
+
+    }
+    else //beides komplette Anbindung
+            if ( ziele_vergleiche_pdf_pos( anbindung1.bis, anbindung2.von ) == -1 ) return TRUE;
+
+    return FALSE;
 }
+
+
 
 
 gboolean
 ziele_1_eltern_von_2( Anbindung anbindung1, Anbindung anbindung2 )
 {
-    //PdfPunkt kann niemals Eltern sein.
-    if ( anbindung1.bis.seite == 0 && anbindung2.bis.index == 0 ) return FALSE;
+    gint pos_anfang = 0;
+    gint pos_ende = 0;
 
-    if ( ((anbindung1.von.seite < anbindung2.von.seite) ||
-            ((anbindung1.von.seite == anbindung2.von.seite) &&
-            (anbindung1.von.index <= anbindung2.von.index)))
-            &&
-            //hinten:
-            ((anbindung1.bis.seite > anbindung2.bis.seite) ||
-            ((anbindung1.bis.seite == anbindung2.bis.seite) &&
-            (anbindung1.bis.index >= anbindung2.bis.index))) ) return TRUE;
-    else return FALSE;
+    //PdfPunkt kann niemals Eltern sein.
+    if ( ziele_anbindung_is_pdf_punkt( anbindung1 ) ) return FALSE;
+
+    //Gleiche können nicht Nachfolger sein
+    if ( ziele_1_gleich_2( anbindung1, anbindung2 ) ) return FALSE;
+
+    //wenn Anbindung1 Datei ist, dann ist sie Eltern
+    if ( !anbindung1.von.seite && !anbindung1.von.index &&
+            !anbindung1.bis.seite && !anbindung1.bis.index ) return FALSE;
+    //auch wenn Anbindung2 Datei
+    if ( !anbindung1.von.seite && !anbindung2.von.index &&
+            !anbindung2.bis.seite && !anbindung2.bis.index ) return FALSE;
+
+    pos_anfang = ziele_vergleiche_pdf_pos( anbindung1.von, anbindung2.von );
+    pos_ende = ziele_vergleiche_pdf_pos( anbindung1.bis, anbindung2.bis );
+
+    if ( pos_anfang > 0 ) return FALSE; //fängt schon später an...
+    else //fängt entweder davor oder gleich an
+    {
+        if ( pos_anfang == 0 && pos_ende <= 0 ) return FALSE; //Fängt gleich an, hört nicht später auf...
+        else if ( pos_anfang < 0 && pos_ende < 0 ) return FALSE; //Fängt vorher an, hört nicht mindestens gleich auf
+    }
+
+    return TRUE;
 }
 
 
@@ -150,7 +193,6 @@ zond_anbindung_baum_inhalt( Projekt* zond, gint anchor_id_pdf_abschnitt, gboolea
 {
     gint rc = 0;
     GtkTreeIter* iter = NULL;
-    GtkTreeIter iter_anchor = { 0 };
     GtkTreeIter iter_inserted = { 0 };
     gint id_baum_inhalt = 0;
     gint anchor_id = 0;
@@ -163,12 +205,12 @@ zond_anbindung_baum_inhalt( Projekt* zond, gint anchor_id_pdf_abschnitt, gboolea
     {
         gint rc = 0;
 
-        rc = zond_dbase_get_baum_inhalt_pdf_abschnitt( zond->dbase_zond->zond_dbase_work,
-                rel_path, anbindung, &id_baum_inhalt, error );
+        rc = zond_dbase_get_first_parent_baum_inhalt_pdf_abschnitt( zond->dbase_zond->zond_dbase_work,
+                rel_path, anbindung, &id_baum_inhalt, NULL, error );
         if ( rc ) ERROR_Z
-    }
 
-    if ( !id_baum_inhalt ) return 0;
+        if ( !id_baum_inhalt ) return 0;
+    }
 
     if ( !anchor_id_pdf_abschnitt ) anchor_id = id_baum_inhalt;
     else anchor_id = anchor_id_pdf_abschnitt;
@@ -183,10 +225,8 @@ zond_anbindung_baum_inhalt( Projekt* zond, gint anchor_id_pdf_abschnitt, gboolea
         return -1;
     }
 
-    iter_anchor = *iter;
-    gtk_tree_iter_free( iter );
-
     zond_tree_store_insert( zond_tree_store_get_tree_store( iter ), iter, child, &iter_inserted );
+    gtk_tree_iter_free( iter );
     zond_tree_store_set( &iter_inserted, zond->icon[ICON_ANBINDUNG].icon_name, node_text, id_inserted );
 
     if ( child )
@@ -197,8 +237,8 @@ zond_anbindung_baum_inhalt( Projekt* zond, gint anchor_id_pdf_abschnitt, gboolea
         if ( rc ) ERROR_Z
     }
 
-    if ( child ) sond_treeview_expand_row( zond->treeview[BAUM_INHALT], &iter_anchor);
-    sond_treeview_set_cursor_on_text_cell( zond->treeview[BAUM_INHALT], &iter_inserted);
+    if ( child ) sond_treeview_expand_row( zond->treeview[BAUM_INHALT], &iter_inserted );
+    sond_treeview_set_cursor_on_text_cell( zond->treeview[BAUM_INHALT], &iter_inserted );
     gtk_widget_grab_focus( GTK_WIDGET(zond->treeview[BAUM_INHALT]) );
 
     return 0;
@@ -329,9 +369,11 @@ zond_anbindung_insert_pdf_abschnitt_in_dbase( Projekt* zond,
         if ( anchor_id_dbase != pdf_root ) *anchor_pdf_abschnitt = anchor_id_dbase;
     }
 
-    *node_text = g_strdup_printf( "S. %i (%i) - %i (%i), %s",
-            anbindung.von.seite + 1, anbindung.von.index,
-            anbindung.bis.seite + 1, anbindung.bis.index, rel_path );
+    *node_text = g_strdup_printf( "S. %i", anbindung.von.seite + 1 );
+    if ( anbindung.von.index ) *node_text = add_string( *node_text, g_strdup_printf( ", Index %d", anbindung.von.index ) );
+    if ( anbindung.bis.seite || anbindung.bis.index )
+            *node_text = add_string( *node_text, g_strdup_printf( " - S. %d", anbindung.bis.seite + 1 ) );
+    if ( anbindung.bis.index != EOP ) *node_text = add_string( *node_text, g_strdup_printf( ", Index %d", anbindung.bis.index ) );
 
     node_id_new = zond_dbase_insert_node( zond->dbase_zond->zond_dbase_work, anchor_id_dbase, *child,
             ZOND_DBASE_TYPE_PDF_ABSCHNITT, 0, rel_path,
@@ -364,6 +406,23 @@ zond_anbindung_fm( Projekt* zond, gchar const* rel_path, Anbindung anbindung,
 }
 
 
+static gint
+zond_anbindung_trees( Projekt* zond, gint anchor_pdf_abschnitt, gboolean child,
+        gint node_inserted, Anbindung anbindung, gchar const* rel_path, gchar const* node_text, GError** error )
+{
+    gint rc = 0;
+
+    rc = zond_anbindung_baum_inhalt( zond, anchor_pdf_abschnitt, child, node_inserted, anbindung,
+            rel_path, node_text, error );
+    if ( rc ) ERROR_Z
+
+    rc = zond_anbindung_fm( zond, rel_path, anbindung, node_text, error );
+    if ( rc ) ERROR_Z
+
+    return 0;
+}
+
+
 gint
 zond_anbindung_erzeugen( PdfViewer* pv, GError** error )
 {
@@ -378,14 +437,11 @@ zond_anbindung_erzeugen( PdfViewer* pv, GError** error )
             &node_inserted, &node_text, error );
     if ( rc ) ERROR_Z
 
-    rc = zond_anbindung_fm( pv->zond, pv->rel_path, pv->anbindung, node_text, error );
-    if ( rc ) ERROR_Z
-
-    rc = zond_anbindung_baum_inhalt( pv->zond, anchor_pdf_abschnitt, child, node_inserted, pv->anbindung,
+    rc = zond_anbindung_trees( pv->zond, anchor_pdf_abschnitt, child, node_inserted, pv->anbindung,
             pv->rel_path, node_text, error );
+    g_free( node_text );
     if ( rc ) ERROR_Z
 
-    g_free( node_text );
 
     return 0;
 }

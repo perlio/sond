@@ -146,8 +146,15 @@ gint zond_dbase_get_baum_inhalt_pdf_abschnitt_from_pdf_abschnitt( ZondDBase*,
 gint zond_dbase_get_baum_inhalt_file_from_rel_path( ZondDBase*,
         const gchar*, gint*, GError** );
 
-gint zond_dbase_get_baum_inhalt_pdf_abschnitt( ZondDBase*,
-        gchar const*, Anbindung, gint*, GError** );
+gint zond_dbase_get_first_parent_baum_inhalt_pdf_abschnitt( ZondDBase*,
+        gchar const*, Anbindung, gint*, gint*, GError** );
+
+gint zond_dbase_get_first_kind_baum_inhalt_pdf_abschnitt( ZondDBase*,
+        gchar const*, Anbindung*, gint*, gint*, GError** );
+
+gint zond_dbase_find_baum_inhalt_anbindung( ZondDBase*, gint, gint*, gint*, Anbindung*, GError** );
+
+gint zond_dbase_is_node_linked( ZondDBase*, gint, gboolean*, GError** );
 
 G_END_DECLS
 
