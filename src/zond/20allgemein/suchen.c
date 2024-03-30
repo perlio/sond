@@ -69,7 +69,7 @@ suchen_kopieren_listenpunkt( Projekt* zond, GList* list, GtkTreeIter* iter, gint
     rc = zond_treeview_walk_tree( ZOND_TREEVIEW(zond->treeview[BAUM_AUSWERTUNG]),
             FALSE, node_id, iter, *child, iter_new, *anchor_id, &node_id_new,
             zond_treeview_copy_node_to_baum_auswertung, error );
-    if ( rc ) ERROR_Z
+    if ( rc ) ERROR_ROLLBACK_Z( zond->dbase_zond->zond_dbase_work )
 
     rc = zond_dbase_commit( zond->dbase_zond->zond_dbase_work, error );
     if ( rc ) ERROR_ROLLBACK_Z( zond->dbase_zond->zond_dbase_work )

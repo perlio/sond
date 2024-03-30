@@ -1057,6 +1057,41 @@ zond_dbase_rollback( ZondDBase* zond_dbase, GError** error )
 }
 
 
+static gint
+zond_dbase_rollback_to_statement( ZondDBase* zond_dbase, GError** error )
+{
+    gint rc = 0;
+    sqlite3_stmt** stmt = NULL;
+
+    const gchar* sql[] = {
+            "ROLLBACK TO statement; "
+        };
+
+    //Prüfen, ob schon Rollback vAw
+    if ( sqlite3_get_autocommit( zond_dbase_get_dbase( zond_dbase ) ) ) return 0;
+
+    rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, error );
+    if ( rc )
+    {
+        g_prefix_error( error, "%s\n", __func__ );
+
+        return -1;
+    }
+
+    rc = sqlite3_step( stmt[0] );
+    if ( rc != SQLITE_DONE )
+    {
+        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
+                sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
+                "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
+
+        return -1;
+    }
+
+    return 0;
+}
+
+
 gint
 zond_dbase_test_path( ZondDBase* zond_dbase, const gchar* rel_path, GError** error )
 {
@@ -1103,10 +1138,11 @@ zond_dbase_insert_node( ZondDBase* zond_dbase, gint anchor_ID, gboolean child,
         const gchar* text, GError** error )
 {
     gint rc = 0;
-    gint new_node_id = 0;
     sqlite3_stmt** stmt = NULL;
 
     const gchar* sql[] = {
+            "SAVEPOINT statement; ",
+
             "INSERT INTO knoten "
             "(parent_id, older_sibling_id, type, link, rel_path, seite_von, index_von, "
             "seite_bis, index_bis, icon_name, node_text, text ) "
@@ -1142,7 +1178,10 @@ zond_dbase_insert_node( ZondDBase* zond_dbase, gint anchor_ID, gboolean child,
                 "AND "
                     "ID!=0; ",
 
-            "VALUES (last_insert_rowid()); " };
+            "VALUES (last_insert_rowid()); ",
+
+            "RELEASE statement; "
+             };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, error );
     if ( rc )
@@ -1153,9 +1192,9 @@ zond_dbase_insert_node( ZondDBase* zond_dbase, gint anchor_ID, gboolean child,
     }
 
     //Damit alles auf NULL gestellt wird
-    sqlite3_clear_bindings( stmt[0] );
+    sqlite3_clear_bindings( stmt[1] );
 
-    rc = sqlite3_bind_int( stmt[0], 1, child );
+    rc = sqlite3_bind_int( stmt[1], 1, child );
     if ( rc != SQLITE_OK )
     {
         if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
@@ -1165,7 +1204,7 @@ zond_dbase_insert_node( ZondDBase* zond_dbase, gint anchor_ID, gboolean child,
         return -1;
     }
 
-    rc = sqlite3_bind_int( stmt[0], 2, anchor_ID );
+    rc = sqlite3_bind_int( stmt[1], 2, anchor_ID );
     if ( rc != SQLITE_OK )
     {
         if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
@@ -1175,7 +1214,7 @@ zond_dbase_insert_node( ZondDBase* zond_dbase, gint anchor_ID, gboolean child,
         return -1;
     }
 
-    rc = sqlite3_bind_int( stmt[0], 3, type );
+    rc = sqlite3_bind_int( stmt[1], 3, type );
     if ( rc != SQLITE_OK )
     {
         if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
@@ -1187,7 +1226,7 @@ zond_dbase_insert_node( ZondDBase* zond_dbase, gint anchor_ID, gboolean child,
 
     if ( link )
     {
-        rc = sqlite3_bind_int( stmt[0], 4, link );
+        rc = sqlite3_bind_int( stmt[1], 4, link );
         if ( rc != SQLITE_OK )
         {
             if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
@@ -1198,7 +1237,7 @@ zond_dbase_insert_node( ZondDBase* zond_dbase, gint anchor_ID, gboolean child,
         }
     }
 
-    rc = sqlite3_bind_text( stmt[0], 5,
+    rc = sqlite3_bind_text( stmt[1], 5,
             rel_path, -1, NULL );
     if ( rc != SQLITE_OK )
     {
@@ -1214,7 +1253,7 @@ zond_dbase_insert_node( ZondDBase* zond_dbase, gint anchor_ID, gboolean child,
             type == ZOND_DBASE_TYPE_BAUM_INHALT_VIRT_PDF_SECTION ||
             type == ZOND_DBASE_TYPE_BAUM_INHALT_FILE_PART )
     {
-        rc = sqlite3_bind_int( stmt[0], 6, seite_von );
+        rc = sqlite3_bind_int( stmt[1], 6, seite_von );
         if ( rc != SQLITE_OK )
         {
             if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
@@ -1224,7 +1263,7 @@ zond_dbase_insert_node( ZondDBase* zond_dbase, gint anchor_ID, gboolean child,
             return -1;
         }
 
-        rc = sqlite3_bind_int( stmt[0], 7, index_von );
+        rc = sqlite3_bind_int( stmt[1], 7, index_von );
         if ( rc != SQLITE_OK )
         {
             if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
@@ -1237,7 +1276,7 @@ zond_dbase_insert_node( ZondDBase* zond_dbase, gint anchor_ID, gboolean child,
 
     if ( type == ZOND_DBASE_TYPE_PDF_ABSCHNITT )
     {
-        rc = sqlite3_bind_int( stmt[0], 8, seite_bis );
+        rc = sqlite3_bind_int( stmt[1], 8, seite_bis );
         if ( rc != SQLITE_OK )
         {
             if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
@@ -1247,7 +1286,7 @@ zond_dbase_insert_node( ZondDBase* zond_dbase, gint anchor_ID, gboolean child,
             return -1;
         }
 
-        rc = sqlite3_bind_int( stmt[0], 9, index_bis );
+        rc = sqlite3_bind_int( stmt[1], 9, index_bis );
         if ( rc != SQLITE_OK )
         {
             if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
@@ -1258,7 +1297,7 @@ zond_dbase_insert_node( ZondDBase* zond_dbase, gint anchor_ID, gboolean child,
         }
     }
 
-    rc = sqlite3_bind_text( stmt[0], 10, icon_name,
+    rc = sqlite3_bind_text( stmt[1], 10, icon_name,
             -1, NULL );
     if ( rc != SQLITE_OK )
     {
@@ -1269,7 +1308,7 @@ zond_dbase_insert_node( ZondDBase* zond_dbase, gint anchor_ID, gboolean child,
         return -1;
     }
 
-    rc = sqlite3_bind_text( stmt[0], 11, node_text,
+    rc = sqlite3_bind_text( stmt[1], 11, node_text,
             -1, NULL );
     if ( rc != SQLITE_OK )
     {
@@ -1280,7 +1319,7 @@ zond_dbase_insert_node( ZondDBase* zond_dbase, gint anchor_ID, gboolean child,
         return -1;
     }
 
-    rc = sqlite3_bind_text( stmt[0], 12, text,
+    rc = sqlite3_bind_text( stmt[1], 12, text,
             -1, NULL );
     if ( rc != SQLITE_OK )
     {
@@ -1304,35 +1343,131 @@ zond_dbase_insert_node( ZondDBase* zond_dbase, gint anchor_ID, gboolean child,
     rc = sqlite3_step( stmt[1] );
     if ( rc != SQLITE_DONE )
     {
-        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
-                sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
-                "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
+        gint res = 0;
+        GError* error_tmp = NULL;
+
+        res = zond_dbase_rollback_to_statement( zond_dbase, &error_tmp );
+
+        if ( error )
+        {
+            *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
+                    sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
+                    "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
+
+            if ( res )
+            {
+                (*error)->message = add_string( (*error)->message,
+                        g_strdup_printf( "\n\nRollback fehlgeschlagen\n%s", error_tmp->message ) );
+                g_error_free( error_tmp );
+            }
+            else (*error)->message = add_string( (*error)->message,
+                    g_strdup_printf( "\n\nRollback durchgeführt" ) );
+        }
 
         return -1;
     }
 
     rc = sqlite3_step( stmt[2] );
-    if ( rc != SQLITE_ROW )
+    if ( rc != SQLITE_DONE )
     {
-        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
-                sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
-                "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
+        gint res = 0;
+        GError* error_tmp = NULL;
+
+        res = zond_dbase_rollback_to_statement( zond_dbase, &error_tmp );
+
+        if ( error )
+        {
+            *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
+                    sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
+                    "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
+
+            if ( res )
+            {
+                (*error)->message = add_string( (*error)->message,
+                        g_strdup_printf( "\n\nRollback fehlgeschlagen\n%s", error_tmp->message ) );
+                g_error_free( error_tmp );
+            }
+            else (*error)->message = add_string( (*error)->message,
+                    g_strdup_printf( "\n\nRollback durchgeführt" ) );
+        }
 
         return -1;
     }
 
-    new_node_id = sqlite3_column_int( stmt[2], 0 );
+    rc = sqlite3_step( stmt[3] );
+    if ( rc != SQLITE_ROW )
+    {
+        gint res = 0;
+        GError* error_tmp = NULL;
 
-    return new_node_id;
+        res = zond_dbase_rollback_to_statement( zond_dbase, &error_tmp );
+
+        if ( error )
+        {
+            *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
+                    sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
+                    "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
+
+            if ( res )
+            {
+                (*error)->message = add_string( (*error)->message,
+                        g_strdup_printf( "\n\nRollback fehlgeschlagen\n%s", error_tmp->message ) );
+                g_error_free( error_tmp );
+            }
+            else (*error)->message = add_string( (*error)->message,
+                    g_strdup_printf( "\n\nRollback durchgeführt" ) );
+        }
+
+        return -1;
+    }
+
+    rc = sqlite3_step( stmt[4] );
+    if ( rc != SQLITE_DONE )
+    {
+        gint res = 0;
+        GError* error_tmp = NULL;
+
+        res = zond_dbase_rollback_to_statement( zond_dbase, &error_tmp );
+
+        if ( error )
+        {
+            *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
+                    sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
+                    "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
+
+            if ( res )
+            {
+                (*error)->message = add_string( (*error)->message,
+                        g_strdup_printf( "\n\nRollback fehlgeschlagen\n%s", error_tmp->message ) );
+                g_error_free( error_tmp );
+            }
+            else (*error)->message = add_string( (*error)->message,
+                    g_strdup_printf( "\n\nRollback durchgeführt" ) );
+        }
+
+        return -1;
+    }
+
+    return sqlite3_column_int( stmt[3], 0 );
 }
 
 
 gint
-zond_dbase_insert_pdf_root( ZondDBase* zond_dbase,
-        const gchar* rel_path, gint* pdf_root, GError** error )
+zond_dbase_get_or_create_pdf_root( ZondDBase* zond_dbase,
+        const gchar* rel_path, gint* pdf_root, gboolean* created, GError** error )
 {
     gint rc = 0;
     sqlite3_stmt** stmt = NULL;
+    gint pdf_root_int = 0;
+
+    rc = zond_dbase_get_pdf_root( zond_dbase, rel_path, pdf_root_int, error );
+    if ( rc ) ERROR_Z
+
+    if ( pdf_root_int )
+    {
+        if ( pdf_root ) *pdf_root = pdf_root_int;
+        if ( created ) *created = FALSE;
+    }
 
     const gchar* sql[] = {
             "INSERT INTO knoten "
@@ -1388,6 +1523,7 @@ zond_dbase_insert_pdf_root( ZondDBase* zond_dbase,
     }
 
     if ( pdf_root ) *pdf_root = sqlite3_column_int( stmt[1], 0 );
+    if ( created ) *created = TRUE;
 
     return 0;
 }
@@ -1771,11 +1907,15 @@ zond_dbase_remove_node( ZondDBase* zond_dbase, gint node_id, GError** error )
     sqlite3_stmt** stmt = NULL;
 
     const gchar* sql[] = {
+            "SAVEPOINT statement; ",
+
             "UPDATE knoten SET older_sibling_ID=(SELECT older_sibling_ID FROM knoten "
             "WHERE ID=?1) WHERE "
             "older_sibling_ID=?1; ",
 
-            "DELETE FROM knoten WHERE ID=?1; "
+            "DELETE FROM knoten WHERE ID=?1; ",
+
+            "RELEASE statement;"
         };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, error );
@@ -1786,7 +1926,17 @@ zond_dbase_remove_node( ZondDBase* zond_dbase, gint node_id, GError** error )
         return -1;
     }
 
-    rc = sqlite3_bind_int( stmt[0], 1, node_id );
+    rc = sqlite3_bind_int( stmt[1], 1, node_id );
+    if ( rc != SQLITE_OK )
+    {
+        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
+                sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
+                "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
+
+        return -1;
+    }
+
+    rc = sqlite3_bind_int( stmt[2], 1, node_id );
     if ( rc != SQLITE_OK )
     {
         if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
@@ -1806,22 +1956,83 @@ zond_dbase_remove_node( ZondDBase* zond_dbase, gint node_id, GError** error )
         return -1;
     }
 
-    rc = sqlite3_bind_int( stmt[1], 1, node_id );
-    if ( rc != SQLITE_OK )
+    rc = sqlite3_step( stmt[1] );
+    if ( rc != SQLITE_DONE )
     {
-        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
-                sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
-                "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
+        gint res = 0;
+        GError* error_tmp = NULL;
+
+        res = zond_dbase_rollback_to_statement( zond_dbase, &error_tmp );
+
+        if ( error )
+        {
+            *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
+                    sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
+                    "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
+
+            if ( res )
+            {
+                (*error)->message = add_string( (*error)->message,
+                        g_strdup_printf( "\n\nRollback fehlgeschlagen\n%s", error_tmp->message ) );
+                g_error_free( error_tmp );
+            }
+            else (*error)->message = add_string( (*error)->message,
+                    g_strdup_printf( "\n\nRollback durchgeführt" ) );
+        }
 
         return -1;
     }
 
-    rc = sqlite3_step( stmt[1] );
+    rc = sqlite3_step( stmt[2] );
     if ( rc != SQLITE_DONE )
     {
-        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
-                sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
-                "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
+        gint res = 0;
+        GError* error_tmp = NULL;
+
+        res = zond_dbase_rollback_to_statement( zond_dbase, &error_tmp );
+
+        if ( error )
+        {
+            *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
+                    sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
+                    "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
+
+            if ( res )
+            {
+                (*error)->message = add_string( (*error)->message,
+                        g_strdup_printf( "\n\nRollback fehlgeschlagen\n%s", error_tmp->message ) );
+                g_error_free( error_tmp );
+            }
+            else (*error)->message = add_string( (*error)->message,
+                    g_strdup_printf( "\n\nRollback durchgeführt" ) );
+        }
+
+        return -1;
+    }
+
+    rc = sqlite3_step( stmt[3] );
+    if ( rc != SQLITE_DONE )
+    {
+        gint res = 0;
+        GError* error_tmp = NULL;
+
+        res = zond_dbase_rollback_to_statement( zond_dbase, &error_tmp );
+
+        if ( error )
+        {
+            *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
+                    sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
+                    "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
+
+            if ( res )
+            {
+                (*error)->message = add_string( (*error)->message,
+                        g_strdup_printf( "\n\nRollback fehlgeschlagen\n%s", error_tmp->message ) );
+                g_error_free( error_tmp );
+            }
+            else (*error)->message = add_string( (*error)->message,
+                    g_strdup_printf( "\n\nRollback durchgeführt" ) );
+        }
 
         return -1;
     }
@@ -2299,8 +2510,54 @@ zond_dbase_get_baum_inhalt_pdf_abschnitt_from_pdf_abschnitt( ZondDBase* zond_dba
         return -1;
     }
 
-    if ( rc == SQLITE_ROW &&baum_inhalt_pdf_abschnitt )
+    if ( rc == SQLITE_ROW && baum_inhalt_pdf_abschnitt )
             *baum_inhalt_pdf_abschnitt = sqlite3_column_int( stmt[0], 0 );
+
+    return 0;
+}
+
+
+gint
+zond_dbase_get_baum_auswertung_copy( ZondDBase* zond_dbase,
+        gint node_id, gint* baum_auswertung_copy, GError** error )
+{
+    gint rc = 0;
+    sqlite3_stmt** stmt = NULL;
+
+    const gchar* sql[] = {
+            "SELECT ID FROM knoten WHERE type=7 AND link=?1;"
+            };
+
+    rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, error );
+    if ( rc )
+    {
+        g_prefix_error( error, "%s\n", __func__ );
+
+        return -1;
+    }
+
+    rc = sqlite3_bind_int( stmt[0], 1, node_id );
+    if ( rc != SQLITE_OK )
+    {
+        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
+                sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
+                "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
+
+        return -1;
+    }
+
+    rc = sqlite3_step( stmt[0] );
+    if ( rc != SQLITE_ROW && rc != SQLITE_DONE ) //richtiger Fähler
+    {
+        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
+                sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
+                "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
+
+        return -1;
+    }
+
+    if ( rc == SQLITE_ROW && baum_auswertung_copy )
+            *baum_auswertung_copy = sqlite3_column_int( stmt[0], 0 );
 
     return 0;
 }
@@ -2352,8 +2609,10 @@ zond_dbase_get_baum_inhalt_file_from_rel_path( ZondDBase* zond_dbase,
 }
 
 
+//Sucht baum_inhalt_pdf_abschnitt heraus, der übergebene Anbindung mindestens umfaßt
+//also auch gleich ist!
 gint
-zond_dbase_get_first_parent_baum_inhalt_pdf_abschnitt( ZondDBase* zond_dbase,
+zond_dbase_get_baum_inhalt_pdf_abschnitt_from_anbindung( ZondDBase* zond_dbase,
         gchar const* rel_path, Anbindung anbindung, gint* baum_inhalt_pdf_abschnitt,
         gint* pdf_abschnitt, GError** error )
 {
@@ -2361,9 +2620,12 @@ zond_dbase_get_first_parent_baum_inhalt_pdf_abschnitt( ZondDBase* zond_dbase,
     sqlite3_stmt** stmt = NULL;
 
     const gchar* sql[] = {
-            "SELECT ID, link, seite_von, index_von, seite_bis, index_bis "
-            "FROM knoten WHERE type=4 AND rel_path=?1;"
-            };
+            "SELECT knoten_baum.ID, knoten_baum.link, "
+            "knoten_abschnitt.seite_von, knoten_abschnitt.index_von, knoten_abschnitt.seite_bis, knoten_abschnitt.index_bis "
+            "FROM knoten AS knoten_baum JOIN knoten AS knoten_abschnitt "
+            "ON knoten_baum.link=knoten_abschnitt.ID "
+            "WHERE knoten_baum.type=4 AND knoten_abschnitt.rel_path=?1;"
+           };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, error );
     if ( rc )
@@ -2405,7 +2667,8 @@ zond_dbase_get_first_parent_baum_inhalt_pdf_abschnitt( ZondDBase* zond_dbase,
         anbindung_baum_inhalt_pdf_abschnitt.bis.seite = sqlite3_column_int( stmt[0], 4 );
         anbindung_baum_inhalt_pdf_abschnitt.bis.index = sqlite3_column_int( stmt[0], 5 );
 
-        if ( ziele_1_eltern_von_2( anbindung_baum_inhalt_pdf_abschnitt, anbindung ) )
+        if ( ziele_1_eltern_von_2( anbindung_baum_inhalt_pdf_abschnitt, anbindung ) ||
+                ziele_1_gleich_2( anbindung_baum_inhalt_pdf_abschnitt, anbindung ) )
         {
             if ( baum_inhalt_pdf_abschnitt )
                     *baum_inhalt_pdf_abschnitt = sqlite3_column_int( stmt[0], 0 );
@@ -2511,8 +2774,9 @@ zond_dbase_find_baum_inhalt_anbindung( ZondDBase* zond_dbase, gint node_id,
                 "UNION ALL "
                 "SELECT knoten.parent_ID FROM knoten JOIN cte_knoten "
                 "WHERE knoten.ID=cte_knoten.ID AND knoten.parent_ID!=0 "
-                ") SELECT knoten.ID, cte_knoten.ID, knoten.seite_von, knoten.index_von, knoten.seite_bis, knoten.index_bis "
-                "FROM knoten JOIN cte_knoten WHERE knoten.type=4 AND knoten.link=cte_knoten.ID; "
+                ") SELECT knoten.ID, cte_knoten.ID, knoten2.seite_von, knoten2.index_von, knoten2.seite_bis, knoten2.index_bis "
+                "FROM knoten JOIN cte_knoten JOIN knoten AS knoten2 WHERE knoten.type=4 AND knoten.link=cte_knoten.ID "
+                "AND knoten2.ID=cte_knoten.ID; "
             };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, error );
@@ -2546,7 +2810,6 @@ zond_dbase_find_baum_inhalt_anbindung( ZondDBase* zond_dbase, gint node_id,
     if ( rc == SQLITE_ROW )
     {
         if ( baum_inhalt ) *baum_inhalt = sqlite3_column_int( stmt[0], 0 );
-
         if ( pdf_abschnitt ) *pdf_abschnitt = sqlite3_column_int( stmt[0], 1 );
 
         if ( anbindung )
@@ -2556,7 +2819,6 @@ zond_dbase_find_baum_inhalt_anbindung( ZondDBase* zond_dbase, gint node_id,
             anbindung->bis.seite = sqlite3_column_int( stmt[0], 4 );
             anbindung->bis.index = sqlite3_column_int( stmt[0], 5 );
         }
-
     }
 
     return 0;

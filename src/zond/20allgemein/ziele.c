@@ -205,7 +205,7 @@ zond_anbindung_baum_inhalt( Projekt* zond, gint anchor_id_pdf_abschnitt, gboolea
     {
         gint rc = 0;
 
-        rc = zond_dbase_get_first_parent_baum_inhalt_pdf_abschnitt( zond->dbase_zond->zond_dbase_work,
+        rc = zond_dbase_get_baum_inhalt_pdf_abschnitt_from_anbindung( zond->dbase_zond->zond_dbase_work,
                 rel_path, anbindung, &id_baum_inhalt, NULL, error );
         if ( rc ) ERROR_Z
 
@@ -340,20 +340,14 @@ zond_anbindung_insert_pdf_abschnitt_in_dbase( Projekt* zond,
     gint node_id_new = 0;
     gint rc = 0;
     gint anchor_id_dbase = 0;
+    gboolean created = FALSE;
 
-    rc = zond_dbase_get_pdf_root( zond->dbase_zond->zond_dbase_work,
-            rel_path, &pdf_root, error );
+    rc = zond_dbase_get_or_create_pdf_root( zond->dbase_zond->zond_dbase_work,
+            rel_path, &pdf_root, &created, error );
     if ( rc ) ERROR_Z
 
-    if ( pdf_root == 0 ) //erster Abschnitt
+    if ( created ) //erster Abschnitt
     {
-        gint rc = 0;
-        gint root_new = 0;
-
-        rc = zond_dbase_insert_pdf_root( zond->dbase_zond->zond_dbase_work,
-                rel_path, &root_new, error );
-        if ( rc ) ERROR_Z
-
         anchor_id_dbase = root_new;
         *child = TRUE;
     }
@@ -392,6 +386,7 @@ static gint
 zond_anbindung_fm( Projekt* zond, gchar const* rel_path, Anbindung anbindung,
         gchar const* node_text, GError** error )
 {
+    //ToDo:
     //ist rel_path sichtbar?
     //nein: return
 

@@ -105,7 +105,7 @@ gint zond_dbase_insert_node( ZondDBase*, gint, gboolean, gint, gint,
         const gchar*, gint, gint, gint, gint, const gchar*, const gchar*,
         const gchar*, GError** );
 
-gint zond_dbase_insert_pdf_root( ZondDBase*, const gchar*, gint*, GError** );
+gint zond_dbase_insert_pdf_root( ZondDBase*, const gchar*, gint*, gboolean*, GError** );
 
 gint zond_dbase_update_icon_name( ZondDBase*, gint, const gchar*, GError** );
 
@@ -143,10 +143,12 @@ gint zond_dbase_get_younger_sibling( ZondDBase*, gint, gint*, GError** );
 gint zond_dbase_get_baum_inhalt_pdf_abschnitt_from_pdf_abschnitt( ZondDBase*,
                     gint, gint*, GError** );
 
+gint zond_dbase_get_baum_auswertung_copy( ZondDBase*, gint, gint*, GError** );
+
 gint zond_dbase_get_baum_inhalt_file_from_rel_path( ZondDBase*,
         const gchar*, gint*, GError** );
 
-gint zond_dbase_get_first_parent_baum_inhalt_pdf_abschnitt( ZondDBase*,
+gint zond_dbase_get_baum_inhalt_pdf_abschnitt_from_anbindung( ZondDBase*,
         gchar const*, Anbindung, gint*, gint*, GError** );
 
 gint zond_dbase_get_first_kind_baum_inhalt_pdf_abschnitt( ZondDBase*,

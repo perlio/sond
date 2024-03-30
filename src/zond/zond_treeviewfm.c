@@ -339,11 +339,40 @@ zond_treeviewfm_render_text( SondTreeviewFM* stvfm, GtkTreeIter* iter, GObject* 
 
     if ( ZOND_IS_PDF_ABSCHNITT(object) )
     {
-        ZondPdfAbschnittPrivate* zond_pdf_abschnitt_priv =
-                zond_pdf_abschnitt_get_instance_private( ZOND_PDF_ABSCHNITT(object) );
+        gint rc = 0;
+        gchar const* rel_path = NULL;
+        gchar const* node_text = NULL;
+        Anbindung anbindung = { 0 };
+        gint baum_inhalt_file = 0;
+        gboolean angebunden = FALSE;
+
+        ZondTreeviewFMPrivate* ztvfm_priv = zond_treeviewfm_get_instance_private( ZOND_TREEVIEWFM(stvfm) );
+
+        zond_pdf_abschnitt_get( ZOND_PDF_ABSCHNITT(object), NULL, &rel_path, &anbindung, NULL, &node_text );
 
         g_object_set( G_OBJECT(sond_treeview_get_cell_renderer_text( SOND_TREEVIEW(stvfm) )), "text",
-                zond_pdf_abschnitt_priv->node_text, NULL );
+                node_text, NULL );
+
+        //Testen, ob grau eingefärbt werden soll, weil Anbindung angebunden
+        rc = zond_dbase_get_baum_inhalt_file_from_rel_path( ztvfm_priv->zond->dbase_zond->zond_dbase_work,
+                rel_path, &baum_inhalt_file, error );
+        if ( rc ) ERROR_Z
+
+        if ( !baum_inhalt_file )
+        {
+            gint rc = 0;
+            gint baum_inhalt_pdf_abschnitt = 0;
+
+            rc = zond_dbase_get_baum_inhalt_pdf_abschnitt_from_anbindung(ztvfm_priv->zond->dbase_zond->zond_dbase_work,
+                    rel_path, anbindung, &baum_inhalt_pdf_abschnitt, NULL, error );
+            if ( rc ) ERROR_Z
+
+            if ( baum_inhalt_pdf_abschnitt ) angebunden = TRUE;
+        }
+        else angebunden = TRUE;
+
+        g_object_set( G_OBJECT(sond_treeview_get_cell_renderer_text( SOND_TREEVIEW(stvfm) )),
+                "background-set", angebunden, NULL );
 
         return 0;
     }
@@ -671,6 +700,8 @@ zond_treeviewfm_foreach_pdf_abschnitt( GtkTreeModel* model, GtkTreePath* path,
     FMForeach* fm_foreach = (FMForeach*) data;
 
     gtk_tree_model_get( model, iter, 0, &object, -1 );
+
+    if ( !object ) return FALSE;
 
     if ( ZOND_IS_PDF_ABSCHNITT(object) )
     {
