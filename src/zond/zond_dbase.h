@@ -7,18 +7,50 @@
 typedef enum
 {
     ZOND_DBASE_TYPE_BAUM_ROOT,
-    ZOND_DBASE_TYPE_BAUM_STRUKT,
+    ZOND_DBASE_TYPE_BAUM_STRUKT, //1
     ZOND_DBASE_TYPE_BAUM_INHALT_FILE,
     ZOND_DBASE_TYPE_BAUM_INHALT_FILE_PART,
     ZOND_DBASE_TYPE_BAUM_INHALT_PDF_ABSCHNITT,
-    ZOND_DBASE_TYPE_BAUM_INHALT_VIRT_PDF,
+    ZOND_DBASE_TYPE_BAUM_INHALT_VIRT_PDF, //5
     ZOND_DBASE_TYPE_BAUM_INHALT_VIRT_PDF_SECTION,
-    ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_COPY,
+    ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_COPY, //7
     ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_LINK,
     ZOND_DBASE_TYPE_PDF_ABSCHNITT,
     ZOND_DBASE_TYPE_PDF_PUNKT,
     NUM_ZOND_DBASE_TYPES
 } NodeType;
+
+
+#define ERROR_Z_DBASE { if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ), \
+                    sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ), \
+                    "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) ); \
+                    return -1; }
+
+#define ERROR_Z_ROLLBACK { \
+        gint res = 0; \
+        GError* error_tmp = NULL; \
+        \
+        res = zond_dbase_rollback_to_statement( zond_dbase, &error_tmp ); \
+        \
+        if ( error ) \
+        { \
+            *error = g_error_new( g_quark_from_static_string( "SQLITE3" ), \
+                    sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ), \
+                    "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) ); \
+            \
+            if ( res ) \
+            { \
+                (*error)->message = add_string( (*error)->message, \
+                        g_strdup_printf( "\n\nRollback fehlgeschlagen\n%s", error_tmp->message ) ); \
+                g_error_free( error_tmp ); \
+            } \
+            else (*error)->message = add_string( (*error)->message, \
+                    g_strdup_printf( "\n\nRollback durchgeführt" ) ); \
+        } \
+        \
+        return -1; \
+    }
+
 
 
 
@@ -105,7 +137,7 @@ gint zond_dbase_insert_node( ZondDBase*, gint, gboolean, gint, gint,
         const gchar*, gint, gint, gint, gint, const gchar*, const gchar*,
         const gchar*, GError** );
 
-gint zond_dbase_insert_pdf_root( ZondDBase*, const gchar*, gint*, gboolean*, GError** );
+gint zond_dbase_get_or_create_pdf_root( ZondDBase*, const gchar*, gint*, gboolean*, GError** );
 
 gint zond_dbase_update_icon_name( ZondDBase*, gint, const gchar*, GError** );
 
@@ -156,7 +188,7 @@ gint zond_dbase_get_first_kind_baum_inhalt_pdf_abschnitt( ZondDBase*,
 
 gint zond_dbase_find_baum_inhalt_anbindung( ZondDBase*, gint, gint*, gint*, Anbindung*, GError** );
 
-gint zond_dbase_is_node_linked( ZondDBase*, gint, gboolean*, GError** );
+gint zond_dbase_is_pdf_abschnitt_copied( ZondDBase*, gint, gboolean*, GError** );
 
 G_END_DECLS
 

@@ -30,19 +30,19 @@ gint zond_treeview_walk_tree( ZondTreeview*, gboolean, gint,
         gint (*) (ZondTreeview*, gint, GtkTreeIter*, gboolean,
         GtkTreeIter*, gint, gint*, GError**), GError** );
 
+GtkTreeIter* zond_treeview_abfragen_iter( ZondTreeview*, gint );
+
 gint zond_treeview_copy_node_to_baum_auswertung( ZondTreeview*,
         gint, GtkTreeIter*, gboolean, GtkTreeIter*, gint, gint*, GError** );
 
 ZondTreeview* zond_treeview_new( Projekt*, gint );
 
-GtkTreeIter* zond_treeview_abfragen_iter( ZondTreeview*, gint );
-
-GtkTreePath* zond_treeview_get_path( SondTreeview*, gint );
-
 gint zond_treeview_load_baum( ZondTreeview*, GError** );
 
 void zond_treeview_set_text_pdf_abschnitt( ZondTreeview*, gint,
         gchar const* );
+
+GtkTreePath* zond_treeview_get_path( SondTreeview*, gint );
 
 G_END_DECLS
 

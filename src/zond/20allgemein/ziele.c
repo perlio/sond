@@ -346,10 +346,21 @@ zond_anbindung_insert_pdf_abschnitt_in_dbase( Projekt* zond,
             rel_path, &pdf_root, &created, error );
     if ( rc ) ERROR_Z
 
-    if ( created ) //erster Abschnitt
+    anchor_id_dbase = pdf_root;
+
+    if ( created )
     {
-        anchor_id_dbase = root_new;
-        *child = TRUE;
+        gint rc = 0;
+
+        rc = zond_dbase_update_icon_name( zond->dbase_zond->zond_dbase_work,
+                pdf_root, "pdf", error );
+        if ( rc ) ERROR_Z
+
+        rc = zond_dbase_update_node_text( zond->dbase_zond->zond_dbase_work,
+                pdf_root, g_strrstr( rel_path, "/" ) + 1, error );
+        if ( rc ) ERROR_Z
+
+        *child = TRUE; //erster Abschnitt
     }
     else
     {
