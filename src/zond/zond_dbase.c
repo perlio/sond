@@ -1195,58 +1195,23 @@ zond_dbase_insert_node( ZondDBase* zond_dbase, gint anchor_ID, gboolean child,
     sqlite3_clear_bindings( stmt[1] );
 
     rc = sqlite3_bind_int( stmt[1], 1, child );
-    if ( rc != SQLITE_OK )
-    {
-        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
-                sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
-                "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
-
-        return -1;
-    }
+    if ( rc != SQLITE_OK ) ERROR_Z_DBASE
 
     rc = sqlite3_bind_int( stmt[1], 2, anchor_ID );
-    if ( rc != SQLITE_OK )
-    {
-        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
-                sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
-                "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
-
-        return -1;
-    }
+    if ( rc != SQLITE_OK ) ERROR_Z_DBASE
 
     rc = sqlite3_bind_int( stmt[1], 3, type );
-    if ( rc != SQLITE_OK )
-    {
-        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
-                sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
-                "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
-
-        return -1;
-    }
+    if ( rc != SQLITE_OK ) ERROR_Z_DBASE
 
     if ( link )
     {
         rc = sqlite3_bind_int( stmt[1], 4, link );
-        if ( rc != SQLITE_OK )
-        {
-            if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
-                    sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
-                    "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
-
-            return -1;
-        }
+        if ( rc != SQLITE_OK ) ERROR_Z_DBASE
     }
 
     rc = sqlite3_bind_text( stmt[1], 5,
             rel_path, -1, NULL );
-    if ( rc != SQLITE_OK )
-    {
-        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
-                sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
-                "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
-
-        return -1;
-    }
+    if ( rc != SQLITE_OK ) ERROR_Z_DBASE
 
     if ( type == ZOND_DBASE_TYPE_PDF_ABSCHNITT ||
             type == ZOND_DBASE_TYPE_PDF_PUNKT ||
@@ -1281,112 +1246,16 @@ zond_dbase_insert_node( ZondDBase* zond_dbase, gint anchor_ID, gboolean child,
     if ( rc != SQLITE_DONE ) ERROR_Z_DBASE
 
     rc = sqlite3_step( stmt[1] );
-    if ( rc != SQLITE_DONE )
-    {
-        gint res = 0;
-        GError* error_tmp = NULL;
-
-        res = zond_dbase_rollback_to_statement( zond_dbase, &error_tmp );
-
-        if ( error )
-        {
-            *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
-                    sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
-                    "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
-
-            if ( res )
-            {
-                (*error)->message = add_string( (*error)->message,
-                        g_strdup_printf( "\n\nRollback fehlgeschlagen\n%s", error_tmp->message ) );
-                g_error_free( error_tmp );
-            }
-            else (*error)->message = add_string( (*error)->message,
-                    g_strdup_printf( "\n\nRollback durchgeführt" ) );
-        }
-
-        return -1;
-    }
+    if ( rc != SQLITE_DONE ) ERROR_Z_ROLLBACK
 
     rc = sqlite3_step( stmt[2] );
-    if ( rc != SQLITE_DONE )
-    {
-        gint res = 0;
-        GError* error_tmp = NULL;
-
-        res = zond_dbase_rollback_to_statement( zond_dbase, &error_tmp );
-
-        if ( error )
-        {
-            *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
-                    sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
-                    "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
-
-            if ( res )
-            {
-                (*error)->message = add_string( (*error)->message,
-                        g_strdup_printf( "\n\nRollback fehlgeschlagen\n%s", error_tmp->message ) );
-                g_error_free( error_tmp );
-            }
-            else (*error)->message = add_string( (*error)->message,
-                    g_strdup_printf( "\n\nRollback durchgeführt" ) );
-        }
-
-        return -1;
-    }
+    if ( rc != SQLITE_DONE ) ERROR_Z_ROLLBACK
 
     rc = sqlite3_step( stmt[3] );
-    if ( rc != SQLITE_ROW )
-    {
-        gint res = 0;
-        GError* error_tmp = NULL;
-
-        res = zond_dbase_rollback_to_statement( zond_dbase, &error_tmp );
-
-        if ( error )
-        {
-            *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
-                    sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
-                    "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
-
-            if ( res )
-            {
-                (*error)->message = add_string( (*error)->message,
-                        g_strdup_printf( "\n\nRollback fehlgeschlagen\n%s", error_tmp->message ) );
-                g_error_free( error_tmp );
-            }
-            else (*error)->message = add_string( (*error)->message,
-                    g_strdup_printf( "\n\nRollback durchgeführt" ) );
-        }
-
-        return -1;
-    }
+    if ( rc != SQLITE_ROW ) ERROR_Z_ROLLBACK
 
     rc = sqlite3_step( stmt[4] );
-    if ( rc != SQLITE_DONE )
-    {
-        gint res = 0;
-        GError* error_tmp = NULL;
-
-        res = zond_dbase_rollback_to_statement( zond_dbase, &error_tmp );
-
-        if ( error )
-        {
-            *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
-                    sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
-                    "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
-
-            if ( res )
-            {
-                (*error)->message = add_string( (*error)->message,
-                        g_strdup_printf( "\n\nRollback fehlgeschlagen\n%s", error_tmp->message ) );
-                g_error_free( error_tmp );
-            }
-            else (*error)->message = add_string( (*error)->message,
-                    g_strdup_printf( "\n\nRollback durchgeführt" ) );
-        }
-
-        return -1;
-    }
+    if ( rc != SQLITE_DONE ) ERROR_Z_ROLLBACK
 
     return sqlite3_column_int( stmt[3], 0 );
 }

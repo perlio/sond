@@ -47,6 +47,10 @@ typedef enum
             else (*error)->message = add_string( (*error)->message, \
                     g_strdup_printf( "\n\nRollback durchgeführt" ) ); \
         } \
+        else \
+        { \
+            if ( res ) g_error_free( error_tmp ); \
+        }\
         \
         return -1; \
     }

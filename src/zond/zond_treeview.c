@@ -803,7 +803,7 @@ zond_treeview_insert_pdf_abschnitt( ZondTreeview* ztv, gint node_id,
 
 static gint
 zond_treeview_remove_childish_anbindungen( ZondTreeview* ztv, InfoWindow* info_window,
-        gchar const* rel_path, Anbindung* anbindung, GError** error )
+        gchar const* rel_path, gint* anchor_id, gboolean* child, Anbindung* anbindung, GError** error )
 {
     gint resp = 0;
 
@@ -820,7 +820,7 @@ zond_treeview_remove_childish_anbindungen( ZondTreeview* ztv, InfoWindow* info_w
 
         if ( !baum_inhalt_pdf_abschnitt ) break;
 
-        //noch nicht gefragt gehabt?!
+        //noch nicht gefrägt gehabt?!
         if ( !resp )
         {
             info_window_set_message( info_window, "...Abschnitt bereits angebunden" );
@@ -829,6 +829,34 @@ zond_treeview_remove_childish_anbindungen( ZondTreeview* ztv, InfoWindow* info_w
                     "Mindestens ein Teil des PDF ist bereits angebunden",
                     "Abschnitt hinzuziehen?", NULL );
             if ( resp != GTK_RESPONSE_YES ) return 1;
+        }
+
+        //Prüfen, ob man sich die anchor_id löschen würde...
+        if ( baum_inhalt_pdf_abschnitt == *anchor_id )
+        {
+            gint rc = 0;
+            gint older_sibling = 0;
+
+            //kann ja nicht child == TRUE sein, weil dann würde ja in Datei eingefügt, was sowieso verboten ist
+            //also dann older sibling
+            rc = zond_dbase_get_older_sibling( ztv_priv->zond->dbase_zond->zond_dbase_work,
+                    baum_inhalt_pdf_abschnitt, &older_sibling, error );
+            if ( rc ) ERROR_Z
+
+            //sonst parent
+            if ( !older_sibling )
+            {
+                gint rc = 0;
+                gint parent = 0;
+
+                rc = zond_dbase_get_parent( ztv_priv->zond->dbase_zond->zond_dbase_work,
+                        baum_inhalt_pdf_abschnitt, &parent, error );
+                if ( rc ) ERROR_Z
+
+                *anchor_id = parent;
+                *child = TRUE;
+            }
+            else *anchor_id = older_sibling;
         }
 
         //BAUM_INHALT_PDF_ABSCHNITT löschen
@@ -962,8 +990,8 @@ zond_treeview_datei_anbinden( ZondTreeview* ztv, GtkTreeIter* anchor_iter,
         }
 
         //etwaige untergeordnete Anbindungen heranholen, falls gewünscht
-        rc = zond_treeview_remove_childish_anbindungen( ztv, info_window, rel_path, NULL,
-                &error );
+        rc = zond_treeview_remove_childish_anbindungen( ztv, info_window, rel_path, &anchor_id,
+                &child, NULL, &error );
         if ( rc == -1 )
         {
             if ( errmsg ) *errmsg = g_strdup( error->message );
@@ -1235,7 +1263,7 @@ zond_treeview_clipboard_anbinden_foreach( SondTreeview* stv, GtkTreeIter* iter,
         }
 
         rc = zond_treeview_remove_childish_anbindungen( s_selection->ztv, s_selection->info_window,
-                rel_path, &anbindung, &error );
+                rel_path, &s_selection->anchor_id, &s_selection->child, &anbindung, &error );
         if ( rc == -1 )
         {
             if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
