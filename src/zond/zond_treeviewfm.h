@@ -78,10 +78,10 @@ struct _ZondTreeviewFMClass
     SondTreeviewFMClass parent_class;
 };
 
-gint zond_treeviewfm_set_cursor_on_anbindung( ZondTreeviewFM*, gchar const*,
-        Anbindung, GError** );
+gint zond_treeviewfm_set_cursor_on_file_part( ZondTreeviewFM*, gchar const*,
+        gchar const*, GError** );
 
-void zond_treeviewfm_set_pdf_abschnitt( ZondTreeviewFM*, gint, gchar const*, GError** );
+void zond_treeviewfm_set_pdf_abschnitt( ZondTreeviewFM*, gint, gchar const* );
 
 G_END_DECLS
 

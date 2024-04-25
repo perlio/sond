@@ -201,7 +201,7 @@ suchen_fuellen_row( Projekt* zond, GtkWidget* list_box, ZondSuchen zond_suchen, 
         GError* error = NULL;
 
         rc = zond_dbase_get_node( zond->dbase_zond->zond_dbase_work, node_id,
-                NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &node_text, NULL, &error );
+                NULL, NULL, NULL, NULL, NULL, &node_text, NULL, &error );
         if ( rc )
         {
             if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );

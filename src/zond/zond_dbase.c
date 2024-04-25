@@ -185,45 +185,14 @@ icon_name
 node_text
 text
 
-type = BAUM_INHALT_FILE
+type = BAUM_INHALT_FILE_LINK
 parent_ID und older_sibling_ID
-rel_path
+link=FILE
 icon_name
 node_text
 text
 
-type = BAUM_INHALT_FILE_PART
-parent_ID und older_sibling_ID
-index_von = Part-Nr.
-Rest = NULL
-
-type = BAUM_INHALT_PDF_ABSCHNITT
-link = PDF_ABSCHNITT
-parent_ID und older_sibling_ID
-
-type = BAUM_INHALT_VIRT_PDF
-link = BAUM_INHALT_VIRT_PDF_SECTION
-parent_ID und older_sibling_ID
-rel_path = UUID
-icon_name
-node_text
-text
-
-type = BAUM_INHALT_VIRT_PDF_SECTION
-link = next oder 0
-parent_ID und older_sibling_ID = 0
-rel_path
-seite_von, index_von, seite_bis, index_bis nach Abschnitt
-
-type = PDF_ABSCHNITT
-parent_ID und older_sibling_ID, angebunden an 0,0
-rel_path
-ziel_id_von, index_von, ziel_id_bis, index_bis nach Abschnitt
-icon_name
-node_text
-text
-
-type = PDF_PUNKT
+type = FILE_PART
 parent_ID und older_sibling_ID je nach parent/older_sibling
 ziel_id_von, index_von nach Abschnitt
 icon_name
@@ -254,11 +223,8 @@ Rest = 0
             "older_sibling_ID INTEGER NOT NULL, "
             "type INTEGER, "
             "link INTEGER, "
-            "rel_path VARCHAR(250), "
-            "seite_von INTEGER, "
-            "index_von INTEGER, "
-            "seite_bis INTEGER, "
-            "index_bis INTEGER, "
+            "file_part VARCHAR, "
+            "section VARCHAR, "
             "icon_name VARCHAR(50), "
             "node_text VARCHAR(50), "
             "text VARCHAR, "
@@ -1091,39 +1057,28 @@ zond_dbase_rollback_to_statement( ZondDBase* zond_dbase, GError** error )
     return 0;
 }
 
-
+//file_part: /Eingang/test.pdf//(mime0:2:3)(zip/blabla/dir/file.txt//){1:129}
 gint
 zond_dbase_test_path( ZondDBase* zond_dbase, const gchar* rel_path, GError** error )
 {
     gint rc = 0;
     sqlite3_stmt** stmt = NULL;
+    gchar* param = NULL;
 
     const gchar* sql[] = {
-            "SELECT ID FROM knoten WHERE rel_path=?1 AND (type=2 OR type=4);"
+            "SELECT ID FROM knoten WHERE file_part LIKE ?1; "
     };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, error );
     if ( rc ) ERROR_Z
 
-    rc = sqlite3_bind_text( stmt[0], 1, rel_path, -1, NULL );
-    if ( rc != SQLITE_OK )
-    {
-        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
-                sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
-                "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
-
-        return -1;
-    }
+    param = g_strdup_printf( "/%s//%s", rel_path, "%" );
+    rc = sqlite3_bind_text( stmt[0], 1, param, -1, SQLITE_TRANSIENT );
+    g_free( param );
+    if ( rc != SQLITE_OK ) ERROR_Z_DBASE
 
     rc = sqlite3_step( stmt[0] );
-    if ( (rc != SQLITE_ROW) && (rc != SQLITE_DONE) )
-    {
-        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
-                sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
-                "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
-
-        return -1;
-    }
+    if ( (rc != SQLITE_ROW) && (rc != SQLITE_DONE) ) ERROR_Z_DBASE
 
     if ( rc == SQLITE_ROW ) return 1;
 
@@ -1133,8 +1088,8 @@ zond_dbase_test_path( ZondDBase* zond_dbase, const gchar* rel_path, GError** err
 
 gint
 zond_dbase_insert_node( ZondDBase* zond_dbase, gint anchor_ID, gboolean child,
-        gint type, gint link, const gchar* rel_path, gint seite_von, gint index_von,
-        gint seite_bis, gint index_bis, const gchar* icon_name, const gchar* node_text,
+        gint type, gint link, const gchar* file_part, gchar const* section,
+        const gchar* icon_name, const gchar* node_text,
         const gchar* text, GError** error )
 {
     gint rc = 0;
@@ -1144,8 +1099,7 @@ zond_dbase_insert_node( ZondDBase* zond_dbase, gint anchor_ID, gboolean child,
             "SAVEPOINT statement; ",
 
             "INSERT INTO knoten "
-            "(parent_id, older_sibling_id, type, link, rel_path, seite_von, index_von, "
-            "seite_bis, index_bis, icon_name, node_text, text ) "
+            "(parent_id, older_sibling_id, type, link, file_part, section, icon_name, node_text, text ) "
             "VALUES ("
                 "CASE ?1 " //child
                     "WHEN 0 THEN (SELECT parent_ID FROM knoten WHERE ID=?2) "
@@ -1157,14 +1111,11 @@ zond_dbase_insert_node( ZondDBase* zond_dbase, gint anchor_ID, gboolean child,
                 "END, "
                 "?3, " //type
                 "?4, " //link
-                "?5, " //rel_path
-                "?6, " //seite_von
-                "?7, " //index_von
-                "?8, " //seite_bis
-                "?9, " //index_bis
-                "?10, " //icon_name
-                "?11, " //node_text
-                "?12 " //text
+                "?5, " //file_part
+                "?6, " //section
+                "?7, " //icon_name
+                "?8, " //node_text
+                "?9 " //text
 
                 "); ",
 
@@ -1209,37 +1160,19 @@ zond_dbase_insert_node( ZondDBase* zond_dbase, gint anchor_ID, gboolean child,
         if ( rc != SQLITE_OK ) ERROR_Z_DBASE
     }
 
-    rc = sqlite3_bind_text( stmt[1], 5,
-            rel_path, -1, NULL );
+    rc = sqlite3_bind_text( stmt[1], 5, file_part, -1, NULL );
     if ( rc != SQLITE_OK ) ERROR_Z_DBASE
 
-    if ( type == ZOND_DBASE_TYPE_PDF_ABSCHNITT ||
-            type == ZOND_DBASE_TYPE_PDF_PUNKT ||
-            type == ZOND_DBASE_TYPE_BAUM_INHALT_VIRT_PDF_SECTION )
-    {
-        rc = sqlite3_bind_int( stmt[1], 6, seite_von );
-        if ( rc != SQLITE_OK ) ERROR_Z_DBASE
-
-        rc = sqlite3_bind_int( stmt[1], 7, index_von );
-        if ( rc != SQLITE_OK ) ERROR_Z_DBASE
-
-        if ( type != ZOND_DBASE_TYPE_PDF_PUNKT)
-        {
-            rc = sqlite3_bind_int( stmt[1], 8, seite_bis );
-            if ( rc != SQLITE_OK ) ERROR_Z_DBASE
-
-            rc = sqlite3_bind_int( stmt[1], 9, index_bis );
-            if ( rc != SQLITE_OK ) ERROR_Z_DBASE
-        }
-    }
-
-    rc = sqlite3_bind_text( stmt[1], 10, icon_name, -1, NULL );
+    rc = sqlite3_bind_text( stmt[1], 6, section, -1, NULL );
     if ( rc != SQLITE_OK ) ERROR_Z_DBASE
 
-    rc = sqlite3_bind_text( stmt[1], 11, node_text, -1, NULL );
+    rc = sqlite3_bind_text( stmt[1], 7, icon_name, -1, NULL );
     if ( rc != SQLITE_OK ) ERROR_Z_DBASE
 
-    rc = sqlite3_bind_text( stmt[1], 12, text, -1, NULL );
+    rc = sqlite3_bind_text( stmt[1], 8, node_text, -1, NULL );
+    if ( rc != SQLITE_OK ) ERROR_Z_DBASE
+
+    rc = sqlite3_bind_text( stmt[1], 9, text, -1, NULL );
     if ( rc != SQLITE_OK ) ERROR_Z_DBASE
 
     rc = sqlite3_step( stmt[0] );
@@ -1262,28 +1195,18 @@ zond_dbase_insert_node( ZondDBase* zond_dbase, gint anchor_ID, gboolean child,
 
 
 gint
-zond_dbase_get_or_create_pdf_root( ZondDBase* zond_dbase,
-        const gchar* rel_path, gint* pdf_root, gboolean* created, GError** error )
+zond_dbase_create_file_root( ZondDBase* zond_dbase,
+        const gchar* rel_path, gchar const* icon_name, gchar const* node_text,
+        gchar const* text, gint* file_part_root, GError** error )
 {
     gint rc = 0;
     sqlite3_stmt** stmt = NULL;
-    gint pdf_root_int = 0;
-
-    rc = zond_dbase_get_pdf_root( zond_dbase, rel_path, &pdf_root_int, error );
-    if ( rc ) ERROR_Z
-
-    if ( pdf_root_int )
-    {
-        if ( pdf_root ) *pdf_root = pdf_root_int;
-        if ( created ) *created = FALSE;
-
-        return 0;
-    }
+    gchar* file_part = NULL;
 
     const gchar* sql[] = {
             "INSERT INTO knoten "
-            "(parent_id, older_sibling_id, type, rel_path) "
-            "VALUES (0, 0, 9, ?1); ",
+            "(parent_id, older_sibling_id, type, file_part, icon_name, node_text, text) "
+            "VALUES (0, 0, 5, ?1, ?2, ?3, ?4); ",
 
             "VALUES (last_insert_rowid()); "
             };
@@ -1296,7 +1219,18 @@ zond_dbase_get_or_create_pdf_root( ZondDBase* zond_dbase,
         return -1;
     }
 
-    rc = sqlite3_bind_text( stmt[0], 1, rel_path, -1, NULL );
+    file_part = g_strdup_printf( "/%s//", rel_path );
+    rc = sqlite3_bind_text( stmt[0], 1, file_part, -1, NULL );
+    g_free( file_part );
+    if ( rc != SQLITE_OK ) ERROR_Z_DBASE
+
+    rc = sqlite3_bind_text( stmt[0], 2, icon_name, -1, NULL );
+    if ( rc != SQLITE_OK ) ERROR_Z_DBASE
+
+    rc = sqlite3_bind_text( stmt[0], 3, node_text, -1, NULL );
+    if ( rc != SQLITE_OK ) ERROR_Z_DBASE
+
+    rc = sqlite3_bind_text( stmt[0], 4, text, -1, NULL );
     if ( rc != SQLITE_OK ) ERROR_Z_DBASE
 
     rc = sqlite3_step( stmt[0] );
@@ -1308,12 +1242,11 @@ zond_dbase_get_or_create_pdf_root( ZondDBase* zond_dbase,
         if ( error ) *error = g_error_new( g_quark_from_static_string( "ZOND_DBASE" ),
                 0, "%s\nKnoten konnte nicht eingefügt werden", __func__ );
 
-        return -1;
+        ERROR_Z_ROLLBACK
     }
-    else if ( rc != SQLITE_ROW ) ERROR_Z_DBASE
+    else if ( rc != SQLITE_ROW ) ERROR_Z_ROLLBACK
 
-    if ( pdf_root ) *pdf_root = sqlite3_column_int( stmt[1], 0 );
-    if ( created ) *created = TRUE;
+    if ( file_part_root ) *file_part_root = sqlite3_column_int( stmt[1], 0 );
 
     return 0;
 }
@@ -1492,43 +1425,22 @@ zond_dbase_update_path( ZondDBase* zond_dbase, const gchar* old_path,
     sqlite3_stmt** stmt = NULL;
 
     const gchar* sql[] = {
-            "UPDATE knoten SET rel_path = "
-            "REPLACE( SUBSTR( rel_path, 1, LENGTH( ?1 ) ), ?1, ?2 ) || "
-            "SUBSTR( rel_path, LENGTH( ?1 ) + 1 );"
+            "UPDATE knoten SET file_part = "
+            "REPLACE( SUBSTR( file_part, 1, LENGTH( ?1 ) ), ?1, ?2 ) || "
+            "SUBSTR( file_part, LENGTH( ?1 ) + 1 );"
     };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, error );
     if ( rc ) ERROR_Z
 
     rc = sqlite3_bind_text( stmt[0], 1, old_path, -1, NULL );
-    if ( rc != SQLITE_OK )
-    {
-        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
-                sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
-                "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
-
-        return -1;
-    }
+    if ( rc != SQLITE_OK ) ERROR_Z_DBASE
 
     rc = sqlite3_bind_text( stmt[0], 2, new_path, -1, NULL );
-    if ( rc != SQLITE_OK )
-    {
-        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
-                sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
-                "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
-
-        return -1;
-    }
+    if ( rc != SQLITE_OK ) ERROR_Z_DBASE
 
     rc = sqlite3_step( stmt[0] );
-    if ( rc != SQLITE_DONE )
-    {
-        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
-                sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
-                "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
-
-        return -1;
-    }
+    if ( rc != SQLITE_DONE ) ERROR_Z_DBASE
 
     return 0;
 }
@@ -1680,15 +1592,13 @@ zond_dbase_remove_node( ZondDBase* zond_dbase, gint node_id, GError** error )
 
 gint
 zond_dbase_get_node( ZondDBase* zond_dbase, gint node_id, gint* type, gint* link,
-        gchar** rel_path, gint* seite_von, gint* index_von, gint* seite_bis, gint* index_bis,
-        gchar** icon_name, gchar** node_text, gchar** text, GError** error )
+        gchar** file_part, gchar** section, gchar** icon_name, gchar** node_text, gchar** text, GError** error )
 {
     gint rc = 0;
     sqlite3_stmt** stmt = NULL;
 
     const gchar* sql[] = {
-            "SELECT type, link, rel_path, seite_von, index_von, seite_bis, index_bis, "
-            "icon_name, node_text, text "
+            "SELECT type, link, file_part, icon_name, node_text, text "
             "FROM knoten WHERE ID=?1;"
             };
 
@@ -1715,14 +1625,10 @@ zond_dbase_get_node( ZondDBase* zond_dbase, gint node_id, gint* type, gint* link
 
     if ( type ) *type = sqlite3_column_int( stmt[0], 0 );
     if ( link ) *link= sqlite3_column_int( stmt[0], 1 );
-    if ( rel_path ) *rel_path = g_strdup( (const gchar*) sqlite3_column_text( stmt[0], 2 ) );
-    if ( seite_von ) *seite_von = sqlite3_column_int( stmt[0], 3 );
-    if ( index_von ) *index_von = sqlite3_column_int( stmt[0], 4 );
-    if ( seite_bis ) *seite_bis = sqlite3_column_int( stmt[0], 5 );
-    if ( index_bis ) *index_bis = sqlite3_column_int( stmt[0], 6 );
-    if ( icon_name ) *icon_name = g_strdup( (const gchar*) sqlite3_column_text( stmt[0], 7 ) );
-    if ( node_text ) *node_text = g_strdup( (const gchar*) sqlite3_column_text( stmt[0], 8 ) );
-    if ( text ) *text = g_strdup( (const gchar*) sqlite3_column_text( stmt[0], 9 ) );
+    if ( file_part ) *file_part = g_strdup( (const gchar*) sqlite3_column_text( stmt[0], 2 ) );
+    if ( icon_name ) *icon_name = g_strdup( (const gchar*) sqlite3_column_text( stmt[0], 3 ) );
+    if ( node_text ) *node_text = g_strdup( (const gchar*) sqlite3_column_text( stmt[0], 4 ) );
+    if ( text ) *text = g_strdup( (const gchar*) sqlite3_column_text( stmt[0], 5 ) );
 
     return 0;
 }
@@ -1735,25 +1641,7 @@ zond_dbase_get_type_and_link( ZondDBase* zond_dbase, gint node_id, gint* type,
     gint rc = 0;
 
     rc = zond_dbase_get_node( zond_dbase, node_id, type, link, NULL, NULL,
-            NULL, NULL, NULL, NULL, NULL, NULL, error );
-    if ( rc )
-    {
-        g_prefix_error( error, "%s\n", __func__ );
-        return -1;
-    }
-
-    return 0;
-}
-
-
-gint
-zond_dbase_get_rel_path( ZondDBase* zond_dbase, gint node_id,
-        gchar** rel_path, GError** error )
-{
-    gint rc = 0;
-
-    rc = zond_dbase_get_node( zond_dbase, node_id, NULL, NULL, rel_path, NULL,
-            NULL, NULL, NULL, NULL, NULL, NULL, error );
+            NULL, NULL, NULL, error );
     if ( rc )
     {
         g_prefix_error( error, "%s\n", __func__ );
@@ -1770,8 +1658,7 @@ zond_dbase_get_text( ZondDBase* zond_dbase, gint node_id,
 {
     gint rc = 0;
 
-    rc = zond_dbase_get_node( zond_dbase, node_id, NULL, NULL, NULL, NULL,
-            NULL, NULL, NULL, NULL, NULL, text, error );
+    rc = zond_dbase_get_node( zond_dbase, node_id, NULL, NULL, NULL, NULL, NULL, NULL, text, error );
     if ( rc )
     {
         g_prefix_error( error, "%s\n", __func__ );
@@ -1783,14 +1670,14 @@ zond_dbase_get_text( ZondDBase* zond_dbase, gint node_id,
 
 
 gint
-zond_dbase_get_pdf_root( ZondDBase* zond_dbase, const gchar* rel_path, gint* pdf_root, GError** error )
+zond_dbase_get_file_part_root( ZondDBase* zond_dbase, const gchar* file_part, gint* file_part_root, GError** error )
 {
     gint rc = 0;
     sqlite3_stmt** stmt = NULL;
 
     const gchar* sql[] = {
             "SELECT (ID) "
-            "FROM knoten WHERE parent_ID=0 AND older_sibling_id=0 AND rel_path=?1;"
+            "FROM knoten WHERE file_part=?1;"
             };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, error );
@@ -1801,13 +1688,13 @@ zond_dbase_get_pdf_root( ZondDBase* zond_dbase, const gchar* rel_path, gint* pdf
         return -1;
     }
 
-    rc = sqlite3_bind_text( stmt[0], 1, rel_path, -1, NULL );
+    rc = sqlite3_bind_text( stmt[0], 1, file_part, -1, NULL );
     if ( rc != SQLITE_OK ) ERROR_Z_DBASE
 
     rc = sqlite3_step( stmt[0] );
     if ( rc != SQLITE_ROW && rc != SQLITE_DONE ) ERROR_Z_DBASE //richtiger Fähler
 
-    if ( pdf_root ) *pdf_root = sqlite3_column_int( stmt[0], 0 );
+    if ( file_part_root ) *file_part_root = sqlite3_column_int( stmt[0], 0 );
 
     return 0;
 }
@@ -2067,14 +1954,14 @@ zond_dbase_get_younger_sibling( ZondDBase* zond_dbase, gint node_id, gint* young
 
 
 gint
-zond_dbase_get_baum_inhalt_pdf_abschnitt_from_pdf_abschnitt( ZondDBase* zond_dbase,
-                    gint pdf_abschnitt, gint* baum_inhalt_pdf_abschnitt, GError** error )
+zond_dbase_get_baum_inhalt_file_from_file_part( ZondDBase* zond_dbase,
+                    gint file_part, gint* baum_inhalt_file, GError** error )
 {
     gint rc = 0;
     sqlite3_stmt** stmt = NULL;
 
     const gchar* sql[] = {
-            "SELECT ID FROM knoten WHERE type=4 AND link=?1;"
+            "SELECT ID FROM knoten WHERE type=2 AND link=?1;"
             };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, error );
@@ -2085,7 +1972,7 @@ zond_dbase_get_baum_inhalt_pdf_abschnitt_from_pdf_abschnitt( ZondDBase* zond_dba
         return -1;
     }
 
-    rc = sqlite3_bind_int( stmt[0], 1, pdf_abschnitt );
+    rc = sqlite3_bind_int( stmt[0], 1, file_part );
     if ( rc != SQLITE_OK )
     {
         if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
@@ -2105,8 +1992,8 @@ zond_dbase_get_baum_inhalt_pdf_abschnitt_from_pdf_abschnitt( ZondDBase* zond_dba
         return -1;
     }
 
-    if ( rc == SQLITE_ROW && baum_inhalt_pdf_abschnitt )
-            *baum_inhalt_pdf_abschnitt = sqlite3_column_int( stmt[0], 0 );
+    if ( rc == SQLITE_ROW && baum_inhalt_file )
+            *baum_inhalt_file = sqlite3_column_int( stmt[0], 0 );
 
     return 0;
 }
@@ -2120,7 +2007,7 @@ zond_dbase_get_baum_auswertung_copy( ZondDBase* zond_dbase,
     sqlite3_stmt** stmt = NULL;
 
     const gchar* sql[] = {
-            "SELECT ID FROM knoten WHERE type=7 AND link=?1;"
+            "SELECT ID FROM knoten WHERE type=3 AND link=?1;"
             };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, error );
@@ -2159,196 +2046,43 @@ zond_dbase_get_baum_auswertung_copy( ZondDBase* zond_dbase,
 
 
 gint
-zond_dbase_get_baum_inhalt_file_from_rel_path( ZondDBase* zond_dbase,
-        const gchar* rel_path, gint* baum_inhalt_file, GError** error )
+zond_dbase_get_first_baum_inhalt_file_child( ZondDBase* zond_dbase,
+        gint ID, gint* baum_inhalt_file, gint* file_part, GError** error )
 {
     gint rc = 0;
     sqlite3_stmt** stmt = NULL;
 
     const gchar* sql[] = {
-            "SELECT ID FROM knoten WHERE type=2 AND rel_path=?1;"
-            };
-
-    rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, error );
-    if ( rc )
-    {
-        g_prefix_error( error, "%s\n", __func__ );
-
-        return -1;
-    }
-
-    rc = sqlite3_bind_text( stmt[0], 1, rel_path, -1, NULL );
-    if ( rc != SQLITE_OK )
-    {
-        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
-                sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
-                "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
-
-        return -1;
-    }
-
-    rc = sqlite3_step( stmt[0] );
-    if ( rc != SQLITE_ROW && rc != SQLITE_DONE ) //richtiger Fähler
-    {
-        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
-                sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
-                "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
-
-        return -1;
-    }
-
-    if ( rc == SQLITE_ROW && baum_inhalt_file )
-            *baum_inhalt_file = sqlite3_column_int( stmt[0], 0 );
-
-    return 0;
-}
-
-
-//Sucht baum_inhalt_pdf_abschnitt heraus, der übergebene Anbindung mindestens umfaßt
-//also auch gleich ist!
-gint
-zond_dbase_get_baum_inhalt_pdf_abschnitt_from_anbindung( ZondDBase* zond_dbase,
-        gchar const* rel_path, Anbindung anbindung, gint* baum_inhalt_pdf_abschnitt,
-        gint* pdf_abschnitt, GError** error )
-{
-    gint rc = 0;
-    sqlite3_stmt** stmt = NULL;
-
-    const gchar* sql[] = {
-            "SELECT knoten_baum.ID, knoten_baum.link, "
-            "knoten_abschnitt.seite_von, knoten_abschnitt.index_von, knoten_abschnitt.seite_bis, knoten_abschnitt.index_bis "
-            "FROM knoten AS knoten_baum JOIN knoten AS knoten_abschnitt "
-            "ON knoten_baum.link=knoten_abschnitt.ID "
-            "WHERE knoten_baum.type=4 AND knoten_abschnitt.rel_path=?1;"
-           };
-
-    rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, error );
-    if ( rc )
-    {
-        g_prefix_error( error, "%s\n", __func__ );
-
-        return -1;
-    }
-
-    rc = sqlite3_bind_text( stmt[0], 1, rel_path, -1, NULL );
-    if ( rc != SQLITE_OK )
-    {
-        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
-                sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
-                "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
-
-        return -1;
-    }
-
-    do
-    {
-        gint rc = 0;
-        Anbindung anbindung_baum_inhalt_pdf_abschnitt = { 0 };
-
-        rc = sqlite3_step( stmt[0] );
-        if ( rc != SQLITE_ROW && rc != SQLITE_DONE ) //richtiger Fähler
-        {
-            if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
-                    sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
-                    "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
-
-            return -1;
-        }
-
-        if ( rc == SQLITE_DONE ) break;
-
-        anbindung_baum_inhalt_pdf_abschnitt.von.seite = sqlite3_column_int( stmt[0], 2 );
-        anbindung_baum_inhalt_pdf_abschnitt.von.index = sqlite3_column_int( stmt[0], 3 );
-        anbindung_baum_inhalt_pdf_abschnitt.bis.seite = sqlite3_column_int( stmt[0], 4 );
-        anbindung_baum_inhalt_pdf_abschnitt.bis.index = sqlite3_column_int( stmt[0], 5 );
-
-        if ( ziele_1_eltern_von_2( anbindung_baum_inhalt_pdf_abschnitt, anbindung ) ||
-                ziele_1_gleich_2( anbindung_baum_inhalt_pdf_abschnitt, anbindung ) )
-        {
-            if ( baum_inhalt_pdf_abschnitt )
-                    *baum_inhalt_pdf_abschnitt = sqlite3_column_int( stmt[0], 0 );
-            if ( pdf_abschnitt )
-                    *pdf_abschnitt = sqlite3_column_int( stmt[0], 1 );
-
-            return 0;
-        }
-    }
-    while ( 1 );
-
-    return 0;
-}
-
-
-gint
-zond_dbase_get_first_kind_baum_inhalt_pdf_abschnitt( ZondDBase* zond_dbase,
-        gchar const* rel_path, Anbindung* anbindung,
-        gint* baum_inhalt_pdf_abschnitt, gint* pdf_abschnitt, GError** error )
-{
-    gint rc = 0;
-    sqlite3_stmt** stmt = NULL;
-
-    const gchar* sql[] = {
-            "SELECT knoten_baum.ID, knoten_baum.link, "
-            "knoten_abschnitt.seite_von, knoten_abschnitt.index_von, knoten_abschnitt.seite_bis, knoten_abschnitt.index_bis "
-            "FROM knoten AS knoten_baum JOIN knoten AS knoten_abschnitt "
-            "ON knoten_baum.link=knoten_abschnitt.ID "
-            "WHERE knoten_baum.type=4 AND knoten_abschnitt.rel_path=?1;"
+            "WITH RECURSIVE cte_knoten (ID) AS ( "
+                "VALUES (?1) "
+                "UNION ALL "
+                "SELECT knoten.ID "
+                    "FROM knoten JOIN cte_knoten WHERE knoten.parent_ID=cte_knoten.ID "
+                ") SELECT knoten.ID, knoten.link "
+                        "FROM knoten JOIN cte_knoten WHERE knoten.type=2 AND knoten.link=cte_knoten.ID; "
             };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, error );
     if ( rc ) ERROR_Z
 
-    rc = sqlite3_bind_text( stmt[0], 1, rel_path, -1, NULL );
-    if ( rc != SQLITE_OK )
-    {
-        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
-                sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
-                "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
-
-        return -1;
-    }
+    rc = sqlite3_bind_int( stmt[0], 1, ID );
+    if ( rc != SQLITE_OK ) ERROR_Z_DBASE
 
     do
     {
         gint res = 0;
-        Anbindung anbindung_baum_inhalt_pdf_abschnitt = { 0 };
 
         res = sqlite3_step( stmt[0] );
-        if ( res != SQLITE_ROW && res != SQLITE_DONE ) //richtiger Fähler
-        {
-            if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
-                    sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
-                    "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
-
-            return -1;
-        }
+        if ( res != SQLITE_ROW && res != SQLITE_DONE ) ERROR_Z_DBASE //richtiger Fähler
 
         if ( res == SQLITE_DONE ) break;
 
-        if ( !anbindung )
-        {
-            if ( baum_inhalt_pdf_abschnitt )  *baum_inhalt_pdf_abschnitt =
-                    sqlite3_column_int( stmt[0], 0 );
-            if ( pdf_abschnitt )  *pdf_abschnitt =
-                    sqlite3_column_int( stmt[0], 1 );
+        if ( baum_inhalt_file )  *baum_inhalt_file =
+                sqlite3_column_int( stmt[0], 0 );
+        if ( file_part )  *file_part =
+                sqlite3_column_int( stmt[0], 1 );
 
-            return 0;
-        }
-
-        anbindung_baum_inhalt_pdf_abschnitt.von.seite = sqlite3_column_int( stmt[0], 2 );
-        anbindung_baum_inhalt_pdf_abschnitt.von.index = sqlite3_column_int( stmt[0], 3 );
-        anbindung_baum_inhalt_pdf_abschnitt.bis.seite = sqlite3_column_int( stmt[0], 4 );
-        anbindung_baum_inhalt_pdf_abschnitt.bis.index = sqlite3_column_int( stmt[0], 5 );
-
-        if ( ziele_1_eltern_von_2( *anbindung, anbindung_baum_inhalt_pdf_abschnitt ) )
-        {
-            if ( baum_inhalt_pdf_abschnitt )  *baum_inhalt_pdf_abschnitt =
-                    sqlite3_column_int( stmt[0], 0 );
-            if ( pdf_abschnitt )  *pdf_abschnitt =
-                    sqlite3_column_int( stmt[0], 1 );
-
-            return 0;
-        }
+        break;
     }
     while ( 1 );
 
@@ -2356,9 +2090,10 @@ zond_dbase_get_first_kind_baum_inhalt_pdf_abschnitt( ZondDBase* zond_dbase,
 }
 
 
+//sucht von file_part ausgehend unter ihm selbst und den Eltern Anbindung im baum_inhalt
 gint
-zond_dbase_find_baum_inhalt_anbindung( ZondDBase* zond_dbase, gint node_id,
-        gint* baum_inhalt, gint* pdf_abschnitt, Anbindung* anbindung, GError** error )
+zond_dbase_find_baum_inhalt_file( ZondDBase* zond_dbase, gint node_id,
+        gint* baum_inhalt_file, gint* id_file_part, gchar** file_part, GError** error )
 {
     gint rc = 0;
     sqlite3_stmt** stmt = NULL;
@@ -2369,8 +2104,8 @@ zond_dbase_find_baum_inhalt_anbindung( ZondDBase* zond_dbase, gint node_id,
                 "UNION ALL "
                 "SELECT knoten.parent_ID FROM knoten JOIN cte_knoten "
                 "WHERE knoten.ID=cte_knoten.ID AND knoten.parent_ID!=0 "
-                ") SELECT knoten.ID, cte_knoten.ID, knoten2.seite_von, knoten2.index_von, knoten2.seite_bis, knoten2.index_bis "
-                "FROM knoten JOIN cte_knoten JOIN knoten AS knoten2 WHERE knoten.type=4 AND knoten.link=cte_knoten.ID "
+                ") SELECT knoten.ID, cte_knoten.ID, knoten2.file_part "
+                "FROM knoten JOIN cte_knoten JOIN knoten AS knoten2 WHERE knoten.type=2 AND knoten.link=cte_knoten.ID "
                 "AND knoten2.ID=cte_knoten.ID; "
             };
 
@@ -2383,37 +2118,16 @@ zond_dbase_find_baum_inhalt_anbindung( ZondDBase* zond_dbase, gint node_id,
     }
 
     rc = sqlite3_bind_int( stmt[0], 1, node_id );
-    if ( rc != SQLITE_OK )
-    {
-        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
-                sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
-                "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
-
-        return -1;
-    }
+    if ( rc != SQLITE_OK ) ERROR_Z_DBASE
 
     rc = sqlite3_step( stmt[0] );
-    if ( rc != SQLITE_ROW && rc != SQLITE_DONE ) //richtiger Fähler
-    {
-        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
-                sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
-                "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
-
-        return -1;
-    }
+    if ( rc != SQLITE_ROW && rc != SQLITE_DONE ) ERROR_Z_DBASE //richtiger Fähler
 
     if ( rc == SQLITE_ROW )
     {
-        if ( baum_inhalt ) *baum_inhalt = sqlite3_column_int( stmt[0], 0 );
-        if ( pdf_abschnitt ) *pdf_abschnitt = sqlite3_column_int( stmt[0], 1 );
-
-        if ( anbindung )
-        {
-            anbindung->von.seite = sqlite3_column_int( stmt[0], 2 );
-            anbindung->von.index = sqlite3_column_int( stmt[0], 3 );
-            anbindung->bis.seite = sqlite3_column_int( stmt[0], 4 );
-            anbindung->bis.index = sqlite3_column_int( stmt[0], 5 );
-        }
+        if ( baum_inhalt_file ) *baum_inhalt_file = sqlite3_column_int( stmt[0], 0 );
+        if ( id_file_part ) *id_file_part = sqlite3_column_int( stmt[0], 1 );
+        if ( file_part ) *file_part = g_strdup( (gchar const*) sqlite3_column_text( stmt[0], 2 ) );
     }
 
     return 0;
@@ -2421,7 +2135,7 @@ zond_dbase_find_baum_inhalt_anbindung( ZondDBase* zond_dbase, gint node_id,
 
 
 gint
-zond_dbase_is_pdf_abschnitt_copied( ZondDBase* zond_dbase, gint search_root,
+zond_dbase_is_file_part_copied( ZondDBase* zond_dbase, gint search_root,
         gboolean* copied, GError** error )
 {
     gint rc = 0;
@@ -2434,7 +2148,7 @@ zond_dbase_is_pdf_abschnitt_copied( ZondDBase* zond_dbase, gint search_root,
                 "SELECT knoten.ID "
                     "FROM knoten JOIN cte_knoten WHERE knoten.parent_ID=cte_knoten.ID "
                 ") SELECT knoten.ID "
-                        "FROM knoten JOIN cte_knoten WHERE knoten.type=7 AND knoten.link=cte_knoten.ID; "
+                        "FROM knoten JOIN cte_knoten WHERE knoten.type=3 AND knoten.link=cte_knoten.ID; "
             };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, error );

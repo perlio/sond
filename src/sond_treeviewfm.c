@@ -524,13 +524,10 @@ sond_treeviewfm_load_dir_foreach( SondTreeviewFM* stvfm, GtkTreeIter* iter_dir, 
     }
     else
     {
-        const gchar* content_type = NULL;
         gint rc = 0;
 
-        content_type = g_file_info_get_content_type( info );
-
         rc = SOND_TREEVIEWFM_GET_CLASS(stvfm)->insert_dummy( stvfm, &iter_new,
-                content_type, &error );
+                G_OBJECT(info), &error );
         if ( rc )
         {
             if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
@@ -658,7 +655,7 @@ sond_treeviewfm_dir_foreach( SondTreeviewFM* stvfm, GtkTreeIter* iter_dir,
         else break;
     }
 
-    g_object_unref( enumer );
+    g_object_unref( enumer ); //unreferenziert auch alle infos und gfiles
 
     return (flag) ? 1 : 0;
 }
@@ -784,7 +781,7 @@ sond_treeviewfm_find_path( SondTreeviewFM* stvfm, GtkTreeIter* iter,
 
 
 gint
-sond_treeviewfm_set_cursor_on_path( SondTreeviewFM* stvfm, const gchar* path,
+sond_treeviewfm_set_cursor_on_file_part( SondTreeviewFM* stvfm, const gchar* path,
         GtkTreeIter* iter_path, gchar** errmsg )
 {
     gchar** arr_path_segs = NULL;
@@ -862,7 +859,7 @@ sond_treeviewfm_results_row_activated( GtkWidget* listbox, GtkWidget* row, gpoin
     path = gtk_label_get_label( GTK_LABEL(label) );
     path_rel = path + strlen( stvfm_priv->root ) + 1;
 
-    rc = sond_treeviewfm_set_cursor_on_path( stvfm, path_rel, NULL, &errmsg );
+    rc = sond_treeviewfm_set_cursor_on_file_part( stvfm, path_rel, NULL, &errmsg );
     if ( rc )
     {
         display_message( gtk_widget_get_toplevel( GTK_WIDGET(stvfm) ),
@@ -918,11 +915,9 @@ sond_treeviewfm_render_text( SondTreeviewFM* stvfm, GtkTreeIter* iter, GObject* 
             rc = SOND_TREEVIEWFM_GET_CLASS(stvfm)->dbase_test( stvfm, rel_path, error );
             g_free( rel_path );
             if ( rc == -1 ) ERROR_Z
-            else if ( rc == 0 )
-                    g_object_set( G_OBJECT(sond_treeview_get_cell_renderer_text( SOND_TREEVIEW(stvfm) )),
-                    "background-set", FALSE, NULL );
-            else g_object_set( G_OBJECT(sond_treeview_get_cell_renderer_text(
-                    SOND_TREEVIEW(stvfm) )), "background-set", TRUE, NULL );
+
+            g_object_set( G_OBJECT(sond_treeview_get_cell_renderer_text( SOND_TREEVIEW(stvfm) )),
+                    "background-set", (gboolean) rc, NULL );
         }
     }
     else //object ist file_part
@@ -1026,32 +1021,56 @@ sond_treeviewfm_render_icon( SondTreeviewFM* stvfm, GtkCellRenderer* renderer,
 static gint
 sond_treeviewfm_expand_dummy( SondTreeviewFM* stvfm, GtkTreeIter* iter, GObject* object, GError** error )
 {
-    if ( g_file_info_get_file_type( G_FILE_INFO(object) ) == G_FILE_TYPE_DIRECTORY )
+    gint rc = 0;
+
+    if ( G_IS_FILE_INFO(object) )
     {
-        gint rc = 0;
-        gchar* errmsg = NULL;
-
-        rc = sond_treeviewfm_load_dir( stvfm, iter, &errmsg );
-        if ( rc )
+        if ( g_file_info_get_file_type( G_FILE_INFO(object) ) == G_FILE_TYPE_DIRECTORY )
         {
-            display_message( gtk_widget_get_toplevel( GTK_WIDGET(stvfm) ),
-                    "Zeile konnte nicht expandiert werden\n\n",
-                    errmsg, NULL );
-            g_free( errmsg );
+            gint rc = 0;
+            gchar* errmsg = NULL;
 
-            return -1;
+            rc = sond_treeviewfm_load_dir( stvfm, iter, &errmsg );
+            if ( rc )
+            {
+                if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\n%s", __func__, errmsg );
+                g_free( errmsg );
+
+                return -1;
+            }
+
+            return 0; //braucht kein insert_dummy mehr; wird schon in load_dir_foreach geregelt...
+        }
+        else
+        {
+            const gchar* content_type = NULL;
+
+            content_type = g_file_info_get_content_type( G_FILE_INFO(object) );
+
+            if ( g_content_type_is_mime_type( content_type, "message/rfc822" ) )
+            {
+
+            }
+            else if ( g_content_type_is_mime_type( content_type, "application/zip" ) )
+            {
+
+            }
         }
     }
     else
     {
-        const gchar* content_type = NULL;
+        //if ( G_IS_MIME_OBJECT(object) )
+        {
 
-        content_type = g_file_info_get_content_type( G_FILE_INFO(object) );
-        if ( g_content_type_is_mime_type( content_type, "message/rfc822" ) )
+        }
+        //else if ( SOND_IS_ZIP(object) )
         {
 
         }
     }
+
+    rc = SOND_TREEVIEWFM_GET_CLASS( stvfm )->insert_dummy( stvfm, iter, object, error );
+    if ( rc ) ERROR_Z
 
     return 0;
 }
@@ -1059,9 +1078,9 @@ sond_treeviewfm_expand_dummy( SondTreeviewFM* stvfm, GtkTreeIter* iter, GObject*
 
 static gint
 sond_treeviewfm_insert_dummy( SondTreeviewFM* stvfm,
-        GtkTreeIter* iter, const gchar* content_type, GError** error )
+        GtkTreeIter* iter, GObject* object, GError** error )
 {
-    if ( g_content_type_is_mime_type( content_type, "message/rfc822" ) )
+//    if ( g_content_type_is_mime_type( content_type, "message/rfc822" ) )
     {
 
     }
@@ -1931,10 +1950,10 @@ sond_treeviewfm_set_root( SondTreeviewFM* stvfm, const gchar* root, gchar** errm
         return 0;
     }
 
-    stvfm_priv->root = g_strdup( root );
-
     rc = sond_treeviewfm_load_dir( stvfm, NULL, errmsg );
     if ( rc ) ERROR_S
+
+    stvfm_priv->root = g_strdup( root );
 
     return 0;
 }
@@ -2331,7 +2350,8 @@ sond_treeviewfm_paste_clipboard( SondTreeviewFM* stvfm, gboolean kind, gchar** e
             !gtk_tree_model_iter_has_child( gtk_tree_view_get_model(
             GTK_TREE_VIEW(stvfm) ), s_fm_paste_selection.iter_cursor ) )
     {
-        GtkTreeIter iter_tmp;
+        GtkTreeIter iter_tmp = { 0 };
+
         gtk_tree_store_insert( GTK_TREE_STORE(gtk_tree_view_get_model(
                 GTK_TREE_VIEW(stvfm) )), &iter_tmp, s_fm_paste_selection.iter_cursor, -1 );
     }

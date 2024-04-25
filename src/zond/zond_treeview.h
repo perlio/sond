@@ -7,6 +7,7 @@
 #include "../sond_treeview.h"
 
 typedef struct _Projekt Projekt;
+typedef struct _Anbindung Anbindung;
 typedef int gint;
 
 G_BEGIN_DECLS
@@ -43,6 +44,11 @@ void zond_treeview_set_text_pdf_abschnitt( ZondTreeview*, gint,
         gchar const* );
 
 GtkTreePath* zond_treeview_get_path( SondTreeview*, gint );
+
+void zond_treeview_parse_file_section( gchar const*, Anbindung* );
+
+void zond_treeview_build_file_section( Anbindung, gchar** );
+
 
 G_END_DECLS
 

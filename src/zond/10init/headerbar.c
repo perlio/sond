@@ -123,7 +123,7 @@ selection_abfragen_pdf( Projekt* zond, gchar** errmsg )
         gint rc = 0;
         GtkTreeIter iter = { 0, };
         gint node_id = 0;
-        gchar* rel_path = NULL;
+        gchar* file_part = NULL;
         GError* error = NULL;
 
         if ( !gtk_tree_model_get_iter( gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[zond->baum_active]) ), &iter, list->data ) )
@@ -139,8 +139,8 @@ selection_abfragen_pdf( Projekt* zond, gchar** errmsg )
 
         gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[zond->baum_active]) ), &iter, 2, &node_id, -1 );
 
-        rc = zond_dbase_get_rel_path( zond->dbase_zond->zond_dbase_work,
-                node_id, &rel_path, &error );
+        rc = zond_dbase_get_node( zond->dbase_zond->zond_dbase_work,
+                node_id, NULL, NULL, &file_part, NULL, NULL, NULL, NULL, &error );
         if ( rc )
         {
             if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
@@ -151,13 +151,13 @@ selection_abfragen_pdf( Projekt* zond, gchar** errmsg )
             return NULL;
         }
 
-        if ( !rel_path ) continue;
+        if ( !file_part ) continue;
 
         //Sonderbehandung, falls pdf-Datei
-        if ( is_pdf( rel_path ) && !pdf_rel_path_in_array( arr_rel_path, rel_path ) )
-                g_ptr_array_add( arr_rel_path, g_strdup( rel_path ) );
+        if ( is_pdf( file_part ) && !pdf_rel_path_in_array( arr_rel_path, file_part ) )
+                g_ptr_array_add( arr_rel_path, g_strdup( file_part ) );
 
-        g_free( rel_path );
+        g_free( file_part );
     }
     while ( (list = list->next) );
 

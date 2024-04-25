@@ -44,7 +44,7 @@ typedef struct _Pdf_Viewer
 {
     Projekt* zond;
 
-    gchar* rel_path;
+    gchar* file_part;
 
     GtkWidget* vf;
     GdkWindow* gdk_window;

@@ -143,6 +143,7 @@ zond_anbindung_verschieben_kinder( Projekt* zond,
         gint rc = 0;
         gint younger_sibling = 0;
         Anbindung anbindung_y = { 0 };
+        gchar* section = NULL;
 
         rc = zond_dbase_get_younger_sibling( zond->dbase_zond->zond_dbase_work,
                 node_id, &younger_sibling, error );
@@ -151,9 +152,11 @@ zond_anbindung_verschieben_kinder( Projekt* zond,
         if ( younger_sibling == 0 ) break;
 
         rc = zond_dbase_get_node( zond->dbase_zond->zond_dbase_work,
-                younger_sibling, NULL, NULL, NULL, &anbindung_y.von.seite, &anbindung_y.von.index,
-                &anbindung_y.bis.seite, &anbindung_y.bis.index, NULL, NULL, NULL, error );
+                younger_sibling, NULL, NULL, NULL, &section, NULL, NULL, NULL, error );
         if ( rc ) ERROR_Z
+
+        zond_treeview_parse_file_section( section, &anbindung_y );
+        g_free( section );
 
         if ( ziele_1_eltern_von_2( anbindung, anbindung_y ) )
         {
@@ -188,32 +191,20 @@ zond_anbindung_verschieben_kinder( Projekt* zond,
 
 
 static gint
-zond_anbindung_baum_inhalt( Projekt* zond, gint anchor_id_pdf_abschnitt, gboolean child,
+zond_anbindung_baum_inhalt( Projekt* zond, gint anchor_id, gboolean child,
         gint id_inserted, Anbindung anbindung, gchar const* rel_path, gchar const* node_text, GError** error )
 {
     gint rc = 0;
     GtkTreeIter* iter = NULL;
     GtkTreeIter iter_inserted = { 0 };
-    gint id_baum_inhalt = 0;
-    gint anchor_id = 0;
+    gint baum_inhalt_file = 0;
 
     //Gucken, ob Anbindung im Baum-Inhalt aufscheint
-    rc = zond_dbase_get_baum_inhalt_file_from_rel_path( zond->dbase_zond->zond_dbase_work,
-            rel_path, &id_baum_inhalt, error );
+    rc = zond_dbase_find_baum_inhalt_file( zond->dbase_zond->zond_dbase_work,
+            id_inserted, &baum_inhalt_file, NULL, NULL, error );
     if ( rc ) ERROR_Z
-    if ( !id_baum_inhalt )
-    {
-        gint rc = 0;
 
-        rc = zond_dbase_get_baum_inhalt_pdf_abschnitt_from_anbindung( zond->dbase_zond->zond_dbase_work,
-                rel_path, anbindung, &id_baum_inhalt, NULL, error );
-        if ( rc ) ERROR_Z
-
-        if ( !id_baum_inhalt ) return 0;
-    }
-
-    if ( !anchor_id_pdf_abschnitt ) anchor_id = id_baum_inhalt;
-    else anchor_id = anchor_id_pdf_abschnitt;
+    if ( !baum_inhalt_file ) return 0; //nicht in Baum Inhalt angebunden - braucht nicht eingefügt zu werden
 
     //eingefügtes ziel in Baum
     iter = zond_treeview_abfragen_iter( ZOND_TREEVIEW(zond->treeview[BAUM_INHALT]), anchor_id );
@@ -251,12 +242,14 @@ ziele_abfragen_anker_rek( ZondDBase* zond_dbase, Anbindung anbindung,
 {
     gint rc = 0;
     Anbindung anbindung_anchor = { 0 };
+    gchar* section = NULL;
 
-    rc = zond_dbase_get_node( zond_dbase, anchor_id, NULL, NULL, NULL,
-            &anbindung_anchor.von.seite, &anbindung_anchor.von.index,
-            &anbindung_anchor.bis.seite, &anbindung_anchor.bis.index,
+    rc = zond_dbase_get_node( zond_dbase, anchor_id, NULL, NULL, NULL, &section,
             NULL, NULL, NULL, error );
     if ( rc ) ERROR_Z
+
+    zond_treeview_parse_file_section( section, &anbindung_anchor );
+    g_free( section );
 
     //ziele auf Identität prüfen
     if ( ziele_1_gleich_2( anbindung_anchor, anbindung ) )
@@ -333,46 +326,36 @@ ziele_abfragen_anker_rek( ZondDBase* zond_dbase, Anbindung anbindung,
 
 static gint
 zond_anbindung_insert_pdf_abschnitt_in_dbase( Projekt* zond,
-        const gchar* rel_path, Anbindung anbindung, gint* anchor_pdf_abschnitt,
+        const gchar* file_part, Anbindung anbindung, gint* anchor_pdf_abschnitt,
         gboolean* child, gint* node_inserted, gchar** node_text, GError** error )
 {
     gint pdf_root = 0;
     gint node_id_new = 0;
     gint rc = 0;
     gint anchor_id_dbase = 0;
-    gboolean created = FALSE;
+    gchar* file_section = NULL;
 
-    rc = zond_dbase_get_or_create_pdf_root( zond->dbase_zond->zond_dbase_work,
-            rel_path, &pdf_root, &created, error );
+    rc = zond_dbase_get_file_part_root( zond->dbase_zond->zond_dbase_work,
+            file_part, &pdf_root, error );
     if ( rc ) ERROR_Z
 
-    anchor_id_dbase = pdf_root;
-
-    if ( created )
+    if ( !pdf_root )
     {
         gint rc = 0;
+        gchar* path = NULL;
+        gchar* part = NULL;
 
-        rc = zond_dbase_update_icon_name( zond->dbase_zond->zond_dbase_work,
-                pdf_root, "pdf", error );
+        rc = zond_treeview_insert_file_in_db( zond, file_part, &pdf_root, error );
+        g_free( path );
         if ( rc ) ERROR_Z
-
-        rc = zond_dbase_update_node_text( zond->dbase_zond->zond_dbase_work,
-                pdf_root, g_strrstr( rel_path, "/" ) + 1, error );
-        if ( rc ) ERROR_Z
-
-        *child = TRUE; //erster Abschnitt
     }
-    else
-    {
-        gint rc = 0;
 
-        //ansonsten: vergleichen,
-        rc = ziele_abfragen_anker_rek( zond->dbase_zond->zond_dbase_work, anbindung,
-                pdf_root, &anchor_id_dbase, child, error );
-        if ( rc ) ERROR_Z
+    //jetzt vergleichen,
+    rc = ziele_abfragen_anker_rek( zond->dbase_zond->zond_dbase_work, anbindung,
+            pdf_root, &anchor_id_dbase, child, error );
+    if ( rc ) ERROR_Z
 
-        if ( anchor_id_dbase != pdf_root ) *anchor_pdf_abschnitt = anchor_id_dbase;
-    }
+    if ( anchor_pdf_abschnitt ) *anchor_pdf_abschnitt = anchor_id_dbase;
 
     *node_text = g_strdup_printf( "S. %i", anbindung.von.seite + 1 );
     if ( anbindung.von.index ) *node_text = add_string( *node_text, g_strdup_printf( ", Index %d", anbindung.von.index ) );
@@ -380,11 +363,13 @@ zond_anbindung_insert_pdf_abschnitt_in_dbase( Projekt* zond,
             *node_text = add_string( *node_text, g_strdup_printf( " - S. %d", anbindung.bis.seite + 1 ) );
     if ( anbindung.bis.index != EOP ) *node_text = add_string( *node_text, g_strdup_printf( ", Index %d", anbindung.bis.index ) );
 
+    //file_section zusammensetzen
+    zond_treeview_build_file_section( anbindung, &file_section );
+
     node_id_new = zond_dbase_insert_node( zond->dbase_zond->zond_dbase_work, anchor_id_dbase, *child,
-            ZOND_DBASE_TYPE_PDF_ABSCHNITT, 0, rel_path,
-            anbindung.von.seite, anbindung.von.index,
-            anbindung.bis.seite, anbindung.bis.index,
+            ZOND_DBASE_TYPE_FILE_PART, 0, file_part, file_section,
             zond->icon[ICON_ANBINDUNG].icon_name, *node_text, NULL, error );
+    g_free( file_section );
     if ( node_id_new == -1 ) ERROR_Z
 
     if ( node_inserted ) *node_inserted = node_id_new;
@@ -414,15 +399,15 @@ zond_anbindung_fm( Projekt* zond, gchar const* rel_path, Anbindung anbindung,
 
 static gint
 zond_anbindung_trees( Projekt* zond, gint anchor_pdf_abschnitt, gboolean child,
-        gint node_inserted, Anbindung anbindung, gchar const* rel_path, gchar const* node_text, GError** error )
+        gint node_inserted, Anbindung anbindung, gchar const* file_part, gchar const* node_text, GError** error )
 {
     gint rc = 0;
 
     rc = zond_anbindung_baum_inhalt( zond, anchor_pdf_abschnitt, child, node_inserted, anbindung,
-            rel_path, node_text, error );
+            file_part, node_text, error );
     if ( rc ) ERROR_Z
 
-    rc = zond_anbindung_fm( zond, rel_path, anbindung, node_text, error );
+    rc = zond_anbindung_fm( zond, file_part, anbindung, node_text, error );
     if ( rc ) ERROR_Z
 
     return 0;
@@ -433,18 +418,18 @@ gint
 zond_anbindung_erzeugen( PdfViewer* pv, GError** error )
 {
     gint rc = 0;
-    gboolean child = FALSE;
+    gboolean child = TRUE;
     gint node_inserted = 0;
     gchar* node_text = NULL;
     gint anchor_pdf_abschnitt = 0;
 
     rc = zond_anbindung_insert_pdf_abschnitt_in_dbase( pv->zond,
-            pv->rel_path, pv->anbindung, &anchor_pdf_abschnitt, &child,
+            pv->file_part, pv->anbindung, &anchor_pdf_abschnitt, &child,
             &node_inserted, &node_text, error );
     if ( rc ) ERROR_Z
 
     rc = zond_anbindung_trees( pv->zond, anchor_pdf_abschnitt, child, node_inserted, pv->anbindung,
-            pv->rel_path, node_text, error );
+            pv->file_part, node_text, error );
     g_free( node_text );
     if ( rc ) ERROR_Z
 

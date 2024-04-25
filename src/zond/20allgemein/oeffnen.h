@@ -7,7 +7,7 @@ typedef int gint;
 typedef char gchar;
 
 
-gint oeffnen_internal_viewer( Projekt*, const gchar*, Anbindung*, const PdfPos*, gchar** );
+gint oeffnen_internal_viewer( Projekt*, gchar const*, Anbindung*, const PdfPos*, gchar** );
 
 
 

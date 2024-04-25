@@ -111,7 +111,7 @@ cb_textsuche_changed( GtkListBox* box, GtkListBoxRow* row, gpointer data )
     gboolean child = FALSE;
     Anbindung anbindung = { 0 };
     gint anchor_id = 0;
-    gint baum_inhalt_pdf_abschnitt = 0;
+    gint baum_inhalt_file = 0;
 
     Projekt* zond = (Projekt*) data;
 
@@ -121,14 +121,14 @@ cb_textsuche_changed( GtkListBox* box, GtkListBoxRow* row, gpointer data )
 
     PDFTextOcc pdf_text_occ = g_array_index( arr_pdf_text_occ, PDFTextOcc, index );
 
-    //herausfinden, welche Anbuindung am besten paßt
+    //herausfinden, welche Anbindung am besten paßt
     //erst pdf_root herausfinden. dann anker_rek
     anbindung.von.seite = pdf_text_occ.page;
     anbindung.bis.seite = pdf_text_occ.page;
     anbindung.von.index = pdf_text_occ.quad.ul.y;
     anbindung.bis.index = pdf_text_occ.quad.ll.y;
 
-    rc = zond_dbase_get_pdf_root( zond->dbase_zond->zond_dbase_work,
+    rc = zond_dbase_get_file_part_root( zond->dbase_zond->zond_dbase_work,
             pdf_text_occ.rel_path, &pdf_root, &error );
     if ( rc )
     {
@@ -169,9 +169,9 @@ cb_textsuche_changed( GtkListBox* box, GtkListBoxRow* row, gpointer data )
     }
     else node_id = anchor_id;
 
-    //prüfen, ob Abschnitt überhaupt angebunden ist (BAUM_INHALT_PDF_ABSCHNITT (link->)
-    rc = zond_dbase_find_baum_inhalt_anbindung( zond->dbase_zond->zond_dbase_work,
-            node_id, &baum_inhalt_pdf_abschnitt, NULL, NULL, &error );
+    //prüfen, ob Abschnitt angebunden ist (BAUM_INHALT_PDF_ABSCHNITT (link->)
+    rc = zond_dbase_find_baum_inhalt_file( zond->dbase_zond->zond_dbase_work,
+            node_id, &baum_inhalt_file, NULL, NULL, &error );
     if ( rc )
     {
         display_message( zond->app_window, "Fehler Abfrage\n\n",
@@ -181,27 +181,8 @@ cb_textsuche_changed( GtkListBox* box, GtkListBoxRow* row, gpointer data )
         return;
     }
 
-    //Falls nicht: Prüfen ob Datei insgesamt angebunden
-    if ( !baum_inhalt_pdf_abschnitt )
-    {
-        gint rc = 0;
-        gint baum_inhalt_file = 0;
-
-        rc = zond_dbase_get_baum_inhalt_file_from_rel_path(
-                zond->dbase_zond->zond_dbase_work, pdf_text_occ.rel_path,
-                &baum_inhalt_file, &error );
-        if ( rc )
-        {
-            display_message( zond->app_window, "Fehler Abfrage\n\n",
-                    error->message, NULL );
-            g_error_free( error );
-
-            return;
-        }
-
-        if ( !baum_inhalt_file ) return;
-        else node_id = baum_inhalt_file; //weil ja nur hierüber angebunden, nicht als Baum_inhalt_pdf_abschnitt
-    }
+    if ( !baum_inhalt_file ) return;
+    else node_id = baum_inhalt_file; //weil ja nur hierüber angebunden, nicht als Baum_inhalt_pdf_abschnitt
 
     //cursor dorthin setzen
     GtkTreePath* path = zond_treeview_get_path( zond->treeview[BAUM_INHALT], node_id );
