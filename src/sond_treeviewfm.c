@@ -1950,10 +1950,15 @@ sond_treeviewfm_set_root( SondTreeviewFM* stvfm, const gchar* root, gchar** errm
         return 0;
     }
 
-    rc = sond_treeviewfm_load_dir( stvfm, NULL, errmsg );
-    if ( rc ) ERROR_S
-
     stvfm_priv->root = g_strdup( root );
+
+    rc = sond_treeviewfm_load_dir( stvfm, NULL, errmsg );
+    if ( rc )
+    {
+        g_free( stvfm_priv->root );
+        stvfm_priv->root = NULL;
+        ERROR_S
+    }
 
     return 0;
 }

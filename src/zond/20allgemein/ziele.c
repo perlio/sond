@@ -342,11 +342,15 @@ zond_anbindung_insert_pdf_abschnitt_in_dbase( Projekt* zond,
     if ( !pdf_root )
     {
         gint rc = 0;
-        gchar* path = NULL;
-        gchar* part = NULL;
+        gchar* rel_path = NULL;
 
-        rc = zond_treeview_insert_file_in_db( zond, file_part, &pdf_root, error );
-        g_free( path );
+        rel_path = g_strndup( file_part + 1, strlen( file_part + 1 ) - strlen( g_strrstr( file_part + 1, "//" ) ) );
+
+        rc = zond_treeview_insert_file_in_db( zond, rel_path, "anbindung", NULL, error );
+        if ( rc ) ERROR_Z
+
+        rc = zond_dbase_get_file_part_root( zond->dbase_zond->zond_dbase_work,
+                file_part, &pdf_root, error );
         if ( rc ) ERROR_Z
     }
 

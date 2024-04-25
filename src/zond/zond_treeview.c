@@ -763,6 +763,28 @@ zond_treeview_insert_file_parts( ZondTreeview* ztv, gint node_id,
 }
 
 
+gint
+zond_treeview_insert_file_in_db( Projekt* zond, gchar const* rel_path,
+        gchar const* icon_name, gint* file_root, GError** error )
+{
+    gint rc = 0;
+    gchar* basename = NULL;
+    gint file_root_int = 0;
+
+    basename = g_strrstr( rel_path, "/" );
+
+    rc = zond_dbase_create_file_root( zond->dbase_zond->zond_dbase_work,
+            rel_path, icon_name, basename, NULL, &file_root_int, error );
+    if ( rc ) ERROR_Z
+
+    if ( file_root ) *file_root = file_root_int;
+
+    //ToDo: MimeParts und zip einfügen
+
+    return 0;
+}
+
+
 static gint
 zond_treeview_remove_childish_anbindungen( ZondTreeview* ztv, InfoWindow* info_window,
         gint ID, gint* anchor_id, gboolean* child, Anbindung* anbindung, GError** error )
@@ -860,7 +882,6 @@ zond_treeview_datei_anbinden( ZondTreeview* ztv, GtkTreeIter* anchor_iter,
     {
         if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
         g_error_free( error );
-        g_free( file_part );
 
         return -1;
     }
@@ -903,12 +924,8 @@ zond_treeview_datei_anbinden( ZondTreeview* ztv, GtkTreeIter* anchor_iter,
     else //Datei noch nicht in zond_dbase
     {
         gint rc = 0;
-//ToDo: hier noch machen!!!
-        rc = zond_treeview_insert_file_in_db( zond, file_part, &pdf_root, error );
 
-        rc = zond_dbase_create_file_root( ztv_priv->zond->dbase_zond->zond_dbase_work,
-                rel_path, zond_treeview_get_icon_name( info ), g_file_info_get_name( info ),
-                NULL, &file_part_root, &error );
+        rc = zond_treeview_insert_file_in_db( ztv_priv->zond, rel_path, zond_treeview_get_icon_name( info ), &file_part_root, &error );
         if ( rc )
         {
             if ( errmsg ) *errmsg = g_strdup( error->message );
@@ -1545,11 +1562,7 @@ zond_treeview_clipboard_kopieren( Projekt* zond, gboolean child,
         GtkTreeIter* iter_cursor, GtkTreeIter* iter_anchor,
         gint anchor_id, gchar** errmsg )
 {
-    Clipboard* clipboard = NULL;
-
     SSelection s_selection = { zond, iter_anchor, child, anchor_id };
-
-    clipboard = ((SondTreeviewClass*) g_type_class_peek( SOND_TYPE_TREEVIEW ))->clipboard;
 
     if ( zond_tree_store_get_tree_store( iter_cursor ) ==
             ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_AUSWERTUNG]) )) )
@@ -1560,14 +1573,6 @@ zond_treeview_clipboard_kopieren( Projekt* zond, gboolean child,
             &s_selection, errmsg );
         if ( rc == -1 ) ERROR_S
     }
-    /*
-    else if ( clipboard->tree_view == zond->treeview[BAUM_INHALT] &&
-            zond_tree_store_get_tree_store( iter_cursor ) ==
-            gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]) ) )
-    {
-        //ToDo: Erzeugen von virt-Pdfs
-    }
-    */
     else return 0;
 
     if ( child && (iter_cursor->user_data !=
@@ -2165,8 +2170,6 @@ zond_treeview_jump_to_origin( ZondTreeview* ztv, GtkTreeIter* iter, GError** err
             GTK_TREE_VIEW(ztv_priv->zond->treeview[ztv_priv->zond->baum_active]) ),
             iter, 2, &node_id, -1 );
 
-    //ToDo: File_PART implementieren
-
     rc = zond_dbase_get_type_and_link( ztv_priv->zond->dbase_zond->zond_dbase_work, node_id,
             &type, &link, error );
     if ( rc ) ERROR_Z
@@ -2354,7 +2357,7 @@ zond_treeview_open_node( Projekt* zond, GtkTreeIter* iter, gboolean open_with, G
         gchar* section_ges = NULL;
 
         rc = zond_dbase_find_baum_inhalt_file( zond->dbase_zond->zond_dbase_work,
-                node_id, NULL, NULL, &file_part_id, error );
+                node_id, NULL, &file_part_id, NULL, error );
         if ( rc ) ERROR_Z
 
         rc = zond_dbase_get_node( zond->dbase_zond->zond_dbase_work,
