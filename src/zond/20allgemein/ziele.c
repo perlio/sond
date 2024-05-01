@@ -137,6 +137,9 @@ zond_anbindung_verschieben_kinder( Projekt* zond,
 {
     gboolean child = TRUE;
     gint anchor_id = node_id;
+    GtkTreeIter iter_anchor = { 0 };
+
+    iter_anchor = *iter;
 
     do
     {
@@ -169,12 +172,14 @@ zond_anbindung_verschieben_kinder( Projekt* zond,
         {
             gint rc = 0;
             GtkTreeIter iter_younger_sibling = { 0 };
+            GtkTreeIter iter_new = { 0 };
 
             rc = zond_dbase_verschieben_knoten( zond->dbase_zond->zond_dbase_work,
                     younger_sibling, anchor_id, child, error );
             if ( rc ) ERROR_Z
 
             iter_younger_sibling = *iter;
+
             if ( !gtk_tree_model_iter_next( GTK_TREE_MODEL(zond_tree_store_get_tree_store( iter )),
                     &iter_younger_sibling ) )
             {
@@ -185,10 +190,11 @@ zond_anbindung_verschieben_kinder( Projekt* zond,
 
             zond_tree_store_move_node(
                     &iter_younger_sibling, ZOND_TREE_STORE(gtk_tree_view_get_model(
-                    GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]) )), iter, TRUE, NULL );
+                    GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]) )), &iter_anchor, child, &iter_new );
 
             anchor_id = younger_sibling;
             child = FALSE;
+            iter_anchor = iter_new;
         }
         else break;
     } while ( 1 );
@@ -227,15 +233,10 @@ zond_anbindung_baum_inhalt( Projekt* zond, gint anchor_id, gboolean child,
     gtk_tree_iter_free( iter );
     zond_tree_store_set( &iter_inserted, zond->icon[ICON_ANBINDUNG].icon_name, node_text, id_inserted );
 
-    if ( child )
-    {
-        gint rc = 0;
+    rc = zond_anbindung_verschieben_kinder( zond, id_inserted, &iter_inserted, anbindung, error );
+    if ( rc ) ERROR_Z
 
-        rc = zond_anbindung_verschieben_kinder( zond, id_inserted, &iter_inserted, anbindung, error );
-        if ( rc ) ERROR_Z
-    }
-
-    if ( child ) sond_treeview_expand_row( zond->treeview[BAUM_INHALT], &iter_inserted );
+    sond_treeview_expand_row( zond->treeview[BAUM_INHALT], &iter_inserted );
     sond_treeview_set_cursor_on_text_cell( zond->treeview[BAUM_INHALT], &iter_inserted );
     gtk_widget_grab_focus( GTK_WIDGET(zond->treeview[BAUM_INHALT]) );
 
