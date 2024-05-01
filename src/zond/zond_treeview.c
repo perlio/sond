@@ -1227,11 +1227,12 @@ zond_treeview_clipboard_anbinden_foreach( SondTreeview* stv, GtkTreeIter* iter,
 
             return -1;
         }
+
+        (s_selection->zaehler)++;
     }
 
     s_selection->child = FALSE;
     s_selection->anchor_id = node_id_new;
-    (s_selection->zaehler)++;
 
     return 0;
 }
@@ -1259,7 +1260,7 @@ zond_treeview_clipboard_anbinden( Projekt* zond, gint anchor_id, GtkTreeIter* an
 
     gtk_tree_view_columns_autosize( GTK_TREE_VIEW(((Projekt*) zond)->treeview[BAUM_INHALT]) );
 
-    gchar* text = g_strdup_printf( "%i Datei(en) angebunden", s_selection.zaehler );
+    gchar* text = g_strdup_printf( "%i Anbindungen eingefügt", s_selection.zaehler );
     info_window_set_message( info_window, text );
     g_free( text );
 
