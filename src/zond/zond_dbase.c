@@ -223,18 +223,18 @@ Rest = 0
             "older_sibling_ID INTEGER NOT NULL, "
             "type INTEGER, "
             "link INTEGER, "
-            "file_part VARCHAR, "
-            "section VARCHAR, "
-            "icon_name VARCHAR(50), "
-            "node_text VARCHAR(50), "
-            "text VARCHAR, "
+            "file_part TEXT, "
+            "section TEXT, "
+            "icon_name TEXT, "
+            "node_text TEXT, "
+            "text TEXT, "
             "FOREIGN KEY (parent_ID) REFERENCES knoten (ID) "
             "ON DELETE CASCADE ON UPDATE CASCADE, "
             "FOREIGN KEY (older_sibling_ID) REFERENCES knoten (ID) "
             "ON DELETE CASCADE ON UPDATE CASCADE, "
             "FOREIGN KEY (link) REFERENCES knoten (ID) "
             "ON DELETE CASCADE ON UPDATE CASCADE "
-            "); "
+            ") STRICT; "
 
             "INSERT INTO knoten (ID, parent_id, older_sibling_id, "
             "node_text) VALUES (0, 0, 0, '" MAJOR "');"
@@ -1220,7 +1220,7 @@ zond_dbase_create_file_root( ZondDBase* zond_dbase,
     }
 
     file_part = g_strdup_printf( "/%s//", rel_path );
-    rc = sqlite3_bind_text( stmt[0], 1, file_part, -1, NULL );
+    rc = sqlite3_bind_text( stmt[0], 1, file_part, -1, SQLITE_TRANSIENT );
     g_free( file_part );
     if ( rc != SQLITE_OK ) ERROR_Z_DBASE
 
@@ -1598,7 +1598,7 @@ zond_dbase_get_node( ZondDBase* zond_dbase, gint node_id, gint* type, gint* link
     sqlite3_stmt** stmt = NULL;
 
     const gchar* sql[] = {
-            "SELECT type, link, file_part, icon_name, node_text, text "
+            "SELECT type, link, file_part, section, icon_name, node_text, text "
             "FROM knoten WHERE ID=?1;"
             };
 
@@ -1626,9 +1626,10 @@ zond_dbase_get_node( ZondDBase* zond_dbase, gint node_id, gint* type, gint* link
     if ( type ) *type = sqlite3_column_int( stmt[0], 0 );
     if ( link ) *link= sqlite3_column_int( stmt[0], 1 );
     if ( file_part ) *file_part = g_strdup( (const gchar*) sqlite3_column_text( stmt[0], 2 ) );
-    if ( icon_name ) *icon_name = g_strdup( (const gchar*) sqlite3_column_text( stmt[0], 3 ) );
-    if ( node_text ) *node_text = g_strdup( (const gchar*) sqlite3_column_text( stmt[0], 4 ) );
-    if ( text ) *text = g_strdup( (const gchar*) sqlite3_column_text( stmt[0], 5 ) );
+    if ( section ) *section = g_strdup( (const gchar*) sqlite3_column_text( stmt[0], 3 ) );
+    if ( icon_name ) *icon_name = g_strdup( (const gchar*) sqlite3_column_text( stmt[0], 4 ) );
+    if ( node_text ) *node_text = g_strdup( (const gchar*) sqlite3_column_text( stmt[0], 5 ) );
+    if ( text ) *text = g_strdup( (const gchar*) sqlite3_column_text( stmt[0], 6 ) );
 
     return 0;
 }

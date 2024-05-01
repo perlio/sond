@@ -768,10 +768,11 @@ zond_treeview_insert_file_in_db( Projekt* zond, gchar const* rel_path,
         gchar const* icon_name, gint* file_root, GError** error )
 {
     gint rc = 0;
-    gchar* basename = NULL;
+    gchar const* basename = NULL;
     gint file_root_int = 0;
 
     basename = g_strrstr( rel_path, "/" );
+    if ( !basename ) basename = rel_path;
 
     rc = zond_dbase_create_file_root( zond->dbase_zond->zond_dbase_work,
             rel_path, icon_name, basename, NULL, &file_root_int, error );
@@ -2317,10 +2318,14 @@ zond_treeview_open_node( Projekt* zond, GtkTreeIter* iter, gboolean open_with, G
         return 0;
     }
 
-    //Dann: Pdf
-    zond_treeview_parse_file_section( section, &anbindung );
     g_free( file_part );
-    g_free( section );
+
+    //Dann: Pdf
+    if ( section )
+    {
+        zond_treeview_parse_file_section( section, &anbindung );
+        g_free( section );
+    }
 
     if ( zond->state & GDK_CONTROL_MASK )
     {
@@ -2340,12 +2345,13 @@ zond_treeview_open_node( Projekt* zond, GtkTreeIter* iter, gboolean open_with, G
                     NULL, NULL, NULL, &section_ges, NULL, NULL, NULL, error );
             if ( rc ) ERROR_Z
 
-            zond_treeview_parse_file_section( section_ges, &anbindung_ges );
-            g_free( section_ges );
+            if ( section ) //nicht root
+            {
+                zond_treeview_parse_file_section( section_ges, &anbindung_ges );
+                g_free( section_ges );
 
-            //Könnte ja root sein... Ansonsten:
-            if ( (anbindung_ges.bis.seite || anbindung_ges.bis.index) )
-                    anbindung_int = &anbindung_ges;
+                anbindung_int = &anbindung_ges;
+            }
         }
     }
     else
@@ -2364,13 +2370,12 @@ zond_treeview_open_node( Projekt* zond, GtkTreeIter* iter, gboolean open_with, G
                 file_part_id, NULL, NULL, NULL, &section_ges, NULL, NULL, NULL, error );
         if ( rc ) ERROR_Z
 
-        zond_treeview_parse_file_section( section_ges, &anbindung_ges );
-        g_free( section_ges );
-
-        //Falls pdf-root seinerseits Kind von part ist, sind alle
-        //member von anbindung_ges 0. Deshalb braucht dies nicht gesondert geprüft zu werden.
-        if ( anbindung_ges.bis.seite || anbindung_ges.bis.index )
-                anbindung_int = &anbindung_ges;
+        if ( section_ges )
+        {
+            zond_treeview_parse_file_section( section_ges, &anbindung_ges );
+            g_free( section_ges );
+            anbindung_int = &anbindung_ges;
+        }
     }
 
     //jetzt Anfangspunkt
@@ -3019,7 +3024,7 @@ static void
 zond_treeview_parse_pdf_pos( gchar const* section, PdfPos* pdf_pos )
 {
     pdf_pos->seite = atoi( section + 1 );
-    pdf_pos->index = atoi( strstr( section, "," ) +1 );
+    pdf_pos->index = atoi( strstr( section, "," ) + 1 );
 
     return;
 }
@@ -3028,17 +3033,13 @@ zond_treeview_parse_pdf_pos( gchar const* section, PdfPos* pdf_pos )
 void
 zond_treeview_parse_file_section( gchar const* file_section, Anbindung* anbindung )
 {
+    if ( !file_section ) return;
+
     if ( g_str_has_prefix( file_section, "{{" ) )
     {
         zond_treeview_parse_pdf_pos( file_section + 1, &anbindung->von );
-        if ( anbindung->von.seite == -1 ) return;
 
         zond_treeview_parse_pdf_pos( strstr( file_section, "}" ) + 1, &anbindung->bis );
-        if ( anbindung->bis.seite == -1 )
-        {
-            anbindung->von.seite = -1;
-            return;
-        }
     }
     else zond_treeview_parse_pdf_pos( file_section + 1, &anbindung->von );
 

@@ -155,6 +155,13 @@ zond_anbindung_verschieben_kinder( Projekt* zond,
                 younger_sibling, NULL, NULL, NULL, &section, NULL, NULL, NULL, error );
         if ( rc ) ERROR_Z
 
+        if ( !section )
+        {
+            if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\nKnoten enthält keine section", __func__ );
+
+            return -1;
+        }
+
         zond_treeview_parse_file_section( section, &anbindung_y );
         g_free( section );
 
@@ -248,8 +255,11 @@ ziele_abfragen_anker_rek( ZondDBase* zond_dbase, Anbindung anbindung,
             NULL, NULL, NULL, error );
     if ( rc ) ERROR_Z
 
-    zond_treeview_parse_file_section( section, &anbindung_anchor );
-    g_free( section );
+    if ( section )
+    {
+        zond_treeview_parse_file_section( section, &anbindung_anchor );
+        g_free( section );
+    }
 
     //ziele auf Identität prüfen
     if ( ziele_1_gleich_2( anbindung_anchor, anbindung ) )

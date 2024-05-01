@@ -179,16 +179,21 @@ oeffnen_internal_viewer( Projekt* zond, const gchar* file_part, Anbindung* anbin
         const PdfPos* pos_pdf, gchar** errmsg )
 {
     PdfPos pos_von = { 0 };
+    gchar* rel_path = NULL;
+
+    rel_path = g_strndup( file_part + 1, strlen( file_part + 1 ) - strlen( g_strrstr( file_part + 1, "//" ) ) );
 
     //Neue Instanz oder bestehende?
     if ( !(zond->state & GDK_SHIFT_MASK) )
     {
+        //ToDo: verallgemeinern für parts
+
         //Testen, ob pv mit rel_path schon geöffnet
         for ( gint i = 0; i < zond->arr_pv->len; i++ )
         {
             PdfViewer* pv = g_ptr_array_index( zond->arr_pv, i );
             if ( pv->dd->next == NULL &&
-                    !g_strcmp0( file_part, zond_pdf_document_get_path( pv->dd->zond_pdf_document ) ) )
+                    !g_strcmp0( rel_path, zond_pdf_document_get_path( pv->dd->zond_pdf_document ) ) )
             {
                 if ( (!pv->dd->anbindung && !anbindung) ||
                         (pv->dd->anbindung && anbindung &&
@@ -209,8 +214,9 @@ oeffnen_internal_viewer( Projekt* zond, const gchar* file_part, Anbindung* anbin
         }
     }
 
-    DisplayedDocument* dd = document_new_displayed_document( file_part,
+    DisplayedDocument* dd = document_new_displayed_document( rel_path,
             anbindung, errmsg );
+    g_free( rel_path );
     if ( !dd && *errmsg ) ERROR_S
     else if ( !dd ) return 0;
 

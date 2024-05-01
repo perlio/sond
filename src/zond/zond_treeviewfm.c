@@ -458,6 +458,14 @@ zond_treeviewfm_expand_dummy( SondTreeviewFM* stvfm,
                     child, NULL, NULL, &file_part, &section, &icon_name, &node_text, NULL, error );
             if ( rc ) ERROR_Z
 
+            if ( !section )
+            {
+                if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\nKnoten enthält keine section", __func__ );
+                g_free( file_part );
+
+                return -1;
+            }
+
             zond_treeview_parse_file_section( section, &anbindung );
             g_free( section );
 
