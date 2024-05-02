@@ -878,34 +878,47 @@ sond_treeviewfm_render_text_cell( GtkTreeViewColumn* column,
 {
     gint rc = 0;
     GObject* object = NULL;
+    gchar const* node_text = NULL;
+    gboolean background = FALSE;
     GError* error = NULL;
 
     SondTreeviewFM* stvfm = SOND_TREEVIEWFM(data);
 
     gtk_tree_model_get( model, iter, 0, &object, -1 );
 
-    rc = SOND_TREEVIEWFM_GET_CLASS(stvfm)->render_text( stvfm, iter, object, &error );
-    g_object_unref( object );
+    rc = SOND_TREEVIEWFM_GET_CLASS(stvfm)->render_text( stvfm, iter, object, &node_text, &background, &error );
     if ( rc )
     {
+        g_object_unref( object );
+
         display_message( gtk_widget_get_toplevel( GTK_WIDGET(stvfm) ),
                 "Fehler - in ", __func__, "\n\n", error->message, NULL );
         g_error_free( error );
+
+        return;
     }
+
+    g_object_set( G_OBJECT(sond_treeview_get_cell_renderer_text( SOND_TREEVIEW(stvfm) )), "text",
+            node_text, NULL );
+
+    g_object_set( G_OBJECT(sond_treeview_get_cell_renderer_text( SOND_TREEVIEW(stvfm) )),
+            "background-set", background, NULL );
+
+    g_object_unref( object );
 
     return;
 }
 
 
 static gint
-sond_treeviewfm_render_text( SondTreeviewFM* stvfm, GtkTreeIter* iter, GObject* object, GError** error )
+sond_treeviewfm_render_text( SondTreeviewFM* stvfm, GtkTreeIter* iter, GObject* object,
+        gchar const** node_text, gboolean* background, GError** error )
 {
     if ( G_IS_FILE_INFO(object) )
     {
         gchar* rel_path = NULL;
 
-        g_object_set( G_OBJECT(sond_treeview_get_cell_renderer_text( SOND_TREEVIEW(stvfm) )), "text",
-                sond_treeviewfm_get_name( SOND_TREEVIEWFM(stvfm), iter ), NULL );
+        *node_text = sond_treeviewfm_get_name( SOND_TREEVIEWFM(stvfm), iter );
 
         rel_path = sond_treeviewfm_get_rel_path( stvfm, iter );
         if ( rel_path )
@@ -916,8 +929,7 @@ sond_treeviewfm_render_text( SondTreeviewFM* stvfm, GtkTreeIter* iter, GObject* 
             g_free( rel_path );
             if ( rc == -1 ) ERROR_Z
 
-            g_object_set( G_OBJECT(sond_treeview_get_cell_renderer_text( SOND_TREEVIEW(stvfm) )),
-                    "background-set", (gboolean) rc, NULL );
+            *background = (gboolean) rc;
         }
     }
     else //object ist file_part

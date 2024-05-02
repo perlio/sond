@@ -333,41 +333,69 @@ zond_treeviewfm_results_row_activated( GtkWidget* listbox, GtkWidget* row, gpoin
 
 
 static gint
-zond_treeviewfm_render_text( SondTreeviewFM* stvfm, GtkTreeIter* iter, GObject* object, GError** error )
+zond_treeviewfm_render_text( SondTreeviewFM* stvfm, GtkTreeIter* iter, GObject* object,
+        gchar const** node_text, gboolean* background, GError** error )
 {
-    gint rc = 0;
-
-    if ( ZOND_IS_PDF_ABSCHNITT(object) )
+    if ( G_IS_FILE_INFO(object) )
     {
+        gchar* rel_path = NULL;
         gint rc = 0;
-        gchar const* node_text = NULL;
-        gint ID = 0;
-        gint baum_inhalt_file = 0;
-        gboolean angebunden = FALSE;
+        gchar* file_part = NULL;
+        gint file_part_root = 0;
 
         ZondTreeviewFMPrivate* ztvfm_priv = zond_treeviewfm_get_instance_private( ZOND_TREEVIEWFM(stvfm) );
 
-        zond_pdf_abschnitt_get( ZOND_PDF_ABSCHNITT(object), &ID, NULL, NULL, NULL, &node_text );
+        *node_text = g_file_info_get_name( G_FILE_INFO(object) );
 
-        g_object_set( G_OBJECT(sond_treeview_get_cell_renderer_text( SOND_TREEVIEW(stvfm) )), "text",
-                node_text, NULL );
+        rel_path = sond_treeviewfm_get_rel_path( stvfm, iter );
+        file_part = g_strdup_printf( "/%s//", rel_path );
+        g_free( rel_path );
+
+        rc = zond_dbase_get_file_part_root( ztvfm_priv->zond->dbase_zond->zond_dbase_work,
+                file_part, &file_part_root, error );
+        g_free( file_part );
+        if ( rc ) ERROR_Z
+
+        if ( !file_part_root ) return 0; //file_part nicht angelegt - nicht ausgrauen
+        else //prüfen, ob überhaupt angebunden
+        {
+            gint rc = 0;
+            gint baum_inhalt_file = 0;
+
+            rc = zond_dbase_find_baum_inhalt_file( ztvfm_priv->zond->dbase_zond->zond_dbase_work,
+                    file_part_root, &baum_inhalt_file, NULL, NULL, error );
+            if ( rc ) ERROR_Z
+
+            if ( baum_inhalt_file ) *background = TRUE;
+
+            return 0;
+        }
+    }
+    else if ( ZOND_IS_PDF_ABSCHNITT(object) )
+    {
+        gint rc = 0;
+        gint ID = 0;
+        gint baum_inhalt_file = 0;
+
+        ZondTreeviewFMPrivate* ztvfm_priv = zond_treeviewfm_get_instance_private( ZOND_TREEVIEWFM(stvfm) );
+
+        zond_pdf_abschnitt_get( ZOND_PDF_ABSCHNITT(object), &ID, NULL, NULL, NULL, node_text );
 
         //Testen, ob grau eingefärbt werden soll, weil Anbindung angebunden
         rc = zond_dbase_find_baum_inhalt_file( ztvfm_priv->zond->dbase_zond->zond_dbase_work,
                 ID, &baum_inhalt_file, NULL, NULL, error );
         if ( rc ) ERROR_Z
 
-        if ( baum_inhalt_file ) angebunden = TRUE;
-
-        g_object_set( G_OBJECT(sond_treeview_get_cell_renderer_text( SOND_TREEVIEW(stvfm) )),
-                "background-set", angebunden, NULL );
+        if ( baum_inhalt_file ) *background = TRUE;
 
         return 0;
     }
+    else //object ist file_part
+    {
 
-    //nur, wenn nicht erledigt
-    rc = SOND_TREEVIEWFM_CLASS(zond_treeviewfm_parent_class)->render_text( stvfm, iter, object, error );
-    if ( rc ) ERROR_Z
+    }
+
+    //kein chain-up!
 
     return 0;
 }

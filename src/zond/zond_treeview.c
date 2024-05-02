@@ -960,7 +960,6 @@ zond_treeview_datei_anbinden( ZondTreeview* ztv, GtkTreeIter* anchor_iter,
     }
 
     *anchor_iter = iter_new;
-    child = FALSE;
     (*zaehler)++;
 
     return new_node_id;
@@ -983,6 +982,7 @@ zond_treeview_ordner_anbinden_rekursiv( ZondTreeview* ztv, GtkTreeIter* anchor_i
     GError* error = NULL;
     gint anchor_id_loop = 0;
     GtkTreeIter iter_anchor_loop = { 0 };
+    gboolean child_loop = TRUE;
 
     ZondTreeviewPrivate* ztv_priv = zond_treeview_get_instance_private( ztv );
 
@@ -1024,7 +1024,6 @@ zond_treeview_ordner_anbinden_rekursiv( ZondTreeview* ztv, GtkTreeIter* anchor_i
 
     //new_anchor kopieren, da in der Schleife verändert wird
     //es soll aber der soeben erzeugte Punkt zurückgegegen werden
-    child = TRUE;
     anchor_id_loop = new_node_id;
     iter_anchor_loop = iter_new;
 
@@ -1053,7 +1052,7 @@ zond_treeview_ordner_anbinden_rekursiv( ZondTreeview* ztv, GtkTreeIter* anchor_i
             if ( type == G_FILE_TYPE_DIRECTORY )
             {
                 new_node_id_loop = zond_treeview_ordner_anbinden_rekursiv( ztv,
-                        &iter_anchor_loop, anchor_id_loop, child, file_child, info_child,
+                        &iter_anchor_loop, anchor_id_loop, child_loop, file_child, info_child,
                         info_window, zaehler, errmsg );
 
                 if ( new_node_id_loop == -1 )
@@ -1070,7 +1069,7 @@ zond_treeview_ordner_anbinden_rekursiv( ZondTreeview* ztv, GtkTreeIter* anchor_i
 
                 rel_path = get_rel_path_from_file( ztv_priv->zond->dbase_zond->project_dir, file_child );
                 new_node_id_loop = zond_treeview_datei_anbinden( ztv,
-                        &iter_anchor_loop, anchor_id_loop, child,
+                        &iter_anchor_loop, anchor_id_loop, child_loop,
                         info_child, rel_path, info_window, zaehler, errmsg );
                 g_free( rel_path );
 
@@ -1088,7 +1087,7 @@ zond_treeview_ordner_anbinden_rekursiv( ZondTreeview* ztv, GtkTreeIter* anchor_i
             }
 
             anchor_id_loop = new_node_id_loop;
-            child = FALSE;
+            child_loop = FALSE;
         } //ende if ( child )
         else break;
     }
