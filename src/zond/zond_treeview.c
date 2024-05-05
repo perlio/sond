@@ -948,8 +948,8 @@ zond_treeview_datei_anbinden( ZondTreeview* ztv, GtkTreeIter* anchor_iter,
     }
 
     rc = zond_treeview_walk_tree( ztv, FALSE, file_part_root,
-        (zond_tree_store_get_root_node( ZOND_TREE_STORE(gtk_tree_view_get_model(
-        GTK_TREE_VIEW(ztv) )) )) ? NULL : anchor_iter, child, &iter_new, 0, NULL,
+        (zond_tree_store_get_root( ZOND_TREE_STORE(gtk_tree_view_get_model(
+        GTK_TREE_VIEW(ztv) )) ) == anchor_id) ? NULL : anchor_iter, child, &iter_new, 0, NULL,
         zond_treeview_insert_file_parts, &error );
     if ( rc == -1 )
     {
