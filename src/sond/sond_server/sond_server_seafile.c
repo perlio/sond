@@ -475,8 +475,8 @@ sond_server_seafile_create_zond( SondServer* sond_server,
     gchar* errmsg = NULL;
 
     path = g_strdup_printf( "%d-%d.ZND", reg_jahr, reg_nr );
-    rc = zond_dbase_new( path, TRUE, TRUE, &zond_dbase, &errmsg );
-    if ( rc )
+    zond_dbase = zond_dbase_new( path, TRUE, TRUE, &errmsg );
+    if ( !zond_dbase )
     {
         if ( error ) *error = g_error_new( ZOND_ERROR, 0,
                 "%s\nzond_dbase_new\n%s", __func__, errmsg );

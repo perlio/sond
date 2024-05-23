@@ -23,6 +23,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <sqlite3.h>
 #include <gtk/gtk.h>
 
+#include "zond_convert.h"
+
 #include "20allgemein/ziele.c"
 
 #include "../misc.h"
@@ -98,7 +100,7 @@ zond_dbase_get_property (GObject    *object,
 
 
 static void
-zond_dbase_finalize_stmts( sqlite3* db)
+zond_dbase_finalize_stmts( sqlite3* db )
 {
     sqlite3_stmt* stmt = NULL;
 
@@ -147,7 +149,7 @@ zond_dbase_class_init( ZondDBaseClass* klass )
             g_param_spec_pointer( "dbase",
                                  "sqlite3*",
                                  "Datenbankverbindung.",
-                                  G_PARAM_CONSTRUCT_ONLY | G_PARAM_READWRITE );
+                                  G_PARAM_READWRITE );
 
     g_object_class_install_properties(object_class,
                                       N_PROPERTIES,
@@ -632,20 +634,92 @@ zond_dbase_convert_from_legacy_to_maj_0( const gchar* path, gchar* v_string,
 
 
 static gint
-zond_dbase_convert_from_maj_0_to_1( const gchar* path, gchar** errmsg )
-{
-
-    return 0;
-}
-
-
-static gint
-zond_dbase_create_db( sqlite3* db, gchar** errmsg )
+zond_dbase_convert_from_maj_0_to_1( ZondDBase* zond_dbase, GError** error )
 {
     gint rc = 0;
+    sqlite3* db = NULL;
+    gchar* sql = NULL;
+    gchar* path_old = NULL;
+    gchar* path_new = NULL;
+    gchar* errmsg = NULL;
+    gchar const* path = NULL;
 
-    rc = zond_dbase_create_db_maj_1( db, errmsg );
-    if ( rc ) ERROR_S
+    ZondDBasePrivate* zond_dbase_priv = zond_dbase_get_instance_private( zond_dbase );
+
+    path = zond_dbase_priv->path;
+
+    path_new = g_strconcat( path, ".tmp", NULL );
+    rc = sqlite3_open( path_new, &db);
+    if ( rc != SQLITE_OK )
+    {
+        g_free( path_new );
+
+        ERROR_Z_DBASE
+    }
+
+    if ( zond_dbase_create_db_maj_1( db, &errmsg ) )
+    {
+        sqlite3_close( db);
+        g_free( path_new );
+
+        if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\n%s", __func__, errmsg );
+        g_free( errmsg );
+
+        return -1;
+    }
+
+    sql = g_strdup_printf( "ATTACH DATABASE '%s' AS old;", path );
+    rc = sqlite3_exec( db, sql, NULL, NULL, &errmsg );
+    g_free( sql );
+    if ( rc != SQLITE_OK )
+    {
+        sqlite3_close( db );
+        g_free( path_new );
+
+        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
+                rc, "%s\n%s", __func__, errmsg );
+        g_free( errmsg );
+
+        return -1;
+    }
+
+    zond_dbase_priv->dbase = db;
+    rc = zond_convert_0_to_1( zond_dbase, error );
+    if ( rc )
+    {
+        sqlite3_close( db );
+        g_free( path_new );
+
+        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
+                rc, "%s\n%s", __func__, errmsg );
+        g_free( errmsg );
+
+        return -1;
+    }
+
+    sqlite3_close( db );
+
+    path_old = g_strconcat( path, "v0", NULL );
+    rc = g_rename( path, path_old);
+    g_free( path_old );
+    if ( rc )
+    {
+        if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\ng_rename gibt Fehlermeldung ""%s"" zurück",
+                __func__, strerror( errno ) );
+        g_free( path_new );
+
+        return -1;
+    }
+
+    rc = g_rename ( path_new, path );
+    g_free( path_new );
+    if ( rc )
+    {
+        if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\ng_rename gibt Fehlermeldung ""%s"" zurück",
+                __func__, strerror( errno ) );
+
+        return -1;
+    }
 
     return 0;
 }
@@ -659,12 +733,16 @@ zond_dbase_get_version( sqlite3* db, gchar** errmsg )
     gchar* v_string = NULL;
 
     rc = sqlite3_prepare_v2( db, "SELECT node_text FROM knoten WHERE ID = 0;", -1, &stmt, NULL );
-    if ( rc != SQLITE_OK )
+    if ( rc != SQLITE_OK ) //vielleicht weil maj=0
     {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_prepare_v2:\n",
-                sqlite3_errstr( rc ), NULL );
+        rc = sqlite3_prepare_v2( db, "SELECT node_text FROM baum_inhalt WHERE node_id = 0;", -1, &stmt, NULL );
+        if ( rc != SQLITE_OK )
+        {
+            if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_prepare_v2:\n",
+                    sqlite3_errstr( rc ), NULL );
 
-        return NULL;
+            return NULL;
+        }
     }
 
     rc = sqlite3_step( stmt );
@@ -692,9 +770,15 @@ zond_dbase_get_version( sqlite3* db, gchar** errmsg )
 
 
 static gint
-zond_dbase_open( const gchar* path, gboolean create_file, gboolean create, sqlite3** db, gchar** errmsg )
+zond_dbase_open( ZondDBase* zond_dbase, gboolean create_file, gboolean create, sqlite3** db, gchar** errmsg )
 {
     gint rc = 0;
+    GError* error = NULL;
+    gchar const* path = NULL;
+
+    ZondDBasePrivate* zond_dbase_priv = zond_dbase_get_instance_private( zond_dbase );
+
+    path = zond_dbase_priv->path;
 
     rc = sqlite3_open_v2( path, db, SQLITE_OPEN_READWRITE |
             ((create_file || create) ? SQLITE_OPEN_CREATE : 0), NULL );
@@ -754,14 +838,16 @@ zond_dbase_open( const gchar* path, gboolean create_file, gboolean create, sqlit
             g_free( v_string );
 
             //aktewalisieren von maj_0 auf maj_1
-            rc = zond_dbase_convert_from_maj_0_to_1( path, errmsg );
+            rc = zond_dbase_convert_from_maj_0_to_1( zond_dbase, &error );
+            *db = zond_dbase_priv->dbase;
             if ( rc )
             {
                 sqlite3_close( *db );
-                ERROR_S
-            }
+                if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+                g_error_free( error );
 
-            v_string = g_strdup( "1" );
+                return -1;
+            }
         }
         //später: if ( atoi( v_string ) == 1 ) ...
     }
@@ -770,7 +856,7 @@ zond_dbase_open( const gchar* path, gboolean create_file, gboolean create, sqlit
         gint rc = 0;
 
         //Abfrage, ob überschrieben werden soll, überflüssig - schon im filechooser
-        rc = zond_dbase_create_db( *db, errmsg );
+        rc = zond_dbase_create_db_maj_1( *db, errmsg );
         if ( rc )
         {
             sqlite3_close( *db );
@@ -790,21 +876,31 @@ zond_dbase_open( const gchar* path, gboolean create_file, gboolean create, sqlit
 }
 
 
-gint
+ZondDBase*
 zond_dbase_new( const gchar* path, gboolean create_file, gboolean create,
-        ZondDBase** zond_dbase, gchar** errmsg )
+        gchar** errmsg )
 {
     gint rc = 0;
     sqlite3* db = NULL;
+    ZondDBase* zond_dbase = NULL;
+    ZondDBasePrivate* zond_dbase_priv = NULL;
 
-    g_return_val_if_fail( zond_dbase, -1 );
+    g_return_val_if_fail( path, NULL );
 
-    rc = zond_dbase_open( path, create_file, create, &db, errmsg );
-    if ( rc ) ERROR_S
+    zond_dbase = g_object_new( ZOND_TYPE_DBASE, "path", path, NULL );
 
-    *zond_dbase = g_object_new( ZOND_TYPE_DBASE, "path", path, "dbase", db, NULL );
+    rc = zond_dbase_open( zond_dbase, create_file, create, &db, errmsg );
+    if ( rc )
+    {
+        g_object_unref( zond_dbase );
 
-    return 0;
+        ERROR_S_VAL( NULL )
+    }
+
+    zond_dbase_priv = zond_dbase_get_instance_private( zond_dbase );
+    zond_dbase_priv->dbase = db;
+
+    return zond_dbase;
 }
 
 

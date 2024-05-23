@@ -869,8 +869,6 @@
 		</Unit>
 		<Unit filename="src/zond/zond_convert.c">
 			<Option compilerVar="CC" />
-			<Option compile="0" />
-			<Option link="0" />
 			<Option target="zond (Release)" />
 			<Option target="zond (Testing)" />
 		</Unit>

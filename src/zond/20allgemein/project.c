@@ -89,19 +89,17 @@ project_create_dbase_zond( Projekt* zond, const gchar* path, gboolean create,
     ZondDBase* zond_dbase_store = NULL;
     gchar* path_tmp = NULL;
 
-    rc  = zond_dbase_new( path, FALSE, create, &zond_dbase_store, errmsg );
-    if ( rc == -1 ) ERROR_S
-    else if ( rc == 1 ) return 1;
+    zond_dbase_store = zond_dbase_new( path, FALSE, create, errmsg );
+    if ( !zond_dbase_store ) ERROR_S
 
     path_tmp = g_strconcat( path, ".tmp", NULL );
 
-    rc = zond_dbase_new( path_tmp, TRUE, FALSE, &zond_dbase_work, errmsg );
+    zond_dbase_work = zond_dbase_new( path_tmp, TRUE, FALSE, errmsg );
     g_free( path_tmp );
-    if ( rc )
+    if ( !zond_dbase_work )
     {
         zond_dbase_close( zond_dbase_store );
         if ( rc == -1 ) ERROR_S
-        else if ( rc == 1 ) return 1;
     }
 
     rc = zond_dbase_backup( zond_dbase_store, zond_dbase_work, errmsg );

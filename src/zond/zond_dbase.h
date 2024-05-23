@@ -112,7 +112,7 @@ struct _ZondDBaseClass
 };
 
 
-gint zond_dbase_new( const gchar*, gboolean, gboolean, ZondDBase**, gchar** );
+ZondDBase* zond_dbase_new( const gchar*, gboolean, gboolean, gchar** );
 
 void zond_dbase_close( ZondDBase* );
 
@@ -122,7 +122,7 @@ const gchar* zond_dbase_get_path( ZondDBase* );
 
 gint zond_dbase_backup( ZondDBase*, ZondDBase*, gchar** );
 
-gint zond_dbase_prepare( ZondDBase*, const gchar*, const gchar**,gint,
+gint zond_dbase_prepare( ZondDBase*, const gchar*, const gchar**, gint,
         sqlite3_stmt***, GError** );
 
 gint zond_dbase_begin( ZondDBase*, GError** );
