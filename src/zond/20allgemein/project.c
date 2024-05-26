@@ -118,9 +118,10 @@ project_create_dbase_zond( Projekt* zond, const gchar* path, gboolean create,
 
     (*dbase_zond)->zond_dbase_store = zond_dbase_store;
     (*dbase_zond)->zond_dbase_work = zond_dbase_work;
-    (*dbase_zond)->project_name = g_strdup( strrchr( path, '/' ) + 1 );
-    (*dbase_zond)->project_dir = g_strndup( path, strlen( path ) - strlen(
-            strrchr( path, '/' ) ) );
+    (*dbase_zond)->project_name = g_path_get_basename( path );
+    //g_strdup( strrchr( path, '/' ) + 1 );
+    (*dbase_zond)->project_dir = g_path_get_dirname( path );
+    //g_strndup( path, strlen( path ) - strlen( strrchr( path, '/' ) ) );
 
     return 0;
 }

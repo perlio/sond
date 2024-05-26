@@ -2183,21 +2183,16 @@ GError* error = NULL;
 
     do
     {
-        gchar* uri = NULL;
-
-        uri = g_uri_unescape_string( list_ptr->data, NULL );
-
-        info_window_set_message( info_window, uri + 8 );
+        info_window_set_message( info_window, list->data );
         info_window_set_progress_bar( info_window );
 
-        zond_pdf_document = zond_pdf_document_open( uri + 8, 0,
+        zond_pdf_document = zond_pdf_document_open( list->data, 0,
                 -1, errmsg );
         if ( !zond_pdf_document )
         {
             info_window_set_message( info_window, "Öffnen nicht möglich:" );
             info_window_set_message( info_window, *errmsg );
 
-            g_free( uri );
             g_clear_pointer( errmsg, g_free );
             continue;
         }
@@ -2205,7 +2200,6 @@ GError* error = NULL;
         //in memory-database, die inhaltlich mit ...work identisch ist, einfügen
         rc = zond_gemini_read_zond_pdf_document( zond, info_window, zond_dbase,
                 zond_pdf_document, &arrays, errmsg );
-        g_free( uri );
         g_object_unref( zond_pdf_document );
         if ( rc == -1 )
         {

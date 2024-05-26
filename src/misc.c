@@ -244,7 +244,7 @@ choose_files( const GtkWidget* window, const gchar* path, const gchar* title_tex
             ext );
 
     rc = gtk_dialog_run( GTK_DIALOG(dialog) );
-    if ( rc == GTK_RESPONSE_ACCEPT ) list = gtk_file_chooser_get_uris( GTK_FILE_CHOOSER(dialog) );
+    if ( rc == GTK_RESPONSE_ACCEPT ) list = gtk_file_chooser_get_filenames( GTK_FILE_CHOOSER(dialog) );
 
     //Dialog schließen
     gtk_widget_destroy(dialog);
@@ -261,12 +261,8 @@ filename_speichern( GtkWindow* window, const gchar* titel, const gchar* ext )
 
     if ( !list ) return NULL;
 
-    gchar* uri_unescaped = g_uri_unescape_string( list->data, NULL );
-    g_free( list->data );
-    g_slist_free( list );
-
-    gchar* abs_path = g_strdup( uri_unescaped + 8 );
-    g_free( uri_unescaped );
+    gchar* abs_path = g_strdup( list->data );
+    g_slist_free_full( list, g_free );
 
     return abs_path; //muß g_freed werden
 }
@@ -280,12 +276,8 @@ filename_oeffnen( GtkWindow* window )
 
     if ( !list ) return NULL;
 
-    gchar* uri_unescaped = g_uri_unescape_string( list->data, NULL );
-    g_free( list->data );
-    g_slist_free( list );
-
-    gchar* abs_path = g_strdup( uri_unescaped + 8);
-    g_free( uri_unescaped );
+    gchar* abs_path = g_strdup( list->data );
+    g_slist_free_full( list, g_free );
 
     return abs_path; //muß g_freed werden
 }

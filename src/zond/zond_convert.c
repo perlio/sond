@@ -18,6 +18,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
 #include <gtk/gtk.h>
+#include <glib/gstdio.h>
 #include <mupdf/fitz.h>
 #include <sqlite3.h>
 
@@ -137,10 +138,11 @@ zond_convert_get_node_from_baum_auswertung_0( ZondDBase* zond_dbase, gint node_i
 
     gchar const* sql[] = {
             "SELECT icon_name, node_text, text, ref_id, links_target.node_id, links_origin.node_id "
-                    "FROM old.baum_auswertung JOIN old.links AS links_target JOIN old.links AS links_origin "
-                    "WHERE old.baum_auswertung.node_id = ?1 AND "
-                    "links_origin.node_id=old.baum_auswertung.node_id AND "
-                    "links_target.baum_id_target=2 AND links_target.node_id_target=old.baum_auswertung.node_id;"
+                    "FROM old.baum_auswertung "
+                    "LEFT JOIN old.links AS links_target "
+                            "ON links_target.baum_id_target=2 AND links_target.node_id_target=old.baum_auswertung.node_id "
+                    "LEFT JOIN old.links AS links_origin ON links_origin.node_id=old.baum_auswertung.node_id "
+                    "WHERE old.baum_auswertung.node_id=?1; "
                     };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, error );
@@ -163,7 +165,7 @@ zond_convert_get_node_from_baum_auswertung_0( ZondDBase* zond_dbase, gint node_i
     }
     else
     {
-        if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\nnode_id nicht in baum_inhalt gefunden", __func__ );
+        if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\nnode_id nicht in baum_auswertung gefunden", __func__ );
         return -1;
     }
 
@@ -180,13 +182,13 @@ zond_convert_get_node_from_baum_inhalt_0( ZondDBase* zond_dbase, gint node_id, g
     sqlite3_stmt** stmt = NULL;
 
     gchar const* sql[] = {
-            "SELECT icon_name, node_text, dat.rel_path, ziel_id_von, index_von, "
-                    "ziel_id_bis, index_bis, old.links.node_id "
-                    "FROM old.baum_inhalt JOIN old.dateien AS dat JOIN old.ziele JOIN old.links "
-                    "WHERE old.baum_inhalt.node_id = ?1 AND "
-                    "old.baum_inhalt.node_id = old.dateien.node_id AND old.baum_inhalt.node_id = old.ziele.node_id AND "
-                    "old.links.baum_id_target=1 AND old.links.node_id_target=old.baum_inhalt.node_id;"
-                    };
+            "SELECT icon_name, node_text, old.dateien.rel_path, ziel_id_von, index_von, ziel_id_bis, index_bis, old.links.node_id "
+                "FROM old.baum_inhalt "
+                "LEFT JOIN old.dateien ON old.baum_inhalt.node_id=old.dateien.node_id "
+                "LEFT JOIN ziele ON old.baum_inhalt.node_id=old.ziele.node_id "
+                "LEFT JOIN old.links ON old.baum_inhalt.node_id=old.links.node_id_target AND old.links.baum_id_target=1 "
+                "WHERE old.baum_inhalt.node_id=?1;"
+            };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, error );
     if ( rc ) ERROR_Z
@@ -206,6 +208,7 @@ zond_convert_get_node_from_baum_inhalt_0( ZondDBase* zond_dbase, gint node_id, g
         *index_von = sqlite3_column_int( stmt[0], 4 );
         *ziel_bis = g_strdup( (gchar const*) sqlite3_column_text( stmt[0], 5 ) );
         *index_bis = sqlite3_column_int( stmt[0], 6 );
+        *link_id = sqlite3_column_int( stmt[0], 7 );
     }
     else
     {
@@ -485,18 +488,60 @@ zond_convert_0_to_1_baum_auswertung( ZondDBase* zond_dbase, gint anchor_id, gboo
 
 
 gint
+zond_convert_0_to_1_update_link( ZondDBase* zond_dbase, gint node_id,
+        gint link, GError** error )
+{
+    gint rc = 0;
+    sqlite3_stmt** stmt = NULL;
+
+    const gchar* sql[] = {
+            "UPDATE knoten "
+            "SET link=?2 WHERE ID=?1; "
+            };
+
+    rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, error );
+    if ( rc )
+    {
+        g_prefix_error( error, "%s\n", __func__ );
+
+        return -1;
+    }
+
+    rc = sqlite3_bind_int( stmt[0], 1, node_id );
+    if ( rc != SQLITE_OK ) ERROR_Z_DBASE
+
+    rc = sqlite3_bind_int( stmt[0], 2,
+            link );
+    if ( rc != SQLITE_OK ) ERROR_Z_DBASE
+
+    rc = sqlite3_step( stmt[0] );
+    if ( rc != SQLITE_DONE ) ERROR_Z_DBASE
+
+    return 0;
+}
+
+
+gint
 zond_convert_0_to_1( ZondDBase* zond_dbase, GError** error )
 {
     gint first_child = 0;
     DataConvert data_convert = { 0 };
     GArray* arr_targets = NULL;
     GArray* arr_links = NULL;
+    gchar* project_dir = NULL;
+    gchar const* path = NULL;
 
     //ersten Knoten Baum_inhalt
     first_child = zond_convert_get_first_child_0( zond_dbase, BAUM_INHALT, 0, error );
     if ( first_child == -1 ) ERROR_Z
 
     arr_targets = g_array_new( FALSE, FALSE, sizeof( Target ) );
+
+    path = zond_dbase_get_path( zond_dbase );
+    project_dir = g_path_get_dirname( path );
+    //g_strndup( path, strlen( path ) - strlen( strrchr( path, '/' ) ) );
+    g_chdir( project_dir );
+    g_free( project_dir );
 
     if ( first_child )
     {

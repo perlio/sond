@@ -115,8 +115,11 @@ zond_dbase_finalize( GObject* self )
 {
     ZondDBasePrivate* priv = zond_dbase_get_instance_private( ZOND_DBASE(self) );
 
-    zond_dbase_finalize_stmts( priv->dbase);
-    sqlite3_close( priv->dbase );
+    if ( priv->dbase )
+    {
+        zond_dbase_finalize_stmts( priv->dbase);
+        sqlite3_close( priv->dbase );
+    }
 
     g_free( priv->path );
 
@@ -685,26 +688,22 @@ zond_dbase_convert_from_maj_0_to_1( ZondDBase* zond_dbase, GError** error )
 
     zond_dbase_priv->dbase = db;
     rc = zond_convert_0_to_1( zond_dbase, error );
+    g_object_unref( zond_dbase );
     if ( rc )
     {
-        sqlite3_close( db );
         g_free( path_new );
 
-        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
-                rc, "%s\n%s", __func__, errmsg );
-        g_free( errmsg );
+        g_prefix_error( error, "%s\n", __func__ );
 
         return -1;
     }
-
-    sqlite3_close( db );
 
     path_old = g_strconcat( path, "v0", NULL );
     rc = g_rename( path, path_old);
     g_free( path_old );
     if ( rc )
     {
-        if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\ng_rename gibt Fehlermeldung ""%s"" zurück",
+        if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\ng_rename (v0) gibt Fehlermeldung ""%s"" zurück",
                 __func__, strerror( errno ) );
         g_free( path_new );
 
@@ -799,6 +798,7 @@ zond_dbase_open( ZondDBase* zond_dbase, gboolean create_file, gboolean create, s
         if ( !v_string )
         {
             sqlite3_close( *db );
+
             ERROR_S
         }
 
@@ -822,12 +822,14 @@ zond_dbase_open( ZondDBase* zond_dbase, gboolean create_file, gboolean create, s
         {
             g_free( v_string );
             sqlite3_close( *db );
+
             ERROR_S_MESSAGE( "Unbekannte Versionsbezeichnung" )
         }
         else if ( atoi( v_string ) > atoi( MAJOR ) )
         {
             g_free( v_string );
             sqlite3_close( *db );
+
             ERROR_S_MESSAGE( "Version gibt's noch gar nicht" )
         }
 
@@ -836,18 +838,20 @@ zond_dbase_open( ZondDBase* zond_dbase, gboolean create_file, gboolean create, s
             gint rc = 0;
 
             g_free( v_string );
+            sqlite3_close( *db );
 
             //aktewalisieren von maj_0 auf maj_1
             rc = zond_dbase_convert_from_maj_0_to_1( zond_dbase, &error );
-            *db = zond_dbase_priv->dbase;
+            zond_dbase_priv->dbase = NULL;
             if ( rc )
             {
-                sqlite3_close( *db );
                 if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
                 g_error_free( error );
 
                 return -1;
             }
+
+            //ToDo: db wieder öffnen - ist auf jeden Fall geschlossen worden!
         }
         //später: if ( atoi( v_string ) == 1 ) ...
     }
@@ -860,6 +864,7 @@ zond_dbase_open( ZondDBase* zond_dbase, gboolean create_file, gboolean create, s
         if ( rc )
         {
             sqlite3_close( *db );
+
             ERROR_S
         }
     }
@@ -869,6 +874,7 @@ zond_dbase_open( ZondDBase* zond_dbase, gboolean create_file, gboolean create, s
     if ( rc != SQLITE_OK )
     {
         sqlite3_close( *db );
+
         ERROR_S
     }
 
@@ -1369,35 +1375,14 @@ zond_dbase_update_icon_name( ZondDBase* zond_dbase, gint node_id,
     }
 
     rc = sqlite3_bind_int( stmt[0], 1, node_id );
-    if ( rc != SQLITE_OK )
-    {
-        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
-                sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
-                "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
-
-        return -1;
-    }
+    if ( rc != SQLITE_OK ) ERROR_Z_DBASE
 
     rc = sqlite3_bind_text( stmt[0], 2,
             icon_name, -1, NULL );
-    if ( rc != SQLITE_OK )
-    {
-        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
-                sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
-                "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
-
-        return -1;
-    }
+    if ( rc != SQLITE_OK ) ERROR_Z_DBASE
 
     rc = sqlite3_step( stmt[0] );
-    if ( rc != SQLITE_DONE )
-    {
-        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
-                sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
-                "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
-
-        return -1;
-    }
+    if ( rc != SQLITE_DONE ) ERROR_Z_DBASE
 
     return 0;
 }
