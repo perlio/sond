@@ -99,7 +99,7 @@ project_create_dbase_zond( Projekt* zond, const gchar* path, gboolean create,
     if ( !zond_dbase_work )
     {
         zond_dbase_close( zond_dbase_store );
-        if ( rc == -1 ) ERROR_S
+        ERROR_S
     }
 
     rc = zond_dbase_backup( zond_dbase_store, zond_dbase_work, errmsg );
@@ -454,8 +454,7 @@ cb_menu_datei_oeffnen_activate( GtkMenuItem* item, gpointer user_data )
     g_free( abs_path );
     if ( rc == -1 )
     {
-        display_message( zond->app_window, "Fehler beim Öffnen-\n\nBei Aufruf "
-                "project_oeffnen:\n", errmsg, NULL );
+        display_message( zond->app_window, "Fehler beim Öffnen-\n\n", errmsg, NULL );
         g_free( errmsg );
 
         return;
@@ -484,8 +483,7 @@ cb_menu_datei_neu_activate( GtkMenuItem* item, gpointer user_data )
     g_free( abs_path );
     if ( rc == -1 )
     {
-        display_message( zond->app_window, "Fehler beim Öffnen-\n\nBei Aufruf "
-                "project_oeffnen:\n", errmsg, NULL );
+        display_message( zond->app_window, "Fehler beim Öffnen-\n\n", errmsg, NULL );
         g_free( errmsg );
     }
 

@@ -268,7 +268,7 @@ open_app( GtkApplication* app, gpointer files, gint n_files, gchar *hint,
     if ( rc == -1 )
     {
         display_message( zond->app_window, "Fehler - Projekt kann nicht geöffnet "
-                "werden\n\nBei Aufruf projekt_oeffnen:\n", errmsg, NULL );
+                "werden\n\n", errmsg, NULL );
         g_free( errmsg );
 
         return;

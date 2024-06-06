@@ -645,13 +645,11 @@ zond_dbase_convert_from_maj_0_to_1( ZondDBase* zond_dbase, GError** error )
     gchar* path_old = NULL;
     gchar* path_new = NULL;
     gchar* errmsg = NULL;
-    gchar const* path = NULL;
+    gchar* path = NULL;
 
     ZondDBasePrivate* zond_dbase_priv = zond_dbase_get_instance_private( zond_dbase );
 
-    path = zond_dbase_priv->path;
-
-    path_new = g_strconcat( path, ".tmp", NULL );
+    path_new = g_strconcat( zond_dbase_priv->path, ".tmp", NULL );
     rc = sqlite3_open( path_new, &db);
     if ( rc != SQLITE_OK )
     {
@@ -671,7 +669,7 @@ zond_dbase_convert_from_maj_0_to_1( ZondDBase* zond_dbase, GError** error )
         return -1;
     }
 
-    sql = g_strdup_printf( "ATTACH DATABASE '%s' AS old;", path );
+    sql = g_strdup_printf( "ATTACH DATABASE '%s' AS old;", zond_dbase_priv->path );
     rc = sqlite3_exec( db, sql, NULL, NULL, &errmsg );
     g_free( sql );
     if ( rc != SQLITE_OK )
@@ -688,7 +686,6 @@ zond_dbase_convert_from_maj_0_to_1( ZondDBase* zond_dbase, GError** error )
 
     zond_dbase_priv->dbase = db;
     rc = zond_convert_0_to_1( zond_dbase, error );
-    g_object_unref( zond_dbase );
     if ( rc )
     {
         g_free( path_new );
@@ -698,6 +695,9 @@ zond_dbase_convert_from_maj_0_to_1( ZondDBase* zond_dbase, GError** error )
         return -1;
     }
 
+    path = g_strdup( zond_dbase_priv->path );
+    g_object_unref( zond_dbase );
+
     path_old = g_strconcat( path, "v0", NULL );
     rc = g_rename( path, path_old);
     g_free( path_old );
@@ -706,12 +706,14 @@ zond_dbase_convert_from_maj_0_to_1( ZondDBase* zond_dbase, GError** error )
         if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\ng_rename (v0) gibt Fehlermeldung ""%s"" zurück",
                 __func__, strerror( errno ) );
         g_free( path_new );
+        g_free( path );
 
         return -1;
     }
 
     rc = g_rename ( path_new, path );
     g_free( path_new );
+    g_free( path );
     if ( rc )
     {
         if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\ng_rename gibt Fehlermeldung ""%s"" zurück",
@@ -769,13 +771,13 @@ zond_dbase_get_version( sqlite3* db, gchar** errmsg )
 
 
 static gint
-zond_dbase_open( ZondDBase* zond_dbase, gboolean create_file, gboolean create, sqlite3** db, gchar** errmsg )
+zond_dbase_open( ZondDBase** zond_dbase, gboolean create_file, gboolean create, sqlite3** db, gchar** errmsg )
 {
     gint rc = 0;
     GError* error = NULL;
     gchar const* path = NULL;
 
-    ZondDBasePrivate* zond_dbase_priv = zond_dbase_get_instance_private( zond_dbase );
+    ZondDBasePrivate* zond_dbase_priv = zond_dbase_get_instance_private( *zond_dbase );
 
     path = zond_dbase_priv->path;
 
@@ -813,7 +815,13 @@ zond_dbase_open( ZondDBase* zond_dbase, gboolean create_file, gboolean create, s
             if ( rc ) ERROR_S
 
             rc = sqlite3_open_v2( path, db, SQLITE_OPEN_READWRITE, NULL );
-            if ( rc ) ERROR_S
+            if ( rc )
+            {
+                if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_open_v2:\n",
+                        sqlite3_errstr( rc ), NULL );
+
+                ERROR_S
+            }
 
             v_string = g_strdup( "0" );
         }
@@ -841,9 +849,9 @@ zond_dbase_open( ZondDBase* zond_dbase, gboolean create_file, gboolean create, s
             sqlite3_close( *db );
 
             //aktewalisieren von maj_0 auf maj_1
-            rc = zond_dbase_convert_from_maj_0_to_1( zond_dbase, &error );
+            rc = zond_dbase_convert_from_maj_0_to_1( *zond_dbase, &error );
             zond_dbase_priv->dbase = NULL;
-            if ( rc )
+            if ( rc == -1 )
             {
                 if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
                 g_error_free( error );
@@ -851,7 +859,7 @@ zond_dbase_open( ZondDBase* zond_dbase, gboolean create_file, gboolean create, s
                 return -1;
             }
 
-            //ToDo: db wieder öffnen - ist auf jeden Fall geschlossen worden!
+            return 1; //zond_dbase ist unreffed
         }
         //später: if ( atoi( v_string ) == 1 ) ...
     }
@@ -895,13 +903,15 @@ zond_dbase_new( const gchar* path, gboolean create_file, gboolean create,
 
     zond_dbase = g_object_new( ZOND_TYPE_DBASE, "path", path, NULL );
 
-    rc = zond_dbase_open( zond_dbase, create_file, create, &db, errmsg );
-    if ( rc )
+    rc = zond_dbase_open( &zond_dbase, create_file, create, &db, errmsg );
+    if ( rc == -1 )
     {
         g_object_unref( zond_dbase );
 
         ERROR_S_VAL( NULL )
     }
+    //konvertiert; deshalb zond_dbase geklöscht
+    else if ( rc == 1 ) zond_dbase = g_object_new( ZOND_TYPE_DBASE, "path", path, NULL );
 
     zond_dbase_priv = zond_dbase_get_instance_private( zond_dbase );
     zond_dbase_priv->dbase = db;
@@ -989,11 +999,7 @@ zond_dbase_prepare_stmts( ZondDBase* zond_dbase, gint num, const gchar** sql,
             //aufräumen
             for ( gint u = 0; u < i; u++ ) sqlite3_finalize( stmt[u] );
 
-            if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
-                    sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
-                    "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
-
-            return -1;
+            ERROR_Z_DBASE
         }
     }
 
@@ -1015,9 +1021,8 @@ zond_dbase_prepare( ZondDBase* zond_dbase, const gchar* func, const gchar** sql,
         if ( rc )
         {
             g_free( *stmt );
-            g_prefix_error( error, "%s\n", __func__ );
 
-            return -1;
+            ERROR_Z
         }
 
         g_object_set_data_full( G_OBJECT(zond_dbase), func, *stmt, g_free );
@@ -1040,12 +1045,7 @@ zond_dbase_begin( ZondDBase* zond_dbase, GError** error )
         };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, error );
-    if ( rc )
-    {
-        g_prefix_error( error, "%s\n", __func__ );
-
-        return -1;
-    }
+    if ( rc ) ERROR_Z
 
     rc = sqlite3_step( stmt[0] );
     if ( rc != SQLITE_DONE )
@@ -1885,52 +1885,20 @@ zond_dbase_get_first_child( ZondDBase* zond_dbase, gint node_id, gint* first_chi
 
     const gchar* sql[] = {
         //...
-            "SELECT knoten1.ID, knoten2.ID FROM knoten AS knoten1 "
-                "LEFT JOIN knoten AS knoten2 "
-                "ON knoten1.ID = knoten2.parent_ID AND knoten2.older_sibling_ID = 0 "
-                    "AND knoten2.ID!= 0 "
-                "WHERE knoten1.ID=?1;"
+            "SELECT ID FROM knoten WHERE parent_ID=?1 AND older_sibling_ID=0;"
         };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, error );
-    if ( rc )
-    {
-        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
-                sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
-                "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
-
-        return -1;
-    }
+    if ( rc ) ERROR_Z
 
     rc = sqlite3_bind_int( stmt[0], 1, node_id );
-    if ( rc != SQLITE_OK )
-    {
-        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
-                sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
-                "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
-
-        return -1;
-    }
+    if ( rc != SQLITE_OK ) ERROR_Z_DBASE
 
     rc = sqlite3_step( stmt[0] );
-    if ( rc == SQLITE_DONE )
-    {
-        if ( error ) *error = g_error_new( g_quark_from_static_string( "ZOND_DBASE" ),
-                0, "%s\nKnoten mit dieser ID existiert nicht", __func__ );
-
-        return -1;
-    }
-    else if ( rc != SQLITE_ROW )
-    {
-        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
-                sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
-                "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
-
-        return -1;
-    }
+    if ( rc != SQLITE_ROW && rc != SQLITE_DONE ) ERROR_Z_DBASE
 
     if ( first_child ) *first_child =
-            sqlite3_column_int( stmt[0], 1 );
+            sqlite3_column_int( stmt[0], 0 );
 
     return 0;
 }
@@ -1956,14 +1924,7 @@ zond_dbase_get_older_sibling( ZondDBase* zond_dbase, gint node_id, gint* older_s
     }
 
     rc = sqlite3_bind_int( stmt[0], 1, node_id );
-    if ( rc != SQLITE_OK )
-    {
-        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
-                sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
-                "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
-
-        return -1;
-    }
+    if ( rc != SQLITE_OK ) ERROR_Z_DBASE
 
     rc = sqlite3_step( stmt[0] );
     if ( rc == SQLITE_DONE )
@@ -1995,39 +1956,17 @@ zond_dbase_get_younger_sibling( ZondDBase* zond_dbase, gint node_id, gint* young
     sqlite3_stmt** stmt = NULL;
 
     const gchar* sql[] = {
-            "SELECT knoten2.ID FROM knoten AS knoten1 "
-                "LEFT JOIN knoten AS knoten2 "
-                "ON knoten1.ID = knoten2.older_sibling_ID "
-                "WHERE knoten1.ID = ?1;"
+            "SELECT ID FROM knoten WHERE older_sibling_ID=?1;"
             };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, error );
-    if ( rc )
-    {
-        g_prefix_error( error, "%s\n", __func__ );
-
-        return -1;
-    }
+    if ( rc ) ERROR_Z
 
     rc = sqlite3_bind_int( stmt[0], 1, node_id );
-    if ( rc != SQLITE_OK )
-    {
-        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
-                sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
-                "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
-
-        return -1;
-    }
+    if ( rc != SQLITE_OK ) ERROR_Z_DBASE
 
     rc = sqlite3_step( stmt[0] );
-    if ( rc != SQLITE_ROW && rc != SQLITE_DONE ) //richtiger Fähler
-    {
-        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
-                sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ),
-                "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) );
-
-        return -1;
-    }
+    if ( rc != SQLITE_ROW && rc != SQLITE_DONE ) ERROR_Z_DBASE
 
     if ( rc == SQLITE_ROW && younger_sibling_id ) *younger_sibling_id = sqlite3_column_int( stmt[0], 0 );
 
@@ -2047,12 +1986,7 @@ zond_dbase_get_baum_inhalt_file_from_file_part( ZondDBase* zond_dbase,
             };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, error );
-    if ( rc )
-    {
-        g_prefix_error( error, "%s\n", __func__ );
-
-        return -1;
-    }
+    if ( rc ) ERROR_Z
 
     rc = sqlite3_bind_int( stmt[0], 1, file_part );
     if ( rc != SQLITE_OK )
@@ -2093,12 +2027,7 @@ zond_dbase_get_baum_auswertung_copy( ZondDBase* zond_dbase,
             };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, error );
-    if ( rc )
-    {
-        g_prefix_error( error, "%s\n", __func__ );
-
-        return -1;
-    }
+    if ( rc ) ERROR_Z
 
     rc = sqlite3_bind_int( stmt[0], 1, node_id );
     if ( rc != SQLITE_OK )
@@ -2192,12 +2121,7 @@ zond_dbase_find_baum_inhalt_file( ZondDBase* zond_dbase, gint node_id,
             };
 
     rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, error );
-    if ( rc )
-    {
-        g_prefix_error( error, "%s\n", __func__ );
-
-        return -1;
-    }
+    if ( rc ) ERROR_Z
 
     rc = sqlite3_bind_int( stmt[0], 1, node_id );
     if ( rc != SQLITE_OK ) ERROR_Z_DBASE
