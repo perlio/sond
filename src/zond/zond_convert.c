@@ -56,6 +56,376 @@ treeviews_get_page_num_from_dest_doc( fz_context* ctx, pdf_document* doc, const 
 
 
 static gint
+zond_convert_create_db_maj_0( sqlite3* db, gchar** errmsg )
+{
+    gchar* errmsg_ii = NULL;
+    gchar* sql = NULL;
+    gint rc = 0;
+
+    //Tabellenstruktur erstellen
+    sql = //Haupttabelle
+            "DROP TABLE IF EXISTS links; "
+            "DROP TABLE IF EXISTS dateien;"
+            "DROP TABLE IF EXISTS ziele;"
+            "DROP TABLE IF EXISTS baum_inhalt;"
+            "DROP TABLE IF EXISTS baum_auswertung; "
+
+            "CREATE TABLE baum_inhalt ("
+                "node_id INTEGER PRIMARY KEY,"
+                "parent_id INTEGER NOT NULL,"
+                "older_sibling_id INTEGER NOT NULL,"
+                "icon_name VARCHAR(50),"
+                "node_text VARCHAR(200), "
+                "FOREIGN KEY (parent_id) REFERENCES baum_inhalt (node_id) "
+                "ON DELETE CASCADE ON UPDATE CASCADE, "
+                "FOREIGN KEY (older_sibling_id) REFERENCES baum_inhalt (node_id) "
+                "ON DELETE CASCADE ON UPDATE CASCADE "
+            "); "
+
+            "INSERT INTO baum_inhalt (node_id, parent_id, older_sibling_id, "
+            "node_text) VALUES (0, 0, 0, '" MAJOR "');"
+
+            //Hilfstabelle "dateien"
+            //hier werden angebundene Dateien erfaßt
+            "CREATE TABLE dateien ("
+            "rel_path VARCHAR(200) PRIMARY KEY,"
+            "node_id INTEGER NOT NULL, "
+            "FOREIGN KEY (node_id) REFERENCES baum_inhalt (node_id) "
+            "ON DELETE CASCADE ON UPDATE CASCADE);"
+
+            //Hilfstabelle "ziele"
+            //hier werden Anbindungen an Dateien mit Zusatzinfo abgelegt
+            "CREATE TABLE ziele ("
+            "ziel_id_von VARCHAR(50), "
+            "index_von INTEGER, "
+            "ziel_id_bis VARCHAR(50), "
+            "index_bis INTEGER, "
+            "rel_path VARCHAR(200) NOT NULL, "
+            "node_id INTEGER NOT NULL, "
+            "PRIMARY KEY (ziel_id_von, index_von, ziel_id_bis, index_bis), "
+            "FOREIGN KEY (rel_path) REFERENCES dateien (rel_path) "
+            "ON DELETE CASCADE ON UPDATE CASCADE,"
+            "FOREIGN KEY (node_id) REFERENCES baum_inhalt (node_id) "
+            "ON DELETE CASCADE ON UPDATE CASCADE );"
+
+            //Auswertungs-Baum
+            "CREATE TABLE baum_auswertung ( "
+            "node_id INTEGER PRIMARY KEY,"
+            "parent_id INTEGER NOT NULL,"
+            "older_sibling_id INTEGER NOT NULL,"
+            "icon_name VARCHAR(50),"
+            "node_text VARCHAR(200),"
+            "text VARCHAR, "
+            "ref_id INTEGER NULL DEFAULT NULL,"
+            "FOREIGN KEY (parent_id) REFERENCES baum_auswertung (node_id) "
+            "ON DELETE CASCADE ON UPDATE CASCADE, "
+            "FOREIGN KEY (older_sibling_id) REFERENCES baum_auswertung (node_id) "
+            "ON DELETE CASCADE ON UPDATE CASCADE, "
+            "FOREIGN KEY (ref_id) REFERENCES baum_inhalt (node_id) "
+            "ON DELETE RESTRICT ON UPDATE RESTRICT );"
+
+            "INSERT INTO baum_auswertung (node_id, parent_id, older_sibling_id) "
+            "VALUES (0, 0, 0); " //mit eingang
+
+            "CREATE TABLE links ( "
+            "ID INTEGER PRIMARY KEY AUTOINCREMENT, " //order of appe...
+            "baum_id INTEGER, "
+            "node_id INTEGER, "
+            "projekt_target VARCHAR (200), "
+            "baum_id_target INTEGER, "
+            "node_id_target INTEGER "
+            " ); "
+
+            "CREATE TRIGGER delete_links_baum_inhalt_trigger BEFORE DELETE ON baum_inhalt "
+            "BEGIN "
+            "DELETE FROM links WHERE node_id=old.node_id AND baum_id=1; "
+            //etwaige Links, die auf gelöschten Knoten zeigen, auch löschen
+            "DELETE FROM baum_inhalt WHERE node_id = "
+                "(SELECT node_id FROM links WHERE node_id_target = old.node_id);"
+            "END; "
+
+            "CREATE TRIGGER delete_links_baum_auswertung_trigger BEFORE DELETE ON baum_auswertung "
+            "BEGIN "
+            "DELETE FROM links WHERE node_id=old.node_id AND baum_id=2; "
+            "DELETE FROM baum_auswertung WHERE node_id = "
+                "(SELECT node_id FROM links WHERE node_id_target = old.node_id);"
+            "END; "
+            ;
+
+    rc = sqlite3_exec( db, sql, NULL, NULL, &errmsg_ii );
+    if ( rc != SQLITE_OK )
+    {
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_exec (create db): "
+                "\nresult code: ", sqlite3_errstr( rc ), "\nerrmsg: ",
+                errmsg_ii, NULL );
+        sqlite3_free( errmsg_ii );
+
+        return -1;
+    }
+
+    return 0;
+}
+
+
+//v0.7: in Tabellen baum_inhalt und baum_auswertung Spalte icon_id statt icon_name in v0.8
+static gint
+zond_convert_from_v0_7( sqlite3* db_convert, gchar** errmsg )
+{
+    gint rc = 0;
+    gchar* errmsg_ii = NULL;
+
+    gchar* sql = "INSERT INTO main.baum_inhalt "
+                    "SELECT node_id, parent_id, older_sibling_id, "
+                            "CASE icon_id "
+                            "WHEN 0 THEN 'dialog-error' "
+                            "WHEN 1 THEN 'emblem-new' "
+                            "WHEN 2 THEN 'folder' "
+                            "WHEN 3 THEN 'document-open' "
+                            "WHEN 4 THEN 'pdf' "
+                            "WHEN 5 THEN 'anbindung' "
+                            "WHEN 6 THEN 'akte' "
+                            "WHEN 7 THEN 'application-x-executable' "
+                            "WHEN 8 THEN 'text-x-generic' "
+                            "WHEN 9 THEN 'x-office-document' "
+                            "WHEN 10 THEN 'x-office-presentation' "
+                            "WHEN 11 THEN 'x-office-spreadsheet' "
+                            "WHEN 12 THEN 'emblem-photo' "
+                            "WHEN 13 THEN 'video-x-generic' "
+                            "WHEN 14 THEN 'audio-x-generic' "
+                            "WHEN 15 THEN 'mail-unread' "
+                            "WHEN 16 THEN 'emblem-web' "
+                            "WHEN 25 THEN 'system-log-out' "
+                            "WHEN 26 THEN 'mark-location' "
+                            "WHEN 27 THEN 'phone' "
+                            "WHEN 28 THEN 'emblem-important' "
+                            "WHEN 29 THEN 'camera-web' "
+                            "WHEN 30 THEN 'media-optical' "
+                            "WHEN 31 THEN 'user-info' "
+                            "WHEN 32 THEN 'system-users' "
+                            "WHEN 33 THEN 'orange' "
+                            "WHEN 34 THEN 'blau' "
+                            "WHEN 35 THEN 'rot' "
+                            "WHEN 36 THEN 'gruen' "
+                            "WHEN 37 THEN 'tuerkis' "
+                            "WHEN 38 THEN 'magenta' "
+                            "ELSE 'process-stop' "
+                            "END, "
+                        "node_text FROM old.baum_inhalt WHERE node_id!=0; "
+            "INSERT INTO main.dateien SELECT uri, node_id FROM old.dateien; "
+            "INSERT INTO main.ziele SELECT ziel_id_von, index_von, ziel_id_bis, index_bis, "
+            "(SELECT uri FROM old.dateien WHERE datei_id=old.ziele.datei_id), "
+            "node_id FROM old.ziele; "
+            "INSERT INTO main.baum_auswertung "
+                    "SELECT node_id, parent_id, older_sibling_id, "
+                            "CASE icon_id "
+                            "WHEN 0 THEN 'dialog-error' "
+                            "WHEN 1 THEN 'emblem-new' "
+                            "WHEN 2 THEN 'folder' "
+                            "WHEN 3 THEN 'document-open' "
+                            "WHEN 4 THEN 'pdf' "
+                            "WHEN 5 THEN 'anbindung' "
+                            "WHEN 6 THEN 'akte' "
+                            "WHEN 7 THEN 'application-x-executable' "
+                            "WHEN 8 THEN 'text-x-generic' "
+                            "WHEN 9 THEN 'x-office-document' "
+                            "WHEN 10 THEN 'x-office-presentation' "
+                            "WHEN 11 THEN 'x-office-spreadsheet' "
+                            "WHEN 12 THEN 'emblem-photo' "
+                            "WHEN 13 THEN 'video-x-generic' "
+                            "WHEN 14 THEN 'audio-x-generic' "
+                            "WHEN 15 THEN 'mail-unread' "
+                            "WHEN 16 THEN 'emblem-web' "
+                            "WHEN 25 THEN 'system-log-out' "
+                            "WHEN 26 THEN 'mark-location' "
+                            "WHEN 27 THEN 'phone' "
+                            "WHEN 28 THEN 'emblem-important' "
+                            "WHEN 29 THEN 'camera-web' "
+                            "WHEN 30 THEN 'media-optical' "
+                            "WHEN 31 THEN 'user-info' "
+                            "WHEN 32 THEN 'system-users' "
+                            "WHEN 33 THEN 'orange' "
+                            "WHEN 34 THEN 'blau' "
+                            "WHEN 35 THEN 'rot' "
+                            "WHEN 36 THEN 'gruen' "
+                            "WHEN 37 THEN 'tuerkis' "
+                            "WHEN 38 THEN 'magenta' "
+                            "ELSE 'process-stop' "
+                            "END, "
+                        "node_text, text, ref_id FROM old.baum_auswertung WHERE node_id!=0; ";
+
+    rc = sqlite3_exec( db_convert, sql, NULL, NULL, &errmsg_ii );
+    if ( rc != SQLITE_OK )
+    {
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_exec:\n"
+                "result code: ", sqlite3_errstr( rc ), "\nerrmsg: ",
+                errmsg_ii, NULL );
+        sqlite3_free( errmsg_ii );
+
+        return -1;
+    }
+
+    return 0;
+}
+
+
+//v0.8 ist wie Maj_0, aber ohne links
+//v0.9 ist wie 0.8, aber mit Tabelle eingang
+static gint
+zond_convert_from_v0_8_or_v0_9( sqlite3* db_convert, gchar** errmsg )
+{
+    gint rc = 0;
+
+    gchar* sql =
+            "INSERT INTO baum_inhalt SELECT node_id, parent_id, older_sibling_id, "
+                    "icon_name, node_text FROM old.baum_inhalt WHERE node_id != 0; "
+            "INSERT INTO baum_auswertung SELECT * FROM old.baum_auswertung WHERE node_id != 0; "
+            "INSERT INTO dateien SELECT * FROM old.dateien; "
+            "INSERT INTO ziele SELECT * FROM old.ziele; ";
+
+    rc = sqlite3_exec( db_convert, sql, NULL, NULL, errmsg );
+    if ( rc != SQLITE_OK )
+    {
+        if ( errmsg ) *errmsg = add_string( g_strdup( "Bei Aufruf sqlite3_exec:\n" ),
+                *errmsg );
+
+        return -1;
+    }
+
+    return 0;
+}
+
+
+//v0.10 ist wie v0.9, aber mit links
+static gint
+zond_convert_from_v0_10( sqlite3* db_convert, gchar** errmsg )
+{
+    gint rc = 0;
+
+    gchar* sql =
+            "INSERT INTO baum_inhalt SELECT node_id, parent_id, older_sibling_id, "
+                    "icon_name, node_text FROM old.baum_inhalt WHERE node_id != 0; "
+            "INSERT INTO baum_auswertung SELECT * FROM old.baum_auswertung WHERE node_id != 0; "
+            "INSERT INTO links SELECT * FROM old.links; "
+            "INSERT INTO dateien SELECT * FROM old.dateien; "
+            "INSERT INTO ziele SELECT * FROM old.ziele; ";
+
+    rc = sqlite3_exec( db_convert, sql, NULL, NULL, errmsg );
+    if ( rc != SQLITE_OK )
+    {
+        if ( errmsg ) *errmsg = add_string( g_strdup( "Bei Aufruf sqlite3_exec:\n" ),
+                *errmsg );
+
+        return -1;
+    }
+
+    return 0;
+}
+
+
+static gint
+zond_convert_from_legacy_to_maj_0( const gchar* path, gchar const* v_string,
+        gchar** errmsg ) //eingang hinzugefügt
+{
+    gint rc = 0;
+    sqlite3* db = NULL;
+    gchar* sql = NULL;
+    gchar* path_old = NULL;
+    gchar* path_new = NULL;
+
+    path_new = g_strconcat( path, ".tmp", NULL );
+    rc = sqlite3_open( path_new, &db);
+    if ( rc != SQLITE_OK )
+    {
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf "
+                "sqlite3_open:\n", sqlite3_errmsg( db ), NULL );
+        g_free( path_new );
+
+        return -1;
+    }
+
+    if ( zond_convert_create_db_maj_0( db, errmsg ) )
+    {
+        sqlite3_close( db);
+        g_free( path_new );
+
+        ERROR_S
+    }
+
+    sql = g_strdup_printf( "ATTACH DATABASE '%s' AS old;", path );
+    rc = sqlite3_exec( db, sql, NULL, NULL, errmsg );
+    g_free( sql );
+    if ( rc != SQLITE_OK )
+    {
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_exec:\n"
+                "result code: ", sqlite3_errstr( rc ), "\nerrmsg: ",
+                *errmsg, NULL );
+        sqlite3_close( db );
+        g_free( path_new );
+
+        return -1;
+    }
+
+    if ( !g_strcmp0( v_string , "v0.7" ) )
+    {
+        rc = zond_convert_from_v0_7( db, errmsg );
+        if ( rc )
+        {
+            sqlite3_close( db );
+            g_free( path_new );
+
+            ERROR_S
+        }
+    }
+    else if ( !g_strcmp0( v_string , "v0.8" ) || !g_strcmp0( v_string , "v0.9" ) )
+    {
+        rc = zond_convert_from_v0_8_or_v0_9( db, errmsg );
+        if ( rc )
+        {
+            sqlite3_close( db );
+            g_free( path_new );
+            ERROR_S
+        }
+    }
+    else if ( !g_strcmp0( v_string , "v0.10" ) )
+    {
+        rc = zond_convert_from_v0_10( db, errmsg );
+        if ( rc )
+        {
+            sqlite3_close( db );
+            g_free( path_new );
+            ERROR_S
+        }
+    }
+
+    sqlite3_close( db );
+
+    path_old = g_strconcat( path, v_string, NULL );
+    rc = g_rename( path, path_old);
+    g_free( path_old );
+    if ( rc )
+    {
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_rename:\n",
+                strerror( errno ), NULL );
+        g_free( path_new );
+
+        return -1;
+    }
+
+    rc = g_rename ( path_new, path );
+    g_free( path_new );
+    if ( rc )
+    {
+        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_rename:\n",
+                strerror( errno ), NULL );
+
+        return -1;
+    }
+
+    return 0;
+}
+
+
+static gint
 zond_convert_get_younger_sibling_0( ZondDBase* zond_dbase, Baum baum, gint node_id, GError** error )
 {
     gint rc = 0;
@@ -514,7 +884,7 @@ zond_convert_0_to_1_update_link( ZondDBase* zond_dbase, gint node_id,
 }
 
 
-gint
+static gint
 zond_convert_0_to_1( ZondDBase* zond_dbase, GError** error )
 {
     gint first_child = 0;
@@ -607,5 +977,139 @@ zond_convert_0_to_1( ZondDBase* zond_dbase, GError** error )
     return 0;
 }
 
+
+static gint
+zond_convert_from_maj_0_to_1( ZondDBase* zond_dbase, GError** error )
+{
+    gint rc = 0;
+    gchar const* path = NULL;
+    gchar* sql = NULL;
+    gchar* path_old = NULL;
+    gchar* path_new = NULL;
+    gchar* errmsg = NULL;
+    sqlite3* db = NULL;
+
+    path = zond_dbase_get_path( zond_dbase );
+
+    path_new = g_strconcat( path, ".tmp", NULL );
+    rc = sqlite3_open( path_new, &db);
+    if ( rc != SQLITE_OK )
+    {
+        sqlite3_close( db );
+        g_free( path_new );
+
+        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE" ), rc, "%s\nsqlite3_open\n%s", __func__,
+                sqlite3_errstr( rc ) );
+
+        return -1;
+    }
+
+    if ( zond_dbase_create_db_maj_1( db, error ) )
+    {
+        sqlite3_close( db );
+        g_free( path_new );
+
+        ERROR_Z
+    }
+
+    sql = g_strdup_printf( "ATTACH DATABASE '%s' AS old;", path );
+    rc = sqlite3_exec( db, sql, NULL, NULL, &errmsg );
+    g_free( sql );
+    if ( rc != SQLITE_OK )
+    {
+        sqlite3_close( db );
+        g_free( path_new );
+
+        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
+                rc, "%s\n%s", __func__, errmsg );
+        g_free( errmsg );
+
+        return -1;
+    }
+
+    g_object_set( zond_dbase, "dbase", db, NULL );
+
+    rc = zond_convert_0_to_1( zond_dbase, error );
+    zond_dbase_finalize_stmts( zond_dbase_get_dbase( zond_dbase ) );
+    sqlite3_close( zond_dbase_get_dbase( zond_dbase ) );
+    g_object_set( zond_dbase, "dbase", NULL, NULL );
+    if ( rc )
+    {
+        g_free( path_new );
+
+        g_prefix_error( error, "%s\n", __func__ );
+
+        return -1;
+    }
+
+    path_old = g_strconcat( path, "v0", NULL );
+    rc = g_rename( path, path_old);
+    g_free( path_old );
+    if ( rc )
+    {
+        if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\ng_rename (v0) gibt Fehlermeldung ""%s"" zurück",
+                __func__, strerror( errno ) );
+        g_free( path_new );
+
+        return -1;
+    }
+
+    rc = g_rename ( path_new, path );
+    g_free( path_new );
+    if ( rc )
+    {
+        if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\ng_rename gibt Fehlermeldung ""%s"" zurück",
+                __func__, strerror( errno ) );
+
+        return -1;
+    }
+
+    return 0;
+}
+
+
+gint
+zond_convert( ZondDBase* zond_dbase, gchar const* v_string, GError** error )
+{
+    if ( v_string[0] == 'v' ) //legacy...
+    {
+        gint rc = 0;
+        gchar* errmsg = NULL;
+
+        rc = zond_convert_from_legacy_to_maj_0( zond_dbase_get_path( zond_dbase ), v_string, &errmsg );
+        if ( rc )
+        {
+            if ( error ) *error = g_error_new( ZOND_ERROR, 0,
+                    "%s\n%s", __func__, errmsg );
+            g_free( errmsg );
+
+            return -1;
+        }
+    }
+    else if ( !g_ascii_isdigit( v_string[0] ) )
+    {
+        if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\nUnbekannte Versionsbezeichnung", __func__ );
+
+        return -1;
+    }
+
+    if ( atoi( v_string ) > atoi( MAJOR ) )
+    {
+        if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\nVersion noch nicht verfügbar", __func__ );
+
+        return -1;
+    }
+    else if ( atoi( v_string ) == 0 ) //ist auch, wenn v_string[0] 'v' ist, dann ist aber zu 0 umgewandelt. Paßt also
+    {
+        gint rc = 0;
+
+        //aktewalisieren von maj_0 auf maj_1
+        rc = zond_convert_from_maj_0_to_1( zond_dbase, error );
+        if ( rc == -1 ) ERROR_Z
+    }
+    //später: if ( atoi( v_string ) == 1 ) ...
+
+    return 0;
+}
 
 

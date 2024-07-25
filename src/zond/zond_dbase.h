@@ -111,6 +111,9 @@ struct _ZondDBaseClass
     GObjectClass parent_class;
 };
 
+void zond_dbase_finalize_stmts( sqlite3* );
+
+gint zond_dbase_create_db_maj_1( sqlite3*, GError** );
 
 ZondDBase* zond_dbase_new( const gchar*, gboolean, gboolean, gchar** );
 

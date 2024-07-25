@@ -57,7 +57,8 @@ zond_dbase_set_property (GObject      *object,
     switch ((ZondDBaseProperty) property_id)
     {
         case PROP_PATH:
-          priv->path = g_strdup( g_value_get_string(value) );
+          g_free( priv->path );
+          priv->path = g_value_dup_string(value);
           break;
 
         case PROP_DBASE:
@@ -99,7 +100,7 @@ zond_dbase_get_property (GObject    *object,
 }
 
 
-static void
+void
 zond_dbase_finalize_stmts( sqlite3* db )
 {
     sqlite3_stmt* stmt = NULL;
@@ -115,11 +116,8 @@ zond_dbase_finalize( GObject* self )
 {
     ZondDBasePrivate* priv = zond_dbase_get_instance_private( ZOND_DBASE(self) );
 
-    if ( priv->dbase )
-    {
-        zond_dbase_finalize_stmts( priv->dbase);
-        sqlite3_close( priv->dbase );
-    }
+    if ( priv->dbase ) zond_dbase_finalize_stmts( priv->dbase);
+    sqlite3_close( priv->dbase );
 
     g_free( priv->path );
 
@@ -171,10 +169,10 @@ zond_dbase_init( ZondDBase* self )
 }
 
 
-static gint
-zond_dbase_create_db_maj_1( sqlite3* db, gchar** errmsg )
+gint
+zond_dbase_create_db_maj_1( sqlite3* db, GError** error )
 {
-    gchar* errmsg_ii = NULL;
+    gchar* errmsg = NULL;
     gchar* sql = NULL;
     gint rc = 0;
 
@@ -251,473 +249,12 @@ Rest = 0
 
             ;
 
-    rc = sqlite3_exec( db, sql, NULL, NULL, &errmsg_ii );
-    if ( rc != SQLITE_OK )
-    {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_exec (create db): "
-                "\nresult code: ", sqlite3_errstr( rc ), "\nerrmsg: ",
-                errmsg_ii, NULL );
-        sqlite3_free( errmsg_ii );
-
-        return -1;
-    }
-
-    return 0;
-}
-
-
-static gint
-zond_dbase_create_db_maj_0( sqlite3* db, gchar** errmsg )
-{
-    gchar* errmsg_ii = NULL;
-    gchar* sql = NULL;
-    gint rc = 0;
-
-    //Tabellenstruktur erstellen
-    sql = //Haupttabelle
-            "DROP TABLE IF EXISTS links; "
-            "DROP TABLE IF EXISTS dateien;"
-            "DROP TABLE IF EXISTS ziele;"
-            "DROP TABLE IF EXISTS baum_inhalt;"
-            "DROP TABLE IF EXISTS baum_auswertung; "
-
-            "CREATE TABLE baum_inhalt ("
-                "node_id INTEGER PRIMARY KEY,"
-                "parent_id INTEGER NOT NULL,"
-                "older_sibling_id INTEGER NOT NULL,"
-                "icon_name VARCHAR(50),"
-                "node_text VARCHAR(200), "
-                "FOREIGN KEY (parent_id) REFERENCES baum_inhalt (node_id) "
-                "ON DELETE CASCADE ON UPDATE CASCADE, "
-                "FOREIGN KEY (older_sibling_id) REFERENCES baum_inhalt (node_id) "
-                "ON DELETE CASCADE ON UPDATE CASCADE "
-            "); "
-
-            "INSERT INTO baum_inhalt (node_id, parent_id, older_sibling_id, "
-            "node_text) VALUES (0, 0, 0, '" MAJOR "');"
-
-            //Hilfstabelle "dateien"
-            //hier werden angebundene Dateien erfaßt
-            "CREATE TABLE dateien ("
-            "rel_path VARCHAR(200) PRIMARY KEY,"
-            "node_id INTEGER NOT NULL, "
-            "FOREIGN KEY (node_id) REFERENCES baum_inhalt (node_id) "
-            "ON DELETE CASCADE ON UPDATE CASCADE);"
-
-            //Hilfstabelle "ziele"
-            //hier werden Anbindungen an Dateien mit Zusatzinfo abgelegt
-            "CREATE TABLE ziele ("
-            "ziel_id_von VARCHAR(50), "
-            "index_von INTEGER, "
-            "ziel_id_bis VARCHAR(50), "
-            "index_bis INTEGER, "
-            "rel_path VARCHAR(200) NOT NULL, "
-            "node_id INTEGER NOT NULL, "
-            "PRIMARY KEY (ziel_id_von, index_von, ziel_id_bis, index_bis), "
-            "FOREIGN KEY (rel_path) REFERENCES dateien (rel_path) "
-            "ON DELETE CASCADE ON UPDATE CASCADE,"
-            "FOREIGN KEY (node_id) REFERENCES baum_inhalt (node_id) "
-            "ON DELETE CASCADE ON UPDATE CASCADE );"
-
-            //Auswertungs-Baum
-            "CREATE TABLE baum_auswertung ( "
-            "node_id INTEGER PRIMARY KEY,"
-            "parent_id INTEGER NOT NULL,"
-            "older_sibling_id INTEGER NOT NULL,"
-            "icon_name VARCHAR(50),"
-            "node_text VARCHAR(200),"
-            "text VARCHAR, "
-            "ref_id INTEGER NULL DEFAULT NULL,"
-            "FOREIGN KEY (parent_id) REFERENCES baum_auswertung (node_id) "
-            "ON DELETE CASCADE ON UPDATE CASCADE, "
-            "FOREIGN KEY (older_sibling_id) REFERENCES baum_auswertung (node_id) "
-            "ON DELETE CASCADE ON UPDATE CASCADE, "
-            "FOREIGN KEY (ref_id) REFERENCES baum_inhalt (node_id) "
-            "ON DELETE RESTRICT ON UPDATE RESTRICT );"
-
-            "INSERT INTO baum_auswertung (node_id, parent_id, older_sibling_id) "
-            "VALUES (0, 0, 0); " //mit eingang
-
-            "CREATE TABLE links ( "
-            "ID INTEGER PRIMARY KEY AUTOINCREMENT, " //order of appe...
-            "baum_id INTEGER, "
-            "node_id INTEGER, "
-            "projekt_target VARCHAR (200), "
-            "baum_id_target INTEGER, "
-            "node_id_target INTEGER "
-            " ); "
-
-            "CREATE TRIGGER delete_links_baum_inhalt_trigger BEFORE DELETE ON baum_inhalt "
-            "BEGIN "
-            "DELETE FROM links WHERE node_id=old.node_id AND baum_id=1; "
-            //etwaige Links, die auf gelöschten Knoten zeigen, auch löschen
-            "DELETE FROM baum_inhalt WHERE node_id = "
-                "(SELECT node_id FROM links WHERE node_id_target = old.node_id);"
-            "END; "
-
-            "CREATE TRIGGER delete_links_baum_auswertung_trigger BEFORE DELETE ON baum_auswertung "
-            "BEGIN "
-            "DELETE FROM links WHERE node_id=old.node_id AND baum_id=2; "
-            "DELETE FROM baum_auswertung WHERE node_id = "
-                "(SELECT node_id FROM links WHERE node_id_target = old.node_id);"
-            "END; "
-            ;
-
-    rc = sqlite3_exec( db, sql, NULL, NULL, &errmsg_ii );
-    if ( rc != SQLITE_OK )
-    {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_exec (create db): "
-                "\nresult code: ", sqlite3_errstr( rc ), "\nerrmsg: ",
-                errmsg_ii, NULL );
-        sqlite3_free( errmsg_ii );
-
-        return -1;
-    }
-
-    return 0;
-}
-
-
-//v0.7: in Tabellen baum_inhalt und baum_auswertung Spalte icon_id statt icon_name in v0.8
-static gint
-zond_dbase_convert_from_v0_7( sqlite3* db_convert, gchar** errmsg )
-{
-    gint rc = 0;
-    gchar* errmsg_ii = NULL;
-
-    gchar* sql = "INSERT INTO main.baum_inhalt "
-                    "SELECT node_id, parent_id, older_sibling_id, "
-                            "CASE icon_id "
-                            "WHEN 0 THEN 'dialog-error' "
-                            "WHEN 1 THEN 'emblem-new' "
-                            "WHEN 2 THEN 'folder' "
-                            "WHEN 3 THEN 'document-open' "
-                            "WHEN 4 THEN 'pdf' "
-                            "WHEN 5 THEN 'anbindung' "
-                            "WHEN 6 THEN 'akte' "
-                            "WHEN 7 THEN 'application-x-executable' "
-                            "WHEN 8 THEN 'text-x-generic' "
-                            "WHEN 9 THEN 'x-office-document' "
-                            "WHEN 10 THEN 'x-office-presentation' "
-                            "WHEN 11 THEN 'x-office-spreadsheet' "
-                            "WHEN 12 THEN 'emblem-photo' "
-                            "WHEN 13 THEN 'video-x-generic' "
-                            "WHEN 14 THEN 'audio-x-generic' "
-                            "WHEN 15 THEN 'mail-unread' "
-                            "WHEN 16 THEN 'emblem-web' "
-                            "WHEN 25 THEN 'system-log-out' "
-                            "WHEN 26 THEN 'mark-location' "
-                            "WHEN 27 THEN 'phone' "
-                            "WHEN 28 THEN 'emblem-important' "
-                            "WHEN 29 THEN 'camera-web' "
-                            "WHEN 30 THEN 'media-optical' "
-                            "WHEN 31 THEN 'user-info' "
-                            "WHEN 32 THEN 'system-users' "
-                            "WHEN 33 THEN 'orange' "
-                            "WHEN 34 THEN 'blau' "
-                            "WHEN 35 THEN 'rot' "
-                            "WHEN 36 THEN 'gruen' "
-                            "WHEN 37 THEN 'tuerkis' "
-                            "WHEN 38 THEN 'magenta' "
-                            "ELSE 'process-stop' "
-                            "END, "
-                        "node_text FROM old.baum_inhalt WHERE node_id!=0; "
-            "INSERT INTO main.dateien SELECT uri, node_id FROM old.dateien; "
-            "INSERT INTO main.ziele SELECT ziel_id_von, index_von, ziel_id_bis, index_bis, "
-            "(SELECT uri FROM old.dateien WHERE datei_id=old.ziele.datei_id), "
-            "node_id FROM old.ziele; "
-            "INSERT INTO main.baum_auswertung "
-                    "SELECT node_id, parent_id, older_sibling_id, "
-                            "CASE icon_id "
-                            "WHEN 0 THEN 'dialog-error' "
-                            "WHEN 1 THEN 'emblem-new' "
-                            "WHEN 2 THEN 'folder' "
-                            "WHEN 3 THEN 'document-open' "
-                            "WHEN 4 THEN 'pdf' "
-                            "WHEN 5 THEN 'anbindung' "
-                            "WHEN 6 THEN 'akte' "
-                            "WHEN 7 THEN 'application-x-executable' "
-                            "WHEN 8 THEN 'text-x-generic' "
-                            "WHEN 9 THEN 'x-office-document' "
-                            "WHEN 10 THEN 'x-office-presentation' "
-                            "WHEN 11 THEN 'x-office-spreadsheet' "
-                            "WHEN 12 THEN 'emblem-photo' "
-                            "WHEN 13 THEN 'video-x-generic' "
-                            "WHEN 14 THEN 'audio-x-generic' "
-                            "WHEN 15 THEN 'mail-unread' "
-                            "WHEN 16 THEN 'emblem-web' "
-                            "WHEN 25 THEN 'system-log-out' "
-                            "WHEN 26 THEN 'mark-location' "
-                            "WHEN 27 THEN 'phone' "
-                            "WHEN 28 THEN 'emblem-important' "
-                            "WHEN 29 THEN 'camera-web' "
-                            "WHEN 30 THEN 'media-optical' "
-                            "WHEN 31 THEN 'user-info' "
-                            "WHEN 32 THEN 'system-users' "
-                            "WHEN 33 THEN 'orange' "
-                            "WHEN 34 THEN 'blau' "
-                            "WHEN 35 THEN 'rot' "
-                            "WHEN 36 THEN 'gruen' "
-                            "WHEN 37 THEN 'tuerkis' "
-                            "WHEN 38 THEN 'magenta' "
-                            "ELSE 'process-stop' "
-                            "END, "
-                        "node_text, text, ref_id FROM old.baum_auswertung WHERE node_id!=0; ";
-
-    rc = sqlite3_exec( db_convert, sql, NULL, NULL, &errmsg_ii );
-    if ( rc != SQLITE_OK )
-    {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_exec:\n"
-                "result code: ", sqlite3_errstr( rc ), "\nerrmsg: ",
-                errmsg_ii, NULL );
-        sqlite3_free( errmsg_ii );
-
-        return -1;
-    }
-
-    return 0;
-}
-
-
-//v0.8 ist wie Maj_0, aber ohne links
-//v0.9 ist wie 0.8, aber mit Tabelle eingang
-static gint
-zond_dbase_convert_from_v0_8_or_v0_9( sqlite3* db_convert, gchar** errmsg )
-{
-    gint rc = 0;
-
-    gchar* sql =
-            "INSERT INTO baum_inhalt SELECT node_id, parent_id, older_sibling_id, "
-                    "icon_name, node_text FROM old.baum_inhalt WHERE node_id != 0; "
-            "INSERT INTO baum_auswertung SELECT * FROM old.baum_auswertung WHERE node_id != 0; "
-            "INSERT INTO dateien SELECT * FROM old.dateien; "
-            "INSERT INTO ziele SELECT * FROM old.ziele; ";
-
-    rc = sqlite3_exec( db_convert, sql, NULL, NULL, errmsg );
-    if ( rc != SQLITE_OK )
-    {
-        if ( errmsg ) *errmsg = add_string( g_strdup( "Bei Aufruf sqlite3_exec:\n" ),
-                *errmsg );
-
-        return -1;
-    }
-
-    return 0;
-}
-
-
-//v0.10 ist wie v0.9, aber mit links
-static gint
-zond_dbase_convert_from_v0_10( sqlite3* db_convert, gchar** errmsg )
-{
-    gint rc = 0;
-
-    gchar* sql =
-            "INSERT INTO baum_inhalt SELECT node_id, parent_id, older_sibling_id, "
-                    "icon_name, node_text FROM old.baum_inhalt WHERE node_id != 0; "
-            "INSERT INTO baum_auswertung SELECT * FROM old.baum_auswertung WHERE node_id != 0; "
-            "INSERT INTO links SELECT * FROM old.links; "
-            "INSERT INTO dateien SELECT * FROM old.dateien; "
-            "INSERT INTO ziele SELECT * FROM old.ziele; ";
-
-    rc = sqlite3_exec( db_convert, sql, NULL, NULL, errmsg );
-    if ( rc != SQLITE_OK )
-    {
-        if ( errmsg ) *errmsg = add_string( g_strdup( "Bei Aufruf sqlite3_exec:\n" ),
-                *errmsg );
-
-        return -1;
-    }
-
-    return 0;
-}
-
-
-static gint
-zond_dbase_convert_from_legacy_to_maj_0( const gchar* path, gchar* v_string,
-        gchar** errmsg ) //eingang hinzugefügt
-{
-    gint rc = 0;
-    sqlite3* db = NULL;
-    gchar* sql = NULL;
-    gchar* path_old = NULL;
-    gchar* path_new = NULL;
-
-    path_new = g_strconcat( path, ".tmp", NULL );
-    rc = sqlite3_open( path_new, &db);
-    if ( rc != SQLITE_OK )
-    {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf "
-                "sqlite3_open:\n", sqlite3_errmsg( db ), NULL );
-        g_free( path_new );
-
-        return -1;
-    }
-
-    if ( zond_dbase_create_db_maj_0( db, errmsg ) )
-    {
-        sqlite3_close( db);
-        g_free( path_new );
-
-        ERROR_S
-    }
-
-    sql = g_strdup_printf( "ATTACH DATABASE '%s' AS old;", path );
-    rc = sqlite3_exec( db, sql, NULL, NULL, errmsg );
-    g_free( sql );
-    if ( rc != SQLITE_OK )
-    {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_exec:\n"
-                "result code: ", sqlite3_errstr( rc ), "\nerrmsg: ",
-                *errmsg, NULL );
-        sqlite3_close( db );
-        g_free( path_new );
-
-        return -1;
-    }
-
-    if ( !g_strcmp0( v_string , "v0.7" ) )
-    {
-        rc = zond_dbase_convert_from_v0_7( db, errmsg );
-        if ( rc )
-        {
-            sqlite3_close( db );
-            g_free( path_new );
-
-            ERROR_S
-        }
-    }
-    else if ( !g_strcmp0( v_string , "v0.8" ) || !g_strcmp0( v_string , "v0.9" ) )
-    {
-        rc = zond_dbase_convert_from_v0_8_or_v0_9( db, errmsg );
-        if ( rc )
-        {
-            sqlite3_close( db );
-            g_free( path_new );
-            ERROR_S
-        }
-    }
-    else if ( !g_strcmp0( v_string , "v0.10" ) )
-    {
-        rc = zond_dbase_convert_from_v0_10( db, errmsg );
-        if ( rc )
-        {
-            sqlite3_close( db );
-            g_free( path_new );
-            ERROR_S
-        }
-    }
-
-    sqlite3_close( db );
-
-    path_old = g_strconcat( path, v_string, NULL );
-    rc = g_rename( path, path_old);
-    g_free( path_old );
-    if ( rc )
-    {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_rename:\n",
-                strerror( errno ), NULL );
-        g_free( path_new );
-
-        return -1;
-    }
-
-    rc = g_rename ( path_new, path );
-    g_free( path_new );
-    if ( rc )
-    {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_rename:\n",
-                strerror( errno ), NULL );
-
-        return -1;
-    }
-
-    return 0;
-}
-
-
-static gint
-zond_dbase_convert_from_maj_0_to_1( ZondDBase* zond_dbase, GError** error )
-{
-    gint rc = 0;
-    sqlite3* db = NULL;
-    gchar* sql = NULL;
-    gchar* path_old = NULL;
-    gchar* path_new = NULL;
-    gchar* errmsg = NULL;
-    gchar* path = NULL;
-
-    ZondDBasePrivate* zond_dbase_priv = zond_dbase_get_instance_private( zond_dbase );
-
-    path_new = g_strconcat( zond_dbase_priv->path, ".tmp", NULL );
-    rc = sqlite3_open( path_new, &db);
-    if ( rc != SQLITE_OK )
-    {
-        g_free( path_new );
-
-        ERROR_Z_DBASE
-    }
-
-    if ( zond_dbase_create_db_maj_1( db, &errmsg ) )
-    {
-        sqlite3_close( db);
-        g_free( path_new );
-
-        if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\n%s", __func__, errmsg );
-        g_free( errmsg );
-
-        return -1;
-    }
-
-    sql = g_strdup_printf( "ATTACH DATABASE '%s' AS old;", zond_dbase_priv->path );
     rc = sqlite3_exec( db, sql, NULL, NULL, &errmsg );
-    g_free( sql );
     if ( rc != SQLITE_OK )
     {
-        sqlite3_close( db );
-        g_free( path_new );
-
-        if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ),
-                rc, "%s\n%s", __func__, errmsg );
-        g_free( errmsg );
-
-        return -1;
-    }
-
-    zond_dbase_priv->dbase = db;
-    rc = zond_convert_0_to_1( zond_dbase, error );
-    if ( rc )
-    {
-        g_free( path_new );
-
-        g_prefix_error( error, "%s\n", __func__ );
-
-        return -1;
-    }
-
-    path = g_strdup( zond_dbase_priv->path );
-    g_object_unref( zond_dbase );
-
-    path_old = g_strconcat( path, "v0", NULL );
-    rc = g_rename( path, path_old);
-    g_free( path_old );
-    if ( rc )
-    {
-        if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\ng_rename (v0) gibt Fehlermeldung ""%s"" zurück",
-                __func__, strerror( errno ) );
-        g_free( path_new );
-        g_free( path );
-
-        return -1;
-    }
-
-    rc = g_rename ( path_new, path );
-    g_free( path_new );
-    g_free( path );
-    if ( rc )
-    {
-        if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\ng_rename gibt Fehlermeldung ""%s"" zurück",
-                __func__, strerror( errno ) );
+        if ( error ) *error = g_error_new( g_quark_from_string( "SQLITE" ), 0, "%s\nsqlite3_exec\n"
+                "\nresult code: %s\n%s", __func__, sqlite3_errstr( rc ), errmsg );
+        sqlite3_free( errmsg );
 
         return -1;
     }
@@ -771,22 +308,16 @@ zond_dbase_get_version( sqlite3* db, gchar** errmsg )
 
 
 static gint
-zond_dbase_open( ZondDBase** zond_dbase, gboolean create_file, gboolean create, sqlite3** db, gchar** errmsg )
+zond_dbase_open( ZondDBase* zond_dbase, gboolean create_file, gboolean create, gchar** errmsg )
 {
     gint rc = 0;
-    GError* error = NULL;
-    gchar const* path = NULL;
 
-    ZondDBasePrivate* zond_dbase_priv = zond_dbase_get_instance_private( *zond_dbase );
+    ZondDBasePrivate* zond_dbase_priv = zond_dbase_get_instance_private( zond_dbase );
 
-    path = zond_dbase_priv->path;
-
-    rc = sqlite3_open_v2( path, db, SQLITE_OPEN_READWRITE |
+    rc = sqlite3_open_v2( zond_dbase_priv->path, &(zond_dbase_priv->dbase), SQLITE_OPEN_READWRITE |
             ((create_file || create) ? SQLITE_OPEN_CREATE : 0), NULL );
     if ( rc != SQLITE_OK ) //Datei nicht vorhanden und weder create_file noch create
     {
-        sqlite3_close( *db );
-
         if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_open_v2:\n",
                 sqlite3_errstr( rc ), NULL );
 
@@ -796,62 +327,19 @@ zond_dbase_open( ZondDBase** zond_dbase, gboolean create_file, gboolean create, 
     {
         gchar* v_string = NULL;
 
-        v_string = zond_dbase_get_version( *db, errmsg );
-        if ( !v_string )
-        {
-            sqlite3_close( *db );
+        v_string = zond_dbase_get_version( zond_dbase_priv->dbase, errmsg );
+        if ( !v_string ) ERROR_S
 
-            ERROR_S
-        }
-
-        if ( v_string[0] == 'v' ) //legacy...
+        if ( g_strcmp0( v_string, MAJOR ) )
         {
             gint rc = 0;
+            GError* error = NULL;
 
-            sqlite3_close( *db );
+            sqlite3_close( zond_dbase_priv->dbase );
 
-            rc = zond_dbase_convert_from_legacy_to_maj_0( path, v_string, errmsg );
+            rc = zond_convert( zond_dbase, v_string, &error );
             g_free( v_string );
-            if ( rc ) ERROR_S
-
-            rc = sqlite3_open_v2( path, db, SQLITE_OPEN_READWRITE, NULL );
             if ( rc )
-            {
-                if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_open_v2:\n",
-                        sqlite3_errstr( rc ), NULL );
-
-                ERROR_S
-            }
-
-            v_string = g_strdup( "0" );
-        }
-
-        if ( !g_ascii_isdigit( v_string[0] ) )
-        {
-            g_free( v_string );
-            sqlite3_close( *db );
-
-            ERROR_S_MESSAGE( "Unbekannte Versionsbezeichnung" )
-        }
-        else if ( atoi( v_string ) > atoi( MAJOR ) )
-        {
-            g_free( v_string );
-            sqlite3_close( *db );
-
-            ERROR_S_MESSAGE( "Version gibt's noch gar nicht" )
-        }
-
-        if ( atoi( v_string ) == 0 )
-        {
-            gint rc = 0;
-
-            g_free( v_string );
-            sqlite3_close( *db );
-
-            //aktewalisieren von maj_0 auf maj_1
-            rc = zond_dbase_convert_from_maj_0_to_1( *zond_dbase, &error );
-            zond_dbase_priv->dbase = NULL;
-            if ( rc == -1 )
             {
                 if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
                 g_error_free( error );
@@ -859,32 +347,36 @@ zond_dbase_open( ZondDBase** zond_dbase, gboolean create_file, gboolean create, 
                 return -1;
             }
 
-            return 1; //zond_dbase ist unreffed
+            rc = sqlite3_open_v2( zond_dbase_priv->path, &(zond_dbase_priv->dbase), SQLITE_OPEN_READWRITE, NULL );
+            if ( rc != SQLITE_OK ) //Datei nicht vorhanden und weder create_file noch create
+            {
+                if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf sqlite3_open_v2:\n",
+                        sqlite3_errstr( rc ), NULL );
+
+                return -1;
+            }
         }
-        //später: if ( atoi( v_string ) == 1 ) ...
+        else g_free( v_string );
     }
     else if ( create ) //Datenbank soll neu angelegt werden
     {
         gint rc = 0;
+        GError* error = NULL;
 
         //Abfrage, ob überschrieben werden soll, überflüssig - schon im filechooser
-        rc = zond_dbase_create_db_maj_1( *db, errmsg );
+        rc = zond_dbase_create_db_maj_1( zond_dbase_priv->dbase, &error );
         if ( rc )
         {
-            sqlite3_close( *db );
+            if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+            g_error_free( error );
 
-            ERROR_S
+            return -1;
         }
     }
 
-    rc = sqlite3_exec( *db, "PRAGMA foreign_keys = ON; PRAGMA recursive_triggers = 1; ",
+    rc = sqlite3_exec( zond_dbase_priv->dbase, "PRAGMA foreign_keys = ON; PRAGMA recursive_triggers = 1; ",
             NULL, NULL, errmsg );
-    if ( rc != SQLITE_OK )
-    {
-        sqlite3_close( *db );
-
-        ERROR_S
-    }
+    if ( rc != SQLITE_OK ) ERROR_S
 
     return 0;
 }
@@ -895,26 +387,19 @@ zond_dbase_new( const gchar* path, gboolean create_file, gboolean create,
         gchar** errmsg )
 {
     gint rc = 0;
-    sqlite3* db = NULL;
     ZondDBase* zond_dbase = NULL;
-    ZondDBasePrivate* zond_dbase_priv = NULL;
 
     g_return_val_if_fail( path, NULL );
 
     zond_dbase = g_object_new( ZOND_TYPE_DBASE, "path", path, NULL );
 
-    rc = zond_dbase_open( &zond_dbase, create_file, create, &db, errmsg );
+    rc = zond_dbase_open( zond_dbase, create_file, create, errmsg );
     if ( rc == -1 )
     {
         g_object_unref( zond_dbase );
 
         ERROR_S_VAL( NULL )
     }
-    //konvertiert; deshalb zond_dbase geklöscht
-    else if ( rc == 1 ) zond_dbase = g_object_new( ZOND_TYPE_DBASE, "path", path, NULL );
-
-    zond_dbase_priv = zond_dbase_get_instance_private( zond_dbase );
-    zond_dbase_priv->dbase = db;
 
     return zond_dbase;
 }
