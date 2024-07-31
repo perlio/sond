@@ -1459,6 +1459,7 @@ zond_dbase_get_younger_sibling( ZondDBase* zond_dbase, gint node_id, gint* young
 }
 
 
+/** ergibt Anknüpfung im Baum, wenn angeknüpft **/
 gint
 zond_dbase_get_baum_inhalt_file_from_file_part( ZondDBase* zond_dbase,
                     gint file_part, gint* baum_inhalt_file, GError** error )
@@ -1586,7 +1587,10 @@ zond_dbase_get_first_baum_inhalt_file_child( ZondDBase* zond_dbase,
 }
 
 
-//sucht von file_part ausgehend unter ihm selbst und den Eltern Anbindung im baum_inhalt
+/** Top-Funktion!!!
+    Prüft, ob node_id (muß FILE_PART sein) oder dessen Eltern angebunden sind
+    Gibt Anbindung (baum_inhalt_file) und angebundenen file_part (id_file_part) zurück
+    **/
 gint
 zond_dbase_find_baum_inhalt_file( ZondDBase* zond_dbase, gint node_id,
         gint* baum_inhalt_file, gint* id_file_part, gchar** file_part, GError** error )

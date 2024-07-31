@@ -63,21 +63,16 @@ zond_treeview_get_root( ZondTreeview* ztv, gint node_id, gint* root, GError** er
         gint baum_inhalt_file = 0;
 
         //prüfen, ob ganze Datei angebunden
-        rc = zond_dbase_get_baum_inhalt_file_from_file_part( ztv_priv->zond->dbase_zond->zond_dbase_work,
-                node_id, &baum_inhalt_file, error );
+        rc = zond_dbase_find_baum_inhalt_file( ztv_priv->zond->dbase_zond->zond_dbase_work,
+                node_id, &baum_inhalt_file, NULL, NULL, error );
         if ( rc ) ERROR_Z
 
         if ( baum_inhalt_file ) node_id = baum_inhalt_file;
     }
 
-    if ( root )
-    {
-        gint rc = 0;
-
-        rc = zond_dbase_get_tree_root( ztv_priv->zond->dbase_zond->zond_dbase_work,
-                node_id, root, error );
-        if ( rc ) ERROR_Z
-    }
+    rc = zond_dbase_get_tree_root( ztv_priv->zond->dbase_zond->zond_dbase_work,
+            node_id, root, error );
+    if ( rc ) ERROR_Z
 
     return 0;
 }
