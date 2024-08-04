@@ -21,12 +21,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <glib/gstdio.h>
 #include <mupdf/fitz.h>
 #include <sqlite3.h>
+#include <stdio.h>
+#include <fcntl.h>
 
 #include "zond_dbase.h"
 #include "zond_treeview.h"
 
 #include "99conv/pdf.h"
-
+#include "99conv/general.h"
 
 
 static gint
@@ -611,50 +613,74 @@ zond_convert_0_to_1_baum_inhalt_insert( ZondDBase* zond_dbase, gint anchor_id, g
     }
     else if ( rel_path && !ziel_von ) //datei
     {
-        gint rc = 0;
-        gint first_child_file = 0;
+        //erstmal Test, ob file da und zu öffnen
+        gint fd = 0;
+        gchar* filename = NULL;
+        gchar* charset = NULL;
+        gboolean exists = TRUE;
         gint node_inserted_root = 0;
+        gint first_child_file = 0;
 
-        //FILE_PART_ROOT einfügen
-        rc = zond_dbase_create_file_root( zond_dbase, rel_path, icon_name, node_text, NULL, &node_inserted_root, error );
-        if ( rc ) ERROR_Z
+        charset = g_get_codeset();
+        filename = g_convert( rel_path, -1, charset, "UTF-8", NULL, NULL,
+                error );
+        g_free( charset );
+        if ( !filename ) ERROR_Z
 
-        //BAUM_INHALT_FILE_PART einfügen
-        *node_inserted = zond_dbase_insert_node( zond_dbase, anchor_id, child, ZOND_DBASE_TYPE_BAUM_INHALT_FILE,
-                node_inserted_root, NULL, NULL, NULL, NULL, NULL, error );
-        if ( *node_inserted == -1 ) ERROR_Z
+        fd = open( filename, O_RDONLY );
+        g_free( filename );
+        if ( fd < 0 )
+        {
+            exists = FALSE;
+            g_warning( "'%s' konnte nicht geöffnet werden: %s", rel_path, strerror( errno ) );
+
+            //Als Strukt einfügen
+            *node_inserted = zond_dbase_insert_node( zond_dbase, anchor_id, child, ZOND_DBASE_TYPE_BAUM_STRUKT,
+                    0, NULL, NULL, icon_name, node_text, NULL, error );
+            if ( *node_inserted == -1 ) ERROR_Z
+        }
+        else //Datei existiert und kann geöffnet werden
+        {
+            close( fd );
+
+            gint rc = 0;
+
+            //FILE_PART_ROOT einfügen
+            rc = zond_dbase_create_file_root( zond_dbase, rel_path, icon_name, node_text, NULL, &node_inserted_root, error );
+            if ( rc ) ERROR_Z
+
+            //BAUM_INHALT_FILE_PART einfügen
+            *node_inserted = zond_dbase_insert_node( zond_dbase, anchor_id, child, ZOND_DBASE_TYPE_BAUM_INHALT_FILE,
+                    node_inserted_root, NULL, NULL, NULL, NULL, NULL, error );
+            if ( *node_inserted == -1 ) ERROR_Z
+        }
 
         //neue Rekursion mit FILE_PART_ROOT starten
+        //in Version bis 0 ja nur bei PDF-Dateien möglich
+        //d.h. Test, ob es sich um PDF handelt, überflüssig
         first_child_file = zond_convert_get_first_child_0( zond_dbase, BAUM_INHALT, node_id, error );
         if ( first_child_file == -1 ) ERROR_Z
 
         if ( first_child_file )
         {
             gint rc = 0;
-            gchar* errmsg = NULL;
             gint node_inserted_file = 0;
 
-            data_convert->ctx = fz_new_context( NULL, NULL, FZ_STORE_UNLIMITED );
-            if ( !data_convert->ctx )
+            if ( exists ) //wenn Datei nicht existiert, muß man nicht versuchen, sie zu öffnen
             {
-                if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\nfz_context konnte nicht initialisiert werden", __func__ );
-                return -1;
-            }
-
-            rc = pdf_open_and_authen_document( data_convert->ctx, TRUE, rel_path, NULL, &(data_convert->doc), NULL, &errmsg );
-            if ( rc )
-            {
-                fz_drop_context( data_convert->ctx );
-                if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\n%s", __func__, errmsg );
-                g_free( errmsg );
-
-                return -1;
+                rc = pdf_open_and_authen_document( data_convert->ctx, TRUE, rel_path, NULL, &(data_convert->doc), NULL, error );
+                if ( rc )
+                {
+                    g_warning( "PDF '%s' konnte nicht geöffnet werden - %s", rel_path,
+                            (*error)->message );
+                    g_clear_error( error );
+                }
             }
 
             rc = zond_convert_0_to_1_baum_inhalt( zond_dbase, node_inserted_root, TRUE, first_child_file, data_convert,
                     arr_targets, &node_inserted_file, error );
             pdf_drop_document( data_convert->ctx, data_convert->doc );
-            fz_drop_context( data_convert->ctx );
+            data_convert->doc = NULL;
             if ( rc ) ERROR_Z
         }
     }
@@ -665,36 +691,47 @@ zond_convert_0_to_1_baum_inhalt_insert( ZondDBase* zond_dbase, gint anchor_id, g
         Anbindung anbindung = { 0 };
         gchar* errmsg = NULL;
 
-        anbindung.von.seite = treeviews_get_page_num_from_dest_doc( data_convert->ctx, data_convert->doc,
-                ziel_von, &errmsg );
-        if ( anbindung.von.seite == -1 )
+        if ( data_convert->doc ) //doc wurde nicht nicht gefunden
         {
-            if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\n%s", __func__, errmsg );
-            g_free( errmsg );
+            anbindung.von.seite = treeviews_get_page_num_from_dest_doc( data_convert->ctx, data_convert->doc,
+                    ziel_von, &errmsg );
+            if ( anbindung.von.seite == -1 )
+            {
+                if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\n%s", __func__, errmsg );
+                g_free( errmsg );
 
-            return -1;
+                return -1;
+            }
+
+            anbindung.bis.seite = treeviews_get_page_num_from_dest_doc( data_convert->ctx, data_convert->doc,
+                    ziel_bis, &errmsg );
+            if ( anbindung.bis.seite == -1 )
+            {
+                if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\n%s", __func__, errmsg );
+                g_free( errmsg );
+
+                return -1;
+            }
+
+            anbindung.von.index = index_von;
+            anbindung.bis.index = index_bis;
+
+            zond_treeview_build_file_section( anbindung, &section );
+            file_part = g_strdup_printf( "/%s//", rel_path_ziel );
+            *node_inserted = zond_dbase_insert_node( zond_dbase, anchor_id, child, ZOND_DBASE_TYPE_FILE_PART,
+                    0, file_part, section, icon_name, node_text, NULL, error );
+            g_free( section );
+            g_free( file_part );
+            if ( *node_inserted == -1 ) ERROR_Z
         }
-
-        anbindung.bis.seite = treeviews_get_page_num_from_dest_doc( data_convert->ctx, data_convert->doc,
-                ziel_bis, &errmsg );
-        if ( anbindung.bis.seite == -1 )
+        else
         {
-            if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\n%s", __func__, errmsg );
-            g_free( errmsg );
+            *node_inserted = zond_dbase_insert_node( zond_dbase, anchor_id, child, ZOND_DBASE_TYPE_BAUM_STRUKT,
+                    0, NULL, NULL, icon_name, node_text, NULL, error );
+            if ( *node_inserted == -1 ) ERROR_Z
 
-            return -1;
+            g_message( "Von: %s,%d   Bis: %s,%d", ziel_von, index_von, ziel_bis, index_bis );
         }
-
-        anbindung.von.index = index_von;
-        anbindung.bis.index = index_bis;
-
-        zond_treeview_build_file_section( anbindung, &section );
-        file_part = g_strdup_printf( "/%s//", rel_path_ziel );
-        *node_inserted = zond_dbase_insert_node( zond_dbase, anchor_id, child, ZOND_DBASE_TYPE_FILE_PART,
-                0, file_part, section, icon_name, node_text, NULL, error );
-        g_free( section );
-        g_free( file_part );
-        if ( *node_inserted == -1 ) ERROR_Z
     }
 
     return 0;
@@ -911,8 +948,16 @@ zond_convert_0_to_1( ZondDBase* zond_dbase, GError** error )
         gint rc = 0;
         gint node_inserted = 0;
 
+        data_convert.ctx = fz_new_context( NULL, NULL, FZ_STORE_UNLIMITED );
+        if ( !data_convert.ctx )
+        {
+            g_array_unref( arr_targets );
+            if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\nfz_context konnte nicht initialisiert werden", __func__ );
+        }
+
         rc = zond_convert_0_to_1_baum_inhalt( zond_dbase, 1, TRUE, first_child,
                 &data_convert, arr_targets, &node_inserted, error );
+        fz_drop_context( data_convert.ctx );
         if ( rc )
         {
             g_array_unref( arr_targets );

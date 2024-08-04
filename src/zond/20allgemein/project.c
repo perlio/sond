@@ -454,7 +454,8 @@ cb_menu_datei_oeffnen_activate( GtkMenuItem* item, gpointer user_data )
     g_free( abs_path );
     if ( rc == -1 )
     {
-        display_message( zond->app_window, "Fehler beim Öffnen-\n\n", errmsg, NULL );
+        printf( "%s\n", errmsg );
+        display_error( zond->app_window, "Fehler beim Öffnen", errmsg );
         g_free( errmsg );
 
         return;

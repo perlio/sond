@@ -334,6 +334,19 @@ zond_dbase_open( ZondDBase* zond_dbase, gboolean create_file, gboolean create, g
         {
             gint rc = 0;
             GError* error = NULL;
+            gchar* message = NULL;
+
+            message = g_strdup_printf( "Projekt in abweichender Version (%s) gespeichert", v_string );
+            rc = abfrage_frage( NULL, message, "Konvertieren", NULL );
+            g_free( message );
+
+            if ( rc != GTK_RESPONSE_YES )
+            {
+                if ( errmsg ) *errmsg = g_strdup_printf( "%s\nFalsche Projektversion (%s)", __func__, v_string );
+                g_free( v_string );
+
+                return -1;
+            }
 
             sqlite3_close( zond_dbase_priv->dbase );
 

@@ -354,17 +354,17 @@ static void
 zond_pdf_document_constructed( GObject* self )
 {
     gint rc = 0;
-    gchar* errmsg = NULL;
+    GError* error = NULL;
     gint number_of_pages = 0;
 
     ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( ZOND_PDF_DOCUMENT(self) );
 
     rc = pdf_open_and_authen_document( priv->ctx, TRUE, priv->path,
-            &priv->password, &priv->doc, &priv->auth, &errmsg );
+            &priv->password, &priv->doc, &priv->auth, &error );
     if ( rc )
     {
-        if ( rc == -1 ) priv->errmsg = add_string( g_strdup( "Bei Aufruf pdf_open_and_authen_document:\n" ),
-                errmsg );
+        if ( rc == -1 ) priv->errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+        g_error_free( error );
         priv->doc = NULL;
         G_OBJECT_CLASS(zond_pdf_document_parent_class)->constructed( self );
 
@@ -374,7 +374,7 @@ zond_pdf_document_constructed( GObject* self )
     number_of_pages = pdf_count_pages( priv->ctx, priv->doc );
     if ( number_of_pages == 0 )
     {
-        priv->errmsg = g_strdup( "Dokument enthält keine Seiten" );
+        priv->errmsg = g_strdup_printf( "%s\nDokument enthält keine Seiten", __func__ );
         G_OBJECT_CLASS(zond_pdf_document_parent_class)->constructed( self );
 
         return;
@@ -611,14 +611,25 @@ zond_pdf_document_reopen_doc_and_pages( ZondPdfDocument* self, gchar** errmsg )
 {
     gint rc = 0;
     fz_context* ctx = NULL;
+    GError* error = NULL;
 
     ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
 
     ctx = priv->ctx;
 
-    rc = pdf_open_and_authen_document( priv->ctx, FALSE, priv->path, &priv->password, &priv->doc, &priv->auth, errmsg );
-    if ( rc == -1 ) ERROR_S
-    else if ( rc == 1 ) ERROR_S_MESSAGE( "Passwort konnte nicht authentifiziert werden")
+    rc = pdf_open_and_authen_document( priv->ctx, FALSE, priv->path, &priv->password, &priv->doc, &priv->auth, &error );
+    if ( rc )
+    {
+        if ( rc == -1 )
+        {
+            if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+            g_error_free( error );
+        }
+        else if ( rc == 1 ) if ( errmsg ) *errmsg =
+                g_strdup_printf( "%s\nPasswort konnte nicht authentifiziert werden", __func__ );
+
+        return -1;
+    }
 
     //Seiten wieder laden
     for ( gint i = 0; i < priv->pages->len; i++ )

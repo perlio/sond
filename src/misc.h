@@ -36,6 +36,8 @@ typedef void* gpointer;
 
 void display_message( GtkWidget*, ... );
 
+void display_error( GtkWidget*, gchar const*, gchar const* );
+
 gint dialog_with_buttons( GtkWidget*, const gchar*, const gchar*, gchar**,
         ... );
 

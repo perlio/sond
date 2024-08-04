@@ -60,6 +60,40 @@ void display_message( GtkWidget* window, ... )
 }
 
 
+void
+display_error( GtkWidget* window, gchar const* error, gchar const* errmsg )
+{
+    GtkWidget* message_area = NULL;
+    GtkWidget* swindow = NULL;
+    GtkWidget* textview = NULL;
+    GtkTextBuffer* textbuffer = NULL;
+
+    GtkWidget* dialog = gtk_message_dialog_new( GTK_WINDOW(window),
+            GTK_DIALOG_DESTROY_WITH_PARENT, GTK_MESSAGE_INFO,
+            GTK_BUTTONS_CLOSE, error );
+
+    message_area = gtk_message_dialog_get_message_area( GTK_MESSAGE_DIALOG(dialog) );
+    swindow = gtk_scrolled_window_new( NULL, NULL );
+    textbuffer = gtk_text_buffer_new( NULL );
+    gtk_text_buffer_set_text( textbuffer, errmsg, -1 );
+
+    textview = gtk_text_view_new_with_buffer( textbuffer );
+
+    gtk_container_add( GTK_CONTAINER(swindow), textview );
+    gtk_box_pack_start( GTK_BOX(message_area), swindow, FALSE, FALSE, 0 );
+    gtk_scrolled_window_set_propagate_natural_height( GTK_SCROLLED_WINDOW(swindow), TRUE );
+    gtk_scrolled_window_set_propagate_natural_width( GTK_SCROLLED_WINDOW(swindow), TRUE );
+
+    gtk_widget_show_all( message_area );
+
+    gtk_dialog_run ( GTK_DIALOG (dialog) );
+
+    gtk_widget_destroy( dialog );
+
+    return;
+}
+
+
 static void
 cb_entry_text( GtkEntry* entry, gpointer data )
 {
@@ -392,9 +426,8 @@ misc_datei_oeffnen( const gchar* path, gboolean open_with, gchar** errmsg )
     gchar* path_win32 = g_strdelimit( g_strdup( path ), "/", '\\' );
 
     //utf8 in filename konvertieren
-    gsize written;
     gchar* charset = g_get_codeset();
-    gchar* local_filename = g_convert( path_win32, -1, charset, "UTF-8", NULL, &written,
+    gchar* local_filename = g_convert( path_win32, -1, charset, "UTF-8", NULL, NULL,
             NULL );
     g_free( charset );
     g_free( path_win32 );
