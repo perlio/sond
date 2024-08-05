@@ -492,18 +492,21 @@ zond_convert_get_first_child_0( ZondDBase* zond_dbase, Baum baum, gint node_id, 
 
 
 static gint
-zond_convert_get_node_from_baum_auswertung_0( ZondDBase* zond_dbase, gint node_id, gint* link_id, gchar** icon_name,
-        gchar** node_text, gchar** text, gint* ref_id, gint* link_id_target, GError** error )
+zond_convert_get_node_from_baum_auswertung_0( ZondDBase* zond_dbase, gint node_id, gchar** icon_name,
+        gchar** node_text, gchar** text, gint* ref_id, gint* is_link_target, gint* baum_target, gint* id_target,
+        GError** error )
 {
     gint rc = 0;
     sqlite3_stmt** stmt = NULL;
 
     gchar const* sql[] = {
-            "SELECT icon_name, node_text, text, ref_id, links_target.node_id, links_origin.node_id "
+            "SELECT icon_name, node_text, text, ref_id, links_target.node_id, "
+                    "links_origin.baum_id_target, links_origin.node_id_target "
                     "FROM old.baum_auswertung "
+                    //Nächste Zeile: Knoten, auf die ein Link zeigt
                     "LEFT JOIN old.links AS links_target "
-                            "ON links_target.baum_id_target=2 AND links_target.node_id_target=old.baum_auswertung.node_id "
-                    "LEFT JOIN old.links AS links_origin ON links_origin.node_id=old.baum_auswertung.node_id "
+                            "ON old.baum_auswertung.node_id=links_target.node_id_target AND links_target.baum_id_target=2 "
+                    "LEFT JOIN old.links AS links_origin ON old.baum_auswertung.node_id=links_origin.node_id "
                     "WHERE old.baum_auswertung.node_id=?1; "
                     };
 
@@ -522,8 +525,9 @@ zond_convert_get_node_from_baum_auswertung_0( ZondDBase* zond_dbase, gint node_i
         *node_text = g_strdup( (gchar const*) sqlite3_column_text( stmt[0], 1 ) );
         *text = g_strdup( (gchar const*) sqlite3_column_text( stmt[0], 2 ) );
         *ref_id = sqlite3_column_int( stmt[0], 3 );
-        *link_id_target = sqlite3_column_int( stmt[0], 4 );
-        *link_id = sqlite3_column_int( stmt[0], 5 );
+        *is_link_target = sqlite3_column_int( stmt[0], 4 );
+        *baum_target = sqlite3_column_int( stmt[0], 5 );
+        *id_target = sqlite3_column_int( stmt[0], 6 );
     }
     else
     {
@@ -544,7 +548,8 @@ zond_convert_get_node_from_baum_inhalt_0( ZondDBase* zond_dbase, gint node_id, g
     sqlite3_stmt** stmt = NULL;
 
     gchar const* sql[] = {
-            "SELECT icon_name, node_text, old.dateien.rel_path, old.ziele.rel_path, ziel_id_von, index_von, ziel_id_bis, index_bis, old.links.node_id "
+            "SELECT icon_name, node_text, old.dateien.rel_path, old.ziele.rel_path, "
+                "ziel_id_von, index_von, ziel_id_bis, index_bis, old.links.node_id "
                 "FROM old.baum_inhalt "
                 "LEFT JOIN old.dateien ON old.baum_inhalt.node_id=old.dateien.node_id "
                 "LEFT JOIN old.ziele ON old.baum_inhalt.node_id=old.ziele.node_id "
@@ -588,14 +593,6 @@ typedef struct _DataConvert
     fz_context* ctx;
     pdf_document* doc;
 } DataConvert;
-
-typedef struct _Target
-{
-    gint id_link;
-    gint baum_target;
-    gint id_target;
-    gint id_target_new;
-} Target;
 
 gint zond_convert_0_to_1_baum_inhalt( ZondDBase*, gint, gboolean, gint, DataConvert*, GArray*, gint*, GError** );
 
@@ -738,6 +735,13 @@ zond_convert_0_to_1_baum_inhalt_insert( ZondDBase* zond_dbase, gint anchor_id, g
 }
 
 
+typedef struct _Target
+{
+    gint baum_target;
+    gint id_target;
+    gint id_target_new;
+} Target;
+
 gint
 zond_convert_0_to_1_baum_inhalt( ZondDBase* zond_dbase, gint anchor_id, gboolean child,
         gint node_id, DataConvert* data_convert, GArray* arr_targets, gint* node_inserted, GError** error )
@@ -772,7 +776,7 @@ zond_convert_0_to_1_baum_inhalt( ZondDBase* zond_dbase, gint anchor_id, gboolean
 
     if ( id_link )
     {
-        Target target = { id_link, BAUM_INHALT, node_id, *node_inserted };
+        Target target = { BAUM_INHALT, node_id, *node_inserted };
         g_array_append_val( arr_targets, target );
     }
 
@@ -813,8 +817,9 @@ zond_convert_0_to_1_baum_inhalt( ZondDBase* zond_dbase, gint anchor_id, gboolean
 
 typedef struct _Links
 {
-    gint id_link;
-    gint id_link_new;
+    gint node_id_new;
+    gint baum_target;
+    gint id_target;
 } Links;
 
 static gint
@@ -826,43 +831,44 @@ zond_convert_0_to_1_baum_auswertung( ZondDBase* zond_dbase, gint anchor_id, gboo
     gchar* node_text = NULL;
     gchar* text = NULL;
     gint ref_id = 0;
-    gint link_id = 0;
-    gint link_id_target = 0;
+    gint is_link = 0;
+    gint baum_target = 0;
+    gint id_target = 0;
     gint first_child = 0;
     gint younger_sibling = 0;
     gint node_inserted = 0;
 
-    rc = zond_convert_get_node_from_baum_auswertung_0( zond_dbase, node_id, &link_id, &icon_name, &node_text, &text, &ref_id,
-            &link_id_target, error );
+    rc = zond_convert_get_node_from_baum_auswertung_0( zond_dbase, node_id, &icon_name, &node_text, &text, &ref_id,
+            &is_link, &baum_target, &id_target, error );
     if ( rc ) ERROR_Z
 
-    if ( link_id )
+    if ( id_target ) //ist ein Link, hat target gespeichert
     {
         node_inserted = zond_dbase_insert_node( zond_dbase, anchor_id, child, ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_LINK,
                 0, NULL, NULL, NULL, NULL, NULL, error );
         if ( node_inserted == -1 ) ERROR_Z
 
-        Links link = { link_id, node_inserted };
+        Links link = { node_inserted, baum_target, id_target };
         g_array_append_val( arr_links, link );
     }
     else
     {
-        if ( !ref_id && !link_id_target ) //STRUKT
+        if ( !ref_id ) //STRUKT
         {
             node_inserted = zond_dbase_insert_node( zond_dbase, anchor_id, child, ZOND_DBASE_TYPE_BAUM_STRUKT,
                     0, NULL, NULL, icon_name, node_text, text, error );
             if ( node_inserted == -1 ) ERROR_Z
         }
-        else if ( ref_id ) //datei
+        else //datei
         {
             node_inserted = zond_dbase_insert_node( zond_dbase, anchor_id, child, ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_COPY,
                     ref_id, NULL, NULL, icon_name, node_text, text, error );
             if ( node_inserted == -1 ) ERROR_Z
         }
 
-        if ( link_id_target )
+        if ( is_link )
         {
-            Target target = { link_id_target, BAUM_AUSWERTUNG, node_id, node_inserted };
+            Target target = { BAUM_AUSWERTUNG, node_id, node_inserted };
             g_array_append_val( arr_targets, target );
         }
 
@@ -1001,11 +1007,24 @@ zond_convert_0_to_1( ZondDBase* zond_dbase, GError** error )
 
             target = g_array_index( arr_targets, Target, u );
 
-            if ( link.id_link == target.id_link )
+            if ( link.baum_target == target.baum_target && link.id_target == target.id_target )
             {
                 gint rc = 0;
+                gint type = 0;
+                gint link_node = 0;
+/*
+                rc = zond_dbase_get_type_and_link( zond_dbase, target.id_target_new, &type, &link_node, error );
+                if ( rc )
+                {
+                    g_array_unref( arr_targets );
+                    g_array_unref( arr_links );
 
-                rc = zond_convert_0_to_1_update_link( zond_dbase, link.id_link_new, target.id_target_new, error );
+                    ERROR_Z
+                }
+
+                if ( type == ZOND_DBASE_TYPE_BAUM_INHALT_FILE ) target.id_target_new = link_node;
+*/
+                rc = zond_convert_0_to_1_update_link( zond_dbase, link.node_id_new, target.id_target_new, error );
                 if ( rc )
                 {
                     g_array_unref( arr_targets );
