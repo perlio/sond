@@ -542,18 +542,19 @@ zond_convert_get_node_from_baum_auswertung_0( ZondDBase* zond_dbase, gint node_i
 static gint
 zond_convert_get_node_from_baum_inhalt_0( ZondDBase* zond_dbase, gint node_id, gchar** icon_name,
         gchar** node_text, gchar** rel_path, gchar** rel_path_ziel, gchar** ziel_von, gint* index_von,
-        gchar** ziel_bis, gint* index_bis, gint* link_id, GError** error )
+        gchar** ziel_bis, gint* index_bis, gboolean* is_linked, GError** error )
 {
     gint rc = 0;
     sqlite3_stmt** stmt = NULL;
 
     gchar const* sql[] = {
-            "SELECT icon_name, node_text, old.dateien.rel_path, old.ziele.rel_path, "
-                "ziel_id_von, index_von, ziel_id_bis, index_bis, old.links.node_id "
+            "SELECT old.baum_inhalt.icon_name, old.baum_inhalt.node_text, old.dateien.rel_path, old.ziele.rel_path, "
+                "ziel_id_von, index_von, ziel_id_bis, index_bis, old.links.node_id, old.baum_auswertung.node_id "
                 "FROM old.baum_inhalt "
                 "LEFT JOIN old.dateien ON old.baum_inhalt.node_id=old.dateien.node_id "
                 "LEFT JOIN old.ziele ON old.baum_inhalt.node_id=old.ziele.node_id "
                 "LEFT JOIN old.links ON old.baum_inhalt.node_id=old.links.node_id_target AND old.links.baum_id_target=1 "
+                "LEFT JOIN old.baum_auswertung ON old.baum_inhalt.node_id=old.baum_auswertung.ref_id "
                 "WHERE old.baum_inhalt.node_id=?1;"
             };
 
@@ -576,7 +577,7 @@ zond_convert_get_node_from_baum_inhalt_0( ZondDBase* zond_dbase, gint node_id, g
         *index_von = sqlite3_column_int( stmt[0], 5 );
         *ziel_bis = g_strdup( (gchar const*) sqlite3_column_text( stmt[0], 6 ) );
         *index_bis = sqlite3_column_int( stmt[0], 7 );
-        *link_id = sqlite3_column_int( stmt[0], 8 );
+        *is_linked = (gboolean) sqlite3_column_int( stmt[0], 8 ) | (gboolean) sqlite3_column_int( stmt[0], 9 );
     }
     else
     {
@@ -662,6 +663,9 @@ zond_convert_0_to_1_baum_inhalt_insert( ZondDBase* zond_dbase, gint anchor_id, g
         {
             gint rc = 0;
             gint node_inserted_file = 0;
+            gint anchor_child = 0;
+
+            anchor_child = *node_inserted;
 
             if ( exists ) //wenn Datei nicht existiert, muß man nicht versuchen, sie zu öffnen
             {
@@ -672,9 +676,11 @@ zond_convert_0_to_1_baum_inhalt_insert( ZondDBase* zond_dbase, gint anchor_id, g
                             (*error)->message );
                     g_clear_error( error );
                 }
+
+                anchor_child = node_inserted_root;
             }
 
-            rc = zond_convert_0_to_1_baum_inhalt( zond_dbase, node_inserted_root, TRUE, first_child_file, data_convert,
+            rc = zond_convert_0_to_1_baum_inhalt( zond_dbase, anchor_child, TRUE, first_child_file, data_convert,
                     arr_targets, &node_inserted_file, error );
             pdf_drop_document( data_convert->ctx, data_convert->doc );
             data_convert->doc = NULL;
@@ -755,12 +761,12 @@ zond_convert_0_to_1_baum_inhalt( ZondDBase* zond_dbase, gint anchor_id, gboolean
     gint index_von = 0;
     gchar* ziel_bis = NULL;
     gint index_bis = 0;
-    gint id_link = 0;
+    gboolean is_linked = 0;
     gint younger_sibling = 0;
     gboolean stop_rec = FALSE;
 
     rc = zond_convert_get_node_from_baum_inhalt_0( zond_dbase, node_id, &icon_name, &node_text, &rel_path,
-            &rel_path_ziel, &ziel_von, &index_von, &ziel_bis, &index_bis, &id_link, error );
+            &rel_path_ziel, &ziel_von, &index_von, &ziel_bis, &index_bis, &is_linked, error );
     if ( rc ) ERROR_Z
 
     rc = zond_convert_0_to_1_baum_inhalt_insert( zond_dbase, anchor_id, child, node_id, icon_name, node_text,
@@ -774,7 +780,7 @@ zond_convert_0_to_1_baum_inhalt( ZondDBase* zond_dbase, gint anchor_id, gboolean
     g_free( ziel_bis );
     if ( rc ) ERROR_Z
 
-    if ( id_link )
+    if ( is_linked )
     {
         Target target = { BAUM_INHALT, node_id, *node_inserted };
         g_array_append_val( arr_targets, target );
@@ -831,7 +837,7 @@ zond_convert_0_to_1_baum_auswertung( ZondDBase* zond_dbase, gint anchor_id, gboo
     gchar* node_text = NULL;
     gchar* text = NULL;
     gint ref_id = 0;
-    gint is_link = 0;
+    gint is_linked = 0;
     gint baum_target = 0;
     gint id_target = 0;
     gint first_child = 0;
@@ -839,7 +845,7 @@ zond_convert_0_to_1_baum_auswertung( ZondDBase* zond_dbase, gint anchor_id, gboo
     gint node_inserted = 0;
 
     rc = zond_convert_get_node_from_baum_auswertung_0( zond_dbase, node_id, &icon_name, &node_text, &text, &ref_id,
-            &is_link, &baum_target, &id_target, error );
+            &is_linked, &baum_target, &id_target, error );
     if ( rc ) ERROR_Z
 
     if ( id_target ) //ist ein Link, hat target gespeichert
@@ -864,9 +870,12 @@ zond_convert_0_to_1_baum_auswertung( ZondDBase* zond_dbase, gint anchor_id, gboo
             node_inserted = zond_dbase_insert_node( zond_dbase, anchor_id, child, ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_COPY,
                     ref_id, NULL, NULL, icon_name, node_text, text, error );
             if ( node_inserted == -1 ) ERROR_Z
+
+            Links link = { node_inserted, BAUM_INHALT, ref_id };
+            g_array_append_val( arr_links, link );
         }
 
-        if ( is_link )
+        if ( is_linked )
         {
             Target target = { BAUM_AUSWERTUNG, node_id, node_inserted };
             g_array_append_val( arr_targets, target );
@@ -1012,7 +1021,7 @@ zond_convert_0_to_1( ZondDBase* zond_dbase, GError** error )
                 gint rc = 0;
                 gint type = 0;
                 gint link_node = 0;
-/*
+
                 rc = zond_dbase_get_type_and_link( zond_dbase, target.id_target_new, &type, &link_node, error );
                 if ( rc )
                 {
@@ -1023,7 +1032,7 @@ zond_convert_0_to_1( ZondDBase* zond_dbase, GError** error )
                 }
 
                 if ( type == ZOND_DBASE_TYPE_BAUM_INHALT_FILE ) target.id_target_new = link_node;
-*/
+
                 rc = zond_convert_0_to_1_update_link( zond_dbase, link.node_id_new, target.id_target_new, error );
                 if ( rc )
                 {

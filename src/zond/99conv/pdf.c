@@ -523,14 +523,14 @@ pdf_new_text_filter_processor( fz_context *ctx, fz_buffer** buf, gint flags,
 	fz_try( ctx ) *buf = fz_new_buffer( ctx, 1024 );
 	fz_catch( ctx ) ERROR_MUPDF_R( "fz_new_buffer", NULL )
 
-	fz_try( ctx ) proc_output = (pdf_output_processor*) pdf_new_buffer_processor( ctx, *buf, 0 );
+	fz_try( ctx ) proc_output = (pdf_output_processor*) pdf_new_buffer_processor( ctx, *buf, 0, 0 );
 	fz_catch( ctx )
 	{
 	    fz_drop_buffer( ctx, *buf );
 	    ERROR_MUPDF_R( "pdf_new_output_processor", NULL )
 	}
 
-	proc = 	Memento_label(fz_calloc(ctx, 1, sizeof( pdf_text_filter_processor ) ), "pdf_processor");
+	proc = 	Memento_label( fz_calloc(ctx, 1, sizeof( pdf_text_filter_processor ) ), "pdf_processor" );
 
 	//output-processor in super-Struktur kopieren
 	proc->super = *proc_output;

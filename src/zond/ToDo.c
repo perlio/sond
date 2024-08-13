@@ -34,6 +34,9 @@ Build mupdf:
 - git submodule update --init
 - Makefile für  mupdf modifizieren:
 
+Zeile 75: Compiler-Optionen -mavx -Wno-incompatible-pointer-types ergänzen
+"CC_CMD = $(QUIET_CC) $(MKTGTDIR) ; $(CC) $(CFLAGS) -mavx -Wno-incompatible-pointer-types -MMD -MP -o $@ -c $<"
+
 # --- Rules ---
 
 $(OUT)/%.a :

@@ -245,8 +245,6 @@ Rest = 0
             "VALUES (1, 0, 0, 0);" //root baum_inhalt
             "INSERT INTO knoten (ID, parent_id, older_sibling_id, type) "
             "VALUES (2, 0, 0, 0);" //root baum_auswertung
-
-
             ;
 
     rc = sqlite3_exec( db, sql, NULL, NULL, &errmsg );

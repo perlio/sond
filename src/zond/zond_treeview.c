@@ -62,7 +62,7 @@ zond_treeview_get_root( ZondTreeview* ztv, gint node_id, gint* root, GError** er
         gint rc = 0;
         gint baum_inhalt_file = 0;
 
-        //prüfen, ob ganze Datei angebunden
+        //prüfen, ob angebundener file_part
         rc = zond_dbase_find_baum_inhalt_file( ztv_priv->zond->dbase_zond->zond_dbase_work,
                 node_id, &baum_inhalt_file, NULL, NULL, error );
         if ( rc ) ERROR_Z

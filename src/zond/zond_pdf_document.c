@@ -184,8 +184,7 @@ zond_pdf_document_page_annot_load( PdfDocumentPage* pdf_document_page,
 
     ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( pdf_document_page->document );
 
-    pdf_document_page_annot = g_try_malloc0( sizeof( PdfDocumentPageAnnot ) );
-    if ( !pdf_document_page_annot ) printf("Error!\n");
+    pdf_document_page_annot = g_malloc0( sizeof( PdfDocumentPageAnnot ) );
 
     pdf_document_page_annot->annot = annot;
     pdf_document_page_annot->pdf_document_page = pdf_document_page;
