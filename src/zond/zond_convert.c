@@ -593,6 +593,7 @@ typedef struct _DataConvert
 {
     fz_context* ctx;
     pdf_document* doc;
+    FILE* logfile;
 } DataConvert;
 
 gint zond_convert_0_to_1_baum_inhalt( ZondDBase*, gint, gboolean, gint, DataConvert*, GArray*, gint*, GError** );
@@ -629,8 +630,16 @@ zond_convert_0_to_1_baum_inhalt_insert( ZondDBase* zond_dbase, gint anchor_id, g
         g_free( filename );
         if ( fd < 0 )
         {
+            gchar* errmsg = NULL;
+            size_t count = 0;
+
             exists = FALSE;
-            g_warning( "'%s' konnte nicht geöffnet werden: %s", rel_path, strerror( errno ) );
+
+            errmsg = g_strdup_printf( "'%s' konnte nicht geöffnet werden: %s\n", rel_path, strerror( errno ) );
+            count = fwrite( errmsg, sizeof( gchar ), strlen( errmsg ), data_convert->logfile );
+            if ( count < strlen( errmsg ) )
+                    g_warning( "Nachricht '%s' konnte nicht ins Logfile geschrieben werden", errmsg );
+            g_free( errmsg );
 
             //Als Strukt einfügen
             *node_inserted = zond_dbase_insert_node( zond_dbase, anchor_id, child, ZOND_DBASE_TYPE_BAUM_STRUKT,
@@ -672,8 +681,15 @@ zond_convert_0_to_1_baum_inhalt_insert( ZondDBase* zond_dbase, gint anchor_id, g
                 rc = pdf_open_and_authen_document( data_convert->ctx, TRUE, rel_path, NULL, &(data_convert->doc), NULL, error );
                 if ( rc )
                 {
-                    g_warning( "PDF '%s' konnte nicht geöffnet werden - %s", rel_path,
-                            (*error)->message );
+                    gchar* errmsg = NULL;
+                    size_t count = 0;
+
+                    errmsg = g_strdup_printf( "PDF '%s' konnte nicht geöffnet werden: %s\n", rel_path, (*error)->message );
+                    count = fwrite( errmsg, sizeof( gchar ), strlen( errmsg ), data_convert->logfile );
+                    if ( count < strlen( errmsg ) )
+                            g_warning( "Nachricht '%s' konnte nicht ins Logfile geschrieben werden", errmsg );
+                    g_free( errmsg );
+
                     g_clear_error( error );
                 }
 
@@ -729,11 +745,18 @@ zond_convert_0_to_1_baum_inhalt_insert( ZondDBase* zond_dbase, gint anchor_id, g
         }
         else
         {
+            gchar* logmsg = NULL;
+            size_t count = 0;
+
             *node_inserted = zond_dbase_insert_node( zond_dbase, anchor_id, child, ZOND_DBASE_TYPE_BAUM_STRUKT,
                     0, NULL, NULL, icon_name, node_text, NULL, error );
             if ( *node_inserted == -1 ) ERROR_Z
 
-            g_message( "Von: %s,%d   Bis: %s,%d", ziel_von, index_von, ziel_bis, index_bis );
+            logmsg = g_strdup_printf( "  Abschnitt Von: %s,%d   Bis: %s,%d\n", ziel_von, index_von, ziel_bis, index_bis );
+            count = fwrite( logmsg, sizeof( gchar ), strlen( logmsg ), data_convert->logfile );
+            if ( count < strlen( logmsg ) )
+                    g_warning( "Nachricht '%s' konnte nicht ins Logfile geschrieben werden", logmsg );
+            g_free( logmsg );
         }
     }
 
@@ -940,67 +963,44 @@ zond_convert_0_to_1_update_link( ZondDBase* zond_dbase, gint node_id,
 
 
 static gint
-zond_convert_0_to_1( ZondDBase* zond_dbase, GError** error )
+zond_convert_do_0_to_1( ZondDBase* zond_dbase, DataConvert* data_convert,
+        GArray* arr_targets, GArray* arr_links, GError** error )
 {
     gint first_child = 0;
-    DataConvert data_convert = { 0 };
-    GArray* arr_targets = NULL;
-    GArray* arr_links = NULL;
-    gchar* project_dir = NULL;
 
     //ersten Knoten Baum_inhalt
     first_child = zond_convert_get_first_child_0( zond_dbase, BAUM_INHALT, 0, error );
     if ( first_child == -1 ) ERROR_Z
-
-    arr_targets = g_array_new( FALSE, FALSE, sizeof( Target ) );
-
-    project_dir = g_path_get_dirname( zond_dbase_get_path( zond_dbase ) );
-    g_chdir( project_dir );
-    g_free( project_dir );
 
     if ( first_child )
     {
         gint rc = 0;
         gint node_inserted = 0;
 
-        data_convert.ctx = fz_new_context( NULL, NULL, FZ_STORE_UNLIMITED );
-        if ( !data_convert.ctx )
+        data_convert->ctx = fz_new_context( NULL, NULL, FZ_STORE_UNLIMITED );
+        if ( !data_convert->ctx )
         {
-            g_array_unref( arr_targets );
             if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\nfz_context konnte nicht initialisiert werden", __func__ );
+
+            return -1;
         }
 
         rc = zond_convert_0_to_1_baum_inhalt( zond_dbase, 1, TRUE, first_child,
-                &data_convert, arr_targets, &node_inserted, error );
-        fz_drop_context( data_convert.ctx );
-        if ( rc )
-        {
-            g_array_unref( arr_targets );
-            ERROR_Z
-        }
+                data_convert, arr_targets, &node_inserted, error );
+        fz_drop_context( data_convert->ctx );
+        if ( rc ) ERROR_Z
     }
 
     //ersten Knoten Baum_auswertung
     first_child = zond_convert_get_first_child_0( zond_dbase, BAUM_AUSWERTUNG, 0, error );
-    if ( first_child == -1 )
-    {
-        g_array_unref( arr_targets );
-        ERROR_Z
-    }
+    if ( first_child == -1 ) ERROR_Z
 
     if ( first_child )
     {
         gint rc = 0;
 
-        arr_links = g_array_new( FALSE, FALSE, sizeof( Links ) );
-
         rc = zond_convert_0_to_1_baum_auswertung( zond_dbase, 2, TRUE, first_child, arr_links, arr_targets, error );
-        if ( rc )
-        {
-            g_array_unref( arr_targets );
-            g_array_unref( arr_links );
-            ERROR_Z
-        }
+        if ( rc ) ERROR_Z
     }
 
     //arr_targets durchgehen
@@ -1023,32 +1023,63 @@ zond_convert_0_to_1( ZondDBase* zond_dbase, GError** error )
                 gint link_node = 0;
 
                 rc = zond_dbase_get_type_and_link( zond_dbase, target.id_target_new, &type, &link_node, error );
-                if ( rc )
-                {
-                    g_array_unref( arr_targets );
-                    g_array_unref( arr_links );
-
-                    ERROR_Z
-                }
+                if ( rc ) ERROR_Z
 
                 if ( type == ZOND_DBASE_TYPE_BAUM_INHALT_FILE ) target.id_target_new = link_node;
 
                 rc = zond_convert_0_to_1_update_link( zond_dbase, link.node_id_new, target.id_target_new, error );
-                if ( rc )
-                {
-                    g_array_unref( arr_targets );
-                    g_array_unref( arr_links );
-
-                    ERROR_Z
-                }
+                if ( rc ) ERROR_Z
 
                 break;
             }
         }
     }
 
-    g_array_unref( arr_targets );
+    return 0;
+}
+
+
+static gint
+zond_convert_0_to_1( ZondDBase* zond_dbase, GError** error )
+{
+    DataConvert data_convert = { 0 };
+    GArray* arr_targets = NULL;
+    GArray* arr_links = NULL;
+    gchar* project_dir = NULL;
+    gchar* filename = NULL;
+    gint rc = 0;
+    size_t count = 0;
+    gchar const* message = NULL;
+
+    project_dir = g_path_get_dirname( zond_dbase_get_path( zond_dbase ) );
+    g_chdir( project_dir );
+    g_free( project_dir );
+
+    //Log_datei öffnen
+    filename = g_strdup_printf( "%s_conv_from_v0_to_v1.log", zond_dbase_get_path( zond_dbase ) );
+    data_convert.logfile = fopen( filename, "wb" );
+    g_free( filename );
+    if ( !data_convert.logfile )
+    {
+        if ( error ) *error = g_error_new( g_quark_from_static_string( "stdlib" ), errno, strerror( errno ) );
+        return -1;
+    }
+
+    arr_targets = g_array_new( FALSE, FALSE, sizeof( Target ) );
+    arr_links = g_array_new( FALSE, FALSE, sizeof( Links ) );
+
+    rc = zond_convert_do_0_to_1( zond_dbase, &data_convert, arr_targets, arr_links, error );
     g_array_unref( arr_links );
+    g_array_unref( arr_targets );
+
+    message = (rc) ? "Konvertierung abgebrochen" : "Konvertierung beendet";
+
+    count = fwrite( message, sizeof( gchar ), strlen( message ), data_convert.logfile );
+    fclose( data_convert.logfile );
+
+    if ( count < strlen( message ) ) g_warning( "Log-Datei konnte nicht beschrieben werden" );
+
+    if ( rc ) ERROR_Z
 
     return 0;
 }
