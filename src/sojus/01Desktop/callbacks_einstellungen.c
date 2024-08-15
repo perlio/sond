@@ -31,11 +31,8 @@ cb_button_dokument_dir( GtkButton* button, gpointer data )
     list = choose_files( sojus->app_window, path, "Dokumentenverzeichnis auswählen", "Ok", GTK_FILE_CHOOSER_ACTION_CREATE_FOLDER, NULL, FALSE );
     if ( list )
     {
-        gchar* uri_unescaped = g_uri_unescape_string( list->data, NULL );
-
+        g_settings_set_string( sojus->settings, "dokument-dir", list->data );
         g_slist_free_full( list, g_free );
-
-        g_settings_set_string( sojus->settings, "dokument-dir", uri_unescaped + 8 );
     }
 
     return;

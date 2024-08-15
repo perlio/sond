@@ -2,7 +2,7 @@
 #define MISC_H_INCLUDED
 
 #define ERROR_S_VAL(y) { if ( errmsg ) *errmsg = add_string( \
-                         g_strconcat( "Bei Aufruf ", __func__, ":\n", NULL ), *errmsg ); \
+                         g_strconcat( __func__, "\n", NULL ), *errmsg ); \
                          return y; }
 
 #define ERROR_S ERROR_S_VAL(-1)
@@ -12,6 +12,8 @@
                          return y; }
 
 #define ERROR_S_MESSAGE(x) ERROR_S_MESSAGE_VAL(x,-1)
+
+#define ERROR_Z { g_prefix_error( error, "%s\n", __func__ ); return -1; }
 
 #include <gtk/gtk.h>
 
@@ -33,6 +35,8 @@ typedef void* GPid;
 typedef void* gpointer;
 
 void display_message( GtkWidget*, ... );
+
+void display_error( GtkWidget*, gchar const*, gchar const* );
 
 gint dialog_with_buttons( GtkWidget*, const gchar*, const gchar*, gchar**,
         ... );

@@ -60,6 +60,40 @@ void display_message( GtkWidget* window, ... )
 }
 
 
+void
+display_error( GtkWidget* window, gchar const* error, gchar const* errmsg )
+{
+    GtkWidget* message_area = NULL;
+    GtkWidget* swindow = NULL;
+    GtkWidget* textview = NULL;
+    GtkTextBuffer* textbuffer = NULL;
+
+    GtkWidget* dialog = gtk_message_dialog_new( GTK_WINDOW(window),
+            GTK_DIALOG_DESTROY_WITH_PARENT, GTK_MESSAGE_INFO,
+            GTK_BUTTONS_CLOSE, error );
+
+    message_area = gtk_message_dialog_get_message_area( GTK_MESSAGE_DIALOG(dialog) );
+    swindow = gtk_scrolled_window_new( NULL, NULL );
+    textbuffer = gtk_text_buffer_new( NULL );
+    gtk_text_buffer_set_text( textbuffer, errmsg, -1 );
+
+    textview = gtk_text_view_new_with_buffer( textbuffer );
+
+    gtk_container_add( GTK_CONTAINER(swindow), textview );
+    gtk_box_pack_start( GTK_BOX(message_area), swindow, FALSE, FALSE, 0 );
+    gtk_scrolled_window_set_propagate_natural_height( GTK_SCROLLED_WINDOW(swindow), TRUE );
+    gtk_scrolled_window_set_propagate_natural_width( GTK_SCROLLED_WINDOW(swindow), TRUE );
+
+    gtk_widget_show_all( message_area );
+
+    gtk_dialog_run ( GTK_DIALOG (dialog) );
+
+    gtk_widget_destroy( dialog );
+
+    return;
+}
+
+
 static void
 cb_entry_text( GtkEntry* entry, gpointer data )
 {
@@ -244,7 +278,7 @@ choose_files( const GtkWidget* window, const gchar* path, const gchar* title_tex
             ext );
 
     rc = gtk_dialog_run( GTK_DIALOG(dialog) );
-    if ( rc == GTK_RESPONSE_ACCEPT ) list = gtk_file_chooser_get_uris( GTK_FILE_CHOOSER(dialog) );
+    if ( rc == GTK_RESPONSE_ACCEPT ) list = gtk_file_chooser_get_filenames( GTK_FILE_CHOOSER(dialog) );
 
     //Dialog schließen
     gtk_widget_destroy(dialog);
@@ -261,12 +295,8 @@ filename_speichern( GtkWindow* window, const gchar* titel, const gchar* ext )
 
     if ( !list ) return NULL;
 
-    gchar* uri_unescaped = g_uri_unescape_string( list->data, NULL );
-    g_free( list->data );
-    g_slist_free( list );
-
-    gchar* abs_path = g_strdup( uri_unescaped + 8 );
-    g_free( uri_unescaped );
+    gchar* abs_path = g_strdup( list->data );
+    g_slist_free_full( list, g_free );
 
     return abs_path; //muß g_freed werden
 }
@@ -280,12 +310,8 @@ filename_oeffnen( GtkWindow* window )
 
     if ( !list ) return NULL;
 
-    gchar* uri_unescaped = g_uri_unescape_string( list->data, NULL );
-    g_free( list->data );
-    g_slist_free( list );
-
-    gchar* abs_path = g_strdup( uri_unescaped + 8);
-    g_free( uri_unescaped );
+    gchar* abs_path = g_strdup( list->data );
+    g_slist_free_full( list, g_free );
 
     return abs_path; //muß g_freed werden
 }
@@ -400,9 +426,8 @@ misc_datei_oeffnen( const gchar* path, gboolean open_with, gchar** errmsg )
     gchar* path_win32 = g_strdelimit( g_strdup( path ), "/", '\\' );
 
     //utf8 in filename konvertieren
-    gsize written;
     gchar* charset = g_get_codeset();
-    gchar* local_filename = g_convert( path_win32, -1, charset, "UTF-8", NULL, &written,
+    gchar* local_filename = g_convert( path_win32, -1, charset, "UTF-8", NULL, NULL,
             NULL );
     g_free( charset );
     g_free( path_win32 );

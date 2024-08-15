@@ -194,12 +194,18 @@ pdf_copy_page( fz_context* ctx, pdf_document* doc_src, gint page_from,
 gint
 pdf_open_and_authen_document( fz_context* ctx, gboolean prompt,
         const gchar* path, gchar** password, pdf_document** doc, gint* auth,
-        gchar** errmsg )
+        GError** error )
 {
     gchar* password_try = NULL;
 
     fz_try( ctx ) *doc = pdf_open_document( ctx, path );
-    fz_catch( ctx ) ERROR_MUPDF( "pdf_open_document" )
+    fz_catch( ctx )
+    {
+        if ( error ) *error = g_error_new( g_quark_from_static_string( "MUPDF" ),
+                fz_caught( ctx ), "%s\n%s", __func__, fz_caught_message( ctx ) );
+
+        return -1;
+    }
 
     if ( password ) password_try = *password;
 
@@ -277,12 +283,19 @@ pdf_clean( fz_context* ctx, const gchar* rel_path, gchar** errmsg )
     gint rc = 0;
     gint* pages = NULL;
     gint count = 0;
+    GError* error = NULL;
 
     //prüfen, ob in Viewer geöffnet
     if ( zond_pdf_document_is_open( rel_path ) ) ERROR_S_MESSAGE( "Dokument ist geöffnet" )
 
-    rc = pdf_open_and_authen_document( ctx, TRUE, rel_path, NULL, &doc, NULL, errmsg );
-    if ( rc == -1 ) ERROR_S
+    rc = pdf_open_and_authen_document( ctx, TRUE, rel_path, NULL, &doc, NULL, &error );
+    if ( rc == -1 )
+    {
+        if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+        g_error_free( error );
+
+        return -1;
+    }
     else if ( rc == 1 ) return 1;
 
     count = pdf_count_pages( ctx, doc );
@@ -510,14 +523,14 @@ pdf_new_text_filter_processor( fz_context *ctx, fz_buffer** buf, gint flags,
 	fz_try( ctx ) *buf = fz_new_buffer( ctx, 1024 );
 	fz_catch( ctx ) ERROR_MUPDF_R( "fz_new_buffer", NULL )
 
-	fz_try( ctx ) proc_output = (pdf_output_processor*) pdf_new_buffer_processor( ctx, *buf, 0 );
+	fz_try( ctx ) proc_output = (pdf_output_processor*) pdf_new_buffer_processor( ctx, *buf, 0, 0 );
 	fz_catch( ctx )
 	{
 	    fz_drop_buffer( ctx, *buf );
 	    ERROR_MUPDF_R( "pdf_new_output_processor", NULL )
 	}
 
-	proc = 	Memento_label(fz_calloc(ctx, 1, sizeof( pdf_text_filter_processor ) ), "pdf_processor");
+	proc = 	Memento_label( fz_calloc(ctx, 1, sizeof( pdf_text_filter_processor ) ), "pdf_processor" );
 
 	//output-processor in super-Struktur kopieren
 	proc->super = *proc_output;

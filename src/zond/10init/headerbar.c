@@ -32,7 +32,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../zond_tree_store.h"
 #include "../zond_treeview.h"
 #include "../zond_dbase.h"
-#include "../zond_gemini.h"
 
 #include "../99conv/general.h"
 #include "../99conv/pdf.h"
@@ -41,11 +40,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "../20allgemein/pdf_text.h"
 #include "../20allgemein/ziele.h"
-#include "../20allgemein/selection.h"
 #include "../20allgemein/suchen.h"
 #include "../20allgemein/project.h"
 #include "../20allgemein/export.h"
-#include "../20allgemein/treeviews.h"
 #include "../20allgemein/oeffnen.h"
 #include "../20allgemein/zond_update.h"
 
@@ -106,6 +103,7 @@ pdf_rel_path_in_array( GPtrArray* arr_rel_path, gchar* rel_path )
     return FALSE;
 }
 
+
 static GPtrArray*
 selection_abfragen_pdf( Projekt* zond, gchar** errmsg )
 {
@@ -125,7 +123,8 @@ selection_abfragen_pdf( Projekt* zond, gchar** errmsg )
         gint rc = 0;
         GtkTreeIter iter = { 0, };
         gint node_id = 0;
-        gchar* rel_path = NULL;
+        gchar* file_part = NULL;
+        GError* error = NULL;
 
         if ( !gtk_tree_model_get_iter( gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[zond->baum_active]) ), &iter, list->data ) )
         {
@@ -140,21 +139,25 @@ selection_abfragen_pdf( Projekt* zond, gchar** errmsg )
 
         gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[zond->baum_active]) ), &iter, 2, &node_id, -1 );
 
-        rc = zond_dbase_get_rel_path( zond->dbase_zond->zond_dbase_work, zond->baum_active, node_id, &rel_path, errmsg );
-        if ( rc == 1 ) continue;
-        else if ( rc )
+        rc = zond_dbase_get_node( zond->dbase_zond->zond_dbase_work,
+                node_id, NULL, NULL, &file_part, NULL, NULL, NULL, NULL, &error );
+        if ( rc )
         {
+            if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+            g_error_free( error );
             g_list_free_full( selected, (GDestroyNotify) gtk_tree_path_free );
             g_ptr_array_free( arr_rel_path, TRUE );
 
-            ERROR_S_VAL( NULL )
+            return NULL;
         }
 
-        //Sonderbehandung, falls pdf-Datei
-        if ( is_pdf( rel_path ) && !pdf_rel_path_in_array( arr_rel_path, rel_path ) )
-                g_ptr_array_add( arr_rel_path, g_strdup( rel_path ) );
+        if ( !file_part ) continue;
 
-        g_free( rel_path );
+        //Sonderbehandung, falls pdf-Datei
+        if ( is_pdf( file_part ) && !pdf_rel_path_in_array( arr_rel_path, file_part ) )
+                g_ptr_array_add( arr_rel_path, g_strdup( file_part ) );
+
+        g_free( file_part );
     }
     while ( (list = list->next) );
 
@@ -441,29 +444,6 @@ cb_item_punkt_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
     return;
 }
 
-/*
-//Knoten-Text anpassen
-static void
-cb_item_text_anbindung( GtkMenuItem* item, gpointer data )
-{
-    gint rc = 0;
-    gchar* errmsg = NULL;
-    Projekt* zond = (Projekt*) data;
-
-    if ( zond->baum_active == KEIN_BAUM || zond->baum_active == BAUM_FS ) return;
-
-    rc = treeviews_selection_set_node_text( zond, zond->baum_active, &errmsg );
-    if ( rc == -1 )
-    {
-        display_message( zond->app_window, "Knotentext anpassen fehlgeschlagen:\n\n"
-                "Bei Aufruf treeviews_node_text_nach_anbindung:\n", errmsg, NULL );
-        g_free( errmsg );
-    }
-
-    return;
-}
-*/
-
 
 static void
 cb_kopieren_activate( GtkMenuItem* item, gpointer user_data )
@@ -666,9 +646,21 @@ cb_reduzieren_activated( GtkMenuItem* item, gpointer data )
 
 
 static void
-cb_refresh_view_activated( GtkMenuItem* item, gpointer zond )
+cb_refresh_view_activated( GtkMenuItem* item, gpointer data )
 {
-    treeviews_reload_baeume( (Projekt*) zond, NULL );
+    GError* error = NULL;
+    gint rc = 0;
+
+    Projekt* zond = (Projekt*) data;
+
+    rc = project_load_baeume( zond, &error );
+    if ( rc == -1 )
+    {
+        display_message( zond->app_window, "Fehler refresh\n\n", error->message, NULL );
+        g_error_free( error );
+
+        return;
+    }
 
     return;
 }
@@ -700,7 +692,7 @@ cb_menu_gemini_einlesen( GtkMenuItem* item, gpointer data )
     gint rc = 0;
     gchar* errmsg = NULL;
 
-    rc = zond_gemini_read_gemini( zond, &errmsg );
+//    rc = zond_gemini_read_gemini( zond, &errmsg );
     if ( rc )
     {
         display_message( zond->app_window, "Fehler bei Einlesen Gemini\n\n",
@@ -720,7 +712,7 @@ cb_menu_gemini_select( GtkWidget* item, gpointer data )
     gint rc = 0;
     gchar* errmsg = NULL;
 
-    rc = zond_gemini_select( zond, &errmsg );
+//    rc = zond_gemini_select( zond, &errmsg );
     if ( rc )
     {
         display_message( zond->app_window, "Fehler bei Auswahl Gemini\n\n",

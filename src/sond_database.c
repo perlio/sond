@@ -201,7 +201,7 @@ sond_database_insert_row( gpointer database, Type type, gint ID_subject, gint ID
 
         ZondDBase* zond_dbase = ZOND_DBASE(database);
 
-        rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, &errmsg );
+        rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, error );
         if ( rc )
         {
             if ( error ) *error = g_error_new( ZOND_ERROR, 0,
@@ -426,7 +426,7 @@ sond_database_get_properties( gpointer database, gint ID_subject, GError** error
 
         ZondDBase* zond_dbase = ZOND_DBASE(database);
 
-        rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, &errmsg );
+        rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, error );
         if ( rc )
         {
             if ( error ) *error = g_error_new( ZOND_ERROR, 0,
@@ -581,17 +581,14 @@ sond_database_get_properties_of_type( gpointer database, gint type, gint ID_subj
     if ( ZOND_IS_DBASE(database) )
     {
         gint rc = 0;
-        gchar* errmsg = NULL;
         sqlite3_stmt** stmt = NULL;
 
         ZondDBase* zond_dbase = ZOND_DBASE(database);
 
-        rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, &errmsg );
+        rc = zond_dbase_prepare( zond_dbase, __func__, sql, nelem( sql ), &stmt, error );
         if ( rc )
         {
-            if ( error ) *error = g_error_new( ZOND_ERROR, 0,
-                    "%s\nzond_dbase_prepare\n%s", __func__, errmsg );
-            g_free( errmsg );
+            g_prefix_error( error, "%s\n", __func__ );
 
             return NULL;
         }

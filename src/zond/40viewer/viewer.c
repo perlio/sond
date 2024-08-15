@@ -616,6 +616,8 @@ viewer_schliessen( PdfViewer* pv )
     //pv aus Liste der geöffneten pvs entfernen
     g_ptr_array_remove_fast( pv->zond->arr_pv, pv );
 
+    g_free( pv->file_part );
+
     g_free( pv );
 
     return;
@@ -1646,7 +1648,7 @@ cb_viewer_swindow_key_press( GtkWidget* swindow, GdkEvent* event, gpointer user_
         zond_pdf_document_mutex_unlock( viewer_page->pdf_document_page->document );
         if ( rc )
         {
-            display_message( pv->vf, "Fehler -Annotation löschen\n\n"
+            display_message( pv->vf, "Fehler - Annotation löschen\n\n"
                     "Bei Aufruf annot_delete", errmsg, NULL );
             g_free( errmsg );
 
@@ -2027,21 +2029,23 @@ cb_viewer_layout_release_button( GtkWidget* layout, GdkEvent* event, gpointer da
 
             ctx = zond_pdf_document_get_ctx( viewer_page->pdf_document_page->document );
 
-            pv->clicked_annot->annot_text.rect =
-                    viewer_clamp_icon_rect( viewer_page,
-                    pv->clicked_annot->annot_text.rect );
-
             //neues rect speichert
             zond_pdf_document_mutex_lock( viewer_page->pdf_document_page->document );
-            fz_try( ctx ) pdf_set_annot_rect( ctx, pv->clicked_annot->annot,
-                    viewer_rotate_rect( viewer_page, pv->clicked_annot->annot_text.rect ) );
+            fz_try( ctx )
+            {
+                pv->clicked_annot->annot_text.rect =
+                        viewer_clamp_icon_rect( viewer_page,
+                        pv->clicked_annot->annot_text.rect );
+
+                pdf_set_annot_rect( ctx, pv->clicked_annot->annot,
+                        viewer_rotate_rect( viewer_page, pv->clicked_annot->annot_text.rect ) );
+            }
             fz_always( ctx ) zond_pdf_document_mutex_unlock( viewer_page->pdf_document_page->document );
             fz_catch( ctx )
             {
                 display_message( pv->vf, "Fehler -Änderung Annot kann nicht "
                         "gespeichert werden\n\nBeiAufruf pdf_set_annot_rect:\n",
                         fz_caught_message( ctx ), NULL );
-                //ToDo: pdf_document_page_annot->rect wieder zurücksetzen
 
                 return TRUE;
             }
@@ -2413,8 +2417,8 @@ cb_viewer_layout_press_button( GtkWidget* layout, GdkEvent* event, gpointer
                         viewer_cb_change_annot, NULL, &errmsg );
                 if ( rc )
                 {
-                    display_message( pv->vf, "Fehler -\n\n",
-                            "Bei Aufruf viewer_refresh_changed_page:\n", errmsg, NULL );
+                    display_message( pv->vf, "Fehler - in ", __func__, "\n\n",
+                            errmsg, NULL );
                     g_free( errmsg );
 
                     return TRUE;
@@ -2463,53 +2467,39 @@ cb_viewer_layout_press_button( GtkWidget* layout, GdkEvent* event, gpointer
 
         //Wenn nicht zurückliegende Seite oder - wenn punktgenau - gleiche
         //Seite und zurückliegender Index
-        if ( !rc && ((pdf_punkt.seite >= pv->anbindung.von.seite) ||
+        if ( !rc )
+        {
+            GError* error = NULL;
+
+            //"richtige" Reihenfolge
+            if  ( (pdf_punkt.seite >= pv->anbindung.von.seite) ||
                     ((punktgenau) &&
                     (pdf_punkt.seite == pv->anbindung.von.seite) &&
-                    (pdf_punkt.punkt.y >= pv->anbindung.von.index))) )
-        {
-            gchar* errmsg = NULL;
-            gint new_node = 0;
-
-            pv->anbindung.bis.seite = pdf_punkt.seite;
-            if ( punktgenau ) pv->anbindung.bis.index = pdf_punkt.punkt.y;
-            else pv->anbindung.bis.index = EOP;
-
-            rc = ziele_erzeugen_anbindung( pv, &new_node, &errmsg );
-            if ( rc == -2 )
+                    (pdf_punkt.punkt.y >= pv->anbindung.von.index)) )
             {
-                display_message( pv->vf, "Fehler - Dokument konnte nicht gespeichert/"
-                        "erneut geöffnet werden\n\n", errmsg,
-                        "\n\nViewer wird geschlossen", NULL );
-                g_free( errmsg );
-                viewer_schliessen( pv );
+                pv->anbindung.bis.seite = pdf_punkt.seite;
+                if ( punktgenau ) pv->anbindung.bis.index = pdf_punkt.punkt.y;
+                else pv->anbindung.bis.index = EOP;
             }
-            else if ( rc == -1 )
+            else //umdrehen
             {
-                display_message( pv->vf, "Fehler - Anbinden per Doppelklick nicht möglich:\n\n"
-                        "Bei Aufruf ziele_erzeugen_anbindung:\n", errmsg, NULL );
-                g_free( errmsg );
-            }
-            else if ( rc == 2 ) display_message( pv->vf, "Anbindung kann nicht "
-                    "erzeugt werden\n\nSeiten stammen aus unterschiedlichen "
-                    "Dokumenten", NULL );
-            else if ( rc == 0 )
-            {
-//                gint rc = 0;
+                pv->anbindung.bis.seite = pv->anbindung.von.seite;
+                if ( pv->anbindung.von.index == 0 ) pv->anbindung.bis.index = EOP;
+                else pv->anbindung.bis.index = pv->anbindung.von.index;
 
-                gtk_window_present( GTK_WINDOW(pv->zond->app_window) );
-/*
-                //Datenbank!!!
-                rc = zond_database_insert_anbindung( pv->zond, new_node, &errmsg );
-                if ( rc == -1 )
-                {
-                    meldung( pv->zond->app_window, "Fehler - Erzeugte Anbindung "
-                            "konnte nicht in database eingefügt werden\n\n"
-                            "Bei Aufruf zond_database_insert_anbindung:\n",
-                            errmsg, NULL );
-                    g_free( errmsg );
-                } */
+                pv->anbindung.von.seite = pdf_punkt.seite;
+                if ( punktgenau ) pv->anbindung.von.index = pdf_punkt.punkt.y;
+                else pv->anbindung.von.index = 0;
             }
+
+            rc = zond_anbindung_erzeugen( pv, &error );
+            if ( rc == -1 )
+            {
+                display_message( pv->vf, "Fehler - Anbinden per Doppelklick\n\n",
+                        error->message, NULL );
+                g_error_free( error );
+            }
+            else if ( rc == 0 ) gtk_window_present( GTK_WINDOW(pv->zond->app_window) );
         }
 
         //anbindung.von "löschen"
@@ -3074,12 +3064,13 @@ viewer_einrichten_fenster( PdfViewer* pv )
 
 
 PdfViewer*
-viewer_start_pv( Projekt* zond )
+viewer_start_pv( Projekt* zond, gchar const* file_part )
 {
     PdfViewer* pv = g_malloc0( sizeof( PdfViewer ) );
 
     pv->zond = zond;
     pv->zoom = g_settings_get_double( zond->settings, "zoom" );
+    pv->file_part = g_strdup( file_part );
 
     g_ptr_array_add( zond->arr_pv, pv );
 

@@ -616,7 +616,7 @@ seiten_anbindung( PdfViewer* pv, GPtrArray* arr_document_page, gchar** errmsg )
     //Überprüfen, ob NamedDest in db als ziel
     for ( gint i = 0; i < arr_dests->len; i++ )
     {
-        rc = zond_dbase_check_id( pv->zond->dbase_zond->zond_dbase_work, g_ptr_array_index( arr_dests, i ), errmsg );
+//        rc = zond_dbase_check_id( pv->zond->dbase_zond->zond_dbase_work, g_ptr_array_index( arr_dests, i ), errmsg );
         if ( rc == -1 )
         {
             g_ptr_array_free( arr_dests, TRUE );

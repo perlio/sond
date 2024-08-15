@@ -7,13 +7,11 @@
 #include "../pdf_ocr.h"
 #include "../zond_pdf_document.h"
 #include "../zond_tree_store.h"
-#include "../zond_gemini.h"
 #include "../../sond_treeview.h"
 #include "../../sond_treeviewfm.h"
 #include "../../misc.h"
 #include "../../sond_database_node.h"
 #include "../../sond_database_entity.h"
-#include "../zond_gemini.h"
 
 #include "general.h"
 #include "pdf.h"
@@ -26,6 +24,7 @@
     rc == 1: alles ausgeführt, mindestens ein Callback hat 1 zurückgegeben
     rc == 2: nicht alles ausgeführt, Callback hat 2 zurückgegeben -> sofortiger Abbruch
     **/
+/*
 static gint
 dir_foreach( GFile* file, gboolean rec, gint (*foreach) ( GFile*, GFileInfo*, gpointer, gchar** ),
         gpointer data, gchar** errmsg )
@@ -112,20 +111,19 @@ dir_foreach( GFile* file, gboolean rec, gint (*foreach) ( GFile*, GFileInfo*, gp
 gint
 test_II( Projekt* zond, gchar** errmsg )
 {
-    GFile* file_root = NULL;
     const gchar* root = "C:/Users/nc-kr/laufende Akten";
     InfoWindow* info_window = NULL;
     gint rc = 0;
 
     file_root = g_file_new_for_path( root );
     info_window = info_window_open( zond->app_window, "Untersuchung auf InlineImages" );
- //   rc = dir_foreach( file_root, TRUE, test_pdf, info_window, errmsg );
+    rc = dir_foreach( file_root, TRUE, test_pdf, info_window, errmsg );
     info_window_close( info_window );
     if ( rc == -1 ) ERROR_S
 
     return 0;
 }
-
+*/
 
 gint
 test( Projekt* zond, gchar** errmsg )
@@ -136,7 +134,7 @@ test( Projekt* zond, gchar** errmsg )
 
     while ( list_app_info )
     {
-        gchar** list_type = NULL;
+        const gchar** list_type = NULL;
 
         printf( "%s   %s\n", g_app_info_get_commandline( G_APP_INFO(list_app_info->data) ),
                 g_app_info_get_executable( G_APP_INFO(list_app_info->data) ) );

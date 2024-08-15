@@ -13,16 +13,12 @@ ToDo:
     - Anbindungen in PDF löschen
 
 - Viewer
-    - iter_thumb in viewer_page speichern; macht viewer_get_iter_thumb überflüssig
     - Farben für Markieren
     - Rummalen
     - angezeigte Seiten als Datei speichern
 
 - Kontextmenu Trees
     - PDF: OCR/Reparieren/Textsuche
-
-- PDF
-    - Fundstellen auf Seitenzahlen umstellen
 
 - datei_oeffnen:
     - nicht-Win32 (niedrig)
@@ -37,6 +33,9 @@ Build mupdf:
 - cd mupdf
 - git submodule update --init
 - Makefile für  mupdf modifizieren:
+
+Zeile 75: Compiler-Optionen -mavx -Wno-incompatible-pointer-types ergänzen
+"CC_CMD = $(QUIET_CC) $(MKTGTDIR) ; $(CC) $(CFLAGS) -mavx -Wno-incompatible-pointer-types -MMD -MP -o $@ -c $<"
 
 # --- Rules ---
 

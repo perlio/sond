@@ -19,16 +19,21 @@ G_DECLARE_DERIVABLE_TYPE (SondTreeviewFM, sond_treeviewfm, SOND, TREEVIEWFM, Son
 struct _SondTreeviewFMClass
 {
     SondTreeviewClass parent_class;
-    gint (*dbase_begin) (SondTreeviewFM*, gchar**);
-    gint (*dbase_test) (SondTreeviewFM*, const gchar*, gchar**);
-    gint (*dbase_update_path) (SondTreeviewFM*, const gchar*, const gchar*, gchar**);
-    gint (*dbase_end) (SondTreeviewFM*, gboolean, gchar**);
-    void (*text_edited) (GtkCellRenderer*, gchar*, gchar*, gpointer);
+    gint (*dbase_begin) (SondTreeviewFM*, GError**);
+    gint (*dbase_test) (SondTreeviewFM*, const gchar*, GError**);
+    gint (*dbase_update_path) (SondTreeviewFM*, const gchar*, const gchar*, GError**);
+    gint (*dbase_end) (SondTreeviewFM*, gboolean, GError**);
+    gint (*text_edited) (SondTreeviewFM*, GtkTreeIter*, GObject*, const gchar*, GError** );
     void (*results_row_activated) (GtkWidget*, GtkWidget*, gpointer);
+    gint (*insert_dummy) ( SondTreeviewFM*, GtkTreeIter*, GObject*, GError** );
+    gint (*expand_dummy) ( SondTreeviewFM*, GtkTreeIter*, GObject*, GError** );
+    void (*render_icon) ( SondTreeviewFM*, GtkCellRenderer*, GtkTreeIter*, GObject* );
+    gint (*render_text) ( SondTreeviewFM*, GtkTreeIter*, GObject*, gchar const**, gboolean*, GError** );
+    gint (*open_row) ( SondTreeviewFM*, GtkTreeIter*, GObject*, gboolean, GError** );
 };
 
 
-gint sond_treeviewfm_set_cursor_on_path( SondTreeviewFM*, const gchar*, gchar** );
+gint sond_treeviewfm_set_cursor_on_path( SondTreeviewFM*, const gchar*, GtkTreeIter*, gchar** );
 
 gint sond_treeviewfm_set_root( SondTreeviewFM*, const gchar*, gchar** );
 
@@ -43,8 +48,6 @@ void sond_treeviewfm_column_eingang_set_visible( SondTreeviewFM*, gboolean );
 gchar* sond_treeviewfm_get_full_path( SondTreeviewFM*, GtkTreeIter* );
 
 gchar* sond_treeviewfm_get_rel_path( SondTreeviewFM*, GtkTreeIter* );
-
-gint sond_treeviewfm_create_dir( SondTreeviewFM*, gboolean, gchar** );
 
 gint sond_treeviewfm_paste_clipboard( SondTreeviewFM*, gboolean, gchar** );
 

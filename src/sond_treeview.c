@@ -25,6 +25,7 @@ typedef struct
 {
     GtkCellRenderer* renderer_icon;
     GtkCellRenderer* renderer_text;
+    gulong signal_key;
     gint id;
     GtkWidget* contextmenu;
 } SondTreeviewPrivate;
@@ -84,6 +85,67 @@ sond_treeview_class_init( SondTreeviewClass* klass )
     //statisch registrierte Klasse wird zurLaufzeit niemals finalisiert!
 
     klass->render_text_cell = NULL;
+    klass->text_edited = NULL;
+    klass->callback_key_press_event = NULL;
+    klass->callback_key_press_event_func_data = NULL;
+
+    return;
+}
+
+
+static void
+renderer_text_editing_canceled( GtkCellRenderer* renderer,
+                              gpointer data)
+{
+    SondTreeview* stv = (SondTreeview*) data;
+    SondTreeviewClass* klass = SOND_TREEVIEW_GET_CLASS(stv);
+    SondTreeviewPrivate* stv_priv = sond_treeview_get_instance_private( stv );
+
+    if ( klass->callback_key_press_event )
+            stv_priv->signal_key = g_signal_connect( stv, "key-press-event",
+            G_CALLBACK(klass->callback_key_press_event),
+            klass->callback_key_press_event_func_data );
+
+    return;
+}
+
+
+static void
+sond_treeview_text_edited( GtkCellRenderer* cell, gchar* path_string, gchar* new_text,
+        gpointer data )
+{
+    GtkTreeIter iter = { 0 };
+
+    SondTreeview* stv = (SondTreeview*) data;
+    SondTreeviewClass* klass = SOND_TREEVIEW_GET_CLASS(stv);
+    SondTreeviewPrivate* stv_priv = sond_treeview_get_instance_private( stv );
+
+    gtk_tree_model_get_iter_from_string( gtk_tree_view_get_model( GTK_TREE_VIEW(stv) ), &iter, path_string );
+
+    if ( klass->text_edited ) klass->text_edited( stv, &iter, new_text );
+
+    if ( klass->callback_key_press_event )
+            stv_priv->signal_key = g_signal_connect( stv, "key-press-event",
+            G_CALLBACK(klass->callback_key_press_event),
+            klass->callback_key_press_event_func_data );
+
+    return;
+}
+
+
+static void
+renderer_text_editing_started( GtkCellRenderer* renderer, GtkEditable* editable,
+                             const gchar* path,
+                             gpointer data )
+{
+    SondTreeview* stv = (SondTreeview*) data;
+    SondTreeviewPrivate* stv_priv = sond_treeview_get_instance_private( stv );
+
+    if ( stv_priv->signal_key )
+    {
+        g_signal_handler_disconnect( stv, stv_priv->signal_key );
+        stv_priv->signal_key = 0;
+    }
 
     return;
 }
@@ -218,6 +280,7 @@ sond_treeview_init( SondTreeview* stv )
     GtkTreeViewColumn* tvc = NULL;
 
     SondTreeviewPrivate* stv_private = sond_treeview_get_instance_private( stv );
+    SondTreeviewClass* klass = SOND_TREEVIEW_GET_CLASS(stv);
 
     gtk_tree_view_set_fixed_height_mode( GTK_TREE_VIEW(stv), TRUE );
     gtk_tree_view_set_enable_tree_lines( GTK_TREE_VIEW(stv), TRUE );
@@ -288,6 +351,20 @@ sond_treeview_init( SondTreeview* stv )
 
     g_signal_connect( stv, "button-press-event",
             G_CALLBACK(sond_treeview_show_popupmenu), (gpointer) stv_private->contextmenu );
+
+    //hiermit sollen die Momente abgefangen werden, in denen im treeview herumgetippt wird
+    //dann soll key-press-event abgefangen werden und Callback gibt TRUE zurück
+    //damit übergeordnete Widgets nicht mehr reagieren
+    g_signal_connect( stv_private->renderer_text, "editing-started",
+            G_CALLBACK(renderer_text_editing_started), stv );
+    g_signal_connect( stv_private->renderer_text, "editing-canceled",
+            G_CALLBACK(renderer_text_editing_canceled), stv );
+    g_signal_connect( stv_private->renderer_text, "edited",
+            G_CALLBACK(sond_treeview_text_edited), stv );
+
+    if ( klass->callback_key_press_event )
+            stv_private->signal_key = g_signal_connect( stv, "key-press-event",
+            G_CALLBACK(klass->callback_key_press_event), klass->callback_key_press_event_func_data );
 
     return;
 }

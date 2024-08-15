@@ -25,6 +25,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "../global_types.h"
 #include "../zond_dbase.h"
+#include "../zond_treeview.h"
 
 #include "../10init/app_window.h"
 
@@ -34,8 +35,18 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../zond_tree_store.h"
 
 #include "project.h"
-#include "treeviews.h"
 
+
+
+void
+project_reset_changed( Projekt* zond, gboolean changed )
+{
+    zond->dbase_zond->changed = changed;
+    gtk_widget_set_sensitive( zond->menu.speichernitem, changed );
+    g_settings_set_boolean( zond->settings, "speichern", changed );
+
+    return;
+}
 
 
 void
@@ -43,20 +54,7 @@ project_set_changed( gpointer user_data )
 {
     Projekt* zond = (Projekt*) user_data;
 
-    zond->dbase_zond->changed = TRUE;
-    gtk_widget_set_sensitive( zond->menu.speichernitem, TRUE );
-    g_settings_set_boolean( zond->settings, "speichern", TRUE );
-
-    return;
-}
-
-
-void
-project_reset_changed( Projekt* zond )
-{
-    zond->dbase_zond->changed = FALSE;
-    gtk_widget_set_sensitive( zond->menu.speichernitem, FALSE );
-    g_settings_set_boolean( zond->settings, "speichern", FALSE );
+    project_reset_changed( zond, TRUE );
 
     return;
 }
@@ -91,19 +89,17 @@ project_create_dbase_zond( Projekt* zond, const gchar* path, gboolean create,
     ZondDBase* zond_dbase_store = NULL;
     gchar* path_tmp = NULL;
 
-    rc  = zond_dbase_new( path, FALSE, create, &zond_dbase_store, errmsg );
-    if ( rc == -1 ) ERROR_S
-    else if ( rc == 1 ) return 1;
+    zond_dbase_store = zond_dbase_new( path, FALSE, create, errmsg );
+    if ( !zond_dbase_store ) ERROR_S
 
     path_tmp = g_strconcat( path, ".tmp", NULL );
 
-    rc = zond_dbase_new( path_tmp, TRUE, FALSE, &zond_dbase_work, errmsg );
+    zond_dbase_work = zond_dbase_new( path_tmp, TRUE, FALSE, errmsg );
     g_free( path_tmp );
-    if ( rc )
+    if ( !zond_dbase_work )
     {
         zond_dbase_close( zond_dbase_store );
-        if ( rc == -1 ) ERROR_S
-        else if ( rc == 1 ) return 1;
+        ERROR_S
     }
 
     rc = zond_dbase_backup( zond_dbase_store, zond_dbase_work, errmsg );
@@ -122,9 +118,10 @@ project_create_dbase_zond( Projekt* zond, const gchar* path, gboolean create,
 
     (*dbase_zond)->zond_dbase_store = zond_dbase_store;
     (*dbase_zond)->zond_dbase_work = zond_dbase_work;
-    (*dbase_zond)->project_name = g_strdup( strrchr( path, '/' ) + 1 );
-    (*dbase_zond)->project_dir = g_strndup( path, strlen( path ) - strlen(
-            strrchr( path, '/' ) ) );
+    (*dbase_zond)->project_name = g_path_get_basename( path );
+    //g_strdup( strrchr( path, '/' ) + 1 );
+    (*dbase_zond)->project_dir = g_path_get_dirname( path );
+    //g_strndup( path, strlen( path ) - strlen( strrchr( path, '/' ) ) );
 
     return 0;
 }
@@ -149,7 +146,7 @@ projekt_aktivieren( Projekt* zond )
     g_settings_set_string( zond->settings, "project", set );
     g_free( set );
 
-    project_reset_changed( zond );
+    project_reset_changed( zond, FALSE );
 
     return;
 }
@@ -182,7 +179,7 @@ project_speichern( Projekt* zond, gchar** errmsg )
             zond->dbase_zond->zond_dbase_store, errmsg );
     if ( rc ) ERROR_S
 
-    project_reset_changed( zond );
+    project_reset_changed( zond, FALSE );
 
     return 0;
 }
@@ -202,8 +199,8 @@ project_timeout_autosave( gpointer data )
         rc = project_speichern( zond, &errmsg );
         if ( rc )
         {
-            display_message( zond->app_window, "Automatisches Speichern fehlgeschlagen\n\n"
-                    "Bei Aufruf project_speichern:\n", errmsg, NULL );
+            display_message( zond->app_window, "Automatisches Speichern fehlgeschlagen\n\n",
+                    errmsg, NULL );
             g_free( errmsg );
         }
     }
@@ -223,8 +220,7 @@ cb_menu_datei_speichern_activate( GtkMenuItem* item, gpointer user_data )
     rc = project_speichern( zond, &errmsg );
     if ( rc )
     {
-        display_message( zond->app_window, "Fehler beim Speichern -\n\nBei Aufruf "
-                "project_speichern:\n", errmsg, NULL );
+        display_message( zond->app_window, "Fehler beim Speichern -\n\n", errmsg, NULL );
         g_free( errmsg );
     }
 
@@ -273,7 +269,7 @@ projekt_schliessen( Projekt* zond, gchar** errmsg )
 
     zond->node_id_act = 0;
 
-    project_reset_changed( zond );
+    project_reset_changed( zond, FALSE );
 
     //treeviews leeren
     zond_tree_store_clear( ZOND_TREE_STORE(gtk_tree_view_get_model(
@@ -312,8 +308,6 @@ projekt_schliessen( Projekt* zond, gchar** errmsg )
     //project in settings auf leeren String setzen
     g_settings_set_string( zond->settings, "project", "" );
 
-    g_signal_handler_disconnect( zond->app_window, zond->key_press_signal );
-
     return 0;
 }
 
@@ -335,6 +329,46 @@ cb_menu_datei_schliessen_activate( GtkMenuItem* item, gpointer user_data )
     }
 
     return;
+}
+
+
+gint
+project_load_baeume( Projekt* zond, GError** error )
+{
+    gint rc = 0;
+    GtkTreeIter iter = { 0 };
+
+    rc = zond_treeview_load_baum( ZOND_TREEVIEW(zond->treeview[BAUM_INHALT]), error );
+    if ( rc == -1 )
+    {
+        g_prefix_error( error, "%s\n", __func__ );
+
+        return -1;
+    }
+
+    rc = zond_treeview_load_baum( ZOND_TREEVIEW(zond->treeview[BAUM_AUSWERTUNG]), error );
+    if ( rc == -1 )
+    {
+        g_prefix_error( error, "%s\n", __func__ );
+
+        return -1;
+    }
+
+    g_object_set( sond_treeview_get_cell_renderer_text( zond->treeview[BAUM_AUSWERTUNG] ),
+            "editable", FALSE, NULL);
+    g_object_set( sond_treeview_get_cell_renderer_text( zond->treeview[BAUM_INHALT] ),
+            "editable", TRUE, NULL);
+
+    gtk_widget_grab_focus( GTK_WIDGET(zond->treeview[BAUM_INHALT]) );
+
+    if ( gtk_tree_model_get_iter_first( gtk_tree_view_get_model(
+            GTK_TREE_VIEW(zond->treeview[BAUM_AUSWERTUNG]) ), &iter ) )
+    {
+        sond_treeview_set_cursor( zond->treeview[BAUM_AUSWERTUNG], &iter );
+        gtk_tree_selection_unselect_all( zond->selection[BAUM_AUSWERTUNG] );
+    }
+
+    return 0;
 }
 
 
@@ -365,17 +399,22 @@ project_oeffnen( Projekt* zond, const gchar* abs_path, gboolean create,
 
     projekt_aktivieren( zond );
 
-    //key_press-event-signal einschalten
-    zond->key_press_signal = g_signal_connect( zond->app_window,
-            "key-press-event", G_CALLBACK(cb_key_press), zond );
-
     if ( g_settings_get_boolean( zond->settings, "autosave" ) )
             g_timeout_add_seconds( 10 * 60, project_timeout_autosave, zond );
 
     if ( !create )
     {
-        rc = treeviews_reload_baeume( zond, errmsg );
-        if ( rc == -1 ) ERROR_S
+        GError* error = NULL;
+        gint rc = 0;
+
+        rc = project_load_baeume( zond, &error );
+        if ( rc )
+        {
+            if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+            g_error_free( error );
+
+            return -1;
+        }
     }
 
     return 0;
@@ -415,8 +454,7 @@ cb_menu_datei_oeffnen_activate( GtkMenuItem* item, gpointer user_data )
     g_free( abs_path );
     if ( rc == -1 )
     {
-        display_message( zond->app_window, "Fehler beim Öffnen-\n\nBei Aufruf "
-                "project_oeffnen:\n", errmsg, NULL );
+        display_error( zond->app_window, "Fehler beim Öffnen", errmsg );
         g_free( errmsg );
 
         return;
@@ -445,8 +483,7 @@ cb_menu_datei_neu_activate( GtkMenuItem* item, gpointer user_data )
     g_free( abs_path );
     if ( rc == -1 )
     {
-        display_message( zond->app_window, "Fehler beim Öffnen-\n\nBei Aufruf "
-                "project_oeffnen:\n", errmsg, NULL );
+        display_message( zond->app_window, "Fehler beim Öffnen-\n\n", errmsg, NULL );
         g_free( errmsg );
     }
 

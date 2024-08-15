@@ -226,33 +226,6 @@ zond_tree_store_init (ZondTreeStore *tree_store)
   while (priv->stamp == 0);
 }
 
-/**
- * gtk_tree_store_new:
- * @n_columns: number of columns in the tree store
- * @...: all #GType types for the columns, from first to last
- *
- * Creates a new tree store as with @n_columns columns each of the types passed
- * in.  Note that only types derived from standard GObject fundamental types
- * are supported.
- *
- * As an example, `gtk_tree_store_new (3, G_TYPE_INT, G_TYPE_STRING,
- * GDK_TYPE_PIXBUF);` will create a new #GtkTreeStore with three columns, of type
- * #gint, #gchararray, and #GdkPixbuf respectively.
- *
- * Returns: a new #GtkTreeStore
- **/
-ZondTreeStore *
-zond_tree_store_new ( gint root_node_id )
-{
-    ZondTreeStore* tree_store = NULL;
-
-    tree_store = g_object_new (ZOND_TYPE_TREE_STORE, NULL);
-
-    tree_store->priv->root_node_id = root_node_id;
-
-    return tree_store;
-}
-
 void zond_tree_store_remove_node( GNode* node );
 
 static gboolean
@@ -867,7 +840,9 @@ zond_tree_store_insert( ZondTreeStore* tree_store, GtkTreeIter* iter,
     GtkTreeIter iter_new = { 0, };
 
     g_return_if_fail (ZOND_IS_TREE_STORE (tree_store));
-    g_return_if_fail( iter == NULL || ((RowData*) G_NODE(iter->user_data)->data)->tree_store == tree_store );
+    g_return_if_fail( iter == NULL || iter->user_data );
+
+//            G_NODE(iter->user_data)->data || ((RowData*) (G_NODE(iter->user_data)->data))->tree_store == tree_store );
 
     if ( iter )
     {
@@ -1180,8 +1155,8 @@ zond_tree_store_walk_tree( GNode* node, gint pos )
 
 
 void
-zond_tree_store_move_node( GtkTreeIter* iter_src, GtkTreeIter* iter_anchor,
-        gboolean child, GtkTreeIter* iter_new )
+zond_tree_store_move_node( GtkTreeIter* iter_src, ZondTreeStore* tree_store_anchor,
+        GtkTreeIter* iter_anchor, gboolean child, GtkTreeIter* iter_new )
 {
     GNode* node_src = NULL;
     GNode* node_src_parent = NULL;
@@ -1216,7 +1191,7 @@ zond_tree_store_move_node( GtkTreeIter* iter_src, GtkTreeIter* iter_anchor,
     }
     gtk_tree_path_free (path);
 
-    ((RowData*) node_src->data)->tree_store = ((RowData*) G_NODE(iter_anchor->user_data)->data)->tree_store;
+    ((RowData*) node_src->data)->tree_store = tree_store_anchor;
 
     //jetzt Knoten, die auf ausgelösten Knoten zeigen, löschen
     list = ((RowData*) node_src->data)->links;
@@ -1238,7 +1213,15 @@ zond_tree_store_move_node( GtkTreeIter* iter_src, GtkTreeIter* iter_anchor,
     }
 
     //jetzt Knoten wieder einfügen
-    if ( child ) g_node_insert_after( G_NODE(iter_anchor->user_data), NULL, node_src );
+    if ( child )
+    {
+        GNode* node_anchor = NULL;
+
+        if ( iter_anchor ) node_anchor = iter_anchor->user_data;
+        else node_anchor = tree_store_anchor->priv->root;
+
+        g_node_insert_after( node_anchor, NULL, node_src );
+    }
     else
     {
         g_node_insert_after( G_NODE(iter_anchor->user_data)->parent, G_NODE(iter_anchor->user_data), node_src );
@@ -1250,7 +1233,7 @@ zond_tree_store_move_node( GtkTreeIter* iter_src, GtkTreeIter* iter_anchor,
 
     if ( iter_new )
     {
-        iter_new->stamp = iter_anchor->stamp;
+        iter_new->stamp = tree_store_anchor->priv->stamp;
         iter_new->user_data = node_src;
     }
 
@@ -1544,8 +1527,17 @@ zond_tree_store_get_tree_store( GtkTreeIter* iter )
 }
 
 
+void
+zond_tree_store_set_root( ZondTreeStore* tree_store, gint root_node_id )
+{
+    tree_store->priv->root_node_id = root_node_id;
+
+    return ;
+}
+
+
 gint
-zond_tree_store_get_root_id( ZondTreeStore* tree_store )
+zond_tree_store_get_root( ZondTreeStore* tree_store )
 {
     return tree_store->priv->root_node_id;
 }

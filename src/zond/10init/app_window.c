@@ -92,8 +92,8 @@ static void
 cb_text_buffer_changed( GtkTextBuffer* buffer, gpointer data )
 {
     gint rc = 0;
-    gchar* errmsg = NULL;
     gint node_id = 0;
+    GError* error = NULL;
 
     Projekt* zond = (Projekt*) data;
 
@@ -110,14 +110,14 @@ cb_text_buffer_changed( GtkTextBuffer* buffer, gpointer data )
     //sonst: node_id aus Extra-Fenster
     else node_id = zond->node_id_extra;
 
-    rc = zond_dbase_set_text( zond->dbase_zond->zond_dbase_work,
-            node_id, text, &errmsg );
+    rc = zond_dbase_update_text( zond->dbase_zond->zond_dbase_work,
+            node_id, text, &error );
     g_free( text );
     if ( rc )
     {
         display_message( zond->app_window, "Fehler in cb_textview_focus_out:\n\n"
-                "Bei Aufruf zond_dbase_set_text:\n", errmsg, NULL );
-        g_free( errmsg );
+                "Bei Aufruf zond_dbase_set_text:\n", error->message, NULL );
+        g_error_free( error );
 
         return;
     }
@@ -131,28 +131,9 @@ cb_textview_focus_in( GtkWidget* textview, GdkEvent* event, gpointer user_data )
 {
     Projekt* zond = (Projekt*) user_data;
 
-    g_signal_handler_disconnect( zond->app_window, zond->key_press_signal );
-
     zond->text_buffer_changed_signal =
             g_signal_connect( gtk_text_view_get_buffer( GTK_TEXT_VIEW(textview) ),
             "changed", G_CALLBACK(cb_text_buffer_changed), (gpointer) zond );
-
-    return FALSE;
-}
-
-
-
-gboolean
-cb_key_press( GtkWidget* treeview, GdkEventKey* event, gpointer data )
-{
-    Projekt* zond = (Projekt*) data;
-
-    if ( event->is_modifier || (event->state & GDK_CONTROL_MASK) ||
-            (event->keyval < 0x21) ||
-            (event->keyval > 0x7e) )
-            return FALSE;
-
-    gtk_popover_popup( GTK_POPOVER(zond->popover) );
 
     return FALSE;
 }
@@ -162,10 +143,6 @@ static gboolean
 cb_textview_focus_out( GtkWidget* textview, GdkEvent* event, gpointer user_data )
 {
     Projekt* zond = (Projekt*) user_data;
-
-    //key_press-event-signal einschalten
-    zond->key_press_signal = g_signal_connect( zond->app_window,
-            "key-press-event", G_CALLBACK(cb_key_press), zond );
 
     g_signal_handler_disconnect(
             gtk_text_view_get_buffer( GTK_TEXT_VIEW(textview) ),
@@ -272,33 +249,6 @@ cb_focus_in( GtkWidget* treeview, GdkEvent* event, gpointer user_data )
 
 
 static void
-treeviews_cb_editing_canceled( GtkCellRenderer* renderer,
-                              gpointer data)
-{
-    Projekt* zond = (Projekt*) data;
-
-    zond->key_press_signal = g_signal_connect( zond->app_window, "key-press-event",
-            G_CALLBACK(cb_key_press), zond );
-
-    return;
-}
-
-
-static void
-treeviews_cb_editing_started( GtkCellRenderer* renderer, GtkEditable* editable,
-                             const gchar* path,
-                             gpointer data )
-{
-    Projekt* zond = (Projekt*) data;
-
-    g_signal_handler_disconnect( zond->app_window, zond->key_press_signal );
-    zond->key_press_signal = 0;
-
-    return;
-}
-
-
-static void
 init_treeviews( Projekt* zond )
 {
     //der treeview
@@ -311,13 +261,6 @@ init_treeviews( Projekt* zond )
         //die Selection
         zond->selection[baum] = gtk_tree_view_get_selection(
                 GTK_TREE_VIEW(zond->treeview[baum]) );
-
-        //Text-Spalte wird editiert
-        //Beginn
-        g_signal_connect( sond_treeview_get_cell_renderer_text( zond->treeview[baum] ),
-                "editing-started", G_CALLBACK(treeviews_cb_editing_started), zond );
-        g_signal_connect( sond_treeview_get_cell_renderer_text( zond->treeview[baum] ),
-                "editing-canceled", G_CALLBACK(treeviews_cb_editing_canceled), zond );
 
         //focus-in
         g_signal_connect( zond->treeview[baum],
@@ -349,11 +292,28 @@ init_create_text_view( Projekt* zond )
 }
 
 
+static gboolean
+cb_key_press( GtkWidget* treeview, GdkEventKey event, gpointer data )
+{
+    Projekt* zond = (Projekt*) data;
+
+    if ( event.is_modifier || (event.state & GDK_CONTROL_MASK) ||
+            (event.keyval < 0x21) ||
+            (event.keyval > 0x7e) )
+            return FALSE;
+
+    gtk_popover_popup( GTK_POPOVER(zond->popover) );
+
+    return FALSE;
+}
+
+
 void
 init_app_window( Projekt* zond )
 {
     GtkWidget* entry_search = NULL;
     GtkTextIter text_iter = { 0 };
+    SondTreeviewClass* stv_class = NULL;
 
     //ApplicationWindow erzeugen
     zond->app_window = gtk_window_new( GTK_WINDOW_TOPLEVEL );
@@ -371,6 +331,11 @@ init_app_window( Projekt* zond )
 
     //jetzt in oberen Teil der vbox einfügen
     gtk_box_pack_start( GTK_BOX(vbox), zond->hpaned, TRUE, TRUE, 0 );
+
+    //vor erzeugung des ersten Sond_treeviews bzw. Derivat, damit Werte kopiert werden
+    stv_class = g_type_class_ref( SOND_TYPE_TREEVIEW );
+    stv_class->callback_key_press_event = cb_key_press;
+    stv_class->callback_key_press_event_func_data = zond;
 
     //TreeView erzeugen und in das scrolled window
     init_treeviews( zond );

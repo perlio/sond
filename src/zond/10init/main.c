@@ -31,7 +31,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../../misc.h"
 #include "../../misc_stdlib.h"
 #include "../20allgemein/project.h"
-#include "../20allgemein/zieleplus.h"
 
 #include "icons.h"
 #include "app_window.h"
@@ -225,8 +224,6 @@ init( GtkApplication* app, Projekt* zond )
     gtk_widget_set_sensitive( zond->menu.speichernitem, FALSE );
     g_settings_set_boolean( zond->settings, "speichern", FALSE );
 
-    DisableDebug( );
-
     gtk_widget_show_all( zond->app_window );
     gtk_widget_hide( gtk_paned_get_child1( GTK_PANED(zond->hpaned) ) );
 
@@ -271,7 +268,7 @@ open_app( GtkApplication* app, gpointer files, gint n_files, gchar *hint,
     if ( rc == -1 )
     {
         display_message( zond->app_window, "Fehler - Projekt kann nicht geöffnet "
-                "werden\n\nBei Aufruf projekt_oeffnen:\n", errmsg, NULL );
+                "werden\n\n", errmsg, NULL );
         g_free( errmsg );
 
         return;

@@ -7,6 +7,7 @@
 #include "../sond_treeview.h"
 
 typedef struct _Projekt Projekt;
+typedef struct _Anbindung Anbindung;
 typedef int gint;
 
 G_BEGIN_DECLS
@@ -22,17 +23,35 @@ struct _ZondTreeviewClass
 
 void zond_treeview_cursor_changed( ZondTreeview*, gpointer );
 
-void item_loeschen_activate( GtkMenuItem*, gpointer );
+gboolean zond_treeview_get_anchor( Projekt*, gboolean, GtkTreeIter*,
+        GtkTreeIter*, gint* );
 
-void item_anbindung_entfernen_activate( GtkMenuItem*, gpointer );
-
-void item_jump_activate( GtkMenuItem*, gpointer );
-
-ZondTreeview* zond_treeview_new( Projekt*, gint );
+gint zond_treeview_walk_tree( ZondTreeview*, gboolean, gint,
+        GtkTreeIter*, gboolean, GtkTreeIter*, gint, gint*,
+        gint (*) (ZondTreeview*, gint, GtkTreeIter*, gboolean,
+        GtkTreeIter*, gint, gint*, GError**), GError** );
 
 GtkTreeIter* zond_treeview_abfragen_iter( ZondTreeview*, gint );
 
+gint zond_treeview_insert_file_in_db( Projekt*, gchar const*,
+        gchar const*, gint*, GError** );
+
+gint zond_treeview_copy_node_to_baum_auswertung( ZondTreeview*,
+        gint, GtkTreeIter*, gboolean, GtkTreeIter*, gint, gint*, GError** );
+
+ZondTreeview* zond_treeview_new( Projekt*, gint );
+
+gint zond_treeview_load_baum( ZondTreeview*, GError** );
+
+void zond_treeview_set_text_pdf_abschnitt( ZondTreeview*, gint,
+        gchar const* );
+
 GtkTreePath* zond_treeview_get_path( SondTreeview*, gint );
+
+void zond_treeview_parse_file_section( gchar const*, Anbindung* );
+
+void zond_treeview_build_file_section( Anbindung, gchar** );
+
 
 G_END_DECLS
 

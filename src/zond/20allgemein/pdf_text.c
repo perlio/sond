@@ -104,11 +104,16 @@ static void
 cb_textsuche_changed( GtkListBox* box, GtkListBoxRow* row, gpointer data )
 {
     gint index = 0;
+    gint node_id = 0;
+    GError* error = NULL;
+    gint rc = 0;
+    gint pdf_root = 0;
+    gboolean child = FALSE;
+    Anbindung anbindung = { 0 };
+    gint anchor_id = 0;
+    gint baum_inhalt_file = 0;
 
     Projekt* zond = (Projekt*) data;
-
-    gint node_id = 0;
-    gchar* errmsg = NULL;
 
     GArray* arr_pdf_text_occ = g_object_get_data( G_OBJECT(box), "arr-pdf-text-occ" );
 
@@ -116,56 +121,70 @@ cb_textsuche_changed( GtkListBox* box, GtkListBoxRow* row, gpointer data )
 
     PDFTextOcc pdf_text_occ = g_array_index( arr_pdf_text_occ, PDFTextOcc, index );
 
-    //herausfinden, welche Anbuindung am besten paßt
-
-    node_id = zond_dbase_get_node_id_from_rel_path( zond->dbase_zond->zond_dbase_work, pdf_text_occ.rel_path, &errmsg );
-    if ( node_id == 0 )
-    {
-        display_message( zond->app_window, "Fehler -\n\n"
-                "Datei ", pdf_text_occ.rel_path, " nicht vorhanden", NULL );
-        return;
-    }
-    else if ( node_id < 0 )
-    {
-        display_message( zond->app_window, "Kann Knoten nicht ermitteln\n\n",
-                errmsg, NULL );
-        g_free( errmsg );
-
-        return;
-    }
-
-    Anbindung anbindung = { 0 };
+    //herausfinden, welche Anbindung am besten paßt
+    //erst pdf_root herausfinden. dann anker_rek
     anbindung.von.seite = pdf_text_occ.page;
     anbindung.bis.seite = pdf_text_occ.page;
     anbindung.von.index = pdf_text_occ.quad.ul.y;
     anbindung.bis.index = pdf_text_occ.quad.ll.y;
 
-    gboolean kind = FALSE;
-
-    node_id = ziele_abfragen_anker_rek( zond, node_id, anbindung, &kind, &errmsg );
-    if ( node_id == -1 )
+    rc = zond_dbase_get_file_part_root( zond->dbase_zond->zond_dbase_work,
+            pdf_text_occ.rel_path, &pdf_root, &error );
+    if ( rc )
     {
-        display_message( zond->app_window, "Fehler -\n\nBei Aufruf ziele_abfragen_anker_"
-                "rek:\n", errmsg, NULL );
-        g_free( errmsg );
+        display_message( zond->app_window, "Fehler Ermittlung root-node\n\n",
+                error->message, NULL );
+        g_error_free( error );
 
         return;
     }
 
-    //cursor dorthin setzen
-    if ( !kind )
+    rc = ziele_abfragen_anker_rek( zond->dbase_zond->zond_dbase_work,
+            anbindung, pdf_root, &anchor_id, &child, &error);
+    if ( rc )
     {
-        node_id = zond_dbase_get_parent( zond->dbase_zond->zond_dbase_work, BAUM_INHALT, node_id, &errmsg );
-        if ( node_id < 0 )
+        display_message( zond->app_window, "Fehler Abfrage\n\n",
+                error->message, NULL );
+        g_error_free( error );
+
+        return;
+    }
+
+    if ( !child ) //heißt auch, daß anchor_id != pdf_root ist
+    {
+        gint rc = 0;
+        gint parent_id = 0;
+
+        rc = zond_dbase_get_parent( zond->dbase_zond->zond_dbase_work, anchor_id, &parent_id, &error );
+        if ( rc )
         {
             display_message( zond->app_window, "Fehler - \n\nBei Aufruf zond_dbase_get_parent:\n",
-                    errmsg, NULL );
-            g_free( errmsg );
+                    error->message, NULL );
+            g_error_free( error );
 
             return;
         }
+
+        node_id = parent_id;
+    }
+    else node_id = anchor_id;
+
+    //prüfen, ob Abschnitt angebunden ist (BAUM_INHALT_PDF_ABSCHNITT (link->)
+    rc = zond_dbase_find_baum_inhalt_file( zond->dbase_zond->zond_dbase_work,
+            node_id, &baum_inhalt_file, NULL, NULL, &error );
+    if ( rc )
+    {
+        display_message( zond->app_window, "Fehler Abfrage\n\n",
+                error->message, NULL );
+        g_error_free( error );
+
+        return;
     }
 
+    if ( !baum_inhalt_file ) return;
+    else node_id = baum_inhalt_file; //weil ja nur hierüber angebunden, nicht als Baum_inhalt_pdf_abschnitt
+
+    //cursor dorthin setzen
     GtkTreePath* path = zond_treeview_get_path( zond->treeview[BAUM_INHALT], node_id );
     gtk_tree_view_expand_to_path( GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]), path );
     gtk_tree_view_set_cursor( GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]), path, NULL, FALSE );

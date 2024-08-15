@@ -23,21 +23,21 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../../sond_treeview.h"
 
 #include "../zond_pdf_document.h"
-
 #include "../global_types.h"
 #include "../zond_dbase.h"
+#include "../zond_tree_store.h"
 
 #include "../99conv/pdf.h"
 #include "../99conv/general.h"
 
 #include "ziele.h"
 #include "project.h"
-#include "treeviews.h"
 
 #include "../40viewer/document.h"
 #include "../40viewer/viewer.h"
 
 
+/*
 static gboolean
 oeffnen_dd_sind_gleich( DisplayedDocument* dd1, DisplayedDocument* dd2 )
 {
@@ -67,15 +67,22 @@ oeffnen_dd_sind_gleich( DisplayedDocument* dd1, DisplayedDocument* dd2 )
 static gint
 oeffnen_auszug( Projekt* zond, gint node_id, gchar** errmsg )
 {
+
     gint rc = 0;
     gint first_child = 0;
     gint younger_sibling = 0;
     DisplayedDocument* dd = NULL;
     DisplayedDocument* dd_next = NULL;
+    GError* error = NULL;
 
-    first_child = zond_dbase_get_first_child( zond->dbase_zond->zond_dbase_work, BAUM_AUSWERTUNG, node_id, errmsg );
+    rc = zond_dbase_get_first_child( zond->dbase_zond->zond_dbase_work, node_id, &first_child, &error );
+    if ( rc )
+    {
+        if ( errmsg ) *errmsg = g_strdup( error->message );
+        g_error_free( error );
 
-    if ( first_child < 0 ) ERROR_S
+        ERROR_S
+    }
     else if ( first_child == 0 ) ERROR_S_MESSAGE( "Auszug anzeigen nicht möglich:\n"
                 "Knoten hat keine Kinder" )
 
@@ -84,9 +91,10 @@ oeffnen_auszug( Projekt* zond, gint node_id, gchar** errmsg )
     {
         gchar* rel_path = NULL;
         Anbindung* anbindung = NULL;
+        gint rc = 0;
 
-        rc = treeviews_get_rel_path_and_anbindung( zond, BAUM_AUSWERTUNG,
-                younger_sibling, &rel_path, &anbindung, errmsg );
+        rc = zond_dbase_get_node( zond->dbase_zond->zond_dbase_work,
+                younger_sibling, NULL, NULL, &rel_path, &anbindung, errmsg );
         if ( rc == -1 ) ERROR_S
 
         if ( rc < 2 && is_pdf( rel_path ) )//rel_path existiert
@@ -121,9 +129,15 @@ oeffnen_auszug( Projekt* zond, gint node_id, gchar** errmsg )
 
         first_child = younger_sibling;
 
-        younger_sibling = zond_dbase_get_younger_sibling( zond->dbase_zond->zond_dbase_work, BAUM_AUSWERTUNG,
-                first_child, errmsg );
-        if ( younger_sibling < 0 ) ERROR_S
+        rc = zond_dbase_get_younger_sibling( zond->dbase_zond->zond_dbase_work,
+                first_child, &younger_sibling, &error);
+        if ( rc )
+        {
+            if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+            g_error_free( error );
+
+            return -1;
+        }
     }
     while ( younger_sibling > 0 );
 
@@ -157,17 +171,23 @@ oeffnen_auszug( Projekt* zond, gint node_id, gchar** errmsg )
 
     return 0;
 }
+*/
 
 
 gint
-oeffnen_internal_viewer( Projekt* zond, const gchar* rel_path, Anbindung* anbindung,
+oeffnen_internal_viewer( Projekt* zond, const gchar* file_part, Anbindung* anbindung,
         const PdfPos* pos_pdf, gchar** errmsg )
 {
     PdfPos pos_von = { 0 };
+    gchar* rel_path = NULL;
+
+    rel_path = g_strndup( file_part + 1, strlen( file_part + 1 ) - strlen( g_strrstr( file_part + 1, "//" ) ) );
 
     //Neue Instanz oder bestehende?
     if ( !(zond->state & GDK_SHIFT_MASK) )
     {
+        //ToDo: verallgemeinern für parts
+
         //Testen, ob pv mit rel_path schon geöffnet
         for ( gint i = 0; i < zond->arr_pv->len; i++ )
         {
@@ -196,89 +216,16 @@ oeffnen_internal_viewer( Projekt* zond, const gchar* rel_path, Anbindung* anbind
 
     DisplayedDocument* dd = document_new_displayed_document( rel_path,
             anbindung, errmsg );
+    g_free( rel_path );
     if ( !dd && *errmsg ) ERROR_S
     else if ( !dd ) return 0;
 
     if ( pos_pdf ) pos_von = *pos_pdf;
 
-    PdfViewer* pv = viewer_start_pv( zond );
+    PdfViewer* pv = viewer_start_pv( zond, file_part );
     viewer_display_document( pv, dd, pos_von.seite, pos_von.index );
 
     return 0;
 }
 
-
-gint
-oeffnen_node( Projekt* zond, GtkTreeIter* iter, gboolean open_with, gchar** errmsg )
-{
-    gint rc = 0;
-    gchar* rel_path = NULL;
-    Anbindung* anbindung = NULL;
-    PdfPos pos_pdf = { 0 };
-    Baum baum = KEIN_BAUM;
-    gint node_id = 0;
-
-    rc = treeviews_get_baum_and_node_id( zond, iter, &baum, &node_id );
-    if ( rc ) return 0;
-
-    rc = treeviews_get_rel_path_and_anbindung( zond, baum, node_id, &rel_path,
-            &anbindung, errmsg );
-    if ( rc == -1 ) ERROR_S
-
-    if ( rc == 2 ) //keine Datei angeklickt
-    {
-        if ( baum == BAUM_AUSWERTUNG )
-        {
-            rc = oeffnen_auszug( zond, node_id, errmsg );
-            if ( rc ) ERROR_S
-
-            return 0;
-        }
-        else return 0;
-    }
-    else if ( open_with || !is_pdf( rel_path ) ) //wenn kein pdf oder mit Programmauswahl zu öffnen:
-    {
-        gint rc = 0;
-
-        rc = misc_datei_oeffnen( rel_path, open_with, errmsg );
-        if ( rc ) ERROR_S
-
-        return 0;
-    }
-    else if ( rc == 0 && !(zond->state & GDK_CONTROL_MASK) )
-    {
-        if ( zond->state & GDK_MOD1_MASK )
-        {
-            pos_pdf.seite = anbindung->bis.seite;
-            pos_pdf.index = anbindung->bis.index;
-        }
-        else
-        {
-            pos_pdf.seite = anbindung->von.seite;
-            pos_pdf.index = anbindung->von.index;
-        }
-
-        g_free( anbindung );
-        anbindung = NULL;
-    }
-
-    if ( rc == 0 && (zond->state & GDK_CONTROL_MASK) && (zond->state & GDK_MOD1_MASK) )
-    {
-        pos_pdf.seite = EOP;
-        pos_pdf.index = EOP;
-    }
-
-    if ( rc == 1 && (zond->state & GDK_MOD1_MASK) ) //am Ende öffnen
-    {
-        pos_pdf.seite = EOP;
-        pos_pdf.index = EOP;
-    }
-
-    rc = oeffnen_internal_viewer( zond, rel_path, anbindung, &pos_pdf, errmsg );
-    g_free( rel_path );
-    g_free( anbindung );
-    if ( rc ) ERROR_S
-
-    return 0;
-}
 
