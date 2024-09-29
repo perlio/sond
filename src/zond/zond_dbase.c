@@ -1464,7 +1464,11 @@ zond_dbase_get_younger_sibling( ZondDBase* zond_dbase, gint node_id, gint* young
     rc = sqlite3_step( stmt[0] );
     if ( rc != SQLITE_ROW && rc != SQLITE_DONE ) ERROR_Z_DBASE
 
-    if ( rc == SQLITE_ROW && younger_sibling_id ) *younger_sibling_id = sqlite3_column_int( stmt[0], 0 );
+    if ( younger_sibling_id )
+    {
+        if ( rc == SQLITE_ROW ) *younger_sibling_id = sqlite3_column_int( stmt[0], 0 );
+        else *younger_sibling_id = 0;
+    }
 
     return 0;
 }

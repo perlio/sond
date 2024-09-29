@@ -106,5 +106,7 @@ void zond_tree_store_load_link( GtkTreeIter* );
 
 gint zond_tree_store_get_node_id( GtkTreeIter* );
 
+void zond_tree_store_kill_parent( GtkTreeIter* );
+
 G_END_DECLS
 #endif /* ZOND_TREE_STORE_H_INCLUDED */

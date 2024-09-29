@@ -226,7 +226,7 @@ zond_tree_store_init (ZondTreeStore *tree_store)
   while (priv->stamp == 0);
 }
 
-void zond_tree_store_remove_node( GNode* node );
+void zond_tree_store_remove_node( GNode* );
 
 static gboolean
 node_free (GNode *node, gpointer data)
@@ -252,6 +252,7 @@ node_free (GNode *node, gpointer data)
 
         g_free( row_data->data );
     }
+
 
     //selbert link-Ziel
     list_links = row_data->links;
@@ -1590,4 +1591,35 @@ zond_tree_store_get_node_id( GtkTreeIter* iter )
     else node_id = ((RowData*) G_NODE(iter->user_data)->data)->data->node_id;
 
     return node_id;
+}
+
+
+//Funktion entfernt nicht etwa parent von iter, sondern iter, und setzt dessen Kinder an Stelle
+void
+zond_tree_store_kill_parent( GtkTreeIter* iter )
+{
+    GtkTreeIter child = { 0 };
+    GtkTreeIter anchor = { 0 };
+    ZondTreeStore* tree_store = NULL;
+    GtkTreeModel* model = NULL;
+
+    if ( !iter ) return;
+
+    tree_store = ((RowData*) G_NODE(iter->user_data)->data)->tree_store;
+    model = GTK_TREE_MODEL(tree_store);
+
+    anchor = *iter;
+
+    while ( gtk_tree_model_iter_children( model, &child, iter ) )
+    {
+        GtkTreeIter inserted = { 0 };
+
+        zond_tree_store_move_node( &child, tree_store, &anchor, FALSE, &inserted );
+
+        anchor = inserted;
+    }
+
+    zond_tree_store_remove( iter );
+
+    return;
 }
