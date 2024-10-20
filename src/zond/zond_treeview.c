@@ -2001,17 +2001,14 @@ zond_treeview_selection_entfernen_anbindung_foreach( SondTreeview* stv,
             return -1;
         }
 
-        if ( !visible )
+        //parent brauchen wir, um zu ermitteln, ob nach der Löschung parent noch Kinder hat
+        rc = zond_dbase_get_parent( zond->dbase_zond->zond_dbase_work, node_id, &id_parent, &error );
+        if ( rc )
         {
-            //parent brauchen wir ggf. um zu ermitteln, ob nach der Löschung parent noch Kinder hat
-            rc = zond_dbase_get_parent( zond->dbase_zond->zond_dbase_work, node_id, &id_parent, &error );
-            if ( rc )
-            {
-                if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
-                g_error_free( error );
+            if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+            g_error_free( error );
 
-                return -1;
-            }
+            return -1;
         }
     }
     else g_free( file_part );
@@ -2213,16 +2210,44 @@ zond_treeview_selection_entfernen_anbindung_foreach( SondTreeview* stv,
 
                         return -1;
                     }
-                    else if ( !ZOND_IS_PDF_ABSCHNITT(object) )
+
+                    if ( ZOND_IS_PDF_ABSCHNITT(object) )
                     {
-                        if ( errmsg ) *errmsg = g_strdup_printf( "%s\nKnoten enthält keinen ZPA", __func__ );
+                        node_id_parent = zond_pdf_abschnitt_get_ID( ZOND_PDF_ABSCHNITT(object) );
+                        g_object_unref( object );
+                    }
+                    else if ( G_IS_FILE_INFO(object) )
+                    {
+                        gchar* rel_path = NULL;
+                        gint rc = 0;
+                        gchar* file_part = NULL;
+
+                        g_object_unref( object );
+
+                        //ToDo: zond_treeviewfm_get_file_part schreiben
+                        rel_path = sond_treeviewfm_get_rel_path( SOND_TREEVIEWFM(ztvfm), &iter_parent );
+                        file_part = g_strdup_printf( "/%s//", rel_path );
+                        g_free( rel_path );
+
+                        rc = zond_dbase_get_file_part_root( zond->dbase_zond->zond_dbase_work,
+                                file_part, &node_id_parent, &error );
+                        g_free( file_part );
+                        if ( rc )
+                        {
+                            if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+                            g_error_free( error );
+
+                            return -1;
+                        }
+                    }
+                    //else if ( ZOND_IS_FILE_PART )
+                    else
+                    {
+                        if ( errmsg ) *errmsg = g_strdup_printf( "%s\nobject ist nix was es sein sollte", __func__ );
                         g_object_unref( object );
 
                         return -1;
                     }
-
-                    node_id_parent = zond_pdf_abschnitt_get_ID( ZOND_PDF_ABSCHNITT(object) );
-                    g_object_unref( object );
 
                     rc = zond_dbase_get_first_child( zond->dbase_zond->zond_dbase_work, node_id_parent, &node_id_dbase, &error );
                     if ( rc )
@@ -2239,6 +2264,7 @@ zond_treeview_selection_entfernen_anbindung_foreach( SondTreeview* stv,
                         gint rc = 0;
 
                         rc = zond_treeviewfm_get_id_pda( ztvfm, &iter_child, &node_id_child, &error );
+                        if ( rc )
                         {
                             if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
                             g_error_free( error );

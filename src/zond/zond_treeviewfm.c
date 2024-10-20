@@ -542,12 +542,12 @@ zond_treeviewfm_expand_dummy( SondTreeviewFM* stvfm,
             GtkTreeIter iter_inserted = { 0 };
             gint younger_sibling = 0;
 
-            rc = zond_treeviewfm_insert_section( ZOND_TREEVIEWFM(stvfm), child, &iter_anchor, child, &iter_inserted, error );
+            rc = zond_treeviewfm_insert_section( ZOND_TREEVIEWFM(stvfm), id_child, &iter_anchor, child, &iter_inserted, error );
             if ( rc ) ERROR_Z
 
             //nächstes Geschwister
             rc = zond_dbase_get_younger_sibling( ztvfm_priv->zond->dbase_zond->zond_dbase_work,
-                    child, &younger_sibling, error );
+                    id_child, &younger_sibling, error );
             if ( rc ) ERROR_Z
 
             id_child = younger_sibling;
@@ -920,6 +920,8 @@ zond_treeviewfm_section_visible( ZondTreeviewFM* ztvfm, gchar const* file_part, 
         } while ( 1 );
     }
 
+    if ( visible ) *visible = TRUE;
+
     //children und opened abfragen
     //prüfen, ob Kinder, und wenn nur dummy
     if ( children )
@@ -938,6 +940,7 @@ zond_treeviewfm_section_visible( ZondTreeviewFM* ztvfm, gchar const* file_part, 
                 gtk_tree_path_free( path );
 
                 if ( expanded ) *opened = TRUE;
+                else *opened = FALSE;
             }
         }
         else *children = FALSE;
