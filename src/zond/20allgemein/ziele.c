@@ -36,98 +36,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "../zond_tree_store.h"
 
 
-gboolean
-ziele_1_gleich_2( const Anbindung anbindung1, const Anbindung anbindung2 )
-{
-    if ( (anbindung1.von.seite == anbindung2.von.seite) &&
-            (anbindung1.bis.seite == anbindung2.bis.seite) &&
-            (anbindung1.von.index == anbindung2.von.index) &&
-            (anbindung1.bis.index == anbindung2.bis.index) ) return TRUE;
-    else return FALSE;
-}
-
-
-static gint
-ziele_vergleiche_pdf_pos( PdfPos pdf_pos1, PdfPos pdf_pos2 )
-{
-    if ( pdf_pos1.seite < pdf_pos2.seite ) return -1;
-    else if ( pdf_pos1.seite > pdf_pos2.seite ) return 1;
-    //wenn gleiche Seite:
-    else if ( pdf_pos1.index < pdf_pos2.index ) return -1;
-    else if ( pdf_pos1.index > pdf_pos2.index ) return 1;
-
-    return 0;
-}
-
-
-static gboolean
-ziele_anbindung_is_pdf_punkt( Anbindung anbindung )
-{
-    if ( (anbindung.von.seite || anbindung.von.index) &&
-            !anbindung.bis.seite && !anbindung.bis.index ) return TRUE;
-
-    return FALSE;
-}
-
-
-static gboolean
-ziele_1_vor_2( Anbindung anbindung1, Anbindung anbindung2 )
-{
-    if ( ziele_1_gleich_2( anbindung1, anbindung2 ) ) return FALSE;
-
-    if ( ziele_anbindung_is_pdf_punkt( anbindung1 ) )
-    {
-        if ( ziele_vergleiche_pdf_pos( anbindung1.von, anbindung2.von ) == -1 ) return TRUE;
-        else return FALSE;
-    }
-    else if ( ziele_anbindung_is_pdf_punkt( anbindung2 ) )
-    {
-        if ( ziele_vergleiche_pdf_pos( anbindung1.bis, anbindung2.von ) == -1 ) return TRUE;
-        else return FALSE;
-
-    }
-    else //beides komplette Anbindung
-            if ( ziele_vergleiche_pdf_pos( anbindung1.bis, anbindung2.von ) == -1 ) return TRUE;
-
-    return FALSE;
-}
-
-
-
-
-gboolean
-ziele_1_eltern_von_2( Anbindung anbindung1, Anbindung anbindung2 )
-{
-    gint pos_anfang = 0;
-    gint pos_ende = 0;
-
-    //PdfPunkt kann niemals Eltern sein.
-    if ( ziele_anbindung_is_pdf_punkt( anbindung1 ) ) return FALSE;
-
-    //Gleiche können nicht Nachfolger sein
-    if ( ziele_1_gleich_2( anbindung1, anbindung2 ) ) return FALSE;
-
-    //wenn Anbindung1 Datei ist, dann ist sie Eltern
-    if ( !anbindung1.von.seite && !anbindung1.von.index &&
-            !anbindung1.bis.seite && !anbindung1.bis.index ) return FALSE;
-    //auch wenn Anbindung2 Datei
-    if ( !anbindung1.von.seite && !anbindung2.von.index &&
-            !anbindung2.bis.seite && !anbindung2.bis.index ) return FALSE;
-
-    pos_anfang = ziele_vergleiche_pdf_pos( anbindung1.von, anbindung2.von );
-    pos_ende = ziele_vergleiche_pdf_pos( anbindung1.bis, anbindung2.bis );
-
-    if ( pos_anfang > 0 ) return FALSE; //fängt schon später an...
-    else //fängt entweder davor oder gleich an
-    {
-        if ( pos_anfang == 0 && pos_ende <= 0 ) return FALSE; //Fängt gleich an, hört nicht später auf...
-        else if ( pos_anfang < 0 && pos_ende < 0 ) return FALSE; //Fängt vorher an, hört nicht mindestens gleich auf
-    }
-
-    return TRUE;
-}
-
-
 static gint
 zond_anbindung_verschieben_kinder( Projekt* zond,
                           gint node_id,
@@ -165,10 +73,10 @@ zond_anbindung_verschieben_kinder( Projekt* zond,
             return -1;
         }
 
-        zond_treeview_parse_file_section( section, &anbindung_y );
+        anbindung_parse_file_section( section, &anbindung_y );
         g_free( section );
 
-        if ( ziele_1_eltern_von_2( anbindung, anbindung_y ) )
+        if ( anbindung_1_eltern_von_2( anbindung, anbindung_y ) )
         {
             gint rc = 0;
             GtkTreeIter iter_younger_sibling = { 0 };
@@ -258,12 +166,12 @@ ziele_abfragen_anker_rek( ZondDBase* zond_dbase, Anbindung anbindung,
 
     if ( section )
     {
-        zond_treeview_parse_file_section( section, &anbindung_anchor );
+        anbindung_parse_file_section( section, &anbindung_anchor );
         g_free( section );
     }
 
     //ziele auf Identität prüfen
-    if ( ziele_1_gleich_2( anbindung_anchor, anbindung ) )
+    if ( anbindung_1_gleich_2( anbindung_anchor, anbindung ) )
     {
         if ( error ) *error = g_error_new( ZOND_ERROR, 0,
                 "%s\nIdentischer Abschnitt wurde bereits angebunden", __func__ );
@@ -271,7 +179,7 @@ ziele_abfragen_anker_rek( ZondDBase* zond_dbase, Anbindung anbindung,
         return -1;
     }
     //Knoten kommt ist kind - anchor "weiter" oder root
-    else if ( ziele_1_eltern_von_2( anbindung_anchor, anbindung ) ||
+    else if ( anbindung_1_eltern_von_2( anbindung_anchor, anbindung ) ||
             (anbindung_anchor.von.seite == 0 && anbindung_anchor.von.index == 0 &&
              anbindung_anchor.bis.seite == 0 && anbindung_anchor.bis.index == 0) )
     {
@@ -299,7 +207,7 @@ ziele_abfragen_anker_rek( ZondDBase* zond_dbase, Anbindung anbindung,
         }
     }
     //Seiten oder Punkte vor den einzufügenden Punkt
-    else if ( ziele_1_vor_2( anbindung_anchor, anbindung ) )
+    else if ( anbindung_1_vor_2( anbindung_anchor, anbindung ) )
     {
         gint rc = 0;
         gint younger_sibling_id = 0;
@@ -321,8 +229,8 @@ ziele_abfragen_anker_rek( ZondDBase* zond_dbase, Anbindung anbindung,
         }
     }
     // wenn nicht danach, bleibt ja nur Überschneidung!!
-    else if ( !ziele_1_vor_2( anbindung, anbindung_anchor ) &&
-            !ziele_1_eltern_von_2( anbindung, anbindung_anchor ) )
+    else if ( !anbindung_1_vor_2( anbindung, anbindung_anchor ) &&
+            !anbindung_1_eltern_von_2( anbindung, anbindung_anchor ) )
     {
         if ( error ) *error = g_error_new( ZOND_ERROR, 0,
                 "Eingegebenes Ziel überschneidet "
@@ -379,7 +287,7 @@ zond_anbindung_insert_pdf_abschnitt_in_dbase( Projekt* zond,
     if ( anbindung.bis.index != EOP ) *node_text = add_string( *node_text, g_strdup_printf( ", Index %d", anbindung.bis.index ) );
 
     //file_section zusammensetzen
-    zond_treeview_build_file_section( anbindung, &file_section );
+    anbindung_build_file_section( anbindung, &file_section );
 
     node_id_new = zond_dbase_insert_node( zond->dbase_zond->zond_dbase_work, anchor_id_dbase, *child,
             ZOND_DBASE_TYPE_FILE_PART, 0, file_part, file_section,

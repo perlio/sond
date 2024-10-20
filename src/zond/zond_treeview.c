@@ -1957,12 +1957,18 @@ zond_treeview_selection_entfernen_anbindung_foreach( SondTreeview* stv,
     GError* error = NULL;
     gint id_anchor = 0;
     gint baum_inhalt_file = 0;
+    gint id_parent = 0;
     gint (*fp_relative) (ZondDBase*, gint, gint*, GError**) = zond_dbase_get_first_child;
     gint relative = 0;
+    gchar* file_part = NULL;
+    gchar* section = NULL;
+    GtkTreeIter iter_fm = { 0 };
+    gboolean visible = FALSE;
+    gboolean children = FALSE;
+    gboolean opened = FALSE;
 
     Projekt* zond = data;
-
-    if ( sond_treeview_get_id( stv ) != BAUM_INHALT ) return 0;
+    ZondTreeviewFM* ztvfm = ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]);
 
     if ( zond_tree_store_is_link( iter ) ) return 0;
 
@@ -1970,7 +1976,7 @@ zond_treeview_selection_entfernen_anbindung_foreach( SondTreeview* stv,
             2, &node_id, -1 );
 
     rc = zond_dbase_get_node( zond->dbase_zond->zond_dbase_work,
-            node_id, &type, NULL, NULL, NULL, NULL, NULL, NULL, &error );
+            node_id, &type, NULL, &file_part, &section, NULL, NULL, NULL, &error );
     if ( rc )
     {
         if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
@@ -1978,6 +1984,37 @@ zond_treeview_selection_entfernen_anbindung_foreach( SondTreeview* stv,
 
         return -1;
     }
+
+    if ( section ) //wenn nicht, muß baum_inhalt_file != 0 sein, d.h. es wird im fm nix gelöscht
+    {
+        gint rc = 0;
+
+        rc = zond_treeviewfm_section_visible( ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
+                file_part, section, FALSE, &visible, &iter_fm, &children, &opened, &error );
+        g_free( file_part );
+        g_free( section );
+        if ( rc )
+        {
+            if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+            g_error_free( error );
+
+            return -1;
+        }
+
+        if ( !visible )
+        {
+            //parent brauchen wir ggf. um zu ermitteln, ob nach der Löschung parent noch Kinder hat
+            rc = zond_dbase_get_parent( zond->dbase_zond->zond_dbase_work, node_id, &id_parent, &error );
+            if ( rc )
+            {
+                if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+                g_error_free( error );
+
+                return -1;
+            }
+        }
+    }
+    else g_free( file_part );
 
     if ( type != ZOND_DBASE_TYPE_BAUM_STRUKT )
     {
@@ -2095,7 +2132,263 @@ zond_treeview_selection_entfernen_anbindung_foreach( SondTreeview* stv,
     //Im Baum jedenfalls Punkt löschen und Kinder an die Stelle setzen
     zond_tree_store_kill_parent( iter );
 
-    //ToDo: in treeviewfm umsetzen
+    //In treeviewfm umsetzen
+    if ( visible && !baum_inhalt_file ) //wenn baum_inhalt_file wird keine section gelöscht
+    {
+        gint rc = 0;
+        gint first_child = 0;
+
+        rc = zond_dbase_get_first_child( zond->dbase_zond->zond_dbase_work, id_parent, &first_child, &error );
+        if ( rc )
+        {
+            if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+            g_error_free( error );
+
+            return -1;
+        }
+        //1. einziges Kind seiner Eltern
+            //1.1 selbst Kinder
+                //1.1.1 selbst geöffnet: Kinder neue Kinder des Eltern-Knotens
+                //1.1.2 selbst nicht expanded: Eltern-Knoten wird geschlossen und bekommt dummy als Kind
+            //1.2 selbst keine Kinder: nix, nur Knoten löschen; Eltern werden automatisch geschlossen
+        //2. Geschwister vorhanden
+            //2.1 selbst Kinder
+                //2.1.1 selbst geöffnet: Kinder neue Geschwister des nächstältesten Onkels
+                //2.1.2 stlbst nicht expanded: s. 2.1.1
+            //2.2 selbst keine Kinder: nix, nur Knoten löschen
+        if ( first_child == 0 ) //in db gelöscht, also keins mehr übrig
+        {
+            if ( children )
+            {
+                if ( opened ) zond_treeviewfm_kill_parent( ztvfm, &iter_fm );
+                else //Knoten schließen, dann wird er gelöscht und dummy eingefügt
+                {
+                    GtkTreePath* path = NULL;
+
+                    path = gtk_tree_model_get_path( gtk_tree_view_get_model( GTK_TREE_VIEW(ztvfm) ), &iter_fm );
+                    gtk_tree_view_collapse_row( GTK_TREE_VIEW(ztvfm), path );
+
+                    gtk_tree_path_free( path );
+                }
+            }
+            else gtk_tree_store_remove( GTK_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(ztvfm) )), &iter_fm );
+            //mal gucken, ob nicht im callback dummy eingefügt wird...
+            //der muß natürlich weg, denn es gibt ja keinen Abkömmling des Eltern-Knotens mehr
+        }
+        else //Knoten hat Geschwister
+        {
+            if ( children )
+            {
+                if ( opened ) zond_treeviewfm_kill_parent( ztvfm, &iter_fm );
+                else //dann müssen die Kinder von Hand eingefügt werden, ggf. mit dummy
+                {
+                    gint rc = 0;
+                    GtkTreeIter iter_parent = { 0 };
+                    GtkTreeIter iter_child = { 0 };
+                    GObject* object = NULL;
+                    gint node_id_parent = 0;
+                    gint node_id_dbase = 0;
+
+                    //parent_iter ermitteln
+                    if ( !gtk_tree_model_iter_parent( gtk_tree_view_get_model( GTK_TREE_VIEW(ztvfm) ), &iter_parent, &iter_fm ) )
+                    {
+                        if ( errmsg ) *errmsg = g_strdup_printf( "%s\niter hat keine Eltern", __func__ );
+
+                        return -1;
+                    }
+
+                    if ( !gtk_tree_model_iter_children( gtk_tree_view_get_model( GTK_TREE_VIEW(ztvfm) ), &iter_child, &iter_parent ) )
+                    {
+                        if ( errmsg ) *errmsg = g_strdup_printf("%s\nparent-iter hat keine Kinder", __func__ );
+
+                        return -1;
+                    }
+
+                    gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(ztvfm) ), &iter_parent,
+                            0, &object, -1 );
+
+                    if ( !object )
+                    {
+                        if ( errmsg ) *errmsg = g_strdup_printf( "%s\nKnoten enthält nichts", __func__ );
+
+                        return -1;
+                    }
+                    else if ( !ZOND_IS_PDF_ABSCHNITT(object) )
+                    {
+                        if ( errmsg ) *errmsg = g_strdup_printf( "%s\nKnoten enthält keinen ZPA", __func__ );
+                        g_object_unref( object );
+
+                        return -1;
+                    }
+
+                    node_id_parent = zond_pdf_abschnitt_get_ID( ZOND_PDF_ABSCHNITT(object) );
+                    g_object_unref( object );
+
+                    rc = zond_dbase_get_first_child( zond->dbase_zond->zond_dbase_work, node_id_parent, &node_id_dbase, &error );
+                    if ( rc )
+                    {
+                        if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+                        g_error_free( error );
+
+                        return -1;
+                    }
+
+                    do
+                    {
+                        gint node_id_child = 0;
+                        gint rc = 0;
+
+                        rc = zond_treeviewfm_get_id_pda( ztvfm, &iter_child, &node_id_child, &error );
+                        {
+                            if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+                            g_error_free( error );
+
+                            return -1;
+                        }
+
+                        if ( node_id_child != node_id_dbase ) //dann sind in dbase die Kinder von iter_fm!
+                        {
+                            gint stop = 0;
+                            GtkTreeIter iter_stop = { 0 };
+
+                            //nächsten iter, der Ende einfügen bestimmt
+                            iter_stop = iter_child;
+                            if ( gtk_tree_model_iter_next( gtk_tree_view_get_model( GTK_TREE_VIEW(ztvfm) ), &iter_stop ) )
+                            {
+                                gint rc = 0;
+
+                                rc = zond_treeviewfm_get_id_pda( ztvfm, &iter_stop, &stop, &error );
+                                if ( rc )
+                                {
+                                    if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+                                    g_error_free( error );
+
+                                    return -1;
+                                }
+                            }
+                            else stop = -1;
+
+                            //muß neue Schleife, wo die eingefügt werden
+                            do
+                            {
+                                gint rc = 0;
+                                gint younger_sibling = 0;
+
+                                //node_id_dbase einfügen, unter letztem iter_child
+                                rc = zond_treeviewfm_insert_section( ztvfm, node_id_dbase, &iter_child,
+                                        FALSE, NULL, &error );
+                                if ( rc )
+                                {
+                                    if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__ , error->message );
+                                    g_error_free( error );
+
+                                    return -1;
+                                }
+
+                                rc = zond_dbase_get_younger_sibling( zond->dbase_zond->zond_dbase_work,
+                                        node_id_dbase, &younger_sibling, &error );
+                                if ( rc )
+                                {
+                                    if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__ , error->message );
+                                    g_error_free( error );
+
+                                    return -1;
+                                }
+
+                                node_id_dbase = younger_sibling;
+                            } while ( node_id_dbase != 0 && node_id_dbase != stop );
+
+                            //dann iter_fm löschen
+                            gtk_tree_store_remove( GTK_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(ztvfm) )), &iter_fm );
+
+                            //dann kann abgeborchen werden
+                            break;
+                        }
+
+                        rc = zond_dbase_get_younger_sibling( zond->dbase_zond->zond_dbase_work, node_id_child, &node_id_dbase, &error );
+                        if ( rc )
+                        {
+                            if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__ , error->message );
+                            g_error_free( error );
+
+                            return -1;
+                        }
+                    } while ( gtk_tree_model_iter_next( gtk_tree_view_get_model( GTK_TREE_VIEW(ztvfm) ), &iter_child ) );
+                }
+            }
+            else gtk_tree_store_remove( GTK_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(ztvfm) )), &iter_fm );
+        }
+    }
+    else if ( !baum_inhalt_file )
+    {
+        gint child = 0;
+        gint rc = 0;
+
+        //hat parent noch child?
+        rc = zond_dbase_get_first_child( zond->dbase_zond->zond_dbase_work, id_parent, &child, &error );
+        if ( rc )
+        {
+            if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+            g_error_free( error );
+
+            return -1;
+        }
+
+        //falls nein: dummy löschen
+        if ( child == 0 )
+        {
+            gint rc = 0;
+            gboolean visible_parent = FALSE;
+            GtkTreeIter iter_parent = { 0 };
+            GtkTreeIter iter_child = { 0 };
+            gint type = 0;
+            gchar* file_part = NULL;
+            gchar* section = NULL;
+
+            rc = zond_dbase_get_node( zond->dbase_zond->zond_dbase_work, id_parent, &type, NULL, &file_part,
+                    &section, NULL, NULL, NULL, &error );
+            if ( rc )
+            {
+                if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+                g_error_free( error );
+
+                return -1;
+            }
+
+            if ( type != ZOND_DBASE_TYPE_FILE_PART )
+            {
+                if ( errmsg ) *errmsg = g_strdup_printf( "%s\nUngültiger Knotentyp", __func__ );
+                g_error_free( error );
+                g_free( file_part );
+                g_free( section );
+
+                return -1;
+            }
+
+            rc = zond_treeviewfm_section_visible( ztvfm, file_part, section, FALSE,
+                    &visible_parent, &iter_parent, NULL, NULL, &error );
+            g_free( file_part );
+            g_free( section );
+            if ( rc )
+            {
+                if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+                g_error_free( error );
+
+                return -1;
+            }
+            if ( visible_parent )
+            {
+                if ( !gtk_tree_model_iter_children( gtk_tree_view_get_model( GTK_TREE_VIEW(ztvfm) ), &iter_child, &iter_parent ) )
+                {
+                    if ( errmsg ) *errmsg = g_strdup_printf( "%s\nKnoten hat keinen Abkömmling, obwohl er müßte", __func__ );
+
+                    return -1;
+                }
+
+                gtk_tree_store_remove( GTK_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(ztvfm) )), &iter_child );
+            }
+        }
+    }
 
     return 0;
 }
@@ -2210,7 +2503,7 @@ zond_treeview_jump_to_origin( ZondTreeview* ztv, GtkTreeIter* iter, GError** err
             if ( !gtk_toggle_button_get_active( GTK_TOGGLE_BUTTON(ztv_priv->zond->fs_button) ) )
                     gtk_toggle_button_set_active( GTK_TOGGLE_BUTTON(ztv_priv->zond->fs_button), TRUE );
 
-            rc = zond_treeviewfm_set_cursor_on_file_part( ZOND_TREEVIEWFM(ztv_priv->zond->treeview[BAUM_FS]),
+            rc = zond_treeviewfm_set_cursor_on_section( ZOND_TREEVIEWFM(ztv_priv->zond->treeview[BAUM_FS]),
                     file_part, section, error );
             g_free( file_part );
             g_free( section );
@@ -2325,7 +2618,7 @@ zond_treeview_open_node( Projekt* zond, GtkTreeIter* iter, gboolean open_with, G
     //Dann: Pdf
     if ( section )
     {
-        zond_treeview_parse_file_section( section, &anbindung );
+        anbindung_parse_file_section( section, &anbindung );
         g_free( section );
     }
 
@@ -2349,7 +2642,7 @@ zond_treeview_open_node( Projekt* zond, GtkTreeIter* iter, gboolean open_with, G
 
             if ( section ) //nicht root
             {
-                zond_treeview_parse_file_section( section_ges, &anbindung_ges );
+                anbindung_parse_file_section( section_ges, &anbindung_ges );
                 g_free( section_ges );
 
                 anbindung_int = &anbindung_ges;
@@ -2374,7 +2667,7 @@ zond_treeview_open_node( Projekt* zond, GtkTreeIter* iter, gboolean open_with, G
 
         if ( section_ges )
         {
-            zond_treeview_parse_file_section( section_ges, &anbindung_ges );
+            anbindung_parse_file_section( section_ges, &anbindung_ges );
             g_free( section_ges );
             anbindung_int = &anbindung_ges;
         }
@@ -3022,40 +3315,3 @@ zond_treeview_get_path( SondTreeview* treeview, gint node_id )
 }
 
 
-static void
-zond_treeview_parse_pdf_pos( gchar const* section, PdfPos* pdf_pos )
-{
-    pdf_pos->seite = atoi( section + 1 );
-    pdf_pos->index = atoi( strstr( section, "," ) + 1 );
-
-    return;
-}
-
-
-void
-zond_treeview_parse_file_section( gchar const* file_section, Anbindung* anbindung )
-{
-    if ( !file_section ) return;
-
-    if ( g_str_has_prefix( file_section, "{{" ) )
-    {
-        zond_treeview_parse_pdf_pos( file_section + 1, &anbindung->von );
-
-        zond_treeview_parse_pdf_pos( strstr( file_section, "}" ) + 1, &anbindung->bis );
-    }
-    else zond_treeview_parse_pdf_pos( file_section + 1, &anbindung->von );
-
-    return;
-}
-
-
-void
-zond_treeview_build_file_section( Anbindung anbindung, gchar** section )
-{
-    if ( anbindung.bis.seite == 0 && anbindung.bis.index == 0 )
-            *section = g_strdup_printf( "{%d,%d}", anbindung.von.seite, anbindung.von.index );
-    else *section = g_strdup_printf( "{{%d,%d}{%d,%d}}", anbindung.von.seite, anbindung.von.index,
-            anbindung.bis.seite, anbindung.bis.index );
-
-    return;
-}

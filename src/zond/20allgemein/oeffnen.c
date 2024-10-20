@@ -197,7 +197,7 @@ oeffnen_internal_viewer( Projekt* zond, const gchar* file_part, Anbindung* anbin
             {
                 if ( (!pv->dd->anbindung && !anbindung) ||
                         (pv->dd->anbindung && anbindung &&
-                        ziele_1_gleich_2( *(pv->dd->anbindung), *anbindung )) )
+                        anbindung_1_gleich_2( *(pv->dd->anbindung), *anbindung )) )
                 {
                     if ( pos_pdf ) pos_von = *pos_pdf;
 

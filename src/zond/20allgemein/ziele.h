@@ -9,11 +9,6 @@ typedef int gboolean;
 typedef struct _Pdf_Viewer PdfViewer;
 
 
-
-gboolean ziele_1_gleich_2( const Anbindung, const Anbindung );
-
-gboolean ziele_1_eltern_von_2( Anbindung, Anbindung );
-
 gint ziele_abfragen_anker_rek( ZondDBase*, Anbindung, gint, gint*, gboolean*, GError** );
 
 gint zond_anbindung_erzeugen( PdfViewer* pv, GError** );

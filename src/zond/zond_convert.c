@@ -735,7 +735,7 @@ zond_convert_0_to_1_baum_inhalt_insert( ZondDBase* zond_dbase, gint anchor_id, g
             anbindung.von.index = index_von;
             anbindung.bis.index = index_bis;
 
-            zond_treeview_build_file_section( anbindung, &section );
+            anbindung_build_file_section( anbindung, &section );
             file_part = g_strdup_printf( "/%s//", rel_path_ziel );
             *node_inserted = zond_dbase_insert_node( zond_dbase, anchor_id, child, ZOND_DBASE_TYPE_FILE_PART,
                     0, file_part, section, icon_name, node_text, NULL, error );

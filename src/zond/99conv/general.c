@@ -162,3 +162,143 @@ info_window_open( GtkWidget* window, const gchar* title )
 }
 
 
+gchar*
+get_rel_path_from_file_part( gchar const* file_part )
+{
+    if ( !file_part ) return NULL;
+    if ( strlen( file_part ) < 4 ) return NULL;
+
+    if ( strstr( file_part, "//" ) ) return
+            g_strndup( file_part + 1, strlen( file_part + 1 ) - strlen( strstr( file_part, "//" ) ) );
+    else return NULL;
+}
+
+
+gboolean
+anbindung_1_gleich_2( const Anbindung anbindung1, const Anbindung anbindung2 )
+{
+    if ( (anbindung1.von.seite == anbindung2.von.seite) &&
+            (anbindung1.bis.seite == anbindung2.bis.seite) &&
+            (anbindung1.von.index == anbindung2.von.index) &&
+            (anbindung1.bis.index == anbindung2.bis.index) ) return TRUE;
+    else return FALSE;
+}
+
+
+static gint
+anbindung_vergleiche_pdf_pos( PdfPos pdf_pos1, PdfPos pdf_pos2 )
+{
+    if ( pdf_pos1.seite < pdf_pos2.seite ) return -1;
+    else if ( pdf_pos1.seite > pdf_pos2.seite ) return 1;
+    //wenn gleiche Seite:
+    else if ( pdf_pos1.index < pdf_pos2.index ) return -1;
+    else if ( pdf_pos1.index > pdf_pos2.index ) return 1;
+
+    return 0;
+}
+
+
+static gboolean
+anbindung_is_pdf_punkt( Anbindung anbindung )
+{
+    if ( (anbindung.von.seite || anbindung.von.index) &&
+            !anbindung.bis.seite && !anbindung.bis.index ) return TRUE;
+
+    return FALSE;
+}
+
+
+gboolean
+anbindung_1_vor_2( Anbindung anbindung1, Anbindung anbindung2 )
+{
+    if ( anbindung_1_gleich_2( anbindung1, anbindung2 ) ) return FALSE;
+
+    if ( anbindung_is_pdf_punkt( anbindung1 ) )
+    {
+        if ( anbindung_vergleiche_pdf_pos( anbindung1.von, anbindung2.von ) == -1 ) return TRUE;
+        else return FALSE;
+    }
+    else if ( anbindung_is_pdf_punkt( anbindung2 ) )
+    {
+        if ( anbindung_vergleiche_pdf_pos( anbindung1.bis, anbindung2.von ) == -1 ) return TRUE;
+        else return FALSE;
+
+    }
+    else //beides komplette Anbindung
+            if ( anbindung_vergleiche_pdf_pos( anbindung1.bis, anbindung2.von ) == -1 ) return TRUE;
+
+    return FALSE;
+}
+
+
+gboolean
+anbindung_1_eltern_von_2( Anbindung anbindung1, Anbindung anbindung2 )
+{
+    gint pos_anfang = 0;
+    gint pos_ende = 0;
+
+    //PdfPunkt kann niemals Eltern sein.
+    if ( anbindung_is_pdf_punkt( anbindung1 ) ) return FALSE;
+
+    //Gleiche können nicht Nachfolger sein
+    if ( anbindung_1_gleich_2( anbindung1, anbindung2 ) ) return FALSE;
+
+    //wenn Anbindung1 Datei ist, dann ist sie Eltern
+    if ( !anbindung1.von.seite && !anbindung1.von.index &&
+            !anbindung1.bis.seite && !anbindung1.bis.index ) return FALSE;
+    //auch wenn Anbindung2 Datei
+    if ( !anbindung1.von.seite && !anbindung2.von.index &&
+            !anbindung2.bis.seite && !anbindung2.bis.index ) return FALSE;
+
+    pos_anfang = anbindung_vergleiche_pdf_pos( anbindung1.von, anbindung2.von );
+    pos_ende = anbindung_vergleiche_pdf_pos( anbindung1.bis, anbindung2.bis );
+
+    if ( pos_anfang > 0 ) return FALSE; //fängt schon später an...
+    else //fängt entweder davor oder gleich an
+    {
+        if ( pos_anfang == 0 && pos_ende <= 0 ) return FALSE; //Fängt gleich an, hört nicht später auf...
+        else if ( pos_anfang < 0 && pos_ende < 0 ) return FALSE; //Fängt vorher an, hört nicht mindestens gleich auf
+    }
+
+    return TRUE;
+}
+
+
+static void
+anbindung_parse_pdf_pos( gchar const* section, PdfPos* pdf_pos )
+{
+    pdf_pos->seite = atoi( section + 1 );
+    pdf_pos->index = atoi( strstr( section, "," ) + 1 );
+
+    return;
+}
+
+
+void
+anbindung_parse_file_section( gchar const* file_section, Anbindung* anbindung )
+{
+    if ( !file_section ) return;
+
+    if ( g_str_has_prefix( file_section, "{{" ) )
+    {
+        anbindung_parse_pdf_pos( file_section + 1, &anbindung->von );
+
+        anbindung_parse_pdf_pos( strstr( file_section, "}" ) + 1, &anbindung->bis );
+    }
+    else anbindung_parse_pdf_pos( file_section + 1, &anbindung->von );
+
+    return;
+}
+
+
+void
+anbindung_build_file_section( Anbindung anbindung, gchar** section )
+{
+    if ( anbindung.bis.seite == 0 && anbindung.bis.index == 0 )
+            *section = g_strdup_printf( "{%d,%d}", anbindung.von.seite, anbindung.von.index );
+    else *section = g_strdup_printf( "{{%d,%d}{%d,%d}}", anbindung.von.seite, anbindung.von.index,
+            anbindung.bis.seite, anbindung.bis.index );
+
+    return;
+}
+

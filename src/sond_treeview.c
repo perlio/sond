@@ -82,7 +82,7 @@ sond_treeview_class_init( SondTreeviewClass* klass )
     klass->clipboard = g_malloc0( sizeof( Clipboard ) );
     klass->clipboard->arr_ref = g_ptr_array_new_with_free_func( (GDestroyNotify) gtk_tree_row_reference_free );
     //class_finalize muß nicht definiert werden -
-    //statisch registrierte Klasse wird zurLaufzeit niemals finalisiert!
+    //statisch registrierte Klasse wird zur Laufzeit niemals finalisiert!
 
     klass->render_text_cell = NULL;
     klass->text_edited = NULL;

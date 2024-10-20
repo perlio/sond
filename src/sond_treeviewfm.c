@@ -752,6 +752,7 @@ typedef struct _FindPath
 {
     const gchar* basename;
     GtkTreeIter* iter;
+    gboolean found;
 } FindPath;
 
 
@@ -766,8 +767,12 @@ sond_treeviewfm_find_path( SondTreeviewFM* stvfm, GtkTreeIter* iter,
 
     if ( !g_strcmp0( find_path->basename, basename ) )
     {
-        if ( iter_file ) *(find_path->iter) = *iter_file;
-        else ERROR_S_MESSAGE( "iter_file nicht gefunden" )
+        if ( iter_file )
+        {
+            *(find_path->iter) = *iter_file;
+            find_path->found = TRUE;
+        }
+        else find_path->found = FALSE;
 
         g_free( basename );
 
@@ -781,20 +786,27 @@ sond_treeviewfm_find_path( SondTreeviewFM* stvfm, GtkTreeIter* iter,
 
 
 gint
-sond_treeviewfm_set_cursor_on_file_part( SondTreeviewFM* stvfm, const gchar* path,
-        GtkTreeIter* iter_path, gchar** errmsg )
+sond_treeviewfm_rel_path_visible( SondTreeviewFM* stvfm, const gchar* rel_path,
+        gboolean open, gboolean* visible, GtkTreeIter* iter, GError** error )
 {
     gchar** arr_path_segs = NULL;
     GtkTreeIter iter_file = { 0 };
     GFile* file = NULL;
-    FindPath find_path = { 0 };
+    FindPath find_path = { NULL, NULL, FALSE };
     gint i = 0;
 
     SondTreeviewFMPrivate* stvfm_priv = sond_treeviewfm_get_instance_private( stvfm );
 
+    if ( !open && !visible ) //sinnlos
+    {
+        if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\nopen muß TRUE sei und/oder visible != NULL", __func__ );
+
+        return -1;
+    }
+
     find_path.iter = &iter_file;
 
-    arr_path_segs = g_strsplit_set( path, "/\\", -1 );
+    arr_path_segs = g_strsplit_set( rel_path, "/\\", -1 );
 
     if ( !arr_path_segs[0] ) return 0;
 
@@ -804,26 +816,49 @@ sond_treeviewfm_set_cursor_on_file_part( SondTreeviewFM* stvfm, const gchar* pat
     {
         gint rc = 0;
         GFile* file_tmp = NULL;
+        gchar* errmsg = NULL;
 
         find_path.basename = arr_path_segs[i];
 
         rc = sond_treeviewfm_dir_foreach( stvfm, (i == 0) ? NULL : find_path.iter,
-                file, FALSE, sond_treeviewfm_find_path, &find_path, errmsg );
+                file, FALSE, sond_treeviewfm_find_path, &find_path, &errmsg );
         if ( rc == -1 )
         {
-            g_strfreev( arr_path_segs );
             g_object_unref( file );
-            ERROR_S
+            g_strfreev( arr_path_segs );
+            if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\n%s", __func__, errmsg );
+            g_free( errmsg );
+
+            return -1;
         }
         else if ( rc == 0 )
         {
-            g_strfreev( arr_path_segs );
             g_object_unref( file );
-            ERROR_S_MESSAGE( "Pfad nicht gefunden" )
+            if ( error ) *error = g_error_new( ZOND_ERROR, 0,
+                    "%s\nVerzeichnis '%s' nicht gefunden", __func__, arr_path_segs[i] );
+            g_strfreev( arr_path_segs );
+
+            return -1;
         }
         else if ( rc == 2 && arr_path_segs[i + 1] )
         {
-            sond_treeview_expand_row( SOND_TREEVIEW(stvfm), find_path.iter );
+            if ( !find_path.found ) //Verzeichnis ist nicht geöffnet
+            {
+                if ( open )
+                {
+                    sond_treeview_expand_row( SOND_TREEVIEW(stvfm), find_path.iter );
+                    i--;
+                    continue; //gleiche Runde nochmal, um iter von Kind herauszufinden
+                }
+                else //es sollen keine Verzeichnisse geöffnet werden
+                {
+                    *visible = FALSE; //visible != NULL, da open == FALSE
+                    g_object_unref( file );
+                    g_strfreev( arr_path_segs );
+
+                    return 0;
+                }
+            }
 
             file_tmp = g_file_get_child( file, arr_path_segs[i] );
             g_object_unref( file );
@@ -834,10 +869,8 @@ sond_treeviewfm_set_cursor_on_file_part( SondTreeviewFM* stvfm, const gchar* pat
     g_object_unref( file );
     g_strfreev( arr_path_segs );
 
-    //cursor setzen
-    sond_treeview_set_cursor( SOND_TREEVIEW(stvfm), find_path.iter );
-
-    if ( iter_path ) *iter_path = *(find_path.iter);
+    if ( visible ) *visible = TRUE; //albern, wenn open == TRUE, aber auch nicht falsch
+    if ( iter ) *iter = *(find_path.iter);
 
     return 0;
 }
@@ -847,10 +880,11 @@ static void
 sond_treeviewfm_results_row_activated( GtkWidget* listbox, GtkWidget* row, gpointer user_data )
 {
     gint rc = 0;
-    gchar* errmsg = NULL;
     GtkWidget* label = NULL;
     const gchar* path = NULL;
     const gchar* path_rel = NULL;
+    GtkTreeIter iter = { 0 };
+    GError* error = NULL;
 
     SondTreeviewFM* stvfm = (SondTreeviewFM*) user_data;
     SondTreeviewFMPrivate* stvfm_priv = sond_treeviewfm_get_instance_private( stvfm );
@@ -859,14 +893,16 @@ sond_treeviewfm_results_row_activated( GtkWidget* listbox, GtkWidget* row, gpoin
     path = gtk_label_get_label( GTK_LABEL(label) );
     path_rel = path + strlen( stvfm_priv->root ) + 1;
 
-    rc = sond_treeviewfm_set_cursor_on_file_part( stvfm, path_rel, NULL, &errmsg );
+    rc = sond_treeviewfm_rel_path_visible( stvfm, path_rel, TRUE, NULL, &iter, &error );
     if ( rc )
     {
         display_message( gtk_widget_get_toplevel( GTK_WIDGET(stvfm) ),
-                "Datei nicht gefunden\n\n", errmsg, NULL );
+                "Datei nicht gefunden\n\n", error->message, NULL );
 
-        g_free( errmsg );
+        g_error_free( error );
     }
+
+    sond_treeview_set_cursor( SOND_TREEVIEW(stvfm), &iter );
 
     return;
 }

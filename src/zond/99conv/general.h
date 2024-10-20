@@ -43,5 +43,17 @@ void info_window_set_message( InfoWindow*, const gchar* );
 
 InfoWindow* info_window_open( GtkWidget*, const gchar* );
 
+gchar* get_rel_path_from_file_part( gchar const* );
+
+gboolean anbindung_1_gleich_2( const Anbindung, const Anbindung );
+
+gboolean anbindung_1_vor_2( Anbindung, Anbindung );
+
+gboolean anbindung_1_eltern_von_2( Anbindung, Anbindung );
+
+void anbindung_parse_file_section( gchar const*, Anbindung* );
+
+void anbindung_build_file_section( Anbindung, gchar** );
+
 #endif // GENERAL_H_INCLUDED
 

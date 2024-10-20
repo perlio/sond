@@ -33,7 +33,8 @@ struct _SondTreeviewFMClass
 };
 
 
-gint sond_treeviewfm_set_cursor_on_path( SondTreeviewFM*, const gchar*, GtkTreeIter*, gchar** );
+gint sond_treeviewfm_rel_path_visible( SondTreeviewFM*, gchar const*,
+        gboolean, gboolean*, GtkTreeIter*, GError** );
 
 gint sond_treeviewfm_set_root( SondTreeviewFM*, const gchar*, gchar** );
 
@@ -50,6 +51,5 @@ gchar* sond_treeviewfm_get_full_path( SondTreeviewFM*, GtkTreeIter* );
 gchar* sond_treeviewfm_get_rel_path( SondTreeviewFM*, GtkTreeIter* );
 
 gint sond_treeviewfm_paste_clipboard( SondTreeviewFM*, gboolean, gchar** );
-
 
 #endif // SOND_TREEVIEWFM_H_INCLUDED

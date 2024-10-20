@@ -78,10 +78,20 @@ struct _ZondTreeviewFMClass
     SondTreeviewFMClass parent_class;
 };
 
-gint zond_treeviewfm_set_cursor_on_file_part( ZondTreeviewFM*, gchar const*,
+void zond_treeviewfm_set_pdf_abschnitt( ZondTreeviewFM*, gint, gchar const* );
+
+gint zond_treeviewfm_insert_section( ZondTreeviewFM*, gint, GtkTreeIter*,
+        gboolean, GtkTreeIter*, GError** );
+
+gint zond_treeviewfm_section_visible( ZondTreeviewFM*, gchar const*,
+        gchar const*, gboolean, gboolean*, GtkTreeIter*, gboolean*, gboolean*, GError** );
+
+gint zond_treeviewfm_set_cursor_on_section( ZondTreeviewFM*, gchar const*,
         gchar const*, GError** );
 
-void zond_treeviewfm_set_pdf_abschnitt( ZondTreeviewFM*, gint, gchar const* );
+void zond_treeviewfm_kill_parent( ZondTreeviewFM*, GtkTreeIter* );
+
+gint zond_treeviewfm_get_id_pda( ZondTreeviewFM*, GtkTreeIter*, gint*, GError** );
 
 G_END_DECLS
 
