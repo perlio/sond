@@ -542,6 +542,7 @@ zond_treeviewfm_expand_dummy( SondTreeviewFM* stvfm,
             GtkTreeIter iter_inserted = { 0 };
             gint younger_sibling = 0;
 
+            //hier wird auch dummy eingefügt, wenn erforderlich;
             rc = zond_treeviewfm_insert_section( ZOND_TREEVIEWFM(stvfm), id_child, &iter_anchor, child, &iter_inserted, error );
             if ( rc ) ERROR_Z
 
@@ -878,11 +879,11 @@ zond_treeviewfm_section_visible( ZondTreeviewFM* ztvfm, gchar const* file_part, 
                 GtkTreeIter iter_sibling = { 0 };
                 GObject* object = NULL;
 
-                iter_sibling = *iter;
+                iter_sibling = iter_intern;
 
                 if ( !gtk_tree_model_iter_next( gtk_tree_view_get_model( GTK_TREE_VIEW(ztvfm) ), &iter_sibling ) )
                 {
-                    if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%sd\nKein jüngeres Geschwister", __func__ );
+                    if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\nKein jüngeres Geschwister", __func__ );
 
                     return -1;
                 }

@@ -729,6 +729,7 @@ sond_treeviewfm_row_expanded( GtkTreeView* tree_view, GtkTreeIter* iter,
     gtk_tree_model_get( gtk_tree_view_get_model( tree_view ), iter, 0, &object, -1 );
 
     rc = SOND_TREEVIEWFM_GET_CLASS( tree_view )->expand_dummy( SOND_TREEVIEWFM(tree_view), iter, object, &error );
+    g_object_unref( object );
     if ( rc )
     {
         display_message( gtk_widget_get_toplevel( GTK_WIDGET(tree_view) ),
