@@ -725,7 +725,7 @@ sond_treeviewfm_row_expanded( GtkTreeView* tree_view, GtkTreeIter* iter,
         return;
     }
 
-    //child ist dummy
+    //child ist dummy: zu expandierenden Knoten abfragen
     gtk_tree_model_get( gtk_tree_view_get_model( tree_view ), iter, 0, &object, -1 );
 
     rc = SOND_TREEVIEWFM_GET_CLASS( tree_view )->expand_dummy( SOND_TREEVIEWFM(tree_view), iter, object, &error );
@@ -841,12 +841,22 @@ sond_treeviewfm_rel_path_visible( SondTreeviewFM* stvfm, const gchar* rel_path,
 
             return -1;
         }
-        else if ( rc == 2 && arr_path_segs[i + 1] )
+        else if ( rc == 2 && arr_path_segs[i] )
         {
             if ( !find_path.found ) //Verzeichnis ist nicht geöffnet
             {
                 if ( open )
-                {
+                {/*
+                    gint rc = 0;
+
+                    rc = sond_treeviewfm_load_dir( stvfm, (i == 0) ? NULL : find_path.iter, &errmsg );
+                    if ( rc )
+                    {
+                        if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\n%s", __func__, errmsg );
+                        g_free( errmsg );
+
+                        return -1;
+                    }*/
                     sond_treeview_expand_row( SOND_TREEVIEW(stvfm), find_path.iter );
                     i--;
                     continue; //gleiche Runde nochmal, um iter von Kind herauszufinden

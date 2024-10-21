@@ -415,6 +415,54 @@ zond_treeviewfm_render_icon( SondTreeviewFM* stvfm, GtkCellRenderer* renderer,
 
         return;
     }
+    else if ( G_IS_FILE_INFO(object) )
+    {
+        gchar* rel_path = NULL;
+        gint rc = 0;
+        GError* error = NULL;
+        gint file_part_root = 0;
+        gchar* icon_name = NULL;
+        gchar* file_part = NULL;
+
+        ZondTreeviewFMPrivate* ztvfm_priv = zond_treeviewfm_get_instance_private( ZOND_TREEVIEWFM(stvfm) );
+
+        //prüfen, ob in dbase gespeichert
+        rel_path = sond_treeviewfm_get_rel_path( stvfm, iter );
+        file_part = g_strdup_printf( "/%s//", rel_path );
+        g_free( rel_path );
+        rc = zond_dbase_get_file_part_root( ztvfm_priv->zond->dbase_zond->zond_dbase_work,
+                file_part, &file_part_root, &error );
+        g_free( file_part );
+        if ( rc )
+        {
+            display_error( gtk_widget_get_toplevel( GTK_WIDGET(stvfm) ), "Icon konnte nicht gerendert werden",
+                    error->message );
+            g_error_free( error );
+
+            return;
+        }
+
+        if ( file_part_root )
+        {
+            gint rc = 0;
+
+            rc = zond_dbase_get_node( ztvfm_priv->zond->dbase_zond->zond_dbase_work,
+                    file_part_root, NULL, NULL, NULL, NULL, &icon_name, NULL, NULL, &error );
+            if ( rc )
+            {
+                display_error( gtk_widget_get_toplevel( GTK_WIDGET(stvfm) ), "Icon konnte nicht gerendert werden",
+                        error->message );
+                g_error_free( error );
+
+                return;
+            }
+
+            g_object_set( G_OBJECT(renderer), "icon-name", icon_name, NULL );
+            g_free( icon_name );
+
+            return;
+        }
+    }
 
     //nur, wenn nicht erledigt
     SOND_TREEVIEWFM_CLASS(zond_treeviewfm_parent_class)->render_icon( stvfm, renderer, iter, object );
@@ -856,7 +904,7 @@ zond_treeviewfm_section_visible( ZondTreeviewFM* ztvfm, gchar const* file_part, 
 
                         return 0;
                     }
-                    else sond_treeview_expand_row( SOND_TREEVIEW(ztvfm), &iter_intern );
+                    else  sond_treeview_expand_row( SOND_TREEVIEW(ztvfm), &iter_intern );
                 }
                 else //ist object
                 {

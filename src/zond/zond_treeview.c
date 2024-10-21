@@ -1817,6 +1817,8 @@ zond_treeview_selection_loeschen_foreach( SondTreeview* tree_view, GtkTreeIter* 
     gint node_id = 0;
     GError* error = NULL;
     gint rc = 0;
+    gboolean visible = FALSE;
+    GtkTreeIter iter_fm = { 0 };
 
     Projekt* zond = (Projekt*) data;
 
@@ -1840,12 +1842,26 @@ zond_treeview_selection_loeschen_foreach( SondTreeview* tree_view, GtkTreeIter* 
         gint baum_auswertung_copy = 0;
         gint baum_inhalt_file = 0;
         gint type = 0;
-        gint link = 0;
+        gchar* file_part = NULL;
+        gchar* section = NULL;
+
 
         gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(tree_view) ), iter, 2, &node_id, -1 );
 
-        rc = zond_dbase_get_type_and_link( zond->dbase_zond->zond_dbase_work,
-                node_id, &type, &link, &error );
+        rc = zond_dbase_get_node( zond->dbase_zond->zond_dbase_work,
+                node_id, &type, NULL, &file_part, &section, NULL, NULL, NULL, &error );
+        if ( rc )
+        {
+            if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+            g_error_free( error );
+
+            return -1;
+        }
+
+        rc = zond_treeviewfm_section_visible( ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), file_part, section,
+                FALSE, &visible, &iter_fm, NULL, NULL, &error );
+        g_free( file_part );
+        g_free( section );
         if ( rc )
         {
             if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
@@ -1904,10 +1920,9 @@ zond_treeview_selection_loeschen_foreach( SondTreeview* tree_view, GtkTreeIter* 
         if ( baum_inhalt_file ) node_id = baum_inhalt_file;
 
         //ToDo: wenn Pdf-Abschnitt gelöscht wird - in ZondTreeviewFM umsetzen
-        if ( !baum_inhalt_file )
-        {
-
-        }
+        if ( !baum_inhalt_file && visible )
+                gtk_tree_store_remove( GTK_TREE_STORE(gtk_tree_view_get_model(
+                GTK_TREE_VIEW(zond->treeview[BAUM_FS]) )), &iter_fm );
     }
 
     rc = zond_dbase_remove_node( zond->dbase_zond->zond_dbase_work,
