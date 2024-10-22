@@ -66,8 +66,6 @@ gint zond_pdf_abschnitt_get_ID( ZondPdfAbschnitt* );
 void zond_pdf_abschnitt_get( ZondPdfAbschnitt*, gint*, gchar const **,
         Anbindung*, gchar const**, gchar const** );
 
-void zond_pdf_abschnitt_set_node_text( ZondPdfAbschnitt*, gchar const* );
-
 //ZOND_TYPE_TREEVIEWFM definieren
 #define ZOND_TYPE_TREEVIEWFM zond_treeviewfm_get_type( )
 G_DECLARE_DERIVABLE_TYPE (ZondTreeviewFM, zond_treeviewfm, ZOND, TREEVIEWFM, SondTreeviewFM)
@@ -78,7 +76,9 @@ struct _ZondTreeviewFMClass
     SondTreeviewFMClass parent_class;
 };
 
-void zond_treeviewfm_set_pdf_abschnitt( ZondTreeviewFM*, gint, gchar const* );
+void zond_treeviewfm_set_pda_node_text( ZondTreeviewFM*, gint, gchar const* );
+
+void zond_treeviewfm_set_pda_icon_name( ZondTreeviewFM*, gint, gchar const* );
 
 gint zond_treeviewfm_insert_section( ZondTreeviewFM*, gint, GtkTreeIter*,
         gboolean, GtkTreeIter*, GError** );

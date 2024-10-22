@@ -87,12 +87,25 @@ zond_pdf_abschnitt_set( ZondPdfAbschnitt* zpa, gint ID, const gchar* rel_path,
 }
 
 
-void
+static void
 zond_pdf_abschnitt_set_node_text( ZondPdfAbschnitt* zpa, gchar const* node_text )
 {
     ZondPdfAbschnittPrivate* zpa_priv = zond_pdf_abschnitt_get_instance_private( zpa );
 
+    g_free( zpa_priv->node_text );
     zpa_priv->node_text = g_strdup( node_text );
+
+    return;
+}
+
+
+static void
+zond_pdf_abschnitt_set_icon_name( ZondPdfAbschnitt* zpa, gchar const* icon_name )
+{
+    ZondPdfAbschnittPrivate* zpa_priv = zond_pdf_abschnitt_get_instance_private( zpa );
+
+    g_free( zpa_priv->icon_name );
+    zpa_priv->icon_name = g_strdup( icon_name );
 
     return;
 }
@@ -415,6 +428,7 @@ zond_treeviewfm_render_icon( SondTreeviewFM* stvfm, GtkCellRenderer* renderer,
 
         return;
     }
+/*
     else if ( G_IS_FILE_INFO(object) )
     {
         gchar* rel_path = NULL;
@@ -463,7 +477,7 @@ zond_treeviewfm_render_icon( SondTreeviewFM* stvfm, GtkCellRenderer* renderer,
             return;
         }
     }
-
+*/
     //nur, wenn nicht erledigt
     SOND_TREEVIEWFM_CLASS(zond_treeviewfm_parent_class)->render_icon( stvfm, renderer, iter, object );
 
@@ -779,6 +793,7 @@ typedef struct
     gint ID;
     gchar const* text_new;
     ZondTreeviewFM* ztvfm;
+    void (*fn_set) ( ZondPdfAbschnitt*, gchar const* );
 } FMForeach;
 
 static gboolean
@@ -798,7 +813,7 @@ zond_treeviewfm_foreach_pdf_abschnitt( GtkTreeModel* model, GtkTreePath* path,
     {
         if ( fm_foreach->ID == zond_pdf_abschnitt_get_ID( ZOND_PDF_ABSCHNITT(object) ) )
         {
-            zond_pdf_abschnitt_set_node_text( ZOND_PDF_ABSCHNITT(object), fm_foreach->text_new );
+            fm_foreach->fn_set( ZOND_PDF_ABSCHNITT(object), fm_foreach->text_new );
             gtk_tree_view_columns_autosize( GTK_TREE_VIEW(fm_foreach->ztvfm) );
 
             ret = TRUE;
@@ -812,9 +827,21 @@ zond_treeviewfm_foreach_pdf_abschnitt( GtkTreeModel* model, GtkTreePath* path,
 
 
 void
-zond_treeviewfm_set_pdf_abschnitt( ZondTreeviewFM* ztvfm, gint ID, gchar const* text_new )
+zond_treeviewfm_set_pda_node_text( ZondTreeviewFM* ztvfm, gint ID, gchar const* text_new )
 {
-    FMForeach fm_foreach = { ID, text_new, ztvfm };
+    FMForeach fm_foreach = { ID, text_new, ztvfm, zond_pdf_abschnitt_set_node_text };
+
+    gtk_tree_model_foreach( gtk_tree_view_get_model( GTK_TREE_VIEW(ztvfm) ),
+            zond_treeviewfm_foreach_pdf_abschnitt, &fm_foreach );
+
+    return;
+}
+
+
+void
+zond_treeviewfm_set_pda_icon_name( ZondTreeviewFM* ztvfm, gint ID, gchar const* icon_name )
+{
+    FMForeach fm_foreach = { ID, icon_name, ztvfm, zond_pdf_abschnitt_set_icon_name };
 
     gtk_tree_model_foreach( gtk_tree_view_get_model( GTK_TREE_VIEW(ztvfm) ),
             zond_treeviewfm_foreach_pdf_abschnitt, &fm_foreach );
@@ -1173,7 +1200,7 @@ zond_treeviewfm_get_id_pda( ZondTreeviewFM* ztvfm, GtkTreeIter* iter, gint* ID, 
     }
     else if ( !ZOND_IS_PDF_ABSCHNITT(object) )
     {
-        if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\nKnoten ist dummy", __func__ );
+        if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\nKnoten ist kein Pdf-Abschnitt", __func__ );
         g_object_unref( object );
 
         return -1;

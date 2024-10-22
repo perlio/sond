@@ -304,7 +304,7 @@ zond_treeview_text_edited( SondTreeview* stv, GtkTreeIter* iter, gchar const* ne
     zond_tree_store_set( iter, NULL, new_text, 0 );
     gtk_tree_view_columns_autosize( GTK_TREE_VIEW(ztv) );
 
-    zond_treeviewfm_set_pdf_abschnitt( ZOND_TREEVIEWFM(ztv_priv->zond->treeview[BAUM_FS]),
+    zond_treeviewfm_set_pda_node_text( ZOND_TREEVIEWFM(ztv_priv->zond->treeview[BAUM_FS]),
             node_id, new_text );
 
     return;
@@ -2841,7 +2841,7 @@ zond_treeview_datei_oeffnen_mit_activate( GtkMenuItem* item, gpointer user_data 
 
 typedef struct _SSelectionChangeIcon
 {
-    ZondDBase* zond_dbase;
+    Projekt* zond;
     const gchar* icon_name;
 } SSelectionChangeIcon;
 
@@ -2858,7 +2858,7 @@ zond_treeview_selection_change_icon_foreach( SondTreeview* tree_view, GtkTreeIte
 
     gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(tree_view) ), iter, 2, &node_id, -1 );
 
-    rc = zond_dbase_update_icon_name( s_selection->zond_dbase, node_id, s_selection->icon_name, &error );
+    rc = zond_dbase_update_icon_name( s_selection->zond->dbase_zond->zond_dbase_work, node_id, s_selection->icon_name, &error );
     if ( rc )
     {
         if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
@@ -2870,7 +2870,9 @@ zond_treeview_selection_change_icon_foreach( SondTreeview* tree_view, GtkTreeIte
     //neuen icon_name im tree speichern
     zond_tree_store_set( iter, s_selection->icon_name, NULL, 0 );
 
-    //ToDo: wenn im treeviewfm angezeigt, auch ändern
+    //wenn im treeviewfm angezeigt, auch ändern
+    zond_treeviewfm_set_pda_icon_name( ZOND_TREEVIEWFM(s_selection->zond->treeview[BAUM_FS]),
+            node_id, s_selection->icon_name );
 
     return 0;
 }
@@ -2887,8 +2889,7 @@ zond_treeview_icon_activate( GtkMenuItem* item, gpointer user_data )
 
     icon_id = GPOINTER_TO_INT(g_object_get_data( G_OBJECT(item), "icon-id" ));
 
-    SSelectionChangeIcon s_selection = { zond->dbase_zond->zond_dbase_work,
-            zond->icon[icon_id].icon_name };
+    SSelectionChangeIcon s_selection = { zond, zond->icon[icon_id].icon_name };
 
     rc = sond_treeview_selection_foreach( zond->treeview[zond->baum_active],
             zond_treeview_selection_change_icon_foreach, (gpointer) &s_selection, &errmsg );
