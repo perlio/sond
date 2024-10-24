@@ -6,10 +6,29 @@
 
 #include "sond_treeview.h"
 
+typedef struct _ZondDBase ZondDBase;
+
 
 G_BEGIN_DECLS
 
-typedef struct _ZondDBase ZondDBase;
+//Sond_TVFM_ITEM definieren - lokales GObject-Derivat
+#define SOND_TYPE_TVFM_ITEM sond_tvfm_item_get_type( )
+G_DECLARE_DERIVABLE_TYPE (SondTVFMItem, sond_tvfm_item, SOND, TVFM_ITEM, GObject)
+
+struct _SondTVFMItemClass
+{
+    GObjectClass parent_class;
+};
+
+
+//Sond_TVFM_ITEM_FILE definieren
+#define SOND_TYPE_TVFM_ITEM_FILE sond_tvfm_item_file_get_type( )
+G_DECLARE_DERIVABLE_TYPE (SondTVFMItemFile, sond_tvfm_item_file, SOND, TVFM_ITEM_FILE, SondTVFMItem)
+
+struct _SondTVFMItemFileClass
+{
+    SondTVFMItemClass parent_class;
+};
 
 
 #define SOND_TYPE_TREEVIEWFM sond_treeviewfm_get_type( )

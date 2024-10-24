@@ -651,9 +651,13 @@ zond_convert_0_to_1_baum_inhalt_insert( ZondDBase* zond_dbase, gint anchor_id, g
             close( fd );
 
             gint rc = 0;
+            gchar* file_part = NULL;
+
+            file_part = g_strdup_printf( "/%s//", rel_path );
 
             //FILE_PART_ROOT einfügen
-            rc = zond_dbase_create_file_root( zond_dbase, rel_path, icon_name, node_text, NULL, &node_inserted_root, error );
+            rc = zond_dbase_create_file_root( zond_dbase, file_part, icon_name, node_text, NULL, &node_inserted_root, error );
+            g_free( file_part );
             if ( rc ) ERROR_Z
 
             //BAUM_INHALT_FILE_PART einfügen

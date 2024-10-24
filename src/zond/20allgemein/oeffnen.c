@@ -175,13 +175,13 @@ oeffnen_auszug( Projekt* zond, gint node_id, gchar** errmsg )
 
 
 gint
-oeffnen_internal_viewer( Projekt* zond, const gchar* rel_path, Anbindung* anbindung,
+oeffnen_internal_viewer( Projekt* zond, const gchar* file_part, Anbindung* anbindung,
         const PdfPos* pos_pdf, gchar** errmsg )
 {
     PdfPos pos_von = { 0 };
-//    gchar* rel_path = NULL;
+    gchar* rel_path = NULL;
 
-//    rel_path = g_strndup( file_part + 1, strlen( file_part + 1 ) - strlen( g_strrstr( file_part + 1, "//" ) ) );
+    rel_path = g_strndup( file_part + 1, strlen( file_part + 1 ) - strlen( g_strrstr( file_part + 1, "//" ) ) );
 
     //Neue Instanz oder bestehende?
     if ( !(zond->state & GDK_SHIFT_MASK) )
@@ -216,13 +216,13 @@ oeffnen_internal_viewer( Projekt* zond, const gchar* rel_path, Anbindung* anbind
 
     DisplayedDocument* dd = document_new_displayed_document( rel_path,
             anbindung, errmsg );
-//    g_free( rel_path );
+    g_free( rel_path );
     if ( !dd && *errmsg ) ERROR_S
     else if ( !dd ) return 0;
 
     if ( pos_pdf ) pos_von = *pos_pdf;
 
-    PdfViewer* pv = viewer_start_pv( zond, rel_path );
+    PdfViewer* pv = viewer_start_pv( zond, file_part );
     viewer_display_document( pv, dd, pos_von.seite, pos_von.index );
 
     return 0;

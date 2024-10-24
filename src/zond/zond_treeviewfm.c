@@ -23,7 +23,7 @@
 typedef struct
 {
     gint ID;
-    gchar* rel_path;
+    gchar* file_part;
     gint seite_von;
     gint index_von;
     gint seite_bis;
@@ -41,7 +41,7 @@ zond_pdf_abschnitt_finalize( GObject* self )
     ZondPdfAbschnittPrivate* zond_pdf_abschnitt_priv =
             zond_pdf_abschnitt_get_instance_private( ZOND_PDF_ABSCHNITT(self) );
 
-    g_free( zond_pdf_abschnitt_priv->rel_path );
+    g_free( zond_pdf_abschnitt_priv->file_part );
     g_free( zond_pdf_abschnitt_priv->icon_name );
     g_free( zond_pdf_abschnitt_priv->node_text );
 
@@ -69,13 +69,13 @@ zond_pdf_abschnitt_init( ZondPdfAbschnitt* self )
 
 
 void
-zond_pdf_abschnitt_set( ZondPdfAbschnitt* zpa, gint ID, const gchar* rel_path,
+zond_pdf_abschnitt_set( ZondPdfAbschnitt* zpa, gint ID, const gchar* file_part,
         Anbindung anbindung, const gchar* icon_name, const gchar* node_text )
 {
     ZondPdfAbschnittPrivate* zpa_priv = zond_pdf_abschnitt_get_instance_private( zpa );
 
     zpa_priv->ID = ID;
-    zpa_priv->rel_path = g_strdup( rel_path );
+    zpa_priv->file_part = g_strdup( file_part );
     zpa_priv->seite_von = anbindung.von.seite;
     zpa_priv->index_von = anbindung.von.index;
     zpa_priv->seite_bis = anbindung.bis.seite;
@@ -121,13 +121,13 @@ zond_pdf_abschnitt_get_ID( ZondPdfAbschnitt* zpa )
 
 
 void
-zond_pdf_abschnitt_get( ZondPdfAbschnitt* zpa, gint* ID, gchar const ** rel_path,
+zond_pdf_abschnitt_get( ZondPdfAbschnitt* zpa, gint* ID, gchar const ** file_part,
         Anbindung* anbindung, gchar const ** icon_name, gchar const ** node_text )
 {
     ZondPdfAbschnittPrivate* zpa_priv = zond_pdf_abschnitt_get_instance_private( zpa );
 
     if ( ID ) *ID = zpa_priv->ID;
-    if ( rel_path ) *rel_path = zpa_priv->rel_path;
+    if ( file_part ) *file_part = zpa_priv->file_part;
     if ( anbindung )
     {
         (*anbindung).von.seite = zpa_priv->seite_von;
@@ -698,12 +698,15 @@ zond_treeviewfm_open_row( SondTreeviewFM* stvfm,
         {
             gint rc = 0;
             gchar* rel_path = NULL;
+            gchar* file_part = NULL;
             gchar* errmsg = NULL;
 
             rel_path = sond_treeviewfm_get_rel_path( stvfm, iter );
-
-            rc = oeffnen_internal_viewer( ztvfm_priv->zond, rel_path, NULL, NULL, &errmsg );
+            file_part = g_strdup_printf( "/%s//", rel_path );
             g_free( rel_path );
+
+            rc = oeffnen_internal_viewer( ztvfm_priv->zond, file_part, NULL, NULL, &errmsg );
+            g_free( file_part );
             if ( rc )
             {
                 g_prefix_error( error, "%s\n%s", __func__, errmsg );
@@ -727,7 +730,7 @@ zond_treeviewfm_open_row( SondTreeviewFM* stvfm,
         pdf_pos.seite = zpa_priv->seite_von;
         pdf_pos.index = zpa_priv->index_von;
 
-        rc = oeffnen_internal_viewer( ztvfm_priv->zond, zpa_priv->rel_path, NULL, &pdf_pos, &errmsg );
+        rc = oeffnen_internal_viewer( ztvfm_priv->zond, zpa_priv->file_part, NULL, &pdf_pos, &errmsg );
         if ( rc )
         {
             g_prefix_error( error, "%s\n%s", __func__, errmsg );
@@ -1088,9 +1091,9 @@ zond_treeviewfm_walk_tree( GtkTreeModel* model, gint stamp, GNode* node, gint po
 }
 
 
-static void
+void
 zond_treeviewfm_move_node( GtkTreeModel* model, GtkTreeIter* iter_src, GtkTreeIter* anchor,
-        gboolean child, GtkTreeIter* iter_new )
+        gboolean child )
 {
     GNode* node_src = NULL;
     GNode* node_src_parent = NULL;
@@ -1147,12 +1150,6 @@ zond_treeviewfm_move_node( GtkTreeModel* model, GtkTreeIter* iter_src, GtkTreeIt
     //im treeview bekannt geben
     zond_treeviewfm_walk_tree( model, iter_src->stamp, node_src, pos );
 
-    if ( iter_new )
-    {
-        iter_new->stamp = iter_src->stamp;
-        iter_new->user_data = node_src;
-    }
-
     return;
 }
 
@@ -1172,11 +1169,9 @@ zond_treeviewfm_kill_parent( ZondTreeviewFM* ztvfm, GtkTreeIter* iter )
 
     while ( gtk_tree_model_iter_children( model, &child, iter ) )
     {
-        GtkTreeIter inserted = { 0 };
+        zond_treeviewfm_move_node( model, &child, &anchor, FALSE );
 
-        zond_treeviewfm_move_node( model, &child, &anchor, FALSE, &inserted );
-
-        anchor = inserted;
+        anchor = child;
     }
 
     gtk_tree_store_remove( GTK_TREE_STORE(model), iter );

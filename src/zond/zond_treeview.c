@@ -768,18 +768,22 @@ zond_treeview_insert_file_parts( ZondTreeview* ztv, gint node_id,
 
 
 gint
-zond_treeview_insert_file_in_db( Projekt* zond, gchar const* rel_path,
+zond_treeview_insert_file_part_in_db( Projekt* zond, gchar const* file_part,
         gchar const* icon_name, gint* file_root, GError** error )
 {
     gint rc = 0;
     gchar const* basename = NULL;
     gint file_root_int = 0;
+    gchar* rel_path = NULL;
+
+    rel_path = g_strndup( file_part + 1, strlen( file_part + 1 ) - strlen( g_strrstr( file_part + 1, "//" ) ) );
 
     basename = g_strrstr( rel_path, "/" );
     if ( !basename ) basename = rel_path;
 
     rc = zond_dbase_create_file_root( zond->dbase_zond->zond_dbase_work,
-            rel_path, icon_name, basename, NULL, &file_root_int, error );
+            file_part, icon_name, basename, NULL, &file_root_int, error );
+    g_free( rel_path );
     if ( rc ) ERROR_Z
 
     if ( file_root ) *file_root = file_root_int;
@@ -929,8 +933,11 @@ zond_treeview_datei_anbinden( ZondTreeview* ztv, GtkTreeIter* anchor_iter,
     else //Datei noch nicht in zond_dbase
     {
         gint rc = 0;
+        gchar* file_part = NULL;
 
-        rc = zond_treeview_insert_file_in_db( ztv_priv->zond, rel_path, zond_treeview_get_icon_name( info ), &file_part_root, &error );
+        file_part = g_strdup_printf( "/%s//", rel_path );
+        rc = zond_treeview_insert_file_part_in_db( ztv_priv->zond, file_part, zond_treeview_get_icon_name( info ), &file_part_root, &error );
+        g_free( file_part );
         if ( rc )
         {
             if ( errmsg ) *errmsg = g_strdup( error->message );
@@ -1165,7 +1172,7 @@ zond_treeview_clipboard_anbinden_foreach( SondTreeview* stv, GtkTreeIter* iter,
     {
         gint rc = 0;
         gint ID = 0;
-        gchar const* rel_path = NULL;
+        gchar const* file_part = NULL;
         Anbindung anbindung = { 0 };
         GError* error = NULL;
         gint baum_inhalt_file = 0;
@@ -1174,9 +1181,9 @@ zond_treeview_clipboard_anbinden_foreach( SondTreeview* stv, GtkTreeIter* iter,
         ZondPdfAbschnitt* zpa = ZOND_PDF_ABSCHNITT(object);
         ZondTreeviewPrivate* ztv_priv = zond_treeview_get_instance_private( s_selection->ztv );
 
-        zond_pdf_abschnitt_get( zpa, &ID, &rel_path, &anbindung, NULL, NULL );
+        zond_pdf_abschnitt_get( zpa, &ID, &file_part, &anbindung, NULL, NULL );
 
-        text = g_strdup_printf( "%s, S. %d, %d - S. %d, %d", rel_path, anbindung.von.seite,
+        text = g_strdup_printf( "%s, S. %d, %d - S. %d, %d", file_part, anbindung.von.seite,
                 anbindung.von.index, anbindung.bis.seite, anbindung.bis.index );
         info_window_set_message( s_selection->info_window, text );
         g_free( text );
@@ -1819,6 +1826,7 @@ zond_treeview_selection_loeschen_foreach( SondTreeview* tree_view, GtkTreeIter* 
     gint rc = 0;
     gboolean visible = FALSE;
     GtkTreeIter iter_fm = { 0 };
+    gboolean response = FALSE;
 
     Projekt* zond = (Projekt*) data;
 
@@ -1835,10 +1843,9 @@ zond_treeview_selection_loeschen_foreach( SondTreeview* tree_view, GtkTreeIter* 
         //nur Linkziel kann Ziel von Copy sein
         //Ebenso ob Link auf PDF-Abschnitt zeigt; nur Link wird entfernt
     }
-    else
+    else if ( tree_view == zond->treeview[BAUM_INHALT] )
     {
         gint rc = 0;
-        gboolean response = FALSE;
         gint baum_auswertung_copy = 0;
         gint baum_inhalt_file = 0;
         gint type = 0;
@@ -1901,10 +1908,6 @@ zond_treeview_selection_loeschen_foreach( SondTreeview* tree_view, GtkTreeIter* 
             if ( copied ) return 0;
         }
 
-        if ( node_id == zond->node_id_extra )
-                g_signal_emit_by_name( zond->textview_window,
-                "delete-event", zond, &response );
-
         //Wenn node_id ein pdf_abschnitt ist, der über baum_inhalt_file angebunden ist,
         //dann soll letzterer gelöscht werden, also die Anbindung im Baum_inhalt
         rc = zond_dbase_get_baum_inhalt_file_from_file_part( zond->dbase_zond->zond_dbase_work,
@@ -1919,17 +1922,84 @@ zond_treeview_selection_loeschen_foreach( SondTreeview* tree_view, GtkTreeIter* 
 
         if ( baum_inhalt_file ) node_id = baum_inhalt_file;
 
-        //ToDo: wenn Pdf-Abschnitt gelöscht wird - in ZondTreeviewFM umsetzen
+        //wenn Pdf-Abschnitt gelöscht wird - in ZondTreeviewFM umsetzen
         if ( !baum_inhalt_file && visible )
                 gtk_tree_store_remove( GTK_TREE_STORE(gtk_tree_view_get_model(
                 GTK_TREE_VIEW(zond->treeview[BAUM_FS]) )), &iter_fm );
+        else if ( !baum_inhalt_file )
+        {
+            GtkTreeIter iter_parent = { 0 };
+
+            gtk_tree_model_iter_parent( gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]) ),
+                    &iter_parent, iter );
+
+            //Einzelkind?
+            if ( gtk_tree_model_iter_n_children( gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]) ),
+                    &iter_parent ) == 1 )
+            {
+                gint rc = 0;
+                gint parent_id = 0;
+                gchar* file_part = NULL;
+                gchar* section = NULL;
+                gboolean visible = FALSE;
+                GtkTreeIter iter_fm = { 0 };
+                GtkTreeIter iter_child = { 0 };
+
+                rc = zond_dbase_get_parent( zond->dbase_zond->zond_dbase_work,
+                        node_id, &parent_id, &error );
+                if ( rc )
+                {
+                    if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+                    g_error_free( error );
+
+                    return -1;
+                }
+
+                rc = zond_dbase_get_node( zond->dbase_zond->zond_dbase_work,
+                        parent_id, &type, NULL, &file_part, &section, NULL, NULL, NULL, &error );
+                if ( rc )
+                {
+                    if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+                    g_error_free( error );
+
+                    return -1;
+                }
+
+                rc = zond_treeviewfm_section_visible( ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), file_part, section,
+                        FALSE, &visible, &iter_fm, NULL, NULL, &error );
+                g_free( file_part );
+                g_free( section );
+                if ( rc )
+                {
+                    if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+                    g_error_free( error );
+
+                    return -1;
+                }
+
+                if ( !gtk_tree_model_iter_children( gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_FS]) ),
+                        &iter_child, &iter_fm ) )
+                {
+                    if ( errmsg ) *errmsg = g_strdup_printf( "%s\niter hat kein Kind, obwohl eines da sein müßte", __func__ );
+
+                    return -1;
+                }
+
+                gtk_tree_store_remove( GTK_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_FS]) )),
+                        &iter_child );
+            }
+        }
     }
+
+    if ( node_id == zond->node_id_extra )
+            g_signal_emit_by_name( zond->textview_window,
+            "delete-event", zond, &response );
 
     rc = zond_dbase_remove_node( zond->dbase_zond->zond_dbase_work,
             node_id, &error );
     if ( rc )
     {
-        if ( errmsg ) *errmsg = g_strdup( error->message );
+        if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
         g_error_free( error );
 
         return -1;

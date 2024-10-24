@@ -24,6 +24,89 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "zond/99conv/general.h"
 
 
+//SOND_TVFM_ITEM
+typedef struct
+{
+    gchar* icon_name;
+    gchar* node_text;
+} SondTVFMItemPrivate;
+
+G_DEFINE_TYPE_WITH_PRIVATE(SondTVFMItem, sond_tvfm_item, G_TYPE_OBJECT)
+
+
+static void
+sond_tvfm_item_finalize( GObject* self )
+{
+    SondTVFMItemPrivate* sond_tvfm_item_priv =
+            sond_tvfm_item_get_instance_private( SOND_TVFM_ITEM(self) );
+
+    g_free( sond_tvfm_item_priv->icon_name );
+    g_free( sond_tvfm_item_priv->node_text );
+
+    G_OBJECT_CLASS(sond_tvfm_item_parent_class)->finalize( self );
+
+    return;
+}
+
+static void
+sond_tvfm_item_class_init( SondTVFMItemClass* klass )
+{
+    GObjectClass *object_class = G_OBJECT_CLASS(klass);
+
+    object_class->finalize = sond_tvfm_item_finalize;
+
+    return;
+}
+
+
+static void
+sond_tvfm_item_init( SondTVFMItem* self )
+{
+    return;
+}
+
+
+//SOND_TVFM_ITEM_FILE
+typedef struct
+{
+    gint type; //0 = DIR; 1 = FILE, um es einfach zu halten
+    gchar* rel_path;
+} SondTVFMItemFilePrivate;
+
+G_DEFINE_TYPE_WITH_PRIVATE(SondTVFMItemFile, sond_tvfm_item_file, SOND_TYPE_TVFM_ITEM)
+
+
+static void
+sond_tvfm_item_file_finalize( GObject* self )
+{
+    SondTVFMItemFilePrivate* stvfm_item_file_priv =
+            sond_tvfm_item_file_get_instance_private( SOND_TVFM_ITEM_FILE(self) );
+
+    g_free( stvfm_item_file_priv->rel_path );
+
+    G_OBJECT_CLASS(sond_tvfm_item_file_parent_class)->finalize( self );
+
+    return;
+}
+
+static void
+sond_tvfm_item_file_class_init( SondTVFMItemFileClass* klass )
+{
+    GObjectClass *object_class = G_OBJECT_CLASS(klass);
+
+    object_class->finalize = sond_tvfm_item_file_finalize;
+
+    return;
+}
+
+
+static void
+sond_tvfm_item_file_init( SondTVFMItemFile* self )
+{
+    return;
+}
+
+
 //Nun geht's mit SondTreeviewFM weiter
 typedef struct
 {

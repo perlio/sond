@@ -91,6 +91,8 @@ gint zond_treeviewfm_set_cursor_on_section( ZondTreeviewFM*, gchar const*,
 
 void zond_treeviewfm_kill_parent( ZondTreeviewFM*, GtkTreeIter* );
 
+void zond_treeviewfm_move_node( GtkTreeModel*, GtkTreeIter*, GtkTreeIter*, gboolean );
+
 gint zond_treeviewfm_get_id_pda( ZondTreeviewFM*, GtkTreeIter*, gint*, GError** );
 
 G_END_DECLS

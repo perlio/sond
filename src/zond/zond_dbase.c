@@ -794,12 +794,11 @@ zond_dbase_insert_node( ZondDBase* zond_dbase, gint anchor_ID, gboolean child,
 
 gint
 zond_dbase_create_file_root( ZondDBase* zond_dbase,
-        const gchar* rel_path, gchar const* icon_name, gchar const* node_text,
+        const gchar* file_part, gchar const* icon_name, gchar const* node_text,
         gchar const* text, gint* file_part_root, GError** error )
 {
     gint rc = 0;
     sqlite3_stmt** stmt = NULL;
-    gchar* file_part = NULL;
 
     const gchar* sql[] = {
             "INSERT INTO knoten "
@@ -817,9 +816,7 @@ zond_dbase_create_file_root( ZondDBase* zond_dbase,
         return -1;
     }
 
-    file_part = g_strdup_printf( "/%s//", rel_path );
-    rc = sqlite3_bind_text( stmt[0], 1, file_part, -1, SQLITE_TRANSIENT );
-    g_free( file_part );
+    rc = sqlite3_bind_text( stmt[0], 1, file_part, -1, NULL );
     if ( rc != SQLITE_OK ) ERROR_Z_DBASE
 
     rc = sqlite3_bind_text( stmt[0], 2, icon_name, -1, NULL );
