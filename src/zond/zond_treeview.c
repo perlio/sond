@@ -1177,6 +1177,7 @@ zond_treeview_clipboard_anbinden_foreach( SondTreeview* stv, GtkTreeIter* iter,
         GError* error = NULL;
         gint baum_inhalt_file = 0;
         gchar* text = NULL;
+        GtkTreeIter iter_inserted = { 0 };
 
         ZondPdfAbschnitt* zpa = ZOND_PDF_ABSCHNITT(object);
         ZondTreeviewPrivate* ztv_priv = zond_treeview_get_instance_private( s_selection->ztv );
@@ -1229,7 +1230,7 @@ zond_treeview_clipboard_anbinden_foreach( SondTreeview* stv, GtkTreeIter* iter,
         }
 
         rc = zond_treeview_walk_tree( s_selection->ztv, FALSE, ID, &s_selection->anchor_iter, s_selection->child,
-                NULL, 0, NULL, zond_treeview_insert_file_parts, &error );
+                &iter_inserted, 0, NULL, zond_treeview_insert_file_parts, &error );
         if ( rc )
         {
             if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
@@ -1239,6 +1240,7 @@ zond_treeview_clipboard_anbinden_foreach( SondTreeview* stv, GtkTreeIter* iter,
         }
 
         (s_selection->zaehler)++;
+        s_selection->anchor_iter = iter_inserted;
     }
 
     s_selection->child = FALSE;
@@ -1265,7 +1267,7 @@ zond_treeview_clipboard_anbinden( Projekt* zond, gint anchor_id, GtkTreeIter* an
     rc = sond_treeview_clipboard_foreach( zond_treeview_clipboard_anbinden_foreach, &s_selection, errmsg );
     if ( rc == -1 ) ERROR_S
 
-    if ( s_selection.zaehler ) sond_treeview_expand_row( zond->treeview[BAUM_INHALT], &s_selection.anchor_iter );
+    if ( s_selection.zaehler ) sond_treeview_expand_to_row( zond->treeview[BAUM_INHALT], &s_selection.anchor_iter );
     sond_treeview_set_cursor( zond->treeview[BAUM_INHALT], &s_selection.anchor_iter );
 
     gtk_tree_view_columns_autosize( GTK_TREE_VIEW(((Projekt*) zond)->treeview[BAUM_INHALT]) );
