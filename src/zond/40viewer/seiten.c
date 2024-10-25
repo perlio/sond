@@ -168,7 +168,7 @@ cb_radio_auswahl_toggled( GtkToggleButton* button, gpointer data )
 
 
 static GPtrArray*
-seiten_abfrage_seiten( PdfViewer* pv, const gchar* title, gint* winkel )
+seiten_abfrage_seiten( PdfViewer* pv, const gchar* title, gint* winkel, gboolean mit_alles )
 {
     gint rc = 0;
     GtkWidget* radio_90_UZS = NULL;
@@ -229,6 +229,8 @@ seiten_abfrage_seiten( PdfViewer* pv, const gchar* title, gint* winkel )
         gtk_widget_grab_focus( entry );
     }
     else gtk_toggle_button_set_active( GTK_TOGGLE_BUTTON(radio_mark), TRUE );
+
+    if ( !mit_alles ) gtk_widget_set_sensitive( radio_alle, FALSE );
 
     g_signal_connect( entry, "activate", G_CALLBACK(cb_seiten_drehen_entry),
             (gpointer) dialog );
@@ -297,7 +299,7 @@ cb_pv_seiten_ocr( GtkMenuItem* item, gpointer data )
 
     //zu OCRende Seiten holen
     title = g_strdup_printf( "Seiten OCR (1 - %i):", pv->arr_pages->len );
-    arr_document_page = seiten_abfrage_seiten( pv, title, NULL );
+    arr_document_page = seiten_abfrage_seiten( pv, title, NULL, TRUE );
     g_free( title );
 
     if ( !arr_document_page ) return;
@@ -525,7 +527,7 @@ cb_pv_seiten_drehen( GtkMenuItem* item, gpointer data )
 
     //zu drehende Seiten holen
     title = g_strdup_printf( "Seiten drehen (1 - %i):", pv->arr_pages->len );
-    arr_document_page = seiten_abfrage_seiten( pv, title, &winkel );
+    arr_document_page = seiten_abfrage_seiten( pv, title, &winkel, TRUE );
     g_free( title );
 
     if ( !arr_document_page ) return;
@@ -578,11 +580,11 @@ seiten_cb_loesche_seite( PdfViewer* pv, gint page_pv, gpointer data, gchar** err
 
 
 static gint
-seiten_anbindung( PdfViewer* pv, GPtrArray* arr_document_page, gchar** errmsg )
+seiten_anbindung( PdfViewer* pv, GPtrArray* arr_document_page, GError** error )
 {
     gint rc = 0;
     GPtrArray* arr_dests = NULL;
-
+/*
     arr_dests = g_ptr_array_new_with_free_func( (GDestroyNotify) g_free );
 
     //Alle NamedDests der zu löschenden Seiten sammeln
@@ -631,13 +633,13 @@ seiten_anbindung( PdfViewer* pv, GPtrArray* arr_document_page, gchar** errmsg )
 #endif // VIEWER
 
     g_ptr_array_free( arr_dests, TRUE );
-
+*/
     return 0;
 }
 
 
 static gint
-seiten_loeschen( PdfViewer* pv, GPtrArray* arr_document_page, gchar** errmsg )
+seiten_loeschen( PdfViewer* pv, GPtrArray* arr_document_page, GError** error )
 {
     GPtrArray* arr_docs = NULL;
 
@@ -646,6 +648,7 @@ seiten_loeschen( PdfViewer* pv, GPtrArray* arr_document_page, gchar** errmsg )
     {
         PdfDocumentPage* pdf_document_page = NULL;
         gint rc = 0;
+        gchar* errmsg = NULL;
 
         pdf_document_page = g_ptr_array_index( arr_document_page, i );
 
@@ -655,11 +658,14 @@ seiten_loeschen( PdfViewer* pv, GPtrArray* arr_document_page, gchar** errmsg )
         //macht - sofern noch nicht geschehen - thread_pool des pv dicht, in dem Seite angezeigt wird
         //Dann wird Seite aus pv gelöscht
         rc = viewer_foreach( pv, pdf_document_page, seiten_cb_loesche_seite, NULL,
-                errmsg );
+                &errmsg );
         if ( rc )
         {
+            if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\n%s", __func__, errmsg );
+            g_free( errmsg );
             g_ptr_array_unref( arr_docs );
-            ERROR_S
+
+            return -1;
         }
 
         //Seite aus document entfernen
@@ -696,8 +702,11 @@ seiten_loeschen( PdfViewer* pv, GPtrArray* arr_document_page, gchar** errmsg )
         fz_always( ctx ) g_free( pages );
         fz_catch( ctx )
         {
+            if ( error ) *error = g_error_new( g_quark_from_static_string( "MUPDF" ), fz_caught( ctx ),
+                    "%s\n%s", __func__, fz_caught_message( ctx ) );
             g_ptr_array_unref( arr_docs );
-            ERROR_MUPDF( "pdf_rearrange_pages" )
+
+            return -1;
         }
     }
 
@@ -716,7 +725,7 @@ void
 cb_pv_seiten_loeschen( GtkMenuItem* item, gpointer data )
 {
     gint rc = 0;
-    gchar* errmsg = NULL;
+    GError* error = NULL;
     gchar* title = NULL;
     GPtrArray* arr_document_page = NULL;
     gint count = 0;
@@ -735,20 +744,19 @@ cb_pv_seiten_loeschen( GtkMenuItem* item, gpointer data )
 
     //zu löschende Seiten holen
     title = g_strdup_printf( "Seiten löschen (1 - %i):", count );
-    arr_document_page = seiten_abfrage_seiten( pv, title, NULL );
+    arr_document_page = seiten_abfrage_seiten( pv, title, NULL, FALSE );
     g_free( title );
 
     if ( !arr_document_page ) return;
 
     //Abfrage, ob Anbindung mit Seite verknüpft
-    rc = seiten_anbindung( pv, arr_document_page, &errmsg );
+    rc = seiten_anbindung( pv, arr_document_page, &error);
     if ( rc )
     {
         if ( rc == -1 )
         {
-            display_message( pv->vf, "Fehler Seiten löschen - \n",
-                    errmsg, NULL );
-            g_free( errmsg );
+            display_error( pv->vf, "Fehler Seiten Löschen", error->message );
+            g_error_free( error );
         }
         else if ( rc == 1 ) display_message( pv->vf, "Seiten enthalten Anbindungen - \n"
                 "Löschen nicht zulässig", NULL );
@@ -758,13 +766,12 @@ cb_pv_seiten_loeschen( GtkMenuItem* item, gpointer data )
         return;
     }
 
-    rc = seiten_loeschen( pv, arr_document_page, &errmsg );
+    rc = seiten_loeschen( pv, arr_document_page, &error );
     g_ptr_array_unref( arr_document_page );
     if ( rc == -1 )
     {
-        display_message( pv->vf, "Fehler in Seiten löschen -\n\nBei Aufruf "
-                "seiten_loeschen:\n", errmsg, "\n\nViewer wird geschlossen", NULL );
-        g_free( errmsg );
+        display_error( pv->vf, "Fehler Seiten Löschen", error->message );
+        g_error_free( error );
 
         viewer_save_and_close( pv );
 
@@ -990,7 +997,7 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
 
 
 static pdf_document*
-seiten_create_document( PdfViewer* pv, GArray* arr_page_pv, gchar** errmsg )
+seiten_create_document( PdfViewer* pv, GArray* arr_page_pv, GError** error )
 {
     pdf_document* doc_dest = NULL;
     gint rc = 0;
@@ -998,8 +1005,9 @@ seiten_create_document( PdfViewer* pv, GArray* arr_page_pv, gchar** errmsg )
     fz_try( pv->zond->ctx ) doc_dest = pdf_create_document( pv->zond->ctx );
     fz_catch( pv->zond->ctx )
     {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf pdf_create_document:\n",
-                fz_caught_message( pv->zond->ctx ), NULL );
+        if ( error ) *error = g_error_new( g_quark_from_static_string( "MUPDF" ),
+                fz_caught( pv->zond->ctx ), "%s\n%s", __func__,
+                fz_caught_message( pv->zond->ctx ) );
 
         return NULL;
     }
@@ -1008,6 +1016,7 @@ seiten_create_document( PdfViewer* pv, GArray* arr_page_pv, gchar** errmsg )
     {
         ViewerPageNew* viewer_page = NULL;
         PdfDocumentPage* pdf_document_page = NULL;
+        gchar* errmsg = NULL;
 
         gint page_pv = g_array_index( arr_page_pv, gint, i );
         viewer_page = g_ptr_array_index( pv->arr_pages, page_pv );
@@ -1016,13 +1025,15 @@ seiten_create_document( PdfViewer* pv, GArray* arr_page_pv, gchar** errmsg )
         zond_pdf_document_mutex_lock( pdf_document_page->document );
         rc = pdf_copy_page( pv->zond->ctx,
                 zond_pdf_document_get_pdf_doc( pdf_document_page->document ),
-                pdf_document_page->page_doc, pdf_document_page->page_doc, doc_dest, -1, errmsg );
+                pdf_document_page->page_doc, pdf_document_page->page_doc, doc_dest, -1, &errmsg );
         zond_pdf_document_mutex_unlock( pdf_document_page->document );
         if ( rc )
         {
+            if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\n%s", __func__, errmsg );
+            g_free( errmsg );
             pdf_drop_document( pv->zond->ctx, doc_dest );
 
-            ERROR_S_VAL( NULL )
+            return NULL;
         }
     }
 
@@ -1031,13 +1042,13 @@ seiten_create_document( PdfViewer* pv, GArray* arr_page_pv, gchar** errmsg )
 
 
 static gint
-seiten_set_clipboard( PdfViewer* pv, GArray* arr_page_pv, gchar** errmsg )
+seiten_set_clipboard( PdfViewer* pv, GArray* arr_page_pv, GError** error )
 {
     pdf_drop_document( pv->zond->ctx, pv->zond->pv_clip );
     pv->zond->pv_clip = NULL;
 
-    pv->zond->pv_clip = seiten_create_document( pv, arr_page_pv, errmsg );
-    if ( !pv->zond->pv_clip ) ERROR_S
+    pv->zond->pv_clip = seiten_create_document( pv, arr_page_pv, error );
+    if ( !pv->zond->pv_clip ) ERROR_Z
 
     return 0;
 }
@@ -1047,19 +1058,18 @@ void
 cb_seiten_kopieren( GtkMenuItem* item, gpointer data )
 {
     gint rc = 0;
-    gchar* errmsg = NULL;
+    GError* error = NULL;
 
     PdfViewer* pv = (PdfViewer*) data;
 
     GArray* arr_page_pv = seiten_markierte_thumbs( pv );
     if ( !arr_page_pv ) return;
 
-    rc = seiten_set_clipboard( pv, arr_page_pv, &errmsg );
+    rc = seiten_set_clipboard( pv, arr_page_pv, &error );
     if ( rc )
     {
-        display_message( pv->vf, "Fehler Kopieren -\n\nBei Aufruf seiten_set_clipboard:\n",
-                errmsg, NULL );
-        g_free( errmsg );
+        display_error( pv->vf, "Fehler Kopieren Seiten", error->message );
+        g_error_free( error );
     }
 
     g_array_unref( arr_page_pv );
@@ -1072,7 +1082,7 @@ void
 cb_seiten_ausschneiden( GtkMenuItem* item, gpointer data )
 {
     gint rc = 0;
-    gchar* errmsg = NULL;
+    GError* error = NULL;
 
     PdfViewer* pv = (PdfViewer*) data;
 
@@ -1082,12 +1092,11 @@ cb_seiten_ausschneiden( GtkMenuItem* item, gpointer data )
     GArray* arr_page_pv = seiten_markierte_thumbs( pv );
     if ( !arr_page_pv ) return;
 
-    rc = seiten_set_clipboard( pv, arr_page_pv, &errmsg );
+    rc = seiten_set_clipboard( pv, arr_page_pv, &error );
     if ( rc )
     {
-        display_message( pv->vf, "Fehler Kopieren -\n\nBei Aufruf seiten_set_clipboard:\n",
-                errmsg, NULL );
-        g_free( errmsg );
+        display_error( pv->vf, "Fehler Kopieren Seiten", error->message );
+        g_error_free( error );
         g_array_unref( arr_page_pv );
 
         return;
@@ -1095,13 +1104,12 @@ cb_seiten_ausschneiden( GtkMenuItem* item, gpointer data )
 
     GPtrArray* arr_document_page = seiten_get_document_pages( pv, arr_page_pv );
     g_array_unref( arr_page_pv );
-    rc = seiten_loeschen( pv, arr_document_page, &errmsg );
+    rc = seiten_loeschen( pv, arr_document_page, &error );
     g_ptr_array_unref( arr_document_page );
     if ( rc == -1 )
     {
-        display_message( pv->vf, "Fehler Ausschneiden -\n\nBei Aufruf seiten_loeschen:\n",
-                errmsg, NULL );
-        g_free( errmsg );
+        display_error( pv->vf, "Fehler Ausschneiden Seiten", error->message );
+        g_error_free( error );
     }
     else if ( rc == 1 ) display_message( pv->vf, "Fehler Ausschneiden -\n\nSeiten enthalten Anbindungen\n",
             NULL );
