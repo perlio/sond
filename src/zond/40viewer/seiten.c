@@ -803,22 +803,7 @@ seiten_cb_einfuegen( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg 
 
     info_insert = (InfoInsert*) data;
 
-    if ( pv->dd->next || pv->dd->anbindung )
-    {
-        gint page_dd = 0;
-
-        if ( info_insert->pos == 0 ) return 0;
-        if ( page_pv == 0 ) return 0; //ist ja am Rand (Anfang) von Anbindung
-
-        dd = document_get_dd( pv, page_pv, NULL, &page_dd, NULL );
-        if ( page_dd == 0 ) return 0; //auch am Anfang von Anbindung!
-        //auf am Ende von Anbindung muß nicht geprüft werden, da
-            //- page_pv - außer wenn pos == 0, schon ausgeschlossen - nach einzufügenden Seiten liegt
-            //- also wenn page_pv am Rand ist eins davor nicht am Rand
-        //wenn in Anbindung, dann Anbindung aufbiegen
-        if ( dd->anbindung ) dd->anbindung->bis.seite += info_insert->count;
-    }
-    else dd = pv->dd;
+    dd = pv->dd;
 
     for ( gint u = 0; u < info_insert->count; u++ )
     {
@@ -827,10 +812,10 @@ seiten_cb_einfuegen( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg 
 
         viewer_page = viewer_new_page( pv, dd->zond_pdf_document, info_insert->pos + u );
 
-        g_ptr_array_insert( pv->arr_pages, page_pv + u, viewer_page );
+        g_ptr_array_insert( pv->arr_pages, info_insert->pos + u, viewer_page );
 
         gtk_list_store_insert( GTK_LIST_STORE(gtk_tree_view_get_model(
-                GTK_TREE_VIEW(pv->tree_thumb) )), &iter_tmp, page_pv + u );
+                GTK_TREE_VIEW(pv->tree_thumb) )), &iter_tmp, info_insert->pos + u );
     }
 
     g_object_set_data( G_OBJECT(pv->layout), "dirty", GINT_TO_POINTER(1) );
@@ -895,7 +880,6 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
 {
     PdfViewer* pv = (PdfViewer*) data;
     DisplayedDocument* dd = NULL;
-    gint page_doc = 0;
     gint ret = 0;
     gint rc = 0;
     guint pos = 0;
@@ -910,26 +894,7 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
     if ( pos > pv->arr_pages->len ) pos = pv->arr_pages->len;
     if ( pos < 0 ) pos = 0;
 
-    //Falls Auszug: nicht zwischen "Grenzen" des dd einfügen - doppeldeutig
-    if ( pv->dd->next != NULL || pv->dd->anbindung != NULL )
-    {
-        gint page_dd = 0;
-        gint dd_len = 0;
-
-        dd = document_get_dd( pv, pos - 1, NULL, &page_dd, &page_doc );
-        dd_len = document_get_num_of_pages_of_dd( dd );
-
-        if ( page_dd == 0 && page_dd == dd_len - 1 )
-        {
-            display_message( pv->vf, "In Auszug darf nicht an den Rändern der "
-                    "Abschnitte eingefügt werden", NULL );
-
-            return;
-        }
-
-        pos = page_doc + 1;
-    }
-    else dd = pv->dd;
+    dd = pv->dd;
 
     //komplette Datei wird eingefügt
     if ( ret == 1 )
