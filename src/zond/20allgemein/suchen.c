@@ -37,18 +37,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 void zond_treeview_cursor_changed( ZondTreeview*, gpointer );
 
 
-typedef enum _Zond_Suchen
-{
-    ZOND_SUCHEN_DATEINAME,
-    ZOND_SUCHEN_NODE_TEXT_BAUM_INHALT,
-    ZOND_SUCHEN_NODE_TEXT_BAUM_AUSWERTUNG,
-    ZOND_SUCHEN_TEXT,
-    N_ZOND_SUCHEN
-} ZondSuchen;
-
 typedef struct _Node
 {
-    ZondSuchen zond_suchen;
+    gint zond_suchen;
     gint node_id;
 } Node;
 
@@ -110,6 +101,13 @@ cb_suchen_nach_auswertung( GtkMenuItem* item, gpointer user_data )
     }
 
     //aktuellen cursor im BAUM_AUSWERTUNG: node_id und iter abfragen
+    if ( zond->baum_active != BAUM_AUSWERTUNG )
+    {
+        display_message( zond->app_window, "Treffer können nur in BAUM_AUSWERTUNG kopiert werden", NULL );
+
+        return;
+    }
+
     if ( !zond_treeview_get_anchor( zond, child, &iter, NULL, &anchor_id ) ) return;
 
     list = selected;
@@ -167,41 +165,24 @@ cb_lb_row_activated( GtkWidget* listbox, GtkWidget* row, gpointer user_data )
 
 
 static gint
-suchen_fuellen_row( Projekt* zond, GtkWidget* list_box, ZondSuchen zond_suchen, gint node_id,
+suchen_fuellen_row( Projekt* zond, GtkWidget* list_box, gint zond_suchen, gint node_id,
         gchar** errmsg )
 {
-    gint rc = 0;
-    Baum baum = KEIN_BAUM;
-    //Beschriftung
     gchar* text_label = NULL;
     GtkWidget* hbox = NULL;
-
-    if ( zond_suchen == ZOND_SUCHEN_DATEINAME ||
-            zond_suchen == ZOND_SUCHEN_NODE_TEXT_BAUM_INHALT )
-            baum = BAUM_INHALT;
-    else baum = BAUM_AUSWERTUNG;
+    gint root = 0;
 
     hbox = gtk_box_new( GTK_ORIENTATION_HORIZONTAL, 0 );
 
-    if ( zond_suchen == ZOND_SUCHEN_DATEINAME )
+    if ( zond_suchen == 0 || zond_suchen == 1 )
     {
         gint rc = 0;
-        gchar* rel_path = NULL;
-
-//        rc = treeviews_get_rel_path_and_anbindung( zond, baum, node_id, &rel_path,
-//                NULL, errmsg );
-        if ( rc == -1 ) ERROR_S
-
-        text_label = add_string( g_strdup( "Dateiname: "), rel_path );
-    }
-    else if ( zond_suchen == ZOND_SUCHEN_NODE_TEXT_BAUM_INHALT ||
-            zond_suchen == ZOND_SUCHEN_NODE_TEXT_BAUM_AUSWERTUNG )
-    {
         gchar* node_text = NULL;
+        gchar* file_part = NULL;
         GError* error = NULL;
 
-        rc = zond_dbase_get_node( zond->dbase_zond->zond_dbase_work, node_id,
-                NULL, NULL, NULL, NULL, NULL, &node_text, NULL, &error );
+        rc = zond_dbase_get_node( zond->dbase_zond->zond_dbase_work, node_id, NULL, NULL, &file_part,
+                NULL, NULL, &node_text, NULL, &error );
         if ( rc )
         {
             if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
@@ -210,9 +191,32 @@ suchen_fuellen_row( Projekt* zond, GtkWidget* list_box, ZondSuchen zond_suchen, 
             return -1;
         }
 
-        if ( zond_suchen == ZOND_SUCHEN_NODE_TEXT_BAUM_INHALT )
-                text_label = add_string( g_strdup( "BAUM_INHALT: " ), node_text );
-        else text_label = add_string( g_strdup( "BAUM_AUSWERTUNG: " ), node_text );
+        if ( zond_suchen == 0 )
+        {
+            text_label = add_string( g_strdup( "FilePart: "), file_part );
+            g_free( node_text );
+        }
+        else if ( zond_suchen == 1 )
+        {
+            gint rc = 0;
+            gint root = 0;
+
+            rc = zond_dbase_get_tree_root( zond->dbase_zond->zond_dbase_work, node_id,
+                &root, &error );
+            if ( rc )
+            {
+                if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+                g_error_free( error );
+
+                return -1;
+            }
+
+            if ( root == 1 )
+                    text_label = add_string( g_strdup( "BAUM_INHALT: " ), node_text );
+            else text_label = add_string( g_strdup( "BAUM_AUSWERTUNG: " ), node_text );
+
+            g_free( file_part );
+        }
     }
     else text_label = g_strdup( "TextView" ); // == ZOND_SUCHEN_TEXT
 
@@ -223,7 +227,7 @@ suchen_fuellen_row( Projekt* zond, GtkWidget* list_box, ZondSuchen zond_suchen, 
     gtk_list_box_insert( GTK_LIST_BOX(list_box), hbox, -1 );
     GtkWidget* list_box_row = gtk_widget_get_parent( hbox );
 
-    g_object_set_data( G_OBJECT(list_box_row), "baum", GINT_TO_POINTER(baum) );
+    g_object_set_data( G_OBJECT(list_box_row), "root", GINT_TO_POINTER(root) );
     g_object_set_data( G_OBJECT(list_box_row), "node-id", GINT_TO_POINTER(node_id) );
 
     return 0;
@@ -346,13 +350,11 @@ suchen_db( Projekt* zond, const gchar* text, GArray* arr_treffer, gchar** errmsg
     sqlite3_stmt* stmt = NULL;
 
     rc = sqlite3_prepare_v2( zond_dbase_get_dbase( zond->dbase_zond->zond_dbase_work ),
-            "SELECT ?2, node_id FROM dateien WHERE LOWER(rel_path) LIKE LOWER(?1) "
+            "SELECT 0, ID FROM knoten WHERE LOWER(file_part) LIKE LOWER(?1) "
             "UNION "
-            "SELECT ?3, node_id FROM baum_inhalt WHERE LOWER(node_text) LIKE LOWER(?1) "
+            "SELECT 1, ID FROM knoten WHERE LOWER(node_text) LIKE LOWER(?1) "
             "UNION "
-            "SELECT ?4, node_id FROM baum_auswertung WHERE LOWER(node_text) LIKE LOWER(?1) "
-            "UNION "
-            "SELECT ?5, node_id FROM baum_auswertung WHERE LOWER(text) LIKE LOWER(?1) ",
+            "SELECT 2, ID FROM knoten WHERE LOWER(text) LIKE LOWER(?1) ",
             -1, &stmt, NULL );
     if ( rc != SQLITE_OK ) ERROR_SQL( "sqlite3_prepare_v2" )
 
@@ -361,34 +363,6 @@ suchen_db( Projekt* zond, const gchar* text, GArray* arr_treffer, gchar** errmsg
     {
         sqlite3_finalize( stmt );
         ERROR_SQL( "sqlite3_bind_text" )
-    }
-
-    rc = sqlite3_bind_int( stmt, 2, ZOND_SUCHEN_DATEINAME );
-    if ( rc != SQLITE_OK )
-    {
-        sqlite3_finalize( stmt );
-        ERROR_SQL( "sqlite3_bind_int" )
-    }
-
-    rc = sqlite3_bind_int( stmt, 3, ZOND_SUCHEN_NODE_TEXT_BAUM_INHALT );
-    if ( rc != SQLITE_OK )
-    {
-        sqlite3_finalize( stmt );
-        ERROR_SQL( "sqlite3_bind_int" )
-    }
-
-    rc = sqlite3_bind_int( stmt, 4, ZOND_SUCHEN_NODE_TEXT_BAUM_AUSWERTUNG );
-    if ( rc != SQLITE_OK )
-    {
-        sqlite3_finalize( stmt );
-        ERROR_SQL( "sqlite3_bind_int" )
-    }
-
-    rc = sqlite3_bind_int( stmt, 5, ZOND_SUCHEN_TEXT );
-    if ( rc != SQLITE_OK )
-    {
-        sqlite3_finalize( stmt );
-        ERROR_SQL( "sqlite3_bind_int" )
     }
 
     do

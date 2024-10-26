@@ -392,7 +392,7 @@ result_listbox_new( GtkWindow* parent_window, const gchar* titel, GtkSelectionMo
     if ( parent_window )
     {
         gtk_window_set_transient_for( GTK_WINDOW(window), parent_window );
-        gtk_window_set_modal( GTK_WINDOW(window), TRUE );
+        gtk_window_set_modal( GTK_WINDOW(window), FALSE );
     }
 
     scrolled_window = gtk_scrolled_window_new( NULL, NULL );

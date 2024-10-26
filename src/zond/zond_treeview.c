@@ -468,26 +468,12 @@ zond_treeview_get_anchor( Projekt* zond, gboolean child, GtkTreeIter* iter_curso
     {
         if ( head_nr <= 0 )
         {
-            gint rc = 0;
             gint anchor_id_tree = 0;
-            gint baum_inhalt_file = 0;
-            GError* error = NULL;
 
             gtk_tree_model_get( GTK_TREE_MODEL(zond_tree_store_get_tree_store(
                     &iter_anchor_intern )), &iter_anchor_intern, 2, &anchor_id_tree, -1 );
 
-            rc = zond_dbase_get_baum_inhalt_file_from_file_part( zond->dbase_zond->zond_dbase_work,
-                    anchor_id_tree, &baum_inhalt_file, &error );
-            if ( rc ) //ToDo: richtige Error-Bearbeitung
-            {
-                display_message( zond->app_window, "Fehler Ermittlung anchor_id\n\n", error->message, NULL );
-                g_error_free( error );
-
-                return FALSE;
-            }
-
-            if ( baum_inhalt_file ) *anchor_id = baum_inhalt_file;
-            else *anchor_id = anchor_id_tree;
+            *anchor_id = anchor_id_tree;
         }
         else *anchor_id = head_nr;
     }
@@ -499,18 +485,19 @@ zond_treeview_get_anchor( Projekt* zond, gboolean child, GtkTreeIter* iter_curso
 
 
 static gint
-zond_treeview_hat_vorfahre_datei( Projekt* zond, GtkTreeIter* iter_anchor,
-        gint anchor_id, gboolean child, GError** error )
+zond_treeview_check_anchor_id( Projekt* zond, GtkTreeIter* iter_anchor,
+        gint* anchor_id, gboolean child, GError** error )
 {
     gint rc = 0;
     gint type = 0;
+    gint parent_id = 0;
+    gint baum_inhalt_file = 0;
 
-    if ( anchor_id == 0 ) return 0;
+    if ( *anchor_id == 0 ) return 0;
 
     if ( !child )
     {
         GtkTreeIter iter_parent = { 0 };
-        gint parent_id = 0;
 
         //Muß Eltern aus dem tree holen, nicht aus der DB, weil BAUM_INHALT_PDF_ABSCHNITT sonst nicht bemerkt wird
         if ( !gtk_tree_model_iter_parent( GTK_TREE_MODEL(zond_tree_store_get_tree_store( iter_anchor )),
@@ -518,16 +505,19 @@ zond_treeview_hat_vorfahre_datei( Projekt* zond, GtkTreeIter* iter_anchor,
 
         gtk_tree_model_get( GTK_TREE_MODEL(zond_tree_store_get_tree_store( iter_anchor )),
                 &iter_parent, 2, &parent_id, -1 );
-
-        anchor_id = parent_id;
     }
 
     rc = zond_dbase_get_type_and_link( zond->dbase_zond->zond_dbase_work,
-            anchor_id, &type, NULL, error );
+            (child) ? *anchor_id : parent_id, &type, NULL, error );
     if ( rc ) ERROR_Z
 
-    if ( type != ZOND_DBASE_TYPE_BAUM_STRUKT &&
-            type != ZOND_DBASE_TYPE_BAUM_ROOT ) return 1;
+    if ( type != ZOND_DBASE_TYPE_BAUM_STRUKT ) return 1;
+
+    rc = zond_dbase_get_baum_inhalt_file_from_file_part( zond->dbase_zond->zond_dbase_work,
+            *anchor_id, &baum_inhalt_file, error );
+    if ( rc ) ERROR_Z
+
+    if ( baum_inhalt_file ) *anchor_id = baum_inhalt_file;
 
     return 0;
 }
@@ -554,7 +544,7 @@ zond_treeview_insert_node( Projekt* zond, gboolean child, gchar** errmsg )
     {
         gint rc = 0;
 
-        rc = zond_treeview_hat_vorfahre_datei( zond, &iter_anchor, anchor_id, child, &error );
+        rc = zond_treeview_check_anchor_id( zond, &iter_anchor, &anchor_id, child, &error );
         if ( rc == -1 )
         {
             if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__,
@@ -1706,7 +1696,7 @@ zond_treeview_paste_clipboard( Projekt* zond, gboolean child, gboolean link, gch
             gint rc = 0;
             GError* error = NULL;
 
-            rc = zond_treeview_hat_vorfahre_datei( zond, &iter_anchor, anchor_id, child, &error );
+            rc = zond_treeview_check_anchor_id( zond, &iter_anchor, &anchor_id, child, &error );
             if ( rc == -1 )
             {
                 if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__,
@@ -2311,7 +2301,6 @@ zond_treeview_selection_entfernen_anbindung_foreach( SondTreeview* stv,
 
                         g_object_unref( object );
 
-                        //ToDo: zond_treeviewfm_get_file_part schreiben
                         rel_path = sond_treeviewfm_get_rel_path( SOND_TREEVIEWFM(ztvfm), &iter_parent );
                         file_part = g_strdup_printf( "/%s//", rel_path );
                         g_free( rel_path );
@@ -2672,68 +2661,16 @@ zond_treeview_jump_activate( GtkMenuItem* item, gpointer user_data )
 
 
 static gint
-zond_treeview_open_node( Projekt* zond, GtkTreeIter* iter, gboolean open_with, GError** error )
+zond_treeview_open_pdf( Projekt* zond, gint node_id, gchar const* file_part, gchar const* section, GError** error )
 {
     gint rc = 0;
-    gchar* file_part = NULL;
-    gchar* section = NULL;
     Anbindung anbindung = { 0 };
     Anbindung anbindung_ges = { 0 };
     PdfPos pos_pdf = { 0 };
-    gint node_id = 0;
-    gint type = 0;
-    gint link = 0;
     Anbindung* anbindung_int = NULL;
     gchar* errmsg = NULL;
 
-    gtk_tree_model_get( GTK_TREE_MODEL(zond_tree_store_get_tree_store( iter ) ), iter, 2, &node_id, -1 );
-
-    rc = zond_dbase_get_node( zond->dbase_zond->zond_dbase_work,
-            node_id, &type, &link, &file_part, &section, NULL, NULL, NULL, error );
-    if ( rc ) ERROR_Z
-
-    if ( type == ZOND_DBASE_TYPE_BAUM_STRUKT ) return 0;
-    else if ( type == ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_COPY )
-    {
-        gint rc = 0;
-
-        //g_free( file_part ) überflüssig - wird in AUSWERTUNG_COPY nicht gespeichtert
-        //Neu für link abfragen - da ist ja die Info
-        node_id = link;
-        rc = zond_dbase_get_node( zond->dbase_zond->zond_dbase_work,
-                node_id, NULL, NULL, &file_part, &section, NULL, NULL, NULL, error );
-        if ( rc ) ERROR_Z
-    }
-
-    //mit externem Programm öffnen
-    if ( open_with || !is_pdf( file_part ) ) //wenn kein pdf oder mit Programmauswahl zu öffnen:
-    {
-        gint rc = 0;
-        gchar* errmsg = NULL;
-
-        g_free( section );
-
-        rc = misc_datei_oeffnen( file_part, open_with, &errmsg );
-        g_free( file_part );
-        if ( rc )
-        {
-            if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\n%s", __func__, errmsg );
-            g_free( errmsg );
-
-            return -1;
-        }
-
-        return 0;
-    }
-
-    g_free( file_part );
-
-    //Dann: Pdf
-    if ( section )
-    {
-        anbindung_parse_file_section( section, &anbindung );
-        g_free( section );
-    }
+    if ( section ) anbindung_parse_file_section( section, &anbindung );
 
     if ( zond->state & GDK_CONTROL_MASK )
     {
@@ -2816,14 +2753,7 @@ zond_treeview_open_node( Projekt* zond, GtkTreeIter* iter, gboolean open_with, G
         //else: bleibt 0
     }
 
-    //jetzt erneut file_part abfragen; sehr unschön, aber sonst müßte bei jedem Error g_free( file_part ) gemacht werden
-    //ToDo: Unterfunktion erzeugen, der file_part übergeben wird
-    rc = zond_dbase_get_node( zond->dbase_zond->zond_dbase_work,
-            node_id, NULL, NULL, &file_part, NULL, NULL, NULL, NULL, error );
-    if ( rc ) ERROR_Z
-
     rc = oeffnen_internal_viewer( zond, file_part, anbindung_int, &pos_pdf, &errmsg );
-    g_free( file_part );
     if ( rc )
     {
         if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\n%s", __func__, errmsg );
@@ -2831,6 +2761,66 @@ zond_treeview_open_node( Projekt* zond, GtkTreeIter* iter, gboolean open_with, G
 
         return -1;
     }
+
+    return 0;
+}
+
+
+static gint
+zond_treeview_open_node( Projekt* zond, GtkTreeIter* iter, gboolean open_with, GError** error )
+{
+    gint rc = 0;
+    gchar* file_part = NULL;
+    gchar* section = NULL;
+    gint node_id = 0;
+    gint type = 0;
+    gint link = 0;
+
+    gtk_tree_model_get( GTK_TREE_MODEL(zond_tree_store_get_tree_store( iter ) ), iter, 2, &node_id, -1 );
+
+    rc = zond_dbase_get_node( zond->dbase_zond->zond_dbase_work,
+            node_id, &type, &link, &file_part, &section, NULL, NULL, NULL, error );
+    if ( rc ) ERROR_Z
+
+    if ( type == ZOND_DBASE_TYPE_BAUM_STRUKT ) return 0;
+    else if ( type == ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_COPY )
+    {
+        gint rc = 0;
+
+        //g_free( file_part ) überflüssig - wird in AUSWERTUNG_COPY nicht gespeichtert
+        //Neu für link abfragen - da ist ja die Info
+        node_id = link;
+        rc = zond_dbase_get_node( zond->dbase_zond->zond_dbase_work,
+                node_id, NULL, NULL, &file_part, &section, NULL, NULL, NULL, error );
+        if ( rc ) ERROR_Z
+    }
+
+    //mit externem Programm öffnen
+    if ( open_with || !is_pdf( file_part ) ) //wenn kein pdf oder mit Programmauswahl zu öffnen:
+    {
+        gint rc = 0;
+        gchar* errmsg = NULL;
+
+        g_free( section );
+
+        rc = misc_datei_oeffnen( file_part, open_with, &errmsg );
+        g_free( file_part );
+        if ( rc )
+        {
+            if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\n%s", __func__, errmsg );
+            g_free( errmsg );
+
+            return -1;
+        }
+
+        return 0;
+    }
+
+    rc = zond_treeview_open_pdf( zond, node_id, file_part, section, error );
+    g_free( file_part );
+    g_free( section );
+    if ( rc ) ERROR_Z
+
 
     return 0;
 }

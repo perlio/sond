@@ -925,6 +925,8 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
 
     count = pdf_count_pages( pv->zond->ctx, doc_merge );
 
+    //ToDo: Anbindungen verschieben/korrigieren
+
     rc = zond_pdf_document_insert_pages( dd->zond_pdf_document, pos,
             pv->zond->ctx, doc_merge, &errmsg );
     pdf_drop_document(pv->zond->ctx, doc_merge );
