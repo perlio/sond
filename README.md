@@ -1,4 +1,9 @@
 # zond
+zond ist ein Programm zur Organisation auch großer Mengen von digital gespeicherten Inhalten. Der Schwerpunkt liegt auf digitalen Dokumenten im PDF-Format.
+
+Mit zond können solche Inhalte strukturiert und gegliedert werden; PDF-Dokumente können auch in beliebigem Umfang untergliedert werden. Für die nahe Zukunft ist geplant, daß aus Abschnitten von PDF-Dateien beliebig "virtuelle PDFs" erzeugt werden können, die dann wie eine einheitliche PDF-Datei behandelt bzw. bearbeitet werden können.
+
+
 A. Installation
 
   I. Erstinstallation
