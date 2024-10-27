@@ -3,6 +3,10 @@ zond ist ein Programm zur Organisation auch großer Mengen von digital gespeiche
 
 Mit zond können solche Inhalte strukturiert und gegliedert werden; PDF-Dokumente können auch in beliebigem Umfang untergliedert werden. Für die nahe Zukunft ist geplant, daß aus Abschnitten von PDF-Dateien beliebig "virtuelle PDFs" erzeugt werden können, die dann wie eine einheitliche PDF-Datei behandelt bzw. bearbeitet werden können.
 
+# "Design"
+Digitale Inhalte werden projektbezogen organisiert. Es gibt ein Dateiverzeichnis, in welchem sich eine Projektdatei befindet. Sämtliche Dateien, die in dem Projekt erfaßt sind oder erfaßt werden können sollen, müssen sich ebenfalls in diesem Projektverzeichnis - oder seinen Unterverzeichnissen - befinden. Selbstverständlich können Dateien zu beliebigen Zeitpunkten hinzugefügt werden.
+
+
 
 A. Installation
 
