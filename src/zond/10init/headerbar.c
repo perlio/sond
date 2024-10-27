@@ -92,11 +92,11 @@ cb_menu_datei_beenden_activate( gpointer data )
 
 /*  Callbacks des Menus Datei  */
 static gboolean
-pdf_rel_path_in_array( GPtrArray* arr_rel_path, gchar* rel_path )
+pdf_rel_path_in_array( GPtrArray* arr_file_part, gchar* rel_path )
 {
-    for ( gint i = 0; i < arr_rel_path->len; i++ )
+    for ( gint i = 0; i < arr_file_part->len; i++ )
     {
-        if ( !g_strcmp0( g_ptr_array_index( arr_rel_path, i ), rel_path ) )
+        if ( !g_strcmp0( g_ptr_array_index( arr_file_part, i ), rel_path ) )
                 return TRUE;
     }
 
@@ -110,7 +110,7 @@ selection_abfragen_pdf( Projekt* zond, gchar** errmsg )
     GList* selected = NULL;
     GList* list = NULL;
 
-    GPtrArray* arr_rel_path = g_ptr_array_new_with_free_func( (GDestroyNotify) g_free );
+    GPtrArray* arr_file_part = g_ptr_array_new_with_free_func( (GDestroyNotify) g_free );
 
     if ( zond->baum_active == KEIN_BAUM ) return NULL;
 
@@ -129,7 +129,7 @@ selection_abfragen_pdf( Projekt* zond, gchar** errmsg )
         if ( !gtk_tree_model_get_iter( gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[zond->baum_active]) ), &iter, list->data ) )
         {
             g_list_free_full( selected, (GDestroyNotify) gtk_tree_path_free );
-            g_ptr_array_unref( arr_rel_path );
+            g_ptr_array_unref( arr_file_part );
 
             if ( errmsg ) *errmsg = g_strdup( "Bei Aufruf gtk_tree_model_get_iter:\n"
                     "Es konnte kein gültiger iter ermittelt werden" );
@@ -146,7 +146,7 @@ selection_abfragen_pdf( Projekt* zond, gchar** errmsg )
             if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
             g_error_free( error );
             g_list_free_full( selected, (GDestroyNotify) gtk_tree_path_free );
-            g_ptr_array_free( arr_rel_path, TRUE );
+            g_ptr_array_free( arr_file_part, TRUE );
 
             return NULL;
         }
@@ -154,8 +154,8 @@ selection_abfragen_pdf( Projekt* zond, gchar** errmsg )
         if ( !file_part ) continue;
 
         //Sonderbehandung, falls pdf-Datei
-        if ( is_pdf( file_part ) && !pdf_rel_path_in_array( arr_rel_path, file_part ) )
-                g_ptr_array_add( arr_rel_path, g_strdup( file_part ) );
+        if ( is_pdf( file_part ) && !pdf_rel_path_in_array( arr_file_part, file_part ) )
+                g_ptr_array_add( arr_file_part, g_strdup( file_part ) );
 
         g_free( file_part );
     }
@@ -163,7 +163,7 @@ selection_abfragen_pdf( Projekt* zond, gchar** errmsg )
 
     g_list_free_full( selected, (GDestroyNotify) gtk_tree_path_free );
 
-    return arr_rel_path;
+    return arr_file_part;
 }
 
 

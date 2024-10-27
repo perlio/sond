@@ -193,18 +193,28 @@ pdf_copy_page( fz_context* ctx, pdf_document* doc_src, gint page_from,
 
 gint
 pdf_open_and_authen_document( fz_context* ctx, gboolean prompt,
-        const gchar* path, gchar** password, pdf_document** doc, gint* auth,
+        const gchar* file_part, gchar** password, pdf_document** doc, gint* auth,
         GError** error )
 {
     gchar* password_try = NULL;
 
-    fz_try( ctx ) *doc = pdf_open_document( ctx, path );
-    fz_catch( ctx )
-    {
-        if ( error ) *error = g_error_new( g_quark_from_static_string( "MUPDF" ),
-                fz_caught( ctx ), "%s\n%s", __func__, fz_caught_message( ctx ) );
+    //ToDo: file_part parsen
 
-        return -1;
+    //if ( file_part nur eine Datei )
+    {
+        gchar* rel_path = NULL;
+
+        rel_path = g_strndup( file_part + 1, strlen( file_part + 1 ) - strlen( g_strrstr( file_part + 1, "//" ) ) );
+
+        fz_try( ctx ) *doc = pdf_open_document( ctx, rel_path );
+        fz_always( ctx ) g_free( rel_path );
+        fz_catch( ctx )
+        {
+            if ( error ) *error = g_error_new( g_quark_from_static_string( "MUPDF" ),
+                    fz_caught( ctx ), "%s\n%s", __func__, fz_caught_message( ctx ) );
+
+            return -1;
+        }
     }
 
     if ( password ) password_try = *password;
@@ -223,7 +233,7 @@ pdf_open_and_authen_document( fz_context* ctx, gboolean prompt,
         }
         else if ( !prompt ) return 1;
 
-        res_dialog = dialog_with_buttons( NULL, path, "Passwort eingeben:",
+        res_dialog = dialog_with_buttons( NULL, file_part, "Passwort eingeben:",
                 &password_try, "Ok", GTK_RESPONSE_OK, "Abbrechen",
                 GTK_RESPONSE_CANCEL, NULL );
         if ( res_dialog != GTK_RESPONSE_OK ) return 1; //Abbruch
@@ -234,7 +244,7 @@ pdf_open_and_authen_document( fz_context* ctx, gboolean prompt,
 
 
 gint
-pdf_save( fz_context* ctx, pdf_document* pdf_doc, const gchar* path,
+pdf_save( fz_context* ctx, pdf_document* pdf_doc, const gchar* file_part,
         void (*drop_func) (gpointer data1, gpointer data2), gpointer data1,
         gpointer data2, gchar** errmsg )
 {
@@ -247,30 +257,44 @@ pdf_save( fz_context* ctx, pdf_document* pdf_doc, const gchar* path,
 #endif // __win32
     if ( pdf_count_pages( ctx, pdf_doc ) < BIG_PDF && !pdf_doc->crypt ) opts.do_garbage = 4;
 
-    path_tmp = g_strconcat( path, ".tmp_clean", NULL );
+    //ToDo: file_part parsen
 
-    fz_try( ctx ) pdf_save_document( ctx, pdf_doc, path_tmp, &opts );
-    fz_always( ctx ) drop_func( data1, data2 );
-    fz_catch( ctx )
+    //if ( file_part zeigt auf Datei )
     {
-        g_free( path_tmp );
-        ERROR_MUPDF( "pdf_write_document" )
-    }
+        gchar* rel_path = NULL;
 
-    if ( g_remove( path ) )
-    {
-        g_free( path_tmp );
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_remove:\n", strerror( errno ), NULL );
-        return -1;
-    }
-    if ( g_rename( path_tmp, path ) )
-    {
-        g_free( path_tmp );
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_rename:\n", strerror( errno ), NULL );
-        return -1;
-    }
+        rel_path = g_strndup( file_part + 1, strlen( file_part + 1 ) - strlen( g_strrstr( file_part + 1, "//" ) ) );
 
-    g_free( path_tmp );
+        path_tmp = g_strconcat( rel_path, ".tmp_clean", NULL );
+
+        fz_try( ctx ) pdf_save_document( ctx, pdf_doc, path_tmp, &opts );
+        fz_always( ctx ) drop_func( data1, data2 );
+        fz_catch( ctx )
+        {
+            g_free( rel_path );
+            g_free( path_tmp );
+            ERROR_MUPDF( "pdf_write_document" )
+        }
+
+        if ( g_remove( rel_path ) )
+        {
+            g_free( rel_path );
+            g_free( path_tmp );
+            if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_remove:\n", strerror( errno ), NULL );
+            return -1;
+        }
+        if ( g_rename( path_tmp, rel_path ) )
+        {
+            g_free( rel_path );
+            g_free( path_tmp );
+            if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_rename:\n", strerror( errno ), NULL );
+            return -1;
+        }
+
+        g_free( rel_path );
+        g_free( path_tmp );
+    }
+    //else if ( file_part ist komplizierter )
 
     return 0;
 }

@@ -26,7 +26,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 typedef enum
 {
-    PROP_PATH = 1,
+    PROP_FILE_PART = 1,
     PROP_PASSWORD,
     N_PROPERTIES
 } ZondPdfDocumentProperty;
@@ -39,7 +39,7 @@ typedef struct
     gchar* password;
     gint auth;
     gboolean dirty;
-    gchar* path;
+    gchar* file_part;
     GPtrArray* pages; //array von PdfDocumentPage*
     gchar* errmsg;
 } ZondPdfDocumentPrivate;
@@ -58,8 +58,8 @@ zond_pdf_document_set_property (GObject      *object,
 
     switch ((ZondPdfDocumentProperty) property_id)
     {
-    case PROP_PATH:
-      priv->path = g_strdup( g_value_get_string(value) );
+    case PROP_FILE_PART:
+      priv->file_part = g_strdup( g_value_get_string(value) );
       break;
 
     case PROP_PASSWORD:
@@ -85,8 +85,8 @@ zond_pdf_document_get_property (GObject    *object,
 
     switch ((ZondPdfDocumentProperty) property_id)
     {
-        case PROP_PATH:
-                g_value_set_string( value, priv->path );
+        case PROP_FILE_PART:
+                g_value_set_string( value, priv->file_part );
                 break;
 
         case PROP_PASSWORD:
@@ -126,7 +126,7 @@ zond_pdf_document_finalize( GObject* self )
     pdf_drop_document( priv->ctx, priv->doc );
     zond_pdf_document_close_context( priv->ctx ); //drop_context reicht nicht aus!
 
-    g_free( priv->path );
+    g_free( priv->file_part );
     g_free( priv->password );
     g_mutex_clear( &priv->mutex_doc );
 
@@ -358,7 +358,7 @@ zond_pdf_document_constructed( GObject* self )
 
     ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( ZOND_PDF_DOCUMENT(self) );
 
-    rc = pdf_open_and_authen_document( priv->ctx, TRUE, priv->path,
+    rc = pdf_open_and_authen_document( priv->ctx, TRUE, priv->file_part,
             &priv->password, &priv->doc, &priv->auth, &error );
     if ( rc )
     {
@@ -402,8 +402,8 @@ zond_pdf_document_class_init( ZondPdfDocumentClass* klass )
     object_class->set_property = zond_pdf_document_set_property;
     object_class->get_property = zond_pdf_document_get_property;
 
-    obj_properties[PROP_PATH] =
-            g_param_spec_string( "path",
+    obj_properties[PROP_FILE_PART] =
+            g_param_spec_string( "file-part",
                                  "gchar*",
                                  "Pfad zur Datei.",
                                  NULL,
@@ -526,7 +526,7 @@ zond_pdf_document_init( ZondPdfDocument* self )
 
 
 ZondPdfDocument*
-zond_pdf_document_open( const gchar* path, gint von, gint bis, gchar** errmsg )
+zond_pdf_document_open( const gchar* file_part, gint von, gint bis, gchar** errmsg )
 {
     gint rc = 0;
     ZondPdfDocument* zond_pdf_document = NULL;
@@ -541,7 +541,7 @@ zond_pdf_document_open( const gchar* path, gint von, gint bis, gchar** errmsg )
             zond_pdf_document = g_ptr_array_index( klass->arr_pdf_documents, i );
             ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( zond_pdf_document );
 
-            if ( !g_strcmp0( priv->path, path ) )
+            if ( !g_strcmp0( priv->file_part, file_part ) )
             {
                 gint rc = 0;
 
@@ -553,7 +553,7 @@ zond_pdf_document_open( const gchar* path, gint von, gint bis, gchar** errmsg )
         }
     }
 
-    zond_pdf_document = g_object_new( ZOND_TYPE_PDF_DOCUMENT, "path", path, NULL );
+    zond_pdf_document = g_object_new( ZOND_TYPE_PDF_DOCUMENT, "file-part", file_part, NULL );
 
     priv = zond_pdf_document_get_instance_private( zond_pdf_document );
 
@@ -587,7 +587,7 @@ zond_pdf_document_open( const gchar* path, gint von, gint bis, gchar** errmsg )
 
 
 const ZondPdfDocument*
-zond_pdf_document_is_open( const gchar* path )
+zond_pdf_document_is_open( const gchar* file_part )
 {
     ZondPdfDocumentClass* klass = g_type_class_peek_static( zond_pdf_document_get_type( ) );
 
@@ -598,7 +598,7 @@ zond_pdf_document_is_open( const gchar* path )
         ZondPdfDocument* zond_pdf_document = g_ptr_array_index( klass->arr_pdf_documents, i );
         ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( zond_pdf_document );
 
-        if ( !g_strcmp0( priv->path, path ) ) return zond_pdf_document;
+        if ( !g_strcmp0( priv->file_part, file_part ) ) return zond_pdf_document;
     }
 
     return NULL;
@@ -616,7 +616,7 @@ zond_pdf_document_reopen_doc_and_pages( ZondPdfDocument* self, gchar** errmsg )
 
     ctx = priv->ctx;
 
-    rc = pdf_open_and_authen_document( priv->ctx, FALSE, priv->path, &priv->password, &priv->doc, &priv->auth, &error );
+    rc = pdf_open_and_authen_document( priv->ctx, FALSE, priv->file_part, &priv->password, &priv->doc, &priv->auth, &error );
     if ( rc )
     {
         if ( rc == -1 )
@@ -688,7 +688,7 @@ zond_pdf_document_save( ZondPdfDocument* self, gchar** errmsg )
 
     gint rc = 0;
 
-    rc = pdf_save( priv->ctx, priv->doc, priv->path,
+    rc = pdf_save( priv->ctx, priv->doc, priv->file_part,
             (void (*) (gpointer, gpointer)) zond_pdf_document_close_doc_and_pages, self, NULL, errmsg );
     if ( rc ) ERROR_S
 
@@ -780,7 +780,7 @@ zond_pdf_document_get_path( ZondPdfDocument* self )
     if ( !ZOND_IS_PDF_DOCUMENT(self) ) return NULL;
     ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
 
-    return priv->path;
+    return priv->file_part;
 }
 
 

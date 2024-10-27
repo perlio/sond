@@ -682,7 +682,12 @@ zond_convert_0_to_1_baum_inhalt_insert( ZondDBase* zond_dbase, gint anchor_id, g
 
             if ( exists ) //wenn Datei nicht existiert, muß man nicht versuchen, sie zu öffnen
             {
-                rc = pdf_open_and_authen_document( data_convert->ctx, TRUE, rel_path, NULL, &(data_convert->doc), NULL, error );
+                gchar* file_part = NULL;
+
+                file_part = g_strdup_printf( "/%s//", rel_path );
+
+                rc = pdf_open_and_authen_document( data_convert->ctx, TRUE, file_part, NULL, &(data_convert->doc), NULL, error );
+                g_free( file_part );
                 if ( rc )
                 {
                     gchar* errmsg = NULL;

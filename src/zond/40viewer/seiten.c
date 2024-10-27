@@ -887,6 +887,7 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
     gint count = 0;
     gchar* errmsg = NULL;
     InfoInsert info_insert = { 0 };
+    GError* error = NULL;
 
     ret = seiten_abfrage_seitenzahl( pv, &pos );
     if ( ret == -1 ) return;
@@ -899,24 +900,27 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
     //komplette Datei wird eingefügt
     if ( ret == 1 )
     {
+        gint rc = 0;
         gchar* path_merge = NULL;
+        gchar* file_part = NULL;
 
         //Datei auswählen
         path_merge = filename_oeffnen( GTK_WINDOW(pv->vf) );
-        if ( !is_pdf( path_merge ) )
+        file_part = g_strdup_printf( "/%s//", path_merge );
+        g_free( path_merge );
+        if ( !is_pdf( file_part ) )
         {
             display_message( pv->vf, "Keine PDF-Datei", NULL );
-            g_free( path_merge );
+            g_free( file_part );
 
             return;
         }
 
-        fz_try( pv->zond->ctx ) doc_merge = pdf_open_document( pv->zond->ctx, path_merge );
-        fz_always( pv->zond->ctx ) g_free( path_merge );
-        fz_catch( pv->zond->ctx )
+        rc = pdf_open_and_authen_document( pv->zond->ctx, TRUE, file_part, NULL, &doc_merge, NULL, &error );
+        if ( rc )
         {
-            display_message( pv->vf, "Fehler Datei einfügen -\n\nBei Aufruf "
-                    "pdf_open_document:\n", fz_caught_message( pv->zond->ctx ), NULL );
+            display_error( pv->vf, "Datei einfügen", error->message );
+            g_error_free( error );
 
             return;
         }
