@@ -533,12 +533,7 @@ update:
     {
         g_free( vtag );
 
-        if ( rc == -1 )
-        {
-            g_prefix_error( error, "%s\n", __func__ );
-
-            return -1;
-        }
+        if ( rc == -1 ) ERROR_Z
         else return 0; //abgebrochen
     }
 
@@ -550,12 +545,7 @@ update:
     if ( rc )
     {
         g_free( vtag );
-        if ( rc == -1 )
-        {
-            g_prefix_error( error, "%s\n", __func__ );
-
-            return -1;
-        }
+        if ( rc == -1 ) ERROR_Z
         else return 0; //ToDo: saubermachen
     }
 
@@ -613,12 +603,7 @@ update:
     res = g_spawn_async( NULL, argv, NULL, G_SPAWN_DEFAULT,
             NULL, NULL, NULL, error );
     g_free( argv[0] );
-    if ( !res )
-    {
-        g_prefix_error( error, "%s\n", __func__ );
-
-        return -1;
-    }
+    if ( !res ) ERROR_Z
 
     //Projekt schließen und zond beenden
     g_signal_emit_by_name( zond->app_window, "delete-event", NULL, &ret );
