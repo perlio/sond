@@ -166,6 +166,7 @@
 			<Add library="C:/msys64/ucrt64/lib/libmupdf-third.a" />
 			<Add library="C:/Windows/System32/crypt32.dll" />
 		</Linker>
+		<Unit filename="README.md" />
 		<Unit filename="SondClient.conf">
 			<Option target="SondClient (Release)" />
 			<Option target="SondClient (Testing)" />
