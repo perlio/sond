@@ -25,11 +25,14 @@ Die zip-Datei des letzten Releases herunterladen, in beliebigem Verzeichnis entp
 
 ## 
 
-##Viewer
+## Viewer
+
 ###
+
 ###
-###Seiten einfügen
+
+### Seiten einfügen
 Werden Seiten vor der ersten oder nach der letzten (angezeigten) Seite eingefügt (Position = 0 oder Position = letzte Seitenzahl), so werden sie am Beginn oder am Ende des im PDF-Viewer angezeigten Abschnitts eingefügt; d.h. der Abschnitt "wächst". Werden Seiten hingegen innerhalb des Dokuments eingefügt und befindet sich die Position, an der eingefügt werden soll, unmittelbar am Anfang oder Ende eines (Unter-)Abschnitts, so werden die Seiten nach oder vor diesem Abschnitt eingefügt. `Beispiel: Ein Abschnitt reicht von Seite 1 - 10, ein weiterer von 11 - 20, Seiten werden nach Seite 10 eingefügt - die Abschnitte bleiben unverändert; zwischen ihnen befinden sich nunmehr die eingefügten Seiten`
 
-##Update
+## Update
 Im Menu "Hilfe" "Update" wählen. Falls eine Internetverbindung besteht, wird geprüft, ob eine neuere Version vorhanden; ggf. wird diese heruntergeladen und installiert. Anschließend wird zond neu gestartet. Sofern ein "Sprung" der erstrangiges Versionsnummer vorliegt - was bedeutet, daß sich die Struktur der Projektdatei verändert hat -, ist zugleich ein Programm zur Konvertierung der Projektdatei enthalten; von der ursprünglichen Datei wird eine Sicherungskopie angefertigt. Ein Downgrade kann durch Herunterladen eines vorangegangenen Releases und dessen Installation vborgenmommen werden.
