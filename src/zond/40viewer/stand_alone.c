@@ -126,8 +126,12 @@ static gint
 pv_oeffnen_datei( PdfViewer* pv, gchar* path, gchar** errmsg )
 {
     DisplayedDocument* dd = NULL;
+    gchar* file_part = NULL;
 
-    dd = document_new_displayed_document( path, NULL, errmsg );
+    file_part = g_strdup_printf( "/%s//", path );
+
+    dd = document_new_displayed_document( file_part, NULL, errmsg );
+    g_free( file_part );
     if ( !dd && *errmsg ) ERROR_S
     else if ( !dd ) return 0;
 
@@ -187,7 +191,7 @@ init( GtkApplication* app, Projekt* zond )
 {
     zond->base_dir = get_base_dir( );
 
-    PdfViewer* pv = viewer_start_pv( zond );
+    PdfViewer* pv = viewer_start_pv( zond, NULL );
 
     gtk_application_add_window( app, GTK_WINDOW(pv->vf) );
 
