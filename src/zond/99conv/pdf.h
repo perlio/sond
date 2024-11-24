@@ -31,11 +31,10 @@ gint pdf_document_get_dest( fz_context*, pdf_document*, gint, gpointer*,
 gint pdf_copy_page( fz_context*, pdf_document*, gint, gint, pdf_document*,
         gint, gchar** );
 
-gint pdf_open_and_authen_document( fz_context*, gboolean, const gchar*, gchar**,
+gint pdf_open_and_authen_document( fz_context*, gboolean, gboolean, const gchar*, gchar**,
         pdf_document**, gint*, GError** );
 
-gint pdf_save( fz_context*, pdf_document*, const gchar*, void (*) (gpointer,
-        gpointer), gpointer, gpointer, gchar** );
+gint pdf_save( fz_context*, pdf_document*, const gchar*, GError** );
 
 gint pdf_clean( fz_context*, const gchar*, gchar** );
 

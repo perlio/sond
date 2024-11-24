@@ -686,7 +686,8 @@ zond_convert_0_to_1_baum_inhalt_insert( ZondDBase* zond_dbase, gint anchor_id, g
 
                 file_part = g_strdup_printf( "/%s//", rel_path );
 
-                rc = pdf_open_and_authen_document( data_convert->ctx, TRUE, file_part, NULL, &(data_convert->doc), NULL, error );
+                rc = pdf_open_and_authen_document( data_convert->ctx, TRUE, TRUE,
+                        file_part, NULL, &(data_convert->doc), NULL, error );
                 g_free( file_part );
                 if ( rc )
                 {

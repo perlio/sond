@@ -57,7 +57,7 @@ SetDestPage( const DisplayedDocument* dd, gint page_number1, gint page_number2,
 {
     PdfMemDocument document;
 
-    const gchar* doc_path = zond_pdf_document_get_path( dd->zond_pdf_document );
+    const gchar* doc_path = zond_pdf_document_get_file_part( dd->zond_pdf_document );
 
     gchar* current_dir = g_get_current_dir( );
     gchar* abs_path = g_strconcat( current_dir, "/", doc_path, NULL );

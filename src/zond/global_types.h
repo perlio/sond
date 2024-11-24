@@ -235,12 +235,4 @@ typedef struct _Pdf_Punkt
 } PdfPunkt;
 
 
-typedef struct _Displayed_Document
-{
-    ZondPdfDocument* zond_pdf_document;
-    Anbindung* anbindung;
-    struct _Displayed_Document* next;
-} DisplayedDocument;
-
-
 #endif // GLOBAL_TYPES_H_INCLUDED

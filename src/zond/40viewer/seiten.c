@@ -793,6 +793,7 @@ typedef struct _InfoInsert
 {
     guint pos;
     gint count;
+    gchar* guid;
 } InfoInsert;
 
 static gint
@@ -916,7 +917,7 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
             return;
         }
 
-        rc = pdf_open_and_authen_document( pv->zond->ctx, TRUE, file_part, NULL, &doc_merge, NULL, &error );
+        rc = pdf_open_and_authen_document( pv->zond->ctx, TRUE, TRUE, file_part, NULL, &doc_merge, NULL, &error );
         if ( rc )
         {
             display_error( pv->vf, "Datei einfügen", error->message );
@@ -928,9 +929,20 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
     else if ( ret == 2 ) doc_merge = pdf_keep_document( pv->zond->ctx, pv->zond->pv_clip ); //Clipboard
 
     count = pdf_count_pages( pv->zond->ctx, doc_merge );
+/*
+#ifndef viewer
+    rc = zond_dbase_insert_pages( pv->zond->dbase_zond->zond_dbase_work,
+            zond_pdf_document_get_file_part( dd->zond_pdf_document ),
+            dd->anbindung, pos, count, &error );
+    if ( rc )
+    {
+        display_error( pv->vf, "Datei einfügen", error->message );
+        g_error_free( error );
 
-    //ToDo: Anbindungen verschieben/korrigieren
-
+        return;
+    }
+#endif
+*/
     rc = zond_pdf_document_insert_pages( dd->zond_pdf_document, pos,
             pv->zond->ctx, doc_merge, &errmsg );
     pdf_drop_document(pv->zond->ctx, doc_merge );
@@ -946,6 +958,7 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
 
     info_insert.pos = pos;
     info_insert.count = count;
+    info_insert.guid = g_uuid_string_random( );
 
     //betroffene viewer-seiten einfügen
     rc = viewer_foreach( pv, zond_pdf_document_get_pdf_document_page(

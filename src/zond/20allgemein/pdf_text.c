@@ -42,7 +42,7 @@ typedef struct _Pdf_Viewer PdfViewer;
 
 typedef struct _PDF_Text_Occ
 {
-    gchar* rel_path;
+    gchar* file_part;
     gint page;
     fz_quad quad;
     gchar* zeile;
@@ -71,7 +71,7 @@ pdf_text_fuellen_fenster( Projekt* zond, GtkListBox* list_box, GArray* arr_pdf_t
         pdf_text_occ = g_array_index( arr_pdf_text_occ, PDFTextOcc, i );
 
         label_text = g_strdup_printf( "<markup><small><u>%s, S. %i</u></small>"
-                "</markup>\n", pdf_text_occ.rel_path, pdf_text_occ.page + 1 );
+                "</markup>\n", pdf_text_occ.file_part, pdf_text_occ.page + 1 );
 
         //text_view erzeugen und einfügen
         text_view = gtk_text_view_new( );
@@ -129,7 +129,7 @@ cb_textsuche_changed( GtkListBox* box, GtkListBoxRow* row, gpointer data )
     anbindung.bis.index = pdf_text_occ.quad.ll.y;
 
     rc = zond_dbase_get_file_part_root( zond->dbase_zond->zond_dbase_work,
-            pdf_text_occ.rel_path, &pdf_root, &error );
+            pdf_text_occ.file_part, &pdf_root, &error );
     if ( rc )
     {
         display_message( zond->app_window, "Fehler Ermittlung root-node\n\n",
@@ -214,7 +214,7 @@ cb_textsuche_act( GtkListBox* box, GtkListBoxRow* row, gpointer data )
     pos_pdf.seite = pdf_text_occ.page;
     pos_pdf.index = (gint) (pdf_text_occ.quad.ul.y);
 
-    rc = oeffnen_internal_viewer( zond, pdf_text_occ.rel_path, NULL, &pos_pdf, &errmsg );
+    rc = oeffnen_internal_viewer( zond, pdf_text_occ.file_part, NULL, &pos_pdf, &errmsg );
     if ( rc )
     {
         display_message( zond->app_window, "Fehler in Textsuche -\n\n",
@@ -239,7 +239,7 @@ cb_textsuche_act( GtkListBox* box, GtkListBoxRow* row, gpointer data )
 
 
 static GtkWidget*
-pdf_text_oeffnen_fenster( Projekt* zond, GPtrArray* arr_rel_path,
+pdf_text_oeffnen_fenster( Projekt* zond, GPtrArray* arr_file_part,
         GArray* arr_pdf_text_occ, gchar* search_text )
 {
     gchar* title = NULL;
@@ -258,14 +258,14 @@ pdf_text_oeffnen_fenster( Projekt* zond, GPtrArray* arr_rel_path,
     GtkWidget* button_sql = gtk_button_new_with_label( "Duchsuchte PDFs" );
     GtkWidget* popover = gtk_popover_new( button_sql );
 
-    gchar* rel_path = NULL;
+    gchar* file_part = NULL;
     gchar* text = g_strdup( "" );
-    for ( gint i = 0; i < arr_rel_path->len; i++ )
+    for ( gint i = 0; i < arr_file_part->len; i++ )
     {
-        rel_path = g_ptr_array_index( arr_rel_path, i );
+        file_part = g_ptr_array_index( arr_file_part, i );
 
-        text = add_string( text, g_strdup( rel_path ) );
-        if ( i < arr_rel_path->len - 1 )
+        text = add_string( text, g_strdup( file_part ) );
+        if ( i < arr_file_part->len - 1 )
                 text = add_string( text, g_strdup( "\n" ) );
     }
 
@@ -294,10 +294,10 @@ pdf_text_oeffnen_fenster( Projekt* zond, GPtrArray* arr_rel_path,
 
 
 gint
-pdf_text_anzeigen_ergebnisse( Projekt* zond, gchar* search_text, GPtrArray* arr_rel_path,
+pdf_text_anzeigen_ergebnisse( Projekt* zond, gchar* search_text, GPtrArray* arr_file_part,
         GArray* arr_pdf_text_occ, gchar** errmsg )
 {
-    GtkWidget* window = pdf_text_oeffnen_fenster( zond, arr_rel_path, arr_pdf_text_occ, search_text );
+    GtkWidget* window = pdf_text_oeffnen_fenster( zond, arr_file_part, arr_pdf_text_occ, search_text );
 
     GtkListBox* list_box = g_object_get_data( G_OBJECT(window), "listbox" );
 
@@ -314,7 +314,7 @@ pdf_text_occ_free( gpointer data )
 {
     PDFTextOcc* pdf_text_occ = (PDFTextOcc*) data;
 
-    g_free( pdf_text_occ->rel_path );
+    g_free( pdf_text_occ->file_part );
     g_free( pdf_text_occ->zeile );
 
     return;
@@ -322,7 +322,7 @@ pdf_text_occ_free( gpointer data )
 
 
 static gint
-pdf_textsuche_pdf( Projekt* zond, const gchar* rel_path, const gchar* search_text,
+pdf_textsuche_pdf( Projekt* zond, const gchar* file_part, const gchar* search_text,
         GArray* arr_pdf_text_occ, InfoWindow* info_window, gchar** errmsg )
 {
     gint rc = 0;
@@ -330,7 +330,7 @@ pdf_textsuche_pdf( Projekt* zond, const gchar* rel_path, const gchar* search_tex
     GPtrArray* arr_pdf_document_pages = NULL;
     fz_context* ctx = NULL;
 
-    zond_pdf_document = zond_pdf_document_open( rel_path, 0, -1, errmsg );
+    zond_pdf_document = zond_pdf_document_open( file_part, 0, -1, errmsg );
     if ( !zond_pdf_document ) ERROR_S
 
     ctx = zond_pdf_document_get_ctx( zond_pdf_document );
@@ -354,7 +354,7 @@ pdf_textsuche_pdf( Projekt* zond, const gchar* rel_path, const gchar* search_tex
             gchar* text_tmp = NULL;
             PDFTextOcc pdf_text_occ = { 0 };
 
-            pdf_text_occ.rel_path = g_strdup( rel_path );
+            pdf_text_occ.file_part = g_strdup( file_part );
             pdf_text_occ.page = i;
             pdf_text_occ.quad = quads[u];
 
@@ -364,7 +364,7 @@ pdf_textsuche_pdf( Projekt* zond, const gchar* rel_path, const gchar* search_tex
             fz_try( ctx ) buf = fz_new_buffer( ctx, 128 );
             fz_catch( ctx )
             {
-                g_free( pdf_text_occ.rel_path );
+                g_free( pdf_text_occ.file_part );
                 ERROR_MUPDF( "fz_new_buffer" )
             }
 
@@ -452,29 +452,29 @@ pdf_textsuche_pdf( Projekt* zond, const gchar* rel_path, const gchar* search_tex
 
 
 gint
-pdf_textsuche( Projekt* zond, InfoWindow* info_window, GPtrArray* array_rel_path,
+pdf_textsuche( Projekt* zond, InfoWindow* info_window, GPtrArray* arr_file_part,
         const gchar* search_text, GArray** arr_pdf_text_occ, gchar** errmsg )
 {
     *arr_pdf_text_occ = g_array_new( FALSE, FALSE, sizeof( PDFTextOcc ) );
     g_array_set_clear_func( *arr_pdf_text_occ, (GDestroyNotify) pdf_text_occ_free );
 
-    for ( gint i = 0; i < array_rel_path->len; i++ )
+    for ( gint i = 0; i < arr_file_part->len; i++ )
     {
-        gchar* rel_path = NULL;
+        gchar* file_part = NULL;
         gint rc = 0;
 
-        rel_path = g_ptr_array_index( array_rel_path, i );
+        file_part = g_ptr_array_index( arr_file_part, i );
 
-        info_window_set_message( info_window, rel_path );
+        info_window_set_message( info_window, file_part );
 
         //prüfen, ob in Viewer geöffnet
-        if ( zond_pdf_document_is_open( rel_path ) )
+        if ( zond_pdf_document_is_open( file_part ) )
         {
             info_window_set_message( info_window, "... in Viewer geöffnet - übersprungen" );
             continue;
         }
 
-        rc = pdf_textsuche_pdf( zond, rel_path, search_text, *arr_pdf_text_occ,
+        rc = pdf_textsuche_pdf( zond, file_part, search_text, *arr_pdf_text_occ,
                 info_window, errmsg );
         if ( rc )
         {

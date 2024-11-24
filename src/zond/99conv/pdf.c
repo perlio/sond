@@ -5,6 +5,7 @@
 #include "test.h"
 
 #include "../zond_pdf_document.h"
+#include "../global_types.h"
 
 #include "../../misc.h"
 
@@ -192,26 +193,70 @@ pdf_copy_page( fz_context* ctx, pdf_document* doc_src, gint page_from,
 
 
 gint
-pdf_open_and_authen_document( fz_context* ctx, gboolean prompt,
+pdf_open_and_authen_document( fz_context* ctx, gboolean prompt, gboolean read_only,
         const gchar* file_part, gchar** password, pdf_document** doc, gint* auth,
         GError** error )
 {
     gchar* password_try = NULL;
+    pdf_document* doc_disk = NULL;
 
     //ToDo: file_part parsen
 
     //if ( file_part nur eine Datei )
     {
         gchar* rel_path = NULL;
+        gchar* rel_path_source = NULL;
+        gchar* rel_path_dest = NULL;
 
-        rel_path = g_strndup( file_part + 1, strlen( file_part + 1 ) - strlen( g_strrstr( file_part + 1, "//" ) ) );
+        rel_path_source = g_strndup( file_part + 1, strlen( file_part + 1 ) - strlen( g_strrstr( file_part + 1, "//" ) ) );
 
-        fz_try( ctx ) *doc = pdf_open_document( ctx, rel_path );
+        if ( !read_only )
+        {
+            GFile* file_source = NULL;
+            GFile* file_dest = NULL;
+            gboolean suc = FALSE;
+
+            file_source = g_file_new_for_path( rel_path_source );
+
+            rel_path_dest = g_strdup_printf( "%s.tmp_open", rel_path_source );
+            g_free( rel_path_source );
+            file_dest = g_file_new_for_path( rel_path_dest );
+
+            suc = g_file_copy( file_source, file_dest, G_FILE_COPY_NONE, NULL, NULL, NULL, error );
+            g_object_unref( file_source );
+            g_object_unref( file_dest );
+            if ( !suc )
+            {
+                g_free( rel_path_dest );
+                ERROR_Z
+            }
+
+            rel_path = rel_path_dest;
+        }
+        else rel_path = rel_path_source;
+
+        fz_try( ctx ) doc_disk = pdf_open_document( ctx, rel_path );
         fz_always( ctx ) g_free( rel_path );
         fz_catch( ctx )
         {
             if ( error ) *error = g_error_new( g_quark_from_static_string( "MUPDF" ),
                     fz_caught( ctx ), "%s\n%s", __func__, fz_caught_message( ctx ) );
+
+            if ( !read_only )
+            {
+                if ( remove( fz_stream_filename( ctx, doc_disk->file ) ) )
+                {
+                    if ( error )
+                    {
+                        gchar* error_text = NULL;
+
+                        error_text = g_strdup_printf( "\n\n%s\nArbeitskopie '%s' konnte nicht "
+                                "gelöscht werden\nFehlermeldung: %s", __func__,
+                                fz_stream_filename(ctx, doc_disk->file ), strerror( errno ) );
+                        (*error)->message = add_string( (*error)->message, error_text );
+                    }
+                 }
+            }
 
             return -1;
         }
@@ -224,20 +269,60 @@ pdf_open_and_authen_document( fz_context* ctx, gboolean prompt,
         gint res_auth = 0;
         gint res_dialog = 0;
 
-        res_auth = pdf_authenticate_password( ctx, *doc, password_try );
+        res_auth = pdf_authenticate_password( ctx, doc_disk, password_try );
         if ( res_auth ) //erfolgreich!
         {
             if ( auth ) *auth = res_auth;
             if ( password ) *password = password_try;
             break;
         }
-        else if ( !prompt ) return 1;
+        else if ( !prompt )
+        {
+            gint ret = 1;
+
+            if ( !read_only )
+            {
+                if ( remove( fz_stream_filename( ctx, doc_disk->file ) ) )
+                {
+                    if ( error ) *error = g_error_new( ZOND_ERROR, 0,
+                            "%s\nArbeitskopie '%s' konnte nicht gelöscht werden\n"
+                            "Fehlermeldung: %s", __func__, fz_stream_filename(ctx, doc_disk->file ),
+                            strerror( errno ) );
+                    ret = -1;
+                }
+            }
+
+            pdf_drop_document( ctx, doc_disk );
+
+            return ret;
+        }
 
         res_dialog = dialog_with_buttons( NULL, file_part, "Passwort eingeben:",
                 &password_try, "Ok", GTK_RESPONSE_OK, "Abbrechen",
                 GTK_RESPONSE_CANCEL, NULL );
-        if ( res_dialog != GTK_RESPONSE_OK ) return 1; //Abbruch
+        if ( res_dialog != GTK_RESPONSE_OK )
+        {
+            gint ret = 1;
+
+            if ( !read_only )
+            {
+                if ( remove( fz_stream_filename( ctx, doc_disk->file ) ) )
+                {
+                    if ( error ) *error = g_error_new( ZOND_ERROR, 0,
+                            "%s\nArbeitskopie '%s' konnte nicht gelöscht werden\n"
+                            "Fehlermeldung: %s", __func__, fz_stream_filename(ctx, doc_disk->file ),
+                            strerror( errno ) );
+                    ret = -1;
+                }
+            }
+
+            pdf_drop_document( ctx, doc_disk );
+
+            return ret;
+        }
     } while ( 1 );
+
+    *doc = doc_disk;
 
     return 0;
 }
@@ -245,10 +330,8 @@ pdf_open_and_authen_document( fz_context* ctx, gboolean prompt,
 
 gint
 pdf_save( fz_context* ctx, pdf_document* pdf_doc, const gchar* file_part,
-        void (*drop_func) (gpointer data1, gpointer data2), gpointer data1,
-        gpointer data2, gchar** errmsg )
+        GError** error )
 {
-    gchar* path_tmp = NULL;
     pdf_write_options opts =
 #ifdef __WIN32
             { 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, ~0, "", "", 0 };
@@ -265,34 +348,15 @@ pdf_save( fz_context* ctx, pdf_document* pdf_doc, const gchar* file_part,
 
         rel_path = g_strndup( file_part + 1, strlen( file_part + 1 ) - strlen( g_strrstr( file_part + 1, "//" ) ) );
 
-        path_tmp = g_strconcat( rel_path, ".tmp_clean", NULL );
-
-        fz_try( ctx ) pdf_save_document( ctx, pdf_doc, path_tmp, &opts );
-        fz_always( ctx ) drop_func( data1, data2 );
+        fz_try( ctx ) pdf_save_document( ctx, pdf_doc, rel_path, &opts );
+        fz_always( ctx ) g_free( rel_path );
         fz_catch( ctx )
         {
-            g_free( rel_path );
-            g_free( path_tmp );
-            ERROR_MUPDF( "pdf_write_document" )
-        }
+            if ( error ) *error = g_error_new( g_quark_from_static_string( "MUPDF" ),
+                    fz_caught( ctx ), "%s\n%s", __func__, fz_caught_message( ctx ) );
 
-        if ( g_remove( rel_path ) )
-        {
-            g_free( rel_path );
-            g_free( path_tmp );
-            if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_remove:\n", strerror( errno ), NULL );
             return -1;
         }
-        if ( g_rename( path_tmp, rel_path ) )
-        {
-            g_free( rel_path );
-            g_free( path_tmp );
-            if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf g_rename:\n", strerror( errno ), NULL );
-            return -1;
-        }
-
-        g_free( rel_path );
-        g_free( path_tmp );
     }
     //else if ( file_part ist komplizierter )
 
@@ -301,7 +365,7 @@ pdf_save( fz_context* ctx, pdf_document* pdf_doc, const gchar* file_part,
 
 
 gint
-pdf_clean( fz_context* ctx, const gchar* rel_path, gchar** errmsg )
+pdf_clean( fz_context* ctx, const gchar* file_part, gchar** errmsg )
 {
     pdf_document* doc = NULL;
     gint rc = 0;
@@ -310,9 +374,9 @@ pdf_clean( fz_context* ctx, const gchar* rel_path, gchar** errmsg )
     GError* error = NULL;
 
     //prüfen, ob in Viewer geöffnet
-    if ( zond_pdf_document_is_open( rel_path ) ) ERROR_S_MESSAGE( "Dokument ist geöffnet" )
+    if ( zond_pdf_document_is_open( file_part ) ) ERROR_S_MESSAGE( "Dokument ist geöffnet" )
 
-    rc = pdf_open_and_authen_document( ctx, TRUE, rel_path, NULL, &doc, NULL, &error );
+    rc = pdf_open_and_authen_document( ctx, TRUE, FALSE, file_part, NULL, &doc, NULL, &error );
     if ( rc == -1 )
     {
         if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
@@ -330,8 +394,14 @@ pdf_clean( fz_context* ctx, const gchar* rel_path, gchar** errmsg )
     fz_always( ctx ) g_free( pages );
     fz_catch( ctx ) ERROR_MUPDF( "pdf_rearrange_pages" )
 
-    rc = pdf_save( ctx, doc, rel_path, (void (*) (gpointer, gpointer)) pdf_drop_document, ctx, doc, errmsg );
-    if ( rc ) ERROR_S
+    rc = pdf_save( ctx, doc, file_part, &error );
+    if ( rc )
+    {
+        if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+        g_error_free( error );
+
+        return -1;
+    }
 
     return 0;
 }

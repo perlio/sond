@@ -1,6 +1,7 @@
 #include <gtk/gtk.h>
 
 #include "viewer.h"
+#include "document.h"
 #include "../zond_pdf_document.h"
 
 #include "../99conv/general.h"
@@ -23,6 +24,7 @@ document_free_displayed_documents( DisplayedDocument* dd )
 
         zond_pdf_document_close( dd->zond_pdf_document );
         g_free( dd->anbindung );
+        g_array_unref( dd->arr_guuids );
         g_free( dd );
 
         dd = next;
@@ -34,13 +36,13 @@ document_free_displayed_documents( DisplayedDocument* dd )
 
 
 DisplayedDocument*
-document_new_displayed_document( const gchar* rel_path,
+document_new_displayed_document( const gchar* file_part,
         Anbindung* anbindung, gchar** errmsg )
 {
     ZondPdfDocument* zond_pdf_document = NULL;
     DisplayedDocument* dd = NULL;
 
-    zond_pdf_document = zond_pdf_document_open( rel_path,
+    zond_pdf_document = zond_pdf_document_open( file_part,
                 (anbindung) ? anbindung->von.seite : 0, (anbindung) ?
                 anbindung->bis.seite : -1, errmsg );
     if ( !zond_pdf_document )
@@ -56,9 +58,10 @@ document_new_displayed_document( const gchar* rel_path,
     {
         dd->anbindung = g_malloc0( sizeof( Anbindung ) );
 
-        dd->anbindung->von = anbindung->von;
-        dd->anbindung->bis = anbindung->bis;
+        *(dd->anbindung) = *anbindung;
     }
+
+    dd->arr_guuids = g_array_new( FALSE, FALSE, sizeof( GQuark ) );
 
     return dd;
 }
@@ -107,5 +110,35 @@ document_get_dd( PdfViewer* pv, gint page, PdfDocumentPage** pdf_document_page,
     } while ( (dd = dd->next) );
 
     return NULL;
+}
+
+
+gint
+document_save_dd( DisplayedDocument* dd, GError** error )
+{
+    if ( !dd->anbindung )
+    {
+        gint rc = 0;
+        gchar* errmsg = NULL;
+
+        rc = zond_pdf_document_save( dd->zond_pdf_document, &errmsg );
+        if ( rc )
+        {
+            if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\n%s", __func__, errmsg );
+            g_free( errmsg );
+
+            return -1;
+        }
+
+        return 0;
+    }
+
+    //doc_disk laden
+
+    //Seiten des dd->Anbindung herauslöschen
+
+    //Seiten des dd->Anbindung an die Stelle kopieren
+
+    return 0;
 }
 

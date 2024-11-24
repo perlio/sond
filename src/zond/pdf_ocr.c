@@ -790,7 +790,7 @@ pdf_ocr_create_pdf_only_text( InfoWindow* info_window,
         PdfDocumentPage* pdf_document_page = g_ptr_array_index( arr_document_pages, i );
 
         gchar* info_text = g_strdup_printf( "(%i/%i) %s, Seite %i",
-                zaehler, arr_document_pages->len, zond_pdf_document_get_path( pdf_document_page->document ),
+                zaehler, arr_document_pages->len, zond_pdf_document_get_file_part( pdf_document_page->document ),
                 pdf_document_page->page_doc + 1 );
         info_window_set_message( info_window, info_text );
         g_free( info_text );

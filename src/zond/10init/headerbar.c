@@ -174,9 +174,9 @@ cb_item_clean_pdf( GtkMenuItem* item, gpointer data )
 
     gchar* errmsg = NULL;
 
-    GPtrArray* arr_rel_path = selection_abfragen_pdf( zond, &errmsg );
+    GPtrArray* arr_file_part = selection_abfragen_pdf( zond, &errmsg );
 
-    if ( !arr_rel_path )
+    if ( !arr_file_part )
     {
         if ( errmsg )
         {
@@ -188,30 +188,30 @@ cb_item_clean_pdf( GtkMenuItem* item, gpointer data )
         return;
     }
 
-    if ( arr_rel_path->len == 0 )
+    if ( arr_file_part->len == 0 )
     {
         display_message( zond->app_window, "Keine PDF-Datei ausgewählt", NULL );
-        g_ptr_array_free( arr_rel_path, TRUE );
+        g_ptr_array_free( arr_file_part, TRUE );
 
         return;
     }
 
-    for ( gint i = 0; i < arr_rel_path->len; i++ )
+    for ( gint i = 0; i < arr_file_part->len; i++ )
     {
         gint rc = 0;
         gchar* errmsg = NULL;
 
-        rc = pdf_clean( zond->ctx, g_ptr_array_index( arr_rel_path, i ), &errmsg );
+        rc = pdf_clean( zond->ctx, g_ptr_array_index( arr_file_part, i ), &errmsg );
         if ( rc == -1 )
         {
             display_message( zond->app_window, "PDF ",
-                    g_ptr_array_index( arr_rel_path, i ), " säubern nicht möglich\n\n",
+                    g_ptr_array_index( arr_file_part, i ), " säubern nicht möglich\n\n",
                     errmsg, NULL );
             g_free( errmsg );
         }
     }
 
-    g_ptr_array_free( arr_rel_path, TRUE );
+    g_ptr_array_free( arr_file_part, TRUE );
 
     return;
 }
@@ -226,8 +226,8 @@ cb_item_textsuche( GtkMenuItem* item, gpointer data )
     gchar* errmsg = NULL;
     GArray* arr_pdf_text_occ = NULL;
 
-    GPtrArray* arr_rel_path = selection_abfragen_pdf( zond, &errmsg );
-    if ( !arr_rel_path )
+    GPtrArray* arr_file_part = selection_abfragen_pdf( zond, &errmsg );
+    if ( !arr_file_part )
     {
         if ( errmsg )
         {
@@ -239,10 +239,10 @@ cb_item_textsuche( GtkMenuItem* item, gpointer data )
         return;
     }
 
-    if ( arr_rel_path->len == 0 )
+    if ( arr_file_part->len == 0 )
     {
         display_message( zond->app_window, "Keine PDF-Datei ausgewählt", NULL );
-        g_ptr_array_free( arr_rel_path, TRUE );
+        g_ptr_array_free( arr_file_part, TRUE );
 
         return;
     }
@@ -251,13 +251,13 @@ cb_item_textsuche( GtkMenuItem* item, gpointer data )
     rc = abfrage_frage( zond->app_window, "Textsuche", "Bitte Suchtext eingeben", &search_text );
     if ( rc != GTK_RESPONSE_YES )
     {
-        g_ptr_array_free( arr_rel_path, TRUE );
+        g_ptr_array_free( arr_file_part, TRUE );
 
         return;
     }
     if ( !g_strcmp0( search_text, "" ) )
     {
-        g_ptr_array_free( arr_rel_path, TRUE );
+        g_ptr_array_free( arr_file_part, TRUE );
         g_free( search_text );
 
         return;
@@ -267,7 +267,7 @@ cb_item_textsuche( GtkMenuItem* item, gpointer data )
 
     info_window = info_window_open( zond->app_window, "Textsuche" );
 
-    rc = pdf_textsuche( zond, info_window, arr_rel_path, search_text, &arr_pdf_text_occ, &errmsg );
+    rc = pdf_textsuche( zond, info_window, arr_file_part, search_text, &arr_pdf_text_occ, &errmsg );
     if ( rc )
     {
         display_message( zond->app_window, "Fehler in Textsuche in PDF -\n\n"
@@ -284,7 +284,7 @@ cb_item_textsuche( GtkMenuItem* item, gpointer data )
     if ( arr_pdf_text_occ->len == 0 )
     {
         display_message( zond->app_window, "Keine Treffer", NULL );
-        g_ptr_array_free( arr_rel_path, TRUE );
+        g_ptr_array_free( arr_file_part, TRUE );
         g_array_free( arr_pdf_text_occ, TRUE );
         g_free( search_text );
 
@@ -292,7 +292,7 @@ cb_item_textsuche( GtkMenuItem* item, gpointer data )
     }
 
     //Anzeigefenster
-    rc = pdf_text_anzeigen_ergebnisse( zond, search_text, arr_rel_path,
+    rc = pdf_text_anzeigen_ergebnisse( zond, search_text, arr_file_part,
             arr_pdf_text_occ, &errmsg );
     if ( rc )
     {
@@ -300,12 +300,12 @@ cb_item_textsuche( GtkMenuItem* item, gpointer data )
                 "Bei Aufruf pdf_text_anzeigen_ergebnisse:\n",
                 errmsg, NULL );
         g_free( errmsg );
-        g_ptr_array_free( arr_rel_path, TRUE );
+        g_ptr_array_free( arr_file_part, TRUE );
         g_array_free( arr_pdf_text_occ, TRUE );
         g_free( search_text );
     }
 
-    g_ptr_array_free( arr_rel_path, TRUE );
+    g_ptr_array_free( arr_file_part, TRUE );
     g_free( search_text );
 
     return;
@@ -322,8 +322,8 @@ cb_datei_ocr( GtkMenuItem* item, gpointer data )
 
     Projekt* zond = (Projekt*) data;
 
-    GPtrArray* arr_rel_path = selection_abfragen_pdf( zond, &errmsg );
-    if ( !arr_rel_path )
+    GPtrArray* arr_file_part = selection_abfragen_pdf( zond, &errmsg );
+    if ( !arr_file_part )
     {
         if ( errmsg )
         {
@@ -335,10 +335,10 @@ cb_datei_ocr( GtkMenuItem* item, gpointer data )
         return;
     }
 
-    if ( arr_rel_path->len == 0 )
+    if ( arr_file_part->len == 0 )
     {
         display_message( zond->app_window, "Keine PDF-Datei ausgewählt", NULL );
-        g_ptr_array_unref( arr_rel_path );
+        g_ptr_array_unref( arr_file_part );
 
         return;
     }
@@ -346,23 +346,23 @@ cb_datei_ocr( GtkMenuItem* item, gpointer data )
     //TessInit
     info_window = info_window_open( zond->app_window, "OCR" );
 
-    for ( gint i = 0; i < arr_rel_path->len; i++ )
+    for ( gint i = 0; i < arr_file_part->len; i++ )
     {
-        gchar* rel_path = NULL;
+        gchar* file_part = NULL;
 
-        rel_path = g_ptr_array_index( arr_rel_path, i );
+        file_part = g_ptr_array_index( arr_file_part, i );
 
-        info_window_set_message(info_window, rel_path );
+        info_window_set_message(info_window, file_part );
 
         //prüfen, ob in Viewer geöffnet
-        if ( zond_pdf_document_is_open( rel_path ) )
+        if ( zond_pdf_document_is_open( file_part ) )
         {
             info_window_set_message( info_window, "... in Viewer geöffnet - übersprungen" );
             continue;
         }
 
         DisplayedDocument* dd = document_new_displayed_document(
-                rel_path, NULL, &errmsg );
+                file_part, NULL, &errmsg );
         if ( !dd )
         {
             if ( *errmsg )
@@ -415,7 +415,7 @@ cb_datei_ocr( GtkMenuItem* item, gpointer data )
 
     info_window_close( info_window );
 
-    g_ptr_array_unref( arr_rel_path );
+    g_ptr_array_unref( arr_file_part );
 
     return;
 }

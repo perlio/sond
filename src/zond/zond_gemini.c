@@ -1509,7 +1509,7 @@ zond_gemini_read_zond_pdf_document( Projekt* zond, InfoWindow* info_window,
     ctx = zond_pdf_document_get_ctx( zond_pdf_document );
 
     //Datei erzeugen oder herausfinden
-    rel_path = zond_pdf_document_get_path( zond_pdf_document ) + strlen( zond->dbase_zond->project_dir ) + 1;
+    rel_path = zond_pdf_document_get_file_part( zond_pdf_document ) + strlen( zond->dbase_zond->project_dir ) + 1;
 
     rc = zond_gemini_get_or_create_datei( zond_dbase, rel_path, errmsg );
     if ( rc == -1 ) ERROR_S
@@ -2555,7 +2555,7 @@ zond_gemini_select( Projekt* zond, gchar** errmsg )
             page_end = atoi( (const gchar*) sqlite3_column_text( stmt, 3 ) );
             index_end = atoi( (const gchar*) sqlite3_column_text( stmt, 4 ) );
 
-            if ( dd_act && !g_strcmp0( zond_pdf_document_get_path(
+            if ( dd_act && !g_strcmp0( zond_pdf_document_get_file_part(
                     dd_act->zond_pdf_document ), datei ) &&
                     ((dd_act->anbindung->bis.seite == page_begin &&
                     dd_act->anbindung->bis.index < index_begin &&
@@ -2567,7 +2567,7 @@ zond_gemini_select( Projekt* zond, gchar** errmsg )
                 {
                     ZondPdfDocument* zpd = NULL;
 
-                    zpd = zond_pdf_document_open( zond_pdf_document_get_path(
+                    zpd = zond_pdf_document_open( zond_pdf_document_get_file_part(
                             dd_act->zond_pdf_document ),
                             dd_act->anbindung->bis.seite + 1, page_end, errmsg );
                     if ( !zpd ) ERROR_S

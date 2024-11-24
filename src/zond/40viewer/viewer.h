@@ -13,7 +13,7 @@
 typedef struct _GtkTreeIter GtkTreeIter;
 typedef struct _Projekt Projekt;
 typedef struct _Pdf_Document_Page PdfDocumentPage;
-
+typedef struct _Displayed_Document DisplayedDocument;
 typedef int gint;
 typedef char gchar;
 typedef double gdouble;
