@@ -365,22 +365,26 @@ pdf_save( fz_context* ctx, pdf_document* pdf_doc, const gchar* file_part,
 
 
 gint
-pdf_clean( fz_context* ctx, const gchar* file_part, gchar** errmsg )
+pdf_clean( fz_context* ctx, const gchar* file_part, GError** error )
 {
     pdf_document* doc = NULL;
     gint rc = 0;
     gint* pages = NULL;
     gint count = 0;
-    GError* error = NULL;
+    gint ret = 0;
 
     //prüfen, ob in Viewer geöffnet
-    if ( zond_pdf_document_is_open( file_part ) ) ERROR_S_MESSAGE( "Dokument ist geöffnet" )
+    if ( zond_pdf_document_is_open( file_part ) )
+    {
+        if ( error ) *error = g_error_new( ZOND_ERROR, 0, "Datei '%s' ist geöffnet", file_part );
 
-    rc = pdf_open_and_authen_document( ctx, TRUE, FALSE, file_part, NULL, &doc, NULL, &error );
+        return -1;
+    }
+
+    rc = pdf_open_and_authen_document( ctx, TRUE, FALSE, file_part, NULL, &doc, NULL, error );
     if ( rc == -1 )
     {
-        if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
-        g_error_free( error );
+        g_prefix_error( error, "%s\n", __func__ );
 
         return -1;
     }
@@ -392,13 +396,50 @@ pdf_clean( fz_context* ctx, const gchar* file_part, gchar** errmsg )
 
     fz_try( ctx ) pdf_rearrange_pages( ctx, doc, count, pages );
     fz_always( ctx ) g_free( pages );
-    fz_catch( ctx ) ERROR_MUPDF( "pdf_rearrange_pages" )
-
-    rc = pdf_save( ctx, doc, file_part, &error );
-    if ( rc )
+    fz_catch( ctx )
     {
-        if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
-        g_error_free( error );
+        gint ret = 0;
+
+        ret = remove( fz_stream_filename( ctx, doc->file ) );
+
+        if ( error )
+        {
+            *error = g_error_new( ZOND_ERROR, 0, "%s\npdf_rearrange_pages\n%s", __func__, fz_caught_message( ctx ) );
+
+            if ( ret )
+            {
+                gchar* error_text = NULL;
+
+                error_text = g_strdup_printf( "\n\nArbeitskopie konnte nicht gelöscht werden\n%s", strerror( errno ) );
+                (*error)->message = add_string( (*error)->message, error_text );
+                g_free( error_text );
+            }
+        }
+
+        return -1;
+    }
+
+    rc = pdf_save( ctx, doc, file_part, error );
+    ret = remove( fz_stream_filename( ctx, doc->file ) );
+    pdf_drop_document( ctx, doc );
+    if ( rc || ret )
+    {
+        if ( error )
+        {
+            if ( rc ) g_prefix_error( error, "%s\n", __func__ );
+
+            if ( ret )
+            {
+                gchar* error_text = NULL;
+
+                if ( rc ) (*error)->message = add_string( (*error)->message, g_strdup( "\n\n" ) );
+                else *error = g_error_new( ZOND_ERROR, 0, " " );
+
+                error_text = g_strdup_printf( "Arbeitskopie konnte nicht gelöscht werden\n%s", strerror( errno ) );
+                (*error)->message = add_string( (*error)->message, error_text );
+                g_free( error_text );
+            }
+        }
 
         return -1;
     }

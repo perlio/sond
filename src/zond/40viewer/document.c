@@ -24,7 +24,6 @@ document_free_displayed_documents( DisplayedDocument* dd )
 
         zond_pdf_document_close( dd->zond_pdf_document );
         g_free( dd->anbindung );
-        g_array_unref( dd->arr_guuids );
         g_free( dd );
 
         dd = next;
@@ -60,8 +59,6 @@ document_new_displayed_document( const gchar* file_part,
 
         *(dd->anbindung) = *anbindung;
     }
-
-    dd->arr_guuids = g_array_new( FALSE, FALSE, sizeof( GQuark ) );
 
     return dd;
 }
@@ -114,23 +111,46 @@ document_get_dd( PdfViewer* pv, gint page, PdfDocumentPage** pdf_document_page,
 
 
 gint
-document_save_dd( DisplayedDocument* dd, GError** error )
+document_save_dd( DisplayedDocument* dd, gboolean ask, GError** error )
 {
-    if ( !dd->anbindung )
+    //ToDo: Test, ob dd geändert
+    //derzeit nur gucken, ob Änderungen irgendwo im Dokument
+
+    GArray* arr_journal = NULL;
+
+    arr_journal = zond_pdf_document_get_arr_journal( dd->zond_pdf_document );
+
+    if ( arr_journal->len > 0 ) //es wurde etwas in diesem doc geändert
     {
         gint rc = 0;
-        gchar* errmsg = NULL;
 
-        rc = zond_pdf_document_save( dd->zond_pdf_document, &errmsg );
-        if ( rc )
+        if ( ask )
         {
-            if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\n%s", __func__, errmsg );
-            g_free( errmsg );
-
-            return -1;
+            gchar* text_frage = g_strconcat( "PDF-Datei ",
+                    zond_pdf_document_get_file_part( dd->zond_pdf_document ),
+                    " geändert", NULL );
+            rc = abfrage_frage( NULL, text_frage, "Speichern?", NULL );
+            g_free( text_frage );
         }
+        else rc = GTK_RESPONSE_YES;
 
-        return 0;
+        if ( rc == GTK_RESPONSE_YES )
+        {
+            gint ret = 0;
+            gchar* errmsg = NULL;
+
+            zond_pdf_document_mutex_lock( dd->zond_pdf_document );
+            ret = zond_pdf_document_save( dd->zond_pdf_document, &errmsg );
+            zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
+            if ( ret )
+            {
+                if ( error ) *error = g_error_new( ZOND_ERROR, 0, "%s\n%s", __func__, errmsg );
+                g_free( errmsg );
+
+                return -1;
+            }
+        }
+        else if ( rc == GTK_RESPONSE_DELETE_EVENT ) return 1;
     }
 
     //doc_disk laden

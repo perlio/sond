@@ -8,6 +8,7 @@
 
 typedef struct _Projekt Projekt;
 typedef struct _Anbindung Anbindung;
+typedef struct _Pdf_Pos PdfPos;
 typedef int gint;
 
 G_BEGIN_DECLS
@@ -40,6 +41,8 @@ gint zond_treeview_copy_node_to_baum_auswertung( ZondTreeview*,
         gint, GtkTreeIter*, gboolean, GtkTreeIter*, gint, gint*, GError** );
 
 ZondTreeview* zond_treeview_new( Projekt*, gint );
+
+gint zond_treeview_oeffnen_internal_viewer( Projekt*, gchar const*, Anbindung*, PdfPos*, gchar** );
 
 gint zond_treeview_load_baum( ZondTreeview*, GError** );
 

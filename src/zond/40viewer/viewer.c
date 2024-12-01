@@ -327,7 +327,7 @@ viewer_thread_render( PdfViewer* pv, gint page )
         GError* error = NULL;
 
         if ( !(pv->thread_pool_page =
-                g_thread_pool_new( (GFunc) render_page_thread, pv, -1, FALSE, &error )) )
+                g_thread_pool_new( (GFunc) render_page_thread, pv, 3, FALSE, &error )) )
         {
             display_message( pv->vf, "Thread-Pool kann nicht erzeugt werden\n\n"
                     "Bei Aufruf g_thread_pool_new:\n", error->message, NULL );
@@ -616,8 +616,6 @@ viewer_schliessen( PdfViewer* pv )
     //pv aus Liste der geöffneten pvs entfernen
     g_ptr_array_remove_fast( pv->zond->arr_pv, pv );
 
-    g_free( pv->file_part );
-
     g_free( pv );
 
     return;
@@ -627,94 +625,56 @@ viewer_schliessen( PdfViewer* pv )
 static gint
 viewer_save_dirty_docs( PdfViewer* pdfv, gboolean ask )
 {
-    DisplayedDocument* dd = pdfv->dd;
+    DisplayedDocument* dd = NULL;
+    GError* error = NULL;
+
+    dd = pdfv->dd;
     if ( !dd ) return 0;
 
+    //Alle schmutzigen Dds speichern
     do
     {
-        if ( dd->arr_guuids->len > 0 ) //es wurde etwas in DIESEM dd geändert
+        gint rc = 0;
+
+        rc = document_save_dd( dd, ask, &error );
+        if ( rc )
         {
-            gint rc = 0;
+            gchar* error_text = NULL;
 
-            if ( ask )
-            {
-                gchar* text_frage = g_strconcat( "PDF-Datei ",
-                        zond_pdf_document_get_file_part( dd->zond_pdf_document ),
-                        " geändert", NULL );
-                rc = abfrage_frage( pdfv->vf, text_frage, "Speichern?", NULL );
-                g_free( text_frage );
-            }
-            else rc = GTK_RESPONSE_YES;
+            error_text = g_strdup_printf( "Fehler bei Speichern der Datei '%s'",
+                    zond_pdf_document_get_file_part( dd->zond_pdf_document ) );
+            display_error( pdfv->vf, error_text, error->message );
+            g_free( error_text );
+            g_error_free( error );
 
-            if ( rc == GTK_RESPONSE_YES )
-            {
-                gint rc = 0;
-                GError* error = NULL;
-
-                zond_pdf_document_mutex_lock( dd->zond_pdf_document );
-
-                rc = document_save_dd( dd, &error );
-                if ( rc )
-                {
-                    gchar* error_text = NULL;
-
-                    error_text = g_strdup_printf( "Fehler bei Speichern der Datei '%s'",
-                            zond_pdf_document_get_file_part( dd->zond_pdf_document ) );
-                    display_error( pdfv->vf, error_text, error->message );
-                    g_free( error_text );
-                    g_error_free( error );
-                    zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
-
-                    continue;
-                }
-
-                //alle pvs prüfen, ob sie die nunmehr "weggespeicherten" Änderungen enthalten
-                //ggf. aus Liste löschen
-                //wenn Liste danach leer ist->Speichern-Icon ausgrauen
-                for ( gint i = 0; i < pdfv->zond->arr_pv->len; i++ )
-                {
-                    DisplayedDocument* dd_vergleich = NULL;
-                    gboolean clean = TRUE;
-
-                    PdfViewer* pv_vergleich = g_ptr_array_index( pdfv->zond->arr_pv, i );
-
-                    if ( pv_vergleich != pdfv )
-                    {
-                        dd_vergleich = pv_vergleich->dd;
-
-                        do
-                        {
-                            for ( gint u = 0; u < dd->arr_guuids->len; u++ )
-                            {
-                                GQuark quark_mod = 0;
-
-                                quark_mod = g_array_index( dd->arr_guuids, GQuark, u );
-
-                                for ( gint z = 0; z < dd_vergleich->arr_guuids->len; z++ )
-                                {
-                                    if ( quark_mod == g_array_index( dd_vergleich->arr_guuids, GQuark, z ) )
-                                    {
-                                        g_array_remove_index_fast( dd_vergleich->arr_guuids, z );
-                                        continue;
-                                    }
-                                }
-                            }
-
-                            if ( dd_vergleich->arr_guuids->len > 0 ) clean = FALSE;
-                        } while ( (dd_vergleich = dd_vergleich->next) );
-                    }
-
-                    if ( clean == TRUE ) gtk_widget_set_sensitive( pv_vergleich->button_speichern, FALSE );
-                }
-
-                //array des dd, der ja gespeichert wurde, leeren
-                g_array_remove_range( dd->arr_guuids, 0, dd->arr_guuids->len );
-
-                zond_pdf_document_mutex_unlock( dd->zond_pdf_document );
-            }
-            else if ( rc == GTK_RESPONSE_DELETE_EVENT ) return 1;
+            continue;
         }
     } while ( (dd = dd->next) );
+
+    //Bei allen sauberen pvs Speichern insensitiv
+    for ( gint i = 0; i < pdfv->zond->arr_pv->len; i++ )
+    {
+        PdfViewer* pdfv_test = NULL;
+        DisplayedDocument* dd = NULL;
+        gboolean dirty = FALSE;
+
+        pdfv_test = g_ptr_array_index( pdfv->zond->arr_pv, i );
+
+        dd = pdfv_test->dd;
+        do
+        {
+            ZondPdfDocument* zpdf = NULL;
+            GArray* arr_journal = NULL;
+
+            zpdf = dd->zond_pdf_document;
+            arr_journal = zond_pdf_document_get_arr_journal( zpdf );
+            if ( arr_journal->len > 0 ) dirty = TRUE;
+            //ToDo: Prüfen, ob entries im journal auch dieses dd betreffen
+        }
+        while ( (dd = dd->next) );
+
+        if ( dirty == FALSE ) gtk_widget_set_sensitive( pdfv_test->button_speichern, FALSE );
+    }
 
     return 0;
 }
@@ -1526,7 +1486,8 @@ viewer_thumblist_render_textcell( GtkTreeViewColumn* column, GtkCellRenderer* ce
 
 
 static gint
-viewer_cb_change_annot( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg )
+viewer_cb_change_annot( PdfViewer* pv, gint page_pv, DisplayedDocument* dd,
+        gpointer data, gchar** errmsg )
 {
     ViewerPageNew* viewer_page = g_ptr_array_index( pv->arr_pages, page_pv );
 
@@ -1563,16 +1524,9 @@ viewer_cb_change_annot( PdfViewer* pv, gint page_pv, gpointer data, gchar** errm
 
 gint
 viewer_foreach( PdfViewer* pdfv, PdfDocumentPage* pdf_document_page,
-        gint (*cb_foreach_pv) (PdfViewer*, gint, gpointer, gchar**),
-        gpointer data, gchar** errmsg )
+        gint (*cb_foreach_pv) (PdfViewer*, gint, DisplayedDocument*,
+        gpointer, gchar**), gpointer data, gchar** errmsg )
 {
-    gchar* guuid = NULL;
-    GQuark quark_error = 0;
-
-    guuid = g_uuid_string_random( );
-    quark_error = g_quark_from_string( guuid );
-    g_free( guuid );
-
     for ( gint p = 0; p < pdfv->zond->arr_pv->len; p++ )
     {
         gint zaehler = 0;
@@ -1585,7 +1539,6 @@ viewer_foreach( PdfViewer* pdfv, PdfDocumentPage* pdf_document_page,
         {
             gint von = 0;
             gint bis = 0;
-            gboolean dirty_dd = FALSE;
 
             if ( dd_vergleich->anbindung )
             {
@@ -1605,21 +1558,16 @@ viewer_foreach( PdfViewer* pdfv, PdfDocumentPage* pdf_document_page,
                     {
                         gint rc = 0;
 
-                        if ( cb_foreach_pv ) rc = cb_foreach_pv( pv_vergleich, zaehler + i, data, errmsg );
+                        if ( cb_foreach_pv ) rc = cb_foreach_pv( pv_vergleich, zaehler + i,
+                                dd_vergleich, data, errmsg );
                         if ( rc ) ERROR_S
-                        dirty_dd = TRUE;
+                        dirty = TRUE;
 
                         break;
                     }
                 }
             }
             else zaehler += (bis - von);
-
-            if ( dirty_dd )
-            {
-                g_array_append_val( dd_vergleich->arr_guuids, quark_error );
-                dirty = TRUE;
-            }
         } while ( (dd_vergleich = dd_vergleich->next) );
 
         if ( dirty ) gtk_widget_set_sensitive( pv_vergleich->button_speichern, TRUE );
@@ -1632,10 +1580,34 @@ viewer_foreach( PdfViewer* pdfv, PdfDocumentPage* pdf_document_page,
 static gint
 viewer_annot_delete( PdfDocumentPage* pdf_document_page, PdfDocumentPageAnnot* pdf_document_page_annot, gchar** errmsg )
 {
+    gint index = 0;
+    JournalEntry entry = { JOURNAL_TYPE_ANNOT_DELETED, };
+    GArray* arr_journal = NULL;
+
     fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
+
+    fz_try( ctx )
+    {
+        pdf_annot* annot = NULL;
+
+        annot = pdf_first_annot( ctx, pdf_document_page->page );
+
+        do
+        {
+            if ( annot == pdf_document_page_annot->annot ) break;
+            index++;
+        }
+        while ( (annot = pdf_next_annot( ctx, annot )) );
+    }
+    fz_catch( ctx ) ERROR_MUPDF( "annot-Index ermitteln" )
 
     fz_try( ctx ) pdf_delete_annot( ctx, pdf_document_page->page, pdf_document_page_annot->annot );
     fz_catch( ctx ) ERROR_MUPDF( "pdf_delete_annot" )
+
+    arr_journal = zond_pdf_document_get_arr_journal( pdf_document_page->document );
+
+    entry.AnnotDeleted.index = index;
+    g_array_append_val( arr_journal, entry );
 
     return 0;
 }
@@ -1918,14 +1890,9 @@ viewer_annot_edit_closed( GtkWidget* popover, gpointer data )
     zond_pdf_document_mutex_unlock( viewer_page->pdf_document_page->document );
 
     gtk_text_buffer_set_text( text_buffer, "", -1 );
-    rc = viewer_foreach( pdfv, viewer_page->pdf_document_page,
+    //wenn foreach_fn == NULL kann kein Fehler zurückkgegeben werden
+    viewer_foreach( pdfv, viewer_page->pdf_document_page,
             NULL, NULL, &errmsg );
-    if ( rc )
-    {
-        display_message( pdfv->vf, "Fehler -\n\n",
-                "Bei Aufruf viewer_refresh_changed_page:\n", errmsg, NULL );
-        g_free( errmsg );
-    }
 
     return;
 }
@@ -3081,13 +3048,12 @@ viewer_einrichten_fenster( PdfViewer* pv )
 
 
 PdfViewer*
-viewer_start_pv( Projekt* zond, gchar const* file_part )
+viewer_start_pv( Projekt* zond )
 {
     PdfViewer* pv = g_malloc0( sizeof( PdfViewer ) );
 
     pv->zond = zond;
     pv->zoom = g_settings_get_double( zond->settings, "zoom" );
-    pv->file_part = g_strdup( file_part );
 
     g_ptr_array_add( zond->arr_pv, pv );
 

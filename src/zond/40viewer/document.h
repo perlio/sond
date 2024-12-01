@@ -14,7 +14,6 @@ typedef struct _Displayed_Document
 {
     ZondPdfDocument* zond_pdf_document;
     Anbindung* anbindung;
-    GArray* arr_guuids;
     struct _Displayed_Document* next;
 } DisplayedDocument;
 
@@ -28,6 +27,6 @@ gint document_get_num_of_pages_of_dd( DisplayedDocument* );
 
 DisplayedDocument* document_get_dd( PdfViewer*, gint, PdfDocumentPage**, gint*, gint* );
 
-gint document_save_dd( DisplayedDocument*, GError** );
+gint document_save_dd( DisplayedDocument*, gboolean, GError** );
 
 #endif // DOCUMENT_H_INCLUDED

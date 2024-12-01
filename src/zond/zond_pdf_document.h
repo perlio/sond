@@ -7,6 +7,7 @@
 #include <mupdf/fitz.h>
 #include <mupdf/pdf.h>
 
+typedef struct _Anbindung Anbindung;
 
 G_BEGIN_DECLS
 
@@ -57,6 +58,60 @@ typedef struct _Pdf_Document_Page_Annot
     };
 } PdfDocumentPageAnnot;
 
+struct PagesDeleted
+{
+    gint* pages_remaining;
+    fz_context* ctx;
+    pdf_document* doc; //hier sollen später die gelöschten Seiten gespeichert sein, um undo zu ermöglichen
+};
+struct PagesInserted
+{
+    gint pos;
+    gint count;
+    Anbindung* anbindung;
+};
+struct AnnotDeleted
+{
+    gint index;
+};
+
+typedef enum _Journal_Type
+{
+    JOURNAL_TYPE_PAGES_DELETED,
+    JOURNAL_TYPE_PAGES_INSERTED,
+    JOURNAL_TYPE_ANNOT_CREATED,
+    JOURNAL_TYPE_ANNOT_CHANGED,
+    JOURNAL_TYPE_ANNOT_DELETED,
+    JOURNAL_TYPE_OCR
+} JournalType;
+
+typedef struct _Journal_Entry
+{
+    JournalType type;
+    union
+    {
+        struct PagesDeleted PagesDeleted;
+        struct PagesInserted PagesInserted;
+        struct AnnotDeleted AnnotDeleted;
+    };
+} JournalEntry;
+
+void
+free_journal_entry( JournalEntry* entry )
+{
+    if ( entry->type == JOURNAL_TYPE_PAGES_DELETED )
+    {
+        g_free( entry->PagesDeleted.pages_remaining );
+        pdf_drop_document( entry->PagesDeleted.ctx, entry->PagesDeleted.doc );
+        fz_drop_context( entry->PagesDeleted.ctx );
+    }
+    else if ( entry->type == JOURNAL_TYPE_PAGES_INSERTED )
+    {
+        g_free( entry->PagesInserted.anbindung );
+    }
+
+    return;
+}
 
 struct _ZondPdfDocumentClass
 {
@@ -83,6 +138,8 @@ void zond_pdf_document_close( ZondPdfDocument* );
 pdf_document* zond_pdf_document_get_pdf_doc( ZondPdfDocument* );
 
 GPtrArray* zond_pdf_document_get_arr_pages( ZondPdfDocument* );
+
+GArray* zond_pdf_document_get_arr_journal( ZondPdfDocument* );
 
 PdfDocumentPage* zond_pdf_document_get_pdf_document_page( ZondPdfDocument*, gint );
 

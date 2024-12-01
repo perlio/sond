@@ -191,7 +191,7 @@ init( GtkApplication* app, Projekt* zond )
 {
     zond->base_dir = get_base_dir( );
 
-    PdfViewer* pv = viewer_start_pv( zond, NULL );
+    PdfViewer* pv = viewer_start_pv( zond );
 
     gtk_application_add_window( app, GTK_WINDOW(pv->vf) );
 

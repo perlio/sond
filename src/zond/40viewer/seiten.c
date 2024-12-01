@@ -390,7 +390,8 @@ seiten_page_tilt( ViewerPageNew* viewer_page)
 
 
 static gint
-seiten_drehen_foreach( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg )
+seiten_drehen_foreach( PdfViewer* pv, gint page_pv, DisplayedDocument* dd,
+        gpointer data, gchar** errmsg )
 {
     gint winkel = 0;
     gint rc = 0;
@@ -553,7 +554,8 @@ cb_pv_seiten_drehen( GtkMenuItem* item, gpointer data )
 **      Seiten löschen
 */
 static gint
-seiten_cb_loesche_seite( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg )
+seiten_cb_loesche_seite( PdfViewer* pv, gint page_pv, DisplayedDocument* dd,
+        gpointer data, gchar** errmsg )
 {
     gint rc = 0;
     GtkTreeIter iter;
@@ -574,6 +576,8 @@ seiten_cb_loesche_seite( PdfViewer* pv, gint page_pv, gpointer data, gchar** err
 
     gtk_list_store_remove( GTK_LIST_STORE( gtk_tree_view_get_model(
             GTK_TREE_VIEW(pv->tree_thumb) ) ), &iter );
+
+    if ( dd->anbindung ) dd->anbindung->bis.seite -= 1;
 
     return 0;
 }
@@ -680,6 +684,7 @@ seiten_loeschen( PdfViewer* pv, GPtrArray* arr_document_page, GError** error )
         gint* pages = NULL;
         GPtrArray* arr_pages = NULL;
         fz_context* ctx = NULL;
+        JournalEntry entry = { JOURNAL_TYPE_PAGES_DELETED, };
 
         zond_pdf_document = g_ptr_array_index( arr_docs, i );
         arr_pages = zond_pdf_document_get_arr_pages( zond_pdf_document );
@@ -699,15 +704,18 @@ seiten_loeschen( PdfViewer* pv, GPtrArray* arr_document_page, GError** error )
 
         fz_try( ctx ) pdf_rearrange_pages( ctx,
                 zond_pdf_document_get_pdf_doc( zond_pdf_document ), arr_pages->len, pages );
-        fz_always( ctx ) g_free( pages );
         fz_catch( ctx )
         {
             if ( error ) *error = g_error_new( g_quark_from_static_string( "MUPDF" ), fz_caught( ctx ),
                     "%s\n%s", __func__, fz_caught_message( ctx ) );
             g_ptr_array_unref( arr_docs );
+            g_free( pages );
 
             return -1;
         }
+
+        entry.PagesDeleted.pages_remaining = pages;
+        g_array_append_val( zond_pdf_document_get_arr_journal( zond_pdf_document ), entry );
     }
 
     g_ptr_array_unref( arr_docs );
@@ -793,25 +801,26 @@ typedef struct _InfoInsert
 {
     guint pos;
     gint count;
-    gchar* guid;
 } InfoInsert;
 
 static gint
-seiten_cb_einfuegen( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg )
+seiten_cb_einfuegen( PdfViewer* pv, gint page_pv, DisplayedDocument* dd,
+        gpointer data, gchar** errmsg )
 {
-    DisplayedDocument* dd = NULL;
     InfoInsert* info_insert = NULL;
+    ViewerPageNew* viewer_page_anchor = NULL;
 
     info_insert = (InfoInsert*) data;
 
-    dd = pv->dd;
+    viewer_page_anchor = g_ptr_array_index( pv->arr_pages, page_pv );
 
     for ( gint u = 0; u < info_insert->count; u++ )
     {
         ViewerPageNew* viewer_page = NULL;
         GtkTreeIter iter_tmp;
 
-        viewer_page = viewer_new_page( pv, dd->zond_pdf_document, info_insert->pos + u );
+        viewer_page = viewer_new_page( pv,
+                viewer_page_anchor->pdf_document_page->document, info_insert->pos + u );
 
         g_ptr_array_insert( pv->arr_pages, info_insert->pos + u, viewer_page );
 
@@ -819,6 +828,7 @@ seiten_cb_einfuegen( PdfViewer* pv, gint page_pv, gpointer data, gchar** errmsg 
                 GTK_TREE_VIEW(pv->tree_thumb) )), &iter_tmp, info_insert->pos + u );
     }
 
+    if ( dd->anbindung ) dd->anbindung->bis.seite += info_insert->count;
     g_object_set_data( G_OBJECT(pv->layout), "dirty", GINT_TO_POINTER(1) );
 
     return 0;
@@ -881,6 +891,7 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
 {
     PdfViewer* pv = (PdfViewer*) data;
     DisplayedDocument* dd = NULL;
+    gint page_doc = 0;
     gint ret = 0;
     gint rc = 0;
     guint pos = 0;
@@ -889,6 +900,7 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
     gchar* errmsg = NULL;
     InfoInsert info_insert = { 0 };
     GError* error = NULL;
+    JournalEntry entry = { JOURNAL_TYPE_PAGES_INSERTED, };
 
     ret = seiten_abfrage_seitenzahl( pv, &pos );
     if ( ret == -1 ) return;
@@ -896,7 +908,27 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
     if ( pos > pv->arr_pages->len ) pos = pv->arr_pages->len;
     if ( pos < 0 ) pos = 0;
 
-    dd = pv->dd;
+    if ( pos == 0 ) dd = pv->dd;
+    else
+    {
+
+        dd = document_get_dd( pv, pos, NULL, NULL, &page_doc );
+        if ( pos < pv->arr_pages->len )
+        {
+            DisplayedDocument* dd_nach = NULL;
+
+            dd_nach = document_get_dd( pv, pos, NULL, NULL, NULL );
+            if ( dd != dd_nach )
+            {
+                //es handelt sich um ein virtuelles PDF
+                //zwischen den Grenzen verschiedener Abschnitte sollte nichts eingefügt werden
+                display_message( pv->vf, "Virtuelles PDF - zwischen den Abschnitten "
+                        "darf nichts eingefügt werden", NULL );
+
+                return;
+            }
+        }
+    }
 
     //komplette Datei wird eingefügt
     if ( ret == 1 )
@@ -956,9 +988,18 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
         return;
     }
 
+    entry.PagesInserted.pos = pos;
+    entry.PagesInserted.count = count;
+    if ( dd->anbindung )
+    {
+        entry.PagesInserted.anbindung = g_malloc0( sizeof( Anbindung ) );
+        *(entry.PagesInserted.anbindung) = *(dd->anbindung);
+    }
+
+    g_array_append_val( zond_pdf_document_get_arr_journal( dd->zond_pdf_document ), entry );
+
     info_insert.pos = pos;
     info_insert.count = count;
-    info_insert.guid = g_uuid_string_random( );
 
     //betroffene viewer-seiten einfügen
     rc = viewer_foreach( pv, zond_pdf_document_get_pdf_document_page(

@@ -214,7 +214,7 @@ cb_textsuche_act( GtkListBox* box, GtkListBoxRow* row, gpointer data )
     pos_pdf.seite = pdf_text_occ.page;
     pos_pdf.index = (gint) (pdf_text_occ.quad.ul.y);
 
-    rc = oeffnen_internal_viewer( zond, pdf_text_occ.file_part, NULL, &pos_pdf, &errmsg );
+    rc = zond_treeview_oeffnen_internal_viewer( zond, pdf_text_occ.file_part, NULL, &pos_pdf, &errmsg );
     if ( rc )
     {
         display_message( zond->app_window, "Fehler in Textsuche -\n\n",

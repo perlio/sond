@@ -42,7 +42,7 @@ typedef struct
     gboolean read_only;
     gchar* working_copy;
     GPtrArray* pages; //array von PdfDocumentPage*
-    gchar* errmsg;
+    GArray* arr_journal;
 } ZondPdfDocumentPrivate;
 
 G_DEFINE_TYPE_WITH_PRIVATE(ZondPdfDocument, zond_pdf_document, G_TYPE_OBJECT)
@@ -145,6 +145,8 @@ zond_pdf_document_finalize( GObject* self )
         }
     }
     zond_pdf_document_close_context( priv->ctx ); //drop_context reicht nicht aus!
+
+    g_array_unref( priv->arr_journal );
 
     g_free( priv->file_part );
     g_free( priv->password );
@@ -370,44 +372,6 @@ zond_pdf_document_init_pages( ZondPdfDocument* self, gint von, gint bis, gchar**
 
 
 static void
-zond_pdf_document_constructed( GObject* self )
-{
-    gint rc = 0;
-    GError* error = NULL;
-    gint number_of_pages = 0;
-
-    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( ZOND_PDF_DOCUMENT(self) );
-
-    rc = pdf_open_and_authen_document( priv->ctx, TRUE, FALSE, priv->file_part,
-            &priv->password, &priv->doc, &priv->auth, &error );
-    if ( rc )
-    {
-        if ( rc == -1 ) priv->errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
-        g_error_free( error );
-        priv->doc = NULL;
-        G_OBJECT_CLASS(zond_pdf_document_parent_class)->constructed( self );
-
-        return;
-    }
-
-    number_of_pages = pdf_count_pages( priv->ctx, priv->doc );
-    if ( number_of_pages == 0 )
-    {
-        priv->errmsg = g_strdup_printf( "%s\nDokument enthält keine Seiten", __func__ );
-        G_OBJECT_CLASS(zond_pdf_document_parent_class)->constructed( self );
-
-        return;
-    }
-
-    g_ptr_array_set_size( priv->pages, number_of_pages );
-
-    G_OBJECT_CLASS(zond_pdf_document_parent_class)->constructed( self );
-
-    return;
-}
-
-
-static void
 zond_pdf_document_class_init( ZondPdfDocumentClass* klass )
 {
     GParamSpec *obj_properties[N_PROPERTIES] = { NULL, };
@@ -416,7 +380,6 @@ zond_pdf_document_class_init( ZondPdfDocumentClass* klass )
 
     GObjectClass *object_class = G_OBJECT_CLASS(klass);
 
-    object_class->constructed = zond_pdf_document_constructed;
     object_class->finalize = zond_pdf_document_finalize;
 
     object_class->set_property = zond_pdf_document_set_property;
@@ -527,19 +490,12 @@ zond_pdf_document_init( ZondPdfDocument* self )
 {
     ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
 
-    priv->ctx = zond_pdf_document_init_context( );
-    if ( !priv->ctx )
-    {
-        priv->errmsg = g_strconcat( "In zond_pdf_document_init:\n"
-                "fz_context konnte nicht erzeugt werden", NULL );
-
-        return;
-    }
-
     g_mutex_init( &priv->mutex_doc );
 
     priv->pages = g_ptr_array_new_with_free_func( (GDestroyNotify)
             zond_pdf_document_page_free );
+    priv->arr_journal = g_array_new( FALSE, FALSE, sizeof( JournalEntry ) );
+    g_array_set_clear_func( priv->arr_journal, (GDestroyNotify) free_journal_entry );
 
     return;
 }
@@ -571,6 +527,8 @@ zond_pdf_document_open( const gchar* file_part, gint von, gint bis, gchar** errm
     ZondPdfDocument* zond_pdf_document = NULL;
     ZondPdfDocumentPrivate* priv = NULL;
     ZondPdfDocumentClass* klass = NULL;
+    GError* error = NULL;
+    gint number_of_pages = 0;
 
     zond_pdf_document = (ZondPdfDocument*) zond_pdf_document_is_open( file_part );
     if ( zond_pdf_document )
@@ -587,20 +545,40 @@ zond_pdf_document_open( const gchar* file_part, gint von, gint bis, gchar** errm
 
     priv = zond_pdf_document_get_instance_private( zond_pdf_document );
 
-    if ( priv->errmsg )
+    priv->ctx = zond_pdf_document_init_context( );
+    if ( !priv->ctx )
     {
-        if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf ", __func__, ":\n\n",
-                priv->errmsg, NULL );
-        g_free( priv->errmsg );
+        if ( errmsg ) *errmsg = g_strdup_printf( "%s\nfz_context konnte nicht erzeugt werden", __func__ );
         g_object_unref( zond_pdf_document );
 
         return NULL;
     }
-    else if ( priv->auth == 0 )
+
+    rc = pdf_open_and_authen_document( priv->ctx, TRUE, FALSE, priv->file_part,
+            &priv->password, &priv->doc, &priv->auth, &error );
+    if ( rc )
     {
+        if ( rc == -1 )
+        {
+            if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
+            g_error_free( error );
+        }
+        else if ( errmsg ) *errmsg = g_strdup_printf( "%s\nDokument verschlüsselt", __func__ );
+
         g_object_unref( zond_pdf_document );
+
         return NULL;
     }
+
+    number_of_pages = pdf_count_pages( priv->ctx, priv->doc );
+    if ( number_of_pages == 0 )
+    {
+        if ( errmsg ) *errmsg = g_strdup_printf( "%s\nDokument enthält keine Seiten", __func__ );
+
+        return NULL;
+    }
+
+    g_ptr_array_set_size( priv->pages, number_of_pages );
 
     rc = zond_pdf_document_init_pages( zond_pdf_document, von, bis, errmsg );
     if ( rc )
@@ -661,6 +639,10 @@ zond_pdf_document_save( ZondPdfDocument* self, gchar** errmsg )
         return -1;
     }
 
+    //Wenn erfolgreich gespeichert, Änderungs-Journal löschen
+    g_array_remove_range( zond_pdf_document_get_arr_journal( self ),
+            0, zond_pdf_document_get_arr_journal( self )->len );
+
     return 0;
 }
 
@@ -689,6 +671,15 @@ zond_pdf_document_get_arr_pages( ZondPdfDocument* self )
     ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
 
     return priv->pages;
+}
+
+
+GArray*
+zond_pdf_document_get_arr_journal( ZondPdfDocument* self )
+{
+    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
+
+    return priv->arr_journal;
 }
 
 

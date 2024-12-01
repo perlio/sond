@@ -505,13 +505,23 @@ zond_anbindung_erzeugen( PdfViewer* pv, GError** error )
     gchar* node_text = NULL;
     gint anchor_pdf_abschnitt = 0;
 
+    //ToDo: Wollen wir später schon!
+    if ( pv->dd->next )
+    {
+        if ( error ) *error = g_error_new( ZOND_ERROR, 0,
+                "%s\nAnbindung kann nicht in virtuelles Dokument eingefügt werden", __func__ );
+
+        return -1;
+    }
+
     rc = zond_anbindung_insert_pdf_abschnitt_in_dbase( pv->zond,
-            pv->file_part, pv->anbindung, &anchor_pdf_abschnitt, &child,
+            zond_pdf_document_get_file_part( pv->dd->zond_pdf_document),
+            pv->anbindung, &anchor_pdf_abschnitt, &child,
             &node_inserted, &node_text, error );
     if ( rc ) ERROR_Z
 
     rc = zond_anbindung_trees( pv->zond, anchor_pdf_abschnitt, child, node_inserted, pv->anbindung,
-            pv->file_part, node_text, error );
+            zond_pdf_document_get_file_part( pv->dd->zond_pdf_document), node_text, error );
     g_free( node_text );
     if ( rc ) ERROR_Z
 

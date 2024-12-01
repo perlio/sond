@@ -199,15 +199,15 @@ cb_item_clean_pdf( GtkMenuItem* item, gpointer data )
     for ( gint i = 0; i < arr_file_part->len; i++ )
     {
         gint rc = 0;
-        gchar* errmsg = NULL;
+        GError* error = NULL;
 
-        rc = pdf_clean( zond->ctx, g_ptr_array_index( arr_file_part, i ), &errmsg );
+        rc = pdf_clean( zond->ctx, g_ptr_array_index( arr_file_part, i ), &error );
         if ( rc == -1 )
         {
             display_message( zond->app_window, "PDF ",
                     g_ptr_array_index( arr_file_part, i ), " säubern nicht möglich\n\n",
-                    errmsg, NULL );
-            g_free( errmsg );
+                    error->message, NULL );
+            g_error_free( error );
         }
     }
 
