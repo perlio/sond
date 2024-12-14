@@ -64,7 +64,7 @@ document_new_displayed_document( const gchar* file_part,
 }
 
 
-gint
+static gint
 document_get_num_of_pages_of_dd( DisplayedDocument* dd )
 {
     gint anz_seiten = 0;

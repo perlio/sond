@@ -891,7 +891,6 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
 {
     PdfViewer* pv = (PdfViewer*) data;
     DisplayedDocument* dd = NULL;
-    gint page_doc = 0;
     gint ret = 0;
     gint rc = 0;
     guint pos = 0;
@@ -908,11 +907,23 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
     if ( pos > pv->arr_pages->len ) pos = pv->arr_pages->len;
     if ( pos < 0 ) pos = 0;
 
-    if ( pos == 0 ) dd = pv->dd;
+    if ( pos == 0 )
+    {
+        dd = pv->dd;
+        if ( dd->anbindung && dd->anbindung->von.index != 0 )
+        {
+            display_message( pv->vf, "Abschnitt beginnt nicht am Beginn der Seite -\n"
+                    "Einfügen vor erster Seite daher nicht möglich" , NULL );
+
+            return;
+        }
+    }
     else
     {
+        gint page_dd = 0;
 
-        dd = document_get_dd( pv, pos, NULL, NULL, &page_doc );
+        dd = document_get_dd( pv, pos, NULL, &page_dd, NULL );
+
         if ( pos < pv->arr_pages->len )
         {
             DisplayedDocument* dd_nach = NULL;
@@ -927,6 +938,16 @@ cb_pv_seiten_einfuegen( GtkMenuItem* item, gpointer data )
 
                 return;
             }
+        }
+
+        //letzte Seite Anbindung?
+        if ( dd->anbindung && dd->anbindung->bis.index &&
+                page_dd == (dd->anbindung->bis.seite - dd->anbindung->von.seite ) )
+        {
+            display_message( pv->vf, "Abschnitt Ende nicht am Schluß der Seite -\n"
+                    "Einfügen nach Ende eines Abschnitts daher nicht möglich" , NULL );
+
+            return;
         }
     }
 

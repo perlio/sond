@@ -639,10 +639,6 @@ zond_pdf_document_save( ZondPdfDocument* self, gchar** errmsg )
         return -1;
     }
 
-    //Wenn erfolgreich gespeichert, Änderungs-Journal löschen
-    g_array_remove_range( zond_pdf_document_get_arr_journal( self ),
-            0, zond_pdf_document_get_arr_journal( self )->len );
-
     return 0;
 }
 

@@ -23,8 +23,6 @@ void document_free_displayed_documents( DisplayedDocument* );
 DisplayedDocument* document_new_displayed_document( const gchar*,
         Anbindung*, gchar** );
 
-gint document_get_num_of_pages_of_dd( DisplayedDocument* );
-
 DisplayedDocument* document_get_dd( PdfViewer*, gint, PdfDocumentPage**, gint*, gint* );
 
 gint document_save_dd( DisplayedDocument*, gboolean, GError** );

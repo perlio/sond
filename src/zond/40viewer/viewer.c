@@ -622,6 +622,32 @@ viewer_schliessen( PdfViewer* pv )
 }
 
 
+static gboolean
+viewer_entry_in_anbindung( JournalEntry entry, Anbindung* anbindung )
+{
+    gboolean ret = TRUE;
+
+    if ( !anbindung ) return ret; //ganzes Dokument
+
+    if ( entry.type == JOURNAL_TYPE_PAGES_INSERTED )
+    {
+        if ( entry.PagesInserted.pos < anbindung->von.seite ||
+                entry.PagesInserted.pos > anbindung->von.seite ) ret = FALSE;
+        else if ( entry.PagesInserted.pos == anbindung->von.seite ||
+                entry.PagesInserted.pos == anbindung->bis.seite )
+        {
+            if ( !entry.PagesInserted.anbindung ) ret = FALSE;
+            else if ( )
+        }
+
+    }
+    else if ( entry.tyoe == JOURNAL_TYPE_PAGES_DELETED )
+    {
+
+    }
+}
+
+
 static gint
 viewer_save_dirty_docs( PdfViewer* pdfv, gboolean ask )
 {
@@ -635,6 +661,43 @@ viewer_save_dirty_docs( PdfViewer* pdfv, gboolean ask )
     do
     {
         gint rc = 0;
+        GArray* arr_journal = NULL;
+        GArray* arr_anb_work = NULL;
+        GArray* arr_anb_store = NULL;
+        GArray* arr_redo = NULL;
+
+        arr_journal = zond_pdf_document_get_arr_journal( dd->zond_pdf_document );
+
+        if ( arr_journal->len == 0 ) continue; //nix geändert
+
+
+
+        for ( gint i = arr_journal->len -1; i >= 0; i-- )
+        {
+            JournalEntry entry = { 0 };
+
+            entry = g_array_index( arr_journal, JournalEntry, i );
+
+            if ( !viewer_entry_in_anbindung( entry, dd->anbindung )
+            {
+                /*
+                g_array_append_val( arr_redo, entry_actus_contrarius )
+                undo( entry )
+                */
+            }
+            else
+            {
+                if ( (entry ist TYPE_PAGES_INSERTED || _DELETED) && entry betrifft dd->anbindung)
+                {
+                    //lese, falls noch nicht geschehen, alle Kinder von root(file_part) ein, wenn sie nicht > dd->anbindung sind
+
+                    //passe diese in Datenbank an
+                }
+
+                g_array_index_remove( arr_journal, i );
+            }
+            */
+        }
 
         rc = document_save_dd( dd, ask, &error );
         if ( rc )
@@ -655,23 +718,23 @@ viewer_save_dirty_docs( PdfViewer* pdfv, gboolean ask )
     for ( gint i = 0; i < pdfv->zond->arr_pv->len; i++ )
     {
         PdfViewer* pdfv_test = NULL;
-        DisplayedDocument* dd = NULL;
+        DisplayedDocument* dd_test = NULL;
         gboolean dirty = FALSE;
 
         pdfv_test = g_ptr_array_index( pdfv->zond->arr_pv, i );
 
-        dd = pdfv_test->dd;
+        dd_test = pdfv_test->dd;
         do
         {
             ZondPdfDocument* zpdf = NULL;
             GArray* arr_journal = NULL;
 
-            zpdf = dd->zond_pdf_document;
+            zpdf = dd_test->zond_pdf_document;
             arr_journal = zond_pdf_document_get_arr_journal( zpdf );
             if ( arr_journal->len > 0 ) dirty = TRUE;
             //ToDo: Prüfen, ob entries im journal auch dieses dd betreffen
         }
-        while ( (dd = dd->next) );
+        while ( (dd_test = dd_test->next) );
 
         if ( dirty == FALSE ) gtk_widget_set_sensitive( pdfv_test->button_speichern, FALSE );
     }
