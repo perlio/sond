@@ -24,8 +24,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "../zond_pdf_document.h"
 
-#include "../../sond_treeview.h"
-#include "../../sond_treeviewfm.h"
+#include "../sond_treeview.h"
+#include "../sond_treeviewfm.h"
 #include "../../misc.h"
 
 #include "../global_types.h"

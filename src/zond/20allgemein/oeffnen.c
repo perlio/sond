@@ -20,7 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include <mupdf/fitz.h>
 
 #include "../../misc.h"
-#include "../../sond_treeview.h"
+#include "../sond_treeview.h"
 
 #include "../zond_pdf_document.h"
 #include "../global_types.h"

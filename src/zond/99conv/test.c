@@ -7,11 +7,9 @@
 #include "../pdf_ocr.h"
 #include "../zond_pdf_document.h"
 #include "../zond_tree_store.h"
-#include "../../sond_treeview.h"
-#include "../../sond_treeviewfm.h"
+#include "../sond_treeview.h"
+#include "../sond_treeviewfm.h"
 #include "../../misc.h"
-#include "../../sond_database_node.h"
-#include "../../sond_database_entity.h"
 
 #include "general.h"
 #include "pdf.h"

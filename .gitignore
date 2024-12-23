@@ -3,9 +3,7 @@
 !/resources
 !/share
 !/src
-
-!*/*gch
-
+!/Makefile
 !.gitignore
 !LICENSE
 !sond.cbp

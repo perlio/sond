@@ -137,9 +137,9 @@ void zond_pdf_document_close( ZondPdfDocument* );
 
 pdf_document* zond_pdf_document_get_pdf_doc( ZondPdfDocument* );
 
-GPtrArray* zond_pdf_document_get_arr_pages( ZondPdfDocument* );
+GPtrArray* zond_pdf_document_get_arr_pages( ZondPdfDocument const* );
 
-GArray* zond_pdf_document_get_arr_journal( ZondPdfDocument* );
+GArray* zond_pdf_document_get_arr_journal( ZondPdfDocument const* );
 
 PdfDocumentPage* zond_pdf_document_get_pdf_document_page( ZondPdfDocument*, gint );
 

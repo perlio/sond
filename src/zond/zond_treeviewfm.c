@@ -1,7 +1,7 @@
 #include "zond_treeviewfm.h"
 
 #include "../misc.h"
-#include "../sond_treeviewfm.h"
+#include "sond_treeviewfm.h"
 
 #include "zond_dbase.h"
 #include "zond_treeview.h"

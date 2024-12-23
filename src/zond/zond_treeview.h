@@ -4,7 +4,7 @@
 #include <glib-object.h>
 #include <gtk/gtk.h>
 
-#include "../sond_treeview.h"
+#include "sond_treeview.h"
 
 typedef struct _Projekt Projekt;
 typedef struct _Anbindung Anbindung;

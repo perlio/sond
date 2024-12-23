@@ -16,12 +16,12 @@ You should have received a copy of the GNU Affero General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 */
 
-#include "misc.h"
+#include "../misc.h"
 
 #include "sond_treeviewfm.h"
 
-#include "zond/zond_dbase.h"
-#include "zond/99conv/general.h"
+#include "zond_dbase.h"
+#include "99conv/general.h"
 
 
 //SOND_TVFM_ITEM

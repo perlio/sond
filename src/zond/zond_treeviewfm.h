@@ -4,7 +4,7 @@
 #include <glib-object.h>
 #include <gtk/gtk.h>
 
-#include "../sond_treeviewfm.h"
+#include "sond_treeviewfm.h"
 
 #include "global_types.h"
 

@@ -18,6 +18,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "zond_treeview.h"
 
+#include <gtk/gtk.h>
+#include <glib-object.h>
+
 #include "zond_dbase.h"
 #include "zond_tree_store.h"
 #include "zond_treeviewfm.h"
@@ -25,7 +28,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "global_types.h"
 #include "../misc.h"
-#include "../sond_treeviewfm.h"
+#include "sond_treeviewfm.h"
 #include "10init/app_window.h"
 #include "10init/headerbar.h"
 
@@ -2663,7 +2666,7 @@ zond_treeview_jump_activate( GtkMenuItem* item, gpointer user_data )
 
 
 static void
-zond_treeview_oeffnen_anbindung_und_pos_anpassen( ZondPdfDocument* zpdfd, Anbindung* anbindung, PdfPos* pdf_pos )
+zond_treeview_oeffnen_anbindung_und_pos_anpassen( ZondPdfDocument const* zpdfd, Anbindung* anbindung, PdfPos* pdf_pos )
 {
     GArray* arr_journal = NULL;
     gint num_of_pages = 0;
@@ -2770,7 +2773,7 @@ zond_treeview_oeffnen_internal_viewer( Projekt* zond, const gchar* file_part, An
         PdfPos* pos_pdf, gchar** errmsg )
 {
     PdfPos pos_von = { 0 };
-    ZondPdfDocument* zpdfd = NULL;
+    ZondPdfDocument const* zpdfd = NULL;
 
     if ( (zpdfd = zond_pdf_document_is_open( file_part )) )
             zond_treeview_oeffnen_anbindung_und_pos_anpassen( zpdfd, anbindung, pos_pdf );

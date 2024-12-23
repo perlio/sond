@@ -12,7 +12,7 @@
 
 #include <mupdf/fitz.h>
 #include <mupdf/pdf.h>
-#include <glib.h>
+#include <glib-object.h>
 
 #define ZOND_ERROR zond_error_quark()
 G_DEFINE_QUARK(zond-error-quark,zond_error)

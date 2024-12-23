@@ -85,7 +85,6 @@ set_icon( Icon* icon, const gchar* icon_name,
 }
 
 
-
 static void
 init_icons( Projekt* zond )
 {
@@ -155,7 +154,7 @@ log_init( Projekt* zond )
 
 #ifdef _WIN32
     logdir = g_strconcat( zond->base_dir, "logs", NULL );
-#elifdef __linux__
+#elif defined __linux__
     logdir = g_strdup( "/var/log/zond" );
 #endif // _WIN32
 
@@ -168,8 +167,8 @@ log_init( Projekt* zond )
     file = freopen( logfile, "a", stdout );
     if ( !file )
     {
-        display_message( zond->app_window, "stout konnte nicht in Datei %s "
-                "umgeleitet werden:\n%s", logfile, strerror( errno ), NULL );
+        display_message( zond->app_window, "stout konnte nicht in Datei """, logfile,
+        			""" umgeleitet werden:\n", strerror( errno ), NULL );
         g_free( logfile );
         exit( -1 );
     }

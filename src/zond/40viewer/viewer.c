@@ -637,11 +637,13 @@ viewer_entry_in_anbindung( JournalEntry entry, Anbindung* anbindung )
                 entry.PagesInserted.pos == anbindung->bis.seite )
         {
             if ( !entry.PagesInserted.anbindung ) ret = FALSE;
-            else if ( )
+            else if ( 1 )
+            {
+            }
         }
 
     }
-    else if ( entry.tyoe == JOURNAL_TYPE_PAGES_DELETED )
+    else if ( entry.type == JOURNAL_TYPE_PAGES_DELETED )
     {
 
     }
@@ -678,7 +680,7 @@ viewer_save_dirty_docs( PdfViewer* pdfv, gboolean ask )
 
             entry = g_array_index( arr_journal, JournalEntry, i );
 
-            if ( !viewer_entry_in_anbindung( entry, dd->anbindung )
+            if ( !viewer_entry_in_anbindung( entry, dd->anbindung ) )
             {
                 /*
                 g_array_append_val( arr_redo, entry_actus_contrarius )
@@ -687,16 +689,16 @@ viewer_save_dirty_docs( PdfViewer* pdfv, gboolean ask )
             }
             else
             {
+            	/*
                 if ( (entry ist TYPE_PAGES_INSERTED || _DELETED) && entry betrifft dd->anbindung)
                 {
                     //lese, falls noch nicht geschehen, alle Kinder von root(file_part) ein, wenn sie nicht > dd->anbindung sind
 
                     //passe diese in Datenbank an
                 }
-
-                g_array_index_remove( arr_journal, i );
+*/
+                g_array_remove_index( arr_journal, i );
             }
-            */
         }
 
         rc = document_save_dd( dd, ask, &error );

@@ -1,5 +1,5 @@
 /*
-sond (sond_treeview.c) - Akten, Beweisstücke, Unterlagen
+sond (sond_treeview.c) - Akten, Beweisstï¿½cke, Unterlagen
 Copyright (C) 2021  pelo america
 
 This program is free software: you can redistribute it and/or modify
@@ -18,7 +18,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "sond_treeview.h"
 
-#include "misc.h"
+#include "../misc.h"
 
 
 typedef struct
@@ -58,7 +58,7 @@ sond_treeview_show_popupmenu( SondTreeview* stv, GdkEventButton* event,
     {
         if ( !gtk_widget_has_focus( GTK_WIDGET(stv) ) )
         {
-            //zunächst cursor setzen, damit der bei Focus-Wechsel direkt markiet wird
+            //zunï¿½chst cursor setzen, damit der bei Focus-Wechsel direkt markiet wird
             gtk_tree_view_set_cursor( GTK_TREE_VIEW(stv), path, NULL, FALSE );
 
            //focus auf neuen Baum...
@@ -81,7 +81,7 @@ sond_treeview_class_init( SondTreeviewClass* klass )
 {
     klass->clipboard = g_malloc0( sizeof( Clipboard ) );
     klass->clipboard->arr_ref = g_ptr_array_new_with_free_func( (GDestroyNotify) gtk_tree_row_reference_free );
-    //class_finalize muß nicht definiert werden -
+    //class_finalize muï¿½ nicht definiert werden -
     //statisch registrierte Klasse wird zur Laufzeit niemals finalisiert!
 
     klass->render_text_cell = NULL;
@@ -353,8 +353,8 @@ sond_treeview_init( SondTreeview* stv )
             G_CALLBACK(sond_treeview_show_popupmenu), (gpointer) stv_private->contextmenu );
 
     //hiermit sollen die Momente abgefangen werden, in denen im treeview herumgetippt wird
-    //dann soll key-press-event abgefangen werden und Callback gibt TRUE zurück
-    //damit übergeordnete Widgets nicht mehr reagieren
+    //dann soll key-press-event abgefangen werden und Callback gibt TRUE zurï¿½ck
+    //damit ï¿½bergeordnete Widgets nicht mehr reagieren
     g_signal_connect( stv_private->renderer_text, "editing-started",
             G_CALLBACK(renderer_text_editing_started), stv );
     g_signal_connect( stv_private->renderer_text, "editing-canceled",
@@ -507,7 +507,7 @@ sond_treeview_set_cursor_on_text_cell( SondTreeview* stv, GtkTreeIter* iter )
 }
 
 
-//überprüft beim verschieben, ob auf zu verschiebenden Knoten oder dessen
+//ï¿½berprï¿½ft beim verschieben, ob auf zu verschiebenden Knoten oder dessen
 //Nachfahren verschoben werden soll
 gboolean
 sond_treeview_test_cursor_descendant( SondTreeview* stv, gboolean child )
@@ -581,7 +581,7 @@ sond_treeview_copy_or_cut_selection( SondTreeview* stv, gboolean ausschneiden )
     if ( clipboard->ausschneiden )
             gtk_widget_queue_draw( GTK_WIDGET(clipboard->tree_view) );
 
-    //Alte Auswahl löschen, falls vorhanden
+    //Alte Auswahl lï¿½schen, falls vorhanden
     g_ptr_array_unref( clipboard->arr_ref );
 
     //clipboard setzen
@@ -619,13 +619,13 @@ sond_treeview_refs_foreach( SondTreeview* stv_orig, GPtrArray* refs,
         if ( !success )
         {
             if ( errmsg ) *errmsg = g_strdup( "Bei Aufruf gtk_tree_model_get_"
-                    "iter:\nKonnte keinen gültigen Iter ermitteln" );
+                    "iter:\nKonnte keinen gï¿½ltigen Iter ermitteln" );
             return -1;
         }
 
         rc = foreach( stv_orig, &iter_ref, data, errmsg );
         if ( rc == -1 ) ERROR_S
-        else if ( rc >= 1 ) return rc; //Abbruch gewählt
+        else if ( rc >= 1 ) return rc; //Abbruch gewï¿½hlt
     }
 
     return 0;

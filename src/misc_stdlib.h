@@ -11,7 +11,7 @@ char* get_base_dir( void );
 
 
 typedef struct _CurlUserData {
-  gchar *response;
+  char *response;
   size_t size;
 } CurlUserData;
 

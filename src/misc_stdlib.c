@@ -23,7 +23,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #ifdef _WIN32
 #include <windows.h>
 #include <shlwapi.h>
-#elifdef __linux__
+#elif defined __linux__
 #include <limits.h>
 #endif // _WIN32
 

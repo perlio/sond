@@ -19,6 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #include "zond_pdf_document.h"
 
 #include <glib/gstdio.h>
+#include <glib-object.h>
 #include "99conv/pdf.h"
 
 #include "../misc.h"
@@ -662,18 +663,18 @@ zond_pdf_document_get_pdf_doc( ZondPdfDocument* self )
 
 
 GPtrArray*
-zond_pdf_document_get_arr_pages( ZondPdfDocument* self )
+zond_pdf_document_get_arr_pages( ZondPdfDocument const* self )
 {
-    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
+    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( (ZondPdfDocument*) self );
 
     return priv->pages;
 }
 
 
 GArray*
-zond_pdf_document_get_arr_journal( ZondPdfDocument* self )
+zond_pdf_document_get_arr_journal( ZondPdfDocument const* self )
 {
-    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( self );
+    ZondPdfDocumentPrivate* priv = zond_pdf_document_get_instance_private( (ZondPdfDocument*) self );
 
     return priv->arr_journal;
 }
