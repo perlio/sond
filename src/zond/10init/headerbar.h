@@ -3,8 +3,8 @@
 
 typedef struct _Projekt Projekt;
 typedef int gboolean;
-typedef void* gpointer;
+typedef void *gpointer;
 
-void init_headerbar ( Projekt* );
+void init_headerbar(Projekt*);
 
 #endif // HEADERBAR_H_INCLUDED

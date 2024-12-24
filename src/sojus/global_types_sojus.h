@@ -7,17 +7,13 @@ typedef struct _GPtrArray GPtrArray;
 typedef struct _GFileMonitor GFileMonitor;
 typedef char gchar;
 
+typedef struct _Sojus {
+	GtkWidget *app_window;
+	gchar *root;
 
-typedef struct _Sojus
-{
-    GtkWidget* app_window;
-    gchar* root;
+	GFileMonitor *monitor;
 
-    GFileMonitor* monitor;
-
-    GPtrArray* arr_dirs;
+	GPtrArray *arr_dirs;
 } Sojus;
-
-
 
 #endif // GLOBAL_TYPES_SOJUS_H_INCLUDED

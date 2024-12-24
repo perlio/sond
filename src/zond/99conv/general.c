@@ -6,308 +6,286 @@
 #include "../40viewer/viewer.h"
 //#include "../../misc.h"
 
+gboolean is_pdf(const gchar *file_part) {
+	gboolean res = FALSE;
 
+	//ToDo: file_part parsen
 
-gboolean
-is_pdf( const gchar* file_part )
-{
-    gboolean res = FALSE;
+	//if ( file_part ist Datei)
+	{
+		gchar *rel_path = NULL;
+		gchar *content_type = NULL;
 
-    //ToDo: file_part parsen
+		rel_path = g_strndup(file_part + 1,
+				strlen(file_part + 1) - strlen(g_strrstr(file_part + 1, "//")));
+		content_type = g_content_type_guess(rel_path, NULL, 0, NULL);
+		g_free(rel_path);
 
-    //if ( file_part ist Datei)
-    {
-        gchar* rel_path = NULL;
-        gchar* content_type = NULL;
+		//Sonderbehandung, falls pdf-Datei
+		if ((!g_strcmp0(content_type, ".pdf")
+				|| !g_strcmp0(content_type, "application/pdf")))
+			res = TRUE;
+		g_free(content_type);
+	}
 
-        rel_path = g_strndup( file_part + 1, strlen( file_part + 1 ) - strlen( g_strrstr( file_part + 1, "//" ) ) );
-        content_type = g_content_type_guess( rel_path, NULL, 0, NULL );
-        g_free( rel_path );
-
-        //Sonderbehandung, falls pdf-Datei
-        if ( (!g_strcmp0( content_type, ".pdf" ) || !g_strcmp0( content_type,
-                "application/pdf" )) ) res = TRUE;
-        g_free( content_type );
-    }
-
-    return res;
+	return res;
 }
 
+void info_window_kill(InfoWindow *info_window) {
+	gtk_widget_destroy(info_window->dialog);
 
-void
-info_window_kill( InfoWindow* info_window )
-{
-    gtk_widget_destroy( info_window->dialog );
+	g_free(info_window);
 
-    g_free( info_window );
-
-    return;
+	return;
 }
 
+void info_window_close(InfoWindow *info_window) {
+	GtkWidget *button = gtk_dialog_get_widget_for_response(
+			GTK_DIALOG(info_window->dialog), GTK_RESPONSE_CANCEL);
+	gtk_button_set_label(GTK_BUTTON(button), "Schließen");
+	gtk_widget_grab_focus(button);
 
-void
-info_window_close( InfoWindow* info_window )
-{
-    GtkWidget* button =
-            gtk_dialog_get_widget_for_response( GTK_DIALOG(info_window->dialog),
-            GTK_RESPONSE_CANCEL );
-    gtk_button_set_label( GTK_BUTTON(button), "Schließen" );
-    gtk_widget_grab_focus( button );
+	gtk_dialog_run(GTK_DIALOG(info_window->dialog));
 
-    gtk_dialog_run( GTK_DIALOG(info_window->dialog) );
+	info_window_kill(info_window);
 
-    info_window_kill( info_window );
-
-    return;
+	return;
 }
 
+void info_window_set_progress_bar_fraction(InfoWindow *info_window,
+		gdouble fraction) {
+	if (!GTK_IS_PROGRESS_BAR(info_window->last_inserted_widget))
+		return;
 
-void
-info_window_set_progress_bar_fraction( InfoWindow* info_window, gdouble fraction )
-{
-    if ( !GTK_IS_PROGRESS_BAR(info_window->last_inserted_widget) ) return;
+	gtk_progress_bar_set_fraction(
+			GTK_PROGRESS_BAR(info_window->last_inserted_widget), fraction);
 
-    gtk_progress_bar_set_fraction( GTK_PROGRESS_BAR(info_window->last_inserted_widget), fraction );
+	while (gtk_events_pending())
+		gtk_main_iteration();
 
-    while ( gtk_events_pending( ) ) gtk_main_iteration( );
-
-    return;
+	return;
 }
 
+static void info_window_scroll(InfoWindow *info_window) {
+	GtkWidget *viewport = NULL;
+	GtkWidget *swindow = NULL;
+	GtkAdjustment *adj = NULL;
 
-static void
-info_window_scroll( InfoWindow* info_window )
-{
-    GtkWidget* viewport = NULL;
-    GtkWidget* swindow = NULL;
-    GtkAdjustment* adj = NULL;
+	viewport = gtk_widget_get_parent(info_window->content);
+	swindow = gtk_widget_get_parent(viewport);
+	adj = gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(swindow));
+	gtk_adjustment_set_value(adj, gtk_adjustment_get_upper(adj));
 
-    viewport = gtk_widget_get_parent( info_window->content);
-    swindow = gtk_widget_get_parent( viewport );
-    adj = gtk_scrolled_window_get_vadjustment( GTK_SCROLLED_WINDOW(swindow) );
-    gtk_adjustment_set_value( adj, gtk_adjustment_get_upper( adj ) );
-
-    return;
+	return;
 }
 
+static void info_window_show_widget(InfoWindow *info_window) {
+	gtk_widget_show(info_window->last_inserted_widget);
+	gtk_box_pack_start(GTK_BOX(info_window->content),
+			info_window->last_inserted_widget, FALSE, FALSE, 0);
 
-static void
-info_window_show_widget( InfoWindow* info_window )
-{
-    gtk_widget_show( info_window->last_inserted_widget );
-    gtk_box_pack_start( GTK_BOX(info_window->content), info_window->last_inserted_widget, FALSE, FALSE, 0 );
+	while (gtk_events_pending())
+		gtk_main_iteration();
 
-    while ( gtk_events_pending( ) ) gtk_main_iteration( );
+	info_window_scroll(info_window);
 
-    info_window_scroll( info_window );
-
-    return;
+	return;
 }
 
-void
-info_window_set_progress_bar( InfoWindow* info_window )
-{
-    info_window->last_inserted_widget = gtk_progress_bar_new( );
-    info_window_show_widget( info_window );
+void info_window_set_progress_bar(InfoWindow *info_window) {
+	info_window->last_inserted_widget = gtk_progress_bar_new();
+	info_window_show_widget(info_window);
 
-    return;
+	return;
 }
 
+void info_window_set_message(InfoWindow *info_window, const gchar *message) {
+	info_window->last_inserted_widget = gtk_label_new(message);
+	gtk_widget_set_halign(info_window->last_inserted_widget, GTK_ALIGN_START);
 
-void
-info_window_set_message( InfoWindow* info_window, const gchar* message )
-{
-    info_window->last_inserted_widget = gtk_label_new( message );
-    gtk_widget_set_halign( info_window->last_inserted_widget, GTK_ALIGN_START );
+	info_window_show_widget(info_window);
 
-    info_window_show_widget( info_window );
-
-    return;
+	return;
 }
 
+static void cb_info_window_response(GtkDialog *dialog, gint id, gpointer data) {
+	InfoWindow *info_window = (InfoWindow*) data;
 
-static void
-cb_info_window_response( GtkDialog* dialog, gint id, gpointer data )
-{
-    InfoWindow* info_window = (InfoWindow*) data;
+	if (info_window->cancel)
+		return;
 
-    if ( info_window->cancel ) return;
+	info_window_set_message(info_window, "...abbrechen");
+	info_window->cancel = TRUE;
 
-    info_window_set_message( info_window, "...abbrechen" );
-    info_window->cancel = TRUE;
-
-    return;
+	return;
 }
-
 
 InfoWindow*
-info_window_open( GtkWidget* window, const gchar* title )
-{
-    GtkWidget* content = NULL;
-    GtkWidget* swindow = NULL;
+info_window_open(GtkWidget *window, const gchar *title) {
+	GtkWidget *content = NULL;
+	GtkWidget *swindow = NULL;
 
-    InfoWindow* info_window = g_malloc0( sizeof( InfoWindow ) );
+	InfoWindow *info_window = g_malloc0(sizeof(InfoWindow));
 
-    info_window->dialog = gtk_dialog_new_with_buttons( title, GTK_WINDOW(window),
-            GTK_DIALOG_DESTROY_WITH_PARENT | GTK_DIALOG_MODAL, "Abbrechen",
-            GTK_RESPONSE_CANCEL, NULL );
+	info_window->dialog = gtk_dialog_new_with_buttons(title, GTK_WINDOW(window),
+			GTK_DIALOG_DESTROY_WITH_PARENT | GTK_DIALOG_MODAL, "Abbrechen",
+			GTK_RESPONSE_CANCEL, NULL);
 
-    gtk_window_set_default_size( GTK_WINDOW(info_window->dialog), 900, 190 );
+	gtk_window_set_default_size(GTK_WINDOW(info_window->dialog), 900, 190);
 
-    content = gtk_dialog_get_content_area( GTK_DIALOG(info_window->dialog) );
-    swindow = gtk_scrolled_window_new( NULL, NULL );
-    gtk_box_pack_start( GTK_BOX(content), swindow, TRUE, TRUE, 0 );
+	content = gtk_dialog_get_content_area(GTK_DIALOG(info_window->dialog));
+	swindow = gtk_scrolled_window_new( NULL, NULL);
+	gtk_box_pack_start(GTK_BOX(content), swindow, TRUE, TRUE, 0);
 
-    info_window->content = gtk_box_new( GTK_ORIENTATION_VERTICAL, 0 );
-    gtk_container_add( GTK_CONTAINER(swindow), info_window->content );
+	info_window->content = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+	gtk_container_add(GTK_CONTAINER(swindow), info_window->content);
 
-    gtk_widget_show_all( info_window->dialog );
-    while ( gtk_events_pending( ) ) gtk_main_iteration( );
+	gtk_widget_show_all(info_window->dialog);
+	while (gtk_events_pending())
+		gtk_main_iteration();
 
-    g_signal_connect( GTK_DIALOG(info_window->dialog), "response",
-            G_CALLBACK(cb_info_window_response), info_window );
+	g_signal_connect(GTK_DIALOG(info_window->dialog), "response",
+			G_CALLBACK(cb_info_window_response), info_window);
 
-    return info_window;
+	return info_window;
 }
-
 
 gchar*
-get_rel_path_from_file_part( gchar const* file_part )
-{
-    if ( !file_part ) return NULL;
-    if ( strlen( file_part ) < 4 ) return NULL;
+get_rel_path_from_file_part(gchar const *file_part) {
+	if (!file_part)
+		return NULL;
+	if (strlen(file_part) < 4)
+		return NULL;
 
-    if ( strstr( file_part, "//" ) ) return
-            g_strndup( file_part + 1, strlen( file_part + 1 ) - strlen( strstr( file_part, "//" ) ) );
-    else return NULL;
+	if (strstr(file_part, "//"))
+		return g_strndup(file_part + 1,
+				strlen(file_part + 1) - strlen(strstr(file_part, "//")));
+	else
+		return NULL;
 }
 
-
-gboolean
-anbindung_1_gleich_2( const Anbindung anbindung1, const Anbindung anbindung2 )
-{
-    if ( (anbindung1.von.seite == anbindung2.von.seite) &&
-            (anbindung1.bis.seite == anbindung2.bis.seite) &&
-            (anbindung1.von.index == anbindung2.von.index) &&
-            (anbindung1.bis.index == anbindung2.bis.index) ) return TRUE;
-    else return FALSE;
+gboolean anbindung_1_gleich_2(const Anbindung anbindung1,
+		const Anbindung anbindung2) {
+	if ((anbindung1.von.seite == anbindung2.von.seite)
+			&& (anbindung1.bis.seite == anbindung2.bis.seite)
+			&& (anbindung1.von.index == anbindung2.von.index)
+			&& (anbindung1.bis.index == anbindung2.bis.index))
+		return TRUE;
+	else
+		return FALSE;
 }
 
+static gint anbindung_vergleiche_pdf_pos(PdfPos pdf_pos1, PdfPos pdf_pos2) {
+	if (pdf_pos1.seite < pdf_pos2.seite)
+		return -1;
+	else if (pdf_pos1.seite > pdf_pos2.seite)
+		return 1;
+	//wenn gleiche Seite:
+	else if (pdf_pos1.index < pdf_pos2.index)
+		return -1;
+	else if (pdf_pos1.index > pdf_pos2.index)
+		return 1;
 
-static gint
-anbindung_vergleiche_pdf_pos( PdfPos pdf_pos1, PdfPos pdf_pos2 )
-{
-    if ( pdf_pos1.seite < pdf_pos2.seite ) return -1;
-    else if ( pdf_pos1.seite > pdf_pos2.seite ) return 1;
-    //wenn gleiche Seite:
-    else if ( pdf_pos1.index < pdf_pos2.index ) return -1;
-    else if ( pdf_pos1.index > pdf_pos2.index ) return 1;
-
-    return 0;
+	return 0;
 }
 
+static gboolean anbindung_is_pdf_punkt(Anbindung anbindung) {
+	if ((anbindung.von.seite || anbindung.von.index) && !anbindung.bis.seite
+			&& !anbindung.bis.index)
+		return TRUE;
 
-static gboolean
-anbindung_is_pdf_punkt( Anbindung anbindung )
-{
-    if ( (anbindung.von.seite || anbindung.von.index) &&
-            !anbindung.bis.seite && !anbindung.bis.index ) return TRUE;
-
-    return FALSE;
+	return FALSE;
 }
 
+gboolean anbindung_1_vor_2(Anbindung anbindung1, Anbindung anbindung2) {
+	if (anbindung_1_gleich_2(anbindung1, anbindung2))
+		return FALSE;
 
-gboolean
-anbindung_1_vor_2( Anbindung anbindung1, Anbindung anbindung2 )
-{
-    if ( anbindung_1_gleich_2( anbindung1, anbindung2 ) ) return FALSE;
+	if (anbindung_is_pdf_punkt(anbindung1)) {
+		if (anbindung_vergleiche_pdf_pos(anbindung1.von, anbindung2.von) == -1)
+			return TRUE;
+		else
+			return FALSE;
+	} else if (anbindung_is_pdf_punkt(anbindung2)) {
+		if (anbindung_vergleiche_pdf_pos(anbindung1.bis, anbindung2.von) == -1)
+			return TRUE;
+		else
+			return FALSE;
 
-    if ( anbindung_is_pdf_punkt( anbindung1 ) )
-    {
-        if ( anbindung_vergleiche_pdf_pos( anbindung1.von, anbindung2.von ) == -1 ) return TRUE;
-        else return FALSE;
-    }
-    else if ( anbindung_is_pdf_punkt( anbindung2 ) )
-    {
-        if ( anbindung_vergleiche_pdf_pos( anbindung1.bis, anbindung2.von ) == -1 ) return TRUE;
-        else return FALSE;
+	} else //beides komplette Anbindung
+	if (anbindung_vergleiche_pdf_pos(anbindung1.bis, anbindung2.von) == -1)
+		return TRUE;
 
-    }
-    else //beides komplette Anbindung
-            if ( anbindung_vergleiche_pdf_pos( anbindung1.bis, anbindung2.von ) == -1 ) return TRUE;
-
-    return FALSE;
+	return FALSE;
 }
 
+gboolean anbindung_1_eltern_von_2(Anbindung anbindung1, Anbindung anbindung2) {
+	gint pos_anfang = 0;
+	gint pos_ende = 0;
 
-gboolean
-anbindung_1_eltern_von_2( Anbindung anbindung1, Anbindung anbindung2 )
-{
-    gint pos_anfang = 0;
-    gint pos_ende = 0;
+	//PdfPunkt kann niemals Eltern sein.
+	if (anbindung_is_pdf_punkt(anbindung1))
+		return FALSE;
 
-    //PdfPunkt kann niemals Eltern sein.
-    if ( anbindung_is_pdf_punkt( anbindung1 ) ) return FALSE;
+	//Gleiche können nicht Nachfolger sein
+	if (anbindung_1_gleich_2(anbindung1, anbindung2))
+		return FALSE;
 
-    //Gleiche können nicht Nachfolger sein
-    if ( anbindung_1_gleich_2( anbindung1, anbindung2 ) ) return FALSE;
+	//wenn Anbindung1 Datei ist, dann ist sie Eltern
+	if (!anbindung1.von.seite && !anbindung1.von.index && !anbindung1.bis.seite
+			&& !anbindung1.bis.index)
+		return FALSE;
+	//auch wenn Anbindung2 Datei
+	if (!anbindung1.von.seite && !anbindung2.von.index && !anbindung2.bis.seite
+			&& !anbindung2.bis.index)
+		return FALSE;
 
-    //wenn Anbindung1 Datei ist, dann ist sie Eltern
-    if ( !anbindung1.von.seite && !anbindung1.von.index &&
-            !anbindung1.bis.seite && !anbindung1.bis.index ) return FALSE;
-    //auch wenn Anbindung2 Datei
-    if ( !anbindung1.von.seite && !anbindung2.von.index &&
-            !anbindung2.bis.seite && !anbindung2.bis.index ) return FALSE;
+	pos_anfang = anbindung_vergleiche_pdf_pos(anbindung1.von, anbindung2.von);
+	pos_ende = anbindung_vergleiche_pdf_pos(anbindung1.bis, anbindung2.bis);
 
-    pos_anfang = anbindung_vergleiche_pdf_pos( anbindung1.von, anbindung2.von );
-    pos_ende = anbindung_vergleiche_pdf_pos( anbindung1.bis, anbindung2.bis );
+	if (pos_anfang > 0)
+		return FALSE; //fängt schon später an...
+	else //fängt entweder davor oder gleich an
+	{
+		if (pos_anfang == 0 && pos_ende <= 0)
+			return FALSE; //Fängt gleich an, hört nicht später auf...
+		else if (pos_anfang < 0 && pos_ende < 0)
+			return FALSE; //Fängt vorher an, hört nicht mindestens gleich auf
+	}
 
-    if ( pos_anfang > 0 ) return FALSE; //fängt schon später an...
-    else //fängt entweder davor oder gleich an
-    {
-        if ( pos_anfang == 0 && pos_ende <= 0 ) return FALSE; //Fängt gleich an, hört nicht später auf...
-        else if ( pos_anfang < 0 && pos_ende < 0 ) return FALSE; //Fängt vorher an, hört nicht mindestens gleich auf
-    }
-
-    return TRUE;
+	return TRUE;
 }
 
+static void anbindung_parse_pdf_pos(gchar const *section, PdfPos *pdf_pos) {
+	pdf_pos->seite = atoi(section + 1);
+	pdf_pos->index = atoi(strstr(section, ",") + 1);
 
-static void
-anbindung_parse_pdf_pos( gchar const* section, PdfPos* pdf_pos )
-{
-    pdf_pos->seite = atoi( section + 1 );
-    pdf_pos->index = atoi( strstr( section, "," ) + 1 );
-
-    return;
+	return;
 }
 
+void anbindung_parse_file_section(gchar const *file_section,
+		Anbindung *anbindung) {
+	if (!file_section)
+		return;
 
-void
-anbindung_parse_file_section( gchar const* file_section, Anbindung* anbindung )
-{
-    if ( !file_section ) return;
+	if (g_str_has_prefix(file_section, "{{")) {
+		anbindung_parse_pdf_pos(file_section + 1, &anbindung->von);
 
-    if ( g_str_has_prefix( file_section, "{{" ) )
-    {
-        anbindung_parse_pdf_pos( file_section + 1, &anbindung->von );
+		anbindung_parse_pdf_pos(strstr(file_section, "}") + 1, &anbindung->bis);
+	} else
+		anbindung_parse_pdf_pos(file_section + 1, &anbindung->von);
 
-        anbindung_parse_pdf_pos( strstr( file_section, "}" ) + 1, &anbindung->bis );
-    }
-    else anbindung_parse_pdf_pos( file_section + 1, &anbindung->von );
-
-    return;
+	return;
 }
 
+void anbindung_build_file_section(Anbindung anbindung, gchar **section) {
+	if (anbindung.bis.seite == 0 && anbindung.bis.index == 0)
+		*section = g_strdup_printf("{%d,%d}", anbindung.von.seite,
+				anbindung.von.index);
+	else
+		*section = g_strdup_printf("{{%d,%d}{%d,%d}}", anbindung.von.seite,
+				anbindung.von.index, anbindung.bis.seite, anbindung.bis.index);
 
-void
-anbindung_build_file_section( Anbindung anbindung, gchar** section )
-{
-    if ( anbindung.bis.seite == 0 && anbindung.bis.index == 0 )
-            *section = g_strdup_printf( "{%d,%d}", anbindung.von.seite, anbindung.von.index );
-    else *section = g_strdup_printf( "{{%d,%d}{%d,%d}}", anbindung.von.seite, anbindung.von.index,
-            anbindung.bis.seite, anbindung.bis.index );
-
-    return;
+	return;
 }
 

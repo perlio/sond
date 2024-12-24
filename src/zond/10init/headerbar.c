@@ -1,20 +1,20 @@
 /*
-zond (headerbar.c) - Akten, Beweisstücke, Unterlagen
-Copyright (C) 2020  pelo america
+ zond (headerbar.c) - Akten, Beweisstücke, Unterlagen
+ Copyright (C) 2020  pelo america
 
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as
-published by the Free Software Foundation, either version 3 of the
-License, or (at your option) any later version.
+ This program is free software: you can redistribute it and/or modify
+ it under the terms of the GNU Affero General Public License as
+ published by the Free Software Foundation, either version 3 of the
+ License, or (at your option) any later version.
 
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU Affero General Public License for more details.
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU Affero General Public License for more details.
 
-You should have received a copy of the GNU Affero General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
-*/
+ You should have received a copy of the GNU Affero General Public License
+ along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
 
 #include <gtk/gtk.h>
 #include <mupdf/fitz.h>
@@ -52,1255 +52,1261 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 #include "../../misc.h"
 
-
-
 /*
-*   Callbacks des Menus "Projekt"
-*/
-static void
-cb_item_search_fs_activate( GtkMenuItem* item, gpointer data )
-{
-    gint sel = 0;
-    gchar* key = NULL;
+ *   Callbacks des Menus "Projekt"
+ */
+static void cb_item_search_fs_activate(GtkMenuItem *item, gpointer data) {
+	gint sel = 0;
+	gchar *key = NULL;
 
-    Projekt* zond = (Projekt*) data;
+	Projekt *zond = (Projekt*) data;
 
-    sel = GPOINTER_TO_INT(g_object_get_data( G_OBJECT(item), "sel" ));
+	sel = GPOINTER_TO_INT(g_object_get_data( G_OBJECT(item), "sel" ));
 
-    if ( sel && !gtk_toggle_button_get_active( GTK_TOGGLE_BUTTON(zond->fs_button) ) ) return;
-    else if ( sel ) key = "item-search-sel";
-    else key = "item-search-all";
+	if (sel
+			&& !gtk_toggle_button_get_active(
+					GTK_TOGGLE_BUTTON(zond->fs_button)))
+		return;
+	else if (sel)
+		key = "item-search-sel";
+	else
+		key = "item-search-all";
 
-    gtk_menu_item_activate( g_object_get_data(
-            G_OBJECT(sond_treeview_get_contextmenu( zond->treeview[BAUM_FS] )), key ) );
+	gtk_menu_item_activate(
+			g_object_get_data(
+					G_OBJECT(
+							sond_treeview_get_contextmenu(
+									zond->treeview[BAUM_FS])), key));
 
-    return;
+	return;
 }
 
+static void cb_menu_datei_beenden_activate(gpointer data) {
+	Projekt *zond = (Projekt*) data;
 
-static void
-cb_menu_datei_beenden_activate( gpointer data )
-{
-    Projekt* zond = (Projekt*) data;
+	gboolean ret = FALSE;
+	g_signal_emit_by_name(zond->app_window, "delete-event", NULL, &ret);
 
-    gboolean ret = FALSE;
-    g_signal_emit_by_name( zond->app_window, "delete-event", NULL, &ret );
-
-    return;
+	return;
 }
-
 
 /*  Callbacks des Menus Datei  */
-static gboolean
-pdf_rel_path_in_array( GPtrArray* arr_file_part, gchar* rel_path )
-{
-    for ( gint i = 0; i < arr_file_part->len; i++ )
-    {
-        if ( !g_strcmp0( g_ptr_array_index( arr_file_part, i ), rel_path ) )
-                return TRUE;
-    }
+static gboolean pdf_rel_path_in_array(GPtrArray *arr_file_part, gchar *rel_path) {
+	for (gint i = 0; i < arr_file_part->len; i++) {
+		if (!g_strcmp0(g_ptr_array_index(arr_file_part, i), rel_path))
+			return TRUE;
+	}
 
-    return FALSE;
+	return FALSE;
 }
-
 
 static GPtrArray*
-selection_abfragen_pdf( Projekt* zond, gchar** errmsg )
-{
-    GList* selected = NULL;
-    GList* list = NULL;
+selection_abfragen_pdf(Projekt *zond, gchar **errmsg) {
+	GList *selected = NULL;
+	GList *list = NULL;
 
-    GPtrArray* arr_file_part = g_ptr_array_new_with_free_func( (GDestroyNotify) g_free );
+	GPtrArray *arr_file_part = g_ptr_array_new_with_free_func(
+			(GDestroyNotify) g_free);
 
-    if ( zond->baum_active == KEIN_BAUM ) return NULL;
+	if (zond->baum_active == KEIN_BAUM)
+		return NULL;
 
-    selected = gtk_tree_selection_get_selected_rows( zond->selection[zond->baum_active], NULL );
-    if( !selected ) return NULL;
+	selected = gtk_tree_selection_get_selected_rows(
+			zond->selection[zond->baum_active], NULL);
+	if (!selected)
+		return NULL;
 
-    list = selected;
-    do //alle rows aus der Liste
-    {
-        gint rc = 0;
-        GtkTreeIter iter = { 0, };
-        gint node_id = 0;
-        gchar* file_part = NULL;
-        GError* error = NULL;
+	list = selected;
+	do //alle rows aus der Liste
+	{
+		gint rc = 0;
+		GtkTreeIter iter = { 0, };
+		gint node_id = 0;
+		gchar *file_part = NULL;
+		GError *error = NULL;
 
-        if ( !gtk_tree_model_get_iter( gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[zond->baum_active]) ), &iter, list->data ) )
-        {
-            g_list_free_full( selected, (GDestroyNotify) gtk_tree_path_free );
-            g_ptr_array_unref( arr_file_part );
+		if (!gtk_tree_model_get_iter(
+				gtk_tree_view_get_model(
+						GTK_TREE_VIEW(zond->treeview[zond->baum_active])),
+				&iter, list->data)) {
+			g_list_free_full(selected, (GDestroyNotify) gtk_tree_path_free);
+			g_ptr_array_unref(arr_file_part);
 
-            if ( errmsg ) *errmsg = g_strdup( "Bei Aufruf gtk_tree_model_get_iter:\n"
-                    "Es konnte kein gültiger iter ermittelt werden" );
+			if (errmsg)
+				*errmsg = g_strdup("Bei Aufruf gtk_tree_model_get_iter:\n"
+						"Es konnte kein gültiger iter ermittelt werden");
 
-            return NULL;
-        }
+			return NULL;
+		}
 
-        gtk_tree_model_get( gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[zond->baum_active]) ), &iter, 2, &node_id, -1 );
+		gtk_tree_model_get(
+				gtk_tree_view_get_model(
+						GTK_TREE_VIEW(zond->treeview[zond->baum_active])),
+				&iter, 2, &node_id, -1);
 
-        rc = zond_dbase_get_node( zond->dbase_zond->zond_dbase_work,
-                node_id, NULL, NULL, &file_part, NULL, NULL, NULL, NULL, &error );
-        if ( rc )
-        {
-            if ( errmsg ) *errmsg = g_strdup_printf( "%s\n%s", __func__, error->message );
-            g_error_free( error );
-            g_list_free_full( selected, (GDestroyNotify) gtk_tree_path_free );
-            g_ptr_array_free( arr_file_part, TRUE );
+		rc = zond_dbase_get_node(zond->dbase_zond->zond_dbase_work, node_id,
+				NULL, NULL, &file_part, NULL, NULL, NULL, NULL, &error);
+		if (rc) {
+			if (errmsg)
+				*errmsg = g_strdup_printf("%s\n%s", __func__, error->message);
+			g_error_free(error);
+			g_list_free_full(selected, (GDestroyNotify) gtk_tree_path_free);
+			g_ptr_array_free(arr_file_part, TRUE);
 
-            return NULL;
-        }
+			return NULL;
+		}
 
-        if ( !file_part ) continue;
+		if (!file_part)
+			continue;
 
-        //Sonderbehandung, falls pdf-Datei
-        if ( is_pdf( file_part ) && !pdf_rel_path_in_array( arr_file_part, file_part ) )
-                g_ptr_array_add( arr_file_part, g_strdup( file_part ) );
+		//Sonderbehandung, falls pdf-Datei
+		if (is_pdf(file_part)
+				&& !pdf_rel_path_in_array(arr_file_part, file_part))
+			g_ptr_array_add(arr_file_part, g_strdup(file_part));
 
-        g_free( file_part );
-    }
-    while ( (list = list->next) );
+		g_free(file_part);
+	} while ((list = list->next));
 
-    g_list_free_full( selected, (GDestroyNotify) gtk_tree_path_free );
+	g_list_free_full(selected, (GDestroyNotify) gtk_tree_path_free);
 
-    return arr_file_part;
+	return arr_file_part;
 }
 
+static void cb_item_clean_pdf(GtkMenuItem *item, gpointer data) {
+	Projekt *zond = (Projekt*) data;
 
-static void
-cb_item_clean_pdf( GtkMenuItem* item, gpointer data )
-{
-    Projekt* zond = (Projekt*) data;
+	gchar *errmsg = NULL;
 
-    gchar* errmsg = NULL;
+	GPtrArray *arr_file_part = selection_abfragen_pdf(zond, &errmsg);
 
-    GPtrArray* arr_file_part = selection_abfragen_pdf( zond, &errmsg );
+	if (!arr_file_part) {
+		if (errmsg) {
+			display_message(zond->app_window,
+					"PDF kann nicht gereinigt werden\n\nBei "
+							"Aufruf selection_abfragen_pdf:\n", errmsg, NULL);
+			g_free(errmsg);
+		}
 
-    if ( !arr_file_part )
-    {
-        if ( errmsg )
-        {
-            display_message( zond->app_window, "PDF kann nicht gereinigt werden\n\nBei "
-                    "Aufruf selection_abfragen_pdf:\n", errmsg, NULL );
-            g_free( errmsg );
-        }
+		return;
+	}
 
-        return;
-    }
+	if (arr_file_part->len == 0) {
+		display_message(zond->app_window, "Keine PDF-Datei ausgewählt", NULL);
+		g_ptr_array_free(arr_file_part, TRUE);
 
-    if ( arr_file_part->len == 0 )
-    {
-        display_message( zond->app_window, "Keine PDF-Datei ausgewählt", NULL );
-        g_ptr_array_free( arr_file_part, TRUE );
+		return;
+	}
 
-        return;
-    }
+	for (gint i = 0; i < arr_file_part->len; i++) {
+		gint rc = 0;
+		GError *error = NULL;
 
-    for ( gint i = 0; i < arr_file_part->len; i++ )
-    {
-        gint rc = 0;
-        GError* error = NULL;
+		rc = pdf_clean(zond->ctx, g_ptr_array_index(arr_file_part, i), &error);
+		if (rc == -1) {
+			display_message(zond->app_window, "PDF ",
+					g_ptr_array_index(arr_file_part, i),
+					" säubern nicht möglich\n\n", error->message, NULL);
+			g_error_free(error);
+		}
+	}
 
-        rc = pdf_clean( zond->ctx, g_ptr_array_index( arr_file_part, i ), &error );
-        if ( rc == -1 )
-        {
-            display_message( zond->app_window, "PDF ",
-                    g_ptr_array_index( arr_file_part, i ), " säubern nicht möglich\n\n",
-                    error->message, NULL );
-            g_error_free( error );
-        }
-    }
+	g_ptr_array_free(arr_file_part, TRUE);
 
-    g_ptr_array_free( arr_file_part, TRUE );
-
-    return;
+	return;
 }
 
+static void cb_item_textsuche(GtkMenuItem *item, gpointer data) {
+	Projekt *zond = (Projekt*) data;
 
-static void
-cb_item_textsuche( GtkMenuItem* item, gpointer data )
-{
-    Projekt* zond = (Projekt*) data;
+	gint rc = 0;
+	gchar *errmsg = NULL;
+	GArray *arr_pdf_text_occ = NULL;
 
-    gint rc = 0;
-    gchar* errmsg = NULL;
-    GArray* arr_pdf_text_occ = NULL;
+	GPtrArray *arr_file_part = selection_abfragen_pdf(zond, &errmsg);
+	if (!arr_file_part) {
+		if (errmsg) {
+			display_message(zond->app_window, "Textsuche nicht möglich\n\nBei "
+					"Aufruf selection_abfragen_pdf:\n", errmsg, NULL);
+			g_free(errmsg);
+		}
 
-    GPtrArray* arr_file_part = selection_abfragen_pdf( zond, &errmsg );
-    if ( !arr_file_part )
-    {
-        if ( errmsg )
-        {
-            display_message( zond->app_window, "Textsuche nicht möglich\n\nBei "
-                    "Aufruf selection_abfragen_pdf:\n", errmsg, NULL );
-            g_free( errmsg );
-        }
+		return;
+	}
 
-        return;
-    }
+	if (arr_file_part->len == 0) {
+		display_message(zond->app_window, "Keine PDF-Datei ausgewählt", NULL);
+		g_ptr_array_free(arr_file_part, TRUE);
 
-    if ( arr_file_part->len == 0 )
-    {
-        display_message( zond->app_window, "Keine PDF-Datei ausgewählt", NULL );
-        g_ptr_array_free( arr_file_part, TRUE );
+		return;
+	}
 
-        return;
-    }
+	gchar *search_text = NULL;
+	rc = abfrage_frage(zond->app_window, "Textsuche", "Bitte Suchtext eingeben",
+			&search_text);
+	if (rc != GTK_RESPONSE_YES) {
+		g_ptr_array_free(arr_file_part, TRUE);
 
-    gchar* search_text = NULL;
-    rc = abfrage_frage( zond->app_window, "Textsuche", "Bitte Suchtext eingeben", &search_text );
-    if ( rc != GTK_RESPONSE_YES )
-    {
-        g_ptr_array_free( arr_file_part, TRUE );
+		return;
+	}
+	if (!g_strcmp0(search_text, "")) {
+		g_ptr_array_free(arr_file_part, TRUE);
+		g_free(search_text);
 
-        return;
-    }
-    if ( !g_strcmp0( search_text, "" ) )
-    {
-        g_ptr_array_free( arr_file_part, TRUE );
-        g_free( search_text );
+		return;
+	}
 
-        return;
-    }
+	InfoWindow *info_window = NULL;
 
-    InfoWindow* info_window = NULL;
+	info_window = info_window_open(zond->app_window, "Textsuche");
 
-    info_window = info_window_open( zond->app_window, "Textsuche" );
+	rc = pdf_textsuche(zond, info_window, arr_file_part, search_text,
+			&arr_pdf_text_occ, &errmsg);
+	if (rc) {
+		display_message(zond->app_window, "Fehler in Textsuche in PDF -\n\n"
+				"Bei Aufruf pdf_textsuche:\n", errmsg, NULL);
+		g_free(errmsg);
+		g_free(search_text);
+		info_window_close(info_window);
 
-    rc = pdf_textsuche( zond, info_window, arr_file_part, search_text, &arr_pdf_text_occ, &errmsg );
-    if ( rc )
-    {
-        display_message( zond->app_window, "Fehler in Textsuche in PDF -\n\n"
-                "Bei Aufruf pdf_textsuche:\n", errmsg, NULL );
-        g_free( errmsg );
-        g_free( search_text );
-        info_window_close( info_window );
+		return;
+	}
 
-        return;
-    }
+	info_window_close(info_window);
 
-    info_window_close( info_window );
+	if (arr_pdf_text_occ->len == 0) {
+		display_message(zond->app_window, "Keine Treffer", NULL);
+		g_ptr_array_free(arr_file_part, TRUE);
+		g_array_free(arr_pdf_text_occ, TRUE);
+		g_free(search_text);
 
-    if ( arr_pdf_text_occ->len == 0 )
-    {
-        display_message( zond->app_window, "Keine Treffer", NULL );
-        g_ptr_array_free( arr_file_part, TRUE );
-        g_array_free( arr_pdf_text_occ, TRUE );
-        g_free( search_text );
+		return;
+	}
 
-        return;
-    }
+	//Anzeigefenster
+	rc = pdf_text_anzeigen_ergebnisse(zond, search_text, arr_file_part,
+			arr_pdf_text_occ, &errmsg);
+	if (rc) {
+		display_message(zond->app_window, "Fehler in Textsuche in PDF -\n\n"
+				"Bei Aufruf pdf_text_anzeigen_ergebnisse:\n", errmsg, NULL);
+		g_free(errmsg);
+		g_ptr_array_free(arr_file_part, TRUE);
+		g_array_free(arr_pdf_text_occ, TRUE);
+		g_free(search_text);
+	}
 
-    //Anzeigefenster
-    rc = pdf_text_anzeigen_ergebnisse( zond, search_text, arr_file_part,
-            arr_pdf_text_occ, &errmsg );
-    if ( rc )
-    {
-        display_message( zond->app_window, "Fehler in Textsuche in PDF -\n\n"
-                "Bei Aufruf pdf_text_anzeigen_ergebnisse:\n",
-                errmsg, NULL );
-        g_free( errmsg );
-        g_ptr_array_free( arr_file_part, TRUE );
-        g_array_free( arr_pdf_text_occ, TRUE );
-        g_free( search_text );
-    }
+	g_ptr_array_free(arr_file_part, TRUE);
+	g_free(search_text);
 
-    g_ptr_array_free( arr_file_part, TRUE );
-    g_free( search_text );
-
-    return;
+	return;
 }
 
+static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
+	gint rc = 0;
+	gchar *errmsg = NULL;
+	InfoWindow *info_window = NULL;
+	gchar *message = NULL;
 
-static void
-cb_datei_ocr( GtkMenuItem* item, gpointer data )
-{
-    gint rc = 0;
-    gchar* errmsg = NULL;
-    InfoWindow* info_window = NULL;
-    gchar* message = NULL;
+	Projekt *zond = (Projekt*) data;
 
-    Projekt* zond = (Projekt*) data;
+	GPtrArray *arr_file_part = selection_abfragen_pdf(zond, &errmsg);
+	if (!arr_file_part) {
+		if (errmsg) {
+			display_message(zond->app_window,
+					"Texterkennung nicht möglich\n\nBei "
+							"Aufruf selection_abfragen_pdf:\n", errmsg, NULL);
+			g_free(errmsg);
+		}
 
-    GPtrArray* arr_file_part = selection_abfragen_pdf( zond, &errmsg );
-    if ( !arr_file_part )
-    {
-        if ( errmsg )
-        {
-            display_message( zond->app_window, "Texterkennung nicht möglich\n\nBei "
-                    "Aufruf selection_abfragen_pdf:\n", errmsg, NULL );
-            g_free( errmsg );
-        }
+		return;
+	}
 
-        return;
-    }
+	if (arr_file_part->len == 0) {
+		display_message(zond->app_window, "Keine PDF-Datei ausgewählt", NULL);
+		g_ptr_array_unref(arr_file_part);
 
-    if ( arr_file_part->len == 0 )
-    {
-        display_message( zond->app_window, "Keine PDF-Datei ausgewählt", NULL );
-        g_ptr_array_unref( arr_file_part );
+		return;
+	}
 
-        return;
-    }
+	//TessInit
+	info_window = info_window_open(zond->app_window, "OCR");
 
-    //TessInit
-    info_window = info_window_open( zond->app_window, "OCR" );
+	for (gint i = 0; i < arr_file_part->len; i++) {
+		gchar *file_part = NULL;
 
-    for ( gint i = 0; i < arr_file_part->len; i++ )
-    {
-        gchar* file_part = NULL;
+		file_part = g_ptr_array_index(arr_file_part, i);
 
-        file_part = g_ptr_array_index( arr_file_part, i );
+		info_window_set_message(info_window, file_part);
 
-        info_window_set_message(info_window, file_part );
+		//prüfen, ob in Viewer geöffnet
+		if (zond_pdf_document_is_open(file_part)) {
+			info_window_set_message(info_window,
+					"... in Viewer geöffnet - übersprungen");
+			continue;
+		}
 
-        //prüfen, ob in Viewer geöffnet
-        if ( zond_pdf_document_is_open( file_part ) )
-        {
-            info_window_set_message( info_window, "... in Viewer geöffnet - übersprungen" );
-            continue;
-        }
+		DisplayedDocument *dd = document_new_displayed_document(file_part, NULL,
+				&errmsg);
+		if (!dd) {
+			if (*errmsg) {
+				info_window_set_message(info_window, "OCR nicht möglich - "
+						"Fehler bei Aufruf document_new_displayed_document:\n");
+				info_window_set_message(info_window, errmsg);
+				g_free(errmsg);
+			}
 
-        DisplayedDocument* dd = document_new_displayed_document(
-                file_part, NULL, &errmsg );
-        if ( !dd )
-        {
-            if ( *errmsg )
-            {
-                info_window_set_message( info_window, "OCR nicht möglich - "
-                        "Fehler bei Aufruf document_new_displayed_document:\n" );
-                info_window_set_message( info_window, errmsg );
-                g_free( errmsg );
-            }
+			continue;
+		}
 
-            continue;
-        }
+		GPtrArray *arr_pdf_document_pages = zond_pdf_document_get_arr_pages(
+				dd->zond_pdf_document);
+		GPtrArray *arr_document_pages_ocr = g_ptr_array_sized_new(
+				arr_pdf_document_pages->len);
+		for (gint u = 0; u < arr_pdf_document_pages->len; u++) {
+			g_ptr_array_add(arr_document_pages_ocr,
+					g_ptr_array_index(arr_pdf_document_pages, u));
+		}
 
-        GPtrArray* arr_pdf_document_pages = zond_pdf_document_get_arr_pages(dd->zond_pdf_document );
-        GPtrArray* arr_document_pages_ocr = g_ptr_array_sized_new( arr_pdf_document_pages->len);
-        for ( gint u = 0; u < arr_pdf_document_pages->len; u++ )
-        {
-            g_ptr_array_add( arr_document_pages_ocr, g_ptr_array_index( arr_pdf_document_pages, u ) );
-        }
+		rc = pdf_ocr_pages(zond, info_window, arr_document_pages_ocr, &errmsg);
+		g_ptr_array_unref(arr_document_pages_ocr);
+		if (rc == -1) {
+			message = g_strdup_printf("Fehler bei Aufruf pdf_ocr_pages:\n%s",
+					errmsg);
+			g_free(errmsg);
+			info_window_set_message(info_window, message);
+			g_free(message);
 
-        rc = pdf_ocr_pages( zond, info_window, arr_document_pages_ocr, &errmsg );
-        g_ptr_array_unref( arr_document_pages_ocr );
-        if ( rc == -1 )
-        {
-            message = g_strdup_printf( "Fehler bei Aufruf pdf_ocr_pages:\n%s", errmsg );
-            g_free( errmsg );
-            info_window_set_message(info_window, message );
-            g_free( message );
+			document_free_displayed_documents(dd);
 
-            document_free_displayed_documents( dd );
+			continue;
+		}
 
-            continue;
-        }
+		rc = zond_pdf_document_save(dd->zond_pdf_document, &errmsg);
+		if (rc) {
+			message = g_strdup_printf(
+					"Fehler bei Aufruf zond_pdf_document_save:\n%s", errmsg);
+			g_free(errmsg);
+			info_window_set_message(info_window, message);
+			g_free(message);
 
-        rc = zond_pdf_document_save( dd->zond_pdf_document, &errmsg );
-        if ( rc )
-        {
-            message = g_strdup_printf( "Fehler bei Aufruf zond_pdf_document_save:\n%s", errmsg );
-            g_free( errmsg );
-            info_window_set_message(info_window, message );
-            g_free( message );
+			document_free_displayed_documents(dd);
 
-            document_free_displayed_documents( dd );
+			continue;
+		}
 
-            continue;
-        }
+		document_free_displayed_documents(dd);
+	}
 
-        document_free_displayed_documents( dd );
-    }
+	info_window_close(info_window);
 
-    info_window_close( info_window );
+	g_ptr_array_unref(arr_file_part);
 
-    g_ptr_array_unref( arr_file_part );
-
-    return;
+	return;
 }
-
 
 /*  Callbacks des Menus "Struktur" */
-static void
-cb_item_punkt_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
-{
-    gchar* key_item = NULL;
+static void cb_item_punkt_einfuegen_activate(GtkMenuItem *item,
+		gpointer user_data) {
+	gchar *key_item = NULL;
 
-    Projekt* zond = (Projekt*) user_data;
+	Projekt *zond = (Projekt*) user_data;
 
-    gboolean child = (gboolean) GPOINTER_TO_INT(g_object_get_data(
-            G_OBJECT(item), "kind" ));
+	gboolean child = (gboolean) GPOINTER_TO_INT(
+			g_object_get_data( G_OBJECT(item), "kind" ));
 
-    if ( zond->baum_active== KEIN_BAUM ) return;
+	if (zond->baum_active == KEIN_BAUM)
+		return;
 
-    if ( !child ) key_item = "item-punkt-einfuegen-ge";
-    else key_item = "item-punkt-einfuegen-up";
+	if (!child)
+		key_item = "item-punkt-einfuegen-ge";
+	else
+		key_item = "item-punkt-einfuegen-up";
 
-    gtk_menu_item_activate( g_object_get_data(
-            G_OBJECT(sond_treeview_get_contextmenu( zond->treeview[zond->baum_active] )),
-            key_item ) );
+	gtk_menu_item_activate(
+			g_object_get_data(
+					G_OBJECT(
+							sond_treeview_get_contextmenu(
+									zond->treeview[zond->baum_active])),
+					key_item));
 
-    return;
+	return;
 }
 
+static void cb_kopieren_activate(GtkMenuItem *item, gpointer user_data) {
+	Projekt *zond = (Projekt*) user_data;
 
-static void
-cb_kopieren_activate( GtkMenuItem* item, gpointer user_data )
-{
-    Projekt* zond = (Projekt*) user_data;
+	if (zond->baum_active == KEIN_BAUM)
+		return;
 
-    if ( zond->baum_active == KEIN_BAUM ) return;
+	gtk_menu_item_activate(
+			g_object_get_data(
+					G_OBJECT(
+							sond_treeview_get_contextmenu(
+									zond->treeview[zond->baum_active])),
+					"item-kopieren"));
 
-    gtk_menu_item_activate( g_object_get_data( G_OBJECT(
-            sond_treeview_get_contextmenu( zond->treeview[zond->baum_active] )),
-            "item-kopieren" ) );
-
-    return;
+	return;
 }
 
+static void cb_ausschneiden_activate(GtkMenuItem *item, gpointer user_data) {
+	Projekt *zond = (Projekt*) user_data;
 
-static void
-cb_ausschneiden_activate( GtkMenuItem* item, gpointer user_data )
-{
-    Projekt* zond = (Projekt*) user_data;
+	if (zond->baum_active == KEIN_BAUM)
+		return;
 
-    if ( zond->baum_active == KEIN_BAUM ) return;
+	gtk_menu_item_activate(
+			g_object_get_data(
+					G_OBJECT(
+							sond_treeview_get_contextmenu(
+									zond->treeview[zond->baum_active])),
+					"item-ausschneiden"));
 
-    gtk_menu_item_activate( g_object_get_data( G_OBJECT(
-            sond_treeview_get_contextmenu( zond->treeview[zond->baum_active] )),
-            "item-ausschneiden" ) );
-
-    return;
+	return;
 }
 
+static void cb_clipboard_einfuegen_activate(GtkMenuItem *item,
+		gpointer user_data) {
+	Projekt *zond = (Projekt*) user_data;
 
-static void
-cb_clipboard_einfuegen_activate( GtkMenuItem* item, gpointer user_data )
-{
-    Projekt* zond = (Projekt*) user_data;
+	gboolean kind = (gboolean) GPOINTER_TO_INT(
+			g_object_get_data( G_OBJECT(item), "kind" ));
+	gboolean link = (gboolean) GPOINTER_TO_INT(
+			g_object_get_data( G_OBJECT(item), "link" ));
 
-    gboolean kind = (gboolean) GPOINTER_TO_INT(g_object_get_data( G_OBJECT(item),
-            "kind" ));
-    gboolean link = (gboolean) GPOINTER_TO_INT(g_object_get_data( G_OBJECT(item),
-            "link" ));
+	if (zond->baum_active == KEIN_BAUM)
+		return;
+	else if (zond->baum_active == BAUM_FS && link)
+		return;
+	else if (!link) {
+		if (!kind)
+			gtk_menu_item_activate(
+					g_object_get_data(
+							G_OBJECT(
+									sond_treeview_get_contextmenu(
+											zond->treeview[zond->baum_active])),
+							"item-paste-ge"));
+		else
+			gtk_menu_item_activate(
+					g_object_get_data(
+							G_OBJECT(
+									sond_treeview_get_contextmenu(
+											zond->treeview[zond->baum_active])),
+							"item-paste-up"));
+	} else //baum == INHALT oder AUSWERTUNG
+	{
+		if (!kind)
+			gtk_menu_item_activate(
+					g_object_get_data(
+							G_OBJECT(
+									sond_treeview_get_contextmenu(
+											zond->treeview[zond->baum_active])),
+							"item-paste-as-link-ge"));
+		else
+			gtk_menu_item_activate(
+					g_object_get_data(
+							G_OBJECT(
+									sond_treeview_get_contextmenu(
+											zond->treeview[zond->baum_active])),
+							"item-paste-as-link-up"));
+	}
 
-    if ( zond->baum_active == KEIN_BAUM ) return;
-    else if ( zond->baum_active == BAUM_FS && link ) return;
-    else if ( !link )
-    {
-        if ( !kind ) gtk_menu_item_activate( g_object_get_data(
-                G_OBJECT(sond_treeview_get_contextmenu( zond->treeview[zond->baum_active] )),
-                "item-paste-ge" ) );
-        else gtk_menu_item_activate( g_object_get_data(
-                G_OBJECT(sond_treeview_get_contextmenu( zond->treeview[zond->baum_active] )),
-                "item-paste-up" ) );
-    }
-    else //baum == INHALT oder AUSWERTUNG
-    {
-        if ( !kind ) gtk_menu_item_activate( g_object_get_data(
-                G_OBJECT(sond_treeview_get_contextmenu( zond->treeview[zond->baum_active] )),
-                "item-paste-as-link-ge" ) );
-        else gtk_menu_item_activate( g_object_get_data(
-                G_OBJECT(sond_treeview_get_contextmenu( zond->treeview[zond->baum_active] )),
-                "item-paste-as-link-up" ) );
-    }
-
-    return;
+	return;
 }
 
+static void cb_loeschen_activate(GtkMenuItem *item, gpointer user_data) {
+	Projekt *zond = (Projekt*) user_data;
 
-static void
-cb_loeschen_activate( GtkMenuItem* item, gpointer user_data )
-{
-    Projekt* zond = (Projekt*) user_data;
+	if (zond->baum_active == KEIN_BAUM)
+		return;
 
-    if ( zond->baum_active == KEIN_BAUM ) return;
+	gtk_menu_item_activate(
+			g_object_get_data(
+					G_OBJECT(
+							sond_treeview_get_contextmenu(
+									zond->treeview[zond->baum_active])),
+					"item-loeschen"));
 
-    gtk_menu_item_activate( g_object_get_data(
-            G_OBJECT(sond_treeview_get_contextmenu( zond->treeview[zond->baum_active] )),
-            "item-loeschen" ) );
-
-    return;
+	return;
 }
 
+static void cb_anbindung_entfernenitem_activate(GtkMenuItem *item,
+		gpointer user_data) {
+	Projekt *zond = (Projekt*) user_data;
 
-static void
-cb_anbindung_entfernenitem_activate( GtkMenuItem* item, gpointer user_data )
-{
-    Projekt* zond = (Projekt*) user_data;
+	if (zond->baum_active == KEIN_BAUM || zond->baum_active == BAUM_FS)
+		return;
 
-    if ( zond->baum_active == KEIN_BAUM || zond->baum_active == BAUM_FS ) return;
+	gtk_menu_item_activate(
+			g_object_get_data(
+					G_OBJECT(
+							sond_treeview_get_contextmenu(
+									zond->treeview[zond->baum_active])),
+					"item-anbindung-entfernen"));
 
-    gtk_menu_item_activate( g_object_get_data(
-            G_OBJECT(sond_treeview_get_contextmenu( zond->treeview[zond->baum_active] )),
-            "item-anbindung-entfernen" ) );
-
-    return;
+	return;
 }
 
+static void cb_jumpitem(GtkMenuItem *item, gpointer data) {
+	Projekt *zond = (Projekt*) data;
 
-static void
-cb_jumpitem( GtkMenuItem* item, gpointer data )
-{
-    Projekt* zond = (Projekt*) data;
+	//nur bei "richtigen" Bäumen
+	if (zond->baum_active != BAUM_INHALT
+			&& zond->baum_active != BAUM_AUSWERTUNG)
+		return;
 
-    //nur bei "richtigen" Bäumen
-    if ( zond->baum_active != BAUM_INHALT && zond->baum_active != BAUM_AUSWERTUNG ) return;
+	gtk_menu_item_activate(
+			g_object_get_data(
+					G_OBJECT(
+							sond_treeview_get_contextmenu(
+									zond->treeview[zond->baum_active])),
+					"item-jump"));
 
-    gtk_menu_item_activate( g_object_get_data(
-            G_OBJECT(sond_treeview_get_contextmenu( zond->treeview[zond->baum_active] )),
-            "item-jump" ) );
-
-    return;
+	return;
 }
 
+static void cb_item_datei_oeffnen(GtkMenuItem *item, gpointer data) {
+	Projekt *zond = (Projekt*) data;
 
-static void
-cb_item_datei_oeffnen( GtkMenuItem* item, gpointer data )
-{
-    Projekt* zond = (Projekt*) data;
+	gtk_menu_item_activate(
+			g_object_get_data(
+					//BAUM_INHALT od. AUSWERTUNG
+					G_OBJECT(
+							sond_treeview_get_contextmenu(
+									zond->treeview[zond->baum_active])),
+					"item-datei-oeffnen"));
 
-    gtk_menu_item_activate( g_object_get_data( //BAUM_INHALT od. AUSWERTUNG
-            G_OBJECT(sond_treeview_get_contextmenu( zond->treeview[zond->baum_active] )),
-            "item-datei-oeffnen" ) );
-
-    return;
+	return;
 }
 
+static void cb_item_datei_oeffnen_mit(GtkMenuItem *item, gpointer data) {
+	Projekt *zond = (Projekt*) data;
 
-static void
-cb_item_datei_oeffnen_mit( GtkMenuItem* item, gpointer data )
-{
-    Projekt* zond = (Projekt*) data;
+	gtk_menu_item_activate(
+			g_object_get_data(
+					//BAUM_INHALT od. AUSWERTUNG
+					G_OBJECT(
+							sond_treeview_get_contextmenu(
+									zond->treeview[zond->baum_active])),
+					"item-datei-oeffnen-mit"));
 
-    gtk_menu_item_activate( g_object_get_data( //BAUM_INHALT od. AUSWERTUNG
-            G_OBJECT(sond_treeview_get_contextmenu( zond->treeview[zond->baum_active] )),
-            "item-datei-oeffnen-mit" ) );
-
-    return;
+	return;
 }
 
+static void cb_change_icon_item(GtkMenuItem *item, gpointer data) {
+	gint icon_id = 0;
+	Projekt *zond = NULL;
+	gchar *key = NULL;
 
-static void
-cb_change_icon_item( GtkMenuItem* item, gpointer data )
-{
-    gint icon_id = 0;
-    Projekt* zond = NULL;
-    gchar* key = NULL;
+	zond = (Projekt*) data;
 
-    zond = (Projekt*) data;
+	if (zond->baum_active == KEIN_BAUM || zond->baum_active == BAUM_FS)
+		return;
 
-    if ( zond->baum_active == KEIN_BAUM || zond->baum_active == BAUM_FS ) return;
+	icon_id = GPOINTER_TO_INT(g_object_get_data( G_OBJECT(item), "icon-id" ));
 
-    icon_id = GPOINTER_TO_INT(g_object_get_data( G_OBJECT(item),
-            "icon-id" ));
+	key = g_strdup_printf("item-menu-icons-%i", icon_id);
+	gtk_menu_item_activate(
+			g_object_get_data(
+					G_OBJECT(
+							sond_treeview_get_contextmenu(
+									zond->treeview[zond->baum_active])), key));
+	g_free(key);
 
-    key = g_strdup_printf( "item-menu-icons-%i", icon_id );
-    gtk_menu_item_activate( g_object_get_data(
-            G_OBJECT(sond_treeview_get_contextmenu( zond->treeview[zond->baum_active] )),
-            key ) );
-    g_free( key );
-
-    return;
+	return;
 }
 
 /*  Callbacks des Menus "Ansicht" */
 
-static void
-cb_alle_erweitern_activated( GtkMenuItem* item, gpointer data )
-{
-    Projekt* zond = (Projekt*) data;
+static void cb_alle_erweitern_activated(GtkMenuItem *item, gpointer data) {
+	Projekt *zond = (Projekt*) data;
 
-    gtk_tree_view_expand_all( GTK_TREE_VIEW(zond->treeview[zond->baum_active]) );
+	gtk_tree_view_expand_all(GTK_TREE_VIEW(zond->treeview[zond->baum_active]));
 
-    return;
+	return;
 }
 
+static void cb_aktueller_zweig_erweitern_activated(GtkMenuItem *item,
+		gpointer data) {
+	GtkTreePath *path;
 
-static void
-cb_aktueller_zweig_erweitern_activated( GtkMenuItem* item, gpointer data )
-{
-    GtkTreePath *path;
+	Projekt *zond = (Projekt*) data;
 
-    Projekt* zond = (Projekt*) data;
+	gtk_tree_view_get_cursor(GTK_TREE_VIEW(zond->treeview[zond->baum_active]),
+			&path, NULL);
+	gtk_tree_view_expand_row(GTK_TREE_VIEW(zond->treeview[zond->baum_active]),
+			path, TRUE);
 
-    gtk_tree_view_get_cursor( GTK_TREE_VIEW(zond->treeview[zond->baum_active]), &path, NULL );
-    gtk_tree_view_expand_row( GTK_TREE_VIEW(zond->treeview[zond->baum_active]), path, TRUE );
+	gtk_tree_path_free(path);
 
-    gtk_tree_path_free(path);
-
-    return;
+	return;
 }
 
+static void cb_reduzieren_activated(GtkMenuItem *item, gpointer data) {
+	Projekt *zond = (Projekt*) data;
 
-static void
-cb_reduzieren_activated( GtkMenuItem* item, gpointer data )
-{
-    Projekt* zond = (Projekt*) data;
+	gtk_tree_view_collapse_all(
+			GTK_TREE_VIEW(zond->treeview[zond->baum_active]));
 
-    gtk_tree_view_collapse_all( GTK_TREE_VIEW(zond->treeview[zond->baum_active]) );
-
-    return;
+	return;
 }
 
+static void cb_refresh_view_activated(GtkMenuItem *item, gpointer data) {
+	GError *error = NULL;
+	gint rc = 0;
 
-static void
-cb_refresh_view_activated( GtkMenuItem* item, gpointer data )
-{
-    GError* error = NULL;
-    gint rc = 0;
+	Projekt *zond = (Projekt*) data;
 
-    Projekt* zond = (Projekt*) data;
+	rc = project_load_baeume(zond, &error);
+	if (rc == -1) {
+		display_message(zond->app_window, "Fehler refresh\n\n", error->message,
+				NULL);
+		g_error_free(error);
 
-    rc = project_load_baeume( zond, &error );
-    if ( rc == -1 )
-    {
-        display_message( zond->app_window, "Fehler refresh\n\n", error->message, NULL );
-        g_error_free( error );
+		return;
+	}
 
-        return;
-    }
-
-    return;
+	return;
 }
-
 
 /*  Callbacks des Menus Extras */
-static void
-cb_menu_test_activate( GtkMenuItem* item, gpointer zond )
-{
-    gint rc = 0;
-    gchar* errmsg = NULL;
+static void cb_menu_test_activate(GtkMenuItem *item, gpointer zond) {
+	gint rc = 0;
+	gchar *errmsg = NULL;
 
-    rc = test( (Projekt*) zond, &errmsg );
-    if ( rc )
-    {
-        display_message( ((Projekt*) zond)->app_window, "Test:\n\n", errmsg, NULL );
-        g_free( errmsg );
-    }
+	rc = test((Projekt*) zond, &errmsg);
+	if (rc) {
+		display_message(((Projekt*) zond)->app_window, "Test:\n\n", errmsg,
+				NULL);
+		g_free(errmsg);
+	}
 
-    return;
+	return;
 }
 
+static void cb_menu_gemini_einlesen(GtkMenuItem *item, gpointer data) {
+	Projekt *zond = (Projekt*) data;
 
-static void
-cb_menu_gemini_einlesen( GtkMenuItem* item, gpointer data )
-{
-    Projekt* zond = (Projekt*) data;
-
-    gint rc = 0;
-    gchar* errmsg = NULL;
+	gint rc = 0;
+	gchar *errmsg = NULL;
 
 //    rc = zond_gemini_read_gemini( zond, &errmsg );
-    if ( rc )
-    {
-        display_message( zond->app_window, "Fehler bei Einlesen Gemini\n\n",
-                errmsg, NULL );
-        g_free( errmsg );
-    }
+	if (rc) {
+		display_message(zond->app_window, "Fehler bei Einlesen Gemini\n\n",
+				errmsg, NULL);
+		g_free(errmsg);
+	}
 
-    return;
+	return;
 }
 
+static void cb_menu_gemini_select(GtkWidget *item, gpointer data) {
+	Projekt *zond = (Projekt*) data;
 
-static void
-cb_menu_gemini_select( GtkWidget* item, gpointer data )
-{
-    Projekt* zond = (Projekt*) data;
-
-    gint rc = 0;
-    gchar* errmsg = NULL;
+	gint rc = 0;
+	gchar *errmsg = NULL;
 
 //    rc = zond_gemini_select( zond, &errmsg );
-    if ( rc )
-    {
-        display_message( zond->app_window, "Fehler bei Auswahl Gemini\n\n",
-                errmsg, NULL );
-        g_free( errmsg );
-    }
+	if (rc) {
+		display_message(zond->app_window, "Fehler bei Auswahl Gemini\n\n",
+				errmsg, NULL);
+		g_free(errmsg);
+	}
 
-    return;
+	return;
 }
-
 
 /*  Callbacks des Menus Einstellungen */
-static void
-cb_settings_zoom( GtkMenuItem* item, gpointer data )
-{
-    gint rc = 0;
-    Projekt* zond = (Projekt*) data;
+static void cb_settings_zoom(GtkMenuItem *item, gpointer data) {
+	gint rc = 0;
+	Projekt *zond = (Projekt*) data;
 
-    gchar* text = g_strdup_printf( "%.0f", g_settings_get_double( zond->settings, "zoom" ) );
-    rc = abfrage_frage( zond->app_window, "Zoom:", "Faktor eingeben", &text );
-    if ( !g_strcmp0( text, "" ) )
-    {
-        g_free( text );
+	gchar *text = g_strdup_printf("%.0f",
+			g_settings_get_double(zond->settings, "zoom"));
+	rc = abfrage_frage(zond->app_window, "Zoom:", "Faktor eingeben", &text);
+	if (!g_strcmp0(text, "")) {
+		g_free(text);
 
-        return;
-    }
+		return;
+	}
 
-    guint zoom = 0;
-    rc = string_to_guint( text, &zoom );
-    if ( rc == 0 && zoom >= ZOOM_MIN && zoom <= ZOOM_MAX )
-            g_settings_set_double( zond->settings, "zoom", (gdouble) zoom );
-    else display_message( zond->app_window, "Eingabe nicht gültig", NULL );
+	guint zoom = 0;
+	rc = string_to_guint(text, &zoom);
+	if (rc == 0 && zoom >= ZOOM_MIN && zoom <= ZOOM_MAX)
+		g_settings_set_double(zond->settings, "zoom", (gdouble) zoom);
+	else
+		display_message(zond->app_window, "Eingabe nicht gültig", NULL);
 
-    g_free( text );
+	g_free(text);
 
-    return;
+	return;
 }
 
+static void prefs_autosave_toggled(GtkCheckMenuItem *item, gpointer data) {
+	Projekt *zond = (Projekt*) data;
 
-static void
-prefs_autosave_toggled( GtkCheckMenuItem* item, gpointer data )
-{
-    Projekt* zond = (Projekt*) data;
+	if (!zond->dbase_zond)
+		return;
 
-    if ( !zond->dbase_zond ) return;
+	if (gtk_check_menu_item_get_active(item))
+		g_timeout_add_seconds(10 * 60, project_timeout_autosave, zond);
+	else if (!g_source_remove_by_user_data(zond))
+		display_message(zond->app_window,
+				"autosave-Timeout konnte nicht entfernt werdern", NULL);
 
-    if ( gtk_check_menu_item_get_active( item ) )
-            g_timeout_add_seconds( 10 * 60, project_timeout_autosave, zond );
-    else if ( !g_source_remove_by_user_data( zond ) )
-            display_message( zond->app_window,
-            "autosave-Timeout konnte nicht entfernt werdern", NULL );
-
-    return;
+	return;
 }
 
-static void
-cb_textview_extra( GtkMenuItem* item, gpointer data )
-{
-    Projekt* zond = (Projekt*) data;
+static void cb_textview_extra(GtkMenuItem *item, gpointer data) {
+	Projekt *zond = (Projekt*) data;
 
-    gtk_widget_show_all( zond->textview_window );
+	gtk_widget_show_all(zond->textview_window);
 
-    //Menüpunkt deaktivieren
-    gtk_widget_set_sensitive( zond->menu.textview_extra, FALSE );
+	//Menüpunkt deaktivieren
+	gtk_widget_set_sensitive(zond->menu.textview_extra, FALSE);
 
-    //TextView-extra laden
-    zond->node_id_extra = zond->node_id_act;
-    gtk_text_view_set_buffer( GTK_TEXT_VIEW(zond->textview_ii),
-            gtk_text_view_get_buffer( GTK_TEXT_VIEW(zond->textview) ) );
+	//TextView-extra laden
+	zond->node_id_extra = zond->node_id_act;
+	gtk_text_view_set_buffer(GTK_TEXT_VIEW(zond->textview_ii),
+			gtk_text_view_get_buffer(GTK_TEXT_VIEW(zond->textview)));
 
-    return;
+	return;
 }
 
+static void headerbar_hilfe_about(GtkWidget *item, gpointer data) {
+	Projekt *zond = (Projekt*) data;
 
-static  void
-headerbar_hilfe_about( GtkWidget* item, gpointer data )
-{
-    Projekt* zond = (Projekt*) data;
+	display_message(zond->app_window, "Version: " MAJOR "." MINOR "." PATCH,
+			NULL);
 
-    display_message( zond->app_window, "Version: " MAJOR "." MINOR "." PATCH, NULL );
-
-    return;
+	return;
 }
 
+static void headerbar_hilfe_update(GtkWidget *item, gpointer data) {
+	gint rc = 0;
+	GError *error = NULL;
+	InfoWindow *info_window = NULL;
 
-static void
-headerbar_hilfe_update( GtkWidget* item, gpointer data )
-{
-    gint rc = 0;
-    GError* error = NULL;
-    InfoWindow* info_window = NULL;
+	Projekt *zond = (Projekt*) data;
 
-    Projekt* zond = (Projekt*) data;
+	info_window = info_window_open(zond->app_window, "Zond Updater");
 
-    info_window = info_window_open( zond->app_window, "Zond Updater" );
+	rc = zond_update(zond, info_window, &error);
 
-    rc = zond_update( zond, info_window, &error );
+	info_window_kill(info_window);
 
-    info_window_kill( info_window );
+	if (rc == -1) {
+		display_message(zond->app_window, "Update fehlgeschlagen\n\n",
+				error->message, NULL);
+		g_error_free(error);
+	} else if (rc == 1)
+		display_message(zond->app_window, "Aktuelle Version installiert", NULL);
 
-    if ( rc == -1 )
-    {
-        display_message( zond->app_window, "Update fehlgeschlagen\n\n",
-                error->message, NULL );
-        g_error_free( error );
-    }
-    else if ( rc == 1 ) display_message( zond->app_window,
-            "Aktuelle Version installiert", NULL );
-
-    return;
+	return;
 }
-
 
 /*  Funktion init_menu - ganze Kopfzeile! */
 static GtkWidget*
-init_menu( Projekt* zond )
-{
-    GtkAccelGroup* accel_group = gtk_accel_group_new();
-    gtk_window_add_accel_group(GTK_WINDOW(zond->app_window), accel_group);
+init_menu(Projekt *zond) {
+	GtkAccelGroup *accel_group = gtk_accel_group_new();
+	gtk_window_add_accel_group(GTK_WINDOW(zond->app_window), accel_group);
 
-/*  Menubar */
-    GtkWidget* menubar = gtk_menu_bar_new();
+	/*  Menubar */
+	GtkWidget *menubar = gtk_menu_bar_new();
 
-    zond->menu.projekt = gtk_menu_item_new_with_label ( "Projekt" );
-    zond->menu.struktur = gtk_menu_item_new_with_label( "Bearbeiten" );
-    zond->menu.pdf = gtk_menu_item_new_with_label("PDF-Dateien");
-    zond->menu.ansicht = gtk_menu_item_new_with_label("Ansicht");
-    zond->menu.extras = gtk_menu_item_new_with_label( "Extras" );
-    GtkWidget* einstellungen = gtk_menu_item_new_with_label(
-            "Einstellungen" );
-    GtkWidget* hilfeitem = gtk_menu_item_new_with_label( "Hilfe" );
+	zond->menu.projekt = gtk_menu_item_new_with_label("Projekt");
+	zond->menu.struktur = gtk_menu_item_new_with_label("Bearbeiten");
+	zond->menu.pdf = gtk_menu_item_new_with_label("PDF-Dateien");
+	zond->menu.ansicht = gtk_menu_item_new_with_label("Ansicht");
+	zond->menu.extras = gtk_menu_item_new_with_label("Extras");
+	GtkWidget *einstellungen = gtk_menu_item_new_with_label("Einstellungen");
+	GtkWidget *hilfeitem = gtk_menu_item_new_with_label("Hilfe");
 
-    //In die Menuleiste einfügen
-    gtk_menu_shell_append ( GTK_MENU_SHELL(menubar), zond->menu.projekt );
-    gtk_menu_shell_append ( GTK_MENU_SHELL(menubar), zond->menu.struktur );
-    gtk_menu_shell_append ( GTK_MENU_SHELL(menubar), zond->menu.pdf );
-    gtk_menu_shell_append ( GTK_MENU_SHELL(menubar), zond->menu.ansicht );
-    gtk_menu_shell_append ( GTK_MENU_SHELL(menubar), zond->menu.extras );
-    gtk_menu_shell_append ( GTK_MENU_SHELL(menubar), einstellungen );
-    gtk_menu_shell_append ( GTK_MENU_SHELL(menubar), hilfeitem );
+	//In die Menuleiste einfügen
+	gtk_menu_shell_append(GTK_MENU_SHELL(menubar), zond->menu.projekt);
+	gtk_menu_shell_append(GTK_MENU_SHELL(menubar), zond->menu.struktur);
+	gtk_menu_shell_append(GTK_MENU_SHELL(menubar), zond->menu.pdf);
+	gtk_menu_shell_append(GTK_MENU_SHELL(menubar), zond->menu.ansicht);
+	gtk_menu_shell_append(GTK_MENU_SHELL(menubar), zond->menu.extras);
+	gtk_menu_shell_append(GTK_MENU_SHELL(menubar), einstellungen);
+	gtk_menu_shell_append(GTK_MENU_SHELL(menubar), hilfeitem);
 
-/*********************
-*  Menu Projekt
-*********************/
-    GtkWidget* projektmenu = gtk_menu_new();
+	/*********************
+	 *  Menu Projekt
+	 *********************/
+	GtkWidget *projektmenu = gtk_menu_new();
 
-    GtkWidget* neuitem = gtk_menu_item_new_with_label ("Neu");
-    g_signal_connect(G_OBJECT(neuitem), "activate", G_CALLBACK(cb_menu_datei_neu_activate), (gpointer) zond);
+	GtkWidget *neuitem = gtk_menu_item_new_with_label("Neu");
+	g_signal_connect(G_OBJECT(neuitem), "activate",
+			G_CALLBACK(cb_menu_datei_neu_activate), (gpointer ) zond);
 
-    GtkWidget* oeffnenitem = gtk_menu_item_new_with_label ("Öffnen");
-    g_signal_connect( G_OBJECT(oeffnenitem), "activate",
-            G_CALLBACK(cb_menu_datei_oeffnen_activate), (gpointer) zond );
+	GtkWidget *oeffnenitem = gtk_menu_item_new_with_label("Öffnen");
+	g_signal_connect(G_OBJECT(oeffnenitem), "activate",
+			G_CALLBACK(cb_menu_datei_oeffnen_activate), (gpointer ) zond);
 
-    zond->menu.speichernitem = gtk_menu_item_new_with_label ("Speichern");
-    g_signal_connect( G_OBJECT(zond->menu.speichernitem), "activate",
-            G_CALLBACK(cb_menu_datei_speichern_activate), (gpointer) zond );
+	zond->menu.speichernitem = gtk_menu_item_new_with_label("Speichern");
+	g_signal_connect(G_OBJECT(zond->menu.speichernitem), "activate",
+			G_CALLBACK(cb_menu_datei_speichern_activate), (gpointer ) zond);
 
-    zond->menu.schliessenitem = gtk_menu_item_new_with_label ("Schliessen");
-    g_signal_connect( G_OBJECT(zond->menu.schliessenitem), "activate",
-            G_CALLBACK(cb_menu_datei_schliessen_activate), (gpointer) zond );
+	zond->menu.schliessenitem = gtk_menu_item_new_with_label("Schliessen");
+	g_signal_connect(G_OBJECT(zond->menu.schliessenitem), "activate",
+			G_CALLBACK(cb_menu_datei_schliessen_activate), (gpointer ) zond);
 
-    GtkWidget* sep_projekt1item = gtk_separator_menu_item_new();
+	GtkWidget *sep_projekt1item = gtk_separator_menu_item_new();
 
-    zond->menu.exportitem = gtk_menu_item_new_with_label( "Export als odt-Dokument" );
-    GtkWidget* exportmenu = gtk_menu_new( );
-    GtkWidget* ganze_struktur = gtk_menu_item_new_with_label( "Ganze Struktur" );
-    g_object_set_data( G_OBJECT(ganze_struktur), "umfang", GINT_TO_POINTER(1) );
-    g_signal_connect( ganze_struktur, "activate", G_CALLBACK(cb_menu_datei_export_activate), (gpointer) zond );
-    GtkWidget* ausgewaehlte_punkte = gtk_menu_item_new_with_label( "Gewählte Zweige" );
-    g_object_set_data( G_OBJECT(ausgewaehlte_punkte), "umfang", GINT_TO_POINTER(2) );
-    g_signal_connect( ausgewaehlte_punkte, "activate", G_CALLBACK(cb_menu_datei_export_activate), (gpointer) zond );
-    GtkWidget* ausgewaehlte_zweige = gtk_menu_item_new_with_label( "Gewählte Punkte" );
-    g_object_set_data( G_OBJECT(ausgewaehlte_zweige), "umfang", GINT_TO_POINTER(3) );
-    g_signal_connect( ausgewaehlte_zweige, "activate", G_CALLBACK(cb_menu_datei_export_activate), (gpointer) zond );
-    gtk_menu_shell_append( GTK_MENU_SHELL(exportmenu), ganze_struktur );
-    gtk_menu_shell_append( GTK_MENU_SHELL(exportmenu), ausgewaehlte_punkte );
-    gtk_menu_shell_append( GTK_MENU_SHELL(exportmenu), ausgewaehlte_zweige );
-    gtk_menu_item_set_submenu( GTK_MENU_ITEM(zond->menu.exportitem), exportmenu );
+	zond->menu.exportitem = gtk_menu_item_new_with_label(
+			"Export als odt-Dokument");
+	GtkWidget *exportmenu = gtk_menu_new();
+	GtkWidget *ganze_struktur = gtk_menu_item_new_with_label("Ganze Struktur");
+	g_object_set_data(G_OBJECT(ganze_struktur), "umfang", GINT_TO_POINTER(1));
+	g_signal_connect(ganze_struktur, "activate",
+			G_CALLBACK(cb_menu_datei_export_activate), (gpointer ) zond);
+	GtkWidget *ausgewaehlte_punkte = gtk_menu_item_new_with_label(
+			"Gewählte Zweige");
+	g_object_set_data(G_OBJECT(ausgewaehlte_punkte), "umfang",
+			GINT_TO_POINTER(2));
+	g_signal_connect(ausgewaehlte_punkte, "activate",
+			G_CALLBACK(cb_menu_datei_export_activate), (gpointer ) zond);
+	GtkWidget *ausgewaehlte_zweige = gtk_menu_item_new_with_label(
+			"Gewählte Punkte");
+	g_object_set_data(G_OBJECT(ausgewaehlte_zweige), "umfang",
+			GINT_TO_POINTER(3));
+	g_signal_connect(ausgewaehlte_zweige, "activate",
+			G_CALLBACK(cb_menu_datei_export_activate), (gpointer ) zond);
+	gtk_menu_shell_append(GTK_MENU_SHELL(exportmenu), ganze_struktur);
+	gtk_menu_shell_append(GTK_MENU_SHELL(exportmenu), ausgewaehlte_punkte);
+	gtk_menu_shell_append(GTK_MENU_SHELL(exportmenu), ausgewaehlte_zweige);
+	gtk_menu_item_set_submenu(GTK_MENU_ITEM(zond->menu.exportitem), exportmenu);
 
-    //Durchsuchen
-    zond->menu.item_search_fs= gtk_menu_item_new_with_label( "Projektverzeichnis durchsuchen" );
+	//Durchsuchen
+	zond->menu.item_search_fs = gtk_menu_item_new_with_label(
+			"Projektverzeichnis durchsuchen");
 
-    GtkWidget* menu_search_fs = gtk_menu_new( );
+	GtkWidget *menu_search_fs = gtk_menu_new();
 
-    GtkWidget* item_all = gtk_menu_item_new_with_label( "Vollständig" );
-    g_signal_connect( item_all, "activate", G_CALLBACK(cb_item_search_fs_activate), (gpointer) zond );
+	GtkWidget *item_all = gtk_menu_item_new_with_label("Vollständig");
+	g_signal_connect(item_all, "activate",
+			G_CALLBACK(cb_item_search_fs_activate), (gpointer ) zond);
 
-    GtkWidget* item_sel = gtk_menu_item_new_with_label( "Ausgewählte Punkte" );
-    g_object_set_data( G_OBJECT(item_sel), "sel", GINT_TO_POINTER(1) );
-    g_signal_connect( item_sel, "activate", G_CALLBACK(cb_item_search_fs_activate), (gpointer) zond );
+	GtkWidget *item_sel = gtk_menu_item_new_with_label("Ausgewählte Punkte");
+	g_object_set_data(G_OBJECT(item_sel), "sel", GINT_TO_POINTER(1));
+	g_signal_connect(item_sel, "activate",
+			G_CALLBACK(cb_item_search_fs_activate), (gpointer ) zond);
 
-    gtk_menu_shell_append( GTK_MENU_SHELL(menu_search_fs), item_all );
-    gtk_menu_shell_append( GTK_MENU_SHELL(menu_search_fs), item_sel );
-    gtk_menu_item_set_submenu( GTK_MENU_ITEM(zond->menu.item_search_fs), menu_search_fs );
+	gtk_menu_shell_append(GTK_MENU_SHELL(menu_search_fs), item_all);
+	gtk_menu_shell_append(GTK_MENU_SHELL(menu_search_fs), item_sel);
+	gtk_menu_item_set_submenu(GTK_MENU_ITEM(zond->menu.item_search_fs),
+			menu_search_fs);
 
-    GtkWidget* sep_projekt1item_2 = gtk_separator_menu_item_new();
+	GtkWidget *sep_projekt1item_2 = gtk_separator_menu_item_new();
 
-    GtkWidget* beendenitem = gtk_menu_item_new_with_label ("Beenden");
-    gtk_widget_add_accelerator(beendenitem, "activate", accel_group, GDK_KEY_q,
-            GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
-    g_signal_connect_swapped(beendenitem, "activate",
-            G_CALLBACK(cb_menu_datei_beenden_activate), (gpointer) zond );
+	GtkWidget *beendenitem = gtk_menu_item_new_with_label("Beenden");
+	gtk_widget_add_accelerator(beendenitem, "activate", accel_group, GDK_KEY_q,
+			GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
+	g_signal_connect_swapped(beendenitem, "activate",
+			G_CALLBACK(cb_menu_datei_beenden_activate), (gpointer ) zond);
 
-    gtk_menu_shell_append ( GTK_MENU_SHELL(projektmenu), neuitem );
-    gtk_menu_shell_append ( GTK_MENU_SHELL(projektmenu), oeffnenitem );
-    gtk_menu_shell_append ( GTK_MENU_SHELL(projektmenu), zond->menu.speichernitem );
-    gtk_menu_shell_append ( GTK_MENU_SHELL(projektmenu), zond->menu.schliessenitem );
-    gtk_menu_shell_append ( GTK_MENU_SHELL(projektmenu), sep_projekt1item );
-    gtk_menu_shell_append ( GTK_MENU_SHELL(projektmenu), zond->menu.exportitem );
-    gtk_menu_shell_append ( GTK_MENU_SHELL(projektmenu), zond->menu.item_search_fs );
-    gtk_menu_shell_append ( GTK_MENU_SHELL(projektmenu), sep_projekt1item_2);
-    gtk_menu_shell_append ( GTK_MENU_SHELL(projektmenu), beendenitem );
+	gtk_menu_shell_append(GTK_MENU_SHELL(projektmenu), neuitem);
+	gtk_menu_shell_append(GTK_MENU_SHELL(projektmenu), oeffnenitem);
+	gtk_menu_shell_append(GTK_MENU_SHELL(projektmenu),
+			zond->menu.speichernitem);
+	gtk_menu_shell_append(GTK_MENU_SHELL(projektmenu),
+			zond->menu.schliessenitem);
+	gtk_menu_shell_append(GTK_MENU_SHELL(projektmenu), sep_projekt1item);
+	gtk_menu_shell_append(GTK_MENU_SHELL(projektmenu), zond->menu.exportitem);
+	gtk_menu_shell_append(GTK_MENU_SHELL(projektmenu),
+			zond->menu.item_search_fs);
+	gtk_menu_shell_append(GTK_MENU_SHELL(projektmenu), sep_projekt1item_2);
+	gtk_menu_shell_append(GTK_MENU_SHELL(projektmenu), beendenitem);
 
-/*********************
-*  Menu Struktur
-*********************/
-    GtkWidget* strukturmenu = gtk_menu_new();
+	/*********************
+	 *  Menu Struktur
+	 *********************/
+	GtkWidget *strukturmenu = gtk_menu_new();
 
-    //Punkt erzeugen
-    GtkWidget* punkterzeugenitem = gtk_menu_item_new_with_label(
-            "Punkt einfügen" );
+	//Punkt erzeugen
+	GtkWidget *punkterzeugenitem = gtk_menu_item_new_with_label(
+			"Punkt einfügen");
 
-    GtkWidget* punkterzeugenmenu = gtk_menu_new();
+	GtkWidget *punkterzeugenmenu = gtk_menu_new();
 
-    GtkWidget* ge_punkterzeugenitem = gtk_menu_item_new_with_label(
-            "Gleiche Ebene" );
-    gtk_widget_add_accelerator( ge_punkterzeugenitem, "activate", accel_group,
-            GDK_KEY_p, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
-    g_signal_connect( G_OBJECT(ge_punkterzeugenitem), "activate",
-            G_CALLBACK(cb_item_punkt_einfuegen_activate), (gpointer) zond );
+	GtkWidget *ge_punkterzeugenitem = gtk_menu_item_new_with_label(
+			"Gleiche Ebene");
+	gtk_widget_add_accelerator(ge_punkterzeugenitem, "activate", accel_group,
+	GDK_KEY_p, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
+	g_signal_connect(G_OBJECT(ge_punkterzeugenitem), "activate",
+			G_CALLBACK(cb_item_punkt_einfuegen_activate), (gpointer ) zond);
 
-    GtkWidget* up_punkterzeugenitem = gtk_menu_item_new_with_label(
-            "Unterebene" );
-    g_object_set_data( G_OBJECT(up_punkterzeugenitem), "kind", GINT_TO_POINTER(1) );
-    gtk_widget_add_accelerator(up_punkterzeugenitem, "activate", accel_group,
-            GDK_KEY_p, GDK_CONTROL_MASK | GDK_SHIFT_MASK, GTK_ACCEL_VISIBLE);
-    g_signal_connect( G_OBJECT(up_punkterzeugenitem), "activate",
-            G_CALLBACK(cb_item_punkt_einfuegen_activate), (gpointer) zond );
+	GtkWidget *up_punkterzeugenitem = gtk_menu_item_new_with_label(
+			"Unterebene");
+	g_object_set_data(G_OBJECT(up_punkterzeugenitem), "kind",
+			GINT_TO_POINTER(1));
+	gtk_widget_add_accelerator(up_punkterzeugenitem, "activate", accel_group,
+	GDK_KEY_p, GDK_CONTROL_MASK | GDK_SHIFT_MASK, GTK_ACCEL_VISIBLE);
+	g_signal_connect(G_OBJECT(up_punkterzeugenitem), "activate",
+			G_CALLBACK(cb_item_punkt_einfuegen_activate), (gpointer ) zond);
 
-    gtk_menu_shell_append( GTK_MENU_SHELL(punkterzeugenmenu),
-            ge_punkterzeugenitem );
-    gtk_menu_shell_append( GTK_MENU_SHELL(punkterzeugenmenu),
-            up_punkterzeugenitem );
+	gtk_menu_shell_append(GTK_MENU_SHELL(punkterzeugenmenu),
+			ge_punkterzeugenitem);
+	gtk_menu_shell_append(GTK_MENU_SHELL(punkterzeugenmenu),
+			up_punkterzeugenitem);
 
-    gtk_menu_item_set_submenu( GTK_MENU_ITEM(punkterzeugenitem),
-            punkterzeugenmenu );
+	gtk_menu_item_set_submenu(GTK_MENU_ITEM(punkterzeugenitem),
+			punkterzeugenmenu);
 
-    //Datei öffnen
-    GtkWidget* item_datei_oeffnen = gtk_menu_item_new_with_label(
-            "Öffnen" );
-    gtk_widget_add_accelerator(item_datei_oeffnen, "activate", accel_group,
-            GDK_KEY_o, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
-    g_signal_connect( G_OBJECT(item_datei_oeffnen), "activate",
-            G_CALLBACK(cb_item_datei_oeffnen), (gpointer) zond );
+	//Datei öffnen
+	GtkWidget *item_datei_oeffnen = gtk_menu_item_new_with_label("Öffnen");
+	gtk_widget_add_accelerator(item_datei_oeffnen, "activate", accel_group,
+	GDK_KEY_o, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
+	g_signal_connect(G_OBJECT(item_datei_oeffnen), "activate",
+			G_CALLBACK(cb_item_datei_oeffnen), (gpointer ) zond);
 
-    //Datei öffnen
-    GtkWidget* item_datei_oeffnen_mit = gtk_menu_item_new_with_label(
-            "Öffnen mit" );
-    g_signal_connect( G_OBJECT(item_datei_oeffnen_mit), "activate",
-            G_CALLBACK(cb_item_datei_oeffnen_mit), (gpointer) zond );
+	//Datei öffnen
+	GtkWidget *item_datei_oeffnen_mit = gtk_menu_item_new_with_label(
+			"Öffnen mit");
+	g_signal_connect(G_OBJECT(item_datei_oeffnen_mit), "activate",
+			G_CALLBACK(cb_item_datei_oeffnen_mit), (gpointer ) zond);
 
-    //Icons ändern
-    GtkWidget* icon_change_item = gtk_menu_item_new_with_label( "Icon ändern" );
+	//Icons ändern
+	GtkWidget *icon_change_item = gtk_menu_item_new_with_label("Icon ändern");
 
-    GtkWidget* icon_change_menu = gtk_menu_new( );
+	GtkWidget *icon_change_menu = gtk_menu_new();
 
-    for ( gint i = 0; i < NUMBER_OF_ICONS; i++ )
-    {
-        GtkWidget *icon = gtk_image_new_from_icon_name( zond->icon[i].icon_name, GTK_ICON_SIZE_MENU );
-        GtkWidget *box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
-        GtkWidget *label = gtk_label_new ( zond->icon[i].display_name );
-        GtkWidget *menu_item = gtk_menu_item_new ( );
-        gtk_container_add (GTK_CONTAINER (box), icon);
-        gtk_container_add (GTK_CONTAINER (box), label);
-        gtk_container_add (GTK_CONTAINER (menu_item), box);
+	for (gint i = 0; i < NUMBER_OF_ICONS; i++) {
+		GtkWidget *icon = gtk_image_new_from_icon_name(zond->icon[i].icon_name,
+				GTK_ICON_SIZE_MENU);
+		GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+		GtkWidget *label = gtk_label_new(zond->icon[i].display_name);
+		GtkWidget *menu_item = gtk_menu_item_new();
+		gtk_container_add(GTK_CONTAINER(box), icon);
+		gtk_container_add(GTK_CONTAINER(box), label);
+		gtk_container_add(GTK_CONTAINER(menu_item), box);
 
-        g_object_set_data( G_OBJECT(menu_item), "icon-id",
-                GINT_TO_POINTER(i) );
-        g_signal_connect( menu_item, "activate",
-                G_CALLBACK(cb_change_icon_item), (gpointer) zond );
+		g_object_set_data(G_OBJECT(menu_item), "icon-id", GINT_TO_POINTER(i));
+		g_signal_connect(menu_item, "activate", G_CALLBACK(cb_change_icon_item),
+				(gpointer ) zond);
 
-        gtk_menu_shell_append( GTK_MENU_SHELL(icon_change_menu), menu_item );
-    }
+		gtk_menu_shell_append(GTK_MENU_SHELL(icon_change_menu), menu_item);
+	}
 
-    gtk_menu_item_set_submenu( GTK_MENU_ITEM(icon_change_item),
-            icon_change_menu );
+	gtk_menu_item_set_submenu(GTK_MENU_ITEM(icon_change_item),
+			icon_change_menu);
 
-    GtkWidget* sep_struktur0item = gtk_separator_menu_item_new();
+	GtkWidget *sep_struktur0item = gtk_separator_menu_item_new();
 
-    //Kopieren
-    GtkWidget* kopierenitem = gtk_menu_item_new_with_label("Kopieren");
-    gtk_widget_add_accelerator(kopierenitem, "activate", accel_group, GDK_KEY_c,
-            GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
-    g_signal_connect( G_OBJECT(kopierenitem), "activate",
-            G_CALLBACK(cb_kopieren_activate), (gpointer) zond );
+	//Kopieren
+	GtkWidget *kopierenitem = gtk_menu_item_new_with_label("Kopieren");
+	gtk_widget_add_accelerator(kopierenitem, "activate", accel_group, GDK_KEY_c,
+			GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
+	g_signal_connect(G_OBJECT(kopierenitem), "activate",
+			G_CALLBACK(cb_kopieren_activate), (gpointer ) zond);
 
-    //Verschieben
-    GtkWidget* ausschneidenitem = gtk_menu_item_new_with_label("Ausschneiden");
-    gtk_widget_add_accelerator( ausschneidenitem, "activate", accel_group,
-            GDK_KEY_x, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE );
-    g_object_set_data( G_OBJECT(ausschneidenitem), "ausschneiden",
-            GINT_TO_POINTER(1) );
-    g_signal_connect( G_OBJECT(ausschneidenitem), "activate",
-            G_CALLBACK(cb_ausschneiden_activate), (gpointer) zond );
+	//Verschieben
+	GtkWidget *ausschneidenitem = gtk_menu_item_new_with_label("Ausschneiden");
+	gtk_widget_add_accelerator(ausschneidenitem, "activate", accel_group,
+	GDK_KEY_x, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
+	g_object_set_data(G_OBJECT(ausschneidenitem), "ausschneiden",
+			GINT_TO_POINTER(1));
+	g_signal_connect(G_OBJECT(ausschneidenitem), "activate",
+			G_CALLBACK(cb_ausschneiden_activate), (gpointer ) zond);
 
-    //Einfügen
-    GtkWidget* pasteitem = gtk_menu_item_new_with_label("Einfügen");
-    GtkWidget* pastemenu = gtk_menu_new();
-    GtkWidget* alspunkt_einfuegenitem = gtk_menu_item_new_with_label(
-            "Gleiche Ebene");
-    GtkWidget* alsunterpunkt_einfuegenitem = gtk_menu_item_new_with_label(
-            "Unterebene");
-    gtk_menu_shell_append(GTK_MENU_SHELL(pastemenu), alspunkt_einfuegenitem);
-    gtk_widget_add_accelerator(alspunkt_einfuegenitem, "activate", accel_group,
-            GDK_KEY_v, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
-    gtk_menu_shell_append(GTK_MENU_SHELL(pastemenu),
-            alsunterpunkt_einfuegenitem);
-    g_object_set_data( G_OBJECT(alsunterpunkt_einfuegenitem), "kind",
-            GINT_TO_POINTER(1) );
+	//Einfügen
+	GtkWidget *pasteitem = gtk_menu_item_new_with_label("Einfügen");
+	GtkWidget *pastemenu = gtk_menu_new();
+	GtkWidget *alspunkt_einfuegenitem = gtk_menu_item_new_with_label(
+			"Gleiche Ebene");
+	GtkWidget *alsunterpunkt_einfuegenitem = gtk_menu_item_new_with_label(
+			"Unterebene");
+	gtk_menu_shell_append(GTK_MENU_SHELL(pastemenu), alspunkt_einfuegenitem);
+	gtk_widget_add_accelerator(alspunkt_einfuegenitem, "activate", accel_group,
+	GDK_KEY_v, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
+	gtk_menu_shell_append(GTK_MENU_SHELL(pastemenu),
+			alsunterpunkt_einfuegenitem);
+	g_object_set_data(G_OBJECT(alsunterpunkt_einfuegenitem), "kind",
+			GINT_TO_POINTER(1));
 
-    gtk_widget_add_accelerator(alsunterpunkt_einfuegenitem, "activate",
-            accel_group, GDK_KEY_v, GDK_CONTROL_MASK | GDK_SHIFT_MASK,
-            GTK_ACCEL_VISIBLE);
-    gtk_menu_item_set_submenu(GTK_MENU_ITEM(pasteitem), pastemenu);
+	gtk_widget_add_accelerator(alsunterpunkt_einfuegenitem, "activate",
+			accel_group, GDK_KEY_v, GDK_CONTROL_MASK | GDK_SHIFT_MASK,
+			GTK_ACCEL_VISIBLE);
+	gtk_menu_item_set_submenu(GTK_MENU_ITEM(pasteitem), pastemenu);
 
-    g_signal_connect( G_OBJECT(alspunkt_einfuegenitem), "activate",
-            G_CALLBACK(cb_clipboard_einfuegen_activate), (gpointer) zond );
-    g_signal_connect( G_OBJECT(alsunterpunkt_einfuegenitem), "activate",
-            G_CALLBACK(cb_clipboard_einfuegen_activate),
-            (gpointer) zond );
+	g_signal_connect(G_OBJECT(alspunkt_einfuegenitem), "activate",
+			G_CALLBACK(cb_clipboard_einfuegen_activate), (gpointer ) zond);
+	g_signal_connect(G_OBJECT(alsunterpunkt_einfuegenitem), "activate",
+			G_CALLBACK(cb_clipboard_einfuegen_activate), (gpointer ) zond);
 
-    //Link Einfügen
-    GtkWidget* pasteitem_link = gtk_menu_item_new_with_label("Als Link einfügen");
+	//Link Einfügen
+	GtkWidget *pasteitem_link = gtk_menu_item_new_with_label(
+			"Als Link einfügen");
 
-    GtkWidget* pastemenu_link = gtk_menu_new();
-    GtkWidget* alspunkt_einfuegenitem_link = gtk_menu_item_new_with_label(
-            "Gleiche Ebene");
-    GtkWidget* alsunterpunkt_einfuegenitem_link = gtk_menu_item_new_with_label(
-            "Unterebene");
-    gtk_menu_shell_append(GTK_MENU_SHELL(pastemenu_link), alspunkt_einfuegenitem_link);
-    gtk_widget_add_accelerator(alspunkt_einfuegenitem_link, "activate", accel_group,
-            GDK_KEY_l, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
-    gtk_widget_add_accelerator(alsunterpunkt_einfuegenitem_link, "activate", accel_group,
-            GDK_KEY_l, GDK_CONTROL_MASK | GDK_SHIFT_MASK, GTK_ACCEL_VISIBLE);
-    gtk_menu_shell_append(GTK_MENU_SHELL(pastemenu_link),
-            alsunterpunkt_einfuegenitem_link);
-    g_object_set_data( G_OBJECT(alsunterpunkt_einfuegenitem_link), "kind",
-            GINT_TO_POINTER(1) );
-    g_object_set_data( G_OBJECT(alsunterpunkt_einfuegenitem_link), "link",
-            GINT_TO_POINTER(1) );
-    g_object_set_data( G_OBJECT(alspunkt_einfuegenitem_link), "link",
-            GINT_TO_POINTER(1) );
-    gtk_menu_item_set_submenu(GTK_MENU_ITEM(pasteitem_link), pastemenu_link);
+	GtkWidget *pastemenu_link = gtk_menu_new();
+	GtkWidget *alspunkt_einfuegenitem_link = gtk_menu_item_new_with_label(
+			"Gleiche Ebene");
+	GtkWidget *alsunterpunkt_einfuegenitem_link = gtk_menu_item_new_with_label(
+			"Unterebene");
+	gtk_menu_shell_append(GTK_MENU_SHELL(pastemenu_link),
+			alspunkt_einfuegenitem_link);
+	gtk_widget_add_accelerator(alspunkt_einfuegenitem_link, "activate",
+			accel_group,
+			GDK_KEY_l, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
+	gtk_widget_add_accelerator(alsunterpunkt_einfuegenitem_link, "activate",
+			accel_group,
+			GDK_KEY_l, GDK_CONTROL_MASK | GDK_SHIFT_MASK, GTK_ACCEL_VISIBLE);
+	gtk_menu_shell_append(GTK_MENU_SHELL(pastemenu_link),
+			alsunterpunkt_einfuegenitem_link);
+	g_object_set_data(G_OBJECT(alsunterpunkt_einfuegenitem_link), "kind",
+			GINT_TO_POINTER(1));
+	g_object_set_data(G_OBJECT(alsunterpunkt_einfuegenitem_link), "link",
+			GINT_TO_POINTER(1));
+	g_object_set_data(G_OBJECT(alspunkt_einfuegenitem_link), "link",
+			GINT_TO_POINTER(1));
+	gtk_menu_item_set_submenu(GTK_MENU_ITEM(pasteitem_link), pastemenu_link);
 
-    GtkWidget* sep_struktur1item = gtk_separator_menu_item_new();
+	GtkWidget *sep_struktur1item = gtk_separator_menu_item_new();
 
-    g_signal_connect( G_OBJECT(alspunkt_einfuegenitem_link), "activate",
-            G_CALLBACK(cb_clipboard_einfuegen_activate), (gpointer) zond );
-    g_signal_connect( G_OBJECT(alsunterpunkt_einfuegenitem_link), "activate",
-            G_CALLBACK(cb_clipboard_einfuegen_activate),
-            (gpointer) zond );
+	g_signal_connect(G_OBJECT(alspunkt_einfuegenitem_link), "activate",
+			G_CALLBACK(cb_clipboard_einfuegen_activate), (gpointer ) zond);
+	g_signal_connect(G_OBJECT(alsunterpunkt_einfuegenitem_link), "activate",
+			G_CALLBACK(cb_clipboard_einfuegen_activate), (gpointer ) zond);
 
-    GtkWidget* sep_struktur2item = gtk_separator_menu_item_new();
+	GtkWidget *sep_struktur2item = gtk_separator_menu_item_new();
 
-    //Punkt(e) löschen
-    GtkWidget* loeschenitem = gtk_menu_item_new_with_label("Löschen");
-    gtk_widget_add_accelerator(loeschenitem, "activate", accel_group,
-            GDK_KEY_Delete, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
-    g_signal_connect( G_OBJECT(loeschenitem), "activate",
-            G_CALLBACK(cb_loeschen_activate), (gpointer) zond );
+	//Punkt(e) löschen
+	GtkWidget *loeschenitem = gtk_menu_item_new_with_label("Löschen");
+	gtk_widget_add_accelerator(loeschenitem, "activate", accel_group,
+	GDK_KEY_Delete, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
+	g_signal_connect(G_OBJECT(loeschenitem), "activate",
+			G_CALLBACK(cb_loeschen_activate), (gpointer ) zond);
 
-    //Speichern als Projektdatei
-    GtkWidget* anbindung_entfernenitem = gtk_menu_item_new_with_label(
-            "Anbindung entfernen");
-    g_signal_connect( G_OBJECT(anbindung_entfernenitem), "activate",
-            G_CALLBACK(cb_anbindung_entfernenitem_activate), zond );
+	//Speichern als Projektdatei
+	GtkWidget *anbindung_entfernenitem = gtk_menu_item_new_with_label(
+			"Anbindung entfernen");
+	g_signal_connect(G_OBJECT(anbindung_entfernenitem), "activate",
+			G_CALLBACK(cb_anbindung_entfernenitem_activate), zond);
 
-    GtkWidget* suchenitem = gtk_menu_item_new_with_label(
-            "Suchen");
-    g_signal_connect_swapped( suchenitem, "activate", G_CALLBACK(gtk_popover_popup), zond->popover );
+	GtkWidget *suchenitem = gtk_menu_item_new_with_label("Suchen");
+	g_signal_connect_swapped(suchenitem, "activate",
+			G_CALLBACK(gtk_popover_popup), zond->popover);
 
-    GtkWidget* jumpitem = gtk_menu_item_new_with_label( "Zu Ursprung springen" );
-    gtk_widget_add_accelerator(jumpitem, "activate", accel_group,
-            GDK_KEY_j, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
-    g_signal_connect( jumpitem, "activate", G_CALLBACK(cb_jumpitem), zond );
+	GtkWidget *jumpitem = gtk_menu_item_new_with_label("Zu Ursprung springen");
+	gtk_widget_add_accelerator(jumpitem, "activate", accel_group,
+	GDK_KEY_j, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
+	g_signal_connect(jumpitem, "activate", G_CALLBACK(cb_jumpitem), zond);
 
-    GtkWidget* sep_struktur3item = gtk_separator_menu_item_new();
+	GtkWidget *sep_struktur3item = gtk_separator_menu_item_new();
 
-    //Menus "Bearbeiten" anbinden
+	//Menus "Bearbeiten" anbinden
 //Menus in dateienmenu
-    gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), punkterzeugenitem );
-    gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), sep_struktur0item );
-    gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), kopierenitem );
-    gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), ausschneidenitem );
-    gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), pasteitem );
-    gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), pasteitem_link );
-    gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), sep_struktur1item );
-    gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), loeschenitem );
-    gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), anbindung_entfernenitem );
-    gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), sep_struktur2item );
-    gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), icon_change_item );
-    gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), sep_struktur3item );
-    gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), suchenitem );
-    gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), jumpitem );
-    gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), item_datei_oeffnen );
-    gtk_menu_shell_append( GTK_MENU_SHELL(strukturmenu), item_datei_oeffnen_mit );
+	gtk_menu_shell_append(GTK_MENU_SHELL(strukturmenu), punkterzeugenitem);
+	gtk_menu_shell_append(GTK_MENU_SHELL(strukturmenu), sep_struktur0item);
+	gtk_menu_shell_append(GTK_MENU_SHELL(strukturmenu), kopierenitem);
+	gtk_menu_shell_append(GTK_MENU_SHELL(strukturmenu), ausschneidenitem);
+	gtk_menu_shell_append(GTK_MENU_SHELL(strukturmenu), pasteitem);
+	gtk_menu_shell_append(GTK_MENU_SHELL(strukturmenu), pasteitem_link);
+	gtk_menu_shell_append(GTK_MENU_SHELL(strukturmenu), sep_struktur1item);
+	gtk_menu_shell_append(GTK_MENU_SHELL(strukturmenu), loeschenitem);
+	gtk_menu_shell_append(GTK_MENU_SHELL(strukturmenu),
+			anbindung_entfernenitem);
+	gtk_menu_shell_append(GTK_MENU_SHELL(strukturmenu), sep_struktur2item);
+	gtk_menu_shell_append(GTK_MENU_SHELL(strukturmenu), icon_change_item);
+	gtk_menu_shell_append(GTK_MENU_SHELL(strukturmenu), sep_struktur3item);
+	gtk_menu_shell_append(GTK_MENU_SHELL(strukturmenu), suchenitem);
+	gtk_menu_shell_append(GTK_MENU_SHELL(strukturmenu), jumpitem);
+	gtk_menu_shell_append(GTK_MENU_SHELL(strukturmenu), item_datei_oeffnen);
+	gtk_menu_shell_append(GTK_MENU_SHELL(strukturmenu), item_datei_oeffnen_mit);
 
-/*********************
-*  Menu Pdf-Dateien
-*********************/
-    GtkWidget* menu_dateien = gtk_menu_new();
+	/*********************
+	 *  Menu Pdf-Dateien
+	 *********************/
+	GtkWidget *menu_dateien = gtk_menu_new();
 
-    GtkWidget* item_sep_dateien0 = gtk_separator_menu_item_new( );
-    gtk_menu_shell_append( GTK_MENU_SHELL(menu_dateien), item_sep_dateien0 );
+	GtkWidget *item_sep_dateien0 = gtk_separator_menu_item_new();
+	gtk_menu_shell_append(GTK_MENU_SHELL(menu_dateien), item_sep_dateien0);
 
-    //PDF reparieren
-    GtkWidget* item_clean_pdf = gtk_menu_item_new_with_label( "PDF reparieren" );
-    gtk_menu_shell_append( GTK_MENU_SHELL(menu_dateien), item_clean_pdf );
-    g_signal_connect( item_clean_pdf, "activate", G_CALLBACK(cb_item_clean_pdf), zond );
+	//PDF reparieren
+	GtkWidget *item_clean_pdf = gtk_menu_item_new_with_label("PDF reparieren");
+	gtk_menu_shell_append(GTK_MENU_SHELL(menu_dateien), item_clean_pdf);
+	g_signal_connect(item_clean_pdf, "activate", G_CALLBACK(cb_item_clean_pdf),
+			zond);
 
-    //Text-Suche
-    GtkWidget* item_textsuche = gtk_menu_item_new_with_label( "Text suchen" );
-    gtk_menu_shell_append( GTK_MENU_SHELL(menu_dateien), item_textsuche);
-    g_signal_connect( item_textsuche, "activate", G_CALLBACK(cb_item_textsuche), zond );
+	//Text-Suche
+	GtkWidget *item_textsuche = gtk_menu_item_new_with_label("Text suchen");
+	gtk_menu_shell_append(GTK_MENU_SHELL(menu_dateien), item_textsuche);
+	g_signal_connect(item_textsuche, "activate", G_CALLBACK(cb_item_textsuche),
+			zond);
 
-    GtkWidget* item_ocr = gtk_menu_item_new_with_label( "OCR" );
-    gtk_menu_shell_append( GTK_MENU_SHELL(menu_dateien), item_ocr );
-    g_signal_connect( item_ocr, "activate", G_CALLBACK(cb_datei_ocr), zond );
+	GtkWidget *item_ocr = gtk_menu_item_new_with_label("OCR");
+	gtk_menu_shell_append(GTK_MENU_SHELL(menu_dateien), item_ocr);
+	g_signal_connect(item_ocr, "activate", G_CALLBACK(cb_datei_ocr), zond);
 
-/*  Menu Ansicht */
-    GtkWidget* ansichtmenu = gtk_menu_new();
+	/*  Menu Ansicht */
+	GtkWidget *ansichtmenu = gtk_menu_new();
 
-    //Erweitern
-    GtkWidget* erweiternitem = gtk_menu_item_new_with_label ("Erweitern");
+	//Erweitern
+	GtkWidget *erweiternitem = gtk_menu_item_new_with_label("Erweitern");
 
-    GtkWidget* erweiternmenu = gtk_menu_new();
-    GtkWidget* alle_erweiternitem = gtk_menu_item_new_with_label("Ganze Struktur");
-    GtkWidget* aktuellerzweig_erweiternitem = gtk_menu_item_new_with_label("Aktueller Zweig");
-    gtk_menu_shell_append(GTK_MENU_SHELL(erweiternmenu), alle_erweiternitem);
-    gtk_menu_shell_append(GTK_MENU_SHELL(erweiternmenu), aktuellerzweig_erweiternitem);
-    gtk_menu_item_set_submenu(GTK_MENU_ITEM(erweiternitem), erweiternmenu);
+	GtkWidget *erweiternmenu = gtk_menu_new();
+	GtkWidget *alle_erweiternitem = gtk_menu_item_new_with_label(
+			"Ganze Struktur");
+	GtkWidget *aktuellerzweig_erweiternitem = gtk_menu_item_new_with_label(
+			"Aktueller Zweig");
+	gtk_menu_shell_append(GTK_MENU_SHELL(erweiternmenu), alle_erweiternitem);
+	gtk_menu_shell_append(GTK_MENU_SHELL(erweiternmenu),
+			aktuellerzweig_erweiternitem);
+	gtk_menu_item_set_submenu(GTK_MENU_ITEM(erweiternitem), erweiternmenu);
 
-    g_signal_connect( G_OBJECT(alle_erweiternitem), "activate", G_CALLBACK(cb_alle_erweitern_activated), (gpointer) zond );
-    g_signal_connect( G_OBJECT(aktuellerzweig_erweiternitem), "activate", G_CALLBACK(cb_aktueller_zweig_erweitern_activated), (gpointer) zond );
+	g_signal_connect(G_OBJECT(alle_erweiternitem), "activate",
+			G_CALLBACK(cb_alle_erweitern_activated), (gpointer ) zond);
+	g_signal_connect(G_OBJECT(aktuellerzweig_erweiternitem), "activate",
+			G_CALLBACK(cb_aktueller_zweig_erweitern_activated),
+			(gpointer ) zond);
 
-    //Alle reduzieren
-    GtkWidget* einklappenitem = gtk_menu_item_new_with_label ("Alle reduzieren");
-    g_signal_connect( einklappenitem, "activate", G_CALLBACK(cb_reduzieren_activated), (gpointer) zond );
+	//Alle reduzieren
+	GtkWidget *einklappenitem = gtk_menu_item_new_with_label("Alle reduzieren");
+	g_signal_connect(einklappenitem, "activate",
+			G_CALLBACK(cb_reduzieren_activated), (gpointer ) zond);
 
-    GtkWidget* sep_ansicht1item = gtk_separator_menu_item_new();
+	GtkWidget *sep_ansicht1item = gtk_separator_menu_item_new();
 
-    //refresh view
-    GtkWidget* refreshitem = gtk_menu_item_new_with_label ("Refresh");
-    g_signal_connect( refreshitem, "activate", G_CALLBACK(cb_refresh_view_activated), (gpointer) zond );
+	//refresh view
+	GtkWidget *refreshitem = gtk_menu_item_new_with_label("Refresh");
+	g_signal_connect(refreshitem, "activate",
+			G_CALLBACK(cb_refresh_view_activated), (gpointer ) zond);
 
-    GtkWidget* sep_item_2 = gtk_separator_menu_item_new();
+	GtkWidget *sep_item_2 = gtk_separator_menu_item_new();
 
-    //Menu-Punkt, mit dem Textfenster losgelöst werden kann
-    //zunächst inaktiv, da bei Start auf baun_inhalt
-    zond->menu.textview_extra = gtk_menu_item_new_with_label( "Textfenster" );
-    gtk_widget_set_sensitive( zond->menu.textview_extra, FALSE );
-    g_signal_connect( zond->menu.textview_extra, "activate", G_CALLBACK(cb_textview_extra), zond );
+	//Menu-Punkt, mit dem Textfenster losgelöst werden kann
+	//zunächst inaktiv, da bei Start auf baun_inhalt
+	zond->menu.textview_extra = gtk_menu_item_new_with_label("Textfenster");
+	gtk_widget_set_sensitive(zond->menu.textview_extra, FALSE);
+	g_signal_connect(zond->menu.textview_extra, "activate",
+			G_CALLBACK(cb_textview_extra), zond);
 
-    gtk_menu_shell_append( GTK_MENU_SHELL(ansichtmenu), erweiternitem);
-    gtk_menu_shell_append( GTK_MENU_SHELL(ansichtmenu), einklappenitem);
-    gtk_menu_shell_append( GTK_MENU_SHELL(ansichtmenu), sep_ansicht1item);
-    gtk_menu_shell_append( GTK_MENU_SHELL(ansichtmenu), refreshitem);
-    gtk_menu_shell_append( GTK_MENU_SHELL(ansichtmenu), sep_item_2 );
-    gtk_menu_shell_append( GTK_MENU_SHELL(ansichtmenu), zond->menu.textview_extra );
+	gtk_menu_shell_append(GTK_MENU_SHELL(ansichtmenu), erweiternitem);
+	gtk_menu_shell_append(GTK_MENU_SHELL(ansichtmenu), einklappenitem);
+	gtk_menu_shell_append(GTK_MENU_SHELL(ansichtmenu), sep_ansicht1item);
+	gtk_menu_shell_append(GTK_MENU_SHELL(ansichtmenu), refreshitem);
+	gtk_menu_shell_append(GTK_MENU_SHELL(ansichtmenu), sep_item_2);
+	gtk_menu_shell_append(GTK_MENU_SHELL(ansichtmenu),
+			zond->menu.textview_extra);
 
-/*  Menu Extras */
-    GtkWidget* extrasmenu = gtk_menu_new( );
+	/*  Menu Extras */
+	GtkWidget *extrasmenu = gtk_menu_new();
 
-    //Gemini
-    GtkWidget* item_gemini_read = gtk_menu_item_new_with_label( "Gemini-Ausdruck einlesen" );
-    g_signal_connect( item_gemini_read, "activate", G_CALLBACK(cb_menu_gemini_einlesen), (gpointer) zond );
+	//Gemini
+	GtkWidget *item_gemini_read = gtk_menu_item_new_with_label(
+			"Gemini-Ausdruck einlesen");
+	g_signal_connect(item_gemini_read, "activate",
+			G_CALLBACK(cb_menu_gemini_einlesen), (gpointer ) zond);
 
-    GtkWidget* item_gemini_select = gtk_menu_item_new_with_label( "Gemini-Protokolle anzeigen" );
-    g_signal_connect( item_gemini_select, "activate", G_CALLBACK(cb_menu_gemini_select), (gpointer) zond );
+	GtkWidget *item_gemini_select = gtk_menu_item_new_with_label(
+			"Gemini-Protokolle anzeigen");
+	g_signal_connect(item_gemini_select, "activate",
+			G_CALLBACK(cb_menu_gemini_select), (gpointer ) zond);
 
-    //Test
-    GtkWidget* testitem = gtk_menu_item_new_with_label ("Test");
-    g_signal_connect( testitem, "activate", G_CALLBACK(cb_menu_test_activate), (gpointer) zond );
+	//Test
+	GtkWidget *testitem = gtk_menu_item_new_with_label("Test");
+	g_signal_connect(testitem, "activate", G_CALLBACK(cb_menu_test_activate),
+			(gpointer ) zond);
 
-    gtk_menu_shell_append( GTK_MENU_SHELL(extrasmenu), item_gemini_read );
-    gtk_menu_shell_append( GTK_MENU_SHELL(extrasmenu), item_gemini_select );
-    gtk_menu_shell_append( GTK_MENU_SHELL(extrasmenu), testitem);
+	gtk_menu_shell_append(GTK_MENU_SHELL(extrasmenu), item_gemini_read);
+	gtk_menu_shell_append(GTK_MENU_SHELL(extrasmenu), item_gemini_select);
+	gtk_menu_shell_append(GTK_MENU_SHELL(extrasmenu), testitem);
 
-/*  Menu Einstellungen */
-    GtkWidget* einstellungenmenu = gtk_menu_new( );
+	/*  Menu Einstellungen */
+	GtkWidget *einstellungenmenu = gtk_menu_new();
 
-    GtkWidget* zoom_item = gtk_menu_item_new_with_label( "Zoom Interner Viewer" );
-    g_signal_connect( zoom_item, "activate", G_CALLBACK(cb_settings_zoom), zond );
-    GtkWidget* prefs_autosave = gtk_check_menu_item_new_with_label( "Automatisches Speichern" );
-    g_signal_connect( prefs_autosave, "toggled", G_CALLBACK(prefs_autosave_toggled), zond );
-    g_settings_bind( zond->settings, "autosave", prefs_autosave, "active", G_SETTINGS_BIND_DEFAULT );
+	GtkWidget *zoom_item = gtk_menu_item_new_with_label("Zoom Interner Viewer");
+	g_signal_connect(zoom_item, "activate", G_CALLBACK(cb_settings_zoom), zond);
+	GtkWidget *prefs_autosave = gtk_check_menu_item_new_with_label(
+			"Automatisches Speichern");
+	g_signal_connect(prefs_autosave, "toggled",
+			G_CALLBACK(prefs_autosave_toggled), zond);
+	g_settings_bind(zond->settings, "autosave", prefs_autosave, "active",
+			G_SETTINGS_BIND_DEFAULT);
 
-    gtk_menu_shell_append( GTK_MENU_SHELL(einstellungenmenu),
-            zoom_item );
-    gtk_menu_shell_append( GTK_MENU_SHELL(einstellungenmenu),
-            prefs_autosave );
+	gtk_menu_shell_append(GTK_MENU_SHELL(einstellungenmenu), zoom_item);
+	gtk_menu_shell_append(GTK_MENU_SHELL(einstellungenmenu), prefs_autosave);
 
+	/*  Menu Hilfe  */
+	GtkWidget *hilfemenu = gtk_menu_new();
 
-/*  Menu Hilfe  */
-    GtkWidget* hilfemenu = gtk_menu_new( );
+	GtkWidget *hilfe_about = gtk_menu_item_new_with_label("Über");
+	gtk_menu_shell_append(GTK_MENU_SHELL(hilfemenu), hilfe_about);
+	g_signal_connect(hilfe_about, "activate", G_CALLBACK(headerbar_hilfe_about),
+			zond);
 
-    GtkWidget* hilfe_about = gtk_menu_item_new_with_label( "Über" );
-    gtk_menu_shell_append( GTK_MENU_SHELL(hilfemenu), hilfe_about );
-    g_signal_connect( hilfe_about, "activate", G_CALLBACK(headerbar_hilfe_about), zond );
+	GtkWidget *hilfe_update = gtk_menu_item_new_with_label("Update");
+	gtk_menu_shell_append(GTK_MENU_SHELL(hilfemenu), hilfe_update);
+	g_signal_connect(hilfe_update, "activate",
+			G_CALLBACK(headerbar_hilfe_update), zond);
 
-    GtkWidget* hilfe_update = gtk_menu_item_new_with_label( "Update" );
-    gtk_menu_shell_append( GTK_MENU_SHELL(hilfemenu), hilfe_update );
-    g_signal_connect( hilfe_update, "activate", G_CALLBACK(headerbar_hilfe_update), zond );
+	/*  Gesamtmenu:
+	 *   Die erzeugten Menus als Untermenu der Menuitems aus der menubar
+	 */
+	// An menu aus menubar anbinden
+	gtk_menu_item_set_submenu(GTK_MENU_ITEM(zond->menu.projekt), projektmenu);
+	gtk_menu_item_set_submenu(GTK_MENU_ITEM(zond->menu.pdf), menu_dateien);
+	gtk_menu_item_set_submenu(GTK_MENU_ITEM(zond->menu.struktur), strukturmenu);
+	gtk_menu_item_set_submenu(GTK_MENU_ITEM(zond->menu.ansicht), ansichtmenu);
+	gtk_menu_item_set_submenu(GTK_MENU_ITEM(zond->menu.extras), extrasmenu);
+	gtk_menu_item_set_submenu(GTK_MENU_ITEM(einstellungen), einstellungenmenu);
+	gtk_menu_item_set_submenu(GTK_MENU_ITEM(hilfeitem), hilfemenu);
 
-/*  Gesamtmenu:
-*   Die erzeugten Menus als Untermenu der Menuitems aus der menubar
-*/
-    // An menu aus menubar anbinden
-    gtk_menu_item_set_submenu( GTK_MENU_ITEM(zond->menu.projekt), projektmenu );
-    gtk_menu_item_set_submenu( GTK_MENU_ITEM(zond->menu.pdf), menu_dateien );
-    gtk_menu_item_set_submenu( GTK_MENU_ITEM(zond->menu.struktur), strukturmenu );
-    gtk_menu_item_set_submenu( GTK_MENU_ITEM(zond->menu.ansicht), ansichtmenu );
-    gtk_menu_item_set_submenu( GTK_MENU_ITEM(zond->menu.extras), extrasmenu );
-    gtk_menu_item_set_submenu( GTK_MENU_ITEM(einstellungen),
-            einstellungenmenu );
-    gtk_menu_item_set_submenu( GTK_MENU_ITEM(hilfeitem), hilfemenu );
-
-    return menubar;
+	return menubar;
 }
 
+static void cb_button_mode_toggled(GtkToggleButton *button, gpointer data) {
+	Projekt *zond = (Projekt*) data;
 
-static void
-cb_button_mode_toggled( GtkToggleButton* button, gpointer data )
-{
-    Projekt* zond = (Projekt*) data;
+	if (gtk_toggle_button_get_active(button)) {
+		GtkWidget *baum_fs = NULL;
+		GtkWidget *baum_auswertung = NULL;
 
-    if ( gtk_toggle_button_get_active( button ) )
-    {
-        GtkWidget* baum_fs = NULL;
-        GtkWidget* baum_auswertung = NULL;
+		baum_fs = gtk_paned_get_child1(GTK_PANED(zond->hpaned));
+		gtk_widget_show_all(baum_fs);
 
-        baum_fs = gtk_paned_get_child1( GTK_PANED(zond->hpaned) );
-        gtk_widget_show_all( baum_fs );
+		baum_auswertung = gtk_paned_get_child2(
+				GTK_PANED(gtk_paned_get_child2( GTK_PANED(zond->hpaned) )));
+		gtk_widget_hide(baum_auswertung);
+	} else {
+		//baum_inhalt und baum_auswertung anzeigen
+		//zwischenspeichern
+		//leeren
+		GtkWidget *baum_fs = NULL;
+		GtkWidget *baum_auswertung = NULL;
 
-        baum_auswertung = gtk_paned_get_child2( GTK_PANED(gtk_paned_get_child2( GTK_PANED(zond->hpaned) )) );
-        gtk_widget_hide( baum_auswertung );
-    }
-    else
-    {
-        //baum_inhalt und baum_auswertung anzeigen
-        //zwischenspeichern
-        //leeren
-        GtkWidget* baum_fs = NULL;
-        GtkWidget* baum_auswertung = NULL;
+		baum_fs = gtk_paned_get_child1(GTK_PANED(zond->hpaned));
+		gtk_widget_hide(baum_fs);
 
-        baum_fs = gtk_paned_get_child1( GTK_PANED(zond->hpaned) );
-        gtk_widget_hide( baum_fs );
+		baum_auswertung = gtk_paned_get_child2(
+				GTK_PANED(gtk_paned_get_child2( GTK_PANED(zond->hpaned) )));
+		gtk_widget_show_all(baum_auswertung);
+	}
 
-        baum_auswertung = gtk_paned_get_child2( GTK_PANED(gtk_paned_get_child2( GTK_PANED(zond->hpaned) )) );
-        gtk_widget_show_all( baum_auswertung );
-    }
-
-    return;
+	return;
 }
 
+void init_headerbar(Projekt *zond) {
+	//Menu erzeugen
+	GtkWidget *menubar = init_menu(zond);
 
-void
-init_headerbar ( Projekt* zond )
-{
-    //Menu erzeugen
-    GtkWidget* menubar = init_menu( zond );
+	//HeaderBar erzeugen
+	GtkWidget *headerbar = gtk_header_bar_new();
+	gtk_header_bar_set_has_subtitle(GTK_HEADER_BAR(headerbar), FALSE);
+	gtk_header_bar_set_decoration_layout(GTK_HEADER_BAR(headerbar),
+			":minimize,maximize,close");
+	gtk_header_bar_set_show_close_button(GTK_HEADER_BAR(headerbar), TRUE);
 
-    //HeaderBar erzeugen
-    GtkWidget* headerbar = gtk_header_bar_new();
-    gtk_header_bar_set_has_subtitle(GTK_HEADER_BAR(headerbar), FALSE);
-    gtk_header_bar_set_decoration_layout(GTK_HEADER_BAR(headerbar), ":minimize,maximize,close");
-    gtk_header_bar_set_show_close_button(GTK_HEADER_BAR(headerbar), TRUE);
+	//Umschaltknopf erzeugen
+	zond->fs_button = gtk_toggle_button_new_with_label("FS");
+	g_signal_connect(zond->fs_button, "toggled",
+			G_CALLBACK(cb_button_mode_toggled), zond);
+	gtk_header_bar_pack_start(GTK_HEADER_BAR(headerbar), zond->fs_button);
 
-    //Umschaltknopf erzeugen
-    zond->fs_button = gtk_toggle_button_new_with_label( "FS" );
-    g_signal_connect( zond->fs_button, "toggled", G_CALLBACK(cb_button_mode_toggled), zond );
-    gtk_header_bar_pack_start( GTK_HEADER_BAR(headerbar), zond->fs_button );
+	//alles in Headerbar packen
+	gtk_header_bar_pack_start(GTK_HEADER_BAR(headerbar), menubar);
 
-    //alles in Headerbar packen
-    gtk_header_bar_pack_start( GTK_HEADER_BAR(headerbar), menubar );
+	//HeaderBar anzeigen
+	gtk_window_set_titlebar(GTK_WINDOW(zond->app_window), headerbar);
 
-    //HeaderBar anzeigen
-    gtk_window_set_titlebar( GTK_WINDOW(zond->app_window), headerbar );
-
-    return;
+	return;
 }

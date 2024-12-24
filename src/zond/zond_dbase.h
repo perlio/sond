@@ -4,18 +4,15 @@
 #include <glib-object.h>
 #include "global_types.h"
 
-typedef enum
-{
-    ZOND_DBASE_TYPE_BAUM_ROOT,
-    ZOND_DBASE_TYPE_BAUM_STRUKT, //1
-    ZOND_DBASE_TYPE_BAUM_INHALT_FILE,
-    ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_COPY, //3
-    ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_LINK,
-    ZOND_DBASE_TYPE_FILE_PART, //5
-    ZOND_DBASE_TYPE_VIRT_PDF,
-    NUM_ZOND_DBASE_TYPES
+typedef enum {
+	ZOND_DBASE_TYPE_BAUM_ROOT, ZOND_DBASE_TYPE_BAUM_STRUKT, //1
+	ZOND_DBASE_TYPE_BAUM_INHALT_FILE,
+	ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_COPY, //3
+	ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_LINK,
+	ZOND_DBASE_TYPE_FILE_PART, //5
+	ZOND_DBASE_TYPE_VIRT_PDF,
+	NUM_ZOND_DBASE_TYPES
 } NodeType;
-
 
 #define ERROR_Z_DBASE { if ( error ) *error = g_error_new( g_quark_from_static_string( "SQLITE3" ), \
                     sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ), \
@@ -50,9 +47,6 @@ typedef enum
         \
         return -1; \
     }
-
-
-
 
 #define ERROR_ZOND_DBASE(x) { if ( errmsg ) *errmsg = add_string( g_strconcat( "Bei Aufruf ", __func__, ":\n", \
                        "Bei Aufruf " x ":\n", \
@@ -104,91 +98,89 @@ typedef enum
 G_BEGIN_DECLS
 
 #define ZOND_TYPE_DBASE zond_dbase_get_type( )
-G_DECLARE_DERIVABLE_TYPE (ZondDBase, zond_dbase, ZOND, DBASE, GObject)
+G_DECLARE_DERIVABLE_TYPE(ZondDBase, zond_dbase, ZOND, DBASE, GObject)
 
-struct _ZondDBaseClass
-{
-    GObjectClass parent_class;
+struct _ZondDBaseClass {
+	GObjectClass parent_class;
 };
 
-void zond_dbase_finalize_stmts( sqlite3* );
+void zond_dbase_finalize_stmts(sqlite3*);
 
-gint zond_dbase_create_db_maj_1( sqlite3*, GError** );
+gint zond_dbase_create_db_maj_1(sqlite3*, GError**);
 
-ZondDBase* zond_dbase_new( const gchar*, gboolean, gboolean, gchar** );
+ZondDBase* zond_dbase_new(const gchar*, gboolean, gboolean, gchar**);
 
-void zond_dbase_close( ZondDBase* );
+void zond_dbase_close(ZondDBase*);
 
-sqlite3* zond_dbase_get_dbase( ZondDBase* );
+sqlite3* zond_dbase_get_dbase(ZondDBase*);
 
-const gchar* zond_dbase_get_path( ZondDBase* );
+const gchar* zond_dbase_get_path(ZondDBase*);
 
-gint zond_dbase_backup( ZondDBase*, ZondDBase*, gchar** );
+gint zond_dbase_backup(ZondDBase*, ZondDBase*, gchar**);
 
-gint zond_dbase_prepare( ZondDBase*, const gchar*, const gchar**, gint,
-        sqlite3_stmt***, GError** );
+gint zond_dbase_prepare(ZondDBase*, const gchar*, const gchar**, gint,
+		sqlite3_stmt***, GError**);
 
-gint zond_dbase_begin( ZondDBase*, GError** );
+gint zond_dbase_begin(ZondDBase*, GError**);
 
-gint zond_dbase_commit( ZondDBase*, GError** );
+gint zond_dbase_commit(ZondDBase*, GError**);
 
-gint zond_dbase_rollback( ZondDBase*, GError** );
+gint zond_dbase_rollback(ZondDBase*, GError**);
 
-gint zond_dbase_test_path( ZondDBase*, const gchar*, GError** );
+gint zond_dbase_test_path(ZondDBase*, const gchar*, GError**);
 
-gint zond_dbase_insert_node( ZondDBase*, gint, gboolean, gint, gint,
-        const gchar*, gchar const*, const gchar*, const gchar*,
-        const gchar*, GError** );
+gint zond_dbase_insert_node(ZondDBase*, gint, gboolean, gint, gint,
+		const gchar*, gchar const*, const gchar*, const gchar*, const gchar*,
+		GError**);
 
-gint zond_dbase_create_file_root( ZondDBase*, gchar const*, gchar const*,
-        gchar const*, gchar const*, gint*, GError** );
+gint zond_dbase_create_file_root(ZondDBase*, gchar const*, gchar const*,
+		gchar const*, gchar const*, gint*, GError**);
 
-gint zond_dbase_update_icon_name( ZondDBase*, gint, const gchar*, GError** );
+gint zond_dbase_update_icon_name(ZondDBase*, gint, const gchar*, GError**);
 
-gint zond_dbase_update_node_text( ZondDBase*, gint, const gchar*, GError** );
+gint zond_dbase_update_node_text(ZondDBase*, gint, const gchar*, GError**);
 
-gint zond_dbase_update_text( ZondDBase*, gint, const gchar*, GError** );
+gint zond_dbase_update_text(ZondDBase*, gint, const gchar*, GError**);
 
-gint zond_dbase_update_path( ZondDBase*, const gchar*, const gchar*, GError** );
+gint zond_dbase_update_path(ZondDBase*, const gchar*, const gchar*, GError**);
 
-gint zond_dbase_verschieben_knoten( ZondDBase*, gint, gint, gboolean, GError** );
+gint zond_dbase_verschieben_knoten(ZondDBase*, gint, gint, gboolean, GError**);
 
-gint zond_dbase_remove_node( ZondDBase*, gint, GError** );
+gint zond_dbase_remove_node(ZondDBase*, gint, GError**);
 
-gint zond_dbase_get_node( ZondDBase*, gint, gint*, gint*, gchar**, gchar**,
-        gchar**, gchar**, gchar**, GError** );
+gint zond_dbase_get_node(ZondDBase*, gint, gint*, gint*, gchar**, gchar**,
+		gchar**, gchar**, gchar**, GError**);
 
-gint zond_dbase_get_type_and_link( ZondDBase*, gint, gint*, gint*, GError** );
+gint zond_dbase_get_type_and_link(ZondDBase*, gint, gint*, gint*, GError**);
 
-gint zond_dbase_get_text( ZondDBase*, gint, gchar**, GError** );
+gint zond_dbase_get_text(ZondDBase*, gint, gchar**, GError**);
 
-gint zond_dbase_get_file_part_root( ZondDBase*, const gchar*, gint*, GError** );
+gint zond_dbase_get_file_part_root(ZondDBase*, const gchar*, gint*, GError**);
 
-gint zond_dbase_get_tree_root( ZondDBase*, gint, gint*, GError** );
+gint zond_dbase_get_tree_root(ZondDBase*, gint, gint*, GError**);
 
-gint zond_dbase_get_parent( ZondDBase*, gint, gint*, GError** );
+gint zond_dbase_get_parent(ZondDBase*, gint, gint*, GError**);
 
-gint zond_dbase_get_first_child( ZondDBase*, gint, gint*, GError** );
+gint zond_dbase_get_first_child(ZondDBase*, gint, gint*, GError**);
 
-gint zond_dbase_get_older_sibling( ZondDBase*, gint, gint*, GError** );
+gint zond_dbase_get_older_sibling(ZondDBase*, gint, gint*, GError**);
 
-gint zond_dbase_get_younger_sibling( ZondDBase*, gint, gint*, GError** );
+gint zond_dbase_get_younger_sibling(ZondDBase*, gint, gint*, GError**);
 
-gint zond_dbase_get_baum_inhalt_file_from_file_part( ZondDBase*,
-                    gint, gint*, GError** );
+gint zond_dbase_get_baum_inhalt_file_from_file_part(ZondDBase*, gint, gint*,
+		GError**);
 
-gint zond_dbase_get_baum_auswertung_copy( ZondDBase*, gint, gint*, GError** );
+gint zond_dbase_get_baum_auswertung_copy(ZondDBase*, gint, gint*, GError**);
 
-gint zond_dbase_get_first_baum_inhalt_file_child( ZondDBase*,
-        gint, gint*, gint*, GError** );
+gint zond_dbase_get_first_baum_inhalt_file_child(ZondDBase*, gint, gint*, gint*,
+		GError**);
 
-gint zond_dbase_find_baum_inhalt_file( ZondDBase*, gint, gint*, gint*, gchar**, GError** );
+gint zond_dbase_find_baum_inhalt_file(ZondDBase*, gint, gint*, gint*, gchar**,
+		GError**);
 
-gint zond_dbase_is_file_part_copied( ZondDBase*, gint, gboolean*, GError** );
+gint zond_dbase_is_file_part_copied(ZondDBase*, gint, gboolean*, GError**);
 
 G_END_DECLS
 
 #endif // ZOND_DBASE_H_INCLUDED
-
-
 

@@ -1,3 +1,2 @@
 
-
-gint zond_convert( ZondDBase*, gchar const*, GError** );
+gint zond_convert(ZondDBase*, gchar const*, GError**);

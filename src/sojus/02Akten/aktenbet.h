@@ -6,17 +6,17 @@ typedef struct _GPtrArray GPtrArray;
 
 typedef struct _Aktenbet Aktenbet;
 
-typedef void* gpointer;
+typedef void *gpointer;
 typedef int gint;
 
-GPtrArray* aktenbet_oeffnen( GtkWidget*, gint, gint );
+GPtrArray* aktenbet_oeffnen(GtkWidget*, gint, gint);
 
-void aktenbet_free( gpointer );
+void aktenbet_free(gpointer);
 
-void aktenbet_speichern( GtkWidget* );
+void aktenbet_speichern(GtkWidget*);
 
-Aktenbet* aktenbet_einlesen( GtkWidget* );
+Aktenbet* aktenbet_einlesen(GtkWidget*);
 
-Aktenbet* aktenbet_neu( void );
+Aktenbet* aktenbet_neu(void);
 
 #endif // AKTENBET_H_INCLUDED

@@ -3,6 +3,6 @@
 
 typedef struct _Sojus Sojus;
 
-gint sql_log( Sojus*, const gchar* );
+gint sql_log(Sojus*, const gchar*);
 
 #endif // SQL_H_INCLUDED

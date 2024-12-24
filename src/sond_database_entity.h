@@ -7,24 +7,21 @@
 G_BEGIN_DECLS
 
 #define SOND_TYPE_DATABASE_ENTITY sond_database_entity_get_type( )
-G_DECLARE_DERIVABLE_TYPE (SondDatabaseEntity, sond_database_entity, SOND, DATABASE_ENTITY, GtkBox)
+G_DECLARE_DERIVABLE_TYPE( SondDatabaseEntity, sond_database_entity, SOND,
+		DATABASE_ENTITY, GtkBox)
 
-
-struct _SondDatabaseEntityClass
-{
-    GtkBoxClass parent_class;
+struct _SondDatabaseEntityClass {
+	GtkBoxClass parent_class;
 };
 
-GtkWidget* sond_database_entity_new( void );
+GtkWidget* sond_database_entity_new(void);
 
-gint sond_database_entity_load( SondDatabaseEntity*, gpointer, gint, gchar** );
+gint sond_database_entity_load(SondDatabaseEntity*, gpointer, gint, gchar**);
 
-GtkWidget* sond_database_entity_load_new( gpointer, gint, gchar** );
+GtkWidget* sond_database_entity_load_new(gpointer, gint, gchar**);
 
-GtkWidget* sond_database_entity_get_prop_box( SondDatabaseEntity* );
-
+GtkWidget* sond_database_entity_get_prop_box(SondDatabaseEntity*);
 
 G_END_DECLS
-
 
 #endif // SOND_DATABASE_ENTITY_H_INCLUDED

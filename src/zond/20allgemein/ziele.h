@@ -8,9 +8,9 @@ typedef char gchar;
 typedef int gboolean;
 typedef struct _Pdf_Viewer PdfViewer;
 
+gint ziele_abfragen_anker_rek(ZondDBase*, Anbindung, gint, gint*, gboolean*,
+		GError**);
 
-gint ziele_abfragen_anker_rek( ZondDBase*, Anbindung, gint, gint*, gboolean*, GError** );
-
-gint zond_anbindung_erzeugen( PdfViewer* pv, GError** );
+gint zond_anbindung_erzeugen(PdfViewer *pv, GError**);
 
 #endif // ZIELE_H_INCLUDED

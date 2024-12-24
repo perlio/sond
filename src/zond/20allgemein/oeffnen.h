@@ -6,8 +6,4 @@
 typedef int gint;
 typedef char gchar;
 
-
-
-
-
 #endif // OEFFNEN_H_INCLUDED

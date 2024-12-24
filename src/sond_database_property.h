@@ -8,19 +8,17 @@
 G_BEGIN_DECLS
 
 #define SOND_TYPE_DATABASE_PROPERTY sond_database_property_get_type( )
-G_DECLARE_DERIVABLE_TYPE (SondDatabaseProperty, sond_database_property, SOND, DATABASE_PROPERTY, SondDatabaseEntity)
+G_DECLARE_DERIVABLE_TYPE( SondDatabaseProperty, sond_database_property, SOND,
+		DATABASE_PROPERTY, SondDatabaseEntity)
 
-
-struct _SondDatabasePropertyClass
-{
-    SondDatabaseEntityClass parent_class;
+struct _SondDatabasePropertyClass {
+	SondDatabaseEntityClass parent_class;
 };
 
 G_END_DECLS
 
-SondDatabaseProperty* sond_database_property_load_new( gpointer, gint, gchar** );
+SondDatabaseProperty* sond_database_property_load_new(gpointer, gint, gchar**);
 
-void sond_database_property_set_editable( SondDatabaseProperty*, gboolean );
-
+void sond_database_property_set_editable(SondDatabaseProperty*, gboolean);
 
 #endif // SOND_DATABASE_PROPERTY_H_INCLUDED

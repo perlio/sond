@@ -10,9 +10,9 @@ typedef struct _Pdf_Document_Page PdfDocumentPage;
 typedef int gint;
 typedef char gchar;
 
+gint render_stext_page_from_display_list(fz_context *ctx, PdfDocumentPage*,
+		gchar**);
 
-gint render_stext_page_from_display_list( fz_context* ctx, PdfDocumentPage*, gchar** );
-
-void render_page_thread( gpointer, gpointer );
+void render_page_thread(gpointer, gpointer);
 
 #endif // RENDER_H_INCLUDED

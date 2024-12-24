@@ -32,12 +32,10 @@ all: zond
 -include $(DEPS)
 
 zond: $(BIN_DIR)/zond.exe
-	echo $(SRCS)
-	echo $(MAKECMDGOALS)
 
 # Linking
-$(BIN_DIR)/zond.exe: $(SRCS:%=$(OBJ_DIR)/%.o)
-	echo $(SRCS)
+$(BIN_DIR)/$(MAKECMDGOALS).exe: $(SRCS:%=$(OBJ_DIR)/%.o)
+	echo $(SRCS) $(BIN_DIR)/$(MAKECMDGOALS).exe
 	@mkdir -p $(BIN_DIR)
 	$(CC) $(SRCS:%=$(OBJ_DIR)/%.o) $(LDFLAGS) -o $@
 

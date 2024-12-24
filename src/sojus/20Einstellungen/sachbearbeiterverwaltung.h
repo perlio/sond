@@ -3,9 +3,8 @@
 
 typedef struct _Sojus Sojus;
 
+void sachbearbeiterfenster_oeffnen(Sojus*);
 
-void sachbearbeiterfenster_oeffnen( Sojus* );
-
-void sachbearbeiterfenster_fuellen( Sojus* );
+void sachbearbeiterfenster_fuellen(Sojus*);
 
 #endif // SACHBEARBETERVERWALTUNG_H_INCLUDED

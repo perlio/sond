@@ -3,9 +3,8 @@
 
 typedef struct _GtkMenuItem GtkMenuItem;
 
-typedef void* gpointer;
+typedef void *gpointer;
 
-
-void cb_menu_datei_export_activate( GtkMenuItem*, gpointer );
+void cb_menu_datei_export_activate(GtkMenuItem*, gpointer);
 
 #endif // EXPORT_H_INCLUDED

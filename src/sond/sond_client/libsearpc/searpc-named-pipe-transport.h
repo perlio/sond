@@ -38,10 +38,10 @@ typedef int SearpcNamedPipe;
 // Server side interface.
 
 struct _SearpcNamedPipeServer {
-    char path[4096];
-    pthread_t listener_thread;
-    SearpcNamedPipe pipe_fd;
-    GThreadPool *named_pipe_server_thread_pool;
+	char path[4096];
+	pthread_t listener_thread;
+	SearpcNamedPipe pipe_fd;
+	GThreadPool *named_pipe_server_thread_pool;
 };
 
 typedef struct _SearpcNamedPipeServer LIBSEARPC_API SearpcNamedPipeServer;
@@ -50,7 +50,8 @@ LIBSEARPC_API
 SearpcNamedPipeServer* searpc_create_named_pipe_server(const char *path);
 
 LIBSEARPC_API
-SearpcNamedPipeServer* searpc_create_named_pipe_server_with_threadpool(const char *path, int named_pipe_server_thread_pool_size);
+SearpcNamedPipeServer* searpc_create_named_pipe_server_with_threadpool(
+		const char *path, int named_pipe_server_thread_pool_size);
 
 LIBSEARPC_API
 int searpc_named_pipe_server_start(SearpcNamedPipeServer *server);
@@ -58,8 +59,8 @@ int searpc_named_pipe_server_start(SearpcNamedPipeServer *server);
 // Client side interface.
 
 struct _SearpcNamedPipeClient {
-    char path[4096];
-    SearpcNamedPipe pipe_fd;
+	char path[4096];
+	SearpcNamedPipe pipe_fd;
 };
 
 typedef struct _SearpcNamedPipeClient LIBSEARPC_API SearpcNamedPipeClient;
@@ -68,13 +69,14 @@ LIBSEARPC_API
 SearpcNamedPipeClient* searpc_create_named_pipe_client(const char *path);
 
 LIBSEARPC_API
-SearpcClient * searpc_client_with_named_pipe_transport(SearpcNamedPipeClient *client, const char *service);
+SearpcClient* searpc_client_with_named_pipe_transport(
+		SearpcNamedPipeClient *client, const char *service);
 
 LIBSEARPC_API
 int searpc_named_pipe_client_connect(SearpcNamedPipeClient *client);
 
 LIBSEARPC_API
-void searpc_free_client_with_pipe_transport (SearpcClient *client);
+void searpc_free_client_with_pipe_transport(SearpcClient *client);
 
 #ifdef __cplusplus
 }

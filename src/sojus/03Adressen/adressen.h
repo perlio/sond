@@ -7,11 +7,10 @@ typedef struct _Adresse Adresse;
 
 typedef int gint;
 
+Adresse* adresse_oeffnen(GtkWidget*, gint);
 
-Adresse* adresse_oeffnen( GtkWidget*, gint );
+void adresse_free(Adresse*);
 
-void adresse_free( Adresse* );
-
-void adresse_speichern( GtkWidget* );
+void adresse_speichern(GtkWidget*);
 
 #endif // ADRESSEN_DB_H_INCLUDED
