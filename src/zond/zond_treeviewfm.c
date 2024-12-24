@@ -641,36 +641,36 @@ static gint zond_treeviewfm_insert_dummy(SondTreeviewFM *stvfm,
 
 		content_type = g_file_info_get_content_type(G_FILE_INFO(object));
 		if (g_content_type_is_mime_type(content_type, "application/pdf"))
-			;
-		ZondTreeviewFMPrivate *priv = zond_treeviewfm_get_instance_private(
-				ZOND_TREEVIEWFM(stvfm));
+		{
+			ZondTreeviewFMPrivate *priv = zond_treeviewfm_get_instance_private(
+					ZOND_TREEVIEWFM(stvfm));
 
-		rel_path = sond_treeviewfm_get_rel_path(stvfm, iter);
-		file_part = g_strdup_printf("/%s//", rel_path);
-		g_free(rel_path);
+			rel_path = sond_treeviewfm_get_rel_path(stvfm, iter);
+			file_part = g_strdup_printf("/%s//", rel_path);
+			g_free(rel_path);
 
-		rc = zond_dbase_get_file_part_root(
-				priv->zond->dbase_zond->zond_dbase_work, file_part, &pdf_root,
-				error);
-		g_free(file_part);
-		if (rc)
-			ERROR_Z
+			rc = zond_dbase_get_file_part_root(
+					priv->zond->dbase_zond->zond_dbase_work, file_part, &pdf_root,
+					error);
+			g_free(file_part);
+			if (rc) ERROR_Z
 
-		if (pdf_root) {
-			gint rc = 0;
-			gint pdf_abschnitt = 0;
+			if (pdf_root) {
+				gint rc = 0;
+				gint pdf_abschnitt = 0;
 
-			rc = zond_dbase_get_first_child(
-					priv->zond->dbase_zond->zond_dbase_work, pdf_root,
-					&pdf_abschnitt, error);
-			if (rc)
-				ERROR_Z
+				rc = zond_dbase_get_first_child(
+						priv->zond->dbase_zond->zond_dbase_work, pdf_root,
+						&pdf_abschnitt, error);
+				if (rc)
+					ERROR_Z
 
-			if (pdf_abschnitt)
-				gtk_tree_store_insert(
-						GTK_TREE_STORE(
-								gtk_tree_view_get_model( GTK_TREE_VIEW(stvfm) )),
-						&iter_newest, iter, -1);
+				if (pdf_abschnitt)
+					gtk_tree_store_insert(
+							GTK_TREE_STORE(
+									gtk_tree_view_get_model( GTK_TREE_VIEW(stvfm) )),
+							&iter_newest, iter, -1);
+			}
 		}
 
 		return 0; //wenn behandelt, kein chain-up mehr!

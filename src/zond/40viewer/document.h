@@ -24,6 +24,4 @@ DisplayedDocument* document_new_displayed_document(const gchar*, Anbindung*,
 DisplayedDocument* document_get_dd(PdfViewer*, gint, PdfDocumentPage**, gint*,
 		gint*);
 
-gint document_save_dd(DisplayedDocument*, gboolean, GError**);
-
 #endif // DOCUMENT_H_INCLUDED

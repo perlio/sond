@@ -649,11 +649,12 @@ static gboolean viewer_entry_in_anbindung(JournalEntry entry,
 	} else if (entry.type == JOURNAL_TYPE_PAGES_DELETED) {
 
 	}
+
+	return ret;
 }
 
 static gint viewer_save_dirty_docs(PdfViewer *pdfv, gboolean ask) {
 	DisplayedDocument *dd = NULL;
-	GError *error = NULL;
 
 	dd = pdfv->dd;
 	if (!dd)
@@ -666,12 +667,40 @@ static gint viewer_save_dirty_docs(PdfViewer *pdfv, gboolean ask) {
 		GArray *arr_anb_work = NULL;
 		GArray *arr_anb_store = NULL;
 		GArray *arr_redo = NULL;
+		gboolean dirty = FALSE;
+		gint ret = 0;
+		gchar *errmsg = NULL;
 
 		arr_journal = zond_pdf_document_get_arr_journal(dd->zond_pdf_document);
 
-		if (arr_journal->len == 0)
+		//arr_journal zuerst durchgehen, um zu prüfen, ob dd sauber oder nicht
+		for (gint i = arr_journal->len - 1; i >= 0; i--) {
+			JournalEntry entry = { 0 };
+
+			entry = g_array_index(arr_journal, JournalEntry, i);
+			if (viewer_entry_in_anbindung( entry, dd->anbindung) )
+			{
+				dirty = TRUE;
+				break;
+			}
+		}
+
+		if (!dirty)
 			continue; //nix geändert
 
+		//ggf. fragen, ob gespeichert werden soll
+		if (ask) {
+			gchar *text_frage = g_strconcat("PDF-Datei ",
+					zond_pdf_document_get_file_part(dd->zond_pdf_document),
+					" geändert", NULL);
+			rc = abfrage_frage( NULL, text_frage, "Speichern?", NULL);
+			g_free(text_frage);
+		} else
+			rc = GTK_RESPONSE_YES;
+
+		if (rc != GTK_RESPONSE_YES) continue;
+
+		//vorbereiten zum speichern
 		for (gint i = arr_journal->len - 1; i >= 0; i--) {
 			JournalEntry entry = { 0 };
 
@@ -691,22 +720,25 @@ static gint viewer_save_dirty_docs(PdfViewer *pdfv, gboolean ask) {
 				 //passe diese in Datenbank an
 				 }
 				 */
+
 				g_array_remove_index(arr_journal, i);
 			}
 		}
 
-		rc = document_save_dd(dd, ask, &error);
-		if (rc) {
+		zond_pdf_document_mutex_lock(dd->zond_pdf_document);
+		ret = zond_pdf_document_save(dd->zond_pdf_document, &errmsg);
+		zond_pdf_document_mutex_unlock(dd->zond_pdf_document);
+		if (ret) {
 			gchar *error_text = NULL;
 
 			error_text = g_strdup_printf("Fehler bei Speichern der Datei '%s'",
 					zond_pdf_document_get_file_part(dd->zond_pdf_document));
-			display_error(pdfv->vf, error_text, error->message);
+			display_error(pdfv->vf, error_text, errmsg);
 			g_free(error_text);
-			g_error_free(error);
-
-			continue;
+			g_free(errmsg);
 		}
+		//redo
+
 	} while ((dd = dd->next));
 
 	//Bei allen sauberen pvs Speichern insensitiv
@@ -724,9 +756,15 @@ static gint viewer_save_dirty_docs(PdfViewer *pdfv, gboolean ask) {
 
 			zpdf = dd_test->zond_pdf_document;
 			arr_journal = zond_pdf_document_get_arr_journal(zpdf);
-			if (arr_journal->len > 0)
-				dirty = TRUE;
-			//ToDo: Prüfen, ob entries im journal auch dieses dd betreffen
+			if (arr_journal->len > 0){
+				for ( gint i = 0; i < arr_journal->len; i++)
+				{
+					JournalEntry entry = { 0 };
+
+					entry = g_array_index(arr_journal, JournalEntry, i);
+					if ( viewer_entry_in_anbindung(entry, dd_test->anbindung)) dirty = TRUE;
+				}
+			}
 		} while ((dd_test = dd_test->next));
 
 		if (dirty == FALSE)
@@ -1849,7 +1887,6 @@ fz_catch		( ctx ) {
 }
 
 static void viewer_annot_edit_closed(GtkWidget *popover, gpointer data) {
-	gint rc = 0;
 	gchar *errmsg = NULL;
 	gchar *text = NULL;
 	ViewerPageNew *viewer_page = NULL;
