@@ -653,10 +653,21 @@ static gint seiten_loeschen(PdfViewer *pv, GPtrArray *arr_document_page,
 		GPtrArray *arr_pages = NULL;
 		fz_context *ctx = NULL;
 		JournalEntry entry = { JOURNAL_TYPE_PAGES_DELETED, };
+		gint last_page = 0;
+		pdf_document* doc = NULL;
 
 		zond_pdf_document = g_ptr_array_index(arr_docs, i);
 		arr_pages = zond_pdf_document_get_arr_pages(zond_pdf_document);
 		ctx = zond_pdf_document_get_ctx(zond_pdf_document);
+
+		fz_try(ctx) doc = pdf_create_document(ctx);
+		fz_catch(ctx) {
+			if (error) *error = g_error_new(g_quark_from_static_string("mupdf"), fz_caught(ctx),
+					"%s\n%s", __func__, fz_caught_message(ctx));
+			g_ptr_array_unref(arr_docs);
+
+			return -1;
+		}
 
 		pages = g_malloc(sizeof(gint) * arr_pages->len);
 		for (gint u = 0; u < arr_pages->len; u++) {
@@ -667,6 +678,24 @@ static gint seiten_loeschen(PdfViewer *pv, GPtrArray *arr_document_page,
 
 			zond_pdf_document_unload_page(pdf_document_page);
 			pdf_document_page->page_doc = u;
+
+			//falls Seite fehlt: in neues doc kopieren
+			if (pages[u] > last_page) {
+				gchar* errmsg = NULL;
+				gint rc = 0;
+				rc = pdf_copy_page(ctx, zond_pdf_document_get_pdf_doc(zond_pdf_document),
+						last_page, pages[u] - 1, doc, -1, &errmsg);
+				if (rc) {
+					if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\n%s", __func__, errmsg);
+					g_free(errmsg);
+					pdf_drop_document(ctx, doc);
+
+					return -1;
+				}
+				last_page = pages[u];
+			}
+
+			last_page++;
 		}
 
 		fz_try (ctx)
@@ -680,11 +709,14 @@ static gint seiten_loeschen(PdfViewer *pv, GPtrArray *arr_document_page,
 						fz_caught_message(ctx));
 			g_ptr_array_unref(arr_docs);
 			g_free(pages);
+			pdf_drop_document(ctx, doc);
 
 			return -1;
 		}
 
+		entry.zond_pdf_document = zond_pdf_document;
 		entry.PagesDeleted.pages_remaining = pages;
+		entry.PagesDeleted.doc = doc;
 		g_array_append_val(zond_pdf_document_get_arr_journal(zond_pdf_document),
 				entry);
 	}
@@ -928,20 +960,7 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 		doc_merge = pdf_keep_document(pv->zond->ctx, pv->zond->pv_clip); //Clipboard
 
 	count = pdf_count_pages(pv->zond->ctx, doc_merge);
-	/*
-	 #ifndef viewer
-	 rc = zond_dbase_insert_pages( pv->zond->dbase_zond->zond_dbase_work,
-	 zond_pdf_document_get_file_part( dd->zond_pdf_document ),
-	 dd->anbindung, pos, count, &error );
-	 if ( rc )
-	 {
-	 display_error( pv->vf, "Datei einfügen", error->message );
-	 g_error_free( error );
 
-	 return;
-	 }
-	 #endif
-	 */
 	rc = zond_pdf_document_insert_pages(dd->zond_pdf_document, pos,
 			pv->zond->ctx, doc_merge, &errmsg);
 	pdf_drop_document(pv->zond->ctx, doc_merge);
@@ -954,6 +973,7 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 		return;
 	}
 
+	entry.zond_pdf_document = dd->zond_pdf_document;
 	entry.PagesInserted.pos = pos;
 	entry.PagesInserted.count = count;
 	if (dd->anbindung) {
