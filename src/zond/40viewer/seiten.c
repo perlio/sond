@@ -669,11 +669,11 @@ static gint seiten_loeschen(PdfViewer *pv, GPtrArray *arr_document_page,
 			pdf_document_page->page_doc = u;
 		}
 
-		fz_try( ctx )
+		fz_try (ctx)
 			pdf_rearrange_pages(ctx,
 					zond_pdf_document_get_pdf_doc(zond_pdf_document),
 					arr_pages->len, pages);
-fz_catch		( ctx ) {
+		fz_catch (ctx) {
 			if (error)
 				*error = g_error_new(g_quark_from_static_string("MUPDF"),
 						fz_caught(ctx), "%s\n%s", __func__,
@@ -704,28 +704,18 @@ void cb_pv_seiten_loeschen(GtkMenuItem *item, gpointer data) {
 	GError *error = NULL;
 	gchar *title = NULL;
 	GPtrArray *arr_document_page = NULL;
-	gint count = 0;
 
 	PdfViewer *pv = (PdfViewer*) data;
 
-	/*
-	 //Seiten löschen nur in "ganzen" Pdfs
-	 if ( pv->dd->next != NULL || pv->dd->anbindung != NULL )
-	 {
-	 display_message( pv->vf, "Seiten aus Auszug löschen nicht möglich" , NULL );
-	 return;
-	 }
-	 */
-	count = pv->arr_pages->len;
-
 	//zu löschende Seiten holen
-	title = g_strdup_printf("Seiten löschen (1 - %i):", count);
+	title = g_strdup_printf("Seiten löschen (1 - %i):", pv->arr_pages->len);
 	arr_document_page = seiten_abfrage_seiten(pv, title, NULL, FALSE);
 	g_free(title);
 
 	if (!arr_document_page)
 		return;
 
+#ifndef VIEWER
 	//Abfrage, ob Anbindung mit Seite verknüpft
 	rc = seiten_anbindung(pv, arr_document_page, &error);
 	if (rc) {
@@ -740,6 +730,7 @@ void cb_pv_seiten_loeschen(GtkMenuItem *item, gpointer data) {
 
 		return;
 	}
+#endif // VIEWER
 
 	rc = seiten_loeschen(pv, arr_document_page, &error);
 	g_ptr_array_unref(arr_document_page);
@@ -751,11 +742,6 @@ void cb_pv_seiten_loeschen(GtkMenuItem *item, gpointer data) {
 
 		return;
 	}
-#ifndef VIEWER
-	else if (rc == 1)
-		display_message(pv->vf, "Fehler in Seiten löschen -\n\n"
-				"Zu löschende Seiten enthalten Anbindungen", NULL);
-#endif // VIEWER
 
 	return;
 }

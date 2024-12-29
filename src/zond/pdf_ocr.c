@@ -20,6 +20,7 @@
 #include <mupdf/pdf.h>
 #include <gtk/gtk.h>
 #include <tesseract/capi.h>
+#include <glib.h>
 #include <glib/gstdio.h>
 
 #include "zond_pdf_document.h"
@@ -92,7 +93,7 @@ pdf_ocr_find_BT(gchar *buf, size_t size) {
 	return NULL;
 }
 
-fz_buffer*
+static fz_buffer*
 pdf_ocr_get_content_stream_as_buffer(fz_context *ctx, pdf_obj *page_ref,
 		gchar **errmsg) {
 	pdf_obj *obj_contents = NULL;
@@ -106,9 +107,10 @@ pdf_ocr_get_content_stream_as_buffer(fz_context *ctx, pdf_obj *page_ref,
 		stream = pdf_open_contents_stream(ctx,
 				pdf_get_bound_document(ctx, page_ref), obj_contents);
 		buf = fz_read_all(ctx, stream, 1024);
-	}fz_always( ctx )
+	}
+	fz_always( ctx )
 		fz_drop_stream(ctx, stream);
-fz_catch	( ctx )
+	fz_catch ( ctx )
 		ERROR_MUPDF_R("open and read stream", NULL)
 
 	return buf;
@@ -212,17 +214,26 @@ static gint pdf_ocr_sandwich_page(PdfDocumentPage *pdf_document_page,
 	pdf_obj *font_dict = NULL;
 	pdf_obj *font_dict_text = NULL;
 	pdf_document *doc = NULL;
+	JournalEntry entry = { JOURNAL_TYPE_OCR, };
 
 	fz_context *ctx = zond_pdf_document_get_ctx(pdf_document_page->document);
 
 	fz_try( ctx )
 		page_ref_text = pdf_lookup_page_obj(ctx, doc_text, page_text);
-fz_catch	( ctx )
+	fz_catch(ctx)
 		ERROR_MUPDF_R("pdf_lookup_page_obj", -2)
 
+	entry.zond_pdf_document = pdf_document_page->document;
+	entry.OCR.page = pdf_document_page->page_doc;
+
+	fz_try(ctx) entry.OCR.buf = pdf_ocr_get_content_stream_as_buffer(ctx, pdf_document_page->obj, errmsg);
+	fz_catch(ctx) ERROR_MUPDF_R("pdf_get_content_stream_as_buffer", -2)
+
 	buf = pdf_text_filter_page(ctx, pdf_document_page->obj, 2, errmsg);
-	if (!buf)
+	if (!buf) {
+		fz_drop_buffer(ctx, entry.OCR.buf);
 		ERROR_S
+	}
 
 	float scale = 1. / TESS_SCALE / 72. * 70.;
 
@@ -232,6 +243,7 @@ fz_catch	( ctx )
 	buf_text = pdf_ocr_process_tess_tmp(ctx, page_ref_text, ctm, errmsg);
 	if (!buf_text) {
 		fz_drop_buffer(ctx, buf);
+		fz_drop_buffer(ctx, entry.OCR.buf);
 		ERROR_S_VAL(-2)
 	}
 
@@ -241,14 +253,17 @@ fz_always	( ctx )
 		fz_drop_buffer(ctx, buf_text);
 fz_catch	( ctx ) {
 		fz_drop_buffer(ctx, buf);
+		fz_drop_buffer(ctx, entry.OCR.buf);
 		ERROR_MUPDF_R("fz_append_buffer", -2)
 	}
 
 	rc = pdf_ocr_update_content_stream(ctx, pdf_document_page->obj, buf,
 			errmsg);
 	fz_drop_buffer(ctx, buf);
-	if (rc)
+	if (rc) {
+		fz_drop_buffer(ctx, entry.OCR.buf);
 		ERROR_S
+	}
 
 	doc = pdf_pin_document(ctx, pdf_document_page->obj);
 	graft_map = pdf_new_graft_map(ctx, doc); //keine exception
@@ -283,8 +298,12 @@ fz_catch	( ctx ) {
 		}
 	}fz_always( ctx )
 		pdf_drop_graft_map(ctx, graft_map);
-fz_catch	( ctx )
+	fz_catch( ctx ) {
+		fz_drop_buffer(ctx, entry.OCR.buf);
 		ERROR_MUPDF("fz_try (page_sandwich)")
+	}
+
+	g_array_append_val(zond_pdf_document_get_arr_journal(pdf_document_page->document), entry);
 
 	return 0;
 }
@@ -914,9 +933,9 @@ gint pdf_ocr_pages(Projekt *zond, InfoWindow *info_window,
 	//doc mit text öffnen
 	fz_try( ctx )
 		doc_text = pdf_open_document(ctx, path_tmp); //keine Passwortabfrage
-fz_always	( ctx )
+	fz_always	( ctx )
 		g_free(path_tmp);
-fz_catch	( ctx )
+	fz_catch	( ctx )
 		ERROR_MUPDF("pdf_open_document")
 
 	//Text in PDF übertragen

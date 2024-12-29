@@ -30,33 +30,27 @@ typedef struct _Pdf_Document_Page {
 } PdfDocumentPage;
 
 typedef struct _Annot_Text_Markup {
-	gint n_quad;
 	GArray *arr_quads;
 } AnnotTextMarkup;
 
 typedef struct _Annot_Text {
 	fz_rect rect;
 	gboolean open;
-	const gchar *name;
+	gchar* content;
 } AnnotText;
 
 typedef struct _Pdf_Document_Page_Annot {
 	PdfDocumentPage *pdf_document_page;
 	pdf_annot *annot;
 	enum pdf_annot_type type;
-	gint flags;
-	const gchar *content; //Text der Annot gem. Dict-Entry /Content
-
 	union {
 		AnnotTextMarkup annot_text_markup;
 		AnnotText annot_text;
-//        AnnotFreeText annot_free_text;
 	};
 } PdfDocumentPageAnnot;
 
 struct PagesDeleted {
 	gint *pages_remaining;
-	fz_context *ctx;
 	pdf_document *doc; //hier sollen später die gelöschten Seiten gespeichert sein, um undo zu ermöglichen
 };
 struct PagesInserted {
@@ -64,8 +58,23 @@ struct PagesInserted {
 	gint count;
 	Anbindung *anbindung;
 };
-struct AnnotDeleted {
+struct AnnotCreated {
+	gint page;
 	gint index;
+};
+struct AnnotChanged {
+	gint page;
+	gint index;
+	gboolean deleted;
+	enum pdf_annot_type type;
+	union {
+		AnnotTextMarkup annot_text_markup;
+		AnnotText annot_text;
+	};
+};
+struct OCR {
+	gint page;
+	fz_buffer* buf;
 };
 
 typedef enum _Journal_Type {
@@ -73,30 +82,20 @@ typedef enum _Journal_Type {
 	JOURNAL_TYPE_PAGES_INSERTED,
 	JOURNAL_TYPE_ANNOT_CREATED,
 	JOURNAL_TYPE_ANNOT_CHANGED,
-	JOURNAL_TYPE_ANNOT_DELETED,
 	JOURNAL_TYPE_OCR
 } JournalType;
 
 typedef struct _Journal_Entry {
 	JournalType type;
+	ZondPdfDocument* zond_pdf_document;
 	union {
 		struct PagesDeleted PagesDeleted;
 		struct PagesInserted PagesInserted;
-		struct AnnotDeleted AnnotDeleted;
+		struct AnnotCreated AnnotCreated;
+		struct AnnotChanged AnnotChanged;
+		struct OCR OCR;
 	};
 } JournalEntry;
-
-void free_journal_entry(JournalEntry *entry) {
-	if (entry->type == JOURNAL_TYPE_PAGES_DELETED) {
-		g_free(entry->PagesDeleted.pages_remaining);
-		pdf_drop_document(entry->PagesDeleted.ctx, entry->PagesDeleted.doc);
-		fz_drop_context(entry->PagesDeleted.ctx);
-	} else if (entry->type == JOURNAL_TYPE_PAGES_INSERTED) {
-		g_free(entry->PagesInserted.anbindung);
-	}
-
-	return;
-}
 
 struct _ZondPdfDocumentClass {
 	GObjectClass parent_class;

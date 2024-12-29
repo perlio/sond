@@ -2,28 +2,28 @@
 
 <schemalist>
 
-  <schema id='de.perlio.zond' path='/de/perlio/zond/'>
+	<schema id='de.perlio.zond' path='/de/perlio/zond/'>
 
-    <key name='project' type='s'>
-      <default>''</default>
-    </key>
+		<key name='project' type='s'>
+			<default>''</default>
+		</key>
 
-    <key name='root' type='s'>
-      <default>'C:\\'</default>
-    </key>
+		<key name='root' type='s'>
+			<default>'C:\\'</default>
+		</key>
 
-    <key name='speichern' type='b'>
-      <default>false</default>
-    </key>
+		<key name='speichern' type='b'>
+			<default>false</default>
+		</key>
 
-    <key name='autosave' type='b'>
-      <default>false</default>
-    </key>
+		<key name='autosave' type='b'>
+			<default>false</default>
+		</key>
 
-    <key name='zoom' type='d'>
-      <default>135</default>
-    </key>
+		<key name='zoom' type='d'>
+			<default>135</default>
+		</key>
 
-  </schema>
+	</schema>
 
 </schemalist>
