@@ -713,7 +713,7 @@ gint zond_pdf_document_insert_pages(ZondPdfDocument *zond_pdf_document,
 	if (rc)
 		ERROR_S
 
-			//eingefügte Seiten als pdf_document_page erzeugen und initiieren
+	//eingefügte Seiten als pdf_document_page erzeugen und initiieren
 	for (gint i = pos; i < pos + count; i++) {
 		gint rc = 0;
 		PdfDocumentPage *pdf_document_page = NULL;

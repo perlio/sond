@@ -189,7 +189,7 @@ static gint anbindung_vergleiche_pdf_pos(PdfPos pdf_pos1, PdfPos pdf_pos2) {
 	return 0;
 }
 
-static gboolean anbindung_is_pdf_punkt(Anbindung anbindung) {
+gboolean anbindung_is_pdf_punkt(Anbindung anbindung) {
 	if ((anbindung.von.seite || anbindung.von.index) && !anbindung.bis.seite
 			&& !anbindung.bis.index)
 		return TRUE;

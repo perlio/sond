@@ -6,10 +6,21 @@ typedef struct _GtkMenuItem GtkMenuItem;
 typedef struct _GFile GFile;
 typedef struct _ZondDBase ZondDBase;
 typedef struct _SondTreeviewFM SondTreeviewFM;
+typedef struct _DBase_Zond DBaseZond;
+typedef struct _Anbindung Anbindung;
 
 typedef void *gpointer;
 typedef int gint;
 typedef char gchar;
+
+gint dbase_zond_begin(DBaseZond*, GError** );
+
+gint dbase_zond_rollback(DBaseZond*, GError** );
+
+gint dbase_zond_commit(DBaseZond*, GError** );
+
+gint dbase_zond_update_section(DBaseZond*, gchar const*, Anbindung const*,
+		gint, gint, GError** );
 
 void project_set_changed(gpointer);
 

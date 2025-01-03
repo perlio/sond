@@ -3,6 +3,11 @@
 
 #include <glib.h>
 
+#define ERROR_ZOND_DBASE(x) { if ( errmsg ) *errmsg = add_string( g_strconcat( "Bei Aufruf ", __func__, ":\n", \
+                       "Bei Aufruf " x ":\n", \
+                       sqlite3_errmsg(zond_dbase_get_dbase(zond_dbase)), NULL ), *errmsg ); \
+                       return -1; }
+
 #define SOND_DATABASE_ERROR sond_database_error_quark()
 G_DEFINE_QUARK(sond-database-error-quark,sond_database_error)
 

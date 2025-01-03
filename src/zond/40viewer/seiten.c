@@ -548,9 +548,6 @@ static gint seiten_cb_loesche_seite(PdfViewer *pv, gint page_pv,
 					gtk_tree_view_get_model( GTK_TREE_VIEW(pv->tree_thumb) )),
 			&iter);
 
-	if (dd->anbindung)
-		dd->anbindung->bis.seite -= 1;
-
 	return 0;
 }
 
@@ -615,19 +612,73 @@ static gint seiten_loeschen(PdfViewer *pv, GPtrArray *arr_document_page,
 		GError **error) {
 	GPtrArray *arr_docs = NULL;
 
+#ifndef VIEWER
+	//ersma kucken, welche zond_pdf_documents überhaupt betroffen sind
 	arr_docs = g_ptr_array_new();
 	for (gint i = 0; i < arr_document_page->len; i++) {
 		PdfDocumentPage *pdf_document_page = NULL;
-		gint rc = 0;
-		gchar *errmsg = NULL;
 
 		pdf_document_page = g_ptr_array_index(arr_document_page, i);
 
-		if (!g_ptr_array_find(arr_docs, pdf_document_page->document, NULL))
+		if (!g_ptr_array_find(arr_docs, pdf_document_page->document, NULL)) {
+			GArray* arr_journal = NULL;
+
+			arr_journal = zond_pdf_document_get_arr_journal(pdf_document_page->document);
+			if (arr_journal->len) {
+				for ( gint u = 0; u < pv->zond->arr_pv->len; u++) {
+					PdfViewer* pv_test = NULL;
+					DisplayedDocument* dd_test = NULL;
+
+					pv_test = g_ptr_array_index(pv->zond->arr_pv, u);
+
+					dd_test = pv_test->dd;
+
+					do {
+						if ( pv != pv_test &&
+								dd_test->zond_pdf_document == pdf_document_page->document) {
+							if (error) *error = g_error_new( ZOND_ERROR, 0, "%s\n"
+									"Dokument, in das eingefügt werden soll, "
+									"ist in anderem Viewer geöffnet - zunächst schließen",
+									__func__);
+							g_ptr_array_unref(arr_docs);
+
+							return -1;
+						}
+					} while((dd_test = dd_test->next));
+				}
+			}
 			g_ptr_array_add(arr_docs, pdf_document_page->document);
+		}
+	}
+#endif
+
+	//Speichern, falls pv es nötig hat
+	if (gtk_widget_get_sensitive(pv->button_speichern)) {
+		gint rc = 0;
+
+		rc = abfrage_frage( NULL, "Viewer enthält Änderungen", "Speichern?",
+				NULL);
+
+		if (rc != GTK_RESPONSE_YES) return 0;
+
+		rc = viewer_save_dirty_docs(pv, error);
+		if (rc) {
+			g_prefix_error(error, "%s\n", __func__);
+
+			return -1;
+		}
+	}
+
+	//und nochmal durch alle pdf_document_pages...
+	for (gint i = 0; i < arr_document_page->len; i++) {
+		gint rc = 0;
+		PdfDocumentPage* pdf_document_page = NULL;
+		gchar* errmsg = NULL;
 
 		//macht - sofern noch nicht geschehen - thread_pool des pv dicht, in dem Seite angezeigt wird
 		//Dann wird Seite aus pv gelöscht
+		pdf_document_page = g_ptr_array_index(arr_document_page, i);
+
 		rc = viewer_foreach(pv, pdf_document_page, seiten_cb_loesche_seite,
 				NULL, &errmsg);
 		if (rc) {
@@ -652,7 +703,6 @@ static gint seiten_loeschen(PdfViewer *pv, GPtrArray *arr_document_page,
 		gint *pages = NULL;
 		GPtrArray *arr_pages = NULL;
 		fz_context *ctx = NULL;
-		JournalEntry entry = { JOURNAL_TYPE_PAGES_DELETED, };
 		gint last_page = 0;
 		pdf_document* doc = NULL;
 
@@ -660,15 +710,7 @@ static gint seiten_loeschen(PdfViewer *pv, GPtrArray *arr_document_page,
 		arr_pages = zond_pdf_document_get_arr_pages(zond_pdf_document);
 		ctx = zond_pdf_document_get_ctx(zond_pdf_document);
 
-		fz_try(ctx) doc = pdf_create_document(ctx);
-		fz_catch(ctx) {
-			if (error) *error = g_error_new(g_quark_from_static_string("mupdf"), fz_caught(ctx),
-					"%s\n%s", __func__, fz_caught_message(ctx));
-			g_ptr_array_unref(arr_docs);
-
-			return -1;
-		}
-
+		//Test, ob zond_pdf_document auch in anderem pv geöffnet
 		pages = g_malloc(sizeof(gint) * arr_pages->len);
 		for (gint u = 0; u < arr_pages->len; u++) {
 			PdfDocumentPage *pdf_document_page = NULL;
@@ -713,12 +755,6 @@ static gint seiten_loeschen(PdfViewer *pv, GPtrArray *arr_document_page,
 
 			return -1;
 		}
-
-		entry.zond_pdf_document = zond_pdf_document;
-		entry.PagesDeleted.pages_remaining = pages;
-		entry.PagesDeleted.doc = doc;
-		g_array_append_val(zond_pdf_document_get_arr_journal(zond_pdf_document),
-				entry);
 	}
 
 	g_ptr_array_unref(arr_docs);
@@ -782,37 +818,49 @@ void cb_pv_seiten_loeschen(GtkMenuItem *item, gpointer data) {
  **      Seiten einfügen
  */
 typedef struct _InfoInsert {
-	guint pos;
+	Anbindung* anbindung;
+	guint page_doc;
 	gint count;
+	gboolean after_last;
 } InfoInsert;
 
 static gint seiten_cb_einfuegen(PdfViewer *pv, gint page_pv,
 		DisplayedDocument *dd, gpointer data, gchar **errmsg) {
 	InfoInsert *info_insert = NULL;
+	ZondPdfDocument* zond_pdf_document = NULL;
 	ViewerPageNew *viewer_page_anchor = NULL;
+	gint page_doc = 0;
 
 	info_insert = (InfoInsert*) data;
 
+	if (dd->anbindung) {
+		if (info_insert->page_doc == dd->anbindung->von.seite ||
+				(info_insert->page_doc == dd->anbindung->bis.seite &&
+				info_insert->after_last)) {
+			if (info_insert->anbindung &&
+					anbindung_1_eltern_von_2(*(info_insert->anbindung), *(dd->anbindung)))
+				return 0;
+		}
+
+		dd->anbindung->bis.seite += info_insert->count;
+	}
+
 	viewer_page_anchor = g_ptr_array_index(pv->arr_pages, page_pv);
+	zond_pdf_document = viewer_page_anchor->pdf_document_page->document;
 
 	for (gint u = 0; u < info_insert->count; u++) {
 		ViewerPageNew *viewer_page = NULL;
 		GtkTreeIter iter_tmp;
 
-		viewer_page = viewer_new_page(pv,
-				viewer_page_anchor->pdf_document_page->document,
-				info_insert->pos + u);
+		viewer_page = viewer_new_page(pv, zond_pdf_document, page_doc + u);
 
-		g_ptr_array_insert(pv->arr_pages, info_insert->pos + u, viewer_page);
+		g_ptr_array_insert(pv->arr_pages, page_pv + u + (info_insert->after_last) ? 1 : 0, viewer_page);
 
-		gtk_list_store_insert(
-				GTK_LIST_STORE(
-						gtk_tree_view_get_model( GTK_TREE_VIEW(pv->tree_thumb) )),
-				&iter_tmp, info_insert->pos + u);
+		gtk_list_store_insert(GTK_LIST_STORE(
+				gtk_tree_view_get_model( GTK_TREE_VIEW(pv->tree_thumb) )),
+				&iter_tmp, page_pv + u + (info_insert->after_last) ? 1 : 0);
 	}
 
-	if (dd->anbindung)
-		dd->anbindung->bis.seite += info_insert->count;
 	g_object_set_data(G_OBJECT(pv->layout), "dirty", GINT_TO_POINTER(1));
 
 	return 0;
@@ -877,7 +925,8 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 	gchar *errmsg = NULL;
 	InfoInsert info_insert = { 0 };
 	GError *error = NULL;
-	JournalEntry entry = { JOURNAL_TYPE_PAGES_INSERTED, };
+	GArray* arr_journal = NULL;
+	gint page_doc = 0;
 
 	ret = seiten_abfrage_seitenzahl(pv, &pos);
 	if (ret == -1)
@@ -898,34 +947,77 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 
 			return;
 		}
-	} else {
-		gint page_dd = 0;
 
-		dd = document_get_dd(pv, pos, NULL, &page_dd, NULL);
+		if (dd->anbindung) page_doc = dd->anbindung->von.seite;
+		//else page_doc = 0;
+	} else if (pos < pv->arr_pages->len) {
+		DisplayedDocument *dd_vor = NULL;
 
-		if (pos < pv->arr_pages->len) {
-			DisplayedDocument *dd_nach = NULL;
+		dd = document_get_dd(pv, pos, NULL, NULL, &page_doc);
 
-			dd_nach = document_get_dd(pv, pos, NULL, NULL, NULL);
-			if (dd != dd_nach) {
-				//es handelt sich um ein virtuelles PDF
-				//zwischen den Grenzen verschiedener Abschnitte sollte nichts eingefügt werden
-				display_message(pv->vf,
-						"Virtuelles PDF - zwischen den Abschnitten "
-								"darf nichts eingefügt werden", NULL);
-
-				return;
-			}
-		}
-
-		//letzte Seite Anbindung?
-		if (dd->anbindung && dd->anbindung->bis.index
-				&& page_dd
-						== (dd->anbindung->bis.seite - dd->anbindung->von.seite)) {
+		dd_vor = document_get_dd(pv, pos - 1, NULL, NULL, NULL);
+		if (dd != dd_vor) {
+			//es handelt sich um ein virtuelles PDF
+			//zwischen den Grenzen verschiedener Abschnitte sollte nichts eingefügt werden
 			display_message(pv->vf,
-					"Abschnitt Ende nicht am Schluß der Seite -\n"
-							"Einfügen nach Ende eines Abschnitts daher nicht möglich",
-					NULL);
+					"Virtuelles PDF - zwischen den Abschnitten "
+							"darf nichts eingefügt werden", NULL);
+
+			return;
+		}
+	} else if (pos == pv->arr_pages->len) {//einfügen nach letzter Seite
+		dd = pv->dd;
+
+		while (dd->next) dd = dd->next; //letztes dd des pv
+
+		if (dd->anbindung && dd->anbindung->bis.index != EOP) {
+			display_message(pv->vf, "Abschnitt Ende nicht am Schluß der Seite -\n"
+					"Einfügen nach Ende eines Abschnitts daher nicht möglich", NULL);
+
+			return;
+		} else if (dd->anbindung) page_doc = dd->anbindung->bis.seite + 1;
+		else page_doc = zond_pdf_document_get_number_of_pages(dd->zond_pdf_document);
+	}
+
+	//es darf kein anderer pdfv geöffnet sein, in dem die Datei angezeigt ist,
+	//sofern es im betreffenden Dokument Änderungen gab
+	arr_journal = zond_pdf_document_get_arr_journal(dd->zond_pdf_document);
+
+	if (arr_journal->len) {
+		for ( gint i = 0; i < pv->zond->arr_pv->len; i++) {
+			PdfViewer* pv_test = NULL;
+			DisplayedDocument* dd_test = NULL;
+
+			pv_test = g_ptr_array_index(pv->zond->arr_pv, i);
+
+			dd_test = pv_test->dd;
+
+			do {
+				if ( pv != pv_test &&
+						dd_test->zond_pdf_document == dd->zond_pdf_document) {
+					display_message(pv->vf, "Dokument, in das eingefügt werden soll, "
+							"ist in anderem Viewer geöffnet - zunächst schließen", NULL);
+
+						return;
+				}
+			} while((dd_test = dd_test->next));
+		}
+	}
+
+	//Frage, ob pv Änderungen enthält, bleibt erforderlich -
+	//können ja andere DDs in diesem pv sein
+	if (gtk_widget_get_sensitive(pv->button_speichern)) {
+		gint rc = 0;
+
+		rc = abfrage_frage( NULL, "Viewer enthält Änderungen", "Speichern?",
+				NULL);
+
+		if (rc != GTK_RESPONSE_YES) return;
+
+		rc = viewer_save_dirty_docs(pv, &error);
+		if (rc) {
+			display_error(pv->vf, "Speichern nicht erfolgreich", error->message);
+			g_error_free(error);
 
 			return;
 		}
@@ -961,47 +1053,113 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 
 	count = pdf_count_pages(pv->zond->ctx, doc_merge);
 
-	rc = zond_pdf_document_insert_pages(dd->zond_pdf_document, pos,
+	rc = zond_pdf_document_insert_pages(dd->zond_pdf_document, page_doc,
 			pv->zond->ctx, doc_merge, &errmsg);
 	pdf_drop_document(pv->zond->ctx, doc_merge);
 	if (rc) {
 		display_message(pv->vf, "Fehler Einfügen\n\n", errmsg,
 				"\n\nViewer wird geschlossen", NULL);
 		g_free(errmsg);
-		viewer_save_and_close(pv);
+		viewer_schliessen(pv);
 
 		return;
 	}
 
-	entry.zond_pdf_document = dd->zond_pdf_document;
-	entry.PagesInserted.pos = pos;
-	entry.PagesInserted.count = count;
-	if (dd->anbindung) {
-		entry.PagesInserted.anbindung = g_malloc0(sizeof(Anbindung));
-		*(entry.PagesInserted.anbindung) = *(dd->anbindung);
-	}
-
-	g_array_append_val(zond_pdf_document_get_arr_journal(dd->zond_pdf_document),
-			entry);
-
-	info_insert.pos = pos;
+	info_insert.anbindung = dd->anbindung;
+	info_insert.page_doc = page_doc;
 	info_insert.count = count;
+	info_insert.after_last = (pos == pv->arr_pages->len) ? TRUE : FALSE;
 
-	//betroffene viewer-seiten einfügen
-	rc = viewer_foreach(pv,
-			zond_pdf_document_get_pdf_document_page(pv->dd->zond_pdf_document,
-					(pos) ? pos - 1 : pos + count), seiten_cb_einfuegen,
-			&info_insert, &errmsg);
-	if (rc) {
-		display_message(pv->vf, "Fehler Einfügen -\n\n", errmsg,
-				"\n\nViewer wird geschlossen", NULL);
-		g_free(errmsg);
-		viewer_save_and_close(pv);
-
-		return;
-	}
+	//betroffene viewer-seiten einfügen - kann keinen Fehler zurückgeben!
+	//vorangehend pdf_document_page wird übergeben - außer wenn Einfügen nach letzter Seite
+	//seiten_cb_einfügen prüft, ob Seite an Schnnittstelle zwischen zwei dds liegt
+	viewer_foreach(pv, g_ptr_array_index(pv->arr_pages,
+			(pos == pv->arr_pages->len) ? pos - 1 : pos), seiten_cb_einfuegen, &info_insert, &errmsg);
 
 	seiten_refresh_layouts(pv->zond->arr_pv);
+
+	rc = dbase_zond_begin(pv->zond->dbase_zond, &error);
+	if (rc == -1) {
+		display_message(pv->vf, "Fehler Einfügen\n\n", error->message,
+				"\n\nViewer wird geschlossen", NULL);
+		g_error_free(error);
+		viewer_schliessen(pv);
+
+		return;
+	} else if (rc == -2) {
+		display_message(pv->vf, "Fehler Einfügen\n\n", error->message,
+				"\n\nDatenbank könnte inkonsistent werden. Programm wird geschlossen",
+				NULL);
+		g_error_free(error);
+
+		gtk_widget_destroy(pv->zond->app_window);
+
+		return;
+	}
+
+	rc = dbase_zond_update_section(pv->zond->dbase_zond,
+			zond_pdf_document_get_file_part(dd->zond_pdf_document), dd->anbindung,
+			page_doc, count, &error);
+	if (rc) {
+		gint ret = 0;
+		GError* error_int = NULL;
+
+		ret = dbase_zond_rollback(pv->zond->dbase_zond, &error_int);
+		if (!ret) {
+			display_message(pv->vf, "Fehler Einfügen\n\n", error->message,
+					"\n\nViewer wird geschlossen", NULL);
+			g_error_free(error);
+			viewer_schliessen(pv);
+
+			return;
+		} else {
+			display_message(pv->vf, "Fehler Einfügen\n\n", error->message,
+					"\n\n",error_int->message, "\n\nDatenbank könnte inkonsistent werden. "
+					"Programm wird geschlossen",
+					NULL);
+			g_error_free(error);
+			g_error_free(error_int);
+
+			gtk_widget_destroy(pv->zond->app_window);
+
+			return;
+		}
+	}
+
+	rc = viewer_save_dirty_docs(pv, &error);
+	if (rc) {
+		gint ret = 0;
+		GError* error_int = NULL;
+
+		ret = dbase_zond_rollback(pv->zond->dbase_zond, &error_int);
+		if (!ret) {
+			display_message(pv->vf, "Fehler Einfügen\n\n", error->message,
+					"\n\nViewer wird geschlossen", NULL);
+			g_error_free(error);
+			viewer_schliessen(pv);
+
+			return;
+		} else {
+			display_message(pv->vf, "Fehler Einfügen\n\n", error->message,
+					"\n\n",error_int->message, "\n\nDatenbank könnte inkonsistent werden. "
+					"Programm wird geschlossen",
+					NULL);
+			g_error_free(error);
+			g_error_free(error_int);
+
+			gtk_widget_destroy(pv->zond->app_window);
+
+			return;
+		}
+	}
+
+	rc = dbase_zond_commit(pv->zond->dbase_zond, &error);
+	if (rc) {
+		display_message(pv->vf, "Änderungen in den Datenbanken konnten "
+				"nicht commited werden.\nDas ist sehr schlecht!\n\nFehlermeldung: %s",
+				error->message, NULL);
+		g_error_free(error);
+	}
 
 	return;
 }

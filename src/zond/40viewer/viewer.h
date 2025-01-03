@@ -136,6 +136,10 @@ ViewerPageNew* viewer_new_page(PdfViewer*, ZondPdfDocument*, gint);
 
 void viewer_display_document(PdfViewer*, DisplayedDocument*, gint, gint);
 
+void viewer_schliessen(PdfViewer*);
+
+gint viewer_save_dirty_docs(PdfViewer*, GError**);
+
 void viewer_save_and_close(PdfViewer*);
 
 gint viewer_get_iter_thumb(PdfViewer*, gint, GtkTreeIter*);

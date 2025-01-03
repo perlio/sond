@@ -605,7 +605,7 @@ static void viewer_free_render_response(gpointer data) {
 	return;
 }
 
-static void viewer_schliessen(PdfViewer *pv) {
+void viewer_schliessen(PdfViewer *pv) {
 	viewer_close_thread_pool_and_transfer(pv); //..._and_transfer, damit etwaig noch gerenderte GdkPixbufs verarztet werden
 	g_idle_remove_by_data(pv);
 
@@ -627,35 +627,25 @@ static void viewer_schliessen(PdfViewer *pv) {
 	return;
 }
 
-static gboolean viewer_entry_in_anbindung(JournalEntry entry,
-		Anbindung *anbindung) {
+static gboolean viewer_dd_is_dirty(DisplayedDocument* dd) {
+	Anbindung anbindung = { 0 };
 	gboolean ret = TRUE;
+	GArray* arr_journal = NULL;
 
-	if (!anbindung)
-		return ret; //ganzes Dokument
+	arr_journal = zond_pdf_document_get_arr_journal(dd->zond_pdf_document);
 
-	if (entry.type == JOURNAL_TYPE_PAGES_INSERTED) {
-		if (entry.PagesInserted.pos < anbindung->von.seite
-				|| entry.PagesInserted.pos >= anbindung->bis.seite)
-			ret = FALSE;
-	} else if (entry.type == JOURNAL_TYPE_PAGES_DELETED) {
-		gint last_page = 0;
+	if (!dd->anbindung) {
+		if (arr_journal->len) return TRUE;
+		else return FALSE;
+	}
 
-		for (gint i = 0;
-				i
-						< (sizeof(*(entry.PagesDeleted.pages_remaining))
-								/ sizeof(entry.PagesDeleted.pages_remaining[0]));
-				i++) {
-			gint page = 0;
+	anbindung = *(dd->anbindung);
 
-			page = entry.PagesDeleted.pages_remaining[i];
-			for (gint u = last_page; u < page; u++)
-				if (u < anbindung->von.seite || u > anbindung->bis.seite)
-					ret = FALSE;
-			last_page = page;
-		}
-	} else {
+	for ( gint i = 0; i < arr_journal->len; i++) {
+		JournalEntry entry = { 0 };
 		gint page = 0;
+
+		entry = g_array_index(arr_journal, JournalEntry, i);
 
 		if (entry.type == JOURNAL_TYPE_OCR)
 			page = entry.OCR.page;
@@ -664,14 +654,14 @@ static gboolean viewer_entry_in_anbindung(JournalEntry entry,
 		else if (entry.type == JOURNAL_TYPE_ANNOT_CHANGED)
 			page = entry.AnnotChanged.page;
 
-		if (page < anbindung->von.seite || page > anbindung->bis.seite)
+		if (page < anbindung.von.seite || page > anbindung.bis.seite)
 			ret = FALSE;
 	}
 
 	return ret;
 }
 
-static gint viewer_save_dirty_docs(PdfViewer *pdfv, gboolean ask) {
+gint viewer_save_dirty_docs(PdfViewer *pdfv, GError** error) {
 	DisplayedDocument *dd = NULL;
 
 	dd = pdfv->dd;
@@ -680,17 +670,14 @@ static gint viewer_save_dirty_docs(PdfViewer *pdfv, gboolean ask) {
 
 	//Alle schmutzigen Dds speichern
 	do {
-		gint rc = 0;
 		GArray *arr_journal = NULL;
 		GArray *arr_redo = NULL;
 		gboolean dirty = FALSE;
 		gint ret = 0;
-		gboolean asked = FALSE;
 		GError *error = NULL;
 
 		arr_journal = zond_pdf_document_get_arr_journal(
 				dd->zond_pdf_document);
-		arr_redo = g_array_new(FALSE, FALSE, sizeof(JournalEntry));
 
 		if (!dd->anbindung) { //ganzes Dokument
 			if (arr_journal->len) { //heißt: Dokument wurde geändert
@@ -717,34 +704,23 @@ static gint viewer_save_dirty_docs(PdfViewer *pdfv, gboolean ask) {
 			continue;
 		}
 
+		//erstmal prüfen, ob dd überhaupt betroffen ist
+		if (!viewer_dd_is_dirty(dd)) continue;
+
+		arr_redo = g_array_new(FALSE, FALSE, sizeof(JournalEntry));
+
 		//Ansonsten die Änderungen "rausrechnen", die dd nicht betreffen
 		for (gint i = arr_journal->len - 1; i >= 0; i--) {
 			JournalEntry entry = { 0 };
 
 			entry = g_array_index(arr_journal, JournalEntry, i);
 
+
 			if (!viewer_entry_in_anbindung(entry, dd->anbindung)) {
 				g_array_append_val(arr_redo, entry);
 
 				//undo( entry )
 			} else {
-				//ggf. fragen, ob gespeichert werden soll
-				if (ask && !asked) {
-					gchar *text_frage = g_strconcat("PDF-Datei ",
-							zond_pdf_document_get_file_part(
-									dd->zond_pdf_document), " geändert",
-							NULL);
-					rc = abfrage_frage( NULL, text_frage, "Speichern?",
-							NULL);
-					g_free(text_frage);
-				} else
-					rc = GTK_RESPONSE_YES;
-
-				asked = TRUE;
-
-				if (rc != GTK_RESPONSE_YES)
-					break;
-
 				/*
 				 if ( (entry ist TYPE_PAGES_INSERTED || _DELETED) && entry betrifft dd->anbindung)
 				 {
@@ -827,9 +803,26 @@ void viewer_save_and_close(PdfViewer *pdfv) {
 
 	gtk_popover_popdown(GTK_POPOVER(pdfv->annot_pop_edit));
 
-	rc = viewer_save_dirty_docs(pdfv, TRUE);
-	if (rc)
-		return;
+	//ggf. fragen, ob gespeichert werden soll
+	if (gtk_widget_get_sensitive(pdfv->button_speichern)) {
+		gint rc = 0;
+
+		rc = abfrage_frage( NULL, "Viewer enthält Änderungen", "Speichern?",
+				NULL);
+
+		if (rc == GTK_RESPONSE_YES) {
+			gint ret = 0;
+			GError* error = NULL;
+
+			ret = viewer_save_dirty_docs(pdfv, &error);
+			if (ret) {
+				display_error(pdfv->vf, "Speichern nicht erfoglreich", error->message);
+				g_error_free(error);
+
+				return;
+			}
+		}
+	}
 
 	viewer_schliessen(pdfv);
 
@@ -899,8 +892,14 @@ static void cb_viewer_auswahlwerkzeug(GtkButton *button, gpointer data) {
 
 static void cb_pv_speichern(GtkButton *button, gpointer data) {
 	PdfViewer *pv = (PdfViewer*) data;
+	GError* error = NULL;
+	gint rc = 0;
 
-	viewer_save_dirty_docs(pv, FALSE);
+	rc = viewer_save_dirty_docs(pv, &error);
+	if (rc) {
+		display_error(pv->vf, "Speichern nicht erfolgreicht", error->message);
+		g_error_free(error);
+	}
 
 	return;
 }
@@ -3268,7 +3267,7 @@ gtk_menu_shell_append( GTK_MENU_SHELL(menu_viewer), item_sep1);
 			G_CALLBACK(cb_viewer_motion_notify), (gpointer ) pv);
 
 	g_signal_connect_swapped(pv->vf, "delete-event",
-			G_CALLBACK(viewer_save_and_close), (gpointer ) pv);
+			G_CALLBACK(viewer_save_and_close), (gpointer) pv);
 
 	return;
 }

@@ -48,11 +48,6 @@ typedef enum {
         return -1; \
     }
 
-#define ERROR_ZOND_DBASE(x) { if ( errmsg ) *errmsg = add_string( g_strconcat( "Bei Aufruf ", __func__, ":\n", \
-                       "Bei Aufruf " x ":\n", \
-                       sqlite3_errmsg(zond_dbase_get_dbase(zond_dbase)), NULL ), *errmsg ); \
-                       return -1; }
-
 #define ERROR_ROLLBACK(zond_dbase) \
           { if ( errmsg ) *errmsg = add_string( \
             g_strconcat( "Bei Aufruf ", __func__, ":\n", NULL ), *errmsg ); \
@@ -94,6 +89,17 @@ typedef enum {
             } \
             \
             return -1; }
+
+typedef struct _Section {
+	gint ID;
+	gchar* section;
+} Section;
+
+void section_free(gpointer data) {
+	g_free(((Section*) data)->section);
+
+	return;
+}
 
 G_BEGIN_DECLS
 
@@ -179,6 +185,10 @@ gint zond_dbase_find_baum_inhalt_file(ZondDBase*, gint, gint*, gint*, gchar**,
 		GError**);
 
 gint zond_dbase_is_file_part_copied(ZondDBase*, gint, gboolean*, GError**);
+
+gint zond_dbase_get_arr_sections(ZondDBase*, gchar const*, GArray**, GError** );
+
+gint zond_dbase_update_section(ZondDBase*, gint, const gchar*, GError**);
 
 G_END_DECLS
 

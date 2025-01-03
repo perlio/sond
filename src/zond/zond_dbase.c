@@ -1638,3 +1638,104 @@ gint zond_dbase_is_file_part_copied(ZondDBase *zond_dbase, gint search_root,
 
 	return 0;
 }
+
+gint zond_dbase_get_arr_sections(ZondDBase* zond_dbase, gchar const* file_part,
+		GArray** arr_sections, GError** error) {
+	gint rc = 0;
+	sqlite3_stmt **stmt = NULL;
+
+	const gchar *sql[] =
+			{
+					"SELECT ID, section FROM knoten WHERE filepart=?1;"
+			};
+
+	rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
+			error);
+	if (rc) {
+		g_prefix_error(error, "%s\n", __func__);
+
+		return -1;
+	}
+
+	rc = sqlite3_bind_text(stmt[0], 1, file_part, -1, NULL);
+	if (rc != SQLITE_OK) {
+		if (error)
+			*error = g_error_new(g_quark_from_static_string("SQLITE3"),
+					sqlite3_errcode(zond_dbase_get_dbase(zond_dbase)), "%s\n%s",
+					__func__, sqlite3_errmsg(zond_dbase_get_dbase(zond_dbase)));
+
+		return -1;
+	}
+
+	*arr_sections = g_array_new(FALSE, FALSE, sizeof(Section));
+	g_array_set_clear_func(*arr_sections, (GDestroyNotify) section_free);
+
+	do {
+		gint rc = 0;
+		Section section = { 0, };
+
+		rc = sqlite3_step(stmt[0]);
+		if (rc != SQLITE_ROW && rc != SQLITE_DONE) {
+			g_array_unref(*arr_sections);
+			ERROR_ZOND_DBASE("sqlite3_step")
+		} else if (rc == SQLITE_DONE)
+			break;
+
+		section.ID = sqlite3_column_int(stmt[0], 0);
+		section.section = g_strdup(sqlite3_column_text(stmt[0], 1));
+		g_array_append_val(*arr_sections, section);
+	} while (rc == SQLITE_ROW);
+
+	return 0;
+}
+
+gint zond_dbase_update_section(ZondDBase *zond_dbase, gint node_id,
+		const gchar *section, GError **error) {
+	gint rc = 0;
+	sqlite3_stmt **stmt = NULL;
+
+	const gchar *sql[] = { "UPDATE knoten "
+			"SET section=?2 WHERE ID=?1; " };
+
+	rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
+			error);
+	if (rc) {
+		g_prefix_error(error, "%s\n", __func__);
+
+		return -1;
+	}
+
+	rc = sqlite3_bind_int(stmt[0], 1, node_id);
+	if (rc != SQLITE_OK) {
+		if (error)
+			*error = g_error_new(g_quark_from_static_string("SQLITE3"),
+					sqlite3_errcode(zond_dbase_get_dbase(zond_dbase)), "%s\n%s",
+					__func__, sqlite3_errmsg(zond_dbase_get_dbase(zond_dbase)));
+
+		return -1;
+	}
+
+	rc = sqlite3_bind_text(stmt[0], 2, section, -1, NULL);
+	if (rc != SQLITE_OK) {
+		if (error)
+			*error = g_error_new(g_quark_from_static_string("SQLITE3"),
+					sqlite3_errcode(zond_dbase_get_dbase(zond_dbase)), "%s\n%s",
+					__func__, sqlite3_errmsg(zond_dbase_get_dbase(zond_dbase)));
+
+		return -1;
+	}
+
+	rc = sqlite3_step(stmt[0]);
+	if (rc != SQLITE_DONE) {
+		if (error)
+			*error = g_error_new(g_quark_from_static_string("SQLITE3"),
+					sqlite3_errcode(zond_dbase_get_dbase(zond_dbase)), "%s\n%s",
+					__func__, sqlite3_errmsg(zond_dbase_get_dbase(zond_dbase)));
+
+		return -1;
+	}
+
+	return 0;
+}
+
+

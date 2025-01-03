@@ -45,6 +45,8 @@ gchar* get_rel_path_from_file_part(gchar const*);
 
 gboolean anbindung_1_gleich_2(const Anbindung, const Anbindung);
 
+gboolean anbindung_is_pdf_punkt(Anbindung);
+
 gboolean anbindung_1_vor_2(Anbindung, Anbindung);
 
 gboolean anbindung_1_eltern_von_2(Anbindung, Anbindung);
