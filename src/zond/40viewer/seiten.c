@@ -452,12 +452,8 @@ static gint seiten_drehen(PdfViewer *pv, GPtrArray *arr_document_page,
 		zond_pdf_document_mutex_lock(pdf_document_page->document);
 
 		rc = seiten_drehen_pdf(pdf_document_page, winkel, errmsg);
-		if (rc == -1) {
-			zond_pdf_document_mutex_unlock(pdf_document_page->document);
-			ERROR_S
-		}
-
 		zond_pdf_document_mutex_unlock(pdf_document_page->document);
+		if (rc == -1) ERROR_S
 
 		while (pdf_document_page->thread & 1)
 			viewer_transfer_rendered((PdfViewer*) pdf_document_page->thread_pv,
@@ -551,75 +547,82 @@ static gint seiten_cb_loesche_seite(PdfViewer *pv, gint page_pv,
 	return 0;
 }
 
+static gint seiten_anbindung_int(ZondDBase* zond_dbase,
+		PdfDocumentPage* pdf_document_page, GError** error) {
+	gint rc = 0;
+	GArray* arr_sections = NULL;
+	gint page_doc = 0;
+
+	rc = zond_dbase_get_arr_sections(zond_dbase,
+			zond_pdf_document_get_file_part(pdf_document_page->document),
+			&arr_sections, error);
+	if (rc) {
+		g_prefix_error(error, "%s\n", __func__);
+
+		return -1;
+	}
+
+	page_doc = pdf_document_page_get_index(pdf_document_page);
+	//ToDo: act_page_doc ermitteln
+
+	for (gint u = 0; u < arr_sections->len; u++) {
+		Section section = { 0, };
+		Anbindung anbindung = { 0, };
+
+		section = g_array_index(arr_sections, Section, u);
+		anbindung_parse_file_section(section.section, &anbindung);
+
+		if ((page_doc == anbindung.von.seite) ||
+				(!anbindung_is_pdf_punkt(anbindung) &&
+				page_doc == anbindung.bis.seite)) {
+			g_array_unref(arr_sections);
+
+			return 1;
+		}
+	}
+
+	g_array_unref(arr_sections);
+
+	return 0;
+}
+
 static gint seiten_anbindung(PdfViewer *pv, GPtrArray *arr_document_page,
 		GError **error) {
-	gint rc = 0;
-	GPtrArray *arr_dests = NULL;
-	/*
-	 arr_dests = g_ptr_array_new_with_free_func( (GDestroyNotify) g_free );
+	for (gint i = 0; i < arr_document_page->len; i++) {
+		PdfDocumentPage *pdf_document_page = NULL;
+		gint rc = 0;
 
-	 //Alle NamedDests der zu löschenden Seiten sammeln
-	 for ( gint i = 0; i < arr_document_page->len; i++ )
-	 {
-	 PdfDocumentPage* pdf_document_page = g_ptr_array_index( arr_document_page, i );
-	 fz_context* ctx = zond_pdf_document_get_ctx( pdf_document_page->document );
-	 pdf_document* doc = zond_pdf_document_get_pdf_doc( pdf_document_page->document );
+		pdf_document_page = g_ptr_array_index(arr_document_page, i);
 
-	 rc = pdf_document_get_dest( ctx, doc, pdf_document_page->page_doc, (gpointer*) &arr_dests,
-	 FALSE, errmsg );
-	 if ( rc )
-	 {
-	 g_ptr_array_free( arr_dests, TRUE );
+		rc = seiten_anbindung_int(pv->zond->dbase_zond->zond_dbase_work,
+				pdf_document_page, error);
+		if (rc) {
+			if (rc == -1) g_prefix_error(error, "%s\n", __func__);
 
-	 ERROR_S
-	 }
-	 }
-	 #ifdef VIEWER
-	 if ( arr_dests->len > 0 )
-	 {
-	 rc = abfrage_frage( pv->vf, "Zu löschende Seiten enthalten Ziele",
-	 "Trotzdem löschen?", NULL );
-	 if ( rc != GTK_RESPONSE_YES )
-	 {
-	 g_ptr_array_free( arr_dests, TRUE );
-	 return 1;
-	 }
-	 }
-	 #else
-	 //Überprüfen, ob NamedDest in db als ziel
-	 for ( gint i = 0; i < arr_dests->len; i++ )
-	 {
-	 //        rc = zond_dbase_check_id( pv->zond->dbase_zond->zond_dbase_work, g_ptr_array_index( arr_dests, i ), errmsg );
-	 if ( rc == -1 )
-	 {
-	 g_ptr_array_free( arr_dests, TRUE );
-	 ERROR_S
-	 }
-	 if ( rc == 1 )
-	 {
-	 g_ptr_array_free( arr_dests, TRUE );
-	 return 1;
-	 }
-	 }
-	 #endif // VIEWER
+			return (rc == -1) ? -1 : 1;
+		}
 
-	 g_ptr_array_free( arr_dests, TRUE );
-	 */
+		rc = seiten_anbindung_int(pv->zond->dbase_zond->zond_dbase_store,
+				pdf_document_page, error);
+		if (rc) {
+			if (rc == -1) g_prefix_error(error, "%s\n", __func__);
+
+			return (rc == -1) ? -1 : 2;
+		}
+	}
+
 	return 0;
 }
 
 static gint seiten_loeschen(PdfViewer *pv, GPtrArray *arr_document_page,
 		GError **error) {
-	GPtrArray *arr_docs = NULL;
-
-#ifndef VIEWER
-	//ersma kucken, welche zond_pdf_documents überhaupt betroffen sind
-	arr_docs = g_ptr_array_new();
+	/*
 	for (gint i = 0; i < arr_document_page->len; i++) {
 		PdfDocumentPage *pdf_document_page = NULL;
 
 		pdf_document_page = g_ptr_array_index(arr_document_page, i);
 
+		//alle sections aus dbase_store durchgehen
 		if (!g_ptr_array_find(arr_docs, pdf_document_page->document, NULL)) {
 			GArray* arr_journal = NULL;
 
@@ -650,7 +653,6 @@ static gint seiten_loeschen(PdfViewer *pv, GPtrArray *arr_document_page,
 			g_ptr_array_add(arr_docs, pdf_document_page->document);
 		}
 	}
-#endif
 
 	//Speichern, falls pv es nötig hat
 	if (gtk_widget_get_sensitive(pv->button_speichern)) {
@@ -668,12 +670,13 @@ static gint seiten_loeschen(PdfViewer *pv, GPtrArray *arr_document_page,
 			return -1;
 		}
 	}
-
-	//und nochmal durch alle pdf_document_pages...
+*/
 	for (gint i = 0; i < arr_document_page->len; i++) {
 		gint rc = 0;
 		PdfDocumentPage* pdf_document_page = NULL;
 		gchar* errmsg = NULL;
+		JournalEntry entry = { 0, };
+		GArray* arr_journal = NULL;
 
 		//macht - sofern noch nicht geschehen - thread_pool des pv dicht, in dem Seite angezeigt wird
 		//Dann wird Seite aus pv gelöscht
@@ -686,11 +689,18 @@ static gint seiten_loeschen(PdfViewer *pv, GPtrArray *arr_document_page,
 				*error = g_error_new( ZOND_ERROR, 0, "%s\n%s", __func__,
 						errmsg);
 			g_free(errmsg);
-			g_ptr_array_unref(arr_docs);
 
 			return -1;
 		}
 
+		arr_journal = zond_pdf_document_get_arr_journal(pdf_document_page->document);
+
+		entry.pdf_document_page = pdf_document_page;
+		entry.type = JOURNAL_TYPE_PAGE_DELETED;
+
+		g_array_append_val(arr_journal, entry);
+	}
+/*
 		//Seite aus document entfernen
 		g_ptr_array_remove(
 				zond_pdf_document_get_arr_pages(pdf_document_page->document),
@@ -758,7 +768,7 @@ static gint seiten_loeschen(PdfViewer *pv, GPtrArray *arr_document_page,
 	}
 
 	g_ptr_array_unref(arr_docs);
-
+*/
 	seiten_refresh_layouts(pv->zond->arr_pv);
 
 	gtk_tree_selection_unselect_all(
@@ -793,6 +803,9 @@ void cb_pv_seiten_loeschen(GtkMenuItem *item, gpointer data) {
 		} else if (rc == 1)
 			display_message(pv->vf, "Seiten enthalten Anbindungen - \n"
 					"Löschen nicht zulässig", NULL);
+		else if (rc == 2)
+			display_message(pv->vf, "Gespeichertes Projekt: Seiten enthalten Anbindungen"
+					"Zunächst Projekt speichern", NULL);
 
 		g_ptr_array_unref(arr_document_page);
 
@@ -916,7 +929,6 @@ static gint seiten_abfrage_seitenzahl(PdfViewer *pv, guint *num) {
 
 void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 	PdfViewer *pv = (PdfViewer*) data;
-	DisplayedDocument *dd = NULL;
 	gint ret = 0;
 	gint rc = 0;
 	guint pos = 0;
@@ -927,6 +939,7 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 	GError *error = NULL;
 	GArray* arr_journal = NULL;
 	gint page_doc = 0;
+	ViewerPageNew* viewer_page = NULL;
 
 	ret = seiten_abfrage_seitenzahl(pv, &pos);
 	if (ret == -1)
@@ -937,26 +950,22 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 	if (pos < 0)
 		pos = 0;
 
-	if (pos == 0) {
-		dd = pv->dd;
-		if (dd->anbindung && dd->anbindung->von.index != 0) {
-			display_message(pv->vf,
-					"Abschnitt beginnt nicht am Beginn der Seite -\n"
-							"Einfügen vor erster Seite daher nicht möglich",
-					NULL);
+	viewer_page = g_ptr_array_index(pv->arr_pages, (pos == pv->arr_pages->len) ? pos - 1 : pos);
 
-			return;
-		}
+	//verschiedene Tests...
+	if (pos == 0 && viewer_page->dd->first_index != 0) {
+		display_message(pv->vf,
+				"Abschnitt beginnt nicht am Beginn der Seite -\n"
+						"Einfügen vor erster Seite daher nicht möglich",
+				NULL);
 
-		if (dd->anbindung) page_doc = dd->anbindung->von.seite;
-		//else page_doc = 0;
+		return;
 	} else if (pos < pv->arr_pages->len) {
-		DisplayedDocument *dd_vor = NULL;
+		ViewerPageNew* viewer_page_vor = NULL;
 
-		dd = document_get_dd(pv, pos, NULL, NULL, &page_doc);
+		viewer_page_vor = g_ptr_array_index(pv->arr_pages, pos - 1);
 
-		dd_vor = document_get_dd(pv, pos - 1, NULL, NULL, NULL);
-		if (dd != dd_vor) {
+		if (viewer_page->dd != viewer_page_vor->dd) {
 			//es handelt sich um ein virtuelles PDF
 			//zwischen den Grenzen verschiedener Abschnitte sollte nichts eingefügt werden
 			display_message(pv->vf,
@@ -965,18 +974,11 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 
 			return;
 		}
-	} else if (pos == pv->arr_pages->len) {//einfügen nach letzter Seite
-		dd = pv->dd;
+	} else if (pos == pv->arr_pages->len && viewer_page->dd->last_index != EOP) {//einfügen nach letzter Seite
+		display_message(pv->vf, "Abschnitt Ende nicht am Schluß der Seite -\n"
+				"Einfügen nach Ende eines Abschnitts daher nicht möglich", NULL);
 
-		while (dd->next) dd = dd->next; //letztes dd des pv
-
-		if (dd->anbindung && dd->anbindung->bis.index != EOP) {
-			display_message(pv->vf, "Abschnitt Ende nicht am Schluß der Seite -\n"
-					"Einfügen nach Ende eines Abschnitts daher nicht möglich", NULL);
-
-			return;
-		} else if (dd->anbindung) page_doc = dd->anbindung->bis.seite + 1;
-		else page_doc = zond_pdf_document_get_number_of_pages(dd->zond_pdf_document);
+		return;
 	}
 
 	//es darf kein anderer pdfv geöffnet sein, in dem die Datei angezeigt ist,
@@ -1184,16 +1186,18 @@ fz_catch	( pv->zond->ctx ) {
 		ViewerPageNew *viewer_page = NULL;
 		PdfDocumentPage *pdf_document_page = NULL;
 		gchar *errmsg = NULL;
+		gint page_doc = 0;
 
 		gint page_pv = g_array_index(arr_page_pv, gint, i);
 		viewer_page = g_ptr_array_index(pv->arr_pages, page_pv);
 		pdf_document_page = viewer_page->pdf_document_page;
 
+		page_doc = pdf_document_page_get_index(pdf_document_page);
+
 		zond_pdf_document_mutex_lock(pdf_document_page->document);
 		rc = pdf_copy_page(pv->zond->ctx,
 				zond_pdf_document_get_pdf_doc(pdf_document_page->document),
-				pdf_document_page->page_doc, pdf_document_page->page_doc,
-				doc_dest, -1, &errmsg);
+				page_doc, page_doc, doc_dest, -1, &errmsg);
 		zond_pdf_document_mutex_unlock(pdf_document_page->document);
 		if (rc) {
 			if (error)
@@ -1247,10 +1251,6 @@ void cb_seiten_ausschneiden(GtkMenuItem *item, gpointer data) {
 	GError *error = NULL;
 
 	PdfViewer *pv = (PdfViewer*) data;
-
-	//Nur aus ganzen PDFs ausschneiden
-	if (pv->dd->next != NULL || pv->dd->anbindung != NULL)
-		return;
 
 	GArray *arr_page_pv = seiten_markierte_thumbs(pv);
 	if (!arr_page_pv)

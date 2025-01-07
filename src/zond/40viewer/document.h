@@ -12,7 +12,10 @@ typedef struct _Pdf_Viewer PdfViewer;
 
 typedef struct _Displayed_Document {
 	ZondPdfDocument *zond_pdf_document;
-	Anbindung *anbindung;
+	PdfDocumentPage* first_page;
+	gint first_index;
+	PdfDocumentPage* last_page;
+	gint last_index;
 	struct _Displayed_Document *next;
 } DisplayedDocument;
 

@@ -117,7 +117,7 @@ typedef struct _Pdf_Viewer {
 
 typedef struct _Viewer_Page_New {
 	PdfViewer *pdfv;
-	PdfDocumentPage *pdf_document_page;
+	DisplayedDocument* dd;
 	fz_rect crop;
 	gint y_pos;
 	GdkPixbuf *pixbuf_page;
@@ -132,7 +132,7 @@ void viewer_close_thread_pool_and_transfer(PdfViewer*);
 
 void viewer_refresh_layout(PdfViewer*, gint);
 
-ViewerPageNew* viewer_new_page(PdfViewer*, ZondPdfDocument*, gint);
+ViewerPageNew* viewer_new_page(PdfViewer*, DisplayedDocument*, gint);
 
 void viewer_display_document(PdfViewer*, DisplayedDocument*, gint, gint);
 

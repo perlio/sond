@@ -43,6 +43,17 @@ typedef struct {
 
 G_DEFINE_TYPE_WITH_PRIVATE(ZondPdfDocument, zond_pdf_document, G_TYPE_OBJECT)
 
+gint pdf_document_page_get_index(PdfDocumentPage* pdf_document_page) {
+	gint index = 0;
+	GPtrArray* arr_pages = NULL;
+
+	arr_pages = zond_pdf_document_get_arr_pages(pdf_document_page->document);
+
+	index = (pdf_document_page - *(arr_pages->pdata)) / sizeof(gpointer);
+
+	return index;
+}
+
 static void zond_pdf_document_set_property(GObject *object, guint property_id,
 		const GValue *value, GParamSpec *pspec) {
 	ZondPdfDocument *self = ZOND_PDF_DOCUMENT(object);
@@ -266,8 +277,8 @@ gint zond_pdf_document_load_page(PdfDocumentPage *pdf_document_page,
 
 	fz_try( ctx )
 		pdf_document_page->page = pdf_load_page(ctx, priv->doc,
-				pdf_document_page->page_doc);
-fz_catch	( ctx )
+				pdf_document_page_get_index(pdf_document_page);
+	fz_catch(ctx)
 		ERROR_MUPDF("pdf_load_page");
 
 	pdf_document_page->arr_annots = g_ptr_array_new_with_free_func(
@@ -293,7 +304,6 @@ static gint zond_pdf_document_init_page(ZondPdfDocument *self,
 	ctx = priv->ctx;
 
 	fz_try( ctx ) {
-		pdf_document_page->page_doc = index;
 		pdf_document_page->obj = pdf_lookup_page_obj(ctx, priv->doc, index);
 		pdf_page_obj_transform(ctx, pdf_document_page->obj, &mediabox,
 				&page_ctm);
@@ -304,7 +314,7 @@ static gint zond_pdf_document_init_page(ZondPdfDocument *self,
 		if (rotate_obj)
 			pdf_document_page->rotate = pdf_to_int(ctx, rotate_obj);
 		//else: 0
-	}fz_catch( ctx )
+	} fz_catch( ctx )
 		ERROR_MUPDF("pdf_lookup_page_obj etc.");
 
 	return 0;

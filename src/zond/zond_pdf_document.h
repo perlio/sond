@@ -17,7 +17,6 @@ G_DECLARE_DERIVABLE_TYPE(ZondPdfDocument, zond_pdf_document, ZOND, PDF_DOCUMENT,
 
 typedef struct _Pdf_Document_Page {
 	ZondPdfDocument *document; //erhält keine ref - muß das mal mit dem const kapieren...
-	gint page_doc;
 	pdf_obj *obj;
 	fz_rect rect;
 	gint rotate;
@@ -49,21 +48,14 @@ typedef struct _Pdf_Document_Page_Annot {
 	};
 } PdfDocumentPageAnnot;
 
-struct PagesDeleted {
-	gint *pages_remaining;
-	pdf_document *doc; //hier sollen später die gelöschten Seiten gespeichert sein, um undo zu ermöglichen
-};
 struct PagesInserted {
-	gint pos;
 	gint count;
-	Anbindung *anbindung;
+	gboolean after_latest;
 };
 struct AnnotCreated {
-	gint page;
 	gint index;
 };
 struct AnnotChanged {
-	gint page;
 	gint index;
 	gboolean deleted;
 	enum pdf_annot_type type;
@@ -72,27 +64,30 @@ struct AnnotChanged {
 		AnnotText annot_text;
 	};
 };
+struct Rotate {
+	gint winkel;
+};
 struct OCR {
-	gint page;
 	fz_buffer* buf;
 };
 
 typedef enum _Journal_Type {
-	JOURNAL_TYPE_PAGES_DELETED,
 	JOURNAL_TYPE_PAGES_INSERTED,
+	JOURNAL_TYPE_PAGE_DELETED,
 	JOURNAL_TYPE_ANNOT_CREATED,
 	JOURNAL_TYPE_ANNOT_CHANGED,
+	JOURNAL_TYPE_ROTATE,
 	JOURNAL_TYPE_OCR
 } JournalType;
 
 typedef struct _Journal_Entry {
+	PdfDocumentPage* pdf_document_page;
 	JournalType type;
-	ZondPdfDocument* zond_pdf_document;
 	union {
-		struct PagesDeleted PagesDeleted;
 		struct PagesInserted PagesInserted;
 		struct AnnotCreated AnnotCreated;
 		struct AnnotChanged AnnotChanged;
+		struct Rotate Rotate;
 		struct OCR OCR;
 	};
 } JournalEntry;
@@ -102,6 +97,8 @@ struct _ZondPdfDocumentClass {
 
 	GPtrArray *arr_pdf_documents;
 };
+
+gint pdf_document_page_get_index(PdfDocumentPage*);
 
 void zond_pdf_document_page_load_annots(PdfDocumentPage*);
 

@@ -214,7 +214,7 @@ static gint pdf_ocr_sandwich_page(PdfDocumentPage *pdf_document_page,
 	pdf_obj *font_dict = NULL;
 	pdf_obj *font_dict_text = NULL;
 	pdf_document *doc = NULL;
-	JournalEntry entry = { JOURNAL_TYPE_OCR, };
+	JournalEntry entry = { 0, };
 
 	fz_context *ctx = zond_pdf_document_get_ctx(pdf_document_page->document);
 
@@ -223,8 +223,7 @@ static gint pdf_ocr_sandwich_page(PdfDocumentPage *pdf_document_page,
 	fz_catch(ctx)
 		ERROR_MUPDF_R("pdf_lookup_page_obj", -2)
 
-	entry.zond_pdf_document = pdf_document_page->document;
-	entry.OCR.page = pdf_document_page->page_doc;
+	entry.pdf_document_page = pdf_document_page;
 
 	fz_try(ctx) entry.OCR.buf = pdf_ocr_get_content_stream_as_buffer(ctx, pdf_document_page->obj, errmsg);
 	fz_catch(ctx) ERROR_MUPDF_R("pdf_get_content_stream_as_buffer", -2)
