@@ -8,6 +8,7 @@
 #include <mupdf/pdf.h>
 
 typedef struct _Anbindung Anbindung;
+typedef struct _Displayed_Document DisplayedDocument;
 
 G_BEGIN_DECLS
 
@@ -26,6 +27,7 @@ typedef struct _Pdf_Document_Page {
 	gint thread;
 	gpointer thread_pv;
 	GPtrArray *arr_annots;
+	gboolean to_be_deleted;
 } PdfDocumentPage;
 
 typedef struct _Annot_Text_Markup {
@@ -49,8 +51,11 @@ typedef struct _Pdf_Document_Page_Annot {
 } PdfDocumentPageAnnot;
 
 struct PagesInserted {
+	gint dd_seite_von;
+	gint dd_seite_bis;
+	gint page_doc;
 	gint count;
-	gboolean after_latest;
+	gboolean after_last;
 };
 struct AnnotCreated {
 	gint index;
@@ -133,7 +138,7 @@ void zond_pdf_document_mutex_lock(const ZondPdfDocument*);
 
 void zond_pdf_document_mutex_unlock(const ZondPdfDocument*);
 
-gint zond_pdf_document_insert_pages(ZondPdfDocument*, gint, fz_context*,
+gint zond_pdf_document_insert_pages(ZondPdfDocument*, gint,
 		pdf_document*, gchar**);
 
 G_END_DECLS

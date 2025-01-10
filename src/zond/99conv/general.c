@@ -3,6 +3,7 @@
 #include <ctype.h>
 
 #include "general.h"
+#include "../zond_pdf_document.h"
 #include "../40viewer/viewer.h"
 //#include "../../misc.h"
 
@@ -289,3 +290,90 @@ void anbindung_build_file_section(Anbindung anbindung, gchar **section) {
 	return;
 }
 
+void anbindung_aktualisieren_insert_pages(ZondPdfDocument* zond_pdf_document, Anbindung* anbindung) {
+	GArray* arr_journal = NULL;
+
+	arr_journal = zond_pdf_document_get_arr_journal(zond_pdf_document);
+
+	//erst die Einfügungen
+	for (gint i = 0; i < arr_journal->len; i ++) {
+		JournalEntry entry = { 0 };
+
+		entry = g_array_index(arr_journal, JournalEntry, i);
+
+		if (entry.type == JOURNAL_TYPE_PAGES_INSERTED) {
+			if (entry.PagesInserted.page_doc < anbindung->von.seite) {
+				anbindung->von.seite += entry.PagesInserted.count;
+
+				if (!anbindung_is_pdf_punkt(*anbindung))
+					anbindung->bis.seite += entry.PagesInserted.count;
+			} else if (entry.PagesInserted.page_doc == anbindung->von.seite) {
+				Anbindung anbindung_hist = { 0 };
+
+				anbindung_hist.von.seite = entry.PagesInserted.dd_seite_von;
+				anbindung_hist.bis.seite = entry.PagesInserted.dd_seite_bis;
+				anbindung_hist.bis.index = EOP;
+
+				if (anbindung_1_eltern_von_2(anbindung_hist, *anbindung))
+					anbindung->von.seite += entry.PagesInserted.count;
+
+				if (!anbindung_is_pdf_punkt(*anbindung))
+					anbindung->bis.seite += entry.PagesInserted.count;
+			} else if (!anbindung_is_pdf_punkt(*anbindung) &&
+					entry.PagesInserted.page_doc <= anbindung->bis.seite &&
+					!entry.PagesInserted.after_last)
+				anbindung->bis.seite += entry.PagesInserted.count;
+			else if (!anbindung_is_pdf_punkt(*anbindung) &&
+					entry.PagesInserted.page_doc == anbindung->bis.seite &&
+					entry.PagesInserted.after_last) {
+				Anbindung anbindung_hist = { 0 };
+
+				anbindung_hist.von.seite = entry.PagesInserted.dd_seite_von;
+				anbindung_hist.bis.seite = entry.PagesInserted.dd_seite_bis;
+				anbindung_hist.bis.index = EOP;
+
+				if (anbindung_1_eltern_von_2(anbindung_hist, *anbindung))
+					anbindung->bis.seite += entry.PagesInserted.count;
+			}
+		}
+	}
+
+	return;
+}
+
+static void anbindung_aktualisieren_delete_page(ZondPdfDocument* zond_pdf_document, Anbindung* anbindung) {
+	GArray* arr_journal = NULL;
+
+	arr_journal = zond_pdf_document_get_arr_journal(zond_pdf_document);
+
+	for (gint i = 0; i < arr_journal->len; i ++) {
+		JournalEntry entry = { 0 };
+
+		entry = g_array_index(arr_journal, JournalEntry, i);
+
+		if (entry.type == JOURNAL_TYPE_PAGE_DELETED) {
+			gint page_doc = 0;
+
+			page_doc = pdf_document_page_get_index(entry.pdf_document_page);
+
+			if (page_doc < anbindung->von.seite) {
+				anbindung->von.seite--;
+
+				if (!anbindung_is_pdf_punkt(*anbindung))
+					anbindung->bis.seite--;
+			} else if (!anbindung_is_pdf_punkt(*anbindung) &&
+					page_doc <= anbindung->bis.seite)
+				anbindung->bis.seite--;
+		}
+	}
+
+	return;
+}
+
+void anbindung_aktualisieren(ZondPdfDocument* zond_pdf_document,
+		Anbindung* anbindung) {
+	anbindung_aktualisieren_insert_pages(zond_pdf_document, anbindung);
+	anbindung_aktualisieren_delete_page(zond_pdf_document, anbindung);
+
+	return;
+}

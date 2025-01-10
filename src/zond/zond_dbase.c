@@ -1677,12 +1677,12 @@ gint zond_dbase_get_arr_sections(ZondDBase* zond_dbase, gchar const* file_part,
 		rc = sqlite3_step(stmt[0]);
 		if (rc != SQLITE_ROW && rc != SQLITE_DONE) {
 			g_array_unref(*arr_sections);
-			ERROR_ZOND_DBASE("sqlite3_step")
+			ERROR_Z_DBASE
 		} else if (rc == SQLITE_DONE)
 			break;
 
 		section.ID = sqlite3_column_int(stmt[0], 0);
-		section.section = g_strdup(sqlite3_column_text(stmt[0], 1));
+		section.section = g_strdup((gchar const*) sqlite3_column_text(stmt[0], 1));
 		g_array_append_val(*arr_sections, section);
 	} while (rc == SQLITE_ROW);
 

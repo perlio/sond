@@ -44,14 +44,13 @@ typedef struct {
 G_DEFINE_TYPE_WITH_PRIVATE(ZondPdfDocument, zond_pdf_document, G_TYPE_OBJECT)
 
 gint pdf_document_page_get_index(PdfDocumentPage* pdf_document_page) {
-	gint index = 0;
+	guint index = 0;
 	GPtrArray* arr_pages = NULL;
 
 	arr_pages = zond_pdf_document_get_arr_pages(pdf_document_page->document);
+	g_ptr_array_find(arr_pages, pdf_document_page, &index);
 
-	index = (pdf_document_page - *(arr_pages->pdata)) / sizeof(gpointer);
-
-	return index;
+	return (gint) index;
 }
 
 static void zond_pdf_document_set_property(GObject *object, guint property_id,
@@ -119,9 +118,10 @@ static void zond_pdf_document_finalize(GObject *self) {
 
 	g_ptr_array_unref(priv->pages);
 
-	if (!priv->read_only)
+	if (!priv->read_only && priv->doc) {
 		path = g_strdup(fz_stream_filename(priv->ctx, priv->doc->file));
-	pdf_drop_document(priv->ctx, priv->doc);
+		pdf_drop_document(priv->ctx, priv->doc);
+	}
 
 	if (!priv->read_only) {
 		gint ret = 0;
@@ -277,7 +277,7 @@ gint zond_pdf_document_load_page(PdfDocumentPage *pdf_document_page,
 
 	fz_try( ctx )
 		pdf_document_page->page = pdf_load_page(ctx, priv->doc,
-				pdf_document_page_get_index(pdf_document_page);
+				pdf_document_page_get_index(pdf_document_page));
 	fz_catch(ctx)
 		ERROR_MUPDF("pdf_load_page");
 
@@ -447,18 +447,13 @@ zond_pdf_document_init_context(void) {
 }
 
 void zond_pdf_document_free_journal_entry(JournalEntry *entry) {
-	if (entry->type == JOURNAL_TYPE_PAGES_DELETED) {
-		g_free(entry->PagesDeleted.pages_remaining);
-		pdf_drop_document(zond_pdf_document_get_ctx(entry->zond_pdf_document),
-				entry->PagesDeleted.doc);
-	} else if (entry->type == JOURNAL_TYPE_PAGES_INSERTED) {
-		g_free(entry->PagesInserted.anbindung);
-	} else if (entry->type == JOURNAL_TYPE_ANNOT_CHANGED) {
+	if (entry->type == JOURNAL_TYPE_ANNOT_CHANGED) {
 		if (entry->AnnotChanged.type == PDF_ANNOT_TEXT)
 			g_free( entry->AnnotChanged.annot_text.content);
 		else g_array_unref(entry->AnnotChanged.annot_text_markup.arr_quads);
 	} else if (entry->type == JOURNAL_TYPE_OCR) {
-		ZondPdfDocumentPrivate *priv = zond_pdf_document_get_instance_private(entry->zond_pdf_document);
+		ZondPdfDocumentPrivate *priv =
+				zond_pdf_document_get_instance_private(entry->pdf_document_page->document);
 
 		fz_drop_buffer(priv->ctx, entry->OCR.buf);
 	}
@@ -575,25 +570,6 @@ zond_pdf_document_open(const gchar *file_part, gint von, gint bis,
 	return zond_pdf_document;
 }
 
-void zond_pdf_document_unload_page(PdfDocumentPage *pdf_document_page) {
-	if (!pdf_document_page)
-		return;
-
-	ZondPdfDocumentPrivate *priv = zond_pdf_document_get_instance_private(
-			pdf_document_page->document);
-
-	if (pdf_document_page->arr_annots) {
-		g_ptr_array_unref(pdf_document_page->arr_annots);
-		pdf_document_page->arr_annots = NULL;
-	}
-	fz_drop_page(priv->ctx, &(pdf_document_page->page->super));
-	pdf_document_page->page = NULL;
-
-	pdf_document_page->thread &= 12; //bit 2 ausschalten
-
-	return;
-}
-
 gint zond_pdf_document_save(ZondPdfDocument *self, gchar **errmsg) {
 	ZondPdfDocumentPrivate *priv = zond_pdf_document_get_instance_private(self);
 
@@ -700,24 +676,23 @@ void zond_pdf_document_mutex_unlock(const ZondPdfDocument *self) {
 
 //wird nur aufgerufen, wenn alle threadpools aus sind!
 gint zond_pdf_document_insert_pages(ZondPdfDocument *zond_pdf_document,
-		gint pos, fz_context *ctx, pdf_document *pdf_doc, gchar **errmsg) {
+		gint pos, pdf_document *pdf_doc, gchar **errmsg) {
 	gint rc = 0;
 	gint count = 0;
 
 	ZondPdfDocumentPrivate *priv = zond_pdf_document_get_instance_private(
 			zond_pdf_document);
 
-	count = pdf_count_pages(ctx, pdf_doc);
-	if (count == 0)
-		return 0;
-	/*
-	 //Seiten, die nach hinten verschoben werden, droppen
-	 for ( gint i = pos; i < priv->pages->len; i++ )
-	 zond_pdf_document_unload_page( g_ptr_array_index( priv->pages, i ) );
-	 */
 	zond_pdf_document_mutex_lock(zond_pdf_document);
+	count = pdf_count_pages(priv->ctx, pdf_doc);
+	if (count == 0) {
+		zond_pdf_document_mutex_unlock(zond_pdf_document);
+
+		return 0;
+	}
+
 	//einfügen in doc
-	rc = pdf_copy_page(ctx, pdf_doc, 0, pdf_count_pages(ctx, pdf_doc) - 1,
+	rc = pdf_copy_page(priv->ctx, pdf_doc, 0, pdf_count_pages(priv->ctx, pdf_doc) - 1,
 			priv->doc, pos, errmsg);
 	zond_pdf_document_mutex_unlock(zond_pdf_document);
 	if (rc)
@@ -736,16 +711,6 @@ gint zond_pdf_document_insert_pages(ZondPdfDocument *zond_pdf_document,
 				i, errmsg);
 		if (rc == -1)
 			ERROR_S
-	}
-
-	//verschobene Seiten haben neuen index
-	for (gint i = pos + count; i < priv->pages->len; i++) {
-		PdfDocumentPage *pdf_document_page = g_ptr_array_index(priv->pages, i);
-		/*      vielleicht nicht erforderlich, wenn page_obj bleibt; nur index ändern
-		 rc = zond_pdf_document_init_page( zond_pdf_document, pdf_document_page, i, errmsg );
-		 if ( rc == -1 ) ERROR_S
-		 */
-		pdf_document_page->page_doc = i;
 	}
 
 	return 0;

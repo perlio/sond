@@ -24,7 +24,4 @@ void document_free_displayed_documents(DisplayedDocument*);
 DisplayedDocument* document_new_displayed_document(const gchar*, Anbindung*,
 		gchar**);
 
-DisplayedDocument* document_get_dd(PdfViewer*, gint, PdfDocumentPage**, gint*,
-		gint*);
-
 #endif // DOCUMENT_H_INCLUDED

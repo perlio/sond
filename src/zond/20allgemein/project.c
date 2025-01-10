@@ -26,9 +26,10 @@
 #include "../global_types.h"
 #include "../zond_dbase.h"
 #include "../zond_treeview.h"
+#include "../zond_pdf_document.h"
 
 #include "../10init/app_window.h"
-
+#include "../40viewer/document.h"
 #include "../99conv/general.h"
 
 #include "../40viewer/viewer.h"
@@ -36,7 +37,12 @@
 
 #include "project.h"
 
-
+/**	Rückgabe:
+ * 	0: 	alles i.O.
+ * 	-1:	BEGIN dbase_store fehlgeschlagen
+ * 		oder: dbase_work fehlgeschlagen - dann aber ROLLBACK dbase_store -normaler Fehler
+ * 	-2: BEGIN dbase_work fehlgeschlagen - kein ROLLBACK dbase_store möglich - schlecht
+ */
 gint dbase_zond_begin(DBaseZond* dbase_zond, GError** error) {
 	gint rc = 0;
 
@@ -60,7 +66,7 @@ gint dbase_zond_begin(DBaseZond* dbase_zond, GError** error) {
 					g_strdup_printf("\n\nRollback zond_dbase_store fehlgeschlagen:\n%s", error_int->message));
 			g_error_free(error_int);
 
-			return -1;
+			return -2;
 		}
 
 		return -1;
@@ -69,6 +75,11 @@ gint dbase_zond_begin(DBaseZond* dbase_zond, GError** error) {
 	return 0;
 }
 
+/**	Rückgabe:
+ * 	0:	alles i.O.
+ * 	-1:	ein ROLLBACK fehlgeschlagen
+ * 	-2: beide ROLLBACKs fehlgeschlagen
+ */
 gint dbase_zond_rollback(DBaseZond* dbase_zond, GError** error) {
 	gint ret1 = 0;
 	gint ret2 = 0;
@@ -92,6 +103,11 @@ gint dbase_zond_rollback(DBaseZond* dbase_zond, GError** error) {
 	return ret1 + ret2;
 }
 
+/**	Rückgabe:
+ * 	0:	alles i.O.
+ * 	-1:	ein COMMIT fehlgeschlagen
+ * 	-2: beide COMMITs fehlgeschlagen
+ */
 gint dbase_zond_commit(DBaseZond* dbase_zond, GError** error) {
 	gint ret1 = 0;
 	gint ret2 = 0;
@@ -118,8 +134,8 @@ gint dbase_zond_commit(DBaseZond* dbase_zond, GError** error) {
 	return ret1 + ret2;
 }
 
-static gint dbase_zond_anpassen_anbindung(ZondDBase* zond_dbase, Anbindung const* anbindung,
-		GArray* arr_sections, gint page_doc, gint count, GError** error) {
+static gint dbase_zond_anpassen_anbindung(ZondDBase* zond_dbase, ZondPdfDocument* zpdfd,
+		GArray* arr_sections, GError** error) {
 	for (gint i = 0; i < arr_sections->len; i++) {
 		Section section = { 0 };
 		Anbindung anbindung_int = { 0 };
@@ -129,19 +145,7 @@ static gint dbase_zond_anpassen_anbindung(ZondDBase* zond_dbase, Anbindung const
 		section = g_array_index(arr_sections, Section, i);
 		anbindung_parse_file_section(section.section, &anbindung_int);
 
-		//Einfügung vorher -> Verschieben
-		if (page_doc < anbindung_int.von.seite) {
-			anbindung_int.von.seite += count;
-			if (!anbindung_is_pdf_punkt(anbindung_int)) anbindung_int.bis.seite += count;
-		} else if (page_doc == anbindung_int.von.seite) { //Einfügung am Anfang: gucken
-			if (anbindung && !anbindung_1_eltern_von_2(*anbindung, anbindung_int))
-				anbindung_int.von.seite += count;
-			if (!anbindung_is_pdf_punkt(anbindung_int)) anbindung_int.bis.seite += count;
-		} else if (page_doc <= anbindung_int.bis.seite) anbindung_int.bis.seite += count;
-		else if (page_doc == anbindung_int.bis.seite + 1) { //nach letzter Seite Anbindung?
-			if (anbindung && !anbindung_1_eltern_von_2(*anbindung, anbindung_int))
-				anbindung_int.von.seite += count;
-		} //else: nix
+		anbindung_aktualisieren(zpdfd, &anbindung_int);
 
 		anbindung_build_file_section(anbindung_int, &section_new);
 		rc = zond_dbase_update_section(zond_dbase, section.ID, section_new, error);
@@ -156,20 +160,21 @@ static gint dbase_zond_anpassen_anbindung(ZondDBase* zond_dbase, Anbindung const
 	return 0;
 }
 
-static gint dbase_zond_update_section_dbase(ZondDBase* zond_dbase, gchar const* file_part,
-		Anbindung const* anbindung, gint page_doc, gint count, GError** error) {
+static gint dbase_zond_update_section_dbase(ZondDBase* zond_dbase,
+		DisplayedDocument* dd, GError** error) {
 	gint rc = 0;
 	GArray* arr_sections = NULL;
 
-	rc = zond_dbase_get_arr_sections(zond_dbase, file_part, &arr_sections, error);
+	rc = zond_dbase_get_arr_sections(zond_dbase,
+			zond_pdf_document_get_file_part(dd->zond_pdf_document), &arr_sections, error);
 	if (rc) {
 		g_prefix_error(error, "%s\n", __func__);
 
 		return -1;
 	}
 
-	rc = dbase_zond_anpassen_anbindung(zond_dbase,
-			anbindung, arr_sections, page_doc, count, error);
+	rc = dbase_zond_anpassen_anbindung(zond_dbase, dd->zond_pdf_document,
+			arr_sections, error);
 	g_array_unref(arr_sections);
 	if (rc) {
 		g_prefix_error(error, "%s\n", __func__);
@@ -180,20 +185,18 @@ static gint dbase_zond_update_section_dbase(ZondDBase* zond_dbase, gchar const* 
 	return 0;
 }
 
-gint dbase_zond_update_section(DBaseZond* dbase_zond, gchar const* file_part,
-		Anbindung const* anbindung, gint page_doc, gint count, GError** error) {
+gint dbase_zond_update_section(DBaseZond* dbase_zond,
+		DisplayedDocument* dd, GError** error) {
 	gint rc = 0;
 
-	rc = dbase_zond_update_section_dbase(dbase_zond->zond_dbase_store, file_part,
-			anbindung, page_doc, count, error);
+	rc = dbase_zond_update_section_dbase(dbase_zond->zond_dbase_store, dd, error);
 	if (rc) {
 		g_prefix_error(error, "%s\n", __func__);
 
 		return -1;
 	}
 
-	rc = dbase_zond_update_section_dbase(dbase_zond->zond_dbase_work, file_part,
-			anbindung, page_doc, count, error);
+	rc = dbase_zond_update_section_dbase(dbase_zond->zond_dbase_work, dd, error);
 	if (rc) {
 		g_prefix_error(error, "%s\n", __func__);
 

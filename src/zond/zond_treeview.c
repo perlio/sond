@@ -28,6 +28,7 @@
 
 #include "global_types.h"
 #include "../misc.h"
+#include "sond_treeview.h"
 #include "sond_treeviewfm.h"
 #include "10init/app_window.h"
 #include "10init/headerbar.h"
@@ -2776,129 +2777,30 @@ static void zond_treeview_jump_activate(GtkMenuItem *item, gpointer user_data) {
 	return;
 }
 
-static void zond_treeview_oeffnen_anbindung_und_pos_anpassen(
-		ZondPdfDocument const *zpdfd, Anbindung *anbindung, PdfPos *pdf_pos) {
-	GArray *arr_journal = NULL;
-	gint num_of_pages = 0;
-
-	if (!anbindung && !pdf_pos)
-		return;
-
-	num_of_pages = zond_pdf_document_get_arr_pages(zpdfd)->len;
-	arr_journal = zond_pdf_document_get_arr_journal(zpdfd);
-
-	for (gint i = 0; i < arr_journal->len; i++) {
-		JournalEntry entry = { 0 };
-
-		entry = g_array_index(arr_journal, JournalEntry, i);
-
-		if (entry.type == JOURNAL_TYPE_PAGES_INSERTED) {
-			if (anbindung) {
-				if (entry.PagesInserted.pos < anbindung->von.seite)
-					anbindung->von.seite += entry.PagesInserted.count;
-				else if (entry.PagesInserted.pos == anbindung->von.seite
-						&& anbindung->von.index == 0) {
-					if (!entry.PagesInserted.anbindung
-							|| !anbindung_1_gleich_2(
-									*(entry.PagesInserted.anbindung),
-									*anbindung))
-						anbindung->von.seite += entry.PagesInserted.count;
-				}
-
-				if (entry.PagesInserted.pos < anbindung->bis.seite)
-					anbindung->bis.seite += entry.PagesInserted.count;
-				else if (entry.PagesInserted.pos == anbindung->bis.seite&&
-				anbindung->bis.index == EOP) {
-					if (!entry.PagesInserted.anbindung
-							|| !anbindung_1_gleich_2(
-									*(entry.PagesInserted.anbindung),
-									*anbindung))
-						anbindung->bis.seite += entry.PagesInserted.count;
-				}
-			}
-
-			if (pdf_pos && (pdf_pos->seite > 0 || pdf_pos->index > 0)) {
-				gint start = 0;
-
-				start = pdf_pos->seite
-						+ ((anbindung) ? anbindung->von.seite : 0);
-
-				if (entry.PagesInserted.pos < start)
-					pdf_pos->seite += entry.PagesInserted.count;
-			}
-		} else if (entry.type == JOURNAL_TYPE_PAGES_DELETED) {
-			gint last_page = 0;
-
-			for (gint i = 0; i < nelem(entry.PagesDeleted.pages_remaining);
-					i++) {
-				gint page_rem = 0;
-
-				page_rem = entry.PagesDeleted.pages_remaining[i];
-
-				while (last_page < page_rem) //last_page gelöscht
-				{
-					if (anbindung) {
-						if (last_page < anbindung->von.seite)
-							anbindung->von.seite--;
-						else if (last_page == anbindung->von.seite) //das darf ja nicht sein - aber wir regeln es trotzdem
-								{
-							assert((last_page + 1) < num_of_pages); //nicht  letzte Seite
-							assert((last_page < anbindung->bis.seite)); //nicht gleiche Seite wie Ende-Anbindung
-							//von.seite rutsch einen auf...
-							anbindung->von.index = 0;
-						}
-
-						if (last_page < anbindung->bis.seite)
-							anbindung->bis.seite--;
-						else if (last_page == anbindung->bis.seite) //s.o.
-								{
-							anbindung->bis.seite--;
-							anbindung->bis.index = EOP;
-						}
-					}
-
-					if (pdf_pos && (pdf_pos->seite > 0 || pdf_pos->index > 0)) {
-						gint start = 0;
-
-						start = pdf_pos->seite
-								+ ((anbindung) ? anbindung->von.seite : 0);
-
-						if (last_page < start)
-							pdf_pos->seite--;
-					}
-
-					last_page++;
-				}
-			}
-		}
-	}
-
-	return;
-}
-
 gint zond_treeview_oeffnen_internal_viewer(Projekt *zond,
 		const gchar *file_part, Anbindung *anbindung, PdfPos *pos_pdf,
 		gchar **errmsg) {
 	PdfPos pos_von = { 0 };
-	ZondPdfDocument const *zpdfd = NULL;
+	ZondPdfDocument const* zpdfd = NULL;
 
 	if ((zpdfd = zond_pdf_document_is_open(file_part)))
-		zond_treeview_oeffnen_anbindung_und_pos_anpassen(zpdfd, anbindung,
-				pos_pdf);
+		anbindung_aktualisieren_insert_pages(zpdfd, anbindung);
 
 	//Neue Instanz oder bestehende?
 	if (!(zond->state & GDK_SHIFT_MASK)) {
 		//Testen, ob pv mit file_part schon geöffnet
 		for (gint i = 0; i < zond->arr_pv->len; i++) {
 			PdfViewer *pv = g_ptr_array_index(zond->arr_pv, i);
-			if (pv->dd->next == NULL
-					&& !g_strcmp0(file_part,
-							zond_pdf_document_get_file_part(
-									pv->dd->zond_pdf_document))) {
-				if ((!pv->dd->anbindung && !anbindung)
-						|| (pv->dd->anbindung && anbindung
-								&& anbindung_1_gleich_2(*(pv->dd->anbindung),
-										*anbindung))) {
+			if (pv->dd->next == NULL && !g_strcmp0(file_part,
+					zond_pdf_document_get_file_part(pv->dd->zond_pdf_document))) {
+				gint dd_von = 0;
+				gint dd_bis = 0;
+
+				dd_von = pdf_document_page_get_index(pv->dd->first_page);
+				dd_bis = pdf_document_page_get_index(pv->dd->last_page);
+
+				if (!anbindung && dd_von == 0 &&
+						dd_bis == zond_pdf_document_get_number_of_pages(pv->dd->zond_pdf_document)) {
 					if (pos_pdf)
 						pos_von = *pos_pdf;
 
@@ -2914,10 +2816,6 @@ gint zond_treeview_oeffnen_internal_viewer(Projekt *zond,
 			}
 		}
 	}
-
-	//Falls document geöffnet: Journal durchgehen
-	//Prüfen, ob noch nicht gespeicherte Einfügungen bzw. Löschungen von Seiten vorhanden sind
-	//anbindung und pos_pdf anpassen
 
 	DisplayedDocument *dd = document_new_displayed_document(file_part,
 			anbindung, errmsg);

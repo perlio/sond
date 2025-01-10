@@ -159,7 +159,7 @@ static void log_init(Projekt *zond) {
 
 	file = freopen(logfile, "a", stdout);
 	if (!file) {
-		display_message(zond->app_window, "stout konnte nicht in Datei " "",
+		display_message(zond->app_window, "stdout konnte nicht in Datei " "",
 				logfile, "" " umgeleitet werden:\n", strerror( errno), NULL);
 		g_free(logfile);
 		exit(-1);
@@ -167,7 +167,7 @@ static void log_init(Projekt *zond) {
 
 	file_tmp = freopen(logfile, "a", stderr);
 	if (!file_tmp) {
-		display_message(zond->app_window, "sterr konnte nicht in "
+		display_message(zond->app_window, "stderr konnte nicht in "
 				"Datei %s umgeleitet werden:\n%s", logfile, strerror( errno),
 				NULL);
 		g_free(logfile);

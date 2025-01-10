@@ -18,6 +18,8 @@
 
 #include <gtk/gtk.h>
 #include <glib/gstdio.h>
+#include <mupdf/pdf.h>
+#include <mupdf/fitz.h>
 
 #include "../zond_pdf_document.h"
 
@@ -26,6 +28,7 @@
 #include "../99conv/general.h"
 #include "../99conv/pdf.h"
 
+#include "../20allgemein/project.h"
 #include "../20allgemein/ziele.h"
 
 #include "document.h"
@@ -489,7 +492,7 @@ viewer_new_page(PdfViewer *pdfv, DisplayedDocument* dd,
 	viewer_page->pdfv = pdfv;
 	viewer_page->dd = dd;
 	viewer_page->pdf_document_page = zond_pdf_document_get_pdf_document_page(
-			zond_pdf_document, page_doc);
+			dd->zond_pdf_document, page_doc);
 
 	viewer_page->crop = viewer_page->pdf_document_page->rect;
 
@@ -510,7 +513,7 @@ static void viewer_create_layout(PdfViewer *pv) {
 
 		g_ptr_array_set_size(pv->arr_pages, bis - von + 1 + pv->arr_pages->len);
 
-		for (gint i = von; i <= bis; i++) {
+		for (gint i = von; i < bis; i++) {
 			ViewerPageNew *viewer_page = NULL;
 			GtkTreeIter iter_tmp;
 
@@ -642,9 +645,140 @@ static gboolean viewer_dd_is_dirty(DisplayedDocument* dd) {
 	return FALSE;
 }
 
-gint viewer_save_dirty_docs(PdfViewer *pdfv, GError** error) {
-	DisplayedDocument *dd = NULL;
+/**	Rückgabe:
+ * 	0:	alles i.O.
+ *	-1:	"normaler" Fehler - alles aufgeräumt
+ *	-2:	Fehler, bei dem Rollback mindestens teilweise fehlgeschlagen ist -
+ *		ggf. Neustart der DB-Verbindungen
+ *	-3:	pdf_rearrange_pages fehlgeschlagen - im Zweifel PDF-Datei kaputt - ROLLBACK erfolgreich
+ *	-4: wie -3, aber ROLLBACK nicht oder nur teilweise erfolgreich
+ *	-5:	save fehlgeschlagen - ROLLBACK erfolgreich
+ *	-6:	wie -5, aber ROLLBACK (teilweise) nicht erfolgreich
+ *	-7: Änderungen in mindestens einer db konnten nicht commited werden,
+ *		nachdem Änderungen an PDF gespeichert worden sind - Katastrophe
+ */
+static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd, GError** error) {
+	GArray* arr_pages = NULL;
+	gint rc = 0;
 
+	rc = dbase_zond_begin(pv->zond->dbase_zond, error);
+	if (rc) {
+		g_prefix_error(error, "%s\n", __func__);
+
+		return rc;
+	}
+
+	rc = dbase_zond_update_section(pv->zond->dbase_zond, dd, error);
+	if (rc) {
+		GError* error_int = NULL;
+		gint ret = 0;
+
+		g_prefix_error(error, "%s\n", __func__);
+
+		ret = dbase_zond_rollback(pv->zond->dbase_zond, &error_int);
+		if (ret) {
+			(*error)->message = add_string((*error)->message, g_strdup(error_int->message));
+			g_error_free(error_int);
+
+			return -2;
+		}
+
+		return -1;
+	}
+
+	//gelöschte Seiten in dd wirklich löschen
+	arr_pages = g_array_new(FALSE, FALSE, sizeof(gint));
+	for (gint i = 0; i < zond_pdf_document_get_number_of_pages(dd->zond_pdf_document); i++) {
+		PdfDocumentPage* pdfp = NULL;
+
+		pdfp = g_ptr_array_index(zond_pdf_document_get_arr_pages(dd->zond_pdf_document), i);
+		if (!pdfp->to_be_deleted)
+			g_array_append_val(arr_pages, i);
+	}
+
+	zond_pdf_document_mutex_lock(dd->zond_pdf_document);
+
+	if (arr_pages->len < zond_pdf_document_get_number_of_pages(dd->zond_pdf_document)) {
+		//jetzt die pdf_document_pages aus array löschen -
+			//ging vorher nicht, da aus index die Seitenzahl abgeleitet wurde
+		for (gint i = 0; i < zond_pdf_document_get_number_of_pages(dd->zond_pdf_document); i++) {
+			PdfDocumentPage* pdfp = NULL;
+
+			pdfp = g_ptr_array_index(zond_pdf_document_get_arr_pages(dd->zond_pdf_document), i);
+			if (pdfp->to_be_deleted) {
+				g_ptr_array_remove_index(zond_pdf_document_get_arr_pages(dd->zond_pdf_document), i);
+				i--;
+			}
+		}
+
+		fz_try(zond_pdf_document_get_ctx(dd->zond_pdf_document))
+			pdf_rearrange_pages(zond_pdf_document_get_ctx(dd->zond_pdf_document),
+					zond_pdf_document_get_pdf_doc(dd->zond_pdf_document),
+					arr_pages->len, (gint*) arr_pages->data);
+
+		fz_always(zond_pdf_document_get_ctx(dd->zond_pdf_document))
+			g_array_unref(arr_pages);
+
+		fz_catch(zond_pdf_document_get_ctx(dd->zond_pdf_document)) {
+			gint ret = 0;
+			GError* error_int = NULL;
+
+			zond_pdf_document_mutex_unlock(dd->zond_pdf_document);
+			if (error) *error = g_error_new( g_quark_from_static_string("mupdf"),
+					fz_caught(zond_pdf_document_get_ctx(dd->zond_pdf_document)),
+					"%s\n%s", __func__,
+					fz_caught_message(zond_pdf_document_get_ctx(dd->zond_pdf_document)));
+
+			ret = dbase_zond_rollback(pv->zond->dbase_zond, &error_int);
+			if (ret) {
+				if (error) (*error)->message = add_string((*error)->message, g_strdup(error_int->message));
+				g_error_free(error_int);
+
+				return -4;
+			}
+
+			return -3;
+		}
+	}
+	else g_array_unref(arr_pages);
+
+	rc = pdf_save(zond_pdf_document_get_ctx(dd->zond_pdf_document),
+			zond_pdf_document_get_pdf_doc(dd->zond_pdf_document),
+			zond_pdf_document_get_file_part(dd->zond_pdf_document),
+			error);
+	zond_pdf_document_mutex_unlock(dd->zond_pdf_document);
+	if (rc) {
+		gint ret = 0;
+		GError* error_int = NULL;
+
+		if (error) *error = g_error_new( g_quark_from_static_string("mupdf"),
+				fz_caught(zond_pdf_document_get_ctx(dd->zond_pdf_document)),
+				"%s\n%s", __func__,
+				fz_caught_message(zond_pdf_document_get_ctx(dd->zond_pdf_document)));
+
+		ret = dbase_zond_rollback(pv->zond->dbase_zond, &error_int);
+		if (ret) {
+			if (error) (*error)->message = add_string((*error)->message, g_strdup(error_int->message));
+			g_error_free(error_int);
+
+			return -6;
+		}
+
+		return -5;
+	}
+
+	rc = dbase_zond_commit(pv->zond->dbase_zond, error);
+	if (rc) {
+		g_prefix_error(error, "%s\n", __func__);
+
+		return -6;
+	}
+
+	return 0;
+}
+
+gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
+	DisplayedDocument *dd = NULL;
 	dd = pdfv->dd;
 	if (!dd)
 		return 0;
@@ -653,10 +787,9 @@ gint viewer_save_dirty_docs(PdfViewer *pdfv, GError** error) {
 	do {
 		GArray *arr_journal = NULL;
 		GArray *arr_redo = NULL;
-		gboolean dirty = FALSE;
-		gint ret = 0;
-		GError *error = NULL;
-		gint* pages = NULL;
+		gint rc = 0;
+		gint dd_von = 0;
+		gint dd_bis = 0;
 
 		arr_journal = zond_pdf_document_get_arr_journal(
 				dd->zond_pdf_document);
@@ -670,51 +803,32 @@ gint viewer_save_dirty_docs(PdfViewer *pdfv, GError** error) {
 
 		//dann Änderungen rausrechnen, später wieder dazu...
 		arr_redo = g_array_new(FALSE, FALSE, sizeof(JournalEntry));
-		pages = g_malloc0(zond_pdf_document_get_number_of_pages(dd->zond_pdf_document) *
-				sizeof(gint));
-		for (gint i = 0; i < zond_pdf_document_get_number_of_pages(dd->zond_pdf_document); i++)
-			pages[i] = i;
+		dd_von = pdf_document_page_get_index(dd->first_page);
+		dd_bis = pdf_document_page_get_index(dd->last_page);
 
 		for (gint i = arr_journal->len - 1; i >= 0; i--) {
 			JournalEntry entry = { 0 };
+			gint page_doc = 0;
 
 			entry = g_array_index(arr_journal, JournalEntry, i);
 			page_doc = pdf_document_page_get_index(entry.pdf_document_page);
 
-			anbindung = *(dd->anbindung);
+			if (page_doc < dd_von || page_doc > dd_bis) { //gehört nicht zum dd
+				//Rückgängig machen (außer PAGE_DELETED) und in arr_redo speichern
 
-			if (page_doc >= anbindung.von.seite && page_doc <= anbindung.bis.seite) {
-				//wenn PageDeleted: in pages_array markieren
-				if (entry.type == JOURNAL_TYPE_PAGE_DELETED)
-					pages[page_doc] = -1;
+				if (entry.type == JOURNAL_TYPE_PAGES_INSERTED) {
+					//nachfolgende entries  gleichen Typs - wenn index > i - anpassen
+				}
 
-				//entry löschen
 				g_array_remove_index(arr_journal, i);
-			} else { //gehört nicht dazu
-				//wenn PageDeleted: einfach lassen
-				//ansonsten: Rückgängig machen und in arr_redo speichern
 			}
 		}
 
-		zond_pdf_document_mutex_lock(dd->zond_pdf_document);
-		ret = pdf_save(zond_pdf_document_get_ctx(dd->zond_pdf_document),
-				zond_pdf_document_get_pdf_doc(dd->zond_pdf_document),
-				zond_pdf_document_get_file_part(dd->zond_pdf_document),
-				&error);
-		zond_pdf_document_mutex_unlock(dd->zond_pdf_document);
-		if (ret) {
-			gchar *error_text = NULL;
+		rc = viewer_do_save_dd(pdfv, dd, error);
+		if (rc) ERROR_Z
 
-			error_text = g_strdup_printf(
-					"Fehler bei Speichern der Datei '%s'",
-					zond_pdf_document_get_file_part(
-							dd->zond_pdf_document));
-			display_error(pdfv->vf, error_text, error->message);
-			g_free(error_text);
-			g_error_free(error);
-		}
 
-		//redo
+				//redo
 
 		g_array_unref(arr_redo);
 
@@ -730,21 +844,8 @@ gint viewer_save_dirty_docs(PdfViewer *pdfv, GError** error) {
 
 		dd_test = pdfv_test->dd;
 		do {
-			ZondPdfDocument *zpdf = NULL;
-			GArray *arr_journal = NULL;
-
-			zpdf = dd_test->zond_pdf_document;
-			arr_journal = zond_pdf_document_get_arr_journal(zpdf);
-			if (arr_journal->len > 0) {
-				for (gint i = 0; i < arr_journal->len; i++) {
-					JournalEntry entry = { 0 };
-
-					entry = g_array_index(arr_journal, JournalEntry, i);
-					if (viewer_entry_in_anbindung(entry,
-							dd_test->anbindung))
-						dirty = TRUE;
-				}
-			}
+			if (viewer_dd_is_dirty(dd_test))
+				dirty = TRUE;
 		} while ((dd_test = dd_test->next));
 
 		if (dirty == FALSE)
@@ -768,7 +869,7 @@ void viewer_save_and_close(PdfViewer *pdfv) {
 			gint ret = 0;
 			GError* error = NULL;
 
-			ret = viewer_save_dirty_docs(pdfv, &error);
+			ret = viewer_save_dirty_dds(pdfv, &error);
 			if (ret) {
 				display_error(pdfv->vf, "Speichern nicht erfoglreich", error->message);
 				g_error_free(error);
@@ -849,7 +950,7 @@ static void cb_pv_speichern(GtkButton *button, gpointer data) {
 	GError* error = NULL;
 	gint rc = 0;
 
-	rc = viewer_save_dirty_docs(pv, &error);
+	rc = viewer_save_dirty_dds(pv, &error);
 	if (rc) {
 		display_error(pv->vf, "Speichern nicht erfolgreicht", error->message);
 		g_error_free(error);
@@ -1600,12 +1701,8 @@ gint viewer_foreach(PdfViewer *pdfv, PdfDocumentPage *pdf_document_page,
 			gint von = 0;
 			gint bis = 0;
 
-			if (dd_vergleich->anbindung) {
-				von = dd_vergleich->anbindung->von.seite;
-				bis = dd_vergleich->anbindung->bis.seite;
-			} else
-				bis = zond_pdf_document_get_number_of_pages(
-						dd_vergleich->zond_pdf_document) - 1;
+			von = pdf_document_page_get_index(dd_vergleich->first_page);
+			bis = pdf_document_page_get_index(dd_vergleich->last_page);
 
 			if (pdf_document_page->document
 					== dd_vergleich->zond_pdf_document) {
@@ -1613,8 +1710,9 @@ gint viewer_foreach(PdfViewer *pdfv, PdfDocumentPage *pdf_document_page,
 						pdf_document_page->document);
 
 				for (gint i = von; i <= bis; i++) {
-					PdfDocumentPage *pdf_document_page_vergleich =
-							g_ptr_array_index(arr_pages, i);
+					PdfDocumentPage *pdf_document_page_vergleich = NULL;
+
+					pdf_document_page_vergleich = g_ptr_array_index(arr_pages, i);
 					if (pdf_document_page_vergleich == pdf_document_page) {
 						gint rc = 0;
 
