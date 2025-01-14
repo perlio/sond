@@ -2793,14 +2793,16 @@ gint zond_treeview_oeffnen_internal_viewer(Projekt *zond,
 			PdfViewer *pv = g_ptr_array_index(zond->arr_pv, i);
 			if (pv->dd->next == NULL && !g_strcmp0(file_part,
 					zond_pdf_document_get_file_part(pv->dd->zond_pdf_document))) {
-				gint dd_von = 0;
-				gint dd_bis = 0;
+				Anbindung* anbindung_dd = NULL;
 
-				dd_von = pdf_document_page_get_index(pv->dd->first_page);
-				dd_bis = pdf_document_page_get_index(pv->dd->last_page);
+				anbindung_dd = document_get_anbindung(pv->dd);
 
-				if (!anbindung && dd_von == 0 &&
-						dd_bis == zond_pdf_document_get_number_of_pages(pv->dd->zond_pdf_document)) {
+				if ((!anbindung && !anbindung_dd) ||
+						(anbindung && !anbindung_dd) ||
+						(!anbindung && anbindung_dd) ||
+						anbindung_1_gleich_2(*anbindung, *anbindung_dd)) {
+					g_free(anbindung_dd);
+
 					if (pos_pdf)
 						pos_von = *pos_pdf;
 
