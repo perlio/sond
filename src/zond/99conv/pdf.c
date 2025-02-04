@@ -201,7 +201,7 @@ gint pdf_open_and_authen_document(fz_context *ctx, gboolean prompt,
 			g_free(rel_path_source);
 			file_dest = g_file_new_for_path(rel_path_dest);
 
-			suc = g_file_copy(file_source, file_dest, G_FILE_COPY_NONE, NULL,
+			suc = g_file_copy(file_source, file_dest, G_FILE_COPY_OVERWRITE, NULL,
 					NULL, NULL, error);
 			g_object_unref(file_source);
 			g_object_unref(file_dest);
@@ -216,9 +216,9 @@ gint pdf_open_and_authen_document(fz_context *ctx, gboolean prompt,
 
 		fz_try( ctx )
 			doc_disk = pdf_open_document(ctx, rel_path);
-fz_always		( ctx )
+		fz_always( ctx )
 			g_free(rel_path);
-fz_catch		( ctx ) {
+		fz_catch( ctx ) {
 			if (error)
 				*error = g_error_new(g_quark_from_static_string("MUPDF"),
 						fz_caught(ctx), "%s\n%s", __func__,
@@ -234,7 +234,7 @@ fz_catch		( ctx ) {
 										"gelöscht werden\nFehlermeldung: %s",
 								__func__,
 								fz_stream_filename(ctx, doc_disk->file),
-								strerror( errno));
+								strerror(errno));
 						(*error)->message = add_string((*error)->message,
 								error_text);
 					}
@@ -411,10 +411,8 @@ fz_catch	( ctx ) {
 	pdf_drop_document(ctx, doc);
 	if (rc || ret) {
 		if (error) {
-			if (rc)
-				g_prefix_error(error, "%s\n", __func__);
-
-			if (ret) {
+			if (rc) g_prefix_error(error, "%s\n", __func__);
+			else {
 				gchar *error_text = NULL;
 
 				if (rc)
@@ -429,9 +427,9 @@ fz_catch	( ctx ) {
 				(*error)->message = add_string((*error)->message, error_text);
 				g_free(error_text);
 			}
-		}
 
 		return -1;
+		}
 	}
 
 	return 0;

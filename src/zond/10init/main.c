@@ -157,7 +157,7 @@ static void log_init(Projekt *zond) {
 	g_free(logdir);
 	g_date_time_unref(date_time);
 
-	file = freopen(logfile, "a", stdout);
+	file = freopen(logfile, "a+", stdout);
 	if (!file) {
 		display_message(zond->app_window, "stdout konnte nicht in Datei " "",
 				logfile, "" " umgeleitet werden:\n", strerror( errno), NULL);
@@ -165,7 +165,7 @@ static void log_init(Projekt *zond) {
 		exit(-1);
 	}
 
-	file_tmp = freopen(logfile, "a", stderr);
+	file_tmp = freopen(logfile, "a+", stderr);
 	if (!file_tmp) {
 		display_message(zond->app_window, "stderr konnte nicht in "
 				"Datei %s umgeleitet werden:\n%s", logfile, strerror( errno),

@@ -118,26 +118,27 @@ static void zond_pdf_document_finalize(GObject *self) {
 
 	g_ptr_array_unref(priv->pages);
 
-	if (!priv->read_only && priv->doc) {
+	if (priv->doc) {
 		path = g_strdup(fz_stream_filename(priv->ctx, priv->doc->file));
 		pdf_drop_document(priv->ctx, priv->doc);
-	}
 
-	if (!priv->read_only) {
-		gint ret = 0;
+		if (!priv->read_only) {
+			gint ret = 0;
 
-		ret = remove(path);
-		g_free(path);
-		if (ret) {
-			gchar *error_text = NULL;
+			ret = remove(path);
+			if (ret && errno == ENOENT) {
+				gchar *error_text = NULL;
 
-			error_text = g_strdup_printf("remove('%s'): %s", priv->file_part,
-					strerror( errno));
-			display_error( NULL,
-					"Arbeitskopie konnte nicht gelöscht werden\n\n",
-					error_text);
-			g_free(error_text);
+				error_text = g_strdup_printf("remove('%s'): %s", priv->file_part,
+						strerror( errno));
+				display_error( NULL,
+						"Arbeitskopie konnte nicht gelöscht werden\n\n",
+						error_text);
+				g_free(error_text);
+			}
 		}
+
+		g_free(path);
 	}
 
 	zond_pdf_document_close_context(priv->ctx); //drop_context reicht nicht aus!

@@ -1646,7 +1646,7 @@ gint zond_dbase_get_arr_sections(ZondDBase* zond_dbase, gchar const* file_part,
 
 	const gchar *sql[] =
 			{
-					"SELECT ID, section FROM knoten WHERE filepart=?1;"
+					"SELECT ID, section FROM knoten WHERE file_part=?1;"
 			};
 
 	rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
@@ -1683,7 +1683,10 @@ gint zond_dbase_get_arr_sections(ZondDBase* zond_dbase, gchar const* file_part,
 
 		section.ID = sqlite3_column_int(stmt[0], 0);
 		section.section = g_strdup((gchar const*) sqlite3_column_text(stmt[0], 1));
-		g_array_append_val(*arr_sections, section);
+
+		//wenn section == NULL, dann brauch es nicht gespeichert zu werden,
+		//ist ja die ganze PDF-Datei - keine Anpassung nötig
+		if (section.section) g_array_append_val(*arr_sections, section);
 	} while (rc == SQLITE_ROW);
 
 	return 0;

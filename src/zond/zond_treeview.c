@@ -2798,10 +2798,8 @@ gint zond_treeview_oeffnen_internal_viewer(Projekt *zond,
 				anbindung_dd = document_get_anbindung(pv->dd);
 
 				if ((!anbindung && !anbindung_dd) ||
-						(anbindung && !anbindung_dd) ||
-						(!anbindung && anbindung_dd) ||
-						anbindung_1_gleich_2(*anbindung, *anbindung_dd)) {
-					g_free(anbindung_dd);
+						(anbindung && anbindung_dd &&
+						anbindung_1_gleich_2(*anbindung, *anbindung_dd))) {
 
 					if (pos_pdf)
 						pos_von = *pos_pdf;
@@ -2813,8 +2811,11 @@ gint zond_treeview_oeffnen_internal_viewer(Projekt *zond,
 
 					viewer_springen_zu_pos_pdf(pv, pos_von, 0.0);
 
+					g_free(anbindung_dd);
+
 					return 0;
 				}
+				else g_free(anbindung_dd);
 			}
 		}
 	}
@@ -2867,7 +2868,7 @@ static gint zond_treeview_open_pdf(Projekt *zond, gint node_id,
 			if (rc)
 				ERROR_Z
 
-			if (section) //nicht root
+			if (section_ges) //nicht root
 			{
 				anbindung_parse_file_section(section_ges, &anbindung_ges);
 				g_free(section_ges);
