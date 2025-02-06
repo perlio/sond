@@ -523,7 +523,7 @@ static void viewer_create_layout(PdfViewer *pv) {
 		von = pdf_document_page_get_index(dd->first_page);
 		bis = pdf_document_page_get_index(dd->last_page);
 
-		for (gint i = von; i < bis; i++) {
+		for (gint i = von; i <= bis; i++) {
 			ViewerPageNew *viewer_page = NULL;
 			GtkTreeIter iter_tmp;
 
@@ -807,7 +807,7 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 			page_doc = pdf_document_page_get_index(entry.pdf_document_page);
 
 			if (page_doc < dd_von || page_doc > dd_bis) { //gehört nicht zum dd
-				//Rückgängig machen (außer PAGE_DELETED) und in arr_redo speichern
+				//Rückgängig machen und in arr_redo speichern
 
 				if (entry.type == JOURNAL_TYPE_PAGES_INSERTED) {
 					//nachfolgende entries  gleichen Typs - wenn index > i - anpassen
