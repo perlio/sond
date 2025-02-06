@@ -624,11 +624,11 @@ static gint seiten_loeschen(PdfViewer *pv, GPtrArray *arr_document_page,
 		JournalEntry entry = { 0, };
 		GArray* arr_journal = NULL;
 
-		//macht - sofern noch nicht geschehen - thread_pool des pv dicht, in dem Seite angezeigt wird
-		//Dann wird Seite aus pv gelöscht
 		pdf_document_page = g_ptr_array_index(arr_document_page, i);
 		pdf_document_page->to_be_deleted = TRUE;
 
+		//macht - sofern noch nicht geschehen - thread_pool des pv dicht, in dem Seite angezeigt wird
+		//Dann wird Seite aus pv gelöscht
 		rc = viewer_foreach(pv, pdf_document_page, seiten_cb_loesche_seite,
 				NULL, &errmsg);
 		if (rc) {

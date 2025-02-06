@@ -380,11 +380,12 @@ static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 			continue;
 		}
 
-		rc = zond_pdf_document_save(dd->zond_pdf_document, &errmsg);
+		GError* error = NULL;
+		rc = zond_pdf_document_save(dd->zond_pdf_document, &error);
 		if (rc) {
 			message = g_strdup_printf(
-					"Fehler bei Aufruf zond_pdf_document_save:\n%s", errmsg);
-			g_free(errmsg);
+					"Fehler bei Aufruf zond_pdf_document_save:\n%s", error->message);
+			g_error_free(error);
 			info_window_set_message(info_window, message);
 			g_free(message);
 

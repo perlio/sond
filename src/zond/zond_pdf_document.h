@@ -116,7 +116,7 @@ const ZondPdfDocument* zond_pdf_document_is_open(const gchar*);
 
 void zond_pdf_document_unload_page(PdfDocumentPage*);
 
-gint zond_pdf_document_save(ZondPdfDocument*, gchar**);
+gint zond_pdf_document_save(ZondPdfDocument*, GError**);
 
 void zond_pdf_document_close(ZondPdfDocument*);
 

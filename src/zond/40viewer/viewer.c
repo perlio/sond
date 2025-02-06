@@ -511,13 +511,14 @@ static void viewer_create_layout(PdfViewer *pv) {
 		von = pdf_document_page_get_index(dd->first_page);
 		bis = pdf_document_page_get_index(dd->last_page);
 
-		g_ptr_array_set_size(pv->arr_pages, bis - von + 1 + pv->arr_pages->len);
-
 		for (gint i = von; i < bis; i++) {
 			ViewerPageNew *viewer_page = NULL;
 			GtkTreeIter iter_tmp;
 
 			viewer_page = viewer_new_page(pv, dd, i);
+
+			//viewer_new_page gibt NULL zurück, wenn pdf_document_page to_be_deleted ist
+			if (!viewer_page) continue;
 
 			viewer_page->y_pos = (gint) (y_pos + .5);
 
@@ -530,9 +531,7 @@ static void viewer_create_layout(PdfViewer *pv) {
 							(gfloat) dd->last_index :
 							viewer_page->crop.y1;
 
-			((pv->arr_pages)->pdata)[pv->arr_pages->len - 1 - (bis - i)] =
-					viewer_page;
-
+			g_ptr_array_add(pv->arr_pages, viewer_page);
 			gtk_list_store_insert(
 					GTK_LIST_STORE(
 							gtk_tree_view_get_model( GTK_TREE_VIEW(pv->tree_thumb) )),
@@ -742,10 +741,7 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd, GError** err
 	}
 	else g_array_unref(arr_pages);
 
-	rc = pdf_save(zond_pdf_document_get_ctx(dd->zond_pdf_document),
-			zond_pdf_document_get_pdf_doc(dd->zond_pdf_document),
-			zond_pdf_document_get_file_part(dd->zond_pdf_document),
-			error);
+	rc = zond_pdf_document_save(dd->zond_pdf_document, error);
 	zond_pdf_document_mutex_unlock(dd->zond_pdf_document);
 	if (rc) {
 		gint ret = 0;

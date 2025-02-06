@@ -55,19 +55,19 @@ static void pv_activate_widgets(PdfViewer *pv, gboolean activ) {
 
 static void pv_schliessen_datei(PdfViewer *pv) {
 	gint rc = 0;
-	gchar *errmsg = NULL;
+	GError *error = NULL;
 
 	viewer_close_thread_pool_and_transfer(pv);
 
 	if (gtk_widget_get_sensitive(pv->button_speichern)) {
 		rc = abfrage_frage(pv->vf, "PDF geändert", "Speichern?", NULL);
 		if (rc == GTK_RESPONSE_YES) {
-			rc = zond_pdf_document_save(pv->dd->zond_pdf_document, &errmsg);
+			rc = zond_pdf_document_save(pv->dd->zond_pdf_document, &error);
 			if (rc) {
-				errmsg = add_string(g_strdup("Dokument kann nicht gespeichert "
-						"werden: "), errmsg);
-				rc = abfrage_frage(pv->vf, errmsg, "Trotzdem schließen?", NULL);
-				g_free(errmsg);
+				error->message = add_string(g_strdup("Dokument kann nicht gespeichert "
+						"werden: "), error->message);
+				rc = abfrage_frage(pv->vf, error->message, "Trotzdem schließen?", NULL);
+				g_error_free(error);
 
 				if (rc == GTK_RESPONSE_NO)
 					return;

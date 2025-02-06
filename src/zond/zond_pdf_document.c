@@ -20,6 +20,8 @@
 
 #include <glib/gstdio.h>
 #include <glib-object.h>
+
+#include "global_types.h"
 #include "99conv/pdf.h"
 
 #include "../misc.h"
@@ -571,30 +573,23 @@ zond_pdf_document_open(const gchar *file_part, gint von, gint bis,
 	return zond_pdf_document;
 }
 
-gint zond_pdf_document_save(ZondPdfDocument *self, gchar **errmsg) {
+gint zond_pdf_document_save(ZondPdfDocument *self, GError **error) {
 	ZondPdfDocumentPrivate *priv = zond_pdf_document_get_instance_private(self);
 
 	gint rc = 0;
-	GError *error = NULL;
 
 	if (priv->read_only) {
-		if (errmsg)
-			*errmsg = g_strdup_printf(
+		if (error)
+			*error = g_error_new(ZOND_ERROR, 0,
 					"%s\nDokument wurde schreibgeschützt geöffnet", __func__);
 
 		return -1;
 	}
 
-	rc = pdf_save(priv->ctx, priv->doc, priv->file_part, &error);
-	if (rc) {
-		if (errmsg)
-			*errmsg = g_strdup_printf("%s\n%s", __func__, error->message);
-		g_error_free(error);
+	rc = pdf_save(priv->ctx, priv->doc, priv->file_part, error);
+	if (rc) ERROR_Z
 
-		return -1;
-	}
-
-	g_array_unref(priv->arr_journal);
+	g_array_remove_range(priv->arr_journal, 0, priv->arr_journal->len);
 
 	return 0;
 }
