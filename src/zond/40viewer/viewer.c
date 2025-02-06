@@ -426,6 +426,28 @@ static void viewer_render_sichtbare_seiten(PdfViewer *pv) {
 	return;
 }
 
+static void viewer_set_layout_size(PdfViewer* pv,
+		gdouble x_max, gdouble y_pos) {
+	x_max = x_max * pv->zoom / 100;
+
+	y_pos -= PAGE_SPACE;
+
+	gtk_layout_set_size(GTK_LAYOUT(pv->layout), (gint) (x_max + .5),
+			(gint) (y_pos + .5));
+
+	//label mit Gesamtseitenzahl erzeugen
+	gchar *text = g_strdup_printf("/ %i ", pv->arr_pages->len);
+	gtk_label_set_text(GTK_LABEL(pv->label_anzahl), text);
+	g_free(text);
+
+	gtk_widget_set_size_request(pv->layout, (gint) (x_max + 0.5),
+			(gint) (y_pos + 0.5));
+
+	gtk_adjustment_set_value(pv->h_adj, (x_max - VIEWER_WIDTH) / 2);
+
+	return;
+}
+
 void viewer_refresh_layout(PdfViewer *pv, gint pos) {
 	ViewerPageNew *viewer_page = NULL;
 	gdouble y_pos = 0;
@@ -453,22 +475,7 @@ void viewer_refresh_layout(PdfViewer *pv, gint pos) {
 				/ 100+ PAGE_SPACE;
 	}
 
-	x_max = x_max * pv->zoom / 100;
-
-	y_pos -= PAGE_SPACE;
-
-	gtk_layout_set_size(GTK_LAYOUT(pv->layout), (gint) (x_max + .5),
-			(gint) (y_pos + .5));
-
-	//label mit Gesamtseitenzahl erzeugen
-	gchar *text = g_strdup_printf("/ %i ", pv->arr_pages->len);
-	gtk_label_set_text(GTK_LABEL(pv->label_anzahl), text);
-	g_free(text);
-
-	gtk_widget_set_size_request(pv->layout, (gint) (x_max + .5),
-			(gint) (y_pos + .5));
-
-	gtk_adjustment_set_value(pv->h_adj, (x_max - VIEWER_WIDTH) / 2);
+	viewer_set_layout_size(pv, x_max, y_pos);
 
 	for (gint u = pos; u < pv->arr_pages->len; u++) {
 		ViewerPageNew *viewer_page = NULL;
@@ -550,22 +557,7 @@ static void viewer_create_layout(PdfViewer *pv) {
 
 	} while ((dd = dd->next));
 
-	x_max = x_max * pv->zoom / 100;
-
-	y_pos -= PAGE_SPACE;
-
-	gtk_layout_set_size(GTK_LAYOUT(pv->layout), (gint) (x_max + .5),
-			(gint) (y_pos + .5));
-
-	//label mit Gesamtseitenzahl erzeugen
-	gchar *text = g_strdup_printf("/ %i ", pv->arr_pages->len);
-	gtk_label_set_text(GTK_LABEL(pv->label_anzahl), text);
-	g_free(text);
-
-	gtk_widget_set_size_request(pv->layout, (gint) (x_max + 0.5),
-			(gint) (y_pos + 0.5));
-
-	gtk_adjustment_set_value(pv->h_adj, (x_max - VIEWER_WIDTH) / 2);
+	viewer_set_layout_size(pv, x_max, y_pos);
 
 	return;
 }
