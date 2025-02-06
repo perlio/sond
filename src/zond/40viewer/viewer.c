@@ -487,13 +487,18 @@ void viewer_refresh_layout(PdfViewer *pv, gint pos) {
 ViewerPageNew*
 viewer_new_page(PdfViewer *pdfv, DisplayedDocument* dd,
 		gint page_doc) {
-	ViewerPageNew *viewer_page = g_malloc0(sizeof(ViewerPageNew));
+	ViewerPageNew *viewer_page = NULL;
+	PdfDocumentPage* pdf_document_page = NULL;
+
+	pdf_document_page = zond_pdf_document_get_pdf_document_page(
+			dd->zond_pdf_document, page_doc);
+	if (pdf_document_page->to_be_deleted) return NULL;
+
+	viewer_page = g_malloc0(sizeof(ViewerPageNew));
 
 	viewer_page->pdfv = pdfv;
 	viewer_page->dd = dd;
-	viewer_page->pdf_document_page = zond_pdf_document_get_pdf_document_page(
-			dd->zond_pdf_document, page_doc);
-
+	viewer_page->pdf_document_page = pdf_document_page;
 	viewer_page->crop = viewer_page->pdf_document_page->rect;
 
 	return viewer_page;
