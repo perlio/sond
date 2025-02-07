@@ -962,8 +962,8 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 	data_insert.count = count;
 	data_insert.after_last = (pos == pv->arr_pages->len) ? TRUE : FALSE;
 
-	viewer_foreach(pv, g_ptr_array_index(pv->arr_pages,
-			(pos == pv->arr_pages->len) ? pos - 1 : pos), seiten_cb_einfuegen, &data_insert, &errmsg);
+	viewer_foreach(pv, viewer_page->pdf_document_page,
+			seiten_cb_einfuegen, &data_insert, &errmsg);
 
 	seiten_refresh_layouts(pv->zond->arr_pv);
 
