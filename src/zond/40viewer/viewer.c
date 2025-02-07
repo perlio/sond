@@ -1684,44 +1684,26 @@ gint viewer_foreach(PdfViewer *pdfv, PdfDocumentPage *pdf_document_page,
 		gint (*cb_foreach_pv)(PdfViewer*, gint, DisplayedDocument*,
 				gpointer, gchar**), gpointer data, gchar **errmsg) {
 	for (gint p = 0; p < pdfv->zond->arr_pv->len; p++) {
-		gint zaehler = 0;
 		gboolean dirty = FALSE;
 
 		PdfViewer *pv_vergleich = g_ptr_array_index(pdfv->zond->arr_pv, p);
-		DisplayedDocument *dd_vergleich = pv_vergleich->dd;
 
-		do {
-			gint von = 0;
-			gint bis = 0;
+		for (gint i = 0; i < pv_vergleich->arr_pages->len; i++) {
+			ViewerPageNew* viewer_page = NULL;
 
-			von = pdf_document_page_get_index(dd_vergleich->first_page);
-			bis = pdf_document_page_get_index(dd_vergleich->last_page);
+			viewer_page = g_ptr_array_index(pv_vergleich->arr_pages, i);
 
-			if (pdf_document_page->document
-					== dd_vergleich->zond_pdf_document) {
-				GPtrArray *arr_pages = zond_pdf_document_get_arr_pages(
-						pdf_document_page->document);
+			if (pdf_document_page == viewer_page->pdf_document_page && cb_foreach_pv) {
+				gint rc = 0;
 
-				for (gint i = von; i <= bis; i++) {
-					PdfDocumentPage *pdf_document_page_vergleich = NULL;
+				rc = cb_foreach_pv(pv_vergleich, i, viewer_page->dd, data, errmsg);
+				if (rc)
+					ERROR_S
+				dirty = TRUE;
 
-					pdf_document_page_vergleich = g_ptr_array_index(arr_pages, i);
-					if (pdf_document_page_vergleich == pdf_document_page) {
-						gint rc = 0;
-
-						if (cb_foreach_pv)
-							rc = cb_foreach_pv(pv_vergleich, zaehler + i,
-									dd_vergleich, data, errmsg);
-						if (rc)
-							ERROR_S
-						dirty = TRUE;
-
-						break;
-					}
-				}
-			} else
-				zaehler += (bis - von);
-		} while ((dd_vergleich = dd_vergleich->next));
+				break;
+			}
+		}
 
 		if (dirty)
 			gtk_widget_set_sensitive(pv_vergleich->button_speichern, TRUE);
