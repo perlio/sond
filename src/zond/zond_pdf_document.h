@@ -51,11 +51,7 @@ typedef struct _Pdf_Document_Page_Annot {
 } PdfDocumentPageAnnot;
 
 struct PagesInserted {
-	gint dd_seite_von;
-	gint dd_seite_bis;
-	gint page_doc;
 	gint count;
-	gboolean after_last;
 };
 struct AnnotCreated {
 	gint index;
