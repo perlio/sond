@@ -303,7 +303,7 @@ void init_app_window(Projekt *zond) {
 	gtk_box_pack_start(GTK_BOX(vbox), zond->hpaned, TRUE, TRUE, 0);
 
 	//vor erzeugung des ersten Sond_treeviews bzw. Derivat, damit Werte kopiert werden
-	stv_class = g_type_class_ref( SOND_TYPE_TREEVIEW);
+	stv_class = g_type_class_ref(SOND_TYPE_TREEVIEW);
 	stv_class->callback_key_press_event = cb_key_press;
 	stv_class->callback_key_press_event_func_data = zond;
 

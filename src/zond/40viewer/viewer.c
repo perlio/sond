@@ -562,6 +562,41 @@ static void viewer_create_layout(PdfViewer *pv) {
 	return;
 }
 
+static gboolean viewer_dd_is_dirty(DisplayedDocument* dd) {
+	GArray* arr_journal = NULL;
+
+	arr_journal = zond_pdf_document_get_arr_journal(dd->zond_pdf_document);
+
+	for ( gint i = 0; i < arr_journal->len; i++) {
+		JournalEntry entry = { 0 };
+		gint page_doc = 0;
+
+		entry = g_array_index(arr_journal, JournalEntry, i);
+		page_doc = pdf_document_page_get_index(entry.pdf_document_page);
+
+		if (page_doc >= pdf_document_page_get_index(dd->first_page) &&
+				page_doc <= pdf_document_page_get_index(dd->last_page))
+			return TRUE;
+	}
+
+	return FALSE;
+}
+
+static gboolean viewer_has_dirty_dd(PdfViewer* pv) {
+	DisplayedDocument* dd = NULL;
+	gboolean dirty = FALSE;
+
+	dd = pv->dd;
+	do {
+		if (viewer_dd_is_dirty(dd)) {
+			dirty = TRUE;
+			break;
+		}
+	} while ((dd = dd->next));
+
+	return dirty;
+}
+
 void viewer_display_document(PdfViewer *pv, DisplayedDocument *dd, gint page,
 		gint index) {
 	PdfPos pdf_pos = { page, index };
@@ -574,6 +609,9 @@ void viewer_display_document(PdfViewer *pv, DisplayedDocument *dd, gint page,
 		viewer_springen_zu_pos_pdf(pv, pdf_pos, 0.0);
 	else
 		g_signal_emit_by_name(pv->v_adj, "value-changed", NULL); // falls pos == 0
+
+	//Test, ob in Viewer "schmutzige" dds angezeigt werden sollen - dann speichern-icon aktiv
+	if (viewer_has_dirty_dd(pv)) gtk_widget_set_sensitive(pv->button_speichern, TRUE);
 
 	gtk_widget_grab_focus(pv->layout);
 
@@ -619,26 +657,6 @@ void viewer_schliessen(PdfViewer *pv) {
 	g_free(pv);
 
 	return;
-}
-
-static gboolean viewer_dd_is_dirty(DisplayedDocument* dd) {
-	GArray* arr_journal = NULL;
-
-	arr_journal = zond_pdf_document_get_arr_journal(dd->zond_pdf_document);
-
-	for ( gint i = 0; i < arr_journal->len; i++) {
-		JournalEntry entry = { 0 };
-		gint page_doc = 0;
-
-		entry = g_array_index(arr_journal, JournalEntry, i);
-		page_doc = pdf_document_page_get_index(entry.pdf_document_page);
-
-		if (page_doc >= pdf_document_page_get_index(dd->first_page) &&
-				page_doc <= pdf_document_page_get_index(dd->last_page))
-			return TRUE;
-	}
-
-	return FALSE;
 }
 
 /**	Rückgabe:
@@ -809,10 +827,6 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 			if (page_doc < dd_von || page_doc > dd_bis) { //gehört nicht zum dd
 				//Rückgängig machen und in arr_redo speichern
 
-				if (entry.type == JOURNAL_TYPE_PAGES_INSERTED) {
-					//nachfolgende entries  gleichen Typs - wenn index > i - anpassen
-				}
-
 				g_array_remove_index(arr_journal, i);
 			}
 		}
@@ -830,18 +844,9 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 	//Bei allen sauberen pvs Speichern insensitiv
 	for (gint i = 0; i < pdfv->zond->arr_pv->len; i++) {
 		PdfViewer *pdfv_test = NULL;
-		DisplayedDocument *dd_test = NULL;
-		gboolean dirty = FALSE;
 
 		pdfv_test = g_ptr_array_index(pdfv->zond->arr_pv, i);
-
-		dd_test = pdfv_test->dd;
-		do {
-			if (viewer_dd_is_dirty(dd_test))
-				dirty = TRUE;
-		} while ((dd_test = dd_test->next));
-
-		if (dirty == FALSE)
+		if (!viewer_has_dirty_dd(pdfv_test))
 			gtk_widget_set_sensitive(pdfv_test->button_speichern, FALSE);
 	}
 
