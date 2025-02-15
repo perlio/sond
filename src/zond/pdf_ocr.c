@@ -214,7 +214,7 @@ static gint pdf_ocr_sandwich_page(PdfDocumentPage *pdf_document_page,
 	pdf_obj *font_dict = NULL;
 	pdf_obj *font_dict_text = NULL;
 	pdf_document *doc = NULL;
-	JournalEntry entry = { 0, };
+	JournalEntry entry = {pdf_document_page, JOURNAL_TYPE_OCR};
 
 	fz_context *ctx = zond_pdf_document_get_ctx(pdf_document_page->document);
 
@@ -223,14 +223,12 @@ static gint pdf_ocr_sandwich_page(PdfDocumentPage *pdf_document_page,
 	fz_catch(ctx)
 		ERROR_MUPDF_R("pdf_lookup_page_obj", -2)
 
-	entry.pdf_document_page = pdf_document_page;
-
-	fz_try(ctx) entry.OCR.buf = pdf_ocr_get_content_stream_as_buffer(ctx, pdf_document_page->obj, errmsg);
+	fz_try(ctx) entry.ocr.buf = pdf_ocr_get_content_stream_as_buffer(ctx, pdf_document_page->obj, errmsg);
 	fz_catch(ctx) ERROR_MUPDF_R("pdf_get_content_stream_as_buffer", -2)
 
 	buf = pdf_text_filter_page(ctx, pdf_document_page->obj, 2, errmsg);
 	if (!buf) {
-		fz_drop_buffer(ctx, entry.OCR.buf);
+		fz_drop_buffer(ctx, entry.ocr.buf);
 		ERROR_S
 	}
 
@@ -242,7 +240,7 @@ static gint pdf_ocr_sandwich_page(PdfDocumentPage *pdf_document_page,
 	buf_text = pdf_ocr_process_tess_tmp(ctx, page_ref_text, ctm, errmsg);
 	if (!buf_text) {
 		fz_drop_buffer(ctx, buf);
-		fz_drop_buffer(ctx, entry.OCR.buf);
+		fz_drop_buffer(ctx, entry.ocr.buf);
 		ERROR_S_VAL(-2)
 	}
 
@@ -252,7 +250,7 @@ fz_always	( ctx )
 		fz_drop_buffer(ctx, buf_text);
 fz_catch	( ctx ) {
 		fz_drop_buffer(ctx, buf);
-		fz_drop_buffer(ctx, entry.OCR.buf);
+		fz_drop_buffer(ctx, entry.ocr.buf);
 		ERROR_MUPDF_R("fz_append_buffer", -2)
 	}
 
@@ -260,7 +258,7 @@ fz_catch	( ctx ) {
 			errmsg);
 	fz_drop_buffer(ctx, buf);
 	if (rc) {
-		fz_drop_buffer(ctx, entry.OCR.buf);
+		fz_drop_buffer(ctx, entry.ocr.buf);
 		ERROR_S
 	}
 
@@ -298,7 +296,7 @@ fz_catch	( ctx ) {
 	}fz_always( ctx )
 		pdf_drop_graft_map(ctx, graft_map);
 	fz_catch( ctx ) {
-		fz_drop_buffer(ctx, entry.OCR.buf);
+		fz_drop_buffer(ctx, entry.ocr.buf);
 		ERROR_MUPDF("fz_try (page_sandwich)")
 	}
 

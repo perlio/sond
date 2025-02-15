@@ -13,7 +13,8 @@
 
 #define ERROR_S_MESSAGE(x) ERROR_S_MESSAGE_VAL(x,-1)
 
-#define ERROR_Z { g_prefix_error( error, "%s\n", __func__ ); return -1; }
+#define ERROR_Z_VAL(y) {g_prefix_error(error, "%s\n", __func__); return y;}
+#define ERROR_Z ERROR_Z_VAL(-1)
 
 #include <gtk/gtk.h>
 

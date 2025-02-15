@@ -7,6 +7,7 @@
 #include <mupdf/pdf.h>
 
 #include "../../misc.h"
+#include "../zond_pdf_document.h"
 
 #define ERROR_MUPDF_R(x,y) { if ( errmsg ) *errmsg = add_string( *errmsg, g_strconcat( \
                         "Bei Aufruf ", __func__, ":\nBei Aufruf " x ":\n", \
@@ -43,4 +44,11 @@ pdf_processor* pdf_new_text_filter_processor(fz_context*, fz_buffer**, gint,
 		gchar**);
 
 fz_buffer* pdf_text_filter_page(fz_context*, pdf_obj*, gint, gchar**);
+
+gint pdf_annot_delete(fz_context*, pdf_annot*, GError**);
+
+gint pdf_annot_change(fz_context*, pdf_annot*, Annot, GError**);
+
+pdf_annot* pdf_annot_create(fz_context*, pdf_page*, Annot, GError**);
+
 #endif // PDF_DATEIEN_H_INCLUDED

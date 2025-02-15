@@ -55,7 +55,7 @@ void anbindung_parse_file_section(gchar const*, Anbindung*);
 
 void anbindung_build_file_section(Anbindung, gchar**);
 
-void anbindung_aktualisieren_insert_pages(ZondPdfDocument*, Anbindung*);
+void anbindung_aktualisieren_insert_pages(ZondPdfDocument const*, Anbindung*);
 
 void anbindung_aktualisieren(ZondPdfDocument*, Anbindung*);
 

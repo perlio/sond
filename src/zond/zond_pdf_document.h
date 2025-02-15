@@ -40,30 +40,32 @@ typedef struct _Annot_Text {
 	gchar* content;
 } AnnotText;
 
-typedef struct _Pdf_Document_Page_Annot {
-	PdfDocumentPage *pdf_document_page;
-	pdf_annot *annot;
+typedef struct _Annot {
 	enum pdf_annot_type type;
 	union {
 		AnnotTextMarkup annot_text_markup;
 		AnnotText annot_text;
 	};
+}Annot;
+
+typedef struct _Pdf_Document_Page_Annot {
+	PdfDocumentPage *pdf_document_page;
+	pdf_annot *pdf_annot;
+	Annot annot;
 } PdfDocumentPageAnnot;
 
 struct PagesInserted {
 	gint count;
 };
 struct AnnotCreated {
-	gint index;
+	pdf_annot* pdf_annot;
 };
 struct AnnotChanged {
-	gint index;
-	gboolean deleted;
-	enum pdf_annot_type type;
-	union {
-		AnnotTextMarkup annot_text_markup;
-		AnnotText annot_text;
-	};
+	pdf_annot* pdf_annot;
+	Annot annot;
+};
+struct AnnotDeleted {
+	Annot annot;
 };
 struct Rotate {
 	gint winkel;
@@ -76,6 +78,7 @@ typedef enum _Journal_Type {
 	JOURNAL_TYPE_PAGES_INSERTED,
 	JOURNAL_TYPE_PAGE_DELETED,
 	JOURNAL_TYPE_ANNOT_CREATED,
+	JOURNAL_TYPE_ANNOT_DELETED,
 	JOURNAL_TYPE_ANNOT_CHANGED,
 	JOURNAL_TYPE_ROTATE,
 	JOURNAL_TYPE_OCR
@@ -85,11 +88,12 @@ typedef struct _Journal_Entry {
 	PdfDocumentPage* pdf_document_page;
 	JournalType type;
 	union {
-		struct PagesInserted PagesInserted;
-		struct AnnotCreated AnnotCreated;
-		struct AnnotChanged AnnotChanged;
-		struct Rotate Rotate;
-		struct OCR OCR;
+		struct PagesInserted pages_inserted;
+		struct AnnotCreated annot_created;
+		struct AnnotChanged annot_changed;
+		struct AnnotDeleted annot_deleted;
+		struct Rotate rotate;
+		struct OCR ocr;
 	};
 } JournalEntry;
 

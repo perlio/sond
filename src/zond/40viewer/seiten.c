@@ -628,7 +628,7 @@ static gint seiten_loeschen(PdfViewer *pv, GPtrArray *arr_document_page,
 		pdf_document_page->to_be_deleted = TRUE;
 
 		//macht - sofern noch nicht geschehen - thread_pool des pv dicht, in dem Seite angezeigt wird
-		//Dann wird Seite aus pv gelöscht
+		//Dann wird Seite aus pv->arr_pages gelöscht
 		rc = viewer_foreach(pv, pdf_document_page, seiten_cb_loesche_seite,
 				NULL, &errmsg);
 		if (rc) {
@@ -970,7 +970,7 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 	//erste eingefügte Seite!
 	entry.pdf_document_page = zond_pdf_document_get_pdf_document_page(viewer_page->dd->zond_pdf_document, page_doc);
 	entry.type = JOURNAL_TYPE_PAGES_INSERTED;
-	entry.PagesInserted.count = count;
+	entry.pages_inserted.count = count;
 
 	g_array_append_val(zond_pdf_document_get_arr_journal(viewer_page->dd->zond_pdf_document), entry);
 

@@ -306,7 +306,7 @@ static gint sort_func(gconstpointer a, gconstpointer b) {
 	return 1;
 }
 
-void anbindung_aktualisieren_insert_pages(ZondPdfDocument* zond_pdf_document, Anbindung* anbindung) {
+void anbindung_aktualisieren_insert_pages(ZondPdfDocument const* zond_pdf_document, Anbindung* anbindung) {
 	GArray* arr_journal = NULL;
 	GArray* arr_insertions = NULL;
 
@@ -325,7 +325,7 @@ void anbindung_aktualisieren_insert_pages(ZondPdfDocument* zond_pdf_document, An
 
 			first_page_inserted = pdf_document_page_get_index(entry.pdf_document_page);
 			insert.page_doc = first_page_inserted;
-			insert.count = entry.PagesInserted.count;
+			insert.count = entry.pages_inserted.count;
 
 			g_array_append_val(arr_insertions, insert);
 		}
