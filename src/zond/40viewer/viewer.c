@@ -707,10 +707,11 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd, GError** err
 		PdfDocumentPage* pdfp = NULL;
 
 		pdfp = g_ptr_array_index(zond_pdf_document_get_arr_pages(dd->zond_pdf_document), i);
-		if (!pdfp->to_be_deleted) //Seitenzahl merken
+
+		if (!pdfp || !pdfp->to_be_deleted) //Seitenzahl merken
 			g_array_prepend_val(arr_pages, i);
 
-		if (pdfp->document == NULL) //PdfDocumentPage zum Löschen markiert
+		if (pdfp && (pdfp->document == NULL)) //PdfDocumentPage zum Löschen markiert
 			g_ptr_array_remove_index(zond_pdf_document_get_arr_pages(dd->zond_pdf_document), i);
 	}
 
@@ -1217,10 +1218,8 @@ static gint viewer_abfragen_pdf_punkt(PdfViewer *pv, fz_point punkt,
 	}
 
 	gtk_widget_get_size_request(pv->layout, &width, NULL);
-	x =
-			(gint) (width
-					- (viewer_page->crop.x1 - viewer_page->crop.x0)
-							* pv->zoom / 100) / 2;
+	x = (gint) (width - (viewer_page->crop.x1 - viewer_page->crop.x0)
+			* pv->zoom / 100) / 2;
 
 	if (punkt.x < x)
 		ret = -1;
@@ -1823,12 +1822,14 @@ gint viewer_foreach(PdfViewer *pdfv, PdfDocumentPage *pdf_document_page,
 
 			viewer_page = g_ptr_array_index(pv_vergleich->arr_pages, i);
 
-			if (pdf_document_page == viewer_page->pdf_document_page && cb_foreach_pv) {
-				gint rc = 0;
+			if (pdf_document_page == viewer_page->pdf_document_page) {
+				if (cb_foreach_pv) {
+					gint rc = 0;
 
-				rc = cb_foreach_pv(pv_vergleich, i, viewer_page->dd, data, errmsg);
-				if (rc)
-					ERROR_S
+					rc = cb_foreach_pv(pv_vergleich, i, viewer_page->dd, data, errmsg);
+					if (rc)
+						ERROR_S
+				}
 				dirty = TRUE;
 
 				break;
@@ -2137,7 +2138,7 @@ static gboolean cb_viewer_layout_release_button(GtkWidget *layout,
 	//Text ist markiert
 	if (pv->highlight.page[0] != -1) {
 		//Annot ist gewählt
-		if ((pv->state == 1 || pv->state == 2)) {
+		if (pv->state == 1 || pv->state == 2) {
 			if (pv->click_pdf_punkt.seite < pdf_punkt.seite) {
 				von = pv->click_pdf_punkt.seite;
 				bis = pdf_punkt.seite;

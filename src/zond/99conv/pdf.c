@@ -750,7 +750,8 @@ gint pdf_annot_change(fz_context* ctx, pdf_annot* pdf_annot, Annot annot, GError
 		}
 	} else if (annot.type == PDF_ANNOT_TEXT) {
 		fz_try(ctx) {
-			pdf_set_annot_contents(ctx, pdf_annot, annot.annot_text.content);
+			if (annot.annot_text.content)
+				pdf_set_annot_contents(ctx, pdf_annot, annot.annot_text.content);
 			pdf_set_annot_rect(ctx, pdf_annot, annot.annot_text.rect);
 		}
 		fz_catch(ctx) {
