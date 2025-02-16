@@ -1003,6 +1003,7 @@ void viewer_save_and_close(PdfViewer *pdfv) {
 				return;
 			}
 		}
+		else if (rc != GTK_RESPONSE_NO) return;
 	}
 
 	viewer_schliessen(pdfv);
