@@ -1999,8 +1999,8 @@ static gint viewer_annot_create(ViewerPageNew *viewer_page, PdfViewer *pdfv,
 		annot.annot_text_markup.arr_quads = g_array_new(FALSE, FALSE, sizeof(fz_quad));
 
 		while (pdfv->highlight.page[i] != -1) {
-			if (pdf_document_page_get_index(viewer_page->pdf_document_page) ==
-					pdfv->highlight.page[i]) {
+			if (viewer_page ==
+					g_ptr_array_index(pdfv->arr_pages, pdfv->highlight.page[i])) {
 				g_array_append_val(annot.annot_text_markup.arr_quads, pdfv->highlight.quad[i]);
 			}
 			i++;
