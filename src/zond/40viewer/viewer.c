@@ -958,13 +958,15 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 			} else if (entry.type == JOURNAL_TYPE_ANNOT_DELETED) {
 				gint rc = 0;
 				Annot annot = { 0 };
+				JournalEntry* ptr_entry = NULL;
 
 				annot = entry.annot_changed.annot;
 
 				rc = pdf_annot_delete(ctx, entry.annot_changed.pdf_annot, error);
 				if (rc) ERROR_Z
 
-				entry.annot_deleted.annot = annot;
+				ptr_entry = (JournalEntry*) &(((JournalEntry*) (void*) arr_journal->data)[i]);
+				ptr_entry->annot_deleted.annot = annot;
 			} else if (entry.type == JOURNAL_TYPE_ROTATE) {
 
 			} else if (entry.type == JOURNAL_TYPE_OCR) {
