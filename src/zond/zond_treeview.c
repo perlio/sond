@@ -2783,7 +2783,7 @@ gint zond_treeview_oeffnen_internal_viewer(Projekt *zond,
 	PdfPos pos_von = { 0 };
 	ZondPdfDocument const* zpdfd = NULL;
 
-	if ((zpdfd = zond_pdf_document_is_open(file_part)))
+	if (anbindung && (zpdfd = zond_pdf_document_is_open(file_part)))
 		anbindung_aktualisieren_insert_pages(zpdfd, anbindung);
 
 	//Neue Instanz oder bestehende?

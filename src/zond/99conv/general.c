@@ -310,6 +310,8 @@ void anbindung_aktualisieren_insert_pages(ZondPdfDocument const* zond_pdf_docume
 	GArray* arr_journal = NULL;
 	GArray* arr_insertions = NULL;
 
+	if (!anbindung) return;
+
 	arr_journal = zond_pdf_document_get_arr_journal(zond_pdf_document);
 	arr_insertions = g_array_new(FALSE, FALSE, sizeof(Inserts));
 
@@ -352,6 +354,8 @@ void anbindung_aktualisieren_insert_pages(ZondPdfDocument const* zond_pdf_docume
 
 static void anbindung_aktualisieren_delete_page(ZondPdfDocument* zond_pdf_document, Anbindung* anbindung) {
 	GArray* arr_journal = NULL;
+
+	if (!anbindung) return;
 
 	arr_journal = zond_pdf_document_get_arr_journal(zond_pdf_document);
 

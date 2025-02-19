@@ -905,14 +905,31 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 
 			if (entry.type == JOURNAL_TYPE_PAGES_INSERTED) {
 				gint index = 0;
+				gint page = 0;
 				gint rc = 0;
 				gchar* errmsg = NULL;
 				pdf_document* doc_inserted = NULL;
 
 				index = pdf_document_page_get_index(entry.pdf_document_page);
+				doc_inserted = (pdf_document*) entry.pdf_document_page->document;
 
-//				rc = pdf_copy_page(pdfv->zond->ctx, dd->zond_pdf_document,
-//						index, index + entry.PagesInserted.count, doc_inserted, -1, &errmsg);
+				//Position in pdf_doc ermitteln
+				if (index == 0) page = 0;
+				else
+					for (gint u = index - 1; u >= 0; u--) {
+						PdfDocumentPage* pdf_document_page = NULL;
+
+						pdf_document_page =
+								zond_pdf_document_get_pdf_document_page(dd->zond_pdf_document, u);
+						if (zond_pdf_document_get_pdf_doc(dd->zond_pdf_document) ==
+								zond_pdf_document_get_pdf_doc(pdf_document_page->document))
+							page++;
+					}
+
+				rc = pdf_copy_page(pdfv->zond->ctx, doc_inserted,
+						0, entry.pages_inserted.count,
+						zond_pdf_document_get_pdf_doc(dd->zond_pdf_document),
+						page, &errmsg);
 				if (rc) {
 					if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\n%s", __func__, errmsg);
 					g_free(errmsg);
@@ -920,11 +937,11 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 					return -1;
 				}
 
-				for (gint i = index; i < index + entry.pages_inserted.count; i++) {
+				for (gint u = index; u < index + entry.pages_inserted.count; u++) {
 					PdfDocumentPage* pdf_document_page = NULL;
 
-//					pdf_document_page = zond_pdf_document_get_pdf_document_page(entry.pdf_document_page, i);
-//					pdf_document_page->document = doc_inserted;
+					pdf_document_page = zond_pdf_document_get_pdf_document_page(dd->zond_pdf_document, u);
+					pdf_document_page->document = (ZondPdfDocument*) doc_inserted;
 					pdf_document_page->to_be_deleted = TRUE;
 				}
 			} else if (entry.type == JOURNAL_TYPE_PAGE_DELETED)
