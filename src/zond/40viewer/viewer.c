@@ -750,7 +750,9 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd, GError** err
 	else g_array_unref(arr_pages);
 
 	zond_pdf_document_mutex_lock(dd->zond_pdf_document);
-	rc = zond_pdf_document_save(dd->zond_pdf_document, error);
+	rc = pdf_save(zond_pdf_document_get_ctx(dd->zond_pdf_document),
+			zond_pdf_document_get_pdf_doc(dd->zond_pdf_document),
+			zond_pdf_document_get_file_part(dd->zond_pdf_document), error);
 	zond_pdf_document_mutex_unlock(dd->zond_pdf_document);
 	if (rc) {
 		gint ret = 0;
@@ -867,6 +869,7 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 				} else if (entry.type == JOURNAL_TYPE_ANNOT_DELETED) {
 					pdf_annot* pdf_annot = NULL;
 					Annot annot = { 0 };
+					JournalEntry* ptr_entry = NULL;
 
 					pdf_annot = pdf_annot_create(ctx, entry.pdf_document_page->page,
 							entry.annot_deleted.annot, error);
@@ -874,8 +877,9 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 
 					//Trick, um annot wiederzufinden:
 					annot = entry.annot_deleted.annot;
-					entry.annot_changed.pdf_annot = pdf_annot;
-					entry.annot_changed.annot = annot;
+					ptr_entry = (JournalEntry*) &(((JournalEntry*) (void*) arr_journal->data)[i]);
+					ptr_entry->annot_changed.pdf_annot = pdf_annot;
+					ptr_entry->annot_changed.annot = annot;
 				} else if (entry.type == JOURNAL_TYPE_ROTATE) {
 
 				} else if (entry.type == JOURNAL_TYPE_OCR) {
