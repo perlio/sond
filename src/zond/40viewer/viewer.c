@@ -723,14 +723,14 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd, GError** err
 					zond_pdf_document_get_pdf_doc(dd->zond_pdf_document),
 					arr_pages->len, (gint*) arr_pages->data);
 
-		fz_always(zond_pdf_document_get_ctx(dd->zond_pdf_document))
+		fz_always(zond_pdf_document_get_ctx(dd->zond_pdf_document)) {
 			g_array_unref(arr_pages);
-
+			zond_pdf_document_mutex_unlock(dd->zond_pdf_document);
+		}
 		fz_catch(zond_pdf_document_get_ctx(dd->zond_pdf_document)) {
 			gint ret = 0;
 			GError* error_int = NULL;
 
-			zond_pdf_document_mutex_unlock(dd->zond_pdf_document);
 			if (error) *error = g_error_new( g_quark_from_static_string("mupdf"),
 					fz_caught(zond_pdf_document_get_ctx(dd->zond_pdf_document)),
 					"%s\n%s", __func__,
@@ -749,6 +749,7 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd, GError** err
 	}
 	else g_array_unref(arr_pages);
 
+	zond_pdf_document_mutex_lock(dd->zond_pdf_document);
 	rc = zond_pdf_document_save(dd->zond_pdf_document, error);
 	zond_pdf_document_mutex_unlock(dd->zond_pdf_document);
 	if (rc) {
@@ -2013,6 +2014,7 @@ static gint viewer_annot_create(ViewerPageNew *viewer_page, PdfViewer *pdfv,
 		annot.annot_text.rect.x1 = rect.x0 + 20;
 		annot.annot_text.rect.y1 = rect.y0 + 20;
 
+		annot.annot_text.rect = viewer_rotate_rect( viewer_page, annot.annot_text.rect );
 		annot.annot_text.rect = viewer_clamp_icon_rect( viewer_page, annot.annot_text.rect );
 	}
 
