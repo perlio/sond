@@ -344,7 +344,13 @@ void anbindung_aktualisieren_insert_pages(ZondPdfDocument const* zond_pdf_docume
 		if (insert.page_doc < anbindung->von.seite) {
 			anbindung->von.seite += insert.count;
 			if (!anbindung_is_pdf_punkt(*anbindung)) anbindung->bis.seite += insert.count;
-		} else if (insert.page_doc < anbindung->bis.seite) anbindung->bis.seite += insert.count;
+		} else if (insert.page_doc == anbindung->von.seite) { //Randlage Anfang
+
+		}
+		else if (insert.page_doc <= anbindung->bis.seite) anbindung->bis.seite += insert.count;
+		else if (insert.page_doc == anbindung->bis.seite + 1) { //Randlage Ende
+
+		}
 	}
 
 	g_array_unref(arr_insertions);

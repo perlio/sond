@@ -26,12 +26,6 @@
 
 #include "../misc.h"
 
-typedef enum {
-	PROP_FILE_PART = 1,
-	PROP_PASSWORD,
-	N_PROPERTIES
-} ZondPdfDocumentProperty;
-
 typedef struct {
 	GMutex mutex_doc;
 	fz_context *ctx;
@@ -56,48 +50,6 @@ gint pdf_document_page_get_index(PdfDocumentPage* pdf_document_page) {
 	g_ptr_array_find(arr_pages, pdf_document_page, &index);
 
 	return (gint) index;
-}
-
-static void zond_pdf_document_set_property(GObject *object, guint property_id,
-		const GValue *value, GParamSpec *pspec) {
-	ZondPdfDocument *self = ZOND_PDF_DOCUMENT(object);
-	ZondPdfDocumentPrivate *priv = zond_pdf_document_get_instance_private(self);
-
-	switch ((ZondPdfDocumentProperty) property_id) {
-	case PROP_FILE_PART:
-		priv->file_part = g_strdup(g_value_get_string(value));
-		break;
-
-	case PROP_PASSWORD:
-		priv->password = g_strdup(g_value_get_string(value));
-		break;
-
-	default:
-		/* We don't have any other property... */
-		G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
-		break;
-	}
-}
-
-static void zond_pdf_document_get_property(GObject *object, guint property_id,
-		GValue *value, GParamSpec *pspec) {
-	ZondPdfDocument *self = ZOND_PDF_DOCUMENT(object);
-	ZondPdfDocumentPrivate *priv = zond_pdf_document_get_instance_private(self);
-
-	switch ((ZondPdfDocumentProperty) property_id) {
-	case PROP_FILE_PART:
-		g_value_set_string(value, priv->file_part);
-		break;
-
-	case PROP_PASSWORD:
-		g_value_set_string(value, priv->password);
-		break;
-
-	default:
-		/* We don't have any other property... */
-		G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
-		break;
-	}
 }
 
 static void zond_pdf_document_close_context(fz_context *ctx) {
@@ -363,27 +315,11 @@ static gint zond_pdf_document_init_pages(ZondPdfDocument *self, gint von,
 }
 
 static void zond_pdf_document_class_init(ZondPdfDocumentClass *klass) {
-	GParamSpec *obj_properties[N_PROPERTIES] = { NULL, };
-
 	klass->arr_pdf_documents = g_ptr_array_new();
 
 	GObjectClass *object_class = G_OBJECT_CLASS(klass);
 
 	object_class->finalize = zond_pdf_document_finalize;
-
-	object_class->set_property = zond_pdf_document_set_property;
-	object_class->get_property = zond_pdf_document_get_property;
-
-	obj_properties[PROP_FILE_PART] = g_param_spec_string("file-part", "gchar*",
-			"Pfad zur Datei.",
-			NULL, G_PARAM_CONSTRUCT | G_PARAM_READWRITE);
-
-	obj_properties[PROP_PASSWORD] = g_param_spec_string("password", "gchar*",
-			"Passwort.",
-			NULL, G_PARAM_CONSTRUCT_ONLY | G_PARAM_READWRITE);
-
-	g_object_class_install_properties(object_class, N_PROPERTIES,
-			obj_properties);
 
 	return;
 }
