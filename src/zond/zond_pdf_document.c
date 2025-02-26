@@ -467,8 +467,7 @@ zond_pdf_document_open(const gchar *file_part, gint von, gint bis,
 		return g_object_ref(zond_pdf_document);
 	}
 
-	zond_pdf_document = g_object_new( ZOND_TYPE_PDF_DOCUMENT, "file-part",
-			file_part, NULL);
+	zond_pdf_document = g_object_new( ZOND_TYPE_PDF_DOCUMENT, NULL);
 
 	priv = zond_pdf_document_get_instance_private(zond_pdf_document);
 
@@ -481,6 +480,8 @@ zond_pdf_document_open(const gchar *file_part, gint von, gint bis,
 
 		return NULL;
 	}
+
+	priv->file_part = g_strdup(file_part);
 
 	rc = pdf_open_and_authen_document(priv->ctx, TRUE, FALSE, priv->file_part,
 			&priv->password, &priv->doc, &priv->auth, &error);

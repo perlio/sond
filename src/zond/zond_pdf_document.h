@@ -56,6 +56,9 @@ typedef struct _Pdf_Document_Page_Annot {
 
 struct PagesInserted {
 	gint count;
+	gint pos_dd; //-1: linke Seite; 0 mittendrin; 1: rechte Seite
+	gint size_dd_pages; //ganze pages bis zur anderen Seite
+	gint size_dd_index; //von/bis-index der letzten page der anderen Seite
 };
 struct AnnotCreated {
 	pdf_annot* pdf_annot;

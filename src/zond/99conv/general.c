@@ -292,19 +292,8 @@ void anbindung_build_file_section(Anbindung anbindung, gchar **section) {
 
 typedef struct _Inserts {
 	gint page_doc;
-	gint count;
+	JournalEntry entry;
 } Inserts;
-
-static gint sort_func(gconstpointer a, gconstpointer b) {
-	Inserts* A = (Inserts*) a;
-	Inserts* B = (Inserts*) b;
-
-	if (A->page_doc < B->page_doc) return -1;
-	else if (A->page_doc == B->page_doc) return 0;
-	//else if (A->page_doc > B->page_doc)
-
-	return 1;
-}
 
 void anbindung_aktualisieren_insert_pages(ZondPdfDocument const* zond_pdf_document, Anbindung* anbindung) {
 	GArray* arr_journal = NULL;
@@ -322,35 +311,57 @@ void anbindung_aktualisieren_insert_pages(ZondPdfDocument const* zond_pdf_docume
 		entry = g_array_index(arr_journal, JournalEntry, i);
 
 		if (entry.type == JOURNAL_TYPE_PAGES_INSERTED) {
-			gint first_page_inserted = 0;
 			Inserts insert = { 0 };
+			gint u = 0;
 
-			first_page_inserted = pdf_document_page_get_index(entry.pdf_document_page);
-			insert.page_doc = first_page_inserted;
-			insert.count = entry.pages_inserted.count;
+			insert.page_doc = pdf_document_page_get_index(entry.pdf_document_page);
+			insert.entry = entry;
 
-			g_array_append_val(arr_insertions, insert);
+			//direkt an richtiger Stelle einsortieren
+			for (u = 0; u <= arr_insertions->len; u++) {
+				Inserts insert_loop = { 0 };
+
+				if (u == arr_insertions->len) break;
+
+				insert_loop = g_array_index(arr_insertions, Inserts, u);
+				if (insert.page_doc  <= insert_loop.page_doc) break;
+			}
+
+			g_array_insert_val(arr_insertions, u, insert);
 		}
 	}
-
-	//dann sortieren
-	g_array_sort(arr_insertions, sort_func);
 
 	//dann neu durchlaufen lassen und Anbindung ändern
 	for (gint i = 0; i < arr_insertions->len; i++) {
 		Inserts insert = { 0 };
+		gboolean ende_versch = FALSE;
 
 		insert = g_array_index(arr_insertions, Inserts, i);
 		if (insert.page_doc < anbindung->von.seite) {
-			anbindung->von.seite += insert.count;
-			if (!anbindung_is_pdf_punkt(*anbindung)) anbindung->bis.seite += insert.count;
+			anbindung->von.seite += insert.entry.pages_inserted.count;
+			ende_versch = TRUE;
 		} else if (insert.page_doc == anbindung->von.seite) { //Randlage Anfang
+			if (!((insert.entry.pages_inserted.pos_dd == -1) && //linker Rand
+					//dann prüfen ob dd, welches eingefügt wurde, genauso groß
+					(insert.entry.pages_inserted.size_dd_pages == //_is_pdf_punkt is ejal
+					anbindung->bis.seite - anbindung->von.seite) &&
+					(insert.entry.pages_inserted.size_dd_index == anbindung->bis.index)))
+				anbindung->von.seite += insert.entry.pages_inserted.count; //auch Anfang verschieben
 
+			ende_versch = TRUE;
 		}
-		else if (insert.page_doc <= anbindung->bis.seite) anbindung->bis.seite += insert.count;
+		else if (insert.page_doc <= anbindung->bis.seite)
+			ende_versch = TRUE;
 		else if (insert.page_doc == anbindung->bis.seite + 1) { //Randlage Ende
-
+			if (insert.entry.pages_inserted.pos_dd == 1 &&
+					insert.entry.pages_inserted.size_dd_pages == //_is_pdf_punkt is ejal
+					anbindung->bis.seite - anbindung->von.seite &&
+					insert.entry.pages_inserted.size_dd_index == anbindung->von.index)
+				ende_versch = TRUE;
 		}
+
+		if (ende_versch && !anbindung_is_pdf_punkt(*anbindung))
+			anbindung->bis.seite += insert.entry.pages_inserted.count;
 	}
 
 	g_array_unref(arr_insertions);

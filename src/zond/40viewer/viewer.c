@@ -484,9 +484,8 @@ void viewer_refresh_layout(PdfViewer *pv, gint pos) {
 		viewer_page = g_ptr_array_index(pv->arr_pages, u);
 		if (viewer_page->image_page)
 			gtk_layout_move(GTK_LAYOUT(pv->layout), viewer_page->image_page,
-					(gint) (x_max
-							- (viewer_page->crop.x1 - viewer_page->crop.x0)
-									* pv->zoom / 100) / 2, viewer_page->y_pos);
+					(gint) (x_max - (viewer_page->crop.x1 - viewer_page->crop.x0)
+					* pv->zoom / 100) / 2, viewer_page->y_pos);
 	}
 
 	return;
