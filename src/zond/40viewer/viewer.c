@@ -799,6 +799,7 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 		GPtrArray* arr_pages = NULL;
 		fz_context *ctx = NULL;
 		GArray* arr_tmp = NULL;
+		gboolean changed = FALSE;
 
 		//prüfen, ob dd überhaupt schmutzig
 		if (!viewer_dd_is_dirty(dd))
@@ -898,8 +899,12 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 			}
 		}
 
+		//Projekt-Zustand (geändert oder nicht) zwischenspeichertn
+		changed = pdfv->zond->dbase_zond->changed;
 		rc = viewer_do_save_dd(pdfv, dd, error);
 		if (rc) ERROR_Z
+		//ggf. zurücksetzen
+		if (!changed) project_reset_changed(pdfv->zond, FALSE);
 
 		//verbliebenes arr_journal leeren
 		g_array_remove_range(arr_journal, 0, arr_journal->len);
