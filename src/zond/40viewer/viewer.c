@@ -798,6 +798,7 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 		gint dd_bis = 0;
 		GPtrArray* arr_pages = NULL;
 		fz_context *ctx = NULL;
+		GArray* arr_tmp = NULL;
 
 		//prüfen, ob dd überhaupt schmutzig
 		if (!viewer_dd_is_dirty(dd))
@@ -806,6 +807,8 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 		ctx = zond_pdf_document_get_ctx(dd->zond_pdf_document);
 		arr_pages = zond_pdf_document_get_arr_pages(dd->zond_pdf_document);
 		arr_journal = zond_pdf_document_get_arr_journal(dd->zond_pdf_document);
+
+		arr_tmp = g_array_new(FALSE, FALSE, sizeof(JournalEntry));
 
 		//dann Änderungen rausrechnen, später wieder dazu...
 		dd_von = pdf_document_page_get_index(dd->first_page);
@@ -884,24 +887,31 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 				} else if (entry.type == JOURNAL_TYPE_OCR) {
 
 				}
+
+				g_array_append_val(arr_tmp, entry);
+				g_array_remove_index(arr_journal, i);
 			}
-			//alle anderen Änderungen werden gespeichert und sind dann keine mehr
 			else {
 				//wenn innerhalb und zu löschen: markieren - PdfDocumentPage muß gelöscht werden
 				if (entry.type == JOURNAL_TYPE_PAGE_DELETED)
 					entry.pdf_document_page->document = NULL;
-				g_array_remove_index(arr_journal, i); //entry aus Journal entfernen
 			}
 		}
 
 		rc = viewer_do_save_dd(pdfv, dd, error);
 		if (rc) ERROR_Z
 
-		//noch vorhandene Änderungen wieder einspielen
-		//zunächst entries ordnen
-		for (gint i = 0; i < arr_journal->len; i++) {
-			JournalEntry entry = g_array_index(arr_journal, JournalEntry, i);
+		//verbliebenes arr_journal leeren
+		g_array_remove_range(arr_journal, 0, arr_journal->len);
 
+		//noch vorhandene Änderungen wieder einspielen
+		for (gint i = 0; i < arr_tmp->len; i++) {
+			JournalEntry entry = g_array_index(arr_tmp, JournalEntry, i);
+
+			//zurück ins arr_journal kopieren
+			g_array_append_val(arr_journal, entry);
+
+			//und jetzt rückgängig gemachte Änderungen wieder herstellen
 			if (entry.type == JOURNAL_TYPE_PAGES_INSERTED) {
 				gint index = 0;
 				gint page = 0;

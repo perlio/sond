@@ -1671,7 +1671,6 @@ gint zond_dbase_get_arr_sections(ZondDBase* zond_dbase, gchar const* file_part,
 	g_array_set_clear_func(*arr_sections, (GDestroyNotify) section_free);
 
 	do {
-		gint rc = 0;
 		Section section = { 0, };
 
 		rc = sqlite3_step(stmt[0]);

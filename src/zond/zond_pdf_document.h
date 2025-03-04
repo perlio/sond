@@ -90,6 +90,7 @@ typedef enum _Journal_Type {
 typedef struct _Journal_Entry {
 	PdfDocumentPage* pdf_document_page;
 	JournalType type;
+	gboolean saved;
 	union {
 		struct PagesInserted pages_inserted;
 		struct AnnotCreated annot_created;
