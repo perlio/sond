@@ -114,7 +114,7 @@ static void zond_pdf_document_finalize(GObject *self) {
 	return;
 }
 
-static void zond_pdf_document_page_free(PdfDocumentPage *pdf_document_page) {
+void zond_pdf_document_page_free(PdfDocumentPage *pdf_document_page) {
 	if (!pdf_document_page)
 		return;
 

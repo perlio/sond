@@ -109,6 +109,8 @@ struct _ZondPdfDocumentClass {
 
 gint pdf_document_page_get_index(PdfDocumentPage*);
 
+void zond_pdf_document_page_free(PdfDocumentPage*);
+
 void zond_pdf_document_page_load_annots(PdfDocumentPage*);
 
 gint zond_pdf_document_load_page(PdfDocumentPage*, gchar**);

@@ -629,6 +629,7 @@ static gint seiten_loeschen(PdfViewer *pv, GPtrArray *arr_document_page,
 
 		//macht - sofern noch nicht geschehen - thread_pool des pv dicht, in dem Seite angezeigt wird
 		//Dann wird Seite aus pv->arr_pages gelöscht
+		//ToDo: Vielleicht Schließen des thread-pools nicht erforderlich?
 		rc = viewer_foreach(pv, pdf_document_page, seiten_cb_loesche_seite,
 				NULL, &errmsg);
 		if (rc) {
@@ -718,7 +719,7 @@ typedef struct _DataInsert {
 	gboolean after_last;
 } DataInsert;
 
-static gint seiten_cb_einfuegen(PdfViewer *pv, gint page_pv,
+static gint seiten_einfuegen_foreach(PdfViewer *pv, gint page_pv,
 		DisplayedDocument *dd, gpointer data, gchar **errmsg) {
 	ViewerPageNew *viewer_page = NULL;
 
@@ -984,7 +985,7 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 	//viewer_page->pdf_document_page ist - wenn nicht Einfügen nach letzter Seite -
 	//im zond_pdf_document nach hinten gerutscht
 	viewer_foreach(pv, viewer_page->pdf_document_page,
-			seiten_cb_einfuegen, &data_insert, &errmsg);
+			seiten_einfuegen_foreach, &data_insert, &errmsg);
 
 	seiten_refresh_layouts(pv->zond->arr_pv);
 

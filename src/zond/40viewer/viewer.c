@@ -705,12 +705,11 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd, GError** err
 	for (gint i = zond_pdf_document_get_number_of_pages(dd->zond_pdf_document) -1; i >= 0; i--) {
 		PdfDocumentPage* pdfp = NULL;
 
-		pdfp = g_ptr_array_index(zond_pdf_document_get_arr_pages(dd->zond_pdf_document), i);
+		pdfp = zond_pdf_document_get_pdf_document_page(dd->zond_pdf_document, i);
 
-		if (!pdfp || !pdfp->to_be_deleted) //Seitenzahl merken
+		if (pdfp && !pdfp->to_be_deleted) //Seitenzahl merken
 			g_array_prepend_val(arr_pages, i);
-
-		if (pdfp && (pdfp->document == NULL)) //PdfDocumentPage zum Löschen markiert
+		else if (!pdfp) //PdfDocumentPage zum Löschen markiert
 			g_ptr_array_remove_index(zond_pdf_document_get_arr_pages(dd->zond_pdf_document), i);
 	}
 
@@ -894,15 +893,20 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 			}
 			else {
 				//wenn innerhalb und zu löschen: markieren - PdfDocumentPage muß gelöscht werden
-				if (entry.type == JOURNAL_TYPE_PAGE_DELETED)
-					entry.pdf_document_page->document = NULL;
+				if (entry.type == JOURNAL_TYPE_PAGE_DELETED) {
+					zond_pdf_document_page_free(entry.pdf_document_page);
+					//auf NULL setzen; Position im array bleibt!
+					((arr_pages)->pdata)[page_doc] = NULL;
+				}
 			}
 		}
 
 		//Projekt-Zustand (geändert oder nicht) zwischenspeichertn
 		changed = pdfv->zond->dbase_zond->changed;
+
 		rc = viewer_do_save_dd(pdfv, dd, error);
 		if (rc) ERROR_Z
+
 		//ggf. zurücksetzen
 		if (!changed) project_reset_changed(pdfv->zond, FALSE);
 
@@ -956,10 +960,10 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 
 					pdf_document_page = zond_pdf_document_get_pdf_document_page(dd->zond_pdf_document, u);
 					pdf_document_page->document = (ZondPdfDocument*) doc_inserted;
-					pdf_document_page->to_be_deleted = TRUE;
+					pdf_document_page->to_be_deleted = FALSE;
 				}
 			} else if (entry.type == JOURNAL_TYPE_PAGE_DELETED)
-				entry.pdf_document_page->to_be_deleted = FALSE;
+				entry.pdf_document_page->to_be_deleted = TRUE;
 			else if (entry.type == JOURNAL_TYPE_ANNOT_CREATED) {
 				pdf_annot* pdf_annot = NULL;
 				PdfDocumentPageAnnot* pdf_document_page_annot = NULL;

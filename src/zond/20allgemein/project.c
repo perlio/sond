@@ -404,7 +404,7 @@ gint projekt_schliessen(Projekt *zond, gchar **errmsg) {
 			GTK_TEXT_VIEW(zond->textview));
 	gtk_text_buffer_set_text(buffer, "", -1);
 
-	//Text-Fenster verstecken (falls nicht schn ist, Überprüfung aber überflüssig
+	//Text-Fenster verstecken (falls nicht schon ist, Überprüfung aber überflüssig
 	g_signal_emit_by_name(zond->textview_window, "delete-event", zond, &ret);
 
 	zond->node_id_act = 0;
@@ -441,7 +441,7 @@ gint projekt_schliessen(Projekt *zond, gchar **errmsg) {
 	gint res = g_remove(working_copy);
 	if (res == -1)
 		display_message(zond->app_window, "Fehler beim Löschen der "
-				"temporären Datenbank:\n", strerror( errno), NULL);
+				"temporären Datenbank:\n", strerror(errno), NULL);
 	g_free(working_copy);
 
 	gtk_header_bar_set_title(
