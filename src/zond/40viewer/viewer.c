@@ -462,7 +462,7 @@ void viewer_refresh_layout(PdfViewer *pv, gint pos) {
 
 		y_pos = viewer_page->y_pos
 				+ (viewer_page->crop.y1 - viewer_page->crop.y0) * pv->zoom
-						/ 100+ PAGE_SPACE;
+						/ 100 + PAGE_SPACE;
 	}
 
 	for (gint u = pos; u < pv->arr_pages->len; u++) {
@@ -473,7 +473,7 @@ void viewer_refresh_layout(PdfViewer *pv, gint pos) {
 		viewer_page->y_pos = (gint) (y_pos + .5);
 
 		y_pos += (viewer_page->crop.y1 - viewer_page->crop.y0) * pv->zoom
-				/ 100+ PAGE_SPACE;
+				/ 100 + PAGE_SPACE;
 	}
 
 	viewer_set_layout_size(pv, x_max, y_pos);
@@ -484,7 +484,7 @@ void viewer_refresh_layout(PdfViewer *pv, gint pos) {
 		viewer_page = g_ptr_array_index(pv->arr_pages, u);
 		if (viewer_page->image_page)
 			gtk_layout_move(GTK_LAYOUT(pv->layout), viewer_page->image_page,
-					(gint) (x_max - (viewer_page->crop.x1 - viewer_page->crop.x0)
+					(gint) ((x_max - (viewer_page->crop.x1 - viewer_page->crop.x0))
 					* pv->zoom / 100) / 2, viewer_page->y_pos);
 	}
 

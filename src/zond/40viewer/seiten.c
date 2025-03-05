@@ -412,16 +412,16 @@ static gint seiten_drehen_pdf(PdfDocumentPage *pdf_document_page, gint winkel,
 
 	page_obj = pdf_document_page->obj;
 
-	fz_try( ctx )
+	fz_try(ctx)
 		rotate_obj = pdf_dict_get_inheritable(ctx, page_obj, PDF_NAME(Rotate));
-fz_catch	( ctx )
+	fz_catch(ctx)
 		ERROR_MUPDF("pdf_dict_get_inheritable")
 
 	if (!rotate_obj) {
 		rotate_obj = pdf_new_int(ctx, (int64_t) winkel);
-		fz_try( ctx )
+		fz_try(ctx)
 			pdf_dict_put_drop(ctx, page_obj, PDF_NAME(Rotate), rotate_obj);
-fz_catch		( ctx )
+		fz_catch(ctx)
 			ERROR_MUPDF("pdf_dict_put_drop")
 	} else {
 		rotate = pdf_to_int(ctx, rotate_obj);
