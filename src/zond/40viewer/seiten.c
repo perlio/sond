@@ -469,6 +469,11 @@ static gint seiten_drehen(PdfViewer *pv, GPtrArray *arr_document_page,
 				pdf_document_page->stext_page);
 		pdf_document_page->stext_page = NULL;
 
+		//page_annots müssen neu geladen werden, weil quads und rects sonst verdreht sind
+		g_ptr_array_remove_range(pdf_document_page->arr_annots,
+				0, pdf_document_page->arr_annots->len);
+		zond_pdf_document_page_load_annots(pdf_document_page);
+
 		pdf_document_page->thread &= 2;
 
 		rc = viewer_foreach(pv, pdf_document_page, seiten_drehen_foreach,
