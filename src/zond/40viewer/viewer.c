@@ -564,8 +564,12 @@ static void viewer_create_layout(PdfViewer *pv) {
 
 static gboolean viewer_dd_is_dirty(DisplayedDocument* dd) {
 	GArray* arr_journal = NULL;
+	gint dd_first_page = 0;
+	gint dd_last_page = 0;
 
 	arr_journal = zond_pdf_document_get_arr_journal(dd->zond_pdf_document);
+	dd_first_page = pdf_document_page_get_index(dd->first_page);
+	dd_last_page = pdf_document_page_get_index(dd->last_page);
 
 	for ( gint i = 0; i < arr_journal->len; i++) {
 		JournalEntry entry = { 0 };
@@ -574,8 +578,7 @@ static gboolean viewer_dd_is_dirty(DisplayedDocument* dd) {
 		entry = g_array_index(arr_journal, JournalEntry, i);
 		page_doc = pdf_document_page_get_index(entry.pdf_document_page);
 
-		if (page_doc >= pdf_document_page_get_index(dd->first_page) &&
-				page_doc <= pdf_document_page_get_index(dd->last_page))
+		if (page_doc >= dd_first_page && page_doc <= dd_last_page)
 			return TRUE;
 	}
 
@@ -707,9 +710,9 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd, GError** err
 
 		pdfp = zond_pdf_document_get_pdf_document_page(dd->zond_pdf_document, i);
 
-		if (pdfp && !pdfp->to_be_deleted) //Seitenzahl merken
+		if (!pdfp || !pdfp->to_be_deleted) //Seitenzahl merken
 			g_array_prepend_val(arr_pages, i);
-		else if (!pdfp) //PdfDocumentPage zum Löschen markiert
+		else //PdfDocumentPage zum Löschen markiert
 			g_ptr_array_remove_index(zond_pdf_document_get_arr_pages(dd->zond_pdf_document), i);
 	}
 
@@ -890,14 +893,6 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 
 				g_array_append_val(arr_tmp, entry);
 				g_array_remove_index(arr_journal, i);
-			}
-			else {
-				//wenn innerhalb und zu löschen: markieren - PdfDocumentPage muß gelöscht werden
-				if (entry.type == JOURNAL_TYPE_PAGE_DELETED) {
-					zond_pdf_document_page_free(entry.pdf_document_page);
-					//auf NULL setzen; Position im array bleibt!
-					((arr_pages)->pdata)[page_doc] = NULL;
-				}
 			}
 		}
 
