@@ -16,6 +16,8 @@ G_BEGIN_DECLS
 G_DECLARE_DERIVABLE_TYPE(ZondPdfDocument, zond_pdf_document, ZOND, PDF_DOCUMENT,
 		GObject)
 
+typedef struct _Pdf_Viewer PdfViewer;
+
 typedef struct _Pdf_Document_Page {
 	ZondPdfDocument *document; //erhält keine ref - muß das mal mit dem const kapieren...
 	pdf_obj *obj;
@@ -25,7 +27,7 @@ typedef struct _Pdf_Document_Page {
 	fz_display_list *display_list;
 	fz_stext_page *stext_page;
 	gint thread;
-	gpointer thread_pv;
+	PdfViewer* thread_pv;
 	GPtrArray *arr_annots;
 	gboolean to_be_deleted;
 } PdfDocumentPage;
@@ -48,9 +50,14 @@ typedef struct _Annot {
 	};
 }Annot;
 
+typedef struct _Zond_Annot_Obj {
+	gint ref;
+	pdf_obj* obj;
+} ZondAnnotObj;
+
 typedef struct _Pdf_Document_Page_Annot {
-	PdfDocumentPage *pdf_document_page;
-	pdf_annot *pdf_annot;
+	PdfDocumentPage *pdf_document_page; //keine ref!
+	ZondAnnotObj* zond_annot_obj;
 	Annot annot;
 } PdfDocumentPageAnnot;
 
@@ -60,14 +67,8 @@ struct PagesInserted {
 	gint size_dd_pages; //ganze pages bis zur anderen Seite
 	gint size_dd_index; //von/bis-index der letzten page der anderen Seite
 };
-struct AnnotCreated {
-	pdf_annot* pdf_annot;
-};
 struct AnnotChanged {
-	pdf_annot* pdf_annot;
-	Annot annot;
-};
-struct AnnotDeleted {
+	ZondAnnotObj* zond_annot_obj;
 	Annot annot;
 };
 struct Rotate {
@@ -90,12 +91,9 @@ typedef enum _Journal_Type {
 typedef struct _Journal_Entry {
 	PdfDocumentPage* pdf_document_page;
 	JournalType type;
-	gboolean saved;
 	union {
 		struct PagesInserted pages_inserted;
-		struct AnnotCreated annot_created;
 		struct AnnotChanged annot_changed;
-		struct AnnotDeleted annot_deleted;
 		struct Rotate rotate;
 		struct OCR ocr;
 	};
@@ -106,6 +104,18 @@ struct _ZondPdfDocumentClass {
 
 	GPtrArray *arr_pdf_documents;
 };
+
+ZondAnnotObj* zond_annot_obj_new(pdf_obj*);
+
+ZondAnnotObj* zond_annot_obj_ref(ZondAnnotObj*);
+
+void zond_drop_annot_obj(ZondAnnotObj*);
+
+pdf_obj* zond_annot_obj_get_obj(ZondAnnotObj*);
+
+void zond_annot_obj_set_obj(ZondAnnotObj*, pdf_obj*);
+
+pdf_annot* pdf_document_page_annot_get_pdf_annot(PdfDocumentPageAnnot*);
 
 gint pdf_document_page_get_index(PdfDocumentPage*);
 

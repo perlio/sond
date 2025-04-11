@@ -456,7 +456,7 @@ static gint seiten_drehen(PdfViewer *pv, GPtrArray *arr_document_page,
 		if (rc == -1) ERROR_S
 
 		while (pdf_document_page->thread & 1)
-			viewer_transfer_rendered((PdfViewer*) pdf_document_page->thread_pv,
+			viewer_transfer_rendered(pdf_document_page->thread_pv,
 					TRUE);
 
 		fz_drop_display_list(

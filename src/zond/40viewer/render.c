@@ -229,13 +229,13 @@ static gint render_display_list(fz_context *ctx,
 
 	fz_try( ctx )
 		display_list = fz_new_display_list(ctx, pdf_document_page->rect);
-fz_catch	( ctx )
+	fz_catch(ctx)
 		ERROR_MUPDF("fz_new_display_list")
 
 	//list_device für die Seite erzeugen
-	fz_try( ctx )
+	fz_try(ctx)
 		list_device = fz_new_list_device(ctx, display_list);
-fz_catch	( ctx ) {
+	fz_catch(ctx) {
 		fz_drop_display_list(ctx, display_list);
 		ERROR_MUPDF("fz_new_list_device")
 	}
@@ -245,11 +245,11 @@ fz_catch	( ctx ) {
 	fz_try( ctx )
 		pdf_run_page(ctx, pdf_document_page->page, list_device, fz_identity,
 				NULL);
-fz_always	( ctx ) {
+	fz_always(ctx) {
 		zond_pdf_document_mutex_unlock(pdf_document_page->document);
 		fz_close_device(ctx, list_device);
 		fz_drop_device(ctx, list_device);
-	}fz_catch( ctx ) {
+	}fz_catch(ctx) {
 		fz_drop_display_list(ctx, display_list);
 		ERROR_MUPDF("fz_drop_display_list")
 	}

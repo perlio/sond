@@ -216,8 +216,6 @@ gint pdf_open_and_authen_document(fz_context *ctx, gboolean prompt,
 
 		fz_try( ctx )
 			doc_disk = pdf_open_document(ctx, rel_path);
-		fz_always( ctx )
-			g_free(rel_path);
 		fz_catch( ctx ) {
 			if (error)
 				*error = g_error_new(g_quark_from_static_string("MUPDF"),
@@ -225,7 +223,7 @@ gint pdf_open_and_authen_document(fz_context *ctx, gboolean prompt,
 						fz_caught_message(ctx));
 
 			if (!read_only) {
-				if (remove(fz_stream_filename(ctx, doc_disk->file))) {
+				if (remove(rel_path)) {
 					if (error) {
 						gchar *error_text = NULL;
 
@@ -241,8 +239,11 @@ gint pdf_open_and_authen_document(fz_context *ctx, gboolean prompt,
 				}
 			}
 
+			g_free(rel_path);
+
 			return -1;
 		}
+		g_free(rel_path);
 	}
 
 	if (password)
@@ -735,7 +736,8 @@ gint pdf_annot_delete(fz_context* ctx, pdf_annot* pdf_annot, GError** error) {
 	return 0;
 }
 
-gint pdf_annot_change(fz_context* ctx, pdf_annot* pdf_annot, Annot annot, GError** error) {
+gint pdf_annot_change(fz_context* ctx, pdf_annot* pdf_annot,
+		Annot annot, GError** error) {
 	if (annot.type == PDF_ANNOT_HIGHLIGHT || annot.type == PDF_ANNOT_UNDERLINE) {
 		for (gint i = 0; i < annot.annot_text_markup.arr_quads->len; i++) {
 			fz_try( ctx )
