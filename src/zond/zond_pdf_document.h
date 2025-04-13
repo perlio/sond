@@ -121,7 +121,11 @@ gint pdf_document_page_get_index(PdfDocumentPage*);
 
 void zond_pdf_document_page_free(PdfDocumentPage*);
 
-void zond_pdf_document_page_load_annots(PdfDocumentPage*);
+Annot annot_deep_copy(Annot);
+
+void annot_free(Annot*);
+
+gint zond_pdf_document_page_load_annots(PdfDocumentPage*, GError**);
 
 gint zond_pdf_document_load_page(PdfDocumentPage*, gchar**);
 

@@ -445,6 +445,7 @@ static gint seiten_drehen(PdfViewer *pv, GPtrArray *arr_document_page,
 		gint winkel, gchar **errmsg) {
 	for (gint i = 0; i < arr_document_page->len; i++) {
 		gint rc = 0;
+		GError* error = NULL;
 
 		PdfDocumentPage *pdf_document_page = g_ptr_array_index(
 				arr_document_page, i);
@@ -472,7 +473,14 @@ static gint seiten_drehen(PdfViewer *pv, GPtrArray *arr_document_page,
 		//page_annots müssen neu geladen werden, weil quads und rects sonst verdreht sind
 		g_ptr_array_remove_range(pdf_document_page->arr_annots,
 				0, pdf_document_page->arr_annots->len);
-		zond_pdf_document_page_load_annots(pdf_document_page);
+		rc = zond_pdf_document_page_load_annots(pdf_document_page, &error);
+		if (rc) {
+			if (errmsg) *errmsg = g_strdup_printf("%s\n%s", __func__,
+					error->message);
+			g_error_free(error);
+
+			return -1;
+		}
 
 		pdf_document_page->thread &= 2;
 

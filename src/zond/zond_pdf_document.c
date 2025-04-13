@@ -88,20 +88,14 @@ void zond_annot_obj_set_obj(ZondAnnotObj* zond_annot_obj, pdf_obj* obj) {
 
 pdf_annot* pdf_document_page_annot_get_pdf_annot(PdfDocumentPageAnnot* pdpa) {
 	pdf_annot* pdf_annot = NULL;
-	pdf_page* pdf_page = NULL;
 	fz_context* ctx = NULL;
 	pdf_obj* obj = NULL;
 
 	ctx = zond_pdf_document_get_ctx(pdpa->pdf_document_page->document);
 
 	obj = zond_annot_obj_get_obj(pdpa->zond_annot_obj);
-	pdf_annot = pdf_first_annot(ctx, pdpa->pdf_document_page->page); //kein Fehler
 
-	while (pdf_annot) {
-		if (pdf_annot_obj(ctx, pdf_annot) == obj) break;
-
-		pdf_annot = pdf_next_annot(ctx, pdf_annot);
-	}
+	pdf_annot = pdf_annot_lookup_obj(ctx, pdpa->pdf_document_page->page, obj);
 
 	return pdf_annot;
 }
@@ -196,28 +190,52 @@ void zond_pdf_document_page_free(PdfDocumentPage *pdf_document_page) {
 	return;
 }
 
+Annot annot_deep_copy(Annot annot) {
+	Annot copy = { 0 };
+
+	copy = annot;
+
+	if (annot.type == PDF_ANNOT_HIGHLIGHT
+			|| annot.type == PDF_ANNOT_UNDERLINE
+			|| annot.type == PDF_ANNOT_STRIKE_OUT
+			|| annot.type == PDF_ANNOT_SQUIGGLY)
+		copy.annot_text_markup.arr_quads = g_array_ref(annot.annot_text_markup.arr_quads);
+	else if (annot.type == PDF_ANNOT_TEXT)
+		copy.annot_text.content = g_strdup(annot.annot_text.content);
+
+	return copy;
+}
+
+void annot_free(Annot* annot) {
+	if (!annot)
+		return;
+
+	if (annot->type == PDF_ANNOT_HIGHLIGHT
+			|| annot->type == PDF_ANNOT_UNDERLINE
+			|| annot->type == PDF_ANNOT_STRIKE_OUT
+			|| annot->type == PDF_ANNOT_SQUIGGLY)
+		g_array_unref(annot->annot_text_markup.arr_quads);
+	else if (annot->type == PDF_ANNOT_TEXT)
+		g_free(annot->annot_text.content);
+
+	return;
+}
+
 static void zond_pdf_document_page_annot_free(gpointer data) {
 	PdfDocumentPageAnnot *pdf_document_page_annot = (PdfDocumentPageAnnot*) data;
 
-	//Text-Markup-annots
-	if (pdf_document_page_annot->annot.type == PDF_ANNOT_HIGHLIGHT
-			|| pdf_document_page_annot->annot.type == PDF_ANNOT_UNDERLINE
-			|| pdf_document_page_annot->annot.type == PDF_ANNOT_STRIKE_OUT
-			|| pdf_document_page_annot->annot.type == PDF_ANNOT_SQUIGGLY)
-		g_array_unref(pdf_document_page_annot->annot.annot_text_markup.arr_quads);
-	else if(pdf_document_page_annot->annot.type == PDF_ANNOT_TEXT)
-		g_free(pdf_document_page_annot->annot.annot_text.content);
-
 	zond_drop_annot_obj(pdf_document_page_annot->zond_annot_obj);
+	annot_free(&(pdf_document_page_annot->annot));
 
 	g_free(pdf_document_page_annot);
 
 	return;
 }
 
-static void zond_pdf_document_page_annot_load(
-		PdfDocumentPage *pdf_document_page, pdf_annot *pdf_annot) {
+static gint zond_pdf_document_page_annot_load(PdfDocumentPage *pdf_document_page,
+		pdf_annot *pdf_annot, GError **error) {
 	PdfDocumentPageAnnot *pdf_document_page_annot = NULL;
+	gboolean ret = FALSE;
 
 	ZondPdfDocumentPrivate *priv = zond_pdf_document_get_instance_private(
 			pdf_document_page->document);
@@ -225,55 +243,21 @@ static void zond_pdf_document_page_annot_load(
 	pdf_document_page_annot = g_malloc0(sizeof(PdfDocumentPageAnnot));
 
 	pdf_document_page_annot->pdf_document_page = pdf_document_page;
-	pdf_document_page_annot->pdf_annot = pdf_annot;
+	pdf_document_page_annot->zond_annot_obj = zond_annot_obj_new(pdf_annot_obj(priv->ctx, pdf_annot));
 
-	fz_try( priv->ctx ) pdf_document_page_annot->annot.type = pdf_annot_type(priv->ctx, pdf_annot);
-	fz_catch( priv->ctx ) {
+	ret = pdf_annot_get_annot(priv->ctx,
+			pdf_annot, &pdf_document_page_annot->annot, error);
+	if (!ret) {
 		g_free(pdf_document_page_annot);
-		fz_warn(priv->ctx, "Warnung: Funktion pdf_annot_type bzw. _contents gab "
-				"Fehler zurück: %s", fz_caught_message(priv->ctx));
-		return;
-	}
-
-	//Text-Markup-annots
-	if (pdf_document_page_annot->annot.type == PDF_ANNOT_HIGHLIGHT
-			|| pdf_document_page_annot->annot.type == PDF_ANNOT_UNDERLINE
-			|| pdf_document_page_annot->annot.type == PDF_ANNOT_STRIKE_OUT
-			|| pdf_document_page_annot->annot.type == PDF_ANNOT_SQUIGGLY) {
-		gint n_quad = 0;
-
-		fz_try( priv->ctx ) n_quad = pdf_annot_quad_point_count(priv->ctx, pdf_annot);
-		fz_catch( priv->ctx )
-		{
-			g_free( pdf_document_page_annot );
-			fz_warn( priv->ctx, "Warnung: Funktion pdf_annot_quad_point_count gab "
-					"Fehler zurück: %s", fz_caught_message( priv->ctx ) );
-			return;
-		}
-
-		pdf_document_page_annot->annot.annot_text_markup.arr_quads =
-				g_array_new( FALSE, FALSE, sizeof( fz_quad ) );
-
-		for ( gint i = 0; i < n_quad; i++ )
-		{
-			fz_quad quad = pdf_annot_quad_point( priv->ctx, pdf_annot, i );
-			g_array_append_val( pdf_document_page_annot->annot.annot_text_markup.arr_quads, quad );
-		}
-
-	}
-	else if ( pdf_document_page_annot->annot.type == PDF_ANNOT_TEXT )
-	{
-		pdf_document_page_annot->annot.annot_text.rect = pdf_bound_annot( priv->ctx, pdf_annot );
-		pdf_document_page_annot->annot.annot_text.open = pdf_annot_is_open( priv->ctx, pdf_annot );
-		pdf_document_page_annot->annot.annot_text.content = g_strdup(pdf_annot_contents(priv->ctx, pdf_annot));
+		ERROR_Z
 	}
 
 	g_ptr_array_add(pdf_document_page->arr_annots, pdf_document_page_annot);
 
-	return;
+	return 0;
 }
 
-void zond_pdf_document_page_load_annots(PdfDocumentPage *pdf_document_page) {
+gint zond_pdf_document_page_load_annots(PdfDocumentPage *pdf_document_page, GError** error) {
 	pdf_annot *annot = NULL;
 
 	ZondPdfDocumentPrivate *priv = zond_pdf_document_get_instance_private(
@@ -282,18 +266,23 @@ void zond_pdf_document_page_load_annots(PdfDocumentPage *pdf_document_page) {
 	annot = pdf_first_annot(priv->ctx, pdf_document_page->page);
 
 	if (!annot)
-		return;
+		return 0;
 
-	do
-		zond_pdf_document_page_annot_load(pdf_document_page, annot);
-	while ((annot = pdf_next_annot(priv->ctx, annot)));
+	do{
+		gint rc = 0;
 
-	return;
+		rc = zond_pdf_document_page_annot_load(pdf_document_page, annot, error);
+		if (rc) ERROR_Z
+	} while ((annot = pdf_next_annot(priv->ctx, annot)));
+
+	return 0;
 }
 
 gint zond_pdf_document_load_page(PdfDocumentPage *pdf_document_page,
 		gchar **errmsg) {
 	fz_context *ctx = NULL;
+	GError *error = NULL;
+	gint rc = 0;
 
 	ZondPdfDocumentPrivate *priv = zond_pdf_document_get_instance_private(
 			pdf_document_page->document);
@@ -309,7 +298,13 @@ gint zond_pdf_document_load_page(PdfDocumentPage *pdf_document_page,
 	pdf_document_page->arr_annots = g_ptr_array_new_with_free_func(
 			zond_pdf_document_page_annot_free);
 
-	zond_pdf_document_page_load_annots(pdf_document_page);
+	rc = zond_pdf_document_page_load_annots(pdf_document_page, &error);
+	if (rc) {
+		if (errmsg) *errmsg = g_strdup_printf("%s\n%s", __func__, error->message);
+		g_error_free(error);
+
+		return -1;
+	}
 
 	return 0;
 }
@@ -456,17 +451,11 @@ zond_pdf_document_init_context(void) {
 }
 
 void zond_pdf_document_free_journal_entry(JournalEntry *entry) {
-	if (entry->type == JOURNAL_TYPE_ANNOT_CREATED ||
-			entry->type == JOURNAL_TYPE_ANNOT_CHANGED ||
-			entry->type == JOURNAL_TYPE_ANNOT_DELETED) {
+	if (entry->type >= JOURNAL_TYPE_ANNOT_CREATED &&
+			entry->type >= JOURNAL_TYPE_ANNOT_CHANGED) {
 		zond_drop_annot_obj(entry->annot_changed.zond_annot_obj);
 
-		if (entry->type == JOURNAL_TYPE_ANNOT_CHANGED ||
-				entry->type == JOURNAL_TYPE_ANNOT_DELETED) {
-			if (entry->annot_changed.annot.type == PDF_ANNOT_TEXT)
-				g_free(entry->annot_changed.annot.annot_text.content);
-			else g_array_unref(entry->annot_changed.annot.annot_text_markup.arr_quads);
-		}
+		annot_free(&(entry->annot_changed.annot));
 	} else if (entry->type == JOURNAL_TYPE_OCR) {
 		ZondPdfDocumentPrivate *priv =
 				zond_pdf_document_get_instance_private(entry->pdf_document_page->document);

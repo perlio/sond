@@ -51,4 +51,8 @@ gint pdf_annot_change(fz_context*, pdf_annot*, Annot, GError**);
 
 pdf_annot* pdf_annot_create(fz_context*, pdf_page*, Annot, GError**);
 
+gboolean pdf_annot_get_annot(fz_context*, pdf_annot*, Annot*, GError**);
+
+pdf_annot* pdf_annot_lookup_obj(fz_context*, pdf_page*, pdf_obj*);
+
 #endif // PDF_DATEIEN_H_INCLUDED
