@@ -2922,7 +2922,8 @@ static gint zond_treeview_open_pdf(Projekt *zond, gint node_id,
 		if (anbindung.von.seite || anbindung.von.index) {
 			pos_pdf.seite = anbindung.von.seite
 					- ((anbindung_int) ? anbindung_int->von.seite : 0);
-			pos_pdf.index = anbindung.von.index;
+			pos_pdf.index = anbindung.von.index
+					- ((anbindung_int) ? anbindung_int->von.index : 0);
 		}
 		//else: bleibt 0
 	}
