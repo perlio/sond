@@ -921,7 +921,7 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 						return -1;
 					}
 
-					rc = pdf_annot_change(ctx, pdf_annot,
+					rc = pdf_annot_change(ctx, pdf_annot, entry.pdf_document_page->rotate,
 							entry.annot_changed.annot, error);
 					zond_pdf_document_mutex_unlock(dd->zond_pdf_document);
 					if (rc) ERROR_Z
@@ -933,7 +933,7 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 
 					zond_pdf_document_mutex_lock(dd->zond_pdf_document);
 					pdf_annot = pdf_annot_create(ctx, entry.pdf_document_page->page,
-							entry.annot_changed.annot, error);
+							entry.pdf_document_page->rotate, entry.annot_changed.annot, error);
 					zond_annot_obj_set_obj(entry.annot_changed.zond_annot_obj,
 							pdf_annot_obj(ctx, pdf_annot));
 					zond_pdf_document_mutex_unlock(dd->zond_pdf_document);
@@ -1021,7 +1021,7 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 
 				zond_pdf_document_mutex_lock(dd->zond_pdf_document);
 				pdf_annot = pdf_annot_create(ctx, entry.pdf_document_page->page,
-						entry.annot_changed.annot, error);
+						entry.pdf_document_page->rotate, entry.annot_changed.annot, error);
 				zond_annot_obj_set_obj(entry.annot_changed.zond_annot_obj, pdf_annot_obj(ctx, pdf_annot));
 				zond_pdf_document_mutex_unlock(dd->zond_pdf_document);
 				if (!pdf_annot) ERROR_Z
@@ -1047,7 +1047,7 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 					return -1;
 				}
 
-				rc = pdf_annot_change(ctx, pdf_annot,
+				rc = pdf_annot_change(ctx, pdf_annot, entry.pdf_document_page->rotate,
 						annot, error);
 				zond_pdf_document_mutex_unlock(dd->zond_pdf_document);
 				if (rc) ERROR_Z
@@ -2077,23 +2077,6 @@ static fz_rect viewer_clamp_icon_rect(ViewerPageNew *viewer_page,
 	return rect_cropped;
 }
 
-static fz_rect viewer_rotate_rect(ViewerPageNew *viewer_page, fz_rect rect) {
-	if (viewer_page->pdf_document_page->rotate == 90) {
-		rect.x0 -= 20;
-		rect.x1 -= 20;
-	} else if (viewer_page->pdf_document_page->rotate == 180) {
-		rect.x0 -= 20;
-		rect.x1 -= 20;
-		rect.y0 -= 20;
-		rect.y1 -= 20;
-	} else if (viewer_page->pdf_document_page->rotate == 270) {
-		rect.y0 -= 20;
-		rect.y1 -= 20;
-	}
-
-	return rect;
-}
-
 static gint viewer_annot_create(ViewerPageNew *viewer_page, PdfViewer *pdfv,
 		gchar **errmsg) {
 	pdf_annot *pdf_annot = NULL;
@@ -2133,12 +2116,12 @@ static gint viewer_annot_create(ViewerPageNew *viewer_page, PdfViewer *pdfv,
 		annot.annot_text.rect.x1 = rect.x0 + 20;
 		annot.annot_text.rect.y1 = rect.y0 + 20;
 
-		annot.annot_text.rect = viewer_rotate_rect( viewer_page, annot.annot_text.rect );
 		annot.annot_text.rect = viewer_clamp_icon_rect( viewer_page, annot.annot_text.rect );
 	}
 
 	zond_pdf_document_mutex_lock(viewer_page->pdf_document_page->document);
-	pdf_annot = pdf_annot_create(ctx, viewer_page->pdf_document_page->page, annot, &error);
+	pdf_annot = pdf_annot_create(ctx, viewer_page->pdf_document_page->page,
+			viewer_page->pdf_document_page->rotate, annot, &error);
 	zond_pdf_document_mutex_unlock(viewer_page->pdf_document_page->document);
 	if (!pdf_annot) {
 		if (errmsg) *errmsg = g_strdup_printf("%s\n%s", __func__, error->message);
@@ -2211,7 +2194,7 @@ static void viewer_annot_edit_closed(GtkWidget *popover, gpointer data) {
 		return;
 	}
 
-	rc = pdf_annot_change(ctx, pdf_annot, annot, &error);
+	rc = pdf_annot_change(ctx, pdf_annot, viewer_page->pdf_document_page->rotate, annot, &error);
 	zond_pdf_document_mutex_unlock(viewer_page->pdf_document_page->document);
 	if (rc) {
 		display_message(pdfv->vf, "Fehler speichern TextAnnot -\n\n",
@@ -2368,9 +2351,8 @@ static gboolean cb_viewer_layout_release_button(GtkWidget *layout,
 					viewer_page->pdf_document_page->document);
 
 			//neues rect kommt ja schon so an, aber clamp machen
-			pv->clicked_annot->annot.annot_text.rect = viewer_clamp_icon_rect(
-					viewer_page, pv->clicked_annot->annot.annot_text.rect);
-
+			pv->clicked_annot->annot.annot_text.rect =
+					viewer_clamp_icon_rect(viewer_page, pv->clicked_annot->annot.annot_text.rect);
 
 			zond_pdf_document_mutex_lock(
 					viewer_page->pdf_document_page->document);
@@ -2399,7 +2381,8 @@ static gboolean cb_viewer_layout_release_button(GtkWidget *layout,
 				return TRUE;
 			}
 
-			rc = pdf_annot_change(ctx, pdf_annot, pv->clicked_annot->annot, &error);
+			rc = pdf_annot_change(ctx, pdf_annot, viewer_page->pdf_document_page->rotate,
+					pv->clicked_annot->annot, &error);
 			zond_pdf_document_mutex_unlock(
 					viewer_page->pdf_document_page->document);
 			if (rc) {

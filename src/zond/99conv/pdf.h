@@ -47,9 +47,9 @@ fz_buffer* pdf_text_filter_page(fz_context*, pdf_obj*, gint, gchar**);
 
 gint pdf_annot_delete(fz_context*, pdf_annot*, GError**);
 
-gint pdf_annot_change(fz_context*, pdf_annot*, Annot, GError**);
+gint pdf_annot_change(fz_context*, pdf_annot*, gint, Annot, GError**);
 
-pdf_annot* pdf_annot_create(fz_context*, pdf_page*, Annot, GError**);
+pdf_annot* pdf_annot_create(fz_context*, pdf_page*, gint, Annot, GError**);
 
 gboolean pdf_annot_get_annot(fz_context*, pdf_annot*, Annot*, GError**);
 

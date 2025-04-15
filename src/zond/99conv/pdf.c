@@ -736,7 +736,24 @@ gint pdf_annot_delete(fz_context* ctx, pdf_annot* pdf_annot, GError** error) {
 	return 0;
 }
 
-gint pdf_annot_change(fz_context* ctx, pdf_annot* pdf_annot,
+static fz_rect pdf_annot_rotate_rect(gint rotate, fz_rect rect) {
+	if (rotate == 90) {
+		rect.x0 -= 20;
+		rect.x1 -= 20;
+	} else if (rotate == 180) {
+		rect.x0 -= 20;
+		rect.x1 -= 20;
+		rect.y0 -= 20;
+		rect.y1 -= 20;
+	} else if (rotate == 270) {
+		rect.y0 -= 20;
+		rect.y1 -= 20;
+	}
+
+	return rect;
+}
+
+gint pdf_annot_change(fz_context* ctx, pdf_annot* pdf_annot, gint rotate,
 		Annot annot, GError** error) {
 	if (annot.type == PDF_ANNOT_HIGHLIGHT || annot.type == PDF_ANNOT_UNDERLINE) {
 		for (gint i = 0; i < annot.annot_text_markup.arr_quads->len; i++) {
@@ -754,7 +771,7 @@ gint pdf_annot_change(fz_context* ctx, pdf_annot* pdf_annot,
 		fz_try(ctx) {
 			if (annot.annot_text.content)
 				pdf_set_annot_contents(ctx, pdf_annot, annot.annot_text.content);
-			pdf_set_annot_rect(ctx, pdf_annot, annot.annot_text.rect);
+			pdf_set_annot_rect(ctx, pdf_annot, pdf_annot_rotate_rect(rotate, annot.annot_text.rect));
 		}
 		fz_catch(ctx) {
 			if (error) *error = g_error_new(g_quark_from_static_string("mupdf"), fz_caught(ctx),
@@ -767,7 +784,8 @@ gint pdf_annot_change(fz_context* ctx, pdf_annot* pdf_annot,
 	return 0;
 }
 
-pdf_annot* pdf_annot_create(fz_context* ctx, pdf_page* pdf_page, Annot annot, GError** error) {
+pdf_annot* pdf_annot_create(fz_context* ctx, pdf_page* pdf_page, gint rotate,
+		Annot annot, GError** error) {
 	pdf_annot* pdf_annot = NULL;
 	gint rc = 0;
 
@@ -801,7 +819,7 @@ pdf_annot* pdf_annot_create(fz_context* ctx, pdf_page* pdf_page, Annot annot, GE
 		}
 	}
 
-	rc = pdf_annot_change(ctx, pdf_annot, annot, error);
+	rc = pdf_annot_change(ctx, pdf_annot, rotate, annot, error);
 	if (rc) ERROR_Z_VAL(NULL)
 
 	return pdf_annot;
