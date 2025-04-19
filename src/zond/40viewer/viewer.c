@@ -561,6 +561,51 @@ static void viewer_create_layout(PdfViewer *pv) {
 	return;
 }
 
+static gboolean viewer_annot_is_in_dd(gint dd_first_page, gint dd_first_index,
+		gint dd_last_page, gint dd_last_index, gint page_doc,
+		Annot annot) {
+	if (page_doc > dd_first_page && page_doc < dd_last_page) return TRUE;
+
+	if (page_doc == dd_first_page) {
+		if (dd_first_index == 0) return TRUE;
+		else {
+			if (annot.type == PDF_ANNOT_TEXT) {
+				if (annot.annot_text.rect.y1 >= dd_first_index)
+					return TRUE;
+			}
+			else if (annot.type == PDF_ANNOT_HIGHLIGHT
+					|| annot.type == PDF_ANNOT_UNDERLINE) {
+				for (gint i = 0; i < annot.annot_text_markup.arr_quads->len; i++) {
+					fz_quad quad = { 0 };
+
+					quad = g_array_index(annot.annot_text_markup.arr_quads, fz_quad, i);
+					if (quad.ll.y >= dd_first_index || quad.lr.y >= dd_first_index) return TRUE;
+				}
+			}
+		}
+	}
+	else if (page_doc == dd_last_page) {
+		if (dd_last_index == EOP) return TRUE;
+		else {
+			if (annot.type == PDF_ANNOT_TEXT) {
+				if (annot.annot_text.rect.y0 <= dd_last_index)
+					return TRUE;
+			}
+			else if (annot.type == PDF_ANNOT_HIGHLIGHT
+					|| annot.type == PDF_ANNOT_UNDERLINE) {
+				for (gint i = 0; i < annot.annot_text_markup.arr_quads->len; i++) {
+					fz_quad quad = { 0 };
+
+					quad = g_array_index(annot.annot_text_markup.arr_quads, fz_quad, i);
+					if (quad.ul.y <= dd_last_index || quad.ur.y <= dd_last_index) return TRUE;
+				}
+			}
+		}
+	}
+
+	return FALSE;
+}
+
 static gboolean viewer_dd_is_dirty(DisplayedDocument* dd) {
 	GArray* arr_journal = NULL;
 	gint dd_first_page = 0;
@@ -570,15 +615,24 @@ static gboolean viewer_dd_is_dirty(DisplayedDocument* dd) {
 	dd_first_page = pdf_document_page_get_index(dd->first_page);
 	dd_last_page = pdf_document_page_get_index(dd->last_page);
 
-	for ( gint i = 0; i < arr_journal->len; i++) {
+	for (gint i = 0; i < arr_journal->len; i++) {
 		JournalEntry entry = { 0 };
 		gint page_doc = 0;
 
 		entry = g_array_index(arr_journal, JournalEntry, i);
 		page_doc = pdf_document_page_get_index(entry.pdf_document_page);
 
-		if (page_doc >= dd_first_page && page_doc <= dd_last_page)
-			return TRUE;
+		if (page_doc >= dd_first_page && page_doc <= dd_last_page) {
+			if (entry.type == JOURNAL_TYPE_PAGES_INSERTED ||
+					entry.type == JOURNAL_TYPE_PAGE_DELETED ||
+					entry.type == JOURNAL_TYPE_ROTATE ||
+					entry.type == JOURNAL_TYPE_OCR) return TRUE;
+
+			//Sind ja nur Annots überig
+			if (viewer_annot_is_in_dd(dd_first_page, dd->first_index,
+					dd_last_page, dd->last_index, page_doc,
+					entry.annot_changed.annot)) return TRUE;
+		}
 	}
 
 	return FALSE;
@@ -1879,12 +1933,11 @@ static void viewer_thumblist_render_textcell(GtkTreeViewColumn *column,
 	return;
 }
 
-static gint viewer_cb_change_annot(PdfViewer *pv, gint page_pv,
-		DisplayedDocument *dd, gpointer data, gchar **errmsg) {
-	ViewerPageNew *viewer_page = g_ptr_array_index(pv->arr_pages, page_pv);
-
-	while (viewer_page->thread & 1)
-		viewer_transfer_rendered(pv, TRUE);
+static gint viewer_cb_change_annot(PdfViewer *pv, ViewerPageNew* viewer_page,
+		gint page_pv, gpointer data, gchar **errmsg) {
+//	while (viewer_page->thread & 1)
+//		viewer_transfer_rendered(pv, TRUE);
+//passiert schon in den aufrufenden Funktionen
 
 	if (viewer_page->thread & 2) {
 		gtk_image_clear(GTK_IMAGE(viewer_page->image_page));
@@ -1910,13 +1963,13 @@ static gint viewer_cb_change_annot(PdfViewer *pv, gint page_pv,
 
 	viewer_page->thread = 0;
 
-	viewer_thread_render(pv, page_pv);
+//	viewer_thread_render(pv, page_pv);
 
 	return 0;
 }
 
 gint viewer_foreach(PdfViewer *pdfv, PdfDocumentPage *pdf_document_page,
-		gint (*cb_foreach_pv)(PdfViewer*, gint, DisplayedDocument*,
+		gint (*cb_foreach_pv)(PdfViewer*, ViewerPageNew*, gint,
 				gpointer, gchar**), gpointer data, gchar **errmsg) {
 	for (gint p = 0; p < pdfv->zond->arr_pv->len; p++) {
 		gboolean dirty = FALSE;
@@ -1932,7 +1985,7 @@ gint viewer_foreach(PdfViewer *pdfv, PdfDocumentPage *pdf_document_page,
 				if (cb_foreach_pv) {
 					gint rc = 0;
 
-					rc = cb_foreach_pv(pv_vergleich, i, viewer_page->dd, data, errmsg);
+					rc = cb_foreach_pv(pv_vergleich, viewer_page, i, data, errmsg);
 					if (rc)
 						ERROR_S
 				}
@@ -2755,8 +2808,7 @@ static gboolean cb_viewer_layout_press_button(GtkWidget *layout,
 			}
 
 			pv->clicked_annot = pdf_document_page_annot;
-		} else //nicht auf annot geklickt, z.B. weil neben layout geclickt
-		{
+		} else { //nicht auf annot geklickt, z.B. weil neben layout geclickt
 			//wird weiter unten geprüft, ob click_on_text wieder angeschaltet werden soll
 			pv->click_on_text = FALSE;
 
