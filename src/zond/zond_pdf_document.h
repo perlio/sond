@@ -117,6 +117,8 @@ void zond_annot_obj_set_obj(ZondAnnotObj*, pdf_obj*);
 
 pdf_annot* pdf_document_page_annot_get_pdf_annot(PdfDocumentPageAnnot*);
 
+gint pdf_document_page_number(PdfDocumentPage*, GError**);
+
 gint pdf_document_page_get_index(PdfDocumentPage*);
 
 void zond_pdf_document_page_free(PdfDocumentPage*);

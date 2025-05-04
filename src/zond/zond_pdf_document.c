@@ -100,6 +100,23 @@ pdf_annot* pdf_document_page_annot_get_pdf_annot(PdfDocumentPageAnnot* pdpa) {
 	return pdf_annot;
 }
 
+gint pdf_document_page_number(PdfDocumentPage* pdf_document_page, GError** error) {
+	gint number = 0;
+
+	ZondPdfDocumentPrivate *priv = zond_pdf_document_get_instance_private(
+			pdf_document_page->document);
+
+	fz_try(priv->ctx)
+		number = pdf_lookup_page_number(priv->ctx, priv->doc, pdf_document_page->obj);
+	fz_catch(priv->ctx) {
+		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
+				fz_caught(priv->ctx), "%s\n%s", __func__, fz_caught_message(priv->ctx));
+		number = -1;
+	}
+
+	return number;
+}
+
 gint pdf_document_page_get_index(PdfDocumentPage* pdf_document_page) {
 	guint index = 0;
 	GPtrArray* arr_pages = NULL;
@@ -291,7 +308,7 @@ gint zond_pdf_document_load_page(PdfDocumentPage *pdf_document_page,
 
 	fz_try( ctx )
 		pdf_document_page->page = pdf_load_page(ctx, priv->doc,
-				pdf_document_page_get_index(pdf_document_page));
+				pdf_lookup_page_number(ctx, priv->doc,pdf_document_page->obj));
 	fz_catch(ctx)
 		ERROR_MUPDF("pdf_load_page");
 

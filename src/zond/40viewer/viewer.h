@@ -135,7 +135,7 @@ void viewer_refresh_layout(PdfViewer*, gint);
 
 ViewerPageNew* viewer_new_page(PdfViewer*, DisplayedDocument*, gint);
 
-void viewer_display_document(PdfViewer*, DisplayedDocument*, gint, gint);
+gint viewer_display_document(PdfViewer*, DisplayedDocument*, gint, gint, GError**);
 
 void viewer_schliessen(PdfViewer*);
 
@@ -143,15 +143,15 @@ gint viewer_save_dirty_docs(PdfViewer*, GError**);
 
 void viewer_save_and_close(PdfViewer*);
 
-gint viewer_get_iter_thumb(PdfViewer*, gint, GtkTreeIter*);
+void viewer_get_iter_thumb(PdfViewer*, gint, GtkTreeIter*);
 
 void viewer_transfer_rendered(PdfViewer*, gboolean);
 
 gint viewer_render_stext_page_fast(fz_context*, PdfDocumentPage*, gchar**);
 
-gint viewer_foreach(PdfViewer*, PdfDocumentPage*,
-		gint (*)(PdfViewer*, ViewerPageNew* viewer_page, gint, gpointer, gchar**),
-		gpointer, gchar **errmsg);
+void viewer_foreach(PdfViewer*, PdfDocumentPage*,
+		gint (*)(PdfViewer*, ViewerPageNew* viewer_page, gint, gpointer),
+		gpointer);
 
 PdfViewer* viewer_start_pv(Projekt*);
 

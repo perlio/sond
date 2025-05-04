@@ -114,6 +114,8 @@ static void pv_schliessen_datei(PdfViewer *pv) {
 static gint pv_oeffnen_datei(PdfViewer *pv, gchar *path, gchar **errmsg) {
 	DisplayedDocument *dd = NULL;
 	gchar *file_part = NULL;
+	GError *error = NULL;
+	gint rc = 0;
 
 	file_part = g_strdup_printf("/%s//", path);
 
@@ -124,7 +126,14 @@ static gint pv_oeffnen_datei(PdfViewer *pv, gchar *path, gchar **errmsg) {
 	else if (!dd)
 		return 0;
 
-	viewer_display_document(pv, dd, 0, 0);
+	rc = viewer_display_document(pv, dd, 0, 0, &error);
+	if (rc) {
+		if (errmsg) *errmsg = g_strdup_printf("%s\n%s", __func__, error->message);
+		g_error_free(error);
+		document_free_displayed_documents(dd);
+
+		return -1;
+	}
 
 	pv_activate_widgets(pv, TRUE);
 

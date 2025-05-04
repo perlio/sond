@@ -2782,6 +2782,8 @@ gint zond_treeview_oeffnen_internal_viewer(Projekt *zond,
 		gchar **errmsg) {
 	PdfPos pos_von = { 0 };
 	ZondPdfDocument const* zpdfd = NULL;
+	gint rc = 0;
+	GError *error = NULL;
 
 	if (anbindung && (zpdfd = zond_pdf_document_is_open(file_part)))
 		anbindung_aktualisieren_insert_pages(zpdfd, anbindung);
@@ -2831,7 +2833,15 @@ gint zond_treeview_oeffnen_internal_viewer(Projekt *zond,
 		pos_von = *pos_pdf;
 
 	PdfViewer *pv = viewer_start_pv(zond);
-	viewer_display_document(pv, dd, pos_von.seite, pos_von.index);
+	rc = viewer_display_document(pv, dd, pos_von.seite, pos_von.index, &error);
+	if (rc) {
+		if (errmsg)
+				*errmsg = g_strdup_printf("%s\n%s", __func__, error->message);
+		g_error_free(error);
+		document_free_displayed_documents(dd);
+
+		return -1;
+	}
 
 	return 0;
 }

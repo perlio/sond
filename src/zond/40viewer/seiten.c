@@ -316,7 +316,7 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 		pdf_document_page->thread &= 2;
 
 		//Damit speichern angeht - gibt keinen Fehler zurück, wenn func == NULL
-		viewer_foreach(pv, pdf_document_page, NULL, NULL, &errmsg);
+		viewer_foreach(pv, pdf_document_page, NULL, NULL);
 	}
 
 	//damit Text von Cursor "erkannt" wird
@@ -361,9 +361,8 @@ static void seiten_page_tilt(ViewerPageNew *viewer_page) {
 }
 
 static gint seiten_drehen_foreach(PdfViewer *pv, ViewerPageNew* viewer_page,
-		gint page_pv, gpointer data, gchar **errmsg) {
+		gint page_pv, gpointer data) {
 	gint winkel = 0;
-	gint rc = 0;
 	GtkTreeIter iter = { 0 };
 	winkel = GPOINTER_TO_INT(data);
 
@@ -377,10 +376,7 @@ static gint seiten_drehen_foreach(PdfViewer *pv, ViewerPageNew* viewer_page,
 		gtk_image_clear(GTK_IMAGE(viewer_page->image_page));
 	viewer_page->pixbuf_page = NULL;
 
-	rc = viewer_get_iter_thumb(pv, page_pv, &iter);
-	if (rc)
-		ERROR_S_MESSAGE("Bei Aufruf viewer_get_iter:\niter konnte "
-				"nicht ermittelt werden");
+	viewer_get_iter_thumb(pv, page_pv, &iter);
 
 	gtk_list_store_set(
 			GTK_LIST_STORE(
@@ -396,7 +392,7 @@ static gint seiten_drehen_foreach(PdfViewer *pv, ViewerPageNew* viewer_page,
 	viewer_page->thread = 0;
 //    g_signal_emit_by_name( pv->v_adj, "value-changed", NULL );
 
-	return 0;
+	return 1;
 }
 
 static gint seiten_drehen_pdf(PdfDocumentPage *pdf_document_page, gint winkel,
@@ -481,13 +477,8 @@ static gint seiten_drehen(PdfViewer *pv, GPtrArray *arr_document_page,
 
 		pdf_document_page->thread &= 2;
 
-		rc = viewer_foreach(pv, pdf_document_page, seiten_drehen_foreach,
-				GINT_TO_POINTER(winkel), errmsg);
-		if (rc) {
-			viewer_save_and_close(pv);
-
-			ERROR_S
-		}
+		viewer_foreach(pv, pdf_document_page, seiten_drehen_foreach,
+				GINT_TO_POINTER(winkel));
 	}
 
 	return 0;
@@ -529,9 +520,8 @@ void cb_pv_seiten_drehen(GtkMenuItem *item, gpointer data) {
  **      Seiten löschen
  */
 static gint seiten_cb_loesche_seite(PdfViewer *pv, ViewerPageNew* viewer_page,
-		gint page_pv, gpointer data, gchar **errmsg) {
-	gint rc = 0;
-	GtkTreeIter iter;
+		gint page_pv, gpointer data) {
+	GtkTreeIter iter = { 0 };
 
 	viewer_close_thread_pool_and_transfer(pv);
 
@@ -539,20 +529,15 @@ static gint seiten_cb_loesche_seite(PdfViewer *pv, ViewerPageNew* viewer_page,
 		gtk_widget_destroy(viewer_page->image_page);
 	g_ptr_array_remove_index(pv->arr_pages, page_pv); //viewer_page wird freed!
 
-	rc = viewer_get_iter_thumb(pv, page_pv, &iter);
-	if (rc)
-		ERROR_S_MESSAGE("Bei Aufruf viewer_get_iter_thumb:\n"
-				"Iter konnte nicht ermittelt werden");
+	viewer_get_iter_thumb(pv, page_pv, &iter);
 
-	gtk_list_store_remove(
-			GTK_LIST_STORE(
-					gtk_tree_view_get_model( GTK_TREE_VIEW(pv->tree_thumb) )),
-			&iter);
+	gtk_list_store_remove(GTK_LIST_STORE(
+			gtk_tree_view_get_model(GTK_TREE_VIEW(pv->tree_thumb))), &iter);
 
 	//pv muß neues layout haben!
 	g_object_set_data(G_OBJECT(pv->layout), "dirty", GINT_TO_POINTER(1));
 
-	return 0;
+	return 1;
 }
 
 static gint seiten_anbindung_int(ZondDBase* zond_dbase,
@@ -626,28 +611,16 @@ static gint seiten_anbindung(PdfViewer *pv, GPtrArray *arr_document_page,
 static gint seiten_loeschen(PdfViewer *pv, GPtrArray *arr_document_page,
 		GError **error) {
 	for (gint i = 0; i < arr_document_page->len; i++) {
-		gint rc = 0;
 		PdfDocumentPage* pdf_document_page = NULL;
-		gchar* errmsg = NULL;
 		JournalEntry entry = { 0, };
 		GArray* arr_journal = NULL;
 
 		pdf_document_page = g_ptr_array_index(arr_document_page, i);
 		pdf_document_page->to_be_deleted = TRUE;
 
-		//macht - sofern noch nicht geschehen - thread_pool des pv dicht, in dem Seite angezeigt wird
-		//Dann wird Seite aus pv->arr_pages gelöscht
-		//ToDo: Vielleicht Schließen des thread-pools nicht erforderlich?
-		rc = viewer_foreach(pv, pdf_document_page, seiten_cb_loesche_seite,
-				NULL, &errmsg);
-		if (rc) {
-			if (error)
-				*error = g_error_new( ZOND_ERROR, 0, "%s\n%s", __func__,
-						errmsg);
-			g_free(errmsg);
-
-			return -1;
-		}
+		//Seite wird aus pv->arr_pages gelöscht
+		viewer_foreach(pv, pdf_document_page, seiten_cb_loesche_seite,
+				NULL);
 
 		arr_journal = zond_pdf_document_get_arr_journal(pdf_document_page->document);
 
@@ -728,7 +701,7 @@ typedef struct _DataInsert {
 } DataInsert;
 
 static gint seiten_einfuegen_foreach(PdfViewer *pv, ViewerPageNew* viewer_page,
-		gint page_pv, gpointer data, gchar **errmsg) {
+		gint page_pv, gpointer data) {
 	DataInsert* data_insert = (DataInsert*) data;
 
 	//Wenn vor erster oder nach letzter Seite des vorliegenden dd eingefügt werden soll:
@@ -795,7 +768,7 @@ static gint seiten_einfuegen_foreach(PdfViewer *pv, ViewerPageNew* viewer_page,
 
 	g_object_set_data(G_OBJECT(pv->layout), "dirty", GINT_TO_POINTER(1));
 
-	return 0;
+	return 1;
 }
 
 static void cb_pv_seiten_entry(GtkEntry *entry, gpointer button_datei) {
@@ -991,7 +964,7 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 	//viewer_page->pdf_document_page ist - wenn nicht Einfügen nach letzter Seite -
 	//im zond_pdf_document nach hinten gerutscht
 	viewer_foreach(pv, viewer_page->pdf_document_page,
-			seiten_einfuegen_foreach, &data_insert, &errmsg);
+			seiten_einfuegen_foreach, &data_insert); //seiten_einfügen_foreach gibt nie Fehler zurück
 
 	seiten_refresh_layouts(pv->zond->arr_pv);
 
