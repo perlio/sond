@@ -1010,7 +1010,11 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 					zond_pdf_document_mutex_unlock(dd->zond_pdf_document);
 					if (!pdf_annot) ERROR_Z
 				} else if (entry.type == JOURNAL_TYPE_ROTATE) {
+					gint rc = 0;
 
+					rc = pdf_page_rotate(ctx, entry.pdf_document_page->obj,
+							entry.rotate.rotate, error);
+					if (rc) ERROR_Z
 				} else if (entry.type == JOURNAL_TYPE_OCR) {
 
 
@@ -1018,7 +1022,7 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 			}
 		}
 
-		//Projekt-Zustand (geändert oder nicht) zwischenspeichertn
+		//Projekt-Zustand (geändert oder nicht) zwischenspeichern
 		changed = pdfv->zond->dbase_zond->changed;
 
 		rc = viewer_do_save_dd(pdfv, dd, error);
@@ -1134,7 +1138,11 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 				zond_pdf_document_mutex_unlock(dd->zond_pdf_document);
 				if (rc) ERROR_Z
 			} else if (entry.type == JOURNAL_TYPE_ROTATE) {
+				gint rc = 0;
 
+				rc = pdf_page_rotate(ctx, entry.pdf_document_page->obj,
+						entry.pdf_document_page->rotate, error);
+				if (rc) ERROR_Z
 			} else if (entry.type == JOURNAL_TYPE_OCR) {
 
 			}

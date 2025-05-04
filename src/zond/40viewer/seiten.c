@@ -390,43 +390,34 @@ static gint seiten_drehen_foreach(PdfViewer *pv, ViewerPageNew* viewer_page,
 	}
 
 	viewer_page->thread = 0;
-//    g_signal_emit_by_name( pv->v_adj, "value-changed", NULL );
+	//g_signal_emit_by_name nicht erforderlich. da layout refreshed wird
 
 	return 1;
 }
 
 static gint seiten_drehen_pdf(PdfDocumentPage *pdf_document_page, gint winkel,
 		gchar **errmsg) {
-	pdf_obj *page_obj = NULL;
-	pdf_obj *rotate_obj = NULL;
 	gint rotate = 0;
+	gint rc = 0;
+	GError *error = NULL;
 
 	fz_context *ctx = zond_pdf_document_get_ctx(pdf_document_page->document);
 
-	page_obj = pdf_document_page->obj;
+	rotate = pdf_document_page->rotate + winkel;
+	if (rotate < 0)
+		rotate += 360;
+	else if (rotate > 360)
+		rotate -= 360;
+	else if (rotate == 360)
+		rotate = 0;
 
-	fz_try(ctx)
-		rotate_obj = pdf_dict_get_inheritable(ctx, page_obj, PDF_NAME(Rotate));
-	fz_catch(ctx)
-		ERROR_MUPDF("pdf_dict_get_inheritable")
+	rc = pdf_page_rotate(ctx, pdf_document_page->obj, rotate, &error);
+	if (rc) {
+		if (errmsg) *errmsg = g_strdup_printf("%s\n%s", __func__,
+				error->message);
+		g_error_free(error);
 
-	if (!rotate_obj) {
-		rotate_obj = pdf_new_int(ctx, (int64_t) winkel);
-		fz_try(ctx)
-			pdf_dict_put_drop(ctx, page_obj, PDF_NAME(Rotate), rotate_obj);
-		fz_catch(ctx)
-			ERROR_MUPDF("pdf_dict_put_drop")
-	} else {
-		rotate = pdf_to_int(ctx, rotate_obj);
-		rotate += winkel;
-		if (rotate < 0)
-			rotate += 360;
-		else if (rotate > 360)
-			rotate -= 360;
-		else if (rotate == 360)
-			rotate = 0;
-
-		pdf_set_int(ctx, rotate_obj, (int64_t) rotate);
+		return -1;
 	}
 
 	pdf_document_page->rotate = rotate;
@@ -439,12 +430,16 @@ static gint seiten_drehen(PdfViewer *pv, GPtrArray *arr_document_page,
 	for (gint i = 0; i < arr_document_page->len; i++) {
 		gint rc = 0;
 		GError* error = NULL;
+		JournalEntry entry = { 0 };
+		GArray* arr_journal = NULL;
+		gint rotate_old = 0;
 
 		PdfDocumentPage *pdf_document_page = g_ptr_array_index(
 				arr_document_page, i);
 
-		zond_pdf_document_mutex_lock(pdf_document_page->document);
+		rotate_old = pdf_document_page->rotate;
 
+		zond_pdf_document_mutex_lock(pdf_document_page->document);
 		rc = seiten_drehen_pdf(pdf_document_page, winkel, errmsg);
 		zond_pdf_document_mutex_unlock(pdf_document_page->document);
 		if (rc == -1) ERROR_S
@@ -476,6 +471,13 @@ static gint seiten_drehen(PdfViewer *pv, GPtrArray *arr_document_page,
 		}
 
 		pdf_document_page->thread &= 2;
+
+		arr_journal = zond_pdf_document_get_arr_journal(
+				pdf_document_page->document);
+		entry.pdf_document_page = pdf_document_page;
+		entry.type = JOURNAL_TYPE_ROTATE;
+		entry.rotate.rotate = rotate_old;
+		g_array_append_val(arr_journal, entry);
 
 		viewer_foreach(pv, pdf_document_page, seiten_drehen_foreach,
 				GINT_TO_POINTER(winkel));

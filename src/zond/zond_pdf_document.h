@@ -72,7 +72,7 @@ struct AnnotChanged {
 	Annot annot;
 };
 struct Rotate {
-	gint winkel;
+	gint rotate;
 };
 struct OCR {
 	fz_buffer* buf;

@@ -889,3 +889,35 @@ pdf_annot* pdf_annot_lookup_obj(fz_context *ctx, pdf_page* pdf_page, pdf_obj *ob
 
 	return pdf_annot;
 }
+
+gint pdf_page_rotate(fz_context *ctx, pdf_obj *page_obj, gint rotate,
+		GError** error) {
+	pdf_obj *rotate_obj = NULL;
+
+	fz_try(ctx)
+		rotate_obj = pdf_dict_get_inheritable(ctx, page_obj, PDF_NAME(Rotate));
+	fz_catch(ctx) {
+		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
+				fz_caught(ctx), "%s\n%s", __func__, fz_caught_message(ctx));
+
+		return -1;
+	}
+
+	if (!rotate_obj) {
+		rotate_obj = pdf_new_int(ctx, (int64_t) rotate);
+		fz_try(ctx)
+			pdf_dict_put_drop(ctx, page_obj, PDF_NAME(Rotate), rotate_obj);
+		fz_catch(ctx) {
+			if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
+					fz_caught(ctx), "%s\n%s", __func__,
+					fz_caught_message(ctx));
+			pdf_drop_obj(ctx, rotate_obj);
+
+			return -1;
+		}
+	} else
+		pdf_set_int(ctx, rotate_obj, (int64_t) rotate);
+
+	return 0;
+}
+

@@ -55,4 +55,6 @@ gboolean pdf_annot_get_annot(fz_context*, pdf_annot*, Annot*, GError**);
 
 pdf_annot* pdf_annot_lookup_obj(fz_context*, pdf_page*, pdf_obj*);
 
+gint pdf_page_rotate(fz_context*, pdf_obj*, gint, GError**);
+
 #endif // PDF_DATEIEN_H_INCLUDED
