@@ -1973,6 +1973,8 @@ static gint viewer_foreach_annot_changed(PdfViewer *pv, ViewerPageNew* viewer_pa
 
 	viewer_page->thread = 0;
 
+	g_signal_emit_by_name(pv->v_adj, "value-changed", NULL);
+
 	return 1;
 }
 
@@ -2098,7 +2100,7 @@ static gboolean cb_viewer_swindow_key_press(GtkWidget *swindow,
 		viewer_page->pdf_document_page->thread &= 10; //4 löschen
 
 		viewer_foreach(pv, viewer_page->pdf_document_page,
-				viewer_foreach_annot_changed, NULL);
+				viewer_foreach_annot_changed, &entry.annot_changed.annot);
 	}
 
 	return FALSE;
