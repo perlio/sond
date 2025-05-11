@@ -542,6 +542,7 @@ static gint seiten_cb_loesche_seite(PdfViewer *pv, ViewerPageNew* viewer_page,
 	return 1;
 }
 
+#ifndef VIEWER
 static gint seiten_anbindung_int(ZondDBase* zond_dbase,
 		PdfDocumentPage* pdf_document_page, GError** error) {
 	gint rc = 0;
@@ -609,6 +610,7 @@ static gint seiten_anbindung(PdfViewer *pv, GPtrArray *arr_document_page,
 
 	return 0;
 }
+#endif // VIEWER
 
 static gint seiten_loeschen(PdfViewer *pv, GPtrArray *arr_document_page,
 		GError **error) {

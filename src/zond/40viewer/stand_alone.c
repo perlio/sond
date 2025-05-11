@@ -31,6 +31,7 @@
 #include "viewer.h"
 #include "document.h"
 
+#ifdef VIEWER
 static void pv_activate_widgets(PdfViewer *pv, gboolean activ) {
 	gtk_widget_set_sensitive(pv->entry, activ);
 	gtk_widget_set_sensitive(pv->entry_search, activ);
@@ -184,6 +185,7 @@ init(GtkApplication *app, Projekt *zond) {
 	zond->base_dir = get_base_dir();
 
 	PdfViewer *pv = viewer_start_pv(zond);
+	pv->zoom = 140;
 
 	gtk_application_add_window(app, GTK_WINDOW(pv->vf));
 
@@ -269,3 +271,4 @@ gint main(gint argc, gchar **argv) {
 
 	return status;
 }
+#endif // VIEWER

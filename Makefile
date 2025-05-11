@@ -15,7 +15,16 @@ ifneq (,$(findstring $(MAKECMDGOALS), zond))
 SRCS += $(shell find $(SRC_DIRS)/zond -name '*.c') $(SRC_DIRS)/misc_stdlib.c $(SRC_DIRS)/misc.c
 CFLAGS += $(shell pkg-config --cflags gtk+-3.0 gobject-2.0 json-glib-1.0)
 LDFLAGS += $(shell pkg-config --libs gtk+-3.0 gobject-2.0 sqlite3 libcurl tesseract libzip json-glib-1.0) \
-	-lshlwapi -lmupdf -lmupdf-third -lpodofo
+	-lshlwapi -lmupdf -lmupdf-third
+endif
+
+ifneq (,$(findstring $(MAKECMDGOALS), viewer))
+SRCS += $(shell find $(SRC_DIRS)/zond/40viewer -name '*.c') $(SRC_DIRS)/zond/zond_pdf_document.c \
+$(SRC_DIRS)/zond/99conv/general.c $(SRC_DIRS)/zond/99conv/pdf.c $(SRC_DIRS)/zond/pdf_ocr.c $(SRC_DIRS)/misc.c \
+$(SRC_DIRS)/misc_stdlib.c
+CFLAGS += -DVIEWER $(shell pkg-config --cflags gtk+-3.0 gobject-2.0 json-glib-1.0)
+LDFLAGS += $(shell pkg-config --libs gtk+-3.0 gobject-2.0 sqlite3 libcurl tesseract libzip json-glib-1.0) \
+	-lshlwapi -lmupdf -lmupdf-third
 endif
 
 # Object files
@@ -32,6 +41,8 @@ all: zond
 -include $(DEPS)
 
 zond: $(BIN_DIR)/zond.exe
+
+viewer: $(BIN_DIR)/viewer.exe
 
 # Linking
 $(BIN_DIR)/$(MAKECMDGOALS).exe: $(SRCS:%=$(OBJ_DIR)/%.o)

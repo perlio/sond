@@ -218,7 +218,7 @@ static gint pdf_ocr_sandwich_page(PdfDocumentPage *pdf_document_page,
 
 	fz_context *ctx = zond_pdf_document_get_ctx(pdf_document_page->document);
 
-	fz_try( ctx )
+	fz_try(ctx)
 		page_ref_text = pdf_lookup_page_obj(ctx, doc_text, page_text);
 	fz_catch(ctx)
 		ERROR_MUPDF_R("pdf_lookup_page_obj", -2)
@@ -246,9 +246,9 @@ static gint pdf_ocr_sandwich_page(PdfDocumentPage *pdf_document_page,
 
 	fz_try( ctx )
 		fz_append_buffer(ctx, buf, buf_text);
-fz_always	( ctx )
+	fz_always (ctx)
 		fz_drop_buffer(ctx, buf_text);
-fz_catch	( ctx ) {
+	fz_catch (ctx) {
 		fz_drop_buffer(ctx, buf);
 		fz_drop_buffer(ctx, entry.ocr.buf);
 		ERROR_MUPDF_R("fz_append_buffer", -2)
@@ -293,7 +293,7 @@ fz_catch	( ctx ) {
 			pdf_dict_put_drop(ctx, font_dict, font_dict_key,
 					pdf_graft_mapped_object(ctx, graft_map, font_dict_val));
 		}
-	}fz_always( ctx )
+	} fz_always( ctx )
 		pdf_drop_graft_map(ctx, graft_map);
 	fz_catch( ctx ) {
 		fz_drop_buffer(ctx, entry.ocr.buf);

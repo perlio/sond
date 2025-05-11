@@ -750,7 +750,9 @@ void viewer_schliessen(PdfViewer *pv) {
 static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd, GError** error) {
 	GArray* arr_pages = NULL;
 	gint rc = 0;
+	gboolean page_deleted = FALSE;
 
+#ifndef VIEWER
 	rc = dbase_zond_begin(pv->zond->dbase_zond, error);
 	if (rc) {
 		g_prefix_error(error, "%s\n", __func__);
@@ -783,13 +785,15 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd, GError** err
 
 		pdfp = zond_pdf_document_get_pdf_document_page(dd->zond_pdf_document, i);
 
-		if (!pdfp || !pdfp->to_be_deleted) //Seitenzahl merken
+		if (!pdfp || !pdfp->to_be_deleted) { //Seitenzahl merken
 			g_array_prepend_val(arr_pages, i);
+			page_deleted = TRUE;
+		}
 		else if (pdfp->obj) //PdfDocumentPage zum Löschen markiert
 			g_ptr_array_remove_index(zond_pdf_document_get_arr_pages(dd->zond_pdf_document), i);
 	}
 
-	if (arr_pages->len < zond_pdf_document_get_number_of_pages(dd->zond_pdf_document)) {
+	if (page_deleted) {
 		zond_pdf_document_mutex_lock(dd->zond_pdf_document);
 
 		fz_try(zond_pdf_document_get_ctx(dd->zond_pdf_document))
@@ -822,6 +826,7 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd, GError** err
 		}
 	}
 	else g_array_unref(arr_pages);
+#endif //VIEWER
 
 	zond_pdf_document_mutex_lock(dd->zond_pdf_document);
 	rc = pdf_save(zond_pdf_document_get_ctx(dd->zond_pdf_document),
@@ -836,7 +841,7 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd, GError** err
 				fz_caught(zond_pdf_document_get_ctx(dd->zond_pdf_document)),
 				"%s\n%s", __func__,
 				fz_caught_message(zond_pdf_document_get_ctx(dd->zond_pdf_document)));
-
+#ifndef VIEWER
 		ret = dbase_zond_rollback(pv->zond->dbase_zond, &error_int);
 		if (ret) {
 			if (error) (*error)->message = add_string((*error)->message, g_strdup(error_int->message));
@@ -851,6 +856,7 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd, GError** err
 	rc = dbase_zond_commit(pv->zond->dbase_zond, error);
 	if (rc) {
 		g_prefix_error(error, "%s\n", __func__);
+#endif //VIEWER
 
 		return -6;
 	}
@@ -1022,14 +1028,18 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 			}
 		}
 
+#ifndef VIEWER
 		//Projekt-Zustand (geändert oder nicht) zwischenspeichern
 		changed = pdfv->zond->dbase_zond->changed;
+#endif //VIEWER
 
 		rc = viewer_do_save_dd(pdfv, dd, error);
 		if (rc) ERROR_Z
 
+#ifndef VIEWER
 		//ggf. zurücksetzen
 		if (!changed) project_reset_changed(pdfv->zond, FALSE);
+#endif //VIEWER
 
 		//noch vorhandene Änderungen wieder einspielen
 		for (gint i = 0; i < arr_journal->len; i++) {
@@ -1146,7 +1156,6 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 			} else if (entry.type == JOURNAL_TYPE_OCR) {
 
 			}
-
 		}
 	} while ((dd = dd->next));
 
