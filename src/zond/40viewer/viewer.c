@@ -777,6 +777,7 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd, GError** err
 
 		return -1;
 	}
+#endif //VIEWER
 
 	//gelöschte Seiten in dd wirklich löschen
 	arr_pages = g_array_new(FALSE, FALSE, sizeof(gint));
@@ -814,6 +815,7 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd, GError** err
 					"%s\n%s", __func__,
 					fz_caught_message(zond_pdf_document_get_ctx(dd->zond_pdf_document)));
 
+#ifndef VIEWER
 			ret = dbase_zond_rollback(pv->zond->dbase_zond, &error_int);
 			if (ret) {
 				if (error) (*error)->message = add_string((*error)->message, g_strdup(error_int->message));
@@ -821,12 +823,12 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd, GError** err
 
 				return -4;
 			}
+#endif //VIEWER
 
 			return -3;
 		}
 	}
 	else g_array_unref(arr_pages);
-#endif //VIEWER
 
 	zond_pdf_document_mutex_lock(dd->zond_pdf_document);
 	rc = pdf_save(zond_pdf_document_get_ctx(dd->zond_pdf_document),
