@@ -382,12 +382,13 @@ gint pdf_clean(fz_context *ctx, const gchar *file_part, GError **error) {
 
 	fz_try( ctx )
 		pdf_rearrange_pages(ctx, doc, count, pages);
-fz_always	( ctx )
+	fz_always(ctx)
 		g_free(pages);
-fz_catch	( ctx ) {
+	fz_catch(ctx) {
 		gint ret = 0;
 
 		ret = remove(fz_stream_filename(ctx, doc->file));
+		pdf_drop_document(ctx, doc);
 
 		if (error) {
 			*error = g_error_new( ZOND_ERROR, 0, "%s\npdf_rearrange_pages\n%s",
@@ -400,7 +401,6 @@ fz_catch	( ctx ) {
 						"\n\nArbeitskopie konnte nicht gelöscht werden\n%s",
 						strerror( errno));
 				(*error)->message = add_string((*error)->message, error_text);
-				g_free(error_text);
 			}
 		}
 
@@ -426,7 +426,6 @@ fz_catch	( ctx ) {
 						"Arbeitskopie konnte nicht gelöscht werden\n%s",
 						strerror( errno));
 				(*error)->message = add_string((*error)->message, error_text);
-				g_free(error_text);
 			}
 
 		return -1;
@@ -467,15 +466,20 @@ typedef struct resources_stack {
 	pdf_obj *res;
 } resources_stack;
 
-typedef struct {
+typedef struct
+{
 	pdf_processor super;
 	fz_output *out;
 	int ahxencode;
 	int extgstate;
+	int newlines;
+	int balance;
 	pdf_obj *res;
 	pdf_obj *last_res;
 	resources_stack *rstack;
+	int sep;
 } pdf_output_processor;
+
 
 typedef struct {
 	pdf_output_processor super;
@@ -632,13 +636,13 @@ pdf_new_text_filter_processor(fz_context *ctx, fz_buffer **buf, gint flags,
 
 	fz_try( ctx )
 		*buf = fz_new_buffer(ctx, 1024);
-fz_catch	( ctx )
+	fz_catch(ctx)
 		ERROR_MUPDF_R("fz_new_buffer", NULL)
 
-	fz_try( ctx )
+	fz_try(ctx)
 		proc_output = (pdf_output_processor*) pdf_new_buffer_processor(ctx,
 				*buf, 0, 0);
-fz_catch	( ctx ) {
+	fz_catch(ctx) {
 		fz_drop_buffer(ctx, *buf);
 		ERROR_MUPDF_R("pdf_new_output_processor", NULL)
 	}
@@ -693,14 +697,14 @@ pdf_text_filter_page(fz_context *ctx, pdf_obj *obj, gint flags, gchar **errmsg) 
 
 	fz_try( ctx )
 		contents = pdf_dict_get(ctx, obj, PDF_NAME(Contents));
-fz_catch	( ctx )
+	fz_catch(ctx)
 		ERROR_MUPDF_R("pdf_dict_get (Contents)", NULL)
 	if (!contents)
 		ERROR_S_MESSAGE_VAL("Kein Contents-Dict", NULL)
 
-	fz_try( ctx )
+	fz_try(ctx)
 		res = pdf_dict_get_inheritable(ctx, obj, PDF_NAME(Resources));
-fz_catch	( ctx )
+	fz_catch(ctx)
 		ERROR_MUPDF_R("pdf_dict_get_inheritable (Ressources)", NULL)
 	if (!res)
 		ERROR_S_MESSAGE_VAL("Kein Ressources-Dict", NULL)
@@ -710,13 +714,14 @@ fz_catch	( ctx )
 		ERROR_S_VAL(NULL)
 
 	doc = pdf_pin_document(ctx, obj);
-	fz_try( ctx )
+	fz_try(ctx)
 		pdf_process_contents(ctx, proc, doc, res, contents, NULL, NULL);
-fz_always	( ctx ) {
+	fz_always(ctx) {
 		pdf_drop_document(ctx, doc);
 		pdf_close_processor(ctx, proc);
 		pdf_drop_processor(ctx, proc);
-	}fz_catch( ctx ) {
+	}
+	fz_catch(ctx) {
 		fz_drop_buffer(ctx, buf);
 		ERROR_S_VAL(NULL)
 	}
