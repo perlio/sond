@@ -928,11 +928,11 @@ gint pdf_ocr_pages(Projekt *zond, InfoWindow *info_window,
 	ctx = zond->ctx;
 
 	//doc mit text öffnen
-	fz_try( ctx )
+	fz_try(ctx)
 		doc_text = pdf_open_document(ctx, path_tmp); //keine Passwortabfrage
-	fz_always	( ctx )
+	fz_always(ctx)
 		g_free(path_tmp);
-	fz_catch	( ctx )
+	fz_catch(ctx)
 		ERROR_MUPDF("pdf_open_document")
 
 	//Text in PDF übertragen

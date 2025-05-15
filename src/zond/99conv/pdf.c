@@ -334,9 +334,9 @@ gint pdf_save(fz_context *ctx, pdf_document *pdf_doc, const gchar *file_part,
 
 		fz_try( ctx )
 			pdf_save_document(ctx, pdf_doc, rel_path, &opts);
-fz_always		( ctx )
+		fz_always	(ctx)
 			g_free(rel_path);
-fz_catch		( ctx ) {
+		fz_catch	(ctx) {
 			if (error)
 				*error = g_error_new(g_quark_from_static_string("MUPDF"),
 						fz_caught(ctx), "%s\n%s", __func__,
@@ -356,6 +356,7 @@ gint pdf_clean(fz_context *ctx, const gchar *file_part, GError **error) {
 	gint *pages = NULL;
 	gint count = 0;
 	gint ret = 0;
+	gchar* path_tmp = NULL;
 
 	//prüfen, ob in Viewer geöffnet
 	if (zond_pdf_document_is_open(file_part)) {
@@ -375,6 +376,7 @@ gint pdf_clean(fz_context *ctx, const gchar *file_part, GError **error) {
 	} else if (rc == 1)
 		return 1;
 
+	path_tmp = g_strdup(fz_stream_filename(ctx, doc->file));
 	count = pdf_count_pages(ctx, doc);
 	pages = g_malloc(sizeof(gint) * count);
 	for (gint i = 0; i < count; i++)
@@ -387,8 +389,8 @@ gint pdf_clean(fz_context *ctx, const gchar *file_part, GError **error) {
 	fz_catch(ctx) {
 		gint ret = 0;
 
-		ret = remove(fz_stream_filename(ctx, doc->file));
 		pdf_drop_document(ctx, doc);
+		ret = remove(path_tmp);
 
 		if (error) {
 			*error = g_error_new( ZOND_ERROR, 0, "%s\npdf_rearrange_pages\n%s",
@@ -403,13 +405,15 @@ gint pdf_clean(fz_context *ctx, const gchar *file_part, GError **error) {
 				(*error)->message = add_string((*error)->message, error_text);
 			}
 		}
+		g_free(path_tmp);
 
 		return -1;
 	}
 
 	rc = pdf_save(ctx, doc, file_part, error);
-	ret = remove(fz_stream_filename(ctx, doc->file));
 	pdf_drop_document(ctx, doc);
+	ret = remove(path_tmp);
+	g_free(path_tmp);
 	if (rc || ret) {
 		if (error) {
 			if (rc) g_prefix_error(error, "%s\n", __func__);
@@ -479,7 +483,6 @@ typedef struct
 	resources_stack *rstack;
 	int sep;
 } pdf_output_processor;
-
 
 typedef struct {
 	pdf_output_processor super;

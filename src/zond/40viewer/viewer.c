@@ -130,6 +130,9 @@ static gboolean viewer_draw_image_page(GtkWidget *image, cairo_t *cr,
 
 	ViewerPageNew *viewer_page = (ViewerPageNew*) data;
 
+	if (!gtk_widget_is_visible(image))
+		return FALSE;
+
 	transform = fz_translate(0.0, -viewer_page->crop.y0);
 	transform = fz_post_scale(transform, viewer_page->pdfv->zoom / 100,
 			viewer_page->pdfv->zoom / 100);

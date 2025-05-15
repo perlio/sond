@@ -529,7 +529,8 @@ static gint seiten_cb_loesche_seite(PdfViewer *pv, ViewerPageNew* viewer_page,
 
 	if (viewer_page->image_page)
 		gtk_widget_destroy(viewer_page->image_page);
-	g_ptr_array_remove_index(pv->arr_pages, page_pv); //viewer_page wird freed!
+
+	g_ptr_array_remove_index(pv->arr_pages, page_pv); //viewer_page wird g_freed!
 
 	viewer_get_iter_thumb(pv, page_pv, &iter);
 
