@@ -137,7 +137,7 @@ static void init_icons(Projekt *zond) {
 	return;
 }
 
-#ifndef TESTING
+#ifndef Debug
 static void log_init(Projekt *zond) {
 	gchar *logfile = NULL;
 	gchar *logdir = NULL;
@@ -183,13 +183,17 @@ static void log_init(Projekt *zond) {
 static void init(GtkApplication *app, Projekt *zond) {
 	zond->base_dir = get_base_dir();
 
-#ifndef TESTING
+#ifdef Debug
+	setvbuf(stdout, NULL, _IONBF, 0);
+	setvbuf(stderr, NULL, _IONBF, 0);
+#else
 	log_init(zond);
 #endif // TESTING
 
 	//GSettings
 	zond->settings = g_settings_new("de.perlio.zond");
-
+g_message("Test");
+g_warning("Test");
 	//benötigte Arrays erzeugen
 	zond->arr_pv = g_ptr_array_new();
 

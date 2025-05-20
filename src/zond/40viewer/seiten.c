@@ -400,6 +400,7 @@ static gint seiten_drehen_pdf(PdfDocumentPage *pdf_document_page, gint winkel,
 	gint rotate = 0;
 	gint rc = 0;
 	GError *error = NULL;
+	pdf_obj* obj = NULL;
 
 	fz_context *ctx = zond_pdf_document_get_ctx(pdf_document_page->document);
 
@@ -411,7 +412,16 @@ static gint seiten_drehen_pdf(PdfDocumentPage *pdf_document_page, gint winkel,
 	else if (rotate == 360)
 		rotate = 0;
 
-	rc = pdf_page_rotate(ctx, pdf_document_page->obj, rotate, &error);
+	obj = pdf_document_page_get_page_obj(pdf_document_page, &error);
+	if (!obj) {
+		if (errmsg) *errmsg = g_strdup_printf("%s\n%s", __func__,
+				error->message);
+		g_error_free(error);
+
+		return -1;
+	}
+
+	rc = pdf_page_rotate(ctx, obj, rotate, &error);
 	if (rc) {
 		if (errmsg) *errmsg = g_strdup_printf("%s\n%s", __func__,
 				error->message);
@@ -643,7 +653,7 @@ static gint seiten_loeschen(PdfViewer *pv, GPtrArray *arr_document_page,
 
 		if (count == 1) continue;
 
-		pdf_document_page->to_be_deleted = TRUE; //als zu löschend markieren
+		pdf_document_page->to_be_deleted = 2; //als zu löschend markieren
 		page_deleted = TRUE;
 
 		//Seite wird aus pv->arr_pages gelöscht

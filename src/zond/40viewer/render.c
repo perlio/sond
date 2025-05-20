@@ -293,7 +293,7 @@ void render_page_thread(gpointer data, gpointer user_data) {
 		gint rc = 0;
 
 		zond_pdf_document_mutex_lock(viewer_page->pdf_document_page->document);
-		rc = zond_pdf_document_load_page(viewer_page->pdf_document_page,
+		rc = zond_pdf_document_load_page(viewer_page->pdf_document_page, render_response.page,
 				&errmsg);
 		zond_pdf_document_mutex_unlock(
 				viewer_page->pdf_document_page->document);

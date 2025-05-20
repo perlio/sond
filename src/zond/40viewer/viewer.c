@@ -587,8 +587,11 @@ gboolean viewer_entry_in_dd(JournalEntry* entry,
 		gint dd_last_page, gint dd_last_index, GError** error) {
 	gint page_doc = 0;
 
-	page_doc = pdf_document_page_number(entry->pdf_document_page, error);
-	if (page_doc == -1) ERROR_Z
+	page_doc = pdf_document_page_get_index(entry->pdf_document_page);
+	if (page_doc == -1) {
+		if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\nSeite nicht gefunden", __func__);
+		return FALSE;
+	}
 
 	if (page_doc >= dd_first_page && page_doc <= dd_last_page) {
 		if (entry->type == JOURNAL_TYPE_PAGES_INSERTED ||
@@ -793,7 +796,7 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd, GError** err
 			g_array_prepend_val(arr_pages, i);
 			page_deleted = TRUE;
 		}
-		else if (pdfp->obj) {//PdfDocumentPage zum Löschen markiert
+		else if (pdfp->to_be_deleted == 2) {//PdfDocumentPage zum Löschen markiert
 			//ggf. dd anpassen, falls erste oder letzte Seite gelöscht wird
 			//kann derzeit nur passieren, wenn dd ganzes Dokument umfaßt und keine Anbindung ist
 			if (pdfp == dd->first_page) {
@@ -917,10 +920,18 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 		arr_journal = zond_pdf_document_get_arr_journal(dd->zond_pdf_document);
 
 		//dann Änderungen rausrechnen, später wieder dazu...
-		dd_von = pdf_document_page_number(dd->first_page, error);
-		if (dd_von == -1) ERROR_Z
-		dd_bis = pdf_document_page_number(dd->last_page, error);
-		if (dd_bis == -1) ERROR_Z
+		dd_von = pdf_document_page_get_index(dd->first_page);
+		if (dd_von == -1) {
+			if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\ndd->first_page nicht gefunden", __func__);
+
+			return -1;
+		}
+		dd_bis = pdf_document_page_get_index(dd->last_page);
+		if (dd_bis == -1) {
+			if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\ndd->last_page nicht gefunden", __func__);
+
+			return -1;
+		}
 
 		for (gint i = arr_journal->len - 1; i >= 0; i--) {
 			JournalEntry entry = { 0 };
@@ -972,18 +983,16 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 						while (pdf_document_page->thread & 1)
 							viewer_transfer_rendered(pdf_document_page->thread_pv, TRUE);
 
-						pdf_document_page->obj = NULL; //heißt: nicht aus array löschen
-
 						pdf_drop_page(zond_pdf_document_get_ctx(dd->zond_pdf_document),
 								pdf_document_page->page);
 						if (pdf_document_page->arr_annots)
 							g_ptr_array_unref(pdf_document_page->arr_annots);
 						pdf_document_page->page = (pdf_page*) doc_inserted; //Merkposten
-						pdf_document_page->to_be_deleted = TRUE;
+						pdf_document_page->to_be_deleted = 1; //nur aus Dokument, nicht aus arr löschen
 					}
 					zond_pdf_document_mutex_unlock(dd->zond_pdf_document);
 				} else if (entry.type == JOURNAL_TYPE_PAGE_DELETED)
-					entry.pdf_document_page->to_be_deleted = FALSE;
+					entry.pdf_document_page->to_be_deleted = 0;
 				else if (entry.type == JOURNAL_TYPE_ANNOT_CREATED) {
 					gint rc = 0;
 					pdf_annot* pdf_annot = NULL;
@@ -1044,8 +1053,12 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 					if (!pdf_annot) ERROR_Z
 				} else if (entry.type == JOURNAL_TYPE_ROTATE) {
 					gint rc = 0;
+					pdf_obj* obj = NULL;
 
-					rc = pdf_page_rotate(ctx, entry.pdf_document_page->obj,
+					obj = pdf_document_page_get_page_obj(entry.pdf_document_page, error);
+					if (!obj) ERROR_Z
+
+					rc = pdf_page_rotate(ctx, obj,
 							entry.rotate.rotate, error);
 					if (rc) ERROR_Z
 				} else if (entry.type == JOURNAL_TYPE_OCR) {
@@ -1116,16 +1129,13 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 					PdfDocumentPage* pdf_document_page = NULL;
 
 					pdf_document_page = zond_pdf_document_get_pdf_document_page(dd->zond_pdf_document, u);
-					pdf_document_page->obj =
-							pdf_lookup_page_obj(zond_pdf_document_get_ctx(dd->zond_pdf_document),
-									zond_pdf_document_get_pdf_doc(dd->zond_pdf_document), u);
-					pdf_document_page->to_be_deleted = FALSE;
+					pdf_document_page->to_be_deleted = 0;
 					pdf_document_page->page = NULL;
 				}
 				zond_pdf_document_mutex_unlock(dd->zond_pdf_document);
 			}
 			else if (entry.type == JOURNAL_TYPE_PAGE_DELETED)
-				entry.pdf_document_page->to_be_deleted = TRUE;
+				entry.pdf_document_page->to_be_deleted = 2;
 			else if (entry.type == JOURNAL_TYPE_ANNOT_CREATED) {
 				pdf_annot* pdf_annot = NULL;
 
@@ -1176,8 +1186,12 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 				if (rc) ERROR_Z
 			} else if (entry.type == JOURNAL_TYPE_ROTATE) {
 				gint rc = 0;
+				pdf_obj* obj = NULL;
 
-				rc = pdf_page_rotate(ctx, entry.pdf_document_page->obj,
+				obj = pdf_document_page_get_page_obj(entry.pdf_document_page, error);
+				if (!obj) ERROR_Z
+
+				rc = pdf_page_rotate(ctx, obj,
 						entry.pdf_document_page->rotate, error);
 				if (rc) ERROR_Z
 			} else if (entry.type == JOURNAL_TYPE_OCR) {
@@ -1551,9 +1565,12 @@ gint viewer_render_stext_page_fast(fz_context *ctx,
 
 		if (!(pdf_document_page->thread & 2)) {
 			gint rc = 0;
+			gint page = 0;
+
+			page = pdf_document_page_get_index(pdf_document_page);
 
 			zond_pdf_document_mutex_lock(pdf_document_page->document);
-			rc = zond_pdf_document_load_page(pdf_document_page, errmsg);
+			rc = zond_pdf_document_load_page(pdf_document_page, page, errmsg);
 			zond_pdf_document_mutex_unlock(pdf_document_page->document);
 			if (rc)
 				ERROR_S

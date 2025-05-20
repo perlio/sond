@@ -215,6 +215,16 @@ static gint pdf_ocr_sandwich_page(PdfDocumentPage *pdf_document_page,
 	pdf_obj *font_dict_text = NULL;
 	pdf_document *doc = NULL;
 	JournalEntry entry = {pdf_document_page, JOURNAL_TYPE_OCR};
+	pdf_obj *obj = NULL;
+	GError* error = NULL;
+
+	obj = pdf_document_page_get_page_obj(pdf_document_page, &error);
+	if (!obj) {
+		if (errmsg) *errmsg = g_strdup_printf("%s\n%s", __func__, error->message);
+		g_error_free(error);
+
+		return -1;
+	}
 
 	fz_context *ctx = zond_pdf_document_get_ctx(pdf_document_page->document);
 
@@ -223,10 +233,10 @@ static gint pdf_ocr_sandwich_page(PdfDocumentPage *pdf_document_page,
 	fz_catch(ctx)
 		ERROR_MUPDF_R("pdf_lookup_page_obj", -2)
 
-	fz_try(ctx) entry.ocr.buf = pdf_ocr_get_content_stream_as_buffer(ctx, pdf_document_page->obj, errmsg);
+	fz_try(ctx) entry.ocr.buf = pdf_ocr_get_content_stream_as_buffer(ctx, obj, errmsg);
 	fz_catch(ctx) ERROR_MUPDF_R("pdf_get_content_stream_as_buffer", -2)
 
-	buf = pdf_text_filter_page(ctx, pdf_document_page->obj, 2, errmsg);
+	buf = pdf_text_filter_page(ctx, obj, 2, errmsg);
 	if (!buf) {
 		fz_drop_buffer(ctx, entry.ocr.buf);
 		ERROR_S
@@ -254,7 +264,7 @@ static gint pdf_ocr_sandwich_page(PdfDocumentPage *pdf_document_page,
 		ERROR_MUPDF_R("fz_append_buffer", -2)
 	}
 
-	rc = pdf_ocr_update_content_stream(ctx, pdf_document_page->obj, buf,
+	rc = pdf_ocr_update_content_stream(ctx, obj, buf,
 			errmsg);
 	fz_drop_buffer(ctx, buf);
 	if (rc) {
@@ -262,19 +272,19 @@ static gint pdf_ocr_sandwich_page(PdfDocumentPage *pdf_document_page,
 		ERROR_S
 	}
 
-	doc = pdf_pin_document(ctx, pdf_document_page->obj);
+	doc = pdf_pin_document(ctx, obj);
 	graft_map = pdf_new_graft_map(ctx, doc); //keine exception
 	pdf_drop_document(ctx, doc);
 
 	fz_try( ctx ) {
 		//Resources aus pdf_text hizukopieren
-		resources = pdf_dict_get_inheritable(ctx, pdf_document_page->obj,
+		resources = pdf_dict_get_inheritable(ctx, obj,
 				PDF_NAME(Resources));
 		//Zunächst testen, ob Resources Font enthalten
 		font_dict = pdf_dict_get(ctx, resources, PDF_NAME(Font));
 		if (!font_dict) {
 			font_dict = pdf_new_dict(ctx,
-					pdf_get_bound_document(ctx, pdf_document_page->obj), 1);
+					pdf_get_bound_document(ctx, obj), 1);
 			pdf_dict_put_drop(ctx, resources, PDF_NAME(Font), font_dict);
 		}
 

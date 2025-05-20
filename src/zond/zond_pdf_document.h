@@ -29,7 +29,7 @@ typedef struct _Pdf_Document_Page {
 	gint thread;
 	PdfViewer* thread_pv;
 	GPtrArray *arr_annots;
-	gboolean to_be_deleted;
+	gint to_be_deleted;
 } PdfDocumentPage;
 
 typedef struct _Annot_Text_Markup {
@@ -117,9 +117,9 @@ void zond_annot_obj_set_obj(ZondAnnotObj*, pdf_obj*);
 
 pdf_annot* pdf_document_page_annot_get_pdf_annot(PdfDocumentPageAnnot*);
 
-gint pdf_document_page_number(PdfDocumentPage*, GError**);
-
 gint pdf_document_page_get_index(PdfDocumentPage*);
+
+pdf_obj* pdf_document_page_get_page_obj(PdfDocumentPage*, GError**);
 
 void zond_pdf_document_page_free(PdfDocumentPage*);
 
@@ -129,7 +129,7 @@ void annot_free(Annot*);
 
 gint zond_pdf_document_page_load_annots(PdfDocumentPage*, GError**);
 
-gint zond_pdf_document_load_page(PdfDocumentPage*, gchar**);
+gint zond_pdf_document_load_page(PdfDocumentPage*, gint, gchar**);
 
 ZondPdfDocument* zond_pdf_document_open(const gchar*, gint, gint, gchar**);
 

@@ -100,23 +100,6 @@ pdf_annot* pdf_document_page_annot_get_pdf_annot(PdfDocumentPageAnnot* pdpa) {
 	return pdf_annot;
 }
 
-gint pdf_document_page_number(PdfDocumentPage* pdf_document_page, GError** error) {
-	gint number = 0;
-
-	ZondPdfDocumentPrivate *priv = zond_pdf_document_get_instance_private(
-			pdf_document_page->document);
-
-	fz_try(priv->ctx)
-		number = pdf_lookup_page_number(priv->ctx, priv->doc, pdf_document_page->obj);
-	fz_catch(priv->ctx) {
-		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
-				fz_caught(priv->ctx), "%s\n%s", __func__, fz_caught_message(priv->ctx));
-		number = -1;
-	}
-
-	return number;
-}
-
 gint pdf_document_page_get_index(PdfDocumentPage* pdf_document_page) {
 	guint index = 0;
 	GPtrArray* arr_pages = NULL;
@@ -125,6 +108,32 @@ gint pdf_document_page_get_index(PdfDocumentPage* pdf_document_page) {
 	if (!g_ptr_array_find(arr_pages, pdf_document_page, &index)) return -1;
 
 	return (gint) index;
+}
+
+pdf_obj* pdf_document_page_get_page_obj(PdfDocumentPage* pdf_document_page, GError** error) {
+	gint page = 0;
+	pdf_obj* obj = NULL;
+
+	ZondPdfDocumentPrivate *priv = zond_pdf_document_get_instance_private(
+			pdf_document_page->document);
+
+	page = pdf_document_page_get_index(pdf_document_page);
+	if (page == -1) {
+		if (error) *error = g_error_new(ZOND_ERROR, 0,
+				"%s\nSeite nicht gefunden", __func__);
+		return NULL;
+	}
+
+	fz_try(priv->ctx)
+		obj = pdf_lookup_page_obj(priv->ctx, priv->doc, page);
+	fz_catch(priv->ctx) {
+		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
+				fz_caught(priv->ctx), "%s\n%s", __func__, fz_caught_message(priv->ctx));
+
+		return NULL;
+	}
+
+	return obj;
 }
 
 static void zond_pdf_document_close_context(fz_context *ctx) {
@@ -295,7 +304,7 @@ gint zond_pdf_document_page_load_annots(PdfDocumentPage *pdf_document_page, GErr
 	return 0;
 }
 
-gint zond_pdf_document_load_page(PdfDocumentPage *pdf_document_page,
+gint zond_pdf_document_load_page(PdfDocumentPage *pdf_document_page, gint page,
 		gchar **errmsg) {
 	fz_context *ctx = NULL;
 	GError *error = NULL;
@@ -308,7 +317,7 @@ gint zond_pdf_document_load_page(PdfDocumentPage *pdf_document_page,
 
 	fz_try( ctx )
 		pdf_document_page->page = pdf_load_page(ctx, priv->doc,
-				pdf_lookup_page_number(ctx, priv->doc,pdf_document_page->obj));
+				page);
 	fz_catch(ctx)
 		ERROR_MUPDF("pdf_load_page");
 
@@ -341,17 +350,19 @@ static gint zond_pdf_document_init_page(ZondPdfDocument *self,
 	ctx = priv->ctx;
 
 	fz_try( ctx ) {
-		pdf_document_page->obj = pdf_lookup_page_obj(ctx, priv->doc, index);
-		pdf_page_obj_transform(ctx, pdf_document_page->obj, &mediabox,
+		pdf_obj* obj = NULL;
+
+		obj = pdf_lookup_page_obj(ctx, priv->doc, index);
+		pdf_page_obj_transform(ctx, obj, &mediabox,
 				&page_ctm);
 		pdf_document_page->rect = fz_transform_rect(mediabox, page_ctm);
 
-		rotate_obj = pdf_dict_get(ctx, pdf_document_page->obj,
-				PDF_NAME(Rotate));
+		rotate_obj = pdf_dict_get(ctx, obj, PDF_NAME(Rotate));
 		if (rotate_obj)
 			pdf_document_page->rotate = pdf_to_int(ctx, rotate_obj);
 		//else: 0
-	} fz_catch( ctx )
+	}
+	fz_catch( ctx )
 		ERROR_MUPDF("pdf_lookup_page_obj etc.");
 
 	return 0;
