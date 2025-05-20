@@ -525,6 +525,10 @@ static gint seiten_cb_loesche_seite(PdfViewer *pv, ViewerPageNew* viewer_page,
 		gint page_pv, gpointer data) {
 	GtkTreeIter iter = { 0 };
 
+	//highlights und Markierungen Text löschen
+	pv->highlight.page[0] = -1;
+	pv->text_occ.index_act = -1;
+
 	viewer_close_thread_pool_and_transfer(pv);
 
 	if (viewer_page->image_page)
@@ -615,13 +619,32 @@ static gint seiten_anbindung(PdfViewer *pv, GPtrArray *arr_document_page,
 
 static gint seiten_loeschen(PdfViewer *pv, GPtrArray *arr_document_page,
 		GError **error) {
+	gboolean page_deleted = FALSE;
+
 	for (gint i = 0; i < arr_document_page->len; i++) {
 		PdfDocumentPage* pdf_document_page = NULL;
 		JournalEntry entry = { 0, };
 		GArray* arr_journal = NULL;
+		GPtrArray* arr_pages = NULL;
+		gint count = 0;
 
 		pdf_document_page = g_ptr_array_index(arr_document_page, i);
-		pdf_document_page->to_be_deleted = TRUE;
+
+		//Prüfen, ob letzte (nicht gelöschte) Seite des Dokuments
+		arr_pages = zond_pdf_document_get_arr_pages(
+				pdf_document_page->document);
+		for (gint j = 0; j < arr_pages->len; j++) {
+			PdfDocumentPage* pdf_document_page_tmp = NULL;
+
+			pdf_document_page_tmp = g_ptr_array_index(arr_pages, j);
+			if (!pdf_document_page_tmp->to_be_deleted)
+				count++;
+		}
+
+		if (count == 1) continue;
+
+		pdf_document_page->to_be_deleted = TRUE; //als zu löschend markieren
+		page_deleted = TRUE;
 
 		//Seite wird aus pv->arr_pages gelöscht
 		viewer_foreach(pv, pdf_document_page, seiten_cb_loesche_seite,
@@ -634,10 +657,13 @@ static gint seiten_loeschen(PdfViewer *pv, GPtrArray *arr_document_page,
 
 		g_array_append_val(arr_journal, entry);
 	}
-	seiten_refresh_layouts(pv->zond->arr_pv);
 
-	gtk_tree_selection_unselect_all(
-			gtk_tree_view_get_selection(GTK_TREE_VIEW(pv->tree_thumb)));
+	if (page_deleted) {
+		seiten_refresh_layouts(pv->zond->arr_pv);
+
+		gtk_tree_selection_unselect_all(
+				gtk_tree_view_get_selection(GTK_TREE_VIEW(pv->tree_thumb)));
+	}
 
 	return 0;
 }
@@ -753,6 +779,10 @@ static gint seiten_einfuegen_foreach(PdfViewer *pv, ViewerPageNew* viewer_page,
 				zond_pdf_document_get_pdf_document_page(viewer_page->dd->zond_pdf_document,
 				data_insert->page_doc + data_insert->count - 1);
 	}
+
+	//highlights und Markierungen Text löschen
+	pv->highlight.page[0] = -1;
+	pv->text_occ.index_act = -1;
 
 	//jetzt in viewer einfügen
 	for (gint u = 0; u < data_insert->count; u++) {

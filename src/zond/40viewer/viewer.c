@@ -793,8 +793,34 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd, GError** err
 			g_array_prepend_val(arr_pages, i);
 			page_deleted = TRUE;
 		}
-		else if (pdfp->obj) //PdfDocumentPage zum Löschen markiert
+		else if (pdfp->obj) {//PdfDocumentPage zum Löschen markiert
+			//ggf. dd anpassen, falls erste oder letzte Seite gelöscht wird
+			//kann derzeit nur passieren, wenn dd ganzes Dokument umfaßt und keine Anbindung ist
+			if (pdfp == dd->first_page) {
+				PdfDocumentPage* pdfp_next = NULL;
+				gint count = i + 1; //Dokument muß mindestens zwei Seiten haben
+				//sonst vorher schon Abfrage, ob letzte Seite gelöscht wird
+
+				do {
+					pdfp_next = zond_pdf_document_get_pdf_document_page(dd->zond_pdf_document, count);
+					count++;
+				} while (pdfp_next->to_be_deleted);
+				dd->first_page = pdfp_next;
+			}
+			else if (pdfp == dd->last_page) {
+				PdfDocumentPage* pdfp_prev = NULL;
+				gint count = i - 1; //Dokument muß mindestens zwei Seiten haben
+				//sonst vorher schon Abfrage, ob letzte Seite gelöscht wird
+
+				do {
+					pdfp_prev = zond_pdf_document_get_pdf_document_page(dd->zond_pdf_document, count);
+					count--;
+				} while (pdfp_prev->to_be_deleted);
+				dd->last_page = pdfp_prev;
+			}
+
 			g_ptr_array_remove_index(zond_pdf_document_get_arr_pages(dd->zond_pdf_document), i);
+		}
 	}
 
 	if (page_deleted) {
@@ -971,11 +997,9 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 
 					ret = pdf_annot_get_annot(ctx, pdf_annot, &annot, error);
 					if (!ret) {
-						if (error) *error = g_error_new(ZOND_ERROR, 0,
-								"%s\nAnnot konnte nicht ausgelesen werden", __func__);
 						zond_pdf_document_mutex_unlock(dd->zond_pdf_document);
 
-						return -1;
+						ERROR_Z
 					}
 
 					rc = pdf_annot_delete(ctx, pdf_annot, error);
@@ -996,11 +1020,9 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 
 					ret = pdf_annot_get_annot(ctx, pdf_annot, &annot, error);
 					if (!ret) {
-						if (error) *error = g_error_new(ZOND_ERROR, 0,
-								"%s\nAnnot konnte nicht ausgelesen werden", __func__);
 						zond_pdf_document_mutex_unlock(dd->zond_pdf_document);
 
-						return -1;
+						ERROR_Z
 					}
 
 					rc = pdf_annot_change(ctx, pdf_annot, entry.pdf_document_page->rotate,
@@ -1101,7 +1123,8 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 					pdf_document_page->page = NULL;
 				}
 				zond_pdf_document_mutex_unlock(dd->zond_pdf_document);
-			} else if (entry.type == JOURNAL_TYPE_PAGE_DELETED)
+			}
+			else if (entry.type == JOURNAL_TYPE_PAGE_DELETED)
 				entry.pdf_document_page->to_be_deleted = TRUE;
 			else if (entry.type == JOURNAL_TYPE_ANNOT_CREATED) {
 				pdf_annot* pdf_annot = NULL;
@@ -1114,7 +1137,8 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 				if (!pdf_annot) ERROR_Z
 
 				annot_free(&entry.annot_changed.annot);
-			} else if (entry.type == JOURNAL_TYPE_ANNOT_CHANGED) {
+			}
+			else if (entry.type == JOURNAL_TYPE_ANNOT_CHANGED) {
 				gint rc = 0;
 				Annot annot = { 0 };
 				gboolean ret = FALSE;
@@ -1127,11 +1151,9 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 
 				ret = pdf_annot_get_annot(ctx, pdf_annot, &annot, error);
 				if (!ret) {
-					if (error) *error = g_error_new(ZOND_ERROR, 0,
-							"%s\nAnnot konnte nicht ausgelesen werden", __func__);
 					zond_pdf_document_mutex_unlock(dd->zond_pdf_document);
 
-					return -1;
+					ERROR_Z
 				}
 
 				rc = pdf_annot_change(ctx, pdf_annot, entry.pdf_document_page->rotate,
@@ -1347,7 +1369,6 @@ static void cb_viewer_text_search_entry_buffer_changed(gpointer data) {
 			pv->text_occ.arr_quad->len);
 	pv->text_occ.not_found = FALSE;
 	pv->text_occ.index_act = -1;
-	pv->text_occ.page_act = -1;
 
 	return;
 }
