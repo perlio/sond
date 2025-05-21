@@ -96,7 +96,7 @@ gint pdf_copy_page(fz_context *ctx, pdf_document *doc_src, gint page_from,
 
 	for (gint u = page_from; u <= page_to; u++) {
 		fz_try(ctx)
-				pdf_graft_mapped_page(ctx, graft_map, page_to, doc_src, u);
+				pdf_graft_mapped_page(ctx, graft_map, page++, doc_src, u);
 		fz_catch( ctx )
 		{
 			pdf_drop_graft_map(ctx, graft_map);
