@@ -52,11 +52,12 @@ static gint pdf_ocr_update_content_stream(fz_context *ctx, pdf_obj *page_ref,
 		pdf_dict_put_drop(ctx, page_ref, PDF_NAME(Contents),
 				obj_content_stream);
 	}
+
 	fz_try( ctx )
 		pdf_update_stream(ctx, doc, obj_content_stream, buf, 0);
-fz_always	( ctx )
+	fz_always(ctx)
 		pdf_drop_document(ctx, doc);
-fz_catch	( ctx )
+	fz_catch(ctx)
 		ERROR_MUPDF("pdf_update_stream")
 
 	return 0;
@@ -303,9 +304,10 @@ static gint pdf_ocr_sandwich_page(PdfDocumentPage *pdf_document_page,
 			pdf_dict_put_drop(ctx, font_dict, font_dict_key,
 					pdf_graft_mapped_object(ctx, graft_map, font_dict_val));
 		}
-	} fz_always( ctx )
+	}
+	fz_always(ctx)
 		pdf_drop_graft_map(ctx, graft_map);
-	fz_catch( ctx ) {
+	fz_catch(ctx) {
 		fz_drop_buffer(ctx, entry.ocr.buf);
 		ERROR_MUPDF("fz_try (page_sandwich)")
 	}

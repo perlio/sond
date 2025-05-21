@@ -90,81 +90,17 @@ fz_catch		( ctx ) ERROR_MUPDF( "pdf_dict_get_key" )
 
 gint pdf_copy_page(fz_context *ctx, pdf_document *doc_src, gint page_from,
 		gint page_to, pdf_document *doc_dest, gint page, gchar **errmsg) {
-	/* Copy as few key/value pairs as we can. Do not include items that reference other pages. */
-	static pdf_obj *const copy_list[] = { PDF_NAME(Contents), PDF_NAME(
-			Resources), PDF_NAME(MediaBox), PDF_NAME(CropBox), PDF_NAME(
-			BleedBox), PDF_NAME(TrimBox), PDF_NAME(ArtBox), PDF_NAME(Rotate),
-			PDF_NAME(UserUnit), PDF_NAME(Annots) };
-
-	pdf_obj *page_ref = NULL;
-	pdf_obj *page_dict = NULL;
-	pdf_obj *obj = NULL;
-	pdf_obj *ref = NULL;
 	pdf_graft_map *graft_map = NULL;
 
 	graft_map = pdf_new_graft_map(ctx, doc_dest); //keine exception
 
 	for (gint u = page_from; u <= page_to; u++) {
-		fz_try( ctx ) {
-			page_ref = pdf_lookup_page_obj(ctx, doc_src, u);
-			pdf_flatten_inheritable_page_items(ctx, page_ref);
-		}fz_catch( ctx )
-		{
-			pdf_drop_graft_map( ctx, graft_map );
-			ERROR_MUPDF( "pdf_lookup- and flatten_inheritable_page" )
-		}
-
-		fz_try( ctx )
-		{
-			/* Make a new page object dictionary to hold the items we copy from the source page. */
-			page_dict = pdf_new_dict( ctx, doc_dest, 4 );
-			pdf_dict_put( ctx, page_dict, PDF_NAME(Type), PDF_NAME(Page) );
-		}
+		fz_try(ctx)
+				pdf_graft_mapped_page(ctx, graft_map, page_to, doc_src, u);
 		fz_catch( ctx )
 		{
-			pdf_drop_graft_map( ctx, graft_map );
-			pdf_drop_obj( ctx, page_dict );
-			ERROR_MUPDF( "pdf_new_dict/_put" )
-		}
-
-		for ( gint i = 0; i < nelem(copy_list); i++ )
-		{
-			obj = pdf_dict_get( ctx, page_ref, copy_list[i] ); //ctx wird gar nicht gebraucht
-			if (obj != NULL)
-			{
-				fz_try( ctx )
-				{
-					pdf_obj* grafted_obj = NULL;
-
-					grafted_obj = pdf_graft_mapped_object( ctx, graft_map, obj );
-					pdf_dict_put_drop( ctx, page_dict, copy_list[i], grafted_obj );
-				}
-				fz_catch( ctx )
-				{
-					pdf_drop_graft_map( ctx, graft_map );
-					pdf_drop_obj( ctx, page_dict );
-					ERROR_MUPDF( "pdf_dict_put_drop" )
-				}
-			}
-		}
-
-		fz_try( ctx )
-		{
-			/* Add the page object to the destination document. */
-			ref = pdf_add_object( ctx, doc_dest, page_dict );
-
-			/* Insert it into the page tree. */
-			pdf_insert_page( ctx, doc_dest, (page == -1) ? -1 : page + u - page_from, ref );
-		}
-		fz_always( ctx )
-		{
-			pdf_drop_obj( ctx, page_dict );
-			pdf_drop_obj( ctx, ref );
-		}
-		fz_catch( ctx )
-		{
-			pdf_drop_graft_map( ctx, graft_map );
-			ERROR_MUPDF( "pdf_add_object/_insert_page" )
+			pdf_drop_graft_map(ctx, graft_map);
+			ERROR_MUPDF( "pdf_graft_mapped_page" )
 		}
 	}
 
