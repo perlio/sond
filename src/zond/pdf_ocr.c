@@ -234,8 +234,10 @@ static gint pdf_ocr_sandwich_page(PdfDocumentPage *pdf_document_page,
 	fz_catch(ctx)
 		ERROR_MUPDF_R("pdf_lookup_page_obj", -2)
 
-	fz_try(ctx) entry.ocr.buf = pdf_ocr_get_content_stream_as_buffer(ctx, obj, errmsg);
-	fz_catch(ctx) ERROR_MUPDF_R("pdf_get_content_stream_as_buffer", -2)
+	fz_try(ctx)
+		entry.ocr.buf = pdf_ocr_get_content_stream_as_buffer(ctx, obj, errmsg);
+	fz_catch(ctx)
+		ERROR_MUPDF_R("pdf_get_content_stream_as_buffer", -2)
 
 	buf = pdf_text_filter_page(ctx, obj, 2, errmsg);
 	if (!buf) {
@@ -277,7 +279,7 @@ static gint pdf_ocr_sandwich_page(PdfDocumentPage *pdf_document_page,
 	graft_map = pdf_new_graft_map(ctx, doc); //keine exception
 	pdf_drop_document(ctx, doc);
 
-	fz_try( ctx ) {
+	fz_try(ctx) {
 		//Resources aus pdf_text hizukopieren
 		resources = pdf_dict_get_inheritable(ctx, obj,
 				PDF_NAME(Resources));
@@ -494,9 +496,9 @@ pdf_ocr_create_doc_from_page(PdfDocumentPage *pdf_document_page, gint flag,
 		ERROR_S_VAL(NULL)
 	}
 
-	fz_try( ctx )
+	fz_try(ctx)
 		page = pdf_load_page(ctx, doc_new, 0);
-fz_catch	( ctx ) {
+	fz_catch(ctx) {
 		pdf_drop_document(ctx, doc_new);
 		ERROR_MUPDF_R("pdf_lookup_page_obj", NULL)
 	}
@@ -726,7 +728,7 @@ pdf_ocr_get_hidden_text(PdfDocumentPage *pdf_document_page, gchar **errmsg) {
 
 	fz_try( ctx )
 		page = pdf_load_page(ctx, doc_tmp_alt, 0);
-fz_catch	( ctx ) {
+	fz_catch(ctx) {
 		pdf_drop_document(ctx, doc_tmp_alt);
 		ERROR_MUPDF_R("fz_load_page", NULL);
 
@@ -737,7 +739,7 @@ fz_catch	( ctx ) {
 	fz_try( ctx )
 		stext_page = fz_new_stext_page(ctx,
 				pdf_bound_page(ctx, page, FZ_CROP_BOX));
-fz_catch	( ctx ) {
+	fz_catch(ctx) {
 		fz_drop_page(ctx, &page->super);
 		pdf_drop_document(ctx, doc_tmp_alt);
 		ERROR_MUPDF_R("fz_new_stext_page", NULL)

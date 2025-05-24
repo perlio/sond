@@ -96,7 +96,7 @@ gint pdf_copy_page(fz_context *ctx, pdf_document *doc_src, gint page_from,
 
 	for (gint u = page_from; u <= page_to; u++) {
 		fz_try(ctx)
-				pdf_graft_mapped_page(ctx, graft_map, page++, doc_src, u);
+			pdf_graft_mapped_page(ctx, graft_map, page++, doc_src, u);
 		fz_catch( ctx )
 		{
 			pdf_drop_graft_map(ctx, graft_map);
@@ -382,7 +382,7 @@ pdf_get_string_from_line(fz_context *ctx, fz_stext_line *line, gchar **errmsg) {
 
 	fz_try( ctx )
 		buf = fz_new_buffer(ctx, 128);
-fz_catch	( ctx )
+	fz_catch(ctx)
 		ERROR_MUPDF_R("fz_new_buffer", NULL)
 
 	//string aus Zeile bilden
@@ -390,7 +390,8 @@ fz_catch	( ctx )
 			stext_char->next) {
 		fz_try( ctx )
 			fz_append_rune(ctx, buf, stext_char->c);
-fz_catch		( ctx ) ERROR_MUPDF_R( "fz_append_rune", NULL )
+		fz_catch(ctx)
+			ERROR_MUPDF_R( "fz_append_rune", NULL )
 	}
 
 	line_string = g_strdup(fz_string_from_buffer(ctx, buf));
@@ -583,7 +584,7 @@ pdf_new_text_filter_processor(fz_context *ctx, fz_buffer **buf, gint flags,
 				*buf, 0, 0);
 	fz_catch(ctx) {
 		fz_drop_buffer(ctx, *buf);
-		ERROR_MUPDF_R("pdf_new_output_processor", NULL)
+		ERROR_MUPDF_R("pdf_new_bufferprocessor", NULL)
 	}
 
 	proc = Memento_label(fz_calloc(ctx, 1, sizeof(pdf_text_filter_processor)),
