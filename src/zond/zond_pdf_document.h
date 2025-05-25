@@ -163,7 +163,11 @@ void zond_pdf_document_mutex_unlock(const ZondPdfDocument*);
 gint zond_pdf_document_insert_pages(ZondPdfDocument*, gint,
 		pdf_document*, gchar**);
 
-G_END_DECLS
+gint zond_pdf_document_get_ocr_num(ZondPdfDocument*);
+
+void zond_pdf_document_set_ocr_num(ZondPdfDocument*, gint );
+
+	G_END_DECLS
 
 #endif // ZOND_PDF_DOCUMENT_H_INCLUDED
 

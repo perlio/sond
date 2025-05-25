@@ -38,6 +38,7 @@ typedef struct {
 	GPtrArray *pages; //array von PdfDocumentPage*
 	GArray *arr_journal;
 	GArray* arr_redo;
+	gint ocr_num;
 } ZondPdfDocumentPrivate;
 
 G_DEFINE_TYPE_WITH_PRIVATE(ZondPdfDocument, zond_pdf_document, G_TYPE_OBJECT)
@@ -620,6 +621,8 @@ gint zond_pdf_document_save(ZondPdfDocument *self, GError **error) {
 		return -1;
 	}
 
+	priv->ocr_num = 0;
+
 	rc = pdf_save(priv->ctx, priv->doc, priv->file_part, error);
 	if (rc) ERROR_Z
 
@@ -744,4 +747,18 @@ gint zond_pdf_document_insert_pages(ZondPdfDocument *zond_pdf_document,
 	}
 
 	return 0;
+}
+
+gint zond_pdf_document_get_ocr_num(ZondPdfDocument *self) {
+	ZondPdfDocumentPrivate *priv = zond_pdf_document_get_instance_private(self);
+
+	return priv->ocr_num;
+}
+
+void zond_pdf_document_set_ocr_num(ZondPdfDocument *self, gint ocr_num) {
+	ZondPdfDocumentPrivate *priv = zond_pdf_document_get_instance_private(self);
+
+	priv->ocr_num = ocr_num;
+
+	return;
 }

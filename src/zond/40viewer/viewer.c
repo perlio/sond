@@ -867,6 +867,7 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd, GError** err
 			zond_pdf_document_get_pdf_doc(dd->zond_pdf_document),
 			zond_pdf_document_get_file_part(dd->zond_pdf_document), error);
 	zond_pdf_document_mutex_unlock(dd->zond_pdf_document);
+	zond_pdf_document_set_ocr_num(dd->zond_pdf_document, 0);
 	if (rc) {
 		gint ret = 0;
 		GError* error_int = NULL;
