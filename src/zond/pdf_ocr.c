@@ -387,11 +387,11 @@ static gint pdf_ocr_sandwich_page(PdfDocumentPage *pdf_document_page,
 //thread-safe
 static gint pdf_ocr_sandwich_doc(GPtrArray *arr_document_pages,
 		pdf_document *doc_text, InfoWindow *info_window, gchar **errmsg) {
-	if (arr_document_pages->len == 0)
-		return 0;
-
 	gint rc = 0;
 	gchar *message = NULL;
+
+	if (arr_document_pages->len == 0)
+		return 0;
 
 	for (gint i = 0; i < arr_document_pages->len; i++) {
 		PdfDocumentPage *pdf_document_page = g_ptr_array_index(
@@ -1006,6 +1006,48 @@ gint pdf_ocr_pages(Projekt *zond, InfoWindow *info_window,
 	fz_catch(ctx)
 		ERROR_MUPDF("pdf_open_document")
 
+	//als erstes prüfen, ob zond->ocr_font schon besteht
+	//Hierin wird die Schriftart "f-0-0" gespeichert
+	//wird benötigt, wenn OCR beim speichern von dds rückgängig genacht wird
+	//und dieser Font "wegsanitized" wird
+
+	if (!zond->ocr_font) {
+		pdf_document *doc = NULL;
+		pdf_graft_map *graft_map = NULL;
+		pdf_obj* f_0_0 = NULL;
+
+		fz_try(ctx) {
+			pdf_obj* page_ref = NULL;
+			pdf_obj* res = NULL;
+			pdf_obj* font = NULL;
+
+			page_ref = pdf_lookup_page_obj(ctx, doc_text, 0); //eine Seite wird es ja wohl haben
+			res = pdf_dict_get(ctx, page_ref, PDF_NAME(Resources));
+			font = pdf_dict_get(ctx, res, PDF_NAME(Font));
+			f_0_0 = pdf_dict_gets(ctx, font, "f-0-0");
+		}
+		fz_catch(ctx)
+			ERROR_MUPDF("pdf get Font")
+
+		fz_try(ctx)
+			doc = pdf_create_document(ctx);
+		fz_catch(ctx)
+			ERROR_MUPDF("pdf_create_document")
+
+		graft_map = pdf_new_graft_map(ctx, doc);
+
+		fz_try(ctx)
+			pdf_dict_puts_drop(ctx, pdf_dict_get(ctx, pdf_trailer(ctx, doc), PDF_NAME(Root)),
+					"f00_Font", pdf_graft_mapped_object(ctx, graft_map, f_0_0));
+		fz_always(ctx)
+			pdf_drop_graft_map(ctx, graft_map);
+		fz_catch(ctx) {
+			pdf_drop_document(ctx, doc);
+			ERROR_MUPDF("pdf_new_graft_map")
+		}
+
+		zond->ocr_font = doc;
+	}
 	//Text in PDF übertragen
 	rc = pdf_ocr_sandwich_doc(arr_document_pages, doc_text, info_window,
 			errmsg); //thread-safe

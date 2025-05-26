@@ -53,6 +53,7 @@ static gboolean cb_delete_event(GtkWidget *app_window, GdkEvent *event,
 	gtk_widget_destroy(zond->app_window);
 
 	pdf_drop_document(zond->ctx, zond->pv_clip);
+	pdf_drop_document(zond->ctx, zond->ocr_font);
 
 	fz_drop_context(zond->ctx);
 
