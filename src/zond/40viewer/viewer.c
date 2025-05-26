@@ -900,6 +900,35 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd, GError** err
 	return 0;
 }
 
+static gint viewer_swap_content_stream(fz_context *ctx, pdf_obj *page_ref,
+		fz_buffer *buf, GError **error) {
+	fz_buffer* buf_tmp = NULL;
+	gchar* errmsg = NULL;
+	gint rc = 0;
+
+	buf_tmp = pdf_ocr_get_content_stream_as_buffer(ctx, page_ref, &errmsg);
+	if (!buf_tmp) {
+		if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\n%s", __func__, errmsg);
+		g_free(errmsg);
+
+		return -1;
+	}
+
+	rc  = pdf_ocr_update_content_stream(ctx, page_ref, buf, &errmsg);
+	if (rc) {
+		if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\n%s", __func__, errmsg);
+		g_free(errmsg);
+		fz_drop_buffer(ctx, buf_tmp);
+
+		return -1;
+	}
+
+	fz_drop_buffer(ctx, buf);
+	buf = buf_tmp;
+
+	return 0;
+}
+
 gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 	DisplayedDocument *dd = NULL;
 
@@ -1065,32 +1094,13 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 					if (rc) ERROR_Z
 				} else if (entry.type == JOURNAL_TYPE_OCR) {
 					pdf_obj* page_ref = NULL;
-					fz_buffer* buf = NULL;
-					gchar* errmsg = NULL;
 					gint rc = 0;
 
 					page_ref = pdf_document_page_get_page_obj(entry.pdf_document_page, error);
 					if (!page_ref) ERROR_Z
 
-					buf = pdf_ocr_get_content_stream_as_buffer(ctx, page_ref, &errmsg);
-					if (!buf) {
-						if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\n%s", __func__, errmsg);
-						g_free(errmsg);
-
-						return -1;
-					}
-
-					rc  = pdf_ocr_update_content_stream(ctx, page_ref, entry.ocr.buf, &errmsg);
-					if (rc) {
-						if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\n%s", __func__, errmsg);
-						g_free(errmsg);
-						fz_drop_buffer(ctx, buf);
-
-						return -1;
-					}
-
-					fz_drop_buffer(ctx, entry.ocr.buf);
-					entry.ocr.buf = buf;
+					rc = viewer_swap_content_stream(ctx, page_ref, entry.ocr.buf, error);
+					if (rc) ERROR_Z
 				}
 			}
 		}
@@ -1223,8 +1233,6 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 				if (rc) ERROR_Z
 			} else if (entry.type == JOURNAL_TYPE_OCR) {
 				pdf_obj* page_ref = NULL;
-				fz_buffer* buf = NULL;
-				gchar* errmsg = NULL;
 				gint rc = 0;
 				pdf_obj* f_0_0_root = NULL;
 				pdf_obj* f_0_0_font = NULL;
@@ -1235,25 +1243,8 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 				page_ref = pdf_document_page_get_page_obj(entry.pdf_document_page, error);
 				if (!page_ref) ERROR_Z
 
-				buf = pdf_ocr_get_content_stream_as_buffer(ctx, page_ref, &errmsg);
-				if (!buf) {
-					if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\n%s", __func__, errmsg);
-					g_free(errmsg);
-
-					return -1;
-				}
-
-				rc  = pdf_ocr_update_content_stream(ctx, page_ref, entry.ocr.buf, &errmsg);
-				if (rc) {
-					if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\n%s", __func__, errmsg);
-					g_free(errmsg);
-					fz_drop_buffer(ctx, buf);
-
-					return -1;
-				}
-
-				fz_drop_buffer(ctx, entry.ocr.buf);
-				entry.ocr.buf = buf;
+				rc = viewer_swap_content_stream(ctx, page_ref, entry.ocr.buf, error);
+				if (rc) ERROR_Z
 
 				//und jetzt noch f-0-0-Font wieder einfügen
 				fz_try(ctx) {
