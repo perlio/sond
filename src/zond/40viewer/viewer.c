@@ -22,6 +22,7 @@
 #include <mupdf/fitz.h>
 
 #include "../zond_pdf_document.h"
+#include "../pdf_ocr.h"
 
 #include "../global_types.h"
 
@@ -1063,8 +1064,33 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 							entry.rotate.rotate, error);
 					if (rc) ERROR_Z
 				} else if (entry.type == JOURNAL_TYPE_OCR) {
+					pdf_obj* page_ref = NULL;
+					fz_buffer* buf = NULL;
+					gchar* errmsg = NULL;
+					gint rc = 0;
 
+					page_ref = pdf_document_page_get_page_obj(entry.pdf_document_page, error);
+					if (!page_ref) ERROR_Z
 
+					buf = pdf_ocr_get_content_stream_as_buffer(ctx, page_ref, &errmsg);
+					if (!buf) {
+						if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\n%s", __func__, errmsg);
+						g_free(errmsg);
+
+						return -1;
+					}
+
+					rc  = pdf_ocr_update_content_stream(ctx, page_ref, entry.ocr.buf, &errmsg);
+					if (rc) {
+						if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\n%s", __func__, errmsg);
+						g_free(errmsg);
+						fz_drop_buffer(ctx, buf);
+
+						return -1;
+					}
+
+					fz_drop_buffer(ctx, entry.ocr.buf);
+					entry.ocr.buf = buf;
 				}
 			}
 		}
@@ -1196,6 +1222,68 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 						entry.pdf_document_page->rotate, error);
 				if (rc) ERROR_Z
 			} else if (entry.type == JOURNAL_TYPE_OCR) {
+				pdf_obj* page_ref = NULL;
+				fz_buffer* buf = NULL;
+				gchar* errmsg = NULL;
+				gint rc = 0;
+				pdf_obj* f_0_0_root = NULL;
+				pdf_obj* f_0_0_font = NULL;
+				pdf_graft_map* graft_map = NULL;
+				pdf_obj* res = NULL;
+				pdf_obj* font = NULL;
+
+				page_ref = pdf_document_page_get_page_obj(entry.pdf_document_page, error);
+				if (!page_ref) ERROR_Z
+
+				buf = pdf_ocr_get_content_stream_as_buffer(ctx, page_ref, &errmsg);
+				if (!buf) {
+					if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\n%s", __func__, errmsg);
+					g_free(errmsg);
+
+					return -1;
+				}
+
+				rc  = pdf_ocr_update_content_stream(ctx, page_ref, entry.ocr.buf, &errmsg);
+				if (rc) {
+					if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\n%s", __func__, errmsg);
+					g_free(errmsg);
+					fz_drop_buffer(ctx, buf);
+
+					return -1;
+				}
+
+				fz_drop_buffer(ctx, entry.ocr.buf);
+				entry.ocr.buf = buf;
+
+				//und jetzt noch f-0-0-Font wieder einfügen
+				fz_try(ctx) {
+					f_0_0_root = pdf_dict_get(ctx, pdf_trailer(ctx, pdfv->zond->ocr_font), PDF_NAME(Root));
+					f_0_0_font = pdf_dict_gets(ctx, f_0_0_root, "f-0-0");
+				}
+				fz_catch(ctx) {
+					if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\n%s", __func__,
+							fz_caught_message(ctx));
+
+					return -1;
+				}
+
+				graft_map = pdf_new_graft_map(ctx,
+						zond_pdf_document_get_pdf_doc(entry.pdf_document_page->document));
+
+				fz_try(ctx) {
+					res = pdf_dict_get(ctx, page_ref, PDF_NAME(Resources));
+					font = pdf_dict_get(ctx, res, PDF_NAME(Font));
+					pdf_dict_puts_drop(ctx, font, "f-0-0",
+							pdf_graft_mapped_object(ctx, graft_map, f_0_0_font));
+				}
+				fz_always(ctx)
+					pdf_drop_graft_map(ctx, graft_map);
+				fz_catch(ctx) {
+					if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\n%s", __func__,
+							fz_caught_message(ctx));
+
+					return -1;
+				}
 
 			}
 		}

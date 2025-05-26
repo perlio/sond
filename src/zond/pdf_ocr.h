@@ -8,8 +8,9 @@ typedef char gchar;
 typedef struct _Projekt Projekt;
 typedef struct _Info_Window InfoWindow;
 
-GArray* pdf_ocr_get_cleaned_tokens(fz_context*, pdf_page*, fz_stream*, gint,
-		gchar**);
+gint pdf_ocr_update_content_stream(fz_context*, pdf_obj*, fz_buffer*, gchar**);
+
+fz_buffer* pdf_ocr_get_content_stream_as_buffer(fz_context*, pdf_obj*, gchar**);
 
 gint pdf_ocr_pages(Projekt*, InfoWindow*, GPtrArray*, gchar**);
 

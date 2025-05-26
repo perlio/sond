@@ -33,7 +33,7 @@
 
 #define TESS_SCALE 5
 
-static gint pdf_ocr_update_content_stream(fz_context *ctx, pdf_obj *page_ref,
+gint pdf_ocr_update_content_stream(fz_context *ctx, pdf_obj *page_ref,
 		fz_buffer *buf, gchar **errmsg) {
 	pdf_obj *obj_content_stream = NULL;
 	pdf_document *doc = NULL;
@@ -47,10 +47,15 @@ static gint pdf_ocr_update_content_stream(fz_context *ctx, pdf_obj *page_ref,
 	/* If contents is not a stream it's an array of streams or missing. */
 	if (!pdf_is_stream(ctx, obj_content_stream)) {
 		/* Create a new stream object to replace the array of streams or missing object. */
-		obj_content_stream = pdf_add_object_drop(ctx, doc,
-				pdf_new_dict(ctx, doc, 1));
-		pdf_dict_put_drop(ctx, page_ref, PDF_NAME(Contents),
-				obj_content_stream);
+		fz_try(ctx) {
+			obj_content_stream = pdf_add_object_drop(ctx, doc,
+					pdf_new_dict(ctx, doc, 1));
+			pdf_dict_put_drop(ctx, page_ref, PDF_NAME(Contents),
+					obj_content_stream);
+		}
+		fz_catch(ctx) {
+			ERROR_MUPDF("pdf_add_object_drop")
+		}
 	}
 
 	fz_try( ctx )
@@ -94,7 +99,7 @@ pdf_ocr_find_BT(gchar *buf, size_t size) {
 	return NULL;
 }
 
-static fz_buffer*
+fz_buffer*
 pdf_ocr_get_content_stream_as_buffer(fz_context *ctx, pdf_obj *page_ref,
 		gchar **errmsg) {
 	pdf_obj *obj_contents = NULL;
@@ -1038,7 +1043,7 @@ gint pdf_ocr_pages(Projekt *zond, InfoWindow *info_window,
 
 		fz_try(ctx)
 			pdf_dict_puts_drop(ctx, pdf_dict_get(ctx, pdf_trailer(ctx, doc), PDF_NAME(Root)),
-					"f00_Font", pdf_graft_mapped_object(ctx, graft_map, f_0_0));
+					"f-0-0", pdf_graft_mapped_object(ctx, graft_map, f_0_0));
 		fz_always(ctx)
 			pdf_drop_graft_map(ctx, graft_map);
 		fz_catch(ctx) {
