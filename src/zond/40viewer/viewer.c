@@ -901,7 +901,7 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd, GError** err
 }
 
 static gint viewer_swap_content_stream(fz_context *ctx, pdf_obj *page_ref,
-		fz_buffer *buf, GError **error) {
+		fz_buffer** buf, GError **error) {
 	fz_buffer* buf_tmp = NULL;
 	gchar* errmsg = NULL;
 	gint rc = 0;
@@ -914,7 +914,7 @@ static gint viewer_swap_content_stream(fz_context *ctx, pdf_obj *page_ref,
 		return -1;
 	}
 
-	rc  = pdf_ocr_update_content_stream(ctx, page_ref, buf, &errmsg);
+	rc  = pdf_ocr_update_content_stream(ctx, page_ref, *buf, &errmsg);
 	if (rc) {
 		if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\n%s", __func__, errmsg);
 		g_free(errmsg);
@@ -923,8 +923,8 @@ static gint viewer_swap_content_stream(fz_context *ctx, pdf_obj *page_ref,
 		return -1;
 	}
 
-	fz_drop_buffer(ctx, buf);
-	buf = buf_tmp;
+	fz_drop_buffer(ctx, *buf);
+	*buf = buf_tmp;
 
 	return 0;
 }
@@ -1099,7 +1099,7 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 					page_ref = pdf_document_page_get_page_obj(entry.pdf_document_page, error);
 					if (!page_ref) ERROR_Z
 
-					rc = viewer_swap_content_stream(ctx, page_ref, entry.ocr.buf, error);
+					rc = viewer_swap_content_stream(ctx, page_ref, &entry.ocr.buf, error);
 					if (rc) ERROR_Z
 				}
 			}
@@ -1243,7 +1243,7 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 				page_ref = pdf_document_page_get_page_obj(entry.pdf_document_page, error);
 				if (!page_ref) ERROR_Z
 
-				rc = viewer_swap_content_stream(ctx, page_ref, entry.ocr.buf, error);
+				rc = viewer_swap_content_stream(ctx, page_ref, &entry.ocr.buf, error);
 				if (rc) ERROR_Z
 
 				//und jetzt noch f-0-0-Font wieder einfügen
