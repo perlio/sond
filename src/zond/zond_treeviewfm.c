@@ -707,7 +707,7 @@ static gint zond_treeviewfm_open_row(SondTreeviewFM *stvfm, GtkTreeIter *iter,
 					file_part, NULL, NULL, &errmsg);
 			g_free(file_part);
 			if (rc) {
-				g_prefix_error(error, "%s\n%s", __func__, errmsg);
+				if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\n%s", __func__, errmsg);
 				g_free(errmsg);
 
 				return -1;
@@ -730,7 +730,7 @@ static gint zond_treeviewfm_open_row(SondTreeviewFM *stvfm, GtkTreeIter *iter,
 		rc = zond_treeview_oeffnen_internal_viewer(ztvfm_priv->zond,
 				zpa_priv->file_part, NULL, &pdf_pos, &errmsg);
 		if (rc) {
-			g_prefix_error(error, "%s\n%s", __func__, errmsg);
+			if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\n%s", __func__, errmsg);
 			g_free(errmsg);
 
 			return -1;

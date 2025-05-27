@@ -1088,7 +1088,7 @@ static gint sond_treeviewfm_open_row(SondTreeviewFM *tree_view,
 		rc = misc_datei_oeffnen(path, open_with, &errmsg);
 		g_free(path);
 		if (rc) {
-			g_prefix_error(error, "%s\n%s", __func__, errmsg);
+			if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\n%s", __func__, errmsg);
 			g_free(errmsg);
 
 			return -1;
