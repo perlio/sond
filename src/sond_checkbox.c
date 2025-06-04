@@ -25,7 +25,7 @@ typedef struct {
 	gulong signal_handler_entry_toggled;
 } SondCheckboxPrivate;
 
-G_DEFINE_TYPE_WITH_PRIVATE( SondCheckbox, sond_checkbox, GTK_TYPE_FRAME)
+G_DEFINE_TYPE_WITH_PRIVATE(SondCheckbox, sond_checkbox, GTK_TYPE_FRAME)
 
 static void sond_checkbox_class_init(SondCheckboxClass *klass) {
 //    GObjectClass *object_class = G_OBJECT_CLASS(klass);

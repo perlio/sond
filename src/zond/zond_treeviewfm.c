@@ -549,99 +549,101 @@ gint zond_treeviewfm_insert_section(ZondTreeviewFM *ztvfm, gint node_id,
 }
 
 static gint zond_treeviewfm_expand_dummy(SondTreeviewFM *stvfm,
-		GtkTreeIter *iter, GObject *object, GError **error) {
+		GtkTreeIter *iter, SondTVFMItem* item, GError **error) {
 	gint parent = 0;
 
 	ZondTreeviewFMPrivate *ztvfm_priv = zond_treeviewfm_get_instance_private(
 			ZOND_TREEVIEWFM(stvfm));
+/*
+	if (item && SOND_IS_FILE_PART_PDF_SECTION(sond_tvfm_item_get_file_part(item))) {
+		if (ZOND_IS_PDF_ABSCHNITT(object))
+			parent = zond_pdf_abschnitt_get_ID(ZOND_PDF_ABSCHNITT(object));
 
-	if (ZOND_IS_PDF_ABSCHNITT(object))
-		parent = zond_pdf_abschnitt_get_ID(ZOND_PDF_ABSCHNITT(object));
-	else if (G_IS_FILE_INFO(object)) {
-		const gchar *content_type = NULL;
+		else if (G_IS_FILE_INFO(object)) {
+			const gchar *content_type = NULL;
 
-		content_type = g_file_info_get_content_type(G_FILE_INFO(object));
-		if (g_content_type_is_mime_type(content_type, "application/pdf")) {
-			gint rc = 0;
-			gchar *rel_path = NULL;
-			gchar *file_part = NULL;
+			content_type = g_file_info_get_content_type(G_FILE_INFO(object));
+			if (g_content_type_is_mime_type(content_type, "application/pdf")) {
+				gint rc = 0;
+				gchar *rel_path = NULL;
+				gchar *file_part = NULL;
 
-			rel_path = sond_treeviewfm_get_rel_path(stvfm, iter);
-			file_part = g_strdup_printf("/%s//", rel_path);
-			g_free(rel_path);
-			rc = zond_dbase_get_file_part_root(
-					ztvfm_priv->zond->dbase_zond->zond_dbase_work, file_part,
-					&parent, error);
-			g_free(file_part);
-			if (rc)
-				ERROR_Z
+				rel_path = sond_treeviewfm_get_rel_path(stvfm, iter);
+				file_part = g_strdup_printf("/%s//", rel_path);
+				g_free(rel_path);
+				rc = zond_dbase_get_file_part_root(
+						ztvfm_priv->zond->dbase_zond->zond_dbase_work, file_part,
+						&parent, error);
+				g_free(file_part);
+				if (rc)
+					ERROR_Z
+			}
 		}
-	}
-	//else if ( MIME_PART oder ZIP
-	//dann mime prüfen und falls application/pdf: prüfen, ob in dbase - dann ist parent = ID
+		//else if ( MIME_PART oder ZIP
+		//dann mime prüfen und falls application/pdf: prüfen, ob in dbase - dann ist parent = ID
 
-	//parent muß immer > 0 sein, sonst hätte gar kein dummy gesetzt werden können, der expand erlaubt
-	if (parent) {
-		gint rc = 0;
-		gint id_child = 0;
-		gboolean child = TRUE;
-		GtkTreeIter iter_anchor = { 0 };
-
-		rc = zond_dbase_get_first_child(
-				ztvfm_priv->zond->dbase_zond->zond_dbase_work, parent,
-				&id_child, error);
-		if (rc)
-			ERROR_Z
-
-		iter_anchor = *iter;
-		while (id_child) {
+		//parent muß immer > 0 sein, sonst hätte gar kein dummy gesetzt werden können, der expand erlaubt
+		if (parent) {
 			gint rc = 0;
-			GtkTreeIter iter_inserted = { 0 };
-			gint younger_sibling = 0;
+			gint id_child = 0;
+			gboolean child = TRUE;
+			GtkTreeIter iter_anchor = { 0 };
 
-			//hier wird auch dummy eingefügt, wenn erforderlich;
-			rc = zond_treeviewfm_insert_section(ZOND_TREEVIEWFM(stvfm),
-					id_child, &iter_anchor, child, &iter_inserted, error);
+			rc = zond_dbase_get_first_child(
+					ztvfm_priv->zond->dbase_zond->zond_dbase_work, parent,
+					&id_child, error);
 			if (rc)
 				ERROR_Z
 
-					//nächstes Geschwister
-			rc = zond_dbase_get_younger_sibling(
-					ztvfm_priv->zond->dbase_zond->zond_dbase_work, id_child,
-					&younger_sibling, error);
-			if (rc)
-				ERROR_Z
+			iter_anchor = *iter;
+			while (id_child) {
+				gint rc = 0;
+				GtkTreeIter iter_inserted = { 0 };
+				gint younger_sibling = 0;
 
-			id_child = younger_sibling;
-			iter_anchor = iter_inserted;
-			child = FALSE;
-		}
-	} else {
-		gint rc = 0;
+				//hier wird auch dummy eingefügt, wenn erforderlich;
+				rc = zond_treeviewfm_insert_section(ZOND_TREEVIEWFM(stvfm),
+						id_child, &iter_anchor, child, &iter_inserted, error);
+				if (rc)
+					ERROR_Z
 
-		//chain-up, nur wenn nicht behandelt...
-		rc = SOND_TREEVIEWFM_CLASS(zond_treeviewfm_parent_class)->expand_dummy(
-				stvfm, iter, object, error);
-		if (rc)
-			ERROR_Z
+						//nächstes Geschwister
+				rc = zond_dbase_get_younger_sibling(
+						ztvfm_priv->zond->dbase_zond->zond_dbase_work, id_child,
+						&younger_sibling, error);
+				if (rc)
+					ERROR_Z
+
+				id_child = younger_sibling;
+				iter_anchor = iter_inserted;
+				child = FALSE;
+			}
+		} else {
+			gint rc = 0;
+
 	}
+*/
 
 	return 0;
 }
 
+/*	Hier werden PDF-Abschnitte erfaßt - ob sie Teil einer PDF-Datei sind
+ * oder Teil eines Containers - z.B. ZIP-Files, MIME-Parts
+ */
 static gint zond_treeviewfm_insert_dummy(SondTreeviewFM *stvfm,
 		GtkTreeIter *iter, GObject *object, GError **error) {
-	if (G_IS_FILE_INFO(object)) {
-		gchar *rel_path = NULL;
-		gchar *file_part = NULL;
-		gint rc = 0;
-		GtkTreeIter iter_newest = { 0 };
-		gint pdf_root = 0;
-		gchar const *content_type = NULL;
+	if (G_IS_FILE_INFO(object) &&
+			(g_file_info_get_file_type(G_FILE_INFO(object)) == G_FILE_TYPE_REGULAR)) {
+		gchar* content_type = NULL;
 
 		content_type = g_file_info_get_content_type(G_FILE_INFO(object));
 		if (g_content_type_is_mime_type(content_type, "application/pdf"))
 		{
+			gchar* rel_path = NULL;
+			gchar* file_part = NULL;
+			gint rc = 0;
+			gint pdf_root = 0;
+
 			ZondTreeviewFMPrivate *priv = zond_treeviewfm_get_instance_private(
 					ZOND_TREEVIEWFM(stvfm));
 
@@ -665,21 +667,20 @@ static gint zond_treeviewfm_insert_dummy(SondTreeviewFM *stvfm,
 				if (rc)
 					ERROR_Z
 
-				if (pdf_abschnitt)
+				if (pdf_abschnitt) {
+					GtkTreeIter iter_newest = { 0 };
+
 					gtk_tree_store_insert(
 							GTK_TREE_STORE(
 									gtk_tree_view_get_model( GTK_TREE_VIEW(stvfm) )),
 							&iter_newest, iter, -1);
+				}
 			}
 		}
 
 		return 0; //wenn behandelt, kein chain-up mehr!
 	}
 	// else if ( mime_part oder zip-file, das pdf ist)
-
-	//chain-up
-	SOND_TREEVIEWFM_CLASS(zond_treeviewfm_parent_class)->insert_dummy(stvfm,
-			iter, object, error);
 
 	return 0;
 }
@@ -766,8 +767,6 @@ static void zond_treeviewfm_class_init(ZondTreeviewFMClass *klass) {
 	SOND_TREEVIEWFM_CLASS(klass)->text_edited = zond_treeviewfm_text_edited;
 	SOND_TREEVIEWFM_CLASS(klass)->results_row_activated =
 			zond_treeviewfm_results_row_activated;
-	SOND_TREEVIEWFM_CLASS(klass)->insert_dummy = zond_treeviewfm_insert_dummy;
-	SOND_TREEVIEWFM_CLASS(klass)->expand_dummy = zond_treeviewfm_expand_dummy;
 	SOND_TREEVIEWFM_CLASS(klass)->render_icon = zond_treeviewfm_render_icon;
 	SOND_TREEVIEWFM_CLASS(klass)->render_text = zond_treeviewfm_render_text;
 	SOND_TREEVIEWFM_CLASS(klass)->open_row = zond_treeviewfm_open_row;

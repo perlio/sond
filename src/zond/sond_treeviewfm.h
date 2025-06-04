@@ -1,12 +1,15 @@
 #ifndef SOND_TREEVIEWFM_H_INCLUDED
 #define SOND_TREEVIEWFM_H_INCLUDED
 
+#include <glib.h>
 #include <glib-object.h>
 #include <gtk/gtk.h>
 
+//#include "../sond_fileparts.h"
 #include "sond_treeview.h"
 
 typedef struct _ZondDBase ZondDBase;
+//typedef struct _SondFilePart SondFilePart;
 
 G_BEGIN_DECLS
 
@@ -18,14 +21,9 @@ struct _SondTVFMItemClass {
 	GObjectClass parent_class;
 };
 
-//Sond_TVFM_ITEM_FILE definieren
-#define SOND_TYPE_TVFM_ITEM_FILE sond_tvfm_item_file_get_type( )
-G_DECLARE_DERIVABLE_TYPE(SondTVFMItemFile, sond_tvfm_item_file, SOND,
-		TVFM_ITEM_FILE, SondTVFMItem)
+//SondFilePart* sond_tvfm_item_get_file_part(SondTVFMItem*);
 
-struct _SondTVFMItemFileClass {
-	SondTVFMItemClass parent_class;
-};
+gboolean sond_tvfm_item_has_children(SondTVFMItem*);
 
 #define SOND_TYPE_TREEVIEWFM sond_treeviewfm_get_type( )
 G_DECLARE_DERIVABLE_TYPE(SondTreeviewFM, sond_treeviewfm, SOND, TREEVIEWFM,
@@ -41,8 +39,6 @@ struct _SondTreeviewFMClass {
 	gint (*text_edited)(SondTreeviewFM*, GtkTreeIter*, GObject*, const gchar*,
 			GError**);
 	void (*results_row_activated)(GtkWidget*, GtkWidget*, gpointer);
-	gint (*insert_dummy)(SondTreeviewFM*, GtkTreeIter*, GObject*, GError**);
-	gint (*expand_dummy)(SondTreeviewFM*, GtkTreeIter*, GObject*, GError**);
 	void (*render_icon)(SondTreeviewFM*, GtkCellRenderer*, GtkTreeIter*,
 			GObject*);
 	gint (*render_text)(SondTreeviewFM*, GtkTreeIter*, GObject*, gchar const**,
@@ -69,5 +65,7 @@ gchar* sond_treeviewfm_get_full_path(SondTreeviewFM*, GtkTreeIter*);
 gchar* sond_treeviewfm_get_rel_path(SondTreeviewFM*, GtkTreeIter*);
 
 gint sond_treeviewfm_paste_clipboard(SondTreeviewFM*, gboolean, gchar**);
+
+G_END_DECLS
 
 #endif // SOND_TREEVIEWFM_H_INCLUDED
