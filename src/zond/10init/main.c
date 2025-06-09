@@ -192,8 +192,7 @@ static void init(GtkApplication *app, Projekt *zond) {
 
 	//GSettings
 	zond->settings = g_settings_new("de.perlio.zond");
-g_message("Test");
-g_warning("Test");
+
 	//benötigte Arrays erzeugen
 	zond->arr_pv = g_ptr_array_new();
 
