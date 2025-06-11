@@ -50,8 +50,11 @@ G_DECLARE_DERIVABLE_TYPE(SondFilePartError, sond_file_part_error, SOND,
 		FILE_PART_ERROR, SondFilePart)
 
 struct _SondFilePartErrorClass {
-	GObjectClass parent_class;
+	SondFilePartClass parent_class;
 };
+
+SondFilePartError* sond_file_part_error_create(gchar const*,
+		SondFilePart*, GError*);
 
 //SondFilePartRoot definieren
 #define SOND_TYPE_FILE_PART_ROOT sond_file_part_root_get_type( )

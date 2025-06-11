@@ -775,8 +775,10 @@ static gint sond_treeviewfm_expand_dummy(SondTreeviewFM *stvfm,
 
 			sfp_zip_dir = sond_file_part_dir_create(
 					NULL, child_file_part, error);
-			if (!sfp_zip_dir)
+			if (!sfp_zip_dir) {
+				g_ptr_array_unref(arr_children);
 				ERROR_Z
+			}
 
 			child_file_part = SOND_FILE_PART(sfp_zip_dir);
 		}
@@ -787,8 +789,10 @@ static gint sond_treeviewfm_expand_dummy(SondTreeviewFM *stvfm,
 				sfp_pdf_page_tree = SOND_FILE_PART_PDF_PAGE_TREE(
 						sond_file_part_pdf_page_tree_create(NULL,
 								child_file_part, error));
-				if (!sfp_pdf_page_tree)
+				if (!sfp_pdf_page_tree) {
+					g_ptr_array_unref(arr_children);
 					ERROR_Z
+				}
 
 				child_file_part = SOND_FILE_PART(sfp_pdf_page_tree);
 			}
@@ -815,6 +819,8 @@ static gint sond_treeviewfm_expand_dummy(SondTreeviewFM *stvfm,
 				&newest_iter, &iter_new, -1);
 		}
 	}
+
+	g_ptr_array_unref(arr_children);
 
 	return 0;
 }
@@ -1032,6 +1038,9 @@ static void sond_treeviewfm_render_text_cell(GtkTreeViewColumn *column,
 	SondTreeviewFM *stvfm = SOND_TREEVIEWFM(data);
 
 	gtk_tree_model_get(model, iter, 0, &stvfm_item, -1);
+	if (!stvfm_item)
+		return;
+
 	node_text = sond_tvfm_item_get_display_name(stvfm_item);
 
 	g_object_set(G_OBJECT(
@@ -1866,6 +1875,9 @@ static void sond_treeviewfm_render_file_icon(GtkTreeViewColumn *column,
 	gchar const* icon_name = NULL;
 
 	gtk_tree_model_get(model, iter, 0, &stvfm_item, -1);
+	if (!stvfm_item)
+		return;
+
 	icon_name = sond_tvfm_item_get_icon_name(stvfm_item);
 
 	if (icon_name)
