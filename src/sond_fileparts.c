@@ -149,7 +149,8 @@ static SondFilePart* sond_file_part_create(GType sfp_type, const gchar *path,
 		//Array von geöffneten Dateien im Filesystem
 		g_ptr_array_add(arr_opened_files, sfp);
 	}
-
+g_message("sfp erstellt - path: %s    path_parent: %s", sfp_priv->path,
+		(sfp_priv->parent) ? sond_file_part_get_path(sfp_priv->parent) : NULL);
 	return sfp;
 }
 
@@ -528,28 +529,6 @@ static void sond_file_part_pdf_finalize(GObject *self) {
 	return;
 }
 
-static gint get_embedded_files(SondFilePartPDF *sfp_pdf,
-		pdf_obj **embedded_files, GError **error) {
-	pdf_obj* embedded_files_tmp = NULL;
-	SondFilePartPDFPrivate* sfp_pdf_priv =
-			sond_file_part_pdf_get_instance_private(sfp_pdf);
-
-	//Prüfen, ob PDF eingebettete Dateien hat
-	fz_try(sfp_pdf_priv->ctx) {
-		sond_file_part_pdf_lock_document(sfp_pdf);
-		embedded_files_tmp = pdf_load_name_tree(
-				sfp_pdf_priv->ctx, sfp_pdf_priv->pdf_doc, PDF_NAME(EmbeddedFiles));
-	}
-	fz_always(sfp_pdf_priv->ctx)
-		sond_file_part_pdf_unlock_document(sfp_pdf);
-	fz_catch(sfp_pdf_priv->ctx)
-		ERROR_Z
-
-	*embedded_files = embedded_files_tmp;
-
-	return 0;
-}
-
 static gint
 load_embedded_files_from_dict(SondFilePartPDF *sfp_pdf,
 		pdf_obj *node, pdf_cycle_list *cycle_up,
@@ -849,7 +828,31 @@ static fz_stream* get_pdf_stream(SondFilePartPDF *sfp_pdf, GError **error) {
 
 	}
 	else if (SOND_IS_FILE_PART_PDF(sfp_parent)) {
+		gchar const* path = NULL;
+		gint rc = 0;
+		pdf_obj* embedded_files_dict = NULL;
 
+		rc = sond_file_part_pdf_open_document(SOND_FILE_PART_PDF(sfp_parent), error);
+		if (rc)
+			ERROR_Z_VAL(NULL)
+
+		rc = get_embedded_files_dict(SOND_FILE_PART_PDF(sfp_parent), &embedded_files_dict, error);
+		if (rc) {
+			sond_file_part_pdf_close_document(SOND_FILE_PART_PDF(sfp_parent));
+			ERROR_Z_VAL(NULL)
+		}
+
+		path = sond_file_part_get_path(SOND_FILE_PART(sfp_pdf));
+
+		//Damit Fehler zurückgegeben wird
+		if (error) *error = g_error_new(ZOND_ERROR, 0,
+				"%snStream noch nicht implementiert", __func__);
+		return NULL;
+//		rc = lookup_embedded_file(sfp_parent, path, &embedded_files_dict, &stream, error);
+		if (rc) {
+			sond_file_part_pdf_close_document(SOND_FILE_PART_PDF(sfp_parent));
+			ERROR_Z_VAL(NULL)
+		}
 	}
 
 	return stream;
@@ -994,7 +997,7 @@ void sond_file_part_pdf_close_document(SondFilePartPDF *sfp_pdf) {
 static gint sond_file_part_pdf_test_for_embedded_files(
 		SondFilePartPDF *sfp_pdf, GError **error) {
 	gint rc = 0;
-	pdf_obj* embedded_files = NULL;
+	pdf_obj* embedded_files_dict = NULL;
 	SondFilePartPDFPrivate* sfp_pdf_priv =
 			sond_file_part_pdf_get_instance_private(sfp_pdf);
 
@@ -1002,7 +1005,9 @@ static gint sond_file_part_pdf_test_for_embedded_files(
 	if (rc)
 		ERROR_Z
 
-	rc = get_embedded_files(sfp_pdf, &embedded_files, error);
+	sond_file_part_pdf_lock_document(sfp_pdf);
+	rc = get_embedded_files_dict(sfp_pdf, &embedded_files_dict, error);
+	sond_file_part_pdf_unlock_document(sfp_pdf);
 	if (rc) {
 		sond_file_part_pdf_close_document(sfp_pdf);
 		ERROR_Z
@@ -1011,7 +1016,7 @@ static gint sond_file_part_pdf_test_for_embedded_files(
 	fz_try(sfp_pdf_priv->ctx) {
 		sond_file_part_pdf_lock_document(sfp_pdf);
 		//Prüfen, ob PDF eingebettete Dateien hat
-		if (embedded_files && pdf_dict_len(sfp_pdf_priv->ctx, embedded_files))
+		if (embedded_files_dict && pdf_dict_len(sfp_pdf_priv->ctx, embedded_files_dict))
 			sfp_pdf_priv->has_embedded_files = TRUE;}
 	fz_always(sfp_pdf_priv->ctx) {
 		sond_file_part_pdf_unlock_document(sfp_pdf);
