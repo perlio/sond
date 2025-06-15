@@ -2986,20 +2986,13 @@ static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 	if (open_with || !is_pdf(file_part)) //wenn kein pdf oder mit Programmauswahl zu öffnen:
 			{
 		gint rc = 0;
-		gchar *errmsg = NULL;
 
 		g_free(section);
 
-		rc = misc_datei_oeffnen(file_part, open_with, &errmsg);
+		rc = misc_datei_oeffnen(file_part, open_with, error);
 		g_free(file_part);
-		if (rc) {
-			if (error)
-				*error = g_error_new( ZOND_ERROR, 0, "%s\n%s", __func__,
-						errmsg);
-			g_free(errmsg);
-
-			return -1;
-		}
+		if (rc)
+			ERROR_Z
 
 		return 0;
 	}

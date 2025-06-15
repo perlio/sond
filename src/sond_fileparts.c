@@ -24,8 +24,9 @@
 #include "misc.h"
 
 #include "zond/global_types.h"
-
 #include "zond/sond_treeviewfm.h"
+
+#include "zond/99conv/pdf.h"
 
 //Grundlegendes Object, welches file_parts beschreibt
 /*
@@ -187,6 +188,116 @@ gboolean sond_file_part_has_children(SondFilePart *sfp) {
 		has_children = SOND_FILE_PART_GET_CLASS(sfp)->has_children(sfp);
 
 	return has_children;
+}
+
+static fz_stream* sond_file_part_pdf_lookup_embedded_file(fz_context*,
+		SondFilePartPDF*, gchar const*, GError**);
+
+static fz_stream* sond_file_part_get_istream(fz_context* ctx,
+		SondFilePart* sfp, GError **error) {
+	SondFilePart* sfp_parent = NULL;
+	fz_stream *stream = NULL;
+
+	sfp_parent = sond_file_part_get_parent(sfp);
+
+	//Datei im Filesystem
+	if (SOND_IS_FILE_PART_ROOT(sfp_parent)) {
+		gchar const* path_root = NULL;
+		gchar* path_file = NULL;
+
+		path_root = sond_file_part_get_path(sfp_parent);
+		path_file = g_strconcat(path_root, "/",
+				sond_file_part_get_path(sfp), NULL);
+
+		fz_try(ctx)
+			stream = fz_open_file(ctx, path_file);
+		fz_always(ctx)
+			g_free(path_file);
+		fz_catch(ctx) {
+			if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
+					fz_caught(ctx), "%s\nfz_open_file: %s", __func__,
+					fz_caught_message(ctx));
+
+			return NULL; //Fehler beim Öffnen des Streams
+		}
+	}
+	//Datei in Zip-Archiv
+	else if (SOND_IS_FILE_PART_ZIP(sfp_parent)) {
+
+	}
+	//Datei in GMimeMessage
+	//else if (SOND_IS_FILE_PART_MIME(sfp_parent)
+	//Datei in PDF
+	else if (SOND_IS_FILE_PART_PDF(sfp_parent)) {
+		stream = sond_file_part_pdf_lookup_embedded_file(ctx,
+				SOND_FILE_PART_PDF(sfp_parent),
+				sond_file_part_get_path(sfp), error);
+		if (!stream)
+			ERROR_Z_VAL(NULL)
+	}
+	else {
+		if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\nStream für SondFilePart-Typ"
+			"kann nicht geöffnet werden", __func__);
+	}
+
+	return stream;
+}
+
+gchar* sond_file_part_write_to_tmp_file(SondFilePart* sfp, GError **error) {
+	gint rc = 0;
+	gchar *filename = NULL;
+	gchar* basename = NULL;
+	gint fd_write = 0;
+	fz_context* ctx = NULL;
+	fz_stream* stream = NULL;
+	fz_buffer *buf = NULL;
+
+	ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
+	if (!ctx) {
+		if (error) *error = g_error_new(ZOND_ERROR, 0,
+				"%s\nfz_new_context gibt NULL zurück", __func__);
+		return NULL;
+	}
+
+	stream = sond_file_part_get_istream(ctx, sfp, error);
+	if (!stream) {
+		fz_drop_context(ctx);
+		ERROR_Z_VAL(NULL)
+	}
+
+	fz_try(ctx)
+		buf = fz_read_all(ctx, stream, 4096);
+	fz_always(ctx)
+		fz_drop_stream(ctx, stream);
+	fz_catch(ctx) {
+		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
+					fz_caught(ctx), "%s\n%s", __func__,
+					fz_caught_message(ctx));
+		fz_drop_context(ctx);
+
+		return NULL;
+	}
+
+	basename = g_path_get_basename(sond_file_part_get_path(sfp));
+	filename = g_strdup_printf("%s/%d%s", g_get_tmp_dir(),
+			g_random_int_range(10000, 99999), basename);
+	g_free(basename);
+
+	fz_try(ctx)
+		fz_save_buffer(ctx, buf, filename);
+	fz_always(ctx)
+		fz_drop_buffer(ctx, buf);
+	fz_catch(ctx) {
+		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
+					fz_caught(ctx), "%s\n%s", __func__,
+					fz_caught_message(ctx));
+		fz_drop_context(ctx);
+		g_free(filename);
+
+		return NULL;
+	}
+
+	return filename;
 }
 
 /*
@@ -356,24 +467,6 @@ static void sond_file_part_dir_finalize(GObject *self) {
 	return;
 }
 
-static void sond_file_part_dir_class_init(SondFilePartDirClass *klass) {
-	GObjectClass *object_class = G_OBJECT_CLASS(klass);
-
-	object_class->finalize = sond_file_part_dir_finalize;
-
-	SOND_FILE_PART_CLASS(klass)->load_children =
-			sond_file_part_dir_load_children;
-	SOND_FILE_PART_CLASS(klass)->has_children =
-			sond_file_part_dir_has_children;
-
-	return;
-}
-
-static void sond_file_part_dir_init(SondFilePartDir* self) {
-
-	return;
-}
-
 static gint sond_file_part_dir_get_children(SondFilePartDir* sfp_dir,
 		gboolean load, GPtrArray** arr_children, GError **error) {
 	SondFilePartDirPrivate *sfp_dir_priv =
@@ -456,6 +549,42 @@ static gint sond_file_part_dir_get_children(SondFilePartDir* sfp_dir,
 	return 0;
 }
 
+static GPtrArray* sond_file_part_dir_load_children(SondFilePart* sfp_dir, GError **error) {
+	gint rc = 0;
+	GPtrArray *arr_children = NULL;
+
+	rc = sond_file_part_dir_get_children(SOND_FILE_PART_DIR(sfp_dir), TRUE, &arr_children, error);
+	if (rc)
+		ERROR_Z_VAL(NULL)
+
+	return arr_children;
+}
+
+static gboolean sond_file_part_dir_has_children(SondFilePart* sfp_dir) {
+	SondFilePartDirPrivate *sfp_dir_priv =
+			sond_file_part_dir_get_instance_private(SOND_FILE_PART_DIR(sfp_dir));
+
+	return sfp_dir_priv->has_children;
+}
+
+static void sond_file_part_dir_class_init(SondFilePartDirClass *klass) {
+	GObjectClass *object_class = G_OBJECT_CLASS(klass);
+
+	object_class->finalize = sond_file_part_dir_finalize;
+
+	SOND_FILE_PART_CLASS(klass)->load_children =
+			sond_file_part_dir_load_children;
+	SOND_FILE_PART_CLASS(klass)->has_children =
+			sond_file_part_dir_has_children;
+
+	return;
+}
+
+static void sond_file_part_dir_init(SondFilePartDir* self) {
+
+	return;
+}
+
 SondFilePartDir* sond_file_part_dir_create(gchar const* path, SondFilePart* sfp_parent,
 		GError **error) {
 	gint rc = 0;
@@ -472,32 +601,10 @@ SondFilePartDir* sond_file_part_dir_create(gchar const* path, SondFilePart* sfp_
 	return sfp_dir;
 }
 
-GPtrArray* sond_file_part_dir_load_children(SondFilePart* sfp_dir, GError **error) {
-	gint rc = 0;
-	GPtrArray *arr_children = NULL;
-
-	rc = sond_file_part_dir_get_children(SOND_FILE_PART_DIR(sfp_dir), TRUE, &arr_children, error);
-	if (rc)
-		ERROR_Z_VAL(NULL)
-
-	return arr_children;
-}
-
-gboolean sond_file_part_dir_has_children(SondFilePart* sfp_dir) {
-	SondFilePartDirPrivate *sfp_dir_priv =
-			sond_file_part_dir_get_instance_private(SOND_FILE_PART_DIR(sfp_dir));
-
-	return sfp_dir_priv->has_children;
-}
-
 /*
  * PDFs
  */
 typedef struct {
-	fz_context* ctx;
-	pdf_document* pdf_doc;
-	GMutex mutex_doc; //Mutex für Dokument, damit nicht mehrere Threads gleichzeitig auf PDF zugreifen
-	gint ref; //Referenzzähler, damit PDF nicht mehrfach geöffnet wird
 	SondFilePartPDFPageTree* sfp_pdf_page_tree;
 	gboolean has_embedded_files; //hat diese PDF eingebettete Dateien?
 	GPtrArray* arr_embedded_files; //eingebettet und geöffnet
@@ -509,66 +616,26 @@ static void sond_file_part_pdf_finalize(GObject *self) {
 	SondFilePartPDFPrivate *sfp_pdf_priv =
 			sond_file_part_pdf_get_instance_private(SOND_FILE_PART_PDF(self));
 
-	if (sfp_pdf_priv->pdf_doc)
-		pdf_drop_document(sfp_pdf_priv->ctx, sfp_pdf_priv->pdf_doc);
-
-	if (sfp_pdf_priv->ctx) {
-		GMutex *mutex = NULL;
-
-		mutex = (GMutex*) sfp_pdf_priv->ctx->locks.user;
-		fz_drop_context(sfp_pdf_priv->ctx);
-		for (gint i = 0; i < FZ_LOCK_MAX; i++)
-			g_mutex_clear(&mutex[i]);
-		g_free(mutex);
-	}
-
-	g_mutex_clear(&sfp_pdf_priv->mutex_doc);
-
 	G_OBJECT_CLASS(sond_file_part_pdf_parent_class)->finalize(self);
 
 	return;
 }
 
-static gint
-load_embedded_files_from_dict(SondFilePartPDF *sfp_pdf,
-		pdf_obj *node, pdf_cycle_list *cycle_up,
-		GPtrArray* arr_embedded_files,GError**error)
-{
-	pdf_cycle_list cycle;
-	pdf_obj *kids = NULL;
-	pdf_obj *names = NULL;
-	int i;
-	gboolean is_cycle = FALSE;
-	fz_context *ctx = NULL;
-	SondFilePartPDFPrivate* sfp_pdf_priv =
-			sond_file_part_pdf_get_instance_private(SOND_FILE_PART_PDF(sfp_pdf));
+typedef struct {
+	gchar const* path_search;
+	fz_stream* stream;
+} Lookup;
 
-	ctx = sfp_pdf_priv->ctx;
+static gint lookup_embedded_file(fz_context* ctx, pdf_obj* EF_F,
+		gchar const* path, gpointer data, GError** error) {
+	Lookup* lookup = (Lookup*) data;
 
-	fz_try(ctx)
-	{
-		kids = pdf_dict_get(ctx, node, PDF_NAME(Kids));
-		names = pdf_dict_get(ctx, node, PDF_NAME(Names));
-		is_cycle = pdf_cycle(ctx, &cycle, cycle_up, node);
-	}
-	fz_catch(ctx)
-	{
-		if (error)
-			*error = g_error_new(g_quark_from_static_string("mupdf"),
-					fz_caught(ctx), "%s\n%s", __func__,
-					fz_caught_message(ctx));
-
-		return -1;
-	}
-
-	if (kids && !is_cycle)
-	{
-		int len = 0;
+	if (g_strcmp0(path, lookup->path_search) == 0) {
+		fz_stream* stream = NULL;
 
 		fz_try(ctx)
-			pdf_array_len(ctx, kids);
-		fz_catch(ctx)
-		{
+			stream = pdf_open_stream(ctx, EF_F);
+		fz_catch(ctx) {
 			if (error)
 				*error = g_error_new(g_quark_from_static_string("mupdf"),
 						fz_caught(ctx), "%s\n%s", __func__,
@@ -576,134 +643,30 @@ load_embedded_files_from_dict(SondFilePartPDF *sfp_pdf,
 
 			return -1;
 		}
+		lookup->stream = stream;
 
-		for (i = 0; i < len; i++) {
-			gint rc = 0;
-
-			rc = load_embedded_files_from_dict(sfp_pdf, pdf_array_get(ctx, kids, i),
-					&cycle, arr_embedded_files, error);
-			if (rc)
-				ERROR_Z
-		}
-	}
-
-	if (names)
-	{
-		int len = 0;
-
-		fz_try(ctx)
-			len = pdf_array_len(ctx, names);
-		fz_catch(ctx)
-		{
-			if (error)
-				*error = g_error_new(g_quark_from_static_string("mupdf"),
-						fz_caught(ctx), "%s\n%s", __func__,
-						fz_caught_message(ctx));
-
-			return -1;
-		}
-
-		for (i = 0; i + 1 < len; i += 2)
-		{
-			pdf_obj* EF_F = NULL;
-			gchar const* path = NULL;
-			fz_stream* stream = NULL;
-			guchar buf[1024] = { 0 };
-			gchar* content_type = NULL;
-			SondFilePart* sfp_embedded_file = NULL;
-
-			fz_try(ctx) {
-	//			pdf_obj *key = pdf_array_get(ctx, names, i);
-				pdf_obj *val = pdf_array_get(ctx, names, i + 1);
-
-				if (pdf_is_dict(ctx, val))
-				{
-					pdf_obj* F = NULL;
-					pdf_obj* UF = NULL;
-					pdf_obj* EF = NULL;
-
-					EF = pdf_dict_get(ctx, val, PDF_NAME(EF));
-					EF_F = pdf_dict_get(ctx, EF, PDF_NAME(F));
-					F = pdf_dict_get(ctx, val, PDF_NAME(F));
-					UF = pdf_dict_get(ctx, val, PDF_NAME(UF));
-
-					if (pdf_is_string(ctx, UF))
-						path = pdf_to_text_string(ctx, UF);
-					else if (pdf_is_string(ctx, F))
-						path = pdf_to_text_string(ctx, F);
-				}
-			}
-			fz_catch(ctx) {
-				if (error)
-					*error = g_error_new(g_quark_from_static_string("mupdf"),
-							fz_caught(ctx), "%s\n%s", __func__,
-							fz_caught_message(ctx));
-
-				return -1;
-			}
-
-			if (!path) {
-				if (error)
-					*error = g_error_new(ZOND_ERROR, 0, "%s\nEingebettete Datei hat keinen Pfad",
-							__func__);
-				return -1;
-			}
-
-			fz_try(ctx)
-				stream = pdf_open_stream(ctx, EF_F);
-			fz_catch(ctx) {
-				if (error)
-					*error = g_error_new(g_quark_from_static_string("mupdf"),
-							fz_caught(ctx), "%s\n%s", __func__,
-							fz_caught_message(ctx));
-
-				return -1;
-			}
-
-			fz_try(ctx)
-				fz_read(sfp_pdf_priv->ctx, stream, buf, sizeof(buf));
-			fz_always(ctx)
-				fz_drop_stream(ctx, stream);
-			fz_catch(ctx) {
-				if (error)
-					*error = g_error_new(g_quark_from_static_string("mupdf"),
-							fz_caught(ctx), "%s\n%s", __func__,
-							fz_caught_message(ctx));
-
-				return -1;
-			}
-
-			content_type = g_content_type_guess(path, buf, sizeof(buf), NULL);
-			sfp_embedded_file = sond_file_part_create_from_content_type(
-					path, SOND_FILE_PART(sfp_pdf), content_type);
-			g_free(content_type);
-
-			g_ptr_array_add(arr_embedded_files, sfp_embedded_file);
-		}
+		return 1;
 	}
 
 	return 0;
 }
 
-gint get_embedded_files_dict(SondFilePartPDF *sfp_pdf,
-		pdf_obj** embedded_files_dict,GError **error)
-{
-	fz_context *ctx = NULL;
-	pdf_document *doc = NULL;
-	SondFilePartPDFPrivate* sfp_pdf_priv =
-			sond_file_part_pdf_get_instance_private(SOND_FILE_PART_PDF(sfp_pdf));
+typedef struct {
+	SondFilePartPDF* sfp_pdf;
+	GPtrArray* arr_embedded_files;
+}Load;
 
-	ctx = sfp_pdf_priv->ctx;
-	doc = sfp_pdf_priv->pdf_doc;
+static gint load_embedded_files(fz_context* ctx, pdf_obj* EF_F, gchar const* path,
+		gpointer data, GError** error) {
+	Load* load = (Load*) data;
+	guchar buf[1024] = { 0 };
+	fz_stream* stream = NULL;
+	gchar* content_type = NULL;
+	SondFilePart* sfp_embedded_file = NULL;
+
 	fz_try(ctx)
-	{
-		pdf_obj *root = pdf_dict_get(ctx, pdf_trailer(ctx, doc), PDF_NAME(Root));
-		pdf_obj *names = pdf_dict_get(ctx, root, PDF_NAME(Names));
-		if( embedded_files_dict)
-			*embedded_files_dict = pdf_dict_get(ctx, names, PDF_NAME(EmbeddedFiles));
-	}
-	fz_catch(ctx)
-	{
+		stream = pdf_open_stream(ctx, EF_F);
+	fz_catch(ctx) {
 		if (error)
 			*error = g_error_new(g_quark_from_static_string("mupdf"),
 					fz_caught(ctx), "%s\n%s", __func__,
@@ -712,48 +675,108 @@ gint get_embedded_files_dict(SondFilePartPDF *sfp_pdf,
 		return -1;
 	}
 
+	fz_try(ctx)
+		fz_read(ctx, stream, buf, sizeof(buf));
+	fz_always(ctx)
+		fz_drop_stream(ctx, stream);
+	fz_catch(ctx) {
+		if (error)
+			*error = g_error_new(g_quark_from_static_string("mupdf"),
+					fz_caught(ctx), "%s\n%s", __func__,
+					fz_caught_message(ctx));
+
+		return -1;
+	}
+
+	content_type = g_content_type_guess(path, buf, sizeof(buf), NULL);
+	sfp_embedded_file = sond_file_part_create_from_content_type(
+			path, SOND_FILE_PART(load->sfp_pdf), content_type);
+	g_free(content_type);
+
+	g_ptr_array_add(load->arr_embedded_files, sfp_embedded_file);
+
 	return 0;
+}
+
+static pdf_document* sond_file_part_pdf_open_document(fz_context* ctx, SondFilePartPDF *sfp_pdf,
+		GError **error) {
+	pdf_document* doc = NULL;
+	fz_stream* stream = NULL;
+
+	stream = sond_file_part_get_istream(ctx, SOND_FILE_PART(sfp_pdf), error);
+	if (!stream)
+		ERROR_Z_VAL(NULL)
+
+	//PDF-Dokument öffnen
+	fz_try(ctx)
+		doc = pdf_open_document_with_stream(ctx, stream);
+	fz_always(ctx)
+		fz_drop_stream(ctx, stream);
+	fz_catch(ctx) {
+		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
+				fz_caught(ctx),
+				"%s\nkonnte PDF-Dokument '%s' nicht öffnen: %s", __func__,
+				sond_file_part_get_path(SOND_FILE_PART(sfp_pdf)),
+				fz_caught_message(ctx));
+
+		return NULL; //Fehler beim Öffnen des PDF-Dokuments
+	}
+
+	return doc;
 }
 
 static GPtrArray* sond_file_part_pdf_load_embedded_files(SondFilePart* sfp_pdf,
 		GError **error) {
 	gint rc = 0;
 	pdf_obj* embedded_files_dict = NULL;
-	GPtrArray *arr_embedded_files = NULL;
+	fz_context* ctx = NULL;
+	pdf_document* doc = NULL;
+	Load load = { 0 };
 	SondFilePartPDFPageTree* sfp_pdf_page_tree = NULL;
 	SondFilePartPDFPrivate *sfp_pdf_priv =
 			sond_file_part_pdf_get_instance_private(SOND_FILE_PART_PDF(sfp_pdf));
 
-	rc = sond_file_part_pdf_open_document(SOND_FILE_PART_PDF(sfp_pdf), error);
-	if (rc)
-		ERROR_Z_VAL(NULL)
+	ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
+	if (!ctx) {
+		if (error) *error = g_error_new(ZOND_ERROR, 0,
+				"%s\nfz_new_context gibt NULL zurück", __func__);
+	}
 
-	rc = get_embedded_files_dict(SOND_FILE_PART_PDF(sfp_pdf),
-			&embedded_files_dict, error);
+	doc = sond_file_part_pdf_open_document(ctx, SOND_FILE_PART_PDF(sfp_pdf), error);
 	if (rc) {
-		sond_file_part_pdf_close_document(SOND_FILE_PART_PDF(sfp_pdf));
+		fz_drop_context(ctx);
 		ERROR_Z_VAL(NULL)
 	}
 
-	arr_embedded_files = g_ptr_array_new_with_free_func((GDestroyNotify)g_object_unref);
-	rc = load_embedded_files_from_dict(SOND_FILE_PART_PDF(sfp_pdf), embedded_files_dict,
-			NULL, arr_embedded_files, error);
-	sond_file_part_pdf_close_document(SOND_FILE_PART_PDF(sfp_pdf));
+	rc = pdf_get_names_tree_dict(ctx, doc, PDF_NAME(EmbeddedFiles),
+			&embedded_files_dict, error);
 	if (rc) {
-		g_ptr_array_unref(arr_embedded_files);
+		pdf_drop_document(ctx, doc);
+		fz_drop_context(ctx);
+		ERROR_Z_VAL(NULL)
+	}
+
+	load.sfp_pdf = SOND_FILE_PART_PDF(sfp_pdf);
+	load.arr_embedded_files = g_ptr_array_new_with_free_func((GDestroyNotify)g_object_unref);
+	rc = pdf_walk_names_dict(ctx, embedded_files_dict,
+			NULL, load_embedded_files, &load, error);
+	pdf_drop_document(ctx, doc);
+	fz_drop_context(ctx);
+	if (rc == -1) {
+		g_ptr_array_unref(load.arr_embedded_files);
 		ERROR_Z_VAL(NULL)
 	}
 
 	sfp_pdf_page_tree = sond_file_part_pdf_page_tree_create(NULL,
 			sfp_pdf, error);
 	if (!sfp_pdf_page_tree) {
-		g_ptr_array_unref(arr_embedded_files);
+		g_ptr_array_unref(load.arr_embedded_files);
 		ERROR_Z_VAL(NULL)
 	}
 
-	g_ptr_array_insert(arr_embedded_files, 0, sfp_pdf_priv->sfp_pdf_page_tree);
+	g_ptr_array_insert(load.arr_embedded_files, 0, sfp_pdf_priv->sfp_pdf_page_tree);
 
-	return arr_embedded_files;
+	return load.arr_embedded_files;
 }
 
 static gboolean sond_file_part_pdf_has_embedded_files(SondFilePart* sfp_pdf) {
@@ -787,91 +810,7 @@ static void sond_file_part_pdf_init(SondFilePartPDF* self) {
 	SondFilePartPDFPrivate *sfp_pdf_priv =
 			sond_file_part_pdf_get_instance_private(SOND_FILE_PART_PDF(self));
 
-	g_mutex_init(&sfp_pdf_priv->mutex_doc);
 	sfp_pdf_priv->arr_embedded_files = g_ptr_array_new( );
-
-	return;
-}
-
-static fz_stream* get_pdf_stream(SondFilePartPDF *sfp_pdf, GError **error) {
-	SondFilePart* sfp_parent = NULL;
-	SondFilePartPDFPrivate *sfp_pdf_priv =
-			sond_file_part_pdf_get_instance_private(sfp_pdf);
-	fz_stream *stream = NULL;
-
-	sfp_parent = sond_file_part_get_parent(SOND_FILE_PART(sfp_pdf));
-
-	//PDF im Filesystem
-	if (SOND_IS_FILE_PART_ROOT(sfp_parent)) {
-		gchar const* path_root = NULL;
-		gchar* path_pdf = NULL;
-
-		path_root = sond_file_part_get_path(sfp_parent);
-		path_pdf = g_strconcat(path_root, "/",
-				sond_file_part_get_path(SOND_FILE_PART(sfp_pdf)), NULL);
-
-		fz_try(sfp_pdf_priv->ctx)
-			stream = fz_open_file(sfp_pdf_priv->ctx, path_pdf);
-		fz_always(sfp_pdf_priv->ctx)
-			g_free(path_pdf);
-		fz_catch(sfp_pdf_priv->ctx) {
-			if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
-					fz_caught(sfp_pdf_priv->ctx),
-					"%s\nkonnte PDF-Datei nicht öffnen: %s", __func__,
-					fz_caught_message(sfp_pdf_priv->ctx));
-
-			return NULL; //Fehler beim Öffnen des Streams
-		}
-	}
-	//PDF in Zip-Archiv
-	else if (SOND_IS_FILE_PART_ZIP(sfp_parent)) {
-
-	}
-	else if (SOND_IS_FILE_PART_PDF(sfp_parent)) {
-		gchar const* path = NULL;
-		gint rc = 0;
-		pdf_obj* embedded_files_dict = NULL;
-
-		rc = sond_file_part_pdf_open_document(SOND_FILE_PART_PDF(sfp_parent), error);
-		if (rc)
-			ERROR_Z_VAL(NULL)
-
-		rc = get_embedded_files_dict(SOND_FILE_PART_PDF(sfp_parent), &embedded_files_dict, error);
-		if (rc) {
-			sond_file_part_pdf_close_document(SOND_FILE_PART_PDF(sfp_parent));
-			ERROR_Z_VAL(NULL)
-		}
-
-		path = sond_file_part_get_path(SOND_FILE_PART(sfp_pdf));
-
-		//Damit Fehler zurückgegeben wird
-		if (error) *error = g_error_new(ZOND_ERROR, 0,
-				"%snStream noch nicht implementiert", __func__);
-		return NULL;
-//		rc = lookup_embedded_file(sfp_parent, path, &embedded_files_dict, &stream, error);
-		if (rc) {
-			sond_file_part_pdf_close_document(SOND_FILE_PART_PDF(sfp_parent));
-			ERROR_Z_VAL(NULL)
-		}
-	}
-
-	return stream;
-}
-
-void sond_file_part_pdf_lock_document(SondFilePartPDF *sfp_pdf) {
-	SondFilePartPDFPrivate* sfp_pdf_priv =
-			sond_file_part_pdf_get_instance_private(sfp_pdf);
-
-	g_mutex_lock(&sfp_pdf_priv->mutex_doc);
-
-	return;
-}
-
-void sond_file_part_pdf_unlock_document(SondFilePartPDF *sfp_pdf) {
-	SondFilePartPDFPrivate* sfp_pdf_priv =
-			sond_file_part_pdf_get_instance_private(sfp_pdf);
-
-	g_mutex_unlock(&sfp_pdf_priv->mutex_doc);
 
 	return;
 }
@@ -908,7 +847,6 @@ static void mupdf_free(void *user, void *ptr) {
 	return;
 }
 
-/** Wenn NULL, dann Fehler und *errmsg gesetzt **/
 static fz_context*
 init_context(void) {
 	GMutex *mutex = NULL;
@@ -941,96 +879,90 @@ init_context(void) {
 	return ctx;
 }
 
-gint sond_file_part_pdf_open_document(SondFilePartPDF *sfp_pdf,
-		GError **error) {
-	fz_stream* stream = NULL;
-	SondFilePartPDFPrivate* sfp_pdf_priv =
-			sond_file_part_pdf_get_instance_private(sfp_pdf);
+static fz_stream* sond_file_part_pdf_lookup_embedded_file(fz_context* ctx,
+		SondFilePartPDF* sfp_pdf, gchar const* path, GError** error) {
+	pdf_document* doc = NULL;
+	pdf_obj* embedded_files_dict = NULL;
+	Lookup lookup = { 0 };
+	gint rc = 0;
 
-	if (!sfp_pdf_priv->ctx)
-		sfp_pdf_priv->ctx = init_context( );
-	if (!sfp_pdf_priv->ctx)
-		ERROR_Z
+	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, error);
+	if (!doc)
+		ERROR_Z_VAL(NULL)
 
-	if (sfp_pdf_priv->pdf_doc) {
-		sfp_pdf_priv->ref++; //PDF-Dokument ist bereits geöffnet
-		return 0; //bereits geöffnet
+	rc = pdf_get_names_tree_dict(ctx, doc, PDF_NAME(EmbeddedFiles), &embedded_files_dict, error);
+	if (rc) {
+		pdf_drop_document(ctx, doc);
+		ERROR_Z_VAL(NULL)
 	}
 
-	stream = get_pdf_stream(sfp_pdf, error);
-	if (!stream)
-		ERROR_Z
+	lookup.path_search = sond_file_part_get_path(SOND_FILE_PART(sfp_pdf));
 
-	//PDF-Dokument öffnen
-	fz_try(sfp_pdf_priv->ctx)
-		sfp_pdf_priv->pdf_doc = pdf_open_document_with_stream(sfp_pdf_priv->ctx, stream);
-	fz_always(sfp_pdf_priv->ctx)
-		fz_drop_stream(sfp_pdf_priv->ctx, stream);
-	fz_catch(sfp_pdf_priv->ctx) {
-		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
-				fz_caught(sfp_pdf_priv->ctx),
-				"%s\nkonnte PDF-Dokument '%s' nicht öffnen: %s", __func__,
-				sond_file_part_get_path(SOND_FILE_PART(sfp_pdf)),
-				fz_caught_message(sfp_pdf_priv->ctx));
+	rc = pdf_walk_names_dict(ctx, embedded_files_dict, NULL,
+			lookup_embedded_file, &lookup, error);
+	pdf_drop_document(ctx, doc); //stream hält (hoffentlich) ref auf doc
+	if (rc == -1)
+		ERROR_Z_VAL(NULL)
+	else if (rc == 0) {
+		if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\nnicht gefunden", __func__);
 
-		return -1; //Fehler beim Öffnen des PDF-Dokuments
+		return NULL;
 	}
 
-	return 0;
-}
-
-void sond_file_part_pdf_close_document(SondFilePartPDF *sfp_pdf) {
-	SondFilePartPDFPrivate* sfp_pdf_priv =
-			sond_file_part_pdf_get_instance_private(sfp_pdf);
-
-	if (sfp_pdf_priv->pdf_doc) {
-		sfp_pdf_priv->ref--;
-		if (sfp_pdf_priv->ref <= 0) {
-			pdf_drop_document(sfp_pdf_priv->ctx, sfp_pdf_priv->pdf_doc);
-			sfp_pdf_priv->pdf_doc = NULL;
-		}
-	}
-
-	return;
+	return lookup.stream;
 }
 
 static gint sond_file_part_pdf_test_for_embedded_files(
 		SondFilePartPDF *sfp_pdf, GError **error) {
 	gint rc = 0;
+	fz_context* ctx = NULL;
+	pdf_document* doc = NULL;
 	pdf_obj* embedded_files_dict = NULL;
 	SondFilePartPDFPrivate* sfp_pdf_priv =
 			sond_file_part_pdf_get_instance_private(sfp_pdf);
 
-	rc = sond_file_part_pdf_open_document(sfp_pdf, error);
-	if (rc)
-		ERROR_Z
+	ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
+	if (!ctx) {
+		if (error) *error = g_error_new(ZOND_ERROR, 0,
+				"%s\nfz_new_context gibt NULL zurück", __func__);
 
-	sond_file_part_pdf_lock_document(sfp_pdf);
-	rc = get_embedded_files_dict(sfp_pdf, &embedded_files_dict, error);
-	sond_file_part_pdf_unlock_document(sfp_pdf);
+		return -1;
+	}
+
+	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, error);
+	if (!doc) {
+		fz_drop_context(ctx);
+		ERROR_Z
+	}
+
+	rc = pdf_get_names_tree_dict(ctx, doc, PDF_NAME(EmbeddedFiles),
+			&embedded_files_dict, error);
 	if (rc) {
-		sond_file_part_pdf_close_document(sfp_pdf);
+		pdf_drop_document(ctx, doc);
+		fz_drop_context(ctx);
 		ERROR_Z
 	}
 
-	fz_try(sfp_pdf_priv->ctx) {
-		sond_file_part_pdf_lock_document(sfp_pdf);
+	fz_try(ctx) {
 		//Prüfen, ob PDF eingebettete Dateien hat
-		if (embedded_files_dict && pdf_dict_len(sfp_pdf_priv->ctx, embedded_files_dict))
-			sfp_pdf_priv->has_embedded_files = TRUE;}
-	fz_always(sfp_pdf_priv->ctx) {
-		sond_file_part_pdf_unlock_document(sfp_pdf);
-		sond_file_part_pdf_close_document(sfp_pdf);
+		if (embedded_files_dict && pdf_dict_len(ctx, embedded_files_dict))
+			sfp_pdf_priv->has_embedded_files = TRUE;
 	}
-	fz_catch(sfp_pdf_priv->ctx) {
+	fz_always(ctx) {
+		pdf_drop_document(ctx, doc);
+	}
+	fz_catch(ctx) {
 		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
-				fz_caught(sfp_pdf_priv->ctx),
+				fz_caught(ctx),
 				"%s\nkonnte eingebettete Dateien in PDF '%s' nicht prüfen: %s",
 				__func__, sond_file_part_get_path(SOND_FILE_PART(sfp_pdf)),
-				fz_caught_message(sfp_pdf_priv->ctx));
+				fz_caught_message(ctx));
+		fz_drop_context(ctx);
 
 		return -1; //Fehler beim Prüfen auf eingebettete Dateien
 	}
+
+	fz_drop_context(ctx);
 
 	return 0;
 }

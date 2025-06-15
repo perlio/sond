@@ -9,7 +9,7 @@
 #include "sond_treeview.h"
 
 typedef struct _ZondDBase ZondDBase;
-//typedef struct _SondFilePart SondFilePart;
+typedef struct _SondFilePart SondFilePart;
 
 G_BEGIN_DECLS
 
@@ -43,8 +43,8 @@ struct _SondTreeviewFMClass {
 			GObject*);
 	gint (*render_text)(SondTreeviewFM*, GtkTreeIter*, GObject*, gchar const**,
 			gboolean*, GError**);
-	gint (*open_row)(SondTreeviewFM*, GtkTreeIter*, GObject*, gboolean,
-			GError**);
+	gint (*open_sfp) (SondFilePart*, gboolean, GError**);
+
 };
 
 gint sond_treeviewfm_rel_path_visible(SondTreeviewFM*, gchar const*, gboolean,

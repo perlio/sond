@@ -741,8 +741,8 @@ static gint zond_treeviewfm_open_row(SondTreeviewFM *stvfm, GtkTreeIter *iter,
 	}
 
 	//chain-up, falls nicht bearbeitet
-	SOND_TREEVIEWFM_CLASS(zond_treeviewfm_parent_class)->open_row(stvfm, iter,
-			object, open_with, error);
+//	SOND_TREEVIEWFM_CLASS(zond_treeviewfm_parent_class)->open_sfp(sfp, open_with,
+//			error);
 
 	return 0;
 }
@@ -769,7 +769,7 @@ static void zond_treeviewfm_class_init(ZondTreeviewFMClass *klass) {
 			zond_treeviewfm_results_row_activated;
 	SOND_TREEVIEWFM_CLASS(klass)->render_icon = zond_treeviewfm_render_icon;
 	SOND_TREEVIEWFM_CLASS(klass)->render_text = zond_treeviewfm_render_text;
-	SOND_TREEVIEWFM_CLASS(klass)->open_row = zond_treeviewfm_open_row;
+//	SOND_TREEVIEWFM_CLASS(klass)->open_sfp = zond_treeviewfm_open_row;
 
 	return;
 }

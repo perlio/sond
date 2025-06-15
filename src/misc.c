@@ -392,7 +392,7 @@ result_listbox_new(GtkWindow *parent_window, const gchar *titel,
 	return window;
 }
 
-gint misc_datei_oeffnen(const gchar *path, gboolean open_with, gchar **errmsg) {
+gint misc_datei_oeffnen(const gchar *path, gboolean open_with, GError** error) {
 #ifdef _WIN32 //glib funktioniert nicht; daher Windows-Api verwenden
 	gboolean ret = FALSE;
 
@@ -419,7 +419,7 @@ gint misc_datei_oeffnen(const gchar *path, gboolean open_with, gchar **errmsg) {
 	g_free(local_filename);
 	if (!ret) //Fähler
 	{
-		if (errmsg) {
+		if (error) {
 			LPVOID lpMsgBuf = NULL;
 			DWORD dw = 0;
 
@@ -430,8 +430,8 @@ gint misc_datei_oeffnen(const gchar *path, gboolean open_with, gchar **errmsg) {
 							FORMAT_MESSAGE_IGNORE_INSERTS,
 					NULL, dw, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
 					(LPTSTR) &lpMsgBuf, 0, NULL);
-			*errmsg = g_strdup_printf("Bei Aufruf ShellExecuteEx:\n"
-					"Fehlercode: %li\n%s", dw, (LPTSTR) lpMsgBuf);
+			*error = g_error_new(g_quark_from_static_string("WinApi"), dw, "%s\nShellExecuteEx:\n"
+					"%s", __func__, (LPTSTR) lpMsgBuf);
 
 			LocalFree(lpMsgBuf);
 		}

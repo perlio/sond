@@ -79,7 +79,7 @@ static SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM *stvfm,
 			icon_name = g_strdup("folder");
 	}
 	else if (SOND_IS_FILE_PART_PDF(sond_file_part))
-		icon_name = g_strdup("application/pdf");
+		icon_name = g_strdup("emblem-package");
 	else if (SOND_IS_FILE_PART_PDF_PAGE_TREE(sond_file_part)) {
 		if (sond_file_part_pdf_page_tree_get_section(
 				SOND_FILE_PART_PDF_PAGE_TREE(sond_file_part)))
@@ -579,6 +579,7 @@ static void sond_treeviewfm_row_collapsed(GtkTreeView *tree_view,
 		not_empty = gtk_tree_store_remove(
 				GTK_TREE_STORE(gtk_tree_view_get_model(tree_view)),
 				&iter_child);
+		printf("gelöscht\n");
 	} while (not_empty);
 
 	//dummy einfügen, dir ist ja nicht leer
@@ -1106,6 +1107,23 @@ static void sond_treeviewfm_constructed(GObject *self) {
 	return;
 }
 
+static gint sond_treeviewfm_open_sfp(SondFilePart* sfp, gboolean open_with,
+		GError** error) {
+	gchar* filename = NULL;
+	gint rc = 0;
+
+	filename = sond_file_part_write_to_tmp_file(sfp, error);
+	if (!filename)
+		ERROR_Z
+
+	rc = misc_datei_oeffnen(filename, open_with, error);
+	g_free(filename);
+	if (rc)
+		ERROR_Z
+
+	return 0;
+}
+
 static void sond_treeviewfm_class_init(SondTreeviewFMClass *klass) {
 	G_OBJECT_CLASS(klass)->finalize = sond_treeviewfm_finalize;
 	G_OBJECT_CLASS(klass)->constructed = sond_treeviewfm_constructed;
@@ -1119,6 +1137,7 @@ static void sond_treeviewfm_class_init(SondTreeviewFMClass *klass) {
 	klass->dbase_end = sond_treeviewfm_dbase_end;
 	klass->text_edited = sond_treeviewfm_text_edited;
 	klass->results_row_activated = sond_treeviewfm_results_row_activated;
+	klass->open_sfp = sond_treeviewfm_open_sfp;
 
 	return;
 }
@@ -1752,10 +1771,13 @@ static void sond_treeviewfm_row_activated(GtkTreeView *tree_view,
 	sfp = sond_tvfm_item_get_sond_file_part(stvfm_item);
 	g_object_unref(stvfm_item);
 
-
-
-
-	g_object_unref(sfp);
+	rc = SOND_TREEVIEWFM_GET_CLASS(SOND_TREEVIEWFM(tree_view))->open_sfp(sfp,
+			open_with, &error);
+	if (rc) {
+		display_message(gtk_widget_get_toplevel(GTK_WIDGET(tree_view)),
+				"Datei kann nicht geöffnet werden\n\n", error->message, NULL);
+		g_error_free(error);
+	}
 
 	return;
 }

@@ -67,6 +67,75 @@ document_new_displayed_document(const gchar *file_part, Anbindung *anbindung,
 	return dd;
 }
 
+gint document_oeffnen_internal_viewer(Projekt *zond,
+		const gchar *file_part, Anbindung *anbindung, PdfPos *pos_pdf,
+		gchar **errmsg) {
+	PdfPos pos_von = { 0 };
+	ZondPdfDocument const* zpdfd = NULL;
+	gint rc = 0;
+	GError *error = NULL;
+
+	if (anbindung && (zpdfd = zond_pdf_document_is_open(file_part)))
+		anbindung_aktualisieren_insert_pages(zpdfd, anbindung);
+
+	//Neue Instanz oder bestehende?
+	if (!(zond->state & GDK_SHIFT_MASK)) {
+		//Testen, ob pv mit file_part schon geöffnet
+		for (gint i = 0; i < zond->arr_pv->len; i++) {
+			PdfViewer *pv = g_ptr_array_index(zond->arr_pv, i);
+			if (pv->dd->next == NULL && !g_strcmp0(file_part,
+					zond_pdf_document_get_file_part(pv->dd->zond_pdf_document))) {
+				Anbindung* anbindung_dd = NULL;
+
+				anbindung_dd = document_get_anbindung(pv->dd);
+
+				if ((!anbindung && !anbindung_dd) ||
+						(anbindung && anbindung_dd &&
+						anbindung_1_gleich_2(*anbindung, *anbindung_dd))) {
+
+					if (pos_pdf)
+						pos_von = *pos_pdf;
+
+					gtk_window_present(GTK_WINDOW(pv->vf));
+
+					if (pos_von.seite > (pv->arr_pages->len - 1))
+						pos_von.seite = pv->arr_pages->len - 1;
+
+					viewer_springen_zu_pos_pdf(pv, pos_von, 0.0);
+
+					g_free(anbindung_dd);
+
+					return 0;
+				}
+				else g_free(anbindung_dd);
+			}
+		}
+	}
+
+	DisplayedDocument *dd = document_new_displayed_document(file_part,
+			anbindung, errmsg);
+	if (!dd && *errmsg)
+		ERROR_S
+	else if (!dd)
+		return 0;
+
+	if (pos_pdf)
+		pos_von = *pos_pdf;
+
+	PdfViewer *pv = viewer_start_pv(zond);
+	rc = viewer_display_document(pv, dd, pos_von.seite, pos_von.index, &error);
+	if (rc) {
+		if (errmsg)
+				*errmsg = g_strdup_printf("%s\n%s", __func__, error->message);
+		g_error_free(error);
+		document_free_displayed_documents(dd);
+
+		return -1;
+	}
+
+	return 0;
+}
+
 Anbindung* document_get_anbindung(DisplayedDocument* dd) {
 	gint seite_von = 0;
 	gint index_von = 0;

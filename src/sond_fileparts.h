@@ -44,6 +44,8 @@ GPtrArray* sond_file_part_load_children(SondFilePart*, GError**);
 
 gboolean sond_file_part_has_children(SondFilePart*);
 
+gchar* sond_file_part_write_to_tmp_file(SondFilePart*, GError**);
+
 //SondFilePart Error
 #define SOND_TYPE_FILE_PART_ERROR sond_file_part_error_get_type( )
 G_DECLARE_DERIVABLE_TYPE(SondFilePartError, sond_file_part_error, SOND,
@@ -88,11 +90,11 @@ struct _SondFilePartDirClass {
 };
 
 SondFilePartDir* sond_file_part_dir_create(gchar const*, SondFilePart*, GError**);
-
+/*
 GPtrArray* sond_file_part_dir_load_children(SondFilePart*, GError**);
 
 gboolean sond_file_part_dir_has_children(SondFilePart*);
-
+*/
 //Sond_File_Part_PDF definieren
 #define SOND_TYPE_FILE_PART_PDF sond_file_part_pdf_get_type( )
 G_DECLARE_DERIVABLE_TYPE(SondFilePartPDF, sond_file_part_pdf, SOND,
@@ -101,14 +103,6 @@ G_DECLARE_DERIVABLE_TYPE(SondFilePartPDF, sond_file_part_pdf, SOND,
 struct _SondFilePartPDFClass {
 	SondFilePartClass parent_class;
 };
-
-void sond_file_part_pdf_lock_document(SondFilePartPDF*);
-
-void sond_file_part_pdf_unlock_document(SondFilePartPDF*);
-
-gint sond_file_part_pdf_open_document(SondFilePartPDF*, GError**);
-
-void sond_file_part_pdf_close_document(SondFilePartPDF*);
 
 SondFilePartPDF* sond_file_part_pdf_create(gchar const*, SondFilePart*, GError**);
 

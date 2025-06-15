@@ -57,4 +57,11 @@ pdf_annot* pdf_annot_lookup_obj(fz_context*, pdf_page*, pdf_obj*);
 
 gint pdf_page_rotate(fz_context*, pdf_obj*, gint, GError**);
 
+gint pdf_get_names_tree_dict(fz_context*, pdf_document*,
+		pdf_obj*, pdf_obj**, GError**);
+
+gint pdf_walk_names_dict(fz_context*, pdf_obj*, pdf_cycle_list*,
+		gint (*) (fz_context*, pdf_obj*, gchar const*,
+				gpointer, GError**), gpointer, GError**);
+
 #endif // PDF_DATEIEN_H_INCLUDED

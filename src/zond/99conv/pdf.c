@@ -866,3 +866,154 @@ gint pdf_page_rotate(fz_context *ctx, pdf_obj *page_obj, gint rotate,
 	return 0;
 }
 
+gint pdf_get_names_tree_dict(fz_context* ctx, pdf_document* doc,
+		pdf_obj* name_dict, pdf_obj** dict, GError **error)
+{
+	pdf_obj* dict_res = NULL;
+
+	fz_try(ctx)
+	{
+		pdf_obj *root = pdf_dict_get(ctx, pdf_trailer(ctx, doc), PDF_NAME(Root));
+		pdf_obj *names = pdf_dict_get(ctx, root, PDF_NAME(Names));
+		dict_res = pdf_dict_get(ctx, names, name_dict);
+	}
+	fz_catch(ctx)
+	{
+		if (error)
+			*error = g_error_new(g_quark_from_static_string("mupdf"),
+					fz_caught(ctx), "%s\n%s", __func__,
+					fz_caught_message(ctx));
+
+		return -1;
+	}
+
+	if (dict) *dict = dict_res;
+
+	return 0;
+}
+
+gint
+pdf_walk_names_dict(fz_context* ctx, pdf_obj *node, pdf_cycle_list *cycle_up,
+		gint (*callback_walk) (fz_context*, pdf_obj*, gchar const*,
+				gpointer, GError**), gpointer data, GError** error)
+{
+	pdf_cycle_list cycle;
+	pdf_obj *kids = NULL;
+	pdf_obj *names = NULL;
+	int i;
+	gboolean is_cycle = FALSE;
+
+	fz_try(ctx)
+	{
+		kids = pdf_dict_get(ctx, node, PDF_NAME(Kids));
+		names = pdf_dict_get(ctx, node, PDF_NAME(Names));
+		is_cycle = pdf_cycle(ctx, &cycle, cycle_up, node);
+	}
+	fz_catch(ctx)
+	{
+		if (error)
+			*error = g_error_new(g_quark_from_static_string("mupdf"),
+					fz_caught(ctx), "%s\n%s", __func__,
+					fz_caught_message(ctx));
+
+		return -1;
+	}
+
+	if (kids && !is_cycle)
+	{
+		int len = 0;
+
+		fz_try(ctx)
+			pdf_array_len(ctx, kids);
+		fz_catch(ctx)
+		{
+			if (error)
+				*error = g_error_new(g_quark_from_static_string("mupdf"),
+						fz_caught(ctx), "%s\n%s", __func__,
+						fz_caught_message(ctx));
+
+			return -1;
+		}
+
+		for (i = 0; i < len; i++) {
+			gint rc = 0;
+
+			rc = pdf_walk_names_dict(ctx, pdf_array_get(ctx, kids, i),
+					&cycle, callback_walk, data, error);
+			if (rc == -1)
+				ERROR_Z
+			else if (rc == 1)
+				return 1;
+		}
+	}
+
+	if (names)
+	{
+		int len = 0;
+
+		fz_try(ctx)
+			len = pdf_array_len(ctx, names);
+		fz_catch(ctx)
+		{
+			if (error)
+				*error = g_error_new(g_quark_from_static_string("mupdf"),
+						fz_caught(ctx), "%s\n%s", __func__,
+						fz_caught_message(ctx));
+
+			return -1;
+		}
+
+		for (i = 0; i + 1 < len; i += 2)
+		{
+			pdf_obj* EF_F = NULL;
+			gchar const* path = NULL;
+			gint rc = 0;
+
+			fz_try(ctx) {
+	//			pdf_obj *key = pdf_array_get(ctx, names, i);
+				pdf_obj *val = pdf_array_get(ctx, names, i + 1);
+
+				if (pdf_is_dict(ctx, val))
+				{
+					pdf_obj* F = NULL;
+					pdf_obj* UF = NULL;
+					pdf_obj* EF = NULL;
+
+					EF = pdf_dict_get(ctx, val, PDF_NAME(EF));
+					EF_F = pdf_dict_get(ctx, EF, PDF_NAME(F));
+					F = pdf_dict_get(ctx, val, PDF_NAME(F));
+					UF = pdf_dict_get(ctx, val, PDF_NAME(UF));
+
+					if (pdf_is_string(ctx, UF))
+						path = pdf_to_text_string(ctx, UF);
+					else if (pdf_is_string(ctx, F))
+						path = pdf_to_text_string(ctx, F);
+				}
+			}
+			fz_catch(ctx) {
+				if (error)
+					*error = g_error_new(g_quark_from_static_string("mupdf"),
+							fz_caught(ctx), "%s\n%s", __func__,
+							fz_caught_message(ctx));
+
+				return -1;
+			}
+
+			if (!path) {
+				if (error)
+					*error = g_error_new(ZOND_ERROR, 0, "%s\nEingebettete Datei hat keinen Pfad",
+							__func__);
+				return -1;
+			}
+
+			rc = callback_walk(ctx, EF_F, path, data, error);
+			if (rc == -1)
+				ERROR_Z
+			else if (rc == 1)
+				return 1;
+		}
+	}
+
+	return 0;
+}
+

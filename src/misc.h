@@ -68,6 +68,6 @@ gchar* misc_get_calendar(GtkCalendar*);
 
 GtkWidget* result_listbox_new(GtkWindow*, const gchar*, GtkSelectionMode);
 
-gint misc_datei_oeffnen(const gchar*, gboolean, gchar**);
+gint misc_datei_oeffnen(const gchar*, gboolean, GError**);
 
 #endif // MISC_H_INCLUDED
