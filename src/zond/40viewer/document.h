@@ -22,7 +22,7 @@ typedef struct _Displayed_Document {
 void document_free_displayed_documents(DisplayedDocument*);
 
 DisplayedDocument* document_new_displayed_document(const gchar*, Anbindung*,
-		gchar**);
+		GError**);
 
 Anbindung* document_get_anbindung(DisplayedDocument*);
 

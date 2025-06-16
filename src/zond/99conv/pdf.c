@@ -319,7 +319,7 @@ gint pdf_clean(fz_context *ctx, const gchar *file_part, GError **error) {
 		pages[i] = i;
 
 	fz_try( ctx )
-		pdf_rearrange_pages(ctx, doc, count, pages);
+		pdf_rearrange_pages(ctx, doc, count, pages, PDF_CLEAN_STRUCTURE_KEEP);
 	fz_always(ctx)
 		g_free(pages);
 	fz_catch(ctx) {

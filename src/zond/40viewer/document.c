@@ -29,16 +29,21 @@ void document_free_displayed_documents(DisplayedDocument *dd) {
 
 DisplayedDocument*
 document_new_displayed_document(const gchar *file_part, Anbindung *anbindung,
-		gchar **errmsg) {
+		GError **error) {
 	ZondPdfDocument *zond_pdf_document = NULL;
 	DisplayedDocument *dd = NULL;
+	gchar* errmsg = NULL;
 
 	zond_pdf_document = zond_pdf_document_open(file_part,
 			(anbindung) ? anbindung->von.seite : 0,
-			(anbindung) ? anbindung->bis.seite : -1, errmsg);
+			(anbindung) ? anbindung->bis.seite : -1, &errmsg);
 	if (!zond_pdf_document) {
-		if (errmsg && *errmsg)
-			ERROR_S_MESSAGE_VAL("zond_pdf_document_open", NULL)
+		if (errmsg) {
+			if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\n%s", __func__, errmsg);
+			g_free(errmsg);
+
+			return NULL;
+		}
 		else
 			return NULL; //Fehler: Passwort funktioniert nicht
 	}
@@ -66,7 +71,7 @@ document_new_displayed_document(const gchar *file_part, Anbindung *anbindung,
 
 	return dd;
 }
-
+/*
 gint document_oeffnen_internal_viewer(Projekt *zond,
 		const gchar *file_part, Anbindung *anbindung, PdfPos *pos_pdf,
 		gchar **errmsg) {
@@ -135,7 +140,7 @@ gint document_oeffnen_internal_viewer(Projekt *zond,
 
 	return 0;
 }
-
+*/
 Anbindung* document_get_anbindung(DisplayedDocument* dd) {
 	gint seite_von = 0;
 	gint index_von = 0;

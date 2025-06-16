@@ -37,6 +37,7 @@
  Zeile 75: Compiler-Optionen -mavx -Wno-incompatible-pointer-types ergänzen
  "CC_CMD = $(QUIET_CC) $(MKTGTDIR) ; $(CC) $(CFLAGS) -mavx -Wno-incompatible-pointer-types -MMD -MP -o $@ -c $<"
 
+Änderung Rules war beim letzten Kompilieren (16.06.25) nicht erforderlich
  # --- Rules ---
 
  $(OUT)/%.a :

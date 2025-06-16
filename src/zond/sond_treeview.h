@@ -52,12 +52,12 @@ gboolean sond_treeview_test_cursor_descendant(SondTreeview*, gboolean);
 void sond_treeview_copy_or_cut_selection(SondTreeview*, gboolean);
 
 gint sond_treeview_clipboard_foreach(
-		gint (*)(SondTreeview*, GtkTreeIter*, gpointer, gchar**), gpointer,
-		gchar**);
+		gint (*)(SondTreeview*, GtkTreeIter*, gpointer, GError**), gpointer,
+		GError**);
 
 gint sond_treeview_selection_foreach(SondTreeview*,
-		gint (*)(SondTreeview*, GtkTreeIter*, gpointer, gchar**), gpointer,
-		gchar**);
+		gint (*)(SondTreeview*, GtkTreeIter*, gpointer, GError**), gpointer,
+		GError**);
 
 G_END_DECLS
 

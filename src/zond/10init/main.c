@@ -137,7 +137,7 @@ static void init_icons(Projekt *zond) {
 	return;
 }
 
-#ifndef Debug
+#ifndef CONFIG_Debug
 static void log_init(Projekt *zond) {
 	gchar *logfile = NULL;
 	gchar *logdir = NULL;
@@ -183,10 +183,7 @@ static void log_init(Projekt *zond) {
 static void init(GtkApplication *app, Projekt *zond) {
 	zond->base_dir = get_base_dir();
 
-#ifdef Debug
-	setvbuf(stdout, NULL, _IONBF, 0);
-	setvbuf(stderr, NULL, _IONBF, 0);
-#else
+#ifndef CONFIG_Debug
 	log_init(zond);
 #endif // TESTING
 

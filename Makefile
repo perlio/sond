@@ -1,7 +1,7 @@
 # Build Directories
 BUILD_DIR := $(CONFIG)
 BIN_DIR := $(BUILD_DIR)/bin
-OBJ_DIR := $(BUILD_DIR)/obj
+OBJ_DIR := $(BUILD_DIR)/obj/$(MAKECMDGOALS)
 
 # Source files
 SRC_DIRS := src
@@ -14,7 +14,7 @@ LDFLAGS := -Wl,--allow-multiple-definition
 ifneq (,$(findstring $(MAKECMDGOALS), zond))
 SRCS += $(shell find $(SRC_DIRS)/zond -name '*.c') $(SRC_DIRS)/misc_stdlib.c $(SRC_DIRS)/misc.c \
 	$(SRC_DIRS)/sond_fileparts.c
-CFLAGS += $(shell pkg-config --cflags gtk+-3.0 gobject-2.0 json-glib-1.0) -D$(CONFIG)
+CFLAGS += $(shell pkg-config --cflags gtk+-3.0 gobject-2.0 json-glib-1.0) -DCONFIG_$(CONFIG)
 LDFLAGS += $(shell pkg-config --libs gtk+-3.0 gobject-2.0 sqlite3 libcurl tesseract libzip json-glib-1.0) \
 	-lshlwapi -lmupdf -lmupdf-third
 endif
@@ -49,7 +49,7 @@ viewer: $(BIN_DIR)/viewer.exe
 $(BIN_DIR)/$(MAKECMDGOALS).exe: $(SRCS:%=$(OBJ_DIR)/%.o)
 	echo $(SRCS) $(BIN_DIR)/$(MAKECMDGOALS).exe
 	@mkdir -p $(BIN_DIR)
-	$(CC) $(SRCS:%=$(OBJ_DIR)/%.o) $(LDFLAGS) -o $@
+	$(CC) $(SRCS:%=$(OBJ_DIR)/%.o) $(LDFLAGS) $(LDFLAGS_CONFIG) -o $@
 
 # Compiling
 $(OBJ_DIR)/%.c.o: %.c
@@ -59,5 +59,5 @@ $(OBJ_DIR)/%.c.o: %.c
 # Clean
 .PHONY: clean
 clean:
-	rm -rf $(BUILD_DIR)/obj
+	rm -rf $(OBJ_DIR)
 	rm -rf $(BUILD_DIR)/bin

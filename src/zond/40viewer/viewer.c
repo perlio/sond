@@ -833,7 +833,7 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd, GError** err
 		fz_try(zond_pdf_document_get_ctx(dd->zond_pdf_document))
 			pdf_rearrange_pages(zond_pdf_document_get_ctx(dd->zond_pdf_document),
 					zond_pdf_document_get_pdf_doc(dd->zond_pdf_document),
-					arr_pages->len, (gint*) arr_pages->data);
+					arr_pages->len, (gint*) arr_pages->data, PDF_CLEAN_STRUCTURE_KEEP);
 
 		fz_always(zond_pdf_document_get_ctx(dd->zond_pdf_document)) {
 			g_array_unref(arr_pages);

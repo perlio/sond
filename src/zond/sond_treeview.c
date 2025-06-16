@@ -557,8 +557,8 @@ void sond_treeview_copy_or_cut_selection(SondTreeview *stv,
 }
 
 static gint sond_treeview_refs_foreach(SondTreeview *stv_orig, GPtrArray *refs,
-		gint (*foreach)(SondTreeview*, GtkTreeIter*, gpointer, gchar**),
-		gpointer data, gchar **errmsg) {
+		gint (*foreach)(SondTreeview*, GtkTreeIter*, gpointer, GError**),
+		gpointer data, GError **error) {
 	if (!refs)
 		return 0;
 
@@ -577,34 +577,32 @@ static gint sond_treeview_refs_foreach(SondTreeview *stv_orig, GPtrArray *refs,
 				path);
 		gtk_tree_path_free(path);
 		if (!success) {
-			if (errmsg)
-				*errmsg = g_strdup("Bei Aufruf gtk_tree_model_get_"
-						"iter:\nKonnte keinen g�ltigen Iter ermitteln");
-			return -1;
+			g_warning("%s\ngtk_tree_model_iter erfolglos", __func__);
+			continue;
 		}
 
-		rc = foreach(stv_orig, &iter_ref, data, errmsg);
+		rc = foreach(stv_orig, &iter_ref, data, error);
 		if (rc == -1)
-			ERROR_S
+			ERROR_Z
 		else if (rc >= 1)
-			return rc; //Abbruch gew�hlt
+			return rc; //Abbruch gewählt
 	}
 
 	return 0;
 }
 
 gint sond_treeview_clipboard_foreach(
-		gint (*foreach)(SondTreeview*, GtkTreeIter*, gpointer, gchar**),
-		gpointer data, gchar **errmsg) {
+		gint (*foreach)(SondTreeview*, GtkTreeIter*, gpointer, GError**),
+		gpointer data, GError **error) {
 	gint rc = 0;
 
 	Clipboard *clipboard = ((SondTreeviewClass*) g_type_class_peek(
 			SOND_TYPE_TREEVIEW))->clipboard;
 
 	rc = sond_treeview_refs_foreach(clipboard->tree_view, clipboard->arr_ref,
-			foreach, data, errmsg);
+			foreach, data, error);
 	if (rc == -1)
-		ERROR_S
+		ERROR_Z
 	else if (rc >= 1)
 		return rc;
 
@@ -612,8 +610,8 @@ gint sond_treeview_clipboard_foreach(
 }
 
 gint sond_treeview_selection_foreach(SondTreeview *stv,
-		gint (*foreach)(SondTreeview*, GtkTreeIter*, gpointer, gchar**),
-		gpointer data, gchar **errmsg) {
+		gint (*foreach)(SondTreeview*, GtkTreeIter*, gpointer, GError**),
+		gpointer data, GError **error) {
 	gint rc = 0;
 	GPtrArray *refs = NULL;
 
@@ -621,10 +619,10 @@ gint sond_treeview_selection_foreach(SondTreeview *stv,
 	if (!refs)
 		return 0;
 
-	rc = sond_treeview_refs_foreach(stv, refs, foreach, data, errmsg);
+	rc = sond_treeview_refs_foreach(stv, refs, foreach, data, error);
 	g_ptr_array_unref(refs);
 	if (rc == -1)
-		ERROR_S
+		ERROR_Z
 	else if (rc >= 1)
 		return rc;
 

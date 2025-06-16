@@ -302,7 +302,8 @@ static void cb_item_textsuche(GtkMenuItem *item, gpointer data) {
 
 static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 	gint rc = 0;
-	gchar *errmsg = NULL;
+	GError *error = NULL;
+	gchar* errmsg = NULL;
 	InfoWindow *info_window = NULL;
 	gchar *message = NULL;
 
@@ -345,13 +346,13 @@ static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 		}
 
 		DisplayedDocument *dd = document_new_displayed_document(file_part, NULL,
-				&errmsg);
+				&error);
 		if (!dd) {
-			if (*errmsg) {
+			if (error) {
 				info_window_set_message(info_window, "OCR nicht möglich - "
 						"Fehler bei Aufruf document_new_displayed_document:\n");
-				info_window_set_message(info_window, errmsg);
-				g_free(errmsg);
+				info_window_set_message(info_window, error->message);
+				g_error_free(error);
 			}
 
 			continue;

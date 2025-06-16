@@ -430,8 +430,8 @@ gint misc_datei_oeffnen(const gchar *path, gboolean open_with, GError** error) {
 							FORMAT_MESSAGE_IGNORE_INSERTS,
 					NULL, dw, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
 					(LPTSTR) &lpMsgBuf, 0, NULL);
-			*error = g_error_new(g_quark_from_static_string("WinApi"), dw, "%s\nShellExecuteEx:\n"
-					"%s", __func__, (LPTSTR) lpMsgBuf);
+			*error = g_error_new(g_quark_from_static_string("WinApi"), dw,
+					"%s\nShellExecuteEx:\n%s", __func__, (LPTSTR) lpMsgBuf);
 
 			LocalFree(lpMsgBuf);
 		}

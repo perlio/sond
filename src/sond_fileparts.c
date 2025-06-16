@@ -125,6 +125,7 @@ static SondFilePart* sond_file_part_create(GType sfp_type, const gchar *path,
 	SondFilePart *sfp = NULL;
 	SondFilePartPrivate *sfp_priv = NULL;
 	GPtrArray *arr_opened_files = NULL;
+	g_message("%s  new: %d  parent: %d", path, sfp_type, parent ? G_OBJECT_TYPE(parent) : 0);
 
 	if (parent && SOND_FILE_PART_GET_CLASS(parent)->get_arr_opened_files) {
 		arr_opened_files = SOND_FILE_PART_GET_CLASS(parent)->get_arr_opened_files(parent);
@@ -150,8 +151,7 @@ static SondFilePart* sond_file_part_create(GType sfp_type, const gchar *path,
 		//Array von geöffneten Dateien im Filesystem
 		g_ptr_array_add(arr_opened_files, sfp);
 	}
-g_message("sfp erstellt - path: %s    path_parent: %s", sfp_priv->path,
-		(sfp_priv->parent) ? sond_file_part_get_path(sfp_priv->parent) : NULL);
+
 	return sfp;
 }
 
@@ -198,6 +198,10 @@ static fz_stream* sond_file_part_get_istream(fz_context* ctx,
 	SondFilePart* sfp_parent = NULL;
 	fz_stream *stream = NULL;
 
+	//ist ja nur Unterteilung der Datei
+	if (SOND_IS_FILE_PART_PDF_PAGE_TREE(sfp))
+		sfp = sond_file_part_get_parent(sfp);
+
 	sfp_parent = sond_file_part_get_parent(sfp);
 
 	//Datei im Filesystem
@@ -234,6 +238,34 @@ static fz_stream* sond_file_part_get_istream(fz_context* ctx,
 				sond_file_part_get_path(sfp), error);
 		if (!stream)
 			ERROR_Z_VAL(NULL)
+
+		if (!stream->seek) { //stream ist nicht seekable - muß in buffer
+			fz_buffer *buf = NULL;
+
+			fz_try(ctx)
+				buf = fz_read_all(ctx, stream, 4096);
+			fz_always(ctx)
+				fz_drop_stream(ctx, stream);
+			fz_catch(ctx) {
+				if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
+						fz_caught(ctx), "%s\nfz_read_all: %s", __func__,
+						fz_caught_message(ctx));
+
+				return NULL;
+			}
+
+			fz_try(ctx)
+				stream = fz_open_buffer(ctx, buf);
+			fz_always(ctx)
+				fz_drop_buffer(ctx, buf);
+			fz_catch(ctx) {
+				if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
+						fz_caught(ctx), "%s\nfz_open_buffer: %s", __func__,
+						fz_caught_message(ctx));
+
+				return NULL;
+			}
+		}
 	}
 	else {
 		if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\nStream für SondFilePart-Typ"
@@ -266,7 +298,7 @@ gchar* sond_file_part_write_to_tmp_file(SondFilePart* sfp, GError **error) {
 	}
 
 	fz_try(ctx)
-		buf = fz_read_all(ctx, stream, 4096);
+		buf = fz_read_all(ctx, stream, 0);
 	fz_always(ctx)
 		fz_drop_stream(ctx, stream);
 	fz_catch(ctx) {
@@ -278,7 +310,10 @@ gchar* sond_file_part_write_to_tmp_file(SondFilePart* sfp, GError **error) {
 		return NULL;
 	}
 
-	basename = g_path_get_basename(sond_file_part_get_path(sfp));
+	if (sond_file_part_get_path(sfp))
+		basename = g_path_get_basename(sond_file_part_get_path(sfp));
+	else basename = g_path_get_basename(sond_file_part_get_path(sond_file_part_get_parent(sfp)));
+
 	filename = g_strdup_printf("%s/%d%s", g_get_tmp_dir(),
 			g_random_int_range(10000, 99999), basename);
 	g_free(basename);
@@ -531,7 +566,6 @@ static gint sond_file_part_dir_get_children(SondFilePartDir* sfp_dir,
 
 			sfp_child = sond_file_part_create_from_content_type(
 					rel_path_child, sfp_parent, content_type);
-
 			g_free(rel_path_child);
 
 			g_ptr_array_add(*arr_children, sfp_child);
@@ -743,7 +777,7 @@ static GPtrArray* sond_file_part_pdf_load_embedded_files(SondFilePart* sfp_pdf,
 	}
 
 	doc = sond_file_part_pdf_open_document(ctx, SOND_FILE_PART_PDF(sfp_pdf), error);
-	if (rc) {
+	if (!doc) {
 		fz_drop_context(ctx);
 		ERROR_Z_VAL(NULL)
 	}
@@ -815,70 +849,6 @@ static void sond_file_part_pdf_init(SondFilePartPDF* self) {
 	return;
 }
 
-static void mupdf_unlock(void *user, gint lock) {
-	GMutex *mutex = (GMutex*) user;
-
-	g_mutex_unlock(&(mutex[lock]));
-
-	return;
-}
-
-static void mupdf_lock(void *user, gint lock) {
-	GMutex *mutex = (GMutex*) user;
-
-	g_mutex_lock(&(mutex[lock]));
-
-	return;
-}
-
-static void*
-mupdf_malloc(void *user, size_t size) {
-	return g_malloc(size);
-}
-
-static void*
-mupdf_realloc(void *user, void *old, size_t size) {
-	return g_realloc(old, size);
-}
-
-static void mupdf_free(void *user, void *ptr) {
-	g_free(ptr);
-
-	return;
-}
-
-static fz_context*
-init_context(void) {
-	GMutex *mutex = NULL;
-	fz_context *ctx = NULL;
-	fz_locks_context locks_context = { 0, };
-	fz_alloc_context alloc_context = { 0, };
-
-	//mutex für document
-	mutex = g_malloc0(sizeof(GMutex) * FZ_LOCK_MAX);
-	for (gint i = 0; i < FZ_LOCK_MAX; i++)
-		g_mutex_init(&(mutex[i]));
-
-	locks_context.user = mutex;
-	locks_context.lock = mupdf_lock;
-	locks_context.unlock = mupdf_unlock;
-
-	alloc_context.user = NULL;
-	alloc_context.malloc = mupdf_malloc;
-	alloc_context.realloc = mupdf_realloc;
-	alloc_context.free = mupdf_free;
-
-	/* Create a context to hold the exception stack and various caches. */
-	ctx = fz_new_context(&alloc_context, &locks_context, FZ_STORE_UNLIMITED);
-	if (!ctx) {
-		for (gint i = 0; i < FZ_LOCK_MAX; i++)
-			g_mutex_clear(&mutex[i]);
-		g_free(mutex);
-	}
-
-	return ctx;
-}
-
 static fz_stream* sond_file_part_pdf_lookup_embedded_file(fz_context* ctx,
 		SondFilePartPDF* sfp_pdf, gchar const* path, GError** error) {
 	pdf_document* doc = NULL;
@@ -896,7 +866,7 @@ static fz_stream* sond_file_part_pdf_lookup_embedded_file(fz_context* ctx,
 		ERROR_Z_VAL(NULL)
 	}
 
-	lookup.path_search = sond_file_part_get_path(SOND_FILE_PART(sfp_pdf));
+	lookup.path_search = path;
 
 	rc = pdf_walk_names_dict(ctx, embedded_files_dict, NULL,
 			lookup_embedded_file, &lookup, error);

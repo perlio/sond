@@ -42,7 +42,7 @@ gint zond_treeview_copy_node_to_baum_auswertung(ZondTreeview*, gint,
 ZondTreeview* zond_treeview_new(Projekt*, gint);
 
 gint zond_treeview_oeffnen_internal_viewer(Projekt*, gchar const*, Anbindung*,
-		PdfPos*, gchar**);
+		PdfPos*, GError**);
 
 gint zond_treeview_load_baum(ZondTreeview*, GError**);
 

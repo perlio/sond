@@ -189,7 +189,7 @@ static void cb_textsuche_act(GtkListBox *box, GtkListBoxRow *row, gpointer data)
 	Projekt *zond = (Projekt*) data;
 
 	gint rc = 0;
-	gchar *errmsg = NULL;
+	GError *error = NULL;
 	GArray *arr_pdf_text_occ = NULL;
 	gint index = 0;
 	PDFTextOcc pdf_text_occ = { 0 };
@@ -204,11 +204,11 @@ static void cb_textsuche_act(GtkListBox *box, GtkListBoxRow *row, gpointer data)
 	pos_pdf.index = (gint) (pdf_text_occ.quad.ul.y);
 
 	rc = zond_treeview_oeffnen_internal_viewer(zond, pdf_text_occ.file_part,
-			NULL, &pos_pdf, &errmsg);
+			NULL, &pos_pdf, &error);
 	if (rc) {
-		display_message(zond->app_window, "Fehler in Textsuche -\n\n", errmsg,
+		display_message(zond->app_window, "Fehler in Textsuche -\n\n", error->message,
 				NULL);
-		g_free(errmsg);
+		g_error_free(error);
 
 		return;
 	}
