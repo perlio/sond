@@ -21,7 +21,7 @@ struct _SondTVFMItemClass {
 	GObjectClass parent_class;
 };
 
-//SondFilePart* sond_tvfm_item_get_file_part(SondTVFMItem*);
+SondFilePart* sond_tvfm_item_get_sond_file_part(SondTVFMItem*);
 
 gboolean sond_tvfm_item_has_children(SondTVFMItem*);
 

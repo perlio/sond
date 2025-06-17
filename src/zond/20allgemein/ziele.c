@@ -20,6 +20,9 @@
 #include <sqlite3.h>
 #include <gtk/gtk.h>
 
+#include "../../misc.h"
+#include "../../sond_fileparts.h"
+
 #include "../zond_pdf_document.h"
 
 #include "../global_types.h"
@@ -32,7 +35,6 @@
 #include "../40viewer/viewer.h"
 #include "../40viewer/document.h"
 
-#include "../../misc.h"
 #include "../zond_treeview.h"
 #include "../zond_tree_store.h"
 
@@ -378,7 +380,6 @@ static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
 		GtkTreeIter iter_test = { 0 };
 		GtkTreeIter iter_new = { 0 };
 		GtkTreeIter iter_anchor = { 0 };
-		ZondPdfAbschnitt *zpda = NULL;
 		gint pos = 0;
 		gboolean child = TRUE;
 
@@ -402,7 +403,7 @@ static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
 				return -1;
 			}
 
-			if (!ZOND_IS_PDF_ABSCHNITT(object)) {
+			if (!SOND_IS_FILE_PART_PDF_PAGE_TREE(object)) {
 				if (error)
 					*error = g_error_new( ZOND_ERROR, 0,
 							"%s\nKnoten enthält keinen PDF-Abschnitt",
@@ -412,8 +413,9 @@ static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
 				return -1;
 			}
 
-			zond_pdf_abschnitt_get(ZOND_PDF_ABSCHNITT(object), NULL, NULL,
-					&anbindung_test, NULL, NULL);
+//			sond_file_part_pdf_page_tree_get_anbindung(
+//					SOND_FILE_PART_PDF_PAGE_TREE(object), NULL, NULL,
+//					&anbindung_test, NULL, NULL);
 			g_object_unref(object);
 
 			if (anbindung_1_vor_2(anbindung, anbindung_test))
@@ -447,19 +449,19 @@ static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
 			}
 		} while (1);
 
-		zpda = g_object_new( ZOND_TYPE_PDF_ABSCHNITT, NULL);
-		zond_pdf_abschnitt_set(zpda, node_inserted, file_part, anbindung,
-				zond->icon[ICON_ANBINDUNG].icon_name, node_text);
+//		zpda = g_object_new( ZOND_TYPE_PDF_ABSCHNITT, NULL);
+//		zond_pdf_abschnitt_set(zpda, node_inserted, file_part, anbindung,
+//				zond->icon[ICON_ANBINDUNG].icon_name, node_text);
 
 		gtk_tree_store_insert(
 				GTK_TREE_STORE(
 						gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_FS]) )),
 				&iter_new, &iter, pos);
-		gtk_tree_store_set(
-				GTK_TREE_STORE(
-						gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_FS]) )),
-				&iter_new, 0, G_OBJECT(zpda), -1);
-		g_object_unref(zpda);
+//		gtk_tree_store_set(
+//				GTK_TREE_STORE(
+//						gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_FS]) )),
+//				&iter_new, 0, G_OBJECT(zpda), -1);
+//		g_object_unref(zpda);
 
 		iter_anchor = iter_new;
 		iter_test = iter_new;
@@ -482,7 +484,7 @@ static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
 				return -1;
 			}
 
-			if (!ZOND_IS_PDF_ABSCHNITT(object)) {
+			if (!SOND_IS_FILE_PART_PDF_PAGE_TREE(object)) {
 				if (error)
 					*error = g_error_new( ZOND_ERROR, 0,
 							"%s\nKnoten enthält keinen PDF-Abschnitt",
@@ -492,8 +494,8 @@ static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
 				return -1;
 			}
 
-			zond_pdf_abschnitt_get(ZOND_PDF_ABSCHNITT(object), NULL, NULL,
-					&anbindung_test, NULL, NULL);
+//			zond_pdf_abschnitt_get(ZOND_PDF_ABSCHNITT(object), NULL, NULL,
+//					&anbindung_test, NULL, NULL);
 			g_object_unref(object);
 
 			if (anbindung_1_eltern_von_2(anbindung, anbindung_test)) {

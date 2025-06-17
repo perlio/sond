@@ -47,23 +47,6 @@
 
 G_BEGIN_DECLS
 
-//ZOND_PDF_ABSCHNITT definieren - lokales GObject-Derivat
-#define ZOND_TYPE_PDF_ABSCHNITT zond_pdf_abschnitt_get_type( )
-G_DECLARE_DERIVABLE_TYPE(ZondPdfAbschnitt, zond_pdf_abschnitt, ZOND,
-		PDF_ABSCHNITT, GObject)
-
-struct _ZondPdfAbschnittClass {
-	GObjectClass parent_class;
-};
-
-void zond_pdf_abschnitt_set(ZondPdfAbschnitt*, gint, const gchar*, Anbindung,
-		const gchar*, const gchar*);
-
-gint zond_pdf_abschnitt_get_ID(ZondPdfAbschnitt*);
-
-void zond_pdf_abschnitt_get(ZondPdfAbschnitt*, gint*, gchar const**, Anbindung*,
-		gchar const**, gchar const**);
-
 //ZOND_TYPE_TREEVIEWFM definieren
 #define ZOND_TYPE_TREEVIEWFM zond_treeviewfm_get_type( )
 G_DECLARE_DERIVABLE_TYPE(ZondTreeviewFM, zond_treeviewfm, ZOND, TREEVIEWFM,

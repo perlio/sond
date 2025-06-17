@@ -40,7 +40,7 @@ SondFilePart* sond_file_part_get_parent(SondFilePart *);
 
 gchar const* sond_file_part_get_path(SondFilePart *);
 
-GPtrArray* sond_file_part_load_children(SondFilePart*, GError**);
+gint sond_file_part_load_children(SondFilePart*, GPtrArray**, GError**);
 
 gboolean sond_file_part_has_children(SondFilePart*);
 

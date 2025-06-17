@@ -125,7 +125,6 @@ static SondFilePart* sond_file_part_create(GType sfp_type, const gchar *path,
 	SondFilePart *sfp = NULL;
 	SondFilePartPrivate *sfp_priv = NULL;
 	GPtrArray *arr_opened_files = NULL;
-	g_message("%s  new: %d  parent: %d", path, sfp_type, parent ? G_OBJECT_TYPE(parent) : 0);
 
 	if (parent && SOND_FILE_PART_GET_CLASS(parent)->get_arr_opened_files) {
 		arr_opened_files = SOND_FILE_PART_GET_CLASS(parent)->get_arr_opened_files(parent);
@@ -167,18 +166,18 @@ gchar const* sond_file_part_get_path(SondFilePart *sfp) {
 	return sfp_priv->path;
 }
 
-GPtrArray* sond_file_part_load_children(SondFilePart* sfp, GError **error) {
-	GPtrArray *arr_children = NULL;
-
+gint sond_file_part_load_children(SondFilePart* sfp, GPtrArray** arr_children, GError **error) {
 	if (SOND_FILE_PART_GET_CLASS(sfp)->load_children) {
-		arr_children = SOND_FILE_PART_GET_CLASS(sfp)->load_children(sfp, error);
-		if (!arr_children) {
+		gint rc = 0;
+
+		rc = SOND_FILE_PART_GET_CLASS(sfp)->load_children(sfp, *arr_children, error);
+		if (rc) {
 			g_prefix_error(error, "%s\n", __func__);
-			return NULL;
+			return -1;
 		}
 	}
 
-	return arr_children; //NULL ohne error - nicht unterstützt
+	return 0; //NULL ohne error - nicht unterstützt
 }
 
 gboolean sond_file_part_has_children(SondFilePart *sfp) {
@@ -276,10 +275,8 @@ static fz_stream* sond_file_part_get_istream(fz_context* ctx,
 }
 
 gchar* sond_file_part_write_to_tmp_file(SondFilePart* sfp, GError **error) {
-	gint rc = 0;
 	gchar *filename = NULL;
 	gchar* basename = NULL;
-	gint fd_write = 0;
 	fz_context* ctx = NULL;
 	fz_stream* stream = NULL;
 	fz_buffer *buf = NULL;
@@ -326,11 +323,12 @@ gchar* sond_file_part_write_to_tmp_file(SondFilePart* sfp, GError **error) {
 		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
 					fz_caught(ctx), "%s\n%s", __func__,
 					fz_caught_message(ctx));
-		fz_drop_context(ctx);
 		g_free(filename);
 
-		return NULL;
+		filename = NULL;
 	}
+
+	fz_drop_context(ctx);
 
 	return filename;
 }
@@ -508,9 +506,10 @@ static gint sond_file_part_dir_get_children(SondFilePartDir* sfp_dir,
 			sond_file_part_dir_get_instance_private(sfp_dir);
 	SondFilePart *sfp_parent = NULL;
 	gchar const* path = NULL;
+	GPtrArray* loaded_children = NULL;
 
 	if (load)
-		*arr_children = g_ptr_array_new_with_free_func((GDestroyNotify)g_object_unref);
+		loaded_children = g_ptr_array_new_with_free_func((GDestroyNotify)g_object_unref);
 
 	path = sond_file_part_get_path(SOND_FILE_PART(sfp_dir));
 
@@ -531,7 +530,7 @@ static gint sond_file_part_dir_get_children(SondFilePartDir* sfp_dir,
 				error);
 		g_object_unref(file_dir);
 		if (!enumer) {
-			g_ptr_array_unref(*arr_children);
+			g_ptr_array_unref(loaded_children);
 
 			ERROR_Z
 		}
@@ -546,7 +545,7 @@ static gint sond_file_part_dir_get_children(SondFilePartDir* sfp_dir,
 			res = g_file_enumerator_iterate(enumer, &info_child, NULL, NULL, error);
 			if (!res) {
 				g_object_unref(enumer);
-				g_ptr_array_unref(*arr_children);
+				g_ptr_array_unref(loaded_children);
 				ERROR_Z
 			}
 
@@ -568,7 +567,7 @@ static gint sond_file_part_dir_get_children(SondFilePartDir* sfp_dir,
 					rel_path_child, sfp_parent, content_type);
 			g_free(rel_path_child);
 
-			g_ptr_array_add(*arr_children, sfp_child);
+			g_ptr_array_add(loaded_children, sfp_child);
 		}
 
 		g_object_unref(enumer); //unreferenziert auch alle infos und gfiles
@@ -580,18 +579,20 @@ static gint sond_file_part_dir_get_children(SondFilePartDir* sfp_dir,
 
 	}
 
+	*arr_children = loaded_children;
+
 	return 0;
 }
 
-static GPtrArray* sond_file_part_dir_load_children(SondFilePart* sfp_dir, GError **error) {
+static gint sond_file_part_dir_load_children(SondFilePart* sfp_dir,
+		GPtrArray** arr_children, GError **error) {
 	gint rc = 0;
-	GPtrArray *arr_children = NULL;
 
-	rc = sond_file_part_dir_get_children(SOND_FILE_PART_DIR(sfp_dir), TRUE, &arr_children, error);
+	rc = sond_file_part_dir_get_children(SOND_FILE_PART_DIR(sfp_dir), TRUE, arr_children, error);
 	if (rc)
-		ERROR_Z_VAL(NULL)
+		ERROR_Z
 
-	return arr_children;
+	return 0;
 }
 
 static gboolean sond_file_part_dir_has_children(SondFilePart* sfp_dir) {
@@ -759,8 +760,8 @@ static pdf_document* sond_file_part_pdf_open_document(fz_context* ctx, SondFileP
 	return doc;
 }
 
-static GPtrArray* sond_file_part_pdf_load_embedded_files(SondFilePart* sfp_pdf,
-		GError **error) {
+static gint sond_file_part_pdf_load_embedded_files(SondFilePart* sfp_pdf,
+		GPtrArray** arr_children, GError **error) {
 	gint rc = 0;
 	pdf_obj* embedded_files_dict = NULL;
 	fz_context* ctx = NULL;
@@ -774,12 +775,13 @@ static GPtrArray* sond_file_part_pdf_load_embedded_files(SondFilePart* sfp_pdf,
 	if (!ctx) {
 		if (error) *error = g_error_new(ZOND_ERROR, 0,
 				"%s\nfz_new_context gibt NULL zurück", __func__);
+		return -1;
 	}
 
 	doc = sond_file_part_pdf_open_document(ctx, SOND_FILE_PART_PDF(sfp_pdf), error);
 	if (!doc) {
 		fz_drop_context(ctx);
-		ERROR_Z_VAL(NULL)
+		ERROR_Z
 	}
 
 	rc = pdf_get_names_tree_dict(ctx, doc, PDF_NAME(EmbeddedFiles),
@@ -787,7 +789,7 @@ static GPtrArray* sond_file_part_pdf_load_embedded_files(SondFilePart* sfp_pdf,
 	if (rc) {
 		pdf_drop_document(ctx, doc);
 		fz_drop_context(ctx);
-		ERROR_Z_VAL(NULL)
+		ERROR_Z
 	}
 
 	load.sfp_pdf = SOND_FILE_PART_PDF(sfp_pdf);
@@ -798,19 +800,21 @@ static GPtrArray* sond_file_part_pdf_load_embedded_files(SondFilePart* sfp_pdf,
 	fz_drop_context(ctx);
 	if (rc == -1) {
 		g_ptr_array_unref(load.arr_embedded_files);
-		ERROR_Z_VAL(NULL)
+		ERROR_Z
 	}
 
 	sfp_pdf_page_tree = sond_file_part_pdf_page_tree_create(NULL,
 			sfp_pdf, error);
 	if (!sfp_pdf_page_tree) {
 		g_ptr_array_unref(load.arr_embedded_files);
-		ERROR_Z_VAL(NULL)
+		ERROR_Z
 	}
 
 	g_ptr_array_insert(load.arr_embedded_files, 0, sfp_pdf_priv->sfp_pdf_page_tree);
 
-	return load.arr_embedded_files;
+	*arr_children = load.arr_embedded_files;
+
+	return 0;
 }
 
 static gboolean sond_file_part_pdf_has_embedded_files(SondFilePart* sfp_pdf) {
@@ -984,14 +988,14 @@ static void sond_file_part_pdf_page_tree_finalize(GObject *self) {
 	return;
 }
 
-static GPtrArray* sond_file_part_pdf_page_tree_load_children(
-		SondFilePart* sfp_pdf_page_tree, GError **error) {
-	GPtrArray *arr_children = NULL;
+static gint sond_file_part_pdf_page_tree_load_children(
+		SondFilePart* sfp_pdf_page_tree, GPtrArray** arr_children, GError **error) {
+	GPtrArray loaded_children = NULL;
 
 	//Hier Seitenbaum-Kinder laden
 	//z.B. wenn es sich um einen PDF-Abschnitt handelt, der Seiten enthält
 
-	return arr_children; //NULL ohne error - nicht unterstützt
+	return 0; //NULL ohne error - nicht unterstützt
 }
 
 static gboolean sond_file_part_pdf_page_tree_has_children(
