@@ -31,7 +31,7 @@ G_DECLARE_DERIVABLE_TYPE(SondFilePart, sond_file_part, SOND,
 struct _SondFilePartClass {
 	GObjectClass parent_class;
 
-	GPtrArray* (*load_children)(SondFilePart*, GError**);
+	gint (*load_children)(SondFilePart*, GPtrArray**, GError**);
 	gboolean (*has_children)(SondFilePart*);
 	GPtrArray* (*get_arr_opened_files)(SondFilePart*);
 };
@@ -45,6 +45,8 @@ gint sond_file_part_load_children(SondFilePart*, GPtrArray**, GError**);
 gboolean sond_file_part_has_children(SondFilePart*);
 
 gchar* sond_file_part_write_to_tmp_file(SondFilePart*, GError**);
+
+gchar* sond_file_part_get_filepart(SondFilePart*);
 
 //SondFilePart Error
 #define SOND_TYPE_FILE_PART_ERROR sond_file_part_error_get_type( )

@@ -165,7 +165,7 @@ static gint zond_treeviewfm_text_edited(SondTreeviewFM *stvfm,
 		GtkTreeIter *iter, GObject *object, const gchar *new_text,
 		GError **error) {
 	gboolean changed = FALSE;
-
+/*
 	ZondTreeviewFMPrivate *ztvfm_priv = zond_treeviewfm_get_instance_private(
 			ZOND_TREEVIEWFM(stvfm));
 
@@ -196,7 +196,7 @@ static gint zond_treeviewfm_text_edited(SondTreeviewFM *stvfm,
 
 	if (!changed)
 		project_reset_changed(ztvfm_priv->zond, FALSE);
-
+*/
 	return 0;
 }
 
@@ -223,7 +223,6 @@ gint zond_treeviewfm_insert_section(ZondTreeviewFM *ztvfm, gint node_id,
 		GtkTreeIter *iter_anchor, gboolean child, GtkTreeIter *iter_inserted,
 		GError **error) {
 	gint rc = 0;
-	ZondPdfAbschnitt *zpa = NULL;
 	gchar *file_part = NULL;
 	gchar *section = NULL;
 	Anbindung anbindung = { 0 };
@@ -252,7 +251,7 @@ gint zond_treeviewfm_insert_section(ZondTreeviewFM *ztvfm, gint node_id,
 
 	anbindung_parse_file_section(section, &anbindung);
 	g_free(section);
-
+/*
 	zpa = g_object_new( ZOND_TYPE_PDF_ABSCHNITT, NULL);
 
 	zond_pdf_abschnitt_set(zpa, node_id, file_part, anbindung, icon_name,
@@ -271,7 +270,7 @@ gint zond_treeviewfm_insert_section(ZondTreeviewFM *ztvfm, gint node_id,
 			&iter_new, 0, zpa, -1);
 
 	g_object_unref(zpa);
-
+*/
 	//insert dummy
 	zond_dbase_get_first_child(ztvfm_priv->zond->dbase_zond->zond_dbase_work,
 			node_id, &first_grandchild, error);
@@ -389,7 +388,7 @@ gint zond_treeviewfm_section_visible(ZondTreeviewFM *ztvfm,
 
 		return 0;
 	}
-
+/*
 	if (section) {
 		Anbindung anbindung_prev = { { 0, 0 }, { 999999, 999999 } };
 		Anbindung anbindung = { 0 };
@@ -496,7 +495,7 @@ gint zond_treeviewfm_section_visible(ZondTreeviewFM *ztvfm,
 			}
 		} while (1);
 	}
-
+*/
 	if (visible)
 		*visible = TRUE;
 
@@ -673,7 +672,7 @@ void zond_treeviewfm_kill_parent(ZondTreeviewFM *ztvfm, GtkTreeIter *iter) {
 gint zond_treeviewfm_get_id_pda(ZondTreeviewFM *ztvfm, GtkTreeIter *iter,
 		gint *ID, GError **error) {
 	GObject *object = NULL;
-
+/*
 	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(ztvfm)), iter, 0,
 			&object, -1);
 	if (!object) {
@@ -694,6 +693,6 @@ gint zond_treeviewfm_get_id_pda(ZondTreeviewFM *ztvfm, GtkTreeIter *iter,
 	if (ID)
 		*ID = zond_pdf_abschnitt_get_ID(ZOND_PDF_ABSCHNITT(object));
 	g_object_unref(object);
-
+*/
 	return 0;
 }

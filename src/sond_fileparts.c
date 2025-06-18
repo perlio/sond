@@ -170,7 +170,7 @@ gint sond_file_part_load_children(SondFilePart* sfp, GPtrArray** arr_children, G
 	if (SOND_FILE_PART_GET_CLASS(sfp)->load_children) {
 		gint rc = 0;
 
-		rc = SOND_FILE_PART_GET_CLASS(sfp)->load_children(sfp, *arr_children, error);
+		rc = SOND_FILE_PART_GET_CLASS(sfp)->load_children(sfp, arr_children, error);
 		if (rc) {
 			g_prefix_error(error, "%s\n", __func__);
 			return -1;
@@ -331,6 +331,43 @@ gchar* sond_file_part_write_to_tmp_file(SondFilePart* sfp, GError **error) {
 	fz_drop_context(ctx);
 
 	return filename;
+}
+
+gchar* sond_file_part_get_filepart(SondFilePart* sfp) {
+	GList* list = NULL;
+	SondFilePart* sfp_parent = NULL;
+	gchar* filepart = NULL;
+	GList* ptr_elem = NULL;
+
+	list = g_list_append(list, sfp);
+
+	//erstmal sfps sammeln und Reihenfolge richtig machen
+	while((sfp_parent = sond_file_part_get_parent(sfp))) {
+		list = g_list_prepend(list, sfp_parent);
+
+		sfp = sfp_parent;
+	}
+
+	//dann filepart zusammensetzen
+	ptr_elem = list;
+	do {
+		SondFilePart* sfp_list = NULL;
+
+		sfp_list = SOND_FILE_PART(ptr_elem->data);
+
+		if (SOND_IS_FILE_PART_ROOT(sfp_list))
+			filepart = g_strdup("/"); //damit geht's los
+		else if (SOND_IS_FILE_PART_PDF_PAGE_TREE(sfp_list))
+			break; //filepart ändert sich nicht mehr
+		else {
+			filepart = add_string(filepart, g_strdup(sond_file_part_get_path(sfp_list)));
+			filepart = add_string(filepart, g_strdup("//"));
+		}
+
+		ptr_elem = ptr_elem->next;
+	} while (ptr_elem);
+
+	return filepart;
 }
 
 /*
@@ -530,7 +567,7 @@ static gint sond_file_part_dir_get_children(SondFilePartDir* sfp_dir,
 				error);
 		g_object_unref(file_dir);
 		if (!enumer) {
-			g_ptr_array_unref(loaded_children);
+			if (load) g_ptr_array_unref(loaded_children);
 
 			ERROR_Z
 		}
@@ -545,7 +582,7 @@ static gint sond_file_part_dir_get_children(SondFilePartDir* sfp_dir,
 			res = g_file_enumerator_iterate(enumer, &info_child, NULL, NULL, error);
 			if (!res) {
 				g_object_unref(enumer);
-				g_ptr_array_unref(loaded_children);
+				if (load) g_ptr_array_unref(loaded_children);
 				ERROR_Z
 			}
 
@@ -579,7 +616,7 @@ static gint sond_file_part_dir_get_children(SondFilePartDir* sfp_dir,
 
 	}
 
-	*arr_children = loaded_children;
+	if (load) *arr_children = loaded_children;
 
 	return 0;
 }
@@ -990,7 +1027,7 @@ static void sond_file_part_pdf_page_tree_finalize(GObject *self) {
 
 static gint sond_file_part_pdf_page_tree_load_children(
 		SondFilePart* sfp_pdf_page_tree, GPtrArray** arr_children, GError **error) {
-	GPtrArray loaded_children = NULL;
+	GPtrArray* loaded_children = NULL;
 
 	//Hier Seitenbaum-Kinder laden
 	//z.B. wenn es sich um einen PDF-Abschnitt handelt, der Seiten enthält
