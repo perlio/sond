@@ -23,6 +23,8 @@
 #include <stdio.h>
 #include <fcntl.h>
 
+#include "../sond_fileparts.h"
+
 #include "zond_dbase.h"
 #include "zond_treeview.h"
 
@@ -578,7 +580,7 @@ typedef struct _DataConvert {
 	FILE *logfile;
 } DataConvert;
 
-gint zond_convert_0_to_1_baum_inhalt(ZondDBase*, gint, gboolean, gint,
+static gint zond_convert_0_to_1_baum_inhalt(ZondDBase*, gint, gboolean, gint,
 		DataConvert*, GArray*, gint*, GError**);
 
 static gint zond_convert_0_to_1_baum_inhalt_insert(ZondDBase *zond_dbase,
@@ -634,8 +636,8 @@ static gint zond_convert_0_to_1_baum_inhalt_insert(ZondDBase *zond_dbase,
 					icon_name, node_text, NULL, error);
 			if (*node_inserted == -1)
 				ERROR_Z
-		} else //Datei existiert und kann geöffnet werden
-		{
+		}
+		else  {//Datei existiert und kann geöffnet werden
 			close(fd);
 
 			gint rc = 0;
@@ -650,7 +652,7 @@ static gint zond_convert_0_to_1_baum_inhalt_insert(ZondDBase *zond_dbase,
 			if (rc)
 				ERROR_Z
 
-					//BAUM_INHALT_FILE_PART einfügen
+			//BAUM_INHALT_FILE_PART einfügen
 			*node_inserted = zond_dbase_insert_node(zond_dbase, anchor_id,
 					child, ZOND_DBASE_TYPE_BAUM_INHALT_FILE, node_inserted_root,
 					NULL, NULL, NULL, NULL, NULL, error);
@@ -676,12 +678,18 @@ static gint zond_convert_0_to_1_baum_inhalt_insert(ZondDBase *zond_dbase,
 			if (exists) //wenn Datei nicht existiert, muß man nicht versuchen, sie zu öffnen
 			{
 				gchar *file_part = NULL;
+				SondFilePartPDFPageTree* sfp_pdf_page_tree = NULL;
 
 				file_part = g_strdup_printf("/%s//", rel_path);
+				sfp_pdf_page_tree = sond_file_part_pdf_page_tree_from_filepart(data_convert->ctx,
+						file_part, NULL, error);
+				g_free(file_part);
+				if (!sfp_pdf_page_tree)
+					ERROR_Z
 
 				rc = pdf_open_and_authen_document(data_convert->ctx, TRUE, TRUE,
-						file_part, NULL, &(data_convert->doc), NULL, error);
-				g_free(file_part);
+						sfp_pdf_page_tree, NULL, &(data_convert->doc), NULL, error);
+				g_object_unref(sfp_pdf_page_tree);
 				if (rc) {
 					gchar *errmsg = NULL;
 					size_t count = 0;
@@ -784,7 +792,7 @@ typedef struct _Target {
 	gint id_target_new;
 } Target;
 
-gint zond_convert_0_to_1_baum_inhalt(ZondDBase *zond_dbase, gint anchor_id,
+static gint zond_convert_0_to_1_baum_inhalt(ZondDBase *zond_dbase, gint anchor_id,
 		gboolean child, gint node_id, DataConvert *data_convert,
 		GArray *arr_targets, gint *node_inserted, GError **error) {
 	gint rc = 0;
@@ -960,7 +968,7 @@ static gint zond_convert_0_to_1_baum_auswertung(ZondDBase *zond_dbase,
 	return 0;
 }
 
-gint zond_convert_0_to_1_update_link(ZondDBase *zond_dbase, gint node_id,
+static gint zond_convert_0_to_1_update_link(ZondDBase *zond_dbase, gint node_id,
 		gint link, GError **error) {
 	gint rc = 0;
 	sqlite3_stmt **stmt = NULL;

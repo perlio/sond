@@ -557,6 +557,7 @@ gint zond_anbindung_erzeugen(PdfViewer *pv, GError **error) {
 	gint node_inserted = 0;
 	gchar *node_text = NULL;
 	gint anchor_pdf_abschnitt = 0;
+	gchar* filepart = NULL;
 
 	//ToDo: Wollen wir später schon!
 	if (pv->dd->next) {
@@ -569,17 +570,21 @@ gint zond_anbindung_erzeugen(PdfViewer *pv, GError **error) {
 		return -1;
 	}
 
-	rc = zond_anbindung_insert_pdf_abschnitt_in_dbase(pv->zond,
-			zond_pdf_document_get_file_part(pv->dd->zond_pdf_document),
+	filepart = sond_file_part_get_filepart(SOND_FILE_PART(
+			zond_pdf_document_get_sfp_pdf_page_tree(pv->dd->zond_pdf_document)));
+
+	rc = zond_anbindung_insert_pdf_abschnitt_in_dbase(pv->zond, filepart,
 			pv->anbindung, &anchor_pdf_abschnitt, &child, &node_inserted,
 			&node_text, error);
-	if (rc)
+	if (rc) {
+		g_free(filepart);
 		ERROR_Z
+	}
 
 	rc = zond_anbindung_trees(pv->zond, anchor_pdf_abschnitt, child,
-			node_inserted, pv->anbindung,
-			zond_pdf_document_get_file_part(pv->dd->zond_pdf_document),
+			node_inserted, pv->anbindung, filepart,
 			node_text, error);
+	g_free(filepart);
 	g_free(node_text);
 	if (rc)
 		ERROR_Z

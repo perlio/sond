@@ -165,7 +165,6 @@ void sond_tvfm_item_set_has_children(SondTVFMItem *stvfm_item,
 //Nun geht's mit SondTreeviewFM weiter
 typedef struct {
 	gchar *root;
-	SondFilePartRoot* sfp_root;
 	GtkTreeViewColumn *column_eingang;
 	ZondDBase *zond_dbase;
 } SondTreeviewFMPrivate;
@@ -698,12 +697,9 @@ static gint sond_treeviewfm_expand_dummy(SondTreeviewFM *stvfm,
 	SondFilePart* sfp = NULL;
 	GPtrArray *arr_children = NULL;
 	gint rc = 0;
-	SondTreeviewFMPrivate *stvfm_priv = sond_treeviewfm_get_instance_private(
-			stvfm);
 
 	if (!iter) {
-		sfp = SOND_FILE_PART(sond_file_part_dir_create(NULL,
-				SOND_FILE_PART(stvfm_priv->sfp_root), error));
+		sfp = SOND_FILE_PART(sond_file_part_dir_create(NULL, NULL, error));
 		if (!sfp)
 			ERROR_Z
 	}
@@ -1062,8 +1058,8 @@ static void sond_treeviewfm_constructed(GObject *self) {
 	return;
 }
 
-static gint sond_treeviewfm_open_sfp(SondFilePart* sfp, gboolean open_with,
-		GError** error) {
+static gint sond_treeviewfm_open_sfp(SondTreeviewFM* stvfm, SondFilePart* sfp,
+		gboolean open_with, GError** error) {
 	gchar* filename = NULL;
 	gint rc = 0;
 
@@ -1284,7 +1280,7 @@ static gint sond_treeviewfm_foreach_loeschen(SondTreeview *stv,
 
 	sfp_parent = sond_file_part_get_parent(sfp);
 
-	if (SOND_IS_FILE_PART_ROOT(sfp_parent)) { //richtige Datei, kann man leicht löschen
+	if (!sfp_parent) { //richtige Datei, kann man leicht löschen
 		gchar* path = NULL;
 		gint rc = 0;
 
@@ -1727,8 +1723,8 @@ static void sond_treeviewfm_row_activated(GtkTreeView *tree_view,
 	sfp = sond_tvfm_item_get_sond_file_part(stvfm_item);
 	g_object_unref(stvfm_item);
 
-	rc = SOND_TREEVIEWFM_GET_CLASS(SOND_TREEVIEWFM(tree_view))->open_sfp(sfp,
-			open_with, &error);
+	rc = SOND_TREEVIEWFM_GET_CLASS(SOND_TREEVIEWFM(tree_view))->
+			open_sfp(SOND_TREEVIEWFM(tree_view), sfp, open_with, &error);
 	if (rc) {
 		display_message(gtk_widget_get_toplevel(GTK_WIDGET(tree_view)),
 				"Datei kann nicht geöffnet werden\n\n", error->message, NULL);
@@ -1922,15 +1918,20 @@ gint sond_treeviewfm_set_root(SondTreeviewFM *stvfm, const gchar *root,
 		gchar **errmsg) {
 	gint rc = 0;
 	GError *error = NULL;
+	SondFilePartClass* sfp_class = NULL;
 
 	SondTreeviewFMPrivate *stvfm_priv = sond_treeviewfm_get_instance_private(
 			stvfm);
 
 	g_free(stvfm_priv->root);
-	if (stvfm_priv->sfp_root) g_object_unref(stvfm_priv->sfp_root);
 
 	if (!root) {
 		stvfm_priv->root = NULL;
+
+		sfp_class = g_type_class_peek_static(SOND_TYPE_FILE_PART);
+		g_free(sfp_class->path_root);
+		sfp_class->path_root = NULL;
+
 		gtk_tree_store_clear(
 				GTK_TREE_STORE(
 						gtk_tree_view_get_model( GTK_TREE_VIEW(stvfm) )));
@@ -1939,13 +1940,14 @@ gint sond_treeviewfm_set_root(SondTreeviewFM *stvfm, const gchar *root,
 	}
 
 	stvfm_priv->root = g_strdup(root);
-	stvfm_priv->sfp_root = sond_file_part_root_create(root);
+
+	sfp_class = g_type_class_peek_static(SOND_TYPE_FILE_PART);
+	sfp_class->path_root = g_strdup(root);
 
 	rc = sond_treeviewfm_expand_dummy(stvfm, NULL, &error);
 	if (rc) {
 		g_free(stvfm_priv->root);
 		stvfm_priv->root = NULL;
-		g_object_unref(stvfm_priv->sfp_root);
 		if (errmsg)
 			*errmsg = g_strconcat("Bei Aufruf expand_dummy:\n",
 					error->message, NULL);

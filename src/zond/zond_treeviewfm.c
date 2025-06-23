@@ -291,17 +291,35 @@ gint zond_treeviewfm_insert_section(ZondTreeviewFM *ztvfm, gint node_id,
 	return 0;
 }
 
-static gint zond_treeviewfm_open_sfp(SondFilePart *sfp, gboolean open_with,
+static gint zond_treeviewfm_open_sfp(SondTreeviewFM* stvfm, SondFilePart *sfp, gboolean open_with,
 		GError **error) {
 
 	if (!open_with && SOND_IS_FILE_PART_PDF_PAGE_TREE(sfp)) {
+		PdfPos pos_pdf = { 0 };
+		gchar const* section = NULL;
+		gint rc = 0;
+		ZondTreeviewFMPrivate* ztvfm_priv =
+				zond_treeviewfm_get_instance_private(ZOND_TREEVIEWFM(stvfm));
 
+		section = sond_file_part_get_path(sfp);
+		if (section) {
+			Anbindung anbindung = { 0 };
+
+			anbindung_parse_file_section(section,  &anbindung);
+			pos_pdf.seite = anbindung.von.seite;
+			pos_pdf.index = anbindung.von.index;
+		}
+
+		rc = zond_treeview_oeffnen_internal_viewer(ztvfm_priv->zond,
+				SOND_FILE_PART_PDF_PAGE_TREE(sfp), NULL, &pos_pdf, error);
+		if (rc)
+			ERROR_Z
 	}
 	else { //chain-up, falls nicht bearbeitet
 		gint rc = 0;
 
 		rc = SOND_TREEVIEWFM_CLASS(zond_treeviewfm_parent_class)->
-				open_sfp(sfp, open_with, error);
+				open_sfp(stvfm, sfp, open_with, error);
 		if (rc)
 			ERROR_Z
 	}

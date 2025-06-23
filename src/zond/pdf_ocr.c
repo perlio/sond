@@ -23,9 +23,10 @@
 #include <glib.h>
 #include <glib/gstdio.h>
 
-#include "zond_pdf_document.h"
-
 #include "../misc.h"
+#include "../sond_fileparts.h"
+
+#include "zond_pdf_document.h"
 
 #include "99conv/pdf.h"
 #include "99conv/general.h"
@@ -858,8 +859,8 @@ static gint pdf_ocr_create_pdf_only_text(InfoWindow *info_window,
 				arr_document_pages, i);
 
 		gchar *info_text = g_strdup_printf("(%i/%i) %s, Seite %i", zaehler,
-				arr_document_pages->len,
-				zond_pdf_document_get_file_part(pdf_document_page->document),
+				arr_document_pages->len, sond_file_part_get_path(SOND_FILE_PART(
+				zond_pdf_document_get_sfp_pdf_page_tree(pdf_document_page->document))),
 				pdf_document_page_get_index(pdf_document_page) + 1);
 		info_window_set_message(info_window, info_text);
 		g_free(info_text);

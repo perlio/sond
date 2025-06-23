@@ -22,11 +22,13 @@
 #include <sqlite3.h>
 #include <glib/gstdio.h>
 
+#include "../../misc.h"
+#include "../../sond_fileparts.h"
+
 #include "../zond_pdf_document.h"
 
 #include "../sond_treeview.h"
 #include "../sond_treeviewfm.h"
-#include "../../misc.h"
 
 #include "../global_types.h"
 #include "../zond_tree_store.h"
@@ -90,23 +92,13 @@ static void cb_menu_datei_beenden_activate(gpointer data) {
 	return;
 }
 
-/*  Callbacks des Menus Datei  */
-static gboolean pdf_rel_path_in_array(GPtrArray *arr_file_part, gchar *rel_path) {
-	for (gint i = 0; i < arr_file_part->len; i++) {
-		if (!g_strcmp0(g_ptr_array_index(arr_file_part, i), rel_path))
-			return TRUE;
-	}
-
-	return FALSE;
-}
-
 static GPtrArray*
 selection_abfragen_pdf(Projekt *zond, gchar **errmsg) {
 	GList *selected = NULL;
 	GList *list = NULL;
 
-	GPtrArray *arr_file_part = g_ptr_array_new_with_free_func(
-			(GDestroyNotify) g_free);
+	GPtrArray *arr_sfp = g_ptr_array_new_with_free_func(
+			(GDestroyNotify) g_object_unref);
 
 	if (zond->baum_active == KEIN_BAUM)
 		return NULL;
@@ -124,13 +116,14 @@ selection_abfragen_pdf(Projekt *zond, gchar **errmsg) {
 		gint node_id = 0;
 		gchar *file_part = NULL;
 		GError *error = NULL;
+		SondFilePart* sfp = NULL;
 
 		if (!gtk_tree_model_get_iter(
 				gtk_tree_view_get_model(
 						GTK_TREE_VIEW(zond->treeview[zond->baum_active])),
 				&iter, list->data)) {
 			g_list_free_full(selected, (GDestroyNotify) gtk_tree_path_free);
-			g_ptr_array_unref(arr_file_part);
+			g_ptr_array_unref(arr_sfp);
 
 			if (errmsg)
 				*errmsg = g_strdup("Bei Aufruf gtk_tree_model_get_iter:\n"
@@ -151,7 +144,7 @@ selection_abfragen_pdf(Projekt *zond, gchar **errmsg) {
 				*errmsg = g_strdup_printf("%s\n%s", __func__, error->message);
 			g_error_free(error);
 			g_list_free_full(selected, (GDestroyNotify) gtk_tree_path_free);
-			g_ptr_array_free(arr_file_part, TRUE);
+			g_ptr_array_unref(arr_sfp);
 
 			return NULL;
 		}
@@ -160,16 +153,23 @@ selection_abfragen_pdf(Projekt *zond, gchar **errmsg) {
 			continue;
 
 		//Sonderbehandung, falls pdf-Datei
-		if (is_pdf(file_part)
-				&& !pdf_rel_path_in_array(arr_file_part, file_part))
-			g_ptr_array_add(arr_file_part, g_strdup(file_part));
+		sfp = sond_file_part_from_filepart(zond->ctx, file_part, &error);
+		if (!sfp) {
+			if (errmsg) *errmsg = g_strdup_printf("%s\n%s", __func__, error->message);
+			g_error_free(error);
+			g_list_free_full(selected, (GDestroyNotify) gtk_tree_path_free);
+			g_ptr_array_unref(arr_sfp);
 
-		g_free(file_part);
+			return NULL;
+		}
+		if (SOND_IS_FILE_PART_PDF_PAGE_TREE(sfp) &&
+				!g_ptr_array_find(arr_sfp, sfp, NULL))
+			g_ptr_array_add(arr_sfp, sfp);
 	} while ((list = list->next));
 
 	g_list_free_full(selected, (GDestroyNotify) gtk_tree_path_free);
 
-	return arr_file_part;
+	return arr_sfp;
 }
 
 static void cb_item_clean_pdf(GtkMenuItem *item, gpointer data) {
@@ -177,9 +177,9 @@ static void cb_item_clean_pdf(GtkMenuItem *item, gpointer data) {
 
 	gchar *errmsg = NULL;
 
-	GPtrArray *arr_file_part = selection_abfragen_pdf(zond, &errmsg);
+	GPtrArray *arr_sfp = selection_abfragen_pdf(zond, &errmsg);
 
-	if (!arr_file_part) {
+	if (!arr_sfp) {
 		if (errmsg) {
 			display_message(zond->app_window,
 					"PDF kann nicht gereinigt werden\n\nBei "
@@ -190,27 +190,27 @@ static void cb_item_clean_pdf(GtkMenuItem *item, gpointer data) {
 		return;
 	}
 
-	if (arr_file_part->len == 0) {
+	if (arr_sfp->len == 0) {
 		display_message(zond->app_window, "Keine PDF-Datei ausgewählt", NULL);
-		g_ptr_array_free(arr_file_part, TRUE);
+		g_ptr_array_unref(arr_sfp);
 
 		return;
 	}
 
-	for (gint i = 0; i < arr_file_part->len; i++) {
+	for (gint i = 0; i < arr_sfp->len; i++) {
 		gint rc = 0;
 		GError *error = NULL;
 
-		rc = pdf_clean(zond->ctx, g_ptr_array_index(arr_file_part, i), &error);
+		rc = pdf_clean(zond->ctx, g_ptr_array_index(arr_sfp, i), &error);
 		if (rc == -1) {
 			display_message(zond->app_window, "PDF ",
-					g_ptr_array_index(arr_file_part, i),
+					g_ptr_array_index(arr_sfp, i),
 					" säubern nicht möglich\n\n", error->message, NULL);
 			g_error_free(error);
 		}
 	}
 
-	g_ptr_array_free(arr_file_part, TRUE);
+	g_ptr_array_unref(arr_sfp);
 
 	return;
 }
@@ -222,8 +222,8 @@ static void cb_item_textsuche(GtkMenuItem *item, gpointer data) {
 	gchar *errmsg = NULL;
 	GArray *arr_pdf_text_occ = NULL;
 
-	GPtrArray *arr_file_part = selection_abfragen_pdf(zond, &errmsg);
-	if (!arr_file_part) {
+	GPtrArray *arr_sfp = selection_abfragen_pdf(zond, &errmsg);
+	if (!arr_sfp) {
 		if (errmsg) {
 			display_message(zond->app_window, "Textsuche nicht möglich\n\nBei "
 					"Aufruf selection_abfragen_pdf:\n", errmsg, NULL);
@@ -233,9 +233,9 @@ static void cb_item_textsuche(GtkMenuItem *item, gpointer data) {
 		return;
 	}
 
-	if (arr_file_part->len == 0) {
+	if (arr_sfp->len == 0) {
 		display_message(zond->app_window, "Keine PDF-Datei ausgewählt", NULL);
-		g_ptr_array_free(arr_file_part, TRUE);
+		g_ptr_array_unref(arr_sfp);
 
 		return;
 	}
@@ -244,12 +244,12 @@ static void cb_item_textsuche(GtkMenuItem *item, gpointer data) {
 	rc = abfrage_frage(zond->app_window, "Textsuche", "Bitte Suchtext eingeben",
 			&search_text);
 	if (rc != GTK_RESPONSE_YES) {
-		g_ptr_array_free(arr_file_part, TRUE);
+		g_ptr_array_unref(arr_sfp);
 
 		return;
 	}
 	if (!g_strcmp0(search_text, "")) {
-		g_ptr_array_free(arr_file_part, TRUE);
+		g_ptr_array_unref(arr_sfp);
 		g_free(search_text);
 
 		return;
@@ -259,11 +259,12 @@ static void cb_item_textsuche(GtkMenuItem *item, gpointer data) {
 
 	info_window = info_window_open(zond->app_window, "Textsuche");
 
-	rc = pdf_textsuche(zond, info_window, arr_file_part, search_text,
+	rc = pdf_textsuche(zond, info_window, arr_sfp, search_text,
 			&arr_pdf_text_occ, &errmsg);
 	if (rc) {
 		display_message(zond->app_window, "Fehler in Textsuche in PDF -\n\n"
 				"Bei Aufruf pdf_textsuche:\n", errmsg, NULL);
+		g_ptr_array_unref(arr_sfp);
 		g_free(errmsg);
 		g_free(search_text);
 		info_window_close(info_window);
@@ -275,26 +276,25 @@ static void cb_item_textsuche(GtkMenuItem *item, gpointer data) {
 
 	if (arr_pdf_text_occ->len == 0) {
 		display_message(zond->app_window, "Keine Treffer", NULL);
-		g_ptr_array_free(arr_file_part, TRUE);
-		g_array_free(arr_pdf_text_occ, TRUE);
+		g_ptr_array_unref(arr_sfp);
+		g_array_unref(arr_pdf_text_occ);
 		g_free(search_text);
 
 		return;
 	}
 
 	//Anzeigefenster
-	rc = pdf_text_anzeigen_ergebnisse(zond, search_text, arr_file_part,
-			arr_pdf_text_occ, &errmsg);
+	rc = pdf_text_anzeigen_ergebnisse(zond, search_text,
+			arr_sfp, arr_pdf_text_occ, &errmsg);
+	g_ptr_array_unref(arr_sfp);
+	g_array_unref(arr_pdf_text_occ);
 	if (rc) {
 		display_message(zond->app_window, "Fehler in Textsuche in PDF -\n\n"
 				"Bei Aufruf pdf_text_anzeigen_ergebnisse:\n", errmsg, NULL);
 		g_free(errmsg);
-		g_ptr_array_free(arr_file_part, TRUE);
-		g_array_free(arr_pdf_text_occ, TRUE);
 		g_free(search_text);
 	}
 
-	g_ptr_array_free(arr_file_part, TRUE);
 	g_free(search_text);
 
 	return;
@@ -309,8 +309,8 @@ static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 
 	Projekt *zond = (Projekt*) data;
 
-	GPtrArray *arr_file_part = selection_abfragen_pdf(zond, &errmsg);
-	if (!arr_file_part) {
+	GPtrArray *arr_sfp = selection_abfragen_pdf(zond, &errmsg);
+	if (!arr_sfp) {
 		if (errmsg) {
 			display_message(zond->app_window,
 					"Texterkennung nicht möglich\n\nBei "
@@ -321,9 +321,9 @@ static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 		return;
 	}
 
-	if (arr_file_part->len == 0) {
+	if (arr_sfp->len == 0) {
 		display_message(zond->app_window, "Keine PDF-Datei ausgewählt", NULL);
-		g_ptr_array_unref(arr_file_part);
+		g_ptr_array_unref(arr_sfp);
 
 		return;
 	}
@@ -331,21 +331,22 @@ static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 	//TessInit
 	info_window = info_window_open(zond->app_window, "OCR");
 
-	for (gint i = 0; i < arr_file_part->len; i++) {
-		gchar *file_part = NULL;
+	for (gint i = 0; i < arr_sfp->len; i++) {
+		SondFilePartPDFPageTree* sfp_pdf_page_tree = NULL;
 
-		file_part = g_ptr_array_index(arr_file_part, i);
+		sfp_pdf_page_tree = g_ptr_array_index(arr_sfp, i);
 
-		info_window_set_message(info_window, file_part);
+		info_window_set_message(info_window,
+				sond_file_part_get_path(SOND_FILE_PART(sfp_pdf_page_tree)));
 
 		//prüfen, ob in Viewer geöffnet
-		if (zond_pdf_document_is_open(file_part)) {
+		if (zond_pdf_document_is_open(sfp_pdf_page_tree)) {
 			info_window_set_message(info_window,
 					"... in Viewer geöffnet - übersprungen");
 			continue;
 		}
 
-		DisplayedDocument *dd = document_new_displayed_document(file_part, NULL,
+		DisplayedDocument *dd = document_new_displayed_document(sfp_pdf_page_tree, NULL,
 				&error);
 		if (!dd) {
 			if (error) {
@@ -362,10 +363,9 @@ static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 				dd->zond_pdf_document);
 		GPtrArray *arr_document_pages_ocr = g_ptr_array_sized_new(
 				arr_pdf_document_pages->len);
-		for (gint u = 0; u < arr_pdf_document_pages->len; u++) {
+		for (gint u = 0; u < arr_pdf_document_pages->len; u++)
 			g_ptr_array_add(arr_document_pages_ocr,
 					g_ptr_array_index(arr_pdf_document_pages, u));
-		}
 
 		rc = pdf_ocr_pages(zond, info_window, arr_document_pages_ocr, &errmsg);
 		g_ptr_array_unref(arr_document_pages_ocr);
@@ -400,7 +400,7 @@ static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 
 	info_window_close(info_window);
 
-	g_ptr_array_unref(arr_file_part);
+	g_ptr_array_unref(arr_sfp);
 
 	return;
 }

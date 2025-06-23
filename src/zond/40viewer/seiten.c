@@ -21,6 +21,9 @@
 #include <gtk/gtk.h>
 #include <tesseract/capi.h>
 
+#include "../../misc.h"
+#include "../../sond_fileparts.h"
+
 #include "../zond_pdf_document.h"
 
 #include "../global_types.h"
@@ -36,8 +39,6 @@
 #include "viewer.h"
 #include "render.h"
 #include "document.h"
-
-#include "../../misc.h"
 
 static GPtrArray*
 seiten_get_document_pages(PdfViewer *pv, GArray *arr_seiten_pv) {
@@ -563,10 +564,14 @@ static gint seiten_anbindung_int(ZondDBase* zond_dbase,
 	gint rc = 0;
 	GArray* arr_sections = NULL;
 	gint page_doc = 0;
+	gchar* filepart = NULL;
 
-	rc = zond_dbase_get_arr_sections(zond_dbase,
-			zond_pdf_document_get_file_part(pdf_document_page->document),
+	filepart = sond_file_part_get_filepart(SOND_FILE_PART(
+			zond_pdf_document_get_sfp_pdf_page_tree(pdf_document_page->document)));
+
+	rc = zond_dbase_get_arr_sections(zond_dbase, filepart,
 			&arr_sections, error);
+	g_free(filepart);
 	if (rc) {
 		g_prefix_error(error, "%s\n", __func__);
 
@@ -870,13 +875,13 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 	gint rc = 0;
 	guint pos = 0;
 	pdf_document *doc_merge = NULL;
-	gchar *errmsg = NULL;
 	GError *error = NULL;
 	ViewerPageNew* viewer_page = NULL;
 	JournalEntry entry = { 0 };
 	gint page_doc = 0;
 	gint count = 0;
 	DataInsert data_insert = { 0 };
+	SondFilePart* sfp = NULL;
 
 	ret = seiten_abfrage_seitenzahl(pv, &pos);
 	if (ret == -1)
@@ -932,29 +937,43 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 		path_merge = filename_oeffnen(GTK_WINDOW(pv->vf));
 		file_part = g_strdup_printf("/%s//", path_merge);
 		g_free(path_merge);
-		if (!is_pdf(file_part)) {
-			display_message(pv->vf, "Keine PDF-Datei", NULL);
-			g_free(file_part);
+
+		sfp = sond_file_part_from_filepart(pv->zond->ctx, file_part, &error);
+		g_free(file_part);
+		if (!sfp) {
+			display_error(pv->vf, "Datei einfügen", error->message);
+			g_error_free(error);
 
 			return;
 		}
 
-		rc = pdf_open_and_authen_document(pv->zond->ctx, TRUE, TRUE, file_part,
-				NULL, &doc_merge, NULL, &error);
+		if (!SOND_IS_FILE_PART_PDF_PAGE_TREE(sfp)) {
+			display_message(pv->vf, "Keine PDF-Datei", NULL);
+			g_object_unref(sfp);
+
+			return;
+		}
+
+		rc = pdf_open_and_authen_document(pv->zond->ctx, TRUE, TRUE,
+				SOND_FILE_PART_PDF_PAGE_TREE(sfp), NULL, &doc_merge, NULL, &error);
 		if (rc) {
 			display_error(pv->vf, "Datei einfügen", error->message);
 			g_error_free(error);
+			g_object_unref(sfp);
 
 			return;
 		}
 	} else if (ret == 2)
 		doc_merge = pdf_keep_document(pv->zond->ctx, pv->zond->pv_clip); //Clipboard
 
-	fz_try(pv->zond->ctx) count = pdf_count_pages(pv->zond->ctx, doc_merge);
+	fz_try(pv->zond->ctx)
+		count = pdf_count_pages(pv->zond->ctx, doc_merge);
 	fz_catch( pv->zond->ctx) {
 		gchar* err_message = NULL;
 
 		pdf_drop_document(pv->zond->ctx, doc_merge);
+		if (ret == 1)
+			g_object_unref(sfp);
 
 		err_message = g_strdup_printf("%s\n%s", __func__, fz_caught_message(pv->zond->ctx));
 		display_error(pv->vf, "Einfügen nicht möglich", err_message);
@@ -969,12 +988,13 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 	//Seiten werden eingefügt, so daß Seite an Position page_doc nach hinten geschoben wird;
 	//page_doc dieser Seite ist hinterher page_doc+count
 	rc = zond_pdf_document_insert_pages(viewer_page->dd->zond_pdf_document,
-			page_doc, doc_merge, &errmsg);
+			page_doc, doc_merge, &error);
 	pdf_drop_document(pv->zond->ctx, doc_merge);
+	g_object_unref(sfp);
 	if (rc) {
-		display_message(pv->vf, "Fehler Einfügen\n\n", errmsg,
+		display_message(pv->vf, "Fehler Einfügen\n\n", error->message,
 				"\n\nViewer wird geschlossen", NULL);
-		g_free(errmsg);
+		g_error_free(error);
 		viewer_schliessen(pv);
 
 		return;

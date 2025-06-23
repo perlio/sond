@@ -21,6 +21,9 @@
 #include <mupdf/pdf.h>
 #include <mupdf/fitz.h>
 
+#include "../../misc.h"
+#include "../../sond_fileparts.h"
+
 #include "../zond_pdf_document.h"
 #include "../pdf_ocr.h"
 
@@ -38,8 +41,6 @@
 #include "stand_alone.h"
 #include "seiten.h"
 #include "viewer.h"
-
-#include "../../misc.h"
 
 void viewer_springen_zu_pos_pdf(PdfViewer *pv, PdfPos pdf_pos, gdouble delta) {
 	gdouble value = 0.0;
@@ -391,14 +392,14 @@ static void viewer_render_sichtbare_seiten(PdfViewer *pv) {
 	viewer_page = g_ptr_array_index(pv->arr_pages, erste);
 
 	//in Headerbar angezeigte Datei und Seite anzeigen
-	path_doc = zond_pdf_document_get_file_part(
-			viewer_page->pdf_document_page->document);
+	path_doc = sond_file_part_get_path(SOND_FILE_PART(
+			zond_pdf_document_get_sfp_pdf_page_tree(viewer_page->pdf_document_page->document)));
 	file = g_strrstr(path_doc, "/");
 	if (file)
 		file++; // "/" entfernen
 	else
 		file = path_doc;
-	dir = g_strndup(path_doc, strlen(path_doc) - strlen(file));
+//	dir = g_strndup(path_doc, strlen(path_doc) - strlen(file));
 
 	title = g_strdup_printf("%s [Seite %i]", file,
 			pdf_document_page_get_index(viewer_page->pdf_document_page) + 1);
@@ -866,7 +867,7 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd, GError** err
 	zond_pdf_document_mutex_lock(dd->zond_pdf_document);
 	rc = pdf_save(zond_pdf_document_get_ctx(dd->zond_pdf_document),
 			zond_pdf_document_get_pdf_doc(dd->zond_pdf_document),
-			zond_pdf_document_get_file_part(dd->zond_pdf_document), error);
+			zond_pdf_document_get_sfp_pdf_page_tree(dd->zond_pdf_document), error);
 	zond_pdf_document_mutex_unlock(dd->zond_pdf_document);
 	zond_pdf_document_set_ocr_num(dd->zond_pdf_document, 0);
 	if (rc) {

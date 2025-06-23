@@ -10,6 +10,7 @@
 
 typedef struct _ZondDBase ZondDBase;
 typedef struct _SondFilePart SondFilePart;
+typedef struct _SondFilePartRoot SondFilePartRoot;
 
 G_BEGIN_DECLS
 
@@ -43,7 +44,7 @@ struct _SondTreeviewFMClass {
 			GObject*);
 	gint (*render_text)(SondTreeviewFM*, GtkTreeIter*, GObject*, gchar const**,
 			gboolean*, GError**);
-	gint (*open_sfp) (SondFilePart*, gboolean, GError**);
+	gint (*open_sfp) (SondTreeviewFM*, SondFilePart*, gboolean, GError**);
 
 };
 

@@ -34,6 +34,7 @@ typedef unsigned int guint;
 typedef int gboolean;
 typedef void *GPid;
 typedef void *gpointer;
+typedef struct _SondFilePart SondFilePart;
 
 void display_message(GtkWidget*, ...);
 
@@ -68,6 +69,6 @@ gchar* misc_get_calendar(GtkCalendar*);
 
 GtkWidget* result_listbox_new(GtkWindow*, const gchar*, GtkSelectionMode);
 
-gint misc_datei_oeffnen(const gchar*, gboolean, GError**);
+gint misc_datei_oeffnen(gchar const*, gboolean, GError**);
 
 #endif // MISC_H_INCLUDED

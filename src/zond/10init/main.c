@@ -26,10 +26,13 @@
 #include <errhandlingapi.h>
 #endif // __WIN32
 
-#include "../global_types.h"
-
 #include "../../misc.h"
 #include "../../misc_stdlib.h"
+#include "../../sond_fileparts.h"
+
+#include "../global_types.h"
+#include "../zond_pdf_document.h"
+
 #include "../20allgemein/project.h"
 
 #include "icons.h"
@@ -225,6 +228,9 @@ static void init(GtkApplication *app, Projekt *zond) {
 
 		return;
 	}
+
+	SOND_FILE_PART_CLASS(g_type_class_get(SOND_TYPE_FILE_PART))->arr_opened_files =
+			g_ptr_array_new( );
 
 	return;
 }

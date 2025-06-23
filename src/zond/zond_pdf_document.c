@@ -21,10 +21,12 @@
 #include <glib/gstdio.h>
 #include <glib-object.h>
 
+#include "../misc.h"
+#include "../sond_fileparts.h"
+
 #include "global_types.h"
 #include "99conv/pdf.h"
 
-#include "../misc.h"
 
 typedef struct {
 	GMutex mutex_doc;
@@ -32,12 +34,11 @@ typedef struct {
 	pdf_document *doc;
 	gchar *password;
 	gint auth;
-	gchar *file_part;
+	SondFilePartPDFPageTree* sfp_pdf_page_tree;
 	gboolean read_only;
 	gchar *working_copy;
 	GPtrArray *pages; //array von PdfDocumentPage*
 	GArray *arr_journal;
-	GArray* arr_redo;
 	gint ocr_num;
 } ZondPdfDocumentPrivate;
 
@@ -157,9 +158,9 @@ static void zond_pdf_document_finalize(GObject *self) {
 			ZOND_PDF_DOCUMENT(self));
 
 	g_array_unref(priv->arr_journal);
-	g_array_unref(priv->arr_redo);
 
 	g_ptr_array_unref(priv->pages);
+	g_object_unref(priv->sfp_pdf_page_tree);
 
 	if (priv->doc) {
 		path = g_strdup(fz_stream_filename(priv->ctx, priv->doc->file));
@@ -169,16 +170,9 @@ static void zond_pdf_document_finalize(GObject *self) {
 			gint ret = 0;
 
 			ret = remove(path);
-			if (ret && errno == ENOENT) {
-				gchar *error_text = NULL;
-
-				error_text = g_strdup_printf("remove('%s'): %s", priv->file_part,
-						strerror( errno));
-				display_error( NULL,
-						"Arbeitskopie konnte nicht gelöscht werden\n\n",
-						error_text);
-				g_free(error_text);
-			}
+			if (ret)
+				g_warning("%s\nArbeitskopie %s konnte nicht gelöscht werden\n%s",
+						__func__, path, strerror(errno));
 		}
 
 		g_free(path);
@@ -186,7 +180,6 @@ static void zond_pdf_document_finalize(GObject *self) {
 
 	zond_pdf_document_close_context(priv->ctx); //drop_context reicht nicht aus!
 
-	g_free(priv->file_part);
 	g_free(priv->password);
 	g_mutex_clear(&priv->mutex_doc);
 
@@ -337,7 +330,7 @@ gint zond_pdf_document_load_page(PdfDocumentPage *pdf_document_page, gint page,
 }
 
 static gint zond_pdf_document_init_page(ZondPdfDocument *self,
-		PdfDocumentPage *pdf_document_page, gint index, gchar **errmsg) {
+		PdfDocumentPage *pdf_document_page, gint index, GError **error) {
 	fz_context *ctx = NULL;
 	pdf_obj *rotate_obj = NULL;
 	fz_rect mediabox = { 0 };
@@ -363,22 +356,27 @@ static gint zond_pdf_document_init_page(ZondPdfDocument *self,
 			pdf_document_page->rotate = pdf_to_int(ctx, rotate_obj);
 		//else: 0
 	}
-	fz_catch( ctx )
-		ERROR_MUPDF("pdf_lookup_page_obj etc.");
+	fz_catch( ctx ) {
+		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
+				fz_caught(ctx), "%s\n%s", __func__, fz_caught_message(ctx));
+
+		return -1;
+	}
 
 	return 0;
 }
 
 static gint zond_pdf_document_init_pages(ZondPdfDocument *self, gint von,
-		gint bis, gchar **errmsg) {
+		gint bis, GError **error) {
 	ZondPdfDocumentPrivate *priv = zond_pdf_document_get_instance_private(self);
 
 	if (bis == -1)
 		bis = priv->pages->len - 1;
 
 	if (von < 0 || von > bis || bis > priv->pages->len - 1) {
-		if (errmsg)
-			*errmsg = g_strdup("Seitengrenzen nicht eingehalten");
+		if (error)
+			*error = g_error_new(ZOND_ERROR, 0,
+					"%s\nSeitengrenzen nicht eingehalten", __func__);
 		return -1;
 	}
 
@@ -393,11 +391,11 @@ static gint zond_pdf_document_init_pages(ZondPdfDocument *self, gint von,
 		pdf_document_page = g_malloc0(sizeof(PdfDocumentPage));
 		((priv->pages)->pdata)[i] = pdf_document_page;
 
-		rc = zond_pdf_document_init_page(self, pdf_document_page, i, errmsg);
+		rc = zond_pdf_document_init_page(self, pdf_document_page, i, error);
 		if (rc) {
 			g_free(pdf_document_page);
 			((priv->pages)->pdata)[i] = NULL;
-			ERROR_S
+			ERROR_Z
 		}
 	}
 
@@ -505,15 +503,12 @@ static void zond_pdf_document_init(ZondPdfDocument *self) {
 	priv->arr_journal = g_array_new( FALSE, FALSE, sizeof(JournalEntry));
 	g_array_set_clear_func(priv->arr_journal,
 			(GDestroyNotify) zond_pdf_document_free_journal_entry);
-	priv->arr_redo = g_array_new(FALSE, FALSE, sizeof(JournalEntry));
-	g_array_set_clear_func(priv->arr_redo,
-				(GDestroyNotify) zond_pdf_document_free_journal_entry);
 
 	return;
 }
 
 const ZondPdfDocument*
-zond_pdf_document_is_open(const gchar *file_part) {
+zond_pdf_document_is_open(SondFilePartPDFPageTree* sfp_pdf_page_tree) {
 	ZondPdfDocumentClass *klass = g_type_class_peek_static(
 			zond_pdf_document_get_type());
 
@@ -521,12 +516,13 @@ zond_pdf_document_is_open(const gchar *file_part) {
 		return NULL;
 
 	for (gint i = 0; i < klass->arr_pdf_documents->len; i++) {
-		ZondPdfDocument *zond_pdf_document = g_ptr_array_index(
-				klass->arr_pdf_documents, i);
-		ZondPdfDocumentPrivate *priv = zond_pdf_document_get_instance_private(
-				zond_pdf_document);
+		ZondPdfDocumentPrivate *priv = NULL;
+		ZondPdfDocument *zond_pdf_document = NULL;
 
-		if (!g_strcmp0(priv->file_part, file_part))
+		zond_pdf_document = g_ptr_array_index(klass->arr_pdf_documents, i);
+		priv = zond_pdf_document_get_instance_private(zond_pdf_document);
+
+		if (priv->sfp_pdf_page_tree == sfp_pdf_page_tree)
 			return zond_pdf_document;
 	}
 
@@ -534,51 +530,47 @@ zond_pdf_document_is_open(const gchar *file_part) {
 }
 
 ZondPdfDocument*
-zond_pdf_document_open(const gchar *file_part, gint von, gint bis,
-		gchar **errmsg) {
+zond_pdf_document_open(SondFilePartPDFPageTree* sfp_pdf_page_tree, gint von, gint bis,
+		GError **error) {
 	gint rc = 0;
 	ZondPdfDocument *zond_pdf_document = NULL;
 	ZondPdfDocumentPrivate *priv = NULL;
 	ZondPdfDocumentClass *klass = NULL;
-	GError *error = NULL;
 	gint number_of_pages = 0;
 
-	zond_pdf_document = (ZondPdfDocument*) zond_pdf_document_is_open(file_part);
+	zond_pdf_document = (ZondPdfDocument*) zond_pdf_document_is_open(sfp_pdf_page_tree);
 	if (zond_pdf_document) {
 		gint rc = 0;
 
-		rc = zond_pdf_document_init_pages(zond_pdf_document, von, bis, errmsg);
+		rc = zond_pdf_document_init_pages(zond_pdf_document, von, bis, error);
 		if (rc)
-			ERROR_S_VAL(NULL)
+			ERROR_Z_VAL(NULL)
 
 		return g_object_ref(zond_pdf_document);
 	}
 
 	zond_pdf_document = g_object_new( ZOND_TYPE_PDF_DOCUMENT, NULL);
-
 	priv = zond_pdf_document_get_instance_private(zond_pdf_document);
+
+	priv->sfp_pdf_page_tree = sfp_pdf_page_tree;
 
 	priv->ctx = zond_pdf_document_init_context();
 	if (!priv->ctx) {
-		if (errmsg)
-			*errmsg = g_strdup_printf(
+		if (error)
+			*error = g_error_new(ZOND_ERROR, 0,
 					"%s\nfz_context konnte nicht erzeugt werden", __func__);
 		g_object_unref(zond_pdf_document);
 
 		return NULL;
 	}
 
-	priv->file_part = g_strdup(file_part);
-
-	rc = pdf_open_and_authen_document(priv->ctx, TRUE, FALSE, priv->file_part,
-			&priv->password, &priv->doc, &priv->auth, &error);
+	rc = pdf_open_and_authen_document(priv->ctx, TRUE, FALSE, sfp_pdf_page_tree,
+			&priv->password, &priv->doc, &priv->auth, error);
 	if (rc) {
-		if (rc == -1) {
-			if (errmsg)
-				*errmsg = g_strdup_printf("%s\n%s", __func__, error->message);
-			g_error_free(error);
-		} else if (errmsg)
-			*errmsg = g_strdup_printf("%s\nDokument verschlüsselt", __func__);
+		if (rc == -1)
+			g_prefix_error(error, "%s\n", __func__);
+		else if (error)
+			*error = g_error_new(ZOND_ERROR, 0, "%s\nDokument verschlüsselt", __func__);
 
 		g_object_unref(zond_pdf_document);
 
@@ -587,19 +579,20 @@ zond_pdf_document_open(const gchar *file_part, gint von, gint bis,
 
 	number_of_pages = pdf_count_pages(priv->ctx, priv->doc);
 	if (number_of_pages == 0) {
-		if (errmsg)
-			*errmsg = g_strdup_printf("%s\nDokument enthält keine Seiten",
+		if (error)
+			*error = g_error_new(ZOND_ERROR, 0, "%s\nDokument enthält keine Seiten",
 					__func__);
+		g_object_unref(zond_pdf_document);
 
 		return NULL;
 	}
 
 	g_ptr_array_set_size(priv->pages, number_of_pages);
 
-	rc = zond_pdf_document_init_pages(zond_pdf_document, von, bis, errmsg);
+	rc = zond_pdf_document_init_pages(zond_pdf_document, von, bis, error);
 	if (rc) {
 		g_object_unref(zond_pdf_document);
-		ERROR_S_VAL(NULL)
+		ERROR_Z_VAL(NULL)
 	}
 
 	klass = ZOND_PDF_DOCUMENT_GET_CLASS(zond_pdf_document);
@@ -623,7 +616,7 @@ gint zond_pdf_document_save(ZondPdfDocument *self, GError **error) {
 
 	priv->ocr_num = 0;
 
-	rc = pdf_save(priv->ctx, priv->doc, priv->file_part, error);
+	rc = pdf_save(priv->ctx, priv->doc, priv->sfp_pdf_page_tree, error);
 	if (rc) ERROR_Z
 
 	g_array_remove_range(priv->arr_journal, 0, priv->arr_journal->len);
@@ -680,13 +673,13 @@ zond_pdf_document_get_ctx(ZondPdfDocument *self) {
 	return priv->ctx;
 }
 
-const gchar*
-zond_pdf_document_get_file_part(ZondPdfDocument *self) {
+SondFilePartPDFPageTree*
+zond_pdf_document_get_sfp_pdf_page_tree(ZondPdfDocument *self) {
 	if (!ZOND_IS_PDF_DOCUMENT(self))
 		return NULL;
 	ZondPdfDocumentPrivate *priv = zond_pdf_document_get_instance_private(self);
 
-	return priv->file_part;
+	return priv->sfp_pdf_page_tree;
 }
 
 void zond_pdf_document_mutex_lock(const ZondPdfDocument *self) {
@@ -709,9 +702,10 @@ void zond_pdf_document_mutex_unlock(const ZondPdfDocument *self) {
 
 //wird nur aufgerufen, wenn alle threadpools aus sind!
 gint zond_pdf_document_insert_pages(ZondPdfDocument *zond_pdf_document,
-		gint pos, pdf_document *pdf_doc, gchar **errmsg) {
+		gint pos, pdf_document *pdf_doc, GError **error) {
 	gint rc = 0;
 	gint count = 0;
+	gchar* errmsg = NULL;
 
 	ZondPdfDocumentPrivate *priv = zond_pdf_document_get_instance_private(
 			zond_pdf_document);
@@ -726,10 +720,14 @@ gint zond_pdf_document_insert_pages(ZondPdfDocument *zond_pdf_document,
 
 	//einfügen in doc
 	rc = pdf_copy_page(priv->ctx, pdf_doc, 0, count - 1,
-			priv->doc, pos, errmsg);
+			priv->doc, pos, &errmsg);
 	zond_pdf_document_mutex_unlock(zond_pdf_document);
-	if (rc)
-		ERROR_S
+	if (rc) {
+		if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\n%s", __func__, errmsg);
+		g_free(errmsg);
+
+		return -1;
+	}
 
 	//eingefügte Seiten als pdf_document_page erzeugen und initiieren
 	for (gint i = pos; i < pos + count; i++) {
@@ -741,9 +739,9 @@ gint zond_pdf_document_insert_pages(ZondPdfDocument *zond_pdf_document,
 		g_ptr_array_insert(priv->pages, i, pdf_document_page);
 
 		rc = zond_pdf_document_init_page(zond_pdf_document, pdf_document_page,
-				i, errmsg);
+				i, error);
 		if (rc == -1)
-			ERROR_S
+			ERROR_Z
 	}
 
 	return 0;

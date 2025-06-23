@@ -21,6 +21,8 @@
 #include <glib/gstdio.h>
 
 #include "../../misc.h"
+#include "../../sond_fileparts.h"
+
 #include "../sond_treeviewfm.h"
 
 #include "../global_types.h"
@@ -164,23 +166,22 @@ static gint dbase_zond_update_section_dbase(ZondDBase* zond_dbase,
 		DisplayedDocument* dd, GError** error) {
 	gint rc = 0;
 	GArray* arr_sections = NULL;
+	SondFilePartPDFPageTree* sfp_pdf_page_tree = NULL;
+	gchar* filepart = NULL;
 
-	rc = zond_dbase_get_arr_sections(zond_dbase,
-			zond_pdf_document_get_file_part(dd->zond_pdf_document), &arr_sections, error);
-	if (rc) {
-		g_prefix_error(error, "%s\n", __func__);
+	sfp_pdf_page_tree = zond_pdf_document_get_sfp_pdf_page_tree(dd->zond_pdf_document);
+	filepart = sond_file_part_get_filepart(SOND_FILE_PART(sfp_pdf_page_tree));
 
-		return -1;
-	}
+	rc = zond_dbase_get_arr_sections(zond_dbase, filepart, &arr_sections, error);
+	g_free(filepart);
+	if (rc)
+		ERROR_Z
 
 	rc = dbase_zond_anpassen_anbindung(zond_dbase, dd->zond_pdf_document,
 			arr_sections, error);
 	g_array_unref(arr_sections);
-	if (rc) {
-		g_prefix_error(error, "%s\n", __func__);
-
-		return -1;
-	}
+	if (rc)
+		ERROR_Z
 
 	return 0;
 }
@@ -427,7 +428,6 @@ gint projekt_schliessen(Projekt *zond, gchar **errmsg) {
 
 	sond_treeviewfm_set_root(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), NULL,
 			NULL);
-
 	sond_treeviewfm_set_dbase(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), NULL);
 	project_clear_dbase_zond(&(zond->dbase_zond));
 

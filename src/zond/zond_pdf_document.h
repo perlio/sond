@@ -9,6 +9,7 @@
 
 typedef struct _Anbindung Anbindung;
 typedef struct _Displayed_Document DisplayedDocument;
+typedef struct _SondFilePartPDFPageTree SondFilePartPDFPageTree;
 
 G_BEGIN_DECLS
 
@@ -99,10 +100,12 @@ typedef struct _Journal_Entry {
 	};
 } JournalEntry;
 
+typedef struct _SondFilePart SondFilePart;
+
 struct _ZondPdfDocumentClass {
 	GObjectClass parent_class;
 
-	GPtrArray *arr_pdf_documents;
+	GPtrArray* arr_pdf_documents;
 };
 
 ZondAnnotObj* zond_annot_obj_new(pdf_obj*);
@@ -131,10 +134,10 @@ gint zond_pdf_document_page_load_annots(PdfDocumentPage*, GError**);
 
 gint zond_pdf_document_load_page(PdfDocumentPage*, gint, gchar**);
 
-ZondPdfDocument* zond_pdf_document_open(const gchar*, gint, gint, gchar**);
+ZondPdfDocument* zond_pdf_document_open(SondFilePartPDFPageTree*, gint, gint, GError**);
 
 //Gibt Zeiger auf geöffnetes document mit gchar* == path zurück; keine neue ref!
-const ZondPdfDocument* zond_pdf_document_is_open(const gchar*);
+const ZondPdfDocument* zond_pdf_document_is_open(SondFilePartPDFPageTree*);
 
 void zond_pdf_document_unload_page(PdfDocumentPage*);
 
@@ -154,14 +157,14 @@ gint zond_pdf_document_get_number_of_pages(ZondPdfDocument*);
 
 fz_context* zond_pdf_document_get_ctx(ZondPdfDocument*);
 
-const gchar* zond_pdf_document_get_file_part(ZondPdfDocument*);
+SondFilePartPDFPageTree* zond_pdf_document_get_sfp_pdf_page_tree(ZondPdfDocument*);
 
 void zond_pdf_document_mutex_lock(const ZondPdfDocument*);
 
 void zond_pdf_document_mutex_unlock(const ZondPdfDocument*);
 
 gint zond_pdf_document_insert_pages(ZondPdfDocument*, gint,
-		pdf_document*, gchar**);
+		pdf_document*, GError**);
 
 gint zond_pdf_document_get_ocr_num(ZondPdfDocument*);
 

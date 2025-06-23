@@ -22,6 +22,9 @@
 #include <glib-object.h>
 #include <gtk/gtk.h>
 
+typedef struct fz_context fz_context;
+typedef struct fz_stream fz_stream;
+
 G_BEGIN_DECLS
 
 #define SOND_TYPE_FILE_PART sond_file_part_get_type( )
@@ -30,6 +33,9 @@ G_DECLARE_DERIVABLE_TYPE(SondFilePart, sond_file_part, SOND,
 
 struct _SondFilePartClass {
 	GObjectClass parent_class;
+
+	gchar* path_root;
+	GPtrArray* arr_opened_files;
 
 	gint (*load_children)(SondFilePart*, GPtrArray**, GError**);
 	gboolean (*has_children)(SondFilePart*);
@@ -44,9 +50,14 @@ gint sond_file_part_load_children(SondFilePart*, GPtrArray**, GError**);
 
 gboolean sond_file_part_has_children(SondFilePart*);
 
+fz_stream* sond_file_part_get_istream(fz_context*, SondFilePart*, gboolean, GError**);
+
 gchar* sond_file_part_write_to_tmp_file(SondFilePart*, GError**);
 
 gchar* sond_file_part_get_filepart(SondFilePart*);
+
+SondFilePart* sond_file_part_from_filepart(fz_context*,
+		gchar const*, GError**);
 
 //SondFilePart Error
 #define SOND_TYPE_FILE_PART_ERROR sond_file_part_error_get_type( )
@@ -60,16 +71,7 @@ struct _SondFilePartErrorClass {
 SondFilePartError* sond_file_part_error_create(gchar const*,
 		SondFilePart*, GError*);
 
-//SondFilePartRoot definieren
-#define SOND_TYPE_FILE_PART_ROOT sond_file_part_root_get_type( )
-G_DECLARE_DERIVABLE_TYPE(SondFilePartRoot, sond_file_part_root, SOND,
-		FILE_PART_ROOT, SondFilePart)
-
-struct _SondFilePartRootClass {
-	SondFilePartClass parent_class;
-};
-
-SondFilePartRoot* sond_file_part_root_create(gchar const*);
+GError* sond_file_part_error_get_error(SondFilePartError*);
 
 //SondFilePartZip definieren
 #define SOND_TYPE_FILE_PART_ZIP sond_file_part_zip_get_type( )
@@ -122,6 +124,9 @@ SondFilePartPDFPageTree* sond_file_part_pdf_page_tree_create(gchar const*,
 
 gchar const* sond_file_part_pdf_page_tree_get_section(
 		SondFilePartPDFPageTree*);
+
+SondFilePartPDFPageTree* sond_file_part_pdf_page_tree_from_filepart(
+		fz_context*, gchar const*, gchar const*, GError**);
 
 //Sond_File_Part_Leaf definieren
 #define SOND_TYPE_FILE_PART_LEAF sond_file_part_leaf_get_type( )
