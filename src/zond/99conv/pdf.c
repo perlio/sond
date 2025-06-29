@@ -111,7 +111,7 @@ gint pdf_copy_page(fz_context *ctx, pdf_document *doc_src, gint page_from,
 }
 
 gint pdf_open_and_authen_document(fz_context *ctx, gboolean prompt,
-		gboolean read_only, SondFilePartPDFPageTree* sfp_pdf_page_tree,
+		gboolean read_only, SondFilePartPDF* sfp_pdf,
 		gchar **password, pdf_document **doc, gint *auth, GError **error) {
 	gchar *password_try = NULL;
 	pdf_document *doc_tmp = NULL;
@@ -119,7 +119,7 @@ gint pdf_open_and_authen_document(fz_context *ctx, gboolean prompt,
 	if (read_only) { //keine Kopie, sondern direkt aus stream lesen, der allerdings seekable sein muß
 		fz_stream* stream = NULL;
 
-		stream = sond_file_part_get_istream(ctx, SOND_FILE_PART(sfp_pdf_page_tree), TRUE, error);
+		stream = sond_file_part_get_istream(ctx, SOND_FILE_PART(sfp_pdf), TRUE, error);
 		if (!stream)
 			ERROR_Z
 
@@ -136,7 +136,7 @@ gint pdf_open_and_authen_document(fz_context *ctx, gboolean prompt,
 	else { //tmp_file schreiben
 		gchar* filename = NULL;
 
-		filename = sond_file_part_write_to_tmp_file(SOND_FILE_PART(sfp_pdf_page_tree), error);
+		filename = sond_file_part_write_to_tmp_file(SOND_FILE_PART(sfp_pdf), error);
 		if (!filename)
 			ERROR_Z
 
@@ -209,7 +209,7 @@ gint pdf_open_and_authen_document(fz_context *ctx, gboolean prompt,
 }
 
 gint pdf_save(fz_context *ctx, pdf_document *pdf_doc,
-		SondFilePartPDFPageTree* sfp_pdf_page_tree, GError **error) {
+		SondFilePartPDF* sfp_pdf, GError **error) {
 	SondFilePart* sfp_parent = NULL;
 	pdf_write_options opts =
 #ifdef __WIN32
@@ -220,21 +220,15 @@ gint pdf_save(fz_context *ctx, pdf_document *pdf_doc,
 //	if (pdf_count_pages(ctx, pdf_doc) < BIG_PDF && !pdf_doc->crypt)
 		opts.do_garbage = 4;
 
-	sfp_parent = sond_file_part_get_parent(SOND_FILE_PART(sfp_pdf_page_tree));
+	sfp_parent = sond_file_part_get_parent(SOND_FILE_PART(sfp_pdf));
 
 	if (!sfp_parent) {
-		gchar* filepart = NULL;
-		gchar *rel_path = NULL;
+		gchar const* rel_path = NULL;
 
-		filepart = sond_file_part_get_filepart(SOND_FILE_PART(sfp_pdf_page_tree));
-		rel_path = g_strndup(filepart + 1,
-				strlen(filepart + 1) - strlen(g_strrstr(filepart + 1, "//")));
-		g_free(filepart);
+		rel_path = sond_file_part_get_path(SOND_FILE_PART(sfp_pdf));
 
 		fz_try( ctx )
 			pdf_save_document(ctx, pdf_doc, rel_path, &opts);
-		fz_always	(ctx)
-			g_free(rel_path);
 		fz_catch	(ctx) {
 			if (error)
 				*error = g_error_new(g_quark_from_static_string("MUPDF"),
@@ -249,7 +243,7 @@ gint pdf_save(fz_context *ctx, pdf_document *pdf_doc,
 	return 0;
 }
 
-gint pdf_clean(fz_context *ctx, SondFilePartPDFPageTree* sfp_pdf_page_tree, GError **error) {
+gint pdf_clean(fz_context *ctx, SondFilePartPDF* sfp_pdf, GError **error) {
 	pdf_document *doc = NULL;
 	gint rc = 0;
 	gint *pages = NULL;
@@ -258,15 +252,15 @@ gint pdf_clean(fz_context *ctx, SondFilePartPDFPageTree* sfp_pdf_page_tree, GErr
 	gchar* path_tmp = NULL;
 
 	//prüfen, ob in Viewer geöffnet
-	if (zond_pdf_document_is_open(sfp_pdf_page_tree)) {
+	if (zond_pdf_document_is_open(sfp_pdf)) {
 		if (error)
 			*error = g_error_new(ZOND_ERROR, 0, "Datei '%s' ist geöffnet",
-					sond_file_part_get_filepart(SOND_FILE_PART(sfp_pdf_page_tree)));
+					sond_file_part_get_filepart(SOND_FILE_PART(sfp_pdf)));
 
 		return -1;
 	}
 
-	rc = pdf_open_and_authen_document(ctx, TRUE, FALSE, sfp_pdf_page_tree, NULL, &doc,
+	rc = pdf_open_and_authen_document(ctx, TRUE, FALSE, sfp_pdf, NULL, &doc,
 			NULL, error);
 	if (rc == -1) {
 		g_prefix_error(error, "%s\n", __func__);
@@ -289,7 +283,7 @@ gint pdf_clean(fz_context *ctx, SondFilePartPDFPageTree* sfp_pdf_page_tree, GErr
 		gint ret = 0;
 
 		pdf_drop_document(ctx, doc);
-		g_object_unref(sfp_pdf_page_tree);
+		g_object_unref(sfp_pdf);
 		ret = remove(path_tmp);
 		if (ret)
 			g_warning("%s\nArbeitskopie '%s' konnte nicht gelöscht werden\n"
@@ -303,9 +297,9 @@ gint pdf_clean(fz_context *ctx, SondFilePartPDFPageTree* sfp_pdf_page_tree, GErr
 		return -1;
 	}
 
-	rc = pdf_save(ctx, doc, sfp_pdf_page_tree, error);
+	rc = pdf_save(ctx, doc, sfp_pdf, error);
 	pdf_drop_document(ctx, doc);
-	g_object_unref(sfp_pdf_page_tree);
+	g_object_unref(sfp_pdf);
 	ret = remove(path_tmp);
 	if (ret)
 		g_warning("%s\nArbeitskopie '%s' konnte nicht gelöscht werden\n"

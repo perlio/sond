@@ -9,7 +9,7 @@
 
 typedef struct _Anbindung Anbindung;
 typedef struct _Displayed_Document DisplayedDocument;
-typedef struct _SondFilePartPDFPageTree SondFilePartPDFPageTree;
+typedef struct _SondFilePartPDF SondFilePartPDF;
 
 G_BEGIN_DECLS
 
@@ -134,10 +134,10 @@ gint zond_pdf_document_page_load_annots(PdfDocumentPage*, GError**);
 
 gint zond_pdf_document_load_page(PdfDocumentPage*, gint, gchar**);
 
-ZondPdfDocument* zond_pdf_document_open(SondFilePartPDFPageTree*, gint, gint, GError**);
+ZondPdfDocument* zond_pdf_document_open(SondFilePartPDF*, gint, gint, GError**);
 
 //Gibt Zeiger auf geöffnetes document mit gchar* == path zurück; keine neue ref!
-const ZondPdfDocument* zond_pdf_document_is_open(SondFilePartPDFPageTree*);
+const ZondPdfDocument* zond_pdf_document_is_open(SondFilePartPDF*);
 
 void zond_pdf_document_unload_page(PdfDocumentPage*);
 
@@ -157,7 +157,7 @@ gint zond_pdf_document_get_number_of_pages(ZondPdfDocument*);
 
 fz_context* zond_pdf_document_get_ctx(ZondPdfDocument*);
 
-SondFilePartPDFPageTree* zond_pdf_document_get_sfp_pdf_page_tree(ZondPdfDocument*);
+SondFilePartPDF* zond_pdf_document_get_sfp_pdf(ZondPdfDocument*);
 
 void zond_pdf_document_mutex_lock(const ZondPdfDocument*);
 

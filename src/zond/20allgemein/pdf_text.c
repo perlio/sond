@@ -40,7 +40,7 @@
 typedef struct _Pdf_Viewer PdfViewer;
 
 typedef struct _PDF_Text_Occ {
-	SondFilePartPDFPageTree *sfp_pdf_page_tree;
+	SondFilePartPDF* sfp_pdf;
 	gint page;
 	fz_quad quad;
 	gchar *zeile;
@@ -65,7 +65,7 @@ static void pdf_text_fuellen_fenster(Projekt *zond, GtkListBox *list_box,
 
 		label_text = g_strdup_printf("<markup><small><u>%s, S. %i</u></small>"
 				"</markup>\n", sond_file_part_get_path(
-						SOND_FILE_PART(pdf_text_occ.sfp_pdf_page_tree)), pdf_text_occ.page + 1);
+						SOND_FILE_PART(pdf_text_occ.sfp_pdf)), pdf_text_occ.page + 1);
 
 		//text_view erzeugen und einfügen
 		text_view = gtk_text_view_new();
@@ -120,7 +120,7 @@ static void cb_textsuche_changed(GtkListBox *box, GtkListBoxRow *row,
 	anbindung.bis.index = pdf_text_occ.quad.ll.y;
 
 	rc = zond_dbase_get_file_part_root(zond->dbase_zond->zond_dbase_work,
-			sond_file_part_get_filepart(SOND_FILE_PART(pdf_text_occ.sfp_pdf_page_tree)),
+			sond_file_part_get_filepart(SOND_FILE_PART(pdf_text_occ.sfp_pdf)),
 			&pdf_root, &error);
 	if (rc) {
 		display_message(zond->app_window, "Fehler Ermittlung root-node\n\n",
@@ -197,7 +197,7 @@ static void cb_textsuche_act(GtkListBox *box, GtkListBoxRow *row, gpointer data)
 	gint index = 0;
 	PDFTextOcc pdf_text_occ = { 0 };
 	PdfPos pos_pdf = { 0 };
-	SondFilePartPDFPageTree* sfp_pdf_page_tree = NULL;
+	SondFilePartPDF* sfp_pdf = NULL;
 
 	arr_pdf_text_occ = g_object_get_data(G_OBJECT(box), "arr-pdf-text-occ");
 	index = gtk_list_box_row_get_index(row);
@@ -207,13 +207,13 @@ static void cb_textsuche_act(GtkListBox *box, GtkListBoxRow *row, gpointer data)
 	pos_pdf.seite = pdf_text_occ.page;
 	pos_pdf.index = (gint) (pdf_text_occ.quad.ul.y);
 
-	rc = zond_treeview_oeffnen_internal_viewer(zond, pdf_text_occ.sfp_pdf_page_tree,
+	rc = zond_treeview_oeffnen_internal_viewer(zond, pdf_text_occ.sfp_pdf,
 			NULL, &pos_pdf, &error);
 	if (rc) {
 		display_message(zond->app_window, "Fehler in Textsuche -\n\n", error->message,
 				NULL);
 		g_error_free(error);
-		g_object_unref(sfp_pdf_page_tree);
+		g_object_unref(sfp_pdf);
 
 		return;
 	}
@@ -300,13 +300,13 @@ gint pdf_text_anzeigen_ergebnisse(Projekt *zond, gchar *search_text, GPtrArray* 
 static void pdf_text_occ_free(gpointer data) {
 	PDFTextOcc *pdf_text_occ = (PDFTextOcc*) data;
 
-	g_object_unref(pdf_text_occ->sfp_pdf_page_tree);
+	g_object_unref(pdf_text_occ->sfp_pdf);
 	g_free(pdf_text_occ->zeile);
 
 	return;
 }
 
-static gint pdf_textsuche_pdf(Projekt *zond, SondFilePartPDFPageTree* sfp_pdf_page_tree,
+static gint pdf_textsuche_pdf(Projekt *zond, SondFilePartPDF* sfp_pdf,
 		const gchar *search_text, GArray *arr_pdf_text_occ,
 		InfoWindow *info_window, gchar **errmsg) {
 	gint rc = 0;
@@ -315,7 +315,7 @@ static gint pdf_textsuche_pdf(Projekt *zond, SondFilePartPDFPageTree* sfp_pdf_pa
 	fz_context *ctx = NULL;
 	GError* error = NULL;
 
-	zond_pdf_document = zond_pdf_document_open(sfp_pdf_page_tree, 0, -1, &error);
+	zond_pdf_document = zond_pdf_document_open(sfp_pdf, 0, -1, &error);
 	if (!zond_pdf_document) {
 		if (errmsg) *errmsg = g_strdup_printf("%s\n%s", __func__, error->message);
 		g_error_free(error);
@@ -344,7 +344,7 @@ static gint pdf_textsuche_pdf(Projekt *zond, SondFilePartPDFPageTree* sfp_pdf_pa
 			gchar *text_tmp = NULL;
 			PDFTextOcc pdf_text_occ = { 0 };
 
-			pdf_text_occ.sfp_pdf_page_tree = g_object_ref(sfp_pdf_page_tree);
+			pdf_text_occ.sfp_pdf = g_object_ref(sfp_pdf);
 			pdf_text_occ.page = i;
 			pdf_text_occ.quad = quads[u];
 
@@ -354,7 +354,7 @@ static gint pdf_textsuche_pdf(Projekt *zond, SondFilePartPDFPageTree* sfp_pdf_pa
 			fz_try(ctx)
 				buf = fz_new_buffer(ctx, 128);
 			fz_catch(ctx) {
-				g_object_unref(pdf_text_occ.sfp_pdf_page_tree);
+				g_object_unref(pdf_text_occ.sfp_pdf);
 				ERROR_MUPDF("fz_new_buffer")
 			}
 
@@ -446,21 +446,21 @@ gint pdf_textsuche(Projekt *zond, InfoWindow *info_window,
 			(GDestroyNotify) pdf_text_occ_free);
 
 	for (gint i = 0; i < arr_sfp->len; i++) {
-		SondFilePartPDFPageTree *sfp_pdf_page_tree = NULL;
+		SondFilePartPDF* sfp_pdf = NULL;
 		gint rc = 0;
 
-		sfp_pdf_page_tree = g_ptr_array_index(arr_sfp, i);
+		sfp_pdf = g_ptr_array_index(arr_sfp, i);
 
-		info_window_set_message(info_window, sond_file_part_get_path(SOND_FILE_PART(sfp_pdf_page_tree)));
+		info_window_set_message(info_window, sond_file_part_get_path(SOND_FILE_PART(sfp_pdf)));
 
 		//prüfen, ob in Viewer geöffnet
-		if (zond_pdf_document_is_open(sfp_pdf_page_tree)) {
+		if (zond_pdf_document_is_open(sfp_pdf)) {
 			info_window_set_message(info_window,
 					"... in Viewer geöffnet - übersprungen");
 			continue;
 		}
 
-		rc = pdf_textsuche_pdf(zond, sfp_pdf_page_tree, search_text, *arr_pdf_text_occ,
+		rc = pdf_textsuche_pdf(zond, sfp_pdf, search_text, *arr_pdf_text_occ,
 				info_window, errmsg);
 		if (rc) {
 			g_array_unref(*arr_pdf_text_occ);

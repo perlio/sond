@@ -166,11 +166,11 @@ static gint dbase_zond_update_section_dbase(ZondDBase* zond_dbase,
 		DisplayedDocument* dd, GError** error) {
 	gint rc = 0;
 	GArray* arr_sections = NULL;
-	SondFilePartPDFPageTree* sfp_pdf_page_tree = NULL;
+	SondFilePartPDF* sfp_pdf = NULL;
 	gchar* filepart = NULL;
 
-	sfp_pdf_page_tree = zond_pdf_document_get_sfp_pdf_page_tree(dd->zond_pdf_document);
-	filepart = sond_file_part_get_filepart(SOND_FILE_PART(sfp_pdf_page_tree));
+	sfp_pdf = zond_pdf_document_get_sfp_pdf(dd->zond_pdf_document);
+	filepart = sond_file_part_get_filepart(SOND_FILE_PART(sfp_pdf));
 
 	rc = zond_dbase_get_arr_sections(zond_dbase, filepart, &arr_sections, error);
 	g_free(filepart);

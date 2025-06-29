@@ -117,10 +117,12 @@ static gint pv_oeffnen_datei(PdfViewer *pv, gchar *path, gchar **errmsg) {
 	gchar *file_part = NULL;
 	GError *error = NULL;
 	gint rc = 0;
+	SondFilePartPDFPageTree* sfp_pdf_page_tree = NULL;
 
-	file_part = g_strdup_printf("/%s//", path);
+	sfp_pdf_page_tree = sond_file_part_from_filepart(path,)
 
-	dd = document_new_displayed_document(file_part, NULL, errmsg);
+
+	dd = document_new_displayed_document(sfp_pdf_page_tree, NULL, errmsg);
 	g_free(file_part);
 	if (!dd && *errmsg)
 		ERROR_S

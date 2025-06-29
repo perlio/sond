@@ -28,13 +28,13 @@ void document_free_displayed_documents(DisplayedDocument *dd) {
 }
 
 DisplayedDocument*
-document_new_displayed_document(SondFilePartPDFPageTree* sfp_pdf_page_tree,
+document_new_displayed_document(SondFilePartPDF* sfp_pdf,
 		Anbindung *anbindung, GError **error) {
 	ZondPdfDocument *zond_pdf_document = NULL;
 	DisplayedDocument *dd = NULL;
 	gchar* errmsg = NULL;
 
-	zond_pdf_document = zond_pdf_document_open(sfp_pdf_page_tree,
+	zond_pdf_document = zond_pdf_document_open(sfp_pdf,
 			(anbindung) ? anbindung->von.seite : 0,
 			(anbindung) ? anbindung->bis.seite : -1, error);
 	if (!zond_pdf_document) {

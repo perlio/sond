@@ -59,5 +59,5 @@ $(OBJ_DIR)/%.c.o: %.c
 # Clean
 .PHONY: clean
 clean:
-	rm -rf $(OBJ_DIR)
+	rm -rf $(BUILD_DIR)/obj
 	rm -rf $(BUILD_DIR)/bin

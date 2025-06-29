@@ -403,7 +403,7 @@ static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
 				return -1;
 			}
 
-			if (!SOND_IS_FILE_PART_PDF_PAGE_TREE(object)) {
+			if (!SOND_IS_FILE_PART_PDF(object)) {
 				if (error)
 					*error = g_error_new( ZOND_ERROR, 0,
 							"%s\nKnoten enthält keinen PDF-Abschnitt",
@@ -484,7 +484,7 @@ static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
 				return -1;
 			}
 
-			if (!SOND_IS_FILE_PART_PDF_PAGE_TREE(object)) {
+			if (!SOND_IS_FILE_PART_PDF(object)) {
 				if (error)
 					*error = g_error_new( ZOND_ERROR, 0,
 							"%s\nKnoten enthält keinen PDF-Abschnitt",
@@ -571,7 +571,7 @@ gint zond_anbindung_erzeugen(PdfViewer *pv, GError **error) {
 	}
 
 	filepart = sond_file_part_get_filepart(SOND_FILE_PART(
-			zond_pdf_document_get_sfp_pdf_page_tree(pv->dd->zond_pdf_document)));
+			zond_pdf_document_get_sfp_pdf(pv->dd->zond_pdf_document)));
 
 	rc = zond_anbindung_insert_pdf_abschnitt_in_dbase(pv->zond, filepart,
 			pv->anbindung, &anchor_pdf_abschnitt, &child, &node_inserted,

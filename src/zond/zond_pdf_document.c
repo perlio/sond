@@ -34,7 +34,7 @@ typedef struct {
 	pdf_document *doc;
 	gchar *password;
 	gint auth;
-	SondFilePartPDFPageTree* sfp_pdf_page_tree;
+	SondFilePartPDF* sfp_pdf;
 	gboolean read_only;
 	gchar *working_copy;
 	GPtrArray *pages; //array von PdfDocumentPage*
@@ -160,7 +160,7 @@ static void zond_pdf_document_finalize(GObject *self) {
 	g_array_unref(priv->arr_journal);
 
 	g_ptr_array_unref(priv->pages);
-	g_object_unref(priv->sfp_pdf_page_tree);
+	g_object_unref(priv->sfp_pdf);
 
 	if (priv->doc) {
 		path = g_strdup(fz_stream_filename(priv->ctx, priv->doc->file));
@@ -508,7 +508,7 @@ static void zond_pdf_document_init(ZondPdfDocument *self) {
 }
 
 const ZondPdfDocument*
-zond_pdf_document_is_open(SondFilePartPDFPageTree* sfp_pdf_page_tree) {
+zond_pdf_document_is_open(SondFilePartPDF* sfp_pdf) {
 	ZondPdfDocumentClass *klass = g_type_class_peek_static(
 			zond_pdf_document_get_type());
 
@@ -522,7 +522,7 @@ zond_pdf_document_is_open(SondFilePartPDFPageTree* sfp_pdf_page_tree) {
 		zond_pdf_document = g_ptr_array_index(klass->arr_pdf_documents, i);
 		priv = zond_pdf_document_get_instance_private(zond_pdf_document);
 
-		if (priv->sfp_pdf_page_tree == sfp_pdf_page_tree)
+		if (priv->sfp_pdf == sfp_pdf)
 			return zond_pdf_document;
 	}
 
@@ -530,7 +530,7 @@ zond_pdf_document_is_open(SondFilePartPDFPageTree* sfp_pdf_page_tree) {
 }
 
 ZondPdfDocument*
-zond_pdf_document_open(SondFilePartPDFPageTree* sfp_pdf_page_tree, gint von, gint bis,
+zond_pdf_document_open(SondFilePartPDF* sfp_pdf, gint von, gint bis,
 		GError **error) {
 	gint rc = 0;
 	ZondPdfDocument *zond_pdf_document = NULL;
@@ -538,7 +538,7 @@ zond_pdf_document_open(SondFilePartPDFPageTree* sfp_pdf_page_tree, gint von, gin
 	ZondPdfDocumentClass *klass = NULL;
 	gint number_of_pages = 0;
 
-	zond_pdf_document = (ZondPdfDocument*) zond_pdf_document_is_open(sfp_pdf_page_tree);
+	zond_pdf_document = (ZondPdfDocument*) zond_pdf_document_is_open(sfp_pdf);
 	if (zond_pdf_document) {
 		gint rc = 0;
 
@@ -552,7 +552,7 @@ zond_pdf_document_open(SondFilePartPDFPageTree* sfp_pdf_page_tree, gint von, gin
 	zond_pdf_document = g_object_new( ZOND_TYPE_PDF_DOCUMENT, NULL);
 	priv = zond_pdf_document_get_instance_private(zond_pdf_document);
 
-	priv->sfp_pdf_page_tree = sfp_pdf_page_tree;
+	priv->sfp_pdf = sfp_pdf;
 
 	priv->ctx = zond_pdf_document_init_context();
 	if (!priv->ctx) {
@@ -564,7 +564,7 @@ zond_pdf_document_open(SondFilePartPDFPageTree* sfp_pdf_page_tree, gint von, gin
 		return NULL;
 	}
 
-	rc = pdf_open_and_authen_document(priv->ctx, TRUE, FALSE, sfp_pdf_page_tree,
+	rc = pdf_open_and_authen_document(priv->ctx, TRUE, FALSE, sfp_pdf,
 			&priv->password, &priv->doc, &priv->auth, error);
 	if (rc) {
 		if (rc == -1)
@@ -616,7 +616,7 @@ gint zond_pdf_document_save(ZondPdfDocument *self, GError **error) {
 
 	priv->ocr_num = 0;
 
-	rc = pdf_save(priv->ctx, priv->doc, priv->sfp_pdf_page_tree, error);
+	rc = pdf_save(priv->ctx, priv->doc, priv->sfp_pdf, error);
 	if (rc) ERROR_Z
 
 	g_array_remove_range(priv->arr_journal, 0, priv->arr_journal->len);
@@ -673,13 +673,13 @@ zond_pdf_document_get_ctx(ZondPdfDocument *self) {
 	return priv->ctx;
 }
 
-SondFilePartPDFPageTree*
-zond_pdf_document_get_sfp_pdf_page_tree(ZondPdfDocument *self) {
+SondFilePartPDF*
+zond_pdf_document_get_sfp_pdf(ZondPdfDocument *self) {
 	if (!ZOND_IS_PDF_DOCUMENT(self))
 		return NULL;
 	ZondPdfDocumentPrivate *priv = zond_pdf_document_get_instance_private(self);
 
-	return priv->sfp_pdf_page_tree;
+	return priv->sfp_pdf;
 }
 
 void zond_pdf_document_mutex_lock(const ZondPdfDocument *self) {

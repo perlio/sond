@@ -294,7 +294,7 @@ gint zond_treeviewfm_insert_section(ZondTreeviewFM *ztvfm, gint node_id,
 static gint zond_treeviewfm_open_sfp(SondTreeviewFM* stvfm, SondFilePart *sfp, gboolean open_with,
 		GError **error) {
 
-	if (!open_with && SOND_IS_FILE_PART_PDF_PAGE_TREE(sfp)) {
+	if (!open_with && SOND_IS_FILE_PART_PDF(sfp)) {
 		PdfPos pos_pdf = { 0 };
 		gchar const* section = NULL;
 		gint rc = 0;
@@ -311,7 +311,7 @@ static gint zond_treeviewfm_open_sfp(SondTreeviewFM* stvfm, SondFilePart *sfp, g
 		}
 
 		rc = zond_treeview_oeffnen_internal_viewer(ztvfm_priv->zond,
-				SOND_FILE_PART_PDF_PAGE_TREE(sfp), NULL, &pos_pdf, error);
+				SOND_FILE_PART_PDF(sfp), NULL, &pos_pdf, error);
 		if (rc)
 			ERROR_Z
 	}

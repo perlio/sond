@@ -37,7 +37,6 @@ struct _SondFilePartClass {
 	gchar* path_root;
 	GPtrArray* arr_opened_files;
 
-	gint (*load_children)(SondFilePart*, GPtrArray**, GError**);
 	gboolean (*has_children)(SondFilePart*);
 	GPtrArray* (*get_arr_opened_files)(SondFilePart*);
 };
@@ -58,6 +57,8 @@ gchar* sond_file_part_get_filepart(SondFilePart*);
 
 SondFilePart* sond_file_part_from_filepart(fz_context*,
 		gchar const*, GError**);
+
+gint sond_file_part_delete_sfp(SondFilePart*, GError**);
 
 //SondFilePart Error
 #define SOND_TYPE_FILE_PART_ERROR sond_file_part_error_get_type( )
@@ -84,21 +85,6 @@ struct _SondFilePartZipClass {
 
 SondFilePartZip* sond_file_part_zip_create(gchar const*, SondFilePart*);
 
-//Sond_File_Part_Dir definieren
-#define SOND_TYPE_FILE_PART_DIR sond_file_part_dir_get_type( )
-G_DECLARE_DERIVABLE_TYPE(SondFilePartDir, sond_file_part_dir, SOND,
-		FILE_PART_DIR, SondFilePart)
-
-struct _SondFilePartDirClass {
-	SondFilePartClass parent_class;
-};
-
-SondFilePartDir* sond_file_part_dir_create(gchar const*, SondFilePart*, GError**);
-/*
-GPtrArray* sond_file_part_dir_load_children(SondFilePart*, GError**);
-
-gboolean sond_file_part_dir_has_children(SondFilePart*);
-*/
 //Sond_File_Part_PDF definieren
 #define SOND_TYPE_FILE_PART_PDF sond_file_part_pdf_get_type( )
 G_DECLARE_DERIVABLE_TYPE(SondFilePartPDF, sond_file_part_pdf, SOND,
@@ -108,25 +94,9 @@ struct _SondFilePartPDFClass {
 	SondFilePartClass parent_class;
 };
 
+gint sond_file_part_pdf_load_embedded_files(SondFilePartPDF*, GPtrArray**, GError**);
+
 SondFilePartPDF* sond_file_part_pdf_create(gchar const*, SondFilePart*, GError**);
-
-//Sond_File_Part_PDF_Page_Tree definieren
-#define SOND_TYPE_FILE_PART_PDF_PAGE_TREE sond_file_part_pdf_page_tree_get_type( )
-G_DECLARE_DERIVABLE_TYPE(SondFilePartPDFPageTree, sond_file_part_pdf_page_tree, SOND,
-		FILE_PART_PDF_PAGE_TREE, SondFilePart)
-
-struct _SondFilePartPDFPageTreeClass {
-	SondFilePartClass parent_class;
-};
-
-SondFilePartPDFPageTree* sond_file_part_pdf_page_tree_create(gchar const*,
-		SondFilePart*, GError **);
-
-gchar const* sond_file_part_pdf_page_tree_get_section(
-		SondFilePartPDFPageTree*);
-
-SondFilePartPDFPageTree* sond_file_part_pdf_page_tree_from_filepart(
-		fz_context*, gchar const*, gchar const*, GError**);
 
 //Sond_File_Part_Leaf definieren
 #define SOND_TYPE_FILE_PART_LEAF sond_file_part_leaf_get_type( )

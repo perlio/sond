@@ -9,7 +9,7 @@
 typedef struct _Projekt Projekt;
 typedef struct _Anbindung Anbindung;
 typedef struct _Pdf_Pos PdfPos;
-typedef struct _SondFilePartPDFPageTree SondFilePartPDFPageTree;
+typedef struct _SondFilePartPDF SondFilePartPDF;
 typedef int gint;
 
 G_BEGIN_DECLS
@@ -42,7 +42,7 @@ gint zond_treeview_copy_node_to_baum_auswertung(ZondTreeview*, gint,
 
 ZondTreeview* zond_treeview_new(Projekt*, gint);
 
-gint zond_treeview_oeffnen_internal_viewer(Projekt*, SondFilePartPDFPageTree*, Anbindung*,
+gint zond_treeview_oeffnen_internal_viewer(Projekt*, SondFilePartPDF*, Anbindung*,
 		PdfPos*, GError**);
 
 gint zond_treeview_load_baum(ZondTreeview*, GError**);

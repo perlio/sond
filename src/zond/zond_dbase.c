@@ -594,11 +594,10 @@ static gint zond_dbase_rollback_to_statement(ZondDBase *zond_dbase,
 }
 
 //file_part: /Eingang/test.pdf//(mime0:2:3)(zip/blabla/dir/file.txt//){1:129}
-gint zond_dbase_test_path(ZondDBase *zond_dbase, const gchar *rel_path,
+gint zond_dbase_test_path(ZondDBase *zond_dbase, const gchar *filepart,
 		GError **error) {
 	gint rc = 0;
 	sqlite3_stmt **stmt = NULL;
-	gchar *param = NULL;
 
 	const gchar *sql[] = { "SELECT ID FROM knoten WHERE file_part LIKE ?1; " };
 
@@ -607,9 +606,7 @@ gint zond_dbase_test_path(ZondDBase *zond_dbase, const gchar *rel_path,
 	if (rc)
 		ERROR_Z
 
-	param = g_strdup_printf("/%s//%s", rel_path, "%");
-	rc = sqlite3_bind_text(stmt[0], 1, param, -1, SQLITE_TRANSIENT);
-	g_free(param);
+	rc = sqlite3_bind_text(stmt[0], 1, filepart, -1, SQLITE_STATIC);
 	if (rc != SQLITE_OK)
 		ERROR_Z_DBASE
 

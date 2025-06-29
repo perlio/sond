@@ -567,7 +567,7 @@ static gint seiten_anbindung_int(ZondDBase* zond_dbase,
 	gchar* filepart = NULL;
 
 	filepart = sond_file_part_get_filepart(SOND_FILE_PART(
-			zond_pdf_document_get_sfp_pdf_page_tree(pdf_document_page->document)));
+			zond_pdf_document_get_sfp_pdf(pdf_document_page->document)));
 
 	rc = zond_dbase_get_arr_sections(zond_dbase, filepart,
 			&arr_sections, error);
@@ -931,15 +931,12 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 	if (ret == 1) {
 		gint rc = 0;
 		gchar *path_merge = NULL;
-		gchar *file_part = NULL;
 
 		//Datei auswählen
 		path_merge = filename_oeffnen(GTK_WINDOW(pv->vf));
-		file_part = g_strdup_printf("/%s//", path_merge);
-		g_free(path_merge);
 
-		sfp = sond_file_part_from_filepart(pv->zond->ctx, file_part, &error);
-		g_free(file_part);
+		sfp = sond_file_part_from_filepart(pv->zond->ctx, path_merge, &error);
+		g_free(path_merge);
 		if (!sfp) {
 			display_error(pv->vf, "Datei einfügen", error->message);
 			g_error_free(error);
@@ -947,7 +944,7 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 			return;
 		}
 
-		if (!SOND_IS_FILE_PART_PDF_PAGE_TREE(sfp)) {
+		if (!SOND_IS_FILE_PART_PDF(sfp)) {
 			display_message(pv->vf, "Keine PDF-Datei", NULL);
 			g_object_unref(sfp);
 
@@ -955,7 +952,7 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 		}
 
 		rc = pdf_open_and_authen_document(pv->zond->ctx, TRUE, TRUE,
-				SOND_FILE_PART_PDF_PAGE_TREE(sfp), NULL, &doc_merge, NULL, &error);
+				SOND_FILE_PART_PDF(sfp), NULL, &doc_merge, NULL, &error);
 		if (rc) {
 			display_error(pv->vf, "Datei einfügen", error->message);
 			g_error_free(error);

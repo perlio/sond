@@ -9,7 +9,7 @@ typedef char gchar;
 typedef struct _Pdf_Document_Page PdfDocumentPage;
 typedef struct _Anbindung Anbindung;
 typedef struct _Pdf_Viewer PdfViewer;
-typedef struct _SondFilePartPDFPageTree SondFilePartPDFPageTree;
+typedef struct _SondFilePartPDF SondFilePartPDF;
 
 typedef struct _Displayed_Document {
 	ZondPdfDocument *zond_pdf_document;
@@ -22,7 +22,7 @@ typedef struct _Displayed_Document {
 
 void document_free_displayed_documents(DisplayedDocument*);
 
-DisplayedDocument* document_new_displayed_document(SondFilePartPDFPageTree*, Anbindung*,
+DisplayedDocument* document_new_displayed_document(SondFilePartPDF*, Anbindung*,
 		GError**);
 
 Anbindung* document_get_anbindung(DisplayedDocument*);

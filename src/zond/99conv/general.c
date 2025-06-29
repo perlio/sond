@@ -7,31 +7,6 @@
 #include "../40viewer/viewer.h"
 //#include "../../misc.h"
 
-gboolean is_pdf(const gchar *file_part) {
-	gboolean res = FALSE;
-
-	//ToDo: file_part parsen
-
-	//if ( file_part ist Datei)
-	{
-		gchar *rel_path = NULL;
-		gchar *content_type = NULL;
-
-		rel_path = g_strndup(file_part + 1,
-				strlen(file_part + 1) - strlen(g_strrstr(file_part + 1, "//")));
-		content_type = g_content_type_guess(rel_path, NULL, 0, NULL);
-		g_free(rel_path);
-
-		//Sonderbehandung, falls pdf-Datei
-		if ((!g_strcmp0(content_type, ".pdf")
-				|| !g_strcmp0(content_type, "application/pdf")))
-			res = TRUE;
-		g_free(content_type);
-	}
-
-	return res;
-}
-
 void info_window_kill(InfoWindow *info_window) {
 	gtk_widget_destroy(info_window->dialog);
 

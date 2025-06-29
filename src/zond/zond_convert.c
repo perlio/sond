@@ -641,14 +641,10 @@ static gint zond_convert_0_to_1_baum_inhalt_insert(ZondDBase *zond_dbase,
 			close(fd);
 
 			gint rc = 0;
-			gchar *file_part = NULL;
-
-			file_part = g_strdup_printf("/%s//", rel_path);
 
 			//FILE_PART_ROOT einfügen
-			rc = zond_dbase_create_file_root(zond_dbase, file_part, icon_name,
+			rc = zond_dbase_create_file_root(zond_dbase, rel_path, icon_name,
 					node_text, NULL, &node_inserted_root, error);
-			g_free(file_part);
 			if (rc)
 				ERROR_Z
 
@@ -677,19 +673,15 @@ static gint zond_convert_0_to_1_baum_inhalt_insert(ZondDBase *zond_dbase,
 
 			if (exists) //wenn Datei nicht existiert, muß man nicht versuchen, sie zu öffnen
 			{
-				gchar *file_part = NULL;
-				SondFilePartPDFPageTree* sfp_pdf_page_tree = NULL;
+				SondFilePart* sfp = NULL;
 
-				file_part = g_strdup_printf("/%s//", rel_path);
-				sfp_pdf_page_tree = sond_file_part_pdf_page_tree_from_filepart(data_convert->ctx,
-						file_part, NULL, error);
-				g_free(file_part);
-				if (!sfp_pdf_page_tree)
+				sfp = sond_file_part_from_filepart(data_convert->ctx, rel_path, error);
+				if (!sfp)
 					ERROR_Z
 
 				rc = pdf_open_and_authen_document(data_convert->ctx, TRUE, TRUE,
-						sfp_pdf_page_tree, NULL, &(data_convert->doc), NULL, error);
-				g_object_unref(sfp_pdf_page_tree);
+						SOND_FILE_PART_PDF(sfp), NULL, &(data_convert->doc), NULL, error);
+				g_object_unref(sfp);
 				if (rc) {
 					gchar *errmsg = NULL;
 					size_t count = 0;
@@ -720,7 +712,6 @@ static gint zond_convert_0_to_1_baum_inhalt_insert(ZondDBase *zond_dbase,
 				ERROR_Z
 		}
 	} else if (!rel_path && ziel_von) {
-		gchar *file_part = NULL;
 		gchar *section = NULL;
 		Anbindung anbindung = { 0 };
 		gchar *errmsg = NULL;
@@ -753,12 +744,10 @@ static gint zond_convert_0_to_1_baum_inhalt_insert(ZondDBase *zond_dbase,
 			anbindung.bis.index = index_bis;
 
 			anbindung_build_file_section(anbindung, &section);
-			file_part = g_strdup_printf("/%s//", rel_path_ziel);
 			*node_inserted = zond_dbase_insert_node(zond_dbase, anchor_id,
-					child, ZOND_DBASE_TYPE_FILE_PART, 0, file_part, section,
+					child, ZOND_DBASE_TYPE_FILE_PART, 0, rel_path_ziel, section,
 					icon_name, node_text, NULL, error);
 			g_free(section);
-			g_free(file_part);
 			if (*node_inserted == -1)
 				ERROR_Z
 		} else {

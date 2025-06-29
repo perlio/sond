@@ -162,7 +162,7 @@ selection_abfragen_pdf(Projekt *zond, gchar **errmsg) {
 
 			return NULL;
 		}
-		if (SOND_IS_FILE_PART_PDF_PAGE_TREE(sfp) &&
+		if (SOND_IS_FILE_PART_PDF(sfp) &&
 				!g_ptr_array_find(arr_sfp, sfp, NULL))
 			g_ptr_array_add(arr_sfp, sfp);
 	} while ((list = list->next));
@@ -332,21 +332,21 @@ static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 	info_window = info_window_open(zond->app_window, "OCR");
 
 	for (gint i = 0; i < arr_sfp->len; i++) {
-		SondFilePartPDFPageTree* sfp_pdf_page_tree = NULL;
+		SondFilePartPDF* sfp_pdf = NULL;
 
-		sfp_pdf_page_tree = g_ptr_array_index(arr_sfp, i);
+		sfp_pdf = g_ptr_array_index(arr_sfp, i);
 
 		info_window_set_message(info_window,
-				sond_file_part_get_path(SOND_FILE_PART(sfp_pdf_page_tree)));
+				sond_file_part_get_path(SOND_FILE_PART(sfp_pdf)));
 
 		//prüfen, ob in Viewer geöffnet
-		if (zond_pdf_document_is_open(sfp_pdf_page_tree)) {
+		if (zond_pdf_document_is_open(sfp_pdf)) {
 			info_window_set_message(info_window,
 					"... in Viewer geöffnet - übersprungen");
 			continue;
 		}
 
-		DisplayedDocument *dd = document_new_displayed_document(sfp_pdf_page_tree, NULL,
+		DisplayedDocument *dd = document_new_displayed_document(sfp_pdf, NULL,
 				&error);
 		if (!dd) {
 			if (error) {

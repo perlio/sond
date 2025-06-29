@@ -24,6 +24,7 @@ typedef void *gpointer;
 typedef int gboolean;
 typedef struct pdf_obj pdf_obj;
 typedef struct pdf_document pdf_document;
+typedef struct _SondFilePartPDF SondFilePartPDF;
 
 gint pdf_document_get_dest(fz_context*, pdf_document*, gint, gpointer*,
 		gboolean, gchar**);
@@ -31,12 +32,12 @@ gint pdf_document_get_dest(fz_context*, pdf_document*, gint, gpointer*,
 gint pdf_copy_page(fz_context*, pdf_document*, gint, gint, pdf_document*, gint,
 		gchar**);
 
-gint pdf_open_and_authen_document(fz_context*, gboolean, gboolean, SondFilePartPDFPageTree*,
+gint pdf_open_and_authen_document(fz_context*, gboolean, gboolean, SondFilePartPDF*,
 		gchar**, pdf_document**, gint*, GError**);
 
-gint pdf_save(fz_context*, pdf_document*, SondFilePartPDFPageTree*, GError**);
+gint pdf_save(fz_context*, pdf_document*, SondFilePartPDF*, GError**);
 
-gint pdf_clean(fz_context*, SondFilePartPDFPageTree*, GError**);
+gint pdf_clean(fz_context*, SondFilePartPDF*, GError**);
 
 gchar* pdf_get_string_from_line(fz_context*, fz_stext_line*, gchar**);
 

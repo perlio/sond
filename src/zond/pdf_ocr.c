@@ -860,7 +860,7 @@ static gint pdf_ocr_create_pdf_only_text(InfoWindow *info_window,
 
 		gchar *info_text = g_strdup_printf("(%i/%i) %s, Seite %i", zaehler,
 				arr_document_pages->len, sond_file_part_get_path(SOND_FILE_PART(
-				zond_pdf_document_get_sfp_pdf_page_tree(pdf_document_page->document))),
+				zond_pdf_document_get_sfp_pdf(pdf_document_page->document))),
 				pdf_document_page_get_index(pdf_document_page) + 1);
 		info_window_set_message(info_window, info_text);
 		g_free(info_text);
