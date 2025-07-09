@@ -8,7 +8,7 @@
 #include "../zond_pdf_document.h"
 #include "../zond_tree_store.h"
 #include "../sond_treeview.h"
-#include "../sond_treeviewfm.h"
+#include "../../sond_treeviewfm.h"
 #include "../../misc.h"
 
 #include "general.h"

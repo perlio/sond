@@ -392,9 +392,9 @@ static void viewer_render_sichtbare_seiten(PdfViewer *pv) {
 	viewer_page = g_ptr_array_index(pv->arr_pages, erste);
 
 	//in Headerbar angezeigte Datei und Seite anzeigen
-	SondFilePart* sfp = SOND_FILE_PART(zond_pdf_document_get_sfp_pdf(
-			viewer_page->pdf_document_page->document));
-	path_doc = sond_file_part_get_path(sond_file_part_get_parent(sfp));
+	SondFilePartPDF* sfp_pdf = zond_pdf_document_get_sfp_pdf(
+			viewer_page->pdf_document_page->document);
+	path_doc = sond_file_part_get_path(SOND_FILE_PART(sfp_pdf));
 	file = g_strrstr(path_doc, "/");
 	if (file)
 		file++; // "/" entfernen

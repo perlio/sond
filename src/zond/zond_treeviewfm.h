@@ -4,7 +4,7 @@
 #include <glib-object.h>
 #include <gtk/gtk.h>
 
-#include "sond_treeviewfm.h"
+#include "../sond_treeviewfm.h"
 
 #include "global_types.h"
 
@@ -75,7 +75,7 @@ void zond_treeviewfm_kill_parent(ZondTreeviewFM*, GtkTreeIter*);
 void zond_treeviewfm_move_node(GtkTreeModel*, GtkTreeIter*, GtkTreeIter*,
 		gboolean);
 
-gint zond_treeviewfm_get_id_pda(ZondTreeviewFM*, GtkTreeIter*, gint*, GError**);
+void zond_treeviewfm_set_zond(ZondTreeviewFM*, Projekt*);
 
 G_END_DECLS
 

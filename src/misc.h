@@ -71,4 +71,24 @@ GtkWidget* result_listbox_new(GtkWindow*, const gchar*, GtkSelectionMode);
 
 gint misc_datei_oeffnen(gchar const*, gboolean, GError**);
 
+/*  info_window  */
+typedef struct _Info_Window {
+	GtkWidget *dialog;
+	GtkWidget *content;
+	GtkWidget *last_inserted_widget;
+	gboolean cancel;
+} InfoWindow;
+
+void info_window_kill(InfoWindow*);
+
+void info_window_close(InfoWindow*);
+
+void info_window_set_progress_bar_fraction(InfoWindow*, gdouble);
+
+void info_window_set_progress_bar(InfoWindow*);
+
+void info_window_set_message(InfoWindow*, const gchar*);
+
+InfoWindow* info_window_open(GtkWidget*, const gchar*);
+
 #endif // MISC_H_INCLUDED

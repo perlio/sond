@@ -5,13 +5,6 @@
 
 #include <stdio.h>
 
-typedef struct _Info_Window {
-	GtkWidget *dialog;
-	GtkWidget *content;
-	GtkWidget *last_inserted_widget;
-	gboolean cancel;
-} InfoWindow;
-
 typedef struct _GFile GFile;
 typedef struct _GSList GSList;
 typedef struct _GtkWindow GtkWindow;
@@ -26,20 +19,6 @@ typedef unsigned int guint;
 typedef const void *gconstpointer;
 
 gboolean is_pdf(const gchar*);
-
-/*  info_window  */
-
-void info_window_kill(InfoWindow*);
-
-void info_window_close(InfoWindow*);
-
-void info_window_set_progress_bar_fraction(InfoWindow*, gdouble);
-
-void info_window_set_progress_bar(InfoWindow*);
-
-void info_window_set_message(InfoWindow*, const gchar*);
-
-InfoWindow* info_window_open(GtkWidget*, const gchar*);
 
 gchar* get_rel_path_from_file_part(gchar const*);
 

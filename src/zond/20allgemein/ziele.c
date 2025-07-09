@@ -323,8 +323,8 @@ static gint zond_anbindung_insert_pdf_abschnitt_in_dbase(Projekt *zond,
 }
 
 static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
-		gchar const *file_part, Anbindung anbindung, gchar const *node_text,
-		gboolean open, GError **error) {
+		gchar const *file_part, SondFilePartPDF *sfp_pdf, Anbindung anbindung,
+		gchar const *node_text, gboolean open, GError **error) {
 	gint rc = 0;
 	gint parent_id = 0;
 	gchar *file_part_parent = NULL;
@@ -382,6 +382,8 @@ static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
 		GtkTreeIter iter_anchor = { 0 };
 		gint pos = 0;
 		gboolean child = TRUE;
+		SondTVFMItem *stvfm_item_child = NULL;
+		gchar* section = NULL;
 
 		gtk_tree_model_iter_children(
 				gtk_tree_view_get_model(GTK_TREE_VIEW(zond->treeview[BAUM_FS])),
@@ -389,34 +391,34 @@ static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
 
 		do {
 			Anbindung anbindung_test = { 0 };
-			GObject *object = NULL;
+			SondTVFMItem *stvfm_item = NULL;
+			gchar const* section_test = NULL;
 
 			gtk_tree_model_get(
 					gtk_tree_view_get_model(
 							GTK_TREE_VIEW(zond->treeview[BAUM_FS])), &iter_test,
-					0, &object, -1);
-			if (!object) {
+					0, &stvfm_item, -1);
+			if (!stvfm_item) {
 				if (error)
 					*error = g_error_new( ZOND_ERROR, 0,
-							"%s\nKnoten enthält kein object", __func__);
+							"%s\nKnoten ist lees", __func__);
 
 				return -1;
 			}
 
-			if (!SOND_IS_FILE_PART_PDF(object)) {
+			if (!SOND_IS_FILE_PART_PDF(sond_tvfm_item_get_sond_file_part(stvfm_item))) {
 				if (error)
 					*error = g_error_new( ZOND_ERROR, 0,
 							"%s\nKnoten enthält keinen PDF-Abschnitt",
 							__func__);
-				g_object_unref(object);
+				g_object_unref(stvfm_item);
 
 				return -1;
 			}
 
-//			sond_file_part_pdf_page_tree_get_anbindung(
-//					SOND_FILE_PART_PDF_PAGE_TREE(object), NULL, NULL,
-//					&anbindung_test, NULL, NULL);
-			g_object_unref(object);
+			section_test = sond_tvfm_item_get_path_or_section(stvfm_item);
+			g_object_unref(stvfm_item);
+			anbindung_parse_file_section(section_test, &anbindung_test);
 
 			if (anbindung_1_vor_2(anbindung, anbindung_test))
 				break;
@@ -429,9 +431,7 @@ static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
 								GTK_TREE_VIEW(zond->treeview[BAUM_FS])),
 						&iter_test))
 					break;
-//                    else break;
 			}
-
 			else if (anbindung_1_gleich_2(anbindung, anbindung_test)) {
 				if (error)
 					*error = g_error_new( ZOND_ERROR, 0,
@@ -439,7 +439,8 @@ static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
 							__func__);
 
 				return -1;
-			} else //darf nicht sein!
+			}
+			else //darf nicht sein!
 			{
 				if (error)
 					*error = g_error_new( ZOND_ERROR, 0, "%s\nBAUM_FS korrupt",
@@ -449,20 +450,23 @@ static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
 			}
 		} while (1);
 
-//		zpda = g_object_new( ZOND_TYPE_PDF_ABSCHNITT, NULL);
-//		zond_pdf_abschnitt_set(zpda, node_inserted, file_part, anbindung,
-//				zond->icon[ICON_ANBINDUNG].icon_name, node_text);
+		anbindung_build_file_section(anbindung, &section);
+		stvfm_item_child = sond_tvfm_item_create(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
+				SOND_TVFM_ITEM_TYPE_LEAF_SECTION, SOND_FILE_PART(sfp_pdf), section);
+		g_free(section);
 
 		gtk_tree_store_insert(
 				GTK_TREE_STORE(
 						gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_FS]) )),
 				&iter_new, &iter, pos);
-//		gtk_tree_store_set(
-//				GTK_TREE_STORE(
-//						gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_FS]) )),
-//				&iter_new, 0, G_OBJECT(zpda), -1);
-//		g_object_unref(zpda);
 
+		gtk_tree_store_set(
+				GTK_TREE_STORE(
+						gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_FS]) )),
+				&iter_new, 0, G_OBJECT(stvfm_item_child), -1);
+		g_object_unref(stvfm_item_child);
+
+		//Kinder gg. umkopieren
 		iter_anchor = iter_new;
 		iter_test = iter_new;
 
@@ -470,13 +474,14 @@ static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
 				gtk_tree_view_get_model(GTK_TREE_VIEW(zond->treeview[BAUM_FS])),
 				&iter_test)) {
 			Anbindung anbindung_test = { 0 };
-			GObject *object = NULL;
+			SondTVFMItem *stvfm_item = NULL;
+			gchar const *section_test = NULL;
 
 			gtk_tree_model_get(
 					gtk_tree_view_get_model(
 							GTK_TREE_VIEW(zond->treeview[BAUM_FS])), &iter_test,
-					0, &object, -1);
-			if (!object) {
+					0, &stvfm_item, -1);
+			if (!stvfm_item) {
 				if (error)
 					*error = g_error_new( ZOND_ERROR, 0,
 							"%s\nKnoten enthält kein object", __func__);
@@ -484,19 +489,19 @@ static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
 				return -1;
 			}
 
-			if (!SOND_IS_FILE_PART_PDF(object)) {
+			if (!SOND_IS_FILE_PART_PDF(sond_tvfm_item_get_sond_file_part(stvfm_item))) {
 				if (error)
 					*error = g_error_new( ZOND_ERROR, 0,
 							"%s\nKnoten enthält keinen PDF-Abschnitt",
 							__func__);
-				g_object_unref(object);
+				g_object_unref(stvfm_item);
 
 				return -1;
 			}
 
-//			zond_pdf_abschnitt_get(ZOND_PDF_ABSCHNITT(object), NULL, NULL,
-//					&anbindung_test, NULL, NULL);
-			g_object_unref(object);
+			section_test = sond_tvfm_item_get_path_or_section(stvfm_item);
+			g_object_unref(stvfm_item);
+			anbindung_parse_file_section(section_test, &anbindung_test);
 
 			if (anbindung_1_eltern_von_2(anbindung, anbindung_test)) {
 				zond_treeviewfm_move_node(
@@ -531,7 +536,8 @@ static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
 
 static gint zond_anbindung_trees(Projekt *zond, gint anchor_pdf_abschnitt,
 		gboolean child, gint node_inserted, Anbindung anbindung,
-		gchar const *file_part, gchar const *node_text, GError **error) {
+		gchar const *file_part, SondFilePartPDF* sfp_pdf,
+		gchar const *node_text, GError **error) {
 	gint rc = 0;
 	gboolean open = FALSE;
 
@@ -543,7 +549,7 @@ static gint zond_anbindung_trees(Projekt *zond, gint anchor_pdf_abschnitt,
 	if (rc == 1)
 		open = TRUE;
 
-	rc = zond_anbindung_fm(zond, node_inserted, file_part, anbindung, node_text,
+	rc = zond_anbindung_fm(zond, node_inserted, file_part, sfp_pdf, anbindung, node_text,
 			open, error);
 	if (rc)
 		ERROR_Z
@@ -582,7 +588,7 @@ gint zond_anbindung_erzeugen(PdfViewer *pv, GError **error) {
 	}
 
 	rc = zond_anbindung_trees(pv->zond, anchor_pdf_abschnitt, child,
-			node_inserted, pv->anbindung, filepart,
+			node_inserted, pv->anbindung, filepart, zond_pdf_document_get_sfp_pdf(pv->dd->zond_pdf_document),
 			node_text, error);
 	g_free(filepart);
 	g_free(node_text);

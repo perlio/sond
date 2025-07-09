@@ -22,8 +22,7 @@
 
 #include "../../misc.h"
 #include "../../sond_fileparts.h"
-
-#include "../sond_treeviewfm.h"
+#include "../../sond_treeviewfm.h"
 
 #include "../global_types.h"
 #include "../zond_dbase.h"
@@ -428,7 +427,6 @@ gint projekt_schliessen(Projekt *zond, gchar **errmsg) {
 
 	sond_treeviewfm_set_root(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), NULL,
 			NULL);
-	sond_treeviewfm_set_dbase(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), NULL);
 	project_clear_dbase_zond(&(zond->dbase_zond));
 
 	//Ggf. autosave abschalten
@@ -527,9 +525,6 @@ gint project_oeffnen(Projekt *zond, const gchar *abs_path, gboolean create,
 	rc = project_create_dbase_zond(zond, abs_path, create, &dbase_zond, errmsg);
 	if (rc)
 		ERROR_S
-
-	sond_treeviewfm_set_dbase(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
-			dbase_zond->zond_dbase_work);
 
 	zond->dbase_zond = dbase_zond;
 	rc = sond_treeviewfm_set_root(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),

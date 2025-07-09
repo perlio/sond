@@ -182,6 +182,8 @@ gint zond_dbase_get_baum_auswertung_copy(ZondDBase*, gint, gint*, GError**);
 gint zond_dbase_get_first_baum_inhalt_file_child(ZondDBase*, gint, gint*, gint*,
 		GError**);
 
+gint zond_dbase_get_section(ZondDBase*, gchar const*, gchar const*, GError**);
+
 gint zond_dbase_find_baum_inhalt_file(ZondDBase*, gint, gint*, gint*, gchar**,
 		GError**);
 

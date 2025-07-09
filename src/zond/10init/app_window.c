@@ -230,7 +230,9 @@ static gboolean cb_focus_in(GtkWidget *treeview, GdkEvent *event,
 static void init_treeviews(Projekt *zond) {
 	//der treeview
 	zond->treeview[BAUM_FS] = SOND_TREEVIEW(
-			g_object_new( ZOND_TYPE_TREEVIEWFM, "Projekt", zond, NULL));
+			g_object_new( ZOND_TYPE_TREEVIEWFM, NULL));
+	zond_treeviewfm_set_zond(ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), zond);
+
 	zond->treeview[BAUM_INHALT] = SOND_TREEVIEW(
 			zond_treeview_new(zond, (gint) BAUM_INHALT));
 	zond->treeview[BAUM_AUSWERTUNG] = SOND_TREEVIEW(
