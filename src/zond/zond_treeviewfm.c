@@ -49,8 +49,11 @@ static gint zond_treeviewfm_dbase_test(SondTVFMItem *stvfm_item, GError **error)
 		g_free(filepart);
 		if (sond_tvfm_item_get_item_type(stvfm_item) == SOND_TVFM_ITEM_TYPE_DIR)
 			return 1; //immer nur Abkömmling, auch bei PDF mit embfiles!
-		else
+		else if (sond_tvfm_item_get_item_type(stvfm_item) == SOND_TVFM_ITEM_TYPE_LEAF)
 			return 2; //Treffer
+		else { //LEAF_SECTION
+
+		}
 	}
 
 	//wenn kein direkter Treffer, prüfen, ob Abkömmlinge in db

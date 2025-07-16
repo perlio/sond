@@ -552,7 +552,7 @@ zond_pdf_document_open(SondFilePartPDF* sfp_pdf, gint von, gint bis,
 	zond_pdf_document = g_object_new( ZOND_TYPE_PDF_DOCUMENT, NULL);
 	priv = zond_pdf_document_get_instance_private(zond_pdf_document);
 
-	priv->sfp_pdf = sfp_pdf;
+	priv->sfp_pdf = g_object_ref(sfp_pdf);
 
 	priv->ctx = zond_pdf_document_init_context();
 	if (!priv->ctx) {

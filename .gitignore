@@ -6,7 +6,5 @@
 !/Makefile
 !.gitignore
 !LICENSE
-!sond.cbp
-!sond debian.cbp
 !release.sh
-
+!README.md

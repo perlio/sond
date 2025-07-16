@@ -23,13 +23,13 @@ gint pdf_document_get_dest(fz_context *ctx, pdf_document *doc, gint page_doc,
 
 	fz_try( ctx )
 		obj_dest_tree = pdf_load_name_tree(ctx, doc, PDF_NAME(Dests));
-fz_catch	( ctx )
+	fz_catch(ctx)
 		ERROR_MUPDF("pdf_load_name_tree")
 
 	for (gint i = 0; i < pdf_dict_len(ctx, obj_dest_tree); i++) {
 		fz_try( ctx )
 			obj_key = pdf_dict_get_key(ctx, obj_dest_tree, i);
-fz_catch		( ctx ) ERROR_MUPDF( "pdf_dict_get_key" )
+		fz_catch(ctx) ERROR_MUPDF( "pdf_dict_get_key" )
 
 		fz_try( ctx ) obj_val = pdf_dict_get_val( ctx, obj_dest_tree, i );
 		fz_catch( ctx ) ERROR_MUPDF( "pdf_dict_get_val" )
@@ -208,9 +208,9 @@ gint pdf_open_and_authen_document(fz_context *ctx, gboolean prompt,
 	return 0;
 }
 
-gint pdf_save(fz_context *ctx, pdf_document *pdf_doc,
-		SondFilePartPDF* sfp_pdf, GError **error) {
-	SondFilePart* sfp_parent = NULL;
+fz_buffer* pdf_doc_to_buf(fz_context* ctx, pdf_document* doc, GError** error) {
+	fz_output* out = NULL;
+	fz_buffer* buf = NULL;
 	pdf_write_options opts =
 #ifdef __WIN32
 			{ 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, ~0, "", "", 0 };
@@ -220,25 +220,56 @@ gint pdf_save(fz_context *ctx, pdf_document *pdf_doc,
 //	if (pdf_count_pages(ctx, pdf_doc) < BIG_PDF && !pdf_doc->crypt)
 		opts.do_garbage = 4;
 
-	sfp_parent = sond_file_part_get_parent(SOND_FILE_PART(sfp_pdf));
-
-	if (!sfp_parent) {
-		gchar const* rel_path = NULL;
-
-		rel_path = sond_file_part_get_path(SOND_FILE_PART(sfp_pdf));
-
-		fz_try( ctx )
-			pdf_save_document(ctx, pdf_doc, rel_path, &opts);
-		fz_catch	(ctx) {
-			if (error)
-				*error = g_error_new(g_quark_from_static_string("MUPDF"),
-						fz_caught(ctx), "%s\n%s", __func__,
-						fz_caught_message(ctx));
-
-			return -1;
-		}
+	fz_try(ctx) {
+		buf = fz_new_buffer(ctx, 4096);
 	}
-	//else if ( file_part ist komplizierter )
+	fz_catch(ctx) {
+		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"), fz_caught(ctx),
+				"%s\n%s", __func__, fz_caught_message(ctx));
+
+		return NULL;
+	}
+
+	fz_try(ctx)
+		out = fz_new_output_with_buffer(ctx, buf);
+	fz_catch(ctx) {
+		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"), fz_caught(ctx),
+				"%s\n%s", __func__, fz_caught_message(ctx));
+		fz_drop_buffer(ctx, buf);
+
+		return NULL;
+	}
+
+	fz_try(ctx)
+		pdf_write_document(ctx, doc, out, &opts);
+	fz_always(ctx) {
+		fz_close_output(ctx, out);
+		fz_drop_output(ctx, out);
+	}
+	fz_catch(ctx) {
+		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"), fz_caught(ctx),
+				"%s\n%s", __func__, fz_caught_message(ctx));
+		fz_drop_buffer(ctx, buf);
+
+		return NULL;
+	}
+
+	return buf;
+}
+
+gint pdf_save(fz_context *ctx, pdf_document *pdf_doc,
+		SondFilePartPDF* sfp_pdf, GError **error) {
+	gint rc = 0;
+	fz_buffer* buf = NULL;
+
+	buf = pdf_doc_to_buf(ctx, pdf_doc, error);
+	if (!buf)
+		ERROR_Z
+
+	rc = sond_file_part_replace(SOND_FILE_PART(sfp_pdf), ctx, buf, error);
+	fz_drop_buffer(ctx, buf);
+	if (rc)
+		ERROR_Z
 
 	return 0;
 }
@@ -661,6 +692,8 @@ gint pdf_annot_change(fz_context* ctx, pdf_annot* pdf_annot, gint rotate,
 			return -1;
 		}
 	}
+
+	pdf_update_annot(ctx, pdf_annot);
 
 	return 0;
 }

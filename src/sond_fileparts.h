@@ -21,9 +21,7 @@
 
 #include <glib-object.h>
 #include <gtk/gtk.h>
-
-typedef struct fz_context fz_context;
-typedef struct fz_stream fz_stream;
+#include <mupdf/pdf.h>
 
 G_BEGIN_DECLS
 
@@ -59,6 +57,10 @@ SondFilePart* sond_file_part_from_filepart(fz_context*,
 		gchar const*, GError**);
 
 gint sond_file_part_delete_sfp(SondFilePart*, GError**);
+
+gint sond_file_part_replace(SondFilePart*, fz_context*, fz_buffer*, GError**);
+
+//gint sond_file_part_replace(SondFilePart*, fz_context*, fz_buffer*, GError**);
 
 //SondFilePart Error
 #define SOND_TYPE_FILE_PART_ERROR sond_file_part_error_get_type( )

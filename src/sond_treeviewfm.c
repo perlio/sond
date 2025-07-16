@@ -409,7 +409,8 @@ gint sond_tvfm_item_load_children(SondTVFMItem* stvfm_item,
 		if (rc)
 			ERROR_Z
 	}
-	else if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF) {
+	else if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF ||
+			stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF_SECTION) {
 		if (SOND_TVFM_ITEM_GET_CLASS(stvfm_item)->load_sections) {
 			gint rc = 0;
 

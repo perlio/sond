@@ -19,7 +19,9 @@
 #include "sond_fileparts.h"
 
 #include <glib-object.h>
+#include <glib/gstdio.h>
 #include <zip.h>
+#include <mupdf/pdf.h>
 
 #include "misc.h"
 #include "sond_treeviewfm.h"
@@ -34,8 +36,6 @@
  * 	sfp_zip/sfp_pdf, wenn Objekt in zip-Archiv oder pdf-Datei gespeichert
  *
  * path: path zum Root-Element
- * 	abs-path, wenn parent == NULL
- * 	"/" für root-Verzeichnis eines zip-Archivs
  */
 typedef struct {
 	gchar *path; //rel_path zum root-Element
@@ -176,6 +176,57 @@ gboolean sond_file_part_has_children(SondFilePart *sfp) {
 	return has_children;
 }
 
+gchar* sond_file_part_get_filepart(SondFilePart* sfp) {
+	GList* list = NULL;
+	SondFilePart* sfp_parent = NULL;
+	gchar* filepart = NULL;
+	GList* ptr_elem = NULL;
+
+	list = g_list_append(list, sfp);
+
+	//erstmal sfps sammeln und Reihenfolge richtig machen
+	while((sfp_parent = sond_file_part_get_parent(sfp))) {
+		list = g_list_prepend(list, sfp_parent);
+
+		sfp = sfp_parent;
+	}
+
+	//dann filepart zusammensetzen
+	ptr_elem = list;
+	do {
+		SondFilePart* sfp_list = NULL;
+
+		sfp_list = SOND_FILE_PART(ptr_elem->data);
+
+		if (filepart) filepart = add_string(filepart, g_strdup("//"));
+		filepart = add_string(filepart, g_strdup(sond_file_part_get_path(sfp_list)));
+
+		ptr_elem = ptr_elem->next;
+	} while (ptr_elem);
+
+	g_list_free(list);
+
+	return filepart;
+}
+
+static gchar* guess_content_type(fz_context* ctx, fz_stream* stream,
+		gchar const* path, GError** error) {
+	guchar buf[1024] = { 0 };
+
+	fz_try(ctx)
+		fz_read(ctx, stream, buf, sizeof(buf));
+	fz_catch(ctx) {
+		if (error)
+			*error = g_error_new(g_quark_from_static_string("mupdf"),
+					fz_caught(ctx), "%s\n%s", __func__,
+					fz_caught_message(ctx));
+
+		return NULL;
+	}
+
+	return g_content_type_guess(path, buf, sizeof(buf), NULL);
+}
+
 static fz_stream* sond_file_part_pdf_lookup_embedded_file(fz_context*,
 		SondFilePartPDF*, gchar const*, GError**);
 
@@ -201,6 +252,68 @@ static fz_stream* open_file(fz_context* ctx, gchar const* path,
 	}
 
 	return stream;
+}
+
+SondFilePart* sond_file_part_from_filepart(fz_context* ctx,
+		gchar const* filepart, GError** error) {
+	SondFilePart* sfp = NULL;
+	gchar** v_string = NULL;
+	gint zaehler = 0;
+
+	v_string = g_strsplit(filepart, "//", -1);
+
+	while (v_string[zaehler])
+	{
+		fz_stream* stream = NULL;
+		gchar* content_type = NULL;
+		SondFilePart* sfp_child = NULL;
+
+		if (!sfp) //1. Ebene - File im Filesystem
+			stream = open_file(ctx, v_string[zaehler], error);
+		else if (SOND_IS_FILE_PART_ZIP(sfp)) {
+
+		}
+		else if (SOND_IS_FILE_PART_PDF(sfp))
+			stream = sond_file_part_pdf_lookup_embedded_file(ctx,
+					SOND_FILE_PART_PDF(sfp), v_string[zaehler], error);
+		//else if (SOND_IS_FILE_PART_GMESSAGE(sfp))
+		else { //darf nicht sein
+			g_object_unref(sfp);
+			g_strfreev(v_string);
+			if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\nfilepart malformed", __func__);
+
+			return NULL;
+		}
+
+		if (!stream) {
+			g_object_unref(sfp);
+			g_strfreev(v_string);
+			ERROR_Z_VAL(NULL)
+		}
+
+		content_type = guess_content_type(ctx, stream, v_string[zaehler], error);
+		fz_drop_stream(ctx, stream);
+		if (!content_type){
+			g_object_unref(sfp);
+			ERROR_Z_VAL(NULL)
+		}
+
+		sfp_child = sond_file_part_create_from_content_type(v_string[zaehler], sfp, content_type);
+		if (SOND_IS_FILE_PART_ERROR(sfp_child)) { //können wir hier nicht brauchen
+			if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\n%s", __func__,
+					sond_file_part_error_get_error(SOND_FILE_PART_ERROR(sfp_child))->message);
+			g_strfreev(v_string);
+			g_object_unref(sfp);
+
+			return NULL;
+		}
+
+		sfp = sfp_child;
+		zaehler++;
+	}
+	g_strfreev(v_string);
+
+	return sfp;
 }
 
 fz_stream* sond_file_part_get_istream(fz_context* ctx,
@@ -267,19 +380,10 @@ fz_stream* sond_file_part_get_istream(fz_context* ctx,
 	return stream;
 }
 
-gchar* sond_file_part_write_to_tmp_file(SondFilePart* sfp, GError **error) {
-	gchar *filename = NULL;
-	gchar* basename = NULL;
-	fz_context* ctx = NULL;
+static fz_buffer* sond_file_part_get_buffer(SondFilePart* sfp,
+		fz_context* ctx, GError** error) {
 	fz_stream* stream = NULL;
-	fz_buffer *buf = NULL;
-
-	ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
-	if (!ctx) {
-		if (error) *error = g_error_new(ZOND_ERROR, 0,
-				"%s\nfz_new_context gibt NULL zurück", __func__);
-		return NULL;
-	}
+	fz_buffer* buf = NULL;
 
 	stream = sond_file_part_get_istream(ctx, sfp, FALSE, error);
 	if (!stream) {
@@ -298,6 +402,28 @@ gchar* sond_file_part_write_to_tmp_file(SondFilePart* sfp, GError **error) {
 		fz_drop_context(ctx);
 
 		return NULL;
+	}
+
+	return buf;
+}
+gchar* sond_file_part_write_to_tmp_file(SondFilePart* sfp, GError **error) {
+	gchar *filename = NULL;
+	gchar* basename = NULL;
+	fz_context* ctx = NULL;
+	fz_buffer *buf = NULL;
+
+	ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
+	if (!ctx) {
+		if (error) *error = g_error_new(ZOND_ERROR, 0,
+				"%s\nfz_new_context gibt NULL zurück", __func__);
+		return NULL;
+	}
+
+	buf = sond_file_part_get_buffer(sfp, ctx, error);
+	if (!buf) {
+		fz_drop_context(ctx);
+
+		ERROR_Z_VAL(NULL)
 	}
 
 	if (sond_file_part_get_path(sfp))
@@ -326,118 +452,11 @@ gchar* sond_file_part_write_to_tmp_file(SondFilePart* sfp, GError **error) {
 	return filename;
 }
 
-gchar* sond_file_part_get_filepart(SondFilePart* sfp) {
-	GList* list = NULL;
-	SondFilePart* sfp_parent = NULL;
-	gchar* filepart = NULL;
-	GList* ptr_elem = NULL;
+static fz_buffer* sond_file_part_pdf_delete_emb_file(SondFilePartPDF*, fz_context*,
+		gchar const*, GError**);
 
-	list = g_list_append(list, sfp);
-
-	//erstmal sfps sammeln und Reihenfolge richtig machen
-	while((sfp_parent = sond_file_part_get_parent(sfp))) {
-		list = g_list_prepend(list, sfp_parent);
-
-		sfp = sfp_parent;
-	}
-
-	//dann filepart zusammensetzen
-	ptr_elem = list;
-	do {
-		SondFilePart* sfp_list = NULL;
-
-		sfp_list = SOND_FILE_PART(ptr_elem->data);
-
-		if (filepart) filepart = add_string(filepart, g_strdup("//"));
-		filepart = add_string(filepart, g_strdup(sond_file_part_get_path(sfp_list)));
-
-		ptr_elem = ptr_elem->next;
-	} while (ptr_elem);
-
-	g_list_free(list);
-
-	return filepart;
-}
-
-static gchar* guess_content_type(fz_context* ctx, fz_stream* stream,
-		gchar const* path, GError** error) {
-	guchar buf[1024] = { 0 };
-
-	fz_try(ctx)
-		fz_read(ctx, stream, buf, sizeof(buf));
-	fz_catch(ctx) {
-		if (error)
-			*error = g_error_new(g_quark_from_static_string("mupdf"),
-					fz_caught(ctx), "%s\n%s", __func__,
-					fz_caught_message(ctx));
-
-		return NULL;
-	}
-
-	return g_content_type_guess(path, buf, sizeof(buf), NULL);
-}
-
-SondFilePart* sond_file_part_from_filepart(fz_context* ctx,
-		gchar const* filepart, GError** error) {
-	SondFilePart* sfp = NULL;
-	gchar** v_string = NULL;
-	gint zaehler = 0;
-
-	v_string = g_strsplit(filepart, "//", -1);
-
-	while (v_string[zaehler])
-	{
-		fz_stream* stream = NULL;
-		gchar* content_type = NULL;
-		SondFilePart* sfp_child = NULL;
-
-		if (!sfp) //1. Ebene - File im Filesystem
-			stream = open_file(ctx, v_string[zaehler], error);
-		else if (SOND_IS_FILE_PART_ZIP(sfp)) {
-
-		}
-		else if (SOND_IS_FILE_PART_PDF(sfp))
-			stream = sond_file_part_pdf_lookup_embedded_file(ctx,
-					SOND_FILE_PART_PDF(sfp), v_string[zaehler], error);
-		//else if (SOND_IS_FILE_PART_GMESSAGE(sfp))
-		else { //darf nicht sein
-			g_object_unref(sfp);
-			g_strfreev(v_string);
-			if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\nfilepart malformed", __func__);
-
-			return NULL;
-		}
-
-		if (!stream) {
-			g_object_unref(sfp);
-			g_strfreev(v_string);
-			ERROR_Z_VAL(NULL)
-		}
-
-		content_type = guess_content_type(ctx, stream, v_string[zaehler], error);
-		fz_drop_stream(ctx, stream);
-		if (!content_type){
-			g_object_unref(sfp);
-			ERROR_Z_VAL(NULL)
-		}
-
-		sfp_child = sond_file_part_create_from_content_type(v_string[zaehler], sfp, content_type);
-		if (SOND_IS_FILE_PART_ERROR(sfp_child)) { //können wir hier nicht brauchen
-			if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\n%s", __func__,
-					sond_file_part_error_get_error(SOND_FILE_PART_ERROR(sfp_child))->message);
-			g_strfreev(v_string);
-			g_object_unref(sfp);
-
-			return NULL;
-		}
-
-		sfp = sfp_child;
-		zaehler++;
-	}
-	g_strfreev(v_string);
-
-	return sfp;
-}
+static fz_buffer* sond_file_part_pdf_mod_emb_file(SondFilePartPDF*, fz_context*,
+		gchar const*, fz_buffer*, GError**);
 
 gint sond_file_part_delete_sfp(SondFilePart* sfp, GError** error) {
 	SondFilePart* sfp_parent = NULL;
@@ -445,15 +464,119 @@ gint sond_file_part_delete_sfp(SondFilePart* sfp, GError** error) {
 	sfp_parent = sond_file_part_get_parent(sfp);
 
 	if (!sfp_parent) { //Datei im Filesystem
+		gint rc = 0;
+		gchar* path = NULL;
+		SondFilePartPrivate* sfp_priv = sond_file_part_get_instance_private(sfp);
 
-	}
-	else if (SOND_IS_FILE_PART_ZIP(sfp_parent)) {
+		path = g_strconcat(SOND_FILE_PART_GET_CLASS(sfp)->path_root, "/", sfp_priv->path, NULL);
+		rc = g_remove(path);
+		g_free(path);
+		if (rc) {
+			if (error) *error = g_error_new(g_quark_from_static_string("stdlib"),
+					errno, "%s\n%s", __func__, strerror(errno));
 
+			return -1;
+		}
 	}
-	else if (SOND_IS_FILE_PART_PDF(sfp_parent)) {
+	else {
+		gint rc = 0;
+		fz_context* ctx = NULL;
+		fz_buffer* buf_out = NULL;
 
+		ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
+		if (!ctx) {
+			if (error) *error =
+					g_error_new(g_quark_from_static_string("mupdf"), 0,
+							"%s\ncontext konnte nicht erzeutgt werden", __func__);
+
+			return -1;
+		}
+
+		if (SOND_IS_FILE_PART_ZIP(sfp_parent)) {
+			//open zip -> buffer
+			//zip_file_locate (Index Datei ermitteln)
+			//zip_delete
+			//zip_close
+		}
+		else if (SOND_IS_FILE_PART_PDF(sfp_parent))
+			buf_out = sond_file_part_pdf_delete_emb_file(SOND_FILE_PART_PDF(sfp_parent), ctx,
+					sond_file_part_get_path(sfp), error);
+
+		//else if (SOND_IS_FILE_PART_GMESSAGE(sfp_parent)) {
+
+		if (!buf_out) {
+			fz_drop_context(ctx);
+
+			ERROR_Z
+		}
+
+		//replace in parent(parent)
+		rc = sond_file_part_replace(sfp_parent, ctx, buf_out, error);
+		fz_drop_buffer(ctx, buf_out);
+		fz_drop_context(ctx);
+		if (rc)
+			ERROR_Z
 	}
-	//else if (SOND_IS_FILE_PART_GMESSAGE(sfp_parent)) {
+
+	return 0;
+}
+
+gint sond_file_part_replace(SondFilePart* sfp, fz_context* ctx,
+		fz_buffer* buf, GError** error) {
+	SondFilePart* sfp_parent = NULL;
+
+	sfp_parent = sond_file_part_get_parent(sfp);
+
+	if (!sfp_parent) { //Datei im Filesystem
+		gint rc = 0;
+		gchar* filename = NULL;
+
+		//Datei löschen
+		rc = sond_file_part_delete_sfp(sfp, error);
+		if (rc)
+			ERROR_Z
+
+		//neue Datei aus buffer schreiben
+		filename = g_strconcat(SOND_FILE_PART_CLASS(g_type_class_peek_static(SOND_TYPE_FILE_PART))->path_root,
+				"/", sond_file_part_get_path(sfp), NULL);
+
+		fz_try(ctx)
+			fz_save_buffer(ctx, buf, filename);
+		fz_always(ctx)
+			g_free(filename);
+		fz_catch(ctx) {
+			if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
+						fz_caught(ctx), "%s\n%s", __func__,
+						fz_caught_message(ctx));
+
+			return -1;
+		}
+
+		return 0;
+	}
+	else {
+		gint rc = 0;
+		fz_buffer* buf_out = NULL;
+
+		if (SOND_IS_FILE_PART_PDF(sfp_parent)) //ist also embedded
+			buf_out = sond_file_part_pdf_mod_emb_file(SOND_FILE_PART_PDF(sfp_parent),
+					ctx, sond_file_part_get_path(sfp), buf, error);
+		else if (SOND_IS_FILE_PART_ZIP(sfp_parent)) { //ist also embedded
+			//zip_archive öffnen ->buffer
+			//zip_file_locate
+			//zip_replace
+			//zip-Archiv in neuen buffer schreiben
+			//zip_close
+		}
+
+		if (!buf_out)
+			ERROR_Z
+
+		rc = sond_file_part_replace(sfp_parent, ctx, buf_out, error);
+		fz_drop_buffer(ctx, buf_out);
+		if (rc)
+			ERROR_Z
+	}
 
 	return 0;
 }
@@ -811,14 +934,11 @@ static gint sond_file_part_pdf_test_for_embedded_files(
 		ERROR_Z
 	}
 
-	fz_try(ctx) {
-		//Prüfen, ob PDF eingebettete Dateien hat
+	fz_try(ctx) //Prüfen, ob PDF eingebettete Dateien hat
 		if (embedded_files_dict && pdf_dict_len(ctx, embedded_files_dict))
 			sfp_pdf_priv->has_embedded_files = TRUE;
-	}
-	fz_always(ctx) {
+	fz_always(ctx)
 		pdf_drop_document(ctx, doc);
-	}
 	fz_catch(ctx) {
 		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
 				fz_caught(ctx),
@@ -850,6 +970,107 @@ SondFilePartPDF* sond_file_part_pdf_create(gchar const* path,
 	}
 
 	return sfp_pdf;
+}
+
+typedef struct {
+	gchar const* path;
+	fz_buffer* buf;
+} Modify;
+
+static gint modify_embedded_file(fz_context* ctx, pdf_obj* EF_F,
+		gchar const* path, gpointer data, GError** error) {
+	Modify* modify = (Modify*) data;
+
+	if (g_strcmp0(path, modify->path) == 0) {
+		pdf_document* doc = NULL;
+
+		doc = pdf_pin_document(ctx, EF_F);
+		if (!doc) {
+			if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
+					fz_caught(ctx), "%s\n%s", __func__,
+					fz_caught_message(ctx));
+
+			return -1;
+		}
+		fz_try(ctx)
+			pdf_update_stream(ctx, doc, EF_F, modify->buf, 0);
+		fz_always(ctx)
+			pdf_drop_document(ctx, doc);
+		fz_catch(ctx) {
+			if (error)
+				*error = g_error_new(g_quark_from_static_string("mupdf"),
+						fz_caught(ctx), "%s\n%s", __func__,
+						fz_caught_message(ctx));
+
+			return -1;
+		}
+
+		return 1;
+	}
+
+	return 0;
+}
+
+static fz_buffer* sond_file_part_pdf_mod_emb_file(SondFilePartPDF* sfp_pdf,
+		fz_context* ctx, gchar const* path, fz_buffer* buf, GError** error) {
+	pdf_document* doc = NULL;
+	gint rc = 0;
+	Modify modify = { path, buf };
+	pdf_obj* embedded_files_dict = NULL;
+	fz_buffer* buf_out = NULL;
+
+	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, error);
+	if (!doc)
+		ERROR_Z_VAL(NULL)
+
+	//mod embedded file
+	rc = pdf_get_names_tree_dict(ctx, doc, PDF_NAME(EmbeddedFiles),
+			&embedded_files_dict, error);
+	if (rc) {
+		pdf_drop_document(ctx, doc);
+		ERROR_Z_VAL(NULL)
+	}
+
+	rc = pdf_walk_names_dict(ctx, embedded_files_dict, NULL,
+			modify_embedded_file, &modify, error);
+	if (rc != 1) {
+		pdf_drop_document(ctx, doc); //stream hält (hoffentlich) ref auf doc
+		if (rc == -1)
+			ERROR_Z_VAL(NULL)
+		else if (rc == 0) {
+			if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\nnicht gefunden", __func__);
+
+			return NULL;
+		}
+	}
+
+	//write pdf to other buffer
+	buf_out = pdf_doc_to_buf(ctx, doc, error);
+	pdf_drop_document(ctx, doc);
+	if (!buf_out)
+		ERROR_Z_VAL(NULL)
+
+	return buf_out;
+}
+
+static fz_buffer* sond_file_part_pdf_delete_emb_file(SondFilePartPDF* sfp_pdf,
+		fz_context* ctx, gchar const* path, GError** error) {
+	pdf_document* doc = NULL;
+	fz_buffer* buf = NULL;
+
+	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, error);
+	if (!doc)
+		ERROR_Z_VAL(NULL)
+
+	//delete embedded file
+
+	//write pdf to other buffer
+	buf = pdf_doc_to_buf(ctx, doc, error);
+	pdf_drop_document(ctx, doc);
+	if (!buf)
+		ERROR_Z_VAL(NULL)
+
+	return buf;
 }
 
 /*

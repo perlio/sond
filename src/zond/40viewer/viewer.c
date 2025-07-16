@@ -872,14 +872,9 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd, GError** err
 	zond_pdf_document_mutex_unlock(dd->zond_pdf_document);
 	zond_pdf_document_set_ocr_num(dd->zond_pdf_document, 0);
 	if (rc) {
+#ifndef VIEWER
 		gint ret = 0;
 		GError* error_int = NULL;
-
-		if (error) *error = g_error_new( g_quark_from_static_string("mupdf"),
-				fz_caught(zond_pdf_document_get_ctx(dd->zond_pdf_document)),
-				"%s\n%s", __func__,
-				fz_caught_message(zond_pdf_document_get_ctx(dd->zond_pdf_document)));
-#ifndef VIEWER
 		ret = dbase_zond_rollback(pv->zond->dbase_zond, &error_int);
 		if (ret) {
 			if (error) (*error)->message = add_string((*error)->message, g_strdup(error_int->message));
@@ -893,8 +888,8 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd, GError** err
 
 	rc = dbase_zond_commit(pv->zond->dbase_zond, error);
 	if (rc) {
-		g_prefix_error(error, "%s\n", __func__);
 #endif //VIEWER
+		g_prefix_error(error, "%s\n", __func__);
 
 		return -6;
 	}
@@ -2325,8 +2320,6 @@ static gint viewer_annot_create(ViewerPageNew *viewer_page, gchar **errmsg) {
 		return -1;
 	}
 
-	pdf_update_page(ctx, viewer_page->pdf_document_page->page);
-
 	pdf_document_page_annot = g_malloc0(sizeof(PdfDocumentPageAnnot));
 	pdf_document_page_annot->pdf_document_page = viewer_page->pdf_document_page;
 	pdf_document_page_annot->zond_annot_obj = zond_annot_obj_new(pdf_annot_obj(ctx, pdf_annot));
@@ -2334,7 +2327,6 @@ static gint viewer_annot_create(ViewerPageNew *viewer_page, gchar **errmsg) {
 
 	g_ptr_array_add(viewer_page->pdf_document_page->arr_annots,
 			pdf_document_page_annot);
-
 
 	fz_drop_display_list(
 			zond_pdf_document_get_ctx(

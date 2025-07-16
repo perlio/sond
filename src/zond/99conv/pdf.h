@@ -37,6 +37,8 @@ gint pdf_open_and_authen_document(fz_context*, gboolean, gboolean, SondFilePartP
 
 gint pdf_save(fz_context*, pdf_document*, SondFilePartPDF*, GError**);
 
+fz_buffer* pdf_doc_to_buf(fz_context*, pdf_document*, GError**);
+
 gint pdf_clean(fz_context*, SondFilePartPDF*, GError**);
 
 gchar* pdf_get_string_from_line(fz_context*, fz_stext_line*, gchar**);
