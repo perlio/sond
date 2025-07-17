@@ -863,13 +863,12 @@ gint pdf_get_names_tree_dict(fz_context* ctx, pdf_document* doc,
 
 gint
 pdf_walk_names_dict(fz_context* ctx, pdf_obj *node, pdf_cycle_list *cycle_up,
-		gint (*callback_walk) (fz_context*, pdf_obj*, gchar const*,
+		gint (*callback_walk) (fz_context*, pdf_obj*, pdf_obj*,
 				gpointer, GError**), gpointer data, GError** error)
 {
 	pdf_cycle_list cycle;
 	pdf_obj *kids = NULL;
 	pdf_obj *names = NULL;
-	int i;
 	gboolean is_cycle = FALSE;
 
 	fz_try(ctx)
@@ -904,7 +903,7 @@ pdf_walk_names_dict(fz_context* ctx, pdf_obj *node, pdf_cycle_list *cycle_up,
 			return -1;
 		}
 
-		for (i = 0; i < len; i++) {
+		for (gint i = 0; i < len; i++) {
 			gint rc = 0;
 
 			rc = pdf_walk_names_dict(ctx, pdf_array_get(ctx, kids, i),
@@ -932,50 +931,26 @@ pdf_walk_names_dict(fz_context* ctx, pdf_obj *node, pdf_cycle_list *cycle_up,
 			return -1;
 		}
 
-		for (i = 0; i + 1 < len; i += 2)
+		for (gint i = 0; i + 1 < len; i++)
 		{
-			pdf_obj* EF_F = NULL;
-			gchar const* path = NULL;
 			gint rc = 0;
+			pdf_obj* key = NULL;
+			pdf_obj* val = NULL;
 
 			fz_try(ctx) {
-	//			pdf_obj *key = pdf_array_get(ctx, names, i);
-				pdf_obj *val = pdf_array_get(ctx, names, i + 1);
-
-				if (pdf_is_dict(ctx, val))
-				{
-					pdf_obj* F = NULL;
-					pdf_obj* UF = NULL;
-					pdf_obj* EF = NULL;
-
-					EF = pdf_dict_get(ctx, val, PDF_NAME(EF));
-					EF_F = pdf_dict_get(ctx, EF, PDF_NAME(F));
-					F = pdf_dict_get(ctx, val, PDF_NAME(F));
-					UF = pdf_dict_get(ctx, val, PDF_NAME(UF));
-
-					if (pdf_is_string(ctx, UF))
-						path = pdf_to_text_string(ctx, UF);
-					else if (pdf_is_string(ctx, F))
-						path = pdf_to_text_string(ctx, F);
-				}
+				key = pdf_array_get(ctx, names, i);
+				val = pdf_array_get(ctx, names, i + 1);
 			}
 			fz_catch(ctx) {
-				if (error)
-					*error = g_error_new(g_quark_from_static_string("mupdf"),
-							fz_caught(ctx), "%s\n%s", __func__,
-							fz_caught_message(ctx));
+				if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
+						fz_caught(ctx), "%s\n%s", __func__,
+						fz_caught_message(ctx));
 
 				return -1;
 			}
 
-			if (!path) {
-				if (error)
-					*error = g_error_new(ZOND_ERROR, 0, "%s\nEingebettete Datei hat keinen Pfad",
-							__func__);
-				return -1;
-			}
 
-			rc = callback_walk(ctx, EF_F, path, data, error);
+			rc = callback_walk(ctx, key, val, data, error);
 			if (rc == -1)
 				ERROR_Z
 			else if (rc == 1)
@@ -985,4 +960,160 @@ pdf_walk_names_dict(fz_context* ctx, pdf_obj *node, pdf_cycle_list *cycle_up,
 
 	return 0;
 }
+/*
+// Vergleicht zwei PDF-Strings
+int compare_pdf_strings(fz_context *ctx, pdf_obj *a, const char *b)
+{
+    const char *astr = pdf_to_str_buf(ctx, a);
+    return strcmp(astr, b);
+}
 
+// Fügt (key, value) sortiert in ein /Names-Array ein
+void insert_sorted_into_names_array(fz_context *ctx, pdf_document *doc, pdf_obj *array, const char *key, pdf_obj *value)
+{
+    int n = pdf_array_len(ctx, array);
+    pdf_obj *new_key = pdf_new_string(ctx, doc, key, strlen(key));
+
+    // Suche die richtige Stelle zum Einfügen
+    for (int i = 0; i < n; i += 2) {
+        pdf_obj *entry_key = pdf_array_get(ctx, array, i);
+        if (compare_pdf_strings(ctx, entry_key, key) > 0) {
+            pdf_array_insert(ctx, array, i, value);
+            pdf_array_insert(ctx, array, i, new_key);
+            return;
+        }
+    }
+
+    // Wenn wir hier sind: hinten anhängen
+    pdf_array_push(ctx, array, new_key);
+    pdf_array_push(ctx, array, value);
+}
+
+// Aktualisiert /Limits eines Leaf-Nodes nach Hinzufügen eines Keys
+static void update_limits(fz_context *ctx, pdf_document *doc, pdf_obj *leaf, const char *key)
+{
+    pdf_obj *limits = pdf_dict_gets(ctx, leaf, "Limits");
+
+    if (!limits || !pdf_is_array(ctx, limits) || pdf_array_len(ctx, limits) != 2) {
+        limits = pdf_new_array(ctx, doc, 2);
+        pdf_array_push(ctx, limits, pdf_new_string(ctx, doc, key, strlen(key)));
+        pdf_array_push(ctx, limits, pdf_new_string(ctx, doc, key, strlen(key)));
+        pdf_dict_puts(ctx, leaf, "Limits", limits);
+        return;
+    }
+
+    pdf_obj *min = pdf_array_get(ctx, limits, 0);
+    pdf_obj *max = pdf_array_get(ctx, limits, 1);
+
+    if (compare_pdf_strings(ctx, min, key) > 0)
+        pdf_array_put(ctx, limits, 0, pdf_new_string(ctx, doc, key, strlen(key)));
+
+    if (compare_pdf_strings(ctx, max, key) < 0)
+        pdf_array_put(ctx, limits, 1, pdf_new_string(ctx, doc, key, strlen(key)));
+}
+
+// Fügt in einen bestehenden Leaf-Node ein
+void insert_into_leaf_node(fz_context *ctx, pdf_document *doc, pdf_obj *leaf, const char *key, pdf_obj *value)
+{
+    pdf_obj *names = pdf_dict_gets(ctx, leaf, "Names");
+    if (!names || !pdf_is_array(ctx, names)) {
+        names = pdf_new_array(ctx, doc, 2);
+        pdf_dict_puts(ctx, leaf, "Names", names);
+    }
+
+    insert_sorted_into_names_array(ctx, doc, names, key, value);
+    update_limits(ctx, doc, leaf, key);
+}
+
+// Erstellt neuen Leaf-Node mit diesem Key/Value
+static pdf_obj* create_leaf_node(fz_context *ctx, pdf_document *doc, const char *key, pdf_obj *value)
+{
+    pdf_obj *leaf = pdf_new_dict(ctx, doc, 2);
+    pdf_obj *names = pdf_new_array(ctx, doc, 2);
+    pdf_array_push(ctx, names, pdf_new_string(ctx, doc, key, strlen(key)));
+    pdf_array_push(ctx, names, value);
+    pdf_dict_puts(ctx, leaf, "Names", names);
+
+    pdf_obj *limits = pdf_new_array(ctx, doc, 2);
+    pdf_array_push(ctx, limits, pdf_new_string(ctx, doc, key, strlen(key)));
+    pdf_array_push(ctx, limits, pdf_new_string(ctx, doc, key, strlen(key)));
+    pdf_dict_puts(ctx, leaf, "Limits", limits);
+
+    return leaf;
+}
+
+// Hauptfunktion: trägt (key, value) korrekt in den Nametree ein
+gint pdf_insert_into_nametree(fz_context *ctx, pdf_document *doc,
+		pdf_obj *nametree, const char *key, pdf_obj *value, GError **error) {
+    pdf_obj *names = NULL;
+
+    fz_try(ctx)
+    	names = pdf_dict_gets(ctx, nametree, "Names");
+    fz_catch(ctx)
+    	ERROR_PDF
+
+    if (names) {
+    	gboolean is_array = FALSE;
+
+    	fz_try(ctx)
+    		is_array = pdf_is_array(ctx, names);
+    	fz_catch(ctx)
+    		ERROR_PDF
+
+    	if (is_array) {
+    		gint rc = 0;
+
+    		rc = insert_sorted_into_names_array(ctx, doc, names, key, value, error);
+    		if (rc)
+    			ERROR_Z
+
+			rc = update_limits(ctx, doc, nametree, key, error);
+    		if (rc)
+				ERROR_Z
+
+			return 0;
+    	}
+    	else {
+    		if (error) *error_ = g_error_new(g_quark_from_static_string("sond"),
+					0, "%s\ntree malformed", __func__);
+
+    		return -1;
+    	}
+    }
+
+    // Kein /Names → vielleicht /Kids
+    pdf_obj *kids = pdf_dict_gets(ctx, nametree, "Kids");
+    if (!kids || !pdf_is_array(ctx, kids)) {
+        // Kein /Kids → neuen Leaf-Node direkt einfügen
+        pdf_obj *leaf = create_leaf_node(ctx, doc, key, value);
+        kids = pdf_new_array(ctx, doc, 1);
+        pdf_array_push(ctx, kids, leaf);
+        pdf_dict_puts(ctx, nametree, "Kids", kids);
+        return;
+    }
+
+    // Suche passenden Kid
+    int n = pdf_array_len(ctx, kids);
+    for (int i = 0; i < n; ++i) {
+        pdf_obj *kid = pdf_array_get(ctx, kids, i);
+        pdf_obj *limits = pdf_dict_gets(ctx, kid, "Limits");
+
+        if (!limits || !pdf_is_array(ctx, limits) || pdf_array_len(ctx, limits) != 2) {
+            insert_into_leaf_node(ctx, doc, kid, key, value);
+            return;
+        }
+
+        const char *min = pdf_to_str_buf(ctx, pdf_array_get(ctx, limits, 0));
+        const char *max = pdf_to_str_buf(ctx, pdf_array_get(ctx, limits, 1));
+
+        if (strcmp(key, min) >= 0 && strcmp(key, max) <= 0) {
+            insert_into_leaf_node(ctx, doc, kid, key, value);
+            return;
+        }
+    }
+
+    // Kein passender Kid → neuen Leaf anlegen
+    pdf_obj *new_leaf = create_leaf_node(ctx, doc, key, value);
+    pdf_array_push(ctx, kids, new_leaf);
+}
+*/

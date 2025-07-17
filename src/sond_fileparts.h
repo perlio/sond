@@ -39,11 +39,12 @@ struct _SondFilePartClass {
 	GPtrArray* (*get_arr_opened_files)(SondFilePart*);
 };
 
+SondFilePart* sond_file_part_create_from_content_type(gchar const* path,
+		SondFilePart*, gchar const*);
+
 SondFilePart* sond_file_part_get_parent(SondFilePart *);
 
 gchar const* sond_file_part_get_path(SondFilePart *);
-
-gint sond_file_part_load_children(SondFilePart*, GPtrArray**, GError**);
 
 gboolean sond_file_part_has_children(SondFilePart*);
 
@@ -71,9 +72,6 @@ struct _SondFilePartErrorClass {
 	SondFilePartClass parent_class;
 };
 
-SondFilePartError* sond_file_part_error_create(gchar const*,
-		SondFilePart*, GError*);
-
 GError* sond_file_part_error_get_error(SondFilePartError*);
 
 //SondFilePartZip definieren
@@ -84,8 +82,6 @@ G_DECLARE_DERIVABLE_TYPE(SondFilePartZip, sond_file_part_zip, SOND,
 struct _SondFilePartZipClass {
 	SondFilePartClass parent_class;
 };
-
-SondFilePartZip* sond_file_part_zip_create(gchar const*, SondFilePart*);
 
 //Sond_File_Part_PDF definieren
 #define SOND_TYPE_FILE_PART_PDF sond_file_part_pdf_get_type( )
@@ -98,8 +94,6 @@ struct _SondFilePartPDFClass {
 
 gint sond_file_part_pdf_load_embedded_files(SondFilePartPDF*, GPtrArray**, GError**);
 
-SondFilePartPDF* sond_file_part_pdf_create(gchar const*, SondFilePart*, GError**);
-
 //Sond_File_Part_Leaf definieren
 #define SOND_TYPE_FILE_PART_LEAF sond_file_part_leaf_get_type( )
 G_DECLARE_DERIVABLE_TYPE(SondFilePartLeaf, sond_file_part_leaf, SOND,
@@ -109,11 +103,7 @@ struct _SondFilePartLeafClass {
 	SondFilePartClass parent_class;
 };
 
-SondFilePartLeaf* sond_file_part_leaf_create(gchar const*, SondFilePart*, gchar const*);
-
 gchar const* sond_file_part_leaf_get_content_type(SondFilePartLeaf*);
-
-void sond_file_part_leaf_set_content_type(SondFilePartLeaf*, gchar const*);
 
 G_END_DECLS
 

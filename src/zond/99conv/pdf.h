@@ -16,6 +16,13 @@
 
 #define ERROR_MUPDF(x) ERROR_MUPDF_R(x,-1)
 
+#define ERROR_PDF_VAL(x,y) { if (error) *error = g_error_new(); \
+						g_quark_from_static_string("mupdf"), fz_caught(ctx), \
+						"%s\n%s", __func__, fz_caught_message(ctx)); \
+						return y; }
+
+#define ERROR_PDF(x) ERROR_PDF_VAL(x,-1)
+
 typedef struct _Projekt Projekt;
 typedef struct _Pdf_Document_Page PdfDocumentPage;
 typedef int gint;
@@ -64,7 +71,7 @@ gint pdf_get_names_tree_dict(fz_context*, pdf_document*,
 		pdf_obj*, pdf_obj**, GError**);
 
 gint pdf_walk_names_dict(fz_context*, pdf_obj*, pdf_cycle_list*,
-		gint (*) (fz_context*, pdf_obj*, gchar const*,
-				gpointer, GError**), gpointer, GError**);
+		gint (*) (fz_context*, pdf_obj*, pdf_obj*, gpointer, GError**),
+		gpointer, GError**);
 
 #endif // PDF_DATEIEN_H_INCLUDED
