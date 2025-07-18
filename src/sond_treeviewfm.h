@@ -73,8 +73,6 @@ gchar* sond_treeviewfm_get_filepart(SondTreeviewFM*, GtkTreeIter*);
 
 gchar* sond_treeviewfm_get_rel_path(SondTreeviewFM*, GtkTreeIter*);
 
-gint sond_treeviewfm_paste_clipboard(SondTreeviewFM*, gboolean, gchar**);
-
 G_END_DECLS
 
 #endif // SOND_TREEVIEWFM_H_INCLUDED
