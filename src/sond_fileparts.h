@@ -48,9 +48,13 @@ gchar const* sond_file_part_get_path(SondFilePart *);
 
 gboolean sond_file_part_has_children(SondFilePart*);
 
+GPtrArray* sond_file_part_get_arr_opened_files(SondFilePart*);
+
 fz_stream* sond_file_part_get_istream(fz_context*, SondFilePart*, gboolean, GError**);
 
 gchar* sond_file_part_write_to_tmp_file(SondFilePart*, GError**);
+
+gint sond_file_part_open(SondFilePart*, gboolean, GError**);
 
 gchar* sond_file_part_get_filepart(SondFilePart*);
 

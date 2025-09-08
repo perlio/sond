@@ -148,7 +148,7 @@ gint pdf_open_and_authen_document(fz_context *ctx, gboolean prompt,
 						fz_caught(ctx), "%s\n%s", __func__,
 						fz_caught_message(ctx));
 
-			if (remove(filename))
+			if (g_remove(filename))
 				g_warning("%s\nArbeitskopie '%s' konnte nicht gelöscht werden\n%s",
 							__func__, filename, strerror(errno));
 
@@ -176,7 +176,7 @@ gint pdf_open_and_authen_document(fz_context *ctx, gboolean prompt,
 			break;
 		} else if (!prompt) {
 			if (!read_only)
-				if (remove(fz_stream_filename(ctx, doc_tmp->file)))
+				if (g_remove(fz_stream_filename(ctx, doc_tmp->file)))
 					g_warning("%s\nArbeitskopie '%s' konnte nicht gelöscht werden\n"
 							"%s", __func__, fz_stream_filename(ctx, doc_tmp->file), strerror( errno));
 
@@ -192,7 +192,7 @@ gint pdf_open_and_authen_document(fz_context *ctx, gboolean prompt,
 		if (res_dialog != GTK_RESPONSE_OK) {
 
 			if (!read_only)
-				if (remove(fz_stream_filename(ctx, doc_tmp->file)))
+				if (g_remove(fz_stream_filename(ctx, doc_tmp->file)))
 					g_warning("%s\nArbeitskopie '%s' konnte nicht gelöscht werden\n"
 								"Fehlermeldung: %s", __func__, fz_stream_filename(ctx, doc_tmp->file),
 								strerror( errno));
@@ -315,7 +315,7 @@ gint pdf_clean(fz_context *ctx, SondFilePartPDF* sfp_pdf, GError **error) {
 
 		pdf_drop_document(ctx, doc);
 		g_object_unref(sfp_pdf);
-		ret = remove(path_tmp);
+		ret = g_remove(path_tmp);
 		if (ret)
 			g_warning("%s\nArbeitskopie '%s' konnte nicht gelöscht werden\n"
 					"%s", __func__, path_tmp, strerror(errno));
@@ -331,7 +331,7 @@ gint pdf_clean(fz_context *ctx, SondFilePartPDF* sfp_pdf, GError **error) {
 	rc = pdf_save(ctx, doc, sfp_pdf, error);
 	pdf_drop_document(ctx, doc);
 	g_object_unref(sfp_pdf);
-	ret = remove(path_tmp);
+	ret = g_remove(path_tmp);
 	if (ret)
 		g_warning("%s\nArbeitskopie '%s' konnte nicht gelöscht werden\n"
 				"%s", __func__, path_tmp, strerror(errno));

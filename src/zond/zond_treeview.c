@@ -2658,31 +2658,14 @@ static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 	}
 
 	//mit externem Programm öffnen
-	if (open_with || !SOND_IS_FILE_PART_PDF(sfp)) { //wenn kein pdf oder mit Programmauswahl zu öffnen:
-		gint rc = 0;
-		gchar* filename = NULL;
-
-		g_free(section);
-		g_object_unref(sfp);
-
-		filename = sond_file_part_write_to_tmp_file(sfp, error);
-		if (!filename)
-			ERROR_Z
-
-		rc = misc_datei_oeffnen(filename, open_with, error);
-		g_free(filename);
-		if (rc)
-			ERROR_Z
-
-		return 0;
-	}
-
-	rc = zond_treeview_open_pdf(zond, node_id, SOND_FILE_PART_PDF(sfp), section, error);
+	if (open_with || !SOND_IS_FILE_PART_PDF(sfp)) //wenn kein pdf oder mit Programmauswahl zu öffnen:
+		rc = sond_file_part_open(sfp, open_with, error);
+	else //internen Viewer verwenden
+		rc = zond_treeview_open_pdf(zond, node_id, SOND_FILE_PART_PDF(sfp), section, error);
 	g_free(section);
-	if (rc) {
-		g_object_unref(sfp);
+	g_object_unref(sfp);
+	if (rc)
 		ERROR_Z
-	}
 
 	return 0;
 }

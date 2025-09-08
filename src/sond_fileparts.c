@@ -18,6 +18,11 @@
 
 #include "sond_fileparts.h"
 
+#ifdef __WIN32
+#include <windows.h>
+#include <shellapi.h>
+#endif // __WIN32
+
 #include <glib-object.h>
 #include <glib/gstdio.h>
 #include <zip.h>
@@ -209,6 +214,19 @@ gboolean sond_file_part_has_children(SondFilePart *sfp) {
 		has_children = SOND_FILE_PART_GET_CLASS(sfp)->has_children(sfp);
 
 	return has_children;
+}
+
+GPtrArray* sond_file_part_get_arr_opened_files(SondFilePart* sfp) {
+	GPtrArray* arr_opened_files = NULL;
+
+	if (!sfp) //NULL = Filesystem
+		arr_opened_files = SOND_FILE_PART_CLASS(g_type_class_peek(
+				SOND_TYPE_FILE_PART))->arr_opened_files;
+	else if (SOND_FILE_PART_GET_CLASS(sfp)->get_arr_opened_files)
+		arr_opened_files = SOND_FILE_PART_GET_CLASS(sfp)->get_arr_opened_files(sfp);
+
+	//gibt NULL zurück, wenn sfp gar keine haben kann; sonst ggf. leeres Array
+	return arr_opened_files;
 }
 
 gchar* sond_file_part_get_filepart(SondFilePart* sfp) {
@@ -485,6 +503,76 @@ gchar* sond_file_part_write_to_tmp_file(SondFilePart* sfp, GError **error) {
 	fz_drop_context(ctx);
 
 	return filename;
+}
+
+static gint open_path(const gchar *path, gboolean open_with, GError **error) {
+#ifdef _WIN32
+    // Pfad von UTF-8 → UTF-16
+    wchar_t *local_filename = g_utf8_to_utf16(path, -1, NULL, NULL, error);
+    if (!local_filename)
+    	ERROR_Z
+
+    SHELLEXECUTEINFOW sei = { sizeof(sei) };
+    sei.nShow = SW_SHOWNORMAL;
+    sei.lpVerb = open_with ? L"openas" : NULL;
+    sei.lpFile = local_filename;
+    sei.fMask = SEE_MASK_INVOKEIDLIST;
+
+    BOOL ret = ShellExecuteExW(&sei);
+    g_free(local_filename);
+
+    if (!ret) {
+        if (error) {
+            DWORD dw = GetLastError();
+            LPWSTR lpMsgBuf = NULL;
+            FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                           NULL, dw, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                           (LPWSTR)&lpMsgBuf, 0, NULL);
+            gchar *msg_utf8 = g_utf16_to_utf8(lpMsgBuf, -1, NULL, NULL, NULL);
+            *error = g_error_new(g_quark_from_static_string("WinApi"), dw,
+                                 "ShellExecuteExW failed: %s", msg_utf8);
+            g_free(msg_utf8);
+            LocalFree(lpMsgBuf);
+        }
+        return -1;
+    }
+    return 0;
+
+#elif defined(__APPLE__)
+    // macOS: "open" benutzen
+    gchar *cmdline = g_strdup_printf("open \"%s\"", path);
+    gboolean ret = g_spawn_command_line_async(cmdline, error);
+    g_free(cmdline);
+    return (ret) ? 0 : -1;
+
+#else
+    // Linux / Unix: "xdg-open" oder "gio open"
+    gchar *cmdline = g_strdup_printf("xdg-open \"%s\"", path);
+    gboolean ret = g_spawn_command_line_async(cmdline, error);
+    g_free(cmdline);
+    return (ret) ? 0 : -1;
+#endif
+}
+
+gint sond_file_part_open(SondFilePart* sfp, gboolean open_with,
+		GError** error) {
+	gchar* path = NULL;
+	gint rc = 0;
+
+	if (!sond_file_part_get_parent(sfp)) { //Datei im Filesystem
+		path = g_strconcat(SOND_FILE_PART_GET_CLASS(sfp)->path_root, "/",
+				sond_file_part_get_path(sfp), NULL);
+		rc = open_path(path, open_with, error);
+	}
+	else { //Datei in zip/pdf/gmessage
+		path = sond_file_part_write_to_tmp_file(sfp, error);
+		rc = open_path(path, open_with, error);
+	}
+	g_free(path);
+	if (rc)
+		ERROR_Z
+
+	return 0;
 }
 
 static fz_buffer* sond_file_part_pdf_mod_emb_file(SondFilePartPDF*, fz_context*,

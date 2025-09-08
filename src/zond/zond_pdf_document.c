@@ -169,7 +169,7 @@ static void zond_pdf_document_finalize(GObject *self) {
 		if (!priv->read_only) {
 			gint ret = 0;
 
-			ret = remove(path);
+			ret = g_remove(path);
 			if (ret)
 				g_warning("%s\nArbeitskopie %s konnte nicht gelöscht werden\n%s",
 						__func__, path, strerror(errno));

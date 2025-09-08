@@ -19,6 +19,7 @@
 #include "misc.h"
 
 #include <gtk/gtk.h>
+#include <gio/gio.h>
 #include <glib/gstdio.h>
 #include <errno.h>
 #include <sys/stat.h>
