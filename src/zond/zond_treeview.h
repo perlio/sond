@@ -15,8 +15,7 @@ typedef int gint;
 G_BEGIN_DECLS
 
 #define ZOND_TYPE_TREEVIEW zond_treeview_get_type( )
-G_DECLARE_DERIVABLE_TYPE(ZondTreeview, zond_treeview, ZOND, TREEVIEW,
-		SondTreeview)
+G_DECLARE_DERIVABLE_TYPE(ZondTreeview, zond_treeview, ZOND, TREEVIEW, SondTreeview)
 
 struct _ZondTreeviewClass {
 	SondTreeviewClass parent_class;

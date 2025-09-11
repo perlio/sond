@@ -120,7 +120,7 @@ static SondFilePart* sond_file_part_create(GType sfp_type, const gchar *path,
 	if (!parent)
 		arr_opened_files = SOND_FILE_PART_CLASS(g_type_class_peek(
 				SOND_TYPE_FILE_PART))->arr_opened_files;
-	else if (parent && SOND_FILE_PART_GET_CLASS(parent)->get_arr_opened_files)
+	else if (SOND_FILE_PART_GET_CLASS(parent)->get_arr_opened_files)
 		arr_opened_files = SOND_FILE_PART_GET_CLASS(parent)->get_arr_opened_files(parent);
 
 	if (arr_opened_files)
@@ -201,10 +201,46 @@ SondFilePart* sond_file_part_get_parent(SondFilePart *sfp) {
 	return sfp_priv->parent;
 }
 
+void sond_file_part_set_parent(SondFilePart *sfp, SondFilePart* parent) {
+	SondFilePartPrivate *sfp_priv = sond_file_part_get_instance_private(sfp);
+	GPtrArray* arr_opened_files = NULL;
+
+	arr_opened_files = sond_file_part_get_arr_opened_files(sfp);
+
+	if (arr_opened_files)
+		g_ptr_array_remove_fast(arr_opened_files, sfp);
+
+	arr_opened_files = NULL;
+
+	if (sfp_priv->parent)
+		g_object_unref(sfp_priv->parent);
+
+	arr_opened_files = sond_file_part_get_arr_opened_files(parent);
+
+	if (parent)
+		sfp_priv->parent = SOND_FILE_PART(g_object_ref(parent));
+	else
+		sfp_priv->parent = NULL;
+
+	if (arr_opened_files)
+		g_ptr_array_add(arr_opened_files, sfp);
+
+	return;
+}
+
 gchar const* sond_file_part_get_path(SondFilePart *sfp) {
 	SondFilePartPrivate *sfp_priv = sond_file_part_get_instance_private(sfp);
 
 	return sfp_priv->path;
+}
+
+void sond_file_part_set_path(SondFilePart *sfp, const gchar *path) {
+	SondFilePartPrivate *sfp_priv = sond_file_part_get_instance_private(sfp);
+
+	g_free(sfp_priv->path);
+	sfp_priv->path = g_strdup(path);
+
+	return;
 }
 
 gboolean sond_file_part_has_children(SondFilePart *sfp) {

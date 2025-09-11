@@ -44,7 +44,11 @@ SondFilePart* sond_file_part_create_from_content_type(gchar const* path,
 
 SondFilePart* sond_file_part_get_parent(SondFilePart *);
 
+void sond_file_part_set_parent(SondFilePart*, SondFilePart*);
+
 gchar const* sond_file_part_get_path(SondFilePart *);
+
+void sond_file_part_set_path(SondFilePart*, const gchar*);
 
 gboolean sond_file_part_has_children(SondFilePart*);
 

@@ -49,8 +49,7 @@ G_BEGIN_DECLS
 
 //ZOND_TYPE_TREEVIEWFM definieren
 #define ZOND_TYPE_TREEVIEWFM zond_treeviewfm_get_type( )
-G_DECLARE_DERIVABLE_TYPE(ZondTreeviewFM, zond_treeviewfm, ZOND, TREEVIEWFM,
-		SondTreeviewFM)
+G_DECLARE_DERIVABLE_TYPE(ZondTreeviewFM, zond_treeviewfm, ZOND, TREEVIEWFM, SondTreeviewFM)
 
 struct _ZondTreeviewFMClass {
 	SondTreeviewFMClass parent_class;

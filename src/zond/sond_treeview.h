@@ -7,8 +7,7 @@
 G_BEGIN_DECLS
 
 #define SOND_TYPE_TREEVIEW sond_treeview_get_type( )
-G_DECLARE_DERIVABLE_TYPE(SondTreeview, sond_treeview, SOND, TREEVIEW,
-		GtkTreeView)
+G_DECLARE_DERIVABLE_TYPE(SondTreeview, sond_treeview, SOND, TREEVIEW, GtkTreeView)
 
 typedef struct _Clipboard {
 	SondTreeview *tree_view;
