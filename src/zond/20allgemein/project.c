@@ -38,37 +38,21 @@
 
 #include "project.h"
 
-/**	Rückgabe:
- * 	0: 	alles i.O.
- * 	-1:	BEGIN dbase_store fehlgeschlagen
- * 		oder: dbase_work fehlgeschlagen - dann aber ROLLBACK dbase_store -normaler Fehler
- * 	-2: BEGIN dbase_work fehlgeschlagen - kein ROLLBACK dbase_store möglich - schlecht
- */
-gint dbase_zond_begin(DBaseZond* dbase_zond, GError** error) {
+static gint dbase_zond_attach(DBaseZond* dbase_zond, GError** error) {
 	gint rc = 0;
+	gchar* sql = NULL;
+	gchar* errmsg = NULL;
 
-	rc = zond_dbase_begin(dbase_zond->zond_dbase_store, error);
+	//zuerst zond_dbase_store, dann zond_dbase_work
+	//dbase_work attachen, um gemeinsame Transaktionen zu ermöglichen
+	sql = g_strdup_printf("ATTACH DATABASE '%s' AS work;",
+			zond_dbase_get_path(dbase_zond->zond_dbase_work));
+	rc = sqlite3_exec(zond_dbase_get_dbase(dbase_zond->zond_dbase_store), sql, NULL, NULL, &errmsg);
+	g_free(sql);
 	if (rc) {
-		g_prefix_error(error, "%s\nzond_dbase_store: ", __func__);
-
-		return -1;
-	}
-
-	rc = zond_dbase_begin(dbase_zond->zond_dbase_work, error);
-	if (rc) {
-		GError* error_int = NULL;
-		gint ret = 0;
-
-		g_prefix_error(error, "%s\nzond_dbase_work: ", __func__);
-
-		ret = zond_dbase_rollback(dbase_zond->zond_dbase_work, &error_int);
-		if (ret) {
-			(*error)->message = add_string((*error)->message,
-					g_strdup_printf("\n\nRollback zond_dbase_store fehlgeschlagen:\n%s", error_int->message));
-			g_error_free(error_int);
-
-			return -2;
-		}
+		if (error) *error = g_error_new(g_quark_from_static_string("SQLITE3"),
+				rc, "%s\n%s", __func__, errmsg);
+		sqlite3_free(errmsg);
 
 		return -1;
 	}
@@ -76,67 +60,38 @@ gint dbase_zond_begin(DBaseZond* dbase_zond, GError** error) {
 	return 0;
 }
 
-/**	Rückgabe:
- * 	0:	alles i.O.
- * 	-1:	ein ROLLBACK fehlgeschlagen
- * 	-2: beide ROLLBACKs fehlgeschlagen
- */
+gint dbase_zond_begin(DBaseZond* dbase_zond, GError** error) {
+	gint rc = 0;
+
+	rc = zond_dbase_begin(dbase_zond->zond_dbase_store, error);
+	if (rc)
+		ERROR_Z
+
+	return 0;
+}
+
 gint dbase_zond_rollback(DBaseZond* dbase_zond, GError** error) {
-	gint ret1 = 0;
-	gint ret2 = 0;
-	GError* error_int1 = NULL;
-	GError* error_int2 = NULL;
-	gchar* errmsg = NULL;
+	gint rc = 0;
 
-	ret1 = zond_dbase_rollback(dbase_zond->zond_dbase_store, &error_int1);
-	ret2 = zond_dbase_rollback(dbase_zond->zond_dbase_work, &error_int2);
-	if (ret1) {
-		errmsg = g_strdup_printf("%s\nRollback zond_dbase_store fehlgeschlagen:\n%s",
-				__func__, error_int1->message);
-		if (ret2) errmsg = add_string(errmsg, g_strdup("\n"));
-	}
+	rc = zond_dbase_rollback(dbase_zond->zond_dbase_store, error);
+	if (rc)
+		ERROR_Z
 
-	if (ret2)
-		errmsg = add_string(errmsg,
-				g_strdup_printf("%s\nRollback zond_dbase_work fehlgeschlagen:\n%s",
-				__func__, error_int1->message));
-
-	return ret1 + ret2;
+	return 0;
 }
 
-/**	Rückgabe:
- * 	0:	alles i.O.
- * 	-1:	ein COMMIT fehlgeschlagen
- * 	-2: beide COMMITs fehlgeschlagen
- */
 gint dbase_zond_commit(DBaseZond* dbase_zond, GError** error) {
-	gint ret1 = 0;
-	gint ret2 = 0;
-	GError* error_int1 = NULL;
-	GError* error_int2 = NULL;
-	gchar* errmsg = NULL;
+	gint rc = 0;
 
-	ret1 = zond_dbase_commit(dbase_zond->zond_dbase_store, &error_int1);
-	ret2 = zond_dbase_commit(dbase_zond->zond_dbase_work, &error_int2);
-	if (ret1) {
-		errmsg = g_strdup_printf("%s\nCommit zond_dbase_store fehlgeschlagen:\n%s",
-				__func__, error_int1->message);
-		if (ret2) errmsg = add_string(errmsg, g_strdup("\n\n"));
-	}
+	rc = zond_dbase_commit(dbase_zond->zond_dbase_store, error);
+	if (rc)
+		ERROR_Z
 
-	if (ret2)
-		errmsg = add_string(errmsg,
-				g_strdup_printf("%s\nCommit zond_dbase_work fehlgeschlagen:\n%s",
-				__func__, error_int1->message));
-
-	if ((ret1 || ret2) && error) *error = g_error_new(ZOND_ERROR, 0, "%s\n%s", __func__, errmsg);
-	g_free(errmsg);
-
-	return ret1 + ret2;
+	return 0;
 }
 
-static gint dbase_zond_anpassen_anbindung(ZondDBase* zond_dbase, ZondPdfDocument* zpdfd,
-		GArray* arr_sections, GError** error) {
+static gint dbase_zond_anpassen_anbindung(DBaseZond* dbase_zond, gint attached,
+		ZondPdfDocument* zpdfd, GArray* arr_sections, GError** error) {
 	for (gint i = 0; i < arr_sections->len; i++) {
 		Section section = { 0 };
 		Anbindung anbindung_int = { 0 };
@@ -149,19 +104,16 @@ static gint dbase_zond_anpassen_anbindung(ZondDBase* zond_dbase, ZondPdfDocument
 		anbindung_aktualisieren(zpdfd, &anbindung_int);
 
 		anbindung_build_file_section(anbindung_int, &section_new);
-		rc = zond_dbase_update_section(zond_dbase, section.ID, section_new, error);
+		rc = zond_dbase_update_section(dbase_zond->zond_dbase_store, attached, section.ID, section_new, error);
 		g_free(section_new);
-		if (rc) {
-			g_prefix_error(error, "%s\n", __func__);
-
-			return -1;
-		}
+		if (rc)
+			ERROR_Z
 	}
 
 	return 0;
 }
 
-static gint dbase_zond_update_section_dbase(ZondDBase* zond_dbase,
+static gint dbase_zond_update_section_dbase(DBaseZond* dbase_zond, gint attached,
 		DisplayedDocument* dd, GError** error) {
 	gint rc = 0;
 	GArray* arr_sections = NULL;
@@ -171,12 +123,13 @@ static gint dbase_zond_update_section_dbase(ZondDBase* zond_dbase,
 	sfp_pdf = zond_pdf_document_get_sfp_pdf(dd->zond_pdf_document);
 	filepart = sond_file_part_get_filepart(SOND_FILE_PART(sfp_pdf));
 
-	rc = zond_dbase_get_arr_sections(zond_dbase, filepart, &arr_sections, error);
+	rc = zond_dbase_get_arr_sections(dbase_zond->zond_dbase_store, attached,
+			filepart, &arr_sections, error);
 	g_free(filepart);
 	if (rc)
 		ERROR_Z
 
-	rc = dbase_zond_anpassen_anbindung(zond_dbase, dd->zond_pdf_document,
+	rc = dbase_zond_anpassen_anbindung(dbase_zond, attached, dd->zond_pdf_document,
 			arr_sections, error);
 	g_array_unref(arr_sections);
 	if (rc)
@@ -189,19 +142,30 @@ gint dbase_zond_update_section(DBaseZond* dbase_zond,
 		DisplayedDocument* dd, GError** error) {
 	gint rc = 0;
 
-	rc = dbase_zond_update_section_dbase(dbase_zond->zond_dbase_store, dd, error);
-	if (rc) {
-		g_prefix_error(error, "%s\n", __func__);
+	rc = dbase_zond_update_section_dbase(dbase_zond, 0, dd, error);
+	if (rc)
+		ERROR_Z
 
-		return -1;
-	}
+	rc = dbase_zond_update_section_dbase(dbase_zond, 1, dd, error);
+	if (rc)
+		ERROR_Z
 
-	rc = dbase_zond_update_section_dbase(dbase_zond->zond_dbase_work, dd, error);
-	if (rc) {
-		g_prefix_error(error, "%s\n", __func__);
+	return 0;
+}
 
-		return -1;
-	}
+gint dbase_zond_update_path(DBaseZond* dbase_zond, gchar const* prefix_old,
+		gchar const* prefix_new, GError** error) {
+	gint rc = 0;
+
+	rc = zond_dbase_update_path(dbase_zond->zond_dbase_store, prefix_old,
+			prefix_new, error);
+	if (rc)
+		ERROR_Z
+
+	rc = zond_dbase_update_path(dbase_zond->zond_dbase_work, prefix_old, prefix_new,
+			error);
+	if (rc)
+		ERROR_Z
 
 	return 0;
 }
@@ -513,6 +477,7 @@ gint project_oeffnen(Projekt *zond, const gchar *abs_path, gboolean create,
 		gchar **errmsg) {
 	gint rc = 0;
 	DBaseZond *dbase_zond = NULL;
+	GError* error = NULL;
 
 	rc = projekt_schliessen(zond, errmsg);
 	if (rc) {
@@ -525,6 +490,15 @@ gint project_oeffnen(Projekt *zond, const gchar *abs_path, gboolean create,
 	rc = project_create_dbase_zond(zond, abs_path, create, &dbase_zond, errmsg);
 	if (rc)
 		ERROR_S
+
+	rc = dbase_zond_attach(dbase_zond, &error);
+	if (rc) {
+		if (errmsg)
+			*errmsg = g_strdup_printf("%s\n%s", __func__, error->message);
+		g_error_free(error);
+
+		return -1;
+	}
 
 	zond->dbase_zond = dbase_zond;
 	rc = sond_treeviewfm_set_root(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),

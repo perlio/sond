@@ -569,7 +569,7 @@ static gint seiten_anbindung_int(ZondDBase* zond_dbase,
 	filepart = sond_file_part_get_filepart(SOND_FILE_PART(
 			zond_pdf_document_get_sfp_pdf(pdf_document_page->document)));
 
-	rc = zond_dbase_get_arr_sections(zond_dbase, filepart,
+	rc = zond_dbase_get_arr_sections(zond_dbase, 1,filepart,
 			&arr_sections, error);
 	g_free(filepart);
 	if (rc) {

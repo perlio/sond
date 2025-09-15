@@ -25,71 +25,155 @@ typedef struct {
 
 G_DEFINE_TYPE_WITH_PRIVATE(ZondTreeviewFM, zond_treeviewfm, SOND_TYPE_TREEVIEWFM)
 
-static gint zond_treeviewfm_dbase_test(SondTVFMItem *stvfm_item, GError **error) {
-	gint rc = 0;
-	SondFilePart* sfp = NULL;
+static gchar* get_path(SondFilePart* sfp, gchar const* path_or_section) {
 	gchar* filepart = NULL;
+	gchar* path = NULL;
 
-	ZondTreeviewFMPrivate *priv = zond_treeviewfm_get_instance_private(
-			ZOND_TREEVIEWFM(sond_tvfm_item_get_stvfm(stvfm_item)));
+	if (sfp)
+		filepart = sond_file_part_get_filepart(sfp);
 
-	sfp = sond_tvfm_item_get_sond_file_part(stvfm_item);
-	if (sfp) filepart = sond_file_part_get_filepart(sfp);
-	if (filepart && sond_tvfm_item_get_path_or_section(stvfm_item))
-		filepart = add_string(filepart, g_strdup("//"));
-	filepart = add_string(filepart, g_strdup(sond_tvfm_item_get_path_or_section(stvfm_item)));
+	path = g_strconcat((filepart) ? filepart : "",
+			(filepart && path_or_section) ? "//" : "",
+			(path_or_section) ? path_or_section : "",
+			"%", NULL);
+	g_free(filepart);
 
-	rc = zond_dbase_test_path(priv->zond->dbase_zond->zond_dbase_work,
-			filepart, error);
-	if (rc == -1) {
-		g_free(filepart);
-		ERROR_Z
-	}
-	else if (rc == 1) {
-		g_free(filepart);
-		if (sond_tvfm_item_get_item_type(stvfm_item) == SOND_TVFM_ITEM_TYPE_DIR)
-			return 1; //immer nur Abkömmling, auch bei PDF mit embfiles!
-		else if (sond_tvfm_item_get_item_type(stvfm_item) == SOND_TVFM_ITEM_TYPE_LEAF)
-			return 2; //Treffer
-		else { //LEAF_SECTION
+	return path;
+}
 
+static gchar* get_path_from_stvfm_item(SondTVFMItem* stvfm_item) {
+	gchar* path = NULL;
+
+	path = get_path(sond_tvfm_item_get_sond_file_part(stvfm_item),
+			sond_tvfm_item_get_path_or_section(stvfm_item));
+
+	return path;
+}
+
+static gint zond_treeviewfm_deter_background(SondTVFMItem *stvfm_item, GError **error) {
+	//prüfen auf Volltreffer
+	//nur, wenn kein Verzeichnis
+	if (sond_tvfm_item_get_item_type(stvfm_item) != SOND_TVFM_ITEM_TYPE_DIR) {
+		gint rc = 0;
+		SondFilePart* sfp = NULL;
+		g_autofree gchar* filepart = NULL;
+
+		ZondTreeviewFMPrivate *priv = zond_treeviewfm_get_instance_private(
+				ZOND_TREEVIEWFM(sond_tvfm_item_get_stvfm(stvfm_item)));
+
+		sfp = sond_tvfm_item_get_sond_file_part(stvfm_item);
+		if (sfp) filepart = sond_file_part_get_filepart(sfp);
+
+		rc = zond_dbase_test_path(priv->zond->dbase_zond->zond_dbase_work,
+				filepart, error);
+		if (rc == -1)
+			ERROR_Z
+		else if (rc == 1) {
+			if (sond_tvfm_item_get_item_type(stvfm_item) == SOND_TVFM_ITEM_TYPE_LEAF)
+				return 1; //Treffer
+			else { //also _LEAF_SECTION
+				gchar const* section = NULL;
+				gint rc = 0;
+
+				section = sond_tvfm_item_get_path_or_section(stvfm_item);
+				if (!section)
+					g_warning("Keine section zu LEAF_SECTION: %s", filepart);
+
+				//Funktion testet, ob mind ein Abschnitt in db, der section mindestens umfaßt
+				rc = zond_dbase_test_path_section(
+						priv->zond->dbase_zond->zond_dbase_work, filepart,
+						section, error);
+				if (rc == -1)
+					ERROR_Z
+				else if (rc == 1)
+					return 1; //Treffer
+			}
 		}
 	}
-
-	//wenn kein direkter Treffer, prüfen, ob Abkömmlinge in db
-	filepart = add_string(filepart, g_strdup("%"));
-	rc = zond_dbase_test_path(priv->zond->dbase_zond->zond_dbase_work,
-			filepart, error);
-	g_free(filepart);
-	if (rc == -1)
-		ERROR_Z
-	else if (rc == 1)
-		return 1; //Halber Treffer
 
 	return 0;
 }
 
-static gint zond_treeviewfm_dbase_update_path(SondTreeviewFM *stvfm,
-		const gchar *rel_path_source, const gchar *rel_path_dest,
-		GError **error) {
+static gint zond_treeviewfm_before_delete(SondTVFMItem *stvfm_item, GError **error) {
+	gint rc = 0;
+	g_autofree gchar* path = NULL;
+
+	ZondTreeviewFMPrivate *priv = zond_treeviewfm_get_instance_private(
+			ZOND_TREEVIEWFM(sond_tvfm_item_get_stvfm(stvfm_item)));
+
+	path = get_path_from_stvfm_item(stvfm_item);
+
+	path = add_string(path, g_strdup("%"));
+
+	rc = zond_dbase_test_path(priv->zond->dbase_zond->zond_dbase_work,
+			path, error);
+	if (rc == -1)
+		ERROR_Z
+	else if (rc == 1)
+		return 1;
+
+	rc = zond_dbase_test_path(priv->zond->dbase_zond->zond_dbase_store,
+			path, error);
+	if (rc == -1)
+		ERROR_Z
+	else if (rc == 1)
+		return 1;
+
+	return 0;
+}
+
+static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
+		gchar const* prefix_old, gchar const* prefix_new, GError **error) {
 	gint rc = 0;
 
+	ZondTreeviewFM* ztvfm = ZOND_TREEVIEWFM(stvfm);
+	ZondTreeviewFMPrivate *ztvfm_priv = zond_treeviewfm_get_instance_private(
+			ZOND_TREEVIEWFM(ztvfm));
+
+	rc = dbase_zond_begin(ztvfm_priv->zond->dbase_zond, error);
+	if (rc)
+		ERROR_Z
+
+	rc = dbase_zond_update_path(ztvfm_priv->zond->dbase_zond, prefix_old, prefix_new, error);
+	if (rc) {
+		gint ret = 0;
+		GError* error_tmp = NULL;
+
+		ret = dbase_zond_rollback(ztvfm_priv->zond->dbase_zond, &error_tmp);
+		if (ret) {
+			//ToDo: Datenbankverbindung neu starten
+		}
+		ERROR_Z
+	}
+
+	return 0;
+}
+
+static gint zond_treeviewfm_after_move(SondTreeviewFM* stvfm,
+		gboolean suc, GError** error) {
 	ZondTreeviewFMPrivate *priv = zond_treeviewfm_get_instance_private(
 			ZOND_TREEVIEWFM(stvfm));
 
-	ZondDBase *dbase_work = NULL; //sond_treeviewfm_get_dbase(stvfm);
-	ZondDBase *dbase_store = priv->zond->dbase_zond->zond_dbase_store;
+	if (suc) {
+		gint rc = 0;
 
-	rc = zond_dbase_update_path(dbase_store, rel_path_source, rel_path_dest,
-			error);
-	if (rc)
-		ERROR_ROLLBACK_Z(dbase_store)
+		rc = dbase_zond_commit(priv->zond->dbase_zond, error);
+		if (rc) {
+			//ToDo: kaputtmachen
+			exit(EXIT_FAILURE);
+		}
 
-	rc = zond_dbase_update_path(dbase_work, rel_path_source, rel_path_dest,
-			error);
-	if (rc)
-		ERROR_ROLLBACK_BOTH(dbase_work,
-				priv->zond->dbase_zond->zond_dbase_store)
+		project_set_changed(priv->zond);
+	}
+	else {
+		gint rc = 0;
+
+		rc = dbase_zond_rollback(priv->zond->dbase_zond, error);
+		if (rc) {
+			//ToDo: kaputtmachen
+			exit(EXIT_FAILURE);
+		}
+	}
 
 	return 0;
 }
@@ -291,9 +375,10 @@ static gint zond_treeviewfm_load_sections(SondTVFMItem* stvfm_item, GPtrArray** 
 }
 
 static void zond_treeviewfm_class_init(ZondTreeviewFMClass *klass) {
-	SOND_TREEVIEWFM_CLASS(klass)->test_item= zond_treeviewfm_dbase_test;
-	SOND_TREEVIEWFM_CLASS(klass)->after_update =
-			zond_treeviewfm_dbase_update_path;
+	SOND_TREEVIEWFM_CLASS(klass)->deter_background = zond_treeviewfm_deter_background;
+	SOND_TREEVIEWFM_CLASS(klass)->before_delete = zond_treeviewfm_before_delete;
+	SOND_TREEVIEWFM_CLASS(klass)->before_move = zond_treeviewfm_before_move;
+	SOND_TREEVIEWFM_CLASS(klass)->after_move = zond_treeviewfm_after_move;
 	SOND_TREEVIEWFM_CLASS(klass)->text_edited = zond_treeviewfm_text_edited;
 	SOND_TREEVIEWFM_CLASS(klass)->results_row_activated =
 			zond_treeviewfm_results_row_activated;

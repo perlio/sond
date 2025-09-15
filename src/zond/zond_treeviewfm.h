@@ -55,10 +55,6 @@ struct _ZondTreeviewFMClass {
 	SondTreeviewFMClass parent_class;
 };
 
-void zond_treeviewfm_set_pda_node_text(ZondTreeviewFM*, gint, gchar const*);
-
-void zond_treeviewfm_set_pda_icon_name(ZondTreeviewFM*, gint, gchar const*);
-
 gint zond_treeviewfm_insert_section(ZondTreeviewFM*, gint, GtkTreeIter*,
 		gboolean, GtkTreeIter*, GError**);
 

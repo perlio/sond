@@ -12,13 +12,15 @@ typedef void *gpointer;
 typedef int gint;
 typedef char gchar;
 
-gint dbase_zond_begin(DBaseZond*, GError** );
+gint dbase_zond_begin(DBaseZond*, GError**);
 
-gint dbase_zond_rollback(DBaseZond*, GError** );
+gint dbase_zond_rollback(DBaseZond*, GError**);
 
-gint dbase_zond_commit(DBaseZond*, GError** );
+gint dbase_zond_commit(DBaseZond*, GError**);
 
 gint dbase_zond_update_section(DBaseZond*, DisplayedDocument*, GError** );
+
+gint dbase_zond_update_path(DBaseZond*, gchar const*, gchar const*, GError**);
 
 void project_set_changed(gpointer);
 

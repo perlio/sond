@@ -136,6 +136,8 @@ gint zond_dbase_rollback(ZondDBase*, GError**);
 
 gint zond_dbase_test_path(ZondDBase*, const gchar*, GError**);
 
+gint zond_dbase_test_path_section(ZondDBase*, const gchar*, gchar const*, GError**);
+
 gint zond_dbase_insert_node(ZondDBase*, gint, gboolean, gint, gint,
 		const gchar*, gchar const*, const gchar*, const gchar*, const gchar*,
 		GError**);
@@ -189,9 +191,9 @@ gint zond_dbase_find_baum_inhalt_file(ZondDBase*, gint, gint*, gint*, gchar**,
 
 gint zond_dbase_is_file_part_copied(ZondDBase*, gint, gboolean*, GError**);
 
-gint zond_dbase_get_arr_sections(ZondDBase*, gchar const*, GArray**, GError** );
+gint zond_dbase_get_arr_sections(ZondDBase*, gint, gchar const*, GArray**, GError** );
 
-gint zond_dbase_update_section(ZondDBase*, gint, const gchar*, GError**);
+gint zond_dbase_update_section(ZondDBase*, gint, gint, const gchar*, GError**);
 
 G_END_DECLS
 
