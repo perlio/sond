@@ -1421,7 +1421,7 @@ static gint move_path(SondTreeviewFM* stvfm,
 		g_autofree gchar *trial_base = (i == 0) ? g_strdup(base) :
 				g_strconcat(name, g_strdup_printf(" (%u)", i), ext, NULL);
 		g_autofree gchar *trial_path =
-				(dest_dir != NULL) ? g_build_filename(dest_dir, trial_base, NULL) : g_strdup(trial_base);
+				(dest_dir != NULL) ? g_strconcat(dest_dir, "/", trial_base, NULL) : g_strdup(trial_base);
 		g_autoptr(GFile) dst = g_file_new_for_path(trial_path);
 
 		if (SOND_TREEVIEWFM_GET_CLASS(stvfm)->before_move) {
