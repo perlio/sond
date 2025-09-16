@@ -298,8 +298,10 @@ static gint sond_tvfm_item_load_fs_dir(SondTVFMItem* stvfm_item,
 		stvfm_item_child =
 				sond_tvfm_item_create_from_content_type(stvfm_item, content_type, rel_path_child, error);
 		g_free(rel_path_child);
-		if (!stvfm_item_child)
+		if (!stvfm_item_child) {
+			g_ptr_array_unref(loaded_children); //Test nicht nötig - wenn !load, kommen wir nicht hier hin
 			ERROR_Z
+		}
 
 		g_ptr_array_add(loaded_children, stvfm_item_child);
 	}
@@ -375,10 +377,10 @@ gint sond_tvfm_item_load_children(SondTVFMItem* stvfm_item,
 	}
 	else if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF ||
 			stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF_SECTION) {
-		if (SOND_TVFM_ITEM_GET_CLASS(stvfm_item)->load_sections) {
+		if (SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->load_sections) {
 			gint rc = 0;
 
-			rc = SOND_TVFM_ITEM_GET_CLASS(stvfm_item)->load_sections(stvfm_item,
+			rc = SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->load_sections(stvfm_item,
 					arr_children, error);
 			if (rc) ERROR_Z
 		}
@@ -1426,7 +1428,7 @@ static gint move_path(SondTreeviewFM* stvfm,
 			gint rc = 0;
 
 			rc = SOND_TREEVIEWFM_GET_CLASS(stvfm)->before_move(stvfm, src_path, trial_path, error);
-			if (rc)
+			if (rc == -1)
 				ERROR_Z
 		}
 
@@ -1668,7 +1670,6 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 		GtkTreeIter *iter, gpointer data, GError **error) {
 	SondTVFMItem *stvfm_item = NULL;
 	SondTVFMItem *stvfm_item_new = NULL;
-	SondTVFMItemPrivate *stvfm_item_priv = NULL;
 	SFMPasteSelection *s_fm_paste_selection = (SFMPasteSelection*) data;
 	Clipboard *clipboard = NULL;
 	gint rc = 0;
@@ -1678,7 +1679,6 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 
 	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(stv)), iter, 0,
 			&stvfm_item, -1);
-	stvfm_item_priv = sond_tvfm_item_get_instance_private(stvfm_item);
 	g_object_unref(stvfm_item); //keine Angst - tree_store hält ref
 
 	//Vers verschieben oder kopieren?

@@ -780,8 +780,6 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd, GError** err
 		if (ret) {
 			(*error)->message = add_string((*error)->message, g_strdup(error_int->message));
 			g_error_free(error_int);
-
-			return -2;
 		}
 
 		return -1;

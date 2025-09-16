@@ -141,9 +141,10 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 
 		ret = dbase_zond_rollback(ztvfm_priv->zond->dbase_zond, &error_tmp);
 		if (ret) {
-			//ToDo: Datenbankverbindung neu starten
+			//ToDo: tmp-Datei sichern, Hinweis, daß tmp-Datei gesichert wurde
+
+			return -1;
 		}
-		ERROR_Z
 	}
 
 	return 0;
@@ -159,7 +160,7 @@ static gint zond_treeviewfm_after_move(SondTreeviewFM* stvfm,
 
 		rc = dbase_zond_commit(priv->zond->dbase_zond, error);
 		if (rc) {
-			//ToDo: kaputtmachen
+			//ToDo: ausführliche Erklärung; verschobene Dateien loggen
 			exit(EXIT_FAILURE);
 		}
 
@@ -370,6 +371,62 @@ static gint zond_treeviewfm_delete_section(SondTVFMItem* stvfm_item, GError** er
 
 static gint zond_treeviewfm_load_sections(SondTVFMItem* stvfm_item, GPtrArray** arr_children,
 		GError** error) {
+	g_autofree gchar* filepart = NULL;
+	g_autoptr(GPtrArray) arr_children_int = NULL;
+	SondFilePart* sfp = NULL;
+	gchar const* section = NULL;
+	gint ID = 0;
+	gint child = 0;
+	gint rc = 0;
+
+	ZondTreeviewFMPrivate* ztvfm_priv =
+			zond_treeviewfm_get_instance_private(ZOND_TREEVIEWFM(sond_tvfm_item_get_stvfm(stvfm_item)));
+
+	sfp = sond_tvfm_item_get_sond_file_part(stvfm_item);
+
+	g_return_val_if_fail(sfp, -1);
+
+	section = sond_tvfm_item_get_path_or_section(stvfm_item);
+	filepart = sond_file_part_get_filepart(sfp);
+
+	ID = zond_dbase_get_section(ztvfm_priv->zond->dbase_zond->zond_dbase_work, filepart, section, error);
+	if (ID == -1)
+		ERROR_Z
+	else if (ID == 0) {
+		if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\nSection nicht in db gefunden", __func__);
+
+		return -1;
+	}
+
+	rc = zond_dbase_get_first_child(ztvfm_priv->zond->dbase_zond->zond_dbase_work, ID, &child, error);
+	if (rc)
+		ERROR_Z
+
+	arr_children_int = g_ptr_array_new_with_free_func((GDestroyNotify) g_ptr_array_unref);
+	while (child) {
+		SondFilePart* sfp_child = NULL;
+		gchar* section_child = NULL;
+		gint rc = 0;
+		gint younger_sibling_id = 0;
+
+		rc = zond_dbase_get_node(ztvfm_priv->zond->dbase_zond->zond_dbase_work, child,
+				NULL, NULL, NULL, &section_child, NULL, NULL, NULL, error);
+		if (rc)
+			ERROR_Z
+
+		sfp_child = sond_file_part_create(SOND_TYPE_FILE_PART_PDF, section_child, sfp);
+		g_free(section_child);
+		g_ptr_array_add(arr_children_int, sfp_child);
+
+		rc = zond_dbase_get_younger_sibling(ztvfm_priv->zond->dbase_zond->zond_dbase_work,
+				child, &younger_sibling_id, error);
+		if (rc)
+			ERROR_Z
+
+		child = younger_sibling_id;
+	}
+
+	*arr_children = g_ptr_array_ref(arr_children_int);
 
 	return 0;
 }

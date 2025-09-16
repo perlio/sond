@@ -74,8 +74,12 @@ gint dbase_zond_rollback(DBaseZond* dbase_zond, GError** error) {
 	gint rc = 0;
 
 	rc = zond_dbase_rollback(dbase_zond->zond_dbase_store, error);
-	if (rc)
-		ERROR_Z
+	if (rc) {
+		g_message("Rollback gescheitert: %s", (*error)->message);
+		g_message("Neustart der Datenbankverbindung...");
+
+		//ToDo: restart con
+	}
 
 	return 0;
 }
@@ -484,7 +488,7 @@ gint project_oeffnen(Projekt *zond, const gchar *abs_path, gboolean create,
 		if (rc == -1)
 			ERROR_S
 		else
-			return 1;
+			return 0;
 	}
 
 	rc = project_create_dbase_zond(zond, abs_path, create, &dbase_zond, errmsg);
