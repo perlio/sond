@@ -162,6 +162,13 @@ SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM* stvfm, SondTVFMItemType type
 			stvfm_item_priv->has_children =
 					SOND_TREEVIEWFM_GET_CLASS(stvfm)->has_sections(stvfm_item);
 	}
+	else if (type == SOND_TVFM_ITEM_TYPE_LEAF_SECTION) {
+		stvfm_item_priv->icon_name = g_strdup("anbindung");
+		stvfm_item_priv->display_name = g_strdup(stvfm_item_priv->path_or_section);
+		if (SOND_TREEVIEWFM_GET_CLASS(stvfm)->has_sections)
+			stvfm_item_priv->has_children =
+					SOND_TREEVIEWFM_GET_CLASS(stvfm)->has_sections(stvfm_item);
+	}
 	else if (type == SOND_TVFM_ITEM_TYPE_DIR) {
 		if (!sond_file_part) { //kein SondFilePart, dann ist es ein Verzeichnis im Dateisystem
 			gint rc = 0;

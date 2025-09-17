@@ -407,7 +407,7 @@ static gint zond_treeviewfm_load_sections(SondTVFMItem* stvfm_item, GPtrArray** 
 		else return 0;
 	}
 
-	arr_children_int = g_ptr_array_new_with_free_func((GDestroyNotify) g_ptr_array_unref);
+	arr_children_int = g_ptr_array_new_with_free_func((GDestroyNotify) g_object_unref);
 	while (child) {
 		SondTVFMItem* stvfm_item_child = NULL;
 		gchar* section_child = NULL;
@@ -423,7 +423,7 @@ static gint zond_treeviewfm_load_sections(SondTVFMItem* stvfm_item, GPtrArray** 
 				SOND_TVFM_ITEM_TYPE_LEAF_SECTION, sfp, section_child);
 		g_free(section_child);
 		g_ptr_array_add(arr_children_int, stvfm_item_child);
-
+guint ref = G_OBJECT(sfp)->ref_count;
 		rc = zond_dbase_get_younger_sibling(ztvfm_priv->zond->dbase_zond->zond_dbase_work,
 				child, &younger_sibling_id, error);
 		if (rc)
