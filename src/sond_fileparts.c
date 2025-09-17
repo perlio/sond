@@ -44,7 +44,7 @@
  */
 typedef struct {
 	gchar *path; //rel_path zum root-Element
-	SondFilePart* parent; //NULL, wenn in Datei rel_path
+	SondFilePart* parent; //NULL, wenn Datei in fs
 } SondFilePartPrivate;
 
 G_DEFINE_TYPE_WITH_PRIVATE(SondFilePart, sond_file_part, G_TYPE_OBJECT)
@@ -100,6 +100,7 @@ static void sond_file_part_class_init(SondFilePartClass *klass) {
 	G_OBJECT_CLASS(klass)->finalize = sond_file_part_finalize;
 
 	klass->has_children = NULL; //Default: keine Kinder
+	klass->has_sections = NULL;
 	klass->get_arr_opened_files = NULL; //Default: keine spezielle Initialisierung
 
 	klass->arr_opened_files = g_ptr_array_new( );
@@ -250,6 +251,15 @@ gboolean sond_file_part_has_children(SondFilePart *sfp) {
 		has_children = SOND_FILE_PART_GET_CLASS(sfp)->has_children(sfp);
 
 	return has_children;
+}
+
+gboolean sond_file_part_has_sections(SondFilePart *sfp) {
+	gboolean has_sections = FALSE;
+
+	if (SOND_FILE_PART_GET_CLASS(sfp)->has_sections)
+		has_sections = SOND_FILE_PART_GET_CLASS(sfp)->has_sections(sfp);
+
+	return has_sections;
 }
 
 GPtrArray* sond_file_part_get_arr_opened_files(SondFilePart* sfp) {

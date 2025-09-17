@@ -139,6 +139,12 @@ SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM* stvfm, SondTVFMItemType type
 	stvfm_item = g_object_new(SOND_TYPE_TVFM_ITEM, NULL);
 	stvfm_item_priv = sond_tvfm_item_get_instance_private(stvfm_item);
 
+	stvfm_item_priv->stvfm = stvfm;
+	stvfm_item_priv->type = type;
+	stvfm_item_priv->path_or_section = g_strdup(path_or_section);
+	if (sond_file_part)
+		stvfm_item_priv->sond_file_part = g_object_ref(sond_file_part);
+
 	//Wenn sond_file_part != NULL dann ist es ein FilePart nicht im Dateisystem
 	if (type == SOND_TVFM_ITEM_TYPE_LEAF) {
 		gchar const* content_type = NULL;
@@ -152,6 +158,9 @@ SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM* stvfm, SondTVFMItemType type
 
 		stvfm_item_priv->display_name = g_path_get_basename(
 				sond_file_part_get_path(sond_file_part));
+		if (SOND_TREEVIEWFM_GET_CLASS(stvfm)->has_sections)
+			stvfm_item_priv->has_children =
+					SOND_TREEVIEWFM_GET_CLASS(stvfm)->has_sections(stvfm_item);
 	}
 	else if (type == SOND_TVFM_ITEM_TYPE_DIR) {
 		if (!sond_file_part) { //kein SondFilePart, dann ist es ein Verzeichnis im Dateisystem
@@ -205,12 +214,6 @@ SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM* stvfm, SondTVFMItemType type
 		//else if (SOND_IS_FILE_PART_GMESSAGE(sond_file_part)) {
 
 	}
-
-	stvfm_item_priv->stvfm = stvfm;
-	stvfm_item_priv->type = type;
-	stvfm_item_priv->path_or_section = g_strdup(path_or_section);
-	if (sond_file_part)
-		stvfm_item_priv->sond_file_part = g_object_ref(sond_file_part);
 
 	return stvfm_item;
 }

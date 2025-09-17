@@ -386,25 +386,30 @@ static gint zond_treeviewfm_load_sections(SondTVFMItem* stvfm_item, GPtrArray** 
 
 	g_return_val_if_fail(sfp, -1);
 
+	if (!SOND_IS_FILE_PART_PDF(sfp))
+		return 0; //derzeit haben nur PDFs sections!
+
 	section = sond_tvfm_item_get_path_or_section(stvfm_item);
 	filepart = sond_file_part_get_filepart(sfp);
 
 	ID = zond_dbase_get_section(ztvfm_priv->zond->dbase_zond->zond_dbase_work, filepart, section, error);
 	if (ID == -1)
 		ERROR_Z
-	else if (ID == 0) {
-		if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\nSection nicht in db gefunden", __func__);
-
-		return -1;
-	}
+	else if (ID == 0)
+		return 0; //gibts nicht, hat auch keine sections
 
 	rc = zond_dbase_get_first_child(ztvfm_priv->zond->dbase_zond->zond_dbase_work, ID, &child, error);
 	if (rc)
 		ERROR_Z
 
+	if (!arr_children) {
+		if (child) return 1; //hat sections
+		else return 0;
+	}
+
 	arr_children_int = g_ptr_array_new_with_free_func((GDestroyNotify) g_ptr_array_unref);
 	while (child) {
-		SondFilePart* sfp_child = NULL;
+		SondTVFMItem* stvfm_item_child = NULL;
 		gchar* section_child = NULL;
 		gint rc = 0;
 		gint younger_sibling_id = 0;
@@ -414,9 +419,10 @@ static gint zond_treeviewfm_load_sections(SondTVFMItem* stvfm_item, GPtrArray** 
 		if (rc)
 			ERROR_Z
 
-		sfp_child = sond_file_part_create(SOND_TYPE_FILE_PART_PDF, section_child, sfp);
+		stvfm_item_child = sond_tvfm_item_create(sond_tvfm_item_get_stvfm(stvfm_item),
+				SOND_TVFM_ITEM_TYPE_LEAF_SECTION, sfp, section_child);
 		g_free(section_child);
-		g_ptr_array_add(arr_children_int, sfp_child);
+		g_ptr_array_add(arr_children_int, stvfm_item_child);
 
 		rc = zond_dbase_get_younger_sibling(ztvfm_priv->zond->dbase_zond->zond_dbase_work,
 				child, &younger_sibling_id, error);
@@ -431,6 +437,21 @@ static gint zond_treeviewfm_load_sections(SondTVFMItem* stvfm_item, GPtrArray** 
 	return 0;
 }
 
+static gboolean zond_treeviewfm_has_sections(SondTVFMItem* stvfm_item) {
+	GError* error = NULL;
+	gint rc = FALSE;
+
+	rc = zond_treeviewfm_load_sections(stvfm_item, NULL, &error);
+	if (rc == -1) {
+		g_warning("Konnte sections nicht laden: %s", error->message);
+		g_error_free(error);
+
+		return FALSE;
+	}
+
+	return (gboolean) rc;
+}
+
 static void zond_treeviewfm_class_init(ZondTreeviewFMClass *klass) {
 	SOND_TREEVIEWFM_CLASS(klass)->deter_background = zond_treeviewfm_deter_background;
 	SOND_TREEVIEWFM_CLASS(klass)->before_delete = zond_treeviewfm_before_delete;
@@ -441,6 +462,7 @@ static void zond_treeviewfm_class_init(ZondTreeviewFMClass *klass) {
 			zond_treeviewfm_results_row_activated;
 	SOND_TREEVIEWFM_CLASS(klass)->open_stvfm_item = zond_treeviewfm_open_stvfm_item;
 	SOND_TREEVIEWFM_CLASS(klass)->load_sections = zond_treeviewfm_load_sections;
+	SOND_TREEVIEWFM_CLASS(klass)->has_sections = zond_treeviewfm_has_sections;
 	SOND_TREEVIEWFM_CLASS(klass)->delete_section = zond_treeviewfm_delete_section;
 
 	return;

@@ -1585,7 +1585,9 @@ gint zond_dbase_get_section(ZondDBase *zond_dbase, gchar const* filepart,
 	gint rc = 0;
 	sqlite3_stmt **stmt = NULL;
 
-	const gchar *sql[] = { "SELECT ID FROM knoten WHERE file_part=?1 AND section=?2;" };
+	const gchar *sql[] = { "SELECT ID FROM knoten WHERE file_part=?1 AND "
+			"(section=?2 OR (section IS NULL AND ?2 IS NULL));"
+	};
 
 	rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
 			error);
@@ -1596,7 +1598,11 @@ gint zond_dbase_get_section(ZondDBase *zond_dbase, gchar const* filepart,
 	if (rc != SQLITE_OK)
 		ERROR_Z_DBASE
 
-	rc = sqlite3_bind_text(stmt[0], 2, section, -1, NULL);
+	if (section)
+		rc = sqlite3_bind_text(stmt[0], 2, section, -1, NULL);
+	else
+		rc = sqlite3_bind_null(stmt[0], 2);
+
 	if (rc != SQLITE_OK)
 		ERROR_Z_DBASE
 

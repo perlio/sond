@@ -42,6 +42,7 @@ struct _SondTreeviewFMClass {
 	void (*results_row_activated)(GtkWidget*, GtkWidget*, gpointer);
 	gint (*open_stvfm_item) (SondTreeviewFM*, SondTVFMItem*, gboolean, GError**);
 	gint (*load_sections) (SondTVFMItem*, GPtrArray**, GError**);
+	gboolean (*has_sections) (SondTVFMItem*);
 	gint (*delete_section) (SondTVFMItem*, GError**);
 };
 

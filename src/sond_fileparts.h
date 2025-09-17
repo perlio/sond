@@ -36,6 +36,7 @@ struct _SondFilePartClass {
 	GPtrArray* arr_opened_files;
 
 	gboolean (*has_children)(SondFilePart*);
+	gboolean (*has_sections)(SondFilePart*);
 	GPtrArray* (*get_arr_opened_files)(SondFilePart*);
 };
 
