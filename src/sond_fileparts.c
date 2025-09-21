@@ -743,6 +743,91 @@ gint sond_file_part_replace(SondFilePart* sfp, fz_context* ctx,
 
 	return 0;
 }
+
+static gchar* get_path(gchar const* path_old, gchar const* base_new) {
+	//rename dir in fs
+	gchar const * base = NULL;
+	gchar* path_new = NULL;
+
+	base = strrchr(path_old, '/');
+	if (!base) //kein Slash gefunden
+		path_new = g_strdup(base_new);
+	else {
+		path_new = g_strndup(path_old, strlen(path_old) - strlen(base) + 1);
+		path_new = add_string(path_new, g_strdup(base_new));
+	}
+
+	return path_new;
+}
+
+gint sond_file_part_rename(SondFilePart* sfp, gchar const* base_new, GError** error) {
+	SondFilePartPrivate* sfp_priv = NULL;
+	SondFilePart* sfp_parent = NULL;
+	gint rc = 0;
+
+	g_return_val_if_fail(sfp, -1);
+
+	sfp_priv = sond_file_part_get_instance_private(sfp);
+
+	g_autofree gchar* path_new = NULL
+
+	path_new = get_path(sfp_priv->path, base_new, error);
+	if (!path_new)
+		ERROR_Z_VAL(NULL)
+
+	if (!sfp_priv->parent) //sfp ist im fs gespeichert
+		rc = g_rename(sfp_priv->path, path_new);
+	else if (SOND_IS_FILE_PART_PDF(sfp_priv->parent))
+		rc = sond_file_part_pdf_rename_emb_file(SOND_FILE_PART_PDF(sfp_priv->parent),
+				sfp_priv->path, path_new);
+	else if (SOND_IS_FILE_PART_ZIP(sfp_priv->parent))
+		rc = sond_file_part_zip_rename_file(SOND_FILE_PART_ZIP(sfp_priv->parent),
+				sfp_priv->path, path_new);
+	else {
+		if (error) *error = g_error_new(g_quark_from_static_string("sond"), 0,
+				"%s\nDerzeit nicht implementiert", __func__);
+
+		return -1;
+	}
+
+	if (rc)
+		ERROR_Z
+
+	return 0;
+}
+
+gint sond_file_part_rename_dir(SondFilePart* sfp,
+		gchar const* path_old, gchar const* base_new, GError** error) {
+	if (!sfp) {
+		//rename dir in fs
+		gchar* path_new = NULL;
+
+		path_new = get_path(path_old, base_new);
+
+		rc = g_rename(path_old, path_new);
+		if (rc) {
+			g_free(path_new);
+			ERROR_Z_VAL(NULL)
+		}
+	}
+	else if (SOND_IS_FILE_PART_ZIP(sfp)) {
+		//ToDo: zip-Verzeichnis-Namen ändern
+		if (error) *error = g_error_new(g_quark_from_static_string("sond"), 0,
+				"%s\nrename zip-dir noch nicht implementiert", __func__);
+
+		return NULL;
+	}
+	//was anderes?
+	else {
+		if (error) *error = g_error_new(g_quark_from_static_string("sond"), 0,
+				"%s\nNicht implementiert", __func__);
+
+		return NULL;
+	}
+
+	return path_new;
+}
+
 /*
 static fz_buffer* sond_file_part_pdf_insert_emb_file(SondFilePartPDF*, fz_context*,
 		SondFilePart*, fz_buffer*, GError**);
@@ -1328,6 +1413,19 @@ static fz_buffer* sond_file_part_pdf_mod_emb_file(SondFilePartPDF* sfp_pdf,
 		ERROR_Z_VAL(NULL)
 
 	return buf_out;
+}
+
+static gint sond_file_part_pdf_rename_embedded_file(SondFilePartPdf* sfp_pdf,
+		gchar const* path_old, gchar const* path_new, GError** error) {
+	GPtrArray* arr_emb_files = NULL;
+
+	SondFilePartPDFPrivate* sfp_pdf_priv = sond_file_part_pdf_get_instance_private(sfp_pdf);
+
+	arr_emb_files = sfp_pdf_priv->arr_embedded_files;
+	for (guint i = 0; i < arr_emb_files->len; i++) {
+
+	}
+
 }
 
 /*

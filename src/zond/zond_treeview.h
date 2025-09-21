@@ -46,8 +46,6 @@ gint zond_treeview_oeffnen_internal_viewer(Projekt*, SondFilePartPDF*, Anbindung
 
 gint zond_treeview_load_baum(ZondTreeview*, GError**);
 
-void zond_treeview_set_text_pdf_abschnitt(ZondTreeview*, gint, gchar const*);
-
 GtkTreePath* zond_treeview_get_path(SondTreeview*, gint);
 
 G_END_DECLS

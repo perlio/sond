@@ -150,15 +150,16 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 	return 0;
 }
 
-static gint zond_treeviewfm_after_move(SondTreeviewFM* stvfm,
-		gboolean suc, GError** error) {
+static void zond_treeviewfm_after_move(SondTreeviewFM* stvfm,
+		gboolean suc, GError* error) {
+	GError* error_int = NULL;
 	ZondTreeviewFMPrivate *priv = zond_treeviewfm_get_instance_private(
 			ZOND_TREEVIEWFM(stvfm));
 
 	if (suc) {
 		gint rc = 0;
 
-		rc = dbase_zond_commit(priv->zond->dbase_zond, error);
+		rc = dbase_zond_commit(priv->zond->dbase_zond, &error_int);
 		if (rc) {
 			//ToDo: ausführliche Erklärung; verschobene Dateien loggen
 			exit(EXIT_FAILURE);
@@ -169,14 +170,14 @@ static gint zond_treeviewfm_after_move(SondTreeviewFM* stvfm,
 	else {
 		gint rc = 0;
 
-		rc = dbase_zond_rollback(priv->zond->dbase_zond, error);
+		rc = dbase_zond_rollback(priv->zond->dbase_zond, &error_int);
 		if (rc) {
 			//ToDo: kaputtmachen
 			exit(EXIT_FAILURE);
 		}
 	}
 
-	return 0;
+	return;
 }
 
 static gint zond_treeviewfm_text_edited(SondTreeviewFM *stvfm,
@@ -214,11 +215,6 @@ static gint zond_treeviewfm_text_edited(SondTreeviewFM *stvfm,
 				new_text, error);
 		if (rc)
 			ERROR_Z
-
-		//zond_treeview ändern
-		zond_treeview_set_text_pdf_abschnitt(
-				ZOND_TREEVIEW(ztvfm_priv->zond->treeview[BAUM_INHALT]),
-				ID_section, new_text);
 	}
 	else { //chain-up, wenn nicht erledigt
 		gint rc = 0;
@@ -423,7 +419,7 @@ static gint zond_treeviewfm_load_sections(SondTVFMItem* stvfm_item, GPtrArray** 
 				SOND_TVFM_ITEM_TYPE_LEAF_SECTION, sfp, section_child);
 		g_free(section_child);
 		g_ptr_array_add(arr_children_int, stvfm_item_child);
-guint ref = G_OBJECT(sfp)->ref_count;
+
 		rc = zond_dbase_get_younger_sibling(ztvfm_priv->zond->dbase_zond->zond_dbase_work,
 				child, &younger_sibling_id, error);
 		if (rc)

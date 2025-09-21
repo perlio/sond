@@ -36,7 +36,7 @@ struct _SondTreeviewFMClass {
 	gint (*deter_background)(SondTVFMItem*, GError**);
 	gint (*before_delete)(SondTVFMItem*, GError**);
 	gint (*before_move)(SondTreeviewFM*, gchar const*, gchar const*, GError**);
-	gint (*after_move)(SondTreeviewFM*, gboolean, GError**);
+	void (*after_move)(SondTreeviewFM*, gboolean, GError*);
 	gint (*text_edited)(SondTreeviewFM*, GtkTreeIter*, SondTVFMItem*, const gchar*,
 			GError**);
 	void (*results_row_activated)(GtkWidget*, GtkWidget*, gpointer);

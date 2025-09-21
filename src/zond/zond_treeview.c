@@ -3205,16 +3205,6 @@ static gboolean zond_treeview_foreach_pdf_abschnitt(GtkTreeModel *model,
 	return FALSE;
 }
 
-void zond_treeview_set_text_pdf_abschnitt(ZondTreeview *ztv,
-		gint ID_pdf_abschnitt, gchar const *text_new) {
-	Foreach foreach = { ID_pdf_abschnitt, text_new };
-
-	gtk_tree_model_foreach(gtk_tree_view_get_model(GTK_TREE_VIEW(ztv)),
-			zond_treeview_foreach_pdf_abschnitt, &foreach);
-
-	return;
-}
-
 static gboolean zond_treeview_foreach_path(GtkTreeModel *model,
 		GtkTreePath *path, GtkTreeIter *iter, gpointer user_data) {
 	GtkTreePath **new_path = (GtkTreePath**) user_data;
