@@ -485,10 +485,8 @@ static fz_buffer* sond_file_part_get_buffer(SondFilePart* sfp,
 	fz_buffer* buf = NULL;
 
 	stream = sond_file_part_get_istream(ctx, sfp, FALSE, error);
-	if (!stream) {
-		fz_drop_context(ctx);
+	if (!stream)
 		ERROR_Z_VAL(NULL)
-	}
 
 	fz_try(ctx)
 		buf = fz_read_all(ctx, stream, 0);
@@ -498,7 +496,6 @@ static fz_buffer* sond_file_part_get_buffer(SondFilePart* sfp,
 		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
 					fz_caught(ctx), "%s\n%s", __func__,
 					fz_caught_message(ctx));
-		fz_drop_context(ctx);
 
 		return NULL;
 	}
@@ -744,7 +741,7 @@ gint sond_file_part_replace(SondFilePart* sfp, fz_context* ctx,
 	return 0;
 }
 
-static gchar* get_path(gchar const* path_old, gchar const* base_new) {
+static gchar* get_new_path(gchar const* path_old, gchar const* base_new) {
 	//rename dir in fs
 	gchar const * base = NULL;
 	gchar* path_new = NULL;
@@ -760,29 +757,35 @@ static gchar* get_path(gchar const* path_old, gchar const* base_new) {
 	return path_new;
 }
 
+static gint sond_file_part_pdf_rename_embedded_file(SondFilePartPDF*,
+		gchar const*, gchar const*, GError**);
+
+static gint sond_file_part_zip_rename_file(SondFilePartZip*,
+		gchar const*, gchar const*, GError**);
+
 gint sond_file_part_rename(SondFilePart* sfp, gchar const* base_new, GError** error) {
 	SondFilePartPrivate* sfp_priv = NULL;
-	SondFilePart* sfp_parent = NULL;
 	gint rc = 0;
 
 	g_return_val_if_fail(sfp, -1);
 
 	sfp_priv = sond_file_part_get_instance_private(sfp);
 
-	g_autofree gchar* path_new = NULL
+	g_autofree gchar* path_new = NULL;
 
-	path_new = get_path(sfp_priv->path, base_new, error);
-	if (!path_new)
-		ERROR_Z_VAL(NULL)
+	path_new = get_new_path(sfp_priv->path, base_new);
 
-	if (!sfp_priv->parent) //sfp ist im fs gespeichert
+	if (!sfp_priv->parent) {//sfp ist im fs gespeichert
 		rc = g_rename(sfp_priv->path, path_new);
+		if (rc && error) *error = g_error_new(g_quark_from_static_string("stdlib"), errno,
+				"g_rename\n%s", strerror(errno)); //error vorbereiten
+	}
 	else if (SOND_IS_FILE_PART_PDF(sfp_priv->parent))
-		rc = sond_file_part_pdf_rename_emb_file(SOND_FILE_PART_PDF(sfp_priv->parent),
-				sfp_priv->path, path_new);
+		rc = sond_file_part_pdf_rename_embedded_file(SOND_FILE_PART_PDF(sfp_priv->parent),
+				sfp_priv->path, path_new, error);
 	else if (SOND_IS_FILE_PART_ZIP(sfp_priv->parent))
 		rc = sond_file_part_zip_rename_file(SOND_FILE_PART_ZIP(sfp_priv->parent),
-				sfp_priv->path, path_new);
+				sfp_priv->path, path_new, error);
 	else {
 		if (error) *error = g_error_new(g_quark_from_static_string("sond"), 0,
 				"%s\nDerzeit nicht implementiert", __func__);
@@ -793,22 +796,25 @@ gint sond_file_part_rename(SondFilePart* sfp, gchar const* base_new, GError** er
 	if (rc)
 		ERROR_Z
 
+	g_free(sfp_priv->path);
+	sfp_priv->path = g_strdup(path_new);
+	
 	return 0;
 }
 
-gint sond_file_part_rename_dir(SondFilePart* sfp,
+gchar* sond_file_part_rename_dir(SondFilePart* sfp,
 		gchar const* path_old, gchar const* base_new, GError** error) {
+	g_autofree gchar* path_new = NULL;
+
+	path_new = get_new_path(path_old, base_new);
+
 	if (!sfp) {
 		//rename dir in fs
-		gchar* path_new = NULL;
-
-		path_new = get_path(path_old, base_new);
+		gint rc = 0;
 
 		rc = g_rename(path_old, path_new);
-		if (rc) {
-			g_free(path_new);
+		if (rc)
 			ERROR_Z_VAL(NULL)
-		}
 	}
 	else if (SOND_IS_FILE_PART_ZIP(sfp)) {
 		//ToDo: zip-Verzeichnis-Namen ändern
@@ -825,7 +831,7 @@ gint sond_file_part_rename_dir(SondFilePart* sfp,
 		return NULL;
 	}
 
-	return path_new;
+	return g_strdup(path_new);
 }
 
 /*
@@ -974,6 +980,17 @@ static fz_buffer* sond_file_part_zip_mod_zip_file(SondFilePartZip* sfp_zip,
 	return NULL;
 
 	return buf_out;
+}
+
+static gint sond_file_part_zip_rename_file(SondFilePartZip* sfp_zip,
+		gchar const* path_old, gchar const* path_new, GError** error) {
+	{
+		if (error) *error = g_error_new(g_quark_from_static_string("sond"), 0,
+				"%s\nUmbenennen von Zip-Dateien noch nicht implementiert", __func__);
+
+		return -1;
+	}
+	return 0;
 }
 
 /*
@@ -1415,17 +1432,156 @@ static fz_buffer* sond_file_part_pdf_mod_emb_file(SondFilePartPDF* sfp_pdf,
 	return buf_out;
 }
 
-static gint sond_file_part_pdf_rename_embedded_file(SondFilePartPdf* sfp_pdf,
-		gchar const* path_old, gchar const* path_new, GError** error) {
-	GPtrArray* arr_emb_files = NULL;
+static gint look_for_embedded_file(fz_context* ctx, pdf_obj* key, pdf_obj* val,
+		gpointer data, GError** error) {
+	pdf_obj* EF_F = NULL;
+	gchar const* path_embedded = NULL;
+	gchar const* path = (gchar const*) data;
 
-	SondFilePartPDFPrivate* sfp_pdf_priv = sond_file_part_pdf_get_instance_private(sfp_pdf);
+	EF_F = get_EF_F(ctx, val, &path_embedded, error);
+	if (!EF_F)
+		ERROR_Z
 
-	arr_emb_files = sfp_pdf_priv->arr_embedded_files;
-	for (guint i = 0; i < arr_emb_files->len; i++) {
+	if (g_strcmp0(path_embedded, path) == 0)
+		return 1;
 
+	return 0;
+}
+
+typedef struct {
+	gchar const* path_old;
+	gchar const* path_new;
+} Rename;
+
+static gint rename_embedded_file(fz_context* ctx, pdf_obj* key, pdf_obj* val,
+		gpointer data, GError** error) {
+	gchar const* path_tmp = NULL;
+	pdf_obj* F = NULL;
+	pdf_obj* UF = NULL;
+	Rename* rename = (Rename*) data;
+
+	if (!pdf_is_dict(ctx, val)) {
+		if (error)
+			*error = g_error_new(g_quark_from_static_string("sond"),
+					0, "%s\nnamestree malformed", __func__);
+		return -1;
 	}
 
+	fz_try(ctx) {
+		F = pdf_dict_get(ctx, val, PDF_NAME(F));
+		UF = pdf_dict_get(ctx, val, PDF_NAME(UF));
+
+		if (pdf_is_string(ctx, UF))
+			path_tmp = pdf_to_text_string(ctx, UF);
+		else if (pdf_is_string(ctx, F))
+			path_tmp = pdf_to_text_string(ctx, F);
+	}
+	fz_catch(ctx) {
+		if (error)
+			*error = g_error_new(g_quark_from_static_string("mupdf"),
+					fz_caught(ctx), "%s\n%s", __func__,
+					fz_caught_message(ctx));
+
+		return -1;
+	}
+
+	if (!path_tmp) {
+		if (error)
+			*error = g_error_new(ZOND_ERROR, 0, "%s\nEingebettete Datei hat keinen Pfad",
+					__func__);
+		return -1;
+	}
+
+	if (g_strcmp0(path_tmp, rename->path_old) != 0)
+		return 0; //nächstes
+
+	fz_try(ctx) {
+		pdf_dict_put_text_string(ctx, val, PDF_NAME(F), rename->path_new);
+		pdf_dict_put_text_string(ctx, val, PDF_NAME(UF), rename->path_new);
+	}
+	fz_catch(ctx) {
+		if (error)
+			*error = g_error_new(g_quark_from_static_string("mupdf"),
+					fz_caught(ctx), "%s\n%s", __func__,
+					fz_caught_message(ctx));
+
+		return -1;
+	}
+
+	return 1;
+}
+
+static gint sond_file_part_pdf_rename_embedded_file(SondFilePartPDF* sfp_pdf,
+		gchar const* path_old, gchar const* path_new, GError** error) {
+	gint rc = 0;
+	pdf_obj* embedded_files_dict = NULL;
+	fz_context* ctx = NULL;
+	pdf_document* doc = NULL;
+	Rename rename = {path_old, path_new};
+
+	ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
+	if (!ctx) {
+		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"), 0,
+				"%s\nfz_new_context gibt NULL zurück", __func__);
+		return -1;
+	}
+
+	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, error);
+	if (!doc) {
+		fz_drop_context(ctx);
+		ERROR_Z
+	}
+
+	rc = pdf_get_names_tree_dict(ctx, doc, PDF_NAME(EmbeddedFiles),
+			&embedded_files_dict, error);
+	if (rc) {
+		pdf_drop_document(ctx, doc);
+		fz_drop_context(ctx);
+		ERROR_Z
+	}
+
+	rc = pdf_walk_names_dict(ctx, embedded_files_dict,
+			NULL, look_for_embedded_file, (gpointer) path_new, error);
+	if (rc == -1) {
+		pdf_drop_document(ctx, doc);
+		fz_drop_context(ctx);
+		ERROR_Z
+	}
+	else if (rc == 1)
+	{
+		pdf_drop_document(ctx, doc);
+		fz_drop_context(ctx);
+
+		if (error) *error = g_error_new(g_quark_from_static_string("sond"), 0,
+				"%s\nDateiname existiert bereits", __func__);
+
+		return -1;
+	}
+
+	rc = pdf_walk_names_dict(ctx, embedded_files_dict,
+			NULL, rename_embedded_file, (gpointer) &rename, error);
+	if (rc == -1) {
+		pdf_drop_document(ctx, doc);
+		fz_drop_context(ctx);
+		ERROR_Z
+	}
+	else if (rc == 0)
+	{
+		pdf_drop_document(ctx, doc);
+		fz_drop_context(ctx);
+		if (error) *error = g_error_new(g_quark_from_static_string("sond"), 0,
+				"%s\nDateiname nicht gefunden", __func__);
+
+		return -1;
+	}
+
+	rc = pdf_save(ctx, doc, sfp_pdf, error);
+	pdf_drop_document(ctx, doc);
+	fz_drop_context(ctx);
+	if (rc)
+		ERROR_Z
+
+	return 0;
 }
 
 /*

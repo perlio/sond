@@ -235,14 +235,14 @@ gint string_to_guint(const gchar *string, guint *zahl) {
 		return -1;
 }
 
-GSList*
-choose_files(const GtkWidget *window, const gchar *path,
+static gchar*
+choose_file(const GtkWidget *window, const gchar *path,
 		const gchar *title_text, gchar *accept_text, gint action,
-		const gchar *ext, gboolean multiple) {
+		const gchar *ext) {
 	GtkWidget *dialog = NULL;
 	gint rc = 0;
 	gchar *dir_start = NULL;
-	GSList *list = NULL;
+	gchar* filename = NULL;
 
 	dialog = gtk_file_chooser_dialog_new(title_text, GTK_WINDOW(window), action,
 			"_Abbrechen", GTK_RESPONSE_CANCEL, accept_text, GTK_RESPONSE_ACCEPT,
@@ -255,48 +255,50 @@ choose_files(const GtkWidget *window, const gchar *path,
 
 	gtk_file_chooser_set_current_folder(GTK_FILE_CHOOSER(dialog), dir_start);
 	g_free(dir_start);
-	gtk_file_chooser_set_select_multiple(GTK_FILE_CHOOSER(dialog), multiple);
+	gtk_file_chooser_set_select_multiple(GTK_FILE_CHOOSER(dialog), FALSE);
 	gtk_file_chooser_set_do_overwrite_confirmation(GTK_FILE_CHOOSER(dialog),
 	TRUE);
 	if (action == GTK_FILE_CHOOSER_ACTION_SAVE && ext)
 		gtk_file_chooser_set_current_name(GTK_FILE_CHOOSER(dialog), ext);
 
 	rc = gtk_dialog_run(GTK_DIALOG(dialog));
-	if (rc == GTK_RESPONSE_ACCEPT)
-		list = gtk_file_chooser_get_filenames(GTK_FILE_CHOOSER(dialog));
+	if (rc == GTK_RESPONSE_ACCEPT) {
+		filename = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
+		for (gchar *p = filename; *p; p++) {
+		    if (*p == '\\') *p = '/';
+		}
+	}
 
 	//Dialog schließen
 	gtk_widget_destroy(dialog);
 
-	return list;
+	return filename;
 }
 
 gchar*
 filename_speichern(GtkWindow *window, const gchar *titel, const gchar *ext) {
-	GSList *list = choose_files(GTK_WIDGET(window), NULL, titel, "Speichern",
-			GTK_FILE_CHOOSER_ACTION_SAVE, ext, FALSE);
+	gchar* filename = NULL;
 
-	if (!list)
+	filename = choose_file(GTK_WIDGET(window), NULL, titel, "Speichern",
+			GTK_FILE_CHOOSER_ACTION_SAVE, ext);
+
+	if (!filename)
 		return NULL;
 
-	gchar *abs_path = g_strdup(list->data);
-	g_slist_free_full(list, g_free);
-
-	return abs_path; //muß g_freed werden
+	return filename; //muß g_freed werden
 }
 
 gchar*
 filename_oeffnen(GtkWindow *window) {
-	GSList *list = choose_files(GTK_WIDGET(window), NULL, "Datei auswählen",
-			"Öffnen", GTK_FILE_CHOOSER_ACTION_OPEN, NULL, FALSE);
+	gchar* filename = NULL;
 
-	if (!list)
+	filename = choose_file(GTK_WIDGET(window), NULL, "Datei auswählen",
+			"Öffnen", GTK_FILE_CHOOSER_ACTION_OPEN, NULL);
+
+	if (!filename)
 		return NULL;
 
-	gchar *abs_path = g_strdup(list->data);
-	g_slist_free_full(list, g_free);
-
-	return abs_path; //muß g_freed werden
+	return filename; //muß g_freed werden
 }
 
 gchar*

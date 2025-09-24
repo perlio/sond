@@ -70,7 +70,9 @@ gint sond_file_part_delete_sfp(SondFilePart*, GError**);
 
 gint sond_file_part_replace(SondFilePart*, fz_context*, fz_buffer*, GError**);
 
-//gint sond_file_part_replace(SondFilePart*, fz_context*, fz_buffer*, GError**);
+gint sond_file_part_rename(SondFilePart*, gchar const*, GError**);
+
+gchar* sond_file_part_rename_dir(SondFilePart*, gchar const*, gchar const*, GError**);
 
 //SondFilePart Error
 #define SOND_TYPE_FILE_PART_ERROR sond_file_part_error_get_type( )

@@ -394,6 +394,12 @@ gint sond_tvfm_item_load_children(SondTVFMItem* stvfm_item,
 					arr_children, error);
 			if (rc) ERROR_Z
 		}
+		else {
+			if (error) *error = g_error_new(g_quark_from_static_string("sond"), 0,
+					"%s\nKeine Kinder vorhanden", __func__);
+
+			return -1;
+		}
 	}
 
 	return 0;
@@ -743,24 +749,22 @@ static void sond_treeviewfm_finalize(GObject *g_object) {
 
 static void sond_treeviewfm_cell_edited(GtkCellRenderer *cell,
 		gchar *path_string, gchar *new_text, gpointer data) {
-	GtkTreeModel *model = NULL;
 	GtkTreeIter iter = { 0 };
 	SondTVFMItem *stvfm_item = NULL;
 	GError *error = NULL;
 	gint rc = 0;
 	gchar const* old_text = NULL;
+	SondTVFMItemPrivate *stvfm_item_priv = NULL;
 
 	SondTreeviewFM *stvfm = (SondTreeviewFM*) data;
-	SondTVFMItemPrivate *stvfm_item_priv = NULL;
-	model = gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm));
+	
 	gtk_tree_model_get_iter_from_string(
 			gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)), &iter, path_string);
-	g_object_unref(stvfm_item);
-
-	gtk_tree_model_get(model, &iter, 0, &stvfm_item, -1);
-
+	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)),
+			&iter, 0, &stvfm_item, -1);
 	stvfm_item_priv = sond_tvfm_item_get_instance_private(
 			stvfm_item);
+	g_object_unref(stvfm_item);
 
 	old_text = stvfm_item_priv->display_name;
 
@@ -859,6 +863,8 @@ static gint sond_treeviewfm_text_edited(SondTreeviewFM *stvfm,
 	if (SOND_TREEVIEWFM_GET_CLASS(stvfm)->after_move)
 		SOND_TREEVIEWFM_GET_CLASS(stvfm)->after_move(stvfm,
 				(rc == 0) ? TRUE : FALSE, (error) ? *error : NULL);
+	if (rc)
+		ERROR_Z
 
 	return 0;
 }

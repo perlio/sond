@@ -3183,28 +3183,6 @@ gint zond_treeview_load_baum(ZondTreeview *ztv, GError **error) {
 	return 0;
 }
 
-typedef struct {
-	gint ID;
-	gchar const *text_new;
-} Foreach;
-
-static gboolean zond_treeview_foreach_pdf_abschnitt(GtkTreeModel *model,
-		GtkTreePath *path, GtkTreeIter *iter, gpointer data) {
-	gint node_id = 0;
-
-	Foreach *foreach = (Foreach*) data;
-
-	gtk_tree_model_get(model, iter, 2, &node_id, -1);
-
-	if (node_id == foreach->ID) {
-		zond_tree_store_set(iter, NULL, foreach->text_new, 0);
-
-		return TRUE;
-	}
-
-	return FALSE;
-}
-
 static gboolean zond_treeview_foreach_path(GtkTreeModel *model,
 		GtkTreePath *path, GtkTreeIter *iter, gpointer user_data) {
 	GtkTreePath **new_path = (GtkTreePath**) user_data;
