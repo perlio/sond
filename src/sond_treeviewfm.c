@@ -777,6 +777,8 @@ static void sond_treeviewfm_cell_edited(GtkCellRenderer *cell,
 		display_message(gtk_widget_get_toplevel(GTK_WIDGET(stvfm)),
 				"Umbenennen nicht möglich\n\n", error->message, NULL);
 		g_error_free(error);
+
+		return;
 	}
 
 	g_free(stvfm_item_priv->display_name);
@@ -795,23 +797,84 @@ static void sond_treeviewfm_constructed(GObject *self) {
 	return;
 }
 
-static gint rename_item(SondTVFMItemPrivate* stvfm_item_priv, gchar const* new_text, GError** error) {
+static void adjust_sfps_in_dir(SondFilePart* sfp_dir, SondFilePart* sfp_dst,
+		gchar const* path_old, gchar const* path_new) {
+	GPtrArray* arr_opened_children = NULL;
+
+	arr_opened_children = sond_file_part_get_arr_opened_files(sfp_dir); //NULL ist ok
+
+	//welche liegen "unterhalb"?
+	for (guint i = 0; arr_opened_children && i < arr_opened_children->len; i++) {
+		SondFilePart* sfp_child = NULL;
+		gchar const* path_child = NULL;
+
+		sfp_child = g_ptr_array_index(arr_opened_children, i);
+		path_child = sond_file_part_get_path(sfp_child);
+
+		if (g_str_has_prefix(path_child, path_old)) { //Treffer
+			//ggf. neues Eltern-sfp
+			if (sfp_dir != sfp_dst)
+				sond_file_part_set_parent(sfp_child, sfp_dst);
+
+			//Pfad von sfp_child anpassen
+			gchar* path_child_new = NULL;
+
+			//stvfm_item_priv->path_or_section ist der neue Pfad des Verzeichnisses
+			//kann nicht NULL sein, ist mindestens toplevel_path!
+			path_child_new = g_strconcat(path_new, "/",
+					path_child + ((path_old) ? strlen(path_old) + 1 : 0), NULL);
+			sond_file_part_set_path(sfp_child, path_child_new);
+			g_free(path_child_new);
+		}
+	}
+
+	return;
+}
+
+static gint rename_item(SondTVFMItemPrivate* stvfm_item_priv, gchar const* text_new, GError** error) {
 	if (!stvfm_item_priv->path_or_section) {
 		gint rc = 0;
-		rc = sond_file_part_rename(stvfm_item_priv->sond_file_part, new_text, error);
+		rc = sond_file_part_rename(stvfm_item_priv->sond_file_part, text_new, error);
 		if (rc)
 			ERROR_Z
 	}
-	else {
-		gchar* path_new = NULL;
+	else { //richtiges Verzeichnis, nicht LEAF oder Root-Dir (=LEAF)
+		g_autofree gchar* path_new = NULL;
 
-		path_new = sond_file_part_rename_dir(stvfm_item_priv->sond_file_part,
-				stvfm_item_priv->path_or_section, new_text, error);
-		if (!path_new)
-			ERROR_Z
+		path_new = change_basename(stvfm_item_priv->path_or_section, text_new);
 
+		if (!stvfm_item_priv->sond_file_part) {
+			//rename dir in fs
+			gint rc = 0;
+
+			rc = g_rename(stvfm_item_priv->path_or_section, path_new);
+			if (rc) {
+				if (error) *error = g_error_new(g_quark_from_static_string("stdlib"), errno,
+						"g_rename\n%s", strerror(errno));
+
+				return -1;
+			}
+		}
+		else if (SOND_IS_FILE_PART_ZIP(stvfm_item_priv->sond_file_part)) {
+			//ToDo: zip-Verzeichnis-Namen ändern
+			if (error) *error = g_error_new(g_quark_from_static_string("sond"), 0,
+					"%s\nrename zip-dir noch nicht implementiert", __func__);
+
+			return -1;
+		}
+		//was anderes?
+		else {
+			if (error) *error = g_error_new(g_quark_from_static_string("sond"), 0,
+					"%s\nNicht implementiert", __func__);
+
+			return -1;
+		}
+
+		//sfp-Pfade ändern, soweit erforderlich
+		adjust_sfps_in_dir(stvfm_item_priv->sond_file_part,
+				stvfm_item_priv->sond_file_part, stvfm_item_priv->path_or_section, path_new);
 		g_free(stvfm_item_priv->path_or_section);
-		stvfm_item_priv->path_or_section = path_new;
+		stvfm_item_priv->path_or_section = g_strdup(path_new);
 	}
 
 	return 0;
@@ -1412,9 +1475,7 @@ static gint move_stvfm_item(SondTVFMItem* stvfm_item, SondTVFMItemPrivate* stvfm
 		sfp_dst = stvfm_item_parent_priv->sond_file_part;
 
 	//Wenn leaf oder root-dir verschoben wird
-	if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF ||
-			(stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_DIR &&
-					!stvfm_item_priv->path_or_section)) {
+	if (!stvfm_item_priv->path_or_section) { //LEAF und ROOT-Dir haben keinen path!
 		SondFilePart* sfp_parent = NULL;
 
 		sfp_parent = sond_file_part_get_parent(stvfm_item_priv->sond_file_part);
@@ -1434,10 +1495,9 @@ static gint move_stvfm_item(SondTVFMItem* stvfm_item, SondTVFMItemPrivate* stvfm
 		g_free(path_new);
 	}
 	else { //Wenn "wirkliches" dir verschoben wird:
-
-		//bisherigen path merken - für Längenbestimmung
 		gchar* path_old = NULL;
 
+		//bisherigen path merken - für Längenbestimmung
 		path_old = stvfm_item_priv->path_or_section;
 
 		//dann neuen path für item
@@ -1448,40 +1508,8 @@ static gint move_stvfm_item(SondTVFMItem* stvfm_item, SondTVFMItemPrivate* stvfm
 
 		//dann alle geöffneten sfps, die in diesem dir liegen, anpassen
 		//welche sfps sind in diesem Raum geöffnet?
-		GPtrArray* arr_opened_children = NULL;
-
-		arr_opened_children = sond_file_part_get_arr_opened_files(stvfm_item_priv->sond_file_part); //NULL ist ok
-
-		//welche liegen "unterhalb"?
-		for (guint i = 0; arr_opened_children && i < arr_opened_children->len; i++) {
-			SondFilePart* sfp_child = NULL;
-			gchar const* path_child = NULL;
-
-			sfp_child = g_ptr_array_index(arr_opened_children, i);
-			path_child = sond_file_part_get_path(sfp_child);
-
-			if (!stvfm_item_priv->path_or_section ||
-					g_str_has_prefix(path_child, stvfm_item_priv->path_or_section)) { //Treffer
-				//ggf. neues Eltern-sfp
-				if (stvfm_item_priv->sond_file_part != sfp_dst)
-				{
-					if (stvfm_item_parent_priv)
-						sond_file_part_set_parent(sfp_child, stvfm_item_parent_priv->sond_file_part);
-					else
-						sond_file_part_set_parent(sfp_child, NULL);
-				}
-
-				//Pfad von sfp_child anpassen
-				gchar* path_new = NULL;
-
-				//stvfm_item_priv->path_or_section ist der neue Pfad des Verzeichnisses
-				//kann nicht NULL sein, ist mindestens toplevel_path!
-				path_new = g_strconcat(stvfm_item_priv->path_or_section, "/",
-						path_child + ((path_old) ? strlen(path_old) + 1 : 0), NULL);
-				sond_file_part_set_path(sfp_child, path_new);
-				g_free(path_new);
-			}
-		}
+		adjust_sfps_in_dir(stvfm_item_priv->sond_file_part, sfp_dst,
+				path_old, stvfm_item_priv->path_or_section);
 
 		g_free(path_old);
 	}

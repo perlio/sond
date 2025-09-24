@@ -36,6 +36,8 @@ typedef void *GPid;
 typedef void *gpointer;
 typedef struct _SondFilePart SondFilePart;
 
+gchar* change_basename(gchar const*, gchar const*);
+
 void display_message(GtkWidget*, ...);
 
 void display_error(GtkWidget*, gchar const*, gchar const*);

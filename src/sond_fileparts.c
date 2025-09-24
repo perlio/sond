@@ -741,22 +741,6 @@ gint sond_file_part_replace(SondFilePart* sfp, fz_context* ctx,
 	return 0;
 }
 
-static gchar* get_new_path(gchar const* path_old, gchar const* base_new) {
-	//rename dir in fs
-	gchar const * base = NULL;
-	gchar* path_new = NULL;
-
-	base = strrchr(path_old, '/');
-	if (!base) //kein Slash gefunden
-		path_new = g_strdup(base_new);
-	else {
-		path_new = g_strndup(path_old, strlen(path_old) - strlen(base) + 1);
-		path_new = add_string(path_new, g_strdup(base_new));
-	}
-
-	return path_new;
-}
-
 static gint sond_file_part_pdf_rename_embedded_file(SondFilePartPDF*,
 		gchar const*, gchar const*, GError**);
 
@@ -773,7 +757,7 @@ gint sond_file_part_rename(SondFilePart* sfp, gchar const* base_new, GError** er
 
 	g_autofree gchar* path_new = NULL;
 
-	path_new = get_new_path(sfp_priv->path, base_new);
+	path_new = change_basename(sfp_priv->path, base_new);
 
 	if (!sfp_priv->parent) {//sfp ist im fs gespeichert
 		rc = g_rename(sfp_priv->path, path_new);
@@ -800,38 +784,6 @@ gint sond_file_part_rename(SondFilePart* sfp, gchar const* base_new, GError** er
 	sfp_priv->path = g_strdup(path_new);
 	
 	return 0;
-}
-
-gchar* sond_file_part_rename_dir(SondFilePart* sfp,
-		gchar const* path_old, gchar const* base_new, GError** error) {
-	g_autofree gchar* path_new = NULL;
-
-	path_new = get_new_path(path_old, base_new);
-
-	if (!sfp) {
-		//rename dir in fs
-		gint rc = 0;
-
-		rc = g_rename(path_old, path_new);
-		if (rc)
-			ERROR_Z_VAL(NULL)
-	}
-	else if (SOND_IS_FILE_PART_ZIP(sfp)) {
-		//ToDo: zip-Verzeichnis-Namen ändern
-		if (error) *error = g_error_new(g_quark_from_static_string("sond"), 0,
-				"%s\nrename zip-dir noch nicht implementiert", __func__);
-
-		return NULL;
-	}
-	//was anderes?
-	else {
-		if (error) *error = g_error_new(g_quark_from_static_string("sond"), 0,
-				"%s\nNicht implementiert", __func__);
-
-		return NULL;
-	}
-
-	return g_strdup(path_new);
 }
 
 /*
@@ -891,6 +843,7 @@ gint sond_file_part_insert(SondFilePart* sfp, fz_context* ctx,
 	return 0;
 }
 */
+
 /*
  * Error
  */

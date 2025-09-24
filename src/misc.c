@@ -30,6 +30,22 @@
 #include <shlwapi.h>
 #endif // _WIN32
 
+gchar* change_basename(gchar const* path_old, gchar const* base_new) {
+	//rename dir in fs
+	gchar const * base = NULL;
+	gchar* path_new = NULL;
+
+	base = strrchr(path_old, '/');
+	if (!base) //kein Slash gefunden
+		path_new = g_strdup(base_new);
+	else {
+		path_new = g_strndup(path_old, strlen(path_old) - strlen(base) + 1);
+		path_new = add_string(path_new, g_strdup(base_new));
+	}
+
+	return path_new;
+}
+
 /** Zeigt Fenster, in dem Liste übergebener strings angezeigt wird.
  *   parent-window kann NULL sein, dann Warnung
  *   text1 darf nicht NULL sein
