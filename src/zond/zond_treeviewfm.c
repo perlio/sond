@@ -555,9 +555,6 @@ gint zond_treeviewfm_section_visible(ZondTreeviewFM *ztvfm,
 	}
 
 	if (!section) { //nur children und opened abfragen
-		if (visible)
-			*visible = TRUE;
-
 		//prüfen, ob Kinder, und wenn nur dummy
 		if (children) {
 			if (gtk_tree_model_iter_has_child(
@@ -582,10 +579,11 @@ gint zond_treeviewfm_section_visible(ZondTreeviewFM *ztvfm,
 	else { //section muß gesucht werden
 		gint rc = 0;
 		Anbindung anbindung = { 0 };
+		GtkTreeIter iter_very_intern = { 0 };
 
 		anbindung_parse_file_section(section, &anbindung);
 
-		rc = zond_treeviewfm_find_section(ztvfm, &iter_intern, anbindung, open, &iter_intern, error);
+		rc = zond_treeviewfm_find_section(ztvfm, &iter_intern, anbindung, open, &iter_very_intern, error);
 		if (rc == -1)
 			ERROR_Z
 		else if (rc == 0) {
@@ -593,8 +591,11 @@ gint zond_treeviewfm_section_visible(ZondTreeviewFM *ztvfm,
 
 			return 0; //nix gefunden
 		}
-
+		iter_intern = iter_very_intern;
 	}
+
+	if (visible)
+		*visible = TRUE;
 
 	if (iter)
 		*iter = iter_intern;
