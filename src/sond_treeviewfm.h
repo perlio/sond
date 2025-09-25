@@ -56,6 +56,10 @@ SondTreeviewFM* sond_tvfm_item_get_stvfm(SondTVFMItem *);
 
 gboolean sond_tvfm_item_has_children(SondTVFMItem*);
 
+void sond_tvfm_item_set_icon_name(SondTVFMItem*, gchar const*);
+
+void sond_tvfm_item_set_display_name(SondTVFMItem*, gchar const*);
+
 SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM*, SondTVFMItemType type,
 		SondFilePart *, gchar const*);
 

@@ -121,12 +121,24 @@ gboolean sond_tvfm_item_get_has_children(SondTVFMItem *stvfm_item) {
 	return stvfm_item_priv->has_children;
 }
 
-void sond_tvfm_item_set_has_children(SondTVFMItem *stvfm_item,
-		gboolean has_children) {
+void sond_tvfm_item_set_icon_name(SondTVFMItem* stvfm_item,
+		gchar const* icon_name) {
 	SondTVFMItemPrivate *stvfm_item_priv =
 			sond_tvfm_item_get_instance_private(stvfm_item);
 
-	stvfm_item_priv->has_children = has_children;
+	stvfm_item_priv->icon_name = g_strdup(icon_name);
+
+	return;
+}
+
+void sond_tvfm_item_set_display_name(SondTVFMItem* stvfm_item,
+		gchar const* display_name) {
+	SondTVFMItemPrivate *stvfm_item_priv =
+			sond_tvfm_item_get_instance_private(stvfm_item);
+
+	stvfm_item_priv->display_name = g_strdup(display_name);
+
+	return;
 }
 
 static gint sond_tvfm_item_load_fs_dir(SondTVFMItem*, gboolean, GPtrArray**, GError**);
@@ -163,8 +175,8 @@ SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM* stvfm, SondTVFMItemType type
 					SOND_TREEVIEWFM_GET_CLASS(stvfm)->has_sections(stvfm_item);
 	}
 	else if (type == SOND_TVFM_ITEM_TYPE_LEAF_SECTION) {
-		stvfm_item_priv->icon_name = g_strdup("anbindung");
-		stvfm_item_priv->display_name = g_strdup(stvfm_item_priv->path_or_section);
+		//stvfm_item_priv->icon_name muß in load_children gesetzt werden;
+		//stvfm_item_priv->display_name ebenfalz
 		if (SOND_TREEVIEWFM_GET_CLASS(stvfm)->has_sections)
 			stvfm_item_priv->has_children =
 					SOND_TREEVIEWFM_GET_CLASS(stvfm)->has_sections(stvfm_item);
