@@ -275,12 +275,7 @@ static gint zond_anbindung_insert_pdf_abschnitt_in_dbase(Projekt *zond,
 		gint rc = 0;
 
 		rc = zond_treeview_insert_file_part_in_db(zond, file_part, "anbindung",
-				NULL, error);
-		if (rc)
-			ERROR_Z
-
-		rc = zond_dbase_get_file_part_root(zond->dbase_zond->zond_dbase_work,
-				file_part, &pdf_root, error);
+				&pdf_root, error);
 		if (rc)
 			ERROR_Z
 	}
@@ -354,9 +349,9 @@ static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
 	if (!visible)
 		return 0;
 
-	if (!opened) //erstes Kind - einfach
+	if (!opened)
 	{
-		if (!children) // dummy einfügen;
+		if (!children) //erstes Kind - einfach dummy einfügen;
 		{
 			GtkTreeIter iter_inserted = { 0 };
 
@@ -365,7 +360,9 @@ static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
 							gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_FS]) )),
 					&iter_inserted, &iter, 0);
 		}
+		//else: brauch kein dummy einfügen; ist ja schon
 
+		//und beim Öffnen wird alles geladen
 		if (open) {
 			GtkTreeIter iter_new = { 0 };
 
@@ -376,19 +373,19 @@ static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
 					&iter);
 			sond_treeview_set_cursor(zond->treeview[BAUM_FS], &iter_new);
 		}
-	} else {
+	}
+	else { //wenn Knoten geöffnet ist (also jedenfalls ein Kind hat
 		GtkTreeIter iter_test = { 0 };
 		GtkTreeIter iter_new = { 0 };
-		GtkTreeIter iter_anchor = { 0 };
 		gint pos = 0;
-		gboolean child = TRUE;
 		SondTVFMItem *stvfm_item_child = NULL;
 		gchar* section = NULL;
 
 		gtk_tree_model_iter_children(
 				gtk_tree_view_get_model(GTK_TREE_VIEW(zond->treeview[BAUM_FS])),
-				&iter_test, &iter);
+				&iter_test, &iter); //iter_test ist erstes Kind
 
+		//erstmal Stelle finden, wo stvfm_item eingefügt wird
 		do {
 			Anbindung anbindung_test = { 0 };
 			SondTVFMItem *stvfm_item = NULL;
@@ -401,7 +398,7 @@ static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
 			if (!stvfm_item) {
 				if (error)
 					*error = g_error_new( ZOND_ERROR, 0,
-							"%s\nKnoten ist lees", __func__);
+							"%s\nKnoten ist leer", __func__);
 
 				return -1;
 			}
@@ -468,8 +465,7 @@ static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
 				&iter_new, 0, G_OBJECT(stvfm_item_child), -1);
 		g_object_unref(stvfm_item_child);
 
-		//Kinder gg. umkopieren
-		iter_anchor = iter_new;
+		//Etwaige Kinder des neuen Knoten löschen
 		iter_test = iter_new;
 
 		while (gtk_tree_model_iter_next(
@@ -490,8 +486,7 @@ static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
 
 				return -1;
 			}
-
-			if (!SOND_IS_FILE_PART_PDF(sond_tvfm_item_get_sond_file_part(stvfm_item))) {
+			else if (!SOND_IS_FILE_PART_PDF(sond_tvfm_item_get_sond_file_part(stvfm_item))) {
 				if (error)
 					*error = g_error_new( ZOND_ERROR, 0,
 							"%s\nKnoten enthält keinen PDF-Abschnitt",
@@ -505,14 +500,21 @@ static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
 			g_object_unref(stvfm_item);
 			anbindung_parse_file_section(section_test, &anbindung_test);
 
+			//ToDo: Expanded-Struktur des gelöschten Knotens merken und am Zielort wiederherstellen
 			if (anbindung_1_eltern_von_2(anbindung, anbindung_test)) {
-				zond_treeviewfm_move_node(
-						gtk_tree_view_get_model(
-								GTK_TREE_VIEW(zond->treeview[BAUM_FS])),
-						&iter_test, &iter_anchor, child);
-				child = FALSE;
-				iter_anchor = iter_test;
-				iter_test = iter_new;
+				gtk_tree_store_remove(
+						GTK_TREE_STORE(
+								gtk_tree_view_get_model(GTK_TREE_VIEW(zond->treeview[BAUM_FS]) )),
+						&iter_test);
+
+				//Wenn noch kein dummy eingefügt wurde...
+				if (!gtk_tree_model_iter_has_child(
+						gtk_tree_view_get_model(GTK_TREE_VIEW(zond->treeview[BAUM_FS])), &iter_new))
+					gtk_tree_store_insert( //dummy einfügen
+							GTK_TREE_STORE(
+									gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_FS]) )),
+							&iter_test, &iter_new, -1);
+				iter_test = iter_new; //wieder auf den neuen Knoten setzen
 			} else if (anbindung_1_vor_2(anbindung, anbindung_test))
 				break;
 			else //darf's nicht geben
@@ -525,13 +527,17 @@ static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
 			}
 		}
 
-		if (open)
+		if (open) {//heißt: Datei ist nicht angebunden im BAUM_INHALT
+			GtkTreePath *path = NULL;
 			sond_treeview_set_cursor(zond->treeview[BAUM_FS], &iter_new);
-
-		//wenn Geschwister als Kind umkopiert wurde, soll Elternknoten geöffnet werden
-		if (!child)
-			sond_treeview_expand_row(zond->treeview[BAUM_FS], &iter_new);
-	} //irre
+			path = gtk_tree_model_get_path(gtk_tree_view_get_model(
+							GTK_TREE_VIEW(zond->treeview[BAUM_FS])),
+					&iter_new);
+			gtk_tree_view_expand_row(
+					GTK_TREE_VIEW(zond->treeview[BAUM_FS]), path, FALSE);
+			gtk_tree_path_free(path);
+		}
+	}
 
 	return 0;
 }

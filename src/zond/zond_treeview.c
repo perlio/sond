@@ -1771,7 +1771,7 @@ static gint zond_treeview_selection_loeschen_foreach(SondTreeview *tree_view,
 				FALSE, &visible, &iter_fm, NULL, NULL, error);
 		g_free(file_part);
 		g_free(section);
-		if (rc)
+		if (rc == -1)
 			ERROR_Z
 
 		rc = zond_dbase_get_baum_auswertung_copy(

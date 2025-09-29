@@ -2337,7 +2337,7 @@ static void sond_treeviewfm_row_collapsed(GtkTreeView *tree_view,
 	return;
 }
 
-static void sond_treeviewfm_row_expanded(GtkTreeView *tree_view,
+void sond_treeviewfm_row_expanded(GtkTreeView *tree_view,
 		GtkTreeIter *iter, GtkTreePath *path, gpointer data) {
 	gint rc = 0;
 	GtkTreeIter iter_dummy = { 0 };

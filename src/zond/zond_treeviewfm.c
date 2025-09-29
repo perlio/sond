@@ -62,7 +62,8 @@ static gint zond_treeviewfm_deter_background(SondTVFMItem *stvfm_item, GError **
 				ZOND_TREEVIEWFM(sond_tvfm_item_get_stvfm(stvfm_item)));
 
 		sfp = sond_tvfm_item_get_sond_file_part(stvfm_item);
-		if (sfp) filepart = sond_file_part_get_filepart(sfp);
+		if (sfp)
+			filepart = sond_file_part_get_filepart(sfp);
 
 		rc = zond_dbase_test_path(priv->zond->dbase_zond->zond_dbase_work,
 				filepart, error);
