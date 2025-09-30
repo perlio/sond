@@ -57,14 +57,25 @@ static gint zond_treeviewfm_deter_background(SondTVFMItem *stvfm_item, GError **
 		gint rc = 0;
 		SondFilePart* sfp = NULL;
 		g_autofree gchar* filepart = NULL;
+		gchar const* section = NULL;
 
 		ZondTreeviewFMPrivate *priv = zond_treeviewfm_get_instance_private(
 				ZOND_TREEVIEWFM(sond_tvfm_item_get_stvfm(stvfm_item)));
 
 		sfp = sond_tvfm_item_get_sond_file_part(stvfm_item);
-		if (sfp)
-			filepart = sond_file_part_get_filepart(sfp);
+		filepart = sond_file_part_get_filepart(sfp);
 
+		section = sond_tvfm_item_get_path_or_section(stvfm_item);
+
+		//Funktion testet, ob mind ein Abschnitt in db, der section mindestens umfaßt
+		rc = zond_dbase_test_path_section(
+				priv->zond->dbase_zond->zond_dbase_work, filepart,
+				section, error);
+		if (rc == -1)
+			ERROR_Z
+		else if (rc == 1)
+			return 1; //Treffer
+		/*
 		rc = zond_dbase_test_path(priv->zond->dbase_zond->zond_dbase_work,
 				filepart, error);
 		if (rc == -1)
@@ -77,8 +88,6 @@ static gint zond_treeviewfm_deter_background(SondTVFMItem *stvfm_item, GError **
 				gint rc = 0;
 
 				section = sond_tvfm_item_get_path_or_section(stvfm_item);
-				if (!section)
-					g_warning("Keine section zu LEAF_SECTION: %s", filepart);
 
 				//Funktion testet, ob mind ein Abschnitt in db, der section mindestens umfaßt
 				rc = zond_dbase_test_path_section(
@@ -90,6 +99,7 @@ static gint zond_treeviewfm_deter_background(SondTVFMItem *stvfm_item, GError **
 					return 1; //Treffer
 			}
 		}
+		*/
 	}
 
 	return 0;
@@ -383,8 +393,12 @@ static gint zond_treeviewfm_load_sections(SondTVFMItem* stvfm_item, GPtrArray** 
 
 	g_return_val_if_fail(sfp, -1);
 
-	if (!SOND_IS_FILE_PART_PDF(sfp))
-		return 0; //derzeit haben nur PDFs sections!
+	if (!SOND_IS_FILE_PART_PDF(sfp)) {
+		if (error) *error = g_error_new(ZOND_ERROR, 0,
+				"%s\nNur bei PDF-FileParts möglich", __func__);
+
+		return -1;
+	}
 
 	section = sond_tvfm_item_get_path_or_section(stvfm_item);
 	filepart = sond_file_part_get_filepart(sfp);
@@ -392,8 +406,12 @@ static gint zond_treeviewfm_load_sections(SondTVFMItem* stvfm_item, GPtrArray** 
 	ID = zond_dbase_get_section(ztvfm_priv->zond->dbase_zond->zond_dbase_work, filepart, section, error);
 	if (ID == -1)
 		ERROR_Z
-	else if (ID == 0)
-		return 0; //gibts nicht, hat auch keine sections
+	else if (ID == 0) {
+		if (error) *error = g_error_new(ZOND_ERROR, 0,
+				"%s\nAbschnitt nicht gefunden", __func__);
+
+		return -1;
+	}
 
 	rc = zond_dbase_get_first_child(ztvfm_priv->zond->dbase_zond->zond_dbase_work, ID, &child, error);
 	if (rc)
@@ -514,7 +532,7 @@ static gint zond_treeviewfm_find_section(ZondTreeviewFM *ztvfm,
 		anbindung_parse_file_section(section_child, &anbindung_child);
 		g_object_unref(stvfm_item);
 
-		if (anbindung_1_eltern_von_2(anbindung, anbindung_child)) {
+		if (anbindung_1_eltern_von_2(anbindung_child, anbindung)) {
 			gint rc = 0;
 
 			rc = zond_treeviewfm_find_section(ztvfm, &iter_child, anbindung, open, iter_res, error);

@@ -773,7 +773,14 @@ gint zond_dbase_insert_node(ZondDBase *zond_dbase, gint anchor_ID,
 		ERROR_Z_ROLLBACK
 
 	rc = sqlite3_step(stmt[3]);
-	if (rc != SQLITE_ROW)
+	if (rc == SQLITE_DONE) {
+		if (error)
+			*error = g_error_new(g_quark_from_static_string("ZOND_DBASE"), 0,
+					"%s\nKnoten konnte nicht eingefügt werden", __func__);
+
+		ERROR_Z_ROLLBACK;
+	}
+	else if (rc != SQLITE_ROW)
 		ERROR_Z_ROLLBACK
 
 	rc = sqlite3_step(stmt[4]);
@@ -791,11 +798,15 @@ gint zond_dbase_create_file_root(ZondDBase *zond_dbase, const gchar *file_part,
 
 	const gchar *sql[] =
 			{
+					"SAVEPOINT statement; ",
+
 					"INSERT INTO knoten "
 							"(parent_id, older_sibling_id, type, file_part, icon_name, node_text, text) "
 							"VALUES (0, 0, 5, ?1, ?2, ?3, ?4); ",
 
-					"VALUES (last_insert_rowid()); " };
+					"VALUES (last_insert_rowid()); ",
+
+					"RELEASE statement; " };
 
 	rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
 			error);
@@ -805,19 +816,19 @@ gint zond_dbase_create_file_root(ZondDBase *zond_dbase, const gchar *file_part,
 		return -1;
 	}
 
-	rc = sqlite3_bind_text(stmt[0], 1, file_part, -1, NULL);
+	rc = sqlite3_bind_text(stmt[1], 1, file_part, -1, NULL);
 	if (rc != SQLITE_OK)
 		ERROR_Z_DBASE
 
-	rc = sqlite3_bind_text(stmt[0], 2, icon_name, -1, NULL);
+	rc = sqlite3_bind_text(stmt[1], 2, icon_name, -1, NULL);
 	if (rc != SQLITE_OK)
 		ERROR_Z_DBASE
 
-	rc = sqlite3_bind_text(stmt[0], 3, node_text, -1, NULL);
+	rc = sqlite3_bind_text(stmt[1], 3, node_text, -1, NULL);
 	if (rc != SQLITE_OK)
 		ERROR_Z_DBASE
 
-	rc = sqlite3_bind_text(stmt[0], 4, text, -1, NULL);
+	rc = sqlite3_bind_text(stmt[1], 4, text, -1, NULL);
 	if (rc != SQLITE_OK)
 		ERROR_Z_DBASE
 
@@ -826,13 +837,21 @@ gint zond_dbase_create_file_root(ZondDBase *zond_dbase, const gchar *file_part,
 		ERROR_Z_DBASE
 
 	rc = sqlite3_step(stmt[1]);
+	if (rc != SQLITE_DONE)
+		ERROR_Z_ROLLBACK
+
+	rc = sqlite3_step(stmt[2]);
 	if (rc == SQLITE_DONE) {
 		if (error)
 			*error = g_error_new(g_quark_from_static_string("ZOND_DBASE"), 0,
 					"%s\nKnoten konnte nicht eingefügt werden", __func__);
 
-		ERROR_Z_ROLLBACK
+		ERROR_Z_ROLLBACK;
 	} else if (rc != SQLITE_ROW)
+		ERROR_Z_ROLLBACK
+
+	rc = sqlite3_step(stmt[3]);
+	if (rc != SQLITE_DONE)
 		ERROR_Z_ROLLBACK
 
 	if (file_part_root)

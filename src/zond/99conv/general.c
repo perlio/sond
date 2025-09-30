@@ -84,16 +84,17 @@ gboolean anbindung_1_eltern_von_2(Anbindung anbindung1, Anbindung anbindung2) {
 	if (anbindung_is_pdf_punkt(anbindung1))
 		return FALSE;
 
-	//Gleiche können nicht Nachfolger sein
+	//Gleiche können nicht Eltern/Kinder sein
 	if (anbindung_1_gleich_2(anbindung1, anbindung2))
 		return FALSE;
 
 	//wenn Anbindung1 Datei ist, dann ist sie Eltern
 	if (!anbindung1.von.seite && !anbindung1.von.index && !anbindung1.bis.seite
 			&& !anbindung1.bis.index)
-		return FALSE;
-	//auch wenn Anbindung2 Datei
-	if (!anbindung1.von.seite && !anbindung2.von.index && !anbindung2.bis.seite
+		return TRUE;
+
+	//wenn Anbindung2 Datei ist, dann kann sie kein Kind sein
+	if (!anbindung2.von.seite && !anbindung2.von.index && !anbindung2.bis.seite
 			&& !anbindung2.bis.index)
 		return FALSE;
 
