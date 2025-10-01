@@ -345,6 +345,8 @@ static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
 			section_parent, open, &visible, &iter, &children, &opened, error);
 	g_free(file_part_parent);
 	g_free(section_parent);
+	if (rc == -1)
+		ERROR_Z
 
 	if (!visible)
 		return 0;

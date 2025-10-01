@@ -567,35 +567,10 @@ gint zond_treeviewfm_section_visible(ZondTreeviewFM *ztvfm,
 			&iter_intern, error);
 	if (rc == -1)
 		ERROR_Z
-	else if (rc == 0) {
-		*visible = FALSE; //
-
+	else if (rc == 0)
 		return 0;
-	}
 
-	if (!section) { //nur children und opened abfragen
-		//prüfen, ob Kinder, und wenn nur dummy
-		if (children) {
-			if (gtk_tree_model_iter_has_child(
-					gtk_tree_view_get_model(GTK_TREE_VIEW(ztvfm)), &iter_intern)) {
-				GtkTreePath *path = NULL;
-
-				*children = TRUE;
-
-				if (opened) {
-					path = gtk_tree_model_get_path(
-							gtk_tree_view_get_model(GTK_TREE_VIEW(ztvfm)),
-							&iter_intern);
-					*opened = gtk_tree_view_row_expanded(GTK_TREE_VIEW(ztvfm),
-							path);
-					gtk_tree_path_free(path);
-				}
-			}
-			else
-				*children = FALSE;
-		}
-	}
-	else { //section muß gesucht werden
+	if (section) { //section muß gesucht werden
 		gint rc = 0;
 		Anbindung anbindung = { 0 };
 		GtkTreeIter iter_very_intern = { 0 };
@@ -606,11 +581,33 @@ gint zond_treeviewfm_section_visible(ZondTreeviewFM *ztvfm,
 		if (rc == -1)
 			ERROR_Z
 		else if (rc == 0) {
-			*visible = FALSE;
+			if (visible)
+				*visible = FALSE;
 
 			return 0; //nix gefunden
 		}
 		iter_intern = iter_very_intern;
+	}
+
+	//prüfen, ob Kinder, und wenn nur dummy
+	if (children) {
+		if (gtk_tree_model_iter_has_child(
+				gtk_tree_view_get_model(GTK_TREE_VIEW(ztvfm)), &iter_intern)) {
+			GtkTreePath *path = NULL;
+
+			*children = TRUE;
+
+			if (opened) {
+				path = gtk_tree_model_get_path(
+						gtk_tree_view_get_model(GTK_TREE_VIEW(ztvfm)),
+						&iter_intern);
+				*opened = gtk_tree_view_row_expanded(GTK_TREE_VIEW(ztvfm),
+						path);
+				gtk_tree_path_free(path);
+			}
+		}
+		else
+			*children = FALSE;
 	}
 
 	if (visible)
@@ -626,13 +623,15 @@ gint zond_treeviewfm_set_cursor_on_section(ZondTreeviewFM *ztvfm,
 		gchar const *file_part, gchar const *section, GError **error) {
 	gint rc = 0;
 	GtkTreeIter iter = { 0 };
+	gboolean visible = FALSE;
 
 	rc = zond_treeviewfm_section_visible(ztvfm, file_part, section,
-	TRUE, NULL, &iter, NULL, NULL, error);
-	if (rc)
+	TRUE, &visible, &iter, NULL, NULL, error);
+	if (rc == -1)
 		ERROR_Z
 
-	sond_treeview_set_cursor(SOND_TREEVIEW(ztvfm), &iter);
+	if (visible)
+		sond_treeview_set_cursor(SOND_TREEVIEW(ztvfm), &iter);
 
 	return 0;
 }
@@ -676,7 +675,7 @@ static void zond_treeviewfm_walk_tree(GtkTreeModel *model, gint stamp,
 	return;
 }
 
-void zond_treeviewfm_move_node(GtkTreeModel *model, GtkTreeIter *iter_src,
+static void zond_treeviewfm_move_node(GtkTreeModel *model, GtkTreeIter *iter_src,
 		GtkTreeIter *anchor, gboolean child) {
 	GNode *node_src = NULL;
 	GNode *node_src_parent = NULL;

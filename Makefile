@@ -15,8 +15,8 @@ ifneq (,$(findstring $(MAKECMDGOALS), zond))
 SRCS += $(shell find $(SRC_DIRS)/zond -name '*.c') $(SRC_DIRS)/misc_stdlib.c $(SRC_DIRS)/misc.c \
 	$(SRC_DIRS)/sond_fileparts.c $(SRC_DIRS)/sond_treeviewfm.c
 CFLAGS += $(shell pkg-config --cflags gtk+-3.0 gobject-2.0 json-glib-1.0) -DCONFIG_$(CONFIG)
-LDFLAGS += $(shell pkg-config --libs gtk+-3.0 gobject-2.0 sqlite3 libcurl tesseract libzip json-glib-1.0) \
-	-lshlwapi -lshell32 -lmupdf -lmupdf-third
+LDFLAGS += $(shell pkg-config --libs gtk+-3.0 sqlite3 libcurl tesseract libzip json-glib-1.0) \
+	-lshlwapi -lmupdf -lmupdf-third
 endif
 
 ifneq (,$(findstring $(MAKECMDGOALS), viewer))

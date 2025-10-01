@@ -72,14 +72,6 @@ gint sond_treeviewfm_set_root(SondTreeviewFM*, const gchar*, gchar**);
 
 const gchar* sond_treeviewfm_get_root(SondTreeviewFM*);
 
-void sond_treeviewfm_column_eingang_set_visible(SondTreeviewFM*, gboolean);
-
-gchar* sond_treeviewfm_get_full_path(SondTreeviewFM*, GtkTreeIter*);
-
-gchar* sond_treeviewfm_get_filepart(SondTreeviewFM*, GtkTreeIter*);
-
-gchar* sond_treeviewfm_get_rel_path(SondTreeviewFM*, GtkTreeIter*);
-
 G_END_DECLS
 
 #endif // SOND_TREEVIEWFM_H_INCLUDED

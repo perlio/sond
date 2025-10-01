@@ -1747,7 +1747,12 @@ static gint zond_treeview_selection_loeschen_foreach(SondTreeview *tree_view,
 		//Prüfung auf Link von BAUM_AUSWERTUNG_COPY nicht erforderlich
 		//nur Linkziel kann Ziel von Copy sein
 		//Ebenso ob Link auf PDF-Abschnitt zeigt; nur Link wird entfernt
-	} else if (tree_view == zond->treeview[BAUM_INHALT]) {
+	}
+	else
+		gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(tree_view)),
+				iter, 2, &node_id, -1);
+
+	if (tree_view == zond->treeview[BAUM_INHALT]) {
 		gint rc = 0;
 		gint baum_auswertung_copy = 0;
 		gint baum_inhalt_file = 0;
@@ -1755,8 +1760,6 @@ static gint zond_treeview_selection_loeschen_foreach(SondTreeview *tree_view,
 		gchar *file_part = NULL;
 		gchar *section = NULL;
 
-		gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(tree_view)),
-				iter, 2, &node_id, -1);
 
 		rc = zond_dbase_get_node(zond->dbase_zond->zond_dbase_work, node_id,
 				&type, NULL, &file_part, &section, NULL, NULL, NULL, error);
@@ -1850,7 +1853,7 @@ static gint zond_treeview_selection_loeschen_foreach(SondTreeview *tree_view,
 						FALSE, &visible, &iter_fm, NULL, NULL, error);
 				g_free(file_part);
 				g_free(section);
-				if (rc)
+				if (rc == -1)
 					ERROR_Z
 
 				if (!gtk_tree_model_iter_children(
@@ -2801,7 +2804,7 @@ zond_treeview_new(Projekt *zond, gint root_node_id) {
 	ZondTreeview *ztv = NULL;
 	ZondTreeviewPrivate *ztv_priv = NULL;
 
-	ztv = g_object_new( ZOND_TYPE_TREEVIEW, NULL);
+	ztv = g_object_new(ZOND_TYPE_TREEVIEW, NULL);
 
 	ztv_priv = zond_treeview_get_instance_private(ztv);
 	ztv_priv->zond = zond;

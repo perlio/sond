@@ -1772,6 +1772,11 @@ static gint sond_treeviewfm_delete_zip_dir(SondTVFMItem* stvfm_item, GError** er
 	return 0;
 }
 
+static gint sond_treeviewfm_delete_pdf_dir(SondTVFMItem* stvfm_item, GError** error) {
+
+	return 0;
+}
+
 static gint sond_treeviewfm_foreach_loeschen(SondTreeview *stv,
 		GtkTreeIter *iter, gpointer data, GError **error) {
 	SondTVFMItem* stvfm_item = NULL;
@@ -1814,27 +1819,25 @@ static gint sond_treeviewfm_foreach_loeschen(SondTreeview *stv,
 				return -1;
 			}
 		}
+		else if (!stvfm_item_priv->path_or_section) { //sfp existiert - also ganze Datei
+			gint rc = 0;
+
+			rc = sond_file_part_delete_sfp(stvfm_item_priv->sond_file_part, error);
+			if (rc) {
+				ERROR_Z
+			}
+		}
 		else if (SOND_IS_FILE_PART_ZIP(stvfm_item_priv->sond_file_part)) {
-			if (!stvfm_item_priv->path_or_section) { //ganze zip-Datei
-				gint rc = 0;
+			gint rc = 0;
 
-				rc = sond_file_part_delete_sfp(stvfm_item_priv->sond_file_part, error);
-				if (rc) {
-					ERROR_Z
-				}
-			}
-			else {//ZIP-Dir löschen
-				gint rc = 0;
-
-				rc = sond_treeviewfm_delete_zip_dir(stvfm_item, error);
-				if (rc)
-					ERROR_Z
-			}
+			rc = sond_treeviewfm_delete_zip_dir(stvfm_item, error);
+			if (rc)
+				ERROR_Z
 		}
 		else if (SOND_IS_FILE_PART_PDF(stvfm_item_priv->sond_file_part)) { //PDF-Datei ist Dir - ganz löschen
 			gint rc = 0;
 
-			rc = sond_file_part_delete_sfp(stvfm_item_priv->sond_file_part, error);
+			rc = sond_treeviewfm_delete_pdf_dir(stvfm_item, error);
 			if (rc)
 				ERROR_Z
 		}
@@ -1942,7 +1945,7 @@ static void sond_treeviewfm_show_hits(SondTreeviewFM *stvfm,
 	return;
 }
 
-typedef struct _SearchFS {
+typedef struct {
 	gchar *needle;
 	gboolean exact_match;
 	gboolean case_sens;
@@ -1989,7 +1992,7 @@ static gint sond_treeviewfm_search_needle(SondTreeviewFM *stvfm,
 	return 0;
 }
 
-typedef struct _DataThread {
+typedef struct {
 	SearchFS *search_fs;
 	SondTreeview *stv;
 	GtkTreeIter *iter;
@@ -2023,6 +2026,63 @@ static gpointer sond_treeviewfm_thread_search(gpointer data) {
 	g_atomic_int_set(data_thread->search_fs->atom_ready, 1);
 
 	return NULL;
+}
+
+static gchar*
+sond_treeviewfm_get_rel_path(SondTreeviewFM *stvfm, GtkTreeIter *iter) {
+	gchar *rel_path = NULL;
+	GtkTreeIter iter_parent = { 0 };
+	GtkTreeIter *iter_seg = NULL;
+	GObject *object = NULL;
+	gboolean datei = FALSE;
+
+	if (!iter)
+		return NULL;
+
+	GtkTreeModel *model = gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm));
+
+	gtk_tree_model_get(model, iter, 0, &object, -1);
+	datei = G_IS_FILE_INFO(object);
+	g_object_unref(object);
+	if (!datei)
+		return NULL;
+
+	iter_seg = gtk_tree_iter_copy(iter);
+
+	rel_path = g_strdup(sond_treeviewfm_get_name(stvfm, iter_seg));
+
+	while (gtk_tree_model_iter_parent(model, &iter_parent, iter_seg)) {
+		gchar *path_segment = NULL;
+
+		gtk_tree_iter_free(iter_seg);
+		iter_seg = gtk_tree_iter_copy(&iter_parent);
+
+		path_segment = g_strdup(sond_treeviewfm_get_name(stvfm, iter_seg));
+
+		rel_path = add_string(g_strdup("/"), rel_path);
+		rel_path = add_string(path_segment, rel_path);
+	}
+
+	gtk_tree_iter_free(iter_seg);
+
+	return rel_path;
+}
+
+static gchar*
+sond_treeviewfm_get_full_path(SondTreeviewFM *stvfm, GtkTreeIter *iter) {
+	gchar *full_path = NULL;
+	gchar *rel_path = NULL;
+
+	SondTreeviewFMPrivate *stvfm_priv = sond_treeviewfm_get_instance_private(
+			stvfm);
+
+	rel_path = sond_treeviewfm_get_rel_path(stvfm, iter);
+	if (!rel_path)
+		return NULL;
+
+	full_path = add_string(g_strconcat(stvfm_priv->root, "/", NULL), rel_path);
+
+	return full_path;
 }
 
 static gint sond_treeviewfm_search(SondTreeview *stv, GtkTreeIter *iter,
@@ -2337,7 +2397,7 @@ static void sond_treeviewfm_row_collapsed(GtkTreeView *tree_view,
 	return;
 }
 
-void sond_treeviewfm_row_expanded(GtkTreeView *tree_view,
+static void sond_treeviewfm_row_expanded(GtkTreeView *tree_view,
 		GtkTreeIter *iter, GtkTreePath *path, gpointer data) {
 	gint rc = 0;
 	GtkTreeIter iter_dummy = { 0 };
@@ -2610,83 +2670,3 @@ sond_treeviewfm_get_root(SondTreeviewFM *stvfm) {
 
 	return stvfm_priv->root;
 }
-
-void sond_treeviewfm_column_eingang_set_visible(SondTreeviewFM *stvfm,
-		gboolean vis) {
-	SondTreeviewFMPrivate *stvfm_priv = sond_treeviewfm_get_instance_private(
-			stvfm);
-
-	gtk_tree_view_column_set_visible(stvfm_priv->column_eingang, vis);
-
-	return;
-}
-
-gchar*
-sond_treeviewfm_get_full_path(SondTreeviewFM *stvfm, GtkTreeIter *iter) {
-	gchar *full_path = NULL;
-	gchar *rel_path = NULL;
-
-	SondTreeviewFMPrivate *stvfm_priv = sond_treeviewfm_get_instance_private(
-			stvfm);
-
-	rel_path = sond_treeviewfm_get_rel_path(stvfm, iter);
-	if (!rel_path)
-		return NULL;
-
-	full_path = add_string(g_strconcat(stvfm_priv->root, "/", NULL), rel_path);
-
-	return full_path;
-}
-
-gchar*
-sond_treeviewfm_get_filepart(SondTreeviewFM* stvfm, GtkTreeIter* iter) {
-	SondTVFMItem* stvfm_item = NULL;
-	SondFilePart* sfp = NULL;
-
-	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)), iter, 0, &stvfm_item, -1);
-	sfp = sond_tvfm_item_get_sond_file_part(stvfm_item);
-	g_object_unref(stvfm_item);
-
-	return sond_file_part_get_filepart(sfp);
-}
-
-gchar*
-sond_treeviewfm_get_rel_path(SondTreeviewFM *stvfm, GtkTreeIter *iter) {
-	gchar *rel_path = NULL;
-	GtkTreeIter iter_parent = { 0 };
-	GtkTreeIter *iter_seg = NULL;
-	GObject *object = NULL;
-	gboolean datei = FALSE;
-
-	if (!iter)
-		return NULL;
-
-	GtkTreeModel *model = gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm));
-
-	gtk_tree_model_get(model, iter, 0, &object, -1);
-	datei = G_IS_FILE_INFO(object);
-	g_object_unref(object);
-	if (!datei)
-		return NULL;
-
-	iter_seg = gtk_tree_iter_copy(iter);
-
-	rel_path = g_strdup(sond_treeviewfm_get_name(stvfm, iter_seg));
-
-	while (gtk_tree_model_iter_parent(model, &iter_parent, iter_seg)) {
-		gchar *path_segment = NULL;
-
-		gtk_tree_iter_free(iter_seg);
-		iter_seg = gtk_tree_iter_copy(&iter_parent);
-
-		path_segment = g_strdup(sond_treeviewfm_get_name(stvfm, iter_seg));
-
-		rel_path = add_string(g_strdup("/"), rel_path);
-		rel_path = add_string(path_segment, rel_path);
-	}
-
-	gtk_tree_iter_free(iter_seg);
-
-	return rel_path;
-}
-
