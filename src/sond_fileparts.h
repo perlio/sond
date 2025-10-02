@@ -40,7 +40,7 @@ struct _SondFilePartClass {
 	GPtrArray* (*get_arr_opened_files)(SondFilePart*);
 };
 
-SondFilePart* sond_file_part_create_from_content_type(gchar const* path,
+SondFilePart* sond_file_part_create_from_mime_type(gchar const* path,
 		SondFilePart*, gchar const*);
 
 SondFilePart* sond_file_part_get_parent(SondFilePart *);
@@ -114,7 +114,7 @@ struct _SondFilePartLeafClass {
 	SondFilePartClass parent_class;
 };
 
-gchar const* sond_file_part_leaf_get_content_type(SondFilePartLeaf*);
+gchar const* sond_file_part_leaf_get_mime_type(SondFilePartLeaf*);
 
 G_END_DECLS
 

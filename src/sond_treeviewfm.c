@@ -99,26 +99,11 @@ SondTreeviewFM* sond_tvfm_item_get_stvfm(SondTVFMItem *stvfm_item) {
 	return stvfm_item_priv->stvfm;
 }
 
-static gchar const* sond_tvfm_item_get_icon_name(SondTVFMItem* stvfm_item) {
+gchar const* sond_tvfm_item_get_icon_name(SondTVFMItem* stvfm_item) {
 	SondTVFMItemPrivate *stvfm_item_priv =
 			sond_tvfm_item_get_instance_private(stvfm_item);
 
 	return stvfm_item_priv->icon_name;
-}
-
-static gchar const* sond_tvfm_item_get_display_name(SondTVFMItem* stvfm_item) {
-	SondTVFMItemPrivate *stvfm_item_priv =
-			sond_tvfm_item_get_instance_private(stvfm_item);
-
-	return stvfm_item_priv->display_name;
-}
-
-
-gboolean sond_tvfm_item_get_has_children(SondTVFMItem *stvfm_item) {
-	SondTVFMItemPrivate *stvfm_item_priv =
-			sond_tvfm_item_get_instance_private(stvfm_item);
-
-	return stvfm_item_priv->has_children;
 }
 
 void sond_tvfm_item_set_icon_name(SondTVFMItem* stvfm_item,
@@ -143,6 +128,25 @@ void sond_tvfm_item_set_display_name(SondTVFMItem* stvfm_item,
 
 static gint sond_tvfm_item_load_fs_dir(SondTVFMItem*, gboolean, GPtrArray**, GError**);
 
+static char const*
+get_icon_name(gchar const* content_type) {
+	const gchar *icon_name = NULL;
+
+	if (!content_type)
+		icon_name = "dialog-error";
+
+	if (!g_strcmp0(content_type, "application/pdf"))
+		icon_name = "pdf";
+	else if (g_content_type_is_a(content_type, "audio"))
+		icon_name = "audio-x-generic";
+	else if (g_str_has_prefix(content_type, "text"))
+		icon_name = "text-x-generic";
+	else
+		icon_name = "dialog-error";
+
+	return icon_name;
+}
+
 SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM* stvfm, SondTVFMItemType type,
 		SondFilePart *sond_file_part, gchar const* path_or_section) {
 	SondTVFMItem *stvfm_item = NULL;
@@ -164,9 +168,9 @@ SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM* stvfm, SondTVFMItemType type
 		if (SOND_IS_FILE_PART_PDF(sond_file_part))
 			content_type = "application/pdf";
 		else
-			content_type = sond_file_part_leaf_get_content_type(SOND_FILE_PART_LEAF(sond_file_part));
+			content_type = sond_file_part_leaf_get_mime_type(SOND_FILE_PART_LEAF(sond_file_part));
 
-		stvfm_item_priv->icon_name = g_content_type_get_generic_icon_name(content_type);
+		stvfm_item_priv->icon_name = g_strdup(get_icon_name(content_type));
 
 		stvfm_item_priv->display_name = g_path_get_basename(
 				sond_file_part_get_path(sond_file_part));
@@ -231,26 +235,25 @@ SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM* stvfm, SondTVFMItemType type
 			stvfm_item_priv->has_children = TRUE; //sonst wären wir nicht hier
 		}
 		//else if (SOND_IS_FILE_PART_GMESSAGE(sond_file_part)) {
-
 	}
 
 	return stvfm_item;
 }
 
-static SondTVFMItem* sond_tvfm_item_create_from_content_type(SondTVFMItem* stvfm_item,
-		gchar const* content_type, gchar const* rel_path_child, GError** error) {
+static SondTVFMItem* sond_tvfm_item_create_from_mime_type(SondTVFMItem* stvfm_item,
+		gchar const* mime_type, gchar const* rel_path_child, GError** error) {
 	SondTVFMItem* stvfm_item_child = NULL;
 	SondTVFMItemPrivate* stvfm_item_priv =
 			sond_tvfm_item_get_instance_private(stvfm_item);
 
-	if (g_content_type_is_mime_type(content_type, "inode/directory"))
+	if (!g_strcmp0(mime_type, "inode/directory"))
 		stvfm_item_child = sond_tvfm_item_create(stvfm_item_priv->stvfm,
 				SOND_TVFM_ITEM_TYPE_DIR, stvfm_item_priv->sond_file_part, rel_path_child);
 	else {
 		SondFilePart* sfp = NULL;
 
-		sfp = sond_file_part_create_from_content_type(rel_path_child,
-				stvfm_item_priv->sond_file_part, content_type);
+		sfp = sond_file_part_create_from_mime_type(rel_path_child,
+				stvfm_item_priv->sond_file_part, mime_type);
 
 		if (sond_file_part_has_children(sfp))
 			stvfm_item_child = sond_tvfm_item_create(stvfm_item_priv->stvfm,
@@ -295,6 +298,7 @@ static gint sond_tvfm_item_load_fs_dir(SondTVFMItem* stvfm_item,
 		gchar const* content_type = NULL;
 		SondTVFMItem* stvfm_item_child = NULL;
 		gchar* rel_path_child = NULL;
+		gchar const* mime_type = NULL;
 
 		res = g_file_enumerator_iterate(enumer, &info_child, NULL, NULL, error);
 		if (!res) {
@@ -316,9 +320,10 @@ static gint sond_tvfm_item_load_fs_dir(SondTVFMItem* stvfm_item,
 		else rel_path_child = g_strdup(g_file_info_get_name(info_child));
 
 		content_type = g_file_info_get_content_type(info_child);
+		mime_type = get_mime_type_from_content_type(content_type);
 
 		stvfm_item_child =
-				sond_tvfm_item_create_from_content_type(stvfm_item, content_type, rel_path_child, error);
+				sond_tvfm_item_create_from_mime_type(stvfm_item, mime_type, rel_path_child, error);
 		g_free(rel_path_child);
 		if (!stvfm_item_child) {
 			g_ptr_array_unref(loaded_children); //Test nicht nötig - wenn !load, kommen wir nicht hier hin
@@ -429,22 +434,23 @@ static void sond_treeviewfm_render_text_cell(GtkTreeViewColumn *column,
 		GtkCellRenderer *renderer, GtkTreeModel *model, GtkTreeIter *iter,
 		gpointer data) {
 	SondTVFMItem *stvfm_item = NULL;
-	gchar const *node_text = NULL;
 	gint rc = 0;
+	SondTVFMItemPrivate *stvfm_item_priv = NULL;
 
 	SondTreeviewFM *stvfm = SOND_TREEVIEWFM(data);
 
 	gtk_tree_model_get(model, iter, 0, &stvfm_item, -1);
-	if (!stvfm_item)
+	if (!stvfm_item) {
+		g_warning("%s: Kein SondTVFMItem", __func__);
 		return;
+	}
 
+	stvfm_item_priv = sond_tvfm_item_get_instance_private(stvfm_item);
 	g_object_unref(stvfm_item);
-
-	node_text = sond_tvfm_item_get_display_name(stvfm_item);
 
 	g_object_set(G_OBJECT(
 			sond_treeview_get_cell_renderer_text(SOND_TREEVIEW(stvfm))),
-			"text", node_text, NULL);
+			"text", stvfm_item_priv->display_name, NULL);
 
 	if (SOND_TREEVIEWFM_GET_CLASS(stvfm)->deter_background) {
 		GError *error = NULL;
@@ -610,17 +616,19 @@ static gint sond_treeviewfm_expand_dummy(SondTreeviewFM *stvfm, GtkTreeIter *ite
 	for (gint i = 0; i < arr_children->len; i++) {
 		GtkTreeIter iter_new = { 0 };
 		SondTVFMItem* child_item = NULL;
+		SondTVFMItemPrivate* child_item_priv = NULL;
 
 		child_item = g_ptr_array_index(arr_children, i);
+		child_item_priv = sond_tvfm_item_get_instance_private(child_item);
 
 		gtk_tree_store_insert(GTK_TREE_STORE(
 				gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm) )),
 				&iter_new, iter, -1);
 		gtk_tree_store_set(GTK_TREE_STORE(
-				gtk_tree_view_get_model( GTK_TREE_VIEW(stvfm) )),
+				gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm) )),
 				&iter_new, 0, G_OBJECT(child_item), -1);
 
-		if (sond_tvfm_item_get_has_children(child_item)) { //Dummy einfügen
+		if (child_item_priv->has_children) { //Dummy einfügen
 			GtkTreeIter newest_iter = { 0 };
 
 			gtk_tree_store_insert(
@@ -1597,6 +1605,7 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 	if (!s_fm_paste_selection->kind || s_fm_paste_selection->expanded) {
 		//Ziel-FS-tree eintragen
 		GtkTreeIter *iter_new = NULL;
+		SondTVFMItemPrivate* stvfm_item_priv = sond_tvfm_item_get_instance_private(stvfm_item_new);
 
 		iter_new = sond_treeviewfm_insert_node(SOND_TREEVIEWFM(stv),
 				s_fm_paste_selection->iter_cursor, s_fm_paste_selection->kind);
@@ -1606,7 +1615,7 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 		s_fm_paste_selection->kind = FALSE;
 
 		//Falls Verzeichnis mit Datei innendrin: dummy in neuen Knoten einfügen
-		if (sond_tvfm_item_get_has_children(stvfm_item_new)) {
+		if (stvfm_item_priv->has_children) {
 			GtkTreeIter iter_tmp = { 0 };
 
 			gtk_tree_store_insert(
@@ -2518,20 +2527,21 @@ static void sond_treeviewfm_render_file_icon(GtkTreeViewColumn *column,
 		GtkCellRenderer *renderer, GtkTreeModel *model, GtkTreeIter *iter,
 		gpointer data) {
 	SondTVFMItem* stvfm_item = NULL;
-	gchar const* icon_name = NULL;
+	SondTVFMItemPrivate* stvfm_item_priv = NULL;
 
 	gtk_tree_model_get(model, iter, 0, &stvfm_item, -1);
-	if (!stvfm_item)
+	if (!stvfm_item) {
+		g_warning("%s: Kein SondTVFMItem", __func__);
 		return;
+	}
 
-	icon_name = sond_tvfm_item_get_icon_name(stvfm_item);
+	stvfm_item_priv = sond_tvfm_item_get_instance_private(stvfm_item);
+	g_object_unref(stvfm_item);
 
-	if (icon_name)
-		g_object_set(G_OBJECT(renderer), "icon-name", icon_name, NULL);
+	if (stvfm_item_priv->icon_name)
+		g_object_set(G_OBJECT(renderer), "icon-name", stvfm_item_priv->icon_name, NULL);
 	else
 		g_object_set(G_OBJECT(renderer), "icon-name", "image-missing", NULL);
-
-	g_object_unref(stvfm_item);
 
 	return;
 }

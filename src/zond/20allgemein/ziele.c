@@ -266,8 +266,8 @@ static gint zond_anbindung_insert_pdf_abschnitt_in_dbase(Projekt *zond,
 	gint anchor_id_dbase = 0;
 	gchar *file_section = NULL;
 
-	rc = zond_dbase_get_file_part_root(zond->dbase_zond->zond_dbase_work,
-			file_part, &pdf_root, error);
+	rc = zond_dbase_get_section(zond->dbase_zond->zond_dbase_work,
+			file_part, NULL, &pdf_root, error);
 	if (rc)
 		ERROR_Z
 

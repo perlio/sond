@@ -119,8 +119,8 @@ static void cb_textsuche_changed(GtkListBox *box, GtkListBoxRow *row,
 	anbindung.von.index = pdf_text_occ.quad.ul.y;
 	anbindung.bis.index = pdf_text_occ.quad.ll.y;
 
-	rc = zond_dbase_get_file_part_root(zond->dbase_zond->zond_dbase_work,
-			sond_file_part_get_filepart(SOND_FILE_PART(pdf_text_occ.sfp_pdf)),
+	rc = zond_dbase_get_section(zond->dbase_zond->zond_dbase_work,
+			sond_file_part_get_filepart(SOND_FILE_PART(pdf_text_occ.sfp_pdf)), NULL,
 			&pdf_root, &error);
 	if (rc) {
 		display_message(zond->app_window, "Fehler Ermittlung root-node\n\n",

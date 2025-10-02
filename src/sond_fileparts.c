@@ -56,7 +56,7 @@ typedef struct {
 G_DEFINE_TYPE_WITH_PRIVATE(SondFilePartError, sond_file_part_error, SOND_TYPE_FILE_PART)
 
 typedef struct {
-	gchar* content_type;
+	gchar* mime_type;
 } SondFilePartLeafPrivate;
 
 G_DEFINE_TYPE_WITH_PRIVATE(SondFilePartLeaf, sond_file_part_leaf, SOND_TYPE_FILE_PART)
@@ -151,12 +151,11 @@ static SondFilePart* sond_file_part_create(GType sfp_type, const gchar *path,
 
 static gint sond_file_part_pdf_test_for_embedded_files(SondFilePartPDF *, GError **);
 
-SondFilePart* sond_file_part_create_from_content_type(gchar const* path,
-		SondFilePart* sfp_parent, gchar const* content_type) {
+SondFilePart* sond_file_part_create_from_mime_type(gchar const* path,
+		SondFilePart* sfp_parent, gchar const* mime_type) {
 	SondFilePart* sfp_child = NULL;
 
-	if (g_content_type_is_mime_type(content_type, "application/pdf") ||
-			g_strcmp0(content_type, ".pdf") == 0) {
+	if (!g_strcmp0(mime_type, "application/pdf")) {
 		gint rc = 0;
 		GError* error = NULL;
 
@@ -177,8 +176,7 @@ SondFilePart* sond_file_part_create_from_content_type(gchar const* path,
 		}
 
 	}
-	else if (g_content_type_is_mime_type(content_type, "application/zip") ||
-			g_strcmp0(content_type, ".zip") == 0) {
+	else if (!g_strcmp0(mime_type, "application/zip")) {
 		sfp_child = sond_file_part_create(SOND_TYPE_FILE_PART_ZIP, path,
 				sfp_parent);
 
@@ -190,7 +188,7 @@ SondFilePart* sond_file_part_create_from_content_type(gchar const* path,
 		sfp_child = sond_file_part_create(SOND_TYPE_FILE_PART_LEAF, path, sfp_parent);
 
 		sfp_leaf_priv = sond_file_part_leaf_get_instance_private(SOND_FILE_PART_LEAF(sfp_child));
-		sfp_leaf_priv->content_type = g_strdup(content_type);
+		sfp_leaf_priv->mime_type = g_strdup(mime_type);
 	}
 
 	return sfp_child;
@@ -366,6 +364,7 @@ SondFilePart* sond_file_part_from_filepart(fz_context* ctx,
 		fz_stream* stream = NULL;
 		gchar* content_type = NULL;
 		SondFilePart* sfp_child = NULL;
+		gchar const* mime_type = NULL;
 
 		if (!sfp) //1. Ebene - File im Filesystem
 			stream = open_file(ctx, v_string[zaehler], error);
@@ -394,10 +393,14 @@ SondFilePart* sond_file_part_from_filepart(fz_context* ctx,
 		fz_drop_stream(ctx, stream);
 		if (!content_type){
 			g_object_unref(sfp);
+			g_strfreev(v_string);
 			ERROR_Z_VAL(NULL)
 		}
 
-		sfp_child = sond_file_part_create_from_content_type(v_string[zaehler], sfp, content_type);
+		mime_type = get_mime_type_from_content_type(content_type);
+		g_free(content_type);
+
+		sfp_child = sond_file_part_create_from_mime_type(v_string[zaehler], sfp, mime_type);
 		if (SOND_IS_FILE_PART_ERROR(sfp_child)) { //können wir hier nicht brauchen
 			if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\n%s", __func__,
 					sond_file_part_error_get_error(SOND_FILE_PART_ERROR(sfp_child))->message);
@@ -1051,6 +1054,7 @@ static gint load_embedded_files(fz_context* ctx, pdf_obj* key, pdf_obj* val,
 	gchar* content_type = NULL;
 	SondFilePart* sfp_embedded_file = NULL;
 	Load* load = (Load*) data;
+	gchar const* mime_type = NULL;
 
 	EF_F = get_EF_F(ctx, val, &path_embedded, error);
 	if (!EF_F)
@@ -1072,9 +1076,11 @@ static gint load_embedded_files(fz_context* ctx, pdf_obj* key, pdf_obj* val,
 	if (!content_type)
 		ERROR_Z
 
-	sfp_embedded_file = sond_file_part_create_from_content_type(
-			path_embedded, SOND_FILE_PART(load->sfp_pdf), content_type);
+	mime_type = get_mime_type_from_content_type(content_type);
 	g_free(content_type);
+
+	sfp_embedded_file = sond_file_part_create_from_mime_type(
+			path_embedded, SOND_FILE_PART(load->sfp_pdf), mime_type);
 
 	g_ptr_array_add(load->arr_embedded_files, sfp_embedded_file);
 
@@ -1544,7 +1550,7 @@ static void sond_file_part_leaf_finalize(GObject *self) {
 	SondFilePartLeafPrivate *sfp_leaf_priv =
 			sond_file_part_leaf_get_instance_private(SOND_FILE_PART_LEAF(self));
 
-	g_free(sfp_leaf_priv->content_type);
+	g_free(sfp_leaf_priv->mime_type);
 
 	G_OBJECT_CLASS(sond_file_part_leaf_parent_class)->finalize(self);
 
@@ -1564,9 +1570,9 @@ static void sond_file_part_leaf_init(SondFilePartLeaf* self) {
 	return;
 }
 
-gchar const* sond_file_part_leaf_get_content_type(SondFilePartLeaf *sfp_leaf) {
+gchar const* sond_file_part_leaf_get_mime_type(SondFilePartLeaf *sfp_leaf) {
 	SondFilePartLeafPrivate *sfp_leaf_priv =
 			sond_file_part_leaf_get_instance_private(sfp_leaf);
 
-	return sfp_leaf_priv->content_type;
+	return sfp_leaf_priv->mime_type;
 }

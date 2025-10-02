@@ -3,17 +3,17 @@
 #include <gtk/gtk.h>
 #include <sqlite3.h>
 
+#include "../../misc.h"
+
 #include "../global_types.h"
 #include "../pdf_ocr.h"
 #include "../zond_pdf_document.h"
 #include "../zond_tree_store.h"
-#include "../sond_treeview.h"
-#include "../../sond_treeviewfm.h"
-#include "../../misc.h"
+
+#include "../20allgemein/pdf_text.h"
 
 #include "general.h"
 #include "pdf.h"
-#include "../20allgemein/pdf_text.h"
 
 /** rc == -1: Fähler
  rc == 0: alles ausgeführt, sämtliche Callbacks haben 0 zurückgegeben

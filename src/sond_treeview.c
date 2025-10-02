@@ -18,7 +18,7 @@
 
 #include "sond_treeview.h"
 
-#include "../misc.h"
+#include "misc.h"
 
 typedef struct {
 	GtkCellRenderer *renderer_icon;

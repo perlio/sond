@@ -20,7 +20,7 @@
 #include <mupdf/fitz.h>
 
 #include "../../misc.h"
-#include "../sond_treeview.h"
+#include "../../sond_treeview.h"
 
 #include "../zond_pdf_document.h"
 #include "../global_types.h"

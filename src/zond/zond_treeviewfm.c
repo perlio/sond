@@ -209,12 +209,13 @@ static gint zond_treeviewfm_text_edited(SondTreeviewFM *stvfm,
 
 		filepart = sond_file_part_get_filepart(sond_tvfm_item_get_sond_file_part(stvfm_item));
 
-		ID_section = zond_dbase_get_section(ztvfm_priv->zond->dbase_zond->zond_dbase_work,
-				filepart, sond_tvfm_item_get_path_or_section(stvfm_item), error);
+		rc = zond_dbase_get_section(ztvfm_priv->zond->dbase_zond->zond_dbase_work,
+				filepart, sond_tvfm_item_get_path_or_section(stvfm_item), &ID_section, error);
 		g_free(filepart);
-		if (ID_section == -1)
+		if (rc)
 			ERROR_Z
-		else if (ID_section == 0) {
+
+		if (ID_section == 0) {
 			if (error) *error = g_error_new(ZOND_ERROR, 0,
 					"%s\nAbschnitt nicht gefunden", __func__);
 
@@ -403,10 +404,12 @@ static gint zond_treeviewfm_load_sections(SondTVFMItem* stvfm_item, GPtrArray** 
 	section = sond_tvfm_item_get_path_or_section(stvfm_item);
 	filepart = sond_file_part_get_filepart(sfp);
 
-	ID = zond_dbase_get_section(ztvfm_priv->zond->dbase_zond->zond_dbase_work, filepart, section, error);
-	if (ID == -1)
+	rc = zond_dbase_get_section(ztvfm_priv->zond->dbase_zond->zond_dbase_work,
+			filepart, section, &ID, error);
+	if (rc)
 		ERROR_Z
-	else if (ID == 0) {
+
+	if (ID == 0) {
 		if (error) *error = g_error_new(ZOND_ERROR, 0,
 				"%s\nAbschnitt nicht gefunden", __func__);
 

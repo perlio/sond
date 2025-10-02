@@ -485,6 +485,57 @@ gint misc_datei_oeffnen(const gchar *path, gboolean open_with, GError** error) {
 	return 0;
 }
 
+gchar const* get_mime_type_from_content_type(gchar const* content_type) {
+	if (!g_strcmp0(content_type, "application/x-zip-compressed") ||
+			!g_strcmp0(content_type, "application/x-zip") ||
+			!g_strcmp0(content_type, "application/x-compress") ||
+			!g_strcmp0(content_type, "application/x-compressed") ||
+			!g_strcmp0(content_type, "multipart/x-zip") ||
+			!g_strcmp0(content_type, ".zip"))
+		return "application/zip";
+	else if (!g_strcmp0(content_type, "application/pdf")  ||
+			!g_strcmp0(content_type, "application/x-pdf") ||
+			!g_strcmp0(content_type, ".pdf"))
+		return "application/pdf";
+	else if (g_strcmp0(content_type, "application/x-gmessage") == 0)
+		return "application/x-gmessage";
+	else if (g_strcmp0(content_type, "inode/directory") == 0)
+		return "inode/directory";
+	else if (!g_strcmp0(content_type, "text/plain") ||
+			!g_strcmp0(content_type, ".txt") ||
+			!g_strcmp0(content_type, ".log"))
+		return "text/plain";
+	else if (!g_strcmp0(content_type, "text/html") ||
+			!g_strcmp0(content_type, ".html") ||
+			!g_strcmp0(content_type, ".htm"))
+		return "text/html";
+	else if (!g_strcmp0(content_type, "text/rtf") ||
+			!g_strcmp0(content_type, ".rtf"))
+		return "text/rtf";
+	else if (!g_strcmp0(content_type, "image/jpeg") ||
+			!g_strcmp0(content_type, ".jpg") ||
+			!g_strcmp0(content_type, ".jpeg"))
+		return "image/jpeg";
+	else if (!g_strcmp0(content_type, "image/png") ||
+			!g_strcmp0(content_type, ".png"))
+		return "image/png";
+	else if (!g_strcmp0(content_type, "image/tiff") ||
+			!g_strcmp0(content_type, ".tif") ||
+			!g_strcmp0(content_type, ".tiff"))
+		return "image/tiff";
+	else if (!g_strcmp0(content_type, "audio/mpeg") ||
+			!g_strcmp0(content_type, ".mp3"))
+		return "audio/mpeg";
+	else if (!g_strcmp0(content_type, "audio/wav") ||
+			!g_strcmp0(content_type, ".wav"))
+		return "audio/wav";
+	else if (!g_strcmp0(content_type, "video/mp4") ||
+			!g_strcmp0(content_type, ".mp4"))
+		return "video/mp4";
+
+	return "application/octet-stream";
+}
+
 void info_window_kill(InfoWindow *info_window) {
 	gtk_widget_destroy(info_window->dialog);
 

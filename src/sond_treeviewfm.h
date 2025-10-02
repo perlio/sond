@@ -5,7 +5,7 @@
 #include <glib-object.h>
 #include <gtk/gtk.h>
 
-#include "zond/sond_treeview.h"
+#include "sond_treeview.h"
 
 typedef struct _SondFilePart SondFilePart;
 
@@ -54,9 +54,9 @@ SondFilePart* sond_tvfm_item_get_sond_file_part(SondTVFMItem*);
 
 SondTreeviewFM* sond_tvfm_item_get_stvfm(SondTVFMItem *);
 
-gboolean sond_tvfm_item_has_children(SondTVFMItem*);
-
 void sond_tvfm_item_set_icon_name(SondTVFMItem*, gchar const*);
+
+gchar const* sond_tvfm_item_get_icon_name(SondTVFMItem*);
 
 void sond_tvfm_item_set_display_name(SondTVFMItem*, gchar const*);
 

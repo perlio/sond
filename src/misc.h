@@ -70,6 +70,8 @@ GtkWidget* result_listbox_new(GtkWindow*, const gchar*, GtkSelectionMode);
 
 gint misc_datei_oeffnen(gchar const*, gboolean, GError**);
 
+gchar const* get_mime_type_from_content_type(gchar const*);
+
 /*  info_window  */
 typedef struct _Info_Window {
 	GtkWidget *dialog;

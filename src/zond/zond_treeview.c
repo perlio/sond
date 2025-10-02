@@ -23,7 +23,7 @@
 
 #include "../misc.h"
 #include "../sond_fileparts.h"
-//#include "../sond_treeviewfm.h"
+#include "../sond_treeview.h"
 
 #include "zond_dbase.h"
 #include "zond_tree_store.h"
@@ -31,7 +31,6 @@
 #include "zond_pdf_document.h"
 
 #include "global_types.h"
-#include "sond_treeview.h"
 #include "10init/app_window.h"
 #include "10init/headerbar.h"
 
@@ -611,25 +610,6 @@ static void zond_treeview_punkt_einfuegen_activate(GtkMenuItem *item,
 	return;
 }
 
-static const gchar*
-zond_treeview_get_icon_name(GFileInfo *info) {
-	const gchar *icon_name = NULL;
-	const gchar *content_type = NULL;
-
-	content_type = g_file_info_get_content_type(info);
-	if (!content_type)
-		return "dialog-error";
-
-	if (g_content_type_is_mime_type(content_type, "application/pdf"))
-		icon_name = "pdf";
-	else if (g_content_type_is_a(content_type, "audio"))
-		icon_name = "audio-x-generic";
-	else
-		icon_name = "dialog-error";
-
-	return icon_name;
-}
-
 gint zond_treeview_walk_tree(ZondTreeview *ztv, gboolean with_younger_siblings,
 		gint node_id, GtkTreeIter *iter_anchor, gboolean child,
 		GtkTreeIter *iter_inserted, gint anchor_id, gint *node_id_inserted,
@@ -867,96 +847,87 @@ static gint zond_treeview_leaf_anbinden(ZondTreeview *ztv,
 		gint *zaehler, GError** error) {
 	gint new_node_id = 0;
 	GtkTreeIter iter_new = { 0 };
-	gchar *filepart = NULL;
-	gint file_part_root = 0;
+	g_autofree gchar *filepart = NULL;
+	gchar const* section = NULL;
+	gint ID_file_part = 0;
 	gint rc = 0;
 	SondFilePart *sfp = NULL;
+	gchar* info_text = NULL;
+	gint baum_inhalt_file = 0;
 
 	ZondTreeviewPrivate *ztv_priv = zond_treeview_get_instance_private(ztv);
 
 	sfp = sond_tvfm_item_get_sond_file_part(stvfm_item);
 	filepart = sond_file_part_get_filepart(sfp);
+	section = sond_tvfm_item_get_path_or_section(stvfm_item);
 
-	info_window_set_message(info_window, filepart);
+	info_text = (section) ? g_strdup_printf("Anbindung Abschnitt '%s' in '%s'",
+			section, filepart) : g_strdup_printf("Anbindung Datei '%s'",
+			filepart);
+	info_window_set_message(info_window, info_text);
+	g_free(info_text);
 
-	rc = zond_dbase_get_file_part_root(
-			ztv_priv->zond->dbase_zond->zond_dbase_work, filepart,
-			&file_part_root, error);
-	if (rc) {
-		g_free(filepart);
+	rc = zond_dbase_get_section(ztv_priv->zond->dbase_zond->zond_dbase_work,
+			filepart, section, &ID_file_part, error);
+	if (rc)
 		ERROR_Z
-	}
 
-	if (file_part_root) //prüfen, ob Datei schon angebunden
-	{
-		gint rc = 0;
-		gint baum_inhalt_file = 0;
-
-		//wenn schon pdf_root existiert, dann herausfinden, ob aktuell an Baum angebunden
-		rc = zond_dbase_get_baum_inhalt_file_from_file_part(
-				ztv_priv->zond->dbase_zond->zond_dbase_work, file_part_root,
-				&baum_inhalt_file, error);
-		if (rc) {
-			g_free(filepart);
-			ERROR_Z
-		}
-
-		if (baum_inhalt_file) {
-			gchar* message = NULL;
-
-			message = g_strdup_printf("filepart '%s' bereits angebunden",
-					filepart);
-			g_free(filepart);
-			info_window_set_message(info_window, message);
-			g_free(message);
-
-			return 0; //Wenn angebunden: nix machen
-		}
-
-		//etwaige untergeordnete Anbindungen heranholen, falls gewünscht
-		rc = zond_treeview_remove_childish_anbindungen(ztv, info_window,
-				file_part_root, &anchor_id, &child, NULL, error);
-		if (rc == -1) {
-			g_free(filepart);
-			ERROR_Z
-		}
-		else if (rc == 1) {
-			g_free(filepart);
-			return 0; //will nicht
-		}
-	}
-	else {//Datei noch nicht in zond_dbase
+	if (!ID_file_part) { //Datei noch nicht in zond_dbase
 		gint rc = 0;
 
-		//ToDo: richtigen icon-name ermitteln
+		if (section) { //kann nicht sein!
+			g_warning("%s: Datei nicht in Datenbank, Abschnitt aber schon",
+					__func__);
+
+			return 0;
+		}
+
+		//Datei in zond_dbase einfügen
 		rc = zond_treeview_insert_file_part_in_db(ztv_priv->zond, filepart,
-				"emblem-new", &file_part_root, error);
-		if (rc) {
-			g_free(filepart);
+				sond_tvfm_item_get_icon_name(stvfm_item), &ID_file_part, error);
+		if (rc)
 			ERROR_Z
-		}
 	}
+
+	//wenn schon pdf_root existiert, dann herausfinden, ob aktuell an Baum angebunden
+	rc = zond_dbase_find_baum_inhalt_file(ztv_priv->zond->dbase_zond->zond_dbase_work,
+			ID_file_part, &baum_inhalt_file, NULL, NULL, error);
+	if (rc)
+		ERROR_Z
+
+	if (baum_inhalt_file) {
+		gchar* message = NULL;
+
+		message = g_strdup_printf("filepart '%s' bereits angebunden",
+				filepart);
+		info_window_set_message(info_window, message);
+		g_free(message);
+
+		return 0; //Wenn angebunden: nix machen
+	}
+
+	//etwaige untergeordnete Anbindungen heranholen, falls gewünscht
+	rc = zond_treeview_remove_childish_anbindungen(ztv, info_window,
+			ID_file_part, &anchor_id, &child, NULL, error);
+	if (rc == -1)
+		ERROR_Z
+	else if (rc == 1)
+		return 0; //will nicht
 
 	new_node_id = zond_dbase_insert_node(
 			ztv_priv->zond->dbase_zond->zond_dbase_work, anchor_id, child,
-			ZOND_DBASE_TYPE_BAUM_INHALT_FILE, file_part_root, NULL, NULL,
+			ZOND_DBASE_TYPE_BAUM_INHALT_FILE, ID_file_part, NULL, NULL,
 			NULL, NULL, NULL, error);
-	if (new_node_id == -1) {
-		g_free(filepart);
+	if (new_node_id == -1)
 		ERROR_Z
-	}
 
-	rc = zond_treeview_walk_tree(ztv, FALSE, file_part_root,
+	rc = zond_treeview_walk_tree(ztv, FALSE, ID_file_part,
 			(zond_tree_store_get_root(ZOND_TREE_STORE(
 			gtk_tree_view_get_model( GTK_TREE_VIEW(ztv)))) == anchor_id) ?
 			NULL : anchor_iter, child, &iter_new, 0,
 			NULL, zond_treeview_insert_file_parts, error);
-	if (rc == -1) {
-		g_free(filepart);
+	if (rc == -1)
 		ERROR_Z
-	}
-
-	g_free(filepart);
 
 	*anchor_iter = iter_new;
 	(*zaehler)++;
