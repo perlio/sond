@@ -3,5 +3,5 @@
 
 #include <gio/gio.h>
 
-extern GResource* icons_get_resource(void);
+extern GResource *icons_get_resource (void);
 #endif

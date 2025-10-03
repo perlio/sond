@@ -228,7 +228,7 @@ SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM* stvfm, SondTVFMItemType type
 			stvfm_item_priv->has_children = sond_file_part_has_children(sond_file_part);
 		}
 		else if (SOND_IS_FILE_PART_PDF(sond_file_part)) {
-			stvfm_item_priv->icon_name = g_strdup("folder-templates");
+			stvfm_item_priv->icon_name = g_strdup("pdf-folder");
 			stvfm_item_priv->display_name =
 					g_path_get_basename(sond_file_part_get_path(sond_file_part));
 

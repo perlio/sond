@@ -626,22 +626,22 @@ gint zond_treeview_walk_tree(ZondTreeview *ztv, gboolean with_younger_siblings,
 			&node_id_new, error);
 	if (rc == -1)
 		ERROR_Z
-	else if (rc == 0) //kein Abbruch gewählt, dann weiter in die Tiefe
-			{
-		rc = zond_dbase_get_first_child(
-				ztv_priv->zond->dbase_zond->zond_dbase_work, node_id,
-				&first_child, error);
+	else if (rc == 1)
+		return 0;
+
+	rc = zond_dbase_get_first_child(
+			ztv_priv->zond->dbase_zond->zond_dbase_work, node_id,
+			&first_child, error);
+	if (rc)
+		ERROR_Z
+	else if (first_child > 0) {
+		gint rc = 0;
+
+		rc = zond_treeview_walk_tree(ztv, TRUE, first_child, &iter_new,
+				TRUE,
+				NULL, node_id_new, NULL, walk_tree, error);
 		if (rc)
 			ERROR_Z
-		else if (first_child > 0) {
-			gint rc = 0;
-
-			rc = zond_treeview_walk_tree(ztv, TRUE, first_child, &iter_new,
-					TRUE,
-					NULL, node_id_new, NULL, walk_tree, error);
-			if (rc)
-				ERROR_Z
-		}
 	}
 
 	if (with_younger_siblings) {
@@ -888,22 +888,23 @@ static gint zond_treeview_leaf_anbinden(ZondTreeview *ztv,
 		if (rc)
 			ERROR_Z
 	}
+	else { //nur wenn in db, dann möglicherweise in baum_inhalt
+		//wenn schon pdf_root existiert, dann herausfinden, ob aktuell an Baum angebunden
+		rc = zond_dbase_find_baum_inhalt_file(ztv_priv->zond->dbase_zond->zond_dbase_work,
+				ID_file_part, &baum_inhalt_file, NULL, NULL, error);
+		if (rc)
+			ERROR_Z
 
-	//wenn schon pdf_root existiert, dann herausfinden, ob aktuell an Baum angebunden
-	rc = zond_dbase_find_baum_inhalt_file(ztv_priv->zond->dbase_zond->zond_dbase_work,
-			ID_file_part, &baum_inhalt_file, NULL, NULL, error);
-	if (rc)
-		ERROR_Z
+		if (baum_inhalt_file) {
+			gchar* message = NULL;
 
-	if (baum_inhalt_file) {
-		gchar* message = NULL;
+			message = g_strdup_printf("filepart '%s' bereits angebunden",
+					filepart);
+			info_window_set_message(info_window, message);
+			g_free(message);
 
-		message = g_strdup_printf("filepart '%s' bereits angebunden",
-				filepart);
-		info_window_set_message(info_window, message);
-		g_free(message);
-
-		return 0; //Wenn angebunden: nix machen
+			return 0; //Wenn angebunden: nix machen
+		}
 	}
 
 	//etwaige untergeordnete Anbindungen heranholen, falls gewünscht

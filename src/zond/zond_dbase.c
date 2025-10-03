@@ -855,7 +855,7 @@ gint zond_dbase_create_file_root(ZondDBase *zond_dbase, const gchar *file_part,
 		ERROR_Z_ROLLBACK
 
 	if (file_part_root)
-		*file_part_root = sqlite3_column_int(stmt[1], 0);
+		*file_part_root = sqlite3_column_int(stmt[2], 0);
 
 	return 0;
 }
