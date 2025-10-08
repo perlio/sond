@@ -15,12 +15,14 @@
  You should have received a copy of the GNU Affero General Public License
  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+#define _XOPEN_SOURCE 700
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #include <ftw.h>
 
 #ifdef _WIN32
@@ -29,6 +31,10 @@
 #elif defined __linux__
 #include <limits.h>
 #endif // _WIN32
+
+#ifndef MAX_PATH
+#define MAX_PATH 4096
+#endif
 
 #include "../misc_stdlib.h"
 
@@ -163,7 +169,11 @@ int main(int argc, char **argv) {
 		goto end;
 	}
 
+#ifdef __WIN32__
 	rc = mkdir("garbage");
+#elif defined __linux__
+	rc = mkdir("garbage", 0700);
+#endif // __WIN32__
 	if (rc) {
 		printf("Konnte Verzeichnis " "garbage" " nicht erzeugen - %s\n",
 				strerror( errno));
@@ -227,7 +237,7 @@ int main(int argc, char **argv) {
 				strerror( errno));
 
 	//kopieren/löschen
-	nftw(vtag, rename_files, 10, FTW_DEPTH);
+//	nftw(vtag, rename_files, 10, FTW_DEPTH);
 
 	end: rc = rmdir("garbage");
 	if (rc) {

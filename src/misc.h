@@ -32,7 +32,11 @@ typedef char gchar;
 typedef int gint;
 typedef unsigned int guint;
 typedef int gboolean;
-typedef void *GPid;
+#ifdef __WIN32
+typedef void* GPid;
+#elif defined __linux__
+typedef int GPid;
+#endif // __win32__
 typedef void *gpointer;
 typedef struct _SondFilePart SondFilePart;
 

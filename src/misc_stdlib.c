@@ -15,14 +15,20 @@
  You should have received a copy of the GNU Affero General Public License
  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+#define _XOPEN_SOURCE 700
 
 #include <errno.h>
 #include <sys/stat.h>
 #include <ftw.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <string.h>
+#include <gio/gio.h>
 
 #ifdef _WIN32
 #include <windows.h>
 #include <shlwapi.h>
+#define mkdir(path, mode) mkdir(path)
 #elif defined __linux__
 #include <limits.h>
 #endif // _WIN32
@@ -50,7 +56,7 @@ static int maybe_mkdir(const char *path, mode_t mode) {
 	errno = 0;
 
 	/* Try to make the directory */
-	if (mkdir(path) == 0)
+	if (mkdir(path, 755) == 0)
 		return 0;
 
 	/* If it fails for any reason but EEXIST, fail */
@@ -110,7 +116,7 @@ int mkdir_p(const char *path) {
 char*
 get_exe_dir(void) {
 	char buff[PATH_MAX] = { 0 };
-	char exe_dir[MAX_PATH] = { 0 };
+	char exe_dir[PATH_MAX] = { 0 };
 
 #ifdef _WIN32
 	DWORD ret = 0;
@@ -118,25 +124,35 @@ get_exe_dir(void) {
 	ret = GetModuleFileName(NULL, buff, _countof(buff));
 	if (!ret)
 		return NULL;
-#elif defined( __linux__ )
-    ssize_t count = readlink("/proc/self/exe", buff, PATH_MAX);
-    if (count == -1) return NULL; //errno is set
-#endif // _WIN32
+
+    if (strrchr((const char*) buff, '\\') == NULL)
+		return NULL;
+
 	strncpy(exe_dir, (const char*) buff,
 			strlen(buff) - strlen(strrchr((const char*) buff, '\\')));
+#elif defined( __linux__ )
+    ssize_t count = readlink("/proc/self/exe", buff, PATH_MAX);
+    if (count <= 0) return NULL; //errno is set
 
+	strncpy(exe_dir, (const char*) buff,
+			strlen(buff) - strlen(strrchr((const char*) buff, '/')));
+#endif // _WIN32
 	return strdup(exe_dir); //ohne /
 }
 
 char*
 get_base_dir(void) {
 	char *exe_dir = NULL;
-	char base_dir[PATH_MAX] = { 0 };
+	char *base_dir = NULL;
 
 	exe_dir = get_exe_dir();
-	strncpy(base_dir, (const char*) exe_dir, strlen(exe_dir) - 3);
-	free(exe_dir);
+	if (exe_dir) {
+		base_dir = g_build_filename(exe_dir, "..", "..", NULL);
+		free(exe_dir);
 
-	return strdup(base_dir); //mit /
+		return base_dir;
+	}
+
+	return NULL;
 }
 

@@ -141,7 +141,7 @@ static void init_icons(Projekt *zond) {
 	return;
 }
 
-#ifndef CONFIG_Debug
+#ifdef CONFIG_Release
 static void log_init(Projekt *zond) {
 	gchar *logfile = NULL;
 	gchar *logdir = NULL;
@@ -184,15 +184,57 @@ static void log_init(Projekt *zond) {
 }
 #endif // TESTING
 
-static void init(GtkApplication *app, Projekt *zond) {
-	zond->base_dir = get_base_dir();
+static void init_schema(Projekt* zond) {
+    GSettingsSchemaSource *source;
+    GSettingsSchema *schema;
+    GError *error = NULL;
+    gchar* path_to_schema_source = NULL;
 
-#ifndef CONFIG_Debug
-	log_init(zond);
-#endif // TESTING
+    path_to_schema_source = g_build_filename(zond->base_dir, "share/glib-2.0/schemas", NULL);
+
+    // Schema-Source aus lokalem Verzeichnis erstellen
+    source = g_settings_schema_source_new_from_directory(
+        path_to_schema_source,                                // Lokaler Pfad
+        g_settings_schema_source_get_default(),        // Parent (Standard-Schemas)
+        FALSE,                                         // trusted
+        &error
+    );
+    g_free(path_to_schema_source);
+
+    if (error) {
+        g_error("Fehler beim Laden der Schemas: %s\n", error->message);
+        g_error_free(error);
+        return;
+    }
+
+    // Schema lookup
+    schema = g_settings_schema_source_lookup(
+        source,
+        "de.perlio.zond",  // Schema-ID
+        FALSE                 // recursive
+    );
+
+    if (!schema) {
+        g_printerr("Schema nicht gefunden!\n");
+        g_settings_schema_source_unref(source);
+        return;
+    }
 
 	//GSettings
-	zond->settings = g_settings_new("de.perlio.zond");
+	zond->settings = g_settings_new_full(schema, NULL, NULL);
+
+	return;
+}
+
+
+static void init(GtkApplication *app, Projekt *zond) {
+    zond->base_dir = get_base_dir();
+
+    init_schema(zond);
+
+#ifdef CONFIG_Release
+	log_init(zond);
+#endif // TESTING
 
 	//benötigte Arrays erzeugen
 	zond->arr_pv = g_ptr_array_new();

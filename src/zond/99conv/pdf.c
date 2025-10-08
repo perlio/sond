@@ -212,11 +212,11 @@ fz_buffer* pdf_doc_to_buf(fz_context* ctx, pdf_document* doc, GError** error) {
 	fz_output* out = NULL;
 	fz_buffer* buf = NULL;
 	pdf_write_options opts =
-#ifdef __WIN32
+//#ifdef __WIN32
 			{ 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, ~0, "", "", 0 };
-#elif defined(__linux__)
-            { 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, ~0, "", "" };
-#endif // __win32
+//#elif defined(__linux__)
+ //           { 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, ~0, "", "" };
+//#endif // __win32
 //	if (pdf_count_pages(ctx, pdf_doc) < BIG_PDF && !pdf_doc->crypt)
 		opts.do_garbage = 4;
 
@@ -307,7 +307,11 @@ gint pdf_clean(fz_context *ctx, SondFilePartPDF* sfp_pdf, GError **error) {
 		pages[i] = i;
 
 	fz_try( ctx )
+#ifdef __WIN32__
 		pdf_rearrange_pages(ctx, doc, count, pages, PDF_CLEAN_STRUCTURE_KEEP);
+#elif defined(__linux__)
+		pdf_rearrange_pages(ctx, doc, count, pages);
+#endif // __win32__
 	fz_always(ctx)
 		g_free(pages);
 	fz_catch(ctx) {

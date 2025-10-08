@@ -1085,74 +1085,6 @@ static gint zond_treeview_clipboard_anbinden_foreach(SondTreeview *stv,
 	return 0;
 }
 
-/*
-	gint rc = 0;
-		gint ID = 0;
-		gchar const *file_part = NULL;
-		Anbindung anbindung = { 0 };
-		gint baum_inhalt_file = 0;
-		gchar *text = NULL;
-		GtkTreeIter iter_inserted = { 0 };
-
-		ZondPdfAbschnitt *zpa = ZOND_PDF_ABSCHNITT(object);
-		ZondTreeviewPrivate *ztv_priv = zond_treeview_get_instance_private(
-				s_selection->ztv);
-
-		zond_pdf_abschnitt_get(zpa, &ID, &file_part, &anbindung, NULL, NULL);
-
-		text = g_strdup_printf("%s, S. %d, %d - S. %d, %d", file_part,
-				anbindung.von.seite, anbindung.von.index, anbindung.bis.seite,
-				anbindung.bis.index);
-		info_window_set_message(s_selection->info_window, text);
-		g_free(text);
-
-		//Test, ob Eltern-Abschnitt angebunden
-		rc = zond_dbase_get_baum_inhalt_file_from_file_part(
-				ztv_priv->zond->dbase_zond->zond_dbase_work, ID,
-				&baum_inhalt_file, error);
-		if (rc)
-			ERROR_Z
-
-		if (baum_inhalt_file) {
-			info_window_set_message(s_selection->info_window,
-					"...bereits angebunden");
-
-			return 0;
-		}
-
-		rc = zond_treeview_remove_childish_anbindungen(s_selection->ztv,
-				s_selection->info_window, ID, &s_selection->anchor_id,
-				&s_selection->child, &anbindung, error);
-		if (rc == -1)
-			ERROR_Z
-		else if (rc == 1)
-			return 0;
-
-		node_id_new = zond_dbase_insert_node(
-				ztv_priv->zond->dbase_zond->zond_dbase_work,
-				s_selection->anchor_id, s_selection->child,
-				ZOND_DBASE_TYPE_BAUM_INHALT_FILE, ID, NULL, NULL, NULL, NULL,
-				NULL, error);
-		if (node_id_new == -1)
-			ERROR_Z
-
-		rc = zond_treeview_walk_tree(s_selection->ztv, FALSE, ID,
-				&s_selection->anchor_iter, s_selection->child, &iter_inserted,
-				0, NULL, zond_treeview_insert_file_parts, error);
-		if (rc)
-			ERROR_Z
-
-		(s_selection->zaehler)++;
-		s_selection->anchor_iter = iter_inserted;
-	}
-
-	s_selection->child = FALSE;
-	s_selection->anchor_id = node_id_new;
-
-	return 0;
-}
-*/
-
 static void zond_treeview_clipboard_anbinden(Projekt *zond, gint anchor_id,
 		GtkTreeIter *anchor_iter, gboolean child, InfoWindow *info_window) {
 	SSelectionAnbinden s_selection = { 0 };
@@ -2864,12 +2796,13 @@ static gint zond_treeview_insert_links_foreach(ZondTreeview *ztv,
 
 	ZondTreeviewPrivate *ztv_priv = zond_treeview_get_instance_private(ztv);
 
-	if (iter)
+	if (iter) {
 		gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(ztv)), iter, 0,
 				&icon_name, 2, &node_id, -1);
 
-	head_nr = atoi(icon_name);
-	g_free(icon_name);
+		head_nr = atoi(icon_name);
+		g_free(icon_name);
+	}
 
 	if (node_id >= 0) {
 		GtkTreeIter iter_child = { 0 };
@@ -2928,9 +2861,8 @@ static gint zond_treeview_insert_links_foreach(ZondTreeview *ztv,
 		gtk_tree_iter_free(iter_target);
 	}
 
-	if (iter
-			&& gtk_tree_model_iter_next(
-					gtk_tree_view_get_model(GTK_TREE_VIEW(ztv)), iter)) {
+	if (iter && gtk_tree_model_iter_next(
+			gtk_tree_view_get_model(GTK_TREE_VIEW(ztv)), iter)) {
 		gint rc = 0;
 
 		rc = zond_treeview_insert_links_foreach(ztv, iter, error);

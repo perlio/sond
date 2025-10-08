@@ -24,10 +24,13 @@
 #include <errno.h>
 #include <sys/stat.h>
 #include <ftw.h>
+#include <ctype.h>
 
 #ifdef _WIN32
 #include <windows.h>
 #include <shlwapi.h>
+#include <direct.h>
+#define mkdir(path, mode) _mkdir(path)
 #endif // _WIN32
 
 gchar* change_basename(gchar const* path_old, gchar const* base_new) {

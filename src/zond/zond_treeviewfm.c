@@ -394,12 +394,8 @@ static gint zond_treeviewfm_load_sections(SondTVFMItem* stvfm_item, GPtrArray** 
 
 	g_return_val_if_fail(sfp, -1);
 
-	if (!SOND_IS_FILE_PART_PDF(sfp)) {
-		if (error) *error = g_error_new(ZOND_ERROR, 0,
-				"%s\nNur bei PDF-FileParts möglich", __func__);
-
-		return -1;
-	}
+	if (!SOND_IS_FILE_PART_PDF(sfp))
+		return 0;
 
 	section = sond_tvfm_item_get_path_or_section(stvfm_item);
 	filepart = sond_file_part_get_filepart(sfp);
@@ -409,7 +405,7 @@ static gint zond_treeviewfm_load_sections(SondTVFMItem* stvfm_item, GPtrArray** 
 	if (rc)
 		ERROR_Z
 
-	if (ID == 0) {
+	if (section && ID == 0) { //wenn section im Baum, dann muß sie auch in db sein
 		if (error) *error = g_error_new(ZOND_ERROR, 0,
 				"%s\nAbschnitt nicht gefunden", __func__);
 

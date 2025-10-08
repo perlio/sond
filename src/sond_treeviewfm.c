@@ -134,8 +134,7 @@ get_icon_name(gchar const* content_type) {
 
 	if (!content_type)
 		icon_name = "dialog-error";
-
-	if (!g_strcmp0(content_type, "application/pdf"))
+	else if (!g_strcmp0(content_type, "application/pdf"))
 		icon_name = "pdf";
 	else if (g_content_type_is_a(content_type, "audio"))
 		icon_name = "audio-x-generic";
@@ -167,6 +166,8 @@ SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM* stvfm, SondTVFMItemType type
 
 		if (SOND_IS_FILE_PART_PDF(sond_file_part))
 			content_type = "application/pdf";
+		else if (SOND_IS_FILE_PART_ZIP(sond_file_part))
+			content_type = "application/zip";
 		else
 			content_type = sond_file_part_leaf_get_mime_type(SOND_FILE_PART_LEAF(sond_file_part));
 
@@ -2511,9 +2512,11 @@ static void sond_treeviewfm_render_file_size(GtkTreeViewColumn *column,
 		gchar *text = NULL;
 
 		size = g_file_info_get_size(G_FILE_INFO(object));
-
+#ifdef __WIN32__
 		text = g_strdup_printf("%lld", size);
-
+#elif defined __linux__
+		text = g_strdup_printf("%ld", size);
+#endif
 		g_object_set(G_OBJECT(renderer), "text", text, NULL);
 		g_free(text);
 	}
