@@ -482,39 +482,30 @@ static gint zond_treeview_check_anchor_id(Projekt *zond,
 		GError **error) {
 	gint rc = 0;
 	gint type = 0;
-	gint parent_id = 0;
 	gint baum_inhalt_file = 0;
 
-	if (*anchor_id == 0)
+	if (*anchor_id == 0) {
+		g_warning("%s: anchor_id == 0", __func__);
+
 		return 0;
-
-	if (!child) {
-		GtkTreeIter iter_parent = { 0 };
-
-		//Muß Eltern aus dem tree holen, nicht aus der DB, weil BAUM_INHALT_PDF_ABSCHNITT sonst nicht bemerkt wird
-		if (!gtk_tree_model_iter_parent(
-				GTK_TREE_MODEL(zond_tree_store_get_tree_store(iter_anchor)),
-				&iter_parent, iter_anchor))
-			return 0;
-
-		gtk_tree_model_get(
-				GTK_TREE_MODEL(zond_tree_store_get_tree_store(iter_anchor)),
-				&iter_parent, 2, &parent_id, -1);
 	}
 
 	rc = zond_dbase_get_type_and_link(zond->dbase_zond->zond_dbase_work,
-			(child) ? *anchor_id : parent_id, &type, NULL, error);
+			*anchor_id, &type, NULL, error);
 	if (rc)
 		ERROR_Z
 
-	if (type != ZOND_DBASE_TYPE_BAUM_STRUKT)
-		return 1;
+	if (type == ZOND_DBASE_TYPE_BAUM_STRUKT)
+		return 0; //ok
 
 	rc = zond_dbase_get_baum_inhalt_file_from_file_part(
 			zond->dbase_zond->zond_dbase_work, *anchor_id, &baum_inhalt_file,
 			error);
 	if (rc)
 		ERROR_Z
+
+	if (!baum_inhalt_file)
+		return 1; //dann ist würde ein Knoten in Datei oder Virt-PDF eingefügt werden
 
 	if (baum_inhalt_file)
 		*anchor_id = baum_inhalt_file;
@@ -982,8 +973,18 @@ static gint zond_treeview_anbinden_rekursiv(ZondTreeview *ztv,
 
 		//icon_name ermitteln
 		//ToDo: Differenzieren nach zip/pdf-container, "normalem" dir
-		icon_name = "folder";
-		basename = sond_tvfm_item_get_path_or_section(stvfm_item);
+		if (SOND_IS_FILE_PART_PDF(sond_tvfm_item_get_sond_file_part(stvfm_item))) {
+			icon_name = "pdf-folder";
+			basename = sond_file_part_get_path(sond_tvfm_item_get_sond_file_part(stvfm_item));
+		}
+		else if (SOND_IS_FILE_PART_ZIP(sond_tvfm_item_get_sond_file_part(stvfm_item))) {
+			icon_name = "package-x-generic";
+			basename = sond_file_part_get_path(sond_tvfm_item_get_sond_file_part(stvfm_item));
+		}
+		else {
+			icon_name = "folder";
+			basename = sond_tvfm_item_get_path_or_section(stvfm_item);
+		}
 
 		new_node_id = zond_dbase_insert_node(
 				ztv_priv->zond->dbase_zond->zond_dbase_work, anchor_id, child,

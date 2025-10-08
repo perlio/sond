@@ -78,6 +78,26 @@ static void recover(Projekt *zond, gchar *project, GApplication *app) {
 	return;
 }
 
+static void cleanup(Projekt* zond) {
+	// aufräumen
+	if (zond->pv_clip)
+		pdf_drop_document(zond->ctx, zond->pv_clip);
+	if (zond->ocr_font)
+		pdf_drop_document(zond->ctx, zond->ocr_font);
+
+	gtk_widget_destroy(zond->textview_window);
+	gtk_widget_destroy(zond->popover);
+	gtk_widget_destroy(zond->app_window);
+
+	fz_drop_context(zond->ctx);
+	g_ptr_array_unref(zond->arr_pv);
+	g_free(zond->base_dir);
+	g_object_unref(zond->settings);
+	g_ptr_array_unref(SOND_FILE_PART_CLASS(g_type_class_get(SOND_TYPE_FILE_PART))->arr_opened_files);
+
+	return;
+}
+
 static void set_icon(Icon *icon, const gchar *icon_name,
 		const gchar *display_name) {
 	icon->icon_name = icon_name;
@@ -163,22 +183,14 @@ static void log_init(Projekt *zond) {
 
 	file = freopen(logfile, "a+", stdout);
 	if (!file) {
-		display_message(zond->app_window, "stdout konnte nicht in Datei " "",
-				logfile, "" " umgeleitet werden:\n", strerror( errno), NULL);
 		g_free(logfile);
-		exit(-1);
+		g_error("stdout konnte nicht umgeleitet werden: %s", strerror(errno));
 	}
 
 	file_tmp = freopen(logfile, "a+", stderr);
-	if (!file_tmp) {
-		display_message(zond->app_window, "stderr konnte nicht in "
-				"Datei %s umgeleitet werden:\n%s", logfile, strerror( errno),
-				NULL);
-		g_free(logfile);
-		exit(-1);
-	}
-
 	g_free(logfile);
+	if (!file_tmp)
+		g_error("stderr konnte nicht umgeleitet werden: %s", strerror(errno));
 
 	return;
 }
@@ -202,7 +214,7 @@ static void init_schema(Projekt* zond) {
     g_free(path_to_schema_source);
 
     if (error) {
-        g_error("Fehler beim Laden der Schemas: %s\n", error->message);
+        g_error("Fehler beim Laden der Schemas: %s", error->message);
         g_error_free(error);
         return;
     }
@@ -213,15 +225,19 @@ static void init_schema(Projekt* zond) {
         "de.perlio.zond",  // Schema-ID
         FALSE                 // recursive
     );
+    g_settings_schema_source_unref(source);
 
     if (!schema) {
-        g_printerr("Schema nicht gefunden!\n");
-        g_settings_schema_source_unref(source);
+        g_error("Schema nicht gefunden!");
         return;
     }
 
 	//GSettings
 	zond->settings = g_settings_new_full(schema, NULL, NULL);
+	g_settings_schema_unref(schema);
+
+	if (!zond->settings)
+		g_error("Settings konnten nicht erzeugt werden");
 
 	return;
 }
@@ -261,19 +277,12 @@ static void init(GtkApplication *app, Projekt *zond) {
 	gtk_widget_show_all(zond->app_window);
 	gtk_widget_hide(gtk_paned_get_child1(GTK_PANED(zond->hpaned)));
 
-	zond->ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
-	if (!zond->ctx) {
-		display_message(zond->app_window,
-				"zond->ctx konnte nicht initialisiert werden",
-				NULL);
-		gboolean ret = FALSE;
-		g_signal_emit_by_name(zond->app_window, "delete-event", NULL, &ret);
-
-		return;
-	}
-
 	SOND_FILE_PART_CLASS(g_type_class_get(SOND_TYPE_FILE_PART))->arr_opened_files =
 			g_ptr_array_new( );
+
+	zond->ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
+	if (!zond->ctx)
+		g_error("fz_context konnte nicht initialisiert werden");
 
 	return;
 }
@@ -329,6 +338,24 @@ static void startup_app(GtkApplication *app, gpointer data) {
 	return;
 }
 
+static void error_handler (const gchar* log_domain, GLogLevelFlags log_level,
+		const gchar* message, gpointer user_data) {
+	Projekt *zond = (Projekt*) user_data;
+    GDateTime *now = g_date_time_new_now_local();
+    gchar *timestr = g_date_time_format(now, "%Y-%m-%d %H:%M:%S");
+
+	// Ausgabe mit Zeitstempel auf stderr
+	g_printerr("[%s] [ERROR] %s\n", timestr, message);
+
+	// Aufräumen
+	g_free(timestr);
+	g_date_time_unref(now);
+
+	cleanup(zond);
+
+	return;
+}
+
 int main(int argc, char **argv) {
 	GtkApplication *app = NULL;
 	Projekt zond = { 0 };
@@ -341,11 +368,16 @@ int main(int argc, char **argv) {
 	g_signal_connect(app, "activate", G_CALLBACK (activate_app), &zond);
 	g_signal_connect(app, "open", G_CALLBACK (open_app), &zond);
 
+	g_log_set_handler(NULL, G_LOG_LEVEL_ERROR | G_LOG_FLAG_FATAL, error_handler,
+			&zond);
+
 	gint status = g_application_run(G_APPLICATION(app), argc, argv);
 
-	g_message("zond beendet");
-
 	g_object_unref(app);
+
+	cleanup(&zond);
+
+	g_message("zond beendet");
 
 	return status;
 }

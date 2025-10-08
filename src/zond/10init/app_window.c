@@ -36,8 +36,6 @@ static gboolean cb_delete_event(GtkWidget *app_window, GdkEvent *event,
 
 	Projekt *zond = (Projekt*) user_data;
 
-	g_free(zond->base_dir);
-
 	rc = projekt_schliessen(zond, &errmsg);
 	if (rc == -1) {
 		display_message(zond->app_window,
@@ -49,15 +47,7 @@ static gboolean cb_delete_event(GtkWidget *app_window, GdkEvent *event,
 	} else if (rc == 1)
 		return TRUE;
 
-	gtk_widget_destroy(zond->textview_window);
-	gtk_widget_destroy(zond->app_window);
-
-	pdf_drop_document(zond->ctx, zond->pv_clip);
-	pdf_drop_document(zond->ctx, zond->ocr_font);
-
-	fz_drop_context(zond->ctx);
-
-	g_ptr_array_unref(zond->arr_pv);
+	g_application_quit(G_APPLICATION(gtk_window_get_application(GTK_WINDOW(zond->app_window))));
 
 	return TRUE;
 }

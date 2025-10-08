@@ -70,7 +70,17 @@ static gboolean sond_treeview_show_popupmenu(SondTreeview *stv,
 	return ret;
 }
 
+static void sond_treeview_finalize(GObject* object) {
+	SondTreeviewPrivate* stv_priv = sond_treeview_get_instance_private(SOND_TREEVIEW(object));
+
+	gtk_widget_destroy(stv_priv->contextmenu);
+
+	G_OBJECT_CLASS(sond_treeview_parent_class)->finalize(object);
+}
+
 static void sond_treeview_class_init(SondTreeviewClass *klass) {
+	GObjectClass *object_class = G_OBJECT_CLASS(klass);
+
 	klass->clipboard = g_malloc0(sizeof(Clipboard));
 	klass->clipboard->arr_ref = g_ptr_array_new_with_free_func(
 			(GDestroyNotify) gtk_tree_row_reference_free);
@@ -81,6 +91,8 @@ static void sond_treeview_class_init(SondTreeviewClass *klass) {
 	klass->text_edited = NULL;
 	klass->callback_key_press_event = NULL;
 	klass->callback_key_press_event_func_data = NULL;
+
+	object_class->finalize = sond_treeview_finalize;
 
 	return;
 }

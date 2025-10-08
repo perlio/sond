@@ -166,157 +166,6 @@ static gint zond_anbindung_baum_inhalt(Projekt *zond, gint anchor_id,
 	return (baum_inhalt_file) ? 0 : 1;
 }
 
-gint ziele_abfragen_anker_rek(ZondDBase *zond_dbase, Anbindung anbindung,
-		gint anchor_id, gint *anchor_id_new, gboolean *kind, GError **error) {
-	gint rc = 0;
-	Anbindung anbindung_anchor = { 0 };
-	gchar *section = NULL;
-
-	rc = zond_dbase_get_node(zond_dbase, anchor_id, NULL, NULL, NULL, &section,
-	NULL, NULL, NULL, error);
-	if (rc)
-		ERROR_Z
-
-	if (section) {
-		anbindung_parse_file_section(section, &anbindung_anchor);
-		g_free(section);
-	}
-
-	//ziele auf Identität prüfen
-	if (anbindung_1_gleich_2(anbindung_anchor, anbindung)) {
-		if (error)
-			*error = g_error_new( ZOND_ERROR, 0,
-					"%s\nIdentischer Abschnitt wurde bereits angebunden",
-					__func__);
-
-		return -1;
-	}
-	//Knoten kommt ist kind - anchor "weiter" oder root
-	else if (anbindung_1_eltern_von_2(anbindung_anchor, anbindung)
-			|| (anbindung_anchor.von.seite == 0
-					&& anbindung_anchor.von.index == 0
-					&& anbindung_anchor.bis.seite == 0
-					&& anbindung_anchor.bis.index == 0)) {
-		gint rc = 0;
-		gint first_child_id = 0;
-
-		*kind = TRUE;
-		*anchor_id_new = anchor_id;
-
-		rc = zond_dbase_get_first_child(zond_dbase, anchor_id, &first_child_id,
-				error);
-		if (rc)
-			ERROR_Z
-
-		if (first_child_id > 0) //hat kind
-				{
-			gint rc = 0;
-
-			rc = ziele_abfragen_anker_rek(zond_dbase, anbindung, first_child_id,
-					anchor_id_new, kind, error);
-			if (rc) {
-				g_prefix_error(error, "%s\n", __func__);
-
-				return -1;
-			}
-		}
-	}
-	//Seiten oder Punkte vor den einzufügenden Punkt
-	else if (anbindung_1_vor_2(anbindung_anchor, anbindung)) {
-		gint rc = 0;
-		gint younger_sibling_id = 0;
-
-		rc = zond_dbase_get_younger_sibling(zond_dbase, anchor_id,
-				&younger_sibling_id, error);
-		if (rc)
-			ERROR_Z
-
-		*kind = FALSE;
-		*anchor_id_new = anchor_id;
-
-		if (younger_sibling_id > 0) {
-			gint rc = 0;
-
-			rc = ziele_abfragen_anker_rek(zond_dbase, anbindung,
-					younger_sibling_id, anchor_id_new, kind, error);
-			if (rc)
-				ERROR_Z
-		}
-	}
-	// wenn nicht danach, bleibt ja nur Überschneidung!!
-	else if (!anbindung_1_vor_2(anbindung, anbindung_anchor)
-			&& !anbindung_1_eltern_von_2(anbindung, anbindung_anchor)) {
-		if (error)
-			*error = g_error_new( ZOND_ERROR, 0,
-					"Eingegebenes Ziel überschneidet "
-							"sich mit bereits bestehendem Ziel");
-
-		return -1;
-	}
-
-	return 0;
-}
-
-static gint zond_anbindung_insert_pdf_abschnitt_in_dbase(Projekt *zond,
-		const gchar *file_part, Anbindung anbindung, gint *anchor_pdf_abschnitt,
-		gboolean *child, gint *node_inserted, gchar **node_text, GError **error) {
-	gint pdf_root = 0;
-	gint node_id_new = 0;
-	gint rc = 0;
-	gint anchor_id_dbase = 0;
-	gchar *file_section = NULL;
-
-	rc = zond_dbase_get_section(zond->dbase_zond->zond_dbase_work,
-			file_part, NULL, &pdf_root, error);
-	if (rc)
-		ERROR_Z
-
-	if (!pdf_root) {
-		gint rc = 0;
-
-		rc = zond_treeview_insert_file_part_in_db(zond, file_part, "anbindung",
-				&pdf_root, error);
-		if (rc)
-			ERROR_Z
-	}
-
-	//jetzt vergleichen,
-	rc = ziele_abfragen_anker_rek(zond->dbase_zond->zond_dbase_work, anbindung,
-			pdf_root, &anchor_id_dbase, child, error);
-	if (rc)
-		ERROR_Z
-
-	if (anchor_pdf_abschnitt)
-		*anchor_pdf_abschnitt = anchor_id_dbase;
-
-	*node_text = g_strdup_printf("S. %i", anbindung.von.seite + 1);
-	if (anbindung.von.index)
-		*node_text = add_string(*node_text,
-				g_strdup_printf(", Index %d", anbindung.von.index));
-	if (anbindung.bis.seite || anbindung.bis.index)
-		*node_text = add_string(*node_text,
-				g_strdup_printf(" - S. %d", anbindung.bis.seite + 1));
-	if (anbindung.bis.index != EOP)
-		*node_text = add_string(*node_text,
-				g_strdup_printf(", Index %d", anbindung.bis.index));
-
-	//file_section zusammensetzen
-	anbindung_build_file_section(anbindung, &file_section);
-
-	node_id_new = zond_dbase_insert_node(zond->dbase_zond->zond_dbase_work,
-			anchor_id_dbase, *child, ZOND_DBASE_TYPE_FILE_PART, 0, file_part,
-			file_section, zond->icon[ICON_ANBINDUNG].icon_name, *node_text,
-			NULL, error);
-	g_free(file_section);
-	if (node_id_new == -1)
-		ERROR_Z
-
-	if (node_inserted)
-		*node_inserted = node_id_new;
-
-	return 0;
-}
-
 static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
 		gchar const *file_part, SondFilePartPDF *sfp_pdf, Anbindung anbindung,
 		gchar const *node_text, gboolean open, GError **error) {
@@ -563,6 +412,157 @@ static gint zond_anbindung_trees(Projekt *zond, gint anchor_pdf_abschnitt,
 			node_text, open, error);
 	if (rc)
 		ERROR_Z
+
+	return 0;
+}
+
+gint ziele_abfragen_anker_rek(ZondDBase *zond_dbase, Anbindung anbindung,
+		gint anchor_id, gint *anchor_id_new, gboolean *kind, GError **error) {
+	gint rc = 0;
+	Anbindung anbindung_anchor = { 0 };
+	gchar *section = NULL;
+
+	rc = zond_dbase_get_node(zond_dbase, anchor_id, NULL, NULL, NULL, &section,
+	NULL, NULL, NULL, error);
+	if (rc)
+		ERROR_Z
+
+	if (section) {
+		anbindung_parse_file_section(section, &anbindung_anchor);
+		g_free(section);
+	}
+
+	//ziele auf Identität prüfen
+	if (anbindung_1_gleich_2(anbindung_anchor, anbindung)) {
+		if (error)
+			*error = g_error_new( ZOND_ERROR, 0,
+					"%s\nIdentischer Abschnitt wurde bereits angebunden",
+					__func__);
+
+		return -1;
+	}
+	//Knoten kommt ist kind - anchor "weiter" oder root
+	else if (anbindung_1_eltern_von_2(anbindung_anchor, anbindung)
+			|| (anbindung_anchor.von.seite == 0
+					&& anbindung_anchor.von.index == 0
+					&& anbindung_anchor.bis.seite == 0
+					&& anbindung_anchor.bis.index == 0)) {
+		gint rc = 0;
+		gint first_child_id = 0;
+
+		*kind = TRUE;
+		*anchor_id_new = anchor_id;
+
+		rc = zond_dbase_get_first_child(zond_dbase, anchor_id, &first_child_id,
+				error);
+		if (rc)
+			ERROR_Z
+
+		if (first_child_id > 0) //hat kind
+				{
+			gint rc = 0;
+
+			rc = ziele_abfragen_anker_rek(zond_dbase, anbindung, first_child_id,
+					anchor_id_new, kind, error);
+			if (rc) {
+				g_prefix_error(error, "%s\n", __func__);
+
+				return -1;
+			}
+		}
+	}
+	//Seiten oder Punkte vor den einzufügenden Punkt
+	else if (anbindung_1_vor_2(anbindung_anchor, anbindung)) {
+		gint rc = 0;
+		gint younger_sibling_id = 0;
+
+		rc = zond_dbase_get_younger_sibling(zond_dbase, anchor_id,
+				&younger_sibling_id, error);
+		if (rc)
+			ERROR_Z
+
+		*kind = FALSE;
+		*anchor_id_new = anchor_id;
+
+		if (younger_sibling_id > 0) {
+			gint rc = 0;
+
+			rc = ziele_abfragen_anker_rek(zond_dbase, anbindung,
+					younger_sibling_id, anchor_id_new, kind, error);
+			if (rc)
+				ERROR_Z
+		}
+	}
+	// wenn nicht danach, bleibt ja nur Überschneidung!!
+	else if (!anbindung_1_vor_2(anbindung, anbindung_anchor)
+			&& !anbindung_1_eltern_von_2(anbindung, anbindung_anchor)) {
+		if (error)
+			*error = g_error_new( ZOND_ERROR, 0,
+					"Eingegebenes Ziel überschneidet "
+							"sich mit bereits bestehendem Ziel");
+
+		return -1;
+	}
+
+	return 0;
+}
+
+static gint zond_anbindung_insert_pdf_abschnitt_in_dbase(Projekt *zond,
+		const gchar *file_part, Anbindung anbindung, gint *anchor_pdf_abschnitt,
+		gboolean *child, gint *node_inserted, gchar **node_text, GError **error) {
+	gint pdf_root = 0;
+	gint node_id_new = 0;
+	gint rc = 0;
+	gint anchor_id_dbase = 0;
+	gchar *file_section = NULL;
+
+	rc = zond_dbase_get_section(zond->dbase_zond->zond_dbase_work,
+			file_part, NULL, &pdf_root, error);
+	if (rc)
+		ERROR_Z
+
+	if (!pdf_root) {
+		gint rc = 0;
+
+		rc = zond_treeview_insert_file_part_in_db(zond, file_part, "anbindung",
+				&pdf_root, error);
+		if (rc)
+			ERROR_Z
+	}
+
+	//jetzt vergleichen,
+	rc = ziele_abfragen_anker_rek(zond->dbase_zond->zond_dbase_work, anbindung,
+			pdf_root, &anchor_id_dbase, child, error);
+	if (rc)
+		ERROR_Z
+
+	if (anchor_pdf_abschnitt)
+		*anchor_pdf_abschnitt = anchor_id_dbase;
+
+	*node_text = g_strdup_printf("S. %i", anbindung.von.seite + 1);
+	if (anbindung.von.index)
+		*node_text = add_string(*node_text,
+				g_strdup_printf(", Index %d", anbindung.von.index));
+	if (anbindung.bis.seite || anbindung.bis.index)
+		*node_text = add_string(*node_text,
+				g_strdup_printf(" - S. %d", anbindung.bis.seite + 1));
+	if (anbindung.bis.index != EOP)
+		*node_text = add_string(*node_text,
+				g_strdup_printf(", Index %d", anbindung.bis.index));
+
+	//file_section zusammensetzen
+	anbindung_build_file_section(anbindung, &file_section);
+
+	node_id_new = zond_dbase_insert_node(zond->dbase_zond->zond_dbase_work,
+			anchor_id_dbase, *child, ZOND_DBASE_TYPE_FILE_PART, 0, file_part,
+			file_section, zond->icon[ICON_ANBINDUNG].icon_name, *node_text,
+			NULL, error);
+	g_free(file_section);
+	if (node_id_new == -1)
+		ERROR_Z
+
+	if (node_inserted)
+		*node_inserted = node_id_new;
 
 	return 0;
 }

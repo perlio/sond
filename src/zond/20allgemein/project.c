@@ -224,14 +224,14 @@ static gint project_create_dbase_zond(Projekt *zond, const gchar *path,
 	zond_dbase_work = zond_dbase_new(path_tmp, TRUE, FALSE, errmsg);
 	g_free(path_tmp);
 	if (!zond_dbase_work) {
-		zond_dbase_close(zond_dbase_store);
+		g_object_unref(zond_dbase_store);
 		ERROR_S
 	}
 
 	rc = zond_dbase_backup(zond_dbase_store, zond_dbase_work, errmsg);
 	if (rc) {
-		zond_dbase_close(zond_dbase_store);
-		zond_dbase_close(zond_dbase_work);
+		g_object_unref(zond_dbase_store);
+		g_object_unref(zond_dbase_work);
 		ERROR_S
 	}
 

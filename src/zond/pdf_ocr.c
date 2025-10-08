@@ -938,7 +938,7 @@ static gint init_tesseract(Projekt *zond, TessBaseAPI **handle,
 	if (!(*handle))
 		ERROR_S
 
-	tessdata_dir = g_strconcat(zond->base_dir, "share/tessdata", NULL);
+	tessdata_dir = g_build_filename(zond->base_dir, "share/tessdata", NULL);
 
 	rc = TessBaseAPIInit3(*handle, tessdata_dir, "deu");
 	g_free(tessdata_dir);
