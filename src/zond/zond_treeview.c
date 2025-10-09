@@ -617,8 +617,6 @@ gint zond_treeview_walk_tree(ZondTreeview *ztv, gboolean with_younger_siblings,
 			&node_id_new, error);
 	if (rc == -1)
 		ERROR_Z
-	else if (rc == 1)
-		return 0;
 
 	rc = zond_dbase_get_first_child(
 			ztv_priv->zond->dbase_zond->zond_dbase_work, node_id,
@@ -710,7 +708,7 @@ static gint zond_treeview_insert_file_parts(ZondTreeview *ztv, gint node_id,
 
 		gtk_tree_iter_free(iter_pdf_abschnitt);
 
-		return 1;
+		return 0;
 	}
 
 	//Ansonsten Einfügen
