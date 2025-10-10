@@ -34,6 +34,7 @@ struct _SondTreeviewFMClass {
 	SondTreeviewClass parent_class;
 
 	gint (*deter_background)(SondTVFMItem*, GError**);
+	gint (*text_from_section)(SondTVFMItem*, gchar**, GError**);
 	gint (*before_delete)(SondTVFMItem*, GError**);
 	gint (*before_move)(SondTreeviewFM*, gchar const*, gchar const*, GError**);
 	void (*after_move)(SondTreeviewFM*, gboolean, GError*);

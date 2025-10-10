@@ -38,5 +38,7 @@ void anbindung_aktualisieren_insert_pages(ZondPdfDocument const*, Anbindung*);
 
 void anbindung_aktualisieren(ZondPdfDocument*, Anbindung*);
 
+gchar* anbindung_to_human_readable(Anbindung*);
+
 #endif // GENERAL_H_INCLUDED
 

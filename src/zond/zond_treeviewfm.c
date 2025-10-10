@@ -227,6 +227,8 @@ static gint zond_treeviewfm_text_edited(SondTreeviewFM *stvfm,
 				new_text, error);
 		if (rc)
 			ERROR_Z
+
+		//ToDo: Text in treeview anpassen
 	}
 	else { //chain-up, wenn nicht erledigt
 		gint rc = 0;
@@ -491,7 +493,45 @@ static gboolean zond_treeviewfm_has_sections(SondTVFMItem* stvfm_item) {
 	return (gboolean) rc;
 }
 
+static gint zond_treeviewfm_get_text_from_section(SondTVFMItem* stvfm_item,
+		gchar** text, GError** error) {
+	gchar* filepart = NULL;
+	gchar const* section = NULL;
+	gint ID = 0;
+	gint rc = 0;
+
+	ZondTreeviewFMPrivate* ztvfm_priv =
+			zond_treeviewfm_get_instance_private(ZOND_TREEVIEWFM(sond_tvfm_item_get_stvfm(stvfm_item)));
+
+	section = sond_tvfm_item_get_path_or_section(stvfm_item);
+	filepart = sond_file_part_get_filepart(
+			sond_tvfm_item_get_sond_file_part(stvfm_item));
+
+	rc = zond_dbase_get_section(ztvfm_priv->zond->dbase_zond->zond_dbase_work,
+			filepart, section, &ID, error);
+	g_free(filepart);
+	if (rc)
+		ERROR_Z
+
+	if (ID == 0) {
+		Anbindung anbindung = { 0 };
+
+		anbindung_parse_file_section(section, &anbindung);
+		*text = anbindung_to_human_readable(&anbindung);
+	}
+	else {
+		rc = zond_dbase_get_node(ztvfm_priv->zond->dbase_zond->zond_dbase_work,
+				ID, NULL, NULL, NULL, NULL, NULL, text, NULL, error);
+		if (rc)
+			ERROR_Z
+	}
+
+	return 0;
+}
+
 static void zond_treeviewfm_class_init(ZondTreeviewFMClass *klass) {
+	SOND_TREEVIEWFM_CLASS(klass)->text_from_section =
+			zond_treeviewfm_get_text_from_section;
 	SOND_TREEVIEWFM_CLASS(klass)->deter_background = zond_treeviewfm_deter_background;
 	SOND_TREEVIEWFM_CLASS(klass)->before_delete = zond_treeviewfm_before_delete;
 	SOND_TREEVIEWFM_CLASS(klass)->before_move = zond_treeviewfm_before_move;

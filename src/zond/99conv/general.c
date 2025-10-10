@@ -1,11 +1,12 @@
+#include "general.h"
+
 #include <stdlib.h>
 #include <gtk/gtk.h>
 #include <ctype.h>
 
-#include "general.h"
 #include "../zond_pdf_document.h"
 #include "../40viewer/viewer.h"
-//#include "../../misc.h"
+#include "../../misc.h"
 
 gchar*
 get_rel_path_from_file_part(gchar const *file_part) {
@@ -145,6 +146,23 @@ void anbindung_build_file_section(Anbindung anbindung, gchar **section) {
 				anbindung.von.index, anbindung.bis.seite, anbindung.bis.index);
 
 	return;
+}
+
+gchar* anbindung_to_human_readable(Anbindung* anbindung) {
+	gchar* text = NULL;
+
+	text = g_strdup_printf("S. %i", anbindung->von.seite + 1);
+	if (anbindung->von.index)
+		text = add_string(text,
+				g_strdup_printf(", Index %d", anbindung->von.index));
+	if (anbindung->bis.seite || anbindung->bis.index)
+		text = add_string(text,
+				g_strdup_printf(" - S. %d", anbindung->bis.seite + 1));
+	if (anbindung->bis.index != EOP)
+		text = add_string(text,
+				g_strdup_printf(", Index %d", anbindung->bis.index));
+
+	return text;
 }
 
 typedef struct _Inserts {

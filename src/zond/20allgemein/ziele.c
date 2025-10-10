@@ -538,16 +538,7 @@ static gint zond_anbindung_insert_pdf_abschnitt_in_dbase(Projekt *zond,
 	if (anchor_pdf_abschnitt)
 		*anchor_pdf_abschnitt = anchor_id_dbase;
 
-	*node_text = g_strdup_printf("S. %i", anbindung.von.seite + 1);
-	if (anbindung.von.index)
-		*node_text = add_string(*node_text,
-				g_strdup_printf(", Index %d", anbindung.von.index));
-	if (anbindung.bis.seite || anbindung.bis.index)
-		*node_text = add_string(*node_text,
-				g_strdup_printf(" - S. %d", anbindung.bis.seite + 1));
-	if (anbindung.bis.index != EOP)
-		*node_text = add_string(*node_text,
-				g_strdup_printf(", Index %d", anbindung.bis.index));
+	*node_text = anbindung_to_human_readable(&anbindung);
 
 	//file_section zusammensetzen
 	anbindung_build_file_section(anbindung, &file_section);
