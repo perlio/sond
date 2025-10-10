@@ -58,8 +58,6 @@ void sond_tvfm_item_set_icon_name(SondTVFMItem*, gchar const*);
 
 gchar const* sond_tvfm_item_get_icon_name(SondTVFMItem*);
 
-void sond_tvfm_item_set_display_name(SondTVFMItem*, gchar const*);
-
 SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM*, SondTVFMItemType type,
 		SondFilePart *, gchar const*);
 

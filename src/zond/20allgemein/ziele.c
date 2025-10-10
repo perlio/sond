@@ -303,7 +303,6 @@ static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
 				SOND_TVFM_ITEM_TYPE_LEAF_SECTION, SOND_FILE_PART(sfp_pdf), section);
 		g_free(section);
 		sond_tvfm_item_set_icon_name(stvfm_item_child, "anbindung");
-		sond_tvfm_item_set_display_name(stvfm_item_child, node_text);
 
 		gtk_tree_store_insert(
 				GTK_TREE_STORE(

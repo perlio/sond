@@ -373,6 +373,29 @@ static gint zond_treeviewfm_open_stvfm_item(SondTreeviewFM* stvfm,
 }
 
 static gint zond_treeviewfm_delete_section(SondTVFMItem* stvfm_item, GError** error) {
+	gint rc = 0;
+	gchar* filepart = NULL;
+	gchar const* section = NULL;
+	gint ID = 0;
+
+	ZondTreeviewFMPrivate* ztvfm_priv = NULL;
+
+	ztvfm_priv = zond_treeviewfm_get_instance_private(
+			ZOND_TREEVIEWFM(sond_tvfm_item_get_stvfm(stvfm_item)));
+
+	section = sond_tvfm_item_get_path_or_section(stvfm_item);
+	filepart = sond_file_part_get_filepart(
+			sond_tvfm_item_get_sond_file_part(stvfm_item));
+
+	rc = zond_dbase_get_section(ztvfm_priv->zond->dbase_zond->zond_dbase_work,
+			filepart, section, &ID, error);
+	g_free(filepart);
+	if (rc)
+		ERROR_Z
+
+	rc = zond_dbase_remove_node(ztvfm_priv->zond->dbase_zond->zond_dbase_work, ID, error);
+	if (rc)
+		ERROR_Z
 
 	return 0;
 }
@@ -428,10 +451,9 @@ static gint zond_treeviewfm_load_sections(SondTVFMItem* stvfm_item, GPtrArray** 
 		gint rc = 0;
 		gint younger_sibling_id = 0;
 		gchar* icon_name = NULL;
-		gchar* display_name = NULL;
 
 		rc = zond_dbase_get_node(ztvfm_priv->zond->dbase_zond->zond_dbase_work, child,
-				NULL, NULL, NULL, &section_child, &icon_name, &display_name, NULL, error);
+				NULL, NULL, NULL, &section_child, &icon_name, NULL, NULL, error);
 		if (rc)
 			ERROR_Z
 
@@ -439,7 +461,6 @@ static gint zond_treeviewfm_load_sections(SondTVFMItem* stvfm_item, GPtrArray** 
 				SOND_TVFM_ITEM_TYPE_LEAF_SECTION, sfp, section_child);
 		g_free(section_child);
 		sond_tvfm_item_set_icon_name(stvfm_item_child, icon_name);
-		sond_tvfm_item_set_display_name(stvfm_item_child, display_name);
 		g_ptr_array_add(arr_children_int, stvfm_item_child);
 
 		rc = zond_dbase_get_younger_sibling(ztvfm_priv->zond->dbase_zond->zond_dbase_work,

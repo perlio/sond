@@ -32,7 +32,6 @@
 typedef struct {
 	SondTreeviewFM* stvfm;
 	gchar *icon_name;
-	gchar* display_name;
 	gboolean has_children;
 	SondTVFMItemType type;
 	SondFilePart* sond_file_part;
@@ -46,7 +45,6 @@ static void sond_tvfm_item_finalize(GObject *self) {
 			sond_tvfm_item_get_instance_private(SOND_TVFM_ITEM(self));
 
 	g_free(sond_tvfm_item_priv->icon_name);
-	g_free(sond_tvfm_item_priv->display_name);
 
 	//sfp-Type oder root
 	if (sond_tvfm_item_priv->sond_file_part)
@@ -116,12 +114,57 @@ void sond_tvfm_item_set_icon_name(SondTVFMItem* stvfm_item,
 	return;
 }
 
-void sond_tvfm_item_set_display_name(SondTVFMItem* stvfm_item,
-		gchar const* display_name) {
+static gchar const* sond_tvfm_item_get_basename(SondTVFMItem* stvfm_item) {
+	gchar const* path = NULL;
+	gchar const* basename = NULL;
+
 	SondTVFMItemPrivate *stvfm_item_priv =
 			sond_tvfm_item_get_instance_private(stvfm_item);
 
-	stvfm_item_priv->display_name = g_strdup(display_name);
+	if (stvfm_item_priv->path_or_section)
+		path = stvfm_item_priv->path_or_section;
+	else
+		path = sond_file_part_get_path(stvfm_item_priv->sond_file_part);
+
+	basename = strrchr(path, '/');
+
+	if (basename)
+		basename++; //nach dem '/'
+	else
+		basename = path; //kein '/', also kompletter Pfad ist der Basename
+
+	return basename;
+}
+
+static void sond_tvfm_item_set_basename(SondTVFMItem* stvfm_item,
+		gchar const* new_basename) {
+	gchar const* path = NULL;
+	gchar const* dir = NULL;
+	gchar* path_new = NULL;
+
+	SondTVFMItemPrivate *stvfm_item_priv =
+			sond_tvfm_item_get_instance_private(stvfm_item);
+
+	if (stvfm_item_priv->path_or_section)
+		path = stvfm_item_priv->path_or_section;
+	else
+		path = sond_file_part_get_path(stvfm_item_priv->sond_file_part);
+
+	dir = strrchr(path, '/');
+
+	if (!dir)
+		path_new = g_strdup(new_basename);
+	else
+		path_new = g_strdup_printf("%.*s/%s", (int)(dir - path), path, new_basename);
+
+	if (stvfm_item_priv->path_or_section) {
+		g_free(stvfm_item_priv->path_or_section);
+		stvfm_item_priv->path_or_section = g_strdup(path_new);
+	}
+	else
+		sond_file_part_set_path(stvfm_item_priv->sond_file_part, path_new);
+
+	g_free(path_new);
 
 	return;
 }
@@ -160,82 +203,56 @@ SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM* stvfm, SondTVFMItemType type
 	if (sond_file_part)
 		stvfm_item_priv->sond_file_part = g_object_ref(sond_file_part);
 
-	//Wenn sond_file_part != NULL dann ist es ein FilePart nicht im Dateisystem
-	if (type == SOND_TVFM_ITEM_TYPE_LEAF) {
-		gchar const* content_type = NULL;
-
-		if (SOND_IS_FILE_PART_PDF(sond_file_part))
-			content_type = "application/pdf";
-		else if (SOND_IS_FILE_PART_ZIP(sond_file_part))
-			content_type = "application/zip";
-		else
-			content_type = sond_file_part_leaf_get_mime_type(SOND_FILE_PART_LEAF(sond_file_part));
-
-		stvfm_item_priv->icon_name = g_strdup(get_icon_name(content_type));
-
-		stvfm_item_priv->display_name = g_path_get_basename(
-				sond_file_part_get_path(sond_file_part));
-		if (SOND_TREEVIEWFM_GET_CLASS(stvfm)->has_sections)
-			stvfm_item_priv->has_children =
-					SOND_TREEVIEWFM_GET_CLASS(stvfm)->has_sections(stvfm_item);
-	}
-	else if (type == SOND_TVFM_ITEM_TYPE_LEAF_SECTION) {
-		//stvfm_item_priv->icon_name muß in load_children gesetzt werden;
-		//stvfm_item_priv->display_name ebenfalz
-		if (SOND_TREEVIEWFM_GET_CLASS(stvfm)->has_sections)
-			stvfm_item_priv->has_children =
-					SOND_TREEVIEWFM_GET_CLASS(stvfm)->has_sections(stvfm_item);
-	}
-	else if (type == SOND_TVFM_ITEM_TYPE_DIR) {
+	if (type == SOND_TVFM_ITEM_TYPE_DIR) {
 		if (!sond_file_part) { //kein SondFilePart, dann ist es ein Verzeichnis im Dateisystem
 			gint rc = 0;
 			GError* error = NULL;
-			gchar* basename = NULL;
-
-			if (path_or_section) basename = g_path_get_basename(path_or_section);
 
 			rc = sond_tvfm_item_load_fs_dir(stvfm_item, FALSE, NULL, &error);
 			if (rc == -1) {
-				gchar* text = NULL;
+				g_warning("Fehler beim Öffnen des Verzeichnisses '%s':\n%s",
+						sond_tvfm_item_get_basename(stvfm_item), error->message);
 
-				text = g_strdup_printf("'%s' konnte nicht geöffnet werden: %s",
-						basename, error->message);
 				g_error_free(error);
-				g_free(basename);
-
-				stvfm_item_priv->display_name = text;
 			}
-			else {
-				stvfm_item_priv->display_name = basename;
-
+			else
 				if (rc == 1) stvfm_item_priv->has_children = TRUE;
-			}
 
 			stvfm_item_priv->icon_name = g_strdup("folder");
 		}
 		else if (SOND_IS_FILE_PART_ZIP(sond_file_part)) {
-			if (!path_or_section) {
+			if (!path_or_section)
 				stvfm_item_priv->icon_name = g_strdup("zip");
-
-				stvfm_item_priv->display_name =
-						g_path_get_basename(sond_file_part_get_path(sond_file_part));
-			}
-			else {
+			else
 				stvfm_item_priv->icon_name = g_strdup("folder");
-				stvfm_item_priv->display_name =
-						g_path_get_basename(stvfm_item_priv->path_or_section);
-			}
 
 			stvfm_item_priv->has_children = sond_file_part_has_children(sond_file_part);
 		}
 		else if (SOND_IS_FILE_PART_PDF(sond_file_part)) {
 			stvfm_item_priv->icon_name = g_strdup("pdf-folder");
-			stvfm_item_priv->display_name =
-					g_path_get_basename(sond_file_part_get_path(sond_file_part));
-
 			stvfm_item_priv->has_children = TRUE; //sonst wären wir nicht hier
 		}
 		//else if (SOND_IS_FILE_PART_GMESSAGE(sond_file_part)) {
+	}
+	else { //LEAF oder LEAF_SECTION
+		if (type == SOND_TVFM_ITEM_TYPE_LEAF) {
+			gchar const* content_type = NULL;
+
+			if (SOND_IS_FILE_PART_PDF(sond_file_part))
+				content_type = "application/pdf";
+			else if (SOND_IS_FILE_PART_ZIP(sond_file_part))
+				content_type = "application/zip";
+			else
+				content_type = sond_file_part_leaf_get_mime_type(SOND_FILE_PART_LEAF(sond_file_part));
+
+			stvfm_item_priv->icon_name = g_strdup(get_icon_name(content_type));
+		}
+
+		//Wenn type == SOND_TVFM_ITEM_TYPE_LEAF_SECTION:
+		//stvfm_item_priv->icon_name muß in load_children gesetzt werden;
+		if (SOND_TREEVIEWFM_GET_CLASS(stvfm)->has_sections)
+			stvfm_item_priv->has_children =
+					SOND_TREEVIEWFM_GET_CLASS(stvfm)->has_sections(stvfm_item);
 	}
 
 	return stvfm_item;
@@ -436,7 +453,6 @@ static void sond_treeviewfm_render_text_cell(GtkTreeViewColumn *column,
 		gpointer data) {
 	SondTVFMItem *stvfm_item = NULL;
 	gint rc = 0;
-	SondTVFMItemPrivate *stvfm_item_priv = NULL;
 
 	SondTreeviewFM *stvfm = SOND_TREEVIEWFM(data);
 
@@ -446,12 +462,11 @@ static void sond_treeviewfm_render_text_cell(GtkTreeViewColumn *column,
 		return;
 	}
 
-	stvfm_item_priv = sond_tvfm_item_get_instance_private(stvfm_item);
-	g_object_unref(stvfm_item);
-
 	g_object_set(G_OBJECT(
 			sond_treeview_get_cell_renderer_text(SOND_TREEVIEW(stvfm))),
-			"text", stvfm_item_priv->display_name, NULL);
+			"text", sond_tvfm_item_get_basename(stvfm_item), NULL);
+
+	g_object_unref(stvfm_item);
 
 	if (SOND_TREEVIEWFM_GET_CLASS(stvfm)->deter_background) {
 		GError *error = NULL;
@@ -482,127 +497,6 @@ static gboolean sond_treeviewfm_other_fm(SondTreeviewFM *stvfm) {
 	if (clipboard->tree_view != SOND_TREEVIEW(stvfm)) return FALSE;
 
 	return TRUE;
-}
-
-static const gchar*
-sond_treeviewfm_get_name(SondTreeviewFM *stvfm, GtkTreeIter *iter) {
-	GFileInfo *info = NULL;
-	const gchar *name = NULL;
-
-	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)), iter, 0,
-			&info, -1);
-
-	if (!info)
-		return NULL;
-
-	name = g_file_info_get_name(info);
-	g_object_unref(info);
-
-	return name;
-}
-
-/** rc == -1: Fähler
- rc == 0: alles ausgeführt, sämtliche Callbacks haben 0 zurückgegeben
- rc == 1: alles ausgeführt, mindestens ein Callback hat 1 zurückgegeben
- rc == 2: nicht alles ausgeführt, Callback hat 2 zurückgegeben -> sofortiger Abbruch
- **/
-static gint sond_treeviewfm_dir_foreach(SondTreeviewFM *stvfm,
-		GtkTreeIter *iter_dir, GFile *file, gboolean rec,
-		gint (*foreach)(SondTreeviewFM*, GtkTreeIter*, GFile*, GFileInfo*,
-				GtkTreeIter*, gpointer, GError**), gpointer data, GError **error) {
-	gboolean flag = FALSE;
-	GFileEnumerator *enumer = NULL;
-
-	SondTreeviewFMPrivate *stvfm_priv = sond_treeviewfm_get_instance_private(
-			stvfm);
-
-	enumer = g_file_enumerate_children(file, "*", G_FILE_QUERY_INFO_NONE, NULL,
-			error);
-	if (!enumer)
-		ERROR_Z
-
-	while (1) {
-		GFile *file_child = NULL;
-		GFileInfo *info_child = NULL;
-
-		if (!g_file_enumerator_iterate(enumer, &info_child, &file_child, NULL,
-				error)) {
-			g_object_unref(enumer);
-
-			ERROR_Z
-		}
-
-		if (file_child) //es gibt noch Datei in Verzeichnis
-		{
-			gint rc = 0;
-			GtkTreeIter iter_file = { 0 };
-			gboolean found = FALSE;
-			gboolean root = FALSE;
-
-			if (!iter_dir) {
-				GFile *file_root = NULL;
-
-				file_root = g_file_new_for_path(stvfm_priv->root);
-				if (g_file_equal(file, file_root))
-					root = TRUE;
-				g_object_unref(file_root);
-			}
-
-			if ((iter_dir || root)
-					&& gtk_tree_model_iter_children(
-							gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)),
-							&iter_file, iter_dir)) {
-				do {
-					//den Namen des aktuellen Kindes holen
-					if (!g_strcmp0(sond_treeviewfm_get_name(stvfm, &iter_file),
-							g_file_info_get_name(info_child)))
-						found = TRUE; //paßt?
-
-					if (found)
-						break;
-				} while (gtk_tree_model_iter_next(
-						gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)),
-						&iter_file));
-			}
-
-			rc = foreach(stvfm, iter_dir, file_child, info_child,
-					(found) ? &iter_file : NULL, data, error);
-			if (rc == -1) {
-				g_object_unref(enumer);
-				ERROR_Z
-			} else if (rc == 1)
-				flag = TRUE;
-			else if (rc == 2) {//Abbruch gewählt
-				g_object_unref(enumer);
-				return 2;
-			}
-
-			if (rec
-					&& g_file_info_get_file_type(info_child)
-							== G_FILE_TYPE_DIRECTORY) {
-				gint rc = 0;
-
-				rc = sond_treeviewfm_dir_foreach(stvfm,
-						(found) ? &iter_file : NULL, file_child, TRUE, foreach,
-						data, error);
-				if (rc == -1) {
-					g_object_unref(enumer);
-					ERROR_Z
-				} else if (rc == 1)
-					flag = TRUE; //Abbruch gewählt
-				else if (rc == 2) {
-					g_object_unref(enumer);
-					return 2;
-				}
-			}
-		} //ende if ( file_child )
-		else
-			break;
-	}
-
-	g_object_unref(enumer); //unreferenziert auch alle infos und gfiles
-
-	return (flag) ? 1 : 0;
 }
 
 static gint sond_treeviewfm_expand_dummy(SondTreeviewFM *stvfm, GtkTreeIter *iter,
@@ -771,11 +665,9 @@ static void sond_treeviewfm_finalize(GObject *g_object) {
 static void sond_treeviewfm_cell_edited(GtkCellRenderer *cell,
 		gchar *path_string, gchar *new_text, gpointer data) {
 	GtkTreeIter iter = { 0 };
-	SondTVFMItem *stvfm_item = NULL;
+	g_autoptr (SondTVFMItem) stvfm_item = NULL;
 	GError *error = NULL;
 	gint rc = 0;
-	gchar const* old_text = NULL;
-	SondTVFMItemPrivate *stvfm_item_priv = NULL;
 
 	SondTreeviewFM *stvfm = (SondTreeviewFM*) data;
 	
@@ -783,17 +675,12 @@ static void sond_treeviewfm_cell_edited(GtkCellRenderer *cell,
 			gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)), &iter, path_string);
 	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)),
 			&iter, 0, &stvfm_item, -1);
-	stvfm_item_priv = sond_tvfm_item_get_instance_private(
-			stvfm_item);
-	g_object_unref(stvfm_item);
 
-	old_text = stvfm_item_priv->display_name;
-
-	if (!g_strcmp0(old_text, new_text))
+	if (!g_strcmp0(sond_tvfm_item_get_basename(stvfm_item), new_text))
 		return;
 
 	rc = SOND_TREEVIEWFM_GET_CLASS(stvfm)->text_edited(stvfm, &iter, stvfm_item,
-			new_text, &error);
+		new_text, &error);
 	if (rc) {
 		display_message(gtk_widget_get_toplevel(GTK_WIDGET(stvfm)),
 				"Umbenennen nicht möglich\n\n", error->message, NULL);
@@ -802,8 +689,7 @@ static void sond_treeviewfm_cell_edited(GtkCellRenderer *cell,
 		return;
 	}
 
-	g_free(stvfm_item_priv->display_name);
-	stvfm_item_priv->display_name = g_strdup(new_text);
+	sond_tvfm_item_set_basename(stvfm_item, new_text);
 
 	return;
 }
@@ -1965,151 +1851,100 @@ typedef struct {
 	volatile gint *atom_cancelled;
 } SearchFS;
 
-static gint sond_treeviewfm_search_needle(SondTreeviewFM *stvfm,
-		GtkTreeIter *iter_dir, GFile *file, GFileInfo *info,
-		GtkTreeIter *iter_file, gpointer data, GError **error) {
-	gchar *path = NULL;
-	gchar *basename = NULL;
+static gint sond_treeviewfm_search_needle(SondTVFMItem* stvfm_item,
+		gpointer data, GError **error) {
 	gboolean found = FALSE;
 
 	SearchFS *search_fs = (SearchFS*) data;
 
-	basename = g_file_get_basename(file);
-
-	if (!search_fs->case_sens) {
-		gchar *basename_tmp = NULL;
-
-		basename_tmp = g_ascii_strdown(basename, -1);
-		g_free(basename);
-		basename = basename_tmp;
-	}
-
-	if (search_fs->exact_match == TRUE) {
-		if (!g_strcmp0(basename, search_fs->needle))
-			found = TRUE;
-	} else if (strstr(basename, search_fs->needle))
-		found = TRUE;
-	g_free(basename);
-
-	if (found) {
-		path = g_file_get_path(file);
-		g_ptr_array_add(search_fs->arr_hits, path);
-	}
-
 	if (g_atomic_int_get(search_fs->atom_cancelled))
 		g_atomic_int_set(search_fs->atom_ready, 1);
+	else {
+		SondTVFMItemPrivate* stvfm_item_priv = sond_tvfm_item_get_instance_private(stvfm_item);
+
+		if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF) {
+			gchar* basename = NULL;
+
+			if (!search_fs->case_sens)
+				basename = g_ascii_strdown(sond_tvfm_item_get_basename(stvfm_item), -1);
+			else
+				basename = g_strdup(sond_tvfm_item_get_basename(stvfm_item));
+
+			if (search_fs->exact_match == TRUE) {
+				if (!g_strcmp0(basename, search_fs->needle))
+					found = TRUE;
+			} else if (strstr(basename, search_fs->needle))
+				found = TRUE;
+			g_free(basename);
+
+			if (found) {
+				gchar* filepart = NULL;
+
+				filepart = sond_file_part_get_filepart(stvfm_item_priv->sond_file_part);
+				g_ptr_array_add(search_fs->arr_hits, filepart);
+			}
+		}
+		else if (stvfm_item_priv->has_children) { //Muß ja DIR sein
+			GPtrArray *arr_children = NULL;
+			gint rc = 0;
+
+			rc = sond_tvfm_item_load_children(stvfm_item,
+					&arr_children, error);
+			if (rc)
+				ERROR_Z
+
+			for (guint i = 0; i < arr_children->len; i++) {
+				SondTVFMItem *child_item = (SondTVFMItem*) g_ptr_array_index(arr_children, i);
+
+				rc = sond_treeviewfm_search_needle(child_item, data, error);
+				if (rc)
+					ERROR_Z
+
+				g_object_unref(child_item);
+			}
+		}
+	}
 
 	return 0;
 }
 
 typedef struct {
 	SearchFS *search_fs;
-	SondTreeview *stv;
-	GtkTreeIter *iter;
-	GFile *file;
+	SondTVFMItem* stvfm_item;
 	GError **error;
 } DataThread;
 
 static gpointer sond_treeviewfm_thread_search(gpointer data) {
 	DataThread *data_thread = (DataThread*) data;
 	GError **error = data_thread->error;
+	gint rc = 0;
 
-	if (data_thread->iter) //nur, wenn nicht root-Verzeichnis
-		sond_treeviewfm_search_needle(SOND_TREEVIEWFM(data_thread->stv),
-				data_thread->iter, data_thread->file,
-				NULL, NULL, data_thread->search_fs, NULL);
-
-	if (g_file_query_file_type(data_thread->file, G_FILE_QUERY_INFO_NONE, NULL)
-			== G_FILE_TYPE_DIRECTORY) {
-		gint rc = 0;
-
-		rc = sond_treeviewfm_dir_foreach(SOND_TREEVIEWFM(data_thread->stv),
-				data_thread->iter, data_thread->file, TRUE,
-				sond_treeviewfm_search_needle, data_thread->search_fs,
-				data_thread->error);
-		if (rc == -1) {
-			g_atomic_int_set(data_thread->search_fs->atom_ready, 1);
-			ERROR_Z_VAL(GINT_TO_POINTER(-1))
-		}
-	}
+	rc = sond_treeviewfm_search_needle(data_thread->stvfm_item,
+			data_thread->search_fs, data_thread->error);
+	if (rc)
+		ERROR_Z_VAL(GINT_TO_POINTER(-1))
 
 	g_atomic_int_set(data_thread->search_fs->atom_ready, 1);
 
 	return NULL;
 }
 
-static gchar*
-sond_treeviewfm_get_rel_path(SondTreeviewFM *stvfm, GtkTreeIter *iter) {
-	gchar *rel_path = NULL;
-	GtkTreeIter iter_parent = { 0 };
-	GtkTreeIter *iter_seg = NULL;
-	GObject *object = NULL;
-	gboolean datei = FALSE;
-
-	if (!iter)
-		return NULL;
-
-	GtkTreeModel *model = gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm));
-
-	gtk_tree_model_get(model, iter, 0, &object, -1);
-	datei = G_IS_FILE_INFO(object);
-	g_object_unref(object);
-	if (!datei)
-		return NULL;
-
-	iter_seg = gtk_tree_iter_copy(iter);
-
-	rel_path = g_strdup(sond_treeviewfm_get_name(stvfm, iter_seg));
-
-	while (gtk_tree_model_iter_parent(model, &iter_parent, iter_seg)) {
-		gchar *path_segment = NULL;
-
-		gtk_tree_iter_free(iter_seg);
-		iter_seg = gtk_tree_iter_copy(&iter_parent);
-
-		path_segment = g_strdup(sond_treeviewfm_get_name(stvfm, iter_seg));
-
-		rel_path = add_string(g_strdup("/"), rel_path);
-		rel_path = add_string(path_segment, rel_path);
-	}
-
-	gtk_tree_iter_free(iter_seg);
-
-	return rel_path;
-}
-
-static gchar*
-sond_treeviewfm_get_full_path(SondTreeviewFM *stvfm, GtkTreeIter *iter) {
-	gchar *full_path = NULL;
-	gchar *rel_path = NULL;
-
-	SondTreeviewFMPrivate *stvfm_priv = sond_treeviewfm_get_instance_private(
-			stvfm);
-
-	rel_path = sond_treeviewfm_get_rel_path(stvfm, iter);
-	if (!rel_path)
-		return NULL;
-
-	full_path = add_string(g_strconcat(stvfm_priv->root, "/", NULL), rel_path);
-
-	return full_path;
-}
-
 static gint sond_treeviewfm_search(SondTreeview *stv, GtkTreeIter *iter,
 		gpointer data, GError **error) {
-	GFile *file = NULL;
-	gchar *path_root = NULL;
 	GThread *thread_search = NULL;
 	gpointer res_thread = NULL;
+	SondTVFMItem *stvfm_item = NULL;
 
 	SearchFS *search_fs = (SearchFS*) data;
 
-	path_root = sond_treeviewfm_get_full_path(SOND_TREEVIEWFM(stv), iter);
-	info_window_set_message(search_fs->info_window, path_root);
-	file = g_file_new_for_path(path_root);
-	g_free(path_root);
+	if (iter) //nur bei Auswahl
+		gtk_tree_model_get(gtk_tree_view_get_model(
+				GTK_TREE_VIEW(stv)), iter, 0, &stvfm_item, -1);
+	else //bei kompletter Suche
+		stvfm_item = sond_tvfm_item_create(SOND_TREEVIEWFM(stv), SOND_TVFM_ITEM_TYPE_DIR,
+				NULL, NULL);
 
-	DataThread data_thread = { search_fs, stv, iter, file, error };
+	DataThread data_thread = { search_fs, stvfm_item, error };
 	thread_search = g_thread_new( NULL, sond_treeviewfm_thread_search,
 			&data_thread);
 
@@ -2119,7 +1954,7 @@ static gint sond_treeviewfm_search(SondTreeview *stv, GtkTreeIter *iter,
 	}
 
 	res_thread = g_thread_join(thread_search);
-	g_object_unref(file);
+	g_object_unref(stvfm_item);
 	if (GPOINTER_TO_INT(res_thread) == -1)
 		ERROR_Z
 
@@ -2169,17 +2004,16 @@ static void sond_treeviewfm_search_activate(GtkMenuItem *item, gpointer data) {
 	else
 		search_fs.needle = g_strdup(search_text);
 
-	g_free(search_text);
-
 	search_fs.info_window = info_window_open(
 			gtk_widget_get_toplevel(GTK_WIDGET(stvfm)),
-			"Projektverzeichnis durchduchen");
-/*
+			search_text);
+	g_free(search_text);
+
 	if (only_sel)
 		rc = sond_treeview_selection_foreach(SOND_TREEVIEW(stvfm),
-				sond_treeviewfm_search, &search_fs, &errmsg);
-	else */
-	rc = sond_treeviewfm_search(SOND_TREEVIEW(stvfm), NULL, &search_fs,
+				sond_treeviewfm_search, &search_fs, &error);
+	else
+		rc = sond_treeviewfm_search(SOND_TREEVIEW(stvfm), NULL, &search_fs,
 				&error);
 
 	info_window_kill(search_fs.info_window);
