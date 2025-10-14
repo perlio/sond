@@ -6,6 +6,7 @@
 
 #include "zond_dbase.h"
 #include "zond_treeview.h"
+#include "zond_tree_store.h"
 
 #include "10init/app_window.h"
 #include "20allgemein/project.h"
@@ -204,14 +205,14 @@ static gint zond_treeviewfm_text_edited(SondTreeviewFM *stvfm,
 
 	if (sond_tvfm_item_get_item_type(stvfm_item) == SOND_TVFM_ITEM_TYPE_LEAF_SECTION) {
 		gint ID_section = 0;
-		gchar* filepart = NULL;
+		g_autofree gchar* filepart = NULL;
 		gint rc = 0;
+		GtkTreeIter* iter = NULL;
 
 		filepart = sond_file_part_get_filepart(sond_tvfm_item_get_sond_file_part(stvfm_item));
 
 		rc = zond_dbase_get_section(ztvfm_priv->zond->dbase_zond->zond_dbase_work,
 				filepart, sond_tvfm_item_get_path_or_section(stvfm_item), &ID_section, error);
-		g_free(filepart);
 		if (rc)
 			ERROR_Z
 
@@ -228,7 +229,16 @@ static gint zond_treeviewfm_text_edited(SondTreeviewFM *stvfm,
 		if (rc)
 			ERROR_Z
 
-		//ToDo: Text in treeview anpassen
+		//Text in treeview anpassen
+		iter = zond_treeview_abfragen_iter(ZOND_TREEVIEW(ztvfm_priv->zond->treeview[BAUM_INHALT]),
+				ID_section);
+		if (!iter)
+			g_warning("%s, Abschnitt %s: Knoten nicht in Baum INHALT gefunden",
+					filepart, sond_tvfm_item_get_path_or_section(stvfm_item));
+		else {
+			zond_tree_store_set(iter, NULL, new_text, 0);
+			gtk_tree_iter_free(iter);
+		}
 	}
 	else { //chain-up, wenn nicht erledigt
 		gint rc = 0;

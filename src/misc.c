@@ -320,25 +320,6 @@ filename_oeffnen(GtkWindow *window) {
 	return filename; //muß g_freed werden
 }
 
-gchar*
-get_rel_path_from_file(const gchar *root, const GFile *file) {
-	if (!file)
-		return NULL;
-
-	//Überprüfung, ob schon angebunden
-	gchar *rel_path = NULL;
-	gchar *abs_path = g_file_get_path((GFile*) file);
-
-#ifdef _WIN32
-	abs_path = g_strdelimit(abs_path, "\\", '/');
-#endif // _WIN32
-
-	rel_path = g_strdup(abs_path + ((root) ? strlen(root) + 1 : 0));
-	g_free(abs_path);
-
-	return rel_path; //muß freed werden
-}
-
 void misc_set_calendar(GtkCalendar *calendar, const gchar *date) {
 	if (!date)
 		return;

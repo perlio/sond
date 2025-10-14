@@ -243,9 +243,13 @@ static gint project_create_dbase_zond(Projekt *zond, const gchar *path,
 	(*dbase_zond)->zond_dbase_store = zond_dbase_store;
 	(*dbase_zond)->zond_dbase_work = zond_dbase_work;
 	(*dbase_zond)->project_name = g_path_get_basename(path);
-	//g_strdup( strrchr( path, '/' ) + 1 );
-	(*dbase_zond)->project_dir = g_path_get_dirname(path);
-	//g_strndup( path, strlen( path ) - strlen( strrchr( path, '/' ) ) );
+
+	(*dbase_zond)->project_dir = //soll ohne '/' enden
+			g_strndup(path, strlen(path) - strlen((*dbase_zond)->project_name) -
+					(((strlen(path) - strlen((*dbase_zond)->project_name)) > 1) ? 1 : 0));
+	//letzte Zeile soll sicherstellen, dass, wenn dir linux-root ist, '/' bleibt
+
+	(*dbase_zond)->changed = FALSE;
 
 	return 0;
 }
