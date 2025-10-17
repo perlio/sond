@@ -182,6 +182,7 @@ SondFilePart* sond_file_part_create_from_mime_type(gchar const* path,
 
 		//ToDo: Prüfen auf Kinder
 	}
+	//ToDo: GMimeMessage
 	else { //alles andere = leaf
 		SondFilePartLeafPrivate *sfp_leaf_priv = NULL;
 

@@ -663,18 +663,11 @@ gint zond_treeviewfm_section_visible(ZondTreeviewFM *ztvfm,
 	if (children) {
 		if (gtk_tree_model_iter_has_child(
 				gtk_tree_view_get_model(GTK_TREE_VIEW(ztvfm)), &iter_intern)) {
-			GtkTreePath *path = NULL;
-
 			*children = TRUE;
 
-			if (opened) {
-				path = gtk_tree_model_get_path(
-						gtk_tree_view_get_model(GTK_TREE_VIEW(ztvfm)),
+			if (opened)
+				*opened = sond_treeview_row_expanded(SOND_TREEVIEW(ztvfm),
 						&iter_intern);
-				*opened = gtk_tree_view_row_expanded(GTK_TREE_VIEW(ztvfm),
-						path);
-				gtk_tree_path_free(path);
-			}
 		}
 		else
 			*children = FALSE;

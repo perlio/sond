@@ -40,6 +40,8 @@ void sond_treeview_expand_row(SondTreeview*, GtkTreeIter*);
 
 void sond_treeview_expand_to_row(SondTreeview*, GtkTreeIter*);
 
+gboolean sond_treeview_row_expanded(SondTreeview*, GtkTreeIter*);
+
 gboolean sond_treeview_get_cursor(SondTreeview*, GtkTreeIter*);
 
 void sond_treeview_set_cursor(SondTreeview*, GtkTreeIter*);

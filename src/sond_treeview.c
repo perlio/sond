@@ -430,6 +430,18 @@ void sond_treeview_expand_to_row(SondTreeview *stv, GtkTreeIter *iter) {
 	return;
 }
 
+gboolean sond_treeview_row_expanded(SondTreeview *stv, GtkTreeIter *iter) {
+	GtkTreePath *path = NULL;
+	gboolean expanded = FALSE;
+
+	path = gtk_tree_model_get_path(
+			gtk_tree_view_get_model(GTK_TREE_VIEW(stv)), iter);
+	expanded = gtk_tree_view_row_expanded(GTK_TREE_VIEW(stv), path);
+	gtk_tree_path_free(path);
+
+	return expanded;
+}
+
 gboolean sond_treeview_get_cursor(SondTreeview *stv, GtkTreeIter *iter) {
 	GtkTreePath *path = NULL;
 

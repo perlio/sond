@@ -933,7 +933,8 @@ static void sond_treeviewfm_class_init(SondTreeviewFMClass *klass) {
 static GtkTreeIter*
 sond_treeviewfm_insert_node(SondTreeviewFM *stvfm, GtkTreeIter *iter,
 		gboolean child) {
-	GtkTreeIter new_iter;
+	GtkTreeIter new_iter = { 0 };
+	GtkTreeIter* ret_iter = NULL;
 	GtkTreeStore *treestore = GTK_TREE_STORE(
 			gtk_tree_view_get_model( GTK_TREE_VIEW(stvfm) ));
 
@@ -944,12 +945,12 @@ sond_treeviewfm_insert_node(SondTreeviewFM *stvfm, GtkTreeIter *iter,
 	else
 		gtk_tree_store_insert_after(treestore, &new_iter, iter, NULL);
 
-	GtkTreeIter *ret_iter = gtk_tree_iter_copy(&new_iter);
+	ret_iter = gtk_tree_iter_copy(&new_iter);
 
 	return ret_iter; //muß nach Gebrauch gtk_tree_iter_freed werden!!!
 }
 
-static gint insert_dir_in_fs(SondTVFMItemPrivate* stvfm_item_priv, gboolean child,
+static gint insert_dir_in_fs(SondTVFMItemPrivate* stvfm_item_priv,
 		gchar** path, GError** error) {
 	guint max_tries = 100;
 
@@ -1008,6 +1009,7 @@ static gint sond_treeviewfm_create_dir(SondTreeviewFM *stvfm, gboolean child,
 	GtkTreeIter *iter_new = NULL;
 	GtkTreeIter iter_parent = { 0 };
 	g_autoptr(SondTVFMItem) stvfm_item_parent = NULL;
+	gboolean first_child = FALSE;
 
 	if (!sond_treeview_get_cursor(SOND_TREEVIEW(stvfm), &iter))
 		return 0;
@@ -1030,30 +1032,70 @@ static gint sond_treeviewfm_create_dir(SondTreeviewFM *stvfm, gboolean child,
 		return 0; //Wenn etwas anderes als in dir - nix machen
 
 	if (!stvfm_item_parent_priv->sond_file_part)
-		rc = insert_dir_in_fs(stvfm_item_parent_priv, child, &path, error);
-//	else if (SOND_IS_FILE_PART_ZIP(stvfm_item_parent_priv->sond_file_part))
-//		rc = insert_dir_in_zip(stvfm_item_priv, child, &path, error);
-	else if (SOND_IS_FILE_PART_PDF(stvfm_item_parent_priv->sond_file_part))
+		rc = insert_dir_in_fs(stvfm_item_parent_priv, &path, error);
+//	else if (SOND_IS_FILE_PART_PDF(stvfm_item_parent_priv->sond_file_part))
+//		rc = insert_dir_in_pdf(stvfm_item_priv, child, &path, error);
+	else if (SOND_IS_FILE_PART_ZIP(stvfm_item_parent_priv->sond_file_part))
 		rc = insert_dir_in_zip(stvfm_item_parent_priv, child, &path, error);
 	if (rc)
 		ERROR_Z
 
-	//In Baum tun
-	iter_new = sond_treeviewfm_insert_node(stvfm, &iter, child);
+	first_child = (gtk_tree_model_iter_n_children(
+				gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)), &iter) == 0);
 
-	stvfm_item_new = sond_tvfm_item_create(stvfm, SOND_TVFM_ITEM_TYPE_DIR,
-			stvfm_item_parent_priv->sond_file_part, path);
+	//In Baum tun? ggf. nur als dummy?
+	if (!child || first_child || sond_treeview_row_expanded(SOND_TREEVIEW(stvfm), &iter))
+		iter_new = sond_treeviewfm_insert_node(stvfm, &iter, child);
 
-	gtk_tree_store_set(
-			GTK_TREE_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm) )),
-			iter_new, 0, stvfm_item_new, -1);
+	//Wenn sichtbar, dann Inhalt in dummy
+	if (!child || sond_treeview_row_expanded(SOND_TREEVIEW(stvfm), &iter)) {
+		stvfm_item_new = sond_tvfm_item_create(stvfm, SOND_TVFM_ITEM_TYPE_DIR,
+				stvfm_item_parent_priv->sond_file_part, path);
 
-	g_object_unref(stvfm_item_new);
+		gtk_tree_store_set(
+				GTK_TREE_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm) )),
+				iter_new, 0, stvfm_item_new, -1);
 
-	sond_treeview_expand_row(SOND_TREEVIEW(stvfm), iter_new);
-	sond_treeview_set_cursor(SOND_TREEVIEW(stvfm), iter_new);
+		g_object_unref(stvfm_item_new);
+		sond_treeview_set_cursor(SOND_TREEVIEW(stvfm), iter_new);
 
-	gtk_tree_iter_free(iter_new);
+		gtk_tree_iter_free(iter_new);
+	}
+	else { //wenn nicht sichtbar, dann öffnen
+		GtkTreeIter iter_child = { 0 };
+
+		sond_treeview_expand_row(SOND_TREEVIEW(stvfm), &iter);
+
+		if (first_child){ //Wenn erstes Kind, Cursor darauf setzen - dann ist es das richtige
+			gtk_tree_model_iter_children(
+					gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)), &iter_child, &iter);
+
+			sond_treeview_set_cursor(SOND_TREEVIEW(stvfm), &iter_child);
+		}
+		else { //neues Verzeichnis suchen...
+			gint num_children = 0;
+
+			num_children = gtk_tree_model_iter_n_children(
+					gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)), &iter);
+			for (guint i = 0; i < num_children; i++) {
+				SondTVFMItem* stvfm_item_child = NULL;
+
+				gtk_tree_model_iter_nth_child(
+						gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)),
+						&iter_child, &iter, i);
+				gtk_tree_model_get(
+						gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)),
+						&iter_child, 0, &stvfm_item_child, -1);
+				g_object_unref(stvfm_item_child);
+
+				if (g_strcmp0(sond_tvfm_item_get_path_or_section(stvfm_item_child),
+						path) == 0) {
+					sond_treeview_set_cursor(SOND_TREEVIEW(stvfm), &iter_child);
+					break;
+				}
+			}
+		}
+	}
 
 	return 0;
 }
@@ -1287,11 +1329,29 @@ static gint copy_stvfm_item(SondTVFMItem* stvfm_item, SondTVFMItemPrivate* stvfm
 				stvfm_item_parent_priv ? stvfm_item_parent_priv->sond_file_part : NULL,
 				toplevel_path);
 	}
-	else {
+	else { //LEAF
+		SondFilePart* sfp_new = NULL;
+		gchar const* mime_type = NULL;
 
+		if (SOND_IS_FILE_PART_ZIP(stvfm_item_priv->sond_file_part))
+			mime_type = "application/zip";
+		else if (SOND_IS_FILE_PART_PDF(stvfm_item_priv->sond_file_part))
+			mime_type = "application/pdf";
+		else //LEAF
+			mime_type = sond_file_part_leaf_get_mime_type(
+					SOND_FILE_PART_LEAF(stvfm_item_priv->sond_file_part));
+
+		sfp_new = sond_file_part_create_from_mime_type(toplevel_path,
+				stvfm_item_parent_priv->sond_file_part, mime_type);
+
+		*stvfm_item_new = sond_tvfm_item_create(stvfm_item_parent_priv->stvfm,
+				SOND_TVFM_ITEM_TYPE_LEAF,
+				sfp_new,
+				NULL);
+		g_object_unref(sfp_new);
 	}
 
-	//ToDo: Pfad muß sicher anders gemacht werden!
+	g_free(toplevel_path);
 
 	return 0;
 }
@@ -1533,7 +1593,6 @@ static gint move_stvfm_item(SondTVFMItem* stvfm_item,
 typedef struct _S_FM_Paste_Selection {
 	SondTVFMItemPrivate *stvfm_item_priv_parent;
 	GtkTreeIter *iter_parent;
-	GtkTreeIter *iter_dest;
 	GtkTreeIter *iter_cursor;
 	gboolean kind;
 	gboolean expanded;
@@ -1547,6 +1606,7 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 	SFMPasteSelection *s_fm_paste_selection = (SFMPasteSelection*) data;
 	Clipboard *clipboard = NULL;
 	gint rc = 0;
+	SondTVFMItemPrivate* stvfm_item_new_priv = NULL;
 
 	clipboard = ((SondTreeviewClass*) g_type_class_peek_static(
 			SOND_TYPE_TREEVIEW))->clipboard;
@@ -1592,23 +1652,66 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 		return 1;
 
 	s_fm_paste_selection->inserted = TRUE;
+	stvfm_item_new_priv =  sond_tvfm_item_get_instance_private(stvfm_item_new);
 
-	//wenn neuer Punkt sichtbar, dann neues stvfm_item erzeugen und in Baum einfügen
-	//Knoten müssen nur eingefügt werden, wenn Row expanded ist; sonst passiert das im callback beim Öffnen
-	if (!s_fm_paste_selection->kind || s_fm_paste_selection->expanded) {
-		//Ziel-FS-tree eintragen
+	//In nicht geöffnetes Verzeichnis eingefügt?
+	if (s_fm_paste_selection->kind && !s_fm_paste_selection->expanded) {
+		gint num_children = 0;
+
+		if (!gtk_tree_model_iter_has_child(
+					gtk_tree_view_get_model(GTK_TREE_VIEW(stv)),
+					s_fm_paste_selection->iter_cursor)) { //erstes Kind
+			GtkTreeIter iter_tmp = { 0 };
+
+			gtk_tree_store_insert( //dann dummy einfügen
+					GTK_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(stv))),
+					&iter_tmp, s_fm_paste_selection->iter_cursor, -1);
+		}
+
+		//Knoten expandieren
+		sond_treeview_expand_row(SOND_TREEVIEW(stv),
+				s_fm_paste_selection->iter_cursor);
+
+		//soeben eingefügten Punkt suchen und iter_cursor darauf setzen
+		num_children = gtk_tree_model_iter_n_children(
+				gtk_tree_view_get_model(GTK_TREE_VIEW(stv)), s_fm_paste_selection->iter_cursor);
+		for (guint i = 0; i < num_children; i++) {
+			GtkTreeIter iter_child = { 0 };
+			SondTVFMItem* stvfm_item_child = NULL;
+			SondTVFMItemPrivate* stvfm_item_child_priv = NULL;
+
+			gtk_tree_model_iter_nth_child(
+					gtk_tree_view_get_model(GTK_TREE_VIEW(stv)),
+					&iter_child, s_fm_paste_selection->iter_cursor, i);
+			gtk_tree_model_get(
+					gtk_tree_view_get_model(GTK_TREE_VIEW(stv)),
+					&iter_child, 0, &stvfm_item_child, -1);
+			stvfm_item_child_priv = sond_tvfm_item_get_instance_private(stvfm_item_child);
+			g_object_unref(stvfm_item_child);
+
+			//Identität prüfen - sfp und path müßte doch ausreichen?!
+			if ((stvfm_item_child_priv->sond_file_part ==
+					stvfm_item_new_priv->sond_file_part) &&
+					!g_strcmp0(stvfm_item_child_priv->path_or_section,
+							stvfm_item_new_priv->path_or_section)) {
+				*(s_fm_paste_selection->iter_cursor) = iter_child;
+				break;
+			}
+		}
+
+		s_fm_paste_selection->kind = FALSE; //nur einmal
+	}
+	else {
 		GtkTreeIter *iter_new = NULL;
-		SondTVFMItemPrivate* stvfm_item_priv = sond_tvfm_item_get_instance_private(stvfm_item_new);
 
 		iter_new = sond_treeviewfm_insert_node(SOND_TREEVIEWFM(stv),
 				s_fm_paste_selection->iter_cursor, s_fm_paste_selection->kind);
 
 		*(s_fm_paste_selection->iter_cursor) = *iter_new;
 		gtk_tree_iter_free(iter_new);
-		s_fm_paste_selection->kind = FALSE;
 
 		//Falls Verzeichnis mit Datei innendrin: dummy in neuen Knoten einfügen
-		if (stvfm_item_priv->has_children) {
+		if (stvfm_item_new_priv->has_children) {
 			GtkTreeIter iter_tmp = { 0 };
 
 			gtk_tree_store_insert(
@@ -1659,14 +1762,7 @@ static gint sond_treeviewfm_paste_clipboard(SondTreeviewFM *stvfm, gboolean kind
 
 	//iter_parent ermitteln
 	if (kind) {
-		//prüfen, ob geöffnet ist
-		GtkTreePath *path = NULL;
-
-		path = gtk_tree_model_get_path(
-				gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)), &iter_cursor);
-		expanded = gtk_tree_view_row_expanded(GTK_TREE_VIEW(stvfm), path);
-		gtk_tree_path_free(path);
-
+		expanded = sond_treeview_row_expanded(SOND_TREEVIEW(stvfm), &iter_cursor);
 		iter_parent = iter_cursor;
 	}
 	else
@@ -1674,7 +1770,7 @@ static gint sond_treeviewfm_paste_clipboard(SondTreeviewFM *stvfm, gboolean kind
 				gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)), &iter_parent,
 				&iter_cursor);
 
-	SFMPasteSelection s_fm_paste_selection = { NULL, NULL, NULL, &iter_cursor,
+	SFMPasteSelection s_fm_paste_selection = { NULL, NULL, &iter_cursor,
 			kind, expanded, FALSE };
 
 	if (!parent_root) {
@@ -1719,32 +1815,19 @@ static gint sond_treeviewfm_paste_clipboard(SondTreeviewFM *stvfm, gboolean kind
 	if (rc == -1)
 		ERROR_Z
 
+	if (!s_fm_paste_selection.inserted) // nix passiert
+		return 0;
+
 	//Wenn in bisher leere pdf verschoben wird: von LEAF zu DIR ändern
-	if (!parent_root && s_fm_paste_selection.stvfm_item_priv_parent->type == SOND_TVFM_ITEM_TYPE_LEAF) {//muß ja der Fall sein,
-		//daß z.B. bisher leere PDF eingefügt wurde
+	if (s_fm_paste_selection.stvfm_item_priv_parent->type ==
+					SOND_TVFM_ITEM_TYPE_LEAF) {//muß ja der Fall sein,
+		//daß z.B. in bisher leere PDF eingefügt wurde
 		s_fm_paste_selection.stvfm_item_priv_parent->type = SOND_TVFM_ITEM_TYPE_DIR;
 		s_fm_paste_selection.stvfm_item_priv_parent->has_children = TRUE;
 	}
 
-	//Wenn in nicht ausgeklapptes Verzeichnis etwas eingefügt wurde und
-	//Verzeichnis bisher leer ist:
-	//Dummy einfügen
-	if (s_fm_paste_selection.inserted && kind && !expanded &&
-			!gtk_tree_model_iter_has_child(
-					gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)),
-					s_fm_paste_selection.iter_cursor)) {
-		GtkTreeIter iter_tmp = { 0 };
-
-		gtk_tree_store_insert(
-				GTK_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(stvfm) )),
-				&iter_tmp, s_fm_paste_selection.iter_cursor, -1);
-	}
-
-	gtk_widget_queue_draw(GTK_WIDGET(clipboard->tree_view));
-
-	//Wenn neuer Knoten sichtbar: Cursor setzen
-	if (!kind || expanded)
-		sond_treeview_set_cursor(SOND_TREEVIEW(stvfm),
+	//Cursor setzen
+	sond_treeview_set_cursor(SOND_TREEVIEW(stvfm),
 				s_fm_paste_selection.iter_cursor);
 
 	return 0;
