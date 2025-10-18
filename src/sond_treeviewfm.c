@@ -509,17 +509,6 @@ static void sond_treeviewfm_render_text_cell(GtkTreeViewColumn *column,
 	return;
 }
 
-static gboolean sond_treeviewfm_other_fm(SondTreeviewFM *stvfm) {
-	Clipboard *clipboard = NULL;
-
-	clipboard =
-			((SondTreeviewClass*) g_type_class_peek_static(SOND_TYPE_TREEVIEW))->clipboard;
-
-	if (clipboard->tree_view != SOND_TREEVIEW(stvfm)) return FALSE;
-
-	return TRUE;
-}
-
 static gint sond_treeviewfm_expand_dummy(SondTreeviewFM *stvfm, GtkTreeIter *iter,
 		SondTVFMItem *stvfm_item, GError **error) {
 	GPtrArray *arr_children = NULL;
@@ -1314,9 +1303,10 @@ static gint copy_stvfm_item(SondTVFMItem* stvfm_item, SondTVFMItemPrivate* stvfm
 		g_free(path_src);
 		g_free(path_dst);
 
-		toplevel_path = g_strconcat(
-				stvfm_item_parent_priv->path_or_section, "/",
-				base_new, NULL);
+		toplevel_path = (stvfm_item_parent_priv->path_or_section) ?
+				g_strconcat(stvfm_item_parent_priv->path_or_section, "/",
+				base_new, NULL) : g_strdup(base_new);
+		g_free(base_new);
 	}
 	else //Verschieben zwischen zwei Welten
 		rc = copy_across_sfps(stvfm_item_priv, stvfm_item_parent_priv,
