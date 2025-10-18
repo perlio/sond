@@ -22,6 +22,7 @@
 
 typedef struct {
 	Projekt *zond;
+	gboolean changed_tmp;
 } ZondTreeviewFMPrivate;
 
 G_DEFINE_TYPE_WITH_PRIVATE(ZondTreeviewFM, zond_treeviewfm, SOND_TYPE_TREEVIEWFM)
@@ -128,8 +129,15 @@ static gint zond_treeviewfm_before_delete(SondTVFMItem *stvfm_item, GError **err
 			path, error);
 	if (rc == -1)
 		ERROR_Z
-	else if (rc == 1)
+	else if (rc == 1) {
+		display_message(priv->zond->app_window,
+				"Die zu löschende Datei bzw. der Abschnitt ist "
+				"noch in der Speicher-Datenbank vorhanden.\n"
+				"Bitte zuerst das Projekt speichern, "
+				"bevor Sie die Datei bzw. den Abschnitt löschen.", NULL);
+
 		return 1;
+	}
 
 	return 0;
 }
@@ -141,6 +149,9 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 	ZondTreeviewFM* ztvfm = ZOND_TREEVIEWFM(stvfm);
 	ZondTreeviewFMPrivate *ztvfm_priv = zond_treeviewfm_get_instance_private(
 			ZOND_TREEVIEWFM(ztvfm));
+
+	//Änderungsstatus zwischenspeichern
+	ztvfm_priv->changed_tmp = ztvfm_priv->zond->dbase_zond->changed;
 
 	rc = dbase_zond_begin(ztvfm_priv->zond->dbase_zond, error);
 	if (rc)
@@ -176,8 +187,6 @@ static void zond_treeviewfm_after_move(SondTreeviewFM* stvfm,
 			//ToDo: ausführliche Erklärung; verschobene Dateien loggen
 			exit(EXIT_FAILURE);
 		}
-
-		project_set_changed(priv->zond);
 	}
 	else {
 		gint rc = 0;
@@ -188,6 +197,8 @@ static void zond_treeviewfm_after_move(SondTreeviewFM* stvfm,
 			exit(EXIT_FAILURE);
 		}
 	}
+
+	project_reset_changed(priv->zond, priv->changed_tmp);
 
 	return;
 }
