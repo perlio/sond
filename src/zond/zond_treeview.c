@@ -1663,112 +1663,133 @@ static gint zond_treeview_selection_loeschen_foreach(SondTreeview *tree_view,
 		gchar *file_part = NULL;
 		gchar *section = NULL;
 
-
 		rc = zond_dbase_get_node(zond->dbase_zond->zond_dbase_work, node_id,
 				&type, NULL, &file_part, &section, NULL, NULL, NULL, error);
 		if (rc)
 			ERROR_Z
 
-		rc = zond_treeviewfm_section_visible(
-				ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), file_part, section,
-				FALSE, &visible, &iter_fm, NULL, NULL, error);
-		g_free(file_part);
-		g_free(section);
-		if (rc == -1)
-			ERROR_Z
+		if (type == ZOND_DBASE_TYPE_BAUM_STRUKT) {
+			gint num_children = 0;
 
-		rc = zond_dbase_get_baum_auswertung_copy(
-				zond->dbase_zond->zond_dbase_work, node_id,
-				&baum_auswertung_copy, error);
-		if (rc)
-			ERROR_Z
+			num_children = gtk_tree_model_iter_n_children(
+					gtk_tree_view_get_model(GTK_TREE_VIEW(tree_view)), iter);
 
-		if (baum_auswertung_copy)
-			return 0;
+			for (guint i = num_children; i > 0; i--) {
+				GtkTreeIter iter_child = { 0 };
+				gint rc = 0;
 
-		//Prüfen, ob mitzulöschendes Kind von PDF_ABSCHNITT als BAUM_AUSWERTUNG_COPY angebunden ist
-		if (type == ZOND_DBASE_TYPE_FILE_PART) {
-			gint rc = 0;
-			gboolean copied = FALSE;
+				gtk_tree_model_iter_nth_child(
+						gtk_tree_view_get_model(GTK_TREE_VIEW(tree_view)),
+						&iter_child, iter, i - 1);
 
-			rc = zond_dbase_is_file_part_copied(
-					zond->dbase_zond->zond_dbase_work, node_id, &copied,
+				rc = zond_treeview_selection_loeschen_foreach(
+						tree_view, &iter_child, data, error);
+				if (rc)
+					ERROR_Z
+			}
+		}
+		else {
+			rc = zond_treeviewfm_section_visible(
+					ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), file_part, section,
+					FALSE, &visible, &iter_fm, NULL, NULL, error);
+			g_free(file_part);
+			g_free(section);
+			if (rc == -1)
+				ERROR_Z
+
+			rc = zond_dbase_get_baum_auswertung_copy(
+					zond->dbase_zond->zond_dbase_work, node_id,
+					&baum_auswertung_copy, error);
+			if (rc)
+				ERROR_Z
+
+			if (baum_auswertung_copy)
+				return 0;
+
+			//Prüfen, ob mitzulöschendes Kind von PDF_ABSCHNITT als BAUM_AUSWERTUNG_COPY angebunden ist
+			if (type == ZOND_DBASE_TYPE_FILE_PART) {
+				gint rc = 0;
+				gboolean copied = FALSE;
+
+				rc = zond_dbase_is_file_part_copied(
+						zond->dbase_zond->zond_dbase_work, node_id, &copied,
+						error);
+				if (rc)
+					ERROR_Z
+
+				if (copied)
+					return 0;
+			}
+
+			//Wenn node_id ein pdf_abschnitt ist, der über baum_inhalt_file angebunden ist,
+			//dann soll letzterer gelöscht werden, also die Anbindung im Baum_inhalt
+			rc = zond_dbase_get_baum_inhalt_file_from_file_part(
+					zond->dbase_zond->zond_dbase_work, node_id, &baum_inhalt_file,
 					error);
 			if (rc)
 				ERROR_Z
 
-			if (copied)
-				return 0;
-		}
+			if (baum_inhalt_file)
+				node_id = baum_inhalt_file;
 
-		//Wenn node_id ein pdf_abschnitt ist, der über baum_inhalt_file angebunden ist,
-		//dann soll letzterer gelöscht werden, also die Anbindung im Baum_inhalt
-		rc = zond_dbase_get_baum_inhalt_file_from_file_part(
-				zond->dbase_zond->zond_dbase_work, node_id, &baum_inhalt_file,
-				error);
-		if (rc)
-			ERROR_Z
+			//wenn Pdf-Abschnitt gelöscht wird - in ZondTreeviewFM umsetzen
+			if (!baum_inhalt_file && visible)
+				gtk_tree_store_remove(
+						GTK_TREE_STORE(
+								gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_FS]) )),
+						&iter_fm);
+			else if (!baum_inhalt_file) {
+				GtkTreeIter iter_parent = { 0 };
 
-		if (baum_inhalt_file)
-			node_id = baum_inhalt_file;
-
-		//wenn Pdf-Abschnitt gelöscht wird - in ZondTreeviewFM umsetzen
-		if (!baum_inhalt_file && visible)
-			gtk_tree_store_remove(
-					GTK_TREE_STORE(
-							gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_FS]) )),
-					&iter_fm);
-		else if (!baum_inhalt_file) {
-			GtkTreeIter iter_parent = { 0 };
-
-			gtk_tree_model_iter_parent(
-					gtk_tree_view_get_model(
-							GTK_TREE_VIEW(zond->treeview[BAUM_INHALT])),
-					&iter_parent, iter);
-
-			//Einzelkind?
-			if (gtk_tree_model_iter_n_children(
-					gtk_tree_view_get_model(
-							GTK_TREE_VIEW(zond->treeview[BAUM_INHALT])),
-					&iter_parent) == 1) {
-				gint rc = 0;
-				gint parent_id = 0;
-				gchar *file_part = NULL;
-				gchar *section = NULL;
-				gboolean visible = FALSE;
-				GtkTreeIter iter_fm = { 0 };
-				GtkTreeIter iter_child = { 0 };
-
-				rc = zond_dbase_get_parent(zond->dbase_zond->zond_dbase_work,
-						node_id, &parent_id, error);
-				if (rc)
-					ERROR_Z
-
-				rc = zond_dbase_get_node(zond->dbase_zond->zond_dbase_work,
-						parent_id, &type, NULL, &file_part, &section, NULL,
-						NULL, NULL, error);
-				if (rc)
-					ERROR_Z
-
-				rc = zond_treeviewfm_section_visible(
-						ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), file_part,
-						section,
-						FALSE, &visible, &iter_fm, NULL, NULL, error);
-				g_free(file_part);
-				g_free(section);
-				if (rc == -1)
-					ERROR_Z
-
-				if (!gtk_tree_model_iter_children(
+				gtk_tree_model_iter_parent(
 						gtk_tree_view_get_model(
-								GTK_TREE_VIEW(zond->treeview[BAUM_FS])),
-						&iter_child, &iter_fm))
-					g_warning("%s\niter hat keine Kinder", __func__);
-				else
-					gtk_tree_store_remove(
-							GTK_TREE_STORE(gtk_tree_view_get_model(
-									GTK_TREE_VIEW(zond->treeview[BAUM_FS]) )),
-									&iter_child);
+								GTK_TREE_VIEW(zond->treeview[BAUM_INHALT])),
+						&iter_parent, iter);
+
+				//Einzelkind?
+				if (gtk_tree_model_iter_n_children(
+						gtk_tree_view_get_model(
+								GTK_TREE_VIEW(zond->treeview[BAUM_INHALT])),
+						&iter_parent) == 1) {
+					gint rc = 0;
+					gint parent_id = 0;
+					gchar *file_part = NULL;
+					gchar *section = NULL;
+					gboolean visible = FALSE;
+					GtkTreeIter iter_fm = { 0 };
+					GtkTreeIter iter_child = { 0 };
+
+					rc = zond_dbase_get_parent(zond->dbase_zond->zond_dbase_work,
+							node_id, &parent_id, error);
+					if (rc)
+						ERROR_Z
+
+					rc = zond_dbase_get_node(zond->dbase_zond->zond_dbase_work,
+							parent_id, &type, NULL, &file_part, &section, NULL,
+							NULL, NULL, error);
+					if (rc)
+						ERROR_Z
+
+					rc = zond_treeviewfm_section_visible(
+							ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), file_part,
+							section,
+							FALSE, &visible, &iter_fm, NULL, NULL, error);
+					g_free(file_part);
+					g_free(section);
+					if (rc == -1)
+						ERROR_Z
+
+					if (!gtk_tree_model_iter_children(
+							gtk_tree_view_get_model(
+									GTK_TREE_VIEW(zond->treeview[BAUM_FS])),
+							&iter_child, &iter_fm))
+						g_warning("%s\niter hat keine Kinder", __func__);
+					else
+						gtk_tree_store_remove(
+								GTK_TREE_STORE(gtk_tree_view_get_model(
+										GTK_TREE_VIEW(zond->treeview[BAUM_FS]) )),
+										&iter_child);
+				}
 			}
 		}
 	}

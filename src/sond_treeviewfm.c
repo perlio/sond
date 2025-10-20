@@ -2684,6 +2684,9 @@ gint sond_treeviewfm_set_root(SondTreeviewFM *stvfm, const gchar *root,
 	sfp_class = g_type_class_peek_static(SOND_TYPE_FILE_PART);
 	sfp_class->path_root = g_strdup(root);
 
+	//zum Arbeitsverzeichnis machen
+	g_chdir(stvfm_priv->root);
+
 	stvfm_item = sond_tvfm_item_create(stvfm, SOND_TVFM_ITEM_TYPE_DIR, NULL, NULL);
 
 	rc = sond_treeviewfm_expand_dummy(stvfm, NULL, stvfm_item, &error);

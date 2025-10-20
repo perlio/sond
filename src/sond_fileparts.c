@@ -89,7 +89,8 @@ static void sond_file_part_finalize(GObject* self) {
 	}
 
 	g_free(sfp_priv->path);
-	g_object_unref(sfp_priv->parent);
+	if (sfp_priv->parent)
+		g_object_unref(sfp_priv->parent);
 
 	G_OBJECT_CLASS(sond_file_part_parent_class)->finalize(self);
 
@@ -166,6 +167,10 @@ SondFilePart* sond_file_part_create_from_mime_type(gchar const* path,
 		if (rc) {
 			SondFilePartErrorPrivate* sfp_error_priv = NULL;
 
+	char* cwd = NULL;
+	if ((cwd = getcwd(NULL, 1024)) != NULL)
+		printf("Aktuelles Verzeichnis: %s\n", cwd);
+g_warning("hier");
 			g_object_unref(sfp_child);
 			sfp_child = sond_file_part_create(SOND_TYPE_FILE_PART_ERROR, path,
 					sfp_parent);
@@ -331,16 +336,9 @@ static fz_stream* sond_file_part_pdf_lookup_embedded_file(fz_context*,
 static fz_stream* open_file(fz_context* ctx, gchar const* path,
 		GError** error) {
 	fz_stream* stream = NULL;
-	gchar const* path_root = NULL;
-	gchar* path_file = NULL;
-
-	path_root = SOND_FILE_PART_CLASS(g_type_class_peek_static(SOND_TYPE_FILE_PART))->path_root;
-	path_file = g_strconcat(path_root, "/", path, NULL);
 
 	fz_try(ctx)
-		stream = fz_open_file(ctx, path_file);
-	fz_always(ctx)
-		g_free(path_file);
+		stream = fz_open_file(ctx, path);
 	fz_catch(ctx) {
 		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
 				fz_caught(ctx), "%s\nfz_open_file: %s", __func__,
@@ -354,7 +352,7 @@ static fz_stream* open_file(fz_context* ctx, gchar const* path,
 
 SondFilePart* sond_file_part_from_filepart(fz_context* ctx,
 		gchar const* filepart, GError** error) {
-	SondFilePart* sfp = NULL;
+	g_autoptr(SondFilePart) sfp = NULL;
 	gchar** v_string = NULL;
 	gint zaehler = 0;
 
@@ -370,14 +368,15 @@ SondFilePart* sond_file_part_from_filepart(fz_context* ctx,
 		if (!sfp) //1. Ebene - File im Filesystem
 			stream = open_file(ctx, v_string[zaehler], error);
 		else if (SOND_IS_FILE_PART_ZIP(sfp)) {
-
+			//stream = sond_file_part_zip_lookup_embedded_file(ctx,
+			//		SOND_FILE_PART_ZIP(sfp), v_string[zaehler], error);
 		}
-		else if (SOND_IS_FILE_PART_PDF(sfp))
+		else if (SOND_IS_FILE_PART_PDF(sfp)) {
 			stream = sond_file_part_pdf_lookup_embedded_file(ctx,
 					SOND_FILE_PART_PDF(sfp), v_string[zaehler], error);
+		}
 		//else if (SOND_IS_FILE_PART_GMESSAGE(sfp))
 		else { //darf nicht sein
-			g_object_unref(sfp);
 			g_strfreev(v_string);
 			if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\nfilepart malformed", __func__);
 
@@ -385,7 +384,6 @@ SondFilePart* sond_file_part_from_filepart(fz_context* ctx,
 		}
 
 		if (!stream) {
-			g_object_unref(sfp);
 			g_strfreev(v_string);
 			ERROR_Z_VAL(NULL)
 		}
@@ -393,7 +391,6 @@ SondFilePart* sond_file_part_from_filepart(fz_context* ctx,
 		content_type = guess_content_type(ctx, stream, v_string[zaehler], error);
 		fz_drop_stream(ctx, stream);
 		if (!content_type){
-			g_object_unref(sfp);
 			g_strfreev(v_string);
 			ERROR_Z_VAL(NULL)
 		}
@@ -406,7 +403,6 @@ SondFilePart* sond_file_part_from_filepart(fz_context* ctx,
 			if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\n%s", __func__,
 					sond_file_part_error_get_error(SOND_FILE_PART_ERROR(sfp_child))->message);
 			g_strfreev(v_string);
-			g_object_unref(sfp);
 
 			return NULL;
 		}
@@ -416,7 +412,7 @@ SondFilePart* sond_file_part_from_filepart(fz_context* ctx,
 	}
 	g_strfreev(v_string);
 
-	return sfp;
+	return (sfp) ? g_object_ref(sfp) : NULL;
 }
 
 fz_stream* sond_file_part_get_istream(fz_context* ctx,

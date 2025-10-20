@@ -209,7 +209,7 @@ void projekt_set_widgets_sensitiv(Projekt *zond, gboolean active) {
 }
 
 static gint project_create_dbase_zond(Projekt *zond, const gchar *path,
-		gboolean create, DBaseZond **dbase_zond, gchar **errmsg) {
+		gboolean create, gchar **errmsg) {
 	gint rc = 0;
 	ZondDBase *zond_dbase_work = NULL;
 	ZondDBase *zond_dbase_store = NULL;
@@ -238,43 +238,20 @@ static gint project_create_dbase_zond(Projekt *zond, const gchar *path,
 	sqlite3_update_hook(zond_dbase_get_dbase(zond_dbase_work),
 			(void*) project_set_changed, (gpointer) zond);
 
-	*dbase_zond = g_malloc0(sizeof(DBaseZond));
+	zond->dbase_zond = g_malloc0(sizeof(DBaseZond));
 
-	(*dbase_zond)->zond_dbase_store = zond_dbase_store;
-	(*dbase_zond)->zond_dbase_work = zond_dbase_work;
-	(*dbase_zond)->project_name = g_path_get_basename(path);
+	zond->dbase_zond->zond_dbase_store = zond_dbase_store;
+	zond->dbase_zond->zond_dbase_work = zond_dbase_work;
+	zond->dbase_zond->project_name = g_path_get_basename(path);
 
-	(*dbase_zond)->project_dir = //soll ohne '/' enden
-			g_strndup(path, strlen(path) - strlen((*dbase_zond)->project_name) -
-					(((strlen(path) - strlen((*dbase_zond)->project_name)) > 1) ? 1 : 0));
+	zond->dbase_zond->project_dir = //soll ohne '/' enden
+			g_strndup(path, strlen(path) - strlen(zond->dbase_zond->project_name) -
+					(((strlen(path) - strlen(zond->dbase_zond->project_name)) > 1) ? 1 : 0));
 	//letzte Zeile soll sicherstellen, dass, wenn dir linux-root ist, '/' bleibt
 
-	(*dbase_zond)->changed = FALSE;
+	zond->dbase_zond->changed = FALSE;
 
 	return 0;
-}
-
-static void projekt_aktivieren(Projekt *zond) {
-	//zum Arbeitsverzeichnis machen
-	g_chdir(zond->dbase_zond->project_dir);
-
-	projekt_set_widgets_sensitiv(zond, TRUE);
-
-	//project_name als Titel Headerbar
-	gtk_header_bar_set_title(
-			GTK_HEADER_BAR(
-					gtk_window_get_titlebar( GTK_WINDOW(zond->app_window) )),
-			zond->dbase_zond->project_name);
-
-	//project_name in settings schreiben
-	gchar *set = g_strconcat(zond->dbase_zond->project_dir, "/",
-			zond->dbase_zond->project_name, NULL);
-	g_settings_set_string(zond->settings, "project", set);
-	g_free(set);
-
-	project_reset_changed(zond, FALSE);
-
-	return;
 }
 
 static void project_clear_dbase_zond(DBaseZond **dbase_zond) {
@@ -484,7 +461,6 @@ gint project_load_baeume(Projekt *zond, GError **error) {
 gint project_oeffnen(Projekt *zond, const gchar *abs_path, gboolean create,
 		gchar **errmsg) {
 	gint rc = 0;
-	DBaseZond *dbase_zond = NULL;
 	GError* error = NULL;
 
 	rc = projekt_schliessen(zond, errmsg);
@@ -495,29 +471,26 @@ gint project_oeffnen(Projekt *zond, const gchar *abs_path, gboolean create,
 			return 0;
 	}
 
-	rc = project_create_dbase_zond(zond, abs_path, create, &dbase_zond, errmsg);
+	rc = project_create_dbase_zond(zond, abs_path, create, errmsg);
 	if (rc)
 		ERROR_S
 
-	rc = dbase_zond_attach(dbase_zond, &error);
+	rc = dbase_zond_attach(zond->dbase_zond, &error);
 	if (rc) {
 		if (errmsg)
 			*errmsg = g_strdup_printf("%s\n%s", __func__, error->message);
 		g_error_free(error);
+		project_clear_dbase_zond(&(zond->dbase_zond));
 
 		return -1;
 	}
 
-	zond->dbase_zond = dbase_zond;
 	rc = sond_treeviewfm_set_root(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
 			zond->dbase_zond->project_dir, errmsg);
-	if (rc)
+	if (rc) {
+		project_clear_dbase_zond(&(zond->dbase_zond));
 		ERROR_S
-
-	projekt_aktivieren(zond);
-
-	if (g_settings_get_boolean(zond->settings, "autosave"))
-		g_timeout_add_seconds(10 * 60, project_timeout_autosave, zond);
+	}
 
 	if (!create) {
 		GError *error = NULL;
@@ -528,10 +501,29 @@ gint project_oeffnen(Projekt *zond, const gchar *abs_path, gboolean create,
 			if (errmsg)
 				*errmsg = g_strdup_printf("%s\n%s", __func__, error->message);
 			g_error_free(error);
+			project_clear_dbase_zond(&(zond->dbase_zond));
+			sond_treeviewfm_set_root(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), NULL,
+					NULL);
 
 			return -1;
 		}
 	}
+
+	projekt_set_widgets_sensitiv(zond, TRUE);
+
+	//project_name als Titel Headerbar
+	gtk_header_bar_set_title(
+			GTK_HEADER_BAR(
+					gtk_window_get_titlebar(GTK_WINDOW(zond->app_window))),
+			zond->dbase_zond->project_name);
+
+	//project_name in settings schreiben
+	g_settings_set_string(zond->settings, "project", abs_path);
+
+	project_reset_changed(zond, FALSE);
+
+	if (g_settings_get_boolean(zond->settings, "autosave"))
+		g_timeout_add_seconds(10 * 60, project_timeout_autosave, zond);
 
 	return 0;
 }
