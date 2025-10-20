@@ -1219,7 +1219,7 @@ static gint zond_treeview_clipboard_verschieben(Projekt *zond, gboolean child,
 			&& (iter_cursor->user_data
 					!= zond_tree_store_get_root_node(
 							zond_tree_store_get_tree_store(iter_cursor))))
-		sond_treeview_expand_row(zond->treeview[zond->baum_active],
+		sond_treeview_expand_to_row(zond->treeview[zond->baum_active],
 				s_selection.iter_anchor);
 	sond_treeview_set_cursor(zond->treeview[zond->baum_active],
 			s_selection.iter_anchor);
@@ -1408,7 +1408,7 @@ static gint zond_treeview_clipboard_kopieren(Projekt *zond, gboolean child,
 			&& (iter_cursor->user_data
 					!= zond_tree_store_get_root_node(
 							zond_tree_store_get_tree_store(iter_cursor))))
-		sond_treeview_expand_row(zond->treeview[zond->baum_active],
+		sond_treeview_expand_to_row(zond->treeview[zond->baum_active],
 				s_selection.iter_anchor);
 	sond_treeview_set_cursor(zond->treeview[zond->baum_active],
 			s_selection.iter_anchor);
