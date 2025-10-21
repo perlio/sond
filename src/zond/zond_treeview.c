@@ -2211,7 +2211,7 @@ gint zond_treeview_oeffnen_internal_viewer(Projekt *zond, SondFilePartPDF* sfp_p
 		//Testen, ob pv mit file_part schon geöffnet
 		for (gint i = 0; i < zond->arr_pv->len; i++) {
 			PdfViewer *pv = g_ptr_array_index(zond->arr_pv, i);
-			if (pv->dd->next == NULL && sfp_pdf !=
+			if (pv->dd->next == NULL && sfp_pdf ==
 					zond_pdf_document_get_sfp_pdf(pv->dd->zond_pdf_document)) {
 				Anbindung* anbindung_dd = NULL;
 
