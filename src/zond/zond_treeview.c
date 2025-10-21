@@ -2115,11 +2115,13 @@ static gint zond_treeview_jump_to_origin(ZondTreeview *ztv, GtkTreeIter *iter,
 	else if (type == ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_COPY) {
 		gint rc = 0;
 
-		rc = zond_treeview_jump_to_node_id(ztv_priv->zond, ztv, node_id, error);
+		rc = zond_treeview_jump_to_node_id(ztv_priv->zond,
+				ZOND_TREEVIEW(ztv_priv->zond->treeview[BAUM_INHALT]),
+				link, error);
 		if (rc)
 			ERROR_Z
-	} else //FILE_PART
-	{
+	}
+	else { //FILE_PART
 		gint rc = 0;
 		gchar *file_part = NULL;
 		gchar *section = NULL;
@@ -2130,29 +2132,19 @@ static gint zond_treeview_jump_to_origin(ZondTreeview *ztv, GtkTreeIter *iter,
 		if (rc)
 			ERROR_Z
 
-		if (g_str_has_prefix(file_part, "//")) //Auszug; hat keinen origin im fs_tree!
-				{
-			g_free(file_part);
-			g_free(section);
+		//wenn FS nicht angezeigt: erst einschalten, damit man was sieht
+		if (!gtk_toggle_button_get_active(
+				GTK_TOGGLE_BUTTON(ztv_priv->zond->fs_button)))
+			gtk_toggle_button_set_active(
+					GTK_TOGGLE_BUTTON(ztv_priv->zond->fs_button), TRUE);
 
-			return 0;
-		} else {
-			gint rc = 0;
-
-			//wenn FS nicht angezeigt: erst einschalten, damit man was sieht
-			if (!gtk_toggle_button_get_active(
-					GTK_TOGGLE_BUTTON(ztv_priv->zond->fs_button)))
-				gtk_toggle_button_set_active(
-						GTK_TOGGLE_BUTTON(ztv_priv->zond->fs_button), TRUE);
-
-			rc = zond_treeviewfm_set_cursor_on_section(
-					ZOND_TREEVIEWFM(ztv_priv->zond->treeview[BAUM_FS]),
-					file_part, section, error);
-			g_free(file_part);
-			g_free(section);
-			if (rc)
-				ERROR_Z
-		}
+		rc = zond_treeviewfm_set_cursor_on_section(
+				ZOND_TREEVIEWFM(ztv_priv->zond->treeview[BAUM_FS]),
+				file_part, section, error);
+		g_free(file_part);
+		g_free(section);
+		if (rc)
+			ERROR_Z
 	}
 
 	return 0;
