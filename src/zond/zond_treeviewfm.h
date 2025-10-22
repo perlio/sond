@@ -58,6 +58,8 @@ struct _ZondTreeviewFMClass {
 gint zond_treeviewfm_insert_section(ZondTreeviewFM*, gint, GtkTreeIter*,
 		gboolean, GtkTreeIter*, GError**);
 
+ZondTreeviewFM* zond_treeviewfm_new(Projekt*);
+
 gint zond_treeviewfm_section_visible(ZondTreeviewFM*, gchar const*,
 		gchar const*, gboolean, gboolean*, GtkTreeIter*, gboolean*, gboolean*,
 		GError**);
@@ -66,8 +68,6 @@ gint zond_treeviewfm_set_cursor_on_section(ZondTreeviewFM*, gchar const*,
 		gchar const*, GError**);
 
 void zond_treeviewfm_kill_parent(ZondTreeviewFM*, GtkTreeIter*);
-
-void zond_treeviewfm_set_zond(ZondTreeviewFM*, Projekt*);
 
 G_END_DECLS
 

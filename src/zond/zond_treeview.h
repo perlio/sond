@@ -39,6 +39,8 @@ gint zond_treeview_insert_file_part_in_db(Projekt*, gchar const*, gchar const*,
 gint zond_treeview_copy_node_to_baum_auswertung(ZondTreeview*, gint,
 		GtkTreeIter*, gboolean, GtkTreeIter*, gint, gint*, GError**);
 
+gint zond_treeview_jump_to_node_id(Projekt*, gint);
+
 ZondTreeview* zond_treeview_new(Projekt*, gint);
 
 gint zond_treeview_oeffnen_internal_viewer(Projekt*, SondFilePartPDF*, Anbindung*,

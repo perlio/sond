@@ -569,7 +569,77 @@ static void zond_treeviewfm_class_init(ZondTreeviewFMClass *klass) {
 }
 
 static void zond_treeviewfm_init(ZondTreeviewFM *ztvfm) {
+
 	return;
+}
+
+static void zond_treeviewfm_jump_activate(GtkMenuItem* item, gpointer data) {
+	GtkTreeIter iter = { 0 };
+	SondTVFMItem* stvfm_item = NULL;
+	gchar* filepart = NULL;
+	gchar const* section = NULL;
+	gint rc = 0;
+	gint ID = 0;
+	GError* error = NULL;
+
+	Projekt *zond = (Projekt*) data;
+
+	if (!sond_treeview_get_cursor(zond->treeview[BAUM_FS], &iter))
+		return;
+
+	gtk_tree_model_get(gtk_tree_view_get_model(
+			GTK_TREE_VIEW(zond->treeview[BAUM_FS])), &iter, 0, &stvfm_item, -1);
+	g_object_unref(stvfm_item);
+
+	if (sond_tvfm_item_get_item_type(stvfm_item) == SOND_TVFM_ITEM_TYPE_DIR)
+		return;
+
+	filepart = sond_file_part_get_filepart(sond_tvfm_item_get_sond_file_part(stvfm_item));
+	section = sond_tvfm_item_get_path_or_section(stvfm_item);
+
+	rc = zond_dbase_get_section(zond->dbase_zond->zond_dbase_work, filepart, section, &ID, &error);
+	g_free(filepart);
+	if (rc) {
+		display_message(zond->app_window, "Zur Anbindung springen nicht möglich\n\n"
+				"%s", error->message, NULL);
+		g_error_free(error);
+
+		return;
+	}
+
+	zond_treeview_jump_to_node_id(zond, ID);
+
+	return;
+}
+
+ZondTreeviewFM* zond_treeviewfm_new(Projekt* zond) {
+	ZondTreeviewFM* ztvfm = NULL;
+	ZondTreeviewFMPrivate* ztvfm_priv = NULL;
+
+	ztvfm = g_object_new(ZOND_TYPE_TREEVIEWFM, NULL);
+	ztvfm_priv = zond_treeviewfm_get_instance_private(ztvfm);
+
+	ztvfm_priv->zond = zond;
+
+	//Ergänze contextmenu
+	GtkWidget* contextmenu = sond_treeview_get_contextmenu(SOND_TREEVIEW(ztvfm));
+
+	//Trennblatt
+	GtkWidget *item_separator_0 = gtk_separator_menu_item_new();
+	gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu), item_separator_0);
+
+	//Zur Anbindung springen
+	GtkWidget *item_jump = gtk_menu_item_new_with_label(
+			"Zur Anbindung springen");
+	gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu), item_jump);
+
+	gtk_widget_show_all(contextmenu);
+
+	g_signal_connect(item_jump, "activate",
+			G_CALLBACK(zond_treeviewfm_jump_activate),
+			(gpointer) zond);
+
+	return ztvfm;
 }
 
 static gint zond_treeviewfm_find_section(ZondTreeviewFM *ztvfm,
@@ -828,14 +898,6 @@ void zond_treeviewfm_kill_parent(ZondTreeviewFM *ztvfm, GtkTreeIter *iter) {
 	}
 
 	gtk_tree_store_remove(GTK_TREE_STORE(model), iter);
-
-	return;
-}
-
-void zond_treeviewfm_set_zond(ZondTreeviewFM* ztvfm, Projekt* zond) {
-	ZondTreeviewFMPrivate* ztvfm_priv = zond_treeviewfm_get_instance_private(ztvfm);
-
-	ztvfm_priv->zond = zond;
 
 	return;
 }

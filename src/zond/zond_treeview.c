@@ -2069,19 +2069,12 @@ static void zond_treeview_jump_to_iter(Projekt *zond, GtkTreeIter *iter) {
 	return;
 }
 
-static gint zond_treeview_jump_to_node_id(Projekt *zond, ZondTreeview *ztv,
-		gint node_id, GError **error) {
+gint zond_treeview_jump_to_node_id(Projekt *zond, gint node_id) {
 	GtkTreeIter *iter = NULL;
 
-	iter = zond_treeview_abfragen_iter(ztv, node_id);
-	if (!iter) {
-		if (error)
-			*error = g_error_new( ZOND_ERROR, 0,
-					"%s\nzond_treeview_abfragen_iter gibt NULL zurück",
-					__func__);
-
-		return -1;
-	}
+	iter = zond_treeview_abfragen_iter(ZOND_TREEVIEW(zond->treeview[BAUM_INHALT]), node_id);
+	if (!iter)
+		return 1;
 
 	zond_treeview_jump_to_iter(zond, iter);
 	gtk_tree_iter_free(iter);
@@ -2115,11 +2108,14 @@ static gint zond_treeview_jump_to_origin(ZondTreeview *ztv, GtkTreeIter *iter,
 	else if (type == ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_COPY) {
 		gint rc = 0;
 
-		rc = zond_treeview_jump_to_node_id(ztv_priv->zond,
-				ZOND_TREEVIEW(ztv_priv->zond->treeview[BAUM_INHALT]),
-				link, error);
-		if (rc)
-			ERROR_Z
+		rc = zond_treeview_jump_to_node_id(ztv_priv->zond, link);
+		if (rc == 1) {//nicht gefunden
+			if (error) *error = g_error_new(ZOND_ERROR, 0,
+					"%s\nlink-ID konnte in BAUM_INHALT nicht gefunden werden",
+					__func__);
+
+			return -1;
+		}
 	}
 	else { //FILE_PART
 		gint rc = 0;
@@ -2175,8 +2171,7 @@ static void zond_treeview_jump_activate(GtkMenuItem *item, gpointer user_data) {
 		GError *error = NULL;
 
 		rc = zond_treeview_jump_to_origin(
-				ZOND_TREEVIEW(zond->treeview[zond->baum_active]), &iter,
-				&error);
+				ZOND_TREEVIEW(zond->treeview[zond->baum_active]), &iter, &error);
 		if (rc) {
 			display_message(zond->app_window, "Fehler Sprung zu Herkunft\n\n",
 					error->message, NULL);
