@@ -29,6 +29,35 @@
 
 #include "../misc.h"
 
+#define ROLLBACK_TO_STATEMENT { \
+        gint res = 0; \
+        GError* error_tmp = NULL; \
+        \
+        res = zond_dbase_rollback_to_statement( zond_dbase, &error_tmp ); \
+        \
+        if ( error ) \
+        { \
+            *error = g_error_new( g_quark_from_static_string( "SQLITE3" ), \
+                    sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ), \
+                    "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) ); \
+            \
+            if ( res ) \
+            { \
+                (*error)->message = add_string( (*error)->message, \
+                        g_strdup_printf( "\n\nRollback fehlgeschlagen\n%s", error_tmp->message ) ); \
+                g_error_free( error_tmp ); \
+            } \
+            else (*error)->message = add_string( (*error)->message, \
+                    g_strdup_printf( "\n\nRollback durchgeführt" ) ); \
+        } \
+        else \
+        { \
+            if ( res ) g_error_free( error_tmp ); \
+        }\
+        \
+        return -1; \
+    }
+
 typedef enum {
 	PROP_PATH = 1, PROP_DBASE, N_PROPERTIES
 } ZondDBaseProperty;
@@ -766,11 +795,11 @@ gint zond_dbase_insert_node(ZondDBase *zond_dbase, gint anchor_ID,
 
 	rc = sqlite3_step(stmt[1]);
 	if (rc != SQLITE_DONE)
-		ERROR_Z_ROLLBACK
+		ROLLBACK_TO_STATEMENT
 
 	rc = sqlite3_step(stmt[2]);
 	if (rc != SQLITE_DONE)
-		ERROR_Z_ROLLBACK
+		ROLLBACK_TO_STATEMENT
 
 	rc = sqlite3_step(stmt[3]);
 	if (rc == SQLITE_DONE) {
@@ -778,14 +807,14 @@ gint zond_dbase_insert_node(ZondDBase *zond_dbase, gint anchor_ID,
 			*error = g_error_new(g_quark_from_static_string("ZOND_DBASE"), 0,
 					"%s\nKnoten konnte nicht eingefügt werden", __func__);
 
-		ERROR_Z_ROLLBACK;
+		ROLLBACK_TO_STATEMENT;
 	}
 	else if (rc != SQLITE_ROW)
-		ERROR_Z_ROLLBACK
+		ROLLBACK_TO_STATEMENT
 
 	rc = sqlite3_step(stmt[4]);
 	if (rc != SQLITE_DONE)
-		ERROR_Z_ROLLBACK
+		ROLLBACK_TO_STATEMENT
 
 	return sqlite3_column_int(stmt[3], 0);
 }
@@ -838,7 +867,7 @@ gint zond_dbase_create_file_root(ZondDBase *zond_dbase, const gchar *file_part,
 
 	rc = sqlite3_step(stmt[1]);
 	if (rc != SQLITE_DONE)
-		ERROR_Z_ROLLBACK
+		ROLLBACK_TO_STATEMENT
 
 	rc = sqlite3_step(stmt[2]);
 	if (rc == SQLITE_DONE) {
@@ -846,13 +875,13 @@ gint zond_dbase_create_file_root(ZondDBase *zond_dbase, const gchar *file_part,
 			*error = g_error_new(g_quark_from_static_string("ZOND_DBASE"), 0,
 					"%s\nKnoten konnte nicht eingefügt werden", __func__);
 
-		ERROR_Z_ROLLBACK;
+		ROLLBACK_TO_STATEMENT;
 	} else if (rc != SQLITE_ROW)
-		ERROR_Z_ROLLBACK
+		ROLLBACK_TO_STATEMENT
 
 	rc = sqlite3_step(stmt[3]);
 	if (rc != SQLITE_DONE)
-		ERROR_Z_ROLLBACK
+		ROLLBACK_TO_STATEMENT
 
 	if (file_part_root)
 		*file_part_root = sqlite3_column_int(stmt[2], 0);
@@ -1105,19 +1134,19 @@ gint zond_dbase_verschieben_knoten(ZondDBase *zond_dbase, gint node_id,
 
 	rc = sqlite3_step(stmt[1]);
 	if (rc != SQLITE_DONE)
-		ERROR_Z_ROLLBACK
+		ROLLBACK_TO_STATEMENT
 
 	rc = sqlite3_step(stmt[2]);
 	if (rc != SQLITE_DONE)
-		ERROR_Z_ROLLBACK
+		ROLLBACK_TO_STATEMENT
 
 	rc = sqlite3_step(stmt[3]);
 	if (rc != SQLITE_DONE)
-		ERROR_Z_ROLLBACK
+		ROLLBACK_TO_STATEMENT
 
 	rc = sqlite3_step(stmt[4]);
 	if (rc != SQLITE_DONE)
-		ERROR_Z_ROLLBACK
+		ROLLBACK_TO_STATEMENT
 
 	return 0;
 }
@@ -1158,15 +1187,15 @@ gint zond_dbase_remove_node(ZondDBase *zond_dbase, gint node_id, GError **error)
 
 	rc = sqlite3_step(stmt[1]);
 	if (rc != SQLITE_DONE)
-		ERROR_Z_ROLLBACK
+		ROLLBACK_TO_STATEMENT
 
 	rc = sqlite3_step(stmt[2]);
 	if (rc != SQLITE_DONE)
-		ERROR_Z_ROLLBACK
+		ROLLBACK_TO_STATEMENT
 
 	rc = sqlite3_step(stmt[3]);
 	if (rc != SQLITE_DONE)
-		ERROR_Z_ROLLBACK
+		ROLLBACK_TO_STATEMENT
 
 	return 0;
 }

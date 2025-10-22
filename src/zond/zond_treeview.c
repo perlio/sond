@@ -514,7 +514,7 @@ static gint zond_treeview_check_anchor_id(Projekt *zond,
 }
 
 static gint zond_treeview_insert_node(Projekt *zond, gboolean child,
-		gchar **errmsg) {
+		GError **error) {
 	gint anchor_id = 0;
 	gint node_id_new = 0;
 	GtkTreeIter iter_cursor = { 0 };
@@ -522,7 +522,6 @@ static gint zond_treeview_insert_node(Projekt *zond, gboolean child,
 	GtkTreeIter iter_new = { 0 };
 	gboolean success = FALSE;
 	ZondTreeStore *tree_store = NULL;
-	GError *error = NULL;
 
 	g_return_val_if_fail(
 			zond->baum_active == BAUM_INHALT
@@ -537,27 +536,19 @@ static gint zond_treeview_insert_node(Projekt *zond, gboolean child,
 		gint rc = 0;
 
 		rc = zond_treeview_check_anchor_id(zond, &iter_anchor, &anchor_id,
-				child, &error);
-		if (rc == -1) {
-			if (errmsg)
-				*errmsg = g_strdup_printf("%s\n%s", __func__, error->message);
-			g_error_free(error);
-
-			return -1;
-		} else if (rc == 1)
+				child, error);
+		if (rc == -1)
+			ERROR_Z
+		else if (rc == 1)
 			return 1;
 	}
 
 	//Knoten in Datenbank einfügen
 	node_id_new = zond_dbase_insert_node(zond->dbase_zond->zond_dbase_work,
 			anchor_id, child, ZOND_DBASE_TYPE_BAUM_STRUKT, 0, NULL, NULL,
-			zond->icon[ICON_NORMAL].icon_name, "Neuer Punkt", NULL, &error);
-	if (node_id_new == -1) {
-		if (errmsg)
-			*errmsg = g_strdup(error->message);
-		g_error_free(error);
-		ERROR_ROLLBACK(zond->dbase_zond->zond_dbase_work)
-	}
+			zond->icon[ICON_NORMAL].icon_name, "Neuer Punkt", NULL, error);
+	if (node_id_new == -1)
+		ERROR_Z
 
 	//Knoten in baum_inhalt einfuegen
 	//success = sond_treeview_get_cursor( zond->treeview[baum], &iter ); - falsch!!!
@@ -582,18 +573,18 @@ static void zond_treeview_punkt_einfuegen_activate(GtkMenuItem *item,
 		gpointer user_data) {
 	gint rc = 0;
 	gboolean child = FALSE;
-	gchar *errmsg = NULL;
+	GError* error = NULL;
 
 	Projekt *zond = (Projekt*) user_data;
 
 	child = (gboolean) GPOINTER_TO_INT(
 			g_object_get_data( G_OBJECT(item), "kind" ));
 
-	rc = zond_treeview_insert_node(zond, child, &errmsg);
+	rc = zond_treeview_insert_node(zond, child, &error);
 	if (rc == -1) {
 		display_message(zond->app_window, "Punkt einfügen fehlgeschlagen\n\n",
-				errmsg, NULL);
-		g_free(errmsg);
+				error->message, NULL);
+		g_error_free(error);
 	} else if (rc == 1)
 		display_message(zond->app_window, "Punkt darf nicht "
 				"als Unterpunkt von Datei eingefügt weden", NULL);
@@ -1354,11 +1345,6 @@ static gint zond_treeview_clipboard_kopieren_foreach(SondTreeview *tree_view,
 
 	SSelection *s_selection = (SSelection*) data;
 
-	rc = zond_dbase_begin(s_selection->zond->dbase_zond->zond_dbase_work,
-			error);
-	if (rc)
-		ERROR_Z
-
 	//soll durch etwaige links "hindurchgucken"
 	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(tree_view)), iter,
 			2, &node_id, -1);
@@ -1368,17 +1354,13 @@ static gint zond_treeview_clipboard_kopieren_foreach(SondTreeview *tree_view,
 			FALSE, node_id, s_selection->iter_anchor, s_selection->child,
 			&iter_new, s_selection->anchor_id, &node_id_new,
 			zond_treeview_copy_node_to_baum_auswertung, error);
-	if (rc) {
-//		ROLLBACK
+	if (rc)
 		ERROR_Z
-	}
 
 	rc = zond_dbase_commit(s_selection->zond->dbase_zond->zond_dbase_work,
 			error);
-	if (rc) {
-//		ROLLBACK
+	if (rc)
 		ERROR_Z
-	}
 
 	s_selection->child = FALSE;
 	*(s_selection->iter_anchor) = iter_new;

@@ -8,43 +8,6 @@
 
 #include "global_types.h"
 
-//#include "20allgemein/project.h"
-
-#define ERROR_ROLLBACK_BOTH(zond_dbase_work, zond_dbase_store) \
-          { g_prefix_error( error, "%s\n", __func__ ); \
-            \
-            gint rc_rollback1 = 0; \
-            gint rc_rollback2 = 0; \
-            GError* err_rollback = NULL; \
-            \
-            rc_rollback1 = zond_dbase_rollback( zond_dbase_work, &err_rollback ); \
-            if ( error ) \
-            { \
-                if ( !rc_rollback1 ) (*error)->message = add_string( (*error)->message, \
-                        g_strdup( "\n\nRollback dbase_store durchgeführt" ) ); \
-                else (*error)->message = add_string( (*error)->message, g_strconcat( "\n\nRollback " \
-                        "zond_dbase_work fehlgeschlagen\n\nBei Aufruf dbase_rollback:\n", \
-                        err_rollback->message, NULL ) ); \
-            } \
-            g_clear_error( &err_rollback ); \
-            \
-            rc_rollback2 = zond_dbase_rollback( zond_dbase_store, &err_rollback ); \
-            { \
-                if ( !rc_rollback2 ) (*error)->message = add_string( (*error)->message, \
-                        g_strdup( "\n\nRollback dbase_work durchgeführt" ) ); \
-                else (*error)->message = add_string( (*error)->message, g_strconcat( "\n\nRollback " \
-                        "zond_dbase_store fehlgeschlagen\n\nBei Aufruf dbase_rollback:\n", \
-                        err_rollback->message, NULL ) ); \
-            } \
-            g_error_free( err_rollback ); \
-            \
-            if ( error ) \
-            { \
-                if ( rc_rollback1 || rc_rollback2 ) (*error)->message = \
-                        add_string( (*error)->message, g_strdup( "\n\nDatenbank inkonsistent" ) ); \
-            } \
-          }
-
 G_BEGIN_DECLS
 
 //ZOND_TYPE_TREEVIEWFM definieren

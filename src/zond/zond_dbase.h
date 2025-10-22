@@ -20,54 +20,6 @@ typedef enum {
                     "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) ); \
                     return -1; }
 
-#define ERROR_Z_ROLLBACK { \
-        gint res = 0; \
-        GError* error_tmp = NULL; \
-        \
-        res = zond_dbase_rollback_to_statement( zond_dbase, &error_tmp ); \
-        \
-        if ( error ) \
-        { \
-            *error = g_error_new( g_quark_from_static_string( "SQLITE3" ), \
-                    sqlite3_errcode( zond_dbase_get_dbase( zond_dbase ) ), \
-                    "%s\n%s", __func__, sqlite3_errmsg( zond_dbase_get_dbase( zond_dbase ) ) ); \
-            \
-            if ( res ) \
-            { \
-                (*error)->message = add_string( (*error)->message, \
-                        g_strdup_printf( "\n\nRollback fehlgeschlagen\n%s", error_tmp->message ) ); \
-                g_error_free( error_tmp ); \
-            } \
-            else (*error)->message = add_string( (*error)->message, \
-                    g_strdup_printf( "\n\nRollback durchgeführt" ) ); \
-        } \
-        else \
-        { \
-            if ( res ) g_error_free( error_tmp ); \
-        }\
-        \
-        return -1; \
-    }
-
-#define ERROR_ROLLBACK(zond_dbase) \
-          { if ( errmsg ) *errmsg = add_string( \
-            g_strconcat( "Bei Aufruf ", __func__, ":\n", NULL ), *errmsg ); \
-            \
-            GError* err_rollback = NULL; \
-            gint rc_rollback = 0; \
-            rc_rollback = zond_dbase_rollback( zond_dbase, &err_rollback ); \
-            if ( errmsg ) \
-            { \
-                if ( !rc_rollback ) *errmsg = add_string( *errmsg, \
-                        g_strdup( "\n\nRollback durchgeführt" ) ); \
-                else *errmsg = add_string( *errmsg, g_strconcat( "\n\nRollback " \
-                        "fehlgeschlagen\n\nBei Aufruf dbase_rollback:\n", \
-                        err_rollback->message, "\n\nDatenbankverbindung trennen", NULL ) ); \
-            } \
-            g_error_free( err_rollback ); \
-            \
-            return -1; }
-
 #define ERROR_ROLLBACK_Z(zond_dbase) \
           { GError* error_tmp; \
             \
