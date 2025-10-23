@@ -349,10 +349,10 @@ static void zond_tree_store_get_value(GtkTreeModel *tree_model,
 
 	if (column == 0) {
 		g_value_init(value, G_TYPE_STRING);
-		g_value_set_string(value, g_strdup(row_data->data->icon_name));
+		g_value_set_string(value, row_data->data->icon_name);
 	} else if (column == 1) {
 		g_value_init(value, G_TYPE_STRING);
-		g_value_set_string(value, g_strdup(row_data->data->node_text));
+		g_value_set_string(value, row_data->data->node_text);
 	} else if (column == 2) {
 		g_value_init(value, G_TYPE_INT);
 		g_value_set_int(value, row_data->data->node_id);

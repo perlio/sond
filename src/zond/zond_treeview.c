@@ -959,6 +959,8 @@ static gint zond_treeview_anbinden_rekursiv(ZondTreeview *ztv,
 		ZondTreeStore *tree_store = NULL;
 		GtkTreeIter iter_new = { 0 };
 		gint rc = 0;
+		gint anchor_id_dir = 0;
+		gboolean child_anchor = TRUE;
 
 		//icon_name ermitteln
 		//ToDo: Differenzieren nach zip/pdf-container, "normalem" dir
@@ -975,11 +977,11 @@ static gint zond_treeview_anbinden_rekursiv(ZondTreeview *ztv,
 			basename = sond_tvfm_item_get_path_or_section(stvfm_item);
 		}
 
-		new_node_id = zond_dbase_insert_node(
+		anchor_id_dir = zond_dbase_insert_node(
 				ztv_priv->zond->dbase_zond->zond_dbase_work, anchor_id, child,
 				ZOND_DBASE_TYPE_BAUM_STRUKT, 0, NULL, NULL, icon_name, basename,
 				NULL, &error);
-		if (new_node_id == -1) {
+		if (anchor_id_dir == -1) {
 			gchar* errmsg = NULL;
 			gchar* filepart = NULL;
 			SondFilePart* sfp = NULL;
@@ -1003,7 +1005,7 @@ static gint zond_treeview_anbinden_rekursiv(ZondTreeview *ztv,
 						NULL : anchor_iter, child, &iter_new);
 
 		//Standardinhalt setzen
-		zond_tree_store_set(&iter_new, icon_name, basename, new_node_id);
+		zond_tree_store_set(&iter_new, icon_name, basename, anchor_id_dir);
 
 		text = g_strconcat("Verzeichnis eingefügt: ", basename, NULL);
 		info_window_set_message(info_window, text);
@@ -1032,10 +1034,15 @@ static gint zond_treeview_anbinden_rekursiv(ZondTreeview *ztv,
 			SondTVFMItem* stvfm_item_child = NULL;
 
 			stvfm_item_child = g_ptr_array_index(arr_children, i);
-			new_node_id = zond_treeview_anbinden_rekursiv(ztv, &iter_new, new_node_id,
-					(i == 0) ? TRUE : FALSE, stvfm_item_child, info_window, zaehler);
+			new_node_id = zond_treeview_anbinden_rekursiv(ztv, &iter_new, anchor_id_dir,
+					child_anchor, stvfm_item_child, info_window, zaehler);
 			if (new_node_id == -1) //abgebrochen
 				break;
+
+			if (new_node_id > 0) {
+				child_anchor = FALSE;
+				anchor_id_dir = new_node_id;
+			}
 		}
 
 		g_ptr_array_unref(arr_children);
@@ -1056,7 +1063,7 @@ typedef struct {
 static gint zond_treeview_clipboard_anbinden_foreach(SondTreeview *stv,
 		GtkTreeIter *iter, gpointer data, GError **error) {
 	SondTVFMItem* stvfm_item = NULL;
-	gint node_id_new = 0;
+	gint rc = 0;
 
 	SSelectionAnbinden *s_selection = (SSelectionAnbinden*) data;
 
@@ -1064,12 +1071,12 @@ static gint zond_treeview_clipboard_anbinden_foreach(SondTreeview *stv,
 	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(stv)), iter, 0,
 			&stvfm_item, -1);
 
-	node_id_new = zond_treeview_anbinden_rekursiv(s_selection->ztv,
+	rc = zond_treeview_anbinden_rekursiv(s_selection->ztv,
 			&s_selection->anchor_iter, s_selection->anchor_id,
 			s_selection->child, stvfm_item, s_selection->info_window,
 			&s_selection->zaehler);
 	g_object_unref(stvfm_item);
-	if (node_id_new == -1)
+	if (rc == -1)
 		return 1; //sond_treeview_..._foreach bricht dann ab
 
 	return 0;

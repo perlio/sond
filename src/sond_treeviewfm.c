@@ -402,6 +402,8 @@ static gint sond_tvfm_item_load_pdf_dir(SondTVFMItem* stvfm_item, GPtrArray** ar
 		g_ptr_array_add(*arr_children, stvfm_item_child);
 	}
 
+	g_ptr_array_unref(arr_emb_files);
+
 	return 0;
 }
 
@@ -486,6 +488,7 @@ static void sond_treeviewfm_render_text_cell(GtkTreeViewColumn *column,
 	g_object_set(G_OBJECT(
 			sond_treeview_get_cell_renderer_text(SOND_TREEVIEW(stvfm))),
 			"text", text, NULL);
+	g_free(text);
 
 	g_object_unref(stvfm_item);
 
@@ -2180,9 +2183,7 @@ static void sond_treeviewfm_search_activate(GtkMenuItem *item, gpointer data) {
 
 	rc = abfrage_frage(gtk_widget_get_toplevel(GTK_WIDGET(stvfm)), "Dateisuche",
 			"Bitte Suchtext eingeben", &search_text);
-	if (rc != GTK_RESPONSE_YES)
-		return;
-	else if (!g_strcmp0(search_text, "")) {
+	if (rc != GTK_RESPONSE_YES || !g_strcmp0(search_text, "")) {
 		g_free(search_text);
 
 		return;

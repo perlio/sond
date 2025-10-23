@@ -167,10 +167,6 @@ SondFilePart* sond_file_part_create_from_mime_type(gchar const* path,
 		if (rc) {
 			SondFilePartErrorPrivate* sfp_error_priv = NULL;
 
-	char* cwd = NULL;
-	if ((cwd = getcwd(NULL, 1024)) != NULL)
-		printf("Aktuelles Verzeichnis: %s\n", cwd);
-g_warning("hier");
 			g_object_unref(sfp_child);
 			sfp_child = sond_file_part_create(SOND_TYPE_FILE_PART_ERROR, path,
 					sfp_parent);
