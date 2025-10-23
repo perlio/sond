@@ -920,7 +920,7 @@ static gint zond_treeview_leaf_anbinden(ZondTreeview *ztv,
  **  ansonsten: Id des zunächst erzeugten Knotens  */
 static gint zond_treeview_anbinden_rekursiv(ZondTreeview *ztv,
 		GtkTreeIter *anchor_iter, gint anchor_id, gboolean child, SondTVFMItem *stvfm_item,
-		InfoWindow *info_window, gint *zaehler) {
+		InfoWindow *info_window, gint *zaehler, gboolean* dir_inserted) {
 	gint new_node_id = 0;
 	GError* error = NULL;
 
@@ -1003,6 +1003,8 @@ static gint zond_treeview_anbinden_rekursiv(ZondTreeview *ztv,
 		zond_tree_store_insert(tree_store,
 				(anchor_iter->user_data == zond_tree_store_get_root_node(tree_store)) ?
 						NULL : anchor_iter, child, &iter_new);
+		*anchor_iter = iter_new;
+		*dir_inserted = TRUE;
 
 		//Standardinhalt setzen
 		zond_tree_store_set(&iter_new, icon_name, basename, anchor_id_dir);
@@ -1035,7 +1037,7 @@ static gint zond_treeview_anbinden_rekursiv(ZondTreeview *ztv,
 
 			stvfm_item_child = g_ptr_array_index(arr_children, i);
 			new_node_id = zond_treeview_anbinden_rekursiv(ztv, &iter_new, anchor_id_dir,
-					child_anchor, stvfm_item_child, info_window, zaehler);
+					child_anchor, stvfm_item_child, info_window, zaehler, dir_inserted);
 			if (new_node_id == -1) //abgebrochen
 				break;
 
@@ -1057,6 +1059,7 @@ typedef struct {
 	GtkTreeIter anchor_iter;
 	gboolean child;
 	gint zaehler;
+	gboolean dir_inserted;
 	InfoWindow *info_window;
 } SSelectionAnbinden;
 
@@ -1074,7 +1077,7 @@ static gint zond_treeview_clipboard_anbinden_foreach(SondTreeview *stv,
 	rc = zond_treeview_anbinden_rekursiv(s_selection->ztv,
 			&s_selection->anchor_iter, s_selection->anchor_id,
 			s_selection->child, stvfm_item, s_selection->info_window,
-			&s_selection->zaehler);
+			&s_selection->zaehler, &s_selection->dir_inserted);
 	g_object_unref(stvfm_item);
 	if (rc == -1)
 		return 1; //sond_treeview_..._foreach bricht dann ab
@@ -1092,19 +1095,20 @@ static void zond_treeview_clipboard_anbinden(Projekt *zond, gint anchor_id,
 	s_selection.anchor_iter = *anchor_iter;
 	s_selection.child = child;
 	s_selection.zaehler = 0;
+	s_selection.dir_inserted = FALSE;
 	s_selection.info_window = info_window;
 
 	sond_treeview_clipboard_foreach(
 			zond_treeview_clipboard_anbinden_foreach, &s_selection, &error);
 
-	if (s_selection.zaehler)
+	if (s_selection.zaehler || s_selection.dir_inserted) {
 		sond_treeview_expand_to_row(zond->treeview[BAUM_INHALT],
 				&s_selection.anchor_iter);
-	sond_treeview_set_cursor(zond->treeview[BAUM_INHALT],
-			&s_selection.anchor_iter);
-
-	gtk_tree_view_columns_autosize(
-			GTK_TREE_VIEW(((Projekt* ) zond)->treeview[BAUM_INHALT]));
+		sond_treeview_set_cursor(zond->treeview[BAUM_INHALT],
+				&s_selection.anchor_iter);
+		gtk_tree_view_columns_autosize(
+				GTK_TREE_VIEW(((Projekt* ) zond)->treeview[BAUM_INHALT]));
+	}
 
 	gchar *text = g_strdup_printf("%i Anbindungen eingefügt",
 			s_selection.zaehler);
