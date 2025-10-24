@@ -1360,18 +1360,22 @@ static gint zond_treeview_clipboard_kopieren_foreach(SondTreeview *tree_view,
 	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(tree_view)), iter,
 			2, &node_id, -1);
 
+	rc = zond_dbase_begin(s_selection->zond->dbase_zond->zond_dbase_work, error);
+	if (rc)
+		ERROR_Z
+
 	rc = zond_treeview_walk_tree(
 			ZOND_TREEVIEW(s_selection->zond->treeview[BAUM_AUSWERTUNG]),
 			FALSE, node_id, s_selection->iter_anchor, s_selection->child,
 			&iter_new, s_selection->anchor_id, &node_id_new,
 			zond_treeview_copy_node_to_baum_auswertung, error);
 	if (rc)
-		ERROR_Z
+		ERROR_ROLLBACK_Z(s_selection->zond->dbase_zond->zond_dbase_work)
 
 	rc = zond_dbase_commit(s_selection->zond->dbase_zond->zond_dbase_work,
 			error);
 	if (rc)
-		ERROR_Z
+		ERROR_ROLLBACK_Z(s_selection->zond->dbase_zond->zond_dbase_work)
 
 	s_selection->child = FALSE;
 	*(s_selection->iter_anchor) = iter_new;
