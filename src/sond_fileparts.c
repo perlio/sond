@@ -50,12 +50,6 @@ typedef struct {
 G_DEFINE_TYPE_WITH_PRIVATE(SondFilePart, sond_file_part, G_TYPE_OBJECT)
 
 typedef struct {
-	GError *error; //Fehler, der aufgetreten ist
-} SondFilePartErrorPrivate;
-
-G_DEFINE_TYPE_WITH_PRIVATE(SondFilePartError, sond_file_part_error, SOND_TYPE_FILE_PART)
-
-typedef struct {
 	gchar* mime_type;
 } SondFilePartLeafPrivate;
 
@@ -165,15 +159,8 @@ SondFilePart* sond_file_part_create_from_mime_type(gchar const* path,
 
 		rc = sond_file_part_pdf_test_for_embedded_files(SOND_FILE_PART_PDF(sfp_child), &error);
 		if (rc) {
-			SondFilePartErrorPrivate* sfp_error_priv = NULL;
-
-			g_object_unref(sfp_child);
-			sfp_child = sond_file_part_create(SOND_TYPE_FILE_PART_ERROR, path,
-					sfp_parent);
-
-			sfp_error_priv = sond_file_part_error_get_instance_private(
-					SOND_FILE_PART_ERROR(sfp_child));
-			sfp_error_priv->error = error;
+			g_warning("%s\n", error->message);
+			g_error_free(error);
 		}
 
 	}
@@ -395,13 +382,6 @@ SondFilePart* sond_file_part_from_filepart(fz_context* ctx,
 		g_free(content_type);
 
 		sfp_child = sond_file_part_create_from_mime_type(v_string[zaehler], sfp, mime_type);
-		if (SOND_IS_FILE_PART_ERROR(sfp_child)) { //können wir hier nicht brauchen
-			if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\n%s", __func__,
-					sond_file_part_error_get_error(SOND_FILE_PART_ERROR(sfp_child))->message);
-			g_strfreev(v_string);
-
-			return NULL;
-		}
 
 		sfp = sfp_child;
 		zaehler++;
@@ -839,38 +819,6 @@ gint sond_file_part_insert(SondFilePart* sfp, fz_context* ctx,
 	return 0;
 }
 */
-
-/*
- * Error
- */
-static void sond_file_part_error_finalize(GObject *self) {
-	SondFilePartErrorPrivate *sfp_error_priv =
-			sond_file_part_error_get_instance_private(SOND_FILE_PART_ERROR(self));
-
-	g_error_free(sfp_error_priv->error); //Fehler freigeben
-
-	G_OBJECT_CLASS(sond_file_part_error_parent_class)->finalize(self);
-
-	return;
-}
-
-static void sond_file_part_error_class_init(SondFilePartErrorClass *klass) {
-	G_OBJECT_CLASS(klass)->finalize = sond_file_part_error_finalize;
-
-	return;
-}
-
-static void sond_file_part_error_init(SondFilePartError* self) {
-
-	return;
-}
-
-GError* sond_file_part_error_get_error(SondFilePartError* sfp_error) {
-	SondFilePartErrorPrivate *sfp_error_priv =
-			sond_file_part_error_get_instance_private(SOND_FILE_PART_ERROR(sfp_error));
-
-	return sfp_error_priv->error;
-}
 
 /*
  * ZIPs

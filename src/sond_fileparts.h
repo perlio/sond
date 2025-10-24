@@ -74,17 +74,6 @@ gint sond_file_part_rename(SondFilePart*, gchar const*, GError**);
 
 gchar* sond_file_part_rename_dir(SondFilePart*, gchar const*, gchar const*, GError**);
 
-//SondFilePart Error
-#define SOND_TYPE_FILE_PART_ERROR sond_file_part_error_get_type( )
-G_DECLARE_DERIVABLE_TYPE(SondFilePartError, sond_file_part_error, SOND,
-		FILE_PART_ERROR, SondFilePart)
-
-struct _SondFilePartErrorClass {
-	SondFilePartClass parent_class;
-};
-
-GError* sond_file_part_error_get_error(SondFilePartError*);
-
 //SondFilePartZip definieren
 #define SOND_TYPE_FILE_PART_ZIP sond_file_part_zip_get_type( )
 G_DECLARE_DERIVABLE_TYPE(SondFilePartZip, sond_file_part_zip, SOND,
