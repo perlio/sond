@@ -34,10 +34,6 @@ struct _SondFilePartClass {
 
 	gchar* path_root;
 	GPtrArray* arr_opened_files;
-
-	gboolean (*has_children)(SondFilePart*);
-	gboolean (*has_sections)(SondFilePart*);
-	GPtrArray* (*get_arr_opened_files)(SondFilePart*);
 };
 
 SondFilePart* sond_file_part_create_from_mime_type(gchar const* path,
@@ -51,7 +47,7 @@ gchar const* sond_file_part_get_path(SondFilePart *);
 
 void sond_file_part_set_path(SondFilePart*, const gchar*);
 
-gboolean sond_file_part_has_children(SondFilePart*);
+gboolean sond_file_part_get_has_children(SondFilePart*);
 
 GPtrArray* sond_file_part_get_arr_opened_files(SondFilePart*);
 
@@ -93,6 +89,15 @@ struct _SondFilePartPDFClass {
 };
 
 gint sond_file_part_pdf_load_embedded_files(SondFilePartPDF*, GPtrArray**, GError**);
+
+//Sond_File_Part_GMessage definieren
+#define SOND_TYPE_FILE_PART_GMESSAGE sond_file_part_pdf_get_type( )
+G_DECLARE_DERIVABLE_TYPE(SondFilePartGMessage, sond_file_part_gmessage, SOND,
+		FILE_PART_GMESSAGE, SondFilePart)
+
+struct _SondFilePartGMessageClass {
+	SondFilePartClass parent_class;
+};
 
 //Sond_File_Part_Leaf definieren
 #define SOND_TYPE_FILE_PART_LEAF sond_file_part_leaf_get_type( )

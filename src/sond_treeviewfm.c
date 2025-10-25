@@ -231,7 +231,7 @@ SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM* stvfm, SondTVFMItemType type
 			else
 				stvfm_item_priv->icon_name = g_strdup("folder");
 
-			stvfm_item_priv->has_children = sond_file_part_has_children(sond_file_part);
+			stvfm_item_priv->has_children = sond_file_part_get_has_children(sond_file_part);
 		}
 		else if (SOND_IS_FILE_PART_PDF(sond_file_part)) {
 			stvfm_item_priv->icon_name = g_strdup("pdf-folder");
@@ -278,7 +278,7 @@ static SondTVFMItem* sond_tvfm_item_create_from_mime_type(SondTVFMItem* stvfm_it
 		sfp = sond_file_part_create_from_mime_type(rel_path_child,
 				stvfm_item_priv->sond_file_part, mime_type);
 
-		if (sond_file_part_has_children(sfp))
+		if (sond_file_part_get_has_children(sfp))
 			stvfm_item_child = sond_tvfm_item_create(stvfm_item_priv->stvfm,
 					SOND_TVFM_ITEM_TYPE_DIR, sfp, NULL);
 		else
@@ -885,18 +885,12 @@ static void sond_treeviewfm_results_row_activated(GtkWidget *listbox,
 	return;
 }
 
-static gint sond_treeviewfm_open_stvfm_item(SondTreeviewFM* stvfm, SondTVFMItem* stvfm_item,
+static gint sond_treeviewfm_open_stvfm_item(SondTVFMItem* stvfm_item,
 		gboolean open_with, GError** error) {
-	gchar* filename = NULL;
 	gint rc = 0;
 	SondTVFMItemPrivate *stvfm_item_priv = sond_tvfm_item_get_instance_private(stvfm_item);
 
-	filename = sond_file_part_write_to_tmp_file(stvfm_item_priv->sond_file_part, error);
-	if (!filename)
-		ERROR_Z
-
-	rc = misc_datei_oeffnen(filename, open_with, error);
-	g_free(filename);
+	rc = sond_file_part_open(stvfm_item_priv->sond_file_part, open_with, error);
 	if (rc)
 		ERROR_Z
 
@@ -1794,7 +1788,7 @@ static gint sond_treeviewfm_paste_clipboard(SondTreeviewFM *stvfm, gboolean kind
 				//PDF-Datei (bisher) ohne embFiles ist stvfm_item_type LEAF!
 				(SOND_IS_FILE_PART_PDF(
 						s_fm_paste_selection.stvfm_item_priv_parent->sond_file_part) &&
-						sond_file_part_has_children(
+						sond_file_part_get_has_children(
 								s_fm_paste_selection.stvfm_item_priv_parent->sond_file_part))) {
 			if (error)
 				*error = g_error_new(g_quark_from_static_string("sond"), 0,
@@ -1941,7 +1935,7 @@ static gint sond_treeviewfm_foreach_loeschen(SondTreeview *stv,
 		gint rc = 0;
 
 		if (SOND_IS_FILE_PART_PDF(stvfm_item_priv->sond_file_part) &&
-				sond_file_part_has_children(stvfm_item_priv->sond_file_part)) {
+				sond_file_part_get_has_children(stvfm_item_priv->sond_file_part)) {
 			if (error) *error = g_error_new(g_quark_from_static_string("sond"), 0,
 					"%s\nLöschen des pagetree aus PDF-Datei nicht unterstützt",
 					__func__);
@@ -2368,16 +2362,16 @@ static void sond_treeviewfm_init_contextmenu(SondTreeviewFM *stvfm) {
 	return;
 }
 
-static gint sond_treeviewfm_open(SondTreeviewFM *tree_view,
-		SondTVFMItem *stvfm_item, gboolean open_with, GError **error) {
+static gint sond_treeviewfm_open(SondTVFMItem *stvfm_item,
+		gboolean open_with, GError **error) {
 	gint rc = 0;
 	SondTVFMItemPrivate *stvfm_item_priv = sond_tvfm_item_get_instance_private(stvfm_item);
 
 	if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_DIR)
 		return 0;
 
-	rc = SOND_TREEVIEWFM_GET_CLASS(SOND_TREEVIEWFM(tree_view))->
-			open_stvfm_item(SOND_TREEVIEWFM(tree_view), stvfm_item, open_with, error);
+	rc = SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->
+			open_stvfm_item(stvfm_item, open_with, error);
 	if (rc)
 		ERROR_Z
 
@@ -2402,8 +2396,7 @@ static void sond_treeviewfm_row_activated(GtkTreeView *tree_view,
 	gtk_tree_path_free(path);
 	gtk_tree_model_get(gtk_tree_view_get_model(tree_view), &iter, 0, &stvfm_item, -1);
 
-	rc = sond_treeviewfm_open(SOND_TREEVIEWFM(tree_view),
-			stvfm_item, open_with, &error);
+	rc = sond_treeviewfm_open(stvfm_item, open_with, &error);
 	g_object_unref(stvfm_item);
 	if (rc) {
 		display_message(gtk_widget_get_toplevel(GTK_WIDGET(tree_view)),
