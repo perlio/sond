@@ -407,6 +407,38 @@ static gint sond_tvfm_item_load_pdf_dir(SondTVFMItem* stvfm_item, GPtrArray** ar
 	return 0;
 }
 
+static gint sond_tvfm_item_load_gmessage_dir(SondTVFMItem* stvfm_item,
+		GPtrArray** arr_children, GError** error) {
+	gint rc = 0;
+	GPtrArray* arr_mimeparts = NULL;
+
+	SondTVFMItemPrivate* stvfm_item_priv = sond_tvfm_item_get_instance_private(stvfm_item);
+
+	rc = sond_file_part_gmessage_load_mime_parts(
+			SOND_FILE_PART_GMESSAGE(stvfm_item_priv->sond_file_part),
+			&arr_mimeparts, error);
+	if (rc)
+		ERROR_Z
+
+	*arr_children = g_ptr_array_new_with_free_func((GDestroyNotify) g_object_unref);
+
+	for (guint i = 0; i < arr_mimeparts->len; i++) {
+		SondFilePart* sfp = NULL;
+		SondTVFMItem* stvfm_item_child = NULL;
+
+		sfp = g_ptr_array_index(arr_mimeparts, i);
+
+		stvfm_item_child = sond_tvfm_item_create(stvfm_item_priv->stvfm,
+				SOND_TVFM_ITEM_TYPE_LEAF, sfp, NULL);
+
+		g_ptr_array_add(*arr_children, stvfm_item_child);
+	}
+
+	g_ptr_array_unref(arr_mimeparts);
+
+	return 0;
+}
+
 gint sond_tvfm_item_load_children(SondTVFMItem* stvfm_item,
 		GPtrArray** arr_children, GError** error) {
 	SondTVFMItemPrivate *stvfm_item_priv =
@@ -422,7 +454,8 @@ gint sond_tvfm_item_load_children(SondTVFMItem* stvfm_item,
 			rc = sond_tvfm_item_load_zip_dir(stvfm_item, TRUE, arr_children, error);
 		else if (SOND_IS_FILE_PART_PDF(stvfm_item_priv->sond_file_part))
 			rc = sond_tvfm_item_load_pdf_dir(stvfm_item, arr_children, error);
-		//else if(SIND_IS_FILE_PART_GMESSAGE(stvfm_item_priv->sond_file_part))
+		else if(SOND_IS_FILE_PART_GMESSAGE(stvfm_item_priv->sond_file_part))
+			rc = sond_tvfm_item_load_gmessage_dir(stvfm_item, arr_children, error);
 
 		if (rc)
 			ERROR_Z

@@ -407,8 +407,10 @@ gchar const* get_mime_type_from_content_type(gchar const* content_type) {
 			!g_strcmp0(content_type, "application/x-pdf") ||
 			!g_strcmp0(content_type, ".pdf"))
 		return "application/pdf";
-	else if (g_strcmp0(content_type, "application/x-gmessage") == 0)
-		return "application/x-gmessage";
+	else if (!g_strcmp0(content_type, "application/x-gmessage") ||
+			!g_strcmp0(content_type, "message/rfc822") ||
+			!g_strcmp0(content_type, ".eml"))
+		return "message/rfc822";
 	else if (g_strcmp0(content_type, "inode/directory") == 0)
 		return "inode/directory";
 	else if (!g_strcmp0(content_type, "text/plain") ||

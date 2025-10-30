@@ -22,6 +22,7 @@
 #include <glib-object.h>
 #include <gtk/gtk.h>
 #include <mupdf/pdf.h>
+#include <gmime/gmime.h>
 
 G_BEGIN_DECLS
 
@@ -98,6 +99,8 @@ G_DECLARE_DERIVABLE_TYPE(SondFilePartGMessage, sond_file_part_gmessage, SOND,
 struct _SondFilePartGMessageClass {
 	SondFilePartClass parent_class;
 };
+
+gint sond_file_part_gmessage_load_mime_parts(SondFilePartGMessage*, GPtrArray**, GError**);
 
 //Sond_File_Part_Leaf definieren
 #define SOND_TYPE_FILE_PART_LEAF sond_file_part_leaf_get_type( )

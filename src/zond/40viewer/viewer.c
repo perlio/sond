@@ -793,7 +793,7 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd, GError** err
 
 		pdfp = zond_pdf_document_get_pdf_document_page(dd->zond_pdf_document, i);
 
-		if (!pdfp || !pdfp->to_be_deleted) { //Seitenzahl merken
+		if (pdfp && !pdfp->to_be_deleted) { //Seitenzahl merken
 			g_array_prepend_val(arr_pages, i);
 			page_deleted = TRUE;
 		}
