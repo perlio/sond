@@ -44,7 +44,7 @@ gint pdf_document_get_dest(fz_context *ctx, pdf_document *doc, gint page_doc,
 
 		//Altmodische PDF verweisen im NameTree auf ein Dict mit dem Schlüssel /D
 		if ( pdf_is_array( ctx, obj_val_resolved ) ) obj_page =
-		pdf_array_get( ctx, obj_val_resolved, 0 );
+				pdf_array_get( ctx, obj_val_resolved, 0 );
 		else if ( pdf_is_dict( ctx, obj_val_resolved ) )
 		{
 			pdf_obj* obj_array = NULL;
@@ -211,14 +211,14 @@ gint pdf_open_and_authen_document(fz_context *ctx, gboolean prompt,
 fz_buffer* pdf_doc_to_buf(fz_context* ctx, pdf_document* doc, GError** error) {
 	fz_output* out = NULL;
 	fz_buffer* buf = NULL;
-	pdf_write_options opts =
+	pdf_write_options in_opts =
 //#ifdef __WIN32
-			{ 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, ~0, "", "", 0 };
+			{ 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, ~0, "", "", 0, 0, 0, 0, 0 };
 //#elif defined(__linux__)
  //           { 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, ~0, "", "" };
 //#endif // __win32
 //	if (pdf_count_pages(ctx, pdf_doc) < BIG_PDF && !pdf_doc->crypt)
-		opts.do_garbage = 4;
+		in_opts.do_garbage = 4;
 
 	fz_try(ctx) {
 		buf = fz_new_buffer(ctx, 4096);
@@ -240,15 +240,39 @@ fz_buffer* pdf_doc_to_buf(fz_context* ctx, pdf_document* doc, GError** error) {
 		return NULL;
 	}
 
+	//do_appereance wird in pdf_write_document ignoriert. deshalb muß es hier gemacht werden
+	if (doc->resynth_required) {
+		gint i = 0;
+		gint n = 0;
+
+		n = pdf_count_pages(ctx, doc);
+		for (i = 0; i < n; ++i)
+		{
+			pdf_page *page = pdf_load_page(ctx, doc, i);
+			fz_try(ctx)
+				pdf_update_page(ctx, page);
+			fz_always(ctx)
+				fz_drop_page(ctx, &page->super);
+			fz_catch(ctx)
+				fz_warn(ctx, "could not create annotation appearances");
+
+			if (!doc->resynth_required) break;
+		}
+	}
+
+	//immer noch? weil keine annot im gesamten Dokement
+	if (doc->resynth_required)
+		doc->resynth_required = 0; //dann mit Gewalt
+
 	fz_try(ctx)
-		pdf_write_document(ctx, doc, out, &opts);
+		pdf_write_document(ctx, doc, out, &in_opts);
 	fz_always(ctx) {
 		fz_close_output(ctx, out);
 		fz_drop_output(ctx, out);
 	}
 	fz_catch(ctx) {
 		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"), fz_caught(ctx),
-				"%s\n%s", __func__, fz_caught_message(ctx));
+				"%s\npdf_write_document: %s", __func__, fz_caught_message(ctx));
 		fz_drop_buffer(ctx, buf);
 
 		return NULL;
@@ -640,8 +664,9 @@ pdf_text_filter_page(fz_context *ctx, pdf_obj *obj, gint flags, gchar **errmsg) 
 	return buf;
 }
 
-gint pdf_annot_delete(fz_context* ctx, pdf_annot* pdf_annot, GError** error) {
-	fz_try(ctx) pdf_delete_annot(ctx, pdf_annot_page(ctx, pdf_annot), pdf_annot);
+gint pdf_annot_delete(fz_context* ctx, pdf_annot* annot, GError** error) {
+	fz_try(ctx)
+		pdf_delete_annot(ctx, pdf_annot_page(ctx, annot), annot);
 	fz_catch(ctx) {
 		if (error) *error = g_error_new( g_quark_from_static_string("mupdf"),
 				fz_caught(ctx), "%s\n%s", __func__, fz_caught_message(ctx));

@@ -519,9 +519,9 @@ static gint open_path(const gchar *path, gboolean open_with, GError **error) {
         if (error) {
             DWORD dw = GetLastError();
             LPWSTR lpMsgBuf = NULL;
-            FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-                           NULL, dw, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-                           (LPWSTR)&lpMsgBuf, 0, NULL);
+            FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+            		FORMAT_MESSAGE_IGNORE_INSERTS, NULL, dw, MAKELANGID(LANG_NEUTRAL,
+            				SUBLANG_DEFAULT), (LPWSTR)&lpMsgBuf, 0, NULL);
             gchar *msg_utf8 = g_utf16_to_utf8(lpMsgBuf, -1, NULL, NULL, NULL);
             *error = g_error_new(g_quark_from_static_string("WinApi"), dw,
                                  "ShellExecuteExW failed: %s", msg_utf8);
@@ -554,8 +554,8 @@ gint sond_file_part_open(SondFilePart* sfp, gboolean open_with,
 	gint rc = 0;
 
 	if (!sond_file_part_get_parent(sfp)) //Datei im Filesystem
-		path = g_strconcat(SOND_FILE_PART_GET_CLASS(sfp)->path_root, "/",
-				sond_file_part_get_path(sfp), NULL);
+		path = g_strconcat(SOND_FILE_PART_CLASS(g_type_class_peek(SOND_TYPE_FILE_PART))->path_root,
+				"/", sond_file_part_get_path(sfp), NULL);
 	else { //Datei in zip/pdf/gmessage
 		path = sond_file_part_write_to_tmp_file(sfp, error);
 		if (!path)
@@ -585,7 +585,8 @@ gint sond_file_part_delete_sfp(SondFilePart* sfp, GError** error) {
 		gchar* path = NULL;
 		SondFilePartPrivate* sfp_priv = sond_file_part_get_instance_private(sfp);
 
-		path = g_strconcat(SOND_FILE_PART_GET_CLASS(sfp)->path_root, "/", sfp_priv->path, NULL);
+		path = g_strconcat(SOND_FILE_PART_CLASS(g_type_class_peek(SOND_TYPE_FILE_PART))->path_root,
+				"/", sfp_priv->path, NULL);
 		rc = g_remove(path);
 		g_free(path);
 		if (rc) {
@@ -651,7 +652,7 @@ gint sond_file_part_replace(SondFilePart* sfp, fz_context* ctx,
 			ERROR_Z
 
 		//neue Datei aus buffer schreiben
-		filename = g_strconcat(SOND_FILE_PART_CLASS(g_type_class_peek_static(SOND_TYPE_FILE_PART))->path_root,
+		filename = g_strconcat(SOND_FILE_PART_CLASS(g_type_class_peek(SOND_TYPE_FILE_PART))->path_root,
 				"/", sond_file_part_get_path(sfp), NULL);
 
 		fz_try(ctx)
@@ -857,10 +858,29 @@ static gint sond_file_part_zip_rename_file(SondFilePartZip* sfp_zip,
  * PDFs
  */
 typedef struct {
+	fz_context* ctx;
 	pdf_document* doc;
+	GMutex* mutex_doc;
 } SondFilePartPDFPrivate;
 
 G_DEFINE_TYPE_WITH_PRIVATE(SondFilePartPDF, sond_file_part_pdf, SOND_TYPE_FILE_PART)
+
+
+gint sond_file_part_pdf_save(SondFilePartPDF* sfp_pdf, GError** error) {
+	gint rc = 0;
+	fz_buffer* buf = NULL;
+/*
+	buf = pdf_doc_to_buf(ctx, pdf_doc, error);
+	if (!buf)
+		ERROR_Z
+
+	rc = sond_file_part_replace(SOND_FILE_PART(sfp_pdf), ctx, buf, error);
+	fz_drop_buffer(ctx, buf);
+	if (rc)
+		ERROR_Z
+*/
+	return 0;
+}
 
 static pdf_obj* get_EF_F(fz_context* ctx, pdf_obj* val, gchar const** path, GError** error) {
 	gchar const* path_tmp = NULL;

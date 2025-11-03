@@ -120,7 +120,69 @@
  return 0;
  }
  */
+#include <gio/gio.h>
+#include <stdio.h>
 
+int test(Projekt* zond, gchar **errmsg) {
+    const char *path = "Adressliste.xlsx";
+    GError* error = NULL;
+
+    /* GFile anlegen */
+    GFile *file = g_file_new_for_path(path);
+
+    /* FileInfo mit content-type anfragen */
+    GFileInfo *info = g_file_query_info(file,
+                                        "standard::content-type",
+                                        G_FILE_QUERY_INFO_NONE,
+                                        NULL, /* GCancellable */
+                                        &error);
+    if (!info) {
+        g_printerr("g_file_query_info failed: %s\n", error->message);
+        g_clear_error(&error);
+        g_object_unref(file);
+        return 2;
+    }
+
+    const char *content_type = g_file_info_get_content_type(info);
+    if (!content_type) {
+        g_printerr("Keine content-type info gefunden für %s\n", path);
+        g_object_unref(info);
+        g_object_unref(file);
+        return 3;
+    }
+
+    g_print("Content type: %s\n", content_type);
+
+    /* Default AppInfo ermitteln */
+    GAppInfo *app = g_app_info_get_default_for_type(content_type, /*must_support_uris=*/TRUE);
+    if (!app) {
+    	printf("Fähler\n");
+        g_printerr("Keine Default-Anwendung für %s gefunden\n", content_type);
+        g_object_unref(info);
+        g_object_unref(file);
+        return 4;
+    }
+
+    const char *cmd = g_app_info_get_commandline(app);
+    const char *exe = g_app_info_get_executable(app);
+    g_print("App commandline: %s\n", cmd ? cmd : "(none)");
+    g_print("App executable: %s\n", exe ? exe : "(none)");
+
+    /* Optional: App wirklich mit der Datei starten */
+    if (!g_app_info_launch(app, (GList*)g_list_prepend(NULL, g_file_dup(file)), NULL, &error)) {
+        g_printerr("Starten der Anwendung fehlgeschlagen: %s\n", error->message);
+        g_clear_error(&error);
+    } else {
+        g_print("Anwendung gestartet (oder Start angefragt)\n");
+    }
+
+    /* aufräumen */
+    g_object_unref(app);
+    g_object_unref(info);
+    g_object_unref(file);
+    return 0;
+}
+/*
 gint test(Projekt *zond, gchar **errmsg) {
 	GList *list_app_info = NULL;
 
@@ -140,6 +202,7 @@ gint test(Projekt *zond, gchar **errmsg) {
 			list_type++;
 		}
 
+		printf("--------------\n");
 		list_app_info = list_app_info->next;
 	}
 
@@ -147,7 +210,7 @@ gint test(Projekt *zond, gchar **errmsg) {
 
 	return 0;
 }
-
+*/
 /*
  static gint
  datei_schreiben_guuid( const gchar* full_path, gchar** guuid_ret, gchar** errmsg )

@@ -270,8 +270,8 @@ void render_page_thread(gpointer data, gpointer user_data) {
 	PdfViewer *pv = (PdfViewer*) user_data;
 
 	thread_data = GPOINTER_TO_INT(data);
-	render_response.page = thread_data >> 5;
-	viewer_page = g_ptr_array_index(pv->arr_pages, render_response.page);
+	render_response.page_pv = thread_data >> 5;
+	viewer_page = g_ptr_array_index(pv->arr_pages, render_response.page_pv);
 
 	ctx = fz_clone_context(
 			zond_pdf_document_get_ctx(
@@ -293,8 +293,7 @@ void render_page_thread(gpointer data, gpointer user_data) {
 		gint rc = 0;
 
 		zond_pdf_document_mutex_lock(viewer_page->pdf_document_page->document);
-		rc = zond_pdf_document_load_page(viewer_page->pdf_document_page, render_response.page,
-				&errmsg);
+		rc = zond_pdf_document_load_page(viewer_page->pdf_document_page, &errmsg);
 		zond_pdf_document_mutex_unlock(
 				viewer_page->pdf_document_page->document);
 		if (rc == -1) {

@@ -2187,9 +2187,23 @@ gint zond_treeview_oeffnen_internal_viewer(Projekt *zond, SondFilePartPDF* sfp_p
 	ZondPdfDocument const* zpdfd = NULL;
 	gint rc = 0;
 
-	if (anbindung && (zpdfd = zond_pdf_document_is_open(sfp_pdf)))
-		anbindung_aktualisieren_insert_pages(zpdfd, anbindung);
+	zpdfd = zond_pdf_document_is_open(sfp_pdf);
 
+	if (zpdfd) {
+		//Anfangspunkt funktioniert anders, weil pos_pdf aus strikter Umsetzung
+		//von page_doc zu page_pv besteht. Wenn Seiten gelöscht paßt das nicht mehr,
+		//weil die Seiten im zpdfd aber nicht (mehr) arr_pages vorhanden sind.
+		for (guint i = 0; i < pos_pdf->seite; i++) {
+			PdfDocumentPage* pdfp = NULL;
+
+			pdfp = g_ptr_array_index(zond_pdf_document_get_arr_pages(zpdfd), i);
+			if (pdfp->to_be_deleted)
+				pos_pdf->seite--;
+		}
+
+		if (anbindung)
+			anbindung_aktualisieren_insert_pages(zond_pdf_document_get_arr_journal(zpdfd), anbindung);
+	}
 	//Neue Instanz oder bestehende?
 	if (!(zond->state & GDK_SHIFT_MASK)) {
 		//Testen, ob pv mit file_part schon geöffnet
@@ -2259,8 +2273,8 @@ static gint zond_treeview_open_pdf(Projekt *zond, gint node_id,
 	if (zond->state & GDK_CONTROL_MASK) {
 		if ((anbindung.bis.seite || anbindung.bis.index))
 			anbindung_int = &anbindung;
-		else if (anbindung.von.seite || anbindung.von.index) //Pdf_punkt
-				{ //nächsthöheren Abschnitt ermitteln
+		else if (anbindung.von.seite || anbindung.von.index) { //Pdf_punkt
+			//nächsthöheren Abschnitt ermitteln
 			gint rc = 0;
 			gint parent_id = 0;
 			gchar *section_ges = NULL;
@@ -2321,12 +2335,13 @@ static gint zond_treeview_open_pdf(Projekt *zond, gint node_id,
 			pos_pdf.seite = anbindung.bis.seite
 					- ((anbindung_int) ? anbindung_int->von.seite : 0);
 			pos_pdf.index = anbindung.bis.index;
-		} else //root
-		{
+		}
+		else { //root
 			pos_pdf.seite = EOP;
 			pos_pdf.index = EOP;
 		}
-	} else {
+	}
+	else {
 		if (anbindung.von.seite || anbindung.von.index) {
 			pos_pdf.seite = anbindung.von.seite
 					- ((anbindung_int) ? anbindung_int->von.seite : 0);

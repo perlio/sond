@@ -27,8 +27,15 @@
 #include "misc_stdlib.h"
 #include "sond_fileparts.h"
 
-//SOND_TVFM_ITEM
+//SOND_TREEVIEWDM
+typedef struct {
+	gchar *root;
+	GtkTreeViewColumn *column_eingang;
+} SondTreeviewFMPrivate;
 
+G_DEFINE_TYPE_WITH_PRIVATE(SondTreeviewFM, sond_treeviewfm, SOND_TYPE_TREEVIEW)
+
+//SOND_TVFM_ITEM
 typedef struct {
 	SondTreeviewFM* stvfm;
 	gchar *icon_name;
@@ -299,8 +306,10 @@ static gint sond_tvfm_item_load_fs_dir(SondTVFMItem* stvfm_item,
 
 	SondTVFMItemPrivate *stvfm_item_priv =
 			sond_tvfm_item_get_instance_private(stvfm_item);
+	SondTreeviewFMPrivate* stvfm_priv =
+			sond_treeviewfm_get_instance_private(stvfm_item_priv->stvfm);
 
-	path_dir = g_strconcat(SOND_FILE_PART_CLASS(g_type_class_peek_static(SOND_TYPE_FILE_PART))->path_root,
+	path_dir = g_strconcat(stvfm_priv->root,
 			"/", stvfm_item_priv->path_or_section, NULL);
 
 	file_dir = g_file_new_for_path(path_dir);
@@ -481,13 +490,6 @@ gint sond_tvfm_item_load_children(SondTVFMItem* stvfm_item,
 }
 
 //Nun geht's mit SondTreeviewFM weiter
-typedef struct {
-	gchar *root;
-	GtkTreeViewColumn *column_eingang;
-} SondTreeviewFMPrivate;
-
-G_DEFINE_TYPE_WITH_PRIVATE(SondTreeviewFM, sond_treeviewfm, SOND_TYPE_TREEVIEW)
-
 static void sond_treeviewfm_render_text_cell(GtkTreeViewColumn *column,
 		GtkCellRenderer *renderer, GtkTreeModel *model, GtkTreeIter *iter,
 		gpointer data) {
@@ -876,7 +878,7 @@ static gint sond_treeviewfm_text_edited(SondTreeviewFM *stvfm,
 	rc = rename_item(stvfm_item_priv, new_text, error);
 	if (SOND_TREEVIEWFM_GET_CLASS(stvfm)->after_move)
 		SOND_TREEVIEWFM_GET_CLASS(stvfm)->after_move(stvfm,
-				(rc == 0) ? TRUE : FALSE, (error) ? *error : NULL);
+				(rc == 0) ? TRUE : FALSE);
 	if (rc)
 		ERROR_Z
 
@@ -1428,7 +1430,7 @@ static gint move_path(SondTreeviewFM* stvfm,
 
 		//Fehlschlag von after_move ist nicht vorgesehen!
 		if (SOND_TREEVIEWFM_GET_CLASS(stvfm)->after_move)
-			SOND_TREEVIEWFM_GET_CLASS(stvfm)->after_move(stvfm, suc, (error) ? *error : NULL);
+			SOND_TREEVIEWFM_GET_CLASS(stvfm)->after_move(stvfm, suc);
 
 		if (suc) {
 			*toplevel_path = g_strdup(trial_base);
@@ -1633,7 +1635,7 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 	gint rc = 0;
 	SondTVFMItemPrivate* stvfm_item_new_priv = NULL;
 
-	clipboard = ((SondTreeviewClass*) g_type_class_peek_static(
+	clipboard = ((SondTreeviewClass*) g_type_class_peek(
 			SOND_TYPE_TREEVIEW))->clipboard;
 
 	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(stv)), iter, 0,
@@ -1778,7 +1780,7 @@ static gint sond_treeviewfm_paste_clipboard(SondTreeviewFM *stvfm, gboolean kind
 	gboolean parent_root = FALSE;
 
 	clipboard =
-			((SondTreeviewClass*) g_type_class_peek_static(SOND_TYPE_TREEVIEW))->clipboard;
+			((SondTreeviewClass*) g_type_class_peek(SOND_TYPE_TREEVIEW))->clipboard;
 
 	if (!SOND_IS_TREEVIEWFM(clipboard->tree_view))
 		return 0;
@@ -2684,19 +2686,17 @@ gint sond_treeviewfm_set_root(SondTreeviewFM *stvfm, const gchar *root,
 		gchar **errmsg) {
 	gint rc = 0;
 	GError *error = NULL;
-	SondFilePartClass* sfp_class = NULL;
 	SondTVFMItem* stvfm_item = NULL;
 
+	SondFilePartClass* sfp_class = g_type_class_peek_static(SOND_TYPE_FILE_PART);
 	SondTreeviewFMPrivate *stvfm_priv = sond_treeviewfm_get_instance_private(
 			stvfm);
 
 	g_free(stvfm_priv->root);
+	g_free(sfp_class->path_root);
 
 	if (!root) {
 		stvfm_priv->root = NULL;
-
-		sfp_class = g_type_class_peek_static(SOND_TYPE_FILE_PART);
-		g_free(sfp_class->path_root);
 		sfp_class->path_root = NULL;
 
 		gtk_tree_store_clear(
@@ -2707,8 +2707,6 @@ gint sond_treeviewfm_set_root(SondTreeviewFM *stvfm, const gchar *root,
 	}
 
 	stvfm_priv->root = g_strdup(root);
-
-	sfp_class = g_type_class_peek_static(SOND_TYPE_FILE_PART);
 	sfp_class->path_root = g_strdup(root);
 
 	//zum Arbeitsverzeichnis machen

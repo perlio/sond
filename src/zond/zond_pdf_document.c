@@ -210,22 +210,6 @@ void zond_pdf_document_page_free(PdfDocumentPage *pdf_document_page) {
 	return;
 }
 
-Annot annot_deep_copy(Annot annot) {
-	Annot copy = { 0 };
-
-	copy = annot;
-
-	if (annot.type == PDF_ANNOT_HIGHLIGHT
-			|| annot.type == PDF_ANNOT_UNDERLINE
-			|| annot.type == PDF_ANNOT_STRIKE_OUT
-			|| annot.type == PDF_ANNOT_SQUIGGLY)
-		copy.annot_text_markup.arr_quads = g_array_ref(annot.annot_text_markup.arr_quads);
-	else if (annot.type == PDF_ANNOT_TEXT)
-		copy.annot_text.content = g_strdup(annot.annot_text.content);
-
-	return copy;
-}
-
 void annot_free(Annot* annot) {
 	if (!annot)
 		return;
@@ -298,22 +282,25 @@ gint zond_pdf_document_page_load_annots(PdfDocumentPage *pdf_document_page, GErr
 	return 0;
 }
 
-gint zond_pdf_document_load_page(PdfDocumentPage *pdf_document_page, gint page,
+gint zond_pdf_document_load_page(PdfDocumentPage *pdf_document_page,
 		gchar **errmsg) {
-	fz_context *ctx = NULL;
 	GError *error = NULL;
 	gint rc = 0;
+	gint page = 0;
+
+	page = pdf_document_page_get_index(pdf_document_page);
 
 	ZondPdfDocumentPrivate *priv = zond_pdf_document_get_instance_private(
 			pdf_document_page->document);
 
-	ctx = priv->ctx;
-
-	fz_try( ctx )
-		pdf_document_page->page = pdf_load_page(ctx, priv->doc,
+	fz_try(priv->ctx)
+		pdf_document_page->page = pdf_load_page(priv->ctx, priv->doc,
 				page);
-	fz_catch(ctx)
-		ERROR_MUPDF("pdf_load_page");
+	fz_catch(priv->ctx) {
+		if (errmsg) *errmsg = g_strdup_printf("%s\n%s", __func__, fz_caught_message(priv->ctx));
+
+		return -1;
+	}
 
 	pdf_document_page->arr_annots = g_ptr_array_new_with_free_func(
 			zond_pdf_document_page_annot_free);
@@ -509,7 +496,7 @@ static void zond_pdf_document_init(ZondPdfDocument *self) {
 
 const ZondPdfDocument*
 zond_pdf_document_is_open(SondFilePartPDF* sfp_pdf) {
-	ZondPdfDocumentClass *klass = g_type_class_peek_static(
+	ZondPdfDocumentClass *klass = g_type_class_peek(
 			zond_pdf_document_get_type());
 
 	if (!klass)

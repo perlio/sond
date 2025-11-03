@@ -170,13 +170,11 @@ typedef struct _Inserts {
 	JournalEntry entry;
 } Inserts;
 
-void anbindung_aktualisieren_insert_pages(ZondPdfDocument const* zond_pdf_document, Anbindung* anbindung) {
-	GArray* arr_journal = NULL;
+void anbindung_aktualisieren_insert_pages(GArray* arr_journal, Anbindung* anbindung) {
 	GArray* arr_insertions = NULL;
 
 	if (!anbindung) return;
 
-	arr_journal = zond_pdf_document_get_arr_journal(zond_pdf_document);
 	arr_insertions = g_array_new(FALSE, FALSE, sizeof(Inserts));
 
 	//erst alle entries mit Type == PAGES_INSERTED aussondern
@@ -244,14 +242,10 @@ void anbindung_aktualisieren_insert_pages(ZondPdfDocument const* zond_pdf_docume
 	return;
 }
 
-static void anbindung_aktualisieren_delete_page(ZondPdfDocument* zond_pdf_document, Anbindung* anbindung) {
-	GArray* arr_journal = NULL;
-
+static void anbindung_aktualisieren_delete_page(GArray* arr_journal, Anbindung* anbindung) {
 	if (!anbindung) return;
 
-	arr_journal = zond_pdf_document_get_arr_journal(zond_pdf_document);
-
-	for (gint i = 0; i < arr_journal->len; i ++) {
+	for (gint i = 0; i < arr_journal->len; i++) {
 		JournalEntry entry = { 0 };
 
 		entry = g_array_index(arr_journal, JournalEntry, i);
@@ -275,10 +269,10 @@ static void anbindung_aktualisieren_delete_page(ZondPdfDocument* zond_pdf_docume
 	return;
 }
 
-void anbindung_aktualisieren(ZondPdfDocument* zond_pdf_document,
+void anbindung_aktualisieren(GArray* arr_journal,
 		Anbindung* anbindung) {
-	anbindung_aktualisieren_insert_pages(zond_pdf_document, anbindung);
-	anbindung_aktualisieren_delete_page(zond_pdf_document, anbindung);
+	anbindung_aktualisieren_insert_pages(arr_journal, anbindung);
+	anbindung_aktualisieren_delete_page(arr_journal, anbindung);
 
 	return;
 }

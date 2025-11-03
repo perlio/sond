@@ -32,7 +32,7 @@ typedef struct _Text_Occ {
 	gboolean not_found;
 } TextOcc;
 typedef struct _RenderResponse {
-	gint page;
+	gint page_pv;
 	gint error;
 	gchar *error_message;
 } RenderResponse;

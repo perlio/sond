@@ -7,6 +7,7 @@ typedef struct _GFile GFile;
 typedef struct _DBase_Zond DBaseZond;
 typedef struct _Anbindung Anbindung;
 typedef struct _Displayed_Document DisplayedDocument;
+typedef struct _ZondPdfDocument ZondPdfDocument;
 
 typedef void *gpointer;
 typedef int gint;
@@ -18,7 +19,7 @@ gint dbase_zond_rollback(DBaseZond*, GError**);
 
 gint dbase_zond_commit(DBaseZond*, GError**);
 
-gint dbase_zond_update_section(DBaseZond*, DisplayedDocument*, GError** );
+gint dbase_zond_update_section(DBaseZond*, GArray*, ZondPdfDocument*, GError** );
 
 gint dbase_zond_update_path(DBaseZond*, gchar const*, gchar const*, GError**);
 

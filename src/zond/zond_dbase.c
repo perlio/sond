@@ -1709,14 +1709,7 @@ gint zond_dbase_is_file_part_copied(ZondDBase *zond_dbase, gint search_root,
 
 	rc = sqlite3_step(stmt[0]);
 	if (rc != SQLITE_ROW && rc != SQLITE_DONE) //richtiger Fähler
-	{
-		if (error)
-			*error = g_error_new(g_quark_from_static_string("SQLITE3"),
-					sqlite3_errcode(zond_dbase_get_dbase(zond_dbase)), "%s\n%s",
-					__func__, sqlite3_errmsg(zond_dbase_get_dbase(zond_dbase)));
-
-		return -1;
-	}
+		ERROR_Z_DBASE
 
 	if (rc == SQLITE_ROW) {
 		if (copied)
@@ -1727,16 +1720,13 @@ gint zond_dbase_is_file_part_copied(ZondDBase *zond_dbase, gint search_root,
 	return 0;
 }
 
-gint zond_dbase_get_arr_sections(ZondDBase* zond_dbase, gint attached, gchar const* file_part,
+gint zond_dbase_get_arr_sections(ZondDBase* zond_dbase, gchar const* file_part,
 		GArray** arr_sections, GError** error) {
 	gint rc = 0;
 	sqlite3_stmt **stmt = NULL;
-	const gchar *sql[1] = { NULL };
+	const gchar *sql[] = {
 
-	if (!attached)
-		sql[0] = "SELECT ID, section FROM main.knoten WHERE file_part=?1;";
-	else
-		sql[0] = "SELECT ID, section FROM work.knoten WHERE file_part=?1;";
+			"SELECT ID, section FROM knoten WHERE file_part=?1;" };
 
 	rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
 			error);
@@ -1744,13 +1734,8 @@ gint zond_dbase_get_arr_sections(ZondDBase* zond_dbase, gint attached, gchar con
 		ERROR_Z
 
 	rc = sqlite3_bind_text(stmt[0], 1, file_part, -1, NULL);
-	if (rc != SQLITE_OK) {
-		if (error)
-			*error = g_error_new(g_quark_from_static_string("SQLITE3"),
-					rc, "%s\n%s", __func__, sqlite3_errmsg(zond_dbase_get_dbase(zond_dbase)));
-
-		return -1;
-	}
+	if (rc != SQLITE_OK)
+		ERROR_Z_DBASE
 
 	*arr_sections = g_array_new(FALSE, FALSE, sizeof(Section));
 	g_array_set_clear_func(*arr_sections, (GDestroyNotify) section_free);
@@ -1776,16 +1761,12 @@ gint zond_dbase_get_arr_sections(ZondDBase* zond_dbase, gint attached, gchar con
 	return 0;
 }
 
-gint zond_dbase_update_section(ZondDBase *zond_dbase, gint attached, gint node_id,
+gint zond_dbase_update_section(ZondDBase *zond_dbase, gint node_id,
 		const gchar *section, GError **error) {
 	gint rc = 0;
 	sqlite3_stmt **stmt = NULL;
-	const gchar *sql[1] = { NULL };
-
-	if (!attached)
-		sql[0] = "UPDATE main.knoten SET section=?2 WHERE ID=?1;";
-	else
-		sql[0] = "UPDATE work.knoten SET section=?2 WHERE ID=?1;";
+	const gchar *sql[] = {
+			"UPDATE knoten SET section=?2 WHERE ID=?1;" };
 
 	rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
 			error);
@@ -1793,34 +1774,16 @@ gint zond_dbase_update_section(ZondDBase *zond_dbase, gint attached, gint node_i
 		ERROR_Z
 
 	rc = sqlite3_bind_int(stmt[0], 1, node_id);
-	if (rc != SQLITE_OK) {
-		if (error)
-			*error = g_error_new(g_quark_from_static_string("SQLITE3"),
-					sqlite3_errcode(zond_dbase_get_dbase(zond_dbase)), "%s\n%s",
-					__func__, sqlite3_errmsg(zond_dbase_get_dbase(zond_dbase)));
-
-		return -1;
-	}
+	if (rc != SQLITE_OK)
+		ERROR_Z_DBASE
 
 	rc = sqlite3_bind_text(stmt[0], 2, section, -1, NULL);
-	if (rc != SQLITE_OK) {
-		if (error)
-			*error = g_error_new(g_quark_from_static_string("SQLITE3"),
-					sqlite3_errcode(zond_dbase_get_dbase(zond_dbase)), "%s\n%s",
-					__func__, sqlite3_errmsg(zond_dbase_get_dbase(zond_dbase)));
-
-		return -1;
-	}
+	if (rc != SQLITE_OK)
+		ERROR_Z_DBASE
 
 	rc = sqlite3_step(stmt[0]);
-	if (rc != SQLITE_DONE) {
-		if (error)
-			*error = g_error_new(g_quark_from_static_string("SQLITE3"),
-					sqlite3_errcode(zond_dbase_get_dbase(zond_dbase)), "%s\n%s",
-					__func__, sqlite3_errmsg(zond_dbase_get_dbase(zond_dbase)));
-
-		return -1;
-	}
+	if (rc != SQLITE_DONE)
+		ERROR_Z_DBASE
 
 	return 0;
 }

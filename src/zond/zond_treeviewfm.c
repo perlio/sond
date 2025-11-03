@@ -174,7 +174,7 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 }
 
 static void zond_treeviewfm_after_move(SondTreeviewFM* stvfm,
-		gboolean suc, GError* error) {
+		gboolean suc) {
 	GError* error_int = NULL;
 	ZondTreeviewFMPrivate *priv = zond_treeviewfm_get_instance_private(
 			ZOND_TREEVIEWFM(stvfm));
@@ -192,10 +192,9 @@ static void zond_treeviewfm_after_move(SondTreeviewFM* stvfm,
 		gint rc = 0;
 
 		rc = dbase_zond_rollback(priv->zond->dbase_zond, &error_int);
-		if (rc) {
-			//ToDo: kaputtmachen
-			exit(EXIT_FAILURE);
-		}
+		if (rc)
+			g_error("Schwerer Ausnahmefehler - ROLLBACK gescheitert:\n%s",
+					error_int->message);
 	}
 
 	project_reset_changed(priv->zond, priv->changed_tmp);

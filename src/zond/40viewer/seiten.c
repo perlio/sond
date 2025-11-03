@@ -559,7 +559,7 @@ static gint seiten_cb_loesche_seite(PdfViewer *pv, ViewerPageNew* viewer_page,
 }
 
 #ifndef VIEWER
-static gint seiten_anbindung_int(ZondDBase* zond_dbase,
+static gint seiten_anbindung_int(ZondDBase* zond_dbase, gint attached,
 		PdfDocumentPage* pdf_document_page, GError** error) {
 	gint rc = 0;
 	GArray* arr_sections = NULL;
@@ -569,8 +569,7 @@ static gint seiten_anbindung_int(ZondDBase* zond_dbase,
 	filepart = sond_file_part_get_filepart(SOND_FILE_PART(
 			zond_pdf_document_get_sfp_pdf(pdf_document_page->document)));
 
-	rc = zond_dbase_get_arr_sections(zond_dbase, 1,filepart,
-			&arr_sections, error);
+	rc = zond_dbase_get_arr_sections(zond_dbase, filepart, &arr_sections, error);
 	g_free(filepart);
 	if (rc) {
 		g_prefix_error(error, "%s\n", __func__);
@@ -587,7 +586,8 @@ static gint seiten_anbindung_int(ZondDBase* zond_dbase,
 		section = g_array_index(arr_sections, Section, u);
 		anbindung_parse_file_section(section.section, &anbindung);
 
-		anbindung_aktualisieren_insert_pages(pdf_document_page->document, &anbindung);
+		anbindung_aktualisieren_insert_pages(
+				zond_pdf_document_get_arr_journal(pdf_document_page->document), &anbindung);
 
 		if ((page_doc == anbindung.von.seite) ||
 				(!anbindung_is_pdf_punkt(anbindung) &&
@@ -611,7 +611,7 @@ static gint seiten_anbindung(PdfViewer *pv, GPtrArray *arr_document_page,
 
 		pdf_document_page = g_ptr_array_index(arr_document_page, i);
 
-		rc = seiten_anbindung_int(pv->zond->dbase_zond->zond_dbase_work,
+		rc = seiten_anbindung_int(pv->zond->dbase_zond->zond_dbase_store, 0,
 				pdf_document_page, error);
 		if (rc) {
 			if (rc == -1) g_prefix_error(error, "%s\n", __func__);
@@ -619,7 +619,7 @@ static gint seiten_anbindung(PdfViewer *pv, GPtrArray *arr_document_page,
 			return (rc == -1) ? -1 : 1;
 		}
 
-		rc = seiten_anbindung_int(pv->zond->dbase_zond->zond_dbase_store,
+		rc = seiten_anbindung_int(pv->zond->dbase_zond->zond_dbase_store, 1,
 				pdf_document_page, error);
 		if (rc) {
 			if (rc == -1) g_prefix_error(error, "%s\n", __func__);
@@ -652,7 +652,7 @@ static gint seiten_loeschen(PdfViewer *pv, GPtrArray *arr_document_page,
 			PdfDocumentPage* pdf_document_page_tmp = NULL;
 
 			pdf_document_page_tmp = g_ptr_array_index(arr_pages, j);
-			if (!pdf_document_page_tmp->to_be_deleted)
+			if (!pdf_document_page_tmp || !pdf_document_page_tmp->to_be_deleted)
 				count++;
 		}
 
