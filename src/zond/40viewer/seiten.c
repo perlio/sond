@@ -443,12 +443,9 @@ static gint seiten_drehen(PdfViewer *pv, GPtrArray *arr_document_page,
 		GError* error = NULL;
 		JournalEntry entry = { 0 };
 		GArray* arr_journal = NULL;
-		gint rotate_old = 0;
 
 		PdfDocumentPage *pdf_document_page = g_ptr_array_index(
 				arr_document_page, i);
-
-		rotate_old = pdf_document_page->rotate;
 
 		zond_pdf_document_mutex_lock(pdf_document_page->document);
 		rc = seiten_drehen_pdf(pdf_document_page, winkel, errmsg);
@@ -487,7 +484,7 @@ static gint seiten_drehen(PdfViewer *pv, GPtrArray *arr_document_page,
 				pdf_document_page->document);
 		entry.pdf_document_page = pdf_document_page;
 		entry.type = JOURNAL_TYPE_ROTATE;
-		entry.rotate.rotate = rotate_old;
+		entry.rotate.rotate = winkel;
 		g_array_append_val(arr_journal, entry);
 
 		viewer_foreach(pv, pdf_document_page, seiten_drehen_foreach,
@@ -658,7 +655,7 @@ static gint seiten_loeschen(PdfViewer *pv, GPtrArray *arr_document_page,
 
 		if (count == 1) continue;
 
-		pdf_document_page->to_be_deleted = 2; //als zu löschend markieren
+		pdf_document_page->to_be_deleted = TRUE; //als zu löschend markieren
 		page_deleted = TRUE;
 
 		//Seite wird aus pv->arr_pages gelöscht
@@ -929,7 +926,6 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 
 	//komplette Datei wird eingefügt
 	if (ret == 1) {
-		gint rc = 0;
 		gchar *path_merge = NULL;
 
 		//Datei auswählen
@@ -951,10 +947,12 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 			return;
 		}
 
-		rc = pdf_open_and_authen_document(pv->zond->ctx, TRUE, TRUE,
-				SOND_FILE_PART_PDF(sfp), NULL, &doc_merge, NULL, &error);
-		if (rc) {
-			display_error(pv->vf, "Datei einfügen", error->message);
+		doc_merge = sond_file_part_pdf_open_document(pv->zond->ctx,
+				SOND_FILE_PART_PDF(sfp), TRUE, FALSE, TRUE, &error);
+		if (!doc_merge) {
+			display_error(pv->vf, "Datei einfügen\n\n"
+					"Einzufügende Datei konnte nicht geöffnet werden:\n",
+					error->message);
 			g_error_free(error);
 			g_object_unref(sfp);
 

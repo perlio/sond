@@ -32,8 +32,6 @@ typedef struct {
 	GMutex mutex_doc;
 	fz_context *ctx;
 	pdf_document *doc;
-	gchar *password;
-	gint auth;
 	SondFilePartPDF* sfp_pdf;
 	gboolean read_only;
 	gchar *working_copy;
@@ -44,60 +42,31 @@ typedef struct {
 
 G_DEFINE_TYPE_WITH_PRIVATE(ZondPdfDocument, zond_pdf_document, G_TYPE_OBJECT)
 
-ZondAnnotObj* zond_annot_obj_new(pdf_obj* obj) {
-	ZondAnnotObj* zond_annot_obj = NULL;
+gint pdf_document_page_annot_get_index(PdfDocumentPageAnnot* pdpa) {
+	GPtrArray* arr_annots = NULL;
+	guint index = 0;
 
-	zond_annot_obj = g_malloc0(sizeof(ZondAnnotObj));
-	zond_annot_obj->ref = 1;
-	zond_annot_obj->obj = obj;
+	arr_annots = pdpa->pdf_document_page->arr_annots;
 
-	return zond_annot_obj;
-}
+	g_ptr_array_find(arr_annots, pdpa, &index);
 
-ZondAnnotObj* zond_annot_obj_ref(ZondAnnotObj* zond_annot_obj) {
-	if (zond_annot_obj) {
-		zond_annot_obj->ref++;
-		return zond_annot_obj;
-	}
-
-	return NULL;
-}
-
-void zond_drop_annot_obj(ZondAnnotObj* zond_annot_obj) {
-	if (zond_annot_obj) {
-		zond_annot_obj->ref--;
-		if (zond_annot_obj->ref == 0) {
-			g_free(zond_annot_obj);
-		}
-	}
-
-	return;
-}
-
-pdf_obj* zond_annot_obj_get_obj(ZondAnnotObj* zond_annot_obj) {
-	if (zond_annot_obj)
-		return zond_annot_obj->obj;
-
-	return NULL;
-}
-
-void zond_annot_obj_set_obj(ZondAnnotObj* zond_annot_obj, pdf_obj* obj) {
-	if (zond_annot_obj)
-		zond_annot_obj->obj = obj;
-
-	return;
+	return (gint) index;
 }
 
 pdf_annot* pdf_document_page_annot_get_pdf_annot(PdfDocumentPageAnnot* pdpa) {
 	pdf_annot* pdf_annot = NULL;
 	fz_context* ctx = NULL;
-	pdf_obj* obj = NULL;
+	gint index = 0;
+
+	index = pdf_document_page_annot_get_index(pdpa);
 
 	ctx = zond_pdf_document_get_ctx(pdpa->pdf_document_page->document);
 
-	obj = zond_annot_obj_get_obj(pdpa->zond_annot_obj);
+	pdf_annot = pdf_first_annot(ctx, pdpa->pdf_document_page->page);
 
-	pdf_annot = pdf_annot_lookup_obj(ctx, pdpa->pdf_document_page->page, obj);
+	for (gint i = 0; i < index; i++)
+		if (pdf_annot)
+			pdf_annot = pdf_next_annot(ctx, pdf_annot);
 
 	return pdf_annot;
 }
@@ -105,6 +74,9 @@ pdf_annot* pdf_document_page_annot_get_pdf_annot(PdfDocumentPageAnnot* pdpa) {
 gint pdf_document_page_get_index(PdfDocumentPage* pdf_document_page) {
 	guint index = 0;
 	GPtrArray* arr_pages = NULL;
+
+	if (pdf_document_page->page) //pdf_page geladen?
+		return pdf_document_page->page->super.number;
 
 	arr_pages = zond_pdf_document_get_arr_pages(pdf_document_page->document);
 	if (!g_ptr_array_find(arr_pages, pdf_document_page, &index)) return -1;
@@ -118,6 +90,9 @@ pdf_obj* pdf_document_page_get_page_obj(PdfDocumentPage* pdf_document_page, GErr
 
 	ZondPdfDocumentPrivate *priv = zond_pdf_document_get_instance_private(
 			pdf_document_page->document);
+
+	if (pdf_document_page->page)
+		return pdf_document_page->page->obj;
 
 	page = pdf_document_page_get_index(pdf_document_page);
 	if (page == -1) {
@@ -163,7 +138,7 @@ static void zond_pdf_document_finalize(GObject *self) {
 	g_object_unref(priv->sfp_pdf);
 
 	if (priv->doc) {
-		path = g_strdup(fz_stream_filename(priv->ctx, priv->doc->file));
+//		path = g_strdup(fz_stream_filename(priv->ctx, priv->doc->file));
 		pdf_drop_document(priv->ctx, priv->doc);
 
 		if (!priv->read_only) {
@@ -180,7 +155,6 @@ static void zond_pdf_document_finalize(GObject *self) {
 
 	zond_pdf_document_close_context(priv->ctx); //drop_context reicht nicht aus!
 
-	g_free(priv->password);
 	g_mutex_clear(&priv->mutex_doc);
 
 	ZondPdfDocumentClass *klass = ZOND_PDF_DOCUMENT_GET_CLASS(self);
@@ -210,6 +184,22 @@ void zond_pdf_document_page_free(PdfDocumentPage *pdf_document_page) {
 	return;
 }
 
+Annot annot_deep_copy(Annot annot) {
+	Annot copy = { 0 };
+
+	copy = annot;
+
+	if (annot.type == PDF_ANNOT_HIGHLIGHT
+			|| annot.type == PDF_ANNOT_UNDERLINE
+			|| annot.type == PDF_ANNOT_STRIKE_OUT
+			|| annot.type == PDF_ANNOT_SQUIGGLY)
+		copy.annot_text_markup.arr_quads = g_array_ref(annot.annot_text_markup.arr_quads);
+	else if (annot.type == PDF_ANNOT_TEXT)
+		copy.annot_text.content = g_strdup(annot.annot_text.content);
+
+	return copy;
+}
+
 void annot_free(Annot* annot) {
 	if (!annot)
 		return;
@@ -225,10 +215,9 @@ void annot_free(Annot* annot) {
 	return;
 }
 
-static void zond_pdf_document_page_annot_free(gpointer data) {
+static void pdf_document_page_annot_free(gpointer data) {
 	PdfDocumentPageAnnot *pdf_document_page_annot = (PdfDocumentPageAnnot*) data;
 
-	zond_drop_annot_obj(pdf_document_page_annot->zond_annot_obj);
 	annot_free(&(pdf_document_page_annot->annot));
 
 	g_free(pdf_document_page_annot);
@@ -247,7 +236,6 @@ static gint zond_pdf_document_page_annot_load(PdfDocumentPage *pdf_document_page
 	pdf_document_page_annot = g_malloc0(sizeof(PdfDocumentPageAnnot));
 
 	pdf_document_page_annot->pdf_document_page = pdf_document_page;
-	pdf_document_page_annot->zond_annot_obj = zond_annot_obj_new(pdf_annot_obj(priv->ctx, pdf_annot));
 
 	ret = pdf_annot_get_annot(priv->ctx,
 			pdf_annot, &pdf_document_page_annot->annot, error);
@@ -303,7 +291,7 @@ gint zond_pdf_document_load_page(PdfDocumentPage *pdf_document_page,
 	}
 
 	pdf_document_page->arr_annots = g_ptr_array_new_with_free_func(
-			zond_pdf_document_page_annot_free);
+			pdf_document_page_annot_free);
 
 	rc = zond_pdf_document_page_load_annots(pdf_document_page, &error);
 	if (rc) {
@@ -466,15 +454,15 @@ zond_pdf_document_init_context(void) {
 
 void zond_pdf_document_free_journal_entry(JournalEntry *entry) {
 	if (entry->type >= JOURNAL_TYPE_ANNOT_CREATED &&
-			entry->type >= JOURNAL_TYPE_ANNOT_CHANGED) {
-		zond_drop_annot_obj(entry->annot_changed.zond_annot_obj);
-
-		annot_free(&(entry->annot_changed.annot));
+			entry->type <= JOURNAL_TYPE_ANNOT_CHANGED) {
+		annot_free(&(entry->annot_changed.annot_before));
+		annot_free(&(entry->annot_changed.annot_after));
 	} else if (entry->type == JOURNAL_TYPE_OCR) {
 		ZondPdfDocumentPrivate *priv =
 				zond_pdf_document_get_instance_private(entry->pdf_document_page->document);
 
-		fz_drop_buffer(priv->ctx, entry->ocr.buf);
+		fz_drop_buffer(priv->ctx, entry->ocr.buf_old);
+		fz_drop_buffer(priv->ctx, entry->ocr.buf_new);
 	}
 
 	return;
@@ -551,17 +539,11 @@ zond_pdf_document_open(SondFilePartPDF* sfp_pdf, gint von, gint bis,
 		return NULL;
 	}
 
-	rc = pdf_open_and_authen_document(priv->ctx, TRUE, FALSE, sfp_pdf,
-			&priv->password, &priv->doc, &priv->auth, error);
-	if (rc) {
-		if (rc == -1)
-			g_prefix_error(error, "%s\n", __func__);
-		else if (error)
-			*error = g_error_new(ZOND_ERROR, 0, "%s\nDokument verschlüsselt", __func__);
-
+	priv->doc = sond_file_part_pdf_open_document(priv->ctx, sfp_pdf, FALSE, TRUE, TRUE, error);
+	if (!priv->doc) {
 		g_object_unref(zond_pdf_document);
 
-		return NULL;
+		ERROR_Z_VAL(NULL)
 	}
 
 	number_of_pages = pdf_count_pages(priv->ctx, priv->doc);

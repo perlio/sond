@@ -17,6 +17,7 @@ typedef struct _Displayed_Document {
 	gint first_index;
 	PdfDocumentPage* last_page;
 	gint last_index;
+	gboolean dirty;
 	struct _Displayed_Document *next;
 } DisplayedDocument;
 

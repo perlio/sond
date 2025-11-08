@@ -222,13 +222,14 @@ void projekt_set_widgets_sensitiv(Projekt *zond, gboolean active) {
 	return;
 }
 
-static gint project_create_dbase_zond(Projekt *zond, const gchar *path,
-		gboolean create, gchar **errmsg) {
+static gint project_create_dbase_zond(Projekt *zond, gboolean create, gchar **errmsg) {
 	gint rc = 0;
 	ZondDBase *zond_dbase_work = NULL;
 	ZondDBase *zond_dbase_store = NULL;
+	g_autofree gchar* path = NULL;
 	gchar *path_tmp = NULL;
 
+	path = g_strdup_printf("%s/%s", zond->project_dir, zond->project_name);
 	zond_dbase_store = zond_dbase_new(path, FALSE, create, errmsg);
 	if (!zond_dbase_store)
 		ERROR_S
@@ -256,12 +257,6 @@ static gint project_create_dbase_zond(Projekt *zond, const gchar *path,
 
 	zond->dbase_zond->zond_dbase_store = zond_dbase_store;
 	zond->dbase_zond->zond_dbase_work = zond_dbase_work;
-	zond->dbase_zond->project_name = g_path_get_basename(path);
-
-	zond->dbase_zond->project_dir = //soll ohne '/' enden
-			g_strndup(path, strlen(path) - strlen(zond->dbase_zond->project_name) -
-					(((strlen(path) - strlen(zond->dbase_zond->project_name)) > 1) ? 1 : 0));
-	//letzte Zeile soll sicherstellen, dass, wenn dir linux-root ist, '/' bleibt
 
 	zond->dbase_zond->changed = FALSE;
 
@@ -269,9 +264,6 @@ static gint project_create_dbase_zond(Projekt *zond, const gchar *path,
 }
 
 static void project_clear_dbase_zond(DBaseZond **dbase_zond) {
-	g_free((*dbase_zond)->project_dir);
-	g_free((*dbase_zond)->project_name);
-
 	g_object_unref((*dbase_zond)->zond_dbase_store);
 	g_object_unref((*dbase_zond)->zond_dbase_work);
 	g_free(*dbase_zond);
@@ -385,8 +377,8 @@ gint projekt_schliessen(Projekt *zond, gchar **errmsg) {
 	//muß vor project_destroy..., weil callback ausgelöst wird, der db_get_node_id... aufruft
 	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(zond->fs_button), FALSE);
 
-	gchar *working_copy = g_strconcat(zond->dbase_zond->project_dir, "/",
-			zond->dbase_zond->project_name, ".tmp", NULL);
+	gchar *working_copy = g_strconcat(zond->project_dir, "/",
+			zond->project_name, ".tmp", NULL);
 
 	sond_treeviewfm_set_root(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), NULL,
 			NULL);
@@ -484,14 +476,19 @@ gint project_oeffnen(Projekt *zond, const gchar *abs_path, gboolean create,
 			return 0;
 	}
 
-	rc = project_create_dbase_zond(zond, abs_path, create, errmsg);
-	if (rc)
-		ERROR_S
+	zond->project_name = g_path_get_basename(abs_path);
+	zond->project_dir = //soll ohne '/' enden
+			g_strndup(abs_path, strlen(abs_path) - strlen(zond->project_name) -
+					(((strlen(abs_path) - strlen(zond->project_name)) > 1) ? 1 : 0));
+	//letzte Zeile soll sicherstellen, dass, wenn dir linux-root ist, '/' bleibt
 
-	rc = sond_treeviewfm_set_root(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
-			zond->dbase_zond->project_dir, errmsg);
+	rc = project_create_dbase_zond(zond, create, errmsg);
 	if (rc) {
-		project_clear_dbase_zond(&(zond->dbase_zond));
+		g_free(zond->project_name);
+		g_free(zond->project_dir);
+		zond->project_name = NULL;
+		zond->project_dir = NULL;
+
 		ERROR_S
 	}
 
@@ -505,11 +502,25 @@ gint project_oeffnen(Projekt *zond, const gchar *abs_path, gboolean create,
 				*errmsg = g_strdup_printf("%s\n%s", __func__, error->message);
 			g_error_free(error);
 			project_clear_dbase_zond(&(zond->dbase_zond));
-			sond_treeviewfm_set_root(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), NULL,
-					NULL);
+			g_free(zond->project_name);
+			g_free(zond->project_dir);
+			zond->project_name = NULL;
+			zond->project_dir = NULL;
 
 			return -1;
 		}
+	}
+
+	rc = sond_treeviewfm_set_root(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
+			zond->project_dir, errmsg); //setzt auch PWD
+	if (rc) {
+		project_clear_dbase_zond(&(zond->dbase_zond));
+		g_free(zond->project_name);
+		g_free(zond->project_dir);
+		zond->project_name = NULL;
+		zond->project_dir = NULL;
+
+		ERROR_S
 	}
 
 	projekt_set_widgets_sensitiv(zond, TRUE);
@@ -518,7 +529,7 @@ gint project_oeffnen(Projekt *zond, const gchar *abs_path, gboolean create,
 	gtk_header_bar_set_title(
 			GTK_HEADER_BAR(
 					gtk_window_get_titlebar(GTK_WINDOW(zond->app_window))),
-			zond->dbase_zond->project_name);
+			zond->project_name);
 
 	//project_name in settings schreiben
 	g_settings_set_string(zond->settings, "project", abs_path);
@@ -537,7 +548,7 @@ static gint project_wechseln(Projekt *zond) {
 	if (!zond->dbase_zond)
 		return 0;
 
-	rc = abfrage_frage(zond->app_window, zond->dbase_zond->project_name,
+	rc = abfrage_frage(zond->app_window, zond->project_name,
 			"Projekt schließen?", NULL);
 	if ((rc != GTK_RESPONSE_YES))
 		return 1; //Abbrechen -> nicht öffnen

@@ -1,6 +1,8 @@
 #include "pdf.h"
 
 #include <glib/gstdio.h>
+#include <mupdf/fitz.h>
+#include <mupdf/pdf.h>
 
 #include "test.h"
 
@@ -106,104 +108,6 @@ gint pdf_copy_page(fz_context *ctx, pdf_document *doc_src, gint page_from,
 	}
 
 	pdf_drop_graft_map(ctx, graft_map);
-
-	return 0;
-}
-
-gint pdf_open_and_authen_document(fz_context *ctx, gboolean prompt,
-		gboolean read_only, SondFilePartPDF* sfp_pdf,
-		gchar **password, pdf_document **doc, gint *auth, GError **error) {
-	gchar *password_try = NULL;
-	pdf_document *doc_tmp = NULL;
-
-	if (read_only) { //keine Kopie, sondern direkt aus stream lesen, der allerdings seekable sein muß
-		fz_stream* stream = NULL;
-
-		stream = sond_file_part_get_istream(ctx, SOND_FILE_PART(sfp_pdf), TRUE, error);
-		if (!stream)
-			ERROR_Z
-
-		fz_try(ctx)
-			doc_tmp = pdf_open_document_with_stream(ctx, stream);
-		fz_catch(ctx) {
-			fz_drop_stream(ctx, stream);
-			if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
-					fz_caught(ctx), "%s\n%s", __func__, fz_caught_message(ctx));
-
-			return -1;
-		}
-	}
-	else { //tmp_file schreiben
-		gchar* filename = NULL;
-
-		filename = sond_file_part_write_to_tmp_file(SOND_FILE_PART(sfp_pdf), error);
-		if (!filename)
-			ERROR_Z
-
-		fz_try( ctx )
-			doc_tmp = pdf_open_document(ctx, filename);
-		fz_catch( ctx ) {
-			if (error)
-				*error = g_error_new(g_quark_from_static_string("MUPDF"),
-						fz_caught(ctx), "%s\n%s", __func__,
-						fz_caught_message(ctx));
-
-			if (g_remove(filename))
-				g_warning("%s\nArbeitskopie '%s' konnte nicht gelöscht werden\n%s",
-							__func__, filename, strerror(errno));
-
-			g_free(filename);
-
-			return -1;
-		}
-		g_free(filename);
-	}
-
-	if (password)
-		password_try = *password;
-
-	do {
-		gint res_auth = 0;
-		gint res_dialog = 0;
-
-		res_auth = pdf_authenticate_password(ctx, doc_tmp, password_try);
-		if (res_auth) //erfolgreich!
-		{
-			if (auth)
-				*auth = res_auth;
-			if (password)
-				*password = password_try;
-			break;
-		} else if (!prompt) {
-			if (!read_only)
-				if (g_remove(fz_stream_filename(ctx, doc_tmp->file)))
-					g_warning("%s\nArbeitskopie '%s' konnte nicht gelöscht werden\n"
-							"%s", __func__, fz_stream_filename(ctx, doc_tmp->file), strerror( errno));
-
-
-			pdf_drop_document(ctx, doc_tmp);
-
-			return 1;
-		}
-
-		res_dialog = dialog_with_buttons(NULL, "PDF verschlüsselt", "Passwort eingeben:",
-				&password_try, "Ok", GTK_RESPONSE_OK, "Abbrechen",
-				GTK_RESPONSE_CANCEL, NULL);
-		if (res_dialog != GTK_RESPONSE_OK) {
-
-			if (!read_only)
-				if (g_remove(fz_stream_filename(ctx, doc_tmp->file)))
-					g_warning("%s\nArbeitskopie '%s' konnte nicht gelöscht werden\n"
-								"Fehlermeldung: %s", __func__, fz_stream_filename(ctx, doc_tmp->file),
-								strerror( errno));
-
-			pdf_drop_document(ctx, doc_tmp);
-
-			return 1;
-		}
-	} while (1);
-
-	*doc = doc_tmp;
 
 	return 0;
 }
@@ -315,16 +219,18 @@ gint pdf_clean(fz_context *ctx, SondFilePartPDF* sfp_pdf, GError **error) {
 		return -1;
 	}
 
-	rc = pdf_open_and_authen_document(ctx, TRUE, FALSE, sfp_pdf, NULL, &doc,
-			NULL, error);
-	if (rc == -1) {
-		g_prefix_error(error, "%s\n", __func__);
+	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, FALSE, TRUE, TRUE, error);
+	if (!doc) {
+		if (g_error_matches(*error, g_quark_from_static_string("sond"), 1)) { //auth failed
+			g_clear_error(error);
 
-		return -1;
-	} else if (rc == 1)
-		return 1;
+			return 1; //nächstes Dokument
+		}
+		else
+			ERROR_Z
+	}
 
-	path_tmp = g_strdup(fz_stream_filename(ctx, doc->file));
+//	path_tmp = g_strdup(fz_stream_filename(ctx, doc->file));
 	count = pdf_count_pages(ctx, doc);
 	pages = g_malloc(sizeof(gint) * count);
 	for (gint i = 0; i < count; i++)

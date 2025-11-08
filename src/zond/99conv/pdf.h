@@ -16,12 +16,12 @@
 
 #define ERROR_MUPDF(x) ERROR_MUPDF_R(x,-1)
 
-#define ERROR_PDF_VAL(x,y) { if (error) *error = g_error_new(); \
+#define ERROR_PDF_VAL(x) { if (error) *error = g_error_new( \
 						g_quark_from_static_string("mupdf"), fz_caught(ctx), \
 						"%s\n%s", __func__, fz_caught_message(ctx)); \
-						return y; }
+						return x; }
 
-#define ERROR_PDF(x) ERROR_PDF_VAL(x,-1)
+#define ERROR_PDF ERROR_PDF_VAL(-1)
 
 typedef struct _Projekt Projekt;
 typedef struct _Pdf_Document_Page PdfDocumentPage;

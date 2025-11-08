@@ -30,7 +30,7 @@ typedef struct _Pdf_Document_Page {
 	gint thread;
 	PdfViewer* thread_pv;
 	GPtrArray *arr_annots;
-	gint to_be_deleted;
+	gboolean to_be_deleted;
 } PdfDocumentPage;
 
 typedef struct _Annot_Text_Markup {
@@ -51,14 +51,9 @@ typedef struct _Annot {
 	};
 }Annot;
 
-typedef struct _Zond_Annot_Obj {
-	gint ref;
-	pdf_obj* obj;
-} ZondAnnotObj;
-
 typedef struct _Pdf_Document_Page_Annot {
 	PdfDocumentPage *pdf_document_page; //keine ref!
-	ZondAnnotObj* zond_annot_obj;
+	gboolean deleted;
 	Annot annot;
 } PdfDocumentPageAnnot;
 
@@ -69,14 +64,16 @@ struct PagesInserted {
 	gint size_dd_index; //von/bis-index der letzten page der anderen Seite
 };
 struct AnnotChanged {
-	ZondAnnotObj* zond_annot_obj;
-	Annot annot;
+	PdfDocumentPageAnnot* pdf_document_page_annot;
+	Annot annot_before;
+	Annot annot_after;
 };
 struct Rotate {
 	gint rotate;
 };
 struct OCR {
-	fz_buffer* buf;
+	fz_buffer* buf_old;
+	fz_buffer* buf_new;
 };
 
 typedef enum _Journal_Type {
@@ -108,15 +105,7 @@ struct _ZondPdfDocumentClass {
 	GPtrArray* arr_pdf_documents;
 };
 
-ZondAnnotObj* zond_annot_obj_new(pdf_obj*);
-
-ZondAnnotObj* zond_annot_obj_ref(ZondAnnotObj*);
-
-void zond_drop_annot_obj(ZondAnnotObj*);
-
-pdf_obj* zond_annot_obj_get_obj(ZondAnnotObj*);
-
-void zond_annot_obj_set_obj(ZondAnnotObj*, pdf_obj*);
+gint pdf_document_page_annot_get_index(PdfDocumentPageAnnot*);
 
 pdf_annot* pdf_document_page_annot_get_pdf_annot(PdfDocumentPageAnnot*);
 

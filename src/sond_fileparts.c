@@ -28,6 +28,7 @@
 #include <gmime/gmime.h>
 #include <zip.h>
 #include <mupdf/pdf.h>
+#include <mupdf/fitz.h>
 
 #include "misc.h"
 #include "sond_treeviewfm.h"
@@ -418,7 +419,8 @@ SondFilePart* sond_file_part_from_filepart(fz_context* ctx,
 	return (sfp) ? g_object_ref(sfp) : NULL;
 }
 
-fz_stream* sond_file_part_get_istream(fz_context* ctx,
+//Datei unmittelbar oder Buffer - jedenfalls keine tmp-Kopie
+static fz_stream* sond_file_part_get_istream(fz_context* ctx,
 		SondFilePart* sfp, gboolean need_seekable, GError **error) {
 	fz_stream *stream = NULL;
 
@@ -430,7 +432,9 @@ fz_stream* sond_file_part_get_istream(fz_context* ctx,
 	return stream;
 }
 
-static fz_buffer* sond_file_part_get_buffer(SondFilePart* sfp,
+//buffer - stream garantiert geschlossen
+//kann also geschrieben werden
+fz_buffer* sond_file_part_get_buffer(SondFilePart* sfp,
 		fz_context* ctx, GError** error) {
 	fz_stream* stream = NULL;
 	fz_buffer* buf = NULL;
@@ -453,6 +457,7 @@ static fz_buffer* sond_file_part_get_buffer(SondFilePart* sfp,
 
 	return buf;
 }
+
 gchar* sond_file_part_write_to_tmp_file(SondFilePart* sfp, GError **error) {
 	gchar *filename = NULL;
 	gchar* basename = NULL;
@@ -550,8 +555,8 @@ static gint open_path(const gchar *path, gboolean open_with, GError **error) {
 
 gint sond_file_part_open(SondFilePart* sfp, gboolean open_with,
 		GError** error) {
-	gchar* path = NULL;
 	gint rc = 0;
+	g_autofree gchar* path = NULL;
 
 	if (!sond_file_part_get_parent(sfp)) //Datei im Filesystem
 		path = g_strconcat(SOND_FILE_PART_CLASS(g_type_class_peek(SOND_TYPE_FILE_PART))->path_root,
@@ -562,9 +567,18 @@ gint sond_file_part_open(SondFilePart* sfp, gboolean open_with,
 			ERROR_Z
 	}
 	rc = open_path(path, open_with, error);
-	g_free(path);
-	if (rc)
+	if (rc) {
+		if (sond_file_part_get_parent(sfp)) { //tmp-Datei wurde erzeugt
+			gint rc = 0;
+
+			rc = g_remove(path);
+			if (rc)
+				g_warning("Datei '%s' konnte nicht gelöscht werden:\n%s",
+						path, strerror(errno));
+		}
+
 		ERROR_Z
+	}
 
 	return 0;
 }
@@ -858,29 +872,156 @@ static gint sond_file_part_zip_rename_file(SondFilePartZip* sfp_zip,
  * PDFs
  */
 typedef struct {
-	fz_context* ctx;
-	pdf_document* doc;
-	GMutex* mutex_doc;
+	gchar* passwd;
+	gint auth;
 } SondFilePartPDFPrivate;
 
 G_DEFINE_TYPE_WITH_PRIVATE(SondFilePartPDF, sond_file_part_pdf, SOND_TYPE_FILE_PART)
 
+static gint sond_file_part_pdf_authen_doc(SondFilePartPDF* sfp_pdf, fz_context* ctx,
+		pdf_document* doc, gboolean prompt, GError** error) {
+	gchar *password_try = NULL;
 
-gint sond_file_part_pdf_save(SondFilePartPDF* sfp_pdf, GError** error) {
-	gint rc = 0;
-	fz_buffer* buf = NULL;
-/*
-	buf = pdf_doc_to_buf(ctx, pdf_doc, error);
-	if (!buf)
-		ERROR_Z
+	SondFilePartPDFPrivate* sfp_pdf_priv = sond_file_part_pdf_get_instance_private(sfp_pdf);
 
-	rc = sond_file_part_replace(SOND_FILE_PART(sfp_pdf), ctx, buf, error);
-	fz_drop_buffer(ctx, buf);
-	if (rc)
-		ERROR_Z
-*/
+	if (sfp_pdf_priv->passwd)
+		password_try = sfp_pdf_priv->passwd;
+
+	do {
+		gint res_auth = 0;
+		gint res_dialog = 0;
+
+		fz_try(ctx)
+			res_auth = pdf_authenticate_password(ctx, doc, password_try);
+		fz_catch(ctx) {
+			if (error) *error = g_error_new(g_quark_from_static_string("mupdf"), fz_caught(ctx),
+					"%s\n%s", __func__, fz_caught_message(ctx));
+
+			return -1;
+		}
+		if (res_auth) //erfolgreich!
+		{
+			sfp_pdf_priv->auth = res_auth;
+			if (password_try) //Passwort überhaupt erforderlich
+				sfp_pdf_priv->passwd = password_try;
+			break;
+		} else if (!prompt)
+			return 1;
+
+		res_dialog = dialog_with_buttons(NULL, "PDF verschlüsselt", "Passwort eingeben:",
+				&password_try, "Ok", GTK_RESPONSE_OK, "Abbrechen",
+				GTK_RESPONSE_CANCEL, NULL);
+		if (res_dialog != GTK_RESPONSE_OK)
+			return 1;
+	} while (1);
+
 	return 0;
 }
+
+pdf_document* sond_file_part_pdf_open_document(fz_context* ctx,
+		SondFilePartPDF *sfp_pdf, gboolean read_only, gboolean tmp_file,
+		gboolean prompt_for_passwd, GError **error) {
+	pdf_document* doc = NULL;
+	fz_stream* stream = NULL;
+	gint rc = 0;
+
+	if (read_only) {
+		stream = sond_file_part_get_istream(ctx, SOND_FILE_PART(sfp_pdf), TRUE, error);
+		if (!stream)
+			ERROR_Z_VAL(NULL)
+	}
+	else {
+		if (!tmp_file) {
+			fz_buffer* buf = NULL;
+
+			buf = sond_file_part_get_buffer(SOND_FILE_PART(sfp_pdf), ctx, error);
+			if (!buf)
+				ERROR_Z_VAL(NULL)
+
+			fz_try(ctx)
+				stream = fz_open_buffer(ctx, buf);
+			fz_always(ctx)
+				fz_drop_buffer(ctx, buf);
+			fz_catch(ctx) {
+				if (error) *error = g_error_new(g_quark_from_static_string("mupdf"), fz_caught(ctx),
+						"%s\nfz_open_buffer: %s", __func__, fz_caught_message(ctx));
+
+				return NULL;
+			}
+		}
+		else {
+			gchar* filename = NULL;
+
+			filename = sond_file_part_write_to_tmp_file(SOND_FILE_PART(sfp_pdf), error);
+			if (!filename)
+				ERROR_Z_VAL(NULL)
+
+			stream = open_file(ctx, filename, error);
+			if (!stream) {
+				gint rc = 0;
+
+				rc = g_remove(filename);
+				if (rc)
+					g_warning("%s\nDatei '%s' konnte nicht gelöscht werden:\n%s",
+							__func__, filename, strerror(errno));
+				g_free(filename);
+
+				ERROR_Z_VAL(NULL)
+			}
+		}
+	}
+
+	//PDF-Dokument öffnen
+	fz_try(ctx)
+		doc = pdf_open_document_with_stream(ctx, stream);
+	fz_catch(ctx) {
+		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
+				fz_caught(ctx),
+				"%s\nPDF-Dokument '%s' konnte nicht geöffnet werden:\n%s", __func__,
+				sond_file_part_get_path(SOND_FILE_PART(sfp_pdf)),
+				fz_caught_message(ctx));
+
+		if (fz_stream_filename(ctx, stream)) {
+			gint rc = 0;
+
+			rc = g_remove(fz_stream_filename(ctx, stream));
+			if (rc)
+				g_warning("%s\nDatei '%s' konnte nicht gelöscht werden:\n%s",
+						__func__, fz_stream_filename(ctx, stream), strerror(errno));
+		}
+
+		fz_drop_stream(ctx, stream);
+
+		return NULL; //Fehler beim Öffnen des PDF-Dokuments
+	}
+
+	fz_drop_stream(ctx, stream);
+
+	rc = sond_file_part_pdf_authen_doc(sfp_pdf, ctx, doc, prompt_for_passwd, error);
+	if (rc) {
+		if (rc == -1)
+			g_prefix_error(error, "%s\n", __func__);
+		else
+			if (error) *error = g_error_new(g_quark_from_static_string("sond"), 1,
+					"%s\nEntschlüsselung gescheitert", __func__);
+
+		if (fz_stream_filename(ctx, doc->file)) {
+			gint rc = 0;
+
+			rc = g_remove(fz_stream_filename(ctx, doc->file));
+			if (rc)
+				g_warning("%s\nDatei '%s' konnte nicht gelöscht werden:\n%s",
+						__func__, fz_stream_filename(ctx, doc->file), strerror(errno));
+		}
+
+		pdf_drop_document(ctx, doc);
+
+		return NULL;
+	}
+
+	return doc;
+}
+
 
 static pdf_obj* get_EF_F(fz_context* ctx, pdf_obj* val, gchar const** path, GError** error) {
 	gchar const* path_tmp = NULL;
@@ -1010,33 +1151,6 @@ static gint load_embedded_files(fz_context* ctx, pdf_obj* key, pdf_obj* val,
 	return 0;
 }
 
-static pdf_document* sond_file_part_pdf_open_document(fz_context* ctx, SondFilePartPDF *sfp_pdf,
-		GError **error) {
-	pdf_document* doc = NULL;
-	fz_stream* stream = NULL;
-
-	stream = sond_file_part_get_istream(ctx, SOND_FILE_PART(sfp_pdf), TRUE, error);
-	if (!stream)
-		ERROR_Z_VAL(NULL)
-
-	//PDF-Dokument öffnen
-	fz_try(ctx)
-		doc = pdf_open_document_with_stream(ctx, stream);
-	fz_always(ctx)
-		fz_drop_stream(ctx, stream);
-	fz_catch(ctx) {
-		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
-				fz_caught(ctx),
-				"%s\nkonnte PDF-Dokument '%s' nicht öffnen: %s", __func__,
-				sond_file_part_get_path(SOND_FILE_PART(sfp_pdf)),
-				fz_caught_message(ctx));
-
-		return NULL; //Fehler beim Öffnen des PDF-Dokuments
-	}
-
-	return doc;
-}
-
 gint sond_file_part_pdf_load_embedded_files(SondFilePartPDF* sfp_pdf,
 		GPtrArray** arr_children, GError **error) {
 	gint rc = 0;
@@ -1052,7 +1166,7 @@ gint sond_file_part_pdf_load_embedded_files(SondFilePartPDF* sfp_pdf,
 		return -1;
 	}
 
-	doc = sond_file_part_pdf_open_document(ctx, SOND_FILE_PART_PDF(sfp_pdf), error);
+	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, TRUE, FALSE, FALSE, error);
 	if (!doc) {
 		fz_drop_context(ctx);
 		ERROR_Z
@@ -1102,7 +1216,7 @@ static gint sond_file_part_pdf_test_for_embedded_files(
 		return -1;
 	}
 
-	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, error);
+	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, TRUE, FALSE, FALSE, error);
 	if (!doc) {
 		fz_drop_context(ctx);
 		ERROR_Z
@@ -1157,7 +1271,7 @@ static fz_stream* sond_file_part_pdf_lookup_embedded_file(fz_context* ctx,
 	Lookup lookup = { 0 };
 	gint rc = 0;
 
-	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, error);
+	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, TRUE, FALSE, FALSE, error);
 	if (!doc)
 		ERROR_Z_VAL(NULL)
 
@@ -1256,7 +1370,7 @@ static fz_buffer* sond_file_part_pdf_mod_emb_file(SondFilePartPDF* sfp_pdf,
 	pdf_obj* embedded_files_dict = NULL;
 	fz_buffer* buf_out = NULL;
 
-	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, error);
+	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, FALSE, FALSE, TRUE, error);
 	if (!doc)
 		ERROR_Z_VAL(NULL)
 
@@ -1391,7 +1505,7 @@ static gint sond_file_part_pdf_rename_embedded_file(SondFilePartPDF* sfp_pdf,
 		return -1;
 	}
 
-	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, error);
+	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, FALSE, FALSE, TRUE, error);
 	if (!doc) {
 		fz_drop_context(ctx);
 		ERROR_Z

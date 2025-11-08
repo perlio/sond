@@ -74,8 +74,6 @@ typedef struct _Icon {
 typedef struct _DBase_Zond {
 	ZondDBase *zond_dbase_store;
 	ZondDBase *zond_dbase_work;
-	gchar *project_name;
-	gchar *project_dir;
 	gboolean changed;
 } DBaseZond;
 
@@ -142,6 +140,9 @@ typedef struct _Clipboard Clipboard;
 
 typedef struct _Projekt {
 	gchar *base_dir;
+
+	gchar *project_dir;
+	gchar *project_name;
 
 #ifndef VIEWER
 	guint state; //Modifier Mask

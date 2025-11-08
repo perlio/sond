@@ -208,6 +208,79 @@ static fz_matrix pdf_ocr_create_matrix(fz_context *ctx, fz_rect rect,
 	return ctm;
 }
 
+static gint pdf_ocr_get_f_0_0_obj_num(ZondPdfDocument* document,
+		pdf_obj* page_ref_text, GError** error) {
+	gint num = 0;
+	pdf_document* doc = NULL;
+	gint num_pages = 0;
+	fz_context* ctx = NULL;
+	pdf_graft_map *graft_map = NULL;
+
+	//Ist der font f-0-0 schon gespeichert
+	num = zond_pdf_document_get_ocr_num(document);
+	if (num)
+		return num;
+
+	ctx = zond_pdf_document_get_ctx(document);
+
+	//Ist er schon irgendwo (vlt. von früheren OCR-Läufen) im Dokument?
+	doc = zond_pdf_document_get_pdf_doc(document);
+	fz_try(ctx)
+		num_pages = pdf_count_pages(ctx, doc);
+	fz_catch(ctx)
+		ERROR_PDF
+
+	for (gint u = 0; u < num_pages; u++) {
+		pdf_obj* page_ref = NULL;
+		pdf_obj* resources = NULL;
+		pdf_obj* font_dict = NULL;
+
+		fz_try(ctx) {
+			pdf_obj* f_0_0 = NULL;
+
+			page_ref = pdf_lookup_page_obj(ctx, doc, u);
+			resources = pdf_dict_get_inheritable(ctx, page_ref,
+					PDF_NAME(Resources));
+			font_dict = pdf_dict_get(ctx, resources, PDF_NAME(Font));
+			f_0_0 = pdf_dict_gets(ctx, font_dict, "f-0-0");
+			if (f_0_0)
+				num = pdf_to_num(ctx, f_0_0);
+		}
+		fz_catch(ctx)
+			ERROR_PDF
+
+		if (num) //f-0-0 gefunden
+			return num;
+	}
+
+	//auch nicht
+	graft_map = pdf_new_graft_map(ctx, doc); //keine exception
+
+	//Nun Text-Pdf
+	fz_try(ctx) {
+		pdf_obj* resources_text = NULL;
+		pdf_obj* font_dict_text = NULL;
+		pdf_obj* f_0_0_text = NULL;
+		pdf_obj* f_0_0 = NULL;
+
+		resources_text = pdf_dict_get_inheritable(ctx, page_ref_text,
+				PDF_NAME(Resources));
+		font_dict_text = pdf_dict_get(ctx, resources_text, PDF_NAME(Font));
+		f_0_0_text = pdf_dict_gets(ctx, font_dict_text, "f-0-0");
+		f_0_0 = pdf_graft_mapped_object(ctx, graft_map, f_0_0_text);
+		num = pdf_to_num(ctx, f_0_0);
+		pdf_drop_obj(ctx, f_0_0);
+	}
+	fz_always(ctx)
+		pdf_drop_graft_map(ctx, graft_map);
+	fz_catch(ctx)
+		ERROR_PDF
+
+	zond_pdf_document_set_ocr_num(document, num);
+
+	return num;
+}
+
 static gint pdf_ocr_sandwich_page(PdfDocumentPage *pdf_document_page,
 		pdf_document *doc_text, gint page_text, gchar **errmsg) {
 	gint rc = 0;
@@ -219,6 +292,7 @@ static gint pdf_ocr_sandwich_page(PdfDocumentPage *pdf_document_page,
 	GError* error = NULL;
 	pdf_obj *font_dict = NULL;
 	gint num = 0;
+	pdf_document* doc = NULL;
 
 	obj = pdf_document_page_get_page_obj(pdf_document_page, &error);
 	if (!obj) {
@@ -240,12 +314,44 @@ static gint pdf_ocr_sandwich_page(PdfDocumentPage *pdf_document_page,
 	fz_matrix ctm = pdf_ocr_create_matrix(ctx, pdf_document_page->rect, scale,
 			pdf_document_page->rotate);
 
+	num = pdf_ocr_get_f_0_0_obj_num(pdf_document_page->document, page_ref_text, &error);
+	if (num == -1)
+		ERROR_S_VAL(-2)
+
+	//Resources aus pdf_text hinzukopieren
+	//Erstmal /Font-dict finden oder erzeugen
+	doc = zond_pdf_document_get_pdf_doc(pdf_document_page->document);
+	fz_try(ctx) {
+		pdf_obj *resources = NULL;
+
+		resources = pdf_dict_get_inheritable(ctx, obj,
+				PDF_NAME(Resources));
+		//Zunächst testen, ob Resources Font enthalten
+		font_dict = pdf_dict_get(ctx, resources, PDF_NAME(Font));
+		if (!font_dict) {
+			font_dict = pdf_new_dict(ctx, doc, 1);
+
+			pdf_dict_put_drop(ctx, resources, PDF_NAME(Font), font_dict);
+		}
+	}
+	fz_catch(ctx)
+		ERROR_MUPDF("pdf_dict_get (Font)")
+
+	pdf_obj* ref = pdf_new_indirect(ctx, doc, num, 0);
+
+	fz_try(ctx)
+		pdf_dict_puts(ctx, font_dict, "f-0-0", ref);
+	fz_always(ctx)
+		pdf_drop_obj(ctx, ref);
+	fz_catch(ctx)
+		ERROR_MUPDF("pdf_dict_puts (ref)")
+
 	buf_text = pdf_ocr_process_tess_tmp(ctx, page_ref_text, ctm, errmsg);
 	if (!buf_text)
 		ERROR_S_VAL(-2)
 
-	entry.ocr.buf = pdf_ocr_get_content_stream_as_buffer(ctx, obj, errmsg);
-	if (!entry.ocr.buf) {
+	entry.ocr.buf_old = pdf_ocr_get_content_stream_as_buffer(ctx, obj, errmsg);
+	if (!entry.ocr.buf_old) {
 		fz_drop_buffer(ctx, buf_text);
 		ERROR_S_VAL(-2)
 	}
@@ -253,7 +359,7 @@ static gint pdf_ocr_sandwich_page(PdfDocumentPage *pdf_document_page,
 	buf = pdf_text_filter_page(ctx, obj, 2, errmsg);
 	if (!buf) {
 		fz_drop_buffer(ctx, buf_text);
-		fz_drop_buffer(ctx, entry.ocr.buf);
+		fz_drop_buffer(ctx, entry.ocr.buf_old);
 		ERROR_S
 	}
 
@@ -263,126 +369,17 @@ static gint pdf_ocr_sandwich_page(PdfDocumentPage *pdf_document_page,
 		fz_drop_buffer(ctx, buf_text);
 	fz_catch (ctx) {
 		fz_drop_buffer(ctx, buf);
-		fz_drop_buffer(ctx, entry.ocr.buf);
+		fz_drop_buffer(ctx, entry.ocr.buf_old);
 		ERROR_MUPDF("fz_append_buffer")
 	}
 
 	rc = pdf_ocr_update_content_stream(ctx, obj, buf,
 			errmsg);
-	fz_drop_buffer(ctx, buf);
+	entry.ocr.buf_new = buf;
 	if (rc) {
-		fz_drop_buffer(ctx, entry.ocr.buf);
+		fz_drop_buffer(ctx, entry.ocr.buf_old);
+		fz_drop_buffer(ctx, entry.ocr.buf_new);
 		ERROR_S
-	}
-
-	//Resources aus pdf_text hinzukopieren
-	//Erstmal /Font-dict finden oder erzeugen
-	fz_try(ctx) {
-		pdf_obj *resources = NULL;
-
-		resources = pdf_dict_get_inheritable(ctx, obj,
-				PDF_NAME(Resources));
-		//Zunächst testen, ob Resources Font enthalten
-		font_dict = pdf_dict_get(ctx, resources, PDF_NAME(Font));
-		if (!font_dict) {
-			pdf_document* doc = NULL;
-
-			doc = pdf_pin_document(ctx, obj);
-			font_dict = pdf_new_dict(ctx, doc, 1);
-			pdf_drop_document(ctx, doc);
-
-			pdf_dict_put_drop(ctx, resources, PDF_NAME(Font), font_dict);
-		}
-	}
-	fz_catch(ctx) {
-		fz_drop_buffer(ctx, entry.ocr.buf);
-		ERROR_MUPDF("pdf_dict_get (Font)")
-	}
-
-	num = zond_pdf_document_get_ocr_num(pdf_document_page->document);
-
-	if (!num) {
-		pdf_document* doc = NULL;
-		gint num_pages = 0;
-
-		doc = zond_pdf_document_get_pdf_doc(pdf_document_page->document);
-		fz_try(ctx)
-			num_pages = pdf_count_pages(ctx, doc);
-		fz_catch(ctx) {
-			fz_drop_buffer(ctx, entry.ocr.buf);
-			ERROR_MUPDF("pdf_count_pages")
-		}
-
-		for (gint u = 0; u < num_pages; u++) {
-			pdf_obj* page_ref = NULL;
-			pdf_obj* resources = NULL;
-			pdf_obj* font_dict = NULL;
-
-			fz_try(ctx) {
-				pdf_obj* f_0_0 = NULL;
-
-				page_ref = pdf_lookup_page_obj(ctx, doc, u);
-				resources = pdf_dict_get_inheritable(ctx, page_ref,
-						PDF_NAME(Resources));
-				font_dict = pdf_dict_get(ctx, resources, PDF_NAME(Font));
-				f_0_0 = pdf_dict_gets(ctx, font_dict, "f-0-0");
-				if (f_0_0)
-					num = pdf_to_num(ctx, f_0_0);
-			}
-			fz_catch(ctx) {
-				fz_drop_buffer(ctx, entry.ocr.buf);
-				ERROR_MUPDF("pdf_lookup_page_obj")
-			}
-
-			if (num) break; //f-0-0 gefunden
-		}
-
-		//Wenn nix gefunden...
-		if (!num) { //kopieren
-			pdf_graft_map *graft_map = NULL;
-			pdf_document *doc = NULL;
-
-			doc = pdf_pin_document(ctx, obj);
-			graft_map = pdf_new_graft_map(ctx, doc); //keine exception
-			pdf_drop_document(ctx, doc);
-
-			//Nun Text-Pdf
-			fz_try(ctx) {
-				pdf_obj* resources_text = NULL;
-				pdf_obj* font_dict_text = NULL;
-				pdf_obj* f_0_0_text = NULL;
-				pdf_obj* f_0_0 = NULL;
-
-				resources_text = pdf_dict_get_inheritable(ctx, page_ref_text,
-						PDF_NAME(Resources));
-				font_dict_text = pdf_dict_get(ctx, resources_text, PDF_NAME(Font));
-				f_0_0_text = pdf_dict_gets(ctx, font_dict_text, "f-0-0");
-				f_0_0 = pdf_graft_mapped_object(ctx, graft_map, f_0_0_text);
-				num = pdf_to_num(ctx, f_0_0);
-				pdf_drop_obj(ctx, f_0_0);
-			}
-			fz_always(ctx)
-				pdf_drop_graft_map(ctx, graft_map);
-			fz_catch(ctx) {
-				fz_drop_buffer(ctx, entry.ocr.buf);
-				ERROR_MUPDF("pdf_dict_put_drop (font_dict)")
-			}
-		}
-
-		zond_pdf_document_set_ocr_num(pdf_document_page->document, num);
-	}
-
-	pdf_document *doc = pdf_pin_document(ctx, font_dict);
-	pdf_obj* ref = pdf_new_indirect(ctx, doc, num, 0);
-	pdf_drop_document(ctx, doc);
-
-	fz_try(ctx)
-		pdf_dict_puts(ctx, font_dict, "f-0-0", ref);
-	fz_always(ctx)
-		pdf_drop_obj(ctx, ref);
-	fz_catch(ctx) {
-		fz_drop_buffer(ctx, entry.ocr.buf);
-		ERROR_MUPDF("pdf_dict_puts (ref)")
 	}
 
 	g_array_append_val(zond_pdf_document_get_arr_journal(pdf_document_page->document), entry);

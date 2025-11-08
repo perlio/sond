@@ -673,16 +673,9 @@ static gint zond_convert_0_to_1_baum_inhalt_insert(ZondDBase *zond_dbase,
 
 			if (exists) //wenn Datei nicht existiert, muß man nicht versuchen, sie zu öffnen
 			{
-				SondFilePart* sfp = NULL;
-
-				sfp = sond_file_part_from_filepart(data_convert->ctx, rel_path, error);
-				if (!sfp)
-					ERROR_Z
-
-				rc = pdf_open_and_authen_document(data_convert->ctx, TRUE, TRUE,
-						SOND_FILE_PART_PDF(sfp), NULL, &(data_convert->doc), NULL, error);
-				g_object_unref(sfp);
-				if (rc) {
+				fz_try(data_convert->ctx)
+					data_convert->doc = pdf_open_document(data_convert->ctx, rel_path);
+				fz_catch(data_convert->ctx) {
 					gchar *errmsg = NULL;
 					size_t count = 0;
 

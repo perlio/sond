@@ -314,7 +314,7 @@ static gint export_html(Projekt *zond, GFileOutputStream *stream, gint umfang,
 	}
 
 	const gchar *buffer = g_strconcat("{\\rtf1 "
-			"{\\fs50\\b\\ul ", zond->dbase_zond->project_name, "\\par\\plain ",
+			"{\\fs50\\b\\ul ", zond->project_name, "\\par\\plain ",
 	NULL);
 
 	//Hier htm-Datei in stream schreiben
