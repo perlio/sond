@@ -2184,12 +2184,14 @@ static void zond_treeview_jump_activate(GtkMenuItem *item, gpointer user_data) {
 gint zond_treeview_oeffnen_internal_viewer(Projekt *zond, SondFilePartPDF* sfp_pdf,
 		Anbindung *anbindung, PdfPos *pos_pdf, GError **error) {
 	PdfPos pos_von = { 0 };
-	ZondPdfDocument const* zpdfd = NULL;
+	ZondPdfDocument* zpdfd = NULL;
 	gint rc = 0;
 
 	zpdfd = zond_pdf_document_is_open(sfp_pdf);
 
 	if (zpdfd) {
+		anbindung_aktualisieren(zpdfd, anbindung);
+
 		//Anfangspunkt funktioniert anders, weil pos_pdf aus strikter Umsetzung
 		//von page_doc zu page_pv besteht. Wenn Seiten gelöscht paßt das nicht mehr,
 		//weil die Seiten im zpdfd aber nicht (mehr) arr_pages vorhanden sind.
@@ -2197,12 +2199,9 @@ gint zond_treeview_oeffnen_internal_viewer(Projekt *zond, SondFilePartPDF* sfp_p
 			PdfDocumentPage* pdfp = NULL;
 
 			pdfp = g_ptr_array_index(zond_pdf_document_get_arr_pages(zpdfd), i);
-			if (pdfp->to_be_deleted)
+			if (pdfp->deleted)
 				pos_pdf->seite--;
 		}
-
-		if (anbindung)
-			anbindung_aktualisieren_insert_pages(zond_pdf_document_get_arr_journal(zpdfd), anbindung);
 	}
 	//Neue Instanz oder bestehende?
 	if (!(zond->state & GDK_SHIFT_MASK)) {
@@ -2211,14 +2210,14 @@ gint zond_treeview_oeffnen_internal_viewer(Projekt *zond, SondFilePartPDF* sfp_p
 			PdfViewer *pv = g_ptr_array_index(zond->arr_pv, i);
 			//ToDo: Test auf Gleichheit über alle dds hinweg
 			if (pv->dd->next == NULL && sfp_pdf ==
-					zond_pdf_document_get_sfp_pdf(pv->dd->zond_pdf_document)) {
-				Anbindung* anbindung_dd = NULL;
+					zond_pdf_document_get_sfp_pdf(pv->dd->zpdfd_part->zond_pdf_document)) {
+				Anbindung anbindung_akt = { 0 };
 
-				anbindung_dd = document_get_anbindung(pv->dd);
+				zpdfd_part_get_anbindung(pv->dd->zpdfd_part, &anbindung_akt);
 
-				if ((!anbindung && !anbindung_dd) ||
-						(anbindung && anbindung_dd &&
-						anbindung_1_gleich_2(*anbindung, *anbindung_dd))) {
+				if ((!anbindung && !pv->dd->zpdfd_part->has_anbindung) ||
+						(anbindung && pv->dd->zpdfd_part->has_anbindung &&
+						anbindung_1_gleich_2(*anbindung, anbindung_akt))) {
 
 					if (pos_pdf)
 						pos_von = *pos_pdf;
@@ -2230,21 +2229,16 @@ gint zond_treeview_oeffnen_internal_viewer(Projekt *zond, SondFilePartPDF* sfp_p
 
 					viewer_springen_zu_pos_pdf(pv, pos_von, 0.0);
 
-					g_free(anbindung_dd);
-
 					return 0;
 				}
-				else g_free(anbindung_dd);
 			}
 		}
 	}
 
 	DisplayedDocument *dd = document_new_displayed_document(sfp_pdf,
 			anbindung, error);
-	if (!dd && *error)
+	if (!dd)
 		ERROR_Z
-	else if (!dd)
-		return 0;
 
 	if (pos_pdf)
 		pos_von = *pos_pdf;

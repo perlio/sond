@@ -26,6 +26,7 @@
 
 #include "global_types.h"
 #include "99conv/pdf.h"
+#include "99conv/general.h"
 
 
 typedef struct {
@@ -36,6 +37,7 @@ typedef struct {
 	gboolean read_only;
 	gchar *working_copy;
 	GPtrArray *pages; //array von PdfDocumentPage*
+	GPtrArray* arr_zpdf_parts; //array von zpdf-parts
 	GArray *arr_journal;
 	gint ocr_num;
 } ZondPdfDocumentPrivate;
@@ -74,9 +76,6 @@ pdf_annot* pdf_document_page_annot_get_pdf_annot(PdfDocumentPageAnnot* pdpa) {
 gint pdf_document_page_get_index(PdfDocumentPage* pdf_document_page) {
 	guint index = 0;
 	GPtrArray* arr_pages = NULL;
-
-	if (pdf_document_page->page) //pdf_page geladen?
-		return pdf_document_page->page->super.number;
 
 	arr_pages = zond_pdf_document_get_arr_pages(pdf_document_page->document);
 	if (!g_ptr_array_find(arr_pages, pdf_document_page, &index)) return -1;
@@ -135,10 +134,11 @@ static void zond_pdf_document_finalize(GObject *self) {
 	g_array_unref(priv->arr_journal);
 
 	g_ptr_array_unref(priv->pages);
+	g_ptr_array_unref(priv->arr_zpdf_parts);
 	g_object_unref(priv->sfp_pdf);
 
 	if (priv->doc) {
-//		path = g_strdup(fz_stream_filename(priv->ctx, priv->doc->file));
+		path = g_strdup(fz_stream_filename(priv->ctx, priv->doc->file));
 		pdf_drop_document(priv->ctx, priv->doc);
 
 		if (!priv->read_only) {
@@ -318,10 +318,12 @@ static gint zond_pdf_document_init_page(ZondPdfDocument *self,
 
 	ctx = priv->ctx;
 
-	fz_try( ctx ) {
+	fz_try(ctx) {
 		pdf_obj* obj = NULL;
 
+		zond_pdf_document_mutex_lock(self);
 		obj = pdf_lookup_page_obj(ctx, priv->doc, index);
+
 		pdf_page_obj_transform(ctx, obj, &mediabox,
 				&page_ctm);
 		pdf_document_page->rect = fz_transform_rect(mediabox, page_ctm);
@@ -331,7 +333,9 @@ static gint zond_pdf_document_init_page(ZondPdfDocument *self,
 			pdf_document_page->rotate = pdf_to_int(ctx, rotate_obj);
 		//else: 0
 	}
-	fz_catch( ctx ) {
+	fz_always(ctx)
+		zond_pdf_document_mutex_unlock(self);
+	fz_catch(ctx) {
 		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
 				fz_caught(ctx), "%s\n%s", __func__, fz_caught_message(ctx));
 
@@ -475,6 +479,7 @@ static void zond_pdf_document_init(ZondPdfDocument *self) {
 
 	priv->pages = g_ptr_array_new_with_free_func(
 			(GDestroyNotify) zond_pdf_document_page_free);
+	priv->arr_zpdf_parts = g_ptr_array_new();
 	priv->arr_journal = g_array_new( FALSE, FALSE, sizeof(JournalEntry));
 	g_array_set_clear_func(priv->arr_journal,
 			(GDestroyNotify) zond_pdf_document_free_journal_entry);
@@ -670,8 +675,8 @@ void zond_pdf_document_mutex_unlock(const ZondPdfDocument *self) {
 }
 
 //wird nur aufgerufen, wenn alle threadpools aus sind!
-gint zond_pdf_document_insert_pages(ZondPdfDocument *zond_pdf_document,
-		gint pos, pdf_document *pdf_doc, GError **error) {
+static gint zond_pdf_document_insert_pages(ZondPdfDocument *zond_pdf_document,
+		gint pos, ZPDFDPart* zpdfd_part, pdf_document *pdf_doc, GError **error) {
 	gint rc = 0;
 	gint count = 0;
 	gchar* errmsg = NULL;
@@ -711,6 +716,8 @@ gint zond_pdf_document_insert_pages(ZondPdfDocument *zond_pdf_document,
 				i, error);
 		if (rc == -1)
 			ERROR_Z
+
+		pdf_document_page->inserted = zpdfd_part;
 	}
 
 	return 0;
@@ -729,3 +736,117 @@ void zond_pdf_document_set_ocr_num(ZondPdfDocument *self, gint ocr_num) {
 
 	return;
 }
+
+/**
+ * ZPDF_PART ist die Struktur, die Zugriff auf zond_pdf_document hat
+ */
+void zpdfd_part_drop(ZPDFDPart* zpdfd_part) {
+	if (zpdfd_part->ref > 1)
+		zpdfd_part->ref--;
+	else {
+		ZondPdfDocumentPrivate* zpdfd_priv =
+				zond_pdf_document_get_instance_private(zpdfd_part->zond_pdf_document);
+
+		if (!g_ptr_array_remove_fast(zpdfd_priv->arr_zpdf_parts, zpdfd_part))
+			g_warning("zpdfd_part nicht in Array vorhanden");
+		g_object_unref(zpdfd_part->zond_pdf_document);
+
+		g_free(zpdfd_part);
+	}
+
+	return;
+}
+
+ZPDFDPart* zpdfd_part_ref(ZPDFDPart* zpdfd_part) {
+	zpdfd_part->ref++;
+
+	return zpdfd_part;
+}
+
+void zpdfd_part_get_anbindung(ZPDFDPart* zpdfd_part, Anbindung* anbindung) {
+	anbindung->von.seite = pdf_document_page_get_index(zpdfd_part->first_page);
+	anbindung->von.index = anbindung->von.index;
+	anbindung->bis.seite = pdf_document_page_get_index(zpdfd_part->last_page);
+	anbindung->bis.index = anbindung->bis.index;
+
+	return;
+}
+
+ZPDFDPart* zpdfd_part_peek(SondFilePartPDF* sfp_pdf, Anbindung* anbindung,
+		GError** error) {
+	ZondPdfDocument* zpdfd = NULL;
+	ZondPdfDocumentPrivate* zpdfd_priv = NULL;
+	ZPDFDPart* zpdfd_part = NULL;
+
+	zpdfd = zond_pdf_document_open(sfp_pdf, (anbindung) ? anbindung->von.seite : 0,
+			(anbindung) ? anbindung->bis.seite : -1, error);
+	if (!zpdfd)
+		ERROR_Z_VAL(NULL)
+
+	zpdfd_priv = zond_pdf_document_get_instance_private(zpdfd);
+
+	//in Array von Parts suchen, ob schon vorhanden
+	for (guint i = 0; i < zpdfd_priv->arr_zpdf_parts->len; i++) {
+		ZPDFDPart* zpdfd_part_loop = NULL;
+
+		zpdfd_part_loop = g_ptr_array_index(zpdfd_priv->arr_zpdf_parts, i);
+
+		if (!anbindung) {
+			if (!zpdfd_part_loop->has_anbindung)
+				return zpdfd_part_ref(zpdfd_part_loop);
+		}
+		else {
+			Anbindung anbindung_part = { 0 };
+
+			zpdfd_part_get_anbindung(zpdfd_part_loop, &anbindung_part);
+
+			if (anbindung_1_gleich_2(*anbindung, anbindung_part))
+				return zpdfd_part_ref(zpdfd_part_loop);
+		}
+	}
+
+	//nicht gefunden, dann neu
+	zpdfd_part = g_malloc0(sizeof(ZPDFDPart));
+
+	zpdfd_part->zond_pdf_document = g_object_ref(zpdfd);
+
+	zpdfd_part->first_page = g_ptr_array_index(zpdfd_priv->pages,
+			(anbindung) ? anbindung->von.seite : 0);
+	zpdfd_part->first_index = (anbindung) ? anbindung->von.index : 0;
+	zpdfd_part->last_page = g_ptr_array_index(zpdfd_priv->pages,
+			(anbindung) ? anbindung->bis.seite : zpdfd_priv->pages->len - 1);
+	zpdfd_part->first_index = (anbindung) ? anbindung->von.index : 0;
+
+	zpdfd_part->has_anbindung = (anbindung) ? TRUE : FALSE;
+
+	zpdfd_part->ref = 1;
+
+	g_ptr_array_add(zpdfd_priv->arr_zpdf_parts, zpdfd_part);
+
+	return zpdfd_part;
+}
+
+gint zpdfd_part_insert_pages(ZPDFDPart* zpdfd_part, gint pos,
+		pdf_document* doc, GError** error) {
+	gint first_page = 0;
+	gint last_page = 0;
+	gint rc = 0;
+
+	first_page = pdf_document_page_get_index(zpdfd_part->first_page);
+	last_page = pdf_document_page_get_index(zpdfd_part->last_page);
+
+	if (pos > last_page) {
+		if (error) *error = g_error_new(ZOND_ERROR, 0,
+				"%s\nSeitenzahl außerhalb Abschnitt", __func__);
+
+		return -1;
+	}
+
+	rc = zond_pdf_document_insert_pages(zpdfd_part->zond_pdf_document, pos + first_page,
+			zpdfd_part, doc, error);
+	if (rc)
+		ERROR_Z
+
+	return 0;
+}
+

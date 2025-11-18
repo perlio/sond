@@ -16,9 +16,11 @@ void document_free_displayed_documents(DisplayedDocument *dd) {
 		return;
 
 	do {
-		DisplayedDocument *next = dd->next;
+		DisplayedDocument* next = NULL;
 
-		zond_pdf_document_close(dd->zond_pdf_document);
+		zpdfd_part_drop(dd->zpdfd_part);
+		next = dd->next;
+
 		g_free(dd);
 
 		dd = next;
@@ -29,68 +31,16 @@ void document_free_displayed_documents(DisplayedDocument *dd) {
 
 DisplayedDocument*
 document_new_displayed_document(SondFilePartPDF* sfp_pdf,
-		Anbindung *anbindung, GError **error) {
-	ZondPdfDocument *zond_pdf_document = NULL;
+		Anbindung *anbindung_akt, GError **error) {
+	ZPDFDPart* zpdfd_part = NULL;
 	DisplayedDocument *dd = NULL;
-	gchar* errmsg = NULL;
 
-	zond_pdf_document = zond_pdf_document_open(sfp_pdf,
-			(anbindung) ? anbindung->von.seite : 0,
-			(anbindung) ? anbindung->bis.seite : -1, error);
-	if (!zond_pdf_document) {
-		if (errmsg)
-			ERROR_Z_VAL(NULL)
-		else
-			return NULL; //Fehler: Passwort funktioniert nicht
-	}
+	zpdfd_part = zpdfd_part_peek(sfp_pdf, anbindung_akt, error);
+	if (!zpdfd_part)
+		ERROR_Z_VAL(NULL)
 
 	dd = g_malloc0(sizeof(DisplayedDocument));
-	dd->zond_pdf_document = zond_pdf_document;
-
-	if (anbindung) {
-		dd->first_page =
-				zond_pdf_document_get_pdf_document_page(zond_pdf_document, anbindung->von.seite);
-		dd->first_index = anbindung->von.index;
-
-		dd->last_page =
-				zond_pdf_document_get_pdf_document_page(zond_pdf_document, anbindung->bis.seite);
-		dd->last_index = anbindung->bis.index;
-	} else {
-		dd->first_page =
-			zond_pdf_document_get_pdf_document_page(zond_pdf_document, 0);
-		dd->first_index = 0; //überflüssig, wg. g_malloc0
-
-		dd->last_page = zond_pdf_document_get_pdf_document_page(zond_pdf_document,
-				zond_pdf_document_get_number_of_pages(zond_pdf_document) - 1);
-		dd->last_index = EOP;
-	}
+	dd->zpdfd_part = zpdfd_part;
 
 	return dd;
 }
-
-Anbindung* document_get_anbindung(DisplayedDocument* dd) {
-	gint seite_von = 0;
-	gint index_von = 0;
-	gint seite_bis = 0;
-	gint index_bis = 0;
-	Anbindung* anbindung = NULL;
-
-	seite_von = pdf_document_page_get_index(dd->first_page);
-	seite_bis = pdf_document_page_get_index(dd->last_page);
-	index_von = dd->first_index;
-	index_bis = dd->last_index;
-
-	if (seite_von == 0 && index_von == 0 &&
-			seite_bis == zond_pdf_document_get_number_of_pages(dd->zond_pdf_document) - 1 &&
-			index_bis == EOP) return NULL;
-
-	anbindung = g_malloc0(sizeof(Anbindung));
-
-	anbindung->von.seite = seite_von;
-	anbindung->von.index = index_von;
-	anbindung->bis.seite = seite_bis;
-	anbindung->bis.index = index_bis;
-
-	return anbindung;
-}
-

@@ -12,20 +12,13 @@ typedef struct _Pdf_Viewer PdfViewer;
 typedef struct _SondFilePartPDF SondFilePartPDF;
 
 typedef struct _Displayed_Document {
-	ZondPdfDocument *zond_pdf_document;
-	PdfDocumentPage* first_page;
-	gint first_index;
-	PdfDocumentPage* last_page;
-	gint last_index;
-	gboolean dirty;
-	struct _Displayed_Document *next;
+	ZPDFDPart* zpdfd_part;
+	DisplayedDocument* next;
 } DisplayedDocument;
 
 void document_free_displayed_documents(DisplayedDocument*);
 
 DisplayedDocument* document_new_displayed_document(SondFilePartPDF*, Anbindung*,
 		GError**);
-
-Anbindung* document_get_anbindung(DisplayedDocument*);
 
 	#endif // DOCUMENT_H_INCLUDED

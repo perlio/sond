@@ -182,6 +182,7 @@ typedef struct _Projekt {
 
 	//Hier sind alle geöffneten PdfViewer abgelegt
 	GPtrArray *arr_pv;
+	GPtrArray* arr_dd;
 	pdf_document *pv_clip;
 	pdf_document* ocr_font; //Dokument soll nur tesseract-Font "f-0-0" beinhalten
 } Projekt;

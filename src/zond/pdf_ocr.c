@@ -225,35 +225,14 @@ static gint pdf_ocr_get_f_0_0_obj_num(ZondPdfDocument* document,
 
 	//Ist er schon irgendwo (vlt. von früheren OCR-Läufen) im Dokument?
 	doc = zond_pdf_document_get_pdf_doc(document);
-	fz_try(ctx)
-		num_pages = pdf_count_pages(ctx, doc);
-	fz_catch(ctx)
-		ERROR_PDF
 
-	for (gint u = 0; u < num_pages; u++) {
-		pdf_obj* page_ref = NULL;
-		pdf_obj* resources = NULL;
-		pdf_obj* font_dict = NULL;
+	num = pdf_get_f_0_0_font(ctx, doc, error);
+	if (num == -1)
+		ERROR_Z
+	else if (num) //nicht 0
+		return num;
 
-		fz_try(ctx) {
-			pdf_obj* f_0_0 = NULL;
-
-			page_ref = pdf_lookup_page_obj(ctx, doc, u);
-			resources = pdf_dict_get_inheritable(ctx, page_ref,
-					PDF_NAME(Resources));
-			font_dict = pdf_dict_get(ctx, resources, PDF_NAME(Font));
-			f_0_0 = pdf_dict_gets(ctx, font_dict, "f-0-0");
-			if (f_0_0)
-				num = pdf_to_num(ctx, f_0_0);
-		}
-		fz_catch(ctx)
-			ERROR_PDF
-
-		if (num) //f-0-0 gefunden
-			return num;
-	}
-
-	//auch nicht
+	//auch nicht - dann kopieren
 	graft_map = pdf_new_graft_map(ctx, doc); //keine exception
 
 	//Nun Text-Pdf

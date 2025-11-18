@@ -563,7 +563,7 @@ gint zond_dbase_commit(ZondDBase *zond_dbase, GError **error) {
 	return 0;
 }
 
-gint zond_dbase_rollback(ZondDBase *zond_dbase, GError **error) {
+static gint do_zond_dbase_rollback(ZondDBase *zond_dbase, GError **error) {
 	gint rc = 0;
 	sqlite3_stmt **stmt = NULL;
 
@@ -588,6 +588,31 @@ gint zond_dbase_rollback(ZondDBase *zond_dbase, GError **error) {
 	}
 
 	return 0;
+}
+
+static gint restart_con(ZondDBase* zond_dbase, GError** error) {
+	//ToDo: Funktion schreiben
+
+	return 0;
+}
+
+void zond_dbase_rollback(ZondDBase* zond_dbase, GError** error) {
+	gint rc = 0;
+
+	rc = do_zond_dbase_rollback(zond_dbase, error);
+	if (rc) {
+		gint ret = 0;
+		GError* error_int = NULL;
+
+		g_prefix_error(error, "%s\n", __func__);
+
+		ret = restart_con(zond_dbase, &error_int);
+		if (ret)
+			g_error("Fehler - Rollback gescheitert: %s - Neustart DB-Con gescheitert: %s",
+					(*error)->message, error_int->message);
+	} //Wenn Neustart erfolgreich, dann tun wir so, als wäre Fehler beseitigt
+
+	return;
 }
 
 static gint zond_dbase_rollback_to_statement(ZondDBase *zond_dbase,

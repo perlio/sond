@@ -11,6 +11,8 @@ typedef struct _GtkWindow GtkWindow;
 typedef struct _GtkWidget GtkWidget;
 typedef struct TessBaseAPI TessBaseAPI;
 typedef struct TessResultRenderer TessResultRenderer;
+typedef struct _Displayed_Document DisplayedDocument;
+typedef struct _ZPDFD_Part ZPDFDPart;
 
 typedef int gboolean;
 typedef char gchar;
@@ -34,11 +36,15 @@ void anbindung_parse_file_section(gchar const*, Anbindung*);
 
 void anbindung_build_file_section(Anbindung, gchar**);
 
-void anbindung_aktualisieren_insert_pages(GArray*, Anbindung*);
-
-void anbindung_aktualisieren(GArray*, Anbindung*);
+void anbindung_aktualisieren(ZondPdfDocument*, Anbindung*);
 
 gchar* anbindung_to_human_readable(Anbindung*);
+
+void anbindung_get_orig(ZondPdfDocument*, Anbindung*);
+
+void anbindung_korrigieren(ZPDFDPart*, Anbindung*);
+
+void anbindung_aktualisieren(ZondPdfDocument*, Anbindung*);
 
 #endif // GENERAL_H_INCLUDED
 

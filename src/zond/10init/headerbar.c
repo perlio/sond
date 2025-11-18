@@ -300,7 +300,6 @@ static void cb_item_textsuche(GtkMenuItem *item, gpointer data) {
 
 static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 	gint rc = 0;
-	GError *error = NULL;
 	gchar* errmsg = NULL;
 	InfoWindow *info_window = NULL;
 	gchar *message = NULL;
@@ -331,6 +330,8 @@ static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 
 	for (gint i = 0; i < arr_sfp->len; i++) {
 		SondFilePartPDF* sfp_pdf = NULL;
+		ZondPdfDocument* zpdfd = NULL;
+		GError* error = NULL;
 
 		sfp_pdf = g_ptr_array_index(arr_sfp, i);
 
@@ -344,21 +345,17 @@ static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 			continue;
 		}
 
-		DisplayedDocument *dd = document_new_displayed_document(sfp_pdf, NULL,
-				&error);
-		if (!dd) {
-			if (error) {
-				info_window_set_message(info_window, "OCR nicht möglich - "
-						"Fehler bei Aufruf document_new_displayed_document:\n");
-				info_window_set_message(info_window, error->message);
-				g_error_free(error);
-			}
+		zpdfd = zond_pdf_document_open(sfp_pdf, 0, -1, &error);
+		if (!zpdfd) {
+			info_window_set_message(info_window, "OCR nicht möglich - "
+					"Fehler bei Aufruf document_new_displayed_document:\n");
+					info_window_set_message(info_window, error->message);
+			g_error_free(error);
 
 			continue;
 		}
 
-		GPtrArray *arr_pdf_document_pages = zond_pdf_document_get_arr_pages(
-				dd->zond_pdf_document);
+		GPtrArray *arr_pdf_document_pages = zond_pdf_document_get_arr_pages(zpdfd);
 		GPtrArray *arr_document_pages_ocr = g_ptr_array_sized_new(
 				arr_pdf_document_pages->len);
 		for (gint u = 0; u < arr_pdf_document_pages->len; u++)
@@ -373,27 +370,24 @@ static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 			g_free(errmsg);
 			info_window_set_message(info_window, message);
 			g_free(message);
-
-			document_free_displayed_documents(dd);
+			zond_pdf_document_close(zpdfd);
 
 			continue;
 		}
 
-		GError* error = NULL;
-		rc = zond_pdf_document_save(dd->zond_pdf_document, &error);
+		rc = zond_pdf_document_save(zpdfd, &error);
 		if (rc) {
 			message = g_strdup_printf(
 					"Fehler bei Aufruf zond_pdf_document_save:\n%s", error->message);
 			g_error_free(error);
 			info_window_set_message(info_window, message);
 			g_free(message);
-
-			document_free_displayed_documents(dd);
+			zond_pdf_document_close(zpdfd);
 
 			continue;
 		}
 
-		document_free_displayed_documents(dd);
+		zond_pdf_document_close(zpdfd);
 	}
 
 	info_window_close(info_window);

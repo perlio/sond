@@ -165,103 +165,25 @@ gchar* anbindung_to_human_readable(Anbindung* anbindung) {
 	return text;
 }
 
-typedef struct _Inserts {
-	gint page_doc;
-	JournalEntry entry;
-} Inserts;
+void anbindung_get_orig(ZondPdfDocument* zpdfd, Anbindung* anbindung) {
+	Anbindung anbindung_akt = { 0 };
 
-void anbindung_aktualisieren_insert_pages(GArray* arr_journal, Anbindung* anbindung) {
-	GArray* arr_insertions = NULL;
+	if (!anbindung)
+		return;
 
-	if (!anbindung) return;
+	anbindung_akt = *anbindung;
 
-	arr_insertions = g_array_new(FALSE, FALSE, sizeof(Inserts));
+	for (guint i = 0; i < zond_pdf_document_get_number_of_pages(zpdfd); i++) {
+		PdfDocumentPage* pdfp = NULL;
 
-	//erst alle entries mit Type == PAGES_INSERTED aussondern
-	for (gint i = 0; i < arr_journal->len; i++) {
-		JournalEntry entry = { 0 };
+		pdfp = zond_pdf_document_get_pdf_document_page(zpdfd, i);
 
-		entry = g_array_index(arr_journal, JournalEntry, i);
-
-		if (entry.type == JOURNAL_TYPE_PAGES_INSERTED) {
-			Inserts insert = { 0 };
-			gint u = 0;
-
-			insert.page_doc = pdf_document_page_get_index(entry.pdf_document_page);
-			insert.entry = entry;
-
-			//direkt an richtiger Stelle einsortieren
-			for (u = 0; u <= arr_insertions->len; u++) {
-				Inserts insert_loop = { 0 };
-
-				if (u == arr_insertions->len) break;
-
-				insert_loop = g_array_index(arr_insertions, Inserts, u);
-				if (insert.page_doc  <= insert_loop.page_doc) break;
-			}
-
-			g_array_insert_val(arr_insertions, u, insert);
-		}
-	}
-
-	//dann neu durchlaufen lassen und Anbindung ändern
-	for (gint i = 0; i < arr_insertions->len; i++) {
-		Inserts insert = { 0 };
-		gboolean ende_versch = FALSE;
-
-		insert = g_array_index(arr_insertions, Inserts, i);
-		if (insert.page_doc < anbindung->von.seite) {
-			anbindung->von.seite += insert.entry.pages_inserted.count;
-			ende_versch = TRUE;
-		} else if (insert.page_doc == anbindung->von.seite) { //Randlage Anfang
-			if (!((insert.entry.pages_inserted.pos_dd == -1) && //linker Rand
-					//dann prüfen ob dd, welches eingefügt wurde, genauso groß
-					(insert.entry.pages_inserted.size_dd_pages == //_is_pdf_punkt is ejal
-					anbindung->bis.seite - anbindung->von.seite) &&
-					(insert.entry.pages_inserted.size_dd_index == anbindung->bis.index)))
-				anbindung->von.seite += insert.entry.pages_inserted.count; //auch Anfang verschieben
-
-			ende_versch = TRUE;
-		}
-		else if (insert.page_doc <= anbindung->bis.seite)
-			ende_versch = TRUE;
-		else if (insert.page_doc == anbindung->bis.seite + 1) { //Randlage Ende
-			if (insert.entry.pages_inserted.pos_dd == 1 &&
-					insert.entry.pages_inserted.size_dd_pages == //_is_pdf_punkt is ejal
-					anbindung->bis.seite - anbindung->von.seite &&
-					insert.entry.pages_inserted.size_dd_index == anbindung->von.index)
-				ende_versch = TRUE;
-		}
-
-		if (ende_versch && !anbindung_is_pdf_punkt(*anbindung))
-			anbindung->bis.seite += insert.entry.pages_inserted.count;
-	}
-
-	g_array_unref(arr_insertions);
-
-	return;
-}
-
-static void anbindung_aktualisieren_delete_page(GArray* arr_journal, Anbindung* anbindung) {
-	if (!anbindung) return;
-
-	for (gint i = 0; i < arr_journal->len; i++) {
-		JournalEntry entry = { 0 };
-
-		entry = g_array_index(arr_journal, JournalEntry, i);
-
-		if (entry.type == JOURNAL_TYPE_PAGE_DELETED) {
-			gint page_doc = 0;
-
-			page_doc = pdf_document_page_get_index(entry.pdf_document_page);
-
-			if (page_doc < anbindung->von.seite) {
+		if (pdfp->inserted) {
+			if (i <= anbindung_akt.von.seite) {
 				anbindung->von.seite--;
-
-				if (!anbindung_is_pdf_punkt(*anbindung))
-					anbindung->bis.seite--;
-			} else if (!anbindung_is_pdf_punkt(*anbindung) &&
-					page_doc <= anbindung->bis.seite)
+				anbindung->bis.seite--;
+			}
+			else if (i <= anbindung_akt.bis.seite)
 				anbindung->bis.seite--;
 		}
 	}
@@ -269,10 +191,84 @@ static void anbindung_aktualisieren_delete_page(GArray* arr_journal, Anbindung* 
 	return;
 }
 
-void anbindung_aktualisieren(GArray* arr_journal,
-		Anbindung* anbindung) {
-	anbindung_aktualisieren_insert_pages(arr_journal, anbindung);
-	anbindung_aktualisieren_delete_page(arr_journal, anbindung);
+//aus aktueller Anbindung diejenige errechnen, die sich nach Speichern von zpdfd_part ergibt
+void anbindung_korrigieren(ZPDFDPart* zpdfd_part, Anbindung* anbindung) {
+	GPtrArray* arr_pages = NULL;
+	Anbindung anbindung_zpdfd_part = { 0 };
+
+	zpdfd_part_get_anbindung(zpdfd_part, &anbindung_zpdfd_part);
+	arr_pages = zond_pdf_document_get_arr_pages(zpdfd_part->zond_pdf_document);
+
+	for (guint i = anbindung->bis.seite; i >= 0; i--) {
+		PdfDocumentPage* pdfp = NULL;
+
+		pdfp = g_ptr_array_index(arr_pages, i);
+
+		//innerhalb des zu speichernde zpdfd_parts?
+		if (i >= anbindung_zpdfd_part.von.seite && i <= anbindung_zpdfd_part.bis.seite) {
+			//nur gelöschte Seiten herausrechnen
+			if (pdfp->deleted) {
+				if (i <= anbindung->von.seite) {
+					anbindung->von.seite--;
+					anbindung->bis.seite--;
+				}
+				else if (i <= anbindung->bis.seite)
+					anbindung->bis.seite--;
+			}
+		}
+		else {//außerhalb: eingefügte Seiten
+			if (pdfp->inserted) { //weil die sind ja zuvor hinzugerechnet worden
+				if (i <= anbindung->von.seite) {
+					anbindung->von.seite--;
+					anbindung->bis.seite--;
+				}
+				else if (i <= anbindung->bis.seite)
+					anbindung->bis.seite--;
+			}
+		}
+	}
+
+	return;
+}
+
+void anbindung_aktualisieren(ZondPdfDocument* zpdfd, Anbindung* anbindung) {
+	GPtrArray* arr_pages = NULL;
+	Anbindung anbindung_orig = { 0 };
+
+	arr_pages = zond_pdf_document_get_arr_pages(zpdfd);
+
+	for (guint i = 0; i < arr_pages->len; i++) {
+		PdfDocumentPage* pdfp = NULL;
+
+		pdfp = g_ptr_array_index(arr_pages, i);
+
+		if (pdfp->inserted) {
+			Anbindung anbindung_zpdfd_part = { 0 };
+			Anbindung anbindung_zpdfd_part_orig = { 0 };
+
+			zpdfd_part_get_anbindung(pdfp->inserted, &anbindung_zpdfd_part);
+			anbindung_zpdfd_part_orig = anbindung_zpdfd_part;
+			anbindung_get_orig(zpdfd, &anbindung_zpdfd_part_orig);
+
+			if (i < anbindung_zpdfd_part.von.seite) {
+				anbindung->von.seite++;
+				anbindung->bis.seite++;
+			}
+			else if (i == anbindung_zpdfd_part.von.seite) {
+				if (!anbindung_1_gleich_2(anbindung_orig, anbindung_zpdfd_part_orig) &&
+						!anbindung_1_eltern_von_2(anbindung_orig, anbindung_zpdfd_part_orig))
+					anbindung->von.seite++;
+				anbindung->bis.seite++;
+			}
+			else if (i < anbindung_zpdfd_part.bis.seite)
+				anbindung->bis.seite++;
+			else if (i == anbindung_zpdfd_part.bis.seite) {
+				if (!anbindung_1_gleich_2(anbindung_orig, anbindung_zpdfd_part_orig) &&
+						!anbindung_1_eltern_von_2(anbindung_orig, anbindung_zpdfd_part_orig))
+					anbindung->bis.seite++;
+			}
+		}
+	}
 
 	return;
 }

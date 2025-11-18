@@ -46,33 +46,17 @@ gint dbase_zond_begin(DBaseZond* dbase_zond, GError** error) {
 		ERROR_Z
 
 	rc = zond_dbase_begin(dbase_zond->zond_dbase_work, error);
-	if (rc) {
-		gint ret = 0;
-		GError* error_int = NULL;
-
-		ret = zond_dbase_rollback(dbase_zond->zond_dbase_store, &error_int);
-		if (ret)
-			g_error("Schwerer Ausnahmefehler - Projekt wird beendet\n\n"
-					"%s\n\nRollback gescheitert:\n%s", (*error)->message, error_int->message);
-
-		ERROR_Z
-	}
+	if (rc)
+		ERROR_ROLLBACK_Z(dbase_zond->zond_dbase_store)
 
 	return 0;
 }
 
-gint dbase_zond_rollback(DBaseZond* dbase_zond, GError** error) {
-	gint rc = 0;
+void dbase_zond_rollback(DBaseZond* dbase_zond, GError** error) {
+	zond_dbase_rollback(dbase_zond->zond_dbase_store, error);
+	zond_dbase_rollback(dbase_zond->zond_dbase_work, error);
 
-	rc = zond_dbase_rollback(dbase_zond->zond_dbase_store, error);
-	if (rc)
-		ERROR_Z
-
-	rc = zond_dbase_rollback(dbase_zond->zond_dbase_work, error);
-	if (rc)
-		ERROR_Z
-
-	return 0;
+	return;
 }
 
 gint dbase_zond_commit(DBaseZond* dbase_zond, GError** error) {
@@ -80,35 +64,33 @@ gint dbase_zond_commit(DBaseZond* dbase_zond, GError** error) {
 
 	rc = zond_dbase_commit(dbase_zond->zond_dbase_store, error);
 	if (rc) {
-		gint ret = 0;
-		GError* error_int = NULL;
+		dbase_zond_rollback(dbase_zond, error);
 
-		ret = dbase_zond_rollback(dbase_zond, &error_int);
-		if (ret)
-			g_error("COMMIT fehlgeschlagen:\n%s\n\nRollback ebenfalz:\n%s",
-					(*error)->message, error_int->message);
-		else
-			ERROR_Z
+		ERROR_Z
 	}
 
 	rc = zond_dbase_commit(dbase_zond->zond_dbase_work, error);
-	if (rc) {
-		gint ret = 0;
-		GError* error_int = NULL;
-
-		ret = dbase_zond_rollback(dbase_zond, &error_int);
-		if (ret)
-			g_error("COMMIT fehlgeschlagen:\n%s\n\nRollback ebenfalz:\n%s",
-					(*error)->message, error_int->message);
-		else
-			ERROR_Z
-	}
+	if (rc) //wenn 2. commit fehlschlägt, ist Katastrophe
+		g_error("Katastrophe - Datenbanken inkonsistent - 2. commit: %s", (*error)->message);
 
 	return 0;
 }
 
-static gint dbase_zond_anpassen_anbindung(ZondDBase* zond_dbase,
-		GArray* arr_journal, GArray* arr_sections, GError** error) {
+static gint dbase_zond_update_section_dbase(ZondDBase* zond_dbase,
+		DisplayedDocument* dd, GError** error) {
+	gint rc = 0;
+	g_autoptr(GArray) arr_sections = NULL;
+	SondFilePartPDF* sfp_pdf = NULL;
+	gchar* filepart = NULL;
+
+	sfp_pdf = zond_pdf_document_get_sfp_pdf(dd->zpdfd_part->zond_pdf_document);
+	filepart = sond_file_part_get_filepart(SOND_FILE_PART(sfp_pdf));
+
+	rc = zond_dbase_get_arr_sections(zond_dbase, filepart, &arr_sections, error);
+	g_free(filepart);
+	if (rc)
+		ERROR_Z
+
 	for (gint i = 0; i < arr_sections->len; i++) {
 		Section section = { 0 };
 		Anbindung anbindung_int = { 0 };
@@ -118,7 +100,9 @@ static gint dbase_zond_anpassen_anbindung(ZondDBase* zond_dbase,
 		section = g_array_index(arr_sections, Section, i);
 		anbindung_parse_file_section(section.section, &anbindung_int);
 
-		anbindung_aktualisieren(arr_journal, &anbindung_int);
+		anbindung_aktualisieren(dd->zpdfd_part->zond_pdf_document, &anbindung_int);
+		//rechnet die Änderungen wieder heraus, die beim Speichern entfallen
+		anbindung_korrigieren(dd->zpdfd_part, &anbindung_int);
 
 		anbindung_build_file_section(anbindung_int, &section_new);
 		rc = zond_dbase_update_section(zond_dbase, section.ID, section_new, error);
@@ -130,41 +114,17 @@ static gint dbase_zond_anpassen_anbindung(ZondDBase* zond_dbase,
 	return 0;
 }
 
-static gint dbase_zond_update_section_dbase(ZondDBase* zond_dbase,
-		GArray* arr_journal, ZondPdfDocument* zpdfd, GError** error) {
-	gint rc = 0;
-	GArray* arr_sections = NULL;
-	SondFilePartPDF* sfp_pdf = NULL;
-	gchar* filepart = NULL;
-
-	sfp_pdf = zond_pdf_document_get_sfp_pdf(zpdfd);
-	filepart = sond_file_part_get_filepart(SOND_FILE_PART(sfp_pdf));
-
-	rc = zond_dbase_get_arr_sections(zond_dbase, filepart, &arr_sections, error);
-	g_free(filepart);
-	if (rc)
-		ERROR_Z
-
-	rc = dbase_zond_anpassen_anbindung(zond_dbase, arr_journal,
-			arr_sections, error);
-	g_array_unref(arr_sections);
-	if (rc)
-		ERROR_Z
-
-	return 0;
-}
-
-gint dbase_zond_update_section(DBaseZond* dbase_zond, GArray* arr_journal,
-		ZondPdfDocument* zpdfd, GError** error) {
+gint dbase_zond_update_sections(DBaseZond* dbase_zond, DisplayedDocument* dd,
+		GError** error) {
 	gint rc = 0;
 
 	rc = dbase_zond_update_section_dbase(dbase_zond->zond_dbase_store,
-			arr_journal, zpdfd, error);
+			dd, error);
 	if (rc)
 		ERROR_Z
 
 	rc = dbase_zond_update_section_dbase(dbase_zond->zond_dbase_work,
-			arr_journal, zpdfd, error);
+			dd, error);
 	if (rc)
 		ERROR_Z
 

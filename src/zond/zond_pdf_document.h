@@ -10,6 +10,7 @@
 typedef struct _Anbindung Anbindung;
 typedef struct _Displayed_Document DisplayedDocument;
 typedef struct _SondFilePartPDF SondFilePartPDF;
+typedef struct _ZPDFD_Part ZPDFDPart;
 
 G_BEGIN_DECLS
 
@@ -21,7 +22,6 @@ typedef struct _Pdf_Viewer PdfViewer;
 
 typedef struct _Pdf_Document_Page {
 	ZondPdfDocument *document; //erhält keine ref - muß das mal mit dem const kapieren...
-	pdf_obj *obj;
 	fz_rect rect;
 	gint rotate;
 	pdf_page *page;
@@ -30,8 +30,20 @@ typedef struct _Pdf_Document_Page {
 	gint thread;
 	PdfViewer* thread_pv;
 	GPtrArray *arr_annots;
-	gboolean to_be_deleted;
+	ZPDFDPart* inserted;
+	gboolean deleted;
 } PdfDocumentPage;
+
+typedef struct _ZPDFD_Part {
+	gint ref;
+	ZondPdfDocument *zond_pdf_document;
+	gboolean has_anbindung;
+	PdfDocumentPage* first_page;
+	gint first_index;
+	PdfDocumentPage* last_page;
+	gint last_index;
+	gboolean dirty;
+} ZPDFDPart;
 
 typedef struct _Annot_Text_Markup {
 	GArray *arr_quads;
@@ -59,9 +71,7 @@ typedef struct _Pdf_Document_Page_Annot {
 
 struct PagesInserted {
 	gint count;
-	gint pos_dd; //-1: linke Seite; 0 mittendrin; 1: rechte Seite
-	gint size_dd_pages; //ganze pages bis zur anderen Seite
-	gint size_dd_index; //von/bis-index der letzten page der anderen Seite
+	ZPDFDPart* zpdfd_part;
 };
 struct AnnotChanged {
 	PdfDocumentPageAnnot* pdf_document_page_annot;
@@ -69,7 +79,7 @@ struct AnnotChanged {
 	Annot annot_after;
 };
 struct Rotate {
-	gint rotate;
+	gint winkel;
 };
 struct OCR {
 	fz_buffer* buf_old;
@@ -152,14 +162,21 @@ void zond_pdf_document_mutex_lock(const ZondPdfDocument*);
 
 void zond_pdf_document_mutex_unlock(const ZondPdfDocument*);
 
-gint zond_pdf_document_insert_pages(ZondPdfDocument*, gint,
-		pdf_document*, GError**);
-
 gint zond_pdf_document_get_ocr_num(ZondPdfDocument*);
 
 void zond_pdf_document_set_ocr_num(ZondPdfDocument*, gint );
 
-	G_END_DECLS
+void zpdfd_part_drop(ZPDFDPart*);
+
+void zpdfd_part_get_anbindung(ZPDFDPart*, Anbindung*);
+
+ZPDFDPart* zpdfd_part_ref(ZPDFDPart*);
+
+ZPDFDPart* zpdfd_part_peek(SondFilePartPDF*, Anbindung*, GError** );
+
+gint zpdfd_part_insert_pages(ZPDFDPart*, gint, pdf_document*, GError**);
+
+G_END_DECLS
 
 #endif // ZOND_PDF_DOCUMENT_H_INCLUDED
 

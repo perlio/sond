@@ -21,27 +21,8 @@ typedef enum {
                     return -1; }
 
 #define ERROR_ROLLBACK_Z(zond_dbase) \
-          { GError* error_tmp; \
-            \
-            gint rc_rollback = 0; \
-            g_prefix_error( error, "%s\n", __func__ ); \
-            \
-            rc_rollback = zond_dbase_rollback( zond_dbase, &error_tmp); \
-            if ( error ) \
-            { \
-                if ( !rc_rollback ) (*error)->message = add_string( (*error)->message, \
-                        g_strdup( "\n\nRollback durchgeführt" ) ); \
-                else \
-                { \
-                    (*error)->message = add_string( (*error)->message, \
-                            g_strdup_printf( "\n\nRollback fehlgeschlagen\n\n" \
-                            "Bei Aufruf dbase_rollback:\n%s\n\nDatenbankverbindung trennen", \
-                            error_tmp->message ) ); \
-                    g_error_free( error_tmp ); \
-                } \
-            } \
-            \
-            return -1; }
+          { zond_dbase_rollback( zond_dbase, error); \
+            ERROR_Z }
 
 typedef struct _Section {
 	gint ID;
@@ -84,7 +65,7 @@ gint zond_dbase_begin(ZondDBase*, GError**);
 
 gint zond_dbase_commit(ZondDBase*, GError**);
 
-gint zond_dbase_rollback(ZondDBase*, GError**);
+void zond_dbase_rollback(ZondDBase*, GError**);
 
 gint zond_dbase_test_path(ZondDBase*, const gchar*, GError**);
 

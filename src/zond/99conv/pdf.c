@@ -739,9 +739,10 @@ pdf_annot* pdf_annot_lookup_obj(fz_context *ctx, pdf_page* pdf_page, pdf_obj *ob
 	return pdf_annot;
 }
 
-gint pdf_page_rotate(fz_context *ctx, pdf_obj *page_obj, gint rotate,
+gint pdf_page_rotate(fz_context *ctx, pdf_obj *page_obj, gint winkel,
 		GError** error) {
 	pdf_obj *rotate_obj = NULL;
+	gint rotate = 0;
 
 	fz_try(ctx)
 		rotate_obj = pdf_dict_get_inheritable(ctx, page_obj, PDF_NAME(Rotate));
@@ -753,7 +754,7 @@ gint pdf_page_rotate(fz_context *ctx, pdf_obj *page_obj, gint rotate,
 	}
 
 	if (!rotate_obj) {
-		rotate_obj = pdf_new_int(ctx, (int64_t) rotate);
+		rotate_obj = pdf_new_int(ctx, (int64_t) winkel);
 		fz_try(ctx)
 			pdf_dict_put_drop(ctx, page_obj, PDF_NAME(Rotate), rotate_obj);
 		fz_catch(ctx) {
@@ -764,8 +765,61 @@ gint pdf_page_rotate(fz_context *ctx, pdf_obj *page_obj, gint rotate,
 
 			return -1;
 		}
-	} else
+	} else {
+		fz_try(ctx)
+			rotate = pdf_to_int(ctx, rotate_obj);
+		fz_catch(ctx) {
+			if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
+					fz_caught(ctx), "%s\n%s", __func__,
+					fz_caught_message(ctx));
+
+			return -1;
+		}
+
+		rotate = rotate + winkel;
+		if (rotate < 0)
+			rotate += 360;
+		else if (rotate > 360)
+			rotate -= 360;
+		else if (rotate == 360)
+			rotate = 0;
+
 		pdf_set_int(ctx, rotate_obj, (int64_t) rotate);
+	}
+
+	return rotate;
+}
+
+gint pdf_get_f_0_0_font(fz_context* ctx, pdf_document* doc, GError** error) {
+	gint num_pages = 0;
+
+	fz_try(ctx)
+		num_pages = pdf_count_pages(ctx, doc);
+	fz_catch(ctx)
+		ERROR_PDF
+
+	for (gint u = 0; u < num_pages; u++) {
+		pdf_obj* page_ref = NULL;
+		pdf_obj* resources = NULL;
+		pdf_obj* font_dict = NULL;
+
+		fz_try(ctx) {
+			pdf_obj* f_0_0 = NULL;
+
+			page_ref = pdf_lookup_page_obj(ctx, doc, u);
+			resources = pdf_dict_get_inheritable(ctx, page_ref,
+					PDF_NAME(Resources));
+			font_dict = pdf_dict_get(ctx, resources, PDF_NAME(Font));
+			f_0_0 = pdf_dict_gets(ctx, font_dict, "f-0-0");
+			if (f_0_0)
+				num = pdf_to_num(ctx, f_0_0);
+		}
+		fz_catch(ctx)
+			ERROR_PDF
+
+		if (num) //f-0-0 gefunden
+			return num;
+	}
 
 	return 0;
 }
