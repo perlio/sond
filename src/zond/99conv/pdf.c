@@ -739,6 +739,17 @@ pdf_annot* pdf_annot_lookup_obj(fz_context *ctx, pdf_page* pdf_page, pdf_obj *ob
 	return pdf_annot;
 }
 
+pdf_annot* pdf_annot_lookup_index(fz_context* ctx, pdf_page* pdf_page, gint index) {
+	pdf_annot *pdf_annot = NULL;
+
+	pdf_annot = pdf_first_annot(ctx, pdf_page); //kein Fehler
+
+	for (gint i = 0; i < index; i++)
+		pdf_annot = pdf_next_annot(ctx, pdf_annot);
+
+	return pdf_annot;
+}
+
 gint pdf_page_rotate(fz_context *ctx, pdf_obj *page_obj, gint winkel,
 		GError** error) {
 	pdf_obj *rotate_obj = NULL;
@@ -802,6 +813,7 @@ gint pdf_get_f_0_0_font(fz_context* ctx, pdf_document* doc, GError** error) {
 		pdf_obj* page_ref = NULL;
 		pdf_obj* resources = NULL;
 		pdf_obj* font_dict = NULL;
+		gint num = 0;
 
 		fz_try(ctx) {
 			pdf_obj* f_0_0 = NULL;

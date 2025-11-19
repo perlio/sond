@@ -783,8 +783,7 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 	Anbindung anbindung = { 0 };
 	Anbindung anbindung_orig = { 0 };
 	gint page_orig = 0;
-	gint first_page = 0;
-	gint last_page = 0;
+	gint num = 0; //für ocr-Font - nur einmal suchen oder kopieren
 
 	//jetzt speichern.
 	//Dafür ersemal rausfinden,
@@ -793,6 +792,8 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 	anbindung_orig = anbindung;
 	anbindung_get_orig(dd->zpdfd_part->zond_pdf_document, &anbindung_orig);
 	page_orig = anbindung_orig.bis.seite;
+
+	arr_journal = zond_pdf_document_get_arr_journal(dd->zpdfd_part->zond_pdf_document);
 
 	for (guint i = anbindung.bis.seite; i >= anbindung.von.seite; i--) {
 		PdfDocumentPage* pdfp = NULL;
@@ -812,105 +813,137 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 			zond_pdf_document_mutex_lock(dd->zpdfd_part->zond_pdf_document);
 			rc = pdf_copy_page(ctx,
 					zond_pdf_document_get_pdf_doc(dd->zpdfd_part->zond_pdf_document),
-					i, i, doc, page_orig, errmsg);
+					i, i, doc, page_orig, &errmsg);
 			zond_pdf_document_mutex_unlock(dd->zpdfd_part->zond_pdf_document);
-			if (rc)
-				ERROR_Z
+			if (rc) {
+				if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\n%s",
+						__func__, errmsg);
+				g_free(errmsg);
+
+				return -1;
+			}
 		}
 		else
 			page_orig--;
-	}
 
-	//Jetzt entries durchgehen
-	first_page = pdf_document_page_get_index(dd->zpdfd_part->first_page);
-	last_page = pdf_document_page_get_index(dd->zpdfd_part->last_index);
-	arr_journal = zond_pdf_document_get_arr_journal(dd->zpdfd_part->zond_pdf_document);
-	for (guint i = 0; i < arr_journal->len; i++) {
-		JournalEntry entry = { 0 };
-		gint num = 0; //für ocr-Font - nur einmal suchen oder kopieren
-		pdf_obj* page_obj = NULL;
+		//entries durchgehen und ggf. einpflegen
+		for (guint u = 0; u < arr_journal->len; u++) {
+			JournalEntry entry = { 0 };
 
-		entry = g_ptr_array_index(arr_journal, i);
-		if (entry.type == JOURNAL_TYPE_PAGES_INSERTED ||
-				entry.type == JOURNAL_TYPE_PAGE_DELETED)
-			continue;
+			entry = g_array_index(arr_journal, JournalEntry, u);
 
-		if (!viewer_entry_in_dd(entry, first_page, dd->zpdfd_part->first_index,
-				last_page, dd->zpdfd_part->last_index))
-			continue;
+			if (pdfp != entry.pdf_document_page)
+				continue;
 
-		if (entry.pdf_document_page->deleted)
-			continue;
+			if (entry.type == JOURNAL_TYPE_PAGES_INSERTED ||
+					entry.type == JOURNAL_TYPE_PAGE_DELETED)
+				continue;
 
-		page_orig = pdf_document_page_get_orig(entry.pdf_document_page);
+			if (entry.pdf_document_page->deleted)
+				continue;
 
-		fz_try(ctx)
-			page_obj = pdf_lookup_page_obj(ctx, doc, page_orig);
-		fz_catch(ctx)
-			ERROR_PDF
+			if (entry.type == JOURNAL_TYPE_ROTATE ||
+					entry.type == JOURNAL_TYPE_OCR) {
+				pdf_obj* page_obj = NULL;
 
-		if (entry.type == JOURNAL_TYPE_ROTATE) {
-			gint rc = 0;
+				fz_try(ctx)
+					page_obj = pdf_lookup_page_obj(ctx, doc, page_orig);
+				fz_catch(ctx)
+					ERROR_PDF
 
-			rc = pdf_page_rotate(ctx, obj, entry.rotate.winkel, error);
-			if (rc)
-				ERROR_Z
-		}
-		else if (entry.type == JOURNAL_TYPE_OCR) {
-			gint rc = 0;
-			gchar* errmsg = NULL;
+				if (entry.type == JOURNAL_TYPE_ROTATE)
+				{
+					gint rc = 0;
 
-			if (!num) {
-				num = pdf_get_f_0_0_font(ctx, doc, error);
-				if (num == -1)
-					ERROR_Z
-				else if (!num) {
-					pdf_graft_map* graft_map = NULL;
-					pdf_obj* obj = NULL;
+					rc = pdf_page_rotate(ctx, page_obj, entry.rotate.winkel, error);
+					if (rc)
+						ERROR_Z
+				}
+				else if (entry.type == JOURNAL_TYPE_OCR) {
+					gint rc = 0;
+					gchar* errmsg = NULL;
 
-					num = zond_pdf_document_get_ocr_num(dd->zpdfd_part->zond_pdf_document);
 					if (!num) {
-						if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\n"
-								"Tesseract-Font nicht in Dokument gespeichert", __func__);
+						num = pdf_get_f_0_0_font(ctx, doc, error);
+						if (num == -1)
+							ERROR_Z
+						else if (!num) {
+							pdf_graft_map* graft_map = NULL;
+							pdf_obj* obj = NULL;
 
-						return -1;
+							num = zond_pdf_document_get_ocr_num(dd->zpdfd_part->zond_pdf_document);
+							if (!num) {
+								if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\n"
+										"Tesseract-Font nicht in Dokument gespeichert", __func__);
+
+								return -1;
+							}
+
+							//in Ursprungsdokument kopieren
+							graft_map = pdf_new_graft_map(ctx, doc); //keine exception
+
+							fz_try(ctx)
+								obj = pdf_load_object(ctx,
+										zond_pdf_document_get_pdf_doc(dd->zpdfd_part->zond_pdf_document), num);
+							fz_catch(ctx)
+								ERROR_PDF
+
+							fz_try(ctx)
+								pdf_graft_mapped_object(ctx, graft_map, obj);
+							fz_always(ctx) {
+								pdf_drop_obj(ctx, obj);
+								pdf_drop_graft_map(ctx, graft_map);
+							}
+							fz_catch(ctx)
+								ERROR_PDF
+						}
+						rc = pdf_ocr_update_content_stream(ctx, page_obj, entry.ocr.buf_new,
+								&errmsg);
+						if (rc) {
+							if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\n%s",
+									__func__, errmsg);
+							g_free(errmsg);
+
+							return -1;
+						}
 					}
-
-					//in Ursprungsdokument kopieren
-					graft_map = pdf_new_graft_map(ctx, doc); //keine exception
+				}
+				else {
+					pdf_page* page = NULL;
 
 					fz_try(ctx)
-						obj = pdf_load_object(ctx,
-								zond_pdf_document_get_pdf_doc(dd->zpdfd_part->zond_pdf_document), num);
+						page = pdf_load_page(ctx, doc, page_orig);
 					fz_catch(ctx)
 						ERROR_PDF
 
-					fz_try(ctx)
-						pdf_graft_mapped_object(ctx, graft_map, obj);
-					fz_always(ctx) {
-						pdf_drop_obj(ctx, obj);
-						pdf_drop_graft_map(ctx, graft_map);
+					if (entry.type == JOURNAL_TYPE_ANNOT_CREATED) {
+						gint rc = 0;
+
+						pdf_annot_create(ctx, page, entry.pdf_document_page->rotate,
+								entry.annot_changed.annot_after, error);
+						if (rc)
+							ERROR_Z
 					}
-					fz_catch(ctx)
-						ERROR_PDF
+					else {
+						gint index = 0;
+						pdf_annot* pdf_annot = NULL;
+						gint rc = 0;
+
+						index = pdf_document_page_annot_get_index(
+								entry.annot_changed.pdf_document_page_annot);
+						pdf_annot = pdf_annot_lookup_index(ctx, page, index);
+
+						if (entry.type == JOURNAL_TYPE_ANNOT_CHANGED)
+							rc = pdf_annot_change(ctx, pdf_annot,
+									entry.pdf_document_page->rotate,
+									entry.annot_changed.annot_after, error);
+						else if (entry.type == JOURNAL_TYPE_ANNOT_DELETED)
+							rc = pdf_annot_delete(ctx, pdf_annot, error);
+
+						if (rc)
+							ERROR_Z
+					}
 				}
-				rc = pdf_ocr_update_content_stream(ctx, page_obj, entry.ocr.buf_new,
-						&errmsg);
-				if (rc) {
-					if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\n%s",
-							__func__, errmsg);
-					g_free(errmsg);
-
-					return -1;
-				}
-			}
-			else if (entry.type == JOURNAL_TYPE_ANNOT_CREATED) {
-
-			}
-			else if (entry.type == JOURNAL_TYPE_ANNOT_CHANGED) {
-
-			}
-			else if (entry.type == JOURNAL_TYPE_ANNOT_DELETED) {
 
 			}
 		}
@@ -934,11 +967,29 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 		ERROR_Z
 	}
 
+	gint dd_first_page = pdf_document_page_get_index(dd->zpdfd_part->first_page);
+	gint dd_last_page = pdf_document_page_get_index(dd->zpdfd_part->last_page);
+
+	//Journal bereinigen
+	for (guint i = 0; i < arr_journal->len; i++) {
+		JournalEntry entry = { 0 };
+
+		entry = g_array_index(arr_journal, JournalEntry, i);
+		if (viewer_entry_in_dd(&entry, dd_first_page, dd->zpdfd_part->first_index,
+				dd_last_page, dd->zpdfd_part->last_index))
+			g_array_remove_index(arr_journal, i);
+	}
+
 	//gelöschte Seiten aus geöffnetem dd löschen
-	for (gint i = zond_pdf_document_get_number_of_pages(dd->zpdfd_part->zond_pdf_document) - 1; i >= 0; i--) {
+	gint i = dd_first_page;
+
+	do {
 		PdfDocumentPage* pdfp = NULL;
 
 		pdfp = zond_pdf_document_get_pdf_document_page(dd->zpdfd_part->zond_pdf_document, i);
+
+		if (pdfp)
+			pdfp->inserted = NULL;
 
 		if (pdfp && pdfp->deleted) { //Seite aus pdf_document löschen
 			fz_try(zond_pdf_document_get_ctx(dd->zpdfd_part->zond_pdf_document)) {
@@ -955,47 +1006,25 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 						"%s\n%s", __func__,
 						fz_caught_message(zond_pdf_document_get_ctx(dd->zpdfd_part->zond_pdf_document)));
 
-				return -3;
+				return -1;
 			}
 
 			//ggf. dd anpassen, falls erste oder letzte Seite gelöscht wird
 			//kann derzeit nur passieren, wenn dd ganzes Dokument umfaßt und keine Anbindung ist
-			if (pdfp == dd->zpdfd_part->first_page) {
-				PdfDocumentPage* pdfp_next = NULL;
-				gint count = i + 1; //Dokument muß mindestens zwei Seiten haben
-				//sonst vorher schon Abfrage, ob letzte Seite gelöscht wird
+			if (pdfp == dd->zpdfd_part->first_page) //Dokument muß mindestens zwei Seiten haben
+				dd->zpdfd_part->first_page =
+						zond_pdf_document_get_pdf_document_page(dd->zpdfd_part->zond_pdf_document, i + 1);
+			else if (pdfp == dd->zpdfd_part->last_page)
+				dd->zpdfd_part->last_page =
+						zond_pdf_document_get_pdf_document_page(dd->zpdfd_part->zond_pdf_document, i - 1);
 
-				do {
-					pdfp_next = zond_pdf_document_get_pdf_document_page(dd->zpdfd_part->zond_pdf_document, count);
-					count++;
-				} while (pdfp_next->deleted);
-				dd->zpdfd_part->first_page = pdfp_next;
-			}
-			else if (pdfp == dd->zpdfd_part->last_page) {
-				PdfDocumentPage* pdfp_prev = NULL;
-				gint count = i - 1; //Dokument muß mindestens zwei Seiten haben
-				//sonst vorher schon Abfrage, ob letzte Seite gelöscht wird
+			g_ptr_array_remove_index(zond_pdf_document_get_arr_pages(dd->zpdfd_part->zond_pdf_document), i);
 
-				do {
-					pdfp_prev = zond_pdf_document_get_pdf_document_page(dd->zpdfd_part->zond_pdf_document, count);
-					count--;
-				} while (pdfp_prev->deleted);
-				dd->zpdfd_part->last_page = pdfp_prev;
-			}
+			dd_last_page--;
 		}
-	}
-
-	//und schließlich noch Journal bereinigen
-	gint dd_first_page = pdf_document_page_get_index(dd->zpdfd_part->first_page);
-	gint dd_last_page = pdf_document_page_get_index(dd->zpdfd_part->last_page);
-	for (guint i = 0; i < arr_journal->len; i++) {
-		JournalEntry entry = { 0 };
-
-		entry = g_array_index(arr_journal, JournalEntry, i);
-		if (viewer_entry_in_dd(&entry, dd_first_page, dd->zpdfd_part->first_index,
-				dd_last_page, dd->zpdfd_part->last_index))
-			g_array_remove_index(arr_journal, i);
-	}
+		else
+			i++;
+	} while (i <= dd_last_page);
 
 	return 0;
 }

@@ -212,7 +212,6 @@ static gint pdf_ocr_get_f_0_0_obj_num(ZondPdfDocument* document,
 		pdf_obj* page_ref_text, GError** error) {
 	gint num = 0;
 	pdf_document* doc = NULL;
-	gint num_pages = 0;
 	fz_context* ctx = NULL;
 	pdf_graft_map *graft_map = NULL;
 
