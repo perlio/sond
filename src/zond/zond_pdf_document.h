@@ -65,7 +65,9 @@ typedef struct _Annot {
 
 typedef struct _Pdf_Document_Page_Annot {
 	PdfDocumentPage *pdf_document_page; //keine ref!
+	gboolean inserted;
 	gboolean deleted;
+	gboolean changed;
 	Annot annot;
 } PdfDocumentPageAnnot;
 

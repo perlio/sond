@@ -669,7 +669,8 @@ pdf_annot* pdf_annot_create(fz_context* ctx, pdf_page* pdf_page, gint rotate,
 	}
 
 	rc = pdf_annot_change(ctx, pdf_annot, rotate, annot, error);
-	if (rc) ERROR_Z_VAL(NULL)
+	if (rc)
+		ERROR_Z_VAL(NULL)
 
 	return pdf_annot;
 }

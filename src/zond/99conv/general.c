@@ -199,7 +199,7 @@ void anbindung_korrigieren(ZPDFDPart* zpdfd_part, Anbindung* anbindung) {
 	zpdfd_part_get_anbindung(zpdfd_part, &anbindung_zpdfd_part);
 	arr_pages = zond_pdf_document_get_arr_pages(zpdfd_part->zond_pdf_document);
 
-	for (guint i = anbindung->bis.seite; i >= 0; i--) {
+	for (gint i = anbindung->bis.seite; i >= 0; i--) {
 		PdfDocumentPage* pdfp = NULL;
 
 		pdfp = g_ptr_array_index(arr_pages, i);
