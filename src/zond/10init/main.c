@@ -340,18 +340,28 @@ static void startup_app(GtkApplication *app, gpointer data) {
 
 static void error_handler (const gchar* log_domain, GLogLevelFlags log_level,
 		const gchar* message, gpointer user_data) {
-	Projekt *zond = (Projekt*) user_data;
+//	Projekt *zond = (Projekt*) user_data;
     GDateTime *now = g_date_time_new_now_local();
     gchar *timestr = g_date_time_format(now, "%Y-%m-%d %H:%M:%S");
+    gchar const* level = NULL;
+
+    if (log_level == G_LOG_LEVEL_MESSAGE)
+    	level = "MESSAGE";
+    else if (log_level == G_LOG_LEVEL_WARNING)
+    	level = "WARNING";
+    else if (log_level == G_LOG_LEVEL_CRITICAL)
+    	level = "CRITICAL";
+    else if (log_level == G_LOG_LEVEL_ERROR)
+    	level = "ERROR";
+    else
+    	level = "UNKNOWN";
 
 	// Ausgabe mit Zeitstempel auf stderr
-	g_printerr("[%s] [ERROR] %s\n", timestr, message);
+	g_printerr("%s: [%s] [%s] %s\n", log_domain, timestr, level, message);
 
 	// Aufräumen
 	g_free(timestr);
 	g_date_time_unref(now);
-
-	cleanup(zond);
 
 	return;
 }
@@ -368,7 +378,7 @@ int main(int argc, char **argv) {
 	g_signal_connect(app, "activate", G_CALLBACK (activate_app), &zond);
 	g_signal_connect(app, "open", G_CALLBACK (open_app), &zond);
 
-	g_log_set_handler(NULL, G_LOG_LEVEL_ERROR | G_LOG_FLAG_FATAL, error_handler,
+	g_log_set_handler("ZOND", G_LOG_LEVEL_MASK | G_LOG_FLAG_FATAL, error_handler,
 			&zond);
 
 	gint status = g_application_run(G_APPLICATION(app), argc, argv);

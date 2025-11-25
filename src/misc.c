@@ -256,7 +256,7 @@ gint string_to_guint(const gchar *string, guint *zahl) {
 
 static gchar*
 choose_file(const GtkWidget *window, const gchar *path,
-		const gchar *title_text, gchar *accept_text, gint action,
+		const gchar *title_text, gchar const* accept_text, gint action,
 		const gchar *ext) {
 	GtkWidget *dialog = NULL;
 	gint rc = 0;

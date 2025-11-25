@@ -808,14 +808,14 @@ ZPDFDPart* zpdfd_part_peek(SondFilePartPDF* sfp_pdf, Anbindung* anbindung,
 	//nicht gefunden, dann neu
 	zpdfd_part = g_malloc0(sizeof(ZPDFDPart));
 
-	zpdfd_part->zond_pdf_document = g_object_ref(zpdfd);
+	zpdfd_part->zond_pdf_document = zpdfd;
 
 	zpdfd_part->first_page = g_ptr_array_index(zpdfd_priv->pages,
 			(anbindung) ? anbindung->von.seite : 0);
 	zpdfd_part->first_index = (anbindung) ? anbindung->von.index : 0;
 	zpdfd_part->last_page = g_ptr_array_index(zpdfd_priv->pages,
 			(anbindung) ? anbindung->bis.seite : zpdfd_priv->pages->len - 1);
-	zpdfd_part->first_index = (anbindung) ? anbindung->von.index : 0;
+	zpdfd_part->last_index = (anbindung) ? anbindung->bis.index : EOP;
 
 	zpdfd_part->has_anbindung = (anbindung) ? TRUE : FALSE;
 

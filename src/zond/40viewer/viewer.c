@@ -798,7 +798,6 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 	for (gint i = anbindung.bis.seite; i >= anbindung.von.seite; i--) {
 		PdfDocumentPage* pdfp = NULL;
 		pdf_page* pdf_page = NULL;
-		pdf_annot* pdf_ann = NULL;
 
 		pdfp = zond_pdf_document_get_pdf_document_page(dd->zpdfd_part->zond_pdf_document, i);
 
@@ -807,8 +806,13 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 					pdf_delete_page(ctx, doc, page_orig);
 			fz_catch(ctx)
 				ERROR_PDF
+
+			page_orig--;
+
+			continue;
 		}
-		else if (pdfp->inserted && !pdfp->deleted) {
+
+		if (pdfp->inserted && !pdfp->deleted) {
 			gint rc = 0;
 			gchar* errmsg = NULL;
 
@@ -824,9 +828,9 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 
 				return -1;
 			}
+
+			page_orig++;
 		}
-		else
-			page_orig--;
 
 		fz_try(ctx)
 			pdf_page = pdf_load_page(ctx, doc, page_orig);
@@ -938,6 +942,7 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 				else if (entry.type == JOURNAL_TYPE_ANNOT_CHANGED) {
 					gint index = 0;
 					gint rc = 0;
+					pdf_annot* pdf_ann = NULL;
 
 					index = pdf_document_page_annot_get_index(
 							entry.annot_changed.pdf_document_page_annot);
@@ -955,25 +960,31 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 		}
 
 		//Annots löschen
-		pdf_ann = pdf_first_annot(ctx, pdf_page);
+		if (pdfp->arr_annots) {
+			pdf_annot* pdf_ann = NULL;
 
-		for (gint u = 0; u < pdfp->arr_annots->len; u++) {
-			PdfDocumentPageAnnot* pdfp_annot = NULL;
-			pdf_annot* annot_next = NULL;
+			pdf_ann = pdf_first_annot(ctx, pdf_page);
 
-			pdfp_annot = g_ptr_array_index(pdfp->arr_annots, u);
-			if (pdf_ann) {
-				annot_next = pdf_next_annot(ctx, pdf_ann);
-				if (pdfp_annot->deleted)
-					pdf_delete_annot(ctx, pdf_page, pdf_ann);
+			for (gint u = 0; u < pdfp->arr_annots->len; u++) {
+				PdfDocumentPageAnnot* pdfp_annot = NULL;
+				pdf_annot* annot_next = NULL;
+
+				pdfp_annot = g_ptr_array_index(pdfp->arr_annots, u);
+				if (pdf_ann) {
+					annot_next = pdf_next_annot(ctx, pdf_ann);
+					if (pdfp_annot->deleted)
+						pdf_delete_annot(ctx, pdf_page, pdf_ann);
+				}
+				else
+					g_warning("%s\nzu viele annots", __func__);
+
+				pdf_ann = annot_next;
 			}
-			else
-				g_warning("%s\nzu viele annots", __func__);
-
-			pdf_ann = annot_next;
 		}
 
 		pdf_drop_page(ctx, pdf_page);
+
+		page_orig--;
 	}
 
 	//alles geändert, dann speichern
@@ -1049,7 +1060,7 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 
 			dd_last_page--;
 		}
-		else {
+		else if (pdfp->arr_annots) {
 			pdf_page* page_pdf = NULL;
 			pdf_annot* annot_pdf = NULL;
 
@@ -1059,7 +1070,7 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 			fz_catch(ctx)
 				ERROR_PDF
 
-				annot_pdf = pdf_first_annot(ctx, page_pdf);
+			annot_pdf = pdf_first_annot(ctx, page_pdf);
 
 			//gelöschte annots aus arr_annot löschen
 			for (gint u = 0; u < pdfp->arr_annots->len; u++) {
@@ -1085,8 +1096,9 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 			}
 
 			pdf_drop_page(ctx, page_pdf);
-			i++;
 		}
+
+		i++;
 	} while (i <= dd_last_page);
 
 	return 0;
@@ -2011,8 +2023,10 @@ void viewer_foreach(PdfViewer *pdfv, PdfDocumentPage *pdf_document_page,
 
 		for (gint i = 0; i < pv_vergleich->arr_pages->len; i++) {
 			ViewerPageNew* viewer_page = NULL;
+			DisplayedDocument* dd = NULL;
 
 			viewer_page = g_ptr_array_index(pv_vergleich->arr_pages, i);
+			dd = viewer_page->dd;
 
 			if (pdf_document_page == viewer_page->pdf_document_page) {
 				if (cb_foreach_pv) {
@@ -2023,7 +2037,7 @@ void viewer_foreach(PdfViewer *pdfv, PdfDocumentPage *pdf_document_page,
 				} else dirty = TRUE;
 
 				if (dirty) //auch dd auf dirty setzen
-					viewer_page->dd->zpdfd_part->dirty = TRUE;
+					dd->zpdfd_part->dirty = TRUE;
 
 				break;
 			}
@@ -2925,17 +2939,19 @@ static gboolean cb_viewer_layout_press_button(GtkWidget *layout,
 			punktgenau = TRUE;
 
 		if (!rc) {
-			PdfDocumentPage* pdfp = NULL;
+			ViewerPageNew* viewer_page = NULL;
+
+			viewer_page = g_ptr_array_index(pv->arr_pages, pdf_punkt.seite);
 
 			//Test, ob Seite in Dokument frisch eingefügt
-			pdfp = g_ptr_array_index(pv->arr_pages, pdf_punkt.seite);
-			if (pdfp->inserted) {
+			if (viewer_page->pdf_document_page->inserted) {
 				display_message(pv->vf, "Gewählte Seite wurde in Dokument eingefügt,\n"
 						"Dokument noch nicht gespeichert\n\nUm Inkonsistenzen zu vermeiden "
 						"Dokument zunächst speichern", NULL);
 
 				return TRUE;
 			}
+
 			if (pv->anbindung.von.index == -1) {
 				pv->anbindung.von.seite = pdf_punkt.seite;
 				if (punktgenau)

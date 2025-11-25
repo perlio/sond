@@ -359,6 +359,7 @@ static gint sond_tvfm_item_load_fs_dir(SondTVFMItem* stvfm_item,
 		g_free(rel_path_child);
 		if (!stvfm_item_child) {
 			g_ptr_array_unref(loaded_children); //Test nicht nötig - wenn !load, kommen wir nicht hier hin
+			g_object_unref(enumer);
 			ERROR_Z
 		}
 
