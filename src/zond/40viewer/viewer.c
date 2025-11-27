@@ -403,7 +403,7 @@ static void viewer_render_sichtbare_seiten(PdfViewer *pv) {
 	dir = g_strndup(path_doc, strlen(path_doc) - strlen(file));
 
 	title = g_strdup_printf("%s [Seite %i]", file,
-			pdf_document_page_get_index(viewer_page->pdf_document_page) + 1);
+			viewer_page->pdf_document_page->page_akt + 1);
 	gtk_header_bar_set_title(GTK_HEADER_BAR(pv->headerbar), title);
 	g_free(title);
 
@@ -521,8 +521,8 @@ static void viewer_create_layout(PdfViewer *pv) {
 		gint von = 0;
 		gint bis = 0;
 
-		von = pdf_document_page_get_index(dd->zpdfd_part->first_page);
-		bis = pdf_document_page_get_index(dd->zpdfd_part->last_page);
+		von = dd->zpdfd_part->first_page->page_akt;
+		bis = dd->zpdfd_part->last_page->page_akt;
 
 		for (gint i = von; i <= bis; i++) {
 			ViewerPageNew *viewer_page = NULL;
@@ -586,26 +586,17 @@ static gboolean viewer_annot_is_in_rect(Annot* annot, fz_rect rect) {
 }
 
 static gboolean viewer_entry_in_dd(JournalEntry* entry,
-		gint dd_first_page, gint dd_first_index,
-		gint dd_last_page, gint dd_last_index) {
-	gint page_doc = 0;
-
-	page_doc = pdf_document_page_get_index(entry->pdf_document_page);
-	if (page_doc == -1) {
-		g_warning("Index konnte nicht ermittelt werden");
-
-		return FALSE;
-	}
-
-	if (page_doc >= dd_first_page && page_doc <= dd_last_page) {
+		ZPDFDPart* zpdfd_part) {
+	if (entry->pdf_document_page->page_akt >= zpdfd_part->first_page->page_akt &&
+			entry->pdf_document_page->page_akt <= zpdfd_part->last_page->page_akt) {
 		if (entry->type == JOURNAL_TYPE_PAGES_INSERTED ||
 				entry->type == JOURNAL_TYPE_PAGE_DELETED ||
 				entry->type == JOURNAL_TYPE_ROTATE ||
 				entry->type == JOURNAL_TYPE_OCR) return TRUE;
 
 		//Sind ja nur Annots überig
-		if (page_doc == dd_first_page) {
-			if (dd_first_index == 0) return TRUE;
+		if (entry->pdf_document_page->page_akt == zpdfd_part->first_page->page_akt) {
+			if (zpdfd_part->first_index == 0) return TRUE;
 			else {
 				fz_rect rect = {0.0, entry->pdf_document_page->rect.x1, (gfloat) dd_first_index,
 						entry->pdf_document_page->rect.y1};
@@ -614,8 +605,8 @@ static gboolean viewer_entry_in_dd(JournalEntry* entry,
 					return 1;
 			}
 		}
-		else if (page_doc == dd_last_page) {
-			if (dd_last_index == EOP) return TRUE;
+		else if (entry->pdf_document_page->page_akt == zpdfd_part->last_page->page_akt) {
+			if (zpdfd_part->last_index == EOP) return TRUE;
 			else {
 				fz_rect rect = {0.0, entry->pdf_document_page->rect.x1, 0.0,
 						(gfloat) dd_last_index};
@@ -640,21 +631,16 @@ static void  viewer_reset_dirty_dds(PdfViewer* pdfv) {
 
 		do {
 			GArray* arr_journal = NULL;
-			gint dd_first_page = 0;
-			gint dd_last_page = 0;
 			gboolean in_dd = FALSE;
 
 			arr_journal = zond_pdf_document_get_arr_journal(dd->zpdfd_part->zond_pdf_document);
-			dd_first_page = pdf_document_page_get_index(dd->zpdfd_part->first_page);
-			dd_last_page = pdf_document_page_get_index(dd->zpdfd_part->last_page);
 
 			for (guint u = 0; u < arr_journal->len; u++) {
 				JournalEntry entry = { 0 };
 
 				entry = g_array_index(arr_journal, JournalEntry, u);
 
-				in_dd = viewer_entry_in_dd(&entry, dd_first_page, dd->zpdfd_part->first_index,
-						dd_last_page, dd->zpdfd_part->last_index);
+				in_dd = viewer_entry_in_dd(&entry, dd->zpdfd_part);
 				if (in_dd)
 					break;
 			}
@@ -1001,16 +987,12 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 		ERROR_Z
 	}
 
-	gint dd_first_page = pdf_document_page_get_index(dd->zpdfd_part->first_page);
-	gint dd_last_page = pdf_document_page_get_index(dd->zpdfd_part->last_page);
-
 	//Journal bereinigen
 	for (gint i = arr_journal->len - 1; i >= 0; i--) {
 		JournalEntry entry = { 0 };
 
 		entry = g_array_index(arr_journal, JournalEntry, i);
-		if (viewer_entry_in_dd(&entry, dd_first_page, dd->zpdfd_part->first_index,
-				dd_last_page, dd->zpdfd_part->last_index))
+		if (viewer_entry_in_dd(&entry, dd->zpdfd_part))
 			g_array_remove_index(arr_journal, i);
 	}
 

@@ -73,18 +73,7 @@ pdf_annot* pdf_document_page_annot_get_pdf_annot(PdfDocumentPageAnnot* pdpa) {
 	return pdf_annot;
 }
 
-gint pdf_document_page_get_index(PdfDocumentPage* pdf_document_page) {
-	guint index = 0;
-	GPtrArray* arr_pages = NULL;
-
-	arr_pages = zond_pdf_document_get_arr_pages(pdf_document_page->document);
-	if (!g_ptr_array_find(arr_pages, pdf_document_page, &index)) return -1;
-
-	return (gint) index;
-}
-
 pdf_obj* pdf_document_page_get_page_obj(PdfDocumentPage* pdf_document_page, GError** error) {
-	gint page = 0;
 	pdf_obj* obj = NULL;
 
 	ZondPdfDocumentPrivate *priv = zond_pdf_document_get_instance_private(
@@ -93,15 +82,8 @@ pdf_obj* pdf_document_page_get_page_obj(PdfDocumentPage* pdf_document_page, GErr
 	if (pdf_document_page->page)
 		return pdf_document_page->page->obj;
 
-	page = pdf_document_page_get_index(pdf_document_page);
-	if (page == -1) {
-		if (error) *error = g_error_new(ZOND_ERROR, 0,
-				"%s\nSeite nicht gefunden", __func__);
-		return NULL;
-	}
-
 	fz_try(priv->ctx)
-		obj = pdf_lookup_page_obj(priv->ctx, priv->doc, page);
+		obj = pdf_lookup_page_obj(priv->ctx, priv->doc, pdf_document_page->page_akt);
 	fz_catch(priv->ctx) {
 		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
 				fz_caught(priv->ctx), "%s\n%s", __func__, fz_caught_message(priv->ctx));
@@ -167,19 +149,31 @@ static void zond_pdf_document_finalize(GObject *self) {
 }
 
 void zond_pdf_document_page_free(PdfDocumentPage *pdf_document_page) {
+	gint page_akt = 0;
+
 	if (!pdf_document_page)
 		return;
 
 	ZondPdfDocumentPrivate *priv = zond_pdf_document_get_instance_private(
 			pdf_document_page->document);
 
-	fz_drop_page(priv->ctx, &(pdf_document_page->page->super));
 	fz_drop_stext_page(priv->ctx, pdf_document_page->stext_page);
 	fz_drop_display_list(priv->ctx, pdf_document_page->display_list);
 	if (pdf_document_page->arr_annots)
 		g_ptr_array_unref(pdf_document_page->arr_annots);
 
+	page_akt = pdf_document_page->page_akt;
+
 	g_free(pdf_document_page);
+
+	//Seitenzahlen der folgenden Seiten anpassen
+	for (gint i = page_akt; i < priv->pages->len; i++) {
+		PdfDocumentPage* pdfp_loop = NULL;
+
+		pdfp_loop = g_ptr_array_index(priv->pages, i);
+		if (pdfp_loop)
+			pdfp_loop->page_akt--;
+	}
 
 	return;
 }
@@ -274,16 +268,13 @@ gint zond_pdf_document_load_page(PdfDocumentPage *pdf_document_page,
 		gchar **errmsg) {
 	GError *error = NULL;
 	gint rc = 0;
-	gint page = 0;
-
-	page = pdf_document_page_get_index(pdf_document_page);
 
 	ZondPdfDocumentPrivate *priv = zond_pdf_document_get_instance_private(
 			pdf_document_page->document);
 
 	fz_try(priv->ctx)
 		pdf_document_page->page = pdf_load_page(priv->ctx, priv->doc,
-				page);
+				pdf_document_page->page_akt);
 	fz_catch(priv->ctx) {
 		if (errmsg) *errmsg = g_strdup_printf("%s\n%s", __func__, fz_caught_message(priv->ctx));
 
@@ -315,6 +306,7 @@ static gint zond_pdf_document_init_page(ZondPdfDocument *self,
 			ZOND_PDF_DOCUMENT(self));
 
 	pdf_document_page->document = self; //keine ref!
+	pdf_document_page->page_akt = index;
 
 	ctx = priv->ctx;
 
@@ -722,6 +714,14 @@ gint zond_pdf_document_insert_pages(ZondPdfDocument *zond_pdf_document,
 		pdf_document_page->inserted = zpdfd_part;
 	}
 
+	//Index der nachfolgenden Seiten anpassen
+	for (gint i = pos + count; i < priv->pages->len; i++) {
+		PdfDocumentPage* pdfp_loop = NULL;
+
+		pdfp_loop = g_ptr_array_index(priv->pages, i);
+		pdfp_loop->page_akt += count;
+	}
+
 	return 0;
 }
 
@@ -766,9 +766,9 @@ ZPDFDPart* zpdfd_part_ref(ZPDFDPart* zpdfd_part) {
 }
 
 void zpdfd_part_get_anbindung(ZPDFDPart* zpdfd_part, Anbindung* anbindung) {
-	anbindung->von.seite = pdf_document_page_get_index(zpdfd_part->first_page);
+	anbindung->von.seite = zpdfd_part->first_page->page_akt;
 	anbindung->von.index = anbindung->von.index;
-	anbindung->bis.seite = pdf_document_page_get_index(zpdfd_part->last_page);
+	anbindung->bis.seite = zpdfd_part->last_page->page_akt;
 	anbindung->bis.index = anbindung->bis.index;
 
 	return;

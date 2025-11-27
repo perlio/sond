@@ -552,7 +552,6 @@ static gint seiten_anbindung_int(ZondDBase* zond_dbase, gint attached,
 	gint rc = 0;
 	GArray* arr_sections = NULL;
 	gchar* filepart = NULL;
-	gint page_doc = 0;
 
 	filepart = sond_file_part_get_filepart(SOND_FILE_PART(
 			zond_pdf_document_get_sfp_pdf(pdf_document_page->document)));
@@ -565,8 +564,6 @@ static gint seiten_anbindung_int(ZondDBase* zond_dbase, gint attached,
 		return -1;
 	}
 
-	page_doc = pdf_document_page_get_index(pdf_document_page);
-
 	for (gint u = 0; u < arr_sections->len; u++) {
 		Section section = { 0, };
 		Anbindung anbindung = { 0, };
@@ -576,7 +573,7 @@ static gint seiten_anbindung_int(ZondDBase* zond_dbase, gint attached,
 
 		anbindung_aktualisieren(pdf_document_page->document, &anbindung);
 
-		if ((page_doc == anbindung.von.seite) ||
+		if ((pdf_document_page->page_akt == anbindung.von.seite) ||
 				(!anbindung_is_pdf_punkt(anbindung) &&
 				page_doc == anbindung.bis.seite)) {
 			g_array_unref(arr_sections);
@@ -746,8 +743,8 @@ static gint seiten_einfuegen_foreach(PdfViewer *pv, ViewerPageNew* viewer_page,
 			return 0;
 
 		//sonst weiter untersuchen:
-		last_page_pv_dd = pdf_document_page_get_index(viewer_page->dd->zpdfd_part->last_page);
-		last_page_pv_entry = pdf_document_page_get_index(data_insert->dd->zpdfd_part->last_page);
+		last_page_pv_dd = viewer_page->dd->zpdfd_part->last_page->page_akt;
+		last_page_pv_entry = data_insert->dd->zpdfd_part->last_page->page_akt;
 
 		//vorliegendes dd kürzer: Ende!
 		if (last_page_pv_dd < last_page_pv_entry) return 0;
@@ -767,8 +764,8 @@ static gint seiten_einfuegen_foreach(PdfViewer *pv, ViewerPageNew* viewer_page,
 
 		if (viewer_page->dd->zpdfd_part->last_index < EOP) return 0;
 
-		first_page_pv_dd = pdf_document_page_get_index(viewer_page->dd->zpdfd_part->first_page);
-		first_page_pv_entry = pdf_document_page_get_index(data_insert->dd->zpdfd_part->first_page);
+		first_page_pv_dd = viewer_page->dd->zpdfd_part->first_page->page_akt;
+		first_page_pv_entry = data_insert->dd->zpdfd_part->first_page->;
 
 		if (first_page_pv_dd > first_page_pv_entry) return 0;
 		else if (first_page_pv_dd == first_page_pv_entry)
@@ -790,7 +787,7 @@ static gint seiten_einfuegen_foreach(PdfViewer *pv, ViewerPageNew* viewer_page,
 		GtkTreeIter iter_tmp;
 
 		viewer_page_insert = viewer_new_page (pv, viewer_page->dd,
-				pdf_document_page_get_index(viewer_page->pdf_document_page) + u -
+				viewer_page->pdf_document_page->page_akt + u -
 				((data_insert->after_last) ? -1 : data_insert->count));
 
 		g_ptr_array_insert(pv->arr_pages, page_pv + u + ((data_insert->after_last) ? 1 : 0),
@@ -961,7 +958,7 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 		return;
 	}
 
-	page_doc = pdf_document_page_get_index(viewer_page->pdf_document_page);
+	page_doc = viewer_page->pdf_document_page->page_akt;
 	if (pos == pv->arr_pages->len) page_doc++;
 
 	//Seiten werden eingefügt, so daß Seite an Position page_doc nach hinten geschoben wird;
@@ -1026,18 +1023,15 @@ fz_catch	( pv->zond->ctx ) {
 		ViewerPageNew *viewer_page = NULL;
 		PdfDocumentPage *pdf_document_page = NULL;
 		gchar *errmsg = NULL;
-		gint page_doc = 0;
 
 		gint page_pv = g_array_index(arr_page_pv, gint, i);
 		viewer_page = g_ptr_array_index(pv->arr_pages, page_pv);
 		pdf_document_page = viewer_page->pdf_document_page;
 
-		page_doc = pdf_document_page_get_index(pdf_document_page);
-
 		zond_pdf_document_mutex_lock(pdf_document_page->document);
 		rc = pdf_copy_page(pv->zond->ctx,
 				zond_pdf_document_get_pdf_doc(pdf_document_page->document),
-				page_doc, page_doc, doc_dest, -1, &errmsg);
+				pdf_document_page->page_akt, pdf_document_page->page_akt, doc_dest, -1, &errmsg);
 		zond_pdf_document_mutex_unlock(pdf_document_page->document);
 		if (rc) {
 			if (error)

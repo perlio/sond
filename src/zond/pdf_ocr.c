@@ -526,8 +526,8 @@ pdf_ocr_create_doc_from_page(PdfDocumentPage *pdf_document_page, gint flag,
 		ERROR_MUPDF_R("pdf_create_document", NULL)
 
 	zond_pdf_document_mutex_lock(pdf_document_page->document);
-	rc = pdf_copy_page(ctx, doc, pdf_document_page_get_index(pdf_document_page),
-			pdf_document_page_get_index(pdf_document_page), doc_new, 0, errmsg);
+	rc = pdf_copy_page(ctx, doc, pdf_document_page->page_akt,
+			pdf_document_page->page_akt, doc_new, 0, errmsg);
 	zond_pdf_document_mutex_unlock(pdf_document_page->document);
 	if (rc) {
 		pdf_drop_document(ctx, doc_new);
@@ -728,7 +728,7 @@ static gint pdf_ocr_show_text(InfoWindow *info_window,
 	gtk_box_pack_start(GTK_BOX(vbox), swindow, FALSE, FALSE, 0);
 
 	GtkWidget *dialog = pdf_ocr_create_dialog(info_window,
-			pdf_document_page_get_index(pdf_document_page) + 1);
+			pdf_document_page->page_akt + 1);
 
 	GtkWidget *content_area = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
 	gtk_box_pack_start(GTK_BOX(content_area), vbox, FALSE, FALSE, 0);
@@ -836,7 +836,7 @@ static gint pdf_ocr_create_pdf_only_text(InfoWindow *info_window,
 		gchar *info_text = g_strdup_printf("(%i/%i) %s, Seite %i", zaehler,
 				arr_document_pages->len, sond_file_part_get_path(SOND_FILE_PART(
 				zond_pdf_document_get_sfp_pdf(pdf_document_page->document))),
-				pdf_document_page_get_index(pdf_document_page) + 1);
+				pdf_document_page->page_akt + 1);
 		info_window_set_message(info_window, info_text);
 		g_free(info_text);
 
@@ -846,7 +846,7 @@ static gint pdf_ocr_create_pdf_only_text(InfoWindow *info_window,
 
 		if (g_strcmp0(page_text, "") && alle == 0) {
 			GtkWidget *dialog = pdf_ocr_create_dialog(info_window,
-					pdf_document_page_get_index(pdf_document_page) + 1);
+					pdf_document_page->page_akt + 1);
 			//braucht nicht thread_safe zu sein
 			rc = 0;
 			rc = gtk_dialog_run(GTK_DIALOG(dialog));

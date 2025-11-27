@@ -30,6 +30,7 @@ typedef struct _Pdf_Document_Page {
 	gint thread;
 	PdfViewer* thread_pv;
 	GPtrArray *arr_annots;
+	gint page_akt;
 	ZPDFDPart* inserted;
 	gboolean deleted;
 } PdfDocumentPage;
@@ -116,8 +117,6 @@ struct _ZondPdfDocumentClass {
 
 	GPtrArray* arr_pdf_documents;
 };
-
-gint pdf_document_page_annot_get_index(PdfDocumentPageAnnot*);
 
 pdf_annot* pdf_document_page_annot_get_pdf_annot(PdfDocumentPageAnnot*);
 
