@@ -383,9 +383,9 @@ int main(int argc, char **argv) {
 
 	gint status = g_application_run(G_APPLICATION(app), argc, argv);
 
-	g_object_unref(app);
-
 	cleanup(&zond);
+
+	g_object_unref(app);
 
 	g_message("zond beendet");
 

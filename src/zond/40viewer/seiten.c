@@ -755,10 +755,8 @@ static gint seiten_einfuegen_foreach(PdfViewer *pv, ViewerPageNew* viewer_page,
 			if (viewer_page->dd->zpdfd_part->last_index < data_insert->dd->zpdfd_part->last_index)
 				return 0;
 
-
 		//dd soll jetzt auch eingefügte Seiten umfassen
 		//d.h. erste Seite anpassen
-
 		viewer_page->dd->zpdfd_part->first_page =
 				zond_pdf_document_get_pdf_document_page(viewer_page->dd->zpdfd_part->zond_pdf_document,
 				data_insert->page_doc);
@@ -968,8 +966,8 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 
 	//Seiten werden eingefügt, so daß Seite an Position page_doc nach hinten geschoben wird;
 	//page_doc dieser Seite ist hinterher page_doc+count
-	rc = zpdfd_part_insert_pages(viewer_page->dd->zpdfd_part,
-			pos, doc_merge, &error);
+	rc = zond_pdf_document_insert_pages(viewer_page->dd->zpdfd_part->zond_pdf_document,
+			page_doc, viewer_page->dd->zpdfd_part, doc_merge, &error);
 	pdf_drop_document(pv->zond->ctx, doc_merge);
 	g_object_unref(sfp);
 	if (rc) {
@@ -984,13 +982,13 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 	//betroffene viewer-seiten einfügen - kann keinen Fehler zurückgeben
 	//vorangehende pdf_document_page wird übergeben - außer wenn Einfügen nach letzter Seite
 	data_insert.dd = viewer_page->dd;
-	data_insert.page_doc = page_doc; //ist die erste eingefügte Seite!
+	data_insert.page_doc = page_doc; //ist die Position der ersten eingefügten Seite!
 	data_insert.count = count;
 	data_insert.after_last = (pos == pv->arr_pages->len) ? TRUE : FALSE;
 
 	entry.type = JOURNAL_TYPE_PAGES_INSERTED;
 	entry.pages_inserted.count = count;
-	entry.pages_inserted.zpdfd_part = viewer_page->dd->zpdfd_part;
+	entry.pages_inserted.zpdfd_part = zpdfd_part_ref(viewer_page->dd->zpdfd_part);
 
 	//viewer_page->pdf_document_page ist - wenn nicht Einfügen nach letzter Seite -
 	//im zond_pdf_document nach hinten gerutscht

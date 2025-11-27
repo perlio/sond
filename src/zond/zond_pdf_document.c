@@ -468,6 +468,8 @@ void zond_pdf_document_free_journal_entry(JournalEntry *entry) {
 		fz_drop_buffer(priv->ctx, entry->ocr.buf_old);
 		fz_drop_buffer(priv->ctx, entry->ocr.buf_new);
 	}
+	else if (entry->type == JOURNAL_TYPE_PAGES_INSERTED)
+		zpdfd_part_drop(entry->pages_inserted.zpdfd_part);
 
 	return;
 }
@@ -675,7 +677,7 @@ void zond_pdf_document_mutex_unlock(const ZondPdfDocument *self) {
 }
 
 //wird nur aufgerufen, wenn alle threadpools aus sind!
-static gint zond_pdf_document_insert_pages(ZondPdfDocument *zond_pdf_document,
+gint zond_pdf_document_insert_pages(ZondPdfDocument *zond_pdf_document,
 		gint pos, ZPDFDPart* zpdfd_part, pdf_document *pdf_doc, GError **error) {
 	gint rc = 0;
 	gint count = 0;
@@ -824,29 +826,5 @@ ZPDFDPart* zpdfd_part_peek(SondFilePartPDF* sfp_pdf, Anbindung* anbindung,
 	g_ptr_array_add(zpdfd_priv->arr_zpdf_parts, zpdfd_part);
 
 	return zpdfd_part;
-}
-
-gint zpdfd_part_insert_pages(ZPDFDPart* zpdfd_part, gint pos,
-		pdf_document* doc, GError** error) {
-	gint first_page = 0;
-	gint last_page = 0;
-	gint rc = 0;
-
-	first_page = pdf_document_page_get_index(zpdfd_part->first_page);
-	last_page = pdf_document_page_get_index(zpdfd_part->last_page);
-
-	if (pos > last_page) {
-		if (error) *error = g_error_new(ZOND_ERROR, 0,
-				"%s\nSeitenzahl außerhalb Abschnitt", __func__);
-
-		return -1;
-	}
-
-	rc = zond_pdf_document_insert_pages(zpdfd_part->zond_pdf_document, pos + first_page,
-			zpdfd_part, doc, error);
-	if (rc)
-		ERROR_Z
-
-	return 0;
 }
 

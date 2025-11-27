@@ -164,6 +164,9 @@ void zond_pdf_document_mutex_lock(const ZondPdfDocument*);
 
 void zond_pdf_document_mutex_unlock(const ZondPdfDocument*);
 
+gint zond_pdf_document_insert_pages(ZondPdfDocument*, gint, ZPDFDPart*,
+		pdf_document*, GError**);
+
 gint zond_pdf_document_get_ocr_num(ZondPdfDocument*);
 
 void zond_pdf_document_set_ocr_num(ZondPdfDocument*, gint );
@@ -175,8 +178,6 @@ void zpdfd_part_get_anbindung(ZPDFDPart*, Anbindung*);
 ZPDFDPart* zpdfd_part_ref(ZPDFDPart*);
 
 ZPDFDPart* zpdfd_part_peek(SondFilePartPDF*, Anbindung*, GError** );
-
-gint zpdfd_part_insert_pages(ZPDFDPart*, gint, pdf_document*, GError**);
 
 G_END_DECLS
 
