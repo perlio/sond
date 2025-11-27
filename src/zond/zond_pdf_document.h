@@ -118,9 +118,9 @@ struct _ZondPdfDocumentClass {
 	GPtrArray* arr_pdf_documents;
 };
 
-pdf_annot* pdf_document_page_annot_get_pdf_annot(PdfDocumentPageAnnot*);
+gint pdf_document_page_annot_get_index(PdfDocumentPageAnnot*);
 
-gint pdf_document_page_get_index(PdfDocumentPage*);
+pdf_annot* pdf_document_page_annot_get_pdf_annot(PdfDocumentPageAnnot*);
 
 pdf_obj* pdf_document_page_get_page_obj(PdfDocumentPage*, GError**);
 

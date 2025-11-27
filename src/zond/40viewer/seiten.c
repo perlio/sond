@@ -575,7 +575,7 @@ static gint seiten_anbindung_int(ZondDBase* zond_dbase, gint attached,
 
 		if ((pdf_document_page->page_akt == anbindung.von.seite) ||
 				(!anbindung_is_pdf_punkt(anbindung) &&
-				page_doc == anbindung.bis.seite)) {
+				pdf_document_page->page_akt == anbindung.bis.seite)) {
 			g_array_unref(arr_sections);
 
 			return 1;
@@ -765,7 +765,7 @@ static gint seiten_einfuegen_foreach(PdfViewer *pv, ViewerPageNew* viewer_page,
 		if (viewer_page->dd->zpdfd_part->last_index < EOP) return 0;
 
 		first_page_pv_dd = viewer_page->dd->zpdfd_part->first_page->page_akt;
-		first_page_pv_entry = data_insert->dd->zpdfd_part->first_page->;
+		first_page_pv_entry = data_insert->dd->zpdfd_part->first_page->page_akt;
 
 		if (first_page_pv_dd > first_page_pv_entry) return 0;
 		else if (first_page_pv_dd == first_page_pv_entry)

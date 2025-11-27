@@ -598,7 +598,8 @@ static gboolean viewer_entry_in_dd(JournalEntry* entry,
 		if (entry->pdf_document_page->page_akt == zpdfd_part->first_page->page_akt) {
 			if (zpdfd_part->first_index == 0) return TRUE;
 			else {
-				fz_rect rect = {0.0, entry->pdf_document_page->rect.x1, (gfloat) dd_first_index,
+				fz_rect rect = {0.0, entry->pdf_document_page->rect.x1,
+						(gfloat) zpdfd_part->first_index,
 						entry->pdf_document_page->rect.y1};
 
 				if (viewer_annot_is_in_rect(&entry->annot_changed.annot_after, rect))
@@ -609,7 +610,7 @@ static gboolean viewer_entry_in_dd(JournalEntry* entry,
 			if (zpdfd_part->last_index == EOP) return TRUE;
 			else {
 				fz_rect rect = {0.0, entry->pdf_document_page->rect.x1, 0.0,
-						(gfloat) dd_last_index};
+						(gfloat) zpdfd_part->last_index};
 
 				if (viewer_annot_is_in_rect(&entry->annot_changed.annot_after, rect))
 					return 1;
@@ -997,7 +998,7 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 	}
 
 	//gelöschte Seiten aus geöffnetem dd löschen
-	gint i = dd_last_page;
+	gint i = dd->zpdfd_part->last_page->page_akt;
 
 	do {
 		PdfDocumentPage* pdfp = NULL;
@@ -1075,7 +1076,7 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 		}
 
 		i--;
-	} while (i >= dd_first_page);
+	} while (i >= dd->zpdfd_part->first_page->page_akt);
 
 	return 0;
 }
