@@ -11,6 +11,7 @@ typedef struct _Anbindung Anbindung;
 typedef struct _Displayed_Document DisplayedDocument;
 typedef struct _SondFilePartPDF SondFilePartPDF;
 typedef struct _ZPDFD_Part ZPDFDPart;
+typedef struct fz_context fz_context;
 
 G_BEGIN_DECLS
 
@@ -132,7 +133,7 @@ void annot_free(Annot*);
 
 gint zond_pdf_document_page_load_annots(PdfDocumentPage*, GError**);
 
-gint zond_pdf_document_load_page(PdfDocumentPage*, gchar**);
+gint zond_pdf_document_load_page(PdfDocumentPage*, fz_context*, gchar**);
 
 ZondPdfDocument* zond_pdf_document_open(SondFilePartPDF*, gint, gint, GError**);
 

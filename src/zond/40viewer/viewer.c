@@ -943,6 +943,10 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 		}
 
 		//Annots löschen
+		//erstmal sicherstellen, daß nichts mehr läuft
+		while ((pdfp->thread & 1))
+			viewer_transfer_rendered(pdfp->thread_pv, TRUE);
+
 		if (pdfp->arr_annots) {
 			pdf_annot* pdf_ann = NULL;
 
@@ -1000,6 +1004,7 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 	//gelöschte Seiten aus geöffnetem dd löschen
 	gint i = dd->zpdfd_part->last_page->page_akt;
 
+	//ist oben schon sichergestellt, daß kein rendering mehr stattfindet
 	do {
 		PdfDocumentPage* pdfp = NULL;
 
@@ -1030,24 +1035,31 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 			//kann derzeit nur passieren, wenn dd ganzes Dokument umfaßt und keine Anbindung ist
 			if (pdfp == dd->zpdfd_part->first_page) //Dokument muß mindestens zwei Seiten haben
 				dd->zpdfd_part->first_page =
-						zond_pdf_document_get_pdf_document_page(dd->zpdfd_part->zond_pdf_document, i + 1);
+						zond_pdf_document_get_pdf_document_page(
+								dd->zpdfd_part->zond_pdf_document, i + 1);
 			else if (pdfp == dd->zpdfd_part->last_page)
 				dd->zpdfd_part->last_page =
-						zond_pdf_document_get_pdf_document_page(dd->zpdfd_part->zond_pdf_document, i - 1);
+						zond_pdf_document_get_pdf_document_page(
+								dd->zpdfd_part->zond_pdf_document, i - 1);
 
-			g_ptr_array_remove_index(zond_pdf_document_get_arr_pages(dd->zpdfd_part->zond_pdf_document), i);
+			g_ptr_array_remove_index(zond_pdf_document_get_arr_pages(
+					dd->zpdfd_part->zond_pdf_document), i);
+
+			//Seitenzahlen der folgenden Seiten anpassen
+			for (gint f = i; f < zond_pdf_document_get_arr_pages(
+					dd->zpdfd_part->zond_pdf_document)->len; f++) {
+				PdfDocumentPage* pdfp_loop = NULL;
+
+				pdfp_loop = g_ptr_array_index(zond_pdf_document_get_arr_pages(
+						dd->zpdfd_part->zond_pdf_document), f);
+				if (pdfp_loop)
+					pdfp_loop->page_akt--;
+			}
 		}
 		else if (pdfp->arr_annots) {
-			pdf_page* page_pdf = NULL;
 			pdf_annot* annot_pdf = NULL;
 
-			fz_try(ctx)
-				page_pdf = pdf_load_page(ctx,
-						zond_pdf_document_get_pdf_doc(dd->zpdfd_part->zond_pdf_document), i);
-			fz_catch(ctx)
-				ERROR_PDF
-
-			annot_pdf = pdf_first_annot(ctx, page_pdf);
+			annot_pdf = pdf_first_annot(ctx, pdfp->page); //gibt es, sonst kein arr_annots!
 
 			//gelöschte annots aus arr_annot löschen
 			for (gint u = 0; u < pdfp->arr_annots->len; u++) {
@@ -1061,18 +1073,15 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 					g_ptr_array_remove_index(pdfp->arr_annots, u);
 
 					fz_try(ctx)
-						pdf_delete_annot(ctx, page_pdf, annot_pdf);
-					fz_catch(ctx) {
-						pdf_drop_page(ctx, page_pdf);
+						pdf_delete_annot(ctx, pdfp->page, annot_pdf);
+					fz_catch(ctx)
 						ERROR_PDF
-					}
+
 					u--;
 				}
 
 				annot_pdf = annot_next;
 			}
-
-			pdf_drop_page(ctx, page_pdf);
 		}
 
 		i--;
@@ -1519,7 +1528,7 @@ gint viewer_render_stext_page_fast(fz_context *ctx,
 			gint rc = 0;
 
 			zond_pdf_document_mutex_lock(pdf_document_page->document);
-			rc = zond_pdf_document_load_page(pdf_document_page, errmsg);
+			rc = zond_pdf_document_load_page(pdf_document_page, ctx, errmsg);
 			zond_pdf_document_mutex_unlock(pdf_document_page->document);
 			if (rc)
 				ERROR_S
@@ -2742,8 +2751,9 @@ static gboolean cb_viewer_layout_motion_notify(GtkWidget *layout,
 					- event->motion.y_root) / pv->zoom * 100;
 
 			gtk_widget_queue_draw(viewer_page->image_page);
-		} else //nicht auf Text und nicht auf Text-annot
-		{ //layout wird mit Mauszeiger geschoben
+		}
+		else { //nicht auf Text und nicht auf Text-annot
+		//layout wird mit Mauszeiger geschoben
 			gdouble y = gtk_adjustment_get_value(pv->v_adj);
 			gdouble x = gtk_adjustment_get_value(pv->h_adj);
 			gtk_adjustment_set_value(pv->v_adj,

@@ -157,6 +157,7 @@ void zond_pdf_document_page_free(PdfDocumentPage *pdf_document_page) {
 	ZondPdfDocumentPrivate *priv = zond_pdf_document_get_instance_private(
 			pdf_document_page->document);
 
+	pdf_drop_page(priv->ctx, pdf_document_page->page); //greift gar nicht auf doc zu
 	fz_drop_stext_page(priv->ctx, pdf_document_page->stext_page);
 	fz_drop_display_list(priv->ctx, pdf_document_page->display_list);
 	if (pdf_document_page->arr_annots)
@@ -165,15 +166,6 @@ void zond_pdf_document_page_free(PdfDocumentPage *pdf_document_page) {
 	page_akt = pdf_document_page->page_akt;
 
 	g_free(pdf_document_page);
-
-	//Seitenzahlen der folgenden Seiten anpassen
-	for (gint i = page_akt; i < priv->pages->len; i++) {
-		PdfDocumentPage* pdfp_loop = NULL;
-
-		pdfp_loop = g_ptr_array_index(priv->pages, i);
-		if (pdfp_loop)
-			pdfp_loop->page_akt--;
-	}
 
 	return;
 }
@@ -265,18 +257,21 @@ gint zond_pdf_document_page_load_annots(PdfDocumentPage *pdf_document_page, GErr
 }
 
 gint zond_pdf_document_load_page(PdfDocumentPage *pdf_document_page,
-		gchar **errmsg) {
+		fz_context* ctx, gchar **errmsg) {
 	GError *error = NULL;
 	gint rc = 0;
 
 	ZondPdfDocumentPrivate *priv = zond_pdf_document_get_instance_private(
 			pdf_document_page->document);
 
-	fz_try(priv->ctx)
-		pdf_document_page->page = pdf_load_page(priv->ctx, priv->doc,
+	if (pdf_document_page->page)
+		pdf_drop_page(ctx, pdf_document_page->page);
+
+	fz_try(ctx)
+		pdf_document_page->page = pdf_load_page(ctx, priv->doc,
 				pdf_document_page->page_akt);
-	fz_catch(priv->ctx) {
-		if (errmsg) *errmsg = g_strdup_printf("%s\n%s", __func__, fz_caught_message(priv->ctx));
+	fz_catch(ctx) {
+		if (errmsg) *errmsg = g_strdup_printf("%s\n%s", __func__, fz_caught_message(ctx));
 
 		return -1;
 	}

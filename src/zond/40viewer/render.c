@@ -246,7 +246,6 @@ static gint render_display_list(fz_context *ctx,
 		pdf_run_page(ctx, pdf_document_page->page, list_device, fz_identity,
 				NULL);
 	fz_always(ctx) {
-		pdf_drop_page(ctx, pdf_document_page->page);
 		zond_pdf_document_mutex_unlock(pdf_document_page->document);
 		fz_close_device(ctx, list_device);
 		fz_drop_device(ctx, list_device);
@@ -294,7 +293,7 @@ void render_page_thread(gpointer data, gpointer user_data) {
 		gint rc = 0;
 
 		zond_pdf_document_mutex_lock(viewer_page->pdf_document_page->document);
-		rc = zond_pdf_document_load_page(viewer_page->pdf_document_page, &errmsg);
+		rc = zond_pdf_document_load_page(viewer_page->pdf_document_page, ctx, &errmsg);
 		zond_pdf_document_mutex_unlock(
 				viewer_page->pdf_document_page->document);
 		if (rc == -1) {
