@@ -334,9 +334,9 @@ static void seiten_refresh_layouts(GPtrArray *arr_pv) {
 
 		if (g_object_get_data(G_OBJECT(pv->layout), "dirty")) {
 			viewer_refresh_layout(pv, 0);
-			g_object_set_data(G_OBJECT(pv->layout), "dirty", NULL);
-
 			g_signal_emit_by_name(pv->v_adj, "value-changed", NULL);
+
+			g_object_set_data(G_OBJECT(pv->layout), "dirty", NULL);
 		}
 	}
 

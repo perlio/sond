@@ -26,6 +26,7 @@
 #include "misc.h"
 #include "misc_stdlib.h"
 #include "sond_fileparts.h"
+#include "sond_log.h"
 
 //SOND_TREEVIEWDM
 typedef struct {
@@ -502,7 +503,7 @@ static void sond_treeviewfm_render_text_cell(GtkTreeViewColumn *column,
 
 	gtk_tree_model_get(model, iter, 0, &stvfm_item, -1);
 	if (!stvfm_item) {
-		g_warning("%s: Kein SondTVFMItem", __func__);
+		warning("Keine Objekt im Baum");
 		return;
 	}
 
@@ -1946,7 +1947,7 @@ static gint sond_treeviewfm_foreach_loeschen(SondTreeview *stv,
 		else if (!stvfm_item_priv->path_or_section) { //sfp existiert - also ganze Datei
 			gint rc = 0;
 
-			rc = sond_file_part_delete_sfp(stvfm_item_priv->sond_file_part, error);
+			rc = sond_file_part_delete(stvfm_item_priv->sond_file_part, error);
 			if (rc) {
 				ERROR_Z
 			}
@@ -1979,9 +1980,70 @@ static gint sond_treeviewfm_foreach_loeschen(SondTreeview *stv,
 			return -1;
 		}
 
-		rc = sond_file_part_delete_sfp(stvfm_item_priv->sond_file_part, error);
+		rc = sond_file_part_delete(stvfm_item_priv->sond_file_part, error);
 		if (rc)
 			ERROR_Z
+
+		//Wenn gelöschte Datei embedded file in PDF war:
+		if (SOND_IS_FILE_PART_PDF(sond_file_part_get_parent(
+				stvfm_item_priv->sond_file_part))) {
+			//Falls es das letzte war, muß alles umgestellt werdem
+			if (!sond_file_part_get_has_children(sond_file_part_get_parent(
+					stvfm_item_priv->sond_file_part))) {
+				GtkTreeIter iter_page_tree = { 0 };
+				GtkTreeIter iter_parent = { 0 };
+				SondTVFMItem* stvfm_item_parent = NULL;
+				SondTVFMItemPrivate* stvfm_item_parent_priv = NULL;
+
+				//stvfm mit page_tree muß gelöscht werden
+				iter_page_tree = *iter; //iter brauchen wir noch
+				if (!gtk_tree_model_iter_previous(
+						gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm_item_priv->stvfm)),
+						&iter_page_tree)) {
+					critical("PageTree-Item fehlt");
+
+					return 0;
+				}
+
+				if (!gtk_tree_store_remove(GTK_TREE_STORE(
+						gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm_item_priv->stvfm))),
+						&iter_page_tree)) {
+					critical("PageTree-Item konnte nicht gelöscht werden");
+
+					goto end;
+				}
+
+				//Jetzt muß stvfm_item (parent) angepaßt werden
+				if (!gtk_tree_model_iter_parent(
+						gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm_item_priv->stvfm)),
+						&iter_parent, iter)) {
+					critical("Parent-Item nicht vorhanden");
+
+					goto end;
+				}
+
+				gtk_tree_model_get(gtk_tree_view_get_model(
+						GTK_TREE_VIEW(stvfm_item_priv->stvfm)),
+						&iter_parent, 0, &stvfm_item_parent, -1);
+
+				if (!SOND_IS_TVFM_ITEM(stvfm_item_parent)) {
+					critical("Parent enthält kein STVFM-Item");
+
+					goto end;
+				}
+
+				stvfm_item_parent_priv = sond_tvfm_item_get_instance_private(
+						stvfm_item_parent);
+				stvfm_item_parent_priv->type = SOND_TVFM_ITEM_TYPE_LEAF;
+				stvfm_item_parent_priv->has_children = FALSE;
+				g_free(stvfm_item_parent_priv->icon_name);
+				stvfm_item_parent_priv->icon_name = g_strdup("pdf");
+				g_object_unref(stvfm_item_parent);
+
+				end:
+				;
+			}
+		}
 	}
 	else if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF_SECTION) {
 		if (SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->delete_section) {

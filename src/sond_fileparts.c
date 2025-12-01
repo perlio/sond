@@ -131,8 +131,25 @@ static SondFilePart* sond_file_part_create(GType sfp_type, const gchar *path,
 }
 
 static gint sond_file_part_pdf_test_for_embedded_files(SondFilePartPDF*, GError**);
+static gint sond_file_part_zip_test_for_files(SondFilePartZip*, GError**);
 static gint sond_file_part_gmessage_test_for_multipart(SondFilePartGMessage*, GError**);
 static void sond_file_part_leaf_set_mime_type(SondFilePartLeaf*, gchar const*);
+
+static gint sond_file_part_test_for_children(SondFilePart* sfp, GError** error) {
+	gint rc = 0;
+
+	if (SOND_IS_FILE_PART_PDF(sfp))
+		rc = sond_file_part_pdf_test_for_embedded_files(SOND_FILE_PART_PDF(sfp), error);
+	else if (SOND_IS_FILE_PART_ZIP(sfp))
+		rc = sond_file_part_zip_test_for_files(SOND_FILE_PART_ZIP(sfp), error);
+	else if (SOND_IS_FILE_PART_GMESSAGE(sfp))
+		rc = sond_file_part_gmessage_test_for_multipart(SOND_FILE_PART_GMESSAGE(sfp), error);
+
+	if (rc)
+		ERROR_Z
+
+	return 0;
+}
 
 SondFilePart* sond_file_part_create_from_mime_type(gchar const* path,
 		SondFilePart* sfp_parent, gchar const* mime_type) {
@@ -151,31 +168,20 @@ SondFilePart* sond_file_part_create_from_mime_type(gchar const* path,
 	sfp_child = sond_file_part_create(type, path, sfp_parent);
 
 	//Nachbehandlung
-	if (type == SOND_TYPE_FILE_PART_PDF) {
-		gint rc = 0;
-		GError* error = NULL;
-		//häßlich, aber geht nicht in _pdf_init, weil path da noch nicht bekannt ist
-		//Alternative: path als property und in constructed prüfen
-
-		rc = sond_file_part_pdf_test_for_embedded_files(SOND_FILE_PART_PDF(sfp_child), &error);
-		if (rc) {
-			g_warning("%s\n", error->message);
-			g_error_free(error);
-		}
-	}
-	else if (type == SOND_TYPE_FILE_PART_GMESSAGE) {
-		gint rc = 0;
-		GError* error = NULL;
-
-		rc = sond_file_part_gmessage_test_for_multipart(
-				SOND_FILE_PART_GMESSAGE(sfp_child), &error);
-		if (rc) {
-			g_warning("%s\n", error->message);
-			g_error_free(error);
-		}
-	}
-	else if (type == SOND_TYPE_FILE_PART_LEAF)
+	//häßlich, aber geht nicht in sond_file_part_..._init,
+	//weil da versch. member (path, mime_type) noch nicht bekannt sind
+	if (type == SOND_TYPE_FILE_PART_LEAF)
 		sond_file_part_leaf_set_mime_type(SOND_FILE_PART_LEAF(sfp_child), mime_type);
+	else {
+		gint rc = 0;
+		GError* error = NULL;
+
+		rc = sond_file_part_test_for_children(sfp_child, &error);
+		if (rc) {
+			g_warning("%s\n", error->message);
+			g_error_free(error);
+		}
+	}
 
 	return sfp_child;
 }
@@ -589,7 +595,7 @@ static fz_buffer* sond_file_part_pdf_mod_emb_file(SondFilePartPDF*, fz_context*,
 static fz_buffer* sond_file_part_zip_mod_zip_file(SondFilePartZip*,
 		fz_context*, gchar const*, fz_buffer*, GError**);
 
-gint sond_file_part_delete_sfp(SondFilePart* sfp, GError** error) {
+gint sond_file_part_delete(SondFilePart* sfp, GError** error) {
 	SondFilePart* sfp_parent = NULL;
 
 	sfp_parent = sond_file_part_get_parent(sfp);
@@ -639,10 +645,15 @@ gint sond_file_part_delete_sfp(SondFilePart* sfp, GError** error) {
 			ERROR_Z
 		}
 
-		//replace in parent(parent)
+		//replace in parent
 		rc = sond_file_part_replace(sfp_parent, ctx, buf_out, error);
 		fz_drop_buffer(ctx, buf_out);
 		fz_drop_context(ctx);
+		if (rc)
+			ERROR_Z
+
+		//testen, ob sfp_parent noch Kinder hat
+		rc = sond_file_part_test_for_children(sfp_parent, error);
 		if (rc)
 			ERROR_Z
 	}
@@ -661,7 +672,7 @@ gint sond_file_part_replace(SondFilePart* sfp, fz_context* ctx,
 		gchar* filename = NULL;
 
 		//Datei löschen
-		rc = sond_file_part_delete_sfp(sfp, error);
+		rc = sond_file_part_delete(sfp, error);
 		if (rc)
 			ERROR_Z
 
@@ -843,6 +854,21 @@ static void sond_file_part_zip_init(SondFilePartZip* self) {
 			g_ptr_array_new( );
 
 	return;
+}
+
+static gint sond_file_part_zip_test_for_files(SondFilePartZip* sfp_zip, GError** error) {
+	SondFilePartPrivate* sfp_priv = NULL;
+	gboolean has_files = FALSE;
+
+	//ToDo: Test auf files
+
+	sfp_priv = sond_file_part_get_instance_private(SOND_FILE_PART(sfp_zip));
+	if (has_files)
+		sfp_priv->has_children = TRUE;
+	else
+		sfp_priv->has_children = FALSE;
+
+	return 0;
 }
 
 static fz_buffer* sond_file_part_zip_mod_zip_file(SondFilePartZip* sfp_zip,
@@ -1074,8 +1100,8 @@ typedef struct {
 	fz_stream* stream;
 } Lookup;
 
-static gint lookup_embedded_file(fz_context* ctx, pdf_obj* key, pdf_obj* val,
-		gpointer data, GError** error) {
+static gint lookup_embedded_file(fz_context* ctx, pdf_obj* names, pdf_obj* key,
+		pdf_obj* val, gpointer data, GError** error) {
 	pdf_obj* EF_F = NULL;
 	gchar const* path_embedded = NULL;
 	Lookup* lookup = (Lookup*) data;
@@ -1110,8 +1136,8 @@ typedef struct {
 	GPtrArray* arr_embedded_files;
 }Load;
 
-static gint load_embedded_files(fz_context* ctx, pdf_obj* key, pdf_obj* val,
-		gpointer data, GError** error) {
+static gint load_embedded_files(fz_context* ctx, pdf_obj* names, pdf_obj* key,
+		pdf_obj* val, gpointer data, GError** error) {
 	pdf_obj* EF_F = NULL;
 	gchar const* path_embedded = NULL;
 	fz_stream* stream = NULL;
@@ -1154,7 +1180,6 @@ static gint load_embedded_files(fz_context* ctx, pdf_obj* key, pdf_obj* val,
 gint sond_file_part_pdf_load_embedded_files(SondFilePartPDF* sfp_pdf,
 		GPtrArray** arr_children, GError **error) {
 	gint rc = 0;
-	pdf_obj* embedded_files_dict = NULL;
 	fz_context* ctx = NULL;
 	pdf_document* doc = NULL;
 	Load load = { 0 };
@@ -1172,23 +1197,22 @@ gint sond_file_part_pdf_load_embedded_files(SondFilePartPDF* sfp_pdf,
 		ERROR_Z
 	}
 
-	rc = pdf_get_names_tree_dict(ctx, doc, PDF_NAME(EmbeddedFiles),
-			&embedded_files_dict, error);
+	load.sfp_pdf = SOND_FILE_PART_PDF(sfp_pdf);
+	load.arr_embedded_files = g_ptr_array_new_with_free_func((GDestroyNotify)g_object_unref);
+	rc = pdf_walk_embedded_files(ctx, doc,load_embedded_files, &load, error);
+	pdf_drop_document(ctx, doc);
+	fz_drop_context(ctx);
 	if (rc) {
-		pdf_drop_document(ctx, doc);
-		fz_drop_context(ctx);
+		g_ptr_array_unref(load.arr_embedded_files);
 		ERROR_Z
 	}
 
-	load.sfp_pdf = SOND_FILE_PART_PDF(sfp_pdf);
-	load.arr_embedded_files = g_ptr_array_new_with_free_func((GDestroyNotify)g_object_unref);
-	rc = pdf_walk_names_dict(ctx, embedded_files_dict,
-			NULL, load_embedded_files, &load, error);
-	pdf_drop_document(ctx, doc);
-	fz_drop_context(ctx);
-	if (rc == -1) {
+	if (load.arr_embedded_files->len == 0) { //darf ja nicht sein
 		g_ptr_array_unref(load.arr_embedded_files);
-		ERROR_Z
+		if (error) *error = g_error_new(g_quark_from_static_string("sond"),
+				0, "%s\nKein embedded file gefunden", __func__);
+
+		return -1;
 	}
 
 	*arr_children = load.arr_embedded_files;
@@ -1201,12 +1225,22 @@ static void sond_file_part_pdf_class_init(SondFilePartPDFClass *klass) {
 	return;
 }
 
+static gint test_for_emb_files(fz_context* ctx, pdf_obj* names, pdf_obj* key,
+		pdf_obj* val, gpointer data, GError** error) {
+	gboolean* has_emb_files = (gboolean*) data;
+
+	*has_emb_files = TRUE;
+
+	return 1; //kann sofort abgebrochen werden
+}
+
 static gint sond_file_part_pdf_test_for_embedded_files(
 		SondFilePartPDF *sfp_pdf, GError **error) {
 	gint rc = 0;
 	fz_context* ctx = NULL;
 	pdf_document* doc = NULL;
-	pdf_obj* embedded_files_dict = NULL;
+	SondFilePartPrivate* sfp_priv = NULL;
+	gboolean has_emb_file = FALSE;
 
 	ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
 	if (!ctx) {
@@ -1222,35 +1256,16 @@ static gint sond_file_part_pdf_test_for_embedded_files(
 		ERROR_Z
 	}
 
-	rc = pdf_get_names_tree_dict(ctx, doc, PDF_NAME(EmbeddedFiles),
-			&embedded_files_dict, error);
-	if (rc) {
-		pdf_drop_document(ctx, doc);
-		fz_drop_context(ctx);
-		ERROR_Z
-	}
-
-	fz_try(ctx) //Prüfen, ob PDF eingebettete Dateien hat
-		if (embedded_files_dict && pdf_dict_len(ctx, embedded_files_dict)) {
-			SondFilePartPrivate* sfp_priv =
-					sond_file_part_get_instance_private(SOND_FILE_PART(sfp_pdf));
-
-			sfp_priv->has_children = TRUE;
-		}
-	fz_always(ctx)
-		pdf_drop_document(ctx, doc);
-	fz_catch(ctx) {
-		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
-				fz_caught(ctx),
-				"%s\nkonnte eingebettete Dateien in PDF '%s' nicht prüfen: %s",
-				__func__, sond_file_part_get_path(SOND_FILE_PART(sfp_pdf)),
-				fz_caught_message(ctx));
-		fz_drop_context(ctx);
-
-		return -1; //Fehler beim Prüfen auf eingebettete Dateien
-	}
-
+	rc = pdf_walk_embedded_files(ctx, doc, test_for_emb_files, &has_emb_file, error);
+	pdf_drop_document(ctx, doc);
 	fz_drop_context(ctx);
+	if (rc)
+		ERROR_Z
+
+	sfp_priv = sond_file_part_get_instance_private(SOND_FILE_PART(sfp_pdf));
+	if (has_emb_file)
+		sfp_priv->has_children = TRUE;
+	else sfp_priv->has_children = FALSE; //aktiv FALSE setzen - kann sich ja ändern
 
 	return 0;
 }
@@ -1267,7 +1282,6 @@ static void sond_file_part_pdf_init(SondFilePartPDF* self) {
 static fz_stream* sond_file_part_pdf_lookup_embedded_file(fz_context* ctx,
 		SondFilePartPDF* sfp_pdf, gchar const* path, GError** error) {
 	pdf_document* doc = NULL;
-	pdf_obj* embedded_files_dict = NULL;
 	Lookup lookup = { 0 };
 	gint rc = 0;
 
@@ -1275,21 +1289,15 @@ static fz_stream* sond_file_part_pdf_lookup_embedded_file(fz_context* ctx,
 	if (!doc)
 		ERROR_Z_VAL(NULL)
 
-	rc = pdf_get_names_tree_dict(ctx, doc, PDF_NAME(EmbeddedFiles), &embedded_files_dict, error);
-	if (rc) {
-		pdf_drop_document(ctx, doc);
-		ERROR_Z_VAL(NULL)
-	}
-
 	lookup.path_search = path;
-
-	rc = pdf_walk_names_dict(ctx, embedded_files_dict, NULL,
-			lookup_embedded_file, &lookup, error);
-	pdf_drop_document(ctx, doc); //stream hält (hoffentlich) ref auf doc
-	if (rc == -1)
+	rc = pdf_walk_embedded_files(ctx, doc, lookup_embedded_file, &lookup, error);
+	pdf_drop_document(ctx, doc);
+	if (rc)
 		ERROR_Z_VAL(NULL)
-	else if (rc == 0) {
-		if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\nnicht gefunden", __func__);
+
+	if (!lookup.stream) { //Datei nicht gefunden
+		if (error) *error = g_error_new(g_quark_from_static_string("sond"),
+				0, "%s\embedded file '%s' nicht gefunden", __func__, path);
 
 		return NULL;
 	}
@@ -1297,33 +1305,229 @@ static fz_stream* sond_file_part_pdf_lookup_embedded_file(fz_context* ctx,
 	return lookup.stream;
 }
 
-static gint delete_embedded_file(fz_context* ctx, pdf_obj* key, pdf_obj* val,
-		gpointer data, GError** error) {
+/*
+// Forward Declaration für rekursive Funktion
+static int remove_in_nametree_node(fz_context *ctx, pdf_document *doc, pdf_obj *node, const char *target);
+
+// Entfernt ein EmbeddedFile aus einem Names Array und gibt das Blatt ggf. frei
+static int remove_from_names_array(fz_context *ctx, pdf_document *doc, pdf_obj *names_array, const char *target)
+{
+	int i, len;
+	fz_var(i);
+	fz_var(len);
+
+	len = pdf_array_len(ctx, names_array);
+	for (i = 0; i + 1 < len; i += 2)
+	{
+		pdf_obj *key = pdf_array_get(ctx, names_array, i);
+		char *key_utf8 = pdf_to_utf8(ctx, doc, key);
+
+		if (key_utf8 && strcmp(key_utf8, target) == 0)
+		{
+			pdf_obj *filespec = pdf_array_get(ctx, names_array, i + 1);
+
+			if (pdf_is_dict(ctx, filespec))
+			{
+				pdf_obj *ef = pdf_dict_gets(ctx, filespec, "EF");
+				if (ef && pdf_is_dict(ctx, ef))
+				{
+					pdf_obj *ef_F = pdf_dict_gets(ctx, ef, "F");
+					if (ef_F && pdf_is_indirect(ctx, ef_F))
+						pdf_drop_obj(ctx, ef_F);
+
+					pdf_obj *ef_UF = pdf_dict_gets(ctx, ef, "UF");
+					if (ef_UF && pdf_is_indirect(ctx, ef_UF))
+						pdf_drop_obj(ctx, ef_UF);
+
+					pdf_dict_dels(ctx, ef, "F");
+					pdf_dict_dels(ctx, ef, "UF");
+				}
+			}
+
+			if (pdf_is_indirect(ctx, filespec))
+				pdf_drop_obj(ctx, filespec);
+
+			// Entferne Key und Filespec aus Names Array
+			pdf_array_delete(ctx, names_array, i + 1);
+			pdf_array_delete(ctx, names_array, i);
+
+			fz_free(ctx, key_utf8);
+			return 0;
+		}
+		fz_free(ctx, key_utf8);
+	}
+
+	return -1;
+}
+
+// Rekursive Löschung inkl. Aufräumen leerer Leaf/Parent Nodes
+static int remove_in_nametree_node(fz_context *ctx, pdf_document *doc, pdf_obj *node, const char *target)
+{
+	pdf_obj *names_array = NULL;
+	pdf_obj *kids = NULL;
+	int i, n, result = -1;
+
+	if (!node)
+		return -1;
+
+	// Blattknoten: /Names prüfen
+	names_array = pdf_dict_gets(ctx, node, "Names");
+	if (names_array && pdf_is_array(ctx, names_array))
+	{
+		result = remove_from_names_array(ctx, doc, names_array, target);
+
+		// Wenn Names Array leer, Node ggf. löschen
+		if (pdf_array_len(ctx, names_array) == 0)
+		{
+			pdf_dict_dels(ctx, node, "Names");
+			// Leaf ohne Key-Wert-Paare: wenn indirekt, freigeben
+			if (pdf_is_indirect(ctx, node))
+				pdf_drop_obj(ctx, node);
+			return result; // Node gelöscht oder geleert
+		}
+
+		if (result == 0)
+			return 0;
+	}
+
+	// Inner Node: /Kids prüfen
+	kids = pdf_dict_gets(ctx, node, "Kids");
+	if (kids && pdf_is_array(ctx, kids))
+	{
+		n = pdf_array_len(ctx, kids);
+		for (i = n - 1; i >= 0; i--) // rückwärts, um löschen zu ermöglichen
+		{
+			pdf_obj *kid = pdf_array_get(ctx, kids, i);
+			if (pdf_is_dict(ctx, kid))
+			{
+				int r = remove_in_nametree_node(ctx, doc, kid, target);
+				if (r == 0)
+				{
+					// Prüfe, ob das Kind jetzt leer ist
+					pdf_obj *names = pdf_dict_gets(ctx, kid, "Names");
+					pdf_obj *kids2 = pdf_dict_gets(ctx, kid, "Kids");
+
+					if ((!names || pdf_array_len(ctx, names) == 0) &&
+					    (!kids2 || pdf_array_len(ctx, kids2) == 0))
+					{
+						// Kind leer → aus Eltern-Array entfernen
+						pdf_array_delete(ctx, kids, i);
+						if (pdf_is_indirect(ctx, kid))
+							pdf_drop_obj(ctx, kid);
+					}
+					result = 0;
+				}
+			}
+		}
+
+		// Wenn Kids-Array jetzt leer ist, Node ggf. löschen
+		if (pdf_array_len(ctx, kids) == 0)
+		{
+			pdf_dict_dels(ctx, node, "Kids");
+			if (pdf_is_indirect(ctx, node))
+				pdf_drop_obj(ctx, node);
+		}
+	}
+
+	return result;
+}
+
+// Öffentliche Funktion: Embedded File löschen + leere Nodes aufräumen
+int pdf_remove_embedded_file_by_name(fz_context *ctx, pdf_document *doc, const char *name_utf8)
+{
+	pdf_obj *trailer = NULL;
+	pdf_obj *root = NULL;
+	pdf_obj *names = NULL;
+	pdf_obj *embedded_files_tree = NULL;
+	int r = -1;
+
+	fz_var(trailer);
+	fz_var(root);
+	fz_var(names);
+	fz_var(embedded_files_tree);
+
+	fz_try(ctx)
+	{
+		trailer = pdf_trailer(ctx, doc);
+		root = pdf_dict_gets(ctx, trailer, "Root");
+		names = pdf_dict_gets(ctx, root, "Names");
+		if (!names || !pdf_is_dict(ctx, names))
+			fz_throw(ctx, FZ_ERROR_GENERIC, "no /Names dict in Root");
+
+		embedded_files_tree = pdf_dict_gets(ctx, names, "EmbeddedFiles");
+		if (!embedded_files_tree || !pdf_is_dict(ctx, embedded_files_tree))
+			fz_throw(ctx, FZ_ERROR_GENERIC, "no /EmbeddedFiles name tree");
+
+		r = remove_in_nametree_node(ctx, doc, embedded_files_tree, name_utf8);
+
+		// Wenn EmbeddedFiles Tree jetzt leer, den gesamten Key löschen
+		if ((pdf_dict_gets(ctx, embedded_files_tree, "Names") == NULL ||
+		     pdf_array_len(ctx, pdf_dict_gets(ctx, embedded_files_tree, "Names")) == 0) &&
+		    (pdf_dict_gets(ctx, embedded_files_tree, "Kids") == NULL ||
+		     pdf_array_len(ctx, pdf_dict_gets(ctx, embedded_files_tree, "Kids")) == 0))
+		{
+			pdf_dict_dels(ctx, names, "EmbeddedFiles");
+			if (pdf_is_indirect(ctx, embedded_files_tree))
+				pdf_drop_obj(ctx, embedded_files_tree);
+		}
+	}
+	fz_catch(ctx)
+	{
+		return -1;
+	}
+
+	return r;
+}
+*/
+
+typedef struct {
+	gchar const* path;
+	fz_buffer* buf;
+	gboolean found;
+} Modify;
+
+static gint delete_embedded_file(fz_context* ctx, pdf_obj*names, pdf_obj* key,
+		pdf_obj* val, gpointer data, GError** error) {
 	pdf_obj* EF_F = NULL;
 	gchar const* path_embedded = NULL;
-	gchar const* path = (gchar const*) data;
+	Modify* modify = (Modify*) data;
 
 	EF_F = get_EF_F(ctx, val, &path_embedded, error);
 	if (!EF_F)
 		ERROR_Z
 
-	if (g_strcmp0(path_embedded, path) == 0) {
-		if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\n%s",
-				__func__, "Eingebettete Datei löschen nicht implementiert");
+	if (g_strcmp0(path_embedded, modify->path) == 0) {
+		gint index = 0;
 
-		return -1;
+		fz_try(ctx)
+			index = pdf_array_find(ctx, names, key);
+		fz_catch(ctx)
+			ERROR_PDF
+
+		if (index == -1) {
+			if (error) *error = g_error_new(ZOND_ERROR, 0,
+					"%s\nkey nicht gefunden", __func__);
+
+			return -1;
+		}
+
+		fz_try(ctx) {
+			pdf_array_delete(ctx, names, index);
+			pdf_array_delete(ctx, names, index);
+		}
+		fz_catch(ctx)
+			ERROR_PDF
+
+		modify->found = TRUE;
+
+		return 1;
 	}
 
 	return 0;
 }
 
-typedef struct {
-	gchar const* path;
-	fz_buffer* buf;
-} Modify;
-
-static gint modify_embedded_file(fz_context* ctx, pdf_obj* key, pdf_obj* val,
-		gpointer data, GError** error) {
+static gint modify_embedded_file(fz_context* ctx, pdf_obj* names, pdf_obj* key,
+		pdf_obj* val, gpointer data, GError** error) {
 	pdf_obj* EF_F = NULL;
 	gchar const* path_embedded = NULL;
 	Modify* modify = (Modify*) data;
@@ -1367,39 +1571,27 @@ static fz_buffer* sond_file_part_pdf_mod_emb_file(SondFilePartPDF* sfp_pdf,
 		fz_context* ctx, gchar const* path, fz_buffer* buf, GError** error) {
 	pdf_document* doc = NULL;
 	gint rc = 0;
-	pdf_obj* embedded_files_dict = NULL;
 	fz_buffer* buf_out = NULL;
+	Modify modify = { path, buf, FALSE };
 
 	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, FALSE, FALSE, TRUE, error);
 	if (!doc)
 		ERROR_Z_VAL(NULL)
 
 	//mod embedded file
-	rc = pdf_get_names_tree_dict(ctx, doc, PDF_NAME(EmbeddedFiles),
-			&embedded_files_dict, error);
+	rc = pdf_walk_embedded_files(ctx, doc,
+			(buf) ? modify_embedded_file : delete_embedded_file, &modify, error);
 	if (rc) {
 		pdf_drop_document(ctx, doc);
 		ERROR_Z_VAL(NULL)
 	}
 
-	if (buf) {
-		Modify modify = { path, buf };
+	if (!modify.found) {
+		pdf_drop_document(ctx, doc);
+		if (error) *error = g_error_new(g_quark_from_static_string("sond"),
+				0, "%s\nembedded file '%s' nicht gefunden", __func__, path);
 
-		rc = pdf_walk_names_dict(ctx, embedded_files_dict, NULL,
-				modify_embedded_file, &modify, error);
-	}
-	else
-		rc = pdf_walk_names_dict(ctx, embedded_files_dict, NULL,
-				delete_embedded_file, (gpointer) path, error);
-	if (rc != 1) {
-		pdf_drop_document(ctx, doc); //stream hält (hoffentlich) ref auf doc
-		if (rc == -1)
-			ERROR_Z_VAL(NULL)
-		else if (rc == 0) {
-			if (error) *error = g_error_new(g_quark_from_static_string("sond"), 0, "%s\nnicht gefunden", __func__);
-
-			return NULL;
-		}
+		return NULL;
 	}
 
 	//write pdf to other buffer
@@ -1411,8 +1603,8 @@ static fz_buffer* sond_file_part_pdf_mod_emb_file(SondFilePartPDF* sfp_pdf,
 	return buf_out;
 }
 
-static gint look_for_embedded_file(fz_context* ctx, pdf_obj* key, pdf_obj* val,
-		gpointer data, GError** error) {
+static gint look_for_embedded_file(fz_context* ctx, pdf_obj* names, pdf_obj* key,
+		pdf_obj* val, gpointer data, GError** error) {
 	pdf_obj* EF_F = NULL;
 	gchar const* path_embedded = NULL;
 	gchar const* path = (gchar const*) data;
@@ -1430,10 +1622,11 @@ static gint look_for_embedded_file(fz_context* ctx, pdf_obj* key, pdf_obj* val,
 typedef struct {
 	gchar const* path_old;
 	gchar const* path_new;
+	gboolean found;
 } Rename;
 
-static gint rename_embedded_file(fz_context* ctx, pdf_obj* key, pdf_obj* val,
-		gpointer data, GError** error) {
+static gint rename_embedded_file(fz_context* ctx, pdf_obj* names, pdf_obj* key,
+		pdf_obj* val, gpointer data, GError** error) {
 	gchar const* path_tmp = NULL;
 	pdf_obj* F = NULL;
 	pdf_obj* UF = NULL;
@@ -1493,10 +1686,9 @@ static gint rename_embedded_file(fz_context* ctx, pdf_obj* key, pdf_obj* val,
 static gint sond_file_part_pdf_rename_embedded_file(SondFilePartPDF* sfp_pdf,
 		gchar const* path_old, gchar const* path_new, GError** error) {
 	gint rc = 0;
-	pdf_obj* embedded_files_dict = NULL;
 	fz_context* ctx = NULL;
 	pdf_document* doc = NULL;
-	Rename rename = {path_old, path_new};
+	Rename rename = {path_old, path_new, FALSE};
 
 	ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
 	if (!ctx) {
@@ -1511,47 +1703,32 @@ static gint sond_file_part_pdf_rename_embedded_file(SondFilePartPDF* sfp_pdf,
 		ERROR_Z
 	}
 
-	rc = pdf_get_names_tree_dict(ctx, doc, PDF_NAME(EmbeddedFiles),
-			&embedded_files_dict, error);
+	//erster Durchgang: gibt's schon embFile mit Namen, in den umgenannt werden soll?
+	rc = pdf_walk_embedded_files(ctx, doc, look_for_embedded_file,
+			&rename, error);
+	if (rc) {
+		pdf_drop_document(ctx, doc);
+		fz_drop_context(ctx);
+
+		ERROR_Z
+	}
+
+	if (rename.found) { //Ziel-Datei existiert schon!
+		pdf_drop_document(ctx, doc);
+		fz_drop_context(ctx);
+		if (error) *error = g_error_new(g_quark_from_static_string("sond"),
+				0, "%s\nDatei '%s' existiert bereits als embedded file",
+				__func__, rename.path_new);
+
+		return -1;
+	}
+
+	rc = pdf_walk_embedded_files(ctx, doc, rename_embedded_file,
+			&rename, error);
 	if (rc) {
 		pdf_drop_document(ctx, doc);
 		fz_drop_context(ctx);
 		ERROR_Z
-	}
-
-	rc = pdf_walk_names_dict(ctx, embedded_files_dict,
-			NULL, look_for_embedded_file, (gpointer) path_new, error);
-	if (rc == -1) {
-		pdf_drop_document(ctx, doc);
-		fz_drop_context(ctx);
-		ERROR_Z
-	}
-	else if (rc == 1)
-	{
-		pdf_drop_document(ctx, doc);
-		fz_drop_context(ctx);
-
-		if (error) *error = g_error_new(g_quark_from_static_string("sond"), 0,
-				"%s\nDateiname existiert bereits", __func__);
-
-		return -1;
-	}
-
-	rc = pdf_walk_names_dict(ctx, embedded_files_dict,
-			NULL, rename_embedded_file, (gpointer) &rename, error);
-	if (rc == -1) {
-		pdf_drop_document(ctx, doc);
-		fz_drop_context(ctx);
-		ERROR_Z
-	}
-	else if (rc == 0)
-	{
-		pdf_drop_document(ctx, doc);
-		fz_drop_context(ctx);
-		if (error) *error = g_error_new(g_quark_from_static_string("sond"), 0,
-				"%s\nDateiname nicht gefunden", __func__);
-
-		return -1;
 	}
 
 	rc = pdf_save(ctx, doc, sfp_pdf, error);

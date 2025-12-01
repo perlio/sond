@@ -849,29 +849,23 @@ gint pdf_get_names_tree_dict(fz_context* ctx, pdf_document* doc,
 		dict_res = pdf_dict_get(ctx, names, name_dict);
 	}
 	fz_catch(ctx)
-	{
-		if (error)
-			*error = g_error_new(g_quark_from_static_string("mupdf"),
-					fz_caught(ctx), "%s\n%s", __func__,
-					fz_caught_message(ctx));
+		ERROR_PDF
 
-		return -1;
-	}
-
-	if (dict) *dict = dict_res;
+	if (dict)
+		*dict = dict_res;
 
 	return 0;
 }
 
-gint
+static gint
 pdf_walk_names_dict(fz_context* ctx, pdf_obj *node, pdf_cycle_list *cycle_up,
-		gint (*callback_walk) (fz_context*, pdf_obj*, pdf_obj*,
-				gpointer, GError**), gpointer data, GError** error)
-{
+		gint (*callback_walk) (fz_context*, pdf_obj*, pdf_obj*, pdf_obj*,
+				gpointer, GError**), gpointer data, GError** error) {
 	pdf_cycle_list cycle;
 	pdf_obj *kids = NULL;
 	pdf_obj *names = NULL;
 	gboolean is_cycle = FALSE;
+	gint i = 0;
 
 	fz_try(ctx)
 	{
@@ -880,85 +874,77 @@ pdf_walk_names_dict(fz_context* ctx, pdf_obj *node, pdf_cycle_list *cycle_up,
 		is_cycle = pdf_cycle(ctx, &cycle, cycle_up, node);
 	}
 	fz_catch(ctx)
-	{
-		if (error)
-			*error = g_error_new(g_quark_from_static_string("mupdf"),
-					fz_caught(ctx), "%s\n%s", __func__,
-					fz_caught_message(ctx));
+		ERROR_PDF
 
-		return -1;
+	if (kids && !is_cycle) {
+		pdf_obj* ind = NULL;
+
+		do {
+			ind = pdf_array_get(ctx, kids, i);
+			if (ind) {
+				gint rc = 0;
+
+				rc = pdf_walk_names_dict(ctx, ind, &cycle, callback_walk, data, error);
+				if (rc == -1)
+					ERROR_Z
+
+				i++;
+			}
+
+		} while (ind);
 	}
+	else if (names) {
+		pdf_obj* key = NULL;
+		pdf_obj* val = NULL;
 
-	if (kids && !is_cycle)
-	{
-		int len = 0;
-
-		fz_try(ctx)
-			pdf_array_len(ctx, kids);
-		fz_catch(ctx)
-		{
-			if (error)
-				*error = g_error_new(g_quark_from_static_string("mupdf"),
-						fz_caught(ctx), "%s\n%s", __func__,
-						fz_caught_message(ctx));
-
-			return -1;
-		}
-
-		for (gint i = 0; i < len; i++) {
-			gint rc = 0;
-
-			rc = pdf_walk_names_dict(ctx, pdf_array_get(ctx, kids, i),
-					&cycle, callback_walk, data, error);
-			if (rc == -1)
-				ERROR_Z
-			else if (rc == 1)
-				return 1;
-		}
-	}
-
-	if (names)
-	{
-		int len = 0;
-
-		fz_try(ctx)
-			len = pdf_array_len(ctx, names);
-		fz_catch(ctx)
-		{
-			if (error)
-				*error = g_error_new(g_quark_from_static_string("mupdf"),
-						fz_caught(ctx), "%s\n%s", __func__,
-						fz_caught_message(ctx));
-
-			return -1;
-		}
-
-		for (gint i = 0; i + 1 < len; i++)
-		{
-			gint rc = 0;
-			pdf_obj* key = NULL;
-			pdf_obj* val = NULL;
-
+		do {
 			fz_try(ctx) {
 				key = pdf_array_get(ctx, names, i);
 				val = pdf_array_get(ctx, names, i + 1);
 			}
-			fz_catch(ctx) {
-				if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
-						fz_caught(ctx), "%s\n%s", __func__,
-						fz_caught_message(ctx));
+			fz_catch(ctx)
+				ERROR_PDF
 
-				return -1;
+			if (key && val) {
+				gint rc = 0;
+
+				rc = callback_walk(ctx, names, key, val, data, error);
+				if (rc == -1)
+					ERROR_Z
+				else if (rc == 1) //Abbruch
+					return 0;
+
+				i += 2;
 			}
-
-
-			rc = callback_walk(ctx, key, val, data, error);
-			if (rc == -1)
-				ERROR_Z
-			else if (rc == 1)
-				return 1;
-		}
+		} while (key && val);
 	}
+
+	if (i == 0 && (kids || names)) {//kein einziger Eintrag in kids- oder names-array
+		fz_try(ctx)
+			pdf_dict_del(ctx, node, PDF_NAME(Names)); //saubermachen
+		fz_catch(ctx)
+			ERROR_PDF
+	}
+
+	return 0;
+}
+
+gint pdf_walk_embedded_files(fz_context* ctx, pdf_document* doc,
+		gint (*callback_walk) (fz_context*, pdf_obj*, pdf_obj*, pdf_obj*,
+				gpointer, GError**), gpointer data, GError** error) {
+	gint rc = 0;
+	pdf_obj* dict = NULL;
+
+	rc = pdf_get_names_tree_dict(ctx, doc, PDF_NAME(EmbeddedFiles), &dict, error);
+	if (rc)
+		ERROR_Z
+
+	if (!dict)
+		return 0; //nicht einmal EmbeddedFiles-Dict gefunden
+
+	rc = pdf_walk_names_dict(ctx, dict, NULL, callback_walk, data, error);
+	if (rc)
+		ERROR_Z
 
 	return 0;
 }

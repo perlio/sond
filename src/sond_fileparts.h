@@ -63,7 +63,7 @@ gchar* sond_file_part_get_filepart(SondFilePart*);
 SondFilePart* sond_file_part_from_filepart(fz_context*,
 		gchar const*, GError**);
 
-gint sond_file_part_delete_sfp(SondFilePart*, GError**);
+gint sond_file_part_delete(SondFilePart*, GError**);
 
 gint sond_file_part_replace(SondFilePart*, fz_context*, fz_buffer*, GError**);
 

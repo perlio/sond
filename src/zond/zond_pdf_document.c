@@ -149,8 +149,6 @@ static void zond_pdf_document_finalize(GObject *self) {
 }
 
 void zond_pdf_document_page_free(PdfDocumentPage *pdf_document_page) {
-	gint page_akt = 0;
-
 	if (!pdf_document_page)
 		return;
 
@@ -162,8 +160,6 @@ void zond_pdf_document_page_free(PdfDocumentPage *pdf_document_page) {
 	fz_drop_display_list(priv->ctx, pdf_document_page->display_list);
 	if (pdf_document_page->arr_annots)
 		g_ptr_array_unref(pdf_document_page->arr_annots);
-
-	page_akt = pdf_document_page->page_akt;
 
 	g_free(pdf_document_page);
 

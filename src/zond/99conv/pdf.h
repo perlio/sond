@@ -74,8 +74,8 @@ gint pdf_get_f_0_0_font(fz_context*, pdf_document*, GError**);
 gint pdf_get_names_tree_dict(fz_context*, pdf_document*,
 		pdf_obj*, pdf_obj**, GError**);
 
-gint pdf_walk_names_dict(fz_context*, pdf_obj*, pdf_cycle_list*,
-		gint (*) (fz_context*, pdf_obj*, pdf_obj*, gpointer, GError**),
+gint pdf_walk_embedded_files(fz_context*, pdf_document*,
+		gint (*) (fz_context*, pdf_obj*, pdf_obj*, pdf_obj*, gpointer, GError**),
 		gpointer, GError**);
 
 #endif // PDF_DATEIEN_H_INCLUDED
