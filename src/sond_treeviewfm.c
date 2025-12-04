@@ -1401,12 +1401,28 @@ static gint move_stvfm_item(SondTVFMItem* stvfm_item,
 	if (rc)
 		ERROR_Z
 
+	//dann alle geöffneten sfps, die in diesem dir liegen, anpassen
+	//welche sfps sind in diesem Raum geöffnet?
+	if (stvfm_item_priv->path_or_section) {
+		gchar* path_new = NULL;
+		path_new = g_strconcat((stvfm_item_parent_priv->path_or_section) ?
+				stvfm_item_parent_priv->path_or_section : "",
+				(stvfm_item_parent_priv->path_or_section) ? "/" : "", base, NULL);
+
+		adjust_sfps_in_dir(stvfm_item_priv->sond_file_part,
+				stvfm_item_parent_priv->sond_file_part,
+				stvfm_item_priv->path_or_section,
+				path_new);
+
+		g_free(path_new);
+	}
+
 	return 0;
 }
 
 static gint process_stvfm_item_move_or_copy(SondTVFMItem* stvfm_item,
-		SondTVFMItemPrivate* stvfm_item_parent_priv,
-		SondTVFMItem** stvfm_item_new, gboolean move, GError** error) {
+		SondTVFMItemPrivate* stvfm_item_parent_priv, gchar** base_out,
+		gboolean move, GError** error) {
 	gint rc = 0;
 	gchar const* path_src = NULL;
 	guint max_tries = 100;
@@ -1414,7 +1430,6 @@ static gint process_stvfm_item_move_or_copy(SondTVFMItem* stvfm_item,
 	gboolean has_ext = FALSE;
 	const gchar *ext = NULL;
 	gint i = 0;
-	gchar* toplevel_path = NULL;
 
 	g_autofree gchar *name = NULL;
 	g_autofree gchar *base = NULL;
@@ -1472,7 +1487,7 @@ static gint process_stvfm_item_move_or_copy(SondTVFMItem* stvfm_item,
 				ERROR_Z
 		}
 		else {
-			toplevel_path = g_strdup(trial_base);
+			*base_out = g_strdup(trial_base);
 
 			break;
 		}
@@ -1484,77 +1499,6 @@ static gint process_stvfm_item_move_or_copy(SondTVFMItem* stvfm_item,
 
 		ERROR_Z
 	}
-
-	if (move) { //stvfm_item_new erzeugen
-		*stvfm_item_new = g_object_ref(stvfm_item);
-
-		//Ziel-sfp
-		SondFilePart* sfp_dst = NULL;
-
-		sfp_dst = stvfm_item_parent_priv->sond_file_part;
-
-		//Wenn leaf oder root-dir verschoben wird
-		if (!stvfm_item_priv->path_or_section) { //LEAF und ROOT-Dir haben keinen path!
-			SondFilePart* sfp_parent = NULL;
-			gchar* path_new = NULL;
-
-			sfp_parent = sond_file_part_get_parent(stvfm_item_priv->sond_file_part);
-
-			if (sfp_parent != stvfm_item_parent_priv->sond_file_part)
-				//neues Eltern-sfp
-				sond_file_part_set_parent(stvfm_item_priv->sond_file_part,
-						stvfm_item_parent_priv->sond_file_part);
-
-			//path von sfp anpassen - item hat ja keinen!
-			path_new = g_strconcat((stvfm_item_parent_priv->path_or_section) ?
-					stvfm_item_parent_priv->path_or_section : "",
-					(stvfm_item_parent_priv->path_or_section) ? "/" : "", toplevel_path, NULL);
-
-			sond_file_part_set_path(stvfm_item_priv->sond_file_part, path_new);
-			g_free(path_new);
-		}
-		else { //Wenn "wirkliches" dir verschoben wird:
-			gchar* path_old = NULL;
-
-			//bisherigen path merken - für Längenbestimmung
-			path_old = stvfm_item_priv->path_or_section;
-
-			//dann neuen path für item
-			stvfm_item_priv->path_or_section = g_strconcat(
-					(stvfm_item_parent_priv->path_or_section) ?
-							stvfm_item_parent_priv->path_or_section : "",
-					(stvfm_item_parent_priv->path_or_section) ? "/" : "",
-					toplevel_path, NULL);
-
-			//dann alle geöffneten sfps, die in diesem dir liegen, anpassen
-			//welche sfps sind in diesem Raum geöffnet?
-			adjust_sfps_in_dir(stvfm_item_priv->sond_file_part,
-					stvfm_item_parent_priv->sond_file_part,
-					path_old, stvfm_item_priv->path_or_section);
-
-			g_free(path_old);
-		}
-	}
-	else {
-		SondTVFMItemPrivate* stvfm_item_new_priv = NULL;
-
-		*stvfm_item_new = sond_tvfm_item_create(stvfm_item_parent_priv->stvfm,
-				stvfm_item_priv->type, NULL, NULL);
-		stvfm_item_new_priv = sond_tvfm_item_get_instance_private(*stvfm_item_new);
-
-		if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_DIR) {
-			if (!stvfm_item_priv->path_or_section)
-				stvfm_item_new_priv->sond_file_part =
-			//path setzen
-			stvfm_item_new_priv->path_or_section = g_strconcat(
-					(stvfm_item_parent_priv->path_or_section) ?
-							stvfm_item_parent_priv->path_or_section : "",
-					(stvfm_item_parent_priv->path_or_section) ? "/" : "",
-					toplevel_path, NULL);
-		}
-	}
-
-	g_free(toplevel_path);
 
 	return 0;
 }
@@ -1571,10 +1515,10 @@ typedef struct _S_FM_Paste_Selection {
 static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 		GtkTreeIter *iter, gpointer data, GError **error) {
 	SondTVFMItem *stvfm_item = NULL;
-	SondTVFMItem *stvfm_item_new = NULL;
-	SFMPasteSelection *s_fm_paste_selection = (SFMPasteSelection*) data;
+	SFMPasteSelection *s_paste_sel = (SFMPasteSelection*) data;
 	Clipboard *clipboard = NULL;
 	gint rc = 0;
+	gchar* base = NULL;
 	SondTVFMItemPrivate* stvfm_item_new_priv = NULL;
 
 	clipboard = ((SondTreeviewClass*) g_type_class_peek(
@@ -1592,19 +1536,19 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 		//dann: return 0;
 		if (gtk_tree_model_iter_parent(
 				gtk_tree_view_get_model(GTK_TREE_VIEW(stv)), &parent_iter, iter)) {
-			if (s_fm_paste_selection->iter_parent &&
-					parent_iter.user_data == s_fm_paste_selection->iter_parent->user_data &&
-					parent_iter.stamp == s_fm_paste_selection->iter_parent->stamp)
+			if (s_paste_sel->iter_parent &&
+					parent_iter.user_data == s_paste_sel->iter_parent->user_data &&
+					parent_iter.stamp == s_paste_sel->iter_parent->stamp)
 				return 0; //innerhalb des gleichen Verzeichnisses verschieben
 		}
 		else
-			if (!s_fm_paste_selection->iter_parent)
+			if (!s_paste_sel->iter_parent)
 				return 0;
 	}
 
 	rc = process_stvfm_item_move_or_copy(stvfm_item,
-			s_fm_paste_selection->stvfm_item_priv_parent,
-			&stvfm_item_new, clipboard->ausschneiden, error);
+			s_paste_sel->stvfm_item_priv_parent, &base,
+			clipboard->ausschneiden, error);
 	if (rc == -1)
 		ERROR_Z
 	else if (rc == 1) //Überspringen gewählt
@@ -1612,42 +1556,42 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 	else if (rc == 2) //Abbrechen gewählt
 		return 1;
 
-	s_fm_paste_selection->inserted = TRUE;
-	stvfm_item_new_priv =  sond_tvfm_item_get_instance_private(stvfm_item_new);
+	s_paste_sel->inserted = TRUE;
 
 	//In nicht geöffnetes Verzeichnis eingefügt?
-	if (s_fm_paste_selection->kind && !s_fm_paste_selection->expanded) {
+	if (s_paste_sel->kind && !s_paste_sel->expanded) {
 		gint num_children = 0;
 
 		if (!gtk_tree_model_iter_has_child(
 					gtk_tree_view_get_model(GTK_TREE_VIEW(stv)),
-					s_fm_paste_selection->iter_cursor)) { //erstes Kind
+					s_paste_sel->iter_cursor)) { //erstes Kind
 			GtkTreeIter iter_tmp = { 0 };
 
 			gtk_tree_store_insert( //dann dummy einfügen
 					GTK_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(stv))),
-					&iter_tmp, s_fm_paste_selection->iter_cursor, -1);
+					&iter_tmp, s_paste_sel->iter_cursor, -1);
 		}
 
 		//Knoten expandieren
 		sond_treeview_expand_row(SOND_TREEVIEW(stv),
-				s_fm_paste_selection->iter_cursor);
+				s_fm_paste_sel->iter_cursor);
 
 		//soeben eingefügten Punkt suchen und iter_cursor darauf setzen
 		num_children = gtk_tree_model_iter_n_children(
-				gtk_tree_view_get_model(GTK_TREE_VIEW(stv)), s_fm_paste_selection->iter_cursor);
+				gtk_tree_view_get_model(GTK_TREE_VIEW(stv)), s_paste_sel->iter_cursor);
 		for (guint i = 0; i < num_children; i++) {
 			GtkTreeIter iter_child = { 0 };
 			SondTVFMItem* stvfm_item_child = NULL;
 			SondTVFMItemPrivate* stvfm_item_child_priv = NULL;
+			g_autofree gchar* base_child = NULL;
 
 			gtk_tree_model_iter_nth_child(
 					gtk_tree_view_get_model(GTK_TREE_VIEW(stv)),
-					&iter_child, s_fm_paste_selection->iter_cursor, i);
+					&iter_child, s_paste_sel->iter_cursor, i);
 
 			if (num_children == 1) {
 				//Wenn nur ein Kind, dann ist es das richtige
-				*(s_fm_paste_selection->iter_cursor) = iter_child;
+				*(s_paste_sel->iter_cursor) = iter_child;
 				break;
 			}
 
@@ -1657,21 +1601,31 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 			stvfm_item_child_priv = sond_tvfm_item_get_instance_private(stvfm_item_child);
 			g_object_unref(stvfm_item_child);
 
-			//Identität prüfen - path müßte doch ausreichen?!
-			if (!g_strcmp0(sond_file_part_get_path(stvfm_item_child_priv->sond_file_part),
-					sond_file_part_get_path(stvfm_item_new_priv->sond_file_part))) {
-				*(s_fm_paste_selection->iter_cursor) = iter_child;
+			if (stvfm_item_child_priv->path_or_section)
+				base_child = g_path_get_basename(
+						stvfm_item_child_priv->path_or_section);
+			else
+				base_child = g_path_get_basename(
+						sond_file_part_get_path(
+								stvfm_item_child_priv->sond_file_part));
+
+			if (g_strcmp0(base_child, base) == 0) {
+				*(s_paste_sel->iter_cursor) = iter_child;
+
 				break;
 			}
 		}
-
-		s_fm_paste_selection->kind = FALSE; //nur einmal
 	}
 	else {
 		GtkTreeIter *iter_new = NULL;
+		SondTVFMItem *stvfm_item_new = NULL;
+		gchar* path_new = NULL;
+
+		SondTVFMItemPrivate* stvfm_item_priv =
+				sond_tvfm_item_get_instance_private(stvfm_item);
 
 		iter_new = sond_treeviewfm_insert_node(SOND_TREEVIEWFM(stv),
-				s_fm_paste_selection->iter_cursor, s_fm_paste_selection->kind);
+				s_paste_sel->iter_cursor, s_fm_paste_selection->kind);
 
 		*(s_fm_paste_selection->iter_cursor) = *iter_new;
 		gtk_tree_iter_free(iter_new);
@@ -1682,22 +1636,42 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 
 			gtk_tree_store_insert(
 					GTK_TREE_STORE(
-							gtk_tree_view_get_model( GTK_TREE_VIEW(stv) )),
-					&iter_tmp, s_fm_paste_selection->iter_cursor, -1);
+							gtk_tree_view_get_model(GTK_TREE_VIEW(stv))),
+					&iter_tmp, s_paste_sel->iter_cursor, -1);
 		}
 
-		gtk_tree_store_set(
-				GTK_TREE_STORE(
-						gtk_tree_view_get_model( GTK_TREE_VIEW(stv) )),
-				s_fm_paste_selection->iter_cursor, 0, stvfm_item_new, -1);
-	}
+		path_new = g_strconcat(
+						(s_paste_sel->stvfm_item_priv_parent->path_or_section) ?
+								s_paste_sel->stvfm_item_priv_parent->path_or_section :
+								"",
+						(s_paste_sel->stvfm_item_priv_parent->path_or_section) ?
+								"/" : "", base, NULL);
 
-	g_object_unref(stvfm_item_new);
+		stvfm_item_new = sond_tvfm_item_create(stvfm_item_parent_priv->stvfm,
+				stvfm_item_priv->type,
+				(stvfm_item_priv->path_or_section) ?
+						s_paste_sel->stvfm_item_priv_parent->sond_file_part :
+						stvfm_item_priv->sond_file_part,
+						(stvfm_item_priv->path_or_section) ?
+								path_new : NULL);
+
+		if (!stvfm_item_priv->path_or_section)
+			sond_file_part_set_path(stvfm_item_priv->sond_file_part,
+					path_new);
+
+		g_free(path_new);
+
+		gtk_tree_store_set(GTK_TREE_STORE(
+				gtk_tree_view_get_model(GTK_TREE_VIEW(stv))),
+				s_paste_sel->iter_cursor, 0, stvfm_item_new, -1);
+
+		g_object_unref(stvfm_item_new);
+	}
 
 	//Knoten löschen, wenn ausgeschnitten
 	if (clipboard->ausschneiden)
 		gtk_tree_store_remove(
-				GTK_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(stv) )),
+				GTK_TREE_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(stv))),
 				iter);
 
 	return 0;
