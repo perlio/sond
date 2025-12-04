@@ -16,8 +16,18 @@
  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#ifndef SRC_SOND_LOG_H_
-#define SRC_SOND_LOG_H_
+#ifndef SRC_SOND_H_
+#define SRC_SOND_H_
+
+#define SOND_ERROR sond_error_quark()
+G_DEFINE_QUARK(sond-error-quark,sond_error)
+
+enum SondError
+{
+	SOND_ERROR_EXISTS,
+	SOND_ERROR_BUSY,
+	NUM_SOND_ERROR
+};
 
 #define message(msg) g_log("Sond", G_LOG_LEVEL_MESSAGE, \
 		"%s:%d (%s): %s", __FILE__, __LINE__, __func__, msg);
@@ -31,4 +41,4 @@
 #define error(msg) g_log("Sond", G_LOG_LEVEL_ERROR, \
 		"%s:%d (%s): %s", __FILE__, __LINE__, __func__, msg);
 
-#endif /* SRC_SOND_LOG_H_ */
+#endif /* SRC_SOND_H_ */

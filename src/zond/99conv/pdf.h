@@ -78,4 +78,7 @@ gint pdf_walk_embedded_files(fz_context*, pdf_document*,
 		gint (*) (fz_context*, pdf_obj*, pdf_obj*, pdf_obj*, gpointer, GError**),
 		gpointer, GError**);
 
+gint pdf_insert_emb_file(fz_context*, pdf_document*,
+		fz_buffer*, gchar const*, gchar const*, GError**);
+
 #endif // PDF_DATEIEN_H_INCLUDED
