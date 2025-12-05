@@ -31,6 +31,7 @@
 #include <mupdf/fitz.h>
 
 #include "misc.h"
+#include "sond.h"
 #include "sond_treeviewfm.h"
 
 #include "zond/global_types.h"
@@ -724,17 +725,13 @@ static gint sond_file_part_pdf_rename_embedded_file(SondFilePartPDF*,
 static gint sond_file_part_zip_rename_file(SondFilePartZip*,
 		gchar const*, gchar const*, GError**);
 
-gint sond_file_part_rename(SondFilePart* sfp, gchar const* base_new, GError** error) {
+gint sond_file_part_rename(SondFilePart* sfp, gchar const* path_new, GError** error) {
 	SondFilePartPrivate* sfp_priv = NULL;
 	gint rc = 0;
 
 	g_return_val_if_fail(sfp, -1);
 
 	sfp_priv = sond_file_part_get_instance_private(sfp);
-
-	g_autofree gchar* path_new = NULL;
-
-	path_new = change_basename(sfp_priv->path, base_new);
 
 	if (!sfp_priv->parent) {//sfp ist im fs gespeichert
 		rc = g_rename(sfp_priv->path, path_new);
@@ -763,20 +760,42 @@ gint sond_file_part_rename(SondFilePart* sfp, gchar const* base_new, GError** er
 	return 0;
 }
 
+static gchar const* sond_file_part_get_mime_type(SondFilePart* sfp) {
+	if (SOND_IS_FILE_PART_LEAF(sfp))
+		return sond_file_part_leaf_get_mime_type(SOND_FILE_PART_LEAF(sfp));
+	else if (SOND_IS_FILE_PART_PDF(sfp))
+		return "application/pdf";
+	else if (SOND_IS_FILE_PART_ZIP(sfp))
+		return "application/zip";
+	else if (SOND_IS_FILE_PART_GMESSAGE(sfp))
+		return "message/rfc822";
+
+	return "application/octet-stream";
+}
+
 static gint sond_file_part_pdf_insert_embedded_file(SondFilePartPDF*,
 		fz_context*, fz_buffer*, gchar const*, gchar const*, GError**);
 static gint sond_file_part_zip_insert_zip_file(SondFilePartZip*,
 		fz_context*, fz_buffer*, gchar const*, gchar const*, GError**);
 
-gint sond_file_part_insert(SondFilePart* sfp, fz_context* ctx,
-		fz_buffer* buf, gchar* const filename, gchar const* mime_type,
+static gint sond_file_part_insert(SondFilePart* sfp, fz_context* ctx,
+		fz_buffer* buf, gchar const* filename, gchar const* mime_type,
 		GError** error) {
 	if (!sfp) { //Datei im Filesystem
 		gchar* path = NULL;
 
 		//neue Datei aus buffer schreiben
-		path = g_strconcat(SOND_FILE_PART_CLASS(g_type_class_peek_static(SOND_TYPE_FILE_PART))->path_root,
-				"/", filename, NULL);
+		path = g_strconcat(SOND_FILE_PART_CLASS(g_type_class_peek_static(
+				SOND_TYPE_FILE_PART))->path_root, "/", filename, NULL);
+
+		//fz_save_buffer löscht klaglos ein etwaig bestehendes file gleichen Namens
+		//Daher ein Test:
+		if (g_file_test(path, G_FILE_TEST_EXISTS)) {
+			if (error) *error = g_error_new(SOND_ERROR, SOND_ERROR_EXISTS,
+					"%s\nDatei existiert", __func__);
+
+			return -1;
+		}
 
 		fz_try(ctx)
 			fz_save_buffer(ctx, buf, path);
@@ -803,6 +822,33 @@ gint sond_file_part_insert(SondFilePart* sfp, fz_context* ctx,
 	return 0;
 }
 
+gint sond_file_part_copy(SondFilePart* sfp_src,
+		SondFilePart* sfp_dst, gchar const* base, GError** error) {
+	fz_context* ctx = NULL;
+	fz_buffer* buf = NULL;
+	gint rc = 0;
+
+	ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
+	if (!ctx) {
+		if (error) *error = g_error_new(ZOND_ERROR, 0,
+				"%s\nfz_new_context gibt NULL zurück", __func__);
+		return -1;
+	}
+	buf = sond_file_part_get_buffer(sfp_src, ctx, error);
+	if (!buf) {
+		fz_drop_context(ctx);
+		ERROR_Z
+	}
+
+	rc = sond_file_part_insert(sfp_dst, ctx, buf, base,
+			sond_file_part_get_mime_type(sfp_src), error);
+	fz_drop_buffer(ctx, buf);
+	fz_drop_context(ctx);
+	if (rc)
+		ERROR_Z
+
+	return 0;
+}
 
 /*
  * ZIPs

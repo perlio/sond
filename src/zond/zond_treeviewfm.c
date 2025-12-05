@@ -142,13 +142,41 @@ static gint zond_treeviewfm_before_delete(SondTVFMItem *stvfm_item, GError **err
 	return 0;
 }
 
-static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
-		gchar const* prefix_old, gchar const* prefix_new, GError **error) {
-	gint rc = 0;
+static gchar* get_prefix_from_stvfm_item(SondTVFMItem* stvfm_item) {
+	gchar* filepart = NULL;
+	gchar* prefix = NULL;
 
-	ZondTreeviewFM* ztvfm = ZOND_TREEVIEWFM(stvfm);
+	if (sond_tvfm_item_get_sond_file_part(stvfm_item))
+		filepart = sond_file_part_get_filepart(sond_tvfm_item_get_sond_file_part(stvfm_item));
+
+	if (sond_tvfm_item_get_path_or_section(stvfm_item)) {
+		if (filepart) {
+			prefix = g_strconcat(filepart, "//",
+					sond_tvfm_item_get_path_or_section(stvfm_item), NULL);
+			g_free(filepart);
+		}
+		else
+			prefix = g_strdup(sond_tvfm_item_get_path_or_section(stvfm_item));
+	}
+	else
+		prefix = filepart;
+
+	return prefix;
+}
+
+static gint zond_treeviewfm_before_move(SondTVFMItem* stvfm_item,
+		SondTVFMItem* stvfm_item_parent, gchar const* base_new, GError **error) {
+	gint rc = 0;
+	g_autofree gchar* prefix_old = NULL;
+	g_autofree gchar* prefix_new = NULL;
+
+	ZondTreeviewFM* ztvfm = ZOND_TREEVIEWFM(sond_tvfm_item_get_stvfm(stvfm_item_parent));
 	ZondTreeviewFMPrivate *ztvfm_priv = zond_treeviewfm_get_instance_private(
 			ZOND_TREEVIEWFM(ztvfm));
+
+	prefix_old = get_prefix_from_stvfm_item(stvfm_item);
+	prefix_new = get_prefix_from_stvfm_item(stvfm_item_parent);
+	prefix_new = add_string(prefix_new, g_strdup(base_new));
 
 	//Änderungsstatus zwischenspeichern
 	ztvfm_priv->changed_tmp = ztvfm_priv->zond->dbase_zond->changed;

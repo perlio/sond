@@ -69,7 +69,7 @@ gint sond_file_part_replace(SondFilePart*, fz_context*, fz_buffer*, GError**);
 
 gint sond_file_part_rename(SondFilePart*, gchar const*, GError**);
 
-gchar* sond_file_part_rename_dir(SondFilePart*, gchar const*, gchar const*, GError**);
+gint sond_file_part_copy(SondFilePart*, SondFilePart*, gchar const*, GError**);
 
 //SondFilePartZip definieren
 #define SOND_TYPE_FILE_PART_ZIP sond_file_part_zip_get_type( )

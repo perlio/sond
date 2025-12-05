@@ -24,7 +24,7 @@ G_DEFINE_QUARK(sond-error-quark,sond_error)
 
 enum SondError
 {
-	SOND_ERROR_EXISTS,
+	SOND_ERROR_EXISTS = 1,
 	SOND_ERROR_BUSY,
 	NUM_SOND_ERROR
 };
