@@ -176,6 +176,14 @@ static gint zond_treeviewfm_before_move(SondTVFMItem* stvfm_item,
 
 	prefix_old = get_prefix_from_stvfm_item(stvfm_item);
 	prefix_new = get_prefix_from_stvfm_item(stvfm_item_parent);
+
+	//Wenn es root-dir einer Datei ist
+	if (sond_tvfm_item_get_sond_file_part(stvfm_item_parent) &&
+			!sond_tvfm_item_get_path_or_section(stvfm_item_parent))
+		prefix_new = add_string(prefix_new, g_strdup("//"));
+	else if (prefix_new)//wenn
+		prefix_new = add_string(prefix_new, g_strdup("/"));
+
 	prefix_new = add_string(prefix_new, g_strdup(base_new));
 
 	//Änderungsstatus zwischenspeichern

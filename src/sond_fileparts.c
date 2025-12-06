@@ -1410,7 +1410,6 @@ static gint modify_embedded_file(fz_context* ctx, pdf_obj* names, pdf_obj* key,
 	if (!EF_F)
 		ERROR_Z
 
-
 	if (g_strcmp0(path_embedded, modify->path) == 0) {
 		pdf_document* doc = NULL;
 
@@ -1434,6 +1433,8 @@ static gint modify_embedded_file(fz_context* ctx, pdf_obj* names, pdf_obj* key,
 
 			return -1;
 		}
+
+		modify->found = TRUE;
 
 		return 1;
 	}
