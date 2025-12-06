@@ -504,11 +504,8 @@ static gint zond_treeview_check_anchor_id(Projekt *zond,
 	if (rc)
 		ERROR_Z
 
-	if (!baum_inhalt_file)
-		return 1; //dann ist würde ein Knoten in Datei oder Virt-PDF eingefügt werden
-
 	if (baum_inhalt_file)
-		*anchor_id = baum_inhalt_file;
+		return 1; //dann ist würde ein Knoten in Datei oder Virt-PDF eingefügt werden
 
 	return 0;
 }
@@ -532,7 +529,7 @@ static gint zond_treeview_insert_node(Projekt *zond, gboolean child,
 		child = TRUE;
 
 	if (zond_tree_store_get_root(zond_tree_store_get_tree_store(&iter_anchor))
-			== BAUM_INHALT) {
+			== BAUM_INHALT && anchor_id > 2) { //Bei anchor == root keine Prüfung erf.
 		gint rc = 0;
 
 		rc = zond_treeview_check_anchor_id(zond, &iter_anchor, &anchor_id,
@@ -963,7 +960,6 @@ static gint zond_treeview_anbinden_rekursiv(ZondTreeview *ztv,
 		gboolean child_anchor = TRUE;
 
 		//icon_name ermitteln
-		//ToDo: Differenzieren nach zip/pdf-container, "normalem" dir
 		if (SOND_IS_FILE_PART_PDF(sond_tvfm_item_get_sond_file_part(stvfm_item))) {
 			icon_name = "pdf-folder";
 			basename = sond_file_part_get_path(sond_tvfm_item_get_sond_file_part(stvfm_item));
@@ -1081,6 +1077,8 @@ static gint zond_treeview_clipboard_anbinden_foreach(SondTreeview *stv,
 	g_object_unref(stvfm_item);
 	if (rc == -1)
 		return 1; //sond_treeview_..._foreach bricht dann ab
+
+	s_selection->child = FALSE;
 
 	return 0;
 }
