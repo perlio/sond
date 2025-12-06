@@ -188,7 +188,12 @@ SondFilePart* sond_file_part_create_from_mime_type(gchar const* path,
 }
 
 SondFilePart* sond_file_part_get_parent(SondFilePart *sfp) {
-	SondFilePartPrivate *sfp_priv = sond_file_part_get_instance_private(sfp);
+	SondFilePartPrivate *sfp_priv = NULL;
+
+	if (!sfp)
+		return NULL;
+
+	sfp_priv = sond_file_part_get_instance_private(sfp);
 
 	return sfp_priv->parent;
 }

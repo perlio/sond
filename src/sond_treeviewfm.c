@@ -1287,14 +1287,13 @@ static gint copy_path(const gchar *src_path,
 	return 0;
 }
 
-static gint copy_across_sfps(SondTVFMItem* stvfm_item,
+static gint copy_dir_across_sfps(SondTVFMItem* stvfm_item,
 		SondTVFMItem* stvfm_item_parent, gchar const* base,
 		GError** error) {
-
 	{
 		if (error) *error = g_error_new(SOND_ERROR, 0,
-			"%s\nKopieren zwischen verschiedenen SondFilePart-Typen noch nicht implementiert",
-			__func__);
+			"%s\nKopieren eines Verzeichnisses in anderen SondFilePart-Typen"
+				"noch nicht implementiert", __func__);
 
 		return -1;
 	}
@@ -1314,6 +1313,8 @@ static gint copy_stvfm_item(SondTVFMItem* stvfm_item,
 
 	//sfp soll kopiert werden
 	if (!stvfm_item_priv->path_or_section) {
+		gchar* path = NULL;
+
 		//Page-Tree einer PDF-Datei: geht (noch) nicht
 		if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF &&
 				SOND_IS_FILE_PART_PDF(stvfm_item_priv->sond_file_part) &&
@@ -1328,8 +1329,15 @@ static gint copy_stvfm_item(SondTVFMItem* stvfm_item,
 			return -1;
 		}
 
+		//Wenn in ein dir kopiert wird, ist der Pfad des dir vom übergeordneten sfp
+		//der Beginn des neuen Pfades des sfp
+		path = stvfm_item_parent_priv->path_or_section ?
+				g_strconcat(stvfm_item_parent_priv->path_or_section, "/", base, NULL) :
+				g_strdup(base);
+
 		rc = sond_file_part_copy(stvfm_item_priv->sond_file_part,
-				stvfm_item_parent_priv->sond_file_part, base, error);
+				stvfm_item_parent_priv->sond_file_part, path, error);
+		g_free(path);
 	}
 	else if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_DIR) { //dir soll kopiert werden
 		//innerhalt Dateisystem - geht schon
@@ -1346,8 +1354,8 @@ static gint copy_stvfm_item(SondTVFMItem* stvfm_item,
 			rc = copy_path(stvfm_item_priv->path_or_section, path_dst, error);
 			g_free(path_dst);
 		}
-		else //Verschieben zwischen zwei Welten
-			rc = copy_across_sfps(stvfm_item, stvfm_item_parent,
+		else //kopieren Verzeichnis zwischen zwei sfp-Welten
+			rc = copy_dir_across_sfps(stvfm_item, stvfm_item_parent,
 					base, error);
 	}
 	if (rc)
@@ -1361,7 +1369,7 @@ static gint move_across_sfps(SondTVFMItem* stvfm_item_src,
 		gchar const* base, GError** error) {
 	gint rc = 0;
 
-	rc = copy_across_sfps(stvfm_item_src,
+	rc = copy_stvfm_item(stvfm_item_src,
 			stvfm_item_parent_dst, base, error);
 	if (rc)
 		ERROR_Z
@@ -1393,10 +1401,10 @@ static gint move_stvfm_item(SondTVFMItem* stvfm_item,
 			ERROR_Z
 	}
 
-	if ((stvfm_item_parent_priv) ? stvfm_item_parent_priv->sond_file_part : NULL ==
-			(stvfm_item_priv->sond_file_part) ?
+	if (stvfm_item_parent_priv->sond_file_part ==
+			((stvfm_item_priv->sond_file_part) ?
 					sond_file_part_get_parent(stvfm_item_priv->sond_file_part)
-					: NULL) //Verschieben innerhalb des gleichen sfp
+					: NULL)) //Verschieben innerhalb des gleichen sfp
 		rc = rename_stvfm_item(stvfm_item, stvfm_item_parent, base, error);
 	else
 		rc = move_across_sfps(stvfm_item,
@@ -1528,6 +1536,7 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 	Clipboard *clipboard = NULL;
 	gint rc = 0;
 	gchar* base = NULL;
+	SondTVFMItemPrivate* stvfm_item_parent_priv = NULL;
 
 	clipboard = ((SondTreeviewClass*) g_type_class_peek(
 			SOND_TYPE_TREEVIEW))->clipboard;
@@ -1566,10 +1575,23 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 
 	s_paste_sel->inserted = TRUE;
 
+	stvfm_item_parent_priv =
+			sond_tvfm_item_get_instance_private(s_paste_sel->stvfm_item_parent);
+
 	//In nicht geöffnetes Verzeichnis eingefügt?
 	if (s_paste_sel->kind && !s_paste_sel->expanded) {
 		gint num_children = 0;
 
+		//Wenn in bisher leere pdf verschoben wird: von LEAF zu DIR ändern
+		if (stvfm_item_parent_priv->type ==
+						SOND_TVFM_ITEM_TYPE_LEAF) {
+			stvfm_item_parent_priv->type = SOND_TVFM_ITEM_TYPE_DIR;
+			stvfm_item_parent_priv->has_children = TRUE;
+			g_free(stvfm_item_parent_priv->icon_name);
+			stvfm_item_parent_priv->icon_name = g_strdup("pdf-folder");
+		} //sonst funktioniert expand nämlich nicht
+
+		//Falls noch kein Kind: dummy einfügen
 		if (!gtk_tree_model_iter_has_child(
 					gtk_tree_view_get_model(GTK_TREE_VIEW(stv)),
 					s_paste_sel->iter_cursor)) { //erstes Kind
@@ -1623,6 +1645,7 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 				break;
 			}
 		}
+		s_paste_sel->kind = FALSE;
 	}
 	else {
 		GtkTreeIter *iter_new = NULL;
@@ -1632,8 +1655,6 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 
 		SondTVFMItemPrivate* stvfm_item_priv =
 				sond_tvfm_item_get_instance_private(stvfm_item);
-		SondTVFMItemPrivate* stvfm_item_parent_priv =
-				sond_tvfm_item_get_instance_private(s_paste_sel->stvfm_item_parent);
 
 		iter_new = sond_treeviewfm_insert_node(SOND_TREEVIEWFM(stv),
 				s_paste_sel->iter_cursor, s_paste_sel->kind);
@@ -1697,7 +1718,7 @@ static gint sond_treeviewfm_paste_clipboard(SondTreeviewFM *stvfm, gboolean kind
 	GtkTreeIter iter_parent = { 0 };
 	gboolean expanded = FALSE;
 	Clipboard *clipboard = NULL;
-	g_autoptr(SondTVFMItem) stvfm_item_parent = NULL;
+	SondTVFMItem* stvfm_item_parent = NULL;
 	gboolean parent_is_root = FALSE;
 	SondTVFMItemPrivate* stvfm_item_parent_priv = NULL;
 
@@ -1748,9 +1769,9 @@ static gint sond_treeviewfm_paste_clipboard(SondTreeviewFM *stvfm, gboolean kind
 		if (stvfm_item_parent_priv->type !=
 				SOND_TVFM_ITEM_TYPE_DIR &&
 				//PDF-Datei (bisher) ohne embFiles ist stvfm_item_type LEAF!
-				(SOND_IS_FILE_PART_PDF(
+				!(SOND_IS_FILE_PART_PDF(
 						stvfm_item_parent_priv->sond_file_part) &&
-						sond_file_part_get_has_children(
+						!sond_file_part_get_has_children(
 								stvfm_item_parent_priv->sond_file_part))) {
 			if (error)
 				*error = g_error_new(g_quark_from_static_string("sond"), 0,
@@ -1766,20 +1787,12 @@ static gint sond_treeviewfm_paste_clipboard(SondTreeviewFM *stvfm, gboolean kind
 	rc = sond_treeview_clipboard_foreach(
 			sond_treeviewfm_paste_clipboard_foreach,
 			(gpointer) &s_paste_sel, error);
+	g_object_unref(stvfm_item_parent);
 	if (rc == -1)
 		ERROR_Z
 
 	if (!s_paste_sel.inserted) // nix passiert
 		return 0;
-
-	//Wenn in bisher leere pdf verschoben wird: von LEAF zu DIR ändern
-	if (stvfm_item_parent_priv->type ==
-					SOND_TVFM_ITEM_TYPE_LEAF) {
-		stvfm_item_parent_priv->type = SOND_TVFM_ITEM_TYPE_DIR;
-		stvfm_item_parent_priv->has_children = TRUE;
-		g_free(stvfm_item_parent_priv->icon_name);
-		stvfm_item_parent_priv->icon_name = g_strdup("pdf-folder");
-	}
 
 	//Cursor setzen
 	sond_treeview_set_cursor(SOND_TREEVIEW(stvfm),
