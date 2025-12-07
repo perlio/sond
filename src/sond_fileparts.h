@@ -92,6 +92,8 @@ struct _SondFilePartPDFClass {
 pdf_document* sond_file_part_pdf_open_document(fz_context*,
 		SondFilePartPDF*, gboolean, gboolean, gboolean, GError **);
 
+gint sond_file_part_pdf_save(fz_context*, pdf_document*, SondFilePartPDF*, GError**);
+
 gint sond_file_part_pdf_load_embedded_files(SondFilePartPDF*, GPtrArray**, GError**);
 
 //Sond_File_Part_GMessage definieren

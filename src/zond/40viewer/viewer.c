@@ -976,7 +976,7 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 
 	//alles geändert, dann speichern
 	zond_pdf_document_mutex_lock(dd->zpdfd_part->zond_pdf_document);
-	rc = pdf_save(ctx, doc,
+	rc = sond_file_part_pdf_save(ctx, doc,
 			zond_pdf_document_get_sfp_pdf(dd->zpdfd_part->zond_pdf_document), error);
 	zond_pdf_document_mutex_unlock(dd->zpdfd_part->zond_pdf_document);
 	if (rc) {

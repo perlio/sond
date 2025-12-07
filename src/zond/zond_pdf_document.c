@@ -575,7 +575,7 @@ gint zond_pdf_document_save(ZondPdfDocument *self, GError **error) {
 
 	priv->ocr_num = 0;
 
-	rc = pdf_save(priv->ctx, priv->doc, priv->sfp_pdf, error);
+	rc = sond_file_part_pdf_save(priv->ctx, priv->doc, priv->sfp_pdf, error);
 	if (rc) ERROR_Z
 
 	g_array_remove_range(priv->arr_journal, 0, priv->arr_journal->len);

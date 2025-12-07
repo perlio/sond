@@ -178,7 +178,7 @@ void anbindung_get_orig(ZondPdfDocument* zpdfd, Anbindung* anbindung) {
 
 		pdfp = zond_pdf_document_get_pdf_document_page(zpdfd, i);
 
-		if (pdfp->inserted) {
+		if (pdfp && pdfp->inserted) {
 			if (i <= anbindung_akt.von.seite) {
 				anbindung->von.seite--;
 				anbindung->bis.seite--;
@@ -203,6 +203,9 @@ void anbindung_korrigieren(ZPDFDPart* zpdfd_part, Anbindung* anbindung) {
 		PdfDocumentPage* pdfp = NULL;
 
 		pdfp = g_ptr_array_index(arr_pages, i);
+
+		if (!pdfp)
+			continue;
 
 		//innerhalb des zu speichernde zpdfd_parts?
 		if (i >= anbindung_zpdfd_part.von.seite && i <= anbindung_zpdfd_part.bis.seite) {
@@ -242,7 +245,7 @@ void anbindung_aktualisieren(ZondPdfDocument* zpdfd, Anbindung* anbindung) {
 
 		pdfp = g_ptr_array_index(arr_pages, i);
 
-		if (pdfp->inserted) {
+		if (pdfp && pdfp->inserted) {
 			Anbindung anbindung_zpdfd_part = { 0 };
 			Anbindung anbindung_zpdfd_part_orig = { 0 };
 

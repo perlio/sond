@@ -42,10 +42,6 @@ gint pdf_copy_page(fz_context*, pdf_document*, gint, gint, pdf_document*, gint,
 gint pdf_open_and_authen_document(fz_context*, gboolean, gboolean, SondFilePartPDF*,
 		gchar**, pdf_document**, gint*, GError**);
 
-gint pdf_save(fz_context*, pdf_document*, SondFilePartPDF*, GError**);
-
-fz_buffer* pdf_doc_to_buf(fz_context*, pdf_document*, GError**);
-
 gint pdf_clean(fz_context*, SondFilePartPDF*, GError**);
 
 gchar* pdf_get_string_from_line(fz_context*, fz_stext_line*, gchar**);
@@ -71,14 +67,8 @@ gint pdf_page_rotate(fz_context*, pdf_obj*, gint, GError**);
 
 gint pdf_get_f_0_0_font(fz_context*, pdf_document*, GError**);
 
-gint pdf_get_names_tree_dict(fz_context*, pdf_document*,
-		pdf_obj*, pdf_obj**, GError**);
-
 gint pdf_walk_embedded_files(fz_context*, pdf_document*,
 		gint (*) (fz_context*, pdf_obj*, pdf_obj*, pdf_obj*, gpointer, GError**),
 		gpointer, GError**);
-
-gint pdf_insert_emb_file(fz_context*, pdf_document*,
-		fz_buffer*, gchar const*, gchar const*, GError**);
 
 #endif // PDF_DATEIEN_H_INCLUDED
