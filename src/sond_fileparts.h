@@ -97,7 +97,7 @@ gint sond_file_part_pdf_save(fz_context*, pdf_document*, SondFilePartPDF*, GErro
 gint sond_file_part_pdf_load_embedded_files(SondFilePartPDF*, GPtrArray**, GError**);
 
 //Sond_File_Part_GMessage definieren
-#define SOND_TYPE_FILE_PART_GMESSAGE sond_file_part_pdf_get_type( )
+#define SOND_TYPE_FILE_PART_GMESSAGE sond_file_part_gmessage_get_type( )
 G_DECLARE_DERIVABLE_TYPE(SondFilePartGMessage, sond_file_part_gmessage, SOND,
 		FILE_PART_GMESSAGE, SondFilePart)
 
@@ -105,7 +105,10 @@ struct _SondFilePartGMessageClass {
 	SondFilePartClass parent_class;
 };
 
-gint sond_file_part_gmessage_load_mime_parts(SondFilePartGMessage*, GPtrArray**, GError**);
+void sond_file_part_gmessage_close(SondFilePartGMessage*);
+
+gint sond_file_part_gmessage_load_multipart(SondFilePartGMessage*,
+		gchar const*, GPtrArray**, GError**);
 
 //Sond_File_Part_Leaf definieren
 #define SOND_TYPE_FILE_PART_LEAF sond_file_part_leaf_get_type( )

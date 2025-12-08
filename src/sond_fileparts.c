@@ -2006,7 +2006,7 @@ static gint sond_file_part_pdf_insert_embedded_file(SondFilePartPDF* sfp_pdf,
 typedef struct {
 	fz_context* ctx;
 	fz_buffer* buf;
-	GMimeMessage message;
+	GMimeMessage* message;
 } SondFilePartGMessagePrivate;
 
 G_DEFINE_TYPE_WITH_PRIVATE(SondFilePartGMessage, sond_file_part_gmessage, SOND_TYPE_FILE_PART)
@@ -2017,6 +2017,25 @@ static void sond_file_part_gmessage_init(SondFilePartGMessage *self) {
 }
 
 static void sond_file_part_gmessage_class_init(SondFilePartGMessageClass *klass) {
+
+	return;
+}
+
+void sond_file_part_gmessage_close(SondFilePartGMessage* self) {
+	SondFilePartGMessagePrivate *sfp_gmessage_priv =
+			sond_file_part_gmessage_get_instance_private(SOND_FILE_PART_GMESSAGE(self));
+
+	if (sfp_gmessage_priv->buf)
+		fz_drop_buffer(sfp_gmessage_priv->ctx, sfp_gmessage_priv->buf);
+	sfp_gmessage_priv->buf = NULL;
+
+	if (sfp_gmessage_priv->ctx)
+		fz_drop_context(sfp_gmessage_priv->ctx);
+	sfp_gmessage_priv->ctx = NULL;
+
+	if (sfp_gmessage_priv->message)
+		g_object_unref(sfp_gmessage_priv->message);
+	sfp_gmessage_priv->message = NULL;
 
 	return;
 }
@@ -2066,6 +2085,7 @@ static GMimeMessage* sond_file_part_gmessage_open(SondFilePartGMessage* sfp_gmes
 
 	sfp_gmessage_priv->ctx = ctx;
 	sfp_gmessage_priv->buf = buf;
+	sfp_gmessage_priv->message = message;
 
 	return message;
 }
@@ -2077,8 +2097,6 @@ static gint sond_file_part_gmessage_test_for_multipart(SondFilePartGMessage* sfp
 
 	SondFilePartPrivate* sfp_priv =
 			sond_file_part_get_instance_private(SOND_FILE_PART(sfp_gmessage));
-	SondFilePartGMessagePrivate* sfp_gmessage_priv =
-			sond_file_part_gmessage_get_instance_private(sfp_gmessage);
 
 	message = sond_file_part_gmessage_open(sfp_gmessage, error);
 	if (!message)
@@ -2088,25 +2106,82 @@ static gint sond_file_part_gmessage_test_for_multipart(SondFilePartGMessage* sfp
 	if (GMIME_IS_MULTIPART(root))
 		sfp_priv->has_children = TRUE;
 
-	g_object_unref(root);
-	g_object_unref(message);
-
-	fz_drop_buffer(sfp_gmessage_priv->ctx, sfp_gmessage_priv->buf);
-	fz_drop_context(sfp_gmessage_priv->ctx);
+	sond_file_part_gmessage_close(sfp_gmessage);
 
 	return 0;
 }
 
-gint sond_file_part_gmessage_load_mime_parts(SondFilePartGMessage* sfp_gmessage,
-		GPtrArray** arr_mime_parts, GError** error) {
+static GMimeMultipart* sond_file_part_gmessage_lookup_multipart_by_path(
+		GMimeMultipart* multipart_parent, gchar const* path, GError** error) {
+	gchar** strv = NULL;
+	gint zaehler = 0;
+	GMimeMultipart* multipart_res = NULL;
+
+	strv = g_strsplit(path, "/", -1);
+
+	do {
+		for (gint i = 0; i < g_mime_multipart_get_count(multipart_parent); i++) {
+			GMimeObject* part = NULL;
+
+			part = g_mime_multipart_get_part(multipart_parent, i);
+			if (!GMIME_IS_MULTIPART(part))
+				continue;
+			else if (!g_strcmp0(strv[zaehler],
+					g_mime_multipart_get_boundary(GMIME_MULTIPART(part)))) {
+				multipart_res = GMIME_MULTIPART(part);
+				break;
+			}
+		}
+
+		zaehler++;
+	} while (strv[zaehler] != NULL);
+
+	g_strfreev(strv);
+
+	if (!multipart_res) {
+		if (error)
+			*error = g_error_new(ZOND_ERROR, 0,
+					"%s\nMultipart mit Pfad '%s' nicht gefunden",
+					__func__, path);
+		return NULL;
+	}
+
+	return multipart_res;
+}
+
+gint sond_file_part_gmessage_load_multipart(SondFilePartGMessage* sfp_gmessage,
+		gchar const* path, GPtrArray** arr_mime_parts, GError** error) {
 	GMimeMessage* message = NULL;
-	GMimeObject* root = NULL;
+	GMimeMultipart* multipart = NULL;
 
 	message = sond_file_part_gmessage_open(sfp_gmessage, error);
 	if (!message)
 		ERROR_Z
 
-	root = g_mime_message_get_mime_part(message);
+	multipart = GMIME_MULTIPART(g_mime_message_get_mime_part(message));
+
+	if (path) {
+		GMimeMultipart* multipart_lookup = NULL;
+
+		multipart_lookup =
+				sond_file_part_gmessage_lookup_multipart_by_path(
+				multipart, path, error);
+		if (!multipart_lookup) {
+			sond_file_part_gmessage_close(sfp_gmessage);
+
+			ERROR_Z
+		}
+
+		multipart = multipart_lookup;
+	}
+
+	*arr_mime_parts = g_ptr_array_new();
+
+	for (gint i = 0; i < g_mime_multipart_get_count(multipart); i++) {
+		GMimeObject* mime_part = g_mime_multipart_get_part(multipart, i);
+
+		g_ptr_array_add(*arr_mime_parts, mime_part);
+	}
 
 	return 0;
 }

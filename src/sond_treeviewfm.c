@@ -191,6 +191,14 @@ get_icon_name(gchar const* content_type) {
 		icon_name = "pdf";
 	else if (g_content_type_is_a(content_type, "audio"))
 		icon_name = "audio-x-generic";
+	else if (!g_strcmp0(content_type, "message/rfc822"))
+		icon_name = "mail-unread";
+	else if (g_content_type_is_a(content_type, "image"))
+		icon_name = "image-x-generic";
+	else if (g_content_type_is_a(content_type, "video"))
+		icon_name = "video-x-generic";
+	else if (!g_strcmp0(content_type, "application/zip"))
+		icon_name = "zip";
 	else if (g_str_has_prefix(content_type, "text"))
 		icon_name = "text-x-generic";
 	else
@@ -245,7 +253,15 @@ SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM* stvfm, SondTVFMItemType type
 			stvfm_item_priv->icon_name = g_strdup("pdf-folder");
 			stvfm_item_priv->has_children = TRUE; //sonst wären wir nicht hier
 		}
-		//else if (SOND_IS_FILE_PART_GMESSAGE(sond_file_part)) {
+		else if (SOND_IS_FILE_PART_GMESSAGE(sond_file_part)) {
+			stvfm_item_priv->icon_name = g_strdup("mail-read");
+			stvfm_item_priv->has_children =
+					sond_file_part_get_has_children(sond_file_part);
+		}
+		else {
+			stvfm_item_priv->icon_name = g_strdup("folder");
+			stvfm_item_priv->has_children = sond_file_part_get_has_children(sond_file_part);
+		}
 	}
 	else { //LEAF oder LEAF_SECTION
 		if (type == SOND_TVFM_ITEM_TYPE_LEAF) {
@@ -255,6 +271,8 @@ SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM* stvfm, SondTVFMItemType type
 				content_type = "application/pdf";
 			else if (SOND_IS_FILE_PART_ZIP(sond_file_part))
 				content_type = "application/zip";
+			else if (SOND_IS_FILE_PART_GMESSAGE(sond_file_part))
+				content_type = "message/rfc822";
 			else
 				content_type = sond_file_part_leaf_get_mime_type(SOND_FILE_PART_LEAF(sond_file_part));
 
@@ -277,7 +295,8 @@ static SondTVFMItem* sond_tvfm_item_create_from_mime_type(SondTVFMItem* stvfm_it
 	SondTVFMItemPrivate* stvfm_item_priv =
 			sond_tvfm_item_get_instance_private(stvfm_item);
 
-	if (!g_strcmp0(mime_type, "inode/directory"))
+	if (!g_strcmp0(mime_type, "inode/directory") ||
+			g_str_has_prefix(mime_type, "multipart"))
 		stvfm_item_child = sond_tvfm_item_create(stvfm_item_priv->stvfm,
 				SOND_TVFM_ITEM_TYPE_DIR, stvfm_item_priv->sond_file_part, rel_path_child);
 	else {
@@ -356,7 +375,8 @@ static gint sond_tvfm_item_load_fs_dir(SondTVFMItem* stvfm_item,
 		mime_type = get_mime_type_from_content_type(content_type);
 
 		stvfm_item_child =
-				sond_tvfm_item_create_from_mime_type(stvfm_item, mime_type, rel_path_child, error);
+				sond_tvfm_item_create_from_mime_type(stvfm_item, mime_type,
+						rel_path_child, error);
 		g_free(rel_path_child);
 		if (!stvfm_item_child) {
 			g_ptr_array_unref(loaded_children); //Test nicht nötig - wenn !load, kommen wir nicht hier hin
@@ -425,27 +445,51 @@ static gint sond_tvfm_item_load_gmessage_dir(SondTVFMItem* stvfm_item,
 
 	SondTVFMItemPrivate* stvfm_item_priv = sond_tvfm_item_get_instance_private(stvfm_item);
 
-	rc = sond_file_part_gmessage_load_mime_parts(
+	rc = sond_file_part_gmessage_load_multipart(
 			SOND_FILE_PART_GMESSAGE(stvfm_item_priv->sond_file_part),
+			stvfm_item_priv->path_or_section,
 			&arr_mimeparts, error);
 	if (rc)
 		ERROR_Z
 
-	*arr_children = g_ptr_array_new_with_free_func((GDestroyNotify) g_object_unref);
+	*arr_children = g_ptr_array_new();
 
 	for (guint i = 0; i < arr_mimeparts->len; i++) {
-		SondFilePart* sfp = NULL;
 		SondTVFMItem* stvfm_item_child = NULL;
+		GMimeContentType* mime_type = NULL;
+		gchar const* mime_string = NULL;
+		GMimeObject* mime_child = NULL;
+		gchar* path = NULL;
+		gchar const* base = NULL;
 
-		sfp = g_ptr_array_index(arr_mimeparts, i);
+		mime_child = g_ptr_array_index(arr_mimeparts, i);
 
-		stvfm_item_child = sond_tvfm_item_create(stvfm_item_priv->stvfm,
-				SOND_TVFM_ITEM_TYPE_LEAF, sfp, NULL);
+		mime_type = g_mime_object_get_content_type(
+				mime_child);
+		mime_string = g_mime_content_type_get_mime_type(mime_type);
+
+		if (GMIME_IS_MULTIPART(mime_child))
+			base = g_mime_multipart_get_boundary(
+					GMIME_MULTIPART(mime_child));
+		else
+			base = g_mime_part_get_filename(GMIME_PART(mime_child));
+
+		path = g_strdup_printf("%s%s%s",
+				(stvfm_item_priv->path_or_section) ?
+				stvfm_item_priv->path_or_section : "",
+				stvfm_item_priv->path_or_section ? "/" : "",
+				base ? base : "unnamed");
+
+		stvfm_item_child = sond_tvfm_item_create_from_mime_type(stvfm_item,
+				mime_string, path, error);
+		g_free(path);
 
 		g_ptr_array_add(*arr_children, stvfm_item_child);
 	}
 
 	g_ptr_array_unref(arr_mimeparts);
+	sond_file_part_gmessage_close(
+			SOND_FILE_PART_GMESSAGE(stvfm_item_priv->sond_file_part));
 
 	return 0;
 }

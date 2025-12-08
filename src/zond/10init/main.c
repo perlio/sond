@@ -95,6 +95,8 @@ static void cleanup(Projekt* zond) {
 	g_object_unref(zond->settings);
 	g_ptr_array_unref(SOND_FILE_PART_CLASS(g_type_class_get(SOND_TYPE_FILE_PART))->arr_opened_files);
 
+	g_mime_shutdown();
+
 	return;
 }
 
@@ -245,6 +247,8 @@ static void init_schema(Projekt* zond) {
 
 static void init(GtkApplication *app, Projekt *zond) {
     zond->base_dir = get_base_dir();
+
+    g_mime_init();
 
     init_schema(zond);
 
