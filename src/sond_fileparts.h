@@ -52,10 +52,6 @@ gboolean sond_file_part_get_has_children(SondFilePart*);
 
 GPtrArray* sond_file_part_get_arr_opened_files(SondFilePart*);
 
-gchar* sond_file_part_write_to_tmp_file(SondFilePart*, GError**);
-
-fz_buffer* sond_file_part_get_buffer(SondFilePart*, fz_context*, GError**);
-
 gint sond_file_part_open(SondFilePart*, gboolean, GError**);
 
 gchar* sond_file_part_get_filepart(SondFilePart*);
@@ -104,8 +100,6 @@ G_DECLARE_DERIVABLE_TYPE(SondFilePartGMessage, sond_file_part_gmessage, SOND,
 struct _SondFilePartGMessageClass {
 	SondFilePartClass parent_class;
 };
-
-void sond_file_part_gmessage_close(SondFilePartGMessage*);
 
 gint sond_file_part_gmessage_load_multipart(SondFilePartGMessage*,
 		gchar const*, GPtrArray**, GError**);

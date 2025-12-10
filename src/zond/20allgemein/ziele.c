@@ -299,8 +299,9 @@ static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
 		} while (1);
 
 		anbindung_build_file_section(anbindung, &section);
-		stvfm_item_child = sond_tvfm_item_create(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
-				SOND_TVFM_ITEM_TYPE_LEAF_SECTION, SOND_FILE_PART(sfp_pdf), section);
+		stvfm_item_child =
+				sond_tvfm_item_create(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
+						SOND_FILE_PART(sfp_pdf), section);
 		g_free(section);
 		sond_tvfm_item_set_icon_name(stvfm_item_child, "anbindung");
 

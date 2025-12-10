@@ -504,8 +504,9 @@ static gint zond_treeviewfm_load_sections(SondTVFMItem* stvfm_item, GPtrArray** 
 		if (rc)
 			ERROR_Z
 
-		stvfm_item_child = sond_tvfm_item_create(sond_tvfm_item_get_stvfm(stvfm_item),
-				SOND_TVFM_ITEM_TYPE_LEAF_SECTION, sfp, section_child);
+		stvfm_item_child =
+				sond_tvfm_item_create(sond_tvfm_item_get_stvfm(stvfm_item),
+						sfp, section_child);
 		g_free(section_child);
 		sond_tvfm_item_set_icon_name(stvfm_item_child, icon_name);
 		g_ptr_array_add(arr_children_int, stvfm_item_child);

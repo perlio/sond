@@ -59,7 +59,7 @@ void sond_tvfm_item_set_icon_name(SondTVFMItem*, gchar const*);
 
 gchar const* sond_tvfm_item_get_icon_name(SondTVFMItem*);
 
-SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM*, SondTVFMItemType type,
+SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM*,
 		SondFilePart *, gchar const*);
 
 gint sond_tvfm_item_load_children(SondTVFMItem*, GPtrArray**, GError**);
