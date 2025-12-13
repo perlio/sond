@@ -101,7 +101,7 @@ struct _SondFilePartGMessageClass {
 	SondFilePartClass parent_class;
 };
 
-gint sond_file_part_gmessage_load_multipart(SondFilePartGMessage*,
+gint sond_file_part_gmessage_load_path(SondFilePartGMessage*,
 		gchar const*, GPtrArray**, GError**);
 
 //Sond_File_Part_Leaf definieren

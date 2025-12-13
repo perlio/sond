@@ -331,6 +331,124 @@ static fz_stream* sond_file_part_pdf_lookup_embedded_file(fz_context*,
 static GMimeObject* sond_file_part_gmessage_lookup_part_by_path(SondFilePartGMessage*,
 		gchar const*, GError**);
 
+#define BUFFER_SIZE 4096
+
+typedef struct {
+    GMimeStream *gstream;
+    gboolean own_stream;
+    unsigned char buffer[BUFFER_SIZE];
+} gmime_state;
+
+static gint
+gmime_next(fz_context *ctx, fz_stream *stm, size_t max)
+{
+    gmime_state *state = (gmime_state *)stm->state;
+    gssize n;
+    size_t read_size;
+
+    // Limitiere auf Buffergröße
+    read_size = max < BUFFER_SIZE ? max : BUFFER_SIZE;
+
+    n = g_mime_stream_read(state->gstream, (char *)state->buffer, read_size);
+
+    if (n < 0)
+        fz_throw(ctx, FZ_ERROR_GENERIC, "gmime stream read error");
+
+    if (n == 0)
+        return EOF;
+
+    // Setze die Stream-Pointer
+    stm->rp = state->buffer;
+    stm->wp = state->buffer + n;
+    stm->pos += n;
+
+    return *stm->rp++;
+}
+
+static void
+gmime_seek(fz_context *ctx, fz_stream *stm, int64_t offset, int whence)
+{
+    gmime_state *state = (gmime_state *)stm->state;
+    GMimeSeekWhence gwhence;
+
+    switch (whence) {
+        case SEEK_SET:
+            gwhence = GMIME_STREAM_SEEK_SET;
+            break;
+        case SEEK_CUR:
+            gwhence = GMIME_STREAM_SEEK_CUR;
+            break;
+        case SEEK_END:
+            gwhence = GMIME_STREAM_SEEK_END;
+            break;
+        default:
+            fz_throw(ctx, FZ_ERROR_GENERIC, "invalid seek whence");
+    }
+
+    if (g_mime_stream_seek(state->gstream, offset, gwhence) == -1)
+        fz_throw(ctx, FZ_ERROR_GENERIC, "gmime stream seek error");
+
+    stm->pos = g_mime_stream_tell(state->gstream);
+    stm->rp = stm->wp = state->buffer;
+}
+
+static void
+gmime_drop(fz_context *ctx, void *state_)
+{
+    gmime_state *state = (gmime_state *)state_;
+
+    if (state->own_stream && state->gstream)
+        g_object_unref(state->gstream);
+
+    fz_free(ctx, state);
+}
+
+/**
+ * Erstellt einen fz_stream aus einem GMimeStream
+ *
+ * @param ctx MuPDF Kontext
+ * @param gstream GMimeStream Quelle
+ * @param own_stream Wenn TRUE, wird gstream beim Schließen freigegeben
+ * @return Neuer fz_stream
+ */
+static fz_stream *
+fz_open_gmime_stream(fz_context *ctx, GMimeStream *gstream, gboolean own_stream)
+{
+    fz_stream *stm = NULL;
+    gmime_state *state = NULL;
+
+    fz_var(stm);
+    fz_var(state);
+
+    fz_try(ctx)
+    {
+        state = fz_malloc_struct(ctx, gmime_state);
+        state->gstream = gstream;
+        state->own_stream = own_stream;
+
+        if (own_stream)
+            g_object_ref(gstream);
+
+        stm = fz_new_stream(ctx, state, gmime_next, gmime_drop);
+        stm->rp = stm->wp = state->buffer;
+
+        // Seek-Funktion nur setzen wenn Stream seekbar ist
+        if (g_mime_stream_tell(gstream) != -1)
+            stm->seek = gmime_seek;
+    }
+    fz_catch(ctx)
+    {
+        if (state) {
+            if (state->own_stream && state->gstream)
+                g_object_unref(state->gstream);
+            fz_free(ctx, state);
+        }
+        fz_rethrow(ctx);
+    }
+
+    return stm;
+}
+
 static fz_stream* get_istream(fz_context* ctx, SondFilePart* sfp_parent, gchar const* path,
 		gboolean need_seekable, GError** error) {
 	fz_stream* stream = NULL;
@@ -350,8 +468,9 @@ static fz_stream* get_istream(fz_context* ctx, SondFilePart* sfp_parent, gchar c
 		GMimeObject* object = NULL;
 		GMimeStream* gmime_stream = NULL;
 		fz_buffer* buf = NULL;
+		GMimeObject* part = NULL;
 		gssize length = 0;
-		GByteArray* gbyte_array = NULL;
+		GByteArray* bytes = NULL;
 
 		object = sond_file_part_gmessage_lookup_part_by_path(
 				SOND_FILE_PART_GMESSAGE(sfp_parent), path, error);
@@ -361,9 +480,7 @@ static fz_stream* get_istream(fz_context* ctx, SondFilePart* sfp_parent, gchar c
 		gmime_stream = g_mime_stream_mem_new();
 
 		if (GMIME_IS_MESSAGE_PART(object)) {
-			GMimeObject* part = NULL;
-
-			part = GMIME_OBJECT(g_mime_message_part_get_message(GMIME_MESSAGE_PART(object)));
+			part = g_mime_message_part_get_message(GMIME_MESSAGE_PART(object));
 			if (!part) {
 				g_object_unref(object);
 				g_object_unref(gmime_stream);
@@ -372,37 +489,34 @@ static fz_stream* get_istream(fz_context* ctx, SondFilePart* sfp_parent, gchar c
 
 				ERROR_Z_VAL(NULL)
 			}
-
-			length = g_mime_object_write_to_stream(part, NULL, gmime_stream);
 		}
 		else if (GMIME_IS_PART(object)) {
-			GMimeDataWrapper* wrapper = NULL;
+			GMimeDataWrapper* data_wrapper = NULL;
 
-			wrapper = g_mime_part_get_content(GMIME_PART(object));
-			length = g_mime_data_wrapper_write_to_stream(wrapper, gmime_stream);
+			data_wrapper = g_mime_part_get_content(GMIME_PART(object));
+			if (!data_wrapper) {
+				g_object_unref(object);
+				g_object_unref(gmime_stream);
+				if (error) *error = g_error_new(ZOND_ERROR, 0,
+						"%s\nGMimePart hat keinen DataWrapper", __func__);
+
+				ERROR_Z_VAL(NULL)
+			}
 		}
 		else {
 			g_object_unref(object);
-			g_object_unref(gmime_stream);
 			if (error) *error = g_error_new(SOND_ERROR, 0,
 					"%s\nGMimeObject ist kein zulässiger MimePart", __func__);
 
 			ERROR_Z_VAL(NULL)
 		}
 
+		length = g_mime_object_write_to_stream(GMIME_OBJECT(part), gmime_stream);
 		g_object_unref(object);
-		if (length <= 0) {
-			g_object_unref(gmime_stream);
-			if (error) *error = g_error_new(ZOND_ERROR, 0,
-					"%s\nFehler beim Schreiben des GMimeObject in Stream", __func__);
-
-			ERROR_Z_VAL(NULL)
-		}
-
-		gbyte_array = g_mime_stream_mem_get_byte_array(GMIME_STREAM_MEM(gmime_stream));
+		bytes = g_mime_stream_mem_get_byte_array(gmime_stream);
 
 		fz_try(ctx)
-			buf = fz_new_buffer_from_copied_data(ctx, gbyte_array->data, gbyte_array->len);
+			buf = fz_new_buffer_from_copied_data(ctx, bytes->data, bytes->len);
 		fz_always(ctx)
 			g_object_unref(gmime_stream);
 		fz_catch(ctx) {
@@ -2195,51 +2309,32 @@ static GMimeObject* sond_file_part_gmessage_lookup_part_by_path(
 
 	strv = g_strsplit(path, "/", -1);
 
-	if (GMIME_IS_MULTIPART(object))
-		do {
-			GMimeObject* part = NULL;
+	do {
+		GMimeObject* part = NULL;
 
-			part = g_object_ref(g_mime_multipart_get_part(
-					GMIME_MULTIPART(object), atoi(strv[zaehler])));
-			g_object_unref(object);
-			if (!part) {
-				if (error)
-					*error = g_error_new(ZOND_ERROR, 0,
-							"%s\nMimePart mit Index %s nicht gefunden",
-							__func__, strv[zaehler]);
-				return NULL;
-			}
-
-			object = part;
-			zaehler++;
-		} while (strv[zaehler] != NULL);
-	else if (zaehler == 0 && strv[0] && !strv[1]) { //nur wenn root-object
-		if (GMIME_IS_MESSAGE_PART(object)) {
-			GMimeMessage* msg = NULL;
-			GMimeObject* part = NULL;
-
-			msg = g_mime_message_part_get_message(GMIME_MESSAGE_PART(object));
-			part = g_object_ref(g_mime_message_get_mime_part(GMIME_MESSAGE(msg)));
-			g_object_unref(object);
-			object = part;
-		}
-		else if (!GMIME_IS_PART(object)) {
+		if (!GMIME_IS_MULTIPART(object)) {
 			g_object_unref(object);
 			if (error) *error = g_error_new(SOND_ERROR, 0,
-					"%s\nroot-Object ist weder MimePart noch Message",
+					"%s\nElternpfad verweist nicht auf Multipart",
 					__func__);
 
 			return NULL;
 		}
-	}
-	else {
-		g_object_unref(object);
-		if (error) *error = g_error_new(SOND_ERROR, 0,
-				"%s\nunzulässiger Pfad",
-				__func__);
 
-		return NULL;
-	}
+		part = g_object_ref(g_mime_multipart_get_part(
+				GMIME_MULTIPART(object), atoi(strv[zaehler])));
+//		g_object_unref(object);
+		if (!part) {
+			if (error)
+				*error = g_error_new(ZOND_ERROR, 0,
+						"%s\nPart mit Index %s nicht gefunden",
+						__func__, strv[zaehler]);
+			return NULL;
+		}
+
+		object = part;
+		zaehler++;
+	} while (strv[zaehler] != NULL);
 
 	g_strfreev(strv);
 
@@ -2257,21 +2352,12 @@ gint sond_file_part_gmessage_load_path(SondFilePartGMessage* sfp_gmessage,
 
 	*arr_mime_parts = g_ptr_array_new_with_free_func(g_object_unref);
 
-	if (GMIME_IS_MESSAGE_PART(object) || GMIME_IS_PART(object)) {
-		g_ptr_array_add(*arr_mime_parts, object);
-
-		return 0;
-	}
-	if (GMIME_IS_MULTIPART(object)) {
-		for (gint i = 0; i < g_mime_multipart_get_count(GMIME_MULTIPART(object)); i++) {
-			GMimeObject* mime_part = g_mime_multipart_get_part(GMIME_MULTIPART(object), i);
-
-			g_ptr_array_add(*arr_mime_parts, g_object_ref(mime_part));
+	if (!GMIME_IS_MULTIPART(object)) {
+		if (!path) {
+			g_ptr_array_add(*arr_mime_parts, object);
+			return 0;
 		}
 
-		g_object_unref(object);
-	}
-	else {
 		g_ptr_array_unref(*arr_mime_parts);
 		g_object_unref(object);
 		if (error)
@@ -2280,6 +2366,14 @@ gint sond_file_part_gmessage_load_path(SondFilePartGMessage* sfp_gmessage,
 					__func__, path);
 		return -1;
 	}
+
+	for (gint i = 0; i < g_mime_multipart_get_count(GMIME_MULTIPART(object)); i++) {
+		GMimeObject* mime_part = g_mime_multipart_get_part(GMIME_MULTIPART(object), i);
+
+		g_ptr_array_add(*arr_mime_parts, g_object_ref(mime_part));
+	}
+
+	g_object_unref(object);
 
 	return 0;
 }
