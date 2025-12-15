@@ -95,4 +95,10 @@ InfoWindow* info_window_open(GtkWidget*, const gchar*);
 
 GtkWidget* show_html_window(fz_context*, fz_buffer*, const char*);
 
+const gchar* mime_to_extension(const char*);
+
+const gchar* mime_to_extension_ci(const char*);
+
+const gchar* mime_to_extension_with_params(const char*);
+
 #endif // MISC_H_INCLUDED

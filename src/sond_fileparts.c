@@ -577,13 +577,12 @@ static fz_buffer* sond_file_part_get_buffer(SondFilePart* sfp,
 
 static gchar* sond_file_part_write_to_tmp_file(SondFilePart* sfp, GError **error) {
 	gchar *filename = NULL;
-	gchar* basename = NULL;
 	fz_context* ctx = NULL;
 	fz_buffer *buf = NULL;
 
 	ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
 	if (!ctx) {
-		if (error) *error = g_error_new(ZOND_ERROR, 0,
+		if (error) *error = g_error_new(SOND_ERROR, 0,
 				"%s\nfz_new_context gibt NULL zurück", __func__);
 		return NULL;
 	}
@@ -595,11 +594,32 @@ static gchar* sond_file_part_write_to_tmp_file(SondFilePart* sfp, GError **error
 		ERROR_Z_VAL(NULL)
 	}
 
-	basename = g_path_get_basename(sond_file_part_get_path(sfp));
+	filename = g_strdup_printf("%s/%d", g_get_tmp_dir(),
+			g_random_int_range(10000, 99999));
 
-	filename = g_strdup_printf("%s/%d%s", g_get_tmp_dir(),
-			g_random_int_range(10000, 99999), basename);
-	g_free(basename);
+#ifdef __WIN32__
+	gchar const* ext = NULL;
+	fz_stream* stream = NULL;
+	gchar* mime = NULL;
+
+	fz_try(ctx)
+		stream = fz_open_buffer(ctx, buf);
+	fz_catch(ctx) {
+		fz_drop_context(ctx);
+		if (error) *error = g_error_new(SOND_ERROR, 0,
+				"%s\nfz_new_context gibt NULL zurück", __func__);
+
+		return NULL;
+	}
+
+	mime = guess_content_type(ctx, stream, mime, error);
+	if (!mime)
+		ERROR_Z_VAL(NULL)
+
+	ext = mime_to_extension(mime);
+
+	filename = add_string(filename, g_strdup(ext));
+#endif
 
 	fz_try(ctx)
 		fz_save_buffer(ctx, buf, filename);
@@ -724,6 +744,7 @@ gint sond_file_part_open(SondFilePart* sfp, gboolean open_with,
 			if (!path)
 				ERROR_Z
 		}
+
 		rc = open_path(path, open_with, error);
 		if (rc) {
 			if (sond_file_part_get_parent(sfp)) { //tmp-Datei wurde erzeugt
