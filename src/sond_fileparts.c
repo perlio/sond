@@ -29,9 +29,11 @@
 #include <zip.h>
 #include <mupdf/pdf.h>
 #include <mupdf/fitz.h>
+#include <magic.h>
 
 #include "misc.h"
 #include "sond.h"
+#include "sond_renderer.h"
 #include "sond_treeviewfm.h"
 
 #include "zond/global_types.h"
@@ -292,20 +294,47 @@ gchar* sond_file_part_get_filepart(SondFilePart* sfp) {
 
 static gchar* guess_content_type(fz_context* ctx, fz_stream* stream,
 		gchar const* path, GError** error) {
-	guchar buf[1024] = { 0 };
+    magic_t magic = magic_open(MAGIC_MIME_TYPE);
+    if (!magic) {
+    	if (error) *error = g_error_new(SOND_ERROR, 0,
+    			"%s\nmagic_open fehlgeschlagen", __func__);
 
-	fz_try(ctx)
-		fz_read(ctx, stream, buf, sizeof(buf));
-	fz_catch(ctx) {
-		if (error)
-			*error = g_error_new(g_quark_from_static_string("mupdf"),
-					fz_caught(ctx), "%s\n%s", __func__,
-					fz_caught_message(ctx));
+        return NULL;
+    }
 
-		return NULL;
-	}
+    if (magic_load(magic, NULL) != 0) {
+        magic_close(magic);
+    	if (error) *error = g_error_new(SOND_ERROR, 0,
+    			"%s\nmagic_load fehlgeschlagen", __func__);
 
-	return g_content_type_guess(path, buf, sizeof(buf), NULL);
+        return NULL;
+    }
+
+    // Ersten Teil des Streams lesen (meist reichen 2KB für Erkennung)
+    size_t buffer_size = 2048;
+    size_t bytes_read = 0;
+    unsigned char *buffer = g_malloc(buffer_size);
+
+    // Daten lesen
+    fz_try(ctx)
+    	bytes_read = fz_read(ctx, stream, buffer, buffer_size);
+    fz_catch(ctx) {
+    	g_free(buffer);
+    	magic_close(magic);
+    	if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
+    			fz_caught(ctx), "%s\n%s", __func__, fz_caught_message(ctx));
+
+    	return NULL;
+    }
+
+    // MIME-Typ aus Puffer erkennen
+    const char* mime = magic_buffer(magic, buffer, bytes_read);
+    char* result = mime ? strdup(mime) : NULL;
+
+    g_free(buffer);
+    magic_close(magic);
+
+    return result;
 }
 
 static fz_stream* open_file(fz_context* ctx, gchar const* path,
@@ -482,7 +511,6 @@ SondFilePart* sond_file_part_from_filepart(fz_context* ctx,
 		fz_stream* stream = NULL;
 		gchar* content_type = NULL;
 		SondFilePart* sfp_child = NULL;
-		gchar const* mime_type = NULL;
 
 		stream = get_istream(ctx, sfp, v_string [zaehler], FALSE, error);
 		if (!stream) {
@@ -497,10 +525,8 @@ SondFilePart* sond_file_part_from_filepart(fz_context* ctx,
 			ERROR_Z_VAL(NULL)
 		}
 
-		mime_type = get_mime_type_from_content_type(content_type);
+		sfp_child = sond_file_part_create_from_mime_type(v_string[zaehler], sfp, content_type);
 		g_free(content_type);
-
-		sfp_child = sond_file_part_create_from_mime_type(v_string[zaehler], sfp, mime_type);
 
 		sfp = sfp_child;
 		zaehler++;
@@ -569,9 +595,7 @@ static gchar* sond_file_part_write_to_tmp_file(SondFilePart* sfp, GError **error
 		ERROR_Z_VAL(NULL)
 	}
 
-	if (sond_file_part_get_path(sfp))
-		basename = g_path_get_basename(sond_file_part_get_path(sfp));
-	else basename = g_path_get_basename(sond_file_part_get_path(sond_file_part_get_parent(sfp)));
+	basename = g_path_get_basename(sond_file_part_get_path(sfp));
 
 	filename = g_strdup_printf("%s/%d%s", g_get_tmp_dir(),
 			g_random_int_range(10000, 99999), basename);
@@ -604,7 +628,7 @@ static gint open_path(const gchar *path, gboolean open_with, GError **error) {
 
     SHELLEXECUTEINFOW sei = { sizeof(sei) };
     sei.nShow = SW_SHOWNORMAL;
-    sei.lpVerb = open_with ? L"openas" : NULL;
+    sei.lpVerb = open_with ? L"openas" : L"open";
     sei.lpFile = local_filename;
     sei.fMask = SEE_MASK_INVOKEIDLIST;
 
@@ -646,30 +670,73 @@ static gint open_path(const gchar *path, gboolean open_with, GError **error) {
 
 gint sond_file_part_open(SondFilePart* sfp, gboolean open_with,
 		GError** error) {
-	gint rc = 0;
-	g_autofree gchar* path = NULL;
+	//hier alle Varianten, in denen eigener Viewer geöffnet wird
+	if (!open_with &&
+			SOND_IS_FILE_PART_LEAF(sfp) &&
+			(!g_strcmp0("text/html", sond_file_part_leaf_get_mime_type(
+					SOND_FILE_PART_LEAF(sfp))) ||
+			g_str_has_prefix(sond_file_part_leaf_get_mime_type(
+					SOND_FILE_PART_LEAF(sfp)), "image") ||
+			!g_strcmp0("application/vnd.oasis.opendocument.text",
+					sond_file_part_leaf_get_mime_type(
+					SOND_FILE_PART_LEAF(sfp))) ||
+			!g_strcmp0("application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+					sond_file_part_leaf_get_mime_type(
+					SOND_FILE_PART_LEAF(sfp)))))
+	 {
+		fz_context* ctx = NULL;
+		fz_stream* stream = NULL;
+		gint rc = 0;
 
-	if (!sond_file_part_get_parent(sfp)) //Datei im Filesystem
-		path = g_strconcat(SOND_FILE_PART_CLASS(
-				g_type_class_peek(SOND_TYPE_FILE_PART))->path_root,
-				"/", sond_file_part_get_path(sfp), NULL);
-	else { //Datei in zip/pdf/gmessage
-		path = sond_file_part_write_to_tmp_file(sfp, error);
-		if (!path)
-			ERROR_Z
-	}
-	rc = open_path(path, open_with, error);
-	if (rc) {
-		if (sond_file_part_get_parent(sfp)) { //tmp-Datei wurde erzeugt
-			gint rc = 0;
+		ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
+		if (!ctx) {
+			if (error) *error = g_error_new(SOND_ERROR, 0,
+					"%s\ncontext konnte nicht erzeugt werden", __func__);
 
-			rc = g_remove(path);
-			if (rc)
-				g_warning("Datei '%s' konnte nicht gelöscht werden:\n%s",
-						path, strerror(errno));
+			return -1;
 		}
 
-		ERROR_Z
+		stream = sond_file_part_get_istream(ctx, sfp, FALSE, error);
+		if (!stream) {
+			fz_drop_context(ctx);
+			ERROR_Z
+		}
+
+		rc = sond_render(ctx, stream, NULL, error);
+		fz_drop_stream(ctx, stream);
+		fz_drop_context(ctx);
+		if (rc)
+			ERROR_Z
+	}/*
+	else if (!open_with && SOND_IS_FILE_PART_PDF(sfp)) {
+
+	}*/
+	else {
+		gint rc = 0;
+		g_autofree gchar* path = NULL;
+
+		if (!sond_file_part_get_parent(sfp)) //Datei im Filesystem
+			path = g_strconcat(SOND_FILE_PART_CLASS(
+					g_type_class_peek(SOND_TYPE_FILE_PART))->path_root,
+					"/", sond_file_part_get_path(sfp), NULL);
+		else { //Datei in zip/pdf/gmessage
+			path = sond_file_part_write_to_tmp_file(sfp, error);
+			if (!path)
+				ERROR_Z
+		}
+		rc = open_path(path, open_with, error);
+		if (rc) {
+			if (sond_file_part_get_parent(sfp)) { //tmp-Datei wurde erzeugt
+				gint rc = 0;
+
+				rc = g_remove(path);
+				if (rc)
+					g_warning("Datei '%s' konnte nicht gelöscht werden:\n%s",
+							path, strerror(errno));
+			}
+
+			ERROR_Z
+		}
 	}
 
 	return 0;
@@ -898,7 +965,12 @@ static gint sond_file_part_insert(SondFilePart* sfp, fz_context* ctx,
 		else if (SOND_IS_FILE_PART_ZIP(sfp)) //ist zip-Datei
 			rc = sond_file_part_zip_insert_zip_file(SOND_FILE_PART_ZIP(sfp),
 					ctx, buf, filename, mime_type, error);
-		//else if (SOND_IS_FILE_PART_GMESSAGE(sfp_parent))
+		else if (SOND_IS_FILE_PART_GMESSAGE(sfp)) {
+			if (error) *error = g_error_new(SOND_ERROR, 0,
+					"%s\nEinfügen in E-Mail noch nicht unterstützt", __func__);
+
+			return -1;
+		}
 
 		if (rc)
 			ERROR_Z
@@ -1361,7 +1433,6 @@ static gint load_embedded_files(fz_context* ctx, pdf_obj* names, pdf_obj* key,
 	gchar* content_type = NULL;
 	SondFilePart* sfp_embedded_file = NULL;
 	Load* load = (Load*) data;
-	gchar const* mime_type = NULL;
 
 	EF_F = get_EF_F(ctx, val, &path_embedded, error);
 	if (!EF_F)
@@ -1383,11 +1454,9 @@ static gint load_embedded_files(fz_context* ctx, pdf_obj* names, pdf_obj* key,
 	if (!content_type)
 		ERROR_Z
 
-	mime_type = get_mime_type_from_content_type(content_type);
-	g_free(content_type);
-
 	sfp_embedded_file = sond_file_part_create_from_mime_type(
-			path_embedded, SOND_FILE_PART(load->sfp_pdf), mime_type);
+			path_embedded, SOND_FILE_PART(load->sfp_pdf), content_type);
+	g_free(content_type);
 
 	g_ptr_array_add(load->arr_embedded_files, sfp_embedded_file);
 

@@ -13,12 +13,12 @@ LDFLAGS := -Wl,--allow-multiple-definition
 # Find source files
 ifneq (,$(findstring $(MAKECMDGOALS), zond))
 SRCS += $(shell find $(SRC_DIRS)/zond -name '*.c') $(SRC_DIRS)/misc_stdlib.c $(SRC_DIRS)/misc.c \
-	$(SRC_DIRS)/sond_fileparts.c $(SRC_DIRS)/sond_treeview.c $(SRC_DIRS)/sond_treeviewfm.c
-CFLAGS += $(shell pkg-config --cflags gtk+-3.0 gobject-2.0 json-glib-1.0 gmime-3.0) -DCONFIG_$(CONFIG)
-LDFLAGS += $(shell pkg-config --libs gtk+-3.0 sqlite3 libcurl tesseract libzip json-glib-1.0 gmime-3.0) \
-	-lmupdf
+	$(SRC_DIRS)/sond_fileparts.c $(SRC_DIRS)/sond_treeview.c $(SRC_DIRS)/sond_treeviewfm.c \
+	$(SRC_DIRS)/sond_renderer.c
+CFLAGS += $(shell pkg-config --cflags libmagic libxml-2.0 gtk+-3.0 gobject-2.0 json-glib-1.0 gmime-3.0) -DCONFIG_$(CONFIG)
+LDFLAGS += $(shell pkg-config --libs libmagic libxml-2.0 gtk+-3.0 sqlite3 libcurl tesseract libzip json-glib-1.0 gmime-3.0 mupdf)
 ifneq ($(CONFIG), Debug_Linux)
-LDFLAGS += -lshlwapi -lmupdf-third
+LDFLAGS += -lshlwapi -llexbor
 endif
 endif
 
@@ -27,8 +27,8 @@ SRCS += $(shell find $(SRC_DIRS)/zond/40viewer -name '*.c') $(SRC_DIRS)/zond/zon
 $(SRC_DIRS)/zond/99conv/general.c $(SRC_DIRS)/zond/99conv/pdf.c $(SRC_DIRS)/zond/pdf_ocr.c $(SRC_DIRS)/misc.c \
 $(SRC_DIRS)/misc_stdlib.c
 CFLAGS += -DVIEWER $(shell pkg-config --cflags gtk+-3.0 gobject-2.0 json-glib-1.0)
-LDFLAGS += $(shell pkg-config --libs gtk+-3.0 gobject-2.0 sqlite3 libcurl tesseract libzip json-glib-1.0) \
-	-lshlwapi -lmupdf -lmupdf-third
+LDFLAGS += $(shell pkg-config --libs gtk+-3.0 gobject-2.0 sqlite3 libcurl tesseract libzip json-glib-1.0 mupdf) \
+	-lshlwapi
 endif
 
 # Object files

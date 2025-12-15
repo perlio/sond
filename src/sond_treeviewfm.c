@@ -26,6 +26,7 @@
 #include "misc.h"
 #include "misc_stdlib.h"
 #include "sond.h"
+#include "sond_renderer.h"
 #include "sond_fileparts.h"
 
 //SOND_TREEVIEWDM
@@ -190,13 +191,13 @@ get_icon_name(gchar const* content_type) {
 		icon_name = "dialog-error";
 	else if (!g_strcmp0(content_type, "application/pdf"))
 		icon_name = "pdf";
-	else if (g_content_type_is_a(content_type, "audio"))
+	else if (g_str_has_prefix(content_type, "audio"))
 		icon_name = "audio-x-generic";
 	else if (!g_strcmp0(content_type, "message/rfc822"))
 		icon_name = "mail-unread";
-	else if (g_content_type_is_a(content_type, "image"))
+	else if (g_str_has_prefix(content_type, "image"))
 		icon_name = "image-x-generic";
-	else if (g_content_type_is_a(content_type, "video"))
+	else if (g_str_has_prefix(content_type, "video"))
 		icon_name = "video-x-generic";
 	else if (!g_strcmp0(content_type, "application/zip"))
 		icon_name = "zip";
@@ -291,6 +292,65 @@ SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM* stvfm,
 	}
 
 	return stvfm_item;
+}
+
+static gchar const* get_mime_type_from_content_type(gchar const* content_type) {
+	if (!g_strcmp0(content_type, "application/x-zip-compressed") ||
+			!g_strcmp0(content_type, "application/x-zip") ||
+			!g_strcmp0(content_type, "application/x-compress") ||
+			!g_strcmp0(content_type, "application/x-compressed") ||
+			!g_strcmp0(content_type, "multipart/x-zip") ||
+			!g_strcmp0(content_type, ".zip"))
+		return "application/zip";
+	else if (!g_strcmp0(content_type, "application/pdf")  ||
+			!g_strcmp0(content_type, "application/x-pdf") ||
+			!g_strcmp0(content_type, ".pdf"))
+		return "application/pdf";
+	else if (!g_strcmp0(content_type, "application/x-gmessage") ||
+			!g_strcmp0(content_type, "message/rfc822") ||
+			!g_strcmp0(content_type, ".eml"))
+		return "message/rfc822";
+	else if (g_strcmp0(content_type, "inode/directory") == 0)
+		return "inode/directory";
+	else if (!g_strcmp0(content_type, "text/plain") ||
+			!g_strcmp0(content_type, ".txt") ||
+			!g_strcmp0(content_type, ".log"))
+		return "text/plain";
+	else if (!g_strcmp0(content_type, "text/html") ||
+			!g_strcmp0(content_type, ".html") ||
+			!g_strcmp0(content_type, ".htm"))
+		return "text/html";
+	else if (!g_strcmp0(content_type, "text/rtf") ||
+			!g_strcmp0(content_type, ".rtf"))
+		return "text/rtf";
+	else if (!g_strcmp0(content_type, "image/jpeg") ||
+			!g_strcmp0(content_type, ".jpg") ||
+			!g_strcmp0(content_type, ".jpeg"))
+		return "image/jpeg";
+	else if (!g_strcmp0(content_type, "image/png") ||
+			!g_strcmp0(content_type, ".png"))
+		return "image/png";
+	else if (!g_strcmp0(content_type, "image/tiff") ||
+			!g_strcmp0(content_type, ".tif") ||
+			!g_strcmp0(content_type, ".tiff"))
+		return "image/tiff";
+	else if (!g_strcmp0(content_type, "audio/mpeg") ||
+			!g_strcmp0(content_type, ".mp3"))
+		return "audio/mpeg";
+	else if (!g_strcmp0(content_type, "audio/wav") ||
+			!g_strcmp0(content_type, ".wav"))
+		return "audio/wav";
+	else if (!g_strcmp0(content_type, "video/mp4") ||
+			!g_strcmp0(content_type, ".mp4"))
+		return "video/mp4";
+	else if (!g_strcmp0(content_type, "application/vnd.oasis.opendocument.text") ||
+			!g_strcmp0(content_type, ".odt"))
+		return "application/vnd.oasis.opendocument.text";
+	else if (!g_strcmp0(content_type, "application/vnd.openxmlformats-officedocument.wordprocessingml.document") ||
+			!g_strcmp0(content_type, ".docx"))
+		return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+	return "application/octet-stream";
 }
 
 static gint sond_tvfm_item_load_fs_dir(SondTVFMItem* stvfm_item,
@@ -445,7 +505,7 @@ static gint sond_tvfm_item_load_gmessage_dir(SondTVFMItem* stvfm_item,
 		gchar const* mime_string = NULL;
 		GMimeObject* mime_child = NULL;
 		gchar* path = NULL;
-		gchar const* base = NULL;
+		gchar* base = NULL;
 
 
 		mime_child = g_ptr_array_index(arr_mimeparts, i);
@@ -453,13 +513,7 @@ static gint sond_tvfm_item_load_gmessage_dir(SondTVFMItem* stvfm_item,
 		mime_type = g_mime_object_get_content_type(
 				mime_child);
 		mime_string = g_mime_content_type_get_mime_type(mime_type);
-/*
-		if (GMIME_IS_MULTIPART(mime_child))
-			base = g_mime_multipart_get_boundary(
-					GMIME_MULTIPART(mime_child));
-		else
-			base = g_mime_part_get_filename(GMIME_PART(mime_child));
-*/
+
 		base = g_strdup_printf("%u", i);
 		path = g_strconcat(stvfm_item_priv->path_or_section ?
 				stvfm_item_priv->path_or_section : "",

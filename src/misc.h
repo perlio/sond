@@ -17,6 +17,7 @@
 #define ERROR_Z ERROR_Z_VAL(-1)
 
 #include <gtk/gtk.h>
+#include <mupdf/fitz.h>
 
 typedef struct _GSList GSList;
 typedef struct _GPtrArray GPtrArray;
@@ -72,8 +73,6 @@ gchar* misc_get_calendar(GtkCalendar*);
 
 GtkWidget* result_listbox_new(GtkWindow*, const gchar*, GtkSelectionMode);
 
-gchar const* get_mime_type_from_content_type(gchar const*);
-
 /*  info_window  */
 typedef struct _Info_Window {
 	GtkWidget *dialog;
@@ -93,5 +92,7 @@ void info_window_set_progress_bar(InfoWindow*);
 void info_window_set_message(InfoWindow*, const gchar*);
 
 InfoWindow* info_window_open(GtkWidget*, const gchar*);
+
+GtkWidget* show_html_window(fz_context*, fz_buffer*, const char*);
 
 #endif // MISC_H_INCLUDED
