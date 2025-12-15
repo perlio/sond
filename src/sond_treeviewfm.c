@@ -40,6 +40,7 @@ G_DEFINE_TYPE_WITH_PRIVATE(SondTreeviewFM, sond_treeviewfm, SOND_TYPE_TREEVIEW)
 //SOND_TVFM_ITEM
 typedef struct {
 	SondTreeviewFM* stvfm;
+	gchar*display_name;
 	gchar *icon_name;
 	gboolean has_children;
 	SondTVFMItemType type;
@@ -53,6 +54,7 @@ static void sond_tvfm_item_finalize(GObject *self) {
 	SondTVFMItemPrivate *sond_tvfm_item_priv =
 			sond_tvfm_item_get_instance_private(SOND_TVFM_ITEM(self));
 
+	g_free(sond_tvfm_item_priv->display_name);
 	g_free(sond_tvfm_item_priv->icon_name);
 
 	//sfp-Type oder root
@@ -218,6 +220,11 @@ SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM* stvfm,
 	stvfm_item_priv = sond_tvfm_item_get_instance_private(stvfm_item);
 
 	stvfm_item_priv->stvfm = stvfm;
+	stvfm_item_priv->path_or_section = g_strdup(path_or_section);
+	if (sond_file_part)
+		stvfm_item_priv->sond_file_part = g_object_ref(sond_file_part);
+	stvfm_item_priv->display_name =
+			g_strdup(sond_tvfm_item_get_basename(stvfm_item));
 
 	if (!sond_file_part) {
 		gint rc = 0;
@@ -243,7 +250,8 @@ SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM* stvfm,
 	}
 	else {
 		if (SOND_IS_FILE_PART_PDF(sond_file_part)) {
-			if (sond_file_part_get_has_children(sond_file_part)) {
+			if (sond_file_part_get_has_children(sond_file_part) &&
+					!path_or_section) { //Marker für PageTree nicht gesetzt
 				stvfm_item_priv->type = SOND_TVFM_ITEM_TYPE_DIR;
 				stvfm_item_priv->has_children = TRUE;
 				stvfm_item_priv->icon_name = g_strdup("pdf-folder");
@@ -251,6 +259,12 @@ SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM* stvfm,
 			else {
 				stvfm_item_priv->type = SOND_TVFM_ITEM_TYPE_LEAF;
 				stvfm_item_priv->icon_name = g_strdup("pdf");
+				if (!g_strcmp0(path_or_section, "//")) { //Marker gesetzt
+					g_free(stvfm_item_priv->path_or_section); //Marker löschen
+					stvfm_item_priv->path_or_section = NULL;
+					g_free(stvfm_item_priv->display_name); //Display-Name ersetzen
+					stvfm_item_priv->display_name = g_strdup("PageTree");
+				}
 			}
 		}
 		else if (SOND_IS_FILE_PART_ZIP(sond_file_part)) {
@@ -275,11 +289,6 @@ SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM* stvfm,
 									SOND_FILE_PART_LEAF(sond_file_part))));
 		}
 	}
-
-	stvfm_item_priv->path_or_section = g_strdup(path_or_section);
-
-	if (sond_file_part)
-		stvfm_item_priv->sond_file_part = g_object_ref(sond_file_part);
 
 	//Spezialbehandlung für Sections
 	if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF_SECTION ||
@@ -463,7 +472,7 @@ static gint sond_tvfm_item_load_pdf_dir(SondTVFMItem* stvfm_item, GPtrArray** ar
 
 	stvfm_item_pdf_page_tree =
 			sond_tvfm_item_create(stvfm_item_priv->stvfm,
-					stvfm_item_priv->sond_file_part, NULL);
+					stvfm_item_priv->sond_file_part, "//");
 	g_ptr_array_add(*arr_children, stvfm_item_pdf_page_tree);
 
 	for (guint i = 0; i < arr_emb_files->len; i++) {
@@ -506,7 +515,8 @@ static gint sond_tvfm_item_load_gmessage_dir(SondTVFMItem* stvfm_item,
 		GMimeObject* mime_child = NULL;
 		gchar* path = NULL;
 		gchar* base = NULL;
-
+		gchar const* filename = NULL;
+		SondTVFMItemPrivate* stvfm_item_child_priv = NULL;
 
 		mime_child = g_ptr_array_index(arr_mimeparts, i);
 
@@ -528,6 +538,17 @@ static gint sond_tvfm_item_load_gmessage_dir(SondTVFMItem* stvfm_item,
 		else {
 			SondFilePart* sfp_child = NULL;
 
+			if (GMIME_IS_PART(mime_child))
+				filename = g_mime_part_get_filename(GMIME_PART(mime_child));
+			else { //GMimeMessagepart
+				GMimeContentDisposition* disp = NULL;
+
+				disp = g_mime_object_get_content_disposition(mime_child);
+
+				if (disp)
+					filename = g_mime_content_disposition_get_parameter(disp, "filename");
+			}
+
 			sfp_child = sond_file_part_create_from_mime_type(path,
 					stvfm_item_priv->sond_file_part, mime_string);
 
@@ -536,6 +557,12 @@ static gint sond_tvfm_item_load_gmessage_dir(SondTVFMItem* stvfm_item,
 		}
 
 		g_free(path);
+
+		stvfm_item_child_priv =
+				sond_tvfm_item_get_instance_private(stvfm_item_child);
+		g_free(stvfm_item_child_priv->display_name);
+		stvfm_item_child_priv->display_name = filename ?
+				g_strdup(filename) : g_strdup(mime_string);
 
 		g_ptr_array_add(*arr_children, stvfm_item_child);
 	}
@@ -627,6 +654,7 @@ static void sond_treeviewfm_render_text_cell(GtkTreeViewColumn *column,
 	SondTVFMItem *stvfm_item = NULL;
 	gint rc = 0;
 	gchar* text = NULL;
+	SondTVFMItemPrivate* stvfm_item_priv = NULL;
 
 	SondTreeviewFM *stvfm = SOND_TREEVIEWFM(data);
 
@@ -636,9 +664,11 @@ static void sond_treeviewfm_render_text_cell(GtkTreeViewColumn *column,
 		return;
 	}
 
-	if (sond_tvfm_item_get_item_type(stvfm_item) == SOND_TVFM_ITEM_TYPE_DIR ||
-			sond_tvfm_item_get_item_type(stvfm_item) == SOND_TVFM_ITEM_TYPE_LEAF)
-		text = g_strdup(sond_tvfm_item_get_basename(stvfm_item));
+	stvfm_item_priv = sond_tvfm_item_get_instance_private(stvfm_item);
+
+	if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_DIR ||
+			stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF)
+		text = g_strdup(stvfm_item_priv->display_name);
 	else if (SOND_TREEVIEWFM_GET_CLASS(stvfm)->text_from_section) {
 		GError* error = NULL;
 

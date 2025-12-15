@@ -463,7 +463,10 @@ static gint zond_treeviewfm_load_sections(SondTVFMItem* stvfm_item, GPtrArray** 
 
 	sfp = sond_tvfm_item_get_sond_file_part(stvfm_item);
 
-	g_return_val_if_fail(sfp, -1);
+	if (!sfp) {
+		warning("sfp darf nicht NULL sein");
+		return 0;
+	}
 
 	if (!SOND_IS_FILE_PART_PDF(sfp))
 		return 0;
