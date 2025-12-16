@@ -483,6 +483,7 @@ static gint zond_treeview_check_anchor_id(Projekt *zond,
 	gint rc = 0;
 	gint type = 0;
 	gint baum_inhalt_file = 0;
+	gint file_part_angebunden = 0;
 
 	if (*anchor_id == 0) {
 		g_warning("%s: anchor_id == 0", __func__);
@@ -498,14 +499,18 @@ static gint zond_treeview_check_anchor_id(Projekt *zond,
 	if (type == ZOND_DBASE_TYPE_BAUM_STRUKT)
 		return 0; //ok
 
-	rc = zond_dbase_get_baum_inhalt_file_from_file_part(
+	rc = zond_dbase_find_baum_inhalt_file(
 			zond->dbase_zond->zond_dbase_work, *anchor_id, &baum_inhalt_file,
-			error);
+			&file_part_angebunden, NULL, error);
 	if (rc)
 		ERROR_Z
 
-	if (baum_inhalt_file)
-		return 1; //dann ist würde ein Knoten in Datei oder Virt-PDF eingefügt werden
+	if (baum_inhalt_file) { //anchor ist angebunden
+		if (*anchor_id != file_part_angebunden) //nicht unmittelbar, sondern Vorfahren
+			return 1; //child egal
+		else if (child) //wenn unmittelbar, dann nur wenn als Kind
+			return 1;
+	}
 
 	return 0;
 }
