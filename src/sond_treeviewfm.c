@@ -41,7 +41,7 @@ G_DEFINE_TYPE_WITH_PRIVATE(SondTreeviewFM, sond_treeviewfm, SOND_TYPE_TREEVIEW)
 typedef struct {
 	SondTreeviewFM* stvfm;
 	gchar*display_name;
-	gchar *icon_name;
+	gchar const* icon_name;
 	gboolean has_children;
 	SondTVFMItemType type;
 	SondFilePart* sond_file_part;
@@ -55,7 +55,6 @@ static void sond_tvfm_item_finalize(GObject *self) {
 			sond_tvfm_item_get_instance_private(SOND_TVFM_ITEM(self));
 
 	g_free(sond_tvfm_item_priv->display_name);
-	g_free(sond_tvfm_item_priv->icon_name);
 
 	//sfp-Type oder root
 	if (sond_tvfm_item_priv->sond_file_part)
@@ -120,7 +119,7 @@ void sond_tvfm_item_set_icon_name(SondTVFMItem* stvfm_item,
 	SondTVFMItemPrivate *stvfm_item_priv =
 			sond_tvfm_item_get_instance_private(stvfm_item);
 
-	stvfm_item_priv->icon_name = g_strdup(icon_name);
+	stvfm_item_priv->icon_name = icon_name;
 
 	return;
 }
@@ -246,7 +245,7 @@ SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM* stvfm,
 		else
 			if (rc == 1) stvfm_item_priv->has_children = TRUE;
 
-		stvfm_item_priv->icon_name = g_strdup("folder");
+		stvfm_item_priv->icon_name = "folder";
 	}
 	else {
 		if (SOND_IS_FILE_PART_PDF(sond_file_part)) {
@@ -254,11 +253,11 @@ SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM* stvfm,
 					!path_or_section) { //Marker für PageTree nicht gesetzt
 				stvfm_item_priv->type = SOND_TVFM_ITEM_TYPE_DIR;
 				stvfm_item_priv->has_children = TRUE;
-				stvfm_item_priv->icon_name = g_strdup("pdf-folder");
+				stvfm_item_priv->icon_name = "pdf-folder";
 			}
 			else {
 				stvfm_item_priv->type = SOND_TVFM_ITEM_TYPE_LEAF;
-				stvfm_item_priv->icon_name = g_strdup("pdf");
+				stvfm_item_priv->icon_name = "pdf";
 				if (!g_strcmp0(path_or_section, "//")) { //Marker gesetzt
 					g_free(stvfm_item_priv->path_or_section); //Marker löschen
 					stvfm_item_priv->path_or_section = NULL;
@@ -273,20 +272,19 @@ SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM* stvfm,
 					sond_tvfm_item_load_zip_dir(stvfm_item, NULL, NULL) ?
 							TRUE : FALSE;
 			stvfm_item_priv->icon_name =(path_or_section) ?
-					g_strdup("folder") : g_strdup("zip");
+					"folder" : "zip";
 		}
 		else if (SOND_IS_FILE_PART_GMESSAGE(sond_file_part)) {
 			stvfm_item_priv->type = SOND_TVFM_ITEM_TYPE_DIR;
 			stvfm_item_priv->has_children =
 					sond_file_part_get_has_children(sond_file_part);
-			stvfm_item_priv->icon_name = g_strdup("mail-read");
+			stvfm_item_priv->icon_name = "mail-read";
 		}
 		else if (SOND_IS_FILE_PART_LEAF(sond_file_part)) {
 			stvfm_item_priv->type = SOND_TVFM_ITEM_TYPE_LEAF;
-			stvfm_item_priv->icon_name =
-					g_strdup(get_icon_name(
-							sond_file_part_leaf_get_mime_type(
-									SOND_FILE_PART_LEAF(sond_file_part))));
+			stvfm_item_priv->icon_name = get_icon_name(
+					sond_file_part_leaf_get_mime_type(
+							SOND_FILE_PART_LEAF(sond_file_part)));
 		}
 	}
 
@@ -1713,8 +1711,7 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 						SOND_TVFM_ITEM_TYPE_LEAF) {
 			stvfm_item_parent_priv->type = SOND_TVFM_ITEM_TYPE_DIR;
 			stvfm_item_parent_priv->has_children = TRUE;
-			g_free(stvfm_item_parent_priv->icon_name);
-			stvfm_item_parent_priv->icon_name = g_strdup("pdf-folder");
+			stvfm_item_parent_priv->icon_name = "pdf-folder";
 		} //sonst funktioniert expand nämlich nicht
 
 		//Falls noch kein Kind: dummy einfügen
@@ -2095,8 +2092,7 @@ static gint sond_treeviewfm_foreach_loeschen(SondTreeview *stv,
 						stvfm_item_parent);
 				stvfm_item_parent_priv->type = SOND_TVFM_ITEM_TYPE_LEAF;
 				stvfm_item_parent_priv->has_children = FALSE;
-				g_free(stvfm_item_parent_priv->icon_name);
-				stvfm_item_parent_priv->icon_name = g_strdup("pdf");
+				stvfm_item_parent_priv->icon_name = "pdf";
 				g_object_unref(stvfm_item_parent);
 
 				end:
