@@ -22,6 +22,7 @@
 
 #include "../../misc.h"
 #include "../../misc_stdlib.h"
+#include "../../sond_fileparts.h"
 
 #include "../zond_pdf_document.h"
 #include "../global_types.h"
@@ -63,7 +64,7 @@ static void pv_schliessen_datei(PdfViewer *pv) {
 	if (gtk_widget_get_sensitive(pv->button_speichern)) {
 		rc = abfrage_frage(pv->vf, "PDF geändert", "Speichern?", NULL);
 		if (rc == GTK_RESPONSE_YES) {
-			rc = zond_pdf_document_save(pv->dd->zond_pdf_document, &error);
+			rc = zond_pdf_document_save(pv->dd->zpdfd_part->zond_pdf_document, &error);
 			if (rc) {
 				error->message = add_string(g_strdup("Dokument kann nicht gespeichert "
 						"werden: "), error->message);
@@ -112,18 +113,21 @@ static void pv_schliessen_datei(PdfViewer *pv) {
 	return;
 }
 
-static gint pv_oeffnen_datei(PdfViewer *pv, gchar *path, gchar **errmsg) {
+static gint pv_oeffnen_datei(PdfViewer *pv, gchar const* path, gchar **errmsg) {
 	DisplayedDocument *dd = NULL;
-	gchar *file_part = NULL;
 	GError *error = NULL;
 	gint rc = 0;
-	SondFilePartPDFPageTree* sfp_pdf_page_tree = NULL;
+	SondFilePart* sfp_pdf_page_tree = NULL;
 
-	sfp_pdf_page_tree = sond_file_part_from_filepart(path,)
+	sfp_pdf_page_tree = sond_file_part_from_filepart(pv->zond->ctx, path, &error);
+	if (!sfp_pdf_page_tree) {
+		if (errmsg) *errmsg = g_strdup_printf("%s\n%s", __func__, error->message);
+		g_error_free(error);
 
+		return -1;
+	}
 
-	dd = document_new_displayed_document(sfp_pdf_page_tree, NULL, errmsg);
-	g_free(file_part);
+	dd = document_new_displayed_document(SOND_FILE_PART_PDF(sfp_pdf_page_tree), NULL, &error);
 	if (!dd && *errmsg)
 		ERROR_S
 	else if (!dd)
@@ -189,6 +193,10 @@ init(GtkApplication *app, Projekt *zond) {
 	PdfViewer *pv = viewer_start_pv(zond);
 	pv->zoom = 140;
 
+	pv->zond->ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
+	if (!pv->zond->ctx)
+		return NULL;
+
 	gtk_application_add_window(app, GTK_WINDOW(pv->vf));
 
 	pv_activate_widgets(pv, FALSE);
@@ -242,13 +250,7 @@ static void startup_app(GtkApplication *app, gpointer user_data) {
 
 	*zond = g_malloc0(sizeof(Projekt));
 
-	(*zond)->ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
-	if (!((*zond)->ctx)) {
-		g_free(*zond);
-		return;
-	}
-
-	(*zond)->settings = g_settings_new("de.perlio.zondPV");
+//	(*zond)->settings = g_settings_new("de.perlio.zondPV");
 
 	(*zond)->arr_pv = g_ptr_array_new();
 

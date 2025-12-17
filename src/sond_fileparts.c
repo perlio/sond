@@ -45,7 +45,7 @@
  * 	NULL, wenn Datei in Filesystem
  * 	sfp_zip/sfp_pdf, wenn Objekt in zip-Archiv oder pdf-Datei gespeichert
  *
- * path: path zum Root-Element
+ * path: Pfad zum Elternelement
  */
 typedef struct {
 	gchar *path; //rel_path zum root-Element
@@ -189,6 +189,67 @@ SondFilePart* sond_file_part_create_from_mime_type(gchar const* path,
 	return sfp_child;
 }
 
+static gchar* guess_content_type(fz_context* ctx, fz_stream* stream,
+		gchar const* path, GError** error) {
+    magic_t magic = magic_open(MAGIC_MIME_TYPE);
+    if (!magic) {
+    	if (error) *error = g_error_new(SOND_ERROR, 0,
+    			"%s\nmagic_open fehlgeschlagen", __func__);
+
+        return NULL;
+    }
+
+    if (magic_load(magic, NULL) != 0) {
+        magic_close(magic);
+    	if (error) *error = g_error_new(SOND_ERROR, 0,
+    			"%s\nmagic_load fehlgeschlagen", __func__);
+
+        return NULL;
+    }
+
+    // Ersten Teil des Streams lesen (meist reichen 2KB für Erkennung)
+    size_t buffer_size = 2048;
+    size_t bytes_read = 0;
+    unsigned char *buffer = g_malloc(buffer_size);
+
+    // Daten lesen
+    fz_try(ctx)
+    	bytes_read = fz_read(ctx, stream, buffer, buffer_size);
+    fz_catch(ctx) {
+    	g_free(buffer);
+    	magic_close(magic);
+    	if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
+    			fz_caught(ctx), "%s\n%s", __func__, fz_caught_message(ctx));
+
+    	return NULL;
+    }
+
+    // MIME-Typ aus Puffer erkennen
+    const char* mime = magic_buffer(magic, buffer, bytes_read);
+    char* result = mime ? strdup(mime) : NULL;
+
+    g_free(buffer);
+    magic_close(magic);
+
+    return result;
+}
+
+SondFilePart* sond_file_part_create_from_stream(fz_context* ctx,
+		fz_stream* stream, gchar const* path, SondFilePart* sfp_parent,
+		GError** error) {
+	gchar* mime_type = NULL;
+	SondFilePart* sfp = NULL;
+
+	mime_type = guess_content_type(ctx, stream, path, error);
+	if (!mime_type)
+		ERROR_Z_VAL(NULL)
+
+	sfp = sond_file_part_create_from_mime_type(path, sfp_parent, mime_type);
+	g_free(mime_type);
+
+	return sfp;
+}
+
 SondFilePart* sond_file_part_get_parent(SondFilePart *sfp) {
 	SondFilePartPrivate *sfp_priv = NULL;
 
@@ -290,51 +351,6 @@ gchar* sond_file_part_get_filepart(SondFilePart* sfp) {
 	g_list_free(list);
 
 	return filepart;
-}
-
-static gchar* guess_content_type(fz_context* ctx, fz_stream* stream,
-		gchar const* path, GError** error) {
-    magic_t magic = magic_open(MAGIC_MIME_TYPE);
-    if (!magic) {
-    	if (error) *error = g_error_new(SOND_ERROR, 0,
-    			"%s\nmagic_open fehlgeschlagen", __func__);
-
-        return NULL;
-    }
-
-    if (magic_load(magic, NULL) != 0) {
-        magic_close(magic);
-    	if (error) *error = g_error_new(SOND_ERROR, 0,
-    			"%s\nmagic_load fehlgeschlagen", __func__);
-
-        return NULL;
-    }
-
-    // Ersten Teil des Streams lesen (meist reichen 2KB für Erkennung)
-    size_t buffer_size = 2048;
-    size_t bytes_read = 0;
-    unsigned char *buffer = g_malloc(buffer_size);
-
-    // Daten lesen
-    fz_try(ctx)
-    	bytes_read = fz_read(ctx, stream, buffer, buffer_size);
-    fz_catch(ctx) {
-    	g_free(buffer);
-    	magic_close(magic);
-    	if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
-    			fz_caught(ctx), "%s\n%s", __func__, fz_caught_message(ctx));
-
-    	return NULL;
-    }
-
-    // MIME-Typ aus Puffer erkennen
-    const char* mime = magic_buffer(magic, buffer, bytes_read);
-    char* result = mime ? strdup(mime) : NULL;
-
-    g_free(buffer);
-    magic_close(magic);
-
-    return result;
 }
 
 static fz_stream* open_file(fz_context* ctx, gchar const* path,
@@ -1057,8 +1073,8 @@ static void sond_file_part_zip_class_init(SondFilePartZipClass *klass) {
 static void sond_file_part_zip_init(SondFilePartZip* self) {
 	SondFilePartPrivate* sfp_priv =
 			sond_file_part_get_instance_private(SOND_FILE_PART(self));
-	sfp_priv->arr_opened_files =
-			g_ptr_array_new( );
+
+	sfp_priv->arr_opened_files = g_ptr_array_new( );
 
 	return;
 }
@@ -2182,6 +2198,10 @@ typedef struct {
 G_DEFINE_TYPE_WITH_PRIVATE(SondFilePartGMessage, sond_file_part_gmessage, SOND_TYPE_FILE_PART)
 
 static void sond_file_part_gmessage_init(SondFilePartGMessage *self) {
+	SondFilePartPrivate *sfp_priv =
+			sond_file_part_get_instance_private(SOND_FILE_PART(self));
+
+	sfp_priv->arr_opened_files = g_ptr_array_new( );
 
 	return;
 }

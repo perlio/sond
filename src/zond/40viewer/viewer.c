@@ -1092,15 +1092,16 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 
 gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 	DisplayedDocument *dd = NULL;
-	gboolean changed = FALSE;
 
 	dd = pdfv->dd;
 	if (!dd)
 		return 0;
 
 #ifndef VIEWER
-		//Projekt-Zustand (geändert oder nicht) zwischenspeichern
-		changed = pdfv->zond->dbase_zond->changed;
+	gboolean changed = FALSE;
+
+	//Projekt-Zustand (geändert oder nicht) zwischenspeichern
+	changed = pdfv->zond->dbase_zond->changed;
 #endif //VIEWER
 
 	//Alle Dds, die im Viewer angezeigt werden, durchgehen
@@ -1145,9 +1146,9 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 		if (rc) {
 			g_prefix_error(error, "%s\n", __func__);
 			pdf_drop_document(ctx, doc);
-
+#ifndef VIEWER
 			dbase_zond_rollback(pdfv->zond->dbase_zond, error);
-
+#endif //viewer
 			return -1;
 		}
 

@@ -40,6 +40,9 @@ struct _SondFilePartClass {
 SondFilePart* sond_file_part_create_from_mime_type(gchar const* path,
 		SondFilePart*, gchar const*);
 
+SondFilePart* sond_file_part_create_from_stream(fz_context*,
+		fz_stream*, gchar const*, SondFilePart*, GError**);
+
 SondFilePart* sond_file_part_get_parent(SondFilePart *);
 
 void sond_file_part_set_parent(SondFilePart*, SondFilePart*);
