@@ -191,6 +191,96 @@ static void sond_tvfm_item_set_basename(SondTVFMItem* stvfm_item,
 static gint sond_tvfm_item_load_fs_dir(SondTVFMItem*, GPtrArray**, GError**);
 static gint sond_tvfm_item_load_zip_dir(SondTVFMItem*, GPtrArray**, GError**);
 
+char const* mime_type_to_icon_name_manual(const char *mime_type)
+{
+    if (!mime_type)
+        return g_strdup("text-x-generic");
+
+    // Exakte Matches
+    static const struct {
+        const char *mime;
+        const char *icon;
+    } mime_map[] = {
+        // Dokumente
+        {"application/pdf", "pdf"},
+        {"application/vnd.oasis.opendocument.text", "x-office-document"},
+        {"application/msword", "x-office-document"},
+        {"application/vnd.openxmlformats-officedocument.wordprocessingml.document", "x-office-document"},
+
+        // Tabellen
+        {"application/vnd.oasis.opendocument.spreadsheet", "x-office-spreadsheet"},
+        {"application/vnd.ms-excel", "x-office-spreadsheet"},
+        {"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "x-office-spreadsheet"},
+
+        // Präsentationen
+        {"application/vnd.oasis.opendocument.presentation", "x-office-presentation"},
+        {"application/vnd.ms-powerpoint", "x-office-presentation"},
+
+        // Bilder
+        {"image/png", "image-x-generic"},
+        {"image/jpeg", "image-x-generic"},
+        {"image/gif", "image-x-generic"},
+        {"image/svg+xml", "image-x-generic"},
+
+        // Audio
+        {"audio/mpeg", "audio-x-generic"},
+        {"audio/ogg", "audio-x-generic"},
+        {"audio/flac", "audio-x-generic"},
+
+        // Video
+        {"video/mp4", "video-x-generic"},
+        {"video/x-matroska", "video-x-generic"},
+        {"video/webm", "video-x-generic"},
+
+        // Archive
+        {"application/zip", "package-x-generic"},
+        {"application/x-tar", "package-x-generic"},
+        {"application/gzip", "package-x-generic"},
+        {"application/x-7z-compressed", "package-x-generic"},
+        {"application/x-rar", "package-x-generic"},
+
+        // Text
+        {"text/plain", "text-x-generic"},
+        {"text/html", "text-html"},
+        {"text/xml", "text-xml"},
+
+        // Code
+        {"text/x-c", "text-x-script"},
+        {"text/x-python", "text-x-script"},
+        {"text/x-java", "text-x-script"},
+        {"application/javascript", "text-x-script"},
+
+        {NULL, NULL}
+    };
+
+    // Exakte Suche
+    for (int i = 0; mime_map[i].mime; i++) {
+        if (strcmp(mime_type, mime_map[i].mime) == 0) {
+            return mime_map[i].icon;
+        }
+    }
+
+    // Prefix-basierte Suche
+    if (g_str_has_prefix(mime_type, "text/")) {
+        return "text-x-generic";
+    }
+    if (g_str_has_prefix(mime_type, "image/")) {
+        return "image-x-generic";
+    }
+    if (g_str_has_prefix(mime_type, "audio/")) {
+        return "audio-x-generic";
+    }
+    if (g_str_has_prefix(mime_type, "video/")) {
+        return "video-x-generic";
+    }
+    if (g_str_has_prefix(mime_type, "application/")) {
+        return "application-x-executable";
+    }
+
+    // Fallback
+    return "text-x-generic";
+}
+
 static char const*
 get_icon_name(gchar const* content_type) {
 	const gchar *icon_name = NULL;
@@ -285,11 +375,12 @@ SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM* stvfm,
 			stvfm_item_priv->type = SOND_TVFM_ITEM_TYPE_DIR;
 			stvfm_item_priv->has_children =
 					sond_file_part_get_has_children(sond_file_part);
-			stvfm_item_priv->icon_name = "mail-read";
+			stvfm_item_priv->icon_name = (path_or_section) ?
+					"folder" : "mail-read";
 		}
 		else if (SOND_IS_FILE_PART_LEAF(sond_file_part)) {
 			stvfm_item_priv->type = SOND_TVFM_ITEM_TYPE_LEAF;
-			stvfm_item_priv->icon_name = get_icon_name(
+			stvfm_item_priv->icon_name = mime_type_to_icon_name_manual(
 					sond_file_part_leaf_get_mime_type(
 							SOND_FILE_PART_LEAF(sond_file_part)));
 		}

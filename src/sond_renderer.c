@@ -301,7 +301,7 @@ static void on_export_pdf(GtkWidget *widget, gpointer data) {
             GtkWidget *err_dialog = gtk_message_dialog_new(
                 GTK_WINDOW(viewer->window), GTK_DIALOG_DESTROY_WITH_PARENT,
                 GTK_MESSAGE_ERROR, GTK_BUTTONS_CLOSE,
-                "Export error: %s", error->message);
+                "Export error: %s", (error) ? error->message : "Druckerfehler");
             gtk_dialog_run(GTK_DIALOG(err_dialog));
             gtk_widget_destroy(err_dialog);
             g_error_free(error);

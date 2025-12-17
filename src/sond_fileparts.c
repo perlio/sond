@@ -436,10 +436,17 @@ static fz_stream* get_istream(fz_context* ctx, SondFilePart* sfp_parent, gchar c
 		}
 
 		g_object_unref(object);
-		if (length <= 0) {
+		if (length < 0) {
 			g_object_unref(gmime_stream);
 			if (error) *error = g_error_new(ZOND_ERROR, 0,
 					"%s\nFehler beim Schreiben des GMimeObject in Stream", __func__);
+
+			ERROR_Z_VAL(NULL)
+		}
+		else if (length == 0) {
+			g_object_unref(gmime_stream);
+			if (error) *error = g_error_new(ZOND_ERROR, 0,
+					"%s\nGMimeObject ist leer", __func__);
 
 			ERROR_Z_VAL(NULL)
 		}
@@ -591,24 +598,14 @@ static fz_buffer* sond_file_part_get_buffer(SondFilePart* sfp,
 	return buf;
 }
 
-static gchar* sond_file_part_write_to_tmp_file(SondFilePart* sfp, GError **error) {
+static gchar* sond_file_part_write_to_tmp_file(fz_context* ctx,
+		SondFilePart* sfp, GError **error) {
 	gchar *filename = NULL;
-	fz_context* ctx = NULL;
 	fz_buffer *buf = NULL;
 
-	ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
-	if (!ctx) {
-		if (error) *error = g_error_new(SOND_ERROR, 0,
-				"%s\nfz_new_context gibt NULL zurück", __func__);
-		return NULL;
-	}
-
 	buf = sond_file_part_get_buffer(sfp, ctx, error);
-	if (!buf) {
-		fz_drop_context(ctx);
-
+	if (!buf)
 		ERROR_Z_VAL(NULL)
-	}
 
 	filename = g_strdup_printf("%s/%d", g_get_tmp_dir(),
 			g_random_int_range(10000, 99999));
@@ -621,7 +618,6 @@ static gchar* sond_file_part_write_to_tmp_file(SondFilePart* sfp, GError **error
 	fz_try(ctx)
 		stream = fz_open_buffer(ctx, buf);
 	fz_catch(ctx) {
-		fz_drop_context(ctx);
 		if (error) *error = g_error_new(SOND_ERROR, 0,
 				"%s\nfz_new_context gibt NULL zurück", __func__);
 
@@ -647,10 +643,8 @@ static gchar* sond_file_part_write_to_tmp_file(SondFilePart* sfp, GError **error
 					fz_caught_message(ctx));
 		g_free(filename);
 
-		filename = NULL;
+		return NULL;
 	}
-
-	fz_drop_context(ctx);
 
 	return filename;
 }
@@ -706,6 +700,16 @@ static gint open_path(const gchar *path, gboolean open_with, GError **error) {
 
 gint sond_file_part_open(SondFilePart* sfp, gboolean open_with,
 		GError** error) {
+	fz_context* ctx = NULL;
+
+	ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
+	if (!ctx) {
+		if (error) *error = g_error_new(SOND_ERROR, 0,
+				"%s\ncontext konnte nicht erzeugt werden", __func__);
+
+		return -1;
+	}
+
 	//hier alle Varianten, in denen eigener Viewer geöffnet wird
 	if (!open_with &&
 			SOND_IS_FILE_PART_LEAF(sfp) &&
@@ -720,17 +724,8 @@ gint sond_file_part_open(SondFilePart* sfp, gboolean open_with,
 					sond_file_part_leaf_get_mime_type(
 					SOND_FILE_PART_LEAF(sfp)))))
 	 {
-		fz_context* ctx = NULL;
 		fz_stream* stream = NULL;
 		gint rc = 0;
-
-		ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
-		if (!ctx) {
-			if (error) *error = g_error_new(SOND_ERROR, 0,
-					"%s\ncontext konnte nicht erzeugt werden", __func__);
-
-			return -1;
-		}
 
 		stream = sond_file_part_get_istream(ctx, sfp, FALSE, error);
 		if (!stream) {
@@ -756,7 +751,8 @@ gint sond_file_part_open(SondFilePart* sfp, gboolean open_with,
 					g_type_class_peek(SOND_TYPE_FILE_PART))->path_root,
 					"/", sond_file_part_get_path(sfp), NULL);
 		else { //Datei in zip/pdf/gmessage
-			path = sond_file_part_write_to_tmp_file(sfp, error);
+			path = sond_file_part_write_to_tmp_file(ctx, sfp, error);
+			fz_drop_context(ctx);
 			if (!path)
 				ERROR_Z
 		}
@@ -826,8 +822,10 @@ gint sond_file_part_delete(SondFilePart* sfp, GError** error) {
 		else if (SOND_IS_FILE_PART_PDF(sfp_parent))
 			buf_out = sond_file_part_pdf_mod_emb_file(SOND_FILE_PART_PDF(sfp_parent), ctx,
 					sond_file_part_get_path(sfp), NULL, error);
-
-		//else if (SOND_IS_FILE_PART_GMESSAGE(sfp_parent)) {
+		else if (SOND_IS_FILE_PART_GMESSAGE(sfp_parent)) {
+			if (error) *error = g_error_new(SOND_ERROR, 0, "%s\nNoch nicht implementiert",
+					__func__);
+		}
 
 		if (!buf_out) {
 			fz_drop_context(ctx);
@@ -1215,7 +1213,8 @@ pdf_document* sond_file_part_pdf_open_document(fz_context* ctx,
 		else {
 			gchar* filename = NULL;
 
-			filename = sond_file_part_write_to_tmp_file(SOND_FILE_PART(sfp_pdf), error);
+			filename = sond_file_part_write_to_tmp_file(ctx,
+					SOND_FILE_PART(sfp_pdf), error);
 			if (!filename)
 				ERROR_Z_VAL(NULL)
 
