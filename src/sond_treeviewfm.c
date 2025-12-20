@@ -1191,27 +1191,27 @@ static void sond_treeviewfm_class_init(SondTreeviewFMClass *klass) {
 
 	klass->signal_before_move = g_signal_new("before-move",
 			SOND_TYPE_TREEVIEWFM, G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_INT, 5,
-			SOND_TVFM_ITEM,
-			SOND_TVFM_ITEM,
+			SOND_TYPE_TVFM_ITEM,
+			SOND_TYPE_TVFM_ITEM,
 			G_TYPE_CHAR,
 			G_TYPE_INT,
-			G_TYPE_ERROR);
+			G_TYPE_POINTER);
 
 	klass->signal_before_insert = g_signal_new("before-insert",
 			SOND_TYPE_TREEVIEWFM, G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_INT, 5,
-			SOND_TVFM_ITEM,
-			SOND_TVFM_ITEM,
+			SOND_TYPE_TVFM_ITEM,
+			SOND_TYPE_TVFM_ITEM,
 			G_TYPE_CHAR,
 			G_TYPE_INT,
-			G_TYPE_ERROR);
+			G_TYPE_POINTER);
 
 	klass->signal_before_delete = g_signal_new("before-delete",
 			SOND_TYPE_TREEVIEWFM, G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_INT, 5,
-			SOND_TVFM_ITEM,
-			SOND_TVFM_ITEM,
+			SOND_TYPE_TVFM_ITEM,
+			SOND_TYPE_TVFM_ITEM,
 			G_TYPE_CHAR,
 			G_TYPE_INT,
-			G_TYPE_ERROR);
+			G_TYPE_POINTER);
 
 	klass->signal_after = g_signal_new("after",
 			SOND_TYPE_TREEVIEWFM, G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 1,
