@@ -713,7 +713,7 @@ gint sond_file_part_open(SondFilePart* sfp, gboolean open_with,
 	//hier alle Varianten, in denen eigener Viewer geöffnet wird
 	if (!open_with &&
 			SOND_IS_FILE_PART_LEAF(sfp) &&
-			(!g_strcmp0("text/html", sond_file_part_leaf_get_mime_type(
+			(g_str_has_prefix("text/", sond_file_part_leaf_get_mime_type(
 					SOND_FILE_PART_LEAF(sfp))) ||
 			g_str_has_prefix(sond_file_part_leaf_get_mime_type(
 					SOND_FILE_PART_LEAF(sfp)), "image") ||

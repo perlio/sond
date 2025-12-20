@@ -33,6 +33,12 @@ G_DECLARE_DERIVABLE_TYPE(SondTreeviewFM, sond_treeviewfm, SOND, TREEVIEWFM, Sond
 struct _SondTreeviewFMClass {
 	SondTreeviewClass parent_class;
 
+	//Signale
+	guint signal_before_move;
+	guint signal_before_insert;
+	guint signal_before_delete;
+	guint signal_after;
+
 	gint (*deter_background)(SondTVFMItem*, GError**);
 	gint (*text_from_section)(SondTVFMItem*, gchar**, GError**);
 	gint (*before_delete)(SondTVFMItem*, GError**);

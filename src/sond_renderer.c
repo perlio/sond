@@ -589,16 +589,10 @@ static GtkWidget* show_surface_viewer(cairo_surface_t *surface, int width, int h
     return viewer->window;
 }
 
-#include <gtk/gtk.h>
-#include <cairo.h>
-#include <mupdf/fitz.h>
-#include <lexbor/html/html.h>
 #include <libxml/parser.h>
 #include <libxml/tree.h>
 #include <libxml/xpath.h>
 #include <zip.h>
-#include <string.h>
-#include <unistd.h>
 #include <time.h>
 
 #define DEFAULT_RENDER_WIDTH 650
