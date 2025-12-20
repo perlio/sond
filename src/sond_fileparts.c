@@ -1015,7 +1015,7 @@ static gint sond_file_part_insert(SondFilePart* sfp, fz_context* ctx,
 }
 
 gint sond_file_part_copy(SondFilePart* sfp_src,
-		SondFilePart* sfp_dst, gchar const* base, GError** error) {
+		SondFilePart* sfp_dst, gchar const* path, GError** error) {
 	fz_context* ctx = NULL;
 	fz_buffer* buf = NULL;
 	gint rc = 0;
@@ -1032,7 +1032,7 @@ gint sond_file_part_copy(SondFilePart* sfp_src,
 		ERROR_Z
 	}
 
-	rc = sond_file_part_insert(sfp_dst, ctx, buf, base,
+	rc = sond_file_part_insert(sfp_dst, ctx, buf, path,
 			sond_file_part_get_mime_type(sfp_src), error);
 	fz_drop_buffer(ctx, buf);
 	fz_drop_context(ctx);

@@ -583,9 +583,6 @@ static void zond_treeviewfm_class_init(ZondTreeviewFMClass *klass) {
 	SOND_TREEVIEWFM_CLASS(klass)->text_from_section =
 			zond_treeviewfm_get_text_from_section;
 	SOND_TREEVIEWFM_CLASS(klass)->deter_background = zond_treeviewfm_deter_background;
-	SOND_TREEVIEWFM_CLASS(klass)->before_delete = zond_treeviewfm_before_delete;
-	SOND_TREEVIEWFM_CLASS(klass)->before_move = zond_treeviewfm_before_move;
-	SOND_TREEVIEWFM_CLASS(klass)->after_move = zond_treeviewfm_after_move;
 	SOND_TREEVIEWFM_CLASS(klass)->text_edited = zond_treeviewfm_text_edited;
 	SOND_TREEVIEWFM_CLASS(klass)->results_row_activated =
 			zond_treeviewfm_results_row_activated;
@@ -649,6 +646,9 @@ ZondTreeviewFM* zond_treeviewfm_new(Projekt* zond) {
 	ztvfm_priv = zond_treeviewfm_get_instance_private(ztvfm);
 
 	ztvfm_priv->zond = zond;
+
+	g_signal_connect(SOND_TREEVIEWFM(ztvfm), "before-delete",
+			G_CALLBACK(zond_treeviewfm_before_delete), NULL);
 
 	//Ergänze contextmenu
 	GtkWidget* contextmenu = sond_treeview_get_contextmenu(SOND_TREEVIEW(ztvfm));
