@@ -1207,10 +1207,8 @@ static void sond_treeviewfm_class_init(SondTreeviewFMClass *klass) {
 			G_TYPE_POINTER);
 
 	klass->signal_before_delete = g_signal_new("before-delete",
-			SOND_TYPE_TREEVIEWFM, G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_INT, 4,
+			SOND_TYPE_TREEVIEWFM, G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_INT, 2,
 			SOND_TYPE_TVFM_ITEM,
-			G_TYPE_CHAR,
-			G_TYPE_INT,
 			G_TYPE_POINTER);
 
 	klass->signal_after = g_signal_new("after",
@@ -1870,6 +1868,10 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 						(stvfm_item_parent_priv->path_or_section) ?
 								"/" : "", s_paste_sel->base_inserted, NULL);
 
+		if (!stvfm_item_priv->path_or_section)
+			sond_file_part_set_path(stvfm_item_priv->sond_file_part,
+					path_new);
+
 		stvfm_item_new = sond_tvfm_item_create(
 				stvfm_item_parent_priv->stvfm,
 				(stvfm_item_priv->path_or_section) ?
@@ -1878,15 +1880,13 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 				(stvfm_item_priv->path_or_section) ?
 						path_new : NULL);
 
-		if (!stvfm_item_priv->path_or_section)
-			sond_file_part_set_path(stvfm_item_priv->sond_file_part,
-					path_new);
-		else { //stvfm_item ist jedenfalls ein DIR
+		stvfm_item_new_priv = sond_tvfm_item_get_instance_private(stvfm_item_new);
+
+		if (stvfm_item_priv->path_or_section) //stvfm_item ist jedenfalls ein DIR
 			adjust_sfps_in_dir(stvfm_item_priv->sond_file_part,
 					stvfm_item_parent_priv->sond_file_part,
 					stvfm_item_priv->path_or_section,
 					path_new);
-		}
 
 		g_free(path_new);
 
@@ -1895,7 +1895,6 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 				s_paste_sel->iter_cursor, 0, stvfm_item_new, -1);
 
 		//Falls Verzeichnis mit Datei innendrin: dummy in neuen Knoten einfügen
-		stvfm_item_new_priv = sond_tvfm_item_get_instance_private(stvfm_item_new);
 		if (stvfm_item_new_priv->has_children) {
 			GtkTreeIter iter_tmp = { 0 };
 
@@ -1906,8 +1905,7 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 		}
 
 		//Falls jetzt in GMessage: alten display_name übernehmen
-		if (stvfm_item_new_priv->sond_file_part &&
-				SOND_IS_FILE_PART_GMESSAGE(stvfm_item_new_priv->sond_file_part)) {
+		if (SOND_IS_FILE_PART_GMESSAGE(stvfm_item_new_priv->sond_file_part)) {
 			GtkTreeIter iter_sibling = *(s_paste_sel->iter_cursor);
 
 			g_free(stvfm_item_new_priv->display_name);
@@ -1961,13 +1959,14 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 
 	//Knoten löschen, wenn ausgeschnitten
 	if (clipboard->ausschneiden) {
+		gboolean is_gmessage = SOND_IS_FILE_PART_GMESSAGE(stvfm_item_priv->sond_file_part);
+
 		if (gtk_tree_store_remove(
 				GTK_TREE_STORE(gtk_tree_view_get_model(
 						GTK_TREE_VIEW(stvfm_item_priv->stvfm))), iter)) {
 
 			//Leider, wenn GMessage, den ganzen Mist nochmal
-			if (stvfm_item_priv->sond_file_part &&
-					SOND_IS_FILE_PART_GMESSAGE(stvfm_item_priv->sond_file_part))
+			if (is_gmessage)
 				do {
 					SondTVFMItem* stvfm_item_sibling = NULL;
 					SondTVFMItemPrivate* stvfm_item_sibling_priv = NULL;
@@ -2167,9 +2166,8 @@ static gint sond_treeviewfm_foreach_loeschen(SondTreeview *stv,
 
 	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)), iter, 0,
 			&stvfm_item, -1);
-	g_object_unref(stvfm_item);
-
 	stvfm_item_priv = sond_tvfm_item_get_instance_private(stvfm_item);
+	g_object_unref(stvfm_item);
 
 	g_signal_emit(stvfm, SOND_TREEVIEWFM_GET_CLASS(stvfm)->signal_before_delete,
 			0, stvfm_item, error, &res);
@@ -2246,8 +2244,27 @@ static gint sond_treeviewfm_foreach_loeschen(SondTreeview *stv,
 			if (!sond_file_part_get_has_children(sond_file_part_get_parent(
 					stvfm_item_priv->sond_file_part))) {
 				GtkTreeIter iter_parent = { 0 };
+				GtkTreeIter iter_page_tree = { 0 };
 				SondTVFMItem* stvfm_item_parent = NULL;
 				SondTVFMItemPrivate* stvfm_item_parent_priv = NULL;
+
+				//stvfm mit page_tree muß gelöscht werden
+				iter_page_tree = *iter; //iter brauchen wir noch
+				if (!gtk_tree_model_iter_previous(
+						gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)),
+						&iter_page_tree)) {
+					critical("PageTree-Item fehlt");
+
+					return 0;
+				}
+
+				if (!gtk_tree_store_remove(GTK_TREE_STORE(
+						gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm))),
+						&iter_page_tree)) {
+					critical("PageTree-Item konnte nicht gelöscht werden");
+
+					goto end;
+				}
 
 				//Jetzt muß stvfm_item (parent) angepaßt werden
 				if (!gtk_tree_model_iter_parent(
