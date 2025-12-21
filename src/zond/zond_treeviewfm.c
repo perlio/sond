@@ -108,12 +108,12 @@ static gint zond_treeviewfm_deter_background(SondTVFMItem *stvfm_item, GError **
 	return 0;
 }
 
-static gint zond_treeviewfm_before_delete(SondTVFMItem *stvfm_item, GError **error) {
+static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
+		SondTVFMItem *stvfm_item, GError **error) {
 	gint rc = 0;
 	g_autofree gchar* path = NULL;
 
-	ZondTreeviewFMPrivate *priv = zond_treeviewfm_get_instance_private(
-			ZOND_TREEVIEWFM(sond_tvfm_item_get_stvfm(stvfm_item)));
+	ZondTreeviewFMPrivate *priv = zond_treeviewfm_get_instance_private(ztvfm);
 
 	path = get_path_from_stvfm_item(stvfm_item);
 
@@ -340,26 +340,7 @@ gint zond_treeviewfm_insert_section(ZondTreeviewFM *ztvfm, gint node_id,
 
 	anbindung_parse_file_section(section, &anbindung);
 	g_free(section);
-/*
-	zpa = g_object_new( ZOND_TYPE_PDF_ABSCHNITT, NULL);
 
-	zond_pdf_abschnitt_set(zpa, node_id, file_part, anbindung, icon_name,
-			node_text);
-	g_free(file_part);
-	g_free(icon_name);
-	g_free(node_text);
-
-	//child in tree einfügen
-	gtk_tree_store_insert_after(
-			GTK_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(ztvfm) )),
-			&iter_new, (child) ? iter_anchor : NULL,
-			(child) ? NULL : iter_anchor);
-	gtk_tree_store_set(
-			GTK_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(ztvfm) )),
-			&iter_new, 0, zpa, -1);
-
-	g_object_unref(zpa);
-*/
 	//insert dummy
 	zond_dbase_get_first_child(ztvfm_priv->zond->dbase_zond->zond_dbase_work,
 			node_id, &first_grandchild, error);
@@ -647,7 +628,7 @@ ZondTreeviewFM* zond_treeviewfm_new(Projekt* zond) {
 
 	ztvfm_priv->zond = zond;
 
-	g_signal_connect(SOND_TREEVIEWFM(ztvfm), "before-delete",
+	g_signal_connect(ztvfm, "before-delete",
 			G_CALLBACK(zond_treeviewfm_before_delete), NULL);
 
 	//Ergänze contextmenu

@@ -615,9 +615,8 @@ static gint sond_treeview_refs_foreach(SondTreeview *stv_orig, GPtrArray *refs,
 	return 0;
 }
 
-gint sond_treeview_clipboard_foreach(
-		gint (*foreach)(SondTreeview*, GtkTreeIter*, gpointer, GError**),
-		gpointer data, GError **error) {
+gint sond_treeview_clipboard_foreach(gint (*foreach)(SondTreeview*,
+		GtkTreeIter*, gpointer, GError**), gpointer data, GError **error) {
 	gint rc = 0;
 
 	Clipboard *clipboard = ((SondTreeviewClass*) g_type_class_peek(

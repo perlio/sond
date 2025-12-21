@@ -736,10 +736,9 @@ static gint sond_treeviewfm_expand_dummy(SondTreeviewFM *stvfm, GtkTreeIter *ite
 		if (child_item_priv->has_children) { //Dummy einfügen
 			GtkTreeIter newest_iter = { 0 };
 
-			gtk_tree_store_insert(
-				GTK_TREE_STORE(
-						gtk_tree_view_get_model( GTK_TREE_VIEW(stvfm) )),
-				&newest_iter, &iter_new, -1);
+			gtk_tree_store_insert(GTK_TREE_STORE(
+					gtk_tree_view_get_model( GTK_TREE_VIEW(stvfm) )),
+					&newest_iter, &iter_new, -1);
 		}
 	}
 
@@ -1126,6 +1125,8 @@ static gint sond_treeviewfm_text_edited(SondTreeviewFM *stvfm,
 	g_signal_emit(stvfm_item_priv->stvfm,
 			SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->signal_after, 0,
 			(rc == 0) ? TRUE : FALSE);
+	if (rc)
+		ERROR_Z
 
 	//sfp-Pfade ändern, soweit erforderlich
 	if (stvfm_item_priv->path_or_section)
@@ -1206,8 +1207,7 @@ static void sond_treeviewfm_class_init(SondTreeviewFMClass *klass) {
 			G_TYPE_POINTER);
 
 	klass->signal_before_delete = g_signal_new("before-delete",
-			SOND_TYPE_TREEVIEWFM, G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_INT, 5,
-			SOND_TYPE_TVFM_ITEM,
+			SOND_TYPE_TREEVIEWFM, G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_INT, 4,
 			SOND_TYPE_TVFM_ITEM,
 			G_TYPE_CHAR,
 			G_TYPE_INT,
@@ -1633,7 +1633,7 @@ static gint move_stvfm_item(SondTVFMItem* stvfm_item,
 	else {
 		g_signal_emit(stvfm_item_priv->stvfm,
 				SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->signal_before_delete, 0,
-				stvfm_item, stvfm_item_parent, base, index_to, error, &res);
+				stvfm_item, base, index_to, error, &res);
 		if (res == -1)
 			ERROR_Z
 		else if (res == 1)
@@ -1704,13 +1704,12 @@ static gint process_stvfm_item_move_or_copy(SondTVFMItem* stvfm_item,
 		SondTVFMItemPrivate* stvfm_item_parent_priv =
 				sond_tvfm_item_get_instance_private(s_paste_sel->stvfm_item_parent);
 
-		if( stvfm_item_parent_priv->sond_file_part &&
-				!SOND_IS_FILE_PART_GMESSAGE(stvfm_item_parent_priv->sond_file_part)) {
+		if(!SOND_IS_FILE_PART_GMESSAGE(stvfm_item_parent_priv->sond_file_part)) {
 			gchar const* ext = NULL;
 
 			ext = mime_to_extension(base);
 			g_free(base);
-			base = g_strconcat("UNNAMED.", ext, NULL);
+			base = g_strconcat("UNNAMED", ext, NULL);
 		}
 	}
 
@@ -2164,15 +2163,15 @@ static gint sond_treeviewfm_foreach_loeschen(SondTreeview *stv,
 	SondTVFMItem* stvfm_item = NULL;
 	SondTVFMItemPrivate* stvfm_item_priv = NULL;
 	gint res = 0;
+	SondTreeviewFM* stvfm = SOND_TREEVIEWFM(stv);
 
-	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(stv)), iter, 0,
+	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)), iter, 0,
 			&stvfm_item, -1);
 	g_object_unref(stvfm_item);
 
 	stvfm_item_priv = sond_tvfm_item_get_instance_private(stvfm_item);
 
-	g_signal_emit(SOND_TREEVIEWFM(stv),
-			SOND_TREEVIEWFM_GET_CLASS(SOND_TREEVIEWFM(stv))->signal_before_delete,
+	g_signal_emit(stvfm, SOND_TREEVIEWFM_GET_CLASS(stvfm)->signal_before_delete,
 			0, stvfm_item, error, &res);
 	if (res == -1)
 		ERROR_Z
@@ -2184,7 +2183,7 @@ static gint sond_treeviewfm_foreach_loeschen(SondTreeview *stv,
 			gint rc = 0;
 			gchar* path = NULL;
 			SondTreeviewFMPrivate* stvfm_priv =
-					sond_treeviewfm_get_instance_private(stvfm_item_priv->stvfm);
+					sond_treeviewfm_get_instance_private(stvfm);
 
 			if (!stvfm_item_priv->path_or_section)
 				return 0; //Root-Verzeichnis kann nicht gelöscht werden!
@@ -2246,32 +2245,13 @@ static gint sond_treeviewfm_foreach_loeschen(SondTreeview *stv,
 			//Falls es das letzte war, muß alles umgestellt werdem
 			if (!sond_file_part_get_has_children(sond_file_part_get_parent(
 					stvfm_item_priv->sond_file_part))) {
-				GtkTreeIter iter_page_tree = { 0 };
 				GtkTreeIter iter_parent = { 0 };
 				SondTVFMItem* stvfm_item_parent = NULL;
 				SondTVFMItemPrivate* stvfm_item_parent_priv = NULL;
 
-				//stvfm mit page_tree muß gelöscht werden
-				iter_page_tree = *iter; //iter brauchen wir noch
-				if (!gtk_tree_model_iter_previous(
-						gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm_item_priv->stvfm)),
-						&iter_page_tree)) {
-					critical("PageTree-Item fehlt");
-
-					return 0;
-				}
-
-				if (!gtk_tree_store_remove(GTK_TREE_STORE(
-						gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm_item_priv->stvfm))),
-						&iter_page_tree)) {
-					critical("PageTree-Item konnte nicht gelöscht werden");
-
-					goto end;
-				}
-
 				//Jetzt muß stvfm_item (parent) angepaßt werden
 				if (!gtk_tree_model_iter_parent(
-						gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm_item_priv->stvfm)),
+						gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)),
 						&iter_parent, iter)) {
 					critical("Parent-Item nicht vorhanden");
 
@@ -2279,7 +2259,7 @@ static gint sond_treeviewfm_foreach_loeschen(SondTreeview *stv,
 				}
 
 				gtk_tree_model_get(gtk_tree_view_get_model(
-						GTK_TREE_VIEW(stvfm_item_priv->stvfm)),
+						GTK_TREE_VIEW(stvfm)),
 						&iter_parent, 0, &stvfm_item_parent, -1);
 
 				if (!SOND_IS_TVFM_ITEM(stvfm_item_parent)) {
@@ -2298,10 +2278,10 @@ static gint sond_treeviewfm_foreach_loeschen(SondTreeview *stv,
 		}
 	}
 	else if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF_SECTION) {
-		if (SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->delete_section) {
+		if (SOND_TREEVIEWFM_GET_CLASS(stvfm)->delete_section) {
 			gint rc = 0;
 
-			rc = SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->delete_section(stvfm_item, error);
+			rc = SOND_TREEVIEWFM_GET_CLASS(stvfm)->delete_section(stvfm_item, error);
 			if (rc)
 				ERROR_Z
 		}
@@ -2311,7 +2291,7 @@ static gint sond_treeviewfm_foreach_loeschen(SondTreeview *stv,
 
 	end:
 	gtk_tree_store_remove(GTK_TREE_STORE(
-			gtk_tree_view_get_model(GTK_TREE_VIEW(stv))), iter);
+			gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm))), iter);
 
 	return 0;
 }
@@ -3017,7 +2997,7 @@ gint sond_treeviewfm_set_root(SondTreeviewFM *stvfm, const gchar *root,
 
 		gtk_tree_store_clear(
 				GTK_TREE_STORE(
-						gtk_tree_view_get_model( GTK_TREE_VIEW(stvfm) )));
+						gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm) )));
 
 		return 0;
 	}
