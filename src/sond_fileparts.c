@@ -282,7 +282,12 @@ void sond_file_part_set_parent(SondFilePart *sfp, SondFilePart* parent) {
 }
 
 gchar const* sond_file_part_get_path(SondFilePart *sfp) {
-	SondFilePartPrivate *sfp_priv = sond_file_part_get_instance_private(sfp);
+	SondFilePartPrivate *sfp_priv = NULL;
+
+	if (!sfp)
+		return NULL;
+
+	sfp_priv = sond_file_part_get_instance_private(sfp);
 
 	return sfp_priv->path;
 }
@@ -713,10 +718,10 @@ gint sond_file_part_open(SondFilePart* sfp, gboolean open_with,
 	//hier alle Varianten, in denen eigener Viewer geöffnet wird
 	if (!open_with &&
 			SOND_IS_FILE_PART_LEAF(sfp) &&
-			(g_str_has_prefix("text/", sond_file_part_leaf_get_mime_type(
-					SOND_FILE_PART_LEAF(sfp))) ||
+			(g_str_has_prefix(sond_file_part_leaf_get_mime_type(
+					SOND_FILE_PART_LEAF(sfp)), "text/") ||
 			g_str_has_prefix(sond_file_part_leaf_get_mime_type(
-					SOND_FILE_PART_LEAF(sfp)), "image") ||
+					SOND_FILE_PART_LEAF(sfp)), "image/") ||
 			!g_strcmp0("application/vnd.oasis.opendocument.text",
 					sond_file_part_leaf_get_mime_type(
 					SOND_FILE_PART_LEAF(sfp))) ||

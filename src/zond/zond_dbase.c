@@ -653,7 +653,8 @@ gint zond_dbase_test_path(ZondDBase *zond_dbase, const gchar *filepart,
 	sqlite3_stmt **stmt = NULL;
 
 	const gchar *sql[] = { "SELECT k1.ID FROM knoten k1 INNER JOIN "
-			"knoten k2 ON k1.link=k2.ID WHERE k1.type=2 AND k2.file_part LIKE ?1 COLLATE BINARY; "
+			"knoten k2 ON k1.link=k2.ID "
+			"WHERE k1.type=2 AND k2.file_part LIKE ?1 || '%' COLLATE BINARY; "
 	};
 
 	rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
@@ -1062,6 +1063,54 @@ gint zond_dbase_update_path(ZondDBase *zond_dbase, const gchar *old_path,
 		ERROR_Z_DBASE
 
 	rc = sqlite3_bind_text(stmt[0], 2, new_path, -1, NULL);
+	if (rc != SQLITE_OK)
+		ERROR_Z_DBASE
+
+	rc = sqlite3_step(stmt[0]);
+	if (rc != SQLITE_DONE)
+		ERROR_Z_DBASE
+
+	return 0;
+}
+
+gint zond_dbase_update_gmessage_index(ZondDBase* zond_dbase, gchar const* prefix,
+		gint index, gboolean into, GError** error) {
+	gint rc = 0;
+	sqlite3_stmt **stmt = NULL;
+
+	const gchar *sql[] = {
+			"UPDATE knoten "
+			"SET filepart = ?1 || " //?1 ist prefix
+			"(CAST(SUBSTR(SUBSTR(filepart, LENGTH(?1) + 1), 1, "
+			"INSTR(SUBSTR(filepart, LENGTH(?1) + 1) || '/', '/') - 1) "
+			"AS INTEGER) + ?2) || " //?2 ist Zahl, die hinzugesetzt/abgezogen wird
+			"SUBSTR(SUBSTR(filepart, LENGTH(?1) + 1), "
+			"INSTR(SUBSTR(filepart, LENGTH(?1) + 1) || '/', '/')) "
+			"WHERE filepart LIKE ?1 || '%' "
+			"AND CASE WHEN ?2 > 0 THEN "
+					"CAST(SUBSTR(SUBSTR(filepart, LENGTH(?1) + 1), 1, "
+					"INSTR(SUBSTR(filepart, LENGTH(?1) + 1) || '/', '/') - 1) "
+					"AS INTEGER) >= ?3 " //?3 ist Schwellenwert
+				"ELSE "
+					"CAST(SUBSTR(SUBSTR(filepart, LENGTH(?1) + 1), 1 "
+					 "INSTR(SUBSTR(filepart, LENGTH(?1) + 1) || '/', '/') - 1) "
+					"AS INTEGER) <= ?3 "
+				"END;" };
+
+	rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
+			error);
+	if (rc)
+		ERROR_Z
+
+	rc = sqlite3_bind_text(stmt[0], 1, prefix, -1, NULL);
+	if (rc != SQLITE_OK)
+		ERROR_Z_DBASE
+
+	rc = sqlite3_bind_int(stmt[0], 2, into ? -1 : 1);
+	if (rc != SQLITE_OK)
+		ERROR_Z_DBASE
+
+	rc = sqlite3_bind_int(stmt[0], 3, index);
 	if (rc != SQLITE_OK)
 		ERROR_Z_DBASE
 

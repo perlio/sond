@@ -21,6 +21,9 @@ gint dbase_zond_update_sections(DBaseZond*, DisplayedDocument*, GError** );
 
 gint dbase_zond_update_path(DBaseZond*, gchar const*, gchar const*, GError**);
 
+gint dbase_zond_update_gmessage_index(DBaseZond*, gchar const*, gint,
+		gboolean, GError**);
+
 void project_set_changed(gpointer);
 
 void project_reset_changed(Projekt*, gboolean);

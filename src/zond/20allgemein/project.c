@@ -148,6 +148,24 @@ gint dbase_zond_update_path(DBaseZond* dbase_zond, gchar const* prefix_old,
 	return 0;
 }
 
+gint dbase_zond_update_gmessage_index(DBaseZond* dbase_zond,
+		gchar const* prefix, gint index, gboolean into, GError** error) {
+	gint rc = 0;
+
+	rc = zond_dbase_update_gmessage_index(dbase_zond->zond_dbase_store, prefix,
+			index, into, error);
+	if (rc)
+		ERROR_Z
+
+	rc = zond_dbase_update_gmessage_index(dbase_zond->zond_dbase_work, prefix,
+			index, into, error);
+	if (rc)
+		ERROR_Z
+
+	return 0;
+}
+
+
 void project_reset_changed(Projekt *zond, gboolean changed) {
 	zond->dbase_zond->changed = changed;
 	gtk_widget_set_sensitive(zond->menu.speichernitem, changed);

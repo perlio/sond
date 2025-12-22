@@ -426,6 +426,7 @@ static gint pdf_ocr_tess_page(InfoWindow *info_window, TessBaseAPI *handle,
 
 	TessBaseAPISetImage(handle, pixmap->samples, pixmap->w, pixmap->h,
 			pixmap->n, pixmap->stride);
+	TessBaseAPISetSourceResolution(handle, (gint) (1. / TESS_SCALE * 72.0 / 70.0));
 
 	monitor = TessMonitorCreate();
 	TessMonitorSetCancelThis(monitor, &(info_window->cancel));
@@ -448,6 +449,8 @@ static gint pdf_ocr_tess_page(InfoWindow *info_window, TessBaseAPI *handle,
 
 	if (rc && !(info_window->cancel))
 		ERROR_S
+
+	g_message("Mean Confidence: %u", TessBaseAPIMeanTextConf(handle));
 
 	return 0;
 }

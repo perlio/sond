@@ -37,8 +37,7 @@ static gchar* get_path(SondFilePart* sfp, gchar const* path_or_section) {
 
 	path = g_strconcat((filepart) ? filepart : "",
 			(filepart && path_or_section) ? "//" : "",
-			(path_or_section) ? path_or_section : "",
-			"%", NULL);
+			(path_or_section) ? path_or_section : "", NULL);
 	g_free(filepart);
 
 	return path;
@@ -78,46 +77,45 @@ static gint zond_treeviewfm_deter_background(SondTVFMItem *stvfm_item, GError **
 			ERROR_Z
 		else if (rc == 1)
 			return 1; //Treffer
-		/*
-		rc = zond_dbase_test_path(priv->zond->dbase_zond->zond_dbase_work,
-				filepart, error);
-		if (rc == -1)
-			ERROR_Z
-		else if (rc == 1) {
-			if (sond_tvfm_item_get_item_type(stvfm_item) == SOND_TVFM_ITEM_TYPE_LEAF)
-				return 1; //Treffer
-			else { //also _LEAF_SECTION
-				gchar const* section = NULL;
-				gint rc = 0;
-
-				section = sond_tvfm_item_get_path_or_section(stvfm_item);
-
-				//Funktion testet, ob mind ein Abschnitt in db, der section mindestens umfaßt
-				rc = zond_dbase_test_path_section(
-						priv->zond->dbase_zond->zond_dbase_work, filepart,
-						section, error);
-				if (rc == -1)
-					ERROR_Z
-				else if (rc == 1)
-					return 1; //Treffer
-			}
-		}
-		*/
 	}
 
 	return 0;
+}
+
+static gboolean get_gmessage_index(SondTVFMItem* stvfm_item, gint* index) {
+	if (sond_tvfm_item_get_path_or_section(stvfm_item)) {
+		if (SOND_IS_FILE_PART_GMESSAGE(sond_tvfm_item_get_sond_file_part(stvfm_item))) {
+			*index = strrchr(sond_tvfm_item_get_path_or_section(stvfm_item), '/') ?
+					atoi(strrchr(sond_tvfm_item_get_path_or_section(stvfm_item), '/') + 1) :
+					atoi(sond_tvfm_item_get_path_or_section(stvfm_item));
+			return TRUE;
+		}
+	}
+	else if (SOND_IS_FILE_PART_GMESSAGE(sond_file_part_get_parent(
+			sond_tvfm_item_get_sond_file_part(stvfm_item)))) {
+		gchar const* path_sfp_parent = NULL;
+
+		path_sfp_parent = sond_file_part_get_path(sond_file_part_get_parent(
+				sond_tvfm_item_get_sond_file_part(stvfm_item)));
+
+		*index = strrchr(path_sfp_parent, '/') ?
+				atoi(strrchr(path_sfp_parent, '/') + 1) :
+				atoi(path_sfp_parent);
+		return TRUE;
+	}
+
+	return FALSE;
 }
 
 static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 		SondTVFMItem *stvfm_item, GError **error) {
 	gint rc = 0;
 	g_autofree gchar* path = NULL;
+	gint index_from = 0;
 
 	ZondTreeviewFMPrivate *priv = zond_treeviewfm_get_instance_private(ztvfm);
 
 	path = get_path_from_stvfm_item(stvfm_item);
-
-	path = add_string(path, g_strdup("%"));
 
 	rc = zond_dbase_test_path(priv->zond->dbase_zond->zond_dbase_work,
 			path, error);
@@ -140,43 +138,46 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 		return 1;
 	}
 
+	rc = dbase_zond_begin(priv->zond->dbase_zond, error);
+	if (rc)
+		ERROR_Z
+
+	//wenn aus GMessage verschoben wurde - nachfolgende indizes anpassen
+	if (get_gmessage_index(stvfm_item, &index_from)) {
+		gint rc = 0;
+		gchar* prefix = NULL;
+
+		prefix = get_path_from_stvfm_item(stvfm_item);
+
+		rc = dbase_zond_update_gmessage_index(priv->zond->dbase_zond,
+				prefix, index_from, FALSE, error);
+		if (rc) {
+			dbase_zond_rollback(priv->zond->dbase_zond, error);
+			ERROR_Z
+		}
+	}
+
 	return 0;
 }
 
-static gchar* get_prefix_from_stvfm_item(SondTVFMItem* stvfm_item) {
-	gchar* filepart = NULL;
-	gchar* prefix = NULL;
-
-	if (sond_tvfm_item_get_sond_file_part(stvfm_item))
-		filepart = sond_file_part_get_filepart(sond_tvfm_item_get_sond_file_part(stvfm_item));
-
-	if (sond_tvfm_item_get_path_or_section(stvfm_item)) {
-		if (filepart) {
-			prefix = g_strconcat(filepart, "//",
-					sond_tvfm_item_get_path_or_section(stvfm_item), NULL);
-			g_free(filepart);
-		}
-		else
-			prefix = g_strdup(sond_tvfm_item_get_path_or_section(stvfm_item));
-	}
-	else
-		prefix = filepart;
-
-	return prefix;
-}
-
 static gint zond_treeviewfm_before_move(SondTVFMItem* stvfm_item,
-		SondTVFMItem* stvfm_item_parent, gchar const* base_new, GError **error) {
+		SondTVFMItem* stvfm_item_parent, gchar const* base_new, gint index_to,
+		GError **error) {
 	gint rc = 0;
 	g_autofree gchar* prefix_old = NULL;
 	g_autofree gchar* prefix_new = NULL;
+	gboolean from_gmessage = FALSE;
+	gint index_from = 0;
 
 	ZondTreeviewFM* ztvfm = ZOND_TREEVIEWFM(sond_tvfm_item_get_stvfm(stvfm_item_parent));
 	ZondTreeviewFMPrivate *ztvfm_priv = zond_treeviewfm_get_instance_private(
 			ZOND_TREEVIEWFM(ztvfm));
 
-	prefix_old = get_prefix_from_stvfm_item(stvfm_item);
-	prefix_new = get_prefix_from_stvfm_item(stvfm_item_parent);
+	prefix_old = get_path_from_stvfm_item(stvfm_item);
+	prefix_new = get_path_from_stvfm_item(stvfm_item_parent);
+
+	//Falls aus GMessage verschoben wird - welchen Index hatte Eintrag?
+	from_gmessage = get_gmessage_index(stvfm_item, &index_from);
 
 	//Wenn es root-dir einer Datei ist
 	if (sond_tvfm_item_get_sond_file_part(stvfm_item_parent) &&
@@ -185,7 +186,9 @@ static gint zond_treeviewfm_before_move(SondTVFMItem* stvfm_item,
 	else if (prefix_new)//wenn
 		prefix_new = add_string(prefix_new, g_strdup("/"));
 
-	prefix_new = add_string(prefix_new, g_strdup(base_new));
+	if (SOND_IS_FILE_PART_GMESSAGE(sond_tvfm_item_get_sond_file_part(stvfm_item_parent)))
+		prefix_new = add_string(prefix_new, g_strdup("alpha")); //irgendwas alphanumerisches
+	else prefix_new = add_string(prefix_new, g_strdup(base_new));
 
 	//Änderungsstatus zwischenspeichern
 	ztvfm_priv->changed_tmp = ztvfm_priv->zond->dbase_zond->changed;
@@ -200,10 +203,50 @@ static gint zond_treeviewfm_before_move(SondTVFMItem* stvfm_item,
 		ERROR_Z
 	}
 
+	//wenn aus GMessage verschoben wurde - nachfolgende indizes anpassen
+	if (from_gmessage) {
+		gint rc = 0;
+
+		rc = dbase_zond_update_gmessage_index(ztvfm_priv->zond->dbase_zond,
+				prefix_old, index_from, FALSE, error);
+		if (rc) {
+			dbase_zond_rollback(ztvfm_priv->zond->dbase_zond, error);
+			ERROR_Z
+		}
+	}
+
+	//wenn in GMESSAGE
+	if (SOND_IS_FILE_PART_GMESSAGE(sond_tvfm_item_get_sond_file_part(stvfm_item_parent))) {
+		gint rc = 0;
+		gchar* prefix_final = NULL;
+
+		//indizes ab index_to +1
+		rc = dbase_zond_update_gmessage_index(ztvfm_priv->zond->dbase_zond,
+				prefix_new, index_to, TRUE, error);
+		if (rc) {
+			dbase_zond_rollback(ztvfm_priv->zond->dbase_zond, error);
+			ERROR_Z
+		}
+
+		//mit base_new upgedatete Zeilen korrigieren
+		prefix_final = strrchr(prefix_new, '/');
+		//muß != NULL sein, weil sfp(item_parent) sonst niemals GMESSAGE sein könnte
+		//hoffe ich
+		prefix_final = add_string(prefix_final, g_strdup_printf("%u", index_to));
+
+		rc = dbase_zond_update_path(ztvfm_priv->zond->dbase_zond, prefix_new,
+				prefix_final, error);
+		g_free(prefix_final);
+		if (rc) {
+			dbase_zond_rollback(ztvfm_priv->zond->dbase_zond, error);
+			ERROR_Z
+		}
+	}
+
 	return 0;
 }
 
-static void zond_treeviewfm_after_move(SondTreeviewFM* stvfm,
+static void zond_treeviewfm_after(SondTreeviewFM* stvfm,
 		gboolean suc) {
 	GError* error_int = NULL;
 	ZondTreeviewFMPrivate *priv = zond_treeviewfm_get_instance_private(
@@ -630,6 +673,10 @@ ZondTreeviewFM* zond_treeviewfm_new(Projekt* zond) {
 
 	g_signal_connect(ztvfm, "before-delete",
 			G_CALLBACK(zond_treeviewfm_before_delete), NULL);
+	g_signal_connect(ztvfm, "before-move",
+			G_CALLBACK(zond_treeviewfm_before_move), NULL);
+	g_signal_connect(ztvfm, "after",
+			G_CALLBACK(zond_treeviewfm_after), NULL);
 
 	//Ergänze contextmenu
 	GtkWidget* contextmenu = sond_treeview_get_contextmenu(SOND_TREEVIEW(ztvfm));

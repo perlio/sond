@@ -86,6 +86,9 @@ gint zond_dbase_update_text(ZondDBase*, gint, const gchar*, GError**);
 
 gint zond_dbase_update_path(ZondDBase*, const gchar*, const gchar*, GError**);
 
+gint zond_dbase_update_gmessage_index(ZondDBase*, gchar const*,
+		gint, gboolean, GError**);
+
 gint zond_dbase_verschieben_knoten(ZondDBase*, gint, gint, gboolean, GError**);
 
 gint zond_dbase_remove_node(ZondDBase*, gint, GError**);
