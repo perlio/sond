@@ -468,41 +468,42 @@ pdf_ocr_render_pixmap(fz_context *ctx, pdf_document *doc, float scale,
 
 	rect = fz_transform_rect(rect, ctm);
 
-//per draw-device to pixmap
+	//per draw-device to pixmap
 	fz_try( ctx )
 		pixmap = fz_new_pixmap_with_bbox(ctx, fz_device_rgb(ctx),
 				fz_irect_from_rect(rect), NULL, 0);
-fz_catch	( ctx ) {
+	fz_catch(ctx) {
 		fz_drop_page(ctx, &page->super);
 		ERROR_MUPDF_R("fz_new_pixmap_with_bbox", NULL)
 	}
 
 	fz_try( ctx)
 		fz_clear_pixmap_with_value(ctx, pixmap, 255);
-fz_catch	( ctx ) {
+	fz_catch(ctx) {
 		fz_drop_page(ctx, &page->super);
 		fz_drop_pixmap(ctx, pixmap);
 
-		ERROR_MUPDF_R("fz_clear_pixmap", NULL)
+		ERROR_MUPDF_R("fz_clear_pixmap_with_value", NULL)
 	}
 
 	fz_device *draw_device = NULL;
-	fz_try( ctx )
+	fz_try(ctx)
 		draw_device = fz_new_draw_device(ctx, ctm, pixmap);
-fz_catch	( ctx ) {
+	fz_catch(ctx) {
 		fz_drop_page(ctx, &page->super);
 		fz_drop_pixmap(ctx, pixmap);
 
 		ERROR_MUPDF_R("fz_new_draw_device", NULL)
 	}
 
-	fz_try( ctx )
+	fz_try(ctx)
 		pdf_run_page(ctx, page, draw_device, fz_identity, NULL);
-fz_always	( ctx ) {
+	fz_always(ctx) {
 		fz_close_device(ctx, draw_device);
 		fz_drop_device(ctx, draw_device);
 		fz_drop_page(ctx, &page->super);
-	}fz_catch( ctx ) {
+	}
+	fz_catch(ctx) {
 		fz_drop_pixmap(ctx, pixmap);
 
 		ERROR_MUPDF_R("fz_new_draw_device", NULL)

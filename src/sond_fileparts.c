@@ -136,7 +136,6 @@ static SondFilePart* sond_file_part_create(GType sfp_type, const gchar *path,
 static gint sond_file_part_pdf_test_for_embedded_files(SondFilePartPDF*, GError**);
 static gint sond_file_part_zip_test_for_files(SondFilePartZip*, GError**);
 static gint sond_file_part_gmessage_test_for_multipart(SondFilePartGMessage*, GError**);
-static void sond_file_part_leaf_set_mime_type(SondFilePartLeaf*, gchar const*);
 
 static gint sond_file_part_test_for_children(SondFilePart* sfp, GError** error) {
 	gint rc = 0;
@@ -2438,7 +2437,7 @@ gchar const* sond_file_part_leaf_get_mime_type(SondFilePartLeaf *sfp_leaf) {
 	return sfp_leaf_priv->mime_type;
 }
 
-static void sond_file_part_leaf_set_mime_type(SondFilePartLeaf* sfp_leaf, gchar const* mime_type) {
+void sond_file_part_leaf_set_mime_type(SondFilePartLeaf* sfp_leaf, gchar const* mime_type) {
 	SondFilePartLeafPrivate* sfp_leaf_priv =
 			sond_file_part_leaf_get_instance_private(sfp_leaf);
 

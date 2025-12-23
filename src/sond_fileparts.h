@@ -118,6 +118,8 @@ struct _SondFilePartLeafClass {
 
 gchar const* sond_file_part_leaf_get_mime_type(SondFilePartLeaf*);
 
+void sond_file_part_leaf_set_mime_type(SondFilePartLeaf*, gchar const*);
+
 G_END_DECLS
 
 #endif /* SRC_SOND_FILEPARTS_H_ */

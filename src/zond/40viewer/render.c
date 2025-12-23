@@ -160,10 +160,11 @@ static gint render_pixmap(fz_context *ctx, ViewerPageNew *viewer_page,
 	fz_try( ctx )
 		fz_run_display_list(ctx, viewer_page->pdf_document_page->display_list,
 				draw_device, transform, rect, NULL);
-	fz_always	( ctx ) {
+	fz_always(ctx) {
 		fz_close_device(ctx, draw_device);
 		fz_drop_device(ctx, draw_device);
-	}fz_catch( ctx ) {
+	}
+	fz_catch(ctx) {
 		fz_drop_pixmap(ctx, pixmap);
 		ERROR_MUPDF("fz_run_display_list")
 	}

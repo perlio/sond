@@ -1873,8 +1873,12 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 		}
 
 		if (!stvfm_item_priv->path_or_section)
-			sond_file_part_set_path(sfp_new,
-					path_new);
+			sond_file_part_set_path(sfp_new, path_new);
+
+		if (SOND_IS_FILE_PART_LEAF(sfp_new))
+			sond_file_part_leaf_set_mime_type(SOND_FILE_PART_LEAF(sfp_new),
+					sond_file_part_leaf_get_mime_type(
+							SOND_FILE_PART_LEAF(stvfm_item_priv->sond_file_part)));
 
 		sond_file_part_set_parent(sfp_new, stvfm_item_parent_priv->sond_file_part);
 
@@ -2345,21 +2349,55 @@ static void sond_treeviewfm_loeschen_activate(GtkMenuItem *item, gpointer data) 
 	return;
 }
 
+static gint sond_treeviewfm_open(SondTVFMItem *stvfm_item,
+		gboolean open_with, GError **error) {
+	gint rc = 0;
+	SondTVFMItemPrivate *stvfm_item_priv = sond_tvfm_item_get_instance_private(stvfm_item);
+
+	if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_DIR)
+		return 0;
+
+	rc = SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->
+			open_stvfm_item(stvfm_item, open_with, error);
+	if (rc)
+		ERROR_Z
+
+	return 0;
+}
+
+static void open_item(GtkTreeView* tree_view, gboolean open_with) {
+	SondTVFMItem* stvfm_item = NULL;
+	GtkTreePath* path = NULL;
+	GtkTreeIter iter = { 0 };
+	gint rc = 0;
+	GError* error = NULL;
+
+	gtk_tree_view_get_cursor(tree_view, &path, NULL);
+	gtk_tree_model_get_iter(gtk_tree_view_get_model(tree_view), &iter, path);
+	gtk_tree_path_free(path);
+	gtk_tree_model_get(gtk_tree_view_get_model(tree_view), &iter, 0, &stvfm_item, -1);
+
+	rc = sond_treeviewfm_open(stvfm_item, open_with, &error);
+	g_object_unref(stvfm_item);
+	if (rc) {
+		display_message(GTK_WIDGET(tree_view), "Fehler beim Öffnen\n\n",
+				error->message, NULL);
+		g_error_free(error);
+	}
+
+	return;
+}
+
 static void sond_treeviewfm_datei_oeffnen_activate(GtkMenuItem *item,
 		gpointer data) {
-	SondTreeviewFM *stvfm = (SondTreeviewFM*) data;
-
-	g_signal_emit_by_name(stvfm, "row-activated", NULL, NULL, NULL);
+	open_item(GTK_TREE_VIEW(data), FALSE);
 
 	return;
 }
 
 static void sond_treeviewfm_datei_oeffnen_mit_activate(GtkMenuItem *item,
 		gpointer data) {
-	SondTreeviewFM *stvfm = (SondTreeviewFM*) data;
-
-	g_signal_emit_by_name(stvfm, "row-activated", NULL, NULL,
-			GINT_TO_POINTER(1));
+	open_item(GTK_TREE_VIEW(data), TRUE);
 
 	return;
 }
@@ -2725,41 +2763,17 @@ static void sond_treeviewfm_init_contextmenu(SondTreeviewFM *stvfm) {
 	return;
 }
 
-static gint sond_treeviewfm_open(SondTVFMItem *stvfm_item,
-		gboolean open_with, GError **error) {
-	gint rc = 0;
-	SondTVFMItemPrivate *stvfm_item_priv = sond_tvfm_item_get_instance_private(stvfm_item);
-
-	if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_DIR)
-		return 0;
-
-	rc = SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->
-			open_stvfm_item(stvfm_item, open_with, error);
-	if (rc)
-		ERROR_Z
-
-	return 0;
-}
-
 static void sond_treeviewfm_row_activated(GtkTreeView *tree_view,
 		GtkTreePath *tree_path, gpointer column, gpointer data) {
 	gint rc = 0;
 	GError *error = NULL;
-	GtkTreePath *path = NULL;
 	SondTVFMItem *stvfm_item = NULL;
 	GtkTreeIter iter = { 0 };
-	gboolean open_with = (gboolean) GPOINTER_TO_INT(data);
 
-	if (tree_path)
-		path = gtk_tree_path_copy(tree_path);
-	else
-		gtk_tree_view_get_cursor(tree_view, &path, NULL);
-
-	gtk_tree_model_get_iter(gtk_tree_view_get_model(tree_view), &iter, path);
-	gtk_tree_path_free(path);
+	gtk_tree_model_get_iter(gtk_tree_view_get_model(tree_view), &iter, tree_path);
 	gtk_tree_model_get(gtk_tree_view_get_model(tree_view), &iter, 0, &stvfm_item, -1);
 
-	rc = sond_treeviewfm_open(stvfm_item, open_with, &error);
+	rc = sond_treeviewfm_open(stvfm_item, FALSE, &error);
 	g_object_unref(stvfm_item);
 	if (rc) {
 		display_message(gtk_widget_get_toplevel(GTK_WIDGET(tree_view)),
