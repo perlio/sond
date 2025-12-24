@@ -666,7 +666,7 @@ gint pdf_page_rotate(fz_context *ctx, pdf_obj *page_obj, gint winkel,
 	pdf_obj *rotate_obj = NULL;
 	gint rotate = 0;
 
-	fz_try(ctx)
+	fz_try(ctx) //erstmal existierenden rotate-Wert ermitteln
 		rotate_obj = pdf_dict_get_inheritable(ctx, page_obj, PDF_NAME(Rotate));
 	fz_catch(ctx) {
 		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
@@ -675,39 +675,32 @@ gint pdf_page_rotate(fz_context *ctx, pdf_obj *page_obj, gint winkel,
 		return -1;
 	}
 
-	if (!rotate_obj) {
-		rotate_obj = pdf_new_int(ctx, (int64_t) winkel);
+	if (rotate_obj) //sonst halt 0
+		rotate = pdf_to_int(ctx, rotate_obj); //Anfangswert
+
+	rotate = rotate + winkel;
+	if (rotate < 0)
+		rotate += 360;
+	else if (rotate > 360)
+		rotate -= 360;
+	else if (rotate == 360)
+		rotate = 0;
+
+	//prüfen, ob page-Knoten einen /Rotate-Eintrag hat, nicht nur geerbt
+	if (!rotate_obj || pdf_dict_get(ctx, rotate_obj, PDF_NAME(Parent)) != page_obj) {
+		pdf_obj* rotate_page = NULL;
+
+		//dann erzeugen und einfügen
+		rotate_page = pdf_new_int(ctx, (int64_t) rotate);
 		fz_try(ctx)
-			pdf_dict_put_drop(ctx, page_obj, PDF_NAME(Rotate), rotate_obj);
-		fz_catch(ctx) {
-			if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
-					fz_caught(ctx), "%s\n%s", __func__,
-					fz_caught_message(ctx));
+			pdf_dict_put(ctx, page_obj, PDF_NAME(Rotate), rotate_page);
+		fz_always(ctx)
 			pdf_drop_obj(ctx, rotate_obj);
-
-			return -1;
-		}
-	} else {
-		fz_try(ctx)
-			rotate = pdf_to_int(ctx, rotate_obj);
-		fz_catch(ctx) {
-			if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
-					fz_caught(ctx), "%s\n%s", __func__,
-					fz_caught_message(ctx));
-
-			return -1;
-		}
-
-		rotate = rotate + winkel;
-		if (rotate < 0)
-			rotate += 360;
-		else if (rotate > 360)
-			rotate -= 360;
-		else if (rotate == 360)
-			rotate = 0;
-
-		pdf_set_int(ctx, rotate_obj, (int64_t) rotate);
+		fz_catch(ctx)
+			ERROR_PDF
 	}
+	else
+		pdf_set_int(ctx, rotate_obj, (int64_t) rotate);
 
 	return rotate;
 }
