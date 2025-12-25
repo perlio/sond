@@ -220,6 +220,83 @@ static void write_log(SondFilePartPDF* sfp_pdf, gint num, gchar const* errmsg) {
 	return;
 }
 
+gint rotate_page(fz_context *ctx, pdf_obj *page_obj, gint winkel,
+		GError** error) {
+	pdf_obj *rotate_obj = NULL;
+	gint rotate = 0;
+
+	fz_try(ctx) //erstmal existierenden rotate-Wert ermitteln
+		rotate_obj = pdf_dict_get_inheritable(ctx, page_obj, PDF_NAME(Rotate));
+	fz_catch(ctx) {
+		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
+				fz_caught(ctx), "%s\n%s", __func__, fz_caught_message(ctx));
+
+		return -1;
+	}
+
+	if (rotate_obj) //sonst halt 0
+		rotate = pdf_to_int(ctx, rotate_obj); //Anfangswert
+
+	rotate = rotate + winkel;
+	if (rotate < 0)
+		rotate += 360;
+	else if (rotate > 360)
+		rotate -= 360;
+	else if (rotate == 360)
+		rotate = 0;
+
+	//prüfen, ob page-Knoten einen /Rotate-Eintrag hat, nicht nur geerbt
+	if (!rotate_obj || pdf_dict_get(ctx, rotate_obj, PDF_NAME(Parent)) != page_obj) {
+		pdf_obj* rotate_page = NULL;
+
+		//dann erzeugen und einfügen
+		rotate_page = pdf_new_int(ctx, (int64_t) rotate);
+		fz_try(ctx)
+			pdf_dict_put(ctx, page_obj, PDF_NAME(Rotate), rotate_page);
+		fz_always(ctx)
+			pdf_drop_obj(ctx, rotate_obj);
+		fz_catch(ctx)
+			ERROR_PDF
+	}
+	else
+		pdf_set_int(ctx, rotate_obj, (int64_t) rotate);
+
+	return 0;
+}
+
+// Hilfsfunktion: UTF-8 → WinAnsi mit Escaping
+static void append_winansi_text(fz_context *ctx, fz_buffer *buf, const char *utf8_text) {
+    fz_append_byte(ctx, buf, '(');
+
+    for (const unsigned char *p = (unsigned char*)utf8_text; *p; p++) {
+        if (*p < 128) {
+            // ASCII - escapen wenn nötig
+            if (*p == '(' || *p == ')' || *p == '\\')
+                fz_append_byte(ctx, buf, '\\');
+            fz_append_byte(ctx, buf, *p);
+        } else if (*p == 0xC3 && *(p+1)) {
+            // UTF-8 deutsche Umlaute (ä, ö, ü, ß, Ä, Ö, Ü)
+            p++;
+            unsigned char c = *p + 0x40;  // Konvertierung UTF-8 → WinAnsi
+            fz_append_printf(ctx, buf, "\\%03o", c);  // Oktal-Escape
+        } else if (*p == 0xC2 && *(p+1)) {
+            // Weitere Latin-1 Zeichen (z.B. ©, ®, °, etc.)
+            p++;
+            fz_append_printf(ctx, buf, "\\%03o", *p);
+        } else {
+            // Nicht darstellbar → Leerzeichen
+            fz_append_byte(ctx, buf, ' ');
+            // Überspringe Rest des Multi-Byte-Zeichens
+            while (*p && (*p & 0xC0) == 0x80) p++;
+            p--;
+        }
+    }
+
+    fz_append_byte(ctx, buf, ')');
+
+    return;
+}
+
 // Transformations-Kontext für OCR-Koordinaten
 typedef struct {
     float scale_x;
@@ -326,7 +403,7 @@ fz_buffer* tesseract_to_content_stream(fz_context *ctx,
             if (font_size < 1.0f) font_size = 1.0f;
 
             if (fabsf(font_size - last_font_size) > 0.5f) {
-                fz_append_printf(ctx, content, "/F1 %.2f Tf\n", font_size);
+                fz_append_printf(ctx, content, "/FSond %.2f Tf\n", font_size);
                 last_font_size = font_size;
             }
 
@@ -376,9 +453,10 @@ static gint add_ocr_layer_to_page(fz_context *ctx,
         pdf_dict_put_drop(ctx, resources, PDF_NAME(Font), fonts);
     }
 
-    if (!pdf_dict_get(ctx, fonts, PDF_NAME(F1))) {
-        pdf_dict_put(ctx, fonts, PDF_NAME(F1), font_ref);
-    }
+    pdf_obj* font_name = pdf_new_name(ctx, "FSond");
+    if (!pdf_dict_get(ctx, fonts, font_name))
+        pdf_dict_put(ctx, fonts, font_name, font_ref);
+    pdf_drop_obj(ctx, font_name);
 
     // Transformation berechnen
     ocr_transform transform =
@@ -391,15 +469,15 @@ static gint add_ocr_layer_to_page(fz_context *ctx,
     pdf_obj *contents = pdf_dict_get(ctx, page->obj, PDF_NAME(Contents));
 
     if (!contents) {
-        contents = pdf_add_stream(ctx, doc, ocr_content, NULL, 0);
+        contents = pdf_add_stream(ctx, page->doc, ocr_content, NULL, 0);
         pdf_dict_put_drop(ctx, page->obj, PDF_NAME(Contents), contents);
     } else if (pdf_is_array(ctx, contents)) {
-        pdf_obj *new_stream = pdf_add_stream(ctx, doc, ocr_content, NULL, 0);
+        pdf_obj *new_stream = pdf_add_stream(ctx,page->doc, ocr_content, NULL, 0);
         pdf_array_push_drop(ctx, contents, new_stream);
     } else {
-        pdf_obj *arr = pdf_new_array(ctx, doc, 2);
+        pdf_obj *arr = pdf_new_array(ctx, page->doc, 2);
         pdf_array_push(ctx, arr, contents);
-        pdf_obj *new_stream = pdf_add_stream(ctx, doc, ocr_content, NULL, 0);
+        pdf_obj *new_stream = pdf_add_stream(ctx, page->doc, ocr_content, NULL, 0);
         pdf_array_push_drop(ctx, arr, new_stream);
         pdf_dict_put_drop(ctx, page->obj, PDF_NAME(Contents), arr);
     }
@@ -582,7 +660,7 @@ static gint sond_ocr_page(SondFilePartPDF* sfp_pdf, fz_context* ctx,
 		rc = TessBaseAPIRecognize(handle, NULL);
 		fz_drop_pixmap(ctx, pixmap);
 		if (rc) {
-			g_set_error(error, SOND_ERROR,  0, "%s\nRecognize schlägt fehl", __func__);
+			g_set_error(error, SOND_ERROR,  0, "%s\nRecognize fehlgeschlagen", __func__);
 
 			return -1;
 		}
@@ -600,6 +678,24 @@ static gint sond_ocr_page(SondFilePartPDF* sfp_pdf, fz_context* ctx,
 	if (rc)
 		ERROR_Z
 
+	TessPageIterator* iter = TessBaseAPIAnalyseLayout(handle);
+	TessOrientation orientation;
+	TessWritingDirection writing_direction;
+	TessTextlineOrder textline_order;
+	float deskew_angle;
+
+	TessPageIteratorOrientation(iter, &orientation, &writing_direction,
+								&textline_order, &deskew_angle);
+	TessPageIteratorDelete(iter);
+
+	if (orientation != ORIENTATION_PAGE_UP) {
+		gint rc = 0;
+
+		rc = rotate_page(ctx, page->obj, orientation * 90, error);
+		if (rc)
+			ERROR_Z
+	}
+
 	return 0;
 }
 
@@ -607,20 +703,41 @@ static gint sond_ocr_pdf_doc(fz_context* ctx, pdf_document* doc,
 		SondFilePartPDF* sfp_pdf, TessBaseAPI* handle, GError** error) {
 	gint num_pages = 0;
 	gint rc = 0;
+	pdf_obj* font = NULL;
 
 	fz_try(ctx)
 		num_pages = pdf_count_pages(ctx, doc);
 	fz_catch(ctx)
-		ERROR_Z
+		ERROR_PDF
 
-	// Font sicherstellen (wie vorher)
-	pdf_obj *font_ref = ensure_ocr_font(ctx, doc);
+	fz_var(font);
+
+	fz_try(ctx) {
+	// Font neu anlegen als indirektes Objekt
+		*font = pdf_new_dict(ctx, doc, 4);
+		pdf_dict_put(ctx, font, PDF_NAME(Type), PDF_NAME(Font));
+		pdf_dict_put(ctx, font, PDF_NAME(Subtype), PDF_NAME(Type1));
+		pdf_dict_put_drop(ctx, font, PDF_NAME(BaseFont), pdf_new_name(ctx, "Helvetica"));
+		pdf_dict_put(ctx, font, PDF_NAME(Encoding), PDF_NAME(WinAnsiEncoding));
+
+		// Als indirektes Objekt hinzufügen
+		pdf_obj *font_ref = pdf_add_object(ctx, doc, font);
+	}
+	fz_always(ctx)
+		pdf_drop_obj(ctx, font);
+	fz_catch(ctx)
+		ERROR_PDF
 
 	for (gint i = 0; i < num_pages; i++) {
 		gint rc = 0;
 		pdf_page* page = NULL;
 
-		page = pdf_load_page(ctx, doc, i);
+		fz_try(ctx)
+			page = pdf_load_page(ctx, doc, i);
+		fz_catch(ctx) {
+			write_log(sfp_pdf, i, fz_caught_message(ctx));
+			continue;
+		}
 
 		rc = sond_ocr_page(sfp_pdf, ctx, page, font_ref, handle, error);
 		pdf_drop_page(ctx, page);
@@ -657,6 +774,7 @@ static gint init_tesseract(TessBaseAPI **handle, GError** error) {
 
 		return -1;
 	}
+    TessBaseAPISetPageSegMode(*handle, PSM_AUTO_OSD);
 
 	return 0;
 }
