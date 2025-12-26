@@ -23,6 +23,7 @@
 #include <glib/gstdio.h>
 
 #include "../../misc.h"
+#include "../../sond_ocr.h"
 #include "../../sond_fileparts.h"
 #include "../../sond_treeview.h"
 #include "../../sond_treeviewfm.h"
@@ -345,11 +346,20 @@ static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 			continue;
 		}
 
+		gint rc = sond_ocr_pdf(sfp_pdf, &error);
+		if (rc) {
+			info_window_set_message(info_window, error->message);
+			g_error_free(error);
+
+			continue;
+		}
+
+/*
 		zpdfd = zond_pdf_document_open(sfp_pdf, 0, -1, &error);
 		if (!zpdfd) {
 			info_window_set_message(info_window, "OCR nicht möglich - "
 					"Fehler bei Aufruf document_new_displayed_document:\n");
-					info_window_set_message(info_window, error->message);
+			info_window_set_message(info_window, error->message);
 			g_error_free(error);
 
 			continue;
@@ -388,6 +398,7 @@ static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 		}
 
 		zond_pdf_document_close(zpdfd);
+*/
 	}
 
 	info_window_close(info_window);

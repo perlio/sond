@@ -63,6 +63,8 @@ pdf_annot* pdf_annot_lookup_obj(fz_context*, pdf_page*, pdf_obj*);
 
 pdf_annot* pdf_annot_lookup_index(fz_context*, pdf_page*, gint);
 
+gint pdf_page_get_rotate(fz_context*, pdf_obj*, GError**);
+
 gint pdf_page_rotate(fz_context*, pdf_obj*, gint, GError**);
 
 gint pdf_get_f_0_0_font(fz_context*, pdf_document*, GError**);

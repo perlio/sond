@@ -661,22 +661,29 @@ pdf_annot* pdf_annot_lookup_index(fz_context* ctx, pdf_page* pdf_page, gint inde
 	return pdf_annot;
 }
 
+gint pdf_page_get_rotate(fz_context *ctx, pdf_obj *page_obj, GError** error) {
+	pdf_obj *rotate_obj = NULL;
+	gint rotate = 0;
+
+	fz_try(ctx) //existierenden rotate-Wert ermitteln
+		rotate_obj = pdf_dict_get_inheritable(ctx, page_obj, PDF_NAME(Rotate));
+	fz_catch(ctx)
+		ERROR_PDF
+
+	if (rotate_obj) //sonst halt 0
+		rotate = pdf_to_int(ctx, rotate_obj);
+
+	return rotate;
+}
+
 gint pdf_page_rotate(fz_context *ctx, pdf_obj *page_obj, gint winkel,
 		GError** error) {
 	pdf_obj *rotate_obj = NULL;
 	gint rotate = 0;
 
-	fz_try(ctx) //erstmal existierenden rotate-Wert ermitteln
-		rotate_obj = pdf_dict_get_inheritable(ctx, page_obj, PDF_NAME(Rotate));
-	fz_catch(ctx) {
-		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
-				fz_caught(ctx), "%s\n%s", __func__, fz_caught_message(ctx));
-
-		return -1;
-	}
-
-	if (rotate_obj) //sonst halt 0
-		rotate = pdf_to_int(ctx, rotate_obj); //Anfangswert
+	rotate = pdf_page_get_rotate(ctx, page_obj, error);
+	if (rotate == -1)
+		ERROR_Z
 
 	rotate = rotate + winkel;
 	if (rotate < 0)
