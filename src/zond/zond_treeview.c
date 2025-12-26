@@ -408,8 +408,51 @@ static void zond_treeview_init(ZondTreeview *ztv) {
 	return;
 }
 
-gboolean zond_treeview_get_anchor(Projekt *zond, gboolean child,
-		GtkTreeIter *iter_cursor, GtkTreeIter *iter_anchor, gint *anchor_id) {
+static gint zond_treeview_check_anchor_id(Projekt *zond,
+		GtkTreeIter *iter_anchor, gint *anchor_id, gboolean child,
+		GError **error) {
+	gint rc = 0;
+	gint type = 0;
+	gint baum_inhalt_file = 0;
+	gint file_part_angebunden = 0;
+
+	if (*anchor_id == 0) {
+		g_warning("%s: anchor_id == 0", __func__);
+
+		return 0;
+	}
+
+	rc = zond_dbase_get_type_and_link(zond->dbase_zond->zond_dbase_work,
+			*anchor_id, &type, NULL, error);
+	if (rc)
+		ERROR_Z
+
+	if (type == ZOND_DBASE_TYPE_FILE_PART) {
+		gint rc = 0;
+
+		rc = zond_dbase_find_baum_inhalt_file(
+				zond->dbase_zond->zond_dbase_work, *anchor_id, &baum_inhalt_file,
+				&file_part_angebunden, NULL, error);
+		if (rc)
+			ERROR_Z
+
+		if (baum_inhalt_file) { //anchor ist angebunden
+			if (*anchor_id != file_part_angebunden || child) {//nicht unmittelbar, sondern Vorfahren
+				*anchor_id = 0;
+
+				return 1; //child egal
+			}
+			else
+				*anchor_id = baum_inhalt_file;
+		}
+	}
+
+	return 0;
+}
+
+gint zond_treeview_get_anchor(Projekt *zond, gboolean* child,
+		GtkTreeIter *iter_cursor, GtkTreeIter *iter_anchor,
+		gint *anchor_id, gboolean* in_link, GError **error) {
 	GtkTreeIter iter_cursor_intern = { 0 };
 	GtkTreeIter iter_anchor_intern = { 0 };
 	gint head_nr = 0;
@@ -438,78 +481,56 @@ gboolean zond_treeview_get_anchor(Projekt *zond, gboolean child,
 		if (anchor_id)
 			*anchor_id = zond_tree_store_get_root(store);
 
-		return FALSE; //heißt: eigentlich kein cursor - fake-iter mit root gebildet
+		if (child)
+			*child = TRUE;
+
+		return 0;
 	}
 
-	if (child)
-		zond_tree_store_get_iter_target(&iter_cursor_intern,
-				&iter_anchor_intern);
-	else {
-		if ((head_nr = zond_tree_store_get_link_head_nr(&iter_cursor_intern))
-				<= 0)
+	if (*child) {
+		if (zond_tree_store_is_link(&iter_cursor_intern)) {
 			zond_tree_store_get_iter_target(&iter_cursor_intern,
 					&iter_anchor_intern);
-		else
-			iter_anchor_intern = iter_cursor_intern; //wenn iter_cursor head-link, dann ist link und nicht target anchor
+			if (in_link)
+				*in_link = TRUE;
+		} else
+			iter_anchor_intern = iter_cursor_intern;
+	}
+	else {
+		if (zond_tree_store_is_link(&iter_cursor_intern) && // ist link
+				((head_nr =
+						zond_tree_store_get_link_head_nr(&iter_cursor_intern)) <= 0)) { //und kein head-link
+			zond_tree_store_get_iter_target(&iter_cursor_intern,
+					&iter_anchor_intern);
+			if (in_link)
+				*in_link = TRUE;
+		}
+		else //wenn iter_cursor_intern kein link oder head-link
+			iter_anchor_intern = iter_cursor_intern; //weil kein child: anchor = head
 	}
 
 	if (iter_cursor)
 		*iter_cursor = iter_cursor_intern;
 
+	if (iter_anchor)
+		*iter_anchor = iter_anchor_intern;
+
 	if (anchor_id) {
 		if (head_nr <= 0) {
-			gint anchor_id_tree = 0;
+			gint rc = 0;
 
 			gtk_tree_model_get(
 					GTK_TREE_MODEL(
 							zond_tree_store_get_tree_store(
 									&iter_anchor_intern)), &iter_anchor_intern,
-					2, &anchor_id_tree, -1);
+					2, anchor_id, -1);
 
-			*anchor_id = anchor_id_tree;
+			rc = zond_treeview_check_anchor_id(zond, &iter_anchor_intern, anchor_id,
+					*child, error);
+			if (rc == -1)
+				ERROR_Z
 		} else
 			*anchor_id = head_nr;
-	}
-
-	if (iter_anchor)
-		*iter_anchor = iter_anchor_intern;
-
-	return TRUE;
-}
-
-static gint zond_treeview_check_anchor_id(Projekt *zond,
-		GtkTreeIter *iter_anchor, gint *anchor_id, gboolean child,
-		GError **error) {
-	gint rc = 0;
-	gint type = 0;
-	gint baum_inhalt_file = 0;
-	gint file_part_angebunden = 0;
-
-	if (*anchor_id == 0) {
-		g_warning("%s: anchor_id == 0", __func__);
-
-		return 0;
-	}
-
-	rc = zond_dbase_get_type_and_link(zond->dbase_zond->zond_dbase_work,
-			*anchor_id, &type, NULL, error);
-	if (rc)
-		ERROR_Z
-
-	if (type == ZOND_DBASE_TYPE_BAUM_STRUKT)
-		return 0; //ok
-
-	rc = zond_dbase_find_baum_inhalt_file(
-			zond->dbase_zond->zond_dbase_work, *anchor_id, &baum_inhalt_file,
-			&file_part_angebunden, NULL, error);
-	if (rc)
-		ERROR_Z
-
-	if (baum_inhalt_file) { //anchor ist angebunden
-		if (*anchor_id != file_part_angebunden) //nicht unmittelbar, sondern Vorfahren
-			return 1; //child egal
-		else if (child) //wenn unmittelbar, dann nur wenn als Kind
-			return 1;
 	}
 
 	return 0;
@@ -522,28 +543,23 @@ static gint zond_treeview_insert_node(Projekt *zond, gboolean child,
 	GtkTreeIter iter_cursor = { 0 };
 	GtkTreeIter iter_anchor = { 0 };
 	GtkTreeIter iter_new = { 0 };
-	gboolean success = FALSE;
 	ZondTreeStore *tree_store = NULL;
+	gboolean in_link = FALSE;
+	gint rc = 0;
 
 	g_return_val_if_fail(
 			zond->baum_active == BAUM_INHALT
 					|| zond->baum_active == BAUM_AUSWERTUNG, -1);
 
-	if (!(success = zond_treeview_get_anchor(zond, child, &iter_cursor,
-			&iter_anchor, &anchor_id)))
-		child = TRUE;
+	rc = zond_treeview_get_anchor(zond, &child, &iter_cursor,
+			&iter_anchor, &anchor_id, &in_link, error);
+	if (rc)
+		ERROR_Z
 
-	if (zond_tree_store_get_root(zond_tree_store_get_tree_store(&iter_anchor))
-			== BAUM_INHALT && anchor_id > 2) { //Bei anchor == root keine Prüfung erf.
-		gint rc = 0;
-
-		rc = zond_treeview_check_anchor_id(zond, &iter_anchor, &anchor_id,
-				child, error);
-		if (rc == -1)
-			ERROR_Z
-		else if (rc == 1)
-			return 1;
-	}
+	if (!anchor_id)
+		return 1; //Punkt darf nicht als Unterpunkt von Datei eingefügt werden
+	else if (in_link)
+		return 2; //Punkt darf nicht als Unterpunkt von Link eingefügt werden
 
 	//Knoten in Datenbank einfügen
 	node_id_new = zond_dbase_insert_node(zond->dbase_zond->zond_dbase_work,
@@ -556,14 +572,14 @@ static gint zond_treeview_insert_node(Projekt *zond, gboolean child,
 	//success = sond_treeview_get_cursor( zond->treeview[baum], &iter ); - falsch!!!
 
 	tree_store = zond_tree_store_get_tree_store(&iter_anchor);
-	zond_tree_store_insert(tree_store, (success) ? &iter_anchor : NULL, child,
+	zond_tree_store_insert(tree_store, (anchor_id > 2) ? &iter_anchor : NULL, child,
 			&iter_new);
 
 	//Standardinhalt setzen
 	zond_tree_store_set(&iter_new, zond->icon[ICON_NORMAL].icon_name,
 			"Neuer Punkt", node_id_new);
 
-	if (child && success)
+	if (child && anchor_id > 2)
 		sond_treeview_expand_row(zond->treeview[zond->baum_active],
 				&iter_cursor);
 	sond_treeview_set_cursor(zond->treeview[zond->baum_active], &iter_new);
@@ -587,9 +603,13 @@ static void zond_treeview_punkt_einfuegen_activate(GtkMenuItem *item,
 		display_message(zond->app_window, "Punkt einfügen fehlgeschlagen\n\n",
 				error->message, NULL);
 		g_error_free(error);
-	} else if (rc == 1)
+	}
+	else if (rc == 1)
 		display_message(zond->app_window, "Punkt darf nicht "
 				"als Unterpunkt von Datei eingefügt weden", NULL);
+	else if (rc == 2)
+		display_message(zond->app_window, "Punkt darf nicht "
+				"als Unterpunkt von Link eingefügt weden", NULL);
 
 	return;
 }
@@ -1001,9 +1021,8 @@ static gint zond_treeview_anbinden_rekursiv(ZondTreeview *ztv,
 		}
 
 		tree_store = ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(ztv) ));
-		zond_tree_store_insert(tree_store,
-				(anchor_iter->user_data == zond_tree_store_get_root_node(tree_store)) ?
-						NULL : anchor_iter, child, &iter_new);
+		zond_tree_store_insert(tree_store, (anchor_id > 2) ? anchor_iter : NULL,
+				child, &iter_new);
 		*anchor_iter = iter_new;
 		*dir_inserted = TRUE;
 
@@ -1485,8 +1504,9 @@ static gint zond_treeview_paste_clipboard(Projekt *zond, gboolean child,
 	GtkTreeIter iter_cursor = { 0, };
 	GtkTreeIter iter_anchor = { 0 };
 	gint anchor_id = 0;
-	gboolean success = FALSE;
+	gboolean in_link = FALSE;
 	gint root = 0;
+	gint rc = 0;
 
 	if (zond->baum_active == KEIN_BAUM || zond->baum_active == BAUM_FS)
 		return 0;
@@ -1511,45 +1531,28 @@ static gint zond_treeview_paste_clipboard(Projekt *zond, gboolean child,
 		}
 	}
 
-	success = zond_treeview_get_anchor(zond, child, &iter_cursor, &iter_anchor,
-			&anchor_id);
-	if (!success)
-		child = TRUE;
-	//in link soll nix eingefügt werden - Konsequenzen kann man nicht überblicken
-	else if (!(iter_cursor.stamp == iter_anchor.stamp
-			&& iter_cursor.user_data == iter_anchor.user_data)) {
-		if (error) *error = g_error_new(ZOND_ERROR, 0,
-				"%s\nUnzulässiges Ziel: Link", __func__);
-		return -1;
-	}
+	rc = zond_treeview_get_anchor(zond, &child, &iter_cursor, &iter_anchor,
+			&anchor_id, &in_link, error);
+	if (rc)
+		ERROR_Z
 
-	if ((root = zond_tree_store_get_root(
-			zond_tree_store_get_tree_store(&iter_anchor))) == BAUM_INHALT) {
+	if (!anchor_id)
+		return 1;
+	else if (in_link)
+		return 2;
 
-		if (anchor_id != root) {
-			gint rc = 0;
+	if (baum_selection == BAUM_FS) {
+		InfoWindow *info_window = NULL;
 
-			rc = zond_treeview_check_anchor_id(zond, &iter_anchor, &anchor_id,
-					child, error);
-			if (rc == -1)
-				ERROR_Z
-			else if (rc == 1)
-				return 1; //unzulässiges Ziel
-		}
+		info_window = info_window_open(zond->app_window,
+				"Dateien anbinden");
 
-		if (baum_selection == BAUM_FS) {
-			InfoWindow *info_window = NULL;
+		zond_treeview_clipboard_anbinden(zond, anchor_id,
+				&iter_anchor, child, info_window);
 
-			info_window = info_window_open(zond->app_window,
-					"Dateien anbinden");
+		info_window_close(info_window);
 
-			zond_treeview_clipboard_anbinden(zond, anchor_id, &iter_anchor,
-					child, info_window);
-
-			info_window_close(info_window);
-
-			return 0;
-		}
+		return 0;
 	}
 
 	if (clipboard->ausschneiden && !link) {

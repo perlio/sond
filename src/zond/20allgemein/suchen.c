@@ -77,8 +77,10 @@ static void cb_suchen_nach_auswertung(GtkMenuItem *item, gpointer user_data) {
 	GList *selected = NULL;
 	GList *list = NULL;
 	gint anchor_id = 0;
-	GtkTreeIter iter = { 0, };
-	GtkTreeIter iter_new = { 0, };
+	GtkTreeIter iter_anchor = { 0, };
+	gboolean in_link = FALSE;
+	gint rc = 0;
+	GError *error = NULL;
 
 	Projekt *zond = (Projekt*) user_data;
 
@@ -104,15 +106,32 @@ static void cb_suchen_nach_auswertung(GtkMenuItem *item, gpointer user_data) {
 		return;
 	}
 
-	if (!zond_treeview_get_anchor(zond, child, &iter, NULL, &anchor_id))
+	rc = zond_treeview_get_anchor(zond, &child, NULL, &iter_anchor, &anchor_id, &in_link, &error);
+	if (rc) {
+		display_message(zond->app_window,
+				"Fehler beim Abfragen des Ankerpunkts in BAUM_AUSWERTUNG -\n\n"
+						"Bei Aufruf zond_treeview_get_anchor:\n",
+				error->message, NULL);
+		g_error_free(error);
+
 		return;
+	}
+
+	if (in_link) {
+		display_message(zond->app_window,
+				"Einfügen in Link nicht zulässig", NULL);
+
+		return;
+	}
+
 
 	list = selected;
 	do {
 		gint rc = 0;
 		GError *error = NULL;
+		GtkTreeIter iter_new = { 0, };
 
-		rc = suchen_kopieren_listenpunkt(zond, list, (anchor_id ? &iter : NULL),
+		rc = suchen_kopieren_listenpunkt(zond, list, ((anchor_id > 2) ? &iter_anchor : NULL),
 				&anchor_id, &child, &iter_new, &error);
 		if (rc) {
 			display_message(zond->app_window,
@@ -124,7 +143,7 @@ static void cb_suchen_nach_auswertung(GtkMenuItem *item, gpointer user_data) {
 			return;
 		}
 
-		iter = iter_new;
+		iter_anchor = iter_new;
 	} while ((list = list->next));
 
 	g_list_free(selected);

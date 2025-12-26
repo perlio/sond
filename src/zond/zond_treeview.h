@@ -23,8 +23,8 @@ struct _ZondTreeviewClass {
 
 void zond_treeview_cursor_changed(ZondTreeview*, gpointer);
 
-gboolean zond_treeview_get_anchor(Projekt*, gboolean, GtkTreeIter*,
-		GtkTreeIter*, gint*);
+gint zond_treeview_get_anchor(Projekt*, gboolean*, GtkTreeIter*,
+		GtkTreeIter*, gint*, gboolean*, GError**);
 
 gint zond_treeview_walk_tree(ZondTreeview*, gboolean, gint, GtkTreeIter*,
 		gboolean, GtkTreeIter*, gint, gint*,
