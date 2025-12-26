@@ -1,4 +1,4 @@
-#include <mupdf/fitz.h>
+ #include <mupdf/fitz.h>
 #include <mupdf/pdf.h>
 #include <gtk/gtk.h>
 #include <sqlite3.h>

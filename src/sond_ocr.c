@@ -269,41 +269,46 @@ gint rotate_page(fz_context *ctx, pdf_obj *page_obj, gint winkel,
 }
 
 // Hilfsfunktion: UTF-8 → WinAnsi mit Escaping
-static void append_winansi_text(fz_context *ctx, fz_buffer *buf, const char *utf8_text) {
-    fz_append_byte(ctx, buf, '(');
+static gint append_winansi_text(fz_context *ctx, fz_buffer *buf,
+		const char *utf8_text, GError **error) {
+	fz_try(ctx) {
+		fz_append_byte(ctx, buf, '(');
 
-    for (const unsigned char *p = (unsigned char*)utf8_text; *p; p++) {
-        if (*p < 128) {
-            // ASCII - escapen wenn nötig
-            if (*p == '(' || *p == ')' || *p == '\\')
-                fz_append_byte(ctx, buf, '\\');
-            fz_append_byte(ctx, buf, *p);
-        } else if (*p == 0xC3 && *(p+1)) {
-            // UTF-8 deutsche Umlaute (ä, ö, ü, ß, Ä, Ö, Ü)
-            p++;
-            unsigned char c = *p + 0x40;  // Konvertierung UTF-8 → WinAnsi
-            fz_append_printf(ctx, buf, "\\%03o", c);  // Oktal-Escape
-        } else if (*p == 0xC2 && *(p+1)) {
-            // Weitere Latin-1 Zeichen (z.B. ©, ®, °, etc.)
-            p++;
-            fz_append_printf(ctx, buf, "\\%03o", *p);
-        } else {
-        	gboolean multi = FALSE;
-            // Nicht darstellbar → Leerzeichen
-            fz_append_byte(ctx, buf, ' ');
-            // Überspringe Rest des Multi-Byte-Zeichens
-            while (*p && (*p & 0xC0) == 0x80) {
-            	p++;
-            	multi = TRUE;
-            }
-            if (multi)
-            	p--;
-        }
-    }
+		for (const unsigned char *p = (unsigned char*)utf8_text; *p; p++) {
+			if (*p < 128) {
+				// ASCII - escapen wenn nötig
+				if (*p == '(' || *p == ')' || *p == '\\')
+					fz_append_byte(ctx, buf, '\\');
+				fz_append_byte(ctx, buf, *p);
+			} else if (*p == 0xC3 && *(p+1)) {
+				// UTF-8 deutsche Umlaute (ä, ö, ü, ß, Ä, Ö, Ü)
+				p++;
+				unsigned char c = *p + 0x40;  // Konvertierung UTF-8 → WinAnsi
+				fz_append_printf(ctx, buf, "\\%03o", c);  // Oktal-Escape
+			} else if (*p == 0xC2 && *(p+1)) {
+				// Weitere Latin-1 Zeichen (z.B. ©, ®, °, etc.)
+				p++;
+				fz_append_printf(ctx, buf, "\\%03o", *p);
+			} else {
+				gboolean multi = FALSE;
+				// Nicht darstellbar → Leerzeichen
+				fz_append_byte(ctx, buf, ' ');
+				// Überspringe Rest des Multi-Byte-Zeichens
+				while (*p && (*p & 0xC0) == 0x80) {
+					p++;
+					multi = TRUE;
+				}
+				if (multi)
+					p--;
+			}
+		}
 
-    fz_append_byte(ctx, buf, ')');
+		fz_append_byte(ctx, buf, ')');
+	}
+	fz_catch(ctx)
+		ERROR_PDF
 
-    return;
+    return 0;
 }
 
 // Transformations-Kontext für OCR-Koordinaten
@@ -316,25 +321,35 @@ typedef struct {
 } ocr_transform;
 
 // Transformation berechnen
-static ocr_transform calculate_ocr_transform(fz_context *ctx,
+static gint calculate_ocr_transform(fz_context *ctx,
                                                pdf_page *page,
-											   float scale) {
-    ocr_transform t;
+											   float scale,
+											   ocr_transform *t,
+											   GError **error) {
+	fz_rect mediabox = { 0 };
 
     // MediaBox der Seite (tatsächliche Seitengröße in PDF-Punkten)
-    fz_rect mediabox = pdf_bound_page(ctx, page, FZ_MEDIA_BOX);
-    t.page_width = mediabox.x1 - mediabox.x0;
-    t.page_height = mediabox.y1 - mediabox.y0;
+	fz_try(ctx)
+    	mediabox = pdf_bound_page(ctx, page, FZ_MEDIA_BOX);
+	fz_catch(ctx)
+		ERROR_PDF
+
+    t->page_width = mediabox.x1 - mediabox.x0;
+    t->page_height = mediabox.y1 - mediabox.y0;
 
     // Rotation holen
-    t.rotation = pdf_to_int(ctx, pdf_dict_get_inheritable(ctx, page->obj, PDF_NAME(Rotate)));
-    t.rotation = t.rotation % 360;
-    if (t.rotation < 0) t.rotation += 360;
+    fz_try(ctx)
+    	t->rotation = pdf_to_int(ctx, pdf_dict_get_inheritable(ctx, page->obj, PDF_NAME(Rotate)));
+    fz_catch(ctx)
+    	ERROR_PDF
 
-    t.scale_x = scale;
-    t.scale_y = scale;
+    t->rotation = t->rotation % 360;
+    if (t->rotation < 0) t->rotation += 360;
 
-    return t;
+    t->scale_x = scale;
+    t->scale_y = scale;
+
+    return 0;
 }
 
 // Koordinaten transformieren (Bild → PDF mit Rotation)
@@ -377,71 +392,110 @@ static void transform_coordinates(const ocr_transform *t,
 // Verbesserte Content-Stream-Funktion mit Transformation
 fz_buffer* tesseract_to_content_stream(fz_context *ctx,
                                         TessBaseAPI *api,
-                                        const ocr_transform *transform) {
-    fz_buffer *content = fz_new_buffer(ctx, 4096);
+                                        const ocr_transform *transform,
+										GError **error) {
+    fz_buffer *content = NULL;
 
-    fz_try(ctx) {
-        TessResultIterator *iter = TessBaseAPIGetIterator(api);
-        if (!iter) {
-            fz_throw(ctx, FZ_ERROR_GENERIC, "Kein Iterator verfügbar");
-        }
+	TessResultIterator *iter = TessBaseAPIGetIterator(api);
+	if (!iter) {
+		g_set_error(error, SOND_ERROR, 0,
+				"Tesseract: Kein ResultIterator verfügbar");
 
-        TessPageIteratorLevel level = RIL_WORD;
+		return NULL;
+	}
 
-        fz_append_string(ctx, content, "q\nBT\n");
+	TessPageIteratorLevel level = RIL_WORD;
 
-        float last_font_size = -1;
+    fz_try(ctx)
+        content = fz_new_buffer(ctx, 4096);
+    fz_catch(ctx)
+		ERROR_PDF_VAL(NULL);
 
-        do {
-            char *word = TessResultIteratorGetUTF8Text(iter, level);
-            if (!word || !*word) {
-                if (word) TessDeleteText(word);
-                continue;
-            }
+    fz_try(ctx)
+        fz_append_string(ctx, content, "\nq\nBT\n");
+    fz_catch(ctx) {
+    	fz_drop_buffer(ctx, content);
 
-            // Bounding Box in Bild-Koordinaten
-            int x1, y1, x2, y2;
-            if (!TessPageIteratorBoundingBox((TessPageIterator*)iter, level, &x1, &y1, &x2, &y2)) {
-                TessDeleteText(word);
-                continue;
-            }
+    	ERROR_PDF_VAL(NULL);
+    }
 
-            // Schriftgröße aus Höhe (vor Transformation!)
-            float word_height = (y2 - y1) * transform->scale_y;
-            float font_size = word_height * 0.85f;
-            if (font_size < 1.0f) font_size = 1.0f;
+	float last_font_size = -1;
 
-            if (fabsf(font_size - last_font_size) > 0.5f) {
-                fz_append_printf(ctx, content, "/FSond %.2f Tf\n", font_size);
-                last_font_size = font_size;
-            }
+	do {
+		gint rc = 0;
 
-            // Koordinaten transformieren (Bild → PDF mit Rotation)
-            float pdf_x, pdf_y;
-            transform_coordinates(transform, x1, y2, &pdf_x, &pdf_y);
+		char *word = TessResultIteratorGetUTF8Text(iter, level);
+		if (!word || !*word) {
+			if (word) TessDeleteText(word);
+			continue;
+		}
 
-            // Text-Matrix setzen
-            fz_append_printf(ctx, content, "1 0 0 1 %.2f %.2f Tm\n", pdf_x, pdf_y);
+		// Bounding Box in Bild-Koordinaten
+		int x1, y1, x2, y2;
+		if (!TessPageIteratorBoundingBox((TessPageIterator*)iter, level, &x1, &y1, &x2, &y2)) {
+			TessDeleteText(word);
+			continue;
+		}
 
-            // Text ausgeben
-            append_winansi_text(ctx, content, word);
+		// Schriftgröße aus Höhe (vor Transformation!)
+		float word_height = (y2 - y1) * transform->scale_y;
+		float font_size = word_height * 0.85f;
+		if (font_size < 1.0f) font_size = 1.0f;
+
+		if (fabsf(font_size - last_font_size) > 0.5f) {
+			fz_try(ctx)
+				fz_append_printf(ctx, content, "/FSond %.2f Tf\n", font_size);
+			fz_catch(ctx) {
+				fz_drop_buffer(ctx, content);
+
+				ERROR_PDF_VAL(NULL);
+			}
+
+			last_font_size = font_size;
+		}
+
+		// Koordinaten transformieren (Bild → PDF mit Rotation)
+		float pdf_x, pdf_y;
+		transform_coordinates(transform, x1, y2, &pdf_x, &pdf_y);
+
+		// Text-Matrix setzen
+		fz_try(ctx)
+			fz_append_printf(ctx, content, "1 0 0 1 %.2f %.2f Tm\n", pdf_x, pdf_y);
+		fz_catch(ctx) {
+			fz_drop_buffer(ctx, content);
+
+			ERROR_PDF_VAL(NULL);
+		}
+
+		// Text ausgeben
+		rc = append_winansi_text(ctx, content, word, error);
+		if (rc)
+			ERROR_Z_VAL(NULL);
+
+		fz_try(ctx)
             fz_append_string(ctx, content, " Tj\n");
-
+		fz_catch(ctx) {
+			fz_drop_buffer(ctx, content);
             TessDeleteText(word);
 
-        } while (TessResultIteratorNext(iter, level));
+            ERROR_PDF_VAL(NULL);
+		}
 
+	} while (TessResultIteratorNext(iter, level));
+
+	fz_try(ctx)
         fz_append_string(ctx, content, "ET\nQ\n");
+	fz_catch(ctx) {
+		fz_drop_buffer(ctx, content);
 
-        TessResultIteratorDelete(iter);
-    }
-    fz_catch(ctx) {
-        fz_drop_buffer(ctx, content);
-        fz_rethrow(ctx);
-    }
+		ERROR_PDF_VAL(NULL);
+	}
+
+	TessResultIteratorDelete(iter);
 
     return content;
 }
+#include "zond/99conv/test.h"
 
 // Aktualisierte Hauptfunktion
 static gint add_ocr_layer_to_page(fz_context *ctx,
@@ -450,51 +504,107 @@ static gint add_ocr_layer_to_page(fz_context *ctx,
 						   float scale,
                            TessBaseAPI *api,
 						   GError** error) {
+	ocr_transform ocr_transform = { 0 };
+	pdf_obj* resources = NULL;
+	pdf_obj* fonts = NULL;
+	pdf_obj* font_name = NULL;
+	fz_buffer* buf_new = NULL;
+	pdf_obj *contents = NULL;
+	gint rc = 0;
+	fz_stream* stream = NULL;
 
 	fz_try(ctx) {
-		pdf_obj *resources = pdf_dict_get_inheritable(ctx, page->obj, PDF_NAME(Resources));
+		// Resources-Dictionary erstellen, falls nicht vorhanden
+		resources = pdf_dict_get_inheritable(ctx, page->obj, PDF_NAME(Resources));
+
 		if (!resources) {
 			resources = pdf_new_dict(ctx, page->doc, 1);
 			pdf_dict_put_drop(ctx, page->obj, PDF_NAME(Resources), resources);
 		}
+	}
+	fz_catch(ctx) //resources muß nicht gedropt werden:
+		ERROR_PDF //entweder exception bei _new_ -> nicht erzeugt
+					//oder bei _put_drop -> dann always drop
 
-		pdf_obj *fonts = pdf_dict_get(ctx, resources, PDF_NAME(Font));
+	fz_try(ctx) {
+		fonts = pdf_dict_get(ctx, resources, PDF_NAME(Font));
 		if (!fonts) {
 			fonts = pdf_new_dict(ctx, page->doc, 1);
 			pdf_dict_put_drop(ctx, resources, PDF_NAME(Font), fonts);
 		}
-
-		pdf_obj* font_name = pdf_new_name(ctx, "FSond");
-		if (!pdf_dict_get(ctx, fonts, font_name))
-			pdf_dict_put(ctx, fonts, font_name, font_ref);
-		pdf_drop_obj(ctx, font_name);
-
-		// Transformation berechnen
-		ocr_transform transform =
-				calculate_ocr_transform(ctx, page, scale);
-
-		// Content Stream mit korrekten Koordinaten erstellen
-		fz_buffer *ocr_content = tesseract_to_content_stream(ctx, api, &transform);
-
-		// An Content Stream anhängen (wie vorher)
-		pdf_obj *contents = pdf_dict_get(ctx, page->obj, PDF_NAME(Contents));
-
-		if (!contents) {
-			contents = pdf_add_stream(ctx, page->doc, ocr_content, NULL, 0);
-			pdf_dict_put_drop(ctx, page->obj, PDF_NAME(Contents), contents);
-		} else if (pdf_is_array(ctx, contents)) {
-			pdf_obj *new_stream = pdf_add_stream(ctx,page->doc, ocr_content, NULL, 0);
-			pdf_array_push_drop(ctx, contents, new_stream);
-		} else {
-			pdf_obj *arr = pdf_new_array(ctx, page->doc, 2);
-			pdf_array_push(ctx, arr, contents);
-			pdf_obj *new_stream = pdf_add_stream(ctx, page->doc, ocr_content, NULL, 0);
-			pdf_array_push_drop(ctx, arr, new_stream);
-			pdf_dict_put_drop(ctx, page->obj, PDF_NAME(Contents), arr);
-		}
-
-		fz_drop_buffer(ctx, ocr_content);
 	}
+	fz_catch(ctx)
+		ERROR_PDF
+
+	fz_try(ctx) {
+		if (!pdf_dict_get(ctx, fonts, font_name))
+			font_name = pdf_new_name(ctx, "FSond");
+	}
+	fz_catch(ctx)
+		ERROR_PDF
+
+	fz_try(ctx)
+		pdf_dict_put(ctx, fonts, font_name, font_ref);
+	fz_always(ctx)
+		pdf_drop_obj(ctx, font_name);
+	fz_catch(ctx)
+		ERROR_PDF
+
+	// Transformation berechnen
+	rc = calculate_ocr_transform(ctx, page, scale, &ocr_transform, error);
+	if (rc)
+		ERROR_Z
+
+	// Content Stream mit korrekten Koordinaten erstellen
+	fz_buffer *ocr_content = tesseract_to_content_stream(ctx, api, &ocr_transform, error);
+	if (!ocr_content)
+		ERROR_Z
+
+	//stream holen und in buffer
+	fz_try(ctx) {
+		contents = pdf_dict_get(ctx, page->obj, PDF_NAME(Contents));
+		stream = pdf_open_contents_stream(ctx,
+				page->doc, contents);
+		buf_new = fz_read_all(ctx, stream, 1024);
+	}
+	fz_always( ctx )
+		fz_drop_stream(ctx, stream);
+	fz_catch (ctx) {
+		fz_drop_buffer(ctx, ocr_content);
+		ERROR_PDF
+	}
+pdf_print_buffer(ctx, buf_new);
+pdf_print_buffer(ctx, ocr_content);
+
+	// An Content Stream anhängen
+	fz_try(ctx)
+		fz_append_buffer(ctx, buf_new, ocr_content);
+	fz_catch(ctx) {
+		fz_drop_buffer(ctx, ocr_content);
+
+		ERROR_PDF
+	}
+
+	/* If contents is not a stream it's an array of streams or missing. */
+	if (!pdf_is_stream(ctx, contents)) {
+		/* Create a new stream object to replace the array of streams or missing object. */
+		fz_try(ctx) {
+			contents = pdf_add_object_drop(ctx, page->doc,
+					pdf_new_dict(ctx, page->doc, 1));
+			pdf_dict_put_drop(ctx, page->obj, PDF_NAME(Contents),
+					contents);
+		}
+		fz_catch(ctx) {
+			fz_drop_buffer(ctx, buf_new);
+
+			ERROR_PDF
+		}
+	}
+
+	fz_try( ctx )
+		pdf_update_stream(ctx, page->doc, contents, buf_new, 0);
+	fz_always(ctx)
+		fz_drop_buffer(ctx, buf_new);
 	fz_catch(ctx)
 		ERROR_PDF
 
@@ -549,7 +659,7 @@ sond_ocr_render_pixmap(fz_context *ctx, pdf_page* page,
 
 	rotate = pdf_page_get_rotate(ctx, page->obj, error);
 	if (rotate == -1)
-		ERROR_PDF_VAL(NULL);
+		ERROR_PDF_VAL(NULL)
 
 	rect = pdf_bound_page(ctx, page, FZ_CROP_BOX);
 	float height = rect.y1 - rect.y0;
@@ -725,7 +835,7 @@ static gint sond_ocr_pdf_doc(fz_context* ctx, pdf_document* doc,
 	fz_catch(ctx)
 		ERROR_PDF
 
-	for (gint i = 1; i < 2; i++) {//num_pages; i++) {
+	for (gint i = 3; i < 4; i++) {//num_pages; i++) {
 		gint rc = 0;
 		pdf_page* page = NULL;
 
