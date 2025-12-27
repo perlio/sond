@@ -17,6 +17,7 @@
  */
 
 //#include <stdio.h>
+#include "locale.h"
 #include <unistd.h>
 #include <gtk/gtk.h>
 #include <glib/gstdio.h>
@@ -336,6 +337,8 @@ static void startup_app(GtkApplication *app, gpointer data) {
 	Projekt *zond = (Projekt*) data;
 
 	init(app, zond);
+
+	setlocale(LC_NUMERIC, "C");
 
 	g_message("zond gestartet");
 
