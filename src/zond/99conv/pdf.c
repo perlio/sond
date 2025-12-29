@@ -694,7 +694,7 @@ gint pdf_page_rotate(fz_context *ctx, pdf_obj *page_obj, gint winkel,
 		rotate = 0;
 
 	//prüfen, ob page-Knoten einen /Rotate-Eintrag hat, nicht nur geerbt
-	if (!rotate_obj || pdf_dict_get(ctx, rotate_obj, PDF_NAME(Parent)) != page_obj) {
+	if (!(rotate_obj = pdf_dict_get(ctx, page_obj, PDF_NAME(Rotate)))) {
 		pdf_obj* rotate_page = NULL;
 
 		//dann erzeugen und einfügen
@@ -709,7 +709,7 @@ gint pdf_page_rotate(fz_context *ctx, pdf_obj *page_obj, gint winkel,
 	else
 		pdf_set_int(ctx, rotate_obj, (int64_t) rotate);
 
-	return rotate;
+	return 0;
 }
 
 gint pdf_get_f_0_0_font(fz_context* ctx, pdf_document* doc, GError** error) {

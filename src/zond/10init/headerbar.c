@@ -299,11 +299,30 @@ static void cb_item_textsuche(GtkMenuItem *item, gpointer data) {
 	return;
 }
 
+static void log_ocr(gpointer info_window, gchar const* format, ...) {
+	va_list args;
+	gchar *message = NULL;
+
+	va_start(args, format);
+	message = g_strdup_vprintf(format, args);
+	va_end(args);
+
+	info_window_set_message((InfoWindow*) info_window, message);
+
+	g_free(message);
+
+	return;
+}
+
 static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 	gint rc = 0;
 	gchar* errmsg = NULL;
 	InfoWindow *info_window = NULL;
 	gchar *message = NULL;
+	gchar *datadir = NULL;
+	TessBaseAPI *ocr_api = NULL;
+	TessBaseAPI *osd_api = NULL;
+	GError* error = NULL;
 
 	Projekt *zond = (Projekt*) data;
 
@@ -329,9 +348,12 @@ static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 	//TessInit
 	info_window = info_window_open(zond->app_window, "OCR");
 
+	datadir = g_build_filename(zond->base_dir, "share/tessdata", NULL);
+	rc = sond_ocr_init_tesseract(&ocr_api, &osd_api, datadir, &error);
+	g_free(datadir);
+
 	for (gint i = 0; i < arr_sfp->len; i++) {
 		SondFilePartPDF* sfp_pdf = NULL;
-		ZondPdfDocument* zpdfd = NULL;
 		GError* error = NULL;
 
 		sfp_pdf = g_ptr_array_index(arr_sfp, i);
@@ -346,59 +368,16 @@ static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 			continue;
 		}
 
-		gint rc = sond_ocr_pdf(sfp_pdf, &error);
-		if (rc) {
-			info_window_set_message(info_window, error->message);
-			g_error_free(error);
-
-			continue;
-		}
-
-/*
-		zpdfd = zond_pdf_document_open(sfp_pdf, 0, -1, &error);
-		if (!zpdfd) {
-			info_window_set_message(info_window, "OCR nicht möglich - "
-					"Fehler bei Aufruf document_new_displayed_document:\n");
-			info_window_set_message(info_window, error->message);
-			g_error_free(error);
-
-			continue;
-		}
-
-		GPtrArray *arr_pdf_document_pages = zond_pdf_document_get_arr_pages(zpdfd);
-		GPtrArray *arr_document_pages_ocr = g_ptr_array_sized_new(
-				arr_pdf_document_pages->len);
-		for (gint u = 0; u < arr_pdf_document_pages->len; u++)
-			g_ptr_array_add(arr_document_pages_ocr,
-					g_ptr_array_index(arr_pdf_document_pages, u));
-
-		rc = pdf_ocr_pages(zond, info_window, arr_document_pages_ocr, &errmsg);
-		g_ptr_array_unref(arr_document_pages_ocr);
-		if (rc == -1) {
-			message = g_strdup_printf("Fehler bei Aufruf pdf_ocr_pages:\n%s",
-					errmsg);
-			g_free(errmsg);
-			info_window_set_message(info_window, message);
-			g_free(message);
-			zond_pdf_document_close(zpdfd);
-
-			continue;
-		}
-
-		rc = zond_pdf_document_save(zpdfd, &error);
+		rc = sond_ocr_pdf(sfp_pdf, NULL, NULL, log_ocr, (void*) info_window, &error);
 		if (rc) {
 			message = g_strdup_printf(
-					"Fehler bei Aufruf zond_pdf_document_save:\n%s", error->message);
+					"Fehler bei Aufruf sond_ocr_pdf:\n%s", error->message);
 			g_error_free(error);
 			info_window_set_message(info_window, message);
 			g_free(message);
-			zond_pdf_document_close(zpdfd);
 
 			continue;
 		}
-
-		zond_pdf_document_close(zpdfd);
-*/
 	}
 
 	info_window_close(info_window);

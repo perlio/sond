@@ -447,8 +447,12 @@ static gint pdf_ocr_tess_page(InfoWindow *info_window, TessBaseAPI *handle,
 	rc = GPOINTER_TO_INT(g_thread_join(thread_recog));
 	TessMonitorDelete(monitor);
 
-	if (rc && !(info_window->cancel))
-		ERROR_S
+	if (rc && !(info_window->cancel)) {
+		if (errmsg) *errmsg = g_strdup(
+				"Tesseract: Fehler bei Aufruf von Recognize");
+
+		return -1;
+	}
 
 	g_message("Mean Confidence: %u", TessBaseAPIMeanTextConf(handle));
 

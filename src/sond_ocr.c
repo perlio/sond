@@ -222,52 +222,6 @@ new_text_analyzer_processor(fz_context *ctx, pdf_processor* chain, gint flags, G
 	return (pdf_processor*) proc;
 }
 
-static void write_log(SondFilePartPDF* sfp_pdf, gint num, gchar const* errmsg) {
-	g_message("%s  %u  %s", sond_file_part_get_path(SOND_FILE_PART(sfp_pdf)), num, errmsg);
-
-	return;
-}
-
-gint rotate_page(fz_context *ctx, pdf_obj *page_obj, gint winkel,
-		GError** error) {
-	pdf_obj *rotate_obj = NULL;
-	gint rotate = 0;
-
-	fz_try(ctx) //erstmal existierenden rotate-Wert ermitteln
-		rotate_obj = pdf_dict_get_inheritable(ctx, page_obj, PDF_NAME(Rotate));
-	fz_catch(ctx)
-		ERROR_PDF
-
-	if (rotate_obj) //sonst halt 0
-		rotate = pdf_to_int(ctx, rotate_obj); //Anfangswert
-
-	rotate = rotate + winkel;
-	if (rotate < 0)
-		rotate += 360;
-	else if (rotate > 360)
-		rotate -= 360;
-	else if (rotate == 360)
-		rotate = 0;
-
-	//prüfen, ob page-Knoten einen /Rotate-Eintrag hat, nicht nur geerbt
-	if (!rotate_obj || pdf_dict_get(ctx, rotate_obj, PDF_NAME(Parent)) != page_obj) {
-		pdf_obj* rotate_page = NULL;
-
-		//dann erzeugen und einfügen
-		rotate_page = pdf_new_int(ctx, (int64_t) rotate);
-		fz_try(ctx)
-			pdf_dict_put(ctx, page_obj, PDF_NAME(Rotate), rotate_page);
-		fz_always(ctx)
-			pdf_drop_obj(ctx, rotate_obj);
-		fz_catch(ctx)
-			ERROR_PDF
-	}
-	else
-		pdf_set_int(ctx, rotate_obj, (int64_t) rotate);
-
-	return 0;
-}
-
 // Hilfsfunktion: UTF-8 → WinAnsi mit Escaping
 static gint append_winansi_text(fz_context *ctx, fz_buffer *buf,
 		const char *utf8_text, GError **error) {
@@ -418,18 +372,10 @@ static gboolean is_garbage_word(const char *word) {
 
 // Verbesserte Content-Stream-Funktion mit Transformation
 fz_buffer* tesseract_to_content_stream(fz_context *ctx,
-                                        TessBaseAPI *api,
+                                        TessResultIterator *iter,
                                         const ocr_transform *transform,
 										GError **error) {
     fz_buffer *content = NULL;
-
-	TessResultIterator *iter = TessBaseAPIGetIterator(api);
-	if (!iter) {
-		g_set_error(error, SOND_ERROR, 0,
-				"Tesseract: Kein ResultIterator verfügbar");
-
-		return NULL;
-	}
 
 	TessPageIteratorLevel level = RIL_WORD;
 
@@ -479,15 +425,13 @@ fz_buffer* tesseract_to_content_stream(fz_context *ctx,
 				fz_append_printf(ctx, content, "/FSond %.2f Tf\n", font_size);
 			fz_catch(ctx) {
 				fz_drop_buffer(ctx, content);
+				TessDeleteText(word);
 
 				ERROR_PDF_VAL(NULL);
 			}
 
 			last_font_size = font_size;
 		}
-if (font_size < 2.0f || font_size > 7.0f)
-		g_message("'%s': BBox w=%d h=%d, font_size=%.2f\n",
-				word ? word : "", x2 - x1, y2 - y1, font_size);
 
 		// Koordinaten transformieren (Bild → PDF mit Rotation)
 		float pdf_x, pdf_y;
@@ -498,6 +442,7 @@ if (font_size < 2.0f || font_size > 7.0f)
 
 		// Text ausgeben
 		rc = append_winansi_text(ctx, content, word, error);
+		TessDeleteText(word);
 		if (rc)
 			ERROR_Z_VAL(NULL);
 
@@ -505,7 +450,6 @@ if (font_size < 2.0f || font_size > 7.0f)
             fz_append_printf(ctx, content, " Tj\n");
 		fz_catch(ctx) {
 			fz_drop_buffer(ctx, content);
-            TessDeleteText(word);
 
             ERROR_PDF_VAL(NULL);
 		}
@@ -519,11 +463,8 @@ if (font_size < 2.0f || font_size > 7.0f)
 		ERROR_PDF_VAL(NULL);
 	}
 
-	TessResultIteratorDelete(iter);
-
     return content;
 }
-#include "zond/99conv/test.h"
 
 // Aktualisierte Hauptfunktion
 static gint calculate_ocr_transform(fz_context *ctx,
@@ -569,9 +510,8 @@ static gint add_ocr_layer_to_page(fz_context *ctx,
                            pdf_page *page,
 						   pdf_obj* font_ref,
 						   float scale,
-                           TessBaseAPI *api,
-						   TessOrientation orientation,
-						   float deskew_angle,
+                           TessResultIterator* iter,
+						   gint* angle_correction,
 						   GError** error) {
 	ocr_transform ocr_transform = { 0 };
 	pdf_obj* resources = NULL;
@@ -624,7 +564,8 @@ static gint add_ocr_layer_to_page(fz_context *ctx,
 		ERROR_Z
 
 	// Content Stream mit korrekten Koordinaten erstellen
-	fz_buffer *ocr_content = tesseract_to_content_stream(ctx, api, &ocr_transform, error);
+	fz_buffer *ocr_content = tesseract_to_content_stream(ctx, iter,
+			&ocr_transform, error);
 	if (!ocr_content)
 		ERROR_Z
 
@@ -792,22 +733,24 @@ static gint page_has_hidden_text(fz_context* ctx, pdf_page* page,
 	return 0;
 }
 
-static gint sond_ocr_page(SondFilePartPDF* sfp_pdf, fz_context* ctx,
-		pdf_page* page, pdf_obj* font_ref, TessBaseAPI* handle, GError** error) {
-	float scale[] = {4.3, 6.4, 8.6 };
+gint sond_ocr_page(fz_context* ctx, pdf_page* page, pdf_obj* font_ref,
+		TessBaseAPI* handle, TessBaseAPI* osd_api,
+		gint (*recog_func)(TessBaseAPI*, gpointer), gpointer recog_data,
+		void (*log_func)(void*, gchar const*, ...), gpointer log_data, GError** error) {
+	float scale[] = {4.3, 6.4, 8.6};
 	gint durchgang = 0;
+	gint max_durchgang = 3;
 	gint rc = 0;
 	gboolean hidden = FALSE;
-	TessResultIterator* iter = NULL;
-	TessOrientation orientation = ORIENTATION_PAGE_UP;
-	float deskew_angle;
+	gint angle_correction = 0;
 
 	rc = page_has_hidden_text(ctx, page, &hidden, error);
 	if (rc)
 		ERROR_Z
 
 	if (hidden) {
-		write_log(sfp_pdf, page->super.number, "Seite enthält bereits hidden text");
+		log_func(log_data, "Seite %u: enthält versteckten Text - OCR übersprungen",
+				page->super.number);
 
 		return 0;
 	}
@@ -815,16 +758,49 @@ static gint sond_ocr_page(SondFilePartPDF* sfp_pdf, fz_context* ctx,
 	do {
 		gint rc = 0;
 		fz_pixmap* pixmap = NULL;
+		gint conf = 0;
+		int orient_deg;
+		float orient_conf;
 
 		pixmap = sond_ocr_render_pixmap(ctx, page, scale[durchgang], error);
 		if (!pixmap)
 			ERROR_Z
 
+		if (durchgang == 0 && osd_api) {
+			// OSD - Orientierung erkennen (schnell!)
+			TessBaseAPISetImage(osd_api, pixmap->samples, pixmap->w, pixmap->h,
+					pixmap->n, pixmap->stride);
+
+			if (TessBaseAPIDetectOrientationScript(osd_api, &orient_deg,
+					&orient_conf, NULL, NULL)) {
+				if (orient_deg && orient_conf > 1.7f) {
+					gint rc = 0;
+
+					rc = pdf_page_rotate(ctx, page->obj, 360 - orient_deg, error);
+					fz_drop_pixmap(ctx, pixmap);
+					if (rc)
+						ERROR_Z
+
+					pixmap = sond_ocr_render_pixmap(ctx, page, scale[durchgang], error);
+					if (!pixmap)
+						ERROR_Z
+				}
+				else if (orient_deg)
+					log_func(log_data,
+							"Tesseract OSD: conf < 1.7 - keine Rotation angewendet");
+			}
+		}
+
+		//jetzt richtige OCR
 		TessBaseAPISetImage(handle, pixmap->samples, pixmap->w, pixmap->h,
 				pixmap->n, pixmap->stride);
-		TessBaseAPISetSourceResolution(handle, (gint) (1. / scale[durchgang] * 72.0 / 70.0));
+		TessBaseAPISetSourceResolution(handle, (gint) (scale[durchgang] * 72.0));
 
-		rc = TessBaseAPIRecognize(handle, NULL);
+		if (recog_func) {
+			rc = recog_func(handle, recog_data);
+		} else {
+			rc = TessBaseAPIRecognize(handle, NULL);
+		}
 		fz_drop_pixmap(ctx, pixmap);
 		if (rc) {
 			g_set_error(error, SOND_ERROR,  0, "%s\nRecognize fehlgeschlagen", __func__);
@@ -832,43 +808,46 @@ static gint sond_ocr_page(SondFilePartPDF* sfp_pdf, fz_context* ctx,
 			return -1;
 		}
 
-		if (TessBaseAPIMeanTextConf(handle) > 80 || durchgang == 2 || TRUE)
+		conf = TessBaseAPIMeanTextConf(handle);
+		if (conf > 80 || durchgang == max_durchgang - 1)
 			break;
 
 		//wenn nicht:
 		durchgang++;
+		log_func(log_data,
+				"Seite %u: OCR-Konfidenz %d%% zu niedrig, nächster Durchgang",
+				page->super.number, conf);
 	} while(1);
 
-	TessPageIterator* iter_page = TessBaseAPIAnalyseLayout(handle);
-	if (iter_page) {
-		TessWritingDirection writing_direction;
-		TessTextlineOrder textline_order;
-		TessPageIteratorOrientation(iter_page, &orientation, &writing_direction, &textline_order, &deskew_angle);
-		TessResultIteratorDelete(iter);
+	TessResultIterator* iter = TessBaseAPIGetIterator(handle);
+	if (!iter) {
+		g_set_error(error, SOND_ERROR, 0,
+				"Tesseract: Kein ResultIterator verfügbar");
 
-		if (orientation != ORIENTATION_PAGE_UP) {
-			gint rc = 0;
-
-			rc = rotate_page(ctx, page->obj, orientation * 90, error);
-			if (rc)
-				ERROR_Z
-		}
+		return -1;
 	}
-	else
-		write_log(sfp_pdf, page->super.number, "Konnte Orientierung nicht ermitteln");
 
 	rc = add_ocr_layer_to_page(ctx, page, font_ref, scale[durchgang],
-			handle, orientation, deskew, error);
+			iter, &angle_correction, error);
 	if (rc)
 		ERROR_Z
+
+	if (angle_correction) {
+		gint rc = 0;
+
+		rc = pdf_page_rotate(ctx, page->obj, angle_correction, error);
+		if (rc)
+			ERROR_Z
+	}
 
 	return 0;
 }
 
 static gint sond_ocr_pdf_doc(fz_context* ctx, pdf_document* doc,
-		SondFilePartPDF* sfp_pdf, TessBaseAPI* handle, GError** error) {
+		SondFilePartPDF* sfp_pdf, TessBaseAPI* handle, TessBaseAPI* osd_api,
+		gint (*recog_func)(TessBaseAPI*, gpointer), gpointer recog_data,
+		void (*log_func)(void*, gchar const*, ...), gpointer log_data, GError** error) {
 	gint num_pages = 0;
-	gint rc = 0;
 	pdf_obj* font = NULL;
 	pdf_obj* font_ref = NULL;
 
@@ -895,63 +874,88 @@ static gint sond_ocr_pdf_doc(fz_context* ctx, pdf_document* doc,
 	fz_catch(ctx)
 		ERROR_PDF
 
-	for (gint i = 0; i < 1; i++) {//num_pages; i++) {
+	for (gint i = 0; i < num_pages; i++) {
 		gint rc = 0;
 		pdf_page* page = NULL;
 
 		fz_try(ctx)
 			page = pdf_load_page(ctx, doc, i);
 		fz_catch(ctx) {
-			write_log(sfp_pdf, i, fz_caught_message(ctx));
+			log_func(log_data, "Seite %u: pdf_load_page: %s", i, fz_caught_message(ctx));
 			continue;
 		}
 
-		rc = sond_ocr_page(sfp_pdf, ctx, page, font_ref, handle, error);
+		rc = sond_ocr_page(ctx, page, font_ref, handle, osd_api,
+				recog_func, recog_data, log_func, log_data, error);
 		pdf_drop_page(ctx, page);
 		if (rc) { //Fehler auf Seitenebene loggen
-			write_log(sfp_pdf, i, (*error)->message);
+			log_func(log_data, "Seite %u: sond_ocr_page:", i, (*error)->message);
 			g_clear_error(error);
 		}
 	}
 
-	rc = sond_file_part_pdf_save(ctx, doc, sfp_pdf, error);
-	if (rc)
-		ERROR_Z
-
 	return 0;
 }
 
-
-static gint init_tesseract(TessBaseAPI **handle, GError** error) {
+gint sond_ocr_init_tesseract(TessBaseAPI **handle, TessBaseAPI** osd_api,
+		gchar const* datadir, GError** error) {
 	gint rc = 0;
 
 	//TessBaseAPI
-	*handle = TessBaseAPICreate();
-	if (!(*handle)) {
-		g_set_error(error, SOND_ERROR, 0, "%s\nTessBaseAPICreate fehlgeschlagen", __func__);
+	if (handle) {
+		*handle = TessBaseAPICreate();
+		if (!(*handle)) {
+			g_set_error(error, SOND_ERROR, 0, "%s\nTessBaseAPICreate fehlgeschlagen", __func__);
 
-		return -1;
+			return -1;
+		}
+
+		rc = TessBaseAPIInit3(*handle, datadir, "deu");
+		if (rc) {
+			TessBaseAPIEnd(*handle);
+			TessBaseAPIDelete(*handle);
+			g_set_error(error, SOND_ERROR, 0, "%s\nTessBaseAPIInit3 fehlgeschlagen", __func__);
+
+			return -1;
+		}
+		TessBaseAPISetPageSegMode(*handle, PSM_AUTO);
 	}
 
-	rc = TessBaseAPIInit3(*handle, "C:\\msys64/ucrt64/share/tessdata", "deu");
-	if (rc) {
-		TessBaseAPIEnd(*handle);
-		TessBaseAPIDelete(*handle);
-		g_set_error(error, SOND_ERROR, 0, "%s\nTessBaseAPIInit3 fehlgeschlagen", __func__);
+	if (osd_api) {
+		*osd_api = TessBaseAPICreate();
+		if (!(*osd_api)) {
+			TessBaseAPIEnd(*handle);
+			TessBaseAPIDelete(*handle);
+			g_set_error(error, SOND_ERROR, 0, datadir, __func__);
 
-		return -1;
+			return -1;
+		}
+		rc = TessBaseAPIInit3(*osd_api, datadir, "osd");
+		if (rc) {
+			TessBaseAPIEnd(*handle);
+			TessBaseAPIDelete(*handle);
+			TessBaseAPIEnd(*osd_api);
+			TessBaseAPIDelete(*osd_api);
+			g_set_error(error, SOND_ERROR, 0, "%s\nTessBaseAPIInit3 OSD fehlgeschlagen", __func__);
+			return -1;
+		}
+
+		TessBaseAPISetPageSegMode(*osd_api, PSM_OSD_ONLY);
 	}
-    TessBaseAPISetPageSegMode(*handle, PSM_AUTO);
 
-	return 0;
+    return 0;
 }
 
-gint sond_ocr_pdf(SondFilePartPDF* sfp_pdf, GError** error) {
+gint sond_ocr_pdf(SondFilePartPDF* sfp_pdf, gint (*recog_func)(TessBaseAPI*, gpointer),
+		gpointer recog_data, void (*log_func)(void*, gchar const*, ...),
+		gpointer log_data, GError** error) {
 	gint rc = 0;
 	fz_context *ctx = NULL;
 	pdf_document* doc = NULL;
+	gchar const* datadir = "C:\\msys64/ucrt64/share/tessdata";
 
-	TessBaseAPI *handle = NULL;
+	TessBaseAPI *ocr_api = NULL;
+	TessBaseAPI *osd_api = NULL;
 
 	ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
 	if (!ctx) {
@@ -968,7 +972,7 @@ gint sond_ocr_pdf(SondFilePartPDF* sfp_pdf, GError** error) {
 		ERROR_Z
 	}
 
-	rc = init_tesseract(&handle, error);
+	rc = sond_ocr_init_tesseract(&ocr_api, &osd_api, datadir, error);
 	if (rc) {
 		pdf_drop_document(ctx, doc);
 		fz_drop_context(ctx);
@@ -976,12 +980,21 @@ gint sond_ocr_pdf(SondFilePartPDF* sfp_pdf, GError** error) {
 		ERROR_Z
 	}
 
-	rc = sond_ocr_pdf_doc(ctx, doc, sfp_pdf, handle, error);
+	rc = sond_ocr_pdf_doc(ctx, doc, sfp_pdf, ocr_api, osd_api, recog_func, recog_data,
+			log_func, log_data, error);
+	TessBaseAPIEnd(ocr_api);
+	TessBaseAPIDelete(ocr_api);
+	TessBaseAPIEnd(osd_api);
+	TessBaseAPIDelete(osd_api);
+	if (rc) {
+		pdf_drop_document(ctx, doc);
+		fz_drop_context(ctx);
+		ERROR_Z
+	}
+
+	rc = sond_file_part_pdf_save(ctx, doc, sfp_pdf, error);
 	pdf_drop_document(ctx, doc);
 	fz_drop_context(ctx);
-	TessBaseAPIEnd(handle);
-	TessBaseAPIDelete(handle);
-
 	if (rc)
 		ERROR_Z
 

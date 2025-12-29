@@ -983,7 +983,7 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 #ifndef VIEWER
 		dbase_zond_rollback(pv->zond->dbase_zond, error);
 
-		return -1;
+		ERROR_Z;
 	}
 
 	rc = dbase_zond_commit(pv->zond->dbase_zond, error);

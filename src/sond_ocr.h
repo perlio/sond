@@ -19,8 +19,16 @@
 #ifndef SRC_SOND_OCR_H_
 #define SRC_SOND_OCR_H_
 
+typedef struct TessBaseAPI TessBaseAPI;
 typedef struct _SondFilePartPDF SondFilePartPDF;
 
-gint sond_ocr_pdf(SondFilePartPDF*, GError**);
+gint sond_ocr_page(fz_context*, pdf_page*, pdf_obj*,
+		TessBaseAPI*, TessBaseAPI*, gint (*)(TessBaseAPI*, gpointer), gpointer,
+		void (*)(void*, gchar const*, ...), gpointer, GError**);
+
+gint sond_ocr_init_tesseract(TessBaseAPI**, TessBaseAPI**, gchar const*, GError**);
+
+gint sond_ocr_pdf(SondFilePartPDF*, gint (*)(TessBaseAPI*, gpointer), gpointer,
+		void (*)(void*, gchar const*, ...), gpointer, GError**);
 
 #endif /* SRC_SOND_OCR_H_ */
