@@ -467,8 +467,16 @@ void info_window_set_progress_bar(InfoWindow *info_window) {
 	return;
 }
 
-void info_window_set_message(InfoWindow *info_window, const gchar *message) {
+void info_window_set_message(InfoWindow *info_window, const gchar *format, ...) {
+	va_list args;
+	gchar *message = NULL;
+
+	va_start(args, format);
+	message = g_strdup_vprintf(format, args);
+	va_end(args);
+
 	info_window->last_inserted_widget = gtk_label_new(message);
+	g_free(message);
 	gtk_widget_set_halign(info_window->last_inserted_widget, GTK_ALIGN_START);
 
 	info_window_show_widget(info_window);
@@ -759,5 +767,95 @@ const gchar* mime_to_extension_with_params(const char* mime_type) {
     }
 
     return mime_to_extension_ci(mime_type);
+}
+
+#include <gtk/gtk.h>
+#include "mupdf/fitz.h"
+
+/*
+ * Einfach: fz_pixmap in neuem Fenster mit ScrolledWindow anzeigen
+ */
+
+// Pixmap zu GdkPixbuf konvertieren
+static GdkPixbuf* pixmap_to_pixbuf(fz_context *ctx, fz_pixmap *pix)
+{
+    GdkPixbuf *pixbuf = NULL;
+    int width, height, stride;
+    guchar *pixels;
+    gboolean has_alpha;
+
+    width = pix->w;
+    height = pix->h;
+
+    // Nur RGB (n=3) oder RGBA (n=4) unterstützt
+    if (pix->n != 3 && pix->n != 4) {
+        // Konvertiere zu RGB
+        fz_pixmap *rgb_pix = fz_convert_pixmap(ctx, pix,
+                                                fz_device_rgb(ctx), NULL,
+                                                NULL, fz_default_color_params, 1);
+        pixbuf = pixmap_to_pixbuf(ctx, rgb_pix);
+        fz_drop_pixmap(ctx, rgb_pix);
+        return pixbuf;
+    }
+
+    has_alpha = (pix->n == 4);
+
+    // GdkPixbuf erstellen
+    pixbuf = gdk_pixbuf_new(GDK_COLORSPACE_RGB, has_alpha, 8, width, height);
+    if (!pixbuf)
+        return NULL;
+
+    pixels = gdk_pixbuf_get_pixels(pixbuf);
+    stride = gdk_pixbuf_get_rowstride(pixbuf);
+
+    // Pixel kopieren
+    for (int y = 0; y < height; y++) {
+        unsigned char *src = pix->samples + y * pix->stride;
+        unsigned char *dst = pixels + y * stride;
+        memcpy(dst, src, width * pix->n);
+    }
+
+    return pixbuf;
+}
+
+// ✅ HAUPTFUNKTION: Zeigt Pixmap in neuem Fenster
+void show_pixmap(fz_context *ctx, fz_pixmap *pix)
+{
+    GtkWidget *window = NULL;
+    GtkWidget *scrolled_window = NULL;
+    GtkWidget *image = NULL;
+    GdkPixbuf *pixbuf = NULL;
+
+    // Pixbuf erstellen
+    pixbuf = pixmap_to_pixbuf(ctx, pix);
+    if (!pixbuf) {
+        g_warning("Failed to convert pixmap");
+        return;
+    }
+
+    // Fenster erstellen
+    window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(window), "PDF Page");
+    gtk_window_set_default_size(GTK_WINDOW(window), 800, 600);
+
+    // ScrolledWindow
+    scrolled_window = gtk_scrolled_window_new(NULL, NULL);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled_window),
+                                   GTK_POLICY_AUTOMATIC,
+                                   GTK_POLICY_AUTOMATIC);
+
+    // Image
+    image = gtk_image_new_from_pixbuf(pixbuf);
+    g_object_unref(pixbuf);
+
+    // Zusammenbauen
+    gtk_container_add(GTK_CONTAINER(scrolled_window), image);
+    gtk_container_add(GTK_CONTAINER(window), scrolled_window);
+
+    // Fenster beim Schließen zerstören (nicht die ganze App beenden)
+    g_signal_connect(window, "destroy", G_CALLBACK(gtk_widget_destroyed), &window);
+
+    // Anzeigen
+    gtk_widget_show_all(window);
 }
 

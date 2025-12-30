@@ -23,6 +23,7 @@
 
 #include "../../misc.h"
 #include "../../sond_fileparts.h"
+#include "../../sond_ocr.h"
 
 #include "../zond_pdf_document.h"
 
@@ -266,10 +267,12 @@ seiten_abfrage_seiten(PdfViewer *pv, const gchar *title, gint *winkel,
  */
 void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 	gint rc = 0;
-	gchar *errmsg = NULL;
+	GError* error = NULL;
 	gchar *title = NULL;
 	GPtrArray *arr_document_page = NULL;
 	InfoWindow *info_window = NULL;
+	gchar* datadir = NULL;
+	TessBaseAPI *handle = NULL;
 
 	PdfViewer *pv = (PdfViewer*) data;
 
@@ -283,14 +286,25 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 
 	info_window = info_window_open(pv->vf, "OCR");
 
-	rc = pdf_ocr_pages(pv->zond, info_window, arr_document_page, &errmsg);
+	datadir = g_build_filename(pv->zond->base_dir, "share/tessdata", NULL);
+	rc = sond_ocr_init_tesseract(&handle, NULL, datadir, &error);
+	g_free(datadir);
+	if (rc) {
+		display_message(pv->vf, "Tesseract konnte nicht initialisiert werden:\n",
+				error->message, NULL);
+		g_error_free(error);
+		g_ptr_array_unref(arr_document_page);
+
+		return;
+	}
+
+//	rc = pdf_ocr_pages(pv->zond, info_window, arr_document_page, &error);
 	info_window_close(info_window);
 
 	if (rc == -1) {
 		display_message(pv->vf, "Fehler - OCR\n\nBei Aufruf pdf_ocr_pages:\n",
-				errmsg,
-				NULL);
-		g_free(errmsg);
+				error->message, NULL);
+		g_error_free(error);
 		g_ptr_array_unref(arr_document_page);
 
 		return;

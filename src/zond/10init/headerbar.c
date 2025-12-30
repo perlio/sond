@@ -21,6 +21,7 @@
 #include <mupdf/pdf.h>
 #include <sqlite3.h>
 #include <glib/gstdio.h>
+#include <tesseract/capi.h>
 
 #include "../../misc.h"
 #include "../../sond_ocr.h"
@@ -299,21 +300,6 @@ static void cb_item_textsuche(GtkMenuItem *item, gpointer data) {
 	return;
 }
 
-static void log_ocr(gpointer info_window, gchar const* format, ...) {
-	va_list args;
-	gchar *message = NULL;
-
-	va_start(args, format);
-	message = g_strdup_vprintf(format, args);
-	va_end(args);
-
-	info_window_set_message((InfoWindow*) info_window, message);
-
-	g_free(message);
-
-	return;
-}
-
 static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 	gint rc = 0;
 	gchar* errmsg = NULL;
@@ -323,6 +309,8 @@ static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 	TessBaseAPI *ocr_api = NULL;
 	TessBaseAPI *osd_api = NULL;
 	GError* error = NULL;
+	SondFilePartPDF* sfp_pdf_before = NULL;
+	pdf_document* doc = NULL;
 
 	Projekt *zond = (Projekt*) data;
 
@@ -357,32 +345,51 @@ static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 		GError* error = NULL;
 
 		sfp_pdf = g_ptr_array_index(arr_sfp, i);
-
-		info_window_set_message(info_window,
-				sond_file_part_get_path(SOND_FILE_PART(sfp_pdf)));
-
-		//prüfen, ob in Viewer geöffnet
-		if (zond_pdf_document_is_open(sfp_pdf)) {
+		if (sfp_pdf != sfp_pdf_before) {
 			info_window_set_message(info_window,
-					"... in Viewer geöffnet - übersprungen");
-			continue;
+					sond_file_part_get_filepart(SOND_FILE_PART(sfp_pdf)));
+
+			//prüfen, ob in Viewer geöffnet
+			if (zond_pdf_document_is_open(sfp_pdf)) {
+				info_window_set_message(info_window,
+						"... in Viewer geöffnet - übersprungen");
+				continue;
+			}
+
+			pdf_drop_document(zond->ctx, doc);
+
+			doc = sond_file_part_pdf_open_document(zond->ctx, sfp_pdf,
+					FALSE, FALSE, FALSE, &error);
+			if (!doc) {
+				message = g_strdup_printf(
+						"Fehler bei Aufruf sond_file_part_pdf_open_document:\n%s",
+						error->message);
+				g_error_free(error);
+				info_window_set_message(info_window, message);
+				g_free(message);
+
+				continue;
+			}
 		}
 
-		rc = sond_ocr_pdf(sfp_pdf, NULL, NULL, log_ocr, (void*) info_window, &error);
+		rc = sond_ocr_pdf_doc(zond->ctx, doc, sfp_pdf, ocr_api, osd_api, NULL, NULL,
+				(void (*)(gpointer, gchar const*, ...)) info_window_set_message,
+				(void*) info_window, &error);
 		if (rc) {
-			message = g_strdup_printf(
-					"Fehler bei Aufruf sond_ocr_pdf:\n%s", error->message);
+			info_window_set_message(info_window, "Fehler OCR - \n\n%s", error->message);
 			g_error_free(error);
-			info_window_set_message(info_window, message);
-			g_free(message);
 
 			continue;
 		}
+
+		rc = sond_file_part_pdf_save(zond->ctx, doc, sfp_pdf, &error);
 	}
 
 	info_window_close(info_window);
 
 	g_ptr_array_unref(arr_sfp);
+	TessBaseAPIEnd(ocr_api);
+	TessBaseAPIDelete(osd_api);
 
 	return;
 }

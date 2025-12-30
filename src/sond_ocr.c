@@ -183,10 +183,13 @@ static void drop_text_analyzer_processor(fz_context* ctx, pdf_processor* proc) {
 }
 
 static void reset_text_analyzer_processor(fz_context* ctx, pdf_processor* proc) {
+	gint zero = 0;
+
 	((pdf_text_analyzer_processor*) proc)->has_hidden_text = FALSE;
 	((pdf_text_analyzer_processor*) proc)->has_visible_text = FALSE;
 	g_array_remove_range(((pdf_text_analyzer_processor*) proc)->arr_Tr, 0,
 			((pdf_text_analyzer_processor*) proc)->arr_Tr->len);
+	g_array_append_val(((pdf_text_analyzer_processor*) proc)->arr_Tr, zero);
 
 	if (proc && proc->chain)
 		pdf_reset_processor(ctx, proc->chain);
@@ -217,7 +220,13 @@ new_text_analyzer_processor(fz_context *ctx, pdf_processor* chain, gint flags, G
 	proc->super.op_Tj = text_analyzer_op_Tj;
 	proc->super.op_squote = text_analyzer_op_squote;
 	proc->super.op_dquote = text_analyzer_op_dquote;
+
 	proc->super.chain = chain;
+
+	if (chain) {
+		proc->super.requirements = proc->super.chain->requirements;
+		proc->super.chain->rstack = proc->super.rstack;
+	}
 
 	return (pdf_processor*) proc;
 }
@@ -415,9 +424,16 @@ fz_buffer* tesseract_to_content_stream(fz_context *ctx,
 			continue;
 		}
 
+		gint base_x1, base_y1, base_x2, base_y2;
+		if (!TessPageIteratorBaseline((TessPageIterator*)iter, RIL_WORD,
+				&base_x1, &base_y1, &base_x2, &base_y2)) {
+			TessDeleteText(word);
+			continue;
+		}
+
 		// Schriftgröße aus Höhe (vor Transformation!)
-		float word_height = (y2 - y1) / transform->scale_y;
-		float font_size = word_height * 0.85f;
+		float word_height = (base_y2 - y1) / transform->scale_y;
+		float font_size = word_height * 1.2; // * 0.85f;
 		if (font_size < 1.0f) font_size = 1.0f;
 
 		if (fabsf(font_size - last_font_size) > 0.5f) {
@@ -435,7 +451,7 @@ fz_buffer* tesseract_to_content_stream(fz_context *ctx,
 
 		// Koordinaten transformieren (Bild → PDF mit Rotation)
 		float pdf_x, pdf_y;
-		transform_coordinates(transform, x1, y2, &pdf_x, &pdf_y);
+		transform_coordinates(transform, x1, base_y2, &pdf_x, &pdf_y);
 
 		// Text-Matrix setzen
 		append_text_matrix(ctx, content, transform, pdf_x, pdf_y);
@@ -505,13 +521,13 @@ static gint calculate_ocr_transform(fz_context *ctx,
 
     return 0;
 }
+#include "zond/99conv/test.h"
 
 static gint add_ocr_layer_to_page(fz_context *ctx,
                            pdf_page *page,
 						   pdf_obj* font_ref,
 						   float scale,
                            TessResultIterator* iter,
-						   gint* angle_correction,
 						   GError** error) {
 	ocr_transform ocr_transform = { 0 };
 	pdf_obj* resources = NULL;
@@ -633,31 +649,31 @@ static gint sond_ocr_run_page(fz_context* ctx, pdf_page* page,
 			"View", NULL, NULL, NULL, NULL, NULL);
 	fz_catch(ctx)
 		ERROR_PDF
-/*
-    // text-analyzer-Processor erstellen (dieser filtert den Text)
-	fz_try(ctx) //flag == 3: aller Text weg
-		proc_text = new_text_analyzer_processor(ctx, proc_run, 3, error);
+
+		// text-analyzer-Processor erstellen (dieser filtert den Text)
+	fz_try(ctx) //flag == 1: sichtbarer Text weg
+		proc_text = new_text_analyzer_processor(ctx, proc_run, 1, error);
 	fz_catch(ctx) {
 		pdf_close_processor(ctx, proc_run);
 		pdf_drop_processor(ctx, proc_run);
 
 		ERROR_PDF
 	}
-*/
+
     // Content durch Filter-Kette schicken
 	fz_try(ctx)
-		pdf_process_contents(ctx, proc_run, page->doc,
+		pdf_process_contents(ctx, proc_text, page->doc,
 				pdf_page_resources(ctx, page), pdf_page_contents(ctx, page),
 				NULL, NULL);
 	fz_always(ctx) {
-		pdf_close_processor(ctx, proc_run);
-//		pdf_drop_processor(ctx, proc_text);
+		pdf_close_processor(ctx, proc_text);
+		pdf_drop_processor(ctx, proc_text);
 		pdf_drop_processor(ctx, proc_run);
 	}
 	fz_catch(ctx)
 		ERROR_PDF
 
-		return 0;
+	return 0;
 }
 
 static fz_pixmap*
@@ -742,7 +758,6 @@ gint sond_ocr_page(fz_context* ctx, pdf_page* page, pdf_obj* font_ref,
 	gint max_durchgang = 3;
 	gint rc = 0;
 	gboolean hidden = FALSE;
-	gint angle_correction = 0;
 
 	rc = page_has_hidden_text(ctx, page, &hidden, error);
 	if (rc)
@@ -780,6 +795,10 @@ gint sond_ocr_page(fz_context* ctx, pdf_page* page, pdf_obj* font_ref,
 					fz_drop_pixmap(ctx, pixmap);
 					if (rc)
 						ERROR_Z
+
+					log_func(log_data,
+							"Tesseract OSD: Seite %u um %d° rotiert (Konfidenz %.2f)",
+							page->super.number, (360 - orient_deg), orient_conf);
 
 					pixmap = sond_ocr_render_pixmap(ctx, page, scale[durchgang], error);
 					if (!pixmap)
@@ -828,22 +847,14 @@ gint sond_ocr_page(fz_context* ctx, pdf_page* page, pdf_obj* font_ref,
 	}
 
 	rc = add_ocr_layer_to_page(ctx, page, font_ref, scale[durchgang],
-			iter, &angle_correction, error);
+			iter, error);
 	if (rc)
 		ERROR_Z
-
-	if (angle_correction) {
-		gint rc = 0;
-
-		rc = pdf_page_rotate(ctx, page->obj, angle_correction, error);
-		if (rc)
-			ERROR_Z
-	}
 
 	return 0;
 }
 
-static gint sond_ocr_pdf_doc(fz_context* ctx, pdf_document* doc,
+gint sond_ocr_pdf_doc(fz_context* ctx, pdf_document* doc,
 		SondFilePartPDF* sfp_pdf, TessBaseAPI* handle, TessBaseAPI* osd_api,
 		gint (*recog_func)(TessBaseAPI*, gpointer), gpointer recog_data,
 		void (*log_func)(void*, gchar const*, ...), gpointer log_data, GError** error) {
@@ -874,7 +885,7 @@ static gint sond_ocr_pdf_doc(fz_context* ctx, pdf_document* doc,
 	fz_catch(ctx)
 		ERROR_PDF
 
-	for (gint i = 0; i < num_pages; i++) {
+	for (gint i = 0; i < 1; i++) {
 		gint rc = 0;
 		pdf_page* page = NULL;
 
@@ -946,13 +957,13 @@ gint sond_ocr_init_tesseract(TessBaseAPI **handle, TessBaseAPI** osd_api,
     return 0;
 }
 
-gint sond_ocr_pdf(SondFilePartPDF* sfp_pdf, gint (*recog_func)(TessBaseAPI*, gpointer),
-		gpointer recog_data, void (*log_func)(void*, gchar const*, ...),
-		gpointer log_data, GError** error) {
+gint sond_ocr_pdf(SondFilePartPDF* sfp_pdf, gchar const* datadir,
+		gint (*recog_func)(TessBaseAPI*, gpointer), gpointer recog_data,
+		void (*log_func)(void*, gchar const*, ...), gpointer log_data,
+		GError** error) {
 	gint rc = 0;
 	fz_context *ctx = NULL;
 	pdf_document* doc = NULL;
-	gchar const* datadir = "C:\\msys64/ucrt64/share/tessdata";
 
 	TessBaseAPI *ocr_api = NULL;
 	TessBaseAPI *osd_api = NULL;

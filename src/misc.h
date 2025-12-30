@@ -89,7 +89,7 @@ void info_window_set_progress_bar_fraction(InfoWindow*, gdouble);
 
 void info_window_set_progress_bar(InfoWindow*);
 
-void info_window_set_message(InfoWindow*, const gchar*);
+void info_window_set_message(InfoWindow*, const gchar*, ...);
 
 InfoWindow* info_window_open(GtkWidget*, const gchar*);
 
@@ -101,4 +101,5 @@ const gchar* mime_to_extension_ci(const char*);
 
 const gchar* mime_to_extension_with_params(const char*);
 
+void show_pixmap(fz_context*, fz_pixmap*);
 #endif // MISC_H_INCLUDED

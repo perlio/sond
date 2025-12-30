@@ -108,9 +108,9 @@ pdf_ocr_get_content_stream_as_buffer(fz_context *ctx, pdf_obj *page_ref,
 	fz_buffer *buf = NULL;
 
 	//Stream doc_text
-	obj_contents = pdf_dict_get_inheritable(ctx, page_ref, PDF_NAME(Contents));
 
 	fz_try( ctx ) {
+		obj_contents = pdf_dict_get(ctx, page_ref, PDF_NAME(Contents));
 		stream = pdf_open_contents_stream(ctx,
 				pdf_get_bound_document(ctx, page_ref), obj_contents);
 		buf = fz_read_all(ctx, stream, 1024);
@@ -949,41 +949,33 @@ static gint init_tesseract(Projekt *zond, TessBaseAPI **handle,
  *** Bei Fehler: -1; *errmsg wird gesetzt
  *** Bei Abbruch: 0 **/
 gint pdf_ocr_pages(Projekt *zond, InfoWindow *info_window,
-		GPtrArray *arr_document_pages, gchar **errmsg) {
+		GPtrArray *arr_document_pages, GError** error) {
 	gint rc = 0;
 	fz_context *ctx = NULL;
+	gchar* datadir = NULL;
 
 	TessBaseAPI *handle = NULL;
-	TessResultRenderer *renderer = NULL;
-	gchar *path_tmp = NULL;
 
-	path_tmp = g_strconcat(g_get_tmp_dir(), "\\tess_tmp", NULL);
-	if (!path_tmp)
-		ERROR_S
-
-	rc = init_tesseract(zond, &handle, &renderer, path_tmp, errmsg);
-	g_free(path_tmp);
+	datadir = g_build_filename(zond->base_dir, "share/tessdata", NULL);
+/*
+	rc = sond_ocr_init_tesseract(&handle, NULL, datadir, error);
 	if (rc)
-		ERROR_S
+		ERROR_Z
 
 	rc = pdf_ocr_create_pdf_only_text(info_window, arr_document_pages, handle,
 			renderer, errmsg);
 
-	TessResultRendererEndDocument(renderer);
-	TessDeleteResultRenderer(renderer);
 	TessBaseAPIEnd(handle);
 	TessBaseAPIDelete(handle);
 
 	if (rc)
-		ERROR_S
+		ERROR_Z
 
 	if (!arr_document_pages->len)
 		return 0;
 
 	//erzeugtes PDF mit nur Text mit muPDF öffnen
 	pdf_document *doc_text = NULL;
-
-	path_tmp = g_strconcat(g_get_tmp_dir(), "\\tess_tmp.pdf", NULL);
 
 	ctx = zond->ctx;
 
@@ -1043,7 +1035,7 @@ gint pdf_ocr_pages(Projekt *zond, InfoWindow *info_window,
 	pdf_drop_document(ctx, doc_text);
 	if (rc)
 		ERROR_S
-
+*/
 	return 0;
 }
 
