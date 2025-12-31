@@ -311,6 +311,7 @@ static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 	GError* error = NULL;
 	SondFilePartPDF* sfp_pdf_before = NULL;
 	pdf_document* doc = NULL;
+	MonitorData monitor_data = { 0 };
 
 	Projekt *zond = (Projekt*) data;
 
@@ -335,6 +336,8 @@ static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 
 	//TessInit
 	info_window = info_window_open(zond->app_window, "OCR");
+	monitor_data.progress_data = (gpointer) info_window;
+	monitor_data.cancel_this = &info_window->cancel;
 
 	datadir = g_build_filename(zond->base_dir, "share/tessdata", NULL);
 	rc = sond_ocr_init_tesseract(&ocr_api, &osd_api, datadir, &error);
@@ -372,9 +375,10 @@ static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 			}
 		}
 
-		rc = sond_ocr_pdf_doc(zond->ctx, doc, sfp_pdf, ocr_api, osd_api, NULL, NULL,
+		rc = sond_ocr_pdf_doc(zond->ctx, doc, sfp_pdf, ocr_api, osd_api,
 				(void (*)(gpointer, gchar const*, ...)) info_window_set_message,
-				(void*) info_window, &error);
+				(void*) info_window, (void (*)(gpointer, gint)) info_window_display_progress,
+				&monitor_data, &error);
 		if (rc) {
 			info_window_set_message(info_window, "Fehler OCR - \n\n%s", error->message);
 			g_error_free(error);

@@ -16,6 +16,8 @@
  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#include "sond_ocr.h"
+
 #include <mupdf/fitz.h>
 #include <mupdf/pdf.h>
 #include <gtk/gtk.h>
@@ -247,11 +249,17 @@ static gint append_winansi_text(fz_context *ctx, fz_buffer *buf,
 				// UTF-8 deutsche Umlaute (ä, ö, ü, ß, Ä, Ö, Ü)
 				p++;
 				unsigned char c = *p + 0x40;  // Konvertierung UTF-8 → WinAnsi
-				fz_append_printf(ctx, buf, "\\\\%03o", c);  // Oktal-Escape
+			    char tmp[8];
+			    sprintf(tmp, "\\%03o", c);
+			    fz_append_string(ctx, buf, tmp);
+				//fz_append_printf(ctx, buf, "\\%03o", c);  // Oktal-Escape
 			} else if (*p == 0xC2 && *(p+1)) {
 				// Weitere Latin-1 Zeichen (z.B. ©, ®, °, etc.)
 				p++;
-				fz_append_printf(ctx, buf, "\\\\%03o", *p);
+			    char tmp[8];
+			    sprintf(tmp, "\\%03o", *p);
+			    fz_append_string(ctx, buf, tmp);
+				//fz_append_printf(ctx, buf, "\\%03o", *p);
 			} else {
 				gboolean multi = FALSE;
 				// Nicht darstellbar → Leerzeichen
@@ -380,7 +388,7 @@ static gboolean is_garbage_word(const char *word) {
 }
 
 // Verbesserte Content-Stream-Funktion mit Transformation
-fz_buffer* tesseract_to_content_stream(fz_context *ctx,
+static fz_buffer* tesseract_to_content_stream(fz_context *ctx,
                                         TessResultIterator *iter,
                                         const ocr_transform *transform,
 										GError **error) {
@@ -521,7 +529,30 @@ static gint calculate_ocr_transform(fz_context *ctx,
 
     return 0;
 }
-#include "zond/99conv/test.h"
+
+gint sond_ocr_set_content_stream(fz_context *ctx,
+						   pdf_page *page,
+						   fz_buffer* content,
+						   GError** error) {
+	//altes content-stream-object überschreiben
+	fz_try(ctx) {
+		pdf_obj* contents_new = pdf_add_object_drop(ctx, page->doc,
+				pdf_new_dict(ctx, page->doc, 1));
+		pdf_dict_put_drop(ctx, page->obj, PDF_NAME(Contents),
+				contents_new);
+	}
+	fz_catch(ctx)
+		ERROR_PDF
+
+	fz_try( ctx ) {
+		pdf_obj* contents = pdf_dict_get(ctx, page->obj, PDF_NAME(Contents));
+		pdf_update_stream(ctx, page->doc, contents, content, 0);
+	}
+	fz_catch(ctx)
+		ERROR_PDF
+
+	return 0;
+}
 
 static gint add_ocr_layer_to_page(fz_context *ctx,
                            pdf_page *page,
@@ -615,6 +646,13 @@ static gint add_ocr_layer_to_page(fz_context *ctx,
 	//und der sanitize-processor beim letzten Speichern
 	//alle indirekten Objekte - sofern identisch - zusammengefaßt hat
 	//Dann würde ändern des val alle Seiten betreffen
+	rc = sond_ocr_set_content_stream(ctx, page, ocr_content, error);
+	if (rc) {
+		fz_drop_buffer(ctx, ocr_content);
+
+		ERROR_Z
+	}
+
 	fz_try(ctx) {
 		pdf_obj* contents_new = pdf_add_object_drop(ctx, page->doc,
 				pdf_new_dict(ctx, page->doc, 1));
@@ -651,7 +689,7 @@ static gint sond_ocr_run_page(fz_context* ctx, pdf_page* page,
 		ERROR_PDF
 
 		// text-analyzer-Processor erstellen (dieser filtert den Text)
-	fz_try(ctx) //flag == 1: sichtbarer Text weg
+	fz_try(ctx) //flag == 1: sichtbarer Text weg, nur Bilder ocr-en
 		proc_text = new_text_analyzer_processor(ctx, proc_run, 1, error);
 	fz_catch(ctx) {
 		pdf_close_processor(ctx, proc_run);
@@ -724,51 +762,38 @@ sond_ocr_render_pixmap(fz_context *ctx, pdf_page* page,
 	return pixmap;
 }
 
-static gint page_has_hidden_text(fz_context* ctx, pdf_page* page,
-		gboolean* hidden, GError** error) {
-	pdf_processor* proc = NULL;
+static gboolean ocr_cancel(void *cancel_this) {
+	volatile gboolean *cancelFlag = (volatile gboolean*) cancel_this;
+	return *cancelFlag;
+}
 
-	proc = new_text_analyzer_processor(ctx, NULL, 3, error);
-	if (!proc)
-		ERROR_Z
+typedef struct _Tess_Recog {
+	TessBaseAPI *handle;
+	ETEXT_DESC *monitor;
+} TessRecog;
 
-	fz_try(ctx)
-		pdf_process_contents(ctx, proc, page->doc, pdf_page_resources(ctx, page),
-				pdf_page_contents(ctx, page), NULL, NULL);
-	fz_catch(ctx) {
-		pdf_close_processor(ctx, proc);
-		pdf_drop_processor(ctx, proc);
+static gpointer ocr_tess_recog(gpointer data) {
+	gint rc = 0;
 
-		ERROR_PDF
-	}
+	TessRecog *tess_recog = (TessRecog*) data;
 
-	*hidden = ((pdf_text_analyzer_processor*) proc)->has_hidden_text;
-	pdf_close_processor(ctx, proc);
-	pdf_drop_processor(ctx, proc);
+	rc = TessBaseAPIRecognize(tess_recog->handle, tess_recog->monitor);
 
-	return 0;
+	if (rc)
+		return GINT_TO_POINTER(1);
+
+	return NULL;
 }
 
 gint sond_ocr_page(fz_context* ctx, pdf_page* page, pdf_obj* font_ref,
 		TessBaseAPI* handle, TessBaseAPI* osd_api,
-		gint (*recog_func)(TessBaseAPI*, gpointer), gpointer recog_data,
-		void (*log_func)(void*, gchar const*, ...), gpointer log_data, GError** error) {
+		void (*log_func)(void*, gchar const*, ...), gpointer log_data,
+		void (*progress_func)(gpointer, gint), MonitorData* monitor_data,
+		GError** error) {
 	float scale[] = {4.3, 6.4, 8.6};
 	gint durchgang = 0;
 	gint max_durchgang = 3;
 	gint rc = 0;
-	gboolean hidden = FALSE;
-
-	rc = page_has_hidden_text(ctx, page, &hidden, error);
-	if (rc)
-		ERROR_Z
-
-	if (hidden) {
-		log_func(log_data, "Seite %u: enthält versteckten Text - OCR übersprungen",
-				page->super.number);
-
-		return 0;
-	}
 
 	do {
 		gint rc = 0;
@@ -815,8 +840,27 @@ gint sond_ocr_page(fz_context* ctx, pdf_page* page, pdf_obj* font_ref,
 				pixmap->n, pixmap->stride);
 		TessBaseAPISetSourceResolution(handle, (gint) (scale[durchgang] * 72.0));
 
-		if (recog_func) {
-			rc = recog_func(handle, recog_data);
+		if (progress_func) {
+			ETEXT_DESC *monitor = NULL;
+			gint progress = 0;
+
+			monitor = TessMonitorCreate();
+			TessMonitorSetCancelThis(monitor, (gpointer) monitor_data->cancel_this);
+			TessMonitorSetCancelFunc(monitor, (TessCancelFunc) ocr_cancel);
+
+			progress_func(monitor_data->progress_data, -1); //Start
+			TessRecog tess_recog = { handle, monitor };
+			GThread *thread_recog = g_thread_new("recog", ocr_tess_recog,
+					&tess_recog);
+
+			while (progress < 100 && !(*(monitor_data->cancel_this))) {
+				progress = TessMonitorGetProgress(monitor);
+				progress_func(monitor_data->progress_data, progress);
+			}
+
+			rc = GPOINTER_TO_INT(g_thread_join(thread_recog));
+			progress_func(monitor_data->progress_data, 101); //Stop
+			TessMonitorDelete(monitor);
 		} else {
 			rc = TessBaseAPIRecognize(handle, NULL);
 		}
@@ -854,24 +898,49 @@ gint sond_ocr_page(fz_context* ctx, pdf_page* page, pdf_obj* font_ref,
 	return 0;
 }
 
-gint sond_ocr_pdf_doc(fz_context* ctx, pdf_document* doc,
-		SondFilePartPDF* sfp_pdf, TessBaseAPI* handle, TessBaseAPI* osd_api,
-		gint (*recog_func)(TessBaseAPI*, gpointer), gpointer recog_data,
-		void (*log_func)(void*, gchar const*, ...), gpointer log_data, GError** error) {
+gint sond_ocr_get_num_sond_font(fz_context* ctx, pdf_document* doc, GError** error) {
 	gint num_pages = 0;
-	pdf_obj* font = NULL;
-	pdf_obj* font_ref = NULL;
+	gint num = 0;
 
 	fz_try(ctx)
 		num_pages = pdf_count_pages(ctx, doc);
 	fz_catch(ctx)
 		ERROR_PDF
 
-	fz_var(font);
+	for (gint u = 0; u < num_pages; u++) {
+		pdf_obj* page_ref = NULL;
+		pdf_obj* resources = NULL;
+		pdf_obj* font_dict = NULL;
+
+		fz_try(ctx) {
+			pdf_obj* fsond = NULL;
+
+			page_ref = pdf_lookup_page_obj(ctx, doc, u);
+			resources = pdf_dict_get_inheritable(ctx, page_ref,
+					PDF_NAME(Resources));
+			font_dict = pdf_dict_get(ctx, resources, PDF_NAME(Font));
+			fsond = pdf_dict_gets(ctx, font_dict, "FSond");
+			if (fsond)
+				num = pdf_to_num(ctx, fsond);
+		}
+		fz_catch(ctx)
+			ERROR_PDF
+	}
+
+	return num;
+}
+
+pdf_obj* sond_ocr_put_sond_font(fz_context* ctx, pdf_document* doc, GError** error) {
+	pdf_obj* font = NULL;
+	pdf_obj* font_ref = NULL;
+
+	fz_try(ctx)
+		// Font neu anlegen als indirektes Objekt
+		font = pdf_new_dict(ctx, doc, 4);
+	fz_catch(ctx)
+		ERROR_PDF_VAL(NULL)
 
 	fz_try(ctx) {
-	// Font neu anlegen als indirektes Objekt
-		font = pdf_new_dict(ctx, doc, 4);
 		pdf_dict_put(ctx, font, PDF_NAME(Type), PDF_NAME(Font));
 		pdf_dict_put(ctx, font, PDF_NAME(Subtype), PDF_NAME(Type1));
 		pdf_dict_put_drop(ctx, font, PDF_NAME(BaseFont), pdf_new_name(ctx, "Helvetica"));
@@ -883,11 +952,56 @@ gint sond_ocr_pdf_doc(fz_context* ctx, pdf_document* doc,
 	fz_always(ctx)
 		pdf_drop_obj(ctx, font);
 	fz_catch(ctx)
+		ERROR_PDF_VAL(NULL)
+
+	return font_ref;
+}
+
+gint sond_ocr_page_has_hidden_text(fz_context* ctx, pdf_page* page,
+		gboolean* hidden, GError** error) {
+	pdf_processor* proc = NULL;
+
+	proc = new_text_analyzer_processor(ctx, NULL, 3, error);
+	if (!proc)
+		ERROR_Z
+
+	fz_try(ctx)
+		pdf_process_contents(ctx, proc, page->doc, pdf_page_resources(ctx, page),
+				pdf_page_contents(ctx, page), NULL, NULL);
+	fz_catch(ctx) {
+		pdf_close_processor(ctx, proc);
+		pdf_drop_processor(ctx, proc);
+
 		ERROR_PDF
+	}
+
+	*hidden = ((pdf_text_analyzer_processor*) proc)->has_hidden_text;
+	pdf_close_processor(ctx, proc);
+	pdf_drop_processor(ctx, proc);
+
+	return 0;
+}
+
+gint sond_ocr_pdf_doc(fz_context* ctx, pdf_document* doc,
+		SondFilePartPDF* sfp_pdf, TessBaseAPI* handle, TessBaseAPI* osd_api,
+		void (*log_func)(void*, gchar const*, ...), gpointer log_data,
+		void (*progress_func)(gpointer, gint), MonitorData* monitor_data, GError** error) {
+	gint num_pages = 0;
+	pdf_obj* font_ref = NULL;
+
+	fz_try(ctx)
+		num_pages = pdf_count_pages(ctx, doc);
+	fz_catch(ctx)
+		ERROR_PDF
+
+	font_ref = sond_ocr_put_sond_font(ctx, doc, error);
+	if (!font_ref)
+		ERROR_Z
 
 	for (gint i = 0; i < 1; i++) {
 		gint rc = 0;
 		pdf_page* page = NULL;
+		gboolean hidden = FALSE;
 
 		fz_try(ctx)
 			page = pdf_load_page(ctx, doc, i);
@@ -896,14 +1010,31 @@ gint sond_ocr_pdf_doc(fz_context* ctx, pdf_document* doc,
 			continue;
 		}
 
+		rc = sond_ocr_page_has_hidden_text(ctx, page, &hidden, error);
+		if (rc) {
+			pdf_drop_page(ctx, page);
+
+			ERROR_Z
+		}
+
+		if (hidden) {
+			log_func(log_data, "Seite %u: enthält versteckten Text - OCR übersprungen",
+					page->super.number);
+			pdf_drop_page(ctx, page);
+
+			return 0;
+		}
+
 		rc = sond_ocr_page(ctx, page, font_ref, handle, osd_api,
-				recog_func, recog_data, log_func, log_data, error);
+				log_func, log_data, progress_func, monitor_data, error);
 		pdf_drop_page(ctx, page);
 		if (rc) { //Fehler auf Seitenebene loggen
 			log_func(log_data, "Seite %u: sond_ocr_page:", i, (*error)->message);
 			g_clear_error(error);
 		}
 	}
+
+	pdf_drop_obj(ctx, font_ref);
 
 	return 0;
 }
@@ -955,60 +1086,5 @@ gint sond_ocr_init_tesseract(TessBaseAPI **handle, TessBaseAPI** osd_api,
 	}
 
     return 0;
-}
-
-gint sond_ocr_pdf(SondFilePartPDF* sfp_pdf, gchar const* datadir,
-		gint (*recog_func)(TessBaseAPI*, gpointer), gpointer recog_data,
-		void (*log_func)(void*, gchar const*, ...), gpointer log_data,
-		GError** error) {
-	gint rc = 0;
-	fz_context *ctx = NULL;
-	pdf_document* doc = NULL;
-
-	TessBaseAPI *ocr_api = NULL;
-	TessBaseAPI *osd_api = NULL;
-
-	ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
-	if (!ctx) {
-		g_set_error(error, SOND_ERROR, 0,
-				"%s\nfz_context konnte nicht geladen werden", __func__);
-
-		return -1;
-	}
-
-	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, FALSE, FALSE, FALSE, error);
-	if (!doc) {
-		fz_drop_context(ctx);
-
-		ERROR_Z
-	}
-
-	rc = sond_ocr_init_tesseract(&ocr_api, &osd_api, datadir, error);
-	if (rc) {
-		pdf_drop_document(ctx, doc);
-		fz_drop_context(ctx);
-
-		ERROR_Z
-	}
-
-	rc = sond_ocr_pdf_doc(ctx, doc, sfp_pdf, ocr_api, osd_api, recog_func, recog_data,
-			log_func, log_data, error);
-	TessBaseAPIEnd(ocr_api);
-	TessBaseAPIDelete(ocr_api);
-	TessBaseAPIEnd(osd_api);
-	TessBaseAPIDelete(osd_api);
-	if (rc) {
-		pdf_drop_document(ctx, doc);
-		fz_drop_context(ctx);
-		ERROR_Z
-	}
-
-	rc = sond_file_part_pdf_save(ctx, doc, sfp_pdf, error);
-	pdf_drop_document(ctx, doc);
-	fz_drop_context(ctx);
-	if (rc)
-		ERROR_Z
-
-	return 0;
 }
 

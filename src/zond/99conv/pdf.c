@@ -712,41 +712,6 @@ gint pdf_page_rotate(fz_context *ctx, pdf_obj *page_obj, gint winkel,
 	return 0;
 }
 
-gint pdf_get_f_0_0_font(fz_context* ctx, pdf_document* doc, GError** error) {
-	gint num_pages = 0;
-
-	fz_try(ctx)
-		num_pages = pdf_count_pages(ctx, doc);
-	fz_catch(ctx)
-		ERROR_PDF
-
-	for (gint u = 0; u < num_pages; u++) {
-		pdf_obj* page_ref = NULL;
-		pdf_obj* resources = NULL;
-		pdf_obj* font_dict = NULL;
-		gint num = 0;
-
-		fz_try(ctx) {
-			pdf_obj* f_0_0 = NULL;
-
-			page_ref = pdf_lookup_page_obj(ctx, doc, u);
-			resources = pdf_dict_get_inheritable(ctx, page_ref,
-					PDF_NAME(Resources));
-			font_dict = pdf_dict_get(ctx, resources, PDF_NAME(Font));
-			f_0_0 = pdf_dict_gets(ctx, font_dict, "f-0-0");
-			if (f_0_0)
-				num = pdf_to_num(ctx, f_0_0);
-		}
-		fz_catch(ctx)
-			ERROR_PDF
-
-		if (num) //f-0-0 gefunden
-			return num;
-	}
-
-	return 0;
-}
-
 static gint pdf_get_names_tree_dict(fz_context* ctx, pdf_document* doc,
 		pdf_obj* name_dict, pdf_obj** dict, GError **error)
 {

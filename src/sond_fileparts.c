@@ -1292,13 +1292,10 @@ static fz_buffer* pdf_doc_to_buf(fz_context* ctx, pdf_document* doc, GError** er
 	fz_output* out = NULL;
 	fz_buffer* buf = NULL;
 	pdf_write_options in_opts =
-//#ifdef __WIN32
 			{ 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, ~0, "", "", 0, 0, 0, 0, 0 };
-//#elif defined(__linux__)
- //           { 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, ~0, "", "" };
-//#endif // __win32
-//	if (pdf_count_pages(ctx, pdf_doc) < BIG_PDF && !pdf_doc->crypt)
-		in_opts.do_garbage = 4;
+
+	//	if (pdf_count_pages(ctx, pdf_doc) < BIG_PDF && !pdf_doc->crypt)
+	in_opts.do_garbage = 4;
 
 	fz_try(ctx) {
 		buf = fz_new_buffer(ctx, 4096);

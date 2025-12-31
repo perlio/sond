@@ -23,6 +23,7 @@
 
 #include "../../misc.h"
 #include "../../sond_fileparts.h"
+#include "../../sond_ocr.h"
 
 #include "../zond_pdf_document.h"
 #include "../pdf_ocr.h"
@@ -733,36 +734,6 @@ void viewer_schliessen(PdfViewer *pv) {
 	return;
 }
 
-//wird vielleicht für undo benötigt...
-static gint viewer_swap_content_stream(fz_context *ctx, pdf_obj *page_ref,
-		fz_buffer** buf, GError **error) {
-	fz_buffer* buf_tmp = NULL;
-	gchar* errmsg = NULL;
-	gint rc = 0;
-
-	buf_tmp = pdf_ocr_get_content_stream_as_buffer(ctx, page_ref, &errmsg);
-	if (!buf_tmp) {
-		if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\n%s", __func__, errmsg);
-		g_free(errmsg);
-
-		return -1;
-	}
-
-	rc  = pdf_ocr_update_content_stream(ctx, page_ref, *buf, &errmsg);
-	if (rc) {
-		if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\n%s", __func__, errmsg);
-		g_free(errmsg);
-		fz_drop_buffer(ctx, buf_tmp);
-
-		return -1;
-	}
-
-	fz_drop_buffer(ctx, *buf);
-	*buf = buf_tmp;
-
-	return 0;
-}
-
 static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 		fz_context* ctx, pdf_document* doc, GError** error) {
 	GArray* arr_journal = NULL;
@@ -852,73 +823,46 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 			}
 			else if (entry.type == JOURNAL_TYPE_OCR) {
 				gint rc = 0;
-				gchar* errmsg = NULL;
 
 				if (!num) {
-					num = pdf_get_f_0_0_font(ctx, doc, error);
+					num = sond_ocr_get_num_sond_font(ctx, doc, error);
 					if (num == -1) {
 						pdf_drop_page(ctx, pdf_page);
 						ERROR_Z
 					}
 					else if (!num) {
-						pdf_graft_map* graft_map = NULL;
-						pdf_obj* obj = NULL;
+						pdf_obj* font_ref = NULL;
 
-						num = zond_pdf_document_get_ocr_num(dd->zpdfd_part->zond_pdf_document);
-						if (!num) {
-							if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\n"
-									"Tesseract-Font nicht in Dokument gespeichert", __func__);
+						font_ref = sond_ocr_put_sond_font(ctx, doc, error);
+						if (!font_ref) {
 							pdf_drop_page(ctx, pdf_page);
-
-							return -1;
-						}
-
-						//in Ursprungsdokument kopieren
-						graft_map = pdf_new_graft_map(ctx, doc); //keine exception
-
-						fz_try(ctx) {
-							zond_pdf_document_mutex_lock(dd->zpdfd_part->zond_pdf_document);
-							obj = pdf_load_object(ctx,
-									zond_pdf_document_get_pdf_doc(dd->zpdfd_part->zond_pdf_document), num);
-						}
-						fz_catch(ctx) {
-							zond_pdf_document_mutex_unlock(dd->zpdfd_part->zond_pdf_document);
-							pdf_drop_page(ctx, pdf_page);
-
-							ERROR_PDF
+							ERROR_Z
 						}
 
 						fz_try(ctx)
-							pdf_graft_mapped_object(ctx, graft_map, obj);
-						fz_always(ctx) {
-							zond_pdf_document_mutex_unlock(dd->zpdfd_part->zond_pdf_document);
-							pdf_drop_obj(ctx, obj);
-							pdf_drop_graft_map(ctx, graft_map);
-						}
+							num = pdf_to_num(ctx, font_ref);
 						fz_catch(ctx) {
 							pdf_drop_page(ctx, pdf_page);
-
 							ERROR_PDF
 						}
 					}
-					rc = pdf_ocr_update_content_stream(ctx, pdf_page->obj, entry.ocr.buf_new,
-							&errmsg);
-					if (rc) {
-						if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\n%s",
-								__func__, errmsg);
-						g_free(errmsg);
-						pdf_drop_page(ctx, pdf_page);
+				}
 
-						return -1;
-					}
+				rc = sond_ocr_set_content_stream(ctx, pdf_page, entry.ocr.buf_new, error);
+				if (rc)
+				{
+					pdf_drop_page(ctx, pdf_page);
+
+					ERROR_Z
 				}
 			}
 			else if (entry.type == JOURNAL_TYPE_ANNOT_CREATED) {
-				gint rc = 0;
+				pdf_annot* pdf_ann = NULL;
 
-				pdf_annot_create(ctx, pdf_page, entry.pdf_document_page->rotate,
+				//pdf_ann borrowed pointer
+				pdf_ann = pdf_annot_create(ctx, pdf_page, entry.pdf_document_page->rotate,
 						entry.annot_changed.annot_after, error);
-				if (rc) {
+				if (!pdf_ann) {
 					pdf_drop_page(ctx, pdf_page);
 					ERROR_Z
 				}

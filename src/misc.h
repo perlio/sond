@@ -89,6 +89,8 @@ void info_window_set_progress_bar_fraction(InfoWindow*, gdouble);
 
 void info_window_set_progress_bar(InfoWindow*);
 
+void info_window_display_progress(InfoWindow*, gint);
+
 void info_window_set_message(InfoWindow*, const gchar*, ...);
 
 InfoWindow* info_window_open(GtkWidget*, const gchar*);

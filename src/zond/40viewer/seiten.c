@@ -265,6 +265,165 @@ seiten_abfrage_seiten(PdfViewer *pv, const gchar *title, gint *winkel,
 /*
  **  Seiten OCR
  */
+// Hilfsfunktion: Pixmap zu GdkPixbuf konvertieren
+static GdkPixbuf* pixmap_to_pixbuf(fz_context *ctx, fz_pixmap *pix)
+{
+    GdkPixbuf *pixbuf = NULL;
+    int width, height, stride;
+    guchar *pixels;
+    gboolean has_alpha;
+
+    if (!pix)
+        return NULL;
+
+    width = pix->w;
+    height = pix->h;
+
+    // Nur RGB (n=3) oder RGBA (n=4)
+    if (pix->n != 3 && pix->n != 4) {
+        fz_pixmap *rgb_pix = fz_convert_pixmap(ctx, pix,
+                                                fz_device_rgb(ctx), NULL,
+                                                NULL, fz_default_color_params, 1);
+        pixbuf = pixmap_to_pixbuf(ctx, rgb_pix);
+        fz_drop_pixmap(ctx, rgb_pix);
+        return pixbuf;
+    }
+
+    has_alpha = (pix->n == 4);
+
+    pixbuf = gdk_pixbuf_new(GDK_COLORSPACE_RGB, has_alpha, 8, width, height);
+    if (!pixbuf)
+        return NULL;
+
+    pixels = gdk_pixbuf_get_pixels(pixbuf);
+    stride = gdk_pixbuf_get_rowstride(pixbuf);
+
+    for (int y = 0; y < height; y++) {
+        unsigned char *src = pix->samples + y * pix->stride;
+        unsigned char *dst = pixels + y * stride;
+        memcpy(dst, src, width * pix->n);
+    }
+
+    return pixbuf;
+}
+
+// Hauptfunktion: Drei Pixmaps nebeneinander anzeigen
+static GtkWidget* show_three_pixmaps(fz_context *ctx,
+                              fz_pixmap *pix1,
+                              fz_pixmap *pix2,
+                              fz_pixmap *pix3,
+                              const char *title1,
+                              const char *title2,
+                              const char *title3)
+{
+    GtkWidget *window = NULL;
+    GtkWidget *hbox = NULL;
+    GtkWidget *scrolled1 = NULL;
+    GtkWidget *scrolled2 = NULL;
+    GtkWidget *scrolled3 = NULL;
+    GtkWidget *image1 = NULL;
+    GtkWidget *image2 = NULL;
+    GtkWidget *image3 = NULL;
+    GtkWidget *vbox1 = NULL;
+    GtkWidget *vbox2 = NULL;
+    GtkWidget *vbox3 = NULL;
+    GtkWidget *label1 = NULL;
+    GtkWidget *label2 = NULL;
+    GtkWidget *label3 = NULL;
+    GdkPixbuf *pixbuf1 = NULL;
+    GdkPixbuf *pixbuf2 = NULL;
+    GdkPixbuf *pixbuf3 = NULL;
+
+    // Fenster erstellen
+    window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(window), "Pixmap Comparison");
+    gtk_window_set_default_size(GTK_WINDOW(window), 1200, 600);
+
+    // Horizontale Box für drei Bereiche
+    hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+    gtk_container_add(GTK_CONTAINER(window), hbox);
+
+    // --- Erste Pixmap ---
+    vbox1 = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+    gtk_box_pack_start(GTK_BOX(hbox), vbox1, TRUE, TRUE, 0);
+
+    if (title1) {
+        label1 = gtk_label_new(title1);
+        gtk_box_pack_start(GTK_BOX(vbox1), label1, FALSE, FALSE, 0);
+    }
+
+    scrolled1 = gtk_scrolled_window_new(NULL, NULL);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled1),
+                                   GTK_POLICY_AUTOMATIC,
+                                   GTK_POLICY_AUTOMATIC);
+    gtk_box_pack_start(GTK_BOX(vbox1), scrolled1, TRUE, TRUE, 0);
+
+    if (pix1) {
+        pixbuf1 = pixmap_to_pixbuf(ctx, pix1);
+        if (pixbuf1) {
+            image1 = gtk_image_new_from_pixbuf(pixbuf1);
+            g_object_unref(pixbuf1);
+            gtk_container_add(GTK_CONTAINER(scrolled1), image1);
+        }
+    }
+
+    // --- Zweite Pixmap ---
+    vbox2 = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+    gtk_box_pack_start(GTK_BOX(hbox), vbox2, TRUE, TRUE, 0);
+
+    if (title2) {
+        label2 = gtk_label_new(title2);
+        gtk_box_pack_start(GTK_BOX(vbox2), label2, FALSE, FALSE, 0);
+    }
+
+    scrolled2 = gtk_scrolled_window_new(NULL, NULL);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled2),
+                                   GTK_POLICY_AUTOMATIC,
+                                   GTK_POLICY_AUTOMATIC);
+    gtk_box_pack_start(GTK_BOX(vbox2), scrolled2, TRUE, TRUE, 0);
+
+    if (pix2) {
+        pixbuf2 = pixmap_to_pixbuf(ctx, pix2);
+        if (pixbuf2) {
+            image2 = gtk_image_new_from_pixbuf(pixbuf2);
+            g_object_unref(pixbuf2);
+            gtk_container_add(GTK_CONTAINER(scrolled2), image2);
+        }
+    }
+
+    // --- Dritte Pixmap ---
+    vbox3 = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+    gtk_box_pack_start(GTK_BOX(hbox), vbox3, TRUE, TRUE, 0);
+
+    if (title3) {
+        label3 = gtk_label_new(title3);
+        gtk_box_pack_start(GTK_BOX(vbox3), label3, FALSE, FALSE, 0);
+    }
+
+    scrolled3 = gtk_scrolled_window_new(NULL, NULL);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled3),
+                                   GTK_POLICY_AUTOMATIC,
+                                   GTK_POLICY_AUTOMATIC);
+    gtk_box_pack_start(GTK_BOX(vbox3), scrolled3, TRUE, TRUE, 0);
+
+    if (pix3) {
+        pixbuf3 = pixmap_to_pixbuf(ctx, pix3);
+        if (pixbuf3) {
+            image3 = gtk_image_new_from_pixbuf(pixbuf3);
+            g_object_unref(pixbuf3);
+            gtk_container_add(GTK_CONTAINER(scrolled3), image3);
+        }
+    }
+
+    // Fenster beim Schließen zerstören
+    g_signal_connect(window, "destroy", G_CALLBACK(gtk_widget_destroyed), &window);
+
+    // Anzeigen
+    gtk_widget_show_all(window);
+
+    return window;
+}
+
 void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 	gint rc = 0;
 	GError* error = NULL;
@@ -273,6 +432,7 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 	InfoWindow *info_window = NULL;
 	gchar* datadir = NULL;
 	TessBaseAPI *handle = NULL;
+	MonitorData monitor_data = { 0 };
 
 	PdfViewer *pv = (PdfViewer*) data;
 
@@ -285,6 +445,8 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 		return;
 
 	info_window = info_window_open(pv->vf, "OCR");
+	monitor_data.progress_data = (gpointer) info_window;
+	monitor_data.cancel_this = (gpointer) &info_window->cancel;
 
 	datadir = g_build_filename(pv->zond->base_dir, "share/tessdata", NULL);
 	rc = sond_ocr_init_tesseract(&handle, NULL, datadir, &error);
@@ -298,23 +460,94 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 		return;
 	}
 
-//	rc = pdf_ocr_pages(pv->zond, info_window, arr_document_page, &error);
-	info_window_close(info_window);
-
-	if (rc == -1) {
-		display_message(pv->vf, "Fehler - OCR\n\nBei Aufruf pdf_ocr_pages:\n",
-				error->message, NULL);
-		g_error_free(error);
-		g_ptr_array_unref(arr_document_page);
-
-		return;
-	}
-
 	for (gint i = 0; i < arr_document_page->len; i++) {
+		pdf_page* page = NULL;
+		gboolean hidden = FALSE;
+		pdf_obj* font_ref = NULL;
+		gint font_num = 0;
+
 		PdfDocumentPage *pdf_document_page = g_ptr_array_index(
 				arr_document_page, i);
 
-		//fz_text_list droppen und auf NULL setzen
+		fz_context *ctx = zond_pdf_document_get_ctx(
+				pdf_document_page->document);
+
+		fz_try(ctx)
+			page = pdf_load_page(ctx, zond_pdf_document_get_pdf_doc(
+					pdf_document_page->document), pdf_document_page->page_akt);
+		fz_catch(ctx) {
+			display_message(pv->vf, "Fehler beim Laden der Seite:\n",
+					fz_caught_message(ctx), NULL);
+			g_error_free(error);
+
+			continue;
+		}
+
+		rc = sond_ocr_page_has_hidden_text(ctx, page, &hidden, &error);
+		if (rc == -1) {
+			display_message(pv->vf, "Fehler beim Prüfen auf versteckten Text:\n",
+					error->message, NULL);
+			g_error_free(error);
+			pdf_drop_page(ctx, page);
+			continue;
+		} else if (rc == 1) {
+			//Seite hat versteckten Text - überspringen
+			//ToDO: Abfragen, falls nicht "für alle Seiten" gewählt
+		}
+
+		if ((font_num = zond_pdf_document_get_ocr_num(
+				pdf_document_page->document))) {
+			fz_try(ctx)
+				font_ref = pdf_new_indirect(ctx, zond_pdf_document_get_pdf_doc(
+						pdf_document_page->document), font_num, 0);
+			fz_catch(ctx) {
+				display_message(pv->vf, "Fehler beim Prüfen auf versteckten Text:\n",
+						error->message, NULL);
+				g_error_free(error);
+				pdf_drop_page(ctx, page);
+				continue;
+			}
+		}
+		else {
+			font_ref = sond_ocr_put_sond_font(ctx,
+					zond_pdf_document_get_pdf_doc(
+							pdf_document_page->document), &error);
+			if (!font_ref) {
+				display_message(pv->vf, "Fehler beim Holen der SOND-Schriftart:\n",
+						error->message, NULL);
+				g_error_free(error);
+				pdf_drop_page(ctx, page);
+				continue;
+			}
+
+			fz_try(ctx)
+				font_num = pdf_to_num(ctx, font_ref);
+			fz_catch(ctx) {
+				display_message(pv->vf, "Fehler bei Ermittlung indirektes Objekt:\n",
+						fz_caught_message(ctx), NULL);
+				pdf_drop_obj(ctx, font_ref);
+				pdf_drop_page(ctx, page);
+				continue;
+			}
+
+			zond_pdf_document_set_ocr_num(pdf_document_page->document, font_num);
+		}
+
+		//OCR
+		rc = sond_ocr_page(ctx, page, font_ref, handle, NULL,
+				(void (*)(gpointer, gchar const*, ...)) info_window_set_message,
+				(gpointer) info_window, (void(*)(gpointer, gint)) info_window_display_progress,
+				&monitor_data, &error); //thread-safe
+		pdf_drop_obj(ctx, font_ref);
+		pdf_drop_page(ctx, page);
+		if (rc) {
+			display_message(pv->vf, "Fehler bei OCR der Seite:\n",
+					error->message, NULL);
+			g_error_free(error);
+			continue;
+		}
+
+		//fz_stext_list droppen und auf NULL setzen
 		while (pdf_document_page->thread & 1)
 			viewer_transfer_rendered(pdf_document_page->thread_pv, TRUE);
 
@@ -333,6 +566,11 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 		//Damit speichern angeht - gibt keinen Fehler zurück, wenn func == NULL
 		viewer_foreach(pv, pdf_document_page, NULL, NULL);
 	}
+
+	TessBaseAPIEnd(handle);
+	TessBaseAPIDelete(handle);
+
+	info_window_close(info_window);
 
 	//damit Text von Cursor "erkannt" wird
 	g_signal_emit_by_name(pv->v_adj, "value-changed", NULL);

@@ -467,6 +467,16 @@ void info_window_set_progress_bar(InfoWindow *info_window) {
 	return;
 }
 
+void info_window_display_progress(InfoWindow *info_window, gint progress) {
+	if (progress == -1)
+		info_window_set_progress_bar(info_window);
+	else
+		info_window_set_progress_bar_fraction(info_window,
+				((gdouble) progress) / 100.);
+
+	return;
+}
+
 void info_window_set_message(InfoWindow *info_window, const gchar *format, ...) {
 	va_list args;
 	gchar *message = NULL;
