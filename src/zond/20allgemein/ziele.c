@@ -524,8 +524,8 @@ static gint zond_anbindung_insert_pdf_abschnitt_in_dbase(Projekt *zond,
 	if (!pdf_root) {
 		gint rc = 0;
 
-		rc = zond_treeview_insert_file_part_in_db(zond, file_part, "anbindung",
-				&pdf_root, error);
+		rc = zond_treeview_insert_file_part_in_db(zond, file_part, NULL,
+				"anbindung", &pdf_root, error);
 		if (rc)
 			ERROR_Z
 	}

@@ -746,16 +746,21 @@ static gint zond_treeview_insert_file_parts(ZondTreeview *ztv, gint node_id,
 }
 
 gint zond_treeview_insert_file_part_in_db(Projekt *zond, gchar const *file_part,
-		gchar const *icon_name, gint *file_root, GError **error) {
+		gchar const* basename_item, gchar const *icon_name, gint *file_root,
+		GError **error) {
 	gint rc = 0;
 	gchar const *basename = NULL;
 	gint file_root_int = 0;
 
-	basename = g_strrstr(file_part, "/");
-	if (basename)
-		basename++; //basename ist der Teil nach dem letzten "/"
-	else
-		basename = file_part;
+	if (basename_item)
+		basename = basename_item;
+	else {
+		basename = g_strrstr(file_part, "/");
+		if (basename)
+			basename++; //basename ist der Teil nach dem letzten "/"
+		else
+			basename = file_part;
+	}
 
 	rc = zond_dbase_create_file_root(zond->dbase_zond->zond_dbase_work,
 			file_part, icon_name, basename, NULL, &file_root_int, error);
@@ -886,6 +891,7 @@ static gint zond_treeview_leaf_anbinden(ZondTreeview *ztv,
 
 		//Datei in zond_dbase einfügen
 		rc = zond_treeview_insert_file_part_in_db(ztv_priv->zond, filepart,
+				sond_tvfm_item_get_display_name(stvfm_item),
 				sond_tvfm_item_get_icon_name(stvfm_item), &ID_file_part, error);
 		if (rc)
 			ERROR_Z

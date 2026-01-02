@@ -34,7 +34,7 @@ gint zond_treeview_walk_tree(ZondTreeview*, gboolean, gint, GtkTreeIter*,
 GtkTreeIter* zond_treeview_abfragen_iter(ZondTreeview*, gint);
 
 gint zond_treeview_insert_file_part_in_db(Projekt*, gchar const*, gchar const*,
-		gint*, GError**);
+		gchar const*, gint*, GError**);
 
 gint zond_treeview_copy_node_to_baum_auswertung(ZondTreeview*, gint,
 		GtkTreeIter*, gboolean, GtkTreeIter*, gint, gint*, GError**);
