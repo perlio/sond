@@ -161,18 +161,17 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 	return 0;
 }
 
-static gint zond_treeviewfm_before_move(SondTVFMItem* stvfm_item,
-		SondTVFMItem* stvfm_item_parent, gchar const* base_new, gint index_to,
-		GError **error) {
+static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
+		SondTVFMItem* stvfm_item, SondTVFMItem* stvfm_item_parent,
+		gchar const* base_new, gint index_to, GError **error) {
 	gint rc = 0;
 	g_autofree gchar* prefix_old = NULL;
 	g_autofree gchar* prefix_new = NULL;
 	gboolean from_gmessage = FALSE;
 	gint index_from = 0;
 
-	ZondTreeviewFM* ztvfm = ZOND_TREEVIEWFM(sond_tvfm_item_get_stvfm(stvfm_item_parent));
 	ZondTreeviewFMPrivate *ztvfm_priv = zond_treeviewfm_get_instance_private(
-			ZOND_TREEVIEWFM(ztvfm));
+			ZOND_TREEVIEWFM(stvfm));
 
 	prefix_old = get_path_from_stvfm_item(stvfm_item);
 	prefix_new = get_path_from_stvfm_item(stvfm_item_parent);

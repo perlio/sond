@@ -960,8 +960,9 @@ static void remove_item_from_tree(GtkTreeIter* iter,
 
 	if (stvfm_item_priv->path_or_section)
 		is_gmessage = SOND_IS_FILE_PART_GMESSAGE(stvfm_item_priv->sond_file_part);
-	else is_gmessage = SOND_IS_FILE_PART_GMESSAGE(
-			sond_file_part_get_parent(stvfm_item_priv->sond_file_part));
+	else
+		is_gmessage = SOND_IS_FILE_PART_GMESSAGE(
+				sond_file_part_get_parent(stvfm_item_priv->sond_file_part));
 
 	if (gtk_tree_store_remove(
 			GTK_TREE_STORE(gtk_tree_view_get_model(
@@ -1947,21 +1948,18 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 										s_paste_sel->base_inserted, NULL);
 
 		if (stvfm_item_priv->sond_file_part) {
-			if (clipboard->ausschneiden)
-				sfp_new = g_object_ref(stvfm_item_priv->sond_file_part);
-			else //das alte sfp bleibt ja, dürfen wir nicht verändern
-				sfp_new = g_object_new(G_OBJECT_TYPE(stvfm_item_priv->sond_file_part), NULL);
+			sfp_new = g_object_new(G_OBJECT_TYPE(stvfm_item_priv->sond_file_part), NULL);
+
+			if (!stvfm_item_priv->path_or_section)
+				sond_file_part_set_path(sfp_new, path_new);
+
+			if (SOND_IS_FILE_PART_LEAF(sfp_new))
+				sond_file_part_leaf_set_mime_type(SOND_FILE_PART_LEAF(sfp_new),
+						sond_file_part_leaf_get_mime_type(
+								SOND_FILE_PART_LEAF(stvfm_item_priv->sond_file_part)));
+
+			sond_file_part_set_parent(sfp_new, stvfm_item_parent_priv->sond_file_part);
 		}
-
-		if (!stvfm_item_priv->path_or_section)
-			sond_file_part_set_path(sfp_new, path_new);
-
-		if (SOND_IS_FILE_PART_LEAF(sfp_new))
-			sond_file_part_leaf_set_mime_type(SOND_FILE_PART_LEAF(sfp_new),
-					sond_file_part_leaf_get_mime_type(
-							SOND_FILE_PART_LEAF(stvfm_item_priv->sond_file_part)));
-
-		sond_file_part_set_parent(sfp_new, stvfm_item_parent_priv->sond_file_part);
 
 		stvfm_item_new = sond_tvfm_item_create(
 				stvfm_item_parent_priv->stvfm,
