@@ -32,8 +32,12 @@ enum SondError
 #define message(msg) g_log("Sond", G_LOG_LEVEL_MESSAGE, \
 		"%s:%d (%s): %s", __FILE__, __LINE__, __func__, msg);
 
-#define warning(msg) g_log("Sond", G_LOG_LEVEL_WARNING, \
-		"%s:%d (%s): %s", __FILE__, __LINE__, __func__, msg);
+#define warning(format, ...) \
+    do { \
+        char *_msg = g_strdup_printf(format, ##__VA_ARGS__); \
+        g_log("Sond", G_LOG_LEVEL_WARNING, "%s:%d (%s): %s", __FILE__, __LINE__, __func__, _msg); \
+        g_free(_msg); \
+    } while(0)
 
 #define critical(msg) g_log("Sond", G_LOG_LEVEL_CRITICAL, \
 		"%s:%d (%s): %s", __FILE__, __LINE__, __func__, msg);

@@ -492,6 +492,13 @@ gint project_oeffnen(Projekt *zond, const gchar *abs_path, gboolean create,
 	rc = sond_treeviewfm_set_root(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
 			zond->project_dir, errmsg); //setzt auch PWD
 	if (rc) {
+		//treeviews leeren
+		zond_tree_store_clear(
+				ZOND_TREE_STORE(
+						gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]) )));
+		zond_tree_store_clear(
+				ZOND_TREE_STORE(
+						gtk_tree_view_get_model( GTK_TREE_VIEW(zond->treeview[BAUM_AUSWERTUNG]) )));
 		project_clear_dbase_zond(&(zond->dbase_zond));
 		g_free(zond->project_name);
 		g_free(zond->project_dir);

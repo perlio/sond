@@ -1087,15 +1087,10 @@ gint zond_dbase_update_gmessage_index(ZondDBase* zond_dbase, gchar const* prefix
 			"SUBSTR(SUBSTR(file_part, LENGTH(?1) + 1), "
 			"INSTR(SUBSTR(file_part, LENGTH(?1) + 1) || '/', '/')) "
 			"WHERE file_part LIKE ?1 || '%' "
-			"AND CASE WHEN ?2 > 0 THEN "
-					"CAST(SUBSTR(SUBSTR(file_part, LENGTH(?1) + 1), 1, "
+			"AND CAST(SUBSTR(SUBSTR(file_part, LENGTH(?1) + 1), 1, "
 					"INSTR(SUBSTR(file_part, LENGTH(?1) + 1) || '/', '/') - 1) "
-					"AS INTEGER) >= ?3 " //?3 ist Schwellenwert
-				"ELSE "
-					"CAST(SUBSTR(SUBSTR(file_part, LENGTH(?1) + 1), 1, "
-					 "INSTR(SUBSTR(file_part, LENGTH(?1) + 1) || '/', '/') - 1) "
-					"AS INTEGER) <= ?3 "
-				"END;" };
+					"AS INTEGER) >= ?3; " //?3 ist Schwellenwert
+		};
 
 	rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
 			error);
@@ -1106,7 +1101,7 @@ gint zond_dbase_update_gmessage_index(ZondDBase* zond_dbase, gchar const* prefix
 	if (rc != SQLITE_OK)
 		ERROR_Z_DBASE
 
-	rc = sqlite3_bind_int(stmt[0], 2, into ? -1 : 1);
+	rc = sqlite3_bind_int(stmt[0], 2, into ? 1 : -1);
 	if (rc != SQLITE_OK)
 		ERROR_Z_DBASE
 

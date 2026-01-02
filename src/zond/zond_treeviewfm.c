@@ -147,10 +147,11 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 		gint rc = 0;
 		gchar* prefix = NULL;
 
-		prefix = get_path_from_stvfm_item(stvfm_item);
+		prefix = g_strndup(path, strlen(path) - strlen(strrchr(path, '/') + 1));
 
 		rc = dbase_zond_update_gmessage_index(priv->zond->dbase_zond,
 				prefix, index_from, FALSE, error);
+		g_free(prefix);
 		if (rc) {
 			dbase_zond_rollback(priv->zond->dbase_zond, error);
 			ERROR_Z
@@ -206,9 +207,14 @@ static gint zond_treeviewfm_before_move(SondTVFMItem* stvfm_item,
 	//wenn aus GMessage verschoben wurde - nachfolgende indizes anpassen
 	if (from_gmessage) {
 		gint rc = 0;
+		gchar* prefix_gmessage = NULL;
+
+		prefix_gmessage = g_strndup(prefix_old, strlen(prefix_old) -
+				strlen(strrchr(prefix_old, '/') + 1));
 
 		rc = dbase_zond_update_gmessage_index(ztvfm_priv->zond->dbase_zond,
-				prefix_old, index_from, FALSE, error);
+				prefix_gmessage, index_from, FALSE, error);
+		g_free(prefix_gmessage);
 		if (rc) {
 			dbase_zond_rollback(ztvfm_priv->zond->dbase_zond, error);
 			ERROR_Z
