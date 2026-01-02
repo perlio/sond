@@ -785,6 +785,11 @@ static fz_buffer* sond_file_part_pdf_mod_emb_file(SondFilePartPDF*, fz_context*,
 static fz_buffer* sond_file_part_zip_mod_zip_file(SondFilePartZip*,
 		fz_context*, gchar const*, fz_buffer*, GError**);
 
+static fz_buffer* sond_file_part_gmessage_mod_part(SondFilePartGMessage*,
+		fz_context* ctx, gchar const*, fz_buffer*, GError**);
+
+static gint sond_file_part_replace(SondFilePart*, fz_context*, fz_buffer*, GError**);
+
 gint sond_file_part_delete(SondFilePart* sfp, GError** error) {
 	SondFilePart* sfp_parent = NULL;
 
@@ -827,8 +832,8 @@ gint sond_file_part_delete(SondFilePart* sfp, GError** error) {
 			buf_out = sond_file_part_pdf_mod_emb_file(SOND_FILE_PART_PDF(sfp_parent), ctx,
 					sond_file_part_get_path(sfp), NULL, error);
 		else if (SOND_IS_FILE_PART_GMESSAGE(sfp_parent)) {
-			if (error) *error = g_error_new(SOND_ERROR, 0, "%s\nNoch nicht implementiert",
-					__func__);
+			buf_out = sond_file_part_gmessage_mod_part(SOND_FILE_PART_GMESSAGE(sfp_parent),
+					ctx, sond_file_part_get_path(sfp), NULL, error);
 		}
 
 		if (!buf_out) {
@@ -853,7 +858,10 @@ gint sond_file_part_delete(SondFilePart* sfp, GError** error) {
 	return 0;
 }
 
-gint sond_file_part_replace(SondFilePart* sfp, fz_context* ctx,
+/**
+ *	setzt buf als neues sfp in dessen parent
+ */
+static gint sond_file_part_replace(SondFilePart* sfp, fz_context* ctx,
 		fz_buffer* buf, GError** error) {
 	SondFilePart* sfp_parent = NULL;
 
@@ -896,7 +904,10 @@ gint sond_file_part_replace(SondFilePart* sfp, fz_context* ctx,
 		else if (SOND_IS_FILE_PART_ZIP(sfp_parent)) //ist zip-Datei
 			buf_out = sond_file_part_zip_mod_zip_file(SOND_FILE_PART_ZIP(sfp_parent),
 					ctx, sond_file_part_get_path(sfp), buf, error);
-		//else if (SOND_IS_FILE_PART_GMESSAGE(sfp_parent))
+		else if (SOND_IS_FILE_PART_GMESSAGE(sfp_parent)) {
+			buf_out = sond_file_part_gmessage_mod_part(SOND_FILE_PART_GMESSAGE(sfp_parent),
+					ctx, sond_file_part_get_path(sfp), buf, error);
+		}
 
 		if (!buf_out)
 			ERROR_Z
@@ -2190,8 +2201,6 @@ static gint sond_file_part_pdf_insert_embedded_file(SondFilePartPDF* sfp_pdf,
 
 //GMessage
 typedef struct {
-	fz_context* ctx;
-	fz_buffer* buf;
 	GMimeMessage* message;
 } SondFilePartGMessagePrivate;
 
@@ -2211,7 +2220,22 @@ static void sond_file_part_gmessage_class_init(SondFilePartGMessageClass *klass)
 	return;
 }
 
-static GMimeMessage* sond_file_part_gmessage_open(SondFilePartGMessage* sfp_gmessage,
+static void sond_file_part_gmessage_close(SondFilePartGMessage* sfp_gmessage) {
+	SondFilePartGMessagePrivate* sfp_gmessage_priv =
+			sond_file_part_gmessage_get_instance_private(sfp_gmessage);
+
+	if (sfp_gmessage_priv->message == NULL) {
+		g_warning("%s\nSondFilePartGMessage war schon geschlossen", __func__);
+
+		return;
+	}
+
+	g_object_unref(sfp_gmessage_priv->message);
+
+	return;
+}
+
+static gint sond_file_part_gmessage_open(SondFilePartGMessage* sfp_gmessage,
 		GError** error) {
 	/* load a GMimeMessage from a stream */
 	GMimeMessage *message;
@@ -2220,17 +2244,26 @@ static GMimeMessage* sond_file_part_gmessage_open(SondFilePartGMessage* sfp_gmes
 	fz_buffer* buf = NULL;
 	fz_context* ctx = NULL;
 
+	SondFilePartGMessagePrivate* sfp_gmessage_priv =
+			sond_file_part_gmessage_get_instance_private(sfp_gmessage);
+
+	if (sfp_gmessage_priv->message) {
+		g_object_ref(sfp_gmessage_priv->message);
+
+		return 0;
+	}
+
 	ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
 	if (!ctx) {
 		if (error) *error = g_error_new(ZOND_ERROR, 0,
 				"%s\nfz_new_context gibt NULL zurück", __func__);
-		return NULL;
+		return -1;
 	}
 
 	buf = sond_file_part_get_buffer(SOND_FILE_PART(sfp_gmessage), ctx, error);
 	if (!buf) {
 		fz_drop_context(ctx);
-		ERROR_Z_VAL(NULL)
+		ERROR_Z
 	}
 
 	stream = g_mime_stream_mem_new_with_buffer((const gchar*) buf->data, buf->len);
@@ -2243,62 +2276,48 @@ static GMimeMessage* sond_file_part_gmessage_open(SondFilePartGMessage* sfp_gmes
 	g_object_unref (stream);
 
 	message = g_mime_parser_construct_message (parser, NULL);
+	g_object_unref (parser);
 	if (!message) {
 		if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\nParsen fehlgeschlagen", __func__);
-		fz_drop_buffer(ctx, buf);
-		fz_drop_context(ctx);
 
-		return NULL;
+		return -1;
 	}
 
-	/* unref the parser since we no longer need it */
-	g_object_unref (parser);
-
-	return message;
-}
-
-static gint sond_file_part_gmessage_test_for_multipart(SondFilePartGMessage* sfp_gmessage,
-		GError** error) {
-	GMimeMessage* message = NULL;
-	GMimeObject* root = NULL;
-
-	SondFilePartPrivate* sfp_priv =
-			sond_file_part_get_instance_private(SOND_FILE_PART(sfp_gmessage));
-
-	message = sond_file_part_gmessage_open(sfp_gmessage, error);
-	if (!message)
-		ERROR_Z
-
-	root = g_object_ref(g_mime_message_get_mime_part(message));
-	g_object_unref(message);
-	if (root) {//Auch wenn nur ein einziger part, ist es ein Kind von Message
-		sfp_priv->has_children = TRUE;
-		g_object_unref(root);
-	}
+	sfp_gmessage_priv->message = message;
+	g_object_add_weak_pointer(G_OBJECT(sfp_gmessage_priv->message),
+			(gpointer*) &sfp_gmessage_priv->message);
 
 	return 0;
 }
 
-static GMimeObject* sond_file_part_gmessage_lookup_part_by_path(
-		SondFilePartGMessage* sfp_gmessage, gchar const* path, GError** error) {
+static gint sond_file_part_gmessage_test_for_multipart(SondFilePartGMessage* sfp_gmessage,
+		GError** error) {
+	gint rc = 0;
+	GMimeObject* root = NULL;
+
+	SondFilePartPrivate* sfp_priv =
+			sond_file_part_get_instance_private(SOND_FILE_PART(sfp_gmessage));
+	SondFilePartGMessagePrivate* sfp_gmessage_priv =
+			sond_file_part_gmessage_get_instance_private(sfp_gmessage);
+
+	rc = sond_file_part_gmessage_open(sfp_gmessage, error);
+	if (rc)
+		ERROR_Z
+
+	root = g_mime_message_get_mime_part(sfp_gmessage_priv->message);
+	if (root)//Auch wenn nur ein einziger part, ist es ein Kind von Message
+		sfp_priv->has_children = TRUE;
+	sond_file_part_gmessage_close(sfp_gmessage);
+
+	return 0;
+}
+
+static GMimeObject* lookup_path(GMimeObject* root, gchar const* path, GError** error) {
+	GMimeObject* object = NULL;
 	gchar** strv = NULL;
 	gint zaehler = 0;
-	GMimeMessage* message = NULL;
-	GMimeObject* object = NULL;
 
-	message = sond_file_part_gmessage_open(sfp_gmessage, error);
-	if (!message)
-		ERROR_Z_VAL(NULL)
-
-	object = g_object_ref(g_mime_message_get_mime_part(message));
-	g_object_unref(message);
-	if (!object) {
-		if (error)
-			*error = g_error_new(ZOND_ERROR, 0,
-					"%s\nNachricht hat keinen MIME-Teil", __func__);
-
-		return NULL;
-	}
+	object = g_object_ref(root);
 
 	if (!path)
 		return object;
@@ -2356,6 +2375,37 @@ static GMimeObject* sond_file_part_gmessage_lookup_part_by_path(
 	return object;
 }
 
+static GMimeObject* sond_file_part_gmessage_lookup_part_by_path(
+		SondFilePartGMessage* sfp_gmessage, gchar const* path, GError** error) {
+	gint rc = 0;
+	GMimeObject* object = NULL;
+	GMimeObject* root = NULL;
+
+	SondFilePartGMessagePrivate* sfp_gmessage_priv =
+			sond_file_part_gmessage_get_instance_private(sfp_gmessage);
+
+	rc = sond_file_part_gmessage_open(sfp_gmessage, error);
+	if (rc)
+		ERROR_Z_VAL(NULL)
+
+	root = g_object_ref(g_mime_message_get_mime_part(sfp_gmessage_priv->message));
+	sond_file_part_gmessage_close(sfp_gmessage);
+	if (!root) {
+		if (error)
+			*error = g_error_new(ZOND_ERROR, 0,
+					"%s\nNachricht hat keinen MIME-Teil", __func__);
+
+		return NULL;
+	}
+
+	object = lookup_path(root, path, error);
+	g_object_unref(root);
+	if (!object)
+		ERROR_Z_VAL(NULL)
+
+	return object;
+}
+
 gint sond_file_part_gmessage_load_path(SondFilePartGMessage* sfp_gmessage,
 		gchar const* path, GPtrArray** arr_mime_parts, GError** error) {
 	GMimeObject* object = NULL;
@@ -2392,6 +2442,221 @@ gint sond_file_part_gmessage_load_path(SondFilePartGMessage* sfp_gmessage,
 	}
 
 	return 0;
+}
+
+static fz_buffer* sond_file_part_gmessage_to_buf(SondFilePartGMessage* sfp_gmessage,
+		fz_context* ctx, GError** error) {
+	fz_buffer* buf = NULL;
+	gsize length = 0;
+
+	SondFilePartGMessagePrivate* sfp_gmessage_priv =
+			sond_file_part_gmessage_get_instance_private(sfp_gmessage);
+
+	if (!sfp_gmessage_priv->message) {
+		g_set_error(error, SOND_ERROR, 0, "%s\nGMessage nicht geöffnet", __func__);
+
+		return NULL;
+	}
+
+	fz_try(ctx)
+		buf = fz_new_buffer(ctx, 4096);
+	fz_catch(ctx)
+		ERROR_PDF_VAL(NULL)
+
+	GMimeStream *stream = g_mime_stream_mem_new();
+
+	// Message in Stream schreiben
+	length = g_mime_object_write_to_stream(GMIME_OBJECT(sfp_gmessage_priv->message),
+			NULL, stream);
+	if (length < 0) {
+		g_set_error(error, SOND_ERROR, 0, "%s\nFehler beim Schreiben der Message in stream",
+				__func__);
+		g_object_unref(stream);
+
+		return NULL;
+	}
+	else if (length == 0) {
+		g_set_error(error, SOND_ERROR, 0, "%s\n0 bytes in stream geschrieben",
+				__func__);
+		g_object_unref(stream);
+
+		return NULL;
+	}
+
+	// Stream-Daten holen
+	GByteArray *bytes = g_mime_stream_mem_get_byte_array(GMIME_STREAM_MEM(stream));
+
+	// In fz_buffer kopieren
+	fz_try(ctx)
+		fz_append_data(ctx, buf, bytes->data, bytes->len);
+	fz_always(ctx) // Aufräumen
+		g_object_unref(stream);
+	fz_catch(ctx)
+		ERROR_PDF_VAL(NULL)
+
+	return buf;
+}
+
+// HAUPTFUNKTION: Sicheres Ersetzen eines Parts
+static gboolean replace_part_content_safe(GMimeObject *part,
+                                  fz_buffer *buffer,
+                                  GError **error)
+{
+    if (GMIME_IS_PART(part)) {
+        GMimeStream *stream = g_mime_stream_mem_new_with_buffer(
+            (const char *)buffer->data, buffer->len);
+
+        GMimeContentEncoding encoding = g_mime_part_get_content_encoding(GMIME_PART(part));
+
+        GMimeDataWrapper *content = g_mime_data_wrapper_new_with_stream(stream, encoding);
+        g_mime_part_set_content(GMIME_PART(part), content);
+
+        g_object_unref(content);
+        g_object_unref(stream);
+
+        return TRUE;
+    }
+    else if (GMIME_IS_MESSAGE_PART(part)) {
+        GMimeStream *stream = g_mime_stream_mem_new_with_buffer(
+            (const char *)buffer->data, buffer->len);
+
+        GMimeParser *parser = g_mime_parser_new_with_stream(stream);
+        GMimeMessage *message = g_mime_parser_construct_message(parser, NULL);
+
+        if (!message) {
+            g_set_error(error, g_quark_from_static_string("gmime"), 2,
+                       "Failed to parse message from buffer");
+            g_object_unref(parser);
+            g_object_unref(stream);
+            return FALSE;
+        }
+
+        g_mime_message_part_set_message(GMIME_MESSAGE_PART(part), message);
+
+        g_object_unref(message);
+        g_object_unref(parser);
+        g_object_unref(stream);
+
+        return TRUE;
+    }
+
+    g_set_error(error, g_quark_from_static_string("gmime"), 3,
+               "Object is neither GMimePart nor GMimeMessagePart");
+
+    return FALSE;
+}
+
+static fz_buffer* sond_file_part_gmessage_mod_part(SondFilePartGMessage* sfp_gmessage,
+		fz_context*ctx, gchar const* path, fz_buffer *buffer, GError** error) {
+	GMimeObject* root = NULL;
+	GMimeObject* obj_parent = NULL;
+	GMimeObject* object = NULL;
+	gint rc = 0;
+	gboolean suc = FALSE;
+	fz_buffer* buf_out = NULL;
+	gint index = 0;
+	gchar* parent_path = NULL;
+	gint count = 0;
+
+	SondFilePartGMessagePrivate* sfp_gmessage_priv =
+			sond_file_part_gmessage_get_instance_private(sfp_gmessage);
+
+	rc = sond_file_part_gmessage_open(sfp_gmessage, error);
+	if (rc)
+		ERROR_Z_VAL(NULL)
+
+	root = g_mime_message_get_mime_part(sfp_gmessage_priv->message);
+
+	if (!buffer && !GMIME_IS_MULTIPART(root)) {
+		g_set_error(error, SOND_ERROR, 0,
+				"%s\nLöschen des einzigen body-Part nicht zulässig", __func__);
+    	sond_file_part_gmessage_close(sfp_gmessage);
+
+		return NULL;
+	}
+
+	if (path) {
+		if (strrchr(path, '/')) {
+			parent_path = g_path_get_dirname(path);
+			index = atoi(strrchr(path, '/'));
+		}
+		else
+			index = atoi(path);
+	}
+
+	obj_parent = lookup_path(root, parent_path, error);
+    if (!obj_parent) {
+    	sond_file_part_gmessage_close(sfp_gmessage);
+
+    	ERROR_Z_VAL(NULL)
+    }
+
+    if (GMIME_IS_MULTIPART(obj_parent))
+    	count = g_mime_multipart_get_count(GMIME_MULTIPART(obj_parent));
+    else count = 1;
+
+    if (index > count - 1) {
+    	g_set_error(error, SOND_ERROR, 0,
+    			"%s\n index %u out of range (0 - %u)", __func__, index, count - 1);
+    	g_object_unref(obj_parent);
+    	sond_file_part_gmessage_close(sfp_gmessage);
+
+    	return NULL;
+    }
+
+	if (!buffer && count <= 1) { //letzter/einziger MimePart
+		g_set_error(error, g_quark_from_static_string("gmime"), 0,
+				"%s\nEinziger mimepart kann nicht gelöscht werden", __func__);
+    	g_object_unref(obj_parent);
+    	sond_file_part_gmessage_close(sfp_gmessage);
+
+		return NULL;
+	}
+
+    if (GMIME_IS_MULTIPART(obj_parent))
+    	object = g_mime_multipart_get_part(GMIME_MULTIPART(obj_parent), index);
+	else
+		object = g_mime_message_get_mime_part(GMIME_MESSAGE(obj_parent));
+    if (!object) {
+    	g_set_error(error, SOND_ERROR, 0,
+    			"%s\nKein GMime-Objekt gefunden", __func__);
+    	sond_file_part_gmessage_close(sfp_gmessage);
+        g_object_unref(obj_parent);
+
+    	return NULL;
+    }
+
+    if (!buffer) {
+    	GMimeObject* obj_removed = NULL;
+
+    	obj_removed = g_mime_multipart_remove_at(GMIME_MULTIPART(obj_parent), index);
+    	g_object_unref(obj_parent);
+    	if (!obj_removed) {
+    		g_set_error(error, SOND_ERROR, 0,
+    				"%s\nKonnte MimePart mit index %u nicht entfernen", __func__, index);
+			sond_file_part_gmessage_close(sfp_gmessage);
+
+    		return NULL;
+    	}
+
+    	g_object_unref(obj_removed);
+    }
+    else {
+		suc = replace_part_content_safe(object, buffer, error);
+		g_object_unref(obj_parent);
+		if (!suc) {
+			sond_file_part_gmessage_close(sfp_gmessage);
+
+			ERROR_Z_VAL(NULL)
+		}
+    }
+
+    buf_out = sond_file_part_gmessage_to_buf(sfp_gmessage, ctx, error);
+    sond_file_part_gmessage_close(sfp_gmessage);
+    if (!buf_out)
+    	ERROR_Z_VAL(NULL)
+
+    return buf_out;
 }
 
 /*

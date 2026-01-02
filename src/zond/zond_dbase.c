@@ -1080,20 +1080,20 @@ gint zond_dbase_update_gmessage_index(ZondDBase* zond_dbase, gchar const* prefix
 
 	const gchar *sql[] = {
 			"UPDATE knoten "
-			"SET filepart = ?1 || " //?1 ist prefix
-			"(CAST(SUBSTR(SUBSTR(filepart, LENGTH(?1) + 1), 1, "
-			"INSTR(SUBSTR(filepart, LENGTH(?1) + 1) || '/', '/') - 1) "
+			"SET file_part = ?1 || " //?1 ist prefix
+			"(CAST(SUBSTR(SUBSTR(file_part, LENGTH(?1) + 1), 1, "
+			"INSTR(SUBSTR(file_part, LENGTH(?1) + 1) || '/', '/') - 1) "
 			"AS INTEGER) + ?2) || " //?2 ist Zahl, die hinzugesetzt/abgezogen wird
-			"SUBSTR(SUBSTR(filepart, LENGTH(?1) + 1), "
-			"INSTR(SUBSTR(filepart, LENGTH(?1) + 1) || '/', '/')) "
-			"WHERE filepart LIKE ?1 || '%' "
+			"SUBSTR(SUBSTR(file_part, LENGTH(?1) + 1), "
+			"INSTR(SUBSTR(file_part, LENGTH(?1) + 1) || '/', '/')) "
+			"WHERE file_part LIKE ?1 || '%' "
 			"AND CASE WHEN ?2 > 0 THEN "
-					"CAST(SUBSTR(SUBSTR(filepart, LENGTH(?1) + 1), 1, "
-					"INSTR(SUBSTR(filepart, LENGTH(?1) + 1) || '/', '/') - 1) "
+					"CAST(SUBSTR(SUBSTR(file_part, LENGTH(?1) + 1), 1, "
+					"INSTR(SUBSTR(file_part, LENGTH(?1) + 1) || '/', '/') - 1) "
 					"AS INTEGER) >= ?3 " //?3 ist Schwellenwert
 				"ELSE "
-					"CAST(SUBSTR(SUBSTR(filepart, LENGTH(?1) + 1), 1 "
-					 "INSTR(SUBSTR(filepart, LENGTH(?1) + 1) || '/', '/') - 1) "
+					"CAST(SUBSTR(SUBSTR(file_part, LENGTH(?1) + 1), 1, "
+					 "INSTR(SUBSTR(file_part, LENGTH(?1) + 1) || '/', '/') - 1) "
 					"AS INTEGER) <= ?3 "
 				"END;" };
 

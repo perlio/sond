@@ -313,9 +313,9 @@ static void pdf_text_filter_op_TJ(fz_context *ctx, pdf_processor *proc,
 
 	Tr = g_array_index(p->arr_Tr, gint, p->arr_Tr->len - 1);
 
-	if (p->flags & 1 && Tr != 3)
+	if ((p->flags & 1) && Tr != 3)
 		return;
-	if (p->flags & 2 && Tr == 3)
+	if ((p->flags & 2) && Tr == 3)
 		return;
 
 	p->pdf_buffer_processor_op_TJ(ctx, proc, array);

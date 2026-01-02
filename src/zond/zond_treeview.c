@@ -983,20 +983,26 @@ static gint zond_treeview_anbinden_rekursiv(ZondTreeview *ztv,
 		gint rc = 0;
 		gint anchor_id_dir = 0;
 		gboolean child_anchor = TRUE;
+		gchar const* path = NULL;
 
 		//icon_name ermitteln
-		if (SOND_IS_FILE_PART_PDF(sond_tvfm_item_get_sond_file_part(stvfm_item))) {
+		if (SOND_IS_FILE_PART_PDF(sond_tvfm_item_get_sond_file_part(stvfm_item)))
 			icon_name = "pdf-folder";
-			basename = sond_file_part_get_path(sond_tvfm_item_get_sond_file_part(stvfm_item));
+		else if (SOND_IS_FILE_PART_ZIP(sond_tvfm_item_get_sond_file_part(stvfm_item)))
+			if (!sond_tvfm_item_get_path_or_section(stvfm_item))
+				icon_name = "package-x-generic";
+			else
+				icon_name = "folder";
+		else if (SOND_IS_FILE_PART_GMESSAGE(sond_tvfm_item_get_sond_file_part(stvfm_item))) {
+			if (!sond_tvfm_item_get_path_or_section(stvfm_item))
+				icon_name = "mail-read";
+			else
+				icon_name = "folder";
 		}
-		else if (SOND_IS_FILE_PART_ZIP(sond_tvfm_item_get_sond_file_part(stvfm_item))) {
-			icon_name = "package-x-generic";
-			basename = sond_file_part_get_path(sond_tvfm_item_get_sond_file_part(stvfm_item));
-		}
-		else {
+		else
 			icon_name = "folder";
-			basename = sond_tvfm_item_get_path_or_section(stvfm_item);
-		}
+
+		basename = sond_tvfm_item_get_display_name(stvfm_item);
 
 		anchor_id_dir = zond_dbase_insert_node(
 				ztv_priv->zond->dbase_zond->zond_dbase_work, anchor_id, child,

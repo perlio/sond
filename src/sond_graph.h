@@ -16,156 +16,130 @@
  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#ifndef SOND_GRAPH_H
-#define SOND_GRAPH_H
+/**
+ * @file graph_db_setup.h
+ * @brief Setup-Funktionen für Graph-Datenbank mit MariaDB
+ *
+ * Stellt Funktionen zum Einrichten einer Graph-Datenbank mit Nodes,
+ * Edges und Lock-Mechanismus bereit.
+ */
+
+#ifndef GRAPH_DB_SETUP_H
+#define GRAPH_DB_SETUP_H
 
 #include <glib.h>
-#include <mysql/mysql.h>
 
 G_BEGIN_DECLS
 
 /**
- * SECTION:sond_graph
- * @title: SOND Graph Database
- * @short_description: Graph-Datenbank mit JSON-Properties
- *
- * Die SOND Graph Database speichert Nodes und Edges mit flexiblen Properties im JSON-Format.
- *
- * Property-Format:
- * [
- *   {
- *     "key": "name",
- *     "value": "Max",
- *     "properties": [...]  // optional
- *   }
- * ]
+ * Error Domain für Graph-Datenbank-Operationen
  */
-
-/* Fehlercodes */
-#define SOND_GRAPH_ERROR_DOMAIN g_quark_from_static_string("sond-graph-error")
+#define GRAPH_DB_ERROR (graph_db_error_quark())
 
 /**
- * sond_graph_create:
- * @mysql: Aktive MySQL-Verbindung mit CREATE DATABASE Rechten
- * @db_name: Name der zu erstellenden Datenbank
- * @prompt_if_exists: TRUE = Benutzer bei existierender DB fragen, FALSE = automatisch überschreiben
- * @error: (nullable): Rückgabe für Fehlerinformationen
+ * GraphDBError:
+ * @GRAPH_DB_ERROR_INIT: MySQL-Initialisierung fehlgeschlagen
+ * @GRAPH_DB_ERROR_CONNECTION: Datenbankverbindung fehlgeschlagen
+ * @GRAPH_DB_ERROR_SQL: SQL-Statement-Ausführung fehlgeschlagen
+ * @GRAPH_DB_ERROR_CONFIG: Ungültige Konfiguration
  *
- * Erstellt eine neue Graph-Datenbank mit nodes und edges Tabellen.
- *
- * Returns: 0 bei Erfolg, -1 bei Fehler
+ * Error-Codes für Graph-Datenbank-Operationen
  */
-gint sond_graph_create(MYSQL *mysql,
-                       const gchar *db_name,
-                       gboolean prompt_if_exists,
-                       GError **error);
+typedef enum {
+    GRAPH_DB_ERROR_INIT,
+    GRAPH_DB_ERROR_CONNECTION,
+    GRAPH_DB_ERROR_SQL,
+    GRAPH_DB_ERROR_CONFIG
+} GraphDBError;
 
 /**
- * sond_graph_insert_node:
- * @mysql: Aktive MySQL-Verbindung (Datenbank muss ausgewählt sein)
- * @label: Label des Nodes (z.B. "Person", "Company")
- * @properties_json: (nullable): Properties als JSON-String im Property-Format
- * @error: (nullable): Rückgabe für Fehlerinformationen
+ * DBConfig:
+ * @host: Hostname oder IP-Adresse des Datenbankservers
+ * @user: Datenbankbenutzername
+ * @password: Datenbankpasswort
+ * @database: Name der Datenbank
+ * @port: Port-Nummer (Standard: 3306)
  *
- * Fügt einen neuen Node in die Datenbank ein.
+ * Konfigurationsstruktur für Datenbankverbindung
+ */
+typedef struct {
+    const char *host;
+    const char *user;
+    const char *password;
+    const char *database;
+    unsigned int port;
+} DBConfig;
+
+/**
+ * graph_db_error_quark:
  *
- * Beispiel für properties_json:
+ * Gibt die Error-Domain für Graph-Datenbank-Fehler zurück.
+ *
+ * Returns: Die Error-Domain als GQuark
+ */
+GQuark graph_db_error_quark(void);
+
+/**
+ * setup_graph_database:
+ * @config: Zeiger auf DBConfig-Struktur mit Verbindungsparametern
+ * @error: Rückgabe-Ort für einen GError, oder NULL
+ *
+ * Richtet die komplette Graph-Datenbank ein mit:
+ * - nodes-Tabelle (id, label, properties als JSON)
+ * - edges-Tabelle (source_id, target_id, label, properties)
+ * - node_locks-Tabelle für Lock-Mechanismus
+ * - lock_history-Tabelle für Audit-Trail
+ * - Stored Procedures für Lock-Management
+ *
+ * Die Datenbank muss bereits existieren. Tabellen und Procedures werden
+ * mit IF NOT EXISTS angelegt, sodass die Funktion idempotent ist.
+ *
+ * Returns: TRUE bei Erfolg, FALSE bei Fehler (error wird gesetzt)
+ *
+ * Beispiel:
  * |[<!-- language="C" -->
- * "[{\"key\":\"name\",\"value\":\"Max\"},{\"key\":\"age\",\"value\":42}]"
- * ]|
+ * DBConfig config = {
+ *     .host = "localhost",
+ *     .user = "root",
+ *     .password = "secret",
+ *     .database = "graph_db",
+ *     .port = 3306
+ * };
  *
- * Returns: ID des eingefügten Nodes (>= 0) bei Erfolg, -1 bei Fehler
+ * GError *error = NULL;
+ * if (!setup_graph_database(&config, &error)) {
+ *     g_printerr("Setup fehlgeschlagen: %s\n", error->message);
+ *     g_error_free(error);
+ *     return FALSE;
+ * }
+ * ]|
  */
-gint sond_graph_insert_node(MYSQL *mysql,
-                             const gchar *label,
-                             const gchar *properties_json,
-                             GError **error);
+gboolean setup_graph_database(const DBConfig *config, GError **error);
 
 /**
- * sond_graph_insert_edge:
- * @mysql: Aktive MySQL-Verbindung (Datenbank muss ausgewählt sein)
- * @label: Label der Edge (z.B. "KNOWS", "WORKS_AT")
- * @from_node_id: ID des Start-Nodes
- * @to_node_id: ID des Ziel-Nodes
- * @properties_json: (nullable): Properties als JSON-String im Property-Format
- * @error: (nullable): Rückgabe für Fehlerinformationen
+ * test_database:
+ * @config: Zeiger auf DBConfig-Struktur mit Verbindungsparametern
+ * @error: Rückgabe-Ort für einen GError, oder NULL
  *
- * Fügt eine neue Edge zwischen zwei Nodes ein.
+ * Testet die Datenbank durch Einfügen von Beispieldaten:
+ * - 2 Person-Nodes (Alice, Bob)
+ * - 1 Company-Node (Acme Corp)
  *
- * Beispiel für properties_json:
+ * Gibt die Anzahl der eingefügten Nodes aus.
+ *
+ * Returns: TRUE bei Erfolg, FALSE bei Fehler (error wird gesetzt)
+ *
+ * Beispiel:
  * |[<!-- language="C" -->
- * "[{\"key\":\"since\",\"value\":\"2020-01-15\"}]"
+ * GError *error = NULL;
+ * if (!test_database(&config, &error)) {
+ *     g_printerr("Test fehlgeschlagen: %s\n", error->message);
+ *     g_error_free(error);
+ * }
  * ]|
- *
- * Returns: ID der eingefügten Edge (>= 0) bei Erfolg, -1 bei Fehler
  */
-gint sond_graph_insert_edge(MYSQL *mysql,
-                             const gchar *label,
-                             gint from_node_id,
-                             gint to_node_id,
-                             const gchar *properties_json,
-                             GError **error);
-
-/**
- * sond_graph_update_node_properties:
- * @mysql: Aktive MySQL-Verbindung
- * @node_id: ID des Nodes
- * @properties_json: Neue Properties als JSON-String (überschreibt alle bisherigen)
- * @error: (nullable): Rückgabe für Fehlerinformationen
- *
- * Aktualisiert die Properties eines Nodes vollständig.
- *
- * Returns: 0 bei Erfolg, -1 bei Fehler
- */
-gint sond_graph_update_node_properties(MYSQL *mysql,
-                                        gint node_id,
-                                        const gchar *properties_json,
-                                        GError **error);
-
-/**
- * sond_graph_update_edge_properties:
- * @mysql: Aktive MySQL-Verbindung
- * @edge_id: ID der Edge
- * @properties_json: Neue Properties als JSON-String (überschreibt alle bisherigen)
- * @error: (nullable): Rückgabe für Fehlerinformationen
- *
- * Aktualisiert die Properties einer Edge vollständig.
- *
- * Returns: 0 bei Erfolg, -1 bei Fehler
- */
-gint sond_graph_update_edge_properties(MYSQL *mysql,
-                                        gint edge_id,
-                                        const gchar *properties_json,
-                                        GError **error);
-
-/**
- * sond_graph_delete_node:
- * @mysql: Aktive MySQL-Verbindung
- * @node_id: ID des zu löschenden Nodes
- * @error: (nullable): Rückgabe für Fehlerinformationen
- *
- * Löscht einen Node und alle zugehörigen Edges (CASCADE).
- *
- * Returns: 0 bei Erfolg, -1 bei Fehler
- */
-gint sond_graph_delete_node(MYSQL *mysql,
-                             gint node_id,
-                             GError **error);
-
-/**
- * sond_graph_delete_edge:
- * @mysql: Aktive MySQL-Verbindung
- * @edge_id: ID der zu löschenden Edge
- * @error: (nullable): Rückgabe für Fehlerinformationen
- *
- * Löscht eine Edge.
- *
- * Returns: 0 bei Erfolg, -1 bei Fehler
- */
-gint sond_graph_delete_edge(MYSQL *mysql,
-                             gint edge_id,
-                             GError **error);
+gboolean test_database(const DBConfig *config, GError **error);
 
 G_END_DECLS
 
-#endif /* SOND_GRAPH_H */
+#endif /* GRAPH_DB_SETUP_H */

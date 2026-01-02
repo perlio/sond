@@ -424,6 +424,29 @@ static GtkWidget* show_three_pixmaps(fz_context *ctx,
     return window;
 }
 
+static fz_buffer*
+get_content_stream_as_buffer(fz_context *ctx, pdf_obj *page_ref,
+		GError **error) {
+	pdf_obj *obj_contents = NULL;
+	fz_stream *stream = NULL;
+	fz_buffer *buf = NULL;
+
+	//Stream doc_text
+
+	fz_try( ctx ) {
+		obj_contents = pdf_dict_get(ctx, page_ref, PDF_NAME(Contents));
+		stream = pdf_open_contents_stream(ctx,
+				pdf_get_bound_document(ctx, page_ref), obj_contents);
+		buf = fz_read_all(ctx, stream, 1024);
+	}
+	fz_always( ctx )
+		fz_drop_stream(ctx, stream);
+	fz_catch ( ctx )
+		ERROR_PDF_VAL(NULL)
+
+	return buf;
+}
+
 void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 	gint rc = 0;
 	GError* error = NULL;
@@ -465,9 +488,14 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 		gboolean hidden = FALSE;
 		pdf_obj* font_ref = NULL;
 		gint font_num = 0;
+		JournalEntry entry = { 0 };
+		GArray* arr_entries = NULL;
+		fz_buffer* buf_content = NULL;
 
 		PdfDocumentPage *pdf_document_page = g_ptr_array_index(
 				arr_document_page, i);
+
+		arr_entries = zond_pdf_document_get_arr_journal(pdf_document_page->document);
 
 		fz_context *ctx = zond_pdf_document_get_ctx(
 				pdf_document_page->document);
@@ -533,6 +561,22 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 			zond_pdf_document_set_ocr_num(pdf_document_page->document, font_num);
 		}
 
+		//entry vorbereiten
+		entry.type = JOURNAL_TYPE_OCR;
+		entry.pdf_document_page = pdf_document_page;
+
+		buf_content = get_content_stream_as_buffer(ctx, page->obj, &error);
+		if (!buf_content) {
+			display_message(pv->vf, "Fehler beim Holen des Content-Streams:\n",
+					error->message, NULL);
+			g_error_free(error);
+			pdf_drop_obj(ctx, font_ref);
+			pdf_drop_page(ctx, page);
+			continue;
+		}
+
+		entry.ocr.buf_old = buf_content; //übernimmt ref
+
 		//OCR
 		rc = sond_ocr_page(ctx, page, font_ref, handle, NULL,
 				(void (*)(gpointer, gchar const*, ...)) info_window_set_message,
@@ -540,12 +584,31 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 				&monitor_data, &error); //thread-safe
 		pdf_drop_obj(ctx, font_ref);
 		pdf_drop_page(ctx, page);
-		if (rc) {
+		if (rc == -1) { //Fähler
 			display_message(pv->vf, "Fehler bei OCR der Seite:\n",
 					error->message, NULL);
 			g_error_free(error);
+			fz_drop_buffer(ctx, entry.ocr.buf_old);
+
 			continue;
 		}
+		else if (rc == 1) { //abgebrochen
+			fz_drop_buffer(ctx, entry.ocr.buf_old);
+			break;
+		}
+
+		buf_content = get_content_stream_as_buffer(ctx, page->obj, &error);
+		if (!buf_content) {
+			display_message(pv->vf, "Fehler beim Holen des neuen Content-Streams:\n",
+					error->message, NULL);
+			g_error_free(error);
+			fz_drop_buffer(ctx, entry.ocr.buf_old);
+			continue;
+		}
+
+		entry.ocr.buf_new = buf_content; //übernimmt ref
+
+		g_array_append_val(arr_entries, entry);
 
 		//fz_stext_list droppen und auf NULL setzen
 		while (pdf_document_page->thread & 1)

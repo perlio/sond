@@ -99,6 +99,13 @@ gchar const* sond_tvfm_item_get_path_or_section(SondTVFMItem *stvfm_item) {
 	return stvfm_item_priv->path_or_section;
 }
 
+gchar const* sond_tvfm_item_get_display_name(SondTVFMItem *stvfm_item) {
+	SondTVFMItemPrivate *stvfm_item_priv =
+			sond_tvfm_item_get_instance_private(stvfm_item);
+
+	return stvfm_item_priv->display_name;
+}
+
 SondFilePart* sond_tvfm_item_get_sond_file_part(SondTVFMItem *stvfm_item) {
 	SondTVFMItemPrivate *stvfm_item_priv =
 			sond_tvfm_item_get_instance_private(stvfm_item);
@@ -606,40 +613,6 @@ gint sond_tvfm_item_load_children(SondTVFMItem* stvfm_item,
 		else {
 			if (error) *error = g_error_new(g_quark_from_static_string("sond"), 0,
 					"%s\nKeine Kinder vorhanden", __func__);
-
-			return -1;
-		}
-	}
-
-	return 0;
-}
-
-static gint stvfm_item_delete(SondTVFMItem* stvfm_item, GError** error) {
-	SondTVFMItemPrivate* stvfm_item_priv =
-			sond_tvfm_item_get_instance_private(stvfm_item);
-
-	if (!stvfm_item_priv->path_or_section) {
-		gint rc = 0;
-
-		rc = sond_file_part_delete(stvfm_item_priv->sond_file_part, error);
-		if (rc)
-			ERROR_Z
-	}
-	else {
-		if (!stvfm_item_priv->sond_file_part) { //ist dir im Dateisystem
-			gint rc = 0;
-
-			rc = rm_r(stvfm_item_priv->path_or_section);
-			if (rc) {
-				if (error) *error = g_error_new(g_quark_from_static_string("stdlib"),
-						errno, "%s\n%s", __func__, strerror(errno));
-
-				return -1;
-			}
-		}
-		else { //zip- oder pdf-dir
-			if (error) *error = g_error_new(SOND_ERROR, 0,
-					"%s\nNoch nicht implementiert", __func__);
 
 			return -1;
 		}
@@ -1593,6 +1566,40 @@ static gint copy_stvfm_item(SondTVFMItem* stvfm_item,
 	return 0;
 }
 
+static gint delete_item(SondTVFMItem* stvfm_item, GError** error) {
+	SondTVFMItemPrivate* stvfm_item_priv =
+			sond_tvfm_item_get_instance_private(stvfm_item);
+
+	if (!stvfm_item_priv->path_or_section) {
+		gint rc = 0;
+
+		rc = sond_file_part_delete(stvfm_item_priv->sond_file_part, error);
+		if (rc)
+			ERROR_Z
+	}
+	else {
+		if (!stvfm_item_priv->sond_file_part) { //ist dir im Dateisystem
+			gint rc = 0;
+
+			rc = rm_r(stvfm_item_priv->path_or_section);
+			if (rc) {
+				if (error) *error = g_error_new(g_quark_from_static_string("stdlib"),
+						errno, "%s\n%s", __func__, strerror(errno));
+
+				return -1;
+			}
+		}
+		else { //zip- oder pdf-dir
+			if (error) *error = g_error_new(SOND_ERROR, 0,
+					"%s\nNoch nicht implementiert", __func__);
+
+			return -1;
+		}
+	}
+
+	return 0;
+}
+
 static gint move_item(SondTVFMItem* stvfm_item_src,
 		SondTVFMItem* stvfm_item_parent_dst,
 		gchar const* base, gint index_to, GError** error) {
@@ -1604,7 +1611,7 @@ static gint move_item(SondTVFMItem* stvfm_item_src,
 		ERROR_Z
 
 	//Jetzt Quelle löschen
-	rc = stvfm_item_delete(stvfm_item_src, error);
+	rc = delete_item(stvfm_item_src, error);
 	if (rc) {
 		warning((*error)->message);
 		g_clear_error(error);
@@ -2317,7 +2324,7 @@ static gint sond_treeviewfm_foreach_loeschen(SondTreeview *stv,
 	g_object_unref(stvfm_item);
 
 	g_signal_emit(stvfm, SOND_TREEVIEWFM_GET_CLASS(stvfm)->signal_before_delete,
-			0, stvfm_item, iter, error, &res);
+			0, stvfm_item, error, &res);
 	if (res == -1)
 		ERROR_Z
 	else if (res == 1)

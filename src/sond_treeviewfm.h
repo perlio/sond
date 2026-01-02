@@ -54,6 +54,8 @@ SondTVFMItemType sond_tvfm_item_get_item_type(SondTVFMItem*);
 
 gchar const* sond_tvfm_item_get_path_or_section(SondTVFMItem *);
 
+gchar const* sond_tvfm_item_get_display_name(SondTVFMItem*);
+
 SondFilePart* sond_tvfm_item_get_sond_file_part(SondTVFMItem*);
 
 SondTreeviewFM* sond_tvfm_item_get_stvfm(SondTVFMItem *);

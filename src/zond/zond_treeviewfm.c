@@ -95,8 +95,8 @@ static gboolean get_gmessage_index(SondTVFMItem* stvfm_item, gint* index) {
 			sond_tvfm_item_get_sond_file_part(stvfm_item)))) {
 		gchar const* path_sfp_parent = NULL;
 
-		path_sfp_parent = sond_file_part_get_path(sond_file_part_get_parent(
-				sond_tvfm_item_get_sond_file_part(stvfm_item)));
+		path_sfp_parent = sond_file_part_get_path(
+				sond_tvfm_item_get_sond_file_part(stvfm_item));
 
 		*index = strrchr(path_sfp_parent, '/') ?
 				atoi(strrchr(path_sfp_parent, '/') + 1) :

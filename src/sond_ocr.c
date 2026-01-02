@@ -92,9 +92,9 @@ static void text_analyzer_op_TJ(fz_context *ctx, pdf_processor *proc,
 	else
 		p->has_visible_text = TRUE;
 
-	if (p->flags & 1 && Tr != 3)
+	if ((p->flags & 1) && Tr != 3)
 		return;
-	else if (p->flags & 2 && Tr == 3)
+	else if ((p->flags & 2) && Tr == 3)
 		return;
 
 	if (proc && proc->chain && proc->chain->op_TJ)
@@ -116,9 +116,9 @@ static void text_analyzer_op_Tj(fz_context *ctx, pdf_processor *proc,
 	else
 		p->has_visible_text = TRUE;
 
-	if (p->flags & 1 && Tr != 3)
+	if ((p->flags & 1) && Tr != 3)
 		return;
-	else if (p->flags & 2 && Tr == 3)
+	else if ((p->flags & 2) && Tr == 3)
 		return;
 
 	if (proc && proc->chain && proc->chain->op_Tj)
@@ -140,9 +140,9 @@ static void text_analyzer_op_squote(fz_context *ctx, pdf_processor *proc,
 	else
 		p->has_visible_text = TRUE;
 
-	if (p->flags & 1 && Tr != 3)
+	if ((p->flags & 1) && Tr != 3)
 		return;
-	else if (p->flags & 2 && Tr == 3)
+	else if ((p->flags & 2) && Tr == 3)
 		return;
 
 	if (proc && proc->chain && proc->chain->op_squote)
@@ -164,9 +164,9 @@ static void text_analyzer_op_dquote(fz_context *ctx, pdf_processor *proc,
 	else
 		p->has_visible_text = TRUE;
 
-	if (p->flags & 1 && Tr != 3)
+	if ((p->flags & 1) && Tr != 3)
 		return;
-	else if (p->flags & 2 && Tr == 3)
+	else if ((p->flags & 2) && Tr == 3)
 		return;
 
 	if (proc && proc->chain && proc->chain->op_dquote)
@@ -333,30 +333,36 @@ static void transform_coordinates(const ocr_transform *t,
 
 static void append_text_matrix(fz_context *ctx, fz_buffer *buf,
             const ocr_transform *t,
+			float scale_word_x,
             float pdf_x, float pdf_y) {
 	switch (t->rotation) {
 		case 0:
 		// Normal horizontal
-		fz_append_printf(ctx, buf, "1 0 0 1 %.2f %.2f Tm\n", pdf_x, pdf_y);
+		fz_append_printf(ctx, buf, "%.4f 0 0 1 %.2f %.2f Tm\n",
+				scale_word_x, pdf_x, pdf_y);
 		break;
 
 		case 90:
 		// 90° gegen Uhrzeigersinn (PDF-Rotation)
-		fz_append_printf(ctx, buf, "0 1 -1 0 %.2f %.2f Tm\n", pdf_x, pdf_y);
+		fz_append_printf(ctx, buf, "0 %.4f -1 0 %.2f %.2f Tm\n",
+				scale_word_x, pdf_x, pdf_y);
 		break;
 
 		case 180:
 		// 180° gedreht
-		fz_append_printf(ctx, buf, "-1 0 0 -1 %.2f %.2f Tm\n", pdf_x, pdf_y);
+		fz_append_printf(ctx, buf, "%.4f 0 0 -1 %.2f %.2f Tm\n",
+				-scale_word_x, pdf_x, pdf_y);
 		break;
 
 		case 270:
 		// 270° gegen Uhrzeigersinn
-		fz_append_printf(ctx, buf, "0 -1 1 0 %.2f %.2f Tm\n", pdf_x, pdf_y);
+		fz_append_printf(ctx, buf, "0 %.4f 1 0 %.2f %.2f Tm\n",
+				-scale_word_x, pdf_x, pdf_y);
 		break;
 
 		default:
-		fz_append_printf(ctx, buf, "1 0 0 1 %.2f %.2f Tm\n", pdf_x, pdf_y);
+		fz_append_printf(ctx, buf, "%.4f 0 0 1 %.2f %.2f Tm\n",
+				scale_word_x, pdf_x, pdf_y);
 		break;
 	}
 
@@ -392,9 +398,13 @@ static fz_buffer* tesseract_to_content_stream(fz_context *ctx,
                                         TessResultIterator *iter,
                                         const ocr_transform *transform,
 										GError **error) {
+    static fz_font *helvetica = NULL;
     fz_buffer *content = NULL;
 
-	TessPageIteratorLevel level = RIL_WORD;
+    TessPageIteratorLevel level = RIL_WORD;
+
+    if (!helvetica)
+        helvetica = fz_new_base14_font(ctx, "Helvetica");
 
     fz_try(ctx)
         content = fz_new_buffer(ctx, 4096);
@@ -402,7 +412,7 @@ static fz_buffer* tesseract_to_content_stream(fz_context *ctx,
 		ERROR_PDF_VAL(NULL);
 
     fz_try(ctx)
-        fz_append_string(ctx, content, "\nq\nBT\n");
+        fz_append_string(ctx, content, "\nq\nBT\n3 Tr\n");
     fz_catch(ctx) {
     	fz_drop_buffer(ctx, content);
 
@@ -439,6 +449,9 @@ static fz_buffer* tesseract_to_content_stream(fz_context *ctx,
 			continue;
 		}
 
+		//Wortbreite
+		float word_width_pdf = (x2 - x1) / transform->scale_x;
+
 		// Schriftgröße aus Höhe (vor Transformation!)
 		float word_height = (base_y2 - y1) / transform->scale_y;
 		float font_size = word_height * 1.2; // * 0.85f;
@@ -457,12 +470,24 @@ static fz_buffer* tesseract_to_content_stream(fz_context *ctx,
 			last_font_size = font_size;
 		}
 
+		// 3. **Tatsächliche Textbreite in Helvetica messen**
+		float width = 0;
+		for (const char *p = word; *p; p++) {
+			int gid = fz_encode_character(ctx, helvetica, (unsigned char)*p);
+			width += fz_advance_glyph(ctx, helvetica, gid, 0);
+		}
+
+		float actual_width = width * font_size;
+
+		// 4. **Horizontale Skalierung berechnen**
+		float scale_word_x = (actual_width > 0.01f) ? (word_width_pdf / actual_width) : 1.0f;
+
 		// Koordinaten transformieren (Bild → PDF mit Rotation)
 		float pdf_x, pdf_y;
 		transform_coordinates(transform, x1, base_y2, &pdf_x, &pdf_y);
 
 		// Text-Matrix setzen
-		append_text_matrix(ctx, content, transform, pdf_x, pdf_y);
+		append_text_matrix(ctx, content, transform, scale_word_x, pdf_x, pdf_y);
 
 		// Text ausgeben
 		rc = append_winansi_text(ctx, content, word, error);
@@ -689,8 +714,8 @@ static gint sond_ocr_run_page(fz_context* ctx, pdf_page* page,
 		ERROR_PDF
 
 		// text-analyzer-Processor erstellen (dieser filtert den Text)
-	fz_try(ctx) //flag == 1: sichtbarer Text weg, nur Bilder ocr-en
-		proc_text = new_text_analyzer_processor(ctx, proc_run, 1, error);
+	fz_try(ctx) //flag == 3: aller Text weg, nur Bilder ocr-en
+		proc_text = new_text_analyzer_processor(ctx, proc_run, 3, error);
 	fz_catch(ctx) {
 		pdf_close_processor(ctx, proc_run);
 		pdf_drop_processor(ctx, proc_run);
@@ -844,6 +869,8 @@ gint sond_ocr_page(fz_context* ctx, pdf_page* page, pdf_obj* font_ref,
 			ETEXT_DESC *monitor = NULL;
 			gint progress = 0;
 
+			log_func(log_data,
+					"Tesseract Recognize S. %u", page->super.number);
 			monitor = TessMonitorCreate();
 			TessMonitorSetCancelThis(monitor, (gpointer) monitor_data->cancel_this);
 			TessMonitorSetCancelFunc(monitor, (TessCancelFunc) ocr_cancel);
@@ -861,11 +888,13 @@ gint sond_ocr_page(fz_context* ctx, pdf_page* page, pdf_obj* font_ref,
 			rc = GPOINTER_TO_INT(g_thread_join(thread_recog));
 			progress_func(monitor_data->progress_data, 101); //Stop
 			TessMonitorDelete(monitor);
-		} else {
+		} else
 			rc = TessBaseAPIRecognize(handle, NULL);
-		}
+
 		fz_drop_pixmap(ctx, pixmap);
-		if (rc) {
+		if (monitor_data && *(monitor_data->cancel_this))
+			return 1; //abgebrochen
+		else if (rc) { //muß sorum abgefragt werden, weil Abbruch auch rc = 1 macht
 			g_set_error(error, SOND_ERROR,  0, "%s\nRecognize fehlgeschlagen", __func__);
 
 			return -1;
@@ -998,7 +1027,7 @@ gint sond_ocr_pdf_doc(fz_context* ctx, pdf_document* doc,
 	if (!font_ref)
 		ERROR_Z
 
-	for (gint i = 0; i < 1; i++) {
+	for (gint i = 0; i < num_pages; i++) {
 		gint rc = 0;
 		pdf_page* page = NULL;
 		gboolean hidden = FALSE;
@@ -1022,16 +1051,18 @@ gint sond_ocr_pdf_doc(fz_context* ctx, pdf_document* doc,
 					page->super.number);
 			pdf_drop_page(ctx, page);
 
-			return 0;
+			continue;
 		}
 
 		rc = sond_ocr_page(ctx, page, font_ref, handle, osd_api,
 				log_func, log_data, progress_func, monitor_data, error);
 		pdf_drop_page(ctx, page);
-		if (rc) { //Fehler auf Seitenebene loggen
+		if (rc == -1) { //Fehler auf Seitenebene loggen
 			log_func(log_data, "Seite %u: sond_ocr_page:", i, (*error)->message);
 			g_clear_error(error);
 		}
+		else if (rc == 1) //abgebrochen
+			break;
 	}
 
 	pdf_drop_obj(ctx, font_ref);

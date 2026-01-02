@@ -500,7 +500,7 @@ static void cb_info_window_response(GtkDialog *dialog, gint id, gpointer data) {
 	if (info_window->cancel)
 		return;
 
-	info_window_set_message(info_window, "...abbrechen");
+	info_window_set_message(info_window, "...abgebrochen");
 	info_window->cancel = TRUE;
 
 	return;

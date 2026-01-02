@@ -64,8 +64,6 @@ SondFilePart* sond_file_part_from_filepart(fz_context*,
 
 gint sond_file_part_delete(SondFilePart*, GError**);
 
-gint sond_file_part_replace(SondFilePart*, fz_context*, fz_buffer*, GError**);
-
 gint sond_file_part_rename(SondFilePart*, gchar const*, GError**);
 
 gint sond_file_part_copy(SondFilePart*, SondFilePart*, gchar const*, GError**);
