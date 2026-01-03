@@ -1609,7 +1609,7 @@ static gint copy_stvfm_item(SondTVFMItem* stvfm_item,
 				stvfm_item_parent_priv->sond_file_part, path, error);
 		g_free(path);
 	}
-	else if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_DIR) { //dir soll kopiert werden
+	else { //dir soll kopiert werden
 		//innerhalt Dateisystem - geht schon
 		if (!stvfm_item_parent_priv->sond_file_part &&
 			(!stvfm_item_priv->sond_file_part ||
@@ -1953,6 +1953,9 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 				sond_file_part_leaf_set_mime_type(SOND_FILE_PART_LEAF(sfp_new),
 						sond_file_part_leaf_get_mime_type(
 								SOND_FILE_PART_LEAF(stvfm_item_priv->sond_file_part)));
+
+			sond_file_part_set_has_children(sfp_new,
+					sond_file_part_get_has_children(stvfm_item_priv->sond_file_part));
 
 			sond_file_part_set_parent(sfp_new, stvfm_item_parent_priv->sond_file_part);
 		}

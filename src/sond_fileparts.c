@@ -337,6 +337,15 @@ gboolean sond_file_part_get_has_children(SondFilePart *sfp) {
 	return sfp_priv->has_children;
 }
 
+void sond_file_part_set_has_children(SondFilePart *sfp, gboolean children) {
+	SondFilePartPrivate* sfp_priv =
+			sond_file_part_get_instance_private(sfp);
+
+	sfp_priv->has_children = children;
+
+	return;
+}
+
 GPtrArray* sond_file_part_get_arr_opened_files(SondFilePart* sfp) {
 	GPtrArray* arr_opened_files = NULL;
 

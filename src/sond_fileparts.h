@@ -53,6 +53,8 @@ void sond_file_part_set_path(SondFilePart*, const gchar*);
 
 gboolean sond_file_part_get_has_children(SondFilePart*);
 
+void sond_file_part_set_has_children(SondFilePart*, gboolean);
+
 GPtrArray* sond_file_part_get_arr_opened_files(SondFilePart*);
 
 gchar* sond_file_part_write_to_tmp_file(fz_context*, SondFilePart*, GError**);
