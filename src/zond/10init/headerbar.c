@@ -362,7 +362,7 @@ static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 			pdf_drop_document(zond->ctx, doc);
 
 			doc = sond_file_part_pdf_open_document(zond->ctx, sfp_pdf,
-					FALSE, FALSE, FALSE, &error);
+					FALSE, &error);
 			if (!doc) {
 				message = g_strdup_printf(
 						"Fehler bei Aufruf sond_file_part_pdf_open_document:\n%s",

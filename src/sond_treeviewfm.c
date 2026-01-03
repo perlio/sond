@@ -413,15 +413,11 @@ static gint sond_tvfm_item_load_fs_dir(SondTVFMItem* stvfm_item,
 			fz_try(ctx)
 				stream = fz_open_file(ctx, rel_path_child);
 			fz_catch(ctx) {
-				if (error)
-					*error = g_error_new( g_quark_from_static_string("mupdf"),
-							fz_caught(ctx), "%s\n%s", __func__,
-							fz_caught_message(ctx));
 				fz_drop_context(ctx);
 				g_free(rel_path_child);
 				g_dir_close(dir);
 
-				return -1;
+				ERROR_PDF
 			}
 
 			sfp_child = sond_file_part_create_from_stream(ctx,
@@ -881,6 +877,9 @@ static void sond_treeviewfm_constructed(GObject *self) {
 	return;
 }
 
+/**
+ * Ändert stvfm_item_priv->path_or_section
+ */
 static void sond_tvfm_item_set_basename(SondTVFMItem* stvfm_item,
 		gchar const* new_basename) {
 	gchar const* path = NULL;
@@ -890,10 +889,11 @@ static void sond_tvfm_item_set_basename(SondTVFMItem* stvfm_item,
 	SondTVFMItemPrivate *stvfm_item_priv =
 			sond_tvfm_item_get_instance_private(stvfm_item);
 
-	if (stvfm_item_priv->path_or_section)
-		path = stvfm_item_priv->path_or_section;
-	else
-		path = sond_file_part_get_path(stvfm_item_priv->sond_file_part);
+	if (!stvfm_item_priv->path_or_section)
+		warning("STVFMItem ist Leaf oder root-dir ('%s')",
+				sond_file_part_get_path(stvfm_item_priv->sond_file_part));
+
+	path = stvfm_item_priv->path_or_section;
 
 	dir = strrchr(path, '/');
 
@@ -902,17 +902,8 @@ static void sond_tvfm_item_set_basename(SondTVFMItem* stvfm_item,
 	else
 		path_new = g_strdup_printf("%.*s/%s", (int)(dir - path), path, new_basename);
 
-	if (stvfm_item_priv->path_or_section) {
-		g_free(stvfm_item_priv->path_or_section);
-		stvfm_item_priv->path_or_section = g_strdup(path_new);
-	}
-	else
-		sond_file_part_set_path(stvfm_item_priv->sond_file_part, path_new);
-
-	g_free(path_new);
-
-	g_free(stvfm_item_priv->display_name);
-	stvfm_item_priv->display_name = g_strdup(new_basename);
+	g_free(stvfm_item_priv->path_or_section);
+	stvfm_item_priv->path_or_section = g_strdup(path_new);
 
 	return;
 }
@@ -1085,6 +1076,8 @@ static gint rename_stvfm_item(SondTVFMItem* stvfm_item,
 				else
 					ERROR_Z
 			}
+
+			sond_tvfm_item_set_basename(stvfm_item, path_new);
 		}
 		else if (SOND_IS_FILE_PART_ZIP(stvfm_item_priv->sond_file_part)) {
 			//ToDo: zip-Verzeichnis-Namen ändern
@@ -1181,7 +1174,10 @@ static gint sond_treeviewfm_text_edited(SondTreeviewFM *stvfm,
 		adjust_sfps_in_dir(stvfm_item_priv->sond_file_part,
 				stvfm_item_priv->sond_file_part, stvfm_item_priv->path_or_section, text_new);
 
-	sond_tvfm_item_set_basename(stvfm_item, text_new);
+	//nur display-name - etwaig erforderliche Pfadanpassungen in rename_stvfm_item bzw.
+	//den spezialisierten Unterfunktionen
+	g_free(stvfm_item_priv->display_name);
+	stvfm_item_priv->display_name = g_strdup(text_new);
 
 	return 0;
 }
@@ -1777,7 +1773,7 @@ static gint process_stvfm_item_move_or_copy(SondTVFMItem* stvfm_item,
 	if(SOND_IS_FILE_PART_GMESSAGE(stvfm_item_parent_priv->sond_file_part))
 		base = g_strdup_printf("%u", s_paste_sel->index_to);
 	else {
-		base = stvfm_item_priv->display_name;
+		base = g_strdup(stvfm_item_priv->display_name);
 
 		//base ändern, wenn MimePart als displayName
 		if (strrchr(base, '/')) {
@@ -1970,7 +1966,7 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 
 		stvfm_item_new_priv = sond_tvfm_item_get_instance_private(stvfm_item_new);
 
-		if (stvfm_item_priv->path_or_section) //stvfm_item ist jedenfalls ein DIR
+		if (clipboard->ausschneiden && stvfm_item_priv->path_or_section) //stvfm_item ist jedenfalls ein DIR
 			adjust_sfps_in_dir(stvfm_item_priv->sond_file_part,
 					stvfm_item_parent_priv->sond_file_part,
 					stvfm_item_priv->path_or_section,

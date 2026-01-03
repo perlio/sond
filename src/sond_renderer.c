@@ -1478,32 +1478,15 @@ static RenderedDocument* render_odt(fz_context *ctx, fz_buffer *buf, int width) 
  * @param render_width Gewünschte Breite (0 = Standard 650px)
  * @return RenderedDocument oder NULL bei Fehler
  */
-RenderedDocument* render_document_from_stream(fz_context *ctx, fz_stream *stream, int render_width) {
-    if (!ctx || !stream) {
-        g_warning("Invalid context or stream");
+RenderedDocument* render_document_from_stream(fz_context *ctx,
+		fz_buffer* buf, int render_width) {
+    if (!ctx || !buf) {
+        g_warning("Invalid context or buffer");
         return NULL;
     }
 
     if (render_width <= 0) {
         render_width = DEFAULT_RENDER_WIDTH;
-    }
-
-    // Stream zu Buffer konvertieren
-    fz_buffer *buf = fz_new_buffer(ctx, 1024);
-
-    fz_seek(ctx, stream, 0, SEEK_SET);
-
-    fz_try(ctx) {
-        unsigned char tmp[4096];
-        size_t n;
-        while ((n = fz_read(ctx, stream, tmp, sizeof(tmp))) > 0) {
-            fz_append_data(ctx, buf, tmp, n);
-        }
-    }
-    fz_catch(ctx) {
-        fz_drop_buffer(ctx, buf);
-        g_warning("Failed to read stream");
-        return NULL;
     }
 
     // Dokumenttyp erkennen
@@ -1556,8 +1539,6 @@ RenderedDocument* render_document_from_stream(fz_context *ctx, fz_stream *stream
         }
     }
 
-    fz_drop_buffer(ctx, buf);
-
     return result;
 }
 
@@ -1591,7 +1572,7 @@ const char* document_type_string(DocumentType type) {
     }
 }
 
-gint sond_render(fz_context* ctx, fz_stream* input, gchar const* title,
+gint sond_render(fz_context* ctx, fz_buffer* input, gchar const* title,
 		GError** error) {
 	RenderedDocument* rd = NULL;
 	GtkWidget* widget = NULL;

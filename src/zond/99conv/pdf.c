@@ -129,7 +129,7 @@ gint pdf_clean(fz_context *ctx, SondFilePartPDF* sfp_pdf, GError **error) {
 		return -1;
 	}
 
-	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, FALSE, TRUE, TRUE, error);
+	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, TRUE, error);
 	if (!doc) {
 		if (g_error_matches(*error, g_quark_from_static_string("sond"), 1)) { //auth failed
 			g_clear_error(error);

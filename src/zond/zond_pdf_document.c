@@ -502,6 +502,7 @@ zond_pdf_document_open(SondFilePartPDF* sfp_pdf, gint von, gint bis,
 	ZondPdfDocumentPrivate *priv = NULL;
 	ZondPdfDocumentClass *klass = NULL;
 	gint number_of_pages = 0;
+	gchar* filename = NULL;
 
 	zond_pdf_document = (ZondPdfDocument*) zond_pdf_document_is_open(sfp_pdf);
 	if (zond_pdf_document) {
@@ -529,8 +530,24 @@ zond_pdf_document_open(SondFilePartPDF* sfp_pdf, gint von, gint bis,
 		return NULL;
 	}
 
-	priv->doc = sond_file_part_pdf_open_document(priv->ctx, sfp_pdf, FALSE, TRUE, TRUE, error);
-	if (!priv->doc) {
+	filename = sond_file_part_write_to_tmp_file(priv->ctx,
+			SOND_FILE_PART(sfp_pdf), error);
+	if (!filename) {
+		g_object_unref(zond_pdf_document);
+
+		ERROR_Z_VAL(NULL)
+	}
+
+	fz_try(priv->ctx)
+		priv->doc = pdf_open_document(priv->ctx, filename);
+	fz_catch(priv->ctx) {
+		gint rc = 0;
+
+		rc = g_remove(filename);
+		if (rc)
+			g_warning("%s\nDatei '%s' konnte nicht gelöscht werden:\n%s",
+					__func__, filename, strerror(errno));
+		g_free(filename);
 		g_object_unref(zond_pdf_document);
 
 		ERROR_Z_VAL(NULL)

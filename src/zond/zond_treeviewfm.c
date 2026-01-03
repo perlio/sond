@@ -179,16 +179,17 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 	//Falls aus GMessage verschoben wird - welchen Index hatte Eintrag?
 	from_gmessage = get_gmessage_index(stvfm_item, &index_from);
 
-	//Wenn es root-dir einer Datei ist
-	if (sond_tvfm_item_get_sond_file_part(stvfm_item_parent) &&
-			!sond_tvfm_item_get_path_or_section(stvfm_item_parent))
-		prefix_new = add_string(prefix_new, g_strdup("//"));
-	else if (prefix_new)//wenn
-		prefix_new = add_string(prefix_new, g_strdup("/"));
+	if (prefix_new) { //wenn nicht root-Verzeichnis
+		if (!sond_tvfm_item_get_path_or_section(stvfm_item_parent))
+			prefix_new = add_string(prefix_new, g_strdup("//"));
+		else if (prefix_new) //wenn
+			prefix_new = add_string(prefix_new, g_strdup("/"));
+	}
 
 	if (SOND_IS_FILE_PART_GMESSAGE(sond_tvfm_item_get_sond_file_part(stvfm_item_parent)))
 		prefix_new = add_string(prefix_new, g_strdup("alpha")); //irgendwas alphanumerisches
-	else prefix_new = add_string(prefix_new, g_strdup(base_new));
+	else
+		prefix_new = add_string(prefix_new, g_strdup(base_new));
 
 	//Änderungsstatus zwischenspeichern
 	ztvfm_priv->changed_tmp = ztvfm_priv->zond->dbase_zond->changed;
@@ -197,13 +198,15 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 	if (rc)
 		ERROR_Z
 
+	//alle Dateien, die mit filepart(stvfm_item) + path anfangen (einschließlich stvfm_item)
+		//-> umbenennen
 	rc = dbase_zond_update_path(ztvfm_priv->zond->dbase_zond, prefix_old, prefix_new, error);
 	if (rc) {
 		dbase_zond_rollback(ztvfm_priv->zond->dbase_zond, error);
 		ERROR_Z
 	}
 
-	//wenn aus GMessage verschoben wurde - nachfolgende indizes anpassen
+	//wenn aus GMessage verschoben wurde - nachfolgende indizes anpassen (-1)
 	if (from_gmessage) {
 		gint rc = 0;
 		gchar* prefix_gmessage = NULL;
@@ -223,25 +226,27 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 	//wenn in GMESSAGE
 	if (SOND_IS_FILE_PART_GMESSAGE(sond_tvfm_item_get_sond_file_part(stvfm_item_parent))) {
 		gint rc = 0;
-		gchar* prefix_final = NULL;
+		gchar* prefix_gmessage = NULL;
+
+		//"alpha" wieder wegnehmen
+		prefix_gmessage = g_strndup(prefix_new, strlen(prefix_new) - strlen(strrchr(prefix_new, '/') + 1));
 
 		//indizes ab index_to +1
 		rc = dbase_zond_update_gmessage_index(ztvfm_priv->zond->dbase_zond,
-				prefix_new, index_to, TRUE, error);
+				prefix_gmessage, index_to, TRUE, error);
 		if (rc) {
 			dbase_zond_rollback(ztvfm_priv->zond->dbase_zond, error);
+			g_free(prefix_gmessage);
+
 			ERROR_Z
 		}
 
-		//mit base_new upgedatete Zeilen korrigieren
-		prefix_final = strrchr(prefix_new, '/');
-		//muß != NULL sein, weil sfp(item_parent) sonst niemals GMESSAGE sein könnte
-		//hoffe ich
-		prefix_final = add_string(prefix_final, g_strdup_printf("%u", index_to));
+		//index_to als basename hinzufügen
+		prefix_gmessage = add_string(prefix_gmessage, g_strdup_printf("%u", index_to));
 
 		rc = dbase_zond_update_path(ztvfm_priv->zond->dbase_zond, prefix_new,
-				prefix_final, error);
-		g_free(prefix_final);
+				prefix_gmessage, error);
+		g_free(prefix_gmessage);
 		if (rc) {
 			dbase_zond_rollback(ztvfm_priv->zond->dbase_zond, error);
 			ERROR_Z

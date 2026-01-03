@@ -55,6 +55,8 @@ gboolean sond_file_part_get_has_children(SondFilePart*);
 
 GPtrArray* sond_file_part_get_arr_opened_files(SondFilePart*);
 
+gchar* sond_file_part_write_to_tmp_file(fz_context*, SondFilePart*, GError**);
+
 gint sond_file_part_open(SondFilePart*, gboolean, GError**);
 
 gchar* sond_file_part_get_filepart(SondFilePart*);
@@ -87,7 +89,7 @@ struct _SondFilePartPDFClass {
 };
 
 pdf_document* sond_file_part_pdf_open_document(fz_context*,
-		SondFilePartPDF*, gboolean, gboolean, gboolean, GError **);
+		SondFilePartPDF*, gboolean, GError **);
 
 gint sond_file_part_pdf_save(fz_context*, pdf_document*, SondFilePartPDF*, GError**);
 
