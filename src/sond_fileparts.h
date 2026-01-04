@@ -93,7 +93,7 @@ struct _SondFilePartPDFClass {
 pdf_document* sond_file_part_pdf_open_document(fz_context*,
 		SondFilePartPDF*, gboolean, GError **);
 
-gint sond_file_part_pdf_save(fz_context*, pdf_document*, SondFilePartPDF*, GError**);
+gint sond_file_part_pdf_save_and_close(fz_context*, pdf_document*, SondFilePartPDF*, GError**);
 
 gint sond_file_part_pdf_load_embedded_files(SondFilePartPDF*, GPtrArray**, GError**);
 

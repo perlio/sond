@@ -472,8 +472,7 @@ static void zond_pdf_document_init(ZondPdfDocument *self) {
 	return;
 }
 
-const ZondPdfDocument*
-zond_pdf_document_is_open(SondFilePartPDF* sfp_pdf) {
+ZondPdfDocument* zond_pdf_document_is_open(SondFilePartPDF* sfp_pdf) {
 	ZondPdfDocumentClass *klass = g_type_class_peek(
 			zond_pdf_document_get_type());
 
@@ -504,7 +503,7 @@ zond_pdf_document_open(SondFilePartPDF* sfp_pdf, gint von, gint bis,
 	gint number_of_pages = 0;
 	gchar* filename = NULL;
 
-	zond_pdf_document = (ZondPdfDocument*) zond_pdf_document_is_open(sfp_pdf);
+	zond_pdf_document = zond_pdf_document_is_open(sfp_pdf);
 	if (zond_pdf_document) {
 		gint rc = 0;
 
@@ -576,7 +575,7 @@ zond_pdf_document_open(SondFilePartPDF* sfp_pdf, gint von, gint bis,
 
 	return zond_pdf_document;
 }
-
+/*
 gint zond_pdf_document_save(ZondPdfDocument *self, GError **error) {
 	ZondPdfDocumentPrivate *priv = zond_pdf_document_get_instance_private(self);
 
@@ -592,14 +591,14 @@ gint zond_pdf_document_save(ZondPdfDocument *self, GError **error) {
 
 	priv->ocr_num = 0;
 
-	rc = sond_file_part_pdf_save(priv->ctx, priv->doc, priv->sfp_pdf, error);
+	rc = sond_file_part_pdf_save_and_close(priv->ctx, priv->doc, priv->sfp_pdf, error);
 	if (rc) ERROR_Z
 
 	g_array_remove_range(priv->arr_journal, 0, priv->arr_journal->len);
 
 	return 0;
 }
-
+*/
 void zond_pdf_document_close(ZondPdfDocument *zond_pdf_document) {
 	g_object_unref(zond_pdf_document);
 

@@ -138,7 +138,7 @@ gint zond_pdf_document_load_page(PdfDocumentPage*, fz_context*, gchar**);
 ZondPdfDocument* zond_pdf_document_open(SondFilePartPDF*, gint, gint, GError**);
 
 //Gibt Zeiger auf geöffnetes document mit gchar* == path zurück; keine neue ref!
-const ZondPdfDocument* zond_pdf_document_is_open(SondFilePartPDF*);
+ZondPdfDocument* zond_pdf_document_is_open(SondFilePartPDF*);
 
 void zond_pdf_document_unload_page(PdfDocumentPage*);
 

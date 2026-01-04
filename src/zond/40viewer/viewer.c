@@ -761,9 +761,12 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 
 		if (pdfp->deleted && !pdfp->inserted) {
 			fz_try(ctx)
-					pdf_delete_page(ctx, doc, page_orig);
-			fz_catch(ctx)
+				pdf_delete_page(ctx, doc, page_orig);
+			fz_catch(ctx) {
+				pdf_drop_document(ctx, doc);
+
 				ERROR_PDF
+			}
 
 			page_orig--;
 
@@ -783,6 +786,7 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 				if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\n%s",
 						__func__, errmsg);
 				g_free(errmsg);
+				pdf_drop_document(ctx, doc);
 
 				return -1;
 			}
@@ -792,8 +796,11 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 
 		fz_try(ctx)
 			pdf_page = pdf_load_page(ctx, doc, page_orig);
-		fz_catch(ctx)
+		fz_catch(ctx) {
+			pdf_drop_document(ctx, doc);
+
 			ERROR_PDF
+		}
 
 		//entries durchgehen und ggf. einpflegen
 		for (gint u = 0; u < arr_journal->len; u++) {
@@ -818,6 +825,8 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 				rc = pdf_page_rotate(ctx, pdf_page->obj, entry.rotate.winkel, error);
 				if (rc) {
 					pdf_drop_page(ctx, pdf_page);
+					pdf_drop_document(ctx, doc);
+
 					ERROR_Z
 				}
 			}
@@ -828,6 +837,8 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 					num = sond_ocr_get_num_sond_font(ctx, doc, error);
 					if (num == -1) {
 						pdf_drop_page(ctx, pdf_page);
+						pdf_drop_document(ctx, doc);
+
 						ERROR_Z
 					}
 					else if (!num) {
@@ -836,6 +847,8 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 						font_ref = sond_ocr_put_sond_font(ctx, doc, error);
 						if (!font_ref) {
 							pdf_drop_page(ctx, pdf_page);
+							pdf_drop_document(ctx, doc);
+
 							ERROR_Z
 						}
 
@@ -843,6 +856,8 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 							num = pdf_to_num(ctx, font_ref);
 						fz_catch(ctx) {
 							pdf_drop_page(ctx, pdf_page);
+							pdf_drop_document(ctx, doc);
+
 							ERROR_PDF
 						}
 					}
@@ -852,6 +867,7 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 				if (rc)
 				{
 					pdf_drop_page(ctx, pdf_page);
+					pdf_drop_document(ctx, doc);
 
 					ERROR_Z
 				}
@@ -864,6 +880,7 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 						entry.annot_changed.annot_after, error);
 				if (!pdf_ann) {
 					pdf_drop_page(ctx, pdf_page);
+					pdf_drop_document(ctx, doc);
 					ERROR_Z
 				}
 			}
@@ -881,6 +898,7 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 						entry.annot_changed.annot_after, error);
 				if (rc) {
 					pdf_drop_page(ctx, pdf_page);
+					pdf_drop_document(ctx, doc);
 					ERROR_Z
 				}
 			}
@@ -920,7 +938,7 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 
 	//alles geändert, dann speichern
 	zond_pdf_document_mutex_lock(dd->zpdfd_part->zond_pdf_document);
-	rc = sond_file_part_pdf_save(ctx, doc,
+	rc = sond_file_part_pdf_save_and_close(ctx, doc,
 			zond_pdf_document_get_sfp_pdf(dd->zpdfd_part->zond_pdf_document), error);
 	zond_pdf_document_mutex_unlock(dd->zpdfd_part->zond_pdf_document);
 	if (rc)

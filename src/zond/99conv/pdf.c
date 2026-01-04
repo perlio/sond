@@ -172,8 +172,7 @@ gint pdf_clean(fz_context *ctx, SondFilePartPDF* sfp_pdf, GError **error) {
 		return -1;
 	}
 
-	rc = sond_file_part_pdf_save(ctx, doc, sfp_pdf, error);
-	pdf_drop_document(ctx, doc);
+	rc = sond_file_part_pdf_save_and_close(ctx, doc, sfp_pdf, error);
 	g_object_unref(sfp_pdf);
 	ret = g_remove(path_tmp);
 	if (ret)

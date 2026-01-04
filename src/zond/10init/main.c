@@ -360,8 +360,9 @@ static void error_handler (const gchar* log_domain, GLogLevelFlags log_level,
     	level = "CRITICAL";
     else if (log_level == G_LOG_LEVEL_ERROR)
     	level = "ERROR";
-    else
+    else {
     	level = "UNKNOWN";
+    }
 
 	// Ausgabe mit Zeitstempel auf stderr
 	g_printerr("%s: [%s] [%s] %s\n", log_domain, timestr, level, message);

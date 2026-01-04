@@ -386,7 +386,7 @@ static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 			continue;
 		}
 
-		rc = sond_file_part_pdf_save(zond->ctx, doc, sfp_pdf, &error);
+		rc = sond_file_part_pdf_save_and_close(zond->ctx, doc, sfp_pdf, &error);
 	}
 
 	info_window_close(info_window);
