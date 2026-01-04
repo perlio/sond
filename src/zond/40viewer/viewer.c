@@ -923,18 +923,8 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 	rc = sond_file_part_pdf_save(ctx, doc,
 			zond_pdf_document_get_sfp_pdf(dd->zpdfd_part->zond_pdf_document), error);
 	zond_pdf_document_mutex_unlock(dd->zpdfd_part->zond_pdf_document);
-	if (rc) {
-#ifndef VIEWER
-		dbase_zond_rollback(pv->zond->dbase_zond, error);
-
-		ERROR_Z;
-	}
-
-	rc = dbase_zond_commit(pv->zond->dbase_zond, error);
-	if (rc) {
-#endif //VIEWER
+	if (rc)
 		ERROR_Z
-	}
 
 	//Journal bereinigen
 	for (gint i = arr_journal->len - 1; i >= 0; i--) {

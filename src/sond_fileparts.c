@@ -644,7 +644,6 @@ static fz_stream* get_istream(fz_context* ctx, SondFilePart* sfp_parent, gchar c
 			"kann nicht geöffnet werden", __func__);
 	}
 
-
 	return stream;
 }
 
@@ -722,9 +721,11 @@ static fz_buffer* sond_file_part_get_buffer(SondFilePart* sfp,
 		arr_gbytes = g_mime_stream_mem_get_byte_array(GMIME_STREAM_MEM(gmime_stream));
 
 		fz_try(ctx)
-			buf = fz_new_buffer_from_data(ctx, arr_gbytes->data, arr_gbytes->len);
-		fz_catch(ctx)
+			buf = fz_new_buffer_from_copied_data(ctx, arr_gbytes->data, arr_gbytes->len);
+		fz_always(ctx)
 			fz_drop_stream(ctx, stream);
+		fz_catch(ctx)
+			ERROR_Z_VAL(NULL)
 	}
 
 	return buf;
@@ -1448,6 +1449,8 @@ gint sond_file_part_pdf_save(fz_context *ctx, pdf_document *pdf_doc,
 	buf = pdf_doc_to_buf(ctx, pdf_doc, error);
 	if (!buf)
 		ERROR_Z
+
+	pdf_drop_document(ctx, pdf_doc);
 
 	rc = sond_file_part_replace(SOND_FILE_PART(sfp_pdf), ctx, buf, error);
 	fz_drop_buffer(ctx, buf);
@@ -2327,6 +2330,7 @@ struct _FzGMimeStreamClass {
 
 G_DEFINE_TYPE(FzGMimeStream, fz_gmime_stream, GMIME_TYPE_STREAM)
 
+
 static ssize_t
 fz_gmime_stream_read(GMimeStream *stream, char *buf, size_t len)
 {
@@ -2527,22 +2531,12 @@ static gint sond_file_part_gmessage_open(SondFilePartGMessage* sfp_gmessage,
 		ERROR_Z
 	}
 
-	stream = fz_gmime_stream_new(ctx, fz_stream); //ref wird übernommen
+	stream = fz_gmime_stream_new(ctx, fz_stream); //ref wird erhöht
 	fz_drop_stream(ctx, fz_stream);
 
 	parser = g_mime_parser_new_with_stream (stream);
-	if (!parser) {
-		if (error) *error = g_error_new(ZOND_ERROR, 0,
-				"%s\nParser konnte nicht erstellt werden", __func__);
-		g_object_unref (stream);
-		fz_drop_stream(ctx, fz_stream);
-		fz_drop_context(ctx);
-
-		return -1;
-	}
 
 	/* Note: we can unref the stream now since the GMimeParser has a reference to it... */
-
 	message = g_mime_parser_construct_message (parser, NULL);
 	g_object_unref (parser);
 	g_object_unref (stream);

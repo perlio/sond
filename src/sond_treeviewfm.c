@@ -942,84 +942,6 @@ static void adjust_sfps_in_dir(SondFilePart* sfp_dir, SondFilePart* sfp_dst,
 	return;
 }
 
-static void remove_item_from_tree(GtkTreeIter* iter,
-		SondTVFMItem* stvfm_item) {
-	gboolean is_gmessage = FALSE;
-
-	SondTVFMItemPrivate* stvfm_item_priv =
-			sond_tvfm_item_get_instance_private(stvfm_item);
-
-	if (stvfm_item_priv->path_or_section)
-		is_gmessage = SOND_IS_FILE_PART_GMESSAGE(stvfm_item_priv->sond_file_part);
-	else
-		is_gmessage = SOND_IS_FILE_PART_GMESSAGE(
-				sond_file_part_get_parent(stvfm_item_priv->sond_file_part));
-
-	if (gtk_tree_store_remove(
-			GTK_TREE_STORE(gtk_tree_view_get_model(
-					GTK_TREE_VIEW(stvfm_item_priv->stvfm))), iter)) {
-
-		//Leider, wenn GMessage, die Pfade anpassen
-		if (is_gmessage)
-			do {
-				SondTVFMItem* stvfm_item_sibling = NULL;
-				SondTVFMItemPrivate* stvfm_item_sibling_priv = NULL;
-				gchar const* path_old = NULL;
-				gchar* path_new = NULL;
-				gint index = 0;
-
-				gtk_tree_model_get(gtk_tree_view_get_model(
-					GTK_TREE_VIEW(stvfm_item_priv->stvfm)), iter, 0,
-						&stvfm_item_sibling, -1);
-				stvfm_item_sibling_priv =
-						sond_tvfm_item_get_instance_private(stvfm_item_sibling);
-				g_object_unref(stvfm_item_sibling);
-
-				path_old = (stvfm_item_sibling_priv->path_or_section) ?
-						stvfm_item_sibling_priv->path_or_section :
-						sond_file_part_get_path(stvfm_item_sibling_priv->sond_file_part);
-
-				if (strrchr(path_old, '/')) {
-					gchar const* base_old = NULL;
-					gchar* dir = NULL;
-
-					base_old = strrchr(path_old, '/');
-					index = atoi(base_old);
-
-					dir = g_path_get_dirname(path_old);
-					path_new = g_strdup_printf("%s/%u", dir, index - 1);
-					g_free(dir);
-				}
-				else {
-					index = atoi(path_old);
-					path_new = g_strdup_printf("%u", index - 1);
-				}
-
-				//sibling ist dir, also multipart:
-				if (stvfm_item_sibling_priv->path_or_section) {
-					//sfps im "scope" anpassen
-					adjust_sfps_in_dir(stvfm_item_sibling_priv->sond_file_part,
-							stvfm_item_sibling_priv->sond_file_part,
-							stvfm_item_sibling_priv->path_or_section, path_new);
-
-					//jetzt path von stvfm_item_sibling ändern
-					g_free(stvfm_item_sibling_priv->path_or_section);
-					stvfm_item_sibling_priv->path_or_section = path_new;
-				}
-				else //ist selbst sfp - dessen Pfad muß geändert werden
-					sond_file_part_set_path(
-							stvfm_item_sibling_priv->sond_file_part, path_new);
-
-				g_free(path_new);
-			} while (gtk_tree_model_iter_next(gtk_tree_view_get_model(
-					GTK_TREE_VIEW(stvfm_item_priv->stvfm)), iter));
-	}
-	else
-		warning("Knoten konnte nicht gelöscht werden");
-
-	return;
-}
-
 static gint rename_stvfm_item(SondTVFMItem* stvfm_item,
 		SondTVFMItem* stvfm_item_parent, gchar const* base_new,
 		GError** error) {
@@ -1635,6 +1557,142 @@ static gint copy_stvfm_item(SondTVFMItem* stvfm_item,
 		ERROR_Z
 
 	return 0;
+}
+
+static void remove_item_from_tree(GtkTreeIter* iter,
+		SondTVFMItem* stvfm_item) {
+	gboolean is_gmessage = FALSE;
+
+	SondTVFMItemPrivate* stvfm_item_priv =
+			sond_tvfm_item_get_instance_private(stvfm_item);
+
+	if (stvfm_item_priv->path_or_section)
+		is_gmessage = SOND_IS_FILE_PART_GMESSAGE(stvfm_item_priv->sond_file_part);
+	else
+		is_gmessage = SOND_IS_FILE_PART_GMESSAGE(
+				sond_file_part_get_parent(stvfm_item_priv->sond_file_part));
+
+	//Wenn gelöschte Datei embedded file in PDF war:
+	if (SOND_IS_FILE_PART_PDF(sond_file_part_get_parent(
+			stvfm_item_priv->sond_file_part))) {
+		//Falls es das letzte war, muß alles umgestellt werdem
+		if (!sond_file_part_get_has_children(sond_file_part_get_parent(
+				stvfm_item_priv->sond_file_part))) {
+			GtkTreeIter iter_parent = { 0 };
+			GtkTreeIter iter_page_tree = { 0 };
+			SondTVFMItem* stvfm_item_parent = NULL;
+			SondTVFMItemPrivate* stvfm_item_parent_priv = NULL;
+
+			//stvfm mit page_tree muß gelöscht werden
+			iter_page_tree = *iter; //iter brauchen wir noch
+			if (!gtk_tree_model_iter_previous(
+					gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm_item_priv->stvfm)),
+					&iter_page_tree)) {
+				critical("PageTree-Item fehlt");
+
+				goto parent;
+			}
+
+			if (!gtk_tree_store_remove(GTK_TREE_STORE(
+					gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm_item_priv->stvfm))),
+					&iter_page_tree))
+				critical("PageTree-Item konnte nicht gelöscht werden");
+
+parent:
+			//Jetzt muß stvfm_item (parent) angepaßt werden
+			if (!gtk_tree_model_iter_parent(
+					gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm_item_priv->stvfm)),
+					&iter_parent, iter)) {
+				critical("Parent-Item nicht vorhanden");
+
+				goto end;
+			}
+
+			gtk_tree_model_get(gtk_tree_view_get_model(
+					GTK_TREE_VIEW(stvfm_item_priv->stvfm)),
+					&iter_parent, 0, &stvfm_item_parent, -1);
+
+			if (!SOND_IS_TVFM_ITEM(stvfm_item_parent)) {
+				critical("Parent enthält kein STVFM-Item");
+
+				goto end;
+			}
+
+			stvfm_item_parent_priv = sond_tvfm_item_get_instance_private(
+					stvfm_item_parent);
+			stvfm_item_parent_priv->type = SOND_TVFM_ITEM_TYPE_LEAF;
+			stvfm_item_parent_priv->has_children = FALSE;
+			stvfm_item_parent_priv->icon_name = "pdf";
+			g_object_unref(stvfm_item_parent);
+
+			end:
+		}
+	}
+
+	//jetzt auf Zielknoten löschen
+	if (gtk_tree_store_remove(
+			GTK_TREE_STORE(gtk_tree_view_get_model(
+					GTK_TREE_VIEW(stvfm_item_priv->stvfm))), iter)) {
+
+		//Leider, wenn GMessage, die Pfade anpassen
+		if (is_gmessage)
+			do {
+				SondTVFMItem* stvfm_item_sibling = NULL;
+				SondTVFMItemPrivate* stvfm_item_sibling_priv = NULL;
+				gchar const* path_old = NULL;
+				gchar* path_new = NULL;
+				gint index = 0;
+
+				gtk_tree_model_get(gtk_tree_view_get_model(
+					GTK_TREE_VIEW(stvfm_item_priv->stvfm)), iter, 0,
+						&stvfm_item_sibling, -1);
+				stvfm_item_sibling_priv =
+						sond_tvfm_item_get_instance_private(stvfm_item_sibling);
+				g_object_unref(stvfm_item_sibling);
+
+				path_old = (stvfm_item_sibling_priv->path_or_section) ?
+						stvfm_item_sibling_priv->path_or_section :
+						sond_file_part_get_path(stvfm_item_sibling_priv->sond_file_part);
+
+				if (strrchr(path_old, '/')) {
+					gchar const* base_old = NULL;
+					gchar* dir = NULL;
+
+					base_old = strrchr(path_old, '/');
+					index = atoi(base_old);
+
+					dir = g_path_get_dirname(path_old);
+					path_new = g_strdup_printf("%s/%u", dir, index - 1);
+					g_free(dir);
+				}
+				else {
+					index = atoi(path_old);
+					path_new = g_strdup_printf("%u", index - 1);
+				}
+
+				//sibling ist dir, also multipart:
+				if (stvfm_item_sibling_priv->path_or_section) {
+					//sfps im "scope" anpassen
+					adjust_sfps_in_dir(stvfm_item_sibling_priv->sond_file_part,
+							stvfm_item_sibling_priv->sond_file_part,
+							stvfm_item_sibling_priv->path_or_section, path_new);
+
+					//jetzt path von stvfm_item_sibling ändern
+					g_free(stvfm_item_sibling_priv->path_or_section);
+					stvfm_item_sibling_priv->path_or_section = path_new;
+				}
+				else //ist selbst sfp - dessen Pfad muß geändert werden
+					sond_file_part_set_path(
+							stvfm_item_sibling_priv->sond_file_part, path_new);
+
+				g_free(path_new);
+			} while (gtk_tree_model_iter_next(gtk_tree_view_get_model(
+					GTK_TREE_VIEW(stvfm_item_priv->stvfm)), iter));
+	}
+	else
+		warning("Knoten konnte nicht gelöscht werden");
+
+	return;
 }
 
 static gint delete_item(SondTVFMItem* stvfm_item, GError** error) {
@@ -2260,61 +2318,6 @@ static gint loesche_item(SondTVFMItem* stvfm_item, GtkTreeIter* iter, GError** e
 		rc = sond_file_part_delete(stvfm_item_priv->sond_file_part, error);
 		if (rc)
 			ERROR_Z
-
-		//Wenn gelöschte Datei embedded file in PDF war:
-		if (SOND_IS_FILE_PART_PDF(sond_file_part_get_parent(
-				stvfm_item_priv->sond_file_part))) {
-			//Falls es das letzte war, muß alles umgestellt werdem
-			if (!sond_file_part_get_has_children(sond_file_part_get_parent(
-					stvfm_item_priv->sond_file_part))) {
-				GtkTreeIter iter_parent = { 0 };
-				GtkTreeIter iter_page_tree = { 0 };
-				SondTVFMItem* stvfm_item_parent = NULL;
-				SondTVFMItemPrivate* stvfm_item_parent_priv = NULL;
-
-				//stvfm mit page_tree muß gelöscht werden
-				iter_page_tree = *iter; //iter brauchen wir noch
-				if (!gtk_tree_model_iter_previous(
-						gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm_item_priv->stvfm)),
-						&iter_page_tree)) {
-					critical("PageTree-Item fehlt");
-
-					goto parent;
-				}
-
-				if (!gtk_tree_store_remove(GTK_TREE_STORE(
-						gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm_item_priv->stvfm))),
-						&iter_page_tree))
-					critical("PageTree-Item konnte nicht gelöscht werden");
-
-	parent:
-				//Jetzt muß stvfm_item (parent) angepaßt werden
-				if (!gtk_tree_model_iter_parent(
-						gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm_item_priv->stvfm)),
-						&iter_parent, iter)) {
-					critical("Parent-Item nicht vorhanden");
-
-					goto end;
-				}
-
-				gtk_tree_model_get(gtk_tree_view_get_model(
-						GTK_TREE_VIEW(stvfm_item_priv->stvfm)),
-						&iter_parent, 0, &stvfm_item_parent, -1);
-
-				if (!SOND_IS_TVFM_ITEM(stvfm_item_parent)) {
-					critical("Parent enthält kein STVFM-Item");
-
-					goto end;
-				}
-
-				stvfm_item_parent_priv = sond_tvfm_item_get_instance_private(
-						stvfm_item_parent);
-				stvfm_item_parent_priv->type = SOND_TVFM_ITEM_TYPE_LEAF;
-				stvfm_item_parent_priv->has_children = FALSE;
-				stvfm_item_parent_priv->icon_name = "pdf";
-				g_object_unref(stvfm_item_parent);
-			}
-		}
 	}
 	else if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF_SECTION) {
 		if (SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->delete_section) {
@@ -2328,7 +2331,6 @@ static gint loesche_item(SondTVFMItem* stvfm_item, GtkTreeIter* iter, GError** e
 			return 0;
 	}
 
-	end:
 	remove_item_from_tree(iter, stvfm_item);
 
 	return 0;
