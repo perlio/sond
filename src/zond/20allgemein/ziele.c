@@ -569,10 +569,9 @@ gint zond_anbindung_erzeugen(PdfViewer *pv, GError **error) {
 	//ToDo: Wollen wir später schon!
 	if (pv->dd->next) {
 		if (error)
-			*error =
-					g_error_new( ZOND_ERROR, 0,
-							"%s\nAnbindung kann nicht in virtuelles Dokument eingefügt werden",
-							__func__);
+			*error = g_error_new( ZOND_ERROR, 0,
+					"%s\nAnbindung kann nicht in virtuelles Dokument eingefügt werden",
+					__func__);
 
 		return -1;
 	}

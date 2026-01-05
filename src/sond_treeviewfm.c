@@ -333,6 +333,10 @@ SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM* stvfm,
 		}
 	}
 
+	//section?
+	if (sond_file_part && path_or_section) //Spezialfall "//" wurde oben schon weggefischt
+		stvfm_item_priv->type = SOND_TVFM_ITEM_TYPE_LEAF_SECTION;
+
 	//Spezialbehandlung für Sections
 	if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF_SECTION ||
 			stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF) {

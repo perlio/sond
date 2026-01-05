@@ -67,9 +67,10 @@ gint zond_dbase_commit(ZondDBase*, GError**);
 
 void zond_dbase_rollback(ZondDBase*, GError**);
 
-gint zond_dbase_test_path(ZondDBase*, const gchar*, GError**);
+gint zond_dbase_test_path(ZondDBase*, const gchar*, gchar const*, GError**);
 
-gint zond_dbase_test_path_section(ZondDBase*, const gchar*, gchar const*, GError**);
+gint zond_dbase_test_path_section(ZondDBase*, const gchar*, gchar const*,
+		gboolean smaller, GError**);
 
 gint zond_dbase_insert_node(ZondDBase*, gint, gboolean, gint, gint,
 		const gchar*, gchar const*, const gchar*, const gchar*, const gchar*,

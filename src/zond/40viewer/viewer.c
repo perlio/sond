@@ -2881,8 +2881,10 @@ static gboolean cb_viewer_layout_press_button(GtkWidget *layout,
 
 		if (!rc) {
 			ViewerPageNew* viewer_page = NULL;
+			gint page_pdf = 0;
 
 			viewer_page = g_ptr_array_index(pv->arr_pages, pdf_punkt.seite);
+			page_pdf = viewer_page->pdf_document_page->page_akt;
 
 			//Test, ob Seite in Dokument frisch eingefügt
 			if (viewer_page->pdf_document_page->inserted) {
@@ -2894,7 +2896,7 @@ static gboolean cb_viewer_layout_press_button(GtkWidget *layout,
 			}
 
 			if (pv->anbindung.von.index == -1) {
-				pv->anbindung.von.seite = pdf_punkt.seite;
+				pv->anbindung.von.seite = page_pdf;
 				if (punktgenau)
 					pv->anbindung.von.index = pdf_punkt.punkt.y;
 				else
@@ -2916,11 +2918,11 @@ static gboolean cb_viewer_layout_press_button(GtkWidget *layout,
 				//"richtige" Reihenfolge
 				GError* error = NULL;
 
-				if ((pdf_punkt.seite >= pv->anbindung.von.seite)
+				if ((page_pdf >= pv->anbindung.von.seite)
 						|| ((punktgenau)
-								&& (pdf_punkt.seite == pv->anbindung.von.seite)
+								&& (page_pdf == pv->anbindung.von.seite)
 								&& (pdf_punkt.punkt.y >= pv->anbindung.von.index))) {
-					pv->anbindung.bis.seite = pdf_punkt.seite;
+					pv->anbindung.bis.seite = page_pdf;
 					if (punktgenau)
 						pv->anbindung.bis.index = pdf_punkt.punkt.y;
 					else
@@ -2934,7 +2936,7 @@ static gboolean cb_viewer_layout_press_button(GtkWidget *layout,
 					else
 						pv->anbindung.bis.index = pv->anbindung.von.index;
 
-					pv->anbindung.von.seite = pdf_punkt.seite;
+					pv->anbindung.von.seite = page_pdf;
 					if (punktgenau)
 						pv->anbindung.von.index = pdf_punkt.punkt.y;
 					else

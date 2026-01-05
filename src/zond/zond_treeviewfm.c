@@ -28,26 +28,24 @@ typedef struct {
 
 G_DEFINE_TYPE_WITH_PRIVATE(ZondTreeviewFM, zond_treeviewfm, SOND_TYPE_TREEVIEWFM)
 
-static gchar* get_path(SondFilePart* sfp, gchar const* path_or_section) {
+static gchar* get_path_from_stvfm_item(SondTVFMItem* stvfm_item) {
 	gchar* filepart = NULL;
 	gchar* path = NULL;
 
-	if (sfp)
-		filepart = sond_file_part_get_filepart(sfp);
+	if (sond_tvfm_item_get_sond_file_part(stvfm_item))
+		filepart = sond_file_part_get_filepart(
+				sond_tvfm_item_get_sond_file_part(stvfm_item));
 
-	path = g_strconcat((filepart) ? filepart : "",
-			(filepart && path_or_section) ? "//" : "",
-			(path_or_section) ? path_or_section : "", NULL);
-	g_free(filepart);
-
-	return path;
-}
-
-static gchar* get_path_from_stvfm_item(SondTVFMItem* stvfm_item) {
-	gchar* path = NULL;
-
-	path = get_path(sond_tvfm_item_get_sond_file_part(stvfm_item),
-			sond_tvfm_item_get_path_or_section(stvfm_item));
+	if (sond_tvfm_item_get_item_type(stvfm_item) ==
+			SOND_TVFM_ITEM_TYPE_DIR) {
+		path = g_strconcat((filepart) ? filepart : "",
+				(filepart && sond_tvfm_item_get_path_or_section(stvfm_item)) ? "//" : "",
+				(sond_tvfm_item_get_path_or_section(stvfm_item)) ?
+						sond_tvfm_item_get_path_or_section(stvfm_item) : "", NULL);
+		g_free(filepart);
+	}
+	else
+		path = filepart;
 
 	return path;
 }
@@ -72,7 +70,7 @@ static gint zond_treeviewfm_deter_background(SondTVFMItem *stvfm_item, GError **
 		//Funktion testet, ob mind ein Abschnitt in db, der section mindestens umfaßt
 		rc = zond_dbase_test_path_section(
 				priv->zond->dbase_zond->zond_dbase_work, filepart,
-				section, error);
+				section, TRUE, error);
 		if (rc == -1)
 			ERROR_Z
 		else if (rc == 1)
@@ -112,20 +110,22 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 	gint rc = 0;
 	g_autofree gchar* path = NULL;
 	gint index_from = 0;
+	gchar const* section = NULL;
 
 	ZondTreeviewFMPrivate *priv = zond_treeviewfm_get_instance_private(ztvfm);
 
 	path = get_path_from_stvfm_item(stvfm_item);
+	section = sond_tvfm_item_get_path_or_section(stvfm_item);
 
-	rc = zond_dbase_test_path(priv->zond->dbase_zond->zond_dbase_work,
-			path, error);
+	rc = zond_dbase_test_path_section(priv->zond->dbase_zond->zond_dbase_work,
+			path, section, FALSE, error);
 	if (rc == -1)
 		ERROR_Z
 	else if (rc == 1)
 		return 1;
 
-	rc = zond_dbase_test_path(priv->zond->dbase_zond->zond_dbase_store,
-			path, error);
+	rc = zond_dbase_test_path_section(priv->zond->dbase_zond->zond_dbase_store,
+			path, section, FALSE, error);
 	if (rc == -1)
 		ERROR_Z
 	else if (rc == 1) {
@@ -141,6 +141,10 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 	rc = dbase_zond_begin(priv->zond->dbase_zond, error);
 	if (rc)
 		ERROR_Z
+
+	if (!section) { //wenn Datei gelöscht wird, kann auch Type-5-node gelöscht werden
+
+	}
 
 	//wenn aus GMessage verschoben wurde - nachfolgende indizes anpassen
 	if (get_gmessage_index(stvfm_item, &index_from)) {
@@ -482,8 +486,8 @@ static gint zond_treeviewfm_delete_section(SondTVFMItem* stvfm_item, GError** er
 	return 0;
 }
 
-static gint zond_treeviewfm_load_sections(SondTVFMItem* stvfm_item, GPtrArray** arr_children,
-		GError** error) {
+static gint zond_treeviewfm_load_sections(SondTVFMItem* stvfm_item,
+		GPtrArray** arr_children, GError** error) {
 	g_autofree gchar* filepart = NULL;
 	g_autoptr(GPtrArray) arr_children_int = NULL;
 	SondFilePart* sfp = NULL;
@@ -493,7 +497,8 @@ static gint zond_treeviewfm_load_sections(SondTVFMItem* stvfm_item, GPtrArray** 
 	gint rc = 0;
 
 	ZondTreeviewFMPrivate* ztvfm_priv =
-			zond_treeviewfm_get_instance_private(ZOND_TREEVIEWFM(sond_tvfm_item_get_stvfm(stvfm_item)));
+			zond_treeviewfm_get_instance_private(
+					ZOND_TREEVIEWFM(sond_tvfm_item_get_stvfm(stvfm_item)));
 
 	sfp = sond_tvfm_item_get_sond_file_part(stvfm_item);
 

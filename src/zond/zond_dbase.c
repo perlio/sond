@@ -648,7 +648,7 @@ static gint zond_dbase_rollback_to_statement(ZondDBase *zond_dbase,
 }
 
 gint zond_dbase_test_path(ZondDBase *zond_dbase, const gchar *filepart,
-		GError **error) {
+		gchar const* section, GError **error) {
 	gint rc = 0;
 	sqlite3_stmt **stmt = NULL;
 
@@ -677,13 +677,14 @@ gint zond_dbase_test_path(ZondDBase *zond_dbase, const gchar *filepart,
 }
 
 gint zond_dbase_test_path_section(ZondDBase *zond_dbase, const gchar *filepart,
-		gchar const* section, GError **error) {
+		gchar const* section, gboolean smaller, GError **error) {
 	gint rc = 0;
 	sqlite3_stmt **stmt = NULL;
 	Anbindung anbindung = { 0 };
 
 	const gchar *sql[] = { "SELECT k2.section FROM knoten k1 INNER JOIN "
-			"knoten k2 ON k1.link=k2.ID WHERE k1.type=2 AND k2.file_part LIKE ?1 COLLATE BINARY; "
+			"knoten k2 ON k1.link=k2.ID "
+			"WHERE k1.type=2 AND k2.file_part LIKE ?1 COLLATE BINARY; "
 	};
 
 	rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
@@ -707,11 +708,12 @@ gint zond_dbase_test_path_section(ZondDBase *zond_dbase, const gchar *filepart,
 			Anbindung anbindung_int = { 0 };
 
 			section_db = sqlite3_column_text(stmt[0], 0);
-			if (!section_db)
+			if (!(smaller ? section_db : (const guchar*) section))
 				return 1; //heißt, daß ganze Datei angebunden ist - dann ist jede section erfaßt
 			anbindung_parse_file_section((gchar const*) section_db, &anbindung_int);
 
-			if (anbindung_1_eltern_von_2(anbindung_int, anbindung) ||
+			if ((smaller ? anbindung_1_eltern_von_2(anbindung_int, anbindung) :
+					anbindung_1_eltern_von_2(anbindung, anbindung_int)) ||
 					anbindung_1_gleich_2(anbindung_int, anbindung))
 				return 1;
 
