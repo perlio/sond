@@ -22,7 +22,8 @@
  */
 
 #include "sond_graph_db.h"
-#include "graph_node.h"
+#include "sond_graph_node.h"
+#include "sond_graph_edge.h"
 #include <string.h>
 
 GQuark sond_graph_db_error_quark(void) {
@@ -321,10 +322,10 @@ static GDateTime* parse_mysql_timestamp(const char *timestamp) {
 /**
  * sond_graph_db_load_node:
  */
-GraphNode* sond_graph_db_load_node(MYSQL *conn, gint64 node_id, GError **error) {
+SondGraphNode* sond_graph_db_load_node(MYSQL *conn, gint64 node_id, GError **error) {
     g_return_val_if_fail(conn != NULL, NULL);
 
-    GraphNode *node = NULL;
+    SondGraphNode *node = NULL;
     MYSQL_STMT *stmt = NULL;
     MYSQL_BIND bind_params[1];
     MYSQL_BIND bind_results[5];
@@ -514,7 +515,7 @@ GraphNode* sond_graph_db_load_node(MYSQL *conn, gint64 node_id, GError **error) 
     mysql_stmt_bind_result(stmt, edge_bind);
 
     while (mysql_stmt_fetch(stmt) == 0) {
-        GraphEdgeRef *ref = graph_edge_ref_new(edge_id, edge_label, target_id);
+        SondGraphEdgeRef *ref = graph_edge_ref_new(edge_id, edge_label, target_id);
         graph_node_add_outgoing_edge(node, ref);
     }
 
@@ -564,6 +565,7 @@ SondEdgeFilter* sond_edge_filter_new(const gchar *edge_label,
                                       SondGraphNodeSearchCriteria *target_criteria) {
     SondEdgeFilter *filter = g_new0(SondEdgeFilter, 1);
     filter->edge_label = g_strdup(edge_label);
+    filter->property_filters = g_ptr_array_new_with_free_func((GDestroyNotify)sond_property_filter_free);
     filter->target_criteria = target_criteria;
     return filter;
 }
@@ -573,6 +575,9 @@ void sond_edge_filter_free(SondEdgeFilter *filter) {
         return;
 
     g_free(filter->edge_label);
+    if (filter->property_filters != NULL) {
+        g_ptr_array_unref(filter->property_filters);
+    }
     if (filter->target_criteria != NULL) {
         sond_graph_node_search_criteria_free(filter->target_criteria);
     }
@@ -627,6 +632,49 @@ void sond_graph_node_search_criteria_add_nested_property_filter(SondGraphNodeSea
     g_ptr_array_add(criteria->property_filters, filter);
 }
 
+void sond_graph_node_search_criteria_add_edge_filter(SondGraphNodeSearchCriteria *criteria,
+                                                      const gchar *edge_label,
+                                                      SondGraphNodeSearchCriteria *target_criteria) {
+    g_return_if_fail(criteria != NULL);
+    g_return_if_fail(edge_label != NULL);
+
+    SondEdgeFilter *filter = sond_edge_filter_new(edge_label, target_criteria);
+    g_ptr_array_add(criteria->edge_filters, filter);
+}
+
+void sond_graph_node_search_criteria_add_simple_edge_filter(SondGraphNodeSearchCriteria *criteria,
+                                                             const gchar *edge_label) {
+    g_return_if_fail(criteria != NULL);
+    g_return_if_fail(edge_label != NULL);
+
+    SondEdgeFilter *filter = sond_edge_filter_new(edge_label, NULL);
+    g_ptr_array_add(criteria->edge_filters, filter);
+}
+
+void sond_edge_filter_add_property(SondEdgeFilter *edge_filter,
+                                    const gchar *key,
+                                    const gchar *value) {
+    g_return_if_fail(edge_filter != NULL);
+    g_return_if_fail(key != NULL);
+    g_return_if_fail(value != NULL);
+
+    SondPropertyFilter *filter = sond_property_filter_new(key, value);
+    g_ptr_array_add(edge_filter->property_filters, filter);
+}
+
+void sond_edge_filter_add_nested_property(SondEdgeFilter *edge_filter,
+                                           const gchar *key,
+                                           const gchar *value,
+                                           const gchar *path) {
+    g_return_if_fail(edge_filter != NULL);
+    g_return_if_fail(key != NULL);
+    g_return_if_fail(value != NULL);
+    g_return_if_fail(path != NULL);
+
+    SondPropertyFilter *filter = sond_property_filter_new_with_path(key, value, path);
+    g_ptr_array_add(edge_filter->property_filters, filter);
+}
+
 /**
  * has_wildcards:
  *
@@ -658,9 +706,160 @@ static gchar* convert_wildcards_to_sql(const gchar *value) {
 }
 
 /**
- * sond_graph_db_search_nodes:
+ * build_property_filters_sql:
  *
- * Erweiterte Suche mit Wildcard-Support und Edge-Filterung
+ * Hilfsfunktion: Generiert SQL für Property-Filter.
+ */
+static void build_property_filters_sql(MYSQL *conn,
+                                        const gchar *table_alias,
+                                        GPtrArray *filters,
+                                        GString *query) {
+    if (filters == NULL || filters->len == 0)
+        return;
+
+    for (guint i = 0; i < filters->len; i++) {
+        SondPropertyFilter *filter = g_ptr_array_index(filters, i);
+
+        char *escaped_key = g_malloc(strlen(filter->key) * 2 + 1);
+        char *escaped_value = g_malloc(strlen(filter->value) * 2 + 1);
+        mysql_real_escape_string(conn, escaped_key, filter->key, strlen(filter->key));
+        mysql_real_escape_string(conn, escaped_value, filter->value, strlen(filter->value));
+
+        gboolean use_like = has_wildcards(filter->value);
+
+        if (use_like) {
+            gchar *sql_pattern = convert_wildcards_to_sql(filter->value);
+            char *escaped_pattern = g_malloc(strlen(sql_pattern) * 2 + 1);
+            mysql_real_escape_string(conn, escaped_pattern, sql_pattern, strlen(sql_pattern));
+
+            if (filter->path != NULL) {
+                char *escaped_path = g_malloc(strlen(filter->path) * 2 + 1);
+                mysql_real_escape_string(conn, escaped_path, filter->path, strlen(filter->path));
+
+                g_string_append_printf(query,
+                    " AND EXISTS ("
+                    "   SELECT 1 FROM JSON_TABLE(%s.properties, '$[*]' COLUMNS("
+                    "     prop_key VARCHAR(255) PATH '$.key',"
+                    "     nested_val JSON PATH '$.value.%s'"
+                    "   )) AS jt"
+                    "   WHERE jt.prop_key = '%s'"
+                    "   AND JSON_UNQUOTE(jt.nested_val) LIKE '%s'"
+                    " )",
+                    table_alias, escaped_path, escaped_key, escaped_pattern);
+
+                g_free(escaped_path);
+            } else {
+                g_string_append_printf(query,
+                    " AND EXISTS ("
+                    "   SELECT 1 FROM JSON_TABLE(%s.properties, '$[*]' COLUMNS("
+                    "     prop_key VARCHAR(255) PATH '$.key',"
+                    "     prop_value VARCHAR(1000) PATH '$.value'"
+                    "   )) AS jt"
+                    "   WHERE jt.prop_key = '%s'"
+                    "   AND jt.prop_value LIKE '%s'"
+                    " )",
+                    table_alias, escaped_key, escaped_pattern);
+            }
+
+            g_free(sql_pattern);
+            g_free(escaped_pattern);
+        } else {
+            if (filter->path != NULL) {
+                char *escaped_path = g_malloc(strlen(filter->path) * 2 + 1);
+                mysql_real_escape_string(conn, escaped_path, filter->path, strlen(filter->path));
+
+                g_string_append_printf(query,
+                    " AND JSON_CONTAINS(%s.properties,"
+                    "   JSON_OBJECT('key', '%s', 'value', JSON_OBJECT('%s', '%s')),"
+                    "   '$')",
+                    table_alias, escaped_key, escaped_path, escaped_value);
+
+                g_free(escaped_path);
+            } else {
+                g_string_append_printf(query,
+                    " AND JSON_CONTAINS(%s.properties,"
+                    "   JSON_OBJECT('key', '%s', 'value', '%s'),"
+                    "   '$')",
+                    table_alias, escaped_key, escaped_value);
+            }
+        }
+
+        g_free(escaped_key);
+        g_free(escaped_value);
+    }
+}
+
+/**
+ * build_edge_filters_sql:
+ *
+ * Rekursive Hilfsfunktion: Generiert SQL für Edge-Filter.
+ */
+static void build_edge_filters_sql(MYSQL *conn,
+                                    GPtrArray *edge_filters,
+                                    GString *query,
+                                    const gchar *source_alias,
+                                    guint depth) {
+    if (edge_filters == NULL || edge_filters->len == 0)
+        return;
+
+    for (guint i = 0; i < edge_filters->len; i++) {
+        SondEdgeFilter *edge_filter = g_ptr_array_index(edge_filters, i);
+
+        /* Unique aliases für diese Tiefe */
+        gchar *edge_alias = g_strdup_printf("e%u_%u", depth, i);
+        gchar *target_alias = g_strdup_printf("t%u_%u", depth, i);
+
+        char *escaped_edge_label = g_malloc(strlen(edge_filter->edge_label) * 2 + 1);
+        mysql_real_escape_string(conn, escaped_edge_label,
+                               edge_filter->edge_label,
+                               strlen(edge_filter->edge_label));
+
+        /* Edge EXISTS öffnen */
+        g_string_append_printf(query,
+            " AND EXISTS (SELECT 1 FROM edges %s WHERE %s.source_id = %s.id",
+            edge_alias, edge_alias, source_alias);
+        g_string_append_printf(query, " AND %s.label = '%s'", edge_alias, escaped_edge_label);
+
+        /* Edge-Properties filtern */
+        build_property_filters_sql(conn, edge_alias, edge_filter->property_filters, query);
+
+        /* Target-Node-Kriterien (rekursiv!) */
+        if (edge_filter->target_criteria != NULL) {
+            SondGraphNodeSearchCriteria *tc = edge_filter->target_criteria;
+
+            g_string_append_printf(query,
+                " AND EXISTS (SELECT 1 FROM nodes %s WHERE %s.id = %s.target_id",
+                target_alias, target_alias, edge_alias);
+
+            /* Target Label */
+            if (tc->label != NULL) {
+                char *escaped_target_label = g_malloc(strlen(tc->label) * 2 + 1);
+                mysql_real_escape_string(conn, escaped_target_label, tc->label, strlen(tc->label));
+                g_string_append_printf(query, " AND %s.label = '%s'", target_alias, escaped_target_label);
+                g_free(escaped_target_label);
+            }
+
+            /* Target Properties */
+            build_property_filters_sql(conn, target_alias, tc->property_filters, query);
+
+            /* REKURSION: Target hat auch Edges! */
+            if (tc->edge_filters != NULL && tc->edge_filters->len > 0) {
+                build_edge_filters_sql(conn, tc->edge_filters, query, target_alias, depth + 1);
+            }
+
+            g_string_append(query, ")");  /* Close target EXISTS */
+        }
+
+        g_string_append(query, ")");  /* Close edge EXISTS */
+
+        g_free(edge_alias);
+        g_free(target_alias);
+        g_free(escaped_edge_label);
+    }
+}
+
+/**
+ * sond_graph_db_search_nodes:
  */
 GPtrArray* sond_graph_db_search_nodes(MYSQL *conn,
                                        const SondGraphNodeSearchCriteria *criteria,
@@ -678,212 +877,21 @@ GPtrArray* sond_graph_db_search_nodes(MYSQL *conn,
         g_free(escaped_label);
     }
 
-    /* Property-Filter (neue Array-basierte Version) */
-    if (criteria->property_filters != NULL && criteria->property_filters->len > 0) {
-        for (guint i = 0; i < criteria->property_filters->len; i++) {
-            SondPropertyFilter *filter = g_ptr_array_index(criteria->property_filters, i);
+    /* Node-Properties */
+    build_property_filters_sql(conn, "n", criteria->property_filters, query);
 
-            char *escaped_key = g_malloc(strlen(filter->key) * 2 + 1);
-            char *escaped_value = g_malloc(strlen(filter->value) * 2 + 1);
-            mysql_real_escape_string(conn, escaped_key, filter->key, strlen(filter->key));
-            mysql_real_escape_string(conn, escaped_value, filter->value, strlen(filter->value));
-
-            /* Wildcard-Erkennung */
-            gboolean use_like = has_wildcards(filter->value);
-
-            if (use_like) {
-                /* LIKE-Suche mit Wildcards */
-                gchar *sql_pattern = convert_wildcards_to_sql(filter->value);
-                char *escaped_pattern = g_malloc(strlen(sql_pattern) * 2 + 1);
-                mysql_real_escape_string(conn, escaped_pattern, sql_pattern, strlen(sql_pattern));
-
-                if (filter->path != NULL) {
-                    /* Nested property mit LIKE */
-                    char *escaped_path = g_malloc(strlen(filter->path) * 2 + 1);
-                    mysql_real_escape_string(conn, escaped_path, filter->path, strlen(filter->path));
-
-                    g_string_append_printf(query,
-                        " AND EXISTS ("
-                        "   SELECT 1 FROM JSON_TABLE(n.properties, '$[*]' COLUMNS("
-                        "     prop_key VARCHAR(255) PATH '$.key',"
-                        "     nested_val JSON PATH '$.value.%s'"
-                        "   )) AS jt"
-                        "   WHERE jt.prop_key = '%s'"
-                        "   AND JSON_UNQUOTE(jt.nested_val) LIKE '%s'"
-                        " )",
-                        escaped_path, escaped_key, escaped_pattern);
-
-                    g_free(escaped_path);
-                } else {
-                    /* Einfache property mit LIKE */
-                    g_string_append_printf(query,
-                        " AND EXISTS ("
-                        "   SELECT 1 FROM JSON_TABLE(n.properties, '$[*]' COLUMNS("
-                        "     prop_key VARCHAR(255) PATH '$.key',"
-                        "     prop_value VARCHAR(1000) PATH '$.value'"
-                        "   )) AS jt"
-                        "   WHERE jt.prop_key = '%s'"
-                        "   AND jt.prop_value LIKE '%s'"
-                        " )",
-                        escaped_key, escaped_pattern);
-                }
-
-                g_free(sql_pattern);
-                g_free(escaped_pattern);
-            } else {
-                /* Exakte Suche mit = */
-                if (filter->path != NULL) {
-                    /* Nested property */
-                    char *escaped_path = g_malloc(strlen(filter->path) * 2 + 1);
-                    mysql_real_escape_string(conn, escaped_path, filter->path, strlen(filter->path));
-
-                    g_string_append_printf(query,
-                        " AND JSON_CONTAINS(n.properties,"
-                        "   JSON_OBJECT('key', '%s', 'value', JSON_OBJECT('%s', '%s')),"
-                        "   '$')",
-                        escaped_key, escaped_path, escaped_value);
-
-                    g_free(escaped_path);
-                } else {
-                    /* Einfache property */
-                    g_string_append_printf(query,
-                        " AND JSON_CONTAINS(n.properties,"
-                        "   JSON_OBJECT('key', '%s', 'value', '%s'),"
-                        "   '$')",
-                        escaped_key, escaped_value);
-                }
-            }
-
-            g_free(escaped_key);
-            g_free(escaped_value);
-        }
-    }
-    /* Fallback: alte single property filter API (deprecated) */
-    else if (criteria->property_key != NULL && criteria->property_value != NULL) {
-        char *escaped_key = g_malloc(strlen(criteria->property_key) * 2 + 1);
-        char *escaped_value = g_malloc(strlen(criteria->property_value) * 2 + 1);
-        mysql_real_escape_string(conn, escaped_key, criteria->property_key,
-                               strlen(criteria->property_key));
-        mysql_real_escape_string(conn, escaped_value, criteria->property_value,
-                               strlen(criteria->property_value));
-
-        gboolean use_like = has_wildcards(criteria->property_value);
-
-        if (use_like) {
-            gchar *sql_pattern = convert_wildcards_to_sql(criteria->property_value);
-            char *escaped_pattern = g_malloc(strlen(sql_pattern) * 2 + 1);
-            mysql_real_escape_string(conn, escaped_pattern, sql_pattern, strlen(sql_pattern));
-
-            g_string_append_printf(query,
-                " AND EXISTS ("
-                "   SELECT 1 FROM JSON_TABLE(n.properties, '$[*]' COLUMNS("
-                "     prop_key VARCHAR(255) PATH '$.key',"
-                "     prop_value VARCHAR(1000) PATH '$.value'"
-                "   )) AS jt"
-                "   WHERE jt.prop_key = '%s' AND jt.prop_value LIKE '%s'"
-                " )",
-                escaped_key, escaped_pattern);
-
-            g_free(sql_pattern);
-            g_free(escaped_pattern);
-        } else {
-            g_string_append_printf(query,
-                " AND JSON_CONTAINS(n.properties, JSON_OBJECT('key', '%s', 'value', '%s'), '$')",
-                escaped_key, escaped_value);
-        }
-
-        g_free(escaped_key);
-        g_free(escaped_value);
-    }
-
-    /* Edge-Filter */
-    if (criteria->edge_filters != NULL && criteria->edge_filters->len > 0) {
-        for (guint i = 0; i < criteria->edge_filters->len; i++) {
-            SondEdgeFilter *edge_filter = g_ptr_array_index(criteria->edge_filters, i);
-
-            /* Escape edge label */
-            char *escaped_edge_label = g_malloc(strlen(edge_filter->edge_label) * 2 + 1);
-            mysql_real_escape_string(conn, escaped_edge_label,
-                                   edge_filter->edge_label,
-                                   strlen(edge_filter->edge_label));
-
-            /* Subquery für Edge-Existenz */
-            g_string_append_printf(query, " AND EXISTS (SELECT 1 FROM edges e WHERE e.source_id = n.id");
-            g_string_append_printf(query, " AND e.label = '%s'", escaped_edge_label);
-
-            /* Optional: Filter auf Target-Node */
-            if (edge_filter->target_criteria != NULL) {
-                SondGraphNodeSearchCriteria *tc = edge_filter->target_criteria;
-
-                g_string_append(query, " AND EXISTS (SELECT 1 FROM nodes target WHERE target.id = e.target_id");
-
-                /* Target Label */
-                if (tc->label != NULL) {
-                    char *escaped_target_label = g_malloc(strlen(tc->label) * 2 + 1);
-                    mysql_real_escape_string(conn, escaped_target_label, tc->label, strlen(tc->label));
-                    g_string_append_printf(query, " AND target.label = '%s'", escaped_target_label);
-                    g_free(escaped_target_label);
-                }
-
-                /* Target Properties */
-                if (tc->property_filters != NULL && tc->property_filters->len > 0) {
-                    for (guint j = 0; j < tc->property_filters->len; j++) {
-                        SondPropertyFilter *tf = g_ptr_array_index(tc->property_filters, j);
-
-                        char *escaped_tkey = g_malloc(strlen(tf->key) * 2 + 1);
-                        char *escaped_tval = g_malloc(strlen(tf->value) * 2 + 1);
-                        mysql_real_escape_string(conn, escaped_tkey, tf->key, strlen(tf->key));
-                        mysql_real_escape_string(conn, escaped_tval, tf->value, strlen(tf->value));
-
-                        gboolean target_use_like = has_wildcards(tf->value);
-
-                        if (target_use_like) {
-                            gchar *sql_pattern = convert_wildcards_to_sql(tf->value);
-                            char *escaped_pattern = g_malloc(strlen(sql_pattern) * 2 + 1);
-                            mysql_real_escape_string(conn, escaped_pattern, sql_pattern, strlen(sql_pattern));
-
-                            g_string_append_printf(query,
-                                " AND EXISTS ("
-                                "   SELECT 1 FROM JSON_TABLE(target.properties, '$[*]' COLUMNS("
-                                "     prop_key VARCHAR(255) PATH '$.key',"
-                                "     prop_value VARCHAR(1000) PATH '$.value'"
-                                "   )) AS tjt"
-                                "   WHERE tjt.prop_key = '%s' AND tjt.prop_value LIKE '%s'"
-                                " )",
-                                escaped_tkey, escaped_pattern);
-
-                            g_free(sql_pattern);
-                            g_free(escaped_pattern);
-                        } else {
-                            g_string_append_printf(query,
-                                " AND JSON_CONTAINS(target.properties,"
-                                "   JSON_OBJECT('key', '%s', 'value', '%s'), '$')",
-                                escaped_tkey, escaped_tval);
-                        }
-
-                        g_free(escaped_tkey);
-                        g_free(escaped_tval);
-                    }
-                }
-
-                g_string_append(query, ")");  /* Close target EXISTS */
-            }
-
-            g_string_append(query, ")");  /* Close edge EXISTS */
-            g_free(escaped_edge_label);
-        }
-    }
+    /* Edge-Filter (rekursiv!) */
+    build_edge_filters_sql(conn, criteria->edge_filters, query, "n", 0);
 
     /* Limit und Offset */
     if (criteria->limit > 0) {
         g_string_append_printf(query, " LIMIT %u", criteria->limit);
     }
-
     if (criteria->offset > 0) {
         g_string_append_printf(query, " OFFSET %u", criteria->offset);
     }
 
-    /* Debug: Query ausgeben */
+    /* Debug */
     g_debug("Search query: %s", query->str);
 
     /* Query ausführen */
@@ -913,7 +921,7 @@ GPtrArray* sond_graph_db_search_nodes(MYSQL *conn,
         gint64 node_id = g_ascii_strtoll(row[0], NULL, 10);
 
         GError *load_error = NULL;
-        GraphNode *node = sond_graph_db_load_node(conn, node_id, &load_error);
+        SondGraphNode *node = sond_graph_db_load_node(conn, node_id, &load_error);
         if (node != NULL) {
             g_ptr_array_add(nodes, node);
         } else {
@@ -931,7 +939,7 @@ GPtrArray* sond_graph_db_search_nodes(MYSQL *conn,
 /**
  * sond_graph_db_save_node:
  */
-gboolean sond_graph_db_save_node(MYSQL *conn, GraphNode *node, GError **error) {
+gboolean sond_graph_db_save_node(MYSQL *conn, SondGraphNode *node, GError **error) {
     g_return_val_if_fail(conn != NULL, FALSE);
     g_return_val_if_fail(GRAPH_IS_NODE(node), FALSE);
 
@@ -1459,6 +1467,490 @@ gint sond_graph_db_cleanup_expired_locks(MYSQL *conn, GError **error) {
     mysql_free_result(result);
 
     return cleaned_count;
+}
+
+/**
+ * Edge-Datenbankfunktionen
+ *
+ * Diese Funktionen in sond_graph_db.c einfügen (nach den Node-Funktionen)
+ */
+
+/* ========================================================================
+ * Edge Load/Save/Delete Functions
+ * ======================================================================== */
+
+/**
+ * sond_graph_db_load_edge:
+ * @conn: MySQL connection
+ * @edge_id: ID der zu ladenden Edge
+ * @error: Error location
+ *
+ * Lädt eine Edge aus der Datenbank.
+ *
+ * Returns: (transfer full): GraphEdge oder NULL bei Fehler
+ */
+GraphEdge* sond_graph_db_load_edge(MYSQL *conn, gint64 edge_id, GError **error) {
+    g_return_val_if_fail(conn != NULL, NULL);
+
+    GraphEdge *edge = NULL;
+    MYSQL_STMT *stmt = NULL;
+    MYSQL_BIND bind_params[1];
+    MYSQL_BIND bind_results[7];
+
+    /* Query vorbereiten */
+    const char *query =
+        "SELECT id, source_id, target_id, label, properties, created_at, updated_at "
+        "FROM edges WHERE id = ?";
+
+    stmt = mysql_stmt_init(conn);
+    if (stmt == NULL) {
+        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
+                   "mysql_stmt_init failed: %s", mysql_error(conn));
+        g_prefix_error(error, "%s: ", __func__);
+        goto cleanup;
+    }
+
+    if (mysql_stmt_prepare(stmt, query, strlen(query))) {
+        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
+                   "mysql_stmt_prepare failed: %s", mysql_stmt_error(stmt));
+        g_prefix_error(error, "%s: ", __func__);
+        goto cleanup;
+    }
+
+    /* Parameter binden */
+    memset(bind_params, 0, sizeof(bind_params));
+    bind_params[0].buffer_type = MYSQL_TYPE_LONGLONG;
+    bind_params[0].buffer = &edge_id;
+
+    if (mysql_stmt_bind_param(stmt, bind_params)) {
+        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
+                   "mysql_stmt_bind_param failed: %s", mysql_stmt_error(stmt));
+        g_prefix_error(error, "%s: ", __func__);
+        goto cleanup;
+    }
+
+    /* Ausführen */
+    if (mysql_stmt_execute(stmt)) {
+        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
+                   "mysql_stmt_execute failed: %s", mysql_stmt_error(stmt));
+        g_prefix_error(error, "%s: ", __func__);
+        goto cleanup;
+    }
+
+    /* Ergebnis-Buffer */
+    gint64 id, source_id, target_id;
+    char label[51] = {0};
+    unsigned long label_length;
+    char *properties = g_malloc(65536);
+    unsigned long properties_length;
+    char created_at[20] = {0};
+    unsigned long created_length;
+    my_bool created_is_null;
+    char updated_at[20] = {0};
+    unsigned long updated_length;
+    my_bool updated_is_null;
+
+    memset(bind_results, 0, sizeof(bind_results));
+
+    bind_results[0].buffer_type = MYSQL_TYPE_LONGLONG;
+    bind_results[0].buffer = &id;
+
+    bind_results[1].buffer_type = MYSQL_TYPE_LONGLONG;
+    bind_results[1].buffer = &source_id;
+
+    bind_results[2].buffer_type = MYSQL_TYPE_LONGLONG;
+    bind_results[2].buffer = &target_id;
+
+    bind_results[3].buffer_type = MYSQL_TYPE_STRING;
+    bind_results[3].buffer = label;
+    bind_results[3].buffer_length = sizeof(label);
+    bind_results[3].length = &label_length;
+
+    bind_results[4].buffer_type = MYSQL_TYPE_STRING;
+    bind_results[4].buffer = properties;
+    bind_results[4].buffer_length = 65536;
+    bind_results[4].length = &properties_length;
+
+    bind_results[5].buffer_type = MYSQL_TYPE_STRING;
+    bind_results[5].buffer = created_at;
+    bind_results[5].buffer_length = sizeof(created_at);
+    bind_results[5].length = &created_length;
+    bind_results[5].is_null = &created_is_null;
+
+    bind_results[6].buffer_type = MYSQL_TYPE_STRING;
+    bind_results[6].buffer = updated_at;
+    bind_results[6].buffer_length = sizeof(updated_at);
+    bind_results[6].length = &updated_length;
+    bind_results[6].is_null = &updated_is_null;
+
+    if (mysql_stmt_bind_result(stmt, bind_results)) {
+        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
+                   "mysql_stmt_bind_result failed: %s", mysql_stmt_error(stmt));
+        g_prefix_error(error, "%s: ", __func__);
+        g_free(properties);
+        goto cleanup;
+    }
+
+    /* Fetch */
+    int fetch_result = mysql_stmt_fetch(stmt);
+    if (fetch_result == MYSQL_NO_DATA) {
+        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
+                   "Edge with ID %ld not found", edge_id);
+        g_prefix_error(error, "%s: ", __func__);
+        g_free(properties);
+        goto cleanup;
+    } else if (fetch_result != 0) {
+        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
+                   "mysql_stmt_fetch failed: %s", mysql_stmt_error(stmt));
+        g_prefix_error(error, "%s: ", __func__);
+        g_free(properties);
+        goto cleanup;
+    }
+
+    /* Edge erstellen */
+    edge = graph_edge_new();
+    graph_edge_set_id(edge, id);
+    graph_edge_set_source_id(edge, source_id);
+    graph_edge_set_target_id(edge, target_id);
+    graph_edge_set_label(edge, label);
+
+    /* Properties laden */
+    GError *json_error = NULL;
+    if (!graph_edge_properties_from_json(edge, properties, &json_error)) {
+        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
+                   "Failed to parse properties JSON: %s",
+                   json_error ? json_error->message : "unknown");
+        g_prefix_error(error, "%s: ", __func__);
+        g_clear_error(&json_error);
+        g_object_unref(edge);
+        edge = NULL;
+        g_free(properties);
+        goto cleanup;
+    }
+    g_free(properties);
+
+    /* Timestamps */
+    if (!created_is_null) {
+        GDateTime *dt = parse_mysql_timestamp(created_at);
+        if (dt) {
+            graph_edge_set_created_at(edge, dt);
+            g_date_time_unref(dt);
+        }
+    }
+
+    if (!updated_is_null) {
+        GDateTime *dt = parse_mysql_timestamp(updated_at);
+        if (dt) {
+            graph_edge_set_updated_at(edge, dt);
+            g_date_time_unref(dt);
+        }
+    }
+
+cleanup:
+    if (stmt) {
+        mysql_stmt_close(stmt);
+    }
+
+    return edge;
+}
+
+/**
+ * sond_graph_db_save_edge:
+ * @conn: MySQL connection
+ * @edge: Edge zum Speichern
+ * @error: Error location
+ *
+ * Speichert eine Edge in der Datenbank.
+ * Wenn edge->id == 0, wird INSERT ausgeführt und die neue ID gesetzt.
+ * Sonst wird UPDATE ausgeführt.
+ *
+ * Returns: TRUE bei Erfolg
+ */
+gboolean sond_graph_db_save_edge(MYSQL *conn, GraphEdge *edge, GError **error) {
+    g_return_val_if_fail(conn != NULL, FALSE);
+    g_return_val_if_fail(GRAPH_IS_EDGE(edge), FALSE);
+
+    MYSQL_STMT *stmt = NULL;
+    gboolean success = FALSE;
+
+    gint64 id = graph_edge_get_id(edge);
+    gint64 source_id = graph_edge_get_source_id(edge);
+    gint64 target_id = graph_edge_get_target_id(edge);
+    const gchar *label = graph_edge_get_label(edge);
+    gchar *properties_json = graph_edge_properties_to_json(edge);
+
+    /* Validierung */
+    if (label == NULL) {
+        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
+                   "Edge label cannot be NULL");
+        g_prefix_error(error, "%s: ", __func__);
+        g_free(properties_json);
+        return FALSE;
+    }
+
+    if (source_id == 0 || target_id == 0) {
+        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
+                   "Edge source_id and target_id must be set");
+        g_prefix_error(error, "%s: ", __func__);
+        g_free(properties_json);
+        return FALSE;
+    }
+
+    const char *query;
+
+    if (id == 0) {
+        /* INSERT - neue Edge */
+        query = "INSERT INTO edges (source_id, target_id, label, properties) VALUES (?, ?, ?, ?)";
+    } else {
+        /* UPDATE - bestehende Edge */
+        query = "UPDATE edges SET source_id = ?, target_id = ?, label = ?, properties = ? WHERE id = ?";
+    }
+
+    stmt = mysql_stmt_init(conn);
+    if (stmt == NULL) {
+        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
+                   "mysql_stmt_init failed: %s", mysql_error(conn));
+        g_prefix_error(error, "%s: ", __func__);
+        g_free(properties_json);
+        return FALSE;
+    }
+
+    if (mysql_stmt_prepare(stmt, query, strlen(query))) {
+        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
+                   "mysql_stmt_prepare failed: %s", mysql_stmt_error(stmt));
+        g_prefix_error(error, "%s: ", __func__);
+        g_free(properties_json);
+        mysql_stmt_close(stmt);
+        return FALSE;
+    }
+
+    MYSQL_BIND bind[5];
+    memset(bind, 0, sizeof(bind));
+
+    unsigned long label_length = strlen(label);
+    unsigned long props_length = strlen(properties_json);
+
+    /* Parameter 1: source_id */
+    bind[0].buffer_type = MYSQL_TYPE_LONGLONG;
+    bind[0].buffer = &source_id;
+
+    /* Parameter 2: target_id */
+    bind[1].buffer_type = MYSQL_TYPE_LONGLONG;
+    bind[1].buffer = &target_id;
+
+    /* Parameter 3: label */
+    bind[2].buffer_type = MYSQL_TYPE_STRING;
+    bind[2].buffer = (char*)label;
+    bind[2].buffer_length = label_length;
+    bind[2].length = &label_length;
+
+    /* Parameter 4: properties */
+    bind[3].buffer_type = MYSQL_TYPE_STRING;
+    bind[3].buffer = properties_json;
+    bind[3].buffer_length = props_length;
+    bind[3].length = &props_length;
+
+    /* Parameter 5: id (nur bei UPDATE) */
+    if (id > 0) {
+        bind[4].buffer_type = MYSQL_TYPE_LONGLONG;
+        bind[4].buffer = &id;
+    }
+
+    if (mysql_stmt_bind_param(stmt, bind)) {
+        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
+                   "mysql_stmt_bind_param failed: %s", mysql_stmt_error(stmt));
+        g_prefix_error(error, "%s: ", __func__);
+        g_free(properties_json);
+        mysql_stmt_close(stmt);
+        return FALSE;
+    }
+
+    if (mysql_stmt_execute(stmt)) {
+        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
+                   "mysql_stmt_execute failed: %s", mysql_stmt_error(stmt));
+        g_prefix_error(error, "%s: ", __func__);
+        g_free(properties_json);
+        mysql_stmt_close(stmt);
+        return FALSE;
+    }
+
+    /* Bei INSERT: Neue ID setzen */
+    if (id == 0) {
+        gint64 new_id = mysql_stmt_insert_id(stmt);
+        graph_edge_set_id(edge, new_id);
+    }
+
+    success = TRUE;
+
+    g_free(properties_json);
+    mysql_stmt_close(stmt);
+
+    return success;
+}
+
+/**
+ * sond_graph_db_delete_edge:
+ * @conn: MySQL connection
+ * @edge_id: ID der zu löschenden Edge
+ * @error: Error location
+ *
+ * Löscht eine Edge aus der Datenbank.
+ *
+ * Returns: TRUE bei Erfolg
+ */
+gboolean sond_graph_db_delete_edge(MYSQL *conn, gint64 edge_id, GError **error) {
+    g_return_val_if_fail(conn != NULL, FALSE);
+
+    if (edge_id == 0) {
+        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
+                   "Cannot delete edge with ID 0");
+        g_prefix_error(error, "%s: ", __func__);
+        return FALSE;
+    }
+
+    gchar *query = g_strdup_printf("DELETE FROM edges WHERE id = %ld", edge_id);
+
+    if (mysql_query(conn, query)) {
+        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
+                   "Delete failed: %s", mysql_error(conn));
+        g_prefix_error(error, "%s: ", __func__);
+        g_free(query);
+        return FALSE;
+    }
+
+    g_free(query);
+
+    /* Prüfen ob wirklich gelöscht wurde */
+    my_ulonglong affected = mysql_affected_rows(conn);
+    if (affected == 0) {
+        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
+                   "Edge with ID %ld not found", edge_id);
+        g_prefix_error(error, "%s: ", __func__);
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+/**
+ * sond_graph_db_delete_edges_between:
+ * @conn: MySQL connection
+ * @source_id: Source Node ID
+ * @target_id: Target Node ID
+ * @label: Optional: nur Edges mit diesem Label löschen (NULL = alle)
+ * @error: Error location
+ *
+ * Löscht alle Edges zwischen zwei Nodes (optional gefiltert nach Label).
+ *
+ * Returns: Anzahl der gelöschten Edges, oder -1 bei Fehler
+ */
+gint sond_graph_db_delete_edges_between(MYSQL *conn,
+                                         gint64 source_id,
+                                         gint64 target_id,
+                                         const gchar *label,
+                                         GError **error) {
+    g_return_val_if_fail(conn != NULL, -1);
+
+    gchar *query;
+    if (label != NULL) {
+        char *escaped_label = g_malloc(strlen(label) * 2 + 1);
+        mysql_real_escape_string(conn, escaped_label, label, strlen(label));
+
+        query = g_strdup_printf(
+            "DELETE FROM edges WHERE source_id = %ld AND target_id = %ld AND label = '%s'",
+            source_id, target_id, escaped_label);
+
+        g_free(escaped_label);
+    } else {
+        query = g_strdup_printf(
+            "DELETE FROM edges WHERE source_id = %ld AND target_id = %ld",
+            source_id, target_id);
+    }
+
+    if (mysql_query(conn, query)) {
+        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
+                   "Delete failed: %s", mysql_error(conn));
+        g_prefix_error(error, "%s: ", __func__);
+        g_free(query);
+        return -1;
+    }
+
+    g_free(query);
+
+    return (gint)mysql_affected_rows(conn);
+}
+
+/**
+ * sond_graph_db_get_edges_from_node:
+ * @conn: MySQL connection
+ * @source_id: Source Node ID
+ * @label: Optional: nur Edges mit diesem Label (NULL = alle)
+ * @error: Error location
+ *
+ * Lädt alle ausgehenden Edges eines Nodes.
+ *
+ * Returns: (transfer full): Array von GraphEdge, oder NULL bei Fehler
+ */
+GPtrArray* sond_graph_db_get_edges_from_node(MYSQL *conn,
+                                               gint64 source_id,
+                                               const gchar *label,
+                                               GError **error) {
+    g_return_val_if_fail(conn != NULL, NULL);
+
+    gchar *query;
+    if (label != NULL) {
+        char *escaped_label = g_malloc(strlen(label) * 2 + 1);
+        mysql_real_escape_string(conn, escaped_label, label, strlen(label));
+
+        query = g_strdup_printf(
+            "SELECT id FROM edges WHERE source_id = %ld AND label = '%s'",
+            source_id, escaped_label);
+
+        g_free(escaped_label);
+    } else {
+        query = g_strdup_printf(
+            "SELECT id FROM edges WHERE source_id = %ld",
+            source_id);
+    }
+
+    if (mysql_query(conn, query)) {
+        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
+                   "Query failed: %s", mysql_error(conn));
+        g_prefix_error(error, "%s: ", __func__);
+        g_free(query);
+        return NULL;
+    }
+
+    g_free(query);
+
+    MYSQL_RES *result = mysql_store_result(conn);
+    if (result == NULL) {
+        g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
+                   "Failed to get result: %s", mysql_error(conn));
+        g_prefix_error(error, "%s: ", __func__);
+        return NULL;
+    }
+
+    GPtrArray *edges = g_ptr_array_new_with_free_func((GDestroyNotify)g_object_unref);
+
+    MYSQL_ROW row;
+    while ((row = mysql_fetch_row(result))) {
+        gint64 edge_id = g_ascii_strtoll(row[0], NULL, 10);
+
+        GError *load_error = NULL;
+        GraphEdge *edge = sond_graph_db_load_edge(conn, edge_id, &load_error);
+        if (edge != NULL) {
+            g_ptr_array_add(edges, edge);
+        } else {
+            g_warning("Failed to load edge %ld: %s", edge_id,
+                     load_error ? load_error->message : "unknown");
+            g_clear_error(&load_error);
+        }
+    }
+
+    mysql_free_result(result);
+
+    return edges;
 }
 
 /*

@@ -26,6 +26,9 @@
 
 #include <glib.h>
 #include <mysql/mysql.h>
+#include "sond_graph_node.h"
+#include "sond_graph_edge.h"
+
 
 G_BEGIN_DECLS
 
@@ -119,7 +122,7 @@ gboolean sond_graph_db_setup(MYSQL *conn, GError **error);
  * g_object_unref(node);
  * ]|
  */
-GraphNode* sond_graph_db_load_node(MYSQL *conn, gint64 node_id, GError **error);
+SondGraphNode* sond_graph_db_load_node(MYSQL *conn, gint64 node_id, GError **error);
 
 /**
  * SondPropertyFilter:
@@ -185,8 +188,9 @@ void sond_property_filter_free(SondPropertyFilter *filter);
  * Filter für ausgehende Edges.
  * Ermöglicht Suche nach Nodes basierend auf ihren Verbindungen.
  */
-typedef struct {
+typedef struct _SondEdgeFilter {
     gchar *edge_label;
+    GPtrArray *property_filters;              /* NEU: Edge-Properties! */
     SondGraphNodeSearchCriteria *target_criteria;
 } SondEdgeFilter;
 
@@ -596,6 +600,44 @@ void sond_graph_node_search_criteria_add_edge_filter(
 void sond_graph_node_search_criteria_add_simple_edge_filter(
     SondGraphNodeSearchCriteria *criteria,
     const gchar *edge_label);
+
+/* Edge-Property-Filter */
+void sond_edge_filter_add_property(SondEdgeFilter *edge_filter,
+                                    const gchar *key,
+                                    const gchar *value);
+
+void sond_edge_filter_add_nested_property(SondEdgeFilter *edge_filter,
+                                           const gchar *key,
+                                           const gchar *value,
+                                           const gchar *path);
+
+/* Edge Database Functions */
+SondGraphEdge* sond_graph_db_load_edge(MYSQL *conn, gint64 edge_id, GError **error);
+
+gboolean sond_graph_db_save_edge(MYSQL *conn, SondGraphEdge *edge, GError **error);
+
+gboolean sond_graph_db_delete_edge(MYSQL *conn, gint64 edge_id, GError **error);
+
+gint sond_graph_db_delete_edges_between(MYSQL *conn,
+                                         gint64 source_id,
+                                         gint64 target_id,
+                                         const gchar *label,
+                                         GError **error);
+
+GPtrArray* sond_graph_db_get_edges_from_node(MYSQL *conn,
+                                               gint64 source_id,
+                                               const gchar *label,
+                                               GError **error);
+
+/* Edge Filter Helper Functions */
+void sond_edge_filter_add_property(SondEdgeFilter *edge_filter,
+                                    const gchar *key,
+                                    const gchar *value);
+
+void sond_edge_filter_add_nested_property(SondEdgeFilter *edge_filter,
+                                           const gchar *key,
+                                           const gchar *value,
+                                           const gchar *path);
 
 G_END_DECLS
 
