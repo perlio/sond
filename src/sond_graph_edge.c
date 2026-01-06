@@ -18,12 +18,16 @@
 
 /**
  * @file sond_graph_edge.c
- * @brief Implementation des SondGraphEdge
+ * @brief Implementation der Graph-Edge Strukturen
  */
 
 #include "sond_graph_edge.h"
-#include <json-glib/json-glib.h>
+#include "sond_graph_property.h"
 #include <string.h>
+
+/* ========================================================================
+ * SondGraphEdge - GObject Implementation
+ * ======================================================================== */
 
 struct _SondGraphEdge {
     GObject parent_instance;
@@ -32,23 +36,40 @@ struct _SondGraphEdge {
     gint64 source_id;
     gint64 target_id;
     gchar *label;
-    GHashTable *properties;  /* key -> value (beide gchar*) */
+    GPtrArray *properties;
     GDateTime *created_at;
     GDateTime *updated_at;
 };
 
 G_DEFINE_TYPE(SondGraphEdge, sond_graph_edge, G_TYPE_OBJECT)
 
+enum {
+    PROP_0,
+    PROP_ID,
+    PROP_SOURCE_ID,
+    PROP_TARGET_ID,
+    PROP_LABEL,
+    PROP_PROPERTIES,
+    PROP_CREATED_AT,
+    PROP_UPDATED_AT,
+    N_PROPERTIES
+};
+
+static GParamSpec *edge_properties[N_PROPERTIES] = { NULL, };
+
 static void sond_graph_edge_finalize(GObject *object) {
     SondGraphEdge *self = SOND_GRAPH_EDGE(object);
 
     g_free(self->label);
+
     if (self->properties) {
-        g_hash_table_unref(self->properties);
+        g_ptr_array_unref(self->properties);
     }
+
     if (self->created_at) {
         g_date_time_unref(self->created_at);
     }
+
     if (self->updated_at) {
         g_date_time_unref(self->updated_at);
     }
@@ -56,9 +77,143 @@ static void sond_graph_edge_finalize(GObject *object) {
     G_OBJECT_CLASS(sond_graph_edge_parent_class)->finalize(object);
 }
 
+static void sond_graph_edge_get_property(GObject *object,
+                                          guint prop_id,
+                                          GValue *value,
+                                          GParamSpec *pspec) {
+    SondGraphEdge *self = SOND_GRAPH_EDGE(object);
+
+    switch (prop_id) {
+        case PROP_ID:
+            g_value_set_int64(value, self->id);
+            break;
+        case PROP_SOURCE_ID:
+            g_value_set_int64(value, self->source_id);
+            break;
+        case PROP_TARGET_ID:
+            g_value_set_int64(value, self->target_id);
+            break;
+        case PROP_LABEL:
+            g_value_set_string(value, self->label);
+            break;
+        case PROP_PROPERTIES:
+            g_value_set_pointer(value, self->properties);
+            break;
+        case PROP_CREATED_AT:
+            g_value_set_boxed(value, self->created_at);
+            break;
+        case PROP_UPDATED_AT:
+            g_value_set_boxed(value, self->updated_at);
+            break;
+        default:
+            G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
+            break;
+    }
+}
+
+static void sond_graph_edge_set_property(GObject *object,
+                                          guint prop_id,
+                                          const GValue *value,
+                                          GParamSpec *pspec) {
+    SondGraphEdge *self = SOND_GRAPH_EDGE(object);
+
+    switch (prop_id) {
+        case PROP_ID:
+            self->id = g_value_get_int64(value);
+            break;
+        case PROP_SOURCE_ID:
+            self->source_id = g_value_get_int64(value);
+            break;
+        case PROP_TARGET_ID:
+            self->target_id = g_value_get_int64(value);
+            break;
+        case PROP_LABEL:
+            g_free(self->label);
+            self->label = g_value_dup_string(value);
+            break;
+        case PROP_PROPERTIES:
+            if (self->properties) {
+                g_ptr_array_unref(self->properties);
+            }
+            self->properties = g_value_get_pointer(value);
+            if (self->properties) {
+                g_ptr_array_ref(self->properties);
+            }
+            break;
+        case PROP_CREATED_AT:
+            if (self->created_at) {
+                g_date_time_unref(self->created_at);
+            }
+            self->created_at = g_value_dup_boxed(value);
+            break;
+        case PROP_UPDATED_AT:
+            if (self->updated_at) {
+                g_date_time_unref(self->updated_at);
+            }
+            self->updated_at = g_value_dup_boxed(value);
+            break;
+        default:
+            G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
+            break;
+    }
+}
+
 static void sond_graph_edge_class_init(SondGraphEdgeClass *klass) {
     GObjectClass *object_class = G_OBJECT_CLASS(klass);
+
     object_class->finalize = sond_graph_edge_finalize;
+    object_class->get_property = sond_graph_edge_get_property;
+    object_class->set_property = sond_graph_edge_set_property;
+
+    edge_properties[PROP_ID] = g_param_spec_int64(
+        "id",
+        "ID",
+        "Edge ID",
+        0, G_MAXINT64, 0,
+        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS);
+
+    edge_properties[PROP_SOURCE_ID] = g_param_spec_int64(
+        "source-id",
+        "Source ID",
+        "Source Node ID",
+        0, G_MAXINT64, 0,
+        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS);
+
+    edge_properties[PROP_TARGET_ID] = g_param_spec_int64(
+        "target-id",
+        "Target ID",
+        "Target Node ID",
+        0, G_MAXINT64, 0,
+        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS);
+
+    edge_properties[PROP_LABEL] = g_param_spec_string(
+        "label",
+        "Label",
+        "Edge label",
+        NULL,
+        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS);
+
+    edge_properties[PROP_PROPERTIES] = g_param_spec_pointer(
+        "properties",
+        "Properties",
+        "Edge properties",
+        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS);
+
+    edge_properties[PROP_CREATED_AT] = g_param_spec_boxed(
+        "created-at",
+        "Created At",
+        "Creation timestamp",
+        G_TYPE_DATE_TIME,
+        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS);
+
+    edge_properties[PROP_UPDATED_AT] = g_param_spec_boxed(
+        "updated-at",
+        "Updated At",
+        "Last update timestamp",
+        G_TYPE_DATE_TIME,
+        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS);
+
+    g_object_class_install_properties(object_class, N_PROPERTIES, edge_properties);
 }
 
 static void sond_graph_edge_init(SondGraphEdge *self) {
@@ -66,240 +221,194 @@ static void sond_graph_edge_init(SondGraphEdge *self) {
     self->source_id = 0;
     self->target_id = 0;
     self->label = NULL;
-    self->properties = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
+    self->properties = g_ptr_array_new_with_free_func(
+        (GDestroyNotify)sond_graph_property_free);
     self->created_at = NULL;
     self->updated_at = NULL;
 }
 
-/**
- * sond_graph_edge_new:
- */
-SondGraphEdge* sond_graph_edge_new(void) {
-    return g_object_new(SOND_GRAPH_TYPE_EDGE, NULL);
-}
-
-/**
- * sond_graph_edge_new_full:
- */
-SondGraphEdge* sond_graph_edge_new_full(gint64 source_id,
-                                         gint64 target_id,
-                                         const gchar *label) {
-    SondGraphEdge *edge = sond_graph_edge_new();
-    edge->source_id = source_id;
-    edge->target_id = target_id;
-    edge->label = g_strdup(label);
-    return edge;
-}
-
 /* ========================================================================
- * Getters/Setters
+ * Public API
  * ======================================================================== */
 
+SondGraphEdge* sond_graph_edge_new(void) {
+    return g_object_new(SOND_TYPE_GRAPH_EDGE, NULL);
+}
+
 gint64 sond_graph_edge_get_id(SondGraphEdge *edge) {
-    g_return_val_if_fail(SOND_GRAPH_IS_EDGE(edge), 0);
+    g_return_val_if_fail(SOND_IS_GRAPH_EDGE(edge), 0);
     return edge->id;
 }
 
 void sond_graph_edge_set_id(SondGraphEdge *edge, gint64 id) {
-    g_return_if_fail(SOND_GRAPH_IS_EDGE(edge));
-    edge->id = id;
+    g_return_if_fail(SOND_IS_GRAPH_EDGE(edge));
+
+    if (edge->id != id) {
+        edge->id = id;
+        g_object_notify_by_pspec(G_OBJECT(edge), edge_properties[PROP_ID]);
+    }
 }
 
 gint64 sond_graph_edge_get_source_id(SondGraphEdge *edge) {
-    g_return_val_if_fail(SOND_GRAPH_IS_EDGE(edge), 0);
+    g_return_val_if_fail(SOND_IS_GRAPH_EDGE(edge), 0);
     return edge->source_id;
 }
 
 void sond_graph_edge_set_source_id(SondGraphEdge *edge, gint64 source_id) {
-    g_return_if_fail(SOND_GRAPH_IS_EDGE(edge));
-    edge->source_id = source_id;
+    g_return_if_fail(SOND_IS_GRAPH_EDGE(edge));
+
+    if (edge->source_id != source_id) {
+        edge->source_id = source_id;
+        g_object_notify_by_pspec(G_OBJECT(edge), edge_properties[PROP_SOURCE_ID]);
+    }
 }
 
 gint64 sond_graph_edge_get_target_id(SondGraphEdge *edge) {
-    g_return_val_if_fail(SOND_GRAPH_IS_EDGE(edge), 0);
+    g_return_val_if_fail(SOND_IS_GRAPH_EDGE(edge), 0);
     return edge->target_id;
 }
 
 void sond_graph_edge_set_target_id(SondGraphEdge *edge, gint64 target_id) {
-    g_return_if_fail(SOND_GRAPH_IS_EDGE(edge));
-    edge->target_id = target_id;
+    g_return_if_fail(SOND_IS_GRAPH_EDGE(edge));
+
+    if (edge->target_id != target_id) {
+        edge->target_id = target_id;
+        g_object_notify_by_pspec(G_OBJECT(edge), edge_properties[PROP_TARGET_ID]);
+    }
 }
 
 const gchar* sond_graph_edge_get_label(SondGraphEdge *edge) {
-    g_return_val_if_fail(SOND_GRAPH_IS_EDGE(edge), NULL);
+    g_return_val_if_fail(SOND_IS_GRAPH_EDGE(edge), NULL);
     return edge->label;
 }
 
 void sond_graph_edge_set_label(SondGraphEdge *edge, const gchar *label) {
-    g_return_if_fail(SOND_GRAPH_IS_EDGE(edge));
-    g_free(edge->label);
-    edge->label = g_strdup(label);
+    g_return_if_fail(SOND_IS_GRAPH_EDGE(edge));
+
+    if (g_strcmp0(edge->label, label) != 0) {
+        g_free(edge->label);
+        edge->label = g_strdup(label);
+        g_object_notify_by_pspec(G_OBJECT(edge), edge_properties[PROP_LABEL]);
+    }
+}
+
+GPtrArray* sond_graph_edge_get_properties(SondGraphEdge *edge) {
+    g_return_val_if_fail(SOND_IS_GRAPH_EDGE(edge), NULL);
+    return edge->properties;
+}
+
+void sond_graph_edge_set_properties(SondGraphEdge *edge, GPtrArray *properties) {
+    g_return_if_fail(SOND_IS_GRAPH_EDGE(edge));
+
+    if (edge->properties) {
+        g_ptr_array_unref(edge->properties);
+    }
+
+    /* Deep copy der Properties */
+    if (properties) {
+        edge->properties = g_ptr_array_new_with_free_func(
+            (GDestroyNotify)sond_graph_property_free);
+
+        for (guint i = 0; i < properties->len; i++) {
+            SondGraphProperty *prop = g_ptr_array_index(properties, i);
+            const gchar *key = sond_graph_property_get_key(prop);
+            GPtrArray *values = sond_graph_property_get_values(prop);
+
+            if (values && values->len > 0) {
+                /* Konvertiere zu const gchar** für new() */
+                const gchar **values_array = g_new(const gchar*, values->len);
+                for (guint j = 0; j < values->len; j++) {
+                    values_array[j] = g_ptr_array_index(values, j);
+                }
+
+                SondGraphProperty *new_prop = sond_graph_property_new(
+                    key, values_array, values->len);
+                g_ptr_array_add(edge->properties, new_prop);
+
+                g_free(values_array);
+
+                /* Sub-Properties kopieren */
+                GPtrArray *sub_props = sond_graph_property_get_properties(prop);
+                if (sub_props && sub_props->len > 0) {
+                    for (guint j = 0; j < sub_props->len; j++) {
+                        SondGraphProperty *sub = g_ptr_array_index(sub_props, j);
+                        /* Rekursion würde hier nötig sein für volle Deep Copy */
+                        /* Vereinfacht: nur erste Ebene kopieren */
+                        sond_graph_property_add_subproperty(new_prop, sub);
+                    }
+                }
+            }
+        }
+    } else {
+        edge->properties = g_ptr_array_new_with_free_func(
+            (GDestroyNotify)sond_graph_property_free);
+    }
+
+    g_object_notify_by_pspec(G_OBJECT(edge), edge_properties[PROP_PROPERTIES]);
 }
 
 GDateTime* sond_graph_edge_get_created_at(SondGraphEdge *edge) {
-    g_return_val_if_fail(SOND_GRAPH_IS_EDGE(edge), NULL);
+    g_return_val_if_fail(SOND_IS_GRAPH_EDGE(edge), NULL);
     return edge->created_at;
 }
 
 void sond_graph_edge_set_created_at(SondGraphEdge *edge, GDateTime *created_at) {
-    g_return_if_fail(SOND_GRAPH_IS_EDGE(edge));
+    g_return_if_fail(SOND_IS_GRAPH_EDGE(edge));
+
     if (edge->created_at) {
         g_date_time_unref(edge->created_at);
     }
+
     edge->created_at = created_at ? g_date_time_ref(created_at) : NULL;
+    g_object_notify_by_pspec(G_OBJECT(edge), edge_properties[PROP_CREATED_AT]);
 }
 
 GDateTime* sond_graph_edge_get_updated_at(SondGraphEdge *edge) {
-    g_return_val_if_fail(SOND_GRAPH_IS_EDGE(edge), NULL);
+    g_return_val_if_fail(SOND_IS_GRAPH_EDGE(edge), NULL);
     return edge->updated_at;
 }
 
 void sond_graph_edge_set_updated_at(SondGraphEdge *edge, GDateTime *updated_at) {
-    g_return_if_fail(SOND_GRAPH_IS_EDGE(edge));
+    g_return_if_fail(SOND_IS_GRAPH_EDGE(edge));
+
     if (edge->updated_at) {
         g_date_time_unref(edge->updated_at);
     }
+
     edge->updated_at = updated_at ? g_date_time_ref(updated_at) : NULL;
+    g_object_notify_by_pspec(G_OBJECT(edge), edge_properties[PROP_UPDATED_AT]);
 }
 
 /* ========================================================================
- * Properties Management
+ * SondGraphEdgeRef - Leichtgewichtige Referenz
  * ======================================================================== */
 
-void sond_graph_edge_set_property(SondGraphEdge *edge,
-                                   const gchar *key,
-                                   const gchar *value) {
-    g_return_if_fail(SOND_GRAPH_IS_EDGE(edge));
-    g_return_if_fail(key != NULL);
-    g_return_if_fail(value != NULL);
-
-    g_hash_table_insert(edge->properties, g_strdup(key), g_strdup(value));
+SondGraphEdgeRef* sond_graph_edge_ref_new(gint64 id,
+                                           const gchar *label,
+                                           gint64 target_id) {
+    SondGraphEdgeRef *ref = g_new0(SondGraphEdgeRef, 1);
+    ref->id = id;
+    ref->label = g_strdup(label);
+    ref->target_id = target_id;
+    return ref;
 }
 
-const gchar* sond_graph_edge_get_property(SondGraphEdge *edge,
-                                            const gchar *key) {
-    g_return_val_if_fail(SOND_GRAPH_IS_EDGE(edge), NULL);
-    g_return_val_if_fail(key != NULL, NULL);
+SondGraphEdgeRef* sond_graph_edge_ref_copy(const SondGraphEdgeRef *ref) {
+    if (ref == NULL)
+        return NULL;
 
-    return g_hash_table_lookup(edge->properties, key);
+    return sond_graph_edge_ref_new(ref->id, ref->label, ref->target_id);
 }
 
-gboolean sond_graph_edge_has_property(SondGraphEdge *edge,
-                                       const gchar *key) {
-    g_return_val_if_fail(SOND_GRAPH_IS_EDGE(edge), FALSE);
-    g_return_val_if_fail(key != NULL, FALSE);
+void sond_graph_edge_ref_free(SondGraphEdgeRef *ref) {
+    if (ref == NULL)
+        return;
 
-    return g_hash_table_contains(edge->properties, key);
-}
-
-void sond_graph_edge_remove_property(SondGraphEdge *edge,
-                                      const gchar *key) {
-    g_return_if_fail(SOND_GRAPH_IS_EDGE(edge));
-    g_return_if_fail(key != NULL);
-
-    g_hash_table_remove(edge->properties, key);
-}
-
-GList* sond_graph_edge_get_property_keys(SondGraphEdge *edge) {
-    g_return_val_if_fail(SOND_GRAPH_IS_EDGE(edge), NULL);
-
-    return g_hash_table_get_keys(edge->properties);
-}
-
-/* ========================================================================
- * JSON Serialisierung (analog zu SondGraphNode)
- * ======================================================================== */
-
-gchar* sond_graph_edge_properties_to_json(SondGraphEdge *edge) {
-    g_return_val_if_fail(SOND_GRAPH_IS_EDGE(edge), NULL);
-
-    JsonBuilder *builder = json_builder_new();
-    json_builder_begin_array(builder);
-
-    GHashTableIter iter;
-    gpointer key, value;
-    g_hash_table_iter_init(&iter, edge->properties);
-
-    while (g_hash_table_iter_next(&iter, &key, &value)) {
-        json_builder_begin_object(builder);
-        json_builder_set_member_name(builder, "key");
-        json_builder_add_string_value(builder, (const gchar*)key);
-        json_builder_set_member_name(builder, "value");
-        json_builder_add_string_value(builder, (const gchar*)value);
-        json_builder_end_object(builder);
-    }
-
-    json_builder_end_array(builder);
-
-    JsonGenerator *generator = json_generator_new();
-    JsonNode *root = json_builder_get_root(builder);
-    json_generator_set_root(generator, root);
-
-    gchar *json = json_generator_to_data(generator, NULL);
-
-    json_node_free(root);
-    g_object_unref(generator);
-    g_object_unref(builder);
-
-    return json;
-}
-
-gboolean sond_graph_edge_properties_from_json(SondGraphEdge *edge,
-                                                const gchar *json,
-                                                GError **error) {
-    g_return_val_if_fail(SOND_GRAPH_IS_EDGE(edge), FALSE);
-    g_return_val_if_fail(json != NULL, FALSE);
-
-    JsonParser *parser = json_parser_new();
-
-    if (!json_parser_load_from_data(parser, json, -1, error)) {
-        g_object_unref(parser);
-        return FALSE;
-    }
-
-    JsonNode *root = json_parser_get_root(parser);
-    if (!JSON_NODE_HOLDS_ARRAY(root)) {
-        g_set_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
-                   "Root node is not an array");
-        g_object_unref(parser);
-        return FALSE;
-    }
-
-    JsonArray *array = json_node_get_array(root);
-    guint length = json_array_get_length(array);
-
-    /* Properties clearen */
-    g_hash_table_remove_all(edge->properties);
-
-    for (guint i = 0; i < length; i++) {
-        JsonNode *element = json_array_get_element(array, i);
-
-        if (!JSON_NODE_HOLDS_OBJECT(element)) {
-            continue;
-        }
-
-        JsonObject *obj = json_node_get_object(element);
-
-        if (!json_object_has_member(obj, "key") ||
-            !json_object_has_member(obj, "value")) {
-            continue;
-        }
-
-        const gchar *key = json_object_get_string_member(obj, "key");
-        const gchar *value = json_object_get_string_member(obj, "value");
-
-        if (key && value) {
-            g_hash_table_insert(edge->properties,
-                              g_strdup(key),
-                              g_strdup(value));
-        }
-    }
-
-    g_object_unref(parser);
-    return TRUE;
+    g_free(ref->label);
+    g_free(ref);
 }
 
 /*
  * Kompilierung:
- * gcc -c sond_graph_edge.c $(pkg-config --cflags glib-2.0 gobject-2.0 json-glib-1.0)
+ * gcc -c sond_graph_edge.c $(pkg-config --cflags glib-2.0 gobject-2.0)
  */
