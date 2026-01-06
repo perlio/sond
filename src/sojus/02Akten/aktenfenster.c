@@ -640,14 +640,14 @@ void aktenfenster_fuellen(GtkWidget *akten_window, gint regnr, gint jahr) {
 		gtk_combo_box_set_active(
 				GTK_COMBO_BOX(
 						g_object_get_data( G_OBJECT(akten_window), "combo_sachgebiete")),
-				allg_string_array_index_holen(sojus->sachgebiete,
+				find_string_in_array(sojus->sachgebiete,
 						akte->sachgebiet));
 
 		//Sachbearbeiter
 		gtk_combo_box_set_active(
 				GTK_COMBO_BOX(
 						g_object_get_data( G_OBJECT(akten_window), "combo_sachbearbeiter")),
-				allg_string_array_index_holen(sojus->sachbearbeiter,
+				find_string_in_array(sojus->sachbearbeiter,
 						akte->sachbearbeiter_id));
 
 		//Aktenbeteiligte
@@ -792,7 +792,7 @@ void listboxlabel_fuellen(GtkWidget *akten_window, GtkWidget *row,
 		adresse = adresse_oeffnen(akten_window, aktenbet->adressnr);
 		gchar *text = g_strconcat(
 				g_ptr_array_index(sojus->beteiligtenart,
-						allg_string_array_index_holen(sojus->beteiligtenart,
+						find_string_in_array(sojus->beteiligtenart,
 								aktenbet->betart)), ": ", adresse->adresszeile1,
 				" ", adresse->vorname, " ", adresse->name, NULL);
 		adresse_free(adresse);
