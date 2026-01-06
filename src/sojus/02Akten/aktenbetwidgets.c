@@ -247,7 +247,7 @@ void aktenbetwidgets_fuellen(GtkWidget *akten_window, Aktenbet *aktenbet) {
 	gtk_combo_box_set_active(
 			GTK_COMBO_BOX(
 					g_object_get_data( G_OBJECT(akten_window), "combo_beteiligtenart")),
-			allg_string_array_index_holen(sojus->beteiligtenart,
+			find_string_in_array(sojus->beteiligtenart,
 					aktenbet->betart));
 
 	//Betreff1

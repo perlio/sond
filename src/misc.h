@@ -53,7 +53,7 @@ gint abfrage_frage(GtkWidget*, const gchar*, const gchar*, gchar**);
 
 gint ask_question(GtkWidget*, const gchar*, const gchar*, const gchar*);
 
-gint allg_string_array_index_holen(GPtrArray*, gchar*);
+gint find_string_in_array(GPtrArray*, gchar*);
 
 gchar* add_string(gchar*, gchar*);
 

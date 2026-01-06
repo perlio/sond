@@ -33,7 +33,7 @@
 #include <limits.h>
 #endif // _WIN32
 
-static int rm(const char *path, const struct stat *s, int flag, struct FTW *f) {
+static int remove_file_or_dir(const char *path, const struct stat *stat_info, int flag, struct FTW *ftw_info) {
 	int (*rm_func)(const char*);
 
 	rm_func = (flag == FTW_DP) ? rmdir : unlink;
@@ -44,7 +44,7 @@ static int rm(const char *path, const struct stat *s, int flag, struct FTW *f) {
 }
 
 int rm_r(const char *path) {
-	if (nftw(path, rm, 10, FTW_DEPTH))
+	if (nftw(path, remove_file_or_dir, 10, FTW_DEPTH))
 		return -1;
 
 	return 0;
@@ -80,7 +80,7 @@ static int maybe_mkdir(const char *path, mode_t mode) {
 int mkdir_p(const char *path) {
 	/* Adapted from http://stackoverflow.com/a/2336245/119527 */
 	char *_path = NULL;
-	char *p;
+	char *path_ptr;
 	int result = -1;
 	mode_t mode = 0777;
 
@@ -92,15 +92,15 @@ int mkdir_p(const char *path) {
 		goto out;
 
 	/* Iterate the string */
-	for (p = _path + 1; *p; p++) {
-		if (*p == '/') {
+	for (path_ptr = _path + 1; *path_ptr; path_ptr++) {
+		if (*path_ptr == '/') {
 			/* Temporarily truncate */
-			*p = '\0';
+			*path_ptr = '\0';
 
 			if (maybe_mkdir(_path, mode) != 0)
 				goto out;
 
-			*p = '/';
+			*path_ptr = '/';
 		}
 	}
 
