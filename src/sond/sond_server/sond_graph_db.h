@@ -517,6 +517,27 @@ gint sond_graph_db_unlock_all_by_user(MYSQL *conn,
  */
 gint sond_graph_db_cleanup_expired_locks(MYSQL *conn, GError **error);
 
-G_END_DECLS
+/**
+ * sond_graph_node_search_criteria_to_json:
+ * @criteria: Search Criteria
+ *
+ * Serialisiert Search Criteria zu JSON.
+ *
+ * Returns: (transfer full): JSON-String. Caller muss g_free() aufrufen.
+ */
+gchar* sond_graph_node_search_criteria_to_json(SondGraphNodeSearchCriteria *criteria);
+
+/**
+ * sond_graph_node_search_criteria_from_json:
+ * @json: JSON-String
+ * @error: (nullable): Error-Rückgabe
+ *
+ * Deserialisiert Search Criteria aus JSON.
+ *
+ * Returns: (transfer full) (nullable): Neue SondGraphNodeSearchCriteria oder NULL.
+ *          Caller muss sond_graph_node_search_criteria_free() aufrufen.
+ */
+SondGraphNodeSearchCriteria* sond_graph_node_search_criteria_from_json(const gchar *json,
+                                                                        GError **error);G_END_DECLS
 
 #endif /* SOND_GRAPH_DB_H */

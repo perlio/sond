@@ -18,7 +18,10 @@
 
 /**
  * @file sond_graph_node.h
- * @brief Graph Node Implementation - Konsistente Property API
+ * @brief Graph Node Implementation - Nutzt SondGraphProperty direkt
+ *
+ * Die Node nutzt SondGraphProperty für alle Property-Operationen.
+ * Dies stellt Konsistenz mit Edge und dem Property-System sicher.
  *
  * Properties Format:
  * - Property = [key, [values...], [sub-properties...]]
@@ -46,22 +49,11 @@ G_BEGIN_DECLS
  * Type Definitions
  * ======================================================================== */
 
-#define SOND_GRAPH_TYPE_NODE (sond_graph_node_get_type())
-G_DECLARE_FINAL_TYPE(SondGraphNode, sond_graph_node, SOND_GRAPH, NODE, GObject)
+#define SOND_TYPE_GRAPH_NODE (sond_graph_node_get_type())
+G_DECLARE_FINAL_TYPE(SondGraphNode, sond_graph_node, SOND, GRAPH_NODE, GObject)
 
-/**
- * SondGraphEdgeRef:
- * @edge_id: ID der Edge
- * @label: Label der Edge (z.B. "KNOWS", "WORKS_AT")
- * @target_id: ID des Zielknotens
- *
- * Referenz auf eine ausgehende Edge.
- */
-typedef struct {
-    gint64 edge_id;
-    gchar *label;
-    gint64 target_id;
-} SondGraphEdgeRef;
+/* Forward declaration */
+typedef struct _SondGraphEdge SondGraphEdge;
 
 /* ========================================================================
  * Constructor / Destructor
@@ -297,10 +289,24 @@ void sond_graph_node_remove_property(SondGraphNode *node,
  *
  * Gibt eine Liste aller Property-Namen zurück.
  *
- * Returns: (transfer full) (element-type utf8): GList von Strings.
- *          Caller muss g_list_free_full(list, g_free) aufrufen.
+ * Returns: (transfer full) (element-type utf8): GPtrArray von Strings.
+ *          Caller muss g_ptr_array_unref() aufrufen.
  */
-GList* sond_graph_node_get_property_keys(SondGraphNode *node);
+GPtrArray* sond_graph_node_get_property_keys(SondGraphNode *node);
+
+/**
+ * sond_graph_node_get_properties:
+ * @node: Ein SondGraphNode
+ *
+ * Gibt das interne Property-Array zurück (nicht-kopiert).
+ * Das Array gehört der Node und darf nicht modifiziert oder freigegeben werden.
+ *
+ * Hinweis: Dies ist eine Low-Level-Funktion. Für die meisten Anwendungsfälle
+ * sollten die einzelnen Property-Getter verwendet werden.
+ *
+ * Returns: (transfer none) (element-type SondGraphProperty): GPtrArray von SondGraphProperty
+ */
+GPtrArray* sond_graph_node_get_properties(SondGraphNode *node);
 
 /* ========================================================================
  * Nested Properties (Sub-Properties als Metadaten)
@@ -395,44 +401,22 @@ gboolean sond_graph_node_has_nested_property(SondGraphNode *node,
  * ======================================================================== */
 
 /**
- * sond_graph_edge_ref_new:
- * @edge_id: Edge ID
- * @label: Edge Label
- * @target_id: Zielknoten ID
- *
- * Erstellt eine neue Edge-Referenz.
- *
- * Returns: (transfer full): Neue SondGraphEdgeRef
- */
-SondGraphEdgeRef* sond_graph_edge_ref_new(gint64 edge_id,
-                                            const gchar *label,
-                                            gint64 target_id);
-
-/**
- * sond_graph_edge_ref_free:
- * @ref: Eine SondGraphEdgeRef
- *
- * Gibt eine Edge-Referenz frei.
- */
-void sond_graph_edge_ref_free(SondGraphEdgeRef *ref);
-
-/**
  * sond_graph_node_add_outgoing_edge:
  * @node: Ein SondGraphNode
- * @edge_ref: (transfer full): Edge-Referenz
+ * @edge: (transfer none): Edge-Objekt
  *
  * Fügt eine ausgehende Edge hinzu.
- * Die Node übernimmt den Besitz der Edge-Referenz.
+ * Die Node erhöht die Referenz-Zählung der Edge (g_object_ref).
  */
 void sond_graph_node_add_outgoing_edge(SondGraphNode *node,
-                                        SondGraphEdgeRef *edge_ref);
+                                        SondGraphEdge *edge);
 
 /**
  * sond_graph_node_remove_outgoing_edge:
  * @node: Ein SondGraphNode
  * @edge_id: Edge ID
  *
- * Entfernt eine ausgehende Edge.
+ * Entfernt eine ausgehende Edge anhand ihrer ID.
  */
 void sond_graph_node_remove_outgoing_edge(SondGraphNode *node,
                                            gint64 edge_id);
@@ -441,12 +425,12 @@ void sond_graph_node_remove_outgoing_edge(SondGraphNode *node,
  * sond_graph_node_get_outgoing_edges:
  * @node: Ein SondGraphNode
  *
- * Gibt die Liste aller ausgehenden Edges zurück.
+ * Gibt das Array aller ausgehenden Edges zurück.
  *
- * Returns: (transfer none) (element-type SondGraphEdgeRef): GList von SondGraphEdgeRef.
- *          Die Liste gehört dem Node und darf nicht modifiziert werden.
+ * Returns: (transfer none) (element-type SondGraphEdge): GPtrArray von SondGraphEdge.
+ *          Das Array gehört dem Node und darf nicht modifiziert werden.
  */
-GList* sond_graph_node_get_outgoing_edges(SondGraphNode *node);
+GPtrArray* sond_graph_node_get_outgoing_edges(SondGraphNode *node);
 
 /**
  * sond_graph_node_find_edge:
@@ -455,62 +439,46 @@ GList* sond_graph_node_get_outgoing_edges(SondGraphNode *node);
  *
  * Findet eine Edge anhand ihrer ID.
  *
- * Returns: (transfer none) (nullable): SondGraphEdgeRef oder NULL
+ * Returns: (transfer none) (nullable): SondGraphEdge oder NULL
  */
-SondGraphEdgeRef* sond_graph_node_find_edge(SondGraphNode *node,
-                                              gint64 edge_id);
+SondGraphEdge* sond_graph_node_find_edge(SondGraphNode *node,
+                                          gint64 edge_id);
 
 /* ========================================================================
  * JSON Serialization
  * ======================================================================== */
 
 /**
- * sond_graph_node_properties_to_json:
+ * sond_graph_node_to_json:
  * @node: Ein SondGraphNode
  *
- * Serialisiert alle Properties zu JSON.
+ * Serialisiert die komplette Node zu JSON (ID, Label, Properties, Timestamps).
+ * Edges werden nicht serialisiert (zu groß/zirkulär).
  *
- * Format: [
- *   [key, [values...], [sub-properties...]],
- *   ...
- * ]
+ * Format:
+ * {
+ *   "id": 123,
+ *   "label": "Person",
+ *   "properties": [...],
+ *   "created_at": "2025-01-01T12:00:00Z",
+ *   "updated_at": "2025-01-02T12:00:00Z"
+ * }
  *
  * Returns: (transfer full): JSON-String. Caller muss g_free() aufrufen.
- *
- * Beispiel:
- * |[<!-- language="C" -->
- * gchar *json = sond_graph_node_properties_to_json(node);
- * g_print("Properties: %s\n", json);
- * g_free(json);
- * ]|
  */
-gchar* sond_graph_node_properties_to_json(SondGraphNode *node);
+gchar* sond_graph_node_to_json(SondGraphNode *node);
 
 /**
- * sond_graph_node_properties_from_json:
- * @node: Ein SondGraphNode
+ * sond_graph_node_from_json:
  * @json: JSON-String
  * @error: (nullable): Error-Rückgabe
  *
- * Lädt Properties aus einem JSON-String.
- * Alle existierenden Properties werden überschrieben.
+ * Erstellt eine Node aus JSON.
  *
- * Returns: TRUE bei Erfolg, FALSE bei Fehler
- *
- * Beispiel:
- * |[<!-- language="C" -->
- * GError *error = NULL;
- * const gchar *json = "[[\"name\", [\"Alice\"]], [\"age\", [\"30\"]]]";
- *
- * if (!sond_graph_node_properties_from_json(node, json, &error)) {
- *     g_warning("Fehler beim Laden: %s", error->message);
- *     g_error_free(error);
- * }
- * ]|
+ * Returns: (transfer full) (nullable): Neue SondGraphNode oder NULL bei Fehler.
+ *          Caller muss g_object_unref() aufrufen.
  */
-gboolean sond_graph_node_properties_from_json(SondGraphNode *node,
-                                                const gchar *json,
-                                                GError **error);
+SondGraphNode* sond_graph_node_from_json(const gchar *json, GError **error);
 
 G_END_DECLS
 

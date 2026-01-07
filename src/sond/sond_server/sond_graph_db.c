@@ -25,6 +25,7 @@
 #include "sond_graph_node.h"
 #include "sond_graph_edge.h"
 #include "sond_graph_property.h"
+#include <json-glib/json-glib.h>
 #include <string.h>
 #include <stdio.h>
 
@@ -560,7 +561,7 @@ SondGraphNode* sond_graph_db_load_node(MYSQL *conn, gint64 node_id, GError **err
         GError *edge_json_error = NULL;
         GPtrArray *edge_props = sond_graph_property_list_from_json(edge_properties, &edge_json_error);
         if (edge_props == NULL && edge_json_error != NULL) {
-            g_warning("Failed to parse edge properties for edge %" " %s",
+            g_warning("Failed to parse edge properties for edge %" G_GINT64_FORMAT " %s",
                      edge_id, edge_json_error->message);
             g_clear_error(&edge_json_error);
         }
@@ -1012,7 +1013,7 @@ GPtrArray* sond_graph_db_search_nodes(MYSQL *conn,
         if (node != NULL) {
             g_ptr_array_add(nodes, node);
         } else {
-            g_warning("Failed to load node %ld: %s", node_id,
+            g_warning("Failed to load node %" G_GINT64_FORMAT " %s", node_id,
                      load_error ? load_error->message : "unknown");
             g_clear_error(&load_error);
         }
@@ -1212,7 +1213,7 @@ gboolean sond_graph_db_delete_node(MYSQL *conn, gint64 node_id, GError **error) 
         return FALSE;
     }
 
-    gchar *query = g_strdup_printf("DELETE FROM nodes WHERE id = %ld", node_id);
+    gchar *query = g_strdup_printf("DELETE FROM nodes WHERE id = %" G_GUINT64_FORMAT, node_id);
 
     if (mysql_query(conn, query)) {
         g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
@@ -1228,7 +1229,7 @@ gboolean sond_graph_db_delete_node(MYSQL *conn, gint64 node_id, GError **error) 
     my_ulonglong affected = mysql_affected_rows(conn);
     if (affected == 0) {
         g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
-                   "Node with ID %ld not found", node_id);
+                   "Node with ID %" G_GINT64_FORMAT " not found", node_id);
         g_prefix_error(error, "%s: ", __func__);
         return FALSE;
     }
@@ -1379,7 +1380,7 @@ gboolean sond_graph_db_delete_edge(MYSQL *conn, gint64 edge_id, GError **error) 
         return FALSE;
     }
 
-    gchar *query = g_strdup_printf("DELETE FROM edges WHERE id = %ld", edge_id);
+    gchar *query = g_strdup_printf("DELETE FROM edges WHERE id = %" G_GINT64_FORMAT, edge_id);
 
     if (mysql_query(conn, query)) {
         g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
@@ -1395,7 +1396,7 @@ gboolean sond_graph_db_delete_edge(MYSQL *conn, gint64 edge_id, GError **error) 
     my_ulonglong affected = mysql_affected_rows(conn);
     if (affected == 0) {
         g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
-                   "Edge with ID %ld not found", edge_id);
+                   "Edge with ID %" G_GINT64_FORMAT " not found", edge_id);
         g_prefix_error(error, "%s: ", __func__);
         return FALSE;
     }
@@ -1566,7 +1567,7 @@ gboolean sond_graph_db_force_unlock_node(MYSQL *conn,
     }
 
     /* Direkt aus Tabelle löschen - ohne User-Check */
-    gchar *query = g_strdup_printf("DELETE FROM node_locks WHERE node_id = %ld", node_id);
+    gchar *query = g_strdup_printf("DELETE FROM node_locks WHERE node_id = %" G_GINT64_FORMAT, node_id);
 
     if (mysql_query(conn, query)) {
         g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
@@ -1582,7 +1583,7 @@ gboolean sond_graph_db_force_unlock_node(MYSQL *conn,
     my_ulonglong affected = mysql_affected_rows(conn);
     if (affected == 0) {
         g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
-                   "Node %ld was not locked", node_id);
+                   "Node %" G_GINT64_FORMAT " was not locked", node_id);
         g_prefix_error(error, "%s: ", __func__);
         return FALSE;
     }

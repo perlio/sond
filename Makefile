@@ -37,8 +37,8 @@ endif
 
 ifneq (,$(findstring $(MAKECMDGOALS), sond_server))
 SRCS := $(shell find $(SRC_DIRS)/sond/sond_server -name '*.c')
-CFLAGS += $(shell pkg-config --cflags libmariadb libsoup-3.0 json-glib-1.0)
-LDFLAGS += $(shell pkg-config --libs libmariadb libsoup-3.0 json-glib-1.0)
+CFLAGS += $(shell pkg-config --cflags libcurl libmariadb libsoup-3.0 json-glib-1.0)
+LDFLAGS += $(shell pkg-config --libs libcurl libmariadb libsoup-3.0 json-glib-1.0)
 endif
 
 # Object files
