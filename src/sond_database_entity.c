@@ -112,11 +112,11 @@ gint sond_database_entity_load(SondDatabaseEntity *sde, gpointer database,
 	ID_label = sond_database_get_ID_label_for_entity(database, ID_entity,
 			errmsg);
 	if (ID_label == -1)
-		ERROR_S
+		ERROR_Z
 
 //    rc = sond_database_get_label_for_ID_label( database, ID_label, &label, errmsg );
 	if (rc)
-		ERROR_S
+		ERROR_Z
 
 	label_text = g_strdup_printf("%i", ID_entity);
 	gtk_label_set_text(GTK_LABEL(priv->label_ID), label_text);
@@ -132,7 +132,7 @@ gint sond_database_entity_load(SondDatabaseEntity *sde, gpointer database,
 	rc = sond_database_get_properties(database, ID_entity, &arr_properties,
 			errmsg);
 	if (!arr_properties)
-		ERROR_S
+		ERROR_Z
 
 	for (gint i = 0; i < arr_properties->len; i++) {
 		gint ID_property = 0;
@@ -164,7 +164,7 @@ sond_database_entity_load_new(gpointer database, gint ID, gchar **errmsg) {
 			errmsg);
 	if (rc) {
 		g_object_unref(sde);
-		ERROR_S_VAL(NULL)
+		ERROR_Z_VAL(NULL)
 	}
 
 	return sde;

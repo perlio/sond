@@ -75,12 +75,12 @@ gint sond_database_node_load(SondDatabaseNode *sdn, gpointer database,
 	rc = sond_database_entity_load(SOND_DATABASE_ENTITY(priv->sde), database,
 			ID_entity, errmsg);
 	if (rc)
-		ERROR_S
+		ERROR_Z
 
 	rc = sond_database_get_incoming_rels(database, ID_entity, &arr_i_rels,
 			errmsg);
 	if (rc)
-		ERROR_S
+		ERROR_Z
 
 	for (gint i = 0; i < ((arr_i_rels->len <= 10) ? arr_i_rels->len : 10);
 			i++) {
@@ -101,7 +101,7 @@ gint sond_database_node_load(SondDatabaseNode *sdn, gpointer database,
 				errmsg);
 		if (rc == -1) {
 			g_array_unref(arr_i_rels);
-			ERROR_S
+			ERROR_Z
 		} else
 			ID_entity_subject = rc;
 
@@ -109,7 +109,7 @@ gint sond_database_node_load(SondDatabaseNode *sdn, gpointer database,
 				errmsg);
 		if (!sde_object) {
 			g_array_unref(arr_i_rels);
-			ERROR_S
+			ERROR_Z
 		}
 
 		gtk_box_pack_start(GTK_BOX(box_segment), sde_object, FALSE, FALSE, 0);
@@ -118,7 +118,7 @@ gint sond_database_node_load(SondDatabaseNode *sdn, gpointer database,
 				errmsg);
 		if (!sde_rel) {
 			g_array_unref(arr_i_rels);
-			ERROR_S
+			ERROR_Z
 		}
 
 		gtk_box_pack_start(GTK_BOX(box_segment), sde_rel, FALSE, FALSE, 0);
@@ -128,7 +128,7 @@ gint sond_database_node_load(SondDatabaseNode *sdn, gpointer database,
 	rc = sond_database_get_outgoing_rels(database, ID_entity, &arr_o_rels,
 			errmsg);
 	if (rc)
-		ERROR_S
+		ERROR_Z
 
 	for (gint i = 0; i < ((arr_o_rels->len <= 10) ? arr_o_rels->len : 10);
 			i++) {
@@ -148,7 +148,7 @@ gint sond_database_node_load(SondDatabaseNode *sdn, gpointer database,
 		rc = sond_database_get_object_from_rel(database, ID_entity_rel, errmsg);
 		if (rc == -1) {
 			g_array_unref(arr_o_rels);
-			ERROR_S
+			ERROR_Z
 		} else
 			ID_entity_object = rc;
 
@@ -156,7 +156,7 @@ gint sond_database_node_load(SondDatabaseNode *sdn, gpointer database,
 				errmsg);
 		if (!sde_rel) {
 			g_array_unref(arr_o_rels);
-			ERROR_S
+			ERROR_Z
 		}
 
 		gtk_box_pack_start(GTK_BOX(box_segment), sde_rel, FALSE, FALSE, 0);
@@ -165,7 +165,7 @@ gint sond_database_node_load(SondDatabaseNode *sdn, gpointer database,
 				errmsg);
 		if (!sde_object) {
 			g_array_unref(arr_o_rels);
-			ERROR_S
+			ERROR_Z
 		}
 
 		gtk_box_pack_start(GTK_BOX(box_segment), sde_object, FALSE, FALSE, 0);
@@ -186,8 +186,7 @@ sond_database_node_load_new(gpointer database, gint ID_entity, gchar **errmsg) {
 	rc = sond_database_node_load(SOND_DATABASE_NODE(sdn), database, ID_entity,
 			errmsg);
 	if (rc)
-		ERROR_S_VAL(NULL)
+		ERROR_Z_VAL(NULL)
 
 	return sdn;
 }
-

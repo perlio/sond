@@ -35,6 +35,12 @@ LDFLAGS += $(shell pkg-config --libs libmagic gtk+-3.0 gobject-2.0 sqlite3 libcu
 	-lshlwapi -llexbor
 endif
 
+ifneq (,$(findstring $(MAKECMDGOALS), sond_server))
+SRCS := $(shell find $(SRC_DIRS)/sond/sond_server -name '*.c')
+CFLAGS += $(shell pkg-config --cflags libmariadb libsoup-3.0 json-glib-1.0)
+LDFLAGS += $(shell pkg-config --libs libmariadb libsoup-3.0 json-glib-1.0)
+endif
+
 # Object files
 OBJS := $(SRCS:%=$(OBJ_DIR)/%.o)
 
@@ -51,6 +57,8 @@ all: zond
 zond: $(BIN_DIR)/zond.exe
 
 viewer: $(BIN_DIR)/viewer.exe
+
+sond_server: $(BIN_DIR)/sond_server.exe
 
 # Linking
 $(BIN_DIR)/$(MAKECMDGOALS).exe: $(SRCS:%=$(OBJ_DIR)/%.o)

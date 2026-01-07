@@ -94,38 +94,38 @@ GArray* sond_database_get_properties_of_type(gpointer, gint, gint, GError**);
 gint sond_database_get_only_property_of_type(gpointer, gint, gint, Property*,
 		GError**);
 
-gint sond_database_update_label(gpointer, gint, gint, gchar**);
+gint sond_database_update_label(gpointer, gint, gint, GError**);
 
-gint sond_database_label_is_equal_or_parent(gpointer, gint, gint, gchar**);
+gint sond_database_label_is_equal_or_parent(gpointer, gint, gint, GError**);
 
-gint sond_database_get_ID_label_for_entity(gpointer, gint, gchar**);
+gint sond_database_get_ID_label_for_entity(gpointer, gint, GError**);
 
-gint sond_database_get_entities_for_label(gpointer, gint, GArray**, gchar**);
+gint sond_database_get_entities_for_label(gpointer, gint, GArray**, GError**);
 
-gint sond_database_get_object_for_subject(gpointer, gint, GArray**, gchar**,
+gint sond_database_get_object_for_subject(gpointer, gint, GArray**, GError**,
 		...);
 
 gint sond_database_get_entities_for_property(gpointer, gint, const gchar*,
-		GArray**, gchar**);
+		GArray**, GError**);
 
 gint sond_database_get_entities_for_properties_and(gpointer, GArray**, gchar**,
 		...);
 
 gint sond_database_get_first_property_value_for_subject(gpointer, gint, gint,
-		gchar**, gchar**);
+		gchar**, GError**);
 
 gint sond_database_get_subject_and_first_property_value_for_labels(gpointer,
-		gint, gint, GArray**, GPtrArray**, gchar**);
+		gint, gint, GArray**, GPtrArray**, GError**);
 
 gint sond_database_get_objects_from_labels(gpointer, gint, gint, gint, GArray**,
-		gchar**);
+		GError**);
 
-gint sond_database_get_outgoing_rels(gpointer, gint, GArray**, gchar**);
+gint sond_database_get_outgoing_rels(gpointer, gint, GArray**, GError**);
 
-gint sond_database_get_incoming_rels(gpointer, gint, GArray**, gchar**);
+gint sond_database_get_incoming_rels(gpointer, gint, GArray**, GError**);
 
-gint sond_database_get_subject_from_rel(gpointer, gint, gchar**);
+gint sond_database_get_subject_from_rel(gpointer, gint, GError**);
 
-gint sond_database_get_object_from_rel(gpointer, gint, gchar**);
+gint sond_database_get_object_from_rel(gpointer, gint, GError**);
 
 #endif //SOND_DATABASE_H_INCLUDED

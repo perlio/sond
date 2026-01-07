@@ -18,8 +18,8 @@
 
 #include <glib.h>
 #include <json-glib/json-glib.h>
-#include <curl/curl.h>
 #include <glib/gstdio.h>
+#include <libsoup/soup.h>
 
 #include "../../misc.h"
 #include "../../misc_stdlib.h"
@@ -29,58 +29,40 @@
 
 static gint sond_server_seafile_do_delete_lib(SondServer *sond_server,
 		const gchar *repo_id, GError **error) {
-	CURL *curl = NULL;
-	CURLcode res = CURLE_OK;
+	SoupSession *session = NULL;
+	SoupMessage *msg = NULL;
 	gchar *url = NULL;
-	struct curl_slist *slist = NULL;
 	gchar *header_token = NULL;
-	glong http_code = 0;
-
-	curl = curl_easy_init();
-	if (!curl) {
-		*error = g_error_new(g_quark_from_static_string("CURL"), 0,
-				"%s\ncurl_easy_init nicht erfolgreich", __func__);
-		return -1;
-	}
+	GError *local_error = NULL;
+	gint status_code = 0;
 
 	url = g_strdup_printf("%s/api2/repos/%s", sond_server->seafile_url,
 			repo_id);
-	curl_easy_setopt(curl, CURLOPT_URL, url);
+	session = soup_session_new();
+	msg = soup_message_new(SOUP_METHOD_DELETE, url);
 	g_free(url);
 
 	header_token = g_strdup_printf("Authorization: Token %s",
 			sond_server->auth_token);
-	slist = curl_slist_append(slist, header_token);
-	slist = curl_slist_append(slist, "Accept: application/json; indent=4");
-	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, slist);
+	soup_message_headers_append(msg->request_headers, "Authorization",
+			header_token);
+	soup_message_headers_append(msg->request_headers, "Accept",
+			"application/json; indent=4");
+	g_free(header_token);
 
-	curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
+	soup_session_send_message(session, msg);
+	status_code = msg->status_code;
 
-	curl_easy_setopt(curl, CURLOPT_SSL_OPTIONS, (long)CURLSSLOPT_NATIVE_CA);
-	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-
-	res = curl_easy_perform(curl);
-	curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
-
-	/* always cleanup */
-	curl_easy_cleanup(curl);
-	curl_slist_free_all(slist);
-
-	if (res != CURLE_OK) {
-		*error = g_error_new(g_quark_from_static_string("CURL"), 0,
-				"%s\ncurl_easy_perform:\n%s", __func__,
-				curl_easy_strerror(res));
-
+	if (status_code != SOUP_STATUS_OK) {
+		*error = g_error_new(g_quark_from_static_string("HTTP"), status_code,
+				"%s\nHTTP error: %d", __func__, status_code);
+		g_object_unref(msg);
+		g_object_unref(session);
 		return -1;
 	}
 
-	if (http_code != 200) {
-		*error = g_error_new(g_quark_from_static_string("HTTP"), 0,
-				"%s\ncurl_easy_perform:\n%ld", __func__, http_code);
-
-		return -1;
-	}
-
+	g_object_unref(msg);
+	g_object_unref(session);
 	return 0;
 }
 

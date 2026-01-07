@@ -16,7 +16,7 @@
  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include <gtk/gtk.h>
+//#include <gtk/gtk.h>
 #include <sqlite3.h>
 #include <mariadb/mysql.h>
 
@@ -65,10 +65,8 @@
  }*/
 
 gint sond_database_add_to_database(gpointer database, GError **error) {
-
 	if (ZOND_IS_DBASE(database)) {
 		gint rc = 0;
-		gchar *errmsg = NULL;
 		const gchar *sql = "CREATE TABLE IF NOT EXISTS entities ( "
 				"ID INTEGER, "
 				"type INTEGER NOT NULL, "
@@ -83,9 +81,14 @@ gint sond_database_add_to_database(gpointer database, GError **error) {
 		ZondDBase *zond_dbase = ZOND_DBASE(database);
 
 		rc = sqlite3_exec(zond_dbase_get_dbase(zond_dbase), sql, NULL, NULL,
-				&errmsg);
+				NULL);
 		if (rc != SQLITE_OK) {
-
+			if (error) {
+				*error = g_error_new(g_quark_from_static_string("SQLITE"), rc,
+						"%s\n%s\n\nFehlermeldung: %s",
+						__func__, "sqlite3_exec (CREATE TABLE)", sqlite3_errmsg(zond_dbase_get_dbase(zond_dbase)));
+			}
+			return -1;
 		}
 	} else //mysql
 	{
@@ -103,11 +106,11 @@ gint sond_database_add_to_database(gpointer database, GError **error) {
 
 		rc = mysql_query(con, sql);
 		if (rc) {
-			if (error)
+			if (error) {
 				*error = g_error_new(g_quark_from_static_string("MYSQL"),
 						mysql_errno(con), "%s\n%s\n\nFehlermeldung: %s",
-						__func__, "mysql_query (CREATE TABLE)",
-						mysql_error(con));
+						__func__, "mysql_query (CREATE TABLE)", mysql_error(con));
+			}
 			return -1;
 		}
 	}
@@ -122,10 +125,11 @@ gint sond_database_begin(gpointer database, GError **error) {
 
 	rc = mysql_query(con, "BEGIN;");
 	if (rc) {
-		if (error)
+		if (error) {
 			*error = g_error_new(g_quark_from_static_string("MYSQL"),
 					mysql_errno(con), "%s\n%s\n\nFehlermeldung: %s", __func__,
 					"mysql_query (BEGIN)", mysql_error(con));
+		}
 		return -1;
 	}
 
@@ -139,10 +143,11 @@ gint sond_database_commit(gpointer database, GError **error) {
 
 	rc = mysql_query(con, "COMMIT;");
 	if (rc) {
-		if (error)
+		if (error) {
 			*error = g_error_new(g_quark_from_static_string("MYSQL"),
 					mysql_errno(con), "%s\n%s\n\nFehlermeldung: %s", __func__,
 					"mysql_query (COMMIT)", mysql_error(con));
+		}
 		return -1;
 	}
 
@@ -156,10 +161,11 @@ gint sond_database_rollback(gpointer database, GError **error) {
 
 	rc = mysql_query(con, "ROLLBACK;");
 	if (rc) {
-		if (error)
+		if (error) {
 			*error = g_error_new(g_quark_from_static_string("MYSQL"),
 					mysql_errno(con), "%s\n%s\n\nFehlermeldung: %s", __func__,
 					"mysql_query (ROLLBACK)", mysql_error(con));
+		}
 		return -1;
 	}
 
@@ -173,7 +179,6 @@ static gint sond_database_insert_row(gpointer database, Type type,
 
 	if (ZOND_IS_DBASE(database)) {
 		gint rc = 0;
-		gchar *errmsg = NULL;
 		const gchar *sql[] =
 				{
 						"INSERT INTO entities (type, ID_subject, ID_object, prop_value) "
@@ -191,16 +196,14 @@ static gint sond_database_insert_row(gpointer database, Type type,
 			if (error)
 				*error = g_error_new( ZOND_ERROR, 0,
 						"%s\n%s\n\nFehlermeldung: %s", __func__,
-						"zond_dbase_prepare", errmsg);
-			g_free(errmsg);
-
+						"zond_dbase_prepare", sqlite3_errmsg(zond_dbase_get_dbase(zond_dbase)));
 			return -1;
 		}
 
 		rc = sqlite3_bind_int(stmt[0], 1, type);
 		if (rc != SQLITE_OK) {
 			if (error)
-				*error = g_error_new(g_quark_from_static_string("SQLITE3"), rc,
+				*error = g_error_new(g_quark_from_static_string("SQLITE"), rc,
 						"%s\n%s\n\nFehlermeldung: %s", __func__,
 						"sqlite3_bind_int (type)", sqlite3_errmsg(database));
 
@@ -212,7 +215,7 @@ static gint sond_database_insert_row(gpointer database, Type type,
 			rc = sqlite3_bind_int(stmt[0], 2, ID_subject);
 			if (rc != SQLITE_OK) {
 				if (error)
-					*error = g_error_new(g_quark_from_static_string("SQLITE3"),
+					*error = g_error_new(g_quark_from_static_string("SQLITE"),
 							rc, "%s\n%s\n\nFehlermeldung: %s", __func__,
 							"sqlite3_bind_int (ID_subject)",
 							sqlite3_errmsg(database));
@@ -222,7 +225,7 @@ static gint sond_database_insert_row(gpointer database, Type type,
 			rc = sqlite3_bind_null(stmt[0], 2);
 			if (rc != SQLITE_OK) {
 				if (error)
-					*error = g_error_new(g_quark_from_static_string("SQLITE3"),
+					*error = g_error_new(g_quark_from_static_string("SQLITE"),
 							rc, "%s\n%s\n\nFehlermeldung: %s", __func__,
 							"sqlite3_bind_null", sqlite3_errmsg(database));
 				return -1;
@@ -233,20 +236,17 @@ static gint sond_database_insert_row(gpointer database, Type type,
 			rc = sqlite3_bind_int(stmt[0], 3, ID_object);
 			if (rc != SQLITE_OK) {
 				if (error)
-					*error = g_error_new(g_quark_from_static_string("SQLITE3"),
-							rc, "%s\n%s\n\nFehlermeldung: %s", __func__,
-							"sqlite3_bind_int (ID_object)",
-							sqlite3_errmsg(database));
-				return -1;
+					*error = g_error_new(g_quark_from_static_string("SQLITE"), rc,
+						"%s\n%s\n\nFehlermeldung: %s", __func__,
+						"sqlite3_bind_int (ID_object)", sqlite3_errmsg(database));
 			}
 		} else {
 			rc = sqlite3_bind_null(stmt[0], 3);
 			if (rc != SQLITE_OK) {
 				if (error)
-					*error = g_error_new(g_quark_from_static_string("SQLITE3"),
-							rc, "%s\n%s\n\nFehlermeldung: %s", __func__,
-							"sqlite3_bind_null", sqlite3_errmsg(database));
-				return -1;
+					*error = g_error_new(g_quark_from_static_string("SQLITE"), rc,
+						"%s\n%s\n\nFehlermeldung: %s", __func__,
+						"sqlite3_bind_null", sqlite3_errmsg(database));
 			}
 		}
 
@@ -254,7 +254,7 @@ static gint sond_database_insert_row(gpointer database, Type type,
 		rc = sqlite3_bind_text(stmt[0], 4, prop_value, -1, NULL);
 		if (rc != SQLITE_OK) {
 			if (error)
-				*error = g_error_new(g_quark_from_static_string("SQLITE3"), rc,
+				*error = g_error_new(g_quark_from_static_string("SQLITE"), rc,
 						"%s\n%s\n\nFehlermeldung: %s", __func__,
 						"sqlite3_bind_text", sqlite3_errmsg(database));
 			return -1;
@@ -263,7 +263,7 @@ static gint sond_database_insert_row(gpointer database, Type type,
 		rc = sqlite3_step(stmt[0]);
 		if (rc != SQLITE_DONE) {
 			if (error)
-				*error = g_error_new(g_quark_from_static_string("SQLITE3"), rc,
+				*error = g_error_new(g_quark_from_static_string("SQLITE"), rc,
 						"%s\n%s\n\nFehlermeldung: %s", __func__, "sqlite3_step",
 						sqlite3_errmsg(database));
 			return -1;
@@ -272,7 +272,7 @@ static gint sond_database_insert_row(gpointer database, Type type,
 		rc = sqlite3_step(stmt[1]);
 		if (rc != SQLITE_ROW && rc != SQLITE_DONE) {
 			if (error)
-				*error = g_error_new(g_quark_from_static_string("SQLITE3"), rc,
+				*error = g_error_new(g_quark_from_static_string("SQLITE"), rc,
 						"%s\n%s\n\nFehlermeldung: %s", __func__, "sqlite3_step",
 						sqlite3_errmsg(database));
 			return -1;
@@ -412,7 +412,6 @@ sond_database_get_properties(gpointer database, gint ID_subject, GError **error)
 
 	if (ZOND_IS_DBASE(database)) {
 		gint rc = 0;
-		gchar *errmsg = NULL;
 		sqlite3_stmt **stmt = NULL;
 
 		ZondDBase *zond_dbase = ZOND_DBASE(database);
@@ -422,16 +421,14 @@ sond_database_get_properties(gpointer database, gint ID_subject, GError **error)
 		if (rc) {
 			if (error)
 				*error = g_error_new( ZOND_ERROR, 0,
-						"%s\nzond_dbase_prepare\n%s", __func__, errmsg);
-			g_free(errmsg);
-
+						"%s\nzond_dbase_prepare\n%s", __func__, sqlite3_errmsg(zond_dbase_get_dbase(zond_dbase)));
 			return NULL;
 		}
 
 		rc = sqlite3_bind_int(stmt[0], 1, ID_subject);
 		if (rc != SQLITE_OK) {
 			if (error)
-				*error = g_error_new(g_quark_from_static_string("SQLITE3"),
+				*error = g_error_new(g_quark_from_static_string("SQLITE"),
 						sqlite3_errcode(zond_dbase_get_dbase(zond_dbase)),
 						"%s\nzond_dbase_prepare\n%s", __func__,
 						sqlite3_errmsg(zond_dbase_get_dbase(zond_dbase)));
@@ -585,7 +582,7 @@ sond_database_get_properties_of_type(gpointer database, gint type,
 		rc = sqlite3_bind_int(stmt[0], 1, type);
 		if (rc != SQLITE_OK) {
 			if (error)
-				*error = g_error_new(g_quark_from_static_string("SQLITE3"),
+				*error = g_error_new(g_quark_from_static_string("SQLITE"),
 						sqlite3_errcode(zond_dbase_get_dbase(zond_dbase)),
 						"%s\nzond_dbase_prepare\n%s", __func__,
 						sqlite3_errmsg(zond_dbase_get_dbase(zond_dbase)));
@@ -596,7 +593,7 @@ sond_database_get_properties_of_type(gpointer database, gint type,
 		rc = sqlite3_bind_int(stmt[0], 2, ID_subject);
 		if (rc != SQLITE_OK) {
 			if (error)
-				*error = g_error_new(g_quark_from_static_string("SQLITE3"),
+				*error = g_error_new(g_quark_from_static_string("SQLITE"),
 						sqlite3_errcode(zond_dbase_get_dbase(zond_dbase)),
 						"%s\nzond_dbase_prepare\n%s", __func__,
 						sqlite3_errmsg(zond_dbase_get_dbase(zond_dbase)));
@@ -788,7 +785,7 @@ gint sond_database_get_only_property_of_type(gpointer database, gint type,
 }
 
 gint sond_database_update_label(gpointer database, gint ID_entity,
-		gint ID_label, gchar **errmsg) {
+		gint ID_label, GError **error) {
 	const gchar *sql[] = { "UPDATE entities SET ID_label=@1 WHERE ID=@2; " };
 
 	if (ZOND_IS_DBASE(database)) {
@@ -798,21 +795,26 @@ gint sond_database_update_label(gpointer database, gint ID_entity,
 		ZondDBase *zond_dbase = ZOND_DBASE(database);
 
 		rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
-				errmsg);
+				error);
 		if (rc)
-			ERROR_S
+			ERROR_Z
 
-		rc = sqlite3_bind_int(stmt[0], 1, ID_label);
 		if (rc != SQLITE_OK)
 			ERROR_ZOND_DBASE("sqlite3_bind_int (ID_label)")
 
-		rc = sqlite3_bind_int(stmt[0], 2, ID_entity);
 		if (rc != SQLITE_OK)
 			ERROR_ZOND_DBASE("sqlite3_bind_int (ID_entity)")
 
-		rc = sqlite3_step(stmt[0]);
 		if (rc != SQLITE_DONE)
 			ERROR_ZOND_DBASE("sqlite3_step")
+
+		if (rc != SQLITE_ROW && rc != SQLITE_DONE)
+			ERROR_ZOND_DBASE("sqlite3_step")
+
+		else if (rc == SQLITE_DONE)
+			ERROR_Z_MESSAGE("ID_entity existiert nicht")
+
+		return sqlite3_column_int(stmt[0], 0);
 	} else //mysql
 	{
 
@@ -822,7 +824,7 @@ gint sond_database_update_label(gpointer database, gint ID_entity,
 }
 
 gint sond_database_label_is_equal_or_parent(gpointer database,
-		gint ID_label_parent, gint ID_label_test, gchar **errmsg) {
+		gint ID_label_parent, gint ID_label_test, GError **error) {
 	const gchar *sql[] = { "(WITH RECURSIVE cte_labels (ID) AS ( "
 			"VALUES (@1) "
 			"UNION ALL "
@@ -839,7 +841,7 @@ gint sond_database_label_is_equal_or_parent(gpointer database,
 		ZondDBase *zond_dbase = ZOND_DBASE(database);
 
 		rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
-				errmsg);
+				error);
 		if (rc)
 			ERROR_S
 
@@ -866,7 +868,7 @@ gint sond_database_label_is_equal_or_parent(gpointer database,
 }
 
 gint sond_database_get_ID_label_for_entity(gpointer database, gint ID_entity,
-		gchar **errmsg) {
+		GError **error) {
 	const gchar *sql[] = { "SELECT ID_label FROM entities WHERE ID=?1; " };
 
 	if (ZOND_IS_DBASE(database)) {
@@ -876,7 +878,7 @@ gint sond_database_get_ID_label_for_entity(gpointer database, gint ID_entity,
 		ZondDBase *zond_dbase = ZOND_DBASE(database);
 
 		rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
-				errmsg);
+				error);
 		if (rc)
 			ERROR_S
 
@@ -900,7 +902,7 @@ gint sond_database_get_ID_label_for_entity(gpointer database, gint ID_entity,
 }
 
 gint sond_database_get_entities_for_label(gpointer database, gint ID_label,
-		GArray **arr_entities, gchar **errmsg) {
+		GArray **arr_entities, GError **error) {
 	const gchar *sql[] = { "SELECT entities.ID FROM entities JOIN "
 			"(WITH RECURSIVE cte_labels (ID) AS ( "
 			"VALUES (@1) "
@@ -918,7 +920,7 @@ gint sond_database_get_entities_for_label(gpointer database, gint ID_label,
 		ZondDBase *zond_dbase = ZOND_DBASE(database);
 
 		rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
-				errmsg);
+				error);
 		if (rc)
 			ERROR_S
 
@@ -951,7 +953,7 @@ gint sond_database_get_entities_for_label(gpointer database, gint ID_label,
  - ID_label_object (einschließlich dessen Kinder) heraus **/
 static gint sond_database_get_object_for_subject_one_step(gpointer database,
 		gint ID_entity_subject, gint ID_label_rel, gint ID_label_object,
-		GArray **arr_objects, gchar **errmsg) {
+		GArray **arr_objects, GError **error) {
 	gint cnt = 0;
 	const gchar *sql[] = { "SELECT rels.entity_object FROM "
 			"rels JOIN "
@@ -978,7 +980,7 @@ static gint sond_database_get_object_for_subject_one_step(gpointer database,
 		ZondDBase *zond_dbase = ZOND_DBASE(database);
 
 		rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
-				errmsg);
+				error);
 		if (rc)
 			ERROR_S
 
@@ -1021,7 +1023,7 @@ static gint sond_database_get_object_for_subject_one_step(gpointer database,
 
  Sofern mehrere Parameter-Paare angegeben sind, werden Ketten gebildet **/
 gint sond_database_get_object_for_subject(gpointer database,
-		gint ID_entity_subject, GArray **arr_objects, gchar **errmsg, ...) {
+		gint ID_entity_subject, GArray **arr_objects, GError **error, ...) {
 	va_list ap;
 	gint ID_label_rel = 0;
 	GArray *arr_objects_tmp = NULL;
@@ -1029,7 +1031,7 @@ gint sond_database_get_object_for_subject(gpointer database,
 	arr_objects_tmp = g_array_new( FALSE, FALSE, sizeof(gint));
 	g_array_append_val(arr_objects_tmp, ID_entity_subject);
 
-	va_start(ap, errmsg);
+	va_start(ap, error);
 
 	while ((ID_label_rel = va_arg(ap, gint)) != -1) {
 		gint ID_label_object = 0;
@@ -1047,7 +1049,7 @@ gint sond_database_get_object_for_subject(gpointer database,
 
 			rc = sond_database_get_object_for_subject_one_step(database,
 					ID_entity_subject_tmp, ID_label_rel, ID_label_object,
-					&arr_results, errmsg);
+					&arr_results, error);
 			if (rc == -1) {
 				g_array_unref(arr_results);
 				g_array_unref(arr_objects_tmp);
@@ -1068,7 +1070,7 @@ gint sond_database_get_object_for_subject(gpointer database,
 
 gint sond_database_get_entities_for_property(gpointer database,
 		gint ID_label_property, const gchar *value, GArray **arr_res,
-		gchar **errmsg) {
+		GError **error) {
 	gint cnt = 0;
 	const gchar *sql[] = {
 			"SELECT properties.entity_subject FROM entities JOIN properties "
@@ -1083,7 +1085,7 @@ gint sond_database_get_entities_for_property(gpointer database,
 		ZondDBase *zond_dbase = ZOND_DBASE(database);
 
 		rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
-				errmsg);
+				error);
 		if (rc)
 			ERROR_S
 
@@ -1124,7 +1126,7 @@ gint sond_database_get_entities_for_property(gpointer database,
 }
 
 static gint sond_database_get_entities_for_no_property(gpointer database,
-		gint ID_label_property, GArray **arr_res, gchar **errmsg) {
+		gint ID_label_property, GArray **arr_res, GError **error) {
 	gint cnt = 0;
 	const gchar *sql[] = {
 			"SELECT properties.entity_subject FROM entities JOIN properties "
@@ -1138,7 +1140,7 @@ static gint sond_database_get_entities_for_no_property(gpointer database,
 		ZondDBase *zond_dbase = ZOND_DBASE(database);
 
 		rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
-				errmsg);
+				error);
 		if (rc)
 			ERROR_S
 
@@ -1177,7 +1179,7 @@ static gint sond_database_get_entities_for_no_property(gpointer database,
 //Value einer property darf nicht NULL sein, macht ja auch keinen Sinn
 //wenn value == NULL übergeben wird dann soll das heißen: entity must not eine solche property haben!
 gint sond_database_get_entities_for_properties_and(gpointer database,
-		GArray **arr_res, gchar **errmsg, ...) {
+		GArray **arr_res, GError **error, ...) {
 	va_list arg_pointer;
 	GArray *arr_first = NULL;
 	gint ID_label = 0;
@@ -1185,7 +1187,7 @@ gint sond_database_get_entities_for_properties_and(gpointer database,
 
 	arr_arrays = g_ptr_array_new_full(0, (GDestroyNotify) g_array_unref);
 
-	va_start(arg_pointer, errmsg);
+	va_start(arg_pointer, error);
 
 	while ((ID_label = va_arg(arg_pointer, gint)) != -1) {
 		const gchar *value = NULL;
@@ -1196,10 +1198,10 @@ gint sond_database_get_entities_for_properties_and(gpointer database,
 
 		if (value)
 			rc = sond_database_get_entities_for_property(database, ID_label,
-					value, &arr_prop, errmsg);
+					value, &arr_prop, error);
 		else
 			rc = sond_database_get_entities_for_no_property(database, ID_label,
-					&arr_prop, errmsg);
+					&arr_prop, error);
 		if (rc == -1) {
 			va_end(arg_pointer);
 			g_ptr_array_unref(arr_arrays);
@@ -1253,7 +1255,7 @@ gint sond_database_get_entities_for_properties_and(gpointer database,
 }
 
 gint sond_database_get_property_value(gpointer database, gint ID_property,
-		gchar **value, gchar **errmsg) {
+		gchar **value, GError **error) {
 	const gchar *sql[] = {
 			"SELECT value FROM properties WHERE entity_property=@1; " };
 
@@ -1264,7 +1266,7 @@ gint sond_database_get_property_value(gpointer database, gint ID_property,
 		ZondDBase *zond_dbase = ZOND_DBASE(database);
 
 		rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
-				errmsg);
+				error);
 		if (rc)
 			ERROR_S
 
@@ -1296,18 +1298,19 @@ gint sond_database_get_property_value(gpointer database, gint ID_property,
 		rc = mysql_query(con, sql_mariadb);
 		g_free(sql_mariadb);
 		if (rc) {
-			if (errmsg)
-				*errmsg = g_strconcat("Bei Aufruf ", __func__, ":\n",
-						mysql_error(con), NULL);
+			if (error)
+				*error = g_error_new(g_quark_from_static_string("MARIADB"),
+						mysql_errno(con), "%s\n%s\n\nFehlermeldung: %s",
+						__func__, "mysql_query (sql_1)", mysql_error(con));
 			return -1;
 		}
 
 		mysql_res = mysql_store_result(con);
 		if (!mysql_res) {
-			if (errmsg)
-				*errmsg = g_strconcat("Bei Aufruf mysql_store_result:\n",
-						mysql_error(con), NULL);
-
+			if (error)
+				*error = g_error_new(g_quark_from_static_string("MARIADB"),
+						mysql_errno(con), "%s\n%s\n\nFehlermeldung: %s",
+						__func__, "mysql_store_result (sql_1)", mysql_error(con));
 			return -1;
 		}
 
@@ -1328,7 +1331,7 @@ gint sond_database_get_property_value(gpointer database, gint ID_property,
 
 gint sond_database_get_first_property_value_for_subject(gpointer database,
 		gint ID_entity_subject, gint ID_label_property, gchar **value,
-		gchar **errmsg) {
+		GError **error) {
 	const gchar *sql[] = {
 			"SELECT properties.value FROM properties JOIN entities  "
 					"ON properties.entity_property=entities.ID "
@@ -1342,7 +1345,7 @@ gint sond_database_get_first_property_value_for_subject(gpointer database,
 		ZondDBase *zond_dbase = ZOND_DBASE(database);
 
 		rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
-				errmsg);
+				error);
 		if (rc)
 			ERROR_S
 
@@ -1380,18 +1383,19 @@ gint sond_database_get_first_property_value_for_subject(gpointer database,
 		rc = mysql_query(con, sql_mariadb);
 		g_free(sql_mariadb);
 		if (rc) {
-			if (errmsg)
-				*errmsg = g_strconcat("Bei Aufruf ", __func__, ":\n",
-						mysql_error(con), NULL);
+			if (error)
+				*error = g_error_new(g_quark_from_static_string("MARIADB"),
+						mysql_errno(con), "%s\n%s\n\nFehlermeldung: %s",
+						__func__, "mysql_query (sql_1)", mysql_error(con));
 			return -1;
 		}
 
 		mysql_res = mysql_store_result(con);
 		if (!mysql_res) {
-			if (errmsg)
-				*errmsg = g_strconcat("Bei Aufruf mysql_store_result:\n",
-						mysql_error(con), NULL);
-
+			if (error)
+				*error = g_error_new(g_quark_from_static_string("MARIADB"),
+						mysql_errno(con), "%s\n%s\n\nFehlermeldung: %s",
+						__func__, "mysql_store_result (sql_1)", mysql_error(con));
 			return -1;
 		}
 
@@ -1412,7 +1416,7 @@ gint sond_database_get_first_property_value_for_subject(gpointer database,
 
 gint sond_database_get_subject_and_first_property_value_for_labels(
 		gpointer database, gint ID_label_subject, gint ID_label_property,
-		GArray **arr_IDs, GPtrArray **arr_values, gchar **errmsg) {
+		GArray **arr_IDs, GPtrArray **arr_values, GError **error) {
 	const gchar *sql[] = { "SELECT e1.ID, properties.value "
 			"FROM properties JOIN entities AS e1 JOIN entities AS e2 WHERE "
 			"e1.ID_label=@1 AND "
@@ -1428,7 +1432,7 @@ gint sond_database_get_subject_and_first_property_value_for_labels(
 		ZondDBase *zond_dbase = ZOND_DBASE(database);
 
 		rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
-				errmsg);
+				error);
 		if (rc)
 			ERROR_S
 
@@ -1472,7 +1476,7 @@ gint sond_database_get_subject_and_first_property_value_for_labels(
 
 gint sond_database_get_objects_from_labels(gpointer database,
 		gint ID_label_subject, gint ID_label_rel, gint ID_label_object,
-		GArray **arr_objects, gchar **errmsg) {
+		GArray **arr_objects, GError **error) {
 	const gchar *sql[] = { "SELECT DISTINCT e3.ID FROM "
 			"rels JOIN "
 			"entities AS e1 JOIN "
@@ -1516,7 +1520,7 @@ gint sond_database_get_objects_from_labels(gpointer database,
 		ZondDBase *zond_dbase = ZOND_DBASE(database);
 
 		rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
-				errmsg);
+				error);
 		if (rc)
 			ERROR_S
 
@@ -1557,7 +1561,7 @@ gint sond_database_get_objects_from_labels(gpointer database,
 }
 
 gint sond_database_get_outgoing_rels(gpointer database, gint ID_entity,
-		GArray **arr_o_rels, gchar **errmsg) {
+		GArray **arr_o_rels, GError **error) {
 	const gchar *sql[] = {
 			"SELECT entity_rel FROM rels WHERE entity_subject=@1; " };
 
@@ -1568,7 +1572,7 @@ gint sond_database_get_outgoing_rels(gpointer database, gint ID_entity,
 		ZondDBase *zond_dbase = ZOND_DBASE(database);
 
 		rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
-				errmsg);
+				error);
 		if (rc)
 			ERROR_S
 
@@ -1606,19 +1610,19 @@ gint sond_database_get_outgoing_rels(gpointer database, gint ID_entity,
 		rc = mysql_query(con, sql_mariadb);
 		g_free(sql_mariadb);
 		if (rc) {
-			if (errmsg)
-				*errmsg = g_strconcat("Bei Aufruf ", __func__, ":\n",
-						"Bei Aufruf mysql_query:\n", mysql_error(con), NULL);
+			if (error)
+				*error = g_error_new(g_quark_from_static_string("MARIADB"),
+						mysql_errno(con), "%s\n%s\n\nFehlermeldung: %s",
+						__func__, "mysql_query (sql_1)", mysql_error(con));
 			return -1;
 		}
 
 		mysql_res = mysql_store_result(con);
 		if (!mysql_res) {
-			if (errmsg)
-				*errmsg = g_strconcat("Bei Aufruf ", __func__, ":\n"
-						"Bei Aufruf mysql_store_result:\n", mysql_error(con),
-						NULL);
-
+			if (error)
+				*error = g_error_new(g_quark_from_static_string("MARIADB"),
+						mysql_errno(con), "%s\n%s\n\nFehlermeldung: %s",
+						__func__, "mysql_store_result (sql_1)", mysql_error(con));
 			return -1;
 		}
 
@@ -1637,7 +1641,7 @@ gint sond_database_get_outgoing_rels(gpointer database, gint ID_entity,
 }
 
 gint sond_database_get_incoming_rels(gpointer database, gint ID_entity,
-		GArray **arr_i_rels, gchar **errmsg) {
+		GArray **arr_i_rels, GError **error) {
 	const gchar *sql[] = {
 			"SELECT entity_rel FROM rels WHERE entity_object=@1; " };
 
@@ -1648,7 +1652,7 @@ gint sond_database_get_incoming_rels(gpointer database, gint ID_entity,
 		ZondDBase *zond_dbase = ZOND_DBASE(database);
 
 		rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
-				errmsg);
+				error);
 		if (rc)
 			ERROR_S
 
@@ -1686,19 +1690,19 @@ gint sond_database_get_incoming_rels(gpointer database, gint ID_entity,
 		rc = mysql_query(con, sql_mariadb);
 		g_free(sql_mariadb);
 		if (rc) {
-			if (errmsg)
-				*errmsg = g_strconcat("Bei Aufruf ", __func__, ":\n",
-						"Bei Aufruf mysql_query:\n", mysql_error(con), NULL);
+			if (error)
+				*error = g_error_new(g_quark_from_static_string("MARIADB"),
+						mysql_errno(con), "%s\n%s\n\nFehlermeldung: %s",
+						__func__, "mysql_query (sql_1)", mysql_error(con));
 			return -1;
 		}
 
 		mysql_res = mysql_store_result(con);
 		if (!mysql_res) {
-			if (errmsg)
-				*errmsg = g_strconcat("Bei Aufruf ", __func__, ":\n"
-						"Bei Aufruf mysql_store_result:\n", mysql_error(con),
-						NULL);
-
+			if (error)
+				*error = g_error_new(g_quark_from_static_string("MARIADB"),
+						mysql_errno(con), "%s\n%s\n\nFehlermeldung: %s",
+						__func__, "mysql_store_result (sql_1)", mysql_error(con));
 			return -1;
 		}
 
@@ -1717,7 +1721,7 @@ gint sond_database_get_incoming_rels(gpointer database, gint ID_entity,
 }
 
 gint sond_database_get_subject_from_rel(gpointer database, gint ID_entity_rel,
-		gchar **errmsg) {
+		GError **error) {
 	gint ID_entity_object = 0;
 	const gchar *sql[] = {
 			"SELECT entity_subject FROM rels WHERE entity_rel=@1; " };
@@ -1729,7 +1733,7 @@ gint sond_database_get_subject_from_rel(gpointer database, gint ID_entity_rel,
 		ZondDBase *zond_dbase = ZOND_DBASE(database);
 
 		rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
-				errmsg);
+				error);
 		if (rc)
 			ERROR_S
 
@@ -1753,7 +1757,7 @@ gint sond_database_get_subject_from_rel(gpointer database, gint ID_entity_rel,
 }
 
 gint sond_database_get_object_from_rel(gpointer database, gint ID_entity_rel,
-		gchar **errmsg) {
+		GError **error) {
 	gint ID_entity_object = 0;
 	const gchar *sql[] = {
 			"SELECT entity_object FROM rels WHERE entity_rel=@1; " };
@@ -1765,7 +1769,7 @@ gint sond_database_get_object_from_rel(gpointer database, gint ID_entity_rel,
 		ZondDBase *zond_dbase = ZOND_DBASE(database);
 
 		rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
-				errmsg);
+				error);
 		if (rc)
 			ERROR_S
 
@@ -2126,7 +2130,7 @@ gint sond_database_get_object_from_rel(gpointer database, gint ID_entity_rel,
  "(SELECT entities.ID AS ID_entity,labels.label AS label_text "
  "FROM entities JOIN labels ON entities.label = labels.ID) "
  "JOIN properties ON ID_entity = properties.entity "
- "WHERE properties.subject = ?1; ",
+ "WHERE properties.subject = ?1;",
 
  //  get_outgoint_edges (46)
  "SELECT ID_subject, ID_edge, labels.label, ID_object "
@@ -2187,9 +2191,8 @@ gint sond_database_get_object_from_rel(gpointer database, gint ID_entity_rel,
  g_free( sql );
  if ( rc )
  {
- if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf mysql_query:\n",
+ if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf ", __func__, ":\n",
  mysql_error( con ), NULL );
-
  return -1;
  }
 
@@ -2212,9 +2215,8 @@ gint sond_database_get_object_from_rel(gpointer database, gint ID_entity_rel,
  g_free( sql );
  if ( rc )
  {
- if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf mysql_query:\n",
+ if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf ", __func__, ":\n",
  mysql_error( con ), NULL );
-
  return -1;
  }
 
@@ -2224,9 +2226,8 @@ gint sond_database_get_object_from_rel(gpointer database, gint ID_entity_rel,
  g_free( sql );
  if ( rc )
  {
- if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf mysql_query:\n",
+ if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf ", __func__, ":\n",
  mysql_error( con ), NULL );
-
  return -1;
  }
 
@@ -2235,7 +2236,6 @@ gint sond_database_get_object_from_rel(gpointer database, gint ID_entity_rel,
  {
  if ( errmsg ) *errmsg = g_strconcat( "Bei Aufruf mysql_store_result:\n",
  mysql_error( con ), NULL );
-
  return -1;
  }
 

@@ -868,4 +868,3 @@ void show_pixmap(fz_context *ctx, fz_pixmap *pix)
     // Anzeigen
     gtk_widget_show_all(window);
 }
-

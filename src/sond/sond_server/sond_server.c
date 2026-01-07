@@ -1,703 +1,805 @@
-#include <libgen.h>         // dirname
-#include <unistd.h>         // readlink
-#include <gio/gio.h>
-#include <stdio.h>
-#include <mariadb/mysql.h>
-#include <libsoup/soup.h>
-#include <json-glib/json-glib.h>
+/*
+ sond (sond_server.c) - Akten, Beweisstücke, Unterlagen
+ Copyright (C) 2026 pelo america
 
-#ifdef __linux__
-#include <linux/limits.h>   // PATH_MAX
-#endif // __linux__
+ This program is free software: you can redistribute it and/or modify
+ it under the terms of the GNU Affero General Public License as
+ published by the Free Software Foundation, either version 3 of the
+ License, or (at your option) any later version.
 
-#include "../../misc_stdlib.h"
-#include "../../sond_database.h"
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU Affero General Public License for more details.
+
+ You should have received a copy of the GNU Affero General Public License
+ along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+/**
+ * @file sond_server.c
+ * @brief Implementation des REST Servers
+ */
 
 #include "sond_server.h"
-#include "sond_server_akte.h"
+#include "sond_graph_db.h"
+#include "sond_graph_node.h"
+#include "sond_graph_edge.h"
+#include <json-glib/json-glib.h>
+#include <string.h>
 
-typedef struct _Cred {
-	gchar *user;
-	gchar *password;
-} Cred;
+struct _SondServer {
+    GObject parent_instance;
 
-static void free_cred(Cred *cred) {
-	g_free(cred->user);
-	g_free(cred->password);
+    SoupServer *soup_server;
+    MYSQL *db_conn;
+    guint port;
+    gboolean running;
 
-	return;
+    /* DB Config */
+    gchar *db_host;
+    gchar *db_user;
+    gchar *db_password;
+    gchar *db_name;
+};
+
+G_DEFINE_TYPE(SondServer, sond_server, G_TYPE_OBJECT)
+
+/* ========================================================================
+ * Helper Functions
+ * ======================================================================== */
+
+/**
+ * send_json_response:
+ *
+ * Sendet eine JSON-Antwort mit Status-Code.
+ */
+static void send_json_response(SoupServerMessage *msg,
+                                guint status_code,
+                                const gchar *json_body) {
+    soup_server_message_set_status(msg, status_code, NULL);
+    soup_message_headers_set_content_type(soup_server_message_get_response_headers(msg),
+                                          "application/json", NULL);
+
+    GBytes *bytes = g_bytes_new(json_body, strlen(json_body));
+    soup_message_body_append_bytes(soup_server_message_get_response_body(msg), bytes);
+    g_bytes_unref(bytes);
 }
 
-static void sond_server_unlock_ID(SondServer *sond_server, gint auth,
-		gchar *params, gchar **omessage) {
-	gint ID_entity = 0;
-	Lock lock = { 0 };
+/**
+ * send_error_response:
+ *
+ * Sendet eine Fehler-Antwort im JSON-Format.
+ */
+static void send_error_response(SoupServerMessage *msg,
+                                 guint status_code,
+                                 const gchar *error_message) {
+    JsonBuilder *builder = json_builder_new();
+    json_builder_begin_object(builder);
 
-	ID_entity = atoi(params);
+    json_builder_set_member_name(builder, "error");
+    json_builder_add_string_value(builder, error_message);
 
-	g_mutex_lock(&sond_server->mutex_arr_locks);
-	for (gint i = 0; i < sond_server->arr_locks->len; i++) {
-		lock = g_array_index(sond_server->arr_locks, Lock, i);
+    json_builder_end_object(builder);
 
-		if (lock.ID_entity == ID_entity) {
-			g_array_remove_index_fast(sond_server->arr_locks, i);
-			break;
-		}
-	}
-	g_mutex_unlock(&sond_server->mutex_arr_locks);
+    JsonGenerator *generator = json_generator_new();
+    JsonNode *root = json_builder_get_root(builder);
+    json_generator_set_root(generator, root);
 
-	*omessage = g_strdup("OK");
+    gchar *json = json_generator_to_data(generator, NULL);
+    send_json_response(msg, status_code, json);
 
-	return;
+    g_free(json);
+    json_node_free(root);
+    g_object_unref(generator);
+    g_object_unref(builder);
 }
 
-Lock sond_server_has_lock(SondServer *sond_server, gint ID_entity) {
-	Lock lock = { 0 };
+/**
+ * send_success_response:
+ *
+ * Sendet eine Erfolgs-Antwort.
+ */
+static void send_success_response(SoupServerMessage *msg,
+                                   const gchar *data_json) {
+    JsonBuilder *builder = json_builder_new();
+    json_builder_begin_object(builder);
 
-	g_mutex_lock(&sond_server->mutex_arr_locks);
-	for (gint i = 0; i < sond_server->arr_locks->len; i++) {
-		lock = g_array_index(sond_server->arr_locks, Lock, i);
+    json_builder_set_member_name(builder, "success");
+    json_builder_add_boolean_value(builder, TRUE);
 
-		if (lock.ID_entity == ID_entity) {
-			g_mutex_unlock(&sond_server->mutex_arr_locks);
-			return lock;
-		}
-	}
+    if (data_json) {
+        json_builder_set_member_name(builder, "data");
 
-	g_mutex_unlock(&sond_server->mutex_arr_locks);
+        /* Parse data JSON und einfügen */
+        JsonParser *parser = json_parser_new();
+        if (json_parser_load_from_data(parser, data_json, -1, NULL)) {
+            JsonNode *data_node = json_parser_get_root(parser);
+            json_builder_add_value(builder, json_node_copy(data_node));
+        } else {
+            json_builder_add_null_value(builder);
+        }
+        g_object_unref(parser);
+    }
 
-	lock.ID_entity = 0;
+    json_builder_end_object(builder);
 
-	return lock;
+    JsonGenerator *generator = json_generator_new();
+    JsonNode *root = json_builder_get_root(builder);
+    json_generator_set_root(generator, root);
+
+    gchar *json = json_generator_to_data(generator, NULL);
+    send_json_response(msg, SOUP_STATUS_OK, json);
+
+    g_free(json);
+    json_node_free(root);
+    g_object_unref(generator);
+    g_object_unref(builder);
 }
 
-gint sond_server_get_lock(SondServer *sond_server, gint ID_entity, gint auth,
-		gboolean force, const gchar **user) {
-	Lock lock = { 0 };
-	Cred cred = { 0 };
+/* ========================================================================
+ * Request Handlers
+ * ======================================================================== */
 
-	g_mutex_lock(&sond_server->mutex_arr_locks);
-	for (gint i = 0; i < sond_server->arr_locks->len; i++) {
-		lock = g_array_index(sond_server->arr_locks, Lock, i);
+/**
+ * handle_node_save:
+ * POST /node/save
+ *
+ * Body: Node als JSON
+ * Response: { "success": true, "data": { Node mit ID } }
+ */
+static void handle_node_save(SoupServer *soup_server,
+                              SoupServerMessage *msg,
+                              const char *path,
+                              GHashTable *query,
+                              gpointer user_data) {
+    SondServer *server = SOND_SERVER(user_data);
 
-		if (lock.ID_entity == ID_entity) {
-			if (force) {
-				if (lock.index != auth) {
-					g_array_remove_index_fast(sond_server->arr_locks, i);
-					break;
-				}
-			} else {
-				if (user)
-					*user = lock.user;
-				g_mutex_unlock(&sond_server->mutex_arr_locks);
+    /* Nur POST erlaubt */
+    if (strcmp(soup_server_message_get_method(msg), "POST") != 0) {
+        send_error_response(msg, SOUP_STATUS_METHOD_NOT_ALLOWED,
+                           "Only POST allowed");
+        return;
+    }
 
-				return 1;
-			}
-		}
-	}
+    /* Body lesen */
+    SoupMessageBody *body = soup_server_message_get_request_body(msg);
+    if (!body->data) {
+        send_error_response(msg, SOUP_STATUS_BAD_REQUEST,
+                           "Empty request body");
+        return;
+    }
 
-	lock.ID_entity = ID_entity;
+    /* Node aus JSON deserialisieren */
+    GError *error = NULL;
+    SondGraphNode *node = sond_graph_node_from_json(body->data, &error);
 
-	g_mutex_lock(&sond_server->mutex_arr_creds);
-	cred = g_array_index(sond_server->arr_creds, Cred, auth);
-	lock.user = cred.user;
-	g_mutex_unlock(&sond_server->mutex_arr_creds);
+    if (!node) {
+        gchar *err_msg = g_strdup_printf("Invalid JSON: %s",
+                                        error ? error->message : "unknown");
+        send_error_response(msg, SOUP_STATUS_BAD_REQUEST, err_msg);
+        g_free(err_msg);
+        g_clear_error(&error);
+        return;
+    }
 
-	g_array_append_val(sond_server->arr_locks, lock);
+    /* Node speichern */
+    if (!sond_graph_db_save_node(server->db_conn, node, &error)) {
+        gchar *err_msg = g_strdup_printf("Failed to save node: %s",
+                                        error ? error->message : "unknown");
+        send_error_response(msg, SOUP_STATUS_INTERNAL_SERVER_ERROR, err_msg);
+        g_free(err_msg);
+        g_clear_error(&error);
+        g_object_unref(node);
+        return;
+    }
 
-	g_mutex_unlock(&sond_server->mutex_arr_locks);
+    /* Gespeicherten Node zurück serialisieren */
+    gchar *response_json = sond_graph_node_to_json(node);
+    send_success_response(msg, response_json);
 
-	return 0;
+    g_free(response_json);
+    g_object_unref(node);
 }
 
-static void sond_server_lock_ID(SondServer *sond_server, gint auth,
-		gchar *params, gchar **omessage) {
-	gint ID_entity = 0;
+/**
+ * handle_node_load:
+ * GET /node/load/{id}
+ *
+ * Response: { "success": true, "data": { Node } }
+ */
+static void handle_node_load(SoupServer *soup_server,
+                              SoupServerMessage *msg,
+                              const char *path,
+                              GHashTable *query,
+                              gpointer user_data) {
+    SondServer *server = SOND_SERVER(user_data);
 
-	ID_entity = atoi(params);
-	sond_server_get_lock(sond_server, ID_entity, auth, TRUE, NULL);
+    /* Nur GET erlaubt */
+    if (strcmp(soup_server_message_get_method(msg), "GET") != 0) {
+        send_error_response(msg, SOUP_STATUS_METHOD_NOT_ALLOWED,
+                           "Only GET allowed");
+        return;
+    }
 
-	*omessage = g_strdup("OK");
+    /* ID aus Path extrahieren: /node/load/123 */
+    const char *id_str = strrchr(path, '/');
+    if (!id_str || strlen(id_str) <= 1) {
+        send_error_response(msg, SOUP_STATUS_BAD_REQUEST,
+                           "Missing node ID in path");
+        return;
+    }
+    id_str++; /* Skip '/' */
 
-	return;
+    gint64 node_id = g_ascii_strtoll(id_str, NULL, 10);
+    if (node_id == 0) {
+        send_error_response(msg, SOUP_STATUS_BAD_REQUEST,
+                           "Invalid node ID");
+        return;
+    }
+
+    /* Node laden */
+    GError *error = NULL;
+    SondGraphNode *node = sond_graph_db_load_node(server->db_conn, node_id, &error);
+
+    if (!node) {
+        gchar *err_msg = g_strdup_printf("Failed to load node: %s",
+                                        error ? error->message : "unknown");
+        send_error_response(msg, SOUP_STATUS_NOT_FOUND, err_msg);
+        g_free(err_msg);
+        g_clear_error(&error);
+        return;
+    }
+
+    /* Node serialisieren */
+    gchar *response_json = sond_graph_node_to_json(node);
+    send_success_response(msg, response_json);
+
+    g_free(response_json);
+    g_object_unref(node);
 }
 
-gchar*
-sond_server_seafile_get_auth_token(SondServer *sond_server, const gchar *user,
-		const gchar *password, gchar **errmsg) {
-	SoupSession *soup_session = NULL;
-	SoupMessage *soup_message = NULL;
-	gchar *url_text = NULL;
-	gchar *body_text = NULL;
-	GBytes *body = NULL;
-	GBytes *response = NULL;
-	JsonParser *parser = NULL;
-	JsonNode *node = NULL;
-	GError *error = NULL;
-	gchar *auth_token = NULL;
+/**
+ * handle_node_delete:
+ * DELETE /node/delete/{id}
+ *
+ * Response: { "success": true }
+ */
+static void handle_node_delete(SoupServer *soup_server,
+                                SoupServerMessage *msg,
+                                const char *path,
+                                GHashTable *query,
+                                gpointer user_data) {
+    SondServer *server = SOND_SERVER(user_data);
 
-	url_text = g_strdup_printf("%s/api2/auth-token/", sond_server->seafile_url);
-	soup_session = soup_session_new();
-	soup_message = soup_message_new(SOUP_METHOD_POST, url_text);
-	g_free(url_text);
+    /* Nur DELETE erlaubt */
+    if (strcmp(soup_server_message_get_method(msg), "DELETE") != 0) {
+        send_error_response(msg, SOUP_STATUS_METHOD_NOT_ALLOWED,
+                           "Only DELETE allowed");
+        return;
+    }
 
-	body_text = g_strdup_printf("username=%s&password=%s", user, password);
-	body = g_bytes_new(body_text, strlen(body_text));
-	g_free(body_text);
-	soup_message_set_request_body_from_bytes(soup_message,
-			"application/x-www-form-urlencoded", body);
-	g_bytes_unref(body);
+    /* ID aus Path extrahieren */
+    const char *id_str = strrchr(path, '/');
+    if (!id_str || strlen(id_str) <= 1) {
+        send_error_response(msg, SOUP_STATUS_BAD_REQUEST,
+                           "Missing node ID in path");
+        return;
+    }
+    id_str++;
 
-	response = soup_session_send_and_read(soup_session, soup_message, NULL,
-			&error);
-	g_object_unref(soup_message);
-	g_object_unref(soup_session);
-	if (error) {
-		if (errmsg)
-			*errmsg = g_strconcat("Keine Antwort vom SeafileServer\n\n"
-					"Bei Aufruf soup_session_send_and_read:\n", error->message,
-					NULL);
-		g_error_free(error);
+    gint64 node_id = g_ascii_strtoll(id_str, NULL, 10);
+    if (node_id == 0) {
+        send_error_response(msg, SOUP_STATUS_BAD_REQUEST,
+                           "Invalid node ID");
+        return;
+    }
 
-		return NULL;
-	}
+    /* Node löschen */
+    GError *error = NULL;
+    if (!sond_graph_db_delete_node(server->db_conn, node_id, &error)) {
+        gchar *err_msg = g_strdup_printf("Failed to delete node: %s",
+                                        error ? error->message : "unknown");
+        send_error_response(msg, SOUP_STATUS_INTERNAL_SERVER_ERROR, err_msg);
+        g_free(err_msg);
+        g_clear_error(&error);
+        return;
+    }
 
-	parser = json_parser_new();
-	if (!json_parser_load_from_data(parser, g_bytes_get_data(response, NULL),
-			-1, &error)) {
-		if (errmsg)
-			*errmsg = g_strconcat(
-					"Antwort vom SeafileServer nicht im json-Format\n\n"
-							"Bei Aufruf json_parser_load_from_data:\n",
-					error->message, "\n\nEmpfangene Nachricht:\n",
-					g_bytes_get_data(response, NULL), NULL);
-		g_error_free(error);
-
-		g_object_unref(parser);
-		g_bytes_unref(response);
-
-		return NULL;
-	}
-
-	node = json_parser_get_root(parser);
-	if (JSON_NODE_HOLDS_OBJECT(node)) {
-		JsonObject *object = NULL;
-
-		object = json_node_get_object(node);
-
-		if (json_object_has_member(object, "token"))
-			auth_token = g_strdup(
-					json_object_get_string_member(object, "token"));
-		else {
-			if (errmsg)
-				*errmsg =
-						g_strconcat(
-								"Antwort vom SeafileServer\n\n"
-										"json hat kein member " "token" "\n\nEmpfangene Nachricht:\n",
-								g_bytes_get_data(response, NULL), NULL);
-
-			g_object_unref(parser);
-			g_bytes_unref(response);
-
-			return NULL;
-		}
-	} else {
-		if (errmsg)
-			*errmsg = g_strconcat("Antwort vom SeafileServer\n\n"
-					"json ist kein object\n\nEmpfangene Nachricht:\n",
-					g_bytes_get_data(response, NULL), NULL);
-
-		g_object_unref(parser);
-		g_bytes_unref(response);
-
-		return NULL;
-	}
-
-	g_object_unref(parser);
-	g_bytes_unref(response);
-
-	return auth_token;
+    send_success_response(msg, NULL);
 }
 
-static gint get_auth_level(SondServer *sond_server, const gchar *user,
-		const gchar *password) {
-	Cred cred = { 0 };
-	gchar *errmsg = NULL;
-	gint i = 0;
+/**
+ * handle_node_save_with_edges:
+ * POST /node/save-with-edges
+ *
+ * Body: Node als JSON (mit Edges)
+ * Response: { "success": true, "data": { Node mit ID } }
+ */
+static void handle_node_save_with_edges(SoupServer *soup_server,
+                                         SoupServerMessage *msg,
+                                         const char *path,
+                                         GHashTable *query,
+                                         gpointer user_data) {
+    SondServer *server = SOND_SERVER(user_data);
 
-	//mutex user
-	g_mutex_lock(&sond_server->mutex_arr_creds);
-	for (i = 0; i < sond_server->arr_creds->len; i++) {
-		cred = g_array_index(sond_server->arr_creds, Cred, i);
-		if (!g_strcmp0(cred.user, user))
-			break;
-	}
-	g_mutex_unlock(&sond_server->mutex_arr_creds);
+    if (strcmp(soup_server_message_get_method(msg), "POST") != 0) {
+        send_error_response(msg, SOUP_STATUS_METHOD_NOT_ALLOWED,
+                           "Only POST allowed");
+        return;
+    }
 
-	if (i == sond_server->arr_creds->len) {
-		gchar *auth_token = NULL;
+    SoupMessageBody *body = soup_server_message_get_request_body(msg);
+    if (!body->data) {
+        send_error_response(msg, SOUP_STATUS_BAD_REQUEST,
+                           "Empty request body");
+        return;
+    }
 
-		auth_token = sond_server_seafile_get_auth_token(sond_server, user,
-				password, &errmsg);
-		if (!auth_token) {
-			g_warning("User konnte nicht legitimiert werden:\n%s", errmsg);
-			g_free(errmsg);
+    GError *error = NULL;
+    SondGraphNode *node = sond_graph_node_from_json(body->data, &error);
 
-			return -1;
-		}
+    if (!node) {
+        gchar *err_msg = g_strdup_printf("Invalid JSON: %s",
+                                        error ? error->message : "unknown");
+        send_error_response(msg, SOUP_STATUS_BAD_REQUEST, err_msg);
+        g_free(err_msg);
+        g_clear_error(&error);
+        return;
+    }
 
-		//brauchen wir nicht
-		g_free(auth_token);
+    /* Node mit Edges speichern */
+    if (!sond_graph_db_save_node_with_edges(server->db_conn, node, &error)) {
+        gchar *err_msg = g_strdup_printf("Failed to save node: %s",
+                                        error ? error->message : "unknown");
+        send_error_response(msg, SOUP_STATUS_INTERNAL_SERVER_ERROR, err_msg);
+        g_free(err_msg);
+        g_clear_error(&error);
+        g_object_unref(node);
+        return;
+    }
 
-		g_mutex_lock(&sond_server->mutex_arr_creds);
-		if (i < sond_server->arr_creds->len) {
-			g_free(
-					(((Cred*) (void*) (sond_server->arr_creds)->data)[i]).password);
-			(((Cred*) (void*) (sond_server->arr_creds)->data)[i]).password =
-					g_strdup(password);
-		} else {
-			Cred cred = { 0 };
+    gchar *response_json = sond_graph_node_to_json(node);
+    send_success_response(msg, response_json);
 
-			cred.user = g_strdup(user);
-			cred.password = g_strdup(password);
-
-			g_array_append_val(sond_server->arr_creds, cred);
-		}
-		g_mutex_unlock(&sond_server->mutex_arr_creds);
-	}
-
-	return i;
+    g_free(response_json);
+    g_object_unref(node);
 }
 
-static gint process_imessage(SondServer *sond_server, gchar **imessage_strv,
-		gchar **omessage) {
-	gint auth = 0;
+/**
+ * handle_edge_save:
+ * POST /edge/save
+ */
+static void handle_edge_save(SoupServer *soup_server,
+                              SoupServerMessage *msg,
+                              const char *path,
+                              GHashTable *query,
+                              gpointer user_data) {
+    SondServer *server = SOND_SERVER(user_data);
 
-	auth = get_auth_level(sond_server, imessage_strv[0], imessage_strv[1]);
-	if (auth < 0) {
-		*omessage = g_strdup("ERROR *** AUTHENTICATION FAILED");
-		return 0;
-	}
+    if (strcmp(soup_server_message_get_method(msg), "POST") != 0) {
+        send_error_response(msg, SOUP_STATUS_METHOD_NOT_ALLOWED,
+                           "Only POST allowed");
+        return;
+    }
 
-	if (!g_strcmp0(imessage_strv[2], "PING"))
-		*omessage = g_strdup("PONG");
-	else if (!g_strcmp0(imessage_strv[2], "SHUTDOWN")) {
-		*omessage = g_strdup("SONDSERVER_OK");
+    SoupMessageBody *body = soup_server_message_get_request_body(msg);
+    if (!body->data) {
+        send_error_response(msg, SOUP_STATUS_BAD_REQUEST,
+                           "Empty request body");
+        return;
+    }
 
-		return 1;
-	} else if (!g_strcmp0(imessage_strv[2], "AKTE_SCHREIBEN"))
-		sond_server_akte_schreiben(sond_server, auth, imessage_strv[3],
-				omessage);
-	else if (!g_strcmp0(imessage_strv[2], "AKTE_HOLEN"))
-		sond_server_akte_holen(sond_server, auth, imessage_strv[3], omessage);
-	else if (!g_strcmp0(imessage_strv[2], "GET_LOCK"))
-		sond_server_lock_ID(sond_server, auth, imessage_strv[3], omessage);
-	else if (!g_strcmp0(imessage_strv[2], "UNLOCK"))
-		sond_server_unlock_ID(sond_server, auth, imessage_strv[3], omessage);
-	else if (!g_strcmp0(imessage_strv[2], "AKTE_SUCHEN"))
-		sond_server_akte_suchen(sond_server, imessage_strv[3], omessage);
-
-	else {
-		g_warning("Nachricht enthält keinen bekannten Befehl");
-		*omessage = g_strdup("ERROR *** NO_KNOWN_COMMAND");
-	}
-
-	return 0;
+    /* Edge aus JSON deserialisieren - komplette Node laden, dann Edge extrahieren */
+    /* Vereinfacht: erwarten wir ein Edge-JSON-Format */
+    send_error_response(msg, SOUP_STATUS_NOT_IMPLEMENTED,
+                       "Edge save not yet implemented - use node/save-with-edges");
 }
 
-#define MAX_MSG_SIZE 2048
+/**
+ * handle_node_search:
+ * POST /node/search
+ *
+ * Body: SearchCriteria als JSON
+ * Response: { "success": true, "data": [Node1, Node2, ...] }
+ */
+static void handle_node_search(SoupServer *soup_server,
+                                SoupServerMessage *msg,
+                                const char *path,
+                                GHashTable *query,
+                                gpointer user_data) {
+    SondServer *server = SOND_SERVER(user_data);
 
-static void sond_server_process_message(gpointer data, gpointer user_data) {
-	gssize ret = 0;
-	GError *error = NULL;
-	GInputStream *istream = NULL;
-	GOutputStream *ostream = NULL;
-	gchar imessage[MAX_MSG_SIZE] = { 0 };
-	gchar *omessage = NULL;
-	SondServer *sond_server = NULL;
-	GSocketConnection *connection = NULL;
-	gint rc = 0;
+    if (strcmp(soup_server_message_get_method(msg), "POST") != 0) {
+        send_error_response(msg, SOUP_STATUS_METHOD_NOT_ALLOWED,
+                           "Only POST allowed");
+        return;
+    }
 
-	sond_server = user_data;
-	connection = data;
+    SoupMessageBody *body = soup_server_message_get_request_body(msg);
+    if (!body->data) {
+        send_error_response(msg, SOUP_STATUS_BAD_REQUEST,
+                           "Empty request body");
+        return;
+    }
 
-	istream = g_io_stream_get_input_stream(G_IO_STREAM(connection));
-	ostream = g_io_stream_get_output_stream(G_IO_STREAM(connection));
+    /* SearchCriteria aus JSON deserialisieren */
+    GError *error = NULL;
+    SondGraphNodeSearchCriteria *criteria =
+        sond_graph_node_search_criteria_from_json(body->data, &error);
 
-	ret = g_input_stream_read(istream, imessage, MAX_MSG_SIZE, NULL, &error);
-	if (error) {
-		g_warning("input-stream konnte nicht gelesen werden: %s",
-				error->message);
-		g_clear_error(&error);
+    if (!criteria) {
+        gchar *err_msg = g_strdup_printf("Invalid search criteria: %s",
+                                        error ? error->message : "unknown");
+        send_error_response(msg, SOUP_STATUS_BAD_REQUEST, err_msg);
+        g_free(err_msg);
+        g_clear_error(&error);
+        return;
+    }
 
-		omessage = g_strdup("ERROR *** COULD_NOT_READ_MESSAGE");
-	} else if (ret == 0)
-		omessage = g_strdup("ERROR *** NO_MESSAGE");
-	else if (ret > MAX_MSG_SIZE)
-		omessage = g_strdup("ERROR *** MESSAGE_TRUNCATED");
-	else {
-		gchar **imessage_strv = NULL;
+    /* Suche ausführen */
+    GPtrArray *nodes = sond_graph_db_search_nodes(server->db_conn, criteria, &error);
+    sond_graph_node_search_criteria_free(criteria);
 
-		imessage_strv = g_strsplit(imessage, "&", 4);
+    if (!nodes) {
+        gchar *err_msg = g_strdup_printf("Search failed: %s",
+                                        error ? error->message : "unknown");
+        send_error_response(msg, SOUP_STATUS_INTERNAL_SERVER_ERROR, err_msg);
+        g_free(err_msg);
+        g_clear_error(&error);
+        return;
+    }
 
-		//empty vector
-		if (imessage_strv[0] == NULL)
-			omessage = g_strdup("ERROR *** EMPTY_MESSAGE");
-		else if (imessage_strv[1] == NULL || imessage_strv[2] == NULL
-				|| imessage_strv[3] == NULL)
-			omessage = g_strdup("ERROR *** MESSAGE_NOT_COMPLETE");
-		else
-			rc = process_imessage(sond_server, imessage_strv, &omessage);
+    /* Nodes zu JSON Array serialisieren */
+    JsonBuilder *builder = json_builder_new();
+    json_builder_begin_array(builder);
 
-		g_strfreev(imessage_strv);
-	}
+    for (guint i = 0; i < nodes->len; i++) {
+        SondGraphNode *node = g_ptr_array_index(nodes, i);
+        gchar *node_json = sond_graph_node_to_json(node);
 
-	ret = g_output_stream_write(ostream, omessage, strlen(omessage), NULL,
-			&error);
-	g_free(omessage);
-	if (error) {
-		g_warning("Antwort '%s' konnte nicht an client gesendet werden: %s",
-				omessage, error->message);
-		g_error_free(error);
-	}
+        /* Parse und einfügen */
+        JsonParser *parser = json_parser_new();
+        if (json_parser_load_from_data(parser, node_json, -1, NULL)) {
+            JsonNode *node_node = json_parser_get_root(parser);
+            json_builder_add_value(builder, json_node_copy(node_node));
+        }
+        g_object_unref(parser);
+        g_free(node_json);
+    }
 
-	if (rc == 1) {
-		g_message("Server wird heruntergefahren ");
-		g_main_loop_quit(sond_server->loop);
-	}
+    json_builder_end_array(builder);
 
-	g_object_unref(connection);
+    JsonGenerator *generator = json_generator_new();
+    JsonNode *root = json_builder_get_root(builder);
+    json_generator_set_root(generator, root);
 
-	return;
+    gchar *response_json = json_generator_to_data(generator, NULL);
+    send_success_response(msg, response_json);
+
+    g_free(response_json);
+    json_node_free(root);
+    g_object_unref(generator);
+    g_object_unref(builder);
+    g_ptr_array_unref(nodes);
 }
 
-static gboolean callback_socket_incoming(GSocketService *service,
-		GSocketConnection *connection, GObject *source_object, gpointer data) {
-	GError *error = NULL;
-	SondServer *sond_server = NULL;
-	GOutputStream *ostream = NULL;
+/**
+ * handle_node_lock:
+ * POST /node/lock/{id}
+ *
+ * Body: { "user_id": "...", "timeout_minutes": 30, "reason": "..." }
+ * Response: { "success": true }
+ */
+static void handle_node_lock(SoupServer *soup_server,
+                              SoupServerMessage *msg,
+                              const char *path,
+                              GHashTable *query,
+                              gpointer user_data) {
+    SondServer *server = SOND_SERVER(user_data);
 
-	sond_server = data;
+    if (strcmp(soup_server_message_get_method(msg), "POST") != 0) {
+        send_error_response(msg, SOUP_STATUS_METHOD_NOT_ALLOWED,
+                           "Only POST allowed");
+        return;
+    }
 
-	if (!g_thread_pool_push(sond_server->thread_pool, g_object_ref(connection),
-			&error)) {
-		const gchar *omessage = "ERROR *** SERVER NO THREAD";
+    /* ID aus Path extrahieren */
+    const char *id_str = strrchr(path, '/');
+    if (!id_str || strlen(id_str) <= 1) {
+        send_error_response(msg, SOUP_STATUS_BAD_REQUEST,
+                           "Missing node ID in path");
+        return;
+    }
+    id_str++;
 
-		g_warning("thread konnte nicht gepusht werden: %s", error->message);
-		g_clear_error(&error);
+    gint64 node_id = g_ascii_strtoll(id_str, NULL, 10);
+    if (node_id == 0) {
+        send_error_response(msg, SOUP_STATUS_BAD_REQUEST,
+                           "Invalid node ID");
+        return;
+    }
 
-		ostream = g_io_stream_get_output_stream(G_IO_STREAM(connection));
-		g_output_stream_write(ostream, omessage, strlen(omessage), NULL,
-				&error);
-		if (error) {
-			g_warning(
-					"Fehlermeldung konnte nicht an client gesendet werden:\n %s",
-					error->message);
-			g_error_free(error);
-		}
-	}
+    /* Body parsen */
+    SoupMessageBody *body = soup_server_message_get_request_body(msg);
+    if (!body->data) {
+        send_error_response(msg, SOUP_STATUS_BAD_REQUEST,
+                           "Empty request body");
+        return;
+    }
 
-	return FALSE;
+    GError *error = NULL;
+    JsonParser *parser = json_parser_new();
+
+    if (!json_parser_load_from_data(parser, body->data, -1, &error)) {
+        send_error_response(msg, SOUP_STATUS_BAD_REQUEST, "Invalid JSON");
+        g_clear_error(&error);
+        g_object_unref(parser);
+        return;
+    }
+
+    JsonNode *root = json_parser_get_root(parser);
+    JsonObject *obj = json_node_get_object(root);
+
+    const gchar *user_id = json_object_get_string_member(obj, "user_id");
+    guint timeout_minutes = json_object_has_member(obj, "timeout_minutes") ?
+        json_object_get_int_member(obj, "timeout_minutes") : 0;
+    const gchar *reason = json_object_has_member(obj, "reason") ?
+        json_object_get_string_member(obj, "reason") : NULL;
+
+    g_object_unref(parser);
+
+    if (!user_id) {
+        send_error_response(msg, SOUP_STATUS_BAD_REQUEST,
+                           "Missing user_id");
+        return;
+    }
+
+    /* Lock setzen */
+    if (!sond_graph_db_lock_node(server->db_conn, node_id, user_id,
+                                 timeout_minutes, reason, &error)) {
+        gchar *err_msg = g_strdup_printf("Lock failed: %s",
+                                        error ? error->message : "unknown");
+        send_error_response(msg, SOUP_STATUS_CONFLICT, err_msg);
+        g_free(err_msg);
+        g_clear_error(&error);
+        return;
+    }
+
+    send_success_response(msg, NULL);
 }
 
-static void sond_server_free(SondServer *sond_server) {
-	g_thread_pool_free(sond_server->thread_pool, TRUE, TRUE);
+/**
+ * handle_node_unlock:
+ * POST /node/unlock/{id}
+ *
+ * Body: { "user_id": "..." }
+ * Response: { "success": true }
+ */
+static void handle_node_unlock(SoupServer *soup_server,
+                                SoupServerMessage *msg,
+                                const char *path,
+                                GHashTable *query,
+                                gpointer user_data) {
+    SondServer *server = SOND_SERVER(user_data);
 
-	g_array_unref(sond_server->arr_creds);
-	g_array_unref(sond_server->arr_locks);
-	g_free(sond_server->mysql_host);
-	g_free(sond_server->mysql_user);
-	g_free(sond_server->mysql_db);
-	g_free(sond_server->mysql_path_ca);
+    if (strcmp(soup_server_message_get_method(msg), "POST") != 0) {
+        send_error_response(msg, SOUP_STATUS_METHOD_NOT_ALLOWED,
+                           "Only POST allowed");
+        return;
+    }
 
-	g_free(sond_server->password);
-	g_free(sond_server->base_dir);
-	g_free(sond_server->log_file);
-	g_free(sond_server->seafile_password);
-	g_free(sond_server->seafile_user);
-	g_free(sond_server->seafile_url);
-	g_free(sond_server->auth_token);
+    /* ID aus Path */
+    const char *id_str = strrchr(path, '/');
+    if (!id_str || strlen(id_str) <= 1) {
+        send_error_response(msg, SOUP_STATUS_BAD_REQUEST,
+                           "Missing node ID in path");
+        return;
+    }
+    id_str++;
 
-	g_mutex_clear(&sond_server->mutex_arr_creds);
-	g_mutex_clear(&sond_server->mutex_create_akte);
-	g_mutex_clear(&sond_server->mutex_arr_locks);
+    gint64 node_id = g_ascii_strtoll(id_str, NULL, 10);
+    if (node_id == 0) {
+        send_error_response(msg, SOUP_STATUS_BAD_REQUEST,
+                           "Invalid node ID");
+        return;
+    }
 
-	return;
+    /* Body parsen */
+    SoupMessageBody *body = soup_server_message_get_request_body(msg);
+    if (!body->data) {
+        send_error_response(msg, SOUP_STATUS_BAD_REQUEST,
+                           "Empty request body");
+        return;
+    }
+
+    GError *error = NULL;
+    JsonParser *parser = json_parser_new();
+
+    if (!json_parser_load_from_data(parser, body->data, -1, &error)) {
+        send_error_response(msg, SOUP_STATUS_BAD_REQUEST, "Invalid JSON");
+        g_clear_error(&error);
+        g_object_unref(parser);
+        return;
+    }
+
+    JsonNode *root = json_parser_get_root(parser);
+    JsonObject *obj = json_node_get_object(root);
+
+    const gchar *user_id = json_object_get_string_member(obj, "user_id");
+    g_object_unref(parser);
+
+    if (!user_id) {
+        send_error_response(msg, SOUP_STATUS_BAD_REQUEST,
+                           "Missing user_id");
+        return;
+    }
+
+    /* Unlock */
+    if (!sond_graph_db_unlock_node(server->db_conn, node_id, user_id, &error)) {
+        gchar *err_msg = g_strdup_printf("Unlock failed: %s",
+                                        error ? error->message : "unknown");
+        send_error_response(msg, SOUP_STATUS_FORBIDDEN, err_msg);
+        g_free(err_msg);
+        g_clear_error(&error);
+        return;
+    }
+
+    send_success_response(msg, NULL);
 }
 
-static void init_socket_service(GKeyFile *keyfile, SondServer *sond_server) {
-	GSocketService *socket = NULL;
-	GInetAddress *inet_address = NULL;
-	GSocketAddress *socket_address = NULL;
-	gboolean success = FALSE;
-	gchar *ip_address = NULL;
-	guint16 port = 0;
-	GError *error = NULL;
+/* ========================================================================
+ * GObject Implementation
+ * ======================================================================== */
 
-	ip_address = g_key_file_get_string(keyfile, "SOCKET", "bind", &error);
-	if (error) {
-		g_message(
-				"bind-address konnte nicht ermittelt werden: %s - bind to localhost",
-				error->message);
-		g_clear_error(&error);
-		ip_address = g_strdup("127.0.0.1");
-	}
+static void sond_server_finalize(GObject *object) {
+    SondServer *self = SOND_SERVER(object);
 
-	port = g_key_file_get_uint64(keyfile, "SOCKET", "port", &error);
-	if (error) {
-		g_message("port konnte nicht ermittelt werden: %s "
-				"- default port (35002) wird verwendet", error->message);
-		g_clear_error(&error);
-		port = 35002;
-	}
+    if (self->running) {
+        sond_server_stop(self);
+    }
 
-	inet_address = g_inet_address_new_from_string(ip_address);
-	g_free(ip_address);
-	if (!inet_address) {
-		g_message(
-				"bind-address %s konnte nicht geparst werden - verwende localhost",
-				ip_address);
-		inet_address = g_inet_address_new_from_string("127.0.0.1");
-		if (!inet_address)
-			g_error("GInetAddress konte nicht erzeugt werden");
-	}
+    if (self->soup_server) {
+        g_object_unref(self->soup_server);
+    }
 
-	socket_address = g_inet_socket_address_new(inet_address, port);
-	g_object_unref(inet_address);
-	if (!socket_address)
-		g_error("GSocketAddress konnte nicht erzeugt werden");
+    if (self->db_conn) {
+        mysql_close(self->db_conn);
+    }
 
-	socket = g_socket_service_new();
+    g_free(self->db_host);
+    g_free(self->db_user);
+    g_free(self->db_password);
+    g_free(self->db_name);
 
-	success = g_socket_listener_add_address(G_SOCKET_LISTENER(socket),
-			socket_address, G_SOCKET_TYPE_STREAM, G_SOCKET_PROTOCOL_TCP, NULL,
-			NULL, &error);
-	g_object_unref(socket_address);
-	if (!success)
-		g_error("g_socket_listener_add_address gibt Fehler zurück: %s",
-				error->message);
-
-	g_signal_connect(socket, "incoming", G_CALLBACK(callback_socket_incoming),
-			sond_server);
-
-	return;
+    G_OBJECT_CLASS(sond_server_parent_class)->finalize(object);
 }
 
-static void sond_server_init_seafile(GKeyFile *keyfile, SondServer *sond_server) {
-	GError *error = NULL;
-	gchar *errmsg = NULL;
-	gchar *seafile_group = NULL;
-
-	sond_server->seafile_user = g_key_file_get_string(keyfile, "SEAFILE",
-			"user", &error);
-	if (error)
-		g_error("Seafile-user konnte nicht ermittelt werden:\n%s",
-				error->message);
-
-	seafile_group = g_key_file_get_string(keyfile, "SEAFILE", "group", &error);
-	if (error)
-		g_error("Seafile-group konnte nicht ermittelt werden:\n%s",
-				error->message);
-
-	//ToDo: group-id abfragen
-	sond_server->seafile_group_id = 1;
-	g_free(seafile_group);
-
-	sond_server->seafile_url = g_key_file_get_string(keyfile, "SEAFILE", "url",
-			&error);
-	if (error)
-		g_error("SEAFILE-host konnte nicht ermittelt werden:\n%s",
-				error->message);
-
-	sond_server->auth_token = sond_server_seafile_get_auth_token(sond_server,
-			sond_server->seafile_user, sond_server->seafile_password, &errmsg);
-	if (!sond_server->auth_token)
-		g_error("AuthToken konnte nicht ermittelt werden:\n%s", errmsg);
-
-	return;
+static void sond_server_class_init(SondServerClass *klass) {
+    GObjectClass *object_class = G_OBJECT_CLASS(klass);
+    object_class->finalize = sond_server_finalize;
 }
 
-MYSQL*
-sond_server_get_mysql_con(SondServer *sond_server, GError **error) {
-	MYSQL *con = NULL;
-
-	con = mysql_init(NULL);
-	mysql_optionsv(con, MYSQL_OPT_SSL_CA, (void*) sond_server->mysql_path_ca);
-	if (!mysql_real_connect(con, sond_server->mysql_host,
-			sond_server->mysql_user, sond_server->mysql_password,
-			sond_server->mysql_db, sond_server->mysql_port, NULL,
-			CLIENT_MULTI_STATEMENTS)) {
-		if (error)
-			*error = g_error_new(g_quark_from_static_string("MARIADB"),
-					mysql_errno(con), "%s\nmysql_real_connect\n%s", __func__,
-					mysql_error(con));
-		mysql_close(con);
-
-		return NULL;
-	}
-
-	return con;
+static void sond_server_init(SondServer *self) {
+    self->soup_server = NULL;
+    self->db_conn = NULL;
+    self->port = 0;
+    self->running = FALSE;
 }
 
-static gint sond_server_init_mysql_con(SondServer *sond_server, GError **error) {
-	gint rc = 0;
-	MYSQL *con = NULL;
+/* ========================================================================
+ * Public API
+ * ======================================================================== */
 
-	con = sond_server_get_mysql_con(sond_server, error);
-	if (!con) {
-		g_prefix_error(error, "%s\n", __func__);
+SondServer* sond_server_new(const gchar *db_host,
+                             const gchar *db_user,
+                             const gchar *db_password,
+                             const gchar *db_name,
+                             guint port,
+                             GError **error) {
+    g_return_val_if_fail(db_host != NULL, NULL);
+    g_return_val_if_fail(db_user != NULL, NULL);
+    g_return_val_if_fail(db_name != NULL, NULL);
 
-		return -1;
-	}
+    SondServer *server = g_object_new(SOND_TYPE_SERVER, NULL);
 
-	rc = sond_database_add_to_database(con, error);
-	mysql_close(con);
-	if (rc) {
-		g_prefix_error(error, "%s\n", __func__);
+    server->db_host = g_strdup(db_host);
+    server->db_user = g_strdup(db_user);
+    server->db_password = g_strdup(db_password);
+    server->db_name = g_strdup(db_name);
+    server->port = port;
 
-		return -1;
-	}
+    /* MySQL verbinden */
+    server->db_conn = mysql_init(NULL);
+    if (!server->db_conn) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "mysql_init failed");
+        g_object_unref(server);
+        return NULL;
+    }
 
-	return 0;
+    if (!mysql_real_connect(server->db_conn, db_host, db_user, db_password,
+                           db_name, 0, NULL, 0)) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "MySQL connection failed: %s", mysql_error(server->db_conn));
+        g_object_unref(server);
+        return NULL;
+    }
+
+    /* SoupServer erstellen */
+    server->soup_server = soup_server_new(NULL, NULL);
+
+    /* Routes registrieren */
+    soup_server_add_handler(server->soup_server, "/node/save",
+                           handle_node_save, server, NULL);
+    soup_server_add_handler(server->soup_server, "/node/load",
+                           handle_node_load, server, NULL);
+    soup_server_add_handler(server->soup_server, "/node/delete",
+                           handle_node_delete, server, NULL);
+    soup_server_add_handler(server->soup_server, "/node/save-with-edges",
+                           handle_node_save_with_edges, server, NULL);
+    soup_server_add_handler(server->soup_server, "/node/search",
+                           handle_node_search, server, NULL);
+    soup_server_add_handler(server->soup_server, "/node/lock",
+                           handle_node_lock, server, NULL);
+    soup_server_add_handler(server->soup_server, "/node/unlock",
+                           handle_node_unlock, server, NULL);
+    soup_server_add_handler(server->soup_server, "/edge/save",
+                           handle_edge_save, server, NULL);
+
+    return server;
 }
 
-static void init_con(GKeyFile *key_file, SondServer *sond_server) {
-	gint rc = 0;
-	GError *error = NULL;
+gboolean sond_server_start(SondServer *server, GError **error) {
+    g_return_val_if_fail(SOND_IS_SERVER(server), FALSE);
 
-	sond_server->mysql_host = g_key_file_get_string(key_file, "MARIADB", "host",
-			&error);
-	if (error)
-		g_error("MariaDB-host konnte nicht ermittelt werden:\n%s",
-				error->message);
+    if (server->running) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "Server already running");
+        return FALSE;
+    }
 
-	sond_server->mysql_port = g_key_file_get_integer(key_file, "MARIADB",
-			"port", &error);
-	if (error)
-		g_error("MariaDB-port konnte nicht ermittelt werden:\n%s",
-				error->message);
+    /* Server auf Port binden und starten */
+    if (!soup_server_listen_all(server->soup_server, server->port, 0, error)) {
+        return FALSE;
+    }
 
-	sond_server->mysql_user = g_key_file_get_string(key_file, "MARIADB", "user",
-			&error);
-	if (error)
-		g_error("MariaDB-user konnte nicht ermittelt werden:\n%s",
-				error->message);
+    server->running = TRUE;
 
-	sond_server->mysql_db = g_key_file_get_string(key_file, "MARIADB", "db",
-			&error);
-	if (error)
-		g_error("MariaDB-db-Name konnte nicht ermittelt werden:\n%s",
-				error->message);
+    g_print("Server started on port %u\n", server->port);
 
-	sond_server->mysql_path_ca = g_key_file_get_string(key_file, "MARIADB",
-			"path_ca", &error);
-	if (error)
-		g_error("MariaDB-path_ca konnte nicht ermittelt werden:\n%s",
-				error->message);
-
-	rc = sond_server_init_mysql_con(sond_server, &error);
-	if (rc)
-		g_error("Verbindung zur Datenbank konnte nicht hergestellt "
-				"werden:\n%s", error->message);
-
-	return;
+    return TRUE;
 }
 
-#ifndef TESTING
-static void log_init(SondServer *sond_server) {
-	gint ret = 0;
-	FILE *file = NULL;
-	GDateTime *date_time = NULL;
+void sond_server_stop(SondServer *server) {
+    g_return_if_fail(SOND_IS_SERVER(server));
 
-	date_time = g_date_time_new_now_local();
-	sond_server->log_file = g_strdup_printf("%slogs/SondServer_log_%i_%i.log",
-			sond_server->base_dir, g_date_time_get_year(date_time),
-			g_date_time_get_month(date_time));
-	g_date_time_unref(date_time);
+    if (!server->running) {
+        return;
+    }
 
-	file = freopen(sond_server->log_file, "a", stdout);
-	if (!file)
-		g_error("stout konnte nicht in Datei %s umgeleitet werden: %s",
-				sond_server->log_file, strerror(errno));
+    soup_server_disconnect(server->soup_server);
+    server->running = FALSE;
 
-	ret = dup2(fileno( stdout), fileno( stderr));
-	if (ret == -1)
-		g_error("stderr konnte nicht umgeleitet werden: %s", strerror(errno));
-
-	return;
+    g_print("Server stopped\n");
 }
-#endif // TESTING
 
-gint main(gint argc, gchar **argv) {
-	GError *error = NULL;
-	GSocketService *socket = NULL;
-	GMainLoop *loop = NULL;
-	SondServer sond_server = { 0 };
-	GKeyFile *keyfile = NULL;
-	gchar *conf_file = NULL;
-	gboolean success = FALSE;
-
-	if (argc != 4)
-		g_error(
-				"Usage: SondServer [password SondServer] [password Mariadb-user] [password Seafile-user]");
-	sond_server.password = argv[1];
-	sond_server.mysql_password = argv[2];
-	sond_server.seafile_password = argv[3];
-
-	//Arbeitserzeichnis ermitteln
-	sond_server.base_dir = get_base_dir();
-
-#ifndef TESTING
-	log_init(&sond_server);
-#endif // TESTING
-
-	keyfile = g_key_file_new();
-
-	conf_file = g_strconcat(sond_server.base_dir, "SondServer.conf", NULL);
-
-	success = g_key_file_load_from_file(keyfile, conf_file,
-			G_KEY_FILE_KEEP_COMMENTS | G_KEY_FILE_KEEP_TRANSLATIONS, &error);
-	g_free(conf_file);
-	if (!success)
-		g_error("SondServer.conf konnte nicht gelesen werden:\n%s",
-				error->message);
-
-	sond_server_init_seafile(keyfile, &sond_server);
-
-	init_con(keyfile, &sond_server);
-
-	init_socket_service(keyfile, &sond_server);
-
-	g_key_file_free(keyfile);
-
-	//thread_pool erzeugen
-	sond_server.thread_pool = g_thread_pool_new(sond_server_process_message,
-			&sond_server, -1, FALSE, &error);
-
-	//arr_creds
-	sond_server.arr_creds = g_array_new(FALSE, FALSE, sizeof(Cred));
-	g_array_set_clear_func(sond_server.arr_creds, (GDestroyNotify) free_cred);
-	g_mutex_init(&sond_server.mutex_arr_creds);
-
-	//mutex create akte
-	g_mutex_init(&sond_server.mutex_create_akte);
-
-	//arr_locks
-	sond_server.arr_locks = g_array_new(FALSE, FALSE, sizeof(Lock));
-	g_mutex_init(&sond_server.mutex_arr_locks);
-
-	sond_server.loop = g_main_loop_new(NULL, FALSE);
-
-	g_message("Server started");
-
-	g_main_loop_run(sond_server.loop);
-
-	g_message("Shutdown");
-	sond_server_free(&sond_server);
-
-	g_socket_listener_close(G_SOCKET_LISTENER(socket));
-	g_object_unref(socket);
-	g_main_loop_unref(loop);
-
-	return 0;
+gboolean sond_server_is_running(SondServer *server) {
+    g_return_val_if_fail(SOND_IS_SERVER(server), FALSE);
+    return server->running;
 }
+
+guint sond_server_get_port(SondServer *server) {
+    g_return_val_if_fail(SOND_IS_SERVER(server), 0);
+    return server->port;
+}
+
+gchar* sond_server_get_url(SondServer *server) {
+    g_return_val_if_fail(SOND_IS_SERVER(server), NULL);
+    return g_strdup_printf("http://localhost:%u", server->port);
+}
+
+/*
+ * Kompilierung:
+ * gcc -c sond_server.c $(pkg-config --cflags glib-2.0 gobject-2.0 libsoup-3.0 json-glib-1.0) $(mysql_config --cflags)
+ */

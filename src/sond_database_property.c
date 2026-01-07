@@ -78,14 +78,14 @@ sond_database_property_load_new(gpointer database, gint ID_property,
 			ID_property, errmsg);
 	if (rc) {
 		g_object_unref(sdp);
-		ERROR_S_VAL(NULL)
+		ERROR_Z_VAL(NULL)
 	}
 
 	rc = sond_database_get_property_value(database, ID_property, &value,
 			errmsg);
 	if (rc) {
 		g_object_unref(sdp);
-		ERROR_S_VAL(NULL)
+		ERROR_Z_VAL(NULL)
 	}
 
 	gtk_entry_set_text(GTK_ENTRY(priv->entry_value), value);

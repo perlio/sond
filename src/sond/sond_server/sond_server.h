@@ -1,6 +1,6 @@
 /*
  sond (sond_server.h) - Akten, Beweisst�cke, Unterlagen
- Copyright (C) 2023  pelo america
+ Copyright (C) 2026  pelo america
 
  This program is free software: you can redistribute it and/or modify
  it under the terms of the GNU Affero General Public License as
@@ -16,69 +16,94 @@
  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#ifndef SOND_SERVER_H_INCLUDED
-#define SOND_SERVER_H_INCLUDED
+/**
+ * @file sond_server.h
+ * @brief HTTP REST Server für Graph-Datenbank
+ *
+ * Stellt REST-Endpoints für Node-Operationen bereit.
+ */
 
-#ifdef G_LOG_DOMAIN
-#undef G_LOG_DOMAIN
-#endif // G_LOG_DOMAIN
+#ifndef SOND_SERVER_H
+#define SOND_SERVER_H
 
-#define G_LOG_DOMAIN "SondServer"
+#include <glib-object.h>
+#include <libsoup/soup.h>
+#include <mysql/mysql.h>
 
-#include <glib.h>
+G_BEGIN_DECLS
 
-#define SOND_SERVER_ERROR sond_server_error_quark()
-G_DEFINE_QUARK(sond-server-error-quark,sond_server_error)
+/* ========================================================================
+ * SondServer
+ * ======================================================================== */
 
-enum SondServerError
-{
-	SOND_SERVER_ERROR_NOTFOUND,
-	SOND_SERVER_ERROR_OVERFLOW,
-	NUM_SOND_SERVER_ERROR
-};
+#define SOND_TYPE_SERVER (sond_server_get_type())
+G_DECLARE_FINAL_TYPE(SondServer, sond_server, SOND, SERVER, GObject)
 
-typedef struct st_mysql MYSQL;
+/**
+ * sond_server_new:
+ * @db_host: MySQL-Host
+ * @db_user: MySQL-User
+ * @db_password: MySQL-Passwort
+ * @db_name: MySQL-Datenbank
+ * @port: Server-Port (z.B. 8080)
+ * @error: (nullable): Fehler-Rückgabe
+ *
+ * Erstellt einen neuen Server mit DB-Verbindung.
+ *
+ * Returns: (transfer full) (nullable): Server oder %NULL bei Fehler
+ */
+SondServer* sond_server_new(const gchar *db_host,
+                             const gchar *db_user,
+                             const gchar *db_password,
+                             const gchar *db_name,
+                             guint port,
+                             GError **error);
 
-typedef struct _Lock {
-	gint ID_entity;
-	gint index;
-	const gchar *user; //Zeiger auf user in SondServer.arr_creds
-} Lock;
+/**
+ * sond_server_start:
+ * @server: Server
+ * @error: (nullable): Fehler-Rückgabe
+ *
+ * Startet den Server.
+ *
+ * Returns: %TRUE bei Erfolg
+ */
+gboolean sond_server_start(SondServer *server, GError **error);
 
-typedef struct _SondServer {
-	GMainLoop *loop;
-	gchar *password;
-	gchar *base_dir;
-	gchar *log_file;
+/**
+ * sond_server_stop:
+ * @server: Server
+ *
+ * Stoppt den Server.
+ */
+void sond_server_stop(SondServer *server);
 
-	GArray *arr_creds;
-	GMutex mutex_arr_creds;
+/**
+ * sond_server_is_running:
+ * @server: Server
+ *
+ * Returns: %TRUE wenn Server läuft
+ */
+gboolean sond_server_is_running(SondServer *server);
 
-	GMutex mutex_create_akte;
+/**
+ * sond_server_get_port:
+ * @server: Server
+ *
+ * Returns: Server-Port
+ */
+guint sond_server_get_port(SondServer *server);
 
-	GArray *arr_locks;
-	GMutex mutex_arr_locks;
+/**
+ * sond_server_get_url:
+ * @server: Server
+ *
+ * Gibt die Server-URL zurück.
+ *
+ * Returns: (transfer full): URL (z.B. "http://localhost:8080")
+ */
+gchar* sond_server_get_url(SondServer *server);
 
-	gchar *mysql_host;
-	gint mysql_port;
-	gchar *mysql_user;
-	gchar *mysql_password;
-	gchar *mysql_db;
-	gchar *mysql_path_ca;
+G_END_DECLS
 
-	gchar *seafile_user;
-	gint seafile_group_id;
-	gchar *seafile_password;
-	gchar *seafile_url;
-	gchar *auth_token;
-
-	GThreadPool *thread_pool;
-} SondServer;
-
-Lock sond_server_has_lock(SondServer*, gint);
-
-gint sond_server_get_lock(SondServer*, gint, gint, gboolean, const gchar**);
-
-MYSQL* sond_server_get_mysql_con(SondServer*, GError**);
-
-#endif // SOND_SERVER_H_INCLUDED
+#endif /* SOND_SERVER_H */
