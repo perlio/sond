@@ -1,5 +1,5 @@
 /*
- sond (sond_server.h) - Akten, Beweisst�cke, Unterlagen
+ sond (sond_server.h) - Akten, Beweisstücke, Unterlagen
  Copyright (C) 2026  pelo america
 
  This program is free software: you can redistribute it and/or modify
