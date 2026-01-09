@@ -787,10 +787,16 @@ static gboolean sond_server_prepare(SondServer*server,
         return FALSE;
     }
 
-    if (!mysql_real_connect(server->db_conn, server->db_host,
-    		server->db_user, server->db_password, server->db_name, 0, NULL, 0)) {
-        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                   "MySQL connection failed: %s", mysql_error(server->db_conn));
+    gboolean suc = !mysql_real_connect(server->db_conn, server->db_host,
+    		server->db_user, server->db_password, server->db_name, 0, NULL, 0);
+
+    // Passwort überschreiben
+	memset(server->db_password, 0, strlen(server->db_password));
+	g_free(server->db_password);
+
+	if (!suc) {
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+			   "MySQL connection failed: %s", mysql_error(server->db_conn));
         return FALSE;
     }
 
@@ -815,6 +821,8 @@ static gboolean sond_server_prepare(SondServer*server,
     soup_server_add_handler(server->soup_server, "/edge/save",
                            handle_edge_save, server, NULL);
 
+    sond_server_seafile_register_handlers(server);
+
     return TRUE;
 }
 
@@ -834,7 +842,7 @@ static gboolean sond_server_start(SondServer *server, GError **error) {
 
     server->running = TRUE;
 
-    g_print("Server started on port %u\n", server->port);
+    LOG_INFO("Server started on port %u\n", server->port);
 
     return TRUE;
 }
@@ -853,9 +861,9 @@ static void signal_handler(int signum) {
     g_print("\n");
 
     if (signum == SIGINT) {
-        g_print("Received SIGINT (Ctrl+C), shutting down...\n");
+        LOG_ERROR("Received SIGINT (Ctrl+C), shutting down...\n");
     } else if (signum == SIGTERM) {
-        g_print("Received SIGTERM, shutting down...\n");
+        LOG_ERROR("Received SIGTERM, shutting down...\n");
     }
 
     /* Server stoppen */
@@ -929,7 +937,7 @@ int main(int argc, char *argv[]) {
     g_main_loop_run(loop);
 
     /* Cleanup */
-    g_print("\nShutting down...\n");
+    LOG_INFO("\nShutting down...\n");
     g_main_loop_unref(loop);
     g_object_unref(server);
 

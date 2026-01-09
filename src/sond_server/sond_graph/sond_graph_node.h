@@ -53,6 +53,7 @@ G_BEGIN_DECLS
 G_DECLARE_FINAL_TYPE(SondGraphNode, sond_graph_node, SOND, GRAPH_NODE, GObject)
 
 /* Forward declaration */
+typedef struct _SondGraphNode SondGraphNode;
 typedef struct _SondGraphEdge SondGraphEdge;
 
 /* ========================================================================

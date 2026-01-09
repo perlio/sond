@@ -25,6 +25,9 @@
 #include "sond_graph_node.h"
 #include "sond_graph_edge.h"
 #include "sond_graph_property.h"
+
+#include "../../sond_log_and_error.h"
+
 #include <json-glib/json-glib.h>
 #include <string.h>
 #include <stdio.h>
@@ -271,7 +274,7 @@ gboolean sond_graph_db_setup(MYSQL *conn, GError **error) {
         return FALSE;
     }
 
-    g_print("=== Graph Database Setup ===\n\n");
+    LOG_INFO("=== Graph Database Setup ===\n\n");
 
     /* Tabellen erstellen */
     if (!create_tables(conn, &tmp_error)) {
@@ -294,7 +297,7 @@ gboolean sond_graph_db_setup(MYSQL *conn, GError **error) {
         return FALSE;
     }
 
-    g_print("\n✓ Graph database setup completed successfully!\n");
+    LOG_INFO("\n✓ Graph database setup completed successfully!\n");
 
     return TRUE;
 }

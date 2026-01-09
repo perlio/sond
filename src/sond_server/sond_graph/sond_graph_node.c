@@ -22,6 +22,7 @@
  */
 
 #include "sond_graph_node.h"
+
 #include "sond_graph_edge.h"
 #include "sond_graph_property.h"
 #include <json-glib/json-glib.h>
