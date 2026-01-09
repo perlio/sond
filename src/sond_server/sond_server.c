@@ -22,27 +22,22 @@
  */
 
 #include "sond_server.h"
-#include "sond_graph_db.h"
-#include "sond_graph_node.h"
-#include "sond_graph_edge.h"
+#include "sond_server_seafile.h"
+#include "sond_graph/sond_graph_db.h"
+#include "sond_graph/sond_graph_node.h"
+#include "sond_graph/sond_graph_edge.h"
+
+#include "../sond_log_and_error.h"
+
 #include <json-glib/json-glib.h>
 #include <string.h>
+#ifdef __linux__
+#include <glib-unix.h>
+#endif // __linux__
 
-struct _SondServer {
-    GObject parent_instance;
-
-    SoupServer *soup_server;
-    MYSQL *db_conn;
-    guint port;
-    gboolean running;
-
-    /* DB Config */
-    gchar *db_host;
-    gchar *db_user;
-    gchar *db_password;
-    gchar *db_name;
-};
-
+GQuark sond_server_error_quark(void) {
+    return g_quark_from_static_string("sond-server-error-quark");
+}
 G_DEFINE_TYPE(SondServer, sond_server, G_TYPE_OBJECT)
 
 /* ========================================================================
@@ -652,6 +647,20 @@ static void handle_node_unlock(SoupServer *soup_server,
  * GObject Implementation
  * ======================================================================== */
 
+static void sond_server_stop(SondServer *server) {
+    g_return_if_fail(SOND_IS_SERVER(server));
+
+    if (!server->running) {
+        return;
+    }
+
+    soup_server_disconnect(server->soup_server);
+    server->running = FALSE;
+
+    g_print("Server stopped\n");
+}
+
+
 static void sond_server_finalize(GObject *object) {
     SondServer *self = SOND_SERVER(object);
 
@@ -687,43 +696,102 @@ static void sond_server_init(SondServer *self) {
     self->running = FALSE;
 }
 
-/* ========================================================================
- * Public API
- * ======================================================================== */
+static gboolean sond_server_load_config(SondServer *server,
+                                  const gchar *config_file,
+                                  GError **error) {
+    GKeyFile *keyfile = g_key_file_new();
 
-SondServer* sond_server_new(const gchar *db_host,
-                             const gchar *db_user,
-                             const gchar *db_password,
-                             const gchar *db_name,
-                             guint port,
+    if (!g_key_file_load_from_file(keyfile, config_file,
+                                    G_KEY_FILE_NONE, error)) {
+        g_key_file_free(keyfile);
+        return FALSE;
+    }
+
+    /* === Server Config === */
+    gint port = g_key_file_get_integer(keyfile, "server", "port", NULL);
+    if (port > 0) {
+    	server->port = port;
+    }
+
+    /* === MariaDB Config === */
+    server->db_host = g_key_file_get_string(keyfile, "mariadb", "host", NULL);
+    server->db_port = g_key_file_get_integer(keyfile, "mariadb", "port", NULL);
+    server->db_name = g_key_file_get_string(keyfile, "mariadb", "database", NULL);
+    server->db_user = g_key_file_get_string(keyfile, "mariadb", "username", NULL);
+
+    gchar *db_pass_file = g_key_file_get_string(keyfile, "mariadb", "password_file", NULL);
+    if (db_pass_file) {
+        gchar *db_password = NULL;
+        if (g_file_get_contents(db_pass_file, &db_password, NULL, error)) {
+            g_strstrip(db_password);
+            server->db_password = db_password;
+        } else {
+            g_prefix_error(error, "Failed to read MariaDB password file: ");
+            g_free(server->db_host);
+            g_free(server->db_name);
+            g_free(server->db_user);
+            g_free(db_pass_file);
+            g_key_file_free(keyfile);
+            return FALSE;
+        }
+    }
+
+    /* === Seafile Config === */
+    server->seafile_url = g_key_file_get_string(keyfile, "seafile", "url", NULL);
+    gchar* seafile_user = g_key_file_get_string(keyfile, "seafile", "username", NULL);
+    gchar *sf_pass_file = g_key_file_get_string(keyfile, "seafile", "password_file", NULL);
+    server->seafile_group_id = g_key_file_get_integer(keyfile, "seafile", "group_id", NULL);
+
+    if (seafile_user && sf_pass_file) {
+        gchar *sf_password = NULL;
+
+        if (g_file_get_contents(sf_pass_file, &sf_password, NULL, error)) {
+            g_strstrip(sf_password);
+
+            // Auth-Token holen
+            gchar *token = sond_server_seafile_get_auth_token(
+                server, seafile_user, sf_password, error);
+            server->auth_token = token;
+
+            // Passwort überschreiben
+            memset(sf_password, 0, strlen(sf_password));
+            g_free(sf_password);
+        } else {
+            g_prefix_error(error, "Failed to read Seafile password file: ");
+            g_free(seafile_user);
+            g_free(sf_pass_file);
+            g_key_file_free(keyfile);
+            return FALSE;
+        }
+
+    }
+
+    g_key_file_free(keyfile);
+    return TRUE;
+}
+
+static gboolean sond_server_prepare(SondServer*server,
+							 gchar const* config,
                              GError **error) {
-    g_return_val_if_fail(db_host != NULL, NULL);
-    g_return_val_if_fail(db_user != NULL, NULL);
-    g_return_val_if_fail(db_name != NULL, NULL);
+    g_return_val_if_fail(config != NULL, FALSE);
 
-    SondServer *server = g_object_new(SOND_TYPE_SERVER, NULL);
-
-    server->db_host = g_strdup(db_host);
-    server->db_user = g_strdup(db_user);
-    server->db_password = g_strdup(db_password);
-    server->db_name = g_strdup(db_name);
-    server->port = port;
+    if (!sond_server_load_config(server, config, error)) {
+		return FALSE;
+	}
 
     /* MySQL verbinden */
     server->db_conn = mysql_init(NULL);
     if (!server->db_conn) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                    "mysql_init failed");
-        g_object_unref(server);
-        return NULL;
+        return FALSE;
     }
 
-    if (!mysql_real_connect(server->db_conn, db_host, db_user, db_password,
-                           db_name, 0, NULL, 0)) {
+    if (!mysql_real_connect(server->db_conn, server->db_host,
+    		server->db_user, server->db_password, server->db_name, 0, NULL, 0)) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                    "MySQL connection failed: %s", mysql_error(server->db_conn));
-        g_object_unref(server);
-        return NULL;
+        return FALSE;
     }
 
     /* SoupServer erstellen */
@@ -747,10 +815,10 @@ SondServer* sond_server_new(const gchar *db_host,
     soup_server_add_handler(server->soup_server, "/edge/save",
                            handle_edge_save, server, NULL);
 
-    return server;
+    return TRUE;
 }
 
-gboolean sond_server_start(SondServer *server, GError **error) {
+static gboolean sond_server_start(SondServer *server, GError **error) {
     g_return_val_if_fail(SOND_IS_SERVER(server), FALSE);
 
     if (server->running) {
@@ -771,35 +839,101 @@ gboolean sond_server_start(SondServer *server, GError **error) {
     return TRUE;
 }
 
-void sond_server_stop(SondServer *server) {
-    g_return_if_fail(SOND_IS_SERVER(server));
+#ifdef __linux__
+/* Globale Variablen für Signal-Handler */
+static GMainLoop *main_loop = NULL;
+static SondServer *server_instance = NULL;
 
-    if (!server->running) {
-        return;
+/**
+ * signal_handler:
+ *
+ * Behandelt SIGINT (Ctrl+C) und SIGTERM für sauberes Beenden.
+ */
+static void signal_handler(int signum) {
+    g_print("\n");
+
+    if (signum == SIGINT) {
+        g_print("Received SIGINT (Ctrl+C), shutting down...\n");
+    } else if (signum == SIGTERM) {
+        g_print("Received SIGTERM, shutting down...\n");
     }
 
-    soup_server_disconnect(server->soup_server);
-    server->running = FALSE;
+    /* Server stoppen */
+    if (server_instance && sond_server_is_running(server_instance)) {
+        sond_server_stop(server_instance);
+    }
 
-    g_print("Server stopped\n");
+    /* Main loop beenden */
+    if (main_loop && g_main_loop_is_running(main_loop)) {
+        g_main_loop_quit(main_loop);
+    }
 }
 
-gboolean sond_server_is_running(SondServer *server) {
-    g_return_val_if_fail(SOND_IS_SERVER(server), FALSE);
-    return server->running;
-}
-
-guint sond_server_get_port(SondServer *server) {
-    g_return_val_if_fail(SOND_IS_SERVER(server), 0);
-    return server->port;
-}
-
-gchar* sond_server_get_url(SondServer *server) {
-    g_return_val_if_fail(SOND_IS_SERVER(server), NULL);
-    return g_strdup_printf("http://localhost:%u", server->port);
-}
-
-/*
- * Kompilierung:
- * gcc -c sond_server.c $(pkg-config --cflags glib-2.0 gobject-2.0 libsoup-3.0 json-glib-1.0) $(mysql_config --cflags)
+/**
+ * setup_signal_handlers:
+ *
+ * Registriert Signal-Handler für sauberes Herunterfahren.
  */
+static void setup_signal_handlers(void) {
+    signal(SIGINT, signal_handler);
+    signal(SIGTERM, signal_handler);
+}
+#endif // __linux__
+
+int main(int argc, char *argv[]) {
+    GError *error = NULL;
+    SondServer *server = NULL;
+    GMainLoop *loop = NULL;
+    gchar *config_file = "/etc/sond_server/sond_server.conf";
+
+    logging_init("sond_server");
+
+    /* Command Line Argument für Config-Pfad (optional) */
+    if (argc > 1) {
+        config_file = argv[1];
+    }
+
+    LOG_INFO("Starting SOND Server...\n");
+    LOG_INFO("Config: %s\n", config_file);
+
+    /* Server erstellen */
+    server = g_object_new(SOND_TYPE_SERVER, NULL);
+
+    /* Config laden */
+    if (!sond_server_prepare(server, config_file, &error)) {
+        LOG_ERROR("Failed to load config: %s\n", error->message);
+        g_error_free(error);
+        g_object_unref(server);
+        return 1;
+    }
+
+    /* Server starten */
+    if (!sond_server_start(server, &error)) {
+        LOG_ERROR("Failed to start server: %s\n", error->message);
+        g_error_free(error);
+        g_object_unref(server);
+        return 1;
+    }
+
+    LOG_INFO("Server running on port %d\n", server->port);
+
+    /* Main Loop */
+    loop = g_main_loop_new(NULL, FALSE);
+
+#ifdef __linux__
+    /* Signal Handler für sauberes Shutdown */
+    g_unix_signal_add(SIGINT, (GSourceFunc)g_main_loop_quit, loop);
+    g_unix_signal_add(SIGTERM, (GSourceFunc)g_main_loop_quit, loop);
+#endif // __linux__
+
+    g_main_loop_run(loop);
+
+    /* Cleanup */
+    g_print("\nShutting down...\n");
+    g_main_loop_unref(loop);
+    g_object_unref(server);
+
+    LOG_INFO("Server stopped\n");
+
+    return 0;
+}

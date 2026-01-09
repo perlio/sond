@@ -30,6 +30,7 @@
 #include "../../misc.h"
 #include "../../misc_stdlib.h"
 #include "../../sond_fileparts.h"
+#include "../../sond_log_and_error.h"
 
 #include "../global_types.h"
 #include "../zond_pdf_document.h"
@@ -187,13 +188,13 @@ static void log_init(Projekt *zond) {
 	file = freopen(logfile, "a+", stdout);
 	if (!file) {
 		g_free(logfile);
-		g_error("stdout konnte nicht umgeleitet werden: %s", strerror(errno));
+		LOG_ERROR("stdout konnte nicht umgeleitet werden: %s", strerror(errno));
 	}
 
 	file_tmp = freopen(logfile, "a+", stderr);
 	g_free(logfile);
 	if (!file_tmp)
-		g_error("stderr konnte nicht umgeleitet werden: %s", strerror(errno));
+		LOG_ERROR("stderr konnte nicht umgeleitet werden: %s", strerror(errno));
 
 	return;
 }
@@ -217,7 +218,7 @@ static void init_schema(Projekt* zond) {
     g_free(path_to_schema_source);
 
     if (error) {
-        g_error("Fehler beim Laden der Schemas: %s", error->message);
+        LOG_ERROR("Fehler beim Laden der Schemas: %s", error->message);
         g_error_free(error);
         return;
     }
@@ -231,7 +232,7 @@ static void init_schema(Projekt* zond) {
     g_settings_schema_source_unref(source);
 
     if (!schema) {
-        g_error("Schema nicht gefunden!");
+        LOG_ERROR("Schema nicht gefunden!");
         return;
     }
 
@@ -240,7 +241,7 @@ static void init_schema(Projekt* zond) {
 	g_settings_schema_unref(schema);
 
 	if (!zond->settings)
-		g_error("Settings konnten nicht erzeugt werden");
+		LOG_ERROR("Settings konnten nicht erzeugt werden");
 
 	return;
 }
@@ -340,7 +341,7 @@ static void startup_app(GtkApplication *app, gpointer data) {
 
 	setlocale(LC_NUMERIC, "C");
 
-	g_message("zond gestartet");
+	LOG_INFO("zond gestartet");
 
 	return;
 }
@@ -386,16 +387,17 @@ int main(int argc, char **argv) {
 	g_signal_connect(app, "activate", G_CALLBACK (activate_app), &zond);
 	g_signal_connect(app, "open", G_CALLBACK (open_app), &zond);
 
+	logging_init("zond");
 	g_log_set_handler("Sond", G_LOG_LEVEL_MASK | G_LOG_FLAG_FATAL, error_handler,
 			&zond);
 
 	gint status = g_application_run(G_APPLICATION(app), argc, argv);
 
 	cleanup(&zond);
-
 	g_object_unref(app);
 
-	g_message("zond beendet");
+	LOG_INFO("zond beendet");
+	logging_cleanup();
 
 	return status;
 }

@@ -1,46 +1,30 @@
 #ifndef MISC_H_INCLUDED
 #define MISC_H_INCLUDED
 
-#define ERROR_Z_VAL(y) { if ( errmsg ) *errmsg = add_string( \
+#define ERROR_S_VAL(y) { if ( errmsg ) *errmsg = add_string( \
                          g_strconcat( __func__, "\n", NULL ), *errmsg ); \
                          return y; }
 
-#define ERROR_Z ERROR_Z_VAL(-1)
+#define ERROR_S ERROR_S_VAL(-1)
 
-#define ERROR_Z_MESSAGE_VAL(x,y) { if ( errmsg ) *errmsg = add_string( \
+#define ERROR_S_MESSAGE_VAL(x,y) { if ( errmsg ) *errmsg = add_string( \
                          g_strconcat( "Bei Aufruf ",__func__, ":\n", x, NULL ), *errmsg ); \
                          return y; }
 
-#define ERROR_Z_MESSAGE(x) ERROR_Z_MESSAGE_VAL(x,-1)
+#define ERROR_S_MESSAGE(x) ERROR_S_MESSAGE_VAL(x,-1)
 
-#define ERROR_S_VAL(y) {g_prefix_error(error, "%s\n", __func__); return y;}
-#define ERROR_S ERROR_S_VAL(-1)
+#define ERROR_Z_VAL(y) {g_prefix_error(error, "%s\n", __func__); return y;}
+#define ERROR_Z ERROR_Z_VAL(-1)
 
 // #include <gtk/gtk.h>
 #include <mupdf/fitz.h>
+#include <gtk/gtk.h>
 
-typedef struct _GSList GSList;
-typedef struct _GPtrArray GPtrArray;
-typedef struct _GtkWidget GtkWidget;
-typedef struct _GtkCalendar GtkCalendar;
-typedef struct _SondTreeview SondTreeview;
-typedef struct _GFile GFile;
-typedef struct _GtkWindow GtkWindow;
-typedef struct _GError GError;
-typedef struct _GtkSelectionMode GtkSelectionMode;
-typedef unsigned int guint32;
-typedef guint32 GQuark;
-typedef char gchar;
-typedef int gint;
-typedef unsigned int guint;
-typedef int gboolean;
-typedef double gdouble;
 #ifdef __WIN32
 typedef void* GPid;
 #elif defined __linux__
 typedef int GPid;
 #endif // __win32__
-typedef void *gpointer;
 typedef struct _SondFilePart SondFilePart;
 
 gchar* change_basename(gchar const*, gchar const*);

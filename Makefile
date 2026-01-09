@@ -14,7 +14,7 @@ LDFLAGS := -Wl,--allow-multiple-definition
 ifneq (,$(findstring $(MAKECMDGOALS), zond))
 SRCS += $(shell find $(SRC_DIRS)/zond -name '*.c') $(SRC_DIRS)/misc_stdlib.c $(SRC_DIRS)/misc.c \
 	$(SRC_DIRS)/sond_fileparts.c $(SRC_DIRS)/sond_treeview.c $(SRC_DIRS)/sond_treeviewfm.c \
-	$(SRC_DIRS)/sond_renderer.c $(SRC_DIRS)/sond_ocr.c
+	$(SRC_DIRS)/sond_renderer.c $(SRC_DIRS)/sond_ocr.c $(SRC_DIRS)/sond_log_and_error.c
 CFLAGS += $(shell pkg-config --cflags libmagic libxml-2.0 gtk+-3.0 gobject-2.0 json-glib-1.0 gmime-3.0) \
 	-DCONFIG_$(CONFIG)
 LDFLAGS += $(shell pkg-config --libs libmagic libxml-2.0 gtk+-3.0 sqlite3 libcurl tesseract \
@@ -36,9 +36,10 @@ LDFLAGS += $(shell pkg-config --libs libmagic gtk+-3.0 gobject-2.0 sqlite3 libcu
 endif
 
 ifneq (,$(findstring $(MAKECMDGOALS), sond_server))
-SRCS := $(shell find $(SRC_DIRS)/sond/sond_server -name '*.c')
-CFLAGS += $(shell pkg-config --cflags libcurl libmariadb libsoup-3.0 json-glib-1.0)
-LDFLAGS += $(shell pkg-config --libs libcurl libmariadb libsoup-3.0 json-glib-1.0)
+SRCS += $(shell find $(SRC_DIRS)/sond_server -name '*.c') $(SRC_DIRS)/sond_log_and_error.c \
+    $(SRC_DIRS)/misc_stdlib.c
+CFLAGS += $(shell pkg-config --cflags libmariadb libsoup-3.0 json-glib-1.0)
+LDFLAGS += $(shell pkg-config --libs libmariadb libsoup-3.0 json-glib-1.0)
 endif
 
 # Object files

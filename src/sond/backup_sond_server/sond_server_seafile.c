@@ -20,6 +20,7 @@
 #include <json-glib/json-glib.h>
 #include <glib/gstdio.h>
 #include <libsoup/soup.h>
+#include <curl/curl.h>
 
 #include "../../misc.h"
 #include "../../misc_stdlib.h"
@@ -824,3 +825,151 @@ gint sond_server_seafile_create_akte(SondServer *sond_server, gint reg_nr,
 
 	return 0;
 }
+
+gchar*
+sond_server_seafile_get_auth_token(SondServer *sond_server, const gchar *user,
+		const gchar *password, gchar **errmsg) {
+	SoupSession *soup_session = NULL;
+	SoupMessage *soup_message = NULL;
+	gchar *url_text = NULL;
+	gchar *body_text = NULL;
+	GBytes *body = NULL;
+	GBytes *response = NULL;
+	JsonParser *parser = NULL;
+	JsonNode *node = NULL;
+	GError *error = NULL;
+	gchar *auth_token = NULL;
+
+	url_text = g_strdup_printf("%s/api2/auth-token/", sond_server->seafile_url);
+	soup_session = soup_session_new();
+	soup_message = soup_message_new(SOUP_METHOD_POST, url_text);
+	g_free(url_text);
+
+	body_text = g_strdup_printf("username=%s&password=%s", user, password);
+	body = g_bytes_new(body_text, strlen(body_text));
+	g_free(body_text);
+	soup_message_set_request_body_from_bytes(soup_message,
+			"application/x-www-form-urlencoded", body);
+	g_bytes_unref(body);
+
+	response = soup_session_send_and_read(soup_session, soup_message, NULL,
+			&error);
+	g_object_unref(soup_message);
+	g_object_unref(soup_session);
+	if (error) {
+		if (errmsg)
+			*errmsg = g_strconcat("Keine Antwort vom SeafileServer\n\n"
+					"Bei Aufruf soup_session_send_and_read:\n", error->message,
+					NULL);
+		g_error_free(error);
+
+		return NULL;
+	}
+
+	parser = json_parser_new();
+	if (!json_parser_load_from_data(parser, g_bytes_get_data(response, NULL),
+			-1, &error)) {
+		if (errmsg)
+			*errmsg = g_strconcat(
+					"Antwort vom SeafileServer nicht im json-Format\n\n"
+							"Bei Aufruf json_parser_load_from_data:\n",
+					error->message, "\n\nEmpfangene Nachricht:\n",
+					g_bytes_get_data(response, NULL), NULL);
+		g_error_free(error);
+
+		g_object_unref(parser);
+		g_bytes_unref(response);
+
+		return NULL;
+	}
+
+	node = json_parser_get_root(parser);
+	if (JSON_NODE_HOLDS_OBJECT(node)) {
+		JsonObject *object = NULL;
+
+		object = json_node_get_object(node);
+
+		if (json_object_has_member(object, "token"))
+			auth_token = g_strdup(
+					json_object_get_string_member(object, "token"));
+		else {
+			if (errmsg)
+				*errmsg =
+						g_strconcat(
+								"Antwort vom SeafileServer\n\n"
+										"json hat kein member " "token" "\n\nEmpfangene Nachricht:\n",
+								g_bytes_get_data(response, NULL), NULL);
+
+			g_object_unref(parser);
+			g_bytes_unref(response);
+
+			return NULL;
+		}
+	} else {
+		if (errmsg)
+			*errmsg = g_strconcat("Antwort vom SeafileServer\n\n"
+					"json ist kein object\n\nEmpfangene Nachricht:\n",
+					g_bytes_get_data(response, NULL), NULL);
+
+		g_object_unref(parser);
+		g_bytes_unref(response);
+
+		return NULL;
+	}
+
+	g_object_unref(parser);
+	g_bytes_unref(response);
+
+	return auth_token;
+}
+
+static gint get_auth_level(SondServer *sond_server, const gchar *user,
+		const gchar *password) {
+	Cred cred = { 0 };
+	gchar *errmsg = NULL;
+	gint i = 0;
+
+	//mutex user
+	g_mutex_lock(&sond_server->mutex_arr_creds);
+	for (i = 0; i < sond_server->arr_creds->len; i++) {
+		cred = g_array_index(sond_server->arr_creds, Cred, i);
+		if (!g_strcmp0(cred.user, user))
+			break;
+	}
+	g_mutex_unlock(&sond_server->mutex_arr_creds);
+
+	if (i == sond_server->arr_creds->len) {
+		gchar *auth_token = NULL;
+
+		auth_token = sond_server_seafile_get_auth_token(sond_server, user,
+				password, &errmsg);
+		if (!auth_token) {
+			g_warning("User konnte nicht legitimiert werden:\n%s", errmsg);
+			g_free(errmsg);
+
+			return -1;
+		}
+
+		//brauchen wir nicht
+		g_free(auth_token);
+
+		g_mutex_lock(&sond_server->mutex_arr_creds);
+		if (i < sond_server->arr_creds->len) {
+			g_free(
+					(((Cred*) (void*) (sond_server->arr_creds)->data)[i]).password);
+			(((Cred*) (void*) (sond_server->arr_creds)->data)[i]).password =
+					g_strdup(password);
+		} else {
+			Cred cred = { 0 };
+
+			cred.user = g_strdup(user);
+			cred.password = g_strdup(password);
+
+			g_array_append_val(sond_server->arr_creds, cred);
+		}
+		g_mutex_unlock(&sond_server->mutex_arr_creds);
+	}
+
+	return i;
+}
+

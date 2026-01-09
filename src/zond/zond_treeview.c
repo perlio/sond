@@ -989,7 +989,6 @@ static gint zond_treeview_anbinden_rekursiv(ZondTreeview *ztv,
 		gint rc = 0;
 		gint anchor_id_dir = 0;
 		gboolean child_anchor = TRUE;
-		gchar const* path = NULL;
 
 		//icon_name ermitteln
 		if (SOND_IS_FILE_PART_PDF(sond_tvfm_item_get_sond_file_part(stvfm_item)))
@@ -1517,7 +1516,6 @@ static gint zond_treeview_paste_clipboard(Projekt *zond, gboolean child,
 	GtkTreeIter iter_anchor = { 0 };
 	gint anchor_id = 0;
 	gboolean in_link = FALSE;
-	gint root = 0;
 	gint rc = 0;
 
 	if (zond->baum_active == KEIN_BAUM || zond->baum_active == BAUM_FS)

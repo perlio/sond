@@ -29,6 +29,7 @@
 
 #include "misc.h"
 #include "misc_stdlib.h"
+#include "sond_log_and_error.h"
 #include "sond.h"
 #include "sond_renderer.h"
 #include "sond_fileparts.h"
@@ -278,7 +279,7 @@ SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM* stvfm,
 		//hat Verzeichnis Einträge?
 		rc = sond_tvfm_item_load_fs_dir(stvfm_item, NULL, &error);
 		if (rc == -1) {
-			g_warning("Fehler beim Öffnen des Verzeichnisses '%s':\n%s",
+			LOG_WARN("Fehler beim Öffnen des Verzeichnisses '%s':\n%s",
 					(sond_tvfm_item_get_basename(stvfm_item)) ?
 							sond_tvfm_item_get_basename(stvfm_item) :
 							sond_treeviewfm_get_root(sond_tvfm_item_get_stvfm(stvfm_item)),
@@ -398,7 +399,7 @@ static gint sond_tvfm_item_load_fs_dir(SondTVFMItem* stvfm_item,
 		else rel_path_child = g_strdup(filename);
 
 		if (g_stat(rel_path_child, &st)) {
-			warning("g_stat(%s) gibt Fehler zurück: %s", rel_path_child, strerror(errno));
+			LOG_WARN("g_stat(%s) gibt Fehler zurück: %s", rel_path_child, strerror(errno));
 			g_free(rel_path_child);
 
 			continue;
@@ -631,7 +632,7 @@ static void sond_treeviewfm_render_text_cell(GtkTreeViewColumn *column,
 
 	gtk_tree_model_get(model, iter, 0, &stvfm_item, -1);
 	if (!stvfm_item) {
-		warning("Keine Objekt im Baum");
+		LOG_WARN("Keine Objekt im Baum");
 		return;
 	}
 
@@ -665,7 +666,7 @@ static void sond_treeviewfm_render_text_cell(GtkTreeViewColumn *column,
 		rc = SOND_TREEVIEWFM_GET_CLASS(stvfm)->deter_background(stvfm_item,
 				&error);
 		if (rc == -1) {
-			g_warning("Fehler bei Ermittlung background: %s", error->message);
+			LOG_WARN("Fehler bei Ermittlung background: %s", error->message);
 			g_error_free(error);
 
 			return;
@@ -894,7 +895,7 @@ static void sond_tvfm_item_set_basename(SondTVFMItem* stvfm_item,
 			sond_tvfm_item_get_instance_private(stvfm_item);
 
 	if (!stvfm_item_priv->path_or_section)
-		warning("STVFMItem ist Leaf oder root-dir ('%s')",
+		LOG_WARN("STVFMItem ist Leaf oder root-dir ('%s')",
 				sond_file_part_get_path(stvfm_item_priv->sond_file_part));
 
 	path = stvfm_item_priv->path_or_section;
@@ -1592,7 +1593,7 @@ static void remove_item_from_tree(GtkTreeIter* iter,
 			if (!gtk_tree_model_iter_previous(
 					gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm_item_priv->stvfm)),
 					&iter_page_tree)) {
-				critical("PageTree-Item fehlt");
+				LOG_ERROR("PageTree-Item fehlt");
 
 				goto parent;
 			}
@@ -1600,14 +1601,14 @@ static void remove_item_from_tree(GtkTreeIter* iter,
 			if (!gtk_tree_store_remove(GTK_TREE_STORE(
 					gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm_item_priv->stvfm))),
 					&iter_page_tree))
-				critical("PageTree-Item konnte nicht gelöscht werden");
+				LOG_ERROR("PageTree-Item konnte nicht gelöscht werden");
 
 parent:
 			//Jetzt muß stvfm_item (parent) angepaßt werden
 			if (!gtk_tree_model_iter_parent(
 					gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm_item_priv->stvfm)),
 					&iter_parent, iter)) {
-				critical("Parent-Item nicht vorhanden");
+				LOG_ERROR("Parent-Item nicht vorhanden");
 
 				goto end;
 			}
@@ -1617,7 +1618,7 @@ parent:
 					&iter_parent, 0, &stvfm_item_parent, -1);
 
 			if (!SOND_IS_TVFM_ITEM(stvfm_item_parent)) {
-				critical("Parent enthält kein STVFM-Item");
+				LOG_ERROR("Parent enthält kein STVFM-Item");
 
 				goto end;
 			}
@@ -1744,7 +1745,7 @@ static gint move_item(SondTVFMItem* stvfm_item_src,
 	//Jetzt Quelle löschen
 	rc = delete_item(stvfm_item_src, error);
 	if (rc) {
-		warning("Item konnte nicht gelöscht werden: %s", (*error)->message);
+		LOG_WARN("Item konnte nicht gelöscht werden: %s", (*error)->message);
 		g_clear_error(error);
 	}
 
@@ -2952,7 +2953,7 @@ static void sond_treeviewfm_render_file_icon(GtkTreeViewColumn *column,
 
 	gtk_tree_model_get(model, iter, 0, &stvfm_item, -1);
 	if (!stvfm_item) {
-		g_warning("%s: Kein SondTVFMItem", __func__);
+		LOG_WARN("%s: Kein SondTVFMItem", __func__);
 		return;
 	}
 
