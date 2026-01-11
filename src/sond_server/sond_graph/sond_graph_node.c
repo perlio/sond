@@ -196,15 +196,12 @@ void sond_graph_node_set_properties(SondGraphNode *node, GPtrArray *props) {
 
         GPtrArray *values = sond_graph_property_get_values(prop);
         if (!values || values->len == 0) {
-            if (values) g_ptr_array_unref(values);
             continue;
         }
 
         sond_graph_property_list_set(node->properties, key,
                                       (const gchar **)values->pdata,
                                       values->len);
-
-        g_ptr_array_unref(values);
 
         /* TODO: Sub-Properties kopieren wenn nötig */
     }

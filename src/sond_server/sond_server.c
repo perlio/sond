@@ -476,6 +476,8 @@ static void handle_node_search(SoupServer *soup_server,
     json_node_free(root);
     g_object_unref(generator);
     g_object_unref(builder);
+    
+    /* WICHTIG: Array freigeben - die Nodes werden automatisch unref'd durch free_func */
     g_ptr_array_unref(nodes);
 }
 
@@ -744,18 +746,23 @@ static gboolean sond_server_load_config(SondServer *server,
 
     if (seafile_user && sf_pass_file) {
         gchar *sf_password = NULL;
-
+/*
         if (g_file_get_contents(sf_pass_file, &sf_password, NULL, error)) {
             g_strstrip(sf_password);
 
             // Auth-Token holen
             gchar *token = sond_server_seafile_get_auth_token(
                 server, seafile_user, sf_password, error);
-            server->auth_token = token;
-
             // Passwort überschreiben
             memset(sf_password, 0, strlen(sf_password));
             g_free(sf_password);
+            if (!token) {
+                g_free(seafile_user);
+                g_free(sf_pass_file);
+                g_key_file_free(keyfile);
+                return FALSE;
+            }
+            server->auth_token = token;
         } else {
             g_prefix_error(error, "Failed to read Seafile password file: ");
             g_free(seafile_user);
@@ -763,7 +770,7 @@ static gboolean sond_server_load_config(SondServer *server,
             g_key_file_free(keyfile);
             return FALSE;
         }
-
+*/
     }
 
     g_key_file_free(keyfile);
@@ -787,7 +794,7 @@ static gboolean sond_server_prepare(SondServer*server,
         return FALSE;
     }
 
-    gboolean suc = !mysql_real_connect(server->db_conn, server->db_host,
+    gboolean suc = (gboolean) mysql_real_connect(server->db_conn, server->db_host,
     		server->db_user, server->db_password, server->db_name, 0, NULL, 0);
 
     // Passwort überschreiben
@@ -797,6 +804,13 @@ static gboolean sond_server_prepare(SondServer*server,
 	if (!suc) {
 		g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
 			   "MySQL connection failed: %s", mysql_error(server->db_conn));
+        return FALSE;
+    }
+
+    /* Graph-Datenbank Setup - Tabellen und Prozeduren erstellen */
+    LOG_INFO("Initializing graph database schema...\n");
+    if (!sond_graph_db_setup(server->db_conn, error)) {
+        g_prefix_error(error, "Graph DB setup failed: ");
         return FALSE;
     }
 
@@ -821,7 +835,7 @@ static gboolean sond_server_prepare(SondServer*server,
     soup_server_add_handler(server->soup_server, "/edge/save",
                            handle_edge_save, server, NULL);
 
-    sond_server_seafile_register_handlers(server);
+//    sond_server_seafile_register_handlers(server);
 
     return TRUE;
 }
@@ -857,17 +871,12 @@ static SondServer *server_instance = NULL;
  *
  * Behandelt SIGINT (Ctrl+C) und SIGTERM für sauberes Beenden.
  */
-static void signal_handler(int signum) {
+static gboolean signal_handler(gpointer user_data) {
     g_print("\n");
-
-    if (signum == SIGINT) {
-        LOG_ERROR("Received SIGINT (Ctrl+C), shutting down...\n");
-    } else if (signum == SIGTERM) {
-        LOG_ERROR("Received SIGTERM, shutting down...\n");
-    }
+    LOG_ERROR("Received signal, shutting down...\n");
 
     /* Server stoppen */
-    if (server_instance && sond_server_is_running(server_instance)) {
+    if (server_instance && server_instance->running) {
         sond_server_stop(server_instance);
     }
 
@@ -875,24 +884,16 @@ static void signal_handler(int signum) {
     if (main_loop && g_main_loop_is_running(main_loop)) {
         g_main_loop_quit(main_loop);
     }
-}
 
-/**
- * setup_signal_handlers:
- *
- * Registriert Signal-Handler für sauberes Herunterfahren.
- */
-static void setup_signal_handlers(void) {
-    signal(SIGINT, signal_handler);
-    signal(SIGTERM, signal_handler);
+    return G_SOURCE_REMOVE;
 }
-#endif // __linux__
+#endif
 
 int main(int argc, char *argv[]) {
     GError *error = NULL;
     SondServer *server = NULL;
     GMainLoop *loop = NULL;
-    gchar *config_file = "/etc/sond_server/sond_server.conf";
+    gchar *config_file = "/mnt/c/msys64/home/pkrieger/eclipse-workspace/sond/SondServer.conf";
 
     logging_init("sond_server");
 
@@ -906,6 +907,7 @@ int main(int argc, char *argv[]) {
 
     /* Server erstellen */
     server = g_object_new(SOND_TYPE_SERVER, NULL);
+    server_instance = server;
 
     /* Config laden */
     if (!sond_server_prepare(server, config_file, &error)) {
@@ -930,8 +932,9 @@ int main(int argc, char *argv[]) {
 
 #ifdef __linux__
     /* Signal Handler für sauberes Shutdown */
-    g_unix_signal_add(SIGINT, (GSourceFunc)g_main_loop_quit, loop);
-    g_unix_signal_add(SIGTERM, (GSourceFunc)g_main_loop_quit, loop);
+    main_loop = loop;
+    g_unix_signal_add(SIGINT, signal_handler, NULL);
+    g_unix_signal_add(SIGTERM, signal_handler, NULL);
 #endif // __linux__
 
     g_main_loop_run(loop);

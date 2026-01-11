@@ -1,0 +1,825 @@
+/*
+ sond (sond_module_akte.c) - Akten, Beweisstücke, Unterlagen
+ Copyright (C) 2026 pelo america
+
+ This program is free software: you can redistribute it and/or modify
+ it under the terms of the GNU Affero General Public License as
+ published by the Free Software Foundation, either version 3 of the
+ License, or (at your option) any later version.
+
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU Affero General Public License for more details.
+
+ You should have received a copy of the GNU Affero General Public License
+ along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+#include "sond_module_akte.h"
+#include "../../sond_log_and_error.h"
+#include "../../sond_server/sond_graph/sond_graph_node.h"
+#include "../../sond_server/sond_graph/sond_graph_property.h"
+#include "../../sond_server/sond_graph/sond_graph_db.h"
+
+#include <libsoup/soup.h>
+#include <json-glib/json-glib.h>
+
+typedef enum {
+    AKTE_STATE_INITIAL,       /* Nur "Neue Akte" + RegNr Entry aktiv */
+    AKTE_STATE_CREATING,      /* Neue Akte wird erstellt (Entry insensitiv) */
+    AKTE_STATE_EDITING,       /* Bestehende/Entry-Akte wird bearbeitet */
+    AKTE_STATE_READONLY       /* Akte ist gelockt von anderem User */
+} AkteState;
+
+typedef struct {
+    SondClient *client;
+    SondGraphNode *current_node;
+    AkteState state;
+    gboolean is_new_from_entry;    /* TRUE wenn über Entry angelegt */
+    gchar *locked_by_user;         /* NULL oder Username */
+    
+    /* UI-Elemente */
+    GtkWidget *main_widget;
+    GtkWidget *regnr_entry;        /* Format: "23/26" */
+    GtkWidget *entry_kurzbezeichnung;
+    GtkWidget *textview_gegenstand;
+    
+    GtkWidget *btn_neue_akte;
+    GtkWidget *btn_ok;
+    GtkWidget *btn_speichern;
+    GtkWidget *btn_abbrechen;
+    
+    GtkWidget *akte_fields_box;    /* Container für Akte-Felder */
+} SondModuleAktePrivate;
+
+/* Forward declarations */
+static void set_akte_state(SondModuleAktePrivate *priv, AkteState new_state);
+static void update_ui_from_node(SondModuleAktePrivate *priv);
+static void clear_akte_fields(SondModuleAktePrivate *priv);
+
+/* ========================================================================
+ * UI State Management
+ * ======================================================================== */
+
+static void set_akte_state(SondModuleAktePrivate *priv, AkteState new_state) {
+    priv->state = new_state;
+
+    switch (new_state) {
+        case AKTE_STATE_INITIAL:
+            /* Nur "Neue Akte" + Entry aktiv */
+            gtk_widget_set_sensitive(priv->regnr_entry, TRUE);
+            gtk_widget_set_sensitive(priv->btn_neue_akte, TRUE);
+            gtk_widget_set_sensitive(priv->akte_fields_box, FALSE);
+            gtk_widget_set_sensitive(priv->btn_ok, FALSE);
+            gtk_widget_set_sensitive(priv->btn_speichern, FALSE);
+            gtk_widget_set_sensitive(priv->btn_abbrechen, TRUE);
+            break;
+
+        case AKTE_STATE_CREATING:
+            /* Entry insensitiv, Felder editierbar */
+            gtk_widget_set_sensitive(priv->regnr_entry, FALSE);
+            gtk_widget_set_sensitive(priv->btn_neue_akte, FALSE);
+            gtk_widget_set_sensitive(priv->akte_fields_box, TRUE);
+            gtk_widget_set_sensitive(priv->btn_ok, TRUE);
+            gtk_widget_set_sensitive(priv->btn_speichern, TRUE);
+            gtk_widget_set_sensitive(priv->btn_abbrechen, TRUE);
+            break;
+
+        case AKTE_STATE_EDITING:
+            /* Alles editierbar außer Entry */
+            gtk_widget_set_sensitive(priv->regnr_entry, FALSE);
+            gtk_widget_set_sensitive(priv->btn_neue_akte, FALSE);
+            gtk_widget_set_sensitive(priv->akte_fields_box, TRUE);
+            gtk_widget_set_sensitive(priv->btn_ok, TRUE);
+            gtk_widget_set_sensitive(priv->btn_speichern, TRUE);
+            gtk_widget_set_sensitive(priv->btn_abbrechen, TRUE);
+            break;
+
+        case AKTE_STATE_READONLY:
+            /* Nur Ansicht */
+            gtk_widget_set_sensitive(priv->regnr_entry, FALSE);
+            gtk_widget_set_sensitive(priv->btn_neue_akte, FALSE);
+            gtk_widget_set_sensitive(priv->akte_fields_box, FALSE);
+            gtk_widget_set_sensitive(priv->btn_ok, TRUE);
+            gtk_widget_set_sensitive(priv->btn_speichern, FALSE);
+            gtk_widget_set_sensitive(priv->btn_abbrechen, TRUE);
+            break;
+    }
+}
+
+static void clear_akte_fields(SondModuleAktePrivate *priv) {
+    gtk_editable_set_text(GTK_EDITABLE(priv->regnr_entry), "");
+    gtk_editable_set_text(GTK_EDITABLE(priv->entry_kurzbezeichnung), "");
+    
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(priv->textview_gegenstand));
+    gtk_text_buffer_set_text(buffer, "", -1);
+}
+
+/* ========================================================================
+ * Helper Functions
+ * ======================================================================== */
+
+static void show_error_dialog(GtkWidget *parent, const gchar *title, const gchar *message) {
+    LOG_ERROR("%s: %s\n", title, message);
+    
+    GtkAlertDialog *dialog = gtk_alert_dialog_new("%s", title);
+    gtk_alert_dialog_set_detail(dialog, message);
+    gtk_alert_dialog_set_modal(dialog, TRUE);
+    
+    gtk_alert_dialog_show(dialog, GTK_WINDOW(gtk_widget_get_root(parent)));
+    g_object_unref(dialog);
+}
+
+static void show_info_dialog(GtkWidget *parent, const gchar *title, const gchar *message) {
+    LOG_INFO("%s: %s\n", title, message);
+    
+    GtkAlertDialog *dialog = gtk_alert_dialog_new("%s", title);
+    gtk_alert_dialog_set_detail(dialog, message);
+    gtk_alert_dialog_set_modal(dialog, TRUE);
+    
+    gtk_alert_dialog_show(dialog, GTK_WINDOW(gtk_widget_get_root(parent)));
+    g_object_unref(dialog);
+}
+
+static gboolean parse_regnr(const gchar *regnr_str, guint *lfd_nr, guint *year) {
+    if (!regnr_str || strlen(regnr_str) == 0) {
+        return FALSE;
+    }
+    
+    gchar **parts = g_strsplit(regnr_str, "/", 2);
+    if (g_strv_length(parts) != 2) {
+        g_strfreev(parts);
+        return FALSE;
+    }
+    
+    *lfd_nr = (guint)g_ascii_strtoull(parts[0], NULL, 10);
+    *year = (guint)g_ascii_strtoull(parts[1], NULL, 10);
+    
+    if (*year < 100) {
+        *year += 2000;
+    }
+    
+    g_strfreev(parts);
+    return (*lfd_nr > 0 && *year >= 2000);
+}
+
+static gchar* format_regnr(guint lfd_nr, guint year) {
+    guint short_year = year % 100;
+    return g_strdup_printf("%u/%02u", lfd_nr, short_year);
+}
+
+static void update_ui_from_node(SondModuleAktePrivate *priv) {
+    if (!priv->current_node) {
+        clear_akte_fields(priv);
+        return;
+    }
+    
+    /* RegNr extrahieren */
+    GPtrArray *regnr_values = sond_graph_node_get_property(priv->current_node, "regnr");
+    if (regnr_values && regnr_values->len == 2) {
+        guint lfd = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 0), NULL, 10);
+        guint year = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 1), NULL, 10);
+        gchar *regnr_display = format_regnr(lfd, year);
+        gtk_editable_set_text(GTK_EDITABLE(priv->regnr_entry), regnr_display);
+        g_free(regnr_display);
+        g_ptr_array_unref(regnr_values);
+    }
+    
+    /* Kurzbezeichnung */
+    gchar *kurzbezeichnung = sond_graph_node_get_property_string(priv->current_node, "kurzbezeichnung");
+    if (kurzbezeichnung) {
+        gtk_editable_set_text(GTK_EDITABLE(priv->entry_kurzbezeichnung), kurzbezeichnung);
+        g_free(kurzbezeichnung);
+    }
+    
+    /* Gegenstand */
+    gchar *gegenstand = sond_graph_node_get_property_string(priv->current_node, "gegenstand");
+    if (gegenstand) {
+        GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(priv->textview_gegenstand));
+        gtk_text_buffer_set_text(buffer, gegenstand, -1);
+        g_free(gegenstand);
+    }
+}
+
+/* ========================================================================
+ * Server Communication
+ * ======================================================================== */
+
+static SondGraphNode* search_node_by_regnr(SondModuleAktePrivate *priv, guint lfd_nr, guint year, GError **error) {
+    /* SearchCriteria erstellen */
+    SondGraphNodeSearchCriteria *criteria = sond_graph_node_search_criteria_new();
+    criteria->label = g_strdup("Akte");
+    
+    gchar *year_str = g_strdup_printf("%u", year);
+    sond_graph_node_search_criteria_add_property_filter(criteria, "regnr", year_str);
+    g_free(year_str);
+    
+    criteria->limit = 100;
+    // Direkt VOR: gchar *criteria_json = sond_graph_node_search_criteria_to_json(criteria);
+    LOG_INFO("DEBUG Criteria: label='%s', filters=%p (len=%u), limit=%u\n",
+             criteria->label ? criteria->label : "NULL",
+             criteria->property_filters,
+             criteria->property_filters ? criteria->property_filters->len : 0,
+             criteria->limit);
+    gchar *criteria_json = sond_graph_node_search_criteria_to_json(criteria);
+    LOG_INFO("Criteria JSON (%zu bytes):\n%s\n", strlen(criteria_json), criteria_json);
+    sond_graph_node_search_criteria_free(criteria);
+    
+    /* HTTP-Request */
+    gchar *url = g_strdup_printf("%s/node/search", sond_client_get_server_url(priv->client));
+    
+    SoupSession *session = soup_session_new();
+    SoupMessage *msg = soup_message_new("POST", url);
+    g_free(url);
+    
+    soup_message_set_request_body_from_bytes(msg, "application/json",
+        g_bytes_new_take(criteria_json, strlen(criteria_json)));
+    
+    GBytes *response = soup_session_send_and_read(session, msg, NULL, error);
+    
+    if (!response) {
+        g_object_unref(msg);
+        g_object_unref(session);
+        return NULL;
+    }
+    
+    guint status = soup_message_get_status(msg);
+    if (status != 200) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "Server gab Status %u zurück", status);
+        g_bytes_unref(response);
+        g_object_unref(msg);
+        g_object_unref(session);
+        return NULL;
+    }
+    
+    /* Response parsen */
+    gsize size;
+    const gchar *data = g_bytes_get_data(response, &size);
+    
+    JsonParser *parser = json_parser_new();
+    SondGraphNode *result_node = NULL;
+    
+    if (json_parser_load_from_data(parser, data, size, error)) {
+        JsonNode *root = json_parser_get_root(parser);
+        JsonObject *obj = json_node_get_object(root);
+        
+        if (json_object_has_member(obj, "data")) {
+            JsonArray *nodes_array = json_object_get_array_member(obj, "data");
+            
+            /* Durch Ergebnisse iterieren */
+            for (guint i = 0; i < json_array_get_length(nodes_array); i++) {
+                JsonNode *node_json = json_array_get_element(nodes_array, i);
+                
+                JsonGenerator *gen = json_generator_new();
+                json_generator_set_root(gen, node_json);
+                gchar *node_str = json_generator_to_data(gen, NULL);
+                
+                SondGraphNode *node = sond_graph_node_from_json(node_str, NULL);
+                g_free(node_str);
+                g_object_unref(gen);
+                
+                if (node) {
+                    GPtrArray *regnr_values = sond_graph_node_get_property(node, "regnr");
+                    
+                    if (regnr_values && regnr_values->len == 2) {
+                        guint node_lfd = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 0), NULL, 10);
+                        guint node_year = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 1), NULL, 10);
+                        
+                        if (node_lfd == lfd_nr && node_year == year) {
+                            result_node = node;
+                            g_ptr_array_unref(regnr_values);
+                            break;
+                        }
+                        
+                        g_ptr_array_unref(regnr_values);
+                    }
+                    
+                    if (!result_node) {
+                        g_object_unref(node);
+                    }
+                }
+            }
+            
+            if (!result_node) {
+                g_set_error(error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND,
+                           "Akte mit RegNr %u/%u nicht gefunden", lfd_nr, year);
+            }
+        }
+    }
+    
+    g_object_unref(parser);
+    g_bytes_unref(response);
+    g_object_unref(msg);
+    g_object_unref(session);
+    
+    return result_node;
+}
+
+static gboolean get_next_regnr(SondModuleAktePrivate *priv, guint *lfd_nr, guint *year, GError **error) {
+    GDateTime *now = g_date_time_new_now_local();
+    *year = g_date_time_get_year(now);
+    g_date_time_unref(now);
+    
+    SondGraphNodeSearchCriteria *criteria = sond_graph_node_search_criteria_new();
+    criteria->label = g_strdup("Akte");
+    
+    gchar *year_str = g_strdup_printf("%u", *year);
+    sond_graph_node_search_criteria_add_property_filter(criteria, "regnr", year_str);
+    g_free(year_str);
+    
+    criteria->limit = 0;
+    
+    gchar *criteria_json = sond_graph_node_search_criteria_to_json(criteria);
+    sond_graph_node_search_criteria_free(criteria);
+    
+    gchar *url = g_strdup_printf("%s/node/search", sond_client_get_server_url(priv->client));
+    
+    SoupSession *session = soup_session_new();
+    SoupMessage *msg = soup_message_new("POST", url);
+    g_free(url);
+    
+    soup_message_set_request_body_from_bytes(msg, "application/json",
+        g_bytes_new_take(criteria_json, strlen(criteria_json)));
+    
+    GBytes *response = soup_session_send_and_read(session, msg, NULL, error);
+    
+    if (!response) {
+        g_object_unref(msg);
+        g_object_unref(session);
+        return FALSE;
+    }
+    
+    guint status = soup_message_get_status(msg);
+    if (status != 200) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "Server gab Status %u zurück", status);
+        g_bytes_unref(response);
+        g_object_unref(msg);
+        g_object_unref(session);
+        return FALSE;
+    }
+    
+    gsize size;
+    const gchar *data = g_bytes_get_data(response, &size);
+    
+    JsonParser *parser = json_parser_new();
+    guint max_lfd_nr = 0;
+    
+    if (json_parser_load_from_data(parser, data, size, NULL)) {
+        JsonNode *root = json_parser_get_root(parser);
+        JsonObject *obj = json_node_get_object(root);
+        
+        if (json_object_has_member(obj, "data")) {
+            JsonArray *nodes_array = json_object_get_array_member(obj, "data");
+            
+            for (guint i = 0; i < json_array_get_length(nodes_array); i++) {
+                JsonNode *node_json = json_array_get_element(nodes_array, i);
+                
+                JsonGenerator *gen = json_generator_new();
+                json_generator_set_root(gen, node_json);
+                gchar *node_str = json_generator_to_data(gen, NULL);
+                
+                SondGraphNode *node = sond_graph_node_from_json(node_str, NULL);
+                g_free(node_str);
+                g_object_unref(gen);
+                
+                if (node) {
+                    GPtrArray *regnr_values = sond_graph_node_get_property(node, "regnr");
+                    
+                    if (regnr_values && regnr_values->len == 2) {
+                        guint node_lfd = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 0), NULL, 10);
+                        guint node_year = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 1), NULL, 10);
+                        
+                        if (node_year == *year && node_lfd > max_lfd_nr) {
+                            max_lfd_nr = node_lfd;
+                        }
+                        
+                        g_ptr_array_unref(regnr_values);
+                    }
+                    
+                    g_object_unref(node);
+                }
+            }
+        }
+    }
+    
+    g_object_unref(parser);
+    g_bytes_unref(response);
+    g_object_unref(msg);
+    g_object_unref(session);
+    
+    *lfd_nr = max_lfd_nr + 1;
+    LOG_INFO("Nächste RegNr: %u/%u\n", *lfd_nr, *year);
+    
+    return TRUE;
+}
+
+static gboolean save_node(SondModuleAktePrivate *priv, GError **error) {
+    if (!priv->current_node) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
+                   "Kein Node zum Speichern vorhanden");
+        return FALSE;
+    }
+    
+    sond_graph_node_set_label(priv->current_node, "Akte");
+    
+    /* Node direkt zu JSON serialisieren - wie der Server es macht */
+    gchar *node_json = sond_graph_node_to_json(priv->current_node);
+    
+    if (!node_json) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "Konnte Node nicht serialisieren");
+        return FALSE;
+    }
+    
+    LOG_INFO("Sende Node-JSON (%zu bytes):\n%s\n", strlen(node_json), node_json);
+    
+    /* HTTP-Request */
+    gchar *url = g_strdup_printf("%s/node/save", sond_client_get_server_url(priv->client));
+    
+    SoupSession *session = soup_session_new();
+    SoupMessage *msg = soup_message_new("POST", url);
+    g_free(url);
+    
+    soup_message_set_request_body_from_bytes(msg, "application/json",
+        g_bytes_new_take(node_json, strlen(node_json)));
+    
+    GBytes *response = soup_session_send_and_read(session, msg, NULL, error);
+    
+    if (!response) {
+        g_object_unref(msg);
+        g_object_unref(session);
+        return FALSE;
+    }
+    
+    guint status = soup_message_get_status(msg);
+    if (status != 200) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "Server gab Status %u zurück", status);
+        g_bytes_unref(response);
+        g_object_unref(msg);
+        g_object_unref(session);
+        return FALSE;
+    }
+    
+    /* Gespeicherten Node zurückladen */
+    gsize size;
+    const gchar *data = g_bytes_get_data(response, &size);
+    
+    JsonParser *parser = json_parser_new();
+    if (json_parser_load_from_data(parser, data, size, NULL)) {
+        JsonNode *root_node = json_parser_get_root(parser);
+        JsonObject *obj = json_node_get_object(root_node);
+        
+        if (json_object_has_member(obj, "data")) {
+            JsonNode *data_node = json_object_get_member(obj, "data");
+            JsonGenerator *data_gen = json_generator_new();
+            json_generator_set_root(data_gen, data_node);
+            gchar *saved_json = json_generator_to_data(data_gen, NULL);
+            
+            g_object_unref(priv->current_node);
+            priv->current_node = sond_graph_node_from_json(saved_json, NULL);
+            
+            LOG_INFO("Node mit ID %" G_GINT64_FORMAT " gespeichert\n", 
+                    sond_graph_node_get_id(priv->current_node));
+            
+            g_free(saved_json);
+            g_object_unref(data_gen);
+        }
+    }
+    
+    g_object_unref(parser);
+    g_bytes_unref(response);
+    g_object_unref(msg);
+    g_object_unref(session);
+    
+    return TRUE;
+}
+
+static gboolean delete_node(SondModuleAktePrivate *priv, gint64 node_id, GError **error) {
+    gchar *url = g_strdup_printf("%s/node/delete/%" G_GINT64_FORMAT, 
+                                sond_client_get_server_url(priv->client),
+                                node_id);
+    
+    SoupSession *session = soup_session_new();
+    SoupMessage *msg = soup_message_new("DELETE", url);
+    g_free(url);
+    
+    GBytes *response = soup_session_send_and_read(session, msg, NULL, error);
+
+    if (!response) {
+        g_object_unref(msg);
+        g_object_unref(session);
+        return FALSE;
+    }
+
+    guint status = soup_message_get_status(msg);
+    gboolean success = (status == 200);
+    
+    if (!success) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "Server gab Status %u zurück", status);
+    }
+
+    g_bytes_unref(response);
+    g_object_unref(msg);
+    g_object_unref(session);
+    
+    return success;
+}
+
+/* ========================================================================
+ * UI Event Handlers
+ * ======================================================================== */
+
+static void on_regnr_entry_activate(GtkEntry *entry, SondModuleAktePrivate *priv) {
+    const gchar *regnr_text = gtk_editable_get_text(GTK_EDITABLE(entry));
+    
+    guint lfd_nr, year;
+    if (!parse_regnr(regnr_text, &lfd_nr, &year)) {
+        show_error_dialog(priv->main_widget, "Ungültiges Format",
+                         "Bitte RegNr im Format '23/26' eingeben.");
+        return;
+    }
+    
+    LOG_INFO("Suche Akte %u/%u...\n", lfd_nr, year);
+    
+    GError *error = NULL;
+    SondGraphNode *node = search_node_by_regnr(priv, lfd_nr, year, &error);
+    
+    if (node) {
+        /* Akte existiert - TODO: Lock prüfen und anfordern */
+        if (priv->current_node) {
+            g_object_unref(priv->current_node);
+        }
+        priv->current_node = node;
+        priv->is_new_from_entry = FALSE;
+        
+        update_ui_from_node(priv);
+        set_akte_state(priv, AKTE_STATE_EDITING);
+        
+        LOG_INFO("Akte %u/%u geladen\n", lfd_nr, year);
+        return;
+    }
+    
+    /* Akte existiert nicht */
+    if (error && error->code != G_IO_ERROR_NOT_FOUND) {
+        show_error_dialog(priv->main_widget, "Fehler", error->message);
+        g_error_free(error);
+        return;
+    }
+    
+    if (error) {
+        g_error_free(error);
+    }
+    
+    /* Bestätigung für neue Akte */
+    // TODO: Hier sollte ein richtiger Dialog kommen
+    // Für jetzt: Einfach anlegen
+    
+    if (priv->current_node) {
+        g_object_unref(priv->current_node);
+    }
+    
+    priv->current_node = sond_graph_node_new();
+    sond_graph_node_set_label(priv->current_node, "Akte");
+    
+    gchar *lfd_str = g_strdup_printf("%u", lfd_nr);
+    gchar *year_str = g_strdup_printf("%u", year);
+    const gchar *values[] = {lfd_str, year_str};
+    sond_graph_node_set_property(priv->current_node, "regnr", values, 2);
+    g_free(lfd_str);
+    g_free(year_str);
+    
+    priv->is_new_from_entry = TRUE;
+    
+    update_ui_from_node(priv);
+    set_akte_state(priv, AKTE_STATE_EDITING);
+    
+    LOG_INFO("Neue Akte mit RegNr %u/%u (manuell) vorbereitet\n", lfd_nr, year);
+}
+
+static void on_neue_akte_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
+    LOG_INFO("Erstelle neue Akte mit automatischer RegNr...\n");
+    
+    guint lfd_nr, year;
+    GError *error = NULL;
+    
+    if (!get_next_regnr(priv, &lfd_nr, &year, &error)) {
+        gchar *msg = g_strdup_printf("Fehler: %s", error ? error->message : "Unbekannter Fehler");
+        show_error_dialog(priv->main_widget, "RegNr-Ermittlung fehlgeschlagen", msg);
+        g_free(msg);
+        if (error) g_error_free(error);
+        return;
+    }
+    
+    if (priv->current_node) {
+        g_object_unref(priv->current_node);
+    }
+    
+    priv->current_node = sond_graph_node_new();
+    sond_graph_node_set_label(priv->current_node, "Akte");
+    
+    gchar *lfd_str = g_strdup_printf("%u", lfd_nr);
+    gchar *year_str = g_strdup_printf("%u", year);
+    const gchar *values[] = {lfd_str, year_str};
+    sond_graph_node_set_property(priv->current_node, "regnr", values, 2);
+    g_free(lfd_str);
+    g_free(year_str);
+    
+    priv->is_new_from_entry = FALSE;
+    
+    update_ui_from_node(priv);
+    set_akte_state(priv, AKTE_STATE_CREATING);
+    
+    LOG_INFO("Neue Akte mit RegNr %u/%u erstellt\n", lfd_nr, year);
+}
+
+static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
+    if (!priv->current_node) {
+        show_error_dialog(priv->main_widget, "Nichts zu speichern",
+                         "Bitte erst eine Akte laden oder neu erstellen.");
+        return;
+    }
+    
+    /* Felder in Node übernehmen */
+    const gchar *kurzbezeichnung = gtk_editable_get_text(GTK_EDITABLE(priv->entry_kurzbezeichnung));
+    if (kurzbezeichnung && strlen(kurzbezeichnung) > 0) {
+        sond_graph_node_set_property_string(priv->current_node, "kurzbezeichnung", kurzbezeichnung);
+    }
+    
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(priv->textview_gegenstand));
+    GtkTextIter start, end;
+    gtk_text_buffer_get_bounds(buffer, &start, &end);
+    gchar *gegenstand = gtk_text_buffer_get_text(buffer, &start, &end, FALSE);
+    if (gegenstand && strlen(gegenstand) > 0) {
+        sond_graph_node_set_property_string(priv->current_node, "gegenstand", gegenstand);
+    }
+    g_free(gegenstand);
+    
+    /* Speichern */
+    GError *error = NULL;
+    if (save_node(priv, &error)) {
+        priv->is_new_from_entry = FALSE; /* Nach Speichern nicht mehr löschen */
+        show_info_dialog(priv->main_widget, "Gespeichert", "Akte wurde erfolgreich gespeichert.");
+    } else {
+        gchar *msg = g_strdup_printf("Fehler: %s", error ? error->message : "Unbekannt");
+        show_error_dialog(priv->main_widget, "Speichern fehlgeschlagen", msg);
+        g_free(msg);
+        if (error) g_error_free(error);
+    }
+}
+
+static void on_ok_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
+    /* Erst speichern */
+    on_speichern_clicked(button, priv);
+    
+    /* Dann zurücksetzen */
+    if (priv->current_node) {
+        g_object_unref(priv->current_node);
+        priv->current_node = NULL;
+    }
+    
+    priv->is_new_from_entry = FALSE;
+    g_free(priv->locked_by_user);
+    priv->locked_by_user = NULL;
+    
+    clear_akte_fields(priv);
+    set_akte_state(priv, AKTE_STATE_INITIAL);
+}
+
+static void on_abbrechen_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
+    /* Wenn über Entry neu angelegt und noch nicht gespeichert: Löschen */
+    if (priv->is_new_from_entry && priv->current_node && sond_graph_node_get_id(priv->current_node) > 0) {
+        gint64 node_id = sond_graph_node_get_id(priv->current_node);
+        LOG_INFO("Lösche nicht gespeicherte Entry-Akte (ID %" G_GINT64_FORMAT ")\n", node_id);
+        
+        GError *error = NULL;
+        if (!delete_node(priv, node_id, &error)) {
+            LOG_ERROR("Fehler beim Löschen der Akte: %s\n", error ? error->message : "Unbekannt");
+            if (error) g_error_free(error);
+        }
+    }
+    
+    /* TODO: Unlock */
+    
+    /* Zurücksetzen */
+    if (priv->current_node) {
+        g_object_unref(priv->current_node);
+        priv->current_node = NULL;
+    }
+    
+    priv->is_new_from_entry = FALSE;
+    g_free(priv->locked_by_user);
+    priv->locked_by_user = NULL;
+    
+    clear_akte_fields(priv);
+    set_akte_state(priv, AKTE_STATE_INITIAL);
+}
+
+/* ========================================================================
+ * Public API
+ * ======================================================================== */
+
+GtkWidget* sond_module_akte_new(SondClient *client) {
+    SondModuleAktePrivate *priv = g_new0(SondModuleAktePrivate, 1);
+    priv->client = g_object_ref(client);
+    priv->current_node = NULL;
+    priv->state = AKTE_STATE_INITIAL;
+    priv->is_new_from_entry = FALSE;
+    priv->locked_by_user = NULL;
+
+    /* Haupt-Container */
+    GtkWidget *main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_widget_set_margin_start(main_box, 20);
+    gtk_widget_set_margin_end(main_box, 20);
+    gtk_widget_set_margin_top(main_box, 20);
+    gtk_widget_set_margin_bottom(main_box, 20);
+    
+    priv->main_widget = main_box;
+
+    /* Top-Zeile: RegNr + Neue Akte */
+    GtkWidget *top_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+    gtk_box_append(GTK_BOX(main_box), top_box);
+
+    GtkWidget *regnr_label = gtk_label_new("Registernummer:");
+    gtk_box_append(GTK_BOX(top_box), regnr_label);
+
+    priv->regnr_entry = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(priv->regnr_entry), "23/26");
+    gtk_widget_set_hexpand(priv->regnr_entry, TRUE);
+    g_signal_connect(priv->regnr_entry, "activate", G_CALLBACK(on_regnr_entry_activate), priv);
+    gtk_box_append(GTK_BOX(top_box), priv->regnr_entry);
+
+    priv->btn_neue_akte = gtk_button_new_with_label("Neue Akte");
+    g_signal_connect(priv->btn_neue_akte, "clicked", G_CALLBACK(on_neue_akte_clicked), priv);
+    gtk_box_append(GTK_BOX(top_box), priv->btn_neue_akte);
+
+    /* Separator */
+    GtkWidget *separator = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
+    gtk_box_append(GTK_BOX(main_box), separator);
+
+    /* Akte-Felder Container */
+    priv->akte_fields_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_box_append(GTK_BOX(main_box), priv->akte_fields_box);
+
+    /* Grid */
+    GtkWidget *grid = gtk_grid_new();
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 10);
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 10);
+    gtk_box_append(GTK_BOX(priv->akte_fields_box), grid);
+
+    /* Kurzbezeichnung */
+    GtkWidget *label_kurz = gtk_label_new("Kurzbezeichnung:");
+    gtk_widget_set_halign(label_kurz, GTK_ALIGN_END);
+    gtk_grid_attach(GTK_GRID(grid), label_kurz, 0, 0, 1, 1);
+
+    priv->entry_kurzbezeichnung = gtk_entry_new();
+    gtk_widget_set_hexpand(priv->entry_kurzbezeichnung, TRUE);
+    gtk_grid_attach(GTK_GRID(grid), priv->entry_kurzbezeichnung, 1, 0, 1, 1);
+
+    /* Gegenstand */
+    GtkWidget *label_gegenstand = gtk_label_new("Gegenstand:");
+    gtk_widget_set_halign(label_gegenstand, GTK_ALIGN_END);
+    gtk_widget_set_valign(label_gegenstand, GTK_ALIGN_START);
+    gtk_grid_attach(GTK_GRID(grid), label_gegenstand, 0, 1, 1, 1);
+
+    priv->textview_gegenstand = gtk_text_view_new();
+    gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(priv->textview_gegenstand), GTK_WRAP_WORD);
+    GtkWidget *scroll = gtk_scrolled_window_new();
+    gtk_widget_set_vexpand(scroll, TRUE);
+    gtk_widget_set_hexpand(scroll, TRUE);
+    gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(scroll), 150);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), priv->textview_gegenstand);
+    gtk_grid_attach(GTK_GRID(grid), scroll, 1, 1, 1, 1);
+
+    /* Separator */
+    GtkWidget *separator2 = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
+    gtk_box_append(GTK_BOX(main_box), separator2);
+
+    /* Button-Zeile */
+    GtkWidget *button_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+    gtk_box_append(GTK_BOX(main_box), button_box);
+
+    priv->btn_ok = gtk_button_new_with_label("Ok");
+    g_signal_connect(priv->btn_ok, "clicked", G_CALLBACK(on_ok_clicked), priv);
+    gtk_box_append(GTK_BOX(button_box), priv->btn_ok);
+
+    priv->btn_speichern = gtk_button_new_with_label("Speichern");
+    g_signal_connect(priv->btn_speichern, "clicked", G_CALLBACK(on_speichern_clicked), priv);
+    gtk_box_append(GTK_BOX(button_box), priv->btn_speichern);
+
+    priv->btn_abbrechen = gtk_button_new_with_label("Abbrechen");
+    g_signal_connect(priv->btn_abbrechen, "clicked", G_CALLBACK(on_abbrechen_clicked), priv);
+    gtk_box_append(GTK_BOX(button_box), priv->btn_abbrechen);
+
+    /* Private Daten am Widget speichern */
+    g_object_set_data_full(G_OBJECT(main_box), "priv", priv, g_free);
+
+    /* Initial State setzen */
+    set_akte_state(priv, AKTE_STATE_INITIAL);
+
+    return main_box;
+}

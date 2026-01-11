@@ -1679,11 +1679,12 @@ static void sond_file_part_pdf_init(SondFilePartPDF* self) {
 
 static fz_stream* sond_file_part_pdf_lookup_embedded_file(fz_context* ctx,
 		SondFilePartPDF* sfp_pdf, gchar const* path, GError** error) {
-	pdf_document* doc = NULL;
 	Lookup lookup = { 0 };
 	gint rc = 0;
+	pdf_document* doc = NULL;
 
-	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, FALSE, error);
+	doc = sond_file_part_pdf_open_document(ctx,
+			sfp_pdf, FALSE, error);
 	if (!doc)
 		ERROR_Z_VAL(NULL)
 

@@ -365,7 +365,6 @@ void sond_graph_edge_set_properties(SondGraphEdge *edge, GPtrArray *properties) 
 
         GPtrArray *values = sond_graph_property_get_values(prop);
         if (!values || values->len == 0) {
-            if (values) g_ptr_array_unref(values);
             continue;
         }
 
@@ -373,8 +372,6 @@ void sond_graph_edge_set_properties(SondGraphEdge *edge, GPtrArray *properties) 
         sond_graph_property_list_set(edge->properties, key,
                                       (const gchar **)values->pdata,
                                       values->len);
-
-        g_ptr_array_unref(values);
 
         /* TODO: Sub-Properties kopieren wenn nötig */
         GPtrArray *sub_props = sond_graph_property_get_properties(prop);

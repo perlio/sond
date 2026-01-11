@@ -592,6 +592,7 @@ SondGraphNode* sond_graph_db_load_node(MYSQL *conn, gint64 node_id, GError **err
         }
 
         sond_graph_node_add_outgoing_edge(node, edge);
+        g_object_unref(edge);  // Ownership wurde an Node übergeben
     }
 
     g_free(edge_label);

@@ -376,6 +376,7 @@ static gint sond_tvfm_item_load_fs_dir(SondTVFMItem* stvfm_item,
 	if (!ctx) {
 		if (error) *error = g_error_new(SOND_ERROR, 0,
 				"%s\nfz_context konnte nicht erzeugt werden", __func__);
+		g_dir_close(dir);
 
 		return -1;
 	}
