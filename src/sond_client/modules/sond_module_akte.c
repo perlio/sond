@@ -178,8 +178,8 @@ static void update_ui_from_node(SondModuleAktePrivate *priv) {
     /* RegNr extrahieren */
     GPtrArray *regnr_values = sond_graph_node_get_property(priv->current_node, "regnr");
     if (regnr_values && regnr_values->len == 2) {
-        guint lfd = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 0), NULL, 10);
-        guint year = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 1), NULL, 10);
+        guint year = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 0), NULL, 10);  /* Index 0 = Jahr */
+        guint lfd = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 1), NULL, 10);   /* Index 1 = lfd_nr */
         gchar *regnr_display = format_regnr(lfd, year);
         gtk_editable_set_text(GTK_EDITABLE(priv->regnr_entry), regnr_display);
         g_free(regnr_display);
@@ -297,8 +297,8 @@ static SondGraphNode* search_node_by_regnr(SondModuleAktePrivate *priv,
                     GPtrArray *regnr_values = sond_graph_node_get_property(node, "regnr");
                     
                     if (regnr_values && regnr_values->len == 2) {
-                        guint node_lfd = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 0), NULL, 10);
-                        guint node_year = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 1), NULL, 10);
+                        guint node_year = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 0), NULL, 10);  /* Index 0 = Jahr */
+                        guint node_lfd = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 1), NULL, 10);   /* Index 1 = lfd_nr */
                         
                         if (node_lfd == lfd_nr && node_year == year) {
                             result_node = node;
@@ -402,8 +402,8 @@ static gboolean get_next_regnr(SondModuleAktePrivate *priv, guint *lfd_nr, guint
                     GPtrArray *regnr_values = sond_graph_node_get_property(node, "regnr");
                     
                     if (regnr_values && regnr_values->len == 2) {
-                        guint node_lfd = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 0), NULL, 10);
-                        guint node_year = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 1), NULL, 10);
+                        guint node_year = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 0), NULL, 10);  /* Index 0 = Jahr */
+                        guint node_lfd = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 1), NULL, 10);   /* Index 1 = lfd_nr */
                         
                         if (node_year == *year && node_lfd > max_lfd_nr) {
                             max_lfd_nr = node_lfd;
@@ -601,7 +601,7 @@ static void on_regnr_entry_activate(GtkEntry *entry, SondModuleAktePrivate *priv
     
     gchar *lfd_str = g_strdup_printf("%u", lfd_nr);
     gchar *year_str = g_strdup_printf("%u", year);
-    const gchar *values[] = {lfd_str, year_str};
+    const gchar *values[] = {year_str, lfd_str};  /* Jahr ZUERST, dann lfd_nr */
     sond_graph_node_set_property(priv->current_node, "regnr", values, 2);
     g_free(lfd_str);
     g_free(year_str);
@@ -637,7 +637,7 @@ static void on_neue_akte_clicked(GtkButton *button, SondModuleAktePrivate *priv)
     
     gchar *lfd_str = g_strdup_printf("%u", lfd_nr);
     gchar *year_str = g_strdup_printf("%u", year);
-    const gchar *values[] = {lfd_str, year_str};
+    const gchar *values[] = {year_str, lfd_str};  /* Jahr ZUERST, dann lfd_nr */
     sond_graph_node_set_property(priv->current_node, "regnr", values, 2);
     g_free(lfd_str);
     g_free(year_str);

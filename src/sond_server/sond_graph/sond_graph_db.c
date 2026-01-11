@@ -1010,7 +1010,7 @@ GPtrArray* sond_graph_db_search_nodes(MYSQL *conn,
     }
 
     /* Debug */
-    g_debug("Search query: %s", query->str);
+    g_print("\n=== SEARCH QUERY ===\n%s\n===================\n", query->str);
 
     /* Query ausführen */
     if (mysql_query(conn, query->str)) {
