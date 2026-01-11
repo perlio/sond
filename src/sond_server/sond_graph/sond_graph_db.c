@@ -616,6 +616,7 @@ SondPropertyFilter* sond_property_filter_new(const gchar *key, const gchar *valu
     SondPropertyFilter *filter = g_new0(SondPropertyFilter, 1);
     filter->key = g_strdup(key);
     filter->value = g_strdup(value);
+    filter->array_index = -1;  /* -1 = beliebiges Array-Element */
     filter->path = NULL;
     return filter;
 }
@@ -626,6 +627,7 @@ SondPropertyFilter* sond_property_filter_new_with_path(const gchar *key,
     SondPropertyFilter *filter = g_new0(SondPropertyFilter, 1);
     filter->key = g_strdup(key);
     filter->value = g_strdup(value);
+    filter->array_index = -1;  /* -1 = beliebiges Array-Element */
     filter->path = g_strdup(path);
     return filter;
 }
@@ -649,6 +651,17 @@ SondEdgeFilter* sond_edge_filter_new(const gchar *edge_label,
     filter->edge_label = g_strdup(edge_label);
     filter->property_filters = g_ptr_array_new_with_free_func((GDestroyNotify)sond_property_filter_free);
     filter->target_criteria = target_criteria;
+    return filter;
+}
+
+SondPropertyFilter* sond_property_filter_new_with_index(const gchar *key,
+                                                         const gchar *value,
+                                                         gint array_index) {
+    SondPropertyFilter *filter = g_new0(SondPropertyFilter, 1);
+    filter->key = g_strdup(key);
+    filter->value = g_strdup(value);
+    filter->array_index = array_index;
+    filter->path = NULL;
     return filter;
 }
 
@@ -866,7 +879,20 @@ static void build_property_filters_sql(MYSQL *conn,
                     table_alias, escaped_key, escaped_value);
 
                 g_free(escaped_path);
+            } else if (filter->array_index >= 0) {
+                /* Spezifischer Array-Index: $[1][0] für erstes Element, $[1][1] für zweites, etc. */
+                g_string_append_printf(query,
+                    " AND EXISTS ("
+                    "   SELECT 1 FROM JSON_TABLE(%s.properties, '$[*]' COLUMNS("
+                    "     prop_key VARCHAR(255) PATH '$[0]',"
+                    "     prop_value VARCHAR(1000) PATH '$[1][%d]'"
+                    "   )) AS jt"
+                    "   WHERE jt.prop_key = '%s'"
+                    "   AND jt.prop_value = '%s'"
+                    " )",
+                    table_alias, filter->array_index, escaped_key, escaped_value);
             } else {
+                /* Beliebiges Array-Element (Standard-Verhalten mit JSON_CONTAINS) */
                 g_string_append_printf(query,
                     " AND JSON_CONTAINS(%s.properties,"
                     "   JSON_ARRAY('%s', JSON_ARRAY('%s')),"
@@ -1815,6 +1841,11 @@ static void property_filter_to_json(SondPropertyFilter *filter, JsonBuilder *bui
     json_builder_set_member_name(builder, "value");
     json_builder_add_string_value(builder, filter->value);
 
+    if (filter->array_index >= 0) {
+        json_builder_set_member_name(builder, "array_index");
+        json_builder_add_int_value(builder, filter->array_index);
+    }
+
     if (filter->path) {
         json_builder_set_member_name(builder, "path");
         json_builder_add_string_value(builder, filter->path);
@@ -1952,9 +1983,17 @@ static SondPropertyFilter* property_filter_from_json(JsonObject *obj) {
     const gchar *key = json_object_get_string_member(obj, "key");
     const gchar *value = json_object_get_string_member(obj, "value");
 
+    /* Array-Index auslesen falls vorhanden */
+    gint array_index = -1;
+    if (json_object_has_member(obj, "array_index")) {
+        array_index = json_object_get_int_member(obj, "array_index");
+    }
+
     if (json_object_has_member(obj, "path")) {
         const gchar *path = json_object_get_string_member(obj, "path");
         return sond_property_filter_new_with_path(key, value, path);
+    } else if (array_index >= 0) {
+        return sond_property_filter_new_with_index(key, value, array_index);
     } else {
         return sond_property_filter_new(key, value);
     }

@@ -206,24 +206,37 @@ static void update_ui_from_node(SondModuleAktePrivate *priv) {
  * Server Communication
  * ======================================================================== */
 
-static SondGraphNode* search_node_by_regnr(SondModuleAktePrivate *priv, guint lfd_nr, guint year, GError **error) {
-    /* SearchCriteria erstellen */
-    SondGraphNodeSearchCriteria *criteria = sond_graph_node_search_criteria_new();
-    criteria->label = g_strdup("Akte");
-    
-    gchar *year_str = g_strdup_printf("%u", year);
-    sond_graph_node_search_criteria_add_property_filter(criteria, "regnr", year_str);
-    g_free(year_str);
-    
-    criteria->limit = 100;
-    // Direkt VOR: gchar *criteria_json = sond_graph_node_search_criteria_to_json(criteria);
-    LOG_INFO("DEBUG Criteria: label='%s', filters=%p (len=%u), limit=%u\n",
-             criteria->label ? criteria->label : "NULL",
-             criteria->property_filters,
-             criteria->property_filters ? criteria->property_filters->len : 0,
-             criteria->limit);
+static SondGraphNode* search_node_by_regnr(SondModuleAktePrivate *priv,
+		guint lfd_nr, guint year, GError **error) {
+	/* Search Criteria erstellen */
+	SondGraphNodeSearchCriteria *criteria = sond_graph_node_search_criteria_new();
+	criteria->label = g_strdup("Akte");
+
+	/* Zahlen zu Strings konvertieren */
+	gchar *year_str = g_strdup_printf("%u", year);
+	gchar *lfdnr_str = g_strdup_printf("%u", lfd_nr);
+
+	/* NEU: Zwei separate Filter für Jahr und lfd. Nummer mit array_index */
+	SondPropertyFilter *jahr_filter = sond_property_filter_new_with_index(
+		"regnr",           // key
+		year_str,          // value = "2026"
+		0                  // array_index = 0 (erstes Element im Array)
+	);
+	g_ptr_array_add(criteria->property_filters, jahr_filter);
+
+	SondPropertyFilter *lfdnr_filter = sond_property_filter_new_with_index(
+		"regnr",           // key
+		lfdnr_str,         // value = "123"
+		1                  // array_index = 1 (zweites Element im Array)
+	);
+	g_ptr_array_add(criteria->property_filters, lfdnr_filter);
+
+	/* Strings freigeben */
+	g_free(year_str);
+	g_free(lfdnr_str);
+
+	criteria->limit = 100;
     gchar *criteria_json = sond_graph_node_search_criteria_to_json(criteria);
-    LOG_INFO("Criteria JSON (%zu bytes):\n%s\n", strlen(criteria_json), criteria_json);
     sond_graph_node_search_criteria_free(criteria);
     
     /* HTTP-Request */

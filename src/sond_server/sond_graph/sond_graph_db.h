@@ -98,6 +98,7 @@ typedef struct _SondPropertyFilter SondPropertyFilter;
 struct _SondPropertyFilter {
     gchar *key;       /* Property-Name */
     gchar *value;     /* Property-Wert (kann Wildcards enthalten) */
+    gint array_index; /* Array-Index: -1 = beliebig, 0+ = spezifischer Index */
     gchar *path;      /* Pfad für verschachtelte Properties (optional) */
 };
 
@@ -115,6 +116,22 @@ struct _SondPropertyFilter {
  * Returns: (transfer full): Neuer Filter
  */
 SondPropertyFilter* sond_property_filter_new(const gchar *key, const gchar *value);
+
+/**
+ * sond_property_filter_new_with_index:
+ * @key: Property-Name
+ * @value: Property-Wert
+ * @array_index: Array-Index (0 = erstes Element, 1 = zweites, etc.)
+ *
+ * Erstellt einen Filter für ein spezifisches Element im Property-Array.
+ * Nützlich für Properties wie ["regnr", ["2026", "123"]] - dann kann
+ * array_index=0 für "2026" (Jahr) und array_index=1 für "123" (lfd. Nr.) verwendet werden.
+ *
+ * Returns: (transfer full): Neuer Filter
+ */
+SondPropertyFilter* sond_property_filter_new_with_index(const gchar *key,
+                                                         const gchar *value,
+                                                         gint array_index);
 
 /**
  * sond_property_filter_new_with_path:
