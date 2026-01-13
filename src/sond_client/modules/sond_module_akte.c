@@ -37,7 +37,6 @@ typedef struct {
     SondGraphNode *current_node;
     AkteState state;
     gboolean is_new_from_entry;    /* TRUE wenn über Entry angelegt */
-    gchar *locked_by_user;         /* NULL oder Username */
     
     /* UI-Elemente */
     GtkWidget *main_widget;
@@ -111,9 +110,7 @@ static void set_akte_state(SondModuleAktePrivate *priv, AkteState new_state) {
 static void clear_akte_fields(SondModuleAktePrivate *priv) {
     gtk_editable_set_text(GTK_EDITABLE(priv->regnr_entry), "");
     gtk_editable_set_text(GTK_EDITABLE(priv->entry_kurzbezeichnung), "");
-    
-    GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(priv->textview_gegenstand));
-    gtk_text_buffer_set_text(buffer, "", -1);
+    gtk_editable_set_text(GTK_EDITABLE(priv->textview_gegenstand), "");  /* Jetzt Entry */
 }
 
 /* ========================================================================
@@ -229,8 +226,7 @@ static void update_ui_from_node(SondModuleAktePrivate *priv) {
     /* Gegenstand */
     gchar *gegenstand = sond_graph_node_get_property_string(priv->current_node, "gegenstand");
     if (gegenstand) {
-        GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(priv->textview_gegenstand));
-        gtk_text_buffer_set_text(buffer, gegenstand, -1);
+        gtk_editable_set_text(GTK_EDITABLE(priv->textview_gegenstand), gegenstand);  /* Jetzt Entry */
         g_free(gegenstand);
     }
 }
@@ -673,15 +669,37 @@ static void on_regnr_entry_activate(GtkEntry *entry, SondModuleAktePrivate *priv
     SondGraphNode *node = search_node_by_regnr(priv, lfd_nr, year, &error);
     
     if (node) {
-        /* Akte existiert - TODO: Lock prüfen und anfordern */
+        /* Akte existiert - versuche Lock zu setzen */
         if (priv->current_node) {
             g_object_unref(priv->current_node);
         }
         priv->current_node = node;
         priv->is_new_from_entry = FALSE;
         
-        update_ui_from_node(priv);
-        set_akte_state(priv, AKTE_STATE_EDITING);
+        gint64 node_id = sond_graph_node_get_id(node);
+        GError *lock_error = NULL;
+        
+        if (sond_client_lock_node(priv->client, node_id, "Bearbeitung", &lock_error)) {
+            /* Lock erfolgreich → EDITING */
+            LOG_INFO("Akte %u/%u geladen und gelockt\n", lfd_nr, year);
+            update_ui_from_node(priv);
+            set_akte_state(priv, AKTE_STATE_EDITING);
+        } else {
+            /* Lock fehlgeschlagen (bereits gelockt) → READONLY */
+            LOG_INFO("Akte %u/%u gelockt von anderem User, öffne read-only\n", lfd_nr, year);
+            
+            gchar *msg = g_strdup_printf(
+                "Akte %u/%u wird gerade von einem anderen Benutzer bearbeitet.\n\n"
+                "Sie können die Akte nur im Lesemodus öffnen.",
+                lfd_nr, year);
+            show_info_dialog(priv->main_widget, "Akte gesperrt", msg);
+            g_free(msg);
+            
+            update_ui_from_node(priv);
+            set_akte_state(priv, AKTE_STATE_READONLY);
+            
+            if (lock_error) g_error_free(lock_error);
+        }
         
         return;
     }
@@ -747,8 +765,7 @@ static void on_neue_akte_clicked(GtkButton *button, SondModuleAktePrivate *priv)
     
     /* Felder leer lassen */
     gtk_editable_set_text(GTK_EDITABLE(priv->entry_kurzbezeichnung), "");
-    GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(priv->textview_gegenstand));
-    gtk_text_buffer_set_text(buffer, "", -1);
+    gtk_editable_set_text(GTK_EDITABLE(priv->textview_gegenstand), "");  /* Jetzt Entry */
     
     set_akte_state(priv, AKTE_STATE_CREATING);
 }
@@ -769,41 +786,104 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
     
     if (!has_regnr) {
         /* Keine RegNr vorhanden - jetzt erst vergeben! */
-        guint lfd_nr, year;
-        GError *error = NULL;
+        /* RETRY-SCHLEIFE: Falls RegNr-Konflikt, nochmal probieren */
+        gboolean success = FALSE;
+        const gint MAX_RETRIES = 10;
         
-        if (!get_next_regnr(priv, &lfd_nr, &year, &error)) {
-            gchar *msg = g_strdup_printf("Fehler bei RegNr-Vergabe: %s",
-                                        error ? error->message : "Unbekannt");
-            show_error_dialog(priv->main_widget, "RegNr-Vergabe fehlgeschlagen", msg);
-            g_free(msg);
-            if (error) g_error_free(error);
-            return;
+        for (gint attempt = 0; attempt < MAX_RETRIES && !success; attempt++) {
+            guint lfd_nr, year;
+            GError *error = NULL;
+            
+            if (!get_next_regnr(priv, &lfd_nr, &year, &error)) {
+                gchar *msg = g_strdup_printf("Fehler bei RegNr-Vergabe (Versuch %d/%d): %s",
+                                            attempt + 1, MAX_RETRIES,
+                                            error ? error->message : "Unbekannt");
+                show_error_dialog(priv->main_widget, "RegNr-Vergabe fehlgeschlagen", msg);
+                g_free(msg);
+                if (error) g_error_free(error);
+                return;
+            }
+            
+            /* RegNr setzen */
+            gchar *lfd_str = g_strdup_printf("%u", lfd_nr);
+            gchar *year_str = g_strdup_printf("%u", year);
+            const gchar *values[] = {year_str, lfd_str};
+            sond_graph_node_set_property(priv->current_node, "regnr", values, 2);
+            g_free(lfd_str);
+            g_free(year_str);
+            
+            LOG_INFO("Versuch %d/%d: RegNr %u/%u vergeben\n", attempt + 1, MAX_RETRIES, lfd_nr, year);
+            
+            /* Felder in Node übernehmen (vor dem Speichern!) */
+            const gchar *kurzbezeichnung = gtk_editable_get_text(GTK_EDITABLE(priv->entry_kurzbezeichnung));
+            if (kurzbezeichnung && strlen(kurzbezeichnung) > 0) {
+                sond_graph_node_set_property_string(priv->current_node, "kurzbezeichnung", kurzbezeichnung);
+            }
+            
+            const gchar *gegenstand = gtk_editable_get_text(GTK_EDITABLE(priv->textview_gegenstand));  /* Jetzt Entry */
+            if (gegenstand && strlen(gegenstand) > 0) {
+                sond_graph_node_set_property_string(priv->current_node, "gegenstand", gegenstand);
+            }
+            
+            /* Status auf "complete" setzen */
+            sond_graph_node_set_property_string(priv->current_node, "status", "complete");
+            
+            /* Versuch zu speichern */
+            error = NULL;
+            if (save_node(priv, &error)) {
+                /* Erfolg! */
+                success = TRUE;
+                priv->is_new_from_entry = FALSE;
+                update_ui_from_node(priv);
+                
+                gchar *regnr_display = format_regnr(lfd_nr, year);
+                gchar *msg = g_strdup_printf("Akte %s wurde erfolgreich gespeichert.", regnr_display);
+                show_info_dialog(priv->main_widget, "Gespeichert", msg);
+                g_free(msg);
+                g_free(regnr_display);
+                
+                LOG_INFO("Akte erfolgreich gespeichert mit RegNr %u/%u (nach %d Versuch(en))\n",
+                        lfd_nr, year, attempt + 1);
+            } else {
+                /* Fehler beim Speichern */
+                if (error && (error->code == 409 || 
+                             (error->message && strstr(error->message, "Duplicate")) ||
+                             (error->message && strstr(error->message, "already exists")))) {
+                    /* RegNr-Konflikt → Retry */
+                    LOG_INFO("RegNr-Konflikt bei %u/%u, versuche mit nächster RegNr...\n", lfd_nr, year);
+                    if (error) g_error_free(error);
+                    /* Schleife läuft weiter */
+                } else {
+                    /* Anderer Fehler → Abbruch */
+                    gchar *msg = g_strdup_printf("Fehler beim Speichern: %s", 
+                                                error ? error->message : "Unbekannt");
+                    show_error_dialog(priv->main_widget, "Speichern fehlgeschlagen", msg);
+                    g_free(msg);
+                    if (error) g_error_free(error);
+                    return;
+                }
+            }
         }
         
-        /* RegNr setzen */
-        gchar *lfd_str = g_strdup_printf("%u", lfd_nr);
-        gchar *year_str = g_strdup_printf("%u", year);
-        const gchar *values[] = {year_str, lfd_str};
-        sond_graph_node_set_property(priv->current_node, "regnr", values, 2);
-        g_free(lfd_str);
-        g_free(year_str);
+        if (!success) {
+            show_error_dialog(priv->main_widget, "Speichern fehlgeschlagen",
+                            "Nach 10 Versuchen konnte keine freie RegNr vergeben werden. "
+                            "Bitte später erneut versuchen.");
+        }
+        
+        return;  /* Fertig (Erfolg oder max retries erreicht) */
     }
     
-    /* Felder in Node übernehmen */
+    /* RegNr vorhanden (manuelle Eingabe oder bereits gespeichert) */
     const gchar *kurzbezeichnung = gtk_editable_get_text(GTK_EDITABLE(priv->entry_kurzbezeichnung));
     if (kurzbezeichnung && strlen(kurzbezeichnung) > 0) {
         sond_graph_node_set_property_string(priv->current_node, "kurzbezeichnung", kurzbezeichnung);
     }
     
-    GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(priv->textview_gegenstand));
-    GtkTextIter start, end;
-    gtk_text_buffer_get_bounds(buffer, &start, &end);
-    gchar *gegenstand = gtk_text_buffer_get_text(buffer, &start, &end, FALSE);
+    const gchar *gegenstand = gtk_editable_get_text(GTK_EDITABLE(priv->textview_gegenstand));  /* Jetzt Entry */
     if (gegenstand && strlen(gegenstand) > 0) {
         sond_graph_node_set_property_string(priv->current_node, "gegenstand", gegenstand);
     }
-    g_free(gegenstand);
     
     /* Status auf "complete" setzen (falls es "draft" war) */
     sond_graph_node_set_property_string(priv->current_node, "status", "complete");
@@ -846,8 +926,6 @@ static void on_ok_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
     }
     
     priv->is_new_from_entry = FALSE;
-    g_free(priv->locked_by_user);
-    priv->locked_by_user = NULL;
     
     clear_akte_fields(priv);
     set_akte_state(priv, AKTE_STATE_INITIAL);
@@ -888,8 +966,6 @@ static void on_abbrechen_clicked(GtkButton *button, SondModuleAktePrivate *priv)
     }
     
     priv->is_new_from_entry = FALSE;
-    g_free(priv->locked_by_user);
-    priv->locked_by_user = NULL;
     
     clear_akte_fields(priv);
     set_akte_state(priv, AKTE_STATE_INITIAL);
@@ -905,7 +981,6 @@ GtkWidget* sond_module_akte_new(SondClient *client) {
     priv->current_node = NULL;
     priv->state = AKTE_STATE_INITIAL;
     priv->is_new_from_entry = FALSE;
-    priv->locked_by_user = NULL;
 
     /* Haupt-Container */
     GtkWidget *main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
@@ -924,7 +999,8 @@ GtkWidget* sond_module_akte_new(SondClient *client) {
     gtk_box_append(GTK_BOX(top_box), regnr_label);
 
     priv->regnr_entry = gtk_entry_new();
-    gtk_widget_set_hexpand(priv->regnr_entry, TRUE);
+    gtk_editable_set_max_width_chars(GTK_EDITABLE(priv->regnr_entry), 7);  /* Max "123/456" */
+    gtk_editable_set_width_chars(GTK_EDITABLE(priv->regnr_entry), 7);
     g_signal_connect(priv->regnr_entry, "activate", G_CALLBACK(on_regnr_entry_activate), priv);
     gtk_box_append(GTK_BOX(top_box), priv->regnr_entry);
 
@@ -952,23 +1028,17 @@ GtkWidget* sond_module_akte_new(SondClient *client) {
     gtk_grid_attach(GTK_GRID(grid), label_kurz, 0, 0, 1, 1);
 
     priv->entry_kurzbezeichnung = gtk_entry_new();
-    gtk_widget_set_hexpand(priv->entry_kurzbezeichnung, TRUE);
+    gtk_editable_set_width_chars(GTK_EDITABLE(priv->entry_kurzbezeichnung), 40);  /* 1/3 kürzer als vorher */
     gtk_grid_attach(GTK_GRID(grid), priv->entry_kurzbezeichnung, 1, 0, 1, 1);
 
-    /* Gegenstand */
+    /* Gegenstand (jetzt als Entry, nicht TextView) */
     GtkWidget *label_gegenstand = gtk_label_new("Gegenstand:");
     gtk_widget_set_halign(label_gegenstand, GTK_ALIGN_END);
-    gtk_widget_set_valign(label_gegenstand, GTK_ALIGN_START);
     gtk_grid_attach(GTK_GRID(grid), label_gegenstand, 0, 1, 1, 1);
 
-    priv->textview_gegenstand = gtk_text_view_new();
-    gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(priv->textview_gegenstand), GTK_WRAP_WORD);
-    GtkWidget *scroll = gtk_scrolled_window_new();
-    gtk_widget_set_vexpand(scroll, TRUE);
-    gtk_widget_set_hexpand(scroll, TRUE);
-    gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(scroll), 150);
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), priv->textview_gegenstand);
-    gtk_grid_attach(GTK_GRID(grid), scroll, 1, 1, 1, 1);
+    priv->textview_gegenstand = gtk_entry_new();  /* Jetzt Entry statt TextView! */
+    gtk_widget_set_hexpand(priv->textview_gegenstand, TRUE);
+    gtk_grid_attach(GTK_GRID(grid), priv->textview_gegenstand, 1, 1, 1, 1);
 
     /* Separator */
     GtkWidget *separator2 = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);

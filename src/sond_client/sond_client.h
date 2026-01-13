@@ -24,6 +24,8 @@
 
 G_BEGIN_DECLS
 
+typedef struct _SondClient SondClient;
+
 #define SOND_TYPE_CLIENT (sond_client_get_type())
 G_DECLARE_FINAL_TYPE(SondClient, sond_client, SOND, CLIENT, GObject)
 
@@ -69,11 +71,37 @@ gboolean sond_client_connect(SondClient *client, GError **error);
  * sond_client_get_user_id:
  * @client: SondClient
  *
- * Gibt die User-ID zurück (username@hostname).
+ * Gibt die User-ID zurück (Seafile-Username).
  *
  * Returns: (transfer none): User-ID String
  */
 const gchar* sond_client_get_user_id(SondClient *client);
+
+/**
+ * sond_client_set_auth:
+ * @client: SondClient
+ * @username: Seafile-Username
+ * @session_token: Session-Token vom Server
+ *
+ * Setzt Authentifizierungsinformationen.
+ * Wird nach erfolgreichem Login aufgerufen.
+ */
+void sond_client_set_auth(SondClient *client,
+                          const gchar *username,
+                          const gchar *session_token);
+
+/**
+ * sond_client_set_auth_failed_callback:
+ * @client: SondClient
+ * @callback: Callback-Funktion bei 401-Fehler
+ * @user_data: User-Data für Callback
+ *
+ * Setzt Callback der bei 401-Fehler aufgerufen wird.
+ * Wird verwendet um Auto-Logout + Re-Login zu triggern.
+ */
+void sond_client_set_auth_failed_callback(SondClient *client,
+                                          void (*callback)(SondClient*, gpointer),
+                                          gpointer user_data);
 
 /**
  * sond_client_create_and_lock_node:

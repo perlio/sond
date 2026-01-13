@@ -30,8 +30,13 @@ struct _SondClient {
     gchar *server_url;
     guint server_port;
     
-    /* User-Identifikation */
-    gchar *user_id;  /* username@hostname */
+    /* Authentifizierung */
+    gchar *session_token;  /* Session-Token vom Server */
+    gchar *username;       /* Seafile-Username */
+    
+    /* Auth-Callback */
+    void (*auth_failed_callback)(SondClient *client, gpointer user_data);
+    gpointer auth_failed_user_data;
     
     /* HTTP-Client */
     SoupSession *session;
@@ -44,7 +49,8 @@ static void sond_client_finalize(GObject *object) {
     SondClient *self = SOND_CLIENT(object);
     
     g_free(self->server_url);
-    g_free(self->user_id);
+    g_free(self->session_token);
+    g_free(self->username);
     
     if (self->session) {
         g_object_unref(self->session);
@@ -63,41 +69,10 @@ static void sond_client_init(SondClient *self) {
     self->server_port = 0;
     self->session = NULL;
     self->connected = FALSE;
-    
-    /* User-ID generieren: username@hostname */
-    /* TEMPORÄR: Komplett hardcoded zum Testen */
-    self->user_id = g_strdup("testuser");
-    
-    const gchar *username = g_get_user_name();
-    const gchar *hostname = g_get_host_name();
-    
-    if (!username) username = "unknown";
-    if (!hostname) hostname = "unknown";
-    
-    /* NOTFALL-FALLBACK: Wenn irgendwas schiefgeht, nutze feste ID */
-    self->user_id = g_strdup("sonduser@localhost");
-    
-    /* Versuche es trotzdem mit dem Filter */
-    gboolean has_non_ascii = FALSE;
-    for (const gchar *p = username; *p; p++) {
-        if ((unsigned char)*p >= 128) has_non_ascii = TRUE;
-    }
-    for (const gchar *p = hostname; *p; p++) {
-        if ((unsigned char)*p >= 128) has_non_ascii = TRUE;
-    }
-    
-    if (!has_non_ascii) {
-        /* Nur wenn garantiert ASCII, dann verwenden */
-        g_free(self->user_id);
-        self->user_id = g_strdup_printf("%s@%s", username, hostname);
-    }
-    
-    /* Debug-Output mit g_print (immer sichtbar) */
-    g_print("[CLIENT INIT] Original username='%s', hostname='%s'\n", username, hostname);
-    g_print("[CLIENT INIT] Sanitized user_id='%s'\n", self->user_id);
-    
-    LOG_INFO("Client user_id: '%s' (from username='%s', hostname='%s')\n",
-             self->user_id, username, hostname);
+    self->session_token = NULL;
+    self->username = NULL;
+    self->auth_failed_callback = NULL;
+    self->auth_failed_user_data = NULL;
 }
 
 /**
@@ -172,7 +147,65 @@ gboolean sond_client_connect(SondClient *client, GError **error) {
 
 const gchar* sond_client_get_user_id(SondClient *client) {
     g_return_val_if_fail(SOND_IS_CLIENT(client), NULL);
-    return client->user_id;
+    return client->username;  /* Username statt username@hostname */
+}
+
+void sond_client_set_auth(SondClient *client,
+                          const gchar *username,
+                          const gchar *session_token) {
+    g_return_if_fail(SOND_IS_CLIENT(client));
+    
+    g_free(client->username);
+    g_free(client->session_token);
+    
+    client->username = g_strdup(username);
+    client->session_token = g_strdup(session_token);
+    
+    LOG_INFO("Auth set for user '%s'\n", username);
+}
+
+void sond_client_set_auth_failed_callback(SondClient *client,
+                                          void (*callback)(SondClient*, gpointer),
+                                          gpointer user_data) {
+    g_return_if_fail(SOND_IS_CLIENT(client));
+    
+    client->auth_failed_callback = callback;
+    client->auth_failed_user_data = user_data;
+}
+
+/**
+ * add_auth_header:
+ *
+ * Fügt Authorization-Header zu Request hinzu.
+ */
+static void add_auth_header(SondClient *client, SoupMessage *msg) {
+    if (client->session_token) {
+        gchar *auth_value = g_strdup_printf("Bearer %s", client->session_token);
+        soup_message_headers_append(soup_message_get_request_headers(msg),
+                                    "Authorization", auth_value);
+        g_free(auth_value);
+    }
+}
+
+/**
+ * check_auth_failed:
+ *
+ * Prüft ob Response 401 ist und ruft Callback auf.
+ * 
+ * Returns: TRUE wenn 401 (Auth failed), FALSE sonst
+ */
+static gboolean check_auth_failed(SondClient *client, guint status) {
+    if (status == 401) {
+        LOG_ERROR("Authentication failed (401) - session expired or invalid\n");
+        
+        /* Callback aufrufen falls gesetzt */
+        if (client->auth_failed_callback) {
+            client->auth_failed_callback(client, client->auth_failed_user_data);
+        }
+        
+        return TRUE;
+    }
+    return FALSE;
 }
 
 gboolean sond_client_create_and_lock_node(SondClient *client,
@@ -206,7 +239,7 @@ gboolean sond_client_create_and_lock_node(SondClient *client,
     g_free(node_json);
     
     json_builder_set_member_name(builder, "user_id");
-    json_builder_add_string_value(builder, client->user_id);
+    json_builder_add_string_value(builder, client->username);  /* Username statt user_id */
     
     if (lock_reason) {
         json_builder_set_member_name(builder, "lock_reason");
@@ -229,6 +262,9 @@ gboolean sond_client_create_and_lock_node(SondClient *client,
     SoupMessage *msg = soup_message_new("POST", url);
     g_free(url);
     
+    /* Authorization-Header hinzufügen */
+    add_auth_header(client, msg);
+    
     soup_message_set_request_body_from_bytes(msg, "application/json",
         g_bytes_new_take(request_json, strlen(request_json)));
     
@@ -240,6 +276,16 @@ gboolean sond_client_create_and_lock_node(SondClient *client,
     }
     
     guint status = soup_message_get_status(msg);
+    
+    /* 401-Check */
+    if (check_auth_failed(client, status)) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+                   "Authentication failed - please login again");
+        g_bytes_unref(response);
+        g_object_unref(msg);
+        return FALSE;
+    }
+    
     if (status != 200) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                    "Server returned status %u", status);
@@ -296,7 +342,7 @@ gboolean sond_client_lock_node(SondClient *client,
     json_builder_begin_object(builder);
     
     json_builder_set_member_name(builder, "user_id");
-    json_builder_add_string_value(builder, client->user_id);
+    json_builder_add_string_value(builder, client->username);  /* Username statt user_id */
     
     json_builder_set_member_name(builder, "timeout_minutes");
     json_builder_add_int_value(builder, 0);  /* Kein Timeout */
@@ -323,6 +369,9 @@ gboolean sond_client_lock_node(SondClient *client,
     SoupMessage *msg = soup_message_new("POST", url);
     g_free(url);
     
+    /* Authorization-Header hinzufügen */
+    add_auth_header(client, msg);
+    
     soup_message_set_request_body_from_bytes(msg, "application/json",
         g_bytes_new_take(request_json, strlen(request_json)));
     
@@ -334,6 +383,16 @@ gboolean sond_client_lock_node(SondClient *client,
     }
     
     guint status = soup_message_get_status(msg);
+    
+    /* 401-Check */
+    if (check_auth_failed(client, status)) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+                   "Authentication failed - please login again");
+        g_bytes_unref(response);
+        g_object_unref(msg);
+        return FALSE;
+    }
+    
     gboolean success = (status == 200);
     
     if (!success) {
@@ -358,7 +417,7 @@ gboolean sond_client_unlock_node(SondClient *client,
     json_builder_begin_object(builder);
     
     json_builder_set_member_name(builder, "user_id");
-    json_builder_add_string_value(builder, client->user_id);
+    json_builder_add_string_value(builder, client->username);  /* Username statt user_id */
     
     json_builder_end_object(builder);
     
@@ -377,6 +436,9 @@ gboolean sond_client_unlock_node(SondClient *client,
     SoupMessage *msg = soup_message_new("POST", url);
     g_free(url);
     
+    /* Authorization-Header hinzufügen */
+    add_auth_header(client, msg);
+    
     soup_message_set_request_body_from_bytes(msg, "application/json",
         g_bytes_new_take(request_json, strlen(request_json)));
     
@@ -388,6 +450,16 @@ gboolean sond_client_unlock_node(SondClient *client,
     }
     
     guint status = soup_message_get_status(msg);
+    
+    /* 401-Check */
+    if (check_auth_failed(client, status)) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+                   "Authentication failed - please login again");
+        g_bytes_unref(response);
+        g_object_unref(msg);
+        return FALSE;
+    }
+    
     gboolean success = (status == 200);
     
     if (!success) {

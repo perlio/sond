@@ -23,6 +23,7 @@
 
 #include "sond_server.h"
 #include "sond_server_seafile.h"
+#include "sond_server_auth.h"
 #include "sond_graph/sond_graph_db.h"
 #include "sond_graph/sond_graph_node.h"
 #include "sond_graph/sond_graph_edge.h"
@@ -38,6 +39,33 @@
 GQuark sond_server_error_quark(void) {
     return g_quark_from_static_string("sond-server-error-quark");
 }
+
+struct _SondServer {
+    GObject parent_instance;
+
+    SoupServer *soup_server;
+    MYSQL *db_conn;
+    guint port;
+    gboolean running;
+
+    /* DB Config */
+    gchar *db_host;
+    gint db_port;
+    gchar *db_name;
+    gchar *db_user;
+    gchar *db_password;
+
+    /* Seafile Config */
+    gchar *seafile_url;           // z.B. "https://seafile.example.com"
+    gchar *auth_token;            // Seafile Auth-Token
+    gint seafile_group_id;        // Gruppe zum Teilen
+    
+    /* Auth/Session */
+    guint session_lifetime_hours;
+    guint session_inactivity_minutes;
+    SessionManager *session_manager;  // Session-Verwaltung
+};
+
 G_DEFINE_TYPE(SondServer, sond_server, G_TYPE_OBJECT)
 
 /* ========================================================================
@@ -60,7 +88,6 @@ static void send_json_response(SoupServerMessage *msg,
     soup_message_body_append_bytes(soup_server_message_get_response_body(msg), bytes);
     g_bytes_unref(bytes);
 }
-
 /**
  * send_error_response:
  *
@@ -128,6 +155,212 @@ static void send_success_response(SoupServerMessage *msg,
 
     g_free(json);
     json_node_free(root);
+    g_object_unref(generator);
+    g_object_unref(builder);
+}
+
+/**
+ * handle_auth_login:
+ * POST /auth/login
+ *
+ * Body: { "username": "...", "password": "..." }
+ * Response: { "success": true, "data": { "session_token": "...", "username": "..." } }
+ */
+static void handle_auth_login(SoupServer *soup_server,
+                               SoupServerMessage *msg,
+                               const char *path,
+                               GHashTable *query,
+                               gpointer user_data) {
+    SondServer *server = SOND_SERVER(user_data);
+
+    if (strcmp(soup_server_message_get_method(msg), "POST") != 0) {
+        send_error_response(msg, SOUP_STATUS_METHOD_NOT_ALLOWED,
+                           "Only POST allowed");
+        return;
+    }
+
+    /* Body parsen */
+    SoupMessageBody *body = soup_server_message_get_request_body(msg);
+    if (!body->data) {
+        send_error_response(msg, SOUP_STATUS_BAD_REQUEST,
+                           "Empty request body");
+        return;
+    }
+
+    GError *error = NULL;
+    JsonParser *parser = json_parser_new();
+
+    if (!json_parser_load_from_data(parser, body->data, -1, &error)) {
+        send_error_response(msg, SOUP_STATUS_BAD_REQUEST, "Invalid JSON");
+        g_clear_error(&error);
+        g_object_unref(parser);
+        return;
+    }
+
+    JsonNode *root = json_parser_get_root(parser);
+    JsonObject *obj = json_node_get_object(root);
+
+    const gchar *username = json_object_has_member(obj, "username") ?
+        json_object_get_string_member(obj, "username") : NULL;
+    const gchar *password = json_object_has_member(obj, "password") ?
+        json_object_get_string_member(obj, "password") : NULL;
+
+    if (!username || !password) {
+        send_error_response(msg, SOUP_STATUS_BAD_REQUEST,
+                           "Missing username or password");
+        g_object_unref(parser);
+        return;
+    }
+
+    /* Bei Seafile authentifizieren */
+    gchar *seafile_token = sond_server_seafile_get_auth_token(server, username, password, &error);
+
+    if (!seafile_token) {
+        gchar *err_msg = g_strdup_printf("Authentication failed: %s",
+                                        error ? error->message : "Invalid credentials");
+        send_error_response(msg, SOUP_STATUS_UNAUTHORIZED, err_msg);
+        g_free(err_msg);
+        g_clear_error(&error);
+        g_object_unref(parser);
+        return;
+    }
+
+    /* Session erstellen */
+    gchar *session_token = session_manager_create(server->session_manager,
+                                                   username, seafile_token);
+    g_free(seafile_token);
+
+    /* Response erstellen */
+    JsonBuilder *builder = json_builder_new();
+    json_builder_begin_object(builder);
+    
+    json_builder_set_member_name(builder, "session_token");
+    json_builder_add_string_value(builder, session_token);
+    
+    json_builder_set_member_name(builder, "username");
+    json_builder_add_string_value(builder, username);
+    
+    json_builder_end_object(builder);
+
+    JsonGenerator *generator = json_generator_new();
+    JsonNode *response_node = json_builder_get_root(builder);
+    json_generator_set_root(generator, response_node);
+    gchar *response_json = json_generator_to_data(generator, NULL);
+
+    send_success_response(msg, response_json);
+
+    g_free(response_json);
+    g_free(session_token);
+    json_node_free(response_node);
+    g_object_unref(generator);
+    g_object_unref(builder);
+    g_object_unref(parser);
+}
+
+/**
+ * handle_auth_logout:
+ * POST /auth/logout
+ *
+ * Header: Authorization: Bearer <token>
+ * Response: { "success": true }
+ */
+static void handle_auth_logout(SoupServer *soup_server,
+                                SoupServerMessage *msg,
+                                const char *path,
+                                GHashTable *query,
+                                gpointer user_data) {
+    SondServer *server = SOND_SERVER(user_data);
+
+    if (strcmp(soup_server_message_get_method(msg), "POST") != 0) {
+        send_error_response(msg, SOUP_STATUS_METHOD_NOT_ALLOWED,
+                           "Only POST allowed");
+        return;
+    }
+
+    /* Token aus Header holen */
+    SoupMessageHeaders *headers = soup_server_message_get_request_headers(msg);
+    const gchar *auth_header = soup_message_headers_get_one(headers, "Authorization");
+
+    if (!auth_header || !g_str_has_prefix(auth_header, "Bearer ")) {
+        send_error_response(msg, SOUP_STATUS_UNAUTHORIZED,
+                           "Missing or invalid Authorization header");
+        return;
+    }
+
+    const gchar *token = auth_header + 7;  /* Skip "Bearer " */
+
+    /* Session invalidieren */
+    session_manager_invalidate(server->session_manager, token);
+
+    send_success_response(msg, NULL);
+}
+
+/**
+ * handle_auth_validate:
+ * GET /auth/validate
+ *
+ * Header: Authorization: Bearer <token>
+ * Response: { "success": true, "data": { "username": "...", "valid": true } }
+ */
+static void handle_auth_validate(SoupServer *soup_server,
+                                  SoupServerMessage *msg,
+                                  const char *path,
+                                  GHashTable *query,
+                                  gpointer user_data) {
+    SondServer *server = SOND_SERVER(user_data);
+
+    if (strcmp(soup_server_message_get_method(msg), "GET") != 0) {
+        send_error_response(msg, SOUP_STATUS_METHOD_NOT_ALLOWED,
+                           "Only GET allowed");
+        return;
+    }
+
+    /* Token aus Header holen */
+    SoupMessageHeaders *headers = soup_server_message_get_request_headers(msg);
+    const gchar *auth_header = soup_message_headers_get_one(headers, "Authorization");
+
+    if (!auth_header || !g_str_has_prefix(auth_header, "Bearer ")) {
+        send_error_response(msg, SOUP_STATUS_UNAUTHORIZED,
+                           "Missing or invalid Authorization header");
+        return;
+    }
+
+    const gchar *token = auth_header + 7;  /* Skip "Bearer " */
+    const gchar *username = NULL;
+
+    /* Session validieren */
+    gboolean valid = session_manager_validate(server->session_manager, token, &username);
+
+    if (!valid) {
+        send_error_response(msg, SOUP_STATUS_UNAUTHORIZED,
+                           "Invalid or expired session");
+        return;
+    }
+
+    /* Activity updaten */
+    session_manager_update_activity(server->session_manager, token);
+
+    /* Response erstellen */
+    JsonBuilder *builder = json_builder_new();
+    json_builder_begin_object(builder);
+    
+    json_builder_set_member_name(builder, "valid");
+    json_builder_add_boolean_value(builder, TRUE);
+    
+    json_builder_set_member_name(builder, "username");
+    json_builder_add_string_value(builder, username);
+    
+    json_builder_end_object(builder);
+
+    JsonGenerator *generator = json_generator_new();
+    JsonNode *response_node = json_builder_get_root(builder);
+    json_generator_set_root(generator, response_node);
+    gchar *response_json = json_generator_to_data(generator, NULL);
+
+    send_success_response(msg, response_json);
+
+    g_free(response_json);
+    json_node_free(response_node);
     g_object_unref(generator);
     g_object_unref(builder);
 }
@@ -544,11 +777,10 @@ static void handle_node_lock(SoupServer *soup_server,
     const gchar *reason = json_object_has_member(obj, "reason") ?
         json_object_get_string_member(obj, "reason") : NULL;
 
-    g_object_unref(parser);
-
     if (!user_id) {
         send_error_response(msg, SOUP_STATUS_BAD_REQUEST,
                            "Missing user_id");
+        g_object_unref(parser);
         return;
     }
 
@@ -560,8 +792,11 @@ static void handle_node_lock(SoupServer *soup_server,
         send_error_response(msg, SOUP_STATUS_CONFLICT, err_msg);
         g_free(err_msg);
         g_clear_error(&error);
+        g_object_unref(parser);
         return;
     }
+
+    g_object_unref(parser);
 
     send_success_response(msg, NULL);
 }
@@ -772,11 +1007,10 @@ static void handle_node_unlock(SoupServer *soup_server,
     JsonObject *obj = json_node_get_object(root);
 
     const gchar *user_id = json_object_get_string_member(obj, "user_id");
-    g_object_unref(parser);
-
     if (!user_id) {
         send_error_response(msg, SOUP_STATUS_BAD_REQUEST,
                            "Missing user_id");
+        g_object_unref(parser);
         return;
     }
 
@@ -787,8 +1021,11 @@ static void handle_node_unlock(SoupServer *soup_server,
         send_error_response(msg, SOUP_STATUS_FORBIDDEN, err_msg);
         g_free(err_msg);
         g_clear_error(&error);
+        g_object_unref(parser);
         return;
     }
+
+    g_object_unref(parser);
 
     send_success_response(msg, NULL);
 }
@@ -821,6 +1058,10 @@ static void sond_server_finalize(GObject *object) {
     if (self->soup_server) {
         g_object_unref(self->soup_server);
     }
+    
+    if (self->session_manager) {
+        session_manager_free(self->session_manager);
+    }
 
     if (self->db_conn) {
         mysql_close(self->db_conn);
@@ -830,6 +1071,8 @@ static void sond_server_finalize(GObject *object) {
     g_free(self->db_user);
     g_free(self->db_password);
     g_free(self->db_name);
+    g_free(self->seafile_url);
+    g_free(self->auth_token);
 
     G_OBJECT_CLASS(sond_server_parent_class)->finalize(object);
 }
@@ -848,6 +1091,19 @@ static void sond_server_init(SondServer *self) {
     self->db_name = NULL;
     self->port = 0;
     self->running = FALSE;
+    self->seafile_url = NULL;
+    self->auth_token = NULL;
+    self->session_lifetime_hours = 0;
+    self->session_inactivity_minutes = 0;
+}
+
+/* ========================================================================
+ * Public API
+ * ======================================================================== */
+
+const gchar* sond_server_get_seafile_url(SondServer *server) {
+    g_return_val_if_fail(SOND_IS_SERVER(server), NULL);
+    return server->seafile_url;
 }
 
 static gboolean sond_server_load_config(SondServer *server,
@@ -866,6 +1122,12 @@ static gboolean sond_server_load_config(SondServer *server,
     if (port > 0) {
     	server->port = port;
     }
+    
+    /* === Auth Config === */
+    server->session_lifetime_hours = g_key_file_get_integer(keyfile, "auth", 
+                                                             "session_lifetime_hours", NULL);
+    server->session_inactivity_minutes = g_key_file_get_integer(keyfile, "auth",
+                                                                 "session_inactivity_minutes", NULL);
 
     /* === MariaDB Config === */
     server->db_host = g_key_file_get_string(keyfile, "mariadb", "host", NULL);
@@ -974,8 +1236,22 @@ static gboolean sond_server_prepare(SondServer*server,
 
     /* SoupServer erstellen */
     server->soup_server = soup_server_new(NULL, NULL);
+    
+    /* SessionManager erstellen */
+    server->session_manager = session_manager_new(server->session_lifetime_hours,
+                                                   server->session_inactivity_minutes);
 
     /* Routes registrieren */
+    
+    /* Auth-Endpoints */
+    soup_server_add_handler(server->soup_server, "/auth/login",
+                           handle_auth_login, server, NULL);
+    soup_server_add_handler(server->soup_server, "/auth/logout",
+                           handle_auth_logout, server, NULL);
+    soup_server_add_handler(server->soup_server, "/auth/validate",
+                           handle_auth_validate, server, NULL);
+    
+    /* Node-Endpoints */
     soup_server_add_handler(server->soup_server, "/node/save",
                            handle_node_save, server, NULL);
     soup_server_add_handler(server->soup_server, "/node/load",
@@ -1017,8 +1293,26 @@ static gboolean sond_server_start(SondServer *server, GError **error) {
     server->running = TRUE;
 
     LOG_INFO("Server started on port %u\n", server->port);
+    
+    /* Periodisches Session-Cleanup alle 10 Minuten */
+    g_timeout_add_seconds(600, (GSourceFunc)session_cleanup_timeout, server);
 
     return TRUE;
+}
+
+/**
+ * session_cleanup_timeout:
+ *
+ * Periodischer Callback für Session-Cleanup.
+ */
+static gboolean session_cleanup_timeout(gpointer user_data) {
+    SondServer *server = SOND_SERVER(user_data);
+    
+    if (server->session_manager) {
+        session_manager_cleanup_expired(server->session_manager);
+    }
+    
+    return G_SOURCE_CONTINUE;  /* Weiter aufrufen */
 }
 
 #ifdef __linux__

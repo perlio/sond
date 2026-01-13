@@ -48,26 +48,6 @@ typedef enum {
 
 typedef struct _SondServer SondServer;
 
-struct _SondServer {
-    GObject parent_instance;
-
-    SoupServer *soup_server;
-    MYSQL *db_conn;
-    guint port;
-    gboolean running;
-
-    /* DB Config */
-    gchar *db_host;
-    gint db_port;
-    gchar *db_name;
-    gchar *db_user;
-    gchar *db_password;
-
-    gchar *seafile_url;           // z.B. "https://seafile.example.com"
-    gchar *auth_token;            // Seafile Auth-Token
-    gint seafile_group_id;        // Gruppe zum Teilen
-};
-
 #define SOND_TYPE_SERVER (sond_server_get_type())
 G_DECLARE_FINAL_TYPE(SondServer, sond_server, SOND, SERVER, GObject)
 
