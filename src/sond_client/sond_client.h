@@ -65,6 +65,77 @@ gboolean sond_client_is_connected(SondClient *client);
  */
 gboolean sond_client_connect(SondClient *client, GError **error);
 
+/**
+ * sond_client_get_user_id:
+ * @client: SondClient
+ *
+ * Gibt die User-ID zurück (username@hostname).
+ *
+ * Returns: (transfer none): User-ID String
+ */
+const gchar* sond_client_get_user_id(SondClient *client);
+
+/**
+ * sond_client_create_and_lock_node:
+ * @client: SondClient
+ * @node: Node zum Anlegen
+ * @lock_reason: (nullable): Grund für Lock
+ * @error: (nullable): Fehler-Rückgabe
+ *
+ * Erstellt Node und setzt Lock atomar auf Server.
+ * Node-ID wird aktualisiert.
+ *
+ * Returns: TRUE bei Erfolg
+ */
+gboolean sond_client_create_and_lock_node(SondClient *client,
+                                           gpointer node,
+                                           const gchar *lock_reason,
+                                           GError **error);
+
+/**
+ * sond_client_lock_node:
+ * @client: SondClient
+ * @node_id: Node-ID
+ * @lock_reason: (nullable): Grund für Lock
+ * @error: (nullable): Fehler-Rückgabe
+ *
+ * Setzt Lock auf existierenden Node.
+ *
+ * Returns: TRUE bei Erfolg
+ */
+gboolean sond_client_lock_node(SondClient *client,
+                                gint64 node_id,
+                                const gchar *lock_reason,
+                                GError **error);
+
+/**
+ * sond_client_unlock_node:
+ * @client: SondClient
+ * @node_id: Node-ID
+ * @error: (nullable): Fehler-Rückgabe
+ *
+ * Entfernt Lock von Node.
+ *
+ * Returns: TRUE bei Erfolg
+ */
+gboolean sond_client_unlock_node(SondClient *client,
+                                  gint64 node_id,
+                                  GError **error);
+
+/**
+ * sond_client_check_lock:
+ * @client: SondClient
+ * @node_id: Node-ID
+ * @error: (nullable): Fehler-Rückgabe
+ *
+ * Prüft ob Node gelockt ist.
+ *
+ * Returns: (transfer full) (nullable): User-ID des Lockers oder NULL wenn nicht gelockt
+ */
+gchar* sond_client_check_lock(SondClient *client,
+                               gint64 node_id,
+                               GError **error);
+
 G_END_DECLS
 
 #endif /* SOND_CLIENT_H */

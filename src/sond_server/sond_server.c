@@ -567,6 +567,154 @@ static void handle_node_lock(SoupServer *soup_server,
 }
 
 /**
+ * handle_node_create_and_lock:
+ * POST /node/create_and_lock
+ *
+ * Body: { "node": {...}, "user_id": "...", "lock_reason": "..." }
+ * Response: { "success": true, "data": { Node mit ID } }
+ *
+ * Erstellt Node und setzt Lock atomar in einer Transaction.
+ */
+static void handle_node_create_and_lock(SoupServer *soup_server,
+                                         SoupServerMessage *msg,
+                                         const char *path,
+                                         GHashTable *query,
+                                         gpointer user_data) {
+    SondServer *server = SOND_SERVER(user_data);
+
+    if (strcmp(soup_server_message_get_method(msg), "POST") != 0) {
+        send_error_response(msg, SOUP_STATUS_METHOD_NOT_ALLOWED,
+                           "Only POST allowed");
+        return;
+    }
+
+    /* Body lesen */
+    SoupMessageBody *body = soup_server_message_get_request_body(msg);
+    if (!body->data) {
+        send_error_response(msg, SOUP_STATUS_BAD_REQUEST,
+                           "Empty request body");
+        return;
+    }
+
+    /* JSON parsen */
+    GError *error = NULL;
+    JsonParser *parser = json_parser_new();
+
+    if (!json_parser_load_from_data(parser, body->data, -1, &error)) {
+        send_error_response(msg, SOUP_STATUS_BAD_REQUEST, "Invalid JSON");
+        g_clear_error(&error);
+        g_object_unref(parser);
+        return;
+    }
+
+    JsonNode *root = json_parser_get_root(parser);
+    JsonObject *obj = json_node_get_object(root);
+
+    /* Node-JSON extrahieren */
+    if (!json_object_has_member(obj, "node")) {
+        send_error_response(msg, SOUP_STATUS_BAD_REQUEST, "Missing 'node' field");
+        g_object_unref(parser);
+        return;
+    }
+
+    JsonNode *node_node = json_object_get_member(obj, "node");
+    JsonGenerator *node_gen = json_generator_new();
+    json_generator_set_root(node_gen, node_node);
+    gchar *node_json = json_generator_to_data(node_gen, NULL);
+    g_object_unref(node_gen);
+
+    /* user_id extrahieren */
+    const gchar *user_id = json_object_has_member(obj, "user_id") ?
+        json_object_get_string_member(obj, "user_id") : NULL;
+
+    if (!user_id) {
+        send_error_response(msg, SOUP_STATUS_BAD_REQUEST, "Missing 'user_id' field");
+        g_free(node_json);
+        g_object_unref(parser);
+        return;
+    }
+
+    /* lock_reason extrahieren (optional) */
+    const gchar *lock_reason = json_object_has_member(obj, "lock_reason") ?
+        json_object_get_string_member(obj, "lock_reason") : "Bearbeitung";
+
+    /* Node aus JSON deserialisieren */
+    SondGraphNode *node = sond_graph_node_from_json(node_json, &error);
+    g_free(node_json);
+
+    if (!node) {
+        gchar *err_msg = g_strdup_printf("Invalid node JSON: %s",
+                                        error ? error->message : "unknown");
+        send_error_response(msg, SOUP_STATUS_BAD_REQUEST, err_msg);
+        g_free(err_msg);
+        g_clear_error(&error);
+        g_object_unref(parser);
+        return;
+    }
+
+    /* Transaction starten */
+    if (mysql_query(server->db_conn, "START TRANSACTION")) {
+        gchar *err_msg = g_strdup_printf("Failed to start transaction: %s",
+                                        mysql_error(server->db_conn));
+        send_error_response(msg, SOUP_STATUS_INTERNAL_SERVER_ERROR, err_msg);
+        g_free(err_msg);
+        g_object_unref(node);
+        g_object_unref(parser);
+        return;
+    }
+
+    /* Node speichern */
+    if (!sond_graph_db_save_node(server->db_conn, node, &error)) {
+        mysql_query(server->db_conn, "ROLLBACK");
+        gchar *err_msg = g_strdup_printf("Failed to save node: %s",
+                                        error ? error->message : "unknown");
+        send_error_response(msg, SOUP_STATUS_INTERNAL_SERVER_ERROR, err_msg);
+        g_free(err_msg);
+        g_clear_error(&error);
+        g_object_unref(node);
+        g_object_unref(parser);
+        return;
+    }
+
+    gint64 node_id = sond_graph_node_get_id(node);
+
+    /* Lock setzen (0 = kein Timeout) */
+    if (!sond_graph_db_lock_node(server->db_conn, node_id, user_id, 0, lock_reason, &error)) {
+        mysql_query(server->db_conn, "ROLLBACK");
+        LOG_ERROR("Lock failed for node %" G_GINT64_FORMAT ": %s\n",
+                 node_id, error ? error->message : "unknown");
+        gchar *err_msg = g_strdup_printf("Failed to lock node: %s",
+                                        error ? error->message : "unknown");
+        send_error_response(msg, SOUP_STATUS_CONFLICT, err_msg);
+        g_free(err_msg);
+        g_clear_error(&error);
+        g_object_unref(node);
+        g_object_unref(parser);
+        return;
+    }
+
+    g_object_unref(parser);
+
+    /* Transaction committen */
+    if (mysql_query(server->db_conn, "COMMIT")) {
+        mysql_query(server->db_conn, "ROLLBACK");
+        gchar *err_msg = g_strdup_printf("Failed to commit transaction: %s",
+                                        mysql_error(server->db_conn));
+        send_error_response(msg, SOUP_STATUS_INTERNAL_SERVER_ERROR, err_msg);
+        g_free(err_msg);
+        g_object_unref(node);
+        return;
+    }
+
+    /* Erfolg - Node zurückgeben */
+    gchar *response_json = sond_graph_node_to_json(node);
+    send_success_response(msg, response_json);
+
+    g_free(response_json);
+    g_object_unref(node);
+}
+
+/**
  * handle_node_unlock:
  * POST /node/unlock/{id}
  *
@@ -694,6 +842,10 @@ static void sond_server_class_init(SondServerClass *klass) {
 static void sond_server_init(SondServer *self) {
     self->soup_server = NULL;
     self->db_conn = NULL;
+    self->db_host = NULL;
+    self->db_user = NULL;
+    self->db_password = NULL;
+    self->db_name = NULL;
     self->port = 0;
     self->running = FALSE;
 }
@@ -730,8 +882,11 @@ static gboolean sond_server_load_config(SondServer *server,
         } else {
             g_prefix_error(error, "Failed to read MariaDB password file: ");
             g_free(server->db_host);
+            server->db_host = NULL;
             g_free(server->db_name);
+            server->db_name = NULL;
             g_free(server->db_user);
+            server->db_user = NULL;
             g_free(db_pass_file);
             g_key_file_free(keyfile);
             return FALSE;
@@ -794,16 +949,18 @@ static gboolean sond_server_prepare(SondServer*server,
         return FALSE;
     }
 
-    gboolean suc = (gboolean) mysql_real_connect(server->db_conn, server->db_host,
+    gpointer suc = mysql_real_connect(server->db_conn, server->db_host,
     		server->db_user, server->db_password, server->db_name, 0, NULL, 0);
 
     // Passwort überschreiben
 	memset(server->db_password, 0, strlen(server->db_password));
 	g_free(server->db_password);
+	server->db_password = NULL;  /* Prevent double-free in finalize() */
 
 	if (!suc) {
 		g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
 			   "MySQL connection failed: %s", mysql_error(server->db_conn));
+		mysql_close(server->db_conn);
         return FALSE;
     }
 
@@ -811,6 +968,7 @@ static gboolean sond_server_prepare(SondServer*server,
     LOG_INFO("Initializing graph database schema...\n");
     if (!sond_graph_db_setup(server->db_conn, error)) {
         g_prefix_error(error, "Graph DB setup failed: ");
+		mysql_close(server->db_conn);
         return FALSE;
     }
 
@@ -828,6 +986,8 @@ static gboolean sond_server_prepare(SondServer*server,
                            handle_node_save_with_edges, server, NULL);
     soup_server_add_handler(server->soup_server, "/node/search",
                            handle_node_search, server, NULL);
+    soup_server_add_handler(server->soup_server, "/node/create_and_lock",
+                           handle_node_create_and_lock, server, NULL);
     soup_server_add_handler(server->soup_server, "/node/lock",
                            handle_node_lock, server, NULL);
     soup_server_add_handler(server->soup_server, "/node/unlock",

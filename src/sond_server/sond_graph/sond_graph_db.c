@@ -1009,9 +1009,6 @@ GPtrArray* sond_graph_db_search_nodes(MYSQL *conn,
         g_string_append_printf(query, " OFFSET %u", criteria->offset);
     }
 
-    /* Debug */
-    g_print("\n=== SEARCH QUERY ===\n%s\n===================\n", query->str);
-
     /* Query ausführen */
     if (mysql_query(conn, query->str)) {
         g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,

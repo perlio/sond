@@ -147,20 +147,53 @@ static gboolean parse_regnr(const gchar *regnr_str, guint *lfd_nr, guint *year) 
         return FALSE;
     }
     
-    gchar **parts = g_strsplit(regnr_str, "/", 2);
-    if (g_strv_length(parts) != 2) {
+    /* Fall 1: Format mit "/" (z.B. "12/26") */
+    if (strchr(regnr_str, '/')) {
+        gchar **parts = g_strsplit(regnr_str, "/", 2);
+        if (g_strv_length(parts) != 2) {
+            g_strfreev(parts);
+            return FALSE;
+        }
+        
+        *lfd_nr = (guint)g_ascii_strtoull(parts[0], NULL, 10);
+        *year = (guint)g_ascii_strtoull(parts[1], NULL, 10);
+        
+        if (*year < 100) {
+            *year += 2000;
+        }
+        
         g_strfreev(parts);
+        return (*lfd_nr > 0 && *year >= 2000);
+    }
+    
+    /* Fall 2: Nur Ziffern (z.B. "1226", "126", "12326") */
+    /* Mindestens 3 Ziffern, letzte 2 = Jahr, Rest = lfd_nr */
+    gsize len = strlen(regnr_str);
+    if (len < 3) {
         return FALSE;
     }
     
-    *lfd_nr = (guint)g_ascii_strtoull(parts[0], NULL, 10);
-    *year = (guint)g_ascii_strtoull(parts[1], NULL, 10);
+    /* Prüfen ob alle Zeichen Ziffern sind */
+    for (gsize i = 0; i < len; i++) {
+        if (!g_ascii_isdigit(regnr_str[i])) {
+            return FALSE;
+        }
+    }
+    
+    /* Letzte 2 Ziffern = Jahr */
+    gchar *year_str = g_strndup(regnr_str + (len - 2), 2);
+    *year = (guint)g_ascii_strtoull(year_str, NULL, 10);
+    g_free(year_str);
     
     if (*year < 100) {
         *year += 2000;
     }
     
-    g_strfreev(parts);
+    /* Rest = lfd. Nr. */
+    gchar *lfd_str = g_strndup(regnr_str, len - 2);
+    *lfd_nr = (guint)g_ascii_strtoull(lfd_str, NULL, 10);
+    g_free(lfd_str);
+    
     return (*lfd_nr > 0 && *year >= 2000);
 }
 
@@ -547,17 +580,94 @@ static gboolean delete_node(SondModuleAktePrivate *priv, gint64 node_id, GError 
  * UI Event Handlers
  * ======================================================================== */
 
+/* Callback-Daten für neuen Akte Dialog */
+typedef struct {
+    SondModuleAktePrivate *priv;
+    guint lfd_nr;
+    guint year;
+} NewAkteDialogData;
+
+static void on_new_akte_dialog_response(GObject *source, GAsyncResult *result, gpointer user_data) {
+    GtkAlertDialog *dialog = GTK_ALERT_DIALOG(source);
+    NewAkteDialogData *data = (NewAkteDialogData *)user_data;
+    SondModuleAktePrivate *priv = data->priv;
+    guint lfd_nr = data->lfd_nr;
+    guint year = data->year;
+    
+    GError *error = NULL;
+    int button = gtk_alert_dialog_choose_finish(dialog, result, &error);
+    
+    if (error) {
+        LOG_ERROR("Dialog error: %s\n", error->message);
+        g_error_free(error);
+        g_free(data);
+        return;
+    }
+    
+    /* button == 0 → "Ja", button == 1 → "Nein" */
+    if (button == 0) {
+        /* Benutzer hat "Ja" geklickt - neue Akte SOFORT anlegen und speichern! */
+        if (priv->current_node) {
+            g_object_unref(priv->current_node);
+        }
+        
+        priv->current_node = sond_graph_node_new();
+        sond_graph_node_set_label(priv->current_node, "Akte");
+        
+        /* RegNr setzen */
+        gchar *lfd_str = g_strdup_printf("%u", lfd_nr);
+        gchar *year_str = g_strdup_printf("%u", year);
+        const gchar *values[] = {year_str, lfd_str};  /* Jahr ZUERST, dann lfd_nr */
+        sond_graph_node_set_property(priv->current_node, "regnr", values, 2);
+        g_free(lfd_str);
+        g_free(year_str);
+        
+        /* Status = draft setzen */
+        sond_graph_node_set_property_string(priv->current_node, "status", "draft");
+        
+        g_print("[AKTE] Calling sond_client_create_and_lock_node now...\n");
+        
+        /* SOFORT in DB speichern UND locken (atomar)! */
+        GError *save_error = NULL;
+        if (!sond_client_create_and_lock_node(priv->client, priv->current_node, 
+                                              "Bearbeitung", &save_error)) {
+            gchar *msg = g_strdup_printf("Fehler beim Anlegen der Akte: %s",
+                                        save_error ? save_error->message : "Unbekannt");
+            show_error_dialog(priv->main_widget, "Fehler", msg);
+            g_free(msg);
+            if (save_error) g_error_free(save_error);
+            g_object_unref(priv->current_node);
+            priv->current_node = NULL;
+            g_free(data);
+            return;
+        }
+        
+        /* Lock ist jetzt gesetzt */
+        
+        priv->is_new_from_entry = TRUE;
+        
+        update_ui_from_node(priv);
+        set_akte_state(priv, AKTE_STATE_EDITING);
+        
+        LOG_INFO("Neue Akte mit RegNr %u/%u angelegt und gespeichert (ID: %" G_GINT64_FORMAT ")\n",
+                lfd_nr, year, sond_graph_node_get_id(priv->current_node));
+    } else {
+        /* Benutzer hat "Nein" geklickt - Abbruch */
+        LOG_INFO("Anlegen neue Akte %u/%u abgebrochen\n", lfd_nr, year);
+    }
+    
+    g_free(data);
+}
+
 static void on_regnr_entry_activate(GtkEntry *entry, SondModuleAktePrivate *priv) {
     const gchar *regnr_text = gtk_editable_get_text(GTK_EDITABLE(entry));
     
     guint lfd_nr, year;
     if (!parse_regnr(regnr_text, &lfd_nr, &year)) {
         show_error_dialog(priv->main_widget, "Ungültiges Format",
-                         "Bitte RegNr im Format '23/26' eingeben.");
+                         "Bitte RegNr im Format '12/26' eingeben.");
         return;
     }
-    
-    LOG_INFO("Suche Akte %u/%u...\n", lfd_nr, year);
     
     GError *error = NULL;
     SondGraphNode *node = search_node_by_regnr(priv, lfd_nr, year, &error);
@@ -573,7 +683,6 @@ static void on_regnr_entry_activate(GtkEntry *entry, SondModuleAktePrivate *priv
         update_ui_from_node(priv);
         set_akte_state(priv, AKTE_STATE_EDITING);
         
-        LOG_INFO("Akte %u/%u geladen\n", lfd_nr, year);
         return;
     }
     
@@ -589,65 +698,59 @@ static void on_regnr_entry_activate(GtkEntry *entry, SondModuleAktePrivate *priv
     }
     
     /* Bestätigung für neue Akte */
-    // TODO: Hier sollte ein richtiger Dialog kommen
-    // Für jetzt: Einfach anlegen
+    gchar *regnr_display = format_regnr(lfd_nr, year);
+    gchar *message = g_strdup_printf(
+        "Akte %s existiert nicht.\n\nNeue Akte mit dieser Registernummer anlegen?",
+        regnr_display);
+    g_free(regnr_display);
     
-    if (priv->current_node) {
-        g_object_unref(priv->current_node);
-    }
+    GtkAlertDialog *dialog = gtk_alert_dialog_new("Akte nicht gefunden");
+    gtk_alert_dialog_set_detail(dialog, message);
+    g_free(message);
     
-    priv->current_node = sond_graph_node_new();
-    sond_graph_node_set_label(priv->current_node, "Akte");
+    const char *buttons[] = {"Ja", "Nein", NULL};
+    gtk_alert_dialog_set_buttons(dialog, buttons);
+    gtk_alert_dialog_set_default_button(dialog, 0);  /* "Ja" als Standard */
+    gtk_alert_dialog_set_cancel_button(dialog, 1);   /* "Nein" als Abbruch */
+    gtk_alert_dialog_set_modal(dialog, TRUE);
     
-    gchar *lfd_str = g_strdup_printf("%u", lfd_nr);
-    gchar *year_str = g_strdup_printf("%u", year);
-    const gchar *values[] = {year_str, lfd_str};  /* Jahr ZUERST, dann lfd_nr */
-    sond_graph_node_set_property(priv->current_node, "regnr", values, 2);
-    g_free(lfd_str);
-    g_free(year_str);
+    /* Callback-Daten vorbereiten */
+    NewAkteDialogData *data = g_new0(NewAkteDialogData, 1);
+    data->priv = priv;
+    data->lfd_nr = lfd_nr;
+    data->year = year;
     
-    priv->is_new_from_entry = TRUE;
+    gtk_alert_dialog_choose(dialog,
+                           GTK_WINDOW(gtk_widget_get_root(priv->main_widget)),
+                           NULL,  /* cancellable */
+                           on_new_akte_dialog_response,
+                           data);
     
-    update_ui_from_node(priv);
-    set_akte_state(priv, AKTE_STATE_EDITING);
-    
-    LOG_INFO("Neue Akte mit RegNr %u/%u (manuell) vorbereitet\n", lfd_nr, year);
+    g_object_unref(dialog);
 }
 
 static void on_neue_akte_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
-    LOG_INFO("Erstelle neue Akte mit automatischer RegNr...\n");
-    
-    guint lfd_nr, year;
-    GError *error = NULL;
-    
-    if (!get_next_regnr(priv, &lfd_nr, &year, &error)) {
-        gchar *msg = g_strdup_printf("Fehler: %s", error ? error->message : "Unbekannter Fehler");
-        show_error_dialog(priv->main_widget, "RegNr-Ermittlung fehlgeschlagen", msg);
-        g_free(msg);
-        if (error) g_error_free(error);
-        return;
-    }
-    
     if (priv->current_node) {
         g_object_unref(priv->current_node);
     }
     
+    /* Leeren Node anlegen (nur lokal, NICHT in DB!) */
     priv->current_node = sond_graph_node_new();
     sond_graph_node_set_label(priv->current_node, "Akte");
-    
-    gchar *lfd_str = g_strdup_printf("%u", lfd_nr);
-    gchar *year_str = g_strdup_printf("%u", year);
-    const gchar *values[] = {year_str, lfd_str};  /* Jahr ZUERST, dann lfd_nr */
-    sond_graph_node_set_property(priv->current_node, "regnr", values, 2);
-    g_free(lfd_str);
-    g_free(year_str);
+    /* KEINE RegNr setzen - wird erst beim Speichern vergeben! */
     
     priv->is_new_from_entry = FALSE;
     
-    update_ui_from_node(priv);
-    set_akte_state(priv, AKTE_STATE_CREATING);
+    /* Entry insensitiv machen + Placeholder */
+    gtk_widget_set_sensitive(priv->regnr_entry, FALSE);
+    gtk_editable_set_text(GTK_EDITABLE(priv->regnr_entry), "Neue Akte");
     
-    LOG_INFO("Neue Akte mit RegNr %u/%u erstellt\n", lfd_nr, year);
+    /* Felder leer lassen */
+    gtk_editable_set_text(GTK_EDITABLE(priv->entry_kurzbezeichnung), "");
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(priv->textview_gegenstand));
+    gtk_text_buffer_set_text(buffer, "", -1);
+    
+    set_akte_state(priv, AKTE_STATE_CREATING);
 }
 
 static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
@@ -655,6 +758,36 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
         show_error_dialog(priv->main_widget, "Nichts zu speichern",
                          "Bitte erst eine Akte laden oder neu erstellen.");
         return;
+    }
+    
+    /* Prüfen ob Node eine RegNr hat (von "Neue Akte"-Button könnte sie fehlen) */
+    GPtrArray *regnr_values = sond_graph_node_get_property(priv->current_node, "regnr");
+    gboolean has_regnr = (regnr_values != NULL && regnr_values->len == 2);
+    if (regnr_values) {
+        g_ptr_array_unref(regnr_values);
+    }
+    
+    if (!has_regnr) {
+        /* Keine RegNr vorhanden - jetzt erst vergeben! */
+        guint lfd_nr, year;
+        GError *error = NULL;
+        
+        if (!get_next_regnr(priv, &lfd_nr, &year, &error)) {
+            gchar *msg = g_strdup_printf("Fehler bei RegNr-Vergabe: %s",
+                                        error ? error->message : "Unbekannt");
+            show_error_dialog(priv->main_widget, "RegNr-Vergabe fehlgeschlagen", msg);
+            g_free(msg);
+            if (error) g_error_free(error);
+            return;
+        }
+        
+        /* RegNr setzen */
+        gchar *lfd_str = g_strdup_printf("%u", lfd_nr);
+        gchar *year_str = g_strdup_printf("%u", year);
+        const gchar *values[] = {year_str, lfd_str};
+        sond_graph_node_set_property(priv->current_node, "regnr", values, 2);
+        g_free(lfd_str);
+        g_free(year_str);
     }
     
     /* Felder in Node übernehmen */
@@ -672,10 +805,17 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
     }
     g_free(gegenstand);
     
+    /* Status auf "complete" setzen (falls es "draft" war) */
+    sond_graph_node_set_property_string(priv->current_node, "status", "complete");
+    
     /* Speichern */
     GError *error = NULL;
     if (save_node(priv, &error)) {
         priv->is_new_from_entry = FALSE; /* Nach Speichern nicht mehr löschen */
+        
+        /* UI mit RegNr updaten (falls sie gerade erst vergeben wurde) */
+        update_ui_from_node(priv);
+        
         show_info_dialog(priv->main_widget, "Gespeichert", "Akte wurde erfolgreich gespeichert.");
     } else {
         gchar *msg = g_strdup_printf("Fehler: %s", error ? error->message : "Unbekannt");
@@ -688,6 +828,16 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
 static void on_ok_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
     /* Erst speichern */
     on_speichern_clicked(button, priv);
+    
+    /* Lock freigeben falls Node in DB */
+    if (priv->current_node && sond_graph_node_get_id(priv->current_node) > 0) {
+        gint64 node_id = sond_graph_node_get_id(priv->current_node);
+        GError *error = NULL;
+        if (!sond_client_unlock_node(priv->client, node_id, &error)) {
+            LOG_ERROR("Unlock fehlgeschlagen: %s\n", error ? error->message : "Unbekannt");
+            if (error) g_error_free(error);
+        }
+    }
     
     /* Dann zurücksetzen */
     if (priv->current_node) {
@@ -709,14 +859,27 @@ static void on_abbrechen_clicked(GtkButton *button, SondModuleAktePrivate *priv)
         gint64 node_id = sond_graph_node_get_id(priv->current_node);
         LOG_INFO("Lösche nicht gespeicherte Entry-Akte (ID %" G_GINT64_FORMAT ")\n", node_id);
         
+        /* Erst Unlock, dann Delete */
         GError *error = NULL;
+        if (!sond_client_unlock_node(priv->client, node_id, &error)) {
+            LOG_ERROR("Unlock fehlgeschlagen: %s\n", error ? error->message : "Unbekannt");
+            if (error) g_error_free(error);
+        }
+        
+        error = NULL;
         if (!delete_node(priv, node_id, &error)) {
             LOG_ERROR("Fehler beim Löschen der Akte: %s\n", error ? error->message : "Unbekannt");
             if (error) g_error_free(error);
         }
+    } else if (priv->current_node && sond_graph_node_get_id(priv->current_node) > 0) {
+        /* Bestehende Akte: Nur Unlock */
+        gint64 node_id = sond_graph_node_get_id(priv->current_node);
+        GError *error = NULL;
+        if (!sond_client_unlock_node(priv->client, node_id, &error)) {
+            LOG_ERROR("Unlock fehlgeschlagen: %s\n", error ? error->message : "Unbekannt");
+            if (error) g_error_free(error);
+        }
     }
-    
-    /* TODO: Unlock */
     
     /* Zurücksetzen */
     if (priv->current_node) {
@@ -761,7 +924,6 @@ GtkWidget* sond_module_akte_new(SondClient *client) {
     gtk_box_append(GTK_BOX(top_box), regnr_label);
 
     priv->regnr_entry = gtk_entry_new();
-    gtk_entry_set_placeholder_text(GTK_ENTRY(priv->regnr_entry), "23/26");
     gtk_widget_set_hexpand(priv->regnr_entry, TRUE);
     g_signal_connect(priv->regnr_entry, "activate", G_CALLBACK(on_regnr_entry_activate), priv);
     gtk_box_append(GTK_BOX(top_box), priv->regnr_entry);
