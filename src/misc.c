@@ -204,7 +204,7 @@ gint ask_question(GtkWidget *window, const gchar *title, const gchar *ja,
 	return res;
 }
 
-gint allg_string_array_index_holen(GPtrArray *array, gchar *element) {
+gint find_string_in_array(GPtrArray *array, gchar *element) {
 	for (gint i = 0; i < array->len; i++)
 		if (!g_strcmp0(g_ptr_array_index(array, i), element))
 			return i;
@@ -213,15 +213,15 @@ gint allg_string_array_index_holen(GPtrArray *array, gchar *element) {
 }
 
 gchar*
-add_string(gchar *old_string, gchar *add_string) {
+add_string(gchar *old_string, gchar *string_to_add) {
 	gchar *new_string = NULL;
 
 	if (old_string)
-		new_string = g_strconcat(old_string, add_string, NULL);
+		new_string = g_strconcat(old_string, string_to_add, NULL);
 	else
-		new_string = g_strdup(add_string);
+		new_string = g_strdup(string_to_add);
 	g_free(old_string);
-	g_free(add_string);
+	g_free(string_to_add);
 
 	return new_string;
 }
@@ -240,7 +240,7 @@ utf8_to_local_filename(const gchar *utf8) {
 	return local_filename; //muß g_freed werden!
 }
 
-gint string_to_guint(const gchar *string, guint *zahl) {
+gint string_to_guint(const gchar *string, guint *result_number) {
 	gboolean is_guint = TRUE;
 	if (!strlen(string))
 		is_guint = FALSE;
@@ -252,7 +252,7 @@ gint string_to_guint(const gchar *string, guint *zahl) {
 	}
 
 	if (is_guint) {
-		*zahl = atoi(string);
+		*result_number = atoi(string);
 		return 0;
 	} else
 		return -1;
@@ -263,7 +263,7 @@ choose_file(const GtkWidget *window, const gchar *path,
 		const gchar *title_text, gchar const* accept_text, gint action,
 		const gchar *ext) {
 	GtkWidget *dialog = NULL;
-	gint rc = 0;
+	gint response = 0;
 	gchar *dir_start = NULL;
 	gchar* filename = NULL;
 
@@ -284,8 +284,8 @@ choose_file(const GtkWidget *window, const gchar *path,
 	if (action == GTK_FILE_CHOOSER_ACTION_SAVE && ext)
 		gtk_file_chooser_set_current_name(GTK_FILE_CHOOSER(dialog), ext);
 
-	rc = gtk_dialog_run(GTK_DIALOG(dialog));
-	if (rc == GTK_RESPONSE_ACCEPT) {
+	response = gtk_dialog_run(GTK_DIALOG(dialog));
+	if (response == GTK_RESPONSE_ACCEPT) {
 		filename = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
 		for (gchar *p = filename; *p; p++) {
 		    if (*p == '\\') *p = '/';
