@@ -459,12 +459,13 @@ gboolean sond_client_unlock_node(SondClient *client,
         g_object_unref(msg);
         return FALSE;
     }
-    
+
     gboolean success = (status == 200);
     
     if (!success) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                   "Unlock failed with status %u", status);
+                   "Unlock failed with status %u: %s", status,
+				   g_bytes_get_data(response, NULL));
     }
     
     g_bytes_unref(response);

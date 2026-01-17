@@ -18,9 +18,9 @@
 
 #include "sond_module_akte.h"
 #include "../../sond_log_and_error.h"
-#include "../../sond_server/sond_graph/sond_graph_node.h"
-#include "../../sond_server/sond_graph/sond_graph_property.h"
-#include "../../sond_server/sond_graph/sond_graph_db.h"
+#include "../../sond_graph/sond_graph_node.h"
+#include "../../sond_graph/sond_graph_property.h"
+#include "../../sond_graph/sond_graph_db.h"
 
 #include <libsoup/soup.h>
 #include <json-glib/json-glib.h>
@@ -217,14 +217,14 @@ static void update_ui_from_node(SondModuleAktePrivate *priv) {
     }
     
     /* Kurzbezeichnung */
-    gchar *kurzbezeichnung = sond_graph_node_get_property_string(priv->current_node, "kurzbezeichnung");
+    gchar *kurzbezeichnung = sond_graph_node_get_property_string(priv->current_node, "kurzb");
     if (kurzbezeichnung) {
         gtk_editable_set_text(GTK_EDITABLE(priv->entry_kurzbezeichnung), kurzbezeichnung);
         g_free(kurzbezeichnung);
     }
     
     /* Gegenstand */
-    gchar *gegenstand = sond_graph_node_get_property_string(priv->current_node, "gegenstand");
+    gchar *gegenstand = sond_graph_node_get_property_string(priv->current_node, "ggstd");
     if (gegenstand) {
         gtk_editable_set_text(GTK_EDITABLE(priv->textview_gegenstand), gegenstand);  /* Jetzt Entry */
         g_free(gegenstand);
@@ -762,7 +762,7 @@ static void on_new_akte_dialog_response(GObject *source, GAsyncResult *result, g
         g_free(year_str);
         
         /* Status = draft setzen */
-        sond_graph_node_set_property_string(priv->current_node, "status", "draft");
+        sond_graph_node_set_property_string(priv->current_node, "stat", "draft");
         
         g_print("[AKTE] Calling sond_client_create_and_lock_node now...\n");
         
@@ -977,16 +977,16 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
             /* Felder in Node übernehmen (vor dem Speichern!) */
             const gchar *kurzbezeichnung = gtk_editable_get_text(GTK_EDITABLE(priv->entry_kurzbezeichnung));
             if (kurzbezeichnung && strlen(kurzbezeichnung) > 0) {
-                sond_graph_node_set_property_string(priv->current_node, "kurzbezeichnung", kurzbezeichnung);
+                sond_graph_node_set_property_string(priv->current_node, "kurzb", kurzbezeichnung);
             }
             
             const gchar *gegenstand = gtk_editable_get_text(GTK_EDITABLE(priv->textview_gegenstand));  /* Jetzt Entry */
             if (gegenstand && strlen(gegenstand) > 0) {
-                sond_graph_node_set_property_string(priv->current_node, "gegenstand", gegenstand);
+                sond_graph_node_set_property_string(priv->current_node, "ggstd", gegenstand);
             }
             
             /* Status auf "complete" setzen */
-            sond_graph_node_set_property_string(priv->current_node, "status", "complete");
+            sond_graph_node_set_property_string(priv->current_node, "stat", "complete");
             
             /* Versuch zu speichern */
             error = NULL;
@@ -1048,16 +1048,16 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
     /* RegNr vorhanden (manuelle Eingabe oder bereits gespeichert) */
     const gchar *kurzbezeichnung = gtk_editable_get_text(GTK_EDITABLE(priv->entry_kurzbezeichnung));
     if (kurzbezeichnung && strlen(kurzbezeichnung) > 0) {
-        sond_graph_node_set_property_string(priv->current_node, "kurzbezeichnung", kurzbezeichnung);
+        sond_graph_node_set_property_string(priv->current_node, "kurzb", kurzbezeichnung);
     }
     
     const gchar *gegenstand = gtk_editable_get_text(GTK_EDITABLE(priv->textview_gegenstand));  /* Jetzt Entry */
     if (gegenstand && strlen(gegenstand) > 0) {
-        sond_graph_node_set_property_string(priv->current_node, "gegenstand", gegenstand);
+        sond_graph_node_set_property_string(priv->current_node, "ggstd", gegenstand);
     }
     
     /* Status auf "complete" setzen (falls es "draft" war) */
-    sond_graph_node_set_property_string(priv->current_node, "status", "complete");
+    sond_graph_node_set_property_string(priv->current_node, "stat", "complete");
     
     /* Speichern */
     GError *error = NULL;

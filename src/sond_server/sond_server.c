@@ -24,9 +24,9 @@
 #include "sond_server.h"
 #include "sond_server_seafile.h"
 #include "sond_server_auth.h"
-#include "sond_graph/sond_graph_db.h"
-#include "sond_graph/sond_graph_node.h"
-#include "sond_graph/sond_graph_edge.h"
+#include "../sond_graph/sond_graph_db.h"
+#include "../sond_graph/sond_graph_node.h"
+#include "../sond_graph/sond_graph_edge.h"
 
 #include "../sond_log_and_error.h"
 

@@ -19,6 +19,7 @@
 #include "sond_login_dialog.h"
 #include "../sond_log_and_error.h"
 
+#include <gdk/gdk.h>
 #include <libsoup/soup.h>
 #include <json-glib/json-glib.h>
 
@@ -174,6 +175,19 @@ static void on_cancel_clicked(GtkButton *button, LoginDialogData *data) {
     }
 }
 
+static gboolean on_password_key_pressed(GtkEventControllerKey *controller,
+                                         guint keyval,
+                                         guint keycode,
+                                         GdkModifierType state,
+                                         LoginDialogData *data) {
+    if (keyval == GDK_KEY_Return || keyval == GDK_KEY_KP_Enter) {
+        /* Enter-Taste gedrückt - Login auslösen */
+        on_login_clicked(NULL, data);
+    }
+    /* WICHTIG: Event weiterpropagieren damit GTK seine internen Handler ausführen kann */
+    return GDK_EVENT_PROPAGATE;
+}
+
 LoginResult* sond_login_dialog_show(GtkWindow *parent,
                                      const gchar *server_url,
                                      const gchar *error_message) {
@@ -251,8 +265,8 @@ LoginResult* sond_login_dialog_show(GtkWindow *parent,
     
     /* Enter-Taste im Password-Feld löst Login aus */
     GtkEventController *controller = gtk_event_controller_key_new();
-    g_signal_connect_swapped(controller, "key-pressed",
-                             G_CALLBACK(gtk_widget_activate), login_button);
+    g_signal_connect(controller, "key-pressed",
+                     G_CALLBACK(on_password_key_pressed), &data);
     gtk_widget_add_controller(data.password_entry, controller);
     
     /* Dialog zeigen */

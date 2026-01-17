@@ -26,7 +26,7 @@
 #include "sond_graph_edge.h"
 #include "sond_graph_property.h"
 
-#include "../../sond_log_and_error.h"
+#include "../sond_log_and_error.h"
 
 #include <json-glib/json-glib.h>
 #include <string.h>
