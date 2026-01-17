@@ -458,6 +458,149 @@ static gboolean get_next_regnr(SondModuleAktePrivate *priv, guint *lfd_nr, guint
     return TRUE;
 }
 
+/**
+ * create_seafile_library:
+ * 
+ * Erstellt eine Seafile Library für eine Akte.
+ * Library-Name = "Jahr-LfdNr" (z.B. "2026-23")
+ */
+static gchar* create_seafile_library(SondModuleAktePrivate *priv,
+                                      guint year, guint lfd_nr,
+                                      GError **error) {
+    /* Library-Name: Jahr-LfdNr */
+    gchar *library_name = g_strdup_printf("%u-%u", year, lfd_nr);
+    
+    LOG_INFO("Erstelle Seafile Library '%s'...\n", library_name);
+    
+    /* JSON Body erstellen */
+    JsonBuilder *builder = json_builder_new();
+    json_builder_begin_object(builder);
+    json_builder_set_member_name(builder, "name");
+    json_builder_add_string_value(builder, library_name);
+    json_builder_set_member_name(builder, "desc");
+    gchar *desc = g_strdup_printf("Akte %u/%u", lfd_nr, year % 100);
+    json_builder_add_string_value(builder, desc);
+    g_free(desc);
+    json_builder_end_object(builder);
+    
+    JsonGenerator *gen = json_generator_new();
+    json_generator_set_root(gen, json_builder_get_root(builder));
+    gchar *request_json = json_generator_to_data(gen, NULL);
+    g_object_unref(gen);
+    g_object_unref(builder);
+    
+    /* HTTP-Request */
+    gchar *url = g_strdup_printf("%s/seafile/library", sond_client_get_server_url(priv->client));
+    
+    SoupSession *session = soup_session_new();
+    SoupMessage *msg = soup_message_new("POST", url);
+    g_free(url);
+    
+    soup_message_set_request_body_from_bytes(msg, "application/json",
+        g_bytes_new_take(request_json, strlen(request_json)));
+    
+    GBytes *response = soup_session_send_and_read(session, msg, NULL, error);
+    
+    if (!response) {
+        g_free(library_name);
+        g_object_unref(msg);
+        g_object_unref(session);
+        return NULL;
+    }
+    
+    guint status = soup_message_get_status(msg);
+    if (status != 200) {
+        gsize size;
+        const gchar *body = g_bytes_get_data(response, &size);
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "Server gab Status %u zurück: %.*s", status, (int)size, body);
+        g_free(library_name);
+        g_bytes_unref(response);
+        g_object_unref(msg);
+        g_object_unref(session);
+        return NULL;
+    }
+    
+    /* Response parsen */
+    gsize size;
+    const gchar *data = g_bytes_get_data(response, &size);
+    
+    JsonParser *parser = json_parser_new();
+    gchar *library_id = NULL;
+    
+    if (json_parser_load_from_data(parser, data, size, error)) {
+        JsonNode *root = json_parser_get_root(parser);
+        JsonObject *obj = json_node_get_object(root);
+        
+        if (json_object_has_member(obj, "data")) {
+            JsonObject *data_obj = json_object_get_object_member(obj, "data");
+            if (json_object_has_member(data_obj, "library_id")) {
+                const gchar *lib_id = json_object_get_string_member(data_obj, "library_id");
+                library_id = g_strdup(lib_id);
+                LOG_INFO("Seafile Library '%s' erstellt (ID: %s)\n", library_name, library_id);
+            }
+        }
+    }
+    
+    g_object_unref(parser);
+    g_bytes_unref(response);
+    g_object_unref(msg);
+    g_object_unref(session);
+    g_free(library_name);
+    
+    if (!library_id) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "Seafile Library konnte nicht erstellt werden");
+    }
+    
+    return library_id;
+}
+
+/**
+ * delete_seafile_library:
+ * 
+ * Löscht eine Seafile Library (Rollback bei Fehler)
+ */
+static gboolean delete_seafile_library(SondModuleAktePrivate *priv,
+                                        const gchar *library_id,
+                                        GError **error) {
+    LOG_INFO("Lösche Seafile Library (ID: %s)...\n", library_id);
+    
+    gchar *url = g_strdup_printf("%s/seafile/library/%s",
+                                 sond_client_get_server_url(priv->client),
+                                 library_id);
+    
+    SoupSession *session = soup_session_new();
+    SoupMessage *msg = soup_message_new("DELETE", url);
+    g_free(url);
+    
+    GBytes *response = soup_session_send_and_read(session, msg, NULL, error);
+    
+    if (!response) {
+        g_object_unref(msg);
+        g_object_unref(session);
+        return FALSE;
+    }
+    
+    guint status = soup_message_get_status(msg);
+    gboolean success = (status == 200 || status == 204);
+    
+    if (!success) {
+        gsize size;
+        const gchar *body = g_bytes_get_data(response, &size);
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "Server gab Status %u zurück: %.*s", status, (int)size, body);
+    } else {
+        LOG_INFO("Seafile Library gelöscht (ID: %s)\n", library_id);
+    }
+    
+    g_bytes_unref(response);
+    g_object_unref(msg);
+    g_object_unref(session);
+    
+    return success;
+}
+
 static gboolean save_node(SondModuleAktePrivate *priv, GError **error) {
     if (!priv->current_node) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
@@ -814,6 +957,23 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
             
             LOG_INFO("Versuch %d/%d: RegNr %u/%u vergeben\n", attempt + 1, MAX_RETRIES, lfd_nr, year);
             
+            /* ZUERST: Seafile Library erstellen! */
+            gchar *library_id = NULL;
+            GError *lib_error = NULL;
+            library_id = create_seafile_library(priv, year, lfd_nr, &lib_error);
+            
+            if (!library_id) {
+                /* Library-Erstellung fehlgeschlagen */
+                gchar *msg = g_strdup_printf("Fehler beim Erstellen der Seafile Library: %s",
+                                            lib_error ? lib_error->message : "Unbekannt");
+                show_error_dialog(priv->main_widget, "Library-Erstellung fehlgeschlagen", msg);
+                g_free(msg);
+                if (lib_error) g_error_free(lib_error);
+                return;
+            }
+            
+            LOG_INFO("Seafile Library erstellt (ID: %s), speichere jetzt Node...\n", library_id);
+            
             /* Felder in Node übernehmen (vor dem Speichern!) */
             const gchar *kurzbezeichnung = gtk_editable_get_text(GTK_EDITABLE(priv->entry_kurzbezeichnung));
             if (kurzbezeichnung && strlen(kurzbezeichnung) > 0) {
@@ -841,11 +1001,22 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
                 show_info_dialog(priv->main_widget, "Gespeichert", msg);
                 g_free(msg);
                 g_free(regnr_display);
+                g_free(library_id);
                 
                 LOG_INFO("Akte erfolgreich gespeichert mit RegNr %u/%u (nach %d Versuch(en))\n",
                         lfd_nr, year, attempt + 1);
             } else {
-                /* Fehler beim Speichern */
+                /* Fehler beim Speichern - Library zurückrollen! */
+                LOG_ERROR("Node-Speichern fehlgeschlagen, rolle Seafile Library zurück...\n");
+                
+                GError *del_error = NULL;
+                if (!delete_seafile_library(priv, library_id, &del_error)) {
+                    LOG_ERROR("Rollback der Library fehlgeschlagen: %s\n",
+                             del_error ? del_error->message : "Unbekannt");
+                    if (del_error) g_error_free(del_error);
+                }
+                g_free(library_id);
+                
                 if (error && (error->code == 409 || 
                              (error->message && strstr(error->message, "Duplicate")) ||
                              (error->message && strstr(error->message, "already exists")))) {

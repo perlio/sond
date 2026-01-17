@@ -87,7 +87,6 @@ int main(int argc, char *argv[]) {
     }
     
     /* Login-Dialog zeigen (modal, blocking) */
-    LOG_INFO("Showing login dialog...\n");
     LoginResult *login_result = sond_login_dialog_show(NULL,
                                                         sond_client_get_server_url(client),
                                                         NULL);
@@ -101,7 +100,6 @@ int main(int argc, char *argv[]) {
     
     /* Auth-Informationen im Client setzen */
     sond_client_set_auth(client, login_result->username, login_result->session_token);
-    LOG_INFO("Login successful for user '%s'\n", login_result->username);
     
     /* Auth-Failed-Callback setzen */
     sond_client_set_auth_failed_callback(client, on_auth_failed, NULL);

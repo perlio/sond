@@ -43,17 +43,11 @@ GQuark sond_server_error_quark(void) {
 struct _SondServer {
     GObject parent_instance;
 
-    SoupServer *soup_server;
-    MYSQL *db_conn;
     guint port;
     gboolean running;
 
-    /* DB Config */
-    gchar *db_host;
-    gint db_port;
-    gchar *db_name;
-    gchar *db_user;
-    gchar *db_password;
+    SoupServer *soup_server;
+    MYSQL *db_conn;
 
     /* Seafile Config */
     gchar *seafile_url;           // z.B. "https://seafile.example.com"
@@ -1067,10 +1061,6 @@ static void sond_server_finalize(GObject *object) {
         mysql_close(self->db_conn);
     }
 
-    g_free(self->db_host);
-    g_free(self->db_user);
-    g_free(self->db_password);
-    g_free(self->db_name);
     g_free(self->seafile_url);
     g_free(self->auth_token);
 
@@ -1085,10 +1075,6 @@ static void sond_server_class_init(SondServerClass *klass) {
 static void sond_server_init(SondServer *self) {
     self->soup_server = NULL;
     self->db_conn = NULL;
-    self->db_host = NULL;
-    self->db_user = NULL;
-    self->db_password = NULL;
-    self->db_name = NULL;
     self->port = 0;
     self->running = FALSE;
     self->seafile_url = NULL;
@@ -1101,14 +1087,31 @@ static void sond_server_init(SondServer *self) {
  * Public API
  * ======================================================================== */
 
-const gchar* sond_server_get_seafile_url(SondServer *server) {
-    g_return_val_if_fail(SOND_IS_SERVER(server), NULL);
-    return server->seafile_url;
+struct DataConfig {
+	gchar *db_host;
+	gint db_port;
+	gchar *db_name;
+	gchar *db_user;
+	gchar *db_passfile;
+	gchar *sf_user;
+	gchar *sf_passfile;
+};
+
+static void data_config_free(struct DataConfig *data_config) {
+	g_free(data_config->db_host);
+	g_free(data_config->db_name);
+	g_free(data_config->db_user);
+	g_free(data_config->db_passfile);
+	g_free(data_config->sf_user);
+	g_free(data_config->sf_passfile);
 }
 
 static gboolean sond_server_load_config(SondServer *server,
                                   const gchar *config_file,
+								  struct DataConfig *data_config,
                                   GError **error) {
+	GError *error_tmp = NULL;
+
     GKeyFile *keyfile = g_key_file_new();
 
     if (!g_key_file_load_from_file(keyfile, config_file,
@@ -1118,90 +1121,69 @@ static gboolean sond_server_load_config(SondServer *server,
     }
 
     /* === Server Config === */
-    gint port = g_key_file_get_integer(keyfile, "server", "port", NULL);
-    if (port > 0) {
-    	server->port = port;
+    server->port = g_key_file_get_integer(keyfile, "server", "port", &error_tmp);
+    if (!server->port) {
+    	LOG_WARN("Couldn't read port in config (error: '%s'), "
+				"using 35002\n", error_tmp->message);
+		g_clear_error(&error_tmp);
+		server->port = 35002;
     }
     
+    /* === MariaDB Config === */
+    data_config->db_host = g_key_file_get_string(keyfile, "mariadb", "host", &error_tmp);
+    if (!data_config->db_host) {
+    	LOG_WARN("Couldn't read host in config (error: '%s'), "
+    			"using 'localhost'\n", error_tmp->message);
+    	g_clear_error(&error_tmp);
+		data_config->db_host = g_strdup("localhost");
+	}
+
+    data_config->db_port = g_key_file_get_integer(keyfile, "mariadb", "port", &error_tmp);
+    if (!data_config->db_port) {
+    	LOG_WARN("Couldn't read port in config (error: '%s'), "
+    			"using 3306\n", error_tmp->message);
+    	g_clear_error(&error_tmp);
+		data_config->db_port = 3306;
+	}
+
+    data_config->db_name = g_key_file_get_string(keyfile, "mariadb", "database", error);
+    if (!data_config->db_name) {
+    	data_config_free(data_config);
+    	return FALSE;
+	}
+
+    data_config->db_user = g_key_file_get_string(keyfile, "mariadb", "username", error);
+    if (!data_config->db_user) {
+    	data_config_free(data_config);
+    	return FALSE;
+	}
+
+    data_config->db_passfile = g_key_file_get_string(keyfile, "mariadb", "password_file", error);
+    if (!data_config->db_passfile) {
+    	data_config_free(data_config);
+    	return FALSE;
+	}
+
     /* === Auth Config === */
     server->session_lifetime_hours = g_key_file_get_integer(keyfile, "auth", 
                                                              "session_lifetime_hours", NULL);
     server->session_inactivity_minutes = g_key_file_get_integer(keyfile, "auth",
                                                                  "session_inactivity_minutes", NULL);
 
-    /* === MariaDB Config === */
-    server->db_host = g_key_file_get_string(keyfile, "mariadb", "host", NULL);
-    server->db_port = g_key_file_get_integer(keyfile, "mariadb", "port", NULL);
-    server->db_name = g_key_file_get_string(keyfile, "mariadb", "database", NULL);
-    server->db_user = g_key_file_get_string(keyfile, "mariadb", "username", NULL);
-
-    gchar *db_pass_file = g_key_file_get_string(keyfile, "mariadb", "password_file", NULL);
-    if (db_pass_file) {
-        gchar *db_password = NULL;
-        if (g_file_get_contents(db_pass_file, &db_password, NULL, error)) {
-            g_strstrip(db_password);
-            server->db_password = db_password;
-        } else {
-            g_prefix_error(error, "Failed to read MariaDB password file: ");
-            g_free(server->db_host);
-            server->db_host = NULL;
-            g_free(server->db_name);
-            server->db_name = NULL;
-            g_free(server->db_user);
-            server->db_user = NULL;
-            g_free(db_pass_file);
-            g_key_file_free(keyfile);
-            return FALSE;
-        }
-    }
-
     /* === Seafile Config === */
     server->seafile_url = g_key_file_get_string(keyfile, "seafile", "url", NULL);
-    gchar* seafile_user = g_key_file_get_string(keyfile, "seafile", "username", NULL);
-    gchar *sf_pass_file = g_key_file_get_string(keyfile, "seafile", "password_file", NULL);
+    data_config->sf_user = g_key_file_get_string(keyfile, "seafile", "username", NULL);
+    data_config->sf_passfile = g_key_file_get_string(keyfile, "seafile", "password_file", NULL);
     server->seafile_group_id = g_key_file_get_integer(keyfile, "seafile", "group_id", NULL);
-
-    if (seafile_user && sf_pass_file) {
-        gchar *sf_password = NULL;
-/*
-        if (g_file_get_contents(sf_pass_file, &sf_password, NULL, error)) {
-            g_strstrip(sf_password);
-
-            // Auth-Token holen
-            gchar *token = sond_server_seafile_get_auth_token(
-                server, seafile_user, sf_password, error);
-            // Passwort überschreiben
-            memset(sf_password, 0, strlen(sf_password));
-            g_free(sf_password);
-            if (!token) {
-                g_free(seafile_user);
-                g_free(sf_pass_file);
-                g_key_file_free(keyfile);
-                return FALSE;
-            }
-            server->auth_token = token;
-        } else {
-            g_prefix_error(error, "Failed to read Seafile password file: ");
-            g_free(seafile_user);
-            g_free(sf_pass_file);
-            g_key_file_free(keyfile);
-            return FALSE;
-        }
-*/
-    }
 
     g_key_file_free(keyfile);
     return TRUE;
 }
 
-static gboolean sond_server_prepare(SondServer*server,
-							 gchar const* config,
-                             GError **error) {
-    g_return_val_if_fail(config != NULL, FALSE);
-
-    if (!sond_server_load_config(server, config, error)) {
-		return FALSE;
-	}
+static gboolean sond_server_init_db_conn(SondServer *server,
+								 struct DataConfig *data_config,
+								 GError **error) {
+    gchar *db_password = NULL;
 
     /* MySQL verbinden */
     server->db_conn = mysql_init(NULL);
@@ -1211,18 +1193,31 @@ static gboolean sond_server_prepare(SondServer*server,
         return FALSE;
     }
 
-    gpointer suc = mysql_real_connect(server->db_conn, server->db_host,
-    		server->db_user, server->db_password, server->db_name, 0, NULL, 0);
+    //Passwort einlesen
+    if (data_config->db_passfile) {
+        if (g_file_get_contents(data_config->db_passfile, &db_password, NULL, error)) {
+            g_strstrip(db_password);
+        } else {
+            g_prefix_error(error, "Failed to read MariaDB password file: ");
+            mysql_close(server->db_conn);
+            server->db_conn = NULL;
+            return FALSE;
+		}
+    }
+
+    gpointer suc = mysql_real_connect(server->db_conn, data_config->db_host,
+    		data_config->db_user, db_password, data_config->db_name, 0, NULL, 0);
 
     // Passwort überschreiben
-	memset(server->db_password, 0, strlen(server->db_password));
-	g_free(server->db_password);
-	server->db_password = NULL;  /* Prevent double-free in finalize() */
+	memset(db_password, 0, strlen(db_password));
+	g_free(db_password);
+	db_password = NULL;  /* Prevent double-free in finalize() */
 
 	if (!suc) {
 		g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
 			   "MySQL connection failed: %s", mysql_error(server->db_conn));
 		mysql_close(server->db_conn);
+		server->db_conn = NULL;
         return FALSE;
     }
 
@@ -1231,8 +1226,59 @@ static gboolean sond_server_prepare(SondServer*server,
     if (!sond_graph_db_setup(server->db_conn, error)) {
         g_prefix_error(error, "Graph DB setup failed: ");
 		mysql_close(server->db_conn);
+		server->db_conn = NULL;
         return FALSE;
     }
+
+    return TRUE;
+}
+
+static gboolean sond_server_init_seafile(SondServer *server,
+							 struct DataConfig *data_config,
+							 GError **error) {
+    gchar *sf_password = NULL;
+
+    if (!g_file_get_contents(data_config->sf_passfile, &sf_password, NULL, error)) {
+        g_prefix_error(error, "Failed to read Seafile password file: ");
+        return FALSE;
+    }
+	g_strstrip(sf_password);
+
+	// Auth-Token holen
+	server->auth_token = sond_server_seafile_get_auth_token(
+		server, data_config->sf_user, sf_password, error);
+
+	// Passwort überschreiben
+	memset(sf_password, 0, strlen(sf_password));
+	g_free(sf_password);
+	if (!server->auth_token)
+		return FALSE;
+
+	return TRUE;
+}
+
+static gboolean sond_server_prepare(SondServer*server,
+							 gchar const* config,
+                             GError **error) {
+	struct DataConfig data_config = { 0 };
+
+    g_return_val_if_fail(config != NULL, FALSE);
+
+    if (!sond_server_load_config(server, config, &data_config, error)) {
+		return FALSE;
+	}
+
+    if (!sond_server_init_db_conn(server, &data_config, error)) {
+    	data_config_free(&data_config);
+		return FALSE;
+    }
+
+    if (!sond_server_init_seafile(server, &data_config, error)) {
+		data_config_free(&data_config);
+		return FALSE;
+    }
+
+    data_config_free(&data_config);
 
     /* SoupServer erstellen */
     server->soup_server = soup_server_new(NULL, NULL);
@@ -1271,9 +1317,25 @@ static gboolean sond_server_prepare(SondServer*server,
     soup_server_add_handler(server->soup_server, "/edge/save",
                            handle_edge_save, server, NULL);
 
-//    sond_server_seafile_register_handlers(server);
+    /* Seafile Endpoints registrieren */
+    sond_server_seafile_register_handlers(server);
 
     return TRUE;
+}
+
+/**
+ * session_cleanup_timeout:
+ *
+ * Periodischer Callback für Session-Cleanup.
+ */
+static gboolean session_cleanup_timeout(gpointer user_data) {
+    SondServer *server = SOND_SERVER(user_data);
+
+    if (server->session_manager) {
+        session_manager_cleanup_expired(server->session_manager);
+    }
+
+    return G_SOURCE_CONTINUE;  /* Weiter aufrufen */
 }
 
 static gboolean sond_server_start(SondServer *server, GError **error) {
@@ -1300,22 +1362,6 @@ static gboolean sond_server_start(SondServer *server, GError **error) {
     return TRUE;
 }
 
-/**
- * session_cleanup_timeout:
- *
- * Periodischer Callback für Session-Cleanup.
- */
-static gboolean session_cleanup_timeout(gpointer user_data) {
-    SondServer *server = SOND_SERVER(user_data);
-    
-    if (server->session_manager) {
-        session_manager_cleanup_expired(server->session_manager);
-    }
-    
-    return G_SOURCE_CONTINUE;  /* Weiter aufrufen */
-}
-
-#ifdef __linux__
 /* Globale Variablen für Signal-Handler */
 static GMainLoop *main_loop = NULL;
 static SondServer *server_instance = NULL;
@@ -1341,13 +1387,12 @@ static gboolean signal_handler(gpointer user_data) {
 
     return G_SOURCE_REMOVE;
 }
-#endif
 
 int main(int argc, char *argv[]) {
     GError *error = NULL;
     SondServer *server = NULL;
     GMainLoop *loop = NULL;
-    gchar *config_file = "/mnt/c/msys64/home/pkrieger/eclipse-workspace/sond/SondServer.conf";
+    gchar *config_file = "/etc/sond-server/sond-server.conf";
 
     logging_init("sond_server");
 
@@ -1401,4 +1446,28 @@ int main(int argc, char *argv[]) {
     LOG_INFO("Server stopped\n");
 
     return 0;
+}
+
+/* ========================================================================
+ * Public Accessors für Seafile-Integration
+ * ======================================================================== */
+
+gchar const* sond_server_get_seafile_url(SondServer *server) {
+    g_return_val_if_fail(SOND_IS_SERVER(server), NULL);
+    return g_strdup(server->seafile_url);
+}
+
+gchar* sond_server_get_seafile_token(SondServer *server) {
+    g_return_val_if_fail(SOND_IS_SERVER(server), NULL);
+    return g_strdup(server->auth_token);
+}
+
+guint sond_server_get_seafile_group_id(SondServer *server) {
+    g_return_val_if_fail(SOND_IS_SERVER(server), 0);
+    return server->seafile_group_id;
+}
+
+SoupServer* sond_server_get_soup_server(SondServer *server) {
+    g_return_val_if_fail(SOND_IS_SERVER(server), NULL);
+    return server->soup_server;
 }
