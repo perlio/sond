@@ -154,6 +154,40 @@ static void send_success_response(SoupServerMessage *msg,
 }
 
 /**
+ * check_authorization:
+ *
+ * Prüft Authorization-Header und validiert Session-Token.
+ * Sendet 401-Fehler bei ungültigem/fehlendem Token.
+ *
+ * Returns: TRUE wenn autorisiert, FALSE sonst (Response wurde bereits gesendet)
+ */
+static gboolean check_authorization(SondServer *server,
+                                    SoupServerMessage *msg,
+                                    const gchar **username) {
+    SoupMessageHeaders *headers = soup_server_message_get_request_headers(msg);
+    const gchar *auth_header = soup_message_headers_get_one(headers, "Authorization");
+
+    if (!auth_header || !g_str_has_prefix(auth_header, "Bearer ")) {
+        send_error_response(msg, SOUP_STATUS_UNAUTHORIZED,
+                           "Missing or invalid Authorization header");
+        return FALSE;
+    }
+
+    const gchar *token = auth_header + 7;  /* Skip "Bearer " */
+
+    if (!session_manager_validate(server->session_manager, token, username)) {
+        send_error_response(msg, SOUP_STATUS_UNAUTHORIZED,
+                           "Invalid or expired session");
+        return FALSE;
+    }
+
+    /* Activity updaten */
+    session_manager_update_activity(server->session_manager, token);
+
+    return TRUE;
+}
+
+/**
  * handle_auth_login:
  * POST /auth/login
  *
@@ -384,6 +418,12 @@ static void handle_node_save(SoupServer *soup_server,
         return;
     }
 
+    /* Auth-Check */
+    const gchar *username = NULL;
+    if (!check_authorization(server, msg, &username)) {
+        return;  /* 401 wurde bereits gesendet */
+    }
+
     /* Body lesen */
     SoupMessageBody *body = soup_server_message_get_request_body(msg);
     if (!body->data) {
@@ -444,6 +484,12 @@ static void handle_node_load(SoupServer *soup_server,
         return;
     }
 
+    /* Auth-Check */
+    const gchar *username = NULL;
+    if (!check_authorization(server, msg, &username)) {
+        return;  /* 401 wurde bereits gesendet */
+    }
+
     /* ID aus Path extrahieren: /node/load/123 */
     const char *id_str = strrchr(path, '/');
     if (!id_str || strlen(id_str) <= 1) {
@@ -501,6 +547,12 @@ static void handle_node_delete(SoupServer *soup_server,
         return;
     }
 
+    /* Auth-Check */
+    const gchar *username = NULL;
+    if (!check_authorization(server, msg, &username)) {
+        return;  /* 401 wurde bereits gesendet */
+    }
+
     /* ID aus Path extrahieren */
     const char *id_str = strrchr(path, '/');
     if (!id_str || strlen(id_str) <= 1) {
@@ -549,6 +601,12 @@ static void handle_node_save_with_edges(SoupServer *soup_server,
         send_error_response(msg, SOUP_STATUS_METHOD_NOT_ALLOWED,
                            "Only POST allowed");
         return;
+    }
+
+    /* Auth-Check */
+    const gchar *username = NULL;
+    if (!check_authorization(server, msg, &username)) {
+        return;  /* 401 wurde bereits gesendet */
     }
 
     SoupMessageBody *body = soup_server_message_get_request_body(msg);
@@ -605,6 +663,12 @@ static void handle_edge_save(SoupServer *soup_server,
         return;
     }
 
+    /* Auth-Check */
+    const gchar *username = NULL;
+    if (!check_authorization(server, msg, &username)) {
+        return;  /* 401 wurde bereits gesendet */
+    }
+
     SoupMessageBody *body = soup_server_message_get_request_body(msg);
     if (!body->data) {
         send_error_response(msg, SOUP_STATUS_BAD_REQUEST,
@@ -638,6 +702,12 @@ static void handle_node_search(SoupServer *soup_server,
         return;
     }
 
+    /* Auth-Check */
+    const gchar *username = NULL;
+    if (!check_authorization(server, msg, &username)) {
+        return;  /* 401 wurde bereits gesendet */
+    }
+
     SoupMessageBody *body = soup_server_message_get_request_body(msg);
     if (!body->data) {
         send_error_response(msg, SOUP_STATUS_BAD_REQUEST,
@@ -647,10 +717,15 @@ static void handle_node_search(SoupServer *soup_server,
 
     /* SearchCriteria aus JSON deserialisieren */
     GError *error = NULL;
+    
+    LOG_INFO("[DEBUG] Parsing search criteria from JSON...\n");
+    LOG_INFO("[DEBUG] Request body: %s\n", body->data ? body->data : "(null)");
+    
     SondGraphNodeSearchCriteria *criteria =
         sond_graph_node_search_criteria_from_json(body->data, &error);
 
     if (!criteria) {
+        LOG_ERROR("[DEBUG] Failed to parse criteria: %s\n", error ? error->message : "unknown");
         gchar *err_msg = g_strdup_printf("Invalid search criteria: %s",
                                         error ? error->message : "unknown");
         send_error_response(msg, SOUP_STATUS_BAD_REQUEST, err_msg);
@@ -658,12 +733,17 @@ static void handle_node_search(SoupServer *soup_server,
         g_clear_error(&error);
         return;
     }
+    
+    LOG_INFO("[DEBUG] Criteria parsed successfully, calling sond_graph_db_search_nodes...\n");
 
     /* Suche ausführen */
     GPtrArray *nodes = sond_graph_db_search_nodes(server->db_conn, criteria, &error);
     sond_graph_node_search_criteria_free(criteria);
+    
+    LOG_INFO("[DEBUG] Search returned, nodes=%p, error=%p\n", nodes, error);
 
     if (!nodes) {
+        LOG_ERROR("[DEBUG] Search failed: %s\n", error ? error->message : "unknown");
         gchar *err_msg = g_strdup_printf("Search failed: %s",
                                         error ? error->message : "unknown");
         send_error_response(msg, SOUP_STATUS_INTERNAL_SERVER_ERROR, err_msg);
@@ -671,6 +751,8 @@ static void handle_node_search(SoupServer *soup_server,
         g_clear_error(&error);
         return;
     }
+    
+    LOG_INFO("[DEBUG] Search successful, found %u nodes\n", nodes->len);
 
     /* Nodes zu JSON Array serialisieren */
     JsonBuilder *builder = json_builder_new();
@@ -726,6 +808,12 @@ static void handle_node_lock(SoupServer *soup_server,
         send_error_response(msg, SOUP_STATUS_METHOD_NOT_ALLOWED,
                            "Only POST allowed");
         return;
+    }
+
+    /* Auth-Check */
+    const gchar *username = NULL;
+    if (!check_authorization(server, msg, &username)) {
+        return;  /* 401 wurde bereits gesendet */
     }
 
     /* ID aus Path extrahieren */
@@ -815,6 +903,12 @@ static void handle_node_create_and_lock(SoupServer *soup_server,
         send_error_response(msg, SOUP_STATUS_METHOD_NOT_ALLOWED,
                            "Only POST allowed");
         return;
+    }
+
+    /* Auth-Check */
+    const gchar *username = NULL;
+    if (!check_authorization(server, msg, &username)) {
+        return;  /* 401 wurde bereits gesendet */
     }
 
     /* Body lesen */
@@ -961,6 +1055,12 @@ static void handle_node_unlock(SoupServer *soup_server,
         send_error_response(msg, SOUP_STATUS_METHOD_NOT_ALLOWED,
                            "Only POST allowed");
         return;
+    }
+
+    /* Auth-Check */
+    const gchar *username = NULL;
+    if (!check_authorization(server, msg, &username)) {
+        return;  /* 401 wurde bereits gesendet */
     }
 
     /* ID aus Path */

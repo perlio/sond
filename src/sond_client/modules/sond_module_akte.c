@@ -335,101 +335,49 @@ static gboolean get_next_ablnr(SondModuleAktePrivate *priv, gchar **ablnr, GErro
     
     criteria->limit = 0;  /* Alle holen */
     
-    gchar *criteria_json = sond_graph_node_search_criteria_to_json(criteria);
+    /* Client-Methode verwenden */
+    GPtrArray *nodes = sond_client_search_nodes(priv->client, criteria, error);
     sond_graph_node_search_criteria_free(criteria);
-    
-    gchar *url = g_strdup_printf("%s/node/search", sond_client_get_server_url(priv->client));
-    
-    SoupSession *session = soup_session_new();
-    SoupMessage *msg = soup_message_new("POST", url);
-    g_free(url);
-    
-    soup_message_set_request_body_from_bytes(msg, "application/json",
-        g_bytes_new_take(criteria_json, strlen(criteria_json)));
-    
-    GBytes *response = soup_session_send_and_read(session, msg, NULL, error);
-    
-    if (!response) {
-        g_object_unref(msg);
-        g_object_unref(session);
+
+    if (!nodes) {
         return FALSE;
     }
-    
-    guint status = soup_message_get_status(msg);
-    if (status != 200) {
-        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                   "Server gab Status %u zurück", status);
-        g_bytes_unref(response);
-        g_object_unref(msg);
-        g_object_unref(session);
-        return FALSE;
-    }
-    
-    /* Parse Response und finde höchste lfd_nr */
-    gsize size;
-    const gchar *data = g_bytes_get_data(response, &size);
-    
-    JsonParser *parser = json_parser_new();
+
     guint max_lfd_nr = 0;
-    
-    if (json_parser_load_from_data(parser, data, size, NULL)) {
-        JsonNode *root = json_parser_get_root(parser);
-        JsonObject *obj = json_node_get_object(root);
+
+    for (guint i = 0; i < nodes->len; i++) {
+        SondGraphNode *node = g_ptr_array_index(nodes, i);
+        GPtrArray *node_props = sond_graph_node_get_properties(node);
         
-        if (json_object_has_member(obj, "data")) {
-            JsonArray *nodes_array = json_object_get_array_member(obj, "data");
+        /* Durchlaufe alle "bis" Properties */
+        for (guint j = 0; j < node_props->len; j++) {
+            SondGraphProperty *prop = g_ptr_array_index(node_props, j);
             
-            for (guint i = 0; i < json_array_get_length(nodes_array); i++) {
-                JsonNode *node_json = json_array_get_element(nodes_array, i);
-                
-                JsonGenerator *gen = json_generator_new();
-                json_generator_set_root(gen, node_json);
-                gchar *node_str = json_generator_to_data(gen, NULL);
-                
-                SondGraphNode *node = sond_graph_node_from_json(node_str, NULL);
-                g_free(node_str);
-                g_object_unref(gen);
-                
-                if (node) {
-                    GPtrArray *node_props = sond_graph_node_get_properties(node);
-                    
-                    /* Durchlaufe alle "bis" Properties */
-                    for (guint j = 0; j < node_props->len; j++) {
-                        SondGraphProperty *prop = g_ptr_array_index(node_props, j);
+            if (g_strcmp0(sond_graph_property_get_key(prop), "bis") == 0) {
+                GPtrArray *sub_props = sond_graph_property_get_properties(prop);
+                if (sub_props) {
+                    SondGraphProperty *ablnr_prop = sond_graph_property_find(sub_props, "ablnr");
+                    if (ablnr_prop) {
+                        const gchar *ablnr_str = sond_graph_property_get_first_value(ablnr_prop);
                         
-                        if (g_strcmp0(sond_graph_property_get_key(prop), "bis") == 0) {
-                            GPtrArray *sub_props = sond_graph_property_get_properties(prop);
-                            if (sub_props) {
-                                SondGraphProperty *ablnr_prop = sond_graph_property_find(sub_props, "ablnr");
-                                if (ablnr_prop) {
-                                    const gchar *ablnr_str = sond_graph_property_get_first_value(ablnr_prop);
-                                    
-                                    /* Parse "2026-5" -> lfd_nr = 5 */
-                                    if (ablnr_str) {
-                                        gchar **parts = g_strsplit(ablnr_str, "-", 2);
-                                        if (g_strv_length(parts) == 2) {
-                                            guint lfd = (guint)g_ascii_strtoull(parts[1], NULL, 10);
-                                            if (lfd > max_lfd_nr) {
-                                                max_lfd_nr = lfd;
-                                            }
-                                        }
-                                        g_strfreev(parts);
-                                    }
+                        /* Parse "2026-5" -> lfd_nr = 5 */
+                        if (ablnr_str) {
+                            gchar **parts = g_strsplit(ablnr_str, "-", 2);
+                            if (g_strv_length(parts) == 2) {
+                                guint lfd = (guint)g_ascii_strtoull(parts[1], NULL, 10);
+                                if (lfd > max_lfd_nr) {
+                                    max_lfd_nr = lfd;
                                 }
                             }
+                            g_strfreev(parts);
                         }
                     }
-                    
-                    g_object_unref(node);
                 }
             }
         }
     }
-    
-    g_object_unref(parser);
-    g_bytes_unref(response);
-    g_object_unref(msg);
-    g_object_unref(session);
+
+    g_ptr_array_unref(nodes);
     
     /* Nächste Nummer */
     *ablnr = g_strdup_printf("%u-%u", year, max_lfd_nr + 1);
@@ -559,98 +507,44 @@ static SondGraphNode* search_node_by_regnr(SondModuleAktePrivate *priv,
 	g_free(lfdnr_str);
 
 	criteria->limit = 100;
-    gchar *criteria_json = sond_graph_node_search_criteria_to_json(criteria);
-    sond_graph_node_search_criteria_free(criteria);
-    
-    /* HTTP-Request */
-    gchar *url = g_strdup_printf("%s/node/search", sond_client_get_server_url(priv->client));
-    
-    SoupSession *session = soup_session_new();
-    SoupMessage *msg = soup_message_new("POST", url);
-    g_free(url);
-    
-    soup_message_set_request_body_from_bytes(msg, "application/json",
-        g_bytes_new_take(criteria_json, strlen(criteria_json)));
-    
-    GBytes *response = soup_session_send_and_read(session, msg, NULL, error);
-    
-    if (!response) {
-        g_object_unref(msg);
-        g_object_unref(session);
-        return NULL;
-    }
-    
-    guint status = soup_message_get_status(msg);
-    if (status != 200) {
-        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                   "Server gab Status %u zurück", status);
-        g_bytes_unref(response);
-        g_object_unref(msg);
-        g_object_unref(session);
-        return NULL;
-    }
-    
-    /* Response parsen */
-    gsize size;
-    const gchar *data = g_bytes_get_data(response, &size);
-    
-    JsonParser *parser = json_parser_new();
-    SondGraphNode *result_node = NULL;
-    
-    if (json_parser_load_from_data(parser, data, size, error)) {
-        JsonNode *root = json_parser_get_root(parser);
-        JsonObject *obj = json_node_get_object(root);
-        
-        if (json_object_has_member(obj, "data")) {
-            JsonArray *nodes_array = json_object_get_array_member(obj, "data");
-            
-            /* Durch Ergebnisse iterieren */
-            for (guint i = 0; i < json_array_get_length(nodes_array); i++) {
-                JsonNode *node_json = json_array_get_element(nodes_array, i);
-                
-                JsonGenerator *gen = json_generator_new();
-                json_generator_set_root(gen, node_json);
-                gchar *node_str = json_generator_to_data(gen, NULL);
-                
-                SondGraphNode *node = sond_graph_node_from_json(node_str, NULL);
-                g_free(node_str);
-                g_object_unref(gen);
-                
-                if (node) {
-                    GPtrArray *regnr_values = sond_graph_node_get_property(node, "regnr");
-                    
-                    if (regnr_values && regnr_values->len == 2) {
-                        guint node_year = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 0), NULL, 10);  /* Index 0 = Jahr */
-                        guint node_lfd = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 1), NULL, 10);   /* Index 1 = lfd_nr */
-                        
-                        if (node_lfd == lfd_nr && node_year == year) {
-                            result_node = node;
-                            g_ptr_array_unref(regnr_values);
-                            break;
-                        }
-                        
-                        g_ptr_array_unref(regnr_values);
-                    }
-                    
-                    if (!result_node) {
-                        g_object_unref(node);
-                    }
-                }
-            }
-            
-            if (!result_node) {
-                g_set_error(error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND,
-                           "Akte mit RegNr %u/%u nicht gefunden", lfd_nr, year);
-            }
-        }
-    }
-    
-    g_object_unref(parser);
-    g_bytes_unref(response);
-    g_object_unref(msg);
-    g_object_unref(session);
-    
-    return result_node;
+
+	/* Client-Methode verwenden (mit Auto-Login und Re-Login bei 401) */
+	GPtrArray *nodes = sond_client_search_nodes(priv->client, criteria, error);
+	sond_graph_node_search_criteria_free(criteria);
+
+	if (!nodes) {
+	    return NULL;
+	}
+
+	/* Ersten passenden Node finden */
+	SondGraphNode *result_node = NULL;
+
+	for (guint i = 0; i < nodes->len; i++) {
+	    SondGraphNode *node = g_ptr_array_index(nodes, i);
+	    GPtrArray *regnr_values = sond_graph_node_get_property(node, "regnr");
+
+	    if (regnr_values && regnr_values->len == 2) {
+	        guint node_year = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 0), NULL, 10);
+	        guint node_lfd = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 1), NULL, 10);
+
+	        if (node_lfd == lfd_nr && node_year == year) {
+	            result_node = g_object_ref(node);  /* Referenz erhöhen */
+	            g_ptr_array_unref(regnr_values);
+	            break;
+	        }
+
+	        g_ptr_array_unref(regnr_values);
+	    }
+	}
+
+	g_ptr_array_unref(nodes);
+
+	if (!result_node) {
+	    g_set_error(error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND,
+	               "Akte mit RegNr %u/%u nicht gefunden", lfd_nr, year);
+	}
+
+	return result_node;
 }
 
 static gboolean get_next_regnr(SondModuleAktePrivate *priv, guint *lfd_nr, guint *year, GError **error) {
@@ -667,84 +561,33 @@ static gboolean get_next_regnr(SondModuleAktePrivate *priv, guint *lfd_nr, guint
     
     criteria->limit = 0;
     
-    gchar *criteria_json = sond_graph_node_search_criteria_to_json(criteria);
+    /* Client-Methode verwenden */
+    GPtrArray *nodes = sond_client_search_nodes(priv->client, criteria, error);
     sond_graph_node_search_criteria_free(criteria);
-    
-    gchar *url = g_strdup_printf("%s/node/search", sond_client_get_server_url(priv->client));
-    
-    SoupSession *session = soup_session_new();
-    SoupMessage *msg = soup_message_new("POST", url);
-    g_free(url);
-    
-    soup_message_set_request_body_from_bytes(msg, "application/json",
-        g_bytes_new_take(criteria_json, strlen(criteria_json)));
-    
-    GBytes *response = soup_session_send_and_read(session, msg, NULL, error);
-    
-    if (!response) {
-        g_object_unref(msg);
-        g_object_unref(session);
+
+    if (!nodes) {
         return FALSE;
     }
-    
-    guint status = soup_message_get_status(msg);
-    if (status != 200) {
-        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                   "Server gab Status %u zurück", status);
-        g_bytes_unref(response);
-        g_object_unref(msg);
-        g_object_unref(session);
-        return FALSE;
-    }
-    
-    gsize size;
-    const gchar *data = g_bytes_get_data(response, &size);
-    
-    JsonParser *parser = json_parser_new();
+
     guint max_lfd_nr = 0;
-    
-    if (json_parser_load_from_data(parser, data, size, NULL)) {
-        JsonNode *root = json_parser_get_root(parser);
-        JsonObject *obj = json_node_get_object(root);
+
+    for (guint i = 0; i < nodes->len; i++) {
+        SondGraphNode *node = g_ptr_array_index(nodes, i);
+        GPtrArray *regnr_values = sond_graph_node_get_property(node, "regnr");
         
-        if (json_object_has_member(obj, "data")) {
-            JsonArray *nodes_array = json_object_get_array_member(obj, "data");
+        if (regnr_values && regnr_values->len == 2) {
+            guint node_year = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 0), NULL, 10);
+            guint node_lfd = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 1), NULL, 10);
             
-            for (guint i = 0; i < json_array_get_length(nodes_array); i++) {
-                JsonNode *node_json = json_array_get_element(nodes_array, i);
-                
-                JsonGenerator *gen = json_generator_new();
-                json_generator_set_root(gen, node_json);
-                gchar *node_str = json_generator_to_data(gen, NULL);
-                
-                SondGraphNode *node = sond_graph_node_from_json(node_str, NULL);
-                g_free(node_str);
-                g_object_unref(gen);
-                
-                if (node) {
-                    GPtrArray *regnr_values = sond_graph_node_get_property(node, "regnr");
-                    
-                    if (regnr_values && regnr_values->len == 2) {
-                        guint node_year = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 0), NULL, 10);  /* Index 0 = Jahr */
-                        guint node_lfd = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 1), NULL, 10);   /* Index 1 = lfd_nr */
-                        
-                        if (node_year == *year && node_lfd > max_lfd_nr) {
-                            max_lfd_nr = node_lfd;
-                        }
-                        
-                        g_ptr_array_unref(regnr_values);
-                    }
-                    
-                    g_object_unref(node);
-                }
+            if (node_year == *year && node_lfd > max_lfd_nr) {
+                max_lfd_nr = node_lfd;
             }
+
+            g_ptr_array_unref(regnr_values);
         }
     }
-    
-    g_object_unref(parser);
-    g_bytes_unref(response);
-    g_object_unref(msg);
-    g_object_unref(session);
+
+    g_ptr_array_unref(nodes);
     
     *lfd_nr = max_lfd_nr + 1;
     LOG_INFO("Nächste RegNr: %u/%u\n", *lfd_nr, *year);
@@ -766,86 +609,17 @@ static gchar* create_seafile_library(SondModuleAktePrivate *priv,
     
     LOG_INFO("Erstelle Seafile Library '%s'...\n", library_name);
     
-    /* JSON Body erstellen */
-    JsonBuilder *builder = json_builder_new();
-    json_builder_begin_object(builder);
-    json_builder_set_member_name(builder, "name");
-    json_builder_add_string_value(builder, library_name);
-    json_builder_set_member_name(builder, "desc");
+    /* Beschreibung */
     gchar *desc = g_strdup_printf("Akte %u/%u", lfd_nr, year % 100);
-    json_builder_add_string_value(builder, desc);
+    
+    /* Client-Methode verwenden (mit Auto-Login und Re-Login bei 401) */
+    gchar *library_id = sond_client_create_seafile_library(priv->client,
+                                                            library_name,
+                                                            desc,
+                                                            error);
+    
     g_free(desc);
-    json_builder_end_object(builder);
-    
-    JsonGenerator *gen = json_generator_new();
-    json_generator_set_root(gen, json_builder_get_root(builder));
-    gchar *request_json = json_generator_to_data(gen, NULL);
-    g_object_unref(gen);
-    g_object_unref(builder);
-    
-    /* HTTP-Request */
-    gchar *url = g_strdup_printf("%s/seafile/library", sond_client_get_server_url(priv->client));
-    
-    SoupSession *session = soup_session_new();
-    SoupMessage *msg = soup_message_new("POST", url);
-    g_free(url);
-    
-    soup_message_set_request_body_from_bytes(msg, "application/json",
-        g_bytes_new_take(request_json, strlen(request_json)));
-    
-    GBytes *response = soup_session_send_and_read(session, msg, NULL, error);
-    
-    if (!response) {
-        g_free(library_name);
-        g_object_unref(msg);
-        g_object_unref(session);
-        return NULL;
-    }
-    
-    guint status = soup_message_get_status(msg);
-    if (status != 200) {
-        gsize size;
-        const gchar *body = g_bytes_get_data(response, &size);
-        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                   "Server gab Status %u zurück: %.*s", status, (int)size, body);
-        g_free(library_name);
-        g_bytes_unref(response);
-        g_object_unref(msg);
-        g_object_unref(session);
-        return NULL;
-    }
-    
-    /* Response parsen */
-    gsize size;
-    const gchar *data = g_bytes_get_data(response, &size);
-    
-    JsonParser *parser = json_parser_new();
-    gchar *library_id = NULL;
-    
-    if (json_parser_load_from_data(parser, data, size, error)) {
-        JsonNode *root = json_parser_get_root(parser);
-        JsonObject *obj = json_node_get_object(root);
-        
-        if (json_object_has_member(obj, "data")) {
-            JsonObject *data_obj = json_object_get_object_member(obj, "data");
-            if (json_object_has_member(data_obj, "library_id")) {
-                const gchar *lib_id = json_object_get_string_member(data_obj, "library_id");
-                library_id = g_strdup(lib_id);
-                LOG_INFO("Seafile Library '%s' erstellt (ID: %s)\n", library_name, library_id);
-            }
-        }
-    }
-    
-    g_object_unref(parser);
-    g_bytes_unref(response);
-    g_object_unref(msg);
-    g_object_unref(session);
     g_free(library_name);
-    
-    if (!library_id) {
-        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                   "Seafile Library konnte nicht erstellt werden");
-    }
     
     return library_id;
 }
@@ -860,39 +634,8 @@ static gboolean delete_seafile_library(SondModuleAktePrivate *priv,
                                         GError **error) {
     LOG_INFO("Lösche Seafile Library (ID: %s)...\n", library_id);
     
-    gchar *url = g_strdup_printf("%s/seafile/library/%s",
-                                 sond_client_get_server_url(priv->client),
-                                 library_id);
-    
-    SoupSession *session = soup_session_new();
-    SoupMessage *msg = soup_message_new("DELETE", url);
-    g_free(url);
-    
-    GBytes *response = soup_session_send_and_read(session, msg, NULL, error);
-    
-    if (!response) {
-        g_object_unref(msg);
-        g_object_unref(session);
-        return FALSE;
-    }
-    
-    guint status = soup_message_get_status(msg);
-    gboolean success = (status == 200 || status == 204);
-    
-    if (!success) {
-        gsize size;
-        const gchar *body = g_bytes_get_data(response, &size);
-        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                   "Server gab Status %u zurück: %.*s", status, (int)size, body);
-    } else {
-        LOG_INFO("Seafile Library gelöscht (ID: %s)\n", library_id);
-    }
-    
-    g_bytes_unref(response);
-    g_object_unref(msg);
-    g_object_unref(session);
-    
-    return success;
+    /* Client-Methode verwenden (mit Auto-Login und Re-Login bei 401) */
+    return sond_client_delete_seafile_library(priv->client, library_id, error);
 }
 
 static gboolean save_node(SondModuleAktePrivate *priv, GError **error) {
@@ -904,109 +647,20 @@ static gboolean save_node(SondModuleAktePrivate *priv, GError **error) {
     
     sond_graph_node_set_label(priv->current_node, "Akte");
     
-    /* Node direkt zu JSON serialisieren - wie der Server es macht */
-    gchar *node_json = sond_graph_node_to_json(priv->current_node);
-    
-    if (!node_json) {
-        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                   "Konnte Node nicht serialisieren");
+    /* Client-Methode verwenden (mit Auto-Login und Re-Login bei 401) */
+    if (!sond_client_save_node(priv->client, priv->current_node, error)) {
         return FALSE;
     }
     
-    LOG_INFO("Sende Node-JSON (%zu bytes):\n%s\n", strlen(node_json), node_json);
-    
-    /* HTTP-Request */
-    gchar *url = g_strdup_printf("%s/node/save", sond_client_get_server_url(priv->client));
-    
-    SoupSession *session = soup_session_new();
-    SoupMessage *msg = soup_message_new("POST", url);
-    g_free(url);
-    
-    soup_message_set_request_body_from_bytes(msg, "application/json",
-        g_bytes_new_take(node_json, strlen(node_json)));
-    
-    GBytes *response = soup_session_send_and_read(session, msg, NULL, error);
-    
-    if (!response) {
-        g_object_unref(msg);
-        g_object_unref(session);
-        return FALSE;
-    }
-    
-    guint status = soup_message_get_status(msg);
-    if (status != 200) {
-        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                   "Server gab Status %u zurück", status);
-        g_bytes_unref(response);
-        g_object_unref(msg);
-        g_object_unref(session);
-        return FALSE;
-    }
-    
-    /* Gespeicherten Node zurückladen */
-    gsize size;
-    const gchar *data = g_bytes_get_data(response, &size);
-    
-    JsonParser *parser = json_parser_new();
-    if (json_parser_load_from_data(parser, data, size, NULL)) {
-        JsonNode *root_node = json_parser_get_root(parser);
-        JsonObject *obj = json_node_get_object(root_node);
-        
-        if (json_object_has_member(obj, "data")) {
-            JsonNode *data_node = json_object_get_member(obj, "data");
-            JsonGenerator *data_gen = json_generator_new();
-            json_generator_set_root(data_gen, data_node);
-            gchar *saved_json = json_generator_to_data(data_gen, NULL);
-            
-            g_object_unref(priv->current_node);
-            priv->current_node = sond_graph_node_from_json(saved_json, NULL);
-            
-            LOG_INFO("Node mit ID %" G_GINT64_FORMAT " gespeichert\n", 
-                    sond_graph_node_get_id(priv->current_node));
-            
-            g_free(saved_json);
-            g_object_unref(data_gen);
-        }
-    }
-    
-    g_object_unref(parser);
-    g_bytes_unref(response);
-    g_object_unref(msg);
-    g_object_unref(session);
+    LOG_INFO("Node mit ID %" G_GINT64_FORMAT " gespeichert\n",
+            sond_graph_node_get_id(priv->current_node));
     
     return TRUE;
 }
 
 static gboolean delete_node(SondModuleAktePrivate *priv, gint64 node_id, GError **error) {
-    gchar *url = g_strdup_printf("%s/node/delete/%" G_GINT64_FORMAT, 
-                                sond_client_get_server_url(priv->client),
-                                node_id);
-    
-    SoupSession *session = soup_session_new();
-    SoupMessage *msg = soup_message_new("DELETE", url);
-    g_free(url);
-    
-    GBytes *response = soup_session_send_and_read(session, msg, NULL, error);
-
-    if (!response) {
-        g_object_unref(msg);
-        g_object_unref(session);
-        return FALSE;
-    }
-
-    guint status = soup_message_get_status(msg);
-    gboolean success = (status == 200);
-    
-    if (!success) {
-        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                   "Server gab Status %u zurück", status);
-    }
-
-    g_bytes_unref(response);
-    g_object_unref(msg);
-    g_object_unref(session);
-    
-    return success;
+    /* Client-Methode verwenden (mit Auto-Login und Re-Login bei 401) */
+    return sond_client_delete_node(priv->client, node_id, error);
 }
 
 /* ========================================================================

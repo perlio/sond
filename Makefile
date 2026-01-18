@@ -36,17 +36,15 @@ LDFLAGS += $(shell pkg-config --libs libmagic gtk+-3.0 gobject-2.0 sqlite3 libcu
 endif
 
 ifneq (,$(findstring $(MAKECMDGOALS), sond_server))
-SRCS += $(shell find $(SRC_DIRS)/sond_server -name '*.c') $(SRC_DIRS)/sond_log_and_error.c
+SRCS += $(shell find $(SRC_DIRS)/sond_server -name '*.c') $(SRC_DIRS)/sond_log_and_error.c \
+	$(shell find $(SRC_DIRS)/sond_graph -name '*.c')
 CFLAGS += $(shell pkg-config --cflags libmariadb libsoup-3.0 json-glib-1.0)
 LDFLAGS += $(shell pkg-config --libs libmariadb libsoup-3.0 json-glib-1.0)
 endif
 
 ifneq (,$(findstring $(MAKECMDGOALS), sond_client))
 SRCS += $(shell find $(SRC_DIRS)/sond_client -name '*.c') \
-	$(SRC_DIRS)/sond_server/sond_graph/sond_graph_node.c \
-	$(SRC_DIRS)/sond_server/sond_graph/sond_graph_edge.c \
-	$(SRC_DIRS)/sond_server/sond_graph/sond_graph_property.c \
-	$(SRC_DIRS)/sond_server/sond_graph/sond_graph_db.c \
+	$(shell find $(SRC_DIRS)/sond_graph -name '*.c') \
 	$(SRC_DIRS)/sond_log_and_error.c
 CFLAGS += $(shell pkg-config --cflags gtk4 libsoup-3.0 json-glib-1.0 libmariadb)
 LDFLAGS += $(shell pkg-config --libs gtk4 libsoup-3.0 json-glib-1.0 libmariadb)

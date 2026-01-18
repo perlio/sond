@@ -97,11 +97,25 @@ void sond_client_set_auth(SondClient *client,
  * @user_data: User-Data für Callback
  *
  * Setzt Callback der bei 401-Fehler aufgerufen wird.
- * Wird verwendet um Auto-Logout + Re-Login zu triggern.
+ * Wird für UI-Benachrichtigungen verwendet.
  */
 void sond_client_set_auth_failed_callback(SondClient *client,
                                           void (*callback)(SondClient*, gpointer),
                                           gpointer user_data);
+
+/**
+ * sond_client_set_login_callback:
+ * @client: SondClient
+ * @callback: Callback-Funktion für Login (Lazy-Auth und Re-Login)
+ * @user_data: User-Data für Callback
+ *
+ * Setzt Callback für Login/Re-Login.
+ * Callback gibt TRUE bei Erfolg zurück, FALSE bei Abbruch.
+ * Nach Login muss sond_client_set_auth() aufgerufen werden.
+ */
+void sond_client_set_login_callback(SondClient *client,
+                                    gboolean (*callback)(SondClient*, gpointer),
+                                    gpointer user_data);
 
 /**
  * sond_client_create_and_lock_node:
@@ -112,6 +126,8 @@ void sond_client_set_auth_failed_callback(SondClient *client,
  *
  * Erstellt Node und setzt Lock atomar auf Server.
  * Node-ID wird aktualisiert.
+ * Führt automatisch Login durch falls nicht authentifiziert.
+ * Bei 401 wird automatisch Re-Login durchgeführt.
  *
  * Returns: TRUE bei Erfolg
  */
@@ -128,6 +144,8 @@ gboolean sond_client_create_and_lock_node(SondClient *client,
  * @error: (nullable): Fehler-Rückgabe
  *
  * Setzt Lock auf existierenden Node.
+ * Führt automatisch Login durch falls nicht authentifiziert.
+ * Bei 401 wird automatisch Re-Login durchgeführt.
  *
  * Returns: TRUE bei Erfolg
  */
@@ -143,6 +161,8 @@ gboolean sond_client_lock_node(SondClient *client,
  * @error: (nullable): Fehler-Rückgabe
  *
  * Entfernt Lock von Node.
+ * Führt automatisch Login durch falls nicht authentifiziert.
+ * Bei 401 wird automatisch Re-Login durchgeführt.
  *
  * Returns: TRUE bei Erfolg
  */
@@ -163,6 +183,89 @@ gboolean sond_client_unlock_node(SondClient *client,
 gchar* sond_client_check_lock(SondClient *client,
                                gint64 node_id,
                                GError **error);
+
+/**
+ * sond_client_search_nodes:
+ * @client: SondClient
+ * @criteria: Suchkriterien (SondGraphNodeSearchCriteria*)
+ * @error: (nullable): Fehler-Rückgabe
+ *
+ * Sucht Nodes auf dem Server.
+ * Führt automatisch Login durch falls nicht authentifiziert.
+ * Bei 401 wird automatisch Re-Login durchgeführt.
+ *
+ * Returns: (transfer full) (element-type SondGraphNode) (nullable): Array von Nodes oder NULL bei Fehler
+ */
+GPtrArray* sond_client_search_nodes(SondClient *client,
+                                     gpointer criteria,
+                                     GError **error);
+
+/**
+ * sond_client_save_node:
+ * @client: SondClient
+ * @node: Node zum Speichern (SondGraphNode*)
+ * @error: (nullable): Fehler-Rückgabe
+ *
+ * Speichert einen Node auf dem Server.
+ * Node-ID wird aktualisiert falls neu angelegt.
+ * Führt automatisch Login durch falls nicht authentifiziert.
+ * Bei 401 wird automatisch Re-Login durchgeführt.
+ *
+ * Returns: TRUE bei Erfolg
+ */
+gboolean sond_client_save_node(SondClient *client,
+                                gpointer node,
+                                GError **error);
+
+/**
+ * sond_client_delete_node:
+ * @client: SondClient
+ * @node_id: Node-ID
+ * @error: (nullable): Fehler-Rückgabe
+ *
+ * Löscht einen Node vom Server.
+ * Führt automatisch Login durch falls nicht authentifiziert.
+ * Bei 401 wird automatisch Re-Login durchgeführt.
+ *
+ * Returns: TRUE bei Erfolg
+ */
+gboolean sond_client_delete_node(SondClient *client,
+                                  gint64 node_id,
+                                  GError **error);
+
+/**
+ * sond_client_create_seafile_library:
+ * @client: SondClient
+ * @name: Library-Name
+ * @description: (nullable): Beschreibung
+ * @error: (nullable): Fehler-Rückgabe
+ *
+ * Erstellt eine Seafile Library.
+ * Führt automatisch Login durch falls nicht authentifiziert.
+ * Bei 401 wird automatisch Re-Login durchgeführt.
+ *
+ * Returns: (transfer full) (nullable): Library-ID oder NULL bei Fehler
+ */
+gchar* sond_client_create_seafile_library(SondClient *client,
+                                          const gchar *name,
+                                          const gchar *description,
+                                          GError **error);
+
+/**
+ * sond_client_delete_seafile_library:
+ * @client: SondClient
+ * @library_id: Library-ID
+ * @error: (nullable): Fehler-Rückgabe
+ *
+ * Löscht eine Seafile Library.
+ * Führt automatisch Login durch falls nicht authentifiziert.
+ * Bei 401 wird automatisch Re-Login durchgeführt.
+ *
+ * Returns: TRUE bei Erfolg
+ */
+gboolean sond_client_delete_seafile_library(SondClient *client,
+                                            const gchar *library_id,
+                                            GError **error);
 
 G_END_DECLS
 
