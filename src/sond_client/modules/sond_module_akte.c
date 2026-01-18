@@ -29,7 +29,8 @@ typedef enum {
     AKTE_STATE_INITIAL,       /* Nur "Neue Akte" + RegNr Entry aktiv */
     AKTE_STATE_CREATING,      /* Neue Akte wird erstellt (Entry insensitiv) */
     AKTE_STATE_EDITING,       /* Bestehende/Entry-Akte wird bearbeitet */
-    AKTE_STATE_READONLY       /* Akte ist gelockt von anderem User */
+    AKTE_STATE_READONLY,      /* Akte ist gelockt von anderem User */
+    AKTE_STATE_ABGELEGT       /* Akte ist abgelegt (read-only mit Reaktivierungs-Option) */
 } AkteState;
 
 typedef struct {
@@ -50,12 +51,18 @@ typedef struct {
     GtkWidget *btn_abbrechen;
     
     GtkWidget *akte_fields_box;    /* Container für Akte-Felder */
+    
+    /* Ablage/Reaktivierung */
+    GtkWidget *status_label;       /* Zeigt "Aktiv" oder "Abgelegt" */
+    GtkWidget *btn_ablegen;        /* "Akte ablegen" */
+    GtkWidget *btn_reaktivieren;   /* "Akte reaktivieren" */
 } SondModuleAktePrivate;
 
 /* Forward declarations */
 static void set_akte_state(SondModuleAktePrivate *priv, AkteState new_state);
 static void update_ui_from_node(SondModuleAktePrivate *priv);
 static void clear_akte_fields(SondModuleAktePrivate *priv);
+static void update_status_display(SondModuleAktePrivate *priv);
 
 /* ========================================================================
  * UI State Management
@@ -104,6 +111,18 @@ static void set_akte_state(SondModuleAktePrivate *priv, AkteState new_state) {
             gtk_widget_set_sensitive(priv->btn_speichern, FALSE);
             gtk_widget_set_sensitive(priv->btn_abbrechen, TRUE);
             break;
+
+        case AKTE_STATE_ABGELEGT:
+            /* Abgelegte Akte: Felder sichtbar aber nicht editierbar, Reaktivierung möglich */
+            gtk_widget_set_sensitive(priv->regnr_entry, FALSE);
+            gtk_widget_set_sensitive(priv->btn_neue_akte, FALSE);
+            gtk_widget_set_sensitive(priv->akte_fields_box, FALSE);  /* Felder nicht editierbar */
+            gtk_widget_set_sensitive(priv->btn_ok, TRUE);
+            gtk_widget_set_sensitive(priv->btn_speichern, FALSE);
+            gtk_widget_set_sensitive(priv->btn_abbrechen, TRUE);
+            /* Reaktivierungs-Button bleibt aktiv (via update_status_display) */
+            gtk_widget_set_sensitive(priv->btn_reaktivieren, TRUE);
+            break;
     }
 }
 
@@ -111,6 +130,13 @@ static void clear_akte_fields(SondModuleAktePrivate *priv) {
     gtk_editable_set_text(GTK_EDITABLE(priv->regnr_entry), "");
     gtk_editable_set_text(GTK_EDITABLE(priv->entry_kurzbezeichnung), "");
     gtk_editable_set_text(GTK_EDITABLE(priv->textview_gegenstand), "");  /* Jetzt Entry */
+    
+    /* Status zurücksetzen */
+    if (priv->status_label) {
+        gtk_label_set_text(GTK_LABEL(priv->status_label), "Status: -");
+        gtk_widget_set_visible(priv->btn_ablegen, FALSE);
+        gtk_widget_set_visible(priv->btn_reaktivieren, FALSE);
+    }
 }
 
 /* ========================================================================
@@ -199,9 +225,274 @@ static gchar* format_regnr(guint lfd_nr, guint year) {
     return g_strdup_printf("%u/%02u", lfd_nr, short_year);
 }
 
+/* ========================================================================
+ * Ablage/Reaktivierungs-Funktionen
+ * ======================================================================== */
+
+/**
+ * ist_akte_aktiv:
+ * 
+ * Prüft ob eine Akte aktuell aktiv ist.
+ * Eine Akte ist aktiv, wenn es mehr "von"-Properties als "bis"-Properties gibt.
+ */
+static gboolean ist_akte_aktiv(SondGraphNode *node) {
+    if (!node) {
+        return FALSE;
+    }
+    
+    GPtrArray *properties = sond_graph_node_get_properties(node);
+    if (!properties) {
+        return FALSE;
+    }
+    
+    /* Zähle "von" und "bis" Properties */
+    guint von_count = 0;
+    guint bis_count = 0;
+    
+    for (guint i = 0; i < properties->len; i++) {
+        SondGraphProperty *prop = g_ptr_array_index(properties, i);
+        const gchar *key = sond_graph_property_get_key(prop);
+        
+        if (g_strcmp0(key, "von") == 0) {
+            von_count++;
+        } else if (g_strcmp0(key, "bis") == 0) {
+            bis_count++;
+        }
+    }
+    
+    /* Wenn mehr "von" als "bis" -> aktiv */
+    return von_count > bis_count;
+}
+
+/**
+ * get_letzte_ablage:
+ * 
+ * Gibt die letzte Ablagenummer zurück (für Anzeige).
+ * Format: "2026-1" (Jahr-lfd_nr)
+ * 
+ * Returns: (transfer full) (nullable): Ablagenummer oder NULL
+ */
+static gchar* get_letzte_ablage(SondGraphNode *node) {
+    if (!node) {
+        return NULL;
+    }
+    
+    GPtrArray *properties = sond_graph_node_get_properties(node);
+    if (!properties) {
+        return NULL;
+    }
+    
+    /* Suche letzte "bis"-Property */
+    SondGraphProperty *letzte_bis = NULL;
+    
+    for (guint i = 0; i < properties->len; i++) {
+        SondGraphProperty *prop = g_ptr_array_index(properties, i);
+        const gchar *key = sond_graph_property_get_key(prop);
+        
+        if (g_strcmp0(key, "bis") == 0) {
+            letzte_bis = prop;  /* Letzte "bis" merken */
+        }
+    }
+    
+    if (!letzte_bis) {
+        return NULL;
+    }
+    
+    /* Hole Sub-Property "ablnr" */
+    GPtrArray *sub_props = sond_graph_property_get_properties(letzte_bis);
+    if (!sub_props) {
+        return NULL;
+    }
+    
+    SondGraphProperty *ablnr_prop = sond_graph_property_find(sub_props, "ablnr");
+    if (!ablnr_prop) {
+        return NULL;
+    }
+    
+    const gchar *ablnr = sond_graph_property_get_first_value(ablnr_prop);
+    return ablnr ? g_strdup(ablnr) : NULL;
+}
+
+/**
+ * get_next_ablnr:
+ * 
+ * Ermittelt die nächste Ablagenummer für das aktuelle Jahr.
+ * Format: "Jahr-lfd_nr" (z.B. "2026-1")
+ */
+static gboolean get_next_ablnr(SondModuleAktePrivate *priv, gchar **ablnr, GError **error) {
+    GDateTime *now = g_date_time_new_now_local();
+    guint year = g_date_time_get_year(now);
+    g_date_time_unref(now);
+    
+    /* Suche nach allen Ablagen in diesem Jahr */
+    SondGraphNodeSearchCriteria *criteria = sond_graph_node_search_criteria_new();
+    criteria->label = g_strdup("Akte");
+    
+    /* Filter: "bis" Property mit Sub-Property "ablnr" die mit "Jahr-" beginnt */
+    gchar *year_prefix = g_strdup_printf("%u-", year);
+    sond_graph_node_search_criteria_add_property_filter(criteria, "ablnr", year_prefix);
+    g_free(year_prefix);
+    
+    criteria->limit = 0;  /* Alle holen */
+    
+    gchar *criteria_json = sond_graph_node_search_criteria_to_json(criteria);
+    sond_graph_node_search_criteria_free(criteria);
+    
+    gchar *url = g_strdup_printf("%s/node/search", sond_client_get_server_url(priv->client));
+    
+    SoupSession *session = soup_session_new();
+    SoupMessage *msg = soup_message_new("POST", url);
+    g_free(url);
+    
+    soup_message_set_request_body_from_bytes(msg, "application/json",
+        g_bytes_new_take(criteria_json, strlen(criteria_json)));
+    
+    GBytes *response = soup_session_send_and_read(session, msg, NULL, error);
+    
+    if (!response) {
+        g_object_unref(msg);
+        g_object_unref(session);
+        return FALSE;
+    }
+    
+    guint status = soup_message_get_status(msg);
+    if (status != 200) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "Server gab Status %u zurück", status);
+        g_bytes_unref(response);
+        g_object_unref(msg);
+        g_object_unref(session);
+        return FALSE;
+    }
+    
+    /* Parse Response und finde höchste lfd_nr */
+    gsize size;
+    const gchar *data = g_bytes_get_data(response, &size);
+    
+    JsonParser *parser = json_parser_new();
+    guint max_lfd_nr = 0;
+    
+    if (json_parser_load_from_data(parser, data, size, NULL)) {
+        JsonNode *root = json_parser_get_root(parser);
+        JsonObject *obj = json_node_get_object(root);
+        
+        if (json_object_has_member(obj, "data")) {
+            JsonArray *nodes_array = json_object_get_array_member(obj, "data");
+            
+            for (guint i = 0; i < json_array_get_length(nodes_array); i++) {
+                JsonNode *node_json = json_array_get_element(nodes_array, i);
+                
+                JsonGenerator *gen = json_generator_new();
+                json_generator_set_root(gen, node_json);
+                gchar *node_str = json_generator_to_data(gen, NULL);
+                
+                SondGraphNode *node = sond_graph_node_from_json(node_str, NULL);
+                g_free(node_str);
+                g_object_unref(gen);
+                
+                if (node) {
+                    GPtrArray *node_props = sond_graph_node_get_properties(node);
+                    
+                    /* Durchlaufe alle "bis" Properties */
+                    for (guint j = 0; j < node_props->len; j++) {
+                        SondGraphProperty *prop = g_ptr_array_index(node_props, j);
+                        
+                        if (g_strcmp0(sond_graph_property_get_key(prop), "bis") == 0) {
+                            GPtrArray *sub_props = sond_graph_property_get_properties(prop);
+                            if (sub_props) {
+                                SondGraphProperty *ablnr_prop = sond_graph_property_find(sub_props, "ablnr");
+                                if (ablnr_prop) {
+                                    const gchar *ablnr_str = sond_graph_property_get_first_value(ablnr_prop);
+                                    
+                                    /* Parse "2026-5" -> lfd_nr = 5 */
+                                    if (ablnr_str) {
+                                        gchar **parts = g_strsplit(ablnr_str, "-", 2);
+                                        if (g_strv_length(parts) == 2) {
+                                            guint lfd = (guint)g_ascii_strtoull(parts[1], NULL, 10);
+                                            if (lfd > max_lfd_nr) {
+                                                max_lfd_nr = lfd;
+                                            }
+                                        }
+                                        g_strfreev(parts);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    g_object_unref(node);
+                }
+            }
+        }
+    }
+    
+    g_object_unref(parser);
+    g_bytes_unref(response);
+    g_object_unref(msg);
+    g_object_unref(session);
+    
+    /* Nächste Nummer */
+    *ablnr = g_strdup_printf("%u-%u", year, max_lfd_nr + 1);
+    LOG_INFO("Nächste Ablagenr: %s\n", *ablnr);
+    
+    return TRUE;
+}
+
+static void update_status_display(SondModuleAktePrivate *priv) {
+    if (!priv->current_node || !priv->status_label) {
+        return;
+    }
+    
+    /* Nur anzeigen wenn Node bereits in DB gespeichert ist (ID > 0) */
+    if (sond_graph_node_get_id(priv->current_node) <= 0) {
+        gtk_label_set_text(GTK_LABEL(priv->status_label), "Status: -");
+        gtk_widget_set_visible(priv->btn_ablegen, FALSE);
+        gtk_widget_set_visible(priv->btn_reaktivieren, FALSE);
+        return;
+    }
+    
+    /* Prüfe ob "von"-Property existiert - nur dann ist Akte "materiell" */
+    GPtrArray *von_props = sond_graph_node_get_property(priv->current_node, "von");
+    if (!von_props || von_props->len == 0) {
+        gtk_label_set_text(GTK_LABEL(priv->status_label), "Status: -");
+        gtk_widget_set_visible(priv->btn_ablegen, FALSE);
+        gtk_widget_set_visible(priv->btn_reaktivieren, FALSE);
+        if (von_props) g_ptr_array_unref(von_props);
+        return;
+    }
+    g_ptr_array_unref(von_props);
+    
+    gboolean aktiv = ist_akte_aktiv(priv->current_node);
+    
+    if (aktiv) {
+        gtk_label_set_text(GTK_LABEL(priv->status_label), "Status: Aktiv");
+        gtk_widget_set_visible(priv->btn_ablegen, TRUE);
+        gtk_widget_set_visible(priv->btn_reaktivieren, FALSE);
+    } else {
+        gchar *ablnr = get_letzte_ablage(priv->current_node);
+        if (ablnr) {
+            gchar *text = g_strdup_printf("Status: Abgelegt (%s)", ablnr);
+            gtk_label_set_text(GTK_LABEL(priv->status_label), text);
+            g_free(text);
+            g_free(ablnr);
+        } else {
+            gtk_label_set_text(GTK_LABEL(priv->status_label), "Status: Abgelegt");
+        }
+        gtk_widget_set_visible(priv->btn_ablegen, FALSE);
+        gtk_widget_set_visible(priv->btn_reaktivieren, TRUE);
+        /* Wichtig: Button auch sensitiv machen (nicht nur sichtbar) */
+        gtk_widget_set_sensitive(priv->btn_reaktivieren, TRUE);
+    }
+}
+
 static void update_ui_from_node(SondModuleAktePrivate *priv) {
     if (!priv->current_node) {
         clear_akte_fields(priv);
+        if (priv->status_label) {
+            gtk_label_set_text(GTK_LABEL(priv->status_label), "Status: -");
+            gtk_widget_set_visible(priv->btn_ablegen, FALSE);
+            gtk_widget_set_visible(priv->btn_reaktivieren, FALSE);
+        }
         return;
     }
     
@@ -229,6 +520,9 @@ static void update_ui_from_node(SondModuleAktePrivate *priv) {
         gtk_editable_set_text(GTK_EDITABLE(priv->textview_gegenstand), gegenstand);  /* Jetzt Entry */
         g_free(gegenstand);
     }
+    
+    /* Status-Anzeige aktualisieren */
+    update_status_display(priv);
 }
 
 /* ========================================================================
@@ -719,6 +1013,108 @@ static gboolean delete_node(SondModuleAktePrivate *priv, gint64 node_id, GError 
  * UI Event Handlers
  * ======================================================================== */
 
+/* Event Handler für Ablage/Reaktivierung */
+static void on_ablegen_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
+    if (!priv->current_node) {
+        return;
+    }
+    
+    if (!ist_akte_aktiv(priv->current_node)) {
+        show_error_dialog(priv->main_widget, "Fehler", "Akte ist bereits abgelegt.");
+        return;
+    }
+    
+    /* Nächste Ablagenummer ermitteln */
+    gchar *ablnr = NULL;
+    GError *error = NULL;
+    
+    if (!get_next_ablnr(priv, &ablnr, &error)) {
+        gchar *msg = g_strdup_printf("Fehler bei Ablagenr-Vergabe: %s",
+                                    error ? error->message : "Unbekannt");
+        show_error_dialog(priv->main_widget, "Fehler", msg);
+        g_free(msg);
+        if (error) g_error_free(error);
+        return;
+    }
+    
+    /* Aktuelles Datum als ISO-String */
+    GDateTime *now = g_date_time_new_now_local();
+    gchar *datum = g_date_time_format(now, "%Y-%m-%d");
+    g_date_time_unref(now);
+    
+    /* "bis"-Property mit Sub-Property "ablnr" hinzufügen */
+    GPtrArray *properties = sond_graph_node_get_properties(priv->current_node);
+    
+    /* Neue "bis"-Property erstellen */
+    const gchar *bis_value[] = {datum};
+    SondGraphProperty *bis_prop = sond_graph_property_new("bis", bis_value, 1);
+    
+    /* Sub-Property "ablnr" hinzufügen */
+    const gchar *ablnr_value[] = {ablnr};
+    SondGraphProperty *ablnr_prop = sond_graph_property_new("ablnr", ablnr_value, 1);
+    sond_graph_property_add_subproperty(bis_prop, ablnr_prop);
+    
+    /* Zur Property-Liste hinzufügen */
+    g_ptr_array_add(properties, bis_prop);
+    
+    g_free(datum);
+    g_free(ablnr);
+    
+    /* Speichern */
+    if (!save_node(priv, &error)) {
+        gchar *msg = g_strdup_printf("Fehler beim Speichern: %s",
+                                    error ? error->message : "Unbekannt");
+        show_error_dialog(priv->main_widget, "Fehler", msg);
+        g_free(msg);
+        if (error) g_error_free(error);
+        return;
+    }
+    
+    update_status_display(priv);
+    set_akte_state(priv, AKTE_STATE_ABGELEGT);  /* Nach Ablage nicht mehr editierbar */
+    show_info_dialog(priv->main_widget, "Erfolgreich", "Akte wurde abgelegt.");
+}
+
+static void on_reaktivieren_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
+    if (!priv->current_node) {
+        return;
+    }
+    
+    if (ist_akte_aktiv(priv->current_node)) {
+        show_error_dialog(priv->main_widget, "Fehler", "Akte ist bereits aktiv.");
+        return;
+    }
+    
+    /* Aktuelles Datum als ISO-String */
+    GDateTime *now = g_date_time_new_now_local();
+    gchar *datum = g_date_time_format(now, "%Y-%m-%d");
+    g_date_time_unref(now);
+    
+    /* "von"-Property hinzufügen */
+    GPtrArray *properties = sond_graph_node_get_properties(priv->current_node);
+    
+    const gchar *von_value[] = {datum};
+    SondGraphProperty *von_prop = sond_graph_property_new("von", von_value, 1);
+    g_ptr_array_add(properties, von_prop);
+    
+    g_free(datum);
+    
+    /* Speichern */
+    GError *error = NULL;
+    if (!save_node(priv, &error)) {
+        gchar *msg = g_strdup_printf("Fehler beim Speichern: %s",
+                                    error ? error->message : "Unbekannt");
+        show_error_dialog(priv->main_widget, "Fehler", msg);
+        g_free(msg);
+        if (error) g_error_free(error);
+        return;
+    }
+    
+    update_status_display(priv);
+    set_akte_state(priv, AKTE_STATE_EDITING);  /* Nach Reaktivierung wieder editierbar */
+    show_info_dialog(priv->main_widget, "Erfolgreich", "Akte wurde reaktiviert.");
+}
+
 /* Callback-Daten für neuen Akte Dialog */
 typedef struct {
     SondModuleAktePrivate *priv;
@@ -761,8 +1157,8 @@ static void on_new_akte_dialog_response(GObject *source, GAsyncResult *result, g
         g_free(lfd_str);
         g_free(year_str);
         
-        /* Status = draft setzen */
-        sond_graph_node_set_property_string(priv->current_node, "stat", "draft");
+        /* KEINE "von"-Property setzen - erst beim Speichern! */
+        /* Node ist damit noch nicht "materiell" existent */
         
         g_print("[AKTE] Calling sond_client_create_and_lock_node now...\n");
         
@@ -823,10 +1219,16 @@ static void on_regnr_entry_activate(GtkEntry *entry, SondModuleAktePrivate *priv
         GError *lock_error = NULL;
         
         if (sond_client_lock_node(priv->client, node_id, "Bearbeitung", &lock_error)) {
-            /* Lock erfolgreich → EDITING */
+            /* Lock erfolgreich */
             LOG_INFO("Akte %u/%u geladen und gelockt\n", lfd_nr, year);
             update_ui_from_node(priv);
-            set_akte_state(priv, AKTE_STATE_EDITING);
+            
+            /* Prüfe ob Akte abgelegt ist */
+            if (ist_akte_aktiv(priv->current_node)) {
+                set_akte_state(priv, AKTE_STATE_EDITING);  /* Aktiv -> editierbar */
+            } else {
+                set_akte_state(priv, AKTE_STATE_ABGELEGT);  /* Abgelegt -> read-only mit Reaktivierung */
+            }
         } else {
             /* Lock fehlgeschlagen (bereits gelockt) → READONLY */
             LOG_INFO("Akte %u/%u gelockt von anderem User, öffne read-only\n", lfd_nr, year);
@@ -899,6 +1301,7 @@ static void on_neue_akte_clicked(GtkButton *button, SondModuleAktePrivate *priv)
     priv->current_node = sond_graph_node_new();
     sond_graph_node_set_label(priv->current_node, "Akte");
     /* KEINE RegNr setzen - wird erst beim Speichern vergeben! */
+    /* KEINE "von"-Property setzen - erst beim Speichern! */
     
     priv->is_new_from_entry = FALSE;
     
@@ -985,8 +1388,12 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
                 sond_graph_node_set_property_string(priv->current_node, "ggstd", gegenstand);
             }
             
-            /* Status auf "complete" setzen */
-            sond_graph_node_set_property_string(priv->current_node, "stat", "complete");
+            /* "von"-Property setzen - Akte wird damit "materiell" */
+            GDateTime *now = g_date_time_new_now_local();
+            gchar *datum = g_date_time_format(now, "%Y-%m-%d");
+            sond_graph_node_set_property_string(priv->current_node, "von", datum);
+            g_date_time_unref(now);
+            g_free(datum);
             
             /* Versuch zu speichern */
             error = NULL;
@@ -1056,8 +1463,18 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
         sond_graph_node_set_property_string(priv->current_node, "ggstd", gegenstand);
     }
     
-    /* Status auf "complete" setzen (falls es "draft" war) */
-    sond_graph_node_set_property_string(priv->current_node, "stat", "complete");
+    /* "von"-Property setzen falls noch nicht vorhanden (bei erster Speicherung) */
+    GPtrArray *von_props = sond_graph_node_get_property(priv->current_node, "von");
+    if (!von_props || von_props->len == 0) {
+        GDateTime *now = g_date_time_new_now_local();
+        gchar *datum = g_date_time_format(now, "%Y-%m-%d");
+        sond_graph_node_set_property_string(priv->current_node, "von", datum);
+        g_date_time_unref(now);
+        g_free(datum);
+    }
+    if (von_props) {
+        g_ptr_array_unref(von_props);
+    }
     
     /* Speichern */
     GError *error = NULL;
@@ -1210,6 +1627,29 @@ GtkWidget* sond_module_akte_new(SondClient *client) {
     priv->textview_gegenstand = gtk_entry_new();  /* Jetzt Entry statt TextView! */
     gtk_widget_set_hexpand(priv->textview_gegenstand, TRUE);
     gtk_grid_attach(GTK_GRID(grid), priv->textview_gegenstand, 1, 1, 1, 1);
+
+    /* Status-Anzeige und Ablage/Reaktivierungs-Buttons (NICHT in akte_fields_box!) */
+    GtkWidget *status_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+    gtk_box_append(GTK_BOX(main_box), status_box);  /* Direkt in main_box! */
+    
+    priv->status_label = gtk_label_new("Status: -");
+    gtk_widget_set_halign(priv->status_label, GTK_ALIGN_START);
+    gtk_box_append(GTK_BOX(status_box), priv->status_label);
+    
+    /* Spacer */
+    GtkWidget *spacer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_set_hexpand(spacer, TRUE);
+    gtk_box_append(GTK_BOX(status_box), spacer);
+    
+    priv->btn_ablegen = gtk_button_new_with_label("Akte ablegen");
+    g_signal_connect(priv->btn_ablegen, "clicked", G_CALLBACK(on_ablegen_clicked), priv);
+    gtk_widget_set_visible(priv->btn_ablegen, FALSE);  /* Initial unsichtbar */
+    gtk_box_append(GTK_BOX(status_box), priv->btn_ablegen);
+    
+    priv->btn_reaktivieren = gtk_button_new_with_label("Akte reaktivieren");
+    g_signal_connect(priv->btn_reaktivieren, "clicked", G_CALLBACK(on_reaktivieren_clicked), priv);
+    gtk_widget_set_visible(priv->btn_reaktivieren, FALSE);  /* Initial unsichtbar */
+    gtk_box_append(GTK_BOX(status_box), priv->btn_reaktivieren);
 
     /* Separator */
     GtkWidget *separator2 = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
