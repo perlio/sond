@@ -17,6 +17,7 @@
  */
 
 #include "sond_module_akte.h"
+#include "../sond_offline_manager.h"
 #include "../../sond_log_and_error.h"
 #include "../../sond_graph/sond_graph_node.h"
 #include "../../sond_graph/sond_graph_property.h"
@@ -56,6 +57,9 @@ typedef struct {
     GtkWidget *status_label;       /* Zeigt "Aktiv" oder "Abgelegt" */
     GtkWidget *btn_ablegen;        /* "Akte ablegen" */
     GtkWidget *btn_reaktivieren;   /* "Akte reaktivieren" */
+    
+    /* Offline-Verfügbarkeit */
+    GtkWidget *offline_toggle;     /* Toggle Button für Offline */
 } SondModuleAktePrivate;
 
 /* Forward declarations */
@@ -63,6 +67,7 @@ static void set_akte_state(SondModuleAktePrivate *priv, AkteState new_state);
 static void update_ui_from_node(SondModuleAktePrivate *priv);
 static void clear_akte_fields(SondModuleAktePrivate *priv);
 static void update_status_display(SondModuleAktePrivate *priv);
+static void on_offline_toggle_toggled(GtkCheckButton *toggle, SondModuleAktePrivate *priv);
 
 /* ========================================================================
  * UI State Management
@@ -137,6 +142,14 @@ static void clear_akte_fields(SondModuleAktePrivate *priv) {
         gtk_widget_set_visible(priv->btn_ablegen, FALSE);
         gtk_widget_set_visible(priv->btn_reaktivieren, FALSE);
     }
+
+    /* Offline-Toggle zurücksetzen */
+	if (priv->offline_toggle) {
+		g_signal_handlers_block_by_func(priv->offline_toggle, on_offline_toggle_toggled, priv);
+		gtk_check_button_set_active(GTK_CHECK_BUTTON(priv->offline_toggle), FALSE);
+		g_signal_handlers_unblock_by_func(priv->offline_toggle, on_offline_toggle_toggled, priv);
+		gtk_widget_set_visible(priv->offline_toggle, FALSE);
+	}
 }
 
 /* ========================================================================
@@ -471,6 +484,41 @@ static void update_ui_from_node(SondModuleAktePrivate *priv) {
     
     /* Status-Anzeige aktualisieren */
     update_status_display(priv);
+
+    /* Offline-Toggle Status aktualisieren */
+	if (priv->offline_toggle && priv->current_node) {
+		gint64 node_id = sond_graph_node_get_id(priv->current_node);
+
+		if (node_id > 0) {
+			GPtrArray *regnr_values = sond_graph_node_get_property(priv->current_node, "regnr");
+			if (regnr_values && regnr_values->len == 2) {
+				guint year = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 0), NULL, 10);
+				guint lfd = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 1), NULL, 10);
+				gchar *regnr = format_regnr(lfd, year);
+				g_ptr_array_unref(regnr_values);
+
+				SondOfflineManager *manager = sond_client_get_offline_manager(priv->client);
+				if (manager) {
+					gboolean is_offline = sond_offline_manager_is_offline(manager, regnr);
+
+					g_signal_handlers_block_by_func(priv->offline_toggle, on_offline_toggle_toggled, priv);
+					gtk_check_button_set_active(GTK_CHECK_BUTTON(priv->offline_toggle), is_offline);
+					g_signal_handlers_unblock_by_func(priv->offline_toggle, on_offline_toggle_toggled, priv);
+
+					gtk_widget_set_visible(priv->offline_toggle, TRUE);
+				} else {
+					gtk_widget_set_visible(priv->offline_toggle, FALSE);
+				}
+
+				g_free(regnr);
+			} else {
+				gtk_widget_set_visible(priv->offline_toggle, FALSE);
+				if (regnr_values) g_ptr_array_unref(regnr_values);
+			}
+		} else {
+			gtk_widget_set_visible(priv->offline_toggle, FALSE);
+		}
+	}
 }
 
 /* ========================================================================
@@ -767,6 +815,134 @@ static void on_reaktivieren_clicked(GtkButton *button, SondModuleAktePrivate *pr
     update_status_display(priv);
     set_akte_state(priv, AKTE_STATE_EDITING);  /* Nach Reaktivierung wieder editierbar */
     show_info_dialog(priv->main_widget, "Erfolgreich", "Akte wurde reaktiviert.");
+}
+
+/* Event Handler für Offline-Toggle */
+static void on_offline_toggle_toggled(GtkCheckButton *toggle, SondModuleAktePrivate *priv) {
+    if (!priv->current_node) {
+        return;
+    }
+
+    /* Hole Offline Manager */
+    SondOfflineManager *manager = sond_client_get_offline_manager(priv->client);
+    if (!manager) {
+        show_error_dialog(priv->main_widget, "Fehler", "Offline Manager nicht verfügbar");
+        return;
+    }
+
+    /* RegNr extrahieren */
+    GPtrArray *regnr_values = sond_graph_node_get_property(priv->current_node, "regnr");
+    if (!regnr_values || regnr_values->len != 2) {
+        show_error_dialog(priv->main_widget, "Fehler", "Akte hat keine gültige RegNr");
+        if (regnr_values) g_ptr_array_unref(regnr_values);
+        return;
+    }
+
+    guint year = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 0), NULL, 10);
+    guint lfd = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 1), NULL, 10);
+    gchar *regnr = format_regnr(lfd, year);
+    g_ptr_array_unref(regnr_values);
+
+    gboolean is_active = gtk_check_button_get_active(toggle);
+    GError *error = NULL;
+
+    if (is_active) {
+        /* Offline aktivieren */
+        LOG_INFO("Aktiviere Offline für Akte %s\n", regnr);
+
+        /* Prüfen ob bereits offline */
+        if (sond_offline_manager_is_offline(manager, regnr)) {
+            LOG_INFO("Akte %s ist bereits offline\n", regnr);
+            g_free(regnr);
+            return;
+        }
+
+        /* Hole Kurzbezeichnung und Gegenstand */
+        gchar *kurzb = sond_graph_node_get_property_string(priv->current_node, "kurzb");
+        gchar *ggstd = sond_graph_node_get_property_string(priv->current_node, "ggstd");
+
+        /* TODO: Seafile Library ID ermitteln */
+        gchar *library_id = g_strdup_printf("%u-%u", year, lfd);  /* Placeholder */
+
+        /* TODO: sync_directory aus Config holen */
+        const gchar *data_dir = g_get_user_data_dir();
+        gchar *sync_dir = g_build_filename(data_dir, "sond", "offline-akten", NULL);
+        gchar *local_path = g_build_filename(sync_dir, regnr, NULL);
+        g_free(sync_dir);
+
+        /* Akte zur Offline-Liste hinzufügen */
+        SondOfflineAkte *akte = sond_offline_akte_new(
+            regnr,
+            kurzb ? kurzb : "",
+            ggstd ? ggstd : "",
+            library_id,
+            local_path
+        );
+
+        if (!sond_offline_manager_add_akte(manager, akte, &error)) {
+            gchar *msg = g_strdup_printf("Fehler beim Aktivieren: %s",
+                                        error ? error->message : "Unbekannt");
+            show_error_dialog(priv->main_widget, "Fehler", msg);
+            g_free(msg);
+            if (error) g_error_free(error);
+
+            sond_offline_akte_free(akte);
+            g_free(kurzb);
+            g_free(ggstd);
+            g_free(library_id);
+            g_free(local_path);
+            g_free(regnr);
+
+            /* Toggle zurücksetzen */
+            g_signal_handlers_block_by_func(toggle, on_offline_toggle_toggled, priv);
+            gtk_check_button_set_active(toggle, FALSE);
+            g_signal_handlers_unblock_by_func(toggle, on_offline_toggle_toggled, priv);
+            return;
+        }
+
+        /* TODO: Seafile RPC - Sync starten */
+        LOG_INFO("Akte %s zur Offline-Liste hinzugefügt (TODO: Seafile Sync starten)\n", regnr);
+        show_info_dialog(priv->main_widget, "Offline aktiviert",
+                        "Akte ist jetzt für Offline-Nutzung verfügbar.");
+
+        g_free(kurzb);
+        g_free(ggstd);
+        g_free(library_id);
+        g_free(local_path);
+
+    } else {
+        /* Offline deaktivieren */
+        LOG_INFO("Deaktiviere Offline für Akte %s\n", regnr);
+
+        if (!sond_offline_manager_is_offline(manager, regnr)) {
+            LOG_INFO("Akte %s ist nicht offline\n", regnr);
+            g_free(regnr);
+            return;
+        }
+
+        /* Sync deaktivieren (Dateien bleiben lokal) */
+        if (!sond_offline_manager_set_sync_enabled(manager, regnr, FALSE, &error)) {
+            gchar *msg = g_strdup_printf("Fehler beim Deaktivieren: %s",
+                                        error ? error->message : "Unbekannt");
+            show_error_dialog(priv->main_widget, "Fehler", msg);
+            g_free(msg);
+            if (error) g_error_free(error);
+            g_free(regnr);
+
+            /* Toggle zurücksetzen */
+            g_signal_handlers_block_by_func(toggle, on_offline_toggle_toggled, priv);
+            gtk_check_button_set_active(toggle, TRUE);
+            g_signal_handlers_unblock_by_func(toggle, on_offline_toggle_toggled, priv);
+            return;
+        }
+
+        /* TODO: Seafile RPC - Sync pausieren */
+        LOG_INFO("Sync für Akte %s deaktiviert (TODO: Seafile Sync pausieren)\n", regnr);
+        show_info_dialog(priv->main_widget, "Offline deaktiviert",
+                        "Synchronisation wurde pausiert. Dateien bleiben lokal verfügbar.");
+    }
+
+    g_free(regnr);
 }
 
 /* Callback-Daten für neuen Akte Dialog */
@@ -1290,7 +1466,14 @@ GtkWidget* sond_module_akte_new(SondClient *client) {
     gtk_widget_set_halign(priv->status_label, GTK_ALIGN_START);
     gtk_box_append(GTK_BOX(status_box), priv->status_label);
     
-    /* Spacer */
+    /* Offline-Toggle Button */
+	priv->offline_toggle = gtk_check_button_new_with_label("Offline verfügbar");
+	gtk_widget_set_margin_start(priv->offline_toggle, 20);
+	g_signal_connect(priv->offline_toggle, "toggled", G_CALLBACK(on_offline_toggle_toggled), priv);
+	gtk_widget_set_visible(priv->offline_toggle, FALSE);
+	gtk_box_append(GTK_BOX(status_box), priv->offline_toggle);
+
+	/* Spacer */
     GtkWidget *spacer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_set_hexpand(spacer, TRUE);
     gtk_box_append(GTK_BOX(status_box), spacer);

@@ -165,41 +165,6 @@ static void init_icons(Projekt *zond) {
 	return;
 }
 
-#ifdef CONFIG_Release
-static void log_init(Projekt *zond) {
-	gchar *logfile = NULL;
-	gchar *logdir = NULL;
-	FILE *file = NULL;
-	FILE *file_tmp = NULL;
-	GDateTime *date_time = NULL;
-
-#ifdef _WIN32
-	logdir = g_strconcat(zond->base_dir, "logs", NULL);
-#elif defined __linux__
-    logdir = g_strdup( "/var/log/zond" );
-#endif // _WIN32
-
-	date_time = g_date_time_new_now_local();
-	logfile = g_strdup_printf("%s/log_%i_%i.log", logdir,
-			g_date_time_get_year(date_time), g_date_time_get_month(date_time));
-	g_free(logdir);
-	g_date_time_unref(date_time);
-
-	file = freopen(logfile, "a+", stdout);
-	if (!file) {
-		g_free(logfile);
-		LOG_ERROR("stdout konnte nicht umgeleitet werden: %s", strerror(errno));
-	}
-
-	file_tmp = freopen(logfile, "a+", stderr);
-	g_free(logfile);
-	if (!file_tmp)
-		LOG_ERROR("stderr konnte nicht umgeleitet werden: %s", strerror(errno));
-
-	return;
-}
-#endif // TESTING
-
 static void init_schema(Projekt* zond) {
     GSettingsSchemaSource *source;
     GSettingsSchema *schema;

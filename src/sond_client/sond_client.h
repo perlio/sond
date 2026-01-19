@@ -267,6 +267,16 @@ gboolean sond_client_delete_seafile_library(SondClient *client,
                                             const gchar *library_id,
                                             GError **error);
 
+/**
+ * sond_client_get_offline_manager:
+ * @client: SondClient
+ *
+ * Gibt den Offline Manager zurück.
+ *
+ * Returns: (transfer none): Offline Manager
+ */
+gpointer sond_client_get_offline_manager(SondClient *client);
+
 G_END_DECLS
 
 #endif /* SOND_CLIENT_H */
