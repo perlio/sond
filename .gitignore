@@ -6,5 +6,5 @@
 !/Makefile
 !.gitignore
 !LICENSE
-!release.sh
+!create-gtk-release.sh
 !README.md
