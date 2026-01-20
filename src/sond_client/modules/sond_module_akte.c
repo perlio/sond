@@ -18,6 +18,7 @@
 
 #include "sond_module_akte.h"
 #include "../sond_offline_manager.h"
+#include "../sond_seafile_sync.h"
 #include "../../sond_log_and_error.h"
 #include "../../sond_graph/sond_graph_node.h"
 #include "../../sond_graph/sond_graph_property.h"
@@ -844,9 +845,19 @@ static void on_offline_toggle_toggled(GtkCheckButton *toggle, SondModuleAktePriv
     g_ptr_array_unref(regnr_values);
 
     gboolean is_active = gtk_check_button_get_active(toggle);
-    GError *error = NULL;
 
-    if (is_active) {
+    /* Library ID - wird in beiden Branches gebraucht */
+	gchar *library_id = NULL;
+	GError *error = NULL;
+
+	if (is_active) {
+		/* Offline aktivieren */
+        GError *error = NULL;
+
+		/* Library anhand Name finden */
+		gchar *library_name = g_strdup_printf("%u-%u", year, lfd);
+		library_id = sond_seafile_find_library_by_name(library_name, &error);
+
         /* Offline aktivieren */
         LOG_INFO("Aktiviere Offline für Akte %s\n", regnr);
 
@@ -861,14 +872,33 @@ static void on_offline_toggle_toggled(GtkCheckButton *toggle, SondModuleAktePriv
         gchar *kurzb = sond_graph_node_get_property_string(priv->current_node, "kurzb");
         gchar *ggstd = sond_graph_node_get_property_string(priv->current_node, "ggstd");
 
-        /* TODO: Seafile Library ID ermitteln */
-        gchar *library_id = g_strdup_printf("%u-%u", year, lfd);  /* Placeholder */
+        /* Library anhand Name finden */
+        gchar *library_id = sond_seafile_find_library_by_name(library_name, &error);
+        g_free(library_name);
 
-        /* TODO: sync_directory aus Config holen */
-        const gchar *data_dir = g_get_user_data_dir();
-        gchar *sync_dir = g_build_filename(data_dir, "sond", "offline-akten", NULL);
-        gchar *local_path = g_build_filename(sync_dir, regnr, NULL);
-        g_free(sync_dir);
+        if (!library_id) {
+            /* Library nicht gefunden - Fehler anzeigen */
+        	GtkAlertDialog *dialog = gtk_alert_dialog_new("Seafile Library nicht gefunden");
+
+        	if (error) {
+        	    gtk_alert_dialog_set_detail(dialog, error->message);
+        	    g_error_free(error);
+        	}
+
+        	gtk_alert_dialog_show(dialog, GTK_WINDOW(gtk_widget_get_root(GTK_WIDGET(toggle))));
+        	g_object_unref(dialog);
+
+            /* Toggle zurücksetzen */
+            g_signal_handlers_block_by_func(toggle, on_offline_toggle_toggled, NULL);
+            gtk_check_button_set_active(GTK_CHECK_BUTTON(toggle), FALSE);
+            g_signal_handlers_unblock_by_func(toggle, on_offline_toggle_toggled, NULL);
+
+            return;
+        }
+
+        /* sync_directory vom Offline Manager holen */
+		const gchar *sync_dir = sond_offline_manager_get_sync_directory(manager);
+		gchar *local_path = g_build_filename(sync_dir, regnr, NULL);
 
         /* Akte zur Offline-Liste hinzufügen */
         SondOfflineAkte *akte = sond_offline_akte_new(
@@ -900,8 +930,30 @@ static void on_offline_toggle_toggled(GtkCheckButton *toggle, SondModuleAktePriv
             return;
         }
 
-        /* TODO: Seafile RPC - Sync starten */
-        LOG_INFO("Akte %s zur Offline-Liste hinzugefügt (TODO: Seafile Sync starten)\n", regnr);
+        /* Seafile Sync starten */
+		if (!sond_seafile_sync_library(library_id, local_path, &error)) {
+			/* Sync-Start fehlgeschlagen */
+			GtkAlertDialog *dialog = gtk_alert_dialog_new("Seafile Sync konnte nicht gestartet werden");
+
+			if (error) {
+			    gtk_alert_dialog_set_detail(dialog, error->message);
+			    g_error_free(error);
+			}
+
+			gtk_alert_dialog_show(dialog, GTK_WINDOW(gtk_widget_get_root(GTK_WIDGET(toggle))));
+			g_object_unref(dialog);
+
+			/* Toggle zurücksetzen */
+			g_signal_handlers_block_by_func(toggle, on_offline_toggle_toggled, NULL);
+			gtk_check_button_set_active(GTK_CHECK_BUTTON(toggle), FALSE);
+			g_signal_handlers_unblock_by_func(toggle, on_offline_toggle_toggled, NULL);
+
+			g_free(library_id);
+			return;
+		}
+
+		LOG_INFO("Seafile Sync gestartet: %s -> %s\n", library_id, local_path);
+
         show_info_dialog(priv->main_widget, "Offline aktiviert",
                         "Akte ist jetzt für Offline-Nutzung verfügbar.");
 
@@ -936,8 +988,18 @@ static void on_offline_toggle_toggled(GtkCheckButton *toggle, SondModuleAktePriv
             return;
         }
 
-        /* TODO: Seafile RPC - Sync pausieren */
-        LOG_INFO("Sync für Akte %s deaktiviert (TODO: Seafile Sync pausieren)\n", regnr);
+        /* Seafile Sync stoppen */
+		if (!sond_seafile_unsync_library(library_id, &error)) {
+			/* Sync-Stop fehlgeschlagen - nur warnen, nicht kritisch */
+			LOG_WARN("Seafile Sync konnte nicht gestoppt werden: %s\n",
+					   error ? error->message : "(unbekannter Fehler)");
+			if (error) {
+				g_error_free(error);
+			}
+		} else {
+			LOG_INFO("Seafile Sync gestoppt: %s\n", library_id);
+		}
+
         show_info_dialog(priv->main_widget, "Offline deaktiviert",
                         "Synchronisation wurde pausiert. Dateien bleiben lokal verfügbar.");
     }

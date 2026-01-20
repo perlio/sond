@@ -417,3 +417,8 @@ gboolean sond_offline_manager_is_offline(SondOfflineManager *manager,
 
     return sond_offline_manager_get_akte(manager, regnr) != NULL;
 }
+
+const gchar* sond_offline_manager_get_sync_directory(SondOfflineManager *manager) {
+    g_return_val_if_fail(manager != NULL, NULL);
+    return manager->sync_directory;
+}

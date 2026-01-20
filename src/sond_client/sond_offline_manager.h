@@ -167,6 +167,8 @@ gboolean sond_offline_manager_update_last_synced(SondOfflineManager *manager,
 gboolean sond_offline_manager_is_offline(SondOfflineManager *manager,
                                           const gchar *regnr);
 
+const gchar* sond_offline_manager_get_sync_directory(SondOfflineManager *manager);
+
 G_END_DECLS
 
 #endif /* SOND_OFFLINE_MANAGER_H */
