@@ -268,6 +268,22 @@ gboolean sond_client_delete_seafile_library(SondClient *client,
                                             GError **error);
 
 /**
+ * sond_client_get_seafile_library_id:
+ * @client: SondClient
+ * @library_name: Library-Name (z.B. "2026-1")
+ * @error: (nullable): Fehler-Rückgabe
+ *
+ * Holt die Library-ID vom Server anhand des Namens.
+ * Führt automatisch Login durch falls nicht authentifiziert.
+ * Bei 401 wird automatisch Re-Login durchgeführt.
+ *
+ * Returns: (transfer full) (nullable): Library-ID oder NULL bei Fehler
+ */
+gchar* sond_client_get_seafile_library_id(SondClient *client,
+                                           const gchar *library_name,
+                                           GError **error);
+
+/**
  * sond_client_get_offline_manager:
  * @client: SondClient
  *

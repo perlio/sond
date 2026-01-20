@@ -27,6 +27,8 @@
 #ifndef SOND_SEAFILE_SYNC_H
 #define SOND_SEAFILE_SYNC_H
 
+typedef struct _SondClient SondClient;
+
 #include <glib.h>
 
 G_BEGIN_DECLS
@@ -42,6 +44,21 @@ G_BEGIN_DECLS
  */
 gchar* sond_seafile_find_library_by_name(const gchar *library_name,
                                           GError **error);
+
+/**
+ * sond_seafile_get_library_id_from_server:
+ * @client: SondClient Instanz für HTTP-Requests
+ * @library_name: Name der Library (z.B. "2026-1")
+ * @error: Fehler-Rückgabe
+ *
+ * Holt die Library-ID vom sond_server (der fragt Seafile-Server).
+ * Nutzen wenn Library noch nicht lokal synchronisiert ist.
+ *
+ * Returns: (transfer full) (nullable): Library ID oder NULL bei Fehler
+ */
+gchar* sond_seafile_get_library_id_from_server(SondClient *client,
+                                                 const gchar *library_name,
+                                                 GError **error);
 
 /**
  * sond_seafile_sync_library:

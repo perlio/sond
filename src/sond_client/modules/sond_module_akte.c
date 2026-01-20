@@ -846,18 +846,42 @@ static void on_offline_toggle_toggled(GtkCheckButton *toggle, SondModuleAktePriv
 
     gboolean is_active = gtk_check_button_get_active(toggle);
 
-    /* Library ID - wird in beiden Branches gebraucht */
-	gchar *library_id = NULL;
-	GError *error = NULL;
+    /* Library ID ermitteln */
+     gchar *library_name = g_strdup_printf("%u-%u", year, lfd);
+     GError *error = NULL;
+     gchar *library_id = NULL;
+
+     if (is_active) {
+         /* Toggle AN: Library noch nicht synchronisiert - vom Server holen */
+         library_id = sond_seafile_get_library_id_from_server(priv->client, library_name, &error);
+     } else {
+         /* Toggle AUS: Library ist synchronisiert - lokal finden */
+         library_id = sond_seafile_find_library_by_name(library_name, &error);
+     }
+
+     g_free(library_name);
+
+     if (!library_id) {
+        /* Library nicht gefunden - Fehler anzeigen */
+    	GtkAlertDialog *dialog = gtk_alert_dialog_new("Seafile Library nicht gefunden");
+
+    	if (error) {
+    	    gtk_alert_dialog_set_detail(dialog, error->message);
+    	    g_error_free(error);
+    	}
+
+    	gtk_alert_dialog_show(dialog, GTK_WINDOW(gtk_widget_get_root(GTK_WIDGET(toggle))));
+    	g_object_unref(dialog);
+
+        /* Toggle zurücksetzen */
+        g_signal_handlers_block_by_func(toggle, on_offline_toggle_toggled, NULL);
+        gtk_check_button_set_active(GTK_CHECK_BUTTON(toggle), FALSE);
+        g_signal_handlers_unblock_by_func(toggle, on_offline_toggle_toggled, NULL);
+
+        return;
+    }
 
 	if (is_active) {
-		/* Offline aktivieren */
-        GError *error = NULL;
-
-		/* Library anhand Name finden */
-		gchar *library_name = g_strdup_printf("%u-%u", year, lfd);
-		library_id = sond_seafile_find_library_by_name(library_name, &error);
-
         /* Offline aktivieren */
         LOG_INFO("Aktiviere Offline für Akte %s\n", regnr);
 
@@ -871,30 +895,6 @@ static void on_offline_toggle_toggled(GtkCheckButton *toggle, SondModuleAktePriv
         /* Hole Kurzbezeichnung und Gegenstand */
         gchar *kurzb = sond_graph_node_get_property_string(priv->current_node, "kurzb");
         gchar *ggstd = sond_graph_node_get_property_string(priv->current_node, "ggstd");
-
-        /* Library anhand Name finden */
-        gchar *library_id = sond_seafile_find_library_by_name(library_name, &error);
-        g_free(library_name);
-
-        if (!library_id) {
-            /* Library nicht gefunden - Fehler anzeigen */
-        	GtkAlertDialog *dialog = gtk_alert_dialog_new("Seafile Library nicht gefunden");
-
-        	if (error) {
-        	    gtk_alert_dialog_set_detail(dialog, error->message);
-        	    g_error_free(error);
-        	}
-
-        	gtk_alert_dialog_show(dialog, GTK_WINDOW(gtk_widget_get_root(GTK_WIDGET(toggle))));
-        	g_object_unref(dialog);
-
-            /* Toggle zurücksetzen */
-            g_signal_handlers_block_by_func(toggle, on_offline_toggle_toggled, NULL);
-            gtk_check_button_set_active(GTK_CHECK_BUTTON(toggle), FALSE);
-            g_signal_handlers_unblock_by_func(toggle, on_offline_toggle_toggled, NULL);
-
-            return;
-        }
 
         /* sync_directory vom Offline Manager holen */
 		const gchar *sync_dir = sond_offline_manager_get_sync_directory(manager);

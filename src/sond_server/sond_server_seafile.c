@@ -327,6 +327,126 @@ static gboolean seafile_delete_library(SondServer *server,
  * Request Handlers
  * ======================================================================== */
 
+/**
+ * seafile_get_library_id_by_name:
+ *
+ * Sucht eine Library anhand des Namens und gibt die ID zurück.
+ *
+ * Seafile API:
+ * GET https://seafile.example.com/api2/repos/?nameContains=XXX
+ * Authorization: Token xxx
+ * Response: [{"repo_id": "xxx", "repo_name": "yyy", ...}, ...]
+ */
+static gchar* seafile_get_library_id_by_name(SondServer *server,
+                                               const gchar *library_name,
+                                               GError **error) {
+    g_return_val_if_fail(server != NULL, NULL);
+    g_return_val_if_fail(library_name != NULL, NULL);
+
+    gchar const* seafile_url = sond_server_get_seafile_url(server);
+    if (!seafile_url) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "Seafile URL not configured");
+        return NULL;
+    }
+
+    gchar *auth_token = sond_server_get_seafile_token(server);
+    if (!auth_token) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "Seafile auth token not available");
+        return NULL;
+    }
+
+    LOG_INFO("Searching for Seafile library with name '%s'...\n", library_name);
+
+    /* URL mit nameContains Filter: https://seafile.example.com/api2/repos/?nameContains=XXX */
+    gchar *escaped_name = g_uri_escape_string(library_name, NULL, FALSE);
+    gchar *url = g_strdup_printf("%s/api2/repos/?nameContains=%s", seafile_url, escaped_name);
+    g_free(escaped_name);
+
+    SoupSession *session = soup_session_new();
+    SoupMessage *msg = soup_message_new("GET", url);
+    g_free(url);
+
+    /* Authorization Header */
+    gchar *auth_header = g_strdup_printf("Token %s", auth_token);
+    soup_message_headers_append(soup_message_get_request_headers(msg),
+                               "Authorization", auth_header);
+    g_free(auth_header);
+    g_free(auth_token);
+
+    GBytes *response = soup_session_send_and_read(session, msg, NULL, error);
+
+    if (!response) {
+        g_object_unref(msg);
+        g_object_unref(session);
+        return NULL;
+    }
+
+    guint status = soup_message_get_status(msg);
+
+    if (status != 200) {
+        gsize size;
+        const gchar *body = g_bytes_get_data(response, &size);
+
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "Failed to search libraries (HTTP %u): %.*s",
+                   status, (int)size, body);
+
+        g_bytes_unref(response);
+        g_object_unref(msg);
+        g_object_unref(session);
+        return NULL;
+    }
+
+    /* Response parsen: [{"repo_id": "xxx", "repo_name": "yyy"}, ...] */
+    gsize size;
+    const gchar *data = g_bytes_get_data(response, &size);
+
+    JsonParser *parser = json_parser_new();
+    gchar *library_id = NULL;
+
+    if (json_parser_load_from_data(parser, data, size, NULL)) {
+        JsonNode *root = json_parser_get_root(parser);
+        JsonArray *repos = json_node_get_array(root);
+
+        /* Exakte Übereinstimmung suchen (nameContains kann auch Teilstrings finden) */
+        for (guint i = 0; i < json_array_get_length(repos); i++) {
+            JsonObject *repo = json_array_get_object_element(repos, i);
+
+            if (json_object_has_member(repo, "repo_name")) {
+                const gchar *name = json_object_get_string_member(repo, "repo_name");
+
+                /* EXAKTER Match! */
+                if (name && g_strcmp0(name, library_name) == 0) {
+                    if (json_object_has_member(repo, "repo_id")) {
+                        const gchar *id = json_object_get_string_member(repo, "repo_id");
+                        library_id = g_strdup(id);
+                        LOG_INFO("Library '%s' found with ID: %s\n", library_name, library_id);
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (!library_id) {
+            LOG_WARN("Library '%s' not found on Seafile server\n", library_name);
+            g_set_error(error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND,
+                       "Library '%s' not found", library_name);
+        }
+    } else {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "Failed to parse Seafile response");
+    }
+
+    g_object_unref(parser);
+    g_bytes_unref(response);
+    g_object_unref(msg);
+    g_object_unref(session);
+
+    return library_id;
+}
+
 static void send_json_response(SoupServerMessage *msg,
                                 guint status_code,
                                 const gchar *json_body) {
@@ -523,6 +643,87 @@ static void handle_seafile_library_delete(SoupServer *soup_server,
     send_success_response(msg, NULL);
 }
 
+/**
+ * handle_seafile_library_id_get:
+ * GET /api/seafile/library-id?name=XXX
+ *
+ * Response: {"library_id": "xxx"}
+ */
+static void handle_seafile_library_id_get(SoupServer *soup_server,
+                                          SoupServerMessage *msg,
+                                          const char *path,
+                                          GHashTable *query,
+                                          gpointer user_data) {
+    SondServer *server = (SondServer*)user_data;
+
+    if (strcmp(soup_server_message_get_method(msg), "GET") != 0) {
+        send_error_response(msg, SOUP_STATUS_METHOD_NOT_ALLOWED, "Only GET allowed");
+        return;
+    }
+
+    /* Query-Parameter 'name' holen */
+    if (!query) {
+        send_error_response(msg, SOUP_STATUS_BAD_REQUEST, "Missing query parameters");
+        return;
+    }
+
+    const gchar *library_name = g_hash_table_lookup(query, "name");
+    if (!library_name || strlen(library_name) == 0) {
+        send_error_response(msg, SOUP_STATUS_BAD_REQUEST, "Missing 'name' query parameter");
+        return;
+    }
+
+    /* Library-ID suchen */
+    GError *error = NULL;
+    gchar *library_id = seafile_get_library_id_by_name(server, library_name, &error);
+
+    if (!library_id) {
+        guint status_code = SOUP_STATUS_INTERNAL_SERVER_ERROR;
+
+        /* 404 wenn nicht gefunden */
+        if (error && error->code == G_IO_ERROR_NOT_FOUND) {
+            status_code = SOUP_STATUS_NOT_FOUND;
+        }
+
+        gchar *err_msg = g_strdup_printf("Failed to find library: %s",
+                                        error ? error->message : "unknown");
+        send_error_response(msg, status_code, err_msg);
+        g_free(err_msg);
+        g_clear_error(&error);
+        return;
+    }
+
+    /* Response: {"library_id": "xxx"} */
+    JsonBuilder *builder = json_builder_new();
+    json_builder_begin_object(builder);
+    json_builder_set_member_name(builder, "library_id");
+    json_builder_add_string_value(builder, library_id);
+    json_builder_end_object(builder);
+
+    JsonGenerator *gen = json_generator_new();
+    JsonNode *root = json_builder_get_root(builder);
+    json_generator_set_root(gen, root);
+    gchar *response_json = json_generator_to_data(gen, NULL);
+
+    send_json_response(msg, SOUP_STATUS_OK, response_json);
+
+    g_free(library_id);
+    g_free(response_json);
+    json_node_free(root);
+    g_object_unref(gen);
+    g_object_unref(builder);
+}
+
+ /**
+ * seafile_get_library_id_by_name:
+ *
+ * Sucht eine Library anhand des Namens und gibt die ID zurück.
+ *
+ * Seafile API:
+ * GET https://seafile.example.com/api2/repos/
+ * Authorization: Token xxx
+ * Response: [{"repo_id": "xxx", "repo_name": "yyy", ...}, ...]
+ */
 void sond_server_seafile_register_handlers(SondServer *server) {
     extern SoupServer* sond_server_get_soup_server(SondServer *server);
     
@@ -532,6 +733,8 @@ void sond_server_seafile_register_handlers(SondServer *server) {
                            handle_seafile_library_create, server, NULL);
     soup_server_add_handler(soup_server, "/seafile/library/",
                            handle_seafile_library_delete, server, NULL);
-    
+    soup_server_add_handler(soup_server, "/api/seafile/library-id",
+                            handle_seafile_library_id_get, server, NULL);
+
     LOG_INFO("Seafile handlers registered\n");
 }

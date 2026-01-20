@@ -50,13 +50,6 @@ CFLAGS += $(shell pkg-config --cflags gtk4 libsoup-3.0 json-glib-1.0 libmariadb 
 LDFLAGS += $(shell pkg-config --libs gtk4 libsoup-3.0 json-glib-1.0 libmariadb jansson)
 endif
 
-ifneq (,$(findstring $(MAKECMDGOALS), seafile_test))
-SRCS += src/sond_client/seafile_test.c \
-	$(shell find src/sond_client/libsearpc -name '*.c')
-CFLAGS += $(shell pkg-config --cflags glib-2.0 gobject-2.0 jansson)
-LDFLAGS += $(shell pkg-config --libs glib-2.0 gobject-2.0 jansson)
-endif
-
 # Object files
 OBJS := $(SRCS:%=$(OBJ_DIR)/%.o)
 

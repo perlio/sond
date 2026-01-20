@@ -18,8 +18,9 @@
 
 #include "sond_seafile_sync.h"
 #include "../sond_log_and_error.h"
+#include "sond_client.h"
 
-#include <jansson.h>
+//#include <jansson.h>
 #include <gio/gio.h>
 #include "libsearpc/searpc-client.h"
 #include "libsearpc/searpc-named-pipe-transport.h"
@@ -168,6 +169,16 @@ gchar* sond_seafile_find_library_by_name(const gchar *library_name,
     searpc_free_client_with_pipe_transport(client);
 
     return library_id;
+}
+
+gchar* sond_seafile_get_library_id_from_server(SondClient *client,
+                                                 const gchar *library_name,
+                                                 GError **error) {
+    g_return_val_if_fail(client != NULL, NULL);
+    g_return_val_if_fail(library_name != NULL, NULL);
+
+    /* Delegiert an SondClient - dort ist die HTTP-Logik */
+    return sond_client_get_seafile_library_id(client, library_name, error);
 }
 
 gboolean sond_seafile_sync_library(const gchar *library_id,

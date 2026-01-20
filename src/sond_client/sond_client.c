@@ -839,11 +839,6 @@ gboolean sond_client_delete_node(SondClient *client,
     return success;
 }
 
-gpointer sond_client_get_offline_manager(SondClient *client) {
-    g_return_val_if_fail(SOND_IS_CLIENT(client), NULL);
-    return client->offline_manager;
-}
-
 gchar* sond_client_check_lock(SondClient *client,
                                gint64 node_id,
                                GError **error) {
@@ -1023,3 +1018,130 @@ gboolean sond_client_delete_seafile_library(SondClient *client,
     
     return success;
 }
+
+gchar* sond_client_get_seafile_library_id(SondClient *client,
+                                           const gchar *library_name,
+                                           GError **error) {
+    g_return_val_if_fail(client != NULL, NULL);
+    g_return_val_if_fail(library_name != NULL, NULL);
+
+    /* Sicherstellen dass wir eingeloggt sind */
+    if (!ensure_authenticated(client, error)) {
+        return NULL;
+    }
+
+    /* URL konstruieren */
+    gchar *escaped_name = g_uri_escape_string(library_name, NULL, FALSE);
+    gchar *path = g_strdup_printf("/api/seafile/library-id?name=%s", escaped_name);
+    g_free(escaped_name);
+
+    gchar *url = g_strdup_printf("%s%s", client->server_url, path);
+    g_free(path);
+
+    /* HTTP GET Request */
+    SoupMessage *msg = soup_message_new("GET", url);
+    g_free(url);
+
+    /* Authorization Header */
+    gchar *auth_header = g_strdup_printf("Bearer %s", client->session_token);
+    soup_message_headers_append(soup_message_get_request_headers(msg),
+                                "Authorization", auth_header);
+    g_free(auth_header);
+
+    /* Request senden */
+    GInputStream *stream = soup_session_send(client->session, msg, NULL, error);
+
+    if (!stream) {
+        g_object_unref(msg);
+        return NULL;
+    }
+
+    /* Status Code prüfen */
+    guint status = soup_message_get_status(msg);
+
+    if (status == 401) {
+        /* Unauthorized - Re-Login versuchen */
+        g_object_unref(stream);
+        g_object_unref(msg);
+
+        if (handle_auth_error(client, error)) {
+            /* Retry nach Re-Login */
+            return sond_client_get_seafile_library_id(client, library_name, error);
+        } else {
+            g_set_error(error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+                       "Nicht authentifiziert");
+            return NULL;
+        }
+    }
+
+    if (status != 200) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "Server-Fehler: HTTP %u", status);
+        g_object_unref(stream);
+        g_object_unref(msg);
+        return NULL;
+    }
+
+    /* Response lesen */
+    GByteArray *bytes = g_byte_array_new();
+    guint8 buffer[4096];
+    gssize read_size;
+
+    while ((read_size = g_input_stream_read(stream, buffer, sizeof(buffer), NULL, error)) > 0) {
+        g_byte_array_append(bytes, buffer, read_size);
+    }
+
+    g_object_unref(stream);
+    g_object_unref(msg);
+
+    if (read_size < 0) {
+        g_byte_array_free(bytes, TRUE);
+        return NULL;
+    }
+
+    /* NULL-terminieren */
+    g_byte_array_append(bytes, (guint8*)"\0", 1);
+    gchar *response_body = (gchar*)g_byte_array_free(bytes, FALSE);
+
+    /* JSON parsen */
+    JsonParser *parser = json_parser_new();
+
+    if (!json_parser_load_from_data(parser, response_body, -1, error)) {
+        g_free(response_body);
+        g_object_unref(parser);
+        return NULL;
+    }
+
+    g_free(response_body);
+
+    JsonNode *root = json_parser_get_root(parser);
+    if (!root || !JSON_NODE_HOLDS_OBJECT(root)) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "Ungültige JSON-Response");
+        g_object_unref(parser);
+        return NULL;
+    }
+
+    JsonObject *obj = json_node_get_object(root);
+    const gchar *library_id_str = json_object_get_string_member(obj, "library_id");
+
+    gchar *library_id = NULL;
+    if (library_id_str && strlen(library_id_str) > 0) {
+        library_id = g_strdup(library_id_str);
+    } else {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND,
+                   "Library '%s' auf Server nicht gefunden", library_name);
+    }
+
+    g_object_unref(parser);
+
+    return library_id;
+}
+
+
+gpointer sond_client_get_offline_manager(SondClient *client) {
+    g_return_val_if_fail(SOND_IS_CLIENT(client), NULL);
+    return client->offline_manager;
+}
+
+
