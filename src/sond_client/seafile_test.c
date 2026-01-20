@@ -1,133 +1,129 @@
 /*
- * Seafile Connection Test
+ * Seafile Connection Test - FINAL VERSION
  *
- * Testet ob Verbindung zum Seafile-Client möglich ist
+ * - Korrekter Pipe-Name: seafile_{BASE64(username)}
+ * - JSON-Response (kein GObject)
+ * - Korrekte Memory-Ownership
  */
 
 #include <stdio.h>
 #include <glib.h>
+#include <jansson.h>
 #include "libsearpc/searpc-client.h"
 #include "libsearpc/searpc-named-pipe-transport.h"
 
-/**
- * test_seafile_connection:
- *
- * Versucht mit Seafile-Client zu verbinden und Repo-Liste abzurufen
- *
- * Returns: TRUE wenn erfolgreich
- */
-gboolean test_seafile_connection(void) {
-    GError *error = NULL;
-    SearpcNamedPipeClient *pipe_client = NULL;
-    SearpcClient *client = NULL;
+static gchar* base64_encode_simple(const gchar *input) {
+    return g_base64_encode((const guchar*)input, strlen(input));
+}
 
-    /* Windows Named Pipe: \\.\pipe\seafile_pipe_<username> */
+int main(void) {
+    printf("=== Seafile Connection Test (FINAL) ===\n\n");
+
     const gchar *username = g_get_user_name();
-    gchar *pipe_path = g_strdup_printf("\\\\.\\pipe\\seafile_pipe_%s", username);
+    gchar *username_b64 = base64_encode_simple(username);
 
-    printf("Versuche Verbindung zu: %s\n", pipe_path);
+    /* KORREKT: seafile_{username_b64} (NICHT seafile_ext_pipe_...) */
+    gchar *pipe_path = g_strdup_printf("\\\\.\\pipe\\seafile_%s", username_b64);
 
-    /* Named Pipe Client erstellen */
-    pipe_client = searpc_create_named_pipe_client(pipe_path);
+    printf("Username: %s\n", username);
+    printf("Base64:   %s\n", username_b64);
+    printf("Pipe:     %s\n\n", pipe_path);
 
+    SearpcNamedPipeClient *pipe_client = searpc_create_named_pipe_client(pipe_path);
     if (!pipe_client) {
-        printf("❌ Konnte Named Pipe Client nicht erstellen: %s\n", pipe_path);
+        printf("❌ Create failed\n");
         g_free(pipe_path);
-        return FALSE;
+        g_free(username_b64);
+        return 1;
     }
 
-    /* Verbinden */
     if (searpc_named_pipe_client_connect(pipe_client) < 0) {
-        printf("❌ Konnte nicht verbinden zu: %s\n", pipe_path);
-        printf("   Seafile-Client läuft vermutlich nicht oder nutzt anderen Pipe-Namen\n");
+        printf("❌ Connect failed\n");
         g_free(pipe_path);
+        g_free(username_b64);
         g_free(pipe_client);
-        return FALSE;
+        return 1;
     }
+    printf("✅ Verbunden!\n\n");
 
-    printf("✅ Verbindung hergestellt!\n");
-    g_free(pipe_path);
-
-    /* SearpcClient mit Transport erstellen */
-    client = searpc_client_with_named_pipe_transport(pipe_client, "seafile-rpcserver");
-
+    SearpcClient *client = searpc_client_with_named_pipe_transport(pipe_client, "seafile-rpcserver");
     if (!client) {
-        printf("❌ Konnte RPC-Client nicht erstellen\n");
+        printf("❌ Transport failed\n");
+        g_free(pipe_path);
+        g_free(username_b64);
         g_free(pipe_client);
-        return FALSE;
+        return 1;
     }
 
-    /* Test-RPC-Call: Hole Repo-Liste */
-    printf("Rufe seafile_get_repo_list auf...\n");
+    /* WICHTIG: Ab hier gehört pipe_client dem client - NICHT mehr freigeben! */
 
-    GList *repos = NULL;
+    printf("Rufe seafile_get_repo_list auf (JSON)...\n");
+
+    GError *error = NULL;
+    json_t *result = NULL;
+
     searpc_client_call(
         client,
         "seafile_get_repo_list",
-        "objlist",
-        0, // GType (wird ignoriert für objlist)
-        &repos,
+        "json",
+        0,
+        &result,
         &error,
         2,
-        "int", (void*)-1,  // offset
-        "int", (void*)-1   // limit
+        "int", (void*)-1,
+        "int", (void*)-1
     );
 
     if (error) {
         printf("❌ RPC-Call fehlgeschlagen: %s\n", error->message);
         g_error_free(error);
         searpc_free_client_with_pipe_transport(client);
-        g_free(pipe_client);
-        return FALSE;
+        g_free(pipe_path);
+        g_free(username_b64);
+        return 1;
     }
 
-    if (!repos) {
-        printf("⚠️  Keine Repos gefunden (oder Seafile hat keine Libraries)\n");
+    if (!result) {
+        printf("⚠️  Keine Daten zurückgekommen\n");
     } else {
-        printf("✅ RPC-Call erfolgreich! Anzahl Repos: %u\n", g_list_length(repos));
+        printf("✅ RPC-Call erfolgreich!\n\n");
 
-        /* Erste 5 Repos ausgeben */
-        guint count = 0;
-        for (GList *l = repos; l != NULL && count < 5; l = l->next, count++) {
-            GObject *repo = l->data;
-            gchar *id = NULL;
-            gchar *name = NULL;
+        if (json_is_array(result)) {
+            size_t count = json_array_size(result);
+            printf("Anzahl Libraries: %zu\n\n", count);
 
-            g_object_get(repo, "id", &id, "name", &name, NULL);
-            printf("   - %s: %s\n", name ? name : "(kein Name)", id ? id : "(keine ID)");
+            for (size_t i = 0; i < count; i++) {
+                json_t *repo = json_array_get(result, i);
 
-            g_free(id);
-            g_free(name);
+                const char *id = json_string_value(json_object_get(repo, "id"));
+                const char *name = json_string_value(json_object_get(repo, "name"));
+                int encrypted = json_integer_value(json_object_get(repo, "encrypted"));
+
+                printf("  %zu. %s\n", i+1, name ? name : "(kein Name)");
+                printf("     ID: %s\n", id ? id : "(keine ID)");
+                printf("     Encrypted: %s\n", encrypted ? "Ja" : "Nein");
+                printf("\n");
+            }
+        } else {
+            printf("Unerwartetes JSON-Format:\n");
+            char *json_str = json_dumps(result, JSON_INDENT(2));
+            printf("%s\n", json_str);
+            free(json_str);
         }
 
-        g_list_free_full(repos, g_object_unref);
+        json_decref(result);
     }
 
     searpc_free_client_with_pipe_transport(client);
-    g_free(pipe_client);
+    /* NICHT g_free(pipe_client) - gehört dem client! */
+    g_free(pipe_path);
+    g_free(username_b64);
 
-    printf("\n✅ Test erfolgreich abgeschlossen!\n");
-    return TRUE;
-}
+    printf("🎉 Test erfolgreich abgeschlossen!\n\n");
+    printf("=== Verwendete Konfiguration ===\n");
+    printf("Pipe-Pattern: \\\\.\\pipe\\seafile_{BASE64(username)}\n");
+    printf("Service:      seafile-rpcserver\n");
+    printf("Response:     JSON (jansson)\n");
 
-/* Test-Main (optional) */
-int main(void) {
-    printf("=== Seafile Connection Test ===\n\n");
-
-    if (test_seafile_connection()) {
-        printf("\n🎉 Seafile-Client ist erreichbar!\n");
-        return 0;
-    } else {
-        printf("\n❌ Seafile-Client nicht erreichbar\n");
-        printf("\nMögliche Ursachen:\n");
-        printf("- Seafile-Client läuft nicht\n");
-        printf("- Falscher Pipe-Name\n");
-        printf("\nPrüfen Sie welche Pipes existieren mit PowerShell:\n");
-        printf("  Get-ChildItem \\\\.\\pipe\\ | Where-Object {$_.Name -like \"*sea*\"}\n");
-        printf("\nAlternative Pipe-Namen zum Testen:\n");
-        printf("  - \\\\.\\pipe\\seafile\n");
-        printf("  - \\\\.\\pipe\\seafile_client\n");
-        printf("  - \\\\.\\pipe\\seadrive\n");
-        return 1;
-    }
+    return 0;
 }
