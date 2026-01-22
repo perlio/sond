@@ -51,6 +51,7 @@ struct _SondServer {
 
     /* Seafile Config */
     gchar *seafile_url;           // z.B. "https://seafile.example.com"
+    gchar* seafile_user;
     gchar *auth_token;            // Seafile Auth-Token
     gint seafile_group_id;        // Gruppe zum Teilen
     
@@ -1181,7 +1182,6 @@ struct DataConfig {
 	gchar *db_name;
 	gchar *db_user;
 	gchar *db_passfile;
-	gchar *sf_user;
 	gchar *sf_passfile;
 };
 
@@ -1190,7 +1190,6 @@ static void data_config_free(struct DataConfig *data_config) {
 	g_free(data_config->db_name);
 	g_free(data_config->db_user);
 	g_free(data_config->db_passfile);
-	g_free(data_config->sf_user);
 	g_free(data_config->sf_passfile);
 }
 
@@ -1260,7 +1259,7 @@ static gboolean sond_server_load_config(SondServer *server,
 
     /* === Seafile Config === */
     server->seafile_url = g_key_file_get_string(keyfile, "seafile", "url", NULL);
-    data_config->sf_user = g_key_file_get_string(keyfile, "seafile", "username", NULL);
+    server->seafile_user = g_key_file_get_string(keyfile, "seafile", "username", NULL);
     data_config->sf_passfile = g_key_file_get_string(keyfile, "seafile", "password_file", NULL);
     server->seafile_group_id = g_key_file_get_integer(keyfile, "seafile", "group_id", NULL);
 
@@ -1334,7 +1333,7 @@ static gboolean sond_server_init_seafile(SondServer *server,
 
 	// Auth-Token holen
 	server->auth_token = sond_server_seafile_get_auth_token(
-		server, data_config->sf_user, sf_password, error);
+		server, server->seafile_user, sf_password, error);
 
 	// Passwort überschreiben
 	memset(sf_password, 0, strlen(sf_password));
@@ -1542,12 +1541,12 @@ int main(int argc, char *argv[]) {
 
 gchar const* sond_server_get_seafile_url(SondServer *server) {
     g_return_val_if_fail(SOND_IS_SERVER(server), NULL);
-    return g_strdup(server->seafile_url);
+    return server->seafile_url;
 }
 
-gchar* sond_server_get_seafile_token(SondServer *server) {
+gchar const* sond_server_get_seafile_token(SondServer *server) {
     g_return_val_if_fail(SOND_IS_SERVER(server), NULL);
-    return g_strdup(server->auth_token);
+    return server->auth_token;
 }
 
 guint sond_server_get_seafile_group_id(SondServer *server) {

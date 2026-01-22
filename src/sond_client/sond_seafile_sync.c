@@ -202,76 +202,55 @@ gboolean sond_seafile_sync_library(const gchar *library_id,
         LOG_INFO("Lokales Verzeichnis erstellt: %s\n", local_path);
     }
 
-    /* RPC-Call: seafile_sync_task_add oder seafile_clone */
-    /* Prüfen ob Library schon synchronisiert wird */
+    /* RPC-Call: seafile_clone
+     * Parameter laut seafile-rpc.h:
+     * - repo_id
+     * - repo_version (meistens 0)
+     * - repo_name
+     * - worktree (lokaler Pfad)
+     * - token
+     * - passwd
+     * - magic
+     * - email
+     * - random_key
+     * - enc_version
+     * - more_info
+     */
     GError *rpc_error = NULL;
-    gchar *existing_worktree = NULL;
+    gchar *task_id = NULL;
 
     searpc_client_call(
         client,
-        "seafile_get_repo_worktree",
+        "seafile_clone",
         "string",
         0,
-        &existing_worktree,
+        &task_id,
         &rpc_error,
-        1,
-        "string", library_id
+        11,
+        "string", library_id,       /* repo_id */
+        "int", (void*)0,             /* repo_version (0 für normale Repos) */
+        "string", library_id,        /* repo_name (nutzen library_id als Name) */
+        "string", local_path,        /* worktree */
+        "string", "",                /* token (leer) */
+        "string", "",                /* passwd (leer wenn nicht verschlüsselt) */
+        "string", "",                /* magic (leer) */
+        "string", "",                /* email (leer) */
+        "string", "",                /* random_key (leer) */
+        "int", (void*)0,             /* enc_version (0 = nicht verschlüsselt) */
+        "string", ""                 /* more_info (leer) */
     );
 
     if (rpc_error) {
-        /* Repo nicht synchronisiert - neu clonen */
-        g_error_free(rpc_error);
-        rpc_error = NULL;
+        g_propagate_error(error, rpc_error);
+        searpc_free_client_with_pipe_transport(client);
+        return FALSE;
+    }
 
-        LOG_INFO("Library noch nicht synchronisiert, starte Clone...\n");
-
-        /* seafile_clone: repo_id, peer_id, repo_name, worktree, token, passwd, enc_version */
-        gchar *task_id = NULL;
-        searpc_client_call(
-            client,
-            "seafile_clone",
-            "string",
-            0,
-            &task_id,
-            &rpc_error,
-            7,
-            "string", library_id,
-            "string", "",           /* peer_id (leer für lokal) */
-            "string", library_id,   /* repo_name */
-            "string", local_path,   /* worktree */
-            "string", "",           /* token (leer für lokal) */
-            "string", "",           /* passwd (leer wenn nicht verschlüsselt) */
-            "int", (void*)2         /* enc_version */
-        );
-
-        if (rpc_error) {
-            g_propagate_error(error, rpc_error);
-            searpc_free_client_with_pipe_transport(client);
-            return FALSE;
-        }
-
-        if (task_id) {
-            LOG_INFO("Clone gestartet, Task-ID: %s\n", task_id);
-            g_free(task_id);
-        }
-
+    if (task_id) {
+        LOG_INFO("Clone gestartet, Task-ID: %s\n", task_id);
+        g_free(task_id);
     } else {
-        /* Library wird bereits synchronisiert */
-        LOG_INFO("Library wird bereits synchronisiert: %s\n",
-                 existing_worktree ? existing_worktree : "(unbekannt)");
-
-        if (existing_worktree) {
-            /* Prüfen ob Pfad übereinstimmt */
-            if (g_strcmp0(existing_worktree, local_path) != 0) {
-                g_set_error(error, G_IO_ERROR, G_IO_ERROR_EXISTS,
-                           "Library wird bereits zu anderem Pfad synchronisiert: %s",
-                           existing_worktree);
-                g_free(existing_worktree);
-                searpc_free_client_with_pipe_transport(client);
-                return FALSE;
-            }
-            g_free(existing_worktree);
-        }
+        LOG_INFO("Clone gestartet (keine Task-ID)\n");
     }
 
     searpc_free_client_with_pipe_transport(client);

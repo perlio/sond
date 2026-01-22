@@ -25,8 +25,8 @@
 
 /* Forward declarations */
 typedef struct _SondServer SondServer;
-extern gchar* sond_server_get_seafile_url(SondServer *server);
-extern gchar* sond_server_get_seafile_token(SondServer *server);
+extern gchar const* sond_server_get_seafile_url(SondServer *server);
+extern gchar const* sond_server_get_seafile_token(SondServer *server);
 extern guint sond_server_get_seafile_group_id(SondServer *server);
 
 /**
@@ -143,14 +143,14 @@ static gchar* seafile_create_library(SondServer *server,
     g_return_val_if_fail(server != NULL, NULL);
     g_return_val_if_fail(name != NULL, NULL);
     
-    gchar const*seafile_url = sond_server_get_seafile_url(server);
+    gchar const* seafile_url = sond_server_get_seafile_url(server);
     if (!seafile_url) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                    "Seafile URL not configured");
         return NULL;
     }
     
-    gchar *auth_token = sond_server_get_seafile_token(server);
+    gchar const* auth_token = sond_server_get_seafile_token(server);
     if (!auth_token) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                    "Seafile auth token not available");
@@ -179,7 +179,6 @@ static gchar* seafile_create_library(SondServer *server,
     soup_message_headers_append(soup_message_get_request_headers(msg),
                                "Authorization", auth_header);
     g_free(auth_header);
-    g_free(auth_token);
     
     /* Content-Type */
     soup_message_headers_set_content_type(soup_message_get_request_headers(msg),
@@ -265,7 +264,7 @@ static gboolean seafile_delete_library(SondServer *server,
         return FALSE;
     }
     
-    gchar *auth_token = sond_server_get_seafile_token(server);
+    gchar const* auth_token = sond_server_get_seafile_token(server);
     if (!auth_token) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                    "Seafile auth token not available");
@@ -286,7 +285,6 @@ static gboolean seafile_delete_library(SondServer *server,
     soup_message_headers_append(soup_message_get_request_headers(msg),
                                "Authorization", auth_header);
     g_free(auth_header);
-    g_free(auth_token);
     
     GBytes *response = soup_session_send_and_read(session, msg, NULL, error);
     
@@ -344,7 +342,7 @@ static gchar* seafile_get_library_id_by_name(SondServer *server,
         return NULL;
     }
 
-    gchar *auth_token = sond_server_get_seafile_token(server);
+    gchar const* auth_token = sond_server_get_seafile_token(server);
     if (!auth_token) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                    "Seafile auth token not available");
@@ -363,7 +361,6 @@ static gchar* seafile_get_library_id_by_name(SondServer *server,
     soup_message_headers_append(soup_message_get_request_headers(msg),
                                "Authorization", auth_header);
     g_free(auth_header);
-    g_free(auth_token);
 
     GBytes *response = soup_session_send_and_read(session, msg, NULL, error);
 
