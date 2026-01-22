@@ -1052,8 +1052,6 @@ static void on_new_akte_dialog_response(GObject *source, GAsyncResult *result, g
         /* KEINE "von"-Property setzen - erst beim Speichern! */
         /* Node ist damit noch nicht "materiell" existent */
         
-        g_print("[AKTE] Calling sond_client_create_and_lock_node now...\n");
-        
         /* SOFORT in DB speichern UND locken (atomar)! */
         GError *save_error = NULL;
         if (!sond_client_create_and_lock_node(priv->client, priv->current_node, 
@@ -1209,19 +1207,29 @@ static void on_neue_akte_clicked(GtkButton *button, SondModuleAktePrivate *priv)
 }
 
 static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
+	GPtrArray* von_props = NULL;
+
     if (!priv->current_node) {
         show_error_dialog(priv->main_widget, "Nichts zu speichern",
                          "Bitte erst eine Akte laden oder neu erstellen.");
         return;
     }
     
-    /* Prüfen ob Node eine RegNr hat (von "Neue Akte"-Button könnte sie fehlen) */
-    GPtrArray *regnr_values = sond_graph_node_get_property(priv->current_node, "regnr");
-    gboolean has_regnr = (regnr_values != NULL && regnr_values->len == 2);
-    if (regnr_values) {
-        g_ptr_array_unref(regnr_values);
-    }
-    
+    /* Prüfen ob Node bereits "materiell" ist (hat "von"-Property) */
+	von_props = sond_graph_node_get_property(priv->current_node, "von");
+	gboolean is_new = (!von_props || von_props->len == 0);
+	if (von_props) {
+		g_ptr_array_unref(von_props);
+		von_props = NULL;
+	}
+
+	/* Prüfen ob Node eine RegNr hat (von "Neue Akte"-Button könnte sie fehlen) */
+	GPtrArray *regnr_values = sond_graph_node_get_property(priv->current_node, "regnr");
+	gboolean has_regnr = (regnr_values != NULL && regnr_values->len == 2);
+	if (regnr_values) {
+		g_ptr_array_unref(regnr_values);
+	}
+
     if (!has_regnr) {
         /* Keine RegNr vorhanden - jetzt erst vergeben! */
         /* RETRY-SCHLEIFE: Falls RegNr-Konflikt, nochmal probieren */
@@ -1252,23 +1260,6 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
             
             LOG_INFO("Versuch %d/%d: RegNr %u/%u vergeben\n", attempt + 1, MAX_RETRIES, lfd_nr, year);
             
-            /* ZUERST: Seafile Library erstellen! */
-            gchar *library_id = NULL;
-            GError *lib_error = NULL;
-            library_id = create_seafile_library(priv, year, lfd_nr, &lib_error);
-            
-            if (!library_id) {
-                /* Library-Erstellung fehlgeschlagen */
-                gchar *msg = g_strdup_printf("Fehler beim Erstellen der Seafile Library: %s",
-                                            lib_error ? lib_error->message : "Unbekannt");
-                show_error_dialog(priv->main_widget, "Library-Erstellung fehlgeschlagen", msg);
-                g_free(msg);
-                if (lib_error) g_error_free(lib_error);
-                return;
-            }
-            
-            LOG_INFO("Seafile Library erstellt (ID: %s), speichere jetzt Node...\n", library_id);
-            
             /* Felder in Node übernehmen (vor dem Speichern!) */
             const gchar *kurzbezeichnung = gtk_editable_get_text(GTK_EDITABLE(priv->entry_kurzbezeichnung));
             if (kurzbezeichnung && strlen(kurzbezeichnung) > 0) {
@@ -1279,7 +1270,7 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
             if (gegenstand && strlen(gegenstand) > 0) {
                 sond_graph_node_set_property_string(priv->current_node, "ggstd", gegenstand);
             }
-            
+
             /* "von"-Property setzen - Akte wird damit "materiell" */
             GDateTime *now = g_date_time_new_now_local();
             gchar *datum = g_date_time_format(now, "%Y-%m-%d");
@@ -1287,35 +1278,10 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
             g_date_time_unref(now);
             g_free(datum);
             
-            /* Versuch zu speichern */
+            /* ZUERST: Node speichern */
             error = NULL;
-            if (save_node(priv, &error)) {
-                /* Erfolg! */
-                success = TRUE;
-                priv->is_new_from_entry = FALSE;
-                update_ui_from_node(priv);
-                
-                gchar *regnr_display = format_regnr(lfd_nr, year);
-                gchar *msg = g_strdup_printf("Akte %s wurde erfolgreich gespeichert.", regnr_display);
-                show_info_dialog(priv->main_widget, "Gespeichert", msg);
-                g_free(msg);
-                g_free(regnr_display);
-                g_free(library_id);
-                
-                LOG_INFO("Akte erfolgreich gespeichert mit RegNr %u/%u (nach %d Versuch(en))\n",
-                        lfd_nr, year, attempt + 1);
-            } else {
-                /* Fehler beim Speichern - Library zurückrollen! */
-                LOG_ERROR("Node-Speichern fehlgeschlagen, rolle Seafile Library zurück...\n");
-                
-                GError *del_error = NULL;
-                if (!delete_seafile_library(priv, library_id, &del_error)) {
-                    LOG_ERROR("Rollback der Library fehlgeschlagen: %s\n",
-                             del_error ? del_error->message : "Unbekannt");
-                    if (del_error) g_error_free(del_error);
-                }
-                g_free(library_id);
-                
+            if (!save_node(priv, &error)) {
+                /* Node-Speichern fehlgeschlagen */
                 if (error && (error->code == 409 || 
                              (error->message && strstr(error->message, "Duplicate")) ||
                              (error->message && strstr(error->message, "already exists")))) {
@@ -1323,6 +1289,7 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
                     LOG_INFO("RegNr-Konflikt bei %u/%u, versuche mit nächster RegNr...\n", lfd_nr, year);
                     if (error) g_error_free(error);
                     /* Schleife läuft weiter */
+                    continue;
                 } else {
                     /* Anderer Fehler → Abbruch */
                     gchar *msg = g_strdup_printf("Fehler beim Speichern: %s", 
@@ -1333,6 +1300,63 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
                     return;
                 }
             }
+
+            /* Node erfolgreich gespeichert - JETZT Library erstellen */
+            LOG_INFO("Node gespeichert (ID: %" G_GINT64_FORMAT "), erstelle jetzt Seafile Library...\n",
+                    sond_graph_node_get_id(priv->current_node));
+
+            gchar *library_id = NULL;
+            GError *lib_error = NULL;
+            library_id = create_seafile_library(priv, year, lfd_nr, &lib_error);
+
+            if (!library_id) {
+                /* Library-Erstellung fehlgeschlagen - Node wieder löschen (Rollback) */
+                LOG_ERROR("Library-Erstellung fehlgeschlagen, lösche Node (Rollback)...\n");
+
+                gint64 node_id = sond_graph_node_get_id(priv->current_node);
+                GError *del_error = NULL;
+
+                /* Unlock und Delete */
+                sond_client_unlock_node(priv->client, node_id, NULL);
+
+                if (!delete_node(priv, node_id, &del_error)) {
+                    LOG_ERROR("Rollback fehlgeschlagen: %s\n",
+                             del_error ? del_error->message : "Unbekannt");
+                    if (del_error) g_error_free(del_error);
+                }
+
+                /* Fehler anzeigen */
+                gchar *msg = g_strdup_printf("Fehler beim Erstellen der Seafile Library: %s\n\n"
+                                            "Node wurde zurückgerollt.",
+                                            lib_error ? lib_error->message : "Unbekannt");
+                show_error_dialog(priv->main_widget, "Library-Erstellung fehlgeschlagen", msg);
+                g_free(msg);
+                if (lib_error) g_error_free(lib_error);
+
+                /* current_node ungültig machen */
+                g_object_unref(priv->current_node);
+                priv->current_node = NULL;
+
+                return;
+            }
+
+            LOG_INFO("Seafile Library erfolgreich erstellt (ID: %s)\n", library_id);
+            g_free(library_id);
+
+            /* Erfolg! */
+            success = TRUE;
+			priv->is_new_from_entry = FALSE;
+			update_ui_from_node(priv);
+
+			gchar *regnr_display = format_regnr(lfd_nr, year);
+			gchar *msg = g_strdup_printf("Akte %s wurde erfolgreich gespeichert.", regnr_display);
+			show_info_dialog(priv->main_widget, "Gespeichert", msg);
+			g_free(msg);
+			g_free(regnr_display);
+			g_free(library_id);
+
+			LOG_INFO("Akte erfolgreich gespeichert mit RegNr %u/%u (nach %d Versuch(en))\n",
+					lfd_nr, year, attempt + 1);
         }
         
         if (!success) {
@@ -1344,6 +1368,80 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
         return;  /* Fertig (Erfolg oder max retries erreicht) */
     }
     
+    /* Wenn Node neu ist (keine "von"-Property), Library erstellen */
+    if (is_new && has_regnr) {
+        /* Manuelle RegNr-Eingabe - Node ist in DB aber noch nicht "materiell" */
+
+        /* RegNr extrahieren */
+        GPtrArray *regnr_vals = sond_graph_node_get_property(priv->current_node, "regnr");
+        if (regnr_vals && regnr_vals->len == 2) {
+            guint year = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_vals, 0), NULL, 10);
+            guint lfd = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_vals, 1), NULL, 10);
+            g_ptr_array_unref(regnr_vals);
+
+            LOG_INFO("Manuelle RegNr %u/%u - erstelle Seafile Library...\n", lfd, year);
+
+            /* Felder übernehmen */
+            const gchar *kurzbezeichnung = gtk_editable_get_text(GTK_EDITABLE(priv->entry_kurzbezeichnung));
+            if (kurzbezeichnung && strlen(kurzbezeichnung) > 0) {
+                sond_graph_node_set_property_string(priv->current_node, "kurzb", kurzbezeichnung);
+            }
+
+            const gchar *gegenstand = gtk_editable_get_text(GTK_EDITABLE(priv->textview_gegenstand));
+            if (gegenstand && strlen(gegenstand) > 0) {
+                sond_graph_node_set_property_string(priv->current_node, "ggstd", gegenstand);
+            }
+
+            /* "von"-Property setzen */
+            GDateTime *now = g_date_time_new_now_local();
+            gchar *datum = g_date_time_format(now, "%Y-%m-%d");
+            sond_graph_node_set_property_string(priv->current_node, "von", datum);
+            g_date_time_unref(now);
+            g_free(datum);
+
+            /* ZUERST: Node speichern */
+            GError *error = NULL;
+            if (!save_node(priv, &error)) {
+                gchar *msg = g_strdup_printf("Fehler beim Speichern: %s",
+                                            error ? error->message : "Unbekannt");
+                show_error_dialog(priv->main_widget, "Speichern fehlgeschlagen", msg);
+                g_free(msg);
+                if (error) g_error_free(error);
+                return;
+            }
+
+            /* Node gespeichert - JETZT Library erstellen */
+            LOG_INFO("Node gespeichert (ID: %" G_GINT64_FORMAT "), erstelle Seafile Library...\n",
+                    sond_graph_node_get_id(priv->current_node));
+
+            gchar *library_id = create_seafile_library(priv, year, lfd, &error);
+
+            if (!library_id) {
+                /* Library-Fehler - nur warnen, Node bleibt */
+                LOG_ERROR("Library-Erstellung fehlgeschlagen: %s\n",
+                         error ? error->message : "Unbekannt");
+
+                gchar *msg = g_strdup_printf(
+                    "Akte wurde gespeichert, aber Seafile Library konnte nicht erstellt werden:\n%s\n\n"
+                    "Sie können die Akte trotzdem nutzen, aber keine Dateien hochladen.",
+                    error ? error->message : "Unbekannt");
+                show_error_dialog(priv->main_widget, "Warnung", msg);
+                g_free(msg);
+                if (error) g_error_free(error);
+            } else {
+                LOG_INFO("Seafile Library erfolgreich erstellt (ID: %s)\n", library_id);
+                g_free(library_id);
+            }
+
+            /* UI aktualisieren */
+            priv->is_new_from_entry = FALSE;
+            update_ui_from_node(priv);
+            show_info_dialog(priv->main_widget, "Gespeichert", "Akte wurde erfolgreich gespeichert.");
+
+            return;  /* Fertig! */
+        }
+    }
+
     /* RegNr vorhanden (manuelle Eingabe oder bereits gespeichert) */
     const gchar *kurzbezeichnung = gtk_editable_get_text(GTK_EDITABLE(priv->entry_kurzbezeichnung));
     if (kurzbezeichnung && strlen(kurzbezeichnung) > 0) {
@@ -1356,7 +1454,7 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
     }
     
     /* "von"-Property setzen falls noch nicht vorhanden (bei erster Speicherung) */
-    GPtrArray *von_props = sond_graph_node_get_property(priv->current_node, "von");
+    von_props = sond_graph_node_get_property(priv->current_node, "von");
     if (!von_props || von_props->len == 0) {
         GDateTime *now = g_date_time_new_now_local();
         gchar *datum = g_date_time_format(now, "%Y-%m-%d");
@@ -1366,6 +1464,7 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
     }
     if (von_props) {
         g_ptr_array_unref(von_props);
+        von_props = NULL;
     }
     
     /* Speichern */

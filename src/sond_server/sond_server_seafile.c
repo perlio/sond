@@ -54,8 +54,6 @@ gchar* sond_server_seafile_get_auth_token(SondServer *server,
         return NULL;
     }
     
-    LOG_INFO("Authenticating user '%s' with Seafile...\n", user);
-    
     /* URL: https://seafile.example.com/api2/auth-token/ */
     gchar *url = g_strdup_printf("%s/api2/auth-token/", seafile_url);
     
@@ -111,7 +109,6 @@ gchar* sond_server_seafile_get_auth_token(SondServer *server,
         if (json_object_has_member(obj, "token")) {
             const gchar *token_str = json_object_get_string_member(obj, "token");
             token = g_strdup(token_str);
-            LOG_INFO("Seafile authentication successful for '%s'\n", user);
         } else {
             g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                        "Seafile response missing 'token' field");
@@ -161,8 +158,6 @@ static gchar* seafile_create_library(SondServer *server,
     }
     
     guint group_id = sond_server_get_seafile_group_id(server);
-    
-    LOG_INFO("Creating Seafile library '%s'...\n", name);
     
     /* URL: https://seafile.example.com/api2/repos/ */
     gchar *url = g_strdup_printf("%s/api2/repos/", seafile_url);
@@ -231,7 +226,6 @@ static gchar* seafile_create_library(SondServer *server,
         if (json_object_has_member(obj, "repo_id")) {
             const gchar *repo_id = json_object_get_string_member(obj, "repo_id");
             library_id = g_strdup(repo_id);
-            LOG_INFO("Seafile library '%s' created with ID: %s\n", name, library_id);
         } else {
             g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                        "Seafile response missing 'repo_id' field");
@@ -357,12 +351,8 @@ static gchar* seafile_get_library_id_by_name(SondServer *server,
         return NULL;
     }
 
-    LOG_INFO("Searching for Seafile library with name '%s'...\n", library_name);
-
     /* URL mit nameContains Filter: https://seafile.example.com/api2/repos/?nameContains=XXX */
-    gchar *escaped_name = g_uri_escape_string(library_name, NULL, FALSE);
-    gchar *url = g_strdup_printf("%s/api2/repos/?nameContains=%s", seafile_url, escaped_name);
-    g_free(escaped_name);
+    gchar *url = g_strdup_printf("%s/api2/repos/?nameContains=%s", seafile_url, library_name);
 
     SoupSession *session = soup_session_new();
     SoupMessage *msg = soup_message_new("GET", url);
@@ -388,7 +378,6 @@ static gchar* seafile_get_library_id_by_name(SondServer *server,
     if (status != 200) {
         gsize size;
         const gchar *body = g_bytes_get_data(response, &size);
-
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                    "Failed to search libraries (HTTP %u): %.*s",
                    status, (int)size, body);
@@ -414,15 +403,13 @@ static gchar* seafile_get_library_id_by_name(SondServer *server,
         for (guint i = 0; i < json_array_get_length(repos); i++) {
             JsonObject *repo = json_array_get_object_element(repos, i);
 
-            if (json_object_has_member(repo, "repo_name")) {
-                const gchar *name = json_object_get_string_member(repo, "repo_name");
-
+            if (json_object_has_member(repo, "name")) {
+                const gchar *name = json_object_get_string_member(repo, "name");
                 /* EXAKTER Match! */
                 if (name && g_strcmp0(name, library_name) == 0) {
-                    if (json_object_has_member(repo, "repo_id")) {
-                        const gchar *id = json_object_get_string_member(repo, "repo_id");
+                    if (json_object_has_member(repo, "id")) {
+                        const gchar *id = json_object_get_string_member(repo, "id");
                         library_id = g_strdup(id);
-                        LOG_INFO("Library '%s' found with ID: %s\n", library_name, library_id);
                         break;
                     }
                 }
@@ -430,7 +417,6 @@ static gchar* seafile_get_library_id_by_name(SondServer *server,
         }
 
         if (!library_id) {
-            LOG_WARN("Library '%s' not found on Seafile server\n", library_name);
             g_set_error(error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND,
                        "Library '%s' not found", library_name);
         }

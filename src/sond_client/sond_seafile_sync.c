@@ -60,9 +60,6 @@ static gchar* get_seafile_pipe_path(void) {
  */
 static SearpcClient* connect_to_seafile(GError **error) {
     gchar *pipe_path = get_seafile_pipe_path();
-
-    LOG_INFO("Verbinde zu Seafile-Client: %s\n", pipe_path);
-
     SearpcNamedPipeClient *pipe_client = searpc_create_named_pipe_client(pipe_path);
     if (!pipe_client) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,

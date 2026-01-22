@@ -408,7 +408,7 @@ searpc_client_async_call_v (SearpcClient *client,
                             int n_params,
                             va_list args)
 {
-    gsize len, ret_len;
+    gsize len;
     char *fstr;
 
     fstr = fcall_to_str (fname, n_params, args, &len);

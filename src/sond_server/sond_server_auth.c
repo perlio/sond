@@ -87,8 +87,7 @@ gchar* session_manager_create(SessionManager *manager,
     g_hash_table_insert(manager->sessions, g_strdup(session_token), data);
     g_mutex_unlock(&manager->mutex);
     
-    LOG_INFO("Session created for user '%s' (token=%.8s...)\n", 
-             username, session_token);
+    LOG_INFO("Session created for user '%s'\n", username);
     
     return session_token;
 }

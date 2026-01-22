@@ -718,14 +718,10 @@ static void handle_node_search(SoupServer *soup_server,
     /* SearchCriteria aus JSON deserialisieren */
     GError *error = NULL;
     
-    LOG_INFO("[DEBUG] Parsing search criteria from JSON...\n");
-    LOG_INFO("[DEBUG] Request body: %s\n", body->data ? body->data : "(null)");
-    
     SondGraphNodeSearchCriteria *criteria =
         sond_graph_node_search_criteria_from_json(body->data, &error);
 
     if (!criteria) {
-        LOG_ERROR("[DEBUG] Failed to parse criteria: %s\n", error ? error->message : "unknown");
         gchar *err_msg = g_strdup_printf("Invalid search criteria: %s",
                                         error ? error->message : "unknown");
         send_error_response(msg, SOUP_STATUS_BAD_REQUEST, err_msg);
@@ -734,16 +730,10 @@ static void handle_node_search(SoupServer *soup_server,
         return;
     }
     
-    LOG_INFO("[DEBUG] Criteria parsed successfully, calling sond_graph_db_search_nodes...\n");
-
     /* Suche ausführen */
     GPtrArray *nodes = sond_graph_db_search_nodes(server->db_conn, criteria, &error);
     sond_graph_node_search_criteria_free(criteria);
-    
-    LOG_INFO("[DEBUG] Search returned, nodes=%p, error=%p\n", nodes, error);
-
     if (!nodes) {
-        LOG_ERROR("[DEBUG] Search failed: %s\n", error ? error->message : "unknown");
         gchar *err_msg = g_strdup_printf("Search failed: %s",
                                         error ? error->message : "unknown");
         send_error_response(msg, SOUP_STATUS_INTERNAL_SERVER_ERROR, err_msg);
@@ -752,8 +742,6 @@ static void handle_node_search(SoupServer *soup_server,
         return;
     }
     
-    LOG_INFO("[DEBUG] Search successful, found %u nodes\n", nodes->len);
-
     /* Nodes zu JSON Array serialisieren */
     JsonBuilder *builder = json_builder_new();
     json_builder_begin_array(builder);
