@@ -37,6 +37,8 @@ typedef struct {
     gboolean success;          /* TRUE wenn Login erfolgreich */
     gchar *username;           /* Username (transfer full) */
     gchar *session_token;      /* Session-Token (transfer full) */
+    gchar *seafile_token;     /* Seafile Auth-Token (transfer full) */
+    gchar* seafile_url;       /* Seafile-Server URL (transfer full) */
 } LoginResult;
 
 /**

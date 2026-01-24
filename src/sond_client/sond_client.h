@@ -49,14 +49,6 @@ SondClient* sond_client_new(const gchar *config_file, GError **error);
 const gchar* sond_client_get_server_url(SondClient *client);
 
 /**
- * sond_client_is_connected:
- * @client: SondClient
- *
- * Returns: TRUE wenn verbunden
- */
-gboolean sond_client_is_connected(SondClient *client);
-
-/**
  * sond_client_connect:
  * @client: SondClient
  * @error: (nullable): Fehler-Rückgabe
@@ -77,6 +69,8 @@ gboolean sond_client_connect(SondClient *client, GError **error);
  */
 const gchar* sond_client_get_user_id(SondClient *client);
 
+const gchar* sond_client_get_user_token(SondClient *client);
+
 /**
  * sond_client_set_auth:
  * @client: SondClient
@@ -88,7 +82,30 @@ const gchar* sond_client_get_user_id(SondClient *client);
  */
 void sond_client_set_auth(SondClient *client,
                           const gchar *username,
-                          const gchar *session_token);
+                          const gchar *session_token,
+						  const gchar *seafile_token,
+						  const gchar *seafile_url);
+
+/**
+ * sond_client_set_seafile_url:
+ * @client: SondClient
+ * @seafile_url: Seafile-Server URL (z.B. "https://seafile.example.com")
+ *
+ * Setzt die Seafile-Server URL.
+ * Wird nach erfolgreichem Login aufgerufen.
+ */
+void sond_client_set_seafile_url(SondClient *client,
+                                  const gchar *seafile_url);
+
+/**
+ * sond_client_get_seafile_url:
+ * @client: SondClient
+ *
+ * Gibt die Seafile-Server URL zurück.
+ *
+ * Returns: (transfer none): Seafile URL oder NULL
+ */
+const gchar* sond_client_get_seafile_url(SondClient *client);
 
 /**
  * sond_client_set_auth_failed_callback:
@@ -282,6 +299,10 @@ gboolean sond_client_delete_seafile_library(SondClient *client,
 gchar* sond_client_get_seafile_library_id(SondClient *client,
                                            const gchar *library_name,
                                            GError **error);
+
+gchar* sond_client_get_seafile_clone_token(SondClient *client,
+                                            const gchar *repo_id,
+                                            GError **error);
 
 /**
  * sond_client_get_offline_manager:

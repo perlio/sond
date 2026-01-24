@@ -17,6 +17,7 @@
  */
 
 #include "sond_module_akte.h"
+#include "../sond_client.h"
 #include "../sond_offline_manager.h"
 #include "../sond_seafile_sync.h"
 #include "../../sond_log_and_error.h"
@@ -158,8 +159,6 @@ static void clear_akte_fields(SondModuleAktePrivate *priv) {
  * ======================================================================== */
 
 static void show_error_dialog(GtkWidget *parent, const gchar *title, const gchar *message) {
-    LOG_ERROR("%s: %s\n", title, message);
-    
     GtkAlertDialog *dialog = gtk_alert_dialog_new("%s", title);
     gtk_alert_dialog_set_detail(dialog, message);
     gtk_alert_dialog_set_modal(dialog, TRUE);
@@ -169,8 +168,6 @@ static void show_error_dialog(GtkWidget *parent, const gchar *title, const gchar
 }
 
 static void show_info_dialog(GtkWidget *parent, const gchar *title, const gchar *message) {
-    LOG_INFO("%s: %s\n", title, message);
-    
     GtkAlertDialog *dialog = gtk_alert_dialog_new("%s", title);
     gtk_alert_dialog_set_detail(dialog, message);
     gtk_alert_dialog_set_modal(dialog, TRUE);
@@ -237,6 +234,16 @@ static gboolean parse_regnr(const gchar *regnr_str, guint *lfd_nr, guint *year) 
 static gchar* format_regnr(guint lfd_nr, guint year) {
     guint short_year = year % 100;
     return g_strdup_printf("%u/%02u", lfd_nr, short_year);
+}
+
+/**
+ * format_regnr_storage:
+ *
+ * Formatiert RegNr für Speicherung/Pfade: "2026-1"
+ * Verwendet NICHT "/" sondern "-" um Pfadprobleme zu vermeiden.
+ */
+static gchar* format_regnr_storage(guint lfd_nr, guint year) {
+    return g_strdup_printf("%u-%u", year, lfd_nr);
 }
 
 /* ========================================================================
@@ -495,7 +502,7 @@ static void update_ui_from_node(SondModuleAktePrivate *priv) {
 			if (regnr_values && regnr_values->len == 2) {
 				guint year = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 0), NULL, 10);
 				guint lfd = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 1), NULL, 10);
-				gchar *regnr = format_regnr(lfd, year);
+				gchar *regnr = format_regnr_storage(lfd, year);
 				g_ptr_array_unref(regnr_values);
 
 				SondOfflineManager *manager = sond_client_get_offline_manager(priv->client);
@@ -639,7 +646,6 @@ static gboolean get_next_regnr(SondModuleAktePrivate *priv, guint *lfd_nr, guint
     g_ptr_array_unref(nodes);
     
     *lfd_nr = max_lfd_nr + 1;
-    LOG_INFO("Nächste RegNr: %u/%u\n", *lfd_nr, *year);
     
     return TRUE;
 }
@@ -655,8 +661,6 @@ static gchar* create_seafile_library(SondModuleAktePrivate *priv,
                                       GError **error) {
     /* Library-Name: Jahr-LfdNr */
     gchar *library_name = g_strdup_printf("%u-%u", year, lfd_nr);
-    
-    LOG_INFO("Erstelle Seafile Library '%s'...\n", library_name);
     
     /* Beschreibung */
     gchar *desc = g_strdup_printf("Akte %u/%u", lfd_nr, year % 100);
@@ -700,9 +704,6 @@ static gboolean save_node(SondModuleAktePrivate *priv, GError **error) {
     if (!sond_client_save_node(priv->client, priv->current_node, error)) {
         return FALSE;
     }
-    
-    LOG_INFO("Node mit ID %" G_GINT64_FORMAT " gespeichert\n",
-            sond_graph_node_get_id(priv->current_node));
     
     return TRUE;
 }
@@ -841,25 +842,39 @@ static void on_offline_toggle_toggled(GtkCheckButton *toggle, SondModuleAktePriv
 
     guint year = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 0), NULL, 10);
     guint lfd = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 1), NULL, 10);
-    gchar *regnr = format_regnr(lfd, year);
+    gchar *library_name = format_regnr_storage(lfd, year);
     g_ptr_array_unref(regnr_values);
 
     gboolean is_active = gtk_check_button_get_active(toggle);
 
     /* Library ID ermitteln */
-     gchar *library_name = g_strdup_printf("%u-%u", year, lfd);
-     GError *error = NULL;
-     gchar *library_id = NULL;
+    GError *error = NULL;
+	gchar *library_id = NULL;
+
+     //Zustand im offline-Manager prüfen
+     SondOfflineAkte* akte = sond_offline_manager_get_akte(manager, library_name);
+     if ((is_active && akte) || (!is_active && !akte)) {
+         show_error_dialog(priv->main_widget, "Fehler: "
+        		 "Zustand Akte %s im Offline Manager umgekehrt zum Toggle-Status.",
+				 library_name);
+		 g_free(library_name);
+		 if (akte)
+			 sond_offline_akte_free(akte);
+
+         /* Toggle zurücksetzen */
+         g_signal_handlers_block_by_func(toggle, on_offline_toggle_toggled, priv);
+         gtk_check_button_set_active(toggle, !is_active);
+         g_signal_handlers_unblock_by_func(toggle, on_offline_toggle_toggled, priv);
+
+		 return;
+     }
 
      if (is_active) {
          /* Toggle AN: Library noch nicht synchronisiert - vom Server holen */
-         library_id = sond_seafile_get_library_id_from_server(priv->client, library_name, &error);
+         library_id = sond_client_get_seafile_library_id(priv->client, library_name, &error);
      } else {
-         /* Toggle AUS: Library ist synchronisiert - lokal finden */
-         library_id = sond_seafile_find_library_by_name(library_name, &error);
+         library_id = g_strdup(akte->seafile_library_id);
      }
-
-     g_free(library_name);
 
      if (!library_id) {
         /* Library nicht gefunden - Fehler anzeigen */
@@ -870,27 +885,21 @@ static void on_offline_toggle_toggled(GtkCheckButton *toggle, SondModuleAktePriv
     	    g_error_free(error);
     	}
 
+    	g_free(library_name);
+
     	gtk_alert_dialog_show(dialog, GTK_WINDOW(gtk_widget_get_root(GTK_WIDGET(toggle))));
     	g_object_unref(dialog);
 
         /* Toggle zurücksetzen */
-        g_signal_handlers_block_by_func(toggle, on_offline_toggle_toggled, NULL);
+        g_signal_handlers_block_by_func(toggle, on_offline_toggle_toggled, priv);
         gtk_check_button_set_active(GTK_CHECK_BUTTON(toggle), FALSE);
-        g_signal_handlers_unblock_by_func(toggle, on_offline_toggle_toggled, NULL);
+        g_signal_handlers_unblock_by_func(toggle, on_offline_toggle_toggled, priv);
 
         return;
     }
 
 	if (is_active) {
         /* Offline aktivieren */
-        LOG_INFO("Aktiviere Offline für Akte %s\n", regnr);
-
-        /* Prüfen ob bereits offline */
-        if (sond_offline_manager_is_offline(manager, regnr)) {
-            LOG_INFO("Akte %s ist bereits offline\n", regnr);
-            g_free(regnr);
-            return;
-        }
 
         /* Hole Kurzbezeichnung und Gegenstand */
         gchar *kurzb = sond_graph_node_get_property_string(priv->current_node, "kurzb");
@@ -898,11 +907,11 @@ static void on_offline_toggle_toggled(GtkCheckButton *toggle, SondModuleAktePriv
 
         /* sync_directory vom Offline Manager holen */
 		const gchar *sync_dir = sond_offline_manager_get_sync_directory(manager);
-		gchar *local_path = g_build_filename(sync_dir, regnr, NULL);
+		gchar *local_path = g_build_filename(sync_dir, library_name, NULL);
 
         /* Akte zur Offline-Liste hinzufügen */
         SondOfflineAkte *akte = sond_offline_akte_new(
-            regnr,
+        	library_name,
             kurzb ? kurzb : "",
             ggstd ? ggstd : "",
             library_id,
@@ -921,7 +930,7 @@ static void on_offline_toggle_toggled(GtkCheckButton *toggle, SondModuleAktePriv
             g_free(ggstd);
             g_free(library_id);
             g_free(local_path);
-            g_free(regnr);
+            g_free(library_name);
 
             /* Toggle zurücksetzen */
             g_signal_handlers_block_by_func(toggle, on_offline_toggle_toggled, priv);
@@ -931,7 +940,7 @@ static void on_offline_toggle_toggled(GtkCheckButton *toggle, SondModuleAktePriv
         }
 
         /* Seafile Sync starten */
-		if (!sond_seafile_sync_library(library_id, local_path, &error)) {
+		if (!sond_seafile_sync_library(priv->client, library_id, library_name, local_path, &error)) {
 			/* Sync-Start fehlgeschlagen */
 			GtkAlertDialog *dialog = gtk_alert_dialog_new("Seafile Sync konnte nicht gestartet werden");
 
@@ -944,42 +953,32 @@ static void on_offline_toggle_toggled(GtkCheckButton *toggle, SondModuleAktePriv
 			g_object_unref(dialog);
 
 			/* Toggle zurücksetzen */
-			g_signal_handlers_block_by_func(toggle, on_offline_toggle_toggled, NULL);
+			g_signal_handlers_block_by_func(toggle, on_offline_toggle_toggled, priv);
 			gtk_check_button_set_active(GTK_CHECK_BUTTON(toggle), FALSE);
-			g_signal_handlers_unblock_by_func(toggle, on_offline_toggle_toggled, NULL);
+			g_signal_handlers_unblock_by_func(toggle, on_offline_toggle_toggled, priv);
 
 			g_free(library_id);
+			g_free(local_path);
+	        g_free(library_name);
 			return;
 		}
 
-		LOG_INFO("Seafile Sync gestartet: %s -> %s\n", library_id, local_path);
-
-        show_info_dialog(priv->main_widget, "Offline aktiviert",
-                        "Akte ist jetzt für Offline-Nutzung verfügbar.");
+        g_free(library_name);
 
         g_free(kurzb);
         g_free(ggstd);
-        g_free(library_id);
         g_free(local_path);
 
     } else {
-        /* Offline deaktivieren */
-        LOG_INFO("Deaktiviere Offline für Akte %s\n", regnr);
-
-        if (!sond_offline_manager_is_offline(manager, regnr)) {
-            LOG_INFO("Akte %s ist nicht offline\n", regnr);
-            g_free(regnr);
-            return;
-        }
-
         /* Sync deaktivieren (Dateien bleiben lokal) */
-        if (!sond_offline_manager_set_sync_enabled(manager, regnr, FALSE, &error)) {
-            gchar *msg = g_strdup_printf("Fehler beim Deaktivieren: %s",
-                                        error ? error->message : "Unbekannt");
+        if (!sond_offline_manager_remove_akte(manager, library_name, &error)) {
+            gchar *msg = g_strdup_printf("Desync '%s' fehlgeschlagen: %s",
+            		library_name, error ? error->message : "Unbekannt");
             show_error_dialog(priv->main_widget, "Fehler", msg);
             g_free(msg);
             if (error) g_error_free(error);
-            g_free(regnr);
+            g_free(library_name);
+            g_free(library_id);
 
             /* Toggle zurücksetzen */
             g_signal_handlers_block_by_func(toggle, on_offline_toggle_toggled, priv);
@@ -988,23 +987,20 @@ static void on_offline_toggle_toggled(GtkCheckButton *toggle, SondModuleAktePriv
             return;
         }
 
+        g_free(library_name);
+
         /* Seafile Sync stoppen */
 		if (!sond_seafile_unsync_library(library_id, &error)) {
 			/* Sync-Stop fehlgeschlagen - nur warnen, nicht kritisch */
-			LOG_WARN("Seafile Sync konnte nicht gestoppt werden: %s\n",
-					   error ? error->message : "(unbekannter Fehler)");
+			show_error_dialog(priv->main_widget, "Fehler beim Aufheben der Synchronisation",
+					error ? error->message : "Unbekannt");
 			if (error) {
 				g_error_free(error);
 			}
-		} else {
-			LOG_INFO("Seafile Sync gestoppt: %s\n", library_id);
 		}
-
-        show_info_dialog(priv->main_widget, "Offline deaktiviert",
-                        "Synchronisation wurde pausiert. Dateien bleiben lokal verfügbar.");
     }
 
-    g_free(regnr);
+    g_free(library_id);
 }
 
 /* Callback-Daten für neuen Akte Dialog */
@@ -1073,12 +1069,6 @@ static void on_new_akte_dialog_response(GObject *source, GAsyncResult *result, g
         
         update_ui_from_node(priv);
         set_akte_state(priv, AKTE_STATE_EDITING);
-        
-        LOG_INFO("Neue Akte mit RegNr %u/%u angelegt und gespeichert (ID: %" G_GINT64_FORMAT ")\n",
-                lfd_nr, year, sond_graph_node_get_id(priv->current_node));
-    } else {
-        /* Benutzer hat "Nein" geklickt - Abbruch */
-        LOG_INFO("Anlegen neue Akte %u/%u abgebrochen\n", lfd_nr, year);
     }
     
     g_free(data);
@@ -1110,7 +1100,6 @@ static void on_regnr_entry_activate(GtkEntry *entry, SondModuleAktePrivate *priv
         
         if (sond_client_lock_node(priv->client, node_id, "Bearbeitung", &lock_error)) {
             /* Lock erfolgreich */
-            LOG_INFO("Akte %u/%u geladen und gelockt\n", lfd_nr, year);
             update_ui_from_node(priv);
             
             /* Prüfe ob Akte abgelegt ist */
@@ -1121,8 +1110,6 @@ static void on_regnr_entry_activate(GtkEntry *entry, SondModuleAktePrivate *priv
             }
         } else {
             /* Lock fehlgeschlagen (bereits gelockt) → READONLY */
-            LOG_INFO("Akte %u/%u gelockt von anderem User, öffne read-only\n", lfd_nr, year);
-            
             gchar *msg = g_strdup_printf(
                 "Akte %u/%u wird gerade von einem anderen Benutzer bearbeitet.\n\n"
                 "Sie können die Akte nur im Lesemodus öffnen.",
@@ -1258,8 +1245,6 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
             g_free(lfd_str);
             g_free(year_str);
             
-            LOG_INFO("Versuch %d/%d: RegNr %u/%u vergeben\n", attempt + 1, MAX_RETRIES, lfd_nr, year);
-            
             /* Felder in Node übernehmen (vor dem Speichern!) */
             const gchar *kurzbezeichnung = gtk_editable_get_text(GTK_EDITABLE(priv->entry_kurzbezeichnung));
             if (kurzbezeichnung && strlen(kurzbezeichnung) > 0) {
@@ -1302,9 +1287,6 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
             }
 
             /* Node erfolgreich gespeichert - JETZT Library erstellen */
-            LOG_INFO("Node gespeichert (ID: %" G_GINT64_FORMAT "), erstelle jetzt Seafile Library...\n",
-                    sond_graph_node_get_id(priv->current_node));
-
             gchar *library_id = NULL;
             GError *lib_error = NULL;
             library_id = create_seafile_library(priv, year, lfd_nr, &lib_error);
@@ -1340,9 +1322,6 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
                 return;
             }
 
-            LOG_INFO("Seafile Library erfolgreich erstellt (ID: %s)\n", library_id);
-            g_free(library_id);
-
             /* Erfolg! */
             success = TRUE;
 			priv->is_new_from_entry = FALSE;
@@ -1354,9 +1333,6 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
 			g_free(msg);
 			g_free(regnr_display);
 			g_free(library_id);
-
-			LOG_INFO("Akte erfolgreich gespeichert mit RegNr %u/%u (nach %d Versuch(en))\n",
-					lfd_nr, year, attempt + 1);
         }
         
         if (!success) {
@@ -1378,8 +1354,6 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
             guint year = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_vals, 0), NULL, 10);
             guint lfd = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_vals, 1), NULL, 10);
             g_ptr_array_unref(regnr_vals);
-
-            LOG_INFO("Manuelle RegNr %u/%u - erstelle Seafile Library...\n", lfd, year);
 
             /* Felder übernehmen */
             const gchar *kurzbezeichnung = gtk_editable_get_text(GTK_EDITABLE(priv->entry_kurzbezeichnung));
@@ -1411,9 +1385,6 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
             }
 
             /* Node gespeichert - JETZT Library erstellen */
-            LOG_INFO("Node gespeichert (ID: %" G_GINT64_FORMAT "), erstelle Seafile Library...\n",
-                    sond_graph_node_get_id(priv->current_node));
-
             gchar *library_id = create_seafile_library(priv, year, lfd, &error);
 
             if (!library_id) {
@@ -1426,12 +1397,10 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
                     "Sie können die Akte trotzdem nutzen, aber keine Dateien hochladen.",
                     error ? error->message : "Unbekannt");
                 show_error_dialog(priv->main_widget, "Warnung", msg);
-                g_free(msg);
                 if (error) g_error_free(error);
-            } else {
-                LOG_INFO("Seafile Library erfolgreich erstellt (ID: %s)\n", library_id);
-                g_free(library_id);
             }
+
+            g_free(library_id);
 
             /* UI aktualisieren */
             priv->is_new_from_entry = FALSE;

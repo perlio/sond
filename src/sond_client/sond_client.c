@@ -34,7 +34,9 @@ struct _SondClient {
     
     /* Authentifizierung */
     gchar *session_token;  /* Session-Token vom Server */
+    gchar *seafile_token; /* Seafile Auth-Token für user */
     gchar *username;       /* Seafile-Username */
+    gchar *seafile_url;    /* Seafile-Server URL */
     
     /* Auth-Callback */
     void (*auth_failed_callback)(SondClient *client, gpointer user_data);
@@ -49,7 +51,6 @@ struct _SondClient {
     
     /* HTTP-Client */
     SoupSession *session;
-    gboolean connected;
 };
 
 G_DEFINE_TYPE(SondClient, sond_client, G_TYPE_OBJECT)
@@ -59,7 +60,9 @@ static void sond_client_finalize(GObject *object) {
     
     g_free(self->server_url);
     g_free(self->session_token);
+    g_free(self->seafile_token);
     g_free(self->username);
+    g_free(self->seafile_url);
     
     if (self->offline_manager) {
         g_object_unref(self->offline_manager);
@@ -81,7 +84,6 @@ static void sond_client_init(SondClient *self) {
     self->server_url = NULL;
     self->server_port = 0;
     self->session = NULL;
-    self->connected = FALSE;
     self->session_token = NULL;
     self->username = NULL;
     self->auth_failed_callback = NULL;
@@ -120,8 +122,9 @@ static gboolean sond_client_load_config(SondClient *client,
     gchar *sync_directory = g_key_file_get_string(keyfile, "offline", "sync_directory", NULL);
     if (!sync_directory) {
         /* Default: ~/.local/share/sond/offline-akten */
+    	//bzw. unter Windows: %APPDATA%\sond\offline-akten
         const gchar *data_dir = g_get_user_data_dir();
-        sync_directory = g_build_filename(data_dir, "sond", "offline-akten", NULL);
+        sync_directory = g_build_filename(data_dir, "sond_client", "offline-akten", NULL);
         LOG_INFO("No sync_directory configured, using default: %s\n", sync_directory);
     }
     
@@ -158,18 +161,9 @@ const gchar* sond_client_get_server_url(SondClient *client) {
     return client->server_url;
 }
 
-gboolean sond_client_is_connected(SondClient *client) {
-    g_return_val_if_fail(SOND_IS_CLIENT(client), FALSE);
-    return client->connected;
-}
-
-gboolean sond_client_connect(SondClient *client, GError **error) {
-    g_return_val_if_fail(SOND_IS_CLIENT(client), FALSE);
-    
-    client->connected = TRUE;
-    LOG_INFO("Assuming connection to server at %s\n", client->server_url);
-    
-    return TRUE;
+const gchar* sond_client_get_seafile_url(SondClient *client) {
+    g_return_val_if_fail(SOND_IS_CLIENT(client), NULL);
+    return client->seafile_url;
 }
 
 const gchar* sond_client_get_user_id(SondClient *client) {
@@ -177,18 +171,27 @@ const gchar* sond_client_get_user_id(SondClient *client) {
     return client->username;
 }
 
+const gchar* sond_client_get_user_token(SondClient *client) {
+    g_return_val_if_fail(SOND_IS_CLIENT(client), NULL);
+    return client->seafile_token;
+}
+
 void sond_client_set_auth(SondClient *client,
                           const gchar *username,
-                          const gchar *session_token) {
+                          const gchar *session_token,
+						  const gchar *seafile_token,
+						  const gchar *seafile_url) {
     g_return_if_fail(SOND_IS_CLIENT(client));
     
     g_free(client->username);
     g_free(client->session_token);
+    g_free(client->seafile_token);
+    g_free(client->seafile_url);
     
     client->username = g_strdup(username);
     client->session_token = g_strdup(session_token);
-    
-    LOG_INFO("Auth set for user '%s'\n", username);
+    client->seafile_token = g_strdup(seafile_token);
+    client->seafile_url = g_strdup(seafile_url);
 }
 
 void sond_client_set_auth_failed_callback(SondClient *client,
@@ -1138,6 +1141,77 @@ gchar* sond_client_get_seafile_library_id(SondClient *client,
     return library_id;
 }
 
+gchar* sond_client_get_seafile_clone_token(SondClient *client,
+                                            const gchar *repo_id,
+                                            GError **error) {
+    g_return_val_if_fail(SOND_IS_CLIENT(client), NULL);
+    g_return_val_if_fail(repo_id != NULL, NULL);
+
+    /* URL bauen: /api2/repos/{repo_id}/download-info/ */
+    gchar *url = g_strdup_printf("%s/api2/repos/%s/download-info/",
+                                 client->seafile_url, repo_id);
+
+    LOG_INFO("Hole Clone-Token von: %s\n", url);
+
+    /* HTTP GET Request */
+    SoupSession *session = soup_session_new();
+    SoupMessage *msg = soup_message_new("GET", url);
+    g_free(url);
+
+    if (!msg) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "Konnte HTTP Request nicht erstellen");
+        g_object_unref(session);
+        return NULL;
+    }
+
+    /* Authorization Header */
+    gchar *auth_header = g_strdup_printf("Token %s", client->seafile_token);
+    soup_message_headers_append(soup_message_get_request_headers(msg),
+                                "Authorization", auth_header);
+    g_free(auth_header);
+
+    /* Request senden */
+    GBytes *response = soup_session_send_and_read(session, msg, NULL, error);
+    guint status = soup_message_get_status(msg);
+
+    g_object_unref(msg);
+    g_object_unref(session);
+
+    if (!response || status != 200) {
+        if (response) g_bytes_unref(response);
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "Seafile returned status %u", status);
+        return NULL;
+    }
+    /* JSON Response parsen */
+    gsize size;
+    const gchar *data = g_bytes_get_data(response, &size);
+    LOG_INFO("Response vom clone_token_holen: %s", data);
+
+    JsonParser *parser = json_parser_new();
+    gchar *clone_token = NULL;
+
+    if (json_parser_load_from_data(parser, data, size, error)) {
+        JsonNode *root = json_parser_get_root(parser);
+        JsonObject *obj = json_node_get_object(root);
+
+        if (json_object_has_member(obj, "token")) {
+            const gchar *token = json_object_get_string_member(obj, "token");
+            clone_token = g_strdup(token);
+            LOG_INFO("Clone-Token erhalten: %s...\n",
+                    clone_token ? (strlen(clone_token) > 10 ? "***" : clone_token) : "NULL");
+        } else {
+            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                       "Seafile response enthält kein 'token' Feld");
+        }
+    }
+
+    g_object_unref(parser);
+    g_bytes_unref(response);
+
+    return clone_token;
+}
 
 gpointer sond_client_get_offline_manager(SondClient *client) {
     g_return_val_if_fail(SOND_IS_CLIENT(client), NULL);

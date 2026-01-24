@@ -20,8 +20,8 @@
 #include "../sond_log_and_error.h"
 #include "sond_client.h"
 
-//#include <jansson.h>
 #include <gio/gio.h>
+#include <libsoup/soup.h>
 #include "libsearpc/searpc-client.h"
 #include "libsearpc/searpc-named-pipe-transport.h"
 
@@ -168,38 +168,32 @@ gchar* sond_seafile_find_library_by_name(const gchar *library_name,
     return library_id;
 }
 
-gchar* sond_seafile_get_library_id_from_server(SondClient *client,
-                                                 const gchar *library_name,
-                                                 GError **error) {
-    g_return_val_if_fail(client != NULL, NULL);
-    g_return_val_if_fail(library_name != NULL, NULL);
-
-    /* Delegiert an SondClient - dort ist die HTTP-Logik */
-    return sond_client_get_seafile_library_id(client, library_name, error);
-}
-
-gboolean sond_seafile_sync_library(const gchar *library_id,
-                                    const gchar *local_path,
+gboolean sond_seafile_sync_library(SondClient* client, const gchar *library_id,
+                                    const gchar* library_name, const gchar *local_path,
                                     GError **error) {
     g_return_val_if_fail(library_id != NULL, FALSE);
     g_return_val_if_fail(local_path != NULL, FALSE);
 
-    SearpcClient *client = connect_to_seafile(error);
-    if (!client) {
+    SearpcClient *rpc_client = connect_to_seafile(error);
+    if (!rpc_client) {
         return FALSE;
     }
 
-    LOG_INFO("Starte Sync: Library %s -> %s\n", library_id, local_path);
-
-    /* Verzeichnis erstellen falls nicht vorhanden */
+    //Verzeichnis erstellen falls nicht vorhanden
     if (!g_file_test(local_path, G_FILE_TEST_EXISTS)) {
         if (g_mkdir_with_parents(local_path, 0755) != 0) {
             g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                        "Konnte lokales Verzeichnis nicht erstellen: %s", local_path);
-            searpc_free_client_with_pipe_transport(client);
+            searpc_free_client_with_pipe_transport(rpc_client);
             return FALSE;
         }
-        LOG_INFO("Lokales Verzeichnis erstellt: %s\n", local_path);
+    }
+
+    /* Clone-Token vom Seafile-Server holen */
+    gchar *clone_token = sond_client_get_seafile_clone_token(client, library_id, error);
+    if (!clone_token) {
+        searpc_free_client_with_pipe_transport(rpc_client);
+        return FALSE;
     }
 
     /* RPC-Call: seafile_clone
@@ -218,44 +212,51 @@ gboolean sond_seafile_sync_library(const gchar *library_id,
      */
     GError *rpc_error = NULL;
     gchar *task_id = NULL;
+    gchar *more_info = NULL;
+
+    //username ist in more_info nicht notwendig
+    more_info = g_strdup_printf("{\"server_url\":\"%s\"}",
+    		sond_client_get_seafile_url(client));
 
     searpc_client_call(
-        client,
+    	rpc_client,
         "seafile_clone",
         "string",
         0,
         &task_id,
         &rpc_error,
         11,
-        "string", library_id,       /* repo_id */
-        "int", (void*)0,             /* repo_version (0 für normale Repos) */
-        "string", library_id,        /* repo_name (nutzen library_id als Name) */
-        "string", local_path,        /* worktree */
-        "string", "",                /* token (leer) */
-        "string", "",                /* passwd (leer wenn nicht verschlüsselt) */
-        "string", "",                /* magic (leer) */
-        "string", "",                /* email (leer) */
-        "string", "",                /* random_key (leer) */
-        "int", (void*)0,             /* enc_version (0 = nicht verschlüsselt) */
-        "string", ""                 /* more_info (leer) */
+        "string", library_id,       // repo_id
+        "int", (void*)1,             // repo_version (0 für normale Repos)
+        "string", library_name,        // repo_name (nutzen library_id als Name)
+        "string", local_path,        // worktree
+        "string", clone_token,  // token
+        "string", NULL,                // passwd (leer wenn nicht verschlüsselt)
+        "string", "",                // magic (leer)
+        "string", "", 			// email - kann leer bleiben, wird nicht geprüft
+        "string", "",                // random_key (leer)
+        "int", (void*)0,             // enc_version (0 = nicht verschlüsselt)
+        "string", more_info		// more_info (nicht leer, wegen server_url)
     );
+
+    g_free(more_info);
+    g_free(clone_token);
+    searpc_free_client_with_pipe_transport(rpc_client);
 
     if (rpc_error) {
         g_propagate_error(error, rpc_error);
-        searpc_free_client_with_pipe_transport(client);
         return FALSE;
     }
 
-    if (task_id) {
-        LOG_INFO("Clone gestartet, Task-ID: %s\n", task_id);
-        g_free(task_id);
-    } else {
-        LOG_INFO("Clone gestartet (keine Task-ID)\n");
-    }
+    if (!task_id) { //zwar kein error, aber clonen hat nicht geklappt
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+				   "Konnte Library nicht synchronisieren (keine Task-ID erhalten)");
+		return FALSE;
+	}
 
-    searpc_free_client_with_pipe_transport(client);
+    g_free(task_id);
 
-    LOG_INFO("Sync erfolgreich gestartet\n");
+    LOG_INFO("Library synced: %s -> %s\n", library_id, local_path);
 
     return TRUE;
 }
@@ -269,15 +270,13 @@ gboolean sond_seafile_unsync_library(const gchar *library_id,
         return FALSE;
     }
 
-    LOG_INFO("Stoppe Sync: Library %s\n", library_id);
-
     /* RPC-Call: seafile_unsync */
     GError *rpc_error = NULL;
     int result = 0;
 
     searpc_client_call(
         client,
-        "seafile_unsync",
+        "seafile_destroy_repo",
         "int",
         0,
         &result,
@@ -286,13 +285,12 @@ gboolean sond_seafile_unsync_library(const gchar *library_id,
         "string", library_id
     );
 
+    searpc_free_client_with_pipe_transport(client);
+
     if (rpc_error) {
         g_propagate_error(error, rpc_error);
-        searpc_free_client_with_pipe_transport(client);
         return FALSE;
     }
-
-    searpc_free_client_with_pipe_transport(client);
 
     if (result != 0) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
@@ -300,7 +298,7 @@ gboolean sond_seafile_unsync_library(const gchar *library_id,
         return FALSE;
     }
 
-    LOG_INFO("Sync erfolgreich gestoppt\n");
+    LOG_INFO("Library unsynced: %s\n", library_id);
 
     return TRUE;
 }

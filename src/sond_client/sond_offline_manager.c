@@ -46,16 +46,13 @@ G_DEFINE_TYPE(SondOfflineManager, sond_offline_manager, G_TYPE_OBJECT)
 SondOfflineAkte* sond_offline_akte_new(const gchar *regnr,
                                         const gchar *kurzb,
                                         const gchar *ggstd,
-                                        const gchar *seafile_library_id,
-                                        const gchar *local_path) {
+                                        const gchar *seafile_library_id) {
     SondOfflineAkte *akte = g_new0(SondOfflineAkte, 1);
 
     akte->regnr = g_strdup(regnr);
     akte->kurzb = g_strdup(kurzb);
     akte->ggstd = g_strdup(ggstd);
     akte->seafile_library_id = g_strdup(seafile_library_id);
-    akte->local_path = g_strdup(local_path);
-    akte->sync_enabled = TRUE;
     akte->last_synced = g_date_time_new_now_local();
 
     return akte;
@@ -68,7 +65,6 @@ void sond_offline_akte_free(SondOfflineAkte *akte) {
     g_free(akte->kurzb);
     g_free(akte->ggstd);
     g_free(akte->seafile_library_id);
-    g_free(akte->local_path);
     
     if (akte->last_synced) {
         g_date_time_unref(akte->last_synced);
@@ -103,12 +99,6 @@ static JsonNode* akte_to_json(SondOfflineAkte *akte) {
     json_builder_set_member_name(builder, "seafile_library_id");
     json_builder_add_string_value(builder, akte->seafile_library_id);
 
-    json_builder_set_member_name(builder, "sync_enabled");
-    json_builder_add_boolean_value(builder, akte->sync_enabled);
-
-    json_builder_set_member_name(builder, "local_path");
-    json_builder_add_string_value(builder, akte->local_path);
-
     if (akte->last_synced) {
         json_builder_set_member_name(builder, "last_synced");
         gchar *iso8601 = g_date_time_format_iso8601(akte->last_synced);
@@ -136,8 +126,6 @@ static SondOfflineAkte* akte_from_json(JsonObject *obj) {
     akte->kurzb = g_strdup(json_object_get_string_member(obj, "kurzb"));
     akte->ggstd = g_strdup(json_object_get_string_member(obj, "ggstd"));
     akte->seafile_library_id = g_strdup(json_object_get_string_member(obj, "seafile_library_id"));
-    akte->local_path = g_strdup(json_object_get_string_member(obj, "local_path"));
-    akte->sync_enabled = json_object_get_boolean_member(obj, "sync_enabled");
 
     /* last_synced parsen */
     if (json_object_has_member(obj, "last_synced")) {
@@ -192,10 +180,6 @@ static gboolean save_config(SondOfflineManager *manager, GError **error) {
     json_node_free(root);
     g_object_unref(gen);
     g_object_unref(builder);
-
-    if (success) {
-        LOG_INFO("Offline-Akten gespeichert: %s\n", manager->config_file_path);
-    }
 
     return success;
 }
@@ -368,25 +352,6 @@ SondOfflineAkte* sond_offline_manager_get_akte(SondOfflineManager *manager,
 GList* sond_offline_manager_get_all_akten(SondOfflineManager *manager) {
     g_return_val_if_fail(SOND_IS_OFFLINE_MANAGER(manager), NULL);
     return manager->akten;
-}
-
-gboolean sond_offline_manager_set_sync_enabled(SondOfflineManager *manager,
-                                                const gchar *regnr,
-                                                gboolean enabled,
-                                                GError **error) {
-    g_return_val_if_fail(SOND_IS_OFFLINE_MANAGER(manager), FALSE);
-    g_return_val_if_fail(regnr != NULL, FALSE);
-
-    SondOfflineAkte *akte = sond_offline_manager_get_akte(manager, regnr);
-    if (!akte) {
-        g_set_error(error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND,
-                   "Akte %s nicht in Offline-Liste", regnr);
-        return FALSE;
-    }
-
-    akte->sync_enabled = enabled;
-
-    return save_config(manager, error);
 }
 
 gboolean sond_offline_manager_update_last_synced(SondOfflineManager *manager,

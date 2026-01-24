@@ -42,8 +42,6 @@ typedef struct {
     gchar *kurzb;                   /* Kurzbezeichnung */
     gchar *ggstd;                   /* Gegenstand */
     gchar *seafile_library_id;      /* Seafile Library ID */
-    gboolean sync_enabled;          /* TRUE wenn Sync aktiv */
-    gchar *local_path;              /* Lokaler Pfad zum Sync-Verzeichnis */
     GDateTime *last_synced;         /* Letzter Sync-Zeitpunkt */
 } SondOfflineAkte;
 
@@ -55,8 +53,7 @@ typedef struct {
 SondOfflineAkte* sond_offline_akte_new(const gchar *regnr,
                                         const gchar *kurzb,
                                         const gchar *ggstd,
-                                        const gchar *seafile_library_id,
-                                        const gchar *local_path);
+                                        const gchar *seafile_library_id);
 
 /**
  * sond_offline_akte_free:

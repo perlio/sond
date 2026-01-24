@@ -41,7 +41,6 @@ static void on_module_button_clicked(GtkButton *button, SondClientWindow *window
     
     if (module_name) {
         gtk_stack_set_visible_child_name(GTK_STACK(window->main_stack), module_name);
-        LOG_INFO("Switched to module: %s\n", module_name);
     }
 }
 
@@ -114,14 +113,6 @@ SondClientWindow* sond_client_window_new(GtkApplication *app, SondClient *client
     /* Akte-Modul erstellen */
     window->module_akte = sond_module_akte_new(client);
     gtk_stack_add_named(GTK_STACK(window->main_stack), window->module_akte, "akte");
-    
-    /* Status aktualisieren */
-    if (sond_client_is_connected(client)) {
-        gchar *status = g_strdup_printf("Verbunden mit %s", 
-                                       sond_client_get_server_url(client));
-        gtk_label_set_text(GTK_LABEL(window->status_bar), status);
-        g_free(status);
-    }
-    
+
     return window;
 }

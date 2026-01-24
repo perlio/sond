@@ -35,7 +35,6 @@ G_BEGIN_DECLS
  */
 typedef struct {
     gchar *username;           /* Seafile-Username */
-    gchar *seafile_token;      /* Seafile Auth-Token */
     GDateTime *created;        /* Wann wurde Session erstellt */
     GDateTime *last_activity;  /* Letzte Aktivität */
 } SessionData;
@@ -76,15 +75,13 @@ void session_manager_free(SessionManager *manager);
  * session_manager_create:
  * @manager: SessionManager
  * @username: Seafile-Username
- * @seafile_token: Seafile Auth-Token
  *
  * Erstellt neue Session.
  *
  * Returns: (transfer full): Session-Token (UUID)
  */
 gchar* session_manager_create(SessionManager *manager,
-                               const gchar *username,
-                               const gchar *seafile_token);
+                               const gchar *username);
 
 /**
  * session_manager_validate:

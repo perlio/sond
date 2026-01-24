@@ -256,8 +256,7 @@ static void handle_auth_login(SoupServer *soup_server,
 
     /* Session erstellen */
     gchar *session_token = session_manager_create(server->session_manager,
-                                                   username, seafile_token);
-    g_free(seafile_token);
+                                                   username);
 
     /* Response erstellen */
     JsonBuilder *builder = json_builder_new();
@@ -266,9 +265,13 @@ static void handle_auth_login(SoupServer *soup_server,
     json_builder_set_member_name(builder, "session_token");
     json_builder_add_string_value(builder, session_token);
     
-    json_builder_set_member_name(builder, "username");
-    json_builder_add_string_value(builder, username);
+    json_builder_set_member_name(builder, "seafile_token");
+    json_builder_add_string_value(builder, seafile_token);
     
+    /* Seafile-URL hinzufügen */
+    json_builder_set_member_name(builder, "seafile_url");
+    json_builder_add_string_value(builder, server->seafile_url);  // z.B. "https://seafile.example.com"
+
     json_builder_end_object(builder);
 
     JsonGenerator *generator = json_generator_new();
@@ -280,6 +283,7 @@ static void handle_auth_login(SoupServer *soup_server,
 
     g_free(response_json);
     g_free(session_token);
+    g_free(seafile_token);
     json_node_free(response_node);
     g_object_unref(generator);
     g_object_unref(builder);
@@ -1182,6 +1186,7 @@ struct DataConfig {
 	gchar *db_name;
 	gchar *db_user;
 	gchar *db_passfile;
+	gchar* sf_user;
 	gchar *sf_passfile;
 };
 
@@ -1190,6 +1195,7 @@ static void data_config_free(struct DataConfig *data_config) {
 	g_free(data_config->db_name);
 	g_free(data_config->db_user);
 	g_free(data_config->db_passfile);
+	g_free(data_config->sf_user);
 	g_free(data_config->sf_passfile);
 }
 
@@ -1259,7 +1265,7 @@ static gboolean sond_server_load_config(SondServer *server,
 
     /* === Seafile Config === */
     server->seafile_url = g_key_file_get_string(keyfile, "seafile", "url", NULL);
-    server->seafile_user = g_key_file_get_string(keyfile, "seafile", "username", NULL);
+    data_config->sf_user = g_key_file_get_string(keyfile, "seafile", "username", NULL);
     data_config->sf_passfile = g_key_file_get_string(keyfile, "seafile", "password_file", NULL);
     server->seafile_group_id = g_key_file_get_integer(keyfile, "seafile", "group_id", NULL);
 
@@ -1333,7 +1339,7 @@ static gboolean sond_server_init_seafile(SondServer *server,
 
 	// Auth-Token holen
 	server->auth_token = sond_server_seafile_get_auth_token(
-		server, server->seafile_user, sf_password, error);
+		server, data_config->sf_user, sf_password, error);
 
 	// Passwort überschreiben
 	memset(sf_password, 0, strlen(sf_password));

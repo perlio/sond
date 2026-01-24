@@ -62,6 +62,7 @@ gchar* sond_seafile_get_library_id_from_server(SondClient *client,
 
 /**
  * sond_seafile_sync_library:
+ * @SondClient* client: SondClient Instanz für HTTP-Requests
  * @library_id: Seafile Library ID
  * @local_path: Lokaler Pfad für Synchronisation
  * @error: Fehler-Rückgabe
@@ -71,7 +72,9 @@ gchar* sond_seafile_get_library_id_from_server(SondClient *client,
  *
  * Returns: TRUE bei Erfolg
  */
-gboolean sond_seafile_sync_library(const gchar *library_id,
+gboolean sond_seafile_sync_library(SondClient* client,
+									const gchar *library_id,
+									const gchar* library_name,
                                     const gchar *local_path,
                                     GError **error);
 

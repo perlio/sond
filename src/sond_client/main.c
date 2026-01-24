@@ -36,8 +36,8 @@ static gboolean on_login_needed(SondClient *client, gpointer user_data) {
         return FALSE;
     }
     
-    sond_client_set_auth(client, login_result->username, login_result->session_token);
-    LOG_INFO("Login successful for user '%s'\n", login_result->username);
+    sond_client_set_auth(client, login_result->username, login_result->session_token,
+    		login_result->seafile_token, login_result->seafile_url);
     
     login_result_free(login_result);
     return TRUE;
@@ -83,13 +83,6 @@ int main(int argc, char *argv[]) {
     sond_client_set_auth_failed_callback(client, on_auth_failed, NULL);
     
     /* KEIN Login beim Start - Login erfolgt erst bei erster Server-Anfrage */
-    
-    if (!sond_client_connect(client, &error)) {
-        LOG_ERROR("Failed to connect to server: %s\n", error->message);
-        g_error_free(error);
-        g_object_unref(client);
-        return 1;
-    }
     
     GtkApplication *app = gtk_application_new("de.rubarth-krieger.sond",
                                                G_APPLICATION_DEFAULT_FLAGS);

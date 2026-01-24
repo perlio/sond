@@ -23,10 +23,9 @@
  * SessionData
  * ======================================================================== */
 
-static SessionData* session_data_new(const gchar *username, const gchar *seafile_token) {
+static SessionData* session_data_new(const gchar *username) {
     SessionData *data = g_new0(SessionData, 1);
     data->username = g_strdup(username);
-    data->seafile_token = g_strdup(seafile_token);
     data->created = g_date_time_new_now_local();
     data->last_activity = g_date_time_ref(data->created);
     return data;
@@ -36,7 +35,6 @@ static void session_data_free(SessionData *data) {
     if (!data) return;
     
     g_free(data->username);
-    g_free(data->seafile_token);
     g_date_time_unref(data->created);
     g_date_time_unref(data->last_activity);
     g_free(data);
@@ -72,16 +70,14 @@ void session_manager_free(SessionManager *manager) {
 }
 
 gchar* session_manager_create(SessionManager *manager,
-                               const gchar *username,
-                               const gchar *seafile_token) {
+                               const gchar *username) {
     g_return_val_if_fail(manager != NULL, NULL);
     g_return_val_if_fail(username != NULL, NULL);
-    g_return_val_if_fail(seafile_token != NULL, NULL);
     
     /* UUID als Session-Token generieren */
     gchar *session_token = g_uuid_string_random();
     
-    SessionData *data = session_data_new(username, seafile_token);
+    SessionData *data = session_data_new(username);
     
     g_mutex_lock(&manager->mutex);
     g_hash_table_insert(manager->sessions, g_strdup(session_token), data);

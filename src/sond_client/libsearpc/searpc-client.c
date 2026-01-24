@@ -127,7 +127,7 @@ searpc_client_call (SearpcClient *client, const char *fname,
     else if (strcmp(ret_type, "int64") == 0)
         *((gint64 *)ret_ptr) = searpc_client_fret__int64 (fret, ret_len, error);
     else if (strcmp(ret_type, "string") == 0)
-        *((char **)ret_ptr) = searpc_client_fret__string (fret, len, error);
+        *((char **)ret_ptr) = searpc_client_fret__string (fret, ret_len, error);
     else if (strcmp(ret_type, "object") == 0)
         *((GObject **)ret_ptr) = searpc_client_fret__object (gobject_type, fret,
                                                              ret_len, error);
