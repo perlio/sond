@@ -314,6 +314,28 @@ gchar* sond_client_get_seafile_clone_token(SondClient *client,
  */
 gpointer sond_client_get_offline_manager(SondClient *client);
 
+/**
+ * sond_client_set_last_regnr:
+ * @client: SondClient
+ * @lfd_nr: Laufende Nummer
+ * @year: Jahr (vollständig, z.B. 2026)
+ *
+ * Speichert die zuletzt verwendete RegNr (während Laufzeit).
+ */
+void sond_client_set_last_regnr(SondClient *client, guint lfd_nr, guint year);
+
+/**
+ * sond_client_get_last_regnr:
+ * @client: SondClient
+ * @lfd_nr: (out): Laufende Nummer
+ * @year: (out): Jahr
+ *
+ * Gibt die zuletzt verwendete RegNr zurück.
+ *
+ * Returns: TRUE wenn eine RegNr gespeichert ist, FALSE sonst
+ */
+gboolean sond_client_get_last_regnr(SondClient *client, guint *lfd_nr, guint *year);
+
 G_END_DECLS
 
 #endif /* SOND_CLIENT_H */

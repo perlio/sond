@@ -120,6 +120,20 @@ gchar* sond_seafile_get_sync_status(const gchar *library_id,
  */
 gboolean sond_seafile_test_connection(GError **error);
 
+/**
+ * sond_seafile_is_repo_in_sync:
+ * @library_id: Seafile Library ID
+ * @error: Fehler-Rückgabe
+ *
+ * Prüft ob ein Repository vollständig synchronisiert ist.
+ * Der seaf-daemon kümmert sich selbstständig um die Synchronisation,
+ * diese Funktion fragt nur den aktuellen Status ab.
+ *
+ * Returns: TRUE wenn vollständig synchronisiert, FALSE sonst
+ */
+gboolean sond_seafile_is_repo_in_sync(const gchar *library_id,
+                                       GError **error);
+
 G_END_DECLS
 
 #endif /* SOND_SEAFILE_SYNC_H */

@@ -70,6 +70,7 @@ static void update_ui_from_node(SondModuleAktePrivate *priv);
 static void clear_akte_fields(SondModuleAktePrivate *priv);
 static void update_status_display(SondModuleAktePrivate *priv);
 static void on_offline_toggle_toggled(GtkCheckButton *toggle, SondModuleAktePrivate *priv);
+static void suggest_last_regnr(SondModuleAktePrivate *priv);
 
 /* ========================================================================
  * UI State Management
@@ -244,6 +245,26 @@ static gchar* format_regnr(guint lfd_nr, guint year) {
  */
 static gchar* format_regnr_storage(guint lfd_nr, guint year) {
     return g_strdup_printf("%u-%u", year, lfd_nr);
+}
+
+/**
+ * suggest_last_regnr:
+ * 
+ * Schlägt die zuletzt verwendete RegNr vom Client im Entry-Feld vor.
+ */
+static void suggest_last_regnr(SondModuleAktePrivate *priv) {
+    guint lfd_nr, year;
+    
+    if (!sond_client_get_last_regnr(priv->client, &lfd_nr, &year)) {
+        return;  /* Keine RegNr gespeichert */
+    }
+    
+    gchar *regnr_display = format_regnr(lfd_nr, year);
+    gtk_editable_set_text(GTK_EDITABLE(priv->regnr_entry), regnr_display);
+    g_free(regnr_display);
+    
+    /* Cursor ans Ende setzen */
+    gtk_editable_set_position(GTK_EDITABLE(priv->regnr_entry), -1);
 }
 
 /* ========================================================================
@@ -914,8 +935,7 @@ static void on_offline_toggle_toggled(GtkCheckButton *toggle, SondModuleAktePriv
         	library_name,
             kurzb ? kurzb : "",
             ggstd ? ggstd : "",
-            library_id,
-            local_path
+            library_id
         );
 
         if (!sond_offline_manager_add_akte(manager, akte, &error)) {
@@ -1083,6 +1103,9 @@ static void on_regnr_entry_activate(GtkEntry *entry, SondModuleAktePrivate *priv
                          "Bitte RegNr im Format '12/26' eingeben.");
         return;
     }
+    
+    /* RegNr merken */
+    sond_client_set_last_regnr(priv->client, lfd_nr, year);
     
     GError *error = NULL;
     SondGraphNode *node = search_node_by_regnr(priv, lfd_nr, year, &error);
@@ -1325,6 +1348,10 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
             /* Erfolg! */
             success = TRUE;
 			priv->is_new_from_entry = FALSE;
+			
+			/* RegNr merken */
+			sond_client_set_last_regnr(priv->client, lfd_nr, year);
+			
 			update_ui_from_node(priv);
 
 			gchar *regnr_display = format_regnr(lfd_nr, year);
@@ -1404,6 +1431,10 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
 
             /* UI aktualisieren */
             priv->is_new_from_entry = FALSE;
+            
+            /* RegNr merken */
+            sond_client_set_last_regnr(priv->client, lfd, year);
+            
             update_ui_from_node(priv);
             show_info_dialog(priv->main_widget, "Gespeichert", "Akte wurde erfolgreich gespeichert.");
 
@@ -1441,6 +1472,15 @@ static void on_speichern_clicked(GtkButton *button, SondModuleAktePrivate *priv)
     if (save_node(priv, &error)) {
         priv->is_new_from_entry = FALSE; /* Nach Speichern nicht mehr löschen */
         
+        /* RegNr merken */
+        GPtrArray *regnr_vals = sond_graph_node_get_property(priv->current_node, "regnr");
+        if (regnr_vals && regnr_vals->len == 2) {
+            guint year = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_vals, 0), NULL, 10);
+            guint lfd = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_vals, 1), NULL, 10);
+            sond_client_set_last_regnr(priv->client, lfd, year);
+            g_ptr_array_unref(regnr_vals);
+        }
+        
         /* UI mit RegNr updaten (falls sie gerade erst vergeben wurde) */
         update_ui_from_node(priv);
         
@@ -1477,6 +1517,9 @@ static void on_ok_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
     
     clear_akte_fields(priv);
     set_akte_state(priv, AKTE_STATE_INITIAL);
+    
+    /* Letzte RegNr vorschlagen */
+    suggest_last_regnr(priv);
 }
 
 static void on_abbrechen_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
@@ -1517,6 +1560,9 @@ static void on_abbrechen_clicked(GtkButton *button, SondModuleAktePrivate *priv)
     
     clear_akte_fields(priv);
     set_akte_state(priv, AKTE_STATE_INITIAL);
+    
+    /* Letzte RegNr vorschlagen */
+    suggest_last_regnr(priv);
 }
 
 /* ========================================================================

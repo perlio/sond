@@ -38,6 +38,11 @@ struct _SondClient {
     gchar *username;       /* Seafile-Username */
     gchar *seafile_url;    /* Seafile-Server URL */
     
+    /* Zuletzt verwendete RegNr (während Laufzeit) */
+    guint last_regnr_lfd;
+    guint last_regnr_year;
+    gboolean has_last_regnr;
+    
     /* Auth-Callback */
     void (*auth_failed_callback)(SondClient *client, gpointer user_data);
     gpointer auth_failed_user_data;
@@ -91,6 +96,11 @@ static void sond_client_init(SondClient *self) {
     self->login_callback = NULL;
     self->login_callback_user_data = NULL;
     self->offline_manager = NULL;
+    
+    /* Letzte RegNr initialisieren */
+    self->last_regnr_lfd = 0;
+    self->last_regnr_year = 0;
+    self->has_last_regnr = FALSE;
 }
 
 static gboolean sond_client_load_config(SondClient *client,
@@ -1216,6 +1226,31 @@ gchar* sond_client_get_seafile_clone_token(SondClient *client,
 gpointer sond_client_get_offline_manager(SondClient *client) {
     g_return_val_if_fail(SOND_IS_CLIENT(client), NULL);
     return client->offline_manager;
+}
+
+void sond_client_set_last_regnr(SondClient *client, guint lfd_nr, guint year) {
+    g_return_if_fail(SOND_IS_CLIENT(client));
+    
+    client->last_regnr_lfd = lfd_nr;
+    client->last_regnr_year = year;
+    client->has_last_regnr = TRUE;
+    
+    LOG_INFO("Client: Letzte RegNr gesetzt: %u/%u\n", lfd_nr, year % 100);
+}
+
+gboolean sond_client_get_last_regnr(SondClient *client, guint *lfd_nr, guint *year) {
+    g_return_val_if_fail(SOND_IS_CLIENT(client), FALSE);
+    g_return_val_if_fail(lfd_nr != NULL, FALSE);
+    g_return_val_if_fail(year != NULL, FALSE);
+    
+    if (!client->has_last_regnr) {
+        return FALSE;
+    }
+    
+    *lfd_nr = client->last_regnr_lfd;
+    *year = client->last_regnr_year;
+    
+    return TRUE;
 }
 
 

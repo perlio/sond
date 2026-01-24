@@ -387,3 +387,64 @@ gboolean sond_seafile_test_connection(GError **error) {
 
     return TRUE;
 }
+
+gboolean sond_seafile_is_repo_in_sync(const gchar *library_id,
+                                       GError **error) {
+    g_return_val_if_fail(library_id != NULL, FALSE);
+
+    SearpcClient *client = connect_to_seafile(error);
+    if (!client) {
+        return FALSE;
+    }
+
+    /* RPC-Call: seafile_get_repo_sync_task */
+    json_t *sync_task = NULL;
+    GError *rpc_error = NULL;
+
+    searpc_client_call(
+        client,
+        "seafile_get_repo_sync_task",
+        "json",
+        0,
+        &sync_task,
+        &rpc_error,
+        1,
+        "string", library_id
+    );
+
+    if (rpc_error) {
+        /* Kein Sync-Task = nicht synchronisiert */
+        g_propagate_error(error, rpc_error);
+        searpc_free_client_with_pipe_transport(client);
+        return FALSE;
+    }
+
+    if (!sync_task || !json_is_object(sync_task)) {
+        /* Kein Task-Objekt = nicht synchronisiert */
+        if (sync_task) json_decref(sync_task);
+        searpc_free_client_with_pipe_transport(client);
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND,
+                   "Kein Sync-Task für Repository %s", library_id);
+        return FALSE;
+    }
+
+    /* Prüfe Status */
+    const char *state = json_string_value(json_object_get(sync_task, "state"));
+    gboolean is_synced = FALSE;
+
+    if (state) {
+        if (g_strcmp0(state, "done") == 0 || 
+            g_strcmp0(state, "synchronized") == 0) {
+            is_synced = TRUE;
+            LOG_INFO("Repository %s ist synchronisiert\n", library_id);
+        } else {
+            LOG_INFO("Repository %s ist nicht synchronisiert (state=%s)\n", 
+                     library_id, state);
+        }
+    }
+
+    json_decref(sync_task);
+    searpc_free_client_with_pipe_transport(client);
+
+    return is_synced;
+}

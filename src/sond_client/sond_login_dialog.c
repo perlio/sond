@@ -20,8 +20,13 @@
 #include "../sond_log_and_error.h"
 
 #include <gdk/gdk.h>
+#include <glib/gstdio.h>
 #include <libsoup/soup.h>
 #include <json-glib/json-glib.h>
+
+/* Konstanten für User-Config */
+#define CONFIG_GROUP_AUTH "auth"
+#define CONFIG_KEY_LAST_USERNAME "last_username"
 
 void login_result_free(LoginResult *result) {
     if (!result) return;
@@ -30,6 +35,90 @@ void login_result_free(LoginResult *result) {
     g_free(result->session_token);
     g_free(result->seafile_token);
     g_free(result);
+}
+
+/* ===== Config-Verwaltung (statische Funktionen) ===== */
+
+static gchar* get_config_file_path(void) {
+    /* Config-Datei ist im Projektverzeichnis */
+    return g_strdup("SondClient.conf");
+}
+
+static gboolean save_last_username(const gchar *username) {
+    if (!username || strlen(username) == 0) {
+        LOG_WARN("Attempted to save empty username\n");
+        return FALSE;
+    }
+    
+    gchar *config_path = get_config_file_path();
+    GKeyFile *keyfile = g_key_file_new();
+    GError *error = NULL;
+    gboolean success = FALSE;
+    
+    /* Bestehende Config laden */
+    if (!g_key_file_load_from_file(keyfile, config_path, 
+                                    G_KEY_FILE_KEEP_COMMENTS, &error)) {
+        LOG_WARN("Failed to load config file %s: %s\n",
+                   config_path, error ? error->message : "unknown error");
+        g_clear_error(&error);
+        g_key_file_free(keyfile);
+        g_free(config_path);
+        return FALSE;
+    }
+    
+    /* Username in [auth] Sektion setzen */
+    g_key_file_set_string(keyfile, CONFIG_GROUP_AUTH, 
+                         CONFIG_KEY_LAST_USERNAME, username);
+    
+    /* Speichern */
+    if (!g_key_file_save_to_file(keyfile, config_path, &error)) {
+        LOG_ERROR("Failed to save last username to %s: %s\n",
+                 config_path, error ? error->message : "unknown error");
+        g_clear_error(&error);
+    } else {
+        LOG_INFO("Saved last username to config: %s\n", username);
+        success = TRUE;
+    }
+    
+    g_key_file_free(keyfile);
+    g_free(config_path);
+    
+    return success;
+}
+
+static gchar* load_last_username(void) {
+    gchar *config_path = get_config_file_path();
+    GKeyFile *keyfile = g_key_file_new();
+    GError *error = NULL;
+    gchar *username = NULL;
+    
+    /* Config-Datei laden */
+    if (!g_key_file_load_from_file(keyfile, config_path, 
+                                    G_KEY_FILE_NONE, &error)) {
+        LOG_WARN("Failed to load config file %s: %s\n",
+                   config_path, error ? error->message : "unknown error");
+        g_clear_error(&error);
+        goto cleanup;
+    }
+    
+    /* Username laden */
+    username = g_key_file_get_string(keyfile, CONFIG_GROUP_AUTH,
+                                     CONFIG_KEY_LAST_USERNAME, &error);
+    
+    if (!username) {
+        if (error && error->code != G_KEY_FILE_ERROR_KEY_NOT_FOUND) {
+            LOG_WARN("Error loading last username: %s\n", error->message);
+        }
+        g_clear_error(&error);
+    } else {
+        LOG_INFO("Loaded last username from config: %s\n", username);
+    }
+    
+cleanup:
+    g_key_file_free(keyfile);
+    g_free(config_path);
+    
+    return username;
 }
 
 typedef struct {
@@ -154,6 +243,9 @@ static void on_login_clicked(GtkButton *button, LoginDialogData *data) {
             data->result->session_token = g_strdup(session_token);
             data->result->seafile_url = g_strdup(seafile_url);
             
+            /* Username für nächstes Mal speichern */
+            save_last_username(username);
+            
             LOG_INFO("Login successful for user '%s'\n", username);
         }
     }
@@ -228,6 +320,14 @@ LoginResult* sond_login_dialog_show(GtkWindow *parent,
     
     data.username_entry = gtk_entry_new();
     gtk_widget_set_hexpand(data.username_entry, TRUE);
+    
+    /* Letzten Username laden und vorschlagen */
+    gchar *last_username = load_last_username();
+    if (last_username) {
+        gtk_editable_set_text(GTK_EDITABLE(data.username_entry), last_username);
+        g_free(last_username);
+    }
+    
     gtk_grid_attach(GTK_GRID(grid), data.username_entry, 1, 0, 1, 1);
     
     /* Password */
