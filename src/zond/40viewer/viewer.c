@@ -925,7 +925,7 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 						pdf_delete_annot(ctx, pdf_page, pdf_ann);
 				}
 				else
-					g_warning("%s\nzu viele annots", __func__);
+					LOG_WARN("%s\nzu viele annots", __func__);
 
 				pdf_ann = annot_next;
 			}

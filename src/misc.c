@@ -839,7 +839,7 @@ void show_pixmap(fz_context *ctx, fz_pixmap *pix)
     // Pixbuf erstellen
     pixbuf = pixmap_to_pixbuf(ctx, pix);
     if (!pixbuf) {
-        g_warning("Failed to convert pixmap");
+        LOG_WARN("Failed to convert pixmap");
         return;
     }
 

@@ -712,12 +712,12 @@ void sond_server_seafile_register_handlers(SondServer *server) {
     
     SoupServer *soup_server = sond_server_get_soup_server(server);
     
+    soup_server_add_handler(soup_server, "/seafile/library-id",
+                            handle_seafile_library_id_get, server, NULL);
     soup_server_add_handler(soup_server, "/seafile/library",
                            handle_seafile_library_create, server, NULL);
     soup_server_add_handler(soup_server, "/seafile/library/",
                            handle_seafile_library_delete, server, NULL);
-    soup_server_add_handler(soup_server, "/seafile/library-id",
-                            handle_seafile_library_id_get, server, NULL);
 
     LOG_INFO("Seafile handlers registered\n");
 }

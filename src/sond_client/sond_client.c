@@ -1198,7 +1198,6 @@ gchar* sond_client_get_seafile_clone_token(SondClient *client,
     /* JSON Response parsen */
     gsize size;
     const gchar *data = g_bytes_get_data(response, &size);
-    LOG_INFO("Response vom clone_token_holen: %s", data);
 
     JsonParser *parser = json_parser_new();
     gchar *clone_token = NULL;
@@ -1210,8 +1209,6 @@ gchar* sond_client_get_seafile_clone_token(SondClient *client,
         if (json_object_has_member(obj, "token")) {
             const gchar *token = json_object_get_string_member(obj, "token");
             clone_token = g_strdup(token);
-            LOG_INFO("Clone-Token erhalten: %s...\n",
-                    clone_token ? (strlen(clone_token) > 10 ? "***" : clone_token) : "NULL");
         } else {
             g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                        "Seafile response enthält kein 'token' Feld");

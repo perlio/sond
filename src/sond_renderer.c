@@ -860,7 +860,7 @@ static RenderedDocument* render_image(fz_context *ctx, fz_buffer *buf, int max_w
     GdkPixbufLoader *loader = gdk_pixbuf_loader_new();
 
     if (!gdk_pixbuf_loader_write(loader, data, len, &error)) {
-        g_warning("Failed to load image: %s", error->message);
+    	LOG_WARN("Failed to load image: %s", error->message);
         g_error_free(error);
         g_object_unref(loader);
         return NULL;
@@ -929,14 +929,14 @@ static char* extract_from_zip(unsigned char *zip_data, size_t zip_len, const cha
     zip_error_init(&error);
     src = zip_source_buffer_create(zip_data, zip_len, 0, &error);
     if (!src) {
-        g_warning("Failed to create zip source: %s", zip_error_strerror(&error));
+    	LOG_WARN("Failed to create zip source: %s", zip_error_strerror(&error));
         zip_error_fini(&error);
         return NULL;
     }
 
     archive = zip_open_from_source(src, ZIP_RDONLY, &error);
     if (!archive) {
-        g_warning("Failed to open zip: %s", zip_error_strerror(&error));
+    	LOG_WARN("Failed to open zip: %s", zip_error_strerror(&error));
         zip_source_free(src);
         zip_error_fini(&error);
         return NULL;
@@ -946,7 +946,7 @@ static char* extract_from_zip(unsigned char *zip_data, size_t zip_len, const cha
     struct zip_stat st;
     zip_stat_init(&st);
     if (zip_stat(archive, filename, 0, &st) != 0) {
-        g_warning("File '%s' not found in archive", filename);
+    	LOG_WARN("File '%s' not found in archive", filename);
         zip_close(archive);
         return NULL;
     }
@@ -954,7 +954,7 @@ static char* extract_from_zip(unsigned char *zip_data, size_t zip_len, const cha
     // Datei öffnen
     zip_file_t *file = zip_fopen(archive, filename, 0);
     if (!file) {
-        g_warning("Failed to open '%s' in archive", filename);
+    	LOG_WARN("Failed to open '%s' in archive", filename);
         zip_close(archive);
         return NULL;
     }
@@ -964,7 +964,7 @@ static char* extract_from_zip(unsigned char *zip_data, size_t zip_len, const cha
     zip_int64_t bytes_read = zip_fread(file, content, st.size);
 
     if (bytes_read < 0) {
-        g_warning("Failed to read '%s'", filename);
+    	LOG_WARN("Failed to read '%s'", filename);
         g_free(content);
         zip_fclose(file);
         zip_close(archive);
@@ -1200,7 +1200,7 @@ static RenderedDocument* render_office_document(fz_context *ctx, fz_buffer *buf,
     char *xml_content = extract_from_zip(data, len, xml_file, &xml_len);
 
     if (!xml_content) {
-        g_warning("Failed to extract %s from document", xml_file);
+    	LOG_WARN("Failed to extract %s from document", xml_file);
         return NULL;
     }
 
@@ -1209,7 +1209,7 @@ static RenderedDocument* render_office_document(fz_context *ctx, fz_buffer *buf,
     g_free(xml_content);
 
     if (!doc) {
-        g_warning("Failed to parse %s", xml_file);
+    	LOG_WARN("Failed to parse %s", xml_file);
         return NULL;
     }
 
@@ -1374,7 +1374,7 @@ static RenderedDocument* render_odt(fz_context *ctx, fz_buffer *buf, int width) 
     char *xml_content = extract_from_zip(data, len, "content.xml", &xml_len);
 
     if (!xml_content) {
-        g_warning("Failed to extract content.xml from ODT");
+    	LOG_WARN("Failed to extract content.xml from ODT");
         return NULL;
     }
 
@@ -1383,7 +1383,7 @@ static RenderedDocument* render_odt(fz_context *ctx, fz_buffer *buf, int width) 
     g_free(xml_content);
 
     if (!doc) {
-        g_warning("Failed to parse content.xml");
+    	LOG_WARN("Failed to parse content.xml");
         return NULL;
     }
 
@@ -1481,7 +1481,7 @@ static RenderedDocument* render_odt(fz_context *ctx, fz_buffer *buf, int width) 
 RenderedDocument* render_document_from_stream(fz_context *ctx,
 		fz_buffer* buf, int render_width) {
     if (!ctx || !buf) {
-        g_warning("Invalid context or buffer");
+    	LOG_WARN("Invalid context or buffer");
         return NULL;
     }
 

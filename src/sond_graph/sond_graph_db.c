@@ -440,7 +440,7 @@ SondGraphNode* sond_graph_db_load_node(MYSQL *conn, gint64 node_id, GError **err
 
     /* Warnung bei Truncation */
     if (fetch_result == MYSQL_DATA_TRUNCATED) {
-        g_warning("Data truncated for node %" G_GINT64_FORMAT, node_id);
+    	LOG_WARN("Data truncated for node %" G_GINT64_FORMAT, node_id);
     }
 
     /* Node erstellen */
@@ -495,7 +495,7 @@ SondGraphNode* sond_graph_db_load_node(MYSQL *conn, gint64 node_id, GError **err
     stmt = mysql_stmt_init(conn);
     if (mysql_stmt_prepare(stmt, edges_query, strlen(edges_query))) {
         /* Fehler beim Laden der Edges - Node trotzdem zurückgeben */
-        g_warning("Failed to load edges: %s", mysql_stmt_error(stmt));
+    	LOG_WARN("Failed to load edges: %s", mysql_stmt_error(stmt));
         goto cleanup;
     }
 
@@ -564,7 +564,7 @@ SondGraphNode* sond_graph_db_load_node(MYSQL *conn, gint64 node_id, GError **err
         GError *edge_json_error = NULL;
         GPtrArray *edge_props = sond_graph_property_list_from_json(edge_properties, &edge_json_error);
         if (edge_props == NULL && edge_json_error != NULL) {
-            g_warning("Failed to parse edge properties for edge %" G_GINT64_FORMAT " %s",
+        	LOG_WARN("Failed to parse edge properties for edge %" G_GINT64_FORMAT " %s",
                      edge_id, edge_json_error->message);
             g_clear_error(&edge_json_error);
         }
@@ -1040,7 +1040,7 @@ GPtrArray* sond_graph_db_search_nodes(MYSQL *conn,
         if (node != NULL) {
             g_ptr_array_add(nodes, node);
         } else {
-            g_warning("Failed to load node %" G_GINT64_FORMAT " %s", node_id,
+        	LOG_WARN("Failed to load node %" G_GINT64_FORMAT " %s", node_id,
                      load_error ? load_error->message : "unknown");
             g_clear_error(&load_error);
         }

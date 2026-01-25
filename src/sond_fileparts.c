@@ -180,7 +180,7 @@ SondFilePart* sond_file_part_create_from_mime_type(gchar const* path,
 
 		rc = sond_file_part_test_for_children(sfp_child, &error);
 		if (rc) {
-			g_warning("%s\n", error->message);
+			LOG_WARN("%s\n", error->message);
 			g_error_free(error);
 		}
 	}
@@ -886,7 +886,7 @@ gint sond_file_part_open(SondFilePart* sfp, gboolean open_with,
 
 				rc = g_remove(path);
 				if (rc)
-					g_warning("Datei '%s' konnte nicht gelöscht werden:\n%s",
+					LOG_WARN("Datei '%s' konnte nicht gelöscht werden:\n%s",
 							path, strerror(errno));
 			}
 
@@ -2287,7 +2287,7 @@ static void sond_file_part_gmessage_close(SondFilePartGMessage* sfp_gmessage) {
 			sond_file_part_gmessage_get_instance_private(sfp_gmessage);
 
 	if (sfp_gmessage_priv->message == NULL) {
-		g_warning("%s\nSondFilePartGMessage war schon geschlossen", __func__);
+		LOG_WARN("%s\nSondFilePartGMessage war schon geschlossen", __func__);
 
 		return;
 	}

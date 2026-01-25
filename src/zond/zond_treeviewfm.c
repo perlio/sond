@@ -324,7 +324,7 @@ static gint zond_treeviewfm_text_edited(SondTreeviewFM *stvfm,
 		iter = zond_treeview_abfragen_iter(ZOND_TREEVIEW(ztvfm_priv->zond->treeview[BAUM_INHALT]),
 				ID_section);
 		if (!iter)
-			g_warning("%s, Abschnitt %s: Knoten nicht in Baum INHALT gefunden",
+			LOG_WARN("%s, Abschnitt %s: Knoten nicht in Baum INHALT gefunden",
 					filepart, sond_tvfm_item_get_path_or_section(stvfm_item));
 		else {
 			zond_tree_store_set(iter, NULL, new_text, 0);
@@ -503,7 +503,7 @@ static gint zond_treeviewfm_load_sections(SondTVFMItem* stvfm_item,
 	sfp = sond_tvfm_item_get_sond_file_part(stvfm_item);
 
 	if (!sfp) {
-		g_warning("sfp darf nicht NULL sein");
+		LOG_WARN("sfp darf nicht NULL sein");
 		return 0;
 	}
 
@@ -573,7 +573,7 @@ static gboolean zond_treeviewfm_has_sections(SondTVFMItem* stvfm_item) {
 
 	rc = zond_treeviewfm_load_sections(stvfm_item, NULL, &error);
 	if (rc == -1) {
-		g_warning("Konnte sections nicht laden: %s", error->message);
+		LOG_WARN("Konnte sections nicht laden: %s", error->message);
 		g_error_free(error);
 
 		return FALSE;

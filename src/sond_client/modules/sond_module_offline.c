@@ -40,58 +40,6 @@ typedef struct {
 /* Forward declarations */
 static void update_akte_list(SondModuleOfflinePrivate *priv);
 
-/* Helper aus sond_seafile_sync.c - lokal kopiert */
-static gchar* get_seafile_pipe_path(void) {
-    const gchar *username = g_get_user_name();
-    gchar *username_b64 = g_base64_encode((const guchar*)username, strlen(username));
-
-#ifdef G_OS_WIN32
-    gchar *pipe_path = g_strdup_printf("\\\\.\\pipe\\seafile_%s", username_b64);
-#else
-    const gchar *home = g_get_home_dir();
-    gchar *pipe_path = g_strdup_printf("%s/.seafile/seafile.sock", home);
-#endif
-
-    g_free(username_b64);
-    return pipe_path;
-}
-
-static SearpcClient* connect_to_seafile(GError **error) {
-    gchar *pipe_path = get_seafile_pipe_path();
-    SearpcNamedPipeClient *pipe_client = searpc_create_named_pipe_client(pipe_path);
-    if (!pipe_client) {
-        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                   "Konnte Named Pipe Client nicht erstellen: %s", pipe_path);
-        g_free(pipe_path);
-        return NULL;
-    }
-
-    if (searpc_named_pipe_client_connect(pipe_client) < 0) {
-        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                   "Seafile-Client nicht erreichbar: %s\n"
-                   "Stellen Sie sicher dass der Seafile-Client läuft!", pipe_path);
-        g_free(pipe_path);
-        g_free(pipe_client);
-        return NULL;
-    }
-
-    g_free(pipe_path);
-
-    SearpcClient *client = searpc_client_with_named_pipe_transport(
-        pipe_client,
-        "seafile-rpcserver"
-    );
-
-    if (!client) {
-        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                   "Konnte RPC-Transport nicht erstellen");
-        g_free(pipe_client);
-        return NULL;
-    }
-
-    return client;
-}
-
 /* ========================================================================
  * Helper Functions
  * ======================================================================== */
@@ -191,9 +139,41 @@ static void action_data_free(ActionData *data) {
 static void on_sync_stop_clicked(GtkButton *button, ActionData *data) {
     SondModuleOfflinePrivate *priv = data->priv;
     
+    /* Prüfe ob Repo vollständig synchronisiert ist */
+    GError *status_error = NULL;
+    gchar *sync_status = sond_seafile_get_sync_status(data->library_id, &status_error);
+
+    if (status_error) {
+        gchar *msg = g_strdup_printf("Fehler beim Prüfen des Sync-Status: %s",
+                                    status_error->message);
+        show_error_dialog(priv->main_widget, "Fehler", msg);
+        g_free(msg);
+        g_error_free(status_error);
+        return;
+    }
+
+    /* Nur pausieren wenn synchronisiert */
+    if (!sync_status || (g_strcmp0(sync_status, "synchronized") != 0 &&
+                         g_strcmp0(sync_status, "done") != 0)) {
+        gchar *current_status = sync_status ? g_strdup(sync_status) : g_strdup("unbekannt");
+        gchar *msg = g_strdup_printf(
+            "Synchronisation kann nur pausiert werden wenn vollständig synchronisiert.\n\n"
+            "Aktueller Status: %s\n\n"
+            "Bitte warten Sie bis die Synchronisation abgeschlossen ist.",
+            current_status);
+        show_error_dialog(priv->main_widget, "Synchronisation läuft noch", msg);
+        g_free(msg);
+        g_free(current_status);
+        if (sync_status) g_free(sync_status);
+        return;
+    }
+
+    g_free(sync_status);
+
+    /* Seafile Sync stoppen */
     GError *error = NULL;
     if (!sond_seafile_unsync_library(data->library_id, &error)) {
-        gchar *msg = g_strdup_printf("Fehler beim Pausieren der Synchronisation: %s",
+        gchar *msg = g_strdup_printf("Fehler beim Stoppen der Synchronisation: %s",
                                     error ? error->message : "Unbekannt");
         show_error_dialog(priv->main_widget, "Fehler", msg);
         g_free(msg);
@@ -201,11 +181,19 @@ static void on_sync_stop_clicked(GtkButton *button, ActionData *data) {
         return;
     }
     
-    LOG_INFO("Synchronisation für %s pausiert\n", data->regnr);
-    show_info_dialog(priv->main_widget, "Erfolg", 
-                    "Synchronisation wurde pausiert.\nDie Dateien bleiben lokal erhalten.");
+    /* syncing_enabled auf FALSE setzen (Akte bleibt in Liste!) */
+    SondOfflineManager *manager = sond_client_get_offline_manager(priv->client);
+    if (manager) {
+        GError *set_error = NULL;
+        if (!sond_offline_manager_set_sync_enabled(manager, data->regnr, FALSE, &set_error)) {
+            LOG_WARN("Konnte syncing_enabled nicht setzen: %s\n",
+                    set_error ? set_error->message : "Unbekannt");
+            if (set_error) g_error_free(set_error);
+        }
+    }
     
-    update_akte_list(priv);
+    /* Liste aktualisieren */
+    gtk_widget_activate(priv->refresh_button);
 }
 
 static void on_sync_resume_clicked(GtkButton *button, ActionData *data) {
@@ -224,9 +212,6 @@ static void on_sync_resume_clicked(GtkButton *button, ActionData *data) {
     
     const gchar *sync_dir = sond_offline_manager_get_sync_directory(manager);
     gchar *local_path = g_build_filename(sync_dir, data->regnr, NULL);
-    
-    LOG_INFO("Versuche Sync fortzusetzen: library_id=%s, regnr=%s, path=%s\n", 
-             data->library_id, data->regnr, local_path);
     
     /* Prüfe ob Verzeichnis existiert */
     if (!g_file_test(local_path, G_FILE_TEST_IS_DIR)) {
@@ -248,7 +233,7 @@ static void on_sync_resume_clicked(GtkButton *button, ActionData *data) {
     }
     
     /* Seafile RPC-Client verbinden */
-    SearpcClient *rpc_client = connect_to_seafile(&error);
+    SearpcClient *rpc_client = sond_seafile_get_rpc_client(&error);
     if (!rpc_client) {
         show_error_dialog(priv->main_widget, "Verbindung mit Seafile-Client "
         		"konnte nicht erstellt werden", error ? error->message : "Unbekannt");
@@ -291,20 +276,26 @@ static void on_sync_resume_clicked(GtkButton *button, ActionData *data) {
     g_free(local_path);
 
     if (rpc_error) {
-        gchar *msg = g_strdup_printf("Fehler beim Fortsetzen: %s",
-                                    rpc_error->message);
-        show_error_dialog(priv->main_widget, "Fehler", msg);
-        g_free(msg);
+        show_error_dialog(priv->main_widget, "Fortsetzen der Synchronisation "
+        		"fehlgeschlagen", rpc_error->message);
         g_error_free(rpc_error);
         return;
     }
 
     if (!task_id) {
-        show_error_dialog(priv->main_widget, "Fehler", 
-                         "Konnte Synchronisation nicht fortsetzen (keine Task-ID erhalten)");
+        show_error_dialog(priv->main_widget, "Fortsetzen der Synchronisation "
+        		"fehlgeschlagen", "Keine Task-ID");
         return;
     }
     
+    /* syncing_enabled auf TRUE setzen */
+    GError *set_error = NULL;
+    if (!sond_offline_manager_set_sync_enabled(manager, data->regnr, TRUE, &set_error)) {
+        LOG_WARN("Konnte syncing_enabled nicht setzen: %s\n",
+                set_error ? set_error->message : "Unbekannt");
+        if (set_error) g_error_free(set_error);
+    }
+
     g_free(task_id);
     
     LOG_INFO("Synchronisation für %s fortgesetzt\n", data->regnr);
@@ -337,7 +328,6 @@ static void on_cache_delete_response(GObject *source, GAsyncResult *result, gpoi
     const gchar *sync_dir = sond_offline_manager_get_sync_directory(manager);
     gchar *akte_path = g_build_filename(sync_dir, data->regnr, NULL);
     
-    gboolean success = FALSE;
     GError *del_error = NULL;
     
 	if (!g_file_test(akte_path, G_FILE_TEST_IS_DIR)) {

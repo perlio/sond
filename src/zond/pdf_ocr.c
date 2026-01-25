@@ -263,7 +263,7 @@ static gint pdf_ocr_tess_page(InfoWindow *info_window, TessBaseAPI *handle,
 		return -1;
 	}
 
-	g_message("Mean Confidence: %u", TessBaseAPIMeanTextConf(handle));
+	LOG_INFO("Mean Confidence: %u", TessBaseAPIMeanTextConf(handle));
 
 	return 0;
 }

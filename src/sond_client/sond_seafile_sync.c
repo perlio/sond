@@ -58,7 +58,7 @@ static gchar* get_seafile_pipe_path(void) {
  *
  * Returns: (transfer full) (nullable): SearpcClient oder NULL bei Fehler
  */
-static SearpcClient* connect_to_seafile(GError **error) {
+SearpcClient* sond_seafile_get_rpc_client(GError **error) {
     gchar *pipe_path = get_seafile_pipe_path();
     SearpcNamedPipeClient *pipe_client = searpc_create_named_pipe_client(pipe_path);
     if (!pipe_client) {
@@ -104,7 +104,7 @@ gchar* sond_seafile_find_library_by_name(const gchar *library_name,
                                           GError **error) {
     g_return_val_if_fail(library_name != NULL, NULL);
 
-    SearpcClient *client = connect_to_seafile(error);
+    SearpcClient *client = sond_seafile_get_rpc_client(error);
     if (!client) {
         return NULL;
     }
@@ -170,7 +170,7 @@ gboolean sond_seafile_sync_library(SondClient* client, const gchar *library_id,
     g_return_val_if_fail(library_id != NULL, FALSE);
     g_return_val_if_fail(local_path != NULL, FALSE);
 
-    SearpcClient *rpc_client = connect_to_seafile(error);
+    SearpcClient *rpc_client = sond_seafile_get_rpc_client(error);
     if (!rpc_client) {
         return FALSE;
     }
@@ -261,7 +261,7 @@ gboolean sond_seafile_unsync_library(const gchar *library_id,
                                       GError **error) {
     g_return_val_if_fail(library_id != NULL, FALSE);
 
-    SearpcClient *client = connect_to_seafile(error);
+    SearpcClient *client = sond_seafile_get_rpc_client(error);
     if (!client) {
         return FALSE;
     }
@@ -290,7 +290,7 @@ gboolean sond_seafile_unsync_library(const gchar *library_id,
 
     if (result != 0) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                   "seafile_unsync gab Fehlercode zurück: %d", result);
+                   "seafile_destroy gab Fehlercode zurück: %d", result);
         return FALSE;
     }
 
@@ -303,7 +303,7 @@ gchar* sond_seafile_get_sync_status(const gchar *library_id,
                                      GError **error) {
     g_return_val_if_fail(library_id != NULL, NULL);
 
-    SearpcClient *client = connect_to_seafile(error);
+    SearpcClient *client = sond_seafile_get_rpc_client(error);
     if (!client) {
         return NULL;
     }
@@ -346,7 +346,7 @@ gchar* sond_seafile_get_sync_status(const gchar *library_id,
 }
 
 gboolean sond_seafile_test_connection(GError **error) {
-    SearpcClient *client = connect_to_seafile(error);
+    SearpcClient *client = sond_seafile_get_rpc_client(error);
     if (!client) {
         return FALSE;
     }
@@ -388,7 +388,7 @@ gboolean sond_seafile_is_repo_in_sync(const gchar *library_id,
                                        GError **error) {
     g_return_val_if_fail(library_id != NULL, FALSE);
 
-    SearpcClient *client = connect_to_seafile(error);
+    SearpcClient *client = sond_seafile_get_rpc_client(error);
     if (!client) {
         return FALSE;
     }

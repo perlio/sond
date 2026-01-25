@@ -28,10 +28,13 @@
 #define SOND_SEAFILE_SYNC_H
 
 typedef struct _SondClient SondClient;
+typedef struct _SearpcClient SearpcClient;
 
 #include <glib.h>
 
 G_BEGIN_DECLS
+
+SearpcClient* sond_seafile_get_rpc_client(GError **error);
 
 /**
  * sond_seafile_find_library_by_name:

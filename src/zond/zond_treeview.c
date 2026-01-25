@@ -417,7 +417,7 @@ static gint zond_treeview_check_anchor_id(Projekt *zond,
 	gint file_part_angebunden = 0;
 
 	if (*anchor_id == 0) {
-		g_warning("%s: anchor_id == 0", __func__);
+		LOG_WARN("%s: anchor_id == 0", __func__);
 
 		return 0;
 	}
@@ -883,7 +883,7 @@ static gint zond_treeview_leaf_anbinden(ZondTreeview *ztv,
 		gint rc = 0;
 
 		if (section) { //kann nicht sein!
-			g_warning("%s: Datei nicht in Datenbank, Abschnitt aber schon",
+			LOG_WARN("%s: Datei nicht in Datenbank, Abschnitt aber schon",
 					__func__);
 
 			return 0;
@@ -1796,7 +1796,7 @@ static gint zond_treeview_selection_loeschen_foreach(SondTreeview *tree_view,
 							gtk_tree_view_get_model(
 									GTK_TREE_VIEW(zond->treeview[BAUM_FS])),
 							&iter_child, &iter_fm))
-						g_warning("%s\niter hat keine Kinder", __func__);
+						LOG_WARN("%s\niter hat keine Kinder", __func__);
 					else
 						gtk_tree_store_remove(
 								GTK_TREE_STORE(gtk_tree_view_get_model(
@@ -2036,7 +2036,7 @@ static gint zond_treeview_selection_entfernen_anbindung_foreach(
 				if (!gtk_tree_model_iter_children(
 						gtk_tree_view_get_model(GTK_TREE_VIEW(ztvfm)),
 						&iter_child, &iter_parent))
-					g_warning("%s\nKnoten hat keinen Abkömmling", __func__);
+					LOG_WARN("%s\nKnoten hat keinen Abkömmling", __func__);
 				else
 					gtk_tree_store_remove(GTK_TREE_STORE(
 							gtk_tree_view_get_model( GTK_TREE_VIEW(ztvfm) )),

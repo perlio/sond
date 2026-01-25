@@ -625,7 +625,7 @@ static gint zond_convert_0_to_1_baum_inhalt_insert(ZondDBase *zond_dbase,
 			count = fwrite(errmsg, sizeof(gchar), strlen(errmsg),
 					data_convert->logfile);
 			if (count < strlen(errmsg))
-				g_warning(
+				LOG_WARN(
 						"Nachricht '%s' konnte nicht ins Logfile geschrieben werden",
 						errmsg);
 			g_free(errmsg);
@@ -685,7 +685,7 @@ static gint zond_convert_0_to_1_baum_inhalt_insert(ZondDBase *zond_dbase,
 					count = fwrite(errmsg, sizeof(gchar), strlen(errmsg),
 							data_convert->logfile);
 					if (count < strlen(errmsg))
-						g_warning(
+						LOG_WARN(
 								"Nachricht '%s' konnte nicht ins Logfile geschrieben werden",
 								errmsg);
 					g_free(errmsg);
@@ -758,7 +758,7 @@ static gint zond_convert_0_to_1_baum_inhalt_insert(ZondDBase *zond_dbase,
 			count = fwrite(logmsg, sizeof(gchar), strlen(logmsg),
 					data_convert->logfile);
 			if (count < strlen(logmsg))
-				g_warning(
+				LOG_WARN(
 						"Nachricht '%s' konnte nicht ins Logfile geschrieben werden",
 						logmsg);
 			g_free(logmsg);
@@ -1104,7 +1104,7 @@ static gint zond_convert_0_to_1(ZondDBase *zond_dbase, GError **error) {
 	fclose(data_convert.logfile);
 
 	if (count < strlen(message))
-		g_warning("Log-Datei konnte nicht beschrieben werden");
+		LOG_WARN("Log-Datei konnte nicht beschrieben werden");
 
 	if (rc)
 		ERROR_Z

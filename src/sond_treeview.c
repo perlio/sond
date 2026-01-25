@@ -601,7 +601,7 @@ static gint sond_treeview_refs_foreach(SondTreeview *stv_orig, GPtrArray *refs,
 				path);
 		gtk_tree_path_free(path);
 		if (!success) {
-			g_warning("%s\ngtk_tree_model_iter erfolglos", __func__);
+			LOG_WARN("%s\ngtk_tree_model_iter erfolglos", __func__);
 			continue;
 		}
 

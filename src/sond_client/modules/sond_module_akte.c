@@ -563,6 +563,30 @@ static void update_ui_from_node(SondModuleAktePrivate *priv) {
 /* ========================================================================
  * Server Communication
  * ======================================================================== */
+static gboolean wait_for_sync_changed(const gchar *library_id, gboolean clone,
+		int timeout_ms, GError **error) {
+    int waited = 0;
+    while (waited < timeout_ms) {
+
+        gchar *status = sond_seafile_get_sync_status(library_id, error);
+        if (error && *error) {
+			return FALSE;  // Fehler beim Abrufen des Status
+		}
+        if ((clone && status != NULL) || (!clone && status == NULL)) {
+            g_free(status);
+            return TRUE;  // Befehl ist angekommen!
+        }
+        g_usleep(100000);  // 100ms
+        waited += 100;
+    }
+
+    if (error && *error == NULL) {
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_TIMED_OUT,
+					"Timeout beim Warten auf Sync-Status-Änderung für Library %s", library_id);
+	}
+
+    return FALSE;  // Timeout
+}
 
 static SondGraphNode* search_node_by_regnr(SondModuleAktePrivate *priv,
 		guint lfd_nr, guint year, GError **error) {
@@ -850,24 +874,85 @@ static void on_reaktivieren_clicked(GtkButton *button, SondModuleAktePrivate *pr
     show_info_dialog(priv->main_widget, "Erfolgreich", "Akte wurde reaktiviert.");
 }
 
+/* Helper: Toggle zurücksetzen und Button wieder aktivieren */
+static void reset_toggle_and_enable(GtkCheckButton *toggle, gboolean new_state,
+                                    SondModuleAktePrivate *priv) {
+    g_signal_handlers_block_by_func(toggle, on_offline_toggle_toggled, priv);
+    gtk_check_button_set_active(toggle, new_state);
+    g_signal_handlers_unblock_by_func(toggle, on_offline_toggle_toggled, priv);
+    gtk_widget_set_sensitive(GTK_WIDGET(toggle), TRUE);
+}
+
+/* Helper: Sync aktivieren (neue Akte oder pausierte fortsetzen) */
+static gboolean activate_sync(SondModuleAktePrivate *priv,
+                               SondOfflineManager *manager,
+                               const gchar *library_name,
+                               const gchar *library_id,
+                               GtkCheckButton *toggle,
+							   GError** error) {
+    SondOfflineAkte *akte = sond_offline_manager_get_akte(manager, library_name);
+
+    /* Akte in Manager registrieren falls nötig */
+    if (!akte) {
+        gchar *kurzb = sond_graph_node_get_property_string(priv->current_node, "kurzb");
+        gchar *ggstd = sond_graph_node_get_property_string(priv->current_node, "ggstd");
+
+        SondOfflineAkte *neue_akte = sond_offline_akte_new(
+            library_name, kurzb ? kurzb : "", ggstd ? ggstd : "", library_id);
+
+        g_free(kurzb);
+        g_free(ggstd);
+
+        if (!sond_offline_manager_add_akte(manager, neue_akte, error))
+            return FALSE;
+    } else {
+        if (!sond_offline_manager_set_sync_enabled(manager, library_name, TRUE, error))
+            return FALSE;
+    }
+
+    /* Seafile Sync starten */
+    const gchar *sync_dir = sond_offline_manager_get_sync_directory(manager);
+    gchar *local_path = g_build_filename(sync_dir, library_name, NULL);
+
+    gboolean success = sond_seafile_sync_library(priv->client, library_id,
+                                                  library_name, local_path, error);
+    g_free(local_path);
+
+    if (!success)
+        return FALSE;
+
+    return TRUE;
+}
+
+/* Helper: Sync deaktivieren (pausieren) */
+static gboolean deactivate_sync(SondModuleAktePrivate *priv,
+                                 SondOfflineManager *manager,
+                                 const gchar *library_name,
+                                 const gchar *library_id,
+								 GError** error) {
+    if (!sond_offline_manager_set_sync_enabled(manager, library_name, FALSE, error))
+        return FALSE;
+
+    if (!sond_seafile_unsync_library(library_id, error))
+        return FALSE;
+
+    return TRUE;
+}
+
 /* Event Handler für Offline-Toggle */
 static void on_offline_toggle_toggled(GtkCheckButton *toggle, SondModuleAktePrivate *priv) {
     if (!priv->current_node) {
         return;
     }
 
-    /* Hole Offline Manager */
-    SondOfflineManager *manager = sond_client_get_offline_manager(priv->client);
-    if (!manager) {
-        show_error_dialog(priv->main_widget, "Fehler", "Offline Manager nicht verfügbar");
-        return;
-    }
+    gtk_widget_set_sensitive(GTK_WIDGET(toggle), FALSE);
 
     /* RegNr extrahieren */
     GPtrArray *regnr_values = sond_graph_node_get_property(priv->current_node, "regnr");
     if (!regnr_values || regnr_values->len != 2) {
         show_error_dialog(priv->main_widget, "Fehler", "Akte hat keine gültige RegNr");
         if (regnr_values) g_ptr_array_unref(regnr_values);
+        gtk_widget_set_sensitive(GTK_WIDGET(toggle), TRUE);
         return;
     }
 
@@ -876,175 +961,81 @@ static void on_offline_toggle_toggled(GtkCheckButton *toggle, SondModuleAktePriv
     gchar *library_name = format_regnr_storage(lfd, year);
     g_ptr_array_unref(regnr_values);
 
-    gboolean is_active = gtk_check_button_get_active(toggle);
-
-    /* Library ID ermitteln */
-    GError *error = NULL;
-	gchar *library_id = NULL;
-
-     //Zustand im offline-Manager prüfen
-	 SondOfflineAkte *akte = sond_offline_manager_get_akte(manager, library_name);
-     gboolean syncing_enabled = akte ? akte->syncing_enabled : FALSE;
-
-     if ((is_active && syncing_enabled) || (!is_active && !syncing_enabled)) {
-    	 gchar *msg = g_strdup_printf("Akte '%s' in Offline Manager bereits "
-    			 "als %s markiert.",
-				 library_name, is_active ? "synchronisiert" : "nicht synchronisiert");
-         show_error_dialog(priv->main_widget, "Toggle-Zustand inkonsistent", msg);
-         g_free(msg);
-		 g_free(library_name);
-
-         /* Toggle zurücksetzen */
-         g_signal_handlers_block_by_func(toggle, on_offline_toggle_toggled, priv);
-         gtk_check_button_set_active(toggle, !is_active);
-         g_signal_handlers_unblock_by_func(toggle, on_offline_toggle_toggled, priv);
-
-		 return;
-     }
-
-     if (is_active) {
-         /* Toggle AN: Library noch nicht synchronisiert - vom Server holen */
-         library_id = sond_client_get_seafile_library_id(priv->client, library_name, &error);
-     } else {
-         library_id = g_strdup(akte->seafile_library_id);
-     }
-
-     if (!library_id) {
-         /* Library nicht gefunden - Fehler anzeigen */
-    	 gchar *msg = g_strdup_printf("Library-ID für Akte '%s' nicht gefunden",
-    			 library_name);
-    	 show_error_dialog(priv->main_widget, msg,
-    			 error ? error->message : "Unbekannt");
-    	 g_free(msg);
-    	 if (error)
-    		 g_error_free(error);
-    	g_free(library_name);
-
-        /* Toggle zurücksetzen */
-        g_signal_handlers_block_by_func(toggle, on_offline_toggle_toggled, priv);
-        gtk_check_button_set_active(GTK_CHECK_BUTTON(toggle), FALSE);
-        g_signal_handlers_unblock_by_func(toggle, on_offline_toggle_toggled, priv);
-
+    SondOfflineManager *manager = sond_client_get_offline_manager(priv->client);
+    if (!manager) {
+        show_error_dialog(priv->main_widget, "Fehler", "Offline Manager nicht verfügbar");
+        g_free(library_name);
+        gtk_widget_set_sensitive(GTK_WIDGET(toggle), TRUE);
         return;
     }
 
-	if (is_active) {
-        /* Offline aktivieren */
+    gboolean is_active = gtk_check_button_get_active(toggle);
+    SondOfflineAkte *akte = sond_offline_manager_get_akte(manager, library_name);
+    gboolean syncing_enabled = akte ? akte->syncing_enabled : FALSE;
 
-        /* Hole Kurzbezeichnung und Gegenstand */
-        gchar *kurzb = sond_graph_node_get_property_string(priv->current_node, "kurzb");
-        gchar *ggstd = sond_graph_node_get_property_string(priv->current_node, "ggstd");
-
-        /* sync_directory vom Offline Manager holen */
-		const gchar *sync_dir = sond_offline_manager_get_sync_directory(manager);
-		gchar *local_path = g_build_filename(sync_dir, library_name, NULL);
-
-		//Wenn akte noch nicht im json - dann anlegen
-		if (!akte) {
-			/* Akte zur Offline-Liste hinzufügen */
-			SondOfflineAkte *akte_new = sond_offline_akte_new(
-				library_name,
-				kurzb ? kurzb : "",
-				ggstd ? ggstd : "",
-				library_id
-			);
-			g_free(kurzb);
-			g_free(ggstd);
-
-			//_add_akte konsumiert jedenfalls Referenz auf akte_new - kein free hier
-			if (!sond_offline_manager_add_akte(manager, akte_new, &error)) {
-				show_error_dialog(priv->main_widget, "Fehler beim Hinzufügen "
-						"in Offline-Manager", error ? error->message : "Unbekannt");
-				if (error) g_error_free(error);
-
-				g_free(library_id);
-				g_free(local_path);
-				g_free(library_name);
-
-				/* Toggle zurücksetzen */
-				g_signal_handlers_block_by_func(toggle, on_offline_toggle_toggled, priv);
-				gtk_check_button_set_active(toggle, FALSE);
-				g_signal_handlers_unblock_by_func(toggle, on_offline_toggle_toggled, priv);
-				return;
-			}
-		}
-		else { //sonst nur auf sync_enabled setzen
-			if (!sond_offline_manager_set_sync_enabled(manager, library_name, TRUE, &error)) {
-				show_error_dialog(priv->main_widget, "Fehler bei Aktivierung "
-						"im Offline Manager", error ? error->message : "Unbekannt");
-				if (error) g_error_free(error);
-
-				g_free(library_id);
-				g_free(local_path);
-				g_free(library_name);
-
-				/* Toggle zurücksetzen */
-				g_signal_handlers_block_by_func(toggle, on_offline_toggle_toggled, priv);
-				gtk_check_button_set_active(toggle, FALSE);
-				g_signal_handlers_unblock_by_func(toggle, on_offline_toggle_toggled, priv);
-				return;
-			}
-		}
-
-        /* Seafile Sync starten */
-		if (!sond_seafile_sync_library(priv->client, library_id, library_name, local_path, &error)) {
-			/* Sync-Start fehlgeschlagen */
-			GtkAlertDialog *dialog = gtk_alert_dialog_new("Seafile Sync konnte nicht gestartet werden");
-
-			if (error) {
-			    gtk_alert_dialog_set_detail(dialog, error->message);
-			    g_error_free(error);
-			}
-
-			gtk_alert_dialog_show(dialog, GTK_WINDOW(gtk_widget_get_root(GTK_WIDGET(toggle))));
-			g_object_unref(dialog);
-
-			/* Toggle zurücksetzen */
-			g_signal_handlers_block_by_func(toggle, on_offline_toggle_toggled, priv);
-			gtk_check_button_set_active(GTK_CHECK_BUTTON(toggle), FALSE);
-			g_signal_handlers_unblock_by_func(toggle, on_offline_toggle_toggled, priv);
-
-			g_free(library_id);
-			g_free(local_path);
-	        g_free(library_name);
-			return;
-		}
-
+    /* Konsistenzprüfung */
+    if ((is_active && syncing_enabled) || (!is_active && !syncing_enabled)) {
+        gchar *msg = g_strdup_printf("Akte '%s' bereits als %s markiert.",
+                                    library_name, is_active ? "synchronisiert" : "nicht synchronisiert");
+        show_error_dialog(priv->main_widget, "Toggle-Zustand inkonsistent", msg);
+        g_free(msg);
         g_free(library_name);
-        g_free(local_path);
-
-    } else {
-        /* Sync deaktivieren (Dateien bleiben lokal) */
-        if (!sond_offline_manager_set_sync_enabled(manager, library_name, FALSE, &error)) {
-            gchar *msg = g_strdup_printf("Konnte library %s im Offline Manager nicht deaktivieren",
-            		library_name);
-            show_error_dialog(priv->main_widget, msg, error ? error->message : "Unbekannt");
-            g_free(msg);
-            if (error) g_error_free(error);
-            g_free(library_name);
-            g_free(library_id);
-
-            /* Toggle zurücksetzen */
-            g_signal_handlers_block_by_func(toggle, on_offline_toggle_toggled, priv);
-            gtk_check_button_set_active(toggle, TRUE);
-            g_signal_handlers_unblock_by_func(toggle, on_offline_toggle_toggled, priv);
-            return;
-        }
-
-        g_free(library_name);
-
-        /* Seafile Sync stoppen */
-		if (!sond_seafile_unsync_library(library_id, &error)) {
-			/* Sync-Stop fehlgeschlagen - nur warnen, nicht kritisch */
-			show_error_dialog(priv->main_widget, "Fehler beim Aufheben der Synchronisation",
-					error ? error->message : "Unbekannt");
-			if (error) {
-				g_error_free(error);
-			}
-		}
+        reset_toggle_and_enable(toggle, !is_active, priv);
+        return;
     }
 
+    /* Library ID ermitteln */
+    GError *error = NULL;
+    gchar *library_id = NULL;
+
+    if (is_active) {
+        library_id = sond_client_get_seafile_library_id(priv->client, library_name, &error);
+    } else {
+        library_id = g_strdup(akte->seafile_library_id);
+    }
+
+    if (!library_id) {
+        show_error_dialog(priv->main_widget, "Library-ID nicht gefunden",
+        		error ? error->message : "Unbekannt");
+        g_error_free(error);
+        g_free(library_name);
+        reset_toggle_and_enable(toggle, FALSE, priv);
+        return;
+    }
+
+    /* Sync aktivieren oder deaktivieren */
+    gboolean success = FALSE;
+    if (is_active) {
+        success = activate_sync(priv, manager, library_name, library_id, toggle, &error);
+    } else {
+        success = deactivate_sync(priv, manager, library_name, library_id, &error);
+    }
+
+    if (!success) {
+		gchar *msg = g_strdup_printf("Fehler beim %s der Synchronisation",
+									is_active ? "Aktivieren" : "Deaktivieren");
+		show_error_dialog(priv->main_widget, msg, error ? error->message : "Unbekannt");
+		g_free(msg);
+		g_error_free(error);
+		reset_toggle_and_enable(toggle, !is_active, priv);
+		g_free(library_name);
+		g_free(library_id);
+		return;
+	}
+
+    /* Warten bis Sync läuft */
+    if (!wait_for_sync_changed(library_id, TRUE, 5000, &error)) {
+        show_error_dialog(priv->main_widget, "Synchronisation wurde nicht gestartet",
+                         error ? error->message : "Unbekannt");
+        g_error_free(error);
+        reset_toggle_and_enable(toggle, !is_active, priv);
+        return;
+    }
+
+    g_free(library_name);
     g_free(library_id);
+
+	gtk_widget_set_sensitive(GTK_WIDGET(toggle), TRUE);
 }
 
 /* Callback-Daten für neuen Akte Dialog */

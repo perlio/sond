@@ -128,7 +128,7 @@ static void zond_pdf_document_finalize(GObject *self) {
 
 			ret = g_remove(path);
 			if (ret)
-				g_warning("%s\nArbeitskopie %s konnte nicht gelöscht werden\n%s",
+				LOG_WARN("%s\nArbeitskopie %s konnte nicht gelöscht werden\n%s",
 						__func__, path, strerror(errno));
 		}
 
@@ -544,7 +544,7 @@ zond_pdf_document_open(SondFilePartPDF* sfp_pdf, gint von, gint bis,
 
 		rc = g_remove(filename);
 		if (rc)
-			g_warning("%s\nDatei '%s' konnte nicht gelöscht werden:\n%s",
+			LOG_WARN("%s\nDatei '%s' konnte nicht gelöscht werden:\n%s",
 					__func__, filename, strerror(errno));
 		g_free(filename);
 		g_object_unref(zond_pdf_document);
@@ -757,7 +757,7 @@ void zpdfd_part_drop(ZPDFDPart* zpdfd_part) {
 				zond_pdf_document_get_instance_private(zpdfd_part->zond_pdf_document);
 
 		if (!g_ptr_array_remove_fast(zpdfd_priv->arr_zpdf_parts, zpdfd_part))
-			g_warning("zpdfd_part nicht in Array vorhanden");
+			LOG_WARN("zpdfd_part nicht in Array vorhanden");
 		g_object_unref(zpdfd_part->zond_pdf_document);
 
 		g_free(zpdfd_part);
