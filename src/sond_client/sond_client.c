@@ -236,8 +236,6 @@ static gboolean ensure_authenticated(SondClient *client, GError **error) {
         return TRUE;
     }
     
-    LOG_INFO("No authentication token - triggering login\n");
-    
     if (!client->login_callback) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
                    "Not authenticated and no login callback set");
@@ -1045,7 +1043,7 @@ gchar* sond_client_get_seafile_library_id(SondClient *client,
 
     /* URL konstruieren */
     gchar *escaped_name = g_uri_escape_string(library_name, NULL, FALSE);
-    gchar *path = g_strdup_printf("/api/seafile/library-id?name=%s", escaped_name);
+    gchar *path = g_strdup_printf("/seafile/library-id?name=%s", escaped_name);
     g_free(escaped_name);
 
     gchar *url = g_strdup_printf("%s%s", client->server_url, path);
@@ -1157,11 +1155,14 @@ gchar* sond_client_get_seafile_clone_token(SondClient *client,
     g_return_val_if_fail(SOND_IS_CLIENT(client), NULL);
     g_return_val_if_fail(repo_id != NULL, NULL);
 
+    /* Sicherstellen dass wir eingeloggt sind */
+    if (!ensure_authenticated(client, error)) {
+        return NULL;
+    }
+
     /* URL bauen: /api2/repos/{repo_id}/download-info/ */
     gchar *url = g_strdup_printf("%s/api2/repos/%s/download-info/",
                                  client->seafile_url, repo_id);
-
-    LOG_INFO("Hole Clone-Token von: %s\n", url);
 
     /* HTTP GET Request */
     SoupSession *session = soup_session_new();
@@ -1234,8 +1235,6 @@ void sond_client_set_last_regnr(SondClient *client, guint lfd_nr, guint year) {
     client->last_regnr_lfd = lfd_nr;
     client->last_regnr_year = year;
     client->has_last_regnr = TRUE;
-    
-    LOG_INFO("Client: Letzte RegNr gesetzt: %u/%u\n", lfd_nr, year % 100);
 }
 
 gboolean sond_client_get_last_regnr(SondClient *client, guint *lfd_nr, guint *year) {

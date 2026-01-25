@@ -93,8 +93,6 @@ static SearpcClient* connect_to_seafile(GError **error) {
 
     /* WICHTIG: pipe_client gehört jetzt dem client - nicht freigeben! */
 
-    LOG_INFO("Seafile-Client Verbindung hergestellt\n");
-
     return client;
 }
 
@@ -110,8 +108,6 @@ gchar* sond_seafile_find_library_by_name(const gchar *library_name,
     if (!client) {
         return NULL;
     }
-
-    LOG_INFO("Suche Library mit Name: %s\n", library_name);
 
     /* RPC-Call: seafile_get_repo_list */
     json_t *result = NULL;

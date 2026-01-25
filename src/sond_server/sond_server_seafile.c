@@ -628,7 +628,7 @@ static void handle_seafile_library_delete(SoupServer *soup_server,
 
 /**
  * handle_seafile_library_id_get:
- * GET /api/seafile/library-id?name=XXX
+ * GET /seafile/library-id?name=XXX
  *
  * Response: {"library_id": "xxx"}
  */
@@ -716,7 +716,7 @@ void sond_server_seafile_register_handlers(SondServer *server) {
                            handle_seafile_library_create, server, NULL);
     soup_server_add_handler(soup_server, "/seafile/library/",
                            handle_seafile_library_delete, server, NULL);
-    soup_server_add_handler(soup_server, "/api/seafile/library-id",
+    soup_server_add_handler(soup_server, "/seafile/library-id",
                             handle_seafile_library_id_get, server, NULL);
 
     LOG_INFO("Seafile handlers registered\n");

@@ -43,6 +43,7 @@ typedef struct {
     gchar *ggstd;                   /* Gegenstand */
     gchar *seafile_library_id;      /* Seafile Library ID */
     GDateTime *last_synced;         /* Letzter Sync-Zeitpunkt */
+    gboolean syncing_enabled;       /* TRUE = Sync aktiv, FALSE = pausiert */
 } SondOfflineAkte;
 
 /**
@@ -137,6 +138,18 @@ gboolean sond_offline_manager_set_sync_enabled(SondOfflineManager *manager,
                                                 const gchar *regnr,
                                                 gboolean enabled,
                                                 GError **error);
+
+/**
+ * sond_offline_manager_get_sync_enabled:
+ * @manager: SondOfflineManager
+ * @regnr: RegNr der Akte
+ *
+ * Prüft ob Sync für eine Akte aktiviert ist
+ *
+ * Returns: TRUE wenn Sync aktiviert, FALSE wenn pausiert oder nicht in Liste
+ */
+gboolean sond_offline_manager_get_sync_enabled(SondOfflineManager *manager,
+                                                const gchar *regnr);
 
 /**
  * sond_offline_manager_update_last_synced:

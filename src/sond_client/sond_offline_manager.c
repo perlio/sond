@@ -54,6 +54,7 @@ SondOfflineAkte* sond_offline_akte_new(const gchar *regnr,
     akte->ggstd = g_strdup(ggstd);
     akte->seafile_library_id = g_strdup(seafile_library_id);
     akte->last_synced = g_date_time_new_now_local();
+    akte->syncing_enabled = TRUE;  /* Standardmäßig aktiv */
 
     return akte;
 }
@@ -99,6 +100,9 @@ static JsonNode* akte_to_json(SondOfflineAkte *akte) {
     json_builder_set_member_name(builder, "seafile_library_id");
     json_builder_add_string_value(builder, akte->seafile_library_id);
 
+    json_builder_set_member_name(builder, "syncing_enabled");
+    json_builder_add_boolean_value(builder, akte->syncing_enabled);
+
     if (akte->last_synced) {
         json_builder_set_member_name(builder, "last_synced");
         gchar *iso8601 = g_date_time_format_iso8601(akte->last_synced);
@@ -126,6 +130,13 @@ static SondOfflineAkte* akte_from_json(JsonObject *obj) {
     akte->kurzb = g_strdup(json_object_get_string_member(obj, "kurzb"));
     akte->ggstd = g_strdup(json_object_get_string_member(obj, "ggstd"));
     akte->seafile_library_id = g_strdup(json_object_get_string_member(obj, "seafile_library_id"));
+
+    /* syncing_enabled parsen (Standard: TRUE für Abwärtskompatibilität) */
+    if (json_object_has_member(obj, "syncing_enabled")) {
+        akte->syncing_enabled = json_object_get_boolean_member(obj, "syncing_enabled");
+    } else {
+        akte->syncing_enabled = TRUE;  /* Alte Einträge ohne Feld = aktiv */
+    }
 
     /* last_synced parsen */
     if (json_object_has_member(obj, "last_synced")) {
@@ -301,6 +312,7 @@ gboolean sond_offline_manager_add_akte(SondOfflineManager *manager,
     if (sond_offline_manager_get_akte(manager, akte->regnr)) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_EXISTS,
                    "Akte %s ist bereits in Offline-Liste", akte->regnr);
+        sond_offline_akte_free(akte);
         return FALSE;
     }
 
@@ -373,6 +385,38 @@ gboolean sond_offline_manager_update_last_synced(SondOfflineManager *manager,
     akte->last_synced = g_date_time_new_now_local();
 
     return save_config(manager, error);
+}
+
+gboolean sond_offline_manager_set_sync_enabled(SondOfflineManager *manager,
+                                                const gchar *regnr,
+                                                gboolean enabled,
+                                                GError **error) {
+    g_return_val_if_fail(SOND_IS_OFFLINE_MANAGER(manager), FALSE);
+    g_return_val_if_fail(regnr != NULL, FALSE);
+
+    SondOfflineAkte *akte = sond_offline_manager_get_akte(manager, regnr);
+    if (!akte) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND,
+                   "Akte %s nicht in Offline-Liste", regnr);
+        return FALSE;
+    }
+
+    akte->syncing_enabled = enabled;
+
+    return save_config(manager, error);
+}
+
+gboolean sond_offline_manager_get_sync_enabled(SondOfflineManager *manager,
+                                                const gchar *regnr) {
+    g_return_val_if_fail(SOND_IS_OFFLINE_MANAGER(manager), FALSE);
+    g_return_val_if_fail(regnr != NULL, FALSE);
+
+    SondOfflineAkte *akte = sond_offline_manager_get_akte(manager, regnr);
+    if (!akte) {
+        return FALSE;
+    }
+
+    return akte->syncing_enabled;
 }
 
 gboolean sond_offline_manager_is_offline(SondOfflineManager *manager,
