@@ -35,6 +35,7 @@
 #include "sond.h"
 #include "sond_renderer.h"
 #include "sond_treeviewfm.h"
+#include "sond_log_and_error.h"
 
 #include "zond/global_types.h"
 #include "zond/99conv/pdf.h"

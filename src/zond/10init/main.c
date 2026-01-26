@@ -219,10 +219,6 @@ static void init(GtkApplication *app, Projekt *zond) {
 
     init_schema(zond);
 
-#ifdef CONFIG_Release
-	log_init(zond);
-#endif // TESTING
-
 	//benötigte Arrays erzeugen
 	zond->arr_pv = g_ptr_array_new();
 

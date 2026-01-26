@@ -8,6 +8,7 @@
 
 #include "../../misc.h"
 #include "../../sond_fileparts.h"
+#include "../../sond_log_and_error.h"
 
 #include "../zond_pdf_document.h"
 #include "../global_types.h"

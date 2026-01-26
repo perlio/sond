@@ -29,13 +29,14 @@
 #include <mupdf/fitz.h>
 #include <lexbor/html/html.h>
 
-
 #ifdef _WIN32
 #include <windows.h>
 #include <shlwapi.h>
 #include <direct.h>
 #define mkdir(path, mode) _mkdir(path)
 #endif // _WIN32
+
+#include "sond_log_and_error.h"
 
 gchar* change_basename(gchar const* path_old, gchar const* base_new) {
 	//rename dir in fs

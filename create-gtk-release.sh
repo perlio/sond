@@ -107,7 +107,7 @@ if [ -d "/ucrt64/share/glib-2.0/schemas" ]; then
     cp /ucrt64/share/glib-2.0/schemas/org.gtk.Settings.ColorChooser.gschema.xml /tmp/gtk_schemas_temp/ 2>/dev/null || true
     
     # Suche nach eigenen Schema-Dateien im Projekt
-    PROJECT_SCHEMA_DIR="$(dirname "$EXE_FILE")/../../share/glib-2.0/schemas"
+    PROJECT_SCHEMA_DIR="$(dirname "$EXE_FILE")/../../schemas"
     if [ -d "$PROJECT_SCHEMA_DIR" ]; then
         echo "  Gefundene Projekt-Schemas:"
         for schema_file in "$PROJECT_SCHEMA_DIR"/*.gschema.xml; do

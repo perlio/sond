@@ -17,6 +17,7 @@
  */
 
 #include "sond_treeview.h"
+#include "sond_log_and_error.h"
 
 #include "misc.h"
 
