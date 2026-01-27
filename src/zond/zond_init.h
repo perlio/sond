@@ -1,5 +1,5 @@
-#ifndef GLOBAL_TYPES_H_INCLUDED
-#define GLOBAL_TYPES_H_INCLUDED
+#ifndef ZOND_INIT_H_INCLUDED
+#define ZOND_INIT_H_INCLUDED
 
 #define ZOOM_MIN 10
 #define ZOOM_MAX 400
@@ -217,4 +217,8 @@ typedef struct _Pdf_Punkt {
 	gdouble delta_y;
 } PdfPunkt;
 
-#endif // GLOBAL_TYPES_H_INCLUDED
+void zond_init(GtkApplication *app, Projekt *zond);
+
+void zond_cleanup(Projekt* zond);
+
+#endif // ZOND_INIT_H_INCLUDED

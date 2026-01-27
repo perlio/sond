@@ -26,16 +26,15 @@
 #include "../sond_treeview.h"
 #include "../sond_log_and_error.h"
 
+#include "zond_init.h"
 #include "zond_dbase.h"
 #include "zond_tree_store.h"
 #include "zond_treeviewfm.h"
 #include "zond_pdf_document.h"
 
-#include "global_types.h"
 #include "10init/app_window.h"
 #include "10init/headerbar.h"
 
-#include "20allgemein/oeffnen.h"
 #include "20allgemein/project.h"
 
 #include "40viewer/viewer.h"

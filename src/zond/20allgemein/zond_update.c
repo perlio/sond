@@ -27,8 +27,8 @@
 
 #include "../../misc.h"
 #include "../../misc_stdlib.h"
+#include "../zond_init.h"
 
-#include "../global_types.h"
 #include "../99conv/general.h"
 #include "../zond_dbase.h"
 

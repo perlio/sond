@@ -20,8 +20,7 @@
 #include <mupdf/fitz.h>
 
 #include "../../misc.h"
-#include "../global_types.h"
-
+#include "../zond_init.h"
 #include "../zond_dbase.h"
 #include "../zond_treeview.h"
 #include "../zond_treeviewfm.h"

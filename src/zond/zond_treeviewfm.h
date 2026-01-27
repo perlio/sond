@@ -6,7 +6,7 @@
 
 #include "../sond_treeviewfm.h"
 
-#include "global_types.h"
+#include "zond_init.h"
 
 G_BEGIN_DECLS
 

@@ -29,8 +29,6 @@
 #include "../zond_pdf_document.h"
 #include "../pdf_ocr.h"
 
-#include "../global_types.h"
-
 #include "../99conv/general.h"
 #include "../99conv/pdf.h"
 
@@ -43,6 +41,7 @@
 #include "stand_alone.h"
 #include "seiten.h"
 #include "viewer.h"
+#include "../zond_init.h"
 
 void viewer_springen_zu_pos_pdf(PdfViewer *pv, PdfPos pdf_pos, gdouble delta) {
 	gdouble value = 0.0;

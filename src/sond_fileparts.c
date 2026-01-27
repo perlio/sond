@@ -37,7 +37,6 @@
 #include "sond_treeviewfm.h"
 #include "sond_log_and_error.h"
 
-#include "zond/global_types.h"
 #include "zond/99conv/pdf.h"
 
 //Grundlegendes Object, welches file_parts beschreibt
@@ -550,7 +549,7 @@ static fz_stream* get_istream(fz_context* ctx, SondFilePart* sfp_parent, gchar c
 			if (!part) {
 				g_object_unref(object);
 				g_object_unref(gmime_stream);
-				if (error) *error = g_error_new(ZOND_ERROR, 0,
+				if (error) *error = g_error_new(SOND_ERROR, 0,
 						"%s\nGMimeMessagePart hat keine Nachricht", __func__);
 
 				ERROR_Z_VAL(NULL)
@@ -576,14 +575,14 @@ static fz_stream* get_istream(fz_context* ctx, SondFilePart* sfp_parent, gchar c
 		g_object_unref(object);
 		if (length < 0) {
 			g_object_unref(gmime_stream);
-			if (error) *error = g_error_new(ZOND_ERROR, 0,
+			if (error) *error = g_error_new(SOND_ERROR, 0,
 					"%s\nFehler beim Schreiben des GMimeObject in Stream", __func__);
 
 			ERROR_Z_VAL(NULL)
 		}
 		else if (length == 0) {
 			g_object_unref(gmime_stream);
-			if (error) *error = g_error_new(ZOND_ERROR, 0,
+			if (error) *error = g_error_new(SOND_ERROR, 0,
 					"%s\nGMimeObject ist leer", __func__);
 
 			ERROR_Z_VAL(NULL)
@@ -1162,7 +1161,7 @@ gint sond_file_part_copy(SondFilePart* sfp_src,
 
 	ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
 	if (!ctx) {
-		if (error) *error = g_error_new(ZOND_ERROR, 0,
+		if (error) *error = g_error_new(SOND_ERROR, 0,
 				"%s\nfz_new_context gibt NULL zurück", __func__);
 		return -1;
 	}
@@ -1486,7 +1485,7 @@ static pdf_obj* get_EF_F(fz_context* ctx, pdf_obj* val, gchar const** path, GErr
 
 	if (!path_tmp) {
 			if (error)
-				*error = g_error_new(ZOND_ERROR, 0, "%s\nEingebettete Datei hat keinen Pfad",
+				*error = g_error_new(SOND_ERROR, 0, "%s\nEingebettete Datei hat keinen Pfad",
 						__func__);
 			return NULL;
 	}
@@ -1584,7 +1583,7 @@ gint sond_file_part_pdf_load_embedded_files(SondFilePartPDF* sfp_pdf,
 
 	ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
 	if (!ctx) {
-		if (error) *error = g_error_new(ZOND_ERROR, 0,
+		if (error) *error = g_error_new(SOND_ERROR, 0,
 				"%s\nfz_new_context gibt NULL zurück", __func__);
 		return -1;
 	}
@@ -1642,7 +1641,7 @@ static gint sond_file_part_pdf_test_for_embedded_files(
 
 	ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
 	if (!ctx) {
-		if (error) *error = g_error_new(ZOND_ERROR, 0,
+		if (error) *error = g_error_new(SOND_ERROR, 0,
 				"%s\nfz_new_context gibt NULL zurück", __func__);
 
 		return -1;
@@ -1730,7 +1729,7 @@ static gint delete_embedded_file(fz_context* ctx, pdf_obj*names, pdf_obj* key,
 			ERROR_PDF
 
 		if (index == -1) {
-			if (error) *error = g_error_new(ZOND_ERROR, 0,
+			if (error) *error = g_error_new(SOND_ERROR, 0,
 					"%s\nkey nicht gefunden", __func__);
 
 			return -1;
@@ -1885,7 +1884,7 @@ static gint rename_embedded_file(fz_context* ctx, pdf_obj* names, pdf_obj* key,
 
 	if (!path_tmp) {
 		if (error)
-			*error = g_error_new(ZOND_ERROR, 0, "%s\nEingebettete Datei hat keinen Pfad",
+			*error = g_error_new(SOND_ERROR, 0, "%s\nEingebettete Datei hat keinen Pfad",
 					__func__);
 		return -1;
 	}
@@ -2318,7 +2317,7 @@ static gint sond_file_part_gmessage_open(SondFilePartGMessage* sfp_gmessage,
 
 	ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
 	if (!ctx) {
-		if (error) *error = g_error_new(ZOND_ERROR, 0,
+		if (error) *error = g_error_new(SOND_ERROR, 0,
 				"%s\nfz_new_context gibt NULL zurück", __func__);
 		return -1;
 	}
@@ -2339,7 +2338,7 @@ static gint sond_file_part_gmessage_open(SondFilePartGMessage* sfp_gmessage,
 	g_object_unref (parser);
 	g_object_unref (stream);
 	if (!message) {
-		if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\nParsen fehlgeschlagen", __func__);
+		if (error) *error = g_error_new(SOND_ERROR, 0, "%s\nParsen fehlgeschlagen", __func__);
 
 		return -1;
 	}
@@ -2394,7 +2393,7 @@ static GMimeObject* lookup_path(GMimeObject* root, gchar const* path, GError** e
 			g_object_unref(object);
 			if (!part) {
 				if (error)
-					*error = g_error_new(ZOND_ERROR, 0,
+					*error = g_error_new(SOND_ERROR, 0,
 							"%s\nMimePart mit Index %s nicht gefunden",
 							__func__, strv[zaehler]);
 				return NULL;
@@ -2453,7 +2452,7 @@ static GMimeObject* sond_file_part_gmessage_lookup_part_by_path(
 	sond_file_part_gmessage_close(sfp_gmessage);
 	if (!root) {
 		if (error)
-			*error = g_error_new(ZOND_ERROR, 0,
+			*error = g_error_new(SOND_ERROR, 0,
 					"%s\nNachricht hat keinen MIME-Teil", __func__);
 
 		return NULL;
@@ -2496,7 +2495,7 @@ gint sond_file_part_gmessage_load_path(SondFilePartGMessage* sfp_gmessage,
 		g_ptr_array_unref(*arr_mime_parts);
 		g_object_unref(object);
 		if (error)
-			*error = g_error_new(ZOND_ERROR, 0,
+			*error = g_error_new(SOND_ERROR, 0,
 					"%s\nPart mit Pfad '%s' ist kein Multipart",
 					__func__, path);
 		return -1;

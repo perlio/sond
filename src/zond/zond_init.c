@@ -27,19 +27,19 @@
 #include <errhandlingapi.h>
 #endif // __WIN32
 
-#include "../../misc.h"
-#include "../../misc_stdlib.h"
-#include "../../sond_fileparts.h"
-#include "../../sond_log_and_error.h"
+#include "../misc.h"
+#include "../misc_stdlib.h"
+#include "../sond_fileparts.h"
+#include "../sond_log_and_error.h"
 
-#include "../global_types.h"
-#include "../zond_pdf_document.h"
+#include "zond_init.h"
+#include "zond_pdf_document.h"
 
-#include "../20allgemein/project.h"
+#include "20allgemein/project.h"
 
-#include "icons.h"
-#include "app_window.h"
-#include "headerbar.h"
+#include "10init/icons.h"
+#include "10init/app_window.h"
+#include "10init/headerbar.h"
 
 static void recover(Projekt *zond, gchar *project, GApplication *app) {
 	gint rc = 0;
@@ -80,28 +80,6 @@ static void recover(Projekt *zond, gchar *project, GApplication *app) {
 	return;
 }
 
-static void cleanup(Projekt* zond) {
-	// aufräumen
-	if (zond->pv_clip)
-		pdf_drop_document(zond->ctx, zond->pv_clip);
-	if (zond->ocr_font)
-		pdf_drop_document(zond->ctx, zond->ocr_font);
-
-	gtk_widget_destroy(zond->textview_window);
-	gtk_widget_destroy(zond->popover);
-	gtk_widget_destroy(zond->app_window);
-
-	fz_drop_context(zond->ctx);
-	g_ptr_array_unref(zond->arr_pv);
-	g_free(zond->base_dir);
-	g_free(zond->exe_dir);
-	g_object_unref(zond->settings);
-	g_ptr_array_unref(SOND_FILE_PART_CLASS(g_type_class_get(SOND_TYPE_FILE_PART))->arr_opened_files);
-
-	g_mime_shutdown();
-
-	return;
-}
 
 static void set_icon(Icon *icon, const gchar *icon_name,
 		const gchar *display_name) {
@@ -213,7 +191,9 @@ static void init_schema(Projekt* zond) {
 }
 
 
-static void init(GtkApplication *app, Projekt *zond) {
+void zond_init(GtkApplication *app, Projekt *zond) {
+	setlocale(LC_NUMERIC, "C");
+
     zond->base_dir = get_base_dir();
     zond->exe_dir = get_exe_dir();
 
@@ -256,80 +236,25 @@ static void init(GtkApplication *app, Projekt *zond) {
 	return;
 }
 
-static void open_app(GtkApplication *app, gpointer files, gint n_files,
-		gchar *hint, gpointer user_data) {
-	gint rc = 0;
-	gchar *errmsg = NULL;
-	GFile **g_file;
-	gchar *uri = NULL;
-	gchar *uri_unesc = NULL;
+void zond_cleanup(Projekt* zond) {
+	// aufräumen
+	if (zond->pv_clip)
+		pdf_drop_document(zond->ctx, zond->pv_clip);
+	if (zond->ocr_font)
+		pdf_drop_document(zond->ctx, zond->ocr_font);
 
-	Projekt *zond = (Projekt*) user_data;
+	gtk_widget_destroy(zond->textview_window);
+	gtk_widget_destroy(zond->popover);
+	gtk_widget_destroy(zond->app_window);
 
-//    if ( zond->dbase_zond ) return; //Verhindert, daß neue Datei geladen wird,
-//wenn bereits Project geöffnet
+	fz_drop_context(zond->ctx);
+	g_ptr_array_unref(zond->arr_pv);
+	g_free(zond->base_dir);
+	g_free(zond->exe_dir);
+	g_object_unref(zond->settings);
+	g_ptr_array_unref(SOND_FILE_PART_CLASS(g_type_class_get(SOND_TYPE_FILE_PART))->arr_opened_files);
 
-	g_file = (GFile**) files;
-
-	uri = g_file_get_uri(g_file[0]);
-	uri_unesc = g_uri_unescape_string(uri, NULL);
-	g_free(uri);
-
-	rc = project_oeffnen(zond, uri_unesc + 8, FALSE, &errmsg);
-	g_free(uri_unesc);
-	if (rc == -1) {
-		display_message(zond->app_window,
-				"Fehler - Projekt kann nicht geöffnet "
-						"werden\n\n", errmsg, NULL);
-		g_free(errmsg);
-
-		return;
-	}
+	g_mime_shutdown();
 
 	return;
-}
-
-static void activate_app(GtkApplication *app, gpointer data) {
-	Projekt *zond = (Projekt*) data;
-
-	gtk_window_present(GTK_WINDOW(zond->app_window));
-
-	return;
-}
-
-static void startup_app(GtkApplication *app, gpointer data) {
-	Projekt *zond = (Projekt*) data;
-
-	init(app, zond);
-
-	setlocale(LC_NUMERIC, "C");
-
-	LOG_INFO("zond gestartet");
-
-	return;
-}
-
-int main(int argc, char **argv) {
-	GtkApplication *app = NULL;
-	Projekt zond = { 0 };
-
-	//ApplicationApp erzeugen
-	app = gtk_application_new("de.perlio.zond", G_APPLICATION_HANDLES_OPEN);
-
-	//und starten
-	g_signal_connect(app, "startup", G_CALLBACK (startup_app), &zond);
-	g_signal_connect(app, "activate", G_CALLBACK (activate_app), &zond);
-	g_signal_connect(app, "open", G_CALLBACK (open_app), &zond);
-
-	logging_init("zond");
-
-	gint status = g_application_run(G_APPLICATION(app), argc, argv);
-
-	cleanup(&zond);
-	g_object_unref(app);
-
-	LOG_INFO("zond beendet");
-	logging_cleanup();
-
-	return status;
 }

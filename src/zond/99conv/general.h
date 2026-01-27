@@ -1,7 +1,7 @@
 #ifndef GENERAL_H_INCLUDED
 #define GENERAL_H_INCLUDED
 
-#include "../global_types.h"
+#include "../zond_init.h"
 
 #include <stdio.h>
 

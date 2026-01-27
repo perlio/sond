@@ -2,7 +2,7 @@
 #define ZOND_DBASE_H_INCLUDED
 
 #include <glib-object.h>
-#include "global_types.h"
+#include "zond_init.h"
 
 typedef enum {
 	ZOND_DBASE_TYPE_BAUM_ROOT,

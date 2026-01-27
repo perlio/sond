@@ -31,7 +31,6 @@
 
 #include "../zond_pdf_document.h"
 
-#include "../global_types.h"
 #include "../zond_tree_store.h"
 #include "../zond_treeview.h"
 #include "../zond_dbase.h"
@@ -45,7 +44,6 @@
 #include "../20allgemein/suchen.h"
 #include "../20allgemein/project.h"
 #include "../20allgemein/export.h"
-#include "../20allgemein/oeffnen.h"
 #include "../20allgemein/zond_update.h"
 
 #include "../40viewer/document.h"
@@ -53,6 +51,7 @@
 #include "app_window.h"
 
 #include "../../misc.h"
+#include "../zond_init.h"
 
 /*
  *   Callbacks des Menus "Projekt"

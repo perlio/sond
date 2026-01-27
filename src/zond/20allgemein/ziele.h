@@ -1,8 +1,6 @@
 #ifndef ZIELE_H_INCLUDED
 #define ZIELE_H_INCLUDED
 
-#include "../global_types.h"
-
 typedef int gint;
 typedef char gchar;
 typedef int gboolean;

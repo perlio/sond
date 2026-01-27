@@ -24,10 +24,10 @@
 #include "../../misc.h"
 #include "../../sond_fileparts.h"
 #include "../../sond_ocr.h"
+#include "../zond_init.h"
 
 #include "../zond_pdf_document.h"
 
-#include "../global_types.h"
 #include "../zond_dbase.h"
 
 #include "../99conv/general.h"

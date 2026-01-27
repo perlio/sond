@@ -8,7 +8,7 @@
 #define ANNOT_ICON_WIDTH 20
 #define ANNOT_ICON_HEIGHT 20
 
-#include "../global_types.h"
+//#include "../global_types.h"
 
 typedef struct _GtkTreeIter GtkTreeIter;
 typedef struct _Projekt Projekt;
