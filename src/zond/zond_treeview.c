@@ -269,6 +269,12 @@ void zond_treeview_cursor_changed(ZondTreeview *treeview, gpointer user_data) {
 			gtk_text_buffer_set_text(buffer, "", -1);
 	}
 
+	// TextView aktivieren wenn Row im BAUM_AUSWERTUNG gewählt wurde
+	Baum active_baum = sond_treeview_get_id(SOND_TREEVIEW(treeview));
+	if (active_baum == BAUM_AUSWERTUNG) {
+		gtk_widget_set_sensitive(GTK_WIDGET(zond->textview), TRUE);
+	}
+
 	zond->node_id_act = node_id;
 
 	return;

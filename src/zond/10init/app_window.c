@@ -400,6 +400,12 @@ void init_app_window(Projekt *zond) {
 	g_signal_connect(zond->textview_window, "delete-event",
 			G_CALLBACK(cb_close_textview), zond);
 
+	// TextView initial deaktivieren (wird aktiviert wenn Row in BAUM_AUSWERTUNG gewählt)
+	gtk_widget_set_sensitive(GTK_WIDGET(zond->textview), FALSE);
+	gtk_text_buffer_set_text(
+			gtk_text_view_get_buffer(GTK_TEXT_VIEW(zond->textview)), "", -1);
+	zond->node_id_act = 0;
+
 	return;
 }
 
