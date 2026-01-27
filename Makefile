@@ -1,3 +1,12 @@
+
+PROJECT_SCHEMA_DIR = schemas
+COMPILED_SCHEMA_DIR = share/glib-2.0/schemas
+SYSTEM_SCHEMA_DIR = /ucrt64/share/glib-2.0/schemas
+GSCHEMAS_COMPILED = $(COMPILED_SCHEMA_DIR)/gschemas.compiled
+SCHEMA_SOURCES = $(wildcard $(PROJECT_SCHEMA_DIR)/*.gschema.xml)
+SYSTEM_SCHEMAS = $(SYSTEM_SCHEMA_DIR)/org.gtk.Settings.FileChooser.gschema.xml \
+                 $(SYSTEM_SCHEMA_DIR)/org.gtk.Settings.ColorChooser.gschema.xml
+      
 # Build Directories
 BUILD_DIR := $(CONFIG)
 BIN_DIR := $(BUILD_DIR)/bin
@@ -62,10 +71,19 @@ all: zond
 
 # Include dependency files
 #-include $(DEPS)
+$(GSCHEMAS_COMPILED): $(SCHEMA_SOURCES) $(SYSTEM_SCHEMAS)
+	@echo "Copying project schemas to compilation directory..."
+	@cp $(SCHEMA_SOURCES) $(COMPILED_SCHEMA_DIR)/
+	@echo "Copying system schemas..."
+	@cp $(SYSTEM_SCHEMAS) $(COMPILED_SCHEMA_DIR)/
+	@echo "Compiling GSettings schemas..."
+	glib-compile-schemas $(COMPILED_SCHEMA_DIR)
+	@echo "Removing temporary schemas..."
+	@cd $(COMPILED_SCHEMA_DIR) && rm -f $(notdir $(SCHEMA_SOURCES)) org.gtk.Settings.FileChooser.gschema.xml org.gtk.Settings.ColorChooser.gschema.xml
 
-zond: $(BIN_DIR)/zond.exe
+zond: $(GSCHEMAS_COMPILED) $(BIN_DIR)/zond.exe
 
-viewer: $(BIN_DIR)/viewer.exe
+viewer: $(GSCHEMAS_COMPILED) $(BIN_DIR)/viewer.exe
 
 sond_server: $(BIN_DIR)/sond_server.exe
 
