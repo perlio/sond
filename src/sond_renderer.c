@@ -801,7 +801,23 @@ static RenderedDocument* render_html(const char *html, int width) {
 
     // Höhe berechnen
     cairo_surface_t *tmp_surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
+    if (cairo_surface_status(tmp_surface) != CAIRO_STATUS_SUCCESS) {
+        LOG_WARN("Failed to create temporary surface for height calculation");
+        cairo_surface_destroy(tmp_surface);
+        g_string_free(text, TRUE);
+        lxb_html_document_destroy(doc);
+        return NULL;
+    }
+    
     cairo_t *tmp_cr = cairo_create(tmp_surface);
+    if (cairo_status(tmp_cr) != CAIRO_STATUS_SUCCESS) {
+        LOG_WARN("Failed to create temporary cairo context");
+        cairo_destroy(tmp_cr);
+        cairo_surface_destroy(tmp_surface);
+        g_string_free(text, TRUE);
+        lxb_html_document_destroy(doc);
+        return NULL;
+    }
 
     PangoLayout *layout = pango_cairo_create_layout(tmp_cr);
     pango_layout_set_width(layout, (width - 20) * PANGO_SCALE);
@@ -819,7 +835,23 @@ static RenderedDocument* render_html(const char *html, int width) {
     // Echte Surface rendern
     cairo_surface_t *surface = cairo_image_surface_create(
         CAIRO_FORMAT_ARGB32, width, height);
+    if (cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS) {
+        LOG_WARN("Failed to create render surface (width=%d, height=%d)", width, height);
+        cairo_surface_destroy(surface);
+        g_string_free(text, TRUE);
+        lxb_html_document_destroy(doc);
+        return NULL;
+    }
+    
     cairo_t *cr = cairo_create(surface);
+    if (cairo_status(cr) != CAIRO_STATUS_SUCCESS) {
+        LOG_WARN("Failed to create cairo context for rendering");
+        cairo_destroy(cr);
+        cairo_surface_destroy(surface);
+        g_string_free(text, TRUE);
+        lxb_html_document_destroy(doc);
+        return NULL;
+    }
 
     // Weißer Hintergrund
     cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);

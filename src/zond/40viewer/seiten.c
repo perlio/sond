@@ -471,7 +471,7 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 	monitor_data.progress_data = (gpointer) info_window;
 	monitor_data.cancel_this = (gpointer) &info_window->cancel;
 
-	datadir = g_build_filename(pv->zond->base_dir, "share/tessdata", NULL);
+	datadir = g_build_filename(pv->zond->exe_dir, "../share/tessdata", NULL);
 	rc = sond_ocr_init_tesseract(&handle, NULL, datadir, &error);
 	g_free(datadir);
 	if (rc) {

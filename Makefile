@@ -71,16 +71,6 @@ all: zond
 
 # Include dependency files
 #-include $(DEPS)
-$(GSCHEMAS_COMPILED): $(SCHEMA_SOURCES) $(SYSTEM_SCHEMAS)
-	@echo "Copying project schemas to compilation directory..."
-	@cp $(SCHEMA_SOURCES) $(COMPILED_SCHEMA_DIR)/
-	@echo "Copying system schemas..."
-	@cp $(SYSTEM_SCHEMAS) $(COMPILED_SCHEMA_DIR)/
-	@echo "Compiling GSettings schemas..."
-	glib-compile-schemas $(COMPILED_SCHEMA_DIR)
-	@echo "Removing temporary schemas..."
-	@cd $(COMPILED_SCHEMA_DIR) && rm -f $(notdir $(SCHEMA_SOURCES)) org.gtk.Settings.FileChooser.gschema.xml org.gtk.Settings.ColorChooser.gschema.xml
-
 zond: $(GSCHEMAS_COMPILED) $(BIN_DIR)/zond.exe
 
 viewer: $(GSCHEMAS_COMPILED) $(BIN_DIR)/viewer.exe
@@ -101,6 +91,16 @@ $(BIN_DIR)/$(MAKECMDGOALS).exe: $(SRCS:%=$(OBJ_DIR)/%.o)
 $(OBJ_DIR)/%.c.o: %.c
 	@mkdir -p $(@D)
 	$(CC) -c $< $(CFLAGS_CONFIG) $(CFLAGS) -MMD -MP -o $@
+
+$(GSCHEMAS_COMPILED): $(SCHEMA_SOURCES) $(SYSTEM_SCHEMAS)
+	@echo "Copying project schemas to compilation directory..."
+	@cp $(SCHEMA_SOURCES) $(COMPILED_SCHEMA_DIR)/
+	@echo "Copying system schemas..."
+	@cp $(SYSTEM_SCHEMAS) $(COMPILED_SCHEMA_DIR)/
+	@echo "Compiling GSettings schemas..."
+	glib-compile-schemas $(COMPILED_SCHEMA_DIR)
+	@echo "Removing temporary schemas..."
+	@cd $(COMPILED_SCHEMA_DIR) && rm -f $(notdir $(SCHEMA_SOURCES)) org.gtk.Settings.FileChooser.gschema.xml org.gtk.Settings.ColorChooser.gschema.xml
 
 # Clean
 .PHONY: clean

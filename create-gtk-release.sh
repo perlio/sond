@@ -1,6 +1,6 @@
 #!/bin/bash
-# GTK3 Windows Release Packager - Einfache Version
-# Direktes Kopieren ohne komplexe Logik
+# GTK3 Windows Release Packager - Vollständige Version
+# Mit DBus, GIO-Module, hicolor Theme
 
 set -e
 
@@ -19,7 +19,7 @@ if [ ! -f "$EXE_FILE" ]; then
     exit 1
 fi
 
-echo "=== GTK3 Release Packager (Simple) ==="
+echo "=== GTK3 Release Packager (Vollständig) ==="
 echo "Erstelle: $RELEASE_DIR"
 echo ""
 
@@ -27,11 +27,11 @@ rm -rf "$RELEASE_DIR"
 mkdir -p "$RELEASE_DIR/bin"
 
 # 1. EXE
-echo "[1/6] Kopiere Executable..."
+echo "[1/9] Kopiere Executable..."
 cp "$EXE_FILE" "$RELEASE_DIR/bin/"
 
 # 2. DLLs - einfach und direkt
-echo "[2/6] Kopiere DLLs..."
+echo "[2/9] Kopiere DLLs..."
 echo "  Sammle Liste der benötigten DLLs..."
 
 # Hole alle DLL-Pfade
@@ -53,8 +53,61 @@ done < /tmp/dll_list.txt
 
 echo "  → Fertig"
 
-# 3. gdk-pixbuf
-echo "[3/6] Kopiere gdk-pixbuf Loader..."
+# 3. DBus (behebt GLib-GIO-WARNING)
+echo "[3/9] Kopiere DBus..."
+if [ -f "/ucrt64/bin/dbus-daemon.exe" ]; then
+    cp /ucrt64/bin/dbus-daemon.exe "$RELEASE_DIR/bin/"
+    echo "  + dbus-daemon.exe"
+    
+    # DBus Konfiguration
+    mkdir -p "$RELEASE_DIR/etc/dbus-1/session.d"
+    if [ -d "/ucrt64/etc/dbus-1" ]; then
+        cp -r /ucrt64/etc/dbus-1/* "$RELEASE_DIR/etc/dbus-1/" 2>/dev/null || true
+    fi
+    
+    # DBus zusätzliche DLLs
+    for dbus_dll in /ucrt64/bin/libdbus-*.dll; do
+        if [ -f "$dbus_dll" ]; then
+            cp "$dbus_dll" "$RELEASE_DIR/bin/"
+            echo "  + $(basename "$dbus_dll")"
+        fi
+    done
+    echo "  → Fertig"
+else
+    echo "  ! DBus nicht gefunden (optional)"
+fi
+
+# 4. GIO Module (behebt GLib-GIO-CRITICAL Fehler)
+echo "[4/9] Kopiere GIO Module..."
+if [ -d "/ucrt64/lib/gio/modules" ]; then
+    mkdir -p "$RELEASE_DIR/lib/gio/modules"
+    cp /ucrt64/lib/gio/modules/*.dll "$RELEASE_DIR/lib/gio/modules/" 2>/dev/null || true
+    
+    # GIO Module DLL-Abhängigkeiten
+    for gio_module in /ucrt64/lib/gio/modules/*.dll; do
+        if [ -f "$gio_module" ]; then
+            echo "  + $(basename "$gio_module")"
+            ldd "$gio_module" | grep ucrt64 | awk '{print $3}' >> /tmp/dll_list.txt
+        fi
+    done
+    
+    # Kopiere zusätzliche DLLs
+    while read dll_path; do
+        if [ -f "$dll_path" ]; then
+            dll_name=$(basename "$dll_path")
+            if [ ! -f "$RELEASE_DIR/bin/$dll_name" ]; then
+                cp "$dll_path" "$RELEASE_DIR/bin/"
+            fi
+        fi
+    done < /tmp/dll_list.txt
+    
+    echo "  → Fertig"
+else
+    echo "  ! GIO Module nicht gefunden"
+fi
+
+# 5. gdk-pixbuf
+echo "[5/9] Kopiere gdk-pixbuf Loader..."
 if [ -d "/ucrt64/lib/gdk-pixbuf-2.0" ]; then
     mkdir -p "$RELEASE_DIR/lib/gdk-pixbuf-2.0"
     cp -r /ucrt64/lib/gdk-pixbuf-2.0/2.10.0 "$RELEASE_DIR/lib/gdk-pixbuf-2.0/"
@@ -84,64 +137,47 @@ if [ -d "/ucrt64/lib/gdk-pixbuf-2.0" ]; then
     echo "  → Fertig"
 fi
 
-# 4. Icons
-echo "[4/6] Kopiere Icons..."
+# 6. Icons - Adwaita UND hicolor (behebt missing-image Fehler)
+echo "[6/9] Kopiere Icon Themes..."
+mkdir -p "$RELEASE_DIR/share/icons"
+
+# Adwaita Theme
 if [ -d "/ucrt64/share/icons/Adwaita" ]; then
-    mkdir -p "$RELEASE_DIR/share/icons"
     cp -r /ucrt64/share/icons/Adwaita "$RELEASE_DIR/share/icons/"
     find "$RELEASE_DIR/share/icons/Adwaita" -type d \( -name "512x512" -o -name "256x256" \) -exec rm -rf {} + 2>/dev/null || true
-    
-    if [ -f "/ucrt64/bin/gtk-update-icon-cache.exe" ]; then
-        /ucrt64/bin/gtk-update-icon-cache.exe "$RELEASE_DIR/share/icons/Adwaita" 2>/dev/null || true
-    fi
+    echo "  + Adwaita"
+fi
+
+# hicolor Theme (WICHTIG - wird von GTK benötigt!)
+if [ -d "/ucrt64/share/icons/hicolor" ]; then
+    cp -r /ucrt64/share/icons/hicolor "$RELEASE_DIR/share/icons/"
+    # Reduziere Größe - behalte nur wichtige Größen
+    find "$RELEASE_DIR/share/icons/hicolor" -type d \( -name "512x512" -o -name "256x256" -o -name "192x192" -o -name "128x128" -o -name "96x96" -o -name "72x72" \) -exec rm -rf {} + 2>/dev/null || true
+    echo "  + hicolor"
+fi
+
+# Icon Cache aktualisieren
+if [ -f "/ucrt64/bin/gtk-update-icon-cache.exe" ]; then
+    /ucrt64/bin/gtk-update-icon-cache.exe "$RELEASE_DIR/share/icons/Adwaita" 2>/dev/null || true
+    /ucrt64/bin/gtk-update-icon-cache.exe "$RELEASE_DIR/share/icons/hicolor" 2>/dev/null || true
+fi
+echo "  → Fertig"
+
+# 7. Schemas (nur gschemas.compiled kopieren)
+echo "[7/9] Kopiere GSettings Schemas..."
+PROJECT_SCHEMA_COMPILED="$(dirname "$EXE_FILE")/../share/glib-2.0/schemas/gschemas.compiled"
+if [ -f "$PROJECT_SCHEMA_COMPILED" ]; then
+    mkdir -p "$RELEASE_DIR/share/glib-2.0/schemas"
+    cp "$PROJECT_SCHEMA_COMPILED" "$RELEASE_DIR/share/glib-2.0/schemas/"
+    echo "  + gschemas.compiled (vom Makefile erstellt)"
     echo "  → Fertig"
-fi
-
-# 5. Schemas (minimal - nur gschemas.compiled)
-echo "[5/7] Kopiere GSettings Schemas..."
-if [ -d "/ucrt64/share/glib-2.0/schemas" ]; then
-    mkdir -p /tmp/gtk_schemas_temp
-    
-    # Kopiere GTK-Standard-Schemas temporär
-    cp /ucrt64/share/glib-2.0/schemas/org.gtk.Settings.FileChooser.gschema.xml /tmp/gtk_schemas_temp/ 2>/dev/null || true
-    cp /ucrt64/share/glib-2.0/schemas/org.gtk.Settings.ColorChooser.gschema.xml /tmp/gtk_schemas_temp/ 2>/dev/null || true
-    
-    # Suche nach eigenen Schema-Dateien im Projekt
-    PROJECT_SCHEMA_DIR="$(dirname "$EXE_FILE")/../../schemas"
-    if [ -d "$PROJECT_SCHEMA_DIR" ]; then
-        echo "  Gefundene Projekt-Schemas:"
-        for schema_file in "$PROJECT_SCHEMA_DIR"/*.gschema.xml; do
-            if [ -f "$schema_file" ]; then
-                schema_name=$(basename "$schema_file")
-                echo "    + $schema_name"
-                cp "$schema_file" /tmp/gtk_schemas_temp/
-            fi
-        done
-    else
-        echo "  (keine Projekt-Schemas gefunden in $PROJECT_SCHEMA_DIR)"
-    fi
-    
-    # Kompiliere alle Schemas zusammen
-    if [ -f "/ucrt64/bin/glib-compile-schemas.exe" ]; then
-        echo "  Kompiliere Schemas..."
-        /ucrt64/bin/glib-compile-schemas.exe /tmp/gtk_schemas_temp/ 2>/dev/null || true
-        
-        # Kopiere NUR die kompilierte Datei (keine XML-Dateien!)
-        mkdir -p "$RELEASE_DIR/share/glib-2.0/schemas"
-        if [ -f /tmp/gtk_schemas_temp/gschemas.compiled ]; then
-            cp /tmp/gtk_schemas_temp/gschemas.compiled "$RELEASE_DIR/share/glib-2.0/schemas/"
-            echo "  → gschemas.compiled erstellt (ohne XML-Quellen)"
-        fi
-    fi
-    
-    # Cleanup
-    rm -rf /tmp/gtk_schemas_temp
 else
-    echo "  → Übersprungen"
+    echo "  ! gschemas.compiled nicht gefunden in $PROJECT_SCHEMA_COMPILED"
+    echo "  ! Bitte zuerst 'make zond' ausführen"
 fi
 
-# 6. Tesseract OCR Daten
-echo "[6/7] Kopiere Tesseract Daten..."
+# 8. Tesseract OCR Daten
+echo "[8/9] Kopiere Tesseract Daten..."
 if [ -d "/ucrt64/share/tessdata" ]; then
     mkdir -p "$RELEASE_DIR/share/tessdata"
     
@@ -165,8 +201,29 @@ else
     echo "  ! Tesseract nicht installiert (/ucrt64/share/tessdata nicht gefunden)"
 fi
 
-# 7. Config & Launcher
-echo "[7/7] Erstelle Konfiguration..."
+# 9. libmagic Daten (magic.mgc)
+echo "[9/10] Kopiere libmagic Daten..."
+MAGIC_FOUND=false
+
+# Suche nach magic.mgc in verschiedenen möglichen Pfaden
+for magic_path in "/ucrt64/share/misc/magic.mgc" "/ucrt64/share/file/magic.mgc" "/ucrt64/share/magic.mgc"; do
+    if [ -f "$magic_path" ]; then
+        mkdir -p "$RELEASE_DIR/share/misc"
+        cp "$magic_path" "$RELEASE_DIR/share/misc/magic.mgc"
+        echo "  + magic.mgc (von $magic_path)"
+        MAGIC_FOUND=true
+        break
+    fi
+done
+
+if [ "$MAGIC_FOUND" = false ]; then
+    echo "  ! magic.mgc nicht gefunden"
+    echo "  ! Falls libmagic verwendet wird: pacman -S mingw-w64-ucrt-x86_64-file"
+fi
+echo "  → Fertig"
+
+# 10. Config & Launcher
+echo "[10/10] Erstelle Konfiguration..."
 
 mkdir -p "$RELEASE_DIR/etc/gtk-3.0"
 cat > "$RELEASE_DIR/etc/gtk-3.0/settings.ini" << 'EOF'
@@ -174,6 +231,7 @@ cat > "$RELEASE_DIR/etc/gtk-3.0/settings.ini" << 'EOF'
 gtk-theme-name=Adwaita
 gtk-icon-theme-name=Adwaita
 gtk-font-name=Segoe UI 9
+gtk-fallback-icon-theme=hicolor
 EOF
 
 echo "@echo off" > "$RELEASE_DIR/${APP_NAME}.bat"
@@ -184,9 +242,13 @@ echo 'set "GTK_DATA_PREFIX=%APP_DIR%"' >> "$RELEASE_DIR/${APP_NAME}.bat"
 echo 'set "GTK_EXE_PREFIX=%APP_DIR%"' >> "$RELEASE_DIR/${APP_NAME}.bat"
 echo 'set "GDK_PIXBUF_MODULEDIR=%APP_DIR%\lib\gdk-pixbuf-2.0\2.10.0\loaders"' >> "$RELEASE_DIR/${APP_NAME}.bat"
 echo 'set "GDK_PIXBUF_MODULE_FILE=%APP_DIR%\lib\gdk-pixbuf-2.0\2.10.0\loaders.cache"' >> "$RELEASE_DIR/${APP_NAME}.bat"
+echo 'set "GIO_MODULE_DIR=%APP_DIR%\lib\gio\modules"' >> "$RELEASE_DIR/${APP_NAME}.bat"
 echo 'set "GSETTINGS_SCHEMA_DIR=%APP_DIR%\share\glib-2.0\schemas"' >> "$RELEASE_DIR/${APP_NAME}.bat"
 echo 'set "XDG_DATA_DIRS=%APP_DIR%\share"' >> "$RELEASE_DIR/${APP_NAME}.bat"
+echo 'set "MAGIC=%APP_DIR%\share\misc\magic.mgc"' >> "$RELEASE_DIR/${APP_NAME}.bat"
 echo 'set "PATH=%APP_DIR%\bin;%PATH%"' >> "$RELEASE_DIR/${APP_NAME}.bat"
+echo 'REM Unterdrücke DBus-Warnung wenn DBus nicht verwendet wird' >> "$RELEASE_DIR/${APP_NAME}.bat"
+echo 'set "DBUS_SESSION_BUS_ADDRESS=disabled:"' >> "$RELEASE_DIR/${APP_NAME}.bat"
 echo '"%APP_DIR%\bin\'"${APP_NAME}"'.exe" %*' >> "$RELEASE_DIR/${APP_NAME}.bat"
 echo "endlocal" >> "$RELEASE_DIR/${APP_NAME}.bat"
 
@@ -201,11 +263,23 @@ VERZEICHNISSTRUKTUR:
 bin/                - Anwendung und DLLs
   ${APP_NAME}.exe
   *.dll
+  dbus-daemon.exe   - DBus Support
 lib/                - GTK-Module
-share/              - Ressourcen (Icons, Schemas, Tesseract)
+  gdk-pixbuf-2.0/   - Bildformat-Loader
+  gio/modules/      - GIO-Module
+share/              - Ressourcen
+  icons/Adwaita/    - Standard-Icons
+  icons/hicolor/    - Fallback-Icons
+  glib-2.0/schemas/ - GSettings
+  tessdata/         - Tesseract OCR
+etc/                - Konfiguration
 
 SYSTEMANFORDERUNGEN:
 - Windows 10+ (64-bit)
+
+HINWEISE:
+- GIO-Module und DBus sind für erweiterte Funktionalität enthalten
+- hicolor Icon Theme verhindert "missing-image" Warnungen
 
 Build: $(date '+%Y-%m-%d')
 EOF
@@ -230,6 +304,8 @@ echo "Verzeichnis: $RELEASE_DIR"
 echo "Größe: $TOTAL_SIZE"
 echo "DLLs: $FINAL_DLL_COUNT"
 echo ""
-echo "Testen: cd $RELEASE_DIR && ./bin/${APP_NAME}.exe"
-echo "    oder: cd $RELEASE_DIR && ./${APP_NAME}.bat"
+echo "WICHTIG: Testen Sie mit:"
+echo "    cd $RELEASE_DIR && ./${APP_NAME}.bat"
+echo ""
+echo "Die .bat-Datei setzt alle benötigten Umgebungsvariablen!"
 echo ""

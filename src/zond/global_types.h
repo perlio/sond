@@ -140,6 +140,7 @@ typedef struct _Clipboard Clipboard;
 
 typedef struct _Projekt {
 	gchar *base_dir;
+	gchar* exe_dir;
 
 	gchar *project_dir;
 	gchar *project_name;

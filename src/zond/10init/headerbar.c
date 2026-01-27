@@ -339,7 +339,7 @@ static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 	monitor_data.progress_data = (gpointer) info_window;
 	monitor_data.cancel_this = &info_window->cancel;
 
-	datadir = g_build_filename(zond->base_dir, "share/tessdata", NULL);
+	datadir = g_build_filename(zond->exe_dir, "../share/tessdata", NULL);
 	rc = sond_ocr_init_tesseract(&ocr_api, &osd_api, datadir, &error);
 	g_free(datadir);
 
