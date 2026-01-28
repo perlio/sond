@@ -25,7 +25,6 @@
 #include "../../sond_fileparts.h"
 
 #include "../zond_pdf_document.h"
-#include "../global_types.h"
 
 #include "../99conv/general.h"
 

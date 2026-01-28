@@ -24,7 +24,6 @@
 
 #include "../../misc.h"
 
-#include "../global_types.h"
 #include "../zond_dbase.h"
 
 #include "project.h"

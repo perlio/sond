@@ -8,9 +8,11 @@
 #define ANNOT_ICON_WIDTH 20
 #define ANNOT_ICON_HEIGHT 20
 
-//#include "../global_types.h"
+#include "../zond_init.h"
 
 typedef struct _GtkTreeIter GtkTreeIter;
+typedef struct _GtkEntry GtkEntry;
+typedef union _GdkEvent GdkEvent;
 typedef struct _Projekt Projekt;
 typedef struct _Pdf_Document_Page PdfDocumentPage;
 typedef struct _Displayed_Document DisplayedDocument;
@@ -129,8 +131,6 @@ typedef struct _Viewer_Page_New {
 
 void viewer_springen_zu_pos_pdf(PdfViewer*, PdfPos, gdouble);
 
-void viewer_close_thread_pool_and_transfer(PdfViewer*);
-
 void viewer_refresh_layout(PdfViewer*, gint);
 
 ViewerPageNew* viewer_new_page(PdfViewer*, DisplayedDocument*, gint);
@@ -139,20 +139,34 @@ gint viewer_display_document(PdfViewer*, DisplayedDocument*, gint, gint, GError*
 
 void viewer_schliessen(PdfViewer*);
 
-gint viewer_save_dirty_docs(PdfViewer*, GError**);
+gint viewer_save_dirty_dds(PdfViewer*, GError**);
 
 void viewer_save_and_close(PdfViewer*);
 
 void viewer_get_iter_thumb(PdfViewer*, gint, GtkTreeIter*);
 
-void viewer_transfer_rendered(PdfViewer*, gboolean);
+void viewer_handle_render_sichtbare_thumbs(PdfViewer *pv);
 
 gint viewer_render_stext_page_fast(fz_context*, PdfDocumentPage*, gchar**);
+
+gint viewer_handle_text_search(PdfViewer* pv, GtkWidget *widget, GError **error);
+
+void viewer_handle_page_entry_activated(PdfViewer* pv, GtkEntry *entry);
 
 void viewer_foreach(PdfViewer*, PdfDocumentPage*,
 		gint (*)(PdfViewer*, ViewerPageNew* viewer_page, gint, gpointer),
 		gpointer);
 
-PdfViewer* viewer_start_pv(Projekt*);
+gint viewer_handle_annot_delete(PdfViewer* pv, GError** error);
+
+gint viewer_handle_annot_edit_closed(PdfViewer* pdfv,
+		GtkWidget *popover, GError** error);
+
+gboolean viewer_handle_layout_release_button(PdfViewer* pv, GdkEvent *event);
+
+void viewer_handle_layout_motion_notify(PdfViewer* pv, GdkEvent *event);
+
+gint viewer_handle_button_press(PdfViewer* pv,
+		GdkEvent *event, GError** error);
 
 #endif // VIEWER_H_INCLUDED

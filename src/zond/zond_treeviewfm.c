@@ -11,10 +11,7 @@
 
 #include "10init/app_window.h"
 #include "20allgemein/project.h"
-#include "20allgemein/oeffnen.h"
 #include "99conv/general.h"
-
-#include "global_types.h"
 
 #ifdef _WIN32
 #include <windows.h>

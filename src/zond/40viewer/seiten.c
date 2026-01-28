@@ -38,7 +38,7 @@
 #include "../20allgemein/project.h"
 
 #include "viewer.h"
-#include "render.h"
+#include "viewer_render.h"
 #include "document.h"
 
 static GPtrArray*
@@ -611,8 +611,7 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 		g_array_append_val(arr_entries, entry);
 
 		//fz_stext_list droppen und auf NULL setzen
-		while (pdf_document_page->thread & 1)
-			viewer_transfer_rendered(pdf_document_page->thread_pv, TRUE);
+		viewer_render_wait_for_transfer(pdf_document_page);
 
 		fz_drop_display_list(
 				zond_pdf_document_get_ctx(pdf_document_page->document),
@@ -758,9 +757,7 @@ static gint seiten_drehen(PdfViewer *pv, GPtrArray *arr_document_page,
 		zond_pdf_document_mutex_unlock(pdf_document_page->document);
 		if (rc == -1) ERROR_S
 
-		while (pdf_document_page->thread & 1)
-			viewer_transfer_rendered(pdf_document_page->thread_pv,
-					TRUE);
+		viewer_render_wait_for_transfer(pdf_document_page);
 
 		fz_drop_display_list(
 				zond_pdf_document_get_ctx(pdf_document_page->document),

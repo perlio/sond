@@ -24,12 +24,10 @@
 #include "../../misc.h"
 #include "../../sond_fileparts.h"
 #include "../zond_pdf_document.h"
-#include "../global_types.h"
 #include "../zond_dbase.h"
 #include "../zond_treeview.h"
 
 #include "../20allgemein/ziele.h"
-#include "../20allgemein/oeffnen.h"
 
 #include "../40viewer/render.h"
 #include "../40viewer/viewer.h"

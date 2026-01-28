@@ -626,7 +626,8 @@ gint project_load(Projekt* zond, gchar** errmsg) {
 
 	rc = project_open(zond, abs_path, FALSE, errmsg);
 	g_free(abs_path);
-	ERROR_S
+	if (rc)
+		ERROR_S
 
 	return 0;
 }

@@ -27,6 +27,7 @@ enum ZondError
 	NUM_ZOND_ERROR
 };
 
+typedef struct _GtkApplication GtkApplication;
 typedef struct _GdkPixbuf GdkPixbuf;
 typedef struct _GtkWidget GtkWidget;
 typedef struct _GSettings GSettings;

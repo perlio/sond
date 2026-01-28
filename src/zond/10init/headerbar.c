@@ -216,7 +216,7 @@ static void cb_item_project_new(GtkMenuItem *item, gpointer user_data) {
 
 	rc = project_new(zond, &errmsg);
 	if (rc) {
-		display_message(zond->app_window, "Fehler beim Speichern -\n\n", errmsg, NULL);
+		display_message(zond->app_window, "Fehler beim Anlegen des Projekts\n", errmsg, NULL);
 		g_free(errmsg);
 	}
 
@@ -233,7 +233,7 @@ static void cb_item_project_load(GtkMenuItem *item, gpointer user_data) {
 
 	rc = project_load(zond, &errmsg);
 	if (rc) {
-		display_message(zond->app_window, "Fehler beim Speichern -\n\n", errmsg, NULL);
+		display_message(zond->app_window, "Fehler beim Laden des Projekts\n", errmsg, NULL);
 		g_free(errmsg);
 	}
 
@@ -251,8 +251,7 @@ void cb_item_project_close(GtkMenuItem *item, gpointer user_data) {
 	rc = project_close(zond, &errmsg);
 	if (rc == -1) {
 		display_message(zond->app_window,
-				"Fehler bei Schließen des Projekts -\n\n"
-						"Bei Aufruf projekt_schliessen:\n", errmsg, NULL);
+				"Fehler beim Schließen des Projekts\n", errmsg, NULL);
 		g_free(errmsg);
 	}
 
@@ -269,7 +268,7 @@ static void cb_item_project_save(GtkMenuItem *item, gpointer user_data) {
 
 	rc = project_save(zond, &errmsg);
 	if (rc) {
-		display_message(zond->app_window, "Fehler beim Speichern -\n\n", errmsg, NULL);
+		display_message(zond->app_window, "Fehler beim Speichern des Projekts\n", errmsg, NULL);
 		g_free(errmsg);
 	}
 

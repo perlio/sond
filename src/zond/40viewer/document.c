@@ -7,8 +7,6 @@
 #include "../99conv/general.h"
 #include "../99conv/pdf.h"
 
-#include "../global_types.h"
-
 #include"../../misc.h"
 
 void document_free_displayed_documents(DisplayedDocument *dd) {

@@ -23,7 +23,6 @@
 #include "../zond_dbase.h"
 #include "../zond_treeview.h"
 
-#include "../global_types.h"
 #include "../zond_dbase.h"
 #include "../zond_treeview.h"
 

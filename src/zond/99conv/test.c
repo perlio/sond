@@ -5,7 +5,6 @@
 
 #include "../../misc.h"
 
-#include "../global_types.h"
 #include "../pdf_ocr.h"
 #include "../zond_pdf_document.h"
 #include "../zond_tree_store.h"

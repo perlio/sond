@@ -38,6 +38,7 @@
 #include "20allgemein/project.h"
 
 #include "40viewer/viewer.h"
+#include "40viewer/viewer_ui.h"
 #include "40viewer/document.h"
 
 #include "99conv/general.h"
@@ -2252,7 +2253,7 @@ gint zond_treeview_oeffnen_internal_viewer(Projekt *zond, SondFilePartPDF* sfp_p
 	if (pos_pdf)
 		pos_von = *pos_pdf;
 
-	PdfViewer *pv = viewer_start_pv(zond);
+	PdfViewer *pv = viewer_init(zond);
 	rc = viewer_display_document(pv, dd, pos_von.seite, pos_von.index, error);
 	if (rc) {
 		document_free_displayed_documents(dd);

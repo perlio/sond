@@ -11,7 +11,6 @@
 #include "../../sond_log_and_error.h"
 
 #include "../zond_pdf_document.h"
-#include "../global_types.h"
 
 /** Nicht thread-safe  **/
 gint pdf_document_get_dest(fz_context *ctx, pdf_document *doc, gint page_doc,
@@ -124,7 +123,7 @@ gint pdf_clean(fz_context *ctx, SondFilePartPDF* sfp_pdf, GError **error) {
 	//prüfen, ob in Viewer geöffnet
 	if (zond_pdf_document_is_open(sfp_pdf)) {
 		if (error)
-			*error = g_error_new(ZOND_ERROR, 0, "Datei '%s' ist geöffnet",
+			*error = g_error_new(g_quark_from_static_string("sond"), 0, "Datei '%s' ist geöffnet",
 					sond_file_part_get_filepart(SOND_FILE_PART(sfp_pdf)));
 
 		return -1;
@@ -165,7 +164,7 @@ gint pdf_clean(fz_context *ctx, SondFilePartPDF* sfp_pdf, GError **error) {
 			LOG_WARN("%s\nArbeitskopie '%s' konnte nicht gelöscht werden\n"
 					"%s", __func__, path_tmp, strerror(errno));
 		if (error)
-			*error = g_error_new( ZOND_ERROR, 0, "%s\npdf_rearrange_pages\n%s",
+			*error = g_error_new(g_quark_from_static_string("sond"), 0, "%s\npdf_rearrange_pages\n%s",
 					__func__, fz_caught_message(ctx));
 
 		g_free(path_tmp);

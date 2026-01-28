@@ -25,7 +25,6 @@
 #include "../sond_fileparts.h"
 #include "../sond_log_and_error.h"
 
-#include "global_types.h"
 #include "99conv/pdf.h"
 #include "99conv/general.h"
 
