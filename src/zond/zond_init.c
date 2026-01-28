@@ -219,7 +219,7 @@ void zond_init(GtkApplication *app, Projekt *zond) {
 		recover(zond, proj_settings, G_APPLICATION(app));
 	g_free(proj_settings);
 
-	projekt_set_widgets_sensitiv(zond, FALSE);
+	project_set_widgets_sensitive(zond, FALSE);
 	gtk_widget_set_sensitive(zond->menu.speichernitem, FALSE);
 	g_settings_set_boolean(zond->settings, "speichern", FALSE);
 

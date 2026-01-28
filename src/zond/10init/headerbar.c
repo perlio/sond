@@ -206,6 +206,76 @@ selection_abfragen_pdf(Projekt *zond, gchar **errmsg) {
  * CALLBACKS - PROJEKT MENU
  * ========================================================================== */
 
+/**
+ * Menu callback: Create new project
+ */
+static void cb_item_project_new(GtkMenuItem *item, gpointer user_data) {
+	gint rc = 0;
+	gchar *errmsg = NULL;
+	Projekt *zond = (Projekt*) user_data;
+
+	rc = project_new(zond, &errmsg);
+	if (rc) {
+		display_message(zond->app_window, "Fehler beim Speichern -\n\n", errmsg, NULL);
+		g_free(errmsg);
+	}
+
+	return;
+}
+
+/**
+ * Menu callback: Load project
+ */
+static void cb_item_project_load(GtkMenuItem *item, gpointer user_data) {
+	gint rc = 0;
+	gchar *errmsg = NULL;
+	Projekt *zond = (Projekt*) user_data;
+
+	rc = project_load(zond, &errmsg);
+	if (rc) {
+		display_message(zond->app_window, "Fehler beim Speichern -\n\n", errmsg, NULL);
+		g_free(errmsg);
+	}
+
+	return;
+}
+
+/**
+ * Menu callback: Close project
+ */
+void cb_item_project_close(GtkMenuItem *item, gpointer user_data) {
+	gint rc = 0;
+	gchar *errmsg = NULL;
+	Projekt *zond = (Projekt*) user_data;
+
+	rc = project_close(zond, &errmsg);
+	if (rc == -1) {
+		display_message(zond->app_window,
+				"Fehler bei Schließen des Projekts -\n\n"
+						"Bei Aufruf projekt_schliessen:\n", errmsg, NULL);
+		g_free(errmsg);
+	}
+
+	return;
+}
+
+/**
+ * Menu callback: Save project
+ */
+static void cb_item_project_save(GtkMenuItem *item, gpointer user_data) {
+	gint rc = 0;
+	gchar *errmsg = NULL;
+	Projekt *zond = (Projekt*) user_data;
+
+	rc = project_save(zond, &errmsg);
+	if (rc) {
+		display_message(zond->app_window, "Fehler beim Speichern -\n\n", errmsg, NULL);
+		g_free(errmsg);
+	}
+
+	return;
+}
+
 static void cb_item_search_fs_activate(GtkMenuItem *item, gpointer data) {
 	gint sel = 0;
 	gchar *key = NULL;
@@ -628,7 +698,7 @@ static void cb_refresh_view_activated(GtkMenuItem *item, gpointer data) {
 
 	Projekt *zond = (Projekt*) data;
 
-	rc = project_load_baeume(zond, &error);
+	rc = project_load_trees(zond, &error);
 	if (rc == -1) {
 		display_message(zond->app_window, "Fehler refresh\n\n", error->message,
 				NULL);
@@ -838,16 +908,16 @@ create_menu_projekt(Projekt *zond, GtkAccelGroup *accel_group) {
 	GtkWidget *projektmenu = gtk_menu_new();
 
 	create_and_connect_menu_item("Neu",
-			G_CALLBACK(cb_menu_datei_neu_activate), zond, projektmenu);
+			G_CALLBACK(cb_item_project_new), zond, projektmenu);
 
 	create_and_connect_menu_item("Öffnen",
-			G_CALLBACK(cb_menu_datei_oeffnen_activate), zond, projektmenu);
+			G_CALLBACK(cb_item_project_load), zond, projektmenu);
 
 	zond->menu.speichernitem = create_and_connect_menu_item("Speichern",
-			G_CALLBACK(cb_menu_datei_speichern_activate), zond, projektmenu);
+			G_CALLBACK(cb_item_project_save), zond, projektmenu);
 
 	zond->menu.schliessenitem = create_and_connect_menu_item("Schliessen",
-			G_CALLBACK(cb_menu_datei_schliessen_activate), zond, projektmenu);
+			G_CALLBACK(cb_item_project_close), zond, projektmenu);
 
 	append_separator(projektmenu);
 

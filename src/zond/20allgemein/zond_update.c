@@ -565,7 +565,7 @@ gint zond_update(Projekt *zond, InfoWindow *info_window, GError **error) {
 		argv[2] = g_strdup(
 				zond_dbase_get_path(zond->dbase_zond->zond_dbase_store));
 
-		rc = projekt_schliessen(zond, &errmsg);
+		rc = project_close(zond, &errmsg);
 		if (rc) {
 			g_free(vtag);
 			g_free(argv[2]);

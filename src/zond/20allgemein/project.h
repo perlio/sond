@@ -11,41 +11,27 @@ typedef void *gpointer;
 typedef int gint;
 typedef char gchar;
 
+// Database transaction functions
 gint dbase_zond_begin(DBaseZond*, GError**);
-
 void dbase_zond_rollback(DBaseZond*, GError**);
-
 gint dbase_zond_commit(DBaseZond*, GError**);
 
-gint dbase_zond_update_sections(DBaseZond*, DisplayedDocument*, GError** );
-
+// Database update functions
+gint dbase_zond_update_sections(DBaseZond*, DisplayedDocument*, GError**);
 gint dbase_zond_update_path(DBaseZond*, gchar const*, gchar const*, GError**);
+gint dbase_zond_update_gmessage_index(DBaseZond*, gchar const*, gint, gboolean, GError**);
 
-gint dbase_zond_update_gmessage_index(DBaseZond*, gchar const*, gint,
-		gboolean, GError**);
-
-void project_set_changed(gpointer);
-
+// Project state management
 void project_reset_changed(Projekt*, gboolean);
-
-void projekt_set_widgets_sensitiv(Projekt*, gboolean);
-
-gint projekt_schliessen(Projekt*, gchar**);
-
-gint project_speichern(Projekt*, gchar**);
-
+void project_set_widgets_sensitive(Projekt*, gboolean);
 gboolean project_timeout_autosave(gpointer);
 
-void cb_menu_datei_speichern_activate(GtkMenuItem*, gpointer);
-
-void cb_menu_datei_schliessen_activate(GtkMenuItem*, gpointer);
-
-gint project_load_baeume(Projekt*, GError**);
-
-gint project_oeffnen(Projekt*, const gchar*, gboolean, gchar**);
-
-void cb_menu_datei_oeffnen_activate(GtkMenuItem*, gpointer);
-
-void cb_menu_datei_neu_activate(GtkMenuItem*, gpointer);
+// Project operations
+gint project_close(Projekt*, gchar**);
+gint project_save(Projekt*, gchar**);
+gint project_load_trees(Projekt*, GError**);
+gint project_open(Projekt*, const gchar*, gboolean, gchar**);
+gint project_load(Projekt* zond, gchar** errmsg);
+gint project_new(Projekt* zond, gchar** errmsg);
 
 #endif // PROJECT_H_INCLUDED

@@ -75,7 +75,7 @@ static void cb_open(GApplication *app, GFile **files, gint n_files,
 	uri_unesc = g_uri_unescape_string(uri, NULL);
 	g_free(uri);
 
-	rc = project_oeffnen(zond, uri_unesc + 8, FALSE, &errmsg);
+	rc = project_open(zond, uri_unesc + 8, FALSE, &errmsg);
 	g_free(uri_unesc);
 	if (rc == -1) {
 		LOG_INFO("Fehler - Projekt kann nicht geöffnet werden: %s", errmsg);

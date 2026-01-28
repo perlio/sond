@@ -107,7 +107,7 @@ static gboolean cb_delete_event(GtkWidget *app_window, GdkEvent *event,
     gchar *errmsg = NULL;
     gint rc = 0;
 
-    rc = projekt_schliessen(zond, &errmsg);
+    rc = project_close(zond, &errmsg);
 
     if (rc == -1) {
         show_error_message(zond->app_window,
