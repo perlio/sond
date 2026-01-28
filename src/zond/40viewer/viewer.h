@@ -145,10 +145,6 @@ void viewer_save_and_close(PdfViewer*);
 
 void viewer_get_iter_thumb(PdfViewer*, gint, GtkTreeIter*);
 
-void viewer_handle_render_sichtbare_thumbs(PdfViewer *pv);
-
-gint viewer_render_stext_page_fast(fz_context*, PdfDocumentPage*, gchar**);
-
 gint viewer_handle_text_search(PdfViewer* pv, GtkWidget *widget, GError **error);
 
 void viewer_handle_page_entry_activated(PdfViewer* pv, GtkEntry *entry);
@@ -156,13 +152,6 @@ void viewer_handle_page_entry_activated(PdfViewer* pv, GtkEntry *entry);
 void viewer_foreach(PdfViewer*, PdfDocumentPage*,
 		gint (*)(PdfViewer*, ViewerPageNew* viewer_page, gint, gpointer),
 		gpointer);
-
-gint viewer_handle_annot_delete(PdfViewer* pv, GError** error);
-
-gint viewer_handle_annot_edit_closed(PdfViewer* pdfv,
-		GtkWidget *popover, GError** error);
-
-gboolean viewer_handle_layout_release_button(PdfViewer* pv, GdkEvent *event);
 
 void viewer_handle_layout_motion_notify(PdfViewer* pv, GdkEvent *event);
 

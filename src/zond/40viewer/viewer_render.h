@@ -1,5 +1,5 @@
 /*
- zond (viewer_ui.h) - Akten, Beweisstücke, Unterlagen
+ zond (viewer_render.h) - Akten, Beweisstücke, Unterlagen
  Copyright (C) 2026  pelo america
 
  This program is free software: you can redistribute it and/or modify
@@ -34,7 +34,7 @@ void viewer_close_thread_pool_and_transfer(PdfViewer *pdfv);
 
 void viewer_render_response_free(gpointer data);
 
-gint viewer_render_stext_page_from_display_list(fz_context *ctx,
+gint viewer_render_stext_page_fast(fz_context *ctx,
 		PdfDocumentPage *pdf_document_page, gchar **errmsg);
 
 void viewer_render_thread(PdfViewer *pv, gint page);

@@ -384,7 +384,7 @@ static gint viewer_render_pixmap(fz_context *ctx, ViewerPageNew *viewer_page,
 	return 0;
 }
 
-gint viewer_render_stext_page_from_display_list(fz_context *ctx,
+static gint viewer_render_stext_page_from_display_list(fz_context *ctx,
 		PdfDocumentPage *pdf_document_page, gchar **errmsg) {
 	fz_stext_page *stext_page = NULL;
 	fz_device *s_t_device = NULL;
@@ -417,6 +417,91 @@ fz_always	( ctx ) {
 	}
 
 	pdf_document_page->stext_page = stext_page;
+
+	return 0;
+}
+
+static gint viewer_render_stext_page_from_page(
+		PdfDocumentPage *pdf_document_page, gchar **errmsg) {
+	fz_device *s_t_device = NULL;
+	fz_stext_page *stext_page = NULL;
+
+	fz_stext_options opts = { FZ_STEXT_DEHYPHENATE };
+
+	fz_context *ctx = zond_pdf_document_get_ctx(
+			pdf_document_page->document);
+
+	fz_try(ctx)
+		stext_page = fz_new_stext_page(ctx, pdf_document_page->rect);
+	fz_catch(ctx)
+		ERROR_MUPDF("fz_new_stext_page")
+
+	//structured text-device
+	fz_try(ctx)
+		s_t_device = fz_new_stext_device(ctx, stext_page, &opts);
+	fz_catch(ctx) {
+		fz_drop_stext_page(ctx, stext_page);
+		ERROR_MUPDF("fz_new_stext_device")
+	}
+
+	//doc-lock muß gesetzt werden, da _load_page auf document zugreift
+	zond_pdf_document_mutex_lock(pdf_document_page->document);
+
+	//page durchs list-device laufen lassen
+	fz_try( ctx )
+		pdf_run_page(ctx, pdf_document_page->page, s_t_device, fz_identity, NULL);
+	fz_always(ctx) {
+		zond_pdf_document_mutex_unlock(pdf_document_page->document);
+		fz_close_device(ctx, s_t_device);
+		fz_drop_device(ctx, s_t_device);
+	}
+	fz_catch( ctx )
+		ERROR_MUPDF("pdf_run_page")
+
+	pdf_document_page->stext_page = stext_page;
+
+	return 0;
+}
+
+gint viewer_render_stext_page_fast(fz_context *ctx,
+		PdfDocumentPage *pdf_document_page, gchar **errmsg) {
+	//thread für Seite gestartet?
+	viewer_render_wait_for_transfer(pdf_document_page);
+
+	if (pdf_document_page->thread & 8)
+		return 0;
+
+	//page oder display_list nicht geladen
+	if (!(pdf_document_page->thread & 4)) {
+		gint rc = 0;
+
+		if (!(pdf_document_page->thread & 2)) {
+			gint rc = 0;
+
+			zond_pdf_document_mutex_lock(pdf_document_page->document);
+			rc = zond_pdf_document_load_page(pdf_document_page, ctx, errmsg);
+			zond_pdf_document_mutex_unlock(pdf_document_page->document);
+			if (rc)
+				ERROR_S
+
+			pdf_document_page->thread |= 2;
+		}
+
+		rc = viewer_render_stext_page_from_page(pdf_document_page, errmsg);
+		if (rc)
+			ERROR_S
+
+	} else //display_list fertig
+	{
+		gint rc = 0;
+
+		rc = viewer_render_stext_page_from_display_list(ctx, pdf_document_page,
+				errmsg);
+		if (rc)
+			ERROR_S
+	}
+
+	pdf_document_page->thread |= 8;
 
 	return 0;
 }

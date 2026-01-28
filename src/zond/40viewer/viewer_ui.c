@@ -243,7 +243,7 @@ static gboolean cb_viewer_swindow_key_press(GtkWidget *swindow,
 	if (event->key.keyval != GDK_KEY_Delete)
 		return FALSE;
 
-	rc = viewer_handle_annot_delete(pv, &error);
+	rc = viewer_annot_handle_delete(pv, &error);
 	if (rc) {
 		display_error(pv->vf, "Fehler beim Löschen der Anmerkung", error->message);
 		g_error_free(error);
@@ -264,8 +264,62 @@ static gboolean cb_viewer_layout_release_button(GtkWidget *layout,
 	if (!(pv->dd))
 		return TRUE;
 
-	// Wrapper: Delegiert die Logik an viewer.c
-	return viewer_handle_layout_release_button(pv, event);
+	gint rc = 0;
+	gchar *errmsg = NULL;
+	ViewerPageNew *viewer_page = NULL;
+	PdfPunkt pdf_punkt = { 0 };
+	gint von = 0;
+	gint bis = 0;
+
+	if (event->button.button != GDK_BUTTON_PRIMARY)
+		return FALSE;
+	if (!(pv->dd))
+		return TRUE;
+
+	rc = viewer_abfragen_pdf_punkt(pv,
+			fz_make_point(event->motion.x, event->motion.y), &pdf_punkt);
+	viewer_page = g_ptr_array_index(pv->arr_pages, pdf_punkt.seite);
+	viewer_render_wait_for_transfer(viewer_page->pdf_document_page);
+
+	pv->click_on_text = FALSE;
+
+	viewer_set_cursor(pv, rc, viewer_page, pv->clicked_annot, pdf_punkt);
+
+	//Text ist markiert
+	if (pv->highlight.page[0] != -1) {
+		//Annot ist gewählt
+		if (pv->state == 1 || pv->state == 2) {
+			gint rc = 0;
+			GError* error = NULL;
+
+			rc = viewer_annot_create_markup(pv, pdf_punkt, &error);
+			if (rc) {
+				display_error(pv->vf, "Annotation konnte nicht erstellt werden",
+						error->message);
+				g_error_free(error);
+				return TRUE;
+			}
+
+			pv->highlight.page[0] = -1;
+		}
+		else
+			gtk_widget_set_sensitive(pv->item_copy, TRUE);
+	}
+
+	//Button wird losgelassen, nachdem auf Text-Annot geklickt wurde
+	if (pv->clicked_annot && pv->clicked_annot->annot.type == PDF_ANNOT_TEXT) {
+		gint rc = 0;
+		GError* error = NULL;
+
+		rc = viewer_annot_handle_release_clicked_annot(pv, pdf_punkt, &error);
+		if (rc) {
+			display_error(pv->vf, "Annotation konnte nicht bearbeitet werden",
+					error->message);
+			g_error_free(error);
+		}
+	}
+
+	return TRUE;
 }
 
 static gboolean cb_viewer_motion_notify(GtkWidget *window, GdkEvent *event,
@@ -323,7 +377,8 @@ static void cb_viewer_annot_edit_closed(GtkWidget *popover, gpointer data) {
 
 	rc = viewer_handle_annot_edit_closed(pdfv, popover, &error);
 	if (rc) {
-		display_message(pdfv->vf, "Fehler - Annotation editieren\n\n", error->message, NULL);
+		display_message(pdfv->vf, "Annotation editieren fehlgeschlagen\n",
+				error->message, NULL);
 		g_error_free(error);
 	}
 
