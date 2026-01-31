@@ -24,6 +24,7 @@
 #include "sond_server.h"
 #include "sond_server_seafile.h"
 #include "sond_server_auth.h"
+#include "sond_server_ocr.h"
 #include "../sond_graph/sond_graph_db.h"
 #include "../sond_graph/sond_graph_node.h"
 #include "../sond_graph/sond_graph_edge.h"
@@ -59,6 +60,9 @@ struct _SondServer {
     guint session_lifetime_hours;
     guint session_inactivity_minutes;
     SessionManager *session_manager;  // Session-Verwaltung
+
+    /* OCR */
+    OcrManager *ocr_manager;  // NEU HINZUFÜGEN
 };
 
 G_DEFINE_TYPE(SondServer, sond_server, G_TYPE_OBJECT)
@@ -1145,9 +1149,15 @@ static void sond_server_finalize(GObject *object) {
     if (self->soup_server) {
         g_object_unref(self->soup_server);
     }
-    
+
+    /* Session Manager freigeben */
     if (self->session_manager) {
         session_manager_free(self->session_manager);
+    }
+
+    /* OCR Manager freigeben */
+    if (self->ocr_manager) {
+        ocr_manager_free(self->ocr_manager);
     }
 
     if (self->db_conn) {
@@ -1373,6 +1383,9 @@ static gboolean sond_server_prepare(SondServer*server,
 
     data_config_free(&data_config);
 
+    /* OCR Manager erstellen */
+    server->ocr_manager = ocr_manager_new(server);
+
     /* SoupServer erstellen */
     server->soup_server = soup_server_new(NULL, NULL);
     
@@ -1382,7 +1395,7 @@ static gboolean sond_server_prepare(SondServer*server,
 
     /* Routes registrieren */
     
-    /* Auth-Endpoints */
+    /* Auth-Endpoints */ //ggf. in SessionManager auslagern
     soup_server_add_handler(server->soup_server, "/auth/login",
                            handle_auth_login, server, NULL);
     soup_server_add_handler(server->soup_server, "/auth/logout",
@@ -1412,7 +1425,7 @@ static gboolean sond_server_prepare(SondServer*server,
 
     /* Seafile Endpoints registrieren */
     sond_server_seafile_register_handlers(server);
-
+    
     return TRUE;
 }
 

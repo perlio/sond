@@ -29,8 +29,8 @@
 
 #include "../20allgemein/ziele.h"
 
-#include "../40viewer/render.h"
 #include "../40viewer/viewer.h"
+#include "../40viewer/viewer_render.h"
 
 #include "../99conv/general.h"
 #include "../99conv/pdf.h"

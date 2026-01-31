@@ -76,6 +76,21 @@ gchar* sond_server_seafile_get_auth_token(SondServer *server,
                                            const gchar *password,
                                            GError **error);
 
+/**
+ * sond_server_seafile_get_library_id_by_name:
+ * @server: SondServer Instanz
+ * @library_name: Name der Library
+ * @error: (nullable): Error Rückgabe
+ *
+ * Sucht eine Library anhand des Namens und gibt die ID zurück.
+ *
+ * Returns: (transfer full) (nullable): Library-ID oder NULL bei Fehler.
+ *          Caller muss g_free() aufrufen.
+ */
+gchar* sond_server_seafile_get_library_id_by_name(SondServer *server,
+                                                   const gchar *library_name,
+                                                   GError **error);
+
 G_END_DECLS
 
 #endif /* SOND_SERVER_SEAFILE_H */

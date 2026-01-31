@@ -19,13 +19,18 @@
 #ifndef VIEWER_ANNOT_H_INCLUDED
 #define VIEWER_ANNOT_H_INCLUDED
 
+gboolean viewer_annot_is_in_rect(Annot* annot, fz_rect rect);
+
 gint viewer_annot_handle_delete(PdfViewer* pv, GError** error);
 
-gint viewer_handle_annot_edit_closed(PdfViewer* pdfv, GtkWidget *popover, GError** error);
+gint viewer_annot_handle_edit_closed(PdfViewer* pdfv, GtkWidget *popover, GError** error);
 
-gint viewer_annot_handle_release_clicked_annot(PdfViewer* pv,
+gint viewer_annot_handle_release_clicked_annot(PdfViewer* pv, ViewerPageNew* viewer_page,
 		PdfPunkt pdf_punkt, GError** error);
 
-gint viewer_annot_create_markup(PdfViewer *pv, PdfPunkt pdf_punkt, GError **error);
+gint viewer_annot_create(ViewerPageNew *viewer_page, gchar **errmsg);
+
+gint viewer_annot_create_markup(PdfViewer *pv, ViewerPageNew* viewer_page,
+		PdfPunkt pdf_punkt, GError **error);
 
 #endif /* VIEWER_ANNOT_H_INCLUDED */

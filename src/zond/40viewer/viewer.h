@@ -145,9 +145,15 @@ void viewer_save_and_close(PdfViewer*);
 
 void viewer_get_iter_thumb(PdfViewer*, gint, GtkTreeIter*);
 
+gint viewer_abfragen_pdf_punkt(PdfViewer *pv, fz_point punkt,
+		PdfPunkt *pdf_punkt);
+
 gint viewer_handle_text_search(PdfViewer* pv, GtkWidget *widget, GError **error);
 
 void viewer_handle_page_entry_activated(PdfViewer* pv, GtkEntry *entry);
+
+void viewer_set_cursor(PdfViewer *pv, gint rc, ViewerPageNew *viewer_page,
+		PdfDocumentPageAnnot *pdf_document_page_annot, PdfPunkt pdf_punkt);
 
 void viewer_foreach(PdfViewer*, PdfDocumentPage*,
 		gint (*)(PdfViewer*, ViewerPageNew* viewer_page, gint, gpointer),

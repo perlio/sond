@@ -320,7 +320,7 @@ static gboolean seafile_delete_library(SondServer *server,
  * ======================================================================== */
 
 /**
- * seafile_get_library_id_by_name:
+ * sond_server_seafile_get_library_id_by_name:
  *
  * Sucht eine Library anhand des Namens und gibt die ID zurück.
  *
@@ -329,9 +329,9 @@ static gboolean seafile_delete_library(SondServer *server,
  * Authorization: Token xxx
  * Response: [{"repo_id": "xxx", "repo_name": "yyy", ...}, ...]
  */
-static gchar* seafile_get_library_id_by_name(SondServer *server,
-                                               const gchar *library_name,
-                                               GError **error) {
+gchar* sond_server_seafile_get_library_id_by_name(SondServer *server,
+                                                   const gchar *library_name,
+                                                   GError **error) {
     g_return_val_if_fail(server != NULL, NULL);
     g_return_val_if_fail(library_name != NULL, NULL);
 
@@ -658,7 +658,7 @@ static void handle_seafile_library_id_get(SoupServer *soup_server,
 
     /* Library-ID suchen */
     GError *error = NULL;
-    gchar *library_id = seafile_get_library_id_by_name(server, library_name, &error);
+    gchar *library_id = sond_server_seafile_get_library_id_by_name(server, library_name, &error);
 
     if (!library_id) {
         guint status_code = SOUP_STATUS_INTERNAL_SERVER_ERROR;

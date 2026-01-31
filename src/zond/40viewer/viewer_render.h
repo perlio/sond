@@ -21,6 +21,7 @@
 
 #include <mupdf/fitz.h>
 
+typedef struct _GtkButton GtkButton;
 typedef struct _Pdf_Viewer PdfViewer;
 typedef struct _Pdf_Document_Page PdfDocumentPage;
 typedef void* gpointer;

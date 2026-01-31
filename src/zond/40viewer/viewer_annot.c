@@ -1,6 +1,82 @@
+/*
+ zond (viewer_annot.c) - Akten, Beweisstücke, Unterlagen
+ Copyright (C) 2026  pelo america
+
+ This program is free software: you can redistribute it and/or modify
+ it under the terms of the GNU Affero General Public License as
+ published by the Free Software Foundation, either version 3 of the
+ License, or (at your option) any later version.
+
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU Affero General Public License for more details.
+
+ You should have received a copy of the GNU Affero General Public License
+ along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+#include "../../misc.h"
+
+#include "../99conv/pdf.h"
+
+#include "viewer.h"
+#include "viewer_render.h"
+#include "document.h"
 
 
+gboolean viewer_annot_is_in_rect(Annot* annot, fz_rect rect) {
+	if (annot->type == PDF_ANNOT_TEXT) {
+		fz_rect annot_rect = annot->annot_text.rect;
 
+		if (fz_is_valid_rect(fz_intersect_rect(annot_rect, rect)))
+			return TRUE;
+	}
+	else if (annot->type == PDF_ANNOT_HIGHLIGHT
+			|| annot->type == PDF_ANNOT_UNDERLINE) {
+		for (gint i = 0; i < annot->annot_text_markup.arr_quads->len; i++) {
+			fz_quad quad = { 0 };
+
+			quad = g_array_index(annot->annot_text_markup.arr_quads, fz_quad, i);
+			if (fz_is_point_inside_rect(quad.ul, rect) ||
+					fz_is_point_inside_rect(quad.lr, rect))
+				return TRUE;
+		}
+	}
+
+	return FALSE;
+}
+
+static gint viewer_annot_foreach_changed(PdfViewer *pv, ViewerPageNew* viewer_page,
+		gint page_pv, gpointer data) {
+	//Falls erste oder letzte Seite dd: prüfen, ob nicht weggecropt
+	if ((viewer_page->pdf_document_page == viewer_page->dd->zpdfd_part->first_page ||
+			viewer_page->pdf_document_page == viewer_page->dd->zpdfd_part->last_page) &&
+			!viewer_annot_is_in_rect((Annot*) data, viewer_page->crop))
+		return 0;
+
+	if (viewer_page->thread & 2) {
+		gtk_image_clear(GTK_IMAGE(viewer_page->image_page));
+		viewer_page->pixbuf_page = NULL;
+	}
+
+	if (viewer_page->thread & 4) {
+		GtkTreeIter iter = { 0 };
+
+		viewer_get_iter_thumb(viewer_page->pdfv, page_pv, &iter);
+
+		//thumb löschen
+		gtk_list_store_set(GTK_LIST_STORE(gtk_tree_view_get_model(
+				GTK_TREE_VIEW(pv->tree_thumb) )), &iter, 0, NULL, -1);
+		viewer_page->pixbuf_thumb = NULL;
+	}
+
+	viewer_page->thread = 0;
+
+	g_signal_emit_by_name(pv->v_adj, "value-changed", NULL);
+
+	return 1;
+}
 
 static gint viewer_annot_delete(PdfDocumentPageAnnot *pdf_document_page_annot,
 		GError** error) {
@@ -71,14 +147,14 @@ gint viewer_annot_handle_delete(PdfViewer* pv, GError** error) {
 	viewer_page->pdf_document_page->thread &= 10; //4 löschen
 
 	viewer_foreach(pv, viewer_page->pdf_document_page,
-			viewer_foreach_annot_changed, &pv->clicked_annot->annot);
+			viewer_annot_foreach_changed, &pv->clicked_annot->annot);
 
 	pv->clicked_annot = NULL;
 
 	return 0;
 }
 
-gint viewer_handle_annot_edit_closed(PdfViewer* pdfv, GtkWidget *popover, GError** error) {
+gint viewer_annot_handle_edit_closed(PdfViewer* pdfv, GtkWidget *popover, GError** error) {
 	gchar *text = NULL;
 	PdfDocumentPageAnnot *pdf_document_page_annot = NULL;
 	GtkTextIter start = { 0, };
@@ -155,7 +231,7 @@ gint viewer_handle_annot_edit_closed(PdfViewer* pdfv, GtkWidget *popover, GError
 	//soll nur in sämtlichen betroffenen viewern Speichern aktivieren
 	//ansonsten muß nichts gemacht werden
 	viewer_foreach(pdfv, pdf_document_page_annot->pdf_document_page,
-			viewer_foreach_annot_changed, &entry.annot_changed.annot_after);
+			viewer_annot_foreach_changed, &entry.annot_changed.annot_after);
 
 	return 0;
 }
@@ -178,8 +254,34 @@ static gboolean viewer_annot_check_diff(DisplayedDocument* dd,
 	return FALSE;
 }
 
+static fz_rect viewer_annot_clamp_page(ViewerPageNew *viewer_page,
+		fz_rect rect) {
+	fz_rect rect_cropped = { 0, };
+
+	//clamp
+	rect_cropped = rect;
+
+	if (rect_cropped.x0 < viewer_page->crop.x0)
+		rect_cropped.x0 = viewer_page->crop.x0;
+	if (rect_cropped.x0 + ANNOT_ICON_WIDTH > viewer_page->crop.x1)
+		rect_cropped.x0 = viewer_page->crop.x1 - ANNOT_ICON_WIDTH;
+
+	if (rect_cropped.y0 < viewer_page->crop.y0)
+		rect_cropped.y0 = viewer_page->crop.y0;
+	if (rect_cropped.y0 + ANNOT_ICON_HEIGHT > viewer_page->crop.y1)
+		rect_cropped.y0 = viewer_page->crop.y1 - ANNOT_ICON_HEIGHT;
+
+	rect_cropped.x1 = rect_cropped.x0 + ANNOT_ICON_WIDTH;
+	rect_cropped.y1 = rect_cropped.y0 + ANNOT_ICON_HEIGHT;
+
+	return rect_cropped;
+}
+
+
+
+
 gint viewer_annot_handle_release_clicked_annot(PdfViewer* pv,
-		PdfPunkt pdf_punkt, GError** error) {
+		ViewerPageNew* viewer_page, PdfPunkt pdf_punkt, GError** error) {
 	//verschoben?
 	if (!(pv->click_pdf_punkt.seite == pdf_punkt.seite
 			&& pv->click_pdf_punkt.punkt.x == pdf_punkt.punkt.x
@@ -192,7 +294,7 @@ gint viewer_annot_handle_release_clicked_annot(PdfViewer* pv,
 		pdf_annot *pdf_annot = NULL;
 		fz_rect rect_old = fz_empty_rect;
 
-		if (pv->click_pdf_punkt.seite != pdf_punkt.seite) {
+		if (pv->click_pdf_punkt.seite != pdf_punkt.seite) { //viewer_page neu holen
 			viewer_page = g_ptr_array_index(pv->arr_pages,
 					pv->click_pdf_punkt.seite);
 			viewer_render_wait_for_transfer(
@@ -297,7 +399,7 @@ gint viewer_annot_handle_release_clicked_annot(PdfViewer* pv,
 		viewer_page->pdf_document_page->thread &= 10;
 
 		viewer_foreach(pv, viewer_page->pdf_document_page,
-				viewer_foreach_annot_changed, &entry.annot_changed.annot_after);
+				viewer_annot_foreach_changed, &entry.annot_changed.annot_after);
 	} else if (pv->clicked_annot->annot.annot_text.open) {//nicht verschoben, edit-popup geöffnet
 		//angeklickt -> textview öffnen
 		GdkRectangle gdk_rectangle = { 0, };
@@ -344,7 +446,89 @@ gint viewer_annot_handle_release_clicked_annot(PdfViewer* pv,
 	return 0;
 }
 
-gint viewer_annot_create_markup(PdfViewer *pv, PdfPunkt pdf_punkt, GError **error) {
+gint viewer_annot_create(ViewerPageNew *viewer_page, gchar **errmsg) {
+	pdf_annot *pdf_annot = NULL;
+	PdfDocumentPageAnnot *pdf_document_page_annot = NULL;
+	JournalEntry entry = { 0, };
+	Annot annot = { 0 };
+	GError* error = NULL;
+
+	fz_context *ctx = zond_pdf_document_get_ctx(
+			viewer_page->pdf_document_page->document);
+
+	if (viewer_page->pdfv->state == 1)
+		annot.type = PDF_ANNOT_HIGHLIGHT;
+	else if (viewer_page->pdfv->state == 2)
+		annot.type = PDF_ANNOT_UNDERLINE;
+	else if (viewer_page->pdfv->state == 3)
+		annot.type = PDF_ANNOT_TEXT;
+
+	if (annot.type == PDF_ANNOT_HIGHLIGHT || annot.type == PDF_ANNOT_UNDERLINE) {
+		gint i = 0;
+
+		annot.annot_text_markup.arr_quads = g_array_new(FALSE, FALSE, sizeof(fz_quad));
+
+		while (viewer_page->pdfv->highlight.page[i] != -1) {
+			if (viewer_page ==
+					g_ptr_array_index(viewer_page->pdfv->arr_pages, viewer_page->pdfv->highlight.page[i])) {
+				g_array_append_val(annot.annot_text_markup.arr_quads, viewer_page->pdfv->highlight.quad[i]);
+			}
+			i++;
+		}
+	}
+	else if (viewer_page->pdfv->state == 3)
+	{
+		annot.annot_text.rect.x0 = viewer_page->pdfv->click_pdf_punkt.punkt.x;
+		annot.annot_text.rect.y0 = viewer_page->pdfv->click_pdf_punkt.punkt.y;
+		annot.annot_text.rect.x1 = annot.annot_text.rect.x0 + ANNOT_ICON_WIDTH;
+		annot.annot_text.rect.y1 = annot.annot_text.rect.y0 + ANNOT_ICON_HEIGHT;
+
+		annot.annot_text.rect = viewer_annot_clamp_page(viewer_page, annot.annot_text.rect);
+	}
+
+	zond_pdf_document_mutex_lock(viewer_page->pdf_document_page->document);
+	pdf_annot = pdf_annot_create(ctx, viewer_page->pdf_document_page->page,
+			viewer_page->pdf_document_page->rotate, annot, &error);
+	zond_pdf_document_mutex_unlock(viewer_page->pdf_document_page->document);
+	if (!pdf_annot) {
+		if (errmsg) *errmsg = g_strdup_printf("%s\n%s", __func__, error->message);
+		g_error_free(error);
+		annot_free(&annot);
+
+		return -1;
+	}
+
+	pdf_document_page_annot = g_malloc0(sizeof(PdfDocumentPageAnnot));
+	pdf_document_page_annot->pdf_document_page = viewer_page->pdf_document_page;
+	pdf_document_page_annot->annot = annot;
+
+	g_ptr_array_add(viewer_page->pdf_document_page->arr_annots,
+			pdf_document_page_annot);
+
+	fz_drop_display_list(
+			zond_pdf_document_get_ctx(
+					viewer_page->pdf_document_page->document),
+			viewer_page->pdf_document_page->display_list);
+	viewer_page->pdf_document_page->display_list = NULL;
+	viewer_page->pdf_document_page->thread &= 10;
+
+	viewer_foreach(viewer_page->pdfv, viewer_page->pdf_document_page,
+			viewer_annot_foreach_changed, &annot);
+
+	entry.pdf_document_page = viewer_page->pdf_document_page;
+	entry.type = JOURNAL_TYPE_ANNOT_CREATED;
+	entry.annot_changed.pdf_document_page_annot = pdf_document_page_annot;
+	entry.annot_changed.annot_after = annot_deep_copy(annot);
+	g_array_append_val(zond_pdf_document_get_arr_journal(viewer_page->pdf_document_page->document), entry);
+
+	return 0;
+}
+
+gint viewer_annot_create_markup(PdfViewer *pv, ViewerPageNew* viewer_page,
+		PdfPunkt pdf_punkt, GError **error) {
+	gint von = 0;
+	gint bis = 0;
+
 	if (pv->click_pdf_punkt.seite < pdf_punkt.seite) {
 		von = pv->click_pdf_punkt.seite;
 		bis = pdf_punkt.seite;
@@ -359,6 +543,8 @@ gint viewer_annot_create_markup(PdfViewer *pv, PdfPunkt pdf_punkt, GError **erro
 
 	for (gint page = von; page <= bis; page++) {
 		ViewerPageNew *viewer_page_loop = NULL;
+		gint rc = 0;
+		gchar* errmsg = NULL;
 
 		if (page == pdf_punkt.seite)
 			viewer_page_loop = viewer_page;
@@ -374,11 +560,13 @@ gint viewer_annot_create_markup(PdfViewer *pv, PdfPunkt pdf_punkt, GError **erro
 
 		rc = viewer_annot_create(viewer_page_loop, &errmsg);
 		if (rc) {
-			g_error_set(error, ZOND_ERROR, 0,
+			g_set_error(error, ZOND_ERROR, 0,
 					"%s", errmsg);
 			g_free(errmsg);
 
 			return -1;
 		}
 	}
+
+	return 0;
 }

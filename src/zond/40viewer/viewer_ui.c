@@ -34,6 +34,7 @@
 #include "viewer.h"
 #include "viewer_ui.h"
 #include "viewer_render.h"
+#include "viewer_annot.h"
 
 static void cb_thumb_sel_changed(GtkTreeSelection *sel, gpointer data) {
 	gboolean active = FALSE;
@@ -254,6 +255,10 @@ static gboolean cb_viewer_swindow_key_press(GtkWidget *swindow,
 
 static gboolean cb_viewer_layout_release_button(GtkWidget *layout,
 		GdkEvent *event, gpointer data) {
+	gint rc = 0;
+	ViewerPageNew *viewer_page = NULL;
+	PdfPunkt pdf_punkt = { 0 };
+
 	PdfViewer *pv = (PdfViewer*) data;
 
 	// Nur primärer Button
@@ -263,13 +268,6 @@ static gboolean cb_viewer_layout_release_button(GtkWidget *layout,
 	// UI-Vorbedingung prüfen
 	if (!(pv->dd))
 		return TRUE;
-
-	gint rc = 0;
-	gchar *errmsg = NULL;
-	ViewerPageNew *viewer_page = NULL;
-	PdfPunkt pdf_punkt = { 0 };
-	gint von = 0;
-	gint bis = 0;
 
 	if (event->button.button != GDK_BUTTON_PRIMARY)
 		return FALSE;
@@ -292,7 +290,7 @@ static gboolean cb_viewer_layout_release_button(GtkWidget *layout,
 			gint rc = 0;
 			GError* error = NULL;
 
-			rc = viewer_annot_create_markup(pv, pdf_punkt, &error);
+			rc = viewer_annot_create_markup(pv, viewer_page, pdf_punkt, &error);
 			if (rc) {
 				display_error(pv->vf, "Annotation konnte nicht erstellt werden",
 						error->message);
@@ -311,7 +309,7 @@ static gboolean cb_viewer_layout_release_button(GtkWidget *layout,
 		gint rc = 0;
 		GError* error = NULL;
 
-		rc = viewer_annot_handle_release_clicked_annot(pv, pdf_punkt, &error);
+		rc = viewer_annot_handle_release_clicked_annot(pv, viewer_page, pdf_punkt, &error);
 		if (rc) {
 			display_error(pv->vf, "Annotation konnte nicht bearbeitet werden",
 					error->message);
@@ -375,7 +373,7 @@ static void cb_viewer_annot_edit_closed(GtkWidget *popover, gpointer data) {
 	GError* error = NULL;
 	gint rc = 0;
 
-	rc = viewer_handle_annot_edit_closed(pdfv, popover, &error);
+	rc = viewer_annot_handle_edit_closed(pdfv, popover, &error);
 	if (rc) {
 		display_message(pdfv->vf, "Annotation editieren fehlgeschlagen\n",
 				error->message, NULL);
