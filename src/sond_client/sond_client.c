@@ -1249,4 +1249,220 @@ gboolean sond_client_get_last_regnr(SondClient *client, guint *lfd_nr, guint *ye
     return TRUE;
 }
 
+/* =======================================================================
+ * OCR API
+ * ======================================================================= */
 
+/**
+ * sond_client_ocr_start_job:
+ *
+ * Startet OCR-Job auf dem Server
+ */
+gboolean sond_client_ocr_start_job(SondClient *client,
+                                   const gchar *library_name,
+                                   gboolean force_reprocess,
+                                   GError **error) {
+    g_return_val_if_fail(client != NULL, FALSE);
+    g_return_val_if_fail(library_name != NULL, FALSE);
+
+    /* Lazy-Auth falls nötig */
+    if (!ensure_authenticated(client, error)) {
+        return FALSE;
+    }
+
+    /* URL: POST /ocr/start?library_name=XXX&force_reprocess=false */
+    gchar *url = g_strdup_printf("%s/ocr/start?library_name=%s&force_reprocess=%s",
+                                 client->server_url,
+                                 library_name,
+                                 force_reprocess ? "true" : "false");
+
+    SoupMessage *msg = soup_message_new("POST", url);
+    g_free(url);
+
+    /* Session-Token im Header */
+    add_auth_header(client, msg);
+
+    GBytes *response = soup_session_send_and_read(client->session, msg, NULL, error);
+
+    if (!response) {
+        g_object_unref(msg);
+        return FALSE;
+    }
+
+    guint status_code = soup_message_get_status(msg);
+
+    /* 401 = Session abgelaufen -> Re-Login */
+    if (status_code == 401) {
+        g_bytes_unref(response);
+        g_object_unref(msg);
+
+        if (!handle_auth_error(client, error)) {
+            return FALSE;
+        }
+
+        /* Retry */
+        return sond_client_ocr_start_job(client, library_name, force_reprocess, error);
+    }
+
+    if (status_code != 200) {
+        gsize size;
+        const gchar *body = g_bytes_get_data(response, &size);
+
+        /* Parse error message */
+        JsonParser *parser = json_parser_new();
+        if (json_parser_load_from_data(parser, body, size, NULL)) {
+            JsonNode *root = json_parser_get_root(parser);
+            JsonObject *obj = json_node_get_object(root);
+
+            if (json_object_has_member(obj, "error")) {
+                const gchar *err_msg = json_object_get_string_member(obj, "error");
+                g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                           "OCR start failed: %s", err_msg);
+            } else {
+                g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                           "OCR start failed (HTTP %u)", status_code);
+            }
+        } else {
+            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                       "OCR start failed (HTTP %u)", status_code);
+        }
+        g_object_unref(parser);
+        g_bytes_unref(response);
+        g_object_unref(msg);
+        return FALSE;
+    }
+
+    g_bytes_unref(response);
+    g_object_unref(msg);
+
+    LOG_INFO("OCR job started for library: %s", library_name);
+    return TRUE;
+}
+
+/**
+ * sond_client_ocr_get_status:
+ *
+ * Holt OCR-Status vom Server
+ */
+OcrStatus* sond_client_ocr_get_status(SondClient *client,
+                                      const gchar *library_name,
+                                      GError **error) {
+    g_return_val_if_fail(client != NULL, NULL);
+    g_return_val_if_fail(library_name != NULL, NULL);
+
+    /* Lazy-Auth falls nötig */
+    if (!ensure_authenticated(client, error)) {
+        return NULL;
+    }
+
+    /* URL: GET /ocr/status?library_name=XXX */
+    gchar *url = g_strdup_printf("%s/ocr/status?library_name=%s",
+                                 client->server_url,
+                                 library_name);
+
+    SoupMessage *msg = soup_message_new("GET", url);
+    g_free(url);
+
+    /* Session-Token im Header */
+    add_auth_header(client, msg);
+
+    GBytes *response = soup_session_send_and_read(client->session, msg, NULL, error);
+
+    if (!response) {
+        g_object_unref(msg);
+        return NULL;
+    }
+
+    guint status_code = soup_message_get_status(msg);
+
+    /* 401 = Session abgelaufen -> Re-Login */
+    if (status_code == 401) {
+        g_bytes_unref(response);
+        g_object_unref(msg);
+
+        if (!handle_auth_error(client, error)) {
+            return NULL;
+        }
+
+        /* Retry */
+        return sond_client_ocr_get_status(client, library_name, error);
+    }
+
+    if (status_code == 404) {
+        /* Kein Job gefunden - das ist OK, nicht als Fehler behandeln */
+        g_bytes_unref(response);
+        g_object_unref(msg);
+        return NULL;
+    }
+
+    if (status_code != 200) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                   "OCR status failed (HTTP %u)", status_code);
+        g_bytes_unref(response);
+        g_object_unref(msg);
+        return NULL;
+    }
+
+    /* Parse Response */
+    gsize size;
+    const gchar *body = g_bytes_get_data(response, &size);
+
+    JsonParser *parser = json_parser_new();
+    if (!json_parser_load_from_data(parser, body, size, error)) {
+        g_object_unref(parser);
+        g_bytes_unref(response);
+        g_object_unref(msg);
+        return NULL;
+    }
+
+    JsonNode *root = json_parser_get_root(parser);
+    JsonObject *obj = json_node_get_object(root);
+
+    OcrStatus *status = g_new0(OcrStatus, 1);
+
+    status->running = json_object_get_boolean_member(obj, "running");
+    status->total_files = json_object_get_int_member(obj, "total_files");
+    status->processed_files = json_object_get_int_member(obj, "processed_files");
+    status->processed_pdfs = json_object_get_int_member(obj, "processed_pdfs");
+    status->error_count = json_object_get_int_member(obj, "error_count");
+
+    if (json_object_has_member(obj, "current_file")) {
+        status->current_file = g_strdup(json_object_get_string_member(obj, "current_file"));
+    }
+
+    if (json_object_has_member(obj, "start_time")) {
+        const gchar *start_str = json_object_get_string_member(obj, "start_time");
+        status->start_time = g_date_time_new_from_iso8601(start_str, NULL);
+    }
+
+    if (json_object_has_member(obj, "end_time")) {
+        const gchar *end_str = json_object_get_string_member(obj, "end_time");
+        status->end_time = g_date_time_new_from_iso8601(end_str, NULL);
+    }
+
+    g_object_unref(parser);
+    g_bytes_unref(response);
+    g_object_unref(msg);
+
+    return status;
+}
+
+/**
+ * sond_client_ocr_status_free:
+ *
+ * Gibt OcrStatus frei
+ */
+void sond_client_ocr_status_free(OcrStatus *status) {
+    if (!status) return;
+
+    g_free(status->current_file);
+
+    if (status->start_time) {
+        g_date_time_unref(status->start_time);
+    }
+    if (status->end_time) {
+        g_date_time_unref(status->end_time);
+    }
+
+    g_free(status);
+}

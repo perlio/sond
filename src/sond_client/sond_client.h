@@ -336,6 +336,66 @@ void sond_client_set_last_regnr(SondClient *client, guint lfd_nr, guint year);
  */
 gboolean sond_client_get_last_regnr(SondClient *client, guint *lfd_nr, guint *year);
 
+/**
+ * OcrStatus:
+ *
+ * Status eines OCR-Jobs
+ */
+typedef struct {
+    gboolean running;
+    gint total_files;
+    gint processed_files;
+    gint processed_pdfs;
+    gchar *current_file;
+    gint error_count;
+    GDateTime *start_time;
+    GDateTime *end_time;
+} OcrStatus;
+
+/**
+ * sond_client_ocr_start_job:
+ * @client: SondClient
+ * @library_name: Name der Library (z.B. "2026-23")
+ * @force_reprocess: TRUE = alle Dateien neu verarbeiten
+ * @error: (nullable): Fehler-Rückgabe
+ *
+ * Startet einen OCR-Job auf dem Server.
+ * Führt automatisch Login durch falls nicht authentifiziert.
+ * Bei 401 wird automatisch Re-Login durchgeführt.
+ *
+ * Returns: TRUE bei Erfolg
+ */
+gboolean sond_client_ocr_start_job(SondClient *client,
+                                   const gchar *library_name,
+                                   gboolean force_reprocess,
+                                   GError **error);
+
+/**
+ * sond_client_ocr_get_status:
+ * @client: SondClient
+ * @library_name: Name der Library
+ * @error: (nullable): Fehler-Rückgabe
+ *
+ * Holt OCR-Status für eine Library.
+ * Führt automatisch Login durch falls nicht authentifiziert.
+ * Bei 401 wird automatisch Re-Login durchgeführt.
+ *
+ * Returns: (transfer full) (nullable): OcrStatus oder NULL.
+ *          NULL bedeutet: Kein Job gefunden (404) - das ist kein Fehler!
+ *          Muss mit sond_client_ocr_status_free() freigegeben werden.
+ */
+OcrStatus* sond_client_ocr_get_status(SondClient *client,
+                                      const gchar *library_name,
+                                      GError **error);
+
+/**
+ * sond_client_ocr_status_free:
+ * @status: OcrStatus Instanz
+ *
+ * Gibt OcrStatus frei.
+ */
+void sond_client_ocr_status_free(OcrStatus *status);
+
 G_END_DECLS
 
 #endif /* SOND_CLIENT_H */

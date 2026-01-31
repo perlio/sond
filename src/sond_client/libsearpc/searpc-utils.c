@@ -191,7 +191,6 @@ GObject *json_gobject_deserialize (GType gtype, json_t *object)
     GObject *ret;
     guint n_members, i;
     json_t *head, *member;
-    const char *member_name;
     GArray *construct_params;
 
     klass = g_type_class_ref (gtype);

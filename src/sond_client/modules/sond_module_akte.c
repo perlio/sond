@@ -62,6 +62,10 @@ typedef struct {
     
     /* Offline-Verfügbarkeit */
     GtkWidget *offline_toggle;     /* Toggle Button für Offline */
+
+    /* OCR */                           // NEU
+    GtkWidget *btn_ocr;                 // NEU
+    gchar *library_name;                // NEU - wird bei update_ui_from_node gesetzt
 } SondModuleAktePrivate;
 
 /* Forward declarations */
@@ -71,6 +75,10 @@ static void clear_akte_fields(SondModuleAktePrivate *priv);
 static void update_status_display(SondModuleAktePrivate *priv);
 static void on_offline_toggle_toggled(GtkCheckButton *toggle, SondModuleAktePrivate *priv);
 static void suggest_last_regnr(SondModuleAktePrivate *priv);
+
+/* Forward declarations */
+extern const gchar* sond_client_get_server_url(SondClient *client);
+extern SoupSession* sond_client_get_session(SondClient *client);
 
 /* ========================================================================
  * UI State Management
@@ -153,6 +161,15 @@ static void clear_akte_fields(SondModuleAktePrivate *priv) {
 		g_signal_handlers_unblock_by_func(priv->offline_toggle, on_offline_toggle_toggled, priv);
 		gtk_widget_set_visible(priv->offline_toggle, FALSE);
 	}
+
+    /* Library-Name löschen */
+    g_free(priv->library_name);
+    priv->library_name = NULL;
+
+    /* OCR-Button verstecken */
+    if (priv->btn_ocr) {
+        gtk_widget_set_visible(priv->btn_ocr, FALSE);
+    }
 }
 
 /* ========================================================================
@@ -475,6 +492,14 @@ static void update_status_display(SondModuleAktePrivate *priv) {
     }
 }
 
+static void update_ocr_button_sensitivity(SondModuleAktePrivate *priv) {
+    if (!priv->btn_ocr) return;
+
+    /* OCR-Button ist nur sensitiv wenn NICHT offline */
+    gboolean is_offline = gtk_check_button_get_active(GTK_CHECK_BUTTON(priv->offline_toggle));
+    gtk_widget_set_sensitive(priv->btn_ocr, !is_offline);
+}
+
 static void update_ui_from_node(SondModuleAktePrivate *priv) {
     if (!priv->current_node) {
         clear_akte_fields(priv);
@@ -558,6 +583,23 @@ static void update_ui_from_node(SondModuleAktePrivate *priv) {
 			gtk_widget_set_visible(priv->offline_toggle, FALSE);
 		}
 	}
+
+    /* Library-Name speichern für OCR */
+    g_free(priv->library_name);
+    priv->library_name = NULL;
+
+    if (priv->current_node) {
+        const gchar *regnr = sond_graph_node_get_property_string(priv->current_node, "regnr");
+        if (regnr) {
+            priv->library_name = g_strdup(regnr);  /* z.B. "23/26" */
+        }
+    }
+
+    /* OCR-Button sichtbar machen wenn Library vorhanden */
+    if (priv->btn_ocr) {
+        gtk_widget_set_visible(priv->btn_ocr, priv->library_name != NULL);
+        update_ocr_button_sensitivity(priv);
+    }
 }
 
 /* ========================================================================
@@ -1036,6 +1078,33 @@ static void on_offline_toggle_toggled(GtkCheckButton *toggle, SondModuleAktePriv
     g_free(library_id);
 
 	gtk_widget_set_sensitive(GTK_WIDGET(toggle), TRUE);
+
+    /* OCR-Button aktualisieren */
+    update_ocr_button_sensitivity(priv);
+
+    /* Wenn aktiviert wird: Prüfe ob OCR läuft */
+    if (gtk_check_button_get_active(toggle) && priv->library_name) {
+        GError *error = NULL;
+        OcrStatus *status = sond_client_ocr_get_status(priv->client, priv->library_name, &error);
+
+        if (status && status->running) {
+            /* OCR läuft - Offline nicht erlauben */
+            gtk_check_button_set_active(toggle, FALSE);
+
+            GtkAlertDialog *dialog = gtk_alert_dialog_new(
+                "Offline-Verfügbarkeit nicht möglich!\n\n"
+                "Für diese Akte läuft gerade ein OCR-Job.\n"
+                "Bitte warten Sie bis der Job abgeschlossen ist.");
+
+            gtk_alert_dialog_show(dialog, GTK_WINDOW(gtk_widget_get_root(priv->main_widget)));
+            g_object_unref(dialog);
+        }
+
+        if (status) {
+            sond_client_ocr_status_free(status);
+        }
+        g_clear_error(&error);
+    }
 }
 
 /* Callback-Daten für neuen Akte Dialog */
@@ -1585,6 +1654,194 @@ static void on_abbrechen_clicked(GtkButton *button, SondModuleAktePrivate *priv)
     suggest_last_regnr(priv);
 }
 
+/* =======================================================================
+ * OCR Callbacks
+ * ======================================================================= */
+
+/**
+ * ocr_start_job_with_force:
+ *
+ * Startet OCR-Job (Helper-Funktion)
+ */
+static void ocr_start_job_with_force(SondModuleAktePrivate *priv,
+                                      gboolean force_reprocess) {
+    GError *error = NULL;
+    gboolean success = sond_client_ocr_start_job(priv->client,
+                                          priv->library_name,
+                                          force_reprocess,
+                                          &error);
+
+    GtkAlertDialog *dialog;
+
+    if (success) {
+        dialog = gtk_alert_dialog_new(
+            "OCR-Job wurde gestartet.\n\n"
+            "Die Verarbeitung läuft im Hintergrund auf dem Server.");
+    } else {
+        gchar *msg = g_strdup_printf(
+            "OCR-Job konnte nicht gestartet werden:\n%s",
+            error ? error->message : "Unbekannter Fehler");
+        dialog = gtk_alert_dialog_new("%s", msg);
+        g_free(msg);
+        g_clear_error(&error);
+    }
+
+    gtk_alert_dialog_show(dialog, GTK_WINDOW(gtk_widget_get_root(priv->main_widget)));
+    g_object_unref(dialog);
+}
+
+/**
+ * on_ocr_update_choice_cb:
+ *
+ * Callback für "Update oder Alles neu" Dialog
+ */
+static void on_ocr_update_choice_cb(GObject *source, GAsyncResult *result, gpointer user_data) {
+    SondModuleAktePrivate *priv = user_data;
+    GtkAlertDialog *dialog = GTK_ALERT_DIALOG(source);
+
+    gint response = gtk_alert_dialog_choose_finish(dialog, result, NULL);
+
+    if (response == 0) {
+        /* "Nur Update" */
+        ocr_start_job_with_force(priv, FALSE);
+    } else if (response == 1) {
+        /* "Alle neu verarbeiten" */
+        ocr_start_job_with_force(priv, TRUE);
+    }
+    /* response == 2 oder -1 = Abbrechen */
+}
+
+/**
+ * on_ocr_first_run_cb:
+ *
+ * Callback für ersten OCR-Lauf Dialog
+ */
+static void on_ocr_first_run_cb(GObject *source, GAsyncResult *result, gpointer user_data) {
+    SondModuleAktePrivate *priv = user_data;
+    GtkAlertDialog *dialog = GTK_ALERT_DIALOG(source);
+
+    gint response = gtk_alert_dialog_choose_finish(dialog, result, NULL);
+
+    if (response == 0) {
+        /* "Ja" */
+        ocr_start_job_with_force(priv, FALSE);
+    }
+    /* response == 1 oder -1 = Nein/Abbrechen */
+}
+
+/**
+ * on_ocr_clicked:
+ *
+ * Handler für OCR-Button
+ */
+static void on_ocr_clicked(GtkButton *button, SondModuleAktePrivate *priv) {
+    if (!priv->library_name) {
+        LOG_ERROR("OCR clicked but no library_name set");
+        return;
+    }
+
+    /* 1. Status prüfen */
+    GError *error = NULL;
+    OcrStatus *status = sond_client_ocr_get_status(priv->client, priv->library_name, &error);
+
+    if (error) {
+        /* Fehler beim Status-Abruf */
+        gchar *msg = g_strdup_printf(
+            "Fehler beim Abrufen des OCR-Status:\n%s",
+            error->message);
+
+        GtkAlertDialog *dialog = gtk_alert_dialog_new("%s", msg);
+        gtk_alert_dialog_show(dialog, GTK_WINDOW(gtk_widget_get_root(priv->main_widget)));
+        g_object_unref(dialog);
+
+        g_free(msg);
+        g_error_free(error);
+        return;
+    }
+
+    /* 2. Läuft bereits ein Job? */
+    if (status && status->running) {
+        /* Job läuft bereits */
+        gchar *msg = g_strdup_printf(
+            "OCR-Job läuft bereits!\n\n"
+            "Fortschritt: %d/%d Dateien\n%d PDFs verarbeitet",
+            status->processed_files,
+            status->total_files,
+            status->processed_pdfs);
+
+        GtkAlertDialog *dialog = gtk_alert_dialog_new("%s", msg);
+        gtk_alert_dialog_show(dialog, GTK_WINDOW(gtk_widget_get_root(priv->main_widget)));
+        g_object_unref(dialog);
+
+        g_free(msg);
+        sond_client_ocr_status_free(status);
+        return;
+    }
+
+    /* 3. War schon mal ein Job? */
+    gboolean had_previous_job = (status != NULL && status->end_time != NULL);
+
+    if (had_previous_job) {
+        /* Zeige wann letzter Job war und frage ob Update */
+        gchar *end_str = g_date_time_format(status->end_time, "%d.%m.%Y %H:%M");
+        gchar *msg = g_strdup_printf(
+            "OCR wurde zuletzt am %s durchgeführt.\n\n"
+            "Sollen nur geänderte und neue Dateien verarbeitet werden?",
+            end_str);
+
+        const char *buttons[] = {
+            "Nur Update",
+            "Alle neu verarbeiten",
+            "Abbrechen",
+            NULL
+        };
+
+        GtkAlertDialog *dialog = gtk_alert_dialog_new("%s", msg);
+        gtk_alert_dialog_set_buttons(dialog, buttons);
+        gtk_alert_dialog_set_cancel_button(dialog, 2);
+        gtk_alert_dialog_set_default_button(dialog, 0);
+
+        gtk_alert_dialog_choose(dialog,
+                               GTK_WINDOW(gtk_widget_get_root(priv->main_widget)),
+                               NULL,
+                               on_ocr_update_choice_cb,
+                               priv);
+
+        g_object_unref(dialog);
+        g_free(msg);
+        g_free(end_str);
+        sond_client_ocr_status_free(status);
+
+    } else {
+        /* Erster Job - direkt starten */
+        if (status) {
+            sond_client_ocr_status_free(status);
+        }
+
+        const char *buttons[] = {
+            "Ja",
+            "Nein",
+            NULL
+        };
+
+        GtkAlertDialog *dialog = gtk_alert_dialog_new(
+            "OCR für diese Akte starten?\n\n"
+            "Dies kann je nach Anzahl der Dateien mehrere Stunden dauern.");
+
+        gtk_alert_dialog_set_buttons(dialog, buttons);
+        gtk_alert_dialog_set_cancel_button(dialog, 1);
+        gtk_alert_dialog_set_default_button(dialog, 0);
+
+        gtk_alert_dialog_choose(dialog,
+                               GTK_WINDOW(gtk_widget_get_root(priv->main_widget)),
+                               NULL,
+                               on_ocr_first_run_cb,
+                               priv);
+
+        g_object_unref(dialog);
+    }
+}
+
 /* ========================================================================
  * Public API
  * ======================================================================== */
@@ -1668,6 +1925,21 @@ GtkWidget* sond_module_akte_new(SondClient *client) {
 	g_signal_connect(priv->offline_toggle, "toggled", G_CALLBACK(on_offline_toggle_toggled), priv);
 	gtk_widget_set_visible(priv->offline_toggle, FALSE);
 	gtk_box_append(GTK_BOX(status_box), priv->offline_toggle);
+
+	/* Offline-Toggle Button */
+	priv->offline_toggle = gtk_check_button_new_with_label("Offline verfügbar");
+	gtk_widget_set_margin_start(priv->offline_toggle, 20);
+	g_signal_connect(priv->offline_toggle, "toggled", G_CALLBACK(on_offline_toggle_toggled), priv);
+	gtk_widget_set_visible(priv->offline_toggle, FALSE);
+	gtk_box_append(GTK_BOX(status_box), priv->offline_toggle);
+
+	/* OCR Button */                                         // NEU
+	priv->btn_ocr = gtk_button_new_with_label("OCR");       // NEU
+	gtk_widget_set_margin_start(priv->btn_ocr, 10);         // NEU
+	g_signal_connect(priv->btn_ocr, "clicked",              // NEU
+					G_CALLBACK(on_ocr_clicked), priv);      // NEU
+	gtk_widget_set_visible(priv->btn_ocr, FALSE);           // NEU
+	gtk_box_append(GTK_BOX(status_box), priv->btn_ocr);     // NEU
 
 	/* Spacer */
     GtkWidget *spacer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
