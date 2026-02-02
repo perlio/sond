@@ -148,11 +148,9 @@ static void clear_akte_fields(SondModuleAktePrivate *priv) {
     gtk_editable_set_text(GTK_EDITABLE(priv->textview_gegenstand), "");  /* Jetzt Entry */
     
     /* Status zurücksetzen */
-    if (priv->status_label) {
-        gtk_label_set_text(GTK_LABEL(priv->status_label), "Status: -");
-        gtk_widget_set_visible(priv->btn_ablegen, FALSE);
-        gtk_widget_set_visible(priv->btn_reaktivieren, FALSE);
-    }
+	gtk_label_set_text(GTK_LABEL(priv->status_label), "Status: -");
+	gtk_widget_set_visible(priv->btn_ablegen, FALSE);
+	gtk_widget_set_visible(priv->btn_reaktivieren, FALSE);
 
     /* Offline-Toggle zurücksetzen */
 	if (priv->offline_toggle) {
@@ -167,9 +165,7 @@ static void clear_akte_fields(SondModuleAktePrivate *priv) {
     priv->library_name = NULL;
 
     /* OCR-Button verstecken */
-    if (priv->btn_ocr) {
-        gtk_widget_set_visible(priv->btn_ocr, FALSE);
-    }
+	gtk_widget_set_visible(priv->btn_ocr, FALSE);
 }
 
 /* ========================================================================
@@ -446,7 +442,7 @@ static gboolean get_next_ablnr(SondModuleAktePrivate *priv, gchar **ablnr, GErro
 }
 
 static void update_status_display(SondModuleAktePrivate *priv) {
-    if (!priv->current_node || !priv->status_label) {
+    if (!priv->current_node) {
         return;
     }
     
@@ -493,30 +489,31 @@ static void update_status_display(SondModuleAktePrivate *priv) {
 }
 
 static void update_ocr_button_sensitivity(SondModuleAktePrivate *priv) {
-    if (!priv->btn_ocr) return;
-
     /* OCR-Button ist nur sensitiv wenn NICHT offline */
     gboolean is_offline = gtk_check_button_get_active(GTK_CHECK_BUTTON(priv->offline_toggle));
     gtk_widget_set_sensitive(priv->btn_ocr, !is_offline);
 }
 
 static void update_ui_from_node(SondModuleAktePrivate *priv) {
+	guint year = 0;
+	guint lfd_nr = 0;
+
     if (!priv->current_node) {
         clear_akte_fields(priv);
-        if (priv->status_label) {
-            gtk_label_set_text(GTK_LABEL(priv->status_label), "Status: -");
-            gtk_widget_set_visible(priv->btn_ablegen, FALSE);
-            gtk_widget_set_visible(priv->btn_reaktivieren, FALSE);
-        }
-        return;
+
+        gtk_label_set_text(GTK_LABEL(priv->status_label), "Status: -");
+		gtk_widget_set_visible(priv->btn_ablegen, FALSE);
+		gtk_widget_set_visible(priv->btn_reaktivieren, FALSE);
+
+		return;
     }
     
     /* RegNr extrahieren */
     GPtrArray *regnr_values = sond_graph_node_get_property(priv->current_node, "regnr");
     if (regnr_values && regnr_values->len == 2) {
-        guint year = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 0), NULL, 10);  /* Index 0 = Jahr */
-        guint lfd = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 1), NULL, 10);   /* Index 1 = lfd_nr */
-        gchar *regnr_display = format_regnr(lfd, year);
+        year = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 0), NULL, 10);  /* Index 0 = Jahr */
+        lfd_nr = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 1), NULL, 10);   /* Index 1 = lfd_nr */
+        gchar *regnr_display = format_regnr(lfd_nr, year);
         gtk_editable_set_text(GTK_EDITABLE(priv->regnr_entry), regnr_display);
         g_free(regnr_display);
         g_ptr_array_unref(regnr_values);
@@ -540,66 +537,41 @@ static void update_ui_from_node(SondModuleAktePrivate *priv) {
     update_status_display(priv);
 
     /* Offline-Toggle Status aktualisieren */
-	if (priv->offline_toggle && priv->current_node) {
+	if (priv->offline_toggle) {
 		gint64 node_id = sond_graph_node_get_id(priv->current_node);
 
 		if (node_id > 0) {
-			GPtrArray *regnr_values = sond_graph_node_get_property(priv->current_node, "regnr");
-			if (regnr_values && regnr_values->len == 2) {
-				guint year = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 0), NULL, 10);
-				guint lfd = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 1), NULL, 10);
-				gchar *regnr = format_regnr_storage(lfd, year);
-				g_ptr_array_unref(regnr_values);
+			SondOfflineManager *manager = sond_client_get_offline_manager(priv->client);
+			gchar *regnr = format_regnr_storage(lfd_nr, year);
 
-				SondOfflineManager *manager = sond_client_get_offline_manager(priv->client);
-				if (manager) {
-					SondOfflineAkte *akte = sond_offline_manager_get_akte(manager, regnr);
-					
-					if (akte && akte->syncing_enabled) {
-						/* Akte in Liste UND Sync aktiv → Toggle AN */
-						g_signal_handlers_block_by_func(priv->offline_toggle, on_offline_toggle_toggled, priv);
-						gtk_check_button_set_active(GTK_CHECK_BUTTON(priv->offline_toggle), TRUE);
-						g_signal_handlers_unblock_by_func(priv->offline_toggle, on_offline_toggle_toggled, priv);
+			SondOfflineAkte *akte = sond_offline_manager_get_akte(manager, regnr);
 
-						gtk_widget_set_visible(priv->offline_toggle, TRUE);
-					} else {
-						/* Nicht in Liste ODER pausiert → Toggle AUS */
-						g_signal_handlers_block_by_func(priv->offline_toggle, on_offline_toggle_toggled, priv);
-						gtk_check_button_set_active(GTK_CHECK_BUTTON(priv->offline_toggle), FALSE);
-						g_signal_handlers_unblock_by_func(priv->offline_toggle, on_offline_toggle_toggled, priv);
-
-						gtk_widget_set_visible(priv->offline_toggle, TRUE);
-					}
-				} else {
-					gtk_widget_set_visible(priv->offline_toggle, FALSE);
-				}
-
-				g_free(regnr);
-			} else {
-				gtk_widget_set_visible(priv->offline_toggle, FALSE);
-				if (regnr_values) g_ptr_array_unref(regnr_values);
+			g_signal_handlers_block_by_func(priv->offline_toggle, on_offline_toggle_toggled, priv);
+			if (akte && akte->syncing_enabled) {
+				/* Akte in Liste UND Sync aktiv → Toggle AN */
+				gtk_check_button_set_active(GTK_CHECK_BUTTON(priv->offline_toggle), TRUE);
 			}
-		} else {
-			gtk_widget_set_visible(priv->offline_toggle, FALSE);
+			else {
+				/* Nicht in Liste ODER pausiert → Toggle AUS */
+				gtk_check_button_set_active(GTK_CHECK_BUTTON(priv->offline_toggle), FALSE);
+			}
+			g_signal_handlers_unblock_by_func(priv->offline_toggle, on_offline_toggle_toggled, priv);
+
+			gtk_widget_set_visible(priv->offline_toggle, TRUE);
+
+			/* Library-Name speichern für OCR */
+			g_free(priv->library_name);
+			priv->library_name = regnr;  /* ownership übernehmen*/
+		}
+		else {
+			g_free(priv->library_name);
+			priv->library_name = NULL;
 		}
 	}
 
-    /* Library-Name speichern für OCR */
-    g_free(priv->library_name);
-    priv->library_name = NULL;
-
-    if (priv->current_node) {
-        const gchar *regnr = sond_graph_node_get_property_string(priv->current_node, "regnr");
-        if (regnr) {
-            priv->library_name = g_strdup(regnr);  /* z.B. "23/26" */
-        }
-    }
-
     /* OCR-Button sichtbar machen wenn Library vorhanden */
-    if (priv->btn_ocr) {
-        gtk_widget_set_visible(priv->btn_ocr, priv->library_name != NULL);
-        update_ocr_button_sensitivity(priv);
-    }
+	gtk_widget_set_visible(priv->btn_ocr, priv->library_name != NULL);
+	update_ocr_button_sensitivity(priv);
 }
 
 /* ========================================================================

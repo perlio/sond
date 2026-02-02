@@ -319,21 +319,24 @@ static void send_error_response(SoupServerMessage *msg,
 /* =======================================================================
  * Forward Declarations - Seafile Interaction
  * ======================================================================= */
-static void seafile_list_files_recursive(SeafileConfig *config,
+static gboolean seafile_list_files_recursive(SeafileConfig *config,
                                          SoupSession *session,
                                          const gchar *path,
-                                         GList **files);
+                                         GList **files,
+										 GError** error);
 
 static guchar* seafile_download_file(SeafileConfig *config,
                                      SoupSession *session,
                                      const gchar *file_path,
-                                     gsize *out_size);
+                                     gsize *out_size,
+									 GError** error);
 
 static gboolean seafile_upload_file(SeafileConfig *config,
                                    SoupSession *session,
                                    const gchar *file_path,
                                    guchar *data,
-                                   gsize size);
+                                   gsize size,
+								   GError** error);
 
 static ProcessedFile process_file_for_ocr(const gchar *filename,
                                           guchar *data,
@@ -367,8 +370,9 @@ static void send_error_response(SoupServerMessage *msg,
  * Liest .ocr_log.json aus Seafile Repo
  */
 static OcrLogEntry* ocr_log_read(SeafileConfig *config, SoupSession *session) {
-    gsize data_size;
-    guchar *data = seafile_download_file(config, session, OCR_LOG_FILENAME, &data_size);
+    gsize data_size = 0;
+
+    guchar *data = seafile_download_file(config, session, OCR_LOG_FILENAME, &data_size, NULL);
 
     OcrLogEntry *entry = g_new0(OcrLogEntry, 1);
     entry->files = g_hash_table_new_full(g_str_hash, g_str_equal,
@@ -385,7 +389,7 @@ static OcrLogEntry* ocr_log_read(SeafileConfig *config, SoupSession *session) {
     GError *error = NULL;
 
     if (!json_parser_load_from_data(parser, (const gchar*)data, data_size, &error)) {
-        g_warning("Failed to parse OCR log: %s", error->message);
+        LOG_WARN("Failed to parse OCR log: %s", error->message);
         g_error_free(error);
         g_free(data);
         g_object_unref(parser);
@@ -432,6 +436,8 @@ static OcrLogEntry* ocr_log_read(SeafileConfig *config, SoupSession *session) {
  */
 static gboolean ocr_log_write(SeafileConfig *config, SoupSession *session,
                               OcrLogEntry *log_entry) {
+	GError* error = NULL;
+
     JsonBuilder *builder = json_builder_new();
     json_builder_begin_object(builder);
 
@@ -474,7 +480,7 @@ static gboolean ocr_log_write(SeafileConfig *config, SoupSession *session,
     gsize json_size = strlen(json_data);
 
     gboolean success = seafile_upload_file(config, session, OCR_LOG_FILENAME,
-                                          (guchar*)json_data, json_size);
+                                          (guchar*)json_data, json_size, &error);
 
     g_free(json_data);
     g_object_unref(gen);
@@ -939,44 +945,48 @@ void ocr_manager_free(OcrManager *manager) {
  *
  * Listet rekursiv alle Dateien in einem Seafile-Pfad
  */
-static void seafile_list_files_recursive(SeafileConfig *config,
+static gboolean seafile_list_files_recursive(SeafileConfig *config,
                                          SoupSession *session,
                                          const gchar *path,
-                                         GList **files) {
+                                         GList **files,
+										 GError **error) {
+    gchar *encoded_path = g_uri_escape_string(path, "/", FALSE);
     gchar *url = g_strdup_printf("%s/api2/repos/%s/dir/?p=%s",
                                  config->server_url,
                                  config->repo_id,
-                                 path);
+                                 encoded_path);
+    g_free(encoded_path);
 
     SoupMessage *msg = soup_message_new("GET", url);
     g_free(url);
+    if (!msg) {
+    	g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+				   "Failed to create SoupMessage for URL: %s", url);
+        return FALSE;
+    }
 
     gchar *auth_header = g_strdup_printf("Token %s", config->auth_token);
     soup_message_headers_append(soup_message_get_request_headers(msg),
                                "Authorization", auth_header);
     g_free(auth_header);
 
-    GBytes *response_bytes = soup_session_send_and_read(session, msg, NULL, NULL);
+    GBytes *response_bytes = soup_session_send_and_read(session, msg, NULL, error);
 
     if (!response_bytes) {
-        g_warning("Failed to list directory: %s", path);
         g_object_unref(msg);
-        return;
+        return FALSE;
     }
 
-    gsize response_size;
+    gsize response_size = 0;
     gconstpointer response_data = g_bytes_get_data(response_bytes, &response_size);
 
     JsonParser *parser = json_parser_new();
-    GError *error = NULL;
     
-    if (!json_parser_load_from_data(parser, response_data, response_size, &error)) {
-        g_warning("Failed to parse JSON: %s", error->message);
-        g_error_free(error);
+    if (!json_parser_load_from_data(parser, response_data, response_size, error)) {
         g_object_unref(parser);
         g_bytes_unref(response_bytes);
         g_object_unref(msg);
-        return;
+        return FALSE;
     }
 
     JsonNode *root = json_parser_get_root(parser);
@@ -1014,8 +1024,13 @@ static void seafile_list_files_recursive(SeafileConfig *config,
             *files = g_list_append(*files, file);
 
         } else if (g_strcmp0(type, "dir") == 0) {
-            g_debug("Entering directory: %s", full_path);
-            seafile_list_files_recursive(config, session, full_path, files);
+        	if (!seafile_list_files_recursive(config, session, full_path, files, error)) {
+        		g_free(full_path);
+				g_object_unref(parser);
+				g_bytes_unref(response_bytes);
+				g_object_unref(msg);
+				return FALSE;
+        	}
             g_free(full_path);
         }
     }
@@ -1023,6 +1038,8 @@ static void seafile_list_files_recursive(SeafileConfig *config,
     g_object_unref(parser);
     g_bytes_unref(response_bytes);
     g_object_unref(msg);
+
+    return TRUE;
 }
 
 /**
@@ -1033,25 +1050,33 @@ static void seafile_list_files_recursive(SeafileConfig *config,
 static guchar* seafile_download_file(SeafileConfig *config,
                                      SoupSession *session,
                                      const gchar *file_path,
-                                     gsize *out_size) {
+                                     gsize *out_size,
+									 GError** error) {
     /* 1. Get download link */
+    gchar *encoded_path = g_uri_escape_string(file_path, "/", FALSE);
     gchar *url = g_strdup_printf("%s/api2/repos/%s/file/?p=%s",
                                  config->server_url,
                                  config->repo_id,
-                                 file_path);
+                                 encoded_path);
+    g_free(encoded_path);
 
     SoupMessage *msg = soup_message_new("GET", url);
     g_free(url);
+    if (!msg) {
+    	g_set_error(error, G_IO_ERROR, G_IO_ERR, "SoupMessage für Download '%s' "
+    			"konnte nicht erstellt werden", file_path);
+        return NULL;
+    }
 
+    SoupMessageHeaders *headers = soup_message_get_request_headers(msg);
+    
     gchar *auth_header = g_strdup_printf("Token %s", config->auth_token);
-    soup_message_headers_append(soup_message_get_request_headers(msg),
-                               "Authorization", auth_header);
+    soup_message_headers_append(headers, "Authorization", auth_header);
     g_free(auth_header);
 
-    GBytes *link_bytes = soup_session_send_and_read(session, msg, NULL, NULL);
+    GBytes *link_bytes = soup_session_send_and_read(session, msg, NULL, error);
 
     if (!link_bytes) {
-        g_warning("Failed to get download link for: %s", file_path);
         g_object_unref(msg);
         return NULL;
     }
@@ -1069,15 +1094,22 @@ static guchar* seafile_download_file(SeafileConfig *config,
 
     g_bytes_unref(link_bytes);
     g_object_unref(msg);
+    msg = NULL;
 
     /* 2. Download actual file */
     msg = soup_message_new("GET", download_url);
+    if (!msg) {
+    	g_set_error(error, G_IO_ERROR, G_IO_ERR, "SoupMessage für Downloadlink '%s' "
+    			"konnte nicht erstellt werden", download_url);
+        g_free(download_url);
+        return NULL;
+    }
+
     g_free(download_url);
 
-    GBytes *file_bytes = soup_session_send_and_read(session, msg, NULL, NULL);
+    GBytes *file_bytes = soup_session_send_and_read(session, msg, NULL, error);
 
-    if (!file_bytes) {
-        g_warning("Failed to download file: %s", file_path);
+	if (!file_bytes) {
         g_object_unref(msg);
         return NULL;
     }
@@ -1101,7 +1133,8 @@ static gboolean seafile_upload_file(SeafileConfig *config,
                                    SoupSession *session,
                                    const gchar *file_path,
                                    guchar *data,
-                                   gsize size) {
+                                   gsize size,
+								   GError** error) {
     /* 1. Get upload link */
     gchar *url = g_strdup_printf("%s/api2/repos/%s/upload-link/?p=/",
                                  config->server_url,
@@ -1109,21 +1142,24 @@ static gboolean seafile_upload_file(SeafileConfig *config,
 
     SoupMessage *msg = soup_message_new("GET", url);
     g_free(url);
+    if (!msg) {
+    	g_set_error(error, G_IO_ERROR, G_IO_ERR, "SoupMessage für Uploadlink "
+				"konnte nicht erstellt werden");
+		return FALSE;
+    }
 
     gchar *auth_header = g_strdup_printf("Token %s", config->auth_token);
     soup_message_headers_append(soup_message_get_request_headers(msg),
                                "Authorization", auth_header);
     g_free(auth_header);
 
-    GBytes *link_bytes = soup_session_send_and_read(session, msg, NULL, NULL);
-
+    GBytes *link_bytes = soup_session_send_and_read(session, msg, NULL, error);
     if (!link_bytes) {
-        g_warning("Failed to get upload link");
         g_object_unref(msg);
         return FALSE;
     }
 
-    gsize link_size;
+    gsize link_size = 0;
     gconstpointer link_data = g_bytes_get_data(link_bytes, &link_size);
 
     gchar *upload_url = g_strndup(link_data, link_size);
@@ -1167,28 +1203,32 @@ static gboolean seafile_upload_file(SeafileConfig *config,
     /* Create message */
     msg = soup_message_new("POST", upload_url);
     g_free(upload_url);
+    if (!msg) {
+    	g_set_error(error, G_IO_ERROR, G_IO_ERR, "SoupMessage für Upload "
+				"konnte nicht erstellt werden");
+        g_free(boundary);
+		return FALSE;
+    }
 
     gchar *content_type = g_strdup_printf("multipart/form-data; boundary=%s", boundary);
+    g_free(boundary);
+
     gchar *body_str = g_string_free(body, FALSE);  /* Get string, free GString */
     GBytes *body_bytes = g_bytes_new_take(body_str, strlen(body_str));
 
     soup_message_set_request_body_from_bytes(msg, content_type, body_bytes);
-
-    g_free(content_type);
-    g_free(boundary);
-
-    GBytes *response = soup_session_send_and_read(session, msg, NULL, NULL);
-
-    gboolean success = (response != NULL);
-
-    if (response) {
-        g_bytes_unref(response);
-    }
-
     g_bytes_unref(body_bytes);
+    g_free(content_type);
+
+    GBytes *response = soup_session_send_and_read(session, msg, NULL, error);
     g_object_unref(msg);
 
-    return success;
+    if (!response)
+    	return FALSE;
+
+    g_bytes_unref(response);
+
+    return TRUE;
 }
 
 /**
@@ -1217,13 +1257,13 @@ static void seafile_file_free(SeafileFile *file) {
  * Worker-Thread der die OCR-Verarbeitung durchführt
  */
 static gpointer seafile_ocr_worker_thread(gpointer user_data) {
+	GError *error = NULL;
+
     WorkerThreadData *thread_data = (WorkerThreadData*)user_data;
     OcrManager *manager = thread_data->manager;
     OcrJobInfo *job_info = thread_data->job_info;
 
     g_free(thread_data);
-
-    LOG_INFO("Starting Seafile OCR worker for repo: %s", job_info->repo_id);
 
     /* Seafile Config erstellen */
     SeafileConfig config;
@@ -1239,10 +1279,26 @@ static gpointer seafile_ocr_worker_thread(gpointer user_data) {
 
     /* Liste alle Dateien rekursiv */
     GList *files = NULL;
-    seafile_list_files_recursive(&config, session, config.base_path, &files);
+    if (!seafile_list_files_recursive(&config, session, config.base_path, &files, &error)) {
+		gchar *err_msg = g_strdup_printf("Failed to list files in repository: %s",
+				error ? error->message : "unknown");
+		g_error_free(error);
+		ocr_job_add_error(job_info, "/", err_msg);
+		g_free(err_msg);
+
+		ocr_log_entry_free(log_entry);
+		g_object_unref(session);
+
+		g_free(config.server_url);
+		g_free(config.auth_token);
+		g_free(config.repo_id);
+		g_free(config.base_path);
+
+		ocr_job_mark_complete(job_info);
+		return NULL;
+    }
 
     guint file_count = g_list_length(files);
-    LOG_INFO("Found %u files in repository", file_count);
 
     /* Total files setzen */
     g_mutex_lock(&job_info->mutex);
@@ -1272,36 +1328,28 @@ static gpointer seafile_ocr_worker_thread(gpointer user_data) {
             }
         }
 
-        if (!should_process) {
-            LOG_INFO("[%u/%u] Skipping (unchanged): %s", i, file_count, file->path);
-            ocr_job_update_progress(job_info, file->path);
-            continue;
-        }
-
-        LOG_INFO("[%u/%u] Processing: %s", i, file_count, file->path);
         ocr_job_update_progress(job_info, file->path);
+
+        if (!should_process)
+            continue;
 
         /* Download */
         gsize data_size;
-        guchar *data = seafile_download_file(&config, session, file->path, &data_size);
-
+        guchar *data = seafile_download_file(&config, session, file->path, &data_size, &error);
         if (!data) {
-            gchar *err_msg = g_strdup_printf("Download failed");
+            gchar *err_msg = g_strdup_printf("Download failed: %s", error->message);
+            g_clear_error(&error);
             ocr_job_add_error(job_info, file->path, err_msg);
-            LOG_ERROR("  ✗ %s: %s", file->path, err_msg);
             g_free(err_msg);
             continue;
         }
 
         /* Verarbeiten */
-        GError *process_error = NULL;
         ProcessedFile processed = process_file_for_ocr(file->path, data, data_size,
-                                                      &process_error);
-
-        if (process_error) {
-            ocr_job_add_error(job_info, file->path, process_error->message);
-            LOG_ERROR("  ✗ %s: %s", file->path, process_error->message);
-            g_error_free(process_error);
+        		job_info, &error);
+        if (error) {
+            ocr_job_add_error(job_info, file->path, error->message);
+            g_clear_error(&error);
             g_free(data);
             continue;
         }
@@ -1313,19 +1361,15 @@ static gpointer seafile_ocr_worker_thread(gpointer user_data) {
 
         /* Upload */
         gboolean upload_success = seafile_upload_file(&config, session, file->path,
-                                                      processed.data, processed.size);
-
+        		processed.data, processed.size, &error);
         if (!upload_success) {
             gchar *err_msg = g_strdup("Upload failed");
             ocr_job_add_error(job_info, file->path, err_msg);
-            LOG_ERROR("  ✗ %s: %s", file->path, err_msg);
             g_free(err_msg);
         } else {
             /* In Log eintragen */
             GDateTime *now = g_date_time_new_now_local();
             g_hash_table_insert(log_entry->files, g_strdup(file->path), now);
-
-            LOG_INFO("  ✓ Successfully processed: %s", file->path);
         }
 
         g_free(processed.data);
@@ -1376,6 +1420,7 @@ static gpointer seafile_ocr_worker_thread(gpointer user_data) {
 static ProcessedFile process_file_for_ocr(const gchar *filename,
                                           guchar *data,
                                           gsize size,
+										  OcrJobInfo* job_info,
                                           GError **error) {
     /* TODO: Hier kommt die eigentliche OCR-Logik */
     /* - Container erkennen (ZIP, EML, PDF) */

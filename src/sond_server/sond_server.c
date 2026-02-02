@@ -1383,12 +1383,12 @@ static gboolean sond_server_prepare(SondServer*server,
 
     data_config_free(&data_config);
 
+    /* SoupServer erstellen */
+    server->soup_server = soup_server_new(NULL, NULL);
+
     /* OCR Manager erstellen */
     server->ocr_manager = ocr_manager_new(server);
 
-    /* SoupServer erstellen */
-    server->soup_server = soup_server_new(NULL, NULL);
-    
     /* SessionManager erstellen */
     server->session_manager = session_manager_new(server->session_lifetime_hours,
                                                    server->session_inactivity_minutes);
