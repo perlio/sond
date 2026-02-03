@@ -19,9 +19,8 @@
 #include "sond_server_ocr.h"
 #include "sond_server_seafile.h"
 #include "../sond_log_and_error.h"
-#include "../misc.h"
-
-#include "../zond/99conv/pdf.h"
+#include "../sond_pdf_helper.h"
+#include "../sond_misc.h"
 
 #include <libsoup/soup.h>
 #include <json-glib/json-glib.h>
@@ -1420,27 +1419,27 @@ static gpointer seafile_ocr_worker_thread(gpointer user_data) {
 
 static void dispatch_buffer(fz_context* ctx, guchar* data, gsize size,
 		gchar const* filename, OcrJobInfo* job_info,
-		guchar** out_data, gsize* out_size, gint* out_pdf_count,
-		GError** error);
+		guchar** out_data, gsize* out_size, gint* out_pdf_count);
 
-static void process_zip_for_ocr(fz_context* ctx, guchar* data, gsize size,
-		OcrJobInfo* job_info,
+static gint process_zip_for_ocr(fz_context* ctx, guchar* data, gsize size,
+		gchar const* filename, OcrJobInfo* job_info,
 		guchar** out_data, gsize* out_size, gint* out_pdf_count,
 		GError** error) {
 
-	return;
+	return 0;
 }
 
-static void process_gmessage_for_ocr(fz_context* ctx, guchar* data, gsize size,
-		OcrJobInfo* job_info,
+static gint process_gmessage_for_ocr(fz_context* ctx, guchar* data, gsize size,
+		gchar const* filename, OcrJobInfo* job_info,
 		guchar** out_data, gsize* out_size, gint* out_pdf_count,
 		GError** error) {
 
-	return;
+	return 0;
 }
 
 typedef struct {
 	pdf_document* doc;
+	gchar const* filename;
 	OcrJobInfo* job_info;
 	gint* out_pdf_count;
 } ProcessPdfData;
@@ -1454,31 +1453,52 @@ static gint process_emb_file(fz_context* ctx, pdf_obj* dict,
 	fz_buffer* buf = NULL;
 
 	EF_F = pdf_get_EF_F(ctx, val, &path, error);
-	if (!EF_F && error && *error)
-		return -1;
-	else if (!EF_F) {
-		g_set_error(error, G_IO_ERROR, G_IO_ERR,
-				"No EF/F entry");
-		return -1;
+	if (!EF_F) {
+		gchar* err_msg = g_strdup_printf("EF/F-key nicht gefunden: %s",
+				error ? (*error)->message : "unknown error");
+		g_clear_error(error);
+		ocr_job_add_error(((ProcessPdfData*)data)->job_info,
+				((ProcessPdfData*)data)->filename,
+				err_msg);
+		g_free(err_msg);
+
+		return 0; //kein Abbruch, nur Fehler protokollieren
 	}
 
 	if (!path) {
-		g_set_error(error, G_IO_ERROR, G_IO_ERR,
+		ocr_job_add_error(((ProcessPdfData*)data)->job_info,
+				((ProcessPdfData*)data)->filename,
 				"No path for embedded file");
-		return -1;
+		return 0;
 	}
+
+	gchar* filename_emb = g_strdup_printf("%s//%s", ((ProcessPdfData*)data)->filename, path);
 
 	fz_try(ctx)
 		stream = pdf_open_stream(ctx, EF_F);
-	fz_catch(ctx)
-		ERROR_PDF
+	fz_catch(ctx) {
+		gchar* err_msg = g_strdup_printf("Failed to open embedded file stream: %s",
+				fz_caught_message(ctx) ? fz_caught_message(ctx) : "unknown error");
+		ocr_job_add_error(((ProcessPdfData*)data)->job_info, filename_emb,
+				err_msg);
+		g_free(err_msg);
+		g_free(filename_emb);
+		return 0;
+	}
 
 	fz_try(ctx)
 		buf = fz_read_all(ctx, stream, 4096);
 	fz_always(ctx)
 		fz_drop_stream(ctx, stream);
-	fz_catch(ctx)
-		ERROR_PDF
+	fz_catch(ctx) {
+		gchar* err_msg = g_strdup_printf("Failed to read embedded file stream: %s",
+				fz_caught_message(ctx) ? fz_caught_message(ctx) : "unknown error");
+		ocr_job_add_error(((ProcessPdfData*)data)->job_info, filename_emb,
+				err_msg);
+		g_free(err_msg);
+		g_free(filename_emb);
+		return 0;
+	}
 
 	guchar* data_buf = NULL;
 	gsize len = 0;
@@ -1486,10 +1506,9 @@ static gint process_emb_file(fz_context* ctx, pdf_obj* dict,
 
 	guchar* data_out = NULL;
 	gsize size_out = 0;
-	dispatch_buffer(ctx, data_buf, len,
-			path, ((ProcessPdfData*)data)->job_info,
-			&data_out, &size_out, ((ProcessPdfData*)data)->out_pdf_count,
-			error);
+	dispatch_buffer(ctx, data_buf, len, filename_emb,
+			((ProcessPdfData*)data)->job_info,
+			&data_out, &size_out, ((ProcessPdfData*)data)->out_pdf_count);
 	fz_drop_buffer(ctx, buf);
 
 	fz_buffer* buf_new = NULL;
@@ -1497,7 +1516,13 @@ static gint process_emb_file(fz_context* ctx, pdf_obj* dict,
 		buf_new = fz_new_buffer_from_data(ctx, data_out, size_out);
 	fz_catch(ctx) {
 		g_free(data_out);
-		ERROR_PDF
+		gchar* err_msg = g_strdup_printf("Failed to create buffer from processed data: %s",
+				fz_caught_message(ctx) ? fz_caught_message(ctx) : "unknown error");
+		ocr_job_add_error(((ProcessPdfData*)data)->job_info, filename_emb,
+				err_msg);
+		g_free(err_msg);
+		g_free(filename_emb);
+		return 0;
 	}
 
 	fz_try(ctx)
@@ -1506,14 +1531,23 @@ static gint process_emb_file(fz_context* ctx, pdf_obj* dict,
 		fz_drop_buffer(ctx, buf_new);
 		g_free(data_out);
 	}
-	fz_catch(ctx)
-		ERROR_PDF
+	fz_catch(ctx) {
+		gchar* err_msg = g_strdup_printf("Failed to update embedded file stream: %s",
+				fz_caught_message(ctx) ? fz_caught_message(ctx) : "unknown error");
+		ocr_job_add_error(((ProcessPdfData*)data)->job_info, filename_emb,
+				err_msg);
+		g_free(err_msg);
+		g_free(filename_emb);
+		return 0;
+	}
+
+	g_free(filename_emb);
 
 	return 0;
 }
 
-static void process_pdf_for_ocr(fz_context* ctx, guchar* data, gsize size,
-		OcrJobInfo* job_info,
+static gint process_pdf_for_ocr(fz_context* ctx, guchar* data, gsize size,
+		gchar const* filename, OcrJobInfo* job_info,
 		guchar** out_data, gsize* out_size, gint* out_pdf_count,
 		GError** error) {
 	pdf_document* doc = NULL;
@@ -1521,7 +1555,7 @@ static void process_pdf_for_ocr(fz_context* ctx, guchar* data, gsize size,
 	fz_buffer* buf = NULL;
 	gint rc = 0;
 
-	ProcessPdfData process_data = {doc, job_info, out_pdf_count};
+	ProcessPdfData process_data = {doc, filename, job_info, out_pdf_count};
 
 	fz_try(ctx)
 		file = fz_open_memory(ctx, data, size);
@@ -1529,16 +1563,25 @@ static void process_pdf_for_ocr(fz_context* ctx, guchar* data, gsize size,
 		g_set_error(error, g_quark_from_static_string("mupdf"), fz_caught(ctx),
 				"Failed to open PDF memory stream: %s",
 				fz_caught_message(ctx) ? fz_caught_message(ctx) : "unknown error");
-		return;
+		return -1;
 	}
 
-	doc = pdf_open_document_with_stream(ctx, file);
+	fz_try(ctx)
+		doc = pdf_open_document_with_stream(ctx, file);
+	fz_always(ctx)
+		fz_drop_stream(ctx, file);
+	fz_catch(ctx) {
+		g_set_error(error, g_quark_from_static_string("mupdf"), fz_caught(ctx),
+				"Failed to open PDF document: %s",
+				fz_caught_message(ctx) ? fz_caught_message(ctx) : "unknown error");
+		return -1;
+	}
 
 	//Alle embedded files durchgehen
 	rc = pdf_walk_embedded_files(ctx, doc, process_emb_file, &process_data, error);
 	if (rc) {
 		pdf_drop_document(ctx, doc);
-		return;
+		return -1;
 	}
 
 	//pdf-page-tree OCRen
@@ -1548,9 +1591,8 @@ static void process_pdf_for_ocr(fz_context* ctx, guchar* data, gsize size,
 	//Rückgabe-buffer füllen
 	buf = pdf_doc_to_buf(ctx, doc, error);
 	pdf_drop_document(ctx, doc);
-	fz_drop_stream(ctx, file);
 	if (!buf)
-		return;
+		return -1;
 
 	guchar* data_buf = NULL;
 	gsize len = 0;
@@ -1564,28 +1606,43 @@ static void process_pdf_for_ocr(fz_context* ctx, guchar* data, gsize size,
 	/* buffer und doc freigeben */
 	fz_drop_buffer(ctx, buf);
 
-	return;
+	return 0;
 }
 
 static void dispatch_buffer(fz_context* ctx, guchar* data, gsize size,
 		gchar const* filename, OcrJobInfo* job_info,
-		guchar** out_data, gsize* out_size, gint* out_pdf_count,
-		GError** error) {
+		guchar** out_data, gsize* out_size, gint* out_pdf_count) {
+	GError* error = NULL;
 	gchar* mime_type = NULL;
+	gint rc = 0;
 
-	mime_type = misc_guess_content_type(data, size, error);
-	if (!mime_type)
+	mime_type = mime_guess_content_type(data, size, &error);
+	if (!mime_type) {
+		gchar* err_msg = g_strdup_printf("Failed to guess MIME type: %s",
+				error ? error->message : "unknown error");
+		ocr_job_add_error(job_info, filename, err_msg);
+		g_free(err_msg);
+		g_error_free(error);
 		return; //Fehler!
+	}
 
 	if (!g_strcmp0(mime_type, "application/pdf"))
-		process_pdf_for_ocr(ctx, data, size, job_info,
-				out_data, out_size, out_pdf_count, error);
+		rc = process_pdf_for_ocr(ctx, data, size, filename, job_info,
+				out_data, out_size, out_pdf_count, &error);
 	else if (!g_strcmp0(mime_type, "application/zip"))
-		process_zip_for_ocr(ctx, data, size, job_info,
-				out_data, out_size, out_pdf_count, error);
+		rc = process_zip_for_ocr(ctx, data, size, filename, job_info,
+				out_data, out_size, out_pdf_count, &error);
 	else if (!g_strcmp0(mime_type, "message/rfc822"))
-		process_gmessage_for_ocr(ctx, data, size, job_info,
-				out_data, out_size, out_pdf_count, error);
+		rc = process_gmessage_for_ocr(ctx, data, size, filename, job_info,
+				out_data, out_size, out_pdf_count, &error);
+
+	if (rc) {
+		gchar* err_msg = g_strdup_printf("Failed to process file for OCR: %s",
+				error ? error->message : "unknown error");
+		ocr_job_add_error(job_info, filename, err_msg);
+		g_free(err_msg);
+		g_error_free(error);
+	}
 
 	return;
 }
@@ -1606,7 +1663,7 @@ static ProcessedFile process_file_for_ocr(const gchar *filename,
 	}
 
 	dispatch_buffer(ctx, data, size, filename, job_info,
-			&result.data, &result.size, &result.pdf_count, error);
+			&result.data, &result.size, &result.pdf_count);
 	fz_drop_context(ctx);
 
 	return result;

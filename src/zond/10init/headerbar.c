@@ -31,6 +31,7 @@
 #include "../../sond_fileparts.h"
 #include "../../sond_treeview.h"
 #include "../../sond_treeviewfm.h"
+#include "../../sond_log_and_error.h"
 
 #include "../zond_pdf_document.h"
 
@@ -38,7 +39,7 @@
 #include "../zond_treeview.h"
 #include "../zond_dbase.h"
 
-#include "../99conv/pdf.h"
+//#include "../99conv/pdf.h"
 #include "../99conv/test.h"
 #include "../pdf_ocr.h"
 
@@ -310,6 +311,78 @@ static void cb_menu_datei_beenden_activate(gpointer data) {
 /* ============================================================================
  * CALLBACKS - PDF MENU
  * ========================================================================== */
+static gint clean_pdf(fz_context *ctx, SondFilePartPDF* sfp_pdf, GError **error) {
+	pdf_document *doc = NULL;
+	gint rc = 0;
+	gint *pages = NULL;
+	gint count = 0;
+	gint ret = 0;
+	gchar* path_tmp = NULL;
+
+	//prüfen, ob in Viewer geöffnet
+	if (zond_pdf_document_is_open(sfp_pdf)) {
+		if (error)
+			*error = g_error_new(g_quark_from_static_string("sond"), 0, "Datei '%s' ist geöffnet",
+					sond_file_part_get_filepart(SOND_FILE_PART(sfp_pdf)));
+
+		return -1;
+	}
+
+	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, TRUE, error);
+	if (!doc) {
+		if (g_error_matches(*error, g_quark_from_static_string("sond"), 1)) { //auth failed
+			g_clear_error(error);
+
+			return 1; //nächstes Dokument
+		}
+		else
+			ERROR_Z
+	}
+
+//	path_tmp = g_strdup(fz_stream_filename(ctx, doc->file));
+	count = pdf_count_pages(ctx, doc);
+	pages = g_malloc(sizeof(gint) * count);
+	for (gint i = 0; i < count; i++)
+		pages[i] = i;
+
+	fz_try( ctx )
+#ifdef __WIN32__
+		pdf_rearrange_pages(ctx, doc, count, pages, PDF_CLEAN_STRUCTURE_KEEP);
+#elif defined(__linux__)
+		pdf_rearrange_pages(ctx, doc, count, pages);
+#endif // __win32__
+	fz_always(ctx)
+		g_free(pages);
+	fz_catch(ctx) {
+		gint ret = 0;
+
+		pdf_drop_document(ctx, doc);
+		g_object_unref(sfp_pdf);
+		ret = g_remove(path_tmp);
+		if (ret)
+			LOG_WARN("%s\nArbeitskopie '%s' konnte nicht gelöscht werden\n"
+					"%s", __func__, path_tmp, strerror(errno));
+		if (error)
+			*error = g_error_new(g_quark_from_static_string("sond"), 0, "%s\npdf_rearrange_pages\n%s",
+					__func__, fz_caught_message(ctx));
+
+		g_free(path_tmp);
+
+		return -1;
+	}
+
+	rc = sond_file_part_pdf_save_and_close(ctx, doc, sfp_pdf, error);
+	g_object_unref(sfp_pdf);
+	ret = g_remove(path_tmp);
+	if (ret)
+		LOG_WARN("%s\nArbeitskopie '%s' konnte nicht gelöscht werden\n"
+				"%s", __func__, path_tmp, strerror(errno));
+	g_free(path_tmp);
+	if (rc)
+		ERROR_Z
+
+	return 0;
+}
 
 static void cb_item_clean_pdf(GtkMenuItem *item, gpointer data) {
 	Projekt *zond = (Projekt*) data;
@@ -340,7 +413,7 @@ static void cb_item_clean_pdf(GtkMenuItem *item, gpointer data) {
 		gint rc = 0;
 		GError *error = NULL;
 
-		rc = pdf_clean(zond->ctx, g_ptr_array_index(arr_sfp, i), &error);
+		rc = clean_pdf(zond->ctx, g_ptr_array_index(arr_sfp, i), &error);
 		if (rc == -1) {
 			display_message(zond->app_window, "PDF ",
 					g_ptr_array_index(arr_sfp, i),

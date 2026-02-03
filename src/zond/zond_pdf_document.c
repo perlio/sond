@@ -24,8 +24,8 @@
 #include "../misc.h"
 #include "../sond_fileparts.h"
 #include "../sond_log_and_error.h"
+#include "../sond_pdf_helper.h"
 
-#include "99conv/pdf.h"
 #include "99conv/general.h"
 
 
@@ -207,6 +207,57 @@ static void pdf_document_page_annot_free(gpointer data) {
 	return;
 }
 
+static gboolean get_annot(fz_context* ctx, pdf_annot* pdf_annot,
+		Annot* annot, GError** error) {
+	assert(annot != NULL);
+	assert(pdf_annot != NULL);
+	assert(ctx != NULL);
+
+	fz_try(ctx) annot->type = pdf_annot_type(ctx, pdf_annot);
+	fz_catch(ctx) {
+		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
+				fz_caught(ctx), "%s\n%s", __func__,
+				fz_caught_message(ctx));
+
+		return FALSE;
+	}
+
+	//Text-Markup-annots
+	if (annot->type == PDF_ANNOT_HIGHLIGHT
+			|| annot->type == PDF_ANNOT_UNDERLINE
+			|| annot->type == PDF_ANNOT_STRIKE_OUT
+			|| annot->type == PDF_ANNOT_SQUIGGLY) {
+		gint n_quad = 0;
+
+		fz_try(ctx) n_quad = pdf_annot_quad_point_count(ctx, pdf_annot);
+		fz_catch(ctx) {
+			if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
+						fz_caught(ctx), "%s\n%s", __func__,
+						fz_caught_message(ctx));
+
+			return FALSE;
+		}
+
+		annot->annot_text_markup.arr_quads =
+				g_array_new(FALSE, FALSE, sizeof( fz_quad ));
+
+		for ( gint i = 0; i < n_quad; i++ )
+		{
+			fz_quad quad = pdf_annot_quad_point(ctx, pdf_annot, i);
+			g_array_append_val(annot->annot_text_markup.arr_quads, quad);
+		}
+
+	}
+	else if (annot->type == PDF_ANNOT_TEXT)
+	{
+		annot->annot_text.rect = pdf_bound_annot(ctx, pdf_annot);
+		annot->annot_text.open = pdf_annot_is_open(ctx, pdf_annot);
+		annot->annot_text.content = g_strdup(pdf_annot_contents(ctx, pdf_annot));
+	}
+
+	return TRUE;
+}
+
 static gint zond_pdf_document_page_annot_load(PdfDocumentPage *pdf_document_page,
 		pdf_annot *pdf_annot, GError **error) {
 	PdfDocumentPageAnnot *pdf_document_page_annot = NULL;
@@ -219,7 +270,7 @@ static gint zond_pdf_document_page_annot_load(PdfDocumentPage *pdf_document_page
 
 	pdf_document_page_annot->pdf_document_page = pdf_document_page;
 
-	ret = pdf_annot_get_annot(priv->ctx,
+	ret = get_annot(priv->ctx,
 			pdf_annot, &pdf_document_page_annot->annot, error);
 	if (!ret) {
 		g_free(pdf_document_page_annot);

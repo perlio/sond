@@ -21,8 +21,9 @@
 
 #include "project.h"
 
-#include "../../misc.h"
+//#include "../../misc.h"
 #include "../../sond_fileparts.h"
+#include "../../sond_log_and_error.h"
 #include "../zond_pdf_document.h"
 #include "../zond_dbase.h"
 #include "../zond_treeview.h"
@@ -238,7 +239,7 @@ pdf_text_oeffnen_fenster(Projekt *zond, GPtrArray *arr_file_part,
 	GtkWidget *headerbar = NULL;
 
 	title = g_strconcat("Suchtext: ", search_text, NULL);
-	window = result_listbox_new( NULL, title, GTK_SELECTION_MULTIPLE);
+	window = result_listbox_new( NULL, title);
 	g_free(title);
 
 	listbox = (GtkWidget*) g_object_get_data(G_OBJECT(window), "listbox");

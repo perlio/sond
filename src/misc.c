@@ -27,7 +27,8 @@
 #include <ctype.h>
 #include <cairo.h>
 #include <mupdf/fitz.h>
-#include <lexbor/html/html.h>
+//#include <lexbor/html/html.h>
+#include <magic.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -37,22 +38,6 @@
 #endif // _WIN32
 
 #include "sond_log_and_error.h"
-
-gchar* change_basename(gchar const* path_old, gchar const* base_new) {
-	//rename dir in fs
-	gchar const * base = NULL;
-	gchar* path_new = NULL;
-
-	base = strrchr(path_old, '/');
-	if (!base) //kein Slash gefunden
-		path_new = g_strdup(base_new);
-	else {
-		path_new = g_strndup(path_old, strlen(path_old) - strlen(base) + 1);
-		path_new = add_string(path_new, g_strdup(base_new));
-	}
-
-	return path_new;
-}
 
 /** Zeigt Fenster, in dem Liste übergebener strings angezeigt wird.
  *   parent-window kann NULL sein, dann Warnung
@@ -192,55 +177,6 @@ gint abfrage_frage(GtkWidget *window, const gchar *message,
 	return res;
 }
 
-gint ask_question(GtkWidget *window, const gchar *title, const gchar *ja,
-		const gchar *nein) {
-	gint res;
-	GtkWidget *dialog = gtk_dialog_new_with_buttons(title, GTK_WINDOW(window),
-			GTK_DIALOG_DESTROY_WITH_PARENT, ja, GTK_RESPONSE_YES, nein,
-			GTK_RESPONSE_NO, "_Abbrechen", GTK_RESPONSE_CANCEL, NULL);
-
-	res = gtk_dialog_run(GTK_DIALOG(dialog));
-	gtk_widget_destroy(dialog);
-
-	return res;
-}
-
-gint allg_string_array_index_holen(GPtrArray *array, gchar *element) {
-	for (gint i = 0; i < array->len; i++)
-		if (!g_strcmp0(g_ptr_array_index(array, i), element))
-			return i;
-
-	return -1;
-}
-
-gchar*
-add_string(gchar *old_string, gchar *add_string) {
-	gchar *new_string = NULL;
-
-	if (old_string)
-		new_string = g_strconcat(old_string, add_string, NULL);
-	else
-		new_string = g_strdup(add_string);
-	g_free(old_string);
-	g_free(add_string);
-
-	return new_string;
-}
-
-/** String Utilities **/
-gchar*
-utf8_to_local_filename(const gchar *utf8) {
-	//utf8 in filename konvertieren
-	gsize written;
-	gchar *charset = g_get_codeset();
-	gchar *local_filename = g_convert(utf8, -1, charset, "UTF-8", NULL,
-			&written,
-			NULL);
-	g_free(charset);
-
-	return local_filename; //muß g_freed werden!
-}
-
 gint string_to_guint(const gchar *string, guint *zahl) {
 	gboolean is_guint = TRUE;
 	if (!strlen(string))
@@ -325,46 +261,8 @@ filename_oeffnen(GtkWindow *window) {
 	return filename; //muß g_freed werden
 }
 
-void misc_set_calendar(GtkCalendar *calendar, const gchar *date) {
-	if (!date)
-		return;
-
-	gchar *year_text = g_strndup(date, 4);
-	gint year = g_ascii_strtoll(year_text, NULL, 10);
-	g_free(year_text);
-
-	gchar *month_text = g_strndup(date + 5, 2);
-	gint month = g_ascii_strtoll(month_text, NULL, 10);
-	g_free(month_text);
-
-	gchar *day_text = g_strdup(date + 8);
-	gint day = g_ascii_strtoll(day_text, NULL, 10);
-	g_free(day_text);
-
-	gtk_calendar_select_month(calendar, month - 1, year);
-	gtk_calendar_select_day(calendar, 0);
-	gtk_calendar_mark_day(calendar, day);
-
-	return;
-}
-
-gchar*
-misc_get_calendar(GtkCalendar *calendar) {
-	guint year = 0;
-	guint month = 0;
-	guint day = 0;
-	gchar *string = NULL;
-
-	gtk_calendar_get_date(calendar, &year, &month, &day);
-
-	string = g_strdup_printf("%04d-%02d-%02d", year, month + 1, day);
-
-	return string;
-}
-
 GtkWidget*
-result_listbox_new(GtkWindow *parent_window, const gchar *titel,
-		GtkSelectionMode mode) {
+result_listbox_new(GtkWindow *parent_window, const gchar *titel) {
 	GtkWidget *window = NULL;
 	GtkWidget *scrolled_window = NULL;
 	GtkWidget *listbox = NULL;
@@ -380,7 +278,7 @@ result_listbox_new(GtkWindow *parent_window, const gchar *titel,
 
 	scrolled_window = gtk_scrolled_window_new( NULL, NULL);
 	listbox = gtk_list_box_new();
-	gtk_list_box_set_selection_mode(GTK_LIST_BOX(listbox), mode);
+	gtk_list_box_set_selection_mode(GTK_LIST_BOX(listbox), GTK_SELECTION_MULTIPLE);
 	gtk_list_box_set_activate_on_single_click(GTK_LIST_BOX(listbox), FALSE);
 
 	gtk_container_add(GTK_CONTAINER(scrolled_window), listbox);
@@ -538,251 +436,6 @@ info_window_open(GtkWidget *window, const gchar *title) {
 }
 
 #include <string.h>
-
-typedef struct {
-    const char* mime_type;
-    const char* extension;
-} MimeExtMapping;
-
-// Umfassende MIME-Type zu Extension Mapping-Tabelle
-static const MimeExtMapping mime_mappings[] = {
-    // Text-Formate
-    {"text/html", ".html"},
-    {"text/plain", ".txt"},
-    {"text/css", ".css"},
-    {"text/javascript", ".js"},
-    {"text/xml", ".xml"},
-    {"text/csv", ".csv"},
-    {"text/markdown", ".md"},
-    {"text/rtf", ".rtf"},
-    {"text/calendar", ".ics"},
-
-    // Application - Dokumente
-    {"application/pdf", ".pdf"},
-    {"application/msword", ".doc"},
-    {"application/vnd.openxmlformats-officedocument.wordprocessingml.document", ".docx"},
-    {"application/vnd.ms-excel", ".xls"},
-    {"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".xlsx"},
-    {"application/vnd.ms-powerpoint", ".ppt"},
-    {"application/vnd.openxmlformats-officedocument.presentationml.presentation", ".pptx"},
-    {"application/vnd.oasis.opendocument.text", ".odt"},
-    {"application/vnd.oasis.opendocument.spreadsheet", ".ods"},
-    {"application/vnd.oasis.opendocument.presentation", ".odp"},
-    {"application/rtf", ".rtf"},
-
-    // Application - Archive
-    {"application/zip", ".zip"},
-    {"application/x-7z-compressed", ".7z"},
-    {"application/x-rar-compressed", ".rar"},
-    {"application/x-tar", ".tar"},
-    {"application/gzip", ".gz"},
-    {"application/x-bzip2", ".bz2"},
-    {"application/x-xz", ".xz"},
-
-    // Application - Executables
-    {"application/x-msdownload", ".exe"},
-    {"application/x-msdos-program", ".exe"},
-    {"application/x-ms-dos-executable", ".exe"},
-    {"application/vnd.microsoft.portable-executable", ".exe"},
-    {"application/x-dosexec", ".exe"},
-    {"application/x-msi", ".msi"},
-    {"application/x-bat", ".bat"},
-    {"application/x-sh", ".sh"},
-
-    // Application - Data
-    {"application/json", ".json"},
-    {"application/xml", ".xml"},
-    {"application/sql", ".sql"},
-    {"application/x-sqlite3", ".db"},
-
-    // Application - Fonts
-    {"application/font-woff", ".woff"},
-    {"application/font-woff2", ".woff2"},
-    {"application/vnd.ms-fontobject", ".eot"},
-    {"font/ttf", ".ttf"},
-    {"font/otf", ".otf"},
-    {"font/woff", ".woff"},
-    {"font/woff2", ".woff2"},
-
-    // Images - Common
-    {"image/jpeg", ".jpg"},
-    {"image/png", ".png"},
-    {"image/gif", ".gif"},
-    {"image/bmp", ".bmp"},
-    {"image/webp", ".webp"},
-    {"image/svg+xml", ".svg"},
-    {"image/tiff", ".tiff"},
-    {"image/x-icon", ".ico"},
-    {"image/vnd.microsoft.icon", ".ico"},
-
-    // Images - Raw/Professional
-    {"image/x-canon-cr2", ".cr2"},
-    {"image/x-canon-crw", ".crw"},
-    {"image/x-nikon-nef", ".nef"},
-    {"image/x-sony-arw", ".arw"},
-    {"image/x-adobe-dng", ".dng"},
-    {"image/heic", ".heic"},
-    {"image/heif", ".heif"},
-    {"image/avif", ".avif"},
-
-    // Images - Adobe
-    {"image/vnd.adobe.photoshop", ".psd"},
-    {"application/postscript", ".eps"},
-    {"image/x-xcf", ".xcf"},
-
-    // Audio
-    {"audio/mpeg", ".mp3"},
-    {"audio/mp4", ".m4a"},
-    {"audio/wav", ".wav"},
-    {"audio/x-wav", ".wav"},
-    {"audio/ogg", ".ogg"},
-    {"audio/flac", ".flac"},
-    {"audio/aac", ".aac"},
-    {"audio/x-ms-wma", ".wma"},
-    {"audio/midi", ".mid"},
-    {"audio/x-midi", ".midi"},
-    {"audio/webm", ".weba"},
-    {"audio/opus", ".opus"},
-
-    // Video
-    {"video/mp4", ".mp4"},
-    {"video/mpeg", ".mpeg"},
-    {"video/x-msvideo", ".avi"},
-    {"video/x-ms-wmv", ".wmv"},
-    {"video/x-matroska", ".mkv"},
-    {"video/webm", ".webm"},
-    {"video/quicktime", ".mov"},
-    {"video/x-flv", ".flv"},
-    {"video/3gpp", ".3gp"},
-    {"video/mp2t", ".ts"},
-    {"video/x-m4v", ".m4v"},
-
-    // 3D Models
-    {"model/gltf+json", ".gltf"},
-    {"model/gltf-binary", ".glb"},
-    {"model/obj", ".obj"},
-    {"model/stl", ".stl"},
-    {"application/x-tgif", ".obj"},
-
-    // eBooks
-    {"application/epub+zip", ".epub"},
-    {"application/x-mobipocket-ebook", ".mobi"},
-    {"application/vnd.amazon.ebook", ".azw"},
-
-    // CAD
-    {"application/acad", ".dwg"},
-    {"application/x-autocad", ".dwg"},
-    {"image/vnd.dwg", ".dwg"},
-    {"image/vnd.dxf", ".dxf"},
-
-    // Programming/Script
-    {"text/x-python", ".py"},
-    {"text/x-c", ".c"},
-    {"text/x-c++", ".cpp"},
-    {"text/x-java", ".java"},
-    {"text/x-csharp", ".cs"},
-    {"text/x-php", ".php"},
-    {"text/x-ruby", ".rb"},
-    {"text/x-perl", ".pl"},
-    {"text/x-shellscript", ".sh"},
-    {"application/x-httpd-php", ".php"},
-    {"application/x-python-code", ".pyc"},
-
-    // Markup/Config
-    {"application/x-yaml", ".yaml"},
-    {"text/yaml", ".yml"},
-    {"application/toml", ".toml"},
-    {"text/x-ini", ".ini"},
-
-    // Email
-    {"message/rfc822", ".eml"},
-    {"application/vnd.ms-outlook", ".msg"},
-
-    // Andere Microsoft-Formate
-    {"application/x-ms-wim", ".wim"},
-    {"application/vnd.ms-cab-compressed", ".cab"},
-    {"application/x-ms-shortcut", ".lnk"},
-    {"application/vnd.ms-project", ".mpp"},
-    {"application/vnd.visio", ".vsd"},
-    {"application/vnd.ms-publisher", ".pub"},
-    {"application/vnd.ms-access", ".mdb"},
-
-    // Disk Images
-    {"application/x-iso9660-image", ".iso"},
-    {"application/x-raw-disk-image", ".img"},
-    {"application/x-virtualbox-vdi", ".vdi"},
-    {"application/x-vmdk", ".vmdk"},
-
-    // Andere
-    {"application/octet-stream", ".bin"},
-    {"application/x-shockwave-flash", ".swf"},
-    {"application/java-archive", ".jar"},
-    {"application/vnd.android.package-archive", ".apk"},
-    {"application/x-debian-package", ".deb"},
-    {"application/x-rpm", ".rpm"},
-    {"application/vnd.apple.installer+xml", ".pkg"},
-    {"application/x-apple-diskimage", ".dmg"},
-
-    {NULL, NULL} // Terminator
-};
-
-// Lookup-Funktion
-const gchar* mime_to_extension(const char* mime_type) {
-    if (!mime_type) return NULL;
-
-    for (int i = 0; mime_mappings[i].mime_type != NULL; i++) {
-        if (strcmp(mime_mappings[i].mime_type, mime_type) == 0) {
-            return mime_mappings[i].extension;
-        }
-    }
-
-    // Fallback für unbekannte MIME-Types
-    return ".bin";
-}
-
-// Fallback mit case-insensitive Vergleich
-const gchar* mime_to_extension_ci(const char* mime_type) {
-    if (!mime_type) return NULL;
-
-    for (int i = 0; mime_mappings[i].mime_type != NULL; i++) {
-        if (strcasecmp(mime_mappings[i].mime_type, mime_type) == 0) {
-            return mime_mappings[i].extension;
-        }
-    }
-
-    return ".bin";
-}
-
-// MIME-Type mit Parameter (z.B. "text/html; charset=utf-8")
-const gchar* mime_to_extension_with_params(const char* mime_type) {
-    if (!mime_type) return NULL;
-
-    // MIME-Type bis zum ersten Semikolon kopieren
-    char mime_base[256];
-    const char* semicolon = strchr(mime_type, ';');
-
-    if (semicolon) {
-        size_t len = semicolon - mime_type;
-        if (len >= sizeof(mime_base)) len = sizeof(mime_base) - 1;
-        strncpy(mime_base, mime_type, len);
-        mime_base[len] = '\0';
-
-        // Trailing whitespace entfernen
-        char* end = mime_base + len - 1;
-        while (end > mime_base && (*end == ' ' || *end == '\t')) {
-            *end = '\0';
-            end--;
-        }
-
-        return mime_to_extension_ci(mime_base);
-    }
-
-    return mime_to_extension_ci(mime_type);
-}
-
-#include <gtk/gtk.h>
-#include "mupdf/fitz.h"
-
 /*
  * Einfach: fz_pixmap in neuem Fenster mit ScrolledWindow anzeigen
  */
@@ -870,47 +523,3 @@ void show_pixmap(fz_context *ctx, fz_pixmap *pix)
     gtk_widget_show_all(window);
 }
 
-gchar* misc_guess_content_type(unsigned char* buffer, gsize size, GError** error) {
-    magic_t magic = magic_open(MAGIC_MIME_TYPE);
-    if (!magic) {
-    	if (error) *error = g_error_new(SOND_ERROR, 0,
-    			"%s\nmagic_open fehlgeschlagen", __func__);
-
-        return NULL;
-    }
-
-    if (magic_load(magic, NULL) != 0) {
-        magic_close(magic);
-        g_set_error(error, SOND_ERROR, 0,
-				"%s\nmagic_load fehlgeschlagen: %s", __func__,
-				magic_error(magic));
-
-        return NULL;
-    }
-
-    // MIME-Typ aus Puffer erkennen
-    const char* mime = magic_buffer(magic, buffer, size);
-/*
-    if (!g_strcmp0(mime, "text/plain")) { //test, ob nicht etwa GMessage
-    	GMimeStream* gmime_stream = NULL;
-    	GMimeParser* parser = NULL;
-    	GMimeMessage* message = NULL;
-
-    	gmime_stream = fz_gmime_stream_new(ctx, stream);
-
-    	parser = g_mime_parser_new_with_stream(gmime_stream);
-    	message = g_mime_parser_construct_message (parser, NULL);
-    	g_object_unref (parser);
-    	g_object_unref(gmime_stream);
-    	if (!message)
-    		result = g_strdup(mime);
-    	else
-    		result = g_strdup("message/rfc822");
-    }
-    else */
-    	result = mime ? g_strdup(mime) : g_strdup("application/octet-stream");
-
-    magic_close(magic);
-
-    return result;
-}

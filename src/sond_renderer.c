@@ -14,7 +14,6 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "sond.h"
 #include "sond_log_and_error.h"
 
 typedef struct {

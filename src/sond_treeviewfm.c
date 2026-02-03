@@ -30,7 +30,6 @@
 #include "misc.h"
 #include "misc_stdlib.h"
 #include "sond_log_and_error.h"
-#include "sond.h"
 #include "sond_renderer.h"
 #include "sond_fileparts.h"
 
@@ -2431,7 +2430,7 @@ static void sond_treeviewfm_show_hits(SondTreeviewFM *stvfm,
 	//Fenster erzeugen
 	window = result_listbox_new(
 			GTK_WINDOW(gtk_widget_get_toplevel( GTK_WIDGET(stvfm) )),
-			"Suchergebnis", GTK_SELECTION_MULTIPLE);
+			"Suchergebnis");
 
 	listbox = (GtkWidget*) g_object_get_data(G_OBJECT(window), "listbox");
 

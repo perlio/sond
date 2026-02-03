@@ -26,10 +26,10 @@
 #include "../misc.h"
 #include "../sond_fileparts.h"
 #include "../sond_log_and_error.h"
+#include "../sond_pdf_helper.h"
 
 #include "zond_pdf_document.h"
 
-#include "99conv/pdf.h"
 #include "99conv/general.h"
 #include "99conv/test.h"
 

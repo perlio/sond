@@ -22,6 +22,8 @@
 #include <shlwapi.h>
 #endif // _WIN32
 
+#include "../../sond_log_and_error.h"
+#include "../../sond_misc.h"
 #include "../../misc.h"
 
 #include "../zond_dbase.h"

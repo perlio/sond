@@ -29,15 +29,13 @@
 #include <zip.h>
 #include <mupdf/pdf.h>
 #include <mupdf/fitz.h>
-#include <magic.h>
 
 #include "misc.h"
-#include "sond.h"
+#include "sond_misc.h"
 #include "sond_renderer.h"
 #include "sond_treeviewfm.h"
 #include "sond_log_and_error.h"
-
-#include "zond/99conv/pdf.h"
+#include "sond_pdf_helper.h"
 
 //Grundlegendes Object, welches file_parts beschreibt
 /*
@@ -206,7 +204,7 @@ static gchar* guess_content_type(fz_context* ctx, fz_stream* stream,
     	ERROR_PDF_VAL(NULL)
     }
 
-    result = misc_guess_mime_type(buffer, buffer_size, error);
+    result = mime_guess_content_type(buffer, bytes_read, error);
     g_free(buffer);
 
     return result;

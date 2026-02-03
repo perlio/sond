@@ -19,6 +19,7 @@
 #include <gtk/gtk.h>
 #include <sqlite3.h>
 
+#include "../../sond_log_and_error.h"
 #include "../../misc.h"
 #include "../zond_dbase.h"
 #include "../zond_treeview.h"
@@ -273,8 +274,7 @@ suchen_erzeugen_ergebnisfenster(Projekt *zond, const gchar *titel) {
 	GtkWidget *headerbar = NULL;
 
 	//Fenster erzeugen
-	window = result_listbox_new(GTK_WINDOW(zond->app_window), titel,
-			GTK_SELECTION_MULTIPLE);
+	window = result_listbox_new(GTK_WINDOW(zond->app_window), titel);
 
 	//Menu Button
 	GtkWidget *suchen_menu_button = gtk_menu_button_new();

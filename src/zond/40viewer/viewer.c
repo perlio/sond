@@ -27,13 +27,13 @@
 #include "../../sond_fileparts.h"
 #include "../../sond_log_and_error.h"
 #include "../../sond_ocr.h"
+#include "../../sond_pdf_helper.h"
 
 #include "../zond_init.h"
 #include "../zond_pdf_document.h"
 #include "../pdf_ocr.h"
 
 #include "../99conv/general.h"
-#include "../99conv/pdf.h"
 
 #include "../20allgemein/project.h"
 #include "../20allgemein/ziele.h"

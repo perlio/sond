@@ -25,11 +25,10 @@
 #include <glib.h>
 #include <glib/gstdio.h>
 
-#include "sond.h"
+#include "sond_log_and_error.h"
 #include "sond_fileparts.h"
+#include "sond_pdf_helper.h"
 #include "misc.h"
-
-#include "zond/99conv/pdf.h"
 
 typedef struct {
 	pdf_processor super;

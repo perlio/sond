@@ -36,43 +36,10 @@ typedef struct _SondFilePartPDF SondFilePartPDF;
 gint pdf_document_get_dest(fz_context*, pdf_document*, gint, gpointer*,
 		gboolean, gchar**);
 
-gint pdf_copy_page(fz_context*, pdf_document*, gint, gint, pdf_document*, gint,
-		gchar**);
-
-gint pdf_open_and_authen_document(fz_context*, gboolean, gboolean, SondFilePartPDF*,
-		gchar**, pdf_document**, gint*, GError**);
-
-gint pdf_clean(fz_context*, SondFilePartPDF*, GError**);
-
-gchar* pdf_get_string_from_line(fz_context*, fz_stext_line*, gchar**);
-
-pdf_processor* pdf_new_text_filter_processor(fz_context*, fz_buffer**, gint,
-		gchar**);
-
-fz_buffer* pdf_text_filter_page(fz_context*, pdf_obj*, gint, gchar**);
-
-gint pdf_annot_delete(fz_context*, pdf_annot*, GError**);
-
 gint pdf_annot_change(fz_context*, pdf_annot*, gint, Annot, GError**);
 
 pdf_annot* pdf_annot_create(fz_context*, pdf_page*, gint, Annot, GError**);
 
-gboolean pdf_annot_get_annot(fz_context*, pdf_annot*, Annot*, GError**);
-
-pdf_annot* pdf_annot_lookup_obj(fz_context*, pdf_page*, pdf_obj*);
-
 pdf_annot* pdf_annot_lookup_index(fz_context*, pdf_page*, gint);
-
-gint pdf_page_get_rotate(fz_context*, pdf_obj*, GError**);
-
-gint pdf_page_rotate(fz_context*, pdf_obj*, gint, GError**);
-
-fz_buffer* pdf_doc_to_buf(fz_context* ctx, pdf_document* doc, GError** error);
-
-pdf_obj* pdf_get_EF_F(fz_context* ctx, pdf_obj* val, gchar const** path, GError** error);
-
-gint pdf_walk_embedded_files(fz_context*, pdf_document*,
-		gint (*) (fz_context*, pdf_obj*, pdf_obj*, pdf_obj*, gpointer, GError**),
-		gpointer, GError**);
 
 #endif // PDF_DATEIEN_H_INCLUDED

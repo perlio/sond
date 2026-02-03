@@ -16,7 +16,8 @@
  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "../../misc.h"
+#include <gtk/gtk.h>
+#include "../../sond_log_and_error.h"
 
 #include "../99conv/pdf.h"
 

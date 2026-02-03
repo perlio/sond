@@ -25,6 +25,7 @@
 #include <errno.h>
 #include <utime.h>
 
+#include "../../sond_log_and_error.h"
 #include "../../misc.h"
 #include "../../misc_stdlib.h"
 #include "../zond_init.h"

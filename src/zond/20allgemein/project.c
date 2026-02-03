@@ -20,9 +20,10 @@
 #include <gtk/gtk.h>
 #include <glib/gstdio.h>
 
-#include "../../misc.h"
+#include "../../sond_log_and_error.h"
 #include "../../sond_fileparts.h"
 #include "../../sond_treeviewfm.h"
+#include "../../misc.h"
 
 #include "../zond_init.h"
 #include "../zond_dbase.h"
