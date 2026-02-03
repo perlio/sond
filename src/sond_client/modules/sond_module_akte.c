@@ -66,6 +66,7 @@ typedef struct {
     /* OCR */                           // NEU
     GtkWidget *btn_ocr;                 // NEU
     gchar *library_name;                // NEU - wird bei update_ui_from_node gesetzt
+    GtkCssProvider *css_provider;
 } SondModuleAktePrivate;
 
 /* Forward declarations */
@@ -75,10 +76,65 @@ static void clear_akte_fields(SondModuleAktePrivate *priv);
 static void update_status_display(SondModuleAktePrivate *priv);
 static void on_offline_toggle_toggled(GtkCheckButton *toggle, SondModuleAktePrivate *priv);
 static void suggest_last_regnr(SondModuleAktePrivate *priv);
+static void apply_widget_style(GtkWidget *widget, gboolean active);
 
-/* Forward declarations */
 extern const gchar* sond_client_get_server_url(SondClient *client);
 extern SoupSession* sond_client_get_session(SondClient *client);
+
+/* ========================================================================
+ * CSS Styling für aktive/inaktive Widgets
+ * ======================================================================== */
+
+/**
+ * setup_css_provider:
+ *
+ * Erstellt und registriert den CSS Provider für Widget-Styling
+ */
+static GtkCssProvider* setup_css_provider(void) {
+    GtkCssProvider *provider = gtk_css_provider_new();
+
+    const gchar *css_data =
+        "entry.widget-active {"
+        "  background-color: #f0ffd0;"
+        "  color: #000000;"  // ← WICHTIG
+        "}"
+        "entry.widget-inactive {"
+        "  background-color: #f5f5f5;"
+        "  color: #808080;"  // ← WICHTIG
+        "}";
+
+    gtk_css_provider_load_from_string(provider, css_data);
+
+    gtk_style_context_add_provider_for_display(
+        gdk_display_get_default(),
+        GTK_STYLE_PROVIDER(provider),
+        GTK_STYLE_PROVIDER_PRIORITY_USER  // ← WICHTIG
+    );
+
+    return provider;
+}
+
+/**
+ * apply_widget_style:
+ *
+ * Wendet CSS-Klasse auf Widget an je nach aktivem/inaktivem Zustand
+ */
+static void apply_widget_style(GtkWidget *widget, gboolean active) {
+    if (!widget) {
+        return;
+    }
+
+    /* Alte Klassen entfernen */
+    gtk_widget_remove_css_class(widget, "widget-active");
+    gtk_widget_remove_css_class(widget, "widget-inactive");
+
+    /* Neue Klasse hinzufügen */
+    if (active) {
+        gtk_widget_add_css_class(widget, "widget-active");
+    } else {
+        gtk_widget_add_css_class(widget, "widget-inactive");
+    }
+}
 
 /* ========================================================================
  * UI State Management
@@ -91,8 +147,15 @@ static void set_akte_state(SondModuleAktePrivate *priv, AkteState new_state) {
         case AKTE_STATE_INITIAL:
             /* Nur "Neue Akte" + Entry aktiv */
             gtk_widget_set_sensitive(priv->regnr_entry, TRUE);
+            apply_widget_style(priv->regnr_entry, TRUE);
+
             gtk_widget_set_sensitive(priv->btn_neue_akte, TRUE);
             gtk_widget_set_sensitive(priv->akte_fields_box, FALSE);
+
+            apply_widget_style(priv->entry_kurzbezeichnung, FALSE);
+            apply_widget_style(priv->textview_gegenstand, FALSE);
+            apply_widget_style(priv->offline_toggle, FALSE);
+
             gtk_widget_set_sensitive(priv->btn_ok, FALSE);
             gtk_widget_set_sensitive(priv->btn_speichern, FALSE);
             gtk_widget_set_sensitive(priv->btn_abbrechen, TRUE);
@@ -101,8 +164,15 @@ static void set_akte_state(SondModuleAktePrivate *priv, AkteState new_state) {
         case AKTE_STATE_CREATING:
             /* Entry insensitiv, Felder editierbar */
             gtk_widget_set_sensitive(priv->regnr_entry, FALSE);
+            apply_widget_style(priv->regnr_entry, FALSE);
+
             gtk_widget_set_sensitive(priv->btn_neue_akte, FALSE);
             gtk_widget_set_sensitive(priv->akte_fields_box, TRUE);
+
+            apply_widget_style(priv->entry_kurzbezeichnung, TRUE);
+            apply_widget_style(priv->textview_gegenstand, TRUE);
+            apply_widget_style(priv->offline_toggle, TRUE);
+
             gtk_widget_set_sensitive(priv->btn_ok, TRUE);
             gtk_widget_set_sensitive(priv->btn_speichern, TRUE);
             gtk_widget_set_sensitive(priv->btn_abbrechen, TRUE);
@@ -111,8 +181,15 @@ static void set_akte_state(SondModuleAktePrivate *priv, AkteState new_state) {
         case AKTE_STATE_EDITING:
             /* Alles editierbar außer Entry */
             gtk_widget_set_sensitive(priv->regnr_entry, FALSE);
+            apply_widget_style(priv->regnr_entry, FALSE);
+
             gtk_widget_set_sensitive(priv->btn_neue_akte, FALSE);
             gtk_widget_set_sensitive(priv->akte_fields_box, TRUE);
+
+            apply_widget_style(priv->entry_kurzbezeichnung, TRUE);
+            apply_widget_style(priv->textview_gegenstand, TRUE);
+            apply_widget_style(priv->offline_toggle, TRUE);
+
             gtk_widget_set_sensitive(priv->btn_ok, TRUE);
             gtk_widget_set_sensitive(priv->btn_speichern, TRUE);
             gtk_widget_set_sensitive(priv->btn_abbrechen, TRUE);
@@ -121,8 +198,15 @@ static void set_akte_state(SondModuleAktePrivate *priv, AkteState new_state) {
         case AKTE_STATE_READONLY:
             /* Nur Ansicht */
             gtk_widget_set_sensitive(priv->regnr_entry, FALSE);
+            apply_widget_style(priv->regnr_entry, FALSE);
+
             gtk_widget_set_sensitive(priv->btn_neue_akte, FALSE);
             gtk_widget_set_sensitive(priv->akte_fields_box, FALSE);
+
+            apply_widget_style(priv->entry_kurzbezeichnung, FALSE);
+            apply_widget_style(priv->textview_gegenstand, FALSE);
+            apply_widget_style(priv->offline_toggle, FALSE);
+
             gtk_widget_set_sensitive(priv->btn_ok, TRUE);
             gtk_widget_set_sensitive(priv->btn_speichern, FALSE);
             gtk_widget_set_sensitive(priv->btn_abbrechen, TRUE);
@@ -131,12 +215,18 @@ static void set_akte_state(SondModuleAktePrivate *priv, AkteState new_state) {
         case AKTE_STATE_ABGELEGT:
             /* Abgelegte Akte: Felder sichtbar aber nicht editierbar, Reaktivierung möglich */
             gtk_widget_set_sensitive(priv->regnr_entry, FALSE);
+            apply_widget_style(priv->regnr_entry, FALSE);
+
             gtk_widget_set_sensitive(priv->btn_neue_akte, FALSE);
-            gtk_widget_set_sensitive(priv->akte_fields_box, FALSE);  /* Felder nicht editierbar */
+            gtk_widget_set_sensitive(priv->akte_fields_box, FALSE);
+
+            apply_widget_style(priv->entry_kurzbezeichnung, FALSE);
+            apply_widget_style(priv->textview_gegenstand, FALSE);
+            apply_widget_style(priv->offline_toggle, FALSE);
+
             gtk_widget_set_sensitive(priv->btn_ok, TRUE);
             gtk_widget_set_sensitive(priv->btn_speichern, FALSE);
             gtk_widget_set_sensitive(priv->btn_abbrechen, TRUE);
-            /* Reaktivierungs-Button bleibt aktiv (via update_status_display) */
             gtk_widget_set_sensitive(priv->btn_reaktivieren, TRUE);
             break;
     }
@@ -1262,6 +1352,7 @@ static void on_neue_akte_clicked(GtkButton *button, SondModuleAktePrivate *priv)
     
     /* Entry insensitiv machen + Placeholder */
     gtk_widget_set_sensitive(priv->regnr_entry, FALSE);
+    apply_widget_style(priv->regnr_entry, FALSE);
     gtk_editable_set_text(GTK_EDITABLE(priv->regnr_entry), "Neue Akte");
     
     /* Felder leer lassen */
@@ -1824,6 +1915,9 @@ GtkWidget* sond_module_akte_new(SondClient *client) {
     priv->current_node = NULL;
     priv->state = AKTE_STATE_INITIAL;
     priv->is_new_from_entry = FALSE;
+
+    /* CSS Provider einrichten */
+    priv->css_provider = setup_css_provider();
 
     /* Haupt-Container */
     GtkWidget *main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
