@@ -192,22 +192,6 @@ static gchar* guess_content_type(fz_context* ctx, fz_stream* stream,
 		gchar const* path, GError** error) {
 	gchar* result = NULL;
 
-    magic_t magic = magic_open(MAGIC_MIME_TYPE);
-    if (!magic) {
-    	if (error) *error = g_error_new(SOND_ERROR, 0,
-    			"%s\nmagic_open fehlgeschlagen", __func__);
-
-        return NULL;
-    }
-
-    if (magic_load(magic, NULL) != 0) {
-        magic_close(magic);
-    	if (error) *error = g_error_new(SOND_ERROR, 0,
-    			"%s\nmagic_load fehlgeschlagen", __func__);
-
-        return NULL;
-    }
-
     // Ersten Teil des Streams lesen (meist reichen 2KB für Erkennung)
     size_t buffer_size = 2048;
     size_t bytes_read = 0;
@@ -218,35 +202,12 @@ static gchar* guess_content_type(fz_context* ctx, fz_stream* stream,
     	bytes_read = fz_read(ctx, stream, buffer, buffer_size);
     fz_catch(ctx) {
     	g_free(buffer);
-    	magic_close(magic);
 
     	ERROR_PDF_VAL(NULL)
     }
 
-    // MIME-Typ aus Puffer erkennen
-    const char* mime = magic_buffer(magic, buffer, bytes_read);
+    result = misc_guess_mime_type(buffer, buffer_size, error);
     g_free(buffer);
-/*
-    if (!g_strcmp0(mime, "text/plain")) { //test, ob nicht etwa GMessage
-    	GMimeStream* gmime_stream = NULL;
-    	GMimeParser* parser = NULL;
-    	GMimeMessage* message = NULL;
-
-    	gmime_stream = fz_gmime_stream_new(ctx, stream);
-
-    	parser = g_mime_parser_new_with_stream(gmime_stream);
-    	message = g_mime_parser_construct_message (parser, NULL);
-    	g_object_unref (parser);
-    	g_object_unref(gmime_stream);
-    	if (!message)
-    		result = g_strdup(mime);
-    	else
-    		result = g_strdup("message/rfc822");
-    }
-    else */
-    	result = mime ? g_strdup(mime) : g_strdup("application/octet-stream");
-
-    magic_close(magic);
 
     return result;
 }
@@ -1360,76 +1321,6 @@ pdf_document* sond_file_part_pdf_open_document(fz_context* ctx,
 	return doc;
 }
 
-static fz_buffer* pdf_doc_to_buf(fz_context* ctx, pdf_document* doc, GError** error) {
-	fz_output* out = NULL;
-	fz_buffer* buf = NULL;
-	pdf_write_options in_opts =
-			{ 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, ~0, "", "", 0, 0, 0, 0, 0 };
-
-	//	if (pdf_count_pages(ctx, pdf_doc) < BIG_PDF && !pdf_doc->crypt)
-	in_opts.do_garbage = 4;
-
-	fz_try(ctx) {
-		buf = fz_new_buffer(ctx, 4096);
-	}
-	fz_catch(ctx) {
-		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"), fz_caught(ctx),
-				"%s\n%s", __func__, fz_caught_message(ctx));
-
-		return NULL;
-	}
-
-	fz_try(ctx)
-		out = fz_new_output_with_buffer(ctx, buf);
-	fz_catch(ctx) {
-		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"), fz_caught(ctx),
-				"%s\n%s", __func__, fz_caught_message(ctx));
-		fz_drop_buffer(ctx, buf);
-
-		return NULL;
-	}
-
-	//do_appereance wird in pdf_write_document ignoriert. deshalb muß es hier gemacht werden
-	if (doc->resynth_required) {
-		gint i = 0;
-		gint n = 0;
-
-		n = pdf_count_pages(ctx, doc);
-		for (i = 0; i < n; ++i)
-		{
-			pdf_page *page = pdf_load_page(ctx, doc, i);
-			fz_try(ctx)
-				pdf_update_page(ctx, page);
-			fz_always(ctx)
-				fz_drop_page(ctx, &page->super);
-			fz_catch(ctx)
-				fz_warn(ctx, "could not create annotation appearances");
-
-			if (!doc->resynth_required) break;
-		}
-	}
-
-	//immer noch? weil keine annot im gesamten Dokement
-	if (doc->resynth_required)
-		doc->resynth_required = 0; //dann mit Gewalt
-
-	fz_try(ctx)
-		pdf_write_document(ctx, doc, out, &in_opts);
-	fz_always(ctx) {
-		fz_close_output(ctx, out);
-		fz_drop_output(ctx, out);
-	}
-	fz_catch(ctx) {
-		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"), fz_caught(ctx),
-				"%s\npdf_write_document: %s", __func__, fz_caught_message(ctx));
-		fz_drop_buffer(ctx, buf);
-
-		return NULL;
-	}
-
-	return buf;
-}
-
 gint sond_file_part_pdf_save_and_close(fz_context *ctx, pdf_document *pdf_doc,
 		SondFilePartPDF* sfp_pdf, GError **error) {
 	gint rc = 0;
@@ -1449,52 +1340,6 @@ gint sond_file_part_pdf_save_and_close(fz_context *ctx, pdf_document *pdf_doc,
 	return 0;
 }
 
-static pdf_obj* get_EF_F(fz_context* ctx, pdf_obj* val, gchar const** path, GError** error) {
-	gchar const* path_tmp = NULL;
-	pdf_obj* EF_F = NULL;
-	pdf_obj* F = NULL;
-	pdf_obj* UF = NULL;
-	pdf_obj* EF = NULL;
-
-	if (!pdf_is_dict(ctx, val)) {
-		if (error)
-			*error = g_error_new(g_quark_from_static_string("sond"),
-					0, "%s\nnamestree malformed", __func__);
-		return NULL;
-	}
-
-	fz_try(ctx) {
-		EF = pdf_dict_get(ctx, val, PDF_NAME(EF));
-		EF_F = pdf_dict_get(ctx, EF, PDF_NAME(F));
-		F = pdf_dict_get(ctx, val, PDF_NAME(F));
-		UF = pdf_dict_get(ctx, val, PDF_NAME(UF));
-
-		if (pdf_is_string(ctx, UF))
-			path_tmp = pdf_to_text_string(ctx, UF);
-		else if (pdf_is_string(ctx, F))
-			path_tmp = pdf_to_text_string(ctx, F);
-	}
-	fz_catch(ctx) {
-		if (error)
-			*error = g_error_new(g_quark_from_static_string("mupdf"),
-					fz_caught(ctx), "%s\n%s", __func__,
-					fz_caught_message(ctx));
-
-		return NULL;
-	}
-
-	if (!path_tmp) {
-			if (error)
-				*error = g_error_new(SOND_ERROR, 0, "%s\nEingebettete Datei hat keinen Pfad",
-						__func__);
-			return NULL;
-	}
-
-	*path = path_tmp;
-
-	return EF_F;
-}
-
 typedef struct {
 	gchar const* path_search;
 	fz_stream* stream;
@@ -1506,7 +1351,7 @@ static gint lookup_embedded_file(fz_context* ctx, pdf_obj* names, pdf_obj* key,
 	gchar const* path_embedded = NULL;
 	Lookup* lookup = (Lookup*) data;
 
-	EF_F = get_EF_F(ctx, val, &path_embedded, error);
+	EF_F = pdf_get_EF_F(ctx, val, &path_embedded, error);
 	if (!EF_F)
 		ERROR_Z
 
@@ -1545,7 +1390,7 @@ static gint load_embedded_files(fz_context* ctx, pdf_obj* names, pdf_obj* key,
 	SondFilePart* sfp_embedded_file = NULL;
 	Load* load = (Load*) data;
 
-	EF_F = get_EF_F(ctx, val, &path_embedded, error);
+	EF_F = pdf_get_EF_F(ctx, val, &path_embedded, error);
 	if (!EF_F)
 		ERROR_Z
 
@@ -1716,7 +1561,7 @@ static gint delete_embedded_file(fz_context* ctx, pdf_obj*names, pdf_obj* key,
 	gchar const* path_embedded = NULL;
 	Modify* modify = (Modify*) data;
 
-	EF_F = get_EF_F(ctx, val, &path_embedded, error);
+	EF_F = pdf_get_EF_F(ctx, val, &path_embedded, error);
 	if (!EF_F)
 		ERROR_Z
 
@@ -1756,7 +1601,7 @@ static gint modify_embedded_file(fz_context* ctx, pdf_obj* names, pdf_obj* key,
 	gchar const* path_embedded = NULL;
 	Modify* modify = (Modify*) data;
 
-	EF_F = get_EF_F(ctx, val, &path_embedded, error);
+	EF_F = pdf_get_EF_F(ctx, val, &path_embedded, error);
 	if (!EF_F)
 		ERROR_Z
 
@@ -1834,7 +1679,7 @@ static gint look_for_embedded_file(fz_context* ctx, pdf_obj* names, pdf_obj* key
 	gchar const* path_embedded = NULL;
 	gchar const* path = (gchar const*) data;
 
-	EF_F = get_EF_F(ctx, val, &path_embedded, error);
+	EF_F = pdf_get_EF_F(ctx, val, &path_embedded, error);
 	if (!EF_F)
 		ERROR_Z
 

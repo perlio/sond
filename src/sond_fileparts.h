@@ -43,6 +43,9 @@ SondFilePart* sond_file_part_create_from_mime_type(gchar const* path,
 SondFilePart* sond_file_part_create_from_stream(fz_context*,
 		fz_stream*, gchar const*, SondFilePart*, GError**);
 
+SondFilePart* sond_file_part_create_from_memory(guchar* data, gsize size,
+		gchar const* path, SondFilePart* sfp_parent, GError** error);
+
 SondFilePart* sond_file_part_get_parent(SondFilePart *);
 
 void sond_file_part_set_parent(SondFilePart*, SondFilePart*);
@@ -92,6 +95,8 @@ struct _SondFilePartPDFClass {
 
 pdf_document* sond_file_part_pdf_open_document(fz_context*,
 		SondFilePartPDF*, gboolean, GError **);
+
+fz_buffer* pdf_doc_to_buf(fz_context* ctx, pdf_document* doc, GError** error);
 
 gint sond_file_part_pdf_save_and_close(fz_context*, pdf_document*, SondFilePartPDF*, GError**);
 

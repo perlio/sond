@@ -19,9 +19,14 @@
 #include "sond_server_ocr.h"
 #include "sond_server_seafile.h"
 #include "../sond_log_and_error.h"
+#include "../misc.h"
+
+#include "../zond/99conv/pdf.h"
 
 #include <libsoup/soup.h>
 #include <json-glib/json-glib.h>
+#include <mupdf/fitz.h>
+#include <mupdf/pdf.h>
 
 /* =======================================================================
  * Forward Declarations - External
@@ -341,6 +346,7 @@ static gboolean seafile_upload_file(SeafileConfig *config,
 static ProcessedFile process_file_for_ocr(const gchar *filename,
                                           guchar *data,
                                           gsize size,
+										  OcrJobInfo *job_info,
                                           GError **error);
 
 static OcrLogEntry* ocr_log_read(SeafileConfig *config, SoupSession *session);
@@ -1347,10 +1353,10 @@ static gpointer seafile_ocr_worker_thread(gpointer user_data) {
         /* Verarbeiten */
         ProcessedFile processed = process_file_for_ocr(file->path, data, data_size,
         		job_info, &error);
-        if (error) {
+        g_free(data);
+        if (error) { //nur an error kann man erkennen, ob process_file_for_ocr fehlgeschlagen ist
             ocr_job_add_error(job_info, file->path, error->message);
             g_clear_error(&error);
-            g_free(data);
             continue;
         }
 
@@ -1360,20 +1366,23 @@ static gpointer seafile_ocr_worker_thread(gpointer user_data) {
         g_mutex_unlock(&job_info->mutex);
 
         /* Upload */
-        gboolean upload_success = seafile_upload_file(&config, session, file->path,
-        		processed.data, processed.size, &error);
-        if (!upload_success) {
-            gchar *err_msg = g_strdup("Upload failed");
-            ocr_job_add_error(job_info, file->path, err_msg);
-            g_free(err_msg);
-        } else {
-            /* In Log eintragen */
-            GDateTime *now = g_date_time_new_now_local();
-            g_hash_table_insert(log_entry->files, g_strdup(file->path), now);
+        if (processed.data) {
+            gboolean upload_success = seafile_upload_file(&config, session, file->path,
+            		processed.data, processed.size, &error);
+            g_free(processed.data);
+            if (!upload_success) {
+                gchar *err_msg = g_strdup_printf("Upload failed: %s",
+                		error ? error->message : "unknown");
+                g_clear_error(&error);
+                ocr_job_add_error(job_info, file->path, err_msg);
+                g_free(err_msg);
+                continue;
+            }
         }
 
-        g_free(processed.data);
-        g_free(data);
+        /* In Log eintragen, egal ob Leaf oder nicht */
+		GDateTime *now = g_date_time_new_now_local();
+		g_hash_table_insert(log_entry->files, g_strdup(file->path), now);
     }
 
     /* Log aktualisieren */
@@ -1409,36 +1418,196 @@ static gpointer seafile_ocr_worker_thread(gpointer user_data) {
     return NULL;
 }
 
-/* =======================================================================
- * Public API
- * ======================================================================= */
+static void dispatch_buffer(fz_context* ctx, guchar* data, gsize size,
+		gchar const* filename, OcrJobInfo* job_info,
+		guchar** out_data, gsize* out_size, gint* out_pdf_count,
+		GError** error);
 
-/* =======================================================================
- * TODO: Diese Funktion muss noch implementiert werden
- * ======================================================================= */
+static void process_zip_for_ocr(fz_context* ctx, guchar* data, gsize size,
+		OcrJobInfo* job_info,
+		guchar** out_data, gsize* out_size, gint* out_pdf_count,
+		GError** error) {
+
+	return;
+}
+
+static void process_gmessage_for_ocr(fz_context* ctx, guchar* data, gsize size,
+		OcrJobInfo* job_info,
+		guchar** out_data, gsize* out_size, gint* out_pdf_count,
+		GError** error) {
+
+	return;
+}
+
+typedef struct {
+	pdf_document* doc;
+	OcrJobInfo* job_info;
+	gint* out_pdf_count;
+} ProcessPdfData;
+
+static gint process_emb_file(fz_context* ctx, pdf_obj* dict,
+		pdf_obj* key, pdf_obj* val, gpointer data,
+		GError** error) {
+	pdf_obj* EF_F = NULL;
+	fz_stream* stream = NULL;
+	gchar const* path = NULL;
+	fz_buffer* buf = NULL;
+
+	EF_F = pdf_get_EF_F(ctx, val, &path, error);
+	if (!EF_F && error && *error)
+		return -1;
+	else if (!EF_F) {
+		g_set_error(error, G_IO_ERROR, G_IO_ERR,
+				"No EF/F entry");
+		return -1;
+	}
+
+	if (!path) {
+		g_set_error(error, G_IO_ERROR, G_IO_ERR,
+				"No path for embedded file");
+		return -1;
+	}
+
+	fz_try(ctx)
+		stream = pdf_open_stream(ctx, EF_F);
+	fz_catch(ctx)
+		ERROR_PDF
+
+	fz_try(ctx)
+		buf = fz_read_all(ctx, stream, 4096);
+	fz_always(ctx)
+		fz_drop_stream(ctx, stream);
+	fz_catch(ctx)
+		ERROR_PDF
+
+	guchar* data_buf = NULL;
+	gsize len = 0;
+	len = fz_buffer_storage(ctx, buf, &data_buf);
+
+	guchar* data_out = NULL;
+	gsize size_out = 0;
+	dispatch_buffer(ctx, data_buf, len,
+			path, ((ProcessPdfData*)data)->job_info,
+			&data_out, &size_out, ((ProcessPdfData*)data)->out_pdf_count,
+			error);
+	fz_drop_buffer(ctx, buf);
+
+	fz_buffer* buf_new = NULL;
+	fz_try(ctx)
+		buf_new = fz_new_buffer_from_data(ctx, data_out, size_out);
+	fz_catch(ctx) {
+		g_free(data_out);
+		ERROR_PDF
+	}
+
+	fz_try(ctx)
+		pdf_update_stream(ctx, ((ProcessPdfData*)data)->doc, EF_F, buf_new, 0);
+	fz_always(ctx) {
+		fz_drop_buffer(ctx, buf_new);
+		g_free(data_out);
+	}
+	fz_catch(ctx)
+		ERROR_PDF
+
+	return 0;
+}
+
+static void process_pdf_for_ocr(fz_context* ctx, guchar* data, gsize size,
+		OcrJobInfo* job_info,
+		guchar** out_data, gsize* out_size, gint* out_pdf_count,
+		GError** error) {
+	pdf_document* doc = NULL;
+	fz_stream* file = NULL;
+	fz_buffer* buf = NULL;
+	gint rc = 0;
+
+	ProcessPdfData process_data = {doc, job_info, out_pdf_count};
+
+	fz_try(ctx)
+		file = fz_open_memory(ctx, data, size);
+	fz_catch(ctx) {
+		g_set_error(error, g_quark_from_static_string("mupdf"), fz_caught(ctx),
+				"Failed to open PDF memory stream: %s",
+				fz_caught_message(ctx) ? fz_caught_message(ctx) : "unknown error");
+		return;
+	}
+
+	doc = pdf_open_document_with_stream(ctx, file);
+
+	//Alle embedded files durchgehen
+	rc = pdf_walk_embedded_files(ctx, doc, process_emb_file, &process_data, error);
+	if (rc) {
+		pdf_drop_document(ctx, doc);
+		return;
+	}
+
+	//pdf-page-tree OCRen
+
+	*out_pdf_count += 1;
+
+	//Rückgabe-buffer füllen
+	buf = pdf_doc_to_buf(ctx, doc, error);
+	pdf_drop_document(ctx, doc);
+	fz_drop_stream(ctx, file);
+	if (!buf)
+		return;
+
+	guchar* data_buf = NULL;
+	gsize len = 0;
+	len = fz_buffer_storage(ctx, buf, &data_buf);
+
+	/* eigene Kopie anlegen */
+	*out_data = fz_malloc(ctx, len);
+	memcpy(*out_data, data_buf, len);
+	*out_size = len;
+
+	/* buffer und doc freigeben */
+	fz_drop_buffer(ctx, buf);
+
+	return;
+}
+
+static void dispatch_buffer(fz_context* ctx, guchar* data, gsize size,
+		gchar const* filename, OcrJobInfo* job_info,
+		guchar** out_data, gsize* out_size, gint* out_pdf_count,
+		GError** error) {
+	gchar* mime_type = NULL;
+
+	mime_type = misc_guess_content_type(data, size, error);
+	if (!mime_type)
+		return; //Fehler!
+
+	if (!g_strcmp0(mime_type, "application/pdf"))
+		process_pdf_for_ocr(ctx, data, size, job_info,
+				out_data, out_size, out_pdf_count, error);
+	else if (!g_strcmp0(mime_type, "application/zip"))
+		process_zip_for_ocr(ctx, data, size, job_info,
+				out_data, out_size, out_pdf_count, error);
+	else if (!g_strcmp0(mime_type, "message/rfc822"))
+		process_gmessage_for_ocr(ctx, data, size, job_info,
+				out_data, out_size, out_pdf_count, error);
+
+	return;
+}
 
 static ProcessedFile process_file_for_ocr(const gchar *filename,
                                           guchar *data,
                                           gsize size,
 										  OcrJobInfo* job_info,
                                           GError **error) {
-    /* TODO: Hier kommt die eigentliche OCR-Logik */
-    /* - Container erkennen (ZIP, EML, PDF) */
-    /* - Rekursiv durchgehen */
-    /* - PDFs OCR-en */
-    /* - Container neu zusammenbauen */
-    
-    ProcessedFile result = { NULL, 0, 0 };
-    
-    /* Für jetzt: Datei unverändert zurückgeben (Pass-through) */
-    result.data = data;  /* WICHTIG: Ownership übernehmen! */
-    result.size = size;
-    result.pdf_count = 0;
+	ProcessedFile result = { 0 };
+	fz_context* ctx = NULL;
 
-    /* Später hier Fehler setzen wenn OCR fehlschlägt:
-    g_set_error(error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
-                "OCR processing not yet implemented");
-    */
-    
-    return result;
+	ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
+	if (!ctx) {
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+				"Failed to create MuPDF context");
+		return result;
+	}
+
+	dispatch_buffer(ctx, data, size, filename, job_info,
+			&result.data, &result.size, &result.pdf_count, error);
+	fz_drop_context(ctx);
+
+	return result;
 }

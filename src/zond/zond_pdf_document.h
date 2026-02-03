@@ -2,7 +2,7 @@
 #define ZOND_PDF_DOCUMENT_H_INCLUDED
 
 #include <glib-object.h>
-#include <gtk/gtk.h>
+//#include <gtk/gtk.h>
 
 #include <mupdf/fitz.h>
 #include <mupdf/pdf.h>

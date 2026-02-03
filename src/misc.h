@@ -16,16 +16,24 @@
 #define ERROR_Z_VAL(y) {g_prefix_error(error, "%s\n", __func__); return y;}
 #define ERROR_Z ERROR_Z_VAL(-1)
 
-// #include <gtk/gtk.h>
 #include <mupdf/fitz.h>
-#include <gtk/gtk.h>
 
 #ifdef __WIN32
 typedef void* GPid;
 #elif defined __linux__
 typedef int GPid;
 #endif // __win32__
+
+typedef char gchar;
+typedef int gboolean;
+
 typedef struct _SondFilePart SondFilePart;
+typedef struct _GtkWidget GtkWidget;
+typedef struct _GtkWindow GtkWindow;
+typedef struct _GtkCalendar GtkCalendar;
+typedef struct _GPtrArray GPtrArray;
+typedef struct _GFile GFile;
+typedef struct _GtkSelectionMode GtkSelectionMode;
 
 gchar* change_basename(gchar const*, gchar const*);
 
@@ -90,5 +98,7 @@ const gchar* mime_to_extension_ci(const char*);
 const gchar* mime_to_extension_with_params(const char*);
 
 void show_pixmap(fz_context*, fz_pixmap*);
+
+gchar* misc_guess_content_type(unsigned char* buffer, gsize size, GError** error);
 
 #endif // MISC_H_INCLUDED

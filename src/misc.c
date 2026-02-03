@@ -869,3 +869,48 @@ void show_pixmap(fz_context *ctx, fz_pixmap *pix)
     // Anzeigen
     gtk_widget_show_all(window);
 }
+
+gchar* misc_guess_content_type(unsigned char* buffer, gsize size, GError** error) {
+    magic_t magic = magic_open(MAGIC_MIME_TYPE);
+    if (!magic) {
+    	if (error) *error = g_error_new(SOND_ERROR, 0,
+    			"%s\nmagic_open fehlgeschlagen", __func__);
+
+        return NULL;
+    }
+
+    if (magic_load(magic, NULL) != 0) {
+        magic_close(magic);
+        g_set_error(error, SOND_ERROR, 0,
+				"%s\nmagic_load fehlgeschlagen: %s", __func__,
+				magic_error(magic));
+
+        return NULL;
+    }
+
+    // MIME-Typ aus Puffer erkennen
+    const char* mime = magic_buffer(magic, buffer, size);
+/*
+    if (!g_strcmp0(mime, "text/plain")) { //test, ob nicht etwa GMessage
+    	GMimeStream* gmime_stream = NULL;
+    	GMimeParser* parser = NULL;
+    	GMimeMessage* message = NULL;
+
+    	gmime_stream = fz_gmime_stream_new(ctx, stream);
+
+    	parser = g_mime_parser_new_with_stream(gmime_stream);
+    	message = g_mime_parser_construct_message (parser, NULL);
+    	g_object_unref (parser);
+    	g_object_unref(gmime_stream);
+    	if (!message)
+    		result = g_strdup(mime);
+    	else
+    		result = g_strdup("message/rfc822");
+    }
+    else */
+    	result = mime ? g_strdup(mime) : g_strdup("application/octet-stream");
+
+    magic_close(magic);
+
+    return result;
+}

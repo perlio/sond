@@ -9,6 +9,7 @@
 #include "../../misc.h"
 #include "../../sond_fileparts.h"
 #include "../../sond_log_and_error.h"
+#include "../../sond.h"
 
 #include "../zond_pdf_document.h"
 
@@ -709,6 +710,109 @@ gint pdf_page_rotate(fz_context *ctx, pdf_obj *page_obj, gint winkel,
 		pdf_set_int(ctx, rotate_obj, (int64_t) rotate);
 
 	return 0;
+}
+
+fz_buffer* pdf_doc_to_buf(fz_context* ctx, pdf_document* doc, GError** error) {
+	fz_output* out = NULL;
+	fz_buffer* buf = NULL;
+	pdf_write_options in_opts =
+			{ 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, ~0, "", "", 0, 0, 0, 0, 0 };
+
+	//	if (pdf_count_pages(ctx, pdf_doc) < BIG_PDF && !pdf_doc->crypt)
+	in_opts.do_garbage = 4;
+
+	fz_try(ctx) {
+		buf = fz_new_buffer(ctx, 4096);
+	}
+	fz_catch(ctx) {
+		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"), fz_caught(ctx),
+				"%s\n%s", __func__, fz_caught_message(ctx));
+
+		return NULL;
+	}
+
+	fz_try(ctx)
+		out = fz_new_output_with_buffer(ctx, buf);
+	fz_catch(ctx) {
+		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"), fz_caught(ctx),
+				"%s\n%s", __func__, fz_caught_message(ctx));
+		fz_drop_buffer(ctx, buf);
+
+		return NULL;
+	}
+
+	//do_appereance wird in pdf_write_document ignoriert. deshalb muß es hier gemacht werden
+	if (doc->resynth_required) {
+		gint i = 0;
+		gint n = 0;
+
+		n = pdf_count_pages(ctx, doc);
+		for (i = 0; i < n; ++i)
+		{
+			pdf_page *page = pdf_load_page(ctx, doc, i);
+			fz_try(ctx)
+				pdf_update_page(ctx, page);
+			fz_always(ctx)
+				fz_drop_page(ctx, &page->super);
+			fz_catch(ctx)
+				fz_warn(ctx, "could not create annotation appearances");
+
+			if (!doc->resynth_required) break;
+		}
+	}
+
+	//immer noch? weil keine annot im gesamten Dokement
+	if (doc->resynth_required)
+		doc->resynth_required = 0; //dann mit Gewalt
+
+	fz_try(ctx)
+		pdf_write_document(ctx, doc, out, &in_opts);
+	fz_always(ctx) {
+		fz_close_output(ctx, out);
+		fz_drop_output(ctx, out);
+	}
+	fz_catch(ctx) {
+		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"), fz_caught(ctx),
+				"%s\npdf_write_document: %s", __func__, fz_caught_message(ctx));
+		fz_drop_buffer(ctx, buf);
+
+		return NULL;
+	}
+
+	return buf;
+}
+
+pdf_obj* pdf_get_EF_F(fz_context* ctx, pdf_obj* val, gchar const** path, GError** error) {
+	gchar const* path_tmp = NULL;
+	pdf_obj* EF_F = NULL;
+	pdf_obj* F = NULL;
+	pdf_obj* UF = NULL;
+	pdf_obj* EF = NULL;
+
+	fz_try(ctx) {
+		EF = pdf_dict_get(ctx, val, PDF_NAME(EF));
+		EF_F = pdf_dict_get(ctx, EF, PDF_NAME(F));
+		F = pdf_dict_get(ctx, val, PDF_NAME(F));
+		UF = pdf_dict_get(ctx, val, PDF_NAME(UF));
+
+		if (pdf_is_string(ctx, UF))
+			path_tmp = pdf_to_text_string(ctx, UF);
+		else if (pdf_is_string(ctx, F))
+			path_tmp = pdf_to_text_string(ctx, F);
+	}
+	fz_catch(ctx) {
+		if (error)
+			*error = g_error_new(g_quark_from_static_string("mupdf"),
+					fz_caught(ctx), "%s\n%s", __func__,
+					fz_caught_message(ctx));
+
+		return NULL;
+	}
+
+	if (path)
+		*path = path_tmp;
+
+	return EF_F;
 }
 
 static gint pdf_get_names_tree_dict(fz_context* ctx, pdf_document* doc,

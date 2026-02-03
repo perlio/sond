@@ -67,7 +67,9 @@ gint pdf_page_get_rotate(fz_context*, pdf_obj*, GError**);
 
 gint pdf_page_rotate(fz_context*, pdf_obj*, gint, GError**);
 
-gint pdf_get_f_0_0_font(fz_context*, pdf_document*, GError**);
+fz_buffer* pdf_doc_to_buf(fz_context* ctx, pdf_document* doc, GError** error);
+
+pdf_obj* pdf_get_EF_F(fz_context* ctx, pdf_obj* val, gchar const** path, GError** error);
 
 gint pdf_walk_embedded_files(fz_context*, pdf_document*,
 		gint (*) (fz_context*, pdf_obj*, pdf_obj*, pdf_obj*, gpointer, GError**),
