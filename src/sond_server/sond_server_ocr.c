@@ -1438,7 +1438,6 @@ static gint process_gmessage_for_ocr(fz_context* ctx, guchar* data, gsize size,
 }
 
 typedef struct {
-	pdf_document* doc;
 	gchar const* filename;
 	OcrJobInfo* job_info;
 	gint* out_pdf_count;
@@ -1451,6 +1450,7 @@ static gint process_emb_file(fz_context* ctx, pdf_obj* dict,
 	fz_stream* stream = NULL;
 	gchar const* path = NULL;
 	fz_buffer* buf = NULL;
+	pdf_document* doc = NULL;
 
 	EF_F = pdf_get_EF_F(ctx, val, &path, error);
 	if (!EF_F) {
@@ -1511,6 +1511,11 @@ static gint process_emb_file(fz_context* ctx, pdf_obj* dict,
 			&data_out, &size_out, ((ProcessPdfData*)data)->out_pdf_count);
 	fz_drop_buffer(ctx, buf);
 
+	if (!data_out) { //kein Fehler, nur nichts zu tun
+		g_free(filename_emb);
+		return 0;
+	}
+
 	fz_buffer* buf_new = NULL;
 	fz_try(ctx)
 		buf_new = fz_new_buffer_from_data(ctx, data_out, size_out);
@@ -1525,9 +1530,20 @@ static gint process_emb_file(fz_context* ctx, pdf_obj* dict,
 		return 0;
 	}
 
+	doc = pdf_pin_document(ctx, EF_F);
+	if (!doc) {
+		fz_drop_buffer(ctx, buf_new);
+		g_free(data_out);
+		ocr_job_add_error(((ProcessPdfData*)data)->job_info, filename_emb,
+				"Failed to pin PDF document for EF/F-object");
+		g_free(filename_emb);
+		return 0;
+	}
+
 	fz_try(ctx)
-		pdf_update_stream(ctx, ((ProcessPdfData*)data)->doc, EF_F, buf_new, 0);
+		pdf_update_stream(ctx, doc, EF_F, buf_new, 0);
 	fz_always(ctx) {
+		pdf_drop_document(ctx, doc);
 		fz_drop_buffer(ctx, buf_new);
 		g_free(data_out);
 	}
@@ -1555,7 +1571,7 @@ static gint process_pdf_for_ocr(fz_context* ctx, guchar* data, gsize size,
 	fz_buffer* buf = NULL;
 	gint rc = 0;
 
-	ProcessPdfData process_data = {doc, filename, job_info, out_pdf_count};
+	ProcessPdfData process_data = {filename, job_info, out_pdf_count};
 
 	fz_try(ctx)
 		file = fz_open_memory(ctx, data, size);

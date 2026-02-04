@@ -69,6 +69,13 @@ typedef struct {
     GtkCssProvider *css_provider;
 } SondModuleAktePrivate;
 
+/* Struktur für Suchergebnis */
+typedef struct {
+    SondGraphNode *node;
+    gchar *regnr_display;   /* Format: "23/26" */
+    gchar *kurzbezeichnung;
+} AkteSearchResult;
+
 /* Forward declarations */
 static void set_akte_state(SondModuleAktePrivate *priv, AkteState new_state);
 static void update_ui_from_node(SondModuleAktePrivate *priv);
@@ -77,6 +84,10 @@ static void update_status_display(SondModuleAktePrivate *priv);
 static void on_offline_toggle_toggled(GtkCheckButton *toggle, SondModuleAktePrivate *priv);
 static void suggest_last_regnr(SondModuleAktePrivate *priv);
 static void apply_widget_style(GtkWidget *widget, gboolean active);
+static gboolean ist_akte_aktiv(SondGraphNode *node);
+static void show_akte_search_results(SondModuleAktePrivate *priv, GPtrArray *results, const gchar *search_term);
+static void akte_search_result_free(AkteSearchResult *result);
+static GPtrArray* search_akten_by_kurzbezeichnung(SondModuleAktePrivate *priv, const gchar *search_term, GError **error);
 
 extern const gchar* sond_client_get_server_url(SondClient *client);
 extern SoupSession* sond_client_get_session(SondClient *client);
@@ -348,6 +359,275 @@ static gchar* format_regnr(guint lfd_nr, guint year) {
  */
 static gchar* format_regnr_storage(guint lfd_nr, guint year) {
     return g_strdup_printf("%u-%u", year, lfd_nr);
+}
+
+/**
+ * akte_search_result_free:
+ * 
+ * Gibt Speicher eines Suchergebnisses frei.
+ */
+static void akte_search_result_free(AkteSearchResult *result) {
+    if (!result) return;
+    
+    if (result->node) {
+        g_object_unref(result->node);
+    }
+    g_free(result->regnr_display);
+    g_free(result->kurzbezeichnung);
+    g_free(result);
+}
+
+/**
+ * is_valid_regnr_format:
+ * 
+ * Prüft ob ein String ein gültiges RegNr-Format hat.
+ * Gültig sind:
+ * - Nur Ziffern (mindestens 3): "126", "1226", "12326"
+ * - Ziffern mit "/": "12/26", "123/26"
+ * 
+ * Returns: TRUE wenn gültiges Format
+ */
+static gboolean is_valid_regnr_format(const gchar *str) {
+    if (!str || strlen(str) == 0) {
+        return FALSE;
+    }
+    
+    gsize len = strlen(str);
+    gboolean has_slash = FALSE;
+    
+    for (gsize i = 0; i < len; i++) {
+        gchar c = str[i];
+        
+        if (c == '/') {
+            if (has_slash) {
+                return FALSE;  /* Mehr als ein "/" */
+            }
+            has_slash = TRUE;
+        } else if (!g_ascii_isdigit(c)) {
+            return FALSE;  /* Nicht-Ziffer und nicht "/" */
+        }
+    }
+    
+    /* Format mit "/" muss mindestens ein Zeichen vor und nach "/" haben */
+    if (has_slash) {
+        gchar **parts = g_strsplit(str, "/", 2);
+        gboolean valid = (g_strv_length(parts) == 2 && 
+                         strlen(parts[0]) > 0 && 
+                         strlen(parts[1]) > 0);
+        g_strfreev(parts);
+        return valid;
+    }
+    
+    /* Format ohne "/" muss mindestens 3 Ziffern haben */
+    return len >= 3;
+}
+
+/**
+ * search_akten_by_kurzbezeichnung:
+ * 
+ * Sucht Akten anhand der Kurzbezeichnung (serverseitige Suche).
+ * Die Datenbank führt die Teilstring-Suche durch.
+ * 
+ * Returns: (transfer full): Array von AkteSearchResult oder NULL bei Fehler
+ */
+static GPtrArray* search_akten_by_kurzbezeichnung(SondModuleAktePrivate *priv, 
+                                                   const gchar *search_term, 
+                                                   GError **error) {
+    /* Suche Akten mit Property-Filter auf "kurzb" */
+    SondGraphNodeSearchCriteria *criteria = sond_graph_node_search_criteria_new();
+    criteria->label = g_strdup("Akte");
+    
+    /* Wildcard-Pattern für Teilstring-Suche erstellen: *search_term* */
+    gchar *pattern = g_strdup_printf("*%s*", search_term);
+    
+    /* Property-Filter für Kurzbezeichnung (Teilstring-Suche via Wildcards) */
+    sond_graph_node_search_criteria_add_property_filter(criteria, "kurzb", pattern);
+    g_free(pattern);
+
+    criteria->limit = 100;  /* Maximal 100 Ergebnisse */
+    
+    GPtrArray *nodes = sond_client_search_nodes(priv->client, criteria, error);
+    sond_graph_node_search_criteria_free(criteria);
+    
+    if (!nodes) {
+        return NULL;
+    }
+    
+    /* Ergebnis-Array erstellen */
+    GPtrArray *results = g_ptr_array_new_with_free_func((GDestroyNotify)akte_search_result_free);
+    
+    /* Alle zurückgegebenen Nodes sind bereits gefiltert */
+    for (guint i = 0; i < nodes->len; i++) {
+        SondGraphNode *node = g_ptr_array_index(nodes, i);
+        
+        /* Kurzbezeichnung holen */
+        gchar *kurzb = sond_graph_node_get_property_string(node, "kurzb");
+        
+        /* RegNr extrahieren */
+            GPtrArray *regnr_values = sond_graph_node_get_property(node, "regnr");
+            if (regnr_values && regnr_values->len == 2) {
+                guint year = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 0), NULL, 10);
+                guint lfd_nr = (guint)g_ascii_strtoull(g_ptr_array_index(regnr_values, 1), NULL, 10);
+                
+                /* Suchergebnis erstellen */
+                AkteSearchResult *result = g_new0(AkteSearchResult, 1);
+                result->node = g_object_ref(node);
+                result->regnr_display = format_regnr(lfd_nr, year);
+                result->kurzbezeichnung = kurzb;  /* Ownership übernehmen */
+                kurzb = NULL;  /* Nicht freigeben */
+                
+                g_ptr_array_add(results, result);
+                
+                g_ptr_array_unref(regnr_values);
+            }
+
+        g_free(kurzb);
+    }
+    
+    g_ptr_array_unref(nodes);
+    
+    return results;
+}
+
+/* Callback-Daten für Suchergebnis-Dialog */
+typedef struct {
+    SondModuleAktePrivate *priv;
+    GPtrArray *results;
+    GtkWidget *dialog;
+    GtkWidget *listbox;
+} SearchDialogData;
+
+/**
+ * on_search_result_selected:
+ * 
+ * Callback wenn Benutzer ein Suchergebnis auswählt (Doppelklick oder Enter).
+ */
+static void on_search_result_selected(GtkListBox *listbox, 
+                                      GtkListBoxRow *row,
+                                      SearchDialogData *data) {
+    if (!row) return;
+    
+    gint index = gtk_list_box_row_get_index(row);
+    if (index < 0 || index >= (gint)data->results->len) {
+        return;
+    }
+    
+    AkteSearchResult *result = g_ptr_array_index(data->results, index);
+    
+    /* Akte laden */
+    if (data->priv->current_node) {
+        g_object_unref(data->priv->current_node);
+    }
+    
+    data->priv->current_node = g_object_ref(result->node);
+    data->priv->is_new_from_entry = FALSE;
+    
+    /* Lock versuchen zu setzen */
+    gint64 node_id = sond_graph_node_get_id(result->node);
+    GError *lock_error = NULL;
+    
+    if (sond_client_lock_node(data->priv->client, node_id, "Bearbeitung", &lock_error)) {
+        /* Lock erfolgreich */
+        update_ui_from_node(data->priv);
+        
+        /* Prüfe ob Akte abgelegt ist */
+        if (ist_akte_aktiv(data->priv->current_node)) {
+            set_akte_state(data->priv, AKTE_STATE_EDITING);
+        } else {
+            set_akte_state(data->priv, AKTE_STATE_ABGELEGT);
+        }
+    } else {
+        /* Lock fehlgeschlagen (bereits gelockt) → READONLY */
+        gchar *msg = g_strdup_printf(
+            "Akte %s wird gerade von einem anderen Benutzer bearbeitet.\n\n"
+            "Sie können die Akte nur im Lesemodus öffnen.",
+            result->regnr_display);
+        show_info_dialog(data->priv->main_widget, "Akte gesperrt", msg);
+        g_free(msg);
+        
+        update_ui_from_node(data->priv);
+        set_akte_state(data->priv, AKTE_STATE_READONLY);
+        
+        if (lock_error) g_error_free(lock_error);
+    }
+    
+    /* Dialog schließen */
+    gtk_window_close(GTK_WINDOW(data->dialog));
+}
+
+/**
+ * show_akte_search_results:
+ * 
+ * Zeigt Suchergebnisse in einem Dialog an.
+ */
+static void show_akte_search_results(SondModuleAktePrivate *priv, 
+                                     GPtrArray *results, 
+                                     const gchar *search_term) {
+    if (!results || results->len == 0) {
+        gchar *msg = g_strdup_printf(
+            "Keine Akten gefunden mit Suchbegriff: \"%s\"",
+            search_term);
+        show_info_dialog(priv->main_widget, "Keine Ergebnisse", msg);
+        g_free(msg);
+        return;
+    }
+    
+    /* Dialog erstellen */
+    GtkWidget *dialog = gtk_window_new();
+    gchar *title = g_strdup_printf("Aktensuche: \"%s\" (%u Ergebnisse)", 
+                                   search_term, results->len);
+    gtk_window_set_title(GTK_WINDOW(dialog), title);
+    g_free(title);
+    
+    gtk_window_set_default_size(GTK_WINDOW(dialog), 600, 400);
+    gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
+    gtk_window_set_transient_for(GTK_WINDOW(dialog), 
+                                 GTK_WINDOW(gtk_widget_get_root(priv->main_widget)));
+    
+    /* ScrolledWindow für Liste */
+    GtkWidget *scrolled = gtk_scrolled_window_new();
+    gtk_window_set_child(GTK_WINDOW(dialog), scrolled);
+    
+    /* ListBox für Ergebnisse */
+    GtkWidget *listbox = gtk_list_box_new();
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), listbox);
+    
+    /* Callback-Daten */
+    SearchDialogData *data = g_new0(SearchDialogData, 1);
+    data->priv = priv;
+    data->results = g_ptr_array_ref(results);  /* Referenz erhöhen */
+    data->dialog = dialog;
+    data->listbox = listbox;
+    
+    /* Ergebnisse in ListBox einfügen */
+    for (guint i = 0; i < results->len; i++) {
+        AkteSearchResult *result = g_ptr_array_index(results, i);
+        
+        gchar *label_text = g_strdup_printf("%s - %s", 
+                                           result->regnr_display, 
+                                           result->kurzbezeichnung);
+        GtkWidget *label = gtk_label_new(label_text);
+        gtk_label_set_xalign(GTK_LABEL(label), 0.0);  /* Links ausrichten */
+        gtk_widget_set_margin_start(label, 10);
+        gtk_widget_set_margin_end(label, 10);
+        gtk_widget_set_margin_top(label, 5);
+        gtk_widget_set_margin_bottom(label, 5);
+        g_free(label_text);
+        
+        gtk_list_box_append(GTK_LIST_BOX(listbox), label);
+    }
+    
+    /* Signal verbinden */
+    g_signal_connect(listbox, "row-activated", 
+                    G_CALLBACK(on_search_result_selected), data);
+    
+    /* Cleanup bei Dialog-Schließung */
+    g_signal_connect_swapped(dialog, "destroy", 
+                             G_CALLBACK(g_ptr_array_unref), data->results);
+    g_signal_connect_swapped(dialog, "destroy", 
+                             G_CALLBACK(g_free), data);
+    
+    gtk_window_present(GTK_WINDOW(dialog));
 }
 
 /**
@@ -1241,12 +1521,39 @@ static void on_new_akte_dialog_response(GObject *source, GAsyncResult *result, g
 }
 
 static void on_regnr_entry_activate(GtkEntry *entry, SondModuleAktePrivate *priv) {
+    guint lfd_nr, year;
+
     const gchar *regnr_text = gtk_editable_get_text(GTK_EDITABLE(entry));
     
-    guint lfd_nr, year;
+    if (!regnr_text || strlen(regnr_text) == 0)
+    	return NULL;
+
+    /* Prüfen ob gültiges RegNr-Format */
+    if (!is_valid_regnr_format(regnr_text)) {
+        /* Kein gültiges RegNr-Format -> Suche nach Kurzbezeichnung */
+        GError *error = NULL;
+        GPtrArray *results = search_akten_by_kurzbezeichnung(priv, regnr_text, &error);
+        
+        if (error) {
+            gchar *msg = g_strdup_printf("Fehler bei der Suche: %s", error->message);
+            show_error_dialog(priv->main_widget, "Suchfehler", msg);
+            g_free(msg);
+            g_error_free(error);
+            return;
+        }
+        
+        if (results) {
+            show_akte_search_results(priv, results, regnr_text);
+            g_ptr_array_unref(results);
+        }
+        
+        return;
+    }
+    
+    /* Gültiges Format -> Parsen */
     if (!parse_regnr(regnr_text, &lfd_nr, &year)) {
-        show_error_dialog(priv->main_widget, "Ungültiges Format",
-                         "Bitte RegNr im Format '12/26' eingeben.");
+        show_error_dialog(priv->main_widget, "Fehler beim Parsen",
+                         "RegNr konnte nicht interpretiert werden.");
         return;
     }
     
