@@ -347,7 +347,6 @@ typedef struct {
     gint processed_files;
     gint processed_pdfs;
     gchar *current_file;
-    gint error_count;
     GDateTime *start_time;
     GDateTime *end_time;
 } OcrStatus;

@@ -58,4 +58,8 @@ gint pdf_walk_embedded_files(fz_context*, pdf_document*,
 		gint (*) (fz_context*, pdf_obj*, pdf_obj*, pdf_obj*, gpointer, GError**),
 		gpointer, GError**);
 
+gint pdf_insert_emb_file(fz_context* ctx, pdf_document* doc,
+		fz_buffer* buf, gchar const* filename,
+		gchar const* mime_type, GError** error);
+
 #endif /* SRC_SOND_PDF_HELPER_H_ */

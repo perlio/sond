@@ -552,8 +552,6 @@ static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 	monitor_data.cancel_this = &info_window->cancel;
 
 	datadir = g_build_filename(zond->exe_dir, "../share/tessdata", NULL);
-	rc = sond_ocr_init_tesseract(&ocr_api, &osd_api, datadir, &error);
-	g_free(datadir);
 
 	for (gint i = 0; i < arr_sfp->len; i++) {
 		SondFilePartPDF* sfp_pdf = NULL;
@@ -587,7 +585,7 @@ static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 			}
 		}
 
-		rc = sond_ocr_pdf_doc(zond->ctx, doc, sfp_pdf, ocr_api, osd_api,
+		rc = sond_ocr_pdf_doc(zond->ctx, doc, 3, datadir, "deu",
 				(void (*)(gpointer, gchar const*, ...)) info_window_set_message,
 				(void*) info_window, (void (*)(gpointer, gint)) info_window_display_progress,
 				&monitor_data, &error);
@@ -601,10 +599,13 @@ static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 		rc = sond_file_part_pdf_save_and_close(zond->ctx, doc, sfp_pdf, &error);
 	}
 
+	g_free(datadir);
 	info_window_close(info_window);
 
 	g_ptr_array_unref(arr_sfp);
 	TessBaseAPIEnd(ocr_api);
+	TessBaseAPIEnd(osd_api);
+	TessBaseAPIDelete(ocr_api);
 	TessBaseAPIDelete(osd_api);
 
 	return;

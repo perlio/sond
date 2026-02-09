@@ -1424,7 +1424,6 @@ OcrStatus* sond_client_ocr_get_status(SondClient *client,
     status->total_files = json_object_get_int_member(obj, "total_files");
     status->processed_files = json_object_get_int_member(obj, "processed_files");
     status->processed_pdfs = json_object_get_int_member(obj, "processed_pdfs");
-    status->error_count = json_object_get_int_member(obj, "error_count");
 
     if (json_object_has_member(obj, "current_file")) {
         status->current_file = g_strdup(json_object_get_string_member(obj, "current_file"));

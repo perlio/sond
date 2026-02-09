@@ -30,20 +30,6 @@
 G_BEGIN_DECLS
 
 /**
- * OcrError:
- * @filename: Dateiname wo Fehler auftrat
- * @message: Fehlermeldung
- * @timestamp: Zeitpunkt des Fehlers
- *
- * Einzelner OCR-Fehler während Verarbeitung
- */
-typedef struct {
-    gchar *filename;
-    gchar *message;
-    GDateTime *timestamp;
-} OcrError;
-
-/**
  * OcrJobInfo:
  * @mutex: Mutex für Thread-sichere Updates
  * @repo_id: Repository ID
@@ -53,7 +39,6 @@ typedef struct {
  * @processed_files: Anzahl verarbeiteter Dateien
  * @processed_pdfs: Anzahl verarbeiteter PDF-Seiten
  * @current_file: Aktuell verarbeitete Datei
- * @errors: Liste von OcrError*
  * @start_time: Startzeitpunkt
  * @end_time: Endzeitpunkt (NULL wenn running)
  * @force_reprocess: Alle Dateien neu verarbeiten?
@@ -69,7 +54,6 @@ typedef struct {
     gint processed_files;
     gint processed_pdfs;
     gchar *current_file;
-    GList *errors;  // Liste von OcrError*
     GDateTime *start_time;
     GDateTime *end_time;
     gboolean force_reprocess;
