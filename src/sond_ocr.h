@@ -21,23 +21,18 @@
 
 #include <mupdf/fitz.h>
 #include <mupdf/pdf.h>
+#include <glib.h>
 
 typedef struct TessBaseAPI TessBaseAPI;
+/*
 typedef struct _GError GError;
+typedef struct _GThreadPool GThreadPool;
 
 typedef void* gpointer;
 typedef int gint;
 typedef char gchar;
 typedef int gboolean;
-
-gint sond_ocr_set_content_stream(fz_context*, pdf_page*, fz_buffer*, GError**);
-
-gint sond_ocr_page_has_hidden_text(fz_context*, pdf_page*,
-		gboolean*, GError**);
-
-gint sond_ocr_get_num_sond_font(fz_context*, pdf_document*, GError**);
-
-pdf_obj* sond_ocr_put_sond_font(fz_context*, pdf_document*, GError**);
+*/
 
 // Thread-Pool Struktur
 typedef struct {
@@ -47,7 +42,8 @@ typedef struct {
     GPrivate thread_data_key;
     gchar *tessdata_path;
     gchar *language;
-    fz_context* ctx;
+    TessBaseAPI* osd_api;
+	fz_context* ctx;
     void (*log_func)(void*, gchar const*, ...);
     gpointer log_data;
     gint num_active_jobs;
@@ -64,7 +60,10 @@ typedef struct {
 
 // Struktur für OCR-Aufgaben
 typedef struct {
-	gint status; //bit 1 = started; bit 2 = done
+	gint status; //0: muß noch laufen; 1: läuft; 2: fertig; 3: error; 4: Abstellgleis
+	SondOcrPool* pool;
+	pdf_page* page;
+	pdf_obj* font_ref;
 	fz_pixmap* pixmap;
 	float scale;
 	gint durchgang;
@@ -72,11 +71,11 @@ typedef struct {
 	fz_buffer* content;
 } SondOcrTask;
 
-gint sond_ocr_page(SondOcrPool* pool, pdf_page* page, pdf_obj* font_ref,
-		SondOcrTask* task, TessBaseAPI* osd_api, GError** error);
+SondOcrTask* sond_ocr_task_new(SondOcrPool* pool, pdf_document* doc,
+		gint page_num, pdf_obj* font_ref, GError** error);
 
-gint sond_ocr_pdf_doc(fz_context* ctx, pdf_document* doc, SondOcrPool* ocr_pool,
-		TessBaseAPI osd_api, GError** error);
+gint sond_ocr_pdf_doc(SondOcrPool* ocr_pool, pdf_document* doc,
+		GError** error);
 
 gint sond_ocr_init_tesseract(TessBaseAPI**, TessBaseAPI**, gchar const*, GError**);
 

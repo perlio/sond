@@ -513,7 +513,7 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 			continue;
 		}
 
-		rc = sond_ocr_page_has_hidden_text(ctx, page, &hidden, &error);
+		rc = pdf_page_has_hidden_text(ctx, page, &hidden, &error);
 		if (rc == -1) {
 			display_message(pv->vf, "Fehler beim Prüfen auf versteckten Text:\n",
 					error->message, NULL);
@@ -539,7 +539,7 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 			}
 		}
 		else {
-			font_ref = sond_ocr_put_sond_font(ctx,
+			font_ref = pdf_put_sond_font(ctx,
 					zond_pdf_document_get_pdf_doc(
 							pdf_document_page->document), &error);
 			if (!font_ref) {

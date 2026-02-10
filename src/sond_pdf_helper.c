@@ -849,3 +849,193 @@ gint pdf_insert_emb_file(fz_context* ctx, pdf_document* doc,
 
 	return 0;
 }
+
+static gint pdf_run_pixmap(fz_context* ctx, pdf_page* page,
+		fz_device* dev, GError** error) {
+	pdf_processor* proc_run = NULL;
+	pdf_processor* proc_text = NULL;
+
+	fz_try(ctx)
+		proc_run = pdf_new_run_processor(ctx, page->doc, dev, fz_identity, -1,
+			"View", NULL, NULL, NULL, NULL, NULL);
+	fz_catch(ctx)
+		ERROR_PDF
+
+		// text-analyzer-Processor erstellen (dieser filtert den Text)
+	fz_try(ctx) //flag == 3: aller Text weg, nur Bilder ocr-en
+		proc_text = new_text_analyzer_processor(ctx, proc_run, 3, error);
+	fz_catch(ctx) {
+		pdf_close_processor(ctx, proc_run);
+		pdf_drop_processor(ctx, proc_run);
+
+		ERROR_PDF
+	}
+
+    // Content durch Filter-Kette schicken
+	fz_try(ctx)
+		pdf_process_contents(ctx, proc_text, page->doc,
+				pdf_page_resources(ctx, page), pdf_page_contents(ctx, page),
+				NULL, NULL);
+	fz_always(ctx) {
+		pdf_close_processor(ctx, proc_text);
+		pdf_drop_processor(ctx, proc_text);
+		pdf_drop_processor(ctx, proc_run);
+	}
+	fz_catch(ctx)
+		ERROR_PDF
+
+	return 0;
+}
+
+fz_pixmap* pdf_render_pixmap(fz_context *ctx, pdf_page* page,
+		float scale, GError** error) {
+	gint rc = 0;
+	fz_device *draw_device = NULL;
+	fz_pixmap *pixmap = NULL;
+	fz_rect rect = { 0 };
+	fz_matrix ctm = { 0 };
+
+	pdf_page_transform(ctx, page, &rect, &ctm);
+	ctm = fz_pre_scale(ctm, scale, scale);
+	rect = fz_transform_rect(rect, ctm);
+
+	//per draw-device to pixmap
+	fz_try( ctx )
+		pixmap = fz_new_pixmap_with_bbox(ctx, fz_device_rgb(ctx),
+				fz_irect_from_rect(rect), NULL, 0);
+	fz_catch(ctx)
+		ERROR_PDF_VAL(NULL)
+
+	fz_try( ctx)
+		fz_clear_pixmap_with_value(ctx, pixmap, 255);
+	fz_catch(ctx) {
+		fz_drop_pixmap(ctx, pixmap);
+
+		ERROR_PDF_VAL(NULL)
+	}
+
+	fz_try(ctx)
+		draw_device = fz_new_draw_device(ctx, ctm, pixmap);
+	fz_catch(ctx) {
+		fz_drop_pixmap(ctx, pixmap);
+
+		ERROR_PDF_VAL(NULL)
+	}
+
+	rc = pdf_run_pixmap(ctx, page, draw_device, error);
+	fz_close_device(ctx, draw_device);
+	fz_drop_device(ctx, draw_device);
+	if (rc) {
+		fz_drop_pixmap(ctx, pixmap);
+
+		ERROR_PDF_VAL(NULL)
+	}
+
+	return pixmap;
+}
+
+gint pdf_set_content_stream(fz_context *ctx,
+						   pdf_page *page,
+						   fz_buffer* content,
+						   GError** error) {
+	//altes content-stream-object überschreiben
+	fz_try(ctx) {
+		pdf_obj* contents_new = pdf_add_object_drop(ctx, page->doc,
+				pdf_new_dict(ctx, page->doc, 1));
+		pdf_dict_put_drop(ctx, page->obj, PDF_NAME(Contents),
+				contents_new);
+	}
+	fz_catch(ctx)
+		ERROR_PDF
+
+	fz_try( ctx ) {
+		pdf_obj* contents = pdf_dict_get(ctx, page->obj, PDF_NAME(Contents));
+		pdf_update_stream(ctx, page->doc, contents, content, 0);
+	}
+	fz_catch(ctx)
+		ERROR_PDF
+
+	return 0;
+}
+
+gint pdf_get_sond_font(fz_context* ctx, pdf_document* doc, pdf_obj** font_ref,
+		GError** error) {
+	gint num_pages = 0;
+	gint num = 0;
+
+	fz_try(ctx)
+		num_pages = pdf_count_pages(ctx, doc);
+	fz_catch(ctx)
+		ERROR_PDF
+
+	for (gint u = 0; u < num_pages; u++) {
+		pdf_obj* page_ref = NULL;
+		pdf_obj* resources = NULL;
+		pdf_obj* font_dict = NULL;
+
+		fz_try(ctx) {
+			page_ref = pdf_lookup_page_obj(ctx, doc, u);
+			resources = pdf_dict_get_inheritable(ctx, page_ref,
+					PDF_NAME(Resources));
+			font_dict = pdf_dict_get(ctx, resources, PDF_NAME(Font));
+			*font_ref = pdf_dict_gets(ctx, font_dict, "FSond");
+		}
+		fz_catch(ctx)
+			ERROR_PDF
+	}
+
+	return 0;
+}
+
+pdf_obj* pdf_put_sond_font(fz_context* ctx, pdf_document* doc, GError** error) {
+	pdf_obj* font = NULL;
+	pdf_obj* font_ref = NULL;
+
+	fz_try(ctx)
+		// Font neu anlegen als indirektes Objekt
+		font = pdf_new_dict(ctx, doc, 4);
+	fz_catch(ctx)
+		ERROR_PDF_VAL(NULL)
+
+	fz_try(ctx) {
+		pdf_dict_put(ctx, font, PDF_NAME(Type), PDF_NAME(Font));
+		pdf_dict_put(ctx, font, PDF_NAME(Subtype), PDF_NAME(Type1));
+		pdf_dict_put_drop(ctx, font, PDF_NAME(BaseFont), pdf_new_name(ctx, "Helvetica"));
+		pdf_dict_put(ctx, font, PDF_NAME(Encoding), PDF_NAME(WinAnsiEncoding));
+
+		// Als indirektes Objekt hinzufügen
+		font_ref = pdf_add_object(ctx, doc, font);
+	}
+	fz_always(ctx)
+		pdf_drop_obj(ctx, font);
+	fz_catch(ctx)
+		ERROR_PDF_VAL(NULL)
+
+	return font_ref;
+}
+
+gint pdf_page_has_hidden_text(fz_context* ctx, pdf_page* page,
+		gboolean* hidden, GError** error) {
+	pdf_processor* proc = NULL;
+
+	proc = new_text_analyzer_processor(ctx, NULL, 3, error);
+	if (!proc)
+		ERROR_Z
+
+	fz_try(ctx)
+		pdf_process_contents(ctx, proc, page->doc, pdf_page_resources(ctx, page),
+				pdf_page_contents(ctx, page), NULL, NULL);
+	fz_catch(ctx) {
+		pdf_close_processor(ctx, proc);
+		pdf_drop_processor(ctx, proc);
+
+		ERROR_PDF
+	}
+
+	*hidden = ((pdf_text_analyzer_processor*) proc)->has_hidden_text;
+	pdf_close_processor(ctx, proc);
+	pdf_drop_processor(ctx, proc);
+
+	return 0;
+}
+

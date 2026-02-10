@@ -1581,7 +1581,7 @@ static gint process_pdf_for_ocr(guchar* data, gsize size,
 	}
 
 	//pdf-page-tree OCRen
-	rc = sond_ocr_pdf_doc(ocr_pool->ctx, doc, ocr_pool, osd_api, error);
+	rc = sond_ocr_pdf_doc(ocr_pool, doc, error);
 	if (rc) {
 		pdf_drop_document(ocr_pool->ctx, doc);
 		return -1;
@@ -1619,7 +1619,7 @@ static void dispatch_buffer(SondOcrPool* pool, guchar* data, gsize size,
 
 	mime_type = mime_guess_content_type(data, size, &error);
 	if (!mime_type) {
-		ocr_log_add_message(log_entry, "Failed to guess MIME type for file '%s': %s",
+		ocr_log_add_message(pool->log_data, "Failed to guess MIME type for file '%s': %s",
 				filename, error ? error->message : "unknown error");
 		g_error_free(error);
 		return; //Fehler!
@@ -1636,7 +1636,7 @@ static void dispatch_buffer(SondOcrPool* pool, guchar* data, gsize size,
 				out_data, out_size, out_pdf_count, &error);
 
 	if (rc) {
-		ocr_log_add_message(log_entry, "Failed to process file '%s' for OCR: %s",
+		ocr_log_add_message(pool->log_data, "Failed to process file '%s' for OCR: %s",
 				filename, error ? error->message : "unknown error");
 		g_error_free(error);
 	}
@@ -1650,7 +1650,7 @@ static ProcessedFile process_file_for_ocr(const gchar *filename,
                                           gsize size) {
 	ProcessedFile result = { 0 };
 
-	dispatch_buffer(pool, data, size, filename,
+	dispatch_buffer(ocr_pool, data, size, filename,
 			&result.data, &result.size, &result.pdf_count);
 
 	return result;

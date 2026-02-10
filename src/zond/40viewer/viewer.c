@@ -450,36 +450,37 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 				gint rc = 0;
 
 				if (!num) {
-					num = sond_ocr_get_num_sond_font(ctx, doc, error);
-					if (num == -1) {
+					pdf_obj* font_ref = NULL;
+
+					rc = pdf_get_sond_font(ctx, doc, &font_ref, error);
+					if (rc) {
 						pdf_drop_page(ctx, pdf_page);
 						pdf_drop_document(ctx, doc);
 
 						ERROR_Z
 					}
-					else if (!num) {
-						pdf_obj* font_ref = NULL;
+					else if (!font_ref) {
 
-						font_ref = sond_ocr_put_sond_font(ctx, doc, error);
+						font_ref = pdf_put_sond_font(ctx, doc, error);
 						if (!font_ref) {
 							pdf_drop_page(ctx, pdf_page);
 							pdf_drop_document(ctx, doc);
 
 							ERROR_Z
 						}
+					}
 
-						fz_try(ctx)
-							num = pdf_to_num(ctx, font_ref);
-						fz_catch(ctx) {
-							pdf_drop_page(ctx, pdf_page);
-							pdf_drop_document(ctx, doc);
+					fz_try(ctx)
+						num = pdf_to_num(ctx, font_ref);
+					fz_catch(ctx) {
+						pdf_drop_page(ctx, pdf_page);
+						pdf_drop_document(ctx, doc);
 
-							ERROR_PDF
-						}
+						ERROR_PDF
 					}
 				}
 
-				rc = sond_ocr_set_content_stream(ctx, pdf_page, entry.ocr.buf_new, error);
+				rc = pdf_set_content_stream(ctx, pdf_page, entry.ocr.buf_new, error);
 				if (rc)
 				{
 					pdf_drop_page(ctx, pdf_page);

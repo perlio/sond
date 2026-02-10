@@ -25,6 +25,7 @@
 typedef int gint;
 typedef char gchar;
 typedef void* gpointer;
+typedef int gboolean;
 
 typedef struct _GError GError;
 
@@ -61,5 +62,17 @@ gint pdf_walk_embedded_files(fz_context*, pdf_document*,
 gint pdf_insert_emb_file(fz_context* ctx, pdf_document* doc,
 		fz_buffer* buf, gchar const* filename,
 		gchar const* mime_type, GError** error);
+
+fz_pixmap* pdf_render_pixmap(fz_context *ctx, pdf_page* page,
+		float scale, GError** error);
+
+gint pdf_set_content_stream(fz_context*, pdf_page*, fz_buffer*, GError**);
+
+gint pdf_get_sond_font(fz_context* ctx, pdf_document* doc, pdf_obj**, GError** error);
+
+pdf_obj* pdf_put_sond_font(fz_context* ctx, pdf_document* doc, GError** error);
+
+gint pdf_page_has_hidden_text(fz_context* ctx, pdf_page* page,
+		gboolean* hidden, GError** error);
 
 #endif /* SRC_SOND_PDF_HELPER_H_ */

@@ -237,8 +237,8 @@ static gint add_ocr_layer_to_page(fz_context *ctx,
 	pdf_obj* fonts = NULL;
 	pdf_obj* font_name = NULL;
 	fz_buffer* buf_new = NULL;
-	gint rc = 0;
 	fz_stream* stream = NULL;
+	gint rc = 0;
 
 	fz_try(ctx) {
 		// Resources-Dictionary erstellen, falls nicht vorhanden
@@ -264,14 +264,10 @@ static gint add_ocr_layer_to_page(fz_context *ctx,
 		ERROR_PDF
 
 	fz_try(ctx) {
+		font_name = pdf_new_name(ctx, "FSond");
 		if (!pdf_dict_get(ctx, fonts, font_name))
-			font_name = pdf_new_name(ctx, "FSond");
+			pdf_dict_put(ctx, fonts, font_name, font_ref);
 	}
-	fz_catch(ctx)
-		ERROR_PDF
-
-	fz_try(ctx)
-		pdf_dict_put(ctx, fonts, font_name, font_ref);
 	fz_always(ctx)
 		pdf_drop_obj(ctx, font_name);
 	fz_catch(ctx)
@@ -305,113 +301,11 @@ static gint add_ocr_layer_to_page(fz_context *ctx,
 	//und der sanitize-processor beim letzten Speichern
 	//alle indirekten Objekte - sofern identisch - zusammengefaßt hat
 	//Dann würde ändern des val alle Seiten betreffen
-	fz_try(ctx) {
-		pdf_obj* contents_new = pdf_add_object_drop(ctx, page->doc,
-				pdf_new_dict(ctx, page->doc, 1));
-		pdf_dict_put_drop(ctx, page->obj, PDF_NAME(Contents),
-				contents_new);
-	}
-	fz_catch(ctx) {
-		fz_drop_buffer(ctx, buf_new);
-
-		ERROR_PDF
-	}
-
-	fz_try( ctx ) {
-		pdf_obj* contents = pdf_dict_get(ctx, page->obj, PDF_NAME(Contents));
-		pdf_update_stream(ctx, page->doc, contents, buf_new, 0);
-	}
-	fz_always(ctx)
-		fz_drop_buffer(ctx, buf_new);
-	fz_catch(ctx)
-		ERROR_PDF
+	rc = pdf_set_content_stream(ctx, page, buf_new, error);
+	if (rc)
+		ERROR_Z
 
     return 0;
-}
-
-static gint sond_ocr_run_page(fz_context* ctx, pdf_page* page,
-		fz_device* dev, GError** error) {
-	pdf_processor* proc_run = NULL;
-	pdf_processor* proc_text = NULL;
-
-	fz_try(ctx)
-		proc_run = pdf_new_run_processor(ctx, page->doc, dev, fz_identity, -1,
-			"View", NULL, NULL, NULL, NULL, NULL);
-	fz_catch(ctx)
-		ERROR_PDF
-
-		// text-analyzer-Processor erstellen (dieser filtert den Text)
-	fz_try(ctx) //flag == 3: aller Text weg, nur Bilder ocr-en
-		proc_text = new_text_analyzer_processor(ctx, proc_run, 3, error);
-	fz_catch(ctx) {
-		pdf_close_processor(ctx, proc_run);
-		pdf_drop_processor(ctx, proc_run);
-
-		ERROR_PDF
-	}
-
-    // Content durch Filter-Kette schicken
-	fz_try(ctx)
-		pdf_process_contents(ctx, proc_text, page->doc,
-				pdf_page_resources(ctx, page), pdf_page_contents(ctx, page),
-				NULL, NULL);
-	fz_always(ctx) {
-		pdf_close_processor(ctx, proc_text);
-		pdf_drop_processor(ctx, proc_text);
-		pdf_drop_processor(ctx, proc_run);
-	}
-	fz_catch(ctx)
-		ERROR_PDF
-
-	return 0;
-}
-
-static fz_pixmap*
-sond_ocr_render_pixmap(fz_context *ctx, pdf_page* page,
-		float scale, GError** error) {
-	gint rc = 0;
-	fz_device *draw_device = NULL;
-	fz_pixmap *pixmap = NULL;
-	fz_rect rect = { 0 };
-	fz_matrix ctm = { 0 };
-
-	pdf_page_transform(ctx, page, &rect, &ctm);
-	ctm = fz_pre_scale(ctm, scale, scale);
-	rect = fz_transform_rect(rect, ctm);
-
-	//per draw-device to pixmap
-	fz_try( ctx )
-		pixmap = fz_new_pixmap_with_bbox(ctx, fz_device_rgb(ctx),
-				fz_irect_from_rect(rect), NULL, 0);
-	fz_catch(ctx)
-		ERROR_PDF_VAL(NULL)
-
-	fz_try( ctx)
-		fz_clear_pixmap_with_value(ctx, pixmap, 255);
-	fz_catch(ctx) {
-		fz_drop_pixmap(ctx, pixmap);
-
-		ERROR_PDF_VAL(NULL)
-	}
-
-	fz_try(ctx)
-		draw_device = fz_new_draw_device(ctx, ctm, pixmap);
-	fz_catch(ctx) {
-		fz_drop_pixmap(ctx, pixmap);
-
-		ERROR_PDF_VAL(NULL)
-	}
-
-	rc = sond_ocr_run_page(ctx, page, draw_device, error);
-	fz_close_device(ctx, draw_device);
-	fz_drop_device(ctx, draw_device);
-	if (rc) {
-		fz_drop_pixmap(ctx, pixmap);
-
-		ERROR_PDF_VAL(NULL)
-	}
-
-	return pixmap;
 }
 
 static gint calculate_ocr_transform(fz_context *ctx,
@@ -453,174 +347,132 @@ static gint calculate_ocr_transform(fz_context *ctx,
     return 0;
 }
 
-gint sond_ocr_page(SondOcrPool* pool, pdf_page* page, pdf_obj* font_ref,
-		SondOcrTask* task, TessBaseAPI* osd_api, GError** error) {
-	float scale[] = {4.3, 6.4, 8.6};
-	gint max_durchgang = 3;
-	gint rc = 0;
-	gint conf = 0;
+static gint sond_ocr_osd(SondOcrTask* task, GError** error) {
 	int orient_deg;
 	float orient_conf;
 
-	task->pixmap = sond_ocr_render_pixmap(ctx, page, scale[task->durchgang], error);
-	if (!task->pixmap)
-		ERROR_Z
-
-	task->ctx = ctx;
-	task->scale = scale[task->durchgang];
-	if (task->durchgang == 0 && osd_api) {
+	if (task->durchgang == 0 && task->pool->osd_api) {
 		// OSD - Orientierung erkennen (schnell!)
-		TessBaseAPISetImage(osd_api, task->pixmap->samples, task->pixmap->w,
+		TessBaseAPISetImage(task->pool->osd_api, task->pixmap->samples, task->pixmap->w,
 				task->pixmap->h, task->pixmap->n, task->pixmap->stride);
 
-		if (TessBaseAPIDetectOrientationScript(osd_api, &orient_deg,
-				&orient_conf, NULL, NULL)) {
+		gboolean suc = TessBaseAPIDetectOrientationScript(task->pool->osd_api, &orient_deg,
+				&orient_conf, NULL, NULL);
+		TessBaseAPIClear(task->pool->osd_api);
+		if (suc) {
 			if (orient_deg && orient_conf > 1.7f) {
 				gint rc = 0;
 
-				rc = pdf_page_rotate(ctx, page->obj, 360 - orient_deg, error);
-				fz_drop_pixmap(ctx, task->pixmap);
+				fz_drop_pixmap(task->pool->ctx, task->pixmap);
+
+				rc = pdf_page_rotate(task->pool->ctx, task->page->obj, 360 - orient_deg, error);
 				if (rc)
 					ERROR_Z
 
-				if (pool->log_func)
-					pool->log_func(pool->log_data,
+				if (task->pool->log_func)
+					task->pool->log_func(task->pool->log_data,
 							"Tesseract OSD: Seite %u um %d° rotiert (Konfidenz %.2f)",
-							page->super.number, (360 - orient_deg), orient_conf);
+							task->page->super.number, (360 - orient_deg), orient_conf);
 
-				task->pixmap = sond_ocr_render_pixmap(ctx, page, scale[task->durchgang], error);
+				task->pixmap = pdf_render_pixmap(task->pool->ctx, task->page, task->scale, error);
 				if (!task->pixmap)
 					ERROR_Z
 			}
-			else if (orient_deg && pool->log_func)
-				pool->log_func(pool->log_data,
+			else if (orient_deg && task->pool->log_func)
+				task->pool->log_func(task->pool->log_data,
 						"Tesseract OSD: conf < 1.7 - keine Rotation angewendet");
 		}
 	}
 
-	rc = calculate_ocr_transform(ctx, page, task->scale,
-			&task->ocr_transform, error);
-	if (rc)
-		ERROR_Z
-
-	g_atomic_int_set(task->status, 1); //started
-	gboolean suc = g_thread_pool_push(pool->pool, task, error);
-	if (!suc)
-		ERROR_Z
-
 	return 0;
 }
 
-gint sond_ocr_get_num_sond_font(fz_context* ctx, pdf_document* doc, GError** error) {
-	gint num_pages = 0;
-	gint num = 0;
-
-	fz_try(ctx)
-		num_pages = pdf_count_pages(ctx, doc);
-	fz_catch(ctx)
-		ERROR_PDF
-
-	for (gint u = 0; u < num_pages; u++) {
-		pdf_obj* page_ref = NULL;
-		pdf_obj* resources = NULL;
-		pdf_obj* font_dict = NULL;
-
-		fz_try(ctx) {
-			pdf_obj* fsond = NULL;
-
-			page_ref = pdf_lookup_page_obj(ctx, doc, u);
-			resources = pdf_dict_get_inheritable(ctx, page_ref,
-					PDF_NAME(Resources));
-			font_dict = pdf_dict_get(ctx, resources, PDF_NAME(Font));
-			fsond = pdf_dict_gets(ctx, font_dict, "FSond");
-			if (fsond)
-				num = pdf_to_num(ctx, fsond);
-		}
-		fz_catch(ctx)
-			ERROR_PDF
-	}
-
-	return num;
-}
-
-pdf_obj* sond_ocr_put_sond_font(fz_context* ctx, pdf_document* doc, GError** error) {
-	pdf_obj* font = NULL;
-	pdf_obj* font_ref = NULL;
-
-	fz_try(ctx)
-		// Font neu anlegen als indirektes Objekt
-		font = pdf_new_dict(ctx, doc, 4);
-	fz_catch(ctx)
-		ERROR_PDF_VAL(NULL)
-
-	fz_try(ctx) {
-		pdf_dict_put(ctx, font, PDF_NAME(Type), PDF_NAME(Font));
-		pdf_dict_put(ctx, font, PDF_NAME(Subtype), PDF_NAME(Type1));
-		pdf_dict_put_drop(ctx, font, PDF_NAME(BaseFont), pdf_new_name(ctx, "Helvetica"));
-		pdf_dict_put(ctx, font, PDF_NAME(Encoding), PDF_NAME(WinAnsiEncoding));
-
-		// Als indirektes Objekt hinzufügen
-		font_ref = pdf_add_object(ctx, doc, font);
-	}
-	fz_always(ctx)
-		pdf_drop_obj(ctx, font);
-	fz_catch(ctx)
-		ERROR_PDF_VAL(NULL)
-
-	return font_ref;
-}
-
-gint sond_ocr_page_has_hidden_text(fz_context* ctx, pdf_page* page,
-		gboolean* hidden, GError** error) {
-	pdf_processor* proc = NULL;
-
-	proc = new_text_analyzer_processor(ctx, NULL, 3, error);
-	if (!proc)
-		ERROR_Z
-
-	fz_try(ctx)
-		pdf_process_contents(ctx, proc, page->doc, pdf_page_resources(ctx, page),
-				pdf_page_contents(ctx, page), NULL, NULL);
-	fz_catch(ctx) {
-		pdf_close_processor(ctx, proc);
-		pdf_drop_processor(ctx, proc);
-
-		ERROR_PDF
-	}
-
-	*hidden = ((pdf_text_analyzer_processor*) proc)->has_hidden_text;
-	pdf_close_processor(ctx, proc);
-	pdf_drop_processor(ctx, proc);
-
-	return 0;
-}
-
-gint sond_ocr_pdf_doc(fz_context* ctx, pdf_document* doc, SondOcrPool* ocr_pool,
-		TessBaseAPI osd_api, GError** error) {
-	gint num_pages = 0;
-	pdf_obj* font_ref = NULL;
+gint sond_ocr_do_tasks(GPtrArray* arr_tasks, GError** error) {
 	gint pages_done = 0;
+	float scale[] = {4.3, 6.4, 8.6};
 
-	fz_try(ctx)
-		num_pages = pdf_count_pages(ctx, doc);
-	fz_catch(ctx)
-		ERROR_PDF
-
-	font_ref = sond_ocr_put_sond_font(ctx, doc, error);
-	if (!font_ref)
-		ERROR_Z
-
-	SondOcrTask* task = g_new0(SondOcrTask, num_pages);
-
-	while (pages_done < num_pages || ocr_pool->cancel_all) {
-		for (gint i = 0; i < num_pages; i++) {
+	while (pages_done < arr_tasks->len) {
+		for (gint i = 0; i < arr_tasks->len; i++) {
+			SondOcrTask* task = NULL;
 			gint rc = 0;
-			pdf_page* page = NULL;
 			gboolean hidden = FALSE;
-			gint progress = 0;
 			gint status = 0;
 
-			status = g_atomic_int_get(task[i].status);
+			task = g_ptr_array_index(arr_tasks, i);
+
+			status = g_atomic_int_get(&task[i].status);
+
+			if (status == 0) {
+				rc = pdf_page_has_hidden_text(task->pool->ctx, task->page, &hidden, error);
+				if (rc) {
+					if (task->pool->log_data)
+						task->pool->log_func(task->pool->log_data,
+								"Seite %u konnte nicht auf versteckten Text geprüft werden: %s",
+							i, (*error)->message);
+					g_clear_error(error);
+					pages_done++;
+
+					status = 4;
+					continue;
+				}
+
+				if (hidden) {
+					if (task->pool->log_data)
+						task->pool->log_func(task->pool->log_data,
+								"Seite %u enthält versteckten Text - OCR übersprungen", i);
+					pages_done++;
+
+					status = 4;
+					continue;
+				}
+
+				task->scale = scale[task->durchgang];
+				task->pixmap = pdf_render_pixmap(task->pool->ctx, task->page, task->scale, error);
+				if (!task->pixmap) {
+					if (task->pool->log_data)
+						task->pool->log_func(task->pool->log_data,
+								"Pixmap Seite %u konnte nicht gerendert werden: %s",
+								i, (*error)->message);
+					g_clear_error(error);
+					status = 4;
+					continue;
+				}
+
+				rc = sond_ocr_osd(task, error);
+				if (rc) {
+					if (task->pool->log_data)
+						task->pool->log_func(task->pool->log_data, "OCR Seite %u gescheitert: %s",
+								i, (*error)->message);
+					g_clear_error(error);
+					status = 4;
+					continue;
+				}
+
+				rc = calculate_ocr_transform(task->pool->ctx, task->page, task->scale,
+						&task->ocr_transform, error);
+				if (rc) {
+					if (task->pool->log_data)
+						task->pool->log_func(task->pool->log_data,
+								"Transform-Matrix konnte nicht berechnet werden: %s",
+								i, (*error)->message);
+					g_clear_error(error);
+					status = 4;
+					continue;
+				}
+
+				g_atomic_int_set(&task->status, 1); //started
+				gboolean suc = g_thread_pool_push(task->pool->pool, task, error);
+				if (!suc) {
+					if (task->pool->log_data)
+						task->pool->log_func(task->pool->log_data,
+								"Thread konnte nicht gepusht werden: %s",
+								i, (*error)->message);
+					g_clear_error(error);
+					status = 4;
+					continue;
+				}
+			}
+
 			if (status == 1) //läuft gerade
 				continue;
 
@@ -628,13 +480,13 @@ gint sond_ocr_pdf_doc(fz_context* ctx, pdf_document* doc, SondOcrPool* ocr_pool,
 				gint rc = 0;
 
 				//content einfügen
-				rc = add_ocr_layer_to_page(ctx, task->content, page, font_ref,
-						&task[i].ocr_transform, error);
+				rc = add_ocr_layer_to_page(task->pool->ctx, task->content, task->page,
+						task->font_ref, &task->ocr_transform, error);
 				if (rc) {
-					if (ocr_pool->log_func)
-						ocr_pool->log_func(ocr_pool->log_data,
-								"Einfügen der OCR-Daten in PDF-Page fehlgeschlagen: %s",
-								(*error)->message);
+					if (task->pool->log_func)
+						task->pool->log_func(task->pool->log_data,
+								"Einfügen der OCR-Daten in PDF-Page %u fehlgeschlagen: %s",
+								i, (*error)->message);
 					g_clear_error(error);
 				}
 
@@ -649,43 +501,93 @@ gint sond_ocr_pdf_doc(fz_context* ctx, pdf_document* doc, SondOcrPool* ocr_pool,
 
 			if (status == 4) //Abstellgleis
 				continue;
-			}
 
-			fz_try(ctx)
-				page = pdf_load_page(ctx, doc, i);
-			fz_catch(ctx) {
-				log_func(log_data, "Seite %u: pdf_load_page: %s", i, fz_caught_message(ctx));
-				continue;
-			}
-
-			rc = sond_ocr_page_has_hidden_text(ctx, page, &hidden, error);
-			if (rc) {
-				pdf_drop_page(ctx, page);
-				log_func(log_data, "Seite %u: Prüfung auf versteckten Text fehlgeschlagen: %s",
-						i, (*error)->message);
-				g_clear_error(error);
-
-				continue;
-			}
-
-			if (hidden) {
-				log_func(log_data, "Seite %u: enthält versteckten Text - OCR übersprungen",
-						page->super.number);
-				pdf_drop_page(ctx, page);
-
-				continue;
-			}
-
-			rc = sond_ocr_page(ctx, page, font_ref, ocr_pool, task[i], osd_api,
-					log_func, log_data, progress_func, &progress, error);
-			if (rc) {
-				log_func(log_data, "Seite %u: OCR failed: %s",
-						(*error)->message);
-				g_clear_error(error);
-			}
 		}
 	}
-	pdf_drop_obj(ctx, font_ref);
+
+	return 0;
+}
+
+static void task_free(SondOcrTask* task) {
+	if (task->page)
+		pdf_drop_page(task->pool->ctx, task->page);
+	if (task->content)
+		fz_drop_buffer(task->pool->ctx, task->content);
+
+	g_free(task);
+
+	return;
+}
+
+SondOcrTask* sond_ocr_task_new(SondOcrPool* pool, pdf_document* doc,
+		gint page_num, pdf_obj* font_ref, GError** error) {
+	SondOcrTask* task = g_new0(SondOcrTask, 1);
+
+	task->pool = pool;
+
+	fz_try(task->pool->ctx)
+		task->page = pdf_load_page(task->pool->ctx, doc, page_num);
+	fz_catch(task->pool->ctx) {
+		if (task->pool->log_data)
+			task->pool->log_func(task->pool->log_data,
+					"pdf_page %u konnte nicht geladen werden: %s",
+					page_num, fz_caught_message(task->pool->ctx));
+		g_free(task);
+
+		return NULL;
+	}
+
+	task->font_ref = font_ref;
+
+	return task;
+}
+
+gint sond_ocr_pdf_doc(SondOcrPool* ocr_pool, pdf_document* doc,
+		GError** error) {
+	gint num_pages = 0;
+	pdf_obj* font_ref = NULL;
+	gint rc = 0;
+
+	fz_try(ocr_pool->ctx)
+		num_pages = pdf_count_pages(ocr_pool->ctx, doc);
+	fz_catch(ocr_pool->ctx) {
+		fz_context* ctx = ocr_pool->ctx;
+		ERROR_PDF
+	}
+
+	rc = pdf_get_sond_font(ocr_pool->ctx, doc, &font_ref, error);
+	if (rc)
+		ERROR_Z
+
+	if (!font_ref) {
+		font_ref = pdf_put_sond_font(ocr_pool->ctx, doc, error);
+		if (!font_ref)
+			ERROR_Z
+	}
+
+	GPtrArray* arr_tasks = g_ptr_array_new_with_free_func((GDestroyNotify) task_free);
+
+	for (gint i = 0; i < num_pages; i++) {
+		SondOcrTask* task =
+				sond_ocr_task_new(ocr_pool, doc, i, font_ref, error);
+		if (!task) {
+			if (ocr_pool->log_data)
+				ocr_pool->log_func(ocr_pool->log_data,
+						"Task für Seite %u konnte nicht erzeugt werden: %s",
+						i, (*error)->message);
+			g_clear_error(error);
+			continue;
+		}
+
+		g_ptr_array_add(arr_tasks, task);
+	}
+
+	pdf_drop_obj(ocr_pool->ctx, font_ref);
+
+	rc = sond_ocr_do_tasks(arr_tasks, error);
+	g_ptr_array_unref(arr_tasks);
+	if (rc)
+		ERROR_Z
 
 	return 0;
 }
@@ -1018,8 +920,14 @@ typedef struct {
     ETEXT_DESC* monitor;
 } TesseractThreadData;
 
+static gboolean ocr_cancel(void *cancel_this, int words) {
+	volatile gboolean *cancelFlag = (volatile gboolean*) cancel_this;
+	return *cancelFlag;
+}
+
 static gint ocr_pixmap(SondOcrTask* task, SondOcrPool* pool,
 		TesseractThreadData* thread_data, GError** error) {
+	gint rc = 0;
 
 	//jetzt richtige OCR
 	TessBaseAPISetImage(thread_data->api, task->pixmap->samples, task->pixmap->w, task->pixmap->h,
@@ -1034,7 +942,7 @@ static gint ocr_pixmap(SondOcrTask* task, SondOcrPool* pool,
 		return -1;
 	}
 
-	conf = TessBaseAPIMeanTextConf(thread_data->api);
+	float conf = TessBaseAPIMeanTextConf(thread_data->api);
 	if (conf > 80 || task->durchgang == 2)
 		return 0;
 
@@ -1047,89 +955,10 @@ static gint ocr_pixmap(SondOcrTask* task, SondOcrPool* pool,
 	return 1;
 }
 
-static void ocr_worker(gpointer task_data, gpointer user_data) {
-    GError *error = NULL;
-    gint rc = 0;
-
-    SondOcrTask *task = (SondOcrTask *)task_data;
-    SondOcrPool *pool = (SondOcrPool *)user_data;
-
-    //job++
-    g_atomic_int_inc(&pool->num_active_jobs);
-
-    // Hole oder erstelle Thread-lokale Tesseract-Instanz
-    TesseractThreadData *thread_data = g_private_get(&pool->thread_data_key);
-
-    if (thread_data == NULL) {
-        thread_data = get_or_create_thread_data(&pool->thread_data_key,
-        		pool->tessdata_path, pool->language, &pool->cancel_all, &error);
-        if (!thread_data) {
-        	if (pool->log_func)
-        		pool->log_func(pool->log_data, "Thread-Data konnte nicht geladen werden: %s",
-        				error->message);
-        	g_error_free(error);
-        	g_atomic_int_set(task->status, 3);
-
-        	goto dec_active_jobs;
-        }
-    }
-
-    rc = ocr_pixmap(task, pool, thread_data, &error);
-
-    fz_context* ctx_clone = fz_clone_context(pool->ctx);
-    fz_drop_pixmap(ctx_clone, task->pixmap)
-    if (rc == -1) {
-		if (pool->log_func)
-			pool->log_func(pool->log_data, "Recog failed: %s", error->message);
-		g_error_free(error);
-    	g_atomic_int_set(task->status, 3);
-    	goto dec_active_jobs;
-    }
-    else if (rc == 1) {
-    	g_atomic_int_set(task->status, 0);
-    	goto dec_active_jobs;
-    }
-
-	TessResultIterator* iter = TessBaseAPIGetIterator(thread_data->api);
-	if (!iter) {
-		if (pool->log_func)
-			pool->log_func(pool->log_data, "Couldn't get ResultIter");
-		g_atomic_int_set(task->status, 3);
-		goto dec_active_jobs;
-	}
-
-	// Content Stream mit korrekten Koordinaten erstellen
-	task->content = tesseract_to_content_stream(ctx_clone, iter,
-			&task->ocr_transform, &error);
-	if (!ocr_content) {
-		if (pool->log_func)
-			pool->log_func(pool->log_data,
-					"Umwandlung Results in content stream fehlgeschlagen: %s",
-					error->message);
-		g_error_free(error)
-		g_atomic_int_set(task->status, 3);
-		goto dec_active_jobs;
-	}
-
-	g_atomic_int_set(task->status, 2);
-
-dec_active_jobs:
-    g_atomic_int_dec_and_test(pool->num_active_jobs);
-    fz_drop_context(ctx_clone);
-
-    return;
-}
-
-static gboolean ocr_cancel(void *cancel_this, int words) {
-	volatile gboolean *cancelFlag = (volatile gboolean*) cancel_this;
-	return *cancelFlag;
-}
-
-// Initialisiert Tesseract für den aktuellen Thread
 static TesseractThreadData* get_or_create_thread_data(GPrivate *thread_data_key,
                                                        const gchar *tessdata_path,
                                                        const gchar *language,
-													   gboolean* cancel_all,
+													   volatile gboolean* cancel_all,
                                                        GError **error) {
     TesseractThreadData *data = g_private_get(thread_data_key);
 
@@ -1158,6 +987,79 @@ static TesseractThreadData* get_or_create_thread_data(GPrivate *thread_data_key,
     return data;
 }
 
+static void ocr_worker(gpointer task_data, gpointer user_data) {
+    GError *error = NULL;
+    gint rc = 0;
+
+    SondOcrTask *task = (SondOcrTask *)task_data;
+    SondOcrPool *pool = (SondOcrPool *)user_data;
+
+    //job++
+    g_atomic_int_inc(&pool->num_active_jobs);
+
+    // Hole oder erstelle Thread-lokale Tesseract-Instanz
+    TesseractThreadData *thread_data = g_private_get(&pool->thread_data_key);
+
+    if (thread_data == NULL) {
+        thread_data = get_or_create_thread_data(&pool->thread_data_key,
+        		pool->tessdata_path, pool->language, &pool->cancel_all, &error);
+        if (!thread_data) {
+        	if (pool->log_func)
+        		pool->log_func(pool->log_data, "Thread-Data konnte nicht geladen werden: %s",
+        				error->message);
+        	g_error_free(error);
+        	g_atomic_int_set(&task->status, 3);
+
+        	goto dec_active_jobs;
+        }
+    }
+
+    rc = ocr_pixmap(task, pool, thread_data, &error);
+
+    if (rc == -1) {
+		if (pool->log_func)
+			pool->log_func(pool->log_data, "Recog failed: %s", error->message);
+		g_error_free(error);
+    	g_atomic_int_set(&task->status, 3);
+    	goto dec_active_jobs;
+    }
+    else if (rc == 1) {
+    	g_atomic_int_set(&task->status, 0);
+    	goto dec_active_jobs;
+    }
+
+	TessResultIterator* iter = TessBaseAPIGetIterator(thread_data->api);
+	if (!iter) {
+		if (pool->log_func)
+			pool->log_func(pool->log_data, "Couldn't get ResultIter");
+		g_atomic_int_set(&task->status, 3);
+		goto dec_active_jobs;
+	}
+
+	// Content Stream mit korrekten Koordinaten erstellen
+	fz_context* ctx_clone = fz_clone_context(pool->ctx);
+	task->content = tesseract_to_content_stream(ctx_clone, iter,
+			&task->ocr_transform, &error);
+	fz_drop_context(ctx_clone);
+	if (!task->content) {
+		if (pool->log_func)
+			pool->log_func(pool->log_data,
+					"Umwandlung Results in content stream fehlgeschlagen: %s",
+					error->message);
+		g_error_free(error);
+		g_atomic_int_set(&task->status, 3);
+		goto dec_active_jobs;
+	}
+
+	g_atomic_int_set(&task->status, 2);
+
+dec_active_jobs:
+    g_atomic_int_dec_and_test(&pool->num_active_jobs);
+
+    return;
+}
+
+// Initialisiert Tesseract für den aktuellen Thread
 // Cleanup-Funktion für Thread-Daten
 static void cleanup_thread_data(TesseractThreadData *data) {
     if (data) {
@@ -1172,6 +1074,30 @@ static void cleanup_thread_data(TesseractThreadData *data) {
     }
 }
 
+static gint sond_ocr_init_osd_api(TessBaseAPI** osd_api,
+		gchar const* datadir, GError** error) {
+	gint rc = 0;
+
+	*osd_api = TessBaseAPICreate();
+	if (!(*osd_api)) {
+		g_set_error(error, SOND_ERROR, 0, "Create Tesseract OSD API failed");
+
+		return -1;
+	}
+
+	rc = TessBaseAPIInit3(*osd_api, datadir, "osd");
+	if (rc) {
+		TessBaseAPIEnd(*osd_api);
+		TessBaseAPIDelete(*osd_api);
+		g_set_error(error, SOND_ERROR, 0, "TessBaseAPIInit3 OSD fehlgeschlagen");
+		return -1;
+	}
+
+	TessBaseAPISetPageSegMode(*osd_api, PSM_OSD_ONLY);
+
+    return 0;
+}
+
 // Worker-Funktion die im Thread-Pool ausgeführt wird
 SondOcrPool* sond_ocr_pool_new(const gchar *tessdata_path,
                                    const gchar *language,
@@ -1180,6 +1106,8 @@ SondOcrPool* sond_ocr_pool_new(const gchar *tessdata_path,
 								   void (*log_func)(void*, gchar const*, ...),
 								   gpointer log_data,
                                    GError **error) {
+	gint rc = 0;
+
     g_return_val_if_fail(tessdata_path != NULL, NULL);
     g_return_val_if_fail(language != NULL, NULL);
     g_return_val_if_fail(num_threads > 0, NULL);
@@ -1193,8 +1121,19 @@ SondOcrPool* sond_ocr_pool_new(const gchar *tessdata_path,
                                    num_threads,
                                    TRUE,
                                    error);
-    if (!pool->pool)
+    if (!pool->pool) {
+    	g_free(pool);
     	return NULL;
+    }
+
+    rc = sond_ocr_init_osd_api(&pool->osd_api,
+    		tessdata_path ? tessdata_path : "/usr/share/tesseract-ocr/5/tessdata/",
+    				error);
+    if (rc) {
+    	g_thread_pool_free(pool->pool, TRUE, TRUE);
+    	g_free(pool);
+    	return NULL;
+    }
 
     g_mutex_init(&pool->mutex);
     pool->tessdata_path = g_strdup(tessdata_path);
@@ -1218,6 +1157,9 @@ void sond_ocr_pool_free(SondOcrPool *pool) {
     // Die thread-lokalen Daten werden automatisch durch die
     // DestroyNotify-Funktion aufgeräumt wenn die Threads beendet werden
     g_thread_pool_free(pool->pool, FALSE, TRUE);
+
+    TessBaseAPIEnd(pool->osd_api);
+    TessBaseAPIDelete(pool->osd_api);
 
     // Cleanup Pool-Struktur
     g_free(pool->tessdata_path);
