@@ -516,14 +516,11 @@ static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 	gint rc = 0;
 	gchar* errmsg = NULL;
 	InfoWindow *info_window = NULL;
-	gchar *message = NULL;
 	gchar *datadir = NULL;
-	TessBaseAPI *ocr_api = NULL;
-	TessBaseAPI *osd_api = NULL;
 	GError* error = NULL;
 	SondFilePartPDF* sfp_pdf_before = NULL;
 	pdf_document* doc = NULL;
-	MonitorData monitor_data = { 0 };
+	SondOcrPool* pool = NULL;
 
 	Projekt *zond = (Projekt*) data;
 
@@ -548,17 +545,27 @@ static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 
 	//TessInit
 	info_window = info_window_open(zond->app_window, "OCR");
-	monitor_data.progress_data = (gpointer) info_window;
-	monitor_data.cancel_this = &info_window->cancel;
 
 	datadir = g_build_filename(zond->exe_dir, "../share/tessdata", NULL);
+	pool = sond_ocr_pool_new(datadir, "deu", 4, zond->ctx,
+			(void(*)(void*, gchar const*, ...)) info_window_set_message,
+			(gpointer) info_window, &error);
+	g_free(datadir);
+	if (!pool) {
+		info_window_set_message(info_window,
+				"Thread-Pool konnte nicht erzeugt werden: %s", error->message);
+		g_error_free(error);
+		info_window_close(info_window);
+		return;
+	}
 
 	for (gint i = 0; i < arr_sfp->len; i++) {
 		SondFilePartPDF* sfp_pdf = NULL;
-		GError* error = NULL;
 
 		sfp_pdf = g_ptr_array_index(arr_sfp, i);
 		if (sfp_pdf != sfp_pdf_before) {
+			sfp_pdf_before = sfp_pdf;
+
 			info_window_set_message(info_window,
 					sond_file_part_get_filepart(SOND_FILE_PART(sfp_pdf)));
 
@@ -569,44 +576,40 @@ static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 				continue;
 			}
 
-			pdf_drop_document(zond->ctx, doc);
-
 			doc = sond_file_part_pdf_open_document(zond->ctx, sfp_pdf,
 					FALSE, &error);
 			if (!doc) {
-				message = g_strdup_printf(
-						"Fehler bei Aufruf sond_file_part_pdf_open_document:\n%s",
+				info_window_set_message(info_window,
+						"Pdf-Dokument konnte nicht geöffnet werden: %s",
 						error->message);
-				g_error_free(error);
-				info_window_set_message(info_window, message);
-				g_free(message);
+				g_clear_error(&error);
 
 				continue;
 			}
 		}
 
-		rc = sond_ocr_pdf_doc(zond->ctx, doc, 3, datadir, "deu",
-				(void (*)(gpointer, gchar const*, ...)) info_window_set_message,
-				(void*) info_window, (void (*)(gpointer, gint)) info_window_display_progress,
-				&monitor_data, &error);
+		rc = sond_ocr_pdf_doc(pool, doc, &error);
 		if (rc) {
-			info_window_set_message(info_window, "Fehler OCR - \n\n%s", error->message);
-			g_error_free(error);
+			info_window_set_message(info_window, "Fehler OCR: %s", error->message);
+			g_clear_error(&error);
+			pdf_drop_document(zond->ctx, doc);
 
 			continue;
 		}
 
 		rc = sond_file_part_pdf_save_and_close(zond->ctx, doc, sfp_pdf, &error);
+		if (rc) {
+			info_window_set_message(info_window,
+					"Speichern fehlgeschlagen: %s", error->message);
+			g_clear_error(&error);
+
+			continue;
+		}
 	}
 
-	g_free(datadir);
 	info_window_close(info_window);
-
+	sond_ocr_pool_free(pool);
 	g_ptr_array_unref(arr_sfp);
-	TessBaseAPIEnd(ocr_api);
-	TessBaseAPIEnd(osd_api);
-	TessBaseAPIDelete(ocr_api);
-	TessBaseAPIDelete(osd_api);
 
 	return;
 }

@@ -44,7 +44,7 @@ typedef struct _GError GError;
 #define ERROR_PDF ERROR_PDF_VAL(-1)
 
 
-fz_buffer* pdf_text_filter_page(fz_context*, pdf_obj*, gint, gchar**);
+fz_buffer* pdf_text_filter_page(fz_context*, pdf_page*, gint, gchar**);
 
 gint pdf_copy_page(fz_context*, pdf_document*, gint, gint, pdf_document*, gint,
 		gchar**);

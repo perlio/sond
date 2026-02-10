@@ -71,6 +71,10 @@ typedef struct {
 	fz_buffer* content;
 } SondOcrTask;
 
+gint sond_ocr_do_tasks(GPtrArray* arr_tasks, GError** error);
+
+void sond_ocr_task_free(SondOcrTask* task);
+
 SondOcrTask* sond_ocr_task_new(SondOcrPool* pool, pdf_document* doc,
 		gint page_num, pdf_obj* font_ref, GError** error);
 

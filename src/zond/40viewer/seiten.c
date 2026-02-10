@@ -456,8 +456,7 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 	GPtrArray *arr_document_page = NULL;
 	InfoWindow *info_window = NULL;
 	gchar* datadir = NULL;
-	TessBaseAPI *handle = NULL;
-	MonitorData monitor_data = { 0 };
+	SondOcrPool* pool = NULL;
 
 	PdfViewer *pv = (PdfViewer*) data;
 
@@ -470,14 +469,15 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 		return;
 
 	info_window = info_window_open(pv->vf, "OCR");
-	monitor_data.progress_data = (gpointer) info_window;
-	monitor_data.cancel_this = (gpointer) &info_window->cancel;
 
 	datadir = g_build_filename(pv->zond->exe_dir, "../share/tessdata", NULL);
-	rc = sond_ocr_init_tesseract(&handle, NULL, datadir, &error);
+	pool = sond_ocr_pool_new(datadir, "deu", 1, pv->zond->ctx,
+			(void(*)(void*, gchar const*, ...)) info_window_set_message,
+					(gpointer) info_window, &error);
 	g_free(datadir);
-	if (rc) {
-		display_message(pv->vf, "Tesseract konnte nicht initialisiert werden:\n",
+	if (!pool) {
+		info_window_set_message(info_window,
+				"Thread-Pool konnte nicht initialisiert werden: %s",
 				error->message, NULL);
 		g_error_free(error);
 		g_ptr_array_unref(arr_document_page);
@@ -486,44 +486,34 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 	}
 
 	for (gint i = 0; i < arr_document_page->len; i++) {
-		pdf_page* page = NULL;
-		gboolean hidden = FALSE;
 		pdf_obj* font_ref = NULL;
 		gint font_num = 0;
 		JournalEntry entry = { 0 };
 		GArray* arr_entries = NULL;
 		fz_buffer* buf_content = NULL;
+		GPtrArray* arr_tasks = NULL;
+		SondOcrTask* task = NULL;
 
 		PdfDocumentPage *pdf_document_page = g_ptr_array_index(
 				arr_document_page, i);
 
-		arr_entries = zond_pdf_document_get_arr_journal(pdf_document_page->document);
-
 		fz_context *ctx = zond_pdf_document_get_ctx(
 				pdf_document_page->document);
+		pool->ctx = ctx; //Trick, um einheitlichn context für Dokument zu bekommen
 
-		fz_try(ctx)
-			page = pdf_load_page(ctx, zond_pdf_document_get_pdf_doc(
-					pdf_document_page->document), pdf_document_page->page_akt);
-		fz_catch(ctx) {
-			display_message(pv->vf, "Fehler beim Laden der Seite:\n",
-					fz_caught_message(ctx), NULL);
-			g_error_free(error);
+		//entry vorbereiten
+		entry.type = JOURNAL_TYPE_OCR;
+		entry.pdf_document_page = pdf_document_page;
 
-			continue;
-		}
-
-		rc = pdf_page_has_hidden_text(ctx, page, &hidden, &error);
-		if (rc == -1) {
-			display_message(pv->vf, "Fehler beim Prüfen auf versteckten Text:\n",
+		buf_content = get_content_stream_as_buffer(ctx, pdf_document_page->page->obj, &error);
+		if (!buf_content) {
+			info_window_set_message(info_window, "Alter Content-Stream nicht gefunden: %s",
 					error->message, NULL);
-			g_error_free(error);
-			pdf_drop_page(ctx, page);
+			g_clear_error(&error);
 			continue;
-		} else if (rc == 1) {
-			//Seite hat versteckten Text - überspringen
-			//ToDO: Abfragen, falls nicht "für alle Seiten" gewählt
 		}
+
+		entry.ocr.buf_old = buf_content; //übernimmt ref
 
 		if ((font_num = zond_pdf_document_get_ocr_num(
 				pdf_document_page->document))) {
@@ -531,85 +521,95 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 				font_ref = pdf_new_indirect(ctx, zond_pdf_document_get_pdf_doc(
 						pdf_document_page->document), font_num, 0);
 			fz_catch(ctx) {
-				display_message(pv->vf, "Fehler beim Prüfen auf versteckten Text:\n",
-						error->message, NULL);
-				g_error_free(error);
-				pdf_drop_page(ctx, page);
+				info_window_set_message(info_window, "Konnte Font-Objekt nicht erzeugen: %s",
+						fz_caught_message(ctx));
+				fz_drop_buffer(ctx, entry.ocr.buf_old);
 				continue;
 			}
 		}
 		else {
-			font_ref = pdf_put_sond_font(ctx,
-					zond_pdf_document_get_pdf_doc(
-							pdf_document_page->document), &error);
+			gint rc = 0;
+
+			rc  = pdf_get_sond_font(ctx,
+					zond_pdf_document_get_pdf_doc(pdf_document_page->document),
+					&font_ref, &error);
+			if (rc) {
+				info_window_set_message(info_window, "Suchen Font-Objekt fehlgeschlagen: %s",
+						error->message);
+				g_clear_error(&error);
+				fz_drop_buffer(ctx, entry.ocr.buf_old);
+				continue;
+			}
+
 			if (!font_ref) {
-				display_message(pv->vf, "Fehler beim Holen der SOND-Schriftart:\n",
-						error->message, NULL);
-				g_error_free(error);
-				pdf_drop_page(ctx, page);
-				continue;
-			}
+				font_ref = pdf_put_sond_font(ctx,
+						zond_pdf_document_get_pdf_doc(
+								pdf_document_page->document), &error);
+				if (!font_ref) {
+					info_window_set_message(info_window,
+							"SOND-Schriftart konnte nicht erzeugt werden: %s",
+							error->message, NULL);
+					g_clear_error(&error);
+					fz_drop_buffer(ctx, entry.ocr.buf_old);
+					continue;
+				}
 
-			fz_try(ctx)
-				font_num = pdf_to_num(ctx, font_ref);
-			fz_catch(ctx) {
-				display_message(pv->vf, "Fehler bei Ermittlung indirektes Objekt:\n",
-						fz_caught_message(ctx), NULL);
-				pdf_drop_obj(ctx, font_ref);
-				pdf_drop_page(ctx, page);
-				continue;
-			}
+				fz_try(ctx)
+					font_num = pdf_to_num(ctx, font_ref);
+				fz_catch(ctx) {
+					info_window_set_message(info_window,
+							"Num des Font_Objektes konnte nicht ermittelt werden:\n",
+							fz_caught_message(ctx), NULL);
+					pdf_drop_obj(ctx, font_ref);
+					fz_drop_buffer(ctx, entry.ocr.buf_old);
+					continue;
+				}
 
-			zond_pdf_document_set_ocr_num(pdf_document_page->document, font_num);
+				zond_pdf_document_set_ocr_num(pdf_document_page->document, font_num);
+			}
 		}
 
-		//entry vorbereiten
-		entry.type = JOURNAL_TYPE_OCR;
-		entry.pdf_document_page = pdf_document_page;
-
-		buf_content = get_content_stream_as_buffer(ctx, page->obj, &error);
-		if (!buf_content) {
-			display_message(pv->vf, "Fehler beim Holen des Content-Streams:\n",
-					error->message, NULL);
-			g_error_free(error);
-			pdf_drop_obj(ctx, font_ref);
-			pdf_drop_page(ctx, page);
+		task = sond_ocr_task_new(pool,
+				zond_pdf_document_get_pdf_doc(pdf_document_page->document),
+				pdf_document_page->page_akt, font_ref, &error);
+		pdf_drop_obj(ctx, font_ref);
+		if (!task) {
+			info_window_set_message(info_window,
+					"OCR-Task konnte nicht erzeugt werden: %s",
+					error->message);
+			g_clear_error(&error);
+			fz_drop_buffer(ctx, entry.ocr.buf_old);
 			continue;
 		}
 
-		entry.ocr.buf_old = buf_content; //übernimmt ref
+		arr_tasks = g_ptr_array_new_with_free_func((GDestroyNotify) sond_ocr_task_free);
+		g_ptr_array_add(arr_tasks, task);
 
 		//OCR
-		rc = sond_ocr_page(ctx, page, font_ref, handle, NULL,
-				(void (*)(gpointer, gchar const*, ...)) info_window_set_message,
-				(gpointer) info_window, (void(*)(gpointer, gint)) info_window_display_progress,
-				&monitor_data, &error); //thread-safe
-		pdf_drop_obj(ctx, font_ref);
-		pdf_drop_page(ctx, page);
-		if (rc == -1) { //Fähler
-			display_message(pv->vf, "Fehler bei OCR der Seite:\n",
-					error->message, NULL);
-			g_error_free(error);
+		rc = sond_ocr_do_tasks(arr_tasks, &error);
+		g_ptr_array_unref(arr_tasks);
+		if (rc) { //Fähler
+			info_window_set_message(info_window, "OCR-Task gescheitert: %s",
+					error->message);
+			g_clear_error(&error);
 			fz_drop_buffer(ctx, entry.ocr.buf_old);
 
 			continue;
 		}
-		else if (rc == 1) { //abgebrochen
-			fz_drop_buffer(ctx, entry.ocr.buf_old);
-			break;
-		}
 
-		buf_content = get_content_stream_as_buffer(ctx, page->obj, &error);
+		buf_content = get_content_stream_as_buffer(ctx, pdf_document_page->page->obj, &error);
 		if (!buf_content) {
-			display_message(pv->vf, "Fehler beim Holen des neuen Content-Streams:\n",
-					error->message, NULL);
-			g_error_free(error);
+			info_window_set_message(info_window,
+					"Neuer Content-Streams konnte nicht ermittelt werden: %s",
+					error->message);
+			g_clear_error(&error);
 			fz_drop_buffer(ctx, entry.ocr.buf_old);
 			continue;
 		}
 
 		entry.ocr.buf_new = buf_content; //übernimmt ref
 
+		arr_entries = zond_pdf_document_get_arr_journal(pdf_document_page->document);
 		g_array_append_val(arr_entries, entry);
 
 		//fz_stext_list droppen und auf NULL setzen
@@ -631,15 +631,11 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 		viewer_foreach(pv, pdf_document_page, NULL, NULL);
 	}
 
-	TessBaseAPIEnd(handle);
-	TessBaseAPIDelete(handle);
-
+	g_ptr_array_unref(arr_document_page);
 	info_window_close(info_window);
 
 	//damit Text von Cursor "erkannt" wird
 	g_signal_emit_by_name(pv->v_adj, "value-changed", NULL);
-
-	g_ptr_array_unref(arr_document_page);
 
 	return;
 }

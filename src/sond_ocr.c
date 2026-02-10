@@ -28,208 +28,6 @@
 #include "sond_log_and_error.h"
 #include "sond_pdf_helper.h"
 
-typedef struct {
-	pdf_processor super;
-	gint flags;
-	GArray* arr_Tr;
-	gboolean has_visible_text;
-	gboolean has_hidden_text;
-} pdf_text_analyzer_processor;
-
-static void text_analyzer_op_q(fz_context *ctx, pdf_processor *proc) {
-	gint Tr = 0;
-
-	pdf_text_analyzer_processor *p = (pdf_text_analyzer_processor*) proc;
-
-	Tr = g_array_index(p->arr_Tr, gint, p->arr_Tr->len - 1);
-
-	g_array_append_val(p->arr_Tr, Tr);
-
-	//chain-up
-	if (proc && proc->chain && proc->chain->op_q)
-		proc->chain->op_q(ctx, proc->chain);
-
-	return;
-}
-
-static void text_analyzer_op_Q(fz_context *ctx, pdf_processor *proc) {
-	pdf_text_analyzer_processor *p = (pdf_text_analyzer_processor*) proc;
-
-	if (p->arr_Tr->len) //wenn mehr Q als q, dann braucht man auch nicht weiterleiten...
-		g_array_remove_index(p->arr_Tr, p->arr_Tr->len - 1);
-
-	if (proc && proc->chain && proc->chain->op_Q)
-		proc->chain->op_Q(ctx, proc->chain);
-
-	return;
-}
-
-static void text_analyzer_op_Tr(fz_context *ctx, pdf_processor *proc,
-		gint render) {
-	pdf_text_analyzer_processor *p = (pdf_text_analyzer_processor*) proc;
-
-	(((gint*) (void*) (p->arr_Tr)->data)[(p->arr_Tr->len - 1)]) = render;
-
-	if (proc && proc->chain && proc->chain->op_Tr)
-		proc->chain->op_Tr(ctx, proc->chain, render);
-
-	return;
-}
-
-static void text_analyzer_op_TJ(fz_context *ctx, pdf_processor *proc,
-		pdf_obj *array) {
-	gint Tr = 0;
-
-	pdf_text_analyzer_processor *p = (pdf_text_analyzer_processor*) proc;
-
-	Tr = g_array_index(p->arr_Tr, gint, p->arr_Tr->len - 1);
-
-	if (Tr == 3)
-		p->has_hidden_text = TRUE;
-	else
-		p->has_visible_text = TRUE;
-
-	if ((p->flags & 1) && Tr != 3)
-		return;
-	else if ((p->flags & 2) && Tr == 3)
-		return;
-
-	if (proc && proc->chain && proc->chain->op_TJ)
-		proc->chain->op_TJ(ctx, proc->chain, array);
-
-	return;
-}
-
-static void text_analyzer_op_Tj(fz_context *ctx, pdf_processor *proc,
-		gchar *str, size_t len) {
-	gint Tr = 0;
-
-	pdf_text_analyzer_processor *p = (pdf_text_analyzer_processor*) proc;
-
-	Tr = g_array_index(p->arr_Tr, gint, p->arr_Tr->len - 1);
-
-	if (Tr == 3)
-		p->has_hidden_text = TRUE;
-	else
-		p->has_visible_text = TRUE;
-
-	if ((p->flags & 1) && Tr != 3)
-		return;
-	else if ((p->flags & 2) && Tr == 3)
-		return;
-
-	if (proc && proc->chain && proc->chain->op_Tj)
-		proc->chain->op_Tj(ctx, proc->chain, str, len);
-
-	return;
-}
-
-static void text_analyzer_op_squote(fz_context *ctx, pdf_processor *proc,
-		gchar *str, size_t len) {
-	gint Tr = 0;
-
-	pdf_text_analyzer_processor *p = (pdf_text_analyzer_processor*) proc;
-
-	Tr = g_array_index(p->arr_Tr, gint, p->arr_Tr->len - 1);
-
-	if (Tr == 3)
-		p->has_hidden_text = TRUE;
-	else
-		p->has_visible_text = TRUE;
-
-	if ((p->flags & 1) && Tr != 3)
-		return;
-	else if ((p->flags & 2) && Tr == 3)
-		return;
-
-	if (proc && proc->chain && proc->chain->op_squote)
-		proc->chain->op_squote(ctx, proc->chain, str, len);
-
-	return;
-}
-
-static void text_analyzer_op_dquote(fz_context *ctx, pdf_processor *proc,
-		float aw, float ac, gchar *str, size_t len) {
-	gint Tr = 0;
-
-	pdf_text_analyzer_processor *p = (pdf_text_analyzer_processor*) proc;
-
-	Tr = g_array_index(p->arr_Tr, gint, p->arr_Tr->len - 1);
-
-	if (Tr == 3)
-		p->has_hidden_text = TRUE;
-	else
-		p->has_visible_text = TRUE;
-
-	if ((p->flags & 1) && Tr != 3)
-		return;
-	else if ((p->flags & 2) && Tr == 3)
-		return;
-
-	if (proc && proc->chain && proc->chain->op_dquote)
-		proc->chain->op_dquote(ctx, proc->chain, aw, ac, str, len);
-
-	return;
-}
-
-static void drop_text_analyzer_processor(fz_context* ctx, pdf_processor* proc) {
-	g_array_unref(((pdf_text_analyzer_processor*) proc)->arr_Tr);
-
-//	if (proc && proc->chain && proc->chain->drop_processor)
-//		proc->chain->drop_processor(ctx, proc->chain);
-
-	return;
-}
-
-static void reset_text_analyzer_processor(fz_context* ctx, pdf_processor* proc) {
-	gint zero = 0;
-
-	((pdf_text_analyzer_processor*) proc)->has_hidden_text = FALSE;
-	((pdf_text_analyzer_processor*) proc)->has_visible_text = FALSE;
-	g_array_remove_range(((pdf_text_analyzer_processor*) proc)->arr_Tr, 0,
-			((pdf_text_analyzer_processor*) proc)->arr_Tr->len);
-	g_array_append_val(((pdf_text_analyzer_processor*) proc)->arr_Tr, zero);
-
-	if (proc && proc->chain)
-		pdf_reset_processor(ctx, proc->chain);
-
-	return;
-}
-
-pdf_processor*
-new_text_analyzer_processor(fz_context *ctx, pdf_processor* chain, gint flags, GError** error) {
-	gint zero = 0;
-	pdf_text_analyzer_processor *proc = NULL;
-
-	proc = pdf_new_processor(ctx, sizeof(pdf_text_analyzer_processor));
-
-	//Funktionen "umleiten"
-	proc->super.drop_processor = drop_text_analyzer_processor;
-	proc->super.reset_processor = reset_text_analyzer_processor;
-
-	proc->arr_Tr = g_array_new( FALSE, FALSE, sizeof(gint));
-	g_array_append_val(proc->arr_Tr, zero);
-
-	proc->flags = flags;
-
-	proc->super.op_q = text_analyzer_op_q;
-	proc->super.op_Q = text_analyzer_op_Q;
-	proc->super.op_Tr = text_analyzer_op_Tr;
-	proc->super.op_TJ = text_analyzer_op_TJ;
-	proc->super.op_Tj = text_analyzer_op_Tj;
-	proc->super.op_squote = text_analyzer_op_squote;
-	proc->super.op_dquote = text_analyzer_op_dquote;
-
-	proc->super.chain = chain;
-
-	if (chain) {
-		proc->super.requirements = proc->super.chain->requirements;
-		proc->super.chain->rstack = proc->super.rstack;
-	}
-
-	return (pdf_processor*) proc;
-}
-
 static gint add_ocr_layer_to_page(fz_context *ctx,
 		fz_buffer* content, pdf_page *page, pdf_obj* font_ref,
 		OcrTransform* ocr_transform, GError** error) {
@@ -380,8 +178,12 @@ static gint sond_ocr_osd(SondOcrTask* task, GError** error) {
 			}
 			else if (orient_deg && task->pool->log_func)
 				task->pool->log_func(task->pool->log_data,
-						"Tesseract OSD: conf < 1.7 - keine Rotation angewendet");
+						"OSD Seite %u: conf < 1.7 - keine Rotation angewendet",
+						task->page->super.number);
 		}
+		else if (task->pool->log_func)
+			task->pool->log_func(task->pool->log_data,
+					"OSD Seite %u fehlgeschlagen", task->page->super.number);
 	}
 
 	return 0;
@@ -400,7 +202,7 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, GError** error) {
 
 			task = g_ptr_array_index(arr_tasks, i);
 
-			status = g_atomic_int_get(&task[i].status);
+			status = g_atomic_int_get(&task->status);
 
 			if (status == 0) {
 				rc = pdf_page_has_hidden_text(task->pool->ctx, task->page, &hidden, error);
@@ -431,7 +233,7 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, GError** error) {
 				if (!task->pixmap) {
 					if (task->pool->log_data)
 						task->pool->log_func(task->pool->log_data,
-								"Pixmap Seite %u konnte nicht gerendert werden: %s",
+								"Seite %u konnte nicht gerendert werden: %s",
 								i, (*error)->message);
 					g_clear_error(error);
 					status = 4;
@@ -441,7 +243,7 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, GError** error) {
 				rc = sond_ocr_osd(task, error);
 				if (rc) {
 					if (task->pool->log_data)
-						task->pool->log_func(task->pool->log_data, "OCR Seite %u gescheitert: %s",
+						task->pool->log_func(task->pool->log_data, "OSD Seite %u gescheitert: %s",
 								i, (*error)->message);
 					g_clear_error(error);
 					status = 4;
@@ -508,7 +310,7 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, GError** error) {
 	return 0;
 }
 
-static void task_free(SondOcrTask* task) {
+void sond_ocr_task_free(SondOcrTask* task) {
 	if (task->page)
 		pdf_drop_page(task->pool->ctx, task->page);
 	if (task->content)
@@ -537,7 +339,7 @@ SondOcrTask* sond_ocr_task_new(SondOcrPool* pool, pdf_document* doc,
 		return NULL;
 	}
 
-	task->font_ref = font_ref;
+	task->font_ref = pdf_keep_obj(task->pool->ctx, font_ref);
 
 	return task;
 }
@@ -565,7 +367,8 @@ gint sond_ocr_pdf_doc(SondOcrPool* ocr_pool, pdf_document* doc,
 			ERROR_Z
 	}
 
-	GPtrArray* arr_tasks = g_ptr_array_new_with_free_func((GDestroyNotify) task_free);
+	GPtrArray* arr_tasks =
+			g_ptr_array_new_with_free_func((GDestroyNotify) sond_ocr_task_free);
 
 	for (gint i = 0; i < num_pages; i++) {
 		SondOcrTask* task =
@@ -936,8 +739,7 @@ static gint ocr_pixmap(SondOcrTask* task, SondOcrPool* pool,
 
 	rc = TessBaseAPIRecognize(thread_data->api, thread_data->monitor);
 	if (rc) { //muß sorum abgefragt werden, weil Abbruch auch rc = 1 macht
-		if (pool->log_func)
-			pool->log_func(pool->log_data, "Recognize fehlgeschlagen");
+		g_set_error(error, SOND_ERROR, 0, "Recognize fehlgeschlagen");
 
 		return -1;
 	}
@@ -950,7 +752,8 @@ static gint ocr_pixmap(SondOcrTask* task, SondOcrPool* pool,
 	task->durchgang++;
 	if (pool->log_func)
 		pool->log_func(pool->log_data,
-			"OCR-Konfidenz %d%% zu niedrig, nächster Durchgang", conf);
+			"OCR-Konfidenz %d%% für Seite %u zu niedrig, nächster Durchgang %u",
+			conf, task->page->super.number, task->durchgang);
 
 	return 1;
 }
@@ -1015,7 +818,6 @@ static void ocr_worker(gpointer task_data, gpointer user_data) {
     }
 
     rc = ocr_pixmap(task, pool, thread_data, &error);
-
     if (rc == -1) {
 		if (pool->log_func)
 			pool->log_func(pool->log_data, "Recog failed: %s", error->message);
@@ -1037,10 +839,8 @@ static void ocr_worker(gpointer task_data, gpointer user_data) {
 	}
 
 	// Content Stream mit korrekten Koordinaten erstellen
-	fz_context* ctx_clone = fz_clone_context(pool->ctx);
-	task->content = tesseract_to_content_stream(ctx_clone, iter,
+	task->content = tesseract_to_content_stream(task->pool->ctx, iter,
 			&task->ocr_transform, &error);
-	fz_drop_context(ctx_clone);
 	if (!task->content) {
 		if (pool->log_func)
 			pool->log_func(pool->log_data,

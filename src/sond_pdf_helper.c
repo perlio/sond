@@ -24,265 +24,246 @@
 #include <mupdf/pdf.h>
 #include <glib.h>
 
-/* PDF-Text-Filter */
-typedef struct resources_stack {
-	struct resources_stack *next;
-	pdf_obj *res;
-} resources_stack;
-
-typedef struct
-{
-	pdf_processor super;
-	fz_output *out;
-	int ahxencode;
-	int extgstate;
-	int newlines;
-	int balance;
-	pdf_obj *res;
-	pdf_obj *last_res;
-	resources_stack *rstack;
-	int sep;
-} pdf_output_processor;
-
 typedef struct {
-	pdf_output_processor super;
-	void (*pdf_drop_buffer_processor)(fz_context *ctx, pdf_processor *proc);
-
-	void (*pdf_buffer_processor_op_q)(fz_context *ctx, pdf_processor *proc);
-	void (*pdf_buffer_processor_op_Q)(fz_context *ctx, pdf_processor *proc);
-
-	void (*pdf_buffer_processor_op_Tr)(fz_context *ctx, pdf_processor *proc,
-			gint);
-
-	void (*pdf_buffer_processor_op_TJ)(fz_context*, pdf_processor*, pdf_obj*);
-	void (*pdf_buffer_processor_op_Tj)(fz_context*, pdf_processor*, gchar*,
-			size_t);
-	void (*pdf_buffer_processor_op_squote)(fz_context*, pdf_processor*, gchar*,
-			size_t);
-	void (*pdf_buffer_processor_op_dquote)(fz_context*, pdf_processor*, float,
-			float, gchar*, size_t);
-
-	GArray *arr_Tr;
+	pdf_processor super;
 	gint flags;
-} pdf_text_filter_processor;
+	GArray* arr_Tr;
+	gboolean has_visible_text;
+	gboolean has_hidden_text;
+} pdf_text_analyzer_processor;
 
-static void pdf_drop_text_filter_processor(fz_context *ctx, pdf_processor *proc) {
-	pdf_text_filter_processor *p = (pdf_text_filter_processor*) proc;
-
-	g_array_unref(p->arr_Tr);
-
-	p->pdf_drop_buffer_processor(ctx, proc);
-
-//	fz_free( ctx, proc );
-
-	return;
-}
-
-static void pdf_text_filter_op_q(fz_context *ctx, pdf_processor *proc) {
+static void text_analyzer_op_q(fz_context *ctx, pdf_processor *proc) {
 	gint Tr = 0;
 
-	pdf_text_filter_processor *p = (pdf_text_filter_processor*) proc;
+	pdf_text_analyzer_processor *p = (pdf_text_analyzer_processor*) proc;
 
 	Tr = g_array_index(p->arr_Tr, gint, p->arr_Tr->len - 1);
 
 	g_array_append_val(p->arr_Tr, Tr);
 
 	//chain-up
-	p->pdf_buffer_processor_op_q(ctx, proc);
+	if (proc && proc->chain && proc->chain->op_q)
+		proc->chain->op_q(ctx, proc->chain);
 
 	return;
 }
 
-static void pdf_text_filter_op_Q(fz_context *ctx, pdf_processor *proc) {
-	pdf_text_filter_processor *p = (pdf_text_filter_processor*) proc;
+static void text_analyzer_op_Q(fz_context *ctx, pdf_processor *proc) {
+	pdf_text_analyzer_processor *p = (pdf_text_analyzer_processor*) proc;
 
 	if (p->arr_Tr->len) //wenn mehr Q als q, dann braucht man auch nicht weiterleiten...
-	{
 		g_array_remove_index(p->arr_Tr, p->arr_Tr->len - 1);
 
-		p->pdf_buffer_processor_op_Q(ctx, proc);
-	}
+	if (proc && proc->chain && proc->chain->op_Q)
+		proc->chain->op_Q(ctx, proc->chain);
 
 	return;
 }
 
-static void pdf_text_filter_op_Tr(fz_context *ctx, pdf_processor *proc,
+static void text_analyzer_op_Tr(fz_context *ctx, pdf_processor *proc,
 		gint render) {
-	pdf_text_filter_processor *p = (pdf_text_filter_processor*) proc;
+	pdf_text_analyzer_processor *p = (pdf_text_analyzer_processor*) proc;
 
 	(((gint*) (void*) (p->arr_Tr)->data)[(p->arr_Tr->len - 1)]) = render;
 
-	p->pdf_buffer_processor_op_Tr(ctx, proc, render);
+	if (proc && proc->chain && proc->chain->op_Tr)
+		proc->chain->op_Tr(ctx, proc->chain, render);
 
 	return;
 }
 
-static void pdf_text_filter_op_TJ(fz_context *ctx, pdf_processor *proc,
+static void text_analyzer_op_TJ(fz_context *ctx, pdf_processor *proc,
 		pdf_obj *array) {
 	gint Tr = 0;
 
-	pdf_text_filter_processor *p = (pdf_text_filter_processor*) proc;
+	pdf_text_analyzer_processor *p = (pdf_text_analyzer_processor*) proc;
 
 	Tr = g_array_index(p->arr_Tr, gint, p->arr_Tr->len - 1);
+
+	if (Tr == 3)
+		p->has_hidden_text = TRUE;
+	else
+		p->has_visible_text = TRUE;
 
 	if ((p->flags & 1) && Tr != 3)
 		return;
-	if ((p->flags & 2) && Tr == 3)
+	else if ((p->flags & 2) && Tr == 3)
 		return;
 
-	p->pdf_buffer_processor_op_TJ(ctx, proc, array);
+	if (proc && proc->chain && proc->chain->op_TJ)
+		proc->chain->op_TJ(ctx, proc->chain, array);
 
 	return;
 }
 
-static void pdf_text_filter_op_Tj(fz_context *ctx, pdf_processor *proc,
+static void text_analyzer_op_Tj(fz_context *ctx, pdf_processor *proc,
 		gchar *str, size_t len) {
 	gint Tr = 0;
 
-	pdf_text_filter_processor *p = (pdf_text_filter_processor*) proc;
+	pdf_text_analyzer_processor *p = (pdf_text_analyzer_processor*) proc;
 
 	Tr = g_array_index(p->arr_Tr, gint, p->arr_Tr->len - 1);
 
-	if (p->flags & 1 && Tr != 3)
+	if (Tr == 3)
+		p->has_hidden_text = TRUE;
+	else
+		p->has_visible_text = TRUE;
+
+	if ((p->flags & 1) && Tr != 3)
 		return;
-	if (p->flags & 2 && Tr == 3)
+	else if ((p->flags & 2) && Tr == 3)
 		return;
 
-	p->pdf_buffer_processor_op_Tj(ctx, proc, str, len);
+	if (proc && proc->chain && proc->chain->op_Tj)
+		proc->chain->op_Tj(ctx, proc->chain, str, len);
 
 	return;
 }
 
-static void pdf_text_filter_op_squote(fz_context *ctx, pdf_processor *proc,
+static void text_analyzer_op_squote(fz_context *ctx, pdf_processor *proc,
 		gchar *str, size_t len) {
 	gint Tr = 0;
 
-	pdf_text_filter_processor *p = (pdf_text_filter_processor*) proc;
+	pdf_text_analyzer_processor *p = (pdf_text_analyzer_processor*) proc;
 
 	Tr = g_array_index(p->arr_Tr, gint, p->arr_Tr->len - 1);
 
-	if (p->flags & 1 && Tr != 3)
+	if (Tr == 3)
+		p->has_hidden_text = TRUE;
+	else
+		p->has_visible_text = TRUE;
+
+	if ((p->flags & 1) && Tr != 3)
 		return;
-	if (p->flags & 2 && Tr == 3)
+	else if ((p->flags & 2) && Tr == 3)
 		return;
 
-	p->pdf_buffer_processor_op_squote(ctx, proc, str, len);
+	if (proc && proc->chain && proc->chain->op_squote)
+		proc->chain->op_squote(ctx, proc->chain, str, len);
 
 	return;
 }
 
-static void pdf_text_filter_op_dquote(fz_context *ctx, pdf_processor *proc,
+static void text_analyzer_op_dquote(fz_context *ctx, pdf_processor *proc,
 		float aw, float ac, gchar *str, size_t len) {
 	gint Tr = 0;
 
-	pdf_text_filter_processor *p = (pdf_text_filter_processor*) proc;
+	pdf_text_analyzer_processor *p = (pdf_text_analyzer_processor*) proc;
 
 	Tr = g_array_index(p->arr_Tr, gint, p->arr_Tr->len - 1);
 
-	if (p->flags & 1 && Tr != 3)
+	if (Tr == 3)
+		p->has_hidden_text = TRUE;
+	else
+		p->has_visible_text = TRUE;
+
+	if ((p->flags & 1) && Tr != 3)
 		return;
-	if (p->flags & 2 && Tr == 3)
+	else if ((p->flags & 2) && Tr == 3)
 		return;
 
-	p->pdf_buffer_processor_op_dquote(ctx, proc, aw, ac, str, len);
+	if (proc && proc->chain && proc->chain->op_dquote)
+		proc->chain->op_dquote(ctx, proc->chain, aw, ac, str, len);
 
 	return;
 }
 
-static pdf_processor*
-pdf_new_text_filter_processor(fz_context *ctx, fz_buffer **buf, gint flags,
-		gchar **errmsg) {
-	*buf = NULL;
-	gint zero = 0; //wg g_array_append_val
-	pdf_text_filter_processor *proc = NULL;
-	pdf_output_processor *proc_output = NULL;
+static void drop_text_analyzer_processor(fz_context* ctx, pdf_processor* proc) {
+	g_array_unref(((pdf_text_analyzer_processor*) proc)->arr_Tr);
 
-	fz_try( ctx )
-		*buf = fz_new_buffer(ctx, 1024);
-	fz_catch(ctx)
-		ERROR_MUPDF_R("fz_new_buffer", NULL)
+//	if (proc && proc->chain && proc->chain->drop_processor)
+//		proc->chain->drop_processor(ctx, proc->chain);
 
-	fz_try(ctx)
-		proc_output = (pdf_output_processor*) pdf_new_buffer_processor(ctx,
-				*buf, 0, 0);
-	fz_catch(ctx) {
-		fz_drop_buffer(ctx, *buf);
-		ERROR_MUPDF_R("pdf_new_bufferprocessor", NULL)
-	}
+	return;
+}
 
-	proc = Memento_label(fz_calloc(ctx, 1, sizeof(pdf_text_filter_processor)),
-			"pdf_processor");
+static void reset_text_analyzer_processor(fz_context* ctx, pdf_processor* proc) {
+	gint zero = 0;
 
-	//output-processor in super-Struktur kopieren
-	proc->super = *proc_output;
+	((pdf_text_analyzer_processor*) proc)->has_hidden_text = FALSE;
+	((pdf_text_analyzer_processor*) proc)->has_visible_text = FALSE;
+	g_array_remove_range(((pdf_text_analyzer_processor*) proc)->arr_Tr, 0,
+			((pdf_text_analyzer_processor*) proc)->arr_Tr->len);
+	g_array_append_val(((pdf_text_analyzer_processor*) proc)->arr_Tr, zero);
 
-	//Hülle kann freigegeben werden
-	fz_free(ctx, proc_output);
+	if (proc && proc->chain)
+		pdf_reset_processor(ctx, proc->chain);
+
+	return;
+}
+
+pdf_processor*
+pdf_new_text_analyzer_processor(fz_context *ctx, pdf_processor* chain, gint flags, GError** error) {
+	gint zero = 0;
+	pdf_text_analyzer_processor *proc = NULL;
+
+	proc = pdf_new_processor(ctx, sizeof(pdf_text_analyzer_processor));
+
+	//Funktionen "umleiten"
+	proc->super.drop_processor = drop_text_analyzer_processor;
+	proc->super.reset_processor = reset_text_analyzer_processor;
 
 	proc->arr_Tr = g_array_new( FALSE, FALSE, sizeof(gint));
 	g_array_append_val(proc->arr_Tr, zero);
 
 	proc->flags = flags;
 
-	//Funktionen "umleiten"
-	proc->pdf_drop_buffer_processor = proc->super.super.drop_processor;
-	proc->super.super.drop_processor = pdf_drop_text_filter_processor;
+	proc->super.op_q = text_analyzer_op_q;
+	proc->super.op_Q = text_analyzer_op_Q;
+	proc->super.op_Tr = text_analyzer_op_Tr;
+	proc->super.op_TJ = text_analyzer_op_TJ;
+	proc->super.op_Tj = text_analyzer_op_Tj;
+	proc->super.op_squote = text_analyzer_op_squote;
+	proc->super.op_dquote = text_analyzer_op_dquote;
 
-	/* special graphics state */
-	proc->pdf_buffer_processor_op_q = proc->super.super.op_q;
-	proc->super.super.op_q = pdf_text_filter_op_q;
+	proc->super.chain = chain;
 
-	proc->pdf_buffer_processor_op_Q = proc->super.super.op_Q;
-	proc->super.super.op_Q = pdf_text_filter_op_Q;
-
-	proc->pdf_buffer_processor_op_Tr = proc->super.super.op_Tr;
-	proc->super.super.op_Tr = pdf_text_filter_op_Tr;
-
-	proc->pdf_buffer_processor_op_TJ = proc->super.super.op_TJ;
-	proc->super.super.op_TJ = pdf_text_filter_op_TJ;
-	proc->pdf_buffer_processor_op_Tj = proc->super.super.op_Tj;
-	proc->super.super.op_Tj = pdf_text_filter_op_Tj;
-	proc->pdf_buffer_processor_op_squote = proc->super.super.op_squote;
-	proc->super.super.op_squote = pdf_text_filter_op_squote;
-	proc->pdf_buffer_processor_op_dquote = proc->super.super.op_dquote;
-	proc->super.super.op_dquote = pdf_text_filter_op_dquote;
+	if (chain) {
+		proc->super.requirements = proc->super.chain->requirements;
+		proc->super.chain->rstack = proc->super.rstack;
+	}
 
 	return (pdf_processor*) proc;
 }
 
 fz_buffer*
-pdf_text_filter_page(fz_context *ctx, pdf_obj *obj, gint flags, gchar **errmsg) {
-	pdf_obj *contents = NULL;
-	pdf_obj *res = NULL;
+pdf_text_filter_page(fz_context *ctx, pdf_page* page, gint flags, gchar **errmsg) {
 	pdf_processor *proc = NULL;
+	pdf_processor* proc_buf = NULL;
 	fz_buffer *buf = NULL;
-	pdf_document *doc = NULL;
 
-	fz_try( ctx )
-		contents = pdf_dict_get(ctx, obj, PDF_NAME(Contents));
+	fz_try(ctx) {
+		buf = fz_new_buffer(ctx, 4096);
+	}
 	fz_catch(ctx)
-		ERROR_MUPDF_R("pdf_dict_get (Contents)", NULL)
-	if (!contents)
-		ERROR_S_MESSAGE_VAL("Kein Contents-Dict", NULL)
-
-	fz_try(ctx)
-		res = pdf_dict_get_inheritable(ctx, obj, PDF_NAME(Resources));
-	fz_catch(ctx)
-		ERROR_MUPDF_R("pdf_dict_get_inheritable (Ressources)", NULL)
-	if (!res)
-		ERROR_S_MESSAGE_VAL("Kein Ressources-Dict", NULL)
-
-	proc = pdf_new_text_filter_processor(ctx, &buf, flags, errmsg);
-	if (!proc)
 		ERROR_S_VAL(NULL)
 
-	doc = pdf_pin_document(ctx, obj);
 	fz_try(ctx)
-		pdf_process_contents(ctx, proc, doc, res, contents, NULL, NULL);
+		proc_buf = pdf_new_buffer_processor(ctx, buf, 0, 0);
+	fz_catch(ctx) {
+		fz_drop_buffer(ctx, buf);
+		ERROR_S_VAL(NULL)
+	}
+
+	GError* error = NULL;
+
+	proc = pdf_new_text_analyzer_processor(ctx, proc_buf, flags, &error);
+	if (!proc) {
+		if (errmsg) *errmsg = g_strdup_printf("%s\n%s", __func__, error->message);
+		g_free(error);
+		pdf_drop_processor(ctx, proc_buf);
+		fz_drop_buffer(ctx, buf);
+
+		return NULL;
+	}
+
+	fz_try(ctx)
+		pdf_process_contents(ctx, proc, page->doc, pdf_page_resources(ctx, page),
+				pdf_page_contents(ctx, page), NULL, NULL);
 	fz_always(ctx) {
-		pdf_drop_document(ctx, doc);
 		pdf_close_processor(ctx, proc);
 		pdf_drop_processor(ctx, proc);
+		pdf_drop_processor(ctx, proc_buf);
 	}
 	fz_catch(ctx) {
 		fz_drop_buffer(ctx, buf);
@@ -863,7 +844,7 @@ static gint pdf_run_pixmap(fz_context* ctx, pdf_page* page,
 
 		// text-analyzer-Processor erstellen (dieser filtert den Text)
 	fz_try(ctx) //flag == 3: aller Text weg, nur Bilder ocr-en
-		proc_text = new_text_analyzer_processor(ctx, proc_run, 3, error);
+		proc_text = pdf_new_text_analyzer_processor(ctx, proc_run, 3, error);
 	fz_catch(ctx) {
 		pdf_close_processor(ctx, proc_run);
 		pdf_drop_processor(ctx, proc_run);
@@ -961,7 +942,6 @@ gint pdf_set_content_stream(fz_context *ctx,
 gint pdf_get_sond_font(fz_context* ctx, pdf_document* doc, pdf_obj** font_ref,
 		GError** error) {
 	gint num_pages = 0;
-	gint num = 0;
 
 	fz_try(ctx)
 		num_pages = pdf_count_pages(ctx, doc);
@@ -1018,7 +998,7 @@ gint pdf_page_has_hidden_text(fz_context* ctx, pdf_page* page,
 		gboolean* hidden, GError** error) {
 	pdf_processor* proc = NULL;
 
-	proc = new_text_analyzer_processor(ctx, NULL, 3, error);
+	proc = pdf_new_text_analyzer_processor(ctx, NULL, 3, error);
 	if (!proc)
 		ERROR_Z
 

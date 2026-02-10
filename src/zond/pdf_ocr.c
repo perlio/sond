@@ -75,7 +75,7 @@ static gint pdf_ocr_filter_content_stream(fz_context *ctx, pdf_page *page,
 	fz_buffer *buf = NULL;
 	gint rc = 0;
 
-	buf = pdf_text_filter_page(ctx, page->obj, flags, errmsg);
+	buf = pdf_text_filter_page(ctx, page, flags, errmsg);
 	if (!buf)
 		ERROR_S
 
