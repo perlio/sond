@@ -29,7 +29,7 @@
 #include "sond_pdf_helper.h"
 
 static gint add_ocr_layer_to_page(fz_context *ctx,
-		fz_buffer* content, pdf_page *page, pdf_obj* font_ref,
+		GString* content, pdf_page *page, pdf_obj* font_ref,
 		OcrTransform* ocr_transform, GError** error) {
 	pdf_obj* resources = NULL;
 	pdf_obj* fonts = NULL;
@@ -87,12 +87,9 @@ static gint add_ocr_layer_to_page(fz_context *ctx,
 
 	// OCR an Content Stream anhängen
 	fz_try(ctx)
-		fz_append_buffer(ctx, buf_new, content);
-	fz_catch(ctx) {
-		fz_drop_buffer(ctx, content);
-
+		fz_append_data(ctx, buf_new, content->str, content->len);
+	fz_catch(ctx)
 		ERROR_PDF
-	}
 
 	//Wir müssen ein neues Contents-Objekt erstellen, weil es sein kann,
 	//daß das alte auf ein indirektes Objekt verweist
@@ -213,8 +210,7 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, GError** error) {
 							i, (*error)->message);
 					g_clear_error(error);
 					pages_done++;
-
-					status = 4;
+					g_atomic_int_set(&task->status, 4);
 					continue;
 				}
 
@@ -223,8 +219,7 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, GError** error) {
 						task->pool->log_func(task->pool->log_data,
 								"Seite %u enthält versteckten Text - OCR übersprungen", i);
 					pages_done++;
-
-					status = 4;
+					g_atomic_int_set(&task->status, 4);
 					continue;
 				}
 
@@ -236,7 +231,7 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, GError** error) {
 								"Seite %u konnte nicht gerendert werden: %s",
 								i, (*error)->message);
 					g_clear_error(error);
-					status = 4;
+					g_atomic_int_set(&task->status, 4);
 					continue;
 				}
 
@@ -246,7 +241,7 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, GError** error) {
 						task->pool->log_func(task->pool->log_data, "OSD Seite %u gescheitert: %s",
 								i, (*error)->message);
 					g_clear_error(error);
-					status = 4;
+					g_atomic_int_set(&task->status, 4);
 					continue;
 				}
 
@@ -258,7 +253,7 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, GError** error) {
 								"Transform-Matrix konnte nicht berechnet werden: %s",
 								i, (*error)->message);
 					g_clear_error(error);
-					status = 4;
+					g_atomic_int_set(&task->status, 4);
 					continue;
 				}
 
@@ -270,12 +265,12 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, GError** error) {
 								"Thread konnte nicht gepusht werden: %s",
 								i, (*error)->message);
 					g_clear_error(error);
-					status = 4;
+					g_atomic_int_set(&task->status, 4);
 					continue;
 				}
 			}
 
-			if (status == 1) //läuft gerade
+			if (status == 1) //läuft gerade - nix machen
 				continue;
 
 			if (status == 2) { //fertig und in Ordnung
@@ -293,17 +288,18 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, GError** error) {
 				}
 
 				pages_done++;
-				status = 4;
+				g_atomic_int_set(&task->status, 4);
+				continue;
 			}
 
-			if (status == 3) {
+			if (status == 3) { //FGehler aber geht nicht besser
 				pages_done++;
-				status = 4;
+				g_atomic_int_set(&task->status, 4);
+				continue;
 			}
 
 			if (status == 4) //Abstellgleis
 				continue;
-
 		}
 	}
 
@@ -314,7 +310,7 @@ void sond_ocr_task_free(SondOcrTask* task) {
 	if (task->page)
 		pdf_drop_page(task->pool->ctx, task->page);
 	if (task->content)
-		fz_drop_buffer(task->pool->ctx, task->content);
+		g_string_free(task->content, TRUE);
 
 	g_free(task);
 
@@ -395,55 +391,6 @@ gint sond_ocr_pdf_doc(SondOcrPool* ocr_pool, pdf_document* doc,
 	return 0;
 }
 
-gint sond_ocr_init_tesseract(TessBaseAPI **handle, TessBaseAPI** osd_api,
-		gchar const* datadir, GError** error) {
-	gint rc = 0;
-
-	//TessBaseAPI
-	if (handle) {
-		*handle = TessBaseAPICreate();
-		if (!(*handle)) {
-			g_set_error(error, SOND_ERROR, 0, "%s\nTessBaseAPICreate fehlgeschlagen", __func__);
-
-			return -1;
-		}
-
-		rc = TessBaseAPIInit3(*handle, datadir, "deu");
-		if (rc) {
-			TessBaseAPIEnd(*handle);
-			TessBaseAPIDelete(*handle);
-			g_set_error(error, SOND_ERROR, 0, "%s\nTessBaseAPIInit3 fehlgeschlagen", __func__);
-
-			return -1;
-		}
-		TessBaseAPISetPageSegMode(*handle, PSM_AUTO);
-	}
-
-	if (osd_api) {
-		*osd_api = TessBaseAPICreate();
-		if (!(*osd_api)) {
-			TessBaseAPIEnd(*handle);
-			TessBaseAPIDelete(*handle);
-			g_set_error(error, SOND_ERROR, 0, datadir, __func__);
-
-			return -1;
-		}
-		rc = TessBaseAPIInit3(*osd_api, datadir, "osd");
-		if (rc) {
-			TessBaseAPIEnd(*handle);
-			TessBaseAPIDelete(*handle);
-			TessBaseAPIEnd(*osd_api);
-			TessBaseAPIDelete(*osd_api);
-			g_set_error(error, SOND_ERROR, 0, "%s\nTessBaseAPIInit3 OSD fehlgeschlagen", __func__);
-			return -1;
-		}
-
-		TessBaseAPISetPageSegMode(*osd_api, PSM_OSD_ONLY);
-	}
-
-    return 0;
-}
-
 // Transformation berechnen
 static void transform_coordinates(const OcrTransform *t,
                                    int img_x, int img_y,
@@ -484,91 +431,117 @@ static void transform_coordinates(const OcrTransform *t,
     return;
 }
 
-// Hilfsfunktion: UTF-8 → WinAnsi mit Escaping
-static gint append_winansi_text(fz_context *ctx, fz_buffer *buf,
+/* Helvetica Zeichenbreiten (WinAnsi, PDF-Standard, in 1/1000 em)
+ * Quelle: PDF Reference, Appendix D
+ * Index = WinAnsi-Zeichencode (0-255) */
+static const gint helvetica_widths[256] = {
+    /*   0- 31 */ 278,278,278,278,278,278,278,278,278,278,278,278,278,278,278,278,
+                  278,278,278,278,278,278,278,278,278,278,278,278,278,278,278,278,
+    /*  32- 63 */ 278,278,355,556,556,889,667,191,333,333,389,584,278,333,278,278,
+                  556,556,556,556,556,556,556,556,556,556,278,278,584,584,584,556,
+    /*  64- 95 */ 1015,667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,
+                  667,778,722,667,611,722,667,944,667,667,611,278,278,278,469,556,
+    /*  96-127 */ 333,556,556,500,556,556,278,556,556,222,222,500,222,833,556,556,
+                  556,556,333,500,278,556,500,722,500,500,500,334,260,334,584,278,
+    /* 128-159 */ 556,350,556,556,167,556,556,556,556,556,556,556,556,556,556,556,
+                  556,556,556,556,556,556,556,556,556,556,556,556,556,556,556,556,
+    /* 160-191 */ 278,333,556,556,556,556,260,556,333,737,370,556,584,278,737,333,
+                  400,584,333,333,333,556,537,278,333,333,365,556,834,834,834,611,
+    /* 192-223 */ 667,667,667,667,667,667,1000,722,667,667,667,667,278,278,278,278,
+                  722,722,778,778,778,778,778,584,778,722,722,722,722,667,667,611,
+    /* 224-255 */ 556,556,556,556,556,556,889,500,556,556,556,556,278,278,278,278,
+                  556,556,556,556,556,556,556,584,611,556,556,556,556,500,556,500
+};
+
+/* Berechnet Textbreite in Helvetica ohne fz_context.
+ * Verwendet dieselbe UTF-8 -> WinAnsi Konvertierung wie append_winansi_text_gs.
+ * Rückgabe: Breite in PDF-Punkten */
+static float helvetica_text_width(const char *utf8_text, float font_size) {
+    float width = 0.0f;
+
+    for (const unsigned char *p = (unsigned char*)utf8_text; *p; p++) {
+        guint winansi = 0;
+
+        if (*p < 128) {
+            winansi = *p;
+        } else if (*p == 0xC3 && *(p+1)) {
+            p++;
+            winansi = *p + 0x40;
+        } else if (*p == 0xC2 && *(p+1)) {
+            p++;
+            winansi = *p;
+        } else {
+            winansi = 32;  /* Nicht darstellbar -> Leerzeichen */
+            while (*(p+1) && (*(p+1) & 0xC0) == 0x80)
+                p++;
+        }
+
+        if (winansi < 256)
+            width += helvetica_widths[winansi];
+    }
+
+    return (width / 1000.0f) * font_size;
+}
+
+static gint append_winansi_text_gs(GString *buf,
 		const char *utf8_text, GError **error) {
-	fz_try(ctx) {
-		fz_append_byte(ctx, buf, '(');
+    g_string_append_c(buf, '(');
 
-		for (const unsigned char *p = (unsigned char*)utf8_text; *p; p++) {
-			if (*p < 128) {
-				// ASCII - escapen wenn nötig
-				if (*p == '(' || *p == ')' || *p == '\\')
-					fz_append_byte(ctx, buf, '\\');
-				fz_append_byte(ctx, buf, *p);
-			} else if (*p == 0xC3 && *(p+1)) {
-				// UTF-8 deutsche Umlaute (ä, ö, ü, ß, Ä, Ö, Ü)
+    for (const unsigned char *p = (unsigned char*)utf8_text; *p; p++) {
+        if (*p < 128) {
+            if (*p == '(' || *p == ')' || *p == '\\')
+                g_string_append_c(buf, '\\');
+            g_string_append_c(buf, (gchar)*p);
+        } else if (*p == 0xC3 && *(p+1)) {
+            p++;
+            unsigned char c = *p + 0x40;
+            char tmp[8];
+            sprintf(tmp, "\\%03o", c);
+            g_string_append(buf, tmp);
+        } else if (*p == 0xC2 && *(p+1)) {
+            p++;
+            char tmp[8];
+            sprintf(tmp, "\\%03o", *p);
+            g_string_append(buf, tmp);
+        } else {
+			g_string_append_c(buf, ' ');
+			/* führendes Byte überspringen, dann Fortsetzungsbytes */
+			while (*(p+1) && (*(p+1) & 0xC0) == 0x80)
 				p++;
-				unsigned char c = *p + 0x40;  // Konvertierung UTF-8 → WinAnsi
-			    char tmp[8];
-			    sprintf(tmp, "\\%03o", c);
-			    fz_append_string(ctx, buf, tmp);
-				//fz_append_printf(ctx, buf, "\\%03o", c);  // Oktal-Escape
-			} else if (*p == 0xC2 && *(p+1)) {
-				// Weitere Latin-1 Zeichen (z.B. ©, ®, °, etc.)
-				p++;
-			    char tmp[8];
-			    sprintf(tmp, "\\%03o", *p);
-			    fz_append_string(ctx, buf, tmp);
-				//fz_append_printf(ctx, buf, "\\%03o", *p);
-			} else {
-				gboolean multi = FALSE;
-				// Nicht darstellbar → Leerzeichen
-				fz_append_byte(ctx, buf, ' ');
-				// Überspringe Rest des Multi-Byte-Zeichens
-				while (*p && (*p & 0xC0) == 0x80) {
-					p++;
-					multi = TRUE;
-				}
-				if (multi)
-					p--;
-			}
 		}
-
-		fz_append_byte(ctx, buf, ')');
 	}
-	fz_catch(ctx)
-		ERROR_PDF
+
+    g_string_append_c(buf, ')');
 
     return 0;
 }
 
-static void append_text_matrix(fz_context *ctx, fz_buffer *buf,
+static void append_text_matrix_gs(GString *buf,
             const OcrTransform *t,
-			float scale_word_x,
+            float scale_word_x,
             float pdf_x, float pdf_y) {
-	switch (t->rotation) {
-		case 0:
-		// Normal horizontal
-		fz_append_printf(ctx, buf, "%.4f 0 0 1 %.2f %.2f Tm\n",
-				scale_word_x, pdf_x, pdf_y);
-		break;
-
-		case 90:
-		// 90° gegen Uhrzeigersinn (PDF-Rotation)
-		fz_append_printf(ctx, buf, "0 %.4f -1 0 %.2f %.2f Tm\n",
-				scale_word_x, pdf_x, pdf_y);
-		break;
-
-		case 180:
-		// 180° gedreht
-		fz_append_printf(ctx, buf, "%.4f 0 0 -1 %.2f %.2f Tm\n",
-				-scale_word_x, pdf_x, pdf_y);
-		break;
-
-		case 270:
-		// 270° gegen Uhrzeigersinn
-		fz_append_printf(ctx, buf, "0 %.4f 1 0 %.2f %.2f Tm\n",
-				-scale_word_x, pdf_x, pdf_y);
-		break;
-
-		default:
-		fz_append_printf(ctx, buf, "%.4f 0 0 1 %.2f %.2f Tm\n",
-				scale_word_x, pdf_x, pdf_y);
-		break;
-	}
-
-	return;
+    switch (t->rotation) {
+        case 0:
+            g_string_append_printf(buf, "%.4f 0 0 1 %.2f %.2f Tm\n",
+                    scale_word_x, pdf_x, pdf_y);
+            break;
+        case 90:
+            g_string_append_printf(buf, "0 %.4f -1 0 %.2f %.2f Tm\n",
+                    scale_word_x, pdf_x, pdf_y);
+            break;
+        case 180:
+            g_string_append_printf(buf, "%.4f 0 0 -1 %.2f %.2f Tm\n",
+                    -scale_word_x, pdf_x, pdf_y);
+            break;
+        case 270:
+            g_string_append_printf(buf, "0 %.4f 1 0 %.2f %.2f Tm\n",
+                    -scale_word_x, pdf_x, pdf_y);
+            break;
+        default:
+            g_string_append_printf(buf, "%.4f 0 0 1 %.2f %.2f Tm\n",
+                    scale_word_x, pdf_x, pdf_y);
+            break;
+    }
 }
 
 static gboolean is_garbage_word(const char *word) {
@@ -595,124 +568,84 @@ static gboolean is_garbage_word(const char *word) {
     return !has_valid_char;  // Müll wenn kein gültiges Zeichen gefunden
 }
 
-// Verbesserte Content-Stream-Funktion mit Transformation
-static fz_buffer* tesseract_to_content_stream(fz_context *ctx,
+static GString* tesseract_to_content_stream(
                                         TessResultIterator *iter,
                                         const OcrTransform *transform,
-										GError **error) {
-    static fz_font *helvetica = NULL;
-    fz_buffer *content = NULL;
-
+                                        GError **error) {
+    GString *content = NULL;
     TessPageIteratorLevel level = RIL_WORD;
 
-    if (!helvetica)
-        helvetica = fz_new_base14_font(ctx, "Helvetica");
-
-    fz_try(ctx)
-        content = fz_new_buffer(ctx, 4096);
-    fz_catch(ctx)
-		ERROR_PDF_VAL(NULL);
-
-    fz_try(ctx)
-        fz_append_string(ctx, content, "\nq\nBT\n3 Tr\n");
-    fz_catch(ctx) {
-    	fz_drop_buffer(ctx, content);
-
-    	ERROR_PDF_VAL(NULL);
+    content = g_string_sized_new(4096);
+    if (!content) {
+        g_set_error(error, SOND_ERROR, 0,
+                "%s\ng_string_sized_new fehlgeschlagen", __func__);
+        return NULL;
     }
 
-	float last_font_size = -1;
+    g_string_append(content, "\nq\nBT\n3 Tr\n");
 
-	do {
-		gint rc = 0;
+    float last_font_size = -1;
 
-		char *word = TessResultIteratorGetUTF8Text(iter, level);
-		if (!word || !*word) {
-			if (word) TessDeleteText(word);
-			continue;
-		}
+    do {
+        gint rc = 0;
 
-		if (is_garbage_word(word)) {
-			TessDeleteText(word);
-			continue;
-		}
+        char *word = TessResultIteratorGetUTF8Text(iter, level);
+        if (!word || !*word) {
+            if (word) TessDeleteText(word);
+            continue;
+        }
 
-		// Bounding Box in Bild-Koordinaten
-		int x1, y1, x2, y2;
-		if (!TessPageIteratorBoundingBox((TessPageIterator*)iter, level, &x1, &y1, &x2, &y2)) {
-			TessDeleteText(word);
-			continue;
-		}
+        if (is_garbage_word(word)) {
+            TessDeleteText(word);
+            continue;
+        }
 
-		gint base_x1, base_y1, base_x2, base_y2;
-		if (!TessPageIteratorBaseline((TessPageIterator*)iter, RIL_WORD,
-				&base_x1, &base_y1, &base_x2, &base_y2)) {
-			TessDeleteText(word);
-			continue;
-		}
+        int x1, y1, x2, y2;
+        if (!TessPageIteratorBoundingBox((TessPageIterator*)iter, level,
+                &x1, &y1, &x2, &y2)) {
+            TessDeleteText(word);
+            continue;
+        }
 
-		//Wortbreite
-		float word_width_pdf = (x2 - x1) / transform->scale_x;
+        gint base_x1, base_y1, base_x2, base_y2;
+        if (!TessPageIteratorBaseline((TessPageIterator*)iter, RIL_WORD,
+                &base_x1, &base_y1, &base_x2, &base_y2)) {
+            TessDeleteText(word);
+            continue;
+        }
 
-		// Schriftgröße aus Höhe (vor Transformation!)
-		float word_height = (base_y2 - y1) / transform->scale_y;
-		float font_size = word_height * 1.2; // * 0.85f;
-		if (font_size < 1.0f) font_size = 1.0f;
+        float word_width_pdf = (x2 - x1) / transform->scale_x;
 
-		if (fabsf(font_size - last_font_size) > 0.5f) {
-			fz_try(ctx)
-				fz_append_printf(ctx, content, "/FSond %.2f Tf\n", font_size);
-			fz_catch(ctx) {
-				fz_drop_buffer(ctx, content);
-				TessDeleteText(word);
+        float word_height = (base_y2 - y1) / transform->scale_y;
+        float font_size = word_height * 1.2f;
+        if (font_size < 1.0f) font_size = 1.0f;
 
-				ERROR_PDF_VAL(NULL);
-			}
+        if (fabsf(font_size - last_font_size) > 0.5f) {
+            g_string_append_printf(content, "/FSond %.2f Tf\n", font_size);
+            last_font_size = font_size;
+        }
 
-			last_font_size = font_size;
-		}
+        float actual_width = helvetica_text_width(word, font_size);
+        float scale_word_x = (actual_width > 0.01f)
+                ? (word_width_pdf / actual_width) : 1.0f;
 
-		// 3. **Tatsächliche Textbreite in Helvetica messen**
-		float width = 0;
-		for (const char *p = word; *p; p++) {
-			int gid = fz_encode_character(ctx, helvetica, (unsigned char)*p);
-			width += fz_advance_glyph(ctx, helvetica, gid, 0);
-		}
+        float pdf_x, pdf_y;
+        transform_coordinates(transform, x1, base_y2, &pdf_x, &pdf_y);
 
-		float actual_width = width * font_size;
+        append_text_matrix_gs(content, transform, scale_word_x, pdf_x, pdf_y);
 
-		// 4. **Horizontale Skalierung berechnen**
-		float scale_word_x = (actual_width > 0.01f) ? (word_width_pdf / actual_width) : 1.0f;
+        rc = append_winansi_text_gs(content, word, error);
+        TessDeleteText(word);
+        if (rc) {
+            g_string_free(content, TRUE);
+            return NULL;
+        }
 
-		// Koordinaten transformieren (Bild → PDF mit Rotation)
-		float pdf_x, pdf_y;
-		transform_coordinates(transform, x1, base_y2, &pdf_x, &pdf_y);
+        g_string_append(content, " Tj\n");
 
-		// Text-Matrix setzen
-		append_text_matrix(ctx, content, transform, scale_word_x, pdf_x, pdf_y);
+    } while (TessResultIteratorNext(iter, level));
 
-		// Text ausgeben
-		rc = append_winansi_text(ctx, content, word, error);
-		TessDeleteText(word);
-		if (rc)
-			ERROR_Z_VAL(NULL);
-
-		fz_try(ctx)
-            fz_append_printf(ctx, content, " Tj\n");
-		fz_catch(ctx) {
-			fz_drop_buffer(ctx, content);
-
-            ERROR_PDF_VAL(NULL);
-		}
-	} while (TessResultIteratorNext(iter, level));
-
-	fz_try(ctx)
-        fz_append_string(ctx, content, "ET\nQ\n");
-	fz_catch(ctx) {
-		fz_drop_buffer(ctx, content);
-
-		ERROR_PDF_VAL(NULL);
-	}
+    g_string_append(content, "ET\nQ\n");
 
     return content;
 }
@@ -724,8 +657,8 @@ typedef struct {
 } TesseractThreadData;
 
 static gboolean ocr_cancel(void *cancel_this, int words) {
-	volatile gboolean *cancelFlag = (volatile gboolean*) cancel_this;
-	return *cancelFlag;
+	gint* cancel_flag = (gint*) cancel_this;
+	return g_atomic_int_get(cancel_flag) != 0;  // TRUE = abbrechen	volatile gboolean *cancelFlag = (volatile gboolean*) cancel_this;
 }
 
 static gint ocr_pixmap(SondOcrTask* task, SondOcrPool* pool,
@@ -758,10 +691,37 @@ static gint ocr_pixmap(SondOcrTask* task, SondOcrPool* pool,
 	return 1;
 }
 
+static gint init_api(TessBaseAPI **handle,
+		gchar const* datadir, GError** error) {
+	gint rc = 0;
+
+	*handle = TessBaseAPICreate();
+	if (!(*handle)) {
+		g_set_error(error, SOND_ERROR, 0, "%s\nTessBaseAPICreate fehlgeschlagen", __func__);
+
+		return -1;
+	}
+
+	rc = TessBaseAPIInit4(*handle, datadir, "deu", OEM_LSTM_ONLY,
+            NULL, 0,
+            NULL, NULL, 0,
+            FALSE);
+	if (rc) {
+		TessBaseAPIEnd(*handle);
+		TessBaseAPIDelete(*handle);
+		g_set_error(error, SOND_ERROR, 0, "%s\nTessBaseAPIInit3 fehlgeschlagen", __func__);
+
+		return -1;
+	}
+	TessBaseAPISetPageSegMode(*handle, PSM_AUTO);
+
+    return 0;
+}
+
 static TesseractThreadData* get_or_create_thread_data(GPrivate *thread_data_key,
                                                        const gchar *tessdata_path,
                                                        const gchar *language,
-													   volatile gboolean* cancel_all,
+													   gint* cancel_all,
                                                        GError **error) {
     TesseractThreadData *data = g_private_get(thread_data_key);
 
@@ -770,7 +730,7 @@ static TesseractThreadData* get_or_create_thread_data(GPrivate *thread_data_key,
 
         data = g_new0(TesseractThreadData, 1);
 
-        rc = sond_ocr_init_tesseract(&data->api, NULL,
+        rc = init_api(&data->api,
         		tessdata_path ? tessdata_path : "/usr/share/tesseract-ocr/5/tessdata/",
         				error);
         if (rc) {
@@ -781,8 +741,11 @@ static TesseractThreadData* get_or_create_thread_data(GPrivate *thread_data_key,
 		}
 
 		data->monitor = TessMonitorCreate();
-		TessMonitorSetCancelFunc(data->monitor, (TessCancelFunc) ocr_cancel);
-		TessMonitorSetCancelThis(data->monitor, (gpointer) cancel_all);
+
+		if (cancel_all) {
+			TessMonitorSetCancelFunc(data->monitor, (TessCancelFunc) ocr_cancel);
+			TessMonitorSetCancelThis(data->monitor, (gpointer) cancel_all);
+        }
 
         g_private_set(thread_data_key, data);
     }
@@ -805,7 +768,7 @@ static void ocr_worker(gpointer task_data, gpointer user_data) {
 
     if (thread_data == NULL) {
         thread_data = get_or_create_thread_data(&pool->thread_data_key,
-        		pool->tessdata_path, pool->language, &pool->cancel_all, &error);
+        		pool->tessdata_path, pool->language, pool->cancel_all, &error);
         if (!thread_data) {
         	if (pool->log_func)
         		pool->log_func(pool->log_data, "Thread-Data konnte nicht geladen werden: %s",
@@ -839,7 +802,7 @@ static void ocr_worker(gpointer task_data, gpointer user_data) {
 	}
 
 	// Content Stream mit korrekten Koordinaten erstellen
-	task->content = tesseract_to_content_stream(task->pool->ctx, iter,
+	task->content = tesseract_to_content_stream(iter,
 			&task->ocr_transform, &error);
 	if (!task->content) {
 		if (pool->log_func)
@@ -885,7 +848,10 @@ static gint sond_ocr_init_osd_api(TessBaseAPI** osd_api,
 		return -1;
 	}
 
-	rc = TessBaseAPIInit3(*osd_api, datadir, "osd");
+	rc = TessBaseAPIInit4(*osd_api, datadir, "osd", OEM_LSTM_ONLY,
+            NULL, 0,
+            NULL, NULL, 0,
+            FALSE);
 	if (rc) {
 		TessBaseAPIEnd(*osd_api);
 		TessBaseAPIDelete(*osd_api);
@@ -905,6 +871,7 @@ SondOcrPool* sond_ocr_pool_new(const gchar *tessdata_path,
 								   fz_context* ctx,
 								   void (*log_func)(void*, gchar const*, ...),
 								   gpointer log_data,
+								   gint* cancel_all,
                                    GError **error) {
 	gint rc = 0;
 
@@ -941,6 +908,7 @@ SondOcrPool* sond_ocr_pool_new(const gchar *tessdata_path,
     pool->ctx = ctx;
     pool->log_func = log_func;
     pool->log_data = log_data;
+    pool->cancel_all = cancel_all;
 
 
     // Initialisiere GPrivate mit automatischer Cleanup-Funktion

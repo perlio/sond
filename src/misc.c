@@ -307,8 +307,8 @@ void info_window_kill(InfoWindow *info_window) {
 }
 
 void info_window_close(InfoWindow *info_window) {
-	GtkWidget *button = gtk_dialog_get_widget_for_response(
-			GTK_DIALOG(info_window->dialog), GTK_RESPONSE_CANCEL);
+	GtkWidget *button = g_object_get_data(
+			G_OBJECT(info_window->dialog), "abbrechen-button");
 	gtk_button_set_label(GTK_BUTTON(button), "Schließen");
 	gtk_widget_grab_focus(button);
 
@@ -321,11 +321,8 @@ void info_window_close(InfoWindow *info_window) {
 
 void info_window_set_progress_bar_fraction(InfoWindow *info_window,
 		gdouble fraction) {
-	if (!GTK_IS_PROGRESS_BAR(info_window->last_inserted_widget))
-		return;
-
 	gtk_progress_bar_set_fraction(
-			GTK_PROGRESS_BAR(info_window->last_inserted_widget), fraction);
+			GTK_PROGRESS_BAR(info_window->progress_bar), fraction);
 
 	while (gtk_events_pending())
 		gtk_main_iteration();
@@ -333,7 +330,8 @@ void info_window_set_progress_bar_fraction(InfoWindow *info_window,
 	return;
 }
 
-static void info_window_scroll(InfoWindow *info_window) {
+static void on_content_size_allocate(GtkWidget *widget, GdkRectangle *allocation, gpointer data) {
+	InfoWindow *info_window = (InfoWindow*) data;
 	GtkWidget *viewport = NULL;
 	GtkWidget *swindow = NULL;
 	GtkAdjustment *adj = NULL;
@@ -343,25 +341,22 @@ static void info_window_scroll(InfoWindow *info_window) {
 	adj = gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(swindow));
 	gtk_adjustment_set_value(adj, gtk_adjustment_get_upper(adj));
 
-	return;
+	// Signal wieder abkoppeln, nur einmal scrollen
+	g_signal_handlers_disconnect_by_func(widget, on_content_size_allocate, data);
 }
 
-static void info_window_show_widget(InfoWindow *info_window) {
-	gtk_widget_show(info_window->last_inserted_widget);
-	gtk_box_pack_start(GTK_BOX(info_window->content),
-			info_window->last_inserted_widget, FALSE, FALSE, 0);
-
-	while (gtk_events_pending())
-		gtk_main_iteration();
-
-	info_window_scroll(info_window);
-
+static void info_window_scroll(InfoWindow *info_window) {
+	g_signal_connect(info_window->content, "size-allocate",
+	                 G_CALLBACK(on_content_size_allocate), info_window);
 	return;
 }
 
 void info_window_set_progress_bar(InfoWindow *info_window) {
-	info_window->last_inserted_widget = gtk_progress_bar_new();
-	info_window_show_widget(info_window);
+	gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(info_window->progress_bar), 0.0);
+	gtk_widget_show(info_window->progress_bar);
+
+	while (gtk_events_pending())
+		gtk_main_iteration();
 
 	return;
 }
@@ -388,8 +383,49 @@ void info_window_set_message(InfoWindow *info_window, const gchar *format, ...) 
 	g_free(message);
 	gtk_widget_set_halign(info_window->last_inserted_widget, GTK_ALIGN_START);
 
-	info_window_show_widget(info_window);
+	gtk_widget_show(info_window->last_inserted_widget);
+	gtk_box_pack_start(GTK_BOX(info_window->content),
+			info_window->last_inserted_widget, FALSE, FALSE, 0);
 
+	while (gtk_events_pending())
+		gtk_main_iteration();
+
+	info_window_scroll(info_window);
+
+	return;
+}
+
+static gboolean show_message_main(gpointer data) {
+    MessageData *md = (MessageData*) data;
+	md->info_window->last_inserted_widget = gtk_label_new(md->message);
+    g_free(md->message);
+
+	gtk_widget_set_halign(md->info_window->last_inserted_widget, GTK_ALIGN_START);
+	gtk_widget_show(md->info_window->last_inserted_widget);
+	gtk_box_pack_start(GTK_BOX(md->info_window->content),
+			md->info_window->last_inserted_widget, FALSE, FALSE, 0);
+
+	info_window_scroll(md->info_window);
+    g_free(md);
+
+    return G_SOURCE_REMOVE;
+}
+
+// Im Worker-Thread aufrufen:
+void info_window_set_message_from_thread(InfoWindow *info_window, const gchar *format, ...) {
+    MessageData *md = g_new(MessageData, 1);
+    md->info_window = info_window;
+
+    va_list args;
+    va_start(args, format);
+    md->message = g_strdup_vprintf(format, args);
+    va_end(args);
+
+    g_idle_add(show_message_main, md);
+}
+
+static void cb_abbrechen_clicked(GtkButton *button, gpointer data) {
+	gtk_dialog_response(GTK_DIALOG(data), GTK_RESPONSE_CANCEL);
 	return;
 }
 
@@ -400,7 +436,7 @@ static void cb_info_window_response(GtkDialog *dialog, gint id, gpointer data) {
 		return;
 
 	info_window_set_message(info_window, "...abgebrochen");
-	info_window->cancel = TRUE;
+	g_atomic_int_set(&info_window->cancel, 1);
 
 	return;
 }
@@ -409,12 +445,13 @@ InfoWindow*
 info_window_open(GtkWidget *window, const gchar *title) {
 	GtkWidget *content = NULL;
 	GtkWidget *swindow = NULL;
+	GtkWidget *bottom_box = NULL;
+	GtkWidget *button = NULL;
 
 	InfoWindow *info_window = g_malloc0(sizeof(InfoWindow));
 
 	info_window->dialog = gtk_dialog_new_with_buttons(title, GTK_WINDOW(window),
-			GTK_DIALOG_DESTROY_WITH_PARENT | GTK_DIALOG_MODAL, "Abbrechen",
-			GTK_RESPONSE_CANCEL, NULL);
+			GTK_DIALOG_DESTROY_WITH_PARENT | GTK_DIALOG_MODAL, NULL, NULL);
 
 	gtk_window_set_default_size(GTK_WINDOW(info_window->dialog), 900, 190);
 
@@ -424,6 +461,28 @@ info_window_open(GtkWidget *window, const gchar *title) {
 
 	info_window->content = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	gtk_container_add(GTK_CONTAINER(swindow), info_window->content);
+
+	/* Untere Leiste: Progress-Bar + Abbrechen-Button nebeneinander, nicht scrollbar */
+	bottom_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+	gtk_widget_set_margin_start(bottom_box, 6);
+	gtk_widget_set_margin_end(bottom_box, 6);
+	gtk_widget_set_margin_top(bottom_box, 4);
+	gtk_widget_set_margin_bottom(bottom_box, 4);
+	gtk_box_pack_end(GTK_BOX(content), bottom_box, FALSE, FALSE, 0);
+
+	info_window->progress_bar = gtk_progress_bar_new();
+	gtk_progress_bar_set_show_text(GTK_PROGRESS_BAR(info_window->progress_bar), TRUE);
+	gtk_widget_set_valign(info_window->progress_bar, GTK_ALIGN_CENTER);
+	gtk_widget_set_no_show_all(info_window->progress_bar, TRUE);
+	gtk_box_pack_start(GTK_BOX(bottom_box), info_window->progress_bar, TRUE, TRUE, 0);
+
+	button = gtk_button_new_with_label("Abbrechen");
+	gtk_widget_set_valign(button, GTK_ALIGN_CENTER);
+	gtk_box_pack_end(GTK_BOX(bottom_box), button, FALSE, FALSE, 0);
+	g_signal_connect(button, "clicked",
+			G_CALLBACK(cb_abbrechen_clicked),
+			info_window->dialog);
+	g_object_set_data(G_OBJECT(info_window->dialog), "abbrechen-button", button);
 
 	gtk_widget_show_all(info_window->dialog);
 	while (gtk_events_pending())

@@ -512,6 +512,34 @@ static void cb_item_textsuche(GtkMenuItem *item, gpointer data) {
 	return;
 }
 
+struct _ThreadData {
+	SondOcrPool* pool;
+	pdf_document* doc;
+	gchar* filepart;
+	gint done;
+};
+
+static gpointer ocr_doc(gpointer data) {
+	gint rc = 0;
+	GError* error = NULL;
+
+	struct _ThreadData* thread_data = (struct _ThreadData*) data;
+
+	rc = sond_ocr_pdf_doc(thread_data->pool, thread_data->doc, &error);
+	g_atomic_int_set(&thread_data->done, 1);
+	if (rc) {
+		thread_data->pool->log_func(thread_data->pool->log_data,
+				"OCR-Recognition für PDF '%s' fehlgeschlagen: %s",
+				thread_data->filepart, error->message);
+		g_error_free(error);
+
+		return GINT_TO_POINTER(1);
+	}
+
+	return NULL;
+}
+
+
 static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 	gint rc = 0;
 	gchar* errmsg = NULL;
@@ -521,6 +549,7 @@ static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 	SondFilePartPDF* sfp_pdf_before = NULL;
 	pdf_document* doc = NULL;
 	SondOcrPool* pool = NULL;
+	gchar* filepart = NULL;
 
 	Projekt *zond = (Projekt*) data;
 
@@ -548,8 +577,8 @@ static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 
 	datadir = g_build_filename(zond->exe_dir, "../share/tessdata", NULL);
 	pool = sond_ocr_pool_new(datadir, "deu", 4, zond->ctx,
-			(void(*)(void*, gchar const*, ...)) info_window_set_message,
-			(gpointer) info_window, &error);
+			(void(*)(void*, gchar const*, ...)) info_window_set_message_from_thread,
+			(gpointer) info_window, &info_window->cancel, &error);
 	g_free(datadir);
 	if (!pool) {
 		info_window_set_message(info_window,
@@ -566,13 +595,14 @@ static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 		if (sfp_pdf != sfp_pdf_before) {
 			sfp_pdf_before = sfp_pdf;
 
-			info_window_set_message(info_window,
-					sond_file_part_get_filepart(SOND_FILE_PART(sfp_pdf)));
+			filepart = sond_file_part_get_filepart(SOND_FILE_PART(sfp_pdf));
 
 			//prüfen, ob in Viewer geöffnet
 			if (zond_pdf_document_is_open(sfp_pdf)) {
 				info_window_set_message(info_window,
-						"... in Viewer geöffnet - übersprungen");
+						"PDF '%s' in Viewer geöffnet - übersprungen",
+						filepart);
+				g_free(filepart);
 				continue;
 			}
 
@@ -580,20 +610,42 @@ static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 					FALSE, &error);
 			if (!doc) {
 				info_window_set_message(info_window,
-						"Pdf-Dokument konnte nicht geöffnet werden: %s",
-						error->message);
+						"PDF '%s' konnte nicht geöffnet werden: %s",
+						filepart, error->message);
 				g_clear_error(&error);
+				g_free(filepart);
 
 				continue;
 			}
 		}
 
-		rc = sond_ocr_pdf_doc(pool, doc, &error);
-		if (rc) {
-			info_window_set_message(info_window, "Fehler OCR: %s", error->message);
-			g_clear_error(&error);
-			pdf_drop_document(zond->ctx, doc);
+		struct _ThreadData* thread_data = g_new0(struct _ThreadData, 1);
+		thread_data->pool = pool;
+		thread_data->doc = doc;
+		thread_data->filepart = filepart;
 
+		info_window_set_message(info_window, "OCR-Erkennung für PDF '%s' wird gestartet",
+				filepart);
+
+		GThread* thread = g_thread_new("ocr-doc", ocr_doc, thread_data);
+		if (!thread) {
+			info_window_set_message(info_window,
+					"Thread zur OCR-Erkennung für PDF '%s' konnte nicht erzeugt werden",
+					filepart);
+			g_free(filepart);
+			continue;
+		}
+
+		while (!g_atomic_int_get(&thread_data->done)) {
+		    gtk_main_iteration_do(FALSE);
+	//	    g_usleep(1000);
+		}
+
+		gpointer res = g_thread_join(thread);
+		g_free(filepart);
+		g_free(thread_data);
+		if (res) {//fehlgeschlagen, nicht speichern
+			pdf_drop_document(zond->ctx, doc);
 			continue;
 		}
 

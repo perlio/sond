@@ -38,7 +38,7 @@ typedef int gboolean;
 typedef struct {
     GThreadPool *pool;
     GMutex mutex;
-    volatile gboolean cancel_all;
+    gint* cancel_all;
     GPrivate thread_data_key;
     gchar *tessdata_path;
     gchar *language;
@@ -68,7 +68,7 @@ typedef struct {
 	float scale;
 	gint durchgang;
 	OcrTransform ocr_transform;
-	fz_buffer* content;
+	GString* content;
 } SondOcrTask;
 
 gint sond_ocr_do_tasks(GPtrArray* arr_tasks, GError** error);
@@ -81,11 +81,10 @@ SondOcrTask* sond_ocr_task_new(SondOcrPool* pool, pdf_document* doc,
 gint sond_ocr_pdf_doc(SondOcrPool* ocr_pool, pdf_document* doc,
 		GError** error);
 
-gint sond_ocr_init_tesseract(TessBaseAPI**, TessBaseAPI**, gchar const*, GError**);
-
 SondOcrPool* sond_ocr_pool_new(const gchar *tessdata_path,
 		const gchar *language, gint num_threads, fz_context* ctx,
-		void (*log_func)(void*, gchar const*, ...), gpointer log_data, GError **error);
+		void (*log_func)(void*, gchar const*, ...), gpointer log_data,
+		gint* cancel_all,GError **error);
 
 void sond_ocr_pool_free(SondOcrPool *pool);
 
