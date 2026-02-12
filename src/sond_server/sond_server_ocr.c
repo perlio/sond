@@ -1272,7 +1272,8 @@ static gpointer seafile_ocr_worker_thread(gpointer user_data) {
     OcrLogEntry *log_entry = ocr_log_read(&config, session);
 
     SondOcrPool* ocr_pool = sond_ocr_pool_new("/usr/share/tesseract-ocr/5/tessdata/",
-    		"deu", 8, ctx, (void(*)(gpointer, gchar const*, ...)) ocr_log_add_message, log_entry, &error);
+    		"deu", 8, ctx, (void(*)(gpointer, gchar const*, ...)) ocr_log_add_message,
+			log_entry, NULL, &error);
     if (!ocr_pool) {
 		LOG_ERROR("Failed to create threadpool: %s",
 				error->message);

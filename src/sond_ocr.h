@@ -84,7 +84,7 @@ gint sond_ocr_pdf_doc(SondOcrPool* ocr_pool, pdf_document* doc,
 SondOcrPool* sond_ocr_pool_new(const gchar *tessdata_path,
 		const gchar *language, gint num_threads, fz_context* ctx,
 		void (*log_func)(void*, gchar const*, ...), gpointer log_data,
-		gint* cancel_all,GError **error);
+		gint* cancel_all, GError **error);
 
 void sond_ocr_pool_free(SondOcrPool *pool);
 

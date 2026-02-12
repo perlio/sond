@@ -75,4 +75,6 @@ pdf_obj* pdf_put_sond_font(fz_context* ctx, pdf_document* doc, GError** error);
 gint pdf_page_has_hidden_text(fz_context* ctx, pdf_page* page,
 		gboolean* hidden, GError** error);
 
+pdf_annot* pdf_annot_lookup_index(fz_context*, pdf_page*, gint);
+
 #endif /* SRC_SOND_PDF_HELPER_H_ */

@@ -25,8 +25,14 @@ gint viewer_annot_handle_delete(PdfViewer* pv, GError** error);
 
 gint viewer_annot_handle_edit_closed(PdfViewer* pdfv, GtkWidget *popover, GError** error);
 
+gint viewer_annot_do_change(fz_context* ctx, pdf_annot* pdf_annot, gint rotate,
+		Annot annot, GError** error);
+
 gint viewer_annot_handle_release_clicked_annot(PdfViewer* pv, ViewerPageNew* viewer_page,
 		PdfPunkt pdf_punkt, GError** error);
+
+pdf_annot* viewer_annot_do_create(fz_context* ctx, pdf_page* pdf_page, gint rotate,
+		Annot annot, GError** error);
 
 gint viewer_annot_create(ViewerPageNew *viewer_page, gchar **errmsg);
 

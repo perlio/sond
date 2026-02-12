@@ -8,20 +8,6 @@
 #include "../40viewer/viewer.h"
 #include "../../misc.h"
 
-gchar*
-get_rel_path_from_file_part(gchar const *file_part) {
-	if (!file_part)
-		return NULL;
-	if (strlen(file_part) < 4)
-		return NULL;
-
-	if (strstr(file_part, "//"))
-		return g_strndup(file_part + 1,
-				strlen(file_part + 1) - strlen(strstr(file_part, "//")));
-	else
-		return NULL;
-}
-
 gboolean anbindung_1_gleich_2(const Anbindung anbindung1,
 		const Anbindung anbindung2) {
 	if ((anbindung1.von.seite == anbindung2.von.seite)

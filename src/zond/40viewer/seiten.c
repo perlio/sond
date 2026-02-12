@@ -472,8 +472,8 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 
 	datadir = g_build_filename(pv->zond->exe_dir, "../share/tessdata", NULL);
 	pool = sond_ocr_pool_new(datadir, "deu", 1, pv->zond->ctx,
-			(void(*)(void*, gchar const*, ...)) info_window_set_message,
-					(gpointer) info_window, &error);
+			(void(*)(void*, gchar const*, ...)) info_window_set_message_from_thread,
+					(gpointer) info_window, &info_window->cancel, &error);
 	g_free(datadir);
 	if (!pool) {
 		info_window_set_message(info_window,

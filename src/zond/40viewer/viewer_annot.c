@@ -17,9 +17,9 @@
  */
 
 #include <gtk/gtk.h>
-#include "../../sond_log_and_error.h"
 
-#include "../99conv/pdf.h"
+#include "../../sond_log_and_error.h"
+#include "../../misc.h"
 
 #include "viewer.h"
 #include "viewer_render.h"
@@ -155,6 +155,56 @@ gint viewer_annot_handle_delete(PdfViewer* pv, GError** error) {
 	return 0;
 }
 
+static fz_rect pdf_annot_rotate_rect(gint rotate, fz_rect rect) {
+	if (rotate == 90) {
+		rect.x0 -= 20;
+		rect.x1 -= 20;
+	} else if (rotate == 180) {
+		rect.x0 -= 20;
+		rect.x1 -= 20;
+		rect.y0 -= 20;
+		rect.y1 -= 20;
+	} else if (rotate == 270) {
+		rect.y0 -= 20;
+		rect.y1 -= 20;
+	}
+
+	return rect;
+}
+
+gint viewer_annot_do_change(fz_context* ctx, pdf_annot* pdf_annot, gint rotate,
+		Annot annot, GError** error) {
+	if (annot.type == PDF_ANNOT_HIGHLIGHT || annot.type == PDF_ANNOT_UNDERLINE) {
+		for (gint i = 0; i < annot.annot_text_markup.arr_quads->len; i++) {
+			fz_try( ctx )
+				pdf_add_annot_quad_point(ctx, pdf_annot,
+						g_array_index(annot.annot_text_markup.arr_quads, fz_quad, i));
+			fz_catch (ctx) {
+				if (error) *error = g_error_new(g_quark_from_static_string("mupdf"), fz_caught(ctx),
+						"%s\n%s", __func__, fz_caught_message(ctx));
+
+				return -1;
+			}
+		}
+	} else if (annot.type == PDF_ANNOT_TEXT) {
+		fz_try(ctx) {
+			if (annot.annot_text.content)
+				pdf_set_annot_contents(ctx, pdf_annot, annot.annot_text.content);
+			pdf_set_annot_rect(ctx, pdf_annot, pdf_annot_rotate_rect(rotate, annot.annot_text.rect));
+		}
+		fz_catch(ctx) {
+			if (error) *error = g_error_new(g_quark_from_static_string("mupdf"), fz_caught(ctx),
+					"%s\n%s", __func__, fz_caught_message(ctx));
+
+			return -1;
+		}
+	}
+
+	pdf_update_annot(ctx, pdf_annot);
+
+	return 0;
+}
+
 gint viewer_annot_handle_edit_closed(PdfViewer* pdfv, GtkWidget *popover, GError** error) {
 	gchar *text = NULL;
 	PdfDocumentPageAnnot *pdf_document_page_annot = NULL;
@@ -199,7 +249,7 @@ gint viewer_annot_handle_edit_closed(PdfViewer* pdfv, GtkWidget *popover, GError
 	pdf_document_page_annot->annot.annot_text.content = text; //ref übernommen
 
 	//in pdf_doc einspielen
-	rc = pdf_annot_change(zond_pdf_document_get_ctx(
+	rc = viewer_annot_do_change(zond_pdf_document_get_ctx(
 			pdf_document_page_annot->pdf_document_page->document), pdf_annot,
 			pdf_document_page_annot->pdf_document_page->rotate,
 			pdf_document_page_annot->annot, error);
@@ -368,7 +418,7 @@ gint viewer_annot_handle_release_clicked_annot(PdfViewer* pv,
 
 		zond_pdf_document_mutex_lock(
 				viewer_page->pdf_document_page->document);
-		rc = pdf_annot_change(ctx, pdf_annot, viewer_page->pdf_document_page->rotate,
+		rc = viewer_annot_do_change(ctx, pdf_annot, viewer_page->pdf_document_page->rotate,
 				pv->clicked_annot->annot, &error);
 		zond_pdf_document_mutex_unlock(
 				viewer_page->pdf_document_page->document);
@@ -447,6 +497,48 @@ gint viewer_annot_handle_release_clicked_annot(PdfViewer* pv,
 	return 0;
 }
 
+pdf_annot* viewer_annot_do_create(fz_context* ctx, pdf_page* pdf_page, gint rotate,
+		Annot annot, GError** error) {
+	pdf_annot* pdf_annot = NULL;
+	gint rc = 0;
+
+	fz_try(ctx) pdf_annot = pdf_create_annot(ctx, pdf_page, annot.type);
+	fz_catch(ctx) {
+		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"), fz_caught(ctx),
+				"%s\n%s", __func__, fz_caught_message(ctx));
+
+		return NULL;
+	}
+	pdf_drop_annot(ctx, pdf_annot); //geht schon jetzt; page behält ref!
+
+	if (annot.type == PDF_ANNOT_UNDERLINE) {
+		const gfloat color[3] = { 0.1, .85, 0 };
+		fz_try(ctx) pdf_set_annot_color(ctx, pdf_annot, 3, color);
+		fz_catch( ctx )
+		{
+			if (error) *error = g_error_new(g_quark_from_static_string("mupdf"), fz_caught(ctx),
+					"%s\n%s", __func__, fz_caught_message(ctx));
+
+			return NULL;
+		}
+	} else if (annot.type == PDF_ANNOT_TEXT) {
+		fz_try(ctx) pdf_set_annot_icon_name( ctx, pdf_annot, "Comment" );
+		fz_catch( ctx )
+		{
+			if (error) *error = g_error_new(g_quark_from_static_string("mupdf"), fz_caught(ctx),
+					"%s\n%s", __func__, fz_caught_message(ctx));
+
+			return NULL;
+		}
+	}
+
+	rc = viewer_annot_do_change(ctx, pdf_annot, rotate, annot, error);
+	if (rc)
+		ERROR_Z_VAL(NULL)
+
+	return pdf_annot;
+}
+
 gint viewer_annot_create(ViewerPageNew *viewer_page, gchar **errmsg) {
 	pdf_annot *pdf_annot = NULL;
 	PdfDocumentPageAnnot *pdf_document_page_annot = NULL;
@@ -488,7 +580,7 @@ gint viewer_annot_create(ViewerPageNew *viewer_page, gchar **errmsg) {
 	}
 
 	zond_pdf_document_mutex_lock(viewer_page->pdf_document_page->document);
-	pdf_annot = pdf_annot_create(ctx, viewer_page->pdf_document_page->page,
+	pdf_annot = viewer_annot_do_create(ctx, viewer_page->pdf_document_page->page,
 			viewer_page->pdf_document_page->rotate, annot, &error);
 	zond_pdf_document_mutex_unlock(viewer_page->pdf_document_page->document);
 	if (!pdf_annot) {

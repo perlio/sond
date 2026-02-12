@@ -1019,3 +1019,14 @@ gint pdf_page_has_hidden_text(fz_context* ctx, pdf_page* page,
 	return 0;
 }
 
+pdf_annot* pdf_annot_lookup_index(fz_context* ctx, pdf_page* pdf_page, gint index) {
+	pdf_annot *pdf_annot = NULL;
+
+	pdf_annot = pdf_first_annot(ctx, pdf_page); //kein Fehler
+
+	for (gint i = 0; i < index; i++)
+		pdf_annot = pdf_next_annot(ctx, pdf_annot);
+
+	return pdf_annot;
+}
+

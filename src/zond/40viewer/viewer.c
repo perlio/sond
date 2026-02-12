@@ -37,7 +37,6 @@
 
 #include "../20allgemein/project.h"
 #include "../20allgemein/ziele.h"
-#include "../99conv/pdf.h"
 
 #include "document.h"
 #include "stand_alone.h"
@@ -493,7 +492,7 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 				pdf_annot* pdf_ann = NULL;
 
 				//pdf_ann borrowed pointer
-				pdf_ann = pdf_annot_create(ctx, pdf_page, entry.pdf_document_page->rotate,
+				pdf_ann = viewer_annot_do_create(ctx, pdf_page, entry.pdf_document_page->rotate,
 						entry.annot_changed.annot_after, error);
 				if (!pdf_ann) {
 					pdf_drop_page(ctx, pdf_page);
@@ -510,7 +509,7 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 						entry.annot_changed.pdf_document_page_annot);
 				pdf_ann = pdf_annot_lookup_index(ctx, pdf_page, index);
 
-				rc = pdf_annot_change(ctx, pdf_ann,
+				rc = viewer_annot_do_change(ctx, pdf_ann,
 						entry.pdf_document_page->rotate,
 						entry.annot_changed.annot_after, error);
 				if (rc) {
