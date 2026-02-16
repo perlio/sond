@@ -527,14 +527,16 @@ static gpointer ocr_doc(gpointer data) {
 
 	rc = sond_ocr_pdf_doc(thread_data->pool, thread_data->doc, &error);
 	g_atomic_int_set(&thread_data->done, 1);
-	if (rc) {
+	if (rc == -1) {
 		thread_data->pool->log_func(thread_data->pool->log_data,
 				"OCR-Recognition für PDF '%s' fehlgeschlagen: %s",
 				thread_data->filepart, error->message);
 		g_error_free(error);
 
-		return GINT_TO_POINTER(1);
+		return GINT_TO_POINTER(-1);
 	}
+	else if (rc == 1)
+		return GINT_TO_POINTER(1);
 
 	return NULL;
 }
@@ -550,6 +552,7 @@ static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 	pdf_document* doc = NULL;
 	SondOcrPool* pool = NULL;
 	gchar* filepart = NULL;
+	gint global_progress = 0;
 
 	Projekt *zond = (Projekt*) data;
 
@@ -578,7 +581,7 @@ static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 	datadir = g_build_filename(zond->exe_dir, "../share/tessdata", NULL);
 	pool = sond_ocr_pool_new(datadir, "deu", 4, zond->ctx,
 			(void(*)(void*, gchar const*, ...)) info_window_set_message_from_thread,
-			(gpointer) info_window, &info_window->cancel, &error);
+			(gpointer) info_window, &info_window->cancel, &global_progress, &error);
 	g_free(datadir);
 	if (!pool) {
 		info_window_set_message(info_window,
@@ -636,17 +639,38 @@ static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 			continue;
 		}
 
+		gint last_progress = -1;
+		info_window_display_progress(info_window, -1);
+
 		while (!g_atomic_int_get(&thread_data->done)) {
+			gint global_progress = 0;
+			gint num_tasks = 0;
+			gint progress = 0;
+
+			global_progress = g_atomic_int_get(pool->global_progress);
+			num_tasks = g_atomic_int_get(&pool->num_tasks);
+
+			if (num_tasks)
+				progress = (gint) (global_progress / num_tasks);
+
+			if (progress != last_progress) {
+				last_progress = progress;
+				info_window_display_progress(info_window, progress);
+			}
+
 		    gtk_main_iteration_do(FALSE);
 	//	    g_usleep(1000);
 		}
 
-		gpointer res = g_thread_join(thread);
+		gint res = GPOINTER_TO_INT(g_thread_join(thread));
 		g_free(filepart);
 		g_free(thread_data);
-		if (res) {//fehlgeschlagen, nicht speichern
+		if (res) {
 			pdf_drop_document(zond->ctx, doc);
-			continue;
+			if (res == -1)
+				continue;
+			else if (res == 1)
+				break;
 		}
 
 		rc = sond_file_part_pdf_save_and_close(zond->ctx, doc, sfp_pdf, &error);

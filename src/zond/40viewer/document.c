@@ -5,7 +5,6 @@
 #include "../zond_pdf_document.h"
 
 #include "../99conv/general.h"
-#include "../99conv/pdf.h"
 
 #include"../../sond_log_and_error.h"
 

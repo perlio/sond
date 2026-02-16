@@ -19,6 +19,7 @@
 #include <stddef.h>
 #include <glib.h>
 #include <magic.h>
+#include <gmime/gmime.h>
 
 
 gchar* add_string(gchar *old_string, gchar *add_string) {
@@ -297,24 +298,24 @@ gchar* mime_guess_content_type(unsigned char* buffer, gsize size, GError** error
 
     // MIME-Typ aus Puffer erkennen
     const char* mime = magic_buffer(magic, buffer, size);
-/*
+
     if (!g_strcmp0(mime, "text/plain")) { //test, ob nicht etwa GMessage
     	GMimeStream* gmime_stream = NULL;
     	GMimeParser* parser = NULL;
     	GMimeMessage* message = NULL;
 
-    	gmime_stream = fz_gmime_stream_new(ctx, stream);
+    	gmime_stream = g_mime_stream_mem_new_with_buffer((const gchar*) buffer, size);
 
     	parser = g_mime_parser_new_with_stream(gmime_stream);
     	message = g_mime_parser_construct_message (parser, NULL);
     	g_object_unref (parser);
     	g_object_unref(gmime_stream);
-    	if (!message)
-    		result = g_strdup(mime);
+    	if (message && g_mime_message_get_sender(message))
+			result = g_strdup("message/rfc822");
     	else
-    		result = g_strdup("message/rfc822");
+    		result = g_strdup(mime);
     }
-    else */
+    else
     	result = mime ? g_strdup(mime) : g_strdup("application/octet-stream");
 
     magic_close(magic);

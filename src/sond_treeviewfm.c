@@ -32,8 +32,8 @@
 #include "sond_log_and_error.h"
 #include "sond_renderer.h"
 #include "sond_fileparts.h"
+#include "sond_pdf_helper.h"
 
-#include "zond/99conv/pdf.h"
 
 //SOND_TREEVIEWDM
 typedef struct {
@@ -334,7 +334,8 @@ SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM* stvfm,
 	}
 
 	//section?
-	if (sond_file_part && path_or_section) //Spezialfall "//" wurde oben schon weggefischt
+	if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF
+			&& path_or_section) //Spezialfall "//" wurde oben schon weggefischt
 		stvfm_item_priv->type = SOND_TVFM_ITEM_TYPE_LEAF_SECTION;
 
 	//Spezialbehandlung für Sections

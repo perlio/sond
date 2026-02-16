@@ -457,6 +457,7 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 	InfoWindow *info_window = NULL;
 	gchar* datadir = NULL;
 	SondOcrPool* pool = NULL;
+	gint progress = 0;
 
 	PdfViewer *pv = (PdfViewer*) data;
 
@@ -473,7 +474,7 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 	datadir = g_build_filename(pv->zond->exe_dir, "../share/tessdata", NULL);
 	pool = sond_ocr_pool_new(datadir, "deu", 1, pv->zond->ctx,
 			(void(*)(void*, gchar const*, ...)) info_window_set_message_from_thread,
-					(gpointer) info_window, &info_window->cancel, &error);
+					(gpointer) info_window, &info_window->cancel, &progress, &error);
 	g_free(datadir);
 	if (!pool) {
 		info_window_set_message(info_window,
@@ -589,12 +590,16 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 		rc = sond_ocr_do_tasks(arr_tasks, &error);
 		g_ptr_array_unref(arr_tasks);
 		if (rc) { //Fähler
-			info_window_set_message(info_window, "OCR-Task gescheitert: %s",
-					error->message);
-			g_clear_error(&error);
 			fz_drop_buffer(ctx, entry.ocr.buf_old);
 
-			continue;
+			if (rc == -1) {
+				info_window_set_message(info_window, "OCR-Task gescheitert: %s",
+						error->message);
+				g_clear_error(&error);
+				continue;
+			}
+			else if (rc == 1)
+				break;
 		}
 
 		buf_content = get_content_stream_as_buffer(ctx, pdf_document_page->page->obj, &error);

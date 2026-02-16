@@ -178,9 +178,12 @@ static gint sond_ocr_osd(SondOcrTask* task, GError** error) {
 						"OSD Seite %u: conf < 1.7 - keine Rotation angewendet",
 						task->page->super.number);
 		}
-		else if (task->pool->log_func)
-			task->pool->log_func(task->pool->log_data,
-					"OSD Seite %u fehlgeschlagen", task->page->super.number);
+		else {
+			g_set_error(error, SOND_ERROR, 0,
+					"TessBaseAPIDetectOrientationScript failed");
+
+			return -1;
+		}
 	}
 
 	return 0;
@@ -198,6 +201,9 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, GError** error) {
 			gint status = 0;
 
 			task = g_ptr_array_index(arr_tasks, i);
+
+			if (g_atomic_int_get(task->pool->cancel_all))
+				return 1;
 
 			status = g_atomic_int_get(&task->status);
 
@@ -231,6 +237,7 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, GError** error) {
 								"Seite %u konnte nicht gerendert werden: %s",
 								i, (*error)->message);
 					g_clear_error(error);
+					pages_done++;
 					g_atomic_int_set(&task->status, 4);
 					continue;
 				}
@@ -241,8 +248,6 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, GError** error) {
 						task->pool->log_func(task->pool->log_data, "OSD Seite %u gescheitert: %s",
 								i, (*error)->message);
 					g_clear_error(error);
-					g_atomic_int_set(&task->status, 4);
-					continue;
 				}
 
 				rc = calculate_ocr_transform(task->pool->ctx, task->page, task->scale,
@@ -253,6 +258,7 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, GError** error) {
 								"Transform-Matrix konnte nicht berechnet werden: %s",
 								i, (*error)->message);
 					g_clear_error(error);
+					pages_done++;
 					g_atomic_int_set(&task->status, 4);
 					continue;
 				}
@@ -265,9 +271,11 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, GError** error) {
 								"Thread konnte nicht gepusht werden: %s",
 								i, (*error)->message);
 					g_clear_error(error);
+					pages_done++;
 					g_atomic_int_set(&task->status, 4);
 					continue;
 				}
+				g_atomic_int_inc(&task->pool->num_tasks);
 			}
 
 			if (status == 1) //läuft gerade - nix machen
@@ -372,7 +380,7 @@ gint sond_ocr_pdf_doc(SondOcrPool* ocr_pool, pdf_document* doc,
 		if (!task) {
 			if (ocr_pool->log_data)
 				ocr_pool->log_func(ocr_pool->log_data,
-						"Task für Seite %u konnte nicht erzeugt werden: %s",
+						"Seite %u: Task konnte nicht erzeugt werden: %s",
 						i, (*error)->message);
 			g_clear_error(error);
 			continue;
@@ -385,8 +393,10 @@ gint sond_ocr_pdf_doc(SondOcrPool* ocr_pool, pdf_document* doc,
 
 	rc = sond_ocr_do_tasks(arr_tasks, error);
 	g_ptr_array_unref(arr_tasks);
-	if (rc)
+	if (rc == -1)
 		ERROR_Z
+	else if (rc == 1)
+		return 1;
 
 	return 0;
 }
@@ -652,13 +662,40 @@ static GString* tesseract_to_content_stream(
 
 // Private Struktur für Thread-lokale Tesseract-Instanz
 typedef struct {
+	gint* cancel_this;
+	ETEXT_DESC* monitor;
+	gint last_progress;
+	gint* global_progress;
+} CancelData;
+
+typedef struct {
     TessBaseAPI *api;
-    ETEXT_DESC* monitor;
+    CancelData* cancel_data;
 } TesseractThreadData;
 
-static gboolean ocr_cancel(void *cancel_this, int words) {
-	gint* cancel_flag = (gint*) cancel_this;
-	return g_atomic_int_get(cancel_flag) != 0;  // TRUE = abbrechen	volatile gboolean *cancelFlag = (volatile gboolean*) cancel_this;
+static gboolean ocr_cancel(void *data, int words) {
+	gboolean ret = FALSE;
+	gint progress = 0;
+	gint last_progress = 0;
+
+	CancelData* cancel_data = (CancelData*) data;
+
+	if (!cancel_data)
+		return FALSE;
+
+	progress = TessMonitorGetProgress(cancel_data->monitor);
+	last_progress = g_atomic_int_get(&cancel_data->last_progress);
+
+	if (progress != last_progress) {
+		if (progress > last_progress)
+			g_atomic_int_add(cancel_data->global_progress, progress - last_progress);
+		g_atomic_int_set(&cancel_data->last_progress, progress);
+	}
+
+	if (cancel_data->cancel_this && (g_atomic_int_get((gint*) cancel_data->cancel_this)))
+		ret = TRUE;
+
+	return ret;  // TRUE = abbrechen
 }
 
 static gint ocr_pixmap(SondOcrTask* task, SondOcrPool* pool,
@@ -670,23 +707,27 @@ static gint ocr_pixmap(SondOcrTask* task, SondOcrPool* pool,
 			task->pixmap->n, task->pixmap->stride);
 	TessBaseAPISetSourceResolution(thread_data->api, (gint) (task->scale * 72.0));
 
-	rc = TessBaseAPIRecognize(thread_data->api, thread_data->monitor);
-	if (rc) { //muß sorum abgefragt werden, weil Abbruch auch rc = 1 macht
-		g_set_error(error, SOND_ERROR, 0, "Recognize fehlgeschlagen");
+	rc = TessBaseAPIRecognize(thread_data->api, thread_data->cancel_data->monitor);
+	if (rc) {
+		if (!g_atomic_int_get(pool->cancel_all)) { //muß sorum abgefragt werden, weil Abbruch auch rc = 1 macht
+			g_set_error(error, SOND_ERROR, 0, "Recognize fehlgeschlagen");
 
-		return -1;
+			return -1;
+		}
+		else
+			return 1;
 	}
 
 	float conf = TessBaseAPIMeanTextConf(thread_data->api);
-	if (conf > 80 || task->durchgang == 2)
+	if (conf >= 80 || task->durchgang == 2)
 		return 0;
 
 	//wenn nicht:
 	task->durchgang++;
 	if (pool->log_func)
 		pool->log_func(pool->log_data,
-			"OCR-Konfidenz %d%% für Seite %u zu niedrig, nächster Durchgang %u",
-			conf, task->page->super.number, task->durchgang);
+			"Seite %u: OCR-Konfidenz %f%%, neuer versuch mit höherer Auflösung",
+			task->page->super.number, conf);
 
 	return 1;
 }
@@ -722,6 +763,7 @@ static TesseractThreadData* get_or_create_thread_data(GPrivate *thread_data_key,
                                                        const gchar *tessdata_path,
                                                        const gchar *language,
 													   gint* cancel_all,
+													   gint* global_progress,
                                                        GError **error) {
     TesseractThreadData *data = g_private_get(thread_data_key);
 
@@ -740,11 +782,16 @@ static TesseractThreadData* get_or_create_thread_data(GPrivate *thread_data_key,
 			return NULL;
 		}
 
-		data->monitor = TessMonitorCreate();
+		data->cancel_data = g_new0(CancelData, 1);
+
+		data->cancel_data->monitor = TessMonitorCreate();
+		if (global_progress)
+			data->cancel_data->global_progress = global_progress;
 
 		if (cancel_all) {
-			TessMonitorSetCancelFunc(data->monitor, (TessCancelFunc) ocr_cancel);
-			TessMonitorSetCancelThis(data->monitor, (gpointer) cancel_all);
+			data->cancel_data->cancel_this = cancel_all;
+			TessMonitorSetCancelFunc(data->cancel_data->monitor, (TessCancelFunc) ocr_cancel);
+			TessMonitorSetCancelThis(data->cancel_data->monitor, data->cancel_data);
         }
 
         g_private_set(thread_data_key, data);
@@ -768,7 +815,8 @@ static void ocr_worker(gpointer task_data, gpointer user_data) {
 
     if (thread_data == NULL) {
         thread_data = get_or_create_thread_data(&pool->thread_data_key,
-        		pool->tessdata_path, pool->language, pool->cancel_all, &error);
+        		pool->tessdata_path, pool->language, pool->cancel_all,
+				pool->global_progress, &error);
         if (!thread_data) {
         	if (pool->log_func)
         		pool->log_func(pool->log_data, "Thread-Data konnte nicht geladen werden: %s",
@@ -831,8 +879,9 @@ static void cleanup_thread_data(TesseractThreadData *data) {
             TessBaseAPIDelete(data->api);
         }
 
-        TessMonitorDelete(data->monitor);
+        TessMonitorDelete(data->cancel_data->monitor);
 
+        g_free(data->cancel_data);
         g_free(data);
     }
 }
@@ -872,6 +921,7 @@ SondOcrPool* sond_ocr_pool_new(const gchar *tessdata_path,
 								   void (*log_func)(void*, gchar const*, ...),
 								   gpointer log_data,
 								   gint* cancel_all,
+								   gint* global_progress,
                                    GError **error) {
 	gint rc = 0;
 
@@ -909,6 +959,7 @@ SondOcrPool* sond_ocr_pool_new(const gchar *tessdata_path,
     pool->log_func = log_func;
     pool->log_data = log_data;
     pool->cancel_all = cancel_all;
+    pool->global_progress = global_progress;
 
 
     // Initialisiere GPrivate mit automatischer Cleanup-Funktion

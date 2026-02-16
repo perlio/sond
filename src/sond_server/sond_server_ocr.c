@@ -1273,7 +1273,7 @@ static gpointer seafile_ocr_worker_thread(gpointer user_data) {
 
     SondOcrPool* ocr_pool = sond_ocr_pool_new("/usr/share/tesseract-ocr/5/tessdata/",
     		"deu", 8, ctx, (void(*)(gpointer, gchar const*, ...)) ocr_log_add_message,
-			log_entry, NULL, &error);
+			log_entry, NULL, NULL, &error);
     if (!ocr_pool) {
 		LOG_ERROR("Failed to create threadpool: %s",
 				error->message);
@@ -1585,7 +1585,7 @@ static gint process_pdf_for_ocr(guchar* data, gsize size,
 	rc = sond_ocr_pdf_doc(ocr_pool, doc, error);
 	if (rc) {
 		pdf_drop_document(ocr_pool->ctx, doc);
-		return -1;
+		return rc;
 	}
 
 	*out_pdf_count += 1;
@@ -1636,7 +1636,7 @@ static void dispatch_buffer(SondOcrPool* pool, guchar* data, gsize size,
 		rc = process_gmessage_for_ocr(data, size, filename, pool,
 				out_data, out_size, out_pdf_count, &error);
 
-	if (rc) {
+	if (rc == -1) {
 		ocr_log_add_message(pool->log_data, "Failed to process file '%s' for OCR: %s",
 				filename, error ? error->message : "unknown error");
 		g_error_free(error);

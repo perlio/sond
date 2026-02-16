@@ -12,7 +12,6 @@
 #include "../20allgemein/pdf_text.h"
 
 #include "general.h"
-#include "pdf.h"
 
 /** rc == -1: Fähler
  rc == 0: alles ausgeführt, sämtliche Callbacks haben 0 zurückgegeben

@@ -24,6 +24,9 @@
 //#include "../../misc.h"
 #include "../../sond_fileparts.h"
 #include "../../sond_log_and_error.h"
+#include "../../sond_pdf_helper.h"
+#include "../../misc.h"
+
 #include "../zond_pdf_document.h"
 #include "../zond_dbase.h"
 #include "../zond_treeview.h"
@@ -34,7 +37,6 @@
 #include "../40viewer/viewer_render.h"
 
 #include "../99conv/general.h"
-#include "../99conv/pdf.h"
 
 typedef struct _Pdf_Viewer PdfViewer;
 

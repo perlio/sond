@@ -5,9 +5,10 @@
 
 #include "../../sond_log_and_error.h"
 #include "../../sond_fileparts.h"
+#include "../../sond_pdf_helper.h"
+#include "../../misc.h"
 
 #include "../zond_pdf_document.h"
-#include "../99conv/pdf.h"
 
 #include "viewer.h"
 

@@ -29,7 +29,6 @@
 #include "../zond_treeviewfm.h"
 
 #include "../99conv/general.h"
-#include "../99conv/pdf.h"
 
 #include "../40viewer/viewer.h"
 #include "../40viewer/document.h"

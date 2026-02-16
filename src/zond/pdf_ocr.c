@@ -19,9 +19,8 @@
 #include <mupdf/fitz.h>
 #include <mupdf/pdf.h>
 #include <gtk/gtk.h>
-#include <tesseract/capi.h>
-#include <glib.h>
 #include <glib/gstdio.h>
+#include <tesseract/capi.h>
 
 #include "../misc.h"
 #include "../sond_fileparts.h"
@@ -30,62 +29,6 @@
 
 #include "zond_pdf_document.h"
 
-#include "99conv/general.h"
-#include "99conv/test.h"
-
-#define TESS_SCALE 5
-
-gint pdf_ocr_update_content_stream(fz_context *ctx, pdf_obj *page_ref,
-		fz_buffer *buf, gchar **errmsg) {
-	pdf_obj *obj_content_stream = NULL;
-	pdf_document *doc = NULL;
-
-	doc = pdf_pin_document(ctx, page_ref);
-	if (!doc)
-		ERROR_S_MESSAGE("pdf_pin_document gibt NULL zurück")
-
-	obj_content_stream = pdf_dict_get(ctx, page_ref, PDF_NAME(Contents));
-
-	/* If contents is not a stream it's an array of streams or missing. */
-	if (!pdf_is_stream(ctx, obj_content_stream)) {
-		/* Create a new stream object to replace the array of streams or missing object. */
-		fz_try(ctx) {
-			obj_content_stream = pdf_add_object_drop(ctx, doc,
-					pdf_new_dict(ctx, doc, 1));
-			pdf_dict_put_drop(ctx, page_ref, PDF_NAME(Contents),
-					obj_content_stream);
-		}
-		fz_catch(ctx) {
-			ERROR_MUPDF("pdf_add_object_drop")
-		}
-	}
-
-	fz_try( ctx )
-		pdf_update_stream(ctx, doc, obj_content_stream, buf, 0);
-	fz_always(ctx)
-		pdf_drop_document(ctx, doc);
-	fz_catch(ctx)
-		ERROR_MUPDF("pdf_update_stream")
-
-	return 0;
-}
-
-static gint pdf_ocr_filter_content_stream(fz_context *ctx, pdf_page *page,
-		gint flags, gchar **errmsg) {
-	fz_buffer *buf = NULL;
-	gint rc = 0;
-
-	buf = pdf_text_filter_page(ctx, page, flags, errmsg);
-	if (!buf)
-		ERROR_S
-
-	rc = pdf_ocr_update_content_stream(ctx, page->obj, buf, errmsg);
-	fz_drop_buffer(ctx, buf);
-	if (rc)
-		ERROR_S
-
-	return 0;
-}
 
 static gchar*
 pdf_ocr_find_BT(gchar *buf, size_t size) {
@@ -124,208 +67,6 @@ pdf_ocr_get_content_stream_as_buffer(fz_context *ctx, pdf_obj *page_ref,
 	return buf;
 }
 
-static fz_buffer*
-pdf_ocr_process_tess_tmp(fz_context *ctx, pdf_obj *page_ref, fz_matrix ctm,
-		gchar **errmsg) {
-	fz_buffer *buf = NULL;
-	fz_buffer *buf_new = NULL;
-	size_t size = 0;
-	gchar *data = NULL;
-	gchar *cm = NULL;
-	gchar *BT = NULL;
-
-	buf = pdf_ocr_get_content_stream_as_buffer(ctx, page_ref, errmsg);
-	if (!buf)
-		ERROR_S_VAL(NULL)
-
-	size = fz_buffer_storage(ctx, buf, (guchar**) &data);
-
-	BT = pdf_ocr_find_BT(data, size);
-	if (!BT) {
-		fz_drop_buffer(ctx, buf);
-		if (errmsg)
-			*errmsg = g_strdup(
-					"Bei Aufruf pdf_ocr_find_BT:\nKein BT-Token gefunden");
-
-		return NULL;
-	}
-
-	fz_try( ctx )
-		buf_new = fz_new_buffer(ctx, size + 64);
-	fz_catch(ctx) {
-		fz_drop_buffer(ctx, buf);
-		ERROR_MUPDF_R("fz_new_buffer", NULL);
-	}
-
-	cm = g_strdup_printf("\nq\n%g %g %g %g %g %g cm\nBT", ctm.a, ctm.b, ctm.c,
-			ctm.d, ctm.e, ctm.f);
-
-	//Komma durch Punkt ersetzen
-	for (gint i = 0; i < strlen(cm); i++)
-		if (*(cm + i) == ',')
-			*(cm + i) = '.';
-
-	fz_try( ctx ) {
-		fz_append_data(ctx, buf_new, cm, strlen(cm));
-		fz_append_data(ctx, buf_new, BT + 2, size - (BT + 2 - data));
-		fz_append_data(ctx, buf_new, "\nQ", 2);
-	}fz_always( ctx ) {
-		g_free(cm);
-		fz_drop_buffer(ctx, buf);
-	}fz_catch( ctx ) {
-		fz_drop_buffer(ctx, buf_new);
-		ERROR_MUPDF_R("fz_append_data", NULL)
-	}
-
-	return buf_new;
-}
-
-static fz_matrix pdf_ocr_create_matrix(fz_context *ctx, fz_rect rect,
-		gfloat scale, gint rotate) {
-	gfloat shift_x = 0;
-	gfloat shift_y = 0;
-	gfloat width = 0;
-	gfloat height = 0;
-
-	width = rect.x1 - rect.x0;
-	height = rect.y1 - rect.y0;
-
-	fz_matrix ctm1 = fz_scale(scale, scale);
-	fz_matrix ctm2 = fz_rotate((float) rotate);
-
-	if (rotate == 90)
-		shift_x = height;
-	else if (rotate == 180) {
-		shift_x = height;
-		shift_y = width;
-	} else if (rotate == 270)
-		shift_y = width;
-
-	fz_matrix ctm = fz_concat(ctm1, ctm2);
-
-	ctm.e = shift_x;
-	ctm.f = shift_y;
-
-	return ctm;
-}
-
-typedef struct _Tess_Recog {
-	TessBaseAPI *handle;
-	ETEXT_DESC *monitor;
-} TessRecog;
-
-static gpointer pdf_ocr_tess_recog(gpointer data) {
-	gint rc = 0;
-
-	TessRecog *tess_recog = (TessRecog*) data;
-
-	rc = TessBaseAPIRecognize(tess_recog->handle, tess_recog->monitor);
-
-	if (rc)
-		return GINT_TO_POINTER(1);
-
-	return NULL;
-}
-
-static gboolean pdf_ocr_cancel(void *cancel_this) {
-	volatile gboolean *cancelFlag = (volatile gboolean*) cancel_this;
-	return *cancelFlag;
-}
-
-static gint pdf_ocr_tess_page(InfoWindow *info_window, TessBaseAPI *handle,
-		fz_pixmap *pixmap, gchar **errmsg) {
-	gint rc = 0;
-	ETEXT_DESC *monitor = NULL;
-	gint progress = 0;
-
-	monitor = TessMonitorCreate();
-	TessMonitorSetCancelThis(monitor, &(info_window->cancel));
-	TessMonitorSetCancelFunc(monitor, (TessCancelFunc) pdf_ocr_cancel);
-
-	TessRecog tess_recog = { handle, monitor };
-	GThread *thread_recog = g_thread_new("recog", pdf_ocr_tess_recog,
-			&tess_recog);
-
-	info_window_set_progress_bar(info_window);
-
-	while (progress < 100 && !(info_window->cancel)) {
-		progress = TessMonitorGetProgress(monitor);
-		info_window_set_progress_bar_fraction(info_window,
-				((gdouble) progress) / 100);
-	}
-
-	rc = GPOINTER_TO_INT(g_thread_join(thread_recog));
-	TessMonitorDelete(monitor);
-
-	if (rc && !(info_window->cancel)) {
-		if (errmsg) *errmsg = g_strdup(
-				"Tesseract: Fehler bei Aufruf von Recognize");
-
-		return -1;
-	}
-
-	LOG_INFO("Mean Confidence: %u", TessBaseAPIMeanTextConf(handle));
-
-	return 0;
-}
-
-static fz_pixmap*
-pdf_ocr_render_pixmap(fz_context *ctx, pdf_document *doc, float scale,
-		gchar **errmsg) {
-	pdf_page *page = NULL;
-	fz_pixmap *pixmap = NULL;
-
-	page = pdf_load_page(ctx, doc, 0);
-
-	fz_rect rect = pdf_bound_page(ctx, page, FZ_CROP_BOX);
-	fz_matrix ctm = pdf_ocr_create_matrix(ctx, rect, scale, 0);
-
-	rect = fz_transform_rect(rect, ctm);
-
-	//per draw-device to pixmap
-	fz_try( ctx )
-		pixmap = fz_new_pixmap_with_bbox(ctx, fz_device_rgb(ctx),
-				fz_irect_from_rect(rect), NULL, 0);
-	fz_catch(ctx) {
-		fz_drop_page(ctx, &page->super);
-		ERROR_MUPDF_R("fz_new_pixmap_with_bbox", NULL)
-	}
-
-	fz_try( ctx)
-		fz_clear_pixmap_with_value(ctx, pixmap, 255);
-	fz_catch(ctx) {
-		fz_drop_page(ctx, &page->super);
-		fz_drop_pixmap(ctx, pixmap);
-
-		ERROR_MUPDF_R("fz_clear_pixmap_with_value", NULL)
-	}
-
-	fz_device *draw_device = NULL;
-	fz_try(ctx)
-		draw_device = fz_new_draw_device(ctx, ctm, pixmap);
-	fz_catch(ctx) {
-		fz_drop_page(ctx, &page->super);
-		fz_drop_pixmap(ctx, pixmap);
-
-		ERROR_MUPDF_R("fz_new_draw_device", NULL)
-	}
-
-	fz_try(ctx)
-		pdf_run_page(ctx, page, draw_device, fz_identity, NULL);
-	fz_always(ctx) {
-		fz_close_device(ctx, draw_device);
-		fz_drop_device(ctx, draw_device);
-		fz_drop_page(ctx, &page->super);
-	}
-	fz_catch(ctx) {
-		fz_drop_pixmap(ctx, pixmap);
-
-		ERROR_MUPDF_R("fz_new_draw_device", NULL)
-	}
-
-	return pixmap;
-}
-
 //thread-safe
 static pdf_document*
 pdf_ocr_create_doc_from_page(PdfDocumentPage *pdf_document_page, gint flag,
@@ -360,39 +101,13 @@ pdf_ocr_create_doc_from_page(PdfDocumentPage *pdf_document_page, gint flag,
 	}
 
 	//neues dokument mit einer Seite filtern
-	rc = pdf_ocr_filter_content_stream(ctx, page, flag, errmsg);
+//	rc = pdf_ocr_filter_content_stream(ctx, page, flag, errmsg);
 	fz_drop_page(ctx, &page->super);
 	if (rc) {
 		pdf_drop_document(ctx, doc_new);
 		ERROR_MUPDF_R("pdf_zond_filter_content_stream", NULL);
 	}
 	return doc_new;
-}
-
-//thread-safe
-static gint pdf_ocr_page(PdfDocumentPage *pdf_document_page,
-		InfoWindow *info_window, TessBaseAPI *handle, gchar **errmsg) {
-	gint rc = 0;
-	fz_pixmap *pixmap = NULL;
-	pdf_document *doc_new = NULL;
-
-	doc_new = pdf_ocr_create_doc_from_page(pdf_document_page, 3, errmsg); //thread-safe
-	if (!doc_new)
-		ERROR_S
-
-	fz_context *ctx = zond_pdf_document_get_ctx(pdf_document_page->document);
-
-	pixmap = pdf_ocr_render_pixmap(ctx, doc_new, TESS_SCALE, errmsg);
-	pdf_drop_document(ctx, doc_new);
-	if (!pixmap)
-		ERROR_S
-
-	rc = pdf_ocr_tess_page(info_window, handle, pixmap, errmsg);
-	fz_drop_pixmap(ctx, pixmap);
-	if (rc)
-		ERROR_S
-
-	return 0;
 }
 
 static GtkWidget*
@@ -406,26 +121,6 @@ pdf_ocr_create_dialog(InfoWindow *info_window, gint page) {
 	g_free(titel);
 
 	return dialog;
-}
-
-//thread-safe
-static fz_pixmap*
-pdf_ocr_render_images(PdfDocumentPage *pdf_document_page, gchar **errmsg) {
-	pdf_document *doc_tmp_orig = NULL;
-	fz_pixmap *pixmap = NULL;
-
-	doc_tmp_orig = pdf_ocr_create_doc_from_page(pdf_document_page, 3, errmsg); //thread-safe
-	if (!doc_tmp_orig)
-		ERROR_S_VAL(NULL)
-
-	fz_context *ctx = zond_pdf_document_get_ctx(pdf_document_page->document);
-
-	pixmap = pdf_ocr_render_pixmap(ctx, doc_tmp_orig, 1.2, errmsg);
-	pdf_drop_document(ctx, doc_tmp_orig);
-	if (!pixmap)
-		ERROR_S_VAL(NULL)
-
-	return pixmap;
 }
 
 static gchar*
@@ -485,14 +180,14 @@ static gint pdf_ocr_show_text(InfoWindow *info_window,
 
 	//Bisherigen versteckten Text
 	//gerenderte Seite ohne sichtbaren Text
-	pixmap_orig = pdf_ocr_render_images(pdf_document_page, errmsg); //thread-safe
+//	pixmap_orig = pdf_ocr_render_images(pdf_document_page, errmsg); //thread-safe
 	if (!pixmap_orig)
 		ERROR_S
 
 			//Eigene OCR
 			//Wenn angezeigt werden soll, dann muß Seite erstmal OCRed werden
 			//Um Vergleich zu haben
-	rc = pdf_ocr_page(pdf_document_page, info_window, handle, errmsg); //thread-safe
+//	rc = pdf_ocr_page(pdf_document_page, info_window, handle, errmsg); //thread-safe
 	if (rc) {
 		fz_drop_pixmap(ctx, pixmap_orig);
 		ERROR_S
