@@ -1084,13 +1084,14 @@ static gint sond_treeviewfm_text_edited(SondTreeviewFM *stvfm,
 	g_signal_emit(stvfm_item_priv->stvfm,
 			SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->signal_before_move,
 			0, stvfm_item, stvfm_item_parent, text_new, 0, error, &res);
-	g_object_unref(stvfm_item_parent);
 
-	if (res)
+	if (res) {
+		g_object_unref(stvfm_item_parent);
 		ERROR_Z
+	}
 
 	rc = rename_stvfm_item(stvfm_item, stvfm_item_parent, text_new, error);
-
+	g_object_unref(stvfm_item_parent);
 	g_signal_emit(stvfm_item_priv->stvfm,
 			SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->signal_after, 0,
 			(rc == 0) ? TRUE : FALSE);
