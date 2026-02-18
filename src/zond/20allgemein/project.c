@@ -650,7 +650,8 @@ gint project_new(Projekt* zond, gchar** errmsg) {
 
 	rc = project_open(zond, abs_path, TRUE, errmsg);
 	g_free(abs_path);
-	ERROR_S
+	if (rc)
+		ERROR_S
 
 	return 0;
 }

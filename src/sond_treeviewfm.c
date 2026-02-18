@@ -335,7 +335,7 @@ SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM* stvfm,
 
 	//section?
 	if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF
-			&& path_or_section) //Spezialfall "//" wurde oben schon weggefischt
+			&& stvfm_item_priv->path_or_section) //Spezialfall "//" wurde oben schon weggefischt
 		stvfm_item_priv->type = SOND_TVFM_ITEM_TYPE_LEAF_SECTION;
 
 	//Spezialbehandlung für Sections
@@ -1704,18 +1704,20 @@ static gint delete_item(SondTVFMItem* stvfm_item, GError** error) {
 	SondTVFMItemPrivate* stvfm_item_priv =
 			sond_tvfm_item_get_instance_private(stvfm_item);
 
-	if (!stvfm_item_priv->path_or_section) {
-		gint rc = 0;
-
-		rc = sond_file_part_delete(stvfm_item_priv->sond_file_part, error);
-		if (rc)
-			ERROR_Z
-	}
-	else {
-		if (!stvfm_item_priv->sond_file_part) { //ist dir im Dateisystem
+	if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_DIR) {
+		if (!stvfm_item_priv->sond_file_part) { //FileSystem - geht schon
 			gint rc = 0;
+			gchar* path = NULL;
+			SondTreeviewFMPrivate* stvfm_priv =
+					sond_treeviewfm_get_instance_private(stvfm_item_priv->stvfm);
 
-			rc = rm_r(stvfm_item_priv->path_or_section);
+			if (!stvfm_item_priv->path_or_section)
+				return 0; //Root-Verzeichnis kann nicht gelöscht werden!
+
+			path = g_strconcat(stvfm_priv->root, "/", stvfm_item_priv->path_or_section, NULL);
+
+			rc = rm_r(path);
+			g_free(path);
 			if (rc) {
 				if (error) *error = g_error_new(g_quark_from_static_string("stdlib"),
 						errno, "%s\n%s", __func__, strerror(errno));
@@ -1723,12 +1725,56 @@ static gint delete_item(SondTVFMItem* stvfm_item, GError** error) {
 				return -1;
 			}
 		}
-		else { //zip- oder pdf-dir
-			if (error) *error = g_error_new(SOND_ERROR, 0,
-					"%s\nNoch nicht implementiert", __func__);
+		else if (!stvfm_item_priv->path_or_section) { //sfp existiert - also root
+			gint rc = 0;
+
+			rc = sond_file_part_delete(stvfm_item_priv->sond_file_part, error);
+			if (rc) {
+				ERROR_Z
+			}
+		}
+		else if (SOND_IS_FILE_PART_ZIP(stvfm_item_priv->sond_file_part)) {
+			g_set_error(error, SOND_ERROR, 0, "%s\nnicht implementiert", __func__);
 
 			return -1;
 		}
+		else if (SOND_IS_FILE_PART_PDF(stvfm_item_priv->sond_file_part)) { //PDF-Datei ist Dir - ganz löschen
+			g_set_error(error, SOND_ERROR, 0, "%s\nnicht implementiert", __func__);
+
+			return -1;
+		}
+		else if (SOND_IS_FILE_PART_GMESSAGE(stvfm_item_priv->sond_file_part)) {
+			g_set_error(error, SOND_ERROR, 0, "%s\nnicht implementiert", __func__);
+
+			return -1;
+		}
+	}
+	else if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF) {
+		gint rc = 0;
+
+		if (SOND_IS_FILE_PART_PDF(stvfm_item_priv->sond_file_part) &&
+				sond_file_part_get_has_children(stvfm_item_priv->sond_file_part)) {
+			if (error) *error = g_error_new(g_quark_from_static_string("sond"), 0,
+					"%s\nLöschen des pagetree aus PDF-Datei nicht unterstützt",
+					__func__);
+
+			return -1;
+		}
+
+		rc = sond_file_part_delete(stvfm_item_priv->sond_file_part, error);
+		if (rc)
+			ERROR_Z
+	}
+	else if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF_SECTION) {
+		if (SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->delete_section) {
+			gint rc = 0;
+
+			rc = SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->delete_section(stvfm_item, error);
+			if (rc)
+				ERROR_Z
+		}
+		else
+			return 0;
 	}
 
 	return 0;
@@ -1786,12 +1832,14 @@ static gint move_stvfm_item(SondTVFMItem* stvfm_item,
 	if (res)
 		ERROR_Z
 
+	//Verschieben innerhalb des gleichen sfp, das aber nicht GMessage ist
 	if (stvfm_item_parent_priv->sond_file_part ==
-			((stvfm_item_priv->sond_file_part) ?
-					sond_file_part_get_parent(stvfm_item_priv->sond_file_part)
-					: NULL) &&
-					!SOND_IS_FILE_PART_GMESSAGE(stvfm_item_parent_priv->sond_file_part))
-		//Verschieben innerhalb des gleichen sfp, das aber nicht GMessage ist
+			sond_file_part_get_parent(stvfm_item_priv->sond_file_part) &&
+			!SOND_IS_FILE_PART_GMESSAGE(stvfm_item_parent_priv->sond_file_part) &&
+			//außer wenn PageTree
+			!(stvfm_item_priv->sond_file_part &&
+					SOND_IS_FILE_PART_PDF(stvfm_item_priv->sond_file_part) &&
+					sond_file_part_get_has_children(stvfm_item_priv->sond_file_part)))
 		rc = rename_stvfm_item(stvfm_item, stvfm_item_parent, base, error);
 	else
 		rc = move_item(stvfm_item, stvfm_item_parent, base, index_to, error);
@@ -2244,88 +2292,6 @@ static void sond_treeviewfm_paste_activate(GtkMenuItem *item, gpointer data) {
 	return;
 }
 
-static gint loesche_item(SondTVFMItem* stvfm_item, GtkTreeIter* iter, GError** error) {
-	SondTVFMItemPrivate* stvfm_item_priv =
-			sond_tvfm_item_get_instance_private(stvfm_item);
-
-	if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_DIR) {
-		if (!stvfm_item_priv->sond_file_part) { //FileSystem - geht schon
-			gint rc = 0;
-			gchar* path = NULL;
-			SondTreeviewFMPrivate* stvfm_priv =
-					sond_treeviewfm_get_instance_private(stvfm_item_priv->stvfm);
-
-			if (!stvfm_item_priv->path_or_section)
-				return 0; //Root-Verzeichnis kann nicht gelöscht werden!
-
-			path = g_strconcat(stvfm_priv->root, "/", stvfm_item_priv->path_or_section, NULL);
-
-			rc = rm_r(path);
-			g_free(path);
-			if (rc) {
-				if (error) *error = g_error_new(g_quark_from_static_string("stdlib"),
-						errno, "%s\n%s", __func__, strerror(errno));
-
-				return -1;
-			}
-		}
-		else if (!stvfm_item_priv->path_or_section) { //sfp existiert - also root
-			gint rc = 0;
-
-			rc = sond_file_part_delete(stvfm_item_priv->sond_file_part, error);
-			if (rc) {
-				ERROR_Z
-			}
-		}
-		else if (SOND_IS_FILE_PART_ZIP(stvfm_item_priv->sond_file_part)) {
-			g_set_error(error, SOND_ERROR, 0, "%s\nnicht implementiert", __func__);
-
-			return -1;
-		}
-		else if (SOND_IS_FILE_PART_PDF(stvfm_item_priv->sond_file_part)) { //PDF-Datei ist Dir - ganz löschen
-			g_set_error(error, SOND_ERROR, 0, "%s\nnicht implementiert", __func__);
-
-			return -1;
-		}
-		else if (SOND_IS_FILE_PART_GMESSAGE(stvfm_item_priv->sond_file_part)) {
-			g_set_error(error, SOND_ERROR, 0, "%s\nnicht implementiert", __func__);
-
-			return -1;
-		}
-	}
-	else if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF) {
-		gint rc = 0;
-
-		if (SOND_IS_FILE_PART_PDF(stvfm_item_priv->sond_file_part) &&
-				sond_file_part_get_has_children(stvfm_item_priv->sond_file_part)) {
-			if (error) *error = g_error_new(g_quark_from_static_string("sond"), 0,
-					"%s\nLöschen des pagetree aus PDF-Datei nicht unterstützt",
-					__func__);
-
-			return -1;
-		}
-
-		rc = sond_file_part_delete(stvfm_item_priv->sond_file_part, error);
-		if (rc)
-			ERROR_Z
-	}
-	else if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF_SECTION) {
-		if (SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->delete_section) {
-			gint rc = 0;
-
-			rc = SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->delete_section(stvfm_item, error);
-			if (rc)
-				ERROR_Z
-		}
-		else
-			return 0;
-	}
-
-	remove_item_from_tree(iter, stvfm_item);
-
-	return 0;
-}
-
 static gint sond_treeviewfm_foreach_loeschen(SondTreeview *stv,
 		GtkTreeIter *iter, gpointer data, GError **error) {
 	SondTVFMItem* stvfm_item = NULL;
@@ -2344,11 +2310,13 @@ static gint sond_treeviewfm_foreach_loeschen(SondTreeview *stv,
 	else if (res == 1)
 		return 0;
 
-	rc = loesche_item(stvfm_item, iter, error);
+	rc = delete_item(stvfm_item, error);
 	g_signal_emit(stvfm, SOND_TREEVIEWFM_GET_CLASS(stvfm)->signal_after,
 			0, (rc == 0) ? TRUE : FALSE);
 	if (rc)
 		ERROR_Z
+
+	remove_item_from_tree(iter, stvfm_item);
 
 	return 0;
 }

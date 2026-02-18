@@ -2055,8 +2055,9 @@ static fz_buffer* sond_file_part_gmessage_mod_part(SondFilePartGMessage* sfp_gme
 	if (rc)
 		ERROR_Z_VAL(NULL)
 
-	rc = gmessage_mod_part(sfp_gmessage_priv->message, path, buffer->data,
-			buffer->len, error);
+	rc = gmessage_mod_part(sfp_gmessage_priv->message, path,
+			buffer ? buffer->data : NULL, buffer ? buffer->len : 0,
+			error);
 	if (rc) {
 		sond_file_part_gmessage_close(sfp_gmessage);
 		ERROR_Z_VAL(NULL)
