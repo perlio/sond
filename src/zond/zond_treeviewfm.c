@@ -107,11 +107,14 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 	g_autofree gchar* path = NULL;
 	gint index_from = 0;
 	gchar const* section = NULL;
+	SondTVFMItemType type;
 
 	ZondTreeviewFMPrivate *priv = zond_treeviewfm_get_instance_private(ztvfm);
 
 	path = get_path_from_stvfm_item(stvfm_item);
-	section = sond_tvfm_item_get_path_or_section(stvfm_item);
+	type = sond_tvfm_item_get_item_type(stvfm_item);
+	if (type == SOND_TVFM_ITEM_TYPE_LEAF || type == SOND_TVFM_ITEM_TYPE_LEAF_SECTION)
+		section = sond_tvfm_item_get_path_or_section(stvfm_item);
 
 	rc = zond_dbase_test_path_section(priv->zond->dbase_zond->zond_dbase_work,
 			path, section, FALSE, error);
