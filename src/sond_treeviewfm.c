@@ -33,6 +33,7 @@
 #include "sond_renderer.h"
 #include "sond_fileparts.h"
 #include "sond_pdf_helper.h"
+#include "sond_file_helper.h"
 
 
 //SOND_TREEVIEWDM
@@ -356,7 +357,7 @@ static gint sond_tvfm_item_load_fs_dir(SondTVFMItem* stvfm_item,
 	GPtrArray* loaded_children = NULL;
 	gboolean dir_has_children = FALSE;
 	gchar* path_dir = NULL;
-    GDir* dir = NULL;
+    SondDir* dir = NULL;
     gchar const* filename = NULL;
     fz_context* ctx = NULL;
 
@@ -367,7 +368,7 @@ static gint sond_tvfm_item_load_fs_dir(SondTVFMItem* stvfm_item,
 
 	path_dir = g_strconcat(stvfm_priv->root,
 			"/", stvfm_item_priv->path_or_section, NULL);
-    dir = g_dir_open(path_dir, 0, error);
+    dir = sond_dir_open(path_dir, error);
     g_free(path_dir);
     if (!dir)
     	ERROR_Z
@@ -376,7 +377,7 @@ static gint sond_tvfm_item_load_fs_dir(SondTVFMItem* stvfm_item,
 	if (!ctx) {
 		if (error) *error = g_error_new(SOND_ERROR, 0,
 				"%s\nfz_context konnte nicht erzeugt werden", __func__);
-		g_dir_close(dir);
+		sond_dir_close(dir);
 
 		return -1;
 	}
@@ -384,7 +385,7 @@ static gint sond_tvfm_item_load_fs_dir(SondTVFMItem* stvfm_item,
 	if (arr_children)
 		loaded_children = g_ptr_array_new_with_free_func((GDestroyNotify)g_object_unref);
 
-    while ((filename = g_dir_read_name(dir)) != NULL) {
+    while ((filename = sond_dir_read_name(dir)) != NULL) {
 		SondTVFMItem* stvfm_item_child = NULL;
 		gchar* rel_path_child = NULL;
 		GStatBuf st = { 0 };
@@ -399,8 +400,9 @@ static gint sond_tvfm_item_load_fs_dir(SondTVFMItem* stvfm_item,
 					filename, NULL);
 		else rel_path_child = g_strdup(filename);
 
-		if (g_stat(rel_path_child, &st)) {
-			LOG_WARN("g_stat(%s) gibt Fehler zurück: %s", rel_path_child, strerror(errno));
+		if (sond_stat(rel_path_child, &st, error)) {
+			LOG_WARN("g_stat(%s) gibt Fehler zurück: %s", rel_path_child, (*error)->message);
+			g_clear_error(error);
 			g_free(rel_path_child);
 
 			continue;
@@ -421,7 +423,7 @@ static gint sond_tvfm_item_load_fs_dir(SondTVFMItem* stvfm_item,
 			fz_catch(ctx) {
 				fz_drop_context(ctx);
 				g_free(rel_path_child);
-				g_dir_close(dir);
+				sond_dir_close(dir);
 
 				ERROR_PDF
 			}
@@ -431,7 +433,7 @@ static gint sond_tvfm_item_load_fs_dir(SondTVFMItem* stvfm_item,
 			fz_drop_stream(ctx, stream);
 			if (!sfp_child) {
 				g_free(rel_path_child);
-				g_dir_close(dir);
+				sond_dir_close(dir);
 				fz_drop_context(ctx);
 
 				ERROR_Z
@@ -446,7 +448,7 @@ static gint sond_tvfm_item_load_fs_dir(SondTVFMItem* stvfm_item,
 		g_ptr_array_add(loaded_children, stvfm_item_child);
     }
 
-    g_dir_close(dir);
+    sond_dir_close(dir);
 	fz_drop_context(ctx);
 
 	if (arr_children) *arr_children = loaded_children;
@@ -1233,9 +1235,7 @@ static gint insert_dir_in_fs(SondTVFMItemPrivate* stvfm_item_priv,
 				g_strdup_printf("%s/Neues Verzeichnis (%u)", stvfm_item_priv->path_or_section, i) :
 				g_strdup_printf("Neues Verzeichnis (%u)", i);
 
-		g_autoptr(GFile) dir = g_file_new_for_path(trial_path);
-
-		suc = g_file_make_directory(dir, NULL, error);
+		suc = sond_mkdir(trial_path, error);
 		if (suc) {
 			*path = g_strdup(trial_path);
 
