@@ -31,6 +31,7 @@
 #include "../misc_stdlib.h"
 #include "../sond_fileparts.h"
 #include "../sond_log_and_error.h"
+#include "../sond_file_helper.h"
 
 #include "zond_init.h"
 #include "zond_pdf_document.h"
@@ -45,6 +46,7 @@ static void recover(Projekt *zond, gchar *project, GApplication *app) {
 	gint rc = 0;
 	gchar *path_bak = NULL;
 	gchar *path_tmp = NULL;
+	GError* error = NULL;
 
 	gchar *text_abfrage = g_strconcat("Projekt ", project,
 			" wurde nicht richtig "
@@ -55,21 +57,26 @@ static void recover(Projekt *zond, gchar *project, GApplication *app) {
 
 	if (res == GTK_RESPONSE_YES) {
 		path_bak = g_strconcat(project, ".bak", NULL);
-		rc = g_rename(project, path_bak);
-		if (rc)
-			display_message(zond->app_window, "g_rename .ZND to .bak:\n",
-					strerror( errno), NULL);
+		rc = sond_rename(project, path_bak, &error);
+		if (rc) {
+			display_message(zond->app_window,
+					"Konnte Sicherungskopie (.bak) nicht erstellen: ",
+					error->message, NULL);
+			g_clear_error(&error);
+		}
 		g_free(path_bak);
 
 		path_tmp = g_strconcat(project, ".tmp", NULL);
-		rc = g_rename(path_tmp, project);
-		if (rc)
-			display_message(zond->app_window, "rename .tmp to .ZND:\n",
-					strerror( errno), NULL);
+		rc = sond_rename(path_tmp, project, &error);
+		if (rc) {
+			display_message(zond->app_window,
+					"Konnte wiederhergestellte Datei (.tmp) nicht umbenennen: ",
+					error->message, NULL);
+			g_clear_error(&error);
+		}
 		else
 			display_message(zond->app_window, project,
-					" erfolgreich wiederhergestellt",
-					NULL);
+					" erfolgreich wiederhergestellt", NULL);
 		g_free(path_tmp);
 	} else if (res != GTK_RESPONSE_NO)
 		g_application_quit(app);

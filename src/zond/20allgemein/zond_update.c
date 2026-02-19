@@ -26,6 +26,7 @@
 #include <utime.h>
 
 #include "../../sond_log_and_error.h"
+#include "../../sond_file_helper.h"
 #include "../../misc.h"
 #include "../../misc_stdlib.h"
 #include "../zond_init.h"
@@ -544,13 +545,16 @@ gint zond_update(Projekt *zond, InfoWindow *info_window, GError **error) {
 	info_window_set_message(info_window, "Download wird gelöscht");
 
 	//zip-Datei löschen
+	GError* error_rem = NULL;
+
 	zipname = g_strconcat(zond->base_dir, "zond-x86_64-", vtag, ".zip", NULL);
 
-	if (g_remove(zipname)) {
+	if (sond_remove(zipname, &error_rem)) {
 		gchar *message = NULL;
 
 		message = g_strconcat("Zip-Datei konnte nicht gelöscht werden - ",
-				strerror( errno), NULL);
+				error_rem->message, NULL);
+		g_error_free(error_rem);
 		info_window_set_message(info_window, message);
 		g_free(message);
 	};

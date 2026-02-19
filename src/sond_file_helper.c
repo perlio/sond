@@ -141,24 +141,18 @@ sond_mkdir(const gchar *path, GError **error)
 
     if (!success) {
         DWORD win_error = GetLastError();
-
-        /* Verzeichnis existiert bereits ist kein Fehler */
-        if (win_error != ERROR_ALREADY_EXISTS) {
-            set_error_from_win32(error, win_error);
-            g_free(long_path);
-            return FALSE;
-        }
+		set_error_from_win32(error, win_error);
+		g_free(long_path);
+		return FALSE;
     }
 
     g_free(long_path);
     return TRUE;
 #else
     if (g_mkdir(path, 0755) != 0) {
-        if (errno != EEXIST) {
-            g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
-                        "%s", g_strerror(errno));
-            return FALSE;
-        }
+		g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
+					"%s", g_strerror(errno));
+		return FALSE;
     }
     return TRUE;
 #endif
@@ -277,6 +271,63 @@ sond_rmdir(const gchar *path, GError **error)
     }
     return TRUE;
 #endif
+}
+
+gboolean
+sond_rmdir_r(const gchar *path, GError **error)
+{
+    SondDir *dir;
+    const gchar *name;
+    gboolean success = TRUE;
+
+    g_return_val_if_fail(path != NULL, FALSE);
+
+    /* Öffne Verzeichnis */
+    dir = sond_dir_open(path, error);
+    if (!dir)
+        return FALSE;
+
+    /* Iteriere über alle Einträge */
+    while ((name = sond_dir_read_name(dir)) != NULL) {
+        gchar *fullpath = g_build_filename(path, name, NULL);
+        GStatBuf st;
+
+        /* Hole Datei-Info */
+        if (sond_stat(fullpath, &st, error) != 0) {
+            success = FALSE;
+            g_free(fullpath);
+            break;
+        }
+
+        /* Rekursiv löschen wenn Verzeichnis */
+        if (S_ISDIR(st.st_mode)) {
+            if (!sond_rmdir_r(fullpath, error)) {
+                success = FALSE;
+                g_free(fullpath);
+                break;
+            }
+        } else {
+            /* Datei löschen */
+            if (!sond_remove(fullpath, error)) {
+                success = FALSE;
+                g_free(fullpath);
+                break;
+            }
+        }
+
+        g_free(fullpath);
+    }
+
+    sond_dir_close(dir);
+
+    /* Lösche das Verzeichnis selbst */
+    if (success) {
+        if (!sond_rmdir(path, error)) {
+            success = FALSE;
+        }
+    }
+
+    return success;
 }
 
 FILE*
@@ -496,6 +547,86 @@ cleanup:
 
     return result;
 #endif
+}
+
+gboolean
+sond_copy_r(const gchar *source, const gchar *dest, gboolean overwrite, GError **error)
+{
+    SondDir *dir;
+    const gchar *name;
+    gboolean success = TRUE;
+    GStatBuf st;
+
+    g_return_val_if_fail(source != NULL, FALSE);
+    g_return_val_if_fail(dest != NULL, FALSE);
+
+    /* Hole Info über Quelle */
+    if (sond_stat(source, &st, error) != 0) {
+        return FALSE;
+    }
+
+    /* Falls Quelle eine Datei ist, einfach kopieren */
+    if (!S_ISDIR(st.st_mode)) {
+        return sond_copy(source, dest, overwrite, error);
+    }
+
+    /* Quelle ist ein Verzeichnis - erstelle Zielverzeichnis */
+    if (sond_exists(dest)) {
+        if (!overwrite) {
+            g_set_error(error, G_IO_ERROR, G_IO_ERROR_EXISTS,
+                        "Zielverzeichnis existiert bereits");
+            return FALSE;
+        }
+    } else {
+        if (!sond_mkdir(dest, error)) {
+            return FALSE;
+        }
+    }
+
+    /* Öffne Quellverzeichnis */
+    dir = sond_dir_open(source, error);
+    if (!dir)
+        return FALSE;
+
+    /* Iteriere über alle Einträge */
+    while ((name = sond_dir_read_name(dir)) != NULL) {
+        gchar *source_path = g_build_filename(source, name, NULL);
+        gchar *dest_path = g_build_filename(dest, name, NULL);
+        GStatBuf entry_st;
+
+        /* Hole Info über Eintrag */
+        if (sond_stat(source_path, &entry_st, error) != 0) {
+            success = FALSE;
+            g_free(source_path);
+            g_free(dest_path);
+            break;
+        }
+
+        /* Rekursiv kopieren wenn Verzeichnis */
+        if (S_ISDIR(entry_st.st_mode)) {
+            if (!sond_copy_r(source_path, dest_path, overwrite, error)) {
+                success = FALSE;
+                g_free(source_path);
+                g_free(dest_path);
+                break;
+            }
+        } else {
+            /* Datei kopieren */
+            if (!sond_copy(source_path, dest_path, overwrite, error)) {
+                success = FALSE;
+                g_free(source_path);
+                g_free(dest_path);
+                break;
+            }
+        }
+
+        g_free(source_path);
+        g_free(dest_path);
+    }
+
+    sond_dir_close(dir);
+
+    return success;
 }
 
 gint

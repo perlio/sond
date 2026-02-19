@@ -21,7 +21,8 @@
 #include "../sond_offline_manager.h"
 #include "../sond_seafile_sync.h"
 #include "../../sond_log_and_error.h"
-#include "../../misc_stdlib.h"
+//#include "../../misc_stdlib.h"
+#include "../../sond_file_helper.h"
 
 #include <glib/gstdio.h>
 #include "../libsearpc/searpc-client.h"
@@ -328,8 +329,6 @@ static void on_cache_delete_response(GObject *source, GAsyncResult *result, gpoi
     const gchar *sync_dir = sond_offline_manager_get_sync_directory(manager);
     gchar *akte_path = g_build_filename(sync_dir, data->regnr, NULL);
     
-    GError *del_error = NULL;
-    
 	if (!g_file_test(akte_path, G_FILE_TEST_IS_DIR)) {
 		gchar *msg = g_strdup_printf("Löschen Cache zur Akte %s nicht möglich",
 									akte_path);
@@ -339,20 +338,21 @@ static void on_cache_delete_response(GObject *source, GAsyncResult *result, gpoi
 	    action_data_free(data);
 		return;
 	}
-	if (rm_r(akte_path) != 0) {
+	if (sond_rmdir_r(akte_path, &error) != 0) {
 		gchar *msg = g_strdup_printf("Fehler beim Löschen des Cache-Verzeichnisses: %s",
 									akte_path);
-		show_error_dialog(priv->main_widget, msg, strerror(errno));
+		show_error_dialog(priv->main_widget, msg, error->message);
 		g_free(msg);
+		g_error_free(error);
 		g_free(akte_path);
 	    action_data_free(data);
 		return;
 	}
 
-    if (!sond_offline_manager_remove_akte(manager, data->regnr, &del_error)) {
+    if (!sond_offline_manager_remove_akte(manager, data->regnr, &error)) {
         LOG_WARN("Konnte Akte nicht aus Offline-Liste entfernen: %s\n",
-                   del_error ? del_error->message : "Unbekannt");
-        if (del_error) g_error_free(del_error);
+                   error ? error->message : "Unbekannt");
+        g_error_free(error);
     }
     
     action_data_free(data);

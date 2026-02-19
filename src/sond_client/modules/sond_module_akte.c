@@ -1526,7 +1526,7 @@ static void on_regnr_entry_activate(GtkEntry *entry, SondModuleAktePrivate *priv
     const gchar *regnr_text = gtk_editable_get_text(GTK_EDITABLE(entry));
     
     if (!regnr_text || strlen(regnr_text) == 0)
-    	return NULL;
+    	return;
 
     /* Prüfen ob gültiges RegNr-Format */
     if (!is_valid_regnr_format(regnr_text)) {

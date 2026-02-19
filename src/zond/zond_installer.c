@@ -24,6 +24,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <ftw.h>
+#include <glib.h>
+
+#include "../sond_file_helper.h"
+#include "../sond_log_and_error.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -38,100 +42,6 @@
 
 #include "../misc_stdlib.h"
 
-static int rename_files(const char *filename, const struct stat *stat_new_file,
-		int flag, struct FTW *ftwbuf) {
-	if (flag == FTW_F) {
-		struct stat stat_old_file = { 0 };
-		int rc = 0;
-		char *ptr = NULL;
-		char garbage_path[PATH_MAX] = { 'g', 'a', 'r', 'b', 'a', 'g', 'e', '/',
-				0 };
-
-		ptr = strchr(filename, '/') + 1; //vtag abschneiden
-		strcat(garbage_path, ptr);
-
-		rc = stat(ptr, &stat_old_file);
-		if (rc && errno != ENOENT)
-			printf("Konnte Eigenschaften von Datei %s nicht lesen - %s\n", ptr,
-					strerror( errno));
-
-		if (stat_new_file->st_mtime > stat_old_file.st_mtime + 1) //+1 wg. Rundungsfehlern
-				{ //Datei aus zip ist neuer -> verschieben
-			int rc = 0;
-
-			rc = remove(ptr);
-			if (rc && errno != ENOENT) {
-				int rc = 0;
-				char garbage_dir[PATH_MAX] = { 0 };
-
-				strncpy(garbage_dir, garbage_path,
-						strlen(garbage_path)
-								- strlen(strrchr(garbage_path, '/')));
-
-				rc = mkdir_p(garbage_dir);
-				if (rc)
-					printf(
-							"Konnte Unterverzeichnis " "%s" " in garbage-Dir nicht erzeugen -%s\n",
-							garbage_dir, strerror( errno));
-
-				rc = rename(ptr, garbage_path); //verschieben in garbage
-				if (rc) {
-					printf(
-							"Konnte Datei %s nicht in Verzeichnis garbage verschieben - %s\n",
-							ptr, strerror( errno));
-
-					return 0; //da kann man nix machen
-				}
-			}
-
-			rc = rename(filename, ptr);
-			if (rc)
-				printf("Konnte downgeloadetes File %s nicht verschieben - %s\n",
-						filename, strerror( errno));
-			else
-				printf("Datei " "%s" " upgedated\n", ptr);
-		} else //downgeloadetes File nicht neuer
-		{
-			int rc = 0;
-
-			rc = remove(filename);
-			if (rc) //Abfrage auf ENOENT nicht nötig - nftw würde nicht ausgelöst
-			{
-				int rc = 0;
-				char garbage_dir[PATH_MAX] = { 0 };
-
-				strncpy(garbage_dir, garbage_path,
-						strlen(garbage_path)
-								- strlen(strrchr(garbage_path, '/')));
-
-				rc = mkdir_p(garbage_dir);
-				if (rc)
-					printf(
-							"Konnte Unterverzeichnis " "%s" " in garbage-Dir nicht erzeugen -%s\n",
-							garbage_dir, strerror( errno));
-
-				rc = rename(filename, garbage_path); //verschieben in garbage
-				if (rc) {
-					printf(
-							"Konnte Datei %s nicht in Verzeichnis garbage verschieben - %s\n",
-							ptr, strerror( errno));
-
-					return 0; //da kann man nix machen
-				}
-			}
-		}
-	} else if (flag == FTW_DP) {
-		int rc = 0;
-
-		rc = rmdir(filename);
-		if (rc && errno != ENOTEMPTY)
-			printf("Konnte directory %s nicht löschen - %s\n", filename,
-					strerror( errno));
-	} else
-		printf("Flag %i zurückgegeben\n", flag);
-
-	return 0;
-}
 
 int main(int argc, char **argv) {
 	int rc = 0;
@@ -139,6 +49,7 @@ int main(int argc, char **argv) {
 	char vtag_dir_tmp[MAX_PATH] = { 0 };
 	char base_dir[PATH_MAX] = { 0 };
 	char *vtag = NULL;
+	GError* error_rem = NULL;
 
 	vtag_dir = get_base_dir(); // mit / am Ende
 	if (!vtag_dir) {
@@ -186,7 +97,6 @@ int main(int argc, char **argv) {
 	{ //schema wurde zuletzt geändert nach Version v0.11.2, d.h. mit v0.11.3
 	  //d.h.: wenn Version < 0.11.3, dann muß geändert werden
 
-		int rc = 0;
 		char *major = NULL;
 		char *minor = NULL;
 		char *patch = NULL;
@@ -219,10 +129,11 @@ int main(int argc, char **argv) {
 
 		del_schemas: strcpy(schema, vtag);
 		strcat(schema, "/share/glib-2.0/schemas/gschemas.compiled");
-		rc = remove(schema);
-		if (rc)
-			printf("gschema.compiled konnte nicht entfernt werden - %s",
-					strerror( errno));
+		if (!sond_remove(schema, &error_rem)) {
+			LOG_WARN("gschema.compiled konnte nicht entfernt werden: %s",
+					error_rem->message);
+			g_clear_error(&error_rem);
+		}
 
 	}
 
@@ -230,29 +141,23 @@ int main(int argc, char **argv) {
 	//zond_installer.exe aus altem Bestand löschen,
 	//damit auf jeden Fall neue Datei in bin und nicht in garbage verschoben wird
 	//denn die läuft und kann nicht gelöscht werden
-	rc = remove("bin/zond_installer.exe");
-	if (rc)
-		printf(
-				"Alte Datei " "zond_installer.exe" " konnte nicht gelöscht werden - %s",
-				strerror( errno));
-
+	if (!sond_remove("bin/zond_installer.exe", &error_rem)) {
+		LOG_WARN( "Alte Datei ""zond_installer.exe"" konnte nicht gelöscht werden: %s",
+				error_rem->message);
+		g_clear_error(&error_rem);
+	}
 	//kopieren/löschen
 //	nftw(vtag, rename_files, 10, FTW_DEPTH);
 
-	end: rc = rmdir("garbage");
-	if (rc) {
-		if ( errno == ENOTEMPTY)
-			printf("Verzeichnis " "%s\\garbage" " "
-					"nach Beendigung des Updaters von Hand löschen!\n\n",
-					base_dir);
-		else
-			printf(
-					"Fehler beim Löschen des Verzeichnisses " "garbage" " - %s\n\n",
-					strerror( errno));
+end:
+	if (!sond_rmdir_r("garbage", &error_rem)) {
+		LOG_WARN("Verzeichnis ""garbage"" konnte nicht gelöscht werden: %s",
+				error_rem->message);
+		g_error_free(error_rem);
 	}
 
 	//ToDo: neuen Prozeß starten, der garbage löscht (ggf. zond_installer) und zond wieder startet
-	printf("Bitte Fenster schließen");
+	LOG_INFO("Bitte Fenster schließen");
 
 	while (1)
 		;

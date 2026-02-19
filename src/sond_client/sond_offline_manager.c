@@ -23,6 +23,7 @@
 
 #include "sond_offline_manager.h"
 #include "../sond_log_and_error.h"
+#include "../sond_file_helper.h"
 
 #include <json-glib/json-glib.h>
 
@@ -202,7 +203,7 @@ static gboolean save_config(SondOfflineManager *manager, GError **error) {
  */
 static gboolean load_config(SondOfflineManager *manager, GError **error) {
     /* Prüfen ob Datei existiert */
-    if (!g_file_test(manager->config_file_path, G_FILE_TEST_EXISTS)) {
+    if (!sond_exists(manager->config_file_path)) {
         LOG_INFO("Keine Offline-Konfiguration gefunden, starte mit leerer Liste\n");
         return TRUE;  /* Kein Fehler, nur noch keine Datei */
     }
@@ -282,7 +283,7 @@ SondOfflineManager* sond_offline_manager_new(const gchar *sync_directory) {
                                                   NULL);
 
     /* Sync-Verzeichnis erstellen falls nicht vorhanden */
-    if (!g_file_test(sync_directory, G_FILE_TEST_EXISTS)) {
+    if (!sond_exists(sync_directory)) {
         if (g_mkdir_with_parents(sync_directory, 0755) != 0) {
             LOG_ERROR("Konnte Sync-Verzeichnis nicht erstellen: %s\n", sync_directory);
             g_object_unref(manager);

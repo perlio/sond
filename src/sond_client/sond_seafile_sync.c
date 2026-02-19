@@ -17,7 +17,9 @@
  */
 
 #include "sond_seafile_sync.h"
+
 #include "../sond_log_and_error.h"
+#include "../sond_file_helper.h"
 #include "sond_client.h"
 
 #include <gio/gio.h>
@@ -176,7 +178,7 @@ gboolean sond_seafile_sync_library(SondClient* client, const gchar *library_id,
     }
 
     //Verzeichnis erstellen falls nicht vorhanden
-    if (!g_file_test(local_path, G_FILE_TEST_EXISTS)) {
+    if (!sond_exists(local_path)) {
         if (g_mkdir_with_parents(local_path, 0755) != 0) {
             g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                        "Konnte lokales Verzeichnis nicht erstellen: %s", local_path);

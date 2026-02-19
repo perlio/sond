@@ -34,6 +34,14 @@
 gboolean sond_mkdir(const gchar *path, GError **error);
 
 /**
+ * Prüft ob Datei/Verzeichnis existiert (Windows: mit Long-Path-Support)
+ *
+ * @param path UTF-8-kodierter Pfad
+ * @return TRUE wenn existiert, FALSE sonst
+ */
+gboolean sond_exists(const gchar *path);
+
+/**
  * Erstellt Verzeichnisse rekursiv (Windows: mit Long-Path-Support)
  *
  * @param path UTF-8-kodierter Pfad
@@ -59,6 +67,15 @@ gboolean sond_remove(const gchar *path, GError **error);
  * @return TRUE bei Erfolg, FALSE bei Fehler
  */
 gboolean sond_rmdir(const gchar *path, GError **error);
+
+/**
+ * Löscht ein Verzeichnis rekursiv mit allen Inhalten (Windows: mit Long-Path-Support)
+ *
+ * @param path UTF-8-kodierter Pfad
+ * @param error Optionaler GError für Fehlermeldungen
+ * @return TRUE bei Erfolg, FALSE bei Fehler
+ */
+gboolean sond_rmdir_r(const gchar *path, GError **error);
 
 /**
  * Öffnet eine Datei (Windows: mit Long-Path-Support)
@@ -91,14 +108,6 @@ gint sond_stat(const gchar *path, GStatBuf *buf, GError **error);
 gboolean sond_rename(const gchar *oldpath, const gchar *newpath, GError **error);
 
 /**
- * Prüft ob Datei/Verzeichnis existiert (Windows: mit Long-Path-Support)
- *
- * @param path UTF-8-kodierter Pfad
- * @return TRUE wenn existiert, FALSE sonst
- */
-gboolean sond_exists(const gchar *path);
-
-/**
  * Kopiert eine Datei (Windows: mit Long-Path-Support)
  *
  * @param source UTF-8-kodierter Quellpfad
@@ -108,6 +117,17 @@ gboolean sond_exists(const gchar *path);
  * @return TRUE bei Erfolg, FALSE bei Fehler
  */
 gboolean sond_copy(const gchar *source, const gchar *dest, gboolean overwrite, GError **error);
+
+/**
+ * Kopiert ein Verzeichnis rekursiv mit allen Inhalten (Windows: mit Long-Path-Support)
+ *
+ * @param source UTF-8-kodierter Quellpfad
+ * @param dest UTF-8-kodierter Zielpfad
+ * @param overwrite TRUE um existierende Dateien zu überschreiben, FALSE sonst
+ * @param error Optionaler GError für Fehlermeldungen
+ * @return TRUE bei Erfolg, FALSE bei Fehler
+ */
+gboolean sond_copy_r(const gchar *source, const gchar *dest, gboolean overwrite, GError **error);
 
 /**
  * Öffnet File-Handle für MuPDF etc. (Windows: mit Long-Path-Support)

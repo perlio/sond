@@ -32,6 +32,7 @@
 #include "../../sond_treeview.h"
 #include "../../sond_treeviewfm.h"
 #include "../../sond_log_and_error.h"
+#include "../../sond_file_helper.h"
 
 #include "../zond_pdf_document.h"
 
@@ -316,8 +317,8 @@ static gint clean_pdf(fz_context *ctx, SondFilePartPDF* sfp_pdf, GError **error)
 	gint rc = 0;
 	gint *pages = NULL;
 	gint count = 0;
-	gint ret = 0;
 	gchar* path_tmp = NULL;
+	GError* error_rem = NULL;
 
 	//prüfen, ob in Viewer geöffnet
 	if (zond_pdf_document_is_open(sfp_pdf)) {
@@ -354,14 +355,15 @@ static gint clean_pdf(fz_context *ctx, SondFilePartPDF* sfp_pdf, GError **error)
 	fz_always(ctx)
 		g_free(pages);
 	fz_catch(ctx) {
-		gint ret = 0;
 
 		pdf_drop_document(ctx, doc);
 		g_object_unref(sfp_pdf);
-		ret = g_remove(path_tmp);
-		if (ret)
-			LOG_WARN("%s\nArbeitskopie '%s' konnte nicht gelöscht werden\n"
-					"%s", __func__, path_tmp, strerror(errno));
+		if (!sond_remove(path_tmp, &error_rem)) {
+			LOG_WARN("Arbeitskopie '%s' konnte nicht gelöscht werden: %s",
+					path_tmp, error_rem->message);
+			g_error_free(error_rem);
+		}
+
 		if (error)
 			*error = g_error_new(g_quark_from_static_string("sond"), 0, "%s\npdf_rearrange_pages\n%s",
 					__func__, fz_caught_message(ctx));
@@ -373,10 +375,11 @@ static gint clean_pdf(fz_context *ctx, SondFilePartPDF* sfp_pdf, GError **error)
 
 	rc = sond_file_part_pdf_save_and_close(ctx, doc, sfp_pdf, error);
 	g_object_unref(sfp_pdf);
-	ret = g_remove(path_tmp);
-	if (ret)
-		LOG_WARN("%s\nArbeitskopie '%s' konnte nicht gelöscht werden\n"
-				"%s", __func__, path_tmp, strerror(errno));
+	if (!sond_remove(path_tmp, &error_rem)) {
+		LOG_WARN("Arbeitskopie '%s' konnte nicht gelöscht werden: %s",
+				path_tmp, error_rem->message);
+		g_free(error_rem);
+	}
 	g_free(path_tmp);
 	if (rc)
 		ERROR_Z

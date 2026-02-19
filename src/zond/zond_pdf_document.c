@@ -25,6 +25,7 @@
 #include "../sond_fileparts.h"
 #include "../sond_log_and_error.h"
 #include "../sond_pdf_helper.h"
+#include "../sond_file_helper.h"
 
 #include "99conv/general.h"
 
@@ -124,12 +125,13 @@ static void zond_pdf_document_finalize(GObject *self) {
 		pdf_drop_document(priv->ctx, priv->doc);
 
 		if (!priv->read_only) {
-			gint ret = 0;
+			GError* error_rem = NULL;
 
-			ret = g_remove(path);
-			if (ret)
-				LOG_WARN("%s\nArbeitskopie %s konnte nicht gelöscht werden\n%s",
-						__func__, path, strerror(errno));
+			if (!sond_remove(path, &error_rem)) {
+				LOG_WARN("Arbeitskopie %s konnte nicht gelöscht werden: %s",
+						path, error_rem->message);
+				g_error_free(error_rem);
+			}
 		}
 
 		g_free(path);
@@ -591,12 +593,13 @@ zond_pdf_document_open(SondFilePartPDF* sfp_pdf, gint von, gint bis,
 	fz_try(priv->ctx)
 		priv->doc = pdf_open_document(priv->ctx, filename);
 	fz_catch(priv->ctx) {
-		gint rc = 0;
+		GError* error_rem = NULL;
 
-		rc = g_remove(filename);
-		if (rc)
-			LOG_WARN("%s\nDatei '%s' konnte nicht gelöscht werden:\n%s",
-					__func__, filename, strerror(errno));
+		if (!sond_remove(filename, &error_rem)) {
+			LOG_WARN("Datei '%s' konnte nicht gelöscht werden: %s",
+					filename, error_rem->message);
+			g_error_free(error_rem);
+		}
 		g_free(filename);
 		g_object_unref(zond_pdf_document);
 

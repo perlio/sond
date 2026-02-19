@@ -21,6 +21,7 @@
 #include <glib/gstdio.h>
 
 #include "../../sond_log_and_error.h"
+#include "../../sond_file_helper.h"
 #include "../../sond_fileparts.h"
 #include "../../sond_treeviewfm.h"
 #include "../../misc.h"
@@ -351,6 +352,7 @@ gboolean project_timeout_autosave(gpointer data) {
  */
 gint project_close(Projekt *zond, gchar **errmsg) {
 	gboolean ret = FALSE;
+	GError* error = NULL;
 
 	if (!zond->dbase_zond)
 		return 0;
@@ -412,10 +414,12 @@ gint project_close(Projekt *zond, gchar **errmsg) {
 	}
 
 	// Remove temporary database
-	gint res = g_remove(working_copy);
-	if (res == -1)
+	if (!sond_remove(working_copy, &error)) {
 		display_message(zond->app_window, "Fehler beim Löschen der "
-				"temporären Datenbank:\n", strerror(errno), NULL);
+				"temporären Datenbank: ", error->message, NULL);
+		g_error_free(error);
+	}
+
 	g_free(working_copy);
 
 	// Clear window title

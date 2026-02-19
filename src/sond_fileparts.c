@@ -37,6 +37,7 @@
 #include "sond_log_and_error.h"
 #include "sond_pdf_helper.h"
 #include "sond_gmessage_helper.h"
+#include "sond_file_helper.h"
 
 //Grundlegendes Object, welches file_parts beschreibt
 /*
@@ -842,14 +843,14 @@ gint sond_file_part_open(SondFilePart* sfp, gboolean open_with,
 		rc = open_path(path, open_with, error);
 		if (rc) {
 			if (sond_file_part_get_parent(sfp)) { //tmp-Datei wurde erzeugt
-				gint rc = 0;
+				GError* error_rem = NULL;
 
-				rc = g_remove(path);
-				if (rc)
+				if (!sond_remove(path, &error_rem)) {
 					LOG_WARN("Datei '%s' konnte nicht gelöscht werden:\n%s",
-							path, strerror(errno));
+							path, error_rem->message);
+					g_error_free(error_rem);
+				}
 			}
-
 			ERROR_Z
 		}
 	}
@@ -880,14 +881,10 @@ gint sond_file_part_delete(SondFilePart* sfp, GError** error) {
 
 		path = g_strconcat(SOND_FILE_PART_CLASS(g_type_class_peek(SOND_TYPE_FILE_PART))->path_root,
 				"/", sfp_priv->path, NULL);
-		rc = g_remove(path);
+		rc = sond_remove(path, error);
 		g_free(path);
-		if (rc) {
-			if (error) *error = g_error_new(g_quark_from_static_string("stdlib"),
-					errno, "%s\n%s", __func__, strerror(errno));
-
-			return -1;
-		}
+		if (rc)
+			ERROR_Z
 	}
 	else {
 		gint rc = 0;
@@ -1013,11 +1010,8 @@ gint sond_file_part_rename(SondFilePart* sfp, gchar const* path_new, GError** er
 
 	sfp_priv = sond_file_part_get_instance_private(sfp);
 
-	if (!sfp_priv->parent) {//sfp ist im fs gespeichert
-		rc = g_rename(sfp_priv->path, path_new);
-		if (rc && error) *error = g_error_new(g_quark_from_static_string("stdlib"), errno,
-				"g_rename\n%s", strerror(errno)); //error vorbereiten
-	}
+	if (!sfp_priv->parent) //sfp ist im fs gespeichert
+		rc = sond_rename(sfp_priv->path, path_new, error);
 	else if (SOND_IS_FILE_PART_PDF(sfp_priv->parent))
 		rc = sond_file_part_pdf_rename_embedded_file(SOND_FILE_PART_PDF(sfp_priv->parent),
 				sfp_priv->path, path_new, error);
@@ -1076,7 +1070,7 @@ static gint sond_file_part_insert(SondFilePart* sfp, fz_context* ctx,
 
 		//fz_save_buffer löscht klaglos ein etwaig bestehendes file gleichen Namens
 		//Daher ein Test:
-		if (g_file_test(path, G_FILE_TEST_EXISTS)) {
+		if (sond_exists(path)) {
 			if (error) *error = g_error_new(SOND_ERROR, SOND_ERROR_EXISTS,
 					"%s\nDatei existiert", __func__);
 

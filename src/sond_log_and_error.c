@@ -17,6 +17,7 @@
  */
 
 #include "sond_log_and_error.h"
+
 #include <string.h>
 #include <sys/stat.h>
 #include <glib/gstdio.h>
@@ -29,6 +30,8 @@
 #else
 #include <unistd.h>
 #endif
+
+#include "sond_file_helper.h"
 
 // ============================================================================
 // Globale Variablen
@@ -85,13 +88,26 @@ static void rotate_log_if_needed(const gchar *log_path)
         if (st.st_size > 10 * 1024 * 1024) {
             gchar *old_path = g_strdup_printf("%s.1", log_path);
             gchar *older_path = g_strdup_printf("%s.2", log_path);
+            GError* error = NULL;
 
             // .2 löschen falls vorhanden
-            g_remove(older_path);
+            if (!sond_remove(older_path, &error)) {
+            	LOG_WARN("Alte Logdatei konnte nicht gelöscht werden: %s",
+            			error->message);
+            	g_clear_error(&error);
+            }
             // .1 → .2
-            g_rename(old_path, older_path);
+            if (!sond_rename(old_path, older_path, &error)) {
+            	LOG_WARN("Logdatei konnte nicht umbenannt werden: %s",
+            			error->message);
+            	g_clear_error(&error);
+            }
             // current → .1
-            g_rename(log_path, old_path);
+            if (!sond_rename(log_path, old_path, &error)) {
+            	LOG_WARN("Aktuelle Logdatei konnte nicht umbenannt werden: %s",
+            			error->message);
+            	g_error_free(error);
+            }
 
             g_free(old_path);
             g_free(older_path);

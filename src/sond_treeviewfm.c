@@ -1389,95 +1389,6 @@ static void sond_treeviewfm_punkt_einfuegen_activate(GtkMenuItem *item,
 	return;
 }
 
-/* Rekursiv Inhalte eines Verzeichnisses kopieren */
-static gboolean
-copy_directory_contents(GFile *src, GFile *dst, GError **error)
-{
-    GError *tmp_err = NULL;
-    GFileEnumerator *enumerator =
-        g_file_enumerate_children(src,
-                                  G_FILE_ATTRIBUTE_STANDARD_NAME ","
-                                  G_FILE_ATTRIBUTE_STANDARD_TYPE,
-                                  G_FILE_QUERY_INFO_NONE,
-                                  NULL, &tmp_err);
-    if (!enumerator) {
-        g_propagate_error(error, tmp_err);
-        return FALSE;
-    }
-
-    GFileInfo *info;
-    while ((info = g_file_enumerator_next_file(enumerator, NULL, &tmp_err)) != NULL) {
-        const char *child_name = g_file_info_get_name(info);
-        GFileType ftype = g_file_info_get_file_type(info);
-
-        GFile *child_src = g_file_get_child(src, child_name);
-        GFile *child_dst = g_file_get_child(dst, child_name);
-
-        gboolean ok = FALSE;
-        if (ftype == G_FILE_TYPE_DIRECTORY) {
-            if (!g_file_make_directory(child_dst, NULL, &tmp_err)) {
-                g_propagate_error(error, tmp_err);
-                g_object_unref(child_src);
-                g_object_unref(child_dst);
-                g_object_unref(info);
-                g_object_unref(enumerator);
-                return FALSE;
-            }
-            ok = copy_directory_contents(child_src, child_dst, &tmp_err);
-        } else if (ftype == G_FILE_TYPE_REGULAR) {
-            ok = g_file_copy(child_src, child_dst,
-                             G_FILE_COPY_NONE,
-                             NULL, NULL, NULL, &tmp_err);
-        }
-
-        g_object_unref(child_src);
-        g_object_unref(child_dst);
-        g_object_unref(info);
-
-        if (!ok) {
-            g_object_unref(enumerator);
-            g_propagate_error(error, tmp_err);
-            return FALSE;
-        }
-    }
-
-    g_object_unref(enumerator);
-    if (tmp_err) {
-        g_propagate_error(error, tmp_err);
-        return FALSE;
-    }
-
-    return TRUE;
-}
-
-/* Race-sicher Dateien oder Verzeichnisse kopieren, nur Top-Level prüft Suffix */
-static gint copy_path(const gchar *src_path,
-                        const gchar *dest_dir,
-					   GError     **error)
-{
-	g_autoptr(GFile) src = g_file_new_for_path(src_path);
-	g_autoptr(GFile) dst = g_file_new_for_path(dest_dir);
-
-	// Nur Top-Level prüft Suffix
-	if (!g_file_make_directory(dst, NULL, error)) {
-		if (g_error_matches(*error, G_IO_ERROR, G_IO_ERROR_EXISTS)) {
-			g_clear_error(error);
-			*error = g_error_new(SOND_ERROR, SOND_ERROR_EXISTS,
-					"%s\nZielverzeichnis existiert bereits", __func__);
-
-			return -1;
-		}
-	}
-
-	//jetzt rekursiv kopieren
-	if (!copy_directory_contents(src, dst, error)) {
-		g_file_delete(dst, NULL, NULL);
-		ERROR_Z;
-	}
-
-	return 0;
-}
-
 static gint copy_dir_across_sfps(SondTVFMItem* stvfm_item,
 		SondTVFMItem* stvfm_item_parent, gchar const* base,
 		GError** error) {
@@ -1551,7 +1462,7 @@ static gint copy_stvfm_item(SondTVFMItem* stvfm_item,
 							base_real, NULL);
 			g_free(base_real);
 
-			rc = copy_path(stvfm_item_priv->path_or_section, path_dst, error);
+			rc = sond_copy_r(stvfm_item_priv->path_or_section, path_dst, FALSE, error);
 			g_free(path_dst);
 		}
 		else { //kopieren Verzeichnis zwischen zwei sfp-Welten
@@ -1716,14 +1627,10 @@ static gint delete_item(SondTVFMItem* stvfm_item, GError** error) {
 
 			path = g_strconcat(stvfm_priv->root, "/", stvfm_item_priv->path_or_section, NULL);
 
-			rc = rm_r(path);
+			rc = sond_rmdir_r(path, error);
 			g_free(path);
-			if (rc) {
-				if (error) *error = g_error_new(g_quark_from_static_string("stdlib"),
-						errno, "%s\n%s", __func__, strerror(errno));
-
-				return -1;
-			}
+			if (rc)
+				ERROR_Z
 		}
 		else if (!stvfm_item_priv->path_or_section) { //sfp existiert - also root
 			gint rc = 0;
@@ -1917,13 +1824,13 @@ static gint process_stvfm_item_move_or_copy(SondTVFMItem* stvfm_item,
 					s_paste_sel->index_to, error);
 
 		if (rc == -1) {
-			if (g_error_matches(*error, SOND_ERROR, SOND_ERROR_EXISTS)) {
+			if (g_error_matches(*error, G_IO_ERROR, G_IO_ERROR_EXISTS)) {
 				g_clear_error(error);
 				i++;
 
 				continue;  // nächster Suffix versuchen
 			}
-			else if (g_error_matches(*error, SOND_ERROR, SOND_ERROR_BUSY)) {
+			else if (g_error_matches(*error, G_IO_ERROR, G_IO_ERROR_BUSY)) {
 				g_clear_error(error);
 
 				gint res = dialog_with_buttons(
@@ -1954,7 +1861,7 @@ static gint process_stvfm_item_move_or_copy(SondTVFMItem* stvfm_item,
 	} while (i < max_tries);
 
 	if (i == max_tries) {
-		g_set_error(error, SOND_ERROR, SOND_ERROR_EXISTS,
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_EXISTS,
 				"%s\nKein eindeutiger Zielname nach %u Versuchen", __func__, max_tries);
 
 		return -1;
