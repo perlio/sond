@@ -227,7 +227,7 @@ gint zond_dbase_create_db_maj_1(sqlite3 *db, GError **error) {
 					"FOREIGN KEY (parent_ID) REFERENCES knoten (ID) "
 					"ON DELETE CASCADE ON UPDATE CASCADE, "
 					"FOREIGN KEY (older_sibling_ID) REFERENCES knoten (ID) "
-					"ON DELETE CASCADE ON UPDATE CASCADE, "
+					"ON DELETE RESTRICT ON UPDATE CASCADE, "
 					"FOREIGN KEY (link) REFERENCES knoten (ID) "
 					"ON DELETE CASCADE ON UPDATE CASCADE "
 					") STRICT; "

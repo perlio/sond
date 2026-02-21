@@ -166,4 +166,14 @@ const gchar* sond_dir_read_name(SondDir *dir);
  */
 void sond_dir_close(SondDir *dir);
 
+/**
+ * Öffnet eine Datei/Verzeichnis mit der Standard-Anwendung des Systems
+ *
+ * @param path UTF-8-kodierter Pfad
+ * @param open_with TRUE für "Öffnen mit"-Dialog, FALSE für direkt öffnen
+ * @param error Optionaler GError für Fehlermeldungen
+ * @return TRUE bei Erfolg, FALSE bei Fehler
+ */
+gboolean sond_open(const gchar *path, gboolean open_with, GError **error);
+
 #endif /* SRC_SOND_FILE_HELPER_H_ */

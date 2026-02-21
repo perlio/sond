@@ -19,10 +19,12 @@
 #include "sond_pdf_helper.h"
 #include "sond_misc.h"
 #include "sond_log_and_error.h"
+#include "sond_file_helper.h"
 
 #include <mupdf/fitz.h>
 #include <mupdf/pdf.h>
 #include <glib.h>
+#include <gio/gio.h>
 
 typedef struct {
 	pdf_processor super;
@@ -1030,3 +1032,28 @@ pdf_annot* pdf_annot_lookup_index(fz_context* ctx, pdf_page* pdf_page, gint inde
 	return pdf_annot;
 }
 
+fz_stream*
+pdf_open_file(fz_context *ctx, const gchar *filename, GError **error)
+{
+    FILE *file = NULL;
+    fz_stream *stream = NULL;
+
+    /* Öffne Datei mit Long-Path-Support */
+    file = sond_fopen(filename, "rb", error);
+    if (!file)
+        return NULL;
+
+    fz_try(ctx) {
+        /* Erstelle fz_stream aus FILE* */
+        stream = fz_open_file_ptr_no_close(ctx, file);
+    }
+    fz_catch(ctx) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "MuPDF Fehler: %s", fz_caught_message(ctx));
+        fclose(file);
+        return NULL;
+    }
+
+    /* WICHTIG: file muss später manuell geschlossen werden! */
+    return stream;
+}

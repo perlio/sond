@@ -982,6 +982,7 @@ static gint zond_treeview_anbinden_rekursiv(ZondTreeview *ztv,
 		GtkTreeIter iter_new = { 0 };
 		gint rc = 0;
 		gint anchor_id_dir = 0;
+		gint anchor_id_child = 0;
 		gboolean child_anchor = TRUE;
 
 		//icon_name ermitteln
@@ -1057,20 +1058,23 @@ static gint zond_treeview_anbinden_rekursiv(ZondTreeview *ztv,
 			return 0;
 		}
 
+		anchor_id_child = anchor_id_dir;
 		for (guint i = 0; i < arr_children->len; i++) {
 			SondTVFMItem* stvfm_item_child = NULL;
 
 			stvfm_item_child = g_ptr_array_index(arr_children, i);
-			new_node_id = zond_treeview_anbinden_rekursiv(ztv, &iter_new, anchor_id_dir,
+			new_node_id = zond_treeview_anbinden_rekursiv(ztv, &iter_new, anchor_id_child,
 					child_anchor, stvfm_item_child, info_window, zaehler, dir_inserted);
 			if (new_node_id == -1) //abgebrochen
 				break;
 
 			if (new_node_id > 0) {
 				child_anchor = FALSE;
-				anchor_id_dir = new_node_id;
+				anchor_id_child = new_node_id;
 			}
 		}
+
+		new_node_id = anchor_id_child;
 
 		g_ptr_array_unref(arr_children);
 	}

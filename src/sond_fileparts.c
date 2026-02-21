@@ -681,6 +681,41 @@ static fz_buffer* sond_file_part_get_buffer(SondFilePart* sfp,
 	return buf;
 }
 
+static gboolean
+save_buffer_longpath(fz_context *ctx, fz_buffer *buf, const gchar *filename, GError **error)
+{
+    fz_output *out = NULL;
+    FILE *file = NULL;
+
+    /* Öffne Datei mit Long-Path-Support */
+    file = sond_fopen(filename, "wb", error);
+    if (!file)
+        return FALSE;
+
+    fz_try(ctx) {
+        /* Erstelle fz_output aus FILE* */
+        out = fz_new_output_with_file_ptr(ctx, file);  /* 0 = schließe FILE* nicht */
+
+        /* Schreibe Buffer */
+        fz_write_buffer(ctx, out, buf);
+
+        /* Schließe Output (flushed Daten) */
+        fz_close_output(ctx, out);
+    }
+    fz_catch(ctx) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "MuPDF Fehler: %s", fz_caught_message(ctx));
+        if (out) fz_drop_output(ctx, out);
+        fclose(file);
+        return FALSE;
+    }
+
+    fz_drop_output(ctx, out);
+    fclose(file);
+
+    return TRUE;
+}
+
 gchar* sond_file_part_write_to_tmp_file(fz_context* ctx,
 		SondFilePart* sfp, GError **error) {
 	gchar *filename = NULL;
@@ -716,69 +751,12 @@ gchar* sond_file_part_write_to_tmp_file(fz_context* ctx,
 	filename = add_string(filename, g_strdup(ext));
 #endif
 
-	fz_try(ctx)
-		fz_save_buffer(ctx, buf, filename);
-	fz_always(ctx)
-		fz_drop_buffer(ctx, buf);
-	fz_catch(ctx) {
-		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
-					fz_caught(ctx), "%s\n%s", __func__,
-					fz_caught_message(ctx));
+	if (!save_buffer_longpath(ctx, buf, filename, error)) {
 		g_free(filename);
-
-		return NULL;
+		ERROR_Z_VAL(NULL)
 	}
 
 	return filename;
-}
-
-static gint open_path(const gchar *path, gboolean open_with, GError **error) {
-#ifdef _WIN32
-    // Pfad von UTF-8 → UTF-16
-    wchar_t *local_filename = g_utf8_to_utf16(path, -1, NULL, NULL, error);
-    if (!local_filename)
-    	ERROR_Z
-
-    SHELLEXECUTEINFOW sei = { sizeof(sei) };
-    sei.nShow = SW_SHOWNORMAL;
-    sei.lpVerb = open_with ? L"openas" : L"open";
-    sei.lpFile = local_filename;
-    sei.fMask = SEE_MASK_INVOKEIDLIST;
-
-    BOOL ret = ShellExecuteExW(&sei);
-    g_free(local_filename);
-
-    if (!ret) {
-        if (error) {
-            DWORD dw = GetLastError();
-            LPWSTR lpMsgBuf = NULL;
-            FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
-            		FORMAT_MESSAGE_IGNORE_INSERTS, NULL, dw, MAKELANGID(LANG_NEUTRAL,
-            				SUBLANG_DEFAULT), (LPWSTR)&lpMsgBuf, 0, NULL);
-            gchar *msg_utf8 = g_utf16_to_utf8(lpMsgBuf, -1, NULL, NULL, NULL);
-            *error = g_error_new(g_quark_from_static_string("WinApi"), dw,
-                                 "ShellExecuteExW failed: %s", msg_utf8);
-            g_free(msg_utf8);
-            LocalFree(lpMsgBuf);
-        }
-        return -1;
-    }
-    return 0;
-
-#elif defined(__APPLE__)
-    // macOS: "open" benutzen
-    gchar *cmdline = g_strdup_printf("open \"%s\"", path);
-    gboolean ret = g_spawn_command_line_async(cmdline, error);
-    g_free(cmdline);
-    return (ret) ? 0 : -1;
-
-#else
-    // Linux / Unix: "xdg-open" oder "gio open"
-    gchar *cmdline = g_strdup_printf("xdg-open \"%s\"", path);
-    gboolean ret = g_spawn_command_line_async(cmdline, error);
-    g_free(cmdline);
-    return (ret) ? 0 : -1;
-#endif
 }
 
 gint sond_file_part_open(SondFilePart* sfp, gboolean open_with,
@@ -826,7 +804,6 @@ gint sond_file_part_open(SondFilePart* sfp, gboolean open_with,
 
 	}*/
 	else {
-		gint rc = 0;
 		g_autofree gchar* path = NULL;
 
 		if (!sond_file_part_get_parent(sfp)) //Datei im Filesystem
@@ -840,8 +817,7 @@ gint sond_file_part_open(SondFilePart* sfp, gboolean open_with,
 				ERROR_Z
 		}
 
-		rc = open_path(path, open_with, error);
-		if (rc) {
+		if (!sond_open(path, open_with, error)) {
 			if (sond_file_part_get_parent(sfp)) { //tmp-Datei wurde erzeugt
 				GError* error_rem = NULL;
 
@@ -875,15 +851,15 @@ gint sond_file_part_delete(SondFilePart* sfp, GError** error) {
 	sfp_parent = sond_file_part_get_parent(sfp);
 
 	if (!sfp_parent) { //Datei im Filesystem
-		gint rc = 0;
+		gboolean res = FALSE;
 		gchar* path = NULL;
 		SondFilePartPrivate* sfp_priv = sond_file_part_get_instance_private(sfp);
 
 		path = g_strconcat(SOND_FILE_PART_CLASS(g_type_class_peek(SOND_TYPE_FILE_PART))->path_root,
 				"/", sfp_priv->path, NULL);
-		rc = sond_remove(path, error);
+		res = sond_remove(path, error);
 		g_free(path);
-		if (rc)
+		if (!res)
 			ERROR_Z
 	}
 	else {
@@ -955,17 +931,10 @@ static gint sond_file_part_replace(SondFilePart* sfp, fz_context* ctx,
 		filename = g_strconcat(SOND_FILE_PART_CLASS(g_type_class_peek(SOND_TYPE_FILE_PART))->path_root,
 				"/", sond_file_part_get_path(sfp), NULL);
 
-		fz_try(ctx)
-			fz_save_buffer(ctx, buf, filename);
-		fz_always(ctx)
-			g_free(filename);
-		fz_catch(ctx) {
-			if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
-						fz_caught(ctx), "%s\n%s", __func__,
-						fz_caught_message(ctx));
-
-			return -1;
-		}
+		gboolean suc = save_buffer_longpath(ctx, buf, filename, error);
+		g_free(filename);
+		if (!suc)
+			ERROR_Z
 	}
 	else {
 		gint rc = 0;
@@ -1010,8 +979,10 @@ gint sond_file_part_rename(SondFilePart* sfp, gchar const* path_new, GError** er
 
 	sfp_priv = sond_file_part_get_instance_private(sfp);
 
-	if (!sfp_priv->parent) //sfp ist im fs gespeichert
-		rc = sond_rename(sfp_priv->path, path_new, error);
+	if (!sfp_priv->parent) {//sfp ist im fs gespeichert
+		if (!sond_rename(sfp_priv->path, path_new, error))
+			rc = -1;
+	}
 	else if (SOND_IS_FILE_PART_PDF(sfp_priv->parent))
 		rc = sond_file_part_pdf_rename_embedded_file(SOND_FILE_PART_PDF(sfp_priv->parent),
 				sfp_priv->path, path_new, error);
@@ -1077,12 +1048,10 @@ static gint sond_file_part_insert(SondFilePart* sfp, fz_context* ctx,
 			return -1;
 		}
 
-		fz_try(ctx)
-			fz_save_buffer(ctx, buf, path);
-		fz_always(ctx)
-			g_free(path);
-		fz_catch(ctx)
-			ERROR_PDF
+		gboolean suc = save_buffer_longpath(ctx, buf, path, error);
+		g_free(path);
+		if (!suc)
+			ERROR_Z
 	}
 	else {
 		gint rc = 0;

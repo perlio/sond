@@ -800,3 +800,48 @@ sond_dir_close(SondDir *dir)
 
     g_free(dir);
 }
+
+gboolean
+sond_open(const gchar *path, gboolean open_with, GError **error)
+{
+    g_return_val_if_fail(path != NULL, FALSE);
+
+#ifdef G_OS_WIN32
+    wchar_t *long_path;
+    SHELLEXECUTEINFOW sei = { 0 };
+    BOOL ret;
+
+    long_path = prepare_long_path(path, error);
+    if (!long_path)
+        return FALSE;
+
+    sei.cbSize = sizeof(sei);
+    sei.nShow = SW_SHOWNORMAL;
+    sei.lpVerb = open_with ? L"openas" : L"open";
+    sei.lpFile = long_path;
+    sei.fMask = SEE_MASK_INVOKEIDLIST;
+
+    ret = ShellExecuteExW(&sei);
+    g_free(long_path);
+
+    if (!ret) {
+        set_error_from_win32(error, GetLastError());
+        return FALSE;
+    }
+
+    return TRUE;
+#else
+    gchar *argv[3];
+    gboolean ret;
+
+    argv[0] = "xdg-open";
+    argv[1] = (gchar *)path;
+    argv[2] = NULL;
+
+    ret = g_spawn_async(NULL, argv, NULL,
+                        G_SPAWN_SEARCH_PATH,
+                        NULL, NULL, NULL, error);
+
+    return ret;
+#endif
+}
