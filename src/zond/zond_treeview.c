@@ -1058,7 +1058,7 @@ static gint zond_treeview_anbinden_rekursiv(ZondTreeview *ztv,
 			return 0;
 		}
 
-		anchor_id_child = anchor_id_dir;
+		anchor_id_child = anchor_id_dir; //wird in Schleife für Kinder verwendet
 		for (guint i = 0; i < arr_children->len; i++) {
 			SondTVFMItem* stvfm_item_child = NULL;
 
@@ -1074,7 +1074,7 @@ static gint zond_treeview_anbinden_rekursiv(ZondTreeview *ztv,
 			}
 		}
 
-		new_node_id = anchor_id_child;
+		new_node_id = anchor_id_dir; //wird zurückgegeben
 
 		g_ptr_array_unref(arr_children);
 	}
@@ -1112,6 +1112,7 @@ static gint zond_treeview_clipboard_anbinden_foreach(SondTreeview *stv,
 		return 1; //sond_treeview_..._foreach bricht dann ab
 
 	s_selection->child = FALSE;
+	s_selection->anchor_id = rc;
 
 	return 0;
 }
