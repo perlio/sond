@@ -21,6 +21,7 @@
 
 #include <glib-object.h>
 #include <gtk/gtk.h>
+#include <mupdf/fitz.h>
 #include <mupdf/pdf.h>
 #include <gmime/gmime.h>
 
@@ -43,9 +44,6 @@ SondFilePart* sond_file_part_create_from_mime_type(gchar const* path,
 SondFilePart* sond_file_part_create_from_stream(fz_context*,
 		fz_stream*, gchar const*, SondFilePart*, GError**);
 
-SondFilePart* sond_file_part_create_from_memory(guchar* data, gsize size,
-		gchar const* path, SondFilePart* sfp_parent, GError** error);
-
 SondFilePart* sond_file_part_get_parent(SondFilePart *);
 
 void sond_file_part_set_parent(SondFilePart*, SondFilePart*);
@@ -60,7 +58,7 @@ void sond_file_part_set_has_children(SondFilePart*, gboolean);
 
 GPtrArray* sond_file_part_get_arr_opened_files(SondFilePart*);
 
-gchar* sond_file_part_write_to_tmp_file(fz_context*, SondFilePart*, GError**);
+gchar* sond_file_part_write_to_tmp_file(SondFilePart*, GError**);
 
 gint sond_file_part_open(SondFilePart*, gboolean, GError**);
 

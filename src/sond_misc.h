@@ -32,6 +32,6 @@ const gchar* mime_to_extension_ci(const gchar*);
 
 const gchar* mime_to_extension_with_params(const gchar*);
 
-gchar* mime_guess_content_type(guchar* buffer, gsize size, GError** error);
+gchar* mime_guess_content_type(const guchar* buffer, gsize size, GError** error);
 
 #endif /* SRC_SOND_MISC_H_ */
