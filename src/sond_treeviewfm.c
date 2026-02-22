@@ -744,44 +744,6 @@ static void sond_treeviewfm_render_text_cell(GtkTreeViewColumn *column,
 	return;
 }
 
-static gint sond_treeviewfm_expand_dummy(SondTreeviewFM *stvfm, GtkTreeIter *iter,
-		SondTVFMItem *stvfm_item, GError **error) {
-	GPtrArray *arr_children = NULL;
-	gint rc = 0;
-
-	rc = sond_tvfm_item_load_children(stvfm_item, &arr_children, error);
-	if (rc)
-		ERROR_Z
-
-	for (gint i = 0; i < arr_children->len; i++) {
-		GtkTreeIter iter_new = { 0 };
-		SondTVFMItem* child_item = NULL;
-		SondTVFMItemPrivate* child_item_priv = NULL;
-
-		child_item = g_ptr_array_index(arr_children, i);
-		child_item_priv = sond_tvfm_item_get_instance_private(child_item);
-
-		gtk_tree_store_insert(GTK_TREE_STORE(
-				gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm) )),
-				&iter_new, iter, -1);
-		gtk_tree_store_set(GTK_TREE_STORE(
-				gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm) )),
-				&iter_new, 0, G_OBJECT(child_item), -1);
-
-		if (child_item_priv->has_children) { //Dummy einfügen
-			GtkTreeIter newest_iter = { 0 };
-
-			gtk_tree_store_insert(GTK_TREE_STORE(
-					gtk_tree_view_get_model( GTK_TREE_VIEW(stvfm) )),
-					&newest_iter, &iter_new, -1);
-		}
-	}
-
-	g_ptr_array_unref(arr_children);
-
-	return 0;
-}
-
 gint sond_treeviewfm_file_part_visible(SondTreeviewFM *stvfm, GtkTreeIter *iter_parent,
 		gchar const* filepart, gboolean open,
 		GtkTreeIter *iter_res, GError **error) {
@@ -1513,8 +1475,7 @@ static gint copy_stvfm_item(SondTVFMItem* stvfm_item,
 	else { //dir soll kopiert werden
 		//innerhalt Dateisystem - geht schon
 		if (!stvfm_item_parent_priv->sond_file_part &&
-			(!stvfm_item_priv->sond_file_part ||
-					!sond_file_part_get_parent(stvfm_item_priv->sond_file_part))) {
+				!stvfm_item_priv->sond_file_part) {
 			gchar* path_dst = NULL;
 
 			path_dst = g_strconcat((stvfm_item_parent_priv->path_or_section) ?
@@ -2762,6 +2723,44 @@ static void sond_treeviewfm_row_collapsed(GtkTreeView *tree_view,
 	gtk_tree_view_columns_autosize(tree_view);
 
 	return;
+}
+
+static gint sond_treeviewfm_expand_dummy(SondTreeviewFM *stvfm, GtkTreeIter *iter,
+		SondTVFMItem *stvfm_item, GError **error) {
+	GPtrArray *arr_children = NULL;
+	gint rc = 0;
+
+	rc = sond_tvfm_item_load_children(stvfm_item, &arr_children, error);
+	if (rc)
+		ERROR_Z
+
+	for (gint i = 0; i < arr_children->len; i++) {
+		GtkTreeIter iter_new = { 0 };
+		SondTVFMItem* child_item = NULL;
+		SondTVFMItemPrivate* child_item_priv = NULL;
+
+		child_item = g_ptr_array_index(arr_children, i);
+		child_item_priv = sond_tvfm_item_get_instance_private(child_item);
+
+		gtk_tree_store_insert(GTK_TREE_STORE(
+				gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm) )),
+				&iter_new, iter, -1);
+		gtk_tree_store_set(GTK_TREE_STORE(
+				gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm) )),
+				&iter_new, 0, G_OBJECT(child_item), -1);
+
+		if (child_item_priv->has_children) { //Dummy einfügen
+			GtkTreeIter newest_iter = { 0 };
+
+			gtk_tree_store_insert(GTK_TREE_STORE(
+					gtk_tree_view_get_model( GTK_TREE_VIEW(stvfm) )),
+					&newest_iter, &iter_new, -1);
+		}
+	}
+
+	g_ptr_array_unref(arr_children);
+
+	return 0;
 }
 
 static void sond_treeviewfm_row_expanded(GtkTreeView *tree_view,
