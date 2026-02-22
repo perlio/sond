@@ -41,9 +41,6 @@ struct _SondFilePartClass {
 SondFilePart* sond_file_part_create_from_mime_type(gchar const* path,
 		SondFilePart*, gchar const*);
 
-SondFilePart* sond_file_part_create_from_stream(fz_context*,
-		fz_stream*, gchar const*, SondFilePart*, GError**);
-
 SondFilePart* sond_file_part_get_parent(SondFilePart *);
 
 void sond_file_part_set_parent(SondFilePart*, SondFilePart*);
@@ -74,6 +71,8 @@ gint sond_file_part_rename(SondFilePart*, gchar const*, GError**);
 gint sond_file_part_copy(SondFilePart*, SondFilePart*, gchar const*, GError**);
 
 //SondFilePartZip definieren
+#include <zip.h>
+
 #define SOND_TYPE_FILE_PART_ZIP sond_file_part_zip_get_type( )
 G_DECLARE_DERIVABLE_TYPE(SondFilePartZip, sond_file_part_zip, SOND,
 		FILE_PART_ZIP, SondFilePart)
@@ -82,24 +81,8 @@ struct _SondFilePartZipClass {
 	SondFilePartClass parent_class;
 };
 
-/*
- * Listet Einträge im ZIP-Archiv auf einer Verzeichnisebene.
- *
- * prefix: Verzeichnispäfix ohne abschließenden Schrägstrich,
- *         oder NULL für die Wurzelebene.
- *
- * Rückgabe: GPtrArray* mit gchar*-Einträgen (volle relative Pfade),
- *           muss mit g_ptr_array_unref() freigegeben werden.
- *           Bei Fehler NULL.
- *
- * Verzeichnisse werden mit abschließendem '/' zurückgegeben,
- * Dateien ohne.
- */
-GPtrArray* sond_file_part_zip_list_dir(SondFilePartZip*, gchar const* prefix,
-		GError**);
-
-gchar* sond_file_part_zip_guess_mime(SondFilePartZip*, gchar const* path,
-		GError**);
+zip_t* sond_file_part_zip_open_archive(SondFilePartZip*, gboolean writeable,
+		zip_source_t**, GError**);
 
 //Sond_File_Part_PDF definieren
 #define SOND_TYPE_FILE_PART_PDF sond_file_part_pdf_get_type( )

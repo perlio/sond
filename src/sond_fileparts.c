@@ -212,22 +212,6 @@ static gchar* guess_content_type(fz_context* ctx, fz_stream* stream,
     return result;
 }
 
-SondFilePart* sond_file_part_create_from_stream(fz_context* ctx,
-		fz_stream* stream, gchar const* path, SondFilePart* sfp_parent,
-		GError** error) {
-	gchar* mime_type = NULL;
-	SondFilePart* sfp = NULL;
-
-	mime_type = guess_content_type(ctx, stream, path, error);
-	if (!mime_type)
-		ERROR_Z_VAL(NULL)
-
-	sfp = sond_file_part_create_from_mime_type(path, sfp_parent, mime_type);
-	g_free(mime_type);
-
-	return sfp;
-}
-
 SondFilePart* sond_file_part_get_parent(SondFilePart *sfp) {
 	SondFilePartPrivate *sfp_priv = NULL;
 
@@ -345,135 +329,10 @@ gchar* sond_file_part_get_filepart(SondFilePart* sfp) {
 	return filepart;
 }
 
-static fz_stream* open_file(fz_context* ctx, gchar const* path,
-		GError** error) {
-	fz_stream* stream = NULL;
-
-	fz_try(ctx)
-		stream = fz_open_file(ctx, path);
-	fz_catch(ctx) {
-		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
-				fz_caught(ctx), "%s\nfz_open_file: %s", __func__,
-				fz_caught_message(ctx));
-
-		return NULL; //Fehler beim Öffnen des Streams
-	}
-
-	return stream;
-}
-
-/**
- * Liest aus GMimeStream für fz_stream next() Callback
- */
-static int gmime_fz_stream_next(fz_context *ctx, fz_stream *stm, size_t max)
-{
-    GMimeStream *gmime_stream = (GMimeStream *)stm->state;
-    unsigned char *buf = stm->rp;
-    ssize_t n;
-
-    n = g_mime_stream_read(gmime_stream, (char *)buf, max);
-
-    if (n < 0)
-        fz_throw(ctx, FZ_ERROR_GENERIC, "GMime stream read error");
-
-    stm->rp = buf;
-    stm->wp = buf + n;
-    stm->pos += n;
-
-    return n > 0 ? *stm->rp++ : EOF;
-}
-
-/**
- * Seek-Callback für fz_stream
- */
-static void gmime_fz_stream_seek(fz_context *ctx, fz_stream *stm, int64_t offset, int whence)
-{
-    GMimeStream *gmime_stream = (GMimeStream *)stm->state;
-    GMimeSeekWhence gmime_whence;
-
-    switch (whence) {
-        case SEEK_SET: gmime_whence = GMIME_STREAM_SEEK_SET; break;
-        case SEEK_CUR: gmime_whence = GMIME_STREAM_SEEK_CUR; break;
-        case SEEK_END: gmime_whence = GMIME_STREAM_SEEK_END; break;
-        default: fz_throw(ctx, FZ_ERROR_GENERIC, "Invalid whence");
-    }
-
-    if (g_mime_stream_seek(gmime_stream, offset, gmime_whence) == -1)
-        fz_throw(ctx, FZ_ERROR_GENERIC, "GMime stream seek failed");
-
-    stm->pos = g_mime_stream_tell(gmime_stream);
-    stm->rp = stm->wp;
-}
-
-/**
- * Drop-Callback für fz_stream (cleanup)
- */
-static void gmime_fz_stream_drop(fz_context *ctx, void *state)
-{
-    GMimeStream *gmime_stream = (GMimeStream *)state;
-    if (gmime_stream)
-        g_object_unref(gmime_stream);
-}
-
-/**
- * Erstellt einen fz_stream aus einem GMimeStream
- *
- * @param ctx MuPDF-Kontext
- * @param gmime_stream GMimeStream (z.B. von g_mime_stream_mem_new())
- * @return fz_stream der von MuPDF verwendet werden kann
- *
- * WICHTIG: Der GMimeStream wird vom fz_stream verwaltet.
- *          Nach diesem Aufruf sollte der Caller seinen eigenen Ref mit
- *          g_object_unref() freigeben, wenn er den Stream nicht mehr benötigt.
- */
-fz_stream* fz_open_gmime_stream(fz_context *ctx, GMimeStream *gmime_stream)
-{
-    fz_stream *stm;
-
-    if (!gmime_stream)
-        return NULL;
-
-    // Ref count erhöhen, da fz_stream Ownership übernimmt
-    g_object_ref(gmime_stream);
-
-    // Stream an Anfang setzen
-    g_mime_stream_reset(gmime_stream);
-
-    // fz_stream erstellen
-    stm = fz_new_stream(ctx, gmime_stream, gmime_fz_stream_next, gmime_fz_stream_drop);
-    stm->seek = gmime_fz_stream_seek;
-
-    return stm;
-}
-
-// =============================================================================
-// VERWENDUNGSBEISPIEL
-// =============================================================================
-
-/*
-// Von GMimePart zu fz_stream:
-GMimePart *part = ...;
-GMimeDataWrapper *content = g_mime_part_get_content(part);
-GMimeStream *gmime_stream = g_mime_stream_mem_new();
-
-// Dekodiert in Memory-Stream schreiben
-g_mime_data_wrapper_write_to_stream(content, gmime_stream);
-g_mime_stream_reset(gmime_stream);
-
-// In fz_stream wrappen (seekable!)
-fz_stream *fz_stm = fz_open_gmime_stream(ctx, gmime_stream);
-g_object_unref(gmime_stream); // fz_stream hat jetzt die Kontrolle
-
-// Verwenden
-fz_archive *zip = fz_open_archive_with_stream(ctx, fz_stm);
-// ...
-fz_drop_stream(ctx, fz_stm);
-*/
-
 static fz_stream* sond_file_part_pdf_lookup_embedded_file(fz_context*,
 		SondFilePartPDF*, gchar const*, GError**);
 
-static zip_t* sond_file_part_zip_open_archive(SondFilePartZip*,
+zip_t* sond_file_part_zip_open_archive(SondFilePartZip*,
 		gboolean, zip_source_t**, GError**);
 
 static GMimeObject* sond_file_part_gmessage_lookup_part_by_path(SondFilePartGMessage*,
@@ -485,9 +344,16 @@ static fz_stream* get_istream(fz_context* ctx, SondFilePart* sfp_parent, gchar c
 
 	//Datei im Filesystem
 	if (!sfp_parent) {
-		stream = open_file(ctx, path, error);
-		if (!stream)
-			ERROR_Z_VAL(NULL)
+		//ToDo: longpath-Support!!!
+		fz_try(ctx)
+			stream = fz_open_file(ctx, path);
+		fz_catch(ctx) {
+			if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
+					fz_caught(ctx), "%s\nfz_open_file: %s", __func__,
+					fz_caught_message(ctx));
+
+			return NULL; //Fehler beim Öffnen des Streams
+		}
 	}
 	//Datei in PDF
 	else if (SOND_IS_FILE_PART_PDF(sfp_parent)) {
@@ -1198,7 +1064,7 @@ static void sond_file_part_zip_init(SondFilePartZip* self) {
  * die nach zip_close() die geänderten Daten hält (für sond_file_part_zip_archive_to_buf_with_src).
  * Rückgabe: zip_t* (muss mit zip_discard() oder zip_close() freigegeben werden)
  */
-static zip_t* sond_file_part_zip_open_archive(SondFilePartZip* sfp_zip,
+zip_t* sond_file_part_zip_open_archive(SondFilePartZip* sfp_zip,
 		gboolean writeable, zip_source_t** src_out, GError** error) {
 	GBytes* bytes = NULL;
 	zip_error_t zip_error = { 0 };
@@ -1327,107 +1193,6 @@ static gint sond_file_part_zip_test_for_files(SondFilePartZip* sfp_zip, GError**
 	sfp_priv->has_children = (num_entries > 0);
 
 	return 0;
-}
-
-/*
- * Listet eine Ebene des ZIP-Archivs.
- * prefix: Verzeichnispäfix ohne abschließenden '/', NULL = Wurzel.
- * Gibt GPtrArray* mit gchar* zurück; Verzeichnisse enden auf '/'.
- */
-GPtrArray* sond_file_part_zip_list_dir(SondFilePartZip* sfp_zip,
-		gchar const* prefix, GError** error) {
-	zip_t* archive = NULL;
-	zip_int64_t num_entries = 0;
-	GHashTable* seen_dirs = NULL;
-	GPtrArray* result = NULL;
-	gsize prefix_len = prefix ? strlen(prefix) + 1 : 0; /* +1 für '/' */
-
-	archive = sond_file_part_zip_open_archive(sfp_zip, FALSE, NULL, error);
-	if (!archive)
-		return NULL;
-
-	num_entries = zip_get_num_entries(archive, 0);
-	seen_dirs = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
-	result = g_ptr_array_new_with_free_func(g_free);
-
-	for (zip_int64_t i = 0; i < num_entries; i++) {
-		gchar const* name = zip_get_name(archive, (zip_uint64_t)i, ZIP_FL_ENC_UTF_8);
-		if (!name) continue;
-
-		/* Prüfen ob Eintrag unter dem gewünschten Präfix liegt */
-		if (prefix) {
-			/* Muss mit "prefix/" beginnen */
-			if (!g_str_has_prefix(name, prefix)) continue;
-			if (name[strlen(prefix)] != '/') continue;
-		}
-
-		/* Relativer Pfad innerhalb dieser Ebene */
-		gchar const* rel = name + prefix_len;
-		if (*rel == '\0') continue; /* Der Präfix-Eintrag selbst (z.B. "dir/") */
-
-		/* Suchen ob weiterer Schrägstrich folgt */
-		gchar const* slash = strchr(rel, '/');
-
-		if (!slash || *(slash + 1) == '\0') {
-			/* Expliziter Verzeichnis-Eintrag (endet auf '/') - überspringen */
-			if (slash && *(slash + 1) == '\0')
-				continue;
-
-			/* Normale Datei - vollständigen Pfad speichern */
-			g_ptr_array_add(result, g_strdup(name));
-		} else {
-			/* Datei in Unterverzeichnis → Unterverzeichnis ableiten */
-			gsize dir_len = (gsize)(slash - name);
-			gchar* dir_key = g_strndup(name, dir_len + 1); /* inkl. '/' */
-
-			if (!g_hash_table_contains(seen_dirs, dir_key)) {
-				g_hash_table_add(seen_dirs, g_strdup(dir_key));
-				g_ptr_array_add(result, dir_key);
-			} else
-				g_free(dir_key);
-		}
-	}
-
-	zip_discard(archive);
-	g_hash_table_destroy(seen_dirs);
-
-	return result;
-}
-
-gchar* sond_file_part_zip_guess_mime(SondFilePartZip* sfp_zip,
-		gchar const* path, GError** error) {
-	zip_t* archive = NULL;
-	zip_file_t* zf = NULL;
-	guchar buf[2048];
-	zip_int64_t n = 0;
-	gchar* mime = NULL;
-
-	archive = sond_file_part_zip_open_archive(sfp_zip, FALSE, NULL, error);
-	if (!archive)
-		return NULL;
-
-	zf = zip_fopen(archive, path, 0);
-	if (!zf) {
-		if (error) *error = g_error_new(SOND_ERROR, 0,
-				"%s\nzip_fopen('%s'): %s", __func__, path,
-				zip_error_strerror(zip_get_error(archive)));
-		zip_discard(archive);
-		return NULL;
-	}
-
-	n = zip_fread(zf, buf, sizeof(buf));
-	zip_fclose(zf);
-	zip_discard(archive);
-
-	if (n <= 0) {
-		if (error) *error = g_error_new(SOND_ERROR, 0,
-				"%s\nzip_fread('%s') fehlgeschlagen", __func__, path);
-		return NULL;
-	}
-
-	mime = mime_guess_content_type(buf, (gsize)n, error);
-
-	return mime;
 }
 
 static GBytes* sond_file_part_zip_mod_zip_file(SondFilePartZip* sfp_zip,

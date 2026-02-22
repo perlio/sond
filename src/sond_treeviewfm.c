@@ -32,7 +32,6 @@
 #include "sond_log_and_error.h"
 #include "sond_renderer.h"
 #include "sond_fileparts.h"
-#include "sond_pdf_helper.h"
 #include "sond_file_helper.h"
 
 
@@ -359,7 +358,6 @@ static gint sond_tvfm_item_load_fs_dir(SondTVFMItem* stvfm_item,
 	gchar* path_dir = NULL;
     SondDir* dir = NULL;
     gchar const* filename = NULL;
-    fz_context* ctx = NULL;
 
 	SondTVFMItemPrivate *stvfm_item_priv =
 			sond_tvfm_item_get_instance_private(stvfm_item);
@@ -372,15 +370,6 @@ static gint sond_tvfm_item_load_fs_dir(SondTVFMItem* stvfm_item,
     g_free(path_dir);
     if (!dir)
     	ERROR_Z
-
-	ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
-	if (!ctx) {
-		if (error) *error = g_error_new(SOND_ERROR, 0,
-				"%s\nfz_context konnte nicht erzeugt werden", __func__);
-		sond_dir_close(dir);
-
-		return -1;
-	}
 
 	if (arr_children)
 		loaded_children = g_ptr_array_new_with_free_func((GDestroyNotify)g_object_unref);
@@ -410,37 +399,46 @@ static gint sond_tvfm_item_load_fs_dir(SondTVFMItem* stvfm_item,
 
 		if (S_ISDIR(st.st_mode)) {
 			//Verzeichnis
-			stvfm_item_child =
-					sond_tvfm_item_create(stvfm_item_priv->stvfm,
-							stvfm_item_priv->sond_file_part, rel_path_child);
+			stvfm_item_child = sond_tvfm_item_create(stvfm_item_priv->stvfm,
+					stvfm_item_priv->sond_file_part, rel_path_child);
 		}
 		else {
 			SondFilePart* sfp_child = NULL;
-			fz_stream* stream = NULL;
+			gchar* mime_type = NULL;
+			gchar* full_path = NULL;
+			FILE* f = NULL;
+			guchar buf[2048];
+			gsize n = 0;
 
-			fz_try(ctx)
-				stream = fz_open_file(ctx, rel_path_child);
-			fz_catch(ctx) {
-				fz_drop_context(ctx);
-				g_free(rel_path_child);
-				sond_dir_close(dir);
-
-				ERROR_PDF
+			full_path = g_strconcat(stvfm_priv->root, "/", rel_path_child, NULL);
+			f = sond_fopen(full_path, "rb", error);
+			g_free(full_path);
+			if (f) {
+				n = fread(buf, 1, sizeof(buf), f);
+				fclose(f);
+				if (n <= 0)
+					LOG_WARN("fread('%s'): %s", rel_path_child, strerror(errno));
+			} else {
+				LOG_WARN("sond_fopen('%s'): %s", rel_path_child, (*error)->message);
+				g_clear_error(error);
 			}
 
-			sfp_child = sond_file_part_create_from_stream(ctx,
-					stream, rel_path_child, stvfm_item_priv->sond_file_part, error);
-			fz_drop_stream(ctx, stream);
+			if (n > 0)
+				mime_type = mime_guess_content_type(buf, n, NULL);
+
+			sfp_child = sond_file_part_create_from_mime_type(
+					rel_path_child, stvfm_item_priv->sond_file_part,
+					mime_type ? mime_type : "application/octet-stream");
+			g_free(mime_type);
 			if (!sfp_child) {
 				g_free(rel_path_child);
 				sond_dir_close(dir);
-				fz_drop_context(ctx);
-
 				ERROR_Z
 			}
 
 			stvfm_item_child = sond_tvfm_item_create(stvfm_item_priv->stvfm,
-						sfp_child, NULL);
+					sfp_child, NULL);
+			g_object_unref(sfp_child);
 		}
 
 		g_free(rel_path_child);
@@ -449,12 +447,95 @@ static gint sond_tvfm_item_load_fs_dir(SondTVFMItem* stvfm_item,
     }
 
     sond_dir_close(dir);
-	fz_drop_context(ctx);
 
 	if (arr_children) *arr_children = loaded_children;
 	else if (dir_has_children) return 1;
 
 	return 0;
+}
+
+typedef struct {
+	gchar* path; /* Verzeichnis: endet auf '/' */
+	gchar* mime; /* NULL = Verzeichnis */
+} ZipDirEntry;
+
+static void zip_dir_entry_free(gpointer p) {
+	ZipDirEntry* e = (ZipDirEntry*) p;
+	g_free(e->path);
+	g_free(e->mime);
+	g_free(e);
+}
+
+static GPtrArray* sfp_zip_list_dir(SondFilePartZip* sfp_zip,
+		gchar const* prefix, GError** error) {
+	zip_t* archive = NULL;
+	zip_int64_t num_entries = 0;
+	GHashTable* seen_dirs = NULL;
+	GPtrArray* result = NULL;
+	gsize prefix_len = prefix ? strlen(prefix) + 1 : 0; /* +1 für '/' */
+
+	archive = sond_file_part_zip_open_archive(sfp_zip, FALSE, NULL, error);
+	if (!archive)
+		return NULL;
+
+	num_entries = zip_get_num_entries(archive, 0);
+	seen_dirs = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+	result = g_ptr_array_new_with_free_func(zip_dir_entry_free);
+
+	for (zip_int64_t i = 0; i < num_entries; i++) {
+		gchar const* name = zip_get_name(archive, (zip_uint64_t)i, ZIP_FL_ENC_UTF_8);
+		if (!name) continue;
+
+		if (prefix) {
+			if (!g_str_has_prefix(name, prefix)) continue;
+			if (name[strlen(prefix)] != '/') continue;
+		}
+
+		gchar const* rel = name + prefix_len;
+		if (*rel == '\0') continue;
+
+		gchar const* slash = strchr(rel, '/');
+
+		if (!slash) {
+			/* Normale Datei: MIME direkt lesen */
+			ZipDirEntry* e = g_new0(ZipDirEntry, 1);
+			e->path = g_strdup(name);
+
+			zip_file_t* zf = zip_fopen_index(archive, (zip_uint64_t)i, 0);
+			if (zf) {
+				guchar buf[2048];
+				zip_int64_t n = zip_fread(zf, buf, sizeof(buf));
+				zip_fclose(zf);
+				if (n > 0)
+					e->mime = mime_guess_content_type(buf, (gsize)n, NULL);
+			}
+			if (!e->mime)
+				e->mime = g_strdup("application/octet-stream");
+
+			g_ptr_array_add(result, e);
+		} else if (*(slash + 1) == '\0') {
+			/* Expliziter Verzeichnis-Eintrag - überspringen */
+			continue;
+		} else {
+			/* Datei in Unterverzeichnis → Verzeichnis ableiten */
+			gsize dir_len = (gsize)(slash - name) + 1; /* inkl. '/' */
+			gchar* dir_key = g_strndup(name, dir_len);
+
+			if (!g_hash_table_contains(seen_dirs, dir_key)) {
+				ZipDirEntry* e = g_new0(ZipDirEntry, 1);
+				e->path = g_strdup(dir_key); /* endet auf '/' */
+				e->mime = NULL;             /* Verzeichnis */
+				g_hash_table_add(seen_dirs, dir_key);
+				g_ptr_array_add(result, e);
+			} else
+				g_free(dir_key);
+		}
+	}
+
+	zip_discard(archive);
+	g_hash_table_destroy(seen_dirs);
+
+	return result;
 }
 
 static gint sond_tvfm_item_load_zip_dir(SondTVFMItem* stvfm_item,
@@ -465,7 +546,7 @@ static gint sond_tvfm_item_load_zip_dir(SondTVFMItem* stvfm_item,
 			sond_tvfm_item_get_instance_private(stvfm_item);
 
 	/* path_or_section ist das Verzeichnispäfix (ohne '/'), NULL = Archiv-Wurzel */
-	entries = sond_file_part_zip_list_dir(
+	entries = sfp_zip_list_dir(
 			SOND_FILE_PART_ZIP(stvfm_item_priv->sond_file_part),
 			stvfm_item_priv->path_or_section, error);
 	if (!entries)
@@ -481,37 +562,18 @@ static gint sond_tvfm_item_load_zip_dir(SondTVFMItem* stvfm_item,
 	*arr_children = g_ptr_array_new_with_free_func((GDestroyNotify)g_object_unref);
 
 	for (guint i = 0; i < entries->len; i++) {
-		gchar const* entry_path = g_ptr_array_index(entries, i);
-		gboolean is_dir = g_str_has_suffix(entry_path, "/");
+		ZipDirEntry* e = g_ptr_array_index(entries, i);
 		SondTVFMItem* child = NULL;
 
-		if (is_dir) {
-			/* Verzeichnis: path_or_section = Pfad ohne abschließendes '/' */
-			gchar* dir_path = g_strndup(entry_path, strlen(entry_path) - 1);
+		if (!e->mime) {
+			/* Verzeichnis: path endet auf '/', ohne dieses als path_or_section */
+			gchar* dir_path = g_strndup(e->path, strlen(e->path) - 1);
 			child = sond_tvfm_item_create(stvfm_item_priv->stvfm,
 					stvfm_item_priv->sond_file_part, dir_path);
 			g_free(dir_path);
 		} else {
-			/* Datei: sfp mit MIME-Erkennung aus ZIP-Inhalt erzeugen */
-			GError* err_local = NULL;
-			gchar* mime = NULL;
-			SondFilePart* sfp_child = NULL;
-
-			mime = sond_file_part_zip_guess_mime(
-					SOND_FILE_PART_ZIP(stvfm_item_priv->sond_file_part),
-					entry_path, &err_local);
-			if (!mime) {
-				LOG_WARN("MIME-Erkennung für '%s' fehlgeschlagen: %s - Fallback auf octet-stream",
-						entry_path, err_local ? err_local->message : "?");
-				g_clear_error(&err_local);
-			}
-
-			sfp_child = sond_file_part_create_from_mime_type(
-					entry_path,
-					stvfm_item_priv->sond_file_part,
-					mime ? mime : "application/octet-stream");
-			g_free(mime);
-
+			SondFilePart* sfp_child = sond_file_part_create_from_mime_type(
+					e->path, stvfm_item_priv->sond_file_part, e->mime);
 			child = sond_tvfm_item_create(stvfm_item_priv->stvfm, sfp_child, NULL);
 			g_object_unref(sfp_child);
 		}
@@ -998,37 +1060,13 @@ static gint rename_stvfm_item(SondTVFMItem* stvfm_item,
 		//Normale Dateien
 		if (!stvfm_item_priv->sond_file_part) {
 			gchar const* path_old = NULL;
-			g_autoptr(GFile) src = NULL;
-			g_autoptr(GFile) dst = NULL;
 
 			path_old = (stvfm_item_priv->path_or_section) ?
 					stvfm_item_priv->path_or_section :
 					sond_file_part_get_path(stvfm_item_priv->sond_file_part);
 
-			src = g_file_new_for_path(path_old);
-			dst = g_file_new_for_path(path_new);
-
-			if (!g_file_move(src, dst,
-							G_FILE_COPY_OVERWRITE,
-							NULL, NULL, NULL,
-							error)) {
-				if (g_error_matches(*error, G_IO_ERROR, G_IO_ERROR_EXISTS)) {
-					g_clear_error(error);
-					*error = g_error_new(SOND_ERROR, SOND_ERROR_EXISTS,
-							"%s\nZielverzeichnis existiert bereits", __func__);
-
-					return -1;
-				}
-				if (g_error_matches(*error, G_IO_ERROR, G_IO_ERROR_BUSY)) {
-					g_clear_error(error);
-					*error = g_error_new(SOND_ERROR, SOND_ERROR_BUSY,
-							"%s\nDatei busy", __func__);
-
-					return -1;
-				}
-				else
-					ERROR_Z
-			}
+			if (!sond_rename(path_old, path_new, error))
+				ERROR_Z
 
 			sond_tvfm_item_set_basename(stvfm_item, path_new);
 		}
