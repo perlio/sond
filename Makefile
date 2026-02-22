@@ -49,7 +49,7 @@ endif
 ifneq (,$(findstring $(MAKECMDGOALS), sond_server))
 SRCS += $(shell find $(SRC_DIRS)/sond_server -name '*.c') $(SRC_DIRS)/sond_log_and_error.c \
 	$(shell find $(SRC_DIRS)/sond_graph -name '*.c') $(SRC_DIRS)/sond_misc.c $(SRC_DIRS)/sond_ocr.c \
-	$(SRC_DIRS)/sond_pdf_helper.c $(SRC_DIRS)/sond_gmessage_helper.c
+	$(SRC_DIRS)/sond_pdf_helper.c $(SRC_DIRS)/sond_gmessage_helper.c $(SRC_DIRS)/sond_file_helper.c
 CFLAGS += $(shell pkg-config --cflags gtk+-3.0 gmime-3.0 libmariadb libsoup-3.0 json-glib-1.0)
 LDFLAGS += $(shell pkg-config --libs gmime-3.0 libmagic libmariadb libsoup-3.0 json-glib-1.0 \
 	mupdf tesseract)

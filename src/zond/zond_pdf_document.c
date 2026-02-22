@@ -582,8 +582,7 @@ zond_pdf_document_open(SondFilePartPDF* sfp_pdf, gint von, gint bis,
 		return NULL;
 	}
 
-	filename = sond_file_part_write_to_tmp_file(priv->ctx,
-			SOND_FILE_PART(sfp_pdf), error);
+	filename = sond_file_part_write_to_tmp_file(SOND_FILE_PART(sfp_pdf), error);
 	if (!filename) {
 		g_object_unref(zond_pdf_document);
 

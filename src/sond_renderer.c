@@ -9,12 +9,22 @@
 #include <gtk/gtk.h>
 #include <cairo.h>
 #include <string.h>
-#include <mupdf/fitz.h>
+#include <libxml/parser.h>
+#include <libxml/tree.h>
+#include <libxml/xpath.h>
+#include <zip.h>
+#include <time.h>
+
 #include <lexbor/html/html.h>
 #include <string.h>
 #include <unistd.h>
 
 #include "sond_log_and_error.h"
+#include "sond_fileparts.h"
+#include "sond_file_helper.h"
+
+#define DEFAULT_RENDER_WIDTH 650
+
 
 typedef struct {
     cairo_surface_t *original_surface;
@@ -40,11 +50,216 @@ typedef struct {
     gboolean panning;
     double pan_start_x;
     double pan_start_y;
+
+    /* Navigation */
+    SondFilePart *sfp;          /* aktuelle Datei, NULL wenn standalone */
+    GtkWidget *btn_prev;
+    GtkWidget *btn_next;
+    GtkWidget *nav_label;
 } SurfaceViewer;
+
+typedef enum {
+    DOC_TYPE_UNKNOWN,
+    DOC_TYPE_HTML,
+    DOC_TYPE_ODT,
+    DOC_TYPE_DOCX,
+    DOC_TYPE_DOC,
+    DOC_TYPE_IMAGE
+} DocumentType;
+
+typedef struct {
+    cairo_surface_t *surface;
+    int width;
+    int height;
+    char *searchable_text;
+    DocumentType type;
+} RenderedDocument;
+
 
 // Forward declarations
 static void update_display(SurfaceViewer *viewer);
 static void update_statusbar(SurfaceViewer *viewer, const char *message);
+static RenderedDocument* render_document_from_bytes(GBytes *bytes, int render_width);
+
+// === NAVIGATION ===
+
+/*
+ * Liefert alle navigierbaren Geschwister (SondFilePartLeaf) im gleichen
+ * virtuellen Verzeichnis wie sfp, geordnet wie im Array.
+ * Gibt NULL zurück wenn sfp NULL ist.
+ */
+static GPtrArray* get_siblings(SondFilePart *sfp) {
+    if (!sfp) return NULL;
+
+    SondFilePart *parent = sond_file_part_get_parent(sfp);
+    GPtrArray *all = sond_file_part_get_arr_opened_files(parent);
+    if (!all || all->len == 0) return NULL;
+
+    GPtrArray *siblings = g_ptr_array_new();
+    for (guint i = 0; i < all->len; i++) {
+        SondFilePart *s = g_ptr_array_index(all, i);
+        /* Nur Leafs, die denselben Parent haben */
+        if (SOND_IS_FILE_PART_LEAF(s) &&
+            sond_file_part_get_parent(s) == parent)
+            g_ptr_array_add(siblings, s);
+    }
+    return siblings;
+}
+
+static gint find_sfp_index(GPtrArray *arr, SondFilePart *sfp) {
+    for (guint i = 0; i < arr->len; i++)
+        if (g_ptr_array_index(arr, i) == sfp)
+            return (gint)i;
+    return -1;
+}
+
+static void update_nav_state(SurfaceViewer *viewer) {
+    if (!viewer->sfp || !viewer->btn_prev) return;
+
+    GPtrArray *siblings = get_siblings(viewer->sfp);
+    if (!siblings || siblings->len <= 1) {
+        gtk_widget_set_sensitive(viewer->btn_prev, FALSE);
+        gtk_widget_set_sensitive(viewer->btn_next, FALSE);
+        if (viewer->nav_label)
+            gtk_label_set_text(GTK_LABEL(viewer->nav_label), "");
+        if (siblings) g_ptr_array_free(siblings, FALSE);
+        return;
+    }
+
+    gint idx = find_sfp_index(siblings, viewer->sfp);
+    gtk_widget_set_sensitive(viewer->btn_prev, idx > 0);
+    gtk_widget_set_sensitive(viewer->btn_next, idx < (gint)siblings->len - 1);
+
+    if (viewer->nav_label) {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "%d / %d", idx + 1, (int)siblings->len);
+        gtk_label_set_text(GTK_LABEL(viewer->nav_label), buf);
+    }
+    g_ptr_array_free(siblings, FALSE);
+}
+
+/**
+ * Gibt ein RenderedDocument frei
+ */
+void free_rendered_document(RenderedDocument *doc) {
+    if (!doc) return;
+
+    if (doc->surface) {
+        cairo_surface_destroy(doc->surface);
+    }
+    if (doc->searchable_text) {
+        g_free(doc->searchable_text);
+    }
+    g_free(doc);
+}
+
+/*
+ * Lädt eine neue Datei in denselben Viewer.
+ * Gibt TRUE zurück bei Erfolg.
+ */
+static gboolean navigate_to_sfp(SurfaceViewer *viewer, SondFilePart *new_sfp) {
+    GError *error = NULL;
+    GBytes *bytes = NULL;
+    RenderedDocument *rd = NULL;
+
+    /* Bytes der neuen Datei holen - sond_file_part_get_bytes ist static,
+     * wir rufen sond_file_part_open nicht auf (würde neues Fenster öffnen).
+     * Stattdessen schreiben wir in tmp, lesen zurück — oder wir nutzen
+     * den schon vorhandenen Pfad. Sauberer: wir exportieren eine
+     * Hilfsfunktion. Hier nutzen wir write_to_tmp_file als Brücke.
+     *
+     * Da sond_file_part_get_bytes intern static ist, umgehen wir das über
+     * sond_file_part_write_to_tmp_file + g_file_get_contents.
+     * Besser: Wir fügen sond_file_part_get_bytes_public hinzu — aber das
+     * würde weitere Headeränderungen bedeuten. Pragmatisch: tmp-Datei.
+     */
+    gchar *tmp = sond_file_part_write_to_tmp_file(new_sfp, &error);
+    if (!tmp) {
+        LOG_WARN("%s\n%s", __func__, error ? error->message : "?");
+        g_clear_error(&error);
+        return FALSE;
+    }
+
+    gsize len = 0;
+    guchar *data = NULL;
+    if (!g_file_get_contents(tmp, (gchar**)&data, &len, &error)) {
+        LOG_WARN("%s\n%s", __func__, error ? error->message : "?");
+        g_clear_error(&error);
+        sond_remove(tmp, NULL);
+        g_free(tmp);
+        return FALSE;
+    }
+    g_remove(tmp);
+    g_free(tmp);
+
+    bytes = g_bytes_new_take(data, len);
+    rd = render_document_from_bytes(bytes, 0);
+    g_bytes_unref(bytes);
+
+    if (!rd) {
+        LOG_WARN("%s\nrender_document_from_bytes fehlgeschlagen", __func__);
+        return FALSE;
+    }
+
+    /* Surface tauschen */
+    if (viewer->original_surface)
+        cairo_surface_destroy(viewer->original_surface);
+
+    viewer->original_surface = cairo_surface_create_similar(
+        rd->surface, CAIRO_CONTENT_COLOR_ALPHA, rd->width, rd->height);
+    cairo_t *cr = cairo_create(viewer->original_surface);
+    cairo_set_source_surface(cr, rd->surface, 0, 0);
+    cairo_paint(cr);
+    cairo_destroy(cr);
+
+    viewer->original_width  = rd->width;
+    viewer->original_height = rd->height;
+    viewer->zoom_level = 1.0;
+
+    if (viewer->searchable_text) g_free(viewer->searchable_text);
+    viewer->searchable_text = g_strdup(rd->searchable_text);
+    if (viewer->search_results) { g_list_free(viewer->search_results); viewer->search_results = NULL; }
+    viewer->current_search_index = 0;
+
+    free_rendered_document(rd);
+
+    /* sfp aktualisieren */
+    if (viewer->sfp) g_object_unref(viewer->sfp);
+    viewer->sfp = g_object_ref(new_sfp);
+
+    /* Titel aktualisieren */
+    gtk_window_set_title(GTK_WINDOW(viewer->window),
+                         sond_file_part_get_path(new_sfp));
+
+    /* Anzeige aktualisieren */
+    update_display(viewer);
+    update_nav_state(viewer);
+    update_statusbar(viewer, sond_file_part_get_path(new_sfp));
+
+    return TRUE;
+}
+
+static void on_nav_prev(GtkWidget *widget, gpointer data) {
+    SurfaceViewer *viewer = (SurfaceViewer*)data;
+    GPtrArray *siblings = get_siblings(viewer->sfp);
+    if (!siblings) return;
+
+    gint idx = find_sfp_index(siblings, viewer->sfp);
+    if (idx > 0)
+        navigate_to_sfp(viewer, g_ptr_array_index(siblings, idx - 1));
+    g_ptr_array_free(siblings, FALSE);
+}
+
+static void on_nav_next(GtkWidget *widget, gpointer data) {
+    SurfaceViewer *viewer = (SurfaceViewer*)data;
+    GPtrArray *siblings = get_siblings(viewer->sfp);
+    if (!siblings) return;
+
+    gint idx = find_sfp_index(siblings, viewer->sfp);
+    if (idx >= 0 && idx < (gint)siblings->len - 1)
+        navigate_to_sfp(viewer, g_ptr_array_index(siblings, idx + 1));
+    g_ptr_array_free(siblings, FALSE);
+}
 
 // === STATUSBAR ===
 
@@ -209,6 +424,16 @@ static gboolean on_key_press(GtkWidget *widget, GdkEventKey *event, gpointer dat
 
     if (event->keyval == GDK_KEY_Escape && viewer->fullscreen) {
         toggle_fullscreen(viewer);
+        return TRUE;
+    }
+
+    if (event->keyval == GDK_KEY_Left) {
+        on_nav_prev(NULL, viewer);
+        return TRUE;
+    }
+
+    if (event->keyval == GDK_KEY_Right) {
+        on_nav_next(NULL, viewer);
         return TRUE;
     }
 
@@ -429,6 +654,9 @@ static void cleanup_viewer(SurfaceViewer *viewer) {
     if (viewer->search_results) {
         g_list_free(viewer->search_results);
     }
+    if (viewer->sfp) {
+        g_object_unref(viewer->sfp);
+    }
     g_free(viewer);
 }
 
@@ -449,7 +677,8 @@ static void on_window_destroy(GtkWidget *widget, gpointer data) {
  * @return GTK Window Widget
  */
 static GtkWidget* show_surface_viewer(cairo_surface_t *surface, int width, int height,
-                               const char *title, const char *searchable_text) {
+                               const char *title, const char *searchable_text,
+                               SondFilePart *sfp) {
     if (!surface) return NULL;
 
     SurfaceViewer *viewer = g_new0(SurfaceViewer, 1);
@@ -466,6 +695,7 @@ static GtkWidget* show_surface_viewer(cairo_surface_t *surface, int width, int h
     viewer->original_height = height;
     viewer->zoom_level = 1.0;
     viewer->fullscreen = FALSE;
+    viewer->sfp = sfp ? g_object_ref(sfp) : NULL;
 
     if (searchable_text) {
         viewer->searchable_text = g_strdup(searchable_text);
@@ -487,6 +717,20 @@ static GtkWidget* show_surface_viewer(cairo_surface_t *surface, int width, int h
     // Toolbar
     viewer->toolbar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
     gtk_box_pack_start(GTK_BOX(vbox), viewer->toolbar, FALSE, FALSE, 5);
+
+    // Navigations-Buttons (Pfeil links/rechts)
+    viewer->btn_prev = gtk_button_new_with_label("◀");
+    viewer->nav_label = gtk_label_new("");
+    viewer->btn_next = gtk_button_new_with_label("▶");
+
+    g_signal_connect(viewer->btn_prev, "clicked", G_CALLBACK(on_nav_prev), viewer);
+    g_signal_connect(viewer->btn_next, "clicked", G_CALLBACK(on_nav_next), viewer);
+
+    gtk_box_pack_start(GTK_BOX(viewer->toolbar), viewer->btn_prev, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(viewer->toolbar), viewer->nav_label, FALSE, FALSE, 4);
+    gtk_box_pack_start(GTK_BOX(viewer->toolbar), viewer->btn_next, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(viewer->toolbar),
+                      gtk_separator_new(GTK_ORIENTATION_VERTICAL), FALSE, FALSE, 10);
 
     // Zoom-Buttons
     GtkWidget *btn_zoom_in = gtk_button_new_with_label("Zoom +");
@@ -586,37 +830,15 @@ static GtkWidget* show_surface_viewer(cairo_surface_t *surface, int width, int h
 
     gtk_widget_show_all(viewer->window);
 
+    /* Navigations-Zustand initial setzen */
+    update_nav_state(viewer);
+
     return viewer->window;
 }
 
-#include <libxml/parser.h>
-#include <libxml/tree.h>
-#include <libxml/xpath.h>
-#include <zip.h>
-#include <time.h>
-
-#define DEFAULT_RENDER_WIDTH 650
-
-typedef enum {
-    DOC_TYPE_UNKNOWN,
-    DOC_TYPE_HTML,
-    DOC_TYPE_ODT,
-    DOC_TYPE_DOCX,
-    DOC_TYPE_DOC,
-    DOC_TYPE_IMAGE
-} DocumentType;
-
-typedef struct {
-    cairo_surface_t *surface;
-    int width;
-    int height;
-    char *searchable_text;
-    DocumentType type;
-} RenderedDocument;
-
 // === TYPE DETECTION ===
 
-static gboolean check_zip_contains_file(unsigned char *data, size_t len, const char *filename) {
+static gboolean check_zip_contains_file(const unsigned char *data, size_t len, const char *filename) {
     zip_error_t error;
     zip_source_t *src;
     zip_t *archive;
@@ -643,9 +865,9 @@ static gboolean check_zip_contains_file(unsigned char *data, size_t len, const c
     return found;
 }
 
-static DocumentType detect_document_type(fz_context *ctx, fz_buffer *buf) {
-    unsigned char *data;
-    size_t len = fz_buffer_storage(ctx, buf, &data);
+static DocumentType detect_document_type(GBytes *bytes) {
+    gsize len;
+    const unsigned char *data = g_bytes_get_data(bytes, &len);
 
     if (len < 4) return DOC_TYPE_UNKNOWN;
 
@@ -884,9 +1106,9 @@ static RenderedDocument* render_html(const char *html, int width) {
 
 // === IMAGE RENDERING ===
 
-static RenderedDocument* render_image(fz_context *ctx, fz_buffer *buf, int max_width) {
-    unsigned char *data;
-    size_t len = fz_buffer_storage(ctx, buf, &data);
+static RenderedDocument* render_image(GBytes *bytes, int max_width) {
+    gsize len;
+    const guchar *data = g_bytes_get_data(bytes, &len);
 
     GError *error = NULL;
     GdkPixbufLoader *loader = gdk_pixbuf_loader_new();
@@ -952,7 +1174,8 @@ static RenderedDocument* render_image(fz_context *ctx, fz_buffer *buf, int max_w
 // === ODT/DOCX RENDERING (Generisch) ===
 
 // Verarbeite DOCX-Node (ähnlich zu ODT, aber andere Element-Namen)
-static char* extract_from_zip(unsigned char *zip_data, size_t zip_len, const char *filename, size_t *out_len) {
+static char* extract_from_zip(const unsigned char *zip_data, size_t zip_len,
+		const char *filename, size_t *out_len) {
     zip_error_t error;
     zip_source_t *src;
     zip_t *archive;
@@ -1213,10 +1436,10 @@ static void process_odt_node(xmlNode *node, GString *text, PangoAttrList **attr_
     }
 }
 
-static RenderedDocument* render_office_document(fz_context *ctx, fz_buffer *buf,
+static RenderedDocument* render_office_document(GBytes *bytes,
                                                  int width, DocumentType type) {
-    unsigned char *data;
-    size_t len = fz_buffer_storage(ctx, buf, &data);
+    gsize len;
+    const unsigned char *data = g_bytes_get_data(bytes, &len);
 
     const char *xml_file;
     if (type == DOC_TYPE_ODT) {
@@ -1337,7 +1560,7 @@ static RenderedDocument* render_office_document(fz_context *ctx, fz_buffer *buf,
 
 // === DOC RENDERING (Fallback) ===
 
-static RenderedDocument* render_doc(fz_context *ctx, fz_buffer *buf, int width) {
+static RenderedDocument* render_doc(int width) {
     // DOC ist binär und sehr komplex
     // Fallback: Zeige Hinweis, dass Konvertierung nötig ist
 
@@ -1395,125 +1618,18 @@ static RenderedDocument* render_doc(fz_context *ctx, fz_buffer *buf, int width) 
     return result;
 }
 
-// Extrahiere Datei aus ZIP-Archiv
-// ODT XML zu formatiertem Text konvertieren
-static RenderedDocument* render_odt(fz_context *ctx, fz_buffer *buf, int width) {
-    unsigned char *data;
-    size_t len = fz_buffer_storage(ctx, buf, &data);
-
-    // content.xml aus ZIP extrahieren
-    size_t xml_len;
-    char *xml_content = extract_from_zip(data, len, "content.xml", &xml_len);
-
-    if (!xml_content) {
-    	LOG_WARN("Failed to extract content.xml from ODT");
-        return NULL;
-    }
-
-    // XML parsen
-    xmlDoc *doc = xmlReadMemory(xml_content, xml_len, "content.xml", NULL, 0);
-    g_free(xml_content);
-
-    if (!doc) {
-    	LOG_WARN("Failed to parse content.xml");
-        return NULL;
-    }
-
-    // Root-Element
-    xmlNode *root = xmlDocGetRootElement(doc);
-    if (!root) {
-        xmlFreeDoc(doc);
-        return NULL;
-    }
-
-    // Text mit Formatierung extrahieren
-    GString *text = g_string_new("");
-    PangoAttrList *attr_list = pango_attr_list_new();
-    int char_offset = 0;
-
-    // Finde office:body > office:text
-    for (xmlNode *node = root->children; node; node = node->next) {
-        if (node->type == XML_ELEMENT_NODE &&
-            strcmp((char*)node->name, "body") == 0) {
-            for (xmlNode *child = node->children; child; child = child->next) {
-                if (child->type == XML_ELEMENT_NODE) {
-                    process_odt_node(child->children, text, &attr_list, &char_offset);
-                }
-            }
-        }
-    }
-
-    xmlFreeDoc(doc);
-
-    if (text->len == 0) {
-        g_string_append(text, "ODT Document\n\n(No readable content found)");
-    }
-
-    // Höhe berechnen
-    cairo_surface_t *tmp_surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
-    cairo_t *tmp_cr = cairo_create(tmp_surface);
-
-    PangoLayout *layout = pango_cairo_create_layout(tmp_cr);
-    pango_layout_set_width(layout, (width - 20) * PANGO_SCALE);
-    pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
-    pango_layout_set_text(layout, text->str, -1);
-    pango_layout_set_attributes(layout, attr_list);
-
-    int pango_width, pango_height;
-    pango_layout_get_pixel_size(layout, &pango_width, &pango_height);
-    int height = pango_height + 20;
-
-    g_object_unref(layout);
-    cairo_destroy(tmp_cr);
-    cairo_surface_destroy(tmp_surface);
-
-    // Echte Surface rendern
-    cairo_surface_t *surface = cairo_image_surface_create(
-        CAIRO_FORMAT_ARGB32, width, height);
-    cairo_t *cr = cairo_create(surface);
-
-    cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
-    cairo_paint(cr);
-    cairo_set_source_rgb(cr, 0.0, 0.0, 0.0);
-
-    layout = pango_cairo_create_layout(cr);
-    pango_layout_set_width(layout, (width - 20) * PANGO_SCALE);
-    pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
-    pango_layout_set_text(layout, text->str, -1);
-    pango_layout_set_attributes(layout, attr_list);
-
-    cairo_move_to(cr, 10, 10);
-    pango_cairo_show_layout(cr, layout);
-
-    g_object_unref(layout);
-    cairo_destroy(cr);
-    pango_attr_list_unref(attr_list);
-
-    // RenderedDocument erstellen
-    RenderedDocument *result = g_new0(RenderedDocument, 1);
-    result->surface = surface;
-    result->width = width;
-    result->height = height;
-    result->searchable_text = g_string_free(text, FALSE);
-    result->type = DOC_TYPE_ODT;
-
-    return result;
-}
-
 // === HAUPTFUNKTION ===
 
 /**
  * Rendert einen Dokument-Stream zu einer Cairo Surface
  *
- * @param ctx MuPDF Context
- * @param stream fz_stream mit Dokumentdaten
+ * @param bytes GBytes mit Dokumentdaten
  * @param render_width Gewünschte Breite (0 = Standard 650px)
  * @return RenderedDocument oder NULL bei Fehler
  */
-RenderedDocument* render_document_from_stream(fz_context *ctx,
-		fz_buffer* buf, int render_width) {
-    if (!ctx || !buf) {
-    	LOG_WARN("Invalid context or buffer");
+static RenderedDocument* render_document_from_bytes(GBytes *bytes, int render_width) {
+    if (!bytes) {
+    	LOG_WARN("Invalid bytes");
         return NULL;
     }
 
@@ -1522,40 +1638,40 @@ RenderedDocument* render_document_from_stream(fz_context *ctx,
     }
 
     // Dokumenttyp erkennen
-    DocumentType type = detect_document_type(ctx, buf);
+    DocumentType type = detect_document_type(bytes);
 
     RenderedDocument *result = NULL;
 
     // Je nach Typ rendern
     switch (type) {
         case DOC_TYPE_HTML: {
-            unsigned char *data;
-            size_t len = fz_buffer_storage(ctx, buf, &data);
-            char *html = g_strndup((char*)data, len);
+            gsize len;
+            const char *data = g_bytes_get_data(bytes, &len);
+            char *html = g_strndup(data, len);
             result = render_html(html, render_width);
             g_free(html);
             break;
         }
 
         case DOC_TYPE_IMAGE:
-            result = render_image(ctx, buf, render_width);
+            result = render_image(bytes, render_width);
             break;
 
         case DOC_TYPE_ODT:
         case DOC_TYPE_DOCX:
-            result = render_office_document(ctx, buf, render_width, type);
+            result = render_office_document(bytes, render_width, type);
             break;
 
         case DOC_TYPE_DOC:
-            result = render_doc(ctx, buf, render_width);
+            result = render_doc(render_width);
             break;
 
         case DOC_TYPE_UNKNOWN:
         default: {
             // Fallback: Als Plain Text behandeln
-            unsigned char *data;
-            size_t len = fz_buffer_storage(ctx, buf, &data);
-            char *text = g_strndup((char*)data, len);
+            gsize len;
+            const char *data = g_bytes_get_data(bytes, &len);
+            char *text = g_strndup(data, len);
 
             // Erstelle einfache Textdarstellung
             GString *formatted = g_string_new("Unknown Document Type\n\n");
@@ -1575,21 +1691,6 @@ RenderedDocument* render_document_from_stream(fz_context *ctx,
 }
 
 /**
- * Gibt ein RenderedDocument frei
- */
-void free_rendered_document(RenderedDocument *doc) {
-    if (!doc) return;
-
-    if (doc->surface) {
-        cairo_surface_destroy(doc->surface);
-    }
-    if (doc->searchable_text) {
-        g_free(doc->searchable_text);
-    }
-    g_free(doc);
-}
-
-/**
  * Typ als String zurückgeben
  */
 const char* document_type_string(DocumentType type) {
@@ -1604,12 +1705,13 @@ const char* document_type_string(DocumentType type) {
     }
 }
 
-gint sond_render(fz_context* ctx, fz_buffer* input, gchar const* title,
+gint sond_render(GBytes* input, SondFilePart* sfp, gchar const* title,
 		GError** error) {
 	RenderedDocument* rd = NULL;
 	GtkWidget* widget = NULL;
+	const char* window_title = NULL;
 
-	rd = render_document_from_stream(ctx, input, 0);
+	rd = render_document_from_bytes(input, 0);
 	if (!rd) {
 		if (error) *error = g_error_new(SOND_ERROR, 0,
 				"%s\nStream konnte nicht gerendert werden", __func__);
@@ -1617,9 +1719,15 @@ gint sond_render(fz_context* ctx, fz_buffer* input, gchar const* title,
 		return -1;
 	}
 
+	if (title)
+		window_title = title;
+	else if (sfp)
+		window_title = sond_file_part_get_path(sfp);
+	else
+		window_title = document_type_string(rd->type);
+
 	widget = show_surface_viewer(rd->surface, rd->width, rd->height,
-			title ? title : document_type_string(rd->type),
-			rd->searchable_text);
+			window_title, rd->searchable_text, sfp);
 	free_rendered_document(rd);
 	if (!widget) {
 		if (error) *error = g_error_new(SOND_ERROR, 0,

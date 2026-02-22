@@ -184,7 +184,7 @@ selection_abfragen_pdf(Projekt *zond, gchar **errmsg) {
 			continue;
 
 		//Sonderbehandung, falls pdf-Datei
-		sfp = sond_file_part_from_filepart(zond->ctx, file_part, &error);
+		sfp = sond_file_part_from_filepart(file_part, &error);
 		if (!sfp) {
 			if (errmsg) *errmsg = g_strdup_printf("%s\n%s", __func__, error->message);
 			g_error_free(error);

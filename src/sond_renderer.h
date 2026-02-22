@@ -8,6 +8,10 @@
 #ifndef SRC_SOND_RENDERER_H_
 #define SRC_SOND_RENDERER_H_
 
-gint sond_render(fz_context*, fz_buffer*, gchar const*, GError**);
+#include <glib.h>
+
+typedef struct _SondFilePart SondFilePart;
+
+gint sond_render(GBytes*, SondFilePart*, gchar const*, GError**);
 
 #endif /* SRC_SOND_RENDERER_H_ */

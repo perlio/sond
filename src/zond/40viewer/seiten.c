@@ -1227,7 +1227,7 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 		//Datei auswählen
 		path_merge = filename_oeffnen(GTK_WINDOW(pv->vf));
 
-		sfp = sond_file_part_from_filepart(pv->zond->ctx, path_merge, &error);
+		sfp = sond_file_part_from_filepart(path_merge, &error);
 		g_free(path_merge);
 		if (!sfp) {
 			display_error(pv->vf, "Datei einfügen", error->message);

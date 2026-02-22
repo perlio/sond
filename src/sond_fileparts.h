@@ -61,8 +61,7 @@ gint sond_file_part_open(SondFilePart*, gboolean, GError**);
 
 gchar* sond_file_part_get_filepart(SondFilePart*);
 
-SondFilePart* sond_file_part_from_filepart(fz_context*,
-		gchar const*, GError**);
+SondFilePart* sond_file_part_from_filepart(gchar const*, GError**);
 
 gint sond_file_part_delete(SondFilePart*, GError**);
 

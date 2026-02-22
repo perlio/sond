@@ -2400,7 +2400,7 @@ static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 			ERROR_Z
 	}
 
-	sfp = sond_file_part_from_filepart(zond->ctx, file_part, error);
+	sfp = sond_file_part_from_filepart(file_part, error);
 	g_free(file_part);
 	if (!sfp) {
 		g_free(section);
