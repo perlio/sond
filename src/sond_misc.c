@@ -279,6 +279,13 @@ const gchar* mime_to_extension_with_params(const char* mime_type) {
 gchar* mime_guess_content_type(unsigned char* buffer, gsize size, GError** error) {
     gchar* result = NULL;
 
+    //erst einmal zip-Erkennung
+    if (size >= 4 && buffer[0]=='P' && buffer[1]=='K' &&
+        (buffer[2]==0x03 || buffer[2]==0x05 || buffer[2]==0x07) &&
+        (buffer[3]==0x04 || buffer[3]==0x06 || buffer[3]==0x08)) {
+        return g_strdup("application/zip");
+    }
+
     magic_t magic = magic_open(MAGIC_MIME_TYPE);
     if (!magic) {
     	if (error) *error = g_error_new(g_quark_from_static_string("stdlib"), errno,

@@ -2783,19 +2783,21 @@ static gint zond_treeview_load_node(ZondTreeview *ztv, gint node_id,
 				error);
 		if (rc)
 			ERROR_Z
-	} else //eigentlich nur link, copy oder strukt...
+	}
+	else //eigentlich nur link, copy oder strukt...
 	{
 		gchar *icon_name = NULL;
 		gchar *node_text = NULL;
 
 		zond_tree_store_insert(
-				ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(ztv) )),
+				ZOND_TREE_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(ztv))),
 				iter_anchor, child, &iter_new);
 
 		if (type == ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_LINK) {
 			icon_name = g_strdup_printf("%d", node_id); //head_nr wird hier gespeichert
 			node_id = link * -1;
-		} else {
+		}
+		else {
 			gint rc = 0;
 
 			rc = zond_dbase_get_node(

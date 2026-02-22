@@ -316,8 +316,8 @@ SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM* stvfm,
 			stvfm_item_priv->has_children =
 					sond_tvfm_item_load_zip_dir(stvfm_item, NULL, NULL) ?
 							TRUE : FALSE;
-			stvfm_item_priv->icon_name =(path_or_section) ?
-					"folder" : "zip";
+			stvfm_item_priv->icon_name = (path_or_section) ?
+					"folder" : "package-x-generic";
 		}
 		else if (SOND_IS_FILE_PART_GMESSAGE(sond_file_part)) {
 			stvfm_item_priv->type = SOND_TVFM_ITEM_TYPE_DIR;
@@ -459,6 +459,67 @@ static gint sond_tvfm_item_load_fs_dir(SondTVFMItem* stvfm_item,
 
 static gint sond_tvfm_item_load_zip_dir(SondTVFMItem* stvfm_item,
 		GPtrArray** arr_children, GError** error) {
+	GPtrArray* entries = NULL;
+
+	SondTVFMItemPrivate* stvfm_item_priv =
+			sond_tvfm_item_get_instance_private(stvfm_item);
+
+	/* path_or_section ist das Verzeichnispäfix (ohne '/'), NULL = Archiv-Wurzel */
+	entries = sond_file_part_zip_list_dir(
+			SOND_FILE_PART_ZIP(stvfm_item_priv->sond_file_part),
+			stvfm_item_priv->path_or_section, error);
+	if (!entries)
+		return -1; /* Fehler */
+
+	if (!arr_children) {
+		/* Nur prüfen ob Einträge vorhanden */
+		gboolean has = (entries->len > 0);
+		g_ptr_array_unref(entries);
+		return has ? 1 : 0;
+	}
+
+	*arr_children = g_ptr_array_new_with_free_func((GDestroyNotify)g_object_unref);
+
+	for (guint i = 0; i < entries->len; i++) {
+		gchar const* entry_path = g_ptr_array_index(entries, i);
+		gboolean is_dir = g_str_has_suffix(entry_path, "/");
+		SondTVFMItem* child = NULL;
+
+		if (is_dir) {
+			/* Verzeichnis: path_or_section = Pfad ohne abschließendes '/' */
+			gchar* dir_path = g_strndup(entry_path, strlen(entry_path) - 1);
+			child = sond_tvfm_item_create(stvfm_item_priv->stvfm,
+					stvfm_item_priv->sond_file_part, dir_path);
+			g_free(dir_path);
+		} else {
+			/* Datei: sfp mit MIME-Erkennung aus ZIP-Inhalt erzeugen */
+			GError* err_local = NULL;
+			gchar* mime = NULL;
+			SondFilePart* sfp_child = NULL;
+
+			mime = sond_file_part_zip_guess_mime(
+					SOND_FILE_PART_ZIP(stvfm_item_priv->sond_file_part),
+					entry_path, &err_local);
+			if (!mime) {
+				LOG_WARN("MIME-Erkennung für '%s' fehlgeschlagen: %s - Fallback auf octet-stream",
+						entry_path, err_local ? err_local->message : "?");
+				g_clear_error(&err_local);
+			}
+
+			sfp_child = sond_file_part_create_from_mime_type(
+					entry_path,
+					stvfm_item_priv->sond_file_part,
+					mime ? mime : "application/octet-stream");
+			g_free(mime);
+
+			child = sond_tvfm_item_create(stvfm_item_priv->stvfm, sfp_child, NULL);
+			g_object_unref(sfp_child);
+		}
+
+		g_ptr_array_add(*arr_children, child);
+	}
+
+	g_ptr_array_unref(entries);
 
 	return 0;
 }
