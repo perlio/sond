@@ -1077,7 +1077,7 @@ static gint sond_file_part_insert(SondFilePart* sfp, fz_context* ctx,
 		//fz_save_buffer löscht klaglos ein etwaig bestehendes file gleichen Namens
 		//Daher ein Test:
 		if (sond_exists(path)) {
-			if (error) *error = g_error_new(SOND_ERROR, SOND_ERROR_EXISTS,
+			if (error) *error = g_error_new(G_IO_ERROR, G_IO_ERROR_EXISTS,
 					"%s\nDatei existiert", __func__);
 
 			return -1;
