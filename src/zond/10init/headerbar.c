@@ -299,10 +299,11 @@ static void cb_item_search_fs_activate(GtkMenuItem *item, gpointer data) {
 	return;
 }
 
-static void cb_menu_datei_beenden_activate(gpointer data) {
+static void cb_menu_datei_beenden_activate(GtkWidget* item, gpointer data) {
+	gboolean ret = FALSE;
+
 	Projekt *zond = (Projekt*) data;
 
-	gboolean ret = FALSE;
 	g_signal_emit_by_name(zond->app_window, "delete-event", NULL, &ret);
 
 	return;

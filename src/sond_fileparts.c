@@ -314,68 +314,6 @@ static GMimeObject* sond_file_part_gmessage_lookup_part_by_path(SondFilePartGMes
 static fz_stream* sond_file_part_pdf_lookup_embedded_file(fz_context*,
 		SondFilePartPDF*, gchar const*, GError**);
 
-static fz_stream* get_istream(fz_context* ctx, SondFilePart* sfp_parent, gchar const* path,
-		gboolean need_seekable, GError** error) {
-	fz_stream* stream = NULL;
-
-	//Datei im Filesystem
-	if (!sfp_parent) {
-		//ToDo: longpath-Support!!!
-		fz_try(ctx)
-			stream = fz_open_file(ctx, path);
-		fz_catch(ctx) {
-			if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
-					fz_caught(ctx), "%s\nfz_open_file: %s", __func__,
-					fz_caught_message(ctx));
-
-			return NULL; //Fehler beim Öffnen des Streams
-		}
-	}
-	//Datei in PDF
-	else if (SOND_IS_FILE_PART_PDF(sfp_parent)) {
-		stream = sond_file_part_pdf_lookup_embedded_file(ctx,
-				SOND_FILE_PART_PDF(sfp_parent), path, error);
-		if (!stream)
-			ERROR_Z_VAL(NULL)
-
-		if (!stream->seek && need_seekable) { //stream ist nicht seekable - muß in buffer
-			fz_buffer *buf = NULL;
-
-			fz_try(ctx)
-				buf = fz_read_all(ctx, stream, 4096);
-			fz_always(ctx)
-				fz_drop_stream(ctx, stream);
-			fz_catch(ctx) {
-				if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
-						fz_caught(ctx), "%s\nfz_read_all: %s", __func__,
-						fz_caught_message(ctx));
-
-				return NULL;
-			}
-
-			fz_try(ctx)
-				stream = fz_open_buffer(ctx, buf);
-			fz_always(ctx)
-				fz_drop_buffer(ctx, buf);
-			fz_catch(ctx) {
-				if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
-						fz_caught(ctx), "%s\nfz_open_buffer: %s", __func__,
-						fz_caught_message(ctx));
-
-				return NULL;
-			}
-		}
-	}
-	else {
-		if (error) *error = g_error_new(SOND_ERROR, 0, "%s\nStream für SondFilePart-Typ"
-			"kann nicht geöffnet werden", __func__);
-
-		ERROR_Z_VAL(NULL)
-	}
-
-	return stream;
-}
-
 static GBytes* sond_file_part_gmessage_read_part(SondFilePartGMessage*, gchar const*, GError**);
 
 /*
@@ -606,7 +544,7 @@ static GBytes* sond_file_part_gmessage_read_part(SondFilePartGMessage* sfp_gmess
 	return result;
 }
 
-static GBytes* sond_file_part_get_bytes(SondFilePart* sfp, GError** error) {
+GBytes* sond_file_part_get_bytes(SondFilePart* sfp, GError** error) {
 	guchar* data = NULL;
 	gsize len = 0;
 
@@ -627,7 +565,7 @@ static GBytes* sond_file_part_get_bytes(SondFilePart* sfp, GError** error) {
 		return sond_file_part_zip_read_file(SOND_FILE_PART_ZIP(sfp_parent), path, error);
 	else if (SOND_IS_FILE_PART_GMESSAGE(sfp_parent))
 		return sond_file_part_gmessage_read_part(SOND_FILE_PART_GMESSAGE(sfp_parent), path, error);
-	/* PDF-embedded: über fz_stream */
+	/* PDF-embedded: stream holen, vollständig lesen */
 	else if (SOND_IS_FILE_PART_PDF(sfp_parent)) {
 		fz_context* ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
 		if (!ctx) {
@@ -636,7 +574,8 @@ static GBytes* sond_file_part_get_bytes(SondFilePart* sfp, GError** error) {
 			return NULL;
 		}
 
-		fz_stream* stream = get_istream(ctx, sfp_parent, path, FALSE, error);
+		fz_stream* stream = sond_file_part_pdf_lookup_embedded_file(
+				ctx, SOND_FILE_PART_PDF(sfp_parent), path, error);
 		if (!stream) {
 			fz_drop_context(ctx);
 			ERROR_Z_VAL(NULL)
@@ -1494,10 +1433,36 @@ pdf_document* sond_file_part_pdf_open_document(fz_context* ctx,
 	gint rc = 0;
 	pdf_document* doc = NULL;
 	fz_stream* stream = NULL;
+	SondFilePart* sfp_parent = sond_file_part_get_parent(SOND_FILE_PART(sfp_pdf));
+	gchar const* path = sond_file_part_get_path(SOND_FILE_PART(sfp_pdf));
 
-	stream = get_istream(ctx,
-			sond_file_part_get_parent(SOND_FILE_PART(sfp_pdf)),
-			sond_file_part_get_path(SOND_FILE_PART(sfp_pdf)), TRUE, error);
+	if (!sfp_parent) {
+		/* Filesystem: fz_open_file (lazy, kein RAM-Overhead).
+		 * ToDo: Long-Path-Support für Windows (fz_open_file kennt kein \\?\) */
+		gchar* full_path = g_strconcat(
+				SOND_FILE_PART_CLASS(g_type_class_peek(SOND_TYPE_FILE_PART))->path_root,
+				"/", path, NULL);
+		fz_try(ctx)
+			stream = fz_open_file(ctx, full_path);
+		fz_catch(ctx) {
+			if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
+					fz_caught(ctx), "%s\nfz_open_file '%s': %s",
+					__func__, full_path, fz_caught_message(ctx));
+			g_free(full_path);
+			return NULL;
+		}
+		g_free(full_path);
+	} else {
+		/* ZIP, GMessage, PDF-embedded: vollständig laden, dann als Stream */
+		GBytes* bytes = sond_file_part_get_bytes(SOND_FILE_PART(sfp_pdf), error);
+		if (!bytes)
+			ERROR_Z_VAL(NULL)
+		stream = sond_gbytes_to_fz_stream(ctx, bytes, error);
+		g_bytes_unref(bytes);
+		if (!stream)
+			ERROR_Z_VAL(NULL)
+	}
+
 	if (!stream)
 		ERROR_Z_VAL(NULL)
 

@@ -55,6 +55,8 @@ void sond_file_part_set_has_children(SondFilePart*, gboolean);
 
 GPtrArray* sond_file_part_get_arr_opened_files(SondFilePart*);
 
+GBytes* sond_file_part_get_bytes(SondFilePart*, GError**);
+
 gchar* sond_file_part_write_to_tmp_file(SondFilePart*, GError**);
 
 gint sond_file_part_open(SondFilePart*, gboolean, GError**);

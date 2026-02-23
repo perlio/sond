@@ -27,6 +27,7 @@ typedef char gchar;
 typedef void* gpointer;
 typedef int gboolean;
 
+typedef struct _GBytes GBytes;
 typedef struct _GError GError;
 
 #define ERROR_MUPDF_R(x,y) { if ( errmsg ) *errmsg = add_string( *errmsg, g_strconcat( \
@@ -76,5 +77,11 @@ gint pdf_page_has_hidden_text(fz_context* ctx, pdf_page* page,
 		gboolean* hidden, GError** error);
 
 pdf_annot* pdf_annot_lookup_index(fz_context*, pdf_page*, gint);
+
+/**
+ * Erzeugt einen seekbaren fz_stream aus einem GBytes-Puffer.
+ * Der Stream hält eine eigene Kopie der Daten (via fz_buffer).
+ */
+fz_stream* sond_gbytes_to_fz_stream(fz_context* ctx, GBytes* bytes, GError** error);
 
 #endif /* SRC_SOND_PDF_HELPER_H_ */

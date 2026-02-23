@@ -1057,3 +1057,34 @@ pdf_open_file(fz_context *ctx, const gchar *filename, GError **error)
     /* WICHTIG: file muss später manuell geschlossen werden! */
     return stream;
 }
+
+fz_stream*
+sond_gbytes_to_fz_stream(fz_context* ctx, GBytes* bytes, GError** error)
+{
+    gsize len = 0;
+    const guchar* data = g_bytes_get_data(bytes, &len);
+    fz_buffer* buf = NULL;
+    fz_stream* stream = NULL;
+
+    fz_try(ctx)
+        buf = fz_new_buffer_from_copied_data(ctx, data, len);
+    fz_catch(ctx) {
+        if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
+                fz_caught(ctx), "%s\nfz_new_buffer_from_copied_data: %s",
+                __func__, fz_caught_message(ctx));
+        return NULL;
+    }
+
+    fz_try(ctx)
+        stream = fz_open_buffer(ctx, buf);
+    fz_always(ctx)
+        fz_drop_buffer(ctx, buf); /* stream hält eigene Referenz */
+    fz_catch(ctx) {
+        if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
+                fz_caught(ctx), "%s\nfz_open_buffer: %s",
+                __func__, fz_caught_message(ctx));
+        return NULL;
+    }
+
+    return stream;
+}
