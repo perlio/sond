@@ -208,24 +208,3 @@ fz_buffer*
 pdf_ocr_get_content_stream_as_buffer(fz_context *ctx, pdf_obj *page_ref,
 		gchar **errmsg);
 
-gint pdf_print_content_stream(fz_context *ctx, pdf_obj *page_ref,
-		GError **error) {
-	gchar* errmsg = NULL;
-	fz_buffer *buf = NULL;
-
-	buf = pdf_ocr_get_content_stream_as_buffer(ctx, page_ref, &errmsg);
-	if (!buf) {
-		if (error)
-			*error = g_error_new(g_quark_from_static_string("mupdf"),
-					fz_caught(ctx), "%s\n%s", __func__, errmsg ? errmsg : "");
-		g_free(errmsg);
-		return -1;
-	}
-
-	pdf_print_buffer(ctx, buf);
-
-	fz_drop_buffer(ctx, buf);
-
-	return 0;
-}
-

@@ -182,14 +182,14 @@ static gboolean navigate_to_sfp(SurfaceViewer *viewer, SondFilePart *new_sfp) {
 
     gsize len = 0;
     guchar *data = NULL;
-    if (!g_file_get_contents(tmp, (gchar**)&data, &len, &error)) {
+    if (!sond_file_get_contents(tmp, (gchar**)&data, &len, &error)) {
         LOG_WARN("%s\n%s", __func__, error ? error->message : "?");
         g_clear_error(&error);
         sond_remove(tmp, NULL);
         g_free(tmp);
         return FALSE;
     }
-    g_remove(tmp);
+    sond_remove(tmp, NULL);
     g_free(tmp);
 
     bytes = g_bytes_new_take(data, len);

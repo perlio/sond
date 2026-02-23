@@ -619,7 +619,7 @@ static GBytes* sond_file_part_get_bytes(SondFilePart* sfp, GError** error) {
 		g_autofree gchar* full_path = g_strconcat(
 				SOND_FILE_PART_CLASS(g_type_class_peek(SOND_TYPE_FILE_PART))->path_root,
 				"/", path, NULL);
-		if (!g_file_get_contents(full_path, (gchar**)&data, &len, error))
+		if (!sond_file_get_contents(full_path, (gchar**)&data, &len, error))
 			ERROR_Z_VAL(NULL)
 		return g_bytes_new_take(data, len);
 	}

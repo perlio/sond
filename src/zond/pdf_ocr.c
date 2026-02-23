@@ -44,7 +44,7 @@ pdf_ocr_find_BT(gchar *buf, size_t size) {
 	return NULL;
 }
 
-fz_buffer*
+static fz_buffer*
 pdf_ocr_get_content_stream_as_buffer(fz_context *ctx, pdf_obj *page_ref,
 		gchar **errmsg) {
 	pdf_obj *obj_contents = NULL;
