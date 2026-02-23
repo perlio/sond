@@ -176,4 +176,17 @@ void sond_dir_close(SondDir *dir);
  */
 gboolean sond_open(const gchar *path, gboolean open_with, GError **error);
 
+/**
+ * Liest den gesamten Inhalt einer Datei in einen neu allozierten Puffer.
+ * Plattformübergreifend mit Long-Path-Support unter Windows.
+ * Die Signatur ist analog zu g_file_get_contents.
+ *
+ * @param path    UTF-8-kodierter Pfad zur Datei
+ * @param contents Zeiger auf gchar*, wird mit den Dateidaten befüllt (mit g_free freigeben)
+ * @param length  Wird mit der Dateigröße in Bytes befüllt (optional, kann NULL sein)
+ * @param error   Optionaler GError für Fehlermeldungen
+ * @return TRUE bei Erfolg, FALSE bei Fehler
+ */
+gboolean sond_file_get_contents(const gchar *path, gchar **contents, gsize *length, GError **error);
+
 #endif /* SRC_SOND_FILE_HELPER_H_ */

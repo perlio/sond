@@ -802,6 +802,48 @@ sond_dir_close(SondDir *dir)
 }
 
 gboolean
+sond_file_get_contents(const gchar *path, gchar **contents, gsize *length, GError **error)
+{
+    FILE *f = NULL;
+    GStatBuf st;
+    gchar *buf = NULL;
+    gsize file_size;
+    gsize bytes_read;
+
+    g_return_val_if_fail(path != NULL, FALSE);
+    g_return_val_if_fail(contents != NULL, FALSE);
+
+    if (sond_stat(path, &st, error) != 0)
+        return FALSE;
+
+    file_size = (gsize)st.st_size;
+
+    f = sond_fopen(path, "rb", error);
+    if (!f)
+        return FALSE;
+
+    /* +1 für abschließende NUL, analog zu g_file_get_contents */
+    buf = g_malloc(file_size + 1);
+    bytes_read = fread(buf, 1, file_size, f);
+    fclose(f);
+
+    if (bytes_read != file_size) {
+        g_free(buf);
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "%s\nfread: %zu von %zu Bytes gelesen",
+                    __func__, bytes_read, file_size);
+        return FALSE;
+    }
+
+    buf[file_size] = '\0';
+    *contents = buf;
+    if (length)
+        *length = file_size;
+
+    return TRUE;
+}
+
+gboolean
 sond_open(const gchar *path, gboolean open_with, GError **error)
 {
     g_return_val_if_fail(path != NULL, FALSE);
