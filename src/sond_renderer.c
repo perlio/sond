@@ -1644,16 +1644,73 @@ static RenderedDocument* render_document_from_bytes(GBytes *bytes, int render_wi
 
     // Je nach Typ rendern
     switch (type) {
-        case DOC_TYPE_HTML: {
-            gsize len;
-            const char *data = g_bytes_get_data(bytes, &len);
-            char *html = g_strndup(data, len);
-            result = render_html(html, render_width);
-            g_free(html);
-            break;
+    case DOC_TYPE_HTML: {
+        gsize len;
+        const char *data = g_bytes_get_data(bytes, &len);
+
+        /* Sicherstellen, dass der HTML-String in UTF-8 vorliegt.
+         * Strategie:
+         *  1. Ist der Puffer bereits gültiges UTF-8 → direkt verwenden.
+         *  2. Andernfalls: charset-Angabe im <meta>-Tag suchen und mit
+         *     g_convert umwandeln. Wird nichts gefunden, nehmen wir
+         *     Windows-1252 als Fallback (deckt Latin-1 / CP1252 ab). */
+        char *html = NULL;
+
+        if (g_utf8_validate(data, (gssize)len, NULL)) {
+            /* Bereits UTF-8 – einfach kopieren */
+            html = g_strndup(data, len);
+        } else {
+            /* Encoding aus dem HTML ermitteln */
+            const char *detected_charset = NULL;
+            gchar *probe = g_strndup(data, len < 1024 ? len : 1024);
+            gchar *probe_lower = g_ascii_strdown(probe, -1);
+            g_free(probe);
+
+            /* Suche nach charset=... in den ersten 1024 Bytes */
+            const gchar *cs_pos = strstr(probe_lower, "charset=");
+            if (cs_pos) {
+                cs_pos += strlen("charset=");
+                /* Anführungszeichen oder Leerzeichen überspringen */
+                while (*cs_pos == '"' || *cs_pos == '\'' || *cs_pos == ' ')
+                    cs_pos++;
+                /* Charset-Name bis zum nächsten Trenner lesen */
+                gchar charset_buf[64] = {0};
+                gsize ci = 0;
+                while (ci < sizeof(charset_buf) - 1 &&
+                       *cs_pos && *cs_pos != '"' && *cs_pos != '\'' &&
+                       *cs_pos != ' ' && *cs_pos != ';' && *cs_pos != '>')
+                    charset_buf[ci++] = *cs_pos++;
+                if (ci > 0)
+                    detected_charset = g_strdup(charset_buf);
+            }
+            g_free(probe_lower);
+
+            const char *from_charset = detected_charset
+                                       ? detected_charset
+                                       : "windows-1252";
+
+            GError *conv_err = NULL;
+            gsize  bytes_written = 0;
+            html = g_convert(data, (gssize)len,
+                             "UTF-8", from_charset,
+                             NULL, &bytes_written, &conv_err);
+            if (!html) {
+                /* Letzter Ausweg: ungültige Bytes durch U+FFFD ersetzen */
+                LOG_WARN("%s\ng_convert von '%s' nach UTF-8 fehlgeschlagen: %s – "
+                         "ersetze ungültige Bytes",
+                         __func__, from_charset,
+                         conv_err ? conv_err->message : "?");
+                g_clear_error(&conv_err);
+                html = g_utf8_make_valid(data, (gssize)len);
+            }
+            g_free((gpointer)detected_charset);
         }
 
-        case DOC_TYPE_IMAGE:
+        result = render_html(html, render_width);
+        g_free(html);
+        break;
+    }
+    case DOC_TYPE_IMAGE:
             result = render_image(bytes, render_width);
             break;
 
@@ -1668,20 +1725,34 @@ static RenderedDocument* render_document_from_bytes(GBytes *bytes, int render_wi
 
         case DOC_TYPE_UNKNOWN:
         default: {
-            // Fallback: Als Plain Text behandeln
             gsize len;
             const char *data = g_bytes_get_data(bytes, &len);
-            char *text = g_strndup(data, len);
 
-            // Erstelle einfache Textdarstellung
-            GString *formatted = g_string_new("Unknown Document Type\n\n");
-            g_string_append(formatted, text);
-            g_free(text);
+            /* Encoding-sichere Übernahme – identisch zum HTML-Zweig,
+             * nur ohne charset-Suche (Plain-Text hat kein <meta>). */
+            char *safe_text = NULL;
+            if (g_utf8_validate(data, (gssize)len, NULL)) {
+                safe_text = g_strndup(data, len);
+            } else {
+                GError *conv_err = NULL;
+                safe_text = g_convert(data, (gssize)len,
+                                      "UTF-8", "windows-1252",
+                                      NULL, NULL, &conv_err);
+                if (!safe_text) {
+                    LOG_WARN("%s\ng_convert (plain text) fehlgeschlagen: %s – "
+                             "ersetze ungültige Bytes",
+                             __func__, conv_err ? conv_err->message : "?");
+                    g_clear_error(&conv_err);
+                    safe_text = g_utf8_make_valid(data, (gssize)len);
+                }
+            }
+
+            GString *formatted = g_string_new(safe_text);
+            g_free(safe_text);
 
             result = render_html(formatted->str, render_width);
-            if (result) {
+            if (result)
                 result->type = DOC_TYPE_UNKNOWN;
-            }
             g_string_free(formatted, TRUE);
             break;
         }
