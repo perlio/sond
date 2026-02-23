@@ -84,4 +84,10 @@ pdf_annot* pdf_annot_lookup_index(fz_context*, pdf_page*, gint);
  */
 fz_stream* sond_gbytes_to_fz_stream(fz_context* ctx, GBytes* bytes, GError** error);
 
+/**
+ * Öffnet eine PDF-Datei als fz_stream mit Long-Path-Support (Windows: fz_open_file_w,
+ * Linux/Mac: fz_open_file). Der Stream schließt die Datei beim fz_drop_stream selbst.
+ */
+fz_stream* sond_pdf_open_file(fz_context* ctx, const gchar* path, GError** error);
+
 #endif /* SRC_SOND_PDF_HELPER_H_ */

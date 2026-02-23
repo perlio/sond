@@ -1033,28 +1033,36 @@ pdf_annot* pdf_annot_lookup_index(fz_context* ctx, pdf_page* pdf_page, gint inde
 }
 
 fz_stream*
-pdf_open_file(fz_context *ctx, const gchar *filename, GError **error)
+sond_pdf_open_file(fz_context *ctx, const gchar *path, GError **error)
 {
-    FILE *file = NULL;
     fz_stream *stream = NULL;
 
-    /* Öffne Datei mit Long-Path-Support */
-    file = sond_fopen(filename, "rb", error);
-    if (!file)
+#ifdef G_OS_WIN32
+    /* Auf Windows: fz_open_file_w mit \\?\-Präfix für Long-Path-Support.
+     * fz_open_file_w öffnet intern mit _wfopen und schließt FILE* beim Drop. */
+    wchar_t *long_path = prepare_long_path(path, error);
+    if (!long_path)
         return NULL;
 
-    fz_try(ctx) {
-        /* Erstelle fz_stream aus FILE* */
-        stream = fz_open_file_ptr_no_close(ctx, file);
-    }
+    fz_try(ctx)
+        stream = fz_open_file_w(ctx, long_path);
     fz_catch(ctx) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                    "MuPDF Fehler: %s", fz_caught_message(ctx));
-        fclose(file);
+                    "%s\nfz_open_file_w: %s", __func__, fz_caught_message(ctx));
+        g_free(long_path);
         return NULL;
     }
+    g_free(long_path);
+#else
+    fz_try(ctx)
+        stream = fz_open_file(ctx, path);
+    fz_catch(ctx) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "%s\nfz_open_file: %s", __func__, fz_caught_message(ctx));
+        return NULL;
+    }
+#endif
 
-    /* WICHTIG: file muss später manuell geschlossen werden! */
     return stream;
 }
 

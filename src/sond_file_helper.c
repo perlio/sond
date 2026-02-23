@@ -30,8 +30,8 @@
 #include <wchar.h>
 
 
-/* Hilfsfunktion: Konvertiert UTF-8-Pfad zu Wide-String mit \\?\ Prefix */
-static wchar_t*
+/* Konvertiert UTF-8-Pfad zu Wide-String mit \\?\ Prefix */
+wchar_t*
 prepare_long_path(const gchar *path, GError **error)
 {
     wchar_t *wpath = NULL;

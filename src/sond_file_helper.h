@@ -24,6 +24,15 @@
 #include <glib.h>
 #include <glib/gstdio.h>
 #include <stdio.h>
+
+#ifdef G_OS_WIN32
+#include <wchar.h>
+/**
+ * Konvertiert einen UTF-8-Pfad in einen Wide-String mit \\?\\ Präfix
+ * für Windows Long-Path-Support. Rückgabe mit g_free() freigeben.
+ */
+wchar_t* prepare_long_path(const gchar *path, GError **error);
+#endif
 /**
  * Erstellt ein Verzeichnis (Windows: mit Long-Path-Support)
  *

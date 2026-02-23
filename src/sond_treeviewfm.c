@@ -514,8 +514,16 @@ static GPtrArray* sfp_zip_list_dir(SondFilePartZip* sfp_zip,
 
 			g_ptr_array_add(result, e);
 		} else if (*(slash + 1) == '\0') {
-			/* Expliziter Verzeichnis-Eintrag - überspringen */
-			continue;
+			/* Expliziter Verzeichnis-Eintrag: wie abgeleitetes Verzeichnis behandeln */
+			gchar* dir_key = g_strdup(name); /* endet auf '/' */
+			if (!g_hash_table_contains(seen_dirs, dir_key)) {
+				ZipDirEntry* e = g_new0(ZipDirEntry, 1);
+				e->path = g_strdup(dir_key);
+				e->mime = NULL;
+				g_hash_table_add(seen_dirs, dir_key);
+				g_ptr_array_add(result, e);
+			} else
+				g_free(dir_key);
 		} else {
 			/* Datei in Unterverzeichnis → Verzeichnis ableiten */
 			gsize dir_len = (gsize)(slash - name) + 1; /* inkl. '/' */
@@ -1637,7 +1645,7 @@ parent:
 					gchar* dir = NULL;
 
 					base_old = strrchr(path_old, '/');
-					index = atoi(base_old);
+					index = atoi(base_old + 1);
 
 					dir = g_path_get_dirname(path_old);
 					path_new = g_strdup_printf("%s/%u", dir, index - 1);
@@ -2074,7 +2082,7 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 				gchar* dir = NULL;
 
 				base_old = strrchr(stvfm_item_sibling_priv->path_or_section, '/');
-				index = atoi(base_old);
+				index = atoi(base_old + 1);
 
 				dir = g_path_get_dirname(stvfm_item_sibling_priv->path_or_section);
 				path_new = g_strdup_printf("%s/%u", dir, index + 1);
