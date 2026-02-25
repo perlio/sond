@@ -95,7 +95,8 @@ struct _SondFilePartPDFClass {
 };
 
 pdf_document* sond_file_part_pdf_open_document(fz_context*,
-		SondFilePartPDF*, gboolean, GError **);
+		SondFilePartPDF*, gboolean writeable, gboolean prompt_for_path,
+		GError **);
 
 fz_buffer* pdf_doc_to_buf(fz_context* ctx, pdf_document* doc, GError** error);
 

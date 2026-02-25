@@ -1086,56 +1086,56 @@ zip_t* sond_file_part_zip_open_archive(SondFilePartZip* sfp_zip,
 			return NULL;
 		}
 		zip_error_fini(&zip_error);
-		return archive;
 	}
+	else {
+		/* Alle anderen Fälle (verschachtelt oder writeable): vollständig in Puffer laden */
+		GBytes* bytes = sond_file_part_get_bytes(SOND_FILE_PART(sfp_zip), error);
+		if (!bytes)
+			ERROR_Z_VAL(NULL)
 
-	/* Alle anderen Fälle (verschachtelt oder writeable): vollständig in Puffer laden */
-	GBytes* bytes = sond_file_part_get_bytes(SOND_FILE_PART(sfp_zip), error);
-	if (!bytes)
-		ERROR_Z_VAL(NULL)
+		/* libzip verwaltet den Puffer selbst (freep=1), daher eigene Kopie */
+		gconstpointer raw = g_bytes_get_data(bytes, &data_len);
+		data_copy = g_memdup2(raw, data_len);
+		g_bytes_unref(bytes);
+		if (!data_copy) {
+			if (error) *error = g_error_new(SOND_ERROR, 0,
+					"%s\ng_memdup2 fehlgeschlagen", __func__);
+			return NULL;
+		}
 
-	/* libzip verwaltet den Puffer selbst (freep=1), daher eigene Kopie */
-	gconstpointer raw = g_bytes_get_data(bytes, &data_len);
-	data_copy = g_memdup2(raw, data_len);
-	g_bytes_unref(bytes);
-	if (!data_copy) {
-		if (error) *error = g_error_new(SOND_ERROR, 0,
-				"%s\ng_memdup2 fehlgeschlagen", __func__);
-		return NULL;
-	}
+		zip_error_init(&zip_error);
+		src = zip_source_buffer_create(data_copy, data_len, 1 /*freep*/, &zip_error);
+		if (!src) {
+			g_free(data_copy);
+			if (error) *error = g_error_new(SOND_ERROR, 0,
+					"%s\nzip_source_buffer_create: %s", __func__,
+					zip_error_strerror(&zip_error));
+			zip_error_fini(&zip_error);
+			return NULL;
+		}
 
-	zip_error_init(&zip_error);
-	src = zip_source_buffer_create(data_copy, data_len, 1 /*freep*/, &zip_error);
-	if (!src) {
-		g_free(data_copy);
-		if (error) *error = g_error_new(SOND_ERROR, 0,
-				"%s\nzip_source_buffer_create: %s", __func__,
-				zip_error_strerror(&zip_error));
-		zip_error_fini(&zip_error);
-		return NULL;
-	}
+		flags = writeable ? 0 : ZIP_RDONLY;
 
-	flags = writeable ? 0 : ZIP_RDONLY;
-
-	/* Bei writeable: ref erhöhen, damit src nach zip_close() noch verfügbar ist */
-	if (writeable && src_out)
-		zip_source_keep(src);
-
-	archive = zip_open_from_source(src, flags, &zip_error);
-	if (!archive) {
+		/* Bei writeable: ref erhöhen, damit src nach zip_close() noch verfügbar ist */
 		if (writeable && src_out)
-			zip_source_free(src); /* extra ref wieder freigeben */
-		zip_source_free(src);
-		if (error) *error = g_error_new(SOND_ERROR, 0,
-				"%s\nzip_open_from_source: %s", __func__,
-				zip_error_strerror(&zip_error));
-		zip_error_fini(&zip_error);
-		return NULL;
-	}
-	zip_error_fini(&zip_error);
+			zip_source_keep(src);
 
-	if (writeable && src_out)
-		*src_out = src;
+		archive = zip_open_from_source(src, flags, &zip_error);
+		if (!archive) {
+			if (writeable && src_out)
+				zip_source_free(src); /* extra ref wieder freigeben */
+			zip_source_free(src);
+			if (error) *error = g_error_new(SOND_ERROR, 0,
+					"%s\nzip_open_from_source: %s", __func__,
+					zip_error_strerror(&zip_error));
+			zip_error_fini(&zip_error);
+			return NULL;
+		}
+		zip_error_fini(&zip_error);
+
+		if (writeable && src_out)
+			*src_out = src;
+	}
 
 	return archive;
 }
@@ -1454,14 +1454,15 @@ static gint sond_file_part_pdf_authen_doc(SondFilePartPDF* sfp_pdf, fz_context* 
 }
 
 pdf_document* sond_file_part_pdf_open_document(fz_context* ctx,
-		SondFilePartPDF *sfp_pdf, gboolean prompt_for_passwd, GError **error) {
+		SondFilePartPDF *sfp_pdf, gboolean writeable, gboolean prompt_for_passwd,
+		GError **error) {
 	gint rc = 0;
 	pdf_document* doc = NULL;
 	fz_stream* stream = NULL;
 	SondFilePart* sfp_parent = sond_file_part_get_parent(SOND_FILE_PART(sfp_pdf));
 	gchar const* path = sond_file_part_get_path(SOND_FILE_PART(sfp_pdf));
 
-	if (!sfp_parent) {
+	if (!sfp_parent && writeable) {
 		/* Filesystem: Long-Path-Support via sond_pdf_open_file */
 		gchar* full_path = g_strconcat(
 				SOND_FILE_PART_CLASS(g_type_class_peek(SOND_TYPE_FILE_PART))->path_root,
@@ -1470,7 +1471,8 @@ pdf_document* sond_file_part_pdf_open_document(fz_context* ctx,
 		g_free(full_path);
 		if (!stream)
 			return NULL;
-	} else {
+	}
+	else {
 		/* ZIP, GMessage, PDF-embedded: vollständig laden, dann als Stream */
 		GBytes* bytes = sond_file_part_get_bytes(SOND_FILE_PART(sfp_pdf), error);
 		if (!bytes)
@@ -1612,7 +1614,7 @@ gint sond_file_part_pdf_load_embedded_files(SondFilePartPDF* sfp_pdf,
 		return -1;
 	}
 
-	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, FALSE, error);
+	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, FALSE, FALSE, error);
 	if (!doc) {
 		fz_drop_context(ctx);
 		ERROR_Z
@@ -1671,7 +1673,7 @@ static gint sond_file_part_pdf_test_for_embedded_files(
 		return -1;
 	}
 
-	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, FALSE, error);
+	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, FALSE, FALSE, error);
 	if (!doc) {
 		fz_drop_context(ctx);
 		ERROR_Z
@@ -1744,7 +1746,7 @@ static fz_stream* sond_file_part_pdf_lookup_embedded_file(fz_context* ctx,
 	pdf_document* doc = NULL;
 
 	doc = sond_file_part_pdf_open_document(ctx,
-			sfp_pdf, FALSE, error);
+			sfp_pdf, FALSE, FALSE, error);
 	if (!doc)
 		ERROR_Z_VAL(NULL)
 
@@ -1859,7 +1861,7 @@ static fz_buffer* sond_file_part_pdf_mod_emb_file(SondFilePartPDF* sfp_pdf,
 	fz_buffer* buf_out = NULL;
 	Modify modify = { path, buf, FALSE };
 
-	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, TRUE, error);
+	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, FALSE, TRUE, error);
 	if (!doc)
 		ERROR_Z_VAL(NULL)
 
@@ -1982,7 +1984,7 @@ static gint sond_file_part_pdf_rename_embedded_file(SondFilePartPDF* sfp_pdf,
 		return -1;
 	}
 
-	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, TRUE, error);
+	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, TRUE, TRUE, error);
 	if (!doc) {
 		fz_drop_context(ctx);
 		ERROR_Z
@@ -2030,7 +2032,7 @@ static gint sond_file_part_pdf_insert_embedded_file(SondFilePartPDF* sfp_pdf,
 	gint rc = 0;
 	pdf_document* doc = NULL;
 
-	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, TRUE, error);
+	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, TRUE, TRUE, error);
 	if (!doc)
 		ERROR_Z
 

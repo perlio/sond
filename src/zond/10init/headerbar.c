@@ -42,7 +42,6 @@
 
 //#include "../99conv/pdf.h"
 #include "../99conv/test.h"
-#include "../pdf_ocr.h"
 
 #include "../20allgemein/pdf_text.h"
 #include "../20allgemein/ziele.h"
@@ -330,7 +329,7 @@ static gint clean_pdf(fz_context *ctx, SondFilePartPDF* sfp_pdf, GError **error)
 		return -1;
 	}
 
-	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, TRUE, error);
+	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, TRUE, TRUE, error);
 	if (!doc) {
 		if (g_error_matches(*error, g_quark_from_static_string("sond"), 1)) { //auth failed
 			g_clear_error(error);
@@ -356,7 +355,6 @@ static gint clean_pdf(fz_context *ctx, SondFilePartPDF* sfp_pdf, GError **error)
 	fz_always(ctx)
 		g_free(pages);
 	fz_catch(ctx) {
-
 		pdf_drop_document(ctx, doc);
 		g_object_unref(sfp_pdf);
 		if (!sond_remove(path_tmp, &error_rem)) {
@@ -614,7 +612,7 @@ static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 			}
 
 			doc = sond_file_part_pdf_open_document(zond->ctx, sfp_pdf,
-					FALSE, &error);
+					TRUE, FALSE, &error);
 			if (!doc) {
 				info_window_set_message(info_window,
 						"PDF '%s' konnte nicht geöffnet werden: %s",

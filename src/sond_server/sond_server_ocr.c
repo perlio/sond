@@ -477,8 +477,21 @@ static gboolean ocr_log_write(SeafileConfig *config, SoupSession *session,
         g_free(iso8601);
     }
 
-    json_builder_end_object(builder);
-    json_builder_end_object(builder);
+    json_builder_end_object(builder); /* end "files" */
+
+	/* log_msg */
+	json_builder_set_member_name(builder, "log_msg");
+	json_builder_begin_array(builder);
+
+	if (log_entry->log_msg) {
+		for (guint i = 0; i < log_entry->log_msg->len; i++) {
+			const gchar *msg = g_ptr_array_index(log_entry->log_msg, i);
+			json_builder_add_string_value(builder, msg ? msg : "");
+		}
+	}
+
+	json_builder_end_array(builder);
+	json_builder_end_object(builder); /* end root */
 
     JsonGenerator *gen = json_generator_new();
     json_generator_set_root(gen, json_builder_get_root(builder));

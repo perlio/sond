@@ -31,7 +31,6 @@
 
 #include "../zond_init.h"
 #include "../zond_pdf_document.h"
-#include "../pdf_ocr.h"
 
 #include "../99conv/general.h"
 
@@ -684,7 +683,7 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 		ctx = zond_pdf_document_get_ctx(dd->zpdfd_part->zond_pdf_document);
 		doc = sond_file_part_pdf_open_document(ctx,
 				zond_pdf_document_get_sfp_pdf(dd->zpdfd_part->zond_pdf_document),
-				FALSE, error);
+				TRUE, FALSE, error);
 		if (!doc)
 			ERROR_Z
 

@@ -34,7 +34,6 @@
 #include "../zond_dbase.h"
 
 #include "../99conv/general.h"
-#include "../pdf_ocr.h"
 
 #include "../20allgemein/ziele.h"
 #include "../20allgemein/project.h"
@@ -307,123 +306,6 @@ static GdkPixbuf* pixmap_to_pixbuf(fz_context *ctx, fz_pixmap *pix)
     }
 
     return pixbuf;
-}
-
-// Hauptfunktion: Drei Pixmaps nebeneinander anzeigen
-static GtkWidget* show_three_pixmaps(fz_context *ctx,
-                              fz_pixmap *pix1,
-                              fz_pixmap *pix2,
-                              fz_pixmap *pix3,
-                              const char *title1,
-                              const char *title2,
-                              const char *title3)
-{
-    GtkWidget *window = NULL;
-    GtkWidget *hbox = NULL;
-    GtkWidget *scrolled1 = NULL;
-    GtkWidget *scrolled2 = NULL;
-    GtkWidget *scrolled3 = NULL;
-    GtkWidget *image1 = NULL;
-    GtkWidget *image2 = NULL;
-    GtkWidget *image3 = NULL;
-    GtkWidget *vbox1 = NULL;
-    GtkWidget *vbox2 = NULL;
-    GtkWidget *vbox3 = NULL;
-    GtkWidget *label1 = NULL;
-    GtkWidget *label2 = NULL;
-    GtkWidget *label3 = NULL;
-    GdkPixbuf *pixbuf1 = NULL;
-    GdkPixbuf *pixbuf2 = NULL;
-    GdkPixbuf *pixbuf3 = NULL;
-
-    // Fenster erstellen
-    window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-    gtk_window_set_title(GTK_WINDOW(window), "Pixmap Comparison");
-    gtk_window_set_default_size(GTK_WINDOW(window), 1200, 600);
-
-    // Horizontale Box für drei Bereiche
-    hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
-    gtk_container_add(GTK_CONTAINER(window), hbox);
-
-    // --- Erste Pixmap ---
-    vbox1 = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
-    gtk_box_pack_start(GTK_BOX(hbox), vbox1, TRUE, TRUE, 0);
-
-    if (title1) {
-        label1 = gtk_label_new(title1);
-        gtk_box_pack_start(GTK_BOX(vbox1), label1, FALSE, FALSE, 0);
-    }
-
-    scrolled1 = gtk_scrolled_window_new(NULL, NULL);
-    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled1),
-                                   GTK_POLICY_AUTOMATIC,
-                                   GTK_POLICY_AUTOMATIC);
-    gtk_box_pack_start(GTK_BOX(vbox1), scrolled1, TRUE, TRUE, 0);
-
-    if (pix1) {
-        pixbuf1 = pixmap_to_pixbuf(ctx, pix1);
-        if (pixbuf1) {
-            image1 = gtk_image_new_from_pixbuf(pixbuf1);
-            g_object_unref(pixbuf1);
-            gtk_container_add(GTK_CONTAINER(scrolled1), image1);
-        }
-    }
-
-    // --- Zweite Pixmap ---
-    vbox2 = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
-    gtk_box_pack_start(GTK_BOX(hbox), vbox2, TRUE, TRUE, 0);
-
-    if (title2) {
-        label2 = gtk_label_new(title2);
-        gtk_box_pack_start(GTK_BOX(vbox2), label2, FALSE, FALSE, 0);
-    }
-
-    scrolled2 = gtk_scrolled_window_new(NULL, NULL);
-    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled2),
-                                   GTK_POLICY_AUTOMATIC,
-                                   GTK_POLICY_AUTOMATIC);
-    gtk_box_pack_start(GTK_BOX(vbox2), scrolled2, TRUE, TRUE, 0);
-
-    if (pix2) {
-        pixbuf2 = pixmap_to_pixbuf(ctx, pix2);
-        if (pixbuf2) {
-            image2 = gtk_image_new_from_pixbuf(pixbuf2);
-            g_object_unref(pixbuf2);
-            gtk_container_add(GTK_CONTAINER(scrolled2), image2);
-        }
-    }
-
-    // --- Dritte Pixmap ---
-    vbox3 = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
-    gtk_box_pack_start(GTK_BOX(hbox), vbox3, TRUE, TRUE, 0);
-
-    if (title3) {
-        label3 = gtk_label_new(title3);
-        gtk_box_pack_start(GTK_BOX(vbox3), label3, FALSE, FALSE, 0);
-    }
-
-    scrolled3 = gtk_scrolled_window_new(NULL, NULL);
-    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled3),
-                                   GTK_POLICY_AUTOMATIC,
-                                   GTK_POLICY_AUTOMATIC);
-    gtk_box_pack_start(GTK_BOX(vbox3), scrolled3, TRUE, TRUE, 0);
-
-    if (pix3) {
-        pixbuf3 = pixmap_to_pixbuf(ctx, pix3);
-        if (pixbuf3) {
-            image3 = gtk_image_new_from_pixbuf(pixbuf3);
-            g_object_unref(pixbuf3);
-            gtk_container_add(GTK_CONTAINER(scrolled3), image3);
-        }
-    }
-
-    // Fenster beim Schließen zerstören
-    g_signal_connect(window, "destroy", G_CALLBACK(gtk_widget_destroyed), &window);
-
-    // Anzeigen
-    gtk_widget_show_all(window);
-
-    return window;
 }
 
 static fz_buffer*
@@ -1244,7 +1126,7 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 		}
 
 		doc_merge = sond_file_part_pdf_open_document(pv->zond->ctx,
-				SOND_FILE_PART_PDF(sfp), TRUE, &error);
+				SOND_FILE_PART_PDF(sfp), TRUE, TRUE, &error);
 		if (!doc_merge) {
 			display_error(pv->vf, "Datei einfügen\n\n"
 					"Einzufügende Datei konnte nicht geöffnet werden:\n",
