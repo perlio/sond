@@ -16,7 +16,7 @@
  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "sond_server_ocr.h"
+#include "sond_server_repo_worker.h"
 #include "sond_server_seafile.h"
 #include "../sond_log_and_error.h"
 #include "../sond_pdf_helper.h"
@@ -329,12 +329,7 @@ static gboolean seafile_upload_file(SeafileConfig *config,
                                    gsize size,
 								   GError** error);
 
-static ProcessedFile process_file_for_ocr(const gchar *filename,
-										  SondOcrPool* pool,
-                                          guchar *data,
-                                          gsize size);
-
-static gpointer seafile_ocr_worker_thread(gpointer user_data);
+static gpointer seafile_repo_worker_thread(gpointer user_data);
 
 static void send_json_response(SoupServerMessage *msg,
                                 guint status_code,
@@ -625,7 +620,7 @@ static void handle_ocr_start(SoupServer *soup_server,
     thread_data->manager = manager;
     thread_data->job_info = job_info;
 
-    GThread *thread = g_thread_new("ocr-worker", seafile_ocr_worker_thread, thread_data);
+    GThread *thread = g_thread_new("ocr-worker", seafile_repo_worker_thread, thread_data);
     g_thread_unref(thread);
 
     LOG_INFO("Started OCR job for library '%s' (repo_id: %s, force: %s)",
@@ -1253,12 +1248,16 @@ static void seafile_file_free(SeafileFile *file) {
  * OCR Worker Thread
  * ======================================================================= */
 
+static void dispatch_buffer(SondWorkerCtx* wctx,
+		guchar* data, gsize size, gchar const* filename,
+		guchar** out_data, gsize* out_size, gint* out_pdf_count);
+
 /**
  * seafile_ocr_worker_thread:
  *
  * Worker-Thread der die OCR-Verarbeitung durchführt
  */
-static gpointer seafile_ocr_worker_thread(gpointer user_data) {
+static gpointer seafile_repo_worker_thread(gpointer user_data) {
 	GError *error = NULL;
 	fz_context* ctx = NULL;
 
@@ -1292,16 +1291,32 @@ static gpointer seafile_ocr_worker_thread(gpointer user_data) {
     		"deu", 8, ctx, (void(*)(gpointer, gchar const*, ...)) ocr_log_add_message,
 			log_entry, NULL, NULL, &error);
     if (!ocr_pool) {
-		LOG_ERROR("Failed to create threadpool: %s",
-				error->message);
+		LOG_ERROR("Failed to create threadpool: %s", error->message);
 		g_error_free(error);
 		ocr_log_entry_free(log_entry);
 		fz_drop_context(ctx);
-
 		ocr_job_mark_complete(job_info);
-
 		return NULL;
     }
+
+    /* Index-Kontext erstellen (lokale DB im tmp-Verzeichnis) */
+#define INDEX_UPLOAD_INTERVAL 50  /* DB alle N Dateien hochladen */
+    gchar *db_path = g_strdup_printf("%s/.sond_index_%s.db",
+    		g_get_tmp_dir(), job_info->repo_id);
+    SondIndexCtx *index_ctx = sond_index_ctx_new(db_path, NULL /*kein Embedding vorerst*/,
+    		0, 0,
+		ocr_pool->ctx,
+		(void(*)(gpointer, gchar const*, ...)) ocr_log_add_message,
+		log_entry,
+		&error);
+    if (!index_ctx) {
+		LOG_WARN("Failed to create index context: %s - indexing disabled",
+				error ? error->message : "unknown");
+		g_clear_error(&error);
+    }
+    g_free(db_path);
+
+    SondWorkerCtx wctx = { ocr_pool, index_ctx };
 
     /* Liste alle Dateien rekursiv */
     GList *files = NULL;
@@ -1371,20 +1386,22 @@ static gpointer seafile_ocr_worker_thread(gpointer user_data) {
         }
 
         /* Verarbeiten */
-        ProcessedFile processed = process_file_for_ocr(file->path, ocr_pool,
-        		data, data_size);
+        ProcessedFile result = { 0 };
+
+		dispatch_buffer(&wctx, data, data_size, file->path,
+        				&result.data, &result.size, &result.pdf_count);
         g_free(data);
 
         /* PDF Count aktualisieren */
         g_mutex_lock(&job_info->mutex);
-        job_info->processed_pdfs += processed.pdf_count;
+        job_info->processed_pdfs += result.pdf_count;
         g_mutex_unlock(&job_info->mutex);
 
-        /* Upload */
-        if (processed.data) {
+        /* Upload verarbeitete Datei */
+        if (result.data) {
             gboolean upload_success = seafile_upload_file(&config, session, file->path,
-            		processed.data, processed.size, &error);
-            g_free(processed.data);
+            		result.data, result.size, &error);
+            g_free(result.data);
             if (!upload_success) {
                 ocr_log_add_message(log_entry, "Upload '%s' failed: %s",
                 		file->path, error->message);
@@ -1393,9 +1410,24 @@ static gpointer seafile_ocr_worker_thread(gpointer user_data) {
             }
         }
 
-        /* In Log eintragen, egal ob Leaf oder nicht */
+        /* In Log eintragen */
 		GDateTime *now = g_date_time_new_now_local();
 		g_hash_table_insert(log_entry->files_new, g_strdup(file->path), now);
+
+        /* Periodischer Index-Upload alle N Dateien */
+        if (index_ctx && (i % INDEX_UPLOAD_INTERVAL == 0)) {
+            gsize db_size = 0;
+            guchar *db_data = NULL;
+            GError *upload_err = NULL;
+
+            if (g_file_get_contents(index_ctx->db_path,
+            			(gchar**)&db_data, &db_size, &upload_err)) {
+                seafile_upload_file(&config, session, INDEX_DB_FILENAME,
+                		db_data, db_size, &upload_err);
+                g_free(db_data);
+            }
+            g_clear_error(&upload_err);
+        }
     }
 
     /* Log aktualisieren */
@@ -1419,6 +1451,24 @@ static gpointer seafile_ocr_worker_thread(gpointer user_data) {
     g_free(config.repo_id);
     g_free(config.base_path);
 
+    /* Abschließender Index-Upload */
+    if (index_ctx) {
+        gsize db_size = 0;
+        guchar *db_data = NULL;
+        GError *upload_err = NULL;
+
+        if (g_file_get_contents(index_ctx->db_path,
+        			(gchar**)&db_data, &db_size, &upload_err)) {
+            if (!seafile_upload_file(&config, session, INDEX_DB_FILENAME,
+            		db_data, db_size, &upload_err))
+                LOG_WARN("Final index upload failed: %s",
+                		upload_err ? upload_err->message : "unknown");
+            g_free(db_data);
+        }
+        g_clear_error(&upload_err);
+        sond_index_ctx_free(index_ctx);
+    }
+
     /* Job als abgeschlossen markieren */
     ocr_job_mark_complete(job_info);
     fz_drop_context(ctx);
@@ -1427,12 +1477,8 @@ static gpointer seafile_ocr_worker_thread(gpointer user_data) {
     return NULL;
 }
 
-static void dispatch_buffer(SondOcrPool* ocr_pool, guchar* data, gsize size,
-		gchar const* filename,
-		guchar** out_data, gsize* out_size, gint* out_pdf_count);
-
 static gint process_zip_for_ocr(guchar* data, gsize size,
-		gchar const* filename, SondOcrPool* pool,
+		gchar const* filename, SondWorkerCtx* wctx,
 		guchar** out_data, gsize* out_size, gint* out_pdf_count,
 		GError** error) {
 	zip_error_t zip_error = { 0 };
@@ -1488,7 +1534,7 @@ static gint process_zip_for_ocr(guchar* data, gsize size,
 
 		zip_file_t* zf = zip_fopen_index(archive, (zip_uint64_t)i, 0);
 		if (!zf) {
-			ocr_log_add_message(pool->log_data,
+			ocr_log_add_message(wctx->ocr_pool->log_data,
 					"ZIP '%s': Kann Eintrag '%s' nicht öffnen: %s",
 					filename, entry_name,
 					zip_error_strerror(zip_get_error(archive)));
@@ -1500,7 +1546,7 @@ static gint process_zip_for_ocr(guchar* data, gsize size,
 		zip_fclose(zf);
 
 		if (bytes_read < 0 || (zip_uint64_t)bytes_read != zstat.size) {
-			ocr_log_add_message(pool->log_data,
+			ocr_log_add_message(wctx->ocr_pool->log_data,
 					"ZIP '%s': Fehler beim Lesen von Eintrag '%s'",
 					filename, entry_name);
 			g_free(entry_data);
@@ -1511,7 +1557,7 @@ static gint process_zip_for_ocr(guchar* data, gsize size,
 		guchar* processed_data = NULL;
 		gsize processed_size = 0;
 
-		dispatch_buffer(pool, entry_data, (gsize)bytes_read, entry_filename,
+		dispatch_buffer(wctx, entry_data, (gsize)bytes_read, entry_filename,
 				&processed_data, &processed_size, out_pdf_count);
 		g_free(entry_data);
 		g_free(entry_filename);
@@ -1525,7 +1571,7 @@ static gint process_zip_for_ocr(guchar* data, gsize size,
 		zip_source_t* entry_src = zip_source_buffer_create(
 				processed_data, processed_size, 0 /*freep*/, &ze);
 		if (!entry_src) {
-			ocr_log_add_message(pool->log_data,
+			ocr_log_add_message(wctx->ocr_pool->log_data,
 					"ZIP '%s': zip_source_buffer_create für '%s': %s",
 					filename, entry_name, zip_error_strerror(&ze));
 			zip_error_fini(&ze);
@@ -1536,7 +1582,7 @@ static gint process_zip_for_ocr(guchar* data, gsize size,
 
 		if (zip_file_replace(archive, (zip_uint64_t)i, entry_src,
 				ZIP_FL_ENC_UTF_8) != 0) {
-			ocr_log_add_message(pool->log_data,
+			ocr_log_add_message(wctx->ocr_pool->log_data,
 					"ZIP '%s': zip_file_replace '%s': %s",
 					filename, entry_name,
 					zip_error_strerror(zip_get_error(archive)));
@@ -1618,7 +1664,7 @@ static guchar* gmessage_to_buffer(GMimeMessage* message, gsize* out_size) {
 
 /* Rekursiv alle MIME-Parts durchgehen und ggf. ersetzen */
 static gboolean gmessage_process_part(GMimeObject* object,
-		gchar const* parent_filename, SondOcrPool* pool,
+		gchar const* parent_filename, SondWorkerCtx* wctx,
 		gint part_index, gint* out_pdf_count) {
 	gboolean modified = FALSE;
 
@@ -1630,7 +1676,7 @@ static gboolean gmessage_process_part(GMimeObject* object,
 			GMimeObject* child = g_mime_multipart_get_part(mp, i);
 			gchar* child_filename = g_strdup_printf("%s/%d", parent_filename, i);
 
-			if (gmessage_process_part(child, child_filename, pool, i, out_pdf_count))
+			if (gmessage_process_part(child, child_filename, wctx, i, out_pdf_count))
 				modified = TRUE;
 
 			g_free(child_filename);
@@ -1645,7 +1691,7 @@ static gboolean gmessage_process_part(GMimeObject* object,
 				guchar* processed = NULL;
 				gsize proc_size = 0;
 
-				dispatch_buffer(pool, inner_buf, inner_size, parent_filename,
+				dispatch_buffer(wctx, inner_buf, inner_size, parent_filename,
 						&processed, &proc_size, out_pdf_count);
 				g_free(inner_buf);
 
@@ -1688,7 +1734,7 @@ static gboolean gmessage_process_part(GMimeObject* object,
 		guchar* processed = NULL;
 		gsize proc_size = 0;
 
-		dispatch_buffer(pool, part_data, part_size, parent_filename,
+		dispatch_buffer(wctx, part_data, part_size, parent_filename,
 				&processed, &proc_size, out_pdf_count);
 		g_free(part_data);
 
@@ -1712,7 +1758,7 @@ static gboolean gmessage_process_part(GMimeObject* object,
 }
 
 static gint process_gmessage_for_ocr(guchar* data, gsize size,
-		gchar const* filename, SondOcrPool* pool,
+		gchar const* filename, SondWorkerCtx* wctx,
 		guchar** out_data, gsize* out_size, gint* out_pdf_count,
 		GError** error) {
 	GMimeMessage* message = NULL;
@@ -1731,7 +1777,7 @@ static gint process_gmessage_for_ocr(guchar* data, gsize size,
 		return 0; /* leere Nachricht - kein Fehler */
 	}
 
-	gboolean modified = gmessage_process_part(root, filename, pool, 0, out_pdf_count);
+	gboolean modified = gmessage_process_part(root, filename, wctx, 0, out_pdf_count);
 
 	if (!modified) {
 		g_object_unref(message);
@@ -1751,9 +1797,9 @@ static gint process_gmessage_for_ocr(guchar* data, gsize size,
 }
 
 typedef struct {
-	gchar const* filename;
-	SondOcrPool* ocr_pool;
-	gint* out_pdf_count;
+	gchar const*   filename;
+	SondWorkerCtx* wctx;
+	gint*          out_pdf_count;
 } ProcessPdfData;
 
 static gint process_emb_file(fz_context* ctx, pdf_obj* dict,
@@ -1765,9 +1811,9 @@ static gint process_emb_file(fz_context* ctx, pdf_obj* dict,
 	fz_buffer* buf = NULL;
 	pdf_document* doc = NULL;
 
-	EF_F = pdf_get_EF_F(((ProcessPdfData*)data)->ocr_pool->ctx, val, &path, error);
+	EF_F = pdf_get_EF_F(((ProcessPdfData*)data)->wctx->ocr_pool->ctx, val, &path, error);
 	if (!EF_F) {
-		ocr_log_add_message(((ProcessPdfData*)data)->ocr_pool->log_data,
+		ocr_log_add_message(((ProcessPdfData*)data)->wctx->ocr_pool->log_data,
 				"'%s' - EF/F-key nicht gefunden: %s",
 				((ProcessPdfData*)data)->filename,
 				error ? (*error)->message : "unknown error");
@@ -1776,7 +1822,7 @@ static gint process_emb_file(fz_context* ctx, pdf_obj* dict,
 	}
 
 	if (!path) {
-		ocr_log_add_message(((ProcessPdfData*)data)->ocr_pool->log_data,
+		ocr_log_add_message(((ProcessPdfData*)data)->wctx->ocr_pool->log_data,
 				"Path für embedded file '%s' nicht gefunden",
 				((ProcessPdfData*)data)->filename);
 		return 0;
@@ -1784,36 +1830,36 @@ static gint process_emb_file(fz_context* ctx, pdf_obj* dict,
 
 	gchar* filename_emb = g_strdup_printf("%s//%s", ((ProcessPdfData*)data)->filename, path);
 
-	fz_try(((ProcessPdfData*)data)->ocr_pool->ctx)
-		stream = pdf_open_stream(((ProcessPdfData*)data)->ocr_pool->ctx, EF_F);
-	fz_catch(((ProcessPdfData*)data)->ocr_pool->ctx) {
-		ocr_log_add_message(((ProcessPdfData*)data)->ocr_pool->log_data,
+	fz_try(((ProcessPdfData*)data)->wctx->ocr_pool->ctx)
+		stream = pdf_open_stream(((ProcessPdfData*)data)->wctx->ocr_pool->ctx, EF_F);
+	fz_catch(((ProcessPdfData*)data)->wctx->ocr_pool->ctx) {
+		ocr_log_add_message(((ProcessPdfData*)data)->wctx->ocr_pool->log_data,
 				"Failed to open stream for embedded file '%s': %s",
-				filename_emb, fz_caught_message(((ProcessPdfData*)data)->ocr_pool->ctx));
+				filename_emb, fz_caught_message(((ProcessPdfData*)data)->wctx->ocr_pool->ctx));
 		g_free(filename_emb);
 		return 0;
 	}
 
-	fz_try(((ProcessPdfData*)data)->ocr_pool->ctx)
-		buf = fz_read_all(((ProcessPdfData*)data)->ocr_pool->ctx, stream, 4096);
-	fz_always(((ProcessPdfData*)data)->ocr_pool->ctx)
-		fz_drop_stream(((ProcessPdfData*)data)->ocr_pool->ctx, stream);
-	fz_catch(((ProcessPdfData*)data)->ocr_pool->ctx) {
-		ocr_log_add_message(((ProcessPdfData*)data)->ocr_pool->log_data,
+	fz_try(((ProcessPdfData*)data)->wctx->ocr_pool->ctx)
+		buf = fz_read_all(((ProcessPdfData*)data)->wctx->ocr_pool->ctx, stream, 4096);
+	fz_always(((ProcessPdfData*)data)->wctx->ocr_pool->ctx)
+		fz_drop_stream(((ProcessPdfData*)data)->wctx->ocr_pool->ctx, stream);
+	fz_catch(((ProcessPdfData*)data)->wctx->ocr_pool->ctx) {
+		ocr_log_add_message(((ProcessPdfData*)data)->wctx->ocr_pool->log_data,
 				"Failed to read stream for embedded file '%s': %s",
-				filename_emb, fz_caught_message(((ProcessPdfData*)data)->ocr_pool->ctx));
+				filename_emb, fz_caught_message(((ProcessPdfData*)data)->wctx->ocr_pool->ctx));
 		return 0;
 	}
 
 	guchar* data_buf = NULL;
 	gsize len = 0;
-	len = fz_buffer_storage(((ProcessPdfData*)data)->ocr_pool->ctx, buf, &data_buf);
+	len = fz_buffer_storage(((ProcessPdfData*)data)->wctx->ocr_pool->ctx, buf, &data_buf);
 
 	guchar* data_out = NULL;
 	gsize size_out = 0;
-	dispatch_buffer(((ProcessPdfData*)data)->ocr_pool, data_buf, len, filename_emb,
+	dispatch_buffer(((ProcessPdfData*)data)->wctx, data_buf, len, filename_emb,
 			&data_out, &size_out, ((ProcessPdfData*)data)->out_pdf_count);
-	fz_drop_buffer(((ProcessPdfData*)data)->ocr_pool->ctx, buf);
+	fz_drop_buffer(((ProcessPdfData*)data)->wctx->ocr_pool->ctx, buf);
 
 	if (!data_out) { //kein Fehler, nur nichts zu tun
 		g_free(filename_emb);
@@ -1821,39 +1867,39 @@ static gint process_emb_file(fz_context* ctx, pdf_obj* dict,
 	}
 
 	fz_buffer* buf_new = NULL;
-	fz_try(((ProcessPdfData*)data)->ocr_pool->ctx)
-		buf_new = fz_new_buffer_from_data(((ProcessPdfData*)data)->ocr_pool->ctx, data_out, size_out);
-	fz_catch(((ProcessPdfData*)data)->ocr_pool->ctx) {
+	fz_try(((ProcessPdfData*)data)->wctx->ocr_pool->ctx)
+		buf_new = fz_new_buffer_from_data(((ProcessPdfData*)data)->wctx->ocr_pool->ctx, data_out, size_out);
+	fz_catch(((ProcessPdfData*)data)->wctx->ocr_pool->ctx) {
 		g_free(data_out);
-		ocr_log_add_message(((ProcessPdfData*)data)->ocr_pool->log_data,
+		ocr_log_add_message(((ProcessPdfData*)data)->wctx->ocr_pool->log_data,
 				"Failed to create buffer for processed file '%s': %s",
 				filename_emb, fz_caught_message(ctx));
 		g_free(filename_emb);
 		return 0;
 	}
 
-	doc = pdf_pin_document(((ProcessPdfData*)data)->ocr_pool->ctx, EF_F);
+	doc = pdf_pin_document(((ProcessPdfData*)data)->wctx->ocr_pool->ctx, EF_F);
 	if (!doc) {
-		fz_drop_buffer(((ProcessPdfData*)data)->ocr_pool->ctx, buf_new);
+		fz_drop_buffer(((ProcessPdfData*)data)->wctx->ocr_pool->ctx, buf_new);
 		g_free(data_out);
-		ocr_log_add_message(((ProcessPdfData*)data)->ocr_pool->log_data,
+		ocr_log_add_message(((ProcessPdfData*)data)->wctx->ocr_pool->log_data,
 				"'%s' - Failed to pin PDF document from EF/F-object",
 				filename_emb);
 		g_free(filename_emb);
 		return 0;
 	}
 
-	fz_try(((ProcessPdfData*)data)->ocr_pool->ctx)
-		pdf_update_stream(((ProcessPdfData*)data)->ocr_pool->ctx, doc, EF_F, buf_new, 0);
-	fz_always(((ProcessPdfData*)data)->ocr_pool->ctx) {
-		pdf_drop_document(((ProcessPdfData*)data)->ocr_pool->ctx, doc);
-		fz_drop_buffer(((ProcessPdfData*)data)->ocr_pool->ctx, buf_new);
+	fz_try(((ProcessPdfData*)data)->wctx->ocr_pool->ctx)
+		pdf_update_stream(((ProcessPdfData*)data)->wctx->ocr_pool->ctx, doc, EF_F, buf_new, 0);
+	fz_always(((ProcessPdfData*)data)->wctx->ocr_pool->ctx) {
+		pdf_drop_document(((ProcessPdfData*)data)->wctx->ocr_pool->ctx, doc);
+		fz_drop_buffer(((ProcessPdfData*)data)->wctx->ocr_pool->ctx, buf_new);
 		g_free(data_out);
 	}
-	fz_catch(((ProcessPdfData*)data)->ocr_pool->ctx) {
-		ocr_log_add_message(((ProcessPdfData*)data)->ocr_pool->log_data,
+	fz_catch(((ProcessPdfData*)data)->wctx->ocr_pool->ctx) {
+		ocr_log_add_message(((ProcessPdfData*)data)->wctx->ocr_pool->log_data,
 				"Failed to update embedded stream for '%s': %s",
-				filename_emb, fz_caught_message(((ProcessPdfData*)data)->ocr_pool->ctx));
+				filename_emb, fz_caught_message(((ProcessPdfData*)data)->wctx->ocr_pool->ctx));
 		g_free(filename_emb);
 		return 0;
 	}
@@ -1864,15 +1910,16 @@ static gint process_emb_file(fz_context* ctx, pdf_obj* dict,
 }
 
 static gint process_pdf_for_ocr(guchar* data, gsize size,
-		gchar const* filename, SondOcrPool* ocr_pool,
+		gchar const* filename, SondWorkerCtx* wctx,
 		guchar** out_data, gsize* out_size, gint* out_pdf_count,
 		GError** error) {
 	pdf_document* doc = NULL;
 	fz_stream* file = NULL;
 	fz_buffer* buf = NULL;
 	gint rc = 0;
+	SondOcrPool* ocr_pool = wctx->ocr_pool;
 
-	ProcessPdfData process_data = {filename, ocr_pool, out_pdf_count};
+	ProcessPdfData process_data = {filename, wctx, out_pdf_count};
 
 	fz_try(ocr_pool->ctx)
 		file = fz_open_memory(ocr_pool->ctx, data, size);
@@ -1931,8 +1978,8 @@ static gint process_pdf_for_ocr(guchar* data, gsize size,
 	return 0;
 }
 
-static void dispatch_buffer(SondOcrPool* pool, guchar* data, gsize size,
-		gchar const* filename,
+static void dispatch_buffer(SondWorkerCtx* wctx,
+		guchar* data, gsize size, gchar const* filename,
 		guchar** out_data, gsize* out_size, gint* out_pdf_count) {
 	GError* error = NULL;
 	gchar* mime_type = NULL;
@@ -1940,39 +1987,38 @@ static void dispatch_buffer(SondOcrPool* pool, guchar* data, gsize size,
 
 	mime_type = mime_guess_content_type(data, size, &error);
 	if (!mime_type) {
-		ocr_log_add_message(pool->log_data, "Failed to guess MIME type for file '%s': %s",
-				filename, error ? error->message : "unknown error");
-		g_error_free(error);
-		return; //Fehler!
+		if (wctx->ocr_pool)
+			ocr_log_add_message(wctx->ocr_pool->log_data,
+					"Failed to guess MIME type for file '%s': %s",
+					filename, error ? error->message : "unknown error");
+		g_clear_error(&error);
+		return;
 	}
 
-	if (!g_strcmp0(mime_type, "application/pdf"))
-		rc = process_pdf_for_ocr(data, size, filename, pool,
-				out_data, out_size, out_pdf_count, &error);
+	if (!g_strcmp0(mime_type, "application/pdf")) {
+		if (wctx->ocr_pool)
+			rc = process_pdf_for_ocr(data, size, filename, wctx,
+					out_data, out_size, out_pdf_count, &error);
+	}
 	else if (!g_strcmp0(mime_type, "application/zip"))
-		rc = process_zip_for_ocr(data, size, filename, pool,
+		rc = process_zip_for_ocr(data, size, filename, wctx,
 				out_data, out_size, out_pdf_count, &error);
 	else if (!g_strcmp0(mime_type, "message/rfc822"))
-		rc = process_gmessage_for_ocr(data, size, filename, pool,
+		rc = process_gmessage_for_ocr(data, size, filename, wctx,
 				out_data, out_size, out_pdf_count, &error);
 
-	if (rc == -1) {
-		ocr_log_add_message(pool->log_data, "Failed to process file '%s' for OCR: %s",
+	if (rc == -1 && wctx->ocr_pool) {
+		ocr_log_add_message(wctx->ocr_pool->log_data,
+				"Failed to process file '%s' for OCR: %s",
 				filename, error ? error->message : "unknown error");
-		g_error_free(error);
 	}
+	g_clear_error(&error);
 
-	return;
-}
+	/* Indizierung: einmal am Schluss, mit dem aktuellsten Buffer */
+	sond_server_index(wctx->index_ctx, filename,
+			(*out_data && *out_size > 0) ? *out_data : data,
+			(*out_data && *out_size > 0) ? *out_size : size,
+			mime_type);
 
-static ProcessedFile process_file_for_ocr(const gchar *filename,
-										  SondOcrPool* ocr_pool,
-                                          guchar *data,
-                                          gsize size) {
-	ProcessedFile result = { 0 };
-
-	dispatch_buffer(ocr_pool, data, size, filename,
-			&result.data, &result.size, &result.pdf_count);
-
-	return result;
+	g_free(mime_type);
 }

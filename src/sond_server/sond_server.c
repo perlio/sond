@@ -24,7 +24,6 @@
 #include "sond_server.h"
 #include "sond_server_seafile.h"
 #include "sond_server_auth.h"
-#include "sond_server_ocr.h"
 #include "../sond_graph/sond_graph_db.h"
 #include "../sond_graph/sond_graph_node.h"
 #include "../sond_graph/sond_graph_edge.h"
@@ -33,6 +32,8 @@
 
 #include <json-glib/json-glib.h>
 #include <string.h>
+
+#include "sond_server_repo_worker.h"
 #ifdef __linux__
 #include <glib-unix.h>
 #endif // __linux__

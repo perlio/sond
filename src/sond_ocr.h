@@ -35,7 +35,7 @@ typedef int gboolean;
 */
 
 // Thread-Pool Struktur
-typedef struct {
+typedef struct _SondOcrPool {
     GThreadPool *pool;
     GMutex mutex;
     gint* cancel_all;
