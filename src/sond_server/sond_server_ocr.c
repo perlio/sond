@@ -27,6 +27,10 @@
 #include <json-glib/json-glib.h>
 #include <mupdf/fitz.h>
 #include <mupdf/pdf.h>
+#include <zip.h>
+#include <gmime/gmime.h>
+
+#include "../sond_gmessage_helper.h"
 
 /* =======================================================================
  * Forward Declarations - External
@@ -1431,14 +1435,317 @@ static gint process_zip_for_ocr(guchar* data, gsize size,
 		gchar const* filename, SondOcrPool* pool,
 		guchar** out_data, gsize* out_size, gint* out_pdf_count,
 		GError** error) {
+	zip_error_t zip_error = { 0 };
+	zip_source_t* src = NULL;
+	zip_t* archive = NULL;
+	gboolean modified = FALSE;
 
+	/* Eigene Kopie des Puffers, da libzip Eigentuemer wird (freep=1) */
+	void* data_copy = g_memdup2(data, size);
+	if (!data_copy) {
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_NO_SPACE,
+				"process_zip_for_ocr: g_memdup2 fehlgeschlagen");
+		return -1;
+	}
+
+	zip_error_init(&zip_error);
+	src = zip_source_buffer_create(data_copy, size, 1 /*freep*/, &zip_error);
+	if (!src) {
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+				"process_zip_for_ocr: zip_source_buffer_create: %s",
+				zip_error_strerror(&zip_error));
+		zip_error_fini(&zip_error);
+		g_free(data_copy);
+		return -1;
+	}
+
+	/* Ref erhöhen, damit src nach zip_close() noch verfügbar ist */
+	zip_source_keep(src);
+
+	archive = zip_open_from_source(src, 0, &zip_error);
+	if (!archive) {
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+				"process_zip_for_ocr: zip_open_from_source: %s",
+				zip_error_strerror(&zip_error));
+		zip_error_fini(&zip_error);
+		zip_source_free(src);
+		return -1;
+	}
+	zip_error_fini(&zip_error);
+
+	zip_int64_t num_entries = zip_get_num_entries(archive, 0);
+
+	for (zip_int64_t i = 0; i < num_entries; i++) {
+		const char* entry_name = zip_get_name(archive, (zip_uint64_t)i, ZIP_FL_ENC_UTF_8);
+		if (!entry_name)
+			continue;
+
+		zip_stat_t zstat = { 0 };
+		if (zip_stat_index(archive, (zip_uint64_t)i, 0, &zstat) != 0)
+			continue;
+		if (!(zstat.valid & ZIP_STAT_SIZE))
+			continue;
+
+		zip_file_t* zf = zip_fopen_index(archive, (zip_uint64_t)i, 0);
+		if (!zf) {
+			ocr_log_add_message(pool->log_data,
+					"ZIP '%s': Kann Eintrag '%s' nicht öffnen: %s",
+					filename, entry_name,
+					zip_error_strerror(zip_get_error(archive)));
+			continue;
+		}
+
+		guchar* entry_data = g_malloc(zstat.size);
+		zip_int64_t bytes_read = zip_fread(zf, entry_data, zstat.size);
+		zip_fclose(zf);
+
+		if (bytes_read < 0 || (zip_uint64_t)bytes_read != zstat.size) {
+			ocr_log_add_message(pool->log_data,
+					"ZIP '%s': Fehler beim Lesen von Eintrag '%s'",
+					filename, entry_name);
+			g_free(entry_data);
+			continue;
+		}
+
+		gchar* entry_filename = g_strdup_printf("%s//%s", filename, entry_name);
+		guchar* processed_data = NULL;
+		gsize processed_size = 0;
+
+		dispatch_buffer(pool, entry_data, (gsize)bytes_read, entry_filename,
+				&processed_data, &processed_size, out_pdf_count);
+		g_free(entry_data);
+		g_free(entry_filename);
+
+		if (!processed_data)
+			continue; /* kein Fehler, nur nichts zu tun */
+
+		/* Verarbeiteten Inhalt zurückschreiben */
+		zip_error_t ze = { 0 };
+		zip_error_init(&ze);
+		zip_source_t* entry_src = zip_source_buffer_create(
+				processed_data, processed_size, 0 /*freep*/, &ze);
+		if (!entry_src) {
+			ocr_log_add_message(pool->log_data,
+					"ZIP '%s': zip_source_buffer_create für '%s': %s",
+					filename, entry_name, zip_error_strerror(&ze));
+			zip_error_fini(&ze);
+			g_free(processed_data);
+			continue;
+		}
+		zip_error_fini(&ze);
+
+		if (zip_file_replace(archive, (zip_uint64_t)i, entry_src,
+				ZIP_FL_ENC_UTF_8) != 0) {
+			ocr_log_add_message(pool->log_data,
+					"ZIP '%s': zip_file_replace '%s': %s",
+					filename, entry_name,
+					zip_error_strerror(zip_get_error(archive)));
+			zip_source_free(entry_src);
+			g_free(processed_data);
+			continue;
+		}
+
+		/* processed_data wird jetzt von zip_source verwaltet - NICHT freigeben */
+		modified = TRUE;
+	}
+
+	if (!modified) {
+		zip_discard(archive);
+		zip_source_free(src);
+		return 0; /* nichts geändert */
+	}
+
+	/* ZIP schreiben und Inhalt aus src lesen */
+	if (zip_close(archive) != 0) {
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+				"process_zip_for_ocr: zip_close: %s",
+				zip_error_strerror(zip_source_error(src)));
+		zip_source_free(src);
+		return -1;
+	}
+
+	if (zip_source_open(src) != 0) {
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+				"process_zip_for_ocr: zip_source_open fehlgeschlagen");
+		zip_source_free(src);
+		return -1;
+	}
+
+	zip_source_seek(src, 0, SEEK_END);
+	zip_int64_t result_len = zip_source_tell(src);
+	zip_source_seek(src, 0, SEEK_SET);
+
+	if (result_len <= 0) {
+		zip_source_close(src);
+		zip_source_free(src);
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+				"process_zip_for_ocr: zip_source hat 0 Bytes");
+		return -1;
+	}
+
+	*out_data = g_malloc((gsize)result_len);
+	zip_int64_t n = zip_source_read(src, *out_data, (zip_uint64_t)result_len);
+	zip_source_close(src);
+	zip_source_free(src);
+
+	if (n != result_len) {
+		g_free(*out_data);
+		*out_data = NULL;
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+				"process_zip_for_ocr: zip_source_read unvollständig");
+		return -1;
+	}
+
+	*out_size = (gsize)result_len;
 	return 0;
+}
+
+/* Hilfsfunktion: schreibt GMimeMessage in Puffer */
+static guchar* gmessage_to_buffer(GMimeMessage* message, gsize* out_size) {
+	GMimeStream* stream = g_mime_stream_mem_new();
+	gssize written = g_mime_object_write_to_stream(
+			GMIME_OBJECT(message), NULL, stream);
+	if (written <= 0) {
+		g_object_unref(stream);
+		return NULL;
+	}
+	GByteArray* ba = g_mime_stream_mem_get_byte_array(GMIME_STREAM_MEM(stream));
+	guchar* result = g_memdup2(ba->data, ba->len);
+	*out_size = ba->len;
+	g_object_unref(stream);
+	return result;
+}
+
+/* Rekursiv alle MIME-Parts durchgehen und ggf. ersetzen */
+static gboolean gmessage_process_part(GMimeObject* object,
+		gchar const* parent_filename, SondOcrPool* pool,
+		gint part_index, gint* out_pdf_count) {
+	gboolean modified = FALSE;
+
+	if (GMIME_IS_MULTIPART(object)) {
+		GMimeMultipart* mp = GMIME_MULTIPART(object);
+		gint count = g_mime_multipart_get_count(mp);
+
+		for (gint i = 0; i < count; i++) {
+			GMimeObject* child = g_mime_multipart_get_part(mp, i);
+			gchar* child_filename = g_strdup_printf("%s/%d", parent_filename, i);
+
+			if (gmessage_process_part(child, child_filename, pool, i, out_pdf_count))
+				modified = TRUE;
+
+			g_free(child_filename);
+		}
+	}
+	else if (GMIME_IS_MESSAGE_PART(object)) {
+		GMimeMessage* inner = g_mime_message_part_get_message(GMIME_MESSAGE_PART(object));
+		if (inner) {
+			gsize inner_size = 0;
+			guchar* inner_buf = gmessage_to_buffer(inner, &inner_size);
+			if (inner_buf) {
+				guchar* processed = NULL;
+				gsize proc_size = 0;
+
+				dispatch_buffer(pool, inner_buf, inner_size, parent_filename,
+						&processed, &proc_size, out_pdf_count);
+				g_free(inner_buf);
+
+				if (processed) {
+					/* Verarbeitete Nachricht zurück in den MessagePart schreiben */
+					GMimeStream* stream = g_mime_stream_mem_new_with_buffer(
+							(const gchar*)processed, proc_size);
+					g_free(processed);
+					GMimeParser* parser = g_mime_parser_new_with_stream(stream);
+					g_object_unref(stream);
+					GMimeMessage* new_inner = g_mime_parser_construct_message(parser, NULL);
+					g_object_unref(parser);
+					if (new_inner) {
+						g_mime_message_part_set_message(GMIME_MESSAGE_PART(object), new_inner);
+						g_object_unref(new_inner);
+						modified = TRUE;
+					}
+				}
+			}
+		}
+	}
+	else if (GMIME_IS_PART(object)) {
+		GMimePart* part = GMIME_PART(object);
+		GMimeDataWrapper* wrapper = g_mime_part_get_content(part);
+		if (!wrapper)
+			return FALSE;
+
+		/* Part-Inhalt in Puffer lesen (dekodiert) */
+		GMimeStream* mem = g_mime_stream_mem_new();
+		gssize written = g_mime_data_wrapper_write_to_stream(wrapper, mem);
+		if (written <= 0) {
+			g_object_unref(mem);
+			return FALSE;
+		}
+		GByteArray* ba = g_mime_stream_mem_get_byte_array(GMIME_STREAM_MEM(mem));
+		guchar* part_data = g_memdup2(ba->data, ba->len);
+		gsize part_size = ba->len;
+		g_object_unref(mem);
+
+		guchar* processed = NULL;
+		gsize proc_size = 0;
+
+		dispatch_buffer(pool, part_data, part_size, parent_filename,
+				&processed, &proc_size, out_pdf_count);
+		g_free(part_data);
+
+		if (!processed)
+			return FALSE; /* nichts zu tun */
+
+		/* Inhalt des Parts ersetzen */
+		GMimeContentEncoding enc = g_mime_part_get_content_encoding(part);
+		GMimeStream* new_stream = g_mime_stream_mem_new_with_buffer(
+				(const gchar*)processed, proc_size);
+		g_free(processed);
+		GMimeDataWrapper* new_wrapper = g_mime_data_wrapper_new_with_stream(new_stream, enc);
+		g_mime_part_set_content(part, new_wrapper);
+		g_object_unref(new_wrapper);
+		g_object_unref(new_stream);
+
+		modified = TRUE;
+	}
+
+	return modified;
 }
 
 static gint process_gmessage_for_ocr(guchar* data, gsize size,
 		gchar const* filename, SondOcrPool* pool,
 		guchar** out_data, gsize* out_size, gint* out_pdf_count,
 		GError** error) {
+	GMimeMessage* message = NULL;
+	GMimeObject* root = NULL;
+
+	message = gmessage_open(data, size);
+	if (!message) {
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+				"process_gmessage_for_ocr: gmessage_open fehlgeschlagen");
+		return -1;
+	}
+
+	root = g_mime_message_get_mime_part(message);
+	if (!root) {
+		g_object_unref(message);
+		return 0; /* leere Nachricht - kein Fehler */
+	}
+
+	gboolean modified = gmessage_process_part(root, filename, pool, 0, out_pdf_count);
+
+	if (!modified) {
+		g_object_unref(message);
+		return 0;
+	}
+
+	*out_data = gmessage_to_buffer(message, out_size);
+	g_object_unref(message);
+
+	if (!*out_data) {
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+				"process_gmessage_for_ocr: Schreiben der geänderten E-Mail fehlgeschlagen");
+		return -1;
+	}
 
 	return 0;
 }
