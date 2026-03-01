@@ -28,7 +28,7 @@
 
 #include <glib-object.h>
 #include <libsoup/soup.h>
-#include <mysql/mysql.h>
+#include <mariadb/mysql.h>
 
 G_BEGIN_DECLS
 

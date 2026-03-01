@@ -50,7 +50,7 @@ ifneq (,$(findstring $(MAKECMDGOALS), sond_server))
 SRCS += $(shell find $(SRC_DIRS)/sond_server -name '*.c') $(SRC_DIRS)/sond_log_and_error.c \
 	$(shell find $(SRC_DIRS)/sond_graph -name '*.c') $(SRC_DIRS)/sond_misc.c $(SRC_DIRS)/sond_ocr.c \
 	$(SRC_DIRS)/sond_pdf_helper.c $(SRC_DIRS)/sond_gmessage_helper.c $(SRC_DIRS)/sond_file_helper.c
-CFLAGS += $(shell pkg-config --cflags gtk+-3.0 gmime-3.0 libmariadb libsoup-3.0 json-glib-1.0)
+CFLAGS += $(shell pkg-config --cflags gobject-2.0 glib-2.0 gmime-3.0 libmariadb libsoup-3.0 json-glib-1.0)
 LDFLAGS += $(shell pkg-config --libs gmime-3.0 libmagic libmariadb libsoup-3.0 json-glib-1.0 \
 	mupdf tesseract libzip)
 endif
@@ -96,11 +96,15 @@ $(OBJ_DIR)/%.c.o: %.c
 	@mkdir -p $(@D)
 	$(CC) -c $< $(CFLAGS_CONFIG) $(CFLAGS) -MMD -MP -o $@
 
-$(GSCHEMAS_COMPILED): $(SCHEMA_SOURCES) $(SYSTEM_SCHEMAS)
+$(GSCHEMAS_COMPILED): $(SCHEMA_SOURCES)
 	@echo "Copying project schemas to compilation directory..."
+	@mkdir -p $(COMPILED_SCHEMA_DIR)
 	@cp $(SCHEMA_SOURCES) $(COMPILED_SCHEMA_DIR)/
 	@echo "Copying system schemas..."
-	@cp $(SYSTEM_SCHEMAS) $(COMPILED_SCHEMA_DIR)/
+	@for f in $(SYSTEM_SCHEMAS); do \
+		if [ -f "$f" ]; then cp "$f" $(COMPILED_SCHEMA_DIR)/; \
+		else echo "Warning: $f not found, skipping"; fi; \
+	done
 	@echo "Compiling GSettings schemas..."
 	glib-compile-schemas $(COMPILED_SCHEMA_DIR)
 	@echo "Removing temporary schemas..."

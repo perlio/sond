@@ -28,7 +28,7 @@
 #define SOND_GRAPH_DB_H
 
 #include <glib.h>
-#include <mysql/mysql.h>
+#include <mariadb/mysql.h>
 #include "sond_graph_node.h"
 #include "sond_graph_edge.h"
 
