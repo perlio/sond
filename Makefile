@@ -50,9 +50,10 @@ ifneq (,$(findstring $(MAKECMDGOALS), sond_server))
 SRCS += $(shell find $(SRC_DIRS)/sond_server -name '*.c') $(SRC_DIRS)/sond_log_and_error.c \
 	$(shell find $(SRC_DIRS)/sond_graph -name '*.c') $(SRC_DIRS)/sond_misc.c $(SRC_DIRS)/sond_ocr.c \
 	$(SRC_DIRS)/sond_pdf_helper.c $(SRC_DIRS)/sond_gmessage_helper.c $(SRC_DIRS)/sond_file_helper.c
-CFLAGS += $(shell pkg-config --cflags gobject-2.0 glib-2.0 gmime-3.0 libmariadb libsoup-3.0 json-glib-1.0)
-LDFLAGS += $(shell pkg-config --libs gmime-3.0 libmagic libmariadb libsoup-3.0 json-glib-1.0 \
-	mupdf tesseract libzip)
+CFLAGS += $(shell pkg-config --cflags gobject-2.0 glib-2.0 gio-2.0 gmime-3.0 libmariadb \
+	libsoup-3.0 json-glib-1.0) -I/usr/local/include/mupdf
+LDFLAGS += $(shell pkg-config --libs gmime-3.0 gio-2.0 libmagic libmariadb libsoup-3.0 json-glib-1.0 \
+	sqlite3 tesseract libzip) /usr/local/lib/libmupdf.a /usr/local/lib/libmupdf-third.a -lm
 endif
 
 ifneq (,$(findstring $(MAKECMDGOALS), sond_client))
@@ -91,8 +92,12 @@ $(BIN_DIR)/$(MAKECMDGOALS).exe: $(SRCS:%=$(OBJ_DIR)/%.o)
 	@mkdir -p $(BIN_DIR)
 	$(CC) $(SRCS:%=$(OBJ_DIR)/%.o) $(LDFLAGS) $(LDFLAGS_CONFIG) -o $@
 
+# Verzeichnisse anlegen
+$(OBJ_DIR) $(BIN_DIR):
+	mkdir -p $@
+
 # Compiling
-$(OBJ_DIR)/%.c.o: %.c
+$(OBJ_DIR)/%.c.o: %.c | $(OBJ_DIR)
 	@mkdir -p $(@D)
 	$(CC) -c $< $(CFLAGS_CONFIG) $(CFLAGS) -MMD -MP -o $@
 

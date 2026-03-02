@@ -20,7 +20,6 @@
 
 #include <mupdf/fitz.h>
 #include <mupdf/pdf.h>
-//#include <gtk/gtk.h>
 #include <tesseract/capi.h>
 #include <glib.h>
 #include <glib/gstdio.h>
@@ -897,14 +896,14 @@ static gint sond_ocr_init_osd_api(TessBaseAPI** osd_api,
 		return -1;
 	}
 
-	rc = TessBaseAPIInit4(*osd_api, datadir, "osd", OEM_LSTM_ONLY,
+	rc = TessBaseAPIInit4(*osd_api, datadir, "osd", OEM_DEFAULT,
             NULL, 0,
             NULL, NULL, 0,
             FALSE);
 	if (rc) {
 		TessBaseAPIEnd(*osd_api);
 		TessBaseAPIDelete(*osd_api);
-		g_set_error(error, SOND_ERROR, 0, "TessBaseAPIInit3 OSD fehlgeschlagen");
+		g_set_error(error, SOND_ERROR, 0, "TessBaseAPIInit4 OSD fehlgeschlagen");
 		return -1;
 	}
 

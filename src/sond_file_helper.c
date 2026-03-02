@@ -21,12 +21,12 @@
 #include <glib.h>
 #include <glib/gstdio.h>
 #include <gio/gio.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 
 #ifdef G_OS_WIN32
 #include <windows.h>
 #include <io.h>
-#include <fcntl.h>
-#include <sys/stat.h>
 #include <wchar.h>
 
 

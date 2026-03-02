@@ -382,7 +382,7 @@ static OcrLogEntry* ocr_log_read(SeafileConfig *config, SoupSession *session) {
     entry->files_new = g_hash_table_new_full(g_str_hash, g_str_equal,
                                          g_free, (GDestroyNotify)g_date_time_unref);
     g_mutex_init(&entry->mutex);
-    g_ptr_array_new_with_free_func((GDestroyNotify) g_free);
+    entry->log_msg = g_ptr_array_new_with_free_func((GDestroyNotify) g_free);
 
 
     if (!data) {
