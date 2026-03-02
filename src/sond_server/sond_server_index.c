@@ -24,7 +24,10 @@
 #include <mupdf/fitz.h>
 #include <gmime/gmime.h>
 #include <string.h>
+#include "../sond_gmessage_helper.h"
+#ifdef SOND_WITH_EMBEDDINGS
 #include <llama.h>
+#endif
 
 #define INDEX_DEFAULT_CHUNK_SIZE    1000
 #define INDEX_DEFAULT_CHUNK_OVERLAP  100
@@ -108,6 +111,7 @@ static gboolean db_init_schema(SondIndexCtx *ctx, GError **error) {
         return FALSE;
     }
 
+#ifdef SOND_WITH_EMBEDDINGS
     if (ctx->n_embd > 0) {
         gchar *sql_vec = g_strdup_printf(SQL_CREATE_VEC_TMPL, ctx->n_embd);
         rc = sqlite3_exec(ctx->db, sql_vec, NULL, NULL, &errmsg);
@@ -119,6 +123,7 @@ static gboolean db_init_schema(SondIndexCtx *ctx, GError **error) {
             return FALSE;
         }
     }
+#endif
 
     return TRUE;
 }
@@ -156,6 +161,7 @@ SondIndexCtx* sond_index_ctx_new(gchar const *db_path,
     sqlite3_exec(ctx->db, "PRAGMA journal_mode=WAL;", NULL, NULL, NULL);
     sqlite3_exec(ctx->db, "PRAGMA synchronous=NORMAL;", NULL, NULL, NULL);
 
+#ifdef SOND_WITH_EMBEDDINGS
     if (model_path) {
         llama_backend_init();
 
@@ -188,6 +194,7 @@ SondIndexCtx* sond_index_ctx_new(gchar const *db_path,
         ctx->n_embd = llama_model_n_embd(
                 (struct llama_model*)ctx->llama_model);
     }
+#endif
 
     if (!db_init_schema(ctx, error)) {
         sond_index_ctx_free(ctx);
@@ -200,11 +207,13 @@ SondIndexCtx* sond_index_ctx_new(gchar const *db_path,
 void sond_index_ctx_free(SondIndexCtx *ctx) {
     if (!ctx) return;
 
+#ifdef SOND_WITH_EMBEDDINGS
     if (ctx->llama_ctx)
         llama_free((struct llama_context*)ctx->llama_ctx);
 
     if (ctx->llama_model)
         llama_model_free((struct llama_model*)ctx->llama_model);
+#endif
 
     if (ctx->db)
         sqlite3_close(ctx->db);
@@ -246,10 +255,12 @@ gboolean sond_index_ctx_clear_file(SondIndexCtx *ctx,
         return FALSE;
     }
 
+#ifdef SOND_WITH_EMBEDDINGS
     if (ctx->n_embd > 0)
         sqlite3_exec(ctx->db,
                 "DELETE FROM chunks_vec WHERE rowid NOT IN (SELECT id FROM chunks);",
                 NULL, NULL, NULL);
+#endif
 
     return TRUE;
 }
@@ -293,6 +304,10 @@ static GPtrArray* text_to_chunks(gchar const *text, gint chunk_size, gint chunk_
  * ======================================================================= */
 
 static gfloat* compute_embedding(SondIndexCtx *ctx, gchar const *text) {
+#ifndef SOND_WITH_EMBEDDINGS
+    (void)ctx; (void)text;
+    return NULL;
+#else
     if (!ctx->llama_ctx || !ctx->llama_model || ctx->n_embd <= 0)
         return NULL;
 
@@ -334,6 +349,7 @@ static gfloat* compute_embedding(SondIndexCtx *ctx, gchar const *text) {
     gfloat *result = g_new(gfloat, ctx->n_embd);
     memcpy(result, embd, ctx->n_embd * sizeof(gfloat));
     return result;
+#endif
 }
 
 /* =======================================================================
@@ -382,6 +398,7 @@ static gboolean db_insert_chunk(SondIndexCtx *ctx,
 
     rowid = sqlite3_last_insert_rowid(ctx->db);
 
+#ifdef SOND_WITH_EMBEDDINGS
     if (embedding && ctx->n_embd > 0) {
         rc = sqlite3_prepare_v2(ctx->db,
                 "INSERT INTO chunks_vec(rowid, embedding) VALUES(?,?)",
@@ -404,6 +421,7 @@ static gboolean db_insert_chunk(SondIndexCtx *ctx,
             ctx->log_func(ctx->log_data,
                     "db_insert_chunk: step vec: %s", sqlite3_errmsg(ctx->db));
     }
+#endif
 
     return TRUE;
 }
@@ -499,27 +517,28 @@ static GPtrArray* extract_segments_from_pdf(SondIndexCtx *ctx,
 
 /* E-Mail-Header: ein einzelnes Segment, char_pos=0, page_nr=-1 */
 static GPtrArray* extract_segments_from_gmessage(guchar const *buf, gsize size) {
-    GPtrArray    *segs    = g_ptr_array_new_with_free_func(
+    GPtrArray    *segs = g_ptr_array_new_with_free_func(
             (GDestroyNotify)sond_text_segment_free);
-    GString      *text    = g_string_new(NULL);
-    GMimeMessage *message = NULL;
+    GString      *text = g_string_new(NULL);
 
-    GMimeParser *parser = g_mime_parser_new_with_stream(
-            g_mime_stream_mem_new_with_buffer((const gchar*)buf, size));
-    message = g_mime_parser_construct_message(parser, NULL);
-    g_object_unref(parser);
-
+    GMimeMessage *message = gmessage_open(buf, size);
     if (!message) {
         g_string_free(text, TRUE);
         return segs;
     }
 
-    const gchar *from    = g_mime_message_get_from_string(message);
-    const gchar *subject = g_mime_message_get_subject(message);
-    GDateTime   *date    = g_mime_message_get_date(message);
+    InternetAddressList *from = g_mime_message_get_addresses(message,
+            GMIME_ADDRESS_TYPE_FROM);
+    if (from) {
+        gchar *s = internet_address_list_to_string(from, NULL, FALSE);
+        if (s) { g_string_append(text, "Von: "); g_string_append(text, s); g_string_append_c(text, '\n'); }
+        g_free(s);
+    }
 
-    if (from)    { g_string_append(text, "Von: ");     g_string_append(text, from);    g_string_append_c(text, '\n'); }
+    const gchar *subject = g_mime_message_get_subject(message);
     if (subject) { g_string_append(text, "Betreff: "); g_string_append(text, subject); g_string_append_c(text, '\n'); }
+
+    GDateTime *date = g_mime_message_get_date(message);
     if (date) {
         gchar *ds = g_date_time_format_iso8601(date);
         g_string_append(text, "Datum: ");
@@ -528,11 +547,12 @@ static GPtrArray* extract_segments_from_gmessage(guchar const *buf, gsize size) 
         g_free(ds);
     }
 
-    GMimeAddressList *to = g_mime_message_get_addresses(message, GMIME_ADDRESS_TYPE_TO);
+    InternetAddressList *to = g_mime_message_get_addresses(message,
+            GMIME_ADDRESS_TYPE_TO);
     if (to) {
-        gchar *to_str = g_mime_address_list_to_string(to, NULL, FALSE);
-        if (to_str) { g_string_append(text, "An: "); g_string_append(text, to_str); g_string_append_c(text, '\n'); }
-        g_free(to_str);
+        gchar *s = internet_address_list_to_string(to, NULL, FALSE);
+        if (s) { g_string_append(text, "An: "); g_string_append(text, s); g_string_append_c(text, '\n'); }
+        g_free(s);
     }
 
     g_object_unref(message);
@@ -554,77 +574,6 @@ static GPtrArray* extract_segments_from_text(guchar const *buf, gsize size) {
         g_ptr_array_add(segs, sond_text_segment_new(
                 g_strndup((gchar const*)buf, size), -1, 0));
     return segs;
-}
-
-static void collect_text_parts(GMimeObject *obj, GString *out) {
-    if (GMIME_IS_MULTIPART(obj)) {
-        GMimeMultipart *mp = GMIME_MULTIPART(obj);
-        gint n = g_mime_multipart_get_count(mp);
-        for (gint i = 0; i < n; i++)
-            collect_text_parts(g_mime_multipart_get_part(mp, i), out);
-    } else if (GMIME_IS_MESSAGE_PART(obj)) {
-        GMimeMessage *inner = g_mime_message_part_get_message(GMIME_MESSAGE_PART(obj));
-        if (inner)
-            collect_text_parts(g_mime_message_get_mime_part(inner), out);
-    } else if (GMIME_IS_PART(obj)) {
-        GMimeContentType *ct = g_mime_object_get_content_type(obj);
-        if (!g_mime_content_type_is_type(ct, "text", "plain")) return;
-
-        GMimeDataWrapper *wrapper = g_mime_part_get_content(GMIME_PART(obj));
-        if (!wrapper) return;
-
-        GMimeStream *mem = g_mime_stream_mem_new();
-        if (g_mime_data_wrapper_write_to_stream(wrapper, mem) > 0) {
-            GByteArray *ba = g_mime_stream_mem_get_byte_array(GMIME_STREAM_MEM(mem));
-            g_string_append_len(out, (gchar*)ba->data, ba->len);
-            g_string_append_c(out, '\n');
-        }
-        g_object_unref(mem);
-    }
-}
-
-static gchar* extract_text_from_gmessage(guchar const *buf, gsize size) {
-    GString      *text    = g_string_new(NULL);
-    GMimeMessage *message = NULL;
-
-    GMimeParser *parser = g_mime_parser_new_with_stream(
-            g_mime_stream_mem_new_with_buffer((const gchar*)buf, size));
-    message = g_mime_parser_construct_message(parser, NULL);
-    g_object_unref(parser);
-
-    if (!message) {
-        g_string_free(text, TRUE);
-        return NULL;
-    }
-
-    const gchar *from    = g_mime_message_get_from_string(message);
-    const gchar *subject = g_mime_message_get_subject(message);
-    GDateTime   *date    = g_mime_message_get_date(message);
-
-    if (from)    { g_string_append(text, "Von: ");     g_string_append(text, from);    g_string_append_c(text, '\n'); }
-    if (subject) { g_string_append(text, "Betreff: "); g_string_append(text, subject); g_string_append_c(text, '\n'); }
-    if (date) {
-        gchar *ds = g_date_time_format_iso8601(date);
-        g_string_append(text, "Datum: ");
-        g_string_append(text, ds);
-        g_string_append_c(text, '\n');
-        g_free(ds);
-    }
-
-    GMimeAddressList *to = g_mime_message_get_addresses(message, GMIME_ADDRESS_TYPE_TO);
-    if (to) {
-        gchar *to_str = g_mime_address_list_to_string(to, NULL, FALSE);
-        if (to_str) { g_string_append(text, "An: "); g_string_append(text, to_str); g_string_append_c(text, '\n'); }
-        g_free(to_str);
-    }
-    g_string_append_c(text, '\n');
-
-    GMimeObject *root = g_mime_message_get_mime_part(message);
-    if (root) collect_text_parts(root, text);
-
-    g_object_unref(message);
-
-    return g_string_free(text, (text->len == 0));
 }
 
 /* =======================================================================

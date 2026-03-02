@@ -20,7 +20,7 @@
 
 #include <mupdf/fitz.h>
 #include <mupdf/pdf.h>
-#include <gtk/gtk.h>
+//#include <gtk/gtk.h>
 #include <tesseract/capi.h>
 #include <glib.h>
 #include <glib/gstdio.h>
@@ -776,7 +776,7 @@ static TesseractThreadData* get_or_create_thread_data(GPrivate *thread_data_key,
         		tessdata_path ? tessdata_path : "/usr/share/tesseract-ocr/5/tessdata/",
         				error);
         if (rc) {
-			g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+			g_set_error(error, SOND_ERROR, 0,
 					   "Tesseract Initialisierung fehlgeschlagen für Thread");
 			g_free(data);
 			return NULL;

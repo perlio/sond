@@ -43,9 +43,11 @@ G_BEGIN_DECLS
 typedef struct {
     sqlite3  *db;
     gchar    *db_path;
+#ifdef SOND_WITH_EMBEDDINGS
     gpointer  llama_model;   /* struct llama_model*   - opak */
     gpointer  llama_ctx;     /* struct llama_context* - opak */
     gint      n_embd;
+#endif
     gint      chunk_size;
     gint      chunk_overlap;
     gpointer  fz_ctx;        /* fz_context* - opak, aus SondOcrPool */
