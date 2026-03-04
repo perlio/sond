@@ -16,15 +16,17 @@
  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "sond_server_index.h"
-#include "../sond_log_and_error.h"
+#include "sond_index.h"
 
 #include <glib.h>
 #include <sqlite3.h>
 #include <mupdf/fitz.h>
 #include <gmime/gmime.h>
 #include <string.h>
-#include "../sond_gmessage_helper.h"
+
+#include "sond_log_and_error.h"
+#include "sond_gmessage_helper.h"
+
 #ifdef SOND_WITH_EMBEDDINGS
 #include <llama.h>
 #endif
@@ -136,18 +138,12 @@ SondIndexCtx* sond_index_ctx_new(gchar const *db_path,
                                   gchar const *model_path,
                                   gint         chunk_size,
                                   gint         chunk_overlap,
-                                  gpointer     fz_ctx,
-                                  void       (*log_func)(gpointer, gchar const*, ...),
-                                  gpointer     log_data,
                                   GError     **error) {
     SondIndexCtx *ctx = g_new0(SondIndexCtx, 1);
 
     ctx->db_path       = g_strdup(db_path);
     ctx->chunk_size    = (chunk_size    > 0) ? chunk_size    : INDEX_DEFAULT_CHUNK_SIZE;
     ctx->chunk_overlap = (chunk_overlap > 0) ? chunk_overlap : INDEX_DEFAULT_CHUNK_OVERLAP;
-    ctx->fz_ctx        = fz_ctx;
-    ctx->log_func      = log_func;
-    ctx->log_data      = log_data;
 
     gint rc = sqlite3_open(db_path, &ctx->db);
     if (rc != SQLITE_OK) {
@@ -356,7 +352,9 @@ static gfloat* compute_embedding(SondIndexCtx *ctx, gchar const *text) {
  * Chunk in DB schreiben
  * ======================================================================= */
 
-static gboolean db_insert_chunk(SondIndexCtx *ctx,
+static gboolean db_insert_chunk(SondIndexCtx *sond_index_ctx,
+								 void (*log_func)(gpointer, gchar const*, ...),
+								 gpointer log_func_data,
                                  gchar const  *filename,
                                  gint          chunk_idx,
                                  gint          page_nr,
@@ -366,16 +364,15 @@ static gboolean db_insert_chunk(SondIndexCtx *ctx,
                                  gfloat       *embedding) {
     sqlite3_stmt  *stmt  = NULL;
     gint           rc    = 0;
-    sqlite3_int64  rowid = 0;
 
-    rc = sqlite3_prepare_v2(ctx->db,
+    rc = sqlite3_prepare_v2(sond_index_ctx->db,
             "INSERT INTO chunks(filename, chunk_idx, page_nr, char_pos, mime_type, text)"
             " VALUES(?,?,?,?,?,?)",
             -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
-        if (ctx->log_func)
-            ctx->log_func(ctx->log_data,
-                    "db_insert_chunk: prepare: %s", sqlite3_errmsg(ctx->db));
+        if (log_func)
+            log_func(log_func_data,
+                    "db_insert_chunk: prepare: %s", sqlite3_errmsg(sond_index_ctx->db));
         return FALSE;
     }
 
@@ -390,36 +387,37 @@ static gboolean db_insert_chunk(SondIndexCtx *ctx,
     sqlite3_finalize(stmt);
 
     if (rc != SQLITE_DONE) {
-        if (ctx->log_func)
-            ctx->log_func(ctx->log_data,
-                    "db_insert_chunk: step: %s", sqlite3_errmsg(ctx->db));
+        if (log_func)
+            log_func(log_func_data,
+                    "db_insert_chunk: step: %s", sqlite3_errmsg(sond_index_ctx->db));
         return FALSE;
     }
 
-    rowid = sqlite3_last_insert_rowid(ctx->db);
-
 #ifdef SOND_WITH_EMBEDDINGS
-    if (embedding && ctx->n_embd > 0) {
-        rc = sqlite3_prepare_v2(ctx->db,
+    sqlite3_int64  rowid = 0;
+    rowid = sqlite3_last_insert_rowid(sond_index_ctx->db);
+
+    if (embedding && sond_index_ctx->n_embd > 0) {
+        rc = sqlite3_prepare_v2(sond_index_ctx->db,
                 "INSERT INTO chunks_vec(rowid, embedding) VALUES(?,?)",
                 -1, &stmt, NULL);
         if (rc != SQLITE_OK) {
-            if (ctx->log_func)
-                ctx->log_func(ctx->log_data,
-                        "db_insert_chunk: prepare vec: %s", sqlite3_errmsg(ctx->db));
+            if (log_func)
+                log_func(log_func_data,
+                        "db_insert_chunk: prepare vec: %s", sqlite3_errmsg(sond_index_ctx->db));
             return FALSE;
         }
 
         sqlite3_bind_int64(stmt, 1, rowid);
         sqlite3_bind_blob (stmt, 2, embedding,
-                           ctx->n_embd * (gint)sizeof(gfloat), SQLITE_STATIC);
+        		sond_index_ctx->n_embd * (gint)sizeof(gfloat), SQLITE_STATIC);
 
         rc = sqlite3_step(stmt);
         sqlite3_finalize(stmt);
 
-        if (rc != SQLITE_DONE && ctx->log_func)
-            ctx->log_func(ctx->log_data,
-                    "db_insert_chunk: step vec: %s", sqlite3_errmsg(ctx->db));
+        if (rc != SQLITE_DONE && log_func)
+            log_func(log_func_data,
+                    "db_insert_chunk: step vec: %s", sqlite3_errmsg(sond_index_ctx->db));
     }
 #endif
 
@@ -455,27 +453,25 @@ static void sond_text_segment_free(SondTextSegment *seg) {
  * ======================================================================= */
 
 /* PDF: ein Segment pro Seite */
-static GPtrArray* extract_segments_from_pdf(SondIndexCtx *ctx,
-                                             guchar const *buf, gsize size) {
-    fz_context *fz  = (fz_context*)ctx->fz_ctx;
+static GPtrArray* extract_segments_from_pdf(SondIndexCtx* sond_index_ctx, fz_context* ctx,
+		guchar const *buf, gsize size, void (*log_func)(gpointer, gchar const*, ...),
+		gpointer log_func_data) {
     GPtrArray  *segs = g_ptr_array_new_with_free_func(
             (GDestroyNotify)sond_text_segment_free);
-
-    if (!fz) return segs;
 
     fz_document *doc = NULL;
     gint char_pos_total = 0;
 
-    fz_try(fz) {
-        fz_stream *stream = fz_open_memory(fz, (guchar*)buf, size);
-        doc = fz_open_document_with_stream(fz, "application/pdf", stream);
-        fz_drop_stream(fz, stream);
+    fz_try(ctx) {
+        fz_stream *stream = fz_open_memory(ctx, (guchar*)buf, size);
+        doc = fz_open_document_with_stream(ctx, "application/pdf", stream);
+        fz_drop_stream(ctx, stream);
 
-        gint n_pages = fz_count_pages(fz, doc);
+        gint n_pages = fz_count_pages(ctx, doc);
         for (gint i = 0; i < n_pages; i++) {
             fz_stext_options opts  = { 0 };
             fz_stext_page   *stext = fz_new_stext_page_from_page_number(
-                    fz, doc, i, &opts);
+            		ctx, doc, i, &opts);
             GString *page_text = g_string_new(NULL);
 
             for (fz_stext_block *b = stext->first_block; b; b = b->next) {
@@ -489,7 +485,7 @@ static GPtrArray* extract_segments_from_pdf(SondIndexCtx *ctx,
                     g_string_append_c(page_text, '\n');
                 }
             }
-            fz_drop_stext_page(fz, stext);
+            fz_drop_stext_page(ctx, stext);
 
             if (page_text->len > 0) {
                 gint page_char_pos = char_pos_total;
@@ -503,13 +499,13 @@ static GPtrArray* extract_segments_from_pdf(SondIndexCtx *ctx,
             }
         }
     }
-    fz_always(fz) {
-        if (doc) fz_drop_document(fz, doc);
+    fz_always(ctx) {
+        if (doc) fz_drop_document(ctx, doc);
     }
-    fz_catch(fz) {
-        if (ctx->log_func)
-            ctx->log_func(ctx->log_data,
-                    "extract_segments_from_pdf: %s", fz_caught_message(fz));
+    fz_catch(ctx) {
+        if (log_func)
+            log_func(log_func_data,
+                    "extract_segments_from_pdf: %s", fz_caught_message(ctx));
     }
 
     return segs;
@@ -580,19 +576,19 @@ static GPtrArray* extract_segments_from_text(guchar const *buf, gsize size) {
  * sond_server_index
  * ======================================================================= */
 
-void sond_server_index(SondIndexCtx  *ctx,
-                        gchar const   *filename,
-                        guchar const  *buf,
-                        gsize          size,
-                        gchar const   *mime_type) {
-    if (!ctx)       return;
+void sond_index(fz_context* ctx,
+		void (*log_func)(void*, gchar const*, ...), gpointer log_func_data,
+		SondIndexCtx  *sond_index_ctx, gchar const   *filename, guchar const  *buf,
+		gsize size, gchar const *mime_type) {
+    if (!sond_index_ctx)       return;
     if (!mime_type) return;
 
     /* Segmente extrahieren */
     GPtrArray *segs = NULL;
 
     if (!g_strcmp0(mime_type, "application/pdf"))
-        segs = extract_segments_from_pdf(ctx, buf, size);
+        segs = extract_segments_from_pdf(sond_index_ctx, ctx, buf, size,
+        		log_func, log_func_data);
     else if (!g_strcmp0(mime_type, "message/rfc822"))
         segs = extract_segments_from_gmessage(buf, size);
     else if (g_str_has_prefix(mime_type, "text/"))
@@ -606,9 +602,9 @@ void sond_server_index(SondIndexCtx  *ctx,
     }
 
     GError *error = NULL;
-    if (!sond_index_ctx_clear_file(ctx, filename, &error)) {
-        if (ctx->log_func)
-            ctx->log_func(ctx->log_data,
+    if (!sond_index_ctx_clear_file(sond_index_ctx, filename, &error)) {
+        if (log_func)
+            log_func(log_func_data,
                     "sond_server_index: clear_file '%s': %s",
                     filename, error ? error->message : "unknown");
         g_clear_error(&error);
@@ -616,19 +612,19 @@ void sond_server_index(SondIndexCtx  *ctx,
         return;
     }
 
-    sqlite3_exec(ctx->db, "BEGIN;", NULL, NULL, NULL);
+    sqlite3_exec(sond_index_ctx->db, "BEGIN;", NULL, NULL, NULL);
 
     gint chunk_idx = 0;
     for (guint s = 0; s < segs->len; s++) {
         SondTextSegment *seg   = g_ptr_array_index(segs, s);
         GPtrArray       *chunks = text_to_chunks(seg->text,
-                                                  ctx->chunk_size,
-                                                  ctx->chunk_overlap);
+        		sond_index_ctx->chunk_size,
+				sond_index_ctx->chunk_overlap);
 
         for (guint i = 0; i < chunks->len; i++) {
             SondChunk   *chunk = g_ptr_array_index(chunks, i);
-            gfloat *embedding  = compute_embedding(ctx, chunk->text);
-            db_insert_chunk(ctx, filename, chunk_idx,
+            gfloat *embedding  = compute_embedding(sond_index_ctx, chunk->text);
+            db_insert_chunk(sond_index_ctx, log_func, log_func_data, filename, chunk_idx,
                             seg->page_nr,
                             seg->char_pos + chunk->offset,
                             mime_type,
@@ -640,7 +636,7 @@ void sond_server_index(SondIndexCtx  *ctx,
         g_ptr_array_unref(chunks);
     }
 
-    sqlite3_exec(ctx->db, "COMMIT;", NULL, NULL, NULL);
+    sqlite3_exec(sond_index_ctx->db, "COMMIT;", NULL, NULL, NULL);
 
     g_ptr_array_unref(segs);
 }

@@ -354,9 +354,8 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 	info_window = info_window_open(pv->vf, "OCR");
 
 	datadir = g_build_filename(pv->zond->exe_dir, "../share/tessdata", NULL);
-	pool = sond_ocr_pool_new(datadir, "deu", 1, pv->zond->ctx,
-			(void(*)(void*, gchar const*, ...)) info_window_set_message_from_thread,
-					(gpointer) info_window, &info_window->cancel, &progress, &error);
+	pool = sond_ocr_pool_new(datadir, "deu", 1,
+			&info_window->cancel, &progress, &error);
 	g_free(datadir);
 	if (!pool) {
 		info_window_set_message(info_window,
@@ -382,7 +381,6 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 
 		fz_context *ctx = zond_pdf_document_get_ctx(
 				pdf_document_page->document);
-		pool->ctx = ctx; //Trick, um einheitlichn context für Dokument zu bekommen
 
 		//entry vorbereiten
 		entry.type = JOURNAL_TYPE_OCR;
@@ -452,9 +450,11 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 			}
 		}
 
-		task = sond_ocr_task_new(pool,
+		task = sond_ocr_task_new(ctx, pool,
 				zond_pdf_document_get_pdf_doc(pdf_document_page->document),
-				pdf_document_page->page_akt, font_ref, &error);
+				pdf_document_page->page_akt, font_ref,
+				(void(*)(void*, gchar const*, ...)) info_window_set_message_from_thread, (gpointer) info_window,
+				&error);
 		pdf_drop_obj(ctx, font_ref);
 		if (!task) {
 			info_window_set_message(info_window,

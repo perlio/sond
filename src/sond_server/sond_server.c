@@ -32,6 +32,7 @@
 
 #include <json-glib/json-glib.h>
 #include <string.h>
+#include <gmime/gmime.h>
 
 #include "sond_server_repo_worker.h"
 #ifdef __linux__
@@ -1533,6 +1534,8 @@ int main(int argc, char *argv[]) {
 
     LOG_INFO("Server running on port %d\n", server->port);
 
+    g_mime_init();
+
     /* Main Loop */
     loop = g_main_loop_new(NULL, FALSE);
 
@@ -1549,6 +1552,7 @@ int main(int argc, char *argv[]) {
     LOG_INFO("\nShutting down...\n");
     g_main_loop_unref(loop);
     g_object_unref(server);
+    g_mime_shutdown();
 
     LOG_INFO("Server stopped\n");
 

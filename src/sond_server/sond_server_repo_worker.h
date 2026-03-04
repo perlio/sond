@@ -20,24 +20,13 @@
 #define SOND_SERVER_REPO_WORKER_H
 
 #include <glib.h>
+
 #include "sond_server.h"
-#include "sond_server_index.h"
+#include "../sond_process_file.h"
 #include "../sond_ocr.h"
+#include "../sond_index.h"
 
 G_BEGIN_DECLS
-
-/**
- * SondWorkerCtx:
- *
- * Übergeordnete Struktur, die OCR-Pool und Index-Kontext zusammenfasst.
- * Wird als einziger Kontext-Parameter durch dispatch_buffer und alle
- * process_*-Funktionen durchgeschleift.
- * Jedes Feld kann NULL sein — dann wird der jeweilige Schritt übersprungen.
- */
-typedef struct {
-    SondOcrPool  *ocr_pool;   /* NULL → keine OCR         */
-    SondIndexCtx *index_ctx;  /* NULL → keine Indizierung */
-} SondWorkerCtx;
 
 /**
  * OcrJobInfo:

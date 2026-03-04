@@ -19,10 +19,9 @@
 #ifndef SRC_SOND_SERVER_INDEX_H_
 #define SRC_SOND_SERVER_INDEX_H_
 
-#define INDEX_DB_FILENAME "./sond_index.db"
-
 #include <glib.h>
 #include <sqlite3.h>
+#include <mupdf/fitz.h>
 
 G_BEGIN_DECLS
 
@@ -40,7 +39,7 @@ G_BEGIN_DECLS
  * @chunk_size:    Maximale Chunk-Größe in Zeichen
  * @chunk_overlap: Überlappung zwischen Chunks in Zeichen
  */
-typedef struct {
+typedef struct _SondIndexCtx {
     sqlite3  *db;
     gchar    *db_path;
 #ifdef SOND_WITH_EMBEDDINGS
@@ -50,9 +49,6 @@ typedef struct {
 #endif
     gint      chunk_size;
     gint      chunk_overlap;
-    gpointer  fz_ctx;        /* fz_context* - opak, aus SondOcrPool */
-    void    (*log_func)(gpointer, gchar const*, ...);  /* Logging-Callback */
-    gpointer  log_data;      /* user_data für log_func */
 } SondIndexCtx;
 
 /* =======================================================================
@@ -75,9 +71,6 @@ SondIndexCtx* sond_index_ctx_new(gchar const *db_path,
                                   gchar const *model_path,
                                   gint         chunk_size,
                                   gint         chunk_overlap,
-                                  gpointer     fz_ctx,
-                                  void       (*log_func)(gpointer, gchar const*, ...),
-                                  gpointer     log_data,
                                   GError     **error);
 
 /**
@@ -121,7 +114,9 @@ gboolean sond_index_ctx_clear_file(SondIndexCtx *ctx,
  *   text*             – Rohtext direkt
  * Alle anderen MIME-Typen: sofortiger Rücksprung.
  */
-void sond_server_index(SondIndexCtx  *ctx,
+void sond_index(fz_context* ctx,
+		void (*log_func)(void*, gchar const*, ...),
+		gpointer log_func_data, SondIndexCtx  *sond_index_ctx,
                         gchar const   *filename,
                         guchar const  *buf,
                         gsize          size,

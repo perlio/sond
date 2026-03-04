@@ -515,9 +515,12 @@ static void cb_item_textsuche(GtkMenuItem *item, gpointer data) {
 }
 
 struct _ThreadData {
+	fz_context* ctx;
 	SondOcrPool* pool;
 	pdf_document* doc;
 	gchar* filepart;
+	void(*log_func)(void*, gchar const*, ...); //log_func
+	gpointer log_func_data; //log_func_data
 	gint done;
 };
 
@@ -527,10 +530,11 @@ static gpointer ocr_doc(gpointer data) {
 
 	struct _ThreadData* thread_data = (struct _ThreadData*) data;
 
-	rc = sond_ocr_pdf_doc(thread_data->pool, thread_data->doc, &error);
+	rc = sond_ocr_pdf_doc(thread_data->ctx, thread_data->pool, thread_data->doc,
+			thread_data->log_func, thread_data->log_func_data, &error);
 	g_atomic_int_set(&thread_data->done, 1);
 	if (rc == -1) {
-		thread_data->pool->log_func(thread_data->pool->log_data,
+		thread_data->log_func(thread_data->log_func_data,
 				"OCR-Recognition für PDF '%s' fehlgeschlagen: %s",
 				thread_data->filepart, error->message);
 		g_error_free(error);
@@ -581,9 +585,8 @@ static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 	info_window = info_window_open(zond->app_window, "OCR");
 
 	datadir = g_build_filename(zond->exe_dir, "../share/tessdata", NULL);
-	pool = sond_ocr_pool_new(datadir, "deu", 4, zond->ctx,
-			(void(*)(void*, gchar const*, ...)) info_window_set_message_from_thread,
-			(gpointer) info_window, &info_window->cancel, &global_progress, &error);
+	pool = sond_ocr_pool_new(datadir, "deu", 4,
+			&info_window->cancel, &global_progress, &error);
 	g_free(datadir);
 	if (!pool) {
 		info_window_set_message(info_window,
@@ -625,9 +628,13 @@ static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 		}
 
 		struct _ThreadData* thread_data = g_new0(struct _ThreadData, 1);
+		thread_data->ctx = zond->ctx;
 		thread_data->pool = pool;
 		thread_data->doc = doc;
 		thread_data->filepart = filepart;
+		thread_data->log_func =
+				(void(*)(void*, gchar const*, ...)) info_window_set_message_from_thread;
+		thread_data->log_func_data = (gpointer) info_window,
 
 		info_window_set_message(info_window, "OCR-Erkennung für PDF '%s' wird gestartet",
 				filepart);

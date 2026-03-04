@@ -45,9 +45,6 @@ typedef struct _SondOcrPool {
     gchar *tessdata_path;
     gchar *language;
     TessBaseAPI* osd_api;
-	fz_context* ctx;
-    void (*log_func)(void*, gchar const*, ...);
-    gpointer log_data;
     gint num_active_jobs;
 } SondOcrPool;
 
@@ -63,6 +60,9 @@ typedef struct {
 // Struktur für OCR-Aufgaben
 typedef struct {
 	gint status; //0: muß noch laufen; 1: läuft; 2: fertig; 3: error; 4: Abstellgleis
+	fz_context* ctx;
+	void(*log_func)(void*, gchar const*, ...);
+	gpointer log_func_data;
 	SondOcrPool* pool;
 	pdf_page* page;
 	pdf_obj* font_ref;
@@ -77,15 +77,17 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, GError** error);
 
 void sond_ocr_task_free(SondOcrTask* task);
 
-SondOcrTask* sond_ocr_task_new(SondOcrPool* pool, pdf_document* doc,
-		gint page_num, pdf_obj* font_ref, GError** error);
+SondOcrTask* sond_ocr_task_new(fz_context* ctx, SondOcrPool* pool, pdf_document* doc,
+		gint page_num, pdf_obj* font_ref,
+		void (*log_func)(void*, gchar const*, ...), gpointer log_func_data,
+		GError** error);
 
-gint sond_ocr_pdf_doc(SondOcrPool* ocr_pool, pdf_document* doc,
+gint sond_ocr_pdf_doc(fz_context* ctx, SondOcrPool* ocr_pool, pdf_document* doc,
+		void (*log_func)(void*, gchar const*, ...), gpointer log_func_data,
 		GError** error);
 
 SondOcrPool* sond_ocr_pool_new(const gchar *tessdata_path,
-		const gchar *language, gint num_threads, fz_context* ctx,
-		void (*log_func)(void*, gchar const*, ...), gpointer log_data,
+		const gchar *language, gint num_threads,
 		gint* cancel_all, gint* global_progress, GError **error);
 
 void sond_ocr_pool_free(SondOcrPool *pool);

@@ -157,23 +157,23 @@ static gint sond_ocr_osd(SondOcrTask* task, GError** error) {
 			if (orient_deg && orient_conf > 1.7f) {
 				gint rc = 0;
 
-				fz_drop_pixmap(task->pool->ctx, task->pixmap);
+				fz_drop_pixmap(task->ctx, task->pixmap);
 
-				rc = pdf_page_rotate(task->pool->ctx, task->page->obj, 360 - orient_deg, error);
+				rc = pdf_page_rotate(task->ctx, task->page->obj, 360 - orient_deg, error);
 				if (rc)
 					ERROR_Z
 
-				if (task->pool->log_func)
-					task->pool->log_func(task->pool->log_data,
+				if (task->log_func)
+					task->log_func(task->log_func_data,
 							"Tesseract OSD: Seite %u um %d° rotiert (Konfidenz %.2f)",
 							task->page->super.number, (360 - orient_deg), orient_conf);
 
-				task->pixmap = pdf_render_pixmap(task->pool->ctx, task->page, task->scale, error);
+				task->pixmap = pdf_render_pixmap(task->ctx, task->page, task->scale, error);
 				if (!task->pixmap)
 					ERROR_Z
 			}
-			else if (orient_deg && task->pool->log_func)
-				task->pool->log_func(task->pool->log_data,
+			else if (orient_deg && task->log_func)
+				task->log_func(task->log_func_data,
 						"OSD Seite %u: conf < 1.7 - keine Rotation angewendet",
 						task->page->super.number);
 		}
@@ -207,10 +207,10 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, GError** error) {
 			status = g_atomic_int_get(&task->status);
 
 			if (status == 0) {
-				rc = pdf_page_has_hidden_text(task->pool->ctx, task->page, &hidden, error);
+				rc = pdf_page_has_hidden_text(task->ctx, task->page, &hidden, error);
 				if (rc) {
-					if (task->pool->log_data)
-						task->pool->log_func(task->pool->log_data,
+					if (task->log_func)
+						task->log_func(task->log_func_data,
 								"Seite %u konnte nicht auf versteckten Text geprüft werden: %s",
 							i, (*error)->message);
 					g_clear_error(error);
@@ -220,8 +220,8 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, GError** error) {
 				}
 
 				if (hidden) {
-					if (task->pool->log_data)
-						task->pool->log_func(task->pool->log_data,
+					if (task->log_func)
+						task->log_func(task->log_func_data,
 								"Seite %u enthält versteckten Text - OCR übersprungen", i);
 					pages_done++;
 					g_atomic_int_set(&task->status, 4);
@@ -229,10 +229,10 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, GError** error) {
 				}
 
 				task->scale = scale[task->durchgang];
-				task->pixmap = pdf_render_pixmap(task->pool->ctx, task->page, task->scale, error);
+				task->pixmap = pdf_render_pixmap(task->ctx, task->page, task->scale, error);
 				if (!task->pixmap) {
-					if (task->pool->log_data)
-						task->pool->log_func(task->pool->log_data,
+					if (task->log_func)
+						task->log_func(task->log_func_data,
 								"Seite %u konnte nicht gerendert werden: %s",
 								i, (*error)->message);
 					g_clear_error(error);
@@ -243,17 +243,17 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, GError** error) {
 
 				rc = sond_ocr_osd(task, error);
 				if (rc) {
-					if (task->pool->log_data)
-						task->pool->log_func(task->pool->log_data, "OSD Seite %u gescheitert: %s",
+					if (task->log_func)
+						task->log_func(task->log_func_data, "OSD Seite %u gescheitert: %s",
 								i, (*error)->message);
 					g_clear_error(error);
 				}
 
-				rc = calculate_ocr_transform(task->pool->ctx, task->page, task->scale,
+				rc = calculate_ocr_transform(task->ctx, task->page, task->scale,
 						&task->ocr_transform, error);
 				if (rc) {
-					if (task->pool->log_data)
-						task->pool->log_func(task->pool->log_data,
+					if (task->log_func)
+						task->log_func(task->log_func_data,
 								"Transform-Matrix konnte nicht berechnet werden: %s",
 								i, (*error)->message);
 					g_clear_error(error);
@@ -265,8 +265,8 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, GError** error) {
 				g_atomic_int_set(&task->status, 1); //started
 				gboolean suc = g_thread_pool_push(task->pool->pool, task, error);
 				if (!suc) {
-					if (task->pool->log_data)
-						task->pool->log_func(task->pool->log_data,
+					if (task->log_func)
+						task->log_func(task->log_func_data,
 								"Thread konnte nicht gepusht werden: %s",
 								i, (*error)->message);
 					g_clear_error(error);
@@ -284,11 +284,11 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, GError** error) {
 				gint rc = 0;
 
 				//content einfügen
-				rc = add_ocr_layer_to_page(task->pool->ctx, task->content, task->page,
+				rc = add_ocr_layer_to_page(task->ctx, task->content, task->page,
 						task->font_ref, &task->ocr_transform, error);
 				if (rc) {
-					if (task->pool->log_func)
-						task->pool->log_func(task->pool->log_data,
+					if (task->log_func)
+						task->log_func(task->log_func_data,
 								"Einfügen der OCR-Daten in PDF-Page %u fehlgeschlagen: %s",
 								i, (*error)->message);
 					g_clear_error(error);
@@ -315,7 +315,7 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, GError** error) {
 
 void sond_ocr_task_free(SondOcrTask* task) {
 	if (task->page)
-		pdf_drop_page(task->pool->ctx, task->page);
+		pdf_drop_page(task->ctx, task->page);
 	if (task->content)
 		g_string_free(task->content, TRUE);
 
@@ -324,48 +324,52 @@ void sond_ocr_task_free(SondOcrTask* task) {
 	return;
 }
 
-SondOcrTask* sond_ocr_task_new(SondOcrPool* pool, pdf_document* doc,
-		gint page_num, pdf_obj* font_ref, GError** error) {
+SondOcrTask* sond_ocr_task_new(fz_context* ctx, SondOcrPool* pool,
+		pdf_document* doc, gint page_num, pdf_obj* font_ref,
+		void (*log_func)(void*, gchar const*, ...), gpointer log_func_data,
+		GError** error) {
 	SondOcrTask* task = g_new0(SondOcrTask, 1);
 
+	task->ctx = ctx;
 	task->pool = pool;
+	task->log_func = log_func;
+	task->log_func_data = log_func_data;
 
-	fz_try(task->pool->ctx)
-		task->page = pdf_load_page(task->pool->ctx, doc, page_num);
-	fz_catch(task->pool->ctx) {
-		if (task->pool->log_data)
-			task->pool->log_func(task->pool->log_data,
+	fz_try(ctx)
+		task->page = pdf_load_page(ctx, doc, page_num);
+	fz_catch(ctx) {
+		if (log_func_data)
+			log_func(log_func_data,
 					"pdf_page %u konnte nicht geladen werden: %s",
-					page_num, fz_caught_message(task->pool->ctx));
+					page_num, fz_caught_message(ctx));
 		g_free(task);
 
 		return NULL;
 	}
 
-	task->font_ref = pdf_keep_obj(task->pool->ctx, font_ref);
+	task->font_ref = pdf_keep_obj(ctx, font_ref);
 
 	return task;
 }
 
-gint sond_ocr_pdf_doc(SondOcrPool* ocr_pool, pdf_document* doc,
+gint sond_ocr_pdf_doc(fz_context* ctx, SondOcrPool* ocr_pool, pdf_document* doc,
+		void(*log_func)(void*, gchar const*, ...), gpointer log_func_data,
 		GError** error) {
 	gint num_pages = 0;
 	pdf_obj* font_ref = NULL;
 	gint rc = 0;
 
-	fz_try(ocr_pool->ctx)
-		num_pages = pdf_count_pages(ocr_pool->ctx, doc);
-	fz_catch(ocr_pool->ctx) {
-		fz_context* ctx = ocr_pool->ctx;
+	fz_try(ctx)
+		num_pages = pdf_count_pages(ctx, doc);
+	fz_catch(ctx)
 		ERROR_PDF
-	}
 
-	rc = pdf_get_sond_font(ocr_pool->ctx, doc, &font_ref, error);
+	rc = pdf_get_sond_font(ctx, doc, &font_ref, error);
 	if (rc)
 		ERROR_Z
 
 	if (!font_ref) {
-		font_ref = pdf_put_sond_font(ocr_pool->ctx, doc, error);
+		font_ref = pdf_put_sond_font(ctx, doc, error);
 		if (!font_ref)
 			ERROR_Z
 	}
@@ -375,10 +379,11 @@ gint sond_ocr_pdf_doc(SondOcrPool* ocr_pool, pdf_document* doc,
 
 	for (gint i = 0; i < num_pages; i++) {
 		SondOcrTask* task =
-				sond_ocr_task_new(ocr_pool, doc, i, font_ref, error);
+				sond_ocr_task_new(ctx, ocr_pool, doc, i, font_ref,
+						log_func, log_func_data, error);
 		if (!task) {
-			if (ocr_pool->log_data)
-				ocr_pool->log_func(ocr_pool->log_data,
+			if (log_func_data)
+				log_func(log_func_data,
 						"Seite %u: Task konnte nicht erzeugt werden: %s",
 						i, (*error)->message);
 			g_clear_error(error);
@@ -388,7 +393,7 @@ gint sond_ocr_pdf_doc(SondOcrPool* ocr_pool, pdf_document* doc,
 		g_ptr_array_add(arr_tasks, task);
 	}
 
-	pdf_drop_obj(ocr_pool->ctx, font_ref);
+	pdf_drop_obj(ctx, font_ref);
 
 	rc = sond_ocr_do_tasks(arr_tasks, error);
 	g_ptr_array_unref(arr_tasks);
@@ -723,8 +728,8 @@ static gint ocr_pixmap(SondOcrTask* task, SondOcrPool* pool,
 
 	//wenn nicht:
 	task->durchgang++;
-	if (pool->log_func)
-		pool->log_func(pool->log_data,
+	if (task->log_func)
+		task->log_func(task->log_func_data,
 			"Seite %u: OCR-Konfidenz %f%%, neuer versuch mit höherer Auflösung",
 			task->page->super.number, conf);
 
@@ -817,8 +822,8 @@ static void ocr_worker(gpointer task_data, gpointer user_data) {
         		pool->tessdata_path, pool->language, pool->cancel_all,
 				pool->global_progress, &error);
         if (!thread_data) {
-        	if (pool->log_func)
-        		pool->log_func(pool->log_data, "Thread-Data konnte nicht geladen werden: %s",
+        	if (task->log_func)
+        		task->log_func(task->log_func_data, "Thread-Data konnte nicht geladen werden: %s",
         				error->message);
         	g_error_free(error);
         	g_atomic_int_set(&task->status, 3);
@@ -829,8 +834,8 @@ static void ocr_worker(gpointer task_data, gpointer user_data) {
 
     rc = ocr_pixmap(task, pool, thread_data, &error);
     if (rc == -1) {
-		if (pool->log_func)
-			pool->log_func(pool->log_data, "Recog failed: %s", error->message);
+		if (task->log_func)
+			task->log_func(task->log_func_data, "Recog failed: %s", error->message);
 		g_error_free(error);
     	g_atomic_int_set(&task->status, 3);
     	goto dec_active_jobs;
@@ -842,8 +847,8 @@ static void ocr_worker(gpointer task_data, gpointer user_data) {
 
 	TessResultIterator* iter = TessBaseAPIGetIterator(thread_data->api);
 	if (!iter) {
-		if (pool->log_func)
-			pool->log_func(pool->log_data, "Couldn't get ResultIter");
+		if (task->log_func)
+			task->log_func(task->log_func_data, "Couldn't get ResultIter");
 		g_atomic_int_set(&task->status, 3);
 		goto dec_active_jobs;
 	}
@@ -852,8 +857,8 @@ static void ocr_worker(gpointer task_data, gpointer user_data) {
 	task->content = tesseract_to_content_stream(iter,
 			&task->ocr_transform, &error);
 	if (!task->content) {
-		if (pool->log_func)
-			pool->log_func(pool->log_data,
+		if (task->log_func)
+			task->log_func(task->log_func_data,
 					"Umwandlung Results in content stream fehlgeschlagen: %s",
 					error->message);
 		g_error_free(error);
@@ -916,9 +921,6 @@ static gint sond_ocr_init_osd_api(TessBaseAPI** osd_api,
 SondOcrPool* sond_ocr_pool_new(const gchar *tessdata_path,
                                    const gchar *language,
                                    gint num_threads,
-								   fz_context* ctx,
-								   void (*log_func)(void*, gchar const*, ...),
-								   gpointer log_data,
 								   gint* cancel_all,
 								   gint* global_progress,
                                    GError **error) {
@@ -927,6 +929,8 @@ SondOcrPool* sond_ocr_pool_new(const gchar *tessdata_path,
     g_return_val_if_fail(tessdata_path != NULL, NULL);
     g_return_val_if_fail(language != NULL, NULL);
     g_return_val_if_fail(num_threads > 0, NULL);
+    g_return_val_if_fail(cancel_all, NULL); //sonst komplizierte Abfrage in threads...
+    g_return_val_if_fail(global_progress, NULL);
 
     SondOcrPool *pool = g_new0(SondOcrPool, 1);
 
@@ -954,9 +958,6 @@ SondOcrPool* sond_ocr_pool_new(const gchar *tessdata_path,
     g_mutex_init(&pool->mutex);
     pool->tessdata_path = g_strdup(tessdata_path);
     pool->language = g_strdup(language);
-    pool->ctx = ctx;
-    pool->log_func = log_func;
-    pool->log_data = log_data;
     pool->cancel_all = cancel_all;
     pool->global_progress = global_progress;
 
