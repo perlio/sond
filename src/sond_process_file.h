@@ -26,7 +26,7 @@ typedef struct _SondIndexCtx SondIndexCtx;
 typedef char gchar;
 typedef unsigned char guchar;
 typedef void* gpointer;
-typedef unsigned long gsize;
+typedef long long unsigned gsize;
 typedef int gint;
 
 /**

@@ -727,8 +727,6 @@ static GBytes* sond_file_part_zip_mod_zip_file(SondFilePartZip*,
 static GBytes* sond_file_part_gmessage_mod_part(SondFilePartGMessage*,
 		gchar const*, GBytes*, GError**);
 
-static gint sond_file_part_replace(SondFilePart*, GBytes*, GError**);
-
 gint sond_file_part_delete(SondFilePart* sfp, GError** error) {
 	SondFilePart* sfp_parent = NULL;
 
@@ -793,7 +791,7 @@ gint sond_file_part_delete(SondFilePart* sfp, GError** error) {
 /**
  *	setzt bytes als neuen Inhalt von sfp in dessen parent
  */
-static gint sond_file_part_replace(SondFilePart* sfp, GBytes* bytes, GError** error) {
+gint sond_file_part_replace(SondFilePart* sfp, GBytes* bytes, GError** error) {
 	SondFilePart* sfp_parent = NULL;
 
 	sfp_parent = sond_file_part_get_parent(sfp);

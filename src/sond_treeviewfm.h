@@ -76,6 +76,10 @@ gint sond_treeviewfm_set_root(SondTreeviewFM*, const gchar*, gchar**);
 
 const gchar* sond_treeviewfm_get_root(SondTreeviewFM*);
 
+void sond_treeviewfm_set_tessdata_path(SondTreeviewFM*, const gchar*);
+
+const gchar* sond_treeviewfm_get_tessdata_path(SondTreeviewFM*);
+
 G_END_DECLS
 
 #endif // SOND_TREEVIEWFM_H_INCLUDED
