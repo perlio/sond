@@ -227,10 +227,10 @@ gboolean sond_index_ctx_clear_file(SondIndexCtx *ctx,
                                     gchar const  *filename,
                                     GError      **error) {
     sqlite3_stmt *stmt    = NULL;
-    gchar        *pattern = g_strdup_printf("%s%%", filename);
+    gchar        *pattern = g_strdup_printf("%s//%%", filename);
 
     gint rc = sqlite3_prepare_v2(ctx->db,
-            "DELETE FROM chunks WHERE filename LIKE ?",
+            "DELETE FROM chunks WHERE filename = ? OR filename LIKE ?",
             -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
@@ -240,7 +240,8 @@ gboolean sond_index_ctx_clear_file(SondIndexCtx *ctx,
         return FALSE;
     }
 
-    sqlite3_bind_text(stmt, 1, pattern, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 1, filename, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, pattern,  -1, SQLITE_TRANSIENT);
     rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
     g_free(pattern);
