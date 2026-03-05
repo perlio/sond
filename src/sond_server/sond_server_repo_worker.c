@@ -360,6 +360,8 @@ static void ocr_log_add_message(OcrLogEntry* log_entry,
 	message = g_strdup_vprintf(format, args);
 	va_end(args);
 
+	LOG_INFO("%s", message);
+
     g_mutex_lock(&log_entry->mutex);
     g_ptr_array_add(log_entry->log_msg, message);
     g_mutex_unlock(&log_entry->mutex);
@@ -1176,18 +1178,28 @@ static gboolean seafile_upload_file(SeafileConfig *config,
     GString *body = g_string_new(NULL);
 
     /* File part */
+    const gchar *basename = strrchr(file_path, '/');
+    const gchar *filename = basename ? basename + 1 : file_path;
     g_string_append_printf(body, "--%s\r\n", boundary);
     g_string_append(body, "Content-Disposition: form-data; name=\"file\"; filename=\"");
-    g_string_append(body, file_path);
+    g_string_append(body, filename);
     g_string_append(body, "\"\r\n");
     g_string_append(body, "Content-Type: application/octet-stream\r\n\r\n");
     g_string_append_len(body, (const gchar*)data, size);
     g_string_append(body, "\r\n");
 
     /* parent_dir part */
+    const gchar *last_slash = strrchr(file_path, '/');
+    gchar *parent_dir;
+    if (last_slash && last_slash != file_path)
+        parent_dir = g_strndup(file_path, last_slash - file_path);
+    else
+        parent_dir = g_strdup("/");
     g_string_append_printf(body, "--%s\r\n", boundary);
     g_string_append(body, "Content-Disposition: form-data; name=\"parent_dir\"\r\n\r\n");
-    g_string_append(body, "/\r\n");
+    g_string_append(body, parent_dir);
+    g_free(parent_dir);
+    g_string_append(body, "\r\n");
 
     /* replace part */
     g_string_append_printf(body, "--%s\r\n", boundary);
@@ -1210,8 +1222,9 @@ static gboolean seafile_upload_file(SeafileConfig *config,
     gchar *content_type = g_strdup_printf("multipart/form-data; boundary=%s", boundary);
     g_free(boundary);
 
+    gsize body_len = body->len;
     gchar *body_str = g_string_free(body, FALSE);  /* Get string, free GString */
-    GBytes *body_bytes = g_bytes_new_take(body_str, strlen(body_str));
+    GBytes *body_bytes = g_bytes_new_take(body_str, body_len);
 
     soup_message_set_request_body_from_bytes(msg, content_type, body_bytes);
     g_bytes_unref(body_bytes);
@@ -1438,15 +1451,6 @@ static gpointer seafile_repo_worker_thread(gpointer user_data) {
         LOG_WARN("Failed to write OCR log file");
     }
 
-    /* Cleanup */
-    g_list_free_full(files, (GDestroyNotify)seafile_file_free);
-    ocr_log_entry_free(log_entry);
-
-    g_free(config.server_url);
-    g_free(config.auth_token);
-    g_free(config.repo_id);
-    g_free(config.base_path);
-
     /* Abschließender Index-Upload */
     if (index_ctx) {
         gsize db_size = 0;
@@ -1465,12 +1469,21 @@ static gpointer seafile_repo_worker_thread(gpointer user_data) {
         sond_index_ctx_free(index_ctx);
     }
 
-    g_object_unref(session);
-
     /* Job als abgeschlossen markieren */
     ocr_job_mark_complete(job_info);
     fz_drop_context(ctx);
     sond_ocr_pool_free(ocr_pool);
+
+    /* Cleanup */
+    g_list_free_full(files, (GDestroyNotify)seafile_file_free);
+    ocr_log_entry_free(log_entry);
+
+    g_free(config.server_url);
+    g_free(config.auth_token);
+    g_free(config.repo_id);
+    g_free(config.base_path);
+
+    g_object_unref(session);
 
     return NULL;
 }

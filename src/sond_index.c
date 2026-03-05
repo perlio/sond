@@ -21,6 +21,7 @@
 #include <glib.h>
 #include <sqlite3.h>
 #include <mupdf/fitz.h>
+#include <mupdf/pdf.h>
 #include <gmime/gmime.h>
 #include <string.h>
 
@@ -459,19 +460,19 @@ static GPtrArray* extract_segments_from_pdf(SondIndexCtx* sond_index_ctx, fz_con
     GPtrArray  *segs = g_ptr_array_new_with_free_func(
             (GDestroyNotify)sond_text_segment_free);
 
-    fz_document *doc = NULL;
+    pdf_document *doc = NULL;
     gint char_pos_total = 0;
 
     fz_try(ctx) {
         fz_stream *stream = fz_open_memory(ctx, (guchar*)buf, size);
-        doc = fz_open_document_with_stream(ctx, "application/pdf", stream);
+        doc = pdf_open_document_with_stream(ctx, stream);
         fz_drop_stream(ctx, stream);
 
-        gint n_pages = fz_count_pages(ctx, doc);
+        gint n_pages = pdf_count_pages(ctx, doc);
         for (gint i = 0; i < n_pages; i++) {
             fz_stext_options opts  = { 0 };
             fz_stext_page   *stext = fz_new_stext_page_from_page_number(
-            		ctx, doc, i, &opts);
+            		ctx, (fz_document*) doc, i, &opts);
             GString *page_text = g_string_new(NULL);
 
             for (fz_stext_block *b = stext->first_block; b; b = b->next) {
@@ -500,7 +501,7 @@ static GPtrArray* extract_segments_from_pdf(SondIndexCtx* sond_index_ctx, fz_con
         }
     }
     fz_always(ctx) {
-        if (doc) fz_drop_document(ctx, doc);
+        if (doc) pdf_drop_document(ctx, doc);
     }
     fz_catch(ctx) {
         if (log_func)
@@ -580,7 +581,7 @@ void sond_index(fz_context* ctx,
 		void (*log_func)(void*, gchar const*, ...), gpointer log_func_data,
 		SondIndexCtx  *sond_index_ctx, gchar const   *filename, guchar const  *buf,
 		gsize size, gchar const *mime_type) {
-    if (!sond_index_ctx)       return;
+    if (!sond_index_ctx) return;
     if (!mime_type) return;
 
     /* Segmente extrahieren */
@@ -601,18 +602,14 @@ void sond_index(fz_context* ctx,
         return;
     }
 
-    GError *error = NULL;
-    if (!sond_index_ctx_clear_file(sond_index_ctx, filename, &error)) {
+    char *errmsg = NULL;
+    if (sqlite3_exec(sond_index_ctx->db, "BEGIN;", NULL, NULL, &errmsg) != SQLITE_OK) {
         if (log_func)
-            log_func(log_func_data,
-                    "sond_server_index: clear_file '%s': %s",
-                    filename, error ? error->message : "unknown");
-        g_clear_error(&error);
+            log_func(log_func_data, "sond_index: BEGIN fehlgeschlagen: %s", errmsg);
+        sqlite3_free(errmsg);
         g_ptr_array_unref(segs);
         return;
     }
-
-    sqlite3_exec(sond_index_ctx->db, "BEGIN;", NULL, NULL, NULL);
 
     gint chunk_idx = 0;
     for (guint s = 0; s < segs->len; s++) {
@@ -624,11 +621,17 @@ void sond_index(fz_context* ctx,
         for (guint i = 0; i < chunks->len; i++) {
             SondChunk   *chunk = g_ptr_array_index(chunks, i);
             gfloat *embedding  = compute_embedding(sond_index_ctx, chunk->text);
-            db_insert_chunk(sond_index_ctx, log_func, log_func_data, filename, chunk_idx,
+            if (!db_insert_chunk(sond_index_ctx, log_func, log_func_data, filename, chunk_idx,
                             seg->page_nr,
                             seg->char_pos + chunk->offset,
                             mime_type,
-                            chunk->text, embedding);
+                            chunk->text, embedding)) {
+                g_free(embedding);
+                g_ptr_array_unref(chunks);
+                sqlite3_exec(sond_index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
+                g_ptr_array_unref(segs);
+                return;
+            }
             g_free(embedding);
             chunk_idx++;
         }
@@ -636,7 +639,12 @@ void sond_index(fz_context* ctx,
         g_ptr_array_unref(chunks);
     }
 
-    sqlite3_exec(sond_index_ctx->db, "COMMIT;", NULL, NULL, NULL);
+    if (sqlite3_exec(sond_index_ctx->db, "COMMIT;", NULL, NULL, &errmsg) != SQLITE_OK) {
+        if (log_func)
+            log_func(log_func_data, "sond_index: COMMIT fehlgeschlagen: %s", errmsg);
+        sqlite3_free(errmsg);
+        sqlite3_exec(sond_index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
+    }
 
     g_ptr_array_unref(segs);
 }

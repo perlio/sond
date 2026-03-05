@@ -32,7 +32,7 @@
 #include "sond_misc.h"
 
 
-void sond_process_file(SondProcessFileCtx* wctx,
+static void sond_process_file_do_rec(SondProcessFileCtx* wctx,
 		guchar* data, gsize size, gchar const* filename,
 		guchar** out_data, gsize* out_size, gint* out_pdf_count);
 
@@ -118,7 +118,7 @@ static gint process_zip_for_ocr(guchar* data, gsize size,
 		guchar* processed_data = NULL;
 		gsize processed_size = 0;
 
-		sond_process_file(wctx, entry_data, (gsize)bytes_read, entry_filename,
+		sond_process_file_do_rec(wctx, entry_data, (gsize)bytes_read, entry_filename,
 				&processed_data, &processed_size, out_pdf_count);
 		g_free(entry_data);
 		g_free(entry_filename);
@@ -252,8 +252,10 @@ static gboolean gmessage_process_part(GMimeObject* object,
 				guchar* processed = NULL;
 				gsize proc_size = 0;
 
-				sond_process_file(wctx, inner_buf, inner_size, parent_filename,
+					gchar* msg_filename = g_strdup_printf("%s//%d", parent_filename, part_index);
+				sond_process_file_do_rec(wctx, inner_buf, inner_size, msg_filename,
 						&processed, &proc_size, out_pdf_count);
+				g_free(msg_filename);
 				g_free(inner_buf);
 
 				if (processed) {
@@ -295,8 +297,10 @@ static gboolean gmessage_process_part(GMimeObject* object,
 		guchar* processed = NULL;
 		gsize proc_size = 0;
 
-		sond_process_file(wctx, part_data, part_size, parent_filename,
+		gchar* part_filename = g_strdup_printf("%s//%d", parent_filename, part_index);
+		sond_process_file_do_rec(wctx, part_data, part_size, part_filename,
 				&processed, &proc_size, out_pdf_count);
+		g_free(part_filename);
 		g_free(part_data);
 
 		if (!processed)
@@ -421,7 +425,7 @@ static gint process_emb_file(fz_context* ctx, pdf_obj* dict,
 
 	guchar* data_out = NULL;
 	gsize size_out = 0;
-	sond_process_file(((ProcessPdfData*)data)->wctx, data_buf, len, filename_emb,
+	sond_process_file_do_rec(((ProcessPdfData*)data)->wctx, data_buf, len, filename_emb,
 			&data_out, &size_out, ((ProcessPdfData*)data)->out_pdf_count);
 	fz_drop_buffer(((ProcessPdfData*)data)->wctx->ctx, buf);
 
@@ -547,7 +551,7 @@ static gint process_pdf_for_ocr(guchar* data, gsize size,
 	return 0;
 }
 
-void sond_process_file(SondProcessFileCtx* wctx,
+static void sond_process_file_do_rec(SondProcessFileCtx* wctx,
 		guchar* data, gsize size, gchar const* filename,
 		guchar** out_data, gsize* out_size, gint* out_pdf_count) {
 	GError* error = NULL;
@@ -591,4 +595,21 @@ void sond_process_file(SondProcessFileCtx* wctx,
 			mime_type);
 
 	g_free(mime_type);
+}
+
+void sond_process_file(SondProcessFileCtx* wctx,
+		guchar* data, gsize size, gchar const* filename,
+		guchar** out_data, gsize* out_size, gint* out_pdf_count) {
+	if (wctx->index_ctx) {
+		GError* error = NULL;
+		if (!sond_index_ctx_clear_file(wctx->index_ctx, filename, &error)) {
+			if (wctx->log_func)
+				wctx->log_func(wctx->log_func_data,
+						"sond_process_file: clear_file '%s': %s",
+						filename, error ? error->message : "unknown");
+			g_clear_error(&error);
+		}
+	}
+
+	sond_process_file_do_rec(wctx, data, size, filename, out_data, out_size, out_pdf_count);
 }
