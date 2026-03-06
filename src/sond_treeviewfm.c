@@ -2608,28 +2608,29 @@ static void sond_treeviewfm_indiziere_leaf(SondTreeviewFM *stvfm,
 		SondFilePart *sfp, SondProcessFileCtx *wctx) {
 	GBytes *bytes = NULL;
 	GError *error = NULL;
-	gchar const *rel_path = NULL;
+	gchar const *file_part = NULL;
 	gconstpointer data = NULL;
 	gsize length = 0;
 	guchar *out_data = NULL;
 	gsize out_size = 0;
 	gint out_pdf_count = 0;
 
-	rel_path = sond_file_part_get_path(sfp);
+	file_part = sond_file_part_get_filepart(sfp);
 
 	bytes = sond_file_part_get_bytes(sfp, &error);
 	if (!bytes) {
 		LOG_WARN("sond_file_part_get_bytes('%s'): %s",
-				rel_path ? rel_path : "?",
+				file_part ? file_part : "?",
 				error ? error->message : "unbekannter Fehler");
 		g_clear_error(&error);
+		g_free(file_part);
 		return;
 	}
 
 	data = g_bytes_get_data(bytes, &length);
 
 	sond_process_file(wctx,
-			(guchar*) data, length, rel_path,
+			(guchar*) data, length, file_part,
 			&out_data, &out_size, &out_pdf_count);
 	g_bytes_unref(bytes);
 
@@ -2638,12 +2639,14 @@ static void sond_treeviewfm_indiziere_leaf(SondTreeviewFM *stvfm,
 		GBytes *bytes_out = g_bytes_new_take(out_data, out_size);
 		if (sond_file_part_replace(sfp, bytes_out, &error)) {
 			LOG_WARN("sond_file_part_replace('%s'): %s",
-					rel_path ? rel_path : "?",
+					file_part ? file_part : "?",
 					error ? error->message : "unbekannter Fehler");
 			g_clear_error(&error);
 		}
 		g_bytes_unref(bytes_out);
 	}
+
+	g_free(file_part);
 
 	return;
 }
@@ -2666,8 +2669,12 @@ static gint sond_treeviewfm_indiziere_dir(SondTreeviewFM *stvfm,
 			/* DIR: FS-Verzeichnis, ZIP-subdir, GMessage-Multipart */
 			rc = sond_treeviewfm_indiziere_dir(stvfm, child, wctx, error);
 			if (rc) {
-				g_ptr_array_unref(arr_children);
-				ERROR_Z
+				if (wctx->log_func)
+					wctx->log_func(wctx->log_func_data,
+							"Verzeichnis '%s' konnte nicht indiziert werden: %s",
+							child_priv->path_or_section, (*error)->message);
+				g_clear_error(error);
+				continue;
 			}
 		} else {
 			/* LEAF: jede Containerdatei (PDF, ZIP, EML) oder einfache Datei */
@@ -2778,6 +2785,7 @@ static void sond_treeviewfm_dateien_indizieren_gesamt_activate(GtkMenuItem *item
 	SondTVFMItem *root_item = sond_tvfm_item_create(stvfm, NULL, NULL);
 	rc = sond_treeviewfm_indiziere_dir(stvfm, root_item, &wctx, &error);
 	g_object_unref(root_item);
+	sond_treeviewfm_destroy_wctx(&wctx);
 	if (rc) {
 		display_message(gtk_widget_get_toplevel(GTK_WIDGET(stvfm)),
 				"Indizieren fehlgeschlagen\n\n", error->message, NULL);

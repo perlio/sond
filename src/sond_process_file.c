@@ -252,7 +252,7 @@ static gboolean gmessage_process_part(GMimeObject* object,
 				guchar* processed = NULL;
 				gsize proc_size = 0;
 
-					gchar* msg_filename = g_strdup_printf("%s//%d", parent_filename, part_index);
+				gchar* msg_filename = g_strdup_printf("%s//%d", parent_filename, part_index);
 				sond_process_file_do_rec(wctx, inner_buf, inner_size, msg_filename,
 						&processed, &proc_size, out_pdf_count);
 				g_free(msg_filename);
@@ -558,6 +558,10 @@ static void sond_process_file_do_rec(SondProcessFileCtx* wctx,
 	gchar* mime_type = NULL;
 	gint rc = 0;
 
+	if (wctx->log_func)
+		wctx->log_func(wctx->log_func_data,
+				"Entering File '%s'", filename);
+
 	mime_type = mime_guess_content_type(data, size, &error);
 	if (!mime_type) {
 		if (wctx->log_func)
@@ -602,6 +606,7 @@ void sond_process_file(SondProcessFileCtx* wctx,
 		guchar** out_data, gsize* out_size, gint* out_pdf_count) {
 	if (wctx->index_ctx) {
 		GError* error = NULL;
+
 		if (!sond_index_ctx_clear_file(wctx->index_ctx, filename, &error)) {
 			if (wctx->log_func)
 				wctx->log_func(wctx->log_func_data,
