@@ -453,7 +453,7 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 		task = sond_ocr_task_new(ctx, pool,
 				zond_pdf_document_get_pdf_doc(pdf_document_page->document),
 				pdf_document_page->page_akt, font_ref,
-				(void(*)(void*, gchar const*, ...)) info_window_set_message_from_thread, (gpointer) info_window,
+				(void(*)(void*, gchar const*, ...)) info_window_set_message_thread_safe, (gpointer) info_window,
 				&error);
 		pdf_drop_obj(ctx, font_ref);
 		if (!task) {

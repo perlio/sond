@@ -2608,7 +2608,7 @@ static void sond_treeviewfm_indiziere_leaf(SondTreeviewFM *stvfm,
 		SondFilePart *sfp, SondProcessFileCtx *wctx) {
 	GBytes *bytes = NULL;
 	GError *error = NULL;
-	gchar const *file_part = NULL;
+	gchar* file_part = NULL;
 	gconstpointer data = NULL;
 	gsize length = 0;
 	guchar *out_data = NULL;
@@ -2733,7 +2733,7 @@ static gboolean sond_treeviewfm_create_wctx(SondTreeviewFM *stvfm,
 			info_window_open(gtk_widget_get_toplevel(GTK_WIDGET(stvfm)), "OCR");
 
 	wctx->log_func =
-			(void (*)(gpointer, gchar const*, ...)) info_window_set_message_from_thread;
+			(void (*)(gpointer, gchar const*, ...)) info_window_set_message_thread_safe;
 	wctx->log_func_data = (gpointer) info_window;
 
 	wctx->ocr_pool = sond_ocr_pool_new(stvfm_priv->tessdata_path, "deu",

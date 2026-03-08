@@ -730,7 +730,7 @@ static gint ocr_pixmap(SondOcrTask* task, SondOcrPool* pool,
 	task->durchgang++;
 	if (task->log_func)
 		task->log_func(task->log_func_data,
-			"Seite %u: OCR-Konfidenz %f%%, neuer versuch mit höherer Auflösung",
+			"Seite %u: OCR-Konfidenz %f%%, neuer Versuch mit höherer Auflösung",
 			task->page->super.number, conf);
 
 	return 1;

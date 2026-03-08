@@ -395,6 +395,12 @@ void info_window_set_message(InfoWindow *info_window, const gchar *format, ...) 
 	return;
 }
 
+typedef struct {
+    InfoWindow *info_window;
+    gboolean main_thread;
+    gchar *message;
+} MessageData;
+
 static gboolean show_message_main(gpointer data) {
     MessageData *md = (MessageData*) data;
 	md->info_window->last_inserted_widget = gtk_label_new(md->message);
@@ -405,6 +411,10 @@ static gboolean show_message_main(gpointer data) {
 	gtk_box_pack_start(GTK_BOX(md->info_window->content),
 			md->info_window->last_inserted_widget, FALSE, FALSE, 0);
 
+	if (md->main_thread)
+		while (gtk_events_pending())
+			gtk_main_iteration();
+
 	info_window_scroll(md->info_window);
     g_free(md);
 
@@ -412,16 +422,22 @@ static gboolean show_message_main(gpointer data) {
 }
 
 // Im Worker-Thread aufrufen:
-void info_window_set_message_from_thread(InfoWindow *info_window, const gchar *format, ...) {
+void info_window_set_message_thread_safe(InfoWindow *info_window, const gchar *format, ...) {
     MessageData *md = g_new(MessageData, 1);
     md->info_window = info_window;
+    md->main_thread = g_main_context_is_owner(g_main_context_default());
 
     va_list args;
     va_start(args, format);
     md->message = g_strdup_vprintf(format, args);
     va_end(args);
 
-    g_idle_add(show_message_main, md);
+    if (md->main_thread)
+    	show_message_main(md);
+    else
+    	g_idle_add(show_message_main, md);
+
+    return;
 }
 
 static void cb_abbrechen_clicked(GtkButton *button, gpointer data) {

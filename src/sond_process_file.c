@@ -599,6 +599,12 @@ static void sond_process_file_do_rec(SondProcessFileCtx* wctx,
 			mime_type);
 
 	g_free(mime_type);
+
+	if (wctx->log_func)
+		wctx->log_func(wctx->log_func_data,
+				"Leaving File '%s'", filename);
+
+	return;
 }
 
 void sond_process_file(SondProcessFileCtx* wctx,

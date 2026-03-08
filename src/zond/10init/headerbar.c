@@ -633,7 +633,7 @@ static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
 		thread_data->doc = doc;
 		thread_data->filepart = filepart;
 		thread_data->log_func =
-				(void(*)(void*, gchar const*, ...)) info_window_set_message_from_thread;
+				(void(*)(void*, gchar const*, ...)) info_window_set_message_thread_safe;
 		thread_data->log_func_data = (gpointer) info_window,
 
 		info_window_set_message(info_window, "OCR-Erkennung für PDF '%s' wird gestartet",
