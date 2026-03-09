@@ -201,6 +201,10 @@ static void init_schema(Projekt* zond) {
 void zond_init(GtkApplication *app, Projekt *zond) {
 	setlocale(LC_NUMERIC, "C");
 
+	zond->ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
+	if (!zond->ctx)
+		g_error("fz_context konnte nicht initialisiert werden");
+
     zond->base_dir = get_base_dir();
     zond->exe_dir = get_exe_dir();
 
@@ -235,10 +239,6 @@ void zond_init(GtkApplication *app, Projekt *zond) {
 
 	SOND_FILE_PART_CLASS(g_type_class_get(SOND_TYPE_FILE_PART))->arr_opened_files =
 			g_ptr_array_new( );
-
-	zond->ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
-	if (!zond->ctx)
-		g_error("fz_context konnte nicht initialisiert werden");
 
 	return;
 }

@@ -24,6 +24,7 @@
 #include "../../sond_file_helper.h"
 #include "../../sond_fileparts.h"
 #include "../../sond_treeviewfm.h"
+#include "../../sond_process_file.h"
 #include "../../misc.h"
 
 #include "../zond_init.h"
@@ -429,6 +430,8 @@ gint project_close(Projekt *zond, gchar **errmsg) {
 	// Clear project setting
 	g_settings_set_string(zond->settings, "project", "");
 
+	sond_process_file_destroy_wctx(zond->wctx);
+
 	return 0;
 }
 
@@ -565,6 +568,21 @@ gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, gchar *
 			zond->project_dir, errmsg);
 	if (rc) {
 		project_open_cleanup(zond, trees_loaded);
+		return -1;
+	}
+
+	GError* error = NULL;
+	gchar* datadir = g_build_filename(zond->exe_dir, "../share/tessdata", NULL);
+	zond->wctx = sond_process_file_create_wctx(zond->ctx,
+			(void (*)(gpointer, gchar const*, ...)) info_window_set_message_thread_safe,
+			NULL, datadir, 4, ".sond_index.db", &error);
+	g_free(datadir);
+	if (!zond->wctx) {
+		if (errmsg) *errmsg = g_strdup_printf("%s\nInitialisierung Indizierungs-Kontext "
+				"fehlgeschlagen: %s", __func__, error->message);
+		g_error_free(error);
+		project_open_cleanup(zond, trees_loaded);
+
 		return -1;
 	}
 

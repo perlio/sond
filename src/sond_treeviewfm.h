@@ -48,6 +48,8 @@ struct _SondTreeviewFMClass {
 	gint (*load_sections) (SondTVFMItem*, GPtrArray**, GError**);
 	gboolean (*has_sections) (SondTVFMItem*);
 	gint (*delete_section) (SondTVFMItem*, GError**);
+	void (*indiziere) (SondTreeviewFM*, GtkTreeSelection*);
+	void (*aktualisiere_index) (SondTreeviewFM*);
 };
 
 SondTVFMItemType sond_tvfm_item_get_item_type(SondTVFMItem*);
@@ -75,10 +77,6 @@ gint sond_treeviewfm_file_part_visible(SondTreeviewFM*, GtkTreeIter*,
 gint sond_treeviewfm_set_root(SondTreeviewFM*, const gchar*, gchar**);
 
 const gchar* sond_treeviewfm_get_root(SondTreeviewFM*);
-
-void sond_treeviewfm_set_tessdata_path(SondTreeviewFM*, const gchar*);
-
-const gchar* sond_treeviewfm_get_tessdata_path(SondTreeviewFM*);
 
 G_END_DECLS
 

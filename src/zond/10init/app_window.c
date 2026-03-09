@@ -351,9 +351,6 @@ static void cb_entry_search(GtkWidget *entry, gpointer data) {
 static void init_treeviews(Projekt *zond) {
     // TreeViews erstellen
     zond->treeview[BAUM_FS] = SOND_TREEVIEW(zond_treeviewfm_new(zond));
-	gchar* datadir = g_build_filename(zond->exe_dir, "../share/tessdata", NULL);
-	sond_treeviewfm_set_tessdata_path(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), datadir);
-	g_free(datadir);
 
     zond->treeview[BAUM_INHALT] = SOND_TREEVIEW(
         zond_treeview_new(zond, (gint) BAUM_INHALT));

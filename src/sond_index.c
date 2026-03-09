@@ -27,6 +27,7 @@
 
 #include "sond_log_and_error.h"
 #include "sond_gmessage_helper.h"
+#include "sond_file_helper.h"
 
 #ifdef SOND_WITH_EMBEDDINGS
 #include <llama.h>
@@ -74,6 +75,12 @@ static const gchar *SQL_TRIGGER_DELETE =
     "    VALUES('delete', old.id, old.text);"
     "END;";
 
+static const gchar *SQL_CREATE_FILES =
+    "CREATE TABLE IF NOT EXISTS files ("
+    "  filename  TEXT    PRIMARY KEY,"
+    "  mtime     INTEGER NOT NULL"
+    ");"; /* mtime: Unix-Timestamp in Sekunden der Wurzel-FS-Datei */
+
 /* =======================================================================
  * Schema initialisieren
  * ======================================================================= */
@@ -110,6 +117,14 @@ static gboolean db_init_schema(SondIndexCtx *ctx, GError **error) {
     if (rc != SQLITE_OK) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                     "db_init_schema: CREATE trigger delete: %s", errmsg);
+        sqlite3_free(errmsg);
+        return FALSE;
+    }
+
+    rc = sqlite3_exec(ctx->db, SQL_CREATE_FILES, NULL, NULL, &errmsg);
+    if (rc != SQLITE_OK) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "db_init_schema: CREATE files: %s", errmsg);
         sqlite3_free(errmsg);
         return FALSE;
     }
@@ -244,7 +259,6 @@ gboolean sond_index_ctx_clear_file(SondIndexCtx *ctx,
     sqlite3_bind_text(stmt, 2, pattern,  -1, SQLITE_TRANSIENT);
     rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
-    g_free(pattern);
 
     if (rc != SQLITE_DONE) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
@@ -259,6 +273,31 @@ gboolean sond_index_ctx_clear_file(SondIndexCtx *ctx,
                 "DELETE FROM chunks_vec WHERE rowid NOT IN (SELECT id FROM chunks);",
                 NULL, NULL, NULL);
 #endif
+
+    /* files-Einträge löschen */
+    rc = sqlite3_prepare_v2(ctx->db,
+            "DELETE FROM files WHERE filename = ? OR filename LIKE ?",
+            -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "sond_index_ctx_clear_file: prepare files: %s",
+                    sqlite3_errmsg(ctx->db));
+        g_free(pattern);
+        return FALSE;
+    }
+
+    sqlite3_bind_text(stmt, 1, filename, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, pattern,  -1, SQLITE_TRANSIENT);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    g_free(pattern);
+
+    if (rc != SQLITE_DONE) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "sond_index_ctx_clear_file: step files: %s",
+                    sqlite3_errmsg(ctx->db));
+        return FALSE;
+    }
 
     return TRUE;
 }
@@ -572,6 +611,114 @@ static GPtrArray* extract_segments_from_text(guchar const *buf, gsize size) {
         g_ptr_array_add(segs, sond_text_segment_new(
                 g_strndup((gchar const*)buf, size), -1, 0));
     return segs;
+}
+
+/* =======================================================================
+ * files-Tabelle: Hilfsfunktionen
+ * ======================================================================= */
+
+gboolean sond_index_file_needs_update(SondIndexCtx *ctx,
+                                       gchar const  *filename,
+                                       gint64        mtime) {
+    sqlite3_stmt *stmt   = NULL;
+    gboolean      needs  = TRUE;
+
+    gint rc = sqlite3_prepare_v2(ctx->db,
+            "SELECT mtime FROM files WHERE filename = ?",
+            -1, &stmt, NULL);
+    if (rc != SQLITE_OK)
+        return TRUE;
+
+    sqlite3_bind_text(stmt, 1, filename, -1, SQLITE_STATIC);
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        gint64 stored = sqlite3_column_int64(stmt, 0);
+        needs = (stored != mtime);
+    }
+    sqlite3_finalize(stmt);
+    return needs;
+}
+
+void sond_index_file_set_mtime(SondIndexCtx *ctx,
+                                gchar const  *filename,
+                                gint64        mtime) {
+    sqlite3_stmt *stmt = NULL;
+
+    gint rc = sqlite3_prepare_v2(ctx->db,
+            "INSERT OR REPLACE INTO files(filename, mtime) VALUES(?,?)",
+            -1, &stmt, NULL);
+    if (rc != SQLITE_OK)
+        return;
+
+    sqlite3_bind_text (stmt, 1, filename, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(stmt, 2, mtime);
+    sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+}
+
+void sond_index_file_update_root_mtime(SondIndexCtx *ctx,
+                                        gchar const  *fs_root_path,
+                                        gint64        mtime) {
+    sqlite3_stmt *stmt    = NULL;
+    gchar        *pattern = g_strdup_printf("%s//%%", fs_root_path);
+
+    gint rc = sqlite3_prepare_v2(ctx->db,
+            "UPDATE files SET mtime = ? WHERE filename = ? OR filename LIKE ?",
+            -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        g_free(pattern);
+        return;
+    }
+
+    sqlite3_bind_int64(stmt, 1, mtime);
+    sqlite3_bind_text (stmt, 2, fs_root_path, -1, SQLITE_STATIC);
+    sqlite3_bind_text (stmt, 3, pattern,      -1, SQLITE_TRANSIENT);
+    sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    g_free(pattern);
+}
+
+GPtrArray* sond_index_get_outdated_files(SondIndexCtx *ctx, GError **error) {
+    sqlite3_stmt *stmt  = NULL;
+    GPtrArray    *result = g_ptr_array_new_with_free_func(g_free);
+
+    gint rc = sqlite3_prepare_v2(ctx->db,
+            "SELECT filename, mtime FROM files",
+            -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "sond_index_get_outdated_files: prepare: %s",
+                    sqlite3_errmsg(ctx->db));
+        g_ptr_array_unref(result);
+        return NULL;
+    }
+
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        gchar const *filename = (gchar const*) sqlite3_column_text(stmt, 0);
+        gint64       stored   = sqlite3_column_int64(stmt, 1);
+
+        /* Wurzel-FS-Pfad ermitteln: Teil vor erstem "//", oder ganzer filename */
+        gchar *fs_root = NULL;
+        gchar *sep = strstr(filename, "//");
+        if (sep)
+            fs_root = g_strndup(filename, (gsize)(sep - filename));
+        else
+            fs_root = g_strdup(filename);
+
+        /* aktuellen mtime der FS-Datei holen */
+        GStatBuf st = { 0 };
+        if (sond_stat(fs_root, &st, NULL) == 0) {
+            if ((gint64) st.st_mtime != stored)
+                g_ptr_array_add(result, g_strdup(filename));
+        }
+        /* wenn g_stat fehlschlägt: Datei existiert nicht mehr -> als veraltet melden */
+        else
+            g_ptr_array_add(result, g_strdup(filename));
+
+        g_free(fs_root);
+    }
+
+    sqlite3_finalize(stmt);
+    return result;
 }
 
 /* =======================================================================

@@ -23,6 +23,7 @@
 
 typedef struct _SondOcrPool SondOcrPool;
 typedef struct _SondIndexCtx SondIndexCtx;
+typedef struct _GError GError;
 typedef char gchar;
 typedef unsigned char guchar;
 typedef void* gpointer;
@@ -37,8 +38,10 @@ typedef int gint;
  * process_*-Funktionen durchgeschleift.
  * Jedes Feld kann NULL sein — dann wird der jeweilige Schritt übersprungen.
  */
-typedef struct {
+typedef struct _SondProcessFileCtx {
 	fz_context* ctx;
+	gint cancel;
+	gint progress;
 	void(*log_func)(void*, gchar const*, ...);
 	gpointer log_func_data;
     SondOcrPool  *ocr_pool;   /* NULL → keine OCR         */
@@ -49,5 +52,11 @@ void sond_process_file(SondProcessFileCtx* wctx,
 		guchar* data, gsize size, gchar const* filename,
 		guchar** out_data, gsize* out_size, gint* out_pdf_count);
 
+SondProcessFileCtx* sond_process_file_create_wctx(fz_context* ctx,
+		void (*log_func)(void*, gchar const*, ...), gpointer log_func_data,
+		gchar const* tessdata_path, gint num_ocr_threads,
+		gchar const* index_db_filename, GError **error);
+
+void sond_process_file_destroy_wctx(SondProcessFileCtx*);
 
 #endif /* SRC_SOND_PROCESS_FILE_H_ */

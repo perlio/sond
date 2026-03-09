@@ -53,6 +53,8 @@ typedef struct sqlite3 sqlite3;
 
 typedef struct _ZondDBase ZondDBase;
 
+typedef struct _SondProcessFileCtx SondProcessFileCtx;
+
 typedef struct pdf_document pdf_document;
 
 typedef int gboolean;
@@ -145,6 +147,8 @@ typedef struct _Projekt {
 
 	gchar *project_dir;
 	gchar *project_name;
+
+	SondProcessFileCtx *wctx;
 
 #ifndef VIEWER
 	guint state; //Modifier Mask

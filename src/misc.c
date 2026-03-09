@@ -448,7 +448,7 @@ static void cb_abbrechen_clicked(GtkButton *button, gpointer data) {
 static void cb_info_window_response(GtkDialog *dialog, gint id, gpointer data) {
 	InfoWindow *info_window = (InfoWindow*) data;
 
-	if (info_window->cancel)
+	if (g_atomic_int_get(&info_window->cancel))
 		return;
 
 	info_window_set_message(info_window, "...abgebrochen");

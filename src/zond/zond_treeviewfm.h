@@ -21,7 +21,7 @@ struct _ZondTreeviewFMClass {
 gint zond_treeviewfm_insert_section(ZondTreeviewFM*, gint, GtkTreeIter*,
 		gboolean, GtkTreeIter*, GError**);
 
-ZondTreeviewFM* zond_treeviewfm_new(Projekt*);
+ZondTreeviewFM* zond_treeviewfm_new(Projekt* zond);
 
 gint zond_treeviewfm_section_visible(ZondTreeviewFM*, gchar const*,
 		gchar const*, gboolean, gboolean*, GtkTreeIter*, gboolean*, gboolean*,

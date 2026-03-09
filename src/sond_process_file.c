@@ -623,4 +623,49 @@ void sond_process_file(SondProcessFileCtx* wctx,
 	}
 
 	sond_process_file_do_rec(wctx, data, size, filename, out_data, out_size, out_pdf_count);
+
+	return;
 }
+
+SondProcessFileCtx* sond_process_file_create_wctx(fz_context* ctx,
+		void (*log_func)(void*, gchar const*, ...), gpointer log_func_data,
+		gchar const* tessdata_path, gint num_ocr_threads,
+		gchar const* index_db_filename, GError **error) {
+
+	SondProcessFileCtx* wctx = g_new0(SondProcessFileCtx, 1);
+
+	/* fz_context */
+	wctx->ctx = ctx;
+
+	wctx->progress = 0;
+	wctx->cancel = 0,
+
+	wctx->log_func = log_func;
+	wctx->log_func_data = (gpointer) log_func_data;
+
+	wctx->ocr_pool = sond_ocr_pool_new(tessdata_path, "deu",
+			num_ocr_threads, &wctx->cancel, &wctx->progress, error);
+	if (!wctx->ocr_pool)
+		return NULL;
+
+	wctx->index_ctx = sond_index_ctx_new(index_db_filename, NULL, 0, 0, error);
+	if (!wctx->index_ctx) {
+		sond_ocr_pool_free(wctx->ocr_pool);
+
+		return NULL;
+	}
+
+	return wctx;
+}
+
+void sond_process_file_destroy_wctx(SondProcessFileCtx *wctx) {
+	if (wctx->index_ctx)
+		sond_index_ctx_free(wctx->index_ctx);
+	if (wctx->ocr_pool)
+		sond_ocr_pool_free(wctx->ocr_pool);
+
+	g_free(wctx);
+
+	return;
+}
+

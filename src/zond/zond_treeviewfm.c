@@ -3,6 +3,9 @@
 #include "../misc.h"
 #include "../sond_fileparts.c"
 #include "../sond_renderer.h"
+#include "../sond_index.h"
+#include "../sond_process_file.h"
+#include "../sond_ocr.h"
 
 #include "zond_dbase.h"
 #include "zond_treeview.h"
@@ -617,7 +620,206 @@ static gint zond_treeviewfm_get_text_from_section(SondTVFMItem* stvfm_item,
 	return 0;
 }
 
+static void zond_treeviewfm_finalize(GObject *obj) {
+
+	G_OBJECT_CLASS(zond_treeviewfm_parent_class)->finalize(obj);
+}
+
+void zond_treeviewfm_indiziere_leaf(SondTreeviewFM *stvfm,
+		SondFilePart *sfp, SondProcessFileCtx *wctx) {
+	GBytes *bytes = NULL;
+	GError *error = NULL;
+	gchar* file_part = NULL;
+	gconstpointer data = NULL;
+	gsize length = 0;
+	guchar *out_data = NULL;
+	gsize out_size = 0;
+	gint out_pdf_count = 0;
+
+	file_part = sond_file_part_get_filepart(sfp);
+
+	bytes = sond_file_part_get_bytes(sfp, &error);
+	if (!bytes) {
+		info_window_set_message((InfoWindow*) wctx->log_func_data,
+				file_part ? file_part : "?",
+				error ? error->message : "unbekannter Fehler");
+		g_clear_error(&error);
+		g_free(file_part);
+		return;
+	}
+
+	data = g_bytes_get_data(bytes, &length);
+
+	sond_process_file(wctx,
+			(guchar*) data, length, file_part,
+			&out_data, &out_size, &out_pdf_count);
+	g_bytes_unref(bytes);
+
+	/* Falls OCR stattfand: Ergebnis generisch zurückschreiben */
+	if (out_data) {
+		GBytes *bytes_out = g_bytes_new_take(out_data, out_size);
+		if (sond_file_part_replace(sfp, bytes_out, &error)) {
+			info_window_set_message((InfoWindow*) wctx->log_func_data,
+					"sond_file_part_replace('%s'): %s",
+					file_part ? file_part : "?",
+					error ? error->message : "unbekannter Fehler");
+			g_clear_error(&error);
+		}
+		g_bytes_unref(bytes_out);
+	}
+
+	g_free(file_part);
+
+	return;
+}
+
+gint zond_treeviewfm_indiziere_dir(SondTreeviewFM *stvfm,
+		SondTVFMItem *stvfm_item_dir, SondProcessFileCtx *wctx, GError **error) {
+	GPtrArray *arr_children = NULL;
+	gint rc = 0;
+
+	rc = sond_tvfm_item_load_children(stvfm_item_dir, &arr_children, error);
+	if (rc)
+		ERROR_Z
+
+	for (guint i = 0; i < arr_children->len; i++) {
+		SondTVFMItem *child = g_ptr_array_index(arr_children, i);
+		gchar const* path_child = NULL;
+
+		path_child = sond_tvfm_item_get_path_or_section(child);
+
+		if (path_child) {
+			/* DIR: FS-Verzeichnis, ZIP-subdir, GMessage-Multipart */
+			rc = zond_treeviewfm_indiziere_dir(stvfm, child, wctx, error);
+			if (rc) {
+				info_window_set_message((InfoWindow*) wctx->log_func_data,
+						"Verzeichnis '%s' konnte nicht indiziert werden: %s",
+						path_child, (*error)->message);
+				g_clear_error(error);
+				continue;
+			}
+		} else
+			/* LEAF: jede Containerdatei (PDF, ZIP, EML) oder einfache Datei */
+			zond_treeviewfm_indiziere_leaf(stvfm,
+					sond_tvfm_item_get_sond_file_part(child), wctx);
+	}
+
+	g_ptr_array_unref(arr_children);
+
+	return 0;
+}
+
+static gint zond_treeviewfm_foreach_index(SondTreeview *stv, GtkTreeIter *iter,
+		gpointer data, GError **error) {
+	SondTVFMItem *stvfm_item = NULL;
+	SondTreeviewFM *stvfm = SOND_TREEVIEWFM(stv);
+
+	SondProcessFileCtx *wctx = (SondProcessFileCtx*) data;
+
+	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(stv)),
+			iter, 0, &stvfm_item, -1);
+	g_object_unref(stvfm_item);
+
+	if (sond_tvfm_item_get_path_or_section(stvfm_item)) {
+		/* DIR: FS-Verzeichnis, ZIP-subdir, GMessage-Multipart */
+		gint rc = zond_treeviewfm_indiziere_dir(stvfm, stvfm_item, wctx, error);
+		if (rc)
+			ERROR_Z
+	} else
+		/* LEAF: Containerdatei oder einfache Datei */
+		zond_treeviewfm_indiziere_leaf(stvfm,
+				sond_tvfm_item_get_sond_file_part(stvfm_item), wctx);
+
+	return 0;
+}
+
+static void zond_treeviewfm_indiziere(SondTreeviewFM *stvfm,
+		GtkTreeSelection *selection) {
+	gint rc = 0;
+	GError *error = NULL;
+
+	ZondTreeviewFMPrivate *priv = zond_treeviewfm_get_instance_private(
+			ZOND_TREEVIEWFM(stvfm));
+	InfoWindow* info_window =
+			info_window_open(gtk_widget_get_toplevel(GTK_WIDGET(stvfm)),
+			"Indexerstellung");
+
+	priv->zond->wctx->log_func_data = info_window;
+
+	if (!selection) {
+		SondTVFMItem* stvfm_item_root = sond_tvfm_item_create(stvfm, NULL, NULL);
+		rc = zond_treeviewfm_indiziere_dir(stvfm, stvfm_item_root, priv->zond->wctx, &error);
+		g_object_unref(stvfm_item_root);
+	}
+	else
+		rc = sond_treeview_selection_foreach(SOND_TREEVIEW(stvfm),
+				zond_treeviewfm_foreach_index, priv->zond->wctx, &error);
+	if (rc == -1) {
+		info_window_set_message(info_window,
+				"Indizieren fehlgeschlagen: %s", error->message, NULL);
+		g_error_free(error);
+	}
+	else if (rc == 1)
+		info_window_set_message(info_window, "...abgebrochen");
+
+	info_window_close(info_window);
+
+	return;
+}
+
+static void zond_treeviewfm_aktualisiere_index(SondTreeviewFM *stvfm) {
+	GError *error = NULL;
+	ZondTreeviewFMPrivate *priv = zond_treeviewfm_get_instance_private(
+			ZOND_TREEVIEWFM(stvfm));
+
+	GPtrArray *outdated = sond_index_get_outdated_files(priv->zond->wctx->index_ctx, &error);
+	if (!outdated) {
+		display_message(gtk_widget_get_toplevel(GTK_WIDGET(stvfm)),
+				"Veraltete Einträge konnten nicht ermittelt werden\n\n",
+				error->message, NULL);
+		g_error_free(error);
+		return;
+	}
+
+	if (outdated->len == 0) {
+		g_ptr_array_unref(outdated);
+		display_message(gtk_widget_get_toplevel(GTK_WIDGET(stvfm)),
+				"Index ist aktuell — keine veralteten Einträge.", NULL);
+		return;
+	}
+
+	InfoWindow* info_window =
+			info_window_open(gtk_widget_get_toplevel(GTK_WIDGET(stvfm)),
+			"Indexerstellung");
+
+	priv->zond->wctx->log_func_data = info_window;
+
+	for (guint i = 0; i < outdated->len; i++) {
+		gchar const *filename = g_ptr_array_index(outdated, i);
+
+		/* filename → SondFilePart */
+		SondFilePart *sfp = sond_file_part_from_filepart(filename, &error);
+		if (!sfp) {
+			info_window_set_message(info_window,
+					"Aktualisierung Index für '%s' fehlgeschlagen: %s",
+					filename, error ? error->message : "?");
+			g_clear_error(&error);
+			continue;
+		}
+
+		zond_treeviewfm_indiziere_leaf(stvfm, sfp, priv->zond->wctx);
+
+		g_object_unref(sfp);
+	}
+
+	g_ptr_array_unref(outdated);
+
+	return;
+}
+
 static void zond_treeviewfm_class_init(ZondTreeviewFMClass *klass) {
+	G_OBJECT_CLASS(klass)->finalize = zond_treeviewfm_finalize;
+
 	SOND_TREEVIEWFM_CLASS(klass)->text_from_section =
 			zond_treeviewfm_get_text_from_section;
 	SOND_TREEVIEWFM_CLASS(klass)->deter_background = zond_treeviewfm_deter_background;
@@ -628,6 +830,9 @@ static void zond_treeviewfm_class_init(ZondTreeviewFMClass *klass) {
 	SOND_TREEVIEWFM_CLASS(klass)->load_sections = zond_treeviewfm_load_sections;
 	SOND_TREEVIEWFM_CLASS(klass)->has_sections = zond_treeviewfm_has_sections;
 	SOND_TREEVIEWFM_CLASS(klass)->delete_section = zond_treeviewfm_delete_section;
+	SOND_TREEVIEWFM_CLASS(klass)->indiziere = zond_treeviewfm_indiziere;
+	SOND_TREEVIEWFM_CLASS(klass)->aktualisiere_index =
+			zond_treeviewfm_aktualisiere_index;
 
 	return;
 }
