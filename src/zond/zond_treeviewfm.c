@@ -650,8 +650,7 @@ void zond_treeviewfm_indiziere_leaf(SondTreeviewFM *stvfm,
 
 	data = g_bytes_get_data(bytes, &length);
 
-	sond_process_file(wctx,
-			(guchar*) data, length, file_part,
+	sond_process_file(wctx, (guchar*) data, length, file_part,
 			&out_data, &out_size, &out_pdf_count);
 	g_bytes_unref(bytes);
 

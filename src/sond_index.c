@@ -638,7 +638,7 @@ gboolean sond_index_file_needs_update(SondIndexCtx *ctx,
     return needs;
 }
 
-void sond_index_file_set_mtime(SondIndexCtx *ctx,
+static void sond_index_file_set_mtime(SondIndexCtx *ctx,
                                 gchar const  *filename,
                                 gint64        mtime) {
     sqlite3_stmt *stmt = NULL;
@@ -792,7 +792,25 @@ void sond_index(fz_context* ctx,
             log_func(log_func_data, "sond_index: COMMIT fehlgeschlagen: %s", errmsg);
         sqlite3_free(errmsg);
         sqlite3_exec(sond_index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
+        g_ptr_array_unref(segs);
+        return;
     }
 
     g_ptr_array_unref(segs);
+
+    /* mtime der FS-Wurzeldatei in files-Tabelle eintragen */
+    {
+        GStatBuf st = { 0 };
+        gchar *fs_root = NULL;
+        gchar *sep = strstr(filename, "//");
+        if (sep)
+            fs_root = g_strndup(filename, (gsize)(sep - filename));
+        else
+            fs_root = g_strdup(filename);
+
+        if (sond_stat(fs_root, &st, NULL) == 0)
+            sond_index_file_set_mtime(sond_index_ctx, filename, (gint64) st.st_mtime);
+
+        g_free(fs_root);
+    }
 }

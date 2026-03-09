@@ -94,18 +94,6 @@ gboolean sond_index_file_needs_update(SondIndexCtx *ctx,
                                        gint64        mtime);
 
 /**
- * sond_index_file_set_mtime:
- * @ctx:      SondIndexCtx
- * @filename: vollständiger filepart-Pfad
- * @mtime:    mtime der Wurzel-FS-Datei zum Zeitpunkt der Indizierung
- *
- * Schreibt oder aktualisiert den mtime-Eintrag für filename in files.
- */
-void sond_index_file_set_mtime(SondIndexCtx *ctx,
-                                gchar const  *filename,
-                                gint64        mtime);
-
-/**
  * sond_index_file_update_root_mtime:
  * @ctx:          SondIndexCtx
  * @fs_root_path: Pfad der Wurzel-FS-Datei (wie in sond_file_part_get_path des obersten sfp)
@@ -160,18 +148,6 @@ gboolean sond_index_ctx_clear_file(SondIndexCtx *ctx,
 gboolean sond_index_file_needs_update(SondIndexCtx *ctx,
                                        gchar const  *filename,
                                        gint64        mtime);
-
-/**
- * sond_index_file_set_mtime:
- * @ctx:      SondIndexCtx
- * @filename: Vollständiger filepart-Pfad
- * @mtime:    mtime der Wurzel-FS-Datei zum Zeitpunkt der Indizierung
- *
- * Schreibt oder aktualisiert den Eintrag in der files-Tabelle.
- */
-void sond_index_file_set_mtime(SondIndexCtx *ctx,
-                                gchar const  *filename,
-                                gint64        mtime);
 
 /**
  * sond_index_file_update_root_mtime:
