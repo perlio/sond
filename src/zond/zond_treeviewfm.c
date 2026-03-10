@@ -140,9 +140,32 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 		return 1;
 	}
 
+	/* Index-DB-Transaktion öffnen (vor zond-DB, damit both oder neither) */
+	if (priv->zond->wctx && priv->zond->wctx->index_ctx && !section) {
+		GError *idx_err = NULL;
+		if (sqlite3_exec(priv->zond->wctx->index_ctx->db, "BEGIN;",
+				NULL, NULL, NULL) != SQLITE_OK) {
+			if (error) *error = g_error_new(G_IO_ERROR, G_IO_ERROR_FAILED,
+					"%s: Index-DB BEGIN fehlgeschlagen: %s", __func__,
+					sqlite3_errmsg(priv->zond->wctx->index_ctx->db));
+			return -1;
+		}
+		if (!sond_index_ctx_clear_file(priv->zond->wctx->index_ctx, path, &idx_err)) {
+			sqlite3_exec(priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
+			if (error) *error = g_error_new(G_IO_ERROR, G_IO_ERROR_FAILED,
+					"%s: sond_index_ctx_clear_file: %s", __func__,
+					idx_err ? idx_err->message : "?");
+			g_clear_error(&idx_err);
+			return -1;
+		}
+	}
+
 	rc = dbase_zond_begin(priv->zond->dbase_zond, error);
-	if (rc)
+	if (rc) {
+		if (priv->zond->wctx && priv->zond->wctx->index_ctx && !section)
+			sqlite3_exec(priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
 		ERROR_Z
+	}
 
 	if (!section) { //wenn Datei gelöscht wird, kann auch Type-5-node gelöscht werden
 
@@ -160,6 +183,8 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 		g_free(prefix);
 		if (rc) {
 			dbase_zond_rollback(priv->zond->dbase_zond, error);
+			if (priv->zond->wctx && priv->zond->wctx->index_ctx && !section)
+				sqlite3_exec(priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
 			ERROR_Z
 		}
 	}
@@ -200,15 +225,41 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 	//Änderungsstatus zwischenspeichern
 	ztvfm_priv->changed_tmp = ztvfm_priv->zond->dbase_zond->changed;
 
+	/* Index-DB-Transaktion öffnen und Pfad umbenennen */
+	if (ztvfm_priv->zond->wctx && ztvfm_priv->zond->wctx->index_ctx) {
+		GError *idx_err = NULL;
+		if (sqlite3_exec(ztvfm_priv->zond->wctx->index_ctx->db, "BEGIN;",
+				NULL, NULL, NULL) != SQLITE_OK) {
+			if (error) *error = g_error_new(G_IO_ERROR, G_IO_ERROR_FAILED,
+					"%s: Index-DB BEGIN fehlgeschlagen: %s", __func__,
+					sqlite3_errmsg(ztvfm_priv->zond->wctx->index_ctx->db));
+			return -1;
+		}
+		if (!sond_index_ctx_rename_file(ztvfm_priv->zond->wctx->index_ctx,
+				prefix_old, prefix_new, &idx_err)) {
+			sqlite3_exec(ztvfm_priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
+			if (error) *error = g_error_new(G_IO_ERROR, G_IO_ERROR_FAILED,
+					"%s: sond_index_ctx_rename_file: %s", __func__,
+					idx_err ? idx_err->message : "?");
+			g_clear_error(&idx_err);
+			return -1;
+		}
+	}
+
 	rc = dbase_zond_begin(ztvfm_priv->zond->dbase_zond, error);
-	if (rc)
+	if (rc) {
+		if (ztvfm_priv->zond->wctx && ztvfm_priv->zond->wctx->index_ctx)
+			sqlite3_exec(ztvfm_priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
 		ERROR_Z
+	}
 
 	//alle Dateien, die mit filepart(stvfm_item) + path anfangen (einschließlich stvfm_item)
 		//-> umbenennen
 	rc = dbase_zond_update_path(ztvfm_priv->zond->dbase_zond, prefix_old, prefix_new, error);
 	if (rc) {
 		dbase_zond_rollback(ztvfm_priv->zond->dbase_zond, error);
+		if (ztvfm_priv->zond->wctx && ztvfm_priv->zond->wctx->index_ctx)
+			sqlite3_exec(ztvfm_priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
 		ERROR_Z
 	}
 
@@ -225,6 +276,8 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 		g_free(prefix_gmessage);
 		if (rc) {
 			dbase_zond_rollback(ztvfm_priv->zond->dbase_zond, error);
+			if (ztvfm_priv->zond->wctx && ztvfm_priv->zond->wctx->index_ctx)
+				sqlite3_exec(ztvfm_priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
 			ERROR_Z
 		}
 	}
@@ -242,6 +295,8 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 				prefix_gmessage, index_to, TRUE, error);
 		if (rc) {
 			dbase_zond_rollback(ztvfm_priv->zond->dbase_zond, error);
+			if (ztvfm_priv->zond->wctx && ztvfm_priv->zond->wctx->index_ctx)
+				sqlite3_exec(ztvfm_priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
 			g_free(prefix_gmessage);
 
 			ERROR_Z
@@ -255,6 +310,8 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 		g_free(prefix_gmessage);
 		if (rc) {
 			dbase_zond_rollback(ztvfm_priv->zond->dbase_zond, error);
+			if (ztvfm_priv->zond->wctx && ztvfm_priv->zond->wctx->index_ctx)
+				sqlite3_exec(ztvfm_priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
 			ERROR_Z
 		}
 	}
@@ -274,11 +331,18 @@ static void zond_treeviewfm_after(SondTreeviewFM* stvfm,
 		rc = dbase_zond_commit(priv->zond->dbase_zond, &error_int);
 		if (rc) {
 			//ToDo: ausführliche Erklärung; verschobene Dateien loggen
+			if (priv->zond->wctx && priv->zond->wctx->index_ctx)
+				sqlite3_exec(priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
 			exit(EXIT_FAILURE);
 		}
+		if (priv->zond->wctx && priv->zond->wctx->index_ctx)
+			sqlite3_exec(priv->zond->wctx->index_ctx->db, "COMMIT;", NULL, NULL, NULL);
 	}
-	else
+	else {
 		dbase_zond_rollback(priv->zond->dbase_zond, &error_int);
+		if (priv->zond->wctx && priv->zond->wctx->index_ctx)
+			sqlite3_exec(priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
+	}
 
 	project_reset_changed(priv->zond, priv->changed_tmp);
 
@@ -766,56 +830,6 @@ static void zond_treeviewfm_indiziere(SondTreeviewFM *stvfm,
 	return;
 }
 
-static void zond_treeviewfm_aktualisiere_index(SondTreeviewFM *stvfm) {
-	GError *error = NULL;
-	ZondTreeviewFMPrivate *priv = zond_treeviewfm_get_instance_private(
-			ZOND_TREEVIEWFM(stvfm));
-
-	GPtrArray *outdated = sond_index_get_outdated_files(priv->zond->wctx->index_ctx, &error);
-	if (!outdated) {
-		display_message(gtk_widget_get_toplevel(GTK_WIDGET(stvfm)),
-				"Veraltete Einträge konnten nicht ermittelt werden\n\n",
-				error->message, NULL);
-		g_error_free(error);
-		return;
-	}
-
-	if (outdated->len == 0) {
-		g_ptr_array_unref(outdated);
-		display_message(gtk_widget_get_toplevel(GTK_WIDGET(stvfm)),
-				"Index ist aktuell — keine veralteten Einträge.", NULL);
-		return;
-	}
-
-	InfoWindow* info_window =
-			info_window_open(gtk_widget_get_toplevel(GTK_WIDGET(stvfm)),
-			"Indexerstellung");
-
-	priv->zond->wctx->log_func_data = info_window;
-
-	for (guint i = 0; i < outdated->len; i++) {
-		gchar const *filename = g_ptr_array_index(outdated, i);
-
-		/* filename → SondFilePart */
-		SondFilePart *sfp = sond_file_part_from_filepart(filename, &error);
-		if (!sfp) {
-			info_window_set_message(info_window,
-					"Aktualisierung Index für '%s' fehlgeschlagen: %s",
-					filename, error ? error->message : "?");
-			g_clear_error(&error);
-			continue;
-		}
-
-		zond_treeviewfm_indiziere_leaf(stvfm, sfp, priv->zond->wctx);
-
-		g_object_unref(sfp);
-	}
-
-	g_ptr_array_unref(outdated);
-
-	return;
-}
-
 static void zond_treeviewfm_class_init(ZondTreeviewFMClass *klass) {
 	G_OBJECT_CLASS(klass)->finalize = zond_treeviewfm_finalize;
 
@@ -830,8 +844,6 @@ static void zond_treeviewfm_class_init(ZondTreeviewFMClass *klass) {
 	SOND_TREEVIEWFM_CLASS(klass)->has_sections = zond_treeviewfm_has_sections;
 	SOND_TREEVIEWFM_CLASS(klass)->delete_section = zond_treeviewfm_delete_section;
 	SOND_TREEVIEWFM_CLASS(klass)->indiziere = zond_treeviewfm_indiziere;
-	SOND_TREEVIEWFM_CLASS(klass)->aktualisiere_index =
-			zond_treeviewfm_aktualisiere_index;
 
 	return;
 }

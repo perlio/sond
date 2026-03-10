@@ -1267,7 +1267,6 @@ static void sond_treeviewfm_class_init(SondTreeviewFMClass *klass) {
 	klass->results_row_activated = sond_treeviewfm_results_row_activated;
 	klass->open_stvfm_item = sond_treeviewfm_open_stvfm_item;
 	klass->indiziere = NULL;
-	klass->aktualisiere_index = NULL;
 
 	return;
 }
@@ -2631,16 +2630,6 @@ static void sond_treeviewfm_dateien_indizieren_auswahl_activate(GtkMenuItem *ite
 	return;
 }
 
-static void sond_treeviewfm_index_aktualisieren_activate(GtkMenuItem *item,
-		gpointer data) {
-	SondTreeviewFM *stvfm = SOND_TREEVIEWFM(data);
-
-	if (SOND_TREEVIEWFM_GET_CLASS(stvfm)->aktualisiere_index)
-		SOND_TREEVIEWFM_GET_CLASS(stvfm)->aktualisiere_index(stvfm);
-
-	return;
-}
-
 static void sond_treeviewfm_init_contextmenu(SondTreeviewFM *stvfm) {
 	GtkWidget *contextmenu = NULL;
 
@@ -2786,15 +2775,6 @@ static void sond_treeviewfm_init_contextmenu(SondTreeviewFM *stvfm) {
 			G_CALLBACK(sond_treeviewfm_dateien_indizieren_auswahl_activate),
 			(gpointer) stvfm);
 	gtk_menu_shell_append(GTK_MENU_SHELL(menu_indizieren), item_indizieren_auswahl);
-
-	GtkWidget *item_index_aktualisieren = gtk_menu_item_new_with_label(
-			"Index aktualisieren");
-	g_object_set_data(G_OBJECT(contextmenu), "item-index-aktualisieren",
-			item_index_aktualisieren);
-	g_signal_connect(G_OBJECT(item_index_aktualisieren), "activate",
-			G_CALLBACK(sond_treeviewfm_index_aktualisieren_activate),
-			(gpointer) stvfm);
-	gtk_menu_shell_append(GTK_MENU_SHELL(menu_indizieren), item_index_aktualisieren);
 
 	gtk_menu_item_set_submenu(GTK_MENU_ITEM(item_indizieren), menu_indizieren);
 

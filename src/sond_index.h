@@ -82,52 +82,14 @@ SondIndexCtx* sond_index_ctx_new(gchar const *db_path,
 void sond_index_ctx_free(SondIndexCtx *ctx);
 
 /**
- * sond_index_file_needs_update:
- * @ctx:      SondIndexCtx
- * @filename: vollständiger filepart-Pfad (wie in chunks)
- * @mtime:    aktueller mtime der Wurzel-FS-Datei
- *
- * Returns: TRUE wenn Datei (neu) indiziert werden soll.
- */
-gboolean sond_index_file_needs_update(SondIndexCtx *ctx,
-                                       gchar const  *filename,
-                                       gint64        mtime);
-
-/**
- * sond_index_file_update_root_mtime:
- * @ctx:          SondIndexCtx
- * @fs_root_path: Pfad der Wurzel-FS-Datei (wie in sond_file_part_get_path des obersten sfp)
- * @mtime:        neuer mtime
- *
- * Setzt den mtime aller files-Einträge, deren filename gleich fs_root_path
- * ist oder mit fs_root_path// beginnt, auf mtime.
- */
-void sond_index_file_update_root_mtime(SondIndexCtx *ctx,
-                                        gchar const  *fs_root_path,
-                                        gint64        mtime);
-
-/**
- * sond_index_get_outdated_files:
- * @ctx:   SondIndexCtx
- * @error: GError
- *
- * Gibt alle filename-Einträge aus files zurück, deren gespeicherter mtime
- * nicht mehr mit dem aktuellen mtime der Wurzel-FS-Datei übereinstimmt.
- * Die Wurzel-FS-Datei ist der Teil vor dem ersten "//" im filename,
- * bzw. der filename selbst wenn kein "//" vorhanden.
- *
- * Returns: (transfer full) GPtrArray* von gchar* (filename), oder NULL bei Fehler.
- */
-GPtrArray* sond_index_get_outdated_files(SondIndexCtx *ctx, GError **error);
-
-/**
  * sond_index_ctx_clear_file:
  * @ctx:      SondIndexCtx
  * @filename: Dateiname (wie in dispatch_buffer)
  * @error:    GError
  *
- * Löscht alle vorhandenen Chunks für filename (und alle Unter-Pfade,
- * d.h. LIKE 'filename%') vor der Neuindizierung.
+ * Löscht alle vorhandenen Chunks und files-Einträge für filename
+ * (und alle Unter-Pfade, d.h. LIKE 'filename//%') vor der Neuindizierung.
+ * Erwartet eine bereits laufende Transaktion (kein eigenes BEGIN/COMMIT).
  *
  * Returns: TRUE bei Erfolg.
  */
@@ -136,32 +98,22 @@ gboolean sond_index_ctx_clear_file(SondIndexCtx *ctx,
                                     GError      **error);
 
 /**
- * sond_index_file_needs_update:
- * @ctx:      SondIndexCtx
- * @filename: Vollständiger filepart-Pfad (wie in chunks)
- * @mtime:    Aktueller mtime der Wurzel-FS-Datei
+ * sond_index_ctx_rename_file:
+ * @ctx:        SondIndexCtx
+ * @prefix_old: Alter Pfad-Präfix
+ * @prefix_new: Neuer Pfad-Präfix
+ * @error:      GError
  *
- * Prüft ob filename in der files-Tabelle fehlt oder einen abweichenden mtime hat.
+ * Benennt in chunks und files alle Einträge um, deren filename gleich
+ * prefix_old ist oder mit prefix_old// beginnt.
+ * Erwartet eine bereits laufende Transaktion (kein eigenes BEGIN/COMMIT).
  *
- * Returns: TRUE wenn neu indiziert werden muss.
+ * Returns: TRUE bei Erfolg.
  */
-gboolean sond_index_file_needs_update(SondIndexCtx *ctx,
-                                       gchar const  *filename,
-                                       gint64        mtime);
-
-/**
- * sond_index_file_update_root_mtime:
- * @ctx:          SondIndexCtx
- * @fs_root_path: Pfad der Wurzel-FS-Datei (ohne Trennzeichen)
- * @mtime:        Neuer mtime
- *
- * Setzt alle Einträge in files, deren filename mit fs_root_path beginnt,
- * auf den neuen mtime. Damit bleiben bereits indizierte eingebettete Dateien
- * gültig, wenn sich nur der Container-mtime durch eine Teiländerung verändert hat.
- */
-void sond_index_file_update_root_mtime(SondIndexCtx *ctx,
-                                        gchar const  *fs_root_path,
-                                        gint64        mtime);
+gboolean sond_index_ctx_rename_file(SondIndexCtx *ctx,
+                                     gchar const  *prefix_old,
+                                     gchar const  *prefix_new,
+                                     GError      **error);
 
 /* =======================================================================
  * Einstiegspunkt aus dispatch_buffer

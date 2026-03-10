@@ -382,9 +382,18 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 		fz_context *ctx = zond_pdf_document_get_ctx(
 				pdf_document_page->document);
 
-		//entry vorbereiten
-		entry.type = JOURNAL_TYPE_OCR;
-		entry.pdf_document_page = pdf_document_page;
+		if (!pdf_document_page->page) {
+			fz_try(ctx) {
+				pdf_document_page->page = pdf_load_page(ctx, zond_pdf_document_get_pdf_doc(
+						pdf_document_page->document), pdf_document_page->page_akt);
+			}
+			fz_catch(ctx) {
+				info_window_set_message(info_window,
+						"Seite %u konnte nicht geladen werden: %s",
+						pdf_document_page->page_akt + 1, fz_caught_message(ctx));
+				continue;
+			}
+		}
 
 		buf_content = get_content_stream_as_buffer(ctx, pdf_document_page->page->obj, &error);
 		if (!buf_content) {
@@ -393,6 +402,10 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 			g_clear_error(&error);
 			continue;
 		}
+
+		//entry vorbereiten
+		entry.type = JOURNAL_TYPE_OCR;
+		entry.pdf_document_page = pdf_document_page;
 
 		entry.ocr.buf_old = buf_content; //übernimmt ref
 

@@ -49,7 +49,6 @@ struct _SondTreeviewFMClass {
 	gboolean (*has_sections) (SondTVFMItem*);
 	gint (*delete_section) (SondTVFMItem*, GError**);
 	void (*indiziere) (SondTreeviewFM*, GtkTreeSelection*);
-	void (*aktualisiere_index) (SondTreeviewFM*);
 };
 
 SondTVFMItemType sond_tvfm_item_get_item_type(SondTVFMItem*);

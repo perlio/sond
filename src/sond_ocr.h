@@ -50,6 +50,9 @@ typedef struct _SondOcrPool {
 
 // Transformations-Kontext für OCR-Koordinaten
 typedef struct {
+    fz_matrix ctm_inv;  // Inverse der Render-CTM: Screen -> PDF
+    int pixmap_x;       // Pixmap-Ursprung im Screen-System (pixmap->x)
+    int pixmap_y;       // Pixmap-Ursprung im Screen-System (pixmap->y)
     float scale_x;
     float scale_y;
     int rotation;  // 0, 90, 180, 270

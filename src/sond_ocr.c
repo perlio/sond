@@ -84,11 +84,20 @@ static gint add_ocr_layer_to_page(fz_context *ctx,
 	fz_catch (ctx)
 		ERROR_PDF
 
-	// OCR an Content Stream anhängen
-	fz_try(ctx)
-		fz_append_data(ctx, buf_new, content->str, content->len);
+	// OCR-Block voranstellen: zuerst OCR, dann alter Stream
+	// So ist garantiert, daß keine aktive cm-Matrix aus dem alten Stream
+	// unsere Koordinaten verfälscht.
+	fz_buffer* buf_ocr = NULL;
+	fz_try(ctx) {
+		buf_ocr = fz_new_buffer(ctx, content->len + buf_new->len);
+		fz_append_data(ctx, buf_ocr, content->str, content->len);
+		fz_append_buffer(ctx, buf_ocr, buf_new);
+	}
+	fz_always(ctx)
+		fz_drop_buffer(ctx, buf_new);
 	fz_catch(ctx)
 		ERROR_PDF
+	buf_new = buf_ocr;
 
 	//Wir müssen ein neues Contents-Objekt erstellen, weil es sein kann,
 	//daß das alte auf ein indirektes Objekt verweist
@@ -104,6 +113,7 @@ static gint add_ocr_layer_to_page(fz_context *ctx,
 
 static gint calculate_ocr_transform(fz_context *ctx,
                                                pdf_page *page,
+											   fz_pixmap *pixmap,
 											   float scale,
 											   OcrTransform *t,
 											   GError **error) {
@@ -124,7 +134,7 @@ static gint calculate_ocr_transform(fz_context *ctx,
 	t->page_width = cropbox.x1 - cropbox.x0;
 	t->page_height = cropbox.y1 - cropbox.y0;
 
-    // Rotation holen
+    // Rotation holen (wird noch für append_text_matrix_gs benötigt)
     fz_try(ctx) {
     	pdf_obj *rotate_obj = pdf_dict_get_inheritable(ctx, page->obj, PDF_NAME(Rotate));
     	t->rotation = rotate_obj ? pdf_to_int(ctx, rotate_obj) : 0;
@@ -137,6 +147,20 @@ static gint calculate_ocr_transform(fz_context *ctx,
 
     t->scale_x = scale;
     t->scale_y = scale;
+
+    // Pixmap-Ursprung speichern
+    t->pixmap_x = pixmap->x;
+    t->pixmap_y = pixmap->y;
+
+    // CTM direkt berechnen (identisch zu pdf_render_pixmap) und invertieren
+    fz_rect r = { 0 };
+    fz_matrix ctm = { 0 };
+    fz_try(ctx)
+        pdf_page_transform(ctx, page, &r, &ctm);
+    fz_catch(ctx)
+        ERROR_PDF
+    ctm = fz_pre_scale(ctm, scale, scale);
+    t->ctm_inv = fz_invert_matrix(ctm);
 
     return 0;
 }
@@ -248,9 +272,8 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, GError** error) {
 								i, (*error)->message);
 					g_clear_error(error);
 				}
-
-				rc = calculate_ocr_transform(task->ctx, task->page, task->scale,
-						&task->ocr_transform, error);
+				rc = calculate_ocr_transform(task->ctx, task->page,
+						task->pixmap, task->scale, &task->ocr_transform, error);
 				if (rc) {
 					if (task->log_func)
 						task->log_func(task->log_func_data,
@@ -405,42 +428,18 @@ gint sond_ocr_pdf_doc(fz_context* ctx, SondOcrPool* ocr_pool, pdf_document* doc,
 	return 0;
 }
 
-// Transformation berechnen
+// Transformation berechnen: Tesseract-Pixmap-Koordinaten -> PDF-Koordinaten
 static void transform_coordinates(const OcrTransform *t,
                                    int img_x, int img_y,
                                    float *pdf_x, float *pdf_y) {
-    // img_x/y sind Koordinaten im GERENDERTEN (bereits rotierten) Bild
-    // Müssen zurück ins Original-Seiten-System
-
-    switch (t->rotation) {
-        case 0:
-            // Keine Rotation beim Rendern
-            *pdf_x = img_x / t->scale_x;
-            *pdf_y = t->page_height - (img_y / t->scale_y);
-            break;
-
-        case 90:
-            // Seite wurde 90° CW gerendert → zurück-drehen
-            *pdf_x = img_y / t->scale_y;
-            *pdf_y = img_x / t->scale_x;
-            break;
-
-        case 180:
-            // Seite wurde 180° gerendert
-            *pdf_x = t->page_width - (img_x / t->scale_x);
-            *pdf_y = img_y / t->scale_y;
-            break;
-
-        case 270:
-            // Seite wurde 270° CW (= 90° CCW) gerendert
-            *pdf_x = t->page_width - (img_y / t->scale_y);
-            *pdf_y = t->page_height - (img_x / t->scale_x);
-            break;
-        default:
-            *pdf_x = img_x / t->scale_x;
-            *pdf_y = t->page_height - (img_y / t->scale_y);
-            break;
-    }
+    // Tesseract liefert (img_x, img_y) relativ zum Pixmap-Ursprung.
+    // Der Pixmap liegt im Screen-System bei (pixmap_x, pixmap_y).
+    // Also: screen_absolute = (img_x + pixmap_x, img_y + pixmap_y)
+    // PDF-Punkt = ctm_inv * screen_absolute
+    fz_point screen = { (float)(img_x + t->pixmap_x), (float)(img_y + t->pixmap_y) };
+    fz_point pdf = fz_transform_point(screen, t->ctm_inv);
+    *pdf_x = pdf.x;
+    *pdf_y = pdf.y;
 
     return;
 }
@@ -534,13 +533,16 @@ static void append_text_matrix_gs(GString *buf,
             const OcrTransform *t,
             float scale_word_x,
             float pdf_x, float pdf_y) {
+    // d=+1: Koordinaten kommen bereits korrekt aus ctm_inv im PDF-System
+    // (Y=0 unten). MuPDF berechnet Text-Quads direkt aus der Textmatrix
+    // ohne zusätzliche Spiegelung. d=+1 = aufrechter Text.
     switch (t->rotation) {
         case 0:
             g_string_append_printf(buf, "%.4f 0 0 1 %.2f %.2f Tm\n",
                     scale_word_x, pdf_x, pdf_y);
             break;
         case 90:
-            g_string_append_printf(buf, "0 %.4f -1 0 %.2f %.2f Tm\n",
+            g_string_append_printf(buf, "0 %.4f 1 0 %.2f %.2f Tm\n",
                     scale_word_x, pdf_x, pdf_y);
             break;
         case 180:
@@ -548,7 +550,7 @@ static void append_text_matrix_gs(GString *buf,
                     -scale_word_x, pdf_x, pdf_y);
             break;
         case 270:
-            g_string_append_printf(buf, "0 %.4f 1 0 %.2f %.2f Tm\n",
+            g_string_append_printf(buf, "0 %.4f -1 0 %.2f %.2f Tm\n",
                     -scale_word_x, pdf_x, pdf_y);
             break;
         default:
@@ -630,8 +632,10 @@ static GString* tesseract_to_content_stream(
 
         float word_width_pdf = (x2 - x1) / transform->scale_x;
 
-        float word_height = (base_y2 - y1) / transform->scale_y;
-        float font_size = word_height * 1.2f;
+        // Schriftgröße aus voller Bounding-Box-Höhe (inkl. Descender),
+        // nicht nur Ascender-Anteil bis Baseline
+        float word_height = (y2 - y1) / transform->scale_y;
+        float font_size = word_height * 0.85f;  // ~85% der Box-Höhe = em-Größe
         if (font_size < 1.0f) font_size = 1.0f;
 
         if (fabsf(font_size - last_font_size) > 0.5f) {
@@ -644,7 +648,7 @@ static GString* tesseract_to_content_stream(
                 ? (word_width_pdf / actual_width) : 1.0f;
 
         float pdf_x, pdf_y;
-        transform_coordinates(transform, x1, base_y2, &pdf_x, &pdf_y);
+        transform_coordinates(transform, x1, y2, &pdf_x, &pdf_y);
 
         append_text_matrix_gs(content, transform, scale_word_x, pdf_x, pdf_y);
 
