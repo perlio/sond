@@ -30,6 +30,7 @@
 #include "misc.h"
 #include "misc_stdlib.h"
 #include "sond_log_and_error.h"
+#include "sond_result_view.h"
 #include "sond_renderer.h"
 #include "sond_fileparts.h"
 #include "sond_file_helper.h"
@@ -1184,21 +1185,25 @@ static gint sond_treeviewfm_text_edited(SondTreeviewFM *stvfm,
 	return 0;
 }
 
-static void sond_treeviewfm_results_row_activated(GtkWidget *listbox,
-		GtkWidget *row, gpointer user_data) {
+static void sond_treeviewfm_results_row_activated(GtkTreeView *treeview,
+		GtkTreePath *tree_path, GtkTreeViewColumn *col, gpointer user_data) {
 	gint rc = 0;
-	GtkWidget *label = NULL;
-	const gchar *filepart = NULL;
+	gchar *filepart = NULL;
 	GtkTreeIter iter = { 0 };
 	GError *error = NULL;
+	GtkTreeModel *model = NULL;
+	GtkTreeIter row_iter = { 0 };
 
 	SondTreeviewFM *stvfm = (SondTreeviewFM*) user_data;
 
-	label = gtk_bin_get_child(GTK_BIN(row));
-	filepart = gtk_label_get_label(GTK_LABEL(label));
+	/* Dateipfad aus Spalte 0 holen */
+	model = gtk_tree_view_get_model(treeview);
+	gtk_tree_model_get_iter(model, &row_iter, tree_path);
+	gtk_tree_model_get(model, &row_iter, 0, &filepart, -1);
 
 	rc = sond_treeviewfm_file_part_visible(stvfm, NULL, filepart, TRUE, &iter,
 			&error);
+	g_free(filepart);
 	if (rc == -1) {
 		display_message(gtk_widget_get_toplevel(GTK_WIDGET(stvfm)),
 				"Fehler\n\n", error->message, NULL);
@@ -2372,28 +2377,22 @@ static void sond_treeviewfm_datei_oeffnen_mit_activate(GtkMenuItem *item,
 static void sond_treeviewfm_show_hits(SondTreeviewFM *stvfm,
 		GPtrArray *arr_hits) {
 	GtkWidget *window = NULL;
-	GtkWidget *listbox = NULL;
+	GtkWidget *treeview = NULL;
 	SondTreeviewFMClass *klass = SOND_TREEVIEWFM_GET_CLASS(stvfm);
 
-	//Fenster erzeugen
-	window = result_listbox_new(
-			GTK_WINDOW(gtk_widget_get_toplevel( GTK_WIDGET(stvfm) )),
-			"Suchergebnis");
-
-	listbox = (GtkWidget*) g_object_get_data(G_OBJECT(window), "listbox");
-
-	g_signal_connect(listbox, "row-activated",
-			G_CALLBACK(klass->results_row_activated), (gpointer ) stvfm);
+	/* Einspaltiges Ergebnisfenster */
+	gchar const *cols[] = { "Datei", NULL };
+	window = sond_result_view_new(
+			GTK_WINDOW(gtk_widget_get_toplevel(GTK_WIDGET(stvfm))),
+			"Suchergebnis",
+			cols,
+			G_CALLBACK(klass->results_row_activated),
+			stvfm);
 
 	for (gint i = 0; i < arr_hits->len; i++) {
-		gchar *path = NULL;
-		GtkWidget *label = NULL;
-
-		path = g_ptr_array_index(arr_hits, i);
-
-		label = gtk_label_new((const gchar*) path);
-
-		gtk_list_box_insert(GTK_LIST_BOX(listbox), label, -1);
+		gchar const *path = g_ptr_array_index(arr_hits, i);
+		gchar const *row[] = { path, NULL };
+		sond_result_view_append(window, row);
 	}
 
 	gtk_widget_show_all(window);

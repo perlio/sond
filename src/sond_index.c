@@ -666,6 +666,200 @@ static GPtrArray* extract_segments_from_text(guchar const *buf, gsize size) {
 }
 
 /* =======================================================================
+ * Volltextsuche
+ * ======================================================================= */
+
+void sond_index_hit_free(gpointer p) {
+    SondIndexHit *hit = (SondIndexHit *) p;
+    if (!hit) return;
+    g_free(hit->filename);
+    g_free(hit->snippet);
+    g_free(hit);
+}
+
+/*
+ * Baut den FTS5-Query-String:
+ *   - Mehrere Wörter in term → Phrasensuche: "Wort1 Wort2"
+ *   - Ein Wort                → einfaches Token: Wort
+ *   - context vorhanden      → AND-Verknüpfung: <term> AND <context>
+ *
+ * Rückgabe: neu allozierter String, mit g_free() freigeben.
+ */
+static gchar* build_fts_query(gchar const *term, gchar const *context) {
+    gchar *term_q   = NULL;
+    gchar *query    = NULL;
+
+    /* Phrase wenn term ein Leerzeichen enthält */
+    if (strchr(term, ' '))
+        term_q = g_strdup_printf("\"%s\"", term);
+    else
+        term_q = g_strdup(term);
+
+    if (context && *context) {
+        gchar *ctx_q = NULL;
+
+        if (strchr(context, ' '))
+            ctx_q = g_strdup_printf("\"%s\"", context);
+        else
+            ctx_q = g_strdup(context);
+
+        query = g_strdup_printf("%s AND %s", term_q, ctx_q);
+        g_free(ctx_q);
+    } else {
+        query = term_q;
+        term_q = NULL; /* Eigentum übertragen */
+    }
+
+    g_free(term_q);
+    return query;
+}
+
+GPtrArray* sond_index_search(SondIndexCtx *ctx,
+                              gchar const  *term,
+                              gchar const  *context,
+                              GError      **error) {
+    GPtrArray    *result = NULL;
+    sqlite3_stmt *stmt   = NULL;
+    gchar        *query  = NULL;
+    gint          rc     = 0;
+
+    g_return_val_if_fail(ctx    != NULL, NULL);
+    g_return_val_if_fail(term   != NULL, NULL);
+    g_return_val_if_fail(*term  != '\0', NULL);
+
+    result = g_ptr_array_new_with_free_func(sond_index_hit_free);
+
+    /* ---------------------------------------------------------------
+     * 1. Volltextsuche über FTS5
+     * ------------------------------------------------------------- */
+    query = build_fts_query(term, context);
+
+    rc = sqlite3_prepare_v2(ctx->db,
+        "SELECT c.filename, c.page_nr, c.char_pos,"
+        "       snippet(chunks_fts, 0, '[', ']', '...', 20),"
+        "       c.char_pos - (SELECT MIN(c2.char_pos) FROM chunks c2"
+        "                     WHERE c2.filename = c.filename"
+        "                       AND c2.page_nr  = c.page_nr)"
+        " FROM chunks_fts"
+        " JOIN chunks c ON c.id = chunks_fts.rowid"
+        " WHERE chunks_fts MATCH ?"
+        " ORDER BY c.filename, c.page_nr, c.char_pos",
+        -1, &stmt, NULL);
+
+    if (rc != SQLITE_OK) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "sond_index_search: prepare FTS: %s",
+                    sqlite3_errmsg(ctx->db));
+        g_free(query);
+        g_ptr_array_unref(result);
+        return NULL;
+    }
+
+    sqlite3_bind_text(stmt, 1, query, -1, SQLITE_TRANSIENT);
+    g_free(query);
+
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+        SondIndexHit *hit = g_new0(SondIndexHit, 1);
+
+        hit->filename         = g_strdup((gchar const *) sqlite3_column_text(stmt, 0));
+        hit->page_nr          = sqlite3_column_int(stmt, 1);
+        hit->char_pos         = sqlite3_column_int(stmt, 2);
+        hit->snippet          = g_strdup((gchar const *) sqlite3_column_text(stmt, 3));
+        hit->char_pos_in_page = sqlite3_column_int(stmt, 4);
+
+        g_ptr_array_add(result, hit);
+    }
+
+    if (rc != SQLITE_DONE) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "sond_index_search: step FTS: %s",
+                    sqlite3_errmsg(ctx->db));
+        sqlite3_finalize(stmt);
+        g_ptr_array_unref(result);
+        return NULL;
+    }
+
+    sqlite3_finalize(stmt);
+
+    /* ---------------------------------------------------------------
+     * 2. Dateinamen-Suche über files-Tabelle (LIKE, Basename)
+     *
+     * Gesucht wird im letzten Pfadsegment nach dem letzten '/'.
+     * Bereits per FTS gefundene Dateien werden nicht doppelt gelistet.
+     * Der context-Parameter wird bei der Dateinamensuche ignoriert.
+     * ------------------------------------------------------------- */
+    {
+        /* LIKE-Muster: %term%
+         * LIKE-Sonderzeichen (% _) im Suchbegriff werden nicht maskiert –
+         * sie treten in Dateinamen so gut wie nie auf. */
+        gchar *pattern = g_strdup_printf("%%%s%%", term);
+
+        rc = sqlite3_prepare_v2(ctx->db,
+            /* Basename per SQLite-String-Funktionen isolieren:
+             * SUBSTR(filename, INSTR(filename,'/')+1) liefert
+             * alles nach dem ersten '/'. Da der Pfad immer
+             * relative Segmente mit '/' trennt, reicht ein
+             * einfacher Vergleich auf den Gesamt-Dateinamen
+             * mit dem LIKE-Pattern – false positives durch
+             * Verzeichnisnamen sind akzeptabel, da das Ergebnis
+             * ohnehin auf den Dateinamen zeigt.
+             *
+             * Zusätzlich: Ergebnis nur wenn filename NICHT bereits
+             * in der FTS-Treffermenge ist, damit keine Duplikate.
+             */
+            "SELECT DISTINCT filename FROM files"
+            " WHERE filename LIKE ? ESCAPE '\\'"
+            "   AND filename NOT IN ("
+            "     SELECT DISTINCT c.filename FROM chunks_fts"
+            "     JOIN chunks c ON c.id = chunks_fts.rowid"
+            "     WHERE chunks_fts MATCH ?2"
+            "   )"
+            " ORDER BY filename",
+            -1, &stmt, NULL);
+
+        if (rc != SQLITE_OK) {
+            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                        "sond_index_search: prepare filename: %s",
+                        sqlite3_errmsg(ctx->db));
+            g_free(pattern);
+            g_ptr_array_unref(result);
+            return NULL;
+        }
+
+        /* ?1 = LIKE-Muster, ?2 = FTS-Query (für NOT IN) */
+        gchar *fts_query = build_fts_query(term, context);
+        sqlite3_bind_text(stmt, 1, pattern,   -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 2, fts_query, -1, SQLITE_TRANSIENT);
+        g_free(pattern);
+        g_free(fts_query);
+
+        while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+            SondIndexHit *hit = g_new0(SondIndexHit, 1);
+
+            hit->filename = g_strdup((gchar const *) sqlite3_column_text(stmt, 0));
+            hit->page_nr  = -1;
+            hit->char_pos = 0;
+            hit->snippet  = g_strdup("(Dateiname)");
+
+            g_ptr_array_add(result, hit);
+        }
+
+        if (rc != SQLITE_DONE) {
+            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                        "sond_index_search: step filename: %s",
+                        sqlite3_errmsg(ctx->db));
+            sqlite3_finalize(stmt);
+            g_ptr_array_unref(result);
+            return NULL;
+        }
+
+        sqlite3_finalize(stmt);
+    }
+
+    return result;
+}
+
+/* =======================================================================
  * files-Tabelle: Hilfsfunktionen
  * ======================================================================= */
 

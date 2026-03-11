@@ -878,6 +878,95 @@ static void viewer_anzeigen_text_occ(PdfViewer *pv) {
 	return;
 }
 
+void viewer_highlight_at_char_pos(PdfViewer *pv, gint page_nr,
+		gint char_pos_in_page, gchar const *term) {
+	gint term_byte_len = 0;
+	gint byte_pos = 0;
+	gint n_quads = 0;
+	gboolean in_term = FALSE;
+	ViewerPageNew *viewer_page = NULL;
+
+	if (!term || !*term)
+		return;
+
+	term_byte_len = (gint) strlen(term);
+
+	/* Passende ViewerPage für page_nr (page_akt) suchen */
+	gint page_idx = -1;
+	for (guint i = 0; i < pv->arr_pages->len; i++) {
+		ViewerPageNew *vp = g_ptr_array_index(pv->arr_pages, i);
+		if (vp->pdf_document_page->page_akt == page_nr) {
+			viewer_page = vp;
+			page_idx = (gint) i;
+			break;
+		}
+	}
+
+	if (!viewer_page || page_idx < 0)
+		return;
+
+	/* Warten bis stext_page verfügbar (thread-safe) */
+	viewer_render_wait_for_transfer(viewer_page->pdf_document_page);
+
+	/* stext_page nicht gerendert: nichts tun */
+	if (!(viewer_page->pdf_document_page->thread & 8))
+		return;
+
+	/* stext_page Zeichen für Zeichen durchlaufen —
+	 * exakt wie extract_segments_from_pdf beim Indizieren */
+	pv->highlight.page[0] = -1; /* Sentinel zurücksetzen */
+
+	for (fz_stext_block *b =
+			viewer_page->pdf_document_page->stext_page->first_block;
+			b && n_quads < 999; b = b->next) {
+		if (b->type != FZ_STEXT_BLOCK_TEXT)
+			continue;
+
+		for (fz_stext_line *l = b->u.t.first_line;
+				l && n_quads < 999; l = l->next) {
+			for (fz_stext_char *c = l->first_char;
+					c && n_quads < 999; c = c->next) {
+				gchar utf8[8];
+				gint  nbytes = fz_runetochar(utf8, c->c);
+
+				if (byte_pos >= char_pos_in_page
+						&& byte_pos < char_pos_in_page + term_byte_len) {
+					/* Dieser Char gehört zum Treffer */
+					if (!in_term) {
+						in_term = TRUE;
+					}
+					/* crop-Koordinaten wie im Viewer üblich anpassen */
+					fz_rect char_rect = fz_rect_from_quad(c->quad);
+					fz_rect cropped = fz_intersect_rect(
+							viewer_page->crop, char_rect);
+					if (!fz_is_empty_rect(cropped)) {
+						cropped = fz_translate_rect(cropped,
+								-viewer_page->crop.x0,
+								-viewer_page->crop.y0);
+						pv->highlight.quad[n_quads] =
+								fz_quad_from_rect(cropped);
+						pv->highlight.page[n_quads] = page_idx;
+						n_quads++;
+					}
+				} else if (in_term) {
+					/* Term vollständig gefunden */
+					goto done;
+				}
+
+				byte_pos += nbytes;
+			}
+			/* Zeilenumbruch mitzählen (wie beim Indizieren) */
+			byte_pos++;
+		}
+	}
+
+done:
+	pv->highlight.page[n_quads] = -1; /* Sentinel */
+
+	if (n_quads > 0)
+		gtk_widget_queue_draw(pv->layout);
+}
+
 static gint viewer_text_occ_search_next(PdfViewer *pv, gint index, gint dir) {
 	gint idx = (dir == 1) ? -1 : pv->text_occ.arr_quad->len;
 

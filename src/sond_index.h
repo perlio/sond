@@ -116,6 +116,52 @@ gboolean sond_index_ctx_rename_file(SondIndexCtx *ctx,
                                      GError      **error);
 
 /* =======================================================================
+ * Volltextsuche
+ * ======================================================================= */
+
+/**
+ * SondIndexHit:
+ *
+ * Ein einzelner Suchtreffer aus sond_index_search().
+ * Alle Felder sind neu alloziert und müssen mit sond_index_hit_free()
+ * bzw. über das GPtrArray-free_func freigegeben werden.
+ */
+typedef struct _SondIndexHit {
+    gchar *filename;         /* filepart-Pfad, wie in chunks gespeichert          */
+    gint   page_nr;          /* Seitennummer (-1 wenn nicht zutreffend)           */
+    gint   char_pos;         /* Zeichenposition im Dokument                       */
+    gint   char_pos_in_page; /* Byte-Offset des Treffers innerhalb der Seite      */
+    gchar *snippet;          /* Kontextausschnitt mit markierten Treffern         */
+} SondIndexHit;
+
+/**
+ * sond_index_hit_free:
+ * Gibt einen einzelnen SondIndexHit frei.
+ */
+void sond_index_hit_free(gpointer p);
+
+/**
+ * sond_index_search:
+ * @ctx:     SondIndexCtx
+ * @term:    Hauptsuchbegriff (ein oder mehrere Wörter → Phrasensuche)
+ * @context: Optionaler Kontext-Begriff (AND-Verknüpfung auf Chunk-Ebene),
+ *           oder NULL für reine Begriffssuche
+ * @error:   GError
+ *
+ * Durchsucht chunks_fts nach @term. Wenn @context angegeben ist, müssen
+ * beide Begriffe im selben Chunk vorkommen (AND-Semantik).
+ * Mehrere Wörter in @term werden als Phrase gesucht.
+ *
+ * Returns: (transfer full) GPtrArray* von SondIndexHit*, nach filename
+ *          und page_nr sortiert. NULL bei Fehler.
+ *          Leeres Array wenn keine Treffer.
+ */
+GPtrArray* sond_index_search(SondIndexCtx *ctx,
+                              gchar const  *term,
+                              gchar const  *context,
+                              GError      **error);
+
+/* =======================================================================
  * Einstiegspunkt aus dispatch_buffer
  * ======================================================================= */
 

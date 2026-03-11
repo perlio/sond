@@ -150,6 +150,9 @@ gint viewer_abfragen_pdf_punkt(PdfViewer *pv, fz_point punkt,
 
 gint viewer_handle_text_search(PdfViewer* pv, GtkWidget *widget, GError **error);
 
+void viewer_highlight_at_char_pos(PdfViewer *pv, gint page_nr,
+		gint char_pos_in_page, gchar const *term);
+
 void viewer_handle_page_entry_activated(PdfViewer* pv, GtkEntry *entry);
 
 void viewer_set_cursor(PdfViewer *pv, gint rc, ViewerPageNew *viewer_page,
