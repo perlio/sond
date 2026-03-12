@@ -873,7 +873,8 @@ static gint sond_file_part_zip_rename_file(SondFilePartZip*,
 static gint sond_file_part_gmessage_rename_file(SondFilePartGMessage*,
 		gchar const*, gchar const*, GError**);
 
-gint sond_file_part_rename(SondFilePart* sfp, gchar const* path_new, GError** error) {
+gint sond_file_part_rename(SondFilePart* sfp, gchar const* path_new,
+		gchar const* base_new, GError** error) {
 	SondFilePartPrivate* sfp_priv = NULL;
 	gint rc = 0;
 
@@ -893,7 +894,7 @@ gint sond_file_part_rename(SondFilePart* sfp, gchar const* path_new, GError** er
 				sfp_priv->path, path_new, error);
 	else if (SOND_IS_FILE_PART_GMESSAGE(sfp_priv->parent))
 		rc = sond_file_part_gmessage_rename_file(SOND_FILE_PART_GMESSAGE(sfp_priv->parent),
-				sfp_priv->path, path_new, error);
+				sfp_priv->path, base_new, error);
 	else {
 		if (error) *error = g_error_new(g_quark_from_static_string("sond"), 0,
 				"Derzeit nicht implementiert");
@@ -2063,37 +2064,40 @@ static void sond_file_part_gmessage_init(SondFilePartGMessage *self) {
 	return;
 }
 
-static void sond_file_part_gmessage_class_init(SondFilePartGMessageClass *klass) {
+static void sond_file_part_gmessage_finalize(GObject* object) {
+	SondFilePartGMessage* sfp_gmessage = SOND_FILE_PART_GMESSAGE(object);
+	SondFilePartGMessagePrivate* sfp_gmessage_priv =
+			sond_file_part_gmessage_get_instance_private(sfp_gmessage);
+
+	if (sfp_gmessage_priv->message)
+		g_object_unref(sfp_gmessage_priv->message);
+
+	G_OBJECT_CLASS(sond_file_part_gmessage_parent_class)->finalize(object);
 
 	return;
 }
 
-static void sond_file_part_gmessage_close(SondFilePartGMessage* sfp_gmessage) {
-	SondFilePartGMessagePrivate* sfp_gmessage_priv =
-			sond_file_part_gmessage_get_instance_private(sfp_gmessage);
-
-	if (sfp_gmessage_priv->message == NULL) {
-		LOG_WARN("%s\nSondFilePartGMessage war schon geschlossen", __func__);
-
-		return;
-	}
-
-	g_object_unref(sfp_gmessage_priv->message);
+static void sond_file_part_gmessage_class_init(SondFilePartGMessageClass *klass) {
+	G_OBJECT_CLASS(klass)->finalize = sond_file_part_gmessage_finalize;
 
 	return;
 }
 
 static gint sond_file_part_gmessage_open(SondFilePartGMessage* sfp_gmessage,
-		GError** error) {
+		gboolean persist, GError** error) {
 	SondFilePartGMessagePrivate* sfp_gmessage_priv =
 			sond_file_part_gmessage_get_instance_private(sfp_gmessage);
 
-	if (sfp_gmessage_priv->message)
-		return 0; //bereits geöffnet
+	if (sfp_gmessage_priv->message) {
+		if (persist)
+			return 0;
+		else
+			return 1;
+	}
 
 	SondFilePart* sfp_parent = sond_file_part_get_parent(SOND_FILE_PART(sfp_gmessage));
 
-	if (!sfp_parent) {
+	if (!sfp_parent && !persist) {
 		/* Filesystem: direkt über GMimeStream, ohne Zwischenpuffer */
 		gchar* full_path = g_strconcat(
 				SOND_FILE_PART_CLASS(g_type_class_peek(SOND_TYPE_FILE_PART))->path_root,
@@ -2143,10 +2147,6 @@ static gint sond_file_part_gmessage_open(SondFilePartGMessage* sfp_gmessage,
 		}
 	}
 
-    // Weak pointer registrieren für den Fall, dass andere das Objekt zerstören
-    g_object_add_weak_pointer(G_OBJECT(sfp_gmessage_priv->message),
-            (gpointer*) &sfp_gmessage_priv->message);
-
     return 0;
 }
 
@@ -2160,14 +2160,17 @@ static gint sond_file_part_gmessage_test_for_multipart(SondFilePartGMessage* sfp
 	SondFilePartGMessagePrivate* sfp_gmessage_priv =
 			sond_file_part_gmessage_get_instance_private(sfp_gmessage);
 
-	rc = sond_file_part_gmessage_open(sfp_gmessage, error);
-	if (rc)
+	rc = sond_file_part_gmessage_open(sfp_gmessage, FALSE, error);
+	if (rc == -1)
 		ERROR_Z
 
-	root = g_mime_message_get_mime_part(sfp_gmessage_priv->message);
-	if (root)//Auch wenn nur ein einziger part, ist es ein Kind von Message
-		sfp_priv->has_children = TRUE;
-	sond_file_part_gmessage_close(sfp_gmessage);
+	//Auch wenn nur ein einziger part, ist es ein Kind von Message
+	sfp_priv->has_children = (g_mime_message_get_mime_part(sfp_gmessage_priv->message) != NULL);
+
+	if (rc == 0) { //nur zerstören, wenn diese Funktion Message geöffnet hat!
+		g_object_unref(sfp_gmessage_priv->message);
+		sfp_gmessage_priv->message = NULL;
+	}
 
 	return 0;
 }
@@ -2180,12 +2183,11 @@ static GMimeObject* sond_file_part_gmessage_lookup_part_by_path(
 	SondFilePartGMessagePrivate* sfp_gmessage_priv =
 			sond_file_part_gmessage_get_instance_private(sfp_gmessage);
 
-	rc = sond_file_part_gmessage_open(sfp_gmessage, error);
+	rc = sond_file_part_gmessage_open(sfp_gmessage, TRUE, error);
 	if (rc)
 		ERROR_Z_VAL(NULL)
 
 	object = gmessage_lookup_part_by_path(sfp_gmessage_priv->message, path, error);
-	sond_file_part_gmessage_close(sfp_gmessage);
 	if (!object)
 		ERROR_Z_VAL(NULL)
 
@@ -2273,7 +2275,7 @@ static GBytes* sond_file_part_gmessage_mod_part(SondFilePartGMessage* sfp_gmessa
 	SondFilePartGMessagePrivate* sfp_gmessage_priv =
 			sond_file_part_gmessage_get_instance_private(sfp_gmessage);
 
-	rc = sond_file_part_gmessage_open(sfp_gmessage, error);
+	rc = sond_file_part_gmessage_open(sfp_gmessage, TRUE, error);
 	if (rc)
 		ERROR_Z_VAL(NULL)
 
@@ -2282,13 +2284,10 @@ static GBytes* sond_file_part_gmessage_mod_part(SondFilePartGMessage* sfp_gmessa
 
 	rc = gmessage_mod_part(sfp_gmessage_priv->message, path,
 			(guchar*)data, data_len, error);
-	if (rc) {
-		sond_file_part_gmessage_close(sfp_gmessage);
+	if (rc)
 		ERROR_Z_VAL(NULL)
-	}
 
 	GBytes* result = sond_file_part_gmessage_to_bytes(sfp_gmessage, error);
-	sond_file_part_gmessage_close(sfp_gmessage);
 	if (!result)
 		ERROR_Z_VAL(NULL)
 
@@ -2320,19 +2319,15 @@ static gint sond_file_part_gmessage_rename_file(SondFilePartGMessage* sfp_gmessa
 	SondFilePartGMessagePrivate* sfp_gmessage_priv =
 			sond_file_part_gmessage_get_instance_private(sfp_gmessage);
 
-	rc = sond_file_part_gmessage_open(sfp_gmessage, error);
+	rc = sond_file_part_gmessage_open(sfp_gmessage, TRUE, error);
 	if (rc)
 		ERROR_Z
 
 	rc = gmessage_set_filename(sfp_gmessage_priv->message, path_old, path_new, error);
-	if (rc) {
-		sond_file_part_gmessage_close(sfp_gmessage);
-
+	if (rc)
 		ERROR_Z
-	}
 
 	rc = sond_file_part_gmessage_save(sfp_gmessage, error);
-	sond_file_part_gmessage_close(sfp_gmessage);
 	if (rc)
 		ERROR_Z
 

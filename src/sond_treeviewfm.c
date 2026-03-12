@@ -1063,7 +1063,8 @@ static gint rename_stvfm_item(SondTVFMItem* stvfm_item,
 
 	if (!stvfm_item_priv->path_or_section) {
 		gint rc = 0;
-		rc = sond_file_part_rename(stvfm_item_priv->sond_file_part, path_new, error);
+		rc = sond_file_part_rename(stvfm_item_priv->sond_file_part,
+				path_new, base_new, error);
 		if (rc)
 			ERROR_Z
 	}
@@ -1092,6 +1093,8 @@ static gint rename_stvfm_item(SondTVFMItem* stvfm_item,
 			//ToDo: Multipart umbenennen
 			if (error) *error = g_error_new(g_quark_from_static_string("sond"), 0,
 					"%s\nrename GMimeMultipart noch nicht implementiert", __func__);
+
+			return -1;
 		}
 		//was anderes?
 		else {
@@ -2377,7 +2380,6 @@ static void sond_treeviewfm_datei_oeffnen_mit_activate(GtkMenuItem *item,
 static void sond_treeviewfm_show_hits(SondTreeviewFM *stvfm,
 		GPtrArray *arr_hits) {
 	GtkWidget *window = NULL;
-	GtkWidget *treeview = NULL;
 	SondTreeviewFMClass *klass = SOND_TREEVIEWFM_GET_CLASS(stvfm);
 
 	/* Einspaltiges Ergebnisfenster */

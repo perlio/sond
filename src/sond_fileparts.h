@@ -69,7 +69,8 @@ SondFilePart* sond_file_part_from_filepart(gchar const*, GError**);
 
 gint sond_file_part_delete(SondFilePart*, GError**);
 
-gint sond_file_part_rename(SondFilePart*, gchar const*, GError**);
+gint sond_file_part_rename(SondFilePart*, gchar const* path_new,
+		gchar const* base_new, GError**);
 
 gint sond_file_part_copy(SondFilePart*, SondFilePart*, gchar const*, GError**);
 

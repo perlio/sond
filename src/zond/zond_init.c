@@ -57,8 +57,7 @@ static void recover(Projekt *zond, gchar *project, GApplication *app) {
 
 	if (res == GTK_RESPONSE_YES) {
 		path_bak = g_strconcat(project, ".bak", NULL);
-		rc = sond_rename(project, path_bak, &error);
-		if (rc) {
+		if (!sond_rename(project, path_bak, &error)) {
 			display_message(zond->app_window,
 					"Konnte Sicherungskopie (.bak) nicht erstellen: ",
 					error->message, NULL);

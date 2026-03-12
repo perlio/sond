@@ -562,7 +562,7 @@ static GPtrArray* extract_segments_from_pdf(SondIndexCtx* sond_index_ctx, fz_con
 
         gint n_pages = pdf_count_pages(ctx, doc);
         for (gint i = 0; i < n_pages; i++) {
-            fz_stext_options opts  = { 0 };
+            fz_stext_options opts  = { FZ_STEXT_DEHYPHENATE };
             fz_stext_page   *stext = fz_new_stext_page_from_page_number(
             		ctx, (fz_document*) doc, i, &opts);
             GString *page_text = g_string_new(NULL);
@@ -739,7 +739,8 @@ GPtrArray* sond_index_search(SondIndexCtx *ctx,
         "       snippet(chunks_fts, 0, '[', ']', '...', 20),"
         "       c.char_pos - (SELECT MIN(c2.char_pos) FROM chunks c2"
         "                     WHERE c2.filename = c.filename"
-        "                       AND c2.page_nr  = c.page_nr)"
+        "                       AND c2.page_nr  = c.page_nr),"
+        "       c.text"
         " FROM chunks_fts"
         " JOIN chunks c ON c.id = chunks_fts.rowid"
         " WHERE chunks_fts MATCH ?"
@@ -766,6 +767,30 @@ GPtrArray* sond_index_search(SondIndexCtx *ctx,
         hit->char_pos         = sqlite3_column_int(stmt, 2);
         hit->snippet          = g_strdup((gchar const *) sqlite3_column_text(stmt, 3));
         hit->char_pos_in_page = sqlite3_column_int(stmt, 4);
+
+        /* Term-Offset innerhalb des Chunks addieren.
+         * strstr auf gefoldeten Strings liefert einen Byte-Offset im gefoldeten
+         * Text, der wegen unterschiedlicher Byte-Längen nach casefold nicht mit
+         * dem Byte-Offset im Original übereinstimmen muss.
+         * Daher: Zeichenanzahl vor dem Treffer ermitteln, und diese dann im
+         * Original-String in einen Byte-Offset umrechnen. */
+        {
+            gchar const *chunk_text = (gchar const *) sqlite3_column_text(stmt, 5);
+            if (chunk_text && term) {
+                gchar *chunk_fold = g_utf8_casefold(chunk_text, -1);
+                gchar *term_fold  = g_utf8_casefold(term, -1);
+                gchar *found      = strstr(chunk_fold, term_fold);
+                if (found) {
+                    /* Anzahl der Unicode-Zeichen vor dem Treffer im gefoldeten Text */
+                    glong n_chars = g_utf8_strlen(chunk_fold, found - chunk_fold);
+                    /* Denselben Zeichenabstand im Original-String in Bytes */
+                    gchar const *orig_pos = g_utf8_offset_to_pointer(chunk_text, n_chars);
+                    hit->char_pos_in_page += (gint)(orig_pos - chunk_text);
+                }
+                g_free(chunk_fold);
+                g_free(term_fold);
+            }
+        }
 
         g_ptr_array_add(result, hit);
     }
