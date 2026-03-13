@@ -2067,13 +2067,15 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 
 	//Falls jetzt in GMessage: alten display_name übernehmen
 	if (SOND_IS_FILE_PART_GMESSAGE(stvfm_item_new_priv->sond_file_part)) {
-		GtkTreeIter iter_sibling = *(s_paste_sel->iter_cursor);
-
 		g_free(stvfm_item_new_priv->display_name);
 		stvfm_item_new_priv->display_name = g_strdup(stvfm_item_priv->display_name);
+	}
 
-		//Problem: path von etwaigen jüngeren Geschwistern
-		//ist nach Einfügen nicht mehr korrekt
+	//Wenn in GMessage eingefügt wird:
+	//path von etwaigen jüngeren Geschwistern nach Einfügen nicht mehr korrekt
+	if (SOND_IS_FILE_PART_GMESSAGE(stvfm_item_parent_priv->sond_file_part)) {
+		GtkTreeIter iter_sibling = *(s_paste_sel->iter_cursor);
+
 		while (gtk_tree_model_iter_next(gtk_tree_view_get_model(
 				GTK_TREE_VIEW(stvfm_item_parent_priv->stvfm)), &iter_sibling)) {
 			SondTVFMItem* stvfm_item_sibling = NULL;
