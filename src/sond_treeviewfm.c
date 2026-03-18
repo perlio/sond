@@ -36,6 +36,7 @@
 #include "sond_file_helper.h"
 #include "sond_ocr.h"
 #include "sond_index.h"
+#include "sond_process_file.h"
 
 
 //SOND_TREEVIEWDM
@@ -1274,7 +1275,7 @@ static void sond_treeviewfm_class_init(SondTreeviewFMClass *klass) {
 	klass->text_edited = sond_treeviewfm_text_edited;
 	klass->results_row_activated = sond_treeviewfm_results_row_activated;
 	klass->open_stvfm_item = sond_treeviewfm_open_stvfm_item;
-	klass->indiziere = NULL;
+	klass->get_wctx = NULL;
 
 	return;
 }
@@ -2605,12 +2606,146 @@ static void sond_treeviewfm_search_activate(GtkMenuItem *item, gpointer data) {
 	return;
 }
 
+static void sond_treeviewfm_indiziere_leaf(SondTreeviewFM *stvfm,
+		SondFilePart *sfp, SondProcessFileCtx *wctx) {
+	GBytes *bytes = NULL;
+	GError *error = NULL;
+	gchar* file_part = NULL;
+	gconstpointer data = NULL;
+	gsize length = 0;
+	guchar *out_data = NULL;
+	gsize out_size = 0;
+	gint out_pdf_count = 0;
+
+	file_part = sond_file_part_get_filepart(sfp);
+
+	bytes = sond_file_part_get_bytes(sfp, &error);
+	if (!bytes) {
+		info_window_set_message((InfoWindow*) wctx->log_func_data,
+				file_part ? file_part : "?",
+				error ? error->message : "unbekannter Fehler");
+		g_clear_error(&error);
+		g_free(file_part);
+		return;
+	}
+
+	data = g_bytes_get_data(bytes, &length);
+
+	sond_process_file(wctx, (guchar*) data, length, file_part,
+			&out_data, &out_size, &out_pdf_count);
+	g_bytes_unref(bytes);
+
+	if (out_data) {
+		GBytes *bytes_out = g_bytes_new_take(out_data, out_size);
+		if (sond_file_part_replace(sfp, bytes_out, &error)) {
+			info_window_set_message((InfoWindow*) wctx->log_func_data,
+					"sond_file_part_replace('%s'): %s",
+					file_part ? file_part : "?",
+					error ? error->message : "unbekannter Fehler");
+			g_clear_error(&error);
+		}
+		g_bytes_unref(bytes_out);
+	}
+
+	g_free(file_part);
+
+	return;
+}
+
+static gint sond_treeviewfm_indiziere_dir(SondTreeviewFM *stvfm,
+		SondTVFMItem *stvfm_item_dir, SondProcessFileCtx *wctx, GError **error) {
+	GPtrArray *arr_children = NULL;
+	gint rc = 0;
+
+	rc = sond_tvfm_item_load_children(stvfm_item_dir, &arr_children, error);
+	if (rc)
+		ERROR_Z
+
+	for (guint i = 0; i < arr_children->len; i++) {
+		SondTVFMItem *child = g_ptr_array_index(arr_children, i);
+		gchar const* path_child = sond_tvfm_item_get_path_or_section(child);
+
+		if (path_child) {
+			rc = sond_treeviewfm_indiziere_dir(stvfm, child, wctx, error);
+			if (rc) {
+				info_window_set_message((InfoWindow*) wctx->log_func_data,
+						"Verzeichnis '%s' konnte nicht indiziert werden: %s",
+						path_child, (*error)->message);
+				g_clear_error(error);
+				continue;
+			}
+		} else
+			sond_treeviewfm_indiziere_leaf(stvfm,
+					sond_tvfm_item_get_sond_file_part(child), wctx);
+	}
+
+	g_ptr_array_unref(arr_children);
+
+	return 0;
+}
+
+static gint sond_treeviewfm_foreach_index(SondTreeview *stv, GtkTreeIter *iter,
+		gpointer data, GError **error) {
+	SondTVFMItem *stvfm_item = NULL;
+	SondTreeviewFM *stvfm = SOND_TREEVIEWFM(stv);
+	SondProcessFileCtx *wctx = (SondProcessFileCtx*) data;
+
+	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(stv)),
+			iter, 0, &stvfm_item, -1);
+	g_object_unref(stvfm_item);
+
+	if (sond_tvfm_item_get_path_or_section(stvfm_item)) {
+		gint rc = sond_treeviewfm_indiziere_dir(stvfm, stvfm_item, wctx, error);
+		if (rc)
+			ERROR_Z
+	} else
+		sond_treeviewfm_indiziere_leaf(stvfm,
+				sond_tvfm_item_get_sond_file_part(stvfm_item), wctx);
+
+	return 0;
+}
+
+static void sond_treeviewfm_indiziere(SondTreeviewFM *stvfm,
+		GtkTreeSelection *selection, SondProcessFileCtx *wctx) {
+	gint rc = 0;
+	GError *error = NULL;
+	InfoWindow *info_window = NULL;
+
+	info_window = info_window_open(gtk_widget_get_toplevel(GTK_WIDGET(stvfm)),
+			"Indexerstellung");
+	wctx->log_func_data = info_window;
+
+	if (!selection) {
+		SondTVFMItem *root = sond_tvfm_item_create(stvfm, NULL, NULL);
+		rc = sond_treeviewfm_indiziere_dir(stvfm, root, wctx, &error);
+		g_object_unref(root);
+	} else
+		rc = sond_treeview_selection_foreach(SOND_TREEVIEW(stvfm),
+				sond_treeviewfm_foreach_index, wctx, &error);
+
+	if (rc == -1) {
+		info_window_set_message(info_window,
+				"Indizieren fehlgeschlagen: %s", error->message, NULL);
+		g_error_free(error);
+	} else if (rc == 1)
+		info_window_set_message(info_window, "...abgebrochen");
+
+	info_window_close(info_window);
+
+	return;
+}
+
 static void sond_treeviewfm_dateien_indizieren_gesamt_activate(GtkMenuItem *item,
 		gpointer data) {
 	SondTreeviewFM *stvfm = SOND_TREEVIEWFM(data);
+	SondProcessFileCtx *wctx = NULL;
 
-	if (SOND_TREEVIEWFM_GET_CLASS(stvfm)->indiziere)
-		SOND_TREEVIEWFM_GET_CLASS(stvfm)->indiziere(stvfm, NULL);
+	if (SOND_TREEVIEWFM_GET_CLASS(stvfm)->get_wctx)
+		wctx = SOND_TREEVIEWFM_GET_CLASS(stvfm)->get_wctx(stvfm);
+
+	if (!wctx) return;
+
+	sond_treeviewfm_indiziere(stvfm, NULL, wctx);
 
 	return;
 }
@@ -2618,6 +2753,7 @@ static void sond_treeviewfm_dateien_indizieren_gesamt_activate(GtkMenuItem *item
 static void sond_treeviewfm_dateien_indizieren_auswahl_activate(GtkMenuItem *item,
 		gpointer data) {
 	SondTreeviewFM *stvfm = (SondTreeviewFM*) data;
+	SondProcessFileCtx *wctx = NULL;
 
 	if (!gtk_tree_selection_count_selected_rows(
 			gtk_tree_view_get_selection(GTK_TREE_VIEW(stvfm)))) {
@@ -2626,9 +2762,13 @@ static void sond_treeviewfm_dateien_indizieren_auswahl_activate(GtkMenuItem *ite
 		return;
 	}
 
-	if (SOND_TREEVIEWFM_GET_CLASS(stvfm)->indiziere)
-		SOND_TREEVIEWFM_GET_CLASS(stvfm)->indiziere(stvfm,
-				gtk_tree_view_get_selection(GTK_TREE_VIEW(stvfm)));
+	if (SOND_TREEVIEWFM_GET_CLASS(stvfm)->get_wctx)
+		wctx = SOND_TREEVIEWFM_GET_CLASS(stvfm)->get_wctx(stvfm);
+
+	if (!wctx) return;
+
+	sond_treeviewfm_indiziere(stvfm,
+				gtk_tree_view_get_selection(GTK_TREE_VIEW(stvfm)), wctx);
 
 	return;
 }
@@ -2756,8 +2896,8 @@ static void sond_treeviewfm_init_contextmenu(SondTreeviewFM *stvfm) {
 
 	gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu), item_search);
 
-	//Dateien indizieren
-	GtkWidget *item_indizieren = gtk_menu_item_new_with_label("Dateien indizieren");
+	//Index erstellen
+	GtkWidget *item_indizieren = gtk_menu_item_new_with_label("Index erstellen");
 
 	GtkWidget *menu_indizieren = gtk_menu_new();
 
@@ -2771,7 +2911,7 @@ static void sond_treeviewfm_init_contextmenu(SondTreeviewFM *stvfm) {
 	gtk_menu_shell_append(GTK_MENU_SHELL(menu_indizieren), item_indizieren_gesamt);
 
 	GtkWidget *item_indizieren_auswahl = gtk_menu_item_new_with_label(
-			"nur ausgewählte");
+			"Ausgewählte Punkte");
 	g_object_set_data(G_OBJECT(contextmenu), "item-indizieren-auswahl",
 			item_indizieren_auswahl);
 	g_signal_connect(G_OBJECT(item_indizieren_auswahl), "activate",
@@ -2780,8 +2920,27 @@ static void sond_treeviewfm_init_contextmenu(SondTreeviewFM *stvfm) {
 	gtk_menu_shell_append(GTK_MENU_SHELL(menu_indizieren), item_indizieren_auswahl);
 
 	gtk_menu_item_set_submenu(GTK_MENU_ITEM(item_indizieren), menu_indizieren);
-
 	gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu), item_indizieren);
+
+	//Index durchsuchen
+	GtkWidget *item_indexsuche = gtk_menu_item_new_with_label("Index durchsuchen");
+
+	GtkWidget *menu_indexsuche = gtk_menu_new();
+
+	GtkWidget *item_indexsuche_gesamt = gtk_menu_item_new_with_label(
+			"Gesamtes Projektverzeichnis");
+	g_object_set_data(G_OBJECT(contextmenu), "item-indexsuche-gesamt",
+			item_indexsuche_gesamt);
+	gtk_menu_shell_append(GTK_MENU_SHELL(menu_indexsuche), item_indexsuche_gesamt);
+
+	GtkWidget *item_indexsuche_auswahl = gtk_menu_item_new_with_label(
+			"Ausgewählte Punkte");
+	g_object_set_data(G_OBJECT(contextmenu), "item-indexsuche-auswahl",
+			item_indexsuche_auswahl);
+	gtk_menu_shell_append(GTK_MENU_SHELL(menu_indexsuche), item_indexsuche_auswahl);
+
+	gtk_menu_item_set_submenu(GTK_MENU_ITEM(item_indexsuche), menu_indexsuche);
+	gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu), item_indexsuche);
 
 	gtk_widget_show_all(contextmenu);
 
@@ -2974,7 +3133,7 @@ static void sond_treeviewfm_render_file_size(GtkTreeViewColumn *column,
 		goffset size = 0;
 		gchar *text = NULL;
 
-		size = g_file_info_get_size(G_FILE_INFO(object));
+//		size = g_file_info_get_size(G_FILE_INFO(object));
 #ifdef __WIN32__
 		text = g_strdup_printf("%lld", size);
 #elif defined __linux__

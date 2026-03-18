@@ -8,6 +8,7 @@
 #include "sond_treeview.h"
 
 typedef struct _SondFilePart SondFilePart;
+typedef struct _SondProcessFileCtx SondProcessFileCtx;
 
 G_BEGIN_DECLS
 
@@ -48,7 +49,7 @@ struct _SondTreeviewFMClass {
 	gint (*load_sections) (SondTVFMItem*, GPtrArray**, GError**);
 	gboolean (*has_sections) (SondTVFMItem*);
 	gint (*delete_section) (SondTVFMItem*, GError**);
-	void (*indiziere) (SondTreeviewFM*, GtkTreeSelection*);
+	SondProcessFileCtx* (*get_wctx) (SondTreeviewFM*);
 };
 
 SondTVFMItemType sond_tvfm_item_get_item_type(SondTVFMItem*);

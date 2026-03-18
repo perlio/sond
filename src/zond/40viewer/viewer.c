@@ -878,21 +878,29 @@ static void viewer_anzeigen_text_occ(PdfViewer *pv) {
 	return;
 }
 
+/* Hilfsstruct für den fz_search_stext_page_cb-Callback */
+typedef struct {
+	GArray *hits; /* Array von GArray* (jeder Eintrag = Array von fz_quad) */
+} SearchHitData;
+
+static gint search_hit_cb(fz_context *ctx, void *opaque,
+		gint num_quads, fz_quad *quads) {
+	SearchHitData *d = (SearchHitData *) opaque;
+	GArray *hit = g_array_new(FALSE, FALSE, sizeof(fz_quad));
+	g_array_append_vals(hit, quads, (guint) num_quads);
+	g_array_append_val(d->hits, hit);
+	return 0; /* weitersuchen */
+}
+
 void viewer_highlight_at_char_pos(PdfViewer *pv, gint page_nr,
 		gint char_pos_in_page, gchar const *term) {
-	gint term_byte_len = 0;
-	gint byte_pos = 0;
-	gint n_quads = 0;
-	gboolean in_term = FALSE;
 	ViewerPageNew *viewer_page = NULL;
+	gint page_idx = -1;
 
 	if (!term || !*term)
 		return;
 
-	term_byte_len = (gint) strlen(term);
-
 	/* Passende ViewerPage für page_nr (page_akt) suchen */
-	gint page_idx = -1;
 	for (guint i = 0; i < pv->arr_pages->len; i++) {
 		ViewerPageNew *vp = g_ptr_array_index(pv->arr_pages, i);
 		if (vp->pdf_document_page->page_akt == page_nr) {
@@ -912,56 +920,139 @@ void viewer_highlight_at_char_pos(PdfViewer *pv, gint page_nr,
 	if (!(viewer_page->pdf_document_page->thread & 8))
 		return;
 
-	/* stext_page Zeichen für Zeichen durchlaufen —
-	 * exakt wie extract_segments_from_pdf beim Indizieren */
-	pv->highlight.page[0] = -1; /* Sentinel zurücksetzen */
+	fz_context *ctx = zond_pdf_document_get_ctx(
+			viewer_page->dd->zpdfd_part->zond_pdf_document);
 
-	for (fz_stext_block *b =
-			viewer_page->pdf_document_page->stext_page->first_block;
-			b && n_quads < 999; b = b->next) {
-		if (b->type != FZ_STEXT_BLOCK_TEXT)
-			continue;
+	fz_stext_page *stext = viewer_page->pdf_document_page->stext_page;
 
-		for (fz_stext_line *l = b->u.t.first_line;
-				l && n_quads < 999; l = l->next) {
-			for (fz_stext_char *c = l->first_char;
-					c && n_quads < 999; c = c->next) {
-				gchar utf8[8];
-				gint  nbytes = fz_runetochar(utf8, c->c);
+	/* Alle Treffer des Terms auf der Seite sammeln (case-insensitive) */
+	SearchHitData hit_data;
+	hit_data.hits = g_array_new(FALSE, TRUE, sizeof(GArray *));
 
-				if (byte_pos >= char_pos_in_page
-						&& byte_pos < char_pos_in_page + term_byte_len) {
-					/* Dieser Char gehört zum Treffer */
-					if (!in_term) {
-						in_term = TRUE;
+	fz_try(ctx) {
+		fz_search_stext_page_cb(ctx, stext, term,
+				(fz_search_callback_fn *) search_hit_cb, &hit_data);
+	}
+	fz_catch(ctx) {
+		/* Fehler ignorieren, hits bleibt leer */
+	}
+
+	if (hit_data.hits->len == 0) {
+		g_array_free(hit_data.hits, TRUE);
+		return;
+	}
+
+	/* Den richtigen Treffer per char_pos_in_page identifizieren:
+	 * Flat-Text der Seite mit map erzeugen (FZ_TEXT_FLATTEN_ALL),
+	 * map[char_pos_in_page] liefert den fz_stext_char am gesuchten Offset.
+	 * Dann den Treffer wählen, der diesen Char enthält. */
+	GArray *chosen_hit = NULL;
+
+	fz_stext_position *map = NULL;
+	fz_buffer *flat_buf = NULL;
+
+	fz_try(ctx) {
+		flat_buf = fz_new_buffer_from_flattened_stext_page(
+				ctx, stext, FZ_TEXT_FLATTEN_ALL, &map);
+	}
+	fz_catch(ctx) {
+		flat_buf = NULL;
+		map = NULL;
+	}
+
+	if (map && flat_buf) {
+		/* Zeichenindex aus Byte-Offset: fz_runeidx */
+		unsigned char *flat_data = NULL;
+		fz_buffer_storage(ctx, flat_buf, &flat_data);
+		if (flat_data) {
+			gsize flat_len = strlen((gchar *) flat_data);
+			gint  safe_pos = (char_pos_in_page < (gint) flat_len)
+					? char_pos_in_page : (gint) flat_len - 1;
+			if (safe_pos >= 0) {
+				gsize char_idx = fz_runeidx((gchar *) flat_data,
+						(gchar *) flat_data + safe_pos);
+				fz_stext_char *target_ch = map[char_idx].ch;
+
+				if (target_ch) {
+					/* Treffer suchen, der target_ch enthält */
+					for (guint h = 0; h < hit_data.hits->len; h++) {
+						GArray *hit = g_array_index(hit_data.hits,
+								GArray *, h);
+						if (hit->len == 0) continue;
+						/* Prüfen ob target_ch innerhalb der
+						 * Bounding-Box dieses Treffers liegt */
+						fz_quad first = g_array_index(hit, fz_quad, 0);
+						fz_quad last  = g_array_index(hit, fz_quad,
+								hit->len - 1);
+						fz_rect hit_rect = fz_union_rect(
+								fz_rect_from_quad(first),
+								fz_rect_from_quad(last));
+						fz_rect ch_rect = fz_rect_from_quad(
+								target_ch->quad);
+						if (!fz_is_empty_rect(fz_intersect_rect(
+								hit_rect, ch_rect))) {
+							chosen_hit = hit;
+							break;
+						}
 					}
-					/* crop-Koordinaten wie im Viewer üblich anpassen */
-					fz_rect char_rect = fz_rect_from_quad(c->quad);
-					fz_rect cropped = fz_intersect_rect(
-							viewer_page->crop, char_rect);
-					if (!fz_is_empty_rect(cropped)) {
-						cropped = fz_translate_rect(cropped,
-								-viewer_page->crop.x0,
-								-viewer_page->crop.y0);
-						pv->highlight.quad[n_quads] =
-								fz_quad_from_rect(cropped);
-						pv->highlight.page[n_quads] = page_idx;
-						n_quads++;
+					/* Fallback: nächsten Treffer nach char_pos_in_page */
+					if (!chosen_hit) {
+						fz_point target_origin = target_ch->origin;
+						float best_dist = 1e30f;
+						for (guint h = 0; h < hit_data.hits->len; h++) {
+							GArray *hit = g_array_index(
+									hit_data.hits, GArray *, h);
+							if (hit->len == 0) continue;
+							fz_quad q = g_array_index(hit, fz_quad, 0);
+							float dx = q.ll.x - target_origin.x;
+							float dy = q.ll.y - target_origin.y;
+							float dist = dx * dx + dy * dy;
+							if (dist < best_dist) {
+								best_dist = dist;
+								chosen_hit = hit;
+							}
+						}
 					}
-				} else if (in_term) {
-					/* Term vollständig gefunden */
-					goto done;
 				}
-
-				byte_pos += nbytes;
 			}
-			/* Zeilenumbruch mitzählen (wie beim Indizieren) */
-			byte_pos++;
 		}
 	}
 
-done:
-	pv->highlight.page[n_quads] = -1; /* Sentinel */
+	if (flat_buf) fz_drop_buffer(ctx, flat_buf);
+	if (map) fz_free(ctx, map); /* map ist separat alloziert */
+
+	/* Fallback falls map-Methode fehlschlug: ersten Treffer nehmen */
+	if (!chosen_hit && hit_data.hits->len > 0)
+		chosen_hit = g_array_index(hit_data.hits, GArray *, 0);
+
+	if (!chosen_hit) {
+		for (guint h = 0; h < hit_data.hits->len; h++)
+			g_array_free(g_array_index(hit_data.hits, GArray *, h), TRUE);
+		g_array_free(hit_data.hits, TRUE);
+		return;
+	}
+
+	/* Quads des gewählten Treffers crop-adjustiert in pv->highlight schreiben */
+	pv->highlight.page[0] = -1;
+	gint n_quads = 0;
+	for (guint q = 0; q < chosen_hit->len && n_quads < 999; q++) {
+		fz_quad quad    = g_array_index(chosen_hit, fz_quad, q);
+		fz_rect r       = fz_rect_from_quad(quad);
+		fz_rect cropped = fz_intersect_rect(viewer_page->crop, r);
+		if (!fz_is_empty_rect(cropped)) {
+			cropped = fz_translate_rect(cropped,
+					-viewer_page->crop.x0, -viewer_page->crop.y0);
+			pv->highlight.quad[n_quads] = fz_quad_from_rect(cropped);
+			pv->highlight.page[n_quads] = page_idx;
+			n_quads++;
+		}
+	}
+	pv->highlight.page[n_quads] = -1;
+
+	/* Speicher freigeben */
+	for (guint h = 0; h < hit_data.hits->len; h++)
+		g_array_free(g_array_index(hit_data.hits, GArray *, h), TRUE);
+	g_array_free(hit_data.hits, TRUE);
 
 	if (n_quads > 0)
 		gtk_widget_queue_draw(pv->layout);

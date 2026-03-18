@@ -121,7 +121,6 @@ struct _Menu {
 	GtkWidget *speichernitem;
 	GtkWidget *schliessenitem;
 	GtkWidget *exportitem;
-	GtkWidget *item_search_fs;
 
 	GtkWidget *pdf;
 

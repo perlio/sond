@@ -2153,7 +2153,6 @@ static gint sond_file_part_gmessage_open(SondFilePartGMessage* sfp_gmessage,
 static gint sond_file_part_gmessage_test_for_multipart(SondFilePartGMessage* sfp_gmessage,
 		GError** error) {
 	gint rc = 0;
-	GMimeObject* root = NULL;
 
 	SondFilePartPrivate* sfp_priv =
 			sond_file_part_get_instance_private(SOND_FILE_PART(sfp_gmessage));

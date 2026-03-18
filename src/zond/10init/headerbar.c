@@ -50,6 +50,9 @@
 #include "../20allgemein/export.h"
 #include "../20allgemein/zond_update.h"
 
+#include "../zond_indexsuche.h"
+#include "../zond_treeviewfm.h"
+
 #include "../40viewer/document.h"
 
 #include "../../misc.h"
@@ -272,28 +275,6 @@ static void cb_item_project_save(GtkMenuItem *item, gpointer user_data) {
 		display_message(zond->app_window, "Fehler beim Speichern des Projekts\n", errmsg, NULL);
 		g_free(errmsg);
 	}
-
-	return;
-}
-
-static void cb_item_search_fs_activate(GtkMenuItem *item, gpointer data) {
-	gint sel = 0;
-	gchar *key = NULL;
-
-	Projekt *zond = (Projekt*) data;
-
-	sel = GPOINTER_TO_INT(g_object_get_data( G_OBJECT(item), "sel" ));
-
-	if (sel
-			&& !gtk_toggle_button_get_active(
-					GTK_TOGGLE_BUTTON(zond->fs_button)))
-		return;
-	else if (sel)
-		key = "item-search-sel";
-	else
-		key = "item-search-all";
-
-	forward_to_contextmenu(zond, key);
 
 	return;
 }
@@ -1064,6 +1045,28 @@ static void cb_button_mode_toggled(GtkToggleButton *button, gpointer data) {
 /**
  * Erstellt das Projekt-Menü
  */
+static void zond_treeview_index_erstellen_activate_hb(GtkMenuItem *item,
+		gpointer data) {
+	Projekt *zond = (Projekt*) data;
+	gtk_menu_item_activate(GTK_MENU_ITEM(
+			g_object_get_data(
+					G_OBJECT(sond_treeview_get_contextmenu(
+							SOND_TREEVIEW(zond->treeview[BAUM_FS]))),
+					"item-indizieren-gesamt")));
+}
+
+static void zond_treeview_index_erstellen_sel_activate_hb(GtkMenuItem *item,
+		gpointer data) {
+	Projekt *zond = (Projekt*) data;
+	if (!gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(zond->fs_button)))
+		return;
+	gtk_menu_item_activate(GTK_MENU_ITEM(
+			g_object_get_data(
+					G_OBJECT(sond_treeview_get_contextmenu(
+							SOND_TREEVIEW(zond->treeview[BAUM_FS]))),
+					"item-indizieren-auswahl")));
+}
+
 static GtkWidget*
 create_menu_projekt(Projekt *zond, GtkAccelGroup *accel_group) {
 	GtkWidget *projektmenu = gtk_menu_new();
@@ -1102,21 +1105,36 @@ create_menu_projekt(Projekt *zond, GtkAccelGroup *accel_group) {
 
 	gtk_menu_item_set_submenu(GTK_MENU_ITEM(zond->menu.exportitem), exportmenu);
 
-	// Durchsuchen-Untermenü
-	zond->menu.item_search_fs = create_and_connect_menu_item(
-			"Projektverzeichnis durchsuchen", NULL, NULL, projektmenu);
+	// Index erstellen
+	GtkWidget *item_index_erstellen = create_and_connect_menu_item(
+			"Index erstellen", NULL, NULL, projektmenu);
+	GtkWidget *menu_index_erstellen = gtk_menu_new();
+	create_and_connect_menu_item("Gesamtes Projektverzeichnis",
+			G_CALLBACK(zond_treeview_index_erstellen_activate_hb), zond,
+			menu_index_erstellen);
+	GtkWidget *item_index_erstellen_sel = create_and_connect_menu_item(
+			"Ausgewählte Punkte",
+			G_CALLBACK(zond_treeview_index_erstellen_sel_activate_hb), zond,
+			menu_index_erstellen);
+	gtk_menu_item_set_submenu(GTK_MENU_ITEM(item_index_erstellen),
+			menu_index_erstellen);
 
-	GtkWidget *menu_search_fs = gtk_menu_new();
+	// Index durchsuchen
+	GtkWidget *item_indexsuche = create_and_connect_menu_item(
+			"Index durchsuchen", NULL, NULL, projektmenu);
+	GtkWidget *menu_indexsuche = gtk_menu_new();
+	create_and_connect_menu_item("Gesamtes Projektverzeichnis",
+			G_CALLBACK(zond_indexsuche_activate), zond, menu_indexsuche);
+	GtkWidget *item_indexsuche_sel = create_and_connect_menu_item(
+			"Ausgewählte Punkte",
+			G_CALLBACK(zond_indexsuche_activate), zond, menu_indexsuche);
+	gtk_menu_item_set_submenu(GTK_MENU_ITEM(item_indexsuche), menu_indexsuche);
 
-	create_and_connect_menu_item("Vollständig",
-			G_CALLBACK(cb_item_search_fs_activate), zond, menu_search_fs);
-
-	GtkWidget *item_sel = create_and_connect_menu_item("Ausgewählte Punkte",
-			G_CALLBACK(cb_item_search_fs_activate), zond, menu_search_fs);
-	g_object_set_data(G_OBJECT(item_sel), "sel", GINT_TO_POINTER(1));
-
-	gtk_menu_item_set_submenu(GTK_MENU_ITEM(zond->menu.item_search_fs),
-			menu_search_fs);
+	/* "Ausgewählte Punkte" nur sensitiv wenn FS-Ansicht aktiv */
+	g_object_bind_property(zond->fs_button, "active",
+			item_index_erstellen_sel, "sensitive", G_BINDING_SYNC_CREATE);
+	g_object_bind_property(zond->fs_button, "active",
+			item_indexsuche_sel, "sensitive", G_BINDING_SYNC_CREATE);
 
 	append_separator(projektmenu);
 
@@ -1282,6 +1300,11 @@ create_menu_pdf(Projekt *zond, GtkAccelGroup *accel_group) {
 
 	create_and_connect_menu_item("OCR",
 			G_CALLBACK(cb_datei_ocr), zond, menu_dateien);
+
+	append_separator(menu_dateien);
+
+	create_and_connect_menu_item("Index durchsuchen",
+			G_CALLBACK(zond_indexsuche_activate), zond, menu_dateien);
 
 	return menu_dateien;
 }

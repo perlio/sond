@@ -223,10 +223,18 @@ static guchar* gmessage_to_buffer(GMimeMessage* message, gsize* out_size) {
 	return result;
 }
 
-/* Rekursiv alle MIME-Parts durchgehen und ggf. ersetzen */
+/*
+ * Rekursiv alle MIME-Parts durchgehen und ggf. ersetzen.
+ *
+ * eml_filename  – Pfad der .eml-Datei im Index (z.B. "xxx.eml")
+ * internal_path – interner Pfad innerhalb der .eml, mit '/' getrennt
+ *                  (z.B. NULL für Root, "0" für ersten Part,
+ *                  "0/1" für zweiten Part des ersten Multiparts)
+ * Der vollständige Index-Filename lautet dann "eml_filename//internal_path".
+ */
 static gboolean gmessage_process_part(GMimeObject* object,
-		gchar const* parent_filename, SondProcessFileCtx* wctx,
-		gint part_index, gint* out_pdf_count) {
+		gchar const* eml_filename, gchar const* internal_path,
+		SondProcessFileCtx* wctx, gint part_index, gint* out_pdf_count) {
 	gboolean modified = FALSE;
 
 	if (GMIME_IS_MULTIPART(object)) {
@@ -235,12 +243,16 @@ static gboolean gmessage_process_part(GMimeObject* object,
 
 		for (gint i = 0; i < count; i++) {
 			GMimeObject* child = g_mime_multipart_get_part(mp, i);
-			gchar* child_filename = g_strdup_printf("%s/%d", parent_filename, i);
+			/* Interner Pfad: Elternpfad/Index */
+			gchar* child_internal = internal_path
+					? g_strdup_printf("%s/%d", internal_path, i)
+					: g_strdup_printf("%d", i);
 
-			if (gmessage_process_part(child, child_filename, wctx, i, out_pdf_count))
+			if (gmessage_process_part(child, eml_filename, child_internal,
+					wctx, i, out_pdf_count))
 				modified = TRUE;
 
-			g_free(child_filename);
+			g_free(child_internal);
 		}
 	}
 	else if (GMIME_IS_MESSAGE_PART(object)) {
@@ -252,14 +264,17 @@ static gboolean gmessage_process_part(GMimeObject* object,
 				guchar* processed = NULL;
 				gsize proc_size = 0;
 
-				gchar* msg_filename = g_strdup_printf("%s//%d", parent_filename, part_index);
+				/* Index-Filename: eml_filename//internal_path
+				 * internal_path=NULL nur wenn Root direkt ein MessagePart ist → "0" */
+				gchar* msg_filename = internal_path
+				? g_strdup_printf("%s//%s", eml_filename, internal_path)
+				: g_strdup_printf("%s//0", eml_filename);
 				sond_process_file_do_rec(wctx, inner_buf, inner_size, msg_filename,
 						&processed, &proc_size, out_pdf_count);
 				g_free(msg_filename);
 				g_free(inner_buf);
 
 				if (processed) {
-					/* Verarbeitete Nachricht zurück in den MessagePart schreiben */
 					GMimeStream* stream = g_mime_stream_mem_new_with_buffer(
 							(const gchar*)processed, proc_size);
 					g_free(processed);
@@ -282,7 +297,6 @@ static gboolean gmessage_process_part(GMimeObject* object,
 		if (!wrapper)
 			return FALSE;
 
-		/* Part-Inhalt in Puffer lesen (dekodiert) */
 		GMimeStream* mem = g_mime_stream_mem_new();
 		gssize written = g_mime_data_wrapper_write_to_stream(wrapper, mem);
 		if (written <= 0) {
@@ -297,16 +311,19 @@ static gboolean gmessage_process_part(GMimeObject* object,
 		guchar* processed = NULL;
 		gsize proc_size = 0;
 
-		gchar* part_filename = g_strdup_printf("%s//%d", parent_filename, part_index);
+		/* Index-Filename: eml_filename//internal_path
+		 * internal_path=NULL nur wenn Root direkt ein MimePart ist → "0" */
+		gchar* part_filename = internal_path
+				? g_strdup_printf("%s//%s", eml_filename, internal_path)
+				: g_strdup_printf("%s//0", eml_filename);
 		sond_process_file_do_rec(wctx, part_data, part_size, part_filename,
 				&processed, &proc_size, out_pdf_count);
 		g_free(part_filename);
 		g_free(part_data);
 
 		if (!processed)
-			return FALSE; /* nichts zu tun */
+			return FALSE;
 
-		/* Inhalt des Parts ersetzen */
 		GMimeContentEncoding enc = g_mime_part_get_content_encoding(part);
 		GMimeStream* new_stream = g_mime_stream_mem_new_with_buffer(
 				(const gchar*)processed, proc_size);
@@ -339,10 +356,14 @@ static gint process_gmessage_for_ocr(guchar* data, gsize size,
 	root = g_mime_message_get_mime_part(message);
 	if (!root) {
 		g_object_unref(message);
-		return 0; /* leere Nachricht - kein Fehler */
+		return 0;
 	}
 
-	gboolean modified = gmessage_process_part(root, filename, wctx, 0, out_pdf_count);
+	/* Root-Aufruf: internal_path = NULL.
+	 * Multipart-Root wird nicht gezählt, seine Kinder kriegen "0", "1" etc.
+	 * Leaf/MessagePart-Root kriegt "0" (part_index beim Leaf-Zweig). */
+	gboolean modified = gmessage_process_part(root, filename, NULL,
+			wctx, 0, out_pdf_count);
 
 	if (!modified) {
 		g_object_unref(message);

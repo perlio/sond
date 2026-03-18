@@ -266,48 +266,6 @@ seiten_abfrage_seiten(PdfViewer *pv, const gchar *title, gint *winkel,
 /*
  **  Seiten OCR
  */
-// Hilfsfunktion: Pixmap zu GdkPixbuf konvertieren
-static GdkPixbuf* pixmap_to_pixbuf(fz_context *ctx, fz_pixmap *pix)
-{
-    GdkPixbuf *pixbuf = NULL;
-    int width, height, stride;
-    guchar *pixels;
-    gboolean has_alpha;
-
-    if (!pix)
-        return NULL;
-
-    width = pix->w;
-    height = pix->h;
-
-    // Nur RGB (n=3) oder RGBA (n=4)
-    if (pix->n != 3 && pix->n != 4) {
-        fz_pixmap *rgb_pix = fz_convert_pixmap(ctx, pix,
-                                                fz_device_rgb(ctx), NULL,
-                                                NULL, fz_default_color_params, 1);
-        pixbuf = pixmap_to_pixbuf(ctx, rgb_pix);
-        fz_drop_pixmap(ctx, rgb_pix);
-        return pixbuf;
-    }
-
-    has_alpha = (pix->n == 4);
-
-    pixbuf = gdk_pixbuf_new(GDK_COLORSPACE_RGB, has_alpha, 8, width, height);
-    if (!pixbuf)
-        return NULL;
-
-    pixels = gdk_pixbuf_get_pixels(pixbuf);
-    stride = gdk_pixbuf_get_rowstride(pixbuf);
-
-    for (int y = 0; y < height; y++) {
-        unsigned char *src = pix->samples + y * pix->stride;
-        unsigned char *dst = pixels + y * stride;
-        memcpy(dst, src, width * pix->n);
-    }
-
-    return pixbuf;
-}
-
 static fz_buffer*
 get_content_stream_as_buffer(fz_context *ctx, pdf_obj *page_ref,
 		GError **error) {

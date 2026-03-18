@@ -42,6 +42,7 @@
 #include "40viewer/document.h"
 
 #include "99conv/general.h"
+#include "zond_indexsuche.h"
 
 typedef struct {
 	Projekt *zond;
@@ -2544,6 +2545,24 @@ static void zond_treeview_icon_activate(GtkMenuItem *item, gpointer user_data) {
 	return;
 }
 
+static void zond_treeview_index_erstellen_activate(GtkMenuItem *item,
+		gpointer data) {
+	Projekt *zond = (Projekt*) data;
+
+	if (!zond->wctx)
+		return;
+
+	SOND_TREEVIEWFM_GET_CLASS(zond->treeview[BAUM_FS])->get_wctx(
+			SOND_TREEVIEWFM(zond->treeview[BAUM_FS]));
+
+	/* Indizierung über den sond_treeviewfm des BAUM_FS ausführen */
+	gtk_menu_item_activate(GTK_MENU_ITEM(
+			g_object_get_data(
+					G_OBJECT(sond_treeview_get_contextmenu(
+							SOND_TREEVIEW(zond->treeview[BAUM_FS]))),
+					"item-indizieren-gesamt")));
+}
+
 static void zond_treeview_init_contextmenu(ZondTreeview *ztv) {
 	GtkWidget *contextmenu = NULL;
 
@@ -2726,6 +2745,34 @@ static void zond_treeview_init_contextmenu(ZondTreeview *ztv) {
 			G_CALLBACK(zond_treeview_datei_oeffnen_mit_activate),
 			(gpointer ) zond);
 	gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu), item_datei_oeffnen_mit);
+
+	GtkWidget *item_separator_index = gtk_separator_menu_item_new();
+	gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu), item_separator_index);
+
+	//Index erstellen
+	GtkWidget *item_index_erstellen = gtk_menu_item_new_with_label("Index erstellen");
+	GtkWidget *menu_index_erstellen = gtk_menu_new();
+	GtkWidget *item_index_erstellen_gesamt = gtk_menu_item_new_with_label(
+			"Gesamtes Projektverzeichnis");
+	g_signal_connect(item_index_erstellen_gesamt, "activate",
+			G_CALLBACK(zond_treeview_index_erstellen_activate),
+			(gpointer) zond);
+	gtk_menu_shell_append(GTK_MENU_SHELL(menu_index_erstellen),
+			item_index_erstellen_gesamt);
+	gtk_menu_item_set_submenu(GTK_MENU_ITEM(item_index_erstellen),
+			menu_index_erstellen);
+	gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu), item_index_erstellen);
+
+	//Index durchsuchen
+	GtkWidget *item_indexsuche = gtk_menu_item_new_with_label("Index durchsuchen");
+	GtkWidget *menu_indexsuche = gtk_menu_new();
+	GtkWidget *item_indexsuche_gesamt = gtk_menu_item_new_with_label(
+			"Gesamtes Projektverzeichnis");
+	g_signal_connect(item_indexsuche_gesamt, "activate",
+			G_CALLBACK(zond_indexsuche_activate), (gpointer) zond);
+	gtk_menu_shell_append(GTK_MENU_SHELL(menu_indexsuche), item_indexsuche_gesamt);
+	gtk_menu_item_set_submenu(GTK_MENU_ITEM(item_indexsuche), menu_indexsuche);
+	gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu), item_indexsuche);
 
 	gtk_widget_show_all(contextmenu);
 

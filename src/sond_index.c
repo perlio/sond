@@ -24,6 +24,7 @@
 #include <mupdf/pdf.h>
 #include <gmime/gmime.h>
 #include <string.h>
+#include <lexbor/html/html.h>
 
 #include "sond_gmessage_helper.h"
 
@@ -562,33 +563,32 @@ static GPtrArray* extract_segments_from_pdf(SondIndexCtx* sond_index_ctx, fz_con
 
         gint n_pages = pdf_count_pages(ctx, doc);
         for (gint i = 0; i < n_pages; i++) {
-            fz_stext_options opts  = { FZ_STEXT_DEHYPHENATE };
-            fz_stext_page   *stext = fz_new_stext_page_from_page_number(
-            		ctx, (fz_document*) doc, i, &opts);
-            GString *page_text = g_string_new(NULL);
+            fz_stext_options opts = { 0 };
+            fz_stext_page *stext  = fz_new_stext_page_from_page_number(
+                    ctx, (fz_document*) doc, i, &opts);
 
-            for (fz_stext_block *b = stext->first_block; b; b = b->next) {
-                if (b->type != FZ_STEXT_BLOCK_TEXT) continue;
-                for (fz_stext_line *l = b->u.t.first_line; l; l = l->next) {
-                    for (fz_stext_char *c = l->first_char; c; c = c->next) {
-                        gchar utf8[8];
-                        gint  n = fz_runetochar(utf8, c->c);
-                        g_string_append_len(page_text, utf8, n);
-                    }
-                    g_string_append_c(page_text, '\n');
-                }
-            }
+            /* Denselben Flat-Text wie fz_search_stext_page intern verwendet:
+             * FZ_TEXT_FLATTEN_ALL → alle Lücken als einzelnes Leerzeichen,
+             * keine Zeilenumbrüche. map wird nicht benötigt (NULL). */
+            fz_buffer *buf = fz_new_buffer_from_flattened_stext_page(
+                    ctx, stext, FZ_TEXT_FLATTEN_ALL, NULL);
             fz_drop_stext_page(ctx, stext);
 
-            if (page_text->len > 0) {
+            gsize   len      = 0;
+            guchar *data     = NULL;
+            fz_buffer_extract(ctx, buf, &data); /* transfer ownership */
+            fz_drop_buffer(ctx, buf);
+            len = (data) ? strlen((gchar*)data) : 0;
+
+            if (len > 0) {
                 gint page_char_pos = char_pos_total;
-                char_pos_total += (gint)page_text->len;
+                char_pos_total += (gint)len;
                 g_ptr_array_add(segs,
                         sond_text_segment_new(
-                                g_string_free(page_text, FALSE),
+                                (gchar*) data,
                                 i, page_char_pos));
             } else {
-                g_string_free(page_text, TRUE);
+                g_free(data);
             }
         }
     }
@@ -645,6 +645,109 @@ static GPtrArray* extract_segments_from_gmessage(guchar const *buf, gsize size) 
     }
 
     g_object_unref(message);
+
+    if (text->len > 0)
+        g_ptr_array_add(segs, sond_text_segment_new(
+                g_string_free(text, FALSE), -1, 0));
+    else
+        g_string_free(text, TRUE);
+
+    return segs;
+}
+
+/* HTML: sichtbaren Text mit lexbor extrahieren (identisch zu extract_text_recursive im Renderer) */
+static void extract_text_from_html_node(lxb_dom_node_t *node, GString *text) {
+    if (!node) return;
+
+    if (node->type == LXB_DOM_NODE_TYPE_TEXT) {
+        size_t len;
+        const lxb_char_t *content = lxb_dom_node_text_content(node, &len);
+        if (content && len > 0)
+            g_string_append_len(text, (const char*)content, len);
+    }
+
+    if (node->type == LXB_DOM_NODE_TYPE_ELEMENT) {
+        lxb_dom_element_t *elem = lxb_dom_interface_element(node);
+        size_t tag_len;
+        const lxb_char_t *tag = lxb_dom_element_qualified_name(elem, &tag_len);
+
+        if (tag_len == 2 && memcmp(tag, "br", 2) == 0) {
+            g_string_append(text, "\n");
+        } else if (tag_len == 1 && memcmp(tag, "p", 1) == 0) {
+            if (text->len > 0 && text->str[text->len-1] != '\n')
+                g_string_append(text, "\n\n");
+        } else if ((tag_len == 2 && (memcmp(tag, "h1", 2) == 0 ||
+                                     memcmp(tag, "h2", 2) == 0 ||
+                                     memcmp(tag, "h3", 2) == 0 ||
+                                     memcmp(tag, "h4", 2) == 0 ||
+                                     memcmp(tag, "h5", 2) == 0 ||
+                                     memcmp(tag, "h6", 2) == 0)) ||
+                   (tag_len == 3 && memcmp(tag, "div", 3) == 0) ||
+                   (tag_len == 10 && memcmp(tag, "blockquote", 10) == 0)) {
+            if (text->len > 0 && text->str[text->len-1] != '\n')
+                g_string_append(text, "\n");
+        }
+    }
+
+    lxb_dom_node_t *child = node->first_child;
+    while (child) {
+        extract_text_from_html_node(child, text);
+        child = child->next;
+    }
+
+    if (node->type == LXB_DOM_NODE_TYPE_ELEMENT) {
+        lxb_dom_element_t *elem = lxb_dom_interface_element(node);
+        size_t tag_len;
+        const lxb_char_t *tag = lxb_dom_element_qualified_name(elem, &tag_len);
+        if ((tag_len == 1 && memcmp(tag, "p", 1) == 0) ||
+            (tag_len == 2 && (memcmp(tag, "h1", 2) == 0 ||
+                              memcmp(tag, "h2", 2) == 0 ||
+                              memcmp(tag, "h3", 2) == 0)) ||
+            (tag_len == 3 && memcmp(tag, "div", 3) == 0)) {
+            if (text->len > 0 && text->str[text->len-1] != '\n')
+                g_string_append(text, "\n");
+        }
+    }
+}
+
+static GPtrArray* extract_segments_from_html(guchar const *buf, gsize size) {
+    GPtrArray *segs = g_ptr_array_new_with_free_func(
+            (GDestroyNotify)sond_text_segment_free);
+    if (!buf || size == 0) return segs;
+
+    /* Encoding-Konvertierung nach UTF-8 (identisch zum Renderer) */
+    char *html = NULL;
+    if (g_utf8_validate((const char*)buf, (gssize)size, NULL)) {
+        html = g_strndup((const char*)buf, size);
+    } else {
+        GError *conv_err = NULL;
+        html = g_convert((const char*)buf, (gssize)size,
+                         "UTF-8", "windows-1252",
+                         NULL, NULL, &conv_err);
+        if (!html) {
+            g_clear_error(&conv_err);
+            html = g_utf8_make_valid((const char*)buf, (gssize)size);
+        }
+    }
+    if (!html) return segs;
+
+    lxb_html_document_t *doc = lxb_html_document_create();
+    if (!doc) { g_free(html); return segs; }
+
+    lxb_status_t status = lxb_html_document_parse(
+            doc, (const lxb_char_t*)html, strlen(html));
+    g_free(html);
+
+    if (status != LXB_STATUS_OK) {
+        lxb_html_document_destroy(doc);
+        return segs;
+    }
+
+    GString *text = g_string_new("");
+    lxb_dom_node_t *body = lxb_dom_interface_node(doc->body);
+    if (body)
+        extract_text_from_html_node(body, text);
+    lxb_html_document_destroy(doc);
 
     if (text->len > 0)
         g_ptr_array_add(segs, sond_text_segment_new(
@@ -734,13 +837,16 @@ GPtrArray* sond_index_search(SondIndexCtx *ctx,
      * ------------------------------------------------------------- */
     query = build_fts_query(term, context);
 
+    /* highlight() markiert jeden Token-Treffer mit \x01...\x02.
+     * Dadurch werden nur ganze Wörter gefunden (FTS5-Tokenisierung),
+     * konsistent für alle Texttypen. */
     rc = sqlite3_prepare_v2(ctx->db,
         "SELECT c.filename, c.page_nr, c.char_pos,"
-        "       snippet(chunks_fts, 0, '[', ']', '...', 20),"
         "       c.char_pos - (SELECT MIN(c2.char_pos) FROM chunks c2"
         "                     WHERE c2.filename = c.filename"
         "                       AND c2.page_nr  = c.page_nr),"
-        "       c.text"
+        "       c.text,"
+        "       highlight(chunks_fts, 0, '\x01', '\x02')"
         " FROM chunks_fts"
         " JOIN chunks c ON c.id = chunks_fts.rowid"
         " WHERE chunks_fts MATCH ?"
@@ -760,39 +866,72 @@ GPtrArray* sond_index_search(SondIndexCtx *ctx,
     g_free(query);
 
     while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
-        SondIndexHit *hit = g_new0(SondIndexHit, 1);
+        gchar const *chunk_text       = (gchar const *) sqlite3_column_text(stmt, 4);
+        gint         chunk_offset_on_page = sqlite3_column_int(stmt, 3);
+        gchar const *highlighted      = (gchar const *) sqlite3_column_text(stmt, 5);
 
-        hit->filename         = g_strdup((gchar const *) sqlite3_column_text(stmt, 0));
-        hit->page_nr          = sqlite3_column_int(stmt, 1);
-        hit->char_pos         = sqlite3_column_int(stmt, 2);
-        hit->snippet          = g_strdup((gchar const *) sqlite3_column_text(stmt, 3));
-        hit->char_pos_in_page = sqlite3_column_int(stmt, 4);
+        if (!chunk_text || !*chunk_text || !highlighted || !*highlighted) continue;
 
-        /* Term-Offset innerhalb des Chunks addieren.
-         * strstr auf gefoldeten Strings liefert einen Byte-Offset im gefoldeten
-         * Text, der wegen unterschiedlicher Byte-Längen nach casefold nicht mit
-         * dem Byte-Offset im Original übereinstimmen muss.
-         * Daher: Zeichenanzahl vor dem Treffer ermitteln, und diese dann im
-         * Original-String in einen Byte-Offset umrechnen. */
-        {
-            gchar const *chunk_text = (gchar const *) sqlite3_column_text(stmt, 5);
-            if (chunk_text && term) {
-                gchar *chunk_fold = g_utf8_casefold(chunk_text, -1);
-                gchar *term_fold  = g_utf8_casefold(term, -1);
-                gchar *found      = strstr(chunk_fold, term_fold);
-                if (found) {
-                    /* Anzahl der Unicode-Zeichen vor dem Treffer im gefoldeten Text */
-                    glong n_chars = g_utf8_strlen(chunk_fold, found - chunk_fold);
-                    /* Denselben Zeichenabstand im Original-String in Bytes */
-                    gchar const *orig_pos = g_utf8_offset_to_pointer(chunk_text, n_chars);
-                    hit->char_pos_in_page += (gint)(orig_pos - chunk_text);
-                }
-                g_free(chunk_fold);
-                g_free(term_fold);
-            }
+        /* Durchsuche highlighted nach \x01-Markierungen.
+         * Für jede Markierung: Offset im Original-chunk_text berechnen.
+         * Da highlight() die Marker einfügt ohne den Text zu ändern,
+         * ist der Byte-Offset im Original = Offset in highlighted minus
+         * Anzahl der bisher eingefügten Marker-Bytes. */
+        gchar const *ph  = highlighted;  /* läuft im highlighted-Text */
+        gint         marker_bytes = 0;   /* bisher eingefügte \x01/\x02-Bytes */
+
+        while ((ph = strchr(ph, '\x01')) != NULL) {
+            /* Byte-Offset des \x01 im highlighted-Text */
+            gint offset_in_highlighted = (gint)(ph - highlighted);
+
+            /* Offset im Original-chunk_text = offset_in_highlighted minus
+             * alle bisher eingefügten Marker-Bytes */
+            gint occ_offset_in_chunk = offset_in_highlighted - marker_bytes;
+            gint occ_pos_in_page     = chunk_offset_on_page + occ_offset_in_chunk;
+
+            /* Marker überspringen */
+            ph++; /* über \x01 */
+            marker_bytes++;
+
+            /* Ende des Treffers suchen (über \x02) */
+            gchar const *term_end_hl = strchr(ph, '\x02');
+            if (!term_end_hl) break; /* defekter highlight-Text */
+            gint term_len_orig = (gint)(term_end_hl - ph);
+
+            /* Snippet aus dem Original-chunk_text um die Fundstelle */
+#define SNIPPET_CTX 80
+            gchar const *chunk_end  = chunk_text + strlen(chunk_text);
+            gchar const *orig_start = chunk_text + occ_offset_in_chunk;
+            gchar const *orig_end   = orig_start + term_len_orig;
+
+            gchar const *snip_start = orig_start;
+            for (gint k = 0; k < SNIPPET_CTX && snip_start > chunk_text; k++)
+                snip_start = g_utf8_prev_char(snip_start);
+
+            gchar const *snip_end = orig_end;
+            for (gint k = 0; k < SNIPPET_CTX && snip_end < chunk_end; k++)
+                snip_end = g_utf8_next_char(snip_end);
+
+            gboolean ellipsis_before = (snip_start > chunk_text);
+            gboolean ellipsis_after  = (snip_end   < chunk_end);
+            gsize    snip_len        = (gsize)(snip_end - snip_start);
+            gchar   *snippet = g_strdup_printf("%s%.*s%s",
+                    ellipsis_before ? "..." : "",
+                    (gint)snip_len, snip_start,
+                    ellipsis_after  ? "..." : "");
+
+            SondIndexHit *hit = g_new0(SondIndexHit, 1);
+            hit->filename         = g_strdup((gchar const *) sqlite3_column_text(stmt, 0));
+            hit->page_nr          = sqlite3_column_int(stmt, 1);
+            hit->char_pos         = sqlite3_column_int(stmt, 2);
+            hit->snippet          = snippet;
+            hit->char_pos_in_page = occ_pos_in_page;
+            g_ptr_array_add(result, hit);
+
+            /* hinter \x02 weitersuchen */
+            ph = term_end_hl + 1; /* über \x02 */
+            marker_bytes++;       /* \x02 zählen */
         }
-
-        g_ptr_array_add(result, hit);
     }
 
     if (rc != SQLITE_DONE) {
@@ -805,6 +944,31 @@ GPtrArray* sond_index_search(SondIndexCtx *ctx,
     }
 
     sqlite3_finalize(stmt);
+
+    /* ---------------------------------------------------------------
+     * 1b. Deduplizierung: Durch Chunk-Überlappung kann dasselbe Vorkommen
+     * aus zwei Chunks gemeldet werden. Duplikate mit gleicher
+     * (filename, page_nr, char_pos_in_page) werden entfernt.
+     * ------------------------------------------------------------- */
+    {
+        GHashTable *seen = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                                  g_free, NULL);
+        guint i = 0;
+        while (i < result->len) {
+            SondIndexHit *h   = g_ptr_array_index(result, i);
+            gchar        *key = g_strdup_printf("%s|%d|%d",
+                    h->filename ? h->filename : "",
+                    h->page_nr, h->char_pos_in_page);
+            if (g_hash_table_contains(seen, key)) {
+                g_free(key);
+                g_ptr_array_remove_index(result, i);
+            } else {
+                g_hash_table_insert(seen, key, GINT_TO_POINTER(1));
+                i++;
+            }
+        }
+        g_hash_table_destroy(seen);
+    }
 
     /* ---------------------------------------------------------------
      * 2. Dateinamen-Suche über files-Tabelle (LIKE, Basename)
@@ -888,24 +1052,6 @@ GPtrArray* sond_index_search(SondIndexCtx *ctx,
  * files-Tabelle: Hilfsfunktionen
  * ======================================================================= */
 
-/* Prüft ob filename bereits in files eingetragen ist */
-static gboolean sond_index_file_is_indexed(SondIndexCtx *ctx,
-                                            gchar const  *filename) {
-    sqlite3_stmt *stmt = NULL;
-    gboolean      found = FALSE;
-
-    gint rc = sqlite3_prepare_v2(ctx->db,
-            "SELECT 1 FROM files WHERE filename = ?",
-            -1, &stmt, NULL);
-    if (rc != SQLITE_OK)
-        return FALSE;
-
-    sqlite3_bind_text(stmt, 1, filename, -1, SQLITE_STATIC);
-    found = (sqlite3_step(stmt) == SQLITE_ROW);
-    sqlite3_finalize(stmt);
-    return found;
-}
-
 /* Trägt filename in files ein */
 static void sond_index_file_set(SondIndexCtx *ctx, gchar const *filename) {
     sqlite3_stmt *stmt = NULL;
@@ -940,6 +1086,8 @@ void sond_index(fz_context* ctx,
         		log_func, log_func_data);
     else if (!g_strcmp0(mime_type, "message/rfc822"))
         segs = extract_segments_from_gmessage(buf, size);
+    else if (!g_strcmp0(mime_type, "text/html"))
+        segs = extract_segments_from_html(buf, size);
     else if (g_str_has_prefix(mime_type, "text/"))
         segs = extract_segments_from_text(buf, size);
     else

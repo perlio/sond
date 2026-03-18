@@ -64,7 +64,8 @@ typedef enum {
     DOC_TYPE_ODT,
     DOC_TYPE_DOCX,
     DOC_TYPE_DOC,
-    DOC_TYPE_IMAGE
+    DOC_TYPE_IMAGE,
+    DOC_TYPE_PLAIN
 } DocumentType;
 
 typedef struct {
@@ -1558,6 +1559,87 @@ static RenderedDocument* render_office_document(GBytes *bytes,
     return result;
 }
 
+// === PLAIN TEXT RENDERING ===
+
+static RenderedDocument* render_plain_text(const char *data, gsize len, int width) {
+    /* Encoding-sichere Übernahme */
+    char *safe_text = NULL;
+    if (g_utf8_validate(data, (gssize)len, NULL)) {
+        safe_text = g_strndup(data, len);
+    } else {
+        GError *conv_err = NULL;
+        safe_text = g_convert(data, (gssize)len,
+                              "UTF-8", "windows-1252",
+                              NULL, NULL, &conv_err);
+        if (!safe_text) {
+            LOG_WARN("%s\ng_convert fehlgeschlagen: %s – ersetze ungültige Bytes",
+                     __func__, conv_err ? conv_err->message : "?");
+            g_clear_error(&conv_err);
+            safe_text = g_utf8_make_valid(data, (gssize)len);
+        }
+    }
+    if (!safe_text) return NULL;
+
+    /* \r\n → \n normalisieren */
+    GString *text = g_string_new("");
+    const char *p = safe_text;
+    while (*p) {
+        if (*p == '\r' && *(p+1) == '\n') {
+            g_string_append_c(text, '\n');
+            p += 2;
+        } else {
+            g_string_append_c(text, *p++);
+        }
+    }
+    g_free(safe_text);
+
+    /* Höhe berechnen */
+    cairo_surface_t *tmp_surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
+    cairo_t *tmp_cr = cairo_create(tmp_surface);
+
+    PangoLayout *layout = pango_cairo_create_layout(tmp_cr);
+    pango_layout_set_width(layout, (width - 20) * PANGO_SCALE);
+    pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
+    pango_layout_set_text(layout, text->str, -1);
+
+    int pango_width, pango_height;
+    pango_layout_get_pixel_size(layout, &pango_width, &pango_height);
+    int height = pango_height + 20;
+
+    g_object_unref(layout);
+    cairo_destroy(tmp_cr);
+    cairo_surface_destroy(tmp_surface);
+
+    /* Echte Surface rendern */
+    cairo_surface_t *surface = cairo_image_surface_create(
+        CAIRO_FORMAT_ARGB32, width, height);
+    cairo_t *cr = cairo_create(surface);
+
+    cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
+    cairo_paint(cr);
+    cairo_set_source_rgb(cr, 0.0, 0.0, 0.0);
+
+    layout = pango_cairo_create_layout(cr);
+    pango_layout_set_width(layout, (width - 20) * PANGO_SCALE);
+    pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
+    pango_layout_set_text(layout, text->str, -1);
+
+    cairo_move_to(cr, 10, 10);
+    pango_cairo_show_layout(cr, layout);
+
+    g_object_unref(layout);
+    cairo_destroy(cr);
+
+    RenderedDocument *result = g_new0(RenderedDocument, 1);
+    result->surface = surface;
+    result->width = width;
+    result->height = height;
+    result->searchable_text = g_string_free(text, FALSE);
+    result->type = DOC_TYPE_PLAIN;
+
+    return result;
+}
+
 // === DOC RENDERING (Fallback) ===
 
 static RenderedDocument* render_doc(int width) {
@@ -1723,37 +1805,12 @@ static RenderedDocument* render_document_from_bytes(GBytes *bytes, int render_wi
             result = render_doc(render_width);
             break;
 
+        case DOC_TYPE_PLAIN:
         case DOC_TYPE_UNKNOWN:
         default: {
             gsize len;
             const char *data = g_bytes_get_data(bytes, &len);
-
-            /* Encoding-sichere Übernahme – identisch zum HTML-Zweig,
-             * nur ohne charset-Suche (Plain-Text hat kein <meta>). */
-            char *safe_text = NULL;
-            if (g_utf8_validate(data, (gssize)len, NULL)) {
-                safe_text = g_strndup(data, len);
-            } else {
-                GError *conv_err = NULL;
-                safe_text = g_convert(data, (gssize)len,
-                                      "UTF-8", "windows-1252",
-                                      NULL, NULL, &conv_err);
-                if (!safe_text) {
-                    LOG_WARN("%s\ng_convert (plain text) fehlgeschlagen: %s – "
-                             "ersetze ungültige Bytes",
-                             __func__, conv_err ? conv_err->message : "?");
-                    g_clear_error(&conv_err);
-                    safe_text = g_utf8_make_valid(data, (gssize)len);
-                }
-            }
-
-            GString *formatted = g_string_new(safe_text);
-            g_free(safe_text);
-
-            result = render_html(formatted->str, render_width);
-            if (result)
-                result->type = DOC_TYPE_UNKNOWN;
-            g_string_free(formatted, TRUE);
+            result = render_plain_text(data, len, render_width);
             break;
         }
     }
@@ -1771,9 +1828,210 @@ const char* document_type_string(DocumentType type) {
         case DOC_TYPE_DOCX: return "DOCX";
         case DOC_TYPE_DOC: return "DOC (Legacy)";
         case DOC_TYPE_IMAGE: return "Image";
+        case DOC_TYPE_PLAIN: return "Plain Text";
         case DOC_TYPE_UNKNOWN:
         default: return "Unknown";
     }
+}
+
+/* =========================================================================
+ * HIGHLIGHT-RENDERING
+ * ======================================================================= */
+
+/*
+ * Rendert wie render_document_from_bytes, übergibt aber zusätzlich
+ * einen Highlight-Term und eine Byte-Position im Flat-Text des Dokuments.
+ * Der Term wird im Pango-Layout gelb hinterlegt; der Viewer scrollt beim
+ * Öffnen zur ersten Fundstelle.
+ *
+ * char_pos_in_doc  – Byte-Offset im extrahierten searchable_text
+ *                    (wie er vom Index gespeichert wird).
+ *                    -1  → einfach zum ersten Vorkommen von term springen.
+ */
+static RenderedDocument *
+render_document_with_highlight(GBytes *bytes, int render_width,
+        const char *term, int char_pos_in_doc,
+        int *out_highlight_y)
+{
+    if (!bytes || !term || !*term) return NULL;
+    if (render_width <= 0) render_width = DEFAULT_RENDER_WIDTH;
+
+    /* Erst normal rendern um den searchable_text zu bekommen */
+    RenderedDocument *rd = render_document_from_bytes(bytes, render_width);
+    if (!rd) return NULL;
+    if (!rd->searchable_text) return rd; /* kein Text → unverändert zurück */
+
+    /* ---------------------------------------------------------------
+     * Trefferposition im searchable_text bestimmen
+     * ------------------------------------------------------------- */
+    const char *text    = rd->searchable_text;
+    gsize       text_len = strlen(text);
+    gsize       term_len = strlen(term);
+
+    /* Groß-/Kleinschreibung ignorieren: beide Seiten casefold */
+    char *text_cf = g_utf8_casefold(text, (gssize)text_len);
+    char *term_cf = g_utf8_casefold(term, (gssize)term_len);
+
+    /* Startposition: versuche char_pos_in_doc, sonst erstes Vorkommen */
+    const char *hit = NULL;
+    if (char_pos_in_doc >= 0 && (gsize)char_pos_in_doc < strlen(text_cf)) {
+        /* Suche ab char_pos_in_doc rückwärts bis Wortanfang, damit
+         * der Index-Offset exakt passt */
+        hit = strstr(text_cf + char_pos_in_doc, term_cf);
+        if (!hit) /* Fallback: erstes Vorkommen */
+            hit = strstr(text_cf, term_cf);
+    } else {
+        hit = strstr(text_cf, term_cf);
+    }
+
+    if (!hit) {
+        g_free(text_cf);
+        g_free(term_cf);
+        if (out_highlight_y) *out_highlight_y = 0;
+        return rd;
+    }
+
+    gsize byte_start = (gsize)(hit - text_cf);
+    gsize byte_end   = byte_start + term_len;
+    g_free(text_cf);
+    g_free(term_cf);
+
+    /* ---------------------------------------------------------------
+     * Surface neu mit Highlight-Attribut rendern
+     * Wir bauen ein Pango-Layout auf dem original searchable_text
+     * mit einem gelben Background-Attribut an byte_start..byte_end.
+     * ------------------------------------------------------------- */
+    int width  = rd->width;
+    int height = rd->height;
+
+    cairo_surface_t *surface = cairo_image_surface_create(
+            CAIRO_FORMAT_ARGB32, width, height);
+    cairo_t *cr = cairo_create(surface);
+
+    /* Weißer Hintergrund */
+    cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
+    cairo_paint(cr);
+    cairo_set_source_rgb(cr, 0.0, 0.0, 0.0);
+
+    PangoLayout *layout = pango_cairo_create_layout(cr);
+    pango_layout_set_width(layout, (width - 20) * PANGO_SCALE);
+    pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
+    pango_layout_set_text(layout, text, -1);
+
+    /* Gelbes Highlight-Attribut */
+    PangoAttrList *attrs = pango_attr_list_new();
+    PangoAttribute *bg = pango_attr_background_new(
+            0xFFFF, 0xEE00, 0x0000); /* RGB16: gelb */
+    bg->start_index = (guint)byte_start;
+    bg->end_index   = (guint)byte_end;
+    pango_attr_list_insert(attrs, bg);
+    pango_layout_set_attributes(layout, attrs);
+    pango_attr_list_unref(attrs);
+
+    cairo_move_to(cr, 10, 10);
+    pango_cairo_show_layout(cr, layout);
+
+    /* Y-Position des Treffers für Scroll ermitteln */
+    if (out_highlight_y) {
+        PangoRectangle rect = {0};
+        int idx = (int)byte_start;
+        pango_layout_index_to_pos(layout, idx, &rect);
+        *out_highlight_y = (int)(rect.y / PANGO_SCALE) + 10; /* +10 Rand */
+    }
+
+    g_object_unref(layout);
+    cairo_destroy(cr);
+
+    /* Alte Surface ersetzen */
+    cairo_surface_destroy(rd->surface);
+    rd->surface = surface;
+
+    return rd;
+}
+
+/* Scrollt den SurfaceViewer nach dem Anzeigen zur Y-Position */
+static gboolean
+scroll_to_highlight_idle(gpointer data)
+{
+    gpointer *pair  = (gpointer *) data;
+    GtkWidget *scrolled = GTK_WIDGET(pair[0]);
+    int        y        = GPOINTER_TO_INT(pair[1]);
+    g_free(pair);
+
+    GtkAdjustment *vadj =
+            gtk_scrolled_window_get_vadjustment(
+                    GTK_SCROLLED_WINDOW(scrolled));
+    double upper = gtk_adjustment_get_upper(vadj);
+    double page  = gtk_adjustment_get_page_size(vadj);
+    double target = (double)y - page / 3.0; /* Treffer im oberen Drittel */
+    if (target < 0) target = 0;
+    if (target > upper - page) target = upper - page;
+    if (target < 0) target = 0;
+    gtk_adjustment_set_value(vadj, target);
+
+    return G_SOURCE_REMOVE;
+}
+
+gint sond_render_with_term(GBytes *input, SondFilePart *sfp,
+        gchar const *title, gchar const *term,
+        gint char_pos_in_doc, GError **error)
+{
+    if (!input) {
+        if (error) *error = g_error_new(SOND_ERROR, 0,
+                "%s\nKein Eingabe-Stream", __func__);
+        return -1;
+    }
+
+    int highlight_y = 0;
+    RenderedDocument *rd;
+
+    if (term && *term)
+        rd = render_document_with_highlight(input, 0, term,
+                char_pos_in_doc, &highlight_y);
+    else
+        rd = render_document_from_bytes(input, 0);
+
+    if (!rd) {
+        if (error) *error = g_error_new(SOND_ERROR, 0,
+                "%s\nStream konnte nicht gerendert werden", __func__);
+        return -1;
+    }
+
+    const char *window_title = title ? title
+            : (sfp ? sond_file_part_get_path(sfp)
+                   : document_type_string(rd->type));
+
+    GtkWidget *win = show_surface_viewer(rd->surface, rd->width, rd->height,
+            window_title, rd->searchable_text, sfp);
+    free_rendered_document(rd);
+
+    if (!win) {
+        if (error) *error = g_error_new(SOND_ERROR, 0,
+                "%s\nFenster konnte nicht erstellt werden", __func__);
+        return -1;
+    }
+
+    /* Zur Trefferposition scrollen (nach dem ersten GTK-Durchlauf) */
+    if (highlight_y > 0) {
+        /* ScrolledWindow aus dem Viewer-Fenster holen:
+         * Aufbau: window > vbox > scrolled (2. Kind) */
+        GtkWidget *vbox     = gtk_bin_get_child(GTK_BIN(win));
+        GtkWidget *scrolled = NULL;
+        if (vbox) {
+            GList *children = gtk_container_get_children(GTK_CONTAINER(vbox));
+            if (children && children->next)
+                scrolled = GTK_WIDGET(children->next->data);
+            g_list_free(children);
+        }
+        if (scrolled) {
+            gpointer *pair = g_new(gpointer, 2);
+            pair[0] = scrolled;
+            pair[1] = GINT_TO_POINTER(highlight_y);
+            g_idle_add(scroll_to_highlight_idle, pair);
+        }
+    }
+
+    return 0;
 }
 
 gint sond_render(GBytes* input, SondFilePart* sfp, gchar const* title,
