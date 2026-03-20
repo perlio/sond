@@ -28,6 +28,8 @@
 #include "../20allgemein/project.h"
 #include "../20allgemein/suchen.h"
 
+#include "headerbar.h"
+
 /* =============================================================================
  * KONSTANTEN
  * ========================================================================== */
@@ -533,6 +535,8 @@ void init_app_window(Projekt *zond) {
     gtk_window_set_default_size(GTK_WINDOW(zond->app_window),
                                APP_WINDOW_DEFAULT_WIDTH,
                                APP_WINDOW_DEFAULT_HEIGHT);
+
+    init_headerbar(zond);
 
     // Vertikale Box für Layout
     vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);

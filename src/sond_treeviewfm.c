@@ -1072,13 +1072,8 @@ static gint rename_stvfm_item(SondTVFMItem* stvfm_item,
 	else { //richtiges Verzeichnis, nicht LEAF oder Root-Dir (=LEAF)
 		//Normale Dateien
 		if (!stvfm_item_priv->sond_file_part) {
-			gchar const* path_old = NULL;
-
-			path_old = (stvfm_item_priv->path_or_section) ?
-					stvfm_item_priv->path_or_section :
-					sond_file_part_get_path(stvfm_item_priv->sond_file_part);
-
-			if (!sond_rename(path_old, path_new, error))
+			//->path_or_section immer != NULL, wenn nicht root-dir
+			if (!sond_rename(stvfm_item_priv->path_or_section, path_new, error))
 				ERROR_Z
 
 			sond_tvfm_item_set_basename(stvfm_item, path_new);
@@ -1249,7 +1244,7 @@ static void sond_treeviewfm_class_init(SondTreeviewFMClass *klass) {
 			SOND_TYPE_TREEVIEWFM, G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_INT, 5,
 			SOND_TYPE_TVFM_ITEM,
 			SOND_TYPE_TVFM_ITEM,
-			G_TYPE_CHAR,
+			G_TYPE_STRING,
 			G_TYPE_INT,
 			G_TYPE_POINTER);
 
@@ -1257,7 +1252,7 @@ static void sond_treeviewfm_class_init(SondTreeviewFMClass *klass) {
 			SOND_TYPE_TREEVIEWFM, G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_INT, 5,
 			SOND_TYPE_TVFM_ITEM,
 			SOND_TYPE_TVFM_ITEM,
-			G_TYPE_CHAR,
+			G_TYPE_STRING,
 			G_TYPE_INT,
 			G_TYPE_POINTER);
 

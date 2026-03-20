@@ -43,7 +43,6 @@
 //#include "../99conv/pdf.h"
 #include "../99conv/test.h"
 
-#include "../20allgemein/pdf_text.h"
 #include "../20allgemein/ziele.h"
 #include "../20allgemein/suchen.h"
 #include "../20allgemein/project.h"
@@ -406,91 +405,6 @@ static void cb_item_clean_pdf(GtkMenuItem *item, gpointer data) {
 	}
 
 	g_ptr_array_unref(arr_sfp);
-
-	return;
-}
-
-static void cb_item_textsuche(GtkMenuItem *item, gpointer data) {
-	Projekt *zond = (Projekt*) data;
-
-	gint rc = 0;
-	gchar *errmsg = NULL;
-	GArray *arr_pdf_text_occ = NULL;
-
-	GPtrArray *arr_sfp = selection_abfragen_pdf(zond, &errmsg);
-	if (!arr_sfp) {
-		if (errmsg) {
-			display_message(zond->app_window, "Textsuche nicht möglich\n\nBei "
-					"Aufruf selection_abfragen_pdf:\n", errmsg, NULL);
-			g_free(errmsg);
-		}
-
-		return;
-	}
-
-	if (arr_sfp->len == 0) {
-		display_message(zond->app_window, "Keine PDF-Datei ausgewählt", NULL);
-		g_ptr_array_unref(arr_sfp);
-
-		return;
-	}
-
-	gchar *search_text = NULL;
-	rc = abfrage_frage(zond->app_window, "Textsuche", "Bitte Suchtext eingeben",
-			&search_text);
-	if (rc != GTK_RESPONSE_YES) {
-		g_ptr_array_unref(arr_sfp);
-
-		return;
-	}
-	if (!g_strcmp0(search_text, "")) {
-		g_ptr_array_unref(arr_sfp);
-		g_free(search_text);
-
-		return;
-	}
-
-	InfoWindow *info_window = NULL;
-
-	info_window = info_window_open(zond->app_window, "Textsuche");
-
-	rc = pdf_textsuche(zond, info_window, arr_sfp, search_text,
-			&arr_pdf_text_occ, &errmsg);
-	if (rc) {
-		display_message(zond->app_window, "Fehler in Textsuche in PDF -\n\n"
-				"Bei Aufruf pdf_textsuche:\n", errmsg, NULL);
-		g_ptr_array_unref(arr_sfp);
-		g_free(errmsg);
-		g_free(search_text);
-		info_window_close(info_window);
-
-		return;
-	}
-
-	info_window_close(info_window);
-
-	if (arr_pdf_text_occ->len == 0) {
-		display_message(zond->app_window, "Keine Treffer", NULL);
-		g_ptr_array_unref(arr_sfp);
-		g_array_unref(arr_pdf_text_occ);
-		g_free(search_text);
-
-		return;
-	}
-
-	//Anzeigefenster
-	rc = pdf_text_anzeigen_ergebnisse(zond, search_text,
-			arr_sfp, arr_pdf_text_occ, &errmsg);
-	g_ptr_array_unref(arr_sfp);
-	g_array_unref(arr_pdf_text_occ);
-	if (rc) {
-		display_message(zond->app_window, "Fehler in Textsuche in PDF -\n\n"
-				"Bei Aufruf pdf_text_anzeigen_ergebnisse:\n", errmsg, NULL);
-		g_free(errmsg);
-		g_free(search_text);
-	}
-
-	g_free(search_text);
 
 	return;
 }
@@ -1295,9 +1209,6 @@ create_menu_pdf(Projekt *zond, GtkAccelGroup *accel_group) {
 	create_and_connect_menu_item("PDF reparieren",
 			G_CALLBACK(cb_item_clean_pdf), zond, menu_dateien);
 
-	create_and_connect_menu_item("Text suchen",
-			G_CALLBACK(cb_item_textsuche), zond, menu_dateien);
-
 	create_and_connect_menu_item("OCR",
 			G_CALLBACK(cb_datei_ocr), zond, menu_dateien);
 
@@ -1460,9 +1371,6 @@ init_menu(Projekt *zond) {
  * Initialisiert die Headerbar mit Menü und Buttons
  */
 void init_headerbar(Projekt *zond) {
-	// Menu erzeugen
-	GtkWidget *menubar = init_menu(zond);
-
 	// HeaderBar erzeugen
 	GtkWidget *headerbar = gtk_header_bar_new();
 	gtk_header_bar_set_has_subtitle(GTK_HEADER_BAR(headerbar), FALSE);
@@ -1470,10 +1378,15 @@ void init_headerbar(Projekt *zond) {
 			":minimize,maximize,close");
 	gtk_header_bar_set_show_close_button(GTK_HEADER_BAR(headerbar), TRUE);
 
-	// Umschaltknopf erzeugen
+	// Umschaltknopf erzeugen (vor init_menu, da Menü darauf bindet)
 	zond->fs_button = gtk_toggle_button_new_with_label("FS");
 	g_signal_connect(zond->fs_button, "toggled",
 			G_CALLBACK(cb_button_mode_toggled), zond);
+
+	// Menu erzeugen
+	GtkWidget *menubar = init_menu(zond);
+
+	// fs_button erst nach init_menu in Headerbar packen
 	gtk_header_bar_pack_start(GTK_HEADER_BAR(headerbar), zond->fs_button);
 
 	// Alles in Headerbar packen

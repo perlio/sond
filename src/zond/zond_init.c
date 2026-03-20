@@ -40,7 +40,6 @@
 
 #include "10init/icons.h"
 #include "10init/app_window.h"
-#include "10init/headerbar.h"
 
 static void recover(Projekt *zond, gchar *project, GApplication *app) {
 	gint rc = 0;
@@ -218,8 +217,6 @@ void zond_init(GtkApplication *app, Projekt *zond) {
 
 	init_app_window(zond);
 	gtk_application_add_window(app, GTK_WINDOW(zond->app_window));
-
-	init_headerbar(zond);
 
 	//Wiederherstellung bei Absturz
 	//(d.h. in den Settings wurde project nicht auf "" gesetzt)

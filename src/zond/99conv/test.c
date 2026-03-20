@@ -8,8 +8,6 @@
 #include "../zond_pdf_document.h"
 #include "../zond_tree_store.h"
 
-#include "../20allgemein/pdf_text.h"
-
 #include "general.h"
 
 /** rc == -1: Fähler
