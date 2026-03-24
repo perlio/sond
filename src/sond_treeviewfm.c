@@ -1013,41 +1013,7 @@ static void sond_tvfm_item_set_basename(SondTVFMItem* stvfm_item,
 	return;
 }
 
-static void adjust_sfps_in_dir(SondFilePart* sfp_dir, SondFilePart* sfp_dst,
-		gchar const* path_old, gchar const* path_new) {
-	GPtrArray* arr_opened_children = NULL;
-
-	arr_opened_children = sond_file_part_get_arr_opened_files(sfp_dir); //NULL ist ok
-
-	//welche liegen "unterhalb"?
-	for (guint i = 0; arr_opened_children && i < arr_opened_children->len; i++) {
-		SondFilePart* sfp_child = NULL;
-		gchar const* path_child = NULL;
-
-		sfp_child = g_ptr_array_index(arr_opened_children, i);
-		path_child = sond_file_part_get_path(sfp_child);
-
-		if (g_str_has_prefix(path_child, path_old)) { //Treffer
-			//ggf. neues Eltern-sfp
-			if (sfp_dir != sfp_dst)
-				sond_file_part_set_parent(sfp_child, sfp_dst);
-
-			//Pfad von sfp_child anpassen
-			gchar* path_child_new = NULL;
-
-			//stvfm_item_priv->path_or_section ist der neue Pfad des Verzeichnisses
-			//kann nicht NULL sein, ist mindestens toplevel_path!
-			path_child_new = g_strconcat(path_new, "/",
-					path_child + ((path_old) ? strlen(path_old) + 1 : 0), NULL);
-			sond_file_part_set_path(sfp_child, path_child_new);
-			g_free(path_child_new);
-		}
-	}
-
-	return;
-}
-
-static gint rename_stvfm_item(SondTVFMItem* stvfm_item,
+static gint sond_tvfm_item_rename(SondTVFMItem* stvfm_item,
 		SondTVFMItem* stvfm_item_parent, gchar const* base_new,
 		GError** error) {
 	g_autofree gchar* path_new = NULL;
@@ -1104,6 +1070,242 @@ static gint rename_stvfm_item(SondTVFMItem* stvfm_item,
 	return 0;
 }
 
+static gint delete_item(SondTVFMItem* stvfm_item, GError** error) {
+	SondTVFMItemPrivate* stvfm_item_priv =
+			sond_tvfm_item_get_instance_private(stvfm_item);
+
+	if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_DIR) {
+		if (!stvfm_item_priv->sond_file_part) { //FileSystem - geht schon
+			gint rc = 0;
+			gchar* path = NULL;
+			SondTreeviewFMPrivate* stvfm_priv =
+					sond_treeviewfm_get_instance_private(stvfm_item_priv->stvfm);
+
+			if (!stvfm_item_priv->path_or_section)
+				return 0; //Root-Verzeichnis kann nicht gelöscht werden!
+
+			path = g_strconcat(stvfm_priv->root, "/", stvfm_item_priv->path_or_section, NULL);
+
+			rc = sond_rmdir_r(path, error);
+			g_free(path);
+			if (rc)
+				ERROR_Z
+		}
+		else if (!stvfm_item_priv->path_or_section) { //sfp existiert - also root
+			gint rc = 0;
+
+			rc = sond_file_part_delete(stvfm_item_priv->sond_file_part, error);
+			if (rc) {
+				ERROR_Z
+			}
+		}
+		else if (SOND_IS_FILE_PART_ZIP(stvfm_item_priv->sond_file_part)) {
+			g_set_error(error, SOND_ERROR, 0, "%s\nnicht implementiert", __func__);
+
+			return -1;
+		}
+		else if (SOND_IS_FILE_PART_PDF(stvfm_item_priv->sond_file_part)) { //PDF-Datei ist Dir - ganz löschen
+			g_set_error(error, SOND_ERROR, 0, "%s\nnicht implementiert", __func__);
+
+			return -1;
+		}
+		else if (SOND_IS_FILE_PART_GMESSAGE(stvfm_item_priv->sond_file_part)) {
+			g_set_error(error, SOND_ERROR, 0, "%s\nnicht implementiert", __func__);
+
+			return -1;
+		}
+	}
+	else if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF) {
+		gint rc = 0;
+
+		if (SOND_IS_FILE_PART_PDF(stvfm_item_priv->sond_file_part) &&
+				sond_file_part_get_has_children(stvfm_item_priv->sond_file_part)) {
+			if (error) *error = g_error_new(g_quark_from_static_string("sond"), 0,
+					"%s\nLöschen des pagetree aus PDF-Datei nicht unterstützt",
+					__func__);
+
+			return -1;
+		}
+
+		rc = sond_file_part_delete(stvfm_item_priv->sond_file_part, error);
+		if (rc)
+			ERROR_Z
+	}
+	else if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF_SECTION) {
+		if (SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->delete_section) {
+			gint rc = 0;
+
+			rc = SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->delete_section(stvfm_item, error);
+			if (rc)
+				ERROR_Z
+		}
+		else
+			return 0;
+	}
+
+	return 0;
+}
+
+static gint copy_dir_across_sfps(SondTVFMItem* stvfm_item,
+		SondTVFMItem* stvfm_item_parent, gchar const* base,
+		GError** error) {
+	{
+		if (error) *error = g_error_new(SOND_ERROR, 0,
+			"%s\nKopieren eines Verzeichnisses in anderen SondFilePart-Typen"
+				"noch nicht implementiert", __func__);
+
+		return -1;
+	}
+
+	return 0;
+}
+
+static gint sond_tvfm_item_copy(SondTVFMItem* stvfm_item,
+		SondTVFMItem* stvfm_item_parent, gchar const* base,
+		gint index_to, GError** error) {
+	gint rc = 0;
+	gchar* base_real = NULL;
+
+	SondTVFMItemPrivate* stvfm_item_priv =
+			sond_tvfm_item_get_instance_private(stvfm_item);
+	SondTVFMItemPrivate* stvfm_item_parent_priv =
+			sond_tvfm_item_get_instance_private(stvfm_item_parent);
+
+	base_real = (stvfm_item_parent_priv->sond_file_part &&
+			SOND_IS_FILE_PART_GMESSAGE(stvfm_item_parent_priv->sond_file_part)) ?
+					g_strdup_printf("%u", index_to) :
+					g_strdup(base);
+
+	//sfp soll kopiert werden
+	if (!stvfm_item_priv->path_or_section) {
+		gchar* path = NULL;
+
+		//Page-Tree einer PDF-Datei: geht (noch) nicht
+		if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF &&
+				SOND_IS_FILE_PART_PDF(stvfm_item_priv->sond_file_part) &&
+				sond_file_part_get_has_children(
+						stvfm_item_priv->sond_file_part)) {
+
+			//ToDo: Sonderbehandlung für PDF-Dateien (nur page_tree)
+			if (error) *error = g_error_new(g_quark_from_static_string("sond"), 0,
+					"%s\nKopieren des Page-Tree aus PDF-Dateien nicht implementiert",
+					__func__);
+			g_free(base_real);
+
+			return -1;
+		}
+
+		//Wenn in ein dir kopiert wird, ist der Pfad des dir vom übergeordneten sfp
+		//der Beginn des neuen Pfades des sfp
+		path = stvfm_item_parent_priv->path_or_section ?
+				g_strconcat(stvfm_item_parent_priv->path_or_section, "/", base_real, NULL) :
+				g_strdup(base_real);
+		g_free(base_real);
+
+		rc = sond_file_part_copy(stvfm_item_priv->sond_file_part,
+				stvfm_item_parent_priv->sond_file_part, path, error);
+		g_free(path);
+	}
+	else { //dir soll kopiert werden
+		//innerhalt Dateisystem - geht schon
+		if (!stvfm_item_parent_priv->sond_file_part &&
+				!stvfm_item_priv->sond_file_part) {
+			gchar* path_dst = NULL;
+
+			path_dst = g_strconcat((stvfm_item_parent_priv->path_or_section) ?
+							stvfm_item_parent_priv->path_or_section : "",
+							(stvfm_item_parent_priv->path_or_section) ? "/" : "",
+							base_real, NULL);
+			g_free(base_real);
+
+			rc = sond_copy_r(stvfm_item_priv->path_or_section, path_dst, FALSE, error);
+			g_free(path_dst);
+		}
+		else { //kopieren Verzeichnis zwischen zwei sfp-Welten
+			rc = copy_dir_across_sfps(stvfm_item, stvfm_item_parent,
+					base_real, error);
+			g_free(base_real);
+		}
+	}
+	if (rc)
+		ERROR_Z
+
+	return 0;
+}
+
+static gint move_item(SondTVFMItem* stvfm_item_src,
+		SondTVFMItem* stvfm_item_parent_dst,
+		gchar const* base, gint index_to, GError** error) {
+	gint rc = 0;
+
+	rc = sond_tvfm_item_copy(stvfm_item_src,
+			stvfm_item_parent_dst, base, index_to, error);
+	if (rc)
+		ERROR_Z
+
+	//Jetzt Quelle löschen
+	rc = delete_item(stvfm_item_src, error);
+	if (rc) {
+		LOG_WARN("Item konnte nicht gelöscht werden: %s", (*error)->message);
+		g_clear_error(error);
+	}
+
+	return 0;
+}
+
+static gint sond_tvfm_item_move(SondTVFMItem* stvfm_item,
+		SondTVFMItem* stvfm_item_parent, gchar const* base,
+		gint index_to, GError** error) {
+	gint rc = 0;
+	gint res = 0;
+
+	SondTVFMItemPrivate* stvfm_item_priv =
+			sond_tvfm_item_get_instance_private(stvfm_item);
+	SondTVFMItemPrivate* stvfm_item_parent_priv =
+			sond_tvfm_item_get_instance_private(stvfm_item_parent);
+
+	if (stvfm_item_priv->stvfm == stvfm_item_parent_priv->stvfm)
+		g_signal_emit(stvfm_item_priv->stvfm,
+				SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->signal_before_move, 0,
+				stvfm_item, stvfm_item_parent, base, index_to, error, &res);
+	else {
+		g_signal_emit(stvfm_item_priv->stvfm,
+				SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->signal_before_delete, 0,
+				stvfm_item, error, &res);
+		if (res == -1)
+			ERROR_Z
+		else if (res == 1)
+			return 1;
+
+		g_signal_emit(stvfm_item_parent_priv->stvfm,
+				SOND_TREEVIEWFM_GET_CLASS(stvfm_item_parent_priv->stvfm)->signal_before_insert, 0,
+				stvfm_item, stvfm_item_parent, base, index_to, error, &res);
+	}
+
+	if (res)
+		ERROR_Z
+
+	//Verschieben innerhalb des gleichen sfp, das aber nicht GMessage ist
+	if (stvfm_item_parent_priv->sond_file_part ==
+			sond_file_part_get_parent(stvfm_item_priv->sond_file_part) &&
+			!SOND_IS_FILE_PART_GMESSAGE(stvfm_item_parent_priv->sond_file_part) &&
+			//außer wenn PageTree
+			!(stvfm_item_priv->sond_file_part &&
+					SOND_IS_FILE_PART_PDF(stvfm_item_priv->sond_file_part) &&
+					sond_file_part_get_has_children(stvfm_item_priv->sond_file_part)))
+		rc = sond_tvfm_item_rename(stvfm_item, stvfm_item_parent, base, error);
+	else
+		rc = move_item(stvfm_item, stvfm_item_parent, base, index_to, error);
+
+	g_signal_emit(stvfm_item_parent_priv->stvfm,
+			SOND_TREEVIEWFM_GET_CLASS(stvfm_item_parent_priv->stvfm)->signal_after, 0,
+			(rc == 0) ? TRUE : FALSE);
+	if (rc)
+		ERROR_Z
+
+	return 0;
+}
+
 static gboolean is_valid_filename(const gchar *filename) {
     if (filename == NULL || *filename == '\0')
         return FALSE;
@@ -1130,6 +1332,40 @@ static gboolean is_valid_filename(const gchar *filename) {
 #endif
 
     return TRUE;
+}
+
+static void adjust_sfps_in_dir(SondFilePart* sfp_dir, SondFilePart* sfp_dst,
+		gchar const* path_old, gchar const* path_new) {
+	GPtrArray* arr_opened_children = NULL;
+
+	arr_opened_children = sond_file_part_get_arr_opened_files(sfp_dir); //NULL ist ok
+
+	//welche liegen "unterhalb"?
+	for (guint i = 0; arr_opened_children && i < arr_opened_children->len; i++) {
+		SondFilePart* sfp_child = NULL;
+		gchar const* path_child = NULL;
+
+		sfp_child = g_ptr_array_index(arr_opened_children, i);
+		path_child = sond_file_part_get_path(sfp_child);
+
+		if (g_str_has_prefix(path_child, path_old)) { //Treffer
+			//ggf. neues Eltern-sfp
+			if (sfp_dir != sfp_dst)
+				sond_file_part_set_parent(sfp_child, sfp_dst);
+
+			//Pfad von sfp_child anpassen
+			gchar* path_child_new = NULL;
+
+			//stvfm_item_priv->path_or_section ist der neue Pfad des Verzeichnisses
+			//kann nicht NULL sein, ist mindestens toplevel_path!
+			path_child_new = g_strconcat(path_new, "/",
+					path_child + ((path_old) ? strlen(path_old) + 1 : 0), NULL);
+			sond_file_part_set_path(sfp_child, path_child_new);
+			g_free(path_child_new);
+		}
+	}
+
+	return;
 }
 
 static gint sond_treeviewfm_text_edited(SondTreeviewFM *stvfm,
@@ -1163,7 +1399,7 @@ static gint sond_treeviewfm_text_edited(SondTreeviewFM *stvfm,
 		ERROR_Z
 	}
 
-	rc = rename_stvfm_item(stvfm_item, stvfm_item_parent, text_new, error);
+	rc = sond_tvfm_item_rename(stvfm_item, stvfm_item_parent, text_new, error);
 	g_object_unref(stvfm_item_parent);
 	g_signal_emit(stvfm_item_priv->stvfm,
 			SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->signal_after, 0,
@@ -1465,89 +1701,112 @@ static void sond_treeviewfm_punkt_einfuegen_activate(GtkMenuItem *item,
 	return;
 }
 
-static gint copy_dir_across_sfps(SondTVFMItem* stvfm_item,
-		SondTVFMItem* stvfm_item_parent, gchar const* base,
-		GError** error) {
-	{
-		if (error) *error = g_error_new(SOND_ERROR, 0,
-			"%s\nKopieren eines Verzeichnisses in anderen SondFilePart-Typen"
-				"noch nicht implementiert", __func__);
+typedef struct _S_FM_Paste_Selection {
+	SondTVFMItem* stvfm_item_parent;
+	GtkTreeIter *iter_parent;
+	GtkTreeIter *iter_cursor;
+	gboolean kind;
+	gboolean expanded;
+	gchar* base_inserted;
+	gint index_to;
+} SFMPasteSelection;
 
-		return -1;
-	}
-
-	return 0;
-}
-
-static gint copy_stvfm_item(SondTVFMItem* stvfm_item,
-		SondTVFMItem* stvfm_item_parent, gchar const* base,
-		gint index_to, GError** error) {
+static gint process_stvfm_item_move_or_copy(SondTVFMItem* stvfm_item,
+		SFMPasteSelection* s_paste_sel, gboolean move, GError** error) {
 	gint rc = 0;
-	gchar* base_real = NULL;
+	guint max_tries = 100;
+	const gchar *dot = NULL;
+	gboolean has_ext = FALSE;
+	const gchar *ext = NULL;
+	gint i = 0;
+
+	g_autofree gchar *name = NULL;
+	g_autofree gchar *base = NULL;
 
 	SondTVFMItemPrivate* stvfm_item_priv =
 			sond_tvfm_item_get_instance_private(stvfm_item);
 	SondTVFMItemPrivate* stvfm_item_parent_priv =
-			sond_tvfm_item_get_instance_private(stvfm_item_parent);
+			sond_tvfm_item_get_instance_private(s_paste_sel->stvfm_item_parent);
 
-	base_real = (stvfm_item_parent_priv->sond_file_part &&
-			SOND_IS_FILE_PART_GMESSAGE(stvfm_item_parent_priv->sond_file_part)) ?
-					g_strdup_printf("%u", index_to) :
-					g_strdup(base);
+	//Einfügen in GMessage
+	if(SOND_IS_FILE_PART_GMESSAGE(stvfm_item_parent_priv->sond_file_part))
+		base = g_strdup_printf("%u", s_paste_sel->index_to);
+	else {
+		base = g_strdup(stvfm_item_priv->display_name);
 
-	//sfp soll kopiert werden
-	if (!stvfm_item_priv->path_or_section) {
-		gchar* path = NULL;
+		//base ändern, wenn MimePart als displayName
+		if (strrchr(base, '/')) {
+			gchar const* ext = NULL;
 
-		//Page-Tree einer PDF-Datei: geht (noch) nicht
-		if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF &&
-				SOND_IS_FILE_PART_PDF(stvfm_item_priv->sond_file_part) &&
-				sond_file_part_get_has_children(
-						stvfm_item_priv->sond_file_part)) {
-
-			//ToDo: Sonderbehandlung für PDF-Dateien (nur page_tree)
-			if (error) *error = g_error_new(g_quark_from_static_string("sond"), 0,
-					"%s\nKopieren des Page-Tree aus PDF-Dateien nicht implementiert",
-					__func__);
-			g_free(base_real);
-
-			return -1;
-		}
-
-		//Wenn in ein dir kopiert wird, ist der Pfad des dir vom übergeordneten sfp
-		//der Beginn des neuen Pfades des sfp
-		path = stvfm_item_parent_priv->path_or_section ?
-				g_strconcat(stvfm_item_parent_priv->path_or_section, "/", base_real, NULL) :
-				g_strdup(base_real);
-		g_free(base_real);
-
-		rc = sond_file_part_copy(stvfm_item_priv->sond_file_part,
-				stvfm_item_parent_priv->sond_file_part, path, error);
-		g_free(path);
-	}
-	else { //dir soll kopiert werden
-		//innerhalt Dateisystem - geht schon
-		if (!stvfm_item_parent_priv->sond_file_part &&
-				!stvfm_item_priv->sond_file_part) {
-			gchar* path_dst = NULL;
-
-			path_dst = g_strconcat((stvfm_item_parent_priv->path_or_section) ?
-							stvfm_item_parent_priv->path_or_section : "",
-							(stvfm_item_parent_priv->path_or_section) ? "/" : "",
-							base_real, NULL);
-			g_free(base_real);
-
-			rc = sond_copy_r(stvfm_item_priv->path_or_section, path_dst, FALSE, error);
-			g_free(path_dst);
-		}
-		else { //kopieren Verzeichnis zwischen zwei sfp-Welten
-			rc = copy_dir_across_sfps(stvfm_item, stvfm_item_parent,
-					base_real, error);
-			g_free(base_real);
+			ext = mime_to_extension(base);
+			g_free(base);
+			base = g_strconcat("UNNAMED", ext, NULL);
 		}
 	}
-	if (rc)
-		ERROR_Z
+
+	dot = strrchr(base, '.');
+	has_ext = (!stvfm_item_priv->path_or_section) && dot && dot != base;
+	name = has_ext ? g_strndup(base, (gsize)(dot - base)) : g_strdup(base);
+	ext = has_ext ? dot : "";
+
+	do {
+		g_autofree gchar *trial_base = NULL;
+
+		trial_base = (i == 0) ? g_strdup(base) :
+				g_strconcat(name, g_strdup_printf(" (%u)", i), ext, NULL);
+
+		if (move)
+			rc = sond_tvfm_item_move(stvfm_item,
+					s_paste_sel->stvfm_item_parent, trial_base,
+					s_paste_sel->index_to, error);
+		else
+			rc = sond_tvfm_item_copy(stvfm_item,
+					s_paste_sel->stvfm_item_parent, trial_base,
+					s_paste_sel->index_to, error);
+
+		if (rc == -1) {
+			if (g_error_matches(*error, G_IO_ERROR, G_IO_ERROR_EXISTS)) {
+				g_clear_error(error);
+				i++;
+
+				continue;  // nächster Suffix versuchen
+			}
+			else if (g_error_matches(*error, G_IO_ERROR, G_IO_ERROR_BUSY)) {
+				g_clear_error(error);
+
+				gint res = dialog_with_buttons(
+						gtk_widget_get_toplevel(GTK_WIDGET(stvfm_item_priv->stvfm)),
+						"Zugriff nicht erlaubt",
+						"Datei möglicherweise geöffnet", NULL,
+						"Erneut versuchen", 1, "Überspringen", 2, "Abbrechen",
+						3, NULL);
+
+				if (res == 1)
+					continue; //Pfad bleibt gleich - einfach nochemal
+				else if (res == 2)
+					return 1; //Überspringen
+				else if (res == 3)
+					return 2; //Abbrechen
+			}
+			else
+				ERROR_Z
+		}
+		else if (rc == 1) //überspringen
+			return 1;
+		else {
+			g_free(s_paste_sel->base_inserted);
+			s_paste_sel->base_inserted = g_strdup(trial_base);
+
+			break;
+		}
+	} while (i < max_tries);
+
+	if (i == max_tries) {
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_EXISTS,
+				"%s\nKein eindeutiger Zielname nach %u Versuchen", __func__, max_tries);
+
+		return -1;
+	}
 
 	return 0;
 }
@@ -1686,264 +1945,7 @@ parent:
 	return;
 }
 
-static gint delete_item(SondTVFMItem* stvfm_item, GError** error) {
-	SondTVFMItemPrivate* stvfm_item_priv =
-			sond_tvfm_item_get_instance_private(stvfm_item);
 
-	if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_DIR) {
-		if (!stvfm_item_priv->sond_file_part) { //FileSystem - geht schon
-			gint rc = 0;
-			gchar* path = NULL;
-			SondTreeviewFMPrivate* stvfm_priv =
-					sond_treeviewfm_get_instance_private(stvfm_item_priv->stvfm);
-
-			if (!stvfm_item_priv->path_or_section)
-				return 0; //Root-Verzeichnis kann nicht gelöscht werden!
-
-			path = g_strconcat(stvfm_priv->root, "/", stvfm_item_priv->path_or_section, NULL);
-
-			rc = sond_rmdir_r(path, error);
-			g_free(path);
-			if (rc)
-				ERROR_Z
-		}
-		else if (!stvfm_item_priv->path_or_section) { //sfp existiert - also root
-			gint rc = 0;
-
-			rc = sond_file_part_delete(stvfm_item_priv->sond_file_part, error);
-			if (rc) {
-				ERROR_Z
-			}
-		}
-		else if (SOND_IS_FILE_PART_ZIP(stvfm_item_priv->sond_file_part)) {
-			g_set_error(error, SOND_ERROR, 0, "%s\nnicht implementiert", __func__);
-
-			return -1;
-		}
-		else if (SOND_IS_FILE_PART_PDF(stvfm_item_priv->sond_file_part)) { //PDF-Datei ist Dir - ganz löschen
-			g_set_error(error, SOND_ERROR, 0, "%s\nnicht implementiert", __func__);
-
-			return -1;
-		}
-		else if (SOND_IS_FILE_PART_GMESSAGE(stvfm_item_priv->sond_file_part)) {
-			g_set_error(error, SOND_ERROR, 0, "%s\nnicht implementiert", __func__);
-
-			return -1;
-		}
-	}
-	else if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF) {
-		gint rc = 0;
-
-		if (SOND_IS_FILE_PART_PDF(stvfm_item_priv->sond_file_part) &&
-				sond_file_part_get_has_children(stvfm_item_priv->sond_file_part)) {
-			if (error) *error = g_error_new(g_quark_from_static_string("sond"), 0,
-					"%s\nLöschen des pagetree aus PDF-Datei nicht unterstützt",
-					__func__);
-
-			return -1;
-		}
-
-		rc = sond_file_part_delete(stvfm_item_priv->sond_file_part, error);
-		if (rc)
-			ERROR_Z
-	}
-	else if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF_SECTION) {
-		if (SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->delete_section) {
-			gint rc = 0;
-
-			rc = SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->delete_section(stvfm_item, error);
-			if (rc)
-				ERROR_Z
-		}
-		else
-			return 0;
-	}
-
-	return 0;
-}
-
-static gint move_item(SondTVFMItem* stvfm_item_src,
-		SondTVFMItem* stvfm_item_parent_dst,
-		gchar const* base, gint index_to, GError** error) {
-	gint rc = 0;
-
-	rc = copy_stvfm_item(stvfm_item_src,
-			stvfm_item_parent_dst, base, index_to, error);
-	if (rc)
-		ERROR_Z
-
-	//Jetzt Quelle löschen
-	rc = delete_item(stvfm_item_src, error);
-	if (rc) {
-		LOG_WARN("Item konnte nicht gelöscht werden: %s", (*error)->message);
-		g_clear_error(error);
-	}
-
-	return 0;
-}
-
-static gint move_stvfm_item(SondTVFMItem* stvfm_item,
-		SondTVFMItem* stvfm_item_parent, gchar const* base,
-		gint index_to, GError** error) {
-	gint rc = 0;
-	gint res = 0;
-
-	SondTVFMItemPrivate* stvfm_item_priv =
-			sond_tvfm_item_get_instance_private(stvfm_item);
-	SondTVFMItemPrivate* stvfm_item_parent_priv =
-			sond_tvfm_item_get_instance_private(stvfm_item_parent);
-
-	if (stvfm_item_priv->stvfm == stvfm_item_parent_priv->stvfm)
-		g_signal_emit(stvfm_item_priv->stvfm,
-				SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->signal_before_move, 0,
-				stvfm_item, stvfm_item_parent, base, index_to, error, &res);
-	else {
-		g_signal_emit(stvfm_item_priv->stvfm,
-				SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->signal_before_delete, 0,
-				stvfm_item, error, &res);
-		if (res == -1)
-			ERROR_Z
-		else if (res == 1)
-			return 1;
-
-		g_signal_emit(stvfm_item_parent_priv->stvfm,
-				SOND_TREEVIEWFM_GET_CLASS(stvfm_item_parent_priv->stvfm)->signal_before_insert, 0,
-				stvfm_item, stvfm_item_parent, base, index_to, error, &res);
-	}
-
-	if (res)
-		ERROR_Z
-
-	//Verschieben innerhalb des gleichen sfp, das aber nicht GMessage ist
-	if (stvfm_item_parent_priv->sond_file_part ==
-			sond_file_part_get_parent(stvfm_item_priv->sond_file_part) &&
-			!SOND_IS_FILE_PART_GMESSAGE(stvfm_item_parent_priv->sond_file_part) &&
-			//außer wenn PageTree
-			!(stvfm_item_priv->sond_file_part &&
-					SOND_IS_FILE_PART_PDF(stvfm_item_priv->sond_file_part) &&
-					sond_file_part_get_has_children(stvfm_item_priv->sond_file_part)))
-		rc = rename_stvfm_item(stvfm_item, stvfm_item_parent, base, error);
-	else
-		rc = move_item(stvfm_item, stvfm_item_parent, base, index_to, error);
-
-	g_signal_emit(stvfm_item_parent_priv->stvfm,
-			SOND_TREEVIEWFM_GET_CLASS(stvfm_item_parent_priv->stvfm)->signal_after, 0,
-			(rc == 0) ? TRUE : FALSE);
-	if (rc)
-		ERROR_Z
-
-	return 0;
-}
-
-typedef struct _S_FM_Paste_Selection {
-	SondTVFMItem* stvfm_item_parent;
-	GtkTreeIter *iter_parent;
-	GtkTreeIter *iter_cursor;
-	gboolean kind;
-	gboolean expanded;
-	gchar* base_inserted;
-	gint index_to;
-} SFMPasteSelection;
-
-static gint process_stvfm_item_move_or_copy(SondTVFMItem* stvfm_item,
-		SFMPasteSelection* s_paste_sel, gboolean move, GError** error) {
-	gint rc = 0;
-	guint max_tries = 100;
-	const gchar *dot = NULL;
-	gboolean has_ext = FALSE;
-	const gchar *ext = NULL;
-	gint i = 0;
-
-	g_autofree gchar *name = NULL;
-	g_autofree gchar *base = NULL;
-
-	SondTVFMItemPrivate* stvfm_item_priv =
-			sond_tvfm_item_get_instance_private(stvfm_item);
-	SondTVFMItemPrivate* stvfm_item_parent_priv =
-			sond_tvfm_item_get_instance_private(s_paste_sel->stvfm_item_parent);
-
-	//Einfügen in GMessage
-	if(SOND_IS_FILE_PART_GMESSAGE(stvfm_item_parent_priv->sond_file_part))
-		base = g_strdup_printf("%u", s_paste_sel->index_to);
-	else {
-		base = g_strdup(stvfm_item_priv->display_name);
-
-		//base ändern, wenn MimePart als displayName
-		if (strrchr(base, '/')) {
-			gchar const* ext = NULL;
-
-			ext = mime_to_extension(base);
-			g_free(base);
-			base = g_strconcat("UNNAMED", ext, NULL);
-		}
-	}
-
-	dot = strrchr(base, '.');
-	has_ext = (!stvfm_item_priv->path_or_section) && dot && dot != base;
-	name = has_ext ? g_strndup(base, (gsize)(dot - base)) : g_strdup(base);
-	ext = has_ext ? dot : "";
-
-	do {
-		g_autofree gchar *trial_base = NULL;
-
-		trial_base = (i == 0) ? g_strdup(base) :
-				g_strconcat(name, g_strdup_printf(" (%u)", i), ext, NULL);
-
-		if (move)
-			rc = move_stvfm_item(stvfm_item,
-					s_paste_sel->stvfm_item_parent, trial_base,
-					s_paste_sel->index_to, error);
-		else
-			rc = copy_stvfm_item(stvfm_item,
-					s_paste_sel->stvfm_item_parent, trial_base,
-					s_paste_sel->index_to, error);
-
-		if (rc == -1) {
-			if (g_error_matches(*error, G_IO_ERROR, G_IO_ERROR_EXISTS)) {
-				g_clear_error(error);
-				i++;
-
-				continue;  // nächster Suffix versuchen
-			}
-			else if (g_error_matches(*error, G_IO_ERROR, G_IO_ERROR_BUSY)) {
-				g_clear_error(error);
-
-				gint res = dialog_with_buttons(
-						gtk_widget_get_toplevel(GTK_WIDGET(stvfm_item_priv->stvfm)),
-						"Zugriff nicht erlaubt",
-						"Datei möglicherweise geöffnet", NULL,
-						"Erneut versuchen", 1, "Überspringen", 2, "Abbrechen",
-						3, NULL);
-
-				if (res == 1)
-					continue; //Pfad bleibt gleich - einfach nochemal
-				else if (res == 2)
-					return 1; //Überspringen
-				else if (res == 3)
-					return 2; //Abbrechen
-			}
-			else
-				ERROR_Z
-		}
-		else if (rc == 1) //überspringen
-			return 1;
-		else {
-			g_free(s_paste_sel->base_inserted);
-			s_paste_sel->base_inserted = g_strdup(trial_base);
-
-			break;
-		}
-	} while (i < max_tries);
-
-	if (i == max_tries) {
-		g_set_error(error, G_IO_ERROR, G_IO_ERROR_EXISTS,
-				"%s\nKein eindeutiger Zielname nach %u Versuchen", __func__, max_tries);
-
-		return -1;
-	}
-
-	return 0;
-}
 
 static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 		GtkTreeIter *iter, gpointer data, GError **error) {
