@@ -470,6 +470,8 @@ static GBytes* sond_file_part_read_bytes_internal(SondFilePart* sfp_parent,
 			return NULL;
 
 		GBytes* result = NULL;
+		GMimeStream* mem_stream = NULL;
+		gssize length = 0;
 
 		if (GMIME_IS_MESSAGE_PART(object)) {
 			GMimeObject* part =
@@ -480,21 +482,8 @@ static GBytes* sond_file_part_read_bytes_internal(SondFilePart* sfp_parent,
 						"%s\nGMimeMessagePart hat keine Nachricht", __func__);
 				return NULL;
 			}
-			GMimeStream* mem_stream = g_mime_stream_mem_new();
-			GMimeStream* out_stream = (max_len == -1) ? g_object_ref(mem_stream) :
-					g_mime_stream_substream(mem_stream, 0, max_len);
-			gssize length = g_mime_object_write_to_stream(part, NULL, out_stream);
-			g_object_unref(out_stream);
-			if (length <= 0) {
-				g_object_unref(object);
-				g_object_unref(mem_stream);
-				if (error) *error = g_error_new(SOND_ERROR, 0,
-						"%s\nGMimeMessagePart leer oder Fehler", __func__);
-				return NULL;
-			}
-			GByteArray* ba = g_mime_stream_mem_get_byte_array(GMIME_STREAM_MEM(mem_stream));
-			result = g_bytes_new(ba->data, ba->len);
-			g_object_unref(mem_stream);
+			mem_stream = g_mime_stream_mem_new();
+			length = g_mime_object_write_to_stream(part, NULL, mem_stream);
 		}
 		else if (GMIME_IS_PART(object)) {
 			GMimeDataWrapper* wrapper = g_mime_part_get_content(GMIME_PART(object));
@@ -504,21 +493,9 @@ static GBytes* sond_file_part_read_bytes_internal(SondFilePart* sfp_parent,
 						"%s\nGMimePart hat keinen Content", __func__);
 				return NULL;
 			}
-			GMimeStream* mem_stream = g_mime_stream_mem_new();
-			GMimeStream* out_stream = (max_len == -1) ? g_object_ref(mem_stream) :
-					g_mime_stream_substream(mem_stream, 0, max_len);
-			gssize length = g_mime_data_wrapper_write_to_stream(wrapper, out_stream);
-			g_object_unref(out_stream);
-			if (length <= 0) {
-				g_object_unref(object);
-				g_object_unref(mem_stream);
-				if (error) *error = g_error_new(SOND_ERROR, 0,
-						"%s\nGMimePart leer oder Fehler", __func__);
-				return NULL;
-			}
-			GByteArray* ba = g_mime_stream_mem_get_byte_array(GMIME_STREAM_MEM(mem_stream));
-			result = g_bytes_new(ba->data, ba->len);
-			g_object_unref(mem_stream);
+
+			mem_stream = g_mime_stream_mem_new();
+			length = g_mime_data_wrapper_write_to_stream(wrapper, mem_stream);
 		}
 		else {
 			g_object_unref(object);
@@ -526,6 +503,21 @@ static GBytes* sond_file_part_read_bytes_internal(SondFilePart* sfp_parent,
 					"%s\nGMimeObject ist kein zulässiger MimePart", __func__);
 			return NULL;
 		}
+
+		if (length <= 0) {
+			if (error) *error = g_error_new(SOND_ERROR, 0,
+					"%s\n%s leer oder __Fehler__", __func__,
+					GMIME_IS_MESSAGE_PART(object) ? "GMimeMessagePart" : "GMimePart");
+			g_object_unref(object);
+			g_object_unref(mem_stream);
+
+			return NULL;
+		}
+
+		GByteArray* ba = g_mime_stream_mem_get_byte_array(GMIME_STREAM_MEM(mem_stream));
+		gsize result_len = (max_len == -1) ? ba->len : MIN((gsize)max_len, ba->len);
+		result = g_bytes_new(ba->data, result_len);
+		g_object_unref(mem_stream);
 
 		g_object_unref(object);
 		return result;

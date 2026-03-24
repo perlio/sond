@@ -763,6 +763,16 @@ static void zond_treeviewfm_jump_activate(GtkMenuItem* item, gpointer data) {
 	return;
 }
 
+static void zond_treeviewfm_indexsuche_auswahl_activate(GtkMenuItem *item,
+		gpointer data) {
+	Projekt *zond = (Projekt*) data;
+	GHashTable* ht = NULL;
+
+	/* Auswahl im BAUM_FS als Pfad-Liste an Indexsuche übergeben */
+	zond_indexsuche_activate_with_selection(item, ht, zond);
+//			SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), zond);
+}
+
 ZondTreeviewFM* zond_treeviewfm_new(Projekt* zond) {
 	ZondTreeviewFM* ztvfm = NULL;
 	ZondTreeviewFMPrivate* ztvfm_priv = NULL;
@@ -791,24 +801,24 @@ ZondTreeviewFM* zond_treeviewfm_new(Projekt* zond) {
 			"Zur Anbindung springen");
 	gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu), item_jump);
 
-	//Callbacks für Index durchsuchen anschließen
-	GtkWidget *item_indexsuche_gesamt = g_object_get_data(
-			G_OBJECT(contextmenu), "item-indexsuche-gesamt");
-	if (item_indexsuche_gesamt)
-		g_signal_connect(item_indexsuche_gesamt, "activate",
-				G_CALLBACK(zond_indexsuche_activate), (gpointer) zond);
+	//Index durchsuchen
+	GtkWidget *item_indexsuche = gtk_menu_item_new_with_label("Index durchsuchen");
+	GtkWidget *menu_indexsuche = gtk_menu_new();
 
-	GtkWidget *item_indexsuche_auswahl = g_object_get_data(
-			G_OBJECT(contextmenu), "item-indexsuche-auswahl");
-	if (item_indexsuche_auswahl) {
-		g_signal_connect(item_indexsuche_auswahl, "activate",
-				G_CALLBACK(zond_indexsuche_activate), (gpointer) zond);
-		/* Nur sensitiv wenn FS-Ansicht sichtbar */
-		g_object_bind_property(
-				zond->fs_button, "active",
-				item_indexsuche_auswahl, "sensitive",
-				G_BINDING_SYNC_CREATE);
-	}
+	GtkWidget *item_indexsuche_gesamt = gtk_menu_item_new_with_label(
+			"Gesamtes Projektverzeichnis");
+	g_signal_connect(item_indexsuche_gesamt, "activate",
+			G_CALLBACK(zond_indexsuche_activate), (gpointer) zond);
+	gtk_menu_shell_append(GTK_MENU_SHELL(menu_indexsuche), item_indexsuche_gesamt);
+
+	GtkWidget *item_indexsuche_auswahl = gtk_menu_item_new_with_label(
+			"Ausgewählte Punkte");
+	g_signal_connect(item_indexsuche_auswahl, "activate",
+			G_CALLBACK(zond_treeviewfm_indexsuche_auswahl_activate), (gpointer) zond);
+	gtk_menu_shell_append(GTK_MENU_SHELL(menu_indexsuche), item_indexsuche_auswahl);
+
+	gtk_menu_item_set_submenu(GTK_MENU_ITEM(item_indexsuche), menu_indexsuche);
+	gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu), item_indexsuche);
 
 	gtk_widget_show_all(contextmenu);
 

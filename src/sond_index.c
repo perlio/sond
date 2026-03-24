@@ -1073,7 +1073,7 @@ static void sond_index_file_set(SondIndexCtx *ctx, gchar const *filename) {
 
 void sond_index(fz_context* ctx,
 		void (*log_func)(void*, gchar const*, ...), gpointer log_func_data,
-		SondIndexCtx  *sond_index_ctx, gchar const   *filename, guchar const  *buf,
+		SondIndexCtx  *sond_index_ctx, gchar const* filename, guchar const  *buf,
 		gsize size, gchar const *mime_type) {
     if (!sond_index_ctx) return;
     if (!mime_type) return;

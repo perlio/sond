@@ -168,7 +168,7 @@ static gchar const* sond_tvfm_item_get_basename(SondTVFMItem* stvfm_item) {
 static gint sond_tvfm_item_load_fs_dir(SondTVFMItem*, GPtrArray**, GError**);
 static gint sond_tvfm_item_load_zip_dir(SondTVFMItem*, GPtrArray**, GError**);
 
-char const* mime_type_to_icon_name_manual(const char *mime_type)
+static char const* mime_type_to_icon_name_manual(const char *mime_type)
 {
     if (!mime_type)
         return g_strdup("text-x-generic");
@@ -2890,52 +2890,6 @@ static void sond_treeviewfm_init_contextmenu(SondTreeviewFM *stvfm) {
 	gtk_menu_item_set_submenu(GTK_MENU_ITEM(item_search), menu_search);
 
 	gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu), item_search);
-
-	//Index erstellen
-	GtkWidget *item_indizieren = gtk_menu_item_new_with_label("Index erstellen");
-
-	GtkWidget *menu_indizieren = gtk_menu_new();
-
-	GtkWidget *item_indizieren_gesamt = gtk_menu_item_new_with_label(
-			"Gesamtes Projektverzeichnis");
-	g_object_set_data(G_OBJECT(contextmenu), "item-indizieren-gesamt",
-			item_indizieren_gesamt);
-	g_signal_connect(G_OBJECT(item_indizieren_gesamt), "activate",
-			G_CALLBACK(sond_treeviewfm_dateien_indizieren_gesamt_activate),
-			(gpointer) stvfm);
-	gtk_menu_shell_append(GTK_MENU_SHELL(menu_indizieren), item_indizieren_gesamt);
-
-	GtkWidget *item_indizieren_auswahl = gtk_menu_item_new_with_label(
-			"Ausgewählte Punkte");
-	g_object_set_data(G_OBJECT(contextmenu), "item-indizieren-auswahl",
-			item_indizieren_auswahl);
-	g_signal_connect(G_OBJECT(item_indizieren_auswahl), "activate",
-			G_CALLBACK(sond_treeviewfm_dateien_indizieren_auswahl_activate),
-			(gpointer) stvfm);
-	gtk_menu_shell_append(GTK_MENU_SHELL(menu_indizieren), item_indizieren_auswahl);
-
-	gtk_menu_item_set_submenu(GTK_MENU_ITEM(item_indizieren), menu_indizieren);
-	gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu), item_indizieren);
-
-	//Index durchsuchen
-	GtkWidget *item_indexsuche = gtk_menu_item_new_with_label("Index durchsuchen");
-
-	GtkWidget *menu_indexsuche = gtk_menu_new();
-
-	GtkWidget *item_indexsuche_gesamt = gtk_menu_item_new_with_label(
-			"Gesamtes Projektverzeichnis");
-	g_object_set_data(G_OBJECT(contextmenu), "item-indexsuche-gesamt",
-			item_indexsuche_gesamt);
-	gtk_menu_shell_append(GTK_MENU_SHELL(menu_indexsuche), item_indexsuche_gesamt);
-
-	GtkWidget *item_indexsuche_auswahl = gtk_menu_item_new_with_label(
-			"Ausgewählte Punkte");
-	g_object_set_data(G_OBJECT(contextmenu), "item-indexsuche-auswahl",
-			item_indexsuche_auswahl);
-	gtk_menu_shell_append(GTK_MENU_SHELL(menu_indexsuche), item_indexsuche_auswahl);
-
-	gtk_menu_item_set_submenu(GTK_MENU_ITEM(item_indexsuche), menu_indexsuche);
-	gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu), item_indexsuche);
 
 	gtk_widget_show_all(contextmenu);
 

@@ -86,12 +86,13 @@ static gint zond_treeview_get_root(ZondTreeview *ztv, gint node_id, gint *root,
 	return 0;
 }
 
+static gint zond_treeview_get_filepart_and_section(ZondTreeview *ztv, GtkTreeIter *iter,
+		gchar **file_part, gchar** section, GError **error);
+
 void zond_treeview_cursor_changed(ZondTreeview *treeview, gpointer user_data) {
 	gint rc = 0;
 	gint node_id = 0;
 	GtkTreeIter iter = { 0, };
-	gint type = 0;
-	gint link = 0;
 	gchar *file_part = NULL;
 	gchar *section = NULL;
 	gchar *text_label = NULL;
@@ -123,11 +124,9 @@ void zond_treeview_cursor_changed(ZondTreeview *treeview, gpointer user_data) {
 			rc = zond_treeview_get_root(treeview, zond->node_id_extra, &root,
 					&error);
 			if (rc) {
-				text_label = g_strconcat("Fehler in ", __func__, "\n",
-						error->message, NULL);
+				LOG_WARN("%s\n%s", __func__, error->message);
 				g_error_free(error);
-				gtk_label_set_text(zond->label_status, text_label);
-				g_free(text_label);
+				gtk_label_set_text(zond->label_status, "*** Error *** - siehe Log");
 
 				return;
 			}
@@ -153,50 +152,25 @@ void zond_treeview_cursor_changed(ZondTreeview *treeview, gpointer user_data) {
 		return;
 	}
 
-	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(treeview)), &iter,
-			2, &node_id, -1);
+    node_id = zond_treeview_get_filepart_and_section(ZOND_TREEVIEW(treeview), &iter, &file_part,
+			&section, &error);
+    if (node_id == -1) {
+    	LOG_WARN("%s\n%s", __func__, error->message);
+    	g_error_free(error);
+    	gtk_label_set_text(zond->label_status, "*** Error *** - siehe Log");
+    	return;
+    }
 
-	//Wenn gleicher Knoten: direkt zurück
-	if (node_id == zond->node_id_act)
-		return;
-
-	//status_label setzen
-	rc = zond_dbase_get_node(zond->dbase_zond->zond_dbase_work, node_id, &type,
-			&link, &file_part, &section, NULL, NULL, NULL, &error);
-	if (rc) {
-		text_label = g_strconcat("Fehler in ", __func__, ":\n", error->message,
-				NULL);
-		g_error_free(error);
-		gtk_label_set_text(zond->label_status, text_label);
-		g_free(text_label);
-
+    //Wenn gleicher Knoten: direkt zurück
+	if (node_id == zond->node_id_act){
+		g_free(file_part);
+		g_free(section);
 		return;
 	}
 
-	if (type == ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_COPY) { //dann link-node holen
-		gint rc = 0;
-		gint node_id_link = 0;
-
-		node_id_link = link;
-
-		rc = zond_dbase_get_node(zond->dbase_zond->zond_dbase_work,
-				node_id_link, &type, &link, &file_part, &section, NULL, NULL,
-				NULL, &error);
-		if (rc) {
-			text_label = g_strconcat("Fehler in ", __func__, "\n",
-					error->message, NULL);
-			g_error_free(error);
-			gtk_label_set_text(zond->label_status, text_label);
-			g_free(text_label);
-
-			return;
-		}
-	}
-
-	if (type == ZOND_DBASE_TYPE_BAUM_STRUKT)
-		text_label = g_strdup("");
-	else
-		text_label = g_strdup_printf("%s - %s", file_part, section);
+	text_label = file_part ?
+			(section ? g_strdup_printf("%s (%s)", file_part, section) :
+					g_strdup(file_part)) : g_strdup("");
 
 	g_free(file_part);
 	g_free(section);
@@ -236,11 +210,9 @@ void zond_treeview_cursor_changed(ZondTreeview *treeview, gpointer user_data) {
             rc = zond_dbase_get_text(zond->dbase_zond->zond_dbase_work, node_id,
                     &text, &error);
             if (rc) {
-                text_label = g_strconcat("Fehler in ", __func__, ": Bei Aufruf "
-                        "zond_dbase_get_text: ", error->message, NULL);
-                g_error_free(error);
-                gtk_label_set_text(zond->label_status, text_label);
-                g_free(text_label);
+    			LOG_WARN("%s\n%s", __func__, error->message);
+    			g_error_free(error);
+    			gtk_label_set_text(zond->label_status, "*** Error *** - siehe Log");
 
                 return;
             }
@@ -358,23 +330,7 @@ static void zond_treeview_render_node_text(GtkTreeViewColumn *column,
 	return;
 }
 
-static void zond_treeview_constructed(GObject *self) {
-	//Die Signale
-	//Zeile expandiert oder kollabiert
-	g_signal_connect(self, "row-expanded",
-			G_CALLBACK(gtk_tree_view_columns_autosize), NULL);
-	g_signal_connect(self, "row-collapsed",
-			G_CALLBACK(gtk_tree_view_columns_autosize), NULL);
-
-	//chain-up
-	G_OBJECT_CLASS(zond_treeview_parent_class)->constructed(self);
-
-	return;
-}
-
 static void zond_treeview_class_init(ZondTreeviewClass *klass) {
-	G_OBJECT_CLASS(klass)->constructed = zond_treeview_constructed;
-
 	SOND_TREEVIEW_CLASS(klass)->render_text_cell =
 			zond_treeview_render_node_text;
 	SOND_TREEVIEW_CLASS(klass)->text_edited = zond_treeview_text_edited;
@@ -399,6 +355,12 @@ static void zond_treeview_init(ZondTreeview *ztv) {
 			gtk_tree_view_get_column(GTK_TREE_VIEW(ztv), 0),
 			sond_treeview_get_cell_renderer_text(SOND_TREEVIEW(ztv)), "text", 1,
 			NULL);
+
+	//Zeile expandiert oder kollabiert
+	g_signal_connect(ztv, "row-expanded",
+			G_CALLBACK(gtk_tree_view_columns_autosize), NULL);
+	g_signal_connect(ztv, "row-collapsed",
+			G_CALLBACK(gtk_tree_view_columns_autosize), NULL);
 
 	return;
 }
@@ -2375,31 +2337,16 @@ static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 	gchar *file_part = NULL;
 	gchar *section = NULL;
 	gint node_id = 0;
-	gint type = 0;
-	gint link = 0;
 	SondFilePart* sfp = NULL;
 
-	gtk_tree_model_get(GTK_TREE_MODEL(zond_tree_store_get_tree_store(iter)),
-			iter, 2, &node_id, -1);
-
-	rc = zond_dbase_get_node(zond->dbase_zond->zond_dbase_work, node_id, &type,
-			&link, &file_part, &section, NULL, NULL, NULL, error);
-	if (rc)
+	node_id = zond_treeview_get_filepart_and_section(
+			ZOND_TREEVIEW(zond->treeview[zond->baum_active]),
+			iter, &file_part, &section, error);
+	if (node_id == -1)
 		ERROR_Z
 
-	if (type == ZOND_DBASE_TYPE_BAUM_STRUKT)
-		return 0;
-	else if (type == ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_COPY) {
-		gint rc = 0;
-
-		//g_free( file_part ) überflüssig - wird in AUSWERTUNG_COPY nicht gespeichtert
-		//Neu für link abfragen - da ist ja die Info
-		node_id = link;
-		rc = zond_dbase_get_node(zond->dbase_zond->zond_dbase_work, node_id,
-				NULL, NULL, &file_part, &section, NULL, NULL, NULL, error);
-		if (rc)
-			ERROR_Z
-	}
+	if (!file_part)
+		return 0; //nichts zu öffnen
 
 	sfp = sond_file_part_from_filepart(file_part, error);
 	g_free(file_part);
@@ -2543,24 +2490,6 @@ static void zond_treeview_icon_activate(GtkMenuItem *item, gpointer user_data) {
 	}
 
 	return;
-}
-
-static void zond_treeview_index_erstellen_activate(GtkMenuItem *item,
-		gpointer data) {
-	Projekt *zond = (Projekt*) data;
-
-	if (!zond->wctx)
-		return;
-
-	SOND_TREEVIEWFM_GET_CLASS(zond->treeview[BAUM_FS])->get_wctx(
-			SOND_TREEVIEWFM(zond->treeview[BAUM_FS]));
-
-	/* Indizierung über den sond_treeviewfm des BAUM_FS ausführen */
-	gtk_menu_item_activate(GTK_MENU_ITEM(
-			g_object_get_data(
-					G_OBJECT(sond_treeview_get_contextmenu(
-							SOND_TREEVIEW(zond->treeview[BAUM_FS]))),
-					"item-indizieren-gesamt")));
 }
 
 static void zond_treeview_init_contextmenu(ZondTreeview *ztv) {
@@ -2745,34 +2674,6 @@ static void zond_treeview_init_contextmenu(ZondTreeview *ztv) {
 			G_CALLBACK(zond_treeview_datei_oeffnen_mit_activate),
 			(gpointer ) zond);
 	gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu), item_datei_oeffnen_mit);
-
-	GtkWidget *item_separator_index = gtk_separator_menu_item_new();
-	gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu), item_separator_index);
-
-	//Index erstellen
-	GtkWidget *item_index_erstellen = gtk_menu_item_new_with_label("Index erstellen");
-	GtkWidget *menu_index_erstellen = gtk_menu_new();
-	GtkWidget *item_index_erstellen_gesamt = gtk_menu_item_new_with_label(
-			"Gesamtes Projektverzeichnis");
-	g_signal_connect(item_index_erstellen_gesamt, "activate",
-			G_CALLBACK(zond_treeview_index_erstellen_activate),
-			(gpointer) zond);
-	gtk_menu_shell_append(GTK_MENU_SHELL(menu_index_erstellen),
-			item_index_erstellen_gesamt);
-	gtk_menu_item_set_submenu(GTK_MENU_ITEM(item_index_erstellen),
-			menu_index_erstellen);
-	gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu), item_index_erstellen);
-
-	//Index durchsuchen
-	GtkWidget *item_indexsuche = gtk_menu_item_new_with_label("Index durchsuchen");
-	GtkWidget *menu_indexsuche = gtk_menu_new();
-	GtkWidget *item_indexsuche_gesamt = gtk_menu_item_new_with_label(
-			"Gesamtes Projektverzeichnis");
-	g_signal_connect(item_indexsuche_gesamt, "activate",
-			G_CALLBACK(zond_indexsuche_activate), (gpointer) zond);
-	gtk_menu_shell_append(GTK_MENU_SHELL(menu_indexsuche), item_indexsuche_gesamt);
-	gtk_menu_item_set_submenu(GTK_MENU_ITEM(item_indexsuche), menu_indexsuche);
-	gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu), item_indexsuche);
 
 	gtk_widget_show_all(contextmenu);
 
@@ -3008,5 +2909,114 @@ zond_treeview_get_path(SondTreeview *treeview, gint node_id) {
 			(GtkTreeModelForeachFunc) zond_treeview_foreach_path, &path);
 
 	return path;
+}
+
+static gint zond_treeview_get_filepart_and_section(ZondTreeview *ztv, GtkTreeIter *iter,
+		gchar **file_part, gchar** section, GError **error) {
+	gint node_id = 0;
+	gint type = 0;
+	gint link = 0;
+	gchar* file_part_local = NULL;
+	gchar* section_local = NULL;
+	gint rc = 0;
+
+	ZondTreeviewPrivate *ztv_priv = zond_treeview_get_instance_private(ztv);
+
+	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(ztv)), iter, 2,
+			&node_id, -1);
+
+	rc = zond_dbase_get_node(ztv_priv->zond->dbase_zond->zond_dbase_work, node_id,
+			&type, &link, &file_part_local, &section_local, NULL, NULL, NULL, error);
+	if (rc)
+		ERROR_Z
+
+	if (type == ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_COPY) {
+		gint rc = 0;
+
+		rc = zond_dbase_get_node(ztv_priv->zond->dbase_zond->zond_dbase_work,
+				link, NULL, NULL, &file_part_local, &section_local, NULL, NULL, NULL,
+				error);
+		if (rc)
+			ERROR_Z
+	}
+
+	if (file_part)
+		*file_part = file_part_local;
+	else
+		g_free(file_part_local);
+
+	if (section)
+		*section = section_local;
+	else
+		g_free(section_local);
+
+	return node_id;
+}
+
+gint zond_treeview_get_all_selected_fileparts_foreach(ZondTreeview *ztv,
+		GtkTreeIter *iter, gpointer data, GError **error) {
+	gint node_id = 0;
+	gchar *file_part = NULL;
+
+	GHashTable *ht_fileparts = (GHashTable*) data;
+
+	node_id = zond_treeview_get_filepart_and_section(ztv, iter, &file_part, NULL, error);
+	if (node_id == -1)
+		ERROR_Z
+
+	g_hash_table_add(ht_fileparts, file_part);
+
+	return 0;
+}
+
+GHashTable* zond_treeview_get_all_selected_fileparts(ZondTreeview *ztv,
+		GError **error) {
+	GHashTable *ht_fileparts = NULL;
+	gint rc = 0;
+
+	ht_fileparts = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+
+	rc = sond_treeview_selection_foreach(SOND_TREEVIEW(ztv),
+			(gint(*)(SondTreeview*, GtkTreeIter*, gpointer, GError**))
+			zond_treeview_get_all_selected_fileparts_foreach, ht_fileparts, error);
+
+	if (rc) {
+		g_hash_table_destroy(ht_fileparts);
+		ERROR_Z_VAL(NULL)
+	}
+
+	return ht_fileparts;
+}
+
+GHashTable* zond_treeview_get_all_selected_files(ZondTreeview *ztv, GError **error) {
+	GHashTable *ht_files = NULL;
+	GHashTable *ht_fileparts = NULL;
+
+	ht_files = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+
+	ht_fileparts = zond_treeview_get_all_selected_fileparts(ztv, error);
+	if (!ht_fileparts)
+		ERROR_Z_VAL(NULL)
+
+	GHashTableIter iter;
+	gpointer key, value;
+
+	g_hash_table_iter_init(&iter, ht_fileparts);
+	while (g_hash_table_iter_next(&iter, &key, &value)) {
+		gchar* file = NULL;
+
+		const gchar *pos = g_strstr_len((const gchar*) key, -1, "//");
+		if (pos != NULL)
+		    file = g_strndup((const gchar*) key, pos - (const gchar*) key);  // → "foo/bar"
+		else
+		    // kein "//" enthalten → ganzer String ist das Ergebnis
+		    file = g_strdup((const gchar*) key);
+
+		g_hash_table_add(ht_files, file); //sfp wird in ht_files verwaltet
+	}
+
+	g_hash_table_destroy(ht_fileparts);
+
+	return ht_files;
 }
 

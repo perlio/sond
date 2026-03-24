@@ -150,8 +150,8 @@ zond_indexsuche_row_activated(GtkTreeView *treeview, GtkTreePath *tree_path,
  * Öffentliche Funktion: Dialog + Ergebnisanzeige
  * ---------------------------------------------------------------------- */
 
-void
-zond_indexsuche_activate(Projekt *zond) {
+static void
+zond_indexsuche_do(Projekt *zond, GHashTable* ht_fileparts) {
     GtkWidget *dialog     = NULL;
     GtkWidget *content    = NULL;
     GtkWidget *grid       = NULL;
@@ -234,6 +234,54 @@ zond_indexsuche_activate(Projekt *zond) {
                 return;
             }
 
+            /* Treffer auf Auswahl filtern wenn gewünscht */
+            if (ht_fileparts && hits->len > 0) {
+
+            	SondTVFMItem* stvfm_filter = NULL;
+
+
+                GtkTreeSelection *sel = gtk_tree_view_get_selection(
+                        GTK_TREE_VIEW(stvfm_filter));
+                GList *selected_rows = gtk_tree_selection_get_selected_rows(
+                        sel, NULL);
+                if (selected_rows) {
+                    GPtrArray *filtered = g_ptr_array_new_with_free_func(
+                            sond_index_hit_free);
+                    for (guint i = 0; i < hits->len; i++) {
+                        SondIndexHit *hit = g_ptr_array_index(hits, i);
+                        gboolean keep = FALSE;
+                        for (GList *l = selected_rows; l; l = l->next) {
+                            GtkTreeIter iter_sel = { 0 };
+                            SondTVFMItem *item = NULL;
+                            gtk_tree_model_get_iter(
+                                    gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm_filter)),
+                                    &iter_sel, (GtkTreePath*) l->data);
+                            gtk_tree_model_get(
+                                    gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm_filter)),
+                                    &iter_sel, 0, &item, -1);
+                            if (item) {
+                                gchar *fp = sond_file_part_get_filepart(
+                                        sond_tvfm_item_get_sond_file_part(item));
+                                if (fp && g_str_has_prefix(hit->filename, fp))
+                                    keep = TRUE;
+                                g_free(fp);
+                                g_object_unref(item);
+                            }
+                            if (keep) break;
+                        }
+                        if (keep) {
+                            g_ptr_array_add(filtered, hit);
+                            /* Eigentumsübertragung: aus hits entfernen ohne free */
+                            g_ptr_array_index(hits, i) = NULL;
+                        }
+                    }
+                    g_list_free_full(selected_rows,
+                            (GDestroyNotify) gtk_tree_path_free);
+                    g_ptr_array_unref(hits);
+                    hits = filtered;
+                }
+            }
+
             if (hits->len == 0) {
                 gtk_widget_destroy(dialog);
                 g_ptr_array_unref(hits);
@@ -287,4 +335,15 @@ zond_indexsuche_activate(Projekt *zond) {
     }
 
     gtk_widget_destroy(dialog);
+}
+
+void
+zond_indexsuche_activate(GtkMenuItem *item, gpointer data) {
+    zond_indexsuche_do((Projekt*) data, NULL);
+}
+
+void
+zond_indexsuche_activate_with_selection(GtkMenuItem *item,
+		GHashTable* ht_fileparts, gpointer data) {
+    zond_indexsuche_do((Projekt*) data, ht_fileparts);
 }

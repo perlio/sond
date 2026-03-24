@@ -972,13 +972,22 @@ static void zond_treeview_index_erstellen_activate_hb(GtkMenuItem *item,
 static void zond_treeview_index_erstellen_sel_activate_hb(GtkMenuItem *item,
 		gpointer data) {
 	Projekt *zond = (Projekt*) data;
-	if (!gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(zond->fs_button)))
-		return;
 	gtk_menu_item_activate(GTK_MENU_ITEM(
 			g_object_get_data(
 					G_OBJECT(sond_treeview_get_contextmenu(
 							SOND_TREEVIEW(zond->treeview[BAUM_FS]))),
 					"item-indizieren-auswahl")));
+}
+
+static void zond_indexsuche_auswahl_activate_hb(GtkMenuItem *item,
+		gpointer data) {
+	Projekt *zond = (Projekt*) data;
+
+	if (zond->baum_active == BAUM_FS)
+		zond_indexsuche_activate_with_selection(item,
+				NULL, data);
+	else
+		zond_indexsuche_activate(item, data);
 }
 
 static GtkWidget*
@@ -1041,14 +1050,8 @@ create_menu_projekt(Projekt *zond, GtkAccelGroup *accel_group) {
 			G_CALLBACK(zond_indexsuche_activate), zond, menu_indexsuche);
 	GtkWidget *item_indexsuche_sel = create_and_connect_menu_item(
 			"Ausgewählte Punkte",
-			G_CALLBACK(zond_indexsuche_activate), zond, menu_indexsuche);
+			G_CALLBACK(zond_indexsuche_auswahl_activate_hb), zond, menu_indexsuche);
 	gtk_menu_item_set_submenu(GTK_MENU_ITEM(item_indexsuche), menu_indexsuche);
-
-	/* "Ausgewählte Punkte" nur sensitiv wenn FS-Ansicht aktiv */
-	g_object_bind_property(zond->fs_button, "active",
-			item_index_erstellen_sel, "sensitive", G_BINDING_SYNC_CREATE);
-	g_object_bind_property(zond->fs_button, "active",
-			item_indexsuche_sel, "sensitive", G_BINDING_SYNC_CREATE);
 
 	append_separator(projektmenu);
 
@@ -1211,11 +1214,6 @@ create_menu_pdf(Projekt *zond, GtkAccelGroup *accel_group) {
 
 	create_and_connect_menu_item("OCR",
 			G_CALLBACK(cb_datei_ocr), zond, menu_dateien);
-
-	append_separator(menu_dateien);
-
-	create_and_connect_menu_item("Index durchsuchen",
-			G_CALLBACK(zond_indexsuche_activate), zond, menu_dateien);
 
 	return menu_dateien;
 }
