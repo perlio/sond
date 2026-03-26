@@ -74,6 +74,9 @@ gint sond_tvfm_item_load_children(SondTVFMItem*, GPtrArray**, GError**);
 gint sond_treeviewfm_file_part_visible(SondTreeviewFM*, GtkTreeIter*,
 		gchar const*, gboolean, GtkTreeIter*, GError**);
 
+gint sond_treeviewfm_create_index(SondTreeviewFM *stv, gboolean selected_only,
+		SondProcessFileCtx* wctx, GError **error);
+
 gint sond_treeviewfm_set_root(SondTreeviewFM*, const gchar*, gchar**);
 
 const gchar* sond_treeviewfm_get_root(SondTreeviewFM*);

@@ -2953,7 +2953,7 @@ static gint zond_treeview_get_filepart_and_section(ZondTreeview *ztv, GtkTreeIte
 	return node_id;
 }
 
-gint zond_treeview_get_all_selected_fileparts_foreach(ZondTreeview *ztv,
+static gint zond_treeview_get_all_selected_fileparts_foreach(ZondTreeview *ztv,
 		GtkTreeIter *iter, gpointer data, GError **error) {
 	gint node_id = 0;
 	gchar *file_part = NULL;
@@ -2987,36 +2987,3 @@ GHashTable* zond_treeview_get_all_selected_fileparts(ZondTreeview *ztv,
 
 	return ht_fileparts;
 }
-
-GHashTable* zond_treeview_get_all_selected_files(ZondTreeview *ztv, GError **error) {
-	GHashTable *ht_files = NULL;
-	GHashTable *ht_fileparts = NULL;
-
-	ht_files = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
-
-	ht_fileparts = zond_treeview_get_all_selected_fileparts(ztv, error);
-	if (!ht_fileparts)
-		ERROR_Z_VAL(NULL)
-
-	GHashTableIter iter;
-	gpointer key, value;
-
-	g_hash_table_iter_init(&iter, ht_fileparts);
-	while (g_hash_table_iter_next(&iter, &key, &value)) {
-		gchar* file = NULL;
-
-		const gchar *pos = g_strstr_len((const gchar*) key, -1, "//");
-		if (pos != NULL)
-		    file = g_strndup((const gchar*) key, pos - (const gchar*) key);  // → "foo/bar"
-		else
-		    // kein "//" enthalten → ganzer String ist das Ergebnis
-		    file = g_strdup((const gchar*) key);
-
-		g_hash_table_add(ht_files, file); //sfp wird in ht_files verwaltet
-	}
-
-	g_hash_table_destroy(ht_fileparts);
-
-	return ht_files;
-}
-

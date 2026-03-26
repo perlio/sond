@@ -24,6 +24,7 @@
 typedef struct _SondOcrPool SondOcrPool;
 typedef struct _SondIndexCtx SondIndexCtx;
 typedef struct _GError GError;
+typedef struct _GHashTable GHashTable;
 typedef char gchar;
 typedef unsigned char guchar;
 typedef void* gpointer;
@@ -48,9 +49,11 @@ typedef struct _SondProcessFileCtx {
     SondIndexCtx *index_ctx;  /* NULL → keine Indizierung */
 } SondProcessFileCtx;
 
-void sond_process_file(SondProcessFileCtx* wctx,
+gint sond_process_file(SondProcessFileCtx* wctx,
 		guchar* data, gsize size, gchar const* filename,
 		guchar** out_data, gsize* out_size, gint* out_pdf_count);
+
+gint sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files);
 
 SondProcessFileCtx* sond_process_file_create_wctx(fz_context* ctx,
 		void (*log_func)(void*, gchar const*, ...), gpointer log_func_data,

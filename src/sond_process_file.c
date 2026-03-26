@@ -27,6 +27,7 @@
 
 #include "sond_ocr.h"
 #include "sond_index.h"
+#include "sond_fileparts.h"
 #include "sond_gmessage_helper.h"
 #include "sond_pdf_helper.h"
 #include "sond_misc.h"
@@ -562,8 +563,7 @@ static gint process_pdf_for_ocr(guchar* data, gsize size,
 	len = fz_buffer_storage(wctx->ctx, buf, &data_buf);
 
 	/* eigene Kopie anlegen */
-	*out_data = fz_malloc(wctx->ctx, len);
-	memcpy(*out_data, data_buf, len);
+	*out_data = g_memdup2(data_buf, len);
 	*out_size = len;
 
 	/* buffer freigeben */
@@ -628,7 +628,7 @@ static void sond_process_file_do_rec(SondProcessFileCtx* wctx,
 	return;
 }
 
-void sond_process_file(SondProcessFileCtx* wctx,
+gint sond_process_file(SondProcessFileCtx* wctx,
 		guchar* data, gsize size, gchar const* filename,
 		guchar** out_data, gsize* out_size, gint* out_pdf_count) {
 	if (wctx->index_ctx) {
@@ -645,7 +645,119 @@ void sond_process_file(SondProcessFileCtx* wctx,
 
 	sond_process_file_do_rec(wctx, data, size, filename, out_data, out_size, out_pdf_count);
 
-	return;
+	return 0;
+}
+
+static void clean_hashtable(GHashTable* files) {
+	GSList *to_remove = NULL;
+
+	// Erst alle zu löschenden Elemente sammeln
+	GHashTableIter iter;
+	gpointer key;
+
+	g_hash_table_iter_init(&iter, files);
+	while (g_hash_table_iter_next(&iter, &key, NULL))
+	{
+		GPtrArray* arr_children = NULL;
+
+	    SondFilePart* sfp = SOND_FILE_PART(key);
+	    arr_children = sond_file_part_get_arr_opened_files(sfp);
+
+	    for (guint i = 0; i < arr_children->len; i++)
+	    {
+	        SondFilePart* sfp_child = g_ptr_array_index(arr_children, i);
+
+	        if (g_hash_table_contains(files, sfp_child))
+	            to_remove = g_slist_prepend(to_remove, sfp_child);
+	    }
+	}
+
+	// Dann löschen
+	for (GSList *l = to_remove; l; l = l->next)
+	    g_hash_table_remove(files, l->data);
+
+	g_slist_free(to_remove);
+}
+
+gint sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files) {
+	GHashTableIter iter = { 0 };
+	gpointer key = NULL;
+
+	clean_hashtable(files);
+
+	g_hash_table_iter_init(&iter, files);
+	while (g_hash_table_iter_next(&iter, &key, NULL)) {
+		GBytes *bytes = NULL;
+		gconstpointer data = NULL;
+		GError* error = NULL;
+		gsize length = 0;
+		gchar* file_part = NULL;
+		guchar* out_data = NULL;
+		gsize out_size = 0;
+		gint out_pdf_count = 0;
+		gint rc = 0;
+
+		SondFilePart* sfp = SOND_FILE_PART(key);
+		file_part = sond_file_part_get_filepart(sfp);
+
+		bytes = sond_file_part_get_bytes(sfp, &error);
+		if (!bytes) {
+			if (wctx->log_func) {
+				wctx->log_func(wctx->log_func_data,
+						"sond_process_fileparts: get_bytes '%s': %s",
+						sond_file_part_get_filepart(sfp),
+						error ? error->message : "unknown error");
+				g_error_free(error);
+			}
+			g_free(file_part);
+
+			continue;
+		}
+
+		data = g_bytes_get_data(bytes, &length);
+
+		rc = sond_process_file(wctx, (guchar*) data, length, file_part,
+				&out_data, &out_size, &out_pdf_count);
+		g_bytes_unref(bytes);
+		if (rc == -1) {
+			if (wctx->log_func) {
+				wctx->log_func(wctx->log_func_data,
+						"sond_process_fileparts: process_file '%s': %s",
+						file_part,
+						error ? error->message : "unknown error");
+				g_error_free(error);
+			}
+			g_free(file_part);
+
+			continue;
+		}
+		else if (rc == 1) {
+			g_free(file_part);
+
+			return 1; //Abbruchsignal von sond_process_file weitergeben
+		}
+
+		if (out_data && out_size > 0) {
+			GBytes* out_bytes = g_bytes_new_take(out_data, out_size);
+			gint rc = sond_file_part_replace(sfp, out_bytes, &error);
+			g_bytes_unref(out_bytes);
+			if (rc) {
+				if (wctx->log_func) {
+					wctx->log_func(wctx->log_func_data,
+							"sond_process_fileparts: replace '%s': %s",
+							file_part,
+							error ? error->message : "unknown error");
+					g_error_free(error);
+				}
+				g_free(file_part);
+
+				continue;
+			}
+		}
+		g_free(file_part);
+	}
+
+	return 0;
 }
 
 SondProcessFileCtx* sond_process_file_create_wctx(fz_context* ctx,
