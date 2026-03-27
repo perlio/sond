@@ -2969,7 +2969,7 @@ static gint zond_treeview_get_all_selected_fileparts_foreach(ZondTreeview *ztv,
 	return 0;
 }
 
-GHashTable* zond_treeview_get_all_selected_fileparts(ZondTreeview *ztv,
+GHashTable* zond_treeview_get_selected_fileparts(ZondTreeview *ztv,
 		GError **error) {
 	GHashTable *ht_fileparts = NULL;
 	gint rc = 0;

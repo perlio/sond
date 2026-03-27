@@ -511,7 +511,6 @@ static gint process_pdf_for_ocr(guchar* data, gsize size,
 	fz_stream* file = NULL;
 	fz_buffer* buf = NULL;
 	gint rc = 0;
-	SondOcrPool* ocr_pool = wctx->ocr_pool;
 
 	ProcessPdfData process_data = {filename, wctx, out_pdf_count};
 
@@ -543,7 +542,7 @@ static gint process_pdf_for_ocr(guchar* data, gsize size,
 	}
 
 	//pdf-page-tree OCRen
-	rc = sond_ocr_pdf_doc(wctx->ctx, ocr_pool, doc,
+	rc = sond_ocr_pdf_doc(wctx->ctx, wctx->ocr_pool, doc,
 			wctx->log_func, wctx->log_func_data, error);
 	if (rc) {
 		pdf_drop_document(wctx->ctx, doc);

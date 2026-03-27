@@ -50,6 +50,8 @@ gint zond_treeview_load_baum(ZondTreeview*, GError**);
 
 GtkTreePath* zond_treeview_get_path(SondTreeview*, gint);
 
+GHashTable* zond_treeview_get_selected_fileparts(ZondTreeview *ztv,
+		GError **error);
 G_END_DECLS
 
 #endif // SOND_TREEVIEW_H_INCLUDED

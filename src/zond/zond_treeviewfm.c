@@ -695,12 +695,6 @@ static void zond_treeviewfm_finalize(GObject *obj) {
 	G_OBJECT_CLASS(zond_treeviewfm_parent_class)->finalize(obj);
 }
 
-static SondProcessFileCtx* zond_treeviewfm_get_wctx(SondTreeviewFM *stvfm) {
-	ZondTreeviewFMPrivate *priv = zond_treeviewfm_get_instance_private(
-			ZOND_TREEVIEWFM(stvfm));
-	return priv->zond->wctx;
-}
-
 static void zond_treeviewfm_class_init(ZondTreeviewFMClass *klass) {
 	G_OBJECT_CLASS(klass)->finalize = zond_treeviewfm_finalize;
 
@@ -714,7 +708,6 @@ static void zond_treeviewfm_class_init(ZondTreeviewFMClass *klass) {
 	SOND_TREEVIEWFM_CLASS(klass)->load_sections = zond_treeviewfm_load_sections;
 	SOND_TREEVIEWFM_CLASS(klass)->has_sections = zond_treeviewfm_has_sections;
 	SOND_TREEVIEWFM_CLASS(klass)->delete_section = zond_treeviewfm_delete_section;
-	SOND_TREEVIEWFM_CLASS(klass)->get_wctx = zond_treeviewfm_get_wctx;
 
 	return;
 }

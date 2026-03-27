@@ -1506,7 +1506,6 @@ static void sond_treeviewfm_class_init(SondTreeviewFMClass *klass) {
 	klass->text_edited = sond_treeviewfm_text_edited;
 	klass->results_row_activated = sond_treeviewfm_results_row_activated;
 	klass->open_stvfm_item = sond_treeviewfm_open_stvfm_item;
-	klass->get_wctx = NULL;
 
 	return;
 }
@@ -2651,8 +2650,8 @@ static gint sond_treeviewfm_get_fileparts_foreach(SondTreeview *stv,
 	return 0;
 }
 
-gint sond_treeviewfm_create_index(SondTreeviewFM *stvfm, gboolean selected_only,
-		SondProcessFileCtx* wctx, GError **error) {
+GHashTable* sond_treeviewfm_get_fileparts(SondTreeviewFM *stvfm, gboolean selected_only,
+		GError **error) {
 	GHashTable* ht = NULL;
 	gint rc = 0;
 
@@ -2669,18 +2668,9 @@ gint sond_treeviewfm_create_index(SondTreeviewFM *stvfm, gboolean selected_only,
 		g_object_unref(stvfm_item);
 	}
 	if (rc)
-		ERROR_Z
+		ERROR_Z_VAL(NULL)
 
-	rc = sond_process_fileparts(wctx, ht, error);
-	g_hash_table_destroy(ht);
-	if (rc == -1)
-		ERROR_Z
-	else if (rc == 1) {
-		if (wctx->log_func)
-			wctx->log_func(wctx->log_func_data, "Indizierung abgebrochen");
-	}
-
-	return 0;
+		return ht;
 }
 
 static void sond_treeviewfm_init_contextmenu(SondTreeviewFM *stvfm) {

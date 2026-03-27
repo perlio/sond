@@ -33,6 +33,7 @@
 #include "../../sond_treeviewfm.h"
 #include "../../sond_log_and_error.h"
 #include "../../sond_file_helper.h"
+#include "../../sond_process_file.h"
 
 #include "../zond_pdf_document.h"
 
@@ -959,24 +960,81 @@ static void cb_button_mode_toggled(GtkToggleButton *button, gpointer data) {
 /**
  * Erstellt das Projekt-Menü
  */
-static void zond_treeview_index_erstellen_activate_hb(GtkMenuItem *item,
-		gpointer data) {
-	Projekt *zond = (Projekt*) data;
-	gtk_menu_item_activate(GTK_MENU_ITEM(
-			g_object_get_data(
-					G_OBJECT(sond_treeview_get_contextmenu(
-							SOND_TREEVIEW(zond->treeview[BAUM_FS]))),
-					"item-indizieren-gesamt")));
+struct _ThreadDataIndex {
+	SondTreeviewFM *treeviewfm;
+	SondProcessFileCtx *wctx;
+	GHashTable *ht_index;
+	gint done;
+};
+
+static gpointer do_index_thread(gpointer data) {
+	struct _ThreadDataIndex* thread_data = (struct _ThreadDataIndex*) data;
+
+	sond_process_fileparts(thread_data->wctx, thread_data->ht_index);
+
+	g_atomic_int_set(&thread_data->done, 1);
+
+	return NULL;
 }
 
-static void zond_treeview_index_erstellen_sel_activate_hb(GtkMenuItem *item,
+static void do_index_erstellen(Projekt *zond, gboolean sel_only) {
+	GError* error = NULL;
+	GHashTable *ht_index = NULL;
+	InfoWindow *info_window = NULL;
+
+	if (zond->baum_active == BAUM_FS || !sel_only)
+		ht_index = sond_treeviewfm_get_fileparts(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
+				sel_only, &error);
+	else
+		ht_index = zond_treeview_get_selected_fileparts(
+				ZOND_TREEVIEW(zond->treeview[zond->baum_active]),
+				&error);
+
+	if (!ht_index) {
+		display_message(zond->app_window, "Fehler beim Erstellen des Index:\n",
+				error->message, NULL);
+		g_error_free(error);
+		return;
+	}
+
+	info_window = info_window_open(zond->app_window, "Index erstellen");
+	zond->wctx->log_func_data = (gpointer) info_window;
+
+	struct _ThreadDataIndex* thread_data = g_new0(struct _ThreadDataIndex, 1);
+	thread_data->treeviewfm = SOND_TREEVIEWFM(zond->treeview[BAUM_FS]);
+	thread_data->ht_index = ht_index;
+	thread_data->wctx = zond->wctx;
+
+	info_window_set_message(info_window, "Indizierung wird gestartet");
+
+	GThread* thread = g_thread_new("ocr-doc", do_index_thread, thread_data);
+	if (!thread) {
+		info_window_set_message(info_window, "Thread konnte nicht erzeugt werden");
+
+	while (!g_atomic_int_get(&thread_data->done))
+	    gtk_main_iteration_do(FALSE);
+
+	g_thread_join(thread);
+	g_free(thread_data);
+
+	info_window_close(info_window);
+
+	return;
+}
+
+
+
+	return;
+}
+
+static void cb_index_erstellen_activate(GtkMenuItem *item,
 		gpointer data) {
-	Projekt *zond = (Projekt*) data;
-	gtk_menu_item_activate(GTK_MENU_ITEM(
-			g_object_get_data(
-					G_OBJECT(sond_treeview_get_contextmenu(
-							SOND_TREEVIEW(zond->treeview[BAUM_FS]))),
-					"item-indizieren-auswahl")));
+	do_index_erstellen((Projekt*) data, FALSE);
+}
+
+static void cb_index_erstellen_sel_activate(GtkMenuItem *item,
+		gpointer data) {
+	do_index_erstellen((Projekt*) data, TRUE);
 }
 
 static void zond_indexsuche_auswahl_activate_hb(GtkMenuItem *item,
@@ -1033,11 +1091,11 @@ create_menu_projekt(Projekt *zond, GtkAccelGroup *accel_group) {
 			"Index erstellen", NULL, NULL, projektmenu);
 	GtkWidget *menu_index_erstellen = gtk_menu_new();
 	create_and_connect_menu_item("Gesamtes Projektverzeichnis",
-			G_CALLBACK(zond_treeview_index_erstellen_activate_hb), zond,
+			G_CALLBACK(cb_index_erstellen_activate), zond,
 			menu_index_erstellen);
-	GtkWidget *item_index_erstellen_sel = create_and_connect_menu_item(
+	create_and_connect_menu_item(
 			"Ausgewählte Punkte",
-			G_CALLBACK(zond_treeview_index_erstellen_sel_activate_hb), zond,
+			G_CALLBACK(cb_index_erstellen_sel_activate), zond,
 			menu_index_erstellen);
 	gtk_menu_item_set_submenu(GTK_MENU_ITEM(item_index_erstellen),
 			menu_index_erstellen);
@@ -1048,7 +1106,7 @@ create_menu_projekt(Projekt *zond, GtkAccelGroup *accel_group) {
 	GtkWidget *menu_indexsuche = gtk_menu_new();
 	create_and_connect_menu_item("Gesamtes Projektverzeichnis",
 			G_CALLBACK(zond_indexsuche_activate), zond, menu_indexsuche);
-	GtkWidget *item_indexsuche_sel = create_and_connect_menu_item(
+	create_and_connect_menu_item(
 			"Ausgewählte Punkte",
 			G_CALLBACK(zond_indexsuche_auswahl_activate_hb), zond, menu_indexsuche);
 	gtk_menu_item_set_submenu(GTK_MENU_ITEM(item_indexsuche), menu_indexsuche);
