@@ -31,6 +31,7 @@
 #include "sond_gmessage_helper.h"
 #include "sond_pdf_helper.h"
 #include "sond_misc.h"
+#include "sond_log_and_error.h"
 
 
 static void sond_process_file_do_rec(SondProcessFileCtx* wctx,
@@ -82,6 +83,9 @@ static gint process_zip_for_ocr(guchar* data, gsize size,
 	zip_int64_t num_entries = zip_get_num_entries(archive, 0);
 
 	for (zip_int64_t i = 0; i < num_entries; i++) {
+		if (g_atomic_int_get(&wctx->cancel))
+			break;
+
 		const char* entry_name = zip_get_name(archive, (zip_uint64_t)i, ZIP_FL_ENC_UTF_8);
 		if (!entry_name)
 			continue;
@@ -237,6 +241,9 @@ static gboolean gmessage_process_part(GMimeObject* object,
 		gchar const* eml_filename, gchar const* internal_path,
 		SondProcessFileCtx* wctx, gint part_index, gint* out_pdf_count) {
 	gboolean modified = FALSE;
+
+	if (g_atomic_int_get(&wctx->cancel))
+		return FALSE;
 
 	if (GMIME_IS_MULTIPART(object)) {
 		GMimeMultipart* mp = GMIME_MULTIPART(object);
@@ -398,6 +405,9 @@ static gint process_emb_file(fz_context* ctx, pdf_obj* dict,
 	fz_buffer* buf = NULL;
 	pdf_document* doc = NULL;
 
+	if (g_atomic_int_get(&((ProcessPdfData*)data)->wctx->cancel))
+		return 0; //Abbruch angefordert
+
 	EF_F = pdf_get_EF_F(((ProcessPdfData*)data)->wctx->ctx, val, &path, error);
 	if (!EF_F) {
 		if (((ProcessPdfData*)data)->wctx->log_func)
@@ -447,6 +457,7 @@ static gint process_emb_file(fz_context* ctx, pdf_obj* dict,
 
 	guchar* data_out = NULL;
 	gsize size_out = 0;
+
 	sond_process_file_do_rec(((ProcessPdfData*)data)->wctx, data_buf, len, filename_emb,
 			&data_out, &size_out, ((ProcessPdfData*)data)->out_pdf_count);
 	fz_drop_buffer(((ProcessPdfData*)data)->wctx->ctx, buf);
@@ -456,23 +467,29 @@ static gint process_emb_file(fz_context* ctx, pdf_obj* dict,
 		return 0;
 	}
 
+	/* Eigene Kopie anlegen, damit buf_new den Speicher besitzt und
+		 * data_out sofort freigegeben werden kann. fz_new_buffer_from_data
+		 * würde den Zeiger nur borgen – nach g_free(data_out) wäre der
+		 * Buffer ungültig (use-after-free). */
 	fz_buffer* buf_new = NULL;
 	fz_try(((ProcessPdfData*)data)->wctx->ctx)
-		buf_new = fz_new_buffer_from_data(((ProcessPdfData*)data)->wctx->ctx, data_out, size_out);
+		buf_new = fz_new_buffer_from_copied_data(((ProcessPdfData*)data)->wctx->ctx, data_out, size_out);
 	fz_catch(((ProcessPdfData*)data)->wctx->ctx) {
-		g_free(data_out);
 		if (((ProcessPdfData*)data)->wctx->log_func)
 			((ProcessPdfData*)data)->wctx->log_func(((ProcessPdfData*)data)->wctx->log_func_data,
 				"Failed to create buffer for processed file '%s': %s",
 				filename_emb, fz_caught_message(((ProcessPdfData*)data)->wctx->ctx));
+		g_free(data_out);
 		g_free(filename_emb);
 		return 0;
 	}
+	/* buf_new hat jetzt eine eigene Kopie – data_out wird nicht mehr benötigt */
+	g_free(data_out);
+	data_out = NULL;
 
 	doc = pdf_pin_document(((ProcessPdfData*)data)->wctx->ctx, EF_F);
 	if (!doc) {
 		fz_drop_buffer(((ProcessPdfData*)data)->wctx->ctx, buf_new);
-		g_free(data_out);
 		if (((ProcessPdfData*)data)->wctx->log_func)
 			((ProcessPdfData*)data)->wctx->log_func(((ProcessPdfData*)data)->wctx->log_func_data,
 				"'%s' - Failed to pin PDF document from EF/F-object",
@@ -486,7 +503,7 @@ static gint process_emb_file(fz_context* ctx, pdf_obj* dict,
 	fz_always(((ProcessPdfData*)data)->wctx->ctx) {
 		pdf_drop_document(((ProcessPdfData*)data)->wctx->ctx, doc);
 		fz_drop_buffer(((ProcessPdfData*)data)->wctx->ctx, buf_new);
-		g_free(data_out);
+		/* data_out wurde bereits oben freigegeben */
 	}
 	fz_catch(((ProcessPdfData*)data)->wctx->ctx) {
 		if (((ProcessPdfData*)data)->wctx->log_func)
@@ -494,7 +511,6 @@ static gint process_emb_file(fz_context* ctx, pdf_obj* dict,
 				"Failed to update embedded stream for '%s': %s",
 				filename_emb, fz_caught_message(((ProcessPdfData*)data)->wctx->ctx));
 		g_free(filename_emb);
-
 		return 0;
 	}
 
@@ -544,9 +560,9 @@ static gint process_pdf_for_ocr(guchar* data, gsize size,
 	//pdf-page-tree OCRen
 	rc = sond_ocr_pdf_doc(wctx->ctx, wctx->ocr_pool, doc,
 			wctx->log_func, wctx->log_func_data, error);
-	if (rc) {
+	if (rc == -1) {
 		pdf_drop_document(wctx->ctx, doc);
-		return rc;
+		return -1;
 	}
 
 	*out_pdf_count += 1;
@@ -578,6 +594,9 @@ static void sond_process_file_do_rec(SondProcessFileCtx* wctx,
 	gchar* mime_type = NULL;
 	gint rc = 0;
 
+	if (g_atomic_int_get(&wctx->cancel))
+		return;
+
 	if (wctx->log_func)
 		wctx->log_func(wctx->log_func_data,
 				"Entering File '%s'", filename);
@@ -592,11 +611,9 @@ static void sond_process_file_do_rec(SondProcessFileCtx* wctx,
 		return;
 	}
 
-	if (!g_strcmp0(mime_type, "application/pdf")) {
-		if (wctx->ocr_pool)
-			rc = process_pdf_for_ocr(data, size, filename, wctx,
-					out_data, out_size, out_pdf_count, &error);
-	}
+	if (!g_strcmp0(mime_type, "application/pdf"))
+		rc = process_pdf_for_ocr(data, size, filename, wctx,
+				out_data, out_size, out_pdf_count, &error);
 	else if (!g_strcmp0(mime_type, "application/zip"))
 		rc = process_zip_for_ocr(data, size, filename, wctx,
 				out_data, out_size, out_pdf_count, &error);
@@ -604,12 +621,16 @@ static void sond_process_file_do_rec(SondProcessFileCtx* wctx,
 		rc = process_gmessage_for_ocr(data, size, filename, wctx,
 				out_data, out_size, out_pdf_count, &error);
 
-	if (rc == -1 && wctx->log_func) {
+	if (rc == -1) {
+		if (wctx->log_func)
 		wctx->log_func(wctx->log_func_data,
-				"Failed to process file '%s' for OCR: %s",
+				"Failed to process file '%s': %s",
 				filename, error ? error->message : "unknown error");
+		g_clear_error(&error);
+		g_free(mime_type);
+
+		return;
 	}
-	g_clear_error(&error);
 
 	/* Indizierung: einmal am Schluss, mit dem aktuellsten Buffer */
 	sond_index(wctx->ctx, wctx->log_func, wctx->log_func_data,
@@ -627,24 +648,26 @@ static void sond_process_file_do_rec(SondProcessFileCtx* wctx,
 	return;
 }
 
-gint sond_process_file(SondProcessFileCtx* wctx,
-		guchar* data, gsize size, gchar const* filename,
+void sond_process_file(SondProcessFileCtx* wctx,
+		guchar* data, gsize size, gchar const* file_part,
 		guchar** out_data, gsize* out_size, gint* out_pdf_count) {
+
 	if (wctx->index_ctx) {
 		GError* error = NULL;
 
-		if (!sond_index_ctx_clear_file(wctx->index_ctx, filename, &error)) {
+		if (!sond_index_ctx_clear_file(wctx->index_ctx, file_part, &error)) {
 			if (wctx->log_func)
 				wctx->log_func(wctx->log_func_data,
 						"sond_process_file: clear_file '%s': %s",
-						filename, error ? error->message : "unknown");
+						file_part, error ? error->message : "unknown");
 			g_clear_error(&error);
 		}
 	}
 
-	sond_process_file_do_rec(wctx, data, size, filename, out_data, out_size, out_pdf_count);
+	sond_process_file_do_rec(wctx, data, size, file_part,
+			out_data, out_size, out_pdf_count);
 
-	return 0;
+	return;
 }
 
 static void clean_hashtable(GHashTable* files) {
@@ -662,13 +685,14 @@ static void clean_hashtable(GHashTable* files) {
 	    SondFilePart* sfp = SOND_FILE_PART(key);
 	    arr_children = sond_file_part_get_arr_opened_files(sfp);
 
-	    for (guint i = 0; i < arr_children->len; i++)
-	    {
-	        SondFilePart* sfp_child = g_ptr_array_index(arr_children, i);
+	    if (arr_children)
+			for (guint i = 0; i < arr_children->len; i++)
+			{
+				SondFilePart* sfp_child = g_ptr_array_index(arr_children, i);
 
-	        if (g_hash_table_contains(files, sfp_child))
-	            to_remove = g_slist_prepend(to_remove, sfp_child);
-	    }
+				if (g_hash_table_contains(files, sfp_child))
+					to_remove = g_slist_prepend(to_remove, sfp_child);
+			}
 	}
 
 	// Dann löschen
@@ -678,7 +702,7 @@ static void clean_hashtable(GHashTable* files) {
 	g_slist_free(to_remove);
 }
 
-gint sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files) {
+void sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files) {
 	GHashTableIter iter = { 0 };
 	gpointer key = NULL;
 
@@ -694,7 +718,9 @@ gint sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files) {
 		guchar* out_data = NULL;
 		gsize out_size = 0;
 		gint out_pdf_count = 0;
-		gint rc = 0;
+
+		if (g_atomic_int_get(&wctx->cancel))
+			break;
 
 		SondFilePart* sfp = SOND_FILE_PART(key);
 		file_part = sond_file_part_get_filepart(sfp);
@@ -715,26 +741,9 @@ gint sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files) {
 
 		data = g_bytes_get_data(bytes, &length);
 
-		rc = sond_process_file(wctx, (guchar*) data, length, file_part,
+		sond_process_file(wctx, (guchar*) data, length, file_part,
 				&out_data, &out_size, &out_pdf_count);
 		g_bytes_unref(bytes);
-		if (rc == -1) {
-			if (wctx->log_func) {
-				wctx->log_func(wctx->log_func_data,
-						"sond_process_fileparts: process_file '%s': %s",
-						file_part,
-						error ? error->message : "unknown error");
-				g_error_free(error);
-			}
-			g_free(file_part);
-
-			continue;
-		}
-		else if (rc == 1) {
-			g_free(file_part);
-
-			return 1; //Abbruchsignal von sond_process_file weitergeben
-		}
 
 		if (out_data && out_size > 0) {
 			GBytes* out_bytes = g_bytes_new_take(out_data, out_size);
@@ -748,15 +757,13 @@ gint sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files) {
 							error ? error->message : "unknown error");
 					g_error_free(error);
 				}
-				g_free(file_part);
-
-				continue;
 			}
 		}
+
 		g_free(file_part);
 	}
 
-	return 0;
+	return;
 }
 
 SondProcessFileCtx* sond_process_file_create_wctx(fz_context* ctx,

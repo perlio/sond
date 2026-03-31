@@ -1010,6 +1010,9 @@ static void do_index_erstellen(Projekt *zond, gboolean sel_only) {
 	GThread* thread = g_thread_new("ocr-doc", do_index_thread, thread_data);
 	if (!thread) {
 		info_window_set_message(info_window, "Thread konnte nicht erzeugt werden");
+		g_free(thread_data);
+		return;
+	}
 
 	while (!g_atomic_int_get(&thread_data->done))
 	    gtk_main_iteration_do(FALSE);
@@ -1018,11 +1021,6 @@ static void do_index_erstellen(Projekt *zond, gboolean sel_only) {
 	g_free(thread_data);
 
 	info_window_close(info_window);
-
-	return;
-}
-
-
 
 	return;
 }

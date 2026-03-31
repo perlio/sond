@@ -2953,10 +2953,11 @@ static gint zond_treeview_get_filepart_and_section(ZondTreeview *ztv, GtkTreeIte
 	return node_id;
 }
 
-static gint zond_treeview_get_all_selected_fileparts_foreach(ZondTreeview *ztv,
+static gint zond_treeview_get_selected_fileparts_foreach(ZondTreeview *ztv,
 		GtkTreeIter *iter, gpointer data, GError **error) {
 	gint node_id = 0;
 	gchar *file_part = NULL;
+	SondFilePart *sfp = NULL;
 
 	GHashTable *ht_fileparts = (GHashTable*) data;
 
@@ -2964,7 +2965,13 @@ static gint zond_treeview_get_all_selected_fileparts_foreach(ZondTreeview *ztv,
 	if (node_id == -1)
 		ERROR_Z
 
-	g_hash_table_add(ht_fileparts, file_part);
+	sfp = sond_file_part_from_filepart(file_part, error);
+	if (!sfp) {
+		g_free(file_part);
+		ERROR_Z
+	}
+
+	g_hash_table_add(ht_fileparts, sfp);
 
 	return 0;
 }
@@ -2974,11 +2981,11 @@ GHashTable* zond_treeview_get_selected_fileparts(ZondTreeview *ztv,
 	GHashTable *ht_fileparts = NULL;
 	gint rc = 0;
 
-	ht_fileparts = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+	ht_fileparts = g_hash_table_new_full(NULL, NULL, g_object_unref, NULL);
 
 	rc = sond_treeview_selection_foreach(SOND_TREEVIEW(ztv),
 			(gint(*)(SondTreeview*, GtkTreeIter*, gpointer, GError**))
-			zond_treeview_get_all_selected_fileparts_foreach, ht_fileparts, error);
+			zond_treeview_get_selected_fileparts_foreach, ht_fileparts, error);
 
 	if (rc) {
 		g_hash_table_destroy(ht_fileparts);

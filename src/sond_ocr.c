@@ -299,11 +299,9 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, GError** error) {
 				}
 				g_atomic_int_inc(&task->pool->num_tasks);
 			}
-
-			if (status == 1) //läuft gerade - nix machen
+			else if (status == 1) //läuft gerade - nix machen
 				continue;
-
-			if (status == 2) { //fertig und in Ordnung
+			else if (status == 2) { //fertig und in Ordnung
 				gint rc = 0;
 
 				//content einfügen
@@ -321,14 +319,12 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, GError** error) {
 				g_atomic_int_set(&task->status, 4);
 				continue;
 			}
-
-			if (status == 3) { //FGehler aber geht nicht besser
+			else if (status == 3) { //Fehler aber geht nicht besser
 				pages_done++;
 				g_atomic_int_set(&task->status, 4);
 				continue;
 			}
-
-			if (status == 4) //Abstellgleis
+			else if (status == 4) //Abstellgleis
 				continue;
 		}
 	}
@@ -707,7 +703,7 @@ static gboolean ocr_cancel(void *data, int words) {
 }
 
 static gint ocr_pixmap(SondOcrTask* task, SondOcrPool* pool,
-		TesseractThreadData* thread_data, GError** error) {
+		TesseractThreadData* thread_data) {
 	gint rc = 0;
 
 	//jetzt richtige OCR
@@ -718,17 +714,25 @@ static gint ocr_pixmap(SondOcrTask* task, SondOcrPool* pool,
 	rc = TessBaseAPIRecognize(thread_data->api, thread_data->cancel_data->monitor);
 	if (rc) {
 		if (!g_atomic_int_get(pool->cancel_all)) { //muß sorum abgefragt werden, weil Abbruch auch rc = 1 macht
-			g_set_error(error, SOND_ERROR, 0, "Recognize fehlgeschlagen");
-
-			return -1;
+			if (task->log_func)
+				task->log_func(task->log_func_data,
+					"Seite %u: OCR gescheitert",
+					task->page->super.number);
 		}
-		else
-			return 1;
+
+		return -1;
 	}
 
 	float conf = TessBaseAPIMeanTextConf(thread_data->api);
 	if (conf >= 80 || task->durchgang == 2)
 		return 0;
+	else if (conf < 20) {
+		if (task->log_func)
+			task->log_func(task->log_func_data,
+				"Seite %u: OCR-Konfidenz %f%%, OCR-Ergebnis wahrscheinlich unbrauchbar - kein weiterer Versuch",
+				task->page->super.number, conf);
+		return -1;
+	}
 
 	//wenn nicht:
 	task->durchgang++;
@@ -836,17 +840,15 @@ static void ocr_worker(gpointer task_data, gpointer user_data) {
         }
     }
 
-    rc = ocr_pixmap(task, pool, thread_data, &error);
+    rc = ocr_pixmap(task, pool, thread_data);
     if (rc == -1) {
-		if (task->log_func)
-			task->log_func(task->log_func_data, "Recog failed: %s", error->message);
-		g_error_free(error);
     	g_atomic_int_set(&task->status, 3);
     	goto dec_active_jobs;
     }
     else if (rc == 1) {
-    	g_atomic_int_set(&task->status, 0);
-    	goto dec_active_jobs;
+		//neuer Versuch mit höherer Auflösung - zurück in die Warteschlange
+		g_atomic_int_set(&task->status, 0);
+		goto dec_active_jobs;
     }
 
 	TessResultIterator* iter = TessBaseAPIGetIterator(thread_data->api);
