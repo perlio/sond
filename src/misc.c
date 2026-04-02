@@ -448,23 +448,25 @@ static void cb_abbrechen_clicked(GtkButton *button, gpointer data) {
 static void cb_info_window_response(GtkDialog *dialog, gint id, gpointer data) {
 	InfoWindow *info_window = (InfoWindow*) data;
 
-	if (g_atomic_int_get(&info_window->cancel))
+	if (g_atomic_int_get(info_window->cancel))
 		return;
 
 	info_window_set_message(info_window, "...abgebrochen");
-	g_atomic_int_set(&info_window->cancel, 1);
+	g_atomic_int_set(info_window->cancel, 1);
 
 	return;
 }
 
 InfoWindow*
-info_window_open(GtkWidget *window, const gchar *title) {
+info_window_open(GtkWidget *window, gint* cancel, const gchar *title) {
 	GtkWidget *content = NULL;
 	GtkWidget *swindow = NULL;
 	GtkWidget *bottom_box = NULL;
 	GtkWidget *button = NULL;
 
 	InfoWindow *info_window = g_malloc0(sizeof(InfoWindow));
+
+	info_window->cancel = cancel;
 
 	info_window->dialog = gtk_dialog_new_with_buttons(title, GTK_WINDOW(window),
 			GTK_DIALOG_DESTROY_WITH_PARENT | GTK_DIALOG_MODAL, NULL, NULL);

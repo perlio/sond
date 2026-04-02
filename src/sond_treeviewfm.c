@@ -2562,9 +2562,8 @@ static void sond_treeviewfm_search_activate(GtkMenuItem *item, gpointer data) {
 	else
 		search_fs.needle = g_strdup(search_text);
 
-	search_fs.info_window = info_window_open(
-			gtk_widget_get_toplevel(GTK_WIDGET(stvfm)),
-			search_text);
+	search_fs.info_window = info_window_open(gtk_widget_get_toplevel(GTK_WIDGET(stvfm)),
+			&cancelled, search_text);
 	g_free(search_text);
 
 	if (only_sel)

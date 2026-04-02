@@ -410,192 +410,6 @@ static void cb_item_clean_pdf(GtkMenuItem *item, gpointer data) {
 	return;
 }
 
-struct _ThreadData {
-	fz_context* ctx;
-	SondOcrPool* pool;
-	pdf_document* doc;
-	gchar* filepart;
-	void(*log_func)(void*, gchar const*, ...); //log_func
-	gpointer log_func_data; //log_func_data
-	gint done;
-};
-
-static gpointer ocr_doc(gpointer data) {
-	gint rc = 0;
-	GError* error = NULL;
-
-	struct _ThreadData* thread_data = (struct _ThreadData*) data;
-
-	rc = sond_ocr_pdf_doc(thread_data->ctx, thread_data->pool, thread_data->doc,
-			thread_data->log_func, thread_data->log_func_data, &error);
-	g_atomic_int_set(&thread_data->done, 1);
-	if (rc == -1) {
-		thread_data->log_func(thread_data->log_func_data,
-				"OCR-Recognition für PDF '%s' fehlgeschlagen: %s",
-				thread_data->filepart, error->message);
-		g_error_free(error);
-
-		return GINT_TO_POINTER(-1);
-	}
-	else if (rc == 1)
-		return GINT_TO_POINTER(1);
-
-	return NULL;
-}
-
-
-static void cb_datei_ocr(GtkMenuItem *item, gpointer data) {
-	gint rc = 0;
-	gchar* errmsg = NULL;
-	InfoWindow *info_window = NULL;
-	gchar *datadir = NULL;
-	GError* error = NULL;
-	SondFilePartPDF* sfp_pdf_before = NULL;
-	pdf_document* doc = NULL;
-	SondOcrPool* pool = NULL;
-	gchar* filepart = NULL;
-	gint global_progress = 0;
-
-	Projekt *zond = (Projekt*) data;
-
-	GPtrArray *arr_sfp = selection_abfragen_pdf(zond, &errmsg);
-	if (!arr_sfp) {
-		if (errmsg) {
-			display_message(zond->app_window,
-					"Texterkennung nicht möglich\n\nBei "
-							"Aufruf selection_abfragen_pdf:\n", errmsg, NULL);
-			g_free(errmsg);
-		}
-
-		return;
-	}
-
-	if (arr_sfp->len == 0) {
-		display_message(zond->app_window, "Keine PDF-Datei ausgewählt", NULL);
-		g_ptr_array_unref(arr_sfp);
-
-		return;
-	}
-
-	//TessInit
-	info_window = info_window_open(zond->app_window, "OCR");
-
-	datadir = g_build_filename(zond->exe_dir, "../share/tessdata", NULL);
-	pool = sond_ocr_pool_new(datadir, "deu", 4,
-			&info_window->cancel, &global_progress, &error);
-	g_free(datadir);
-	if (!pool) {
-		info_window_set_message(info_window,
-				"Thread-Pool konnte nicht erzeugt werden: %s", error->message);
-		g_error_free(error);
-		info_window_close(info_window);
-		return;
-	}
-
-	for (gint i = 0; i < arr_sfp->len; i++) {
-		SondFilePartPDF* sfp_pdf = NULL;
-
-		sfp_pdf = g_ptr_array_index(arr_sfp, i);
-		if (sfp_pdf != sfp_pdf_before) {
-			sfp_pdf_before = sfp_pdf;
-
-			filepart = sond_file_part_get_filepart(SOND_FILE_PART(sfp_pdf));
-
-			//prüfen, ob in Viewer geöffnet
-			if (zond_pdf_document_is_open(sfp_pdf)) {
-				info_window_set_message(info_window,
-						"PDF '%s' in Viewer geöffnet - übersprungen",
-						filepart);
-				g_free(filepart);
-				continue;
-			}
-
-			doc = sond_file_part_pdf_open_document(zond->ctx, sfp_pdf,
-					TRUE, FALSE, &error);
-			if (!doc) {
-				info_window_set_message(info_window,
-						"PDF '%s' konnte nicht geöffnet werden: %s",
-						filepart, error->message);
-				g_clear_error(&error);
-				g_free(filepart);
-
-				continue;
-			}
-		}
-
-		struct _ThreadData* thread_data = g_new0(struct _ThreadData, 1);
-		thread_data->ctx = zond->ctx;
-		thread_data->pool = pool;
-		thread_data->doc = doc;
-		thread_data->filepart = filepart;
-		thread_data->log_func =
-				(void(*)(void*, gchar const*, ...)) info_window_set_message_thread_safe;
-		thread_data->log_func_data = (gpointer) info_window,
-
-		info_window_set_message(info_window, "OCR-Erkennung für PDF '%s' wird gestartet",
-				filepart);
-
-		GThread* thread = g_thread_new("ocr-doc", ocr_doc, thread_data);
-		if (!thread) {
-			info_window_set_message(info_window,
-					"Thread zur OCR-Erkennung für PDF '%s' konnte nicht erzeugt werden",
-					filepart);
-			g_free(filepart);
-			continue;
-		}
-
-		gint last_progress = -1;
-		info_window_display_progress(info_window, -1);
-
-		while (!g_atomic_int_get(&thread_data->done)) {
-			gint global_progress = 0;
-			gint num_tasks = 0;
-			gint progress = 0;
-
-			global_progress = g_atomic_int_get(pool->global_progress);
-			num_tasks = g_atomic_int_get(&pool->num_tasks);
-
-			if (num_tasks)
-				progress = (gint) (global_progress / num_tasks);
-
-			if (progress != last_progress) {
-				last_progress = progress;
-				info_window_display_progress(info_window, progress);
-			}
-
-		    gtk_main_iteration_do(FALSE);
-	//	    g_usleep(1000);
-		}
-
-		gint res = GPOINTER_TO_INT(g_thread_join(thread));
-		g_free(filepart);
-		g_free(thread_data);
-		if (res) {
-			pdf_drop_document(zond->ctx, doc);
-			if (res == -1)
-				continue;
-			else if (res == 1)
-				break;
-		}
-
-		rc = sond_file_part_pdf_save_and_close(zond->ctx, doc, sfp_pdf, &error);
-		if (rc) {
-			info_window_set_message(info_window,
-					"Speichern fehlgeschlagen: %s", error->message);
-			g_clear_error(&error);
-
-			continue;
-		}
-	}
-
-	info_window_close(info_window);
-	sond_ocr_pool_free(pool);
-	g_ptr_array_unref(arr_sfp);
-
-	return;
-}
-
-
 /* ============================================================================
  * CALLBACKS - STRUKTUR MENU
  * ========================================================================== */
@@ -900,7 +714,7 @@ static void cb_hilfe_update(GtkWidget *item, gpointer data) {
 
 	Projekt *zond = (Projekt*) data;
 
-	info_window = info_window_open(zond->app_window, "Zond Updater");
+	info_window = info_window_open(zond->app_window, &zond->wctx->cancel, "Zond Updater");
 
 	rc = zond_update(zond, info_window, &error);
 
@@ -997,7 +811,7 @@ static void do_index_erstellen(Projekt *zond, gboolean sel_only) {
 		return;
 	}
 
-	info_window = info_window_open(zond->app_window, "Index erstellen");
+	info_window = info_window_open(zond->app_window, &zond->wctx->cancel, "Index erstellen");
 	zond->wctx->log_func_data = (gpointer) info_window;
 
 	struct _ThreadDataIndex* thread_data = g_new0(struct _ThreadDataIndex, 1);
@@ -1267,9 +1081,6 @@ create_menu_pdf(Projekt *zond, GtkAccelGroup *accel_group) {
 
 	create_and_connect_menu_item("PDF reparieren",
 			G_CALLBACK(cb_item_clean_pdf), zond, menu_dateien);
-
-	create_and_connect_menu_item("OCR",
-			G_CALLBACK(cb_datei_ocr), zond, menu_dateien);
 
 	return menu_dateien;
 }

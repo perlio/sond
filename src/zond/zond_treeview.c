@@ -25,6 +25,7 @@
 #include "../sond_fileparts.h"
 #include "../sond_treeview.h"
 #include "../sond_log_and_error.h"
+#include "../sond_process_file.h"
 
 #include "zond_init.h"
 #include "zond_dbase.h"
@@ -1517,7 +1518,7 @@ static gint zond_treeview_paste_clipboard(Projekt *zond, gboolean child,
 		InfoWindow *info_window = NULL;
 
 		info_window = info_window_open(zond->app_window,
-				"Dateien anbinden");
+				&zond->wctx->cancel, "Dateien anbinden");
 
 		zond_treeview_clipboard_anbinden(zond, anchor_id,
 				&iter_anchor, child, info_window);

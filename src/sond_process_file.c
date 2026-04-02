@@ -777,7 +777,7 @@ SondProcessFileCtx* sond_process_file_create_wctx(fz_context* ctx,
 	wctx->ctx = ctx;
 
 	wctx->progress = 0;
-	wctx->cancel = 0,
+	wctx->cancel = 0;
 
 	wctx->log_func = log_func;
 	wctx->log_func_data = (gpointer) log_func_data;

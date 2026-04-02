@@ -819,8 +819,8 @@ static void ocr_worker(gpointer task_data, gpointer user_data) {
     SondOcrTask *task = (SondOcrTask *)task_data;
     SondOcrPool *pool = (SondOcrPool *)user_data;
 
-    //job++
-    g_atomic_int_inc(&pool->num_active_jobs);
+    if (g_atomic_int_get(pool->cancel_all))
+    	return;
 
     // Hole oder erstelle Thread-lokale Tesseract-Instanz
     TesseractThreadData *thread_data = g_private_get(&pool->thread_data_key);
@@ -836,19 +836,19 @@ static void ocr_worker(gpointer task_data, gpointer user_data) {
         	g_error_free(error);
         	g_atomic_int_set(&task->status, 3);
 
-        	goto dec_active_jobs;
+        	return;
         }
     }
 
     rc = ocr_pixmap(task, pool, thread_data);
     if (rc == -1) {
     	g_atomic_int_set(&task->status, 3);
-    	goto dec_active_jobs;
+    	return;
     }
     else if (rc == 1) {
 		//neuer Versuch mit höherer Auflösung - zurück in die Warteschlange
 		g_atomic_int_set(&task->status, 0);
-		goto dec_active_jobs;
+		return;
     }
 
 	TessResultIterator* iter = TessBaseAPIGetIterator(thread_data->api);
@@ -856,7 +856,7 @@ static void ocr_worker(gpointer task_data, gpointer user_data) {
 		if (task->log_func)
 			task->log_func(task->log_func_data, "Couldn't get ResultIter");
 		g_atomic_int_set(&task->status, 3);
-		goto dec_active_jobs;
+		return;
 	}
 
 	// Content Stream mit korrekten Koordinaten erstellen
@@ -869,13 +869,10 @@ static void ocr_worker(gpointer task_data, gpointer user_data) {
 					error->message);
 		g_error_free(error);
 		g_atomic_int_set(&task->status, 3);
-		goto dec_active_jobs;
+		return;
 	}
 
 	g_atomic_int_set(&task->status, 2);
-
-dec_active_jobs:
-    g_atomic_int_dec_and_test(&pool->num_active_jobs);
 
     return;
 }

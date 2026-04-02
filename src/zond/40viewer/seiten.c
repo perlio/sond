@@ -25,6 +25,7 @@
 #include "../../sond_fileparts.h"
 #include "../../sond_ocr.h"
 #include "../../sond_pdf_helper.h"
+#include "../../sond_process_file.h"
 #include "../../misc.h"
 
 #include "../zond_init.h"
@@ -309,11 +310,11 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 	if (!arr_document_page)
 		return;
 
-	info_window = info_window_open(pv->vf, "OCR");
+	info_window = info_window_open(pv->vf, &pv->zond->wctx->cancel, "OCR");
 
 	datadir = g_build_filename(pv->zond->exe_dir, "../share/tessdata", NULL);
 	pool = sond_ocr_pool_new(datadir, "deu", 1,
-			&info_window->cancel, &progress, &error);
+			info_window->cancel, &progress, &error);
 	g_free(datadir);
 	if (!pool) {
 		info_window_set_message(info_window,

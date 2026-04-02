@@ -45,7 +45,6 @@ typedef struct _SondOcrPool {
     gchar *tessdata_path;
     gchar *language;
     TessBaseAPI* osd_api;
-    gint num_active_jobs;
 } SondOcrPool;
 
 // Transformations-Kontext für OCR-Koordinaten

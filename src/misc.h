@@ -49,7 +49,7 @@ typedef struct _Info_Window {
 	GtkWidget *content;
 	GtkWidget *last_inserted_widget;
 	GtkWidget *progress_bar;
-	gint cancel;
+	gint* cancel;
 } InfoWindow;
 
 void info_window_kill(InfoWindow*);
@@ -66,7 +66,7 @@ void info_window_set_message(InfoWindow*, const gchar*, ...);
 
 void info_window_set_message_thread_safe(InfoWindow *info_window, const gchar *format, ...);
 
-InfoWindow* info_window_open(GtkWidget*, const gchar*);
+InfoWindow* info_window_open(GtkWidget*, gint*, const gchar*);
 
 GtkWidget* show_html_window(fz_context*, fz_buffer*, const char*);
 
