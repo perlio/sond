@@ -165,18 +165,18 @@ static gint calculate_ocr_transform(fz_context *ctx,
     return 0;
 }
 
-static gint sond_ocr_osd(SondOcrTask* task, GError** error) {
+static gint sond_ocr_osd(SondOcrTask* task, SondOcrPool* pool, GError** error) {
 	int orient_deg;
 	float orient_conf;
 
-	if (task->durchgang == 0 && task->pool->osd_api) {
+	if (task->durchgang == 0 && pool->osd_api) {
 		// OSD - Orientierung erkennen (schnell!)
-		TessBaseAPISetImage(task->pool->osd_api, task->pixmap->samples, task->pixmap->w,
+		TessBaseAPISetImage(pool->osd_api, task->pixmap->samples, task->pixmap->w,
 				task->pixmap->h, task->pixmap->n, task->pixmap->stride);
 
-		gboolean suc = TessBaseAPIDetectOrientationScript(task->pool->osd_api, &orient_deg,
+		gboolean suc = TessBaseAPIDetectOrientationScript(pool->osd_api, &orient_deg,
 				&orient_conf, NULL, NULL);
-		TessBaseAPIClear(task->pool->osd_api);
+		TessBaseAPIClear(pool->osd_api);
 		if (suc) {
 			if (orient_deg && orient_conf > 1.7f) {
 				gint rc = 0;
@@ -212,7 +212,7 @@ static gint sond_ocr_osd(SondOcrTask* task, GError** error) {
 	return 0;
 }
 
-gint sond_ocr_do_tasks(GPtrArray* arr_tasks, GError** error) {
+gint sond_ocr_do_tasks(GPtrArray* arr_tasks, SondOcrPool* pool, GError** error) {
 	gint pages_done = 0;
 	float scale[] = {4.3, 6.4, 8.6};
 
@@ -223,10 +223,10 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, GError** error) {
 			gboolean hidden = FALSE;
 			gint status = 0;
 
-			task = g_ptr_array_index(arr_tasks, i);
-
-			if (g_atomic_int_get(task->pool->cancel_all))
+			if (g_atomic_int_get(pool->cancel_all))
 				return 1;
+
+			task = g_ptr_array_index(arr_tasks, i);
 
 			status = g_atomic_int_get(&task->status);
 
@@ -265,7 +265,7 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, GError** error) {
 					continue;
 				}
 
-				rc = sond_ocr_osd(task, error);
+				rc = sond_ocr_osd(task, pool, error);
 				if (rc) {
 					if (task->log_func)
 						task->log_func(task->log_func_data, "OSD Seite %u gescheitert: %s",
@@ -286,7 +286,7 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, GError** error) {
 				}
 
 				g_atomic_int_set(&task->status, 1); //started
-				gboolean suc = g_thread_pool_push(task->pool->pool, task, error);
+				gboolean suc = g_thread_pool_push(pool->pool, task, error);
 				if (!suc) {
 					if (task->log_func)
 						task->log_func(task->log_func_data,
@@ -297,7 +297,6 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, GError** error) {
 					g_atomic_int_set(&task->status, 4);
 					continue;
 				}
-				g_atomic_int_inc(&task->pool->num_tasks);
 			}
 			else if (status == 1) //läuft gerade - nix machen
 				continue;
@@ -343,14 +342,13 @@ void sond_ocr_task_free(SondOcrTask* task) {
 	return;
 }
 
-SondOcrTask* sond_ocr_task_new(fz_context* ctx, SondOcrPool* pool,
+SondOcrTask* sond_ocr_task_new(fz_context* ctx,
 		pdf_document* doc, gint page_num, pdf_obj* font_ref,
 		void (*log_func)(void*, gchar const*, ...), gpointer log_func_data,
 		GError** error) {
 	SondOcrTask* task = g_new0(SondOcrTask, 1);
 
 	task->ctx = ctx;
-	task->pool = pool;
 	task->log_func = log_func;
 	task->log_func_data = log_func_data;
 
@@ -398,7 +396,7 @@ gint sond_ocr_pdf_doc(fz_context* ctx, SondOcrPool* ocr_pool, pdf_document* doc,
 
 	for (gint i = 0; i < num_pages; i++) {
 		SondOcrTask* task =
-				sond_ocr_task_new(ctx, ocr_pool, doc, i, font_ref,
+				sond_ocr_task_new(ctx, doc, i, font_ref,
 						log_func, log_func_data, error);
 		if (!task) {
 			if (log_func_data)
@@ -414,7 +412,7 @@ gint sond_ocr_pdf_doc(fz_context* ctx, SondOcrPool* ocr_pool, pdf_document* doc,
 
 	pdf_drop_obj(ctx, font_ref);
 
-	rc = sond_ocr_do_tasks(arr_tasks, error);
+	rc = sond_ocr_do_tasks(arr_tasks, ocr_pool, error);
 	g_ptr_array_unref(arr_tasks);
 	if (rc == -1)
 		ERROR_Z

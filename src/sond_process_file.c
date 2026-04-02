@@ -766,6 +766,13 @@ void sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files) {
 	return;
 }
 
+void sond_process_file_reset_wctx(SondProcessFileCtx* wctx) {
+	g_atomic_int_set(&wctx->cancel, 0);
+	g_atomic_int_set(&wctx->progress, 0);
+
+	return;
+}
+
 SondProcessFileCtx* sond_process_file_create_wctx(fz_context* ctx,
 		void (*log_func)(void*, gchar const*, ...), gpointer log_func_data,
 		gchar const* tessdata_path, gint num_ocr_threads,

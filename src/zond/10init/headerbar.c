@@ -813,6 +813,7 @@ static void do_index_erstellen(Projekt *zond, gboolean sel_only) {
 
 	info_window = info_window_open(zond->app_window, &zond->wctx->cancel, "Index erstellen");
 	zond->wctx->log_func_data = (gpointer) info_window;
+	zond->wctx->cancel = 0;
 
 	struct _ThreadDataIndex* thread_data = g_new0(struct _ThreadDataIndex, 1);
 	thread_data->treeviewfm = SOND_TREEVIEWFM(zond->treeview[BAUM_FS]);

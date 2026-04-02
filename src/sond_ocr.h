@@ -39,7 +39,6 @@ typedef struct _SondOcrPool {
     GThreadPool *pool;
     GMutex mutex;
     gint* cancel_all;
-    gint num_tasks;
     gint* global_progress;
     GPrivate thread_data_key;
     gchar *tessdata_path;
@@ -65,7 +64,6 @@ typedef struct {
 	fz_context* ctx;
 	void(*log_func)(void*, gchar const*, ...);
 	gpointer log_func_data;
-	SondOcrPool* pool;
 	pdf_page* page;
 	pdf_obj* font_ref;
 	fz_pixmap* pixmap;
@@ -75,11 +73,11 @@ typedef struct {
 	GString* content;
 } SondOcrTask;
 
-gint sond_ocr_do_tasks(GPtrArray* arr_tasks, GError** error);
+gint sond_ocr_do_tasks(GPtrArray* arr_tasks, SondOcrPool* pool, GError** error);
 
 void sond_ocr_task_free(SondOcrTask* task);
 
-SondOcrTask* sond_ocr_task_new(fz_context* ctx, SondOcrPool* pool, pdf_document* doc,
+SondOcrTask* sond_ocr_task_new(fz_context* ctx, pdf_document* doc,
 		gint page_num, pdf_obj* font_ref,
 		void (*log_func)(void*, gchar const*, ...), gpointer log_func_data,
 		GError** error);

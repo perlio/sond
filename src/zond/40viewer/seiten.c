@@ -299,6 +299,7 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 	gchar* datadir = NULL;
 	SondOcrPool* pool = NULL;
 	gint progress = 0;
+	gint cancel = 0;
 
 	PdfViewer *pv = (PdfViewer*) data;
 
@@ -310,7 +311,7 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 	if (!arr_document_page)
 		return;
 
-	info_window = info_window_open(pv->vf, &pv->zond->wctx->cancel, "OCR");
+	info_window = info_window_open(pv->vf, &cancel, "OCR");
 
 	datadir = g_build_filename(pv->zond->exe_dir, "../share/tessdata", NULL);
 	pool = sond_ocr_pool_new(datadir, "deu", 1,
@@ -422,7 +423,7 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 			}
 		}
 
-		task = sond_ocr_task_new(ctx, pool,
+		task = sond_ocr_task_new(ctx,
 				zond_pdf_document_get_pdf_doc(pdf_document_page->document),
 				pdf_document_page->page_akt, font_ref,
 				(void(*)(void*, gchar const*, ...)) info_window_set_message_thread_safe, (gpointer) info_window,
@@ -441,7 +442,7 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 		g_ptr_array_add(arr_tasks, task);
 
 		//OCR
-		rc = sond_ocr_do_tasks(arr_tasks, &error);
+		rc = sond_ocr_do_tasks(arr_tasks, pool, &error);
 		g_ptr_array_unref(arr_tasks);
 		if (rc) { //Fähler
 			fz_drop_buffer(ctx, entry.ocr.buf_old);
@@ -492,6 +493,7 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 
 	g_ptr_array_unref(arr_document_page);
 	info_window_close(info_window);
+	sond_ocr_pool_free(pool);
 
 	//damit Text von Cursor "erkannt" wird
 	g_signal_emit_by_name(pv->v_adj, "value-changed", NULL);
