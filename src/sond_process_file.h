@@ -55,8 +55,6 @@ void sond_process_file(SondProcessFileCtx* wctx,
 
 void sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files);
 
-void sond_process_file_reset_wctx(SondProcessFileCtx* wctx);
-
 SondProcessFileCtx* sond_process_file_create_wctx(fz_context* ctx,
 		void (*log_func)(void*, gchar const*, ...), gpointer log_func_data,
 		gchar const* tessdata_path, gint num_ocr_threads,

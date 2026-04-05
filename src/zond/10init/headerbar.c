@@ -51,6 +51,8 @@
 #include "../20allgemein/zond_update.h"
 
 #include "../zond_indexsuche.h"
+#include "../../sond_treeviewfm_seadrive.h"
+
 #include "../zond_treeviewfm.h"
 
 #include "../40viewer/document.h"
@@ -1233,6 +1235,36 @@ init_menu(Projekt *zond) {
  * PUBLIC FUNCTIONS
  * ========================================================================== */
 
+#ifdef _WIN32
+void cb_seadrive_status_app_window(SondTreeviewFM *stvfm,
+		guint pending_down, guint pending_up,
+		gpointer user_data)
+{
+	GtkLabel *label = GTK_LABEL(user_data);
+	gchar *text = NULL;
+
+	/* kein SeaDrive-Pfad geladen: Label leeren */
+	if (!sond_treeviewfm_is_seadrive_path(stvfm)) {
+		gtk_label_set_text(label, "");
+		return;
+	}
+
+	if (pending_down == 0 && pending_up == 0) {
+		text = g_strdup("SeaDrive: ✓");
+	} else {
+		GString *s = g_string_new("SeaDrive:");
+		if (pending_down > 0)
+			g_string_append_printf(s, " ↓ %u", pending_down);
+		if (pending_up > 0)
+			g_string_append_printf(s, " ↑ %u", pending_up);
+		text = g_string_free(s, FALSE);
+	}
+
+	gtk_label_set_text(label, text);
+	g_free(text);
+}
+#endif
+
 /**
  * Initialisiert die Headerbar mit Menü und Buttons
  */
@@ -1260,6 +1292,15 @@ void init_headerbar(Projekt *zond) {
 
 	// HeaderBar anzeigen
 	gtk_window_set_titlebar(GTK_WINDOW(zond->app_window), headerbar);
+
+#ifdef _WIN32
+	/* SeaDrive-Statuslabel rechts in der Headerbar */
+	GtkWidget *label_seadrive = gtk_label_new("");
+	gtk_widget_show(label_seadrive);
+	gtk_header_bar_pack_end(GTK_HEADER_BAR(headerbar), label_seadrive);
+	/* Signal-Verbindung erst nach init_treeviews möglich - über g_object_set_data merken */
+	g_object_set_data(G_OBJECT(zond->app_window), "seadrive-label", label_seadrive);
+#endif
 
 	return;
 }

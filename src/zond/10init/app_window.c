@@ -20,6 +20,8 @@
 #include <mupdf/fitz.h>
 
 #include "../../misc.h"
+#include "../../sond_treeviewfm.h"
+#include "../../sond_treeviewfm_seadrive.h"
 #include "../zond_init.h"
 #include "../zond_dbase.h"
 #include "../zond_treeview.h"
@@ -554,6 +556,19 @@ void init_app_window(Projekt *zond) {
 
     // TreeViews initialisieren
     init_treeviews(zond);
+
+#ifdef _WIN32
+    /* SeaDrive-Signal jetzt verbinden - treeview[BAUM_FS] ist jetzt initialisiert */
+    {
+        GtkWidget *label_seadrive = g_object_get_data(
+                G_OBJECT(zond->app_window), "seadrive-label");
+        if (label_seadrive)
+            g_signal_connect(
+                    zond->treeview[BAUM_FS], "seadrive-status",
+                    G_CALLBACK(cb_seadrive_status_app_window),
+                    label_seadrive);
+    }
+#endif
 
     // Layout der TreeViews erstellen
     init_treeview_layout(zond);

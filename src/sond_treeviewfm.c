@@ -37,12 +37,20 @@
 #include "sond_ocr.h"
 #include "sond_index.h"
 #include "sond_process_file.h"
+#include "sond_treeviewfm_seadrive.h"
 
 
 //SOND_TREEVIEWDM
 typedef struct {
 	gchar *root;
 	GtkTreeViewColumn *column_eingang;
+	gboolean is_seadrive_path;
+#ifdef _WIN32
+	GThread *seadrive_watcher_thread;
+	gint     seadrive_watcher_stop;   /* atomares Flag: 0=laufen, 1=stoppen */
+	guint    seadrive_pending_down;   /* PINNED + RECALL_ON_DATA_ACCESS */
+	guint    seadrive_pending_up;     /* NOT_IN_SYNC */
+#endif
 } SondTreeviewFMPrivate;
 
 G_DEFINE_TYPE_WITH_PRIVATE(SondTreeviewFM, sond_treeviewfm, SOND_TYPE_TREEVIEW)
@@ -410,29 +418,50 @@ static gint sond_tvfm_item_load_fs_dir(SondTVFMItem* stvfm_item,
 			SondFilePart* sfp_child = NULL;
 			gchar* mime_type = NULL;
 			gchar* full_path = NULL;
-			FILE* f = NULL;
-			guchar buf[2048];
-			gsize n = 0;
+			const gchar* mime_from_ext = NULL;
 
 			full_path = g_strconcat(stvfm_priv->root, "/", rel_path_child, NULL);
-			f = sond_fopen(full_path, "rb", error);
-			g_free(full_path);
-			if (f) {
-				n = fread(buf, 1, sizeof(buf), f);
-				fclose(f);
-				if (n <= 0)
-					LOG_WARN("fread('%s'): %s", rel_path_child, strerror(errno));
-			} else {
-				LOG_WARN("sond_fopen('%s'): %s", rel_path_child, (*error)->message);
-				g_clear_error(error);
-			}
 
-			if (n > 0)
-				mime_type = mime_guess_content_type(buf, n, NULL);
+#ifdef _WIN32
+			/* Bei SeaDrive: offline-Dateien nicht lesen - nur Extension-basierter MIME-Typ */
+			if (stvfm_priv->is_seadrive_path) {
+				wchar_t *lp = prepare_long_path(full_path, NULL);
+				if (lp) {
+					DWORD attrs = GetFileAttributesW(lp);
+					g_free(lp);
+					if (attrs != INVALID_FILE_ATTRIBUTES &&
+							(attrs & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS))
+						mime_from_ext = mime_from_extension(filename);
+				}
+			}
+#endif
+
+			if (!mime_from_ext) {
+				/* Datei lokal verfügbar - normal lesen */
+				FILE* f = NULL;
+				guchar buf[2048];
+				gsize n = 0;
+
+				f = sond_fopen(full_path, "rb", error);
+				if (f) {
+					n = fread(buf, 1, sizeof(buf), f);
+					fclose(f);
+					if (n <= 0)
+						LOG_WARN("fread('%s'): %s", rel_path_child, strerror(errno));
+				} else {
+					LOG_WARN("sond_fopen('%s'): %s", rel_path_child, (*error)->message);
+					g_clear_error(error);
+				}
+
+				if (n > 0)
+					mime_type = mime_guess_content_type(buf, n, NULL);
+			}
+			g_free(full_path);
 
 			sfp_child = sond_file_part_create_from_mime_type(
 					rel_path_child, stvfm_item_priv->sond_file_part,
-					mime_type ? mime_type : "application/octet-stream");
+					mime_from_ext ? mime_from_ext :
+							(mime_type ? mime_type : "application/octet-stream"));
 			g_free(mime_type);
 			if (!sfp_child) {
 				g_free(rel_path_child);
@@ -928,6 +957,10 @@ static void sond_treeviewfm_finalize(GObject *g_object) {
 
 	SondTreeviewFMPrivate *stvfm_priv = sond_treeviewfm_get_instance_private(
 			SOND_TREEVIEWFM(g_object));
+
+#ifdef _WIN32
+	sond_treeviewfm_seadrive_stop_watcher(SOND_TREEVIEWFM(g_object));
+#endif
 
 	g_free(stvfm_priv->root);
 
@@ -1506,6 +1539,14 @@ static void sond_treeviewfm_class_init(SondTreeviewFMClass *klass) {
 	klass->text_edited = sond_treeviewfm_text_edited;
 	klass->results_row_activated = sond_treeviewfm_results_row_activated;
 	klass->open_stvfm_item = sond_treeviewfm_open_stvfm_item;
+
+#ifdef _WIN32
+	klass->signal_seadrive_status = g_signal_new("seadrive-status",
+			SOND_TYPE_TREEVIEWFM, G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
+			G_TYPE_NONE, 2,
+			G_TYPE_UINT,     /* pending_down */
+			G_TYPE_UINT);    /* pending_up */
+#endif
 
 	return;
 }
@@ -2797,6 +2838,9 @@ static void sond_treeviewfm_init_contextmenu(SondTreeviewFM *stvfm) {
 
 	gtk_widget_show_all(contextmenu);
 
+	/* SeaDrive pin/unpin menu */
+	sond_treeviewfm_seadrive_init_contextmenu(stvfm);
+
 	return;
 }
 
@@ -3001,11 +3045,29 @@ static void sond_treeviewfm_render_file_size(GtkTreeViewColumn *column,
 	return;
 }
 
+/* Lädt ein benanntes Icon als GdkPixbuf in der angegebenen Größe.
+ * Gibt NULL zurück wenn das Icon nicht gefunden wird. */
+static GdkPixbuf* load_icon_pixbuf(GtkWidget *widget,
+		const gchar *icon_name, gint size) {
+	GtkIconTheme *theme = NULL;
+	GdkPixbuf *pixbuf = NULL;
+
+	if (!icon_name) return NULL;
+
+	theme = gtk_icon_theme_get_for_screen(
+			gtk_widget_get_screen(widget));
+	pixbuf = gtk_icon_theme_load_icon(theme, icon_name, size,
+			GTK_ICON_LOOKUP_USE_BUILTIN, NULL);
+
+	return pixbuf;
+}
+
 static void sond_treeviewfm_render_file_icon(GtkTreeViewColumn *column,
 		GtkCellRenderer *renderer, GtkTreeModel *model, GtkTreeIter *iter,
 		gpointer data) {
 	SondTVFMItem* stvfm_item = NULL;
 	SondTVFMItemPrivate* stvfm_item_priv = NULL;
+	SondTreeviewFM *stvfm = SOND_TREEVIEWFM(data);
 
 	gtk_tree_model_get(model, iter, 0, &stvfm_item, -1);
 	if (!stvfm_item) {
@@ -3016,10 +3078,84 @@ static void sond_treeviewfm_render_file_icon(GtkTreeViewColumn *column,
 	stvfm_item_priv = sond_tvfm_item_get_instance_private(stvfm_item);
 	g_object_unref(stvfm_item);
 
-	if (stvfm_item_priv->icon_name)
-		g_object_set(G_OBJECT(renderer), "icon-name", stvfm_item_priv->icon_name, NULL);
-	else
-		g_object_set(G_OBJECT(renderer), "icon-name", "image-missing", NULL);
+#ifdef _WIN32
+	/* Overlay-Icon für SeaDrive-Cloud-Status ermitteln */
+	if (sond_treeviewfm_is_seadrive_path(stvfm)) {
+		gchar *full_path = NULL;
+		const gchar *overlay_icon_name = NULL;
+
+		const gchar *root = sond_treeviewfm_get_root(stvfm);
+
+		/* Nur Dateien (LEAF) erhalten Overlay-Icons, keine Verzeichnisse */
+		if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF &&
+				stvfm_item_priv->sond_file_part &&
+				!sond_file_part_get_parent(stvfm_item_priv->sond_file_part)) {
+			const gchar *sfp_path = sond_file_part_get_path(
+					stvfm_item_priv->sond_file_part);
+			if (sfp_path && *sfp_path)
+				full_path = g_strconcat(root, "/", sfp_path, NULL);
+		}
+
+		if (full_path) {
+			wchar_t *lp = prepare_long_path(full_path, NULL);
+			g_free(full_path);
+			if (lp) {
+				DWORD attrs = GetFileAttributesW(lp);
+				g_free(lp);
+				if (attrs != INVALID_FILE_ATTRIBUTES) {
+					gboolean pinned  = (attrs & FILE_ATTRIBUTE_PINNED) != 0;
+					gboolean offline = (attrs & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) != 0;
+					if (pinned && offline)
+						overlay_icon_name = "emblem-synchronizing"; /* gepinnt, wird heruntergeladen */
+					else if (offline)
+						overlay_icon_name = "network-server"; /* offline */
+					else if (pinned)
+						overlay_icon_name = "emblem-default"; /* lokal + gepinnt */
+				}
+			}
+
+			if (overlay_icon_name) {
+				gint icon_size = 0;
+				GdkPixbuf *main_pb = NULL;
+				GdkPixbuf *overlay_pb = NULL;
+
+				/* Icon-Größe aus dem Renderer ermitteln */
+				g_object_get(renderer, "stock-size", &icon_size, NULL);
+				gint px = 0;
+				gtk_icon_size_lookup((GtkIconSize)icon_size, &px, NULL);
+				if (px <= 0) px = 16;
+
+				main_pb = load_icon_pixbuf(GTK_WIDGET(stvfm),
+						stvfm_item_priv->icon_name, px);
+				if (main_pb) {
+					gint overlay_px = MAX(px / 2, 10);
+					overlay_pb = load_icon_pixbuf(GTK_WIDGET(stvfm),
+							overlay_icon_name, overlay_px);
+					if (overlay_pb) {
+						/* Overlay unten-rechts einblenden */
+						gint dest_x = px - overlay_px;
+						gint dest_y = px - overlay_px;
+						gdk_pixbuf_composite(overlay_pb, main_pb,
+								dest_x, dest_y,
+								overlay_px, overlay_px,
+								dest_x, dest_y,
+								1.0, 1.0,
+								GDK_INTERP_BILINEAR, 255);
+						g_object_unref(overlay_pb);
+					}
+					g_object_set(G_OBJECT(renderer), "pixbuf", main_pb, NULL);
+					g_object_unref(main_pb);
+					return;
+				}
+			}
+		}
+	}
+#endif
+
+	/* Kein Overlay - normales Icon setzen */
+	g_object_set(G_OBJECT(renderer), "icon-name",
+			stvfm_item_priv->icon_name ? stvfm_item_priv->icon_name : "image-missing",
+			NULL);
 
 	return;
 }
@@ -3112,9 +3248,20 @@ gint sond_treeviewfm_set_root(SondTreeviewFM *stvfm, const gchar *root,
 	g_free(stvfm_priv->root);
 	g_free(sfp_class->path_root);
 
+#ifdef _WIN32
+	sond_treeviewfm_seadrive_stop_watcher(stvfm);
+	/* Status zurücksetzen und Signal emittieren */
+	stvfm_priv->seadrive_pending_down = 0;
+	stvfm_priv->seadrive_pending_up = 0;
+	g_signal_emit(stvfm,
+			SOND_TREEVIEWFM_GET_CLASS(stvfm)->signal_seadrive_status, 0,
+			(guint)0, (guint)0);
+#endif
+
 	if (!root) {
 		stvfm_priv->root = NULL;
 		sfp_class->path_root = NULL;
+		stvfm_priv->is_seadrive_path = FALSE;
 
 		gtk_tree_store_clear(
 				GTK_TREE_STORE(
@@ -3125,6 +3272,22 @@ gint sond_treeviewfm_set_root(SondTreeviewFM *stvfm, const gchar *root,
 
 	stvfm_priv->root = g_strdup(root);
 	sfp_class->path_root = g_strdup(root);
+
+#ifdef _WIN32
+	stvfm_priv->is_seadrive_path = sond_seadrive_is_seadrive_path(root);
+	if (stvfm_priv->is_seadrive_path)
+		sond_treeviewfm_seadrive_start_watcher(stvfm);
+	/* SeaDrive-Menüpunkt aktivieren/deaktivieren */
+	{
+		GtkWidget *menu_item = g_object_get_data(
+				G_OBJECT(stvfm), "seadrive-menu-item");
+		if (menu_item)
+			gtk_widget_set_sensitive(menu_item,
+					stvfm_priv->is_seadrive_path);
+	}
+#else
+	stvfm_priv->is_seadrive_path = FALSE;
+#endif
 
 	//zum Arbeitsverzeichnis machen
 	g_chdir(stvfm_priv->root);
@@ -3157,4 +3320,95 @@ sond_treeviewfm_get_root(SondTreeviewFM *stvfm) {
 
 	return stvfm_priv->root;
 }
+
+gboolean
+sond_treeviewfm_is_seadrive_path(SondTreeviewFM *stvfm) {
+	if (!stvfm)
+		return FALSE;
+
+	SondTreeviewFMPrivate *stvfm_priv = sond_treeviewfm_get_instance_private(
+			stvfm);
+
+	return stvfm_priv->is_seadrive_path;
+}
+
+#ifdef _WIN32
+void
+sond_treeviewfm_seadrive_update_status(SondTreeviewFM *stvfm,
+		gint delta_down,
+		const gchar *path_up, gboolean up_pending) {
+	gboolean changed = FALSE;
+	SondTreeviewFMPrivate *p = sond_treeviewfm_get_instance_private(stvfm);
+
+	if (delta_down > 0) {
+		p->seadrive_pending_down++;
+		changed = TRUE;
+	} else if (delta_down < 0 && p->seadrive_pending_down > 0) {
+		p->seadrive_pending_down--;
+		changed = TRUE;
+	}
+
+	if (path_up) {
+		static GHashTable *not_in_sync = NULL;
+		if (!not_in_sync)
+			not_in_sync = g_hash_table_new_full(
+					g_str_hash, g_str_equal, g_free, NULL);
+		if (up_pending) {
+			if (g_hash_table_add(not_in_sync, g_strdup(path_up)))
+				p->seadrive_pending_up++;
+		} else {
+			if (g_hash_table_remove(not_in_sync, path_up))
+				p->seadrive_pending_up--;
+		}
+		changed = TRUE;
+	}
+
+	if (changed) {
+		gtk_widget_queue_draw(GTK_WIDGET(stvfm));
+		g_signal_emit(stvfm,
+				SOND_TREEVIEWFM_GET_CLASS(stvfm)->signal_seadrive_status, 0,
+				p->seadrive_pending_down,
+				p->seadrive_pending_up);
+	}
+}
+
+void
+sond_treeviewfm_seadrive_set_pending_down(SondTreeviewFM *stvfm, guint count) {
+	SondTreeviewFMPrivate *p = sond_treeviewfm_get_instance_private(stvfm);
+	p->seadrive_pending_down = count;
+	gtk_widget_queue_draw(GTK_WIDGET(stvfm));
+	g_signal_emit(stvfm,
+			SOND_TREEVIEWFM_GET_CLASS(stvfm)->signal_seadrive_status, 0,
+			p->seadrive_pending_down,
+			p->seadrive_pending_up);
+}
+
+gboolean
+sond_treeviewfm_seadrive_stop_requested(SondTreeviewFM *stvfm) {
+	SondTreeviewFMPrivate *p = sond_treeviewfm_get_instance_private(stvfm);
+	return g_atomic_int_get(&p->seadrive_watcher_stop) != 0;
+}
+
+void
+sond_treeviewfm_seadrive_start_watcher(SondTreeviewFM *stvfm) {
+	SondTreeviewFMPrivate *p = sond_treeviewfm_get_instance_private(stvfm);
+	if (p->seadrive_watcher_thread)
+		return;
+	g_atomic_int_set(&p->seadrive_watcher_stop, 0);
+	p->seadrive_watcher_thread = g_thread_new(
+			"seadrive-watcher",
+			sond_treeviewfm_seadrive_watcher_thread,
+			stvfm);
+}
+
+void
+sond_treeviewfm_seadrive_stop_watcher(SondTreeviewFM *stvfm) {
+	SondTreeviewFMPrivate *p = sond_treeviewfm_get_instance_private(stvfm);
+	if (!p->seadrive_watcher_thread)
+		return;
+	g_atomic_int_set(&p->seadrive_watcher_stop, 1);
+	g_thread_join(p->seadrive_watcher_thread);
+	p->seadrive_watcher_thread = NULL;
+}
+#endif
 

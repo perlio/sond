@@ -1,11 +1,12 @@
 #include "zond_treeviewfm.h"
 
 #include "../misc.h"
-#include "../sond_fileparts.c"
+#include "../sond_fileparts.h"
 #include "../sond_renderer.h"
 #include "../sond_index.h"
 #include "../sond_process_file.h"
 #include "../sond_ocr.h"
+#include "../sond_log_and_error.h"
 #include "zond_indexsuche.h"
 
 #include "zond_dbase.h"

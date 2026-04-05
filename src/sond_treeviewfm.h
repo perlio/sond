@@ -50,6 +50,9 @@ struct _SondTreeviewFMClass {
 	gboolean (*has_sections) (SondTVFMItem*);
 	gint (*delete_section) (SondTVFMItem*, GError**);
 	SondProcessFileCtx* (*get_wctx) (SondTreeviewFM*);
+
+	/* Signal: SeaDrive-Status geändert (connected, pending_down, pending_up) */
+	guint signal_seadrive_status;
 };
 
 SondTVFMItemType sond_tvfm_item_get_item_type(SondTVFMItem*);
@@ -80,6 +83,17 @@ GHashTable* sond_treeviewfm_get_fileparts(SondTreeviewFM *stv, gboolean selected
 gint sond_treeviewfm_set_root(SondTreeviewFM*, const gchar*, gchar**);
 
 const gchar* sond_treeviewfm_get_root(SondTreeviewFM*);
+
+gboolean sond_treeviewfm_is_seadrive_path(SondTreeviewFM*);
+
+#ifdef _WIN32
+void     sond_treeviewfm_seadrive_update_status(SondTreeviewFM*,
+             gint delta_down, const gchar *path_up, gboolean up_pending);
+void     sond_treeviewfm_seadrive_set_pending_down(SondTreeviewFM*, guint);
+gboolean sond_treeviewfm_seadrive_stop_requested(SondTreeviewFM*);
+void     sond_treeviewfm_seadrive_start_watcher(SondTreeviewFM*);
+void     sond_treeviewfm_seadrive_stop_watcher(SondTreeviewFM*);
+#endif
 
 G_END_DECLS
 

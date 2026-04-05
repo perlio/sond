@@ -222,6 +222,21 @@ static const MimeExtMapping mime_mappings[] = {
     {NULL, NULL} // Terminator
 };
 
+// Extension → MIME-Typ (Umkehrung der Tabelle)
+const gchar* mime_from_extension(const char* filename) {
+    if (!filename) return NULL;
+
+    const char* dot = strrchr(filename, '.');
+    if (!dot || dot == filename) return NULL;
+
+    for (int i = 0; mime_mappings[i].mime_type != NULL; i++) {
+        if (strcasecmp(mime_mappings[i].extension, dot) == 0)
+            return mime_mappings[i].mime_type;
+    }
+
+    return NULL; /* unbekannte Extension */
+}
+
 // Lookup-Funktion
 const gchar* mime_to_extension(const char* mime_type) {
     if (!mime_type) return NULL;

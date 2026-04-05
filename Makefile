@@ -26,7 +26,7 @@ SRCS += $(shell find $(SRC_DIRS)/zond -name '*.c') $(SRC_DIRS)/misc_stdlib.c $(S
 	$(SRC_DIRS)/sond_renderer.c $(SRC_DIRS)/sond_ocr.c $(SRC_DIRS)/sond_log_and_error.c \
 	$(SRC_DIRS)/sond_pdf_helper.c $(SRC_DIRS)/sond_gmessage_helper.c $(SRC_DIRS)/sond_misc.c \
 	$(SRC_DIRS)/sond_file_helper.c $(SRC_DIRS)/sond_process_file.c $(SRC_DIRS)/sond_index.c \
-	$(SRC_DIRS)/sond_result_view.c
+	$(SRC_DIRS)/sond_result_view.c $(SRC_DIRS)/sond_treeviewfm_seadrive.c
 CFLAGS += $(shell pkg-config --cflags libsoup-3.0 libmagic libxml-2.0 gtk+-3.0 gobject-2.0 json-glib-1.0 gmime-3.0) \
 	-DCONFIG_$(CONFIG)
 LDFLAGS += $(shell pkg-config --libs libmagic libxml-2.0 gtk+-3.0 sqlite3 libcurl tesseract \
