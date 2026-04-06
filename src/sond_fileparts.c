@@ -188,6 +188,14 @@ SondFilePart* sond_file_part_create_from_mime_type(gchar const* path,
 	return sfp_child;
 }
 
+SondFilePart* sond_file_part_create_leaf(gchar const* path,
+		SondFilePart* parent, gchar const* mime_type) {
+	SondFilePart* sfp = sond_file_part_create(SOND_TYPE_FILE_PART_LEAF, path, parent);
+	sond_file_part_leaf_set_mime_type(SOND_FILE_PART_LEAF(sfp),
+			mime_type ? mime_type : "application/octet-stream");
+	return sfp;
+}
+
 SondFilePart* sond_file_part_get_parent(SondFilePart *sfp) {
 	SondFilePartPrivate *sfp_priv = NULL;
 

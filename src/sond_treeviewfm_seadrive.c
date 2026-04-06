@@ -131,9 +131,10 @@ typedef struct {
 
 typedef struct {
     SondTreeviewFM *stvfm;
-    gint            delta_down; /* +1 oder -1, 0 = keine Änderung */
-    gchar          *path_up;    /* NULL oder Pfad für pending_up-Änderung */
-    gboolean        up_pending; /* TRUE=NOT_IN_SYNC, FALSE=IN_SYNC */
+    gint            delta_down;  /* +1 oder -1, 0 = keine Änderung */
+    gchar          *path_down;   /* Pfad der hydrierten Datei, NULL sonst */
+    gchar          *path_up;     /* NULL oder Pfad für pending_up-Änderung */
+    gboolean        up_pending;  /* TRUE=NOT_IN_SYNC, FALSE=IN_SYNC */
 } WatcherIdleData;
 
 static gboolean watcher_idle_cb(gpointer user_data)
@@ -144,6 +145,11 @@ static gboolean watcher_idle_cb(gpointer user_data)
             d->delta_down,
             d->path_up, d->up_pending);
 
+    /* Wenn Datei hydrated: Knoten im Baum korrigieren */
+    if (d->path_down)
+        sond_treeviewfm_seadrive_item_hydrated(d->stvfm, d->path_down);
+
+    g_free(d->path_down);
     g_free(d->path_up);
     g_free(d);
     return G_SOURCE_REMOVE;
@@ -359,9 +365,10 @@ gpointer sond_treeviewfm_seadrive_watcher_thread(gpointer user_data)
 
                                     if (pinned && offline)
                                         d->delta_down = +1; /* gepinnt, noch nicht lokal */
-                                    else if (pinned && !offline)
+                                    else if (pinned && !offline) {
                                         d->delta_down = -1; /* hydrated */
-                                    else if (!pinned && offline)
+                                        d->path_down  = g_strdup(full);
+                                    } else if (!pinned && offline)
                                         d->delta_down = -1; /* unpinned während laufendem Download */
                                     /* !pinned && !offline: lokal, nicht gepinnt - keine Änderung */
                                 }

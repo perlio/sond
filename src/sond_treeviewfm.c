@@ -436,8 +436,13 @@ static gint sond_tvfm_item_load_fs_dir(SondTVFMItem* stvfm_item,
 			}
 #endif
 
-			if (!mime_from_ext) {
-				/* Datei lokal verfügbar - normal lesen */
+			if (mime_from_ext) {
+				/* Datei offline - SondFilePartLeaf erzwingen, kein Öffnen */
+				sfp_child = sond_file_part_create_leaf(
+						rel_path_child, stvfm_item_priv->sond_file_part,
+						mime_from_ext);
+			} else {
+				/* Datei lokal verfügbar - normal lesen und MIME-Typ ermitteln */
 				FILE* f = NULL;
 				guchar buf[2048];
 				gsize n = 0;
@@ -455,14 +460,13 @@ static gint sond_tvfm_item_load_fs_dir(SondTVFMItem* stvfm_item,
 
 				if (n > 0)
 					mime_type = mime_guess_content_type(buf, n, NULL);
+
+				sfp_child = sond_file_part_create_from_mime_type(
+						rel_path_child, stvfm_item_priv->sond_file_part,
+						mime_type ? mime_type : "application/octet-stream");
+				g_free(mime_type);
 			}
 			g_free(full_path);
-
-			sfp_child = sond_file_part_create_from_mime_type(
-					rel_path_child, stvfm_item_priv->sond_file_part,
-					mime_from_ext ? mime_from_ext :
-							(mime_type ? mime_type : "application/octet-stream"));
-			g_free(mime_type);
 			if (!sfp_child) {
 				g_free(rel_path_child);
 				sond_dir_close(dir);
@@ -2372,6 +2376,46 @@ static gint sond_treeviewfm_open(SondTVFMItem *stvfm_item,
 	if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_DIR)
 		return 0;
 
+#ifdef _WIN32
+	/* Bei offline-Dateien im SeaDrive-Pfad: Download triggern durch kurzes
+	 * Lesen der Datei. Windows/SeaDrive beginnt dadurch den Download der
+	 * gesamten Datei (Recall). Den Pin-State nicht ändern. */
+	if (SOND_IS_FILE_PART_LEAF(stvfm_item_priv->sond_file_part) &&
+			!sond_file_part_get_parent(stvfm_item_priv->sond_file_part)) {
+		SondTreeviewFM *stvfm = sond_tvfm_item_get_stvfm(stvfm_item);
+		if (sond_treeviewfm_is_seadrive_path(stvfm)) {
+			const gchar *root = sond_treeviewfm_get_root(stvfm);
+			const gchar *sfp_path = sond_file_part_get_path(
+					stvfm_item_priv->sond_file_part);
+			if (root && sfp_path) {
+				gchar *full_path = g_strconcat(root, "/", sfp_path, NULL);
+				wchar_t *lp = prepare_long_path(full_path, NULL);
+				g_free(full_path);
+				if (lp) {
+					DWORD attrs = GetFileAttributesW(lp);
+					if (attrs != INVALID_FILE_ATTRIBUTES &&
+							(attrs & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS)) {
+						/* Datei offline - durch Öffnen und kurzes Lesen
+						 * den Recall-Mechanismus triggern */
+						HANDLE h = CreateFileW(lp,
+								GENERIC_READ, FILE_SHARE_READ,
+								NULL, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+						if (h != INVALID_HANDLE_VALUE) {
+							BYTE buf[1];
+							DWORD read = 0;
+							ReadFile(h, buf, sizeof(buf), &read, NULL);
+							CloseHandle(h);
+						}
+						g_free(lp);
+						return 0;
+					}
+					g_free(lp);
+				}
+			}
+		}
+	}
+#endif
+
 	rc = SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->
 			open_stvfm_item(stvfm_item, open_with, error);
 	if (rc)
@@ -3086,7 +3130,7 @@ static void sond_treeviewfm_render_file_icon(GtkTreeViewColumn *column,
 
 		const gchar *root = sond_treeviewfm_get_root(stvfm);
 
-		/* Nur Dateien (LEAF) erhalten Overlay-Icons, keine Verzeichnisse */
+		/* Dateien (LEAF) und Filesystem-Verzeichnisse erhalten Overlay-Icons */
 		if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF &&
 				stvfm_item_priv->sond_file_part &&
 				!sond_file_part_get_parent(stvfm_item_priv->sond_file_part)) {
@@ -3094,6 +3138,14 @@ static void sond_treeviewfm_render_file_icon(GtkTreeViewColumn *column,
 					stvfm_item_priv->sond_file_part);
 			if (sfp_path && *sfp_path)
 				full_path = g_strconcat(root, "/", sfp_path, NULL);
+		} else if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_DIR &&
+				!stvfm_item_priv->sond_file_part) {
+			/* Filesystem-Verzeichnis: PINNED oder UNPINNED direkt abfragen */
+			const gchar *rel = stvfm_item_priv->path_or_section;
+			if (rel && *rel)
+				full_path = g_strconcat(root, "/", rel, NULL);
+			else
+				full_path = g_strdup(root);
 		}
 
 		if (full_path) {
@@ -3103,14 +3155,24 @@ static void sond_treeviewfm_render_file_icon(GtkTreeViewColumn *column,
 				DWORD attrs = GetFileAttributesW(lp);
 				g_free(lp);
 				if (attrs != INVALID_FILE_ATTRIBUTES) {
-					gboolean pinned  = (attrs & FILE_ATTRIBUTE_PINNED) != 0;
-					gboolean offline = (attrs & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) != 0;
-					if (pinned && offline)
-						overlay_icon_name = "emblem-synchronizing"; /* gepinnt, wird heruntergeladen */
-					else if (offline)
-						overlay_icon_name = "network-server"; /* offline */
-					else if (pinned)
-						overlay_icon_name = "emblem-default"; /* lokal + gepinnt */
+					gboolean pinned   = (attrs & FILE_ATTRIBUTE_PINNED) != 0;
+					gboolean offline  = (attrs & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) != 0;
+					gboolean unpinned = (attrs & FILE_ATTRIBUTE_UNPINNED) != 0;
+					if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_DIR) {
+						/* Verzeichnisse: nur PINNED oder UNPINNED */
+						if (pinned)
+							overlay_icon_name = "emblem-default";   /* gepinnt */
+						else if (unpinned)
+							overlay_icon_name = "edit-clear";       /* Cache leer */
+					} else {
+						/* Dateien: wie bisher */
+						if (pinned && offline)
+							overlay_icon_name = "emblem-synchronizing";
+						else if (offline)
+							overlay_icon_name = "network-server";
+						else if (pinned)
+							overlay_icon_name = "emblem-default";
+					}
 				}
 			}
 
@@ -3271,7 +3333,7 @@ gint sond_treeviewfm_set_root(SondTreeviewFM *stvfm, const gchar *root,
 	}
 
 	stvfm_priv->root = g_strdup(root);
-	sfp_class->path_root = g_strdup(root);
+	sfp_class->path_root = g_strdup(root); /* synchron halten - siehe Kommentar in sond_fileparts.h */
 
 #ifdef _WIN32
 	stvfm_priv->is_seadrive_path = sond_seadrive_is_seadrive_path(root);
@@ -3381,6 +3443,119 @@ sond_treeviewfm_seadrive_set_pending_down(SondTreeviewFM *stvfm, guint count) {
 			SOND_TREEVIEWFM_GET_CLASS(stvfm)->signal_seadrive_status, 0,
 			p->seadrive_pending_down,
 			p->seadrive_pending_up);
+}
+
+void
+sond_treeviewfm_seadrive_item_hydrated(SondTreeviewFM *stvfm,
+		const gchar *full_path) {
+	GtkTreeIter iter = { 0 };
+	SondTVFMItem *stvfm_item = NULL;
+	SondTVFMItemPrivate *stvfm_item_priv = NULL;
+	SondFilePart *sfp_old = NULL;
+	SondFilePart *sfp_new = NULL;
+	gchar *mime_type = NULL;
+	const gchar *rel_path = NULL;
+	int rc = 0;
+
+	const gchar *root = sond_treeviewfm_get_root(stvfm);
+	if (!root || !full_path)
+		return;
+
+	/* relativen Pfad ermitteln */
+	gsize root_len = strlen(root);
+	if (!g_str_has_prefix(full_path, root))
+		return;
+	rel_path = full_path + root_len;
+	if (*rel_path == '/' || *rel_path == '\\')
+		rel_path++;
+	if (!*rel_path)
+		return;
+
+	/* Knoten im sichtbaren Baum suchen - nicht expandieren */
+	rc = sond_treeviewfm_file_part_visible(stvfm, NULL, rel_path, FALSE,
+			&iter, NULL);
+	if (rc != 1)
+		return; /* nicht sichtbar - wird beim nächsten Expandieren korrekt geladen */
+
+	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)),
+			&iter, 0, &stvfm_item, -1);
+	if (!stvfm_item)
+		return;
+
+	stvfm_item_priv = sond_tvfm_item_get_instance_private(stvfm_item);
+	sfp_old = stvfm_item_priv->sond_file_part;
+
+	/* Nur korrigieren wenn Item als einfaches LEAF geladen wurde
+	 * (d.h. es war offline beim Laden und wurde nicht auf Kinder geprüft) */
+	if (stvfm_item_priv->type != SOND_TVFM_ITEM_TYPE_LEAF ||
+			!SOND_IS_FILE_PART_LEAF(sfp_old)) {
+		g_object_unref(stvfm_item);
+		return;
+	}
+
+	/* MIME-Typ jetzt korrekt ermitteln - Datei ist lokal */
+	{
+		GError *error = NULL;
+		FILE *f = sond_fopen(full_path, "rb", &error);
+		if (f) {
+			guchar buf[2048];
+			gsize n = fread(buf, 1, sizeof(buf), f);
+			fclose(f);
+			if (n > 0)
+				mime_type = mime_guess_content_type(buf, n, NULL);
+		} else
+			g_clear_error(&error);
+	}
+
+	if (!mime_type) {
+		g_object_unref(stvfm_item);
+		return; /* kein MIME-Typ - nichts zu korrigieren */
+	}
+
+	/* Altes sfp aus arr_opened_files entfernen damit sond_file_part_create
+	 * nicht das alte LEAF zurückgibt anstatt ein neues PDF/ZIP/GMessage zu erstellen */
+	{
+		GPtrArray *arr = sond_file_part_get_arr_opened_files(
+				sond_file_part_get_parent(sfp_old));
+		if (arr)
+			g_ptr_array_remove_fast(arr, sfp_old);
+	}
+
+	/* Neues sfp mit korrektem Typ erstellen */
+	sfp_new = sond_file_part_create_from_mime_type(
+			rel_path,
+			sond_file_part_get_parent(sfp_old),
+			mime_type);
+	g_free(mime_type);
+
+	if (!sfp_new) {
+		g_object_unref(stvfm_item);
+		return;
+	}
+
+	/* Altes Item im Baum durch neues ersetzen */
+	SondTVFMItem *stvfm_item_new = sond_tvfm_item_create(stvfm, sfp_new, NULL);
+	g_object_unref(sfp_new);
+
+	gtk_tree_store_set(
+			GTK_TREE_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm))),
+			&iter, 0, stvfm_item_new, -1);
+
+	SondTVFMItemPrivate *new_priv =
+			sond_tvfm_item_get_instance_private(stvfm_item_new);
+
+	/* Falls jetzt Kinder möglich: Dummy-Kind einfügen */
+	if (new_priv->has_children) {
+		GtkTreeIter iter_dummy = { 0 };
+		gtk_tree_store_insert(GTK_TREE_STORE(
+				gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm))),
+				&iter_dummy, &iter, -1);
+	}
+
+	g_object_unref(stvfm_item_new);
+	g_object_unref(stvfm_item);
+
+	gtk_widget_queue_draw(GTK_WIDGET(stvfm));
 }
 
 gboolean

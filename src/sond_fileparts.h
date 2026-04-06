@@ -34,12 +34,22 @@ G_DECLARE_DERIVABLE_TYPE(SondFilePart, sond_file_part, SOND,
 struct _SondFilePartClass {
 	GObjectClass parent_class;
 
+	/* DESIGNFEHLER: path_root liegt auf Klassenebene und gilt damit global
+	 * für alle SondFilePart-Instanzen. Wenn zwei SondTreeviewFM-Widgets
+	 * gleichzeitig mit unterschiedlichen Roots existieren würden, würde
+	 * das zweite das erste überschreiben. Aktuell kein praktisches Problem
+	 * da immer nur ein Projektverzeichnis gleichzeitig geöffnet ist.
+	 * Korrekte Lösung wäre path_root als Parameter durch alle betroffenen
+	 * Funktionen durchzureichen. */
 	gchar* path_root;
 	GPtrArray* arr_opened_files;
 };
 
 SondFilePart* sond_file_part_create_from_mime_type(gchar const* path,
 		SondFilePart*, gchar const*);
+
+SondFilePart* sond_file_part_create_leaf(gchar const* path,
+		SondFilePart* parent, gchar const* mime_type);
 
 SondFilePart* sond_file_part_get_parent(SondFilePart *);
 

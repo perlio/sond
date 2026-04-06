@@ -90,6 +90,7 @@ gboolean sond_treeviewfm_is_seadrive_path(SondTreeviewFM*);
 void     sond_treeviewfm_seadrive_update_status(SondTreeviewFM*,
              gint delta_down, const gchar *path_up, gboolean up_pending);
 void     sond_treeviewfm_seadrive_set_pending_down(SondTreeviewFM*, guint);
+void     sond_treeviewfm_seadrive_item_hydrated(SondTreeviewFM*, const gchar *full_path);
 gboolean sond_treeviewfm_seadrive_stop_requested(SondTreeviewFM*);
 void     sond_treeviewfm_seadrive_start_watcher(SondTreeviewFM*);
 void     sond_treeviewfm_seadrive_stop_watcher(SondTreeviewFM*);
