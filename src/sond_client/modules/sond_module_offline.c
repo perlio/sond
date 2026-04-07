@@ -338,7 +338,7 @@ static void on_cache_delete_response(GObject *source, GAsyncResult *result, gpoi
 	    action_data_free(data);
 		return;
 	}
-	if (sond_rmdir_r(akte_path, &error) != 0) {
+	if (!sond_rmdir_r(akte_path, &error) != 0) {
 		gchar *msg = g_strdup_printf("Fehler beim Löschen des Cache-Verzeichnisses: %s",
 									akte_path);
 		show_error_dialog(priv->main_widget, msg, error->message);

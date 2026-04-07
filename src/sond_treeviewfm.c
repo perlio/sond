@@ -1113,7 +1113,7 @@ static gint delete_item(SondTVFMItem* stvfm_item, GError** error) {
 
 	if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_DIR) {
 		if (!stvfm_item_priv->sond_file_part) { //FileSystem - geht schon
-			gint rc = 0;
+			gboolean res = FALSE;
 			gchar* path = NULL;
 			SondTreeviewFMPrivate* stvfm_priv =
 					sond_treeviewfm_get_instance_private(stvfm_item_priv->stvfm);
@@ -1123,9 +1123,9 @@ static gint delete_item(SondTVFMItem* stvfm_item, GError** error) {
 
 			path = g_strconcat(stvfm_priv->root, "/", stvfm_item_priv->path_or_section, NULL);
 
-			rc = sond_rmdir_r(path, error);
+			res = sond_rmdir_r(path, error);
 			g_free(path);
-			if (rc)
+			if (!res)
 				ERROR_Z
 		}
 		else if (!stvfm_item_priv->path_or_section) { //sfp existiert - also root
