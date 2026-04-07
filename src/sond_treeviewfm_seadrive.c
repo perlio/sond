@@ -366,11 +366,15 @@ gpointer sond_treeviewfm_seadrive_watcher_thread(gpointer user_data)
                                     if (pinned && offline)
                                         d->delta_down = +1; /* gepinnt, noch nicht lokal */
                                     else if (pinned && !offline) {
-                                        d->delta_down = -1; /* hydrated */
+                                        d->delta_down = -1; /* hydrated via pin */
                                         d->path_down  = g_strdup(full);
                                     } else if (!pinned && offline)
                                         d->delta_down = -1; /* unpinned während laufendem Download */
-                                    /* !pinned && !offline: lokal, nicht gepinnt - keine Änderung */
+                                    else {
+                                        /* !pinned && !offline: z.B. nach Doppelklick-Recall.
+                                         * _item_hydrated prüft selbst ob Korrektur nötig. */
+                                        d->path_down = g_strdup(full);
+                                    }
                                 }
 
                                 /* LAST_WRITE: In-Sync-Status prüfen */
@@ -380,10 +384,7 @@ gpointer sond_treeviewfm_seadrive_watcher_thread(gpointer user_data)
                                     d->up_pending = !in_sync;
                                 }
 
-                                if (d->delta_down != 0 || d->path_up)
-                                    g_idle_add(watcher_idle_cb, d);
-                                else
-                                    g_free(d);
+								g_idle_add(watcher_idle_cb, d);
                             }
                         }
                         g_free(full);
