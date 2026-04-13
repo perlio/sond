@@ -912,7 +912,7 @@ static gint zond_treeview_anbinden_rekursiv(ZondTreeview *ztv,
 
 	ZondTreeviewPrivate *ztv_priv = zond_treeview_get_instance_private(ztv);
 
-	if (info_window->cancel)
+	if (*(info_window->cancel))
 		return -1;
 
 	if (sond_tvfm_item_get_item_type(stvfm_item) == SOND_TVFM_ITEM_TYPE_LEAF ||
@@ -1072,7 +1072,7 @@ static gint zond_treeview_clipboard_anbinden_foreach(SondTreeview *stv,
 			s_selection->child, stvfm_item, s_selection->info_window,
 			&s_selection->zaehler, &s_selection->dir_inserted);
 	g_object_unref(stvfm_item);
-	if (rc == -1)
+	if (rc == -1) //Kein Fehler, Cancel gedrückt!
 		return 1; //sond_treeview_..._foreach bricht dann ab
 
 	s_selection->child = FALSE;
@@ -1480,6 +1480,7 @@ static gint zond_treeview_paste_clipboard(Projekt *zond, gboolean child,
 	gint anchor_id = 0;
 	gboolean in_link = FALSE;
 	gint rc = 0;
+	gint cancel = 0;
 
 	if (zond->baum_active == KEIN_BAUM || zond->baum_active == BAUM_FS)
 		return 0;
@@ -1518,7 +1519,7 @@ static gint zond_treeview_paste_clipboard(Projekt *zond, gboolean child,
 		InfoWindow *info_window = NULL;
 
 		info_window = info_window_open(zond->app_window,
-				&zond->wctx->cancel, "Dateien anbinden");
+				&cancel, "Dateien anbinden");
 
 		zond_treeview_clipboard_anbinden(zond, anchor_id,
 				&iter_anchor, child, info_window);
@@ -2178,7 +2179,7 @@ gint zond_treeview_oeffnen_internal_viewer(Projekt *zond, SondFilePartPDF* sfp_p
 			PdfDocumentPage* pdfp = NULL;
 
 			pdfp = g_ptr_array_index(zond_pdf_document_get_arr_pages(zpdfd), i);
-			if (pdfp->deleted)
+			if (pdfp && pdfp->deleted)
 				pos_pdf->seite--;
 		}
 	}

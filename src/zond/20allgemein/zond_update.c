@@ -63,7 +63,7 @@ static gint zond_update_unzip(Projekt *zond, InfoWindow *info_window,
 		gint rc = 0;
 		gint len_name = 0;
 
-		if (info_window->cancel) {
+		if (*(info_window->cancel)) {
 			zip_discard(za);
 			return 1;
 		}
@@ -315,7 +315,7 @@ static gint curl_progress(gpointer ptr, curl_off_t dltotal, curl_off_t dlnow,
 		curl_off_t ultotal, curl_off_t ulnow) {
 	InfoWindow *info_window = (InfoWindow*) ptr;
 
-	if (info_window->cancel)
+	if (*(info_window->cancel))
 		return -1; //abbrechen
 
 	if (dltotal == 0)

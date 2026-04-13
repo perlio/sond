@@ -392,10 +392,8 @@ static gint zond_treeviewfm_text_edited(SondTreeviewFM *stvfm,
 		//Text in treeview anpassen
 		iter = zond_treeview_abfragen_iter(ZOND_TREEVIEW(ztvfm_priv->zond->treeview[BAUM_INHALT]),
 				ID_section);
-		if (!iter)
-			LOG_WARN("%s, Abschnitt %s: Knoten nicht in Baum INHALT gefunden",
-					filepart, sond_tvfm_item_get_path_or_section(stvfm_item));
-		else {
+
+		if (iter) {
 			zond_tree_store_set(iter, NULL, new_text, 0);
 			gtk_tree_iter_free(iter);
 		}

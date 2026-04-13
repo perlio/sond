@@ -713,10 +713,11 @@ static void cb_hilfe_update(GtkWidget *item, gpointer data) {
 	gint rc = 0;
 	GError *error = NULL;
 	InfoWindow *info_window = NULL;
+	gint cancel = 0;
 
 	Projekt *zond = (Projekt*) data;
 
-	info_window = info_window_open(zond->app_window, &zond->wctx->cancel, "Zond Updater");
+	info_window = info_window_open(zond->app_window, &cancel, "Zond Updater");
 
 	rc = zond_update(zond, info_window, &error);
 

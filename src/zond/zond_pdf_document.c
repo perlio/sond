@@ -827,9 +827,9 @@ ZPDFDPart* zpdfd_part_ref(ZPDFDPart* zpdfd_part) {
 
 void zpdfd_part_get_anbindung(ZPDFDPart* zpdfd_part, Anbindung* anbindung) {
 	anbindung->von.seite = zpdfd_part->first_page->page_akt;
-	anbindung->von.index = anbindung->von.index;
+	anbindung->von.index = zpdfd_part->first_index;
 	anbindung->bis.seite = zpdfd_part->last_page->page_akt;
-	anbindung->bis.index = anbindung->bis.index;
+	anbindung->bis.index = zpdfd_part->last_index;
 
 	return;
 }

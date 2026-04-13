@@ -2594,7 +2594,7 @@ static gint sond_treeviewfm_search(SondTreeview *stv, GtkTreeIter *iter,
 			&data_thread);
 
 	while (!g_atomic_int_get(search_fs->atom_ready)) {
-		if (search_fs->info_window->cancel)
+		if (*(search_fs->info_window->cancel))
 			g_atomic_int_set(search_fs->atom_cancelled, 1);
 	}
 

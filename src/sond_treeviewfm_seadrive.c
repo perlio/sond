@@ -601,7 +601,7 @@ static void apply_pin_state_to_item(SondTVFMItem *stvfm_item, guint pin_state)
      * These have sfp != NULL AND path_or_section != NULL.
      * Act on:
      *   sfp == NULL              -> fs directory
-     *   sfp != NULL, pos == NULL -> the file itself on the filesystem
+     *   sfp != NULL && path_or_section == NULL -> the file itself on the filesystem
      */
     if (sfp != NULL && sond_tvfm_item_get_path_or_section(stvfm_item) != NULL)
         return;
@@ -616,14 +616,15 @@ static void apply_pin_state_to_item(SondTVFMItem *stvfm_item, guint pin_state)
         LOG_WARN("SeaDrive set_pin_state('%s'): %s",
                  full_path, error ? error->message : "?");
         g_clear_error(&error);
-    } else if (pin_state != STVFM_PIN_STATE_PINNED) {
-        /* PINNED bei allen Elternverzeichnissen löschen */
+    }
+    else if (pin_state != STVFM_PIN_STATE_PINNED) {
+        // PINNED bei allen Elternverzeichnissen löschen
         const gchar *root = sond_treeviewfm_get_root(
                 sond_tvfm_item_get_stvfm(stvfm_item));
         if (root)
             clear_attr_on_parents(full_path, root, FILE_ATTRIBUTE_PINNED);
     } else {
-        /* PINNED gesetzt - UNPINNED bei allen Elternverzeichnissen löschen */
+        //PINNED gesetzt - UNPINNED bei allen Elternverzeichnissen löschen
         const gchar *root = sond_treeviewfm_get_root(
                 sond_tvfm_item_get_stvfm(stvfm_item));
         if (root)
