@@ -333,10 +333,16 @@ gpointer sond_treeviewfm_seadrive_watcher_thread(gpointer user_data)
 
                 do {
                     /* Dateiname von UTF-16 nach UTF-8 */
+                    GError *conv_error = NULL;
                     gchar *filename = g_utf16_to_utf8(
                             (gunichar2*) fni->FileName,
                             fni->FileNameLength / sizeof(WCHAR),
-                            NULL, NULL, NULL);
+                            NULL, NULL, &conv_error);
+                    if (!filename) {
+                        LOG_WARN("UTF-16->UTF-8 Konvertierung fehlgeschlagen: %s",
+                                conv_error ? conv_error->message : "?");
+                        g_error_free(conv_error);
+                    }
 
                     if (filename) {
                         /* Schrägstriche vereinheitlichen */
@@ -360,8 +366,9 @@ gpointer sond_treeviewfm_seadrive_watcher_thread(gpointer user_data)
 
                                 /* ATTRIBUTES: pending_down aktualisieren */
                                 {
-                                    gboolean pinned  = (attrs & FILE_ATTRIBUTE_PINNED) != 0;
-                                    gboolean offline = (attrs & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) != 0;
+                                    gboolean pinned   = (attrs & FILE_ATTRIBUTE_PINNED) != 0;
+                                    gboolean offline  = (attrs & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) != 0;
+                                    gboolean unpinned = (attrs & FILE_ATTRIBUTE_UNPINNED) != 0;
 
                                     if (pinned && offline)
                                         d->delta_down = +1; /* gepinnt, noch nicht lokal */
@@ -370,11 +377,15 @@ gpointer sond_treeviewfm_seadrive_watcher_thread(gpointer user_data)
                                         d->path_down  = g_strdup(full);
                                     } else if (!pinned && offline)
                                         d->delta_down = -1; /* unpinned während laufendem Download */
-                                    else {
-                                        /* !pinned && !offline: z.B. nach Doppelklick-Recall.
-                                         * _item_hydrated prüft selbst ob Korrektur nötig. */
+                                    else if (!unpinned) {
+                                        /* !pinned && !offline && !unpinned:
+                                         * Hydration via Doppelklick-Recall -
+                                         * Knoten im Baum korrigieren */
                                         d->path_down = g_strdup(full);
                                     }
+                                    /* !pinned && !offline && unpinned:
+                                     * Dehydration abgeschlossen - nichts tun,
+                                     * kein path_down setzen (würde Recall triggern) */
                                 }
 
                                 /* LAST_WRITE: In-Sync-Status prüfen */

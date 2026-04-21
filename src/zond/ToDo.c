@@ -1,10 +1,9 @@
 /*
- Bugs:
-
- - OCR bei leerer Pixmap: TessBaseApiRecognize geht in Endlosschleife
-
-
  ToDo:
+
+- Rows mit Text Farbe
+- Copy_Auswertung wenn root dann Verweis auf root?
+- Wenn in BAUM_INHALT Section angebunden, copy_auswertung öffnet ganze Datei
 
  - Abschnitte neu organisieren
 
@@ -17,8 +16,6 @@
  - Rummalen
  - angezeigte Seiten als Datei speichern
 
- - Kontextmenu Trees
- - PDF: OCR/Reparieren/Textsuche
 
  - datei_oeffnen:
  - nicht-Win32 (niedrig)

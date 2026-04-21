@@ -60,6 +60,10 @@ static void sond_file_part_finalize(GObject* self) {
 	SondFilePartPrivate *sfp_priv =
 			sond_file_part_get_instance_private(SOND_FILE_PART(self));
 
+	LOG_INFO("sond_file_part_finalize: type=%s path=%s",
+			g_type_name(G_OBJECT_TYPE(self)),
+			sfp_priv->path ? sfp_priv->path : "(null)");
+
 	if (!sfp_priv->parent)  //ist "normale" Datei
 		g_ptr_array_remove_fast(SOND_FILE_PART_CLASS(
 				g_type_class_peek(SOND_TYPE_FILE_PART))->arr_opened_files, self);
@@ -115,8 +119,13 @@ static SondFilePart* sond_file_part_create(GType sfp_type, const gchar *path,
 		for (guint i = 0; i < arr_opened_files->len; i++) {
 			SondFilePart *sfp_tmp = g_ptr_array_index(arr_opened_files, i);
 			//bereits geöffnet
-			if (g_strcmp0(sond_file_part_get_path(sfp_tmp), path) == 0)
+			if (g_strcmp0(sond_file_part_get_path(sfp_tmp), path) == 0) {
+				LOG_INFO("sond_file_part_create: wiederverwende type=%s path=%s ref=%u",
+						g_type_name(G_OBJECT_TYPE(sfp_tmp)),
+						path,
+						G_OBJECT(sfp_tmp)->ref_count);
 				return g_object_ref(sfp_tmp); //ref zurückgeben
+			}
 		}
 
 	//sonst neu machen
