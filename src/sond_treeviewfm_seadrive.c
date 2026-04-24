@@ -132,7 +132,8 @@ typedef struct {
 typedef struct {
     SondTreeviewFM *stvfm;
     gint            delta_down;  /* +1 oder -1, 0 = keine Änderung */
-    gchar          *path_down;   /* Pfad der hydrierten Datei, NULL sonst */
+    gchar          *path_down;       /* Pfad der hydrierten Datei, NULL sonst */
+    gchar          *path_dehydrated; /* Pfad der dehydrierten Datei, NULL sonst */
     gchar          *path_up;     /* NULL oder Pfad für pending_up-Änderung */
     gboolean        up_pending;  /* TRUE=NOT_IN_SYNC, FALSE=IN_SYNC */
 } WatcherIdleData;
@@ -149,7 +150,12 @@ static gboolean watcher_idle_cb(gpointer user_data)
     if (d->path_down)
         sond_treeviewfm_seadrive_item_hydrated(d->stvfm, d->path_down);
 
+    /* Wenn Datei dehydrated: Knoten im Baum zurückbauen */
+    if (d->path_dehydrated)
+        sond_treeviewfm_seadrive_item_dehydrated(d->stvfm, d->path_dehydrated);
+
     g_free(d->path_down);
+    g_free(d->path_dehydrated);
     g_free(d->path_up);
     g_free(d);
     return G_SOURCE_REMOVE;
@@ -375,6 +381,10 @@ gpointer sond_treeviewfm_seadrive_watcher_thread(gpointer user_data)
                                     else if (pinned && !offline) {
                                         d->delta_down = -1; /* hydrated via pin */
                                         d->path_down  = g_strdup(full);
+                                    } else if (unpinned && offline) {
+                                        /* Datei dehydriert - war nicht mehr PINNED+offline,
+                                         * also nicht im Zähler - delta_down nicht setzen */
+                                        d->path_dehydrated = g_strdup(full);
                                     } else if (!pinned && offline)
                                         d->delta_down = -1; /* unpinned während laufendem Download */
                                     else if (!unpinned) {
@@ -384,8 +394,7 @@ gpointer sond_treeviewfm_seadrive_watcher_thread(gpointer user_data)
                                         d->path_down = g_strdup(full);
                                     }
                                     /* !pinned && !offline && unpinned:
-                                     * Dehydration abgeschlossen - nichts tun,
-                                     * kein path_down setzen (würde Recall triggern) */
+                                     * Dehydration abgeschlossen - nichts tun */
                                 }
 
                                 /* LAST_WRITE: In-Sync-Status prüfen */

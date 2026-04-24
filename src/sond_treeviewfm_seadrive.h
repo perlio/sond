@@ -53,6 +53,7 @@ gboolean sond_seadrive_set_pin_state(const gchar *full_path,
 void sond_treeviewfm_seadrive_init_contextmenu(SondTreeviewFM *stvfm);
 
 gpointer sond_treeviewfm_seadrive_watcher_thread(gpointer user_data);
+void sond_treeviewfm_seadrive_item_dehydrated(SondTreeviewFM *stvfm, const gchar *full_path);
 
 #else /* !_WIN32 */
 
