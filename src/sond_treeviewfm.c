@@ -683,7 +683,7 @@ static gint sond_tvfm_item_load_gmessage_dir(SondTVFMItem* stvfm_item,
 	if (rc)
 		ERROR_Z
 
-	*arr_children = g_ptr_array_new();
+	*arr_children = g_ptr_array_new_with_free_func((GDestroyNotify)g_object_unref);
 
 	for (guint i = 0; i < arr_mimeparts->len; i++) {
 		SondTVFMItem* stvfm_item_child = NULL;
@@ -3123,7 +3123,6 @@ static void sond_treeviewfm_render_file_icon(GtkTreeViewColumn *column,
 	stvfm_item_priv = sond_tvfm_item_get_instance_private(stvfm_item);
 	g_object_unref(stvfm_item);
 
-#ifdef _WIN32
 	/* Overlay-Icon für SeaDrive-Cloud-Status ermitteln */
 	if (sond_treeviewfm_is_seadrive_path(stvfm)) {
 		gchar *full_path = NULL;
@@ -3144,7 +3143,8 @@ static void sond_treeviewfm_render_file_icon(GtkTreeViewColumn *column,
 		else if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_DIR) {
 			if (!stvfm_item_priv->sond_file_part) //DIR im Filesystem
 				rel = stvfm_item_priv->path_or_section;
-			else if (!sond_file_part_get_parent(stvfm_item_priv->sond_file_part))
+			else if (!sond_file_part_get_parent(stvfm_item_priv->sond_file_part) &&
+					!stvfm_item_priv->path_or_section)
 				rel = sond_file_part_get_path(stvfm_item_priv->sond_file_part);
 		}
 
@@ -3152,10 +3152,7 @@ static void sond_treeviewfm_render_file_icon(GtkTreeViewColumn *column,
 			full_path = g_strconcat(root, "/", rel, NULL);
 
 		if (full_path) {
-			gboolean BMO = FALSE;
-			if (g_strrstr(full_path, "@Lips"))
-				BMO = TRUE;
-
+#ifdef _WIN32
 			wchar_t *lp = prepare_long_path(full_path, NULL);
 			g_free(full_path);
 			if (lp) {
@@ -3172,11 +3169,9 @@ static void sond_treeviewfm_render_file_icon(GtkTreeViewColumn *column,
 						overlay_icon_name = "process-stop";
 					else if (pinned)
 						overlay_icon_name = "emblem-default";
-
-					if (BMO) LOG_INFO("%s  %s  %s", pinned ? "p" : "", unpinned ? "u" : "",
-							offline ? "o" : "");
 				}
 			}
+#endif
 
 			if (overlay_icon_name) {
 				gint icon_size = 0;
@@ -3214,7 +3209,6 @@ static void sond_treeviewfm_render_file_icon(GtkTreeViewColumn *column,
 			}
 		}
 	}
-#endif
 
 	/* Kein Overlay - normales Icon setzen */
 	g_object_set(G_OBJECT(renderer), "icon-name",
