@@ -3147,8 +3147,8 @@ static void sond_treeviewfm_render_file_icon(GtkTreeViewColumn *column,
 					gboolean offline  = (attrs & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) != 0;
 					gboolean unpinned = (attrs & FILE_ATTRIBUTE_UNPINNED) != 0;
 
-					if (pinned && offline)
-						overlay_icon_name = "view-refresh";
+					if (offline && !unpinned)
+						overlay_icon_name = "view-refresh"; /* wird heruntergeladen oder nicht lokal */
 					else if (unpinned)
 						overlay_icon_name = "process-stop";
 					else if (pinned)
@@ -3579,7 +3579,8 @@ sond_treeviewfm_seadrive_item_dehydrated(SondTreeviewFM *stvfm,
 			!sfp_old ||
 			stvfm_item_priv->path_or_section ||
 			(!SOND_IS_FILE_PART_GMESSAGE(sfp_old) &&
-			 !SOND_IS_FILE_PART_ZIP(sfp_old)))
+			 !SOND_IS_FILE_PART_ZIP(sfp_old) &&
+			 !SOND_IS_FILE_PART_PDF(sfp_old)))
 		return;
 
 	/* Altes sfp zuerst aus arr_opened_files entfernen - VOR create_leaf,
