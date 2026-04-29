@@ -301,18 +301,16 @@ static void sond_treeview_init(SondTreeview *stv) {
 
 	//die column
 	tvc = gtk_tree_view_column_new();
-	gtk_tree_view_column_set_resizable(tvc, TRUE);
 	gtk_tree_view_column_set_sizing(tvc, GTK_TREE_VIEW_COLUMN_FIXED);
+	gtk_tree_view_column_set_resizable(tvc, TRUE);
 
 	gtk_tree_view_column_pack_start(tvc, stv_private->renderer_icon, FALSE);
-	gtk_tree_view_column_pack_start(tvc, stv_private->renderer_text, TRUE);
+	gtk_tree_view_column_pack_start(tvc, stv_private->renderer_text, FALSE);
 
 	gtk_tree_view_append_column(GTK_TREE_VIEW(stv), tvc);
 
 	gtk_tree_view_column_set_cell_data_func(tvc, stv_private->renderer_text,
 			(GtkTreeCellDataFunc) sond_treeview_render_text, stv, NULL);
-
-	gtk_tree_view_columns_autosize(GTK_TREE_VIEW(stv));
 
 	//Contextmenu
 	//Rechtsklick - Kontextmenu
@@ -411,8 +409,6 @@ void sond_treeview_expand_row(SondTreeview *stv, GtkTreeIter *iter) {
 //    gtk_tree_view_expand_row( GTK_TREE_VIEW(stv), path, FALSE );
 	gtk_tree_path_free(path);
 
-	gtk_tree_view_columns_autosize(GTK_TREE_VIEW(stv));
-
 	return;
 }
 
@@ -425,8 +421,6 @@ void sond_treeview_expand_to_row(SondTreeview *stv, GtkTreeIter *iter) {
 	if (gtk_tree_path_up(path))
 		gtk_tree_view_expand_to_path(GTK_TREE_VIEW(stv), path);
 	gtk_tree_path_free(path);
-
-	gtk_tree_view_columns_autosize(GTK_TREE_VIEW(stv));
 
 	return;
 }

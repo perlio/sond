@@ -361,6 +361,10 @@ static void init_treeviews(Projekt *zond) {
     zond->treeview[BAUM_AUSWERTUNG] = SOND_TREEVIEW(
         zond_treeview_new(zond, (gint) BAUM_AUSWERTUNG));
 
+    // Nach dem Erstellen der TreeViews in init_treeviews:
+    gtk_widget_set_hexpand(GTK_WIDGET(zond->treeview[BAUM_INHALT]), FALSE);
+    gtk_widget_set_hexpand(GTK_WIDGET(zond->treeview[BAUM_AUSWERTUNG]), FALSE);
+
     // Für jeden Baum: Selection holen und Callbacks verbinden
     for (Baum baum = BAUM_FS; baum < NUM_BAUM; baum++) {
         zond->selection[baum] = gtk_tree_view_get_selection(
@@ -461,7 +465,8 @@ static void init_treeview_layout(Projekt *zond) {
 
     // Innerer HPaned für rechte Seite
     hpaned_inner = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
-    gtk_paned_add2(GTK_PANED(zond->hpaned), hpaned_inner);
+    gtk_paned_pack2(GTK_PANED(zond->hpaned), hpaned_inner, FALSE, TRUE);
+//    gtk_paned_add2(GTK_PANED(zond->hpaned), hpaned_inner);
 
     // BAUM_INHALT
     swindow_baum_inhalt = create_scrolled_window(
@@ -474,15 +479,17 @@ static void init_treeview_layout(Projekt *zond) {
 
     swindow_treeview_auswertung = create_scrolled_window(
         GTK_WIDGET(zond->treeview[BAUM_AUSWERTUNG]));
+    gtk_scrolled_window_set_min_content_width(
+        GTK_SCROLLED_WINDOW(swindow_treeview_auswertung), 0);
     gtk_paned_pack1(GTK_PANED(paned_baum_auswertung),
-                   swindow_treeview_auswertung, TRUE, TRUE);
+                   swindow_treeview_auswertung, FALSE, TRUE);
 
     // TextView in unterem Teil des VPaned
     swindow_textview = create_scrolled_window(NULL);
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(swindow_textview),
                                   GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
     gtk_paned_pack2(GTK_PANED(paned_baum_auswertung),
-                   swindow_textview, TRUE, TRUE);
+                   swindow_textview, FALSE, TRUE);
 
     // TextView erstellen und konfigurieren
     zond->textview = create_configured_textview(zond);
@@ -500,8 +507,8 @@ static void init_treeview_layout(Projekt *zond) {
                      GTK_WIDGET(zond->textview));
 
     // Layout zusammenfügen: Links BAUM_INHALT, rechts BAUM_AUSWERTUNG
-    gtk_paned_pack1(GTK_PANED(hpaned_inner), swindow_baum_inhalt, TRUE, TRUE);
-    gtk_paned_pack2(GTK_PANED(hpaned_inner), paned_baum_auswertung, TRUE, TRUE);
+    gtk_paned_pack1(GTK_PANED(hpaned_inner), swindow_baum_inhalt, FALSE, TRUE);
+    gtk_paned_pack2(GTK_PANED(hpaned_inner), paned_baum_auswertung, FALSE, TRUE);
 }
 
 /**
@@ -509,6 +516,7 @@ static void init_treeview_layout(Projekt *zond) {
  */
 static void init_statusbar(Projekt *zond, GtkWidget *vbox) {
     zond->label_status = GTK_LABEL(gtk_label_new(""));
+    gtk_label_set_ellipsize(zond->label_status, PANGO_ELLIPSIZE_END);
     gtk_label_set_xalign(zond->label_status, 0.02);
     gtk_box_pack_end(GTK_BOX(vbox), GTK_WIDGET(zond->label_status),
                     FALSE, FALSE, 0);

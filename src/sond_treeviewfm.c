@@ -2912,8 +2912,6 @@ static void sond_treeviewfm_row_collapsed(GtkTreeView *tree_view,
 	gtk_tree_store_insert(GTK_TREE_STORE(gtk_tree_view_get_model(tree_view)),
 			&iter_child, iter, -1);
 
-	gtk_tree_view_columns_autosize(tree_view);
-
 	return;
 }
 
@@ -2983,8 +2981,6 @@ static void sond_treeviewfm_row_expanded(GtkTreeView *tree_view,
 
 	gtk_tree_store_remove(GTK_TREE_STORE(gtk_tree_view_get_model(tree_view)),
 			&iter_dummy);
-
-	gtk_tree_view_columns_autosize(tree_view);
 
 	return;
 }

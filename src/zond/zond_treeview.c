@@ -275,7 +275,6 @@ static void zond_treeview_text_edited(SondTreeview *stv, GtkTreeIter *iter,
 	}
 
 	zond_tree_store_set(iter, NULL, new_text, 0);
-	gtk_tree_view_columns_autosize(GTK_TREE_VIEW(ztv));
 
 	return;
 }
@@ -1102,8 +1101,6 @@ static void zond_treeview_clipboard_anbinden(Projekt *zond, gint anchor_id,
 				&s_selection.anchor_iter);
 		sond_treeview_set_cursor(zond->treeview[BAUM_INHALT],
 				&s_selection.anchor_iter);
-		gtk_tree_view_columns_autosize(
-				GTK_TREE_VIEW(((Projekt* ) zond)->treeview[BAUM_INHALT]));
 	}
 
 	gchar *text = g_strdup_printf("%i Anbindungen eingefügt",
