@@ -195,6 +195,27 @@ static void init_schema(Projekt* zond) {
 	return;
 }
 
+static void init_css(void) {
+	GtkCssProvider *provider = gtk_css_provider_new();
+	gtk_css_provider_load_from_data(provider,
+	    "tooltip {"
+	    "  background-color: #ffffdd;"
+	    "  border: 1px solid #cccc99;"
+	    "  border-radius: 4px;"
+	    "}"
+	    "tooltip label {"
+	    "  color: #000000;"
+	    "  padding: 4px;"
+	    "}",
+	    -1, NULL);
+
+	gtk_style_context_add_provider_for_screen(
+	    gdk_screen_get_default(),
+	    GTK_STYLE_PROVIDER(provider),
+	    GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+
+	g_object_unref(provider);
+}
 
 void zond_init(GtkApplication *app, Projekt *zond) {
 	setlocale(LC_NUMERIC, "C");
@@ -207,6 +228,7 @@ void zond_init(GtkApplication *app, Projekt *zond) {
     zond->exe_dir = get_exe_dir();
 
     g_mime_init();
+    init_css();
 
     init_schema(zond);
 

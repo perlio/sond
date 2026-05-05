@@ -320,6 +320,71 @@ static void zond_treeview_class_init(ZondTreeviewClass *klass) {
 	return;
 }
 
+static gboolean on_query_tooltip(GtkWidget  *widget,
+                                  gint        x,
+                                  gint        y,
+                                  gboolean    keyboard_mode,
+                                  GtkTooltip *tooltip,
+                                  gpointer    data)
+{
+    GtkTreeView  *tree_view = GTK_TREE_VIEW(widget);
+    GtkTreeModel *model;
+    GtkTreeIter   iter;
+    GtkTreePath  *path = NULL;
+    gint          bx, by;
+    gint node_id = 0;
+    gchar* file_part = NULL;
+    gchar* section = NULL;
+    Anbindung anbindung = { 0 };
+    gchar* anb_string = NULL;
+    GError* error = NULL;
+    gchar* markup = NULL;
+
+    // Koordinaten umrechnen
+    gtk_tree_view_convert_widget_to_bin_window_coords(tree_view, x, y, &bx, &by);
+
+    // Row unter der Maus ermitteln
+    if (!gtk_tree_view_get_path_at_pos(tree_view, bx, by, &path, NULL, NULL, NULL))
+        return FALSE;
+
+    model = gtk_tree_view_get_model(tree_view);
+    gtk_tree_model_get_iter(model, &iter, path);
+    gtk_tree_path_free(path);
+
+	node_id = zond_treeview_get_filepart_and_section(
+			ZOND_TREEVIEW(tree_view), &iter, &file_part, &section, &error);
+	if (node_id == -1) {
+		markup = g_strdup_printf("Fehler: %s", error->message);
+		g_error_free(error);
+	}
+	else if (file_part) {
+		if (section) {
+			anbindung_parse_file_section(section, &anbindung);
+			g_free(section);
+			anb_string = anbindung_to_human_readable(&anbindung);
+		}
+
+		// Markup zusammenbauen
+		markup = g_strdup_printf("<small><tt>%s</tt></small>\n",
+				file_part);
+		g_free(file_part);
+
+		if (anb_string) {
+			markup = add_string(markup,
+					g_strdup_printf("<small><tt>%s</tt></small>",
+			anb_string));
+			g_free(anb_string);
+		}
+
+		gtk_tooltip_set_markup(tooltip, markup);
+	    g_free(markup);
+	}
+	else
+		return FALSE;
+
+    return TRUE;
+}
+
 static void zond_treeview_init(ZondTreeview *ztv) {
 	//Tree-Model erzeugen und verbinden
 	ZondTreeStore *tree_store = g_object_new( ZOND_TYPE_TREE_STORE, NULL);
@@ -337,6 +402,10 @@ static void zond_treeview_init(ZondTreeview *ztv) {
 			gtk_tree_view_get_column(GTK_TREE_VIEW(ztv), 0),
 			sond_treeview_get_cell_renderer_text(SOND_TREEVIEW(ztv)), "text", 1,
 			NULL);
+
+	// Setup
+	gtk_widget_set_has_tooltip(GTK_WIDGET(ztv), TRUE);
+	g_signal_connect(ztv, "query-tooltip", G_CALLBACK(on_query_tooltip), NULL);
 
 	//Zeile expandiert oder kollabiert
 	g_signal_connect(ztv, "row-expanded",
