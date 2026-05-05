@@ -94,9 +94,6 @@ void zond_treeview_cursor_changed(ZondTreeview *treeview, gpointer user_data) {
 	gint rc = 0;
 	gint node_id = 0;
 	GtkTreeIter iter = { 0, };
-	gchar *file_part = NULL;
-	gchar *section = NULL;
-	gchar *text_label = NULL;
 	gchar *text = NULL;
 	GError *error = NULL;
 
@@ -153,31 +150,14 @@ void zond_treeview_cursor_changed(ZondTreeview *treeview, gpointer user_data) {
 		return;
 	}
 
-    node_id = zond_treeview_get_filepart_and_section(ZOND_TREEVIEW(treeview), &iter, &file_part,
-			&section, &error);
-    if (node_id == -1) {
-    	LOG_WARN("%s\n%s", __func__, error->message);
-    	g_error_free(error);
-    	gtk_label_set_text(zond->label_status, "*** Error *** - siehe Log");
-    	return;
-    }
+	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(treeview)), &iter, 2,
+			&node_id, -1);
 
     //Wenn gleicher Knoten: direkt zurück
-	if (node_id == zond->node_id_act){
-		g_free(file_part);
-		g_free(section);
+	if (node_id == zond->node_id_act)
 		return;
-	}
 
-	text_label = file_part ?
-			(section ? g_strdup_printf("%s (%s)", file_part, section) :
-					g_strdup(file_part)) : g_strdup("");
-
-	g_free(file_part);
-	g_free(section);
-
-	gtk_label_set_text(zond->label_status, text_label);
-	g_free(text_label);
+	gtk_label_set_text(zond->label_status, "");
 
 	//neuer Knoten == Extra-Fenster und vorheriger Knoten nicht
 	if (zond->node_id_extra && node_id == zond->node_id_extra
@@ -298,6 +278,7 @@ static void zond_treeview_render_node_text(GtkTreeViewColumn *column,
 		gtk_tree_model_get(model, iter, 1, &label, -1);
 
 		markuptxt = g_strdup_printf("<i>%s</i>", label);
+		g_free(label);
 
 		if (zond_tree_store_get_link_head_nr(iter)) {
 			markuptxt = add_string(g_strdup("<span foreground=\"purple\">"),
@@ -311,6 +292,7 @@ static void zond_treeview_render_node_text(GtkTreeViewColumn *column,
 	}
 
 	//Hintergrund icon rot wenn Text in textview
+	gtk_tree_model_get(model, iter, 2, &node_id, -1);
 	rc = zond_dbase_get_text(ztv_priv->zond->dbase_zond->zond_dbase_work,
 			node_id, &text, &error);
 	if (rc) {
@@ -2932,8 +2914,9 @@ static gint zond_treeview_get_filepart_and_section(ZondTreeview *ztv, GtkTreeIte
 	if (type == ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_COPY) {
 		gint rc = 0;
 
+		node_id = link;
 		rc = zond_dbase_get_node(ztv_priv->zond->dbase_zond->zond_dbase_work,
-				link, NULL, NULL, &file_part_local, &section_local, NULL, NULL, NULL,
+				node_id, NULL, NULL, &file_part_local, &section_local, NULL, NULL, NULL,
 				error);
 		if (rc)
 			ERROR_Z
