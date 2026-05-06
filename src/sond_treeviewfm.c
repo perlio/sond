@@ -1146,7 +1146,7 @@ static gint delete_item(SondTVFMItem* stvfm_item, GError** error) {
 			if (!res)
 				ERROR_Z
 		}
-		else if (!stvfm_item_priv->path_or_section) { //sfp existiert - also root
+		else if (!stvfm_item_priv->path_or_section) { //sfp existiert - also root-Element
 			gint rc = 0;
 
 			rc = sond_file_part_delete(stvfm_item_priv->sond_file_part, error);
@@ -1253,7 +1253,7 @@ static gint sond_tvfm_item_copy(SondTVFMItem* stvfm_item,
 				return -1;
 			}
 			else if (SOND_IS_FILE_PART_GMESSAGE(stvfm_item_priv->sond_file_part)) {
-				g_error_set(error, SOND_ERROR, 0, "Kopieren des Email-Leaf-Eintrags nicht zulässig");
+				g_set_error(error, SOND_ERROR, 0, "Kopieren des Email-Leaf-Eintrags nicht zulässig");
 				g_free(base_real);
 
 				return -1;
