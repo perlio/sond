@@ -331,11 +331,28 @@ SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM* stvfm,
 					"folder" : "package-x-generic";
 		}
 		else if (SOND_IS_FILE_PART_GMESSAGE(sond_file_part)) {
-			stvfm_item_priv->type = SOND_TVFM_ITEM_TYPE_DIR;
-			stvfm_item_priv->has_children =
-					sond_file_part_get_has_children(sond_file_part);
-			stvfm_item_priv->icon_name = (path_or_section) ?
-					"folder" : "mail-read";
+			if (sond_file_part_get_has_children(sond_file_part) &&
+					!path_or_section) { //Marker für Message nicht gesetzt
+				stvfm_item_priv->type = SOND_TVFM_ITEM_TYPE_DIR;
+				stvfm_item_priv->has_children = TRUE;
+				stvfm_item_priv->icon_name = "mail-read";
+			}
+			else {
+				stvfm_item_priv->type = SOND_TVFM_ITEM_TYPE_LEAF;
+				stvfm_item_priv->icon_name = "mail-read";
+				if (!g_strcmp0(path_or_section, "//message")) { //Marker gesetzt
+					g_free(stvfm_item_priv->path_or_section); //Marker löschen
+					stvfm_item_priv->path_or_section = NULL;
+					g_free(stvfm_item_priv->display_name); //Display-Name ersetzen
+					stvfm_item_priv->display_name = g_strdup("Message");
+				}
+				else if (path_or_section) { //Multipart-Verzeichnis
+					stvfm_item_priv->type = SOND_TVFM_ITEM_TYPE_DIR;
+					stvfm_item_priv->has_children =
+							sond_file_part_get_has_children(sond_file_part);
+					stvfm_item_priv->icon_name = "folder";
+				}
+			}
 		}
 		else if (SOND_IS_FILE_PART_LEAF(sond_file_part)) {
 			stvfm_item_priv->type = SOND_TVFM_ITEM_TYPE_LEAF;
@@ -684,6 +701,22 @@ static gint sond_tvfm_item_load_gmessage_dir(SondTVFMItem* stvfm_item,
 		ERROR_Z
 
 	*arr_children = g_ptr_array_new_with_free_func((GDestroyNotify)g_object_unref);
+
+	/* Erstes Kind: Message (Header + Body) - analog zu PageTree bei PDF */
+	if (!stvfm_item_priv->path_or_section) { /* Nur auf oberster Ebene der .eml */
+		SondTVFMItem* stvfm_item_message = NULL;
+		SondTVFMItemPrivate* stvfm_item_message_priv = NULL;
+
+		stvfm_item_message = sond_tvfm_item_create(stvfm_item_priv->stvfm,
+				stvfm_item_priv->sond_file_part, "//message");
+		stvfm_item_message_priv = sond_tvfm_item_get_instance_private(stvfm_item_message);
+
+		/* Display-Name anpassen */
+		g_free(stvfm_item_message_priv->display_name);
+		stvfm_item_message_priv->display_name = g_strdup("Message");
+
+		g_ptr_array_add(*arr_children, stvfm_item_message);
+	}
 
 	for (guint i = 0; i < arr_mimeparts->len; i++) {
 		SondTVFMItem* stvfm_item_child = NULL;
@@ -1143,8 +1176,13 @@ static gint delete_item(SondTVFMItem* stvfm_item, GError** error) {
 		if (SOND_IS_FILE_PART_PDF(stvfm_item_priv->sond_file_part) &&
 				sond_file_part_get_has_children(stvfm_item_priv->sond_file_part)) {
 			if (error) *error = g_error_new(g_quark_from_static_string("sond"), 0,
-					"%s\nLöschen des pagetree aus PDF-Datei nicht unterstützt",
-					__func__);
+					"Löschen des Pagetree aus PDF-Datei nicht unterstützt");
+
+			return -1;
+		}
+		else if (SOND_IS_FILE_PART_GMESSAGE(stvfm_item_priv->sond_file_part)) {
+			if (error) *error = g_error_new(SOND_ERROR, 0,
+					"EMail-Leaf-Eintrag kann nicht gelöscht werden");
 
 			return -1;
 		}
@@ -1203,18 +1241,23 @@ static gint sond_tvfm_item_copy(SondTVFMItem* stvfm_item,
 		gchar* path = NULL;
 
 		//Page-Tree einer PDF-Datei: geht (noch) nicht
-		if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF &&
-				SOND_IS_FILE_PART_PDF(stvfm_item_priv->sond_file_part) &&
+		if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF) {
+			if (SOND_IS_FILE_PART_PDF(stvfm_item_priv->sond_file_part) &&
 				sond_file_part_get_has_children(
 						stvfm_item_priv->sond_file_part)) {
+				if (error) *error = g_error_new(SOND_ERROR, 0,
+						"%s\nKopieren des Page-Tree aus PDF-Dateien nicht implementiert",
+						__func__);
+				g_free(base_real);
 
-			//ToDo: Sonderbehandlung für PDF-Dateien (nur page_tree)
-			if (error) *error = g_error_new(g_quark_from_static_string("sond"), 0,
-					"%s\nKopieren des Page-Tree aus PDF-Dateien nicht implementiert",
-					__func__);
-			g_free(base_real);
+				return -1;
+			}
+			else if (SOND_IS_FILE_PART_GMESSAGE(stvfm_item_priv->sond_file_part)) {
+				g_error_set(error, SOND_ERROR, 0, "Kopieren des Email-Leaf-Eintrags nicht zulässig");
+				g_free(base_real);
 
-			return -1;
+				return -1;
+			}
 		}
 
 		//Wenn in ein dir kopiert wird, ist der Pfad des dir vom übergeordneten sfp
@@ -1911,10 +1954,14 @@ parent:
 		}
 	}
 
+	//stvfm vor remove sichern, da stvfm_item_priv danach undefiniert sein kann
+	//(TreeStore gibt GObject frei → Use-after-free)
+	SondTreeviewFM* stvfm = stvfm_item_priv->stvfm;
+
 	//jetzt auf Zielknoten löschen
 	if (gtk_tree_store_remove(
 			GTK_TREE_STORE(gtk_tree_view_get_model(
-					GTK_TREE_VIEW(stvfm_item_priv->stvfm))), iter)) {
+					GTK_TREE_VIEW(stvfm))), iter)) {
 		//Leider, wenn GMessage, die Pfade anpassen
 		if (is_gmessage)
 			do {
@@ -1925,11 +1972,19 @@ parent:
 				gint index = 0;
 
 				gtk_tree_model_get(gtk_tree_view_get_model(
-					GTK_TREE_VIEW(stvfm_item_priv->stvfm)), iter, 0,
-						&stvfm_item_sibling, -1);
+				GTK_TREE_VIEW(stvfm)), iter, 0,
+				&stvfm_item_sibling, -1);
+
 				stvfm_item_sibling_priv =
-						sond_tvfm_item_get_instance_private(stvfm_item_sibling);
+				sond_tvfm_item_get_instance_private(stvfm_item_sibling);
 				g_object_unref(stvfm_item_sibling);
+
+				/* Message-Item überspringen: path_or_section == NULL bei GMessage-LEAF
+				* (analog zu PageTree bei PDF) - hat keinen numerischen Index */
+				if (!stvfm_item_sibling_priv->path_or_section &&
+				stvfm_item_sibling_priv->type == SOND_TVFM_ITEM_TYPE_LEAF &&
+				SOND_IS_FILE_PART_GMESSAGE(stvfm_item_sibling_priv->sond_file_part))
+					continue;
 
 				path_old = (stvfm_item_sibling_priv->path_or_section) ?
 						stvfm_item_sibling_priv->path_or_section :
@@ -1968,12 +2023,11 @@ parent:
 
 				g_free(path_new);
 			} while (gtk_tree_model_iter_next(gtk_tree_view_get_model(
-					GTK_TREE_VIEW(stvfm_item_priv->stvfm)), iter));
+					GTK_TREE_VIEW(stvfm)), iter));
 	}
 
 	return;
 }
-
 
 
 static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
