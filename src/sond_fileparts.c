@@ -662,7 +662,7 @@ gint sond_file_part_open(SondFilePart* sfp, gboolean open_with,
 		GError** error) {
 	//hier alle Varianten, in denen eigener Viewer geöffnet wird
 	if (!open_with &&
-			SOND_IS_FILE_PART_LEAF(sfp) &&
+			((SOND_IS_FILE_PART_LEAF(sfp) &&
 			(g_str_has_prefix(sond_file_part_leaf_get_mime_type(
 					SOND_FILE_PART_LEAF(sfp)), "text/") ||
 			g_str_has_prefix(sond_file_part_leaf_get_mime_type(
@@ -672,7 +672,8 @@ gint sond_file_part_open(SondFilePart* sfp, gboolean open_with,
 					SOND_FILE_PART_LEAF(sfp))) ||
 			!g_strcmp0("application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 					sond_file_part_leaf_get_mime_type(
-					SOND_FILE_PART_LEAF(sfp)))))
+					SOND_FILE_PART_LEAF(sfp))))) ||
+					SOND_IS_FILE_PART_GMESSAGE(sfp)))
 	{
 		GBytes* bytes = NULL;
 		gint rc = 0;

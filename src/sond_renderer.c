@@ -22,6 +22,7 @@
 #include "sond_log_and_error.h"
 #include "sond_fileparts.h"
 #include "sond_file_helper.h"
+#include "sond_gmessage_helper.h"
 
 #define DEFAULT_RENDER_WIDTH 650
 
@@ -65,7 +66,8 @@ typedef enum {
     DOC_TYPE_DOCX,
     DOC_TYPE_DOC,
     DOC_TYPE_IMAGE,
-    DOC_TYPE_PLAIN
+    DOC_TYPE_PLAIN,
+    DOC_TYPE_EML
 } DocumentType;
 
 typedef struct {
@@ -80,7 +82,8 @@ typedef struct {
 // Forward declarations
 static void update_display(SurfaceViewer *viewer);
 static void update_statusbar(SurfaceViewer *viewer, const char *message);
-static RenderedDocument* render_document_from_bytes(GBytes *bytes, int render_width);
+static RenderedDocument* render_document_from_bytes(GBytes *bytes, int render_width,
+        SondFilePart *sfp);
 
 // === NAVIGATION ===
 
@@ -194,7 +197,7 @@ static gboolean navigate_to_sfp(SurfaceViewer *viewer, SondFilePart *new_sfp) {
     g_free(tmp);
 
     bytes = g_bytes_new_take(data, len);
-    rd = render_document_from_bytes(bytes, 0);
+    rd = render_document_from_bytes(bytes, 0, new_sfp);
     g_bytes_unref(bytes);
 
     if (!rd) {
@@ -838,103 +841,6 @@ static GtkWidget* show_surface_viewer(cairo_surface_t *surface, int width, int h
 }
 
 // === TYPE DETECTION ===
-
-static gboolean check_zip_contains_file(const unsigned char *data, size_t len, const char *filename) {
-    zip_error_t error;
-    zip_source_t *src;
-    zip_t *archive;
-
-    zip_error_init(&error);
-    src = zip_source_buffer_create(data, len, 0, &error);
-    if (!src) {
-        zip_error_fini(&error);
-        return FALSE;
-    }
-
-    archive = zip_open_from_source(src, ZIP_RDONLY, &error);
-    if (!archive) {
-        zip_source_free(src);
-        zip_error_fini(&error);
-        return FALSE;
-    }
-
-    struct zip_stat st;
-    zip_stat_init(&st);
-    gboolean found = (zip_stat(archive, filename, 0, &st) == 0);
-
-    zip_close(archive);
-    return found;
-}
-
-static DocumentType detect_document_type(GBytes *bytes) {
-    gsize len;
-    const unsigned char *data = g_bytes_get_data(bytes, &len);
-
-    if (len < 4) return DOC_TYPE_UNKNOWN;
-
-    // ZIP-Signatur (ODT/DOCX sind beide ZIP)
-    if (data[0] == 0x50 && data[1] == 0x4B && data[2] == 0x03 && data[3] == 0x04) {
-        // Unterscheide ODT von DOCX
-        if (check_zip_contains_file(data, len, "content.xml")) {
-            return DOC_TYPE_ODT;
-        }
-        if (check_zip_contains_file(data, len, "word/document.xml")) {
-            return DOC_TYPE_DOCX;
-        }
-        return DOC_TYPE_UNKNOWN;  // Anderes ZIP
-    }
-
-    // DOC (Microsoft Compound File Binary Format)
-    if (len >= 8 && data[0] == 0xD0 && data[1] == 0xCF &&
-        data[2] == 0x11 && data[3] == 0xE0 &&
-        data[4] == 0xA1 && data[5] == 0xB1 &&
-        data[6] == 0x1A && data[7] == 0xE1) {
-        return DOC_TYPE_DOC;
-    }
-
-    // PNG-Signatur
-    if (len >= 8 && data[0] == 0x89 && data[1] == 'P' &&
-        data[2] == 'N' && data[3] == 'G') {
-        return DOC_TYPE_IMAGE;
-    }
-
-    // JPEG-Signatur
-    if (data[0] == 0xFF && data[1] == 0xD8) {
-        return DOC_TYPE_IMAGE;
-    }
-
-    // GIF-Signatur
-    if (len >= 6 && (memcmp(data, "GIF87a", 6) == 0 || memcmp(data, "GIF89a", 6) == 0)) {
-        return DOC_TYPE_IMAGE;
-    }
-
-    // BMP-Signatur
-    if (len >= 2 && data[0] == 'B' && data[1] == 'M') {
-        return DOC_TYPE_IMAGE;
-    }
-
-    // WebP-Signatur
-    if (len >= 12 && memcmp(data, "RIFF", 4) == 0 && memcmp(data + 8, "WEBP", 4) == 0) {
-        return DOC_TYPE_IMAGE;
-    }
-
-    // HTML-Erkennung
-    char *str = (char*)data;
-    size_t check_len = (len > 512) ? 512 : len;
-    char check_buf[513];
-    strncpy(check_buf, str, check_len);
-    check_buf[check_len] = '\0';
-
-    char *lower = g_ascii_strdown(check_buf, check_len);
-    if (strstr(lower, "<html") || strstr(lower, "<!doctype") ||
-        strstr(lower, "<?xml") || strstr(lower, "<head") || strstr(lower, "<body")) {
-        g_free(lower);
-        return DOC_TYPE_HTML;
-    }
-    g_free(lower);
-
-    return DOC_TYPE_UNKNOWN;
-}
 
 // === TEXT EXTRACTION FROM HTML ===
 
@@ -1709,7 +1615,504 @@ static RenderedDocument* render_doc(int width) {
  * @param render_width Gewünschte Breite (0 = Standard 650px)
  * @return RenderedDocument oder NULL bei Fehler
  */
-static RenderedDocument* render_document_from_bytes(GBytes *bytes, int render_width) {
+/* ---- EML: Part-Metadaten + Inhalt ---- */
+typedef struct {
+    gchar *mime_type; /* z.B. "text/plain" oder "image/jpeg" */
+    gchar *filename;  /* NULL wenn kein Filename */
+    gchar *text;      /* dekodierter Textinhalt, NULL bei Bild-Parts */
+    guchar *image_data; /* rohe Bilddaten, NULL bei Text-Parts */
+    gsize  image_len;
+} EmlPart;
+
+static void eml_part_free(gpointer p) {
+    EmlPart *ep = (EmlPart*)p;
+    g_free(ep->mime_type);
+    g_free(ep->filename);
+    g_free(ep->text);
+    g_free(ep->image_data);
+    g_free(ep);
+}
+
+static gchar* extract_text_from_part(GMimeObject* part) {
+    if (!GMIME_IS_PART(part))
+        return NULL;
+
+    /* Kein Attachment */
+    GMimeContentDisposition* disp = g_mime_object_get_content_disposition(part);
+    if (disp) {
+        const char* dval = g_mime_content_disposition_get_disposition(disp);
+        if (dval && g_ascii_strcasecmp(dval, "attachment") == 0)
+            return NULL;
+    }
+
+    /* Nur text — Wildcard "*" funktioniert in GMime nicht als Subtype,
+     * daher den MIME-Type-String direkt prüfen */
+    GMimeContentType* ct = g_mime_object_get_content_type(part);
+    if (!ct) return NULL;
+    const char* main_type = g_mime_content_type_get_media_type(ct);
+    if (!main_type || g_ascii_strcasecmp(main_type, "text") != 0)
+        return NULL;
+
+    GMimeDataWrapper* wrapper = g_mime_part_get_content(GMIME_PART(part));
+    if (!wrapper)
+        return NULL;
+
+    GMimeStream* mem_stream = g_mime_stream_mem_new();
+    g_mime_data_wrapper_write_to_stream(wrapper, mem_stream);
+    g_mime_stream_flush(mem_stream);
+
+    GByteArray* ba = g_mime_stream_mem_get_byte_array(GMIME_STREAM_MEM(mem_stream));
+    gchar* text = g_strndup((const gchar*)ba->data, ba->len);
+    g_object_unref(mem_stream);
+
+    /* Encoding-Korrektur */
+    if (text && !g_utf8_validate(text, -1, NULL)) {
+        const char* charset = g_mime_content_type_get_parameter(ct, "charset");
+        if (!charset) charset = "windows-1252";
+        GError* conv_err = NULL;
+        gchar* utf8 = g_convert(text, -1, "UTF-8", charset, NULL, NULL, &conv_err);
+        g_free(text);
+        if (!utf8) {
+            g_clear_error(&conv_err);
+            utf8 = g_strdup("(Encoding-Fehler beim Lesen des Textteils)");
+        }
+        text = utf8;
+    }
+
+    return text;
+}
+
+
+static void collect_text_parts(GMimeObject* obj, GPtrArray* parts) {
+    if (GMIME_IS_MULTIPART(obj)) {
+        int count = g_mime_multipart_get_count(GMIME_MULTIPART(obj));
+        for (int i = 0; i < count; i++)
+            collect_text_parts(
+                g_mime_multipart_get_part(GMIME_MULTIPART(obj), i), parts);
+    } else if (GMIME_IS_MESSAGE_PART(obj)) {
+        GMimeMessage* inner = g_mime_message_part_get_message(
+                GMIME_MESSAGE_PART(obj));
+        if (inner)
+            collect_text_parts(g_mime_message_get_mime_part(inner), parts);
+    } else if (GMIME_IS_PART(obj)) {
+        GMimeContentType* ct = g_mime_object_get_content_type(obj);
+        if (!ct) return;
+        const char* main_type = g_mime_content_type_get_media_type(ct);
+        const char* sub_type  = g_mime_content_type_get_media_subtype(ct);
+        if (!main_type) return;
+
+        /* Attachment überspringen */
+        GMimeContentDisposition* disp = g_mime_object_get_content_disposition(obj);
+        if (disp) {
+            const char* dval = g_mime_content_disposition_get_disposition(disp);
+            if (dval && g_ascii_strcasecmp(dval, "attachment") == 0)
+                return;
+        }
+
+        EmlPart *ep = g_new0(EmlPart, 1);
+        ep->mime_type = (sub_type)
+                ? g_strdup_printf("%s/%s", main_type, sub_type)
+                : g_strdup(main_type);
+
+        /* Dateiname */
+        const char* fn = g_mime_object_get_content_disposition_parameter(obj, "filename");
+        if (!fn) fn = g_mime_content_type_get_parameter(ct, "name");
+        if (fn) ep->filename = g_strdup(fn);
+
+        if (g_ascii_strcasecmp(main_type, "text") == 0) {
+            /* Text-Part */
+            ep->text = extract_text_from_part(obj);
+            if (!ep->text) {
+                eml_part_free(ep);
+                return;
+            }
+        } else if (g_ascii_strcasecmp(main_type, "image") == 0) {
+            /* Bild-Part: rohe Bytes dekodieren */
+            GMimeDataWrapper* wrapper = g_mime_part_get_content(GMIME_PART(obj));
+            if (!wrapper) { eml_part_free(ep); return; }
+            GMimeStream* mem = g_mime_stream_mem_new();
+            g_mime_data_wrapper_write_to_stream(wrapper, mem);
+            g_mime_stream_flush(mem);
+            GByteArray* ba = g_mime_stream_mem_get_byte_array(GMIME_STREAM_MEM(mem));
+            ep->image_data = (guchar*)g_memdup2(ba->data, ba->len);
+            ep->image_len  = ba->len;
+            g_object_unref(mem);
+        } else {
+            /* Unbekannter Typ — ignorieren */
+            eml_part_free(ep);
+            return;
+        }
+
+        g_ptr_array_add(parts, ep);
+    }
+}
+
+
+static RenderedDocument* render_gmessage(GBytes* bytes, int width) {
+    if (!bytes) return NULL;
+    if (width <= 0) width = DEFAULT_RENDER_WIDTH;
+
+    gsize len;
+    const guchar* data = g_bytes_get_data(bytes, &len);
+    GMimeMessage* message = gmessage_open(data, len);
+    if (!message) {
+        LOG_WARN("%s\ngmessage_open fehlgeschlagen", __func__);
+        return NULL;
+    }
+
+    /* ---- Header-Block aufbauen ---- */
+    GString* header = g_string_new("");
+
+    /* Von */
+    InternetAddressList* from_list =
+            g_mime_message_get_from(message);
+    if (from_list) {
+        char* from_str = internet_address_list_to_string(
+                from_list, NULL, TRUE);
+        g_string_append_printf(header, "Von:     %s\n",
+                from_str ? from_str : "");
+        g_free(from_str);
+    }
+
+    /* An */
+    InternetAddressList* to_list =
+            g_mime_message_get_to(message);
+    if (to_list) {
+        char* to_str = internet_address_list_to_string(
+                to_list, NULL, TRUE);
+        g_string_append_printf(header, "An:      %s\n",
+                to_str ? to_str : "");
+        g_free(to_str);
+    }
+
+    /* CC */
+    InternetAddressList* cc_list =
+            g_mime_message_get_cc(message);
+    if (cc_list && internet_address_list_length(cc_list) > 0) {
+        char* cc_str = internet_address_list_to_string(
+                cc_list, NULL, TRUE);
+        g_string_append_printf(header, "CC:      %s\n",
+                cc_str ? cc_str : "");
+        g_free(cc_str);
+    }
+
+    /* BCC */
+    InternetAddressList* bcc_list =
+            g_mime_message_get_bcc(message);
+    if (bcc_list && internet_address_list_length(bcc_list) > 0) {
+        char* bcc_str = internet_address_list_to_string(
+                bcc_list, NULL, TRUE);
+        g_string_append_printf(header, "BCC:     %s\n",
+                bcc_str ? bcc_str : "");
+        g_free(bcc_str);
+    }
+
+    /* Betreff */
+    const char* subject = g_mime_message_get_subject(message);
+    g_string_append_printf(header, "Betreff: %s\n",
+            subject ? subject : "");
+
+    /* Datum */
+    GDateTime* date = g_mime_message_get_date(message);
+    if (date) {
+        gchar* date_str = g_date_time_format(date,
+                "%d.%m.%Y %H:%M:%S %Z");
+        g_string_append_printf(header, "Datum:   %s\n",
+                date_str ? date_str : "");
+        g_free(date_str);
+        g_date_time_unref(date);
+    }
+
+    /* Trennlinie */
+    g_string_append(header, "\n"
+            "────────────────────────────────────────────────────────────"
+            "\n\n");
+
+    /* ---- Body: alle inline Text-Parts sammeln ---- */
+    GPtrArray* parts = g_ptr_array_new_with_free_func(eml_part_free);
+    GMimeObject* mime_root = g_mime_message_get_mime_part(message);
+    if (mime_root)
+        collect_text_parts(mime_root, parts);
+
+    /* Body-Text zusammenfügen */
+    GString* body = g_string_new("");
+    for (guint i = 0; i < parts->len; i++) {
+        EmlPart* ep = g_ptr_array_index(parts, i);
+
+        /* Bild-Parts werden später separat gerendert */
+        if (!ep->text) continue;
+        /* Part-Überschrift: MIME-Type und ggf. Dateiname */
+        if (ep->filename)
+            g_string_append_printf(body, "[%s — %s]\n",
+                    ep->mime_type ? ep->mime_type : "?", ep->filename);
+        else
+            g_string_append_printf(body, "[%s]\n",
+                    ep->mime_type ? ep->mime_type : "?");
+
+        /* Trennlinie unter der Überschrift */
+        g_string_append(body,
+                "- - - - - - - - - - - - - - - - - - - - - - - - - - - -"
+                "\n\n");
+
+        const gchar* part_text = ep->text;
+
+        /* HTML-Parts: Text via lexbor extrahieren */
+        gchar* lower_probe = g_ascii_strdown(part_text,
+                strlen(part_text) < 512 ? strlen(part_text) : 512);
+        gboolean is_html = (strstr(lower_probe, "<html") ||
+                            strstr(lower_probe, "<!doctype") ||
+                            strstr(lower_probe, "<body"));
+        g_free(lower_probe);
+
+        if (is_html) {
+            lxb_html_document_t* doc = lxb_html_document_create();
+            if (doc) {
+                lxb_status_t st = lxb_html_document_parse(
+                        doc,
+                        (const lxb_char_t*)part_text,
+                        strlen(part_text));
+                if (st == LXB_STATUS_OK) {
+                    GString* extracted = g_string_new("");
+                    lxb_dom_node_t* body_node =
+                            lxb_dom_interface_node(doc->body);
+                    if (body_node)
+                        extract_text_recursive(body_node, extracted);
+                    g_string_append(body, extracted->str);
+                    g_string_free(extracted, TRUE);
+                }
+                lxb_html_document_destroy(doc);
+            }
+        } else {
+            /* Plain-Text: \r\n normalisieren */
+            const gchar* p = part_text;
+            while (*p) {
+                if (*p == '\r' && *(p+1) == '\n') {
+                    g_string_append_c(body, '\n');
+                    p += 2;
+                } else {
+                    g_string_append_c(body, *p++);
+                }
+            }
+        }
+
+        /* Trennlinie nach jedem Part außer dem letzten Text-Part */
+        gboolean has_more_text = FALSE;
+        for (guint j = i + 1; j < parts->len; j++) {
+            EmlPart* ep2 = g_ptr_array_index(parts, j);
+            if (ep2->text) { has_more_text = TRUE; break; }
+        }
+        if (has_more_text)
+            g_string_append(body,
+                    "\n\n════════════════════════════════════════════"
+                    "═══════════════════\n\n");
+    }
+    /* ---- Gesamttext = Header + Body ---- */
+    GString* full_text = g_string_new(header->str);
+    g_string_append(full_text, body->str);
+    g_string_free(header, TRUE);
+    g_string_free(body, TRUE);
+
+    /* ---- Bild-Parts aus dem bereits befüllten parts-Array verwenden ---- */
+    GPtrArray* image_surfaces = g_ptr_array_new_with_free_func(
+            (GDestroyNotify)cairo_surface_destroy);
+    GPtrArray* image_labels = g_ptr_array_new_with_free_func(g_free);
+
+    for (guint i = 0; i < parts->len; i++) {
+        EmlPart* ep = g_ptr_array_index(parts, i);
+        if (!ep->image_data) continue;
+
+        GdkPixbufLoader* loader = gdk_pixbuf_loader_new();
+        GError* perr = NULL;
+        gdk_pixbuf_loader_write(loader, ep->image_data, ep->image_len, &perr);
+        g_clear_error(&perr);
+        gdk_pixbuf_loader_close(loader, NULL);
+        {
+            /* Erst statischen Pixbuf versuchen, dann Animation (z.B. GIF) */
+            GdkPixbuf* pb = gdk_pixbuf_loader_get_pixbuf(loader);
+            if (!pb) {
+                GdkPixbufAnimation* anim = gdk_pixbuf_loader_get_animation(loader);
+                if (anim)
+                    pb = gdk_pixbuf_animation_get_static_image(anim);
+            }
+            if (pb) {
+                int iw = gdk_pixbuf_get_width(pb);
+                int ih = gdk_pixbuf_get_height(pb);
+                /* Skalieren wenn breiter als width-20 */
+                double scale = 1.0;
+                if (iw > width - 20)
+                    scale = (double)(width - 20) / iw;
+                int dw = (int)(iw * scale);
+                int dh = (int)(ih * scale);
+                cairo_surface_t* img_surf = cairo_image_surface_create(
+                        CAIRO_FORMAT_ARGB32, dw, dh);
+                cairo_t* ic = cairo_create(img_surf);
+                cairo_scale(ic, scale, scale);
+                gdk_cairo_set_source_pixbuf(ic, pb, 0, 0);
+                cairo_paint(ic);
+                cairo_destroy(ic);
+                g_ptr_array_add(image_surfaces, img_surf);
+                /* Label: MIME-Type + ggf. Dateiname */
+                g_ptr_array_add(image_labels,
+                        ep->filename
+                        ? g_strdup_printf("%s — %s", ep->mime_type, ep->filename)
+                        : g_strdup(ep->mime_type));
+            } else {
+                LOG_WARN("%s\nBild-Part konnte nicht geladen werden: %s",
+                        __func__, ep->mime_type ? ep->mime_type : "?");
+            }
+        }
+        g_object_unref(loader);
+    }
+    g_ptr_array_unref(parts);
+
+    /* ---- PangoAttrList: Header fett + größer (bis zur Trennlinie) ---- */
+    /* Länge des Header-Blocks in Bytes bestimmen */
+    const char* sep_pos = strstr(full_text->str, "\n\n");
+    guint header_end = sep_pos
+            ? (guint)(sep_pos - full_text->str)
+            : 0;
+
+    PangoAttrList* attrs = pango_attr_list_new();
+    if (header_end > 0) {
+        PangoAttribute* bold = pango_attr_weight_new(PANGO_WEIGHT_BOLD);
+        bold->start_index = 0;
+        bold->end_index   = header_end;
+        pango_attr_list_insert(attrs, bold);
+
+        PangoAttribute* mono = pango_attr_family_new("Monospace");
+        mono->start_index = 0;
+        mono->end_index   = header_end;
+        pango_attr_list_insert(attrs, mono);
+    }
+
+    /* ---- Rendern ---- */
+    /* Höhe berechnen */
+    cairo_surface_t* tmp_surf = cairo_image_surface_create(
+            CAIRO_FORMAT_ARGB32, 1, 1);
+    cairo_t* tmp_cr = cairo_create(tmp_surf);
+    PangoLayout* layout = pango_cairo_create_layout(tmp_cr);
+    pango_layout_set_width(layout, (width - 20) * PANGO_SCALE);
+    pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
+    pango_layout_set_text(layout, full_text->str, -1);
+    pango_layout_set_attributes(layout, attrs);
+    int pw, ph;
+    pango_layout_get_pixel_size(layout, &pw, &ph);
+    int height = ph + 20;
+    g_object_unref(layout);
+    cairo_destroy(tmp_cr);
+    cairo_surface_destroy(tmp_surf);
+
+    /* Echte Surface */
+    cairo_surface_t* surface = cairo_image_surface_create(
+            CAIRO_FORMAT_ARGB32, width, height);
+    cairo_t* cr = cairo_create(surface);
+    cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
+    cairo_paint(cr);
+    cairo_set_source_rgb(cr, 0.0, 0.0, 0.0);
+
+    layout = pango_cairo_create_layout(cr);
+    pango_layout_set_width(layout, (width - 20) * PANGO_SCALE);
+    pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
+    pango_layout_set_text(layout, full_text->str, -1);
+    pango_layout_set_attributes(layout, attrs);
+    cairo_move_to(cr, 10, 10);
+    pango_cairo_show_layout(cr, layout);
+    g_object_unref(layout);
+    cairo_destroy(cr);
+    pango_attr_list_unref(attrs);
+
+    /* ---- Bilder unter den Text-Block anfügen ---- */
+    int total_height = height;
+    int img_gap = 12; /* Abstand zwischen Bildern und zum Text */
+
+    /* Gesamthöhe berechnen */
+    for (guint i = 0; i < image_surfaces->len; i++) {
+        cairo_surface_t* is = g_ptr_array_index(image_surfaces, i);
+        total_height += img_gap + 18 /* Label */ + img_gap
+                + cairo_image_surface_get_height(is);
+    }
+
+    if (image_surfaces->len > 0) {
+        /* Neue kombinierte Surface */
+        cairo_surface_t* combined = cairo_image_surface_create(
+                CAIRO_FORMAT_ARGB32, width, total_height);
+        cairo_t* cc = cairo_create(combined);
+
+        /* weißer Hintergrund */
+        cairo_set_source_rgb(cc, 1.0, 1.0, 1.0);
+        cairo_paint(cc);
+
+        /* Text-Surface einfügen */
+        cairo_set_source_surface(cc, surface, 0, 0);
+        cairo_paint(cc);
+        cairo_surface_destroy(surface);
+
+        /* Bilder anfügen */
+        int y_off = height;
+        cairo_set_source_rgb(cc, 0.0, 0.0, 0.0);
+        for (guint i = 0; i < image_surfaces->len; i++) {
+            cairo_surface_t* is = g_ptr_array_index(image_surfaces, i);
+            const char* lbl = g_ptr_array_index(image_labels, i);
+            int iw = cairo_image_surface_get_width(is);
+            int ih = cairo_image_surface_get_height(is);
+
+            /* Trennlinie */
+            cairo_set_line_width(cc, 1.0);
+            cairo_move_to(cc, 10, y_off + img_gap / 2.0);
+            cairo_line_to(cc, width - 10, y_off + img_gap / 2.0);
+            cairo_stroke(cc);
+            y_off += img_gap;
+
+            /* Label */
+            PangoLayout* lbl_layout = pango_cairo_create_layout(cc);
+            pango_layout_set_text(lbl_layout, lbl, -1);
+            PangoAttrList* lbl_attrs = pango_attr_list_new();
+            PangoAttribute* lbl_bold = pango_attr_weight_new(PANGO_WEIGHT_BOLD);
+            lbl_bold->start_index = 0;
+            lbl_bold->end_index   = G_MAXUINT;
+            pango_attr_list_insert(lbl_attrs, lbl_bold);
+            pango_layout_set_attributes(lbl_layout, lbl_attrs);
+            pango_attr_list_unref(lbl_attrs);
+            cairo_move_to(cc, 10, y_off);
+            pango_cairo_show_layout(cc, lbl_layout);
+            g_object_unref(lbl_layout);
+            y_off += 18;
+
+            /* Bild zentriert */
+            int x_off = (width - iw) / 2;
+            if (x_off < 0) x_off = 0;
+            cairo_set_source_surface(cc, is, x_off, y_off + img_gap / 2);
+            cairo_paint(cc);
+            y_off += img_gap + ih;
+
+            /* Source nach Bild wieder auf Schwarz zurücksetzen */
+            cairo_set_source_rgb(cc, 0.0, 0.0, 0.0);
+        }
+
+        cairo_destroy(cc);
+        surface = combined;
+        height  = total_height;
+    }
+
+    g_ptr_array_unref(image_surfaces);
+    g_ptr_array_unref(image_labels);
+
+    RenderedDocument* result = g_new0(RenderedDocument, 1);
+    result->surface = surface;
+    result->width   = width;
+    result->height  = height;
+    result->searchable_text = g_string_free(full_text, FALSE);
+    result->type = DOC_TYPE_EML;
+
+    g_object_unref(message);
+    return result;
+}
+
+
+
+
+static RenderedDocument* render_document_from_bytes(GBytes *bytes, int render_width,
+        SondFilePart *sfp) {
     if (!bytes) {
     	LOG_WARN("Invalid bytes");
         return NULL;
@@ -1719,8 +2122,39 @@ static RenderedDocument* render_document_from_bytes(GBytes *bytes, int render_wi
         render_width = DEFAULT_RENDER_WIDTH;
     }
 
-    // Dokumenttyp erkennen
-    DocumentType type = detect_document_type(bytes);
+    /* Dokumenttyp: wenn sfp bekannt, direkt daraus ableiten */
+    DocumentType type;
+    if (sfp && SOND_IS_FILE_PART_GMESSAGE(sfp)) {
+        type = DOC_TYPE_EML;
+    } else if (sfp && (SOND_IS_FILE_PART_PDF(sfp) || SOND_IS_FILE_PART_ZIP(sfp))) {
+        type = DOC_TYPE_UNKNOWN; /* wird nicht hier gerendert */
+    } else if (sfp && SOND_IS_FILE_PART_LEAF(sfp)) {
+        /* MIME-Type des Leaf direkt auswerten — wurde bereits durch
+         * mime_guess_content_type (libmagic) korrekt bestimmt */
+        const gchar *mime = sond_file_part_leaf_get_mime_type(
+                SOND_FILE_PART_LEAF(sfp));
+        if (!mime)
+            type = DOC_TYPE_PLAIN;
+        else if (g_str_has_prefix(mime, "image/"))
+            type = DOC_TYPE_IMAGE;
+        else if (g_str_equal(mime, "text/html"))
+            type = DOC_TYPE_HTML;
+        else if (g_str_equal(mime, "application/vnd.oasis.opendocument.text"))
+            type = DOC_TYPE_ODT;
+        else if (g_str_equal(mime, "application/vnd.openxmlformats-officedocument.wordprocessingml.document"))
+            type = DOC_TYPE_DOCX;
+        else if (g_str_equal(mime, "application/msword"))
+            type = DOC_TYPE_DOC;
+        else if (g_str_equal(mime, "message/rfc822"))
+            type = DOC_TYPE_EML;
+        else if (g_str_has_prefix(mime, "text/"))
+            type = DOC_TYPE_PLAIN;
+        else
+            type = DOC_TYPE_PLAIN; /* unbekannt → als Text darstellen */
+    } else {
+        /* kein sfp — sollte nicht vorkommen, Fallback: Plain */
+        type = DOC_TYPE_PLAIN;
+    }
 
     RenderedDocument *result = NULL;
 
@@ -1813,6 +2247,10 @@ static RenderedDocument* render_document_from_bytes(GBytes *bytes, int render_wi
             result = render_plain_text(data, len, render_width);
             break;
         }
+
+        case DOC_TYPE_EML:
+            result = render_gmessage(bytes, render_width);
+            break;
     }
 
     return result;
@@ -1829,6 +2267,7 @@ const char* document_type_string(DocumentType type) {
         case DOC_TYPE_DOC: return "DOC (Legacy)";
         case DOC_TYPE_IMAGE: return "Image";
         case DOC_TYPE_PLAIN: return "Plain Text";
+        case DOC_TYPE_EML: return "E-Mail";
         case DOC_TYPE_UNKNOWN:
         default: return "Unknown";
     }
@@ -1857,7 +2296,7 @@ render_document_with_highlight(GBytes *bytes, int render_width,
     if (render_width <= 0) render_width = DEFAULT_RENDER_WIDTH;
 
     /* Erst normal rendern um den searchable_text zu bekommen */
-    RenderedDocument *rd = render_document_from_bytes(bytes, render_width);
+    RenderedDocument *rd = render_document_from_bytes(bytes, render_width, NULL);
     if (!rd) return NULL;
     if (!rd->searchable_text) return rd; /* kein Text → unverändert zurück */
 
@@ -1989,7 +2428,7 @@ gint sond_render_with_term(GBytes *input, SondFilePart *sfp,
         rd = render_document_with_highlight(input, 0, term,
                 char_pos_in_doc, &highlight_y);
     else
-        rd = render_document_from_bytes(input, 0);
+        rd = render_document_from_bytes(input, 0, sfp);
 
     if (!rd) {
         if (error) *error = g_error_new(SOND_ERROR, 0,
@@ -2034,13 +2473,15 @@ gint sond_render_with_term(GBytes *input, SondFilePart *sfp,
     return 0;
 }
 
+// === EML RENDERING ===
+
 gint sond_render(GBytes* input, SondFilePart* sfp, gchar const* title,
 		GError** error) {
 	RenderedDocument* rd = NULL;
 	GtkWidget* widget = NULL;
 	const char* window_title = NULL;
 
-	rd = render_document_from_bytes(input, 0);
+	rd = render_document_from_bytes(input, 0, sfp);
 	if (!rd) {
 		if (error) *error = g_error_new(SOND_ERROR, 0,
 				"%s\nStream konnte nicht gerendert werden", __func__);
