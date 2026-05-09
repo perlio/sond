@@ -39,7 +39,6 @@
 #include "sond_process_file.h"
 #include "sond_treeviewfm_seadrive.h"
 
-
 //SOND_TREEVIEWDM
 typedef struct {
 	gchar *root;
@@ -1017,8 +1016,8 @@ static void sond_treeviewfm_cell_edited(GtkCellRenderer *cell,
 	rc = SOND_TREEVIEWFM_GET_CLASS(stvfm)->text_edited(stvfm, &iter, stvfm_item,
 		new_text, &error);
 	if (rc) {
-		display_message(gtk_widget_get_toplevel(GTK_WIDGET(stvfm)),
-				"Umbenennen nicht möglich\n\n", error->message, NULL);
+		display_message(SOND_GET_TOPLEVEL(stvfm),
+		"Umbenennen nicht möglich\n\n", error->message, NULL);
 		g_error_free(error);
 
 		return;
@@ -1505,14 +1504,14 @@ static void sond_treeviewfm_results_row_activated(GtkTreeView *treeview,
 			&error);
 	g_free(filepart);
 	if (rc == -1) {
-		display_message(gtk_widget_get_toplevel(GTK_WIDGET(stvfm)),
-				"Fehler\n\n", error->message, NULL);
+		display_message(SOND_GET_TOPLEVEL(stvfm),
+		"Fehler\n\n", error->message, NULL);
 
 		g_error_free(error);
-	}
-	else if (rc == 0) {
-		display_message(gtk_widget_get_toplevel(GTK_WIDGET(stvfm)),
-				"Datei nicht gefunden", filepart, NULL);
+		}
+		else if (rc == 0) {
+		display_message(SOND_GET_TOPLEVEL(stvfm),
+		"Datei nicht gefunden", filepart, NULL);
 
 		return;
 	}
@@ -1765,8 +1764,8 @@ static void sond_treeviewfm_punkt_einfuegen_activate(GtkMenuItem *item,
 
 	rc = sond_treeviewfm_create_dir(stvfm, child, &error);
 	if (rc) {
-		display_message(gtk_widget_get_toplevel(GTK_WIDGET(stvfm)),
-				"Verzeichnis kann nicht eingefügt werden\n\n", error->message, NULL);
+		display_message(SOND_GET_TOPLEVEL(stvfm),
+		 "Verzeichnis kann nicht eingefügt werden\n\n", error->message, NULL);
 		g_error_free(error);
 	}
 
@@ -1847,7 +1846,7 @@ static gint process_stvfm_item_move_or_copy(SondTVFMItem* stvfm_item,
 				g_clear_error(error);
 
 				gint res = dialog_with_buttons(
-						gtk_widget_get_toplevel(GTK_WIDGET(stvfm_item_priv->stvfm)),
+						SOND_GET_TOPLEVEL(stvfm_item_priv->stvfm),
 						"Zugriff nicht erlaubt",
 						"Datei möglicherweise geöffnet", NULL,
 						"Erneut versuchen", 1, "Überspringen", 2, "Abbrechen",
@@ -2347,13 +2346,13 @@ static void sond_treeviewfm_paste_activate(GtkMenuItem *item, gpointer data) {
 			g_object_get_data( G_OBJECT(item), "kind" ));
 
 	if (sond_treeview_test_cursor_descendant(SOND_TREEVIEW(stvfm), kind))
-		display_message(gtk_widget_get_toplevel(GTK_WIDGET(stvfm)),
+		display_message(SOND_GET_TOPLEVEL(stvfm),
 				"Unzulässiges Ziel: Abkömmling von zu verschiebendem Knoten",
 				NULL);
 
 	rc = sond_treeviewfm_paste_clipboard(stvfm, kind, &error);
 	if (rc) {
-		display_message(gtk_widget_get_toplevel(GTK_WIDGET(stvfm)),
+		display_message(SOND_GET_TOPLEVEL(stvfm),
 				"Einfügen nicht möglich\n\n", error->message, NULL);
 		g_error_free(error);
 	}
@@ -2399,7 +2398,7 @@ static void sond_treeviewfm_loeschen_activate(GtkMenuItem *item, gpointer data) 
 	rc = sond_treeview_selection_foreach(SOND_TREEVIEW(stvfm),
 			sond_treeviewfm_foreach_loeschen, NULL, &error);
 	if (rc == -1) {
-		display_message(gtk_widget_get_toplevel(GTK_WIDGET(stvfm)),
+		display_message(SOND_GET_TOPLEVEL(stvfm),
 				"Löschen nicht möglich\n\n", error->message, NULL);
 		g_error_free(error);
 	}
@@ -2478,7 +2477,7 @@ static void open_item(GtkTreeView* tree_view, gboolean open_with) {
 	rc = sond_treeviewfm_open(stvfm_item, open_with, &error);
 	g_object_unref(stvfm_item);
 	if (rc) {
-		display_message(GTK_WIDGET(tree_view), "Fehler beim Öffnen\n\n",
+		display_message(SOND_GET_TOPLEVEL(tree_view), "Fehler beim Öffnen\n\n",
 				error->message, NULL);
 		g_error_free(error);
 	}
@@ -2508,7 +2507,7 @@ static void sond_treeviewfm_show_hits(SondTreeviewFM *stvfm,
 	/* Einspaltiges Ergebnisfenster */
 	gchar const *cols[] = { "Datei", NULL };
 	window = sond_result_view_new(
-			GTK_WINDOW(gtk_widget_get_toplevel(GTK_WIDGET(stvfm))),
+			GTK_WINDOW(SOND_GET_TOPLEVEL(stvfm)),
 			"Suchergebnis",
 			cols,
 			G_CALLBACK(klass->results_row_activated),
@@ -2520,7 +2519,11 @@ static void sond_treeviewfm_show_hits(SondTreeviewFM *stvfm,
 		sond_result_view_append(window, row);
 	}
 
+#if GTK_MAJOR_VERSION < 4
 	gtk_widget_show_all(window);
+#else
+	gtk_widget_set_visible(window, TRUE);
+#endif
 
 	return;
 }
@@ -2662,12 +2665,12 @@ static void sond_treeviewfm_search_activate(GtkMenuItem *item, gpointer data) {
 	if (only_sel
 			&& !gtk_tree_selection_count_selected_rows(
 					gtk_tree_view_get_selection(GTK_TREE_VIEW(stvfm)))) {
-		display_message(gtk_widget_get_toplevel(GTK_WIDGET(stvfm)),
+		display_message(SOND_GET_TOPLEVEL(stvfm),
 				"Keine Punkte ausgewählt", NULL);
 		return;
 	}
 
-	rc = abfrage_frage(gtk_widget_get_toplevel(GTK_WIDGET(stvfm)), "Dateisuche",
+	rc = abfrage_frage(SOND_GET_TOPLEVEL(stvfm), "Dateisuche",
 			"Bitte Suchtext eingeben", &search_text);
 	if (rc != GTK_RESPONSE_YES || !g_strcmp0(search_text, "")) {
 		g_free(search_text);
@@ -2686,7 +2689,7 @@ static void sond_treeviewfm_search_activate(GtkMenuItem *item, gpointer data) {
 	else
 		search_fs.needle = g_strdup(search_text);
 
-	search_fs.info_window = info_window_open(gtk_widget_get_toplevel(GTK_WIDGET(stvfm)),
+	search_fs.info_window = info_window_open(SOND_GET_TOPLEVEL(stvfm),
 			&cancelled, search_text);
 	g_free(search_text);
 
@@ -2702,7 +2705,7 @@ static void sond_treeviewfm_search_activate(GtkMenuItem *item, gpointer data) {
 	g_free(search_fs.needle);
 
 	if (rc == -1) {
-		display_message(gtk_widget_get_toplevel(GTK_WIDGET(stvfm)),
+		display_message(SOND_GET_TOPLEVEL(stvfm),
 				"Fehler bei Dateisuche\n\n", error->message, NULL);
 		g_error_free(error);
 		g_ptr_array_unref(search_fs.arr_hits);
@@ -2711,7 +2714,7 @@ static void sond_treeviewfm_search_activate(GtkMenuItem *item, gpointer data) {
 	}
 
 	if (search_fs.arr_hits->len == 0) {
-		display_message(gtk_widget_get_toplevel(GTK_WIDGET(stvfm)),
+		display_message(SOND_GET_TOPLEVEL(stvfm),
 				"Keine Datei gefunden", NULL);
 		g_ptr_array_unref(search_fs.arr_hits);
 
@@ -2940,7 +2943,7 @@ static void sond_treeviewfm_row_activated(GtkTreeView *tree_view,
 	rc = sond_treeviewfm_open(stvfm_item, FALSE, &error);
 	g_object_unref(stvfm_item);
 	if (rc) {
-		display_message(gtk_widget_get_toplevel(GTK_WIDGET(tree_view)),
+		display_message(SOND_GET_TOPLEVEL(tree_view),
 				"Datei kann nicht geöffnet werden\n\n", error->message, NULL);
 		g_error_free(error);
 	}
@@ -3023,7 +3026,7 @@ static void sond_treeviewfm_row_expanded(GtkTreeView *tree_view,
 
 	rc = sond_treeviewfm_expand_dummy(SOND_TREEVIEWFM(tree_view), iter, stvfm_item, &error);
 	if (rc) {
-		display_message(gtk_widget_get_toplevel(GTK_WIDGET(tree_view)),
+		display_message(SOND_GET_TOPLEVEL(tree_view),
 				"Zeile konnte nicht expandiert werden\n\n", error->message,
 				NULL);
 		g_error_free(error);
@@ -3110,10 +3113,10 @@ static void sond_treeviewfm_render_file_size(GtkTreeViewColumn *column,
 		gchar *text = NULL;
 
 //		size = g_file_info_get_size(G_FILE_INFO(object));
-#ifdef __WIN32__
-		text = g_strdup_printf("%lld", size);
-#elif defined __linux__
-		text = g_strdup_printf("%ld", size);
+#ifdef _WIN32
+		text = g_strdup_printf("%lld", (long long) size);
+#else
+		text = g_strdup_printf("%ld", (long) size);
 #endif
 		g_object_set(G_OBJECT(renderer), "text", text, NULL);
 		g_free(text);
@@ -3133,8 +3136,7 @@ static GdkPixbuf* load_icon_pixbuf(GtkWidget *widget,
 
 	if (!icon_name) return NULL;
 
-	theme = gtk_icon_theme_get_for_screen(
-			gtk_widget_get_screen(widget));
+	theme = SOND_ICON_THEME_FOR_WIDGET(widget);
 	pixbuf = gtk_icon_theme_load_icon(theme, icon_name, size,
 			GTK_ICON_LOOKUP_USE_BUILTIN, NULL);
 

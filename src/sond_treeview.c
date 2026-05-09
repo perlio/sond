@@ -26,10 +26,55 @@ typedef struct {
 	GtkCellRenderer *renderer_text;
 	gulong signal_key;
 	gint id;
-	GtkWidget *contextmenu;
+	GtkWidget *contextmenu;  /* GTK3: GtkMenu, GTK4: GtkPopoverMenu */
 } SondTreeviewPrivate;
 
 G_DEFINE_TYPE_WITH_PRIVATE(SondTreeview, sond_treeview, GTK_TYPE_TREE_VIEW)
+
+/* --------------------------------------------------------------------------
+ * Popup-Menu GTK3/4 getrennt
+ * -------------------------------------------------------------------------- */
+#if GTK_MAJOR_VERSION >= 4
+
+static void sond_treeview_show_popupmenu(SondTreeview *stv, gdouble x,
+		gdouble y) {
+	SondTreeviewPrivate *stv_priv = sond_treeview_get_instance_private(stv);
+	GdkRectangle rect = { (gint)x, (gint)y, 1, 1 };
+	gtk_popover_set_pointing_to(GTK_POPOVER(stv_priv->contextmenu), &rect);
+	gtk_popover_popup(GTK_POPOVER(stv_priv->contextmenu));
+}
+
+static void sond_treeview_gesture_pressed(GtkGestureClick *gesture,
+		gint n_press, gdouble x, gdouble y, gpointer data) {
+	SondTreeview *stv = SOND_TREEVIEW(data);
+
+	if (gtk_gesture_single_get_current_button(
+			GTK_GESTURE_SINGLE(gesture)) != GDK_BUTTON_SECONDARY)
+		return;
+
+	GtkTreePath *path = NULL;
+	gtk_tree_view_get_path_at_pos(GTK_TREE_VIEW(stv), (gint)x, (gint)y,
+			&path, NULL, NULL, NULL);
+
+	if (!path) {
+		GtkTreeIter iter = { 0 };
+		if (gtk_tree_model_get_iter_first(
+				gtk_tree_view_get_model(GTK_TREE_VIEW(stv)), &iter))
+			return;
+		if (!gtk_widget_has_focus(GTK_WIDGET(stv)))
+			gtk_widget_grab_focus(GTK_WIDGET(stv));
+	} else {
+		if (!gtk_widget_has_focus(GTK_WIDGET(stv))) {
+			gtk_tree_view_set_cursor(GTK_TREE_VIEW(stv), path, NULL, FALSE);
+			gtk_widget_grab_focus(GTK_WIDGET(stv));
+		}
+		gtk_tree_path_free(path);
+	}
+
+	sond_treeview_show_popupmenu(stv, x, y);
+}
+
+#else /* GTK3 */
 
 static gboolean sond_treeview_show_popupmenu(SondTreeview *stv,
 		GdkEventButton *event, GtkMenu *contextmenu) {
@@ -71,10 +116,19 @@ static gboolean sond_treeview_show_popupmenu(SondTreeview *stv,
 	return ret;
 }
 
+#endif /* GTK_MAJOR_VERSION */
+
 static void sond_treeview_finalize(GObject* object) {
 	SondTreeviewPrivate* stv_priv = sond_treeview_get_instance_private(SOND_TREEVIEW(object));
 
+#if GTK_MAJOR_VERSION >= 4
+	if (stv_priv->contextmenu) {
+		gtk_widget_unparent(stv_priv->contextmenu);
+		stv_priv->contextmenu = NULL;
+	}
+#else
 	gtk_widget_destroy(stv_priv->contextmenu);
+#endif
 
 	G_OBJECT_CLASS(sond_treeview_parent_class)->finalize(object);
 }
@@ -247,6 +301,20 @@ static gboolean sond_treeview_selection_select_func(GtkTreeSelection *selection,
 	return TRUE;
 }
 
+#if GTK_MAJOR_VERSION >= 4
+
+static void sond_treeview_action_kopieren(GSimpleAction *action,
+		GVariant *parameter, gpointer user_data) {
+	sond_treeview_copy_or_cut_selection(SOND_TREEVIEW(user_data), FALSE);
+}
+
+static void sond_treeview_action_ausschneiden(GSimpleAction *action,
+		GVariant *parameter, gpointer user_data) {
+	sond_treeview_copy_or_cut_selection(SOND_TREEVIEW(user_data), TRUE);
+}
+
+#else /* GTK3 */
+
 static void sond_treeview_kopieren_activate(GtkMenuItem *item,
 		gpointer user_data) {
 	SondTreeview *stv = (SondTreeview*) user_data;
@@ -264,6 +332,8 @@ static void sond_treeview_ausschneiden_activate(GtkMenuItem *item,
 
 	return;
 }
+
+#endif /* GTK_MAJOR_VERSION */
 
 static void sond_treeview_init(SondTreeview *stv) {
 	GtkTreeViewColumn *tvc = NULL;
@@ -312,12 +382,47 @@ static void sond_treeview_init(SondTreeview *stv) {
 	gtk_tree_view_column_set_cell_data_func(tvc, stv_private->renderer_text,
 			(GtkTreeCellDataFunc) sond_treeview_render_text, stv, NULL);
 
-	//Contextmenu
-	//Rechtsklick - Kontextmenu
-	//Kontextmenu erzeugen, welches bei Rechtsklick auf treeview angezeigt wird
+	/* ------------------------------------------------------------------
+	 * Kontextmenu aufbauen - GTK3: GtkMenu, GTK4: GtkPopoverMenu
+	 * ------------------------------------------------------------------ */
+#if GTK_MAJOR_VERSION >= 4
+
+	GMenu *gmenu_stv = g_menu_new();
+	g_menu_append(gmenu_stv, "Kopieren",     "stv.kopieren");
+	g_menu_append(gmenu_stv, "Ausschneiden", "stv.ausschneiden");
+
+	GSimpleAction *act_kop = g_simple_action_new("kopieren", NULL);
+	g_signal_connect(act_kop, "activate",
+			G_CALLBACK(sond_treeview_action_kopieren), stv);
+	GSimpleAction *act_aus = g_simple_action_new("ausschneiden", NULL);
+	g_signal_connect(act_aus, "activate",
+			G_CALLBACK(sond_treeview_action_ausschneiden), stv);
+
+	GSimpleActionGroup *ag_stv = g_simple_action_group_new();
+	g_action_map_add_action(G_ACTION_MAP(ag_stv), G_ACTION(act_kop));
+	g_action_map_add_action(G_ACTION_MAP(ag_stv), G_ACTION(act_aus));
+	g_object_unref(act_kop);
+	g_object_unref(act_aus);
+	gtk_widget_insert_action_group(GTK_WIDGET(stv), "stv", G_ACTION_GROUP(ag_stv));
+	g_object_unref(ag_stv);
+
+	stv_private->contextmenu = gtk_popover_menu_new_from_model(
+			G_MENU_MODEL(gmenu_stv));
+	g_object_unref(gmenu_stv);
+	gtk_widget_set_parent(stv_private->contextmenu, GTK_WIDGET(stv));
+	gtk_popover_set_has_arrow(GTK_POPOVER(stv_private->contextmenu), FALSE);
+
+	GtkGesture *gesture = gtk_gesture_click_new();
+	gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(gesture),
+			GDK_BUTTON_SECONDARY);
+	g_signal_connect(gesture, "pressed",
+			G_CALLBACK(sond_treeview_gesture_pressed), stv);
+	gtk_widget_add_controller(GTK_WIDGET(stv), GTK_EVENT_CONTROLLER(gesture));
+
+#else /* GTK3 */
+
 	stv_private->contextmenu = gtk_menu_new();
 
-	//Kopieren
 	GtkWidget *item_kopieren = gtk_menu_item_new_with_label("Kopieren");
 	g_object_set_data(G_OBJECT(stv_private->contextmenu), "item-kopieren",
 			item_kopieren);
@@ -326,7 +431,6 @@ static void sond_treeview_init(SondTreeview *stv) {
 	gtk_menu_shell_append(GTK_MENU_SHELL(stv_private->contextmenu),
 			item_kopieren);
 
-	//Verschieben
 	GtkWidget *item_ausschneiden = gtk_menu_item_new_with_label("Ausschneiden");
 	g_object_set_data(G_OBJECT(stv_private->contextmenu), "item-ausschneiden",
 			item_ausschneiden);
@@ -340,6 +444,8 @@ static void sond_treeview_init(SondTreeview *stv) {
 	g_signal_connect(stv, "button-press-event",
 			G_CALLBACK(sond_treeview_show_popupmenu),
 			(gpointer ) stv_private->contextmenu);
+
+#endif /* GTK_MAJOR_VERSION */
 
 	//hiermit sollen die Momente abgefangen werden, in denen im treeview herumgetippt wird
 	//dann soll key-press-event abgefangen werden und Callback gibt TRUE zur�ck
