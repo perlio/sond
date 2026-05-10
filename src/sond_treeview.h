@@ -37,7 +37,8 @@ struct _SondTreeviewClass {
 			GtkTreeModel*, GtkTreeIter*, gpointer);
 	void (*text_edited)(SondTreeview *stv, GtkTreeIter *iter,
 			gchar const *new_text);
-	gboolean (*callback_key_press_event)(GtkWidget*, GdkEventKey, gpointer);
+	gboolean (*callback_key_press_event)(GtkWidget*, guint keyval,
+			GdkModifierType state, gpointer);
 	gpointer callback_key_press_event_func_data;
 };
 

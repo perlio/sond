@@ -291,17 +291,14 @@ static gboolean cb_treeview_focus_in(GtkWidget *treeview, GdkEvent *event,
 /**
  * Callback: Taste in TreeView gedrückt
  */
-static gboolean cb_treeview_key_press(GtkWidget *treeview, GdkEventKey event,
-                                     gpointer data) {
+static gboolean cb_treeview_key_press(GtkWidget *treeview, guint keyval,
+                                     GdkModifierType state, gpointer data) {
     Projekt *zond = (Projekt*) data;
 
-    // Nur normale Zeichen öffnen das Suchfeld
-    if (event.is_modifier ||
-        (event.state & GDK_CONTROL_MASK) ||
-        (event.keyval < 0x21) ||
-        (event.keyval > 0x7e)) {
+    if ((state & GDK_CONTROL_MASK) ||
+        (keyval < 0x21) ||
+        (keyval > 0x7e))
         return FALSE;
-    }
 
     gtk_popover_popup(GTK_POPOVER(zond->popover));
 
