@@ -432,7 +432,6 @@ static gint sond_tvfm_item_load_fs_dir(SondTVFMItem* stvfm_item,
 		}
 		else {
 			SondFilePart* sfp_child = NULL;
-			gchar* mime_type = NULL;
 			gchar* full_path = NULL;
 			const gchar* mime_from_ext = NULL;
 
@@ -457,31 +456,10 @@ static gint sond_tvfm_item_load_fs_dir(SondTVFMItem* stvfm_item,
 				sfp_child = sond_file_part_create_leaf(
 						rel_path_child, stvfm_item_priv->sond_file_part,
 						mime_from_ext);
-			} else {
-				/* Datei lokal verfügbar - normal lesen und MIME-Typ ermitteln */
-				FILE* f = NULL;
-				guchar buf[2048];
-				gsize n = 0;
-
-				f = sond_fopen(full_path, "rb", error);
-				if (f) {
-					n = fread(buf, 1, sizeof(buf), f);
-					fclose(f);
-					if (n <= 0)
-						LOG_WARN("fread('%s'): %s", rel_path_child, strerror(errno));
-				} else {
-					LOG_WARN("sond_fopen('%s'): %s", rel_path_child, (*error)->message);
-					g_clear_error(error);
-				}
-
-				if (n > 0)
-					mime_type = mime_guess_content_type(buf, n, NULL);
-
-				sfp_child = sond_file_part_create_from_mime_type(
-						rel_path_child, stvfm_item_priv->sond_file_part,
-						mime_type ? mime_type : "application/octet-stream");
-				g_free(mime_type);
-			}
+			} else
+				/* Datei lokal verfügbar - normal lesen und sfp erzeugen */
+				sfp_child = sond_file_part_create(stvfm_item_priv->sond_file_part,
+						rel_path_child, error);
 			g_free(full_path);
 			if (!sfp_child) {
 				g_free(rel_path_child);
@@ -509,13 +487,12 @@ static gint sond_tvfm_item_load_fs_dir(SondTVFMItem* stvfm_item,
 
 typedef struct {
 	gchar* path; /* Verzeichnis: endet auf '/' */
-	gchar* mime; /* NULL = Verzeichnis */
+	gboolean is_dir; /* NULL = Verzeichnis */
 } ZipDirEntry;
 
 static void zip_dir_entry_free(gpointer p) {
 	ZipDirEntry* e = (ZipDirEntry*) p;
 	g_free(e->path);
-	g_free(e->mime);
 	g_free(e);
 }
 
@@ -553,17 +530,7 @@ static GPtrArray* sfp_zip_list_dir(SondFilePartZip* sfp_zip,
 			/* Normale Datei: MIME direkt lesen */
 			ZipDirEntry* e = g_new0(ZipDirEntry, 1);
 			e->path = g_strdup(name);
-
-			zip_file_t* zf = zip_fopen_index(archive, (zip_uint64_t)i, 0);
-			if (zf) {
-				guchar buf[2048];
-				zip_int64_t n = zip_fread(zf, buf, sizeof(buf));
-				zip_fclose(zf);
-				if (n > 0)
-					e->mime = mime_guess_content_type(buf, (gsize)n, NULL);
-			}
-			if (!e->mime)
-				e->mime = g_strdup("application/octet-stream");
+			e->is_dir = FALSE;
 
 			g_ptr_array_add(result, e);
 		} else if (*(slash + 1) == '\0') {
@@ -572,7 +539,7 @@ static GPtrArray* sfp_zip_list_dir(SondFilePartZip* sfp_zip,
 			if (!g_hash_table_contains(seen_dirs, dir_key)) {
 				ZipDirEntry* e = g_new0(ZipDirEntry, 1);
 				e->path = g_strdup(dir_key);
-				e->mime = NULL;
+				e->is_dir = TRUE;
 				g_hash_table_add(seen_dirs, dir_key);
 				g_ptr_array_add(result, e);
 			} else
@@ -585,7 +552,7 @@ static GPtrArray* sfp_zip_list_dir(SondFilePartZip* sfp_zip,
 			if (!g_hash_table_contains(seen_dirs, dir_key)) {
 				ZipDirEntry* e = g_new0(ZipDirEntry, 1);
 				e->path = g_strdup(dir_key); /* endet auf '/' */
-				e->mime = NULL;             /* Verzeichnis */
+				e->is_dir = TRUE;            /* Verzeichnis */
 				g_hash_table_add(seen_dirs, dir_key);
 				g_ptr_array_add(result, e);
 			} else
@@ -626,15 +593,23 @@ static gint sond_tvfm_item_load_zip_dir(SondTVFMItem* stvfm_item,
 		ZipDirEntry* e = g_ptr_array_index(entries, i);
 		SondTVFMItem* child = NULL;
 
-		if (!e->mime) {
+		if (e->is_dir) {
 			/* Verzeichnis: path endet auf '/', ohne dieses als path_or_section */
 			gchar* dir_path = g_strndup(e->path, strlen(e->path) - 1);
 			child = sond_tvfm_item_create(stvfm_item_priv->stvfm,
 					stvfm_item_priv->sond_file_part, dir_path);
 			g_free(dir_path);
 		} else {
-			SondFilePart* sfp_child = sond_file_part_create_from_mime_type(
-					e->path, stvfm_item_priv->sond_file_part, e->mime);
+			SondFilePart* sfp_child = sond_file_part_create(stvfm_item_priv->sond_file_part,
+					e->path, error);
+			if (!sfp_child) {
+				LOG_WARN("SondFilePart konnte nicht erzeugt werden:\n%s",
+						(*error)->message);
+				g_clear_error(error);
+
+				continue;
+			}
+
 			child = sond_tvfm_item_create(stvfm_item_priv->stvfm, sfp_child, NULL);
 			g_object_unref(sfp_child);
 		}
@@ -758,8 +733,10 @@ static gint sond_tvfm_item_load_gmessage_dir(SondTVFMItem* stvfm_item,
 					filename = g_mime_content_disposition_get_parameter(disp, "filename");
 			}
 
-			sfp_child = sond_file_part_create_from_mime_type(path,
-					stvfm_item_priv->sond_file_part, mime_string);
+			sfp_child = sond_file_part_is_open(stvfm_item_priv->sond_file_part, path);
+			if (!sfp_child)
+				sfp_child = sond_file_part_create_from_mime_type(path,
+						stvfm_item_priv->sond_file_part, mime_string);
 
 			stvfm_item_child = sond_tvfm_item_create(stvfm_item_priv->stvfm,
 						sfp_child, NULL);
@@ -3485,7 +3462,6 @@ sond_treeviewfm_seadrive_item_hydrated(SondTreeviewFM *stvfm,
 	SondTVFMItemPrivate *stvfm_item_priv = NULL;
 	SondFilePart *sfp_old = NULL;
 	SondFilePart *sfp_new = NULL;
-	gchar *mime_type = NULL;
 	const gchar *rel_path = NULL;
 	int rc = 0;
 	SondTVFMItemType type = 0;
@@ -3526,41 +3502,25 @@ sond_treeviewfm_seadrive_item_hydrated(SondTreeviewFM *stvfm,
 			!SOND_IS_FILE_PART_LEAF(sfp_old))
 		return;
 
-	/* MIME-Typ jetzt korrekt ermitteln - Datei ist lokal */
-	{
-		GError *error = NULL;
-		FILE *f = sond_fopen(full_path, "rb", &error);
-		if (f) {
-			guchar buf[2048];
-			gsize n = fread(buf, 1, sizeof(buf), f);
-			fclose(f);
-			if (n > 0)
-				mime_type = mime_guess_content_type(buf, n, NULL);
-		} else
-			g_clear_error(&error);
-	}
-
-	if (!mime_type)
-		return; /* kein MIME-Typ - nichts zu korrigieren */
-
 	/* Altes sfp aus arr_opened_files entfernen damit sond_file_part_create
 	 * nicht das alte LEAF zurückgibt anstatt ein neues PDF/ZIP/GMessage zu erstellen */
-	{
-		GPtrArray *arr = sond_file_part_get_arr_opened_files(
-				sond_file_part_get_parent(sfp_old));
-		if (arr)
-			g_ptr_array_remove_fast(arr, sfp_old);
-	}
+	GPtrArray *arr = sond_file_part_get_arr_opened_files(
+			sond_file_part_get_parent(sfp_old));
+	if (arr)
+		g_ptr_array_remove_fast(arr, sfp_old);
 
 	/* Neues sfp mit korrektem Typ erstellen */
-	sfp_new = sond_file_part_create_from_mime_type(
-			rel_path,
-			sond_file_part_get_parent(sfp_old),
-			mime_type);
-	g_free(mime_type);
+	GError* error = NULL;
+	sfp_new = sond_file_part_create(sond_file_part_get_parent(sfp_old),
+			rel_path, &error);
 
-	if (!sfp_new)
+	if (!sfp_new) {
+		LOG_WARN("SondFilePart kann nicht geöffnet werden:\n%s",
+				error->message);
+		g_error_free(error);
+
 		return;
+	}
 
 	/* Altes Item im Baum durch neues ersetzen */
 	SondTVFMItem *stvfm_item_new = sond_tvfm_item_create(stvfm, sfp_new, NULL);
@@ -3636,7 +3596,7 @@ sond_treeviewfm_seadrive_item_dehydrated(SondTreeviewFM *stvfm,
 		return;
 
 	/* Altes sfp zuerst aus arr_opened_files entfernen - VOR create_leaf,
-	 * damit nicht das alte GMessage zurückgegeben wird */
+	 * damit nicht das alte sfp zurückgegeben wird */
 	{
 		GPtrArray *arr = sond_file_part_get_arr_opened_files(
 				sond_file_part_get_parent(sfp_old));

@@ -96,40 +96,23 @@ static void sond_file_part_init(SondFilePart* self) {
 	return;
 }
 
-static SondFilePart* sond_file_part_create(GType sfp_type, const gchar *path,
+static SondFilePart* sond_file_part_do_create(GType sfp_type, const gchar *path,
 		SondFilePart* parent) {
 	SondFilePart *sfp = NULL;
 	SondFilePartPrivate *sfp_priv = NULL;
-	GPtrArray *arr_opened_files = NULL;
-
-	if (!parent)
-		arr_opened_files = SOND_FILE_PART_CLASS(g_type_class_peek(
-				SOND_TYPE_FILE_PART))->arr_opened_files;
-	else {
-		SondFilePartPrivate* sfp_parent_priv = sond_file_part_get_instance_private(parent);
-		arr_opened_files = sfp_parent_priv->arr_opened_files;
-	}
-
-	if (arr_opened_files)
-		//suchen, ob schon geöffnet
-		for (guint i = 0; i < arr_opened_files->len; i++) {
-			SondFilePart *sfp_tmp = g_ptr_array_index(arr_opened_files, i);
-			//bereits geöffnet
-			if (g_strcmp0(sond_file_part_get_path(sfp_tmp), path) == 0) {
-				return g_object_ref(sfp_tmp); //ref zurückgeben
-			}
-		}
+	GPtrArray* arr_opened_files = NULL;
 
 	//sonst neu machen
 	sfp = g_object_new(sfp_type, NULL);
 	sfp_priv = sond_file_part_get_instance_private(sfp);
 
 	sfp_priv->path = g_strdup(path);
-	if (parent) sfp_priv->parent = SOND_FILE_PART(g_object_ref(parent));
+	if (parent)
+		sfp_priv->parent = SOND_FILE_PART(g_object_ref(parent));
 
 	//Und ggf. im Elternobekt notieren
-	if (arr_opened_files) //Array von geöffneten Dateien im Filesystem
-		g_ptr_array_add(arr_opened_files, sfp);
+	arr_opened_files = sond_file_part_get_arr_opened_files(parent);
+	g_ptr_array_add(arr_opened_files, sfp);
 
 	return sfp;
 }
@@ -154,6 +137,30 @@ static gint sond_file_part_test_for_children(SondFilePart* sfp, GError** error) 
 	return 0;
 }
 
+SondFilePart* sond_file_part_is_open(SondFilePart* sfp, const gchar* path) {
+	GPtrArray *arr_opened_files = NULL;
+
+	if (!sfp)
+		arr_opened_files = SOND_FILE_PART_CLASS(g_type_class_peek(
+				SOND_TYPE_FILE_PART))->arr_opened_files;
+	else {
+		SondFilePartPrivate* sfp_priv = sond_file_part_get_instance_private(sfp);
+		arr_opened_files = sfp_priv->arr_opened_files;
+	}
+
+	if (arr_opened_files)
+		//suchen, ob schon geöffnet
+		for (guint i = 0; i < arr_opened_files->len; i++) {
+			SondFilePart *sfp_tmp = g_ptr_array_index(arr_opened_files, i);
+			//bereits geöffnet
+			if (g_strcmp0(sond_file_part_get_path(sfp_tmp), path) == 0) {
+				return g_object_ref(sfp_tmp); //ref zurückgeben
+			}
+		}
+
+	return NULL;
+}
+
 SondFilePart* sond_file_part_create_from_mime_type(gchar const* path,
 		SondFilePart* sfp_parent, gchar const* mime_type) {
 	SondFilePart* sfp_child = NULL;
@@ -168,7 +175,7 @@ SondFilePart* sond_file_part_create_from_mime_type(gchar const* path,
 	else
 		type = SOND_TYPE_FILE_PART_LEAF;
 
-	sfp_child = sond_file_part_create(type, path, sfp_parent);
+	sfp_child = sond_file_part_do_create(type, path, sfp_parent);
 
 	//Nachbehandlung
 	//häßlich, aber geht nicht in sond_file_part_..._init,
@@ -189,9 +196,43 @@ SondFilePart* sond_file_part_create_from_mime_type(gchar const* path,
 	return sfp_child;
 }
 
+static GBytes* sond_file_part_read_bytes_internal(SondFilePart* sfp_parent,
+		gchar const* path, gssize max_len, GError** error);
+
+SondFilePart* sond_file_part_create(SondFilePart* sfp_parent, const gchar* path,
+		GError** error) {
+	SondFilePart* sfp = NULL;
+	gchar* content_type = NULL;
+
+
+	sfp = sond_file_part_is_open(sfp_parent, path);
+	if (sfp)
+		return sfp;
+
+	GBytes* bytes = sond_file_part_read_bytes_internal(sfp_parent, path, 2048, error);
+	if (!bytes)
+		return NULL;
+
+	gsize len = 0;
+	gconstpointer data = g_bytes_get_data(bytes, &len);
+	if (len > 0)
+		content_type = mime_guess_content_type(data, len, error);
+	g_bytes_unref(bytes);
+	if (!content_type) {
+		if (len > 0) /* mime_guess_content_type hat Fehler gesetzt */
+			ERROR_Z_VAL(NULL)
+		content_type = g_strdup("application/octet-stream");
+	}
+
+	sfp = sond_file_part_create_from_mime_type(path, sfp_parent, content_type);
+	g_free(content_type);
+
+	return sfp;
+}
+
 SondFilePart* sond_file_part_create_leaf(gchar const* path,
 		SondFilePart* parent, gchar const* mime_type) {
-	SondFilePart* sfp = sond_file_part_create(SOND_TYPE_FILE_PART_LEAF, path, parent);
+	SondFilePart* sfp = sond_file_part_do_create(SOND_TYPE_FILE_PART_LEAF, path, parent);
 	sond_file_part_leaf_set_mime_type(SOND_FILE_PART_LEAF(sfp),
 			mime_type ? mime_type : "application/octet-stream");
 	return sfp;
@@ -537,19 +578,6 @@ static GBytes* sond_file_part_read_bytes_internal(SondFilePart* sfp_parent,
 	return NULL;
 }
 
-static gssize read_header_bytes(SondFilePart* sfp_parent, gchar const* path,
-		guchar buf[2048], GError** error) {
-	GBytes* bytes = sond_file_part_read_bytes_internal(sfp_parent, path, 2048, error);
-	if (!bytes)
-		return -1;
-	gsize len = 0;
-	gconstpointer data = g_bytes_get_data(bytes, &len);
-	if (len > 0)
-		memcpy(buf, data, len);
-	g_bytes_unref(bytes);
-	return (gssize) len;
-}
-
 SondFilePart* sond_file_part_from_filepart(gchar const* filepart, GError** error) {
 	g_autoptr(SondFilePart) sfp = NULL;
 	gchar** v_string = NULL;
@@ -558,29 +586,14 @@ SondFilePart* sond_file_part_from_filepart(gchar const* filepart, GError** error
 	v_string = g_strsplit(filepart, "//", -1);
 
 	while (v_string[zaehler]) {
-		guchar buf[2048];
-		gssize n = 0;
-		gchar* content_type = NULL;
 		SondFilePart* sfp_child = NULL;
 
-		n = read_header_bytes(sfp, v_string[zaehler], buf, error);
-		if (n < 0) {
+		sfp_child = sond_file_part_create(sfp, v_string[zaehler], error);
+		if (!sfp_child) {
 			g_strfreev(v_string);
+
 			ERROR_Z_VAL(NULL)
 		}
-
-		if (n > 0)
-			content_type = mime_guess_content_type(buf, (gsize)n, error);
-		if (!content_type) {
-			if (n > 0) { /* mime_guess_content_type hat Fehler gesetzt */
-				g_strfreev(v_string);
-				ERROR_Z_VAL(NULL)
-			}
-			content_type = g_strdup("application/octet-stream");
-		}
-
-		sfp_child = sond_file_part_create_from_mime_type(v_string[zaehler], sfp, content_type);
-		g_free(content_type);
 
 		sfp = sfp_child;
 		zaehler++;
@@ -1549,8 +1562,6 @@ static gint load_embedded_files(fz_context* ctx, pdf_obj* names, pdf_obj* key,
 		pdf_obj* val, gpointer data, GError** error) {
 	pdf_obj* EF_F = NULL;
 	gchar const* path_embedded = NULL;
-	fz_stream* stream = NULL;
-	gchar* content_type = NULL;
 	SondFilePart* sfp_embedded_file = NULL;
 	Load* load = (Load*) data;
 
@@ -1558,43 +1569,10 @@ static gint load_embedded_files(fz_context* ctx, pdf_obj* names, pdf_obj* key,
 	if (!EF_F)
 		ERROR_Z
 
-	fz_try(ctx)
-		stream = pdf_open_stream(ctx, EF_F);
-	fz_catch(ctx) {
-		if (error)
-			*error = g_error_new(g_quark_from_static_string("mupdf"),
-					fz_caught(ctx), "%s\n%s", __func__,
-					fz_caught_message(ctx));
-
-		return -1;
-	}
-
-	{
-		guchar header[2048];
-		gssize n = -1;
-
-		fz_try(ctx)
-			n = (gssize) fz_read(ctx, stream, header, sizeof(header));
-		fz_always(ctx)
-			fz_drop_stream(ctx, stream);
-		fz_catch(ctx) {
-			if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
-					fz_caught(ctx), "%s\n%s", __func__, fz_caught_message(ctx));
-			return -1;
-		}
-
-		if (n > 0)
-			content_type = mime_guess_content_type(header, (gsize) n, error);
-		if (!content_type) {
-			if (n > 0)
-				ERROR_Z
-			content_type = g_strdup("application/octet-stream");
-		}
-	}
-
-	sfp_embedded_file = sond_file_part_create_from_mime_type(
-			path_embedded, SOND_FILE_PART(load->sfp_pdf), content_type);
-	g_free(content_type);
+	sfp_embedded_file = sond_file_part_create(SOND_FILE_PART(load->sfp_pdf),
+			path_embedded, error);
+	if (!sfp_embedded_file)
+		ERROR_Z
 
 	g_ptr_array_add(load->arr_embedded_files, sfp_embedded_file);
 

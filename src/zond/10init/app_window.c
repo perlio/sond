@@ -305,6 +305,17 @@ static gboolean cb_treeview_key_press(GtkWidget *treeview, guint keyval,
     return FALSE;
 }
 
+#if GTK_MAJOR_VERSION < 4
+static gboolean cb_treeview_key_press_gtk3(GtkWidget *treeview,
+                                           GdkEventKey *event,
+                                           gpointer data) {
+    if (GPOINTER_TO_INT(g_object_get_data(G_OBJECT(treeview), "editing")))
+        return FALSE;
+    return cb_treeview_key_press(treeview, event->keyval,
+                                 (GdkModifierType) event->state, data);
+}
+#endif
+
 /* =============================================================================
  * CALLBACK-FUNKTIONEN - SUCHE
  * ========================================================================== */
@@ -358,11 +369,9 @@ static void init_treeviews(Projekt *zond) {
     zond->treeview[BAUM_AUSWERTUNG] = SOND_TREEVIEW(
         zond_treeview_new(zond, (gint) BAUM_AUSWERTUNG));
 
-    // Nach dem Erstellen der TreeViews in init_treeviews:
     gtk_widget_set_hexpand(GTK_WIDGET(zond->treeview[BAUM_INHALT]), FALSE);
     gtk_widget_set_hexpand(GTK_WIDGET(zond->treeview[BAUM_AUSWERTUNG]), FALSE);
 
-    // Für jeden Baum: Selection holen und Callbacks verbinden
     for (Baum baum = BAUM_FS; baum < NUM_BAUM; baum++) {
         zond->selection[baum] = gtk_tree_view_get_selection(
             GTK_TREE_VIEW(zond->treeview[baum]));
@@ -371,6 +380,21 @@ static void init_treeviews(Projekt *zond) {
                         G_CALLBACK(cb_treeview_focus_in), zond);
         g_signal_connect(zond->treeview[baum], "focus-out-event",
                         G_CALLBACK(cb_treeview_focus_out), zond);
+
+        /* Key-Handler registrieren und Controller am Widget speichern
+         * damit sond_treeview.c ihn beim Editieren an/abschalten kann */
+#if GTK_MAJOR_VERSION >= 4
+        GtkEventController *key_ctrl = gtk_event_controller_key_new();
+        g_signal_connect(key_ctrl, "key-pressed",
+                        G_CALLBACK(cb_treeview_key_press), zond);
+        gtk_widget_add_controller(GTK_WIDGET(zond->treeview[baum]),
+                        GTK_EVENT_CONTROLLER(key_ctrl));
+        g_object_set_data_full(G_OBJECT(zond->treeview[baum]),
+                        "key-controller", key_ctrl, g_object_unref);
+#else
+        g_signal_connect(zond->treeview[baum], "key-press-event",
+                        G_CALLBACK(cb_treeview_key_press_gtk3), zond);
+#endif
     }
 }
 
@@ -535,7 +559,6 @@ static void init_statusbar(Projekt *zond, GtkWidget *vbox) {
  */
 void init_app_window(Projekt *zond) {
     GtkWidget *vbox = NULL;
-    SondTreeviewClass *stv_class = NULL;
 
     // Hauptfenster erstellen
     zond->app_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
@@ -553,11 +576,6 @@ void init_app_window(Projekt *zond) {
     zond->hpaned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
     gtk_paned_set_position(GTK_PANED(zond->hpaned), PANED_LEFT_WIDTH);
     gtk_box_pack_start(GTK_BOX(vbox), zond->hpaned, TRUE, TRUE, 0);
-
-    // TreeView-Klasse konfigurieren (für Key-Press-Callback)
-    stv_class = g_type_class_ref(SOND_TYPE_TREEVIEW);
-    stv_class->callback_key_press_event = cb_treeview_key_press;
-    stv_class->callback_key_press_event_func_data = zond;
 
     // TreeViews initialisieren
     init_treeviews(zond);

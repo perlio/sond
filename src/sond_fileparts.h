@@ -45,6 +45,11 @@ struct _SondFilePartClass {
 	GPtrArray* arr_opened_files;
 };
 
+SondFilePart* sond_file_part_is_open(SondFilePart* sfp, const gchar* path);
+
+SondFilePart* sond_file_part_create(SondFilePart* sfp_parent, const gchar* path,
+		GError** error);
+
 SondFilePart* sond_file_part_create_from_mime_type(gchar const* path,
 		SondFilePart*, gchar const*);
 

@@ -2433,36 +2433,123 @@ static gint zond_treeview_open_path(Projekt *zond, GtkTreeView *tree_view,
 	return 0;
 }
 
-static void zond_treeview_row_activated(GtkWidget *ztv, GtkTreePath *tp,
-		GtkTreeViewColumn *tvc, gpointer user_data) {
+static gint zond_treeview_open_auszug(Projekt* zond, GtkTreeIter* iter,
+		GError** error) {
+
+	return 0;
+}
+
+static gint zond_treeview_open_node_clicked(Projekt *zond, GtkTreeIter *iter,
+		gint n_clicks, GError **error) {
 	gint rc = 0;
-	GError *error = NULL;
 
+	/* n_clicks wird hier noch nicht ausgewertet - Platzhalter fuer kuenftige
+	 * Unterscheidung zwischen Doppel- und Dreifachklick */
+	(void) n_clicks;
+
+	if (n_clicks == 2)
+		rc = zond_treeview_open_node(zond, iter, FALSE, error);
+	else if (n_clicks == 3)
+		rc = zond_treeview_open_auszug(zond, iter, error);
+	if (rc)
+		ERROR_Z
+
+	return 0;
+}
+
+#if GTK_MAJOR_VERSION >= 4
+
+static void zond_treeview_gesture_clicked(GtkGestureClick *gesture,
+		gint n_press, gdouble x, gdouble y, gpointer user_data) {
 	Projekt *zond = (Projekt*) user_data;
+	GtkTreeView *tree_view = GTK_TREE_VIEW(
+			gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(gesture)));
+	GtkTreePath *path = NULL;
+	GtkTreeIter iter = { 0 };
+	GError *error = NULL;
+	gint rc = 0;
 
-	rc = zond_treeview_open_path(zond, GTK_TREE_VIEW(ztv), tp, FALSE, &error);
+	if (n_press < 2)
+		return;
+	if (gtk_gesture_single_get_current_button(
+			GTK_GESTURE_SINGLE(gesture)) != GDK_BUTTON_PRIMARY)
+		return;
+
+	if (!gtk_tree_view_get_path_at_pos(tree_view, (gint)x, (gint)y,
+			&path, NULL, NULL, NULL))
+		return;
+
+	gtk_tree_model_get_iter(gtk_tree_view_get_model(tree_view), &iter, path);
+	gtk_tree_path_free(path);
+
+	rc = zond_treeview_open_node_clicked(zond, &iter, n_press, &error);
 	if (rc) {
-		display_message(zond->app_window, "Fehler - in ", __func__, "\n\n",
+		display_message(zond->app_window, "Fehler beim Öffnen\n\n",
 				error->message, NULL);
 		g_error_free(error);
 	}
 
-	return;
+	/* row-activated unterdruecken damit keine Doppelverarbeitung */
+	gtk_gesture_set_state(GTK_GESTURE(gesture), GTK_EVENT_SEQUENCE_CLAIMED);
 }
+
+#else /* GTK3 */
+
+static gboolean zond_treeview_button_press(GtkWidget *widget,
+		GdkEventButton *event, gpointer user_data) {
+	Projekt *zond = (Projekt*) user_data;
+	GtkTreePath *path = NULL;
+	GtkTreeIter iter = { 0 };
+	GError *error = NULL;
+	gint rc = 0;
+	gint n_clicks = 0;
+
+	if (event->button != GDK_BUTTON_PRIMARY)
+		return FALSE;
+
+	if (event->type == GDK_2BUTTON_PRESS)      n_clicks = 2;
+	else if (event->type == GDK_3BUTTON_PRESS) n_clicks = 3;
+	else
+		return FALSE;
+
+	if (!gtk_tree_view_get_path_at_pos(GTK_TREE_VIEW(widget),
+			(gint)event->x, (gint)event->y, &path, NULL, NULL, NULL))
+		return FALSE;
+
+	gtk_tree_model_get_iter(
+			gtk_tree_view_get_model(GTK_TREE_VIEW(widget)), &iter, path);
+	gtk_tree_path_free(path);
+
+	rc = zond_treeview_open_node_clicked(zond, &iter, n_clicks, &error);
+	if (rc) {
+		display_message(zond->app_window, "Fehler beim Öffnen\n\n",
+				error->message, NULL);
+		g_error_free(error);
+	}
+
+	/* TRUE: row-activated unterdruecken */
+	return TRUE;
+}
+
+#endif /* GTK_MAJOR_VERSION */
 
 static void zond_treeview_datei_oeffnen_activate(GtkMenuItem *item,
 		gpointer user_data) {
 	GtkTreePath *path = NULL;
+	GError* error = NULL;
+	gint rc = 0;
 
 	Projekt *zond = (Projekt*) user_data;
 
 	gtk_tree_view_get_cursor(GTK_TREE_VIEW(zond->treeview[zond->baum_active]),
 			&path, NULL);
-
-	g_signal_emit_by_name(zond->treeview[zond->baum_active], "row-activated",
-			path, NULL);
-
+	rc = zond_treeview_open_path(zond, GTK_TREE_VIEW(zond->treeview[zond->baum_active]),
+			path, FALSE, &error);
 	gtk_tree_path_free(path);
+	if (rc) {
+		display_message(zond->app_window, "%s", error->message);
+		g_error_free(error);
+	}
 
 	return;
 }
@@ -2746,10 +2833,24 @@ zond_treeview_new(Projekt *zond, gint root_node_id) {
 
 	zond_treeview_init_contextmenu(ztv);
 
-	// Doppelklick = angebundene Datei anzeigen
-	g_signal_connect(ztv, "row-activated",
-			G_CALLBACK(zond_treeview_row_activated),
-			(gpointer ) ztv_priv->zond);
+	/* Doppel-/Dreifachklick = angebundene Datei anzeigen */
+#if GTK_MAJOR_VERSION >= 4
+	{
+		GtkGesture *gesture = gtk_gesture_click_new();
+		gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(gesture),
+				GDK_BUTTON_PRIMARY);
+		g_signal_connect(gesture, "pressed",
+				G_CALLBACK(zond_treeview_gesture_clicked),
+				(gpointer) ztv_priv->zond);
+		gtk_widget_add_controller(GTK_WIDGET(ztv),
+				GTK_EVENT_CONTROLLER(gesture));
+	}
+#else
+	g_signal_connect(ztv, "button-press-event",
+			G_CALLBACK(zond_treeview_button_press),
+			(gpointer) ztv_priv->zond);
+#endif
+
 	//Zeile expandiert
 	g_signal_connect(ztv, "row-expanded",
 			G_CALLBACK(zond_treeview_row_expanded), zond);
