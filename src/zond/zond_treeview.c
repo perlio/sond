@@ -2445,8 +2445,7 @@ static gint zond_treeview_open_node_clicked(Projekt *zond, GtkTreeIter *iter,
 
 	/* n_clicks wird hier noch nicht ausgewertet - Platzhalter fuer kuenftige
 	 * Unterscheidung zwischen Doppel- und Dreifachklick */
-	(void) n_clicks;
-
+	LOG_INFO("%d", n_clicks);
 	if (n_clicks == 2)
 		rc = zond_treeview_open_node(zond, iter, FALSE, error);
 	else if (n_clicks == 3)
@@ -2482,14 +2481,23 @@ static void zond_treeview_gesture_clicked(GtkGestureClick *gesture,
 	gtk_tree_model_get_iter(gtk_tree_view_get_model(tree_view), &iter, path);
 	gtk_tree_path_free(path);
 
-	rc = zond_treeview_open_node_clicked(zond, &iter, n_press, &error);
-	if (rc) {
-		display_message(zond->app_window, "Fehler beim Öffnen\n\n",
-				error->message, NULL);
-		g_error_free(error);
+	if (n_press == 3) {
+		rc = zond_treeview_open_auszug(zond, &iter, &error);
+		if (rc) {
+			display_message(zond->app_window,
+					"Fehler beim Öffnen des Auszugs\n\n",
+					error->message, NULL);
+			g_error_free(error);
+		}
+	} else {
+		rc = zond_treeview_open_node_clicked(zond, &iter, n_press, &error);
+		if (rc) {
+			display_message(zond->app_window, "Fehler beim Öffnen\n\n",
+					error->message, NULL);
+			g_error_free(error);
+		}
 	}
 
-	/* row-activated unterdruecken damit keine Doppelverarbeitung */
 	gtk_gesture_set_state(GTK_GESTURE(gesture), GTK_EVENT_SEQUENCE_CLAIMED);
 }
 
@@ -2507,8 +2515,7 @@ static gboolean zond_treeview_button_press(GtkWidget *widget,
 	if (event->button != GDK_BUTTON_PRIMARY)
 		return FALSE;
 
-	if (event->type == GDK_2BUTTON_PRESS)      n_clicks = 2;
-	else if (event->type == GDK_3BUTTON_PRESS) n_clicks = 3;
+	if (event->type == GDK_2BUTTON_PRESS) n_clicks = 2;
 	else
 		return FALSE;
 
@@ -2623,6 +2630,27 @@ static void zond_treeview_icon_activate(GtkMenuItem *item, gpointer user_data) {
 	if (rc == -1) {
 		display_message(zond->app_window, "Icon ändern fehlgeschlagen\n\n",
 				error->message, NULL);
+		g_error_free(error);
+	}
+
+	return;
+}
+
+static void zond_treeview_auszug_oeffnen_activate(GtkMenuItem *item,
+		gpointer user_data) {
+	GtkTreeIter iter = { 0 };
+	GError *error = NULL;
+	gint rc = 0;
+
+	Projekt *zond = (Projekt*) user_data;
+
+	if (!sond_treeview_get_cursor(zond->treeview[zond->baum_active], &iter))
+		return;
+
+	rc = zond_treeview_open_auszug(zond, &iter, &error);
+	if (rc) {
+		display_message(zond->app_window,
+				"Fehler beim Öffnen des Auszugs\n\n", error->message, NULL);
 		g_error_free(error);
 	}
 
@@ -2811,6 +2839,14 @@ static void zond_treeview_init_contextmenu(ZondTreeview *ztv) {
 			G_CALLBACK(zond_treeview_datei_oeffnen_mit_activate),
 			(gpointer ) zond);
 	gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu), item_datei_oeffnen_mit);
+
+	//Auszug öffnen
+	GtkWidget *item_auszug_oeffnen = gtk_menu_item_new_with_label("Auszug öffnen");
+	g_object_set_data(G_OBJECT(contextmenu), "item-auszug-oeffnen",
+			item_auszug_oeffnen);
+	g_signal_connect(item_auszug_oeffnen, "activate",
+			G_CALLBACK(zond_treeview_auszug_oeffnen_activate), (gpointer) zond);
+	gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu), item_auszug_oeffnen);
 
 	gtk_widget_show_all(contextmenu);
 
