@@ -333,7 +333,6 @@ static void zond_treeviewfm_after(SondTreeviewFM* stvfm,
 
 		rc = dbase_zond_commit(priv->zond->dbase_zond, &error_int);
 		if (rc) {
-			//ToDo: ausführliche Erklärung; verschobene Dateien loggen
 			if (priv->zond->wctx && priv->zond->wctx->index_ctx)
 				sqlite3_exec(priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
 			exit(EXIT_FAILURE);
@@ -413,23 +412,17 @@ static gint zond_treeviewfm_text_edited(SondTreeviewFM *stvfm,
 	return 0;
 }
 
-/* -------------------------------------------------------------------------
- * Dateisuche: row-activated (Basisklassen-Override)
- * ---------------------------------------------------------------------- */
-
 static void zond_treeviewfm_results_row_activated(GtkTreeView *treeview,
 		GtkTreePath *tree_path, GtkTreeViewColumn *col, gpointer data) {
 	ZondTreeviewFM *ztvfm = (ZondTreeviewFM*) data;
 	ZondTreeviewFMPrivate *ztvfm_priv = zond_treeviewfm_get_instance_private(
 			ztvfm);
 
-	//wenn FS nicht angezeigt: erst einschalten, damit man was sieht
 	if (!gtk_toggle_button_get_active(
 			GTK_TOGGLE_BUTTON(ztvfm_priv->zond->fs_button)))
 		gtk_toggle_button_set_active(
 				GTK_TOGGLE_BUTTON(ztvfm_priv->zond->fs_button), TRUE);
 
-	//chain-up
 	SOND_TREEVIEWFM_CLASS(zond_treeviewfm_parent_class)->results_row_activated(
 			treeview, tree_path, col, data);
 
@@ -469,7 +462,6 @@ gint zond_treeviewfm_insert_section(ZondTreeviewFM *ztvfm, gint node_id,
 	anbindung_parse_file_section(section, &anbindung);
 	g_free(section);
 
-	//insert dummy
 	zond_dbase_get_first_child(ztvfm_priv->zond->dbase_zond->zond_dbase_work,
 			node_id, &first_grandchild, error);
 	if (rc)
@@ -517,7 +509,7 @@ static gint zond_treeviewfm_open_stvfm_item(SondTVFMItem* stvfm_item,
 		if (rc)
 			ERROR_Z
 	}
-	else { //chain-up, falls nicht bearbeitet
+	else {
 		gint rc = 0;
 
 		rc = SOND_TREEVIEWFM_CLASS(zond_treeviewfm_parent_class)->
@@ -589,7 +581,7 @@ static gint zond_treeviewfm_load_sections(SondTVFMItem* stvfm_item,
 	if (rc)
 		ERROR_Z
 
-	if (section && ID == 0) { //wenn section im Baum, dann muß sie auch in db sein
+	if (section && ID == 0) {
 		if (error) *error = g_error_new(ZOND_ERROR, 0,
 				"%s\nAbschnitt nicht gefunden", __func__);
 
@@ -601,7 +593,7 @@ static gint zond_treeviewfm_load_sections(SondTVFMItem* stvfm_item,
 		ERROR_Z
 
 	if (!arr_children) {
-		if (child) return 1; //hat sections
+		if (child) return 1;
 		else return 0;
 	}
 
@@ -708,6 +700,27 @@ static void zond_treeviewfm_class_init(ZondTreeviewFMClass *klass) {
 	SOND_TREEVIEWFM_CLASS(klass)->has_sections = zond_treeviewfm_has_sections;
 	SOND_TREEVIEWFM_CLASS(klass)->delete_section = zond_treeviewfm_delete_section;
 
+	/* Zond-spezifische GMenu-Sections einmalig fuer diese Klasse aufbauen */
+	SOND_TREEVIEW_CLASS(klass)->gmenu = g_menu_new();
+	sond_treeviewfm_add_base_menu(SOND_TREEVIEW_CLASS(klass)->gmenu);
+
+	// dann die ZTV-FM-Sections
+	GMenu *gmenu = SOND_TREEVIEW_CLASS(klass)->gmenu;
+
+	GMenu *sec_jump = g_menu_new();
+	g_menu_append(sec_jump, "Zur Anbindung springen", "stv.ztv-fm-jump");
+	g_menu_append_section(gmenu, NULL, G_MENU_MODEL(sec_jump));
+	g_object_unref(sec_jump);
+
+	GMenu *sec_idx = g_menu_new();
+	GMenu *sub_idx = g_menu_new();
+	g_menu_append(sub_idx, "Gesamtes Projektverzeichnis", "stv.ztv-fm-indexsuche");
+	g_menu_append(sub_idx, "Ausgew\u00e4hlte Punkte",    "stv.ztv-fm-indexsuche-sel");
+	g_menu_append_submenu(sec_idx, "Index durchsuchen", G_MENU_MODEL(sub_idx));
+	g_object_unref(sub_idx);
+	g_menu_append_section(gmenu, NULL, G_MENU_MODEL(sec_idx));
+	g_object_unref(sec_idx);
+
 	return;
 }
 
@@ -760,9 +773,48 @@ static void zond_treeviewfm_indexsuche_auswahl_activate(GtkMenuItem *item,
 	Projekt *zond = (Projekt*) data;
 	GHashTable* ht = NULL;
 
-	/* Auswahl im BAUM_FS als Pfad-Liste an Indexsuche übergeben */
 	zond_indexsuche_activate_with_selection(item, ht, zond);
-//			SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), zond);
+}
+
+static void zond_treeviewfm_action_jump(GSimpleAction *a, GVariant *p,
+		gpointer d) {
+	zond_treeviewfm_jump_activate(NULL, d);
+}
+
+static void zond_treeviewfm_action_indexsuche(GSimpleAction *a, GVariant *p,
+		gpointer d) {
+	zond_indexsuche_activate(NULL, d);
+}
+
+static void zond_treeviewfm_action_indexsuche_auswahl(GSimpleAction *a,
+		GVariant *p, gpointer d) {
+	zond_treeviewfm_indexsuche_auswahl_activate(NULL, d);
+}
+
+static void zond_treeviewfm_init_contextmenu(ZondTreeviewFM *ztvfm,
+		Projekt *zond) {
+	/* Nur GActions registrieren — GMenu-Sections wurden bereits in
+	 * zond_treeviewfm_class_init einmalig aufgebaut. */
+	GSimpleActionGroup *ag = sond_treeview_get_action_group(
+			SOND_TREEVIEW(ztvfm));
+
+	GSimpleAction *act_jump = g_simple_action_new("ztv-fm-jump", NULL);
+	g_signal_connect(act_jump, "activate",
+			G_CALLBACK(zond_treeviewfm_action_jump), zond);
+	g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act_jump));
+	g_object_unref(act_jump);
+
+	GSimpleAction *act_idx = g_simple_action_new("ztv-fm-indexsuche", NULL);
+	g_signal_connect(act_idx, "activate",
+			G_CALLBACK(zond_treeviewfm_action_indexsuche), zond);
+	g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act_idx));
+	g_object_unref(act_idx);
+
+	GSimpleAction *act_idx_sel = g_simple_action_new("ztv-fm-indexsuche-sel", NULL);
+	g_signal_connect(act_idx_sel, "activate",
+			G_CALLBACK(zond_treeviewfm_action_indexsuche_auswahl), zond);
+	g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act_idx_sel));
+	g_object_unref(act_idx_sel);
 }
 
 ZondTreeviewFM* zond_treeviewfm_new(Projekt* zond) {
@@ -774,49 +826,14 @@ ZondTreeviewFM* zond_treeviewfm_new(Projekt* zond) {
 
 	ztvfm_priv->zond = zond;
 
+	zond_treeviewfm_init_contextmenu(ztvfm, zond);
+
 	g_signal_connect(ztvfm, "before-delete",
 			G_CALLBACK(zond_treeviewfm_before_delete), NULL);
 	g_signal_connect(ztvfm, "before-move",
 			G_CALLBACK(zond_treeviewfm_before_move), NULL);
 	g_signal_connect(ztvfm, "after",
 			G_CALLBACK(zond_treeviewfm_after), NULL);
-
-	//Ergänze contextmenu
-	GtkWidget* contextmenu = sond_treeview_get_contextmenu(SOND_TREEVIEW(ztvfm));
-
-	//Trennblatt
-	GtkWidget *item_separator_0 = gtk_separator_menu_item_new();
-	gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu), item_separator_0);
-
-	//Zur Anbindung springen
-	GtkWidget *item_jump = gtk_menu_item_new_with_label(
-			"Zur Anbindung springen");
-	gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu), item_jump);
-
-	//Index durchsuchen
-	GtkWidget *item_indexsuche = gtk_menu_item_new_with_label("Index durchsuchen");
-	GtkWidget *menu_indexsuche = gtk_menu_new();
-
-	GtkWidget *item_indexsuche_gesamt = gtk_menu_item_new_with_label(
-			"Gesamtes Projektverzeichnis");
-	g_signal_connect(item_indexsuche_gesamt, "activate",
-			G_CALLBACK(zond_indexsuche_activate), (gpointer) zond);
-	gtk_menu_shell_append(GTK_MENU_SHELL(menu_indexsuche), item_indexsuche_gesamt);
-
-	GtkWidget *item_indexsuche_auswahl = gtk_menu_item_new_with_label(
-			"Ausgewählte Punkte");
-	g_signal_connect(item_indexsuche_auswahl, "activate",
-			G_CALLBACK(zond_treeviewfm_indexsuche_auswahl_activate), (gpointer) zond);
-	gtk_menu_shell_append(GTK_MENU_SHELL(menu_indexsuche), item_indexsuche_auswahl);
-
-	gtk_menu_item_set_submenu(GTK_MENU_ITEM(item_indexsuche), menu_indexsuche);
-	gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu), item_indexsuche);
-
-	gtk_widget_show_all(contextmenu);
-
-	g_signal_connect(item_jump, "activate",
-			G_CALLBACK(zond_treeviewfm_jump_activate),
-			(gpointer) zond);
 
 	return ztvfm;
 }
@@ -830,7 +847,7 @@ static gint zond_treeviewfm_find_section(ZondTreeviewFM *ztvfm,
 	if (!gtk_tree_model_iter_children(
 			gtk_tree_view_get_model(GTK_TREE_VIEW(ztvfm)),
 			&iter_child, iter))
-		return 0; //keine Kinder, also kann man hier aufhören
+		return 0;
 
 	gtk_tree_model_get(
 			gtk_tree_view_get_model(GTK_TREE_VIEW(ztvfm)),
@@ -838,7 +855,7 @@ static gint zond_treeviewfm_find_section(ZondTreeviewFM *ztvfm,
 
 	if (!stvfm_item) //dummy
 	{
-		if (!open) //wenn's nicht geöffnet werden soll, sind wir hier fertig
+		if (!open)
 			return 0;
 
 		sond_treeview_expand_row(SOND_TREEVIEW(ztvfm), iter);
@@ -847,7 +864,7 @@ static gint zond_treeviewfm_find_section(ZondTreeviewFM *ztvfm,
 				gtk_tree_view_get_model(GTK_TREE_VIEW(ztvfm)), &iter_child, iter);
 	}
 	else
-		g_object_unref(stvfm_item); //häßlich
+		g_object_unref(stvfm_item);
 
 	do {
 		gchar const* section_child = NULL;
@@ -869,7 +886,7 @@ static gint zond_treeviewfm_find_section(ZondTreeviewFM *ztvfm,
 			if (rc == -1)
 				ERROR_Z
 
-			return rc; //wenn hier nicht gefunden, dann auch nirgendwo anders
+			return rc;
 		}
 		else if (anbindung_1_gleich_2(anbindung, anbindung_child)) {
 			if(iter_res)
@@ -880,7 +897,7 @@ static gint zond_treeviewfm_find_section(ZondTreeviewFM *ztvfm,
 	} while (gtk_tree_model_iter_next(
 			gtk_tree_view_get_model(GTK_TREE_VIEW(ztvfm)), &iter_child));
 
-	return 0; //nichts gefunden
+	return 0;
 }
 
 gint zond_treeviewfm_section_visible(ZondTreeviewFM *ztvfm,
@@ -891,7 +908,7 @@ gint zond_treeviewfm_section_visible(ZondTreeviewFM *ztvfm,
 	GtkTreeIter iter_intern = { 0 };
 
 	if (!open && !visible)
-		return 0; //ergibt einfach keinen Sinn
+		return 0;
 
 	rc = sond_treeviewfm_file_part_visible(SOND_TREEVIEWFM(ztvfm), NULL, file_part, open,
 			&iter_intern, error);
@@ -900,7 +917,7 @@ gint zond_treeviewfm_section_visible(ZondTreeviewFM *ztvfm,
 	else if (rc == 0)
 		return 0;
 
-	if (section) { //section muß gesucht werden
+	if (section) {
 		gint rc = 0;
 		Anbindung anbindung = { 0 };
 		GtkTreeIter iter_very_intern = { 0 };
@@ -914,12 +931,11 @@ gint zond_treeviewfm_section_visible(ZondTreeviewFM *ztvfm,
 			if (visible)
 				*visible = FALSE;
 
-			return 0; //nix gefunden
+			return 0;
 		}
 		iter_intern = iter_very_intern;
 	}
 
-	//prüfen, ob Kinder, und wenn nur dummy
 	if (children) {
 		if (gtk_tree_model_iter_has_child(
 				gtk_tree_view_get_model(GTK_TREE_VIEW(ztvfm)), &iter_intern)) {
@@ -974,9 +990,7 @@ static void zond_treeviewfm_walk_tree(GtkTreeModel *model, gint stamp,
 	gtk_tree_model_row_inserted(model, path, &iter);
 
 	if (node->parent->parent != NULL) {
-		/* child_toggled */
-		if (node->prev == NULL && node->next == NULL) //keineGeschwister
-		{
+		if (node->prev == NULL && node->next == NULL) {
 			GtkTreeIter new_iter = { 0 };
 			gtk_tree_path_up(path);
 			new_iter.stamp = stamp;
@@ -986,7 +1000,6 @@ static void zond_treeviewfm_walk_tree(GtkTreeModel *model, gint stamp,
 	}
 	gtk_tree_path_free(path);
 
-	//Kinder durchgehen
 	child = node->children;
 	while (child) {
 		zond_treeviewfm_walk_tree(model, stamp, child, pos_child);
@@ -1010,17 +1023,12 @@ static void zond_treeviewfm_move_node(GtkTreeModel *model, GtkTreeIter *iter_src
 
 	path = gtk_tree_model_get_path(model, iter_src);
 
-	//node ausklinken
 	g_node_unlink(node_src);
 
-	//und im treeview bekanntgeben
 	gtk_tree_model_row_deleted(model, path);
 
-	if (node_src_parent->parent != NULL) //nicht root?
-	{
-		/* child_toggled */
-		if (node_src_parent->children == NULL) //keineGeschwister
-		{
+	if (node_src_parent->parent != NULL) {
+		if (node_src_parent->children == NULL) {
 			GtkTreeIter new_iter = { 0, };
 			gtk_tree_path_up(path);
 			new_iter.stamp = iter_src->stamp;
@@ -1030,14 +1038,12 @@ static void zond_treeviewfm_move_node(GtkTreeModel *model, GtkTreeIter *iter_src
 	}
 	gtk_tree_path_free(path);
 
-	//jetzt Knoten wieder einfügen
 	if (child) {
 		GNode *node_anchor = NULL;
 
 		if (anchor)
 			node_anchor = anchor->user_data;
-		else //anchor ist root-node
-		{
+		else {
 			GtkTreeIter iter_first = { 0 };
 
 			gtk_tree_model_get_iter_first(model, &iter_first);
@@ -1052,7 +1058,6 @@ static void zond_treeviewfm_move_node(GtkTreeModel *model, GtkTreeIter *iter_src
 				node_src);
 	}
 
-	//im treeview bekannt geben
 	zond_treeviewfm_walk_tree(model, iter_src->stamp, node_src, pos);
 
 	return;

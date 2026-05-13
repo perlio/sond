@@ -159,17 +159,11 @@ void zond_treeview_cursor_changed(ZondTreeview *treeview, gpointer user_data) {
 
 	gtk_label_set_text(zond->label_status, "");
 
-	//neuer Knoten == Extra-Fenster und vorheriger Knoten nicht
-	if (zond->node_id_extra && node_id == zond->node_id_extra
-			&& zond->node_id_act != zond->node_id_extra)
-		gtk_text_view_set_buffer(GTK_TEXT_VIEW(zond->textview),
-				gtk_text_view_get_buffer(GTK_TEXT_VIEW(zond->textview_ii)));
-
     // TextView NUR für BAUM_AUSWERTUNG füllen!
     Baum active_baum = sond_treeview_get_id(SOND_TREEVIEW(treeview));
 
     if (active_baum == BAUM_AUSWERTUNG) {
-        // Nur für BAUM_AUSWERTUNG: Buffer füllen
+        //neuer Knoten == Extra-Fenster und vorheriger Knoten nicht
         if (zond->node_id_extra && node_id == zond->node_id_extra
                 && zond->node_id_act != zond->node_id_extra)
             gtk_text_view_set_buffer(GTK_TEXT_VIEW(zond->textview),
@@ -286,9 +280,11 @@ static void zond_treeview_render_node_text(GtkTreeViewColumn *column,
 			markuptxt = add_string(markuptxt, g_strdup("</span>"));
 		}
 
-		g_object_set(renderer, "markup", markuptxt, NULL); // markup isn't showing and text field is blank due to "text" == NULL
-
+		g_object_set(renderer, "markup", markuptxt, NULL);
 		g_free(markuptxt);
+
+		/* Hintergrund für Links nicht setzen – fertig */
+		return;
 	}
 
 	//Hintergrund icon rot wenn Text in textview
@@ -316,6 +312,55 @@ static void zond_treeview_class_init(ZondTreeviewClass *klass) {
 	SOND_TREEVIEW_CLASS(klass)->render_text_cell =
 			zond_treeview_render_node_text;
 	SOND_TREEVIEW_CLASS(klass)->text_edited = zond_treeview_text_edited;
+
+	SOND_TREEVIEW_CLASS(klass)->gmenu = g_menu_new();
+	sond_treeview_add_base_menu(SOND_TREEVIEW_CLASS(klass)->gmenu);
+
+	GMenu *gmenu = SOND_TREEVIEW_CLASS(klass)->gmenu;
+
+	GMenu *sec_einf = g_menu_new();
+	GMenu *sub_einf = g_menu_new();
+	g_menu_append(sub_einf, "Gleiche Ebene", "stv.ztv-einf-ge");
+	g_menu_append(sub_einf, "Unterebene",    "stv.ztv-einf-up");
+	g_menu_append_submenu(sec_einf, "Punkt einf\u00fcgen", G_MENU_MODEL(sub_einf));
+	g_object_unref(sub_einf);
+	g_menu_prepend_section(gmenu, NULL, G_MENU_MODEL(sec_einf));
+	g_object_unref(sec_einf);
+
+	GMenu *sec_paste = g_menu_new();
+	GMenu *sub_paste = g_menu_new();
+	g_menu_append(sub_paste, "Gleiche Ebene", "stv.ztv-paste-ge");
+	g_menu_append(sub_paste, "Unterebene",    "stv.ztv-paste-up");
+	g_menu_append_submenu(sec_paste, "Einf\u00fcgen", G_MENU_MODEL(sub_paste));
+	g_object_unref(sub_paste);
+	GMenu *sub_paste_link = g_menu_new();
+	g_menu_append(sub_paste_link, "Gleiche Ebene", "stv.ztv-paste-link-ge");
+	g_menu_append(sub_paste_link, "Unterebene",    "stv.ztv-paste-link-up");
+	g_menu_append_submenu(sec_paste, "Als Link einf\u00fcgen", G_MENU_MODEL(sub_paste_link));
+	g_object_unref(sub_paste_link);
+	g_menu_append_section(gmenu, NULL, G_MENU_MODEL(sec_paste));
+	g_object_unref(sec_paste);
+
+	GMenu *sec_edit = g_menu_new();
+	g_menu_append(sec_edit, "L\u00f6schen",            "stv.ztv-loeschen");
+	g_menu_append(sec_edit, "Anbindung entfernen", "stv.ztv-anb-entf");
+	g_menu_append(sec_edit, "Zu Ursprung springen","stv.ztv-jump");
+	g_menu_append_section(gmenu, NULL, G_MENU_MODEL(sec_edit));
+	g_object_unref(sec_edit);
+
+	/* Icon-Submenu: leer, wird bei erster Instanz befuellt */
+	GMenu *sec_icon = g_menu_new();
+	klass->gmenu_icons = g_menu_new();
+	g_menu_append_submenu(sec_icon, "Icon \u00e4ndern", G_MENU_MODEL(klass->gmenu_icons));
+	g_menu_append_section(gmenu, NULL, G_MENU_MODEL(sec_icon));
+	g_object_unref(sec_icon);
+
+	GMenu *sec_oeffnen = g_menu_new();
+	g_menu_append(sec_oeffnen, "\u00d6ffnen",        "stv.ztv-oeffnen");
+	g_menu_append(sec_oeffnen, "\u00d6ffnen mit",    "stv.ztv-oeffnen-mit");
+	g_menu_append(sec_oeffnen, "Auszug \u00f6ffnen", "stv.ztv-auszug");
+	g_menu_append_section(gmenu, NULL, G_MENU_MODEL(sec_oeffnen));
+	g_object_unref(sec_oeffnen);
 
 	return;
 }
@@ -403,11 +448,11 @@ static void zond_treeview_init(ZondTreeview *ztv) {
 			sond_treeview_get_cell_renderer_text(SOND_TREEVIEW(ztv)), "text", 1,
 			NULL);
 
-	// Setup
+	// Tooltip
 	gtk_widget_set_has_tooltip(GTK_WIDGET(ztv), TRUE);
 	g_signal_connect(ztv, "query-tooltip", G_CALLBACK(on_query_tooltip), NULL);
 
-	//Zeile expandiert oder kollabiert
+	// Spaltenbreite nach Expand/Collapse anpassen
 	g_signal_connect(ztv, "row-expanded",
 			G_CALLBACK(gtk_tree_view_columns_autosize), NULL);
 	g_signal_connect(ztv, "row-collapsed",
@@ -577,8 +622,6 @@ static gint zond_treeview_insert_node(Projekt *zond, gboolean child,
 		ERROR_Z
 
 	//Knoten in baum_inhalt einfuegen
-	//success = sond_treeview_get_cursor( zond->treeview[baum], &iter ); - falsch!!!
-
 	tree_store = zond_tree_store_get_tree_store(&iter_anchor);
 	zond_tree_store_insert(tree_store, (anchor_id > 2) ? &iter_anchor : NULL, child,
 			&iter_new);
@@ -593,33 +636,6 @@ static gint zond_treeview_insert_node(Projekt *zond, gboolean child,
 	sond_treeview_set_cursor(zond->treeview[zond->baum_active], &iter_new);
 
 	return 0;
-}
-
-static void zond_treeview_punkt_einfuegen_activate(GtkMenuItem *item,
-		gpointer user_data) {
-	gint rc = 0;
-	gboolean child = FALSE;
-	GError* error = NULL;
-
-	Projekt *zond = (Projekt*) user_data;
-
-	child = (gboolean) GPOINTER_TO_INT(
-			g_object_get_data( G_OBJECT(item), "kind" ));
-
-	rc = zond_treeview_insert_node(zond, child, &error);
-	if (rc == -1) {
-		display_message(zond->app_window, "Punkt einfügen fehlgeschlagen\n\n",
-				error->message, NULL);
-		g_error_free(error);
-	}
-	else if (rc == 1)
-		display_message(zond->app_window, "Punkt darf nicht "
-				"als Unterpunkt von Datei eingefügt weden", NULL);
-	else if (rc == 2)
-		display_message(zond->app_window, "Punkt darf nicht "
-				"als Unterpunkt von Link eingefügt weden", NULL);
-
-	return;
 }
 
 gint zond_treeview_walk_tree(ZondTreeview *ztv, gboolean with_younger_siblings,
@@ -1607,51 +1623,6 @@ static gint zond_treeview_paste_clipboard(Projekt *zond, gboolean child,
 	return 0;
 }
 
-static void zond_treeview_paste_activate(GtkMenuItem *item, gpointer user_data) {
-	gint rc = 0;
-	GError *error= NULL;
-	gboolean child = FALSE;
-
-	Projekt *zond = (Projekt*) user_data;
-
-	child = (gboolean) GPOINTER_TO_INT(
-			g_object_get_data( G_OBJECT(item), "kind" ));
-
-	rc = zond_treeview_paste_clipboard(zond, child, FALSE, &error);
-	if (rc == -1) {
-		display_message(zond->app_window, "Fehler Einfügen Clipboard\n\n",
-				error->message, NULL);
-		g_error_free(error);
-	} else if (rc == 1)
-		display_message(zond->app_window, "Einfügen als "
-				"Unterpunkt einer Datei nicht zulässig", NULL);
-
-	return;
-}
-
-static void zond_treeview_paste_as_link_activate(GtkMenuItem *item,
-		gpointer user_data) {
-	gint rc = 0;
-	GError *error = NULL;
-	gboolean child = FALSE;
-
-	Projekt *zond = (Projekt*) user_data;
-
-	child = (gboolean) GPOINTER_TO_INT(
-			g_object_get_data( G_OBJECT(item), "kind" ));
-
-	rc = zond_treeview_paste_clipboard(zond, child, TRUE, &error);
-	if (rc == -1) {
-		display_message(zond->app_window, "Fehler Einfügen Clipboard\n\n",
-				error->message, NULL);
-		g_error_free(error);
-	} else if (rc == 1)
-		display_message(zond->app_window, "Einfügen als "
-				"Unterpunkt einer Datei nicht zulässig", NULL);
-
-	return;
-}
-
 static gint zond_treeview_selection_loeschen_foreach(SondTreeview *tree_view,
 		GtkTreeIter *iter, gpointer data, GError **error) {
 	gint node_id = 0;
@@ -1831,26 +1802,6 @@ static gint zond_treeview_selection_loeschen_foreach(SondTreeview *tree_view,
 	zond_tree_store_remove(iter);
 
 	return 0;
-}
-
-static void zond_treeview_loeschen_activate(GtkMenuItem *item,
-		gpointer user_data) {
-	gint rc = 0;
-	GError *error = NULL;
-
-	Projekt *zond = (Projekt*) user_data;
-
-	rc = sond_treeview_selection_foreach(zond->treeview[zond->baum_active],
-			zond_treeview_selection_loeschen_foreach, zond, &error);
-	if (rc == -1) {
-		display_message(zond->app_window,
-				"Löschen fehlgeschlagen -\n\nBei Aufruf "
-						"sond_treeviewfm_selection/treeviews_loeschen:\n",
-				error->message, NULL);
-		g_error_free(error);
-	}
-
-	return;
 }
 
 static gint zond_treeview_selection_entfernen_anbindung_foreach(
@@ -2060,28 +2011,6 @@ static gint zond_treeview_selection_entfernen_anbindung_foreach(
 	return 0;
 }
 
-//Funktioniert nur im BAUM_INHALT - Abfrage im cb schließt nur BAUM_FS aus
-static void zond_treeview_anbindung_entfernen_activate(GtkMenuItem *item,
-		gpointer user_data) {
-	gint rc = 0;
-	GError* error = NULL;
-
-	Projekt *zond = (Projekt*) user_data;
-
-	if (zond->baum_active != BAUM_INHALT)
-		return;
-
-	rc = sond_treeview_selection_foreach(zond->treeview[BAUM_INHALT],
-			zond_treeview_selection_entfernen_anbindung_foreach, zond, &error);
-	if (rc) {
-		display_message(zond->app_window,
-				"Löschen von Anbindungen fehlgeschlagen\n\n", error->message, NULL);
-		g_error_free(error);
-	}
-
-	return;
-}
-
 static void zond_treeview_jump_to_iter(Projekt *zond, GtkTreeIter *iter) {
 	Baum baum_target = KEIN_BAUM;
 
@@ -2181,34 +2110,6 @@ static void zond_treeview_jump_to_link_target(Projekt *zond, GtkTreeIter *iter) 
 	return;
 }
 
-static void zond_treeview_jump_activate(GtkMenuItem *item, gpointer user_data) {
-	GtkTreeIter iter = { 0 };
-
-	Projekt *zond = (Projekt*) user_data;
-
-	if (!sond_treeview_get_cursor(zond->treeview[zond->baum_active], &iter))
-		return;
-
-	if (zond_tree_store_is_link(&iter))
-		zond_treeview_jump_to_link_target(zond, &iter);
-	else {
-		gint rc = 0;
-		GError *error = NULL;
-
-		rc = zond_treeview_jump_to_origin(
-				ZOND_TREEVIEW(zond->treeview[zond->baum_active]), &iter, &error);
-		if (rc) {
-			display_message(zond->app_window, "Fehler Sprung zu Herkunft\n\n",
-					error->message, NULL);
-			g_error_free(error);
-
-			return;
-		}
-	}
-
-	return;
-}
-
 gint zond_treeview_oeffnen_internal_viewer(Projekt *zond, SondFilePartPDF* sfp_pdf,
 		Anbindung *anbindung, PdfPos *pos_pdf, GError **error) {
 	PdfPos pos_von = { 0 };
@@ -2220,9 +2121,6 @@ gint zond_treeview_oeffnen_internal_viewer(Projekt *zond, SondFilePartPDF* sfp_p
 	if (zpdfd) {
 		anbindung_aktualisieren(zpdfd, anbindung);
 
-		//Anfangspunkt funktioniert anders, weil pos_pdf aus strikter Umsetzung
-		//von page_doc zu page_pv besteht. Wenn Seiten gelöscht paßt das nicht mehr,
-		//weil die Seiten im zpdfd aber nicht (mehr) arr_pages vorhanden sind.
 		for (guint i = 0; i < pos_pdf->seite; i++) {
 			PdfDocumentPage* pdfp = NULL;
 
@@ -2443,8 +2341,6 @@ static gint zond_treeview_open_node_clicked(Projekt *zond, GtkTreeIter *iter,
 		gint n_clicks, GError **error) {
 	gint rc = 0;
 
-	/* n_clicks wird hier noch nicht ausgewertet - Platzhalter fuer kuenftige
-	 * Unterscheidung zwischen Doppel- und Dreifachklick */
 	LOG_INFO("%d", n_clicks);
 	if (n_clicks == 2)
 		rc = zond_treeview_open_node(zond, iter, FALSE, error);
@@ -2540,51 +2436,6 @@ static gboolean zond_treeview_button_press(GtkWidget *widget,
 
 #endif /* GTK_MAJOR_VERSION */
 
-static void zond_treeview_datei_oeffnen_activate(GtkMenuItem *item,
-		gpointer user_data) {
-	GtkTreePath *path = NULL;
-	GError* error = NULL;
-	gint rc = 0;
-
-	Projekt *zond = (Projekt*) user_data;
-
-	gtk_tree_view_get_cursor(GTK_TREE_VIEW(zond->treeview[zond->baum_active]),
-			&path, NULL);
-	rc = zond_treeview_open_path(zond, GTK_TREE_VIEW(zond->treeview[zond->baum_active]),
-			path, FALSE, &error);
-	gtk_tree_path_free(path);
-	if (rc) {
-		display_message(zond->app_window, "%s", error->message);
-		g_error_free(error);
-	}
-
-	return;
-}
-
-static void zond_treeview_datei_oeffnen_mit_activate(GtkMenuItem *item,
-		gpointer user_data) {
-	GtkTreePath *path = NULL;
-	gint rc = 0;
-	GError *error = NULL;
-
-	Projekt *zond = (Projekt*) user_data;
-
-	gtk_tree_view_get_cursor(GTK_TREE_VIEW(zond->treeview[zond->baum_active]),
-			&path, NULL);
-
-	rc = zond_treeview_open_path(zond,
-			GTK_TREE_VIEW(zond->treeview[zond->baum_active]), path, TRUE,
-			&error);
-	gtk_tree_path_free(path);
-	if (rc) {
-		display_message(zond->app_window, "Fehler beim Öffnen Knoten:\n\n",
-				error->message, NULL);
-		g_error_free(error);
-	}
-
-	return;
-}
-
 typedef struct _SSelectionChangeIcon {
 	Projekt *zond;
 	const gchar *icon_name;
@@ -2613,242 +2464,149 @@ static gint zond_treeview_selection_change_icon_foreach(SondTreeview *tree_view,
 	return 0;
 }
 
-static void zond_treeview_icon_activate(GtkMenuItem *item, gpointer user_data) {
-	gint rc = 0;
-	gint icon_id = 0;
-	GError *error = NULL;
-
-	Projekt *zond = (Projekt*) user_data;
-
-	icon_id = GPOINTER_TO_INT(g_object_get_data( G_OBJECT(item), "icon-id" ));
-
-	SSelectionChangeIcon s_selection = { zond, zond->icon[icon_id].icon_name };
-
-	rc = sond_treeview_selection_foreach(zond->treeview[zond->baum_active],
-			zond_treeview_selection_change_icon_foreach,
-			(gpointer) &s_selection, &error);
-	if (rc == -1) {
-		display_message(zond->app_window, "Icon ändern fehlgeschlagen\n\n",
-				error->message, NULL);
-		g_error_free(error);
-	}
-
-	return;
+/* --------------------------------------------------------------------------
+ * GSimpleAction-Wrapper fuer ZondTreeview-Kontextmenu
+ * -------------------------------------------------------------------------- */
+static void zond_treeview_action_einf_ge(GSimpleAction *a, GVariant *p, gpointer d) {
+	Projekt *zond = (Projekt*) d;
+	gint rc = 0; GError *error = NULL;
+	rc = zond_treeview_insert_node(zond, FALSE, &error);
+	if (rc == -1) { display_message(zond->app_window, "Punkt einf\u00fcgen fehlgeschlagen\n\n", error->message, NULL); g_error_free(error); }
+	else if (rc == 1) display_message(zond->app_window, "Punkt darf nicht als Unterpunkt von Datei eingef\u00fcgt werden", NULL);
+	else if (rc == 2) display_message(zond->app_window, "Punkt darf nicht als Unterpunkt von Link eingef\u00fcgt werden", NULL);
 }
-
-static void zond_treeview_auszug_oeffnen_activate(GtkMenuItem *item,
-		gpointer user_data) {
+static void zond_treeview_action_einf_up(GSimpleAction *a, GVariant *p, gpointer d) {
+	Projekt *zond = (Projekt*) d;
+	gint rc = 0; GError *error = NULL;
+	rc = zond_treeview_insert_node(zond, TRUE, &error);
+	if (rc == -1) { display_message(zond->app_window, "Punkt einf\u00fcgen fehlgeschlagen\n\n", error->message, NULL); g_error_free(error); }
+	else if (rc == 1) display_message(zond->app_window, "Punkt darf nicht als Unterpunkt von Datei eingef\u00fcgt werden", NULL);
+	else if (rc == 2) display_message(zond->app_window, "Punkt darf nicht als Unterpunkt von Link eingef\u00fcgt werden", NULL);
+}
+static void zond_treeview_action_paste_ge(GSimpleAction *a, GVariant *p, gpointer d) {
+	Projekt *zond = (Projekt*) d; gint rc = 0; GError *error = NULL;
+	rc = zond_treeview_paste_clipboard(zond, FALSE, FALSE, &error);
+	if (rc == -1) { display_message(zond->app_window, "Fehler Einf\u00fcgen Clipboard\n\n", error->message, NULL); g_error_free(error); }
+	else if (rc == 1) display_message(zond->app_window, "Einf\u00fcgen als Unterpunkt einer Datei nicht zul\u00e4ssig", NULL);
+}
+static void zond_treeview_action_paste_up(GSimpleAction *a, GVariant *p, gpointer d) {
+	Projekt *zond = (Projekt*) d; gint rc = 0; GError *error = NULL;
+	rc = zond_treeview_paste_clipboard(zond, TRUE, FALSE, &error);
+	if (rc == -1) { display_message(zond->app_window, "Fehler Einf\u00fcgen Clipboard\n\n", error->message, NULL); g_error_free(error); }
+	else if (rc == 1) display_message(zond->app_window, "Einf\u00fcgen als Unterpunkt einer Datei nicht zul\u00e4ssig", NULL);
+}
+static void zond_treeview_action_paste_link_ge(GSimpleAction *a, GVariant *p, gpointer d) {
+	Projekt *zond = (Projekt*) d; gint rc = 0; GError *error = NULL;
+	rc = zond_treeview_paste_clipboard(zond, FALSE, TRUE, &error);
+	if (rc == -1) { display_message(zond->app_window, "Fehler Einf\u00fcgen Clipboard\n\n", error->message, NULL); g_error_free(error); }
+	else if (rc == 1) display_message(zond->app_window, "Einf\u00fcgen als Unterpunkt einer Datei nicht zul\u00e4ssig", NULL);
+}
+static void zond_treeview_action_paste_link_up(GSimpleAction *a, GVariant *p, gpointer d) {
+	Projekt *zond = (Projekt*) d; gint rc = 0; GError *error = NULL;
+	rc = zond_treeview_paste_clipboard(zond, TRUE, TRUE, &error);
+	if (rc == -1) { display_message(zond->app_window, "Fehler Einf\u00fcgen Clipboard\n\n", error->message, NULL); g_error_free(error); }
+	else if (rc == 1) display_message(zond->app_window, "Einf\u00fcgen als Unterpunkt einer Datei nicht zul\u00e4ssig", NULL);
+}
+static void zond_treeview_action_loeschen(GSimpleAction *a, GVariant *p, gpointer d) {
+	Projekt *zond = (Projekt*) d; gint rc = 0; GError *error = NULL;
+	rc = sond_treeview_selection_foreach(zond->treeview[zond->baum_active], zond_treeview_selection_loeschen_foreach, zond, &error);
+	if (rc == -1) { display_message(zond->app_window, "L\u00f6schen fehlgeschlagen\n\n", error->message, NULL); g_error_free(error); }
+}
+static void zond_treeview_action_anb_entf(GSimpleAction *a, GVariant *p, gpointer d) {
+	Projekt *zond = (Projekt*) d; gint rc = 0; GError *error = NULL;
+	if (zond->baum_active != BAUM_INHALT) return;
+	rc = sond_treeview_selection_foreach(zond->treeview[BAUM_INHALT], zond_treeview_selection_entfernen_anbindung_foreach, zond, &error);
+	if (rc) { display_message(zond->app_window, "L\u00f6schen von Anbindungen fehlgeschlagen\n\n", error->message, NULL); g_error_free(error); }
+}
+static void zond_treeview_action_jump(GSimpleAction *a, GVariant *p, gpointer d) {
+	Projekt *zond = (Projekt*) d;
 	GtkTreeIter iter = { 0 };
-	GError *error = NULL;
-	gint rc = 0;
-
-	Projekt *zond = (Projekt*) user_data;
-
-	if (!sond_treeview_get_cursor(zond->treeview[zond->baum_active], &iter))
-		return;
-
-	rc = zond_treeview_open_auszug(zond, &iter, &error);
-	if (rc) {
-		display_message(zond->app_window,
-				"Fehler beim Öffnen des Auszugs\n\n", error->message, NULL);
-		g_error_free(error);
+	if (!sond_treeview_get_cursor(zond->treeview[zond->baum_active], &iter)) return;
+	if (zond_tree_store_is_link(&iter)) zond_treeview_jump_to_link_target(zond, &iter);
+	else {
+		gint rc = 0; GError *error = NULL;
+		rc = zond_treeview_jump_to_origin(ZOND_TREEVIEW(zond->treeview[zond->baum_active]), &iter, &error);
+		if (rc) { display_message(zond->app_window, "Fehler Sprung zu Herkunft\n\n", error->message, NULL); g_error_free(error); }
 	}
-
-	return;
+}
+static void zond_treeview_action_oeffnen(GSimpleAction *a, GVariant *p, gpointer d) {
+	Projekt *zond = (Projekt*) d; GtkTreePath *path = NULL; GError *error = NULL; gint rc = 0;
+	gtk_tree_view_get_cursor(GTK_TREE_VIEW(zond->treeview[zond->baum_active]), &path, NULL);
+	rc = zond_treeview_open_path(zond, GTK_TREE_VIEW(zond->treeview[zond->baum_active]), path, FALSE, &error);
+	gtk_tree_path_free(path);
+	if (rc) { display_message(zond->app_window, "%s", error->message); g_error_free(error); }
+}
+static void zond_treeview_action_oeffnen_mit(GSimpleAction *a, GVariant *p, gpointer d) {
+	Projekt *zond = (Projekt*) d; GtkTreePath *path = NULL; GError *error = NULL; gint rc = 0;
+	gtk_tree_view_get_cursor(GTK_TREE_VIEW(zond->treeview[zond->baum_active]), &path, NULL);
+	rc = zond_treeview_open_path(zond, GTK_TREE_VIEW(zond->treeview[zond->baum_active]), path, TRUE, &error);
+	gtk_tree_path_free(path);
+	if (rc) { display_message(zond->app_window, "Fehler beim \u00d6ffnen Knoten:\n\n", error->message, NULL); g_error_free(error); }
+}
+static void zond_treeview_action_auszug(GSimpleAction *a, GVariant *p, gpointer d) {
+	Projekt *zond = (Projekt*) d; GtkTreeIter iter = { 0 }; GError *error = NULL; gint rc = 0;
+	if (!sond_treeview_get_cursor(zond->treeview[zond->baum_active], &iter)) return;
+	rc = zond_treeview_open_auszug(zond, &iter, &error);
+	if (rc) { display_message(zond->app_window, "Fehler beim \u00d6ffnen des Auszugs\n\n", error->message, NULL); g_error_free(error); }
+}
+static void zond_treeview_action_icon(GSimpleAction *a, GVariant *p, gpointer d) {
+	Projekt *zond = (Projekt*) d; gint rc = 0; GError *error = NULL;
+	gint icon_id = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(a), "icon-id"));
+	SSelectionChangeIcon s_selection = { zond, zond->icon[icon_id].icon_name };
+	rc = sond_treeview_selection_foreach(zond->treeview[zond->baum_active], zond_treeview_selection_change_icon_foreach, (gpointer) &s_selection, &error);
+	if (rc == -1) { display_message(zond->app_window, "Icon \u00e4ndern fehlgeschlagen\n\n", error->message, NULL); g_error_free(error); }
 }
 
 static void zond_treeview_init_contextmenu(ZondTreeview *ztv) {
-	GtkWidget *contextmenu = NULL;
-
+	/* Instanzspezifische Aktionen registrieren.
+	 * GMenu-Sections wurden bereits in class_init aufgebaut. */
+	GSimpleActionGroup *ag = sond_treeview_get_action_group(SOND_TREEVIEW(ztv));
 	ZondTreeviewPrivate *ztv_priv = zond_treeview_get_instance_private(ztv);
 	Projekt *zond = ztv_priv->zond;
 
-	contextmenu = sond_treeview_get_contextmenu(SOND_TREEVIEW(ztv));
-
-	//Trennblatt
-	GtkWidget *item_separator_0 = gtk_separator_menu_item_new();
-	gtk_menu_shell_prepend(GTK_MENU_SHELL(contextmenu), item_separator_0);
-
-	//Punkt einfügen
-	GtkWidget *item_punkt_einfuegen = gtk_menu_item_new_with_label(
-			"Punkt einfügen");
-
-	GtkWidget *menu_punkt_einfuegen = gtk_menu_new();
-
-	GtkWidget *item_punkt_einfuegen_ge = gtk_menu_item_new_with_label(
-			"Gleiche Ebene");
-	g_object_set_data(G_OBJECT(contextmenu), "item-punkt-einfuegen-ge",
-			item_punkt_einfuegen_ge);
-	g_signal_connect(G_OBJECT(item_punkt_einfuegen_ge), "activate",
-			G_CALLBACK(zond_treeview_punkt_einfuegen_activate),
-			(gpointer ) zond);
-
-	GtkWidget *item_punkt_einfuegen_up = gtk_menu_item_new_with_label(
-			"Unterebene");
-	g_object_set_data(G_OBJECT(contextmenu), "item-punkt-einfuegen-up",
-			item_punkt_einfuegen_up);
-	g_object_set_data(G_OBJECT(item_punkt_einfuegen_up), "kind",
-			GINT_TO_POINTER(1));
-	g_signal_connect(G_OBJECT(item_punkt_einfuegen_up), "activate",
-			G_CALLBACK(zond_treeview_punkt_einfuegen_activate),
-			(gpointer ) zond);
-
-	gtk_menu_shell_append(GTK_MENU_SHELL(menu_punkt_einfuegen),
-			item_punkt_einfuegen_ge);
-	gtk_menu_shell_append(GTK_MENU_SHELL(menu_punkt_einfuegen),
-			item_punkt_einfuegen_up);
-
-	gtk_menu_item_set_submenu(GTK_MENU_ITEM(item_punkt_einfuegen),
-			menu_punkt_einfuegen);
-
-	gtk_menu_shell_prepend(GTK_MENU_SHELL(contextmenu), item_punkt_einfuegen);
-
-	//Einfügen
-	GtkWidget *item_paste = gtk_menu_item_new_with_label("Einfügen");
-
-	GtkWidget *menu_paste = gtk_menu_new();
-
-	GtkWidget *item_paste_ge = gtk_menu_item_new_with_label("Gleiche Ebene");
-	g_object_set_data(G_OBJECT(contextmenu), "item-paste-ge", item_paste_ge);
-	gtk_menu_shell_append(GTK_MENU_SHELL(menu_paste), item_paste_ge);
-	g_signal_connect(G_OBJECT(item_paste_ge), "activate",
-			G_CALLBACK(zond_treeview_paste_activate), (gpointer ) zond);
-
-	GtkWidget *item_paste_up = gtk_menu_item_new_with_label("Unterebene");
-	g_object_set_data(G_OBJECT(item_paste_up), "kind", GINT_TO_POINTER(1));
-	g_object_set_data(G_OBJECT(contextmenu), "item-paste-up", item_paste_up);
-	g_signal_connect(G_OBJECT(item_paste_up), "activate",
-			G_CALLBACK(zond_treeview_paste_activate), (gpointer ) zond);
-	gtk_menu_shell_append(GTK_MENU_SHELL(menu_paste), item_paste_up);
-
-	gtk_menu_item_set_submenu(GTK_MENU_ITEM(item_paste), menu_paste);
-
-	gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu), item_paste);
-
-	//Link Einfügen
-	GtkWidget *item_paste_as_link = gtk_menu_item_new_with_label(
-			"Als Link einfügen");
-
-	GtkWidget *menu_paste_as_link = gtk_menu_new();
-
-	GtkWidget *item_paste_as_link_ge = gtk_menu_item_new_with_label(
-			"Gleiche Ebene");
-	g_object_set_data(G_OBJECT(contextmenu), "item-paste-as-link-ge",
-			item_paste_as_link_ge);
-	g_object_set_data(G_OBJECT(item_paste_as_link_ge), "link",
-			GINT_TO_POINTER(1));
-	g_signal_connect(G_OBJECT(item_paste_as_link_ge), "activate",
-			G_CALLBACK(zond_treeview_paste_as_link_activate), (gpointer ) zond);
-	gtk_menu_shell_append(GTK_MENU_SHELL(menu_paste_as_link),
-			item_paste_as_link_ge);
-
-	GtkWidget *item_paste_as_link_up = gtk_menu_item_new_with_label(
-			"Unterebene");
-	g_object_set_data(G_OBJECT(contextmenu), "item-paste-as-link-up",
-			item_paste_as_link_up);
-	g_object_set_data(G_OBJECT(item_paste_as_link_up), "kind",
-			GINT_TO_POINTER(1));
-	g_object_set_data(G_OBJECT(item_paste_as_link_up), "link",
-			GINT_TO_POINTER(1));
-	g_signal_connect(G_OBJECT(item_paste_as_link_up), "activate",
-			G_CALLBACK(zond_treeview_paste_as_link_activate), (gpointer ) zond);
-	gtk_menu_shell_append(GTK_MENU_SHELL(menu_paste_as_link),
-			item_paste_as_link_up);
-
-	gtk_menu_item_set_submenu(GTK_MENU_ITEM(item_paste_as_link),
-			menu_paste_as_link);
-
-	gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu), item_paste_as_link);
-
-	GtkWidget *item_separator_1 = gtk_separator_menu_item_new();
-	gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu), item_separator_1);
-
-	//Punkt(e) löschen
-	GtkWidget *item_loeschen = gtk_menu_item_new_with_label("Löschen");
-	g_object_set_data(G_OBJECT(contextmenu), "item-loeschen", item_loeschen);
-	g_signal_connect(G_OBJECT(item_loeschen), "activate",
-			G_CALLBACK(zond_treeview_loeschen_activate), (gpointer ) zond);
-	gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu), item_loeschen);
-
-	//Anbindung entfernen
-	GtkWidget *item_anbindung_entfernen = gtk_menu_item_new_with_label(
-			"Anbindung entfernen");
-	g_object_set_data(G_OBJECT(contextmenu), "item-anbindung-entfernen",
-			item_anbindung_entfernen);
-	g_signal_connect(G_OBJECT(item_anbindung_entfernen), "activate",
-			G_CALLBACK(zond_treeview_anbindung_entfernen_activate), zond);
-	gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu),
-			item_anbindung_entfernen);
-
-	GtkWidget *item_jump = gtk_menu_item_new_with_label("Zu Ursprung springen");
-	g_object_set_data(G_OBJECT(contextmenu), "item-jump", item_jump);
-	g_signal_connect(item_jump, "activate",
-			G_CALLBACK(zond_treeview_jump_activate), zond);
-	gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu), item_jump);
-
-	GtkWidget *item_separator_2 = gtk_separator_menu_item_new();
-	gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu), item_separator_2);
-
-	//Icons ändern
-	GtkWidget *item_icon = gtk_menu_item_new_with_label("Icon ändern");
-
-	GtkWidget *menu_icon = gtk_menu_new();
-
-	for (gint i = 0; i < NUMBER_OF_ICONS; i++) {
-		gchar *key = NULL;
-
-		GtkWidget *icon = gtk_image_new_from_icon_name(zond->icon[i].icon_name,
-				GTK_ICON_SIZE_MENU);
-		GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-		GtkWidget *label = gtk_label_new(zond->icon[i].display_name);
-		GtkWidget *item_menu_icons = gtk_menu_item_new();
-		gtk_container_add(GTK_CONTAINER(box), icon);
-		gtk_container_add(GTK_CONTAINER(box), label);
-		gtk_container_add(GTK_CONTAINER(item_menu_icons), box);
-
-		key = g_strdup_printf("item-menu-icons-%i", i);
-		g_object_set_data(G_OBJECT(contextmenu), key, item_menu_icons);
-		g_free(key);
-
-		g_object_set_data(G_OBJECT(item_menu_icons), "icon-id",
-				GINT_TO_POINTER(i));
-		g_signal_connect(item_menu_icons, "activate",
-				G_CALLBACK(zond_treeview_icon_activate), (gpointer ) zond);
-
-		gtk_menu_shell_append(GTK_MENU_SHELL(menu_icon), item_menu_icons);
+	struct { const gchar *name; GCallback cb; } acts[] = {
+		{ "ztv-einf-ge",      G_CALLBACK(zond_treeview_action_einf_ge)      },
+		{ "ztv-einf-up",      G_CALLBACK(zond_treeview_action_einf_up)      },
+		{ "ztv-paste-ge",     G_CALLBACK(zond_treeview_action_paste_ge)     },
+		{ "ztv-paste-up",     G_CALLBACK(zond_treeview_action_paste_up)     },
+		{ "ztv-paste-link-ge",G_CALLBACK(zond_treeview_action_paste_link_ge)},
+		{ "ztv-paste-link-up",G_CALLBACK(zond_treeview_action_paste_link_up)},
+		{ "ztv-loeschen",     G_CALLBACK(zond_treeview_action_loeschen)     },
+		{ "ztv-anb-entf",     G_CALLBACK(zond_treeview_action_anb_entf)     },
+		{ "ztv-jump",         G_CALLBACK(zond_treeview_action_jump)         },
+		{ "ztv-oeffnen",      G_CALLBACK(zond_treeview_action_oeffnen)      },
+		{ "ztv-oeffnen-mit",  G_CALLBACK(zond_treeview_action_oeffnen_mit)  },
+		{ "ztv-auszug",       G_CALLBACK(zond_treeview_action_auszug)       },
+	};
+	for (guint i = 0; i < G_N_ELEMENTS(acts); i++) {
+		GSimpleAction *act = g_simple_action_new(acts[i].name, NULL);
+		g_signal_connect(act, "activate", acts[i].cb, zond);
+		g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act));
+		g_object_unref(act);
 	}
 
-	gtk_menu_item_set_submenu(GTK_MENU_ITEM(item_icon), menu_icon);
-
-	gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu), item_icon);
-
-	//Datei Öffnen
-	GtkWidget *item_datei_oeffnen = gtk_menu_item_new_with_label("Öffnen");
-	g_object_set_data(G_OBJECT(contextmenu), "item-datei-oeffnen",
-			item_datei_oeffnen);
-	g_signal_connect(item_datei_oeffnen, "activate",
-			G_CALLBACK(zond_treeview_datei_oeffnen_activate), (gpointer ) zond);
-	gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu), item_datei_oeffnen);
-
-	//Datei Öffnen
-	GtkWidget *item_datei_oeffnen_mit = gtk_menu_item_new_with_label(
-			"Öffnen mit");
-	g_object_set_data(G_OBJECT(contextmenu), "item-datei-oeffnen-mit",
-			item_datei_oeffnen_mit);
-	g_signal_connect(item_datei_oeffnen_mit, "activate",
-			G_CALLBACK(zond_treeview_datei_oeffnen_mit_activate),
-			(gpointer ) zond);
-	gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu), item_datei_oeffnen_mit);
-
-	//Auszug öffnen
-	GtkWidget *item_auszug_oeffnen = gtk_menu_item_new_with_label("Auszug öffnen");
-	g_object_set_data(G_OBJECT(contextmenu), "item-auszug-oeffnen",
-			item_auszug_oeffnen);
-	g_signal_connect(item_auszug_oeffnen, "activate",
-			G_CALLBACK(zond_treeview_auszug_oeffnen_activate), (gpointer) zond);
-	gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu), item_auszug_oeffnen);
-
-	gtk_widget_show_all(contextmenu);
+	/* Icon-Aktionen + Submenu befuellen (nur erste Instanz befuellt das Submenu) */
+	GMenu *gmenu_icons = ZOND_TREEVIEW_GET_CLASS(ztv)->gmenu_icons;
+	gboolean filled = (g_menu_model_get_n_items(G_MENU_MODEL(gmenu_icons)) > 0);
+	for (gint i = 0; i < NUMBER_OF_ICONS; i++) {
+		gchar *name = g_strdup_printf("ztv-icon-%d", i);
+		GSimpleAction *act = g_simple_action_new(name, NULL);
+		g_object_set_data(G_OBJECT(act), "icon-id", GINT_TO_POINTER(i));
+		g_signal_connect(act, "activate", G_CALLBACK(zond_treeview_action_icon), zond);
+		g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act));
+		g_object_unref(act);
+		if (!filled) {
+			gchar *action = g_strdup_printf("stv.ztv-icon-%d", i);
+			GMenuItem *item = g_menu_item_new(zond->icon[i].display_name, action);
+			GIcon *icon = g_themed_icon_new(zond->icon[i].icon_name);
+			g_menu_item_set_icon(item, icon);
+			g_object_unref(icon);
+			g_menu_append_item(gmenu_icons, item);
+			g_object_unref(item);
+			g_free(action);
+		}
+		g_free(name);
+	}
 
 	return;
 }
@@ -2887,7 +2645,7 @@ zond_treeview_new(Projekt *zond, gint root_node_id) {
 			(gpointer) ztv_priv->zond);
 #endif
 
-	//Zeile expandiert
+	/* Zeile expandiert: Link nachladen + Spaltenbreite anpassen */
 	g_signal_connect(ztv, "row-expanded",
 			G_CALLBACK(zond_treeview_row_expanded), zond);
 

@@ -33,11 +33,17 @@ typedef struct _Clipboard {
 struct _SondTreeviewClass {
 	GtkTreeViewClass parent_class;
 	Clipboard *clipboard;
+	GMenu *gmenu;
 	void (*render_text_cell)(GtkTreeViewColumn*, GtkCellRenderer*,
 			GtkTreeModel*, GtkTreeIter*, gpointer);
 	void (*text_edited)(SondTreeview *stv, GtkTreeIter *iter,
 			gchar const *new_text);
 };
+
+/* Haengt die Basis-Section (Kopieren/Ausschneiden) an gmenu.
+ * Wird von abgeleiteten Klassen in deren class_init aufgerufen,
+ * nachdem sie ein eigenes GMenu angelegt haben. */
+void sond_treeview_add_base_menu(GMenu *gmenu);
 
 void sond_treeview_set_id(SondTreeview*, gint);
 
@@ -48,6 +54,10 @@ GtkCellRenderer* sond_treeview_get_cell_renderer_icon(SondTreeview*);
 GtkCellRenderer* sond_treeview_get_cell_renderer_text(SondTreeview*);
 
 GtkWidget* sond_treeview_get_contextmenu(SondTreeview*);
+
+GMenu* sond_treeview_get_gmenu(SondTreeview*);
+
+GSimpleActionGroup* sond_treeview_get_action_group(SondTreeview*);
 
 void sond_treeview_expand_row(SondTreeview*, GtkTreeIter*);
 

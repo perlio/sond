@@ -1,5 +1,5 @@
 /*
- sond (sond_treeview.c) - Akten, Beweisst�cke, Unterlagen
+ sond (sond_treeview.c) - Akten, Beweisstücke, Unterlagen
  Copyright (C) 2021  pelo america
 
  This program is free software: you can redistribute it and/or modify
@@ -25,7 +25,8 @@ typedef struct {
 	GtkCellRenderer *renderer_icon;
 	GtkCellRenderer *renderer_text;
 	gint id;
-	GtkWidget *contextmenu;  /* GTK3: GtkMenu, GTK4: GtkPopoverMenu */
+	GtkWidget *contextmenu;       /* GTK3: GtkMenu, GTK4: GtkPopoverMenu */
+	GSimpleActionGroup *action_group; /* instanzspezifische Aktionsgruppe */
 } SondTreeviewPrivate;
 
 G_DEFINE_TYPE_WITH_PRIVATE(SondTreeview, sond_treeview, GTK_TYPE_TREE_VIEW)
@@ -80,12 +81,11 @@ static gboolean sond_treeview_show_popupmenu(SondTreeview *stv,
 	GtkTreePath *path = NULL;
 	gboolean ret = FALSE;
 
-	//wenn was anderes als Rechtsklick:
 	if (((event->button) != 3) || (event->type != GDK_BUTTON_PRESS))
 		return FALSE;
 
-	gtk_tree_view_get_path_at_pos(GTK_TREE_VIEW(stv), event->x, event->y, &path,
-			NULL, NULL, NULL);
+	gtk_tree_view_get_path_at_pos(GTK_TREE_VIEW(stv), event->x, event->y,
+			&path, NULL, NULL, NULL);
 	if (!path) {
 		GtkTreeIter iter = { 0 };
 
@@ -96,14 +96,9 @@ static gboolean sond_treeview_show_popupmenu(SondTreeview *stv,
 			gtk_widget_grab_focus(GTK_WIDGET(stv));
 	} else {
 		if (!gtk_widget_has_focus(GTK_WIDGET(stv))) {
-			//zun�chst cursor setzen, damit der bei Focus-Wechsel direkt markiet wird
 			gtk_tree_view_set_cursor(GTK_TREE_VIEW(stv), path, NULL, FALSE);
-
-			//focus auf neuen Baum...
 			gtk_widget_grab_focus(GTK_WIDGET(stv));
-		}
-		//angeklickte schon markiert: dann kein default-handler (selection soll bleiben)
-		else if (gtk_tree_selection_path_is_selected(
+		} else if (gtk_tree_selection_path_is_selected(
 				gtk_tree_view_get_selection(GTK_TREE_VIEW(stv)), path))
 			ret = TRUE;
 
@@ -117,8 +112,12 @@ static gboolean sond_treeview_show_popupmenu(SondTreeview *stv,
 
 #endif /* GTK_MAJOR_VERSION */
 
-static void sond_treeview_finalize(GObject* object) {
-	SondTreeviewPrivate* stv_priv = sond_treeview_get_instance_private(SOND_TREEVIEW(object));
+/* --------------------------------------------------------------------------
+ * finalize
+ * -------------------------------------------------------------------------- */
+static void sond_treeview_finalize(GObject *object) {
+	SondTreeviewPrivate *stv_priv = sond_treeview_get_instance_private(
+			SOND_TREEVIEW(object));
 
 #if GTK_MAJOR_VERSION >= 4
 	if (stv_priv->contextmenu) {
@@ -126,10 +125,66 @@ static void sond_treeview_finalize(GObject* object) {
 		stv_priv->contextmenu = NULL;
 	}
 #else
-	gtk_widget_destroy(stv_priv->contextmenu);
+	stv_priv->contextmenu = NULL;
 #endif
 
+	g_clear_object(&stv_priv->action_group);
+
 	G_OBJECT_CLASS(sond_treeview_parent_class)->finalize(object);
+}
+
+/* --------------------------------------------------------------------------
+ * Oeffentliche Hilfsfunktion: Basis-Section (Kopieren/Ausschneiden) anhaengen.
+ * Wird von abgeleiteten Klassen in deren class_init aufgerufen,
+ * nachdem sie ein eigenes GMenu angelegt haben.
+ * -------------------------------------------------------------------------- */
+void sond_treeview_add_base_menu(GMenu *gmenu) {
+	GMenu *sec_base = g_menu_new();
+	g_menu_append(sec_base, "Kopieren",     "stv.kopieren");
+	g_menu_append(sec_base, "Ausschneiden", "stv.ausschneiden");
+	g_menu_append_section(gmenu, NULL, G_MENU_MODEL(sec_base));
+	g_object_unref(sec_base);
+}
+
+/* --------------------------------------------------------------------------
+ * class_init / constructed
+ * -------------------------------------------------------------------------- */
+static void sond_treeview_constructed(GObject *object) {
+	SondTreeview *stv = SOND_TREEVIEW(object);
+	SondTreeviewPrivate *stv_priv = sond_treeview_get_instance_private(stv);
+	GMenu *gmenu = SOND_TREEVIEW_GET_CLASS(stv)->gmenu;
+
+	/* Aktionsgruppe mit Präfix "stv" am Widget registrieren */
+	gtk_widget_insert_action_group(GTK_WIDGET(stv), "stv",
+			G_ACTION_GROUP(stv_priv->action_group));
+
+#if GTK_MAJOR_VERSION >= 4
+	stv_priv->contextmenu = gtk_popover_menu_new_from_model(
+			G_MENU_MODEL(gmenu));
+	gtk_widget_set_parent(stv_priv->contextmenu, GTK_WIDGET(stv));
+	gtk_popover_set_has_arrow(GTK_POPOVER(stv_priv->contextmenu), FALSE);
+
+	GtkGesture *gesture = gtk_gesture_click_new();
+	gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(gesture),
+			GDK_BUTTON_SECONDARY);
+	g_signal_connect(gesture, "pressed",
+			G_CALLBACK(sond_treeview_gesture_pressed), stv);
+	gtk_widget_add_controller(GTK_WIDGET(stv), GTK_EVENT_CONTROLLER(gesture));
+
+#else /* GTK3 */
+	stv_priv->contextmenu = gtk_menu_new_from_model(
+			G_MENU_MODEL(gmenu));
+	gtk_menu_attach_to_widget(GTK_MENU(stv_priv->contextmenu),
+			GTK_WIDGET(stv), NULL);
+	gtk_widget_show_all(stv_priv->contextmenu);
+	g_signal_connect(stv, "button-press-event",
+			G_CALLBACK(sond_treeview_show_popupmenu),
+			(gpointer) stv_priv->contextmenu);
+#endif
+
+	G_OBJECT_CLASS(sond_treeview_parent_class)->constructed(object);
+
+	return;
 }
 
 static void sond_treeview_class_init(SondTreeviewClass *klass) {
@@ -138,17 +193,23 @@ static void sond_treeview_class_init(SondTreeviewClass *klass) {
 	klass->clipboard = g_malloc0(sizeof(Clipboard));
 	klass->clipboard->arr_ref = g_ptr_array_new_with_free_func(
 			(GDestroyNotify) gtk_tree_row_reference_free);
-	//class_finalize mu� nicht definiert werden -
-	//statisch registrierte Klasse wird zur Laufzeit niemals finalisiert!
+
+	/* Eigenes GMenu fuer SondTreeview-Instanzen (Fallback) */
+	klass->gmenu = g_menu_new();
+	sond_treeview_add_base_menu(klass->gmenu);
 
 	klass->render_text_cell = NULL;
 	klass->text_edited = NULL;
 
 	object_class->finalize = sond_treeview_finalize;
+	object_class->constructed = sond_treeview_constructed;
 
 	return;
 }
 
+/* --------------------------------------------------------------------------
+ * CellRenderer-Callbacks
+ * -------------------------------------------------------------------------- */
 static void renderer_text_editing_canceled(GtkCellRenderer *renderer,
 		gpointer data) {
 	SondTreeview *stv = (SondTreeview*) data;
@@ -165,8 +226,8 @@ static void renderer_text_editing_canceled(GtkCellRenderer *renderer,
 	return;
 }
 
-static void sond_treeview_text_edited(GtkCellRenderer *cell, gchar *path_string,
-		gchar *new_text, gpointer data) {
+static void sond_treeview_text_edited(GtkCellRenderer *cell,
+		gchar *path_string, gchar *new_text, gpointer data) {
 	GtkTreeIter iter = { 0 };
 
 	SondTreeview *stv = (SondTreeview*) data;
@@ -206,6 +267,9 @@ static void renderer_text_editing_started(GtkCellRenderer *renderer,
 	return;
 }
 
+/* --------------------------------------------------------------------------
+ * Render-Callbacks
+ * -------------------------------------------------------------------------- */
 static void sond_treeview_grey_cut_cell(SondTreeview *stv, GtkTreeIter *iter) {
 	SondTreeviewPrivate *stv_priv = sond_treeview_get_instance_private(stv);
 	Clipboard *clipboard = SOND_TREEVIEW_GET_CLASS(stv)->clipboard;
@@ -231,19 +295,20 @@ static void sond_treeview_grey_cut_cell(SondTreeview *stv, GtkTreeIter *iter) {
 		gtk_tree_path_free(path);
 
 		if (enthalten)
-			g_object_set(G_OBJECT(stv_priv->renderer_text), "sensitive", FALSE,
-			NULL);
+			g_object_set(G_OBJECT(stv_priv->renderer_text), "sensitive",
+					FALSE, NULL);
 		else
-			g_object_set(G_OBJECT(stv_priv->renderer_text), "sensitive", TRUE,
-					NULL);
+			g_object_set(G_OBJECT(stv_priv->renderer_text), "sensitive",
+					TRUE, NULL);
 	} else
-		g_object_set(G_OBJECT(stv_priv->renderer_text), "sensitive", TRUE,
-				NULL);
+		g_object_set(G_OBJECT(stv_priv->renderer_text), "sensitive",
+				TRUE, NULL);
 
 	return;
 }
 
-static void sond_treeview_underline_cursor(SondTreeview *stv, GtkTreeIter *iter) {
+static void sond_treeview_underline_cursor(SondTreeview *stv,
+		GtkTreeIter *iter) {
 	SondTreeviewPrivate *stv_priv = sond_treeview_get_instance_private(stv);
 
 	GtkTreePath *path_cursor = NULL;
@@ -253,15 +318,15 @@ static void sond_treeview_underline_cursor(SondTreeview *stv, GtkTreeIter *iter)
 		GtkTreePath *path = gtk_tree_model_get_path(
 				gtk_tree_view_get_model(GTK_TREE_VIEW(stv)), iter);
 		if (!gtk_tree_path_compare(path, path_cursor))
-			g_object_set(G_OBJECT(stv_priv->renderer_text), "underline-set",
-					TRUE, NULL);
+			g_object_set(G_OBJECT(stv_priv->renderer_text),
+					"underline-set", TRUE, NULL);
 		else
-			g_object_set(G_OBJECT(stv_priv->renderer_text), "underline-set",
-					FALSE, NULL);
+			g_object_set(G_OBJECT(stv_priv->renderer_text),
+					"underline-set", FALSE, NULL);
 		gtk_tree_path_free(path);
 	} else
-		g_object_set(G_OBJECT(stv_priv->renderer_text), "underline-set", FALSE,
-				NULL);
+		g_object_set(G_OBJECT(stv_priv->renderer_text),
+				"underline-set", FALSE, NULL);
 
 	gtk_tree_path_free(path_cursor);
 
@@ -283,11 +348,11 @@ static void sond_treeview_render_text(GtkTreeViewColumn *column,
 	return;
 }
 
-static gboolean sond_treeview_selection_select_func(GtkTreeSelection *selection,
-		GtkTreeModel *model, GtkTreePath *path, gboolean selected,
-		gpointer data) {
+static gboolean sond_treeview_selection_select_func(
+		GtkTreeSelection *selection, GtkTreeModel *model, GtkTreePath *path,
+		gboolean selected, gpointer data) {
 	if (selected)
-		return TRUE; //abschalten geht immer
+		return TRUE;
 
 	GList *list = gtk_tree_selection_get_selected_rows(selection, NULL);
 	GList *l = list;
@@ -297,7 +362,6 @@ static gboolean sond_treeview_selection_select_func(GtkTreeSelection *selection,
 			g_list_free_full(list, (GDestroyNotify) gtk_tree_path_free);
 			return FALSE;
 		}
-
 		l = l->next;
 	}
 
@@ -306,8 +370,9 @@ static gboolean sond_treeview_selection_select_func(GtkTreeSelection *selection,
 	return TRUE;
 }
 
-#if GTK_MAJOR_VERSION >= 4
-
+/* --------------------------------------------------------------------------
+ * Aktions-Callbacks (GSimpleAction, GTK3 und GTK4)
+ * -------------------------------------------------------------------------- */
 static void sond_treeview_action_kopieren(GSimpleAction *action,
 		GVariant *parameter, gpointer user_data) {
 	sond_treeview_copy_or_cut_selection(SOND_TREEVIEW(user_data), FALSE);
@@ -318,28 +383,6 @@ static void sond_treeview_action_ausschneiden(GSimpleAction *action,
 	sond_treeview_copy_or_cut_selection(SOND_TREEVIEW(user_data), TRUE);
 }
 
-#else /* GTK3 */
-
-static void sond_treeview_kopieren_activate(GtkMenuItem *item,
-		gpointer user_data) {
-	SondTreeview *stv = (SondTreeview*) user_data;
-
-	sond_treeview_copy_or_cut_selection(stv, FALSE);
-
-	return;
-}
-
-static void sond_treeview_ausschneiden_activate(GtkMenuItem *item,
-		gpointer user_data) {
-	SondTreeview *stv = (SondTreeview*) user_data;
-
-	sond_treeview_copy_or_cut_selection(stv, TRUE);
-
-	return;
-}
-
-#endif /* GTK_MAJOR_VERSION */
-
 static void sond_treeview_init(SondTreeview *stv) {
 	GtkTreeViewColumn *tvc = NULL;
 
@@ -349,13 +392,12 @@ static void sond_treeview_init(SondTreeview *stv) {
 	gtk_tree_view_set_enable_tree_lines(GTK_TREE_VIEW(stv), TRUE);
 	gtk_tree_view_set_enable_search(GTK_TREE_VIEW(stv), FALSE);
 
-	//die Selection
 	GtkTreeSelection *selection = gtk_tree_view_get_selection(
 			GTK_TREE_VIEW(stv));
 	gtk_tree_selection_set_mode(selection, GTK_SELECTION_MULTIPLE);
 	gtk_tree_selection_set_select_function(selection,
-			(GtkTreeSelectionFunc) sond_treeview_selection_select_func, NULL,
-			NULL);
+			(GtkTreeSelectionFunc) sond_treeview_selection_select_func,
+			NULL, NULL);
 
 	stv_private->renderer_icon = gtk_cell_renderer_pixbuf_new();
 	stv_private->renderer_text = gtk_cell_renderer_text_new();
@@ -366,14 +408,13 @@ static void sond_treeview_init(SondTreeview *stv) {
 
 	GdkRGBA gdkrgba;
 	gdkrgba.alpha = 1.0;
-	gdkrgba.red = 0.95;
-	gdkrgba.blue = 0.95;
+	gdkrgba.red   = 0.95;
+	gdkrgba.blue  = 0.95;
 	gdkrgba.green = 0.95;
 
 	g_object_set(G_OBJECT(stv_private->renderer_text), "background-rgba",
 			&gdkrgba, "background-set", FALSE, NULL);
 
-	//die column
 	tvc = gtk_tree_view_column_new();
 	gtk_tree_view_column_set_sizing(tvc, GTK_TREE_VIEW_COLUMN_FIXED);
 	gtk_tree_view_column_set_resizable(tvc, TRUE);
@@ -386,74 +427,23 @@ static void sond_treeview_init(SondTreeview *stv) {
 	gtk_tree_view_column_set_cell_data_func(tvc, stv_private->renderer_text,
 			(GtkTreeCellDataFunc) sond_treeview_render_text, stv, NULL);
 
-	/* ------------------------------------------------------------------
-	 * Kontextmenu aufbauen - GTK3: GtkMenu, GTK4: GtkPopoverMenu
-	 * ------------------------------------------------------------------ */
-#if GTK_MAJOR_VERSION >= 4
-
-	GMenu *gmenu_stv = g_menu_new();
-	g_menu_append(gmenu_stv, "Kopieren",     "stv.kopieren");
-	g_menu_append(gmenu_stv, "Ausschneiden", "stv.ausschneiden");
+	/* Instanzspezifische ActionGroup */
+	stv_private->action_group = g_simple_action_group_new();
 
 	GSimpleAction *act_kop = g_simple_action_new("kopieren", NULL);
 	g_signal_connect(act_kop, "activate",
 			G_CALLBACK(sond_treeview_action_kopieren), stv);
+	g_action_map_add_action(G_ACTION_MAP(stv_private->action_group),
+			G_ACTION(act_kop));
+	g_object_unref(act_kop);
+
 	GSimpleAction *act_aus = g_simple_action_new("ausschneiden", NULL);
 	g_signal_connect(act_aus, "activate",
 			G_CALLBACK(sond_treeview_action_ausschneiden), stv);
-
-	GSimpleActionGroup *ag_stv = g_simple_action_group_new();
-	g_action_map_add_action(G_ACTION_MAP(ag_stv), G_ACTION(act_kop));
-	g_action_map_add_action(G_ACTION_MAP(ag_stv), G_ACTION(act_aus));
-	g_object_unref(act_kop);
+	g_action_map_add_action(G_ACTION_MAP(stv_private->action_group),
+			G_ACTION(act_aus));
 	g_object_unref(act_aus);
-	gtk_widget_insert_action_group(GTK_WIDGET(stv), "stv", G_ACTION_GROUP(ag_stv));
-	g_object_unref(ag_stv);
 
-	stv_private->contextmenu = gtk_popover_menu_new_from_model(
-			G_MENU_MODEL(gmenu_stv));
-	g_object_unref(gmenu_stv);
-	gtk_widget_set_parent(stv_private->contextmenu, GTK_WIDGET(stv));
-	gtk_popover_set_has_arrow(GTK_POPOVER(stv_private->contextmenu), FALSE);
-
-	GtkGesture *gesture = gtk_gesture_click_new();
-	gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(gesture),
-			GDK_BUTTON_SECONDARY);
-	g_signal_connect(gesture, "pressed",
-			G_CALLBACK(sond_treeview_gesture_pressed), stv);
-	gtk_widget_add_controller(GTK_WIDGET(stv), GTK_EVENT_CONTROLLER(gesture));
-
-#else /* GTK3 */
-
-	stv_private->contextmenu = gtk_menu_new();
-
-	GtkWidget *item_kopieren = gtk_menu_item_new_with_label("Kopieren");
-	g_object_set_data(G_OBJECT(stv_private->contextmenu), "item-kopieren",
-			item_kopieren);
-	g_signal_connect(G_OBJECT(item_kopieren), "activate",
-			G_CALLBACK(sond_treeview_kopieren_activate), (gpointer ) stv);
-	gtk_menu_shell_append(GTK_MENU_SHELL(stv_private->contextmenu),
-			item_kopieren);
-
-	GtkWidget *item_ausschneiden = gtk_menu_item_new_with_label("Ausschneiden");
-	g_object_set_data(G_OBJECT(stv_private->contextmenu), "item-ausschneiden",
-			item_ausschneiden);
-	g_signal_connect(G_OBJECT(item_ausschneiden), "activate",
-			G_CALLBACK(sond_treeview_ausschneiden_activate), (gpointer ) stv);
-	gtk_menu_shell_append(GTK_MENU_SHELL(stv_private->contextmenu),
-			item_ausschneiden);
-
-	gtk_widget_show_all(stv_private->contextmenu);
-
-	g_signal_connect(stv, "button-press-event",
-			G_CALLBACK(sond_treeview_show_popupmenu),
-			(gpointer ) stv_private->contextmenu);
-
-#endif /* GTK_MAJOR_VERSION */
-
-	//hiermit sollen die Momente abgefangen werden, in denen im treeview herumgetippt wird
-	//dann soll key-press-event abgefangen werden und Callback gibt TRUE zur�ck
-	//damit �bergeordnete Widgets nicht mehr reagieren
 	/* CellRenderer-Signale */
 	g_signal_connect(stv_private->renderer_text, "editing-started",
 			G_CALLBACK(renderer_text_editing_started), stv);
@@ -465,42 +455,52 @@ static void sond_treeview_init(SondTreeview *stv) {
 	return;
 }
 
+/* --------------------------------------------------------------------------
+ * Öffentliche API
+ * -------------------------------------------------------------------------- */
 void sond_treeview_set_id(SondTreeview *stv, gint id) {
-	SondTreeviewPrivate *stv_priv = NULL;
+	SondTreeviewPrivate* stv_priv =
+			sond_treeview_get_instance_private(stv);
 
-	stv_priv = sond_treeview_get_instance_private(stv);
 	stv_priv->id = id;
-
 	return;
 }
 
 gint sond_treeview_get_id(SondTreeview *stv) {
-	gint id = 0;
-	SondTreeviewPrivate *stv_priv = NULL;
+	SondTreeviewPrivate* stv_priv =
+			sond_treeview_get_instance_private(stv);
 
-	stv_priv = sond_treeview_get_instance_private(stv);
-	id = stv_priv->id;
-
-	return id;
+	return stv_priv->id;
 }
 
-GtkCellRenderer*
-sond_treeview_get_cell_renderer_icon(SondTreeview *stv) {
-	SondTreeviewPrivate *stv_priv = sond_treeview_get_instance_private(stv);
+GMenu* sond_treeview_get_gmenu(SondTreeview *stv) {
+	return SOND_TREEVIEW_GET_CLASS(stv)->gmenu;
+}
+
+GSimpleActionGroup* sond_treeview_get_action_group(SondTreeview *stv) {
+	SondTreeviewPrivate* stv_priv =
+			sond_treeview_get_instance_private(stv);
+
+	return stv_priv->action_group;
+}
+
+GtkCellRenderer* sond_treeview_get_cell_renderer_icon(SondTreeview *stv) {
+	SondTreeviewPrivate* stv_priv =
+			sond_treeview_get_instance_private(stv);
 
 	return stv_priv->renderer_icon;
 }
 
-GtkCellRenderer*
-sond_treeview_get_cell_renderer_text(SondTreeview *stv) {
-	SondTreeviewPrivate *stv_priv = sond_treeview_get_instance_private(stv);
+GtkCellRenderer* sond_treeview_get_cell_renderer_text(SondTreeview *stv) {
+	SondTreeviewPrivate* stv_priv =
+			sond_treeview_get_instance_private(stv);
 
 	return stv_priv->renderer_text;
 }
 
-GtkWidget*
-sond_treeview_get_contextmenu(SondTreeview *stv) {
-	SondTreeviewPrivate *stv_priv = sond_treeview_get_instance_private(stv);
+GtkWidget* sond_treeview_get_contextmenu(SondTreeview *stv) {
+	SondTreeviewPrivate* stv_priv =
+			sond_treeview_get_instance_private(stv);
 
 	return stv_priv->contextmenu;
 }
@@ -512,7 +512,6 @@ void sond_treeview_expand_row(SondTreeview *stv, GtkTreeIter *iter) {
 	GtkTreePath *path = gtk_tree_model_get_path(
 			gtk_tree_view_get_model(GTK_TREE_VIEW(stv)), iter);
 	gtk_tree_view_expand_to_path(GTK_TREE_VIEW(stv), path);
-//    gtk_tree_view_expand_row( GTK_TREE_VIEW(stv), path, FALSE );
 	gtk_tree_path_free(path);
 
 	return;
@@ -532,12 +531,9 @@ void sond_treeview_expand_to_row(SondTreeview *stv, GtkTreeIter *iter) {
 }
 
 gboolean sond_treeview_row_expanded(SondTreeview *stv, GtkTreeIter *iter) {
-	GtkTreePath *path = NULL;
-	gboolean expanded = FALSE;
-
-	path = gtk_tree_model_get_path(
+	GtkTreePath *path = gtk_tree_model_get_path(
 			gtk_tree_view_get_model(GTK_TREE_VIEW(stv)), iter);
-	expanded = gtk_tree_view_row_expanded(GTK_TREE_VIEW(stv), path);
+	gboolean expanded = gtk_tree_view_row_expanded(GTK_TREE_VIEW(stv), path);
 	gtk_tree_path_free(path);
 
 	return expanded;
@@ -573,7 +569,8 @@ void sond_treeview_set_cursor(SondTreeview *stv, GtkTreeIter *iter) {
 	return;
 }
 
-void sond_treeview_set_cursor_on_text_cell(SondTreeview *stv, GtkTreeIter *iter) {
+void sond_treeview_set_cursor_on_text_cell(SondTreeview *stv,
+		GtkTreeIter *iter) {
 	if (!iter)
 		return;
 
@@ -589,9 +586,8 @@ void sond_treeview_set_cursor_on_text_cell(SondTreeview *stv, GtkTreeIter *iter)
 	return;
 }
 
-//�berpr�ft beim verschieben, ob auf zu verschiebenden Knoten oder dessen
-//Nachfahren verschoben werden soll
-gboolean sond_treeview_test_cursor_descendant(SondTreeview *stv, gboolean child) {
+gboolean sond_treeview_test_cursor_descendant(SondTreeview *stv,
+		gboolean child) {
 	Clipboard *clipboard = ((SondTreeviewClass*) g_type_class_peek(
 			SOND_TYPE_TREEVIEW))->clipboard;
 
@@ -630,8 +626,7 @@ gboolean sond_treeview_test_cursor_descendant(SondTreeview *stv, gboolean child)
 	return FALSE;
 }
 
-static GPtrArray*
-sond_treeview_selection_get_refs(SondTreeview *stv) {
+static GPtrArray* sond_treeview_selection_get_refs(SondTreeview *stv) {
 	GList *selected = gtk_tree_selection_get_selected_rows(
 			gtk_tree_view_get_selection(GTK_TREE_VIEW(stv)), NULL);
 
@@ -663,14 +658,11 @@ void sond_treeview_copy_or_cut_selection(SondTreeview *stv,
 	if (!refs)
 		return;
 
-	//wenn ausschneiden, alle rows ausgrauen
 	if (clipboard->ausschneiden)
 		gtk_widget_queue_draw(GTK_WIDGET(clipboard->tree_view));
 
-	//Alte Auswahl l�schen, falls vorhanden
 	g_ptr_array_unref(clipboard->arr_ref);
 
-	//clipboard setzen
 	clipboard->tree_view = stv;
 	clipboard->ausschneiden = ausschneiden;
 	clipboard->arr_ref = refs;
@@ -710,14 +702,15 @@ static gint sond_treeview_refs_foreach(SondTreeview *stv_orig, GPtrArray *refs,
 		if (rc == -1)
 			ERROR_Z
 		else if (rc >= 1)
-			return rc; //Abbruch gewählt
+			return rc;
 	}
 
 	return 0;
 }
 
-gint sond_treeview_clipboard_foreach(gint (*foreach)(SondTreeview*,
-		GtkTreeIter*, gpointer, GError**), gpointer data, GError **error) {
+gint sond_treeview_clipboard_foreach(
+		gint (*foreach)(SondTreeview*, GtkTreeIter*, gpointer, GError**),
+		gpointer data, GError **error) {
 	gint rc = 0;
 
 	Clipboard *clipboard = ((SondTreeviewClass*) g_type_class_peek(
@@ -752,4 +745,3 @@ gint sond_treeview_selection_foreach(SondTreeview *stv,
 
 	return 0;
 }
-

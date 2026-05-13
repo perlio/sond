@@ -1510,12 +1510,83 @@ static gint sond_treeviewfm_open_stvfm_item(SondTVFMItem* stvfm_item,
 	return 0;
 }
 
+void sond_treeviewfm_add_base_menu(GMenu *gmenu) {
+    sond_treeview_add_base_menu(gmenu);
+
+	GMenu *sec_einf = g_menu_new();
+	GMenu *sub_einf = g_menu_new();
+	g_menu_append(sub_einf, "Gleiche Ebene", "stv.fm-einf-ge");
+	g_menu_append(sub_einf, "Unterebene",    "stv.fm-einf-up");
+	g_menu_append_submenu(sec_einf, "Punkt einf\u00fcgen",
+			G_MENU_MODEL(sub_einf));
+	g_object_unref(sub_einf);
+	g_menu_prepend_section(gmenu, NULL, G_MENU_MODEL(sec_einf));
+	g_object_unref(sec_einf);
+
+	GMenu *sec_paste = g_menu_new();
+	GMenu *sub_paste = g_menu_new();
+	g_menu_append(sub_paste, "Gleiche Ebene", "stv.fm-paste-ge");
+	g_menu_append(sub_paste, "Unterebene",    "stv.fm-paste-up");
+	g_menu_append_submenu(sec_paste, "Einf\u00fcgen",
+			G_MENU_MODEL(sub_paste));
+	g_object_unref(sub_paste);
+	g_menu_append_section(gmenu, NULL, G_MENU_MODEL(sec_paste));
+	g_object_unref(sec_paste);
+
+	GMenu *sec_loeschen = g_menu_new();
+	g_menu_append(sec_loeschen, "L\u00f6schen", "stv.fm-loeschen");
+	g_menu_append_section(gmenu, NULL, G_MENU_MODEL(sec_loeschen));
+	g_object_unref(sec_loeschen);
+
+	GMenu *sec_oeffnen = g_menu_new();
+	g_menu_append(sec_oeffnen, "\u00d6ffnen",     "stv.fm-oeffnen");
+	g_menu_append(sec_oeffnen, "\u00d6ffnen mit", "stv.fm-oeffnen-mit");
+	g_menu_append_section(gmenu, NULL, G_MENU_MODEL(sec_oeffnen));
+	g_object_unref(sec_oeffnen);
+
+	GMenu *sec_search = g_menu_new();
+	GMenu *sub_search = g_menu_new();
+	g_menu_append(sub_search, "Gesamtes Verzeichnis", "stv.fm-search");
+	g_menu_append(sub_search, "Nur markierte Punkte", "stv.fm-search-sel");
+	g_menu_append_submenu(sec_search, "Dateisuche",
+			G_MENU_MODEL(sub_search));
+	g_object_unref(sub_search);
+	g_menu_append_section(gmenu, NULL, G_MENU_MODEL(sec_search));
+	g_object_unref(sec_search);
+
+	/* SeaDrive-Section */
+	GMenu *sec_sd = g_menu_new();
+	GMenu *sub_pin = g_menu_new();
+	g_menu_append(sub_pin, "Gesamtes Verzeichnis", "stv.sd-pin-all");
+	g_menu_append(sub_pin, "Auswahl",              "stv.sd-pin-sel");
+	g_menu_append_submenu(sec_sd, "Immer offline verf\u00fcgbar",
+			G_MENU_MODEL(sub_pin));
+	g_object_unref(sub_pin);
+	GMenu *sub_unspec = g_menu_new();
+	g_menu_append(sub_unspec, "Gesamtes Verzeichnis", "stv.sd-unspec-all");
+	g_menu_append(sub_unspec, "Auswahl",              "stv.sd-unspec-sel");
+	g_menu_append_submenu(sec_sd, "Offline verf\u00fcgbar aufheben",
+			G_MENU_MODEL(sub_unspec));
+	g_object_unref(sub_unspec);
+	GMenu *sub_unpin = g_menu_new();
+	g_menu_append(sub_unpin, "Gesamtes Verzeichnis", "stv.sd-unpin-all");
+	g_menu_append(sub_unpin, "Auswahl",              "stv.sd-unpin-sel");
+	g_menu_append_submenu(sec_sd, "Cache leeren",
+			G_MENU_MODEL(sub_unpin));
+	g_object_unref(sub_unpin);
+	g_menu_append_section(gmenu, NULL, G_MENU_MODEL(sec_sd));
+	g_object_unref(sec_sd);
+}
+
 static void sond_treeviewfm_class_init(SondTreeviewFMClass *klass) {
 	G_OBJECT_CLASS(klass)->finalize = sond_treeviewfm_finalize;
 	G_OBJECT_CLASS(klass)->constructed = sond_treeviewfm_constructed;
 
 	SOND_TREEVIEW_CLASS(klass)->render_text_cell =
 			sond_treeviewfm_render_text_cell;
+
+	SOND_TREEVIEW_CLASS(klass)->gmenu = g_menu_new();
+	sond_treeviewfm_add_base_menu(SOND_TREEVIEW_CLASS(klass)->gmenu);
 
 	klass->signal_before_move = g_signal_new("before-move",
 			SOND_TYPE_TREEVIEWFM, G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_INT, 5,
@@ -1726,27 +1797,6 @@ static gint sond_treeviewfm_create_dir(SondTreeviewFM *stvfm, gboolean child,
 	}
 
 	return 0;
-}
-
-static void sond_treeviewfm_punkt_einfuegen_activate(GtkMenuItem *item,
-		gpointer data) {
-	gint rc = 0;
-	GError *error = NULL;
-	gboolean child = FALSE;
-
-	SondTreeviewFM *stvfm = (SondTreeviewFM*) data;
-
-	child = (gboolean) GPOINTER_TO_INT(
-			g_object_get_data( G_OBJECT(item), "kind" ));
-
-	rc = sond_treeviewfm_create_dir(stvfm, child, &error);
-	if (rc) {
-		display_message(SOND_GET_TOPLEVEL(stvfm),
-		 "Verzeichnis kann nicht eingefügt werden\n\n", error->message, NULL);
-		g_error_free(error);
-	}
-
-	return;
 }
 
 typedef struct _S_FM_Paste_Selection {
@@ -2312,31 +2362,6 @@ static gint sond_treeviewfm_paste_clipboard(SondTreeviewFM *stvfm, gboolean kind
 	return 0;
 }
 
-static void sond_treeviewfm_paste_activate(GtkMenuItem *item, gpointer data) {
-	gboolean kind = FALSE;
-	gint rc = 0;
-	GError *error = NULL;
-
-	SondTreeviewFM *stvfm = (SondTreeviewFM*) data;
-
-	kind = (gboolean) GPOINTER_TO_INT(
-			g_object_get_data( G_OBJECT(item), "kind" ));
-
-	if (sond_treeview_test_cursor_descendant(SOND_TREEVIEW(stvfm), kind))
-		display_message(SOND_GET_TOPLEVEL(stvfm),
-				"Unzulässiges Ziel: Abkömmling von zu verschiebendem Knoten",
-				NULL);
-
-	rc = sond_treeviewfm_paste_clipboard(stvfm, kind, &error);
-	if (rc) {
-		display_message(SOND_GET_TOPLEVEL(stvfm),
-				"Einfügen nicht möglich\n\n", error->message, NULL);
-		g_error_free(error);
-	}
-
-	return;
-}
-
 static gint sond_treeviewfm_foreach_loeschen(SondTreeview *stv,
 		GtkTreeIter *iter, gpointer data, GError **error) {
 	SondTVFMItem* stvfm_item = NULL;
@@ -2364,23 +2389,6 @@ static gint sond_treeviewfm_foreach_loeschen(SondTreeview *stv,
 	remove_item_from_tree(iter, stvfm_item);
 
 	return 0;
-}
-
-static void sond_treeviewfm_loeschen_activate(GtkMenuItem *item, gpointer data) {
-	gint rc = 0;
-	GError *error = NULL;
-
-	SondTreeviewFM *stvfm = (SondTreeviewFM*) data;
-
-	rc = sond_treeview_selection_foreach(SOND_TREEVIEW(stvfm),
-			sond_treeviewfm_foreach_loeschen, NULL, &error);
-	if (rc == -1) {
-		display_message(SOND_GET_TOPLEVEL(stvfm),
-				"Löschen nicht möglich\n\n", error->message, NULL);
-		g_error_free(error);
-	}
-
-	return;
 }
 
 static gint sond_treeviewfm_open(SondTVFMItem *stvfm_item,
@@ -2458,20 +2466,6 @@ static void open_item(GtkTreeView* tree_view, gboolean open_with) {
 				error->message, NULL);
 		g_error_free(error);
 	}
-
-	return;
-}
-
-static void sond_treeviewfm_datei_oeffnen_activate(GtkMenuItem *item,
-		gpointer data) {
-	open_item(GTK_TREE_VIEW(data), FALSE);
-
-	return;
-}
-
-static void sond_treeviewfm_datei_oeffnen_mit_activate(GtkMenuItem *item,
-		gpointer data) {
-	open_item(GTK_TREE_VIEW(data), TRUE);
 
 	return;
 }
@@ -2625,86 +2619,6 @@ static gint sond_treeviewfm_search(SondTreeview *stv, GtkTreeIter *iter,
 	return 0;
 }
 
-static void sond_treeviewfm_search_activate(GtkMenuItem *item, gpointer data) {
-	gboolean only_sel = FALSE;
-	gint rc = 0;
-	gchar *search_text = NULL;
-	SearchFS search_fs = { 0 };
-	gint ready = 0;
-	gint cancelled = 0;
-	GError* error = NULL;
-
-	SondTreeviewFM *stvfm = (SondTreeviewFM*) data;
-
-	only_sel = (gboolean) GPOINTER_TO_INT(
-			g_object_get_data( G_OBJECT(item), "sel" ));
-
-	if (only_sel
-			&& !gtk_tree_selection_count_selected_rows(
-					gtk_tree_view_get_selection(GTK_TREE_VIEW(stvfm)))) {
-		display_message(SOND_GET_TOPLEVEL(stvfm),
-				"Keine Punkte ausgewählt", NULL);
-		return;
-	}
-
-	rc = abfrage_frage(SOND_GET_TOPLEVEL(stvfm), "Dateisuche",
-			"Bitte Suchtext eingeben", &search_text);
-	if (rc != GTK_RESPONSE_YES || !g_strcmp0(search_text, "")) {
-		g_free(search_text);
-
-		return;
-	}
-
-	search_fs.arr_hits = g_ptr_array_new_with_free_func(g_free);
-	search_fs.exact_match = FALSE;
-	search_fs.case_sens = FALSE;
-	search_fs.atom_ready = &ready;
-	search_fs.atom_cancelled = &cancelled;
-
-	if (!search_fs.case_sens)
-		search_fs.needle = g_utf8_strdown(search_text, -1);
-	else
-		search_fs.needle = g_strdup(search_text);
-
-	search_fs.info_window = info_window_open(SOND_GET_TOPLEVEL(stvfm),
-			&cancelled, search_text);
-	g_free(search_text);
-
-	if (only_sel)
-		rc = sond_treeview_selection_foreach(SOND_TREEVIEW(stvfm),
-				sond_treeviewfm_search, &search_fs, &error);
-	else
-		rc = sond_treeviewfm_search(SOND_TREEVIEW(stvfm), NULL, &search_fs,
-				&error);
-
-	info_window_kill(search_fs.info_window);
-
-	g_free(search_fs.needle);
-
-	if (rc == -1) {
-		display_message(SOND_GET_TOPLEVEL(stvfm),
-				"Fehler bei Dateisuche\n\n", error->message, NULL);
-		g_error_free(error);
-		g_ptr_array_unref(search_fs.arr_hits);
-
-		return;
-	}
-
-	if (search_fs.arr_hits->len == 0) {
-		display_message(SOND_GET_TOPLEVEL(stvfm),
-				"Keine Datei gefunden", NULL);
-		g_ptr_array_unref(search_fs.arr_hits);
-
-		return;
-	}
-
-	sond_treeviewfm_show_hits(stvfm, search_fs.arr_hits);
-
-	g_ptr_array_unref(search_fs.arr_hits);
-
-	return;
-}
-
 static gint sond_tvfm_item_get_fileparts(SondTVFMItem *stvfm_item,
 		GHashTable* ht, GError **error) {
 	SondTVFMItemPrivate *stvfm_item_priv = sond_tvfm_item_get_instance_private(stvfm_item);
@@ -2776,132 +2690,248 @@ GHashTable* sond_treeviewfm_get_fileparts(SondTreeviewFM *stvfm, gboolean select
 		return ht;
 }
 
+/* --------------------------------------------------------------------------
+ * GSimpleAction-Wrapper fuer FM-Kontextmenu
+ * -------------------------------------------------------------------------- */
+static void sond_treeviewfm_action_einf_ge(GSimpleAction *a, GVariant *p,
+		gpointer d) {
+	gint rc = 0;
+	GError *error = NULL;
+	SondTreeviewFM *stvfm = (SondTreeviewFM*) d;
+	rc = sond_treeviewfm_create_dir(stvfm, FALSE, &error);
+	if (rc) {
+		display_message(SOND_GET_TOPLEVEL(stvfm),
+				"Verzeichnis kann nicht eingef\u00fcgt werden\n\n",
+				error->message, NULL);
+		g_error_free(error);
+	}
+}
+
+static void sond_treeviewfm_action_einf_up(GSimpleAction *a, GVariant *p,
+		gpointer d) {
+	gint rc = 0;
+	GError *error = NULL;
+	SondTreeviewFM *stvfm = (SondTreeviewFM*) d;
+	rc = sond_treeviewfm_create_dir(stvfm, TRUE, &error);
+	if (rc) {
+		display_message(SOND_GET_TOPLEVEL(stvfm),
+				"Verzeichnis kann nicht eingef\u00fcgt werden\n\n",
+				error->message, NULL);
+		g_error_free(error);
+	}
+}
+
+static void sond_treeviewfm_action_paste_ge(GSimpleAction *a, GVariant *p,
+		gpointer d) {
+	gint rc = 0;
+	GError *error = NULL;
+	SondTreeviewFM *stvfm = (SondTreeviewFM*) d;
+	if (sond_treeview_test_cursor_descendant(SOND_TREEVIEW(stvfm), FALSE))
+		display_message(SOND_GET_TOPLEVEL(stvfm),
+				"Unzul\u00e4ssiges Ziel: Abk\u00f6mmling von zu verschiebendem Knoten",
+				NULL);
+	rc = sond_treeviewfm_paste_clipboard(stvfm, FALSE, &error);
+	if (rc) {
+		display_message(SOND_GET_TOPLEVEL(stvfm),
+				"Einf\u00fcgen nicht m\u00f6glich\n\n", error->message, NULL);
+		g_error_free(error);
+	}
+}
+
+static void sond_treeviewfm_action_paste_up(GSimpleAction *a, GVariant *p,
+		gpointer d) {
+	gint rc = 0;
+	GError *error = NULL;
+	SondTreeviewFM *stvfm = (SondTreeviewFM*) d;
+	if (sond_treeview_test_cursor_descendant(SOND_TREEVIEW(stvfm), TRUE))
+		display_message(SOND_GET_TOPLEVEL(stvfm),
+				"Unzul\u00e4ssiges Ziel: Abk\u00f6mmling von zu verschiebendem Knoten",
+				NULL);
+	rc = sond_treeviewfm_paste_clipboard(stvfm, TRUE, &error);
+	if (rc) {
+		display_message(SOND_GET_TOPLEVEL(stvfm),
+				"Einf\u00fcgen nicht m\u00f6glich\n\n", error->message, NULL);
+		g_error_free(error);
+	}
+}
+
+static void sond_treeviewfm_action_loeschen(GSimpleAction *a, GVariant *p,
+		gpointer d) {
+	gint rc = 0;
+	GError *error = NULL;
+	SondTreeviewFM *stvfm = (SondTreeviewFM*) d;
+	rc = sond_treeview_selection_foreach(SOND_TREEVIEW(stvfm),
+			sond_treeviewfm_foreach_loeschen, NULL, &error);
+	if (rc == -1) {
+		display_message(SOND_GET_TOPLEVEL(stvfm),
+				"L\u00f6schen nicht m\u00f6glich\n\n", error->message, NULL);
+		g_error_free(error);
+	}
+}
+
+static void sond_treeviewfm_action_oeffnen(GSimpleAction *a, GVariant *p,
+		gpointer d) {
+	open_item(GTK_TREE_VIEW(d), FALSE);
+}
+
+static void sond_treeviewfm_action_oeffnen_mit(GSimpleAction *a, GVariant *p,
+		gpointer d) {
+	open_item(GTK_TREE_VIEW(d), TRUE);
+}
+
+static void sond_treeviewfm_action_search(GSimpleAction *a, GVariant *p,
+		gpointer d) {
+	gint rc = 0;
+	gchar *search_text = NULL;
+	SearchFS search_fs = { 0 };
+	gint ready = 0;
+	gint cancelled = 0;
+	GError *error = NULL;
+	SondTreeviewFM *stvfm = (SondTreeviewFM*) d;
+	rc = abfrage_frage(SOND_GET_TOPLEVEL(stvfm), "Dateisuche",
+			"Bitte Suchtext eingeben", &search_text);
+	if (rc != GTK_RESPONSE_YES || !g_strcmp0(search_text, "")) {
+		g_free(search_text);
+		return;
+	}
+	search_fs.arr_hits = g_ptr_array_new_with_free_func(g_free);
+	search_fs.exact_match = FALSE;
+	search_fs.case_sens = FALSE;
+	search_fs.atom_ready = &ready;
+	search_fs.atom_cancelled = &cancelled;
+	search_fs.needle = g_utf8_strdown(search_text, -1);
+	search_fs.info_window = info_window_open(SOND_GET_TOPLEVEL(stvfm),
+			&cancelled, search_text);
+	g_free(search_text);
+	rc = sond_treeviewfm_search(SOND_TREEVIEW(stvfm), NULL, &search_fs, &error);
+	info_window_kill(search_fs.info_window);
+	g_free(search_fs.needle);
+	if (rc == -1) {
+		display_message(SOND_GET_TOPLEVEL(stvfm),
+				"Fehler bei Dateisuche\n\n", error->message, NULL);
+		g_error_free(error);
+		g_ptr_array_unref(search_fs.arr_hits);
+		return;
+	}
+	if (search_fs.arr_hits->len == 0) {
+		display_message(SOND_GET_TOPLEVEL(stvfm), "Keine Datei gefunden", NULL);
+		g_ptr_array_unref(search_fs.arr_hits);
+		return;
+	}
+	sond_treeviewfm_show_hits(stvfm, search_fs.arr_hits);
+	g_ptr_array_unref(search_fs.arr_hits);
+}
+
+static void sond_treeviewfm_action_search_sel(GSimpleAction *a, GVariant *p,
+		gpointer d) {
+	gint rc = 0;
+	gchar *search_text = NULL;
+	SearchFS search_fs = { 0 };
+	gint ready = 0;
+	gint cancelled = 0;
+	GError *error = NULL;
+	SondTreeviewFM *stvfm = (SondTreeviewFM*) d;
+	if (!gtk_tree_selection_count_selected_rows(
+			gtk_tree_view_get_selection(GTK_TREE_VIEW(stvfm)))) {
+		display_message(SOND_GET_TOPLEVEL(stvfm),
+				"Keine Punkte ausgew\u00e4hlt", NULL);
+		return;
+	}
+	rc = abfrage_frage(SOND_GET_TOPLEVEL(stvfm), "Dateisuche",
+			"Bitte Suchtext eingeben", &search_text);
+	if (rc != GTK_RESPONSE_YES || !g_strcmp0(search_text, "")) {
+		g_free(search_text);
+		return;
+	}
+	search_fs.arr_hits = g_ptr_array_new_with_free_func(g_free);
+	search_fs.exact_match = FALSE;
+	search_fs.case_sens = FALSE;
+	search_fs.atom_ready = &ready;
+	search_fs.atom_cancelled = &cancelled;
+	search_fs.needle = g_utf8_strdown(search_text, -1);
+	search_fs.info_window = info_window_open(SOND_GET_TOPLEVEL(stvfm),
+			&cancelled, search_text);
+	g_free(search_text);
+	rc = sond_treeview_selection_foreach(SOND_TREEVIEW(stvfm),
+			sond_treeviewfm_search, &search_fs, &error);
+	info_window_kill(search_fs.info_window);
+	g_free(search_fs.needle);
+	if (rc == -1) {
+		display_message(SOND_GET_TOPLEVEL(stvfm),
+				"Fehler bei Dateisuche\n\n", error->message, NULL);
+		g_error_free(error);
+		g_ptr_array_unref(search_fs.arr_hits);
+		return;
+	}
+	if (search_fs.arr_hits->len == 0) {
+		display_message(SOND_GET_TOPLEVEL(stvfm), "Keine Datei gefunden", NULL);
+		g_ptr_array_unref(search_fs.arr_hits);
+		return;
+	}
+	sond_treeviewfm_show_hits(stvfm, search_fs.arr_hits);
+	g_ptr_array_unref(search_fs.arr_hits);
+}
+
 static void sond_treeviewfm_init_contextmenu(SondTreeviewFM *stvfm) {
-	GtkWidget *contextmenu = NULL;
+	/* Instanzspezifische Aktionen in die ActionGroup eintragen.
+	 * Die GMenu-Sections wurden bereits einmalig in class_init aufgebaut. */
+	GSimpleActionGroup *ag = sond_treeview_get_action_group(SOND_TREEVIEW(stvfm));
 
-	contextmenu = sond_treeview_get_contextmenu(SOND_TREEVIEW(stvfm));
+	GSimpleAction *act_einf_ge = g_simple_action_new("fm-einf-ge", NULL);
+	g_signal_connect(act_einf_ge, "activate",
+			G_CALLBACK(sond_treeviewfm_action_einf_ge), stvfm);
+	g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act_einf_ge));
+	g_object_unref(act_einf_ge);
 
-	//Trennblatt
-	GtkWidget *item_separator_0 = gtk_separator_menu_item_new();
-	gtk_menu_shell_prepend(GTK_MENU_SHELL(contextmenu), item_separator_0);
+	GSimpleAction *act_einf_up = g_simple_action_new("fm-einf-up", NULL);
+	g_signal_connect(act_einf_up, "activate",
+			G_CALLBACK(sond_treeviewfm_action_einf_up), stvfm);
+	g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act_einf_up));
+	g_object_unref(act_einf_up);
 
-	//Punkt einfügen
-	GtkWidget *item_punkt_einfuegen = gtk_menu_item_new_with_label(
-			"Punkt einfügen");
+	GSimpleAction *act_paste_ge = g_simple_action_new("fm-paste-ge", NULL);
+	g_signal_connect(act_paste_ge, "activate",
+			G_CALLBACK(sond_treeviewfm_action_paste_ge), stvfm);
+	g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act_paste_ge));
+	g_object_unref(act_paste_ge);
 
-	GtkWidget *menu_punkt_einfuegen = gtk_menu_new();
+	GSimpleAction *act_paste_up = g_simple_action_new("fm-paste-up", NULL);
+	g_signal_connect(act_paste_up, "activate",
+			G_CALLBACK(sond_treeviewfm_action_paste_up), stvfm);
+	g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act_paste_up));
+	g_object_unref(act_paste_up);
 
-	GtkWidget *item_punkt_einfuegen_ge = gtk_menu_item_new_with_label(
-			"Gleiche Ebene");
-	g_object_set_data(G_OBJECT(contextmenu), "item-punkt-einfuegen-ge",
-			item_punkt_einfuegen_ge);
-	g_signal_connect(G_OBJECT(item_punkt_einfuegen_ge), "activate",
-			G_CALLBACK(sond_treeviewfm_punkt_einfuegen_activate),
-			(gpointer ) stvfm);
+	GSimpleAction *act_loeschen = g_simple_action_new("fm-loeschen", NULL);
+	g_signal_connect(act_loeschen, "activate",
+			G_CALLBACK(sond_treeviewfm_action_loeschen), stvfm);
+	g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act_loeschen));
+	g_object_unref(act_loeschen);
 
-	GtkWidget *item_punkt_einfuegen_up = gtk_menu_item_new_with_label(
-			"Unterebene");
-	g_object_set_data(G_OBJECT(contextmenu), "item-punkt-einfuegen-up",
-			item_punkt_einfuegen_up);
-	g_object_set_data(G_OBJECT(item_punkt_einfuegen_up), "kind",
-			GINT_TO_POINTER(1));
-	g_signal_connect(G_OBJECT(item_punkt_einfuegen_up), "activate",
-			G_CALLBACK(sond_treeviewfm_punkt_einfuegen_activate),
-			(gpointer ) stvfm);
+	GSimpleAction *act_oeffnen = g_simple_action_new("fm-oeffnen", NULL);
+	g_signal_connect(act_oeffnen, "activate",
+			G_CALLBACK(sond_treeviewfm_action_oeffnen), stvfm);
+	g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act_oeffnen));
+	g_object_unref(act_oeffnen);
 
-	gtk_menu_shell_append(GTK_MENU_SHELL(menu_punkt_einfuegen),
-			item_punkt_einfuegen_ge);
-	gtk_menu_shell_append(GTK_MENU_SHELL(menu_punkt_einfuegen),
-			item_punkt_einfuegen_up);
+	GSimpleAction *act_oeffnen_mit = g_simple_action_new("fm-oeffnen-mit", NULL);
+	g_signal_connect(act_oeffnen_mit, "activate",
+			G_CALLBACK(sond_treeviewfm_action_oeffnen_mit), stvfm);
+	g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act_oeffnen_mit));
+	g_object_unref(act_oeffnen_mit);
 
-	gtk_menu_item_set_submenu(GTK_MENU_ITEM(item_punkt_einfuegen),
-			menu_punkt_einfuegen);
+	GSimpleAction *act_search = g_simple_action_new("fm-search", NULL);
+	g_signal_connect(act_search, "activate",
+			G_CALLBACK(sond_treeviewfm_action_search), stvfm);
+	g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act_search));
+	g_object_unref(act_search);
 
-	gtk_menu_shell_prepend(GTK_MENU_SHELL(contextmenu), item_punkt_einfuegen);
+	GSimpleAction *act_search_sel = g_simple_action_new("fm-search-sel", NULL);
+	g_signal_connect(act_search_sel, "activate",
+			G_CALLBACK(sond_treeviewfm_action_search_sel), stvfm);
+	g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act_search_sel));
+	g_object_unref(act_search_sel);
 
-	//Einfügen
-	GtkWidget *item_paste = gtk_menu_item_new_with_label("Einfügen");
-
-	GtkWidget *menu_paste = gtk_menu_new();
-
-	GtkWidget *item_paste_ge = gtk_menu_item_new_with_label("Gleiche Ebene");
-	g_object_set_data(G_OBJECT(contextmenu), "item-paste-ge", item_paste_ge);
-	g_signal_connect(G_OBJECT(item_paste_ge), "activate",
-			G_CALLBACK(sond_treeviewfm_paste_activate), (gpointer ) stvfm);
-	gtk_menu_shell_append(GTK_MENU_SHELL(menu_paste), item_paste_ge);
-
-	GtkWidget *item_paste_up = gtk_menu_item_new_with_label("Unterebene");
-	g_object_set_data(G_OBJECT(item_paste_up), "kind", GINT_TO_POINTER(1));
-	g_object_set_data(G_OBJECT(contextmenu), "item-paste-up", item_paste_up);
-	g_signal_connect(G_OBJECT(item_paste_up), "activate",
-			G_CALLBACK(sond_treeviewfm_paste_activate), (gpointer ) stvfm);
-	gtk_menu_shell_append(GTK_MENU_SHELL(menu_paste), item_paste_up);
-
-	gtk_menu_item_set_submenu(GTK_MENU_ITEM(item_paste), menu_paste);
-
-	gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu), item_paste);
-
-	//Punkt(e) löschen
-	GtkWidget *item_loeschen = gtk_menu_item_new_with_label("Löschen");
-	g_object_set_data(G_OBJECT(contextmenu), "item-loeschen", item_loeschen);
-	g_signal_connect(G_OBJECT(item_loeschen), "activate",
-			G_CALLBACK(sond_treeviewfm_loeschen_activate), (gpointer ) stvfm);
-	gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu), item_loeschen);
-
-	//Trennblatt
-	GtkWidget *item_separator_1 = gtk_separator_menu_item_new();
-	gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu), item_separator_1);
-
-	//Datei Öffnen
-	GtkWidget *item_datei_oeffnen = gtk_menu_item_new_with_label("Öffnen");
-	g_object_set_data(G_OBJECT(contextmenu), "item-datei-oeffnen",
-			item_datei_oeffnen);
-	g_signal_connect(item_datei_oeffnen, "activate",
-			G_CALLBACK(sond_treeviewfm_datei_oeffnen_activate),
-			(gpointer ) stvfm);
-	gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu), item_datei_oeffnen);
-
-	//Datei Öffnen mit
-	GtkWidget *item_datei_oeffnen_mit = gtk_menu_item_new_with_label(
-			"Öffnen mit");
-	g_object_set_data(G_OBJECT(contextmenu), "item-datei-oeffnen-mit",
-			item_datei_oeffnen_mit);
-	g_object_set_data(G_OBJECT(item_datei_oeffnen_mit), "open-with",
-			GINT_TO_POINTER(1));
-	g_signal_connect(item_datei_oeffnen_mit, "activate",
-			G_CALLBACK(sond_treeviewfm_datei_oeffnen_mit_activate),
-			(gpointer ) stvfm);
-	gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu), item_datei_oeffnen_mit);
-
-	//In Projektverzeichnis suchen
-	GtkWidget *item_search = gtk_menu_item_new_with_label("Dateisuche");
-
-	GtkWidget *menu_search = gtk_menu_new();
-
-	GtkWidget *item_search_all = gtk_menu_item_new_with_label(
-			"Gesamtes Verzeichnis");
-	g_object_set_data(G_OBJECT(contextmenu), "item-search-all",
-			item_search_all);
-	g_signal_connect(G_OBJECT(item_search_all), "activate",
-			G_CALLBACK(sond_treeviewfm_search_activate), (gpointer ) stvfm);
-	gtk_menu_shell_append(GTK_MENU_SHELL(menu_search), item_search_all);
-
-	GtkWidget *item_search_sel = gtk_menu_item_new_with_label(
-			"Nur markierte Punkte");
-	g_object_set_data(G_OBJECT(item_search_sel), "sel", GINT_TO_POINTER(1));
-	g_object_set_data(G_OBJECT(contextmenu), "item-search-sel",
-			item_search_sel);
-	g_signal_connect(G_OBJECT(item_search_sel), "activate",
-			G_CALLBACK(sond_treeviewfm_search_activate), (gpointer ) stvfm);
-	gtk_menu_shell_append(GTK_MENU_SHELL(menu_search), item_search_sel);
-
-	gtk_menu_item_set_submenu(GTK_MENU_ITEM(item_search), menu_search);
-
-	gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu), item_search);
-
-	gtk_widget_show_all(contextmenu);
-
-	/* SeaDrive pin/unpin menu */
+	/* SeaDrive-Aktionen */
 	sond_treeviewfm_seadrive_init_contextmenu(stvfm);
 
 	return;

@@ -19,6 +19,7 @@ G_DECLARE_DERIVABLE_TYPE(ZondTreeview, zond_treeview, ZOND, TREEVIEW, SondTreevi
 
 struct _ZondTreeviewClass {
 	SondTreeviewClass parent_class;
+	GMenu *gmenu_icons; /* Icon-Submenu - wird in init_contextmenu befuellt */
 };
 
 void zond_treeview_cursor_changed(ZondTreeview*, gpointer);

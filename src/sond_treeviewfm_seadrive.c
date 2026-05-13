@@ -693,14 +693,17 @@ static void apply_pin_state_to_root(SondTreeviewFM *stvfm, guint pin_state)
 }
 
 /* ------------------------------------------------------------------ */
-/*  Context menu callback                                             */
+/*  GSimpleAction-Callback (ersetzt seadrive_menu_activate)           */
 /* ------------------------------------------------------------------ */
 
-static void seadrive_menu_activate(GtkMenuItem *item, gpointer data)
+static void seadrive_action_activate(GSimpleAction *action, GVariant *parameter,
+        gpointer data)
 {
     SondTreeviewFM *stvfm = SOND_TREEVIEWFM(data);
-    guint    pin_state = (guint)GPOINTER_TO_INT(g_object_get_data(G_OBJECT(item), "pin_state"));
-    gboolean sel_only  = (gboolean)GPOINTER_TO_INT(g_object_get_data(G_OBJECT(item), "sel"));
+    guint    pin_state = (guint) GPOINTER_TO_INT(
+            g_object_get_data(G_OBJECT(action), "pin_state"));
+    gboolean sel_only  = (gboolean) GPOINTER_TO_INT(
+            g_object_get_data(G_OBJECT(action), "sel"));
     GError  *error = NULL;
 
     if (sel_only) {
@@ -722,24 +725,8 @@ static void seadrive_menu_activate(GtkMenuItem *item, gpointer data)
         apply_pin_state_to_root(stvfm, pin_state);
     }
 
-    /* Neuzeichnen nur bei UNSPECIFIED/UNPINNED nötig - bei PINNED
-     * übernimmt der Watcher das Neuzeichnen via Attribut-Events */
     if (pin_state != STVFM_PIN_STATE_PINNED)
         gtk_widget_queue_draw(GTK_WIDGET(stvfm));
-}
-
-/* ------------------------------------------------------------------ */
-/*  Helper: create one menu item                                      */
-/* ------------------------------------------------------------------ */
-
-static GtkWidget *make_pin_item(const gchar *label, guint pin_state,
-                                gboolean sel_only, SondTreeviewFM *stvfm)
-{
-    GtkWidget *item = gtk_menu_item_new_with_label(label);
-    g_object_set_data(G_OBJECT(item), "pin_state", GINT_TO_POINTER((gint)pin_state));
-    g_object_set_data(G_OBJECT(item), "sel",       GINT_TO_POINTER((gint)sel_only));
-    g_signal_connect(item, "activate", G_CALLBACK(seadrive_menu_activate), stvfm);
-    return item;
 }
 
 /* ------------------------------------------------------------------ */
@@ -748,50 +735,30 @@ static GtkWidget *make_pin_item(const gchar *label, guint pin_state,
 
 void sond_treeviewfm_seadrive_init_contextmenu(SondTreeviewFM *stvfm)
 {
-    GtkWidget *contextmenu = sond_treeview_get_contextmenu(SOND_TREEVIEW(stvfm));
-    GtkWidget *item_sep    = gtk_separator_menu_item_new();
-    GtkWidget *item_top    = gtk_menu_item_new_with_label("SeaDrive");
-    GtkWidget *menu_sub    = gtk_menu_new();
+    /* Nur noch Aktionen registrieren - GMenu-Sections wurden
+     * bereits in sond_treeviewfm_class_init aufgebaut. */
+    GSimpleActionGroup *ag = sond_treeview_get_action_group(SOND_TREEVIEW(stvfm));
 
-    gtk_menu_item_set_submenu(GTK_MENU_ITEM(item_top), menu_sub);
+    struct { const gchar *name; guint pin_state; gboolean sel; } actions[] = {
+        { "sd-pin-all",     STVFM_PIN_STATE_PINNED,      FALSE },
+        { "sd-pin-sel",     STVFM_PIN_STATE_PINNED,      TRUE  },
+        { "sd-unspec-all",  STVFM_PIN_STATE_UNSPECIFIED, FALSE },
+        { "sd-unspec-sel",  STVFM_PIN_STATE_UNSPECIFIED, TRUE  },
+        { "sd-unpin-all",   STVFM_PIN_STATE_UNPINNED,    FALSE },
+        { "sd-unpin-sel",   STVFM_PIN_STATE_UNPINNED,    TRUE  },
+    };
 
-    /* --- Immer offline verfügbar --- */
-    GtkWidget *item_pin    = gtk_menu_item_new_with_label("Immer offline verf\u00fcgbar");
-    GtkWidget *menu_pin    = gtk_menu_new();
-    gtk_menu_item_set_submenu(GTK_MENU_ITEM(item_pin), menu_pin);
-    gtk_menu_shell_append(GTK_MENU_SHELL(menu_pin),
-        make_pin_item("Gesamtes Verzeichnis", STVFM_PIN_STATE_PINNED, FALSE, stvfm));
-    gtk_menu_shell_append(GTK_MENU_SHELL(menu_pin),
-        make_pin_item("Auswahl", STVFM_PIN_STATE_PINNED, TRUE, stvfm));
-    gtk_menu_shell_append(GTK_MENU_SHELL(menu_sub), item_pin);
-
-    /* --- Offline verfügbar aufheben --- */
-    GtkWidget *item_unspec    = gtk_menu_item_new_with_label("Offline verf\u00fcgbar aufheben");
-    GtkWidget *menu_unspec    = gtk_menu_new();
-    gtk_menu_item_set_submenu(GTK_MENU_ITEM(item_unspec), menu_unspec);
-    gtk_menu_shell_append(GTK_MENU_SHELL(menu_unspec),
-        make_pin_item("Gesamtes Verzeichnis", STVFM_PIN_STATE_UNSPECIFIED, FALSE, stvfm));
-    gtk_menu_shell_append(GTK_MENU_SHELL(menu_unspec),
-        make_pin_item("Auswahl", STVFM_PIN_STATE_UNSPECIFIED, TRUE, stvfm));
-    gtk_menu_shell_append(GTK_MENU_SHELL(menu_sub), item_unspec);
-
-    /* --- Cache leeren --- */
-    GtkWidget *item_unpin    = gtk_menu_item_new_with_label("Cache leeren");
-    GtkWidget *menu_unpin    = gtk_menu_new();
-    gtk_menu_item_set_submenu(GTK_MENU_ITEM(item_unpin), menu_unpin);
-    gtk_menu_shell_append(GTK_MENU_SHELL(menu_unpin),
-        make_pin_item("Gesamtes Verzeichnis", STVFM_PIN_STATE_UNPINNED, FALSE, stvfm));
-    gtk_menu_shell_append(GTK_MENU_SHELL(menu_unpin),
-        make_pin_item("Auswahl", STVFM_PIN_STATE_UNPINNED, TRUE, stvfm));
-    gtk_menu_shell_append(GTK_MENU_SHELL(menu_sub), item_unpin);
-
-    gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu), item_sep);
-    gtk_menu_shell_append(GTK_MENU_SHELL(contextmenu), item_top);
-    gtk_widget_show_all(item_top);
-    gtk_widget_show(item_sep);
-    /* initial deaktiviert - wird in set_root aktiviert wenn SeaDrive-Pfad */
-    gtk_widget_set_sensitive(item_top, FALSE);
-    g_object_set_data(G_OBJECT(stvfm), "seadrive-menu-item", item_top);
+    for (guint i = 0; i < G_N_ELEMENTS(actions); i++) {
+        GSimpleAction *act = g_simple_action_new(actions[i].name, NULL);
+        g_object_set_data(G_OBJECT(act), "pin_state",
+                GINT_TO_POINTER((gint) actions[i].pin_state));
+        g_object_set_data(G_OBJECT(act), "sel",
+                GINT_TO_POINTER((gint) actions[i].sel));
+        g_signal_connect(act, "activate",
+                G_CALLBACK(seadrive_action_activate), stvfm);
+        g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act));
+        g_object_unref(act);
+    }
 }
 
 #endif /* _WIN32 */

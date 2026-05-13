@@ -55,6 +55,11 @@ struct _SondTreeviewFMClass {
 	guint signal_seadrive_status;
 };
 
+/* Haengt die Basis-Section von SondTreeview plus alle FM-Sections an gmenu.
+ * Wird von abgeleiteten Klassen in deren class_init aufgerufen,
+ * nachdem sie ein eigenes GMenu angelegt haben. */
+void sond_treeviewfm_add_base_menu(GMenu *gmenu);
+
 SondTVFMItemType sond_tvfm_item_get_item_type(SondTVFMItem*);
 
 gchar const* sond_tvfm_item_get_path_or_section(SondTVFMItem *);
