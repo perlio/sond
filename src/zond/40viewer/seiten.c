@@ -224,7 +224,7 @@ seiten_abfrage_seiten(PdfViewer *pv, const gchar *title, gint *winkel,
 
 	gtk_widget_show_all(dialog);
 
-	rc = gtk_dialog_run(GTK_DIALOG(dialog));
+	rc = my_dialog_run(GTK_DIALOG(dialog));
 
 	if (rc == GTK_RESPONSE_OK) {
 		GArray *arr_seiten_pv = NULL;
@@ -1009,7 +1009,7 @@ static gint seiten_abfrage_seitenzahl(PdfViewer *pv, guint *num) {
 	gtk_widget_show_all(dialog);
 	gtk_widget_grab_focus(entry);
 
-	res = gtk_dialog_run(GTK_DIALOG(dialog));
+	res = my_dialog_run(GTK_DIALOG(dialog));
 	rc = string_to_guint(gtk_entry_get_text(GTK_ENTRY(entry)), num);
 	if (rc)
 		res = -1;

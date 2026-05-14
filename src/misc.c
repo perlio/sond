@@ -44,6 +44,32 @@
  *   text1 darf nicht NULL sein
  *   Abschluß der Liste mit NULL
  */
+static void my_dialog_run_response(GtkDialog *dialog, gint response,
+		gpointer data) {
+	*(gint*) data = response;
+}
+
+gint my_dialog_run(GtkDialog *dialog) {
+	gint result = GTK_RESPONSE_NONE;
+	GMainLoop *loop = g_main_loop_new(NULL, FALSE);
+
+	g_signal_connect(dialog, "response",
+			G_CALLBACK(my_dialog_run_response), &result);
+	g_signal_connect_swapped(dialog, "response",
+			G_CALLBACK(g_main_loop_quit), loop);
+
+	gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
+	gtk_widget_show_all(GTK_WIDGET(dialog));
+	gtk_grab_add(GTK_WIDGET(dialog));
+
+	g_main_loop_run(loop);
+
+	gtk_grab_remove(GTK_WIDGET(dialog));
+	g_main_loop_unref(loop);
+
+	return result;
+}
+
 void display_message(GtkWidget *window, ...) {
 	va_list ap;
 	gchar *message = NULL;
@@ -60,7 +86,7 @@ void display_message(GtkWidget *window, ...) {
 			message);
 	g_free(message);
 
-	gtk_dialog_run(GTK_DIALOG(dialog));
+	my_dialog_run(GTK_DIALOG(dialog));
 
 	gtk_widget_destroy(dialog);
 
@@ -68,34 +94,34 @@ void display_message(GtkWidget *window, ...) {
 }
 
 void display_error(GtkWidget *window, gchar const *error, gchar const *errmsg) {
-	GtkWidget *message_area = NULL;
-	GtkWidget *swindow = NULL;
-	GtkWidget *textview = NULL;
-	GtkTextBuffer *textbuffer = NULL;
-
 	GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(window),
-			GTK_DIALOG_DESTROY_WITH_PARENT, GTK_MESSAGE_INFO, GTK_BUTTONS_CLOSE,
-			error);
+			GTK_DIALOG_DESTROY_WITH_PARENT, GTK_MESSAGE_ERROR, GTK_BUTTONS_CLOSE,
+			"%s", error);
 
-	message_area = gtk_message_dialog_get_message_area(
-			GTK_MESSAGE_DIALOG(dialog));
-	swindow = gtk_scrolled_window_new( NULL, NULL);
-	textbuffer = gtk_text_buffer_new( NULL);
-	gtk_text_buffer_set_text(textbuffer, errmsg, -1);
+	if (errmsg) {
+		GtkWidget *message_area = gtk_message_dialog_get_message_area(
+				GTK_MESSAGE_DIALOG(dialog));
+		GtkTextBuffer *textbuffer = gtk_text_buffer_new(NULL);
+		gtk_text_buffer_set_text(textbuffer, errmsg, -1);
+		GtkWidget *textview = gtk_text_view_new_with_buffer(textbuffer);
+		gtk_text_view_set_editable(GTK_TEXT_VIEW(textview), FALSE);
+		gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(textview), GTK_WRAP_WORD_CHAR);
+		GtkWidget *swindow = gtk_scrolled_window_new(NULL, NULL);
+		gtk_scrolled_window_set_propagate_natural_height(
+				GTK_SCROLLED_WINDOW(swindow), TRUE);
+		gtk_scrolled_window_set_propagate_natural_width(
+				GTK_SCROLLED_WINDOW(swindow), TRUE);
+#if GTK_MAJOR_VERSION >= 4
+		gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(swindow), textview);
+		gtk_box_append(GTK_BOX(message_area), swindow);
+#else
+		gtk_container_add(GTK_CONTAINER(swindow), textview);
+		gtk_box_pack_start(GTK_BOX(message_area), swindow, FALSE, FALSE, 0);
+		gtk_widget_show_all(message_area);
+#endif
+	}
 
-	textview = gtk_text_view_new_with_buffer(textbuffer);
-
-	gtk_container_add(GTK_CONTAINER(swindow), textview);
-	gtk_box_pack_start(GTK_BOX(message_area), swindow, FALSE, FALSE, 0);
-	gtk_scrolled_window_set_propagate_natural_height(
-			GTK_SCROLLED_WINDOW(swindow), TRUE);
-	gtk_scrolled_window_set_propagate_natural_width(
-			GTK_SCROLLED_WINDOW(swindow), TRUE);
-
-	gtk_widget_show_all(message_area);
-
-	gtk_dialog_run(GTK_DIALOG(dialog));
-
+	my_dialog_run(GTK_DIALOG(dialog));
 	gtk_widget_destroy(dialog);
 
 	return;
@@ -155,7 +181,7 @@ gint dialog_with_buttons(GtkWidget *window, const gchar *message,
 				(gpointer ) dialog);
 	}
 
-	res = gtk_dialog_run(GTK_DIALOG(dialog));
+	res = my_dialog_run(GTK_DIALOG(dialog));
 
 	if (text)
 		*text = g_strdup(gtk_entry_get_text( GTK_ENTRY(entry) ));
@@ -221,7 +247,7 @@ choose_file(const GtkWidget *window, const gchar *path,
 	if (action == GTK_FILE_CHOOSER_ACTION_SAVE && ext)
 		gtk_file_chooser_set_current_name(GTK_FILE_CHOOSER(dialog), ext);
 
-	rc = gtk_dialog_run(GTK_DIALOG(dialog));
+	rc = my_dialog_run(GTK_DIALOG(dialog));
 	if (rc == GTK_RESPONSE_ACCEPT) {
 		filename = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
 		for (gchar *p = filename; *p; p++) {
@@ -312,7 +338,7 @@ void info_window_close(InfoWindow *info_window) {
 	gtk_button_set_label(GTK_BUTTON(button), "Schließen");
 	gtk_widget_grab_focus(button);
 
-	gtk_dialog_run(GTK_DIALOG(info_window->dialog));
+	my_dialog_run(GTK_DIALOG(info_window->dialog));
 
 	info_window_kill(info_window);
 

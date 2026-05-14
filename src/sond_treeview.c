@@ -25,17 +25,16 @@ typedef struct {
 	GtkCellRenderer *renderer_icon;
 	GtkCellRenderer *renderer_text;
 	gint id;
-	GtkWidget *contextmenu;       /* GTK3: GtkMenu, GTK4: GtkPopoverMenu */
+	GtkWidget *contextmenu;       /* GtkPopoverMenu (GTK3 + GTK4) */
 	GSimpleActionGroup *action_group; /* instanzspezifische Aktionsgruppe */
+	GtkEventController *key_controller;
 } SondTreeviewPrivate;
 
 G_DEFINE_TYPE_WITH_PRIVATE(SondTreeview, sond_treeview, GTK_TYPE_TREE_VIEW)
 
 /* --------------------------------------------------------------------------
- * Popup-Menu GTK3/4 getrennt
+ * Popup-Menu
  * -------------------------------------------------------------------------- */
-#if GTK_MAJOR_VERSION >= 4
-
 static void sond_treeview_show_popupmenu(SondTreeview *stv, gdouble x,
 		gdouble y) {
 	SondTreeviewPrivate *stv_priv = sond_treeview_get_instance_private(stv);
@@ -74,44 +73,6 @@ static void sond_treeview_gesture_pressed(GtkGestureClick *gesture,
 	sond_treeview_show_popupmenu(stv, x, y);
 }
 
-#else /* GTK3 */
-
-static gboolean sond_treeview_show_popupmenu(SondTreeview *stv,
-		GdkEventButton *event, GtkMenu *contextmenu) {
-	GtkTreePath *path = NULL;
-	gboolean ret = FALSE;
-
-	if (((event->button) != 3) || (event->type != GDK_BUTTON_PRESS))
-		return FALSE;
-
-	gtk_tree_view_get_path_at_pos(GTK_TREE_VIEW(stv), event->x, event->y,
-			&path, NULL, NULL, NULL);
-	if (!path) {
-		GtkTreeIter iter = { 0 };
-
-		if (gtk_tree_model_get_iter_first(
-				gtk_tree_view_get_model(GTK_TREE_VIEW(stv)), &iter))
-			return FALSE;
-		else if (!gtk_widget_has_focus(GTK_WIDGET(stv)))
-			gtk_widget_grab_focus(GTK_WIDGET(stv));
-	} else {
-		if (!gtk_widget_has_focus(GTK_WIDGET(stv))) {
-			gtk_tree_view_set_cursor(GTK_TREE_VIEW(stv), path, NULL, FALSE);
-			gtk_widget_grab_focus(GTK_WIDGET(stv));
-		} else if (gtk_tree_selection_path_is_selected(
-				gtk_tree_view_get_selection(GTK_TREE_VIEW(stv)), path))
-			ret = TRUE;
-
-		gtk_tree_path_free(path);
-	}
-
-	gtk_menu_popup_at_pointer(contextmenu, NULL);
-
-	return ret;
-}
-
-#endif /* GTK_MAJOR_VERSION */
-
 /* --------------------------------------------------------------------------
  * finalize
  * -------------------------------------------------------------------------- */
@@ -119,14 +80,10 @@ static void sond_treeview_finalize(GObject *object) {
 	SondTreeviewPrivate *stv_priv = sond_treeview_get_instance_private(
 			SOND_TREEVIEW(object));
 
-#if GTK_MAJOR_VERSION >= 4
 	if (stv_priv->contextmenu) {
 		gtk_widget_unparent(stv_priv->contextmenu);
 		stv_priv->contextmenu = NULL;
 	}
-#else
-	stv_priv->contextmenu = NULL;
-#endif
 
 	g_clear_object(&stv_priv->action_group);
 
@@ -158,7 +115,6 @@ static void sond_treeview_constructed(GObject *object) {
 	gtk_widget_insert_action_group(GTK_WIDGET(stv), "stv",
 			G_ACTION_GROUP(stv_priv->action_group));
 
-#if GTK_MAJOR_VERSION >= 4
 	stv_priv->contextmenu = gtk_popover_menu_new_from_model(
 			G_MENU_MODEL(gmenu));
 	gtk_widget_set_parent(stv_priv->contextmenu, GTK_WIDGET(stv));
@@ -170,17 +126,6 @@ static void sond_treeview_constructed(GObject *object) {
 	g_signal_connect(gesture, "pressed",
 			G_CALLBACK(sond_treeview_gesture_pressed), stv);
 	gtk_widget_add_controller(GTK_WIDGET(stv), GTK_EVENT_CONTROLLER(gesture));
-
-#else /* GTK3 */
-	stv_priv->contextmenu = gtk_menu_new_from_model(
-			G_MENU_MODEL(gmenu));
-	gtk_menu_attach_to_widget(GTK_MENU(stv_priv->contextmenu),
-			GTK_WIDGET(stv), NULL);
-	gtk_widget_show_all(stv_priv->contextmenu);
-	g_signal_connect(stv, "button-press-event",
-			G_CALLBACK(sond_treeview_show_popupmenu),
-			(gpointer) stv_priv->contextmenu);
-#endif
 
 	G_OBJECT_CLASS(sond_treeview_parent_class)->constructed(object);
 
@@ -213,15 +158,10 @@ static void sond_treeview_class_init(SondTreeviewClass *klass) {
 static void renderer_text_editing_canceled(GtkCellRenderer *renderer,
 		gpointer data) {
 	SondTreeview *stv = (SondTreeview*) data;
+	SondTreeviewPrivate *stv_priv = sond_treeview_get_instance_private(stv);
 
-#if GTK_MAJOR_VERSION >= 4
-	GtkEventController *ctrl = GTK_EVENT_CONTROLLER(
-			g_object_get_data(G_OBJECT(stv), "key-controller"));
-	if (ctrl)
-		gtk_event_controller_set_propagation_phase(ctrl, GTK_PHASE_BUBBLE);
-#else
-	g_object_set_data(G_OBJECT(stv), "editing", GINT_TO_POINTER(0));
-#endif
+	gtk_event_controller_set_propagation_phase(
+			stv_priv->key_controller, GTK_PHASE_BUBBLE);
 
 	return;
 }
@@ -231,6 +171,7 @@ static void sond_treeview_text_edited(GtkCellRenderer *cell,
 	GtkTreeIter iter = { 0 };
 
 	SondTreeview *stv = (SondTreeview*) data;
+	SondTreeviewPrivate *stv_priv = sond_treeview_get_instance_private(stv);
 	SondTreeviewClass *klass = SOND_TREEVIEW_GET_CLASS(stv);
 
 	gtk_tree_model_get_iter_from_string(
@@ -239,14 +180,8 @@ static void sond_treeview_text_edited(GtkCellRenderer *cell,
 	if (klass->text_edited)
 		klass->text_edited(stv, &iter, new_text);
 
-#if GTK_MAJOR_VERSION >= 4
-	GtkEventController *ctrl = GTK_EVENT_CONTROLLER(
-			g_object_get_data(G_OBJECT(stv), "key-controller"));
-	if (ctrl)
-		gtk_event_controller_set_propagation_phase(ctrl, GTK_PHASE_BUBBLE);
-#else
-	g_object_set_data(G_OBJECT(stv), "editing", GINT_TO_POINTER(0));
-#endif
+	gtk_event_controller_set_propagation_phase(
+			stv_priv->key_controller, GTK_PHASE_BUBBLE);
 
 	return;
 }
@@ -254,15 +189,10 @@ static void sond_treeview_text_edited(GtkCellRenderer *cell,
 static void renderer_text_editing_started(GtkCellRenderer *renderer,
 		GtkEditable *editable, const gchar *path, gpointer data) {
 	SondTreeview *stv = (SondTreeview*) data;
+	SondTreeviewPrivate *stv_priv = sond_treeview_get_instance_private(stv);
 
-#if GTK_MAJOR_VERSION >= 4
-	GtkEventController *ctrl = GTK_EVENT_CONTROLLER(
-			g_object_get_data(G_OBJECT(stv), "key-controller"));
-	if (ctrl)
-		gtk_event_controller_set_propagation_phase(ctrl, GTK_PHASE_NONE);
-#else
-	g_object_set_data(G_OBJECT(stv), "editing", GINT_TO_POINTER(1));
-#endif
+	gtk_event_controller_set_propagation_phase(
+			stv_priv->key_controller, GTK_PHASE_NONE);
 
 	return;
 }
@@ -451,6 +381,12 @@ static void sond_treeview_init(SondTreeview *stv) {
 			G_CALLBACK(renderer_text_editing_canceled), stv);
 	g_signal_connect(stv_private->renderer_text, "edited",
 			G_CALLBACK(sond_treeview_text_edited), stv);
+
+	/* KeyController — wird beim Editieren deaktiviert */
+	stv_private->key_controller = gtk_event_controller_key_new(
+			GTK_WIDGET(stv));
+	gtk_event_controller_set_propagation_phase(
+			stv_private->key_controller, GTK_PHASE_BUBBLE);
 
 	return;
 }

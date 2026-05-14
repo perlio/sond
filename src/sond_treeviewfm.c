@@ -1515,8 +1515,8 @@ void sond_treeviewfm_add_base_menu(GMenu *gmenu) {
 
 	GMenu *sec_einf = g_menu_new();
 	GMenu *sub_einf = g_menu_new();
-	g_menu_append(sub_einf, "Gleiche Ebene", "stv.fm-einf-ge");
-	g_menu_append(sub_einf, "Unterebene",    "stv.fm-einf-up");
+	g_menu_append(sub_einf, "Gleiche Ebene", "stv.einf-ge");
+	g_menu_append(sub_einf, "Unterebene",    "stv.einf-up");
 	g_menu_append_submenu(sec_einf, "Punkt einf\u00fcgen",
 			G_MENU_MODEL(sub_einf));
 	g_object_unref(sub_einf);
@@ -1525,8 +1525,8 @@ void sond_treeviewfm_add_base_menu(GMenu *gmenu) {
 
 	GMenu *sec_paste = g_menu_new();
 	GMenu *sub_paste = g_menu_new();
-	g_menu_append(sub_paste, "Gleiche Ebene", "stv.fm-paste-ge");
-	g_menu_append(sub_paste, "Unterebene",    "stv.fm-paste-up");
+	g_menu_append(sub_paste, "Gleiche Ebene", "stv.paste-ge");
+	g_menu_append(sub_paste, "Unterebene",    "stv.paste-up");
 	g_menu_append_submenu(sec_paste, "Einf\u00fcgen",
 			G_MENU_MODEL(sub_paste));
 	g_object_unref(sub_paste);
@@ -1534,20 +1534,20 @@ void sond_treeviewfm_add_base_menu(GMenu *gmenu) {
 	g_object_unref(sec_paste);
 
 	GMenu *sec_loeschen = g_menu_new();
-	g_menu_append(sec_loeschen, "L\u00f6schen", "stv.fm-loeschen");
+	g_menu_append(sec_loeschen, "L\u00f6schen", "stv.loeschen");
 	g_menu_append_section(gmenu, NULL, G_MENU_MODEL(sec_loeschen));
 	g_object_unref(sec_loeschen);
 
 	GMenu *sec_oeffnen = g_menu_new();
-	g_menu_append(sec_oeffnen, "\u00d6ffnen",     "stv.fm-oeffnen");
-	g_menu_append(sec_oeffnen, "\u00d6ffnen mit", "stv.fm-oeffnen-mit");
+	g_menu_append(sec_oeffnen, "\u00d6ffnen",     "stv.oeffnen");
+	g_menu_append(sec_oeffnen, "\u00d6ffnen mit", "stv.oeffnen-mit");
 	g_menu_append_section(gmenu, NULL, G_MENU_MODEL(sec_oeffnen));
 	g_object_unref(sec_oeffnen);
 
 	GMenu *sec_search = g_menu_new();
 	GMenu *sub_search = g_menu_new();
-	g_menu_append(sub_search, "Gesamtes Verzeichnis", "stv.fm-search");
-	g_menu_append(sub_search, "Nur markierte Punkte", "stv.fm-search-sel");
+	g_menu_append(sub_search, "Gesamtes Verzeichnis", "stv.dateisuche");
+	g_menu_append(sub_search, "Nur markierte Punkte", "stv.dateisuche-sel");
 	g_menu_append_submenu(sec_search, "Dateisuche",
 			G_MENU_MODEL(sub_search));
 	g_object_unref(sub_search);
@@ -2877,55 +2877,55 @@ static void sond_treeviewfm_init_contextmenu(SondTreeviewFM *stvfm) {
 	 * Die GMenu-Sections wurden bereits einmalig in class_init aufgebaut. */
 	GSimpleActionGroup *ag = sond_treeview_get_action_group(SOND_TREEVIEW(stvfm));
 
-	GSimpleAction *act_einf_ge = g_simple_action_new("fm-einf-ge", NULL);
+	GSimpleAction *act_einf_ge = g_simple_action_new("einf-ge", NULL);
 	g_signal_connect(act_einf_ge, "activate",
 			G_CALLBACK(sond_treeviewfm_action_einf_ge), stvfm);
 	g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act_einf_ge));
 	g_object_unref(act_einf_ge);
 
-	GSimpleAction *act_einf_up = g_simple_action_new("fm-einf-up", NULL);
+	GSimpleAction *act_einf_up = g_simple_action_new("einf-up", NULL);
 	g_signal_connect(act_einf_up, "activate",
 			G_CALLBACK(sond_treeviewfm_action_einf_up), stvfm);
 	g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act_einf_up));
 	g_object_unref(act_einf_up);
 
-	GSimpleAction *act_paste_ge = g_simple_action_new("fm-paste-ge", NULL);
+	GSimpleAction *act_paste_ge = g_simple_action_new("paste-ge", NULL);
 	g_signal_connect(act_paste_ge, "activate",
 			G_CALLBACK(sond_treeviewfm_action_paste_ge), stvfm);
 	g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act_paste_ge));
 	g_object_unref(act_paste_ge);
 
-	GSimpleAction *act_paste_up = g_simple_action_new("fm-paste-up", NULL);
+	GSimpleAction *act_paste_up = g_simple_action_new("paste-up", NULL);
 	g_signal_connect(act_paste_up, "activate",
 			G_CALLBACK(sond_treeviewfm_action_paste_up), stvfm);
 	g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act_paste_up));
 	g_object_unref(act_paste_up);
 
-	GSimpleAction *act_loeschen = g_simple_action_new("fm-loeschen", NULL);
+	GSimpleAction *act_loeschen = g_simple_action_new("loeschen", NULL);
 	g_signal_connect(act_loeschen, "activate",
 			G_CALLBACK(sond_treeviewfm_action_loeschen), stvfm);
 	g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act_loeschen));
 	g_object_unref(act_loeschen);
 
-	GSimpleAction *act_oeffnen = g_simple_action_new("fm-oeffnen", NULL);
+	GSimpleAction *act_oeffnen = g_simple_action_new("oeffnen", NULL);
 	g_signal_connect(act_oeffnen, "activate",
 			G_CALLBACK(sond_treeviewfm_action_oeffnen), stvfm);
 	g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act_oeffnen));
 	g_object_unref(act_oeffnen);
 
-	GSimpleAction *act_oeffnen_mit = g_simple_action_new("fm-oeffnen-mit", NULL);
+	GSimpleAction *act_oeffnen_mit = g_simple_action_new("oeffnen-mit", NULL);
 	g_signal_connect(act_oeffnen_mit, "activate",
 			G_CALLBACK(sond_treeviewfm_action_oeffnen_mit), stvfm);
 	g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act_oeffnen_mit));
 	g_object_unref(act_oeffnen_mit);
 
-	GSimpleAction *act_search = g_simple_action_new("fm-search", NULL);
+	GSimpleAction *act_search = g_simple_action_new("dateisuche", NULL);
 	g_signal_connect(act_search, "activate",
 			G_CALLBACK(sond_treeviewfm_action_search), stvfm);
 	g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act_search));
 	g_object_unref(act_search);
 
-	GSimpleAction *act_search_sel = g_simple_action_new("fm-search-sel", NULL);
+	GSimpleAction *act_search_sel = g_simple_action_new("dateisuche-sel", NULL);
 	g_signal_connect(act_search_sel, "activate",
 			G_CALLBACK(sond_treeviewfm_action_search_sel), stvfm);
 	g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act_search_sel));

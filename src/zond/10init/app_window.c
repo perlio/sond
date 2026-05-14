@@ -138,7 +138,7 @@ static gboolean cb_close_textview(GtkWidget *window_textview, GdkEvent *event,
     Projekt *zond = (Projekt*) user_data;
 
     gtk_widget_hide(window_textview);
-    gtk_widget_set_sensitive(zond->menu.textview_extra, TRUE);
+    g_simple_action_set_enabled(zond->menu.textview_extra, TRUE);
     zond->node_id_extra = 0;
 
     return TRUE;
@@ -546,6 +546,29 @@ static void init_statusbar(Projekt *zond, GtkWidget *vbox) {
 /* =============================================================================
  * HAUPT-INITIALISIERUNGS-FUNKTION
  * ========================================================================== */
+
+#ifdef _WIN32
+static void cb_seadrive_status_app_window(SondTreeviewFM *stvfm,
+		guint pending_down, guint pending_up,
+		gpointer user_data) {
+	GtkLabel *label = GTK_LABEL(user_data);
+	gchar *text = NULL;
+	if (!sond_treeviewfm_is_seadrive_path(stvfm)) {
+		gtk_label_set_text(label, "");
+		return;
+	}
+	if (pending_down == 0 && pending_up == 0)
+		text = g_strdup("SeaDrive: ✓");
+	else {
+		GString *s = g_string_new("SeaDrive:");
+		if (pending_down > 0) g_string_append_printf(s, " ↓ %u", pending_down);
+		if (pending_up   > 0) g_string_append_printf(s, " ↑ %u", pending_up);
+		text = g_string_free(s, FALSE);
+	}
+	gtk_label_set_text(label, text);
+	g_free(text);
+}
+#endif
 
 /**
  * Initialisiert das Hauptfenster der Anwendung

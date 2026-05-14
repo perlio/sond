@@ -25,6 +25,10 @@ typedef struct _GFile GFile;
 typedef struct _GError GError;
 //extern GtkSelectionMode;
 
+typedef struct _GtkDialog GtkDialog;
+
+gint my_dialog_run(GtkDialog*);
+
 void display_message(GtkWidget*, ...);
 
 void display_error(GtkWidget*, gchar const*, gchar const*);

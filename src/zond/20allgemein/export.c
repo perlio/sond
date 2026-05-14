@@ -358,51 +358,35 @@ static gint export_html(Projekt *zond, GFileOutputStream *stream, gint umfang,
 	return 0;
 }
 
-void cb_menu_datei_export_activate(GtkMenuItem *item, gpointer user_data) {
-	Projekt *zond = (Projekt*) user_data;
-
+gint export_activate(Projekt* zond, gint umfang, GError** error) {
 	gchar *filename = filename_speichern(GTK_WINDOW(zond->app_window),
 			"Datei wählen", ".odt");
 	if (!filename)
-		return;
-
-	GError *error = NULL;
+		return 0;
 
 	GFile *file = g_file_new_for_path("export_tmp.rtf");
 	GFileOutputStream *stream = g_file_replace(file, NULL, FALSE,
-			G_FILE_CREATE_NONE, NULL, &error);
+			G_FILE_CREATE_NONE, NULL, error);
 	if (!stream) {
-		display_message(zond->app_window,
-				"Export nicht möglich\n\nBei Aufruf g_file_"
-						"replace:\n", error->message, NULL);
-		g_error_free(error);
 		g_object_unref(file);
+		g_free(filename);
 
-		return;
+		ERROR_Z;
 	}
-
-	//html-Datei füllen
-	gint umfang = GPOINTER_TO_INT(
-			g_object_get_data( G_OBJECT(item), "umfang" ));
 
 	gchar *errmsg = NULL;
 	gint res = export_html(zond, stream, umfang, &errmsg);
+	g_object_unref(stream);
 	if (res) {
-		display_message(zond->app_window,
-				"Export nicht möglich\n\nFehler bei Aufruf "
-						"export_html:\n", errmsg, NULL);
+		g_set_error(error, SOND_ERROR, 0, "%s", errmsg);
 		g_free(errmsg);
 		g_object_unref(file);
-		g_object_unref(stream);
+		g_free(filename);
 
-		return;
+		return -1;
 	}
 
-	//stream schließen
-	g_object_unref(stream);
-
 	//Nun in .odt umwandeln
-
 	//Pfad LibreOffice herausfinden
 	gchar soffice_exe[270] = { 0 };
 
@@ -414,13 +398,13 @@ void cb_menu_datei_export_activate(GtkMenuItem *item, gpointer user_data) {
 	rc = AssocQueryString(0, ASSOCSTR_EXECUTABLE, ".odt", "open", soffice_exe,
 			&bufferlen);
 	if (rc != S_OK) {
-		display_message(zond->app_window,
-				"Export nicht möglich:\n\nFehler bei Aufruf "
-						"AssocQueryString", NULL);
+		g_set_error(error, SOND_ERROR, 0,
+				"AssocQueryString fehlgeschlagen");
 
 		g_object_unref(file);
+		g_free(filename);
 
-		return;
+		return -1;
 	}
 #else
     //für Linux etc: Pfad von soffice suchen
@@ -437,22 +421,20 @@ void cb_menu_datei_export_activate(GtkMenuItem *item, gpointer user_data) {
 	argv[4] = "--headless";
 
 	ret = g_spawn_sync( NULL, argv, NULL, G_SPAWN_DEFAULT, NULL, NULL, NULL,
-	NULL, NULL, &error);
+	NULL, NULL, error);
 	if (!ret) {
-		display_message(zond->app_window,
-				"Export nicht möglich:\n\nFehler bei Aufruf "
-						"g_spawn_sync:\n", error->message, NULL);
-		g_error_free(error);
-		error = NULL;
+		g_file_delete(file, NULL, NULL);
+		g_object_unref(file);
+		g_free(filename);
+
+		ERROR_Z
 	}
 
-	if (!g_file_delete(file, NULL, &error)) {
-		display_message(zond->app_window,
-				"Löschen der bei Export im Arbeitsverzeichnis "
-						"erzeugten Datei 'export_tmp.rtf' nicht möglich:\n\n",
-				error->message, NULL);
-		g_error_free(error);
-		error = NULL;
+	if (!g_file_delete(file, NULL, error)) {
+		LOG_WARN("Löschen der bei Export im Arbeitsverzeichnis "
+						"erzeugten Datei 'export_tmp.rtf' fehlgeschlagen:\n\n",
+				(*error)->message, NULL);
+		g_clear_error(error);
 	}
 
 	g_object_unref(file);
@@ -460,20 +442,22 @@ void cb_menu_datei_export_activate(GtkMenuItem *item, gpointer user_data) {
 	GFile *source = g_file_new_for_path("export_tmp.odt");
 	GFile *dest = g_file_new_for_path((const gchar*) filename);
 	g_free(filename);
+	GError* error_tmp = NULL;
 
-	if (!g_file_move(source, dest, G_FILE_COPY_OVERWRITE, NULL, NULL, NULL,
-			&error)) {
-		display_message(zond->app_window,
-				"Exportierte Datei konnte nicht umbenannt "
-						"werden:\n\n", error->message,
-				"\nErzeugte Datei 'export_tmp.odt' "
-						"von Hand umbenennen", NULL);
-		g_error_free(error);
-	}
-
+	gboolean suc = g_file_move(source, dest, G_FILE_COPY_OVERWRITE, NULL, NULL, NULL,
+			&error_tmp);
 	g_object_unref(source);
 	g_object_unref(dest);
+	if (!suc) {
+		g_set_error(error, SOND_ERROR, 0,
+				"Exportierte Datei konnte nicht umbenannt werden:\n\n%s\n\n"
+				"Erzeugte Datei 'export_tmp.odt' von Hand umbenennen", error_tmp->message);
+		g_error_free(error_tmp);
 
-	return;
+		return -1;
+	}
+
+
+	return 0;
 }
 

@@ -708,14 +708,14 @@ static void zond_treeviewfm_class_init(ZondTreeviewFMClass *klass) {
 	GMenu *gmenu = SOND_TREEVIEW_CLASS(klass)->gmenu;
 
 	GMenu *sec_jump = g_menu_new();
-	g_menu_append(sec_jump, "Zur Anbindung springen", "stv.ztv-fm-jump");
+	g_menu_append(sec_jump, "Zur Anbindung springen", "stv.jump");
 	g_menu_append_section(gmenu, NULL, G_MENU_MODEL(sec_jump));
 	g_object_unref(sec_jump);
 
 	GMenu *sec_idx = g_menu_new();
 	GMenu *sub_idx = g_menu_new();
-	g_menu_append(sub_idx, "Gesamtes Projektverzeichnis", "stv.ztv-fm-indexsuche");
-	g_menu_append(sub_idx, "Ausgew\u00e4hlte Punkte",    "stv.ztv-fm-indexsuche-sel");
+	g_menu_append(sub_idx, "Gesamtes Projektverzeichnis", "stv.indexsuche");
+	g_menu_append(sub_idx, "Ausgew\u00e4hlte Punkte",    "stv.indexsuche-sel");
 	g_menu_append_submenu(sec_idx, "Index durchsuchen", G_MENU_MODEL(sub_idx));
 	g_object_unref(sub_idx);
 	g_menu_append_section(gmenu, NULL, G_MENU_MODEL(sec_idx));
@@ -798,19 +798,19 @@ static void zond_treeviewfm_init_contextmenu(ZondTreeviewFM *ztvfm,
 	GSimpleActionGroup *ag = sond_treeview_get_action_group(
 			SOND_TREEVIEW(ztvfm));
 
-	GSimpleAction *act_jump = g_simple_action_new("ztv-fm-jump", NULL);
+	GSimpleAction *act_jump = g_simple_action_new("jump", NULL);
 	g_signal_connect(act_jump, "activate",
 			G_CALLBACK(zond_treeviewfm_action_jump), zond);
 	g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act_jump));
 	g_object_unref(act_jump);
 
-	GSimpleAction *act_idx = g_simple_action_new("ztv-fm-indexsuche", NULL);
+	GSimpleAction *act_idx = g_simple_action_new("indexsuche", NULL);
 	g_signal_connect(act_idx, "activate",
 			G_CALLBACK(zond_treeviewfm_action_indexsuche), zond);
 	g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act_idx));
 	g_object_unref(act_idx);
 
-	GSimpleAction *act_idx_sel = g_simple_action_new("ztv-fm-indexsuche-sel", NULL);
+	GSimpleAction *act_idx_sel = g_simple_action_new("indexsuche-sel", NULL);
 	g_signal_connect(act_idx_sel, "activate",
 			G_CALLBACK(zond_treeviewfm_action_indexsuche_auswahl), zond);
 	g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act_idx_sel));

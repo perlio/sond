@@ -19,6 +19,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "misc.h"
 #include "sond_log_and_error.h"
 #include "sond_fileparts.h"
 #include "sond_file_helper.h"
@@ -478,13 +479,9 @@ static void on_print(GtkWidget *widget, gpointer data) {
         GTK_WINDOW(viewer->window), &error);
 
     if (result == GTK_PRINT_OPERATION_RESULT_ERROR) {
-        GtkWidget *dialog = gtk_message_dialog_new(
-            GTK_WINDOW(viewer->window), GTK_DIALOG_DESTROY_WITH_PARENT,
-            GTK_MESSAGE_ERROR, GTK_BUTTONS_CLOSE,
-            "Print error: %s", error->message);
-        gtk_dialog_run(GTK_DIALOG(dialog));
-        gtk_widget_destroy(dialog);
-        g_error_free(error);
+        display_message(viewer->window, "Print error: ",
+                error ? error->message : "?", NULL);
+        g_clear_error(&error);
     } else {
         update_statusbar(viewer, "Document printed");
     }
@@ -497,55 +494,40 @@ static void on_print(GtkWidget *widget, gpointer data) {
 static void on_export_pdf(GtkWidget *widget, gpointer data) {
     SurfaceViewer *viewer = (SurfaceViewer*)data;
 
-    GtkWidget *dialog = gtk_file_chooser_dialog_new(
-        "Save as PDF", GTK_WINDOW(viewer->window),
-        GTK_FILE_CHOOSER_ACTION_SAVE,
-        "_Cancel", GTK_RESPONSE_CANCEL,
-        "_Save", GTK_RESPONSE_ACCEPT, NULL);
+    char *filename = filename_speichern(GTK_WINDOW(viewer->window),
+            "Save as PDF", "document.pdf");
+    if (!filename)
+        return;
 
-    gtk_file_chooser_set_do_overwrite_confirmation(GTK_FILE_CHOOSER(dialog), TRUE);
-    gtk_file_chooser_set_current_name(GTK_FILE_CHOOSER(dialog), "document.pdf");
+    GtkPrintOperation *print = gtk_print_operation_new();
+    gtk_print_operation_set_n_pages(print, 1);
+    gtk_print_operation_set_unit(print, GTK_UNIT_PIXEL);
 
-    if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) {
-        char *filename = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
+    GtkPrintSettings *settings = gtk_print_settings_new();
+    gtk_print_settings_set(settings, GTK_PRINT_SETTINGS_OUTPUT_URI,
+                          g_filename_to_uri(filename, NULL, NULL));
+    gtk_print_operation_set_print_settings(print, settings);
 
-        // Verwende GTK Print statt cairo-pdf
-        GtkPrintOperation *print = gtk_print_operation_new();
-        gtk_print_operation_set_n_pages(print, 1);
-        gtk_print_operation_set_unit(print, GTK_UNIT_PIXEL);
+    g_signal_connect(print, "draw-page", G_CALLBACK(draw_page_for_print), viewer);
 
-        GtkPrintSettings *settings = gtk_print_settings_new();
-        gtk_print_settings_set(settings, GTK_PRINT_SETTINGS_OUTPUT_URI,
-                              g_filename_to_uri(filename, NULL, NULL));
-        gtk_print_operation_set_print_settings(print, settings);
+    GError *error = NULL;
+    GtkPrintOperationResult result = gtk_print_operation_run(
+        print, GTK_PRINT_OPERATION_ACTION_EXPORT,
+        GTK_WINDOW(viewer->window), &error);
 
-        g_signal_connect(print, "draw-page", G_CALLBACK(draw_page_for_print), viewer);
-
-        GError *error = NULL;
-        GtkPrintOperationResult result = gtk_print_operation_run(
-            print, GTK_PRINT_OPERATION_ACTION_EXPORT,
-            GTK_WINDOW(viewer->window), &error);
-
-        if (result == GTK_PRINT_OPERATION_RESULT_ERROR) {
-            GtkWidget *err_dialog = gtk_message_dialog_new(
-                GTK_WINDOW(viewer->window), GTK_DIALOG_DESTROY_WITH_PARENT,
-                GTK_MESSAGE_ERROR, GTK_BUTTONS_CLOSE,
-                "Export error: %s", (error) ? error->message : "Druckerfehler");
-            gtk_dialog_run(GTK_DIALOG(err_dialog));
-            gtk_widget_destroy(err_dialog);
-            g_error_free(error);
-        } else {
-            char msg[256];
-            snprintf(msg, sizeof(msg), "Exported to %s", filename);
-            update_statusbar(viewer, msg);
-        }
-
-        g_object_unref(settings);
-        g_object_unref(print);
-        g_free(filename);
+    if (result == GTK_PRINT_OPERATION_RESULT_ERROR) {
+        display_message(viewer->window, "Export error: ",
+                error ? error->message : "Druckerfehler", NULL);
+        g_clear_error(&error);
+    } else {
+        char msg[256];
+        snprintf(msg, sizeof(msg), "Exported to %s", filename);
+        update_statusbar(viewer, msg);
     }
 
-    gtk_widget_destroy(dialog);
+    g_object_unref(settings);
+    g_object_unref(print);
+    g_free(filename);
 }
 
 // === SEARCH ===
@@ -815,6 +797,7 @@ static GtkWidget* show_surface_viewer(cairo_surface_t *surface, int width, int h
     update_statusbar(viewer, "Ready");
 
     // Tastenkombinationen
+#if GTK_MAJOR_VERSION < 4
     GtkAccelGroup *accel_group = gtk_accel_group_new();
     gtk_window_add_accel_group(GTK_WINDOW(viewer->window), accel_group);
 
@@ -831,6 +814,7 @@ static GtkWidget* show_surface_viewer(cairo_surface_t *surface, int width, int h
         gtk_widget_add_accelerator(viewer->search_entry, "grab-focus", accel_group,
                                   GDK_KEY_f, GDK_CONTROL_MASK, GTK_ACCEL_VISIBLE);
     }
+#endif
 
     gtk_widget_show_all(viewer->window);
 
@@ -1931,8 +1915,10 @@ static RenderedDocument* render_gmessage(GBytes* bytes, int width) {
             GdkPixbuf* pb = gdk_pixbuf_loader_get_pixbuf(loader);
             if (!pb) {
                 GdkPixbufAnimation* anim = gdk_pixbuf_loader_get_animation(loader);
+                G_GNUC_BEGIN_IGNORE_DEPRECATIONS
                 if (anim)
                     pb = gdk_pixbuf_animation_get_static_image(anim);
+                G_GNUC_END_IGNORE_DEPRECATIONS
             }
             if (pb) {
                 int iw = gdk_pixbuf_get_width(pb);

@@ -141,7 +141,7 @@ void zond_treeview_cursor_changed(ZondTreeview *treeview, gpointer user_data) {
 						zond, &ret);
 
 				//Vorsichtshalber auch Menüpunkt deaktivieren
-				gtk_widget_set_sensitive(zond->menu.textview_extra, FALSE);
+				g_simple_action_set_enabled(zond->menu.textview_extra, FALSE);
 
 				zond->node_id_extra = 0;
 			}
@@ -320,8 +320,8 @@ static void zond_treeview_class_init(ZondTreeviewClass *klass) {
 
 	GMenu *sec_einf = g_menu_new();
 	GMenu *sub_einf = g_menu_new();
-	g_menu_append(sub_einf, "Gleiche Ebene", "stv.ztv-einf-ge");
-	g_menu_append(sub_einf, "Unterebene",    "stv.ztv-einf-up");
+	g_menu_append(sub_einf, "Gleiche Ebene", "stv.einf-ge");
+	g_menu_append(sub_einf, "Unterebene",    "stv.einf-up");
 	g_menu_append_submenu(sec_einf, "Punkt einf\u00fcgen", G_MENU_MODEL(sub_einf));
 	g_object_unref(sub_einf);
 	g_menu_prepend_section(gmenu, NULL, G_MENU_MODEL(sec_einf));
@@ -329,22 +329,22 @@ static void zond_treeview_class_init(ZondTreeviewClass *klass) {
 
 	GMenu *sec_paste = g_menu_new();
 	GMenu *sub_paste = g_menu_new();
-	g_menu_append(sub_paste, "Gleiche Ebene", "stv.ztv-paste-ge");
-	g_menu_append(sub_paste, "Unterebene",    "stv.ztv-paste-up");
+	g_menu_append(sub_paste, "Gleiche Ebene", "stv.paste-ge");
+	g_menu_append(sub_paste, "Unterebene",    "stv.paste-up");
 	g_menu_append_submenu(sec_paste, "Einf\u00fcgen", G_MENU_MODEL(sub_paste));
 	g_object_unref(sub_paste);
 	GMenu *sub_paste_link = g_menu_new();
-	g_menu_append(sub_paste_link, "Gleiche Ebene", "stv.ztv-paste-link-ge");
-	g_menu_append(sub_paste_link, "Unterebene",    "stv.ztv-paste-link-up");
+	g_menu_append(sub_paste_link, "Gleiche Ebene", "stv.paste-link-ge");
+	g_menu_append(sub_paste_link, "Unterebene",    "stv.paste-link-up");
 	g_menu_append_submenu(sec_paste, "Als Link einf\u00fcgen", G_MENU_MODEL(sub_paste_link));
 	g_object_unref(sub_paste_link);
 	g_menu_append_section(gmenu, NULL, G_MENU_MODEL(sec_paste));
 	g_object_unref(sec_paste);
 
 	GMenu *sec_edit = g_menu_new();
-	g_menu_append(sec_edit, "L\u00f6schen",            "stv.ztv-loeschen");
-	g_menu_append(sec_edit, "Anbindung entfernen", "stv.ztv-anb-entf");
-	g_menu_append(sec_edit, "Zu Ursprung springen","stv.ztv-jump");
+	g_menu_append(sec_edit, "L\u00f6schen",            "stv.loeschen");
+	g_menu_append(sec_edit, "Anbindung entfernen", "stv.anb-entf");
+	g_menu_append(sec_edit, "Zu Ursprung springen","stv.jump");
 	g_menu_append_section(gmenu, NULL, G_MENU_MODEL(sec_edit));
 	g_object_unref(sec_edit);
 
@@ -356,9 +356,9 @@ static void zond_treeview_class_init(ZondTreeviewClass *klass) {
 	g_object_unref(sec_icon);
 
 	GMenu *sec_oeffnen = g_menu_new();
-	g_menu_append(sec_oeffnen, "\u00d6ffnen",        "stv.ztv-oeffnen");
-	g_menu_append(sec_oeffnen, "\u00d6ffnen mit",    "stv.ztv-oeffnen-mit");
-	g_menu_append(sec_oeffnen, "Auszug \u00f6ffnen", "stv.ztv-auszug");
+	g_menu_append(sec_oeffnen, "Öffnen",        "stv.oeffnen");
+	g_menu_append(sec_oeffnen, "Öffnen mit",    "stv.oeffnen-mit");
+	g_menu_append(sec_oeffnen, "Auszug \u00f6ffnen", "stv.auszug");
 	g_menu_append_section(gmenu, NULL, G_MENU_MODEL(sec_oeffnen));
 	g_object_unref(sec_oeffnen);
 
@@ -2110,6 +2110,18 @@ static void zond_treeview_jump_to_link_target(Projekt *zond, GtkTreeIter *iter) 
 	return;
 }
 
+gint static zond_treeview_oeffnen_dd(ZondTreeview* ztv, DisplayedDocument* dd,
+		gint pos_seite, gint pos_index, GError** error) {
+	ZondTreeviewPrivate* ztv_priv = zond_treeview_get_instance_private(ztv);
+
+	PdfViewer *pv = viewer_init(ztv_priv->zond);
+	rc = viewer_display_document(pv, dd, pos_von.seite, pos_von.index, error);
+	if (rc)
+		ERROR_Z
+
+	return 0;
+}
+
 gint zond_treeview_oeffnen_internal_viewer(Projekt *zond, SondFilePartPDF* sfp_pdf,
 		Anbindung *anbindung, PdfPos *pos_pdf, GError **error) {
 	PdfPos pos_von = { 0 };
@@ -2134,6 +2146,7 @@ gint zond_treeview_oeffnen_internal_viewer(Projekt *zond, SondFilePartPDF* sfp_p
 		//Testen, ob pv mit file_part schon geöffnet
 		for (gint i = 0; i < zond->arr_pv->len; i++) {
 			PdfViewer *pv = g_ptr_array_index(zond->arr_pv, i);
+
 			//ToDo: Test auf Gleichheit über alle dds hinweg
 			if (pv->dd->next == NULL && sfp_pdf ==
 					zond_pdf_document_get_sfp_pdf(pv->dd->zpdfd_part->zond_pdf_document)) {
@@ -2169,10 +2182,10 @@ gint zond_treeview_oeffnen_internal_viewer(Projekt *zond, SondFilePartPDF* sfp_p
 	if (pos_pdf)
 		pos_von = *pos_pdf;
 
-	PdfViewer *pv = viewer_init(zond);
-	rc = viewer_display_document(pv, dd, pos_von.seite, pos_von.index, error);
+	rc = zond_treeview_oeffnen_dd(zond, dd, pos_von.seite, pos_von.index, error);
 	if (rc) {
 		document_free_displayed_documents(dd);
+
 		ERROR_Z
 	}
 
@@ -2279,73 +2292,189 @@ static gint zond_treeview_open_pdf(Projekt *zond, gint node_id,
 	return 0;
 }
 
-static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
-		gboolean open_with, GError **error) {
-	gint rc = 0;
+static get_filepart_from_iter(ZondTreeview* ztv, GtkTreeIter* iter,
+		SondFilePart** sfp, gchar** section, GError** error) {
 	gchar *file_part = NULL;
-	gchar *section = NULL;
+	gint rc = 0;
 	gint node_id = 0;
-	SondFilePart* sfp = NULL;
 
 	node_id = zond_treeview_get_filepart_and_section(
 			ZOND_TREEVIEW(zond->treeview[zond->baum_active]),
-			iter, &file_part, &section, error);
+			iter, &file_part, section, error);
 	if (node_id == -1)
 		ERROR_Z
 
 	if (!file_part)
 		return 0; //nichts zu öffnen
 
-	sfp = sond_file_part_from_filepart(file_part, error);
+	*sfp = sond_file_part_from_filepart(file_part, error);
 	g_free(file_part);
-	if (!sfp) {
-		g_free(section);
+	if (!(*sfp)) {
+		g_free(*section);
+		*section = NULL;
+
 		ERROR_Z
 	}
-
-	//mit externem Programm öffnen
-	if (open_with || !SOND_IS_FILE_PART_PDF(sfp)) //wenn kein pdf oder mit Programmauswahl zu öffnen:
-		rc = sond_file_part_open(sfp, open_with, error);
-	else //internen Viewer verwenden
-		rc = zond_treeview_open_pdf(zond, node_id, SOND_FILE_PART_PDF(sfp), section, error);
-	g_free(section);
-	g_object_unref(sfp);
-	if (rc)
-		ERROR_Z
 
 	return 0;
 }
 
-static gint zond_treeview_open_path(Projekt *zond, GtkTreeView *tree_view,
-		GtkTreePath *tree_path, gboolean open_with, GError **error) {
+
+
+
+static gint get_dd(SondTreeview* stv, GtkTreeIter* iter,
+		DisplayedDocument** dd, GError** error) {
 	gint rc = 0;
-	GtkTreeIter iter = { 0 };
+	SondFilePart* sfp = NULL;
+	Anbindung anbindung = { 0 };
+	gchar* section = NULL;
 
-	gtk_tree_model_get_iter(gtk_tree_view_get_model(tree_view), &iter,
-			tree_path);
+	*dd = NULL;
 
-	rc = zond_treeview_open_node(zond, &iter, open_with, error);
+	rc = get_filepart_from_iter(ztv, iter, &sfp, &section, error);
 	if (rc)
 		ERROR_Z
+
+	if (!SOND_IS_FILE_PART_PDF(sfp)) {
+		g_free(section);
+		g_object_unref(sfp);
+
+		return 0;
+	}
+
+	if (section) {
+		ZondPdfDocument* zpdfd = NULL;
+
+		anbindung_parse_file_section(section, &anbindung);
+		g_free(section);
+
+		zpdfd = zond_pdf_document_is_open(SOND_FILE_PART_PDF(sfp));
+
+		if (zpdfd) {
+			anbindung_aktualisieren(zpdfd, &anbindung);
+/*
+			for (guint i = 0; i < pos_pdf->seite; i++) {
+				PdfDocumentPage* pdfp = NULL;
+
+				pdfp = g_ptr_array_index(zond_pdf_document_get_arr_pages(zpdfd), i);
+				if (pdfp && pdfp->deleted)
+					pos_pdf->seite--;
+			}
+			*/
+		}
+	}
+
+
+
 
 	return 0;
 }
 
 static gint zond_treeview_open_auszug(Projekt* zond, GtkTreeIter* iter,
 		GError** error) {
+	gint rc = 0;
+	DisplayedDocument* dd_ges = NULL;
+	DisplayedDocument* dd = NULL;
+	GtkTreeIter iter_tmp = { 0 };
+	Anbindung anbindung = { 0 };
+	PdfPos pdf_pos = { 0 };
+
+	GtkTreeModel* model = gtk_tree_view_get_model(GTK_TREE_VIEW(zond->treeview[zond->baum_active]));
+
+	rc = get_dd(zond->treeview[zond->baum_active], iter, &dd, error);
+	if (rc)
+		ERROR_Z
+
+	if (!dd) //Knoten verweist nicht auf ein PDF
+		return 0;
+
+	if (zond->state & GDK_MOD1_MASK) {
+		if (anbindung.bis.seite || anbindung.bis.index) { //Abschnitt
+			pdf_pos.seite = dd->zpdfd_part->last_page->page_akt -
+					dd->zpdfd_part->first_page->page_akt;
+			pdf_pos.index = dd->zpdfd_part->last_index -
+					dd->zpdfd_part->first_index;
+		}
+	}
+	dd_ges = dd;
+	iter_tmp = *iter;
+
+	//jetzt im Baum nach oben gehen und etwaige dds prependen
+	while (gtk_tree_model_iter_previous(model, &iter_tmp)) {
+		gint rc = 0;
+		DisplayedDocument* dd_tmp = NULL;
+
+		rc = get_dd(zond->treeview[zond->baum_active], &iter_tmp, &dd, error);
+		if (rc) {
+			document_free_displayed_documents(dd_ges);
+
+			ERROR_Z
+		}
+
+		if (!dd)
+			continue;
+
+		pdf_pos.seite += dd->zpdfd_part->last_page->page_akt -
+				dd->zpdfd_part->first_page->page_akt;
+
+		dd_tmp = dd_ges;
+		dd_ges = dd;
+		dd_ges->next = dd_tmp;
+	}
+
+	//dann runter
+	iter_tmp = *iter;
+	while (gtk_tree_model_iter_next(model, &iter_tmp)) {
+		gint rc = 0;
+		DisplayedDocument* dd_tmp = NULL;
+
+		rc = get_dd(zond->treeview[zond->baum_active], &iter_tmp, &dd, error);
+		if (rc) {
+			document_free_displayed_documents(dd_ges);
+
+			ERROR_Z
+		}
+
+		if (!dd)
+			continue;
+
+		dd_tmp = dd_ges;
+		while ((dd_tmp = dd_tmp->next));
+		dd_tmp->next = dd;
+	}
+
+	PdfViewer *pv = viewer_init(zond);
+	rc = viewer_display_document(pv, dd_ges, pdf_pos.seite, pdf_pos.index, error);
+	if (rc) {
+		document_free_displayed_documents(dd_ges);
+		ERROR_Z
+	}
 
 	return 0;
 }
 
-static gint zond_treeview_open_node_clicked(Projekt *zond, GtkTreeIter *iter,
-		gint n_clicks, GError **error) {
+static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
+		gboolean open_with, gboolean auszug, GError **error) {
 	gint rc = 0;
+	gchar *section = NULL;
+	SondFilePart* sfp = NULL;
 
-	LOG_INFO("%d", n_clicks);
-	if (n_clicks == 2)
-		rc = zond_treeview_open_node(zond, iter, FALSE, error);
-	else if (n_clicks == 3)
-		rc = zond_treeview_open_auszug(zond, iter, error);
+	rc = get_filepart_from_iter(zond->treeview[zond->baum_active], iter,
+			sfp, section, error);
+	if (rc)
+		ERROR_Z
+
+	if (!sfp)
+		return 0;
+
+	//mit externem Programm öffnen
+	if (open_with || !SOND_IS_FILE_PART_PDF(sfp)) //wenn kein pdf oder mit Programmauswahl zu öffnen:
+		rc = sond_file_part_open(sfp, open_with, error);
+	else { //internen Viewer verwenden
+		rc = zond_treeview_open_pdf(zond, node_id, SOND_FILE_PART_PDF(sfp), section, error);
+	}
+	g_free(section);
+	g_object_unref(sfp);
 	if (rc)
 		ERROR_Z
 
@@ -2377,21 +2506,12 @@ static void zond_treeview_gesture_clicked(GtkGestureClick *gesture,
 	gtk_tree_model_get_iter(gtk_tree_view_get_model(tree_view), &iter, path);
 	gtk_tree_path_free(path);
 
-	if (n_press == 3) {
-		rc = zond_treeview_open_auszug(zond, &iter, &error);
-		if (rc) {
-			display_message(zond->app_window,
-					"Fehler beim Öffnen des Auszugs\n\n",
-					error->message, NULL);
-			g_error_free(error);
-		}
-	} else {
-		rc = zond_treeview_open_node_clicked(zond, &iter, n_press, &error);
-		if (rc) {
-			display_message(zond->app_window, "Fehler beim Öffnen\n\n",
-					error->message, NULL);
-			g_error_free(error);
-		}
+	rc = zond_treeview_open_node(zond, &iter, FALSE,
+			(n_press == 2) ? FALSE : TRUE, &error);
+	if (rc) {
+		display_message(zond->app_window, "Fehler beim Öffnen\n\n",
+				error->message, NULL);
+		g_error_free(error);
 	}
 
 	gtk_gesture_set_state(GTK_GESTURE(gesture), GTK_EVENT_SEQUENCE_CLAIMED);
@@ -2423,7 +2543,7 @@ static gboolean zond_treeview_button_press(GtkWidget *widget,
 			gtk_tree_view_get_model(GTK_TREE_VIEW(widget)), &iter, path);
 	gtk_tree_path_free(path);
 
-	rc = zond_treeview_open_node_clicked(zond, &iter, n_clicks, &error);
+	rc = zond_treeview_open_node(zond, &iter, FALSE, FALSE, &error);
 	if (rc) {
 		display_message(zond->app_window, "Fehler beim Öffnen\n\n",
 				error->message, NULL);
@@ -2529,26 +2649,66 @@ static void zond_treeview_action_jump(GSimpleAction *a, GVariant *p, gpointer d)
 		if (rc) { display_message(zond->app_window, "Fehler Sprung zu Herkunft\n\n", error->message, NULL); g_error_free(error); }
 	}
 }
-static void zond_treeview_action_oeffnen(GSimpleAction *a, GVariant *p, gpointer d) {
-	Projekt *zond = (Projekt*) d; GtkTreePath *path = NULL; GError *error = NULL; gint rc = 0;
-	gtk_tree_view_get_cursor(GTK_TREE_VIEW(zond->treeview[zond->baum_active]), &path, NULL);
-	rc = zond_treeview_open_path(zond, GTK_TREE_VIEW(zond->treeview[zond->baum_active]), path, FALSE, &error);
-	gtk_tree_path_free(path);
-	if (rc) { display_message(zond->app_window, "%s", error->message); g_error_free(error); }
+static void zond_treeview_action_oeffnen(GSimpleAction *a,
+		GVariant *p, gpointer d) {
+	Projekt *zond = (Projekt*) d;
+	GtkTreePath iter = { 0 };
+	GError *error = NULL;
+	gint rc = 0;
+
+	if (!sond_treeview_get_cursor(zond->treeview[zond->baum_active], &iter))
+		return;
+
+	rc = zond_treeview_open_node(zond, &iter, TRUE, FALSE, &error);
+	if (rc) {
+		display_message(zond->app_window, "Fehler beim \u00d6ffnen Knoten:\n\n",
+				error->message, NULL);
+		g_error_free(error);
+	}
+
+	return;
 }
-static void zond_treeview_action_oeffnen_mit(GSimpleAction *a, GVariant *p, gpointer d) {
-	Projekt *zond = (Projekt*) d; GtkTreePath *path = NULL; GError *error = NULL; gint rc = 0;
-	gtk_tree_view_get_cursor(GTK_TREE_VIEW(zond->treeview[zond->baum_active]), &path, NULL);
-	rc = zond_treeview_open_path(zond, GTK_TREE_VIEW(zond->treeview[zond->baum_active]), path, TRUE, &error);
-	gtk_tree_path_free(path);
-	if (rc) { display_message(zond->app_window, "Fehler beim \u00d6ffnen Knoten:\n\n", error->message, NULL); g_error_free(error); }
+
+static void zond_treeview_action_oeffnen_mit(GSimpleAction *a,
+		GVariant *p, gpointer d) {
+	Projekt *zond = (Projekt*) d;
+	GtkTreeIter iter = { 0 };
+	GError *error = NULL;
+	gint rc = 0;
+
+	if (!sond_treeview_get_cursor(zond->treeview[zond->baum_active], &iter))
+		return;
+
+	rc = zond_treeview_open_node(zond, &iter, TRUE, FALSE, &error);
+	if (rc) {
+		display_message(zond->app_window, "Fehler beim \u00d6ffnen Knoten:\n\n",
+				error->message, NULL);
+		g_error_free(error);
+	}
+
+	return;
 }
+
 static void zond_treeview_action_auszug(GSimpleAction *a, GVariant *p, gpointer d) {
-	Projekt *zond = (Projekt*) d; GtkTreeIter iter = { 0 }; GError *error = NULL; gint rc = 0;
-	if (!sond_treeview_get_cursor(zond->treeview[zond->baum_active], &iter)) return;
-	rc = zond_treeview_open_auszug(zond, &iter, &error);
-	if (rc) { display_message(zond->app_window, "Fehler beim \u00d6ffnen des Auszugs\n\n", error->message, NULL); g_error_free(error); }
+	GtkTreeIter iter = { 0 };
+	GError *error = NULL;
+	gint rc = 0;
+
+	Projekt *zond = (Projekt*) d;
+
+	if (!sond_treeview_get_cursor(zond->treeview[zond->baum_active], &iter))
+		return;
+
+	rc = zond_treeview_open_node(zond, &iter, FALSE, TRUE, &error);
+	if (rc) {
+		display_message(zond->app_window, "Fehler beim \u00d6ffnen des Auszugs\n\n",
+				error->message, NULL);
+		g_error_free(error);
+	}
+
+	return;
 }
+
 static void zond_treeview_action_icon(GSimpleAction *a, GVariant *p, gpointer d) {
 	Projekt *zond = (Projekt*) d; gint rc = 0; GError *error = NULL;
 	gint icon_id = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(a), "icon-id"));
@@ -2565,18 +2725,18 @@ static void zond_treeview_init_contextmenu(ZondTreeview *ztv) {
 	Projekt *zond = ztv_priv->zond;
 
 	struct { const gchar *name; GCallback cb; } acts[] = {
-		{ "ztv-einf-ge",      G_CALLBACK(zond_treeview_action_einf_ge)      },
-		{ "ztv-einf-up",      G_CALLBACK(zond_treeview_action_einf_up)      },
-		{ "ztv-paste-ge",     G_CALLBACK(zond_treeview_action_paste_ge)     },
-		{ "ztv-paste-up",     G_CALLBACK(zond_treeview_action_paste_up)     },
-		{ "ztv-paste-link-ge",G_CALLBACK(zond_treeview_action_paste_link_ge)},
-		{ "ztv-paste-link-up",G_CALLBACK(zond_treeview_action_paste_link_up)},
-		{ "ztv-loeschen",     G_CALLBACK(zond_treeview_action_loeschen)     },
-		{ "ztv-anb-entf",     G_CALLBACK(zond_treeview_action_anb_entf)     },
-		{ "ztv-jump",         G_CALLBACK(zond_treeview_action_jump)         },
-		{ "ztv-oeffnen",      G_CALLBACK(zond_treeview_action_oeffnen)      },
-		{ "ztv-oeffnen-mit",  G_CALLBACK(zond_treeview_action_oeffnen_mit)  },
-		{ "ztv-auszug",       G_CALLBACK(zond_treeview_action_auszug)       },
+		{ "einf-ge",       G_CALLBACK(zond_treeview_action_einf_ge)      },
+		{ "einf-up",       G_CALLBACK(zond_treeview_action_einf_up)      },
+		{ "paste-ge",      G_CALLBACK(zond_treeview_action_paste_ge)     },
+		{ "paste-up",      G_CALLBACK(zond_treeview_action_paste_up)     },
+		{ "paste-link-ge", G_CALLBACK(zond_treeview_action_paste_link_ge)},
+		{ "paste-link-up", G_CALLBACK(zond_treeview_action_paste_link_up)},
+		{ "loeschen",      G_CALLBACK(zond_treeview_action_loeschen)     },
+		{ "anb-entf",      G_CALLBACK(zond_treeview_action_anb_entf)     },
+		{ "jump",          G_CALLBACK(zond_treeview_action_jump)         },
+		{ "oeffnen",       G_CALLBACK(zond_treeview_action_oeffnen)      },
+		{ "oeffnen-mit",   G_CALLBACK(zond_treeview_action_oeffnen_mit)  },
+		{ "auszug",        G_CALLBACK(zond_treeview_action_auszug)       },
 	};
 	for (guint i = 0; i < G_N_ELEMENTS(acts); i++) {
 		GSimpleAction *act = g_simple_action_new(acts[i].name, NULL);
@@ -2589,14 +2749,14 @@ static void zond_treeview_init_contextmenu(ZondTreeview *ztv) {
 	GMenu *gmenu_icons = ZOND_TREEVIEW_GET_CLASS(ztv)->gmenu_icons;
 	gboolean filled = (g_menu_model_get_n_items(G_MENU_MODEL(gmenu_icons)) > 0);
 	for (gint i = 0; i < NUMBER_OF_ICONS; i++) {
-		gchar *name = g_strdup_printf("ztv-icon-%d", i);
+		gchar *name = g_strdup_printf("icon-%d", i);
 		GSimpleAction *act = g_simple_action_new(name, NULL);
 		g_object_set_data(G_OBJECT(act), "icon-id", GINT_TO_POINTER(i));
 		g_signal_connect(act, "activate", G_CALLBACK(zond_treeview_action_icon), zond);
 		g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act));
 		g_object_unref(act);
 		if (!filled) {
-			gchar *action = g_strdup_printf("stv.ztv-icon-%d", i);
+			gchar *action = g_strdup_printf("stv.icon-%d", i);
 			GMenuItem *item = g_menu_item_new(zond->icon[i].display_name, action);
 			GIcon *icon = g_themed_icon_new(zond->icon[i].icon_name);
 			g_menu_item_set_icon(item, icon);

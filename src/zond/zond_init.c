@@ -235,6 +235,8 @@ void zond_init(GtkApplication *app, Projekt *zond) {
 	//benötigte Arrays erzeugen
 	zond->arr_pv = g_ptr_array_new();
 
+	zond->app = GTK_APPLICATION(app);
+
 	init_icons(zond);
 
 	init_app_window(zond);
@@ -249,7 +251,6 @@ void zond_init(GtkApplication *app, Projekt *zond) {
 	g_free(proj_settings);
 
 	project_set_widgets_sensitive(zond, FALSE);
-	gtk_widget_set_sensitive(zond->menu.speichernitem, FALSE);
 	g_settings_set_boolean(zond->settings, "speichern", FALSE);
 
 	gtk_widget_show_all(zond->app_window);

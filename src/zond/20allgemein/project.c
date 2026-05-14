@@ -189,7 +189,7 @@ gint dbase_zond_update_gmessage_index(DBaseZond* dbase_zond,
  */
 void project_reset_changed(Projekt *zond, gboolean changed) {
 	zond->dbase_zond->changed = changed;
-	gtk_widget_set_sensitive(zond->menu.speichernitem, changed);
+	g_simple_action_set_enabled(zond->menu.speichern, changed);
 	g_settings_set_boolean(zond->settings, "speichern", changed);
 
 	return;
@@ -216,13 +216,13 @@ void project_set_widgets_sensitive(Projekt *zond, gboolean active) {
 	gtk_widget_set_sensitive(GTK_WIDGET(zond->treeview[BAUM_INHALT]), active);
 	gtk_widget_set_sensitive(GTK_WIDGET(zond->treeview[BAUM_AUSWERTUNG]), active);
 
-	gtk_widget_set_sensitive(GTK_WIDGET(zond->menu.schliessenitem), active);
-	gtk_widget_set_sensitive(GTK_WIDGET(zond->menu.exportitem), active);
-	gtk_widget_set_sensitive(GTK_WIDGET(zond->menu.pdf), active);
-	gtk_widget_set_sensitive(GTK_WIDGET(zond->menu.struktur), active);
-	gtk_widget_set_sensitive(GTK_WIDGET(zond->menu.ansicht), active);
-	gtk_widget_set_sensitive(GTK_WIDGET(zond->fs_button), active);
-	gtk_widget_set_sensitive(GTK_WIDGET(zond->menu.extras), active);
+	g_simple_action_set_enabled(zond->menu.schliessen,  active);
+	g_simple_action_set_enabled(zond->menu.export_odt,  active);
+	g_simple_action_set_enabled(zond->menu.pdf,         active);
+	g_simple_action_set_enabled(zond->menu.struktur,    active);
+	g_simple_action_set_enabled(zond->menu.ansicht,     active);
+	gtk_widget_set_sensitive(zond->fs_button,           active);
+	g_simple_action_set_enabled(zond->menu.extras,      active);
 
 	return;
 }

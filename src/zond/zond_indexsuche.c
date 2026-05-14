@@ -209,7 +209,7 @@ zond_indexsuche_do(Projekt *zond, GHashTable* ht_fileparts) {
     gtk_container_add(GTK_CONTAINER(content), grid);
     gtk_widget_show_all(dialog);
 
-    response = gtk_dialog_run(GTK_DIALOG(dialog));
+    response = my_dialog_run(GTK_DIALOG(dialog));
 
     if (response == GTK_RESPONSE_OK) {
         const gchar *term = gtk_entry_get_text(GTK_ENTRY(entry_term));

@@ -12,7 +12,7 @@
 
 #include <mupdf/fitz.h>
 #include <mupdf/pdf.h>
-#include <glib-object.h>
+#include <gio/gio.h>
 
 #define ZOND_ERROR zond_error_quark()
 G_DEFINE_QUARK(zond-error-quark,zond_error)
@@ -117,23 +117,15 @@ enum {
 };
 
 struct _Menu {
-	GtkWidget *projekt;
-	GtkWidget *speichernitem;
-	GtkWidget *schliessenitem;
-	GtkWidget *exportitem;
-
-	GtkWidget *pdf;
-
-	GtkWidget *struktur;
-
-	GtkWidget *ansicht;
-
-	//Menuitem, mit dem Textview aus app-Fenster gelöst werden kann
-	GtkWidget *textview_extra;
-
-	GtkWidget *extras;
-
-	GtkWidget *autosave;
+	/* Window-level GSimpleActions fuer enable/disable */
+	GSimpleAction *speichern;
+	GSimpleAction *schliessen;
+	GSimpleAction *export_odt;
+	GSimpleAction *pdf;
+	GSimpleAction *struktur;   /* Gruppe: alle Struktur-Actions */
+	GSimpleAction *ansicht;    /* Gruppe: alle Ansicht-Actions */
+	GSimpleAction *extras;
+	GSimpleAction *textview_extra;
 };
 
 typedef struct _Menu Menu;
@@ -146,6 +138,8 @@ typedef struct _Projekt {
 
 	gchar *project_dir;
 	gchar *project_name;
+
+	GtkApplication *app;
 
 	SondProcessFileCtx *wctx;
 
