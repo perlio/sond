@@ -38,12 +38,16 @@ G_DEFINE_TYPE_WITH_PRIVATE(SondTreeview, sond_treeview, GTK_TYPE_TREE_VIEW)
 static void sond_treeview_show_popupmenu(SondTreeview *stv, gdouble x,
 		gdouble y) {
 	SondTreeviewPrivate *stv_priv = sond_treeview_get_instance_private(stv);
+
+	if (!stv_priv->contextmenu)
+		return;
+
 	GdkRectangle rect = { (gint)x, (gint)y, 1, 1 };
 	gtk_popover_set_pointing_to(GTK_POPOVER(stv_priv->contextmenu), &rect);
 	gtk_popover_popup(GTK_POPOVER(stv_priv->contextmenu));
 }
 
-static void sond_treeview_gesture_pressed(GtkGestureClick *gesture,
+static void sond_treeview_gesture_pressed(GtkGestureMultiPress *gesture,
 		gint n_press, gdouble x, gdouble y, gpointer data) {
 	SondTreeview *stv = SOND_TREEVIEW(data);
 
@@ -81,7 +85,7 @@ static void sond_treeview_finalize(GObject *object) {
 			SOND_TREEVIEW(object));
 
 	if (stv_priv->contextmenu) {
-		gtk_widget_unparent(stv_priv->contextmenu);
+		gtk_widget_destroy(stv_priv->contextmenu);
 		stv_priv->contextmenu = NULL;
 	}
 
@@ -115,17 +119,17 @@ static void sond_treeview_constructed(GObject *object) {
 	gtk_widget_insert_action_group(GTK_WIDGET(stv), "stv",
 			G_ACTION_GROUP(stv_priv->action_group));
 
-	stv_priv->contextmenu = gtk_popover_menu_new_from_model(
-			G_MENU_MODEL(gmenu));
-	gtk_widget_set_parent(stv_priv->contextmenu, GTK_WIDGET(stv));
-	gtk_popover_set_has_arrow(GTK_POPOVER(stv_priv->contextmenu), FALSE);
+	stv_priv->contextmenu = gtk_popover_menu_new();
+	gtk_popover_set_relative_to(GTK_POPOVER(stv_priv->contextmenu),
+			GTK_WIDGET(stv));
+	gtk_popover_bind_model(GTK_POPOVER(stv_priv->contextmenu),
+			G_MENU_MODEL(gmenu), NULL);
 
-	GtkGesture *gesture = gtk_gesture_click_new();
+	GtkGesture *gesture = gtk_gesture_multi_press_new(GTK_WIDGET(stv));
 	gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(gesture),
 			GDK_BUTTON_SECONDARY);
 	g_signal_connect(gesture, "pressed",
 			G_CALLBACK(sond_treeview_gesture_pressed), stv);
-	gtk_widget_add_controller(GTK_WIDGET(stv), GTK_EVENT_CONTROLLER(gesture));
 
 	G_OBJECT_CLASS(sond_treeview_parent_class)->constructed(object);
 

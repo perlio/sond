@@ -2110,11 +2110,42 @@ static void zond_treeview_jump_to_link_target(Projekt *zond, GtkTreeIter *iter) 
 	return;
 }
 
-gint static zond_treeview_oeffnen_dd(ZondTreeview* ztv, DisplayedDocument* dd,
-		gint pos_seite, gint pos_index, GError** error) {
-	ZondTreeviewPrivate* ztv_priv = zond_treeview_get_instance_private(ztv);
+gint zond_treeview_oeffnen_internal_viewer(Projekt *zond, SondFilePartPDF* sfp_pdf,
+		DisplayedDocument* dd, PdfPos *pos_pdf, GError **error) {
+	PdfPos pos_von = { 0 };
+	gint rc = 0;
 
-	PdfViewer *pv = viewer_init(ztv_priv->zond);
+	//Neue Instanz oder bestehende?
+	if (!(zond->state & GDK_SHIFT_MASK)) {
+		//Testen, ob pv mit file_part schon geöffnet
+		for (gint i = 0; i < zond->arr_pv->len; i++) {
+			DisplayedDocument* dd_loop = dd;
+			PdfViewer *pv = g_ptr_array_index(zond->arr_pv, i);
+
+			DisplayedDocument* dd_int = pv->dd;
+
+			do {
+				if (dd_int->zpdfd_part != dd_loop->zpdfd_part)
+					break;
+				dd_int = dd_int->next;
+				dd_loop = dd_loop->next;
+			} while (dd_int);
+
+			if (dd_int == NULL && dd_loop == NULL) {
+				gtk_window_present(GTK_WINDOW(pv->vf));
+				if (pos_pdf)
+					pos_von = *pos_pdf;
+				viewer_springen_zu_pos_pdf(pv, pos_von, 0);
+
+				return 0;
+			}
+		}
+	}
+
+	if (pos_pdf)
+		pos_von = *pos_pdf;
+
+	PdfViewer *pv = viewer_init(zond);
 	rc = viewer_display_document(pv, dd, pos_von.seite, pos_von.index, error);
 	if (rc)
 		ERROR_Z
@@ -2122,90 +2153,12 @@ gint static zond_treeview_oeffnen_dd(ZondTreeview* ztv, DisplayedDocument* dd,
 	return 0;
 }
 
-gint zond_treeview_oeffnen_internal_viewer(Projekt *zond, SondFilePartPDF* sfp_pdf,
-		Anbindung *anbindung, PdfPos *pos_pdf, GError **error) {
-	PdfPos pos_von = { 0 };
-	ZondPdfDocument* zpdfd = NULL;
-	gint rc = 0;
-
-	zpdfd = zond_pdf_document_is_open(sfp_pdf);
-
-	if (zpdfd) {
-		anbindung_aktualisieren(zpdfd, anbindung);
-
-		for (guint i = 0; i < pos_pdf->seite; i++) {
-			PdfDocumentPage* pdfp = NULL;
-
-			pdfp = g_ptr_array_index(zond_pdf_document_get_arr_pages(zpdfd), i);
-			if (pdfp && pdfp->deleted)
-				pos_pdf->seite--;
-		}
-	}
-	//Neue Instanz oder bestehende?
-	if (!(zond->state & GDK_SHIFT_MASK)) {
-		//Testen, ob pv mit file_part schon geöffnet
-		for (gint i = 0; i < zond->arr_pv->len; i++) {
-			PdfViewer *pv = g_ptr_array_index(zond->arr_pv, i);
-
-			//ToDo: Test auf Gleichheit über alle dds hinweg
-			if (pv->dd->next == NULL && sfp_pdf ==
-					zond_pdf_document_get_sfp_pdf(pv->dd->zpdfd_part->zond_pdf_document)) {
-				Anbindung anbindung_akt = { 0 };
-
-				zpdfd_part_get_anbindung(pv->dd->zpdfd_part, &anbindung_akt);
-
-				if ((!anbindung && !pv->dd->zpdfd_part->has_anbindung) ||
-						(anbindung && pv->dd->zpdfd_part->has_anbindung &&
-						anbindung_1_gleich_2(*anbindung, anbindung_akt))) {
-
-					if (pos_pdf)
-						pos_von = *pos_pdf;
-
-					gtk_window_present(GTK_WINDOW(pv->vf));
-
-					if (pos_von.seite > (pv->arr_pages->len - 1))
-						pos_von.seite = pv->arr_pages->len - 1;
-
-					viewer_springen_zu_pos_pdf(pv, pos_von, 0.0);
-
-					return 0;
-				}
-			}
-		}
-	}
-
-	DisplayedDocument *dd = document_new_displayed_document(sfp_pdf,
-			anbindung, error);
-	if (!dd)
-		ERROR_Z
-
-	if (pos_pdf)
-		pos_von = *pos_pdf;
-
-	rc = zond_treeview_oeffnen_dd(zond, dd, pos_von.seite, pos_von.index, error);
-	if (rc) {
-		document_free_displayed_documents(dd);
-
-		ERROR_Z
-	}
-
-	return 0;
-}
-
-static gint zond_treeview_open_pdf(Projekt *zond, gint node_id,
-		SondFilePartPDF* sfp_pdf, gchar const *section, GError **error) {
-	gint rc = 0;
-	Anbindung anbindung = { 0 };
-	Anbindung anbindung_ges = { 0 };
-	PdfPos pos_pdf = { 0 };
-	Anbindung *anbindung_int = NULL;
-
-	if (section)
-		anbindung_parse_file_section(section, &anbindung);
-
+static gint get_anbindung_ges(Projekt *zond, gint node_id,
+		Anbindung anbindung, Anbindung* anbindung_ges,
+		GError **error) {
 	if (zond->state & GDK_CONTROL_MASK) {
 		if ((anbindung.bis.seite || anbindung.bis.index))
-			anbindung_int = &anbindung;
+			*anbindung_ges = anbindung;
 		else if (anbindung.von.seite || anbindung.von.index) { //Pdf_punkt
 			//nächsthöheren Abschnitt ermitteln
 			gint rc = 0;
@@ -2225,10 +2178,8 @@ static gint zond_treeview_open_pdf(Projekt *zond, gint node_id,
 
 			if (section_ges) //nicht root
 			{
-				anbindung_parse_file_section(section_ges, &anbindung_ges);
+				anbindung_parse_file_section(section_ges, anbindung_ges);
 				g_free(section_ges);
-
-				anbindung_int = &anbindung_ges;
 			}
 		}
 	} else {
@@ -2250,58 +2201,22 @@ static gint zond_treeview_open_pdf(Projekt *zond, gint node_id,
 			ERROR_Z
 
 		if (section_ges) {
-			anbindung_parse_file_section(section_ges, &anbindung_ges);
+			anbindung_parse_file_section(section_ges, anbindung_ges);
 			g_free(section_ges);
-			anbindung_int = &anbindung_ges;
 		}
 	}
-
-	//jetzt Anfangspunkt
-	if ((anbindung.von.seite || anbindung.von.index) && // Pdf-Punkt
-			!(anbindung.bis.seite || anbindung.bis.index)) {
-		pos_pdf.seite = anbindung.von.seite
-				- ((anbindung_int) ? anbindung_int->von.seite : 0);
-		pos_pdf.index = anbindung.von.index;
-	} else if (zond->state & GDK_MOD1_MASK) {
-		if (anbindung.bis.seite || anbindung.bis.index) //Abschnitt
-				{
-			pos_pdf.seite = anbindung.bis.seite
-					- ((anbindung_int) ? anbindung_int->von.seite : 0);
-			pos_pdf.index = anbindung.bis.index;
-		}
-		else { //root
-			pos_pdf.seite = EOP;
-			pos_pdf.index = EOP;
-		}
-	}
-	else {
-		if (anbindung.von.seite || anbindung.von.index) {
-			pos_pdf.seite = anbindung.von.seite
-					- ((anbindung_int) ? anbindung_int->von.seite : 0);
-			pos_pdf.index = anbindung.von.index
-					- ((anbindung_int) ? anbindung_int->von.index : 0);
-		}
-		//else: bleibt 0
-	}
-
-	rc = zond_treeview_oeffnen_internal_viewer(zond, sfp_pdf, anbindung_int,
-			&pos_pdf, error);
-	if (rc)
-		ERROR_Z
 
 	return 0;
 }
 
-static get_filepart_from_iter(ZondTreeview* ztv, GtkTreeIter* iter,
-		SondFilePart** sfp, gchar** section, GError** error) {
+static gint get_filepart_from_iter(ZondTreeview* ztv, GtkTreeIter* iter,
+		SondFilePart** sfp, gchar** section, gint* node_id, GError** error) {
 	gchar *file_part = NULL;
-	gint rc = 0;
-	gint node_id = 0;
+	gint ret = 0;
 
-	node_id = zond_treeview_get_filepart_and_section(
-			ZOND_TREEVIEW(zond->treeview[zond->baum_active]),
+	ret = zond_treeview_get_filepart_and_section(ztv,
 			iter, &file_part, section, error);
-	if (node_id == -1)
+	if (ret == -1)
 		ERROR_Z
 
 	if (!file_part)
@@ -2316,13 +2231,16 @@ static get_filepart_from_iter(ZondTreeview* ztv, GtkTreeIter* iter,
 		ERROR_Z
 	}
 
+	if (node_id)
+		*node_id = ret;
+
 	return 0;
 }
 
 
 
 
-static gint get_dd(SondTreeview* stv, GtkTreeIter* iter,
+static gint get_dd(ZondTreeview* ztv, GtkTreeIter* iter,
 		DisplayedDocument** dd, GError** error) {
 	gint rc = 0;
 	SondFilePart* sfp = NULL;
@@ -2331,7 +2249,7 @@ static gint get_dd(SondTreeview* stv, GtkTreeIter* iter,
 
 	*dd = NULL;
 
-	rc = get_filepart_from_iter(ztv, iter, &sfp, &section, error);
+	rc = get_filepart_from_iter(ztv, iter, &sfp, &section, NULL, error);
 	if (rc)
 		ERROR_Z
 
@@ -2353,13 +2271,6 @@ static gint get_dd(SondTreeview* stv, GtkTreeIter* iter,
 		if (zpdfd) {
 			anbindung_aktualisieren(zpdfd, &anbindung);
 /*
-			for (guint i = 0; i < pos_pdf->seite; i++) {
-				PdfDocumentPage* pdfp = NULL;
-
-				pdfp = g_ptr_array_index(zond_pdf_document_get_arr_pages(zpdfd), i);
-				if (pdfp && pdfp->deleted)
-					pos_pdf->seite--;
-			}
 			*/
 		}
 	}
@@ -2381,7 +2292,8 @@ static gint zond_treeview_open_auszug(Projekt* zond, GtkTreeIter* iter,
 
 	GtkTreeModel* model = gtk_tree_view_get_model(GTK_TREE_VIEW(zond->treeview[zond->baum_active]));
 
-	rc = get_dd(zond->treeview[zond->baum_active], iter, &dd, error);
+	rc = get_dd(ZOND_TREEVIEW(zond->treeview[zond->baum_active]),
+			iter, &dd, error);
 	if (rc)
 		ERROR_Z
 
@@ -2404,7 +2316,7 @@ static gint zond_treeview_open_auszug(Projekt* zond, GtkTreeIter* iter,
 		gint rc = 0;
 		DisplayedDocument* dd_tmp = NULL;
 
-		rc = get_dd(zond->treeview[zond->baum_active], &iter_tmp, &dd, error);
+		rc = get_dd(ZOND_TREEVIEW(zond->treeview[zond->baum_active]), &iter_tmp, &dd, error);
 		if (rc) {
 			document_free_displayed_documents(dd_ges);
 
@@ -2428,7 +2340,8 @@ static gint zond_treeview_open_auszug(Projekt* zond, GtkTreeIter* iter,
 		gint rc = 0;
 		DisplayedDocument* dd_tmp = NULL;
 
-		rc = get_dd(zond->treeview[zond->baum_active], &iter_tmp, &dd, error);
+		rc = get_dd(ZOND_TREEVIEW(zond->treeview[zond->baum_active]),
+				&iter_tmp, &dd, error);
 		if (rc) {
 			document_free_displayed_documents(dd_ges);
 
@@ -2458,32 +2371,99 @@ static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 	gint rc = 0;
 	gchar *section = NULL;
 	SondFilePart* sfp = NULL;
+	gint node_id = 0;
+	Anbindung anbindung_node = { 0 };
+	PdfPos pdf_pos = { 0 };
 
-	rc = get_filepart_from_iter(zond->treeview[zond->baum_active], iter,
-			sfp, section, error);
+	rc = get_filepart_from_iter(ZOND_TREEVIEW(zond->treeview[zond->baum_active]), iter,
+			&sfp, &section, &node_id, error);
 	if (rc)
 		ERROR_Z
 
 	if (!sfp)
 		return 0;
 
-	//mit externem Programm öffnen
-	if (open_with || !SOND_IS_FILE_PART_PDF(sfp)) //wenn kein pdf oder mit Programmauswahl zu öffnen:
-		rc = sond_file_part_open(sfp, open_with, error);
-	else { //internen Viewer verwenden
-		rc = zond_treeview_open_pdf(zond, node_id, SOND_FILE_PART_PDF(sfp), section, error);
+	if (section) {
+		anbindung_parse_file_section(section, &anbindung_node);
+		g_free(section);
 	}
-	g_free(section);
-	g_object_unref(sfp);
-	if (rc)
-		ERROR_Z
+
+	//mit externem Programm oder mit renderer öffnen
+	if (open_with || !SOND_IS_FILE_PART_PDF(sfp)) {//wenn kein pdf oder mit Programmauswahl zu öffnen:
+		rc = sond_file_part_open(sfp, open_with, error);
+		g_object_unref(sfp);
+		if (rc)
+			ERROR_Z
+	}
+	else if (!auszug) { //internen Viewer verwenden
+		Anbindung anbindung_ges = { 0 };
+		ZondPdfDocument* zpdfd = NULL;
+		DisplayedDocument* dd = NULL;
+LOG_INFO("normal");
+		rc = get_anbindung_ges(zond, node_id, anbindung_node,
+				&anbindung_ges, error);
+		if (rc) {
+			g_object_unref(sfp);
+
+			ERROR_Z
+		}
+
+		//Anbindung anpassen
+		zpdfd = zond_pdf_document_is_open(SOND_FILE_PART_PDF(sfp));
+		if (zpdfd) {
+			anbindung_aktualisieren(zpdfd, &anbindung_ges);
+
+			//wenn anbindung auf größeren Teil verweist, müssen wir herausfinden,
+			//wo der innere Teil liegt
+			if (!anbindung_1_gleich_2(anbindung_node, anbindung_ges)) {
+				anbindung_aktualisieren(zpdfd, &anbindung_node);
+
+				if (!(zond->state & GDK_MOD1_MASK)) {
+					pdf_pos.seite = anbindung_node.von.seite - anbindung_ges.von.seite;
+					if (pdf_pos.seite == 0) //gleiche Seite
+						pdf_pos.index = anbindung_node.von.index - anbindung_ges.von.index;
+					else
+						pdf_pos.index = anbindung_node.von.index;
+				}
+				else { //alt gedrückt
+					pdf_pos.seite = anbindung_node.bis.seite - anbindung_ges.von.seite;
+					if (pdf_pos.seite == 0) //Letzte Seite ist erste Seite gesamt
+						pdf_pos.index = anbindung_node.bis.index - anbindung_ges.von.index;
+					else
+						pdf_pos.index = anbindung_node.bis.index;
+				}
+
+				if (pdf_pos.seite != anbindung_ges.von.seite) { //nicht 1. Seite des Abschnitts
+					for (guint i = anbindung_ges.von.seite; i < pdf_pos.seite; i++) {
+						PdfDocumentPage* pdfp = NULL;
+
+						pdfp = g_ptr_array_index(zond_pdf_document_get_arr_pages(zpdfd), i);
+						if (pdfp && pdfp->deleted) //gelöschte Seite "herauskürzen"
+							pdf_pos.seite--;
+					}
+
+				}
+			}
+			else if (zond->state & GDK_MOD1_MASK) { //ganz am Schluß
+				pdf_pos.seite = EOP;
+				pdf_pos.index = EOP;
+			}
+		}
+
+		dd = document_new_displayed_document(SOND_FILE_PART_PDF(sfp),
+				&anbindung_ges, error);
+		g_object_unref(sfp);
+		if (!dd)
+			ERROR_Z
+	}
+	else { //Auszug!
+LOG_INFO("auszug");
+	}
 
 	return 0;
 }
 
-#if GTK_MAJOR_VERSION >= 4
-
-static void zond_treeview_gesture_clicked(GtkGestureClick *gesture,
+static void zond_treeview_gesture_clicked(GtkGestureMultiPress *gesture,
 		gint n_press, gdouble x, gdouble y, gpointer user_data) {
 	Projekt *zond = (Projekt*) user_data;
 	GtkTreeView *tree_view = GTK_TREE_VIEW(
@@ -2516,45 +2496,6 @@ static void zond_treeview_gesture_clicked(GtkGestureClick *gesture,
 
 	gtk_gesture_set_state(GTK_GESTURE(gesture), GTK_EVENT_SEQUENCE_CLAIMED);
 }
-
-#else /* GTK3 */
-
-static gboolean zond_treeview_button_press(GtkWidget *widget,
-		GdkEventButton *event, gpointer user_data) {
-	Projekt *zond = (Projekt*) user_data;
-	GtkTreePath *path = NULL;
-	GtkTreeIter iter = { 0 };
-	GError *error = NULL;
-	gint rc = 0;
-	gint n_clicks = 0;
-
-	if (event->button != GDK_BUTTON_PRIMARY)
-		return FALSE;
-
-	if (event->type == GDK_2BUTTON_PRESS) n_clicks = 2;
-	else
-		return FALSE;
-
-	if (!gtk_tree_view_get_path_at_pos(GTK_TREE_VIEW(widget),
-			(gint)event->x, (gint)event->y, &path, NULL, NULL, NULL))
-		return FALSE;
-
-	gtk_tree_model_get_iter(
-			gtk_tree_view_get_model(GTK_TREE_VIEW(widget)), &iter, path);
-	gtk_tree_path_free(path);
-
-	rc = zond_treeview_open_node(zond, &iter, FALSE, FALSE, &error);
-	if (rc) {
-		display_message(zond->app_window, "Fehler beim Öffnen\n\n",
-				error->message, NULL);
-		g_error_free(error);
-	}
-
-	/* TRUE: row-activated unterdruecken */
-	return TRUE;
-}
-
-#endif /* GTK_MAJOR_VERSION */
 
 typedef struct _SSelectionChangeIcon {
 	Projekt *zond;
@@ -2652,14 +2593,14 @@ static void zond_treeview_action_jump(GSimpleAction *a, GVariant *p, gpointer d)
 static void zond_treeview_action_oeffnen(GSimpleAction *a,
 		GVariant *p, gpointer d) {
 	Projekt *zond = (Projekt*) d;
-	GtkTreePath iter = { 0 };
+	GtkTreeIter iter = { 0 };
 	GError *error = NULL;
 	gint rc = 0;
 
 	if (!sond_treeview_get_cursor(zond->treeview[zond->baum_active], &iter))
 		return;
 
-	rc = zond_treeview_open_node(zond, &iter, TRUE, FALSE, &error);
+	rc = zond_treeview_open_node(zond, &iter, FALSE, FALSE, &error);
 	if (rc) {
 		display_message(zond->app_window, "Fehler beim \u00d6ffnen Knoten:\n\n",
 				error->message, NULL);
@@ -2788,22 +2729,14 @@ zond_treeview_new(Projekt *zond, gint root_node_id) {
 	zond_treeview_init_contextmenu(ztv);
 
 	/* Doppel-/Dreifachklick = angebundene Datei anzeigen */
-#if GTK_MAJOR_VERSION >= 4
 	{
-		GtkGesture *gesture = gtk_gesture_click_new();
+		GtkGesture *gesture = gtk_gesture_multi_press_new(GTK_WIDGET(ztv));
 		gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(gesture),
 				GDK_BUTTON_PRIMARY);
 		g_signal_connect(gesture, "pressed",
 				G_CALLBACK(zond_treeview_gesture_clicked),
 				(gpointer) ztv_priv->zond);
-		gtk_widget_add_controller(GTK_WIDGET(ztv),
-				GTK_EVENT_CONTROLLER(gesture));
 	}
-#else
-	g_signal_connect(ztv, "button-press-event",
-			G_CALLBACK(zond_treeview_button_press),
-			(gpointer) ztv_priv->zond);
-#endif
 
 	/* Zeile expandiert: Link nachladen + Spaltenbreite anpassen */
 	g_signal_connect(ztv, "row-expanded",

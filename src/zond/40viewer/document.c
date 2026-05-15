@@ -28,11 +28,17 @@ void document_free_displayed_documents(DisplayedDocument *dd) {
 
 DisplayedDocument*
 document_new_displayed_document(SondFilePartPDF* sfp_pdf,
-		Anbindung *anbindung_akt, GError **error) {
+		Anbindung *anbindung, GError **error) {
 	ZPDFDPart* zpdfd_part = NULL;
 	DisplayedDocument *dd = NULL;
+	ZondPdfDocument* zpdfd = NULL;
 
-	zpdfd_part = zpdfd_part_peek(sfp_pdf, anbindung_akt, error);
+	zpdfd = zond_pdf_document_is_open(sfp_pdf);
+
+	if (zpdfd)
+		anbindung_aktualisieren(zpdfd, anbindung);
+
+	zpdfd_part = zpdfd_part_peek(sfp_pdf, anbindung, error);
 	if (!zpdfd_part)
 		ERROR_Z_VAL(NULL)
 
