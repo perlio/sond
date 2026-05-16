@@ -840,8 +840,13 @@ ZPDFDPart* zpdfd_part_peek(SondFilePartPDF* sfp_pdf, Anbindung* anbindung,
 	ZondPdfDocumentPrivate* zpdfd_priv = NULL;
 	ZPDFDPart* zpdfd_part = NULL;
 
-	zpdfd = zond_pdf_document_open(sfp_pdf, (anbindung) ? anbindung->von.seite : 0,
-			(anbindung) ? anbindung->bis.seite : -1, error);
+	if (anbindung && anbindung_is_empty(anbindung))
+		anbindung = NULL;
+
+	zpdfd = zond_pdf_document_open(sfp_pdf,
+			(anbindung) ? anbindung->von.seite : 0,
+					(anbindung) ? anbindung->bis.seite : -1,
+							error);
 	if (!zpdfd)
 		ERROR_Z_VAL(NULL)
 

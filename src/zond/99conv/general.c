@@ -220,9 +220,20 @@ void anbindung_korrigieren(ZPDFDPart* zpdfd_part, Anbindung* anbindung) {
 	return;
 }
 
+gboolean anbindung_is_empty(Anbindung* anbindung) {
+	if (anbindung->von.seite || anbindung->von.index ||
+			anbindung->bis.seite || anbindung->bis.index)
+		return FALSE;
+
+	return TRUE;
+}
+
 void anbindung_aktualisieren(ZondPdfDocument* zpdfd, Anbindung* anbindung) {
 	GPtrArray* arr_pages = NULL;
 	Anbindung anbindung_orig = { 0 };
+
+	if (!anbindung || anbindung_is_empty(anbindung))
+		return;
 
 	arr_pages = zond_pdf_document_get_arr_pages(zpdfd);
 

@@ -31,12 +31,6 @@ document_new_displayed_document(SondFilePartPDF* sfp_pdf,
 		Anbindung *anbindung, GError **error) {
 	ZPDFDPart* zpdfd_part = NULL;
 	DisplayedDocument *dd = NULL;
-	ZondPdfDocument* zpdfd = NULL;
-
-	zpdfd = zond_pdf_document_is_open(sfp_pdf);
-
-	if (zpdfd)
-		anbindung_aktualisieren(zpdfd, anbindung);
 
 	zpdfd_part = zpdfd_part_peek(sfp_pdf, anbindung, error);
 	if (!zpdfd_part)

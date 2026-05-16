@@ -29,6 +29,8 @@ void anbindung_get_orig(ZondPdfDocument*, Anbindung*);
 
 void anbindung_korrigieren(ZPDFDPart*, Anbindung*);
 
+gboolean anbindung_is_empty(Anbindung* anbindung);
+
 void anbindung_aktualisieren(ZondPdfDocument*, Anbindung*);
 
 #endif // GENERAL_H_INCLUDED

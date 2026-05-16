@@ -2110,7 +2110,7 @@ static void zond_treeview_jump_to_link_target(Projekt *zond, GtkTreeIter *iter) 
 	return;
 }
 
-gint zond_treeview_oeffnen_internal_viewer(Projekt *zond, SondFilePartPDF* sfp_pdf,
+gint zond_treeview_oeffnen_internal_viewer(Projekt *zond,
 		DisplayedDocument* dd, PdfPos *pos_pdf, GError **error) {
 	PdfPos pos_von = { 0 };
 	gint rc = 0;
@@ -2366,6 +2366,42 @@ static gint zond_treeview_open_auszug(Projekt* zond, GtkTreeIter* iter,
 	return 0;
 }
 
+PdfPos zond_treeview_get_pdf_pos(Projekt* zond, ZondPdfDocument* zpdfd,
+		Anbindung anbindung_ges, Anbindung anbindung_node) {
+	PdfPos pdf_pos = { 0 };
+
+	if (!(zond->state & GDK_MOD1_MASK)) {
+		pdf_pos.seite = anbindung_node.von.seite - anbindung_ges.von.seite;
+		if (pdf_pos.seite == 0)
+			pdf_pos.index = anbindung_node.von.index - anbindung_ges.von.index;
+		else
+			pdf_pos.index = anbindung_node.von.index;
+	} else {
+		if (anbindung_node.bis.seite || anbindung_node.bis.index) {
+			pdf_pos.seite = anbindung_node.bis.seite - anbindung_ges.von.seite;
+			if (pdf_pos.seite == 0)
+				pdf_pos.index = anbindung_node.bis.index - anbindung_ges.von.index;
+			else
+				pdf_pos.index = anbindung_node.bis.index;
+		} else {
+			pdf_pos.seite = EOP;
+			pdf_pos.index = EOP;
+		}
+	}
+
+	/* gelöschte Seiten herausrechnen (nur wenn PDF offen) */
+	if (zpdfd && pdf_pos.seite != EOP && pdf_pos.seite > 0) {
+		for (guint i = anbindung_ges.von.seite; i < (guint)pdf_pos.seite; i++) {
+			PdfDocumentPage* pdfp = g_ptr_array_index(
+					zond_pdf_document_get_arr_pages(zpdfd), i);
+			if (pdfp && pdfp->deleted)
+				pdf_pos.seite--;
+		}
+	}
+
+	return pdf_pos;
+}
+
 static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 		gboolean open_with, gboolean auszug, GError **error) {
 	gint rc = 0;
@@ -2399,62 +2435,42 @@ static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 		Anbindung anbindung_ges = { 0 };
 		ZondPdfDocument* zpdfd = NULL;
 		DisplayedDocument* dd = NULL;
-LOG_INFO("normal");
-		rc = get_anbindung_ges(zond, node_id, anbindung_node,
-				&anbindung_ges, error);
-		if (rc) {
-			g_object_unref(sfp);
 
-			ERROR_Z
-		}
+		//Anbindung anpassen und Anfangsposition berechnen
+		if (!anbindung_is_empty(&anbindung_node)) {
+			rc = get_anbindung_ges(zond, node_id, anbindung_node,
+					&anbindung_ges, error);
+			if (rc) {
+				g_object_unref(sfp);
 
-		//Anbindung anpassen
-		zpdfd = zond_pdf_document_is_open(SOND_FILE_PART_PDF(sfp));
-		if (zpdfd) {
-			anbindung_aktualisieren(zpdfd, &anbindung_ges);
-
-			//wenn anbindung auf größeren Teil verweist, müssen wir herausfinden,
-			//wo der innere Teil liegt
-			if (!anbindung_1_gleich_2(anbindung_node, anbindung_ges)) {
-				anbindung_aktualisieren(zpdfd, &anbindung_node);
-
-				if (!(zond->state & GDK_MOD1_MASK)) {
-					pdf_pos.seite = anbindung_node.von.seite - anbindung_ges.von.seite;
-					if (pdf_pos.seite == 0) //gleiche Seite
-						pdf_pos.index = anbindung_node.von.index - anbindung_ges.von.index;
-					else
-						pdf_pos.index = anbindung_node.von.index;
-				}
-				else { //alt gedrückt
-					pdf_pos.seite = anbindung_node.bis.seite - anbindung_ges.von.seite;
-					if (pdf_pos.seite == 0) //Letzte Seite ist erste Seite gesamt
-						pdf_pos.index = anbindung_node.bis.index - anbindung_ges.von.index;
-					else
-						pdf_pos.index = anbindung_node.bis.index;
-				}
-
-				if (pdf_pos.seite != anbindung_ges.von.seite) { //nicht 1. Seite des Abschnitts
-					for (guint i = anbindung_ges.von.seite; i < pdf_pos.seite; i++) {
-						PdfDocumentPage* pdfp = NULL;
-
-						pdfp = g_ptr_array_index(zond_pdf_document_get_arr_pages(zpdfd), i);
-						if (pdfp && pdfp->deleted) //gelöschte Seite "herauskürzen"
-							pdf_pos.seite--;
-					}
-
-				}
+				ERROR_Z
 			}
-			else if (zond->state & GDK_MOD1_MASK) { //ganz am Schluß
-				pdf_pos.seite = EOP;
-				pdf_pos.index = EOP;
+
+			zpdfd = zond_pdf_document_is_open(SOND_FILE_PART_PDF(sfp));
+			if (zpdfd) {
+				anbindung_aktualisieren(zpdfd, &anbindung_ges);
+				anbindung_aktualisieren(zpdfd, &anbindung_node);
 			}
 		}
 
 		dd = document_new_displayed_document(SOND_FILE_PART_PDF(sfp),
 				&anbindung_ges, error);
-		g_object_unref(sfp);
-		if (!dd)
+		if (!dd) {
+			g_object_unref(sfp);
+
 			ERROR_Z
+		}
+
+		pdf_pos = zond_treeview_get_pdf_pos(zond, zpdfd, anbindung_ges, anbindung_node);
+
+		rc = zond_treeview_oeffnen_internal_viewer(zond, dd,
+				&pdf_pos, error);
+		g_object_unref(sfp);
+		if (rc) {
+			document_free_displayed_documents(dd);
+
+			ERROR_Z
+		}
 	}
 	else { //Auszug!
 LOG_INFO("auszug");
@@ -2473,7 +2489,7 @@ static void zond_treeview_gesture_clicked(GtkGestureMultiPress *gesture,
 	GError *error = NULL;
 	gint rc = 0;
 
-	if (n_press < 2)
+	if (n_press != 2)
 		return;
 	if (gtk_gesture_single_get_current_button(
 			GTK_GESTURE_SINGLE(gesture)) != GDK_BUTTON_PRIMARY)
@@ -2486,8 +2502,7 @@ static void zond_treeview_gesture_clicked(GtkGestureMultiPress *gesture,
 	gtk_tree_model_get_iter(gtk_tree_view_get_model(tree_view), &iter, path);
 	gtk_tree_path_free(path);
 
-	rc = zond_treeview_open_node(zond, &iter, FALSE,
-			(n_press == 2) ? FALSE : TRUE, &error);
+	rc = zond_treeview_open_node(zond, &iter, FALSE, FALSE, &error);
 	if (rc) {
 		display_message(zond->app_window, "Fehler beim Öffnen\n\n",
 				error->message, NULL);

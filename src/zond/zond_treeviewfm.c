@@ -12,10 +12,11 @@
 #include "zond_dbase.h"
 #include "zond_treeview.h"
 #include "zond_tree_store.h"
-#include "40viewer/viewer.h"
 
 #include "10init/app_window.h"
 #include "20allgemein/project.h"
+#include "40viewer/viewer.h"
+#include "40viewer/document.h"
 #include "99conv/general.h"
 
 #ifdef _WIN32
@@ -489,6 +490,7 @@ static gint zond_treeviewfm_open_stvfm_item(SondTVFMItem* stvfm_item,
 		gchar const* section = NULL;
 		gint rc = 0;
 		SondFilePartPDF* sfp_pdf = NULL;
+		DisplayedDocument* dd = NULL;
 
 		ZondTreeviewFM* ztvfm = ZOND_TREEVIEWFM(sond_tvfm_item_get_stvfm(stvfm_item));
 		ZondTreeviewFMPrivate* ztvfm_priv =
@@ -498,14 +500,25 @@ static gint zond_treeviewfm_open_stvfm_item(SondTVFMItem* stvfm_item,
 		section = sond_tvfm_item_get_path_or_section(stvfm_item);
 		if (section) {
 			Anbindung anbindung = { 0 };
+			Anbindung anbindung_ges = { 0 };
+			ZondPdfDocument* zpdfd = NULL;
 
-			anbindung_parse_file_section(section,  &anbindung);
-			pos_pdf.seite = anbindung.von.seite;
-			pos_pdf.index = anbindung.von.index;
+			anbindung_parse_file_section(section, &anbindung);
+
+			zpdfd = zond_pdf_document_is_open(sfp_pdf);
+			if (zpdfd)
+				anbindung_aktualisieren(zpdfd, &anbindung);
+
+			pos_pdf = zond_treeview_get_pdf_pos(ztvfm_priv->zond, zpdfd,
+					anbindung_ges, anbindung);
 		}
 
+		dd = document_new_displayed_document(sfp_pdf, NULL, error);
+		if (!dd)
+			ERROR_Z
+
 		rc = zond_treeview_oeffnen_internal_viewer(ztvfm_priv->zond,
-				sfp_pdf, NULL, &pos_pdf, error);
+				dd, &pos_pdf, error);
 		if (rc)
 			ERROR_Z
 	}

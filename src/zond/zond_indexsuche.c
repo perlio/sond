@@ -107,7 +107,7 @@ zond_indexsuche_row_activated(GtkTreeView *treeview, GtkTreePath *tree_path,
                 PdfPos pos_pdf = { page_nr, 0 };
 
                 rc = zond_treeview_oeffnen_internal_viewer(zond,
-                        SOND_FILE_PART_PDF(sfp), NULL, &pos_pdf, &error);
+                        NULL, &pos_pdf, &error);
                 if (rc) {
                     display_message(zond->app_window,
                             "Fehler beim Öffnen\n\n",
