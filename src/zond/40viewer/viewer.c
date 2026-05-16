@@ -304,6 +304,19 @@ static gboolean viewer_has_dirty_dd(PdfViewer* pv) {
 	return FALSE;
 }
 
+typedef struct {
+	PdfViewer *pv;
+	PdfPos pdf_pos;
+	gdouble delta;
+} SSpringArgs;
+
+static gboolean viewer_springen_idle(gpointer data) {
+	SSpringArgs *args = (SSpringArgs*) data;
+	viewer_springen_zu_pos_pdf(args->pv, args->pdf_pos, args->delta);
+	g_free(args);
+	return G_SOURCE_REMOVE;
+}
+
 gint viewer_display_document(PdfViewer *pv, DisplayedDocument *dd, gint page,
 		gint index, GError **error) {
 	PdfPos pdf_pos = { page, index };
@@ -312,10 +325,14 @@ gint viewer_display_document(PdfViewer *pv, DisplayedDocument *dd, gint page,
 
 	viewer_create_layout(pv);
 
-	if (page || index)
-		viewer_springen_zu_pos_pdf(pv, pdf_pos, 0.0);
-	else
-		g_signal_emit_by_name(pv->v_adj, "value-changed", NULL); // falls pos == 0
+	if (page || index) {
+		SSpringArgs *args = g_new0(SSpringArgs, 1);
+		args->pv = pv;
+		args->pdf_pos = pdf_pos;
+		args->delta = 0.0;
+		g_idle_add(viewer_springen_idle, args);
+	} else
+		g_signal_emit_by_name(pv->v_adj, "value-changed", NULL);
 
 	//Test, ob in Viewer "schmutzige" dds angezeigt werden sollen - dann speichern-icon aktiv
 	if (viewer_has_dirty_dd(pv))
