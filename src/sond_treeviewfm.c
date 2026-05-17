@@ -1498,7 +1498,7 @@ static void sond_treeviewfm_results_row_activated(GtkTreeView *treeview,
 	return;
 }
 
-static gint sond_treeviewfm_open_stvfm_item(SondTVFMItem* stvfm_item,
+static gint sond_treeviewfm_open_stvfm_item(GtkTreeIter* iter, SondTVFMItem* stvfm_item,
 		gboolean open_with, GError** error) {
 	gint rc = 0;
 	SondTVFMItemPrivate *stvfm_item_priv = sond_tvfm_item_get_instance_private(stvfm_item);
@@ -2391,7 +2391,7 @@ static gint sond_treeviewfm_foreach_loeschen(SondTreeview *stv,
 	return 0;
 }
 
-static gint sond_treeviewfm_open(SondTVFMItem *stvfm_item,
+static gint sond_treeviewfm_open(GtkTreeIter* iter, SondTVFMItem *stvfm_item,
 		gboolean open_with, GError **error) {
 	gint rc = 0;
 	SondTVFMItemPrivate *stvfm_item_priv = sond_tvfm_item_get_instance_private(stvfm_item);
@@ -2440,7 +2440,7 @@ static gint sond_treeviewfm_open(SondTVFMItem *stvfm_item,
 #endif
 
 	rc = SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->
-			open_stvfm_item(stvfm_item, open_with, error);
+			open_stvfm_item(iter, stvfm_item, open_with, error);
 	if (rc)
 		ERROR_Z
 
@@ -2459,7 +2459,7 @@ static void open_item(GtkTreeView* tree_view, gboolean open_with) {
 	gtk_tree_path_free(path);
 	gtk_tree_model_get(gtk_tree_view_get_model(tree_view), &iter, 0, &stvfm_item, -1);
 
-	rc = sond_treeviewfm_open(stvfm_item, open_with, &error);
+	rc = sond_treeviewfm_open(&iter, stvfm_item, open_with, &error);
 	g_object_unref(stvfm_item);
 	if (rc) {
 		display_message(SOND_GET_TOPLEVEL(tree_view), "Fehler beim Öffnen\n\n",
@@ -2947,7 +2947,7 @@ static void sond_treeviewfm_row_activated(GtkTreeView *tree_view,
 	gtk_tree_model_get_iter(gtk_tree_view_get_model(tree_view), &iter, tree_path);
 	gtk_tree_model_get(gtk_tree_view_get_model(tree_view), &iter, 0, &stvfm_item, -1);
 
-	rc = sond_treeviewfm_open(stvfm_item, FALSE, &error);
+	rc = sond_treeviewfm_open(&iter, stvfm_item, FALSE, &error);
 	g_object_unref(stvfm_item);
 	if (rc) {
 		display_message(SOND_GET_TOPLEVEL(tree_view),

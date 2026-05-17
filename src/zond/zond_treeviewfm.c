@@ -482,7 +482,7 @@ gint zond_treeviewfm_insert_section(ZondTreeviewFM *ztvfm, gint node_id,
 	return 0;
 }
 
-static gint zond_treeviewfm_open_stvfm_item(SondTVFMItem* stvfm_item,
+static gint zond_treeviewfm_open_stvfm_item(GtkTreeIter* iter, SondTVFMItem* stvfm_item,
 		gboolean open_with, GError **error) {
 
 	if (!open_with && SOND_IS_FILE_PART_PDF(sond_tvfm_item_get_sond_file_part(stvfm_item))) {
@@ -492,6 +492,7 @@ static gint zond_treeviewfm_open_stvfm_item(SondTVFMItem* stvfm_item,
 		SondFilePartPDF* sfp_pdf = NULL;
 		DisplayedDocument* dd = NULL;
 		Anbindung anbindung = { 0 };
+		Anbindung anbindung_ges = { 0 };
 
 		ZondTreeviewFM* ztvfm = ZOND_TREEVIEWFM(sond_tvfm_item_get_stvfm(stvfm_item));
 		ZondTreeviewFMPrivate* ztvfm_priv =
@@ -502,7 +503,30 @@ static gint zond_treeviewfm_open_stvfm_item(SondTVFMItem* stvfm_item,
 		if (section)
 			anbindung_parse_file_section(section, &anbindung);
 
-		dd = document_new_displayed_document(sfp_pdf, NULL, &anbindung,
+		if (ztvfm_priv->zond->state & GDK_CONTROL_MASK) {
+			if (!anbindung_is_pdf_punkt(anbindung))
+				anbindung_ges = anbindung;
+			else { //Eltern-iter holen
+				GtkTreeIter iter_parent = { 0 };
+				GtkTreeModel* model = NULL;
+				SondTVFMItem* stvfm_item_parent = NULL;
+				gchar const* section_parent = NULL;
+
+				model = gtk_tree_view_get_model(GTK_TREE_VIEW(
+						sond_tvfm_item_get_stvfm(stvfm_item)));
+				if (!gtk_tree_model_iter_parent(model, &iter_parent, iter)) {
+					LOG_WARN("Elter-Iter konnte nicht ermittelt werden");
+					//dann halt weiter mit ganzem PDF...
+				}
+				gtk_tree_model_get(model, &iter_parent, 0, &stvfm_item_parent, -1);
+				section_parent = sond_tvfm_item_get_path_or_section(stvfm_item_parent);
+				if (section_parent)
+					anbindung_parse_file_section(section, &anbindung_ges);
+				g_object_unref(stvfm_item_parent);
+			}
+		}
+
+		dd = document_new_displayed_document(sfp_pdf, &anbindung_ges, &anbindung,
 				(ztvfm_priv->zond->state & GDK_MOD1_MASK), &pdf_pos, error);
 		if (!dd)
 			ERROR_Z
@@ -516,7 +540,7 @@ static gint zond_treeviewfm_open_stvfm_item(SondTVFMItem* stvfm_item,
 		gint rc = 0;
 
 		rc = SOND_TREEVIEWFM_CLASS(zond_treeviewfm_parent_class)->
-				open_stvfm_item(stvfm_item, open_with, error);
+				open_stvfm_item(iter, stvfm_item, open_with, error);
 		if (rc)
 			ERROR_Z
 	}

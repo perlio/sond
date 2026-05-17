@@ -2275,11 +2275,13 @@ static gint zond_treeview_open_auszug(Projekt* zond, GtkTreeIter* iter,
 		if (!dd_tmp)
 			ERROR_Z
 
-		pdf_pos->seite += pdf_pos_tmp.seite;
+		pdf_pos->seite += pdf_pos_tmp.seite + 1;
 
-		dd_loop->next = dd_tmp;
-		dd_loop = dd_loop->next;
+		dd_tmp->next = dd_loop;
+		dd_loop = dd_tmp;
 	}
+
+	*dd = dd_loop;
 
 	//dann runter
 	iter_tmp = *iter;
@@ -2312,11 +2314,9 @@ static gint zond_treeview_open_auszug(Projekt* zond, GtkTreeIter* iter,
 		if (!dd_tmp)
 			ERROR_Z
 
-		dd_tmp->next = dd_loop;
+		dd_loop->next = dd_tmp;
 		dd_loop = dd_tmp;
 	}
-
-	*dd = dd_loop;
 
 	return 0;
 }
