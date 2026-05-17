@@ -2414,37 +2414,12 @@ static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 	return 0;
 }
 
-static void zond_treeview_gesture_clicked(GtkGestureMultiPress *gesture,
-		gint n_press, gdouble x, gdouble y, gpointer user_data) {
-	Projekt *zond = (Projekt*) user_data;
-	GtkTreeView *tree_view = GTK_TREE_VIEW(
-			gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(gesture)));
-	GtkTreePath *path = NULL;
-	GtkTreeIter iter = { 0 };
-	GError *error = NULL;
-	gint rc = 0;
-
-	if (n_press != 2)
-		return;
-	if (gtk_gesture_single_get_current_button(
-			GTK_GESTURE_SINGLE(gesture)) != GDK_BUTTON_PRIMARY)
-		return;
-
-	if (!gtk_tree_view_get_path_at_pos(tree_view, (gint)x, (gint)y,
-			&path, NULL, NULL, NULL))
-		return;
-
-	gtk_tree_model_get_iter(gtk_tree_view_get_model(tree_view), &iter, path);
-	gtk_tree_path_free(path);
-
-	rc = zond_treeview_open_node(zond, &iter, FALSE, FALSE, &error);
-	if (rc) {
-		display_message(zond->app_window, "Fehler beim Öffnen\n\n",
-				error->message, NULL);
-		g_error_free(error);
-	}
-
-	gtk_gesture_set_state(GTK_GESTURE(gesture), GTK_EVENT_SEQUENCE_CLAIMED);
+static void zond_treeview_row_activated(GtkTreeView *tree_view,
+		GtkTreePath *path, GtkTreeViewColumn *column, gpointer user_data) {
+	GActionGroup *ag = gtk_widget_get_action_group(
+			GTK_WIDGET(tree_view), "stv");
+	if (ag && g_action_group_has_action(ag, "oeffnen"))
+		g_action_group_activate_action(ag, "oeffnen", NULL);
 }
 
 typedef struct _SSelectionChangeIcon {
@@ -2678,15 +2653,9 @@ zond_treeview_new(Projekt *zond, gint root_node_id) {
 
 	zond_treeview_init_contextmenu(ztv);
 
-	/* Doppel-/Dreifachklick = angebundene Datei anzeigen */
-	{
-		GtkGesture *gesture = gtk_gesture_multi_press_new(GTK_WIDGET(ztv));
-		gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(gesture),
-				GDK_BUTTON_PRIMARY);
-		g_signal_connect(gesture, "pressed",
-				G_CALLBACK(zond_treeview_gesture_clicked),
-				(gpointer) ztv_priv->zond);
-	}
+	/* Doppelklick = angebundene Datei öffnen */
+	g_signal_connect(ztv, "row-activated",
+			G_CALLBACK(zond_treeview_row_activated), zond);
 
 	/* Zeile expandiert: Link nachladen + Spaltenbreite anpassen */
 	g_signal_connect(ztv, "row-expanded",
