@@ -18,7 +18,9 @@ typedef struct _Displayed_Document {
 
 void document_free_displayed_documents(DisplayedDocument*);
 
-DisplayedDocument* document_new_displayed_document(SondFilePartPDF*, Anbindung*,
-		GError**);
+DisplayedDocument*
+document_new_displayed_document(SondFilePartPDF* sfp_pdf,
+		Anbindung *anbindung_ges, Anbindung* anbindung_node, gboolean end,
+		PdfPos* pdf_pos, GError **error);
 
 	#endif // DOCUMENT_H_INCLUDED

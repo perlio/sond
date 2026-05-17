@@ -60,7 +60,6 @@ void viewer_springen_zu_pos_pdf(PdfViewer *pv, PdfPos pdf_pos, gdouble delta) {
 	else
 		value = viewer_page->y_pos + page * pv->zoom / 100;
 
-//    value = value * pv->zoom / 100;
 #ifndef VIEWER
 	if (pv->zond->state & GDK_MOD1_MASK) {
 		gdouble page_size = gtk_adjustment_get_page_size(pv->v_adj);
@@ -317,8 +316,8 @@ static gboolean viewer_springen_idle(gpointer data) {
 	return G_SOURCE_REMOVE;
 }
 
-gint viewer_display_document(PdfViewer *pv, DisplayedDocument *dd, gint page,
-		gint index, GError **error) {
+void viewer_display_document(PdfViewer *pv, DisplayedDocument *dd, gint page,
+		gint index) {
 	PdfPos pdf_pos = { page, index };
 
 	pv->dd = dd;
@@ -340,7 +339,7 @@ gint viewer_display_document(PdfViewer *pv, DisplayedDocument *dd, gint page,
 
 	gtk_widget_grab_focus(pv->layout);
 
-	return 0;
+	return;
 }
 
 void viewer_schliessen(PdfViewer *pv) {

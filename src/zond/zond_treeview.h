@@ -49,9 +49,6 @@ ZondTreeview* zond_treeview_new(Projekt*, gint);
 gint zond_treeview_oeffnen_internal_viewer(Projekt*, DisplayedDocument*,
 		PdfPos*, GError**);
 
-PdfPos zond_treeview_get_pdf_pos(Projekt* zond, ZondPdfDocument* zpdfd,
-		Anbindung anbindung_ges, Anbindung anbindung_node);
-
 gint zond_treeview_load_baum(ZondTreeview*, GError**);
 
 GtkTreePath* zond_treeview_get_path(SondTreeview*, gint);

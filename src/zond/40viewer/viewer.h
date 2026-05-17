@@ -135,7 +135,7 @@ void viewer_refresh_layout(PdfViewer*, gint);
 
 ViewerPageNew* viewer_new_page(PdfViewer*, DisplayedDocument*, gint);
 
-gint viewer_display_document(PdfViewer*, DisplayedDocument*, gint, gint, GError**);
+void viewer_display_document(PdfViewer*, DisplayedDocument*, gint, gint);
 
 void viewer_schliessen(PdfViewer*);
 

@@ -36,6 +36,7 @@
 #include "20allgemein/project.h"
 
 #include "40viewer/viewer.h"
+#include "40viewer/document.h"
 
 
 /* -------------------------------------------------------------------------
@@ -103,8 +104,19 @@ zond_indexsuche_row_activated(GtkTreeView *treeview, GtkTreePath *tree_path,
             g_object_unref(stvfm_item);
 
             if (sfp && SOND_IS_FILE_PART_PDF(sfp) && page_nr >= 0) {
-                /* PDF → interner PDF-Viewer */
+            	DisplayedDocument* dd = NULL;
+
+            	/* PDF → interner PDF-Viewer */
                 PdfPos pos_pdf = { page_nr, 0 };
+                dd = document_new_displayed_document(SOND_FILE_PART_PDF(sfp), NULL, NULL,
+                		FALSE, NULL, &error);
+                if (!dd) {
+                	display_message(zond->app_window, "DisplayedDocument "
+                			"konnte nicht erstellt werden:\n", error->message, NULL);
+                	g_error_free(error);
+                	g_free(filename);
+                	return;
+                }
 
                 rc = zond_treeview_oeffnen_internal_viewer(zond,
                         NULL, &pos_pdf, &error);

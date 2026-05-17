@@ -486,11 +486,12 @@ static gint zond_treeviewfm_open_stvfm_item(SondTVFMItem* stvfm_item,
 		gboolean open_with, GError **error) {
 
 	if (!open_with && SOND_IS_FILE_PART_PDF(sond_tvfm_item_get_sond_file_part(stvfm_item))) {
-		PdfPos pos_pdf = { 0 };
+		PdfPos pdf_pos = { 0 };
 		gchar const* section = NULL;
 		gint rc = 0;
 		SondFilePartPDF* sfp_pdf = NULL;
 		DisplayedDocument* dd = NULL;
+		Anbindung anbindung = { 0 };
 
 		ZondTreeviewFM* ztvfm = ZOND_TREEVIEWFM(sond_tvfm_item_get_stvfm(stvfm_item));
 		ZondTreeviewFMPrivate* ztvfm_priv =
@@ -498,27 +499,16 @@ static gint zond_treeviewfm_open_stvfm_item(SondTVFMItem* stvfm_item,
 
 		sfp_pdf = SOND_FILE_PART_PDF(sond_tvfm_item_get_sond_file_part(stvfm_item));
 		section = sond_tvfm_item_get_path_or_section(stvfm_item);
-		if (section) {
-			Anbindung anbindung = { 0 };
-			Anbindung anbindung_ges = { 0 };
-			ZondPdfDocument* zpdfd = NULL;
-
+		if (section)
 			anbindung_parse_file_section(section, &anbindung);
 
-			zpdfd = zond_pdf_document_is_open(sfp_pdf);
-			if (zpdfd)
-				anbindung_aktualisieren(zpdfd, &anbindung);
-
-			pos_pdf = zond_treeview_get_pdf_pos(ztvfm_priv->zond, zpdfd,
-					anbindung_ges, anbindung);
-		}
-
-		dd = document_new_displayed_document(sfp_pdf, NULL, error);
+		dd = document_new_displayed_document(sfp_pdf, NULL, &anbindung,
+				(ztvfm_priv->zond->state & GDK_MOD1_MASK), &pdf_pos, error);
 		if (!dd)
 			ERROR_Z
 
 		rc = zond_treeview_oeffnen_internal_viewer(ztvfm_priv->zond,
-				dd, &pos_pdf, error);
+				dd, &pdf_pos, error);
 		if (rc)
 			ERROR_Z
 	}
