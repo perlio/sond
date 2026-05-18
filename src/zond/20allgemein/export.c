@@ -432,8 +432,8 @@ gint export_activate(Projekt* zond, gint umfang, GError** error) {
 
 	if (!g_file_delete(file, NULL, error)) {
 		LOG_WARN("Löschen der bei Export im Arbeitsverzeichnis "
-						"erzeugten Datei 'export_tmp.rtf' fehlgeschlagen:\n\n",
-				(*error)->message, NULL);
+						"erzeugten Datei 'export_tmp.rtf' fehlgeschlagen:\n%s",
+				(*error)->message);
 		g_clear_error(error);
 	}
 

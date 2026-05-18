@@ -292,55 +292,46 @@ const gchar* mime_to_extension_with_params(const char* mime_type) {
 }
 
 gchar* mime_guess_content_type(unsigned char* buffer, gsize size, GError** error) {
-    gchar* result = NULL;
+	gchar* result = NULL;
 
-    //erst einmal zip-Erkennung
-    if (size >= 4 && buffer[0]=='P' && buffer[1]=='K' &&
-        (buffer[2]==0x03 || buffer[2]==0x05 || buffer[2]==0x07) &&
-        (buffer[3]==0x04 || buffer[3]==0x06 || buffer[3]==0x08)) {
-        return g_strdup("application/zip");
-    }
+	magic_t magic = magic_open(MAGIC_MIME_TYPE);
+	if (!magic) {
+		if (error) *error = g_error_new(g_quark_from_static_string("stdlib"), errno,
+				"%s\nmagic_open fehlgeschlagen: %s", __func__, strerror(errno));
+		return NULL;
+	}
 
-    magic_t magic = magic_open(MAGIC_MIME_TYPE);
-    if (!magic) {
-    	if (error) *error = g_error_new(g_quark_from_static_string("stdlib"), errno,
-    			"%s\nmagic_open fehlgeschlagen: %s", __func__, strerror(errno));
+	if (magic_load(magic, NULL) != 0) {
+		g_set_error(error, g_quark_from_static_string("magic"), 0,
+				"%s\nmagic_load fehlgeschlagen: %s", __func__, magic_error(magic));
+		magic_close(magic);
+		return NULL;
+	}
 
-        return NULL;
-    }
+	const char* mime = magic_buffer(magic, buffer, size);
 
-    if (magic_load(magic, NULL) != 0) {
-        g_set_error(error, g_quark_from_static_string("magic"), 0,
-				"%s\nmagic_load fehlgeschlagen: %s", __func__,
-				magic_error(magic));
-        magic_close(magic);
+	/* Fallback: wenn libmagic ZIP nicht erkennt, aber Magic-Bytes stimmen */
+	if (!mime || !g_strcmp0(mime, "application/octet-stream")) {
+		if (size >= 4 && buffer[0]=='P' && buffer[1]=='K' &&
+				(buffer[2]==0x03 || buffer[2]==0x05 || buffer[2]==0x07) &&
+				(buffer[3]==0x04 || buffer[3]==0x06 || buffer[3]==0x08))
+			mime = "application/zip";
+	}
 
-        return NULL;
-    }
-
-    // MIME-Typ aus Puffer erkennen
-    const char* mime = magic_buffer(magic, buffer, size);
-
-    if (!g_strcmp0(mime, "text/plain")) { //test, ob nicht etwa GMessage
-    	GMimeStream* gmime_stream = NULL;
-    	GMimeParser* parser = NULL;
-    	GMimeMessage* message = NULL;
-
-    	gmime_stream = g_mime_stream_mem_new_with_buffer((const gchar*) buffer, size);
-
-    	parser = g_mime_parser_new_with_stream(gmime_stream);
-    	message = g_mime_parser_construct_message (parser, NULL);
-    	g_object_unref (parser);
-    	g_object_unref(gmime_stream);
-    	if (message && g_mime_message_get_sender(message))
+	if (!g_strcmp0(mime, "text/plain")) {
+		GMimeStream* gmime_stream = g_mime_stream_mem_new_with_buffer(
+				(const gchar*) buffer, size);
+		GMimeParser* parser = g_mime_parser_new_with_stream(gmime_stream);
+		GMimeMessage* message = g_mime_parser_construct_message(parser, NULL);
+		g_object_unref(parser);
+		g_object_unref(gmime_stream);
+		if (message && g_mime_message_get_sender(message))
 			result = g_strdup("message/rfc822");
-    	else
-    		result = g_strdup(mime);
-    }
-    else
-    	result = mime ? g_strdup(mime) : g_strdup("application/octet-stream");
+		else
+			result = g_strdup(mime);
+	} else
+		result = mime ? g_strdup(mime) : g_strdup("application/octet-stream");
 
-    magic_close(magic);
-
-    return result;
+	magic_close(magic);
+	return result;
 }
