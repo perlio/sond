@@ -24,6 +24,8 @@ struct _ZondTreeviewClass {
 	GMenu *gmenu_icons; /* Icon-Submenu - wird in init_contextmenu befuellt */
 };
 
+void zond_treeview_load_textview(Projekt* zond);
+
 void zond_treeview_cursor_changed(ZondTreeview*, gpointer);
 
 gint zond_treeview_get_anchor(Projekt*, gboolean*, GtkTreeIter*,

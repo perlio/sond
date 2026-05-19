@@ -426,15 +426,6 @@ static void cb_win_refresh(GSimpleAction *a, GVariant *p, gpointer d) {
 	}
 }
 
-static void cb_win_textview_extra(GSimpleAction *a, GVariant *p, gpointer d) {
-	Projekt *zond = (Projekt*) d;
-	gtk_widget_show_all(zond->textview_window);
-	g_simple_action_set_enabled(zond->menu.textview_extra, FALSE);
-	zond->node_id_extra = zond->node_id_act;
-	gtk_text_view_set_buffer(GTK_TEXT_VIEW(zond->textview_ii),
-			gtk_text_view_get_buffer(GTK_TEXT_VIEW(zond->textview)));
-}
-
 /* ============================================================================
  * CALLBACKS - EXTRAS
  * ========================================================================== */
@@ -544,24 +535,17 @@ static void init_app_actions(Projekt *zond) {
 
 	APP_ACT("projekt-neu",        cb_app_projekt_neu);
 	APP_ACT("projekt-oeffnen",    cb_app_projekt_oeffnen);
+	/* GTK3: Menü nutzt win.-Alias (GtkMenuBar kennt kein app.-Präfix).
+	 * GTK4: Menü nutzt app. direkt — dann win.-Alias entfernen und
+	 * zond->menu.speichern/schliessen auf app.-Action umstellen. */
+	APP_ACT("projekt-speichern",  cb_app_projekt_speichern);
+	APP_ACT("projekt-schliessen", cb_app_projekt_schliessen);
 	APP_ACT("index-erstellen",    cb_app_index_erstellen);
 	APP_ACT("indexsuche",         cb_app_indexsuche);
 	APP_ACT("beenden",            cb_app_beenden);
 	APP_ACT("ueber",              cb_app_ueber);
 	APP_ACT("update",             cb_app_update);
 	APP_ACT("zoom",               cb_app_zoom);
-
-	/* speichern — Referenz merken, kein unref (wird in project.c genutzt) */
-	{ GSimpleAction *a = g_simple_action_new("projekt-speichern", NULL);
-	  g_signal_connect(a, "activate", G_CALLBACK(cb_app_projekt_speichern), zond);
-	  g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(a));
-	  zond->menu.speichern = a; }
-
-	/* schliessen — kein unref */
-	{ GSimpleAction *a = g_simple_action_new("projekt-schliessen", NULL);
-	  g_signal_connect(a, "activate", G_CALLBACK(cb_app_projekt_schliessen), zond);
-	  g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(a));
-	  zond->menu.schliessen = a; }
 
 	{ gboolean init = g_settings_get_boolean(zond->settings, "autosave");
 	  GSimpleAction *a = g_simple_action_new_stateful("autosave", NULL,
@@ -610,12 +594,12 @@ static void init_win_actions(Projekt *zond) {
 	{ GSimpleAction *a = g_simple_action_new("projekt-speichern", NULL);
 	  g_signal_connect(a, "activate", G_CALLBACK(cb_app_projekt_speichern), zond);
 	  g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(a));
-	  g_object_unref(a); }
+	  zond->menu.speichern = a; /* Referenz merken — kein unref */ }
 
 	{ GSimpleAction *a = g_simple_action_new("projekt-schliessen", NULL);
 	  g_signal_connect(a, "activate", G_CALLBACK(cb_app_projekt_schliessen), zond);
 	  g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(a));
-	  g_object_unref(a); }
+	  zond->menu.schliessen = a; /* Referenz merken — kein unref */ }
 
 	{ gboolean init = g_settings_get_boolean(zond->settings, "autosave");
 	  GSimpleAction *a = g_simple_action_new_stateful("autosave", NULL,
@@ -668,11 +652,6 @@ static void init_win_actions(Projekt *zond) {
 	WIN_ACT("zweig-erweitern", cb_win_zweig_erweitern);
 	WIN_ACT("reduzieren",      cb_win_reduzieren);
 	WIN_ACT("refresh",         cb_win_refresh);
-
-	{ GSimpleAction *a = g_simple_action_new("textview-extra", NULL);
-	  g_signal_connect(a, "activate", G_CALLBACK(cb_win_textview_extra), zond);
-	  g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(a));
-	  zond->menu.textview_extra = a; }
 
 	/* Extras */
 	{ GSimpleAction *a = g_simple_action_new("test", NULL);
@@ -906,7 +885,6 @@ void init_headerbar(Projekt *zond) {
 	g_simple_action_set_enabled(zond->menu.schliessen,     FALSE);
 	g_simple_action_set_enabled(zond->menu.export_odt,     FALSE);
 	g_simple_action_set_enabled(zond->menu.pdf,            FALSE);
-	g_simple_action_set_enabled(zond->menu.textview_extra, FALSE);
 
 #ifdef _WIN32
 	GtkWidget *label_seadrive = gtk_label_new("");

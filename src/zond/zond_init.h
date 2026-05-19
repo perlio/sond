@@ -148,7 +148,6 @@ typedef struct _Projekt {
 	Icon icon[NUMBER_OF_ICONS];
 
 	GtkWidget *app_window;
-	GtkWidget *textview_window;
 	GtkLabel *label_status;
 	GtkWidget *label_project;
 	GtkWidget *popover;
@@ -163,11 +162,12 @@ typedef struct _Projekt {
 
 	gulong cursor_changed_signal;
 	gint node_id_act;
-	gint node_id_extra;
 	gulong text_buffer_changed_signal;
 
 	GtkWidget *textview;
-	GtkWidget *textview_ii;
+	GtkWidget *textview_pin_button;
+	GtkWidget *textview_jump_button;
+	gint node_id_textview;
 
 	DBaseZond *dbase_zond;
 

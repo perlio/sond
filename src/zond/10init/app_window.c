@@ -25,6 +25,7 @@
 #include "../zond_init.h"
 #include "../zond_dbase.h"
 #include "../zond_treeview.h"
+#include "../zond_tree_store.h"
 #include "../zond_treeviewfm.h"
 
 #include "../20allgemein/project.h"
@@ -51,37 +52,6 @@
 static void show_error_message(GtkWidget *window, const gchar *context,
 		const gchar *error_msg) {
 	display_message(window, context, error_msg, NULL);
-}
-
-static gint get_active_node_id(Projekt *zond, GtkTextBuffer *buffer) {
-	if (buffer == gtk_text_view_get_buffer(GTK_TEXT_VIEW(zond->textview)))
-		return zond->node_id_act;
-	else
-		return zond->node_id_extra;
-}
-
-static void save_text_buffer_to_database(Projekt *zond, GtkTextBuffer *buffer) {
-	GtkTextIter start, end;
-	GError *error = NULL;
-	gchar *text = NULL;
-	gint node_id = 0;
-	gint rc = 0;
-
-	gtk_text_buffer_get_bounds(buffer, &start, &end);
-	text = gtk_text_buffer_get_text(buffer, &start, &end, FALSE);
-	node_id = get_active_node_id(zond, buffer);
-
-	rc = zond_dbase_update_text(zond->dbase_zond->zond_dbase_work,
-			node_id, text, &error);
-	g_free(text);
-
-	if (rc) {
-		show_error_message(zond->app_window,
-				"Fehler beim Speichern des Textes:\n\n"
-				"Bei Aufruf zond_dbase_update_text:\n",
-				error->message);
-		g_error_free(error);
-	}
 }
 
 /* =============================================================================
@@ -113,17 +83,6 @@ static gboolean cb_delete_event(GtkWidget *app_window, GdkEvent *event,
 	return TRUE;
 }
 
-static gboolean cb_close_textview(GtkWidget *window_textview, GdkEvent *event,
-		gpointer user_data) {
-	Projekt *zond = (Projekt*) user_data;
-
-	gtk_widget_hide(window_textview);
-	g_simple_action_set_enabled(zond->menu.textview_extra, TRUE);
-	zond->node_id_extra = 0;
-
-	return TRUE;
-}
-
 static gboolean cb_button_event(GtkWidget *app_window, GdkEvent *event,
 		gpointer data) {
 	((Projekt*) data)->state = event->button.state;
@@ -136,7 +95,26 @@ static gboolean cb_button_event(GtkWidget *app_window, GdkEvent *event,
 
 static void cb_text_buffer_changed(GtkTextBuffer *buffer, gpointer data) {
 	Projekt *zond = (Projekt*) data;
-	save_text_buffer_to_database(zond, buffer);
+	GtkTextIter start, end;
+	GError *error = NULL;
+	gchar *text = NULL;
+	gint rc = 0;
+
+	gtk_text_buffer_get_bounds(buffer, &start, &end);
+	text = gtk_text_buffer_get_text(buffer, &start, &end, FALSE);
+
+	rc = zond_dbase_update_text(zond->dbase_zond->zond_dbase_work,
+			(zond->node_id_textview) ? zond->node_id_textview : zond->node_id_act,
+					text, &error);
+	g_free(text);
+
+	if (rc) {
+		show_error_message(zond->app_window,
+				"Fehler beim Speichern des Textes:\n\n"
+				"Bei Aufruf zond_dbase_update_text:\n",
+				error->message);
+		g_error_free(error);
+	}
 }
 
 /* GTK3: focus via classic signals */
@@ -164,9 +142,46 @@ static gboolean cb_textview_focus_out(GtkWidget *textview, GdkEvent *event,
 		zond->text_buffer_changed_signal = 0;
 	}
 
-	gtk_widget_queue_draw(GTK_WIDGET(zond->treeview[BAUM_AUSWERTUNG]));
+	gtk_widget_queue_draw(GTK_WIDGET(zond->treeview[zond->baum_active]));
 
 	return FALSE;
+}
+
+static void cb_pin_button_toggled(GtkToggleButton* toggle, gpointer user_data) {
+	Projekt* zond = (Projekt*) user_data;
+
+	if (!gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(zond->textview_pin_button))) {
+		if (zond->baum_active == BAUM_FS)
+			gtk_widget_set_sensitive(zond->textview, FALSE);
+		zond->node_id_textview = zond->node_id_act;
+
+		zond_treeview_load_textview(zond);
+	}
+}
+
+static void cb_jump_button_clicked(GtkButton *button, gpointer user_data) {
+	Projekt *zond = (Projekt*) user_data;
+	GtkTreeIter *iter = NULL;
+
+	if (!zond->node_id_textview)
+		return;
+
+	// Zuerst in BAUM_AUSWERTUNG suchen
+	iter = zond_treeview_abfragen_iter(
+			ZOND_TREEVIEW(zond->treeview[BAUM_AUSWERTUNG]), zond->node_id_textview);
+	if (!iter)
+		iter = zond_treeview_abfragen_iter(
+				ZOND_TREEVIEW(zond->treeview[BAUM_INHALT]), zond->node_id_textview);
+
+	if (!iter)
+		return;
+
+	Baum baum_target = zond_tree_store_get_root(
+			zond_tree_store_get_tree_store(iter));
+	sond_treeview_expand_to_row(zond->treeview[baum_target], iter);
+	sond_treeview_set_cursor(zond->treeview[baum_target], iter);
+	gtk_widget_grab_focus(GTK_WIDGET(zond->treeview[baum_target]));
+	gtk_tree_iter_free(iter);
 }
 
 /* =============================================================================
@@ -181,7 +196,7 @@ static gboolean cb_treeview_focus_out(GtkWidget *treeview, GdkEvent *event,
 
 	zond->baum_active = KEIN_BAUM;
 
-	if (baum != BAUM_FS && zond->cursor_changed_signal) {
+	if (zond->cursor_changed_signal) {
 		g_signal_handler_disconnect(treeview, zond->cursor_changed_signal);
 		zond->cursor_changed_signal = 0;
 	}
@@ -200,12 +215,10 @@ static gboolean cb_treeview_focus_in(GtkWidget *treeview, GdkEvent *event,
 
 	zond->baum_active = (Baum) sond_treeview_get_id(SOND_TREEVIEW(treeview));
 
-	if (zond->baum_active != BAUM_FS) {
-		zond->cursor_changed_signal = g_signal_connect(
-				treeview,
-				"cursor-changed",
-				G_CALLBACK(zond_treeview_cursor_changed),
-				zond);
+	if (zond->baum_active != BAUM_FS && !zond->cursor_changed_signal) {
+		zond->cursor_changed_signal =
+				g_signal_connect(treeview, "cursor-changed",
+						G_CALLBACK(zond_treeview_cursor_changed), zond);
 
 		g_signal_emit_by_name(treeview, "cursor-changed", user_data, NULL);
 	}
@@ -225,17 +238,6 @@ static gboolean cb_treeview_focus_in(GtkWidget *treeview, GdkEvent *event,
 	g_object_set(
 			sond_treeview_get_cell_renderer_text(zond->treeview[zond->baum_active]),
 			"editable", TRUE, NULL);
-
-	if (zond->baum_active == BAUM_AUSWERTUNG) {
-		GtkTreePath *path = NULL;
-		gtk_tree_view_get_cursor(GTK_TREE_VIEW(treeview), &path, NULL);
-		if (path) {
-			gtk_widget_set_sensitive(GTK_WIDGET(zond->textview), TRUE);
-			gtk_tree_path_free(path);
-		}
-	} else {
-		gtk_widget_set_sensitive(GTK_WIDGET(zond->textview), FALSE);
-	}
 
 	return FALSE;
 }
@@ -321,21 +323,6 @@ static void init_treeviews(Projekt *zond) {
 	}
 }
 
-static GtkWidget* create_configured_textview(Projekt *zond) {
-	GtkWidget *text_view = gtk_text_view_new();
-
-	gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(text_view), GTK_WRAP_WORD);
-	gtk_text_view_set_accepts_tab(GTK_TEXT_VIEW(text_view), FALSE);
-
-	/* Focus — GTK3 classic signals */
-	g_signal_connect(text_view, "focus-in-event",
-			G_CALLBACK(cb_textview_focus_in), zond);
-	g_signal_connect(text_view, "focus-out-event",
-			G_CALLBACK(cb_textview_focus_out), zond);
-
-	return text_view;
-}
-
 static GtkWidget* create_scrolled_window(GtkWidget *child) {
 	GtkWidget *swindow = gtk_scrolled_window_new(NULL, NULL);
 
@@ -355,23 +342,6 @@ static void init_search_popover(Projekt *zond) {
 
 	g_signal_connect(entry_search, "activate",
 			G_CALLBACK(cb_entry_search), zond);
-}
-
-static void init_extra_textview_window(Projekt *zond) {
-	GtkWidget *swindow = NULL;
-
-	zond->textview_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-	gtk_widget_set_size_request(zond->textview_window,
-			TEXTVIEW_WINDOW_MIN_WIDTH, TEXTVIEW_WINDOW_MIN_HEIGHT);
-
-	swindow = create_scrolled_window(NULL);
-	gtk_container_add(GTK_CONTAINER(zond->textview_window), swindow);
-
-	zond->textview_ii = create_configured_textview(zond);
-	gtk_container_add(GTK_CONTAINER(swindow), GTK_WIDGET(zond->textview_ii));
-
-	g_signal_connect(zond->textview_window, "delete-event",
-			G_CALLBACK(cb_close_textview), zond);
 }
 
 static void init_treeview_layout(Projekt *zond) {
@@ -401,13 +371,55 @@ static void init_treeview_layout(Projekt *zond) {
 	gtk_paned_pack1(GTK_PANED(paned_baum_auswertung),
 			swindow_treeview_auswertung, FALSE, TRUE);
 
+	GtkWidget *vbox_textview = NULL;
+	GtkWidget *hbox_textview_buttons = NULL;
+
 	swindow_textview = create_scrolled_window(NULL);
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(swindow_textview),
 			GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
-	gtk_paned_pack2(GTK_PANED(paned_baum_auswertung),
-			swindow_textview, FALSE, TRUE);
 
-	zond->textview = create_configured_textview(zond);
+	vbox_textview = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+	gtk_paned_pack2(GTK_PANED(paned_baum_auswertung),
+			vbox_textview, FALSE, TRUE);
+
+	hbox_textview_buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
+	gtk_box_pack_start(GTK_BOX(vbox_textview), hbox_textview_buttons, FALSE, FALSE, 0);
+
+	zond->textview_pin_button = gtk_toggle_button_new();
+	gtk_button_set_image(GTK_BUTTON(zond->textview_pin_button),
+			gtk_image_new_from_icon_name("media-record", GTK_ICON_SIZE_SMALL_TOOLBAR));
+	gtk_widget_set_tooltip_text(zond->textview_pin_button, "Textansicht einfrieren");
+	gtk_box_pack_start(GTK_BOX(hbox_textview_buttons),
+			zond->textview_pin_button, FALSE, FALSE, 0);
+
+	zond->textview_jump_button = gtk_button_new();
+	gtk_button_set_image(GTK_BUTTON(zond->textview_jump_button),
+			gtk_image_new_from_icon_name("go-jump", GTK_ICON_SIZE_SMALL_TOOLBAR));
+	gtk_widget_set_tooltip_text(zond->textview_jump_button, "Zur angepinnten Row springen");
+	g_signal_connect(zond->textview_jump_button, "clicked",
+			G_CALLBACK(cb_jump_button_clicked), zond);
+	gtk_box_pack_start(GTK_BOX(hbox_textview_buttons),
+			zond->textview_jump_button, FALSE, FALSE, 0);
+	gtk_widget_set_sensitive(zond->textview_jump_button, FALSE);
+
+	g_signal_connect(zond->textview_pin_button, "toggled",
+			G_CALLBACK(cb_pin_button_toggled), zond);
+	g_object_bind_property(zond->textview_pin_button, "active",
+			zond->textview_jump_button, "sensitive",
+			G_BINDING_DEFAULT);
+
+	gtk_box_pack_start(GTK_BOX(vbox_textview), swindow_textview, TRUE, TRUE, 0);
+
+	zond->textview = gtk_text_view_new();
+
+	gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(zond->textview), GTK_WRAP_WORD);
+	gtk_text_view_set_accepts_tab(GTK_TEXT_VIEW(zond->textview), FALSE);
+
+	/* Focus — GTK3 classic signals */
+	g_signal_connect(zond->textview, "focus-in-event",
+			G_CALLBACK(cb_textview_focus_in), zond);
+	g_signal_connect(zond->textview, "focus-out-event",
+			G_CALLBACK(cb_textview_focus_out), zond);
 
 	GtkTextIter text_iter = { 0 };
 	gtk_text_buffer_get_end_iter(
@@ -502,10 +514,7 @@ void init_app_window(Projekt *zond) {
 	g_signal_connect(zond->app_window, "delete-event",
 			G_CALLBACK(cb_delete_event), zond);
 
-	init_extra_textview_window(zond);
-
 	gtk_widget_set_sensitive(GTK_WIDGET(zond->textview), FALSE);
 	gtk_text_buffer_set_text(
 			gtk_text_view_get_buffer(GTK_TEXT_VIEW(zond->textview)), "", -1);
-	zond->node_id_act = 0;
 }

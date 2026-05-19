@@ -224,6 +224,9 @@ void project_set_widgets_sensitive(Projekt *zond, gboolean active) {
 	gtk_widget_set_sensitive(zond->fs_button,           active);
 	g_simple_action_set_enabled(zond->menu.extras,      active);
 
+	if (!active)
+		g_simple_action_set_enabled(zond->menu.speichern, FALSE);
+
 	return;
 }
 
@@ -306,7 +309,7 @@ static void project_clear_dbase_zond(DBaseZond **dbase_zond) {
 gint project_save(Projekt *zond, gchar **errmsg) {
 	gint rc = 0;
 
-	if (!(zond->dbase_zond->changed))
+	if (!(zond->dbase_zond) || !(zond->dbase_zond->changed))
 		return 0;
 
 	rc = zond_dbase_backup(zond->dbase_zond->zond_dbase_work,
@@ -351,10 +354,12 @@ gboolean project_timeout_autosave(gpointer data) {
  * @return 0 on success, -1 on error, 1 if user cancelled
  */
 gint project_close(Projekt *zond, gchar **errmsg) {
-	gboolean ret = FALSE;
 	GError* error = NULL;
 
 	if (!zond->dbase_zond)
+		return 0;
+
+	if (!zond->arr_pv || !zond->app_window)
 		return 0;
 
 	// Ask to save if there are unsaved changes
@@ -378,15 +383,14 @@ gint project_close(Projekt *zond, gchar **errmsg) {
 	// Disable menus and widgets
 	project_set_widgets_sensitive(zond, FALSE);
 
-	// Remove focus from text view to trigger changed signal
-	gtk_widget_grab_focus(GTK_WIDGET(zond->treeview[BAUM_INHALT]));
-
 	// Clear text view
 	GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(zond->textview));
 	gtk_text_buffer_set_text(buffer, "", -1);
 
-	// Hide text window
-	g_signal_emit_by_name(zond->textview_window, "delete-event", zond, &ret);
+	// Pin-Button zurücksetzen
+	if (zond->textview_pin_button)
+		gtk_toggle_button_set_active(
+				GTK_TOGGLE_BUTTON(zond->textview_pin_button), FALSE);
 
 	zond->node_id_act = 0;
 

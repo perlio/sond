@@ -19,6 +19,7 @@
 #include <stddef.h>
 #include <glib.h>
 #include <magic.h>
+#include <zlib.h>
 #include <gmime/gmime.h>
 
 
@@ -316,6 +317,87 @@ gchar* mime_guess_content_type(unsigned char* buffer, gsize size, GError** error
 				(buffer[2]==0x03 || buffer[2]==0x05 || buffer[2]==0x07) &&
 				(buffer[3]==0x04 || buffer[3]==0x06 || buffer[3]==0x08))
 			mime = "application/zip";
+	}
+
+	/* ZIP-Inhalt prüfen: Office-Formate sind ZIP-basiert */
+	if (!g_strcmp0(mime, "application/zip")) {
+		/* Ersten Local File Header lesen (ohne libzip, nur aus Buffer) */
+		if (size >= 30) {
+			guint16 name_len = buffer[26] | (buffer[27] << 8);
+			guint16 extra_len = buffer[28] | (buffer[29] << 8);
+
+			if (30 + name_len <= size) {
+				guint16 compress_method = buffer[8] | (buffer[9] << 8);
+				gchar *first_entry = g_strndup((gchar*) buffer + 30, name_len);
+
+				/* ODF: erster Eintrag ist "mimetype" — immer stored (Spezifikation) */
+				if (!g_strcmp0(first_entry, "mimetype") && compress_method == 0) {
+					guint32 data_offset = 30 + name_len + extra_len;
+					guint32 data_size = buffer[18] | (buffer[19] << 8) |
+							(buffer[20] << 16) | (buffer[21] << 24);
+					if (data_offset + data_size <= size && data_size < 128) {
+						gchar odf_mime[128] = { 0 };
+						memcpy(odf_mime, buffer + data_offset, data_size);
+						if (g_str_has_prefix(odf_mime, "application/vnd.oasis"))
+							mime = g_intern_string(odf_mime);
+					}
+				}
+				/* Office Open XML: erster Eintrag ist "[Content_Types].xml" */
+				/* HINWEIS: Der Buffer ist auf 2048 Bytes begrenzt. [Content_Types].xml
+				 * ist komprimiert (deflate) typischerweise 300-500 Bytes groß, passt
+				 * also knapp rein. Falls später Erkennungsprobleme auftreten (z.B. bei
+				 * sehr großen [Content_Types].xml), Buffer-Größe erhöhen (z.B. 4096)
+				 * an der Stelle wo mime_guess_content_type aufgerufen wird. */
+				else if (!g_strcmp0(first_entry, "[Content_Types].xml")) {
+					guint32 data_offset = 30 + name_len + extra_len;
+					guint32 comp_size   = buffer[18] | (buffer[19] << 8) |
+							(buffer[20] << 16) | (buffer[21] << 24);
+					guint32 uncomp_size = buffer[22] | (buffer[23] << 8) |
+							(buffer[24] << 16) | (buffer[25] << 24);
+
+					if (data_offset + comp_size <= size && uncomp_size < 65536) {
+						gchar *content = NULL;
+
+						if (compress_method == 0) {
+							/* stored */
+							content = g_strndup((gchar*) buffer + data_offset,
+									comp_size);
+						} else if (compress_method == 8) {
+							/* deflate */
+							content = g_malloc0(uncomp_size + 1);
+							z_stream zs = { 0 };
+							zs.next_in   = buffer + data_offset;
+							zs.avail_in  = comp_size;
+							zs.next_out  = (Bytef*) content;
+							zs.avail_out = uncomp_size;
+							if (inflateInit2(&zs, -15) != Z_OK) {
+								g_free(content);
+								content = NULL;
+							} else {
+								inflate(&zs, Z_FINISH);
+								inflateEnd(&zs);
+							}
+						}
+
+						if (content) {
+							if (g_strstr_len(content, -1, "spreadsheetml.sheet"))
+								mime = "application/vnd.openxmlformats-officedocument"
+										".spreadsheetml.sheet";
+							else if (g_strstr_len(content, -1,
+									"wordprocessingml.document"))
+								mime = "application/vnd.openxmlformats-officedocument"
+										".wordprocessingml.document";
+							else if (g_strstr_len(content, -1,
+									"presentationml.presentation"))
+								mime = "application/vnd.openxmlformats-officedocument"
+										".presentationml.presentation";
+							g_free(content);
+						}
+					}
+				}
+				g_free(first_entry);
+			}
+		}
 	}
 
 	if (!g_strcmp0(mime, "text/plain")) {

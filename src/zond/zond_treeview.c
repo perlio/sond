@@ -90,126 +90,78 @@ static gint zond_treeview_get_root(ZondTreeview *ztv, gint node_id, gint *root,
 static gint zond_treeview_get_filepart_and_section(ZondTreeview *ztv, GtkTreeIter *iter,
 		gchar **file_part, gchar** section, GError **error);
 
+void zond_treeview_load_textview(Projekt* zond) {
+	if (zond->node_id_act == 0)
+        gtk_text_buffer_set_text(
+            gtk_text_view_get_buffer(GTK_TEXT_VIEW(zond->textview)), "", -1);
+	else {
+		GtkTextBuffer *buffer = NULL;
+		GError* error = NULL;
+		gint rc = 0;
+		gchar* text = NULL;
+
+		buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(zond->textview));
+
+		rc = zond_dbase_get_text(zond->dbase_zond->zond_dbase_work, zond->node_id_act,
+				&text, &error);
+		if (rc) {
+			LOG_WARN("Node-Text konnte nicht geladen werden:\n%s", error->message);
+			g_error_free(error);
+		}
+
+		if (text) {
+			gtk_text_buffer_set_text(buffer, text, -1);
+			gtk_text_view_scroll_to_mark(GTK_TEXT_VIEW(zond->textview),
+					gtk_text_buffer_get_mark(
+							gtk_text_view_get_buffer(
+									GTK_TEXT_VIEW(zond->textview)),
+							"ende-text"), 0.0,
+					FALSE, 0.0, 0.0);
+			g_free(text);
+		} else
+			gtk_text_buffer_set_text(buffer, "", -1);
+	}
+
+	return;
+}
+
 void zond_treeview_cursor_changed(ZondTreeview *treeview, gpointer user_data) {
-	gint rc = 0;
 	gint node_id = 0;
 	GtkTreeIter iter = { 0, };
-	gchar *text = NULL;
-	GError *error = NULL;
 
 	Projekt *zond = (Projekt*) user_data;
 
     //wenn kein cursor gesetzt ist
     if (!sond_treeview_get_cursor(SOND_TREEVIEW(treeview), &iter)) {
-        Baum active_baum = sond_treeview_get_id(SOND_TREEVIEW(treeview));
+        zond->node_id_act = 0;
 
-        // Statuszeile für ALLE Bäume leeren
-        gtk_label_set_text(zond->label_status, "");
-
-        // TextView nur für BAUM_AUSWERTUNG leeren
-        if (active_baum == BAUM_AUSWERTUNG) {
-            gtk_widget_set_sensitive(GTK_WIDGET(zond->textview), FALSE);
-            gtk_text_buffer_set_text(
-                gtk_text_view_get_buffer(GTK_TEXT_VIEW(zond->textview)), "", -1);
-            zond->node_id_act = 0;
+        if (!gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(zond->textview_pin_button))) {
+            gtk_widget_set_sensitive(zond->textview, FALSE);
+            gtk_widget_set_sensitive(zond->textview_pin_button, FALSE);
+            gtk_widget_set_sensitive(zond->textview_jump_button, FALSE);
         }
-
-		//falls extra-textview auf gelöschten Punkt
-		if (zond->node_id_extra) {
-			gint root = 0;
-			gint rc = 0;
-
-			rc = zond_treeview_get_root(treeview, zond->node_id_extra, &root,
-					&error);
-			if (rc) {
-				LOG_WARN("%s\n%s", __func__, error->message);
-				g_error_free(error);
-				gtk_label_set_text(zond->label_status, "*** Error *** - siehe Log");
-
-				return;
-			}
-
-			if (root == sond_treeview_get_id(SOND_TREEVIEW(treeview))) {
-				gboolean ret = FALSE;
-
-				gtk_text_buffer_set_text(
-						gtk_text_view_get_buffer(
-								GTK_TEXT_VIEW(zond->textview_ii)), "", -1);
-
-				//Text-Fenster verstecken (falls nicht schn ist, Überprüfung aber überflüssig
-				g_signal_emit_by_name(zond->textview_window, "delete-event",
-						zond, &ret);
-
-				//Vorsichtshalber auch Menüpunkt deaktivieren
-				g_simple_action_set_enabled(zond->menu.textview_extra, FALSE);
-
-				zond->node_id_extra = 0;
-			}
-		}
 
 		return;
 	}
 
-	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(treeview)), &iter, 2,
-			&node_id, -1);
+    gtk_widget_set_sensitive(zond->textview, TRUE);
+    gtk_widget_set_sensitive(zond->textview_pin_button, TRUE);
+    gtk_widget_set_sensitive(zond->textview_jump_button, TRUE);
+	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(treeview)),
+			&iter, 2, &node_id, -1);
 
-    //Wenn gleicher Knoten: direkt zurück
+	//Wenn gleicher Knoten: direkt zurück
 	if (node_id == zond->node_id_act)
 		return;
 
-	gtk_label_set_text(zond->label_status, "");
+    // node_id_act setzen
+    zond->node_id_act = node_id;
 
-    // TextView NUR für BAUM_AUSWERTUNG füllen!
-    Baum active_baum = sond_treeview_get_id(SOND_TREEVIEW(treeview));
+	// Wenn textview gepint: nicht aktualisieren
+	if (!gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(zond->textview_pin_button))) {
+		zond_treeview_load_textview(zond);
 
-    if (active_baum == BAUM_AUSWERTUNG) {
-        //neuer Knoten == Extra-Fenster und vorheriger Knoten nicht
-        if (zond->node_id_extra && node_id == zond->node_id_extra
-                && zond->node_id_act != zond->node_id_extra)
-            gtk_text_view_set_buffer(GTK_TEXT_VIEW(zond->textview),
-                    gtk_text_view_get_buffer(GTK_TEXT_VIEW(zond->textview_ii)));
-        else {
-            GtkTextBuffer *buffer = NULL;
-
-            if (zond->node_id_act == zond->node_id_extra) {
-                GtkTextIter text_iter = { 0 };
-
-                buffer = gtk_text_buffer_new(NULL);
-                gtk_text_buffer_get_end_iter(buffer, &text_iter);
-                gtk_text_buffer_create_mark(buffer, "ende-text", &text_iter, FALSE);
-
-                gtk_text_view_set_buffer(GTK_TEXT_VIEW(zond->textview), buffer);
-            } else
-                buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(zond->textview));
-
-            rc = zond_dbase_get_text(zond->dbase_zond->zond_dbase_work, node_id,
-                    &text, &error);
-            if (rc) {
-    			LOG_WARN("%s\n%s", __func__, error->message);
-    			g_error_free(error);
-    			gtk_label_set_text(zond->label_status, "*** Error *** - siehe Log");
-
-                return;
-            }
-
-            if (text) {
-                gtk_text_buffer_set_text(buffer, text, -1);
-                gtk_text_view_scroll_to_mark(GTK_TEXT_VIEW(zond->textview),
-                        gtk_text_buffer_get_mark(
-                                gtk_text_view_get_buffer(
-                                        GTK_TEXT_VIEW(zond->textview)),
-                                "ende-text"), 0.0,
-                        FALSE, 0.0, 0.0);
-                g_free(text);
-            } else
-                gtk_text_buffer_set_text(buffer, "", -1);
-        }
-
-        // TextView aktivieren
-        gtk_widget_set_sensitive(GTK_WIDGET(zond->textview), TRUE);
-
-        // node_id_act setzen
-        zond->node_id_act = node_id;
+		zond->node_id_textview = node_id;
     }
 
     return;
@@ -1629,7 +1581,6 @@ static gint zond_treeview_selection_loeschen_foreach(SondTreeview *tree_view,
 	gint rc = 0;
 	gboolean visible = FALSE;
 	GtkTreeIter iter_fm = { 0 };
-	gboolean response = FALSE;
 
 	Projekt *zond = (Projekt*) data;
 
@@ -1789,10 +1740,6 @@ static gint zond_treeview_selection_loeschen_foreach(SondTreeview *tree_view,
 			}
 		}
 	}
-
-	if (node_id == zond->node_id_extra)
-		g_signal_emit_by_name(zond->textview_window, "delete-event", zond,
-				&response);
 
 	rc = zond_dbase_remove_node(zond->dbase_zond->zond_dbase_work, node_id,
 			error);
