@@ -216,7 +216,7 @@ SondFilePart* sond_file_part_create(SondFilePart* sfp_parent, const gchar* path,
 	gsize len = 0;
 	gconstpointer data = g_bytes_get_data(bytes, &len);
 	if (len > 0)
-		content_type = mime_guess_content_type(data, len, error);
+		content_type = mime_guess_content_type(data, len, path, error);
 	g_bytes_unref(bytes);
 	if (!content_type) {
 		if (len > 0) /* mime_guess_content_type hat Fehler gesetzt */
@@ -649,7 +649,7 @@ gchar* sond_file_part_write_to_tmp_file(SondFilePart* sfp, GError **error) {
 		gsize len = 0;
 		gconstpointer data = g_bytes_get_data(bytes, &len);
 		gchar* mime = mime_guess_content_type((const guchar*)data,
-				MIN(len, (gsize)2048), error);
+				MIN(len, (gsize)2048), sond_file_part_get_path(sfp), error);
 		if (!mime) {
 			g_bytes_unref(bytes);
 			g_free(filename);
@@ -677,7 +677,9 @@ gint sond_file_part_open(SondFilePart* sfp, gboolean open_with,
 	if (!open_with &&
 			((SOND_IS_FILE_PART_LEAF(sfp) &&
 			(g_str_has_prefix(sond_file_part_leaf_get_mime_type(
-					SOND_FILE_PART_LEAF(sfp)), "text/") ||
+					SOND_FILE_PART_LEAF(sfp)), "text/") &&
+			 g_strcmp0(sond_file_part_leaf_get_mime_type(
+					SOND_FILE_PART_LEAF(sfp)), "text/csv") ||
 			g_str_has_prefix(sond_file_part_leaf_get_mime_type(
 					SOND_FILE_PART_LEAF(sfp)), "image/") ||
 			!g_strcmp0("application/vnd.oasis.opendocument.text",

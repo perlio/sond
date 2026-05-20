@@ -292,7 +292,8 @@ const gchar* mime_to_extension_with_params(const char* mime_type) {
     return mime_to_extension_ci(mime_type);
 }
 
-gchar* mime_guess_content_type(unsigned char* buffer, gsize size, GError** error) {
+gchar* mime_guess_content_type(const guchar* buffer, gsize size,
+		const gchar* path, GError** error) {
 	gchar* result = NULL;
 
 	magic_t magic = magic_open(MAGIC_MIME_TYPE);
@@ -398,19 +399,31 @@ gchar* mime_guess_content_type(unsigned char* buffer, gsize size, GError** error
 				g_free(first_entry);
 			}
 		}
+
+		/* Fallback: Dateiendung nutzen wenn ZIP-Inhalt nicht erkannt */
+		if (!g_strcmp0(mime, "application/zip") && path) {
+			const gchar *mime_ext = mime_from_extension(path);
+			if (mime_ext && g_strcmp0(mime_ext, "application/zip"))
+				mime = mime_ext;
+		}
 	}
 
 	if (!g_strcmp0(mime, "text/plain")) {
-		GMimeStream* gmime_stream = g_mime_stream_mem_new_with_buffer(
-				(const gchar*) buffer, size);
-		GMimeParser* parser = g_mime_parser_new_with_stream(gmime_stream);
-		GMimeMessage* message = g_mime_parser_construct_message(parser, NULL);
-		g_object_unref(parser);
-		g_object_unref(gmime_stream);
-		if (message && g_mime_message_get_sender(message))
-			result = g_strdup("message/rfc822");
-		else
-			result = g_strdup(mime);
+		/* CSV-Erkennung: libmagic gibt text/plain zurück, Endung entscheidet */
+		if (path && !g_strcmp0(mime_from_extension(path), "text/csv")) {
+			result = g_strdup("text/csv");
+		} else {
+			GMimeStream* gmime_stream = g_mime_stream_mem_new_with_buffer(
+					(const gchar*) buffer, size);
+			GMimeParser* parser = g_mime_parser_new_with_stream(gmime_stream);
+			GMimeMessage* message = g_mime_parser_construct_message(parser, NULL);
+			g_object_unref(parser);
+			g_object_unref(gmime_stream);
+			if (message && g_mime_message_get_sender(message))
+				result = g_strdup("message/rfc822");
+			else
+				result = g_strdup(mime);
+		}
 	} else
 		result = mime ? g_strdup(mime) : g_strdup("application/octet-stream");
 

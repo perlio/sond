@@ -2186,6 +2186,7 @@ static gint get_filepart_from_iter(ZondTreeview* ztv, GtkTreeIter* iter,
 static gint zond_treeview_open_auszug(Projekt* zond, GtkTreeIter* iter,
 		DisplayedDocument** dd, PdfPos* pdf_pos, GError** error) {
 	DisplayedDocument* dd_loop = NULL;
+	DisplayedDocument* dd_first = NULL;
 	GtkTreeIter iter_tmp = { 0 };
 
 	GtkTreeModel* model = gtk_tree_view_get_model(GTK_TREE_VIEW(zond->treeview[zond->baum_active]));
@@ -2228,7 +2229,7 @@ static gint zond_treeview_open_auszug(Projekt* zond, GtkTreeIter* iter,
 		dd_loop = dd_tmp;
 	}
 
-	*dd = dd_loop;
+	dd_first = dd_loop;
 
 	//dann runter
 	iter_tmp = *iter;
@@ -2264,6 +2265,8 @@ static gint zond_treeview_open_auszug(Projekt* zond, GtkTreeIter* iter,
 		dd_loop->next = dd_tmp;
 		dd_loop = dd_tmp;
 	}
+
+	*dd = dd_first;
 
 	return 0;
 }

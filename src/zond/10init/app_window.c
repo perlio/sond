@@ -347,67 +347,70 @@ static void init_search_popover(Projekt *zond) {
 static void init_treeview_layout(Projekt *zond) {
 	GtkWidget *swindow_baum_fs = NULL;
 	GtkWidget *swindow_baum_inhalt = NULL;
-	GtkWidget *hpaned_inner = NULL;
-	GtkWidget *paned_baum_auswertung = NULL;
 	GtkWidget *swindow_treeview_auswertung = NULL;
+	GtkWidget *hpaned_inner = NULL;
+	GtkWidget *vpaned_outer = NULL;
 	GtkWidget *swindow_textview = NULL;
 
 	swindow_baum_fs = create_scrolled_window(GTK_WIDGET(zond->treeview[BAUM_FS]));
 	gtk_paned_add1(GTK_PANED(zond->hpaned), swindow_baum_fs);
 
+	// vpaned_outer teilt rechte Seite: oben beide Treeviews, unten Textview
+	vpaned_outer = gtk_paned_new(GTK_ORIENTATION_VERTICAL);
+	gtk_paned_set_position(GTK_PANED(vpaned_outer), PANED_AUSWERTUNG_HEIGHT);
+	gtk_paned_pack2(GTK_PANED(zond->hpaned), vpaned_outer, FALSE, TRUE);
+
+	// oben: hpaned_inner mit BAUM_INHALT und BAUM_AUSWERTUNG nebeneinander
 	hpaned_inner = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
-	gtk_paned_pack2(GTK_PANED(zond->hpaned), hpaned_inner, FALSE, TRUE);
+	gtk_paned_pack1(GTK_PANED(vpaned_outer), hpaned_inner, FALSE, TRUE);
 
 	swindow_baum_inhalt = create_scrolled_window(
 			GTK_WIDGET(zond->treeview[BAUM_INHALT]));
-
-	paned_baum_auswertung = gtk_paned_new(GTK_ORIENTATION_VERTICAL);
-	gtk_paned_set_position(GTK_PANED(paned_baum_auswertung), PANED_AUSWERTUNG_HEIGHT);
+	gtk_paned_pack1(GTK_PANED(hpaned_inner), swindow_baum_inhalt, FALSE, TRUE);
 
 	swindow_treeview_auswertung = create_scrolled_window(
 			GTK_WIDGET(zond->treeview[BAUM_AUSWERTUNG]));
 	gtk_scrolled_window_set_min_content_width(
 			GTK_SCROLLED_WINDOW(swindow_treeview_auswertung), 0);
-	gtk_paned_pack1(GTK_PANED(paned_baum_auswertung),
+	gtk_paned_pack2(GTK_PANED(hpaned_inner),
 			swindow_treeview_auswertung, FALSE, TRUE);
 
-	GtkWidget *vbox_textview = NULL;
-	GtkWidget *hbox_textview_buttons = NULL;
+	// unten: vbox_textview mit Buttons und Textview
+	GtkWidget *vbox_textview = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+	gtk_paned_pack2(GTK_PANED(vpaned_outer), vbox_textview, FALSE, TRUE);
 
-	swindow_textview = create_scrolled_window(NULL);
-	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(swindow_textview),
-			GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
-
-	vbox_textview = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-	gtk_paned_pack2(GTK_PANED(paned_baum_auswertung),
-			vbox_textview, FALSE, TRUE);
-
-	hbox_textview_buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
+	GtkWidget *hbox_textview_buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
 	gtk_box_pack_start(GTK_BOX(vbox_textview), hbox_textview_buttons, FALSE, FALSE, 0);
 
 	zond->textview_pin_button = gtk_toggle_button_new();
 	gtk_button_set_image(GTK_BUTTON(zond->textview_pin_button),
 			gtk_image_new_from_icon_name("media-record", GTK_ICON_SIZE_SMALL_TOOLBAR));
+	gtk_button_set_relief(GTK_BUTTON(zond->textview_pin_button), GTK_RELIEF_NONE);
 	gtk_widget_set_tooltip_text(zond->textview_pin_button, "Textansicht einfrieren");
+	g_signal_connect(zond->textview_pin_button, "toggled",
+			G_CALLBACK(cb_pin_button_toggled), zond);
 	gtk_box_pack_start(GTK_BOX(hbox_textview_buttons),
 			zond->textview_pin_button, FALSE, FALSE, 0);
 
 	zond->textview_jump_button = gtk_button_new();
 	gtk_button_set_image(GTK_BUTTON(zond->textview_jump_button),
 			gtk_image_new_from_icon_name("go-jump", GTK_ICON_SIZE_SMALL_TOOLBAR));
+	gtk_button_set_relief(GTK_BUTTON(zond->textview_jump_button), GTK_RELIEF_NONE);
 	gtk_widget_set_tooltip_text(zond->textview_jump_button, "Zur angepinnten Row springen");
 	g_signal_connect(zond->textview_jump_button, "clicked",
 			G_CALLBACK(cb_jump_button_clicked), zond);
 	gtk_box_pack_start(GTK_BOX(hbox_textview_buttons),
 			zond->textview_jump_button, FALSE, FALSE, 0);
-	gtk_widget_set_sensitive(zond->textview_jump_button, FALSE);
 
-	g_signal_connect(zond->textview_pin_button, "toggled",
-			G_CALLBACK(cb_pin_button_toggled), zond);
 	g_object_bind_property(zond->textview_pin_button, "active",
 			zond->textview_jump_button, "sensitive",
 			G_BINDING_DEFAULT);
 
+	gtk_widget_set_sensitive(zond->textview_jump_button, FALSE);
+
+	swindow_textview = create_scrolled_window(NULL);
+	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(swindow_textview),
+			GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
 	gtk_box_pack_start(GTK_BOX(vbox_textview), swindow_textview, TRUE, TRUE, 0);
 
 	zond->textview = gtk_text_view_new();
@@ -430,9 +433,6 @@ static void init_treeview_layout(Projekt *zond) {
 
 	gtk_container_add(GTK_CONTAINER(swindow_textview),
 			GTK_WIDGET(zond->textview));
-
-	gtk_paned_pack1(GTK_PANED(hpaned_inner), swindow_baum_inhalt, FALSE, TRUE);
-	gtk_paned_pack2(GTK_PANED(hpaned_inner), paned_baum_auswertung, FALSE, TRUE);
 }
 
 static void init_statusbar(Projekt *zond, GtkWidget *vbox) {

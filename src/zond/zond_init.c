@@ -25,6 +25,7 @@
 #ifdef __WIN32
 #include <libloaderapi.h>
 #include <errhandlingapi.h>
+#include <gdk/gdkwin32.h>
 #endif // __WIN32
 
 #include "../misc.h"
@@ -217,6 +218,20 @@ static void init_css(void) {
 	g_object_unref(provider);
 }
 
+static gboolean cb_snap_left(gpointer user_data) {
+	GtkWidget *window = GTK_WIDGET(user_data);
+	HWND hwnd = GDK_WINDOW_HWND(gtk_widget_get_window(window));
+
+	int screen_width  = GetSystemMetrics(SM_CXSCREEN);
+	int screen_height = GetSystemMetrics(SM_CYSCREEN);
+
+	SetWindowPos(hwnd, HWND_TOP, 0, 0,
+			screen_width / 2, screen_height,
+			SWP_SHOWWINDOW | SWP_FRAMECHANGED);
+
+	return G_SOURCE_REMOVE;
+}
+
 void zond_init(GtkApplication *app, Projekt *zond) {
 	setlocale(LC_NUMERIC, "C");
 
@@ -254,6 +269,8 @@ void zond_init(GtkApplication *app, Projekt *zond) {
 	g_settings_set_boolean(zond->settings, "speichern", FALSE);
 
 	gtk_widget_show_all(zond->app_window);
+
+	g_idle_add(cb_snap_left, zond->app_window);
 	gtk_widget_hide(gtk_paned_get_child1(GTK_PANED(zond->hpaned)));
 
 	SOND_FILE_PART_CLASS(g_type_class_get(SOND_TYPE_FILE_PART))->arr_opened_files =

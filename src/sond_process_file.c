@@ -601,7 +601,7 @@ static void sond_process_file_do_rec(SondProcessFileCtx* wctx,
 		wctx->log_func(wctx->log_func_data,
 				"Entering File '%s'", filename);
 
-	mime_type = mime_guess_content_type(data, size, &error);
+	mime_type = mime_guess_content_type(data, size, filename, &error);
 	if (!mime_type) {
 		if (wctx->log_func)
 			wctx->log_func(wctx->log_func_data,
