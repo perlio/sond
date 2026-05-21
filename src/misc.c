@@ -49,6 +49,12 @@ static void my_dialog_run_response(GtkDialog *dialog, gint response,
 	*(gint*) data = response;
 }
 
+static gboolean my_dialog_run_delete(GtkWidget *dialog, GdkEvent *event,
+		gpointer data) {
+	gtk_dialog_response(GTK_DIALOG(dialog), GTK_RESPONSE_CANCEL);
+	return TRUE; /* verhindert automatisches Zerstören */
+}
+
 gint my_dialog_run(GtkDialog *dialog) {
 	gint result = GTK_RESPONSE_NONE;
 	GMainLoop *loop = g_main_loop_new(NULL, FALSE);
@@ -57,6 +63,8 @@ gint my_dialog_run(GtkDialog *dialog) {
 			G_CALLBACK(my_dialog_run_response), &result);
 	g_signal_connect_swapped(dialog, "response",
 			G_CALLBACK(g_main_loop_quit), loop);
+	g_signal_connect(dialog, "delete-event",
+			G_CALLBACK(my_dialog_run_delete), NULL);
 
 	gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
 	gtk_widget_show_all(GTK_WIDGET(dialog));

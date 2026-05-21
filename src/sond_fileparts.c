@@ -676,10 +676,10 @@ gint sond_file_part_open(SondFilePart* sfp, gboolean open_with,
 	//hier alle Varianten, in denen eigener Viewer geöffnet wird
 	if (!open_with &&
 			((SOND_IS_FILE_PART_LEAF(sfp) &&
-			(g_str_has_prefix(sond_file_part_leaf_get_mime_type(
+			((g_str_has_prefix(sond_file_part_leaf_get_mime_type(
 					SOND_FILE_PART_LEAF(sfp)), "text/") &&
 			 g_strcmp0(sond_file_part_leaf_get_mime_type(
-					SOND_FILE_PART_LEAF(sfp)), "text/csv") ||
+					SOND_FILE_PART_LEAF(sfp)), "text/csv")) ||
 			g_str_has_prefix(sond_file_part_leaf_get_mime_type(
 					SOND_FILE_PART_LEAF(sfp)), "image/") ||
 			!g_strcmp0("application/vnd.oasis.opendocument.text",

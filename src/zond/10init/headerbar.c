@@ -81,7 +81,7 @@ static void cb_app_projekt_oeffnen(GSimpleAction *a, GVariant *p, gpointer d) {
 	gchar *errmsg = NULL;
 	Projekt *zond = (Projekt*) d;
 	if (project_load(zond, &errmsg)) {
-		display_message(zond->app_window, "Fehler beim Laden des Projekts\n", errmsg, NULL);
+		display_error(zond->app_window, "Fehler beim Laden des Projekts", errmsg);
 		g_free(errmsg);
 	}
 }
