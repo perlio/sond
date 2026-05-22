@@ -22,7 +22,7 @@
 #include <glib.h>
 #include <stdio.h>
 
-#include "sond_misc.h"
+#include "sond_mime.h"
 
 #define SOND_ERROR sond_error_quark()
 G_DEFINE_QUARK(sond-error-quark,sond_error)

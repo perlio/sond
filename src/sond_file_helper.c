@@ -29,7 +29,6 @@
 #include <io.h>
 #include <wchar.h>
 
-
 /* Konvertiert UTF-8-Pfad zu Wide-String mit \\?\ Prefix */
 wchar_t*
 prepare_long_path(const gchar *path, GError **error)
@@ -69,43 +68,22 @@ g_io_error_from_win32(DWORD win_error)
 {
     switch (win_error) {
         case ERROR_FILE_NOT_FOUND:
-        case ERROR_PATH_NOT_FOUND:
-            return G_IO_ERROR_NOT_FOUND;
-
-        case ERROR_ACCESS_DENIED:
-            return G_IO_ERROR_PERMISSION_DENIED;
-
+        case ERROR_PATH_NOT_FOUND:  return G_IO_ERROR_NOT_FOUND;
+        case ERROR_ACCESS_DENIED:   return G_IO_ERROR_PERMISSION_DENIED;
         case ERROR_ALREADY_EXISTS:
-        case ERROR_FILE_EXISTS:
-            return G_IO_ERROR_EXISTS;
-
+        case ERROR_FILE_EXISTS:     return G_IO_ERROR_EXISTS;
         case ERROR_SHARING_VIOLATION:
-        case ERROR_LOCK_VIOLATION:
-            return G_IO_ERROR_BUSY;
-
+        case ERROR_LOCK_VIOLATION:  return G_IO_ERROR_BUSY;
         case ERROR_NOT_ENOUGH_MEMORY:
         case ERROR_OUTOFMEMORY:
-            return G_IO_ERROR_NO_SPACE;
-
-        case ERROR_DISK_FULL:
-            return G_IO_ERROR_NO_SPACE;
-
+        case ERROR_DISK_FULL:       return G_IO_ERROR_NO_SPACE;
         case ERROR_INVALID_NAME:
-        case ERROR_BAD_PATHNAME:
-            return G_IO_ERROR_INVALID_FILENAME;
-
-        case ERROR_TOO_MANY_OPEN_FILES:
-            return G_IO_ERROR_TOO_MANY_OPEN_FILES;
-
-        case ERROR_DIRECTORY:
-            return G_IO_ERROR_IS_DIRECTORY;
-
+        case ERROR_BAD_PATHNAME:    return G_IO_ERROR_INVALID_FILENAME;
+        case ERROR_TOO_MANY_OPEN_FILES: return G_IO_ERROR_TOO_MANY_OPEN_FILES;
+        case ERROR_DIRECTORY:       return G_IO_ERROR_IS_DIRECTORY;
         case ERROR_NOT_A_REPARSE_POINT:
-        case ERROR_INVALID_REPARSE_DATA:
-            return G_IO_ERROR_NOT_SYMBOLIC_LINK;
-
-        default:
-            return G_IO_ERROR_FAILED;
+        case ERROR_INVALID_REPARSE_DATA: return G_IO_ERROR_NOT_SYMBOLIC_LINK;
+        default:                    return G_IO_ERROR_FAILED;
     }
 }
 
@@ -113,13 +91,8 @@ g_io_error_from_win32(DWORD win_error)
 static void
 set_error_from_win32(GError **error, DWORD win_error)
 {
-    gchar *msg;
-    GIOErrorEnum io_error;
-
-    msg = g_win32_error_message(win_error);
-    io_error = g_io_error_from_win32(win_error);
-
-    g_set_error(error, G_IO_ERROR, io_error, "%s", msg);
+    gchar *msg = g_win32_error_message(win_error);
+    g_set_error(error, G_IO_ERROR, g_io_error_from_win32(win_error), "%s", msg);
     g_free(msg);
 }
 #endif /* G_OS_WIN32 */
@@ -130,29 +103,23 @@ sond_mkdir(const gchar *path, GError **error)
     g_return_val_if_fail(path != NULL, FALSE);
 
 #ifdef G_OS_WIN32
-    wchar_t *long_path;
-    BOOL success;
-
-    long_path = prepare_long_path(path, error);
+    wchar_t *long_path = prepare_long_path(path, error);
     if (!long_path)
         return FALSE;
 
-    success = CreateDirectoryW(long_path, NULL);
+    BOOL success = CreateDirectoryW(long_path, NULL);
+    g_free(long_path);
 
     if (!success) {
-        DWORD win_error = GetLastError();
-		set_error_from_win32(error, win_error);
-		g_free(long_path);
-		return FALSE;
+        set_error_from_win32(error, GetLastError());
+        return FALSE;
     }
-
-    g_free(long_path);
     return TRUE;
 #else
     if (g_mkdir(path, 0755) != 0) {
-		g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
-					"%s", g_strerror(errno));
-		return FALSE;
+        g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
+                    "%s", g_strerror(errno));
+        return FALSE;
     }
     return TRUE;
 #endif
@@ -164,16 +131,12 @@ sond_exists(const gchar *path)
     g_return_val_if_fail(path != NULL, FALSE);
 
 #ifdef G_OS_WIN32
-    wchar_t *long_path;
-    DWORD attrs;
-
-    long_path = prepare_long_path(path, NULL);
+    wchar_t *long_path = prepare_long_path(path, NULL);
     if (!long_path)
         return FALSE;
 
-    attrs = GetFileAttributesW(long_path);
+    DWORD attrs = GetFileAttributesW(long_path);
     g_free(long_path);
-
     return (attrs != INVALID_FILE_ATTRIBUTES);
 #else
     return g_file_test(path, G_FILE_TEST_EXISTS);
@@ -183,27 +146,20 @@ sond_exists(const gchar *path)
 gboolean
 sond_mkdir_with_parents(const gchar *path, GError **error)
 {
-    gchar *parent;
-
     g_return_val_if_fail(path != NULL, FALSE);
 
-    /* Prüfe ob bereits existiert */
     if (sond_exists(path))
         return TRUE;
 
-    /* Erstelle Parent rekursiv */
-    parent = g_path_get_dirname(path);
-
+    gchar *parent = g_path_get_dirname(path);
     if (g_strcmp0(parent, ".") != 0 && g_strcmp0(parent, path) != 0) {
         if (!sond_mkdir_with_parents(parent, error)) {
             g_free(parent);
             return FALSE;
         }
     }
-
     g_free(parent);
 
-    /* Erstelle dieses Verzeichnis */
     return sond_mkdir(path, error);
 }
 
@@ -213,22 +169,17 @@ sond_remove(const gchar *path, GError **error)
     g_return_val_if_fail(path != NULL, FALSE);
 
 #ifdef G_OS_WIN32
-    wchar_t *long_path;
-    BOOL success;
-
-    long_path = prepare_long_path(path, error);
+    wchar_t *long_path = prepare_long_path(path, error);
     if (!long_path)
         return FALSE;
 
-    success = DeleteFileW(long_path);
+    BOOL success = DeleteFileW(long_path);
+    g_free(long_path);
 
     if (!success) {
         set_error_from_win32(error, GetLastError());
-        g_free(long_path);
         return FALSE;
     }
-
-    g_free(long_path);
     return TRUE;
 #else
     if (g_remove(path) != 0) {
@@ -246,22 +197,17 @@ sond_rmdir(const gchar *path, GError **error)
     g_return_val_if_fail(path != NULL, FALSE);
 
 #ifdef G_OS_WIN32
-    wchar_t *long_path;
-    BOOL success;
-
-    long_path = prepare_long_path(path, error);
+    wchar_t *long_path = prepare_long_path(path, error);
     if (!long_path)
         return FALSE;
 
-    success = RemoveDirectoryW(long_path);
+    BOOL success = RemoveDirectoryW(long_path);
+    g_free(long_path);
 
     if (!success) {
         set_error_from_win32(error, GetLastError());
-        g_free(long_path);
         return FALSE;
     }
-
-    g_free(long_path);
     return TRUE;
 #else
     if (g_rmdir(path) != 0) {
@@ -276,56 +222,39 @@ sond_rmdir(const gchar *path, GError **error)
 gboolean
 sond_rmdir_r(const gchar *path, GError **error)
 {
-    SondDir *dir;
-    const gchar *name;
-    gboolean success = TRUE;
-
     g_return_val_if_fail(path != NULL, FALSE);
 
-    /* Öffne Verzeichnis */
-    dir = sond_dir_open(path, error);
+    SondDir *dir = sond_dir_open(path, error);
     if (!dir)
         return FALSE;
 
-    /* Iteriere über alle Einträge */
+    gboolean success = TRUE;
+    const gchar *name;
+
     while ((name = sond_dir_read_name(dir)) != NULL) {
         gchar *fullpath = g_build_filename(path, name, NULL);
         GStatBuf st;
 
-        /* Hole Datei-Info */
         if (sond_stat(fullpath, &st, error) != 0) {
             success = FALSE;
             g_free(fullpath);
             break;
         }
 
-        /* Rekursiv löschen wenn Verzeichnis */
-        if (S_ISDIR(st.st_mode)) {
-            if (!sond_rmdir_r(fullpath, error)) {
-                success = FALSE;
-                g_free(fullpath);
-                break;
-            }
-        } else {
-            /* Datei löschen */
-            if (!sond_remove(fullpath, error)) {
-                success = FALSE;
-                g_free(fullpath);
-                break;
-            }
-        }
+        if (S_ISDIR(st.st_mode))
+            success = sond_rmdir_r(fullpath, error);
+        else
+            success = sond_remove(fullpath, error);
 
         g_free(fullpath);
+        if (!success)
+            break;
     }
 
     sond_dir_close(dir);
 
-    /* Lösche das Verzeichnis selbst */
-    if (success) {
-        if (!sond_rmdir(path, error)) {
-            success = FALSE;
-        }
-    }
+    if (success && !sond_rmdir(path, error))
+        success = FALSE;
 
     return success;
 }
@@ -337,16 +266,11 @@ sond_fopen(const gchar *path, const gchar *mode, GError **error)
     g_return_val_if_fail(mode != NULL, NULL);
 
 #ifdef G_OS_WIN32
-    wchar_t *long_path;
-    wchar_t *wmode;
-    FILE *file;
-
-    long_path = prepare_long_path(path, error);
+    wchar_t *long_path = prepare_long_path(path, error);
     if (!long_path)
         return NULL;
 
-    /* Mode auch zu Wide-String */
-    wmode = g_utf8_to_utf16(mode, -1, NULL, NULL, NULL);
+    wchar_t *wmode = g_utf8_to_utf16(mode, -1, NULL, NULL, NULL);
     if (!wmode) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
                     "Ungültiger Modus");
@@ -354,16 +278,14 @@ sond_fopen(const gchar *path, const gchar *mode, GError **error)
         return NULL;
     }
 
-    file = _wfopen(long_path, wmode);
+    FILE *file = _wfopen(long_path, wmode);
+    g_free(long_path);
+    g_free(wmode);
 
     if (!file) {
         g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
                     "%s", g_strerror(errno));
     }
-
-    g_free(long_path);
-    g_free(wmode);
-
     return file;
 #else
     FILE *file = g_fopen(path, mode);
@@ -382,31 +304,25 @@ sond_stat(const gchar *path, GStatBuf *buf, GError **error)
     g_return_val_if_fail(buf != NULL, -1);
 
 #ifdef G_OS_WIN32
-    wchar_t *long_path;
-    struct _stat64 st;
-    gint result;
-
-    long_path = prepare_long_path(path, error);
+    wchar_t *long_path = prepare_long_path(path, error);
     if (!long_path)
         return -1;
 
-    result = _wstat64(long_path, &st);
+    struct _stat64 st;
+    gint result = _wstat64(long_path, &st);
+    g_free(long_path);
 
     if (result != 0) {
         g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
                     "%s", g_strerror(errno));
-        g_free(long_path);
         return -1;
     }
 
-    /* Kopiere relevante Felder zu GStatBuf */
-    buf->st_mode = st.st_mode;
-    buf->st_size = st.st_size;
+    buf->st_mode  = st.st_mode;
+    buf->st_size  = st.st_size;
     buf->st_atime = st.st_atime;
     buf->st_mtime = st.st_mtime;
     buf->st_ctime = st.st_ctime;
-
-    g_free(long_path);
     return 0;
 #else
     if (g_stat(path, buf) != 0) {
@@ -425,31 +341,24 @@ sond_rename(const gchar *oldpath, const gchar *newpath, GError **error)
     g_return_val_if_fail(newpath != NULL, FALSE);
 
 #ifdef G_OS_WIN32
-    wchar_t *long_oldpath;
-    wchar_t *long_newpath;
-    BOOL success;
-
-    long_oldpath = prepare_long_path(oldpath, error);
+    wchar_t *long_oldpath = prepare_long_path(oldpath, error);
     if (!long_oldpath)
         return FALSE;
 
-    long_newpath = prepare_long_path(newpath, error);
+    wchar_t *long_newpath = prepare_long_path(newpath, error);
     if (!long_newpath) {
         g_free(long_oldpath);
         return FALSE;
     }
 
-    success = MoveFileW(long_oldpath, long_newpath);
+    BOOL success = MoveFileW(long_oldpath, long_newpath);
+    g_free(long_oldpath);
+    g_free(long_newpath);
 
     if (!success) {
         set_error_from_win32(error, GetLastError());
-        g_free(long_oldpath);
-        g_free(long_newpath);
         return FALSE;
     }
-
-    g_free(long_oldpath);
-    g_free(long_newpath);
     return TRUE;
 #else
     if (g_rename(oldpath, newpath) != 0) {
@@ -468,55 +377,40 @@ sond_copy(const gchar *source, const gchar *dest, gboolean overwrite, GError **e
     g_return_val_if_fail(dest != NULL, FALSE);
 
 #ifdef G_OS_WIN32
-    wchar_t *long_source;
-    wchar_t *long_dest;
-    BOOL success;
-
-    long_source = prepare_long_path(source, error);
+    wchar_t *long_source = prepare_long_path(source, error);
     if (!long_source)
         return FALSE;
 
-    long_dest = prepare_long_path(dest, error);
+    wchar_t *long_dest = prepare_long_path(dest, error);
     if (!long_dest) {
         g_free(long_source);
         return FALSE;
     }
 
-    /* CopyFileW: letzter Parameter FALSE = überschreibe nicht (fail wenn existiert) */
-    success = CopyFileW(long_source, long_dest, !overwrite);
+    BOOL success = CopyFileW(long_source, long_dest, !overwrite);
+    g_free(long_source);
+    g_free(long_dest);
 
     if (!success) {
         set_error_from_win32(error, GetLastError());
-        g_free(long_source);
-        g_free(long_dest);
         return FALSE;
     }
-
-    g_free(long_source);
-    g_free(long_dest);
     return TRUE;
 #else
-    FILE *src_file = NULL;
-    FILE *dst_file = NULL;
-    gchar buffer[8192];
-    size_t bytes_read;
-    gboolean result = FALSE;
-
-    /* Prüfe ob Ziel existiert und overwrite=FALSE */
     if (!overwrite && g_file_test(dest, G_FILE_TEST_EXISTS)) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_EXISTS,
                     "Zieldatei existiert bereits");
         return FALSE;
     }
 
-    src_file = fopen(source, "rb");
+    FILE *src_file = fopen(source, "rb");
     if (!src_file) {
         g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
                     "Konnte Quelldatei nicht öffnen: %s", g_strerror(errno));
         return FALSE;
     }
 
-    dst_file = fopen(dest, "wb");
+    FILE *dst_file = fopen(dest, "wb");
     if (!dst_file) {
         g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
                     "Konnte Zieldatei nicht erstellen: %s", g_strerror(errno));
@@ -524,27 +418,27 @@ sond_copy(const gchar *source, const gchar *dest, gboolean overwrite, GError **e
         return FALSE;
     }
 
-    /* Kopiere in Blöcken */
+    gchar buffer[8192];
+    size_t bytes_read;
+    gboolean result = TRUE;
+
     while ((bytes_read = fread(buffer, 1, sizeof(buffer), src_file)) > 0) {
         if (fwrite(buffer, 1, bytes_read, dst_file) != bytes_read) {
             g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
                         "Fehler beim Schreiben: %s", g_strerror(errno));
-            goto cleanup;
+            result = FALSE;
+            break;
         }
     }
 
-    if (ferror(src_file)) {
+    if (result && ferror(src_file)) {
         g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
                     "Fehler beim Lesen: %s", g_strerror(errno));
-        goto cleanup;
+        result = FALSE;
     }
 
-    result = TRUE;
-
-cleanup:
-    if (src_file) fclose(src_file);
-    if (dst_file) fclose(dst_file);
-
+    fclose(src_file);
+    fclose(dst_file);
     return result;
 #endif
 }
@@ -552,25 +446,16 @@ cleanup:
 gboolean
 sond_copy_r(const gchar *source, const gchar *dest, gboolean overwrite, GError **error)
 {
-    SondDir *dir;
-    const gchar *name;
-    gboolean success = TRUE;
-    GStatBuf st;
-
     g_return_val_if_fail(source != NULL, FALSE);
     g_return_val_if_fail(dest != NULL, FALSE);
 
-    /* Hole Info über Quelle */
-    if (sond_stat(source, &st, error) != 0) {
+    GStatBuf st;
+    if (sond_stat(source, &st, error) != 0)
         return FALSE;
-    }
 
-    /* Falls Quelle eine Datei ist, einfach kopieren */
-    if (!S_ISDIR(st.st_mode)) {
+    if (!S_ISDIR(st.st_mode))
         return sond_copy(source, dest, overwrite, error);
-    }
 
-    /* Quelle ist ein Verzeichnis - erstelle Zielverzeichnis */
     if (sond_exists(dest)) {
         if (!overwrite) {
             g_set_error(error, G_IO_ERROR, G_IO_ERROR_EXISTS,
@@ -578,100 +463,95 @@ sond_copy_r(const gchar *source, const gchar *dest, gboolean overwrite, GError *
             return FALSE;
         }
     } else {
-        if (!sond_mkdir(dest, error)) {
+        if (!sond_mkdir(dest, error))
             return FALSE;
-        }
     }
 
-    /* Öffne Quellverzeichnis */
-    dir = sond_dir_open(source, error);
+    SondDir *dir = sond_dir_open(source, error);
     if (!dir)
         return FALSE;
 
-    /* Iteriere über alle Einträge */
+    gboolean success = TRUE;
+    const gchar *name;
+
     while ((name = sond_dir_read_name(dir)) != NULL) {
         gchar *source_path = g_build_filename(source, name, NULL);
-        gchar *dest_path = g_build_filename(dest, name, NULL);
+        gchar *dest_path   = g_build_filename(dest,   name, NULL);
         GStatBuf entry_st;
 
-        /* Hole Info über Eintrag */
         if (sond_stat(source_path, &entry_st, error) != 0) {
             success = FALSE;
-            g_free(source_path);
-            g_free(dest_path);
-            break;
-        }
-
-        /* Rekursiv kopieren wenn Verzeichnis */
-        if (S_ISDIR(entry_st.st_mode)) {
-            if (!sond_copy_r(source_path, dest_path, overwrite, error)) {
-                success = FALSE;
-                g_free(source_path);
-                g_free(dest_path);
-                break;
-            }
+        } else if (S_ISDIR(entry_st.st_mode)) {
+            success = sond_copy_r(source_path, dest_path, overwrite, error);
         } else {
-            /* Datei kopieren */
-            if (!sond_copy(source_path, dest_path, overwrite, error)) {
-                success = FALSE;
-                g_free(source_path);
-                g_free(dest_path);
-                break;
-            }
+            success = sond_copy(source_path, dest_path, overwrite, error);
         }
 
         g_free(source_path);
         g_free(dest_path);
+        if (!success)
+            break;
     }
 
     sond_dir_close(dir);
-
     return success;
 }
 
 gint
-sond_open_read(const gchar *path, GError **error)
+sond_open_fd(const gchar *path, gint flags, gint mode, GError **error)
 {
     g_return_val_if_fail(path != NULL, -1);
 
 #ifdef G_OS_WIN32
     wchar_t *long_path;
     HANDLE h;
-    gint fd;
+    DWORD access = 0;
+    DWORD creation = 0;
+    DWORD share = FILE_SHARE_READ;
+    gint osfhandle_flags = 0;
+
+    /* Access-Flags */
+    if ((flags & O_RDONLY) || (flags & O_RDWR)) access |= GENERIC_READ;
+    if ((flags & O_WRONLY) || (flags & O_RDWR)) access |= GENERIC_WRITE;
+
+    /* Creation-Disposition */
+    if      ((flags & O_CREAT) && (flags & O_EXCL))  creation = CREATE_NEW;
+    else if ((flags & O_CREAT) && (flags & O_TRUNC)) creation = CREATE_ALWAYS;
+    else if  (flags & O_CREAT)                       creation = OPEN_ALWAYS;
+    else if  (flags & O_TRUNC)                       creation = TRUNCATE_EXISTING;
+    else                                             creation = OPEN_EXISTING;
+
+    /* osfhandle-Flags */
+    if (flags & O_RDONLY) osfhandle_flags |= _O_RDONLY;
+    if (flags & O_WRONLY) osfhandle_flags |= _O_WRONLY;
+    if (flags & O_RDWR)   osfhandle_flags |= _O_RDWR;
+    if (flags & O_BINARY) osfhandle_flags |= _O_BINARY;
+    else                  osfhandle_flags |= _O_TEXT;
 
     long_path = prepare_long_path(path, error);
     if (!long_path)
         return -1;
 
-    h = CreateFileW(long_path,
-                    GENERIC_READ,
-                    FILE_SHARE_READ,
-                    NULL,
-                    OPEN_EXISTING,
-                    FILE_ATTRIBUTE_NORMAL,
-                    NULL);
+    h = CreateFileW(long_path, access, share, NULL, creation,
+                    FILE_ATTRIBUTE_NORMAL, NULL);
+    g_free(long_path);
 
     if (h == INVALID_HANDLE_VALUE) {
         set_error_from_win32(error, GetLastError());
-        g_free(long_path);
         return -1;
     }
 
-    /* Windows-Handle zu C-File-Descriptor */
-    fd = _open_osfhandle((intptr_t)h, _O_RDONLY);
-
+    gint fd = _open_osfhandle((intptr_t)h, osfhandle_flags);
     if (fd == -1) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                     "_open_osfhandle fehlgeschlagen");
         CloseHandle(h);
-        g_free(long_path);
         return -1;
     }
 
-    g_free(long_path);
     return fd;
 #else
-    gint fd = g_open(path, O_RDONLY, 0);
+    gint fd = g_open(path, flags, mode);
     if (fd == -1) {
         g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
                     "%s", g_strerror(errno));
@@ -680,7 +560,15 @@ sond_open_read(const gchar *path, GError **error)
 #endif
 }
 
-/* Verzeichnis-Iteration */
+gint
+sond_open_read(const gchar *path, GError **error)
+{
+    return sond_open_fd(path, O_RDONLY | O_BINARY, 0, error);
+}
+
+/* ============================================================
+ * Verzeichnis-Iteration
+ * ============================================================ */
 #ifdef G_OS_WIN32
 struct _SondDir {
     HANDLE handle;
@@ -697,35 +585,27 @@ struct _SondDir {
 SondDir*
 sond_dir_open(const gchar *path, GError **error)
 {
-    SondDir *dir;
-
     g_return_val_if_fail(path != NULL, NULL);
 
-    dir = g_new0(SondDir, 1);
+    SondDir *dir = g_new0(SondDir, 1);
 
 #ifdef G_OS_WIN32
-    wchar_t *long_path;
     wchar_t search_path[32768];
 
-    long_path = prepare_long_path(path, error);
+    wchar_t *long_path = prepare_long_path(path, error);
     if (!long_path) {
         g_free(dir);
         return NULL;
     }
 
-    /* Entferne trailing Backslash falls vorhanden */
-    size_t path_len;
-    path_len = wcslen(long_path);
-    if (path_len > 0 && long_path[path_len - 1] == L'\\') {
+    size_t path_len = wcslen(long_path);
+    if (path_len > 0 && long_path[path_len - 1] == L'\\')
         long_path[path_len - 1] = L'\0';
-    }
 
-    /* Füge \* für FindFirstFile hinzu */
     swprintf(search_path, 32768, L"%ls\\*", long_path);
     g_free(long_path);
 
     dir->handle = FindFirstFileW(search_path, &dir->find_data);
-
     if (dir->handle == INVALID_HANDLE_VALUE) {
         set_error_from_win32(error, GetLastError());
         g_free(dir);
@@ -733,8 +613,6 @@ sond_dir_open(const gchar *path, GError **error)
     }
 
     dir->first = TRUE;
-    dir->utf8_name = NULL;
-
     return dir;
 #else
     dir->gdir = g_dir_open(path, 0, error);
@@ -752,29 +630,21 @@ sond_dir_read_name(SondDir *dir)
     g_return_val_if_fail(dir != NULL, NULL);
 
 #ifdef G_OS_WIN32
-    BOOL success;
-
-    /* Beim ersten Aufruf haben wir schon Daten von FindFirstFile */
     if (dir->first) {
         dir->first = FALSE;
     } else {
-        success = FindNextFileW(dir->handle, &dir->find_data);
-        if (!success) {
+        if (!FindNextFileW(dir->handle, &dir->find_data))
             return NULL;
-        }
     }
 
-    /* Überspringe . und .. */
+    /* . und .. überspringen */
     if (wcscmp(dir->find_data.cFileName, L".") == 0 ||
-        wcscmp(dir->find_data.cFileName, L"..") == 0) {
-        return sond_dir_read_name(dir);  /* Rekursiv zum nächsten */
-    }
+        wcscmp(dir->find_data.cFileName, L"..") == 0)
+        return sond_dir_read_name(dir);
 
-    /* Konvertiere Wide-String zu UTF-8 */
     g_free(dir->utf8_name);
-    dir->utf8_name = g_utf16_to_utf8((gunichar2*)dir->find_data.cFileName,
-                                      -1, NULL, NULL, NULL);
-
+    dir->utf8_name = g_utf16_to_utf8(
+            (gunichar2*) dir->find_data.cFileName, -1, NULL, NULL, NULL);
     return dir->utf8_name;
 #else
     return g_dir_read_name(dir->gdir);
@@ -788,14 +658,12 @@ sond_dir_close(SondDir *dir)
         return;
 
 #ifdef G_OS_WIN32
-    if (dir->handle != INVALID_HANDLE_VALUE) {
+    if (dir->handle != INVALID_HANDLE_VALUE)
         FindClose(dir->handle);
-    }
     g_free(dir->utf8_name);
 #else
-    if (dir->gdir) {
+    if (dir->gdir)
         g_dir_close(dir->gdir);
-    }
 #endif
 
     g_free(dir);
@@ -804,27 +672,21 @@ sond_dir_close(SondDir *dir)
 gboolean
 sond_file_get_contents(const gchar *path, gchar **contents, gsize *length, GError **error)
 {
-    FILE *f = NULL;
-    GStatBuf st;
-    gchar *buf = NULL;
-    gsize file_size;
-    gsize bytes_read;
-
     g_return_val_if_fail(path != NULL, FALSE);
     g_return_val_if_fail(contents != NULL, FALSE);
 
+    GStatBuf st;
     if (sond_stat(path, &st, error) != 0)
         return FALSE;
 
-    file_size = (gsize)st.st_size;
+    gsize file_size = (gsize) st.st_size;
 
-    f = sond_fopen(path, "rb", error);
+    FILE *f = sond_fopen(path, "rb", error);
     if (!f)
         return FALSE;
 
-    /* +1 für abschließende NUL, analog zu g_file_get_contents */
-    buf = g_malloc(file_size + 1);
-    bytes_read = fread(buf, 1, file_size, f);
+    gchar *buf = g_malloc(file_size + 1);
+    gsize bytes_read = fread(buf, 1, file_size, f);
     fclose(f);
 
     if (bytes_read != file_size) {
@@ -849,41 +711,28 @@ sond_open(const gchar *path, gboolean open_with, GError **error)
     g_return_val_if_fail(path != NULL, FALSE);
 
 #ifdef G_OS_WIN32
-    wchar_t *long_path;
-    SHELLEXECUTEINFOW sei = { 0 };
-    BOOL ret;
-
-    long_path = prepare_long_path(path, error);
+    wchar_t *long_path = prepare_long_path(path, error);
     if (!long_path)
         return FALSE;
 
-    sei.cbSize = sizeof(sei);
-    sei.nShow = SW_SHOWNORMAL;
-    sei.lpVerb = open_with ? L"openas" : L"open";
-    sei.lpFile = long_path;
-    sei.fMask = SEE_MASK_INVOKEIDLIST;
+    SHELLEXECUTEINFOW sei = { 0 };
+    sei.cbSize  = sizeof(sei);
+    sei.nShow   = SW_SHOWNORMAL;
+    sei.lpVerb  = open_with ? L"openas" : L"open";
+    sei.lpFile  = long_path;
+    sei.fMask   = SEE_MASK_INVOKEIDLIST;
 
-    ret = ShellExecuteExW(&sei);
+    BOOL ret = ShellExecuteExW(&sei);
     g_free(long_path);
 
     if (!ret) {
         set_error_from_win32(error, GetLastError());
         return FALSE;
     }
-
     return TRUE;
 #else
-    gchar *argv[3];
-    gboolean ret;
-
-    argv[0] = "xdg-open";
-    argv[1] = (gchar *)path;
-    argv[2] = NULL;
-
-    ret = g_spawn_async(NULL, argv, NULL,
-                        G_SPAWN_SEARCH_PATH,
-                        NULL, NULL, NULL, error);
-
-    return ret;
+    gchar *argv[] = { "xdg-open", (gchar*) path, NULL };
+    return g_spawn_async(NULL, argv, NULL, G_SPAWN_SEARCH_PATH,
+                         NULL, NULL, NULL, error);
 #endif
 }

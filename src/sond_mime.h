@@ -16,8 +16,8 @@
  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#ifndef SRC_SOND_MISC_H_
-#define SRC_SOND_MISC_H_
+#ifndef SRC_SOND_MIME_H_
+#define SRC_SOND_MIME_H_
 
 typedef char gchar;
 typedef size_t gsize;
@@ -37,4 +37,4 @@ const gchar* mime_from_extension(const gchar* filename);
 gchar* mime_guess_content_type(const guchar* buffer, gsize size,
 		const gchar* path, GError** error);
 
-#endif /* SRC_SOND_MISC_H_ */
+#endif /* SRC_SOND_MIME_H_ */

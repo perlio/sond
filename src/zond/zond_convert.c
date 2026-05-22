@@ -26,6 +26,7 @@
 #include "../sond_fileparts.h"
 #include "../sond_log_and_error.h"
 #include "../sond_pdf_helper.h"
+#include "../sond_file_helper.h"
 
 #include "zond_dbase.h"
 #include "zond_treeview.h"
@@ -599,30 +600,21 @@ static gint zond_convert_0_to_1_baum_inhalt_insert(ZondDBase *zond_dbase,
 			ERROR_Z
 	} else if (rel_path && !ziel_von) //datei
 			{
-		//erstmal Test, ob file da und zu öffnen
 		gint fd = 0;
-		gchar *filename = NULL;
-		gchar *charset = NULL;
 		gboolean exists = TRUE;
 		gint node_inserted_root = 0;
 		gint first_child_file = 0;
 
-		charset = g_get_codeset();
-		filename = g_convert(rel_path, -1, charset, "UTF-8", NULL, NULL, error);
-		g_free(charset);
-		if (!filename)
-			ERROR_Z
-
-		fd = open(filename, O_RDONLY);
-		g_free(filename);
+		fd = sond_open_fd(rel_path, O_RDONLY | O_BINARY, 0, error);
 		if (fd < 0) {
 			gchar *errmsg = NULL;
 			size_t count = 0;
 
 			exists = FALSE;
+			g_clear_error(error);
 
-			errmsg = g_strdup_printf("'%s' konnte nicht geöffnet werden: %s\n",
-					rel_path, strerror( errno));
+			errmsg = g_strdup_printf("'%s' konnte nicht geöffnet werden\n",
+					rel_path);
 			count = fwrite(errmsg, sizeof(gchar), strlen(errmsg),
 					data_convert->logfile);
 			if (count < strlen(errmsg))
@@ -637,8 +629,7 @@ static gint zond_convert_0_to_1_baum_inhalt_insert(ZondDBase *zond_dbase,
 					icon_name, node_text, NULL, error);
 			if (*node_inserted == -1)
 				ERROR_Z
-		}
-		else  {//Datei existiert und kann geöffnet werden
+		} else {
 			close(fd);
 
 			gint rc = 0;
@@ -658,8 +649,6 @@ static gint zond_convert_0_to_1_baum_inhalt_insert(ZondDBase *zond_dbase,
 		}
 
 		//neue Rekursion mit FILE_PART_ROOT starten
-		//in Version bis 0 ja nur bei PDF-Dateien möglich
-		//d.h. Test, ob es sich um PDF handelt, überflüssig
 		first_child_file = zond_convert_get_first_child_0(zond_dbase,
 				BAUM_INHALT, node_id, error);
 		if (first_child_file == -1)
@@ -672,8 +661,7 @@ static gint zond_convert_0_to_1_baum_inhalt_insert(ZondDBase *zond_dbase,
 
 			anchor_child = *node_inserted;
 
-			if (exists) //wenn Datei nicht existiert, muß man nicht versuchen, sie zu öffnen
-			{
+			if (exists) {
 				fz_try(data_convert->ctx)
 					data_convert->doc = pdf_open_document(data_convert->ctx, rel_path);
 				fz_catch(data_convert->ctx) {
@@ -682,7 +670,7 @@ static gint zond_convert_0_to_1_baum_inhalt_insert(ZondDBase *zond_dbase,
 
 					errmsg = g_strdup_printf(
 							"PDF '%s' konnte nicht geöffnet werden: %s\n",
-							rel_path, (*error)->message);
+							rel_path, fz_caught_message(data_convert->ctx));
 					count = fwrite(errmsg, sizeof(gchar), strlen(errmsg),
 							data_convert->logfile);
 					if (count < strlen(errmsg))
@@ -690,8 +678,6 @@ static gint zond_convert_0_to_1_baum_inhalt_insert(ZondDBase *zond_dbase,
 								"Nachricht '%s' konnte nicht ins Logfile geschrieben werden",
 								errmsg);
 					g_free(errmsg);
-
-					g_clear_error(error);
 				}
 
 				anchor_child = node_inserted_root;
@@ -710,8 +696,7 @@ static gint zond_convert_0_to_1_baum_inhalt_insert(ZondDBase *zond_dbase,
 		Anbindung anbindung = { 0 };
 		gchar *errmsg = NULL;
 
-		if (data_convert->doc) //doc wurde nicht nicht gefunden
-		{
+		if (data_convert->doc) {
 			anbindung.von.seite = treeviews_get_page_num_from_dest_doc(
 					data_convert->ctx, data_convert->doc, ziel_von, &errmsg);
 			if (anbindung.von.seite == -1) {
@@ -817,8 +802,7 @@ static gint zond_convert_0_to_1_baum_inhalt(ZondDBase *zond_dbase, gint anchor_i
 		g_array_append_val(arr_targets, target);
 	}
 
-	if (!stop_rec) //weil ist Datei; neuer Zweig wird eingefügt
-	{
+	if (!stop_rec) {
 		gint first_child = 0;
 
 		first_child = zond_convert_get_first_child_0(zond_dbase, BAUM_INHALT,
@@ -1081,14 +1065,10 @@ static gint zond_convert_0_to_1(ZondDBase *zond_dbase, GError **error) {
 	//Log_datei öffnen
 	filename = g_strdup_printf("%s_conv_from_v0_to_v1.log",
 			zond_dbase_get_path(zond_dbase));
-	data_convert.logfile = fopen(filename, "wb");
+	data_convert.logfile = sond_fopen(filename, "wb", error);
 	g_free(filename);
-	if (!data_convert.logfile) {
-		if (error)
-			*error = g_error_new(g_quark_from_static_string("stdlib"), errno,
-					strerror( errno));
+	if (!data_convert.logfile)
 		return -1;
-	}
 
 	arr_targets = g_array_new( FALSE, FALSE, sizeof(Target));
 	arr_links = g_array_new( FALSE, FALSE, sizeof(Links));
@@ -1230,11 +1210,9 @@ gint zond_convert(ZondDBase *zond_dbase, gchar const *v_string, GError **error) 
 					"%s\nVersion noch nicht verfügbar", __func__);
 
 		return -1;
-	} else if (atoi(v_string) == 0) //ist auch, wenn v_string[0] 'v' ist, dann ist aber zu 0 umgewandelt. Paßt also
-			{
+	} else if (atoi(v_string) == 0) {
 		gint rc = 0;
 
-		//aktewalisieren von maj_0 auf maj_1
 		rc = zond_convert_from_maj_0_to_1(zond_dbase, error);
 		if (rc == -1)
 			ERROR_Z
@@ -1243,4 +1221,3 @@ gint zond_convert(ZondDBase *zond_dbase, gchar const *v_string, GError **error) 
 
 	return 0;
 }
-

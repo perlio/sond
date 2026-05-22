@@ -17,7 +17,7 @@
  */
 
 #include "sond_pdf_helper.h"
-#include "sond_misc.h"
+#include "sond_mime.h"
 #include "sond_log_and_error.h"
 #include "sond_file_helper.h"
 

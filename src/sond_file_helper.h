@@ -16,8 +16,6 @@
  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-
-
 #ifndef SRC_SOND_FILE_HELPER_H_
 #define SRC_SOND_FILE_HELPER_H_
 
@@ -33,117 +31,77 @@
  */
 wchar_t* prepare_long_path(const gchar *path, GError **error);
 #endif
+
 /**
  * Erstellt ein Verzeichnis (Windows: mit Long-Path-Support)
- *
- * @param path UTF-8-kodierter Pfad (kann relativ oder absolut sein)
- * @param error Optionaler GError für Fehlermeldungen
- * @return TRUE bei Erfolg, FALSE bei Fehler
  */
 gboolean sond_mkdir(const gchar *path, GError **error);
 
 /**
  * Prüft ob Datei/Verzeichnis existiert (Windows: mit Long-Path-Support)
- *
- * @param path UTF-8-kodierter Pfad
- * @return TRUE wenn existiert, FALSE sonst
  */
 gboolean sond_exists(const gchar *path);
 
 /**
  * Erstellt Verzeichnisse rekursiv (Windows: mit Long-Path-Support)
- *
- * @param path UTF-8-kodierter Pfad
- * @param error Optionaler GError für Fehlermeldungen
- * @return TRUE bei Erfolg, FALSE bei Fehler
  */
 gboolean sond_mkdir_with_parents(const gchar *path, GError **error);
 
 /**
  * Löscht eine Datei (Windows: mit Long-Path-Support)
- *
- * @param path UTF-8-kodierter Pfad
- * @param error Optionaler GError für Fehlermeldungen
- * @return TRUE bei Erfolg, FALSE bei Fehler
  */
 gboolean sond_remove(const gchar *path, GError **error);
 
 /**
  * Löscht ein leeres Verzeichnis (Windows: mit Long-Path-Support)
- *
- * @param path UTF-8-kodierter Pfad
- * @param error Optionaler GError für Fehlermeldungen
- * @return TRUE bei Erfolg, FALSE bei Fehler
  */
 gboolean sond_rmdir(const gchar *path, GError **error);
 
 /**
  * Löscht ein Verzeichnis rekursiv mit allen Inhalten (Windows: mit Long-Path-Support)
- *
- * @param path UTF-8-kodierter Pfad
- * @param error Optionaler GError für Fehlermeldungen
- * @return TRUE bei Erfolg, FALSE bei Fehler
  */
 gboolean sond_rmdir_r(const gchar *path, GError **error);
 
 /**
  * Öffnet eine Datei (Windows: mit Long-Path-Support)
  *
- * @param path UTF-8-kodierter Pfad
  * @param mode Modus wie bei fopen ("r", "w", "rb", etc.)
- * @param error Optionaler GError für Fehlermeldungen
- * @return FILE* bei Erfolg, NULL bei Fehler
  */
 FILE* sond_fopen(const gchar *path, const gchar *mode, GError **error);
 
 /**
  * Holt Datei-Statistiken (Windows: mit Long-Path-Support)
- *
- * @param path UTF-8-kodierter Pfad
- * @param buf Pointer auf GStatBuf-Struktur
- * @param error Optionaler GError für Fehlermeldungen
- * @return 0 bei Erfolg, -1 bei Fehler
  */
 gint sond_stat(const gchar *path, GStatBuf *buf, GError **error);
 
 /**
  * Verschiebt/umbenennt eine Datei (Windows: mit Long-Path-Support)
- *
- * @param oldpath UTF-8-kodierter alter Pfad
- * @param newpath UTF-8-kodierter neuer Pfad
- * @param error Optionaler GError für Fehlermeldungen
- * @return TRUE bei Erfolg, FALSE bei Fehler
  */
 gboolean sond_rename(const gchar *oldpath, const gchar *newpath, GError **error);
 
 /**
  * Kopiert eine Datei (Windows: mit Long-Path-Support)
- *
- * @param source UTF-8-kodierter Quellpfad
- * @param dest UTF-8-kodierter Zielpfad
- * @param overwrite TRUE um Zieldatei zu überschreiben, FALSE sonst
- * @param error Optionaler GError für Fehlermeldungen
- * @return TRUE bei Erfolg, FALSE bei Fehler
  */
 gboolean sond_copy(const gchar *source, const gchar *dest, gboolean overwrite, GError **error);
 
 /**
  * Kopiert ein Verzeichnis rekursiv mit allen Inhalten (Windows: mit Long-Path-Support)
- *
- * @param source UTF-8-kodierter Quellpfad
- * @param dest UTF-8-kodierter Zielpfad
- * @param overwrite TRUE um existierende Dateien zu überschreiben, FALSE sonst
- * @param error Optionaler GError für Fehlermeldungen
- * @return TRUE bei Erfolg, FALSE bei Fehler
  */
 gboolean sond_copy_r(const gchar *source, const gchar *dest, gboolean overwrite, GError **error);
 
 /**
- * Öffnet File-Handle für MuPDF etc. (Windows: mit Long-Path-Support)
+ * Öffnet eine Datei mit angegebenen Flags als File-Descriptor (Windows: mit Long-Path-Support).
+ * Plattformübergreifendes Äquivalent zu g_open() / open().
  *
- * @param path UTF-8-kodierter Pfad
- * @param error Optionaler GError für Fehlermeldungen
+ * @param flags  Flags wie O_RDONLY, O_WRONLY, O_RDWR, O_CREAT, O_TRUNC, O_BINARY etc.
+ * @param mode   Berechtigungen (z.B. 0644), nur relevant bei O_CREAT auf POSIX
  * @return File-Descriptor oder -1 bei Fehler
+ */
+gint sond_open_fd(const gchar *path, gint flags, gint mode, GError **error);
+
+/**
+ * Öffnet eine Datei zum Lesen als File-Descriptor (Windows: mit Long-Path-Support).
+ * Wrapper um sond_open_fd() mit O_RDONLY | O_BINARY.
  */
 gint sond_open_read(const gchar *path, GError **error);
 
@@ -152,49 +110,30 @@ typedef struct _SondDir SondDir;
 
 /**
  * Öffnet ein Verzeichnis für Iteration (Windows: mit Long-Path-Support)
- *
- * @param path UTF-8-kodierter Pfad zum Verzeichnis
- * @param error Optionaler GError für Fehlermeldungen
- * @return SondDir* bei Erfolg, NULL bei Fehler
  */
 SondDir* sond_dir_open(const gchar *path, GError **error);
 
 /**
- * Liest den nächsten Eintrag aus dem Verzeichnis
- *
- * @param dir Verzeichnis-Handle von sond_dir_open
- * @return Dateiname (UTF-8) oder NULL wenn keine weiteren Einträge
- *         Der zurückgegebene String gehört SondDir und darf nicht freigegeben werden
+ * Liest den nächsten Eintrag aus dem Verzeichnis.
+ * Der zurückgegebene String gehört SondDir und darf nicht freigegeben werden.
  */
 const gchar* sond_dir_read_name(SondDir *dir);
 
 /**
  * Schließt das Verzeichnis-Handle
- *
- * @param dir Verzeichnis-Handle von sond_dir_open
  */
 void sond_dir_close(SondDir *dir);
 
 /**
  * Öffnet eine Datei/Verzeichnis mit der Standard-Anwendung des Systems
  *
- * @param path UTF-8-kodierter Pfad
  * @param open_with TRUE für "Öffnen mit"-Dialog, FALSE für direkt öffnen
- * @param error Optionaler GError für Fehlermeldungen
- * @return TRUE bei Erfolg, FALSE bei Fehler
  */
 gboolean sond_open(const gchar *path, gboolean open_with, GError **error);
 
 /**
  * Liest den gesamten Inhalt einer Datei in einen neu allozierten Puffer.
- * Plattformübergreifend mit Long-Path-Support unter Windows.
- * Die Signatur ist analog zu g_file_get_contents.
- *
- * @param path    UTF-8-kodierter Pfad zur Datei
- * @param contents Zeiger auf gchar*, wird mit den Dateidaten befüllt (mit g_free freigeben)
- * @param length  Wird mit der Dateigröße in Bytes befüllt (optional, kann NULL sein)
- * @param error   Optionaler GError für Fehlermeldungen
- * @return TRUE bei Erfolg, FALSE bei Fehler
+ * Analog zu g_file_get_contents, mit Long-Path-Support unter Windows.
  */
 gboolean sond_file_get_contents(const gchar *path, gchar **contents, gsize *length, GError **error);
 
