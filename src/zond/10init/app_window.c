@@ -401,11 +401,11 @@ static void init_treeview_layout(Projekt *zond) {
 	gtk_widget_hide(swindow_baum_fs);
 
 	/* --- vbox_textview: Buttons + Textview --- */
-	GtkWidget *vbox_textview = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-	gtk_paned_pack2(GTK_PANED(vpaned), vbox_textview, FALSE, TRUE);
+	GtkWidget *hbox_textview = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+	gtk_paned_pack2(GTK_PANED(vpaned), hbox_textview, FALSE, TRUE);
 
-	GtkWidget *hbox_textview_buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
-	gtk_box_pack_start(GTK_BOX(vbox_textview), hbox_textview_buttons,
+	GtkWidget *vbox_textview_buttons = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+	gtk_box_pack_start(GTK_BOX(hbox_textview), vbox_textview_buttons,
 			FALSE, FALSE, 0);
 
 	zond->textview_pin_button = gtk_toggle_button_new();
@@ -418,7 +418,7 @@ static void init_treeview_layout(Projekt *zond) {
 			"Pin Textfenster");
 	g_signal_connect(zond->textview_pin_button, "toggled",
 			G_CALLBACK(cb_pin_button_toggled), zond);
-	gtk_box_pack_start(GTK_BOX(hbox_textview_buttons),
+	gtk_box_pack_start(GTK_BOX(vbox_textview_buttons),
 			zond->textview_pin_button, FALSE, FALSE, 0);
 
 	zond->textview_jump_button = gtk_button_new();
@@ -431,14 +431,14 @@ static void init_treeview_layout(Projekt *zond) {
 			"Zur angepinnten Row springen");
 	g_signal_connect(zond->textview_jump_button, "clicked",
 			G_CALLBACK(cb_jump_button_clicked), zond);
-	gtk_box_pack_start(GTK_BOX(hbox_textview_buttons),
+	gtk_box_pack_start(GTK_BOX(vbox_textview_buttons),
 			zond->textview_jump_button, FALSE, FALSE, 0);
 	gtk_widget_set_sensitive(zond->textview_jump_button, FALSE);
 
 	GtkWidget *swindow_textview = create_scrolled_window(NULL);
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(swindow_textview),
 			GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
-	gtk_box_pack_start(GTK_BOX(vbox_textview), swindow_textview,
+	gtk_box_pack_start(GTK_BOX(hbox_textview), swindow_textview,
 			TRUE, TRUE, 0);
 
 	zond->textview = gtk_text_view_new();
