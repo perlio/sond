@@ -505,16 +505,17 @@ static void cb_app_update(GSimpleAction *a, GVariant *p, gpointer d) {
 
 static void cb_button_mode_toggled(GtkToggleButton *button, gpointer data) {
 	Projekt *zond = (Projekt*) data;
+	GtkWidget *swindow_fs   = g_object_get_data(G_OBJECT(zond->hpaned), "swindow-fs");
+	GtkWidget *swindow_ausw = g_object_get_data(G_OBJECT(zond->hpaned), "swindow-auswertung");
+
 	if (gtk_toggle_button_get_active(button)) {
-		gtk_widget_show_all(
-				gtk_paned_get_child1(GTK_PANED(zond->hpaned)));
-		gtk_widget_hide(gtk_paned_get_child2(
-				GTK_PANED(gtk_paned_get_child2(GTK_PANED(zond->hpaned)))));
+		/* FS-Modus: FS-Tree zeigen, Auswertungs-Tree verstecken */
+		gtk_widget_show(swindow_fs);
+		gtk_widget_hide(swindow_ausw);
 	} else {
-		gtk_widget_hide(
-				gtk_paned_get_child1(GTK_PANED(zond->hpaned)));
-		gtk_widget_show_all(gtk_paned_get_child2(
-				GTK_PANED(gtk_paned_get_child2(GTK_PANED(zond->hpaned)))));
+		/* Normal-Modus: FS-Tree verstecken, Auswertungs-Tree zeigen */
+		gtk_widget_hide(swindow_fs);
+		gtk_widget_show(swindow_ausw);
 	}
 }
 
@@ -535,9 +536,6 @@ static void init_app_actions(Projekt *zond) {
 
 	APP_ACT("projekt-neu",        cb_app_projekt_neu);
 	APP_ACT("projekt-oeffnen",    cb_app_projekt_oeffnen);
-	/* GTK3: Menü nutzt win.-Alias (GtkMenuBar kennt kein app.-Präfix).
-	 * GTK4: Menü nutzt app. direkt — dann win.-Alias entfernen und
-	 * zond->menu.speichern/schliessen auf app.-Action umstellen. */
 	APP_ACT("projekt-speichern",  cb_app_projekt_speichern);
 	APP_ACT("projekt-schliessen", cb_app_projekt_schliessen);
 	APP_ACT("index-erstellen",    cb_app_index_erstellen);
@@ -556,7 +554,6 @@ static void init_app_actions(Projekt *zond) {
 
 #undef APP_ACT
 
-	/* Tastaturkürzel für App-Actions */
 	const gchar *accels_beenden[] = { "<Control>q", NULL };
 	gtk_application_set_accels_for_action(app, "app.beenden", accels_beenden);
 }
@@ -577,11 +574,9 @@ static void init_win_actions(Projekt *zond) {
 		g_object_unref(_a); \
 	} while (0)
 
-	/* Projekt — nur baum-zustandsabhängige Actions */
 	WIN_ACT("index-erstellen-sel", cb_win_index_erstellen_sel);
 	WIN_ACT("indexsuche-auswahl",  cb_win_indexsuche_auswahl);
 
-	/* App-Actions auch als win. registrieren (GTK3 GtkMenuBar kennt kein app.) */
 	WIN_ACT("projekt-neu",     cb_app_projekt_neu);
 	WIN_ACT("projekt-oeffnen", cb_app_projekt_oeffnen);
 	WIN_ACT("index-erstellen", cb_app_index_erstellen);
@@ -594,12 +589,12 @@ static void init_win_actions(Projekt *zond) {
 	{ GSimpleAction *a = g_simple_action_new("projekt-speichern", NULL);
 	  g_signal_connect(a, "activate", G_CALLBACK(cb_app_projekt_speichern), zond);
 	  g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(a));
-	  zond->menu.speichern = a; /* Referenz merken — kein unref */ }
+	  zond->menu.speichern = a; }
 
 	{ GSimpleAction *a = g_simple_action_new("projekt-schliessen", NULL);
 	  g_signal_connect(a, "activate", G_CALLBACK(cb_app_projekt_schliessen), zond);
 	  g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(a));
-	  zond->menu.schliessen = a; /* Referenz merken — kein unref */ }
+	  zond->menu.schliessen = a; }
 
 	{ gboolean init = g_settings_get_boolean(zond->settings, "autosave");
 	  GSimpleAction *a = g_simple_action_new_stateful("autosave", NULL,
@@ -608,13 +603,11 @@ static void init_win_actions(Projekt *zond) {
 	  g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(a));
 	  g_object_unref(a); }
 
-	/* export */
 	{ GSimpleAction *a = g_simple_action_new("export-odt", NULL);
 	  g_signal_connect(a, "activate", G_CALLBACK(cb_win_export), zond);
 	  g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(a));
 	  zond->menu.export_odt = a; }
 
-	/* Bearbeiten */
 	WIN_ACT("einf-ge",       cb_win_einf_ge);
 	WIN_ACT("einf-up",       cb_win_einf_up);
 	WIN_ACT("kopieren",      cb_win_kopieren);
@@ -630,7 +623,6 @@ static void init_win_actions(Projekt *zond) {
 	WIN_ACT("oeffnen-mit",   cb_win_oeffnen_mit);
 	WIN_ACT("suchen",        cb_win_suchen);
 
-	/* Icon-Actions */
 	for (gint i = 0; i < NUMBER_OF_ICONS; i++) {
 		gchar *name = g_strdup_printf("icon-%d", i);
 		GSimpleAction *a = g_simple_action_new(name, NULL);
@@ -641,25 +633,21 @@ static void init_win_actions(Projekt *zond) {
 		g_free(name);
 	}
 
-	/* PDF */
 	{ GSimpleAction *a = g_simple_action_new("pdf-reparieren", NULL);
 	  g_signal_connect(a, "activate", G_CALLBACK(cb_win_pdf_reparieren), zond);
 	  g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(a));
 	  zond->menu.pdf = a; }
 
-	/* Ansicht */
 	WIN_ACT("alle-erweitern",  cb_win_alle_erweitern);
 	WIN_ACT("zweig-erweitern", cb_win_zweig_erweitern);
 	WIN_ACT("reduzieren",      cb_win_reduzieren);
 	WIN_ACT("refresh",         cb_win_refresh);
 
-	/* Extras */
 	{ GSimpleAction *a = g_simple_action_new("test", NULL);
 	  g_signal_connect(a, "activate", G_CALLBACK(cb_win_test), zond);
 	  g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(a));
 	  zond->menu.extras = a; }
 
-	/* Struktur- und Ansicht-Referenzen (für project_set_widgets_sensitive) */
 	zond->menu.struktur = G_SIMPLE_ACTION(
 			g_action_map_lookup_action(G_ACTION_MAP(ag), "einf-ge"));
 	zond->menu.ansicht = G_SIMPLE_ACTION(
@@ -671,7 +659,6 @@ static void init_win_actions(Projekt *zond) {
 			G_ACTION_GROUP(ag));
 	g_object_unref(ag);
 
-	/* Tastaturkürzel für Win-Actions */
 	struct { const gchar *action; const gchar *accel; } accels[] = {
 		{ "win.einf-ge",        "<Control>p"         },
 		{ "win.einf-up",        "<Control><Shift>p"  },
@@ -848,29 +835,22 @@ static GMenuModel* build_menu(Projekt *zond) {
  * ========================================================================== */
 
 void init_headerbar(Projekt *zond) {
-	/* HeaderBar erzeugen */
 	GtkWidget *headerbar = gtk_header_bar_new();
 	gtk_header_bar_set_has_subtitle(GTK_HEADER_BAR(headerbar), FALSE);
 	gtk_header_bar_set_decoration_layout(GTK_HEADER_BAR(headerbar),
 			":minimize,maximize,close");
 	gtk_header_bar_set_show_close_button(GTK_HEADER_BAR(headerbar), TRUE);
 
-	/* Titelleiste setzen — muss vor init_win_actions, damit get_app() klappt */
 	gtk_window_set_titlebar(GTK_WINDOW(zond->app_window), headerbar);
 
-	/* FS-Umschalter */
 	zond->fs_button = gtk_toggle_button_new_with_label("FS");
 	g_signal_connect(zond->fs_button, "toggled",
 			G_CALLBACK(cb_button_mode_toggled), zond);
 	gtk_header_bar_pack_start(GTK_HEADER_BAR(headerbar), zond->fs_button);
 
-	/* App-Actions anlegen (an GtkApplication) */
 	init_app_actions(zond);
-
-	/* Window-Actions anlegen */
 	init_win_actions(zond);
 
-	/* GMenu aufbauen und Menüleiste erzeugen */
 	GMenuModel *model = build_menu(zond);
 #if GTK_MAJOR_VERSION >= 4
 	GtkWidget *menubar = gtk_popover_menu_bar_new_from_model(model);
@@ -880,7 +860,6 @@ void init_headerbar(Projekt *zond) {
 	g_object_unref(model);
 	gtk_header_bar_pack_start(GTK_HEADER_BAR(headerbar), menubar);
 
-	/* Anfangszustand: projektabhängige Actions deaktivieren */
 	g_simple_action_set_enabled(zond->menu.speichern,      FALSE);
 	g_simple_action_set_enabled(zond->menu.schliessen,     FALSE);
 	g_simple_action_set_enabled(zond->menu.export_odt,     FALSE);

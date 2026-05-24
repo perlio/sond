@@ -135,18 +135,24 @@ void zond_treeview_cursor_changed(ZondTreeview *treeview, gpointer user_data) {
     if (!sond_treeview_get_cursor(SOND_TREEVIEW(treeview), &iter)) {
         zond->node_id_act = 0;
 
-        if (!gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(zond->textview_pin_button))) {
-            gtk_widget_set_sensitive(zond->textview, FALSE);
-            gtk_widget_set_sensitive(zond->textview_pin_button, FALSE);
+        if (!gtk_toggle_button_get_active(
+        		GTK_TOGGLE_BUTTON(zond->textview_pin_button))) {
+    		GtkTextBuffer *buffer = NULL;
+
+    		gtk_widget_set_sensitive(zond->textview, FALSE);
             gtk_widget_set_sensitive(zond->textview_jump_button, FALSE);
+
+            buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(zond->textview));
+			gtk_text_buffer_set_text(buffer, "", -1);
         }
 
 		return;
 	}
 
     gtk_widget_set_sensitive(zond->textview, TRUE);
-    gtk_widget_set_sensitive(zond->textview_pin_button, TRUE);
     gtk_widget_set_sensitive(zond->textview_jump_button, TRUE);
+
+    //node-id ermitteln
 	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(treeview)),
 			&iter, 2, &node_id, -1);
 
