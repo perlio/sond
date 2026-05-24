@@ -31,7 +31,6 @@
 #include <mupdf/fitz.h>
 
 #include "misc.h"
-#include "sond_misc.h"
 #include "sond_renderer.h"
 #include "sond_treeviewfm.h"
 #include "sond_log_and_error.h"

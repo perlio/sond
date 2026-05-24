@@ -30,7 +30,6 @@
 #include "sond_fileparts.h"
 #include "sond_gmessage_helper.h"
 #include "sond_pdf_helper.h"
-#include "sond_misc.h"
 #include "sond_log_and_error.h"
 
 
