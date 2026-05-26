@@ -4,9 +4,11 @@
 #include <gtk/gtk.h>
 #include <ctype.h>
 
-#include "../zond_pdf_document.h"
-#include "../40viewer/viewer.h"
 #include "../../misc.h"
+
+#include "../zond_pdf_document.h"
+
+#include "../40viewer/viewer.h"
 
 gboolean anbindung_1_gleich_2(const Anbindung anbindung1,
 		const Anbindung anbindung2) {

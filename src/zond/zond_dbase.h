@@ -2,7 +2,9 @@
 #define ZOND_DBASE_H_INCLUDED
 
 #include <glib-object.h>
-#include "zond_init.h"
+
+typedef struct sqlite3 sqlite3;
+typedef struct sqlite3_stmt sqlite3_stmt;
 
 typedef enum {
 	ZOND_DBASE_TYPE_BAUM_ROOT,

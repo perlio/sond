@@ -21,6 +21,8 @@
 #include "../../sond_log_and_error.h"
 #include "../../misc.h"
 
+#include "../zond_pdf_document.h"
+
 #include "viewer.h"
 #include "viewer_render.h"
 #include "document.h"
@@ -92,7 +94,7 @@ static gint viewer_annot_delete(PdfDocumentPageAnnot *pdf_document_page_annot,
 	pdf_annot = pdf_document_page_annot_get_pdf_annot(pdf_document_page_annot);
 	if (!pdf_annot) {
 		zond_pdf_document_mutex_unlock(pdf_document_page_annot->pdf_document_page->document);
-		*error = g_error_new(ZOND_ERROR, 0, "%s\nAnnotation nicht gefunden", __func__);
+		*error = g_error_new(VIEWER_ERROR, 0, "%s\nAnnotation nicht gefunden", __func__);
 		return -1;
 	}
 
@@ -239,7 +241,7 @@ gint viewer_annot_handle_edit_closed(PdfViewer* pdfv, GtkWidget *popover, GError
 	if (!pdf_annot) {
 		zond_pdf_document_mutex_unlock(pdf_document_page_annot->pdf_document_page->document);
 		g_free(text);
-		g_set_error(error, ZOND_ERROR, 0,
+		g_set_error(error, VIEWER_ERROR, 0,
 				"%s\nAnnotation nicht gefunden", __func__);
 
 		return -1;
@@ -653,7 +655,7 @@ gint viewer_annot_create_markup(PdfViewer *pv, ViewerPageNew* viewer_page,
 
 		rc = viewer_annot_create(viewer_page_loop, &errmsg);
 		if (rc) {
-			g_set_error(error, ZOND_ERROR, 0,
+			g_set_error(error, VIEWER_ERROR, 0,
 					"%s", errmsg);
 			g_free(errmsg);
 

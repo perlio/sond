@@ -1,11 +1,6 @@
 #ifndef ZOND_INIT_H_INCLUDED
 #define ZOND_INIT_H_INCLUDED
 
-#define ZOOM_MIN 10
-#define ZOOM_MAX 400
-
-#define EOP 99999
-
 #define MAJOR "1" //wenn sich Struktur der .znd-Datei ändert
 #define MINOR "0" //neues Feature
 #define PATCH "0" //irjendwatt
@@ -47,6 +42,7 @@ typedef struct _SondTreeview SondTreeview;
 typedef struct _ViewerThumblist ViewerThumblist;
 typedef struct _ZondPdfDocument ZondPdfDocument;
 typedef struct _Pdf_Document_Page_Annot PdfDocumentPageAnnot;
+typedef struct _DBase_Zond DBaseZond;
 
 typedef struct sqlite3_stmt sqlite3_stmt;
 typedef struct sqlite3 sqlite3;
@@ -73,12 +69,6 @@ typedef struct _Icon {
 	const gchar *icon_name;
 	const gchar *display_name;
 } Icon;
-
-typedef struct _DBase_Zond {
-	ZondDBase *zond_dbase_store;
-	ZondDBase *zond_dbase_work;
-	gboolean changed;
-} DBaseZond;
 
 enum {
 	ICON_NOTHING = 0,
@@ -125,7 +115,6 @@ struct _Menu {
 	GSimpleAction *struktur;   /* Gruppe: alle Struktur-Actions */
 	GSimpleAction *ansicht;    /* Gruppe: alle Ansicht-Actions */
 	GSimpleAction *extras;
-	GSimpleAction *textview_extra;
 };
 
 typedef struct _Menu Menu;
@@ -136,6 +125,13 @@ typedef struct _Projekt {
 	gchar *base_dir;
 	gchar* exe_dir;
 
+	fz_context *ctx;
+	GPtrArray *arr_pv;
+
+	GSettings *settings;
+
+	pdf_document *pv_clip;
+
 	gchar *project_dir;
 	gchar *project_name;
 
@@ -143,7 +139,6 @@ typedef struct _Projekt {
 
 	SondProcessFileCtx *wctx;
 
-#ifndef VIEWER
 	guint state; //Modifier Mask
 	Icon icon[NUMBER_OF_ICONS];
 
@@ -173,47 +168,7 @@ typedef struct _Projekt {
 
 	Menu menu;
 	GtkWidget *fs_button;
-
-#endif //VIEWER
-	fz_context *ctx;
-
-	GSettings *settings;
-
-	//Hier sind alle geöffneten PdfViewer abgelegt
-	GPtrArray *arr_pv;
-	GPtrArray* arr_dd;
-	pdf_document *pv_clip;
-	pdf_document* ocr_font; //Dokument soll nur tesseract-Font "f-0-0" beinhalten
 } Projekt;
-
-struct _Pdf_Pos {
-	gint seite;
-	gint index;
-};
-
-typedef struct _Pdf_Pos PdfPos;
-
-struct _Anbindung {
-	PdfPos von;
-	PdfPos bis;
-};
-
-typedef struct _Anbindung Anbindung;
-
-struct _Ziel {
-	gchar *ziel_id_von;
-	gint index_von;
-	gchar *ziel_id_bis;
-	gint index_bis;
-};
-
-typedef struct _Ziel Ziel;
-
-typedef struct _Pdf_Punkt {
-	gint seite;
-	fz_point punkt;
-	gdouble delta_y;
-} PdfPunkt;
 
 void zond_init(GtkApplication *app, Projekt *zond);
 

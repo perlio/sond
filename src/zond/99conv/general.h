@@ -1,7 +1,7 @@
 #ifndef GENERAL_H_INCLUDED
 #define GENERAL_H_INCLUDED
 
-#include "../zond_init.h"
+#include "../40viewer/viewer.h"
 
 #include <stdio.h>
 

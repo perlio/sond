@@ -23,15 +23,17 @@
 #include "../../misc.h"
 #include "../../misc_stdlib.h"
 #include "../../sond_fileparts.h"
+#include "../../sond_log_and_error.h"
 
 #include "../zond_pdf_document.h"
 
 #include "../99conv/general.h"
 
 #include "viewer.h"
+#include "viewer_ui.h"
+#include "viewer_render.h"
 #include "document.h"
 
-#ifdef VIEWER
 static void pv_activate_widgets(PdfViewer *pv, gboolean activ) {
 	gtk_widget_set_sensitive(pv->entry, activ);
 	gtk_widget_set_sensitive(pv->entry_search, activ);
@@ -63,7 +65,7 @@ static void pv_schliessen_datei(PdfViewer *pv) {
 	if (gtk_widget_get_sensitive(pv->button_speichern)) {
 		rc = abfrage_frage(pv->vf, "PDF geändert", "Speichern?", NULL);
 		if (rc == GTK_RESPONSE_YES) {
-			rc = zond_pdf_document_save(pv->dd->zpdfd_part->zond_pdf_document, &error);
+			rc = viewer_save_dirty_dds(pv, &error);
 			if (rc) {
 				error->message = add_string(g_strdup("Dokument kann nicht gespeichert "
 						"werden: "), error->message);
@@ -112,35 +114,20 @@ static void pv_schliessen_datei(PdfViewer *pv) {
 	return;
 }
 
-static gint pv_oeffnen_datei(PdfViewer *pv, gchar const* path, gchar **errmsg) {
+static gint pv_oeffnen_datei(PdfViewer *pv, gchar const* path, GError**error) {
 	DisplayedDocument *dd = NULL;
-	GError *error = NULL;
-	gint rc = 0;
 	SondFilePart* sfp_pdf_page_tree = NULL;
 
-	sfp_pdf_page_tree = sond_file_part_from_filepart(pv->zond->ctx, path, &error);
-	if (!sfp_pdf_page_tree) {
-		if (errmsg) *errmsg = g_strdup_printf("%s\n%s", __func__, error->message);
-		g_error_free(error);
+	sfp_pdf_page_tree = sond_file_part_from_filepart(path, error);
+	if (!sfp_pdf_page_tree)
+		ERROR_Z
 
-		return -1;
-	}
+	dd = document_new_displayed_document(SOND_FILE_PART_PDF(sfp_pdf_page_tree),
+			NULL, NULL, FALSE, NULL, error);
+	if (!dd)
+		ERROR_Z
 
-	dd = document_new_displayed_document(SOND_FILE_PART_PDF(sfp_pdf_page_tree), NULL, &error);
-	if (!dd && *errmsg)
-		ERROR_S
-	else if (!dd)
-		return 0;
-
-	rc = viewer_display_document(pv, dd, 0, 0, &error);
-	if (rc) {
-		if (errmsg) *errmsg = g_strdup_printf("%s\n%s", __func__, error->message);
-		g_error_free(error);
-		document_free_displayed_documents(dd);
-
-		return -1;
-	}
-
+	viewer_display_document(pv, dd, 0, 0);
 	pv_activate_widgets(pv, TRUE);
 
 	return 0;
@@ -156,7 +143,7 @@ void cb_datei_schliessen(GtkWidget *item, gpointer data) {
 
 void cb_datei_oeffnen(GtkWidget *item, gpointer data) {
 	gint rc = 0;
-	gchar *errmsg = NULL;
+	GError* error = NULL;
 
 	PdfViewer *pv = (PdfViewer*) data;
 
@@ -174,72 +161,122 @@ void cb_datei_oeffnen(GtkWidget *item, gpointer data) {
 
 	if (pv->dd)
 		pv_schliessen_datei(pv);
-	rc = pv_oeffnen_datei(pv, filename, &errmsg);
+	rc = pv_oeffnen_datei(pv, filename, &error);
 	g_free(filename);
 	if (rc) {
 		display_message(pv->vf, "Fehler - Datei öffnen\n\n"
-				"Bei Aufruf pv_oeffnen_datei:\n", errmsg, NULL);
-		g_free(errmsg);
+				"Bei Aufruf pv_oeffnen_datei:\n", error->message, NULL);
+		g_error_free(error);
 	}
 
 	return;
 }
 
-static PdfViewer*
-init(GtkApplication *app, Projekt *zond) {
-	zond->base_dir = get_base_dir();
-
-	PdfViewer *pv = viewer_start_pv(zond);
-	pv->zoom = 140;
-
-	pv->zond->ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
-	if (!pv->zond->ctx)
-		return NULL;
-
-	gtk_application_add_window(app, GTK_WINDOW(pv->vf));
-
-	pv_activate_widgets(pv, FALSE);
-
-	return pv;
-}
-
 static void open_app(GtkApplication *app, gpointer files, gint n_files,
 		gchar *hint, gpointer user_data) {
+	gint rc = 0;
+	GError* error = NULL;
+	GFile **g_file = NULL;
+
 	Projekt **zond = (Projekt**) user_data;
 
-	PdfViewer *pv = init(app, *zond);
+	PdfViewer *pv = viewer_init(*zond);
 	if (!pv)
 		return;
 
-	gint rc = 0;
-	gchar *errmsg = NULL;
+	gtk_application_add_window(app, GTK_WINDOW(pv->vf));
 
-	GFile **g_file = NULL;
 	g_file = (GFile**) files;
 
 	gchar *uri = g_file_get_uri(g_file[0]);
 	gchar *uri_unesc = g_uri_unescape_string(uri, NULL);
 	g_free(uri);
 
-	rc = pv_oeffnen_datei(pv, uri_unesc + 8, &errmsg);
+	rc = pv_oeffnen_datei(pv, uri_unesc + 8, &error);
 	g_free(uri_unesc);
 	if (rc) {
-		display_message(pv->vf, "Fehler - Datei öffnen:\n", errmsg, NULL);
-		g_free(errmsg);
+		display_message(pv->vf, "Fehler - Datei öffnen:\n", error->message, NULL);
+		g_error_free(error);
 	}
 
 	return;
 }
 
 static void activate_app(GtkApplication *app, gpointer user_data) {
+	PdfViewer* pdfv = NULL;
+
 	Projekt **zond = (Projekt**) user_data;
 
-	if ((*zond)->arr_pv->len)
+	pdfv = viewer_init(*zond);
+	if (!pdfv)
 		return;
 
-	PdfViewer *pv = init(app, *zond);
-	if (!pv)
-		return;
+	gtk_application_add_window(app, GTK_WINDOW(pdfv->vf));
+
+	pv_activate_widgets(pdfv, FALSE);
+
+	return;
+}
+
+static void init_schema(Projekt* zond) {
+    GSettingsSchemaSource *source;
+    GSettingsSchema *schema;
+    GError *error = NULL;
+    gchar* path_to_schema_source = NULL;
+
+    path_to_schema_source = g_build_filename(zond->exe_dir, "../share/glib-2.0/schemas", NULL);
+
+    // Schema-Source aus lokalem Verzeichnis erstellen
+    source = g_settings_schema_source_new_from_directory(
+        path_to_schema_source,                                // Lokaler Pfad
+        g_settings_schema_source_get_default(),        // Parent (Standard-Schemas)
+        FALSE,                                         // trusted
+        &error
+    );
+    g_free(path_to_schema_source);
+
+    if (error) {
+        LOG_ERROR("Fehler beim Laden der Schemas: %s", error->message);
+        g_error_free(error);
+        return;
+    }
+
+    // Schema lookup
+    schema = g_settings_schema_source_lookup(
+        source,
+        "de.perlio.zondPV",  // Schema-ID
+        FALSE                 // recursive
+    );
+    g_settings_schema_source_unref(source);
+
+    if (!schema) {
+        LOG_ERROR("Schema nicht gefunden!");
+        return;
+    }
+
+	//GSettings
+	zond->settings = g_settings_new_full(schema, NULL, NULL);
+	g_settings_schema_unref(schema);
+
+	if (!zond->settings)
+		LOG_ERROR("Settings konnten nicht erzeugt werden");
+
+	return;
+}
+
+static void
+init(GtkApplication *app, Projekt *zond) {
+	zond->arr_pv = g_ptr_array_new();
+	zond->base_dir = get_base_dir();
+	zond->exe_dir = get_exe_dir();
+	zond->ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
+	if (!zond->ctx)
+		LOG_ERROR("fz_context konnte nicht initialisiert werden");
+
+	init_schema(zond);
+
+	SOND_FILE_PART_CLASS(g_type_class_get(SOND_TYPE_FILE_PART))->arr_opened_files =
+			g_ptr_array_new( );
 
 	return;
 }
@@ -249,9 +286,7 @@ static void startup_app(GtkApplication *app, gpointer user_data) {
 
 	*zond = g_malloc0(sizeof(Projekt));
 
-//	(*zond)->settings = g_settings_new("de.perlio.zondPV");
-
-	(*zond)->arr_pv = g_ptr_array_new();
+	init(app, *zond);
 
 	return;
 }
@@ -268,10 +303,11 @@ gint main(gint argc, gchar **argv) {
 	g_signal_connect(app, "activate", G_CALLBACK (activate_app), &zond);
 	g_signal_connect(app, "open", G_CALLBACK (open_app), &zond);
 
+	logging_init("zond viewer");
+
 	gint status = g_application_run(G_APPLICATION(app), argc, argv);
 
 	g_object_unref(app);
 
 	return status;
 }
-#endif // VIEWER

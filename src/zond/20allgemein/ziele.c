@@ -36,6 +36,8 @@
 #include "../zond_treeview.h"
 #include "../zond_tree_store.h"
 
+#include "project.h"
+
 static gint zond_anbindung_verschieben_kinder(Projekt *zond, gint node_id,
 		GtkTreeIter *iter, Anbindung anbindung, GError **error) {
 	gboolean child = TRUE;

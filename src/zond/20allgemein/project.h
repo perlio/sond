@@ -3,13 +3,19 @@
 
 typedef struct _Projekt Projekt;
 typedef struct _GtkMenuItem GtkMenuItem;
-typedef struct _DBase_Zond DBaseZond;
 typedef struct _Displayed_Document DisplayedDocument;
 typedef struct _ZondPdfDocument ZondPdfDocument;
+typedef struct _ZondDBase ZondDBase;
 
 typedef void *gpointer;
 typedef int gint;
 typedef char gchar;
+
+typedef struct _DBase_Zond {
+	ZondDBase *zond_dbase_store;
+	ZondDBase *zond_dbase_work;
+	gboolean changed;
+} DBaseZond;
 
 // Database transaction functions
 gint dbase_zond_begin(DBaseZond*, GError**);

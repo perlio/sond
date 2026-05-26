@@ -8,19 +8,35 @@
 #define ANNOT_ICON_WIDTH 20
 #define ANNOT_ICON_HEIGHT 20
 
-#include "../zond_init.h"
+#include <mupdf/fitz.h>
+#include <mupdf/pdf.h>
+#include <gio/gio.h>
 
 typedef struct _GtkTreeIter GtkTreeIter;
 typedef struct _GtkEntry GtkEntry;
 typedef union _GdkEvent GdkEvent;
-typedef struct _Projekt Projekt;
+typedef struct _GtkWidget GtkWidget;
+typedef struct _GdkWindow GdkWindow;
+typedef struct _GdkCursor GdkCursor;
+typedef struct _GdkPixbuf GdkPixbuf;
+typedef struct _GtkAdjustment GtkAdjustment;
+typedef struct _GSettings GSettings;
 typedef struct _Pdf_Document_Page PdfDocumentPage;
+typedef struct _Pdf_Document_Page_Annot PdfDocumentPageAnnot;
 typedef struct _Displayed_Document DisplayedDocument;
 typedef int gint;
 typedef char gchar;
 typedef double gdouble;
 typedef int gboolean;
 typedef void *gpointer;
+
+#define ZOOM_MIN 10
+#define ZOOM_MAX 400
+
+#define EOP 99999
+
+#define VIEWER_ERROR viewer_error_quark()
+G_DEFINE_QUARK(viewer-error-quark, viewer_error)
 
 typedef struct _Page_Quad {
 	gint page[1000];
@@ -33,11 +49,54 @@ typedef struct _Text_Occ {
 	gint index_act;
 	gboolean not_found;
 } TextOcc;
+
 typedef struct _RenderResponse {
 	gint page_pv;
 	gint error;
 	gchar *error_message;
 } RenderResponse;
+
+typedef struct _Pdf_Pos {
+	gint seite;
+	gint index;
+} PdfPos;
+
+typedef struct _Anbindung {
+	PdfPos von;
+	PdfPos bis;
+} Anbindung;
+
+typedef struct _Pdf_Punkt {
+	gint seite;
+	fz_point punkt;
+	gdouble delta_y;
+} PdfPunkt;
+
+#ifdef VIEWER
+typedef struct _Projekt {
+    gchar        *base_dir;
+    gchar        *exe_dir;
+    fz_context   *ctx;
+    GPtrArray    *arr_pv;
+    pdf_document *pv_clip;
+    GSettings* settings;
+} Projekt;
+
+#define ZOND_ERROR zond_error_quark()
+G_DEFINE_QUARK(zond-error-quark,zond_error)
+
+enum ZondError
+{
+	ZOND_ERROR_IO,
+	ZOND_ERROR_JSON_NO_OBJECT,
+	ZOND_ERROR_VTAG_NOT_FOUND,
+	ZOND_ERROR_CURL,
+	ZOND_ERROR_ZIP,
+	NUM_ZOND_ERROR
+};
+#else
+#include "../zond_init.h"
+#endif
 
 typedef struct _Pdf_Viewer {
 	Projekt *zond;
@@ -78,21 +137,16 @@ typedef struct _Pdf_Viewer {
 	GtkWidget *swindow_tree;
 	GtkWidget *tree_thumb;
 
-	//gewähltes Werkzeug wird hier gespeichert
 	gint state;
 
-	//Bei Doppelklick wird hier die 1. und zweite PosPdf gespeichert
 	Anbindung anbindung;
 
-	//Position des Mauszeigers
 	gdouble x;
 	gdouble y;
 
-	//Beim Klick
 	gboolean click_on_text;
 	PdfPunkt click_pdf_punkt;
 
-	//hier werden die Seitenzahlen gespeichert, die zwischen Click und letzter Mausbewgung liegen
 	gint von_alt;
 	gint bis_alt;
 
@@ -104,7 +158,7 @@ typedef struct _Pdf_Viewer {
 	GtkWidget *annot_textview;
 
 	DisplayedDocument *dd;
-	GPtrArray *arr_pages; //array von ViewerPage*
+	GPtrArray *arr_pages;
 
 	TextOcc text_occ;
 

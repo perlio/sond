@@ -39,6 +39,19 @@
 
 #include "sond_log_and_error.h"
 
+gchar* add_string(gchar *old_string, gchar *add_string) {
+	gchar *new_string = NULL;
+
+	if (old_string)
+		new_string = g_strconcat(old_string, add_string, NULL);
+	else
+		new_string = g_strdup(add_string);
+	g_free(old_string);
+	g_free(add_string);
+
+	return new_string;
+}
+
 /** Zeigt Fenster, in dem Liste übergebener strings angezeigt wird.
  *   parent-window kann NULL sein, dann Warnung
  *   text1 darf nicht NULL sein

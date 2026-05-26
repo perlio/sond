@@ -24,8 +24,6 @@ typedef size_t gsize;
 typedef struct _GError GError;
 typedef unsigned char guchar;
 
-gchar* add_string(gchar *old_string, gchar *add_string);
-
 const gchar* mime_to_extension(const gchar*);
 
 const gchar* mime_to_extension_ci(const gchar*);

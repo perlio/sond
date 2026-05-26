@@ -27,6 +27,8 @@
 
 #include "../zond_dbase.h"
 
+#include "../40viewer/viewer.h"
+
 #include "project.h"
 
 static gchar*

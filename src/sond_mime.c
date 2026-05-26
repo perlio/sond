@@ -23,19 +23,6 @@
 #include <gmime/gmime.h>
 
 
-gchar* add_string(gchar *old_string, gchar *add_string) {
-	gchar *new_string = NULL;
-
-	if (old_string)
-		new_string = g_strconcat(old_string, add_string, NULL);
-	else
-		new_string = g_strdup(add_string);
-	g_free(old_string);
-	g_free(add_string);
-
-	return new_string;
-}
-
 typedef struct {
     const char* mime_type;
     const char* extension;
@@ -344,11 +331,6 @@ gchar* mime_guess_content_type(const guchar* buffer, gsize size,
 					}
 				}
 				/* Office Open XML: erster Eintrag ist "[Content_Types].xml" */
-				/* HINWEIS: Der Buffer ist auf 2048 Bytes begrenzt. [Content_Types].xml
-				 * ist komprimiert (deflate) typischerweise 300-500 Bytes groß, passt
-				 * also knapp rein. Falls später Erkennungsprobleme auftreten (z.B. bei
-				 * sehr großen [Content_Types].xml), Buffer-Größe erhöhen (z.B. 4096)
-				 * an der Stelle wo mime_guess_content_type aufgerufen wird. */
 				else if (!g_strcmp0(first_entry, "[Content_Types].xml")) {
 					guint32 data_offset = 30 + name_len + extra_len;
 					guint32 comp_size   = buffer[18] | (buffer[19] << 8) |
@@ -367,7 +349,7 @@ gchar* mime_guess_content_type(const guchar* buffer, gsize size,
 							/* deflate */
 							content = g_malloc0(uncomp_size + 1);
 							z_stream zs = { 0 };
-							zs.next_in   = buffer + data_offset;
+							zs.next_in   = (Bytef*) (buffer + data_offset);
 							zs.avail_in  = comp_size;
 							zs.next_out  = (Bytef*) content;
 							zs.avail_out = uncomp_size;

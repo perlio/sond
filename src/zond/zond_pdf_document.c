@@ -150,7 +150,7 @@ static void zond_pdf_document_finalize(GObject *self) {
 	return;
 }
 
-void zond_pdf_document_page_free(PdfDocumentPage *pdf_document_page) {
+static void zond_pdf_document_page_free(PdfDocumentPage *pdf_document_page) {
 	if (!pdf_document_page)
 		return;
 
@@ -546,7 +546,7 @@ ZondPdfDocument* zond_pdf_document_is_open(SondFilePartPDF* sfp_pdf) {
 	return NULL;
 }
 
-ZondPdfDocument*
+static ZondPdfDocument*
 zond_pdf_document_open(SondFilePartPDF* sfp_pdf, gint von, gint bis,
 		GError **error) {
 	gint rc = 0;

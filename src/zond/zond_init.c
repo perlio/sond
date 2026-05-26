@@ -276,8 +276,6 @@ void zond_cleanup(Projekt* zond) {
 	// aufräumen
 	if (zond->pv_clip)
 		pdf_drop_document(zond->ctx, zond->pv_clip);
-	if (zond->ocr_font)
-		pdf_drop_document(zond->ctx, zond->ocr_font);
 
 	gtk_widget_destroy(zond->popover);
 	gtk_widget_destroy(zond->app_window);

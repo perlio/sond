@@ -29,7 +29,6 @@
 #include "../../sond_ocr.h"
 #include "../../sond_pdf_helper.h"
 
-#include "../zond_init.h"
 #include "../zond_pdf_document.h"
 
 #include "../99conv/general.h"
@@ -413,7 +412,7 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 					i, i, doc, page_orig, &errmsg);
 			zond_pdf_document_mutex_unlock(dd->zpdfd_part->zond_pdf_document);
 			if (rc) {
-				if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\n%s",
+				if (error) *error = g_error_new(VIEWER_ERROR, 0, "%s\n%s",
 						__func__, errmsg);
 				g_free(errmsg);
 				pdf_drop_document(ctx, doc);
@@ -1182,7 +1181,7 @@ gint viewer_handle_text_search(PdfViewer* pv, GtkWidget *widget, GError **error)
 			rc = viewer_render_stext_page_fast(ctx,
 					viewer_page->pdf_document_page, &errmsg);
 			if (rc) {
-				g_set_error(error, ZOND_ERROR, 0, "%s\n%s", __func__, errmsg);
+				g_set_error(error, VIEWER_ERROR, 0, "%s\n%s", __func__, errmsg);
 				g_free(errmsg);
 
 				return -1;
@@ -1643,6 +1642,8 @@ gint viewer_handle_button_press(PdfViewer* pv,
 
 	rc = viewer_abfragen_pdf_punkt(pv,
 			fz_make_point(event->button.x, event->button.y), &pdf_punkt);
+	if (rc) //daneben!
+		return 0;
 
 //Einzelklick
 	if (event->button.type == GDK_BUTTON_PRESS
@@ -1694,7 +1695,7 @@ gint viewer_handle_button_press(PdfViewer* pv,
 
 				rc = viewer_annot_create(viewer_page, &errmsg);
 				if (rc) {
-					if (error) *error = g_error_new(ZOND_ERROR, 0,
+					if (error) *error = g_error_new(VIEWER_ERROR, 0,
 							"%s\n%s", __func__, errmsg);
 					g_free(errmsg);
 
@@ -1738,7 +1739,7 @@ gint viewer_handle_button_press(PdfViewer* pv,
 
 			//Test, ob Seite in Dokument frisch eingefügt
 			if (viewer_page->pdf_document_page->inserted) {
-				g_set_error(error, ZOND_ERROR, 0,
+				g_set_error(error, VIEWER_ERROR, 0,
 						"Die gewählte Seite wurde in das Dokument eingefügt,\n"
 								"Dokument ist aber noch nicht gespeichert.\n\n"
 								"Um Inkonsistenzen zu vermeiden, speichern Sie "

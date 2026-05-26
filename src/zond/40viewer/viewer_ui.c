@@ -25,7 +25,6 @@
 #include "../../sond_fileparts.h"
 #include "../../sond_log_and_error.h"
 
-#include "../zond_init.h"
 #include "../zond_pdf_document.h"
 #include "../20allgemein/project.h"
 
@@ -35,6 +34,10 @@
 #include "viewer_ui.h"
 #include "viewer_render.h"
 #include "viewer_annot.h"
+#ifdef VIEWER
+#include "stand_alone.h"
+#endif
+
 
 static void cb_thumb_sel_changed(GtkTreeSelection *sel, gpointer data) {
 	gboolean active = FALSE;

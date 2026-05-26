@@ -1,15 +1,15 @@
 #ifndef DOCUMENT_H_INCLUDED
 #define DOCUMENT_H_INCLUDED
 
-#include "../zond_pdf_document.h"
-
 typedef int gint;
 typedef char gchar;
 
 typedef struct _Pdf_Document_Page PdfDocumentPage;
+typedef struct _ZPDFD_Part ZPDFDPart;
 typedef struct _Anbindung Anbindung;
 typedef struct _Pdf_Viewer PdfViewer;
 typedef struct _SondFilePartPDF SondFilePartPDF;
+typedef struct _Pdf_Pos PdfPos;
 
 typedef struct _Displayed_Document {
 	ZPDFDPart* zpdfd_part;

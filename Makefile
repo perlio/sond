@@ -1,4 +1,3 @@
-
 PROJECT_SCHEMA_DIR = schemas
 COMPILED_SCHEMA_DIR = share/glib-2.0/schemas
 SYSTEM_SCHEMA_DIR = /ucrt64/share/glib-2.0/schemas
@@ -21,10 +20,12 @@ LDFLAGS := -Wl,--allow-multiple-definition
 
 # Find source files
 ifneq (,$(findstring $(MAKECMDGOALS), zond))
-SRCS += $(shell find $(SRC_DIRS)/zond -name '*.c') $(SRC_DIRS)/misc_stdlib.c $(SRC_DIRS)/misc.c \
+SRCS += $(filter-out $(SRC_DIRS)/zond/40viewer/stand_alone.c, \
+	$(shell find $(SRC_DIRS)/zond -name '*.c')) \
+	$(SRC_DIRS)/misc_stdlib.c $(SRC_DIRS)/misc.c \
 	$(SRC_DIRS)/sond_fileparts.c $(SRC_DIRS)/sond_treeview.c $(SRC_DIRS)/sond_treeviewfm.c \
 	$(SRC_DIRS)/sond_renderer.c $(SRC_DIRS)/sond_ocr.c $(SRC_DIRS)/sond_log_and_error.c \
-	$(SRC_DIRS)/sond_pdf_helper.c $(SRC_DIRS)/sond_gmessage_helper.c $(SRC_DIRS)/sond_misc.c \
+	$(SRC_DIRS)/sond_pdf_helper.c $(SRC_DIRS)/sond_gmessage_helper.c $(SRC_DIRS)/sond_mime.c \
 	$(SRC_DIRS)/sond_file_helper.c $(SRC_DIRS)/sond_process_file.c $(SRC_DIRS)/sond_index.c \
 	$(SRC_DIRS)/sond_result_view.c $(SRC_DIRS)/sond_treeviewfm_seadrive.c
 CFLAGS += $(shell pkg-config --cflags libsoup-3.0 libmagic libxml-2.0 gtk+-3.0 gobject-2.0 json-glib-1.0 gmime-3.0) \
@@ -37,9 +38,11 @@ endif
 endif
 
 ifneq (,$(findstring $(MAKECMDGOALS), viewer))
-SRCS += $(shell find $(SRC_DIRS)/zond/40viewer -name '*.c') $(SRC_DIRS)/zond/zond_pdf_document.c \
-$(SRC_DIRS)/zond/99conv/general.c $(SRC_DIRS)/zond/99conv/pdf.c $(SRC_DIRS)/zond/pdf_ocr.c \
-	$(SRC_DIRS)/misc.c $(SRC_DIRS)/misc_stdlib.c $(SRC_DIRS)/sond_fileparts.c $(SRC_DIRS)/sond_renderer.c
+SRCS += $(shell find $(SRC_DIRS)/zond/40viewer -name '*.c') \
+	$(SRC_DIRS)/sond_file_helper.c $(SRC_DIRS)/sond_pdf_helper.c $(SRC_DIRS)/sond_gmessage_helper.c \
+	$(SRC_DIRS)/sond_log_and_error.c $(SRC_DIRS)/sond_fileparts.c $(SRC_DIRS)/sond_renderer.c\
+	$(SRC_DIRS)/zond/zond_pdf_document.c $(SRC_DIRS)/zond/99conv/general.c $(SRC_DIRS)/zond/pdf_ocr.c $(SRC_DIRS)/sond_ocr.c \
+	$(SRC_DIRS)/misc.c $(SRC_DIRS)/misc_stdlib.c $(SRC_DIRS)/sond_mime.c
 CFLAGS += -DVIEWER $(shell pkg-config --cflags libmagic gtk+-3.0 gobject-2.0 json-glib-1.0 gmime-3.0 \
 	libxml-2.0)
 LDFLAGS += $(shell pkg-config --libs libmagic gtk+-3.0 gobject-2.0 sqlite3 libcurl tesseract libzip \
@@ -109,8 +112,8 @@ $(GSCHEMAS_COMPILED): $(SCHEMA_SOURCES)
 	@cp $(SCHEMA_SOURCES) $(COMPILED_SCHEMA_DIR)/
 	@echo "Copying system schemas..."
 	@for f in $(SYSTEM_SCHEMAS); do \
-		if [ -f "$f" ]; then cp "$f" $(COMPILED_SCHEMA_DIR)/; \
-		else echo "Warning: $f not found, skipping"; fi; \
+		if [ -f "$$f" ]; then cp "$$f" $(COMPILED_SCHEMA_DIR)/; \
+		else echo "Warning: $$f not found, skipping"; fi; \
 	done
 	@echo "Compiling GSettings schemas..."
 	glib-compile-schemas $(COMPILED_SCHEMA_DIR)

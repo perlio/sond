@@ -23,9 +23,9 @@ typedef struct _GtkCalendar GtkCalendar;
 typedef struct _GPtrArray GPtrArray;
 typedef struct _GFile GFile;
 typedef struct _GError GError;
-//extern GtkSelectionMode;
-
 typedef struct _GtkDialog GtkDialog;
+
+gchar* add_string(gchar *old_string, gchar *add_string);
 
 gint my_dialog_run(GtkDialog*);
 

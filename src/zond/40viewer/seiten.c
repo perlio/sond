@@ -28,7 +28,7 @@
 #include "../../sond_process_file.h"
 #include "../../misc.h"
 
-#include "../zond_init.h"
+//#include "../zond_init.h"
 
 #include "../zond_pdf_document.h"
 
@@ -1206,7 +1206,7 @@ fz_catch	( pv->zond->ctx ) {
 		zond_pdf_document_mutex_unlock(pdf_document_page->document);
 		if (rc) {
 			if (error)
-				*error = g_error_new( ZOND_ERROR, 0, "%s\n%s", __func__,
+				*error = g_error_new(VIEWER_ERROR, 0, "%s\n%s", __func__,
 						errmsg);
 			g_free(errmsg);
 			pdf_drop_document(pv->zond->ctx, doc_dest);

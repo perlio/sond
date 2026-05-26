@@ -2,7 +2,6 @@
 #define ZOND_PDF_DOCUMENT_H_INCLUDED
 
 #include <glib-object.h>
-//#include <gtk/gtk.h>
 
 #include <mupdf/fitz.h>
 #include <mupdf/pdf.h>
@@ -125,8 +124,6 @@ pdf_annot* pdf_document_page_annot_get_pdf_annot(PdfDocumentPageAnnot*);
 
 pdf_obj* pdf_document_page_get_page_obj(PdfDocumentPage*, GError**);
 
-void zond_pdf_document_page_free(PdfDocumentPage*);
-
 Annot annot_deep_copy(Annot);
 
 void annot_free(Annot*);
@@ -135,14 +132,8 @@ gint zond_pdf_document_page_load_annots(PdfDocumentPage*, GError**);
 
 gint zond_pdf_document_load_page(PdfDocumentPage*, fz_context*, gchar**);
 
-ZondPdfDocument* zond_pdf_document_open(SondFilePartPDF*, gint, gint, GError**);
-
 //Gibt Zeiger auf geöffnetes document mit gchar* == path zurück; keine neue ref!
 ZondPdfDocument* zond_pdf_document_is_open(SondFilePartPDF*);
-
-void zond_pdf_document_unload_page(PdfDocumentPage*);
-
-gint zond_pdf_document_save(ZondPdfDocument*, GError**);
 
 void zond_pdf_document_close(ZondPdfDocument*);
 

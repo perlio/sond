@@ -203,7 +203,6 @@ SondFilePart* sond_file_part_create(SondFilePart* sfp_parent, const gchar* path,
 	SondFilePart* sfp = NULL;
 	gchar* content_type = NULL;
 
-
 	sfp = sond_file_part_is_open(sfp_parent, path);
 	if (sfp)
 		return sfp;
@@ -376,10 +375,16 @@ static fz_stream* sond_file_part_pdf_lookup_embedded_file(fz_context*,
 static GBytes* sond_file_part_read_bytes_internal(SondFilePart* sfp_parent,
 		gchar const* path, gssize max_len, GError** error) {
 	if (!sfp_parent) {
+		gchar* full_path = NULL;
+
+		gchar const* root =
+				SOND_FILE_PART_CLASS(g_type_class_peek(SOND_TYPE_FILE_PART))->path_root;
 		/* Filesystem */
-		gchar* full_path = g_strconcat(
-				SOND_FILE_PART_CLASS(g_type_class_peek(SOND_TYPE_FILE_PART))->path_root,
-				"/", path, NULL);
+		if (root)
+			full_path = g_strconcat(root, "/", path, NULL);
+		else
+			full_path = g_strdup(path);
+
 		if (max_len == -1) {
 			guchar* data = NULL;
 			gsize len = 0;
