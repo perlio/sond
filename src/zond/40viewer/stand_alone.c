@@ -176,7 +176,6 @@ static void open_app(GtkApplication *app, gpointer files, gint n_files,
 		gchar *hint, gpointer user_data) {
 	gint rc = 0;
 	GError* error = NULL;
-	GFile **g_file = NULL;
 
 	Projekt **zond = (Projekt**) user_data;
 
@@ -186,9 +185,7 @@ static void open_app(GtkApplication *app, gpointer files, gint n_files,
 
 	gtk_application_add_window(app, GTK_WINDOW(pv->vf));
 
-	g_file = (GFile**) files;
-
-	gchar *uri = g_file_get_uri(g_file[0]);
+	gchar *uri = g_file_get_uri(((GFile**)files)[0]);
 	gchar *uri_unesc = g_uri_unescape_string(uri, NULL);
 	g_free(uri);
 
@@ -303,11 +300,14 @@ gint main(gint argc, gchar **argv) {
 	g_signal_connect(app, "activate", G_CALLBACK (activate_app), &zond);
 	g_signal_connect(app, "open", G_CALLBACK (open_app), &zond);
 
-	logging_init("zond viewer");
+	logging_init("zond_viewer");
 
 	gint status = g_application_run(G_APPLICATION(app), argc, argv);
 
 	g_object_unref(app);
+
+	LOG_INFO("zond_viewer beendet");
+	logging_cleanup();
 
 	return status;
 }

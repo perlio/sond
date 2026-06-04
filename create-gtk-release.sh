@@ -251,9 +251,35 @@ echo 'REM Unterdrücke DBus-Warnung wenn DBus nicht verwendet wird' >> "$RELEASE
 echo 'set "DBUS_SESSION_BUS_ADDRESS=disabled:"' >> "$RELEASE_DIR/${APP_NAME}.bat"
 echo '"%APP_DIR%\bin\'"${APP_NAME}"'.exe" %*' >> "$RELEASE_DIR/${APP_NAME}.bat"
 echo "endlocal" >> "$RELEASE_DIR/${APP_NAME}.bat"
+echo "  + ${APP_NAME}.bat"
+
+cat > "$RELEASE_DIR/install-assoc.bat" << 'EOF'
+@echo off
+setlocal
+set "APP_DIR=%~dp0"
+set "APP_DIR=%APP_DIR:~0,-1%"
+
+REM === viewer.exe → .pdf ===
+reg add "HKCU\Software\Classes\.pdf" /ve /d "ZondViewer.pdf" /f
+reg add "HKCU\Software\Classes\ZondViewer.pdf" /ve /d "PDF-Dokument (Viewer)" /f
+reg add "HKCU\Software\Classes\ZondViewer.pdf\shell\open\command" /ve /d "\"%APP_DIR%\bin\viewer.exe\" \"%%1\"" /f
+
+REM === zond.exe → .znd ===
+reg add "HKCU\Software\Classes\.znd" /ve /d "Zond.znd" /f
+reg add "HKCU\Software\Classes\Zond.znd" /ve /d "Zond-Dokument" /f
+reg add "HKCU\Software\Classes\Zond.znd\shell\open\command" /ve /d "\"%APP_DIR%\bin\zond.exe\" \"%%1\"" /f
+
+echo Dateiverknuepfungen wurden registriert.
+endlocal
+EOF
+echo "  + install-assoc.bat"
 
 cat > "$RELEASE_DIR/README.txt" << EOF
 $APP_NAME - Version $VERSION
+
+DATEIVERKNUEPFUNGEN:
+  install-assoc.bat ausfuehren um .pdf und .znd zu registrieren
+  (kein Adminrecht erforderlich)
 
 INSTALLATION:
 1. Alle Dateien entpacken
@@ -278,11 +304,12 @@ SYSTEMANFORDERUNGEN:
 - Windows 10+ (64-bit)
 
 HINWEISE:
-- GIO-Module und DBus sind für erweiterte Funktionalität enthalten
+- GIO-Module und DBus sind fuer erweiterte Funktionalitaet enthalten
 - hicolor Icon Theme verhindert "missing-image" Warnungen
 
 Build: $(date '+%Y-%m-%d')
 EOF
+echo "  + README.txt"
 
 echo "  → Fertig"
 

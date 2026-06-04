@@ -63,15 +63,12 @@ static void cb_open(GApplication *app, GFile **files, gint n_files,
                     const gchar *hint, gpointer user_data) {
 	gint rc = 0;
 	gchar *errmsg = NULL;
-	GFile **g_file;
 	gchar *uri = NULL;
 	gchar *uri_unesc = NULL;
 
     Projekt *zond = (Projekt*) user_data;
 
-	g_file = (GFile**) files;
-
-	uri = g_file_get_uri(g_file[0]);
+	uri = g_file_get_uri(files[0]);
 	uri_unesc = g_uri_unescape_string(uri, NULL);
 	g_free(uri);
 

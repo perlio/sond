@@ -125,3 +125,26 @@ $(GSCHEMAS_COMPILED): $(SCHEMA_SOURCES)
 clean:
 	rm -rf $(BUILD_DIR)/obj
 	rm -rf $(BUILD_DIR)/bin
+
+# Release packaging
+RELEASE_VERSION ?= 1.0.0
+RELEASE_EXE     := Release/bin/zond.exe
+VIEWER_EXE      := Release/bin/viewer.exe
+RELEASE_DIR      = zond-$(RELEASE_VERSION)-win64
+RELEASE_ZIP      = $(RELEASE_DIR).zip
+
+.PHONY: release
+release:
+	$(MAKE) CONFIG=Release CFLAGS_CONFIG=-O3 LDFLAGS_CONFIG=-mwindows zond
+	$(MAKE) CONFIG=Release CFLAGS_CONFIG=-O3 LDFLAGS_CONFIG=-mwindows viewer
+	$(MAKE) $(RELEASE_ZIP)
+
+$(RELEASE_ZIP): $(RELEASE_EXE) $(VIEWER_EXE)
+	bash create-gtk-release.sh $(RELEASE_EXE) $(RELEASE_VERSION)
+	cp $(VIEWER_EXE) $(RELEASE_DIR)/bin/
+	zip -q -r $(RELEASE_ZIP) $(RELEASE_DIR)
+	@echo ""
+	@echo "=== Release fertig ==="
+	@echo "Verzeichnis: $(RELEASE_DIR)"
+	@echo "ZIP:         $(RELEASE_ZIP)"
+	
