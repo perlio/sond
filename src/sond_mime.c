@@ -279,6 +279,23 @@ const gchar* mime_to_extension_with_params(const char* mime_type) {
     return mime_to_extension_ci(mime_type);
 }
 
+static gboolean
+buffer_looks_like_text (const guchar *buf, gsize len)
+{
+    gsize check = MIN (len, 512);
+    for (gsize i = 0; i < check; i++) {
+        guchar c = buf[i];
+        if (c == 0x09 || c == 0x0A || c == 0x0C || c == 0x0D)
+            continue;
+        if (c >= 0x20 && c <= 0x7E)
+            continue;
+        if (c >= 0x80)
+            continue;
+        return FALSE;
+    }
+    return TRUE;
+}
+
 gchar* mime_guess_content_type(const guchar* buffer, gsize size,
 		const gchar* path, GError** error) {
 	gchar* result = NULL;
@@ -298,6 +315,14 @@ gchar* mime_guess_content_type(const guchar* buffer, gsize size,
 	}
 
 	const char* mime = magic_buffer(magic, buffer, size);
+
+	if (mime
+	    && g_ascii_strcasecmp (mime, "video/mp2t") == 0
+	    && buffer_looks_like_text (buffer, size))
+	{
+	    const gchar *ext_mime = path ? mime_from_extension (path) : NULL;
+	    mime = ext_mime ? ext_mime : "text/plain";
+	}
 
 	/* Fallback: wenn libmagic ZIP nicht erkennt, aber Magic-Bytes stimmen */
 	if (!mime || !g_strcmp0(mime, "application/octet-stream")) {
