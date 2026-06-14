@@ -20,7 +20,6 @@
 #include <glib.h>
 #include <magic.h>
 #include <zlib.h>
-#include <gmime/gmime.h>
 
 
 typedef struct {
@@ -416,22 +415,14 @@ gchar* mime_guess_content_type(const guchar* buffer, gsize size,
 	}
 
 	if (!g_strcmp0(mime, "text/plain")) {
-		/* CSV-Erkennung: libmagic gibt text/plain zurück, Endung entscheidet */
-		if (path && !g_strcmp0(mime_from_extension(path), "text/csv")) {
-			result = g_strdup("text/csv");
-		} else {
-			GMimeStream* gmime_stream = g_mime_stream_mem_new_with_buffer(
-					(const gchar*) buffer, size);
-			GMimeParser* parser = g_mime_parser_new_with_stream(gmime_stream);
-			GMimeMessage* message = g_mime_parser_construct_message(parser, NULL);
-			g_object_unref(parser);
-			g_object_unref(gmime_stream);
-			if (message && g_mime_message_get_sender(message))
-				result = g_strdup("message/rfc822");
-			else
-				result = g_strdup(mime);
-		}
-	} else
+	    if (path && !g_strcmp0(mime_from_extension(path), "text/csv"))
+	        result = g_strdup("text/csv");
+	    else if (path && !g_strcmp0(mime_from_extension(path), "message/rfc822"))
+	        result = g_strdup("message/rfc822");
+	    else
+	        result = g_strdup(mime);
+	}
+	else
 		result = mime ? g_strdup(mime) : g_strdup("application/octet-stream");
 
 	magic_close(magic);

@@ -210,13 +210,8 @@ static gboolean navigate_to_sfp(SurfaceViewer *viewer, SondFilePart *new_sfp) {
     if (viewer->original_surface)
         cairo_surface_destroy(viewer->original_surface);
 
-    viewer->original_surface = cairo_surface_create_similar(
-        rd->surface, CAIRO_CONTENT_COLOR_ALPHA, rd->width, rd->height);
-    cairo_t *cr = cairo_create(viewer->original_surface);
-    cairo_set_source_surface(cr, rd->surface, 0, 0);
-    cairo_paint(cr);
-    cairo_destroy(cr);
-
+    viewer->original_surface = rd->surface;
+    rd->surface = NULL;
     viewer->original_width  = rd->width;
     viewer->original_height = rd->height;
     viewer->zoom_level = 1.0;
@@ -278,27 +273,16 @@ static void update_statusbar(SurfaceViewer *viewer, const char *message) {
 static void update_display(SurfaceViewer *viewer) {
     if (!viewer->original_surface) return;
 
-    int new_width = (int)(viewer->original_width * viewer->zoom_level);
+    int new_width  = (int)(viewer->original_width  * viewer->zoom_level);
     int new_height = (int)(viewer->original_height * viewer->zoom_level);
 
-    cairo_surface_t *scaled = cairo_image_surface_create(
-        CAIRO_FORMAT_ARGB32, new_width, new_height);
-    cairo_t *cr = cairo_create(scaled);
-
-    cairo_scale(cr, viewer->zoom_level, viewer->zoom_level);
-    cairo_set_source_surface(cr, viewer->original_surface, 0, 0);
-    cairo_paint(cr);
-    cairo_destroy(cr);
-
-    GdkPixbuf *pixbuf = gdk_pixbuf_get_from_surface(scaled, 0, 0, new_width, new_height);
-    gtk_image_set_from_pixbuf(GTK_IMAGE(viewer->image), pixbuf);
+    gtk_widget_set_size_request(viewer->image, new_width, new_height);
+    gtk_widget_queue_draw(viewer->image);
 
     char zoom_text[32];
-    snprintf(zoom_text, sizeof(zoom_text), "Zoom: %d%%", (int)(viewer->zoom_level * 100));
+    snprintf(zoom_text, sizeof(zoom_text), "Zoom: %d%%",
+             (int)(viewer->zoom_level * 100));
     gtk_label_set_text(GTK_LABEL(viewer->zoom_label), zoom_text);
-
-    g_object_unref(pixbuf);
-    cairo_surface_destroy(scaled);
 }
 
 static void on_zoom_in(GtkWidget *widget, gpointer data) {
@@ -652,6 +636,19 @@ static void on_window_destroy(GtkWidget *widget, gpointer data) {
 
 // === HAUPTFUNKTION ===
 
+// === DRAWING AREA CALLBACK ===
+static gboolean on_drawing_area_draw(GtkWidget *widget,
+        cairo_t *cr, gpointer data) {
+    SurfaceViewer *viewer = (SurfaceViewer*)data;
+    if (!viewer->original_surface) return FALSE;
+
+    cairo_scale(cr, viewer->zoom_level, viewer->zoom_level);
+    cairo_set_source_surface(cr, viewer->original_surface, 0, 0);
+    cairo_paint(cr);
+
+    return FALSE;
+}
+
 /**
  * Erstellt ein Fenster mit Cairo Surface Viewer
  *
@@ -670,13 +667,7 @@ static GtkWidget* show_surface_viewer(cairo_surface_t *surface, int width, int h
     SurfaceViewer *viewer = g_new0(SurfaceViewer, 1);
 
     // Surface kopieren (damit Original freigegeben werden kann)
-    viewer->original_surface = cairo_surface_create_similar(
-        surface, CAIRO_CONTENT_COLOR_ALPHA, width, height);
-    cairo_t *cr = cairo_create(viewer->original_surface);
-    cairo_set_source_surface(cr, surface, 0, 0);
-    cairo_paint(cr);
-    cairo_destroy(cr);
-
+    viewer->original_surface = surface;
     viewer->original_width = width;
     viewer->original_height = height;
     viewer->zoom_level = 1.0;
@@ -766,28 +757,37 @@ static GtkWidget* show_surface_viewer(cairo_surface_t *surface, int width, int h
         gtk_box_pack_start(GTK_BOX(viewer->toolbar), btn_next, FALSE, FALSE, 0);
     }
 
-    // ScrolledWindow mit Image
-    viewer->scrolled = gtk_scrolled_window_new(NULL, NULL);
-    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(viewer->scrolled),
-                                   GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
-    gtk_box_pack_start(GTK_BOX(vbox), viewer->scrolled, TRUE, TRUE, 0);
+    // ScrolledWindow
+	viewer->scrolled = gtk_scrolled_window_new(NULL, NULL);
+	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(viewer->scrolled),
+								   GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+	gtk_box_pack_start(GTK_BOX(vbox), viewer->scrolled, TRUE, TRUE, 0);
 
-    // Event Box für Mouse-Events
-    GtkWidget *event_box = gtk_event_box_new();
-    gtk_container_add(GTK_CONTAINER(viewer->scrolled), event_box);
+	// DrawingArea statt EventBox + GtkImage
+	viewer->image = gtk_drawing_area_new();
+	gtk_widget_set_size_request(viewer->image,
+								viewer->original_width,
+								viewer->original_height);
 
-    g_signal_connect(event_box, "scroll-event", G_CALLBACK(on_scroll_event), viewer);
-    g_signal_connect(event_box, "button-press-event", G_CALLBACK(on_button_press), viewer);
-    g_signal_connect(event_box, "button-release-event", G_CALLBACK(on_button_release), viewer);
-    g_signal_connect(event_box, "motion-notify-event", G_CALLBACK(on_motion_notify), viewer);
-    gtk_widget_set_events(event_box, GDK_SCROLL_MASK | GDK_BUTTON_PRESS_MASK |
-                         GDK_BUTTON_RELEASE_MASK | GDK_POINTER_MOTION_MASK);
+	gtk_widget_set_events(viewer->image,
+						  GDK_SCROLL_MASK |
+						  GDK_BUTTON_PRESS_MASK |
+						  GDK_BUTTON_RELEASE_MASK |
+						  GDK_POINTER_MOTION_MASK);
 
-    GdkPixbuf *pixbuf = gdk_pixbuf_get_from_surface(surface, 0, 0, width, height);
-    viewer->image = gtk_image_new_from_pixbuf(pixbuf);
-    g_object_unref(pixbuf);
+	g_signal_connect(viewer->image, "draw",
+					 G_CALLBACK(on_drawing_area_draw), viewer);
+	g_signal_connect(viewer->image, "scroll-event",
+					 G_CALLBACK(on_scroll_event), viewer);
+	g_signal_connect(viewer->image, "button-press-event",
+					 G_CALLBACK(on_button_press), viewer);
+	g_signal_connect(viewer->image, "button-release-event",
+					 G_CALLBACK(on_button_release), viewer);
+	g_signal_connect(viewer->image, "motion-notify-event",
+					 G_CALLBACK(on_motion_notify), viewer);
 
-    gtk_container_add(GTK_CONTAINER(event_box), viewer->image);
+	gtk_scrolled_window_add_with_viewport(
+			GTK_SCROLLED_WINDOW(viewer->scrolled), viewer->image);
 
     // Statusbar
     viewer->statusbar = gtk_statusbar_new();
@@ -822,6 +822,70 @@ static GtkWidget* show_surface_viewer(cairo_surface_t *surface, int width, int h
     update_nav_state(viewer);
 
     return viewer->window;
+}
+
+static cairo_surface_t* render_text_to_surface(
+        const char *text, PangoAttrList *attrs,
+        int width, int max_height,
+        int *out_height) {
+
+    /* Höhe berechnen */
+    cairo_surface_t *tmp = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
+    cairo_t *tmp_cr = cairo_create(tmp);
+    PangoLayout *layout = pango_cairo_create_layout(tmp_cr);
+    pango_layout_set_width(layout, (width - 20) * PANGO_SCALE);
+    pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
+    pango_layout_set_text(layout, text, -1);
+    if (attrs) pango_layout_set_attributes(layout, attrs);
+    int pw, ph;
+    pango_layout_get_pixel_size(layout, &pw, &ph);
+    g_object_unref(layout);
+    cairo_destroy(tmp_cr);
+    cairo_surface_destroy(tmp);
+
+    gboolean truncated = (ph > max_height);
+    if (truncated) ph = max_height;
+    int height = ph + 20;
+    if (out_height) *out_height = truncated ? max_height + 1 : height;
+
+    /* Rendern */
+    cairo_surface_t *surface = cairo_image_surface_create(
+            CAIRO_FORMAT_ARGB32, width, height);
+    if (cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS) {
+        LOG_WARN("render_text_to_surface: cairo_image_surface_create "
+                 "fehlgeschlagen (width=%d height=%d): %s",
+                 width, height,
+                 cairo_status_to_string(cairo_surface_status(surface)));
+        cairo_surface_destroy(surface);
+        return NULL;
+    }
+
+    cairo_t *cr = cairo_create(surface);
+    cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
+	cairo_paint(cr);
+
+	if (truncated) {
+		cairo_set_source_rgb(cr, 0.8, 0.0, 0.0);
+		PangoLayout *hint = pango_cairo_create_layout(cr);
+		pango_layout_set_text(hint,
+				"[Darstellung abgeschnitten — Inhalt zu lang]", -1);
+		cairo_move_to(cr, 10, 10);
+		pango_cairo_show_layout(cr, hint);
+		g_object_unref(hint);
+	}
+
+	cairo_set_source_rgb(cr, 0.0, 0.0, 0.0);
+	layout = pango_cairo_create_layout(cr);
+	pango_layout_set_width(layout, (width - 20) * PANGO_SCALE);
+	pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
+	pango_layout_set_text(layout, text, -1);
+	if (attrs) pango_layout_set_attributes(layout, attrs);
+	cairo_move_to(cr, 10, truncated ? 30 : 10);
+	pango_cairo_show_layout(cr, layout);
+	g_object_unref(layout);
+
+	cairo_destroy(cr);
+    return surface;
 }
 
 // === TYPE DETECTION ===
@@ -898,100 +962,29 @@ static RenderedDocument* render_html(const char *html, int width) {
 
     lxb_status_t status = lxb_html_document_parse(doc,
         (const lxb_char_t*)html, strlen(html));
-
     if (status != LXB_STATUS_OK) {
         lxb_html_document_destroy(doc);
         return NULL;
     }
 
-    // Text extrahieren
     GString *text = g_string_new("");
     lxb_dom_node_t *body = lxb_dom_interface_node(doc->body);
-    if (body) {
+    if (body)
         extract_text_recursive(body, text);
-    }
-
-    // Höhe berechnen
-    cairo_surface_t *tmp_surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
-    if (cairo_surface_status(tmp_surface) != CAIRO_STATUS_SUCCESS) {
-        LOG_WARN("Failed to create temporary surface for height calculation");
-        cairo_surface_destroy(tmp_surface);
-        g_string_free(text, TRUE);
-        lxb_html_document_destroy(doc);
-        return NULL;
-    }
-    
-    cairo_t *tmp_cr = cairo_create(tmp_surface);
-    if (cairo_status(tmp_cr) != CAIRO_STATUS_SUCCESS) {
-        LOG_WARN("Failed to create temporary cairo context");
-        cairo_destroy(tmp_cr);
-        cairo_surface_destroy(tmp_surface);
-        g_string_free(text, TRUE);
-        lxb_html_document_destroy(doc);
-        return NULL;
-    }
-
-    PangoLayout *layout = pango_cairo_create_layout(tmp_cr);
-    pango_layout_set_width(layout, (width - 20) * PANGO_SCALE);
-    pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
-    pango_layout_set_text(layout, text->str, -1);
-
-    int pango_width, pango_height;
-    pango_layout_get_pixel_size(layout, &pango_width, &pango_height);
-    int height = pango_height + 20;
-
-    g_object_unref(layout);
-    cairo_destroy(tmp_cr);
-    cairo_surface_destroy(tmp_surface);
-
-    // Echte Surface rendern
-    cairo_surface_t *surface = cairo_image_surface_create(
-        CAIRO_FORMAT_ARGB32, width, height);
-    if (cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS) {
-        LOG_WARN("Failed to create render surface (width=%d, height=%d)", width, height);
-        cairo_surface_destroy(surface);
-        g_string_free(text, TRUE);
-        lxb_html_document_destroy(doc);
-        return NULL;
-    }
-    
-    cairo_t *cr = cairo_create(surface);
-    if (cairo_status(cr) != CAIRO_STATUS_SUCCESS) {
-        LOG_WARN("Failed to create cairo context for rendering");
-        cairo_destroy(cr);
-        cairo_surface_destroy(surface);
-        g_string_free(text, TRUE);
-        lxb_html_document_destroy(doc);
-        return NULL;
-    }
-
-    // Weißer Hintergrund
-    cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
-    cairo_paint(cr);
-
-    // Schwarzer Text
-    cairo_set_source_rgb(cr, 0.0, 0.0, 0.0);
-
-    layout = pango_cairo_create_layout(cr);
-    pango_layout_set_width(layout, (width - 20) * PANGO_SCALE);
-    pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
-    pango_layout_set_text(layout, text->str, -1);
-
-    cairo_move_to(cr, 10, 10);
-    pango_cairo_show_layout(cr, layout);
-
-    g_object_unref(layout);
-    cairo_destroy(cr);
     lxb_html_document_destroy(doc);
 
-    // RenderedDocument erstellen
+    char *text_str = g_string_free(text, FALSE);
+    int height = 0;
+    cairo_surface_t *surface = render_text_to_surface(
+            text_str, NULL, width, 30000, &height);
+    if (!surface) { g_free(text_str); return NULL; }
+
     RenderedDocument *result = g_new0(RenderedDocument, 1);
     result->surface = surface;
     result->width = width;
     result->height = height;
-    result->searchable_text = g_string_free(text, FALSE);
+    result->searchable_text = text_str;
     result->type = DOC_TYPE_HTML;
-
     return result;
 }
 
@@ -1061,6 +1054,7 @@ static RenderedDocument* render_image(GBytes *bytes, int max_width) {
 
     return result;
 }
+
 
 // === ODT/DOCX RENDERING (Generisch) ===
 
@@ -1332,127 +1326,72 @@ static RenderedDocument* render_office_document(GBytes *bytes,
     gsize len;
     const unsigned char *data = g_bytes_get_data(bytes, &len);
 
-    const char *xml_file;
-    if (type == DOC_TYPE_ODT) {
-        xml_file = "content.xml";
-    } else if (type == DOC_TYPE_DOCX) {
-        xml_file = "word/document.xml";
-    } else {
-        return NULL;
-    }
+    const char *xml_file = (type == DOC_TYPE_ODT)
+            ? "content.xml" : "word/document.xml";
 
-    // XML aus ZIP extrahieren
     size_t xml_len;
     char *xml_content = extract_from_zip(data, len, xml_file, &xml_len);
-
     if (!xml_content) {
-    	LOG_WARN("Failed to extract %s from document", xml_file);
+        LOG_WARN("Failed to extract %s from document", xml_file);
         return NULL;
     }
 
-    // XML parsen
     xmlDoc *doc = xmlReadMemory(xml_content, xml_len, xml_file, NULL, 0);
     g_free(xml_content);
-
     if (!doc) {
-    	LOG_WARN("Failed to parse %s", xml_file);
+        LOG_WARN("Failed to parse %s", xml_file);
         return NULL;
     }
 
     xmlNode *root = xmlDocGetRootElement(doc);
-    if (!root) {
-        xmlFreeDoc(doc);
-        return NULL;
-    }
+    if (!root) { xmlFreeDoc(doc); return NULL; }
 
-    // Text mit Formatierung extrahieren
     GString *text = g_string_new("");
     PangoAttrList *attr_list = pango_attr_list_new();
     int char_offset = 0;
 
     if (type == DOC_TYPE_ODT) {
-        // ODT: office:body > office:text
         for (xmlNode *node = root->children; node; node = node->next) {
             if (node->type == XML_ELEMENT_NODE &&
                 strcmp((char*)node->name, "body") == 0) {
                 for (xmlNode *child = node->children; child; child = child->next) {
-                    if (child->type == XML_ELEMENT_NODE) {
+                    if (child->type == XML_ELEMENT_NODE)
                         process_odt_node(child->children, text, &attr_list, &char_offset);
-                    }
                 }
             }
         }
-    } else if (type == DOC_TYPE_DOCX) {
-        // DOCX: w:document > w:body
+    } else {
         for (xmlNode *node = root->children; node; node = node->next) {
-            if (node->type == XML_ELEMENT_NODE && strcmp((char*)node->name, "body") == 0) {
+            if (node->type == XML_ELEMENT_NODE &&
+                strcmp((char*)node->name, "body") == 0)
                 process_docx_node(node->children, text, &attr_list, &char_offset);
-            }
         }
     }
-
     xmlFreeDoc(doc);
 
-    if (text->len == 0) {
+    if (text->len == 0)
         g_string_append_printf(text, "%s Document\n\n(No readable content found)",
                               type == DOC_TYPE_ODT ? "ODT" : "DOCX");
-    }
 
-    // Höhe berechnen
-    cairo_surface_t *tmp_surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
-    cairo_t *tmp_cr = cairo_create(tmp_surface);
-
-    PangoLayout *layout = pango_cairo_create_layout(tmp_cr);
-    pango_layout_set_width(layout, (width - 20) * PANGO_SCALE);
-    pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
-    pango_layout_set_text(layout, text->str, -1);
-    pango_layout_set_attributes(layout, attr_list);
-
-    int pango_width, pango_height;
-    pango_layout_get_pixel_size(layout, &pango_width, &pango_height);
-    int height = pango_height + 20;
-
-    g_object_unref(layout);
-    cairo_destroy(tmp_cr);
-    cairo_surface_destroy(tmp_surface);
-
-    // Echte Surface rendern
-    cairo_surface_t *surface = cairo_image_surface_create(
-        CAIRO_FORMAT_ARGB32, width, height);
-    cairo_t *cr = cairo_create(surface);
-
-    cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
-    cairo_paint(cr);
-    cairo_set_source_rgb(cr, 0.0, 0.0, 0.0);
-
-    layout = pango_cairo_create_layout(cr);
-    pango_layout_set_width(layout, (width - 20) * PANGO_SCALE);
-    pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
-    pango_layout_set_text(layout, text->str, -1);
-    pango_layout_set_attributes(layout, attr_list);
-
-    cairo_move_to(cr, 10, 10);
-    pango_cairo_show_layout(cr, layout);
-
-    g_object_unref(layout);
-    cairo_destroy(cr);
+    char *text_str = g_string_free(text, FALSE);
+    int height = 0;
+    cairo_surface_t *surface = render_text_to_surface(
+            text_str, attr_list, width, 30000, &height);
     pango_attr_list_unref(attr_list);
+    if (!surface) { g_free(text_str); return NULL; }
 
-    // RenderedDocument erstellen
     RenderedDocument *result = g_new0(RenderedDocument, 1);
     result->surface = surface;
     result->width = width;
     result->height = height;
-    result->searchable_text = g_string_free(text, FALSE);
+    result->searchable_text = text_str;
     result->type = type;
-
     return result;
 }
 
 // === PLAIN TEXT RENDERING ===
 
 static RenderedDocument* render_plain_text(const char *data, gsize len, int width) {
-    /* Encoding-sichere Übernahme */
     char *safe_text = NULL;
     if (g_utf8_validate(data, (gssize)len, NULL)) {
         safe_text = g_strndup(data, len);
@@ -1462,15 +1401,12 @@ static RenderedDocument* render_plain_text(const char *data, gsize len, int widt
                               "UTF-8", "windows-1252",
                               NULL, NULL, &conv_err);
         if (!safe_text) {
-            LOG_WARN("%s\ng_convert fehlgeschlagen: %s – ersetze ungültige Bytes",
-                     __func__, conv_err ? conv_err->message : "?");
             g_clear_error(&conv_err);
             safe_text = g_utf8_make_valid(data, (gssize)len);
         }
     }
     if (!safe_text) return NULL;
 
-    /* \r\n → \n normalisieren */
     GString *text = g_string_new("");
     const char *p = safe_text;
     while (*p) {
@@ -1483,110 +1419,40 @@ static RenderedDocument* render_plain_text(const char *data, gsize len, int widt
     }
     g_free(safe_text);
 
-    /* Höhe berechnen */
-    cairo_surface_t *tmp_surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
-    cairo_t *tmp_cr = cairo_create(tmp_surface);
-
-    PangoLayout *layout = pango_cairo_create_layout(tmp_cr);
-    pango_layout_set_width(layout, (width - 20) * PANGO_SCALE);
-    pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
-    pango_layout_set_text(layout, text->str, -1);
-
-    int pango_width, pango_height;
-    pango_layout_get_pixel_size(layout, &pango_width, &pango_height);
-    int height = pango_height + 20;
-
-    g_object_unref(layout);
-    cairo_destroy(tmp_cr);
-    cairo_surface_destroy(tmp_surface);
-
-    /* Echte Surface rendern */
-    cairo_surface_t *surface = cairo_image_surface_create(
-        CAIRO_FORMAT_ARGB32, width, height);
-    cairo_t *cr = cairo_create(surface);
-
-    cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
-    cairo_paint(cr);
-    cairo_set_source_rgb(cr, 0.0, 0.0, 0.0);
-
-    layout = pango_cairo_create_layout(cr);
-    pango_layout_set_width(layout, (width - 20) * PANGO_SCALE);
-    pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
-    pango_layout_set_text(layout, text->str, -1);
-
-    cairo_move_to(cr, 10, 10);
-    pango_cairo_show_layout(cr, layout);
-
-    g_object_unref(layout);
-    cairo_destroy(cr);
+    char *text_str = g_string_free(text, FALSE);
+    int height = 0;
+    cairo_surface_t *surface = render_text_to_surface(
+            text_str, NULL, width, 30000, &height);
+    if (!surface) { g_free(text_str); return NULL; }
 
     RenderedDocument *result = g_new0(RenderedDocument, 1);
     result->surface = surface;
     result->width = width;
     result->height = height;
-    result->searchable_text = g_string_free(text, FALSE);
+    result->searchable_text = text_str;
     result->type = DOC_TYPE_PLAIN;
-
     return result;
 }
 
 // === DOC RENDERING (Fallback) ===
 
 static RenderedDocument* render_doc(int width) {
-    // DOC ist binär und sehr komplex
-    // Fallback: Zeige Hinweis, dass Konvertierung nötig ist
-
     GString *text = g_string_new("Microsoft Word DOC Format\n\n");
-    g_string_append(text, "This is a legacy binary format (.doc) that cannot be rendered directly.\n\n");
-    g_string_append(text, "Suggestions:\n");
-    g_string_append(text, "• Convert to DOCX using Microsoft Word or LibreOffice\n");
-    g_string_append(text, "• Use 'antiword' command-line tool to extract text\n");
-    g_string_append(text, "• Use LibreOffice headless mode to convert:\n");
-    g_string_append(text, "  libreoffice --headless --convert-to docx file.doc\n");
+    g_string_append(text, "Dieses Format (.doc) kann nicht direkt dargestellt werden.\n\n");
+    g_string_append(text, "Bitte konvertieren Sie die Datei in DOCX oder ODT.");
 
-    // Einfaches Rendering
-    cairo_surface_t *tmp_surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
-    cairo_t *tmp_cr = cairo_create(tmp_surface);
-
-    PangoLayout *layout = pango_cairo_create_layout(tmp_cr);
-    pango_layout_set_width(layout, (width - 20) * PANGO_SCALE);
-    pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
-    pango_layout_set_text(layout, text->str, -1);
-
-    int pango_width, pango_height;
-    pango_layout_get_pixel_size(layout, &pango_width, &pango_height);
-    int height = pango_height + 20;
-
-    g_object_unref(layout);
-    cairo_destroy(tmp_cr);
-    cairo_surface_destroy(tmp_surface);
-
-    cairo_surface_t *surface = cairo_image_surface_create(
-        CAIRO_FORMAT_ARGB32, width, height);
-    cairo_t *cr = cairo_create(surface);
-
-    cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
-    cairo_paint(cr);
-    cairo_set_source_rgb(cr, 0.0, 0.0, 0.0);
-
-    layout = pango_cairo_create_layout(cr);
-    pango_layout_set_width(layout, (width - 20) * PANGO_SCALE);
-    pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
-    pango_layout_set_text(layout, text->str, -1);
-
-    cairo_move_to(cr, 10, 10);
-    pango_cairo_show_layout(cr, layout);
-
-    g_object_unref(layout);
-    cairo_destroy(cr);
+    char *text_str = g_string_free(text, FALSE);
+    int height = 0;
+    cairo_surface_t *surface = render_text_to_surface(
+            text_str, NULL, width, 30000, &height);
+    if (!surface) { g_free(text_str); return NULL; }
 
     RenderedDocument *result = g_new0(RenderedDocument, 1);
     result->surface = surface;
     result->width = width;
     result->height = height;
-    result->searchable_text = g_string_free(text, FALSE);
+    result->searchable_text = text_str;
     result->type = DOC_TYPE_DOC;
-
     return result;
 }
 
@@ -1731,7 +1597,6 @@ static void collect_text_parts(GMimeObject* obj, GPtrArray* parts) {
     }
 }
 
-
 static RenderedDocument* render_gmessage(GBytes* bytes, int width) {
     if (!bytes) return NULL;
     if (width <= 0) width = DEFAULT_RENDER_WIDTH;
@@ -1747,67 +1612,45 @@ static RenderedDocument* render_gmessage(GBytes* bytes, int width) {
     /* ---- Header-Block aufbauen ---- */
     GString* header = g_string_new("");
 
-    /* Von */
-    InternetAddressList* from_list =
-            g_mime_message_get_from(message);
+    InternetAddressList* from_list = g_mime_message_get_from(message);
     if (from_list) {
-        char* from_str = internet_address_list_to_string(
-                from_list, NULL, TRUE);
-        g_string_append_printf(header, "Von:     %s\n",
-                from_str ? from_str : "");
+        char* from_str = internet_address_list_to_string(from_list, NULL, TRUE);
+        g_string_append_printf(header, "Von:     %s\n", from_str ? from_str : "");
         g_free(from_str);
     }
 
-    /* An */
-    InternetAddressList* to_list =
-            g_mime_message_get_to(message);
+    InternetAddressList* to_list = g_mime_message_get_to(message);
     if (to_list) {
-        char* to_str = internet_address_list_to_string(
-                to_list, NULL, TRUE);
-        g_string_append_printf(header, "An:      %s\n",
-                to_str ? to_str : "");
+        char* to_str = internet_address_list_to_string(to_list, NULL, TRUE);
+        g_string_append_printf(header, "An:      %s\n", to_str ? to_str : "");
         g_free(to_str);
     }
 
-    /* CC */
-    InternetAddressList* cc_list =
-            g_mime_message_get_cc(message);
+    InternetAddressList* cc_list = g_mime_message_get_cc(message);
     if (cc_list && internet_address_list_length(cc_list) > 0) {
-        char* cc_str = internet_address_list_to_string(
-                cc_list, NULL, TRUE);
-        g_string_append_printf(header, "CC:      %s\n",
-                cc_str ? cc_str : "");
+        char* cc_str = internet_address_list_to_string(cc_list, NULL, TRUE);
+        g_string_append_printf(header, "CC:      %s\n", cc_str ? cc_str : "");
         g_free(cc_str);
     }
 
-    /* BCC */
-    InternetAddressList* bcc_list =
-            g_mime_message_get_bcc(message);
+    InternetAddressList* bcc_list = g_mime_message_get_bcc(message);
     if (bcc_list && internet_address_list_length(bcc_list) > 0) {
-        char* bcc_str = internet_address_list_to_string(
-                bcc_list, NULL, TRUE);
-        g_string_append_printf(header, "BCC:     %s\n",
-                bcc_str ? bcc_str : "");
+        char* bcc_str = internet_address_list_to_string(bcc_list, NULL, TRUE);
+        g_string_append_printf(header, "BCC:     %s\n", bcc_str ? bcc_str : "");
         g_free(bcc_str);
     }
 
-    /* Betreff */
     const char* subject = g_mime_message_get_subject(message);
-    g_string_append_printf(header, "Betreff: %s\n",
-            subject ? subject : "");
+    g_string_append_printf(header, "Betreff: %s\n", subject ? subject : "");
 
-    /* Datum */
     GDateTime* date = g_mime_message_get_date(message);
     if (date) {
-        gchar* date_str = g_date_time_format(date,
-                "%d.%m.%Y %H:%M:%S %Z");
-        g_string_append_printf(header, "Datum:   %s\n",
-                date_str ? date_str : "");
+        gchar* date_str = g_date_time_format(date, "%d.%m.%Y %H:%M:%S %Z");
+        g_string_append_printf(header, "Datum:   %s\n", date_str ? date_str : "");
         g_free(date_str);
         g_date_time_unref(date);
     }
 
-    /* Trennlinie */
     g_string_append(header, "\n"
             "────────────────────────────────────────────────────────────"
             "\n\n");
@@ -1822,10 +1665,8 @@ static RenderedDocument* render_gmessage(GBytes* bytes, int width) {
     GString* body = g_string_new("");
     for (guint i = 0; i < parts->len; i++) {
         EmlPart* ep = g_ptr_array_index(parts, i);
-
-        /* Bild-Parts werden später separat gerendert */
         if (!ep->text) continue;
-        /* Part-Überschrift: MIME-Type und ggf. Dateiname */
+
         if (ep->filename)
             g_string_append_printf(body, "[%s — %s]\n",
                     ep->mime_type ? ep->mime_type : "?", ep->filename);
@@ -1833,14 +1674,12 @@ static RenderedDocument* render_gmessage(GBytes* bytes, int width) {
             g_string_append_printf(body, "[%s]\n",
                     ep->mime_type ? ep->mime_type : "?");
 
-        /* Trennlinie unter der Überschrift */
         g_string_append(body,
                 "- - - - - - - - - - - - - - - - - - - - - - - - - - - -"
                 "\n\n");
 
         const gchar* part_text = ep->text;
 
-        /* HTML-Parts: Text via lexbor extrahieren */
         gchar* lower_probe = g_ascii_strdown(part_text,
                 strlen(part_text) < 512 ? strlen(part_text) : 512);
         gboolean is_html = (strstr(lower_probe, "<html") ||
@@ -1851,10 +1690,8 @@ static RenderedDocument* render_gmessage(GBytes* bytes, int width) {
         if (is_html) {
             lxb_html_document_t* doc = lxb_html_document_create();
             if (doc) {
-                lxb_status_t st = lxb_html_document_parse(
-                        doc,
-                        (const lxb_char_t*)part_text,
-                        strlen(part_text));
+                lxb_status_t st = lxb_html_document_parse(doc,
+                        (const lxb_char_t*)part_text, strlen(part_text));
                 if (st == LXB_STATUS_OK) {
                     GString* extracted = g_string_new("");
                     lxb_dom_node_t* body_node =
@@ -1867,7 +1704,6 @@ static RenderedDocument* render_gmessage(GBytes* bytes, int width) {
                 lxb_html_document_destroy(doc);
             }
         } else {
-            /* Plain-Text: \r\n normalisieren */
             const gchar* p = part_text;
             while (*p) {
                 if (*p == '\r' && *(p+1) == '\n') {
@@ -1879,7 +1715,6 @@ static RenderedDocument* render_gmessage(GBytes* bytes, int width) {
             }
         }
 
-        /* Trennlinie nach jedem Part außer dem letzten Text-Part */
         gboolean has_more_text = FALSE;
         for (guint j = i + 1; j < parts->len; j++) {
             EmlPart* ep2 = g_ptr_array_index(parts, j);
@@ -1890,13 +1725,14 @@ static RenderedDocument* render_gmessage(GBytes* bytes, int width) {
                     "\n\n════════════════════════════════════════════"
                     "═══════════════════\n\n");
     }
+
     /* ---- Gesamttext = Header + Body ---- */
     GString* full_text = g_string_new(header->str);
     g_string_append(full_text, body->str);
     g_string_free(header, TRUE);
     g_string_free(body, TRUE);
 
-    /* ---- Bild-Parts aus dem bereits befüllten parts-Array verwenden ---- */
+    /* ---- Bild-Parts verarbeiten ---- */
     GPtrArray* image_surfaces = g_ptr_array_new_with_free_func(
             (GDestroyNotify)cairo_surface_destroy);
     GPtrArray* image_labels = g_ptr_array_new_with_free_func(g_free);
@@ -1910,49 +1746,44 @@ static RenderedDocument* render_gmessage(GBytes* bytes, int width) {
         gdk_pixbuf_loader_write(loader, ep->image_data, ep->image_len, &perr);
         g_clear_error(&perr);
         gdk_pixbuf_loader_close(loader, NULL);
-        {
-            /* Erst statischen Pixbuf versuchen, dann Animation (z.B. GIF) */
-            GdkPixbuf* pb = gdk_pixbuf_loader_get_pixbuf(loader);
-            if (!pb) {
-                GdkPixbufAnimation* anim = gdk_pixbuf_loader_get_animation(loader);
-                G_GNUC_BEGIN_IGNORE_DEPRECATIONS
-                if (anim)
-                    pb = gdk_pixbuf_animation_get_static_image(anim);
-                G_GNUC_END_IGNORE_DEPRECATIONS
-            }
-            if (pb) {
-                int iw = gdk_pixbuf_get_width(pb);
-                int ih = gdk_pixbuf_get_height(pb);
-                /* Skalieren wenn breiter als width-20 */
-                double scale = 1.0;
-                if (iw > width - 20)
-                    scale = (double)(width - 20) / iw;
-                int dw = (int)(iw * scale);
-                int dh = (int)(ih * scale);
-                cairo_surface_t* img_surf = cairo_image_surface_create(
-                        CAIRO_FORMAT_ARGB32, dw, dh);
-                cairo_t* ic = cairo_create(img_surf);
-                cairo_scale(ic, scale, scale);
-                gdk_cairo_set_source_pixbuf(ic, pb, 0, 0);
-                cairo_paint(ic);
-                cairo_destroy(ic);
-                g_ptr_array_add(image_surfaces, img_surf);
-                /* Label: MIME-Type + ggf. Dateiname */
-                g_ptr_array_add(image_labels,
-                        ep->filename
-                        ? g_strdup_printf("%s — %s", ep->mime_type, ep->filename)
-                        : g_strdup(ep->mime_type));
-            } else {
-                LOG_WARN("%s\nBild-Part konnte nicht geladen werden: %s",
-                        __func__, ep->mime_type ? ep->mime_type : "?");
-            }
+
+        GdkPixbuf* pb = gdk_pixbuf_loader_get_pixbuf(loader);
+        if (!pb) {
+            GdkPixbufAnimation* anim = gdk_pixbuf_loader_get_animation(loader);
+            G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+            if (anim)
+                pb = gdk_pixbuf_animation_get_static_image(anim);
+            G_GNUC_END_IGNORE_DEPRECATIONS
+        }
+        if (pb) {
+            int iw = gdk_pixbuf_get_width(pb);
+            int ih = gdk_pixbuf_get_height(pb);
+            double scale = 1.0;
+            if (iw > width - 20)
+                scale = (double)(width - 20) / iw;
+            int dw = (int)(iw * scale);
+            int dh = (int)(ih * scale);
+            cairo_surface_t* img_surf = cairo_image_surface_create(
+                    CAIRO_FORMAT_ARGB32, dw, dh);
+            cairo_t* ic = cairo_create(img_surf);
+            cairo_scale(ic, scale, scale);
+            gdk_cairo_set_source_pixbuf(ic, pb, 0, 0);
+            cairo_paint(ic);
+            cairo_destroy(ic);
+            g_ptr_array_add(image_surfaces, img_surf);
+            g_ptr_array_add(image_labels,
+                    ep->filename
+                    ? g_strdup_printf("%s — %s", ep->mime_type, ep->filename)
+                    : g_strdup(ep->mime_type));
+        } else {
+            LOG_WARN("%s\nBild-Part konnte nicht geladen werden: %s",
+                    __func__, ep->mime_type ? ep->mime_type : "?");
         }
         g_object_unref(loader);
     }
     g_ptr_array_unref(parts);
 
-    /* ---- PangoAttrList: Header fett + größer (bis zur Trennlinie) ---- */
-    /* Länge des Header-Blocks in Bytes bestimmen */
+    /* ---- PangoAttrList für Header ---- */
     const char* sep_pos = strstr(full_text->str, "\n\n");
     guint header_end = sep_pos
             ? (guint)(sep_pos - full_text->str)
@@ -1971,113 +1802,90 @@ static RenderedDocument* render_gmessage(GBytes* bytes, int width) {
         pango_attr_list_insert(attrs, mono);
     }
 
-    /* ---- Rendern ---- */
-    /* Höhe berechnen */
-    cairo_surface_t* tmp_surf = cairo_image_surface_create(
-            CAIRO_FORMAT_ARGB32, 1, 1);
-    cairo_t* tmp_cr = cairo_create(tmp_surf);
-    PangoLayout* layout = pango_cairo_create_layout(tmp_cr);
-    pango_layout_set_width(layout, (width - 20) * PANGO_SCALE);
-    pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
-    pango_layout_set_text(layout, full_text->str, -1);
-    pango_layout_set_attributes(layout, attrs);
-    int pw, ph;
-    pango_layout_get_pixel_size(layout, &pw, &ph);
-    int height = ph + 20;
-    g_object_unref(layout);
-    cairo_destroy(tmp_cr);
-    cairo_surface_destroy(tmp_surf);
-
-    /* Echte Surface */
-    cairo_surface_t* surface = cairo_image_surface_create(
-            CAIRO_FORMAT_ARGB32, width, height);
-    cairo_t* cr = cairo_create(surface);
-    cairo_set_source_rgb(cr, 1.0, 1.0, 1.0);
-    cairo_paint(cr);
-    cairo_set_source_rgb(cr, 0.0, 0.0, 0.0);
-
-    layout = pango_cairo_create_layout(cr);
-    pango_layout_set_width(layout, (width - 20) * PANGO_SCALE);
-    pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
-    pango_layout_set_text(layout, full_text->str, -1);
-    pango_layout_set_attributes(layout, attrs);
-    cairo_move_to(cr, 10, 10);
-    pango_cairo_show_layout(cr, layout);
-    g_object_unref(layout);
-    cairo_destroy(cr);
+    /* ---- Text rendern ---- */
+    char *text_str = g_string_free(full_text, FALSE);
+    int height = 0;
+    cairo_surface_t* surface = render_text_to_surface(
+            text_str, attrs, width, 30000, &height);
     pango_attr_list_unref(attrs);
+    if (!surface) {
+        g_free(text_str);
+        g_ptr_array_unref(image_surfaces);
+        g_ptr_array_unref(image_labels);
+        g_object_unref(message);
+        return NULL;
+    }
 
-    /* ---- Bilder unter den Text-Block anfügen ---- */
+    /* ---- Bilder unter Text anfügen ---- */
     int total_height = height;
-    int img_gap = 12; /* Abstand zwischen Bildern und zum Text */
+    int img_gap = 12;
 
-    /* Gesamthöhe berechnen */
     for (guint i = 0; i < image_surfaces->len; i++) {
         cairo_surface_t* is = g_ptr_array_index(image_surfaces, i);
-        total_height += img_gap + 18 /* Label */ + img_gap
+        total_height += img_gap + 18 + img_gap
                 + cairo_image_surface_get_height(is);
     }
 
     if (image_surfaces->len > 0) {
-        /* Neue kombinierte Surface */
+        if (total_height > 30000) total_height = 30000;
+
         cairo_surface_t* combined = cairo_image_surface_create(
                 CAIRO_FORMAT_ARGB32, width, total_height);
-        cairo_t* cc = cairo_create(combined);
-
-        /* weißer Hintergrund */
-        cairo_set_source_rgb(cc, 1.0, 1.0, 1.0);
-        cairo_paint(cc);
-
-        /* Text-Surface einfügen */
-        cairo_set_source_surface(cc, surface, 0, 0);
-        cairo_paint(cc);
-        cairo_surface_destroy(surface);
-
-        /* Bilder anfügen */
-        int y_off = height;
-        cairo_set_source_rgb(cc, 0.0, 0.0, 0.0);
-        for (guint i = 0; i < image_surfaces->len; i++) {
-            cairo_surface_t* is = g_ptr_array_index(image_surfaces, i);
-            const char* lbl = g_ptr_array_index(image_labels, i);
-            int iw = cairo_image_surface_get_width(is);
-            int ih = cairo_image_surface_get_height(is);
-
-            /* Trennlinie */
-            cairo_set_line_width(cc, 1.0);
-            cairo_move_to(cc, 10, y_off + img_gap / 2.0);
-            cairo_line_to(cc, width - 10, y_off + img_gap / 2.0);
-            cairo_stroke(cc);
-            y_off += img_gap;
-
-            /* Label */
-            PangoLayout* lbl_layout = pango_cairo_create_layout(cc);
-            pango_layout_set_text(lbl_layout, lbl, -1);
-            PangoAttrList* lbl_attrs = pango_attr_list_new();
-            PangoAttribute* lbl_bold = pango_attr_weight_new(PANGO_WEIGHT_BOLD);
-            lbl_bold->start_index = 0;
-            lbl_bold->end_index   = G_MAXUINT;
-            pango_attr_list_insert(lbl_attrs, lbl_bold);
-            pango_layout_set_attributes(lbl_layout, lbl_attrs);
-            pango_attr_list_unref(lbl_attrs);
-            cairo_move_to(cc, 10, y_off);
-            pango_cairo_show_layout(cc, lbl_layout);
-            g_object_unref(lbl_layout);
-            y_off += 18;
-
-            /* Bild zentriert */
-            int x_off = (width - iw) / 2;
-            if (x_off < 0) x_off = 0;
-            cairo_set_source_surface(cc, is, x_off, y_off + img_gap / 2);
+        if (cairo_surface_status(combined) != CAIRO_STATUS_SUCCESS) {
+            LOG_WARN("%s\ncombined surface fehlgeschlagen", __func__);
+            cairo_surface_destroy(combined);
+        } else {
+            cairo_t* cc = cairo_create(combined);
+            cairo_set_source_rgb(cc, 1.0, 1.0, 1.0);
             cairo_paint(cc);
-            y_off += img_gap + ih;
 
-            /* Source nach Bild wieder auf Schwarz zurücksetzen */
+            cairo_set_source_surface(cc, surface, 0, 0);
+            cairo_paint(cc);
+            cairo_surface_destroy(surface);
+
+            int y_off = height;
             cairo_set_source_rgb(cc, 0.0, 0.0, 0.0);
-        }
+            for (guint i = 0; i < image_surfaces->len; i++) {
+                cairo_surface_t* is = g_ptr_array_index(image_surfaces, i);
+                const char* lbl = g_ptr_array_index(image_labels, i);
+                int iw = cairo_image_surface_get_width(is);
+                int ih = cairo_image_surface_get_height(is);
 
-        cairo_destroy(cc);
-        surface = combined;
-        height  = total_height;
+                cairo_set_line_width(cc, 1.0);
+                cairo_move_to(cc, 10, y_off + img_gap / 2.0);
+                cairo_line_to(cc, width - 10, y_off + img_gap / 2.0);
+                cairo_stroke(cc);
+                y_off += img_gap;
+
+                PangoLayout* lbl_layout = pango_cairo_create_layout(cc);
+                pango_layout_set_text(lbl_layout, lbl, -1);
+                PangoAttrList* lbl_attrs = pango_attr_list_new();
+                PangoAttribute* lbl_bold = pango_attr_weight_new(PANGO_WEIGHT_BOLD);
+                lbl_bold->start_index = 0;
+                lbl_bold->end_index   = G_MAXUINT;
+                pango_attr_list_insert(lbl_attrs, lbl_bold);
+                pango_layout_set_attributes(lbl_layout, lbl_attrs);
+                pango_attr_list_unref(lbl_attrs);
+                cairo_move_to(cc, 10, y_off);
+                pango_cairo_show_layout(cc, lbl_layout);
+                g_object_unref(lbl_layout);
+                y_off += 18;
+
+                int x_off = (width - iw) / 2;
+                if (x_off < 0) x_off = 0;
+                cairo_set_source_surface(cc, is, x_off, y_off + img_gap / 2);
+                cairo_paint(cc);
+                y_off += img_gap + ih;
+
+                cairo_set_source_rgb(cc, 0.0, 0.0, 0.0);
+
+                if (y_off >= total_height) break;
+            }
+
+            cairo_destroy(cc);
+            surface = combined;
+            height  = total_height;
+        }
     }
 
     g_ptr_array_unref(image_surfaces);
@@ -2087,15 +1895,12 @@ static RenderedDocument* render_gmessage(GBytes* bytes, int width) {
     result->surface = surface;
     result->width   = width;
     result->height  = height;
-    result->searchable_text = g_string_free(full_text, FALSE);
+    result->searchable_text = text_str;
     result->type = DOC_TYPE_EML;
 
     g_object_unref(message);
     return result;
 }
-
-
-
 
 static RenderedDocument* render_document_from_bytes(GBytes *bytes, int render_width,
         SondFilePart *sfp) {
@@ -2428,6 +2233,7 @@ gint sond_render_with_term(GBytes *input, SondFilePart *sfp,
 
     GtkWidget *win = show_surface_viewer(rd->surface, rd->width, rd->height,
             window_title, rd->searchable_text, sfp);
+    rd->surface = NULL;
     free_rendered_document(rd);
 
     if (!win) {
@@ -2484,6 +2290,7 @@ gint sond_render(GBytes* input, SondFilePart* sfp, gchar const* title,
 
 	widget = show_surface_viewer(rd->surface, rd->width, rd->height,
 			window_title, rd->searchable_text, sfp);
+	rd->surface = NULL;
 	free_rendered_document(rd);
 	if (!widget) {
 		if (error) *error = g_error_new(SOND_ERROR, 0,
