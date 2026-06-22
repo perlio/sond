@@ -2263,8 +2263,10 @@ static gint zond_treeview_open_auszug(ZondTreeview* ztv, GtkTreeIter* iter_paren
 						iter_pos->user_data == iter_tmp.user_data) {
 					found = TRUE;
 
-					if (end)
-						pdf_pos->seite += pdf_pos_loop.seite + 1;
+					if (end) {
+						pdf_pos->seite += pdf_pos_loop.seite ;
+						pdf_pos->index = EOP;
+					}
 				}
 				else
 					pdf_pos->seite += pdf_pos_loop.seite + 1;
@@ -2273,6 +2275,12 @@ static gint zond_treeview_open_auszug(ZondTreeview* ztv, GtkTreeIter* iter_paren
 				pdf_pos->seite += pdf_pos_loop.seite + 1;
 		}
 	} while (gtk_tree_model_iter_next(model, &iter_tmp));
+
+	//Wenn letzte Seite des Dokuments: nicht Anfang nächster Seite!
+	if (!iter_pos && end) {
+		pdf_pos->seite--;
+		pdf_pos->index = EOP;
+	}
 
 	*dd = dd_first;
 
