@@ -47,7 +47,7 @@ void viewer_springen_zu_pos_pdf(PdfViewer *pv, PdfPos pdf_pos, gdouble delta) {
 	gdouble value = 0.0;
 	ViewerPageNew *viewer_page = NULL;
 
-	if (pdf_pos.seite > pv->arr_pages->len)
+	if (pdf_pos.seite >= pv->arr_pages->len)
 		pdf_pos.seite = pv->arr_pages->len - 1;
 
 	viewer_page = g_ptr_array_index(pv->arr_pages, pdf_pos.seite);
