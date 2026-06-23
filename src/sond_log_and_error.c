@@ -20,6 +20,7 @@
 
 #include <string.h>
 #include <sys/stat.h>
+#include <signal.h>
 #include <glib/gstdio.h>
 
 #ifdef _WIN32
@@ -200,6 +201,47 @@ void logging_cleanup(void)
         g_free((gpointer)_log_domain);
         _log_domain = NULL;
     }
+}
+
+// ============================================================================
+// Crash-Handler
+// ============================================================================
+
+static void crash_handler(int sig)
+{
+    const char *msg;
+
+    switch (sig) {
+        case SIGSEGV: msg = "CRASH: SIGSEGV (Speicherzugriffsfehler)\n"; break;
+        case SIGABRT: msg = "CRASH: SIGABRT (abort - z.B. g_assert/g_error)\n"; break;
+        case SIGFPE:  msg = "CRASH: SIGFPE (z.B. Division durch 0)\n"; break;
+        case SIGILL:  msg = "CRASH: SIGILL (ungueltige Instruktion)\n"; break;
+        default:      msg = "CRASH: unbekanntes Signal\n"; break;
+    }
+
+    // Bewusst kein g_log/LOG_MSG hier - im Signalkontext nur
+    // einfache, robuste I/O verwenden.
+    if (_global_log_file) {
+        fwrite(msg, 1, strlen(msg), _global_log_file);
+        fflush(_global_log_file);
+    }
+    if (_has_console) {
+        fwrite(msg, 1, strlen(msg), stderr);
+        fflush(stderr);
+    }
+
+    // Standard-Verhalten wiederherstellen und Signal erneut ausloesen,
+    // damit z.B. unter MSYS2/Windows ggf. noch ein Core-Dump entsteht.
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+
+void install_crash_handler(void)
+{
+    signal(SIGSEGV, crash_handler);
+    signal(SIGABRT, crash_handler);
+    signal(SIGFPE, crash_handler);
+    signal(SIGILL, crash_handler);
 }
 
 // ============================================================================

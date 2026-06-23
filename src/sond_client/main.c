@@ -58,6 +58,7 @@ int main(int argc, char *argv[]) {
     gchar *config_file = "SondClient.conf";
     
     logging_init("sond_client");
+    install_crash_handler();
     
     gtk_init();
     

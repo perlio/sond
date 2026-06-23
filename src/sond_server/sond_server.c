@@ -1503,6 +1503,7 @@ int main(int argc, char *argv[]) {
     gchar *config_file = "/etc/sond-server/sond-server.conf";
 
     logging_init("sond_server");
+    install_crash_handler();
 
     /* Command Line Argument für Config-Pfad (optional) */
     if (argc > 1) {

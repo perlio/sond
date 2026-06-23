@@ -107,6 +107,7 @@ int main(int argc, char **argv) {
     g_signal_connect(app, "shutdown", G_CALLBACK(cb_shutdown), &zond);
 
 	logging_init("zond");
+	install_crash_handler();
 
 	status = g_application_run(G_APPLICATION(app), argc, argv);
 

@@ -127,7 +127,11 @@ clean:
 	rm -rf $(BUILD_DIR)/bin
 
 # Release packaging
-RELEASE_VERSION ?= 1.0.0
+ZOND_INIT_H     := src/zond/zond_init.h
+ZOND_VER_MAJOR  := $(shell grep -oP '(?<=define ZOND_VERSION_MAJOR )[0-9]+' $(ZOND_INIT_H))
+ZOND_VER_MINOR  := $(shell grep -oP '(?<=define ZOND_VERSION_MINOR )[0-9]+' $(ZOND_INIT_H))
+ZOND_VER_PATCH  := $(shell grep -oP '(?<=define ZOND_VERSION_PATCH )[0-9]+' $(ZOND_INIT_H))
+RELEASE_VERSION ?= $(ZOND_VER_MAJOR).$(ZOND_VER_MINOR).$(ZOND_VER_PATCH)
 RELEASE_EXE     := Release/bin/zond.exe
 VIEWER_EXE      := Release/bin/viewer.exe
 RELEASE_DIR      = zond-$(RELEASE_VERSION)-win64
@@ -147,4 +151,8 @@ $(RELEASE_ZIP): $(RELEASE_EXE) $(VIEWER_EXE)
 	@echo "=== Release fertig ==="
 	@echo "Verzeichnis: $(RELEASE_DIR)"
 	@echo "ZIP:         $(RELEASE_ZIP)"
+	@echo ""
+	@echo "Nicht vergessen zu taggen:"
+	@echo "  git tag -a zond-v$(RELEASE_VERSION) -m \"zond: <Beschreibung>\""
+	@echo "  git push origin zond-v$(RELEASE_VERSION)"
 	

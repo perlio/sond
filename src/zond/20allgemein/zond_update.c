@@ -479,19 +479,19 @@ gint zond_update(Projekt *zond, InfoWindow *info_window, GError **error) {
 	//tag mit aktueller version vergleichen
 	strv_tags = g_strsplit(vtag + 1, ".", -1);
 
-	if (atoi(strv_tags[0]) < atoi( MAJOR))
+	if (atoi(strv_tags[0]) < ZOND_VERSION_MAJOR)
 		goto no_update;
-	else if (atoi(strv_tags[0]) > atoi( MAJOR))
+	else if (atoi(strv_tags[0]) > ZOND_VERSION_MAJOR)
 		goto update;
 	else {
-		if (atoi(strv_tags[1]) < atoi( MINOR))
+		if (atoi(strv_tags[1]) < ZOND_VERSION_MINOR)
 			goto no_update;
-		else if (atoi(strv_tags[1]) > atoi( MINOR))
+		else if (atoi(strv_tags[1]) > ZOND_VERSION_MINOR)
 			goto update;
 		else {
-			if (atoi(strv_tags[2]) <= atoi( PATCH))
+			if (atoi(strv_tags[2]) <= ZOND_VERSION_PATCH)
 				goto no_update;
-			else if (atoi(strv_tags[2]) > atoi( PATCH))
+			else if (atoi(strv_tags[2]) > ZOND_VERSION_PATCH)
 				goto update;
 		}
 	}
@@ -593,7 +593,7 @@ gint zond_update(Projekt *zond, InfoWindow *info_window, GError **error) {
 	argv[0] = g_strdup("ain/zond_installer");
 #endif // __linux__
 
-	argv[1] = "v" MAJOR "." MINOR "." PATCH;
+	argv[1] = "v" ZOND_VERSION_STR;
 
 	res = g_spawn_async( NULL, argv, NULL, G_SPAWN_DEFAULT,
 	NULL, NULL, NULL, error);

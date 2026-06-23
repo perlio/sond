@@ -10,7 +10,30 @@ if [ $# -lt 1 ]; then
 fi
 
 EXE_FILE="$1"
-VERSION="${2:-1.0}"
+
+if [ -n "$2" ]; then
+    VERSION="$2"
+else
+    # Version automatisch aus zond_init.h ermitteln, falls nicht angegeben
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    ZOND_INIT_H="$SCRIPT_DIR/src/zond/zond_init.h"
+    if [ -f "$ZOND_INIT_H" ]; then
+        VMAJOR=$(grep -oP '(?<=define ZOND_VERSION_MAJOR )[0-9]+' "$ZOND_INIT_H")
+        VMINOR=$(grep -oP '(?<=define ZOND_VERSION_MINOR )[0-9]+' "$ZOND_INIT_H")
+        VPATCH=$(grep -oP '(?<=define ZOND_VERSION_PATCH )[0-9]+' "$ZOND_INIT_H")
+        if [ -n "$VMAJOR" ] && [ -n "$VMINOR" ] && [ -n "$VPATCH" ]; then
+            VERSION="$VMAJOR.$VMINOR.$VPATCH"
+            echo "Version automatisch aus zond_init.h ermittelt: $VERSION"
+        else
+            echo "Warnung: Version konnte nicht aus zond_init.h gelesen werden, verwende Fallback 1.0"
+            VERSION="1.0"
+        fi
+    else
+        echo "Warnung: $ZOND_INIT_H nicht gefunden, verwende Fallback 1.0"
+        VERSION="1.0"
+    fi
+fi
+
 APP_NAME=$(basename "$EXE_FILE" .exe)
 RELEASE_DIR="${APP_NAME}-${VERSION}-win64"
 

@@ -301,6 +301,7 @@ gint main(gint argc, gchar **argv) {
 	g_signal_connect(app, "open", G_CALLBACK (open_app), &zond);
 
 	logging_init("zond_viewer");
+	install_crash_handler();
 
 	gint status = g_application_run(G_APPLICATION(app), argc, argv);
 

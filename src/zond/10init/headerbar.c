@@ -479,7 +479,7 @@ static void cb_app_autosave(GSimpleAction *a, GVariant *p, gpointer d) {
 static void cb_app_ueber(GSimpleAction *a, GVariant *p, gpointer d) {
 	Projekt *zond = (Projekt*) d;
 	display_message(zond->app_window,
-			"Version: " MAJOR "." MINOR "." PATCH, NULL);
+			"Version: " ZOND_VERSION_STR, NULL);
 }
 
 static void cb_app_update(GSimpleAction *a, GVariant *p, gpointer d) {

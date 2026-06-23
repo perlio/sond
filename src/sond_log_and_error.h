@@ -85,6 +85,16 @@ void logging_cleanup(void);
  */
 gboolean has_console(void);
 
+/**
+ * install_crash_handler:
+ *
+ * Installiert Signal-Handler für SIGSEGV, SIGABRT, SIGFPE, SIGILL.
+ * Schreibt im Crash-Fall eine minimale Meldung ins Log, bevor der
+ * Prozess durch das Standard-Verhalten beendet wird.
+ * Sollte direkt nach logging_init() aufgerufen werden.
+ */
+void install_crash_handler(void);
+
 // ============================================================================
 // Logging-Makros
 // ============================================================================

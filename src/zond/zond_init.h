@@ -1,9 +1,13 @@
 #ifndef ZOND_INIT_H_INCLUDED
 #define ZOND_INIT_H_INCLUDED
 
-#define MAJOR "1" //wenn sich Struktur der .znd-Datei ändert
-#define MINOR "0" //neues Feature
-#define PATCH "0" //irjendwatt
+#define ZOND_VERSION_MAJOR 1 //wenn sich Struktur der .znd-Datei ändert
+#define ZOND_VERSION_MINOR 0 //neues Feature
+#define ZOND_VERSION_PATCH 0 //irjendwatt
+
+#define ZOND_VERSION_STR G_STRINGIFY(ZOND_VERSION_MAJOR) "." \
+                          G_STRINGIFY(ZOND_VERSION_MINOR) "." \
+                          G_STRINGIFY(ZOND_VERSION_PATCH)
 
 #include <mupdf/fitz.h>
 #include <mupdf/pdf.h>
