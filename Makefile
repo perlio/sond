@@ -69,6 +69,17 @@ CFLAGS += $(shell pkg-config --cflags gtk4 libsoup-3.0 json-glib-1.0 libmariadb 
 LDFLAGS += $(shell pkg-config --libs gtk4 libsoup-3.0 json-glib-1.0 libmariadb jansson)
 endif
 
+ifneq (,$(findstring $(MAKECMDGOALS), zond_installer))
+SRCS += $(SRC_DIRS)/zond/zond_installer.c \
+	$(SRC_DIRS)/sond_file_helper.c $(SRC_DIRS)/sond_log_and_error.c \
+	$(SRC_DIRS)/misc_stdlib.c
+CFLAGS += $(shell pkg-config --cflags glib-2.0 gio-2.0)
+LDFLAGS += $(shell pkg-config --libs glib-2.0 gio-2.0)
+ifneq ($(CONFIG), Debug_Linux)
+LDFLAGS += -lshlwapi
+endif
+endif
+
 # Object files
 OBJS := $(SRCS:%=$(OBJ_DIR)/%.o)
 
@@ -88,6 +99,8 @@ viewer: $(GSCHEMAS_COMPILED) $(BIN_DIR)/viewer.exe
 sond_server: $(BIN_DIR)/sond_server.exe
 
 sond_client: $(BIN_DIR)/sond_client.exe
+
+zond_installer: $(BIN_DIR)/zond_installer.exe
 
 seafile_test: $(BIN_DIR)/seafile_test.exe
 
@@ -134,6 +147,7 @@ ZOND_VER_PATCH  := $(shell grep -oP '(?<=define ZOND_VERSION_PATCH )[0-9]+' $(ZO
 RELEASE_VERSION ?= $(ZOND_VER_MAJOR).$(ZOND_VER_MINOR).$(ZOND_VER_PATCH)
 RELEASE_EXE     := Release/bin/zond.exe
 VIEWER_EXE      := Release/bin/viewer.exe
+INSTALLER_EXE   := Release/bin/zond_installer.exe
 RELEASE_DIR      = zond-$(RELEASE_VERSION)-win64
 RELEASE_ZIP      = $(RELEASE_DIR).zip
 
@@ -141,9 +155,10 @@ RELEASE_ZIP      = $(RELEASE_DIR).zip
 release:
 	$(MAKE) CONFIG=Release CFLAGS_CONFIG=-O3 LDFLAGS_CONFIG=-mwindows zond
 	$(MAKE) CONFIG=Release CFLAGS_CONFIG=-O3 LDFLAGS_CONFIG=-mwindows viewer
+	$(MAKE) CONFIG=Release CFLAGS_CONFIG=-O3 LDFLAGS_CONFIG=-mwindows zond_installer
 	$(MAKE) $(RELEASE_ZIP)
 
-$(RELEASE_ZIP): $(RELEASE_EXE) $(VIEWER_EXE)
+$(RELEASE_ZIP): $(RELEASE_EXE) $(VIEWER_EXE) $(INSTALLER_EXE)
 	bash create-gtk-release.sh $(RELEASE_EXE) $(RELEASE_VERSION)
 	cp $(VIEWER_EXE) $(RELEASE_DIR)/bin/
 	zip -q -r $(RELEASE_ZIP) $(RELEASE_DIR)
@@ -153,6 +168,25 @@ $(RELEASE_ZIP): $(RELEASE_EXE) $(VIEWER_EXE)
 	@echo "ZIP:         $(RELEASE_ZIP)"
 	@echo ""
 	@echo "Nicht vergessen zu taggen:"
-	@echo "  git tag -a zond-v$(RELEASE_VERSION) -m \"zond: <Beschreibung>\""
+	@echo "  make tag MSG=\"Beschreibung\""
 	@echo "  git push origin zond-v$(RELEASE_VERSION)"
 	
+
+.PHONY: tag
+tag:
+	@if [ -z "$(MSG)" ]; then \
+		echo "Fehler: Bitte Beschreibung angeben, z.B. make tag MSG=\"GtkTextView-Rendering\""; \
+		exit 1; \
+	fi
+	@if ! git diff --quiet || ! git diff --cached --quiet; then \
+		echo "Fehler: Working tree ist nicht clean. Erst committen, dann taggen."; \
+		git status --short; \
+		exit 1; \
+	fi
+	@if git rev-parse "zond-v$(RELEASE_VERSION)" >/dev/null 2>&1; then \
+		echo "Fehler: Tag zond-v$(RELEASE_VERSION) existiert bereits."; \
+		exit 1; \
+	fi
+	git tag -a zond-v$(RELEASE_VERSION) -m "zond: $(MSG)"
+	@echo "Tag zond-v$(RELEASE_VERSION) erstellt. Push mit:"
+	@echo "  git push origin zond-v$(RELEASE_VERSION)"

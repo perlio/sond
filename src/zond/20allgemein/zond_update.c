@@ -24,6 +24,7 @@
 #include <sys/stat.h>
 #include <errno.h>
 #include <utime.h>
+#include <unistd.h>
 
 #include "../../sond_log_and_error.h"
 #include "../../sond_file_helper.h"
@@ -463,7 +464,7 @@ gint zond_update(Projekt *zond, InfoWindow *info_window, GError **error) {
 	gchar **strv_tags = NULL;
 	gchar *title = NULL;
 	gint rc = 0;
-	gchar *argv[4] = { NULL };
+	gchar *argv[5] = { NULL };
 	gchar *vtag = NULL;
 	gboolean ret = FALSE;
 	gboolean res = FALSE;
@@ -567,13 +568,13 @@ gint zond_update(Projekt *zond, InfoWindow *info_window, GError **error) {
 		gint rc = 0;
 		gchar *errmsg = NULL;
 
-		argv[2] = g_strdup(
+		argv[3] = g_strdup(
 				zond_dbase_get_path(zond->dbase_zond->zond_dbase_store));
 
 		rc = project_close(zond, &errmsg);
 		if (rc) {
 			g_free(vtag);
-			g_free(argv[2]);
+			g_free(argv[3]);
 
 			if (rc == -1) {
 				*error = g_error_new( ZOND_ERROR, ZOND_ERROR_IO,
@@ -594,10 +595,12 @@ gint zond_update(Projekt *zond, InfoWindow *info_window, GError **error) {
 #endif // __linux__
 
 	argv[1] = "v" ZOND_VERSION_STR;
+	argv[2] = g_strdup_printf("%lu", (unsigned long) getpid());
 
 	res = g_spawn_async( NULL, argv, NULL, G_SPAWN_DEFAULT,
 	NULL, NULL, NULL, error);
 	g_free(argv[0]);
+	g_free(argv[2]);
 	if (!res)
 		ERROR_Z
 

@@ -245,8 +245,22 @@ if [ "$MAGIC_FOUND" = false ]; then
 fi
 echo "  → Fertig"
 
-# 10. Config & Launcher
-echo "[10/10] Erstelle Konfiguration..."
+# 10. zond_installer (fuer Auto-Update, liegt direkt im Release-Root,
+#     NICHT in bin/, damit er beim Update nicht mit den zu ersetzenden
+#     Unterverzeichnissen kollidiert)
+echo "[10/11] Kopiere zond_installer..."
+INSTALLER_EXE="$(dirname "$EXE_FILE")/zond_installer.exe"
+if [ -f "$INSTALLER_EXE" ]; then
+    cp "$INSTALLER_EXE" "$RELEASE_DIR/zond_installer.exe"
+    echo "  + zond_installer.exe"
+else
+    echo "  ! zond_installer.exe nicht gefunden in $(dirname "$EXE_FILE")"
+    echo "  ! Bitte zuerst 'make zond_installer' ausfuehren"
+fi
+echo "  → Fertig"
+
+# 11. Config & Launcher
+echo "[11/11] Erstelle Konfiguration..."
 
 mkdir -p "$RELEASE_DIR/etc/gtk-3.0"
 cat > "$RELEASE_DIR/etc/gtk-3.0/settings.ini" << 'EOF'
