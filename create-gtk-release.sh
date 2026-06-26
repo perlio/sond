@@ -350,11 +350,6 @@ echo "  + README.txt"
 
 echo "  → Fertig"
 
-# ZIP
-echo ""
-echo "Erstelle ZIP..."
-zip -q -r "${RELEASE_DIR}.zip" "$RELEASE_DIR" 2>/dev/null || echo "  (zip nicht installiert)"
-
 # Cleanup
 rm -f /tmp/dll_list.txt
 

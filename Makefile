@@ -151,21 +151,28 @@ release:
 	$(MAKE) CONFIG=Release CFLAGS_CONFIG=-O3 LDFLAGS_CONFIG=-mwindows zond
 	$(MAKE) CONFIG=Release CFLAGS_CONFIG=-O3 LDFLAGS_CONFIG=-mwindows viewer
 	$(MAKE) CONFIG=Release CFLAGS_CONFIG=-O3 LDFLAGS_CONFIG=-mwindows zond_installer
-	$(MAKE) $(RELEASE_ZIP)
+	$(MAKE) release-dir
 
-$(RELEASE_ZIP): $(RELEASE_EXE) $(VIEWER_EXE) $(INSTALLER_EXE)
+.PHONY: release-dir
+release-dir: $(RELEASE_EXE) $(VIEWER_EXE) $(INSTALLER_EXE)
 	bash create-gtk-release.sh $(RELEASE_EXE) $(RELEASE_VERSION)
 	cp $(VIEWER_EXE) $(RELEASE_DIR)/bin/
-	zip -q -r $(RELEASE_ZIP) $(RELEASE_DIR)
 	@echo ""
-	@echo "=== Release fertig ==="
+	@echo "=== Release-Verzeichnis fertig ==="
 	@echo "Verzeichnis: $(RELEASE_DIR)"
-	@echo "ZIP:         $(RELEASE_ZIP)"
 	@echo ""
-	@echo "Nicht vergessen zu taggen:"
-	@echo "  make tag MSG=\"Beschreibung\""
-	@echo "  git push origin zond-v$(RELEASE_VERSION)"
-	
+	@echo "Zum Veroeffentlichen: make publish MSG=\"Beschreibung\""
+
+.PHONY: release-zip
+release-zip: release-dir
+	zip -q -r $(RELEASE_ZIP) $(RELEASE_DIR)
+	@echo "ZIP: $(RELEASE_ZIP)"
+
+.PHONY: bump-patch
+NEW_PATCH := $(shell expr $(ZOND_VER_PATCH) + 1)
+bump-patch:
+	sed -i "s/define ZOND_VERSION_PATCH [0-9]\+/define ZOND_VERSION_PATCH $(NEW_PATCH)/" $(ZOND_INIT_H)
+	@echo "Patch-Version erhoeht: $(ZOND_VER_MAJOR).$(ZOND_VER_MINOR).$(NEW_PATCH)"
 
 .PHONY: tag
 tag:
@@ -185,3 +192,30 @@ tag:
 	git tag -a zond-v$(RELEASE_VERSION) -m "zond: $(MSG)"
 	@echo "Tag zond-v$(RELEASE_VERSION) erstellt. Push mit:"
 	@echo "  git push origin zond-v$(RELEASE_VERSION)"
+
+# Oeffentliches Release: Patch erhoehen, bauen, zippen, taggen, pushen, GitHub-Release anlegen
+.PHONY: publish
+publish:
+	@if [ -z "$(MSG)" ]; then \
+		echo "Fehler: Bitte Beschreibung angeben, z.B. make publish MSG=\"GtkTextView-Rendering\""; \
+		exit 1; \
+	fi
+	@if ! git diff --quiet || ! git diff --cached --quiet; then \
+		echo "Fehler: Working tree ist nicht clean. Erst committen."; \
+		git status --short; \
+		exit 1; \
+	fi
+	$(MAKE) bump-patch
+	git commit -am "Bump version (publish)"
+	$(MAKE) do-publish MSG="$(MSG)"
+
+.PHONY: do-publish
+do-publish:
+	$(MAKE) release-zip
+	$(MAKE) tag MSG="$(MSG)"
+	git push origin zond-v$(RELEASE_VERSION)
+	gh release create zond-v$(RELEASE_VERSION) $(RELEASE_ZIP) \
+		--title "zond $(RELEASE_VERSION)" \
+		--notes "$(MSG)"
+	@echo ""
+	@echo "=== Veroeffentlicht: zond-v$(RELEASE_VERSION) ==="
