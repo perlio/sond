@@ -188,7 +188,7 @@ echo "  → Fertig"
 
 # 7. Schemas (nur gschemas.compiled kopieren)
 echo "[7/9] Kopiere GSettings Schemas..."
-PROJECT_SCHEMA_COMPILED="$(dirname "$EXE_FILE")/../share/glib-2.0/schemas/gschemas.compiled"
+PROJECT_SCHEMA_COMPILED="$(dirname "$EXE_FILE")/../../schemas/gschemas.compiled"
 if [ -f "$PROJECT_SCHEMA_COMPILED" ]; then
     mkdir -p "$RELEASE_DIR/share/glib-2.0/schemas"
     cp "$PROJECT_SCHEMA_COMPILED" "$RELEASE_DIR/share/glib-2.0/schemas/"

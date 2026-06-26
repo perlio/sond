@@ -30,6 +30,7 @@
 
 #include "zond_dbase.h"
 #include "zond_treeview.h"
+#include "zond_init.h"
 
 #include "99conv/general.h"
 
@@ -87,7 +88,7 @@ static gint zond_convert_create_db_maj_0(sqlite3 *db, gchar **errmsg) {
 					"); "
 
 					"INSERT INTO baum_inhalt (node_id, parent_id, older_sibling_id, "
-					"node_text) VALUES (0, 0, 0, '" MAJOR "');"
+					"node_text) VALUES (0, 0, 0, '" G_STRINGIFY(ZOND_VERSION_MAJOR) "');"
 
 			//Hilfstabelle "dateien"
 			//hier werden angebundene Dateien erfaßt
@@ -1204,7 +1205,7 @@ gint zond_convert(ZondDBase *zond_dbase, gchar const *v_string, GError **error) 
 		return -1;
 	}
 
-	if (atoi(v_string) > atoi( MAJOR)) {
+	if (atoi(v_string) > ZOND_VERSION_MAJOR) {
 		if (error)
 			*error = g_error_new( ZOND_ERROR, 0,
 					"%s\nVersion noch nicht verfügbar", __func__);

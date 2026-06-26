@@ -184,18 +184,43 @@ static int move_vtag_contents(const char *vtag_dir, const char *base_dir,
 	return fail_count;
 }
 
+// Prueft, ob path ein echtes Unterverzeichnis von parent ist
+// (als String-Praefix-Vergleich, mit Trennzeichen).
+static gboolean path_is_inside(const char *path, const char *parent) {
+	size_t parent_len = strlen(parent);
+
+	if (strncmp(path, parent, parent_len) != 0)
+		return FALSE;
+
+	// direkt danach muss ein Pfadtrenner kommen (kein Praefix-Zufallstreffer
+	// wie "/foo/bar" vs. "/foo/barbaz")
+	if (path[parent_len] != '/' && path[parent_len] != '\\')
+		return FALSE;
+
+	return TRUE;
+}
+
 int main(int argc, char **argv) {
 	int rc = 0;
-	char *vtag_dir = NULL;
-	char vtag_dir_tmp[MAX_PATH] = { 0 };
-	char base_dir[PATH_MAX] = { 0 };
-	char *vtag = NULL;
+	char *exe_dir = NULL;
+	gchar *vtag_dir = NULL;
+	gchar *base_dir = NULL;
+	gchar *vtag = NULL;
 	GError *error_rem = NULL;
 	int fail_count = 0;
 	const char *skip_names[2] = { NULL, NULL };
 
 	logging_init("zond_installer");
 	install_crash_handler();
+
+	//Sicherheitsschranke 1: ohne argv[1] (Version) und argv[2] (PID)
+	//ist dies kein echter Update-Lauf durch zond - keinesfalls etwas loeschen
+	if (!argv[1] || !argv[2]) {
+		LOG_ERROR("zond_installer wurde ohne die erforderlichen Parameter "
+				"(Version, PID) aufgerufen - moeglicherweise kein echter "
+				"Update-Lauf. Breche ab, ohne etwas zu veraendern.");
+		goto end;
+	}
 
 	//warten, bis altes zond beendet ist
 	if (argv[2]) { //argv[2] ist die PID der alten zond.exe
@@ -204,18 +229,46 @@ int main(int argc, char **argv) {
 					"fahre trotzdem fort", argv[2]);
 	}
 
-	vtag_dir = get_base_dir(); // mit / am Ende
-	if (!vtag_dir) {
-		LOG_ERROR("Konnte base-dir nicht ermitteln");
+	//der Installer liegt direkt in vtag_dir (z.B. ".../zond-x.y.z-win64/v1.4.0/"),
+	//NICHT in einem bin-Unterverzeichnis - daher exe_dir == vtag_dir
+	exe_dir = get_exe_dir();
+	if (!exe_dir) {
+		LOG_ERROR("Konnte eigenes Verzeichnis nicht ermitteln");
 		goto end;
 	}
 
-	strncpy(vtag_dir_tmp, vtag_dir, strlen(vtag_dir) - 1); // letztes Zeichen (/) abschneiden
-	free(vtag_dir);
+	vtag_dir = g_canonicalize_filename(exe_dir, NULL);
+	free(exe_dir);
 
-	vtag = strrchr(vtag_dir_tmp, '\\') + 1;
+	vtag = g_path_get_basename(vtag_dir); // z.B. "v1.4.0"
+	base_dir = g_path_get_dirname(vtag_dir); // eine Ebene hoch
 
-	strncpy(base_dir, vtag_dir_tmp, strlen(vtag_dir_tmp) - strlen(vtag));
+	//Sicherheitsschranke 2: vtag_dir muss tatsaechlich INNERHALB von
+	//base_dir liegen (verhindert, dass eine verzerrte Pfadberechnung auf
+	//einen voellig falschen Ort zeigt)
+	if (!path_is_inside(vtag_dir, base_dir)) {
+		LOG_ERROR("Sicherheitscheck fehlgeschlagen: %s liegt nicht innerhalb "
+				"von %s - breche ab, ohne etwas zu veraendern.",
+				vtag_dir, base_dir);
+		goto end;
+	}
+
+	//Sicherheitsschranke 3: base_dir muss plausibel nach einer echten
+	//zond-Installation aussehen (bin/zond.exe muss existieren) - sonst
+	//keinesfalls loeschen
+	{
+		gchar *check_path = g_build_filename(base_dir, "bin", "zond.exe", NULL);
+		gboolean exists = g_file_test(check_path, G_FILE_TEST_EXISTS);
+		g_free(check_path);
+
+		if (!exists) {
+			LOG_ERROR("Sicherheitscheck fehlgeschlagen: %s/bin/zond.exe "
+					"existiert nicht - %s sieht nicht wie eine echte "
+					"zond-Installation aus. Breche ab, ohne etwas zu "
+					"veraendern.", base_dir, base_dir);
+			goto end;
+		}
+	}
 
 	rc = chdir(base_dir);
 	if (rc) {
@@ -279,10 +332,10 @@ int main(int argc, char **argv) {
 				"geloescht werden", fail_count, base_dir);
 
 	//neue Version an ihren Platz verschieben (ausser der eigenen, laufenden exe)
-	fail_count = move_vtag_contents(vtag_dir_tmp, base_dir, "zond_installer.exe");
+	fail_count = move_vtag_contents(vtag_dir, base_dir, "zond_installer.exe");
 	if (fail_count)
 		LOG_WARN("%d Eintraege konnten von %s nach %s nicht verschoben "
-				"werden", fail_count, vtag_dir_tmp, base_dir);
+				"werden", fail_count, vtag_dir, base_dir);
 
 	//zond neu starten
 	{
@@ -308,6 +361,10 @@ int main(int argc, char **argv) {
 	}
 
 end:
+	g_free(vtag_dir);
+	g_free(vtag);
+	g_free(base_dir);
+
 	LOG_INFO("zond_installer beendet");
 	logging_cleanup();
 

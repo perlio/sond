@@ -3,7 +3,7 @@
 
 #define ZOND_VERSION_MAJOR 1 //wenn sich Struktur der .znd-Datei ändert
 #define ZOND_VERSION_MINOR 0 //neues Feature
-#define ZOND_VERSION_PATCH 17 //irjendwatt
+#define ZOND_VERSION_PATCH 0 //irjendwatt
 
 #define ZOND_VERSION_STR G_STRINGIFY(ZOND_VERSION_MAJOR) "." \
                           G_STRINGIFY(ZOND_VERSION_MINOR) "." \
@@ -124,7 +124,6 @@ struct _Menu {
 typedef struct _Menu Menu;
 
 typedef struct _Projekt {
-	gchar *base_dir;
 	gchar* exe_dir;
 
 	fz_context *ctx;

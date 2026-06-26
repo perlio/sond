@@ -264,7 +264,6 @@ static void init_schema(Projekt* zond) {
 static void
 init(GtkApplication *app, Projekt *zond) {
 	zond->arr_pv = g_ptr_array_new();
-	zond->base_dir = get_base_dir();
 	zond->exe_dir = get_exe_dir();
 	zond->ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
 	if (!zond->ctx)

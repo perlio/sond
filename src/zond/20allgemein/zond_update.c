@@ -38,12 +38,12 @@
 #include "project.h"
 
 static gint zond_update_unzip(Projekt *zond, InfoWindow *info_window,
-		const gchar *vtag, GError **error) {
+		const gchar *base_dir, const gchar *vtag, GError **error) {
 	gchar *zipname = NULL; // File path
 	struct zip *za; // Zip archive
 	int err; // Stores error code
 
-	zipname = g_strconcat(zond->base_dir, "zond-x86_64-", vtag, ".zip", NULL);
+	zipname = g_strconcat(base_dir, "/zond-x86_64-", vtag, ".zip", NULL);
 	// Open the zip file
 	za = zip_open(zipname, 0, &err);
 	g_free(zipname);
@@ -93,7 +93,7 @@ static gint zond_update_unzip(Projekt *zond, InfoWindow *info_window,
 			gchar *dir = NULL;
 			gint rc = 0;
 
-			dir = g_strconcat(zond->base_dir, vtag, "/", sb.name, NULL);
+			dir = g_strconcat(base_dir, "/", vtag, "/", sb.name, NULL);
 			rc = mkdir_p(dir);
 			g_free(dir);
 			if (rc && errno != EEXIST) {
@@ -125,7 +125,7 @@ static gint zond_update_unzip(Projekt *zond, InfoWindow *info_window,
 				return -1;
 			}
 
-			filename = g_strconcat(zond->base_dir, vtag, "/", sb.name, NULL);
+			filename = g_strconcat(base_dir, "/", vtag, "/", sb.name, NULL);
 			fd = fopen(filename, "wb"); // Create new file
 			g_free(filename);
 			if (fd == NULL) {
@@ -294,7 +294,7 @@ static gint zond_update_unzip(Projekt *zond, InfoWindow *info_window,
 			//Änderungsdatum anpassen
 			s_time.actime = time( NULL);
 			s_time.modtime = sb.mtime;
-			filename = g_strconcat(zond->base_dir, vtag, "/", sb.name, NULL);
+			filename = g_strconcat(base_dir, "/", vtag, "/", sb.name, NULL);
 			rc = utime(filename, &s_time);
 			if (rc) {
 				*error = g_error_new( ZOND_ERROR, ZOND_ERROR_IO,
@@ -329,7 +329,7 @@ static gint curl_progress(gpointer ptr, curl_off_t dltotal, curl_off_t dlnow,
 }
 
 static gint zond_update_download_newest(Projekt *zond, InfoWindow *info_window,
-		const gchar *vtag, GError **error) {
+		const gchar *base_dir, const gchar *vtag, GError **error) {
 	CURL *curl = NULL;
 	FILE *fp = NULL;
 	CURLcode res;
@@ -346,7 +346,7 @@ static gint zond_update_download_newest(Projekt *zond, InfoWindow *info_window,
 
 	filename = g_strconcat("zond-x86_64-", vtag, ".zip", NULL);
 
-	outfilename = g_strconcat(zond->base_dir, filename, NULL);
+	outfilename = g_strconcat(base_dir, "/", filename, NULL);
 	fp = fopen(outfilename, "wb");
 	g_free(outfilename);
 
@@ -469,10 +469,22 @@ gint zond_update(Projekt *zond, InfoWindow *info_window, GError **error) {
 	gboolean ret = FALSE;
 	gboolean res = FALSE;
 	gchar *zipname = NULL;
+	char *exe_dir = NULL;
+	gchar *base_dir = NULL;
+
+	exe_dir = get_exe_dir(); // ".../bin" (zond.exe liegt direkt in bin/)
+	if (!exe_dir) {
+		*error = g_error_new( ZOND_ERROR, ZOND_ERROR_IO,
+				"%s\nKonnte eigenes Verzeichnis nicht ermitteln", __func__);
+		return -1;
+	}
+	base_dir = g_path_get_dirname(exe_dir); // eine Ebene hoch
+	free(exe_dir);
 
 	vtag = zond_update_get_vtag(zond, error);
 	if (!vtag) {
 		g_prefix_error(error, "%s\n", __func__);
+		g_free(base_dir);
 
 		return -1;
 	}
@@ -499,12 +511,13 @@ gint zond_update(Projekt *zond, InfoWindow *info_window, GError **error) {
 
 	no_update: g_strfreev(strv_tags);
 	g_free(vtag);
+	g_free(base_dir);
 
 	return 1;
 
 	update: g_strfreev(strv_tags);
 
-	title = g_strconcat("Aktewellere Version vorhanden (", vtag, ")", NULL);
+	title = g_strconcat("Aktuellere Version vorhanden (", vtag, ")", NULL);
 
 	rc = abfrage_frage(zond->app_window, title,
 			"Herunterladen und installieren?",
@@ -512,6 +525,7 @@ gint zond_update(Projekt *zond, InfoWindow *info_window, GError **error) {
 	g_free(title);
 	if (rc != GTK_RESPONSE_YES) {
 		g_free(vtag);
+		g_free(base_dir);
 		return 0;
 	}
 
@@ -520,9 +534,10 @@ gint zond_update(Projekt *zond, InfoWindow *info_window, GError **error) {
 	info_window_set_progress_bar(info_window);
 
 	//herunterladen
-	rc = zond_update_download_newest(zond, info_window, vtag, error);
+	rc = zond_update_download_newest(zond, info_window, base_dir, vtag, error);
 	if (rc) {
 		g_free(vtag);
+		g_free(base_dir);
 
 		if (rc == -1)
 			ERROR_Z
@@ -534,9 +549,10 @@ gint zond_update(Projekt *zond, InfoWindow *info_window, GError **error) {
 	info_window_set_progress_bar(info_window);
 
 	//entpacken
-	rc = zond_update_unzip(zond, info_window, vtag, error);
+	rc = zond_update_unzip(zond, info_window, base_dir, vtag, error);
 	if (rc) {
 		g_free(vtag);
+		g_free(base_dir);
 		if (rc == -1)
 			ERROR_Z
 		else
@@ -548,7 +564,7 @@ gint zond_update(Projekt *zond, InfoWindow *info_window, GError **error) {
 	//zip-Datei löschen
 	GError* error_rem = NULL;
 
-	zipname = g_strconcat(zond->base_dir, "zond-x86_64-", vtag, ".zip", NULL);
+	zipname = g_strconcat(base_dir, "/zond-x86_64-", vtag, ".zip", NULL);
 
 	if (sond_remove(zipname, &error_rem)) {
 		gchar *message = NULL;
@@ -559,6 +575,7 @@ gint zond_update(Projekt *zond, InfoWindow *info_window, GError **error) {
 		info_window_set_message(info_window, message);
 		g_free(message);
 	};
+	g_free(zipname);
 
 	info_window_set_message(info_window,
 			"Starte Installer und schließe Programm");
@@ -574,6 +591,7 @@ gint zond_update(Projekt *zond, InfoWindow *info_window, GError **error) {
 		rc = project_close(zond, &errmsg);
 		if (rc) {
 			g_free(vtag);
+			g_free(base_dir);
 			g_free(argv[3]);
 
 			if (rc == -1) {
@@ -586,9 +604,9 @@ gint zond_update(Projekt *zond, InfoWindow *info_window, GError **error) {
 		}
 	}
 
-	//installer starten
+	//installer starten (liegt direkt in vtag/, nicht in vtag/bin/)
 #ifdef __WIN32
-	argv[0] = g_strconcat(zond->base_dir, vtag, "/bin/zond_installer.exe",
+	argv[0] = g_strconcat(base_dir, "/", vtag, "/zond_installer.exe",
 			NULL);
 #elifdef __linux__
 	argv[0] = g_strdup("ain/zond_installer");
@@ -601,6 +619,8 @@ gint zond_update(Projekt *zond, InfoWindow *info_window, GError **error) {
 	NULL, NULL, NULL, error);
 	g_free(argv[0]);
 	g_free(argv[2]);
+	g_free(vtag);
+	g_free(base_dir);
 	if (!res)
 		ERROR_Z
 

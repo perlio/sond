@@ -1,5 +1,5 @@
 PROJECT_SCHEMA_DIR = schemas
-COMPILED_SCHEMA_DIR = share/glib-2.0/schemas
+COMPILED_SCHEMA_DIR = schemas
 SYSTEM_SCHEMA_DIR = /ucrt64/share/glib-2.0/schemas
 GSCHEMAS_COMPILED = $(COMPILED_SCHEMA_DIR)/gschemas.compiled
 SCHEMA_SOURCES = $(wildcard $(PROJECT_SCHEMA_DIR)/*.gschema.xml)
@@ -120,18 +120,13 @@ $(OBJ_DIR)/%.c.o: %.c | $(OBJ_DIR)
 	$(CC) -c $< $(CFLAGS_CONFIG) $(CFLAGS) -MMD -MP -o $@
 
 $(GSCHEMAS_COMPILED): $(SCHEMA_SOURCES)
-	@echo "Copying project schemas to compilation directory..."
-	@mkdir -p $(COMPILED_SCHEMA_DIR)
-	@cp $(SCHEMA_SOURCES) $(COMPILED_SCHEMA_DIR)/
 	@echo "Copying system schemas..."
-	@for f in $(SYSTEM_SCHEMAS); do \
-		if [ -f "$$f" ]; then cp "$$f" $(COMPILED_SCHEMA_DIR)/; \
-		else echo "Warning: $$f not found, skipping"; fi; \
-	done
+	@mkdir -p $(COMPILED_SCHEMA_DIR)
+	@cp $(SYSTEM_SCHEMAS) $(COMPILED_SCHEMA_DIR)/
 	@echo "Compiling GSettings schemas..."
 	glib-compile-schemas $(COMPILED_SCHEMA_DIR)
-	@echo "Removing temporary schemas..."
-	@cd $(COMPILED_SCHEMA_DIR) && rm -f $(notdir $(SCHEMA_SOURCES)) org.gtk.Settings.FileChooser.gschema.xml org.gtk.Settings.ColorChooser.gschema.xml
+	@echo "Removing temporary system schemas..."
+	@cd $(COMPILED_SCHEMA_DIR) && rm -f org.gtk.Settings.FileChooser.gschema.xml org.gtk.Settings.ColorChooser.gschema.xml
 
 # Clean
 .PHONY: clean

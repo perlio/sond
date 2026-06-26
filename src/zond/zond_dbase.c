@@ -24,6 +24,7 @@
 #include <gtk/gtk.h>
 
 #include "zond_convert.h"
+#include "zond_init.h"
 
 #include "20allgemein/ziele.c"
 
@@ -233,7 +234,7 @@ gint zond_dbase_create_db_maj_1(sqlite3 *db, GError **error) {
 					") STRICT; "
 
 					"INSERT INTO knoten (ID, parent_id, older_sibling_id, "
-					"node_text) VALUES (0, 0, 0, '" MAJOR "');"
+					"node_text) VALUES (0, 0, 0, '" G_STRINGIFY(ZOND_VERSION_MAJOR) "');"
 			"INSERT INTO knoten (ID, parent_id, older_sibling_id, type) "
 			"VALUES (1, 0, 0, 0);"//root baum_inhalt
 			"INSERT INTO knoten (ID, parent_id, older_sibling_id, type) "
@@ -326,7 +327,7 @@ static gint zond_dbase_open(ZondDBase *zond_dbase, gboolean create_file,
 		if (!v_string)
 			ERROR_S
 
-		if (g_strcmp0(v_string, MAJOR)) {
+		if (g_strcmp0(v_string, G_STRINGIFY(ZOND_VERSION_MAJOR))) {
 			gint rc = 0;
 			GError *error = NULL;
 			gchar *message = NULL;

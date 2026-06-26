@@ -7,8 +7,6 @@ int mkdir_p(const char*);
 
 char* get_exe_dir(void);
 
-char* get_base_dir(void);
-
 typedef struct _CurlUserData {
 	char *response;
 	size_t size;

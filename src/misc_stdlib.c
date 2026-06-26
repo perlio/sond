@@ -140,19 +140,3 @@ get_exe_dir(void) {
 	return strdup(exe_dir); //ohne /
 }
 
-char*
-get_base_dir(void) {
-	char *exe_dir = NULL;
-	char *base_dir = NULL;
-
-	exe_dir = get_exe_dir();
-	if (exe_dir) {
-		base_dir = g_build_filename(exe_dir, "..", "..", NULL);
-		free(exe_dir);
-
-		return base_dir;
-	}
-
-	return NULL;
-}
-
