@@ -174,6 +174,21 @@ bump-patch:
 	sed -i "s/define ZOND_VERSION_PATCH [0-9]\+/define ZOND_VERSION_PATCH $(NEW_PATCH)/" $(ZOND_INIT_H)
 	@echo "Patch-Version erhoeht: $(ZOND_VER_MAJOR).$(ZOND_VER_MINOR).$(NEW_PATCH)"
 
+.PHONY: bump-minor
+NEW_MINOR := $(shell expr $(ZOND_VER_MINOR) + 1)
+bump-minor:
+	sed -i "s/define ZOND_VERSION_MINOR [0-9]\+/define ZOND_VERSION_MINOR $(NEW_MINOR)/" $(ZOND_INIT_H)
+	sed -i "s/define ZOND_VERSION_PATCH [0-9]\+/define ZOND_VERSION_PATCH 0/" $(ZOND_INIT_H)
+	@echo "Minor-Version erhoeht: $(ZOND_VER_MAJOR).$(NEW_MINOR).0"
+
+.PHONY: bump-major
+NEW_MAJOR := $(shell expr $(ZOND_VER_MAJOR) + 1)
+bump-major:
+	sed -i "s/define ZOND_VERSION_MAJOR [0-9]\+/define ZOND_VERSION_MAJOR $(NEW_MAJOR)/" $(ZOND_INIT_H)
+	sed -i "s/define ZOND_VERSION_MINOR [0-9]\+/define ZOND_VERSION_MINOR 0/" $(ZOND_INIT_H)
+	sed -i "s/define ZOND_VERSION_PATCH [0-9]\+/define ZOND_VERSION_PATCH 0/" $(ZOND_INIT_H)
+	@echo "Major-Version erhoeht: $(NEW_MAJOR).0.0"
+
 .PHONY: tag
 tag:
 	@if [ -z "$(MSG)" ]; then \
@@ -193,21 +208,23 @@ tag:
 	@echo "Tag zond-v$(RELEASE_VERSION) erstellt. Push mit:"
 	@echo "  git push origin zond-v$(RELEASE_VERSION)"
 
-# Oeffentliches Release: Patch erhoehen, bauen, zippen, taggen, pushen, GitHub-Release anlegen
+# Oeffentliches Release: Version erhoehen (Default: patch), committen,
+# bauen, zippen, taggen, pushen, GitHub-Release anlegen
+BUMP ?= patch
 .PHONY: publish
 publish:
-	@if [ -z "$(MSG)" ]; then \
-		echo "Fehler: Bitte Beschreibung angeben, z.B. make publish MSG=\"GtkTextView-Rendering\""; \
-		exit 1; \
-	fi
 	@if ! git diff --quiet || ! git diff --cached --quiet; then \
 		echo "Fehler: Working tree ist nicht clean. Erst committen."; \
 		git status --short; \
 		exit 1; \
 	fi
-	$(MAKE) bump-patch
-	git commit -am "Bump version (publish)"
-	$(MAKE) do-publish MSG="$(MSG)"
+	$(MAKE) bump-$(BUMP)
+	$(MAKE) do-publish-commit
+
+.PHONY: do-publish-commit
+do-publish-commit:
+	git commit -am "Bump to $(RELEASE_VERSION)"
+	$(MAKE) do-publish MSG="$(if $(MSG),$(MSG),Bump to $(RELEASE_VERSION))"
 
 .PHONY: do-publish
 do-publish:
