@@ -145,6 +145,8 @@ VIEWER_EXE      := Release/bin/viewer.exe
 INSTALLER_EXE   := Release/bin/zond_installer.exe
 RELEASE_DIR      = zond-$(RELEASE_VERSION)-win64
 RELEASE_ZIP      = $(RELEASE_DIR).zip
+GITHUB_TAG       = v$(RELEASE_VERSION)
+GITHUB_ASSET_ZIP = zond-x86_64-$(GITHUB_TAG).zip
 
 .PHONY: release
 release: release-dir
@@ -199,13 +201,13 @@ tag:
 		git status --short; \
 		exit 1; \
 	fi
-	@if git rev-parse "zond-v$(RELEASE_VERSION)" >/dev/null 2>&1; then \
-		echo "Fehler: Tag zond-v$(RELEASE_VERSION) existiert bereits."; \
+	@if git rev-parse "$(GITHUB_TAG)" >/dev/null 2>&1; then \
+		echo "Fehler: Tag $(GITHUB_TAG) existiert bereits."; \
 		exit 1; \
 	fi
-	git tag -a zond-v$(RELEASE_VERSION) -m "zond: $(MSG)"
-	@echo "Tag zond-v$(RELEASE_VERSION) erstellt. Push mit:"
-	@echo "  git push origin zond-v$(RELEASE_VERSION)"
+	git tag -a $(GITHUB_TAG) -m "zond: $(MSG)"
+	@echo "Tag $(GITHUB_TAG) erstellt. Push mit:"
+	@echo "  git push origin $(GITHUB_TAG)"
 
 # Oeffentliches Release: Version erhoehen (Default: patch), committen,
 # bauen, zippen, taggen, pushen, GitHub-Release anlegen
@@ -229,13 +231,14 @@ do-publish-commit:
 do-publish:
 	$(MAKE) release
 	$(MAKE) zip-only
+	cp $(RELEASE_ZIP) $(GITHUB_ASSET_ZIP)
 	$(MAKE) tag MSG="$(MSG)"
-	git push origin zond-v$(RELEASE_VERSION)
-	gh release create zond-v$(RELEASE_VERSION) $(RELEASE_ZIP) \
+	git push origin $(GITHUB_TAG)
+	gh release create $(GITHUB_TAG) $(GITHUB_ASSET_ZIP) \
 		--title "zond $(RELEASE_VERSION)" \
 		--notes "$(MSG)"
 	@echo ""
-	@echo "=== Veroeffentlicht: zond-v$(RELEASE_VERSION) ==="
+	@echo "=== Veroeffentlicht: $(GITHUB_TAG) ==="
 
 .PHONY: zip-only
 zip-only:
