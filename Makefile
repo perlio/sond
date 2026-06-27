@@ -147,14 +147,13 @@ RELEASE_DIR      = zond-$(RELEASE_VERSION)-win64
 RELEASE_ZIP      = $(RELEASE_DIR).zip
 
 .PHONY: release
-release:
+release: release-dir
+
+.PHONY: release-dir
+release-dir:
 	$(MAKE) CONFIG=Release CFLAGS_CONFIG=-O3 LDFLAGS_CONFIG=-mwindows zond
 	$(MAKE) CONFIG=Release CFLAGS_CONFIG=-O3 LDFLAGS_CONFIG=-mwindows viewer
 	$(MAKE) CONFIG=Release CFLAGS_CONFIG=-O3 LDFLAGS_CONFIG=-mwindows zond_installer
-	$(MAKE) release-dir
-
-.PHONY: release-dir
-release-dir: $(RELEASE_EXE) $(VIEWER_EXE) $(INSTALLER_EXE)
 	bash create-gtk-release.sh $(RELEASE_EXE) $(RELEASE_VERSION)
 	cp $(VIEWER_EXE) $(RELEASE_DIR)/bin/
 	@echo ""
@@ -228,7 +227,8 @@ do-publish-commit:
 
 .PHONY: do-publish
 do-publish:
-	$(MAKE) release-zip
+	$(MAKE) release
+	$(MAKE) zip-only
 	$(MAKE) tag MSG="$(MSG)"
 	git push origin zond-v$(RELEASE_VERSION)
 	gh release create zond-v$(RELEASE_VERSION) $(RELEASE_ZIP) \
@@ -236,3 +236,8 @@ do-publish:
 		--notes "$(MSG)"
 	@echo ""
 	@echo "=== Veroeffentlicht: zond-v$(RELEASE_VERSION) ==="
+
+.PHONY: zip-only
+zip-only:
+	zip -q -r $(RELEASE_ZIP) $(RELEASE_DIR)
+	@echo "ZIP: $(RELEASE_ZIP)"
