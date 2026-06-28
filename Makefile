@@ -91,7 +91,8 @@ DEPS := $(OBJS:.o=.d)
 all: zond
 
 # Include dependency files
-#-include $(DEPS)
+-include $(DEPS)
+.PHONY: zond viewer sond_server sond_client zond_installer seafile_test
 zond: $(GSCHEMAS_COMPILED) $(BIN_DIR)/zond.exe
 
 viewer: $(GSCHEMAS_COMPILED) $(BIN_DIR)/viewer.exe
@@ -237,8 +238,10 @@ do-publish:
 	gh release create $(GITHUB_TAG) $(GITHUB_ASSET_ZIP) \
 		--title "zond $(RELEASE_VERSION)" \
 		--notes "$(MSG)"
+	rm -f $(RELEASE_ZIP) $(GITHUB_ASSET_ZIP)
 	@echo ""
 	@echo "=== Veroeffentlicht: $(GITHUB_TAG) ==="
+	@echo "Lokales Test-Verzeichnis (fuer Seafile-Sync): $(RELEASE_DIR)"
 
 .PHONY: zip-only
 zip-only:
