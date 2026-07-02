@@ -116,7 +116,7 @@ $(OBJ_DIR) $(BIN_DIR):
 	mkdir -p $@
 
 # Compiling
-$(OBJ_DIR)/%.c.o: %.c | $(OBJ_DIR)
+$(OBJ_DIR)/%.c.o: %.c Makefile | $(OBJ_DIR)
 	@mkdir -p $(@D)
 	$(CC) -c $< $(CFLAGS_CONFIG) $(CFLAGS) -MMD -MP -o $@
 
@@ -150,7 +150,9 @@ GITHUB_TAG       = v$(RELEASE_VERSION)
 GITHUB_ASSET_ZIP = zond-x86_64-$(GITHUB_TAG).zip
 
 .PHONY: release
-release: release-dir
+release:
+	$(MAKE) bump-patch
+	$(MAKE) release-dir
 
 .PHONY: release-dir
 release-dir:
@@ -220,7 +222,6 @@ publish:
 		git status --short; \
 		exit 1; \
 	fi
-	$(MAKE) bump-$(BUMP)
 	$(MAKE) do-publish-commit
 
 .PHONY: do-publish-commit

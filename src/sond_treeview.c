@@ -55,8 +55,18 @@ static void sond_treeview_gesture_pressed(GtkGestureMultiPress *gesture,
 			GTK_GESTURE_SINGLE(gesture)) != GDK_BUTTON_SECONDARY)
 		return;
 
+	gtk_gesture_set_sequence_state(GTK_GESTURE(gesture),
+			gtk_gesture_single_get_current_sequence(GTK_GESTURE_SINGLE(gesture)),
+			GTK_EVENT_SEQUENCE_CLAIMED);
+
+	// Gesture-Koordinaten sind Widget-Koordinaten - in Bin-Window-Koordinaten
+	// umrechnen, damit Header-Hoehe (bei ZondTreeviewFM) korrekt beruecksichtigt wird
+	gint bx = 0, by = 0;
+	gtk_tree_view_convert_widget_to_bin_window_coords(
+			GTK_TREE_VIEW(stv), (gint)x, (gint)y, &bx, &by);
+
 	GtkTreePath *path = NULL;
-	gtk_tree_view_get_path_at_pos(GTK_TREE_VIEW(stv), (gint)x, (gint)y,
+	gtk_tree_view_get_path_at_pos(GTK_TREE_VIEW(stv), bx, by,
 			&path, NULL, NULL, NULL);
 
 	if (!path) {
@@ -67,10 +77,14 @@ static void sond_treeview_gesture_pressed(GtkGestureMultiPress *gesture,
 		if (!gtk_widget_has_focus(GTK_WIDGET(stv)))
 			gtk_widget_grab_focus(GTK_WIDGET(stv));
 	} else {
-		if (!gtk_widget_has_focus(GTK_WIDGET(stv))) {
-			gtk_tree_view_set_cursor(GTK_TREE_VIEW(stv), path, NULL, FALSE);
+		GtkTreeSelection *selection = gtk_tree_view_get_selection(GTK_TREE_VIEW(stv));
+
+		if (!gtk_widget_has_focus(GTK_WIDGET(stv)))
 			gtk_widget_grab_focus(GTK_WIDGET(stv));
-		}
+
+		if (!gtk_tree_selection_path_is_selected(selection, path))
+			gtk_tree_view_set_cursor(GTK_TREE_VIEW(stv), path, NULL, FALSE);
+
 		gtk_tree_path_free(path);
 	}
 
@@ -128,6 +142,11 @@ static void sond_treeview_constructed(GObject *object) {
 	GtkGesture *gesture = gtk_gesture_multi_press_new(GTK_WIDGET(stv));
 	gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(gesture),
 			GDK_BUTTON_SECONDARY);
+	/* CAPTURE-Phase: muss vor dem internen GtkTreeView-Button-Handling
+	 * feuern, sonst hat GtkTreeView die Selektion bereits auf die
+	 * angeklickte Zeile reduziert, bevor wir reagieren koennen. */
+	gtk_event_controller_set_propagation_phase(
+			GTK_EVENT_CONTROLLER(gesture), GTK_PHASE_CAPTURE);
 	g_signal_connect(gesture, "pressed",
 			G_CALLBACK(sond_treeview_gesture_pressed), stv);
 
