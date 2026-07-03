@@ -234,6 +234,7 @@ do-publish:
 	$(MAKE) release
 	$(MAKE) zip-only
 	cp $(RELEASE_ZIP) $(GITHUB_ASSET_ZIP)
+	git push origin
 	$(MAKE) tag MSG="$(MSG)"
 	git push origin $(GITHUB_TAG)
 	gh release create $(GITHUB_TAG) $(GITHUB_ASSET_ZIP) \

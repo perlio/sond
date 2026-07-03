@@ -360,6 +360,27 @@ int main(int argc, char **argv) {
 		g_free(zond_exe);
 	}
 
+	//Dateiassoziationen neu setzen (install-assoc.bat)
+	//wird bei jedem Update ausgefuehrt, da Windows die Zuordnung
+	//verlieren kann, wenn die exe-Datei ersetzt wird
+	{
+		gchar *bat = g_build_filename(base_dir, "install-assoc.bat", NULL);
+		if (g_file_test(bat, G_FILE_TEST_EXISTS)) {
+			GError *error_bat = NULL;
+			gchar *spawn_argv[4] = { "cmd.exe", "/c", bat, NULL };
+
+			g_spawn_async(NULL, spawn_argv, NULL, G_SPAWN_DEFAULT,
+					NULL, NULL, NULL, &error_bat);
+			if (error_bat) {
+				LOG_WARN("install-assoc.bat konnte nicht ausgefuehrt werden: %s",
+						error_bat->message);
+				g_clear_error(&error_bat);
+			}
+		} else
+			LOG_WARN("install-assoc.bat nicht gefunden in %s", base_dir);
+		g_free(bat);
+	}
+
 end:
 	g_free(vtag_dir);
 	g_free(vtag);
