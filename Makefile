@@ -226,7 +226,9 @@ publish:
 
 .PHONY: do-publish-commit
 do-publish-commit:
-	git commit -am "Bump to $(RELEASE_VERSION)"
+	@if ! git diff --quiet || ! git diff --cached --quiet; then \
+		git commit -am "Bump to $(RELEASE_VERSION)"; \
+	fi
 	$(MAKE) do-publish MSG="$(if $(MSG),$(MSG),Bump to $(RELEASE_VERSION))"
 
 .PHONY: do-publish
