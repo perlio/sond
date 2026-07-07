@@ -2368,12 +2368,16 @@ static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 		}
 	}
 
-	rc = zond_treeview_oeffnen_internal_viewer(zond, dd,
-			&pdf_pos, error);
-	if (rc) {
-		document_free_displayed_documents(dd);
+	if (dd) {
+		gint rc = 0;
 
-		ERROR_Z
+		rc = zond_treeview_oeffnen_internal_viewer(zond, dd,
+				&pdf_pos, error);
+		if (rc) {
+			document_free_displayed_documents(dd);
+
+			ERROR_Z
+		}
 	}
 
 	return 0;

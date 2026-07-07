@@ -151,8 +151,12 @@ GITHUB_ASSET_ZIP = zond-x86_64-$(GITHUB_TAG).zip
 
 .PHONY: release
 release:
-	$(MAKE) bump-patch
 	$(MAKE) release-dir
+	git add -A
+	git commit -m "internal release $(RELEASE_VERSION)"
+	git push origin
+	@echo ""
+	@echo "=== Internes Release $(RELEASE_VERSION) committed und gepusht ==="
 
 .PHONY: release-dir
 release-dir:
@@ -165,7 +169,7 @@ release-dir:
 	@echo "=== Release-Verzeichnis fertig ==="
 	@echo "Verzeichnis: $(RELEASE_DIR)"
 	@echo ""
-	@echo "Zum Veroeffentlichen: make publish MSG=\"Beschreibung\""
+	@echo "Zum Veroeffentlichen: make publish"
 
 .PHONY: release-zip
 release-zip: release-dir
@@ -212,8 +216,8 @@ tag:
 	@echo "Tag $(GITHUB_TAG) erstellt. Push mit:"
 	@echo "  git push origin $(GITHUB_TAG)"
 
-# Oeffentliches Release: Version erhoehen (Default: patch), committen,
-# bauen, zippen, taggen, pushen, GitHub-Release anlegen
+# Oeffentliches Release: Version erhoehen, committen, pushen,
+# bauen, zippen, taggen, GitHub-Release anlegen
 BUMP ?= patch
 .PHONY: publish
 publish:
@@ -222,18 +226,17 @@ publish:
 		git status --short; \
 		exit 1; \
 	fi
-	$(MAKE) do-publish-commit
+	$(MAKE) bump-$(BUMP)
+	$(MAKE) do-publish-bump
 
-.PHONY: do-publish-commit
-do-publish-commit:
-	@if ! git diff --quiet || ! git diff --cached --quiet; then \
-		git commit -am "Bump to $(RELEASE_VERSION)"; \
-	fi
-	$(MAKE) do-publish MSG="$(if $(MSG),$(MSG),Bump to $(RELEASE_VERSION))"
+.PHONY: do-publish-bump
+do-publish-bump:
+	git commit -am "Bump to $(RELEASE_VERSION)"
+	$(MAKE) do-publish MSG="Bump to $(RELEASE_VERSION)"
 
 .PHONY: do-publish
 do-publish:
-	$(MAKE) release
+	$(MAKE) release-dir
 	$(MAKE) zip-only
 	cp $(RELEASE_ZIP) $(GITHUB_ASSET_ZIP)
 	git push origin
