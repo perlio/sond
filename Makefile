@@ -153,7 +153,9 @@ GITHUB_ASSET_ZIP = zond-x86_64-$(GITHUB_TAG).zip
 release:
 	$(MAKE) release-dir
 	git add -A
-	git commit -m "internal release $(RELEASE_VERSION)"
+	@if ! git diff --quiet || ! git diff --cached --quiet; then \
+		git commit -m "internal release $(RELEASE_VERSION)"; \
+	fi
 	git push origin
 	@echo ""
 	@echo "=== Internes Release $(RELEASE_VERSION) committed und gepusht ==="
