@@ -254,5 +254,5 @@ do-publish:
 
 .PHONY: zip-only
 zip-only:
-	zip -q -r $(RELEASE_ZIP) $(RELEASE_DIR)
+	cd $(RELEASE_DIR) && zip -q -r ../$(RELEASE_ZIP) .
 	@echo "ZIP: $(RELEASE_ZIP)"

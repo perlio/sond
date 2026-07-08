@@ -279,7 +279,6 @@ static gint zond_update_unzip(Projekt *zond, InfoWindow *info_window,
 			}
 
 			ret = zip_fclose(zf);
-			zip_discard(za);
 			if (ret) {
 				zip_error_t zip_error = { 0 };
 
@@ -301,6 +300,7 @@ static gint zond_update_unzip(Projekt *zond, InfoWindow *info_window,
 						"%s\nutime (file: %s)\n%s", __func__, filename,
 						strerror( errno));
 				g_free(filename);
+				zip_discard(za);
 				return -1;
 			}
 			g_free(filename);
