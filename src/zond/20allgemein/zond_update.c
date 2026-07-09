@@ -605,6 +605,7 @@ gint zond_update(Projekt *zond, InfoWindow *info_window, GError **error) {
 	}
 
 	//installer starten (liegt direkt in vtag/, nicht in vtag/bin/)
+	//working_directory auf vtag/bin setzen, damit Windows die DLLs findet
 #ifdef __WIN32
 	argv[0] = g_strconcat(base_dir, "/", vtag, "/zond_installer.exe",
 			NULL);
@@ -615,8 +616,12 @@ gint zond_update(Projekt *zond, InfoWindow *info_window, GError **error) {
 	argv[1] = "v" ZOND_VERSION_STR;
 	argv[2] = g_strdup_printf("%lu", (unsigned long) getpid());
 
-	res = g_spawn_async( NULL, argv, NULL, G_SPAWN_DEFAULT,
-	NULL, NULL, NULL, error);
+	{
+		gchar *working_dir = g_strconcat(base_dir, "/", vtag, "/bin", NULL);
+		res = g_spawn_async(working_dir, argv, NULL, G_SPAWN_DEFAULT,
+				NULL, NULL, NULL, error);
+		g_free(working_dir);
+	}
 	g_free(argv[0]);
 	g_free(argv[2]);
 	g_free(vtag);
