@@ -39,12 +39,12 @@
 
 static gint zond_update_unzip(Projekt *zond, InfoWindow *info_window,
 		const gchar *base_dir, const gchar *vtag, GError **error) {
-	gchar *zipname = NULL; // File path
-	struct zip *za; // Zip archive
-	int err; // Stores error code
+	gchar *zipname = NULL;
+	struct zip *za;
+	int err;
 
+	// ZIP-Datei oeffnen: liegt direkt in base_dir (z.B. "zond-x86_64-v1.0.2.zip")
 	zipname = g_strconcat(base_dir, "/zond-x86_64-", vtag, ".zip", NULL);
-	// Open the zip file
 	za = zip_open(zipname, 0, &err);
 	g_free(zipname);
 	if (!za) {
@@ -57,22 +57,28 @@ static gint zond_update_unzip(Projekt *zond, InfoWindow *info_window,
 		return -1;
 	}
 
-	// Unpack zip
+	// Alle Eintraege im ZIP durchlaufen (Verzeichnisse und Dateien)
+	// Das ZIP enthaelt keine Top-Level-Verzeichnis-Wrapper - die Eintraege
+	// beginnen direkt mit "bin/", "share/" etc. (erzeugt durch
+	// "cd RELEASE_DIR && zip -r ../RELEASE_ZIP ." im Makefile)
 	int num = zip_get_num_entries(za, 0);
-	for (int i = 0; i < num; i++) { // Iterate through all files in zip
-		struct zip_stat sb; // Stores file info
+	for (int i = 0; i < num; i++) {
+		struct zip_stat sb;
 		gint rc = 0;
 		gint len_name = 0;
 
+		// Abbruch-Pruefung: Nutzer hat "Abbrechen" geklickt
 		if (*(info_window->cancel)) {
 			zip_discard(za);
 			return 1;
 		}
 
+		// Fortschrittsbalken alle 10 Eintraege aktualisieren
 		if (!(i % 10))
 			info_window_set_progress_bar_fraction(info_window,
 					(gdouble) i / (gdouble) num);
 
+		// Metadaten des aktuellen Eintrags lesen (Name, Groesse, Zeitstempel)
 		rc = zip_stat_index(za, i, 0, &sb);
 		if (rc) {
 			zip_error_t *zip_error = NULL;
@@ -88,8 +94,10 @@ static gint zond_update_unzip(Projekt *zond, InfoWindow *info_window,
 		}
 
 		len_name = strlen(sb.name);
-		if (sb.name[len_name - 1] == '/') // Check if directory
-				{
+
+		if (sb.name[len_name - 1] == '/') {
+			// Verzeichnis-Eintrag: Zielverzeichnis anlegen
+			// Zielpfad: base_dir/vtag/bin/ (bzw. share/, etc.)
 			gchar *dir = NULL;
 			gint rc = 0;
 
@@ -104,14 +112,16 @@ static gint zond_update_unzip(Projekt *zond, InfoWindow *info_window,
 				return -1;
 			}
 		} else {
-			struct zip_file *zf = NULL; // Stores file to be extracted
-			FILE *fd = NULL; // Where file is extracted to
-			long long sum; // How much file has been copied so far
+			// Datei-Eintrag: Datei aus ZIP extrahieren
+			struct zip_file *zf = NULL;
+			FILE *fd = NULL;
+			long long sum;
 			gchar *filename = NULL;
 			struct utimbuf s_time = { 0 };
 			gint ret = 0;
 
-			zf = zip_fopen_index(za, i, 0); // Open file within zip
+			// Datei im ZIP zur Extraktion oeffnen
+			zf = zip_fopen_index(za, i, 0);
 			if (!zf) {
 				zip_error_t *zip_error = NULL;
 
@@ -125,8 +135,11 @@ static gint zond_update_unzip(Projekt *zond, InfoWindow *info_window,
 				return -1;
 			}
 
+			// Zieldatei anlegen: base_dir/vtag/bin/dateiname.dll (o.ae.)
+			// Das Verzeichnis muss bereits existieren (durch den
+			// vorangegangenen Verzeichnis-Eintrag angelegt)
 			filename = g_strconcat(base_dir, "/", vtag, "/", sb.name, NULL);
-			fd = fopen(filename, "wb"); // Create new file
+			fd = fopen(filename, "wb");
 			g_free(filename);
 			if (fd == NULL) {
 				gint ret = 0;
@@ -150,9 +163,11 @@ static gint zond_update_unzip(Projekt *zond, InfoWindow *info_window,
 				return -1;
 			}
 
+			// Dateiinhalt byteweise aus dem ZIP in die Zieldatei kopieren
+			// (kleiner Puffer von 100 Bytes - historisch, koennte groesser sein)
 			sum = 0;
-			while (sum != sb.size) { // Copy bytes to new file
-				char buf[100]; // Buffer to write stuff
+			while (sum != sb.size) {
+				char buf[100];
 				int len;
 				gint resp = 0;
 
@@ -218,12 +233,11 @@ static gint zond_update_unzip(Projekt *zond, InfoWindow *info_window,
 					}
 
 					return -1;
-
 				}
 				sum += len;
 			}
 
-			// Finished copying file
+			// Puffer leeren und Datei schliessen
 			ret = fflush(fd);
 			if (ret) {
 				gint res = 0;
@@ -278,6 +292,8 @@ static gint zond_update_unzip(Projekt *zond, InfoWindow *info_window,
 				}
 			}
 
+			// ZIP-Eintrag schliessen (nicht zip_discard - das wuerde das
+			// gesamte Archiv schliessen und naechste Iteration crashen!)
 			ret = zip_fclose(zf);
 			if (ret) {
 				zip_error_t zip_error = { 0 };
@@ -290,7 +306,8 @@ static gint zond_update_unzip(Projekt *zond, InfoWindow *info_window,
 				zip_error_fini(&zip_error);
 			}
 
-			//Änderungsdatum anpassen
+			// Aenderungsdatum der extrahierten Datei auf das Original-Datum
+			// aus dem ZIP setzen (wichtig fuer make-Zeitstempel-Vergleiche)
 			s_time.actime = time( NULL);
 			s_time.modtime = sb.mtime;
 			filename = g_strconcat(base_dir, "/", vtag, "/", sb.name, NULL);
@@ -307,6 +324,7 @@ static gint zond_update_unzip(Projekt *zond, InfoWindow *info_window,
 		}
 	}
 
+	// ZIP-Archiv schliessen (einmalig, nach Abschluss aller Eintraege)
 	zip_discard(za);
 
 	return 0;
@@ -617,10 +635,20 @@ gint zond_update(Projekt *zond, InfoWindow *info_window, GError **error) {
 	argv[2] = g_strdup_printf("%lu", (unsigned long) getpid());
 
 	{
-		gchar *working_dir = g_strconcat(base_dir, "/", vtag, "/bin", NULL);
-		res = g_spawn_async(working_dir, argv, NULL, G_SPAWN_DEFAULT,
+		// PATH um vtag/bin erweitern, damit Windows die DLLs findet,
+		// ohne das Arbeitsverzeichnis zu aendern (wuerde get_exe_dir()
+		// im Installer verfaelschen)
+		gchar *bin_dir = g_strconcat(base_dir, "/", vtag, "/bin", NULL);
+		gchar **env = g_get_environ();
+		const gchar *old_path = g_environ_getenv(env, "PATH");
+		gchar *new_path = g_strconcat(bin_dir, ";", old_path, NULL);
+		env = g_environ_setenv(env, "PATH", new_path, TRUE);
+		g_free(bin_dir);
+		g_free(new_path);
+
+		res = g_spawn_async(NULL, argv, env, G_SPAWN_DEFAULT,
 				NULL, NULL, NULL, error);
-		g_free(working_dir);
+		g_strfreev(env);
 	}
 	g_free(argv[0]);
 	g_free(argv[2]);
