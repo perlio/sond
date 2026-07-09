@@ -5,7 +5,7 @@
 
 #define ZOND_VERSION_MAJOR 1 //wenn sich Struktur der .znd-Datei aendert
 #define ZOND_VERSION_MINOR 0 //neues Feature
-#define ZOND_VERSION_PATCH 4 //irjendwatt
+#define ZOND_VERSION_PATCH 5 //irjendwatt
 
 #define ZOND_VERSION_STR G_STRINGIFY(ZOND_VERSION_MAJOR) "." \
                           G_STRINGIFY(ZOND_VERSION_MINOR) "." \
