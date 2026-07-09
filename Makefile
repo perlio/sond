@@ -136,7 +136,7 @@ clean:
 	rm -rf $(BUILD_DIR)/bin
 
 # Release packaging
-ZOND_INIT_H     := src/zond/zond_init.h
+ZOND_INIT_H     := src/zond/zond_version.h
 ZOND_VER_MAJOR  := $(shell grep -oP '(?<=define ZOND_VERSION_MAJOR )[0-9]+' $(ZOND_INIT_H))
 ZOND_VER_MINOR  := $(shell grep -oP '(?<=define ZOND_VERSION_MINOR )[0-9]+' $(ZOND_INIT_H))
 ZOND_VER_PATCH  := $(shell grep -oP '(?<=define ZOND_VERSION_PATCH )[0-9]+' $(ZOND_INIT_H))
