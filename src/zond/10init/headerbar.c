@@ -40,6 +40,7 @@
 #include "../zond_indexsuche.h"
 #include "../zond_treeviewfm.h"
 #include "../zond_init.h"
+#include "../zond_version.h"
 
 #include "../20allgemein/ziele.h"
 #include "../20allgemein/suchen.h"

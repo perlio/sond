@@ -31,6 +31,7 @@
 #include "../../misc.h"
 #include "../../misc_stdlib.h"
 #include "../zond_init.h"
+#include "../zond_version.h"
 
 #include "../99conv/general.h"
 #include "../zond_dbase.h"
@@ -645,6 +646,9 @@ gint zond_update(Projekt *zond, InfoWindow *info_window, GError **error) {
 		env = g_environ_setenv(env, "PATH", new_path, TRUE);
 		g_free(bin_dir);
 		g_free(new_path);
+
+		LOG_INFO("Starte Installer: %s", argv[0]);
+		LOG_INFO("PATH: %s", g_environ_getenv(env, "PATH"));
 
 		res = g_spawn_async(NULL, argv, env, G_SPAWN_DEFAULT,
 				NULL, NULL, NULL, error);

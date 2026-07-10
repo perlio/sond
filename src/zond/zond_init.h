@@ -1,8 +1,6 @@
 #ifndef ZOND_INIT_H_INCLUDED
 #define ZOND_INIT_H_INCLUDED
 
-#include "zond_version.h"
-
 #include <mupdf/fitz.h>
 #include <mupdf/pdf.h>
 #include <gio/gio.h>

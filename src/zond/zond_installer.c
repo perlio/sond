@@ -343,20 +343,36 @@ int main(int argc, char **argv) {
 		gchar *spawn_argv[3] = { NULL, NULL, NULL };
 		GError *error_spawn = NULL;
 		gboolean res = FALSE;
+		gchar **env = NULL;
 
 		zond_exe = g_build_filename(base_dir, "bin", "zond.exe", NULL);
 		spawn_argv[0] = zond_exe;
 		if (argv[3]) //argv[3] ist der Pfad der vorher offenen Projekt-Datenbank
 			spawn_argv[1] = argv[3];
 
-		res = g_spawn_async(NULL, spawn_argv, NULL, G_SPAWN_DEFAULT,
+		// PATH um bin/ erweitern, damit Windows die DLLs findet
+		// (der Installer selbst hat keinen vollstaendigen MSYS2-PATH)
+		{
+			gchar *bin_dir = g_build_filename(base_dir, "bin", NULL);
+			env = g_get_environ();
+			const gchar *old_path = g_environ_getenv(env, "PATH");
+			gchar *new_path = g_strconcat(bin_dir, ";", old_path ? old_path : "", NULL);
+			env = g_environ_setenv(env, "PATH", new_path, TRUE);
+			g_free(bin_dir);
+			g_free(new_path);
+		}
+
+		LOG_INFO("Starte zond: %s", zond_exe);
+		res = g_spawn_async(NULL, spawn_argv, env, G_SPAWN_DEFAULT,
 				NULL, NULL, NULL, &error_spawn);
 		if (!res) {
 			LOG_ERROR("Konnte %s nicht starten: %s", zond_exe,
 					error_spawn->message);
 			g_clear_error(&error_spawn);
-		}
+		} else
+			LOG_INFO("zond gestartet");
 
+		g_strfreev(env);
 		g_free(zond_exe);
 	}
 
@@ -367,7 +383,8 @@ int main(int argc, char **argv) {
 		gchar *bat = g_build_filename(base_dir, "install-assoc.bat", NULL);
 		if (g_file_test(bat, G_FILE_TEST_EXISTS)) {
 			GError *error_bat = NULL;
-			gchar *spawn_argv[4] = { "cmd.exe", "/c", bat, NULL };
+			gchar *cmd_exe = g_build_filename(g_getenv("SYSTEMROOT") ? g_getenv("SYSTEMROOT") : "C:\\Windows", "System32", "cmd.exe", NULL);
+			gchar *spawn_argv[4] = { cmd_exe, "/c", bat, NULL };
 
 			g_spawn_async(NULL, spawn_argv, NULL, G_SPAWN_DEFAULT,
 					NULL, NULL, NULL, &error_bat);
@@ -376,6 +393,7 @@ int main(int argc, char **argv) {
 						error_bat->message);
 				g_clear_error(&error_bat);
 			}
+			g_free(cmd_exe);
 		} else
 			LOG_WARN("install-assoc.bat nicht gefunden in %s", base_dir);
 		g_free(bat);
