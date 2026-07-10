@@ -579,6 +579,7 @@ gint zond_update(Projekt *zond, InfoWindow *info_window, GError **error) {
 	}
 
 	info_window_set_message(info_window, "Download wird gelöscht");
+	LOG_INFO("ZIP wird geloescht");
 
 	//zip-Datei löschen
 	GError* error_rem = NULL;
@@ -595,6 +596,7 @@ gint zond_update(Projekt *zond, InfoWindow *info_window, GError **error) {
 		g_free(message);
 	};
 	g_free(zipname);
+	LOG_INFO("ZIP geloescht, starte Installer");
 
 	info_window_set_message(info_window,
 			"Starte Installer und schließe Programm");
