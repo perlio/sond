@@ -151,14 +151,31 @@ GITHUB_ASSET_ZIP = zond-x86_64-$(GITHUB_TAG).zip
 
 .PHONY: release
 release:
-	$(MAKE) release-dir
-	git add -A
 	@if ! git diff --quiet || ! git diff --cached --quiet; then \
-		git commit -m "internal release $(RELEASE_VERSION)"; \
+		echo "Fehler: Working tree ist nicht clean. Erst committen."; \
+		git status --short; \
+		exit 1; \
 	fi
+	$(MAKE) bump-$(BUMP)
+	$(MAKE) do-release-commit
+
+.PHONY: do-release-commit
+do-release-commit:
+	git commit -am "Bump to $(RELEASE_VERSION)"
+	@if git rev-parse "$(GITHUB_TAG)" >/dev/null 2>&1; then \
+		echo "Fehler: Tag $(GITHUB_TAG) existiert bereits."; \
+		exit 1; \
+	fi
+	git tag -a $(GITHUB_TAG) -m "zond: $(RELEASE_VERSION)"
 	git push origin
+	git push origin $(GITHUB_TAG)
+	$(MAKE) release-dir
 	@echo ""
-	@echo "=== Internes Release $(RELEASE_VERSION) committed und gepusht ==="
+	@echo "=== Release $(RELEASE_VERSION) fertig ==="
+	@echo "Tag: $(GITHUB_TAG)"
+	@echo "Verzeichnis: $(RELEASE_DIR)"
+	@echo ""
+	@echo "Zum Veroeffentlichen: make publish"
 
 .PHONY: release-dir
 release-dir:
@@ -218,39 +235,19 @@ tag:
 	@echo "Tag $(GITHUB_TAG) erstellt. Push mit:"
 	@echo "  git push origin $(GITHUB_TAG)"
 
-# Oeffentliches Release: Version erhoehen, committen, pushen,
-# bauen, zippen, taggen, GitHub-Release anlegen
+# Oeffentliches Release: ZIP erzeugen, auf GitHub hochladen, aufraeumen
+# Setzt voraus, dass 'make release' bereits ausgefuehrt wurde
 BUMP ?= patch
 .PHONY: publish
 publish:
-	@if ! git diff --quiet || ! git diff --cached --quiet; then \
-		echo "Fehler: Working tree ist nicht clean. Erst committen."; \
-		git status --short; \
-		exit 1; \
-	fi
-	$(MAKE) bump-$(BUMP)
-	$(MAKE) do-publish-bump
-
-.PHONY: do-publish-bump
-do-publish-bump:
-	git commit -am "Bump to $(RELEASE_VERSION)"
-	$(MAKE) do-publish MSG="Bump to $(RELEASE_VERSION)"
-
-.PHONY: do-publish
-do-publish:
-	$(MAKE) release-dir
 	$(MAKE) zip-only
 	cp $(RELEASE_ZIP) $(GITHUB_ASSET_ZIP)
-	git push origin
-	$(MAKE) tag MSG="$(MSG)"
-	git push origin $(GITHUB_TAG)
 	gh release create $(GITHUB_TAG) $(GITHUB_ASSET_ZIP) \
 		--title "zond $(RELEASE_VERSION)" \
 		--notes "$(MSG)"
 	rm -f $(RELEASE_ZIP) $(GITHUB_ASSET_ZIP)
 	@echo ""
 	@echo "=== Veroeffentlicht: $(GITHUB_TAG) ==="
-	@echo "Lokales Test-Verzeichnis (fuer Seafile-Sync): $(RELEASE_DIR)"
 
 .PHONY: zip-only
 zip-only:
