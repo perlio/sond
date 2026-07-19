@@ -146,8 +146,7 @@ static gint zond_anbindung_baum_inhalt(Projekt *zond, gint anchor_id,
 			return -1;
 		}
 
-		zond_tree_store_insert(zond_tree_store_get_tree_store(iter), iter,
-				child, &iter_inserted);
+		zond_tree_store_insert(iter, child, &iter_inserted);
 		gtk_tree_iter_free(iter);
 		zond_tree_store_set(&iter_inserted,
 				zond->icon[ICON_ANBINDUNG].icon_name, node_text, id_inserted);

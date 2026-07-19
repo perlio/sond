@@ -553,7 +553,6 @@ static gint zond_treeview_insert_node(Projekt *zond, gboolean child,
 	GtkTreeIter iter_cursor = { 0 };
 	GtkTreeIter iter_anchor = { 0 };
 	GtkTreeIter iter_new = { 0 };
-	ZondTreeStore *tree_store = NULL;
 	gboolean in_link = FALSE;
 	gint rc = 0;
 
@@ -579,15 +578,13 @@ static gint zond_treeview_insert_node(Projekt *zond, gboolean child,
 		ERROR_Z
 
 	//Knoten in baum_inhalt einfuegen
-	tree_store = zond_tree_store_get_tree_store(&iter_anchor);
-	zond_tree_store_insert(tree_store, (anchor_id > 2) ? &iter_anchor : NULL, child,
-			&iter_new);
+	zond_tree_store_insert(&iter_anchor, child, &iter_new);
 
 	//Standardinhalt setzen
 	zond_tree_store_set(&iter_new, zond->icon[ICON_NORMAL].icon_name,
 			"Neuer Punkt", node_id_new);
 
-	if (child && anchor_id > 2)
+	if (child && !zond_tree_store_iter_is_root(&iter_cursor))
 		sond_treeview_expand_row(zond->treeview[zond->baum_active],
 				&iter_cursor);
 	sond_treeview_set_cursor(zond->treeview[zond->baum_active], &iter_new);
@@ -712,9 +709,7 @@ static gint zond_treeview_insert_file_parts(ZondTreeview *ztv, gint node_id,
 	if (rc)
 		ERROR_Z
 
-	zond_tree_store_insert(
-			ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(ztv) )),
-			iter, child, &iter_new);
+	zond_tree_store_insert(iter, child, &iter_new);
 	zond_tree_store_set(&iter_new, icon_name, node_text, node_id);
 
 	g_free(icon_name);
@@ -933,15 +928,10 @@ static gint zond_treeview_leaf_anbinden(ZondTreeview *ztv,
 
 	//Angezeigt wird ID_file_part (nicht new_node_id!) - dessen icon_name/
 	//node_text sowie ggf. schon vorhandene Kinder (z.B. PDF-Abschnitte)
-	//werden hier eingehängt. NULL statt anchor_iter, wenn anchor_id die
-	//Wurzel dieses Baums ist (Vergleich hier über zond_tree_store_get_root,
-	//an anderer Stelle - zond_treeview_anbinden_rekursiv - äquivalent, aber
-	//als "anchor_id > 2" ausgedrückt, weil dort die IDs der beiden
-	//Baum-Wurzeln [1 = BAUM_INHALT, 2 = BAUM_AUSWERTUNG] gemeint sind).
+	//werden hier eingehängt. anchor_iter zeigt ggf. auf die Wurzel des
+	//tree_store - das behandelt zond_tree_store_insert selbst korrekt.
 	rc = zond_treeview_walk_tree(ztv, FALSE, ID_file_part,
-			(zond_tree_store_get_root(ZOND_TREE_STORE(
-			gtk_tree_view_get_model( GTK_TREE_VIEW(ztv)))) == anchor_id) ?
-			NULL : anchor_iter, child, &iter_new, 0,
+			anchor_iter, child, &iter_new, 0,
 			NULL, zond_treeview_insert_file_parts, error);
 	if (rc == -1)
 		ERROR_Z
@@ -992,7 +982,6 @@ static gint zond_treeview_anbinden_rekursiv(ZondTreeview *ztv,
 		GPtrArray* arr_children = NULL;
 		gchar const* icon_name = NULL;
 		gchar *text = 0;
-		ZondTreeStore *tree_store = NULL;
 		GtkTreeIter iter_new = { 0 };
 		gint rc = 0;
 		gint anchor_id_dir = 0;
@@ -1040,16 +1029,10 @@ static gint zond_treeview_anbinden_rekursiv(ZondTreeview *ztv,
 			return 0;
 		}
 
-		tree_store = ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(ztv) ));
-		//anchor_id <= 2: anchor_id ist eine der beiden Baum-Wurzeln
-		//(1 = BAUM_INHALT, 2 = BAUM_AUSWERTUNG) - dann NULL übergeben und
-		//direkt unter der Wurzel des tree_store einfügen, statt dem
-		//(ggf. nicht aussagekräftigen) anchor_iter zu vertrauen. Siehe
-		//auch den äquivalenten, aber anders formulierten Check in
-		//zond_treeview_leaf_anbinden (zond_tree_store_get_root(...) ==
-		//anchor_id).
-		zond_tree_store_insert(tree_store, (anchor_id > 2) ? anchor_iter : NULL,
-				child, &iter_new);
+		//anchor_iter zeigt ggf. auf die (unsichtbare) Wurzel des tree_store
+		//(nichts ausgewählt, siehe zond_treeview_get_anchor) - das behandelt
+		//zond_tree_store_insert selbst korrekt.
+		zond_tree_store_insert(anchor_iter, child, &iter_new);
 		*anchor_iter = iter_new;
 		*dir_inserted = TRUE;
 
@@ -1268,10 +1251,7 @@ static gint zond_treeview_clipboard_verschieben(Projekt *zond, gboolean child,
 
 	gtk_widget_queue_draw(GTK_WIDGET(zond->treeview[zond->baum_active]));
 
-	if (child
-			&& (iter_cursor->user_data
-					!= zond_tree_store_get_root_node(
-							zond_tree_store_get_tree_store(iter_cursor))))
+	if (child && !zond_tree_store_iter_is_root(iter_cursor))
 		sond_treeview_expand_to_row(zond->treeview[zond->baum_active],
 				s_selection.iter_anchor);
 	sond_treeview_set_cursor(zond->treeview[zond->baum_active],
@@ -1347,9 +1327,7 @@ gint zond_treeview_copy_node_to_baum_auswertung(ZondTreeview *ztv, gint node_id,
 	if (node_id_inserted)
 		*node_id_inserted = node_id_new;
 
-	zond_tree_store_insert(
-			ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(ztv) )),
-			iter, child, iter_inserted);
+	zond_tree_store_insert(iter, child, iter_inserted);
 	zond_tree_store_set(iter_inserted, icon_name, node_text, node_id_new);
 
 	g_free(icon_name);
@@ -1432,10 +1410,7 @@ static gint zond_treeview_clipboard_kopieren(Projekt *zond, gboolean child,
 	} else
 		return 0;
 
-	if (child
-			&& (iter_cursor->user_data
-					!= zond_tree_store_get_root_node(
-							zond_tree_store_get_tree_store(iter_cursor))))
+	if (child && !zond_tree_store_iter_is_root(iter_cursor))
 		sond_treeview_expand_to_row(zond->treeview[zond->baum_active],
 				s_selection.iter_anchor);
 	sond_treeview_set_cursor(zond->treeview[zond->baum_active],
@@ -1495,10 +1470,7 @@ static gint zond_treeview_paste_clipboard_as_link(Projekt *zond, gboolean child,
 	if (rc == -1)
 		ERROR_Z
 
-	if (child
-			&& (iter_cursor->user_data
-					!= zond_tree_store_get_root_node(
-							zond_tree_store_get_tree_store(iter_cursor))))
+	if (child && !zond_tree_store_iter_is_root(iter_cursor))
 		sond_treeview_expand_row(zond->treeview[zond->baum_active],
 				iter_cursor);
 	sond_treeview_set_cursor(zond->treeview[zond->baum_active],
@@ -2639,9 +2611,7 @@ static gint zond_treeview_load_node(ZondTreeview *ztv, gint node_id,
 		gchar *icon_name = NULL;
 		gchar *node_text = NULL;
 
-		zond_tree_store_insert(
-				ZOND_TREE_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(ztv))),
-				iter_anchor, child, &iter_new);
+		zond_tree_store_insert(iter_anchor, child, &iter_new);
 
 		if (type == ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_LINK) {
 			icon_name = g_strdup_printf("%d", node_id); //head_nr wird hier gespeichert
@@ -2734,9 +2704,7 @@ static gint zond_treeview_insert_links_foreach(ZondTreeview *ztv,
 
 		zond_tree_store_insert_link(iter_target, head_nr,
 				zond_tree_store_get_tree_store(&iter_anchor),
-				((GNode*) (iter_anchor.user_data)
-						== zond_tree_store_get_root_node(
-								zond_tree_store_get_tree_store(&iter_anchor))) ?
+				zond_tree_store_iter_is_root(&iter_anchor) ?
 						NULL : &iter_anchor, child, iter); //*iter existiert, ist aber bis hierhin nutzlos
 
 		gtk_tree_iter_free(iter_target);
@@ -2758,14 +2726,16 @@ gint zond_treeview_load_baum(ZondTreeview *ztv, GError **error) {
 	gint first_child = 0;
 	gint rc = 0;
 	gint root = 0;
+	GtkTreeIter iter_root = { 0 };
+	ZondTreeStore *tree_store = NULL;
 
 	ZondTreeviewPrivate *ztv_priv = zond_treeview_get_instance_private(ztv);
 
-	zond_tree_store_clear(
-			ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(ztv) )));
+	tree_store = ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(ztv) ));
 
-	root = zond_tree_store_get_root(
-			ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(ztv) )));
+	zond_tree_store_clear(tree_store);
+
+	root = zond_tree_store_get_root(tree_store);
 	rc = zond_dbase_get_first_child(ztv_priv->zond->dbase_zond->zond_dbase_work,
 			root, &first_child, error);
 	if (rc)
@@ -2773,8 +2743,12 @@ gint zond_treeview_load_baum(ZondTreeview *ztv, GError **error) {
 	else if (first_child == 0)
 		return 0; //Baum leer
 
-	rc = zond_treeview_walk_tree(ztv, TRUE, first_child, NULL, TRUE, NULL, root,
-			NULL, zond_treeview_load_node, error);
+	//Baum ist noch leer - kein echter Anker-Iter vorhanden, also einen auf
+	//die Wurzel des tree_store konstruieren (siehe zond_tree_store_insert).
+	zond_tree_store_iter_init_root(tree_store, &iter_root);
+
+	rc = zond_treeview_walk_tree(ztv, TRUE, first_child, &iter_root, TRUE, NULL,
+			root, NULL, zond_treeview_load_node, error);
 	if (rc)
 		ERROR_Z
 

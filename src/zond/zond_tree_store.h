@@ -55,9 +55,12 @@ void zond_tree_store_set(GtkTreeIter *iter, const gchar *icon_name,
 GDK_AVAILABLE_IN_ALL
 void zond_tree_store_remove(GtkTreeIter *iter);
 
+/* iter muss immer gültig sein (nie NULL) - zeigt er auf die Wurzel seines
+ eigenen tree_store (siehe zond_tree_store_iter_is_root/
+ zond_tree_store_iter_init_root), wird ganz oben im tree_store eingefügt. */
 GDK_AVAILABLE_IN_ALL
-void zond_tree_store_insert(ZondTreeStore *tree_store, GtkTreeIter *iter,
-		gboolean child, GtkTreeIter *iter_new);
+void zond_tree_store_insert(GtkTreeIter *iter, gboolean child,
+		GtkTreeIter *iter_new);
 
 GDK_AVAILABLE_IN_ALL
 void zond_tree_store_insert_link(GtkTreeIter*, gint, ZondTreeStore*,
@@ -87,6 +90,19 @@ void zond_tree_store_set_root(ZondTreeStore*, gint);
 gint zond_tree_store_get_root(ZondTreeStore*);
 
 GNode* zond_tree_store_get_root_node(ZondTreeStore*);
+
+/* TRUE, wenn iter der (unsichtbare, echte icon_name/node_text-lose) interne
+ Wurzel-Knoten seines eigenen tree_store ist - z.B. der von
+ zond_treeview_get_anchor gelieferte Ersatz-Iter, wenn nichts ausgewählt ist.
+ Praktisch überall dort relevant, wo zwischen "an dieser Stelle im Baum
+ einfügen" (echter iter) und "ganz oben im tree_store einfügen" (NULL)
+ unterschieden werden muß. */
+gboolean zond_tree_store_iter_is_root(GtkTreeIter*);
+
+/* Füllt iter so, dass er auf die (unsichtbare) Wurzel von tree_store zeigt -
+ das Gegenstück zu zond_tree_store_iter_is_root, für Aufrufer, die bisher
+ NULL an zond_tree_store_insert übergeben haben. */
+void zond_tree_store_iter_init_root(ZondTreeStore*, GtkTreeIter*);
 
 gint zond_tree_store_get_stamp(ZondTreeStore*);
 

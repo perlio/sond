@@ -26,6 +26,7 @@
 
 #include "../zond_dbase.h"
 #include "../zond_treeview.h"
+#include "../zond_tree_store.h"
 
 #include "../99conv/general.h"
 #include "../20allgemein/ziele.h"
@@ -131,7 +132,7 @@ static void cb_suchen_nach_auswertung(GtkMenuItem *item, gpointer user_data) {
 		GError *error = NULL;
 		GtkTreeIter iter_new = { 0, };
 
-		rc = suchen_kopieren_listenpunkt(zond, list, ((anchor_id > 2) ? &iter_anchor : NULL),
+		rc = suchen_kopieren_listenpunkt(zond, list, &iter_anchor,
 				&anchor_id, &child, &iter_new, &error);
 		if (rc) {
 			display_message(zond->app_window,
