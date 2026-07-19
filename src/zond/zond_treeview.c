@@ -942,6 +942,28 @@ static gint zond_treeview_leaf_anbinden(ZondTreeview *ztv,
 	return new_node_id;
 }
 
+/* Baut aus format (muss genau zwei %s enthalten - filepart und
+ error->message) die Fehlermeldung, zeigt sie im info_window an und gibt
+ error frei. Gemeinsamer Helper für die Fehlerpfade in
+ zond_treeview_anbinden_rekursiv, die sich nur im Format-String
+ unterscheiden. */
+static void zond_treeview_anbinden_error_message(InfoWindow *info_window,
+		SondTVFMItem *stvfm_item, gchar const *format, GError *error) {
+	gchar *errmsg = NULL;
+	gchar *filepart = NULL;
+	SondFilePart *sfp = NULL;
+
+	sfp = sond_tvfm_item_get_sond_file_part(stvfm_item);
+	filepart = sond_file_part_get_filepart(sfp);
+	errmsg = g_strdup_printf(format, filepart, error->message);
+	g_free(filepart);
+	g_error_free(error);
+	info_window_set_message(info_window, errmsg);
+	g_free(errmsg);
+
+	return;
+}
+
 /*  Fehler: werden im info_window angezeigt
  **  ansonsten: Id des zunächst erzeugten Knotens  */
 static gint zond_treeview_anbinden_rekursiv(ZondTreeview *ztv,
@@ -961,18 +983,8 @@ static gint zond_treeview_anbinden_rekursiv(ZondTreeview *ztv,
 				stvfm_item, info_window, zaehler, &error);
 
 		if (new_node_id == -1) {
-			gchar* errmsg = NULL;
-			gchar* filepart = NULL;
-			SondFilePart* sfp = NULL;
-
-			sfp = sond_tvfm_item_get_sond_file_part(stvfm_item);
-			filepart = sond_file_part_get_filepart(sfp);
-			errmsg = g_strdup_printf("Fehler Anbindung filepart '%s':\n%s",
-					filepart, error->message);
-			g_free(filepart);
-			g_error_free(error);
-			info_window_set_message(info_window, errmsg);
-			g_free(errmsg);
+			zond_treeview_anbinden_error_message(info_window, stvfm_item,
+					"Fehler Anbindung filepart '%s':\n%s", error);
 
 			return 0;
 		}
@@ -1012,19 +1024,8 @@ static gint zond_treeview_anbinden_rekursiv(ZondTreeview *ztv,
 				ZOND_DBASE_TYPE_BAUM_STRUKT, 0, NULL, NULL, icon_name, basename,
 				NULL, &error);
 		if (anchor_id_dir == -1) {
-			gchar* errmsg = NULL;
-			gchar* filepart = NULL;
-			SondFilePart* sfp = NULL;
-
-			sfp = sond_tvfm_item_get_sond_file_part(stvfm_item);
-
-			filepart = sond_file_part_get_filepart(sfp);
-			errmsg = g_strdup_printf("Fehler Anbindung filepart '%s':\n%s",
-					filepart, error->message);
-			g_free(filepart);
-			g_error_free(error);
-			info_window_set_message(info_window, errmsg);
-			g_free(errmsg);
+			zond_treeview_anbinden_error_message(info_window, stvfm_item,
+					"Fehler Anbindung filepart '%s':\n%s", error);
 
 			return 0;
 		}
@@ -1045,19 +1046,9 @@ static gint zond_treeview_anbinden_rekursiv(ZondTreeview *ztv,
 
 		rc = sond_tvfm_item_load_children(stvfm_item, &arr_children, &error);
 		if (rc) {
-			gchar* errmsg = NULL;
-			gchar* filepart = NULL;
-			SondFilePart* sfp = NULL;
-
-			sfp = sond_tvfm_item_get_sond_file_part(stvfm_item);
-
-			filepart = sond_file_part_get_filepart(sfp);
-			errmsg = g_strdup_printf("Kinder von filepart '%s' konnten "
-					"nicht geladen werden:\n%s", filepart, error->message);
-			g_free(filepart);
-			g_error_free(error);
-			info_window_set_message(info_window, errmsg);
-			g_free(errmsg);
+			zond_treeview_anbinden_error_message(info_window, stvfm_item,
+					"Kinder von filepart '%s' konnten nicht geladen werden:\n%s",
+					error);
 
 			return 0;
 		}
