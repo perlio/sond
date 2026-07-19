@@ -1467,6 +1467,11 @@ gint zond_dbase_get_first_child(ZondDBase *zond_dbase, gint node_id,
 	if (rc != SQLITE_ROW && rc != SQLITE_DONE)
 		ERROR_Z_DBASE
 
+	//Bei rc == SQLITE_DONE (kein Kind gefunden) liefert sqlite3_column_int
+	//auf einem fertig durchlaufenen Statement 0 zurück - das nutzen wir hier
+	//bewusst aus, statt *first_child explizit auf 0 zu setzen. Aufrufer
+	//verlassen sich also implizit darauf, dass first_child == 0 "kein Kind
+	//vorhanden" bedeutet.
 	if (first_child)
 		*first_child = sqlite3_column_int(stmt[0], 0);
 

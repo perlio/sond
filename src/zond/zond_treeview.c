@@ -829,6 +829,24 @@ static gint zond_treeview_remove_childish_anbindungen(ZondTreeview *ztv,
 /** Fehler: -1
  eingefügt: node_id
  nicht eingefügt, weil schon angebunden: 0 **/
+/* Wichtig für das Verständnis dieser Funktion: Beim Anbinden einer Datei
+ entstehen zwei unterschiedliche Knoten:
+ 1. Ein "Anker"-Knoten vom Typ BAUM_INHALT_FILE (Rückgabewert new_node_id
+    unten), der ohne eigenen icon_name/node_text angelegt wird. Er dient
+    ausschließlich dazu, im knoten-Baum eine Position (parent_ID/
+    older_sibling_ID) an der Anbindungsstelle zu belegen - er wird selbst
+    NIE im Treeview angezeigt.
+ 2. Die dauerhafte file_part-Zeile (ID_file_part), die unabhängig von der
+    Anbindungsstelle existiert (ggf. schon vorher angelegt, falls die Datei
+    an anderer Stelle bereits angebunden war) und deren icon_name/node_text
+    tatsächlich im Treeview dargestellt werden (siehe
+    zond_treeview_walk_tree/zond_treeview_insert_file_parts unten, das mit
+    ID_file_part - nicht mit new_node_id - aufgerufen wird).
+ Dadurch kann dieselbe Datei an mehreren Stellen im Baum eingehängt werden,
+ ohne Name/Icon/Unterstruktur zu duplizieren. Für nachfolgende Geschwister
+ (siehe Aufrufer) ist trotzdem new_node_id (der Anker) die relevante ID,
+ weil older_sibling_ID/parent_ID sich auf den knoten-Baum beziehen, nicht
+ auf die Anzeige. */
 static gint zond_treeview_leaf_anbinden(ZondTreeview *ztv,
 		GtkTreeIter *anchor_iter, gint anchor_id, gboolean child,
 		SondTVFMItem* stvfm_item, InfoWindow *info_window,
@@ -904,6 +922,8 @@ static gint zond_treeview_leaf_anbinden(ZondTreeview *ztv,
 	else if (rc == 1)
 		return 0; //will nicht
 
+	//Anker-Knoten: bewusst ohne icon_name/node_text/text - siehe Erklärung
+	//im Funktionskommentar oben. Belegt nur die Position im knoten-Baum.
 	new_node_id = zond_dbase_insert_node(
 			ztv_priv->zond->dbase_zond->zond_dbase_work, anchor_id, child,
 			ZOND_DBASE_TYPE_BAUM_INHALT_FILE, ID_file_part, NULL, NULL,
@@ -911,6 +931,13 @@ static gint zond_treeview_leaf_anbinden(ZondTreeview *ztv,
 	if (new_node_id == -1)
 		ERROR_Z
 
+	//Angezeigt wird ID_file_part (nicht new_node_id!) - dessen icon_name/
+	//node_text sowie ggf. schon vorhandene Kinder (z.B. PDF-Abschnitte)
+	//werden hier eingehängt. NULL statt anchor_iter, wenn anchor_id die
+	//Wurzel dieses Baums ist (Vergleich hier über zond_tree_store_get_root,
+	//an anderer Stelle - zond_treeview_anbinden_rekursiv - äquivalent, aber
+	//als "anchor_id > 2" ausgedrückt, weil dort die IDs der beiden
+	//Baum-Wurzeln [1 = BAUM_INHALT, 2 = BAUM_AUSWERTUNG] gemeint sind).
 	rc = zond_treeview_walk_tree(ztv, FALSE, ID_file_part,
 			(zond_tree_store_get_root(ZOND_TREE_STORE(
 			gtk_tree_view_get_model( GTK_TREE_VIEW(ztv)))) == anchor_id) ?
@@ -1014,6 +1041,13 @@ static gint zond_treeview_anbinden_rekursiv(ZondTreeview *ztv,
 		}
 
 		tree_store = ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(ztv) ));
+		//anchor_id <= 2: anchor_id ist eine der beiden Baum-Wurzeln
+		//(1 = BAUM_INHALT, 2 = BAUM_AUSWERTUNG) - dann NULL übergeben und
+		//direkt unter der Wurzel des tree_store einfügen, statt dem
+		//(ggf. nicht aussagekräftigen) anchor_iter zu vertrauen. Siehe
+		//auch den äquivalenten, aber anders formulierten Check in
+		//zond_treeview_leaf_anbinden (zond_tree_store_get_root(...) ==
+		//anchor_id).
 		zond_tree_store_insert(tree_store, (anchor_id > 2) ? anchor_iter : NULL,
 				child, &iter_new);
 		*anchor_iter = iter_new;
@@ -1246,46 +1280,6 @@ static gint zond_treeview_clipboard_verschieben(Projekt *zond, gboolean child,
 	return 0;
 }
 
-static gint zond_treeview_copy_pdf_abschnitt(ZondTreeview *ztv, gint node_id,
-		GtkTreeIter *iter, gboolean child, GtkTreeIter *iter_inserted,
-		gint anchor_id, gint *node_id_inserted, GError **error) {
-	gchar *icon_name = NULL;
-	gchar *node_text = NULL;
-	gchar *text = NULL;
-	gint rc = 0;
-
-	ZondTreeviewPrivate *ztv_priv = zond_treeview_get_instance_private(ztv);
-
-	rc = zond_dbase_get_node(ztv_priv->zond->dbase_zond->zond_dbase_work,
-			node_id, NULL, NULL, NULL, NULL, &icon_name, &node_text, &text,
-			error);
-	if (rc)
-		ERROR_Z
-
-	*node_id_inserted = zond_dbase_insert_node(
-			ztv_priv->zond->dbase_zond->zond_dbase_work, anchor_id, child,
-			ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_COPY, node_id, NULL, NULL,
-			icon_name, node_text, text, error);
-	if (*node_id_inserted == -1) {
-		g_free(icon_name);
-		g_free(node_text);
-		g_free(text);
-
-		ERROR_Z
-	}
-
-	zond_tree_store_insert(
-			ZOND_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(ztv) )),
-			iter, child, iter_inserted);
-	zond_tree_store_set(iter_inserted, icon_name, node_text, *node_id_inserted);
-
-	g_free(icon_name);
-	g_free(node_text);
-	g_free(text);
-
-	return 0;
-}
-
 gint zond_treeview_copy_node_to_baum_auswertung(ZondTreeview *ztv, gint node_id,
 		GtkTreeIter *iter, gboolean child, GtkTreeIter *iter_inserted,
 		gint anchor_id, gint *node_id_inserted, GError **error) {
@@ -1313,6 +1307,26 @@ gint zond_treeview_copy_node_to_baum_auswertung(ZondTreeview *ztv, gint node_id,
 			link_new = link;
 		else
 			link_new = node_id;
+
+		//BAUM_INHALT_FILE ist der reine Anker-Knoten der Anbindung (siehe
+		//Kommentar in zond_treeview_leaf_anbinden) - er trägt selbst kein
+		//icon_name/node_text/text. Angezeigt werden muss stattdessen der
+		//verlinkte, dauerhafte file_part-Knoten (link) - sonst bleibt die
+		//Kopie in BAUM_AUSWERTUNG unbeschriftet, obwohl link_new korrekt
+		//gesetzt ist (Öffnen/Hover funktionieren dann trotzdem, weil die
+		//darüber laufen).
+		if (type == ZOND_DBASE_TYPE_BAUM_INHALT_FILE) {
+			g_free(icon_name);
+			g_free(node_text);
+			g_free(text);
+			icon_name = node_text = text = NULL;
+
+			rc = zond_dbase_get_node(
+					ztv_priv->zond->dbase_zond->zond_dbase_work, link, NULL,
+					NULL, NULL, NULL, &icon_name, &node_text, &text, error);
+			if (rc)
+				ERROR_Z
+		}
 
 		type_new = ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_COPY;
 	} else
@@ -1355,8 +1369,8 @@ gint zond_treeview_copy_node_to_baum_auswertung(ZondTreeview *ztv, gint node_id,
 			return 0;
 
 		rc = zond_treeview_walk_tree(ztv, TRUE, first_child, iter_inserted,
-				TRUE, NULL, node_id_new, NULL, zond_treeview_copy_pdf_abschnitt,
-				error);
+				TRUE, NULL, node_id_new, NULL,
+				zond_treeview_copy_node_to_baum_auswertung, error);
 		if (rc)
 			ERROR_Z
 	}

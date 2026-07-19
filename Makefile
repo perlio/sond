@@ -162,17 +162,10 @@ release:
 .PHONY: do-release-commit
 do-release-commit:
 	git commit -am "Bump to $(RELEASE_VERSION)"
-	@if git rev-parse "$(GITHUB_TAG)" >/dev/null 2>&1; then \
-		echo "Fehler: Tag $(GITHUB_TAG) existiert bereits."; \
-		exit 1; \
-	fi
-	git tag -a $(GITHUB_TAG) -m "zond: $(RELEASE_VERSION)"
 	git push origin
-	git push origin $(GITHUB_TAG)
 	$(MAKE) release-dir
 	@echo ""
 	@echo "=== Release $(RELEASE_VERSION) fertig ==="
-	@echo "Tag: $(GITHUB_TAG)"
 	@echo "Verzeichnis: $(RELEASE_DIR)"
 	@echo ""
 	@echo "Zum Veroeffentlichen: make publish"
@@ -235,16 +228,22 @@ tag:
 	@echo "Tag $(GITHUB_TAG) erstellt. Push mit:"
 	@echo "  git push origin $(GITHUB_TAG)"
 
-# Oeffentliches Release: ZIP erzeugen, auf GitHub hochladen, aufraeumen
+# Oeffentliches Release: ZIP erzeugen, taggen, auf GitHub hochladen, aufraeumen
 # Setzt voraus, dass 'make release' bereits ausgefuehrt wurde
 BUMP ?= patch
 .PHONY: publish
 publish:
+	@if git rev-parse "$(GITHUB_TAG)" >/dev/null 2>&1; then \
+		echo "Fehler: Tag $(GITHUB_TAG) existiert bereits."; \
+		exit 1; \
+	fi
+	git tag -a $(GITHUB_TAG) -m "Release $(RELEASE_VERSION)"
+	git push origin $(GITHUB_TAG)
 	$(MAKE) zip-only
 	cp $(RELEASE_ZIP) $(GITHUB_ASSET_ZIP)
 	gh release create $(GITHUB_TAG) $(GITHUB_ASSET_ZIP) \
 		--title "zond $(RELEASE_VERSION)" \
-		--notes "$(MSG)"
+		--notes "$(if $(MSG),$(MSG),Release $(RELEASE_VERSION))"
 	rm -f $(RELEASE_ZIP) $(GITHUB_ASSET_ZIP)
 	@echo ""
 	@echo "=== Veroeffentlicht: $(GITHUB_TAG) ==="
