@@ -130,7 +130,7 @@ void annot_free(Annot*);
 
 gint zond_pdf_document_page_load_annots(PdfDocumentPage*, GError**);
 
-gint zond_pdf_document_load_page(PdfDocumentPage*, fz_context*, gchar**);
+gint zond_pdf_document_load_page(PdfDocumentPage*, fz_context*, GError**);
 
 //Gibt Zeiger auf geöffnetes document mit gchar* == path zurück; keine neue ref!
 ZondPdfDocument* zond_pdf_document_is_open(SondFilePartPDF*);

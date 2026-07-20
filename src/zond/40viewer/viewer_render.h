@@ -27,6 +27,7 @@ typedef struct _Pdf_Document_Page PdfDocumentPage;
 typedef void* gpointer;
 typedef int gint;
 typedef char gchar;
+typedef struct _GError GError;
 
 
 void viewer_render_wait_for_transfer(PdfDocumentPage* pdf_document_page);
@@ -36,7 +37,7 @@ void viewer_close_thread_pool_and_transfer(PdfViewer *pdfv);
 void viewer_render_response_free(gpointer data);
 
 gint viewer_render_stext_page_fast(fz_context *ctx,
-		PdfDocumentPage *pdf_document_page, gchar **errmsg);
+		PdfDocumentPage *pdf_document_page, GError **error);
 
 void viewer_render_thread(PdfViewer *pv, gint page);
 

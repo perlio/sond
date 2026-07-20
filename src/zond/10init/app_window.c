@@ -62,17 +62,17 @@ static void show_error_message(GtkWidget *window, const gchar *context,
 static gboolean cb_delete_event(GtkWidget *app_window, GdkEvent *event,
 		gpointer user_data) {
 	Projekt *zond = (Projekt*) user_data;
-	gchar *errmsg = NULL;
+	GError *error = NULL;
 	gint rc = 0;
 
-	rc = project_close(zond, &errmsg);
+	rc = project_close(zond, &error);
 
 	if (rc == -1) {
 		show_error_message(zond->app_window,
 				"Fehler beim Schließen des Projekts -\n\n"
 				"Bei Aufruf projekt_schliessen:\n",
-				errmsg);
-		g_free(errmsg);
+				error->message);
+		g_error_free(error);
 		return TRUE;
 	} else if (rc == 1) {
 		return TRUE;
@@ -270,7 +270,7 @@ static void cb_entry_search(GtkWidget *entry, gpointer data) {
 	Projekt *zond = (Projekt*) data;
 	const gchar *text = NULL;
 	gchar *search_text = NULL;
-	gchar *errmsg = NULL;
+	GError *error = NULL;
 	gint rc = 0;
 
 	text = gtk_entry_get_text(GTK_ENTRY(entry));
@@ -279,15 +279,15 @@ static void cb_entry_search(GtkWidget *entry, gpointer data) {
 		return;
 
 	search_text = g_strconcat("%", text, "%", NULL);
-	rc = suchen_treeviews(zond, search_text, &errmsg);
+	rc = suchen_treeviews(zond, search_text, &error);
 	g_free(search_text);
 
 	if (rc) {
 		show_error_message(zond->app_window,
 				"Fehler bei der Suche -\n\n"
 				"Bei Aufruf suchen_treeviews:\n",
-				errmsg);
-		g_free(errmsg);
+				error->message);
+		g_error_free(error);
 	}
 
 	gtk_popover_popdown(GTK_POPOVER(zond->popover));

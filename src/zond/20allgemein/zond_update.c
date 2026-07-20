@@ -559,7 +559,7 @@ gint zond_update(Projekt *zond, InfoWindow *info_window, GError **error) {
 		g_free(base_dir);
 
 		if (rc == -1)
-			ERROR_Z
+			return -1;
 		else
 			return 0; //abgebrochen
 	}
@@ -573,7 +573,7 @@ gint zond_update(Projekt *zond, InfoWindow *info_window, GError **error) {
 		g_free(vtag);
 		g_free(base_dir);
 		if (rc == -1)
-			ERROR_Z
+			return -1;
 		else
 			return 0; //ToDo: saubermachen
 	}
@@ -602,23 +602,19 @@ gint zond_update(Projekt *zond, InfoWindow *info_window, GError **error) {
 	//Projekt schliessen
 	if (zond->dbase_zond) {
 		gint rc = 0;
-		gchar *errmsg = NULL;
 
 		argv[3] = g_strdup(
 				zond_dbase_get_path(zond->dbase_zond->zond_dbase_store));
 
-		rc = project_close(zond, &errmsg);
+		rc = project_close(zond, error);
 		if (rc) {
 			g_free(vtag);
 			g_free(base_dir);
 			g_free(argv[3]);
 
-			if (rc == -1) {
-				*error = g_error_new( ZOND_ERROR, ZOND_ERROR_IO,
-						"%s\nproject_schliessen\n%s", __func__, errmsg);
-				g_free(errmsg);
+			if (rc == -1)
 				return -1;
-			} else
+			else
 				return 0; // if ( rc == 1 )
 		}
 	}
@@ -659,7 +655,7 @@ gint zond_update(Projekt *zond, InfoWindow *info_window, GError **error) {
 	g_free(vtag);
 	g_free(base_dir);
 	if (!res)
-		ERROR_Z
+		return -1;
 
 			//Projekt schließen und zond beenden
 	g_signal_emit_by_name(zond->app_window, "delete-event", NULL, &ret);

@@ -56,7 +56,7 @@ static gint zond_anbindung_verschieben_kinder(Projekt *zond, gint node_id,
 		rc = zond_dbase_get_younger_sibling(zond->dbase_zond->zond_dbase_work,
 				node_id, &younger_sibling, error);
 		if (rc)
-			ERROR_Z
+			return -1;
 
 		if (younger_sibling == 0)
 			break;
@@ -65,7 +65,7 @@ static gint zond_anbindung_verschieben_kinder(Projekt *zond, gint node_id,
 				younger_sibling, NULL, NULL, NULL, &section, NULL, NULL, NULL,
 				error);
 		if (rc)
-			ERROR_Z
+			return -1;
 
 		if (!section) {
 			if (error)
@@ -87,7 +87,7 @@ static gint zond_anbindung_verschieben_kinder(Projekt *zond, gint node_id,
 					zond->dbase_zond->zond_dbase_work, younger_sibling,
 					anchor_id, child, error);
 			if (rc)
-				ERROR_Z
+				return -1;
 
 			if (iter) {
 				iter_younger_sibling = *iter;
@@ -130,7 +130,7 @@ static gint zond_anbindung_baum_inhalt(Projekt *zond, gint anchor_id,
 	rc = zond_dbase_find_baum_inhalt_file(zond->dbase_zond->zond_dbase_work,
 			id_inserted, &baum_inhalt_file, NULL, NULL, error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	if (baum_inhalt_file) //in Baum Inhalt angebunden - muß in tree eingefügt werden
 	{
@@ -160,7 +160,7 @@ static gint zond_anbindung_baum_inhalt(Projekt *zond, gint anchor_id,
 	rc = zond_anbindung_verschieben_kinder(zond, id_inserted,
 			(baum_inhalt_file) ? &iter_inserted : NULL, anbindung, error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	return (baum_inhalt_file) ? 0 : 1;
 }
@@ -181,12 +181,12 @@ static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
 	rc = zond_dbase_get_parent(zond->dbase_zond->zond_dbase_work, node_inserted,
 			&parent_id, error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	rc = zond_dbase_get_node(zond->dbase_zond->zond_dbase_work, parent_id, NULL,
 			NULL, &file_part_parent, &section_parent, NULL, NULL, NULL, error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	rc = zond_treeviewfm_section_visible(
 			ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), file_part_parent,
@@ -194,7 +194,7 @@ static gint zond_anbindung_fm(Projekt *zond, gint node_inserted,
 	g_free(file_part_parent);
 	g_free(section_parent);
 	if (rc == -1)
-		ERROR_Z
+		return -1;
 
 	if (!visible)
 		return 0;
@@ -402,7 +402,7 @@ static gint zond_anbindung_trees(Projekt *zond, gint anchor_pdf_abschnitt,
 	rc = zond_anbindung_baum_inhalt(zond, anchor_pdf_abschnitt, child,
 			node_inserted, anbindung, file_part, node_text, error);
 	if (rc == -1)
-		ERROR_Z
+		return -1;
 
 	if (rc == 1)
 		open = TRUE;
@@ -410,7 +410,7 @@ static gint zond_anbindung_trees(Projekt *zond, gint anchor_pdf_abschnitt,
 	rc = zond_anbindung_fm(zond, node_inserted, file_part, sfp_pdf, anbindung,
 			node_text, open, error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	return 0;
 }
@@ -424,7 +424,7 @@ gint ziele_abfragen_anker_rek(ZondDBase *zond_dbase, Anbindung anbindung,
 	rc = zond_dbase_get_node(zond_dbase, anchor_id, NULL, NULL, NULL, &section,
 	NULL, NULL, NULL, error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	if (section) {
 		anbindung_parse_file_section(section, &anbindung_anchor);
@@ -455,7 +455,7 @@ gint ziele_abfragen_anker_rek(ZondDBase *zond_dbase, Anbindung anbindung,
 		rc = zond_dbase_get_first_child(zond_dbase, anchor_id, &first_child_id,
 				error);
 		if (rc)
-			ERROR_Z
+			return -1;
 
 		if (first_child_id > 0) //hat kind
 				{
@@ -478,7 +478,7 @@ gint ziele_abfragen_anker_rek(ZondDBase *zond_dbase, Anbindung anbindung,
 		rc = zond_dbase_get_younger_sibling(zond_dbase, anchor_id,
 				&younger_sibling_id, error);
 		if (rc)
-			ERROR_Z
+			return -1;
 
 		*kind = FALSE;
 		*anchor_id_new = anchor_id;
@@ -489,7 +489,7 @@ gint ziele_abfragen_anker_rek(ZondDBase *zond_dbase, Anbindung anbindung,
 			rc = ziele_abfragen_anker_rek(zond_dbase, anbindung,
 					younger_sibling_id, anchor_id_new, kind, error);
 			if (rc)
-				ERROR_Z
+				return -1;
 		}
 	}
 	// wenn nicht danach, bleibt ja nur Überschneidung!!
@@ -518,7 +518,7 @@ static gint zond_anbindung_insert_pdf_abschnitt_in_dbase(Projekt *zond,
 	rc = zond_dbase_get_section(zond->dbase_zond->zond_dbase_work,
 			file_part, NULL, &pdf_root, error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	if (!pdf_root) {
 		gint rc = 0;
@@ -526,14 +526,14 @@ static gint zond_anbindung_insert_pdf_abschnitt_in_dbase(Projekt *zond,
 		rc = zond_treeview_insert_file_part_in_db(zond, file_part, NULL,
 				"anbindung", &pdf_root, error);
 		if (rc)
-			ERROR_Z
+			return -1;
 	}
 
 	//jetzt vergleichen,
 	rc = ziele_abfragen_anker_rek(zond->dbase_zond->zond_dbase_work, anbindung,
 			pdf_root, &anchor_id_dbase, child, error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	if (anchor_pdf_abschnitt)
 		*anchor_pdf_abschnitt = anchor_id_dbase;
@@ -549,7 +549,7 @@ static gint zond_anbindung_insert_pdf_abschnitt_in_dbase(Projekt *zond,
 			NULL, error);
 	g_free(file_section);
 	if (node_id_new == -1)
-		ERROR_Z
+		return -1;
 
 	if (node_inserted)
 		*node_inserted = node_id_new;
@@ -583,7 +583,7 @@ gint zond_anbindung_erzeugen(PdfViewer *pv, GError **error) {
 			&node_text, error);
 	if (rc) {
 		g_free(filepart);
-		ERROR_Z
+		return -1;
 	}
 
 	rc = zond_anbindung_trees(pv->zond, anchor_pdf_abschnitt, child, node_inserted,
@@ -592,7 +592,7 @@ gint zond_anbindung_erzeugen(PdfViewer *pv, GError **error) {
 	g_free(filepart);
 	g_free(node_text);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	return 0;
 }

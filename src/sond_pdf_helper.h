@@ -32,13 +32,6 @@ typedef int gboolean;
 typedef struct _GBytes GBytes;
 typedef struct _GError GError;
 
-#define ERROR_MUPDF_R(x,y) { if ( errmsg ) *errmsg = add_string( *errmsg, g_strconcat( \
-                        "Bei Aufruf ", __func__, ":\nBei Aufruf " x ":\n", \
-                        fz_caught_message( ctx ), NULL ) ); \
-                        return y; }
-
-#define ERROR_MUPDF(x) ERROR_MUPDF_R(x,-1)
-
 #define ERROR_PDF_VAL(x) { if (error) *error = g_error_new( \
 						g_quark_from_static_string("mupdf"), fz_caught(ctx), \
 						"%s\n%s", __func__, fz_caught_message(ctx)); \
@@ -47,10 +40,10 @@ typedef struct _GError GError;
 #define ERROR_PDF ERROR_PDF_VAL(-1)
 
 
-fz_buffer* pdf_text_filter_page(fz_context*, pdf_page*, gint, gchar**);
+fz_buffer* pdf_text_filter_page(fz_context*, pdf_page*, gint, GError**);
 
 gint pdf_copy_page(fz_context*, pdf_document*, gint, gint, pdf_document*, gint,
-		gchar**);
+		GError**);
 
 gint pdf_page_rotate(fz_context*, pdf_obj*, gint, GError**);
 

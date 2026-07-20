@@ -404,17 +404,13 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 
 		if (pdfp->inserted && !pdfp->deleted) {
 			gint rc = 0;
-			gchar* errmsg = NULL;
 
 			zond_pdf_document_mutex_lock(dd->zpdfd_part->zond_pdf_document);
 			rc = pdf_copy_page(ctx,
 					zond_pdf_document_get_pdf_doc(dd->zpdfd_part->zond_pdf_document),
-					i, i, doc, page_orig, &errmsg);
+					i, i, doc, page_orig, error);
 			zond_pdf_document_mutex_unlock(dd->zpdfd_part->zond_pdf_document);
 			if (rc) {
-				if (error) *error = g_error_new(VIEWER_ERROR, 0, "%s\n%s",
-						__func__, errmsg);
-				g_free(errmsg);
 				pdf_drop_document(ctx, doc);
 
 				return -1;
@@ -456,7 +452,7 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 					pdf_drop_page(ctx, pdf_page);
 					pdf_drop_document(ctx, doc);
 
-					ERROR_Z
+					return -1;
 				}
 			}
 			else if (entry.type == JOURNAL_TYPE_OCR) {
@@ -470,7 +466,7 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 						pdf_drop_page(ctx, pdf_page);
 						pdf_drop_document(ctx, doc);
 
-						ERROR_Z
+						return -1;
 					}
 					else if (!font_ref) {
 
@@ -479,7 +475,7 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 							pdf_drop_page(ctx, pdf_page);
 							pdf_drop_document(ctx, doc);
 
-							ERROR_Z
+							return -1;
 						}
 					}
 
@@ -499,7 +495,7 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 					pdf_drop_page(ctx, pdf_page);
 					pdf_drop_document(ctx, doc);
 
-					ERROR_Z
+					return -1;
 				}
 			}
 			else if (entry.type == JOURNAL_TYPE_ANNOT_CREATED) {
@@ -511,7 +507,7 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 				if (!pdf_ann) {
 					pdf_drop_page(ctx, pdf_page);
 					pdf_drop_document(ctx, doc);
-					ERROR_Z
+					return -1;
 				}
 			}
 			else if (entry.type == JOURNAL_TYPE_ANNOT_CHANGED) {
@@ -529,7 +525,7 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 				if (rc) {
 					pdf_drop_page(ctx, pdf_page);
 					pdf_drop_document(ctx, doc);
-					ERROR_Z
+					return -1;
 				}
 			}
 		}
@@ -571,7 +567,7 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 			zond_pdf_document_get_sfp_pdf(dd->zpdfd_part->zond_pdf_document), error);
 	zond_pdf_document_mutex_unlock(dd->zpdfd_part->zond_pdf_document);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	//Journal bereinigen
 	for (gint i = arr_journal->len - 1; i >= 0; i--) {
@@ -700,7 +696,7 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 				zond_pdf_document_get_sfp_pdf(dd->zpdfd_part->zond_pdf_document),
 				TRUE, FALSE, error);
 		if (!doc)
-			ERROR_Z
+			return -1;
 
 #ifndef VIEWER
 		rc = dbase_zond_begin(pdfv->zond->dbase_zond, error);
@@ -780,7 +776,7 @@ void viewer_save_and_close(PdfViewer *pdfv) {
 
 			ret = viewer_save_dirty_dds(pdfv, &error);
 			if (ret) {
-				display_error(pdfv->vf, "Speichern nicht erfoglreich", error->message);
+				display_message(pdfv->vf, "Speichern nicht erfoglreich\n\n", error->message, NULL);
 				g_error_free(error);
 
 				return;
@@ -1165,7 +1161,6 @@ gint viewer_handle_text_search(PdfViewer* pv, GtkWidget *widget, GError **error)
 			gint anzahl = 0;
 			fz_quad quads[100] = { 0 };
 			fz_context *ctx = NULL;
-			gchar *errmsg = NULL;
 
 			//array leeren
 			g_array_remove_range(pv->text_occ.arr_quad, 0,
@@ -1179,13 +1174,9 @@ gint viewer_handle_text_search(PdfViewer* pv, GtkWidget *widget, GError **error)
 					viewer_page->pdf_document_page->document);
 
 			rc = viewer_render_stext_page_fast(ctx,
-					viewer_page->pdf_document_page, &errmsg);
-			if (rc) {
-				g_set_error(error, VIEWER_ERROR, 0, "%s\n%s", __func__, errmsg);
-				g_free(errmsg);
-
+					viewer_page->pdf_document_page, error);
+			if (rc)
 				return -1;
-			}
 
 			fz_try( ctx )
 				anzahl = fz_search_stext_page(ctx,
@@ -1691,16 +1682,10 @@ gint viewer_handle_button_press(PdfViewer* pv,
 			if ((viewer_page->pdf_document_page->thread & 2)
 					&& pv->state == 3) { //Neue AnnotText einfügen
 				gint rc = 0;
-				gchar *errmsg = NULL;
 
-				rc = viewer_annot_create(viewer_page, &errmsg);
-				if (rc) {
-					if (error) *error = g_error_new(VIEWER_ERROR, 0,
-							"%s\n%s", __func__, errmsg);
-					g_free(errmsg);
-
+				rc = viewer_annot_create(viewer_page, error);
+				if (rc)
 					return -1;
-				}
 
 				//neu erzeugte Text-Annot soll markiert sein!
 				pv->clicked_annot = g_ptr_array_index(
@@ -1797,7 +1782,7 @@ gint viewer_handle_button_press(PdfViewer* pv,
 
 				rc = zond_anbindung_erzeugen(pv, error);
 				if (rc)
-					ERROR_Z
+					return -1;
 
 				gtk_window_present(GTK_WINDOW(pv->zond->app_window));
 

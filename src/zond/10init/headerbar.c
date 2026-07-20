@@ -69,38 +69,38 @@ static void activate_baum_action(Projekt *zond, const gchar *action_name) {
  * ========================================================================== */
 
 static void cb_app_projekt_neu(GSimpleAction *a, GVariant *p, gpointer d) {
-	gchar *errmsg = NULL;
+	GError *error = NULL;
 	Projekt *zond = (Projekt*) d;
-	if (project_new(zond, &errmsg)) {
-		display_message(zond->app_window, "Fehler beim Anlegen des Projekts\n", errmsg, NULL);
-		g_free(errmsg);
+	if (project_new(zond, &error)) {
+		display_message(zond->app_window, "Fehler beim Anlegen des Projekts\n", error->message, NULL);
+		g_error_free(error);
 	}
 }
 
 static void cb_app_projekt_oeffnen(GSimpleAction *a, GVariant *p, gpointer d) {
-	gchar *errmsg = NULL;
+	GError *error = NULL;
 	Projekt *zond = (Projekt*) d;
-	if (project_load(zond, &errmsg)) {
-		display_error(zond->app_window, "Fehler beim Laden des Projekts", errmsg);
-		g_free(errmsg);
+	if (project_load(zond, &error)) {
+		display_message(zond->app_window, "Fehler beim Laden des Projekts\n\n", error->message, NULL);
+		g_error_free(error);
 	}
 }
 
 static void cb_app_projekt_schliessen(GSimpleAction *a, GVariant *p, gpointer d) {
-	gchar *errmsg = NULL;
+	GError *error = NULL;
 	Projekt *zond = (Projekt*) d;
-	if (project_close(zond, &errmsg) == -1) {
-		display_message(zond->app_window, "Fehler beim Schließen des Projekts\n", errmsg, NULL);
-		g_free(errmsg);
+	if (project_close(zond, &error) == -1) {
+		display_message(zond->app_window, "Fehler beim Schließen des Projekts\n", error->message, NULL);
+		g_error_free(error);
 	}
 }
 
 static void cb_app_projekt_speichern(GSimpleAction *a, GVariant *p, gpointer d) {
-	gchar *errmsg = NULL;
+	GError *error = NULL;
 	Projekt *zond = (Projekt*) d;
-	if (project_save(zond, &errmsg)) {
-		display_message(zond->app_window, "Fehler beim Speichern des Projekts\n", errmsg, NULL);
-		g_free(errmsg);
+	if (project_save(zond, &error)) {
+		display_message(zond->app_window, "Fehler beim Speichern des Projekts\n", error->message, NULL);
+		g_error_free(error);
 	}
 }
 
@@ -247,7 +247,7 @@ static void cb_win_icon(GSimpleAction *a, GVariant *p, gpointer d) {
  * CALLBACKS - PDF
  * ========================================================================== */
 
-static GPtrArray* selection_abfragen_pdf(Projekt *zond, gchar **errmsg) {
+static GPtrArray* selection_abfragen_pdf(Projekt *zond, GError **error) {
 	GPtrArray *arr_sfp = g_ptr_array_new_with_free_func(
 			(GDestroyNotify) g_object_unref);
 	if (zond->baum_active == KEIN_BAUM)
@@ -260,7 +260,6 @@ static GPtrArray* selection_abfragen_pdf(Projekt *zond, gchar **errmsg) {
 		GtkTreeIter iter = { 0 };
 		gint node_id = 0;
 		gchar *file_part = NULL;
-		GError *error = NULL;
 		SondFilePart *sfp = NULL;
 		if (!gtk_tree_model_get_iter(
 				gtk_tree_view_get_model(GTK_TREE_VIEW(
@@ -268,28 +267,23 @@ static GPtrArray* selection_abfragen_pdf(Projekt *zond, gchar **errmsg) {
 				&iter, l->data)) {
 			g_list_free_full(selected, (GDestroyNotify) gtk_tree_path_free);
 			g_ptr_array_unref(arr_sfp);
-			if (errmsg)
-				*errmsg = g_strdup("Iter konnte nicht ermittelt werden");
+			g_set_error(error, SOND_ERROR, 0, "Iter konnte nicht ermittelt werden");
 			return NULL;
 		}
 		gtk_tree_model_get(gtk_tree_view_get_model(
 				GTK_TREE_VIEW(zond->treeview[zond->baum_active])),
 				&iter, 2, &node_id, -1);
 		if (zond_dbase_get_node(zond->dbase_zond->zond_dbase_work, node_id,
-				NULL, NULL, &file_part, NULL, NULL, NULL, NULL, &error)) {
-			if (errmsg) *errmsg = g_strdup(error->message);
-			g_error_free(error);
+				NULL, NULL, &file_part, NULL, NULL, NULL, NULL, error)) {
 			g_list_free_full(selected, (GDestroyNotify) gtk_tree_path_free);
 			g_ptr_array_unref(arr_sfp);
 			return NULL;
 		}
 		if (!file_part)
 			continue;
-		sfp = sond_file_part_from_filepart(file_part, &error);
+		sfp = sond_file_part_from_filepart(file_part, error);
 		g_free(file_part);
 		if (!sfp) {
-			if (errmsg) *errmsg = g_strdup(error->message);
-			g_error_free(error);
 			g_list_free_full(selected, (GDestroyNotify) gtk_tree_path_free);
 			g_ptr_array_unref(arr_sfp);
 			return NULL;
@@ -322,7 +316,7 @@ static gint clean_pdf(fz_context *ctx, SondFilePartPDF *sfp_pdf, GError **error)
 			g_clear_error(error);
 			return 1;
 		}
-		ERROR_Z
+		return -1;
 	}
 	count = pdf_count_pages(ctx, doc);
 	pages = g_malloc(sizeof(gint) * count);
@@ -352,22 +346,23 @@ static gint clean_pdf(fz_context *ctx, SondFilePartPDF *sfp_pdf, GError **error)
 	g_object_unref(sfp_pdf);
 	if (!sond_remove(path_tmp, &error_rem)) {
 		LOG_WARN("Arbeitskopie konnte nicht gelöscht werden: %s", error_rem->message);
-		g_free(error_rem);
+		g_error_free(error_rem);
 	}
 	g_free(path_tmp);
-	if (rc) ERROR_Z
+	if (rc)
+		return -1;
 	return 0;
 }
 
 static void cb_win_pdf_reparieren(GSimpleAction *a, GVariant *p, gpointer d) {
 	Projekt *zond = (Projekt*) d;
-	gchar *errmsg = NULL;
-	GPtrArray *arr_sfp = selection_abfragen_pdf(zond, &errmsg);
+	GError *error = NULL;
+	GPtrArray *arr_sfp = selection_abfragen_pdf(zond, &error);
 	if (!arr_sfp) {
-		if (errmsg) {
+		if (error) {
 			display_message(zond->app_window,
-					"PDF kann nicht gereinigt werden\n\n", errmsg, NULL);
-			g_free(errmsg);
+					"PDF kann nicht gereinigt werden\n\n", error->message, NULL);
+			g_error_free(error);
 		}
 		return;
 	}
@@ -431,11 +426,12 @@ static void cb_win_refresh(GSimpleAction *a, GVariant *p, gpointer d) {
  * ========================================================================== */
 
 static void cb_win_test(GSimpleAction *a, GVariant *p, gpointer d) {
-	gchar *errmsg = NULL;
+	GError *error = NULL;
 	Projekt *zond = (Projekt*) d;
-	if (test(zond, &errmsg)) {
-		display_message(zond->app_window, "Test:\n\n", errmsg, NULL);
-		g_free(errmsg);
+	if (test(zond, &error)) {
+		display_message(zond->app_window, "Test:\n\n",
+				error ? error->message : NULL, NULL);
+		g_clear_error(&error);
 	}
 }
 

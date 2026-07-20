@@ -53,7 +53,7 @@ static gint suchen_kopieren_listenpunkt(Projekt *zond, GList *list,
 
 	rc = zond_dbase_begin(zond->dbase_zond->zond_dbase_work, error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	rc = zond_treeview_walk_tree(ZOND_TREEVIEW(zond->treeview[BAUM_AUSWERTUNG]),
 	FALSE, node_id, iter, *child, iter_new, *anchor_id, &node_id_new,
@@ -180,7 +180,7 @@ static void cb_lb_row_activated(GtkWidget *listbox, GtkWidget *row,
 }
 
 static gint suchen_fuellen_row(Projekt *zond, GtkWidget *list_box,
-		gint zond_suchen, gint node_id, gchar **errmsg) {
+		gint zond_suchen, gint node_id, GError **error) {
 	gchar *text_label = NULL;
 	GtkWidget *hbox = NULL;
 	gint root = 0;
@@ -191,18 +191,12 @@ static gint suchen_fuellen_row(Projekt *zond, GtkWidget *list_box,
 		gint rc = 0;
 		gchar *node_text = NULL;
 		gchar *file_part = NULL;
-		GError *error = NULL;
 
 		rc = zond_dbase_get_node(zond->dbase_zond->zond_dbase_work, node_id,
 				NULL, NULL, &file_part,
-				NULL, NULL, &node_text, NULL, &error);
-		if (rc) {
-			if (errmsg)
-				*errmsg = g_strdup_printf("%s\n%s", __func__, error->message);
-			g_error_free(error);
-
+				NULL, NULL, &node_text, NULL, error);
+		if (rc)
 			return -1;
-		}
 
 		if (zond_suchen == 0) {
 			text_label = add_string(g_strdup("FilePart: "), file_part);
@@ -212,15 +206,9 @@ static gint suchen_fuellen_row(Projekt *zond, GtkWidget *list_box,
 			gint root = 0;
 
 			rc = zond_dbase_get_tree_root(zond->dbase_zond->zond_dbase_work,
-					node_id, &root, &error);
-			if (rc) {
-				if (errmsg)
-					*errmsg = g_strdup_printf("%s\n%s", __func__,
-							error->message);
-				g_error_free(error);
-
+					node_id, &root, error);
+			if (rc)
 				return -1;
-			}
 
 			if (root == 1)
 				text_label = add_string(g_strdup("BAUM_INHALT: "), node_text);
@@ -248,7 +236,7 @@ static gint suchen_fuellen_row(Projekt *zond, GtkWidget *list_box,
 }
 
 static gint suchen_fuellen_ergebnisfenster(Projekt *zond,
-		GtkWidget *ergebnisfenster, GArray *arr_treffer, gchar **errmsg) {
+		GtkWidget *ergebnisfenster, GArray *arr_treffer, GError **error) {
 	gint rc = 0;
 	GtkWidget *list_box = NULL;
 	Node node = { 0 };
@@ -258,9 +246,9 @@ static gint suchen_fuellen_ergebnisfenster(Projekt *zond,
 	for (gint i = 0; i < arr_treffer->len; i++) {
 		node = g_array_index(arr_treffer, Node, i);
 		rc = suchen_fuellen_row(zond, list_box, node.zond_suchen, node.node_id,
-				errmsg);
+				error);
 		if (rc)
-			ERROR_S
+			return -1;
 	}
 
 	gtk_widget_show_all(list_box);
@@ -331,26 +319,27 @@ suchen_erzeugen_ergebnisfenster(Projekt *zond, const gchar *titel) {
 }
 
 static gint suchen_anzeigen_ergebnisse(Projekt *zond, const gchar *titel,
-		GArray *arr_treffer, gchar **errmsg) {
+		GArray *arr_treffer, GError **error) {
 	gint rc = 0;
 	GtkWidget *ergebnisfenster = 0;
 
 	ergebnisfenster = suchen_erzeugen_ergebnisfenster(zond, titel);
 
 	rc = suchen_fuellen_ergebnisfenster(zond, ergebnisfenster, arr_treffer,
-			errmsg);
+			error);
 	if (rc)
-		ERROR_S
+		return -1;
 
 	return 0;
 }
 
-#define ERROR_SQL(x) { if ( errmsg ) *errmsg = add_string( g_strconcat( "Bei Aufruf " x ":\n", \
-                       sqlite3_errmsg(zond_dbase_get_dbase( zond->dbase_zond->zond_dbase_work ) ), NULL ), *errmsg ); \
+#define ERROR_SQL(x) { g_set_error(error, g_quark_from_static_string("SQLITE3"), rc, \
+                       "Bei Aufruf " x ":\n%s", \
+                       sqlite3_errmsg(zond_dbase_get_dbase( zond->dbase_zond->zond_dbase_work ) ) ); \
                        return -1; }
 
 static gint suchen_db(Projekt *zond, const gchar *text, GArray *arr_treffer,
-		gchar **errmsg) {
+		GError **error) {
 	gint rc = 0;
 	Node node = { 0, };
 	sqlite3_stmt *stmt = NULL;
@@ -390,26 +379,26 @@ static gint suchen_db(Projekt *zond, const gchar *text, GArray *arr_treffer,
 	return 0;
 }
 
-gint suchen_treeviews(Projekt *zond, const gchar *text, gchar **errmsg) {
+gint suchen_treeviews(Projekt *zond, const gchar *text, GError **error) {
 	gint rc = 0;
 	GArray *arr_treffer = NULL;
 	gchar *titel = NULL;
 
 	arr_treffer = g_array_new( FALSE, FALSE, sizeof(Node));
 
-	rc = suchen_db(zond, text, arr_treffer, errmsg);
+	rc = suchen_db(zond, text, arr_treffer, error);
 	if (rc) {
 		g_array_unref(arr_treffer);
-		ERROR_S
+		return -1;
 	}
 
 	if (arr_treffer->len) {
 		titel = g_strconcat("Suche nach: '", text, "'", NULL);
-		rc = suchen_anzeigen_ergebnisse(zond, titel, arr_treffer, errmsg);
+		rc = suchen_anzeigen_ergebnisse(zond, titel, arr_treffer, error);
 	}
 	g_array_unref(arr_treffer);
 	if (rc)
-		ERROR_S
+		return -1;
 
 	return 0;
 }

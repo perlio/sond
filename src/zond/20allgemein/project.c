@@ -53,7 +53,7 @@ gint dbase_zond_begin(DBaseZond* dbase_zond, GError** error) {
 
 	rc = zond_dbase_begin(dbase_zond->zond_dbase_store, error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	rc = zond_dbase_begin(dbase_zond->zond_dbase_work, error);
 	if (rc)
@@ -75,7 +75,7 @@ gint dbase_zond_commit(DBaseZond* dbase_zond, GError** error) {
 	rc = zond_dbase_commit(dbase_zond->zond_dbase_store, error);
 	if (rc) {
 		dbase_zond_rollback(dbase_zond, error);
-		ERROR_Z
+		return -1;
 	}
 
 	rc = zond_dbase_commit(dbase_zond->zond_dbase_work, error);
@@ -104,7 +104,7 @@ static gint dbase_zond_update_section_dbase(ZondDBase* zond_dbase,
 	rc = zond_dbase_get_arr_sections(zond_dbase, filepart, &arr_sections, error);
 	g_free(filepart);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	for (gint i = 0; i < arr_sections->len; i++) {
 		Section section = { 0 };
@@ -123,7 +123,7 @@ static gint dbase_zond_update_section_dbase(ZondDBase* zond_dbase,
 		rc = zond_dbase_update_section(zond_dbase, section.ID, section_new, error);
 		g_free(section_new);
 		if (rc)
-			ERROR_Z
+			return -1;
 	}
 
 	return 0;
@@ -135,11 +135,11 @@ gint dbase_zond_update_sections(DBaseZond* dbase_zond, DisplayedDocument* dd,
 
 	rc = dbase_zond_update_section_dbase(dbase_zond->zond_dbase_store, dd, error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	rc = dbase_zond_update_section_dbase(dbase_zond->zond_dbase_work, dd, error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	return 0;
 }
@@ -151,12 +151,12 @@ gint dbase_zond_update_path(DBaseZond* dbase_zond, gchar const* prefix_old,
 	rc = zond_dbase_update_path(dbase_zond->zond_dbase_store, prefix_old,
 			prefix_new, error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	rc = zond_dbase_update_path(dbase_zond->zond_dbase_work, prefix_old, prefix_new,
 			error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	return 0;
 }
@@ -168,12 +168,12 @@ gint dbase_zond_update_gmessage_index(DBaseZond* dbase_zond,
 	rc = zond_dbase_update_gmessage_index(dbase_zond->zond_dbase_store, prefix,
 			index, into, error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	rc = zond_dbase_update_gmessage_index(dbase_zond->zond_dbase_work, prefix,
 			index, into, error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	return 0;
 }
@@ -238,10 +238,10 @@ void project_set_widgets_sensitive(Projekt *zond, gboolean active) {
  * Create and initialize the project databases
  * @param zond The project structure
  * @param create TRUE to create new database, FALSE to open existing
- * @param errmsg Error message output (legacy error handling)
+ * @param error GError for error reporting
  * @return 0 on success, -1 on error
  */
-static gint project_create_dbase_zond(Projekt *zond, gboolean create, gchar **errmsg) {
+static gint project_create_dbase_zond(Projekt *zond, gboolean create, GError **error) {
 	gint rc = 0;
 	ZondDBase *zond_dbase_work = NULL;
 	ZondDBase *zond_dbase_store = NULL;
@@ -249,24 +249,24 @@ static gint project_create_dbase_zond(Projekt *zond, gboolean create, gchar **er
 	gchar *path_tmp = NULL;
 
 	path = g_strdup_printf("%s/%s", zond->project_dir, zond->project_name);
-	zond_dbase_store = zond_dbase_new(path, FALSE, create, errmsg);
+	zond_dbase_store = zond_dbase_new(path, FALSE, create, error);
 	if (!zond_dbase_store)
-		ERROR_S
+		return -1;
 
 	path_tmp = g_strconcat(path, ".tmp", NULL);
 
-	zond_dbase_work = zond_dbase_new(path_tmp, TRUE, FALSE, errmsg);
+	zond_dbase_work = zond_dbase_new(path_tmp, TRUE, FALSE, error);
 	g_free(path_tmp);
 	if (!zond_dbase_work) {
 		g_object_unref(zond_dbase_store);
-		ERROR_S
+		return -1;
 	}
 
-	rc = zond_dbase_backup(zond_dbase_store, zond_dbase_work, errmsg);
+	rc = zond_dbase_backup(zond_dbase_store, zond_dbase_work, error);
 	if (rc) {
 		g_object_unref(zond_dbase_store);
 		g_object_unref(zond_dbase_work);
-		ERROR_S
+		return -1;
 	}
 
 	sqlite3_update_hook(zond_dbase_get_dbase(zond_dbase_work),
@@ -303,19 +303,19 @@ static void project_clear_dbase_zond(DBaseZond **dbase_zond) {
 /**
  * Save the project to disk
  * @param zond The project structure
- * @param errmsg Error message output (legacy error handling)
+ * @param error GError for error reporting
  * @return 0 on success, -1 on error
  */
-gint project_save(Projekt *zond, gchar **errmsg) {
+gint project_save(Projekt *zond, GError **error) {
 	gint rc = 0;
 
 	if (!(zond->dbase_zond) || !(zond->dbase_zond->changed))
 		return 0;
 
 	rc = zond_dbase_backup(zond->dbase_zond->zond_dbase_work,
-			zond->dbase_zond->zond_dbase_store, errmsg);
+			zond->dbase_zond->zond_dbase_store, error);
 	if (rc)
-		ERROR_S
+		return -1;
 
 	project_reset_changed(zond, FALSE);
 
@@ -328,15 +328,15 @@ gint project_save(Projekt *zond, gchar **errmsg) {
  * @return TRUE to continue timeout, FALSE to stop
  */
 gboolean project_timeout_autosave(gpointer data) {
-	gchar *errmsg = NULL;
+	GError *error = NULL;
 	Projekt *zond = (Projekt*) data;
 
 	if (zond->dbase_zond) {
-		gint rc = project_save(zond, &errmsg);
+		gint rc = project_save(zond, &error);
 		if (rc) {
 			display_message(zond->app_window,
-					"Automatisches Speichern fehlgeschlagen\n\n", errmsg, NULL);
-			g_free(errmsg);
+					"Automatisches Speichern fehlgeschlagen\n\n", error->message, NULL);
+			g_error_free(error);
 		}
 	}
 
@@ -350,11 +350,11 @@ gboolean project_timeout_autosave(gpointer data) {
 /**
  * Close the current project
  * @param zond The project structure
- * @param errmsg Error message output (legacy error handling)
+ * @param error GError for error reporting
  * @return 0 on success, -1 on error, 1 if user cancelled
  */
-gint project_close(Projekt *zond, gchar **errmsg) {
-	GError* error = NULL;
+gint project_close(Projekt *zond, GError **error) {
+	GError *error_remove = NULL;
 
 	if (!zond->dbase_zond)
 		return 0;
@@ -368,9 +368,9 @@ gint project_close(Projekt *zond, gchar **errmsg) {
 				"Änderungen aktuelles Projekt speichern?", NULL);
 
 		if (rc == GTK_RESPONSE_YES) {
-			gint save_rc = project_save(zond, errmsg);
+			gint save_rc = project_save(zond, error);
 			if (save_rc)
-				ERROR_S
+				return -1;
 		} else if (rc != GTK_RESPONSE_NO) {
 			return 1;  // User cancelled
 		}
@@ -418,10 +418,10 @@ gint project_close(Projekt *zond, gchar **errmsg) {
 	}
 
 	// Remove temporary database
-	if (!sond_remove(working_copy, &error)) {
+	if (!sond_remove(working_copy, &error_remove)) {
 		display_message(zond->app_window, "Fehler beim Löschen der "
-				"temporären Datenbank: ", error->message, NULL);
-		g_error_free(error);
+				"temporären Datenbank: ", error_remove->message, NULL);
+		g_error_free(error_remove);
 	}
 
 	g_free(working_copy);
@@ -521,15 +521,15 @@ static void project_open_cleanup(Projekt* zond, gboolean trees_loaded) {
  * @param zond The project structure
  * @param abs_path Absolute path to the project file
  * @param create TRUE to create new project, FALSE to open existing
- * @param errmsg Error message output (legacy error handling)
+ * @param error GError for error reporting
  * @return 0 on success, -1 on error, 1 if user cancelled
  */
-gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, gchar **errmsg) {
+gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, GError **error) {
 	gint rc = 0;
 	gboolean trees_loaded = FALSE;
 
 	// Close current project if open
-	rc = project_close(zond, errmsg);
+	rc = project_close(zond, error);
 	if (rc) {
 		if (rc == -1)
 			return -1;
@@ -545,7 +545,7 @@ gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, gchar *
 	// Ensure that if dir is root, '/' remains
 
 	// Create or open databases
-	rc = project_create_dbase_zond(zond, create, errmsg);
+	rc = project_create_dbase_zond(zond, create, error);
 	if (rc) {
 		project_open_cleanup(zond, FALSE);
 		return -1;
@@ -553,13 +553,8 @@ gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, gchar *
 
 	// Load tree structures if opening existing project
 	if (!create) {
-		GError *error = NULL;
-
-		rc = project_load_trees(zond, &error);
+		rc = project_load_trees(zond, error);
 		if (rc) {
-			if (errmsg)
-				*errmsg = g_strdup_printf("%s\n%s", __func__, error->message);
-			g_error_free(error);
 			project_open_cleanup(zond, FALSE);
 			return -1;
 		}
@@ -568,22 +563,18 @@ gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, gchar *
 
 	// Set filesystem root
 	rc = sond_treeviewfm_set_root(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
-			zond->project_dir, errmsg);
+			zond->project_dir, error);
 	if (rc) {
 		project_open_cleanup(zond, trees_loaded);
 		return -1;
 	}
 
-	GError* error = NULL;
 	gchar* datadir = g_build_filename(zond->exe_dir, "../share/tessdata", NULL);
 	zond->wctx = sond_process_file_create_wctx(zond->ctx,
 			(void (*)(gpointer, gchar const*, ...)) info_window_set_message_thread_safe,
-			NULL, datadir, 4, ".sond_index.db", &error);
+			NULL, datadir, 4, ".sond_index.db", error);
 	g_free(datadir);
 	if (!zond->wctx) {
-		if (errmsg) *errmsg = g_strdup_printf("%s\nInitialisierung Indizierungs-Kontext "
-				"fehlgeschlagen: %s", __func__, error->message);
-		g_error_free(error);
 		project_open_cleanup(zond, trees_loaded);
 
 		return -1;
@@ -639,7 +630,7 @@ static gint project_confirm_switch(Projekt *zond) {
 /**
  * Load existing project
  */
-gint project_load(Projekt* zond, gchar** errmsg) {
+gint project_load(Projekt* zond, GError** error) {
 	gint rc = 0;
 
 	rc = project_confirm_switch(zond);
@@ -650,10 +641,10 @@ gint project_load(Projekt* zond, gchar** errmsg) {
 	if (!abs_path)
 		return 0;
 
-	rc = project_open(zond, abs_path, FALSE, errmsg);
+	rc = project_open(zond, abs_path, FALSE, error);
 	g_free(abs_path);
 	if (rc)
-		ERROR_S
+		return -1;
 
 	return 0;
 }
@@ -661,7 +652,7 @@ gint project_load(Projekt* zond, gchar** errmsg) {
 /**
  * Create new project
  */
-gint project_new(Projekt* zond, gchar** errmsg) {
+gint project_new(Projekt* zond, GError** error) {
 	gint rc = 0;
 
 	rc = project_confirm_switch(zond);
@@ -673,10 +664,10 @@ gint project_new(Projekt* zond, gchar** errmsg) {
 	if (!abs_path)
 		return 0;
 
-	rc = project_open(zond, abs_path, TRUE, errmsg);
+	rc = project_open(zond, abs_path, TRUE, error);
 	g_free(abs_path);
 	if (rc)
-		ERROR_S
+		return -1;
 
 	return 0;
 }

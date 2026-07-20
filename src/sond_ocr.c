@@ -106,9 +106,9 @@ static gint add_ocr_layer_to_page(fz_context *ctx,
 	//Dann würde ändern des val alle Seiten betreffen
 	rc = pdf_set_content_stream(ctx, page, buf_new, error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
-    return 0;
+	return 0;
 }
 
 static gint calculate_ocr_transform(fz_context *ctx,
@@ -185,7 +185,7 @@ static gint sond_ocr_osd(SondOcrTask* task, SondOcrPool* pool, GError** error) {
 
 				rc = pdf_page_rotate(task->ctx, task->page->obj, 360 - orient_deg, error);
 				if (rc)
-					ERROR_Z
+					return -1;
 
 				if (task->log_func)
 					task->log_func(task->log_func_data,
@@ -194,7 +194,7 @@ static gint sond_ocr_osd(SondOcrTask* task, SondOcrPool* pool, GError** error) {
 
 				task->pixmap = pdf_render_pixmap(task->ctx, task->page, task->scale, error);
 				if (!task->pixmap)
-					ERROR_Z
+					return -1;
 			}
 			else if (orient_deg && task->log_func)
 				task->log_func(task->log_func_data,
@@ -383,12 +383,12 @@ gint sond_ocr_pdf_doc(fz_context* ctx, SondOcrPool* ocr_pool, pdf_document* doc,
 
 	rc = pdf_get_sond_font(ctx, doc, &font_ref, error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	if (!font_ref) {
 		font_ref = pdf_put_sond_font(ctx, doc, error);
 		if (!font_ref)
-			ERROR_Z
+			return -1;
 	}
 
 	GPtrArray* arr_tasks =
@@ -415,7 +415,7 @@ gint sond_ocr_pdf_doc(fz_context* ctx, SondOcrPool* ocr_pool, pdf_document* doc,
 	rc = sond_ocr_do_tasks(arr_tasks, ocr_pool, error);
 	g_ptr_array_unref(arr_tasks);
 	if (rc == -1)
-		ERROR_Z
+		return -1;
 	else if (rc == 1)
 		return 1;
 

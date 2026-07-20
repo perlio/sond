@@ -62,7 +62,7 @@ static void cb_activate(GApplication *app, gpointer user_data) {
 static void cb_open(GApplication *app, GFile **files, gint n_files,
                     const gchar *hint, gpointer user_data) {
 	gint rc = 0;
-	gchar *errmsg = NULL;
+	GError *error = NULL;
 	gchar *uri = NULL;
 	gchar *uri_unesc = NULL;
 
@@ -72,11 +72,11 @@ static void cb_open(GApplication *app, GFile **files, gint n_files,
 	uri_unesc = g_uri_unescape_string(uri, NULL);
 	g_free(uri);
 
-	rc = project_open(zond, uri_unesc + 8, FALSE, &errmsg);
+	rc = project_open(zond, uri_unesc + 8, FALSE, &error);
 	g_free(uri_unesc);
 	if (rc == -1) {
-		LOG_INFO("Fehler - Projekt kann nicht geöffnet werden: %s", errmsg);
-		g_free(errmsg);
+		LOG_INFO("Fehler - Projekt kann nicht geöffnet werden: %s", error->message);
+		g_error_free(error);
 	}
 
 	return;

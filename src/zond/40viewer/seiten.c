@@ -570,30 +570,19 @@ static gint seiten_drehen_foreach(PdfViewer *pv, ViewerPageNew* viewer_page,
 }
 
 static gint seiten_drehen_pdf(PdfDocumentPage *pdf_document_page, gint winkel,
-		gchar **errmsg) {
+		GError **error) {
 	gint rotate = 0;
-	GError *error = NULL;
 	pdf_obj* obj = NULL;
 
 	fz_context *ctx = zond_pdf_document_get_ctx(pdf_document_page->document);
 
-	obj = pdf_document_page_get_page_obj(pdf_document_page, &error);
-	if (!obj) {
-		if (errmsg) *errmsg = g_strdup_printf("%s\n%s", __func__,
-				error->message);
-		g_error_free(error);
-
+	obj = pdf_document_page_get_page_obj(pdf_document_page, error);
+	if (!obj)
 		return -1;
-	}
 
-	rotate = pdf_page_rotate(ctx, obj, winkel, &error);
-	if (rotate == -1) {
-		if (errmsg) *errmsg = g_strdup_printf("%s\n%s", __func__,
-				error->message);
-		g_error_free(error);
-
+	rotate = pdf_page_rotate(ctx, obj, winkel, error);
+	if (rotate == -1)
 		return -1;
-	}
 
 	pdf_document_page->rotate = rotate;
 
@@ -601,10 +590,9 @@ static gint seiten_drehen_pdf(PdfDocumentPage *pdf_document_page, gint winkel,
 }
 
 static gint seiten_drehen(PdfViewer *pv, GPtrArray *arr_document_page,
-		gint winkel, gchar **errmsg) {
+		gint winkel, GError **error) {
 	for (gint i = 0; i < arr_document_page->len; i++) {
 		gint rc = 0;
-		GError* error = NULL;
 		JournalEntry entry = { 0 };
 		GArray* arr_journal = NULL;
 
@@ -612,9 +600,10 @@ static gint seiten_drehen(PdfViewer *pv, GPtrArray *arr_document_page,
 				arr_document_page, i);
 
 		zond_pdf_document_mutex_lock(pdf_document_page->document);
-		rc = seiten_drehen_pdf(pdf_document_page, winkel, errmsg);
+		rc = seiten_drehen_pdf(pdf_document_page, winkel, error);
 		zond_pdf_document_mutex_unlock(pdf_document_page->document);
-		if (rc == -1) ERROR_S
+		if (rc == -1)
+			return -1;
 
 		viewer_render_wait_for_transfer(pdf_document_page);
 
@@ -631,14 +620,9 @@ static gint seiten_drehen(PdfViewer *pv, GPtrArray *arr_document_page,
 		//page_annots müssen neu geladen werden, weil quads und rects sonst verdreht sind
 		g_ptr_array_remove_range(pdf_document_page->arr_annots,
 				0, pdf_document_page->arr_annots->len);
-		rc = zond_pdf_document_page_load_annots(pdf_document_page, &error);
-		if (rc) {
-			if (errmsg) *errmsg = g_strdup_printf("%s\n%s", __func__,
-					error->message);
-			g_error_free(error);
-
+		rc = zond_pdf_document_page_load_annots(pdf_document_page, error);
+		if (rc)
 			return -1;
-		}
 
 		pdf_document_page->thread &= 2;
 
@@ -658,7 +642,7 @@ static gint seiten_drehen(PdfViewer *pv, GPtrArray *arr_document_page,
 
 void cb_pv_seiten_drehen(GtkMenuItem *item, gpointer data) {
 	gint rc = 0;
-	gchar *errmsg = NULL;
+	GError *error = NULL;
 	gint winkel = 0;
 	gchar *title = NULL;
 	GPtrArray *arr_document_page = NULL;
@@ -673,12 +657,12 @@ void cb_pv_seiten_drehen(GtkMenuItem *item, gpointer data) {
 	if (!arr_document_page)
 		return;
 
-	rc = seiten_drehen(pv, arr_document_page, winkel, &errmsg);
+	rc = seiten_drehen(pv, arr_document_page, winkel, &error);
 	g_ptr_array_unref(arr_document_page);
 	if (rc) {
 		display_message(pv->vf, "Fehler in Seiten drehen -\n\nBei Aufruf "
-				"seiten_drehen\n", errmsg, NULL);
-		g_free(errmsg);
+				"seiten_drehen\n", error->message, NULL);
+		g_error_free(error);
 
 		return;
 	}
@@ -859,7 +843,7 @@ void cb_pv_seiten_loeschen(GtkMenuItem *item, gpointer data) {
 	rc = seiten_anbindung(pv, arr_document_page, &error);
 	if (rc) {
 		if (rc == -1) {
-			display_error(pv->vf, "Fehler Seiten Löschen", error->message);
+			display_message(pv->vf, "Fehler Seiten Löschen\n\n", error->message, NULL);
 			g_error_free(error);
 		} else if (rc == 1)
 			display_message(pv->vf, "Seiten enthalten Anbindungen - \n"
@@ -877,7 +861,7 @@ void cb_pv_seiten_loeschen(GtkMenuItem *item, gpointer data) {
 	rc = seiten_loeschen(pv, arr_document_page, &error);
 	g_ptr_array_unref(arr_document_page);
 	if (rc == -1) {
-		display_error(pv->vf, "Fehler Seiten Löschen", error->message);
+		display_message(pv->vf, "Fehler Seiten Löschen\n\n", error->message, NULL);
 		g_error_free(error);
 
 		viewer_save_and_close(pv);
@@ -1086,7 +1070,7 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 		sfp = sond_file_part_from_filepart(path_merge, &error);
 		g_free(path_merge);
 		if (!sfp) {
-			display_error(pv->vf, "Datei einfügen", error->message);
+			display_message(pv->vf, "Datei einfügen\n\n", error->message, NULL);
 			g_error_free(error);
 
 			return;
@@ -1102,9 +1086,9 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 		doc_merge = sond_file_part_pdf_open_document(pv->zond->ctx,
 				SOND_FILE_PART_PDF(sfp), TRUE, TRUE, &error);
 		if (!doc_merge) {
-			display_error(pv->vf, "Datei einfügen\n\n"
+			display_message(pv->vf, "Datei einfügen\n\n"
 					"Einzufügende Datei konnte nicht geöffnet werden:\n",
-					error->message);
+					error->message, NULL);
 			g_error_free(error);
 			g_object_unref(sfp);
 
@@ -1123,7 +1107,7 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 			g_object_unref(sfp);
 
 		err_message = g_strdup_printf("%s\n%s", __func__, fz_caught_message(pv->zond->ctx));
-		display_error(pv->vf, "Einfügen nicht möglich", err_message);
+		display_message(pv->vf, "Einfügen nicht möglich\n\n", err_message, NULL);
 		g_free(err_message);
 
 		return;
@@ -1193,7 +1177,6 @@ fz_catch	( pv->zond->ctx ) {
 	for (gint i = 0; i < arr_page_pv->len; i++) {
 		ViewerPageNew *viewer_page = NULL;
 		PdfDocumentPage *pdf_document_page = NULL;
-		gchar *errmsg = NULL;
 
 		gint page_pv = g_array_index(arr_page_pv, gint, i);
 		viewer_page = g_ptr_array_index(pv->arr_pages, page_pv);
@@ -1202,13 +1185,9 @@ fz_catch	( pv->zond->ctx ) {
 		zond_pdf_document_mutex_lock(pdf_document_page->document);
 		rc = pdf_copy_page(pv->zond->ctx,
 				zond_pdf_document_get_pdf_doc(pdf_document_page->document),
-				pdf_document_page->page_akt, pdf_document_page->page_akt, doc_dest, -1, &errmsg);
+				pdf_document_page->page_akt, pdf_document_page->page_akt, doc_dest, -1, error);
 		zond_pdf_document_mutex_unlock(pdf_document_page->document);
 		if (rc) {
-			if (error)
-				*error = g_error_new(VIEWER_ERROR, 0, "%s\n%s", __func__,
-						errmsg);
-			g_free(errmsg);
 			pdf_drop_document(pv->zond->ctx, doc_dest);
 
 			return NULL;
@@ -1225,7 +1204,7 @@ static gint seiten_set_clipboard(PdfViewer *pv, GArray *arr_page_pv,
 
 	pv->zond->pv_clip = seiten_create_document(pv, arr_page_pv, error);
 	if (!pv->zond->pv_clip)
-		ERROR_Z
+		return -1;
 
 	return 0;
 }
@@ -1242,7 +1221,7 @@ void cb_seiten_kopieren(GtkMenuItem *item, gpointer data) {
 
 	rc = seiten_set_clipboard(pv, arr_page_pv, &error);
 	if (rc) {
-		display_error(pv->vf, "Fehler Kopieren Seiten", error->message);
+		display_message(pv->vf, "Fehler Kopieren Seiten\n\n", error->message, NULL);
 		g_error_free(error);
 	}
 
@@ -1263,7 +1242,7 @@ void cb_seiten_ausschneiden(GtkMenuItem *item, gpointer data) {
 
 	rc = seiten_set_clipboard(pv, arr_page_pv, &error);
 	if (rc) {
-		display_error(pv->vf, "Fehler Kopieren Seiten", error->message);
+		display_message(pv->vf, "Fehler Kopieren Seiten\n\n", error->message, NULL);
 		g_error_free(error);
 		g_array_unref(arr_page_pv);
 
@@ -1275,7 +1254,7 @@ void cb_seiten_ausschneiden(GtkMenuItem *item, gpointer data) {
 	rc = seiten_loeschen(pv, arr_document_page, &error);
 	g_ptr_array_unref(arr_document_page);
 	if (rc == -1) {
-		display_error(pv->vf, "Fehler Ausschneiden Seiten", error->message);
+		display_message(pv->vf, "Fehler Ausschneiden Seiten\n\n", error->message, NULL);
 		g_error_free(error);
 	} else if (rc == 1)
 		display_message(pv->vf,

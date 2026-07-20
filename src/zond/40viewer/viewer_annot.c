@@ -140,7 +140,7 @@ gint viewer_annot_handle_delete(PdfViewer* pv, GError** error) {
 
 	rc = viewer_annot_delete(pv->clicked_annot, error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	fz_drop_display_list(
 			zond_pdf_document_get_ctx(
@@ -260,7 +260,7 @@ gint viewer_annot_handle_edit_closed(PdfViewer* pdfv, GtkWidget *popover, GError
 		pdf_document_page_annot->annot.annot_text.content = text_old;
 		g_free(text);
 
-		ERROR_Z
+		return -1;
 	}
 
 	//Jetzt entry machen
@@ -536,17 +536,16 @@ pdf_annot* viewer_annot_do_create(fz_context* ctx, pdf_page* pdf_page, gint rota
 
 	rc = viewer_annot_do_change(ctx, pdf_annot, rotate, annot, error);
 	if (rc)
-		ERROR_Z_VAL(NULL)
+		return NULL;
 
 	return pdf_annot;
 }
 
-gint viewer_annot_create(ViewerPageNew *viewer_page, gchar **errmsg) {
+gint viewer_annot_create(ViewerPageNew *viewer_page, GError **error) {
 	pdf_annot *pdf_annot = NULL;
 	PdfDocumentPageAnnot *pdf_document_page_annot = NULL;
 	JournalEntry entry = { 0, };
 	Annot annot = { 0 };
-	GError* error = NULL;
 
 	fz_context *ctx = zond_pdf_document_get_ctx(
 			viewer_page->pdf_document_page->document);
@@ -583,11 +582,9 @@ gint viewer_annot_create(ViewerPageNew *viewer_page, gchar **errmsg) {
 
 	zond_pdf_document_mutex_lock(viewer_page->pdf_document_page->document);
 	pdf_annot = viewer_annot_do_create(ctx, viewer_page->pdf_document_page->page,
-			viewer_page->pdf_document_page->rotate, annot, &error);
+			viewer_page->pdf_document_page->rotate, annot, error);
 	zond_pdf_document_mutex_unlock(viewer_page->pdf_document_page->document);
 	if (!pdf_annot) {
-		if (errmsg) *errmsg = g_strdup_printf("%s\n%s", __func__, error->message);
-		g_error_free(error);
 		annot_free(&annot);
 
 		return -1;
@@ -639,7 +636,6 @@ gint viewer_annot_create_markup(PdfViewer *pv, ViewerPageNew* viewer_page,
 	for (gint page = von; page <= bis; page++) {
 		ViewerPageNew *viewer_page_loop = NULL;
 		gint rc = 0;
-		gchar* errmsg = NULL;
 
 		if (page == pdf_punkt.seite)
 			viewer_page_loop = viewer_page;
@@ -653,14 +649,9 @@ gint viewer_annot_create_markup(PdfViewer *pv, ViewerPageNew* viewer_page,
 		if (!(viewer_page_loop->pdf_document_page->thread & 2))
 			return TRUE;
 
-		rc = viewer_annot_create(viewer_page_loop, &errmsg);
-		if (rc) {
-			g_set_error(error, VIEWER_ERROR, 0,
-					"%s", errmsg);
-			g_free(errmsg);
-
+		rc = viewer_annot_create(viewer_page_loop, error);
+		if (rc)
 			return -1;
-		}
 	}
 
 	return 0;

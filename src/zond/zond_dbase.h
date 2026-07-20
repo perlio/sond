@@ -24,7 +24,7 @@ typedef enum {
 
 #define ERROR_ROLLBACK_Z(zond_dbase) \
           { zond_dbase_rollback( zond_dbase, error); \
-            ERROR_Z }
+            return -1; }
 
 typedef struct _Section {
 	gint ID;
@@ -50,7 +50,7 @@ void zond_dbase_finalize_stmts(sqlite3*);
 
 gint zond_dbase_create_db_maj_1(sqlite3*, GError**);
 
-ZondDBase* zond_dbase_new(const gchar*, gboolean, gboolean, gchar**);
+ZondDBase* zond_dbase_new(const gchar*, gboolean, gboolean, GError**);
 
 void zond_dbase_close(ZondDBase*);
 
@@ -58,7 +58,7 @@ sqlite3* zond_dbase_get_dbase(ZondDBase*);
 
 const gchar* zond_dbase_get_path(ZondDBase*);
 
-gint zond_dbase_backup(ZondDBase*, ZondDBase*, gchar**);
+gint zond_dbase_backup(ZondDBase*, ZondDBase*, GError**);
 
 gint zond_dbase_prepare(ZondDBase*, const gchar*, const gchar**, gint,
 		sqlite3_stmt***, GError**);

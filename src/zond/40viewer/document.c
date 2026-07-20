@@ -106,7 +106,7 @@ document_new_displayed_document(SondFilePartPDF* sfp_pdf,
 
 	zpdfd_part = zpdfd_part_peek(sfp_pdf, anbindung_ges, error);
 	if (!zpdfd_part)
-		ERROR_Z_VAL(NULL)
+		return NULL;
 
 	//Position node berechnen
 	pdf_pos_int = get_pdf_pos(zpdfd_part->zond_pdf_document,

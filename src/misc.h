@@ -31,8 +31,6 @@ gint my_dialog_run(GtkDialog*);
 
 void display_message(GtkWidget*, ...);
 
-void display_error(GtkWidget*, gchar const*, gchar const*);
-
 gint dialog_with_buttons(GtkWidget*, const gchar*, const gchar*, gchar**, ...);
 
 gint abfrage_frage(GtkWidget*, const gchar*, const gchar*, gchar**);

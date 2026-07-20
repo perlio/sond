@@ -61,6 +61,19 @@ typedef enum BAEUME {
 	KEIN_BAUM = -1, BAUM_FS = 0, BAUM_INHALT, BAUM_AUSWERTUNG, NUM_BAUM
 } Baum;
 
+//gehört inhaltlich eher zum Viewer, wird aber auch von zond selbst (z.B.
+//zond_dbase.c) als Werttyp gebraucht - deshalb hier in der gemeinsamen
+//Basis statt in viewer.h definiert
+typedef struct _Pdf_Pos {
+	gint seite;
+	gint index;
+} PdfPos;
+
+typedef struct _Anbindung {
+	PdfPos von;
+	PdfPos bis;
+} Anbindung;
+
 typedef struct _Icon {
 	const gchar *icon_name;
 	const gchar *display_name;

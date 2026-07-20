@@ -229,7 +229,7 @@ pdf_new_text_analyzer_processor(fz_context *ctx, pdf_processor* chain, gint flag
 }
 
 fz_buffer*
-pdf_text_filter_page(fz_context *ctx, pdf_page* page, gint flags, gchar **errmsg) {
+pdf_text_filter_page(fz_context *ctx, pdf_page* page, gint flags, GError **error) {
 	pdf_processor *proc = NULL;
 	pdf_processor* proc_buf = NULL;
 	fz_buffer *buf = NULL;
@@ -238,21 +238,17 @@ pdf_text_filter_page(fz_context *ctx, pdf_page* page, gint flags, gchar **errmsg
 		buf = fz_new_buffer(ctx, 4096);
 	}
 	fz_catch(ctx)
-		ERROR_S_VAL(NULL)
+		ERROR_PDF_VAL(NULL)
 
 	fz_try(ctx)
 		proc_buf = pdf_new_buffer_processor(ctx, buf, 0, 0);
 	fz_catch(ctx) {
 		fz_drop_buffer(ctx, buf);
-		ERROR_S_VAL(NULL)
+		ERROR_PDF_VAL(NULL)
 	}
 
-	GError* error = NULL;
-
-	proc = pdf_new_text_analyzer_processor(ctx, proc_buf, flags, &error);
+	proc = pdf_new_text_analyzer_processor(ctx, proc_buf, flags, error);
 	if (!proc) {
-		if (errmsg) *errmsg = g_strdup_printf("%s\n%s", __func__, error->message);
-		g_free(error);
 		pdf_drop_processor(ctx, proc_buf);
 		fz_drop_buffer(ctx, buf);
 
@@ -269,14 +265,14 @@ pdf_text_filter_page(fz_context *ctx, pdf_page* page, gint flags, gchar **errmsg
 	}
 	fz_catch(ctx) {
 		fz_drop_buffer(ctx, buf);
-		ERROR_S_VAL(NULL)
+		ERROR_PDF_VAL(NULL)
 	}
 
 	return buf;
 }
 
 gint pdf_copy_page(fz_context *ctx, pdf_document *doc_src, gint page_from,
-		gint page_to, pdf_document *doc_dest, gint page, gchar **errmsg) {
+		gint page_to, pdf_document *doc_dest, gint page, GError **error) {
 	pdf_graft_map *graft_map = NULL;
 
 	graft_map = pdf_new_graft_map(ctx, doc_dest); //keine exception
@@ -287,7 +283,7 @@ gint pdf_copy_page(fz_context *ctx, pdf_document *doc_src, gint page_from,
 		fz_catch( ctx )
 		{
 			pdf_drop_graft_map(ctx, graft_map);
-			ERROR_MUPDF( "pdf_graft_mapped_page" )
+			ERROR_PDF
 		}
 	}
 
@@ -318,7 +314,7 @@ gint pdf_page_rotate(fz_context *ctx, pdf_obj *page_obj, gint winkel,
 
 	rotate = pdf_page_get_rotate(ctx, page_obj, error);
 	if (rotate == -1)
-		ERROR_Z
+		return -1;
 
 	rotate = rotate + winkel;
 	if (rotate < 0)
@@ -499,7 +495,7 @@ pdf_walk_names_dict(fz_context* ctx, pdf_obj *node, pdf_cycle_list *cycle_up,
 
 				rc = pdf_walk_names_dict(ctx, ind, &cycle, callback_walk, data, error);
 				if (rc == -1)
-					ERROR_Z
+					return -1;
 
 				i++;
 			}
@@ -523,7 +519,7 @@ pdf_walk_names_dict(fz_context* ctx, pdf_obj *node, pdf_cycle_list *cycle_up,
 
 				rc = callback_walk(ctx, names, key, val, data, error);
 				if (rc == -1)
-					ERROR_Z
+					return -1;
 				else if (rc == 1) //Abbruch
 					return 0;
 
@@ -550,14 +546,14 @@ gint pdf_walk_embedded_files(fz_context* ctx, pdf_document* doc,
 
 	rc = pdf_get_names_tree_dict(ctx, doc, PDF_NAME(EmbeddedFiles), &dict, error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	if (!dict)
 		return 0; //nicht einmal EmbeddedFiles-Dict gefunden
 
 	rc = pdf_walk_names_dict(ctx, dict, NULL, callback_walk, data, error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	return 0;
 }
@@ -828,7 +824,7 @@ gint pdf_insert_emb_file(fz_context* ctx, pdf_document* doc,
 	pdf_drop_obj(ctx, filespec);
 	pdf_drop_obj(ctx, key);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	return 0;
 }
@@ -1002,7 +998,7 @@ gint pdf_page_has_hidden_text(fz_context* ctx, pdf_page* page,
 
 	proc = pdf_new_text_analyzer_processor(ctx, NULL, 3, error);
 	if (!proc)
-		ERROR_Z
+		return -1;
 
 	fz_try(ctx)
 		pdf_process_contents(ctx, proc, page->doc, pdf_page_resources(ctx, page),

@@ -196,7 +196,7 @@ gint gmessage_mod_part(GMimeMessage *message, const char *path,
 
 	obj_parent = lookup_path(root, parent_path, error);
     if (!obj_parent)
-    	ERROR_Z
+    	return -1;
 
     if (GMIME_IS_MULTIPART(obj_parent))
     	count = g_mime_multipart_get_count(GMIME_MULTIPART(obj_parent));
@@ -247,7 +247,7 @@ gint gmessage_mod_part(GMimeMessage *message, const char *path,
     else {
 		g_object_unref(obj_parent);
 		if (!replace_part_content_safe(object, data, len, error))
-			ERROR_Z
+			return -1;
     }
 
     return 0;
@@ -260,12 +260,16 @@ gint gmessage_set_filename(GMimeMessage* message, gchar const* path,
 	GMimeContentDisposition* disposition = NULL;
 
 	root = g_mime_message_get_mime_part(message);
-	if (!root)
-		ERROR_Z
+	if (!root) {
+		if (error)
+			*error = g_error_new(SOND_ERROR, 0,
+					"Nachricht enthält keinen MIME-Teil");
+		return -1;
+	}
 
 	object = lookup_path(root, path, error);
     if (!object)
-    	ERROR_Z
+    	return -1;
 
     if (GMIME_IS_PART(object)) {
     	g_mime_part_set_filename(GMIME_PART(object), filename);

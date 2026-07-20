@@ -26,8 +26,9 @@
 #include "zond_convert.h"
 #include "zond_version.h"
 #include "zond_init.h"
+#include "99conv/general.h"
 
-#include "20allgemein/ziele.c"
+#include "../sond_log_and_error.h"
 
 #include "../misc.h"
 
@@ -258,7 +259,7 @@ gint zond_dbase_create_db_maj_1(sqlite3 *db, GError **error) {
 }
 
 static gchar*
-zond_dbase_get_version(sqlite3 *db, gchar **errmsg) {
+zond_dbase_get_version(sqlite3 *db, GError **error) {
 	gint rc = 0;
 	sqlite3_stmt *stmt = NULL;
 	gchar *v_string = NULL;
@@ -271,9 +272,9 @@ zond_dbase_get_version(sqlite3 *db, gchar **errmsg) {
 				"SELECT node_text FROM baum_inhalt WHERE node_id = 0;", -1,
 				&stmt, NULL);
 		if (rc != SQLITE_OK) {
-			if (errmsg)
-				*errmsg = g_strconcat("Bei Aufruf sqlite3_prepare_v2:\n",
-						sqlite3_errstr(rc), NULL);
+			if (error)
+				*error = g_error_new(g_quark_from_static_string("SQLITE3"),
+						rc, "%s", sqlite3_errstr(rc));
 
 			return NULL;
 		}
@@ -281,10 +282,9 @@ zond_dbase_get_version(sqlite3 *db, gchar **errmsg) {
 
 	rc = sqlite3_step(stmt);
 	if (rc != SQLITE_ROW) {
-		if (errmsg)
-			*errmsg = add_string(
-					g_strconcat("Bei Aufruf sqlite3_step:\n",
-							sqlite3_errmsg(db), NULL), *errmsg);
+		if (error)
+			*error = g_error_new(g_quark_from_static_string("SQLITE3"),
+					sqlite3_errcode(db), "%s", sqlite3_errmsg(db));
 		sqlite3_finalize(stmt);
 
 		return NULL;
@@ -293,7 +293,9 @@ zond_dbase_get_version(sqlite3 *db, gchar **errmsg) {
 	if (!sqlite3_column_text(stmt, 0)
 			|| !g_strcmp0((const gchar*) sqlite3_column_text(stmt, 0), "")) {
 		sqlite3_finalize(stmt);
-		ERROR_S_MESSAGE_VAL("ZND-Datei enthält keine Versionsbezeichnung", NULL)
+		g_set_error(error, SOND_ERROR, 0,
+				"ZND-Datei enthält keine Versionsbezeichnung");
+		return NULL;
 	}
 
 	v_string = g_strdup((const gchar* ) sqlite3_column_text(stmt, 0));
@@ -304,7 +306,7 @@ zond_dbase_get_version(sqlite3 *db, gchar **errmsg) {
 }
 
 static gint zond_dbase_open(ZondDBase *zond_dbase, gboolean create_file,
-		gboolean create, gchar **errmsg) {
+		gboolean create, GError **error) {
 	gint rc = 0;
 
 	ZondDBasePrivate *zond_dbase_priv = zond_dbase_get_instance_private(
@@ -315,22 +317,21 @@ static gint zond_dbase_open(ZondDBase *zond_dbase, gboolean create_file,
 					| ((create_file || create) ? SQLITE_OPEN_CREATE : 0), NULL);
 	if (rc != SQLITE_OK) //Datei nicht vorhanden und weder create_file noch create
 	{
-		if (errmsg)
-			*errmsg = g_strconcat("Bei Aufruf sqlite3_open_v2:\n",
-					sqlite3_errstr(rc), NULL);
+		if (error)
+			*error = g_error_new(g_quark_from_static_string("SQLITE3"), rc,
+					"%s", sqlite3_errstr(rc));
 
 		return -1;
 	} else if (!(create_file || create)) //Alt-Datei war vorhanden - Versions-Check
 	{
 		gchar *v_string = NULL;
 
-		v_string = zond_dbase_get_version(zond_dbase_priv->dbase, errmsg);
+		v_string = zond_dbase_get_version(zond_dbase_priv->dbase, error);
 		if (!v_string)
-			ERROR_S
+			return -1;
 
 		if (g_strcmp0(v_string, G_STRINGIFY(ZOND_VERSION_MAJOR))) {
 			gint rc = 0;
-			GError *error = NULL;
 			gchar *message = NULL;
 
 			message = g_strdup_printf(
@@ -340,9 +341,8 @@ static gint zond_dbase_open(ZondDBase *zond_dbase, gboolean create_file,
 			g_free(message);
 
 			if (rc != GTK_RESPONSE_YES) {
-				if (errmsg)
-					*errmsg = g_strdup_printf("%s\nFalsche Projektversion (%s)",
-							__func__, v_string);
+				g_set_error(error, SOND_ERROR, 0,
+						"Falsche Projektversion (%s)", v_string);
 				g_free(v_string);
 
 				return -1;
@@ -350,24 +350,18 @@ static gint zond_dbase_open(ZondDBase *zond_dbase, gboolean create_file,
 
 			sqlite3_close(zond_dbase_priv->dbase);
 
-			rc = zond_convert(zond_dbase, v_string, &error);
+			rc = zond_convert(zond_dbase, v_string, error);
 			g_free(v_string);
-			if (rc) {
-				if (errmsg)
-					*errmsg = g_strdup_printf("%s\n%s", __func__,
-							error->message);
-				g_error_free(error);
-
+			if (rc)
 				return -1;
-			}
 
 			rc = sqlite3_open_v2(zond_dbase_priv->path,
 					&(zond_dbase_priv->dbase), SQLITE_OPEN_READWRITE, NULL);
 			if (rc != SQLITE_OK) //Datei nicht vorhanden und weder create_file noch create
 			{
-				if (errmsg)
-					*errmsg = g_strconcat("Bei Aufruf sqlite3_open_v2:\n",
-							sqlite3_errstr(rc), NULL);
+				if (error)
+					*error = g_error_new(g_quark_from_static_string("SQLITE3"),
+							rc, "%s", sqlite3_errstr(rc));
 
 				return -1;
 			}
@@ -376,31 +370,35 @@ static gint zond_dbase_open(ZondDBase *zond_dbase, gboolean create_file,
 	} else if (create) //Datenbank soll neu angelegt werden
 	{
 		gint rc = 0;
-		GError *error = NULL;
 
 		//Abfrage, ob überschrieben werden soll, überflüssig - schon im filechooser
-		rc = zond_dbase_create_db_maj_1(zond_dbase_priv->dbase, &error);
-		if (rc) {
-			if (errmsg)
-				*errmsg = g_strdup_printf("%s\n%s", __func__, error->message);
-			g_error_free(error);
+		rc = zond_dbase_create_db_maj_1(zond_dbase_priv->dbase, error);
+		if (rc)
+			return -1;
+	}
+
+	{
+		gchar *errmsg_sqlite = NULL;
+
+		rc = sqlite3_exec(zond_dbase_priv->dbase,
+				"PRAGMA foreign_keys = ON; PRAGMA recursive_triggers = 1; ",
+				NULL, NULL, &errmsg_sqlite);
+		if (rc != SQLITE_OK) {
+			if (error)
+				*error = g_error_new(g_quark_from_static_string("SQLITE3"),
+						rc, "%s", errmsg_sqlite);
+			sqlite3_free(errmsg_sqlite);
 
 			return -1;
 		}
 	}
-
-	rc = sqlite3_exec(zond_dbase_priv->dbase,
-			"PRAGMA foreign_keys = ON; PRAGMA recursive_triggers = 1; ",
-			NULL, NULL, errmsg);
-	if (rc != SQLITE_OK)
-		ERROR_S
 
 	return 0;
 }
 
 ZondDBase*
 zond_dbase_new(const gchar *path, gboolean create_file, gboolean create,
-		gchar **errmsg) {
+		GError **error) {
 	gint rc = 0;
 	ZondDBase *zond_dbase = NULL;
 
@@ -408,11 +406,11 @@ zond_dbase_new(const gchar *path, gboolean create_file, gboolean create,
 
 	zond_dbase = g_object_new( ZOND_TYPE_DBASE, "path", path, NULL);
 
-	rc = zond_dbase_open(zond_dbase, create_file, create, errmsg);
+	rc = zond_dbase_open(zond_dbase, create_file, create, error);
 	if (rc == -1) {
 		g_object_unref(zond_dbase);
 
-		ERROR_S_VAL(NULL)
+		return NULL;
 	}
 
 	return zond_dbase;
@@ -438,7 +436,7 @@ zond_dbase_get_path(ZondDBase *zond_dbase) {
 	return priv->path;
 }
 
-gint zond_dbase_backup(ZondDBase *src, ZondDBase *dst, gchar **errmsg) {
+gint zond_dbase_backup(ZondDBase *src, ZondDBase *dst, GError **error) {
 	gint rc = 0;
 	sqlite3 *db_src = NULL;
 	sqlite3 *db_dst = NULL;
@@ -450,21 +448,22 @@ gint zond_dbase_backup(ZondDBase *src, ZondDBase *dst, gchar **errmsg) {
 	//Datenbank öffnen
 	backup = sqlite3_backup_init(db_dst, "main", db_src, "main");
 	if (!backup) {
-		if (errmsg)
-			*errmsg = g_strconcat(__func__, "\nsqlite3_backup_init\n",
-					sqlite3_errmsg(db_dst), NULL);
+		if (error)
+			*error = g_error_new(g_quark_from_static_string("SQLITE3"),
+					sqlite3_errcode(db_dst), "%s", sqlite3_errmsg(db_dst));
 
 		return -1;
 	}
 	rc = sqlite3_backup_step(backup, -1);
 	sqlite3_backup_finish(backup);
 	if (rc != SQLITE_DONE) {
-		if (errmsg && rc == SQLITE_NOTADB)
-			*errmsg = g_strdup("Datei ist "
-					"keine SQLITE-Datenbank");
-		else if (errmsg)
-			*errmsg = g_strconcat(__func__, "\nsqlite3_backup_step:\n",
-					sqlite3_errmsg(db_dst), NULL);
+		if (rc == SQLITE_NOTADB) {
+			if (error)
+				*error = g_error_new(g_quark_from_static_string("SQLITE3"),
+						rc, "Datei ist keine SQLITE-Datenbank");
+		} else if (error)
+			*error = g_error_new(g_quark_from_static_string("SQLITE3"), rc,
+					"%s", sqlite3_errmsg(db_dst));
 
 		return -1;
 	}
@@ -503,7 +502,7 @@ gint zond_dbase_prepare(ZondDBase *zond_dbase, const gchar *func,
 		if (rc) {
 			g_free(*stmt);
 
-			ERROR_Z
+			return -1;
 		}
 
 		g_object_set_data_full(G_OBJECT(zond_dbase), func, *stmt, g_free);
@@ -523,7 +522,7 @@ gint zond_dbase_begin(ZondDBase *zond_dbase, GError **error) {
 	rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
 			error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	rc = sqlite3_step(stmt[0]);
 	if (rc != SQLITE_DONE)
@@ -638,7 +637,7 @@ gint zond_dbase_test_path(ZondDBase *zond_dbase, const gchar *filepart,
 	rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
 			error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	rc = sqlite3_bind_text(stmt[0], 1, filepart, -1, NULL);
 	if (rc != SQLITE_OK)
@@ -668,7 +667,7 @@ gint zond_dbase_test_path_section(ZondDBase *zond_dbase, const gchar *filepart,
 	rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
 			error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	rc = sqlite3_bind_text(stmt[0], 1, filepart, -1, NULL);
 	if (rc != SQLITE_OK)
@@ -1000,7 +999,7 @@ gint zond_dbase_update_path(ZondDBase *zond_dbase, const gchar *old_path,
 	rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
 			error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	rc = sqlite3_bind_text(stmt[0], 1, old_path, -1, NULL);
 	if (rc != SQLITE_OK)
@@ -1039,7 +1038,7 @@ gint zond_dbase_update_gmessage_index(ZondDBase* zond_dbase, gchar const* prefix
 	rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
 			error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	rc = sqlite3_bind_text(stmt[0], 1, prefix, -1, NULL);
 	if (rc != SQLITE_OK)
@@ -1379,7 +1378,7 @@ gint zond_dbase_get_first_child(ZondDBase *zond_dbase, gint node_id,
 	rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
 			error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	rc = sqlite3_bind_int(stmt[0], 1, node_id);
 	if (rc != SQLITE_OK)
@@ -1447,7 +1446,7 @@ gint zond_dbase_get_younger_sibling(ZondDBase *zond_dbase, gint node_id,
 	rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
 			error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	rc = sqlite3_bind_int(stmt[0], 1, node_id);
 	if (rc != SQLITE_OK)
@@ -1478,7 +1477,7 @@ gint zond_dbase_get_baum_inhalt_file_from_file_part(ZondDBase *zond_dbase,
 	rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
 			error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	rc = sqlite3_bind_int(stmt[0], 1, file_part);
 	if (rc != SQLITE_OK)
@@ -1504,7 +1503,7 @@ gint zond_dbase_get_baum_auswertung_copy(ZondDBase *zond_dbase, gint node_id,
 	rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
 			error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	rc = sqlite3_bind_int(stmt[0], 1, node_id);
 	if (rc != SQLITE_OK)
@@ -1543,7 +1542,7 @@ gint zond_dbase_get_first_baum_inhalt_file_child(ZondDBase *zond_dbase, gint ID,
 	rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
 			error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	rc = sqlite3_bind_int(stmt[0], 1, ID);
 	if (rc != SQLITE_OK)
@@ -1583,7 +1582,7 @@ gint zond_dbase_get_section(ZondDBase *zond_dbase, gchar const* filepart,
 	rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
 			error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	rc = sqlite3_bind_text(stmt[0], 1, filepart, -1, NULL);
 	if (rc != SQLITE_OK)
@@ -1631,7 +1630,7 @@ gint zond_dbase_find_baum_inhalt_file(ZondDBase *zond_dbase, gint node_id,
 	rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
 			error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	rc = sqlite3_bind_int(stmt[0], 1, node_id);
 	if (rc != SQLITE_OK)
@@ -1706,7 +1705,7 @@ gint zond_dbase_get_arr_sections(ZondDBase* zond_dbase, gchar const* file_part,
 	rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
 			error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	rc = sqlite3_bind_text(stmt[0], 1, file_part, -1, NULL);
 	if (rc != SQLITE_OK)
@@ -1746,7 +1745,7 @@ gint zond_dbase_update_section(ZondDBase *zond_dbase, gint node_id,
 	rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
 			error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	rc = sqlite3_bind_int(stmt[0], 1, node_id);
 	if (rc != SQLITE_OK)

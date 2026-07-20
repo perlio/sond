@@ -34,23 +34,6 @@ enum SondError
 	NUM_SOND_ERROR
 };
 
-#define ERROR_S_VAL(y) { if ( errmsg ) *errmsg = add_string( \
-                         g_strconcat( __func__, "\n", NULL ), *errmsg ); \
-                         return y; }
-
-#define ERROR_S ERROR_S_VAL(-1)
-
-#define ERROR_S_MESSAGE_VAL(x,y) { if ( errmsg ) *errmsg = add_string( \
-                         g_strconcat( "Bei Aufruf ",__func__, ":\n", x, NULL ), *errmsg ); \
-                         return y; }
-
-#define ERROR_S_MESSAGE(x) ERROR_S_MESSAGE_VAL(x,-1)
-
-#define ERROR_Z_VAL(y) {g_prefix_error(error, "%s\n", __func__); return y;}
-#define ERROR_Z ERROR_Z_VAL(-1)
-
-
-
 // ============================================================================
 // Globale Variablen (extern)
 // ============================================================================

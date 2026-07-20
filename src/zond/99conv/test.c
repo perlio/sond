@@ -118,9 +118,9 @@
 #include <gio/gio.h>
 #include <stdio.h>
 
-int test(Projekt* zond, gchar **errmsg) {
+int test(Projekt* zond, GError **error) {
     const char *path = "Adressliste.xlsx";
-    GError* error = NULL;
+    GError* error_local = NULL;
 
     /* GFile anlegen */
     GFile *file = g_file_new_for_path(path);
@@ -130,10 +130,10 @@ int test(Projekt* zond, gchar **errmsg) {
                                         "standard::content-type",
                                         G_FILE_QUERY_INFO_NONE,
                                         NULL, /* GCancellable */
-                                        &error);
+                                        &error_local);
     if (!info) {
-        g_printerr("g_file_query_info failed: %s\n", error->message);
-        g_clear_error(&error);
+        g_printerr("g_file_query_info failed: %s\n", error_local->message);
+        g_clear_error(&error_local);
         g_object_unref(file);
         return 2;
     }
@@ -164,9 +164,9 @@ int test(Projekt* zond, gchar **errmsg) {
     g_print("App executable: %s\n", exe ? exe : "(none)");
 
     /* Optional: App wirklich mit der Datei starten */
-    if (!g_app_info_launch(app, (GList*)g_list_prepend(NULL, g_file_dup(file)), NULL, &error)) {
-        g_printerr("Starten der Anwendung fehlgeschlagen: %s\n", error->message);
-        g_clear_error(&error);
+    if (!g_app_info_launch(app, (GList*)g_list_prepend(NULL, g_file_dup(file)), NULL, &error_local)) {
+        g_printerr("Starten der Anwendung fehlgeschlagen: %s\n", error_local->message);
+        g_clear_error(&error_local);
     } else {
         g_print("Anwendung gestartet (oder Start angefragt)\n");
     }
@@ -203,5 +203,5 @@ void pdf_print_buffer(fz_context *ctx, fz_buffer *buf) {
 
 fz_buffer*
 pdf_ocr_get_content_stream_as_buffer(fz_context *ctx, pdf_obj *page_ref,
-		gchar **errmsg);
+		GError **error);
 

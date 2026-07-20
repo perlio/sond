@@ -33,11 +33,11 @@ void project_set_widgets_sensitive(Projekt*, gboolean);
 gboolean project_timeout_autosave(gpointer);
 
 // Project operations
-gint project_close(Projekt*, gchar**);
-gint project_save(Projekt*, gchar**);
+gint project_close(Projekt*, GError**);
+gint project_save(Projekt*, GError**);
 gint project_load_trees(Projekt*, GError**);
-gint project_open(Projekt*, const gchar*, gboolean, gchar**);
-gint project_load(Projekt* zond, gchar** errmsg);
-gint project_new(Projekt* zond, gchar** errmsg);
+gint project_open(Projekt*, const gchar*, gboolean, GError**);
+gint project_load(Projekt* zond, GError** error);
+gint project_new(Projekt* zond, GError** error);
 
 #endif // PROJECT_H_INCLUDED

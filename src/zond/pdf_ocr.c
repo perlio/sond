@@ -46,7 +46,7 @@ pdf_ocr_find_BT(gchar *buf, size_t size) {
 
 static fz_buffer*
 pdf_ocr_get_content_stream_as_buffer(fz_context *ctx, pdf_obj *page_ref,
-		gchar **errmsg) {
+		GError **error) {
 	pdf_obj *obj_contents = NULL;
 	fz_stream *stream = NULL;
 	fz_buffer *buf = NULL;
@@ -62,7 +62,7 @@ pdf_ocr_get_content_stream_as_buffer(fz_context *ctx, pdf_obj *page_ref,
 	fz_always( ctx )
 		fz_drop_stream(ctx, stream);
 	fz_catch ( ctx )
-		ERROR_MUPDF_R("open and read stream", NULL)
+		ERROR_PDF_VAL(NULL)
 
 	return buf;
 }
@@ -70,7 +70,7 @@ pdf_ocr_get_content_stream_as_buffer(fz_context *ctx, pdf_obj *page_ref,
 //thread-safe
 static pdf_document*
 pdf_ocr_create_doc_from_page(PdfDocumentPage *pdf_document_page, gint flag,
-		gchar **errmsg) {
+		GError **error) {
 	gint rc = 0;
 	pdf_document *doc_new = NULL;
 	pdf_page *page = NULL;
@@ -82,30 +82,32 @@ pdf_ocr_create_doc_from_page(PdfDocumentPage *pdf_document_page, gint flag,
 	fz_try( ctx )
 		doc_new = pdf_create_document(ctx);
 	fz_catch(ctx)
-		ERROR_MUPDF_R("pdf_create_document", NULL)
+		ERROR_PDF_VAL(NULL)
 
 	zond_pdf_document_mutex_lock(pdf_document_page->document);
 	rc = pdf_copy_page(ctx, doc, pdf_document_page->page_akt,
-			pdf_document_page->page_akt, doc_new, 0, errmsg);
+			pdf_document_page->page_akt, doc_new, 0, error);
 	zond_pdf_document_mutex_unlock(pdf_document_page->document);
 	if (rc) {
 		pdf_drop_document(ctx, doc_new);
-		ERROR_S_VAL(NULL)
+		return NULL;
 	}
 
 	fz_try(ctx)
 		page = pdf_load_page(ctx, doc_new, 0);
 	fz_catch(ctx) {
 		pdf_drop_document(ctx, doc_new);
-		ERROR_MUPDF_R("pdf_lookup_page_obj", NULL)
+		ERROR_PDF_VAL(NULL)
 	}
 
 	//neues dokument mit einer Seite filtern
-//	rc = pdf_ocr_filter_content_stream(ctx, page, flag, errmsg);
+//	rc = pdf_ocr_filter_content_stream(ctx, page, flag, error);
 	fz_drop_page(ctx, &page->super);
 	if (rc) {
 		pdf_drop_document(ctx, doc_new);
-		ERROR_MUPDF_R("pdf_zond_filter_content_stream", NULL);
+		g_set_error(error, g_quark_from_static_string("mupdf"), 0,
+				"pdf_zond_filter_content_stream");
+		return NULL;
 	}
 	return doc_new;
 }
@@ -125,7 +127,7 @@ pdf_ocr_create_dialog(InfoWindow *info_window, gint page) {
 
 static gchar*
 pdf_ocr_get_text_from_stext_page(fz_context *ctx, fz_stext_page *stext_page,
-		gchar **errmsg) {
+		GError **error) {
 	gchar *text = "";
 	guchar *text_tmp = NULL;
 	fz_buffer *buf = NULL;
@@ -134,13 +136,13 @@ pdf_ocr_get_text_from_stext_page(fz_context *ctx, fz_stext_page *stext_page,
 	fz_try( ctx )
 		buf = fz_new_buffer(ctx, 1024);
 	fz_catch(ctx)
-		ERROR_MUPDF_R("fz_new_buffer", NULL);
+		ERROR_PDF_VAL(NULL);
 
 	fz_try(ctx)
 		out = fz_new_output_with_buffer(ctx, buf);
 	fz_catch(ctx) {
 		fz_drop_buffer(ctx, buf);
-		ERROR_MUPDF_R("fz_new_output_with_buffer", NULL);
+		ERROR_PDF_VAL(NULL);
 	}
 
 	fz_try(ctx)
@@ -151,14 +153,14 @@ pdf_ocr_get_text_from_stext_page(fz_context *ctx, fz_stext_page *stext_page,
 	}
 	fz_catch( ctx ) {
 		fz_drop_buffer(ctx, buf);
-		ERROR_MUPDF_R("fz_print_stext_page_as_text", NULL)
+		ERROR_PDF_VAL(NULL)
 	}
 
 	fz_try( ctx )
 		fz_terminate_buffer(ctx, buf);
 fz_catch	( ctx ) {
 		fz_drop_buffer(ctx, buf);
-		ERROR_MUPDF_R("fz_terminate_buffer", NULL);
+		ERROR_PDF_VAL(NULL);
 	}
 
 	fz_buffer_storage(ctx, buf, &text_tmp);
@@ -171,7 +173,7 @@ fz_catch	( ctx ) {
 //thread-safe
 static gint pdf_ocr_show_text(InfoWindow *info_window,
 		PdfDocumentPage *pdf_document_page, gchar *text_alt,
-		TessBaseAPI *handle, gchar **errmsg) {
+		TessBaseAPI *handle, GError **error) {
 	gint rc = 0;
 	fz_pixmap *pixmap_orig = NULL;
 	gchar *text_neu = NULL;
@@ -180,17 +182,17 @@ static gint pdf_ocr_show_text(InfoWindow *info_window,
 
 	//Bisherigen versteckten Text
 	//gerenderte Seite ohne sichtbaren Text
-//	pixmap_orig = pdf_ocr_render_images(pdf_document_page, errmsg); //thread-safe
+//	pixmap_orig = pdf_ocr_render_images(pdf_document_page, error); //thread-safe
 	if (!pixmap_orig)
-		ERROR_S
+		return -1;
 
 			//Eigene OCR
 			//Wenn angezeigt werden soll, dann muß Seite erstmal OCRed werden
 			//Um Vergleich zu haben
-//	rc = pdf_ocr_page(pdf_document_page, info_window, handle, errmsg); //thread-safe
+//	rc = pdf_ocr_page(pdf_document_page, info_window, handle, error); //thread-safe
 	if (rc) {
 		fz_drop_pixmap(ctx, pixmap_orig);
-		ERROR_S
+		return -1;
 	}
 	text_neu = TessBaseAPIGetUTF8Text(handle);
 

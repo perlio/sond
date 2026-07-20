@@ -85,7 +85,7 @@ gint sond_treeviewfm_file_part_visible(SondTreeviewFM*, GtkTreeIter*,
 GHashTable* sond_treeviewfm_get_fileparts(SondTreeviewFM *stv, gboolean selected_only,
 		GError **error);
 
-gint sond_treeviewfm_set_root(SondTreeviewFM*, const gchar*, gchar**);
+gint sond_treeviewfm_set_root(SondTreeviewFM*, const gchar*, GError**);
 
 const gchar* sond_treeviewfm_get_root(SondTreeviewFM*);
 

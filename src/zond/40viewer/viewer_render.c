@@ -265,7 +265,7 @@ viewer_render_pixbuf_from_pixmap(fz_context *ctx, fz_pixmap *pixmap) {
 }
 
 static gint viewer_render_thumb(fz_context *ctx, ViewerPageNew *viewer_page,
-		gchar **errmsg) {
+		GError **error) {
 	fz_pixmap *pixmap = NULL;
 	GdkPixbuf *pixbuf = NULL;
 
@@ -279,13 +279,13 @@ static gint viewer_render_thumb(fz_context *ctx, ViewerPageNew *viewer_page,
 		pixmap = fz_new_pixmap_with_bbox(ctx, fz_device_rgb(ctx), irect, NULL,
 				0);
 	fz_catch(ctx)
-		ERROR_MUPDF("fz_new_pixmap_with_bbox")
+		ERROR_PDF
 
 	fz_try( ctx)
 		fz_clear_pixmap_with_value(ctx, pixmap, 255);
 	fz_catch( ctx ) {
 		fz_drop_pixmap(ctx, pixmap);
-		ERROR_MUPDF("fz_clear_pixmap")
+		ERROR_PDF
 	}
 
 	fz_device *draw_device = NULL;
@@ -293,7 +293,7 @@ static gint viewer_render_thumb(fz_context *ctx, ViewerPageNew *viewer_page,
 		draw_device = fz_new_draw_device(ctx, fz_identity, pixmap);
 	fz_catch	( ctx ) {
 		fz_drop_pixmap(ctx, pixmap);
-		ERROR_MUPDF("fz_new_draw_device")
+		ERROR_PDF
 	}
 
 	fz_try( ctx )
@@ -304,7 +304,7 @@ static gint viewer_render_thumb(fz_context *ctx, ViewerPageNew *viewer_page,
 		fz_drop_device(ctx, draw_device);
 	}fz_catch( ctx ) {
 		fz_drop_pixmap(ctx, pixmap);
-		ERROR_MUPDF("fz_run_display_list")
+		ERROR_PDF
 	}
 
 	pixbuf = viewer_render_pixbuf_from_pixmap(
@@ -312,9 +312,8 @@ static gint viewer_render_thumb(fz_context *ctx, ViewerPageNew *viewer_page,
 			pixmap);
 	if (!pixbuf) {
 		fz_drop_pixmap(ctx, pixmap);
-		if (errmsg)
-			*errmsg = g_strdup("Bei Aufruf render_pixbuf_new_from_pixmap:\n"
-					"Out of memory");
+		g_set_error(error, SOND_ERROR, 0,
+				"Bei Aufruf render_pixbuf_new_from_pixmap: Out of memory");
 
 		return -1;
 	}
@@ -325,7 +324,7 @@ static gint viewer_render_thumb(fz_context *ctx, ViewerPageNew *viewer_page,
 }
 
 static gint viewer_render_pixmap(fz_context *ctx, ViewerPageNew *viewer_page,
-		gdouble zoom, gchar **errmsg) {
+		gdouble zoom, GError **error) {
 	fz_pixmap *pixmap = NULL;
 	GdkPixbuf *pixbuf = NULL;
 
@@ -339,13 +338,13 @@ static gint viewer_render_pixmap(fz_context *ctx, ViewerPageNew *viewer_page,
 		pixmap = fz_new_pixmap_with_bbox(ctx, fz_device_rgb(ctx), irect, NULL,
 				0);
 	fz_catch( ctx )
-		ERROR_MUPDF("fz_new_pixmap_with_bbox")
+		ERROR_PDF
 
 	fz_try( ctx)
 		fz_clear_pixmap_with_value(ctx, pixmap, 255);
 	fz_catch( ctx ) {
 		fz_drop_pixmap(ctx, pixmap);
-		ERROR_MUPDF("fz_clear_pixmap")
+		ERROR_PDF
 	}
 
 	fz_device *draw_device = NULL;
@@ -353,7 +352,7 @@ static gint viewer_render_pixmap(fz_context *ctx, ViewerPageNew *viewer_page,
 		draw_device = fz_new_draw_device(ctx, fz_identity, pixmap);
 	fz_catch( ctx ) {
 		fz_drop_pixmap(ctx, pixmap);
-		ERROR_MUPDF("fz_new_draw_device")
+		ERROR_PDF
 	}
 
 	fz_try( ctx )
@@ -365,7 +364,7 @@ static gint viewer_render_pixmap(fz_context *ctx, ViewerPageNew *viewer_page,
 	}
 	fz_catch(ctx) {
 		fz_drop_pixmap(ctx, pixmap);
-		ERROR_MUPDF("fz_run_display_list")
+		ERROR_PDF
 	}
 
 	pixbuf = viewer_render_pixbuf_from_pixmap(
@@ -373,9 +372,8 @@ static gint viewer_render_pixmap(fz_context *ctx, ViewerPageNew *viewer_page,
 			pixmap);
 	if (!pixbuf) {
 		fz_drop_pixmap(ctx, pixmap);
-		if (errmsg)
-			*errmsg = g_strdup("Bei Aufruf render_pixbuf_new_from_pixmap:\n"
-					"Out of memory");
+		g_set_error(error, SOND_ERROR, 0,
+				"Bei Aufruf render_pixbuf_new_from_pixmap: Out of memory");
 
 		return -1;
 	}
@@ -386,7 +384,7 @@ static gint viewer_render_pixmap(fz_context *ctx, ViewerPageNew *viewer_page,
 }
 
 static gint viewer_render_stext_page_from_display_list(fz_context *ctx,
-		PdfDocumentPage *pdf_document_page, gchar **errmsg) {
+		PdfDocumentPage *pdf_document_page, GError **error) {
 	fz_stext_page *stext_page = NULL;
 	fz_device *s_t_device = NULL;
 
@@ -395,14 +393,14 @@ static gint viewer_render_stext_page_from_display_list(fz_context *ctx,
 	fz_try( ctx )
 		stext_page = fz_new_stext_page(ctx, pdf_document_page->rect);
 fz_catch	( ctx )
-		ERROR_MUPDF("fz_new_stext_page")
+		ERROR_PDF
 
 	//structured text-device
 	fz_try( ctx )
 		s_t_device = fz_new_stext_device(ctx, stext_page, &opts);
 fz_catch	( ctx ) {
 		fz_drop_stext_page(ctx, stext_page);
-		ERROR_MUPDF("fz_new_stext_device")
+		ERROR_PDF
 	}
 
 	//und durchs stext-device laufen lassen
@@ -414,7 +412,7 @@ fz_always	( ctx ) {
 		fz_drop_device(ctx, s_t_device);
 	}fz_catch( ctx ) {
 		fz_drop_stext_page(ctx, stext_page);
-		ERROR_MUPDF("fz_run_display_list")
+		ERROR_PDF
 	}
 
 	pdf_document_page->stext_page = stext_page;
@@ -423,7 +421,7 @@ fz_always	( ctx ) {
 }
 
 static gint viewer_render_stext_page_from_page(
-		PdfDocumentPage *pdf_document_page, gchar **errmsg) {
+		PdfDocumentPage *pdf_document_page, GError **error) {
 	fz_device *s_t_device = NULL;
 	fz_stext_page *stext_page = NULL;
 
@@ -435,14 +433,14 @@ static gint viewer_render_stext_page_from_page(
 	fz_try(ctx)
 		stext_page = fz_new_stext_page(ctx, pdf_document_page->rect);
 	fz_catch(ctx)
-		ERROR_MUPDF("fz_new_stext_page")
+		ERROR_PDF
 
 	//structured text-device
 	fz_try(ctx)
 		s_t_device = fz_new_stext_device(ctx, stext_page, &opts);
 	fz_catch(ctx) {
 		fz_drop_stext_page(ctx, stext_page);
-		ERROR_MUPDF("fz_new_stext_device")
+		ERROR_PDF
 	}
 
 	//doc-lock muß gesetzt werden, da _load_page auf document zugreift
@@ -457,7 +455,7 @@ static gint viewer_render_stext_page_from_page(
 		fz_drop_device(ctx, s_t_device);
 	}
 	fz_catch( ctx )
-		ERROR_MUPDF("pdf_run_page")
+		ERROR_PDF
 
 	pdf_document_page->stext_page = stext_page;
 
@@ -465,7 +463,7 @@ static gint viewer_render_stext_page_from_page(
 }
 
 gint viewer_render_stext_page_fast(fz_context *ctx,
-		PdfDocumentPage *pdf_document_page, gchar **errmsg) {
+		PdfDocumentPage *pdf_document_page, GError **error) {
 	//thread für Seite gestartet?
 	viewer_render_wait_for_transfer(pdf_document_page);
 
@@ -480,26 +478,26 @@ gint viewer_render_stext_page_fast(fz_context *ctx,
 			gint rc = 0;
 
 			zond_pdf_document_mutex_lock(pdf_document_page->document);
-			rc = zond_pdf_document_load_page(pdf_document_page, ctx, errmsg);
+			rc = zond_pdf_document_load_page(pdf_document_page, ctx, error);
 			zond_pdf_document_mutex_unlock(pdf_document_page->document);
 			if (rc)
-				ERROR_S
+				return -1;
 
 			pdf_document_page->thread |= 2;
 		}
 
-		rc = viewer_render_stext_page_from_page(pdf_document_page, errmsg);
+		rc = viewer_render_stext_page_from_page(pdf_document_page, error);
 		if (rc)
-			ERROR_S
+			return -1;
 
 	} else //display_list fertig
 	{
 		gint rc = 0;
 
 		rc = viewer_render_stext_page_from_display_list(ctx, pdf_document_page,
-				errmsg);
+				error);
 		if (rc)
-			ERROR_S
+			return -1;
 	}
 
 	pdf_document_page->thread |= 8;
@@ -508,21 +506,21 @@ gint viewer_render_stext_page_fast(fz_context *ctx,
 }
 
 static gint viewer_render_display_list(fz_context *ctx,
-		PdfDocumentPage *pdf_document_page, gchar **errmsg) {
+		PdfDocumentPage *pdf_document_page, GError **error) {
 	fz_display_list *display_list = NULL;
 	fz_device *list_device = NULL;
 
 	fz_try( ctx )
 		display_list = fz_new_display_list(ctx, pdf_document_page->rect);
 	fz_catch(ctx)
-		ERROR_MUPDF("fz_new_display_list")
+		ERROR_PDF
 
 	//list_device für die Seite erzeugen
 	fz_try(ctx)
 		list_device = fz_new_list_device(ctx, display_list);
 	fz_catch(ctx) {
 		fz_drop_display_list(ctx, display_list);
-		ERROR_MUPDF("fz_new_list_device")
+		ERROR_PDF
 	}
 
 	zond_pdf_document_mutex_lock(pdf_document_page->document);
@@ -536,7 +534,7 @@ static gint viewer_render_display_list(fz_context *ctx,
 		fz_drop_device(ctx, list_device);
 	}fz_catch(ctx) {
 		fz_drop_display_list(ctx, display_list);
-		ERROR_MUPDF("fz_drop_display_list")
+		ERROR_PDF
 	}
 
 	pdf_document_page->display_list = display_list;
@@ -546,7 +544,7 @@ static gint viewer_render_display_list(fz_context *ctx,
 
 void viewer_render_page(gpointer data, gpointer user_data) {
 	gint rc = 0;
-	gchar *errmsg = NULL;
+	GError *error = NULL;
 	ViewerPageNew *viewer_page = NULL;
 	fz_context *ctx = NULL;
 	gint thread_data = 0;
@@ -563,9 +561,8 @@ void viewer_render_page(gpointer data, gpointer user_data) {
 					viewer_page->pdf_document_page->document));
 	if (!ctx) {
 		render_response.error = 1;
-		render_response.error_message = g_strconcat("Bei Aufruf ", __func__,
-				":\n", errmsg, NULL);
-		g_free(errmsg);
+		render_response.error_message = g_strdup_printf(
+				"Bei Aufruf %s:\nfz_clone_context: Out of memory", __func__);
 
 		g_mutex_lock(&pv->mutex_arr_rendered);
 		g_array_append_val(pv->arr_rendered, render_response);
@@ -578,14 +575,14 @@ void viewer_render_page(gpointer data, gpointer user_data) {
 		gint rc = 0;
 
 		zond_pdf_document_mutex_lock(viewer_page->pdf_document_page->document);
-		rc = zond_pdf_document_load_page(viewer_page->pdf_document_page, ctx, &errmsg);
+		rc = zond_pdf_document_load_page(viewer_page->pdf_document_page, ctx, &error);
 		zond_pdf_document_mutex_unlock(
 				viewer_page->pdf_document_page->document);
 		if (rc == -1) {
 			render_response.error = 2;
 			render_response.error_message = g_strconcat("Bei Aufruf ", __func__,
-					":\n", errmsg, NULL);
-			g_free(errmsg);
+					":\n", error->message, NULL);
+			g_error_free(error);
 
 			g_mutex_lock(&pv->mutex_arr_rendered);
 			g_array_append_val(pv->arr_rendered, render_response);
@@ -596,12 +593,12 @@ void viewer_render_page(gpointer data, gpointer user_data) {
 	}
 
 	if (thread_data & 2) {
-		rc = viewer_render_display_list(ctx, viewer_page->pdf_document_page, &errmsg);
+		rc = viewer_render_display_list(ctx, viewer_page->pdf_document_page, &error);
 		if (rc == -1) {
 			render_response.error = 3;
 			render_response.error_message = g_strconcat("Bei Aufruf ", __func__,
-					":\n", errmsg, NULL);
-			g_free(errmsg);
+					":\n", error->message, NULL);
+			g_error_free(error);
 
 			g_mutex_lock(&pv->mutex_arr_rendered);
 			g_array_append_val(pv->arr_rendered, render_response);
@@ -613,12 +610,12 @@ void viewer_render_page(gpointer data, gpointer user_data) {
 
 	if (thread_data & 4) {
 		rc = viewer_render_stext_page_from_display_list(ctx,
-				viewer_page->pdf_document_page, &errmsg);
+				viewer_page->pdf_document_page, &error);
 		if (rc == -1) {
 			render_response.error = 4;
 			render_response.error_message = g_strconcat("Bei Aufruf ", __func__,
-					":\n", errmsg, NULL);
-			g_free(errmsg);
+					":\n", error->message, NULL);
+			g_error_free(error);
 
 			g_mutex_lock(&pv->mutex_arr_rendered);
 			g_array_append_val(pv->arr_rendered, render_response);
@@ -631,12 +628,12 @@ void viewer_render_page(gpointer data, gpointer user_data) {
 	if (thread_data & 8) {
 		gint rc = 0;
 
-		rc = viewer_render_pixmap(ctx, viewer_page, pv->zoom, &errmsg);
+		rc = viewer_render_pixmap(ctx, viewer_page, pv->zoom, &error);
 		if (rc == -1) {
 			render_response.error = 5;
 			render_response.error_message = g_strconcat("Bei Aufruf ", __func__,
-					":\n", errmsg, NULL);
-			g_free(errmsg);
+					":\n", error->message, NULL);
+			g_error_free(error);
 
 			g_mutex_lock(&pv->mutex_arr_rendered);
 			g_array_append_val(pv->arr_rendered, render_response);
@@ -649,12 +646,12 @@ void viewer_render_page(gpointer data, gpointer user_data) {
 	if (thread_data & 16) {
 		gint rc = 0;
 
-		rc = viewer_render_thumb(ctx, viewer_page, &errmsg);
+		rc = viewer_render_thumb(ctx, viewer_page, &error);
 		if (rc == -1) {
 			render_response.error = 6;
 			render_response.error_message = g_strconcat("Bei Aufruf ", __func__,
-					":\n", errmsg, NULL);
-			g_free(errmsg);
+					":\n", error->message, NULL);
+			g_error_free(error);
 
 			g_mutex_lock(&pv->mutex_arr_rendered);
 			g_array_append_val(pv->arr_rendered, render_response);

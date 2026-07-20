@@ -75,7 +75,7 @@ static gint zond_treeviewfm_deter_background(SondTVFMItem *stvfm_item, GError **
 				priv->zond->dbase_zond->zond_dbase_work, filepart,
 				section, TRUE, error);
 		if (rc == -1)
-			ERROR_Z
+			return -1;
 		else if (rc == 1)
 			return 1; //Treffer
 	}
@@ -126,14 +126,14 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 	rc = zond_dbase_test_path_section(priv->zond->dbase_zond->zond_dbase_work,
 			path, section, FALSE, error);
 	if (rc == -1)
-		ERROR_Z
+		return -1;
 	else if (rc == 1)
 		return 1;
 
 	rc = zond_dbase_test_path_section(priv->zond->dbase_zond->zond_dbase_store,
 			path, section, FALSE, error);
 	if (rc == -1)
-		ERROR_Z
+		return -1;
 	else if (rc == 1) {
 		display_message(priv->zond->app_window,
 				"Die zu löschende Datei bzw. der Abschnitt ist "
@@ -168,7 +168,7 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 	if (rc) {
 		if (priv->zond->wctx && priv->zond->wctx->index_ctx && !section)
 			sqlite3_exec(priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
-		ERROR_Z
+		return -1;
 	}
 
 	if (!section) { //wenn Datei gelöscht wird, kann auch Type-5-node gelöscht werden
@@ -189,7 +189,7 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 			dbase_zond_rollback(priv->zond->dbase_zond, error);
 			if (priv->zond->wctx && priv->zond->wctx->index_ctx && !section)
 				sqlite3_exec(priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
-			ERROR_Z
+			return -1;
 		}
 	}
 
@@ -254,7 +254,7 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 	if (rc) {
 		if (ztvfm_priv->zond->wctx && ztvfm_priv->zond->wctx->index_ctx)
 			sqlite3_exec(ztvfm_priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
-		ERROR_Z
+		return -1;
 	}
 
 	//alle Dateien, die mit filepart(stvfm_item) + path anfangen (einschließlich stvfm_item)
@@ -264,7 +264,7 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 		dbase_zond_rollback(ztvfm_priv->zond->dbase_zond, error);
 		if (ztvfm_priv->zond->wctx && ztvfm_priv->zond->wctx->index_ctx)
 			sqlite3_exec(ztvfm_priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
-		ERROR_Z
+		return -1;
 	}
 
 	//wenn aus GMessage verschoben wurde - nachfolgende indizes anpassen (-1)
@@ -282,7 +282,7 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 			dbase_zond_rollback(ztvfm_priv->zond->dbase_zond, error);
 			if (ztvfm_priv->zond->wctx && ztvfm_priv->zond->wctx->index_ctx)
 				sqlite3_exec(ztvfm_priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
-			ERROR_Z
+			return -1;
 		}
 	}
 
@@ -303,7 +303,7 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 				sqlite3_exec(ztvfm_priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
 			g_free(prefix_gmessage);
 
-			ERROR_Z
+			return -1;
 		}
 
 		//index_to als basename hinzufügen
@@ -316,7 +316,7 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 			dbase_zond_rollback(ztvfm_priv->zond->dbase_zond, error);
 			if (ztvfm_priv->zond->wctx && ztvfm_priv->zond->wctx->index_ctx)
 				sqlite3_exec(ztvfm_priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
-			ERROR_Z
+			return -1;
 		}
 	}
 
@@ -374,7 +374,7 @@ static gint zond_treeviewfm_text_edited(SondTreeviewFM *stvfm,
 		rc = zond_dbase_get_section(ztvfm_priv->zond->dbase_zond->zond_dbase_work,
 				filepart, sond_tvfm_item_get_path_or_section(stvfm_item), &ID_section, error);
 		if (rc)
-			ERROR_Z
+			return -1;
 
 		if (ID_section == 0) {
 			if (error) *error = g_error_new(ZOND_ERROR, 0,
@@ -387,7 +387,7 @@ static gint zond_treeviewfm_text_edited(SondTreeviewFM *stvfm,
 				ztvfm_priv->zond->dbase_zond->zond_dbase_work, ID_section,
 				new_text, error);
 		if (rc)
-			ERROR_Z
+			return -1;
 
 		//Text in treeview anpassen
 		iter = zond_treeview_abfragen_iter(ZOND_TREEVIEW(ztvfm_priv->zond->treeview[BAUM_INHALT]),
@@ -404,7 +404,7 @@ static gint zond_treeviewfm_text_edited(SondTreeviewFM *stvfm,
 		rc = SOND_TREEVIEWFM_CLASS(zond_treeviewfm_parent_class)->text_edited(stvfm,
 				iter, stvfm_item, new_text, error);
 		if (rc)
-			ERROR_Z
+			return -1;
 	}
 
 	if (!changed)
@@ -449,7 +449,7 @@ gint zond_treeviewfm_insert_section(ZondTreeviewFM *ztvfm, gint node_id,
 			node_id, NULL, NULL, &file_part, &section, &icon_name, &node_text,
 			NULL, error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	if (!section) {
 		if (error)
@@ -463,10 +463,10 @@ gint zond_treeviewfm_insert_section(ZondTreeviewFM *ztvfm, gint node_id,
 	anbindung_parse_file_section(section, &anbindung);
 	g_free(section);
 
-	zond_dbase_get_first_child(ztvfm_priv->zond->dbase_zond->zond_dbase_work,
+	rc = zond_dbase_get_first_child(ztvfm_priv->zond->dbase_zond->zond_dbase_work,
 			node_id, &first_grandchild, error);
-	if (rc)
-		ERROR_Z
+	if (rc == -1)
+		return -1;
 
 	if (first_grandchild) {
 		GtkTreeIter iter_tmp = { 0 };
@@ -529,12 +529,12 @@ static gint zond_treeviewfm_open_stvfm_item(GtkTreeIter* iter, SondTVFMItem* stv
 		dd = document_new_displayed_document(sfp_pdf, &anbindung_ges, &anbindung,
 				(ztvfm_priv->zond->state & GDK_MOD1_MASK), &pdf_pos, error);
 		if (!dd)
-			ERROR_Z
+			return -1;
 
 		rc = zond_treeview_oeffnen_internal_viewer(ztvfm_priv->zond,
 				dd, &pdf_pos, error);
 		if (rc)
-			ERROR_Z
+			return -1;
 	}
 	else {
 		gint rc = 0;
@@ -542,7 +542,7 @@ static gint zond_treeviewfm_open_stvfm_item(GtkTreeIter* iter, SondTVFMItem* stv
 		rc = SOND_TREEVIEWFM_CLASS(zond_treeviewfm_parent_class)->
 				open_stvfm_item(iter, stvfm_item, open_with, error);
 		if (rc)
-			ERROR_Z
+			return -1;
 	}
 
 	return 0;
@@ -567,11 +567,11 @@ static gint zond_treeviewfm_delete_section(SondTVFMItem* stvfm_item, GError** er
 			filepart, section, &ID, error);
 	g_free(filepart);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	rc = zond_dbase_remove_node(ztvfm_priv->zond->dbase_zond->zond_dbase_work, ID, error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	return 0;
 }
@@ -606,7 +606,7 @@ static gint zond_treeviewfm_load_sections(SondTVFMItem* stvfm_item,
 	rc = zond_dbase_get_section(ztvfm_priv->zond->dbase_zond->zond_dbase_work,
 			filepart, section, &ID, error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	if (section && ID == 0) {
 		if (error) *error = g_error_new(ZOND_ERROR, 0,
@@ -617,7 +617,7 @@ static gint zond_treeviewfm_load_sections(SondTVFMItem* stvfm_item,
 
 	rc = zond_dbase_get_first_child(ztvfm_priv->zond->dbase_zond->zond_dbase_work, ID, &child, error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	if (!arr_children) {
 		if (child) return 1;
@@ -635,7 +635,7 @@ static gint zond_treeviewfm_load_sections(SondTVFMItem* stvfm_item,
 		rc = zond_dbase_get_node(ztvfm_priv->zond->dbase_zond->zond_dbase_work, child,
 				NULL, NULL, NULL, &section_child, &icon_name, NULL, NULL, error);
 		if (rc)
-			ERROR_Z
+			return -1;
 
 		stvfm_item_child =
 				sond_tvfm_item_create(sond_tvfm_item_get_stvfm(stvfm_item),
@@ -647,7 +647,7 @@ static gint zond_treeviewfm_load_sections(SondTVFMItem* stvfm_item,
 		rc = zond_dbase_get_younger_sibling(ztvfm_priv->zond->dbase_zond->zond_dbase_work,
 				child, &younger_sibling_id, error);
 		if (rc)
-			ERROR_Z
+			return -1;
 
 		child = younger_sibling_id;
 	}
@@ -690,7 +690,7 @@ static gint zond_treeviewfm_get_text_from_section(SondTVFMItem* stvfm_item,
 			filepart, section, &ID, error);
 	g_free(filepart);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	if (ID == 0) {
 		Anbindung anbindung = { 0 };
@@ -702,7 +702,7 @@ static gint zond_treeviewfm_get_text_from_section(SondTVFMItem* stvfm_item,
 		rc = zond_dbase_get_node(ztvfm_priv->zond->dbase_zond->zond_dbase_work,
 				ID, NULL, NULL, NULL, NULL, NULL, text, NULL, error);
 		if (rc)
-			ERROR_Z
+			return -1;
 	}
 
 	return 0;
@@ -911,7 +911,7 @@ static gint zond_treeviewfm_find_section(ZondTreeviewFM *ztvfm,
 
 			rc = zond_treeviewfm_find_section(ztvfm, &iter_child, anbindung, open, iter_res, error);
 			if (rc == -1)
-				ERROR_Z
+				return -1;
 
 			return rc;
 		}
@@ -940,7 +940,7 @@ gint zond_treeviewfm_section_visible(ZondTreeviewFM *ztvfm,
 	rc = sond_treeviewfm_file_part_visible(SOND_TREEVIEWFM(ztvfm), NULL, file_part, open,
 			&iter_intern, error);
 	if (rc == -1)
-		ERROR_Z
+		return -1;
 	else if (rc == 0)
 		return 0;
 
@@ -953,7 +953,7 @@ gint zond_treeviewfm_section_visible(ZondTreeviewFM *ztvfm,
 
 		rc = zond_treeviewfm_find_section(ztvfm, &iter_intern, anbindung, open, &iter_very_intern, error);
 		if (rc == -1)
-			ERROR_Z
+			return -1;
 		else if (rc == 0) {
 			if (visible)
 				*visible = FALSE;
@@ -994,7 +994,7 @@ gint zond_treeviewfm_set_cursor_on_section(ZondTreeviewFM *ztvfm,
 	rc = zond_treeviewfm_section_visible(ztvfm, file_part, section,
 	TRUE, &visible, &iter, NULL, NULL, error);
 	if (rc == -1)
-		ERROR_Z
+		return -1;
 
 	if (visible)
 		sond_treeview_set_cursor(SOND_TREEVIEW(ztvfm), &iter);

@@ -276,7 +276,7 @@ static gint zond_pdf_document_page_annot_load(PdfDocumentPage *pdf_document_page
 			pdf_annot, &pdf_document_page_annot->annot, error);
 	if (!ret) {
 		g_free(pdf_document_page_annot);
-		ERROR_Z
+		return -1;
 	}
 
 	g_ptr_array_add(pdf_document_page->arr_annots, pdf_document_page_annot);
@@ -299,15 +299,15 @@ gint zond_pdf_document_page_load_annots(PdfDocumentPage *pdf_document_page, GErr
 		gint rc = 0;
 
 		rc = zond_pdf_document_page_annot_load(pdf_document_page, annot, error);
-		if (rc) ERROR_Z
+		if (rc)
+			return -1;
 	} while ((annot = pdf_next_annot(priv->ctx, annot)));
 
 	return 0;
 }
 
 gint zond_pdf_document_load_page(PdfDocumentPage *pdf_document_page,
-		fz_context* ctx, gchar **errmsg) {
-	GError *error = NULL;
+		fz_context* ctx, GError **error) {
 	gint rc = 0;
 
 	ZondPdfDocumentPrivate *priv = zond_pdf_document_get_instance_private(
@@ -319,22 +319,15 @@ gint zond_pdf_document_load_page(PdfDocumentPage *pdf_document_page,
 	fz_try(ctx)
 		pdf_document_page->page = pdf_load_page(ctx, priv->doc,
 				pdf_document_page->page_akt);
-	fz_catch(ctx) {
-		if (errmsg) *errmsg = g_strdup_printf("%s\n%s", __func__, fz_caught_message(ctx));
-
-		return -1;
-	}
+	fz_catch(ctx)
+		ERROR_PDF_VAL(-1)
 
 	pdf_document_page->arr_annots = g_ptr_array_new_with_free_func(
 			pdf_document_page_annot_free);
 
-	rc = zond_pdf_document_page_load_annots(pdf_document_page, &error);
-	if (rc) {
-		if (errmsg) *errmsg = g_strdup_printf("%s\n%s", __func__, error->message);
-		g_error_free(error);
-
+	rc = zond_pdf_document_page_load_annots(pdf_document_page, error);
+	if (rc)
 		return -1;
-	}
 
 	return 0;
 }
@@ -410,7 +403,7 @@ static gint zond_pdf_document_init_pages(ZondPdfDocument *self, gint von,
 		if (rc) {
 			g_free(pdf_document_page);
 			((priv->pages)->pdata)[i] = NULL;
-			ERROR_Z
+			return -1;
 		}
 	}
 
@@ -562,7 +555,7 @@ zond_pdf_document_open(SondFilePartPDF* sfp_pdf, gint von, gint bis,
 
 		rc = zond_pdf_document_init_pages(zond_pdf_document, von, bis, error);
 		if (rc)
-			ERROR_Z_VAL(NULL)
+			return NULL;
 
 		return g_object_ref(zond_pdf_document);
 	}
@@ -586,7 +579,7 @@ zond_pdf_document_open(SondFilePartPDF* sfp_pdf, gint von, gint bis,
 	if (!filename) {
 		g_object_unref(zond_pdf_document);
 
-		ERROR_Z_VAL(NULL)
+		return NULL;
 	}
 
 	fz_try(priv->ctx)
@@ -602,7 +595,7 @@ zond_pdf_document_open(SondFilePartPDF* sfp_pdf, gint von, gint bis,
 		g_free(filename);
 		g_object_unref(zond_pdf_document);
 
-		ERROR_Z_VAL(NULL)
+		return NULL;
 	}
 
 	number_of_pages = pdf_count_pages(priv->ctx, priv->doc);
@@ -620,7 +613,7 @@ zond_pdf_document_open(SondFilePartPDF* sfp_pdf, gint von, gint bis,
 	rc = zond_pdf_document_init_pages(zond_pdf_document, von, bis, error);
 	if (rc) {
 		g_object_unref(zond_pdf_document);
-		ERROR_Z_VAL(NULL)
+		return NULL;
 	}
 
 	klass = ZOND_PDF_DOCUMENT_GET_CLASS(zond_pdf_document);
@@ -645,7 +638,8 @@ gint zond_pdf_document_save(ZondPdfDocument *self, GError **error) {
 	priv->ocr_num = 0;
 
 	rc = sond_file_part_pdf_save_and_close(priv->ctx, priv->doc, priv->sfp_pdf, error);
-	if (rc) ERROR_Z
+	if (rc)
+		return -1;
 
 	g_array_remove_range(priv->arr_journal, 0, priv->arr_journal->len);
 
@@ -733,7 +727,6 @@ gint zond_pdf_document_insert_pages(ZondPdfDocument *zond_pdf_document,
 		gint pos, ZPDFDPart* zpdfd_part, pdf_document *pdf_doc, GError **error) {
 	gint rc = 0;
 	gint count = 0;
-	gchar* errmsg = NULL;
 
 	ZondPdfDocumentPrivate *priv = zond_pdf_document_get_instance_private(
 			zond_pdf_document);
@@ -748,14 +741,10 @@ gint zond_pdf_document_insert_pages(ZondPdfDocument *zond_pdf_document,
 
 	//einfügen in doc
 	rc = pdf_copy_page(priv->ctx, pdf_doc, 0, count - 1,
-			priv->doc, pos, &errmsg);
+			priv->doc, pos, error);
 	zond_pdf_document_mutex_unlock(zond_pdf_document);
-	if (rc) {
-		if (error) *error = g_error_new(ZOND_ERROR, 0, "%s\n%s", __func__, errmsg);
-		g_free(errmsg);
-
+	if (rc)
 		return -1;
-	}
 
 	//eingefügte Seiten als pdf_document_page erzeugen und initiieren
 	for (gint i = pos; i < pos + count; i++) {
@@ -769,7 +758,7 @@ gint zond_pdf_document_insert_pages(ZondPdfDocument *zond_pdf_document,
 		rc = zond_pdf_document_init_page(zond_pdf_document, pdf_document_page,
 				i, error);
 		if (rc == -1)
-			ERROR_Z
+			return -1;
 
 		pdf_document_page->inserted = zpdfd_part;
 	}
@@ -848,7 +837,7 @@ ZPDFDPart* zpdfd_part_peek(SondFilePartPDF* sfp_pdf, Anbindung* anbindung,
 					(anbindung) ? anbindung->bis.seite : -1,
 							error);
 	if (!zpdfd)
-		ERROR_Z_VAL(NULL)
+		return NULL;
 
 	zpdfd_priv = zond_pdf_document_get_instance_private(zpdfd);
 

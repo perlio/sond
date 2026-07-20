@@ -120,12 +120,12 @@ static gint pv_oeffnen_datei(PdfViewer *pv, gchar const* path, GError**error) {
 
 	sfp_pdf_page_tree = sond_file_part_from_filepart(path, error);
 	if (!sfp_pdf_page_tree)
-		ERROR_Z
+		return -1;
 
 	dd = document_new_displayed_document(SOND_FILE_PART_PDF(sfp_pdf_page_tree),
 			NULL, NULL, FALSE, NULL, error);
 	if (!dd)
-		ERROR_Z
+		return -1;
 
 	viewer_display_document(pv, dd, 0, 0);
 	pv_activate_widgets(pv, TRUE);

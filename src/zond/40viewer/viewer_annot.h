@@ -34,7 +34,7 @@ gint viewer_annot_handle_release_clicked_annot(PdfViewer* pv, ViewerPageNew* vie
 pdf_annot* viewer_annot_do_create(fz_context* ctx, pdf_page* pdf_page, gint rotate,
 		Annot annot, GError** error);
 
-gint viewer_annot_create(ViewerPageNew *viewer_page, gchar **errmsg);
+gint viewer_annot_create(ViewerPageNew *viewer_page, GError **error);
 
 gint viewer_annot_create_markup(PdfViewer *pv, ViewerPageNew* viewer_page,
 		PdfPunkt pdf_punkt, GError **error);

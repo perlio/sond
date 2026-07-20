@@ -56,16 +56,6 @@ typedef struct _RenderResponse {
 	gchar *error_message;
 } RenderResponse;
 
-typedef struct _Pdf_Pos {
-	gint seite;
-	gint index;
-} PdfPos;
-
-typedef struct _Anbindung {
-	PdfPos von;
-	PdfPos bis;
-} Anbindung;
-
 typedef struct _Pdf_Punkt {
 	gint seite;
 	fz_point punkt;
@@ -94,6 +84,18 @@ enum ZondError
 	ZOND_ERROR_ZIP,
 	NUM_ZOND_ERROR
 };
+
+//im eigenständigen "viewer"-Build (-DVIEWER) wird zond_init.h nicht
+//eingebunden - PdfPos/Anbindung deshalb hier lokal für diesen Build
+typedef struct _Pdf_Pos {
+	gint seite;
+	gint index;
+} PdfPos;
+
+typedef struct _Anbindung {
+	PdfPos von;
+	PdfPos bis;
+} Anbindung;
 #else
 #include "../zond_init.h"
 #endif

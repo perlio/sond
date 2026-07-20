@@ -114,40 +114,6 @@ void display_message(GtkWidget *window, ...) {
 	return;
 }
 
-void display_error(GtkWidget *window, gchar const *error, gchar const *errmsg) {
-	GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(window),
-			GTK_DIALOG_DESTROY_WITH_PARENT, GTK_MESSAGE_ERROR, GTK_BUTTONS_CLOSE,
-			"%s", error);
-
-	if (errmsg) {
-		GtkWidget *message_area = gtk_message_dialog_get_message_area(
-				GTK_MESSAGE_DIALOG(dialog));
-		GtkTextBuffer *textbuffer = gtk_text_buffer_new(NULL);
-		gtk_text_buffer_set_text(textbuffer, errmsg, -1);
-		GtkWidget *textview = gtk_text_view_new_with_buffer(textbuffer);
-		gtk_text_view_set_editable(GTK_TEXT_VIEW(textview), FALSE);
-		gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(textview), GTK_WRAP_WORD_CHAR);
-		GtkWidget *swindow = gtk_scrolled_window_new(NULL, NULL);
-		gtk_scrolled_window_set_propagate_natural_height(
-				GTK_SCROLLED_WINDOW(swindow), TRUE);
-		gtk_scrolled_window_set_propagate_natural_width(
-				GTK_SCROLLED_WINDOW(swindow), TRUE);
-#if GTK_MAJOR_VERSION >= 4
-		gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(swindow), textview);
-		gtk_box_append(GTK_BOX(message_area), swindow);
-#else
-		gtk_container_add(GTK_CONTAINER(swindow), textview);
-		gtk_box_pack_start(GTK_BOX(message_area), swindow, FALSE, FALSE, 0);
-		gtk_widget_show_all(message_area);
-#endif
-	}
-
-	my_dialog_run(GTK_DIALOG(dialog));
-	gtk_widget_destroy(dialog);
-
-	return;
-}
-
 static void cb_entry_text(GtkEntry *entry, gpointer data) {
 	GtkWidget *dialog = NULL;
 

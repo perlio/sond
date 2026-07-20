@@ -99,8 +99,7 @@ export_get_buffer(gint left_indent, gchar *node_text, gchar *rel_path,
 }
 
 static gint export_node(Projekt *zond, GtkTreeModel *model, GtkTreePath *path,
-		gint depth, GFileOutputStream *stream, gchar **errmsg) {
-	GError *error = NULL;
+		gint depth, GFileOutputStream *stream, GError **error) {
 	gint rc = 0;
 
 	gchar *node_text = NULL;
@@ -111,9 +110,7 @@ static gint export_node(Projekt *zond, GtkTreeModel *model, GtkTreePath *path,
 
 	GtkTreeIter iter;
 	if (!gtk_tree_model_get_iter(model, &iter, path)) {
-		if (errmsg)
-			*errmsg = g_strdup("Bei Aufruf gtk_tree_model_get_iter:\n"
-					"iter konnte nicht gesetzt werden");
+		g_set_error(error, SOND_ERROR, 0, "iter konnte nicht gesetzt werden");
 
 		return -1;
 	}
@@ -131,11 +128,8 @@ static gint export_node(Projekt *zond, GtkTreeModel *model, GtkTreePath *path,
 							== gtk_tree_view_get_model(
 									GTK_TREE_VIEW(zond->treeview[BAUM_INHALT])))))) {
 		rc = zond_dbase_get_text(zond->dbase_zond->zond_dbase_work, node_id,
-				&text, &error);
+				&text, error);
 		if (rc) {
-			if (errmsg)
-				*errmsg = g_strdup_printf("%s\n%s", __func__, error->message);
-			g_error_free(error);
 			g_free(node_text);
 
 			return -1;
@@ -146,22 +140,16 @@ static gint export_node(Projekt *zond, GtkTreeModel *model, GtkTreePath *path,
 	g_free(node_text);
 	g_free(text);
 	rc = g_output_stream_write(G_OUTPUT_STREAM(stream), (const void*) buffer,
-			strlen(buffer), NULL, &error);
+			strlen(buffer), NULL, error);
 	g_free(buffer);
-	if (rc == -1) {
-		if (errmsg)
-			*errmsg = g_strconcat("Bei Aufruf g_output_stream_"
-					"write (header):\n", error->message, NULL);
-		g_error_free(error);
-
+	if (rc == -1)
 		return -1;
-	}
 
 	return 0;
 }
 
 static gint export_selektierte_punkte(Projekt *zond, Baum baum,
-		GFileOutputStream *stream, gchar **errmsg) {
+		GFileOutputStream *stream, GError **error) {
 	GList *selected = NULL;
 	GList *list = NULL;
 	GtkTreeModel *model = NULL;
@@ -171,14 +159,13 @@ static gint export_selektierte_punkte(Projekt *zond, Baum baum,
 	selected = gtk_tree_selection_get_selected_rows(zond->selection[baum],
 			NULL);
 	if (!selected) {
-		if (errmsg)
-			*errmsg = g_strdup("Keine Punkte ausgewählt");
+		g_set_error(error, SOND_ERROR, 0, "Keine Punkte ausgewählt");
 
 		return -1;
 	}
 
 	g_object_set_data(G_OBJECT(model), "stream", (gpointer) stream);
-	g_object_set_data(G_OBJECT(model), "errmsg", (gpointer) errmsg);
+	g_object_set_data(G_OBJECT(model), "error", (gpointer) error);
 
 	list = selected;
 
@@ -186,10 +173,10 @@ static gint export_selektierte_punkte(Projekt *zond, Baum baum,
 	{
 		gint rc = 0;
 
-		rc = export_node(zond, model, list->data, 1, stream, errmsg);
+		rc = export_node(zond, model, list->data, 1, stream, error);
 		if (rc) {
 			g_list_free_full(selected, (GDestroyNotify) gtk_tree_path_free);
-			ERROR_S
+			return -1;
 		}
 	} while ((list = list->next));
 
@@ -200,24 +187,25 @@ static gint export_selektierte_punkte(Projekt *zond, Baum baum,
 
 static gboolean export_foreach(GtkTreeModel *model, GtkTreePath *path,
 		GtkTreeIter *iter, gpointer user_data) {
-	gchar *errmsg_ii = NULL;
+	GError *error_ii = NULL;
 
 	Projekt *zond = (Projekt*) user_data;
 
 	GFileOutputStream *stream = (GFileOutputStream*) g_object_get_data(
 			G_OBJECT(model), "stream");
-	gchar **errmsg = (gchar**) g_object_get_data(G_OBJECT(model), "errmsg");
+	GError **error = (GError**) g_object_get_data(G_OBJECT(model), "error");
 	gint offset = GPOINTER_TO_INT(
 			g_object_get_data( G_OBJECT(model), "offset" ));
 
 	gint depth = gtk_tree_path_get_depth(path);
 
 	gint rc = 0;
-	rc = export_node(zond, model, path, depth + offset, stream, &errmsg_ii);
+	rc = export_node(zond, model, path, depth + offset, stream, &error_ii);
 	if (rc) {
-		if (errmsg)
-			*errmsg = g_strconcat("Bei Aufruf export_node:\n", errmsg_ii, NULL);
-		g_free(errmsg_ii);
+		if (error)
+			*error = error_ii;
+		else
+			g_error_free(error_ii);
 
 		return TRUE;
 	}
@@ -226,15 +214,14 @@ static gboolean export_foreach(GtkTreeModel *model, GtkTreePath *path,
 }
 
 static gint export_selektierte_zweige(Projekt *zond, Baum baum,
-		GFileOutputStream *stream, gchar **errmsg) {
+		GFileOutputStream *stream, GError **error) {
 	GList *selected = NULL;
 	GList *list = NULL;
 
 	selected = gtk_tree_selection_get_selected_rows(zond->selection[baum],
 			NULL);
 	if (!selected) {
-		if (errmsg)
-			*errmsg = g_strdup("Keine Punkte ausgewählt");
+		g_set_error(error, SOND_ERROR, 0, "Keine Punkte ausgewählt");
 
 		return -1;
 	}
@@ -246,29 +233,29 @@ static gint export_selektierte_zweige(Projekt *zond, Baum baum,
 	do //alle rows aus der Liste
 	{
 		gint rc = 0;
-		gchar *errmsg_ii = NULL;
+		GError *error_ii = NULL;
 
-		rc = export_node(zond, model, list->data, 1, stream, errmsg);
+		rc = export_node(zond, model, list->data, 1, stream, error);
 		if (rc) {
 			g_list_free_full(selected, (GDestroyNotify) gtk_tree_path_free);
-			ERROR_S
+			return -1;
 		}
 
 		//neuen treeview mit root_node
 		GtkTreeModel *new_model = gtk_tree_model_filter_new(model, list->data);
 
 		g_object_set_data(G_OBJECT(new_model), "stream", (gpointer) stream);
-		g_object_set_data(G_OBJECT(new_model), "errmsg", (gpointer) &errmsg_ii);
+		g_object_set_data(G_OBJECT(new_model), "error", (gpointer) &error_ii);
 		g_object_set_data(G_OBJECT(new_model), "offset", GINT_TO_POINTER(1));
 
 		gtk_tree_model_foreach(new_model,
 				(GtkTreeModelForeachFunc) export_foreach, (gpointer) zond);
 		g_object_unref(new_model);
-		if (errmsg_ii) {
-			if (errmsg)
-				*errmsg = g_strconcat("Bei Aufruf gtk_tree_model_foreach:\n",
-						errmsg_ii, NULL);
-			g_free(errmsg_ii);
+		if (error_ii) {
+			if (error)
+				*error = error_ii;
+			else
+				g_error_free(error_ii);
 
 			return -1;
 		}
@@ -280,22 +267,22 @@ static gint export_selektierte_zweige(Projekt *zond, Baum baum,
 }
 
 static gint export_alles(Projekt *zond, Baum baum, GFileOutputStream *stream,
-		gchar **errmsg) {
-	gchar *errmsg_ii = NULL;
+		GError **error) {
+	GError *error_ii = NULL;
 	GtkTreeModel *model = gtk_tree_view_get_model(
 			GTK_TREE_VIEW(zond->treeview[baum]));
 
 	g_object_set_data(G_OBJECT(model), "stream", (gpointer) stream);
-	g_object_set_data(G_OBJECT(model), "errmsg", (gpointer) &errmsg_ii);
+	g_object_set_data(G_OBJECT(model), "error", (gpointer) &error_ii);
 
 	gtk_tree_model_foreach(model, (GtkTreeModelForeachFunc) export_foreach,
 			(gpointer) zond);
 
-	if (errmsg_ii) {
-		if (errmsg)
-			*errmsg = g_strconcat("Bei Aufruf gtk_tree_model_foreach:\n",
-					errmsg_ii, NULL);
-		g_free(errmsg_ii);
+	if (error_ii) {
+		if (error)
+			*error = error_ii;
+		else
+			g_error_free(error_ii);
 
 		return -1;
 	}
@@ -304,13 +291,11 @@ static gint export_alles(Projekt *zond, Baum baum, GFileOutputStream *stream,
 }
 
 static gint export_html(Projekt *zond, GFileOutputStream *stream, gint umfang,
-		gchar **errmsg) {
-	GError *error = NULL;
+		GError **error) {
 	gint rc = 0;
 
 	if (zond->baum_prev == KEIN_BAUM) {
-		if (errmsg)
-			*errmsg = g_strdup("Kein Baum ausgewählt");
+		g_set_error(error, SOND_ERROR, 0, "Kein Baum ausgewählt");
 
 		return -1;
 	}
@@ -321,41 +306,30 @@ static gint export_html(Projekt *zond, GFileOutputStream *stream, gint umfang,
 
 	//Hier htm-Datei in stream schreiben
 	rc = g_output_stream_write(G_OUTPUT_STREAM(stream), (const void*) buffer,
-			strlen(buffer), NULL, &error);
-	if (rc == -1) {
-		if (errmsg)
-			*errmsg = g_strconcat("Bei Aufruf g_output_stream_write "
-					"(header):\n", error->message, NULL);
-		g_error_free(error);
-
+			strlen(buffer), NULL, error);
+	if (rc == -1)
 		return -1;
-	}
 
 	switch (umfang) {
 	case 1:
-		rc = export_alles(zond, zond->baum_prev, stream, errmsg);
+		rc = export_alles(zond, zond->baum_prev, stream, error);
 		break;
 	case 2:
-		rc = export_selektierte_zweige(zond, zond->baum_prev, stream, errmsg);
+		rc = export_selektierte_zweige(zond, zond->baum_prev, stream, error);
 		break;
 	case 3:
-		rc = export_selektierte_punkte(zond, zond->baum_prev, stream, errmsg);
+		rc = export_selektierte_punkte(zond, zond->baum_prev, stream, error);
 		break;
 	}
 	if (rc)
-		ERROR_S
-
-			//Hier htm-Datei in stream schreiben
-	rc = g_output_stream_write(G_OUTPUT_STREAM(stream), "}}", strlen("}}"),
-			NULL, &error);
-	if (rc == -1) {
-		if (errmsg)
-			*errmsg = g_strconcat("Bei Aufruf g_output_stream_write "
-					"(end):\n", error->message, NULL);
-		g_error_free(error);
-
 		return -1;
-	}
+
+	//Hier htm-Datei in stream schreiben
+	rc = g_output_stream_write(G_OUTPUT_STREAM(stream), "}}", strlen("}}"),
+			NULL, error);
+	if (rc == -1)
+		return -1;
+
 	return 0;
 }
 
@@ -372,15 +346,12 @@ gint export_activate(Projekt* zond, gint umfang, GError** error) {
 		g_object_unref(file);
 		g_free(filename);
 
-		ERROR_Z;
+		return -1;
 	}
 
-	gchar *errmsg = NULL;
-	gint res = export_html(zond, stream, umfang, &errmsg);
+	gint res = export_html(zond, stream, umfang, error);
 	g_object_unref(stream);
 	if (res) {
-		g_set_error(error, SOND_ERROR, 0, "%s", errmsg);
-		g_free(errmsg);
 		g_object_unref(file);
 		g_free(filename);
 
@@ -428,7 +399,7 @@ gint export_activate(Projekt* zond, gint umfang, GError** error) {
 		g_object_unref(file);
 		g_free(filename);
 
-		ERROR_Z
+		return -1;
 	}
 
 	if (!g_file_delete(file, NULL, error)) {

@@ -659,7 +659,7 @@ static gint sond_treeview_refs_foreach(SondTreeview *stv_orig, GPtrArray *refs,
 
 		rc = foreach(stv_orig, &iter_ref, data, error);
 		if (rc == -1)
-			ERROR_Z
+			return -1;
 		else if (rc >= 1)
 			return rc;
 	}
@@ -678,7 +678,7 @@ gint sond_treeview_clipboard_foreach(
 	rc = sond_treeview_refs_foreach(clipboard->tree_view, clipboard->arr_ref,
 			foreach, data, error);
 	if (rc == -1)
-		ERROR_Z
+		return -1;
 	else if (rc >= 1)
 		return rc;
 
@@ -698,7 +698,7 @@ gint sond_treeview_selection_foreach(SondTreeview *stv,
 	rc = sond_treeview_refs_foreach(stv, refs, foreach, data, error);
 	g_ptr_array_unref(refs);
 	if (rc == -1)
-		ERROR_Z
+		return -1;
 	else if (rc >= 1)
 		return rc;
 

@@ -4,7 +4,8 @@
 typedef struct _Projekt Projekt;
 
 typedef char gchar;
+typedef struct _GError GError;
 
-gint suchen_treeviews(Projekt*, const gchar*, gchar**);
+gint suchen_treeviews(Projekt*, const gchar*, GError**);
 
 #endif // SUCHEN_H_INCLUDED

@@ -36,7 +36,7 @@
 #include "99conv/general.h"
 
 static gint treeviews_get_page_num_from_dest_doc(fz_context *ctx,
-		pdf_document *doc, const gchar *dest, gchar **errmsg) {
+		pdf_document *doc, const gchar *dest, GError **error) {
 	pdf_obj *obj_dest_string = NULL;
 	pdf_obj *obj_dest = NULL;
 	pdf_obj *pageobj = NULL;
@@ -48,7 +48,7 @@ static gint treeviews_get_page_num_from_dest_doc(fz_context *ctx,
 fz_always	( ctx )
 		pdf_drop_obj(ctx, obj_dest_string);
 fz_catch	( ctx )
-		ERROR_MUPDF("pdf_lookup_dest")
+		ERROR_PDF
 
 	pageobj = pdf_array_get(ctx, obj_dest, 0);
 
@@ -57,13 +57,13 @@ fz_catch	( ctx )
 	else {
 		fz_try( ctx )
 			page_num = pdf_lookup_page_number(ctx, doc, pageobj);
-fz_catch		( ctx ) ERROR_MUPDF( "pdf_lookup_page_number" )
+fz_catch		( ctx ) ERROR_PDF
 	}
 
 	return page_num;
 }
 
-static gint zond_convert_create_db_maj_0(sqlite3 *db, gchar **errmsg) {
+static gint zond_convert_create_db_maj_0(sqlite3 *db, GError **error) {
 	gchar *errmsg_ii = NULL;
 	gchar *sql = NULL;
 	gint rc = 0;
@@ -159,10 +159,9 @@ static gint zond_convert_create_db_maj_0(sqlite3 *db, gchar **errmsg) {
 
 	rc = sqlite3_exec(db, sql, NULL, NULL, &errmsg_ii);
 	if (rc != SQLITE_OK) {
-		if (errmsg)
-			*errmsg = g_strconcat("Bei Aufruf sqlite3_exec (create db): "
-					"\nresult code: ", sqlite3_errstr(rc), "\nerrmsg: ",
-					errmsg_ii, NULL);
+		if (error)
+			*error = g_error_new(g_quark_from_static_string("SQLITE3"), rc,
+					"%s", errmsg_ii);
 		sqlite3_free(errmsg_ii);
 
 		return -1;
@@ -172,7 +171,7 @@ static gint zond_convert_create_db_maj_0(sqlite3 *db, gchar **errmsg) {
 }
 
 //v0.7: in Tabellen baum_inhalt und baum_auswertung Spalte icon_id statt icon_name in v0.8
-static gint zond_convert_from_v0_7(sqlite3 *db_convert, gchar **errmsg) {
+static gint zond_convert_from_v0_7(sqlite3 *db_convert, GError **error) {
 	gint rc = 0;
 	gchar *errmsg_ii = NULL;
 
@@ -258,10 +257,9 @@ static gint zond_convert_from_v0_7(sqlite3 *db_convert, gchar **errmsg) {
 
 	rc = sqlite3_exec(db_convert, sql, NULL, NULL, &errmsg_ii);
 	if (rc != SQLITE_OK) {
-		if (errmsg)
-			*errmsg = g_strconcat("Bei Aufruf sqlite3_exec:\n"
-					"result code: ", sqlite3_errstr(rc), "\nerrmsg: ",
-					errmsg_ii, NULL);
+		if (error)
+			*error = g_error_new(g_quark_from_static_string("SQLITE3"), rc,
+					"%s", errmsg_ii);
 		sqlite3_free(errmsg_ii);
 
 		return -1;
@@ -272,8 +270,9 @@ static gint zond_convert_from_v0_7(sqlite3 *db_convert, gchar **errmsg) {
 
 //v0.8 ist wie Maj_0, aber ohne links
 //v0.9 ist wie 0.8, aber mit Tabelle eingang
-static gint zond_convert_from_v0_8_or_v0_9(sqlite3 *db_convert, gchar **errmsg) {
+static gint zond_convert_from_v0_8_or_v0_9(sqlite3 *db_convert, GError **error) {
 	gint rc = 0;
+	gchar *errmsg_ii = NULL;
 
 	gchar *sql =
 			"INSERT INTO baum_inhalt SELECT node_id, parent_id, older_sibling_id, "
@@ -282,11 +281,12 @@ static gint zond_convert_from_v0_8_or_v0_9(sqlite3 *db_convert, gchar **errmsg) 
 					"INSERT INTO dateien SELECT * FROM old.dateien; "
 					"INSERT INTO ziele SELECT * FROM old.ziele; ";
 
-	rc = sqlite3_exec(db_convert, sql, NULL, NULL, errmsg);
+	rc = sqlite3_exec(db_convert, sql, NULL, NULL, &errmsg_ii);
 	if (rc != SQLITE_OK) {
-		if (errmsg)
-			*errmsg = add_string(g_strdup("Bei Aufruf sqlite3_exec:\n"),
-					*errmsg);
+		if (error)
+			*error = g_error_new(g_quark_from_static_string("SQLITE3"), rc,
+					"%s", errmsg_ii);
+		sqlite3_free(errmsg_ii);
 
 		return -1;
 	}
@@ -295,8 +295,9 @@ static gint zond_convert_from_v0_8_or_v0_9(sqlite3 *db_convert, gchar **errmsg) 
 }
 
 //v0.10 ist wie v0.9, aber mit links
-static gint zond_convert_from_v0_10(sqlite3 *db_convert, gchar **errmsg) {
+static gint zond_convert_from_v0_10(sqlite3 *db_convert, GError **error) {
 	gint rc = 0;
+	gchar *errmsg_ii = NULL;
 
 	gchar *sql =
 			"INSERT INTO baum_inhalt SELECT node_id, parent_id, older_sibling_id, "
@@ -306,11 +307,12 @@ static gint zond_convert_from_v0_10(sqlite3 *db_convert, gchar **errmsg) {
 					"INSERT INTO dateien SELECT * FROM old.dateien; "
 					"INSERT INTO ziele SELECT * FROM old.ziele; ";
 
-	rc = sqlite3_exec(db_convert, sql, NULL, NULL, errmsg);
+	rc = sqlite3_exec(db_convert, sql, NULL, NULL, &errmsg_ii);
 	if (rc != SQLITE_OK) {
-		if (errmsg)
-			*errmsg = add_string(g_strdup("Bei Aufruf sqlite3_exec:\n"),
-					*errmsg);
+		if (error)
+			*error = g_error_new(g_quark_from_static_string("SQLITE3"), rc,
+					"%s", errmsg_ii);
+		sqlite3_free(errmsg_ii);
 
 		return -1;
 	}
@@ -319,40 +321,41 @@ static gint zond_convert_from_v0_10(sqlite3 *db_convert, gchar **errmsg) {
 }
 
 static gint zond_convert_from_legacy_to_maj_0(const gchar *path,
-		gchar const *v_string, gchar **errmsg) //eingang hinzugefügt
+		gchar const *v_string, GError **error) //eingang hinzugefügt
 {
 	gint rc = 0;
 	sqlite3 *db = NULL;
 	gchar *sql = NULL;
 	gchar *path_old = NULL;
 	gchar *path_new = NULL;
+	gchar *errmsg_sqlite = NULL;
 
 	path_new = g_strconcat(path, ".tmp", NULL);
 	rc = sqlite3_open(path_new, &db);
 	if (rc != SQLITE_OK) {
-		if (errmsg)
-			*errmsg = g_strconcat("Bei Aufruf "
-					"sqlite3_open:\n", sqlite3_errmsg(db), NULL);
+		if (error)
+			*error = g_error_new(g_quark_from_static_string("SQLITE3"), rc,
+					"%s", sqlite3_errmsg(db));
 		g_free(path_new);
 
 		return -1;
 	}
 
-	if (zond_convert_create_db_maj_0(db, errmsg)) {
+	if (zond_convert_create_db_maj_0(db, error)) {
 		sqlite3_close(db);
 		g_free(path_new);
 
-		ERROR_S
+		return -1;
 	}
 
 	sql = g_strdup_printf("ATTACH DATABASE '%s' AS old;", path);
-	rc = sqlite3_exec(db, sql, NULL, NULL, errmsg);
+	rc = sqlite3_exec(db, sql, NULL, NULL, &errmsg_sqlite);
 	g_free(sql);
 	if (rc != SQLITE_OK) {
-		if (errmsg)
-			*errmsg = g_strconcat("Bei Aufruf sqlite3_exec:\n"
-					"result code: ", sqlite3_errstr(rc), "\nerrmsg: ", *errmsg,
-					NULL);
+		if (error)
+			*error = g_error_new(g_quark_from_static_string("SQLITE3"), rc,
+					"%s", errmsg_sqlite);
+		sqlite3_free(errmsg_sqlite);
 		sqlite3_close(db);
 		g_free(path_new);
 
@@ -360,26 +363,26 @@ static gint zond_convert_from_legacy_to_maj_0(const gchar *path,
 	}
 
 	if (!g_strcmp0(v_string, "v0.7")) {
-		rc = zond_convert_from_v0_7(db, errmsg);
+		rc = zond_convert_from_v0_7(db, error);
 		if (rc) {
 			sqlite3_close(db);
 			g_free(path_new);
 
-			ERROR_S
+			return -1;
 		}
 	} else if (!g_strcmp0(v_string, "v0.8") || !g_strcmp0(v_string, "v0.9")) {
-		rc = zond_convert_from_v0_8_or_v0_9(db, errmsg);
+		rc = zond_convert_from_v0_8_or_v0_9(db, error);
 		if (rc) {
 			sqlite3_close(db);
 			g_free(path_new);
-			ERROR_S
+			return -1;
 		}
 	} else if (!g_strcmp0(v_string, "v0.10")) {
-		rc = zond_convert_from_v0_10(db, errmsg);
+		rc = zond_convert_from_v0_10(db, error);
 		if (rc) {
 			sqlite3_close(db);
 			g_free(path_new);
-			ERROR_S
+			return -1;
 		}
 	}
 
@@ -389,9 +392,9 @@ static gint zond_convert_from_legacy_to_maj_0(const gchar *path,
 	rc = g_rename(path, path_old);
 	g_free(path_old);
 	if (rc) {
-		if (errmsg)
-			*errmsg = g_strconcat("Bei Aufruf g_rename:\n", strerror( errno),
-					NULL);
+		if (error)
+			g_set_error(error, G_FILE_ERROR, g_file_error_from_errno(errno),
+					"Bei Aufruf g_rename: %s", strerror(errno));
 		g_free(path_new);
 
 		return -1;
@@ -400,9 +403,9 @@ static gint zond_convert_from_legacy_to_maj_0(const gchar *path,
 	rc = g_rename(path_new, path);
 	g_free(path_new);
 	if (rc) {
-		if (errmsg)
-			*errmsg = g_strconcat("Bei Aufruf g_rename:\n", strerror( errno),
-					NULL);
+		if (error)
+			g_set_error(error, G_FILE_ERROR, g_file_error_from_errno(errno),
+					"Bei Aufruf g_rename: %s", strerror(errno));
 
 		return -1;
 	}
@@ -427,7 +430,7 @@ static gint zond_convert_get_younger_sibling_0(ZondDBase *zond_dbase, Baum baum,
 	rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
 			error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	rc = sqlite3_bind_int(stmt[baum - 1], 1, node_id);
 	if (rc != SQLITE_OK)
@@ -460,7 +463,7 @@ static gint zond_convert_get_first_child_0(ZondDBase *zond_dbase, Baum baum,
 	rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
 			error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	rc = sqlite3_bind_int(stmt[baum - 1], 1, node_id);
 	if (rc != SQLITE_OK)
@@ -497,7 +500,7 @@ static gint zond_convert_get_node_from_baum_auswertung_0(ZondDBase *zond_dbase,
 	rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
 			error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	rc = sqlite3_bind_int(stmt[0], 1, node_id);
 	if (rc != SQLITE_OK)
@@ -546,7 +549,7 @@ static gint zond_convert_get_node_from_baum_inhalt_0(ZondDBase *zond_dbase,
 	rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
 			error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	rc = sqlite3_bind_int(stmt[0], 1, node_id);
 	if (rc != SQLITE_OK)
@@ -599,7 +602,7 @@ static gint zond_convert_0_to_1_baum_inhalt_insert(ZondDBase *zond_dbase,
 				ZOND_DBASE_TYPE_BAUM_STRUKT, 0, NULL, NULL, icon_name,
 				node_text, NULL, error);
 		if (*node_inserted == -1)
-			ERROR_Z
+			return -1;
 	} else if (rel_path && !ziel_von) //datei
 			{
 		gint fd = 0;
@@ -630,7 +633,7 @@ static gint zond_convert_0_to_1_baum_inhalt_insert(ZondDBase *zond_dbase,
 					child, ZOND_DBASE_TYPE_BAUM_STRUKT, 0, NULL, NULL,
 					icon_name, node_text, NULL, error);
 			if (*node_inserted == -1)
-				ERROR_Z
+				return -1;
 		} else {
 			close(fd);
 
@@ -640,21 +643,21 @@ static gint zond_convert_0_to_1_baum_inhalt_insert(ZondDBase *zond_dbase,
 			rc = zond_dbase_create_file_root(zond_dbase, rel_path, icon_name,
 					node_text, NULL, &node_inserted_root, error);
 			if (rc)
-				ERROR_Z
+				return -1;
 
 			//BAUM_INHALT_FILE_PART einfügen
 			*node_inserted = zond_dbase_insert_node(zond_dbase, anchor_id,
 					child, ZOND_DBASE_TYPE_BAUM_INHALT_FILE, node_inserted_root,
 					NULL, NULL, NULL, NULL, NULL, error);
 			if (*node_inserted == -1)
-				ERROR_Z
+				return -1;
 		}
 
 		//neue Rekursion mit FILE_PART_ROOT starten
 		first_child_file = zond_convert_get_first_child_0(zond_dbase,
 				BAUM_INHALT, node_id, error);
 		if (first_child_file == -1)
-			ERROR_Z
+			return -1;
 
 		if (first_child_file) {
 			gint rc = 0;
@@ -691,35 +694,22 @@ static gint zond_convert_0_to_1_baum_inhalt_insert(ZondDBase *zond_dbase,
 			pdf_drop_document(data_convert->ctx, data_convert->doc);
 			data_convert->doc = NULL;
 			if (rc)
-				ERROR_Z
+				return -1;
 		}
 	} else if (!rel_path && ziel_von) {
 		gchar *section = NULL;
 		Anbindung anbindung = { 0 };
-		gchar *errmsg = NULL;
 
 		if (data_convert->doc) {
 			anbindung.von.seite = treeviews_get_page_num_from_dest_doc(
-					data_convert->ctx, data_convert->doc, ziel_von, &errmsg);
-			if (anbindung.von.seite == -1) {
-				if (error)
-					*error = g_error_new( ZOND_ERROR, 0, "%s\n%s", __func__,
-							errmsg);
-				g_free(errmsg);
-
+					data_convert->ctx, data_convert->doc, ziel_von, error);
+			if (anbindung.von.seite == -1)
 				return -1;
-			}
 
 			anbindung.bis.seite = treeviews_get_page_num_from_dest_doc(
-					data_convert->ctx, data_convert->doc, ziel_bis, &errmsg);
-			if (anbindung.bis.seite == -1) {
-				if (error)
-					*error = g_error_new( ZOND_ERROR, 0, "%s\n%s", __func__,
-							errmsg);
-				g_free(errmsg);
-
+					data_convert->ctx, data_convert->doc, ziel_bis, error);
+			if (anbindung.bis.seite == -1)
 				return -1;
-			}
 
 			anbindung.von.index = index_von;
 			anbindung.bis.index = index_bis;
@@ -730,7 +720,7 @@ static gint zond_convert_0_to_1_baum_inhalt_insert(ZondDBase *zond_dbase,
 					icon_name, node_text, NULL, error);
 			g_free(section);
 			if (*node_inserted == -1)
-				ERROR_Z
+				return -1;
 		} else {
 			gchar *logmsg = NULL;
 			size_t count = 0;
@@ -739,7 +729,7 @@ static gint zond_convert_0_to_1_baum_inhalt_insert(ZondDBase *zond_dbase,
 					child, ZOND_DBASE_TYPE_BAUM_STRUKT, 0, NULL, NULL,
 					icon_name, node_text, NULL, error);
 			if (*node_inserted == -1)
-				ERROR_Z
+				return -1;
 
 			logmsg = g_strdup_printf("  Abschnitt Von: %s,%d   Bis: %s,%d\n",
 					ziel_von, index_von, ziel_bis, index_bis);
@@ -782,7 +772,7 @@ static gint zond_convert_0_to_1_baum_inhalt(ZondDBase *zond_dbase, gint anchor_i
 			&icon_name, &node_text, &rel_path, &rel_path_ziel, &ziel_von,
 			&index_von, &ziel_bis, &index_bis, &is_linked, error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	rc = zond_convert_0_to_1_baum_inhalt_insert(zond_dbase, anchor_id, child,
 			node_id, icon_name, node_text, rel_path, rel_path_ziel, ziel_von,
@@ -797,7 +787,7 @@ static gint zond_convert_0_to_1_baum_inhalt(ZondDBase *zond_dbase, gint anchor_i
 	g_free(ziel_von);
 	g_free(ziel_bis);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	if (is_linked) {
 		Target target = { BAUM_INHALT, node_id, *node_inserted };
@@ -810,7 +800,7 @@ static gint zond_convert_0_to_1_baum_inhalt(ZondDBase *zond_dbase, gint anchor_i
 		first_child = zond_convert_get_first_child_0(zond_dbase, BAUM_INHALT,
 				node_id, error);
 		if (first_child == -1)
-			ERROR_Z
+			return -1;
 
 		if (first_child > 0) {
 			gint rc = 0;
@@ -820,14 +810,14 @@ static gint zond_convert_0_to_1_baum_inhalt(ZondDBase *zond_dbase, gint anchor_i
 					TRUE, first_child, data_convert, arr_targets,
 					&node_inserted_loop, error);
 			if (rc)
-				ERROR_Z
+				return -1;
 		}
 	}
 
 	younger_sibling = zond_convert_get_younger_sibling_0(zond_dbase,
 			BAUM_INHALT, node_id, error);
 	if (younger_sibling == -1)
-		ERROR_Z
+		return -1;
 
 	if (younger_sibling > 0) {
 		gint rc = 0;
@@ -837,7 +827,7 @@ static gint zond_convert_0_to_1_baum_inhalt(ZondDBase *zond_dbase, gint anchor_i
 				younger_sibling, data_convert, arr_targets, &node_inserted_loop,
 				error);
 		if (rc)
-			ERROR_Z
+			return -1;
 	}
 
 	return 0;
@@ -868,7 +858,7 @@ static gint zond_convert_0_to_1_baum_auswertung(ZondDBase *zond_dbase,
 			&icon_name, &node_text, &text, &ref_id, &is_linked, &baum_target,
 			&id_target, error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	if (id_target) //ist ein Link, hat target gespeichert
 	{
@@ -876,7 +866,7 @@ static gint zond_convert_0_to_1_baum_auswertung(ZondDBase *zond_dbase,
 				ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_LINK, 0, NULL, NULL, NULL, NULL,
 				NULL, error);
 		if (node_inserted == -1)
-			ERROR_Z
+			return -1;
 
 		Links link = { node_inserted, baum_target, id_target };
 		g_array_append_val(arr_links, link);
@@ -887,14 +877,14 @@ static gint zond_convert_0_to_1_baum_auswertung(ZondDBase *zond_dbase,
 					ZOND_DBASE_TYPE_BAUM_STRUKT, 0, NULL, NULL, icon_name,
 					node_text, text, error);
 			if (node_inserted == -1)
-				ERROR_Z
+				return -1;
 		} else //datei
 		{
 			node_inserted = zond_dbase_insert_node(zond_dbase, anchor_id, child,
 					ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_COPY, ref_id, NULL, NULL,
 					icon_name, node_text, text, error);
 			if (node_inserted == -1)
-				ERROR_Z
+				return -1;
 
 			Links link = { node_inserted, BAUM_INHALT, ref_id };
 			g_array_append_val(arr_links, link);
@@ -908,7 +898,7 @@ static gint zond_convert_0_to_1_baum_auswertung(ZondDBase *zond_dbase,
 		first_child = zond_convert_get_first_child_0(zond_dbase,
 				BAUM_AUSWERTUNG, node_id, error);
 		if (first_child == -1)
-			ERROR_Z
+			return -1;
 
 		if (first_child > 0) {
 			gint rc = 0;
@@ -916,13 +906,13 @@ static gint zond_convert_0_to_1_baum_auswertung(ZondDBase *zond_dbase,
 			rc = zond_convert_0_to_1_baum_auswertung(zond_dbase, node_inserted,
 					TRUE, first_child, arr_links, arr_targets, error);
 			if (rc)
-				ERROR_Z
+				return -1;
 		}
 
 		younger_sibling = zond_convert_get_younger_sibling_0(zond_dbase,
 				BAUM_AUSWERTUNG, node_id, error);
 		if (younger_sibling == -1)
-			ERROR_Z
+			return -1;
 
 		if (younger_sibling > 0) {
 			gint rc = 0;
@@ -930,7 +920,7 @@ static gint zond_convert_0_to_1_baum_auswertung(ZondDBase *zond_dbase,
 			rc = zond_convert_0_to_1_baum_auswertung(zond_dbase, node_inserted,
 					FALSE, younger_sibling, arr_links, arr_targets, error);
 			if (rc)
-				ERROR_Z
+				return -1;
 		}
 	}
 
@@ -948,7 +938,7 @@ static gint zond_convert_0_to_1_update_link(ZondDBase *zond_dbase, gint node_id,
 	rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
 			error);
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	rc = sqlite3_bind_int(stmt[0], 1, node_id);
 	if (rc != SQLITE_OK)
@@ -974,7 +964,7 @@ static gint zond_convert_do_0_to_1(ZondDBase *zond_dbase,
 	first_child = zond_convert_get_first_child_0(zond_dbase, BAUM_INHALT, 0,
 			error);
 	if (first_child == -1)
-		ERROR_Z
+		return -1;
 
 	if (first_child) {
 		gint rc = 0;
@@ -994,14 +984,14 @@ static gint zond_convert_do_0_to_1(ZondDBase *zond_dbase,
 				data_convert, arr_targets, &node_inserted, error);
 		fz_drop_context(data_convert->ctx);
 		if (rc)
-			ERROR_Z
+			return -1;
 	}
 
 	//ersten Knoten Baum_auswertung
 	first_child = zond_convert_get_first_child_0(zond_dbase, BAUM_AUSWERTUNG, 0,
 			error);
 	if (first_child == -1)
-		ERROR_Z
+		return -1;
 
 	if (first_child) {
 		gint rc = 0;
@@ -1009,7 +999,7 @@ static gint zond_convert_do_0_to_1(ZondDBase *zond_dbase,
 		rc = zond_convert_0_to_1_baum_auswertung(zond_dbase, 2, TRUE,
 				first_child, arr_links, arr_targets, error);
 		if (rc)
-			ERROR_Z
+			return -1;
 	}
 
 	//arr_targets durchgehen
@@ -1032,7 +1022,7 @@ static gint zond_convert_do_0_to_1(ZondDBase *zond_dbase,
 				rc = zond_dbase_get_type_and_link(zond_dbase,
 						target.id_target_new, &type, &link_node, error);
 				if (rc)
-					ERROR_Z
+					return -1;
 
 				if (type == ZOND_DBASE_TYPE_BAUM_INHALT_FILE)
 					target.id_target_new = link_node;
@@ -1040,7 +1030,7 @@ static gint zond_convert_do_0_to_1(ZondDBase *zond_dbase,
 				rc = zond_convert_0_to_1_update_link(zond_dbase,
 						link.node_id_new, target.id_target_new, error);
 				if (rc)
-					ERROR_Z
+					return -1;
 
 				break;
 			}
@@ -1090,7 +1080,7 @@ static gint zond_convert_0_to_1(ZondDBase *zond_dbase, GError **error) {
 		LOG_WARN("Log-Datei konnte nicht beschrieben werden");
 
 	if (rc)
-		ERROR_Z
+		return -1;
 
 	return 0;
 }
@@ -1123,7 +1113,7 @@ static gint zond_convert_from_maj_0_to_1(ZondDBase *zond_dbase, GError **error) 
 		sqlite3_close(db);
 		g_free(path_new);
 
-		ERROR_Z
+		return -1;
 	}
 
 	sql = g_strdup_printf("ATTACH DATABASE '%s' AS old;", path);
@@ -1136,7 +1126,7 @@ static gint zond_convert_from_maj_0_to_1(ZondDBase *zond_dbase, GError **error) 
 		if (error)
 			*error = g_error_new(g_quark_from_static_string("SQLITE3"), rc,
 					"%s\n%s", __func__, errmsg);
-		g_free(errmsg);
+		sqlite3_free(errmsg);
 
 		return -1;
 	}
@@ -1186,18 +1176,11 @@ gint zond_convert(ZondDBase *zond_dbase, gchar const *v_string, GError **error) 
 	if (v_string[0] == 'v') //legacy...
 			{
 		gint rc = 0;
-		gchar *errmsg = NULL;
 
 		rc = zond_convert_from_legacy_to_maj_0(zond_dbase_get_path(zond_dbase),
-				v_string, &errmsg);
-		if (rc) {
-			if (error)
-				*error = g_error_new( ZOND_ERROR, 0, "%s\n%s", __func__,
-						errmsg);
-			g_free(errmsg);
-
+				v_string, error);
+		if (rc)
 			return -1;
-		}
 	} else if (!g_ascii_isdigit(v_string[0])) {
 		if (error)
 			*error = g_error_new( ZOND_ERROR, 0,
@@ -1217,7 +1200,7 @@ gint zond_convert(ZondDBase *zond_dbase, gchar const *v_string, GError **error) 
 
 		rc = zond_convert_from_maj_0_to_1(zond_dbase, error);
 		if (rc == -1)
-			ERROR_Z
+			return -1;
 	}
 	//später: if ( atoi( v_string ) == 1 ) ...
 

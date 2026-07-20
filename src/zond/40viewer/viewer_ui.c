@@ -99,7 +99,7 @@ static void cb_pv_speichern(GtkButton *button, gpointer data) {
 
 	rc = viewer_save_dirty_dds(pv, &error);
 	if (rc) {
-		display_error(pv->vf, "Speichern nicht erfolgreich", error->message);
+		display_message(pv->vf, "Speichern nicht erfolgreich\n\n", error->message, NULL);
 		g_error_free(error);
 	}
 
@@ -140,7 +140,7 @@ static void cb_viewer_text_search(GtkWidget *widget, gpointer data) {
 	// Wrapper: Delegiert die Logik an viewer.c
 	rc = viewer_handle_text_search(pv, widget, &error);
 	if (rc) {
-		display_error(pv->vf, "Fehler bei Textsuche", error->message);
+		display_message(pv->vf, "Fehler bei Textsuche\n\n", error->message, NULL);
 		g_error_free(error);
 	}
 
@@ -249,7 +249,7 @@ static gboolean cb_viewer_swindow_key_press(GtkWidget *swindow,
 
 	rc = viewer_annot_handle_delete(pv, &error);
 	if (rc) {
-		display_error(pv->vf, "Fehler beim Löschen der Anmerkung", error->message);
+		display_message(pv->vf, "Fehler beim Löschen der Anmerkung\n\n", error->message, NULL);
 		g_error_free(error);
 	}
 
@@ -295,8 +295,8 @@ static gboolean cb_viewer_layout_release_button(GtkWidget *layout,
 
 			rc = viewer_annot_create_markup(pv, viewer_page, pdf_punkt, &error);
 			if (rc) {
-				display_error(pv->vf, "Annotation konnte nicht erstellt werden",
-						error->message);
+				display_message(pv->vf, "Annotation konnte nicht erstellt werden\n\n",
+						error->message, NULL);
 				g_error_free(error);
 				return TRUE;
 			}
@@ -314,8 +314,8 @@ static gboolean cb_viewer_layout_release_button(GtkWidget *layout,
 
 		rc = viewer_annot_handle_release_clicked_annot(pv, viewer_page, pdf_punkt, &error);
 		if (rc) {
-			display_error(pv->vf, "Annotation konnte nicht bearbeitet werden",
-					error->message);
+			display_message(pv->vf, "Annotation konnte nicht bearbeitet werden\n\n",
+					error->message, NULL);
 			g_error_free(error);
 		}
 	}
@@ -364,7 +364,7 @@ static gboolean cb_viewer_layout_press_button(GtkWidget *layout,
 	// Wrapper: Delegiert die Logik an viewer.c
 	rc = viewer_handle_button_press(pv, event, &error);
 	if (rc) {
-		display_error(pv->vf, "Fehler bei Maus-Button-Event", error->message);
+		display_message(pv->vf, "Fehler bei Maus-Button-Event\n\n", error->message, NULL);
 		g_error_free(error);
 	}
 
