@@ -343,14 +343,18 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 				pdf_document_page->document);
 
 		if (!pdf_document_page->page) {
-			fz_try(ctx) {
-				pdf_document_page->page = pdf_load_page(ctx, zond_pdf_document_get_pdf_doc(
-						pdf_document_page->document), pdf_document_page->page_akt);
-			}
-			fz_catch(ctx) {
+			gint rc_load = 0;
+
+			/* zond_pdf_document_load_page() statt isoliertem pdf_load_page():
+			 * legt dabei auch arr_annots an. page != NULL ohne arr_annots
+			 * würde die Invariante brechen, dass beide immer zusammen
+			 * gesetzt werden (siehe seiten_drehen()/viewer.c). */
+			rc_load = zond_pdf_document_load_page(pdf_document_page, ctx, &error);
+			if (rc_load) {
 				info_window_set_message(info_window,
 						"Seite %u konnte nicht geladen werden: %s",
-						pdf_document_page->page_akt + 1, fz_caught_message(ctx));
+						pdf_document_page->page_akt + 1, error->message);
+				g_clear_error(&error);
 				continue;
 			}
 		}
@@ -442,7 +446,7 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 		g_ptr_array_add(arr_tasks, task);
 
 		//OCR
-		rc = sond_ocr_do_tasks(arr_tasks, pool, &error);
+		rc = sond_ocr_do_tasks(arr_tasks, pool, SOND_OCR_MODE_CHECK, &error);
 		g_ptr_array_unref(arr_tasks);
 		if (rc) { //Fähler
 			fz_drop_buffer(ctx, entry.ocr.buf_old);
@@ -607,22 +611,40 @@ static gint seiten_drehen(PdfViewer *pv, GPtrArray *arr_document_page,
 
 		viewer_render_wait_for_transfer(pdf_document_page);
 
-		fz_drop_display_list(
-				zond_pdf_document_get_ctx(pdf_document_page->document),
-				pdf_document_page->display_list);
-		pdf_document_page->display_list = NULL;
+		/* War die Seite noch nie geladen (kein page, kein display_list/
+		 * stext_page/arr_annots - lazy load), gibt es hier nichts zu
+		 * invalidieren: seiten_drehen_pdf() hat /Rotate bereits im pdf_obj
+		 * gesetzt, und beim späteren ersten Rendern wird die Seite ganz
+		 * normal frisch geladen und liest die Rotation dann schon korrekt.
+		 * Nur wenn die Seite schon geladen war, muss sie neu geladen werden,
+		 * weil pdf_page_rotate() nur den pdf_obj ändert, nicht ein bereits
+		 * geladenes pdf_page-Objekt. */
+		if (pdf_document_page->page) {
+			fz_drop_display_list(
+					zond_pdf_document_get_ctx(pdf_document_page->document),
+					pdf_document_page->display_list);
+			pdf_document_page->display_list = NULL;
 
-		fz_drop_stext_page(
-				zond_pdf_document_get_ctx(pdf_document_page->document),
-				pdf_document_page->stext_page);
-		pdf_document_page->stext_page = NULL;
+			fz_drop_stext_page(
+					zond_pdf_document_get_ctx(pdf_document_page->document),
+					pdf_document_page->stext_page);
+			pdf_document_page->stext_page = NULL;
 
-		//page_annots müssen neu geladen werden, weil quads und rects sonst verdreht sind
-		g_ptr_array_remove_range(pdf_document_page->arr_annots,
-				0, pdf_document_page->arr_annots->len);
-		rc = zond_pdf_document_page_load_annots(pdf_document_page, error);
-		if (rc)
-			return -1;
+			/* altes arr_annots freigeben (mit Free-Func je Element) - danach
+			 * legt zond_pdf_document_load_page() ein neues an. Nur hier
+			 * nötig: dort wird sie sonst nur beim erstmaligen Laden
+			 * aufgerufen, wo arr_annots ohnehin noch NULL ist.
+			 * page und arr_annots werden immer zusammen in
+			 * zond_pdf_document_load_page() gesetzt - da wir hier bereits
+			 * wissen, dass page gesetzt ist, ist es auch arr_annots. */
+			g_ptr_array_unref(pdf_document_page->arr_annots);
+			pdf_document_page->arr_annots = NULL;
+
+			rc = zond_pdf_document_load_page(pdf_document_page,
+					zond_pdf_document_get_ctx(pdf_document_page->document), error);
+			if (rc)
+				return -1;
+		}
 
 		pdf_document_page->thread &= 2;
 

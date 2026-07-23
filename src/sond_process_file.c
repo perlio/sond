@@ -558,6 +558,7 @@ static gint process_pdf_for_ocr(guchar* data, gsize size,
 
 	//pdf-page-tree OCRen
 	rc = sond_ocr_pdf_doc(wctx->ctx, wctx->ocr_pool, doc,
+			(SondOcrMode) wctx->ocr_mode,
 			wctx->log_func, wctx->log_func_data, error);
 	if (rc == -1) {
 		pdf_drop_document(wctx->ctx, doc);
@@ -777,6 +778,7 @@ SondProcessFileCtx* sond_process_file_create_wctx(fz_context* ctx,
 
 	wctx->progress = 0;
 	wctx->cancel = 0;
+	wctx->ocr_mode = SOND_OCR_MODE_CHECK; /* bisheriges Standardverhalten */
 
 	wctx->log_func = log_func;
 	wctx->log_func_data = (gpointer) log_func_data;

@@ -47,6 +47,13 @@ typedef struct _SondProcessFileCtx {
 	gpointer log_func_data;
     SondOcrPool  *ocr_pool;   /* NULL → keine OCR         */
     SondIndexCtx *index_ctx;  /* NULL → keine Indizierung */
+    /* Umgang mit bereits vorhandenem verstecktem Text beim OCRen.
+     * Werte entsprechen SondOcrMode (sond_ocr.h):
+     *   0 = SOND_OCR_MODE_NONE  - kein OCR
+     *   1 = SOND_OCR_MODE_CHECK - prüfen, Seite ggf. überspringen (Default)
+     *   2 = SOND_OCR_MODE_FORCE - versteckten Text löschen, neu OCRen
+     * Als gint gehalten, damit dieser Header ohne sond_ocr.h auskommt. */
+    gint ocr_mode;
 } SondProcessFileCtx;
 
 void sond_process_file(SondProcessFileCtx* wctx,

@@ -924,15 +924,29 @@ void viewer_highlight_at_char_pos(PdfViewer *pv, gint page_nr,
 	if (!viewer_page || page_idx < 0)
 		return;
 
-	/* Warten bis stext_page verfügbar (thread-safe) */
-	viewer_render_wait_for_transfer(viewer_page->pdf_document_page);
-
-	/* stext_page nicht gerendert: nichts tun */
-	if (!(viewer_page->pdf_document_page->thread & 8))
-		return;
-
 	fz_context *ctx = zond_pdf_document_get_ctx(
 			viewer_page->dd->zpdfd_part->zond_pdf_document);
+
+	/* stext_page synchron sicherstellen. Beim erstmaligen Öffnen eines
+	 * Dokuments (frisch erzeugte Seite) ist der asynchrone Render-Task
+	 * oft noch gar nicht gestartet - viewer_render_wait_for_transfer()
+	 * wartet aber nur auf einen BEREITS laufenden Task und kehrt sonst
+	 * sofort zurück, sodass "thread & 8" fälschlich "nicht bereit"
+	 * anzeigt und Markierung+Scroll stillschweigend übersprungen wurden.
+	 * viewer_render_stext_page_fast() (schon für die Textsuche im
+	 * Dokument benutzt, siehe viewer_anzeigen_text_occ) lädt/rendert bei
+	 * Bedarf synchron nach. */
+	{
+		GError *error = NULL;
+		gint rc = 0;
+
+		rc = viewer_render_stext_page_fast(ctx,
+				viewer_page->pdf_document_page, &error);
+		if (rc) {
+			g_clear_error(&error);
+			return;
+		}
+	}
 
 	fz_stext_page *stext = viewer_page->pdf_document_page->stext_page;
 
@@ -1043,6 +1057,10 @@ void viewer_highlight_at_char_pos(PdfViewer *pv, gint page_nr,
 		return;
 	}
 
+	/* Erste Quad des Treffers merken (unbeschnitten), um anschließend zur
+	 * Trefferposition zu scrollen - analog zu viewer_anzeigen_text_occ(). */
+	fz_quad first_quad = g_array_index(chosen_hit, fz_quad, 0);
+
 	/* Quads des gewählten Treffers crop-adjustiert in pv->highlight schreiben */
 	pv->highlight.page[0] = -1;
 	gint n_quads = 0;
@@ -1065,8 +1083,26 @@ void viewer_highlight_at_char_pos(PdfViewer *pv, gint page_nr,
 		g_array_free(g_array_index(hit_data.hits, GArray *, h), TRUE);
 	g_array_free(hit_data.hits, TRUE);
 
-	if (n_quads > 0)
+	if (n_quads > 0) {
+		/* Zur Trefferposition scrollen. Beim erstmaligen Öffnen eines neuen
+		 * Viewers plant viewer_display_document() den Sprung zur Seite
+		 * bereits als Idle-Callback ein (g_idle_add(viewer_springen_idle,
+		 * ...)), noch bevor wir hier ankommen - ein sofortiger Sprung würde
+		 * von diesem später ausgeführten Callback wieder auf den
+		 * Seitenanfang zurückgesetzt. Indem wir denselben Mechanismus
+		 * benutzen, reiht sich unser Sprung als zweiter (später
+		 * hinzugefügter) Idle-Callback dahinter ein und gewinnt. Bei einem
+		 * bereits offenen Viewer (rein synchroner Sprung dort) ist unserer
+		 * ohnehin der einzige/letzte. */
+		SSpringArgs *args = g_new0(SSpringArgs, 1);
+		args->pv = pv;
+		args->pdf_pos.seite = page_idx;
+		args->pdf_pos.index = (gint) first_quad.ul.y;
+		args->delta = 40.0;
+		g_idle_add(viewer_springen_idle, args);
+
 		gtk_widget_queue_draw(pv->layout);
+	}
 }
 
 static gint viewer_text_occ_search_next(PdfViewer *pv, gint index, gint dir) {

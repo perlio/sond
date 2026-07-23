@@ -34,6 +34,23 @@ typedef char gchar;
 typedef int gboolean;
 */
 
+/*
+ * SondOcrMode - Umgang mit bereits vorhandenem "verstecktem" Text (Tr 3,
+ * z.B. von einer früheren OCR oder einem PDF mit Textebene) beim OCRen
+ * einer PDF-Seite.
+ *
+ * Wird pro Aufruf (nicht im SondOcrPool, der nur die Thread-Infrastruktur
+ * hält) übergeben, damit sowohl zond als auch sond_server denselben Pool
+ * für unterschiedliche Läufe mit unterschiedlichem Modus verwenden können.
+ */
+typedef enum {
+	SOND_OCR_MODE_NONE  = 0, /* kein OCR                                    */
+	SOND_OCR_MODE_CHECK = 1, /* vorhandenen versteckten Text prüfen, Seite  *
+	                          * ggf. überspringen (bisheriger Standard)     */
+	SOND_OCR_MODE_FORCE = 2  /* vorhandenen versteckten Text löschen und    *
+	                          * Seite in jedem Fall neu OCRen               */
+} SondOcrMode;
+
 // Thread-Pool Struktur
 typedef struct _SondOcrPool {
     GThreadPool *pool;
@@ -69,11 +86,13 @@ typedef struct {
 	fz_pixmap* pixmap;
 	float scale;
 	gint durchgang;
+	float confidence; //von Tesseract erreichte Konfidenz (TessBaseAPIMeanTextConf) des letzten Durchgangs
 	OcrTransform ocr_transform;
 	GString* content;
 } SondOcrTask;
 
-gint sond_ocr_do_tasks(GPtrArray* arr_tasks, SondOcrPool* pool, GError** error);
+gint sond_ocr_do_tasks(GPtrArray* arr_tasks, SondOcrPool* pool,
+		SondOcrMode mode, GError** error);
 
 void sond_ocr_task_free(SondOcrTask* task);
 
@@ -83,6 +102,7 @@ SondOcrTask* sond_ocr_task_new(fz_context* ctx, pdf_document* doc,
 		GError** error);
 
 gint sond_ocr_pdf_doc(fz_context* ctx, SondOcrPool* ocr_pool, pdf_document* doc,
+		SondOcrMode mode,
 		void (*log_func)(void*, gchar const*, ...), gpointer log_func_data,
 		GError** error);
 

@@ -138,23 +138,110 @@ static gpointer do_index_thread(gpointer data) {
 	return NULL;
 }
 
+/*
+ * ask_ocr_mode:
+ *
+ * Kleiner Dialog, mit dem der Nutzer vor dem (Neu-)Indizieren wählt, wie
+ * mit ggf. bereits vorhandenem "verstecktem" Text in PDF-Filepart umgegangen
+ * werden soll. Rückgabe: SOND_OCR_MODE_* oder -1, wenn der Nutzer
+ * abgebrochen hat.
+ */
+static gint ask_ocr_mode(GtkWindow *parent) {
+	GtkWidget *dialog = NULL;
+	GtkWidget *content_area = NULL;
+	GtkWidget *box = NULL;
+	GtkWidget *radio_none = NULL;
+	GtkWidget *radio_check = NULL;
+	GtkWidget *radio_force = NULL;
+	gint response = 0;
+	gint mode = SOND_OCR_MODE_CHECK;
+
+	dialog = gtk_dialog_new_with_buttons("OCR-Modus",
+			parent, GTK_DIALOG_MODAL,
+			"_Abbrechen", GTK_RESPONSE_CANCEL,
+			"_OK", GTK_RESPONSE_OK,
+			NULL);
+	gtk_dialog_set_default_response(GTK_DIALOG(dialog), GTK_RESPONSE_OK);
+
+	content_area = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
+	box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+	gtk_container_set_border_width(GTK_CONTAINER(box), 12);
+	gtk_container_add(GTK_CONTAINER(content_area), box);
+
+	gtk_box_pack_start(GTK_BOX(box), gtk_label_new(
+			"Umgang mit bereits vorhandenem verstecktem Text in PDFs:"),
+			FALSE, FALSE, 0);
+
+	radio_none = gtk_radio_button_new_with_label(NULL, "Kein OCR");
+	radio_check = gtk_radio_button_new_with_label_from_widget(
+			GTK_RADIO_BUTTON(radio_none),
+			"Auf vorhandenen versteckten Text prüfen (überspringen, falls vorhanden)");
+	radio_force = gtk_radio_button_new_with_label_from_widget(
+			GTK_RADIO_BUTTON(radio_none),
+			"Vorhandenen versteckten Text löschen und Seite neu OCRen");
+
+	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(radio_check), TRUE);
+
+	gtk_box_pack_start(GTK_BOX(box), radio_none, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(box), radio_check, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(box), radio_force, FALSE, FALSE, 0);
+
+	gtk_widget_show_all(dialog);
+	response = gtk_dialog_run(GTK_DIALOG(dialog));
+
+	if (response != GTK_RESPONSE_OK)
+		mode = -1;
+	else if (gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(radio_none)))
+		mode = SOND_OCR_MODE_NONE;
+	else if (gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(radio_force)))
+		mode = SOND_OCR_MODE_FORCE;
+	else
+		mode = SOND_OCR_MODE_CHECK;
+
+	gtk_widget_destroy(dialog);
+
+	return mode;
+}
+
 static void do_index_erstellen(Projekt *zond, gboolean sel_only) {
 	GError *error = NULL;
 	GHashTable *ht_index = NULL;
 	InfoWindow *info_window = NULL;
+	gint ocr_mode = 0;
 
-	if (zond->baum_active == BAUM_FS || !sel_only)
+	ocr_mode = ask_ocr_mode(GTK_WINDOW(zond->app_window));
+	if (ocr_mode == -1)
+		return;
+
+	/* zond->baum_active ist hier bereits KEIN_BAUM: das Öffnen des
+	 * Headerbar-Menüs hat dem zuvor aktiven Treeview den Fokus entzogen
+	 * (cb_treeview_focus_out in app_window.c), bevor dieser Handler läuft.
+	 * zond->baum_prev hält den zuletzt aktiven Baum fest und ist daher
+	 * hier die richtige Referenz (wie schon in export.c gehandhabt). */
+	if (zond->baum_prev == KEIN_BAUM) {
+		display_message(zond->app_window, "Fehler beim Erstellen des Index:\n",
+				"Kein Baum ausgewählt", NULL);
+		return;
+	}
+
+	if (zond->baum_prev == BAUM_FS || !sel_only)
 		ht_index = sond_treeviewfm_get_fileparts(
 				SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), sel_only, &error);
 	else
 		ht_index = zond_treeview_get_selected_fileparts(
-				ZOND_TREEVIEW(zond->treeview[zond->baum_active]), &error);
+				ZOND_TREEVIEW(zond->treeview[zond->baum_prev]), &error);
 	if (!ht_index) {
 		display_message(zond->app_window, "Fehler beim Erstellen des Index:\n",
 				error->message, NULL);
 		g_error_free(error);
 		return;
 	}
+	if (sel_only && g_hash_table_size(ht_index) == 0) {
+		display_message(zond->app_window, "Keine Punkte ausgewählt", NULL);
+		g_hash_table_destroy(ht_index);
+		return;
+	}
+	zond->wctx->ocr_mode = ocr_mode;
 	info_window = info_window_open(zond->app_window, &zond->wctx->cancel,
 			"Index erstellen");
 	zond->wctx->log_func_data = (gpointer) info_window;
@@ -173,6 +260,10 @@ static void do_index_erstellen(Projekt *zond, gboolean sel_only) {
 	while (!g_atomic_int_get(&td->done))
 		gtk_main_iteration_do(FALSE);
 	g_thread_join(thread);
+	/* ht_index hält jetzt (nach dem Ref-Fix in
+	 * sond_tvfm_item_get_fileparts()) eine eigene Ref pro SondFilePart -
+	 * muss also freigegeben werden, sonst Leck. */
+	g_hash_table_destroy(ht_index);
 	g_free(td);
 	info_window_close(info_window);
 }
@@ -191,10 +282,44 @@ static void cb_win_index_erstellen_sel(GSimpleAction *a, GVariant *p, gpointer d
 
 static void cb_win_indexsuche_auswahl(GSimpleAction *a, GVariant *p, gpointer d) {
 	Projekt *zond = (Projekt*) d;
-	if (zond->baum_active == BAUM_FS)
-		zond_indexsuche_activate_with_selection(NULL, NULL, d);
+	GError *error = NULL;
+	GHashTable *ht_fileparts = NULL;
+
+	/* Auswahl im jeweils zuletzt aktiven Baum ermitteln. zond->baum_active
+	 * ist an dieser Stelle bereits KEIN_BAUM, weil das Öffnen des
+	 * Headerbar-Menüs dem Treeview den Fokus entzogen hat (siehe
+	 * cb_treeview_focus_out in app_window.c), bevor dieser Handler läuft -
+	 * zond->baum_prev ist daher hier die richtige Referenz (wie in
+	 * export.c gehandhabt). Vorher wurde hier immer NULL übergeben,
+	 * "Ausgewählte Punkte" filterte also nie und verhielt sich wie
+	 * "Gesamtes Projektverzeichnis". */
+	if (zond->baum_prev == KEIN_BAUM) {
+		display_message(zond->app_window, "Fehler beim Ermitteln der Auswahl:\n",
+				"Kein Baum ausgewählt", NULL);
+		return;
+	}
+
+	if (zond->baum_prev == BAUM_FS)
+		ht_fileparts = sond_treeviewfm_get_fileparts(
+				SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), TRUE, &error);
 	else
-		zond_indexsuche_activate(NULL, d);
+		ht_fileparts = zond_treeview_get_selected_fileparts(
+				ZOND_TREEVIEW(zond->treeview[zond->baum_prev]), &error);
+
+	if (!ht_fileparts) {
+		display_message(zond->app_window, "Fehler beim Ermitteln der Auswahl:\n",
+				error ? error->message : "?", NULL);
+		g_clear_error(&error);
+		return;
+	}
+	if (g_hash_table_size(ht_fileparts) == 0) {
+		display_message(zond->app_window, "Keine Punkte ausgewählt", NULL);
+		g_hash_table_destroy(ht_fileparts);
+		return;
+	}
+
+	zond_indexsuche_activate_with_selection(NULL, ht_fileparts, d);
+	g_hash_table_destroy(ht_fileparts);
 }
 
 /* ============================================================================

@@ -1324,10 +1324,23 @@ static gpointer seafile_repo_worker_thread(gpointer user_data) {
     }
     g_free(db_path);
 
-    SondProcessFileCtx wctx = { ctx,
-    		(void (*)(void*, gchar const*, ...)) ocr_log_add_message,
-			(gpointer) log_entry,
-			ocr_pool, index_ctx };
+    /* Designated initializers, da SondProcessFileCtx zusätzliche Felder
+     * (cancel, progress, ocr_mode) hat, die hier zuvor stillschweigend
+     * falsch belegt wurden (positionelle Initialisierung ohne diese Felder).
+     * ocr_mode: bei force_reprocess wird auch bereits vorhandener
+     * versteckter Text entfernt und die Seite neu geOCRt, sonst der
+     * bisherige "prüfen und ggf. überspringen"-Modus. */
+    SondProcessFileCtx wctx = {
+    		.ctx = ctx,
+    		.cancel = 0,
+    		.progress = 0,
+    		.log_func = (void (*)(void*, gchar const*, ...)) ocr_log_add_message,
+    		.log_func_data = (gpointer) log_entry,
+    		.ocr_pool = ocr_pool,
+    		.index_ctx = index_ctx,
+    		.ocr_mode = job_info->force_reprocess
+    				? SOND_OCR_MODE_FORCE : SOND_OCR_MODE_CHECK,
+    };
 
     /* Liste alle Dateien rekursiv */
     GList *files = NULL;

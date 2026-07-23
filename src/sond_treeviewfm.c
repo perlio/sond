@@ -2645,7 +2645,13 @@ static gint sond_tvfm_item_get_fileparts(SondTVFMItem *stvfm_item,
 		}
 	}
 	else
-		g_hash_table_add(ht, stvfm_item_priv->sond_file_part);
+		/* ht wurde mit g_object_unref als key-destroy-func angelegt
+		 * (sond_treeviewfm_get_fileparts()) - erwartet also eine eigene
+		 * Ref pro Key. sond_file_part gehört sonst dem stvfm_item (dessen
+		 * eigene Ref), ohne g_object_ref() hier würde die Hashtable beim
+		 * Zerstören eine fremde Ref freigeben und damit ein Objekt, das noch
+		 * im Treeview angezeigt wird, vorzeitig finalisieren. */
+		g_hash_table_add(ht, g_object_ref(stvfm_item_priv->sond_file_part));
 
 	return 0;
 }

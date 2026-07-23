@@ -9,14 +9,7 @@
 #include <gtk/gtk.h>
 #include <cairo.h>
 #include <string.h>
-#include <libxml/parser.h>
-#include <libxml/tree.h>
-#include <libxml/xpath.h>
-#include <zip.h>
 #include <time.h>
-
-#include <lexbor/html/html.h>
-#include <string.h>
 #include <unistd.h>
 
 #include "misc.h"
@@ -24,6 +17,7 @@
 #include "sond_fileparts.h"
 #include "sond_file_helper.h"
 #include "sond_gmessage_helper.h"
+#include "sond_text_extract.h"
 
 #define DEFAULT_RENDER_WIDTH 650
 
@@ -890,101 +884,33 @@ static cairo_surface_t* render_text_to_surface(
 
 // === TYPE DETECTION ===
 
-// === TEXT EXTRACTION FROM HTML ===
-
-static void extract_text_recursive(lxb_dom_node_t *node, GString *text) {
-    if (!node) return;
-
-    if (node->type == LXB_DOM_NODE_TYPE_TEXT) {
-        size_t len;
-        const lxb_char_t *content = lxb_dom_node_text_content(node, &len);
-        if (content && len > 0) {
-            g_string_append_len(text, (const char*)content, len);
-        }
-    }
-
-    // Block-Elemente mit Zeilenumbrüchen
-    if (node->type == LXB_DOM_NODE_TYPE_ELEMENT) {
-        lxb_dom_element_t *elem = lxb_dom_interface_element(node);
-        size_t tag_len;
-        const lxb_char_t *tag = lxb_dom_element_qualified_name(elem, &tag_len);
-
-        if (tag_len == 2 && memcmp(tag, "br", 2) == 0) {
-            g_string_append(text, "\n");
-        } else if (tag_len == 1 && memcmp(tag, "p", 1) == 0) {
-            if (text->len > 0 && text->str[text->len-1] != '\n') {
-                g_string_append(text, "\n\n");
-            }
-        } else if ((tag_len == 2 && (memcmp(tag, "h1", 2) == 0 ||
-                                     memcmp(tag, "h2", 2) == 0 ||
-                                     memcmp(tag, "h3", 2) == 0 ||
-                                     memcmp(tag, "h4", 2) == 0 ||
-                                     memcmp(tag, "h5", 2) == 0 ||
-                                     memcmp(tag, "h6", 2) == 0)) ||
-                   (tag_len == 3 && memcmp(tag, "div", 3) == 0) ||
-                   (tag_len == 10 && memcmp(tag, "blockquote", 10) == 0)) {
-            if (text->len > 0 && text->str[text->len-1] != '\n') {
-                g_string_append(text, "\n");
-            }
-        }
-    }
-
-    // Rekursiv durch Kinder
-    lxb_dom_node_t *child = node->first_child;
-    while (child) {
-        extract_text_recursive(child, text);
-        child = child->next;
-    }
-
-    // Nach Block-Elementen Zeilenumbruch
-    if (node->type == LXB_DOM_NODE_TYPE_ELEMENT) {
-        lxb_dom_element_t *elem = lxb_dom_interface_element(node);
-        size_t tag_len;
-        const lxb_char_t *tag = lxb_dom_element_qualified_name(elem, &tag_len);
-
-        if ((tag_len == 1 && memcmp(tag, "p", 1) == 0) ||
-            (tag_len == 2 && (memcmp(tag, "h1", 2) == 0 ||
-                             memcmp(tag, "h2", 2) == 0 ||
-                             memcmp(tag, "h3", 2) == 0)) ||
-            (tag_len == 3 && memcmp(tag, "div", 3) == 0)) {
-            if (text->len > 0 && text->str[text->len-1] != '\n') {
-                g_string_append(text, "\n");
-            }
-        }
-    }
-}
-
 // === HTML RENDERING ===
 
-static RenderedDocument* render_html(const char *html, int width) {
-    lxb_html_document_t *doc = lxb_html_document_create();
-    if (!doc) return NULL;
+/*
+ * Text-Extraktion kommt aus sond_text_extract.c - dieselbe Funktion, die
+ * auch beim Indizieren verwendet wird. Nur so bleiben die char_pos-
+ * Offsets aus der Indexsuche und der hier angezeigte Text konsistent
+ * (siehe sond_text_extract.h).
+ */
+static RenderedDocument* render_html(guchar const *buf, gsize size, int width) {
+    GPtrArray *segs = sond_text_extract_html(buf, size);
+    if (segs->len == 0) { g_ptr_array_unref(segs); return NULL; }
 
-    lxb_status_t status = lxb_html_document_parse(doc,
-        (const lxb_char_t*)html, strlen(html));
-    if (status != LXB_STATUS_OK) {
-        lxb_html_document_destroy(doc);
-        return NULL;
-    }
+    SondTextSegment *seg = g_ptr_array_index(segs, 0);
 
-    GString *text = g_string_new("");
-    lxb_dom_node_t *body = lxb_dom_interface_node(doc->body);
-    if (body)
-        extract_text_recursive(body, text);
-    lxb_html_document_destroy(doc);
-
-    char *text_str = g_string_free(text, FALSE);
     int height = 0;
     cairo_surface_t *surface = render_text_to_surface(
-            text_str, NULL, width, 30000, &height);
-    if (!surface) { g_free(text_str); return NULL; }
+            seg->text, NULL, width, 30000, &height);
+    if (!surface) { g_ptr_array_unref(segs); return NULL; }
 
     RenderedDocument *result = g_new0(RenderedDocument, 1);
     result->surface = surface;
     result->width = width;
     result->height = height;
-    result->searchable_text = text_str;
+    result->searchable_text = g_strdup(seg->text);
     result->type = DOC_TYPE_HTML;
+
+    g_ptr_array_unref(segs);
     return result;
 }
 
@@ -1058,379 +984,78 @@ static RenderedDocument* render_image(GBytes *bytes, int max_width) {
 
 // === ODT/DOCX RENDERING (Generisch) ===
 
-// Verarbeite DOCX-Node (ähnlich zu ODT, aber andere Element-Namen)
-static char* extract_from_zip(const unsigned char *zip_data, size_t zip_len,
-		const char *filename, size_t *out_len) {
-    zip_error_t error;
-    zip_source_t *src;
-    zip_t *archive;
-
-    // ZIP aus Memory öffnen
-    zip_error_init(&error);
-    src = zip_source_buffer_create(zip_data, zip_len, 0, &error);
-    if (!src) {
-    	LOG_WARN("Failed to create zip source: %s", zip_error_strerror(&error));
-        zip_error_fini(&error);
-        return NULL;
-    }
-
-    archive = zip_open_from_source(src, ZIP_RDONLY, &error);
-    if (!archive) {
-    	LOG_WARN("Failed to open zip: %s", zip_error_strerror(&error));
-        zip_source_free(src);
-        zip_error_fini(&error);
-        return NULL;
-    }
-
-    // Datei im Archiv finden
-    struct zip_stat st;
-    zip_stat_init(&st);
-    if (zip_stat(archive, filename, 0, &st) != 0) {
-    	LOG_WARN("File '%s' not found in archive", filename);
-        zip_close(archive);
-        return NULL;
-    }
-
-    // Datei öffnen
-    zip_file_t *file = zip_fopen(archive, filename, 0);
-    if (!file) {
-    	LOG_WARN("Failed to open '%s' in archive", filename);
-        zip_close(archive);
-        return NULL;
-    }
-
-    // Inhalt lesen
-    char *content = g_malloc(st.size + 1);
-    zip_int64_t bytes_read = zip_fread(file, content, st.size);
-
-    if (bytes_read < 0) {
-    	LOG_WARN("Failed to read '%s'", filename);
-        g_free(content);
-        zip_fclose(file);
-        zip_close(archive);
-        return NULL;
-    }
-
-    content[bytes_read] = '\0';
-
-    if (out_len) {
-        *out_len = bytes_read;
-    }
-
-    zip_fclose(file);
-    zip_close(archive);
-
-    return content;
-}
-
-static void process_docx_node(xmlNode *node, GString *text, PangoAttrList **attr_list, int *char_offset) {
-    if (!node) return;
-
-    for (xmlNode *cur = node; cur; cur = cur->next) {
-        if (cur->type == XML_TEXT_NODE) {
-            if (cur->content) {
-                const char *content = (const char*)cur->content;
-                g_string_append(text, content);
-                if (attr_list && char_offset) {
-                    *char_offset += strlen(content);
-                }
-            }
-        } else if (cur->type == XML_ELEMENT_NODE) {
-            const char *name = (const char*)cur->name;
-
-            // DOCX: w:t = Text
-            if (strcmp(name, "t") == 0) {
-                if (cur->children && cur->children->content) {
-                    const char *content = (const char*)cur->children->content;
-                    g_string_append(text, content);
-                    *char_offset += strlen(content);
-                }
-                continue;
-            }
-
-            // DOCX: w:p = Paragraph
-            if (strcmp(name, "p") == 0) {
-                process_docx_node(cur->children, text, attr_list, char_offset);
-                g_string_append(text, "\n\n");
-                *char_offset += 2;
-                continue;
-            }
-
-            // DOCX: w:br = Line Break
-            if (strcmp(name, "br") == 0) {
-                g_string_append(text, "\n");
-                (*char_offset)++;
-                continue;
-            }
-
-            // DOCX: w:tab = Tab
-            if (strcmp(name, "tab") == 0) {
-                g_string_append(text, "    ");
-                *char_offset += 4;
-                continue;
-            }
-
-            // DOCX: w:r = Run (Textlauf mit Formatierung)
-            if (strcmp(name, "r") == 0) {
-                int run_start = *char_offset;
-                gboolean is_bold = FALSE;
-
-                // Prüfe auf Formatierung (w:rPr)
-                for (xmlNode *child = cur->children; child; child = child->next) {
-                    if (child->type == XML_ELEMENT_NODE && strcmp((char*)child->name, "rPr") == 0) {
-                        // Suche nach w:b (bold)
-                        for (xmlNode *prop = child->children; prop; prop = prop->next) {
-                            if (prop->type == XML_ELEMENT_NODE && strcmp((char*)prop->name, "b") == 0) {
-                                is_bold = TRUE;
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                process_docx_node(cur->children, text, attr_list, char_offset);
-
-                if (is_bold && attr_list && *attr_list) {
-                    PangoAttribute *attr = pango_attr_weight_new(PANGO_WEIGHT_BOLD);
-                    attr->start_index = run_start;
-                    attr->end_index = *char_offset;
-                    pango_attr_list_insert(*attr_list, attr);
-                }
-                continue;
-            }
-
-            // Rekursiv
-            process_docx_node(cur->children, text, attr_list, char_offset);
-        }
-    }
-}
-
-static void process_odt_node(xmlNode *node, GString *text, PangoAttrList **attr_list, int *char_offset) {
-    if (!node) return;
-
-    for (xmlNode *cur = node; cur; cur = cur->next) {
-        if (cur->type == XML_TEXT_NODE) {
-            if (cur->content) {
-                const char *content = (const char*)cur->content;
-                g_string_append(text, content);
-                if (attr_list && char_offset) {
-                    *char_offset += strlen(content);
-                }
-            }
-        } else if (cur->type == XML_ELEMENT_NODE) {
-            const char *name = (const char*)cur->name;
-
-            // Überschriften
-            if (strcmp(name, "h") == 0) {
-                g_string_append(text, "\n");
-                (*char_offset)++;
-
-                int heading_start = *char_offset;
-                process_odt_node(cur->children, text, attr_list, char_offset);
-
-                // Überschrift fett und größer machen
-                if (attr_list && *attr_list) {
-                    PangoAttribute *attr;
-
-                    attr = pango_attr_weight_new(PANGO_WEIGHT_BOLD);
-                    attr->start_index = heading_start;
-                    attr->end_index = *char_offset;
-                    pango_attr_list_insert(*attr_list, attr);
-
-                    attr = pango_attr_scale_new(1.5);
-                    attr->start_index = heading_start;
-                    attr->end_index = *char_offset;
-                    pango_attr_list_insert(*attr_list, attr);
-                }
-
-                g_string_append(text, "\n\n");
-                *char_offset += 2;
-                continue;
-            }
-
-            // Absätze
-            if (strcmp(name, "p") == 0) {
-                process_odt_node(cur->children, text, attr_list, char_offset);
-                g_string_append(text, "\n\n");
-                *char_offset += 2;
-                continue;
-            }
-
-            // Listen
-            if (strcmp(name, "list-item") == 0) {
-                g_string_append(text, "• ");
-                *char_offset += 4;
-                process_odt_node(cur->children, text, attr_list, char_offset);
-                continue;
-            }
-
-            // Tabellenzellen
-            if (strcmp(name, "table-cell") == 0) {
-                process_odt_node(cur->children, text, attr_list, char_offset);
-                g_string_append(text, " | ");
-                *char_offset += 3;
-                continue;
-            }
-
-            // Tabellenzeilen
-            if (strcmp(name, "table-row") == 0) {
-                process_odt_node(cur->children, text, attr_list, char_offset);
-                g_string_append(text, "\n");
-                (*char_offset)++;
-                continue;
-            }
-
-            // Fett
-            if (strcmp(name, "span") == 0) {
-                xmlChar *style = xmlGetProp(cur, (xmlChar*)"style-name");
-                int span_start = *char_offset;
-
-                process_odt_node(cur->children, text, attr_list, char_offset);
-
-                // Vereinfacht: Manche Styles sind fett
-                if (style && (strstr((char*)style, "Bold") || strstr((char*)style, "bold"))) {
-                    if (attr_list && *attr_list) {
-                        PangoAttribute *attr = pango_attr_weight_new(PANGO_WEIGHT_BOLD);
-                        attr->start_index = span_start;
-                        attr->end_index = *char_offset;
-                        pango_attr_list_insert(*attr_list, attr);
-                    }
-                }
-
-                if (style) xmlFree(style);
-                continue;
-            }
-
-            // Line Break
-            if (strcmp(name, "line-break") == 0) {
-                g_string_append(text, "\n");
-                (*char_offset)++;
-                continue;
-            }
-
-            // Tab
-            if (strcmp(name, "tab") == 0) {
-                g_string_append(text, "    ");
-                *char_offset += 4;
-                continue;
-            }
-
-            // Rekursiv für andere Elemente
-            process_odt_node(cur->children, text, attr_list, char_offset);
-        }
-    }
-}
-
+/*
+ * Extraktion (ZIP/XML-Parsing) kommt aus sond_text_extract.c - dieselbe
+ * Funktion, die auch beim Indizieren verwendet wird. out_attrs liefert
+ * zusätzlich die Fett/Überschriften-Formatierung für die Anzeige, ohne
+ * dass der Text dafür ein zweites Mal (potenziell abweichend) extrahiert
+ * werden muss.
+ */
 static RenderedDocument* render_office_document(GBytes *bytes,
                                                  int width, DocumentType type) {
     gsize len;
-    const unsigned char *data = g_bytes_get_data(bytes, &len);
+    const guchar *data = g_bytes_get_data(bytes, &len);
 
-    const char *xml_file = (type == DOC_TYPE_ODT)
-            ? "content.xml" : "word/document.xml";
+    PangoAttrList *attr_list = NULL;
+    GPtrArray *segs = (type == DOC_TYPE_ODT)
+            ? sond_text_extract_odt(data, len, &attr_list)
+            : sond_text_extract_docx(data, len, &attr_list);
 
-    size_t xml_len;
-    char *xml_content = extract_from_zip(data, len, xml_file, &xml_len);
-    if (!xml_content) {
-        LOG_WARN("Failed to extract %s from document", xml_file);
+    if (segs->len == 0) {
+        LOG_WARN("render_office_document: Extraktion fehlgeschlagen (%s)",
+                type == DOC_TYPE_ODT ? "ODT" : "DOCX");
+        g_ptr_array_unref(segs);
+        if (attr_list) pango_attr_list_unref(attr_list);
         return NULL;
     }
 
-    xmlDoc *doc = xmlReadMemory(xml_content, xml_len, xml_file, NULL, 0);
-    g_free(xml_content);
-    if (!doc) {
-        LOG_WARN("Failed to parse %s", xml_file);
-        return NULL;
-    }
+    SondTextSegment *seg = g_ptr_array_index(segs, 0);
 
-    xmlNode *root = xmlDocGetRootElement(doc);
-    if (!root) { xmlFreeDoc(doc); return NULL; }
-
-    GString *text = g_string_new("");
-    PangoAttrList *attr_list = pango_attr_list_new();
-    int char_offset = 0;
-
-    if (type == DOC_TYPE_ODT) {
-        for (xmlNode *node = root->children; node; node = node->next) {
-            if (node->type == XML_ELEMENT_NODE &&
-                strcmp((char*)node->name, "body") == 0) {
-                for (xmlNode *child = node->children; child; child = child->next) {
-                    if (child->type == XML_ELEMENT_NODE)
-                        process_odt_node(child->children, text, &attr_list, &char_offset);
-                }
-            }
-        }
-    } else {
-        for (xmlNode *node = root->children; node; node = node->next) {
-            if (node->type == XML_ELEMENT_NODE &&
-                strcmp((char*)node->name, "body") == 0)
-                process_docx_node(node->children, text, &attr_list, &char_offset);
-        }
-    }
-    xmlFreeDoc(doc);
-
-    if (text->len == 0)
-        g_string_append_printf(text, "%s Document\n\n(No readable content found)",
-                              type == DOC_TYPE_ODT ? "ODT" : "DOCX");
-
-    char *text_str = g_string_free(text, FALSE);
     int height = 0;
     cairo_surface_t *surface = render_text_to_surface(
-            text_str, attr_list, width, 30000, &height);
-    pango_attr_list_unref(attr_list);
-    if (!surface) { g_free(text_str); return NULL; }
+            seg->text, attr_list, width, 30000, &height);
+    if (attr_list) pango_attr_list_unref(attr_list);
+    if (!surface) { g_ptr_array_unref(segs); return NULL; }
 
     RenderedDocument *result = g_new0(RenderedDocument, 1);
     result->surface = surface;
     result->width = width;
     result->height = height;
-    result->searchable_text = text_str;
+    result->searchable_text = g_strdup(seg->text);
     result->type = type;
+
+    g_ptr_array_unref(segs);
     return result;
 }
 
 // === PLAIN TEXT RENDERING ===
 
-static RenderedDocument* render_plain_text(const char *data, gsize len, int width) {
-    char *safe_text = NULL;
-    if (g_utf8_validate(data, (gssize)len, NULL)) {
-        safe_text = g_strndup(data, len);
-    } else {
-        GError *conv_err = NULL;
-        safe_text = g_convert(data, (gssize)len,
-                              "UTF-8", "windows-1252",
-                              NULL, NULL, &conv_err);
-        if (!safe_text) {
-            g_clear_error(&conv_err);
-            safe_text = g_utf8_make_valid(data, (gssize)len);
-        }
-    }
-    if (!safe_text) return NULL;
+/*
+ * Extraktion (Encoding-Korrektur + CRLF -> LF) kommt aus
+ * sond_text_extract.c - dieselbe Funktion, die auch beim Indizieren
+ * verwendet wird (siehe sond_text_extract.h). Vorher unterschied sich
+ * diese Normalisierung von der beim Indizieren verwendeten, wodurch die
+ * char_pos-Offsets aus der Indexsuche hier nicht mehr passten.
+ */
+static RenderedDocument* render_plain_text(guchar const *data, gsize len, int width) {
+    GPtrArray *segs = sond_text_extract_plain(data, len);
+    if (segs->len == 0) { g_ptr_array_unref(segs); return NULL; }
 
-    GString *text = g_string_new("");
-    const char *p = safe_text;
-    while (*p) {
-        if (*p == '\r' && *(p+1) == '\n') {
-            g_string_append_c(text, '\n');
-            p += 2;
-        } else {
-            g_string_append_c(text, *p++);
-        }
-    }
-    g_free(safe_text);
+    SondTextSegment *seg = g_ptr_array_index(segs, 0);
 
-    char *text_str = g_string_free(text, FALSE);
     int height = 0;
     cairo_surface_t *surface = render_text_to_surface(
-            text_str, NULL, width, 30000, &height);
-    if (!surface) { g_free(text_str); return NULL; }
+            seg->text, NULL, width, 30000, &height);
+    if (!surface) { g_ptr_array_unref(segs); return NULL; }
 
     RenderedDocument *result = g_new0(RenderedDocument, 1);
     result->surface = surface;
     result->width = width;
     result->height = height;
-    result->searchable_text = text_str;
+    result->searchable_text = g_strdup(seg->text);
     result->type = DOC_TYPE_PLAIN;
+
+    g_ptr_array_unref(segs);
     return result;
 }
 
@@ -1465,285 +1090,45 @@ static RenderedDocument* render_doc(int width) {
  * @param render_width Gewünschte Breite (0 = Standard 650px)
  * @return RenderedDocument oder NULL bei Fehler
  */
-/* ---- EML: Part-Metadaten + Inhalt ---- */
-typedef struct {
-    gchar *mime_type; /* z.B. "text/plain" oder "image/jpeg" */
-    gchar *filename;  /* NULL wenn kein Filename */
-    gchar *text;      /* dekodierter Textinhalt, NULL bei Bild-Parts */
-    guchar *image_data; /* rohe Bilddaten, NULL bei Text-Parts */
-    gsize  image_len;
-} EmlPart;
-
-static void eml_part_free(gpointer p) {
-    EmlPart *ep = (EmlPart*)p;
-    g_free(ep->mime_type);
-    g_free(ep->filename);
-    g_free(ep->text);
-    g_free(ep->image_data);
-    g_free(ep);
-}
-
-static gchar* extract_text_from_part(GMimeObject* part) {
-    if (!GMIME_IS_PART(part))
-        return NULL;
-
-    /* Kein Attachment */
-    GMimeContentDisposition* disp = g_mime_object_get_content_disposition(part);
-    if (disp) {
-        const char* dval = g_mime_content_disposition_get_disposition(disp);
-        if (dval && g_ascii_strcasecmp(dval, "attachment") == 0)
-            return NULL;
-    }
-
-    /* Nur text — Wildcard "*" funktioniert in GMime nicht als Subtype,
-     * daher den MIME-Type-String direkt prüfen */
-    GMimeContentType* ct = g_mime_object_get_content_type(part);
-    if (!ct) return NULL;
-    const char* main_type = g_mime_content_type_get_media_type(ct);
-    if (!main_type || g_ascii_strcasecmp(main_type, "text") != 0)
-        return NULL;
-
-    GMimeDataWrapper* wrapper = g_mime_part_get_content(GMIME_PART(part));
-    if (!wrapper)
-        return NULL;
-
-    GMimeStream* mem_stream = g_mime_stream_mem_new();
-    g_mime_data_wrapper_write_to_stream(wrapper, mem_stream);
-    g_mime_stream_flush(mem_stream);
-
-    GByteArray* ba = g_mime_stream_mem_get_byte_array(GMIME_STREAM_MEM(mem_stream));
-    gchar* text = g_strndup((const gchar*)ba->data, ba->len);
-    g_object_unref(mem_stream);
-
-    /* Encoding-Korrektur */
-    if (text && !g_utf8_validate(text, -1, NULL)) {
-        const char* charset = g_mime_content_type_get_parameter(ct, "charset");
-        if (!charset) charset = "windows-1252";
-        GError* conv_err = NULL;
-        gchar* utf8 = g_convert(text, -1, "UTF-8", charset, NULL, NULL, &conv_err);
-        g_free(text);
-        if (!utf8) {
-            g_clear_error(&conv_err);
-            utf8 = g_strdup("(Encoding-Fehler beim Lesen des Textteils)");
-        }
-        text = utf8;
-    }
-
-    return text;
-}
-
-
-static void collect_text_parts(GMimeObject* obj, GPtrArray* parts) {
-    if (GMIME_IS_MULTIPART(obj)) {
-        int count = g_mime_multipart_get_count(GMIME_MULTIPART(obj));
-        for (int i = 0; i < count; i++)
-            collect_text_parts(
-                g_mime_multipart_get_part(GMIME_MULTIPART(obj), i), parts);
-    } else if (GMIME_IS_MESSAGE_PART(obj)) {
-        GMimeMessage* inner = g_mime_message_part_get_message(
-                GMIME_MESSAGE_PART(obj));
-        if (inner)
-            collect_text_parts(g_mime_message_get_mime_part(inner), parts);
-    } else if (GMIME_IS_PART(obj)) {
-        GMimeContentType* ct = g_mime_object_get_content_type(obj);
-        if (!ct) return;
-        const char* main_type = g_mime_content_type_get_media_type(ct);
-        const char* sub_type  = g_mime_content_type_get_media_subtype(ct);
-        if (!main_type) return;
-
-        /* Attachment überspringen */
-        GMimeContentDisposition* disp = g_mime_object_get_content_disposition(obj);
-        if (disp) {
-            const char* dval = g_mime_content_disposition_get_disposition(disp);
-            if (dval && g_ascii_strcasecmp(dval, "attachment") == 0)
-                return;
-        }
-
-        EmlPart *ep = g_new0(EmlPart, 1);
-        ep->mime_type = (sub_type)
-                ? g_strdup_printf("%s/%s", main_type, sub_type)
-                : g_strdup(main_type);
-
-        /* Dateiname */
-        const char* fn = g_mime_object_get_content_disposition_parameter(obj, "filename");
-        if (!fn) fn = g_mime_content_type_get_parameter(ct, "name");
-        if (fn) ep->filename = g_strdup(fn);
-
-        if (g_ascii_strcasecmp(main_type, "text") == 0) {
-            /* Text-Part */
-            ep->text = extract_text_from_part(obj);
-            if (!ep->text) {
-                eml_part_free(ep);
-                return;
-            }
-        } else if (g_ascii_strcasecmp(main_type, "image") == 0) {
-            /* Bild-Part: rohe Bytes dekodieren */
-            GMimeDataWrapper* wrapper = g_mime_part_get_content(GMIME_PART(obj));
-            if (!wrapper) { eml_part_free(ep); return; }
-            GMimeStream* mem = g_mime_stream_mem_new();
-            g_mime_data_wrapper_write_to_stream(wrapper, mem);
-            g_mime_stream_flush(mem);
-            GByteArray* ba = g_mime_stream_mem_get_byte_array(GMIME_STREAM_MEM(mem));
-            ep->image_data = (guchar*)g_memdup2(ba->data, ba->len);
-            ep->image_len  = ba->len;
-            g_object_unref(mem);
-        } else {
-            /* Unbekannter Typ — ignorieren */
-            eml_part_free(ep);
-            return;
-        }
-
-        g_ptr_array_add(parts, ep);
-    }
-}
-
+/*
+ * Text (Header + Body) kommt komplett aus sond_text_extract.c
+ * (sond_text_extract_gmessage) - dieselbe Funktion, die auch beim
+ * Indizieren verwendet wird. Vorher bauten Indexer und Renderer den
+ * E-Mail-Text getrennt und unterschiedlich formatiert auf (Indexer nur
+ * Header ohne Body, Renderer Header+Body in anderer Reihenfolge), so
+ * dass char_pos-Offsets aus der Indexsuche hier nie an der richtigen
+ * Stelle landeten. Bild-Anhänge betreffen nur die Darstellung und werden
+ * separat über sond_text_extract_gmessage_images() geholt.
+ */
 static RenderedDocument* render_gmessage(GBytes* bytes, int width) {
     if (!bytes) return NULL;
     if (width <= 0) width = DEFAULT_RENDER_WIDTH;
 
     gsize len;
     const guchar* data = g_bytes_get_data(bytes, &len);
-    GMimeMessage* message = gmessage_open(data, len);
-    if (!message) {
-        LOG_WARN("%s\ngmessage_open fehlgeschlagen", __func__);
+
+    GPtrArray *segs = sond_text_extract_gmessage(data, len);
+    if (segs->len == 0) {
+        LOG_WARN("render_gmessage: Extraktion fehlgeschlagen oder leere Nachricht");
+        g_ptr_array_unref(segs);
         return NULL;
     }
+    SondTextSegment *seg = g_ptr_array_index(segs, 0);
+    const gchar *full_text = seg->text;
 
-    /* ---- Header-Block aufbauen ---- */
-    GString* header = g_string_new("");
+    /* ---- Bild-Parts holen und als Pixbufs vorbereiten ---- */
+    GPtrArray* images = sond_text_extract_gmessage_images(data, len);
 
-    InternetAddressList* from_list = g_mime_message_get_from(message);
-    if (from_list) {
-        char* from_str = internet_address_list_to_string(from_list, NULL, TRUE);
-        g_string_append_printf(header, "Von:     %s\n", from_str ? from_str : "");
-        g_free(from_str);
-    }
-
-    InternetAddressList* to_list = g_mime_message_get_to(message);
-    if (to_list) {
-        char* to_str = internet_address_list_to_string(to_list, NULL, TRUE);
-        g_string_append_printf(header, "An:      %s\n", to_str ? to_str : "");
-        g_free(to_str);
-    }
-
-    InternetAddressList* cc_list = g_mime_message_get_cc(message);
-    if (cc_list && internet_address_list_length(cc_list) > 0) {
-        char* cc_str = internet_address_list_to_string(cc_list, NULL, TRUE);
-        g_string_append_printf(header, "CC:      %s\n", cc_str ? cc_str : "");
-        g_free(cc_str);
-    }
-
-    InternetAddressList* bcc_list = g_mime_message_get_bcc(message);
-    if (bcc_list && internet_address_list_length(bcc_list) > 0) {
-        char* bcc_str = internet_address_list_to_string(bcc_list, NULL, TRUE);
-        g_string_append_printf(header, "BCC:     %s\n", bcc_str ? bcc_str : "");
-        g_free(bcc_str);
-    }
-
-    const char* subject = g_mime_message_get_subject(message);
-    g_string_append_printf(header, "Betreff: %s\n", subject ? subject : "");
-
-    GDateTime* date = g_mime_message_get_date(message);
-    if (date) {
-        gchar* date_str = g_date_time_format(date, "%d.%m.%Y %H:%M:%S %Z");
-        g_string_append_printf(header, "Datum:   %s\n", date_str ? date_str : "");
-        g_free(date_str);
-        g_date_time_unref(date);
-    }
-
-    g_string_append(header, "\n"
-            "────────────────────────────────────────────────────────────"
-            "\n\n");
-
-    /* ---- Body: alle inline Text-Parts sammeln ---- */
-    GPtrArray* parts = g_ptr_array_new_with_free_func(eml_part_free);
-    GMimeObject* mime_root = g_mime_message_get_mime_part(message);
-    if (mime_root)
-        collect_text_parts(mime_root, parts);
-
-    /* Body-Text zusammenfügen */
-    GString* body = g_string_new("");
-    for (guint i = 0; i < parts->len; i++) {
-        EmlPart* ep = g_ptr_array_index(parts, i);
-        if (!ep->text) continue;
-
-        if (ep->filename)
-            g_string_append_printf(body, "[%s — %s]\n",
-                    ep->mime_type ? ep->mime_type : "?", ep->filename);
-        else
-            g_string_append_printf(body, "[%s]\n",
-                    ep->mime_type ? ep->mime_type : "?");
-
-        g_string_append(body,
-                "- - - - - - - - - - - - - - - - - - - - - - - - - - - -"
-                "\n\n");
-
-        const gchar* part_text = ep->text;
-
-        gchar* lower_probe = g_ascii_strdown(part_text,
-                strlen(part_text) < 512 ? strlen(part_text) : 512);
-        gboolean is_html = (strstr(lower_probe, "<html") ||
-                            strstr(lower_probe, "<!doctype") ||
-                            strstr(lower_probe, "<body"));
-        g_free(lower_probe);
-
-        if (is_html) {
-            lxb_html_document_t* doc = lxb_html_document_create();
-            if (doc) {
-                lxb_status_t st = lxb_html_document_parse(doc,
-                        (const lxb_char_t*)part_text, strlen(part_text));
-                if (st == LXB_STATUS_OK) {
-                    GString* extracted = g_string_new("");
-                    lxb_dom_node_t* body_node =
-                            lxb_dom_interface_node(doc->body);
-                    if (body_node)
-                        extract_text_recursive(body_node, extracted);
-                    g_string_append(body, extracted->str);
-                    g_string_free(extracted, TRUE);
-                }
-                lxb_html_document_destroy(doc);
-            }
-        } else {
-            const gchar* p = part_text;
-            while (*p) {
-                if (*p == '\r' && *(p+1) == '\n') {
-                    g_string_append_c(body, '\n');
-                    p += 2;
-                } else {
-                    g_string_append_c(body, *p++);
-                }
-            }
-        }
-
-        gboolean has_more_text = FALSE;
-        for (guint j = i + 1; j < parts->len; j++) {
-            EmlPart* ep2 = g_ptr_array_index(parts, j);
-            if (ep2->text) { has_more_text = TRUE; break; }
-        }
-        if (has_more_text)
-            g_string_append(body,
-                    "\n\n════════════════════════════════════════════"
-                    "═══════════════════\n\n");
-    }
-
-    /* ---- Gesamttext = Header + Body ---- */
-    GString* full_text = g_string_new(header->str);
-    g_string_append(full_text, body->str);
-    g_string_free(header, TRUE);
-    g_string_free(body, TRUE);
-
-    /* ---- Bild-Parts verarbeiten ---- */
     GPtrArray* image_surfaces = g_ptr_array_new_with_free_func(
             (GDestroyNotify)cairo_surface_destroy);
     GPtrArray* image_labels = g_ptr_array_new_with_free_func(g_free);
 
-    for (guint i = 0; i < parts->len; i++) {
-        EmlPart* ep = g_ptr_array_index(parts, i);
-        if (!ep->image_data) continue;
+    for (guint i = 0; i < images->len; i++) {
+        SondEmlImage* img = g_ptr_array_index(images, i);
 
         GdkPixbufLoader* loader = gdk_pixbuf_loader_new();
         GError* perr = NULL;
-        gdk_pixbuf_loader_write(loader, ep->image_data, ep->image_len, &perr);
+        gdk_pixbuf_loader_write(loader, img->image_data, img->image_len, &perr);
         g_clear_error(&perr);
         gdk_pixbuf_loader_close(loader, NULL);
 
@@ -1772,21 +1157,22 @@ static RenderedDocument* render_gmessage(GBytes* bytes, int width) {
             cairo_destroy(ic);
             g_ptr_array_add(image_surfaces, img_surf);
             g_ptr_array_add(image_labels,
-                    ep->filename
-                    ? g_strdup_printf("%s — %s", ep->mime_type, ep->filename)
-                    : g_strdup(ep->mime_type));
+                    img->filename
+                    ? g_strdup_printf("%s — %s", img->mime_type, img->filename)
+                    : g_strdup(img->mime_type));
         } else {
             LOG_WARN("%s\nBild-Part konnte nicht geladen werden: %s",
-                    __func__, ep->mime_type ? ep->mime_type : "?");
+                    __func__, img->mime_type ? img->mime_type : "?");
         }
         g_object_unref(loader);
     }
-    g_ptr_array_unref(parts);
+    g_ptr_array_unref(images);
 
-    /* ---- PangoAttrList für Header ---- */
-    const char* sep_pos = strstr(full_text->str, "\n\n");
+    /* ---- PangoAttrList für Header (fett + Monospace bis zur ersten
+     * Leerzeile) ---- */
+    const char* sep_pos = strstr(full_text, "\n\n");
     guint header_end = sep_pos
-            ? (guint)(sep_pos - full_text->str)
+            ? (guint)(sep_pos - full_text)
             : 0;
 
     PangoAttrList* attrs = pango_attr_list_new();
@@ -1803,16 +1189,14 @@ static RenderedDocument* render_gmessage(GBytes* bytes, int width) {
     }
 
     /* ---- Text rendern ---- */
-    char *text_str = g_string_free(full_text, FALSE);
     int height = 0;
     cairo_surface_t* surface = render_text_to_surface(
-            text_str, attrs, width, 30000, &height);
+            full_text, attrs, width, 30000, &height);
     pango_attr_list_unref(attrs);
     if (!surface) {
-        g_free(text_str);
+        g_ptr_array_unref(segs);
         g_ptr_array_unref(image_surfaces);
         g_ptr_array_unref(image_labels);
-        g_object_unref(message);
         return NULL;
     }
 
@@ -1895,10 +1279,10 @@ static RenderedDocument* render_gmessage(GBytes* bytes, int width) {
     result->surface = surface;
     result->width   = width;
     result->height  = height;
-    result->searchable_text = text_str;
+    result->searchable_text = g_strdup(full_text);
     result->type = DOC_TYPE_EML;
 
-    g_object_unref(message);
+    g_ptr_array_unref(segs);
     return result;
 }
 
@@ -1953,68 +1337,11 @@ static RenderedDocument* render_document_from_bytes(GBytes *bytes, int render_wi
     switch (type) {
     case DOC_TYPE_HTML: {
         gsize len;
-        const char *data = g_bytes_get_data(bytes, &len);
-
-        /* Sicherstellen, dass der HTML-String in UTF-8 vorliegt.
-         * Strategie:
-         *  1. Ist der Puffer bereits gültiges UTF-8 → direkt verwenden.
-         *  2. Andernfalls: charset-Angabe im <meta>-Tag suchen und mit
-         *     g_convert umwandeln. Wird nichts gefunden, nehmen wir
-         *     Windows-1252 als Fallback (deckt Latin-1 / CP1252 ab). */
-        char *html = NULL;
-
-        if (g_utf8_validate(data, (gssize)len, NULL)) {
-            /* Bereits UTF-8 – einfach kopieren */
-            html = g_strndup(data, len);
-        } else {
-            /* Encoding aus dem HTML ermitteln */
-            const char *detected_charset = NULL;
-            gchar *probe = g_strndup(data, len < 1024 ? len : 1024);
-            gchar *probe_lower = g_ascii_strdown(probe, -1);
-            g_free(probe);
-
-            /* Suche nach charset=... in den ersten 1024 Bytes */
-            const gchar *cs_pos = strstr(probe_lower, "charset=");
-            if (cs_pos) {
-                cs_pos += strlen("charset=");
-                /* Anführungszeichen oder Leerzeichen überspringen */
-                while (*cs_pos == '"' || *cs_pos == '\'' || *cs_pos == ' ')
-                    cs_pos++;
-                /* Charset-Name bis zum nächsten Trenner lesen */
-                gchar charset_buf[64] = {0};
-                gsize ci = 0;
-                while (ci < sizeof(charset_buf) - 1 &&
-                       *cs_pos && *cs_pos != '"' && *cs_pos != '\'' &&
-                       *cs_pos != ' ' && *cs_pos != ';' && *cs_pos != '>')
-                    charset_buf[ci++] = *cs_pos++;
-                if (ci > 0)
-                    detected_charset = g_strdup(charset_buf);
-            }
-            g_free(probe_lower);
-
-            const char *from_charset = detected_charset
-                                       ? detected_charset
-                                       : "windows-1252";
-
-            GError *conv_err = NULL;
-            gsize  bytes_written = 0;
-            html = g_convert(data, (gssize)len,
-                             "UTF-8", from_charset,
-                             NULL, &bytes_written, &conv_err);
-            if (!html) {
-                /* Letzter Ausweg: ungültige Bytes durch U+FFFD ersetzen */
-                LOG_WARN("%s\ng_convert von '%s' nach UTF-8 fehlgeschlagen: %s – "
-                         "ersetze ungültige Bytes",
-                         __func__, from_charset,
-                         conv_err ? conv_err->message : "?");
-                g_clear_error(&conv_err);
-                html = g_utf8_make_valid(data, (gssize)len);
-            }
-            g_free((gpointer)detected_charset);
-        }
-
-        result = render_html(html, render_width);
-        g_free(html);
+        const guchar *data = g_bytes_get_data(bytes, &len);
+        /* Encoding-Erkennung (UTF-8 / <meta charset> / windows-1252-
+         * Fallback) passiert in sond_text_extract_html() - identisch
+         * zur Indizierung. */
+        result = render_html(data, len, render_width);
         break;
     }
     case DOC_TYPE_IMAGE:
@@ -2034,7 +1361,7 @@ static RenderedDocument* render_document_from_bytes(GBytes *bytes, int render_wi
         case DOC_TYPE_UNKNOWN:
         default: {
             gsize len;
-            const char *data = g_bytes_get_data(bytes, &len);
+            const guchar *data = g_bytes_get_data(bytes, &len);
             result = render_plain_text(data, len, render_width);
             break;
         }
@@ -2077,9 +1404,15 @@ const char* document_type_string(DocumentType type) {
  * char_pos_in_doc  – Byte-Offset im extrahierten searchable_text
  *                    (wie er vom Index gespeichert wird).
  *                    -1  → einfach zum ersten Vorkommen von term springen.
+ *
+ * WICHTIG: sfp muss durchgereicht werden, sonst kann
+ * render_document_from_bytes() den Dokumenttyp nicht bestimmen und
+ * rendert JEDES Dokument (auch HTML/DOCX/ODT/E-Mail) als Rohtext - dann
+ * stimmt weder die Darstellung noch der char_pos-Offset (das war vorher
+ * der Fall: sfp wurde hier fest auf NULL gesetzt).
  */
 static RenderedDocument *
-render_document_with_highlight(GBytes *bytes, int render_width,
+render_document_with_highlight(GBytes *bytes, SondFilePart *sfp, int render_width,
         const char *term, int char_pos_in_doc,
         int *out_highlight_y)
 {
@@ -2087,7 +1420,7 @@ render_document_with_highlight(GBytes *bytes, int render_width,
     if (render_width <= 0) render_width = DEFAULT_RENDER_WIDTH;
 
     /* Erst normal rendern um den searchable_text zu bekommen */
-    RenderedDocument *rd = render_document_from_bytes(bytes, render_width, NULL);
+    RenderedDocument *rd = render_document_from_bytes(bytes, render_width, sfp);
     if (!rd) return NULL;
     if (!rd->searchable_text) return rd; /* kein Text → unverändert zurück */
 
@@ -2216,7 +1549,7 @@ gint sond_render_with_term(GBytes *input, SondFilePart *sfp,
     RenderedDocument *rd;
 
     if (term && *term)
-        rd = render_document_with_highlight(input, 0, term,
+        rd = render_document_with_highlight(input, sfp, 0, term,
                 char_pos_in_doc, &highlight_y);
     else
         rd = render_document_from_bytes(input, 0, sfp);

@@ -19,14 +19,12 @@
 #include "sond_index.h"
 
 #include <glib.h>
+#include <gio/gio.h>
 #include <sqlite3.h>
 #include <mupdf/fitz.h>
-#include <mupdf/pdf.h>
-#include <gmime/gmime.h>
 #include <string.h>
-#include <lexbor/html/html.h>
 
-#include "sond_gmessage_helper.h"
+#include "sond_text_extract.h"
 
 #ifdef SOND_WITH_EMBEDDINGS
 #include <llama.h>
@@ -370,6 +368,16 @@ static void sond_chunk_free(SondChunk *c) {
     g_free(c);
 }
 
+/* Falls sich pos mitten in einer Mehrbyte-UTF-8-Sequenz befindet
+ * (Fortsetzungsbyte 10xxxxxx), auf den Anfang dieses Zeichens
+ * zurückspringen. So wird nie mitten in einem UTF-8-Zeichen geschnitten
+ * (relevant u.a. für Umlaute/ß, die als Mehrbyte-Sequenzen kodiert sind). */
+static gint utf8_align_to_char_start(gchar const *text, gint pos) {
+    while (pos > 0 && ((guchar) text[pos] & 0xC0) == 0x80)
+        pos--;
+    return pos;
+}
+
 static GPtrArray* text_to_chunks(gchar const *text, gint chunk_size, gint chunk_overlap) {
     GPtrArray *chunks = g_ptr_array_new_with_free_func((GDestroyNotify)sond_chunk_free);
     gint len  = (gint)strlen(text);
@@ -377,13 +385,33 @@ static GPtrArray* text_to_chunks(gchar const *text, gint chunk_size, gint chunk_
 
     if (step <= 0) step = chunk_size;
 
-    for (gint pos = 0; pos < len; pos += step) {
-        gint end = MIN(pos + chunk_size, len);
+    for (gint pos = 0; pos < len; ) {
+        gint end = utf8_align_to_char_start(text, MIN(pos + chunk_size, len));
+
+        /* utf8_align_to_char_start kann end bis auf pos zurückwerfen, wenn
+         * bereits das erste Zeichen ab pos länger als chunk_size (in Byte)
+         * ist. Dann trotzdem mindestens dieses eine Zeichen vollständig
+         * aufnehmen, statt einen leeren Chunk zu erzeugen. */
+        if (end <= pos) {
+            end = pos + 1;
+            while (end < len && ((guchar) text[end] & 0xC0) == 0x80)
+                end++;
+        }
+
         SondChunk *c = g_new0(SondChunk, 1);
         c->text   = g_strndup(text + pos, end - pos);
         c->offset = pos;
         g_ptr_array_add(chunks, c);
+
         if (end == len) break;
+
+        {
+            gint next_pos = utf8_align_to_char_start(text, pos + step);
+            /* Sicherheitsnetz: next_pos muss echt vorwärts gehen, sonst
+             * Endlosschleife bei sehr kleinem step relativ zu Mehrbyte-
+             * Zeichen. */
+            pos = (next_pos > pos) ? next_pos : end;
+        }
     }
 
     return chunks;
@@ -519,254 +547,13 @@ static gboolean db_insert_chunk(SondIndexCtx *sond_index_ctx,
 }
 
 /* =======================================================================
- * Textsegment
- * ======================================================================= */
-
-typedef struct {
-    gchar *text;      /* Textinhalt des Segments                       */
-    gint   page_nr;   /* PDF: Seitennummer (0-basiert); sonst -1        */
-    gint   char_pos;  /* Zeichenposition im Gesamttext der Datei        */
-} SondTextSegment;
-
-static SondTextSegment* sond_text_segment_new(gchar *text, gint page_nr, gint char_pos) {
-    SondTextSegment *seg = g_new0(SondTextSegment, 1);
-    seg->text     = text;
-    seg->page_nr  = page_nr;
-    seg->char_pos = char_pos;
-    return seg;
-}
-
-static void sond_text_segment_free(SondTextSegment *seg) {
-    if (!seg) return;
-    g_free(seg->text);
-    g_free(seg);
-}
-
-/* =======================================================================
  * Textextraktion
+ *
+ * Die eigentliche Extraktion (PDF/HTML/E-Mail/Text/DOCX/ODT) lebt in
+ * sond_text_extract.c - und zwar für Indizierung UND Renderer identisch,
+ * damit die hier berechneten char_pos-Offsets im Renderer exakt an der
+ * richtigen Stelle landen (siehe sond_text_extract.h für Details).
  * ======================================================================= */
-
-/* PDF: ein Segment pro Seite */
-static GPtrArray* extract_segments_from_pdf(SondIndexCtx* sond_index_ctx, fz_context* ctx,
-		guchar const *buf, gsize size, void (*log_func)(gpointer, gchar const*, ...),
-		gpointer log_func_data) {
-    GPtrArray  *segs = g_ptr_array_new_with_free_func(
-            (GDestroyNotify)sond_text_segment_free);
-
-    pdf_document *doc = NULL;
-    gint char_pos_total = 0;
-
-    fz_try(ctx) {
-        fz_stream *stream = fz_open_memory(ctx, (guchar*)buf, size);
-        doc = pdf_open_document_with_stream(ctx, stream);
-        fz_drop_stream(ctx, stream);
-
-        gint n_pages = pdf_count_pages(ctx, doc);
-        for (gint i = 0; i < n_pages; i++) {
-            fz_stext_options opts = { 0 };
-            fz_stext_page *stext  = fz_new_stext_page_from_page_number(
-                    ctx, (fz_document*) doc, i, &opts);
-
-            /* Denselben Flat-Text wie fz_search_stext_page intern verwendet:
-             * FZ_TEXT_FLATTEN_ALL → alle Lücken als einzelnes Leerzeichen,
-             * keine Zeilenumbrüche. map wird nicht benötigt (NULL). */
-            fz_buffer *buf = fz_new_buffer_from_flattened_stext_page(
-                    ctx, stext, FZ_TEXT_FLATTEN_ALL, NULL);
-            fz_drop_stext_page(ctx, stext);
-
-            gsize   len      = 0;
-            guchar *data     = NULL;
-            fz_buffer_extract(ctx, buf, &data); /* transfer ownership */
-            fz_drop_buffer(ctx, buf);
-            len = (data) ? strlen((gchar*)data) : 0;
-
-            if (len > 0) {
-                gint page_char_pos = char_pos_total;
-                char_pos_total += (gint)len;
-                g_ptr_array_add(segs,
-                        sond_text_segment_new(
-                                (gchar*) data,
-                                i, page_char_pos));
-            } else {
-                g_free(data);
-            }
-        }
-    }
-    fz_always(ctx) {
-        if (doc) pdf_drop_document(ctx, doc);
-    }
-    fz_catch(ctx) {
-        if (log_func)
-            log_func(log_func_data,
-                    "extract_segments_from_pdf: %s", fz_caught_message(ctx));
-    }
-
-    return segs;
-}
-
-/* E-Mail-Header: ein einzelnes Segment, char_pos=0, page_nr=-1 */
-static GPtrArray* extract_segments_from_gmessage(guchar const *buf, gsize size) {
-    GPtrArray    *segs = g_ptr_array_new_with_free_func(
-            (GDestroyNotify)sond_text_segment_free);
-    GString      *text = g_string_new(NULL);
-
-    GMimeMessage *message = gmessage_open(buf, size);
-    if (!message) {
-        g_string_free(text, TRUE);
-        return segs;
-    }
-
-    InternetAddressList *from = g_mime_message_get_addresses(message,
-            GMIME_ADDRESS_TYPE_FROM);
-    if (from) {
-        gchar *s = internet_address_list_to_string(from, NULL, FALSE);
-        if (s) { g_string_append(text, "Von: "); g_string_append(text, s); g_string_append_c(text, '\n'); }
-        g_free(s);
-    }
-
-    const gchar *subject = g_mime_message_get_subject(message);
-    if (subject) { g_string_append(text, "Betreff: "); g_string_append(text, subject); g_string_append_c(text, '\n'); }
-
-    GDateTime *date = g_mime_message_get_date(message);
-    if (date) {
-        gchar *ds = g_date_time_format_iso8601(date);
-        g_string_append(text, "Datum: ");
-        g_string_append(text, ds);
-        g_string_append_c(text, '\n');
-        g_free(ds);
-    }
-
-    InternetAddressList *to = g_mime_message_get_addresses(message,
-            GMIME_ADDRESS_TYPE_TO);
-    if (to) {
-        gchar *s = internet_address_list_to_string(to, NULL, FALSE);
-        if (s) { g_string_append(text, "An: "); g_string_append(text, s); g_string_append_c(text, '\n'); }
-        g_free(s);
-    }
-
-    g_object_unref(message);
-
-    if (text->len > 0)
-        g_ptr_array_add(segs, sond_text_segment_new(
-                g_string_free(text, FALSE), -1, 0));
-    else
-        g_string_free(text, TRUE);
-
-    return segs;
-}
-
-/* HTML: sichtbaren Text mit lexbor extrahieren (identisch zu extract_text_recursive im Renderer) */
-static void extract_text_from_html_node(lxb_dom_node_t *node, GString *text) {
-    if (!node) return;
-
-    if (node->type == LXB_DOM_NODE_TYPE_TEXT) {
-        size_t len;
-        const lxb_char_t *content = lxb_dom_node_text_content(node, &len);
-        if (content && len > 0)
-            g_string_append_len(text, (const char*)content, len);
-    }
-
-    if (node->type == LXB_DOM_NODE_TYPE_ELEMENT) {
-        lxb_dom_element_t *elem = lxb_dom_interface_element(node);
-        size_t tag_len;
-        const lxb_char_t *tag = lxb_dom_element_qualified_name(elem, &tag_len);
-
-        if (tag_len == 2 && memcmp(tag, "br", 2) == 0) {
-            g_string_append(text, "\n");
-        } else if (tag_len == 1 && memcmp(tag, "p", 1) == 0) {
-            if (text->len > 0 && text->str[text->len-1] != '\n')
-                g_string_append(text, "\n\n");
-        } else if ((tag_len == 2 && (memcmp(tag, "h1", 2) == 0 ||
-                                     memcmp(tag, "h2", 2) == 0 ||
-                                     memcmp(tag, "h3", 2) == 0 ||
-                                     memcmp(tag, "h4", 2) == 0 ||
-                                     memcmp(tag, "h5", 2) == 0 ||
-                                     memcmp(tag, "h6", 2) == 0)) ||
-                   (tag_len == 3 && memcmp(tag, "div", 3) == 0) ||
-                   (tag_len == 10 && memcmp(tag, "blockquote", 10) == 0)) {
-            if (text->len > 0 && text->str[text->len-1] != '\n')
-                g_string_append(text, "\n");
-        }
-    }
-
-    lxb_dom_node_t *child = node->first_child;
-    while (child) {
-        extract_text_from_html_node(child, text);
-        child = child->next;
-    }
-
-    if (node->type == LXB_DOM_NODE_TYPE_ELEMENT) {
-        lxb_dom_element_t *elem = lxb_dom_interface_element(node);
-        size_t tag_len;
-        const lxb_char_t *tag = lxb_dom_element_qualified_name(elem, &tag_len);
-        if ((tag_len == 1 && memcmp(tag, "p", 1) == 0) ||
-            (tag_len == 2 && (memcmp(tag, "h1", 2) == 0 ||
-                              memcmp(tag, "h2", 2) == 0 ||
-                              memcmp(tag, "h3", 2) == 0)) ||
-            (tag_len == 3 && memcmp(tag, "div", 3) == 0)) {
-            if (text->len > 0 && text->str[text->len-1] != '\n')
-                g_string_append(text, "\n");
-        }
-    }
-}
-
-static GPtrArray* extract_segments_from_html(guchar const *buf, gsize size) {
-    GPtrArray *segs = g_ptr_array_new_with_free_func(
-            (GDestroyNotify)sond_text_segment_free);
-    if (!buf || size == 0) return segs;
-
-    /* Encoding-Konvertierung nach UTF-8 (identisch zum Renderer) */
-    char *html = NULL;
-    if (g_utf8_validate((const char*)buf, (gssize)size, NULL)) {
-        html = g_strndup((const char*)buf, size);
-    } else {
-        GError *conv_err = NULL;
-        html = g_convert((const char*)buf, (gssize)size,
-                         "UTF-8", "windows-1252",
-                         NULL, NULL, &conv_err);
-        if (!html) {
-            g_clear_error(&conv_err);
-            html = g_utf8_make_valid((const char*)buf, (gssize)size);
-        }
-    }
-    if (!html) return segs;
-
-    lxb_html_document_t *doc = lxb_html_document_create();
-    if (!doc) { g_free(html); return segs; }
-
-    lxb_status_t status = lxb_html_document_parse(
-            doc, (const lxb_char_t*)html, strlen(html));
-    g_free(html);
-
-    if (status != LXB_STATUS_OK) {
-        lxb_html_document_destroy(doc);
-        return segs;
-    }
-
-    GString *text = g_string_new("");
-    lxb_dom_node_t *body = lxb_dom_interface_node(doc->body);
-    if (body)
-        extract_text_from_html_node(body, text);
-    lxb_html_document_destroy(doc);
-
-    if (text->len > 0)
-        g_ptr_array_add(segs, sond_text_segment_new(
-                g_string_free(text, FALSE), -1, 0));
-    else
-        g_string_free(text, TRUE);
-
-    return segs;
-}
-
-/* Rohtext: ein Segment, char_pos=0, page_nr=-1 */
-static GPtrArray* extract_segments_from_text(guchar const *buf, gsize size) {
-    GPtrArray *segs = g_ptr_array_new_with_free_func(
-            (GDestroyNotify)sond_text_segment_free);
-    if (size > 0)
-        g_ptr_array_add(segs, sond_text_segment_new(
-                g_strndup((gchar const*)buf, size), -1, 0));
-    return segs;
-}
 
 /* =======================================================================
  * Volltextsuche
@@ -1082,14 +869,19 @@ void sond_index(fz_context* ctx,
     GPtrArray *segs = NULL;
 
     if (!g_strcmp0(mime_type, "application/pdf"))
-        segs = extract_segments_from_pdf(sond_index_ctx, ctx, buf, size,
-        		log_func, log_func_data);
+        segs = sond_text_extract_pdf(ctx, buf, size,
+        		(SondLogFunc) log_func, log_func_data);
     else if (!g_strcmp0(mime_type, "message/rfc822"))
-        segs = extract_segments_from_gmessage(buf, size);
+        segs = sond_text_extract_gmessage(buf, size);
     else if (!g_strcmp0(mime_type, "text/html"))
-        segs = extract_segments_from_html(buf, size);
+        segs = sond_text_extract_html(buf, size);
+    else if (!g_strcmp0(mime_type,
+    		"application/vnd.openxmlformats-officedocument.wordprocessingml.document"))
+        segs = sond_text_extract_docx(buf, size, NULL);
+    else if (!g_strcmp0(mime_type, "application/vnd.oasis.opendocument.text"))
+        segs = sond_text_extract_odt(buf, size, NULL);
     else if (g_str_has_prefix(mime_type, "text/"))
-        segs = extract_segments_from_text(buf, size);
+        segs = sond_text_extract_plain(buf, size);
     else
         return; /* MIME-Typ nicht indizierbar */
 

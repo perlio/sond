@@ -27,6 +27,12 @@
 #include "sond_log_and_error.h"
 #include "sond_pdf_helper.h"
 
+/* Auflösungen (DPI/72, s. TessBaseAPISetSourceResolution) der bis zu drei
+ * OCR-Durchgänge - Index = task->durchgang. Von sond_ocr_do_tasks() (Auswahl
+ * der Auflösung fürs Rendern) und ocr_pixmap() (Log-Meldung, mit welcher
+ * Auflösung der nächste Durchgang erfolgt) gemeinsam genutzt. */
+static const float ocr_scales[] = {4.3, 6.4, 8.6};
+
 static gint add_ocr_layer_to_page(fz_context *ctx,
 		GString* content, pdf_page *page, pdf_obj* font_ref,
 		OcrTransform* ocr_transform, GError** error) {
@@ -212,9 +218,10 @@ static gint sond_ocr_osd(SondOcrTask* task, SondOcrPool* pool, GError** error) {
 	return 0;
 }
 
-gint sond_ocr_do_tasks(GPtrArray* arr_tasks, SondOcrPool* pool, GError** error) {
+gint sond_ocr_do_tasks(GPtrArray* arr_tasks, SondOcrPool* pool,
+		SondOcrMode mode, GError** error) {
 	gint pages_done = 0;
-	float scale[] = {4.3, 6.4, 8.6};
+	gboolean cancelled = FALSE;
 
 	while (pages_done < arr_tasks->len) {
 		for (gint i = 0; i < arr_tasks->len; i++) {
@@ -224,11 +231,24 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, SondOcrPool* pool, GError** error) 
 			gint status = 0;
 
 			if (g_atomic_int_get(pool->cancel_all))
-				return 1;
+				cancelled = TRUE;
 
 			task = g_ptr_array_index(arr_tasks, i);
 
 			status = g_atomic_int_get(&task->status);
+
+			/* Bei Abbruch keine neuen Tasks mehr starten - aber bereits im
+			 * Thread-Pool laufende (status 1) müssen hier fertig abgewartet
+			 * werden. arr_tasks wird nach Rückkehr von hier freigegeben
+			 * (sond_ocr_task_free droppt task->page) und das PDF-Dokument
+			 * geschlossen; würde das passieren, während ein Worker-Thread
+			 * noch mit genau diesem task arbeitet, wäre das ein
+			 * Use-after-free im Hintergrund-Thread. */
+			if (cancelled && status == 0) {
+				pages_done++;
+				g_atomic_int_set(&task->status, 4);
+				continue;
+			}
 
 			if (status == 0) {
 				rc = pdf_page_has_hidden_text(task->ctx, task->page, &hidden, error);
@@ -244,15 +264,51 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, SondOcrPool* pool, GError** error) 
 				}
 
 				if (hidden) {
-					if (task->log_func)
-						task->log_func(task->log_func_data,
-								"Seite %u enthält versteckten Text - OCR übersprungen", i);
-					pages_done++;
-					g_atomic_int_set(&task->status, 4);
-					continue;
+					if (mode == SOND_OCR_MODE_FORCE) {
+						fz_buffer* buf_filtered = pdf_text_filter_page(
+								task->ctx, task->page, 2 /* verstecken Text entfernen */,
+								error);
+						if (!buf_filtered) {
+							if (task->log_func)
+								task->log_func(task->log_func_data,
+										"Seite %u: versteckter Text konnte nicht entfernt werden: %s",
+										i, (*error)->message);
+							g_clear_error(error);
+							pages_done++;
+							g_atomic_int_set(&task->status, 4);
+							continue;
+						}
+
+						rc = pdf_set_content_stream(task->ctx, task->page,
+								buf_filtered, error);
+						fz_drop_buffer(task->ctx, buf_filtered);
+						if (rc) {
+							if (task->log_func)
+								task->log_func(task->log_func_data,
+										"Seite %u: Content-Stream konnte nicht ersetzt werden: %s",
+										i, (*error)->message);
+							g_clear_error(error);
+							pages_done++;
+							g_atomic_int_set(&task->status, 4);
+							continue;
+						}
+
+						if (task->log_func)
+							task->log_func(task->log_func_data,
+									"Seite %u: versteckter Text entfernt - wird neu OCRt", i);
+						/* weiter unten: Seite normal rendern und OCRen */
+					}
+					else {
+						if (task->log_func)
+							task->log_func(task->log_func_data,
+									"Seite %u enthält versteckten Text - OCR übersprungen", i);
+						pages_done++;
+						g_atomic_int_set(&task->status, 4);
+						continue;
+					}
 				}
 
-				task->scale = scale[task->durchgang];
+				task->scale = ocr_scales[task->durchgang];
 				task->pixmap = pdf_render_pixmap(task->ctx, task->page, task->scale, error);
 				if (!task->pixmap) {
 					if (task->log_func)
@@ -313,6 +369,11 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, SondOcrPool* pool, GError** error) 
 								i, (*error)->message);
 					g_clear_error(error);
 				}
+				else if (task->log_func)
+					task->log_func(task->log_func_data,
+							"Seite %u: OCR abgeschlossen, Konfidenz %.1f%% (%d/%d erledigt)",
+							task->page->super.number, task->confidence,
+							pages_done + 1, arr_tasks->len);
 
 				pages_done++;
 				g_atomic_int_set(&task->status, 4);
@@ -328,7 +389,7 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, SondOcrPool* pool, GError** error) 
 		}
 	}
 
-	return 0;
+	return cancelled ? 1 : 0;
 }
 
 void sond_ocr_task_free(SondOcrTask* task) {
@@ -370,11 +431,15 @@ SondOcrTask* sond_ocr_task_new(fz_context* ctx,
 }
 
 gint sond_ocr_pdf_doc(fz_context* ctx, SondOcrPool* ocr_pool, pdf_document* doc,
+		SondOcrMode mode,
 		void(*log_func)(void*, gchar const*, ...), gpointer log_func_data,
 		GError** error) {
 	gint num_pages = 0;
 	pdf_obj* font_ref = NULL;
 	gint rc = 0;
+
+	if (mode == SOND_OCR_MODE_NONE)
+		return 0;
 
 	fz_try(ctx)
 		num_pages = pdf_count_pages(ctx, doc);
@@ -412,7 +477,7 @@ gint sond_ocr_pdf_doc(fz_context* ctx, SondOcrPool* ocr_pool, pdf_document* doc,
 
 	pdf_drop_obj(ctx, font_ref);
 
-	rc = sond_ocr_do_tasks(arr_tasks, ocr_pool, error);
+	rc = sond_ocr_do_tasks(arr_tasks, ocr_pool, mode, error);
 	g_ptr_array_unref(arr_tasks);
 	if (rc == -1)
 		return -1;
@@ -722,6 +787,7 @@ static gint ocr_pixmap(SondOcrTask* task, SondOcrPool* pool,
 	}
 
 	float conf = TessBaseAPIMeanTextConf(thread_data->api);
+	task->confidence = conf;
 	if (conf >= 80 || task->durchgang == 2)
 		return 0;
 	else if (conf < 20) {
@@ -736,8 +802,9 @@ static gint ocr_pixmap(SondOcrTask* task, SondOcrPool* pool,
 	task->durchgang++;
 	if (task->log_func)
 		task->log_func(task->log_func_data,
-			"Seite %u: OCR-Konfidenz %f%%, neuer Versuch mit höherer Auflösung",
-			task->page->super.number, conf);
+			"Seite %u: OCR-Konfidenz %f%%, neuer Versuch mit höherer Auflösung (%.1f statt %.1f)",
+			task->page->super.number, conf,
+			ocr_scales[task->durchgang], ocr_scales[task->durchgang - 1]);
 
 	return 1;
 }

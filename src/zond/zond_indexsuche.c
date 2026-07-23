@@ -119,7 +119,7 @@ zond_indexsuche_row_activated(GtkTreeView *treeview, GtkTreePath *tree_path,
                 }
 
                 rc = zond_treeview_oeffnen_internal_viewer(zond,
-                        NULL, &pos_pdf, &error);
+                        dd, &pos_pdf, &error);
                 if (rc) {
                     display_message(zond->app_window,
                             "Fehler beim Öffnen\n\n",
@@ -246,52 +246,54 @@ zond_indexsuche_do(Projekt *zond, GHashTable* ht_fileparts) {
                 return;
             }
 
-            /* Treffer auf Auswahl filtern wenn gewünscht */
+            /* Treffer auf Auswahl filtern wenn gewünscht.
+             * ht_fileparts ist ein Set von SondFilePart* (siehe
+             * sond_treeviewfm_get_fileparts()/zond_treeview_get_selected_
+             * fileparts()) - direkt vom Aufrufer übergeben, kein erneutes
+             * Auslesen einer Treeview-Selektion nötig (das war vorher
+             * kaputt: stvfm_filter war nie zugewiesen/immer NULL, daher
+             * lief dieser Zweig faktisch nie). */
             if (ht_fileparts && hits->len > 0) {
+                GPtrArray *filtered = g_ptr_array_new_with_free_func(
+                        sond_index_hit_free);
 
-            	SondTVFMItem* stvfm_filter = NULL;
+                for (guint i = 0; i < hits->len; i++) {
+                    SondIndexHit *hit = g_ptr_array_index(hits, i);
+                    gboolean keep = FALSE;
 
+                    GHashTableIter iter_sel;
+                    gpointer key = NULL;
+                    g_hash_table_iter_init(&iter_sel, ht_fileparts);
+                    while (g_hash_table_iter_next(&iter_sel, &key, NULL)) {
+                        SondFilePart *sfp_sel = (SondFilePart*) key;
+                        gchar *fp = sond_file_part_get_filepart(sfp_sel);
 
-                GtkTreeSelection *sel = gtk_tree_view_get_selection(
-                        GTK_TREE_VIEW(stvfm_filter));
-                GList *selected_rows = gtk_tree_selection_get_selected_rows(
-                        sel, NULL);
-                if (selected_rows) {
-                    GPtrArray *filtered = g_ptr_array_new_with_free_func(
-                            sond_index_hit_free);
-                    for (guint i = 0; i < hits->len; i++) {
-                        SondIndexHit *hit = g_ptr_array_index(hits, i);
-                        gboolean keep = FALSE;
-                        for (GList *l = selected_rows; l; l = l->next) {
-                            GtkTreeIter iter_sel = { 0 };
-                            SondTVFMItem *item = NULL;
-                            gtk_tree_model_get_iter(
-                                    gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm_filter)),
-                                    &iter_sel, (GtkTreePath*) l->data);
-                            gtk_tree_model_get(
-                                    gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm_filter)),
-                                    &iter_sel, 0, &item, -1);
-                            if (item) {
-                                gchar *fp = sond_file_part_get_filepart(
-                                        sond_tvfm_item_get_sond_file_part(item));
-                                if (fp && g_str_has_prefix(hit->filename, fp))
-                                    keep = TRUE;
-                                g_free(fp);
-                                g_object_unref(item);
-                            }
-                            if (keep) break;
+                        /* Treffer gehört zu fp selbst oder zu einem darin
+                         * enthaltenen Unterpfad (Konvention '//' als
+                         * Trenner, wie in sond_index_ctx_clear_file). Ein
+                         * reiner Prefix-Vergleich würde z.B. "a/b" auch
+                         * für "a/bc" fälschlich matchen. */
+                        if (fp) {
+                            gsize fp_len = strlen(fp);
+                            if (g_str_has_prefix(hit->filename, fp) &&
+                                    (hit->filename[fp_len] == '\0' ||
+                                     (hit->filename[fp_len] == '/' &&
+                                      hit->filename[fp_len + 1] == '/')))
+                                keep = TRUE;
                         }
-                        if (keep) {
-                            g_ptr_array_add(filtered, hit);
-                            /* Eigentumsübertragung: aus hits entfernen ohne free */
-                            g_ptr_array_index(hits, i) = NULL;
-                        }
+                        g_free(fp);
+                        if (keep) break;
                     }
-                    g_list_free_full(selected_rows,
-                            (GDestroyNotify) gtk_tree_path_free);
-                    g_ptr_array_unref(hits);
-                    hits = filtered;
+
+                    if (keep) {
+                        g_ptr_array_add(filtered, hit);
+                        /* Eigentumsübertragung: aus hits entfernen ohne free */
+                        g_ptr_array_index(hits, i) = NULL;
+                    }
                 }
+
+                g_ptr_array_unref(hits);
+                hits = filtered;
             }
 
             if (hits->len == 0) {
