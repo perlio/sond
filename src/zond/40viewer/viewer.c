@@ -28,6 +28,8 @@
 #include "../../sond_log_and_error.h"
 #include "../../sond_ocr.h"
 #include "../../sond_pdf_helper.h"
+#include "../../sond_index.h"
+#include "../../sond_process_file.h"
 
 #include "../zond_pdf_document.h"
 
@@ -252,6 +254,123 @@ static gboolean viewer_entry_in_dd(JournalEntry* entry,
 	}
 
 	return FALSE;
+}
+
+/* Vor dem physischen Speichern (viewer_do_save_dd()) den FTS-Index für
+ * diese Datei auf den nach dem Speichern gültigen Stand bringen:
+ * - Seiten mit einem JOURNAL_TYPE_OCR-Eintrag: Inhalt ändert sich (neue
+ *   versteckte Textebene) - nur diese eine Seite verwerfen, kein
+ *   pauschales Verwerfen der ganzen Datei.
+ * - Seiten, die gelöscht werden (pdfp->deleted): ebenfalls verwerfen.
+ * - Überlebende Seiten, deren Nummer sich durch anderswo gelöschte/
+ *   eingefügte Seiten verschiebt: in chunks/pages umnummerieren (Inhalt
+ *   bleibt erhalten). Wiederverwendet dieselbe, für Anbindungen bereits
+ *   bewährte Korrektur wie dbase_zond_update_section_dbase() - eine
+ *   einzelne Seite ist dafür einfach eine entartete Anbindung
+ *   {seite,0}-{seite,EOP} ("ganze Seite").
+ * Muss VOR viewer_do_save_dd() laufen (genau wie dbase_zond_update_
+ * sections()), weil die dort ablaufende Kompaktierung (pdfp->deleted/
+ * inserted-Flags werden gelöscht/page_akt neu gesetzt) genau das ist,
+ * was anbindung_korrigieren() auswertet - danach sind die Flags weg. */
+static void viewer_update_index_for_save(PdfViewer *pdfv, DisplayedDocument *dd) {
+	SondIndexCtx *index_ctx = NULL;
+	gchar *filename = NULL;
+	GArray *arr_journal = NULL;
+	GArray *pages = NULL;
+	GError *error = NULL;
+	GArray *old_nrs = NULL;
+	GArray *new_nrs = NULL;
+
+	if (!pdfv->zond->wctx || !pdfv->zond->wctx->index_ctx)
+		return;
+
+	index_ctx = pdfv->zond->wctx->index_ctx;
+	filename = sond_file_part_get_filepart(
+			SOND_FILE_PART(zond_pdf_document_get_sfp_pdf(
+					dd->zpdfd_part->zond_pdf_document)));
+
+	/* OCR: Inhalt der betroffenen Seite ändert sich - verwerfen */
+	arr_journal = zond_pdf_document_get_arr_journal(dd->zpdfd_part->zond_pdf_document);
+	for (guint u = 0; u < arr_journal->len; u++) {
+		JournalEntry entry = g_array_index(arr_journal, JournalEntry, u);
+
+		if (entry.type != JOURNAL_TYPE_OCR)
+			continue;
+		if (!viewer_entry_in_dd(&entry, dd->zpdfd_part))
+			continue;
+
+		if (!sond_index_ctx_clear_page(index_ctx, filename,
+				entry.pdf_document_page->page_akt, &error)) {
+			LOG_WARN("%s\n", error->message);
+			g_clear_error(&error);
+		}
+	}
+
+	/* Gelöschte Seiten verwerfen, überlebende ggf. umnummerieren - über
+	 * ALLE aktuell im Index geführten Seiten dieser Datei (nicht nur den
+	 * Bereich dieses dd), da anbindung_korrigieren() ohnehin nur Seiten
+	 * berücksichtigt, die tatsächlich betroffen sind. */
+	pages = sond_index_ctx_get_pages_for_file(index_ctx, filename);
+	old_nrs = g_array_new(FALSE, FALSE, sizeof(gint));
+	new_nrs = g_array_new(FALSE, FALSE, sizeof(gint));
+
+	for (guint u = 0; u < pages->len; u++) {
+		gint page_nr = g_array_index(pages, gint, u);
+		PdfDocumentPage *pdfp = NULL;
+
+		if (page_nr < 0) /* Nicht-PDF-Konvention (page_nr == -1) betrifft hier nicht */
+			continue;
+
+		/* Verteidigung gegen g_ptr_array_index() ohne Bounds-Check:
+		 * sollte der Index eine Seitenzahl kennen, die es (mehr) gar
+		 * nicht gibt, verwerfen statt out-of-bounds zuzugreifen. */
+		if (page_nr >= zond_pdf_document_get_number_of_pages(
+				dd->zpdfd_part->zond_pdf_document)) {
+			if (!sond_index_ctx_clear_page(index_ctx, filename, page_nr, &error)) {
+				LOG_WARN("%s\n", error->message);
+				g_clear_error(&error);
+			}
+			continue;
+		}
+
+		pdfp = zond_pdf_document_get_pdf_document_page(
+				dd->zpdfd_part->zond_pdf_document, page_nr);
+
+		if (!pdfp || pdfp->deleted) {
+			if (!sond_index_ctx_clear_page(index_ctx, filename, page_nr, &error)) {
+				LOG_WARN("%s\n", error->message);
+				g_clear_error(&error);
+			}
+			continue;
+		}
+
+		{
+			Anbindung anbindung = { { page_nr, 0 }, { page_nr, EOP } };
+
+			anbindung_korrigieren(dd->zpdfd_part, &anbindung);
+
+			if (anbindung.von.seite != page_nr) {
+				g_array_append_val(old_nrs, page_nr);
+				g_array_append_val(new_nrs, anbindung.von.seite);
+			}
+		}
+	}
+
+	if (old_nrs->len > 0) {
+		if (!sond_index_ctx_renumber_pages(index_ctx, filename,
+				(gint const*) old_nrs->data, (gint const*) new_nrs->data,
+				old_nrs->len, &error)) {
+			LOG_WARN("%s\n", error->message);
+			g_clear_error(&error);
+		}
+	}
+
+	g_array_unref(old_nrs);
+	g_array_unref(new_nrs);
+	g_array_unref(pages);
+	g_free(filename);
+
+	return;
 }
 
 static void  viewer_reset_dirty_dds(PdfViewer* pdfv) {
@@ -706,6 +825,11 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 
 			return rc;
 		}
+
+		//FTS-Index für diese Datei auf den nach dem Speichern gültigen
+		//Stand bringen (Seiten verwerfen/umnummerieren) - muss vor dem
+		//physischen Speichern laufen, s. Kommentar an der Funktion.
+		viewer_update_index_for_save(pdfv, dd);
 
 		//Anbindungen in db anpassen
 		rc = dbase_zond_update_sections(pdfv->zond->dbase_zond, dd, error);

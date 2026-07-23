@@ -2825,21 +2825,60 @@ static gint zond_treeview_get_selected_fileparts_foreach(ZondTreeview *ztv,
 		GtkTreeIter *iter, gpointer data, GError **error) {
 	gint node_id = 0;
 	gchar *file_part = NULL;
+	gchar *section = NULL;
 	SondFilePart *sfp = NULL;
+	SondPageRange *range = NULL;
+	Anbindung anbindung = { 0 };
 
 	GHashTable *ht_fileparts = (GHashTable*) data;
 
-	node_id = zond_treeview_get_filepart_and_section(ztv, iter, &file_part, NULL, error);
+	node_id = zond_treeview_get_filepart_and_section(ztv, iter, &file_part, &section, error);
 	if (node_id == -1)
 		return -1;
 
 	sfp = sond_file_part_from_filepart(file_part, error);
 	if (!sfp) {
 		g_free(file_part);
+		g_free(section);
 		return -1;
 	}
+	g_free(file_part);
 
-	g_hash_table_add(ht_fileparts, sfp);
+	/* Anbindung auswerten: kein section (oder komplett leer) -> ganze Datei
+	 * (range == NULL). Sonst wird nur der referenzierte Seitenbereich
+	 * (nur ganze Seiten, Zeichen-Index wird bewusst ignoriert - s.
+	 * Absprache) (neu) indiziert. Ein reiner Text-Punkt
+	 * (anbindung_is_pdf_punkt) hat kein "bis" - dann gilt bis == von
+	 * (eine einzelne Seite). */
+	anbindung_parse_file_section(section, &anbindung);
+	g_free(section);
+
+	if (!anbindung_is_empty(&anbindung)) {
+		gint von = anbindung.von.seite;
+		gint bis = anbindung_is_pdf_punkt(anbindung) ? von : anbindung.bis.seite;
+
+		range = sond_page_range_new(von, bis);
+	}
+	/* sonst range == NULL -> ganze Datei */
+
+	/* Mehrere ausgewählte Punkte können dieselbe Datei referenzieren
+	 * (gleiches SondFilePart, per Identität interniert) - dann Vereinigung
+	 * der Seitenbereiche bilden. Ganze Datei (range == NULL) dominiert. */
+	if (g_hash_table_contains(ht_fileparts, sfp)) {
+		SondPageRange *existing = g_hash_table_lookup(ht_fileparts, sfp);
+
+		if (!existing || !range) {
+			/* einer von beiden will die ganze Datei -> ganze Datei */
+			sond_page_range_free(range);
+			g_hash_table_insert(ht_fileparts, sfp, NULL);
+		} else {
+			existing->von = MIN(existing->von, range->von);
+			existing->bis = MAX(existing->bis, range->bis);
+			sond_page_range_free(range);
+			g_object_unref(sfp); /* schon als Key vorhanden - eigene Ref wieder los */
+		}
+	} else
+		g_hash_table_insert(ht_fileparts, sfp, range);
 
 	return 0;
 }
@@ -2849,7 +2888,8 @@ GHashTable* zond_treeview_get_selected_fileparts(ZondTreeview *ztv,
 	GHashTable *ht_fileparts = NULL;
 	gint rc = 0;
 
-	ht_fileparts = g_hash_table_new_full(NULL, NULL, g_object_unref, NULL);
+	ht_fileparts = g_hash_table_new_full(NULL, NULL, g_object_unref,
+			sond_page_range_free);
 
 	rc = sond_treeview_selection_foreach(SOND_TREEVIEW(ztv),
 			(gint(*)(SondTreeview*, GtkTreeIter*, gpointer, GError**))

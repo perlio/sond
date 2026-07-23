@@ -431,7 +431,7 @@ SondOcrTask* sond_ocr_task_new(fz_context* ctx,
 }
 
 gint sond_ocr_pdf_doc(fz_context* ctx, SondOcrPool* ocr_pool, pdf_document* doc,
-		SondOcrMode mode,
+		SondOcrMode mode, gint seite_von, gint seite_bis,
 		void(*log_func)(void*, gchar const*, ...), gpointer log_func_data,
 		GError** error) {
 	gint num_pages = 0;
@@ -446,6 +446,9 @@ gint sond_ocr_pdf_doc(fz_context* ctx, SondOcrPool* ocr_pool, pdf_document* doc,
 	fz_catch(ctx)
 		ERROR_PDF
 
+	gint i_von = (seite_von >= 0) ? seite_von : 0;
+	gint i_bis = (seite_bis >= 0) ? MIN(seite_bis, num_pages - 1) : num_pages - 1;
+
 	rc = pdf_get_sond_font(ctx, doc, &font_ref, error);
 	if (rc)
 		return -1;
@@ -459,7 +462,7 @@ gint sond_ocr_pdf_doc(fz_context* ctx, SondOcrPool* ocr_pool, pdf_document* doc,
 	GPtrArray* arr_tasks =
 			g_ptr_array_new_with_free_func((GDestroyNotify) sond_ocr_task_free);
 
-	for (gint i = 0; i < num_pages; i++) {
+	for (gint i = i_von; i <= i_bis; i++) {
 		SondOcrTask* task =
 				sond_ocr_task_new(ctx, doc, i, font_ref,
 						log_func, log_func_data, error);

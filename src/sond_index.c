@@ -25,6 +25,7 @@
 #include <string.h>
 
 #include "sond_text_extract.h"
+#include "sond_ocr.h"
 
 #ifdef SOND_WITH_EMBEDDINGS
 #include <llama.h>
@@ -72,10 +73,20 @@ static const gchar *SQL_TRIGGER_DELETE =
     "    VALUES('delete', old.id, old.text);"
     "END;";
 
-static const gchar *SQL_CREATE_FILES =
-    "CREATE TABLE IF NOT EXISTS files ("
-    "  filename  TEXT    PRIMARY KEY"
-    ");"; /* Präsenzliste indizierter leafs */
+static const gchar *SQL_CREATE_PAGES =
+    "CREATE TABLE IF NOT EXISTS pages ("
+    "  filename  TEXT    NOT NULL,"
+    "  page_nr   INTEGER NOT NULL DEFAULT -1,"
+    "  ocr_mode  INTEGER NOT NULL DEFAULT 0,"
+    "  PRIMARY KEY(filename, page_nr)"
+    ");"; /* Präsenzliste indizierter Seiten je Datei, inkl. zuletzt
+           * angewandtem OCR-Modus (SondOcrMode-Wert). Nicht-PDF-Formate:
+           * ein Eintrag mit page_nr = -1. Ersetzt die frühere reine
+           * Datei-Präsenzliste "files" - jetzt seitenweise, damit sich
+           * a) Anbindungen (Seitenbereiche) gezielt (neu) indizieren lassen
+           * und b) doppelte Arbeit bei überlappenden Anbindungen bzw.
+           * erneuten Läufen anhand des zuletzt angewandten OCR-Modus
+           * vermieden werden kann. */
 
 /* =======================================================================
  * Schema initialisieren
@@ -117,10 +128,10 @@ static gboolean db_init_schema(SondIndexCtx *ctx, GError **error) {
         return FALSE;
     }
 
-    rc = sqlite3_exec(ctx->db, SQL_CREATE_FILES, NULL, NULL, &errmsg);
+    rc = sqlite3_exec(ctx->db, SQL_CREATE_PAGES, NULL, NULL, &errmsg);
     if (rc != SQLITE_OK) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                    "db_init_schema: CREATE files: %s", errmsg);
+                    "db_init_schema: CREATE pages: %s", errmsg);
         sqlite3_free(errmsg);
         return FALSE;
     }
@@ -270,13 +281,13 @@ gboolean sond_index_ctx_clear_file(SondIndexCtx *ctx,
                 NULL, NULL, NULL);
 #endif
 
-    /* files-Einträge löschen */
+    /* pages-Einträge löschen */
     rc = sqlite3_prepare_v2(ctx->db,
-            "DELETE FROM files WHERE filename = ? OR filename LIKE ?",
+            "DELETE FROM pages WHERE filename = ? OR filename LIKE ?",
             -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                    "sond_index_ctx_clear_file: prepare files: %s",
+                    "sond_index_ctx_clear_file: prepare pages: %s",
                     sqlite3_errmsg(ctx->db));
         g_free(pattern);
         return FALSE;
@@ -290,12 +301,233 @@ gboolean sond_index_ctx_clear_file(SondIndexCtx *ctx,
 
     if (rc != SQLITE_DONE) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                    "sond_index_ctx_clear_file: step files: %s",
+                    "sond_index_ctx_clear_file: step pages: %s",
                     sqlite3_errmsg(ctx->db));
         return FALSE;
     }
 
     return TRUE;
+}
+
+/* =======================================================================
+ * sond_index_ctx_clear_page
+ * ======================================================================= */
+
+gboolean sond_index_ctx_clear_page(SondIndexCtx *ctx,
+                                    gchar const  *filename,
+                                    gint          page_nr,
+                                    GError      **error) {
+    sqlite3_stmt *stmt = NULL;
+
+    gint rc = sqlite3_prepare_v2(ctx->db,
+            "DELETE FROM chunks WHERE filename = ? AND page_nr = ?",
+            -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "sond_index_ctx_clear_page: prepare chunks: %s",
+                    sqlite3_errmsg(ctx->db));
+        return FALSE;
+    }
+
+    sqlite3_bind_text(stmt, 1, filename, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int (stmt, 2, page_nr);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+
+    if (rc != SQLITE_DONE) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "sond_index_ctx_clear_page: step chunks: %s",
+                    sqlite3_errmsg(ctx->db));
+        return FALSE;
+    }
+
+#ifdef SOND_WITH_EMBEDDINGS
+    if (ctx->n_embd > 0)
+        sqlite3_exec(ctx->db,
+                "DELETE FROM chunks_vec WHERE rowid NOT IN (SELECT id FROM chunks);",
+                NULL, NULL, NULL);
+#endif
+
+    rc = sqlite3_prepare_v2(ctx->db,
+            "DELETE FROM pages WHERE filename = ? AND page_nr = ?",
+            -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "sond_index_ctx_clear_page: prepare pages: %s",
+                    sqlite3_errmsg(ctx->db));
+        return FALSE;
+    }
+
+    sqlite3_bind_text(stmt, 1, filename, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int (stmt, 2, page_nr);
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+
+    if (rc != SQLITE_DONE) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "sond_index_ctx_clear_page: step pages: %s",
+                    sqlite3_errmsg(ctx->db));
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+/* =======================================================================
+ * sond_index_ctx_renumber_page
+ * ======================================================================= */
+
+static gboolean sond_index_ctx_renumber_one_pass(SondIndexCtx *ctx,
+        gchar const *filename, gint from_page_nr, gint to_page_nr,
+        gchar const *caller, GError **error) {
+    gchar const *tables[] = { "chunks", "pages" };
+
+    for (guint t = 0; t < G_N_ELEMENTS(tables); t++) {
+        sqlite3_stmt *stmt = NULL;
+        gchar *sql = g_strdup_printf(
+                "UPDATE %s SET page_nr = ? WHERE filename = ? AND page_nr = ?",
+                tables[t]);
+
+        gint rc = sqlite3_prepare_v2(ctx->db, sql, -1, &stmt, NULL);
+        g_free(sql);
+        if (rc != SQLITE_OK) {
+            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                        "%s: prepare %s: %s",
+                        caller, tables[t], sqlite3_errmsg(ctx->db));
+            return FALSE;
+        }
+
+        sqlite3_bind_int (stmt, 1, to_page_nr);
+        sqlite3_bind_text(stmt, 2, filename, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int (stmt, 3, from_page_nr);
+        rc = sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+
+        if (rc != SQLITE_DONE) {
+            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                        "%s: step %s: %s",
+                        caller, tables[t], sqlite3_errmsg(ctx->db));
+            return FALSE;
+        }
+    }
+
+    return TRUE;
+}
+
+gboolean sond_index_ctx_renumber_page(SondIndexCtx *ctx,
+                                       gchar const  *filename,
+                                       gint          old_page_nr,
+                                       gint          new_page_nr,
+                                       GError      **error) {
+    return sond_index_ctx_renumber_pages(ctx, filename,
+            &old_page_nr, &new_page_nr, 1, error);
+}
+
+gboolean sond_index_ctx_renumber_pages(SondIndexCtx *ctx,
+                                        gchar const  *filename,
+                                        gint const   *old_page_nrs,
+                                        gint const   *new_page_nrs,
+                                        guint         n,
+                                        GError      **error) {
+    /* Kollisionsfreier Zwischenwert: pages hat PRIMARY KEY(filename,
+     * page_nr) - ein direktes UPDATE auf new_page_nr kann fehlschlagen,
+     * wenn diese Seite gerade erst durch eine andere, noch nicht
+     * verarbeitete Zeile derselben Umnumerierungs-Serie frei wird (z.B.
+     * Seite 5->4, während Seite 4->3 noch aussteht: Seite 4 ist zum
+     * Zeitpunkt von "5->4" noch belegt). Daher zwei komplett getrennte
+     * Durchgänge über ALLE Seiten: erst alle auf einen Zwischenwert,
+     * dann alle vom Zwischenwert auf die endgültige neue Seitenzahl - so
+     * ist die Reihenfolge der Einträge in old_page_nrs/new_page_nrs
+     * beliebig. */
+    for (guint i = 0; i < n; i++) {
+        if (old_page_nrs[i] == new_page_nrs[i])
+            continue;
+
+        gint tmp_page_nr = -1000000 - old_page_nrs[i];
+        if (!sond_index_ctx_renumber_one_pass(ctx, filename,
+                old_page_nrs[i], tmp_page_nr,
+                "sond_index_ctx_renumber_pages (tmp)", error))
+            return FALSE;
+    }
+
+    for (guint i = 0; i < n; i++) {
+        if (old_page_nrs[i] == new_page_nrs[i])
+            continue;
+
+        gint tmp_page_nr = -1000000 - old_page_nrs[i];
+        if (!sond_index_ctx_renumber_one_pass(ctx, filename,
+                tmp_page_nr, new_page_nrs[i],
+                "sond_index_ctx_renumber_pages", error))
+            return FALSE;
+    }
+
+    return TRUE;
+}
+
+/* =======================================================================
+ * sond_index_ctx_get_page_ocr_mode / sond_index_ctx_should_process_page
+ * ======================================================================= */
+
+GArray* sond_index_ctx_get_pages_for_file(SondIndexCtx *ctx,
+                                           gchar const  *filename) {
+    GArray       *result = g_array_new(FALSE, FALSE, sizeof(gint));
+    sqlite3_stmt *stmt   = NULL;
+
+    gint rc = sqlite3_prepare_v2(ctx->db,
+            "SELECT page_nr FROM pages WHERE filename = ?",
+            -1, &stmt, NULL);
+    if (rc != SQLITE_OK)
+        return result;
+
+    sqlite3_bind_text(stmt, 1, filename, -1, SQLITE_TRANSIENT);
+
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        gint page_nr = sqlite3_column_int(stmt, 0);
+        g_array_append_val(result, page_nr);
+    }
+
+    sqlite3_finalize(stmt);
+    return result;
+}
+
+gint sond_index_ctx_get_page_ocr_mode(SondIndexCtx *ctx,
+                                       gchar const  *filename,
+                                       gint          page_nr) {
+    sqlite3_stmt *stmt   = NULL;
+    gint          result = -1;
+
+    gint rc = sqlite3_prepare_v2(ctx->db,
+            "SELECT ocr_mode FROM pages WHERE filename = ? AND page_nr = ?",
+            -1, &stmt, NULL);
+    if (rc != SQLITE_OK)
+        return -1;
+
+    sqlite3_bind_text(stmt, 1, filename, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int (stmt, 2, page_nr);
+
+    if (sqlite3_step(stmt) == SQLITE_ROW)
+        result = sqlite3_column_int(stmt, 0);
+
+    sqlite3_finalize(stmt);
+    return result;
+}
+
+gboolean sond_index_ctx_should_process_page(SondIndexCtx *ctx,
+                                             gchar const  *filename,
+                                             gint          page_nr,
+                                             gint          requested_mode) {
+    gint applied_mode = 0;
+
+    /* erzwingen: immer neu verarbeiten, unabhängig vom bisherigen Stand */
+    if (requested_mode >= SOND_OCR_MODE_FORCE)
+        return TRUE;
+
+    applied_mode = sond_index_ctx_get_page_ocr_mode(ctx, filename, page_nr);
+
+    if (applied_mode < 0)
+        return TRUE; /* noch nie verarbeitet */
+
+    return (requested_mode > applied_mode);
 }
 
 /* =======================================================================
@@ -314,7 +546,7 @@ gboolean sond_index_ctx_rename_file(SondIndexCtx *ctx,
      * Das ersetzt den Anfang (prefix_old) durch prefix_new,
      * der Rest (nach dem Präfix) bleibt unverandert.
      */
-    const gchar *tables[] = { "chunks", "files" };
+    const gchar *tables[] = { "chunks", "pages" };
     gchar       *pattern  = g_strdup_printf("%s//%%", prefix_old);
 
     for (guint t = 0; t < G_N_ELEMENTS(tables); t++) {
@@ -783,7 +1015,7 @@ GPtrArray* sond_index_search(SondIndexCtx *ctx,
              * Zusätzlich: Ergebnis nur wenn filename NICHT bereits
              * in der FTS-Treffermenge ist, damit keine Duplikate.
              */
-            "SELECT DISTINCT filename FROM files"
+            "SELECT DISTINCT filename FROM pages"
             " WHERE filename LIKE ? ESCAPE '\\'"
             "   AND filename NOT IN ("
             "     SELECT DISTINCT c.filename FROM chunks_fts"
@@ -836,20 +1068,26 @@ GPtrArray* sond_index_search(SondIndexCtx *ctx,
 }
 
 /* =======================================================================
- * files-Tabelle: Hilfsfunktionen
+ * pages-Tabelle: Hilfsfunktionen
  * ======================================================================= */
 
-/* Trägt filename in files ein */
-static void sond_index_file_set(SondIndexCtx *ctx, gchar const *filename) {
+/* Trägt (filename, page_nr) mit ocr_mode in pages ein, oder aktualisiert
+ * ocr_mode, falls die Seite schon einen Eintrag hat (z.B. war sie zuerst
+ * mit "kein OCR" markiert und wird jetzt mit "prüfen" neu verarbeitet). */
+static void sond_index_page_set(SondIndexCtx *ctx, gchar const *filename,
+        gint page_nr, gint ocr_mode) {
     sqlite3_stmt *stmt = NULL;
 
     gint rc = sqlite3_prepare_v2(ctx->db,
-            "INSERT OR IGNORE INTO files(filename) VALUES(?)",
+            "INSERT INTO pages(filename, page_nr, ocr_mode) VALUES(?,?,?)"
+            " ON CONFLICT(filename, page_nr) DO UPDATE SET ocr_mode = excluded.ocr_mode",
             -1, &stmt, NULL);
     if (rc != SQLITE_OK)
         return;
 
     sqlite3_bind_text(stmt, 1, filename, -1, SQLITE_STATIC);
+    sqlite3_bind_int (stmt, 2, page_nr);
+    sqlite3_bind_int (stmt, 3, ocr_mode);
     sqlite3_step(stmt);
     sqlite3_finalize(stmt);
 }
@@ -861,7 +1099,8 @@ static void sond_index_file_set(SondIndexCtx *ctx, gchar const *filename) {
 void sond_index(fz_context* ctx,
 		void (*log_func)(void*, gchar const*, ...), gpointer log_func_data,
 		SondIndexCtx  *sond_index_ctx, gchar const* filename, guchar const  *buf,
-		gsize size, gchar const *mime_type) {
+		gsize size, gchar const *mime_type,
+		gint seite_von, gint seite_bis, gint ocr_mode) {
     if (!sond_index_ctx) return;
     if (!mime_type) return;
 
@@ -870,7 +1109,7 @@ void sond_index(fz_context* ctx,
 
     if (!g_strcmp0(mime_type, "application/pdf"))
         segs = sond_text_extract_pdf(ctx, buf, size,
-        		(SondLogFunc) log_func, log_func_data);
+        		(SondLogFunc) log_func, log_func_data, seite_von, seite_bis);
     else if (!g_strcmp0(mime_type, "message/rfc822"))
         segs = sond_text_extract_gmessage(buf, size);
     else if (!g_strcmp0(mime_type, "text/html"))
@@ -901,8 +1140,36 @@ void sond_index(fz_context* ctx,
 
     gint chunk_idx = 0;
     for (guint s = 0; s < segs->len; s++) {
-        SondTextSegment *seg   = g_ptr_array_index(segs, s);
-        GPtrArray       *chunks = text_to_chunks(seg->text,
+        SondTextSegment *seg = g_ptr_array_index(segs, s);
+
+        /* Doppelte Arbeit vermeiden: wenn diese Seite bereits mit
+         * demselben oder höherem OCR-Modus indiziert wurde (z.B. weil
+         * zwei ausgewählte Punkte sich überschneidende Seiten derselben
+         * Datei referenzieren, oder ein früherer Lauf sie schon erledigt
+         * hat), bleiben ihre vorhandenen Chunks unangetastet. */
+        if (!sond_index_ctx_should_process_page(sond_index_ctx, filename,
+                seg->page_nr, ocr_mode))
+            continue;
+
+        /* Vorhandene Chunks dieser Seite entfernen, bevor sie neu
+         * eingefügt werden (Löschen-vor-Einfügen wie zuvor auf
+         * Datei-Ebene, jetzt auf Seiten-Ebene) - verhindert doppelte
+         * Chunks, wenn die Seite zuvor schon (mit niedrigerem Modus oder
+         * in einem früheren Lauf) indiziert war. */
+        {
+            GError *clear_error = NULL;
+            if (!sond_index_ctx_clear_page(sond_index_ctx, filename,
+                    seg->page_nr, &clear_error)) {
+                if (log_func)
+                    log_func(log_func_data,
+                            "sond_index: clear_page '%s' Seite %d: %s",
+                            filename, seg->page_nr,
+                            clear_error ? clear_error->message : "unknown");
+                g_clear_error(&clear_error);
+            }
+        }
+
+        GPtrArray *chunks = text_to_chunks(seg->text,
         		sond_index_ctx->chunk_size,
 				sond_index_ctx->chunk_overlap);
 
@@ -925,6 +1192,9 @@ void sond_index(fz_context* ctx,
         }
 
         g_ptr_array_unref(chunks);
+
+        /* Seite als (mit diesem Modus) indiziert markieren */
+        sond_index_page_set(sond_index_ctx, filename, seg->page_nr, ocr_mode);
     }
 
     if (sqlite3_exec(sond_index_ctx->db, "COMMIT;", NULL, NULL, &errmsg) != SQLITE_OK) {
@@ -937,7 +1207,4 @@ void sond_index(fz_context* ctx,
     }
 
     g_ptr_array_unref(segs);
-
-    /* leaf als indiziert markieren */
-    sond_index_file_set(sond_index_ctx, filename);
 }

@@ -87,7 +87,7 @@ void sond_index_ctx_free(SondIndexCtx *ctx);
  * @filename: Dateiname (wie in dispatch_buffer)
  * @error:    GError
  *
- * Löscht alle vorhandenen Chunks und files-Einträge für filename
+ * Löscht alle vorhandenen Chunks und pages-Einträge für filename
  * (und alle Unter-Pfade, d.h. LIKE 'filename//%') vor der Neuindizierung.
  * Erwartet eine bereits laufende Transaktion (kein eigenes BEGIN/COMMIT).
  *
@@ -98,13 +98,133 @@ gboolean sond_index_ctx_clear_file(SondIndexCtx *ctx,
                                     GError      **error);
 
 /**
+ * sond_index_ctx_clear_page:
+ * @ctx:      SondIndexCtx
+ * @filename: Dateiname
+ * @page_nr:  Seite (0-basiert)
+ * @error:    GError
+ *
+ * Löscht Chunks und pages-Eintrag nur für genau diese eine Seite (z.B.
+ * nach OCR einer einzelnen Seite - die Seitenzahl selbst ändert sich
+ * dabei nicht, nur ihr Inhalt). Erwartet eine bereits laufende
+ * Transaktion (kein eigenes BEGIN/COMMIT).
+ *
+ * Returns: TRUE bei Erfolg.
+ */
+gboolean sond_index_ctx_clear_page(SondIndexCtx *ctx,
+                                    gchar const  *filename,
+                                    gint          page_nr,
+                                    GError      **error);
+
+/**
+ * sond_index_ctx_renumber_page:
+ * @ctx:         SondIndexCtx
+ * @filename:    Dateiname
+ * @old_page_nr: bisherige Seitenzahl
+ * @new_page_nr: neue Seitenzahl (nach Seiten-Löschen/-Einfügen)
+ * @error:       GError
+ *
+ * Bequemlichkeitswrapper um sond_index_ctx_renumber_pages() für genau
+ * eine Seite. ACHTUNG: werden in einem Rutsch MEHRERE Seiten derselben
+ * Datei umnummeriert, sond_index_ctx_renumber_pages() (Plural) benutzen,
+ * nicht mehrere Einzelaufrufe hiervon - sonst können Zwischenzustände
+ * kollidieren (siehe dort).
+ *
+ * Returns: TRUE bei Erfolg.
+ */
+gboolean sond_index_ctx_renumber_page(SondIndexCtx *ctx,
+                                       gchar const  *filename,
+                                       gint          old_page_nr,
+                                       gint          new_page_nr,
+                                       GError      **error);
+
+/**
+ * sond_index_ctx_renumber_pages:
+ * @ctx:          SondIndexCtx
+ * @filename:     Dateiname
+ * @old_page_nrs: bisherige Seitenzahlen
+ * @new_page_nrs: zugehörige neue Seitenzahlen (gleiche Länge/Reihenfolge
+ *                wie old_page_nrs)
+ * @n:            Anzahl Einträge
+ * @error:        GError
+ *
+ * Setzt page_nr in chunks und pages für mehrere Seiten auf einen Schlag
+ * um (Inhalt/Chunks bleiben erhalten - nur die Seitenzahl wird
+ * korrigiert), z.B. nach Seiten-Löschen/-Einfügen im Viewer, wenn sich
+ * mehrere Seitenzahlen gleichzeitig verschieben. Kollisionssicher
+ * UNABHÄNGIG von der Reihenfolge der Einträge (zwei komplett getrennte
+ * Durchgänge über alle Seiten, mit Zwischenwert). Erwartet eine bereits
+ * laufende Transaktion (kein eigenes BEGIN/COMMIT).
+ *
+ * Returns: TRUE bei Erfolg.
+ */
+gboolean sond_index_ctx_renumber_pages(SondIndexCtx *ctx,
+                                        gchar const  *filename,
+                                        gint const   *old_page_nrs,
+                                        gint const   *new_page_nrs,
+                                        guint         n,
+                                        GError      **error);
+
+/**
+ * sond_index_ctx_get_pages_for_file:
+ * @ctx:      SondIndexCtx
+ * @filename: Dateiname
+ *
+ * Liefert alle Seiten (page_nr), für die diese Datei aktuell Einträge in
+ * der pages-Tabelle hat - z.B. um sie beim Speichern eines im Viewer
+ * bearbeiteten PDF (Seiten gelöscht/eingefügt) gezielt umzunummerieren
+ * oder zu verwerfen (siehe sond_index_ctx_renumber_page/_clear_page).
+ *
+ * Returns: (transfer full) neu alloziertes GArray von gint, mit
+ *          g_array_unref() freizugeben. Leer (nicht NULL), wenn die Datei
+ *          nicht (seitenweise) indiziert ist.
+ */
+GArray* sond_index_ctx_get_pages_for_file(SondIndexCtx *ctx,
+                                           gchar const  *filename);
+
+/**
+ * sond_index_ctx_get_page_ocr_mode:
+ * @ctx:      SondIndexCtx
+ * @filename: Dateiname
+ * @page_nr:  Seite (0-basiert; -1 für Nicht-PDF-Formate)
+ *
+ * Returns: zuletzt für diese Seite angewandter OCR-Modus (SondOcrMode-Wert),
+ *          oder -1, wenn die Seite noch nie indiziert wurde.
+ */
+gint sond_index_ctx_get_page_ocr_mode(SondIndexCtx *ctx,
+                                       gchar const  *filename,
+                                       gint          page_nr);
+
+/**
+ * sond_index_ctx_should_process_page:
+ * @ctx:            SondIndexCtx
+ * @filename:        Dateiname
+ * @page_nr:         Seite (0-basiert; -1 für Nicht-PDF-Formate)
+ * @requested_mode:  gewünschter OCR-Modus für den aktuellen Lauf (SondOcrMode)
+ *
+ * Entscheidet, ob eine Seite (neu) verarbeitet werden muss, um doppelte
+ * Arbeit zu vermeiden (z.B. wenn mehrere ausgewählte Punkte sich
+ * überschneidende Seiten derselben Datei referenzieren, oder die Seite in
+ * einem früheren Lauf schon ausreichend behandelt wurde):
+ *   - erzwingen (SOND_OCR_MODE_FORCE): immer TRUE.
+ *   - sonst: TRUE nur, wenn die Seite noch nie oder mit einem niedrigeren
+ *     Modus als @requested_mode behandelt wurde.
+ *
+ * Returns: TRUE, wenn die Seite (neu) verarbeitet werden soll.
+ */
+gboolean sond_index_ctx_should_process_page(SondIndexCtx *ctx,
+                                             gchar const  *filename,
+                                             gint          page_nr,
+                                             gint          requested_mode);
+
+/**
  * sond_index_ctx_rename_file:
  * @ctx:        SondIndexCtx
  * @prefix_old: Alter Pfad-Präfix
  * @prefix_new: Neuer Pfad-Präfix
  * @error:      GError
  *
- * Benennt in chunks und files alle Einträge um, deren filename gleich
+ * Benennt in chunks und pages alle Einträge um, deren filename gleich
  * prefix_old ist oder mit prefix_old// beginnt.
  * Erwartet eine bereits laufende Transaktion (kein eigenes BEGIN/COMMIT).
  *
@@ -172,6 +292,14 @@ GPtrArray* sond_index_search(SondIndexCtx *ctx,
  * @buf:       Rohdaten (bei PDF: bereits OCR-ter Buffer)
  * @size:      Größe von buf
  * @mime_type: MIME-Typ (entscheidet ob und wie indiziert wird)
+ * @seite_von: erste zu indizierende Seite (0-basiert), -1 = ganze Datei
+ *             (nur für PDF relevant; bei anderen MIME-Typen ignoriert)
+ * @seite_bis: letzte zu indizierende Seite (0-basiert, inklusive),
+ *             -1 = ganze Datei
+ * @ocr_mode:  angewandter OCR-Modus (SondOcrMode-Wert), wird pro indizierter
+ *             Seite in der pages-Tabelle vermerkt, um künftige Läufe
+ *             doppelte Arbeit sparen zu lassen (siehe
+ *             sond_index_ctx_should_process_page())
  *
  * Indiziert wird für:
  *   application/pdf   – Text aus OCR-tem PDF (MuPDF stext)
@@ -185,7 +313,10 @@ void sond_index(fz_context* ctx,
                         gchar const   *filename,
                         guchar const  *buf,
                         gsize          size,
-                        gchar const   *mime_type);
+                        gchar const   *mime_type,
+                        gint           seite_von,
+                        gint           seite_bis,
+                        gint           ocr_mode);
 
 G_END_DECLS
 

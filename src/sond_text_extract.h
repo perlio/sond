@@ -70,12 +70,15 @@ typedef void (*SondLogFunc)(gpointer log_data, gchar const *format, ...);
 
 /**
  * sond_text_extract_pdf:
+ * @seite_von: erste zu extrahierende Seite (0-basiert), -1 = ab Seite 0
+ * @seite_bis: letzte zu extrahierende Seite (0-basiert, inklusive),
+ *             -1 = bis letzte Seite
  *
- * Ein Segment pro Seite, Text via MuPDF stext (FZ_TEXT_FLATTEN_ALL,
- * identisch zu fz_search_stext_page).
+ * Ein Segment pro Seite (nur im Bereich [seite_von, seite_bis]), Text via
+ * MuPDF stext (FZ_TEXT_FLATTEN_ALL, identisch zu fz_search_stext_page).
  */
 GPtrArray* sond_text_extract_pdf(fz_context *ctx, guchar const *buf, gsize size,
-        SondLogFunc log_func, gpointer log_data);
+        SondLogFunc log_func, gpointer log_data, gint seite_von, gint seite_bis);
 
 /**
  * sond_text_extract_html:

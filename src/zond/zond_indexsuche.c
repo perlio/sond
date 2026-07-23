@@ -247,12 +247,15 @@ zond_indexsuche_do(Projekt *zond, GHashTable* ht_fileparts) {
             }
 
             /* Treffer auf Auswahl filtern wenn gewünscht.
-             * ht_fileparts ist ein Set von SondFilePart* (siehe
-             * sond_treeviewfm_get_fileparts()/zond_treeview_get_selected_
-             * fileparts()) - direkt vom Aufrufer übergeben, kein erneutes
-             * Auslesen einer Treeview-Selektion nötig (das war vorher
-             * kaputt: stvfm_filter war nie zugewiesen/immer NULL, daher
-             * lief dieser Zweig faktisch nie). */
+             * ht_fileparts ist eine Map SondFilePart* -> SondPageRange*
+             * (siehe sond_treeviewfm_get_fileparts()/zond_treeview_get_
+             * selected_fileparts()) - direkt vom Aufrufer übergeben, kein
+             * erneutes Auslesen einer Treeview-Selektion nötig (das war
+             * vorher kaputt: stvfm_filter war nie zugewiesen/immer NULL,
+             * daher lief dieser Zweig faktisch nie).
+             * Ein NULL-Wert bedeutet "ganze Datei"; ein SondPageRange*
+             * beschränkt den Treffer zusätzlich auf dessen Seitenbereich
+             * (die Anbindung des ausgewählten Punkts). */
             if (ht_fileparts && hits->len > 0) {
                 GPtrArray *filtered = g_ptr_array_new_with_free_func(
                         sond_index_hit_free);
@@ -263,9 +266,11 @@ zond_indexsuche_do(Projekt *zond, GHashTable* ht_fileparts) {
 
                     GHashTableIter iter_sel;
                     gpointer key = NULL;
+                    gpointer value = NULL;
                     g_hash_table_iter_init(&iter_sel, ht_fileparts);
-                    while (g_hash_table_iter_next(&iter_sel, &key, NULL)) {
+                    while (g_hash_table_iter_next(&iter_sel, &key, &value)) {
                         SondFilePart *sfp_sel = (SondFilePart*) key;
+                        SondPageRange *range = (SondPageRange*) value;
                         gchar *fp = sond_file_part_get_filepart(sfp_sel);
 
                         /* Treffer gehört zu fp selbst oder zu einem darin
@@ -278,8 +283,15 @@ zond_indexsuche_do(Projekt *zond, GHashTable* ht_fileparts) {
                             if (g_str_has_prefix(hit->filename, fp) &&
                                     (hit->filename[fp_len] == '\0' ||
                                      (hit->filename[fp_len] == '/' &&
-                                      hit->filename[fp_len + 1] == '/')))
-                                keep = TRUE;
+                                      hit->filename[fp_len + 1] == '/'))) {
+                                /* Datei passt - bei Anbindung (range) auf
+                                 * deren Seitenbereich einschränken (nur
+                                 * ganze Seiten, s. Absprache). Ohne range:
+                                 * ganze Datei, jede Seite zählt. */
+                                if (!range || (hit->page_nr >= range->von &&
+                                        hit->page_nr <= range->bis))
+                                    keep = TRUE;
+                            }
                         }
                         g_free(fp);
                         if (keep) break;

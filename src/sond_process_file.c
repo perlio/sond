@@ -35,7 +35,19 @@
 
 static void sond_process_file_do_rec(SondProcessFileCtx* wctx,
 		guchar* data, gsize size, gchar const* filename,
-		guchar** out_data, gsize* out_size, gint* out_pdf_count);
+		guchar** out_data, gsize* out_size, gint* out_pdf_count,
+		gint seite_von, gint seite_bis);
+
+SondPageRange* sond_page_range_new(gint von, gint bis) {
+	SondPageRange* range = g_new0(SondPageRange, 1);
+	range->von = von;
+	range->bis = bis;
+	return range;
+}
+
+void sond_page_range_free(gpointer p) {
+	g_free(p);
+}
 
 static gint process_zip_for_ocr(guchar* data, gsize size,
 		gchar const* filename, SondProcessFileCtx* wctx,
@@ -123,7 +135,7 @@ static gint process_zip_for_ocr(guchar* data, gsize size,
 		gsize processed_size = 0;
 
 		sond_process_file_do_rec(wctx, entry_data, (gsize)bytes_read, entry_filename,
-				&processed_data, &processed_size, out_pdf_count);
+				&processed_data, &processed_size, out_pdf_count, -1, -1);
 		g_free(entry_data);
 		g_free(entry_filename);
 
@@ -277,7 +289,7 @@ static gboolean gmessage_process_part(GMimeObject* object,
 				? g_strdup_printf("%s//%s", eml_filename, internal_path)
 				: g_strdup_printf("%s//0", eml_filename);
 				sond_process_file_do_rec(wctx, inner_buf, inner_size, msg_filename,
-						&processed, &proc_size, out_pdf_count);
+						&processed, &proc_size, out_pdf_count, -1, -1);
 				g_free(msg_filename);
 				g_free(inner_buf);
 
@@ -324,7 +336,7 @@ static gboolean gmessage_process_part(GMimeObject* object,
 				? g_strdup_printf("%s//%s", eml_filename, internal_path)
 				: g_strdup_printf("%s//0", eml_filename);
 		sond_process_file_do_rec(wctx, part_data, part_size, part_filename,
-				&processed, &proc_size, out_pdf_count);
+				&processed, &proc_size, out_pdf_count, -1, -1);
 		g_free(part_filename);
 		g_free(part_data);
 
@@ -458,7 +470,7 @@ static gint process_emb_file(fz_context* ctx, pdf_obj* dict,
 	gsize size_out = 0;
 
 	sond_process_file_do_rec(((ProcessPdfData*)data)->wctx, data_buf, len, filename_emb,
-			&data_out, &size_out, ((ProcessPdfData*)data)->out_pdf_count);
+			&data_out, &size_out, ((ProcessPdfData*)data)->out_pdf_count, -1, -1);
 	fz_drop_buffer(((ProcessPdfData*)data)->wctx->ctx, buf);
 
 	if (!data_out) { //kein Fehler, nur nichts zu tun
@@ -521,6 +533,7 @@ static gint process_emb_file(fz_context* ctx, pdf_obj* dict,
 static gint process_pdf_for_ocr(guchar* data, gsize size,
 		gchar const* filename, SondProcessFileCtx* wctx,
 		guchar** out_data, gsize* out_size, gint* out_pdf_count,
+		gint seite_von, gint seite_bis,
 		GError** error) {
 	pdf_document* doc = NULL;
 	fz_stream* file = NULL;
@@ -558,7 +571,7 @@ static gint process_pdf_for_ocr(guchar* data, gsize size,
 
 	//pdf-page-tree OCRen
 	rc = sond_ocr_pdf_doc(wctx->ctx, wctx->ocr_pool, doc,
-			(SondOcrMode) wctx->ocr_mode,
+			(SondOcrMode) wctx->ocr_mode, seite_von, seite_bis,
 			wctx->log_func, wctx->log_func_data, error);
 	if (rc == -1) {
 		pdf_drop_document(wctx->ctx, doc);
@@ -589,7 +602,8 @@ static gint process_pdf_for_ocr(guchar* data, gsize size,
 
 static void sond_process_file_do_rec(SondProcessFileCtx* wctx,
 		guchar* data, gsize size, gchar const* filename,
-		guchar** out_data, gsize* out_size, gint* out_pdf_count) {
+		guchar** out_data, gsize* out_size, gint* out_pdf_count,
+		gint seite_von, gint seite_bis) {
 	GError* error = NULL;
 	gchar* mime_type = NULL;
 	gint rc = 0;
@@ -613,7 +627,7 @@ static void sond_process_file_do_rec(SondProcessFileCtx* wctx,
 
 	if (!g_strcmp0(mime_type, "application/pdf"))
 		rc = process_pdf_for_ocr(data, size, filename, wctx,
-				out_data, out_size, out_pdf_count, &error);
+				out_data, out_size, out_pdf_count, seite_von, seite_bis, &error);
 	else if (!g_strcmp0(mime_type, "application/zip"))
 		rc = process_zip_for_ocr(data, size, filename, wctx,
 				out_data, out_size, out_pdf_count, &error);
@@ -637,7 +651,7 @@ static void sond_process_file_do_rec(SondProcessFileCtx* wctx,
 			wctx->index_ctx, filename,
 			(*out_data && *out_size > 0) ? *out_data : data,
 			(*out_data && *out_size > 0) ? *out_size : size,
-			mime_type);
+			mime_type, seite_von, seite_bis, wctx->ocr_mode);
 
 	g_free(mime_type);
 
@@ -650,22 +664,18 @@ static void sond_process_file_do_rec(SondProcessFileCtx* wctx,
 
 void sond_process_file(SondProcessFileCtx* wctx,
 		guchar* data, gsize size, gchar const* file_part,
-		guchar** out_data, gsize* out_size, gint* out_pdf_count) {
+		guchar** out_data, gsize* out_size, gint* out_pdf_count,
+		gint seite_von, gint seite_bis) {
 
-	if (wctx->index_ctx) {
-		GError* error = NULL;
-
-		if (!sond_index_ctx_clear_file(wctx->index_ctx, file_part, &error)) {
-			if (wctx->log_func)
-				wctx->log_func(wctx->log_func_data,
-						"sond_process_file: clear_file '%s': %s",
-						file_part, error ? error->message : "unknown");
-			g_clear_error(&error);
-		}
-	}
-
+	/* Kein pauschales clear_file mehr vor dem (Neu-)Indizieren: die
+	 * Invalidierung/Ersetzung passiert jetzt seitenweise innerhalb von
+	 * sond_index() (sond_index_ctx_should_process_page/_clear_page), damit
+	 * a) ein auf einen Seitenbereich beschränkter Lauf nicht versehentlich
+	 * andere, bereits indizierte Seiten derselben Datei mitlöscht, und
+	 * b) unveränderte, bereits ausreichend indizierte Seiten übersprungen
+	 * werden können. */
 	sond_process_file_do_rec(wctx, data, size, file_part,
-			out_data, out_size, out_pdf_count);
+			out_data, out_size, out_pdf_count, seite_von, seite_bis);
 
 	return;
 }
@@ -705,11 +715,12 @@ static void clean_hashtable(GHashTable* files) {
 void sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files) {
 	GHashTableIter iter = { 0 };
 	gpointer key = NULL;
+	gpointer value = NULL;
 
 	clean_hashtable(files);
 
 	g_hash_table_iter_init(&iter, files);
-	while (g_hash_table_iter_next(&iter, &key, NULL)) {
+	while (g_hash_table_iter_next(&iter, &key, &value)) {
 		GBytes *bytes = NULL;
 		gconstpointer data = NULL;
 		GError* error = NULL;
@@ -718,6 +729,9 @@ void sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files) {
 		guchar* out_data = NULL;
 		gsize out_size = 0;
 		gint out_pdf_count = 0;
+		SondPageRange* range = (SondPageRange*) value; /* NULL = ganze Datei */
+		gint seite_von = range ? range->von : -1;
+		gint seite_bis = range ? range->bis : -1;
 
 		if (g_atomic_int_get(&wctx->cancel))
 			break;
@@ -742,7 +756,7 @@ void sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files) {
 		data = g_bytes_get_data(bytes, &length);
 
 		sond_process_file(wctx, (guchar*) data, length, file_part,
-				&out_data, &out_size, &out_pdf_count);
+				&out_data, &out_size, &out_pdf_count, seite_von, seite_bis);
 		g_bytes_unref(bytes);
 
 		if (out_data && out_size > 0) {

@@ -2650,8 +2650,12 @@ static gint sond_tvfm_item_get_fileparts(SondTVFMItem *stvfm_item,
 		 * Ref pro Key. sond_file_part gehört sonst dem stvfm_item (dessen
 		 * eigene Ref), ohne g_object_ref() hier würde die Hashtable beim
 		 * Zerstören eine fremde Ref freigeben und damit ein Objekt, das noch
-		 * im Treeview angezeigt wird, vorzeitig finalisieren. */
-		g_hash_table_add(ht, g_object_ref(stvfm_item_priv->sond_file_part));
+		 * im Treeview angezeigt wird, vorzeitig finalisieren.
+		 * Wert explizit NULL (nicht g_hash_table_add(), das würde value ==
+		 * key setzen) - sond_process_fileparts() liest den Wert als
+		 * SondPageRange* (NULL == ganze Datei); dieser Baum (BAUM_FS) kennt
+		 * keine Anbindungen, hier ist immer die ganze Datei gemeint. */
+		g_hash_table_insert(ht, g_object_ref(stvfm_item_priv->sond_file_part), NULL);
 
 	return 0;
 }

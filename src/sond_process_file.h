@@ -56,9 +56,28 @@ typedef struct _SondProcessFileCtx {
     gint ocr_mode;
 } SondProcessFileCtx;
 
+/**
+ * SondPageRange:
+ * @von: erste Seite (0-basiert), -1 = ganze Datei
+ * @bis: letzte Seite (0-basiert, inklusive), -1 = ganze Datei
+ *
+ * Seitenbereich, auf den Indizierung/OCR für eine Datei beschränkt werden
+ * soll (z.B. weil nur eine an einen Baum-Punkt angebundene Teilstrecke
+ * einer großen PDF interessiert). Wird als Wert in der GHashTable an
+ * sond_process_fileparts() übergeben - ein NULL-Wert bedeutet "ganze Datei".
+ */
+typedef struct _SondPageRange {
+    gint von;
+    gint bis;
+} SondPageRange;
+
+SondPageRange* sond_page_range_new(gint von, gint bis);
+void sond_page_range_free(gpointer p);
+
 void sond_process_file(SondProcessFileCtx* wctx,
 		guchar* data, gsize size, gchar const* filename,
-		guchar** out_data, gsize* out_size, gint* out_pdf_count);
+		guchar** out_data, gsize* out_size, gint* out_pdf_count,
+		gint seite_von, gint seite_bis);
 
 void sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files);
 

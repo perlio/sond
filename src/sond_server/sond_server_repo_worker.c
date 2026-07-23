@@ -23,6 +23,7 @@
 #include "../sond_misc.h"
 #include "../sond_ocr.h"
 #include "../sond_process_file.h"
+#include "../sond_index.h"
 
 #include <libsoup/soup.h>
 #include <json-glib/json-glib.h>
@@ -1412,8 +1413,24 @@ static gpointer seafile_repo_worker_thread(gpointer user_data) {
         /* Verarbeiten */
         ProcessedFile result = { 0 };
 
+        /* sond_process_file() macht selbst kein pauschales clear_file mehr
+         * (das würde die seitenweise "schon ausreichend indiziert"-Prüfung
+         * für unveränderte Dateien unterlaufen). Hier ist aber bekannt,
+         * dass die Datei laut mtime-Vergleich tatsächlich geändert wurde
+         * (should_process==TRUE) - also explizit vorher den alten Index
+         * für diese Datei verwerfen, damit veralteter Inhalt nicht stehen
+         * bleibt bzw. fälschlich als "schon erledigt" übersprungen wird. */
+        if (wctx.index_ctx) {
+            GError *clear_error = NULL;
+            if (!sond_index_ctx_clear_file(wctx.index_ctx, file->path, &clear_error)) {
+                ocr_log_add_message(log_entry, "clear_file '%s' failed: %s",
+                        file->path, clear_error ? clear_error->message : "unknown");
+                g_clear_error(&clear_error);
+            }
+        }
+
 		sond_process_file(&wctx, data, data_size, file->path,
-        				&result.data, &result.size, &result.pdf_count);
+        				&result.data, &result.size, &result.pdf_count, -1, -1);
         g_free(data);
 
         /* PDF Count aktualisieren */

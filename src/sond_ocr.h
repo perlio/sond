@@ -101,8 +101,10 @@ SondOcrTask* sond_ocr_task_new(fz_context* ctx, pdf_document* doc,
 		void (*log_func)(void*, gchar const*, ...), gpointer log_func_data,
 		GError** error);
 
+/* seite_von/seite_bis (0-basiert, inklusive): nur dieser Seitenbereich wird
+ * OCRt, -1/-1 = ganzes Dokument. */
 gint sond_ocr_pdf_doc(fz_context* ctx, SondOcrPool* ocr_pool, pdf_document* doc,
-		SondOcrMode mode,
+		SondOcrMode mode, gint seite_von, gint seite_bis,
 		void (*log_func)(void*, gchar const*, ...), gpointer log_func_data,
 		GError** error);
 
