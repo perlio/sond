@@ -539,6 +539,36 @@ ZondPdfDocument* zond_pdf_document_is_open(SondFilePartPDF* sfp_pdf) {
 	return NULL;
 }
 
+/* Wie zond_pdf_document_is_open(), aber Suche über den Dateinamen statt
+ * über einen bereits vorliegenden SondFilePartPDF*. Wird gebraucht, wenn
+ * (wie bei der Indexsuche) nur der Dateiname bekannt ist und ein teurer
+ * Baum-Lookup zur Ermittlung des SondFilePart vermieden werden soll. */
+ZondPdfDocument* zond_pdf_document_find_by_filename(const gchar* filename) {
+	ZondPdfDocumentClass *klass = g_type_class_peek(
+			zond_pdf_document_get_type());
+
+	if (!klass || !filename)
+		return NULL;
+
+	for (gint i = 0; i < klass->arr_pdf_documents->len; i++) {
+		ZondPdfDocument *zond_pdf_document = NULL;
+		SondFilePartPDF *sfp_pdf = NULL;
+		gchar *fp = NULL;
+
+		zond_pdf_document = g_ptr_array_index(klass->arr_pdf_documents, i);
+		sfp_pdf = zond_pdf_document_get_sfp_pdf(zond_pdf_document);
+		fp = sfp_pdf ? sond_file_part_get_filepart(SOND_FILE_PART(sfp_pdf)) : NULL;
+
+		if (fp && !g_strcmp0(fp, filename)) {
+			g_free(fp);
+			return zond_pdf_document;
+		}
+		g_free(fp);
+	}
+
+	return NULL;
+}
+
 static ZondPdfDocument*
 zond_pdf_document_open(SondFilePartPDF* sfp_pdf, gint von, gint bis,
 		GError **error) {

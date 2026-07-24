@@ -31,12 +31,15 @@
 #include "zond_init.h"
 #include "zond_treeviewfm.h"
 #include "zond_treeview.h"
+#include "zond_pdf_document.h"
 
 #include "10init/app_window.h"
 #include "20allgemein/project.h"
 
 #include "40viewer/viewer.h"
 #include "40viewer/document.h"
+
+#include "99conv/general.h"
 
 
 /* -------------------------------------------------------------------------
@@ -50,9 +53,9 @@ zond_indexsuche_row_activated(GtkTreeView *treeview, GtkTreePath *tree_path,
     GtkTreeModel *model        = NULL;
     GtkTreeIter   iter         = { 0 };
     gchar        *filename     = NULL;
-    gchar        *page_nr_str  = NULL;
     gchar        *char_pos_str = NULL;
-    gint          page_nr      = -1;
+    gchar        *page_nr_raw_str = NULL;
+    gint          page_nr      = -1; /* roh, Stand: letzte Indizierung */
     gint          char_pos_in_page = 0;
     gint          rc           = 0;
     GError       *error        = NULL;
@@ -66,13 +69,18 @@ zond_indexsuche_row_activated(GtkTreeView *treeview, GtkTreePath *tree_path,
     gtk_tree_model_get_iter(model, &iter, tree_path);
     gtk_tree_model_get(model, &iter,
             0, &filename,
-            1, &page_nr_str,
             3, &char_pos_str,
+            4, &page_nr_raw_str,
             -1);
 
-    if (page_nr_str && *page_nr_str)
-        page_nr = atoi(page_nr_str) - 1;
-    g_free(page_nr_str);
+    /* Absichtlich die rohe (Spalte 4), nicht die beim Aufbau der Liste
+     * bereits angezeigte Seite (Spalte 1) verwenden: seitdem können in
+     * einem offenen Viewer weitere Seiten eingefügt/gelöscht worden sein.
+     * Die Live-Übersetzung erfolgt daher unten, unmittelbar vor der
+     * Navigation, immer neu aus der rohen Seite. */
+    if (page_nr_raw_str && *page_nr_raw_str)
+        page_nr = atoi(page_nr_raw_str);
+    g_free(page_nr_raw_str);
 
     if (char_pos_str && *char_pos_str)
         char_pos_in_page = atoi(char_pos_str);
@@ -105,9 +113,25 @@ zond_indexsuche_row_activated(GtkTreeView *treeview, GtkTreePath *tree_path,
 
             if (sfp && SOND_IS_FILE_PART_PDF(sfp) && page_nr >= 0) {
             	DisplayedDocument* dd = NULL;
+            	ZondPdfDocument* zpdfd_open = NULL;
+            	gint page_nr_akt = page_nr;
+
+            	/* Erneut (unmittelbar vor der Navigation) gegen den JETZT
+            	 * aktuellen Live-Stand übersetzen - nicht gegen den Stand
+            	 * beim Aufbau der Ergebnisliste. Falls die Datei offen ist
+            	 * und dort inzwischen (auch erst nach Öffnen der Liste)
+            	 * Seiten eingefügt/gelöscht wurden, ändert sich sonst die
+            	 * Zielseite zwischen Anzeige und Klick. */
+            	zpdfd_open = zond_pdf_document_is_open(SOND_FILE_PART_PDF(sfp));
+            	if (zpdfd_open) {
+            		Anbindung anbindung = { { page_nr, 0 }, { page_nr, EOP } };
+
+            		anbindung_aktualisieren(zpdfd_open, &anbindung);
+            		page_nr_akt = anbindung.von.seite;
+            	}
 
             	/* PDF → interner PDF-Viewer */
-                PdfPos pos_pdf = { page_nr, 0 };
+                PdfPos pos_pdf = { page_nr_akt, 0 };
                 dd = document_new_displayed_document(SOND_FILE_PART_PDF(sfp), NULL, NULL,
                 		FALSE, NULL, &error);
                 if (!dd) {
@@ -128,7 +152,7 @@ zond_indexsuche_row_activated(GtkTreeView *treeview, GtkTreePath *tree_path,
                 } else if (term && zond->arr_pv->len > 0) {
                     PdfViewer *pv = g_ptr_array_index(zond->arr_pv,
                             zond->arr_pv->len - 1);
-                    viewer_highlight_at_char_pos(pv, page_nr,
+                    viewer_highlight_at_char_pos(pv, page_nr_akt,
                             char_pos_in_page, term);
                 }
             } else if (sfp) {
@@ -318,11 +342,16 @@ zond_indexsuche_do(Projekt *zond, GHashTable* ht_fileparts) {
 
             /* Ergebnisfenster:
              * Spalte 0: Dateiname
-             * Spalte 1: Seite (1-basiert)
+             * Spalte 1: Seite (1-basiert, zum Anzeigezeitpunkt live umgerechnet)
              * Spalte 2: Fundstelle (snippet)
              * Spalte 3: char_pos_in_page (versteckt)
+             * Spalte 4: rohe, unübersetzte Seite aus dem Index (versteckt) -
+             *           wird beim Klick erneut gegen den dann aktuellen
+             *           Live-Stand übersetzt (siehe zond_indexsuche_row_
+             *           activated), falls zwischen Aufbau der Liste und
+             *           Klick weitere Seiten eingefügt/gelöscht wurden.
              */
-            gchar const *cols[] = { "Datei", "Seite", "Fundstelle", "", NULL };
+            gchar const *cols[] = { "Datei", "Seite", "Fundstelle", "", "", NULL };
             gchar *titel = g_strdup_printf(
                     "Index-Suche: \u201e%s\u201c", term);
             GtkWidget *rv = sond_result_view_new(
@@ -338,21 +367,46 @@ zond_indexsuche_do(Projekt *zond, GHashTable* ht_fileparts) {
 
             for (guint i = 0; i < hits->len; i++) {
                 SondIndexHit *hit = g_ptr_array_index(hits, i);
-                gchar *page_str = (hit->page_nr >= 0)
-                        ? g_strdup_printf("%d", hit->page_nr + 1)
+                gint page_nr_akt = hit->page_nr;
+
+                /* Ist die Datei schon offen und liegen dort anhängige
+                 * (noch nicht gespeicherte) Seiten einfügen/löschen vor,
+                 * dann bezieht sich hit->page_nr (Stand: letzte Indizierung)
+                 * ggf. auf eine andere Seite als im aktuellen Live-Zustand.
+                 * Über eine Ganze-Seite-Anbindung {page_nr,0}-{page_nr,EOP}
+                 * schon hier - vor dem Speichern - auf den aktuellen Stand
+                 * übersetzen, damit die angezeigte Seitenzahl stimmt. */
+                if (page_nr_akt >= 0) {
+                    ZondPdfDocument *zpdfd_open =
+                            zond_pdf_document_find_by_filename(hit->filename);
+
+                    if (zpdfd_open) {
+                        Anbindung anbindung = { { page_nr_akt, 0 },
+                                { page_nr_akt, EOP } };
+
+                        anbindung_aktualisieren(zpdfd_open, &anbindung);
+                        page_nr_akt = anbindung.von.seite;
+                    }
+                }
+
+                gchar *page_str = (page_nr_akt >= 0)
+                        ? g_strdup_printf("%d", page_nr_akt + 1)
                         : g_strdup("");
                 gchar *char_pos_str = g_strdup_printf("%d",
                         hit->char_pos_in_page);
+                gchar *page_raw_str = g_strdup_printf("%d", hit->page_nr);
                 gchar const *row[] = {
                         hit->filename,
                         page_str,
                         hit->snippet ? hit->snippet : "",
                         char_pos_str,
+                        page_raw_str,
                         NULL
                 };
                 sond_result_view_append(rv, row);
                 g_free(page_str);
                 g_free(char_pos_str);
+                g_free(page_raw_str);
             }
 
             g_ptr_array_unref(hits);
