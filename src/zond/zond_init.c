@@ -33,6 +33,10 @@
 #include "../sond_fileparts.h"
 #include "../sond_log_and_error.h"
 #include "../sond_file_helper.h"
+/* sond_chat.h bewußt nicht mehr eingebunden - Chat-Funktion fürs Release
+ * abgeklemmt (siehe Makefile-Kommentar, Ziel "zond"). zond->chat_ctx bleibt
+ * dadurch immer NULL (nichts setzt ihn mehr), daher hier auch kein
+ * Freigeben mehr nötig. */
 
 #include "zond_init.h"
 #include "zond_pdf_document.h"

@@ -38,6 +38,14 @@ G_BEGIN_DECLS
  * @n_embd:        Dimension der Embedding-Vektoren
  * @chunk_size:    Maximale Chunk-Größe in Zeichen
  * @chunk_overlap: Überlappung zwischen Chunks in Zeichen
+ * @embedding_model_changed:
+ *                 TRUE, wenn beim Öffnen festgestellt wurde, daß das jetzt
+ *                 konfigurierte Embedding-Modell von dem abweicht, mit dem
+ *                 die in der DB gespeicherten Embeddings zuletzt berechnet
+ *                 wurden (Name oder Dimension unterschiedlich). Vorhandene
+ *                 Embeddings sind dann nicht mehr mit neu berechneten
+ *                 vergleichbar und müssen neu berechnet werden, siehe
+ *                 sond_index_ctx_embedding_model_changed().
  */
 typedef struct _SondIndexCtx {
     sqlite3  *db;
@@ -49,6 +57,7 @@ typedef struct _SondIndexCtx {
 #endif
     gint      chunk_size;
     gint      chunk_overlap;
+    gboolean  embedding_model_changed;
 } SondIndexCtx;
 
 /* =======================================================================
@@ -80,6 +89,36 @@ SondIndexCtx* sond_index_ctx_new(gchar const *db_path,
  * Schließt DB und llama-Kontext und gibt alle Ressourcen frei.
  */
 void sond_index_ctx_free(SondIndexCtx *ctx);
+
+/**
+ * sond_index_ctx_embedding_model_changed:
+ * @ctx: SondIndexCtx
+ *
+ * Siehe @embedding_model_changed in SondIndexCtx. Aufrufer sollten bei TRUE
+ * ein Re-Embedding der vorhandenen Chunks anstoßen (bestehende Embeddings
+ * stammen von einem anderen Modell und dürfen nicht mit neu berechneten
+ * verglichen werden), statt sie unverändert weiterzubenutzen.
+ *
+ * Returns: FALSE, wenn ctx NULL ist oder kein Modellwechsel festgestellt
+ *          wurde.
+ */
+gboolean sond_index_ctx_embedding_model_changed(SondIndexCtx *ctx);
+
+/**
+ * sond_index_ctx_has_embeddings:
+ * @ctx: SondIndexCtx
+ *
+ * Ein fehlendes/nicht ladbares Embedding-Modell (Datei fehlt, da bewußt
+ * nicht mit dem Release ausgeliefert - der Nutzer lädt sie sich selbst
+ * herunter) läßt sond_index_ctx_new() nicht scheitern, sondern deaktiviert
+ * nur die Embedding-Funktion für diese Sitzung. Aufrufer, die eine
+ * semantische Suche/Chat-Funktion anbieten, sollten dies hiermit prüfen und
+ * dem Nutzer eine klare Meldung zeigen (welche Datei fehlt, woher zu
+ * bekommen), statt die Funktion kommentarlos verschwinden zu lassen.
+ *
+ * Returns: TRUE, wenn ein Embedding-Modell erfolgreich geladen ist.
+ */
+gboolean sond_index_ctx_has_embeddings(SondIndexCtx *ctx);
 
 /**
  * sond_index_ctx_clear_file:
@@ -247,11 +286,14 @@ gboolean sond_index_ctx_rename_file(SondIndexCtx *ctx,
  * bzw. über das GPtrArray-free_func freigegeben werden.
  */
 typedef struct _SondIndexHit {
-    gchar *filename;         /* filepart-Pfad, wie in chunks gespeichert          */
-    gint   page_nr;          /* Seitennummer (-1 wenn nicht zutreffend)           */
-    gint   char_pos;         /* Zeichenposition im Dokument                       */
-    gint   char_pos_in_page; /* Byte-Offset des Treffers innerhalb der Seite      */
-    gchar *snippet;          /* Kontextausschnitt mit markierten Treffern         */
+    gchar  *filename;         /* filepart-Pfad, wie in chunks gespeichert          */
+    gint    page_nr;          /* Seitennummer (-1 wenn nicht zutreffend)           */
+    gint    char_pos;         /* Zeichenposition im Dokument                       */
+    gint    char_pos_in_page; /* Byte-Offset des Treffers innerhalb der Seite      */
+    gchar  *snippet;          /* Kontextausschnitt mit markierten Treffern         */
+    gdouble score;            /* nur bei sond_index_semantic_search(): Cosine-
+                                * Ähnlichkeit (-1..1, höher = ähnlicher). Bei
+                                * sond_index_search() immer 0 (unbenutzt). */
 } SondIndexHit;
 
 /**
@@ -280,6 +322,38 @@ GPtrArray* sond_index_search(SondIndexCtx *ctx,
                               gchar const  *term,
                               gchar const  *context,
                               GError      **error);
+
+/* =======================================================================
+ * Semantische Suche (Embeddings)
+ * ======================================================================= */
+
+/**
+ * sond_index_semantic_search:
+ * @ctx:     SondIndexCtx
+ * @query:   Anfragetext in natürlicher Sprache (wird mit dem konfigurierten
+ *           Embedding-Modell embedded)
+ * @top_k:   maximale Anzahl Treffer (<=0: Standardwert 15)
+ * @error:   GError
+ *
+ * Embedded @query und vergleicht das Ergebnis per Cosine-Similarity
+ * (brute-force in C, keine sqlite-vec/vec0-Abhängigkeit) gegen alle in
+ * chunks gespeicherten Embeddings. Liefert die @top_k ähnlichsten Treffer,
+ * absteigend nach SondIndexHit::score sortiert.
+ *
+ * Einschränkung auf eine Auswahl/Anbindung (wie bei sond_index_search()
+ * durch den Aufrufer anhand von filename/page_nr) ist hier bewußt NICHT
+ * eingebaut - der Aufrufer filtert das Ergebnis nach denselben Regeln wie
+ * bei der Volltextsuche (siehe zond_indexsuche.c).
+ *
+ * Voraussetzung: sond_index_ctx_has_embeddings(ctx) - sonst wird ein
+ * GError gesetzt und NULL zurückgegeben (kein stiller Leerlauf).
+ *
+ * Returns: (transfer full) GPtrArray* von SondIndexHit*, NULL bei Fehler.
+ */
+GPtrArray* sond_index_semantic_search(SondIndexCtx *ctx,
+                                       gchar const  *query,
+                                       gint          top_k,
+                                       GError      **error);
 
 /* =======================================================================
  * Einstiegspunkt aus dispatch_buffer

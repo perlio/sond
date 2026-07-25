@@ -20,7 +20,17 @@ LDFLAGS := -Wl,--allow-multiple-definition
 
 # Find source files
 ifneq (,$(findstring $(MAKECMDGOALS), zond))
-SRCS += $(filter-out $(SRC_DIRS)/zond/40viewer/stand_alone.c, \
+# Embeddings/Chat (semantische Suche, lokales LLM) sind für das anstehende
+# Release bewußt wieder abgeklemmt (nicht ausgereift genug) - dazu:
+# sond_chat.c (Backend) und zond_chat.c (UI-Fenster/Menüeintrag) aus dem
+# Build ausgeschlossen, -DSOND_WITH_EMBEDDINGS entfernt (schaltet auch die
+# entsprechenden Codepfade in sond_index.c per #ifdef ab) und die
+# llama-Abhängigkeit entfernt, damit das Release keine llama.cpp/ggml-DLLs
+# braucht. Alles über git wiederherstellbar/reversibel, sobald die
+# Funktionalität reif genug ist. Die reine Volltextsuche (FTS5,
+# sond_index_search()/zond_indexsuche.c) ist davon nicht betroffen und
+# bleibt voll funktionsfähig.
+SRCS += $(filter-out $(SRC_DIRS)/zond/40viewer/stand_alone.c $(SRC_DIRS)/zond/zond_chat.c, \
 	$(shell find $(SRC_DIRS)/zond -name '*.c')) \
 	$(SRC_DIRS)/misc_stdlib.c $(SRC_DIRS)/misc.c \
 	$(SRC_DIRS)/sond_fileparts.c $(SRC_DIRS)/sond_treeview.c $(SRC_DIRS)/sond_treeviewfm.c \
@@ -129,6 +139,10 @@ $(GSCHEMAS_COMPILED): $(SCHEMA_SOURCES)
 	glib-compile-schemas $(COMPILED_SCHEMA_DIR)
 	@echo "Removing temporary system schemas..."
 	@cd $(COMPILED_SCHEMA_DIR) && rm -f org.gtk.Settings.FileChooser.gschema.xml org.gtk.Settings.ColorChooser.gschema.xml
+	@echo "Verlinke gschemas.compiled nach Debug/Release (statt Kopie, damit es bei jeder Neukompilierung automatisch aktuell bleibt)..."
+	@mkdir -p Debug/share/glib-2.0/schemas Release/share/glib-2.0/schemas
+	@ln -sf $(CURDIR)/$(GSCHEMAS_COMPILED) Debug/share/glib-2.0/schemas/gschemas.compiled
+	@ln -sf $(CURDIR)/$(GSCHEMAS_COMPILED) Release/share/glib-2.0/schemas/gschemas.compiled
 
 # Clean
 .PHONY: clean

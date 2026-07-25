@@ -783,7 +783,8 @@ void sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files) {
 SondProcessFileCtx* sond_process_file_create_wctx(fz_context* ctx,
 		void (*log_func)(void*, gchar const*, ...), gpointer log_func_data,
 		gchar const* tessdata_path, gint num_ocr_threads,
-		gchar const* index_db_filename, GError **error) {
+		gchar const* index_db_filename, gchar const* embedding_model_path,
+		GError **error) {
 
 	SondProcessFileCtx* wctx = g_new0(SondProcessFileCtx, 1);
 
@@ -802,7 +803,8 @@ SondProcessFileCtx* sond_process_file_create_wctx(fz_context* ctx,
 	if (!wctx->ocr_pool)
 		return NULL;
 
-	wctx->index_ctx = sond_index_ctx_new(index_db_filename, NULL, 0, 0, error);
+	wctx->index_ctx = sond_index_ctx_new(index_db_filename,
+			embedding_model_path, 0, 0, error);
 	if (!wctx->index_ctx) {
 		sond_ocr_pool_free(wctx->ocr_pool);
 

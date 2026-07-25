@@ -38,6 +38,8 @@
 #include "../zond_treeview.h"
 #include "../zond_dbase.h"
 #include "../zond_indexsuche.h"
+/* zond_chat.h bewußt nicht mehr eingebunden - Chat-Funktion fürs Release
+ * abgeklemmt (siehe Makefile-Kommentar, Ziel "zond"), noch nicht ausgereift. */
 #include "../zond_treeviewfm.h"
 #include "../zond_init.h"
 #include "../zond_version.h"
@@ -203,15 +205,61 @@ static gint ask_ocr_mode(GtkWindow *parent) {
 	return mode;
 }
 
-static void do_index_erstellen(Projekt *zond, gboolean sel_only) {
-	GError *error = NULL;
-	GHashTable *ht_index = NULL;
+gboolean zond_index_erstellen_ht(Projekt *zond, GHashTable *ht_index) {
 	InfoWindow *info_window = NULL;
 	gint ocr_mode = 0;
 
 	ocr_mode = ask_ocr_mode(GTK_WINDOW(zond->app_window));
-	if (ocr_mode == -1)
-		return;
+	if (ocr_mode == -1) {
+		g_hash_table_destroy(ht_index);
+		return FALSE;
+	}
+
+	zond->wctx->ocr_mode = ocr_mode;
+	info_window = info_window_open(zond->app_window, &zond->wctx->cancel,
+			"Index erstellen");
+	zond->wctx->log_func_data = (gpointer) info_window;
+	zond->wctx->cancel = 0;
+	struct _ThreadDataIndex *td = g_new0(struct _ThreadDataIndex, 1);
+	td->treeviewfm = SOND_TREEVIEWFM(zond->treeview[BAUM_FS]);
+	td->ht_index = ht_index;
+	td->wctx = zond->wctx;
+	info_window_set_message(info_window, "Indizierung wird gestartet");
+	GThread *thread = g_thread_new("ocr-doc", do_index_thread, td);
+	if (!thread) {
+		info_window_set_message(info_window, "Thread konnte nicht erzeugt werden");
+		g_free(td);
+		info_window_close(info_window);
+		g_hash_table_destroy(ht_index);
+		return FALSE;
+	}
+	/* NICHT als reine Busy-Loop (gtk_main_iteration_do(FALSE) im Dauerlauf
+	 * ohne jede Pause) - das beansprucht einen ganzen CPU-Kern ausschließlich
+	 * fürs Nichtstun-Pollen und konkurriert damit direkt mit den
+	 * Rechen-Threads der Embedding-Berechnung (die inzwischen bewußt alle
+	 * verfügbaren Kerne nutzen, siehe sond_index.c/n_threads) - auf einem
+	 * Laptop mit wenigen Kernen kann das die eigentliche Rechenzeit um ein
+	 * Vielfaches verlängern (Kernkonkurrenz/Scheduler-Thrashing). Deshalb:
+	 * anstehende Events abarbeiten, danach kurz schlafen statt sofort
+	 * erneut zu pollen. */
+	while (!g_atomic_int_get(&td->done)) {
+		while (gtk_events_pending())
+			gtk_main_iteration_do(FALSE);
+		g_usleep(20000);
+	}
+	g_thread_join(thread);
+	/* ht_index hält jetzt (nach dem Ref-Fix in
+	 * sond_tvfm_item_get_fileparts()) eine eigene Ref pro SondFilePart -
+	 * muss also freigegeben werden, sonst Leck. */
+	g_hash_table_destroy(ht_index);
+	g_free(td);
+	info_window_close(info_window);
+	return TRUE;
+}
+
+static void do_index_erstellen(Projekt *zond, gboolean sel_only) {
+	GError *error = NULL;
+	GHashTable *ht_index = NULL;
 
 	/* zond->baum_active ist hier bereits KEIN_BAUM: das Öffnen des
 	 * Headerbar-Menüs hat dem zuvor aktiven Treeview den Fokus entzogen
@@ -241,31 +289,8 @@ static void do_index_erstellen(Projekt *zond, gboolean sel_only) {
 		g_hash_table_destroy(ht_index);
 		return;
 	}
-	zond->wctx->ocr_mode = ocr_mode;
-	info_window = info_window_open(zond->app_window, &zond->wctx->cancel,
-			"Index erstellen");
-	zond->wctx->log_func_data = (gpointer) info_window;
-	zond->wctx->cancel = 0;
-	struct _ThreadDataIndex *td = g_new0(struct _ThreadDataIndex, 1);
-	td->treeviewfm = SOND_TREEVIEWFM(zond->treeview[BAUM_FS]);
-	td->ht_index = ht_index;
-	td->wctx = zond->wctx;
-	info_window_set_message(info_window, "Indizierung wird gestartet");
-	GThread *thread = g_thread_new("ocr-doc", do_index_thread, td);
-	if (!thread) {
-		info_window_set_message(info_window, "Thread konnte nicht erzeugt werden");
-		g_free(td);
-		return;
-	}
-	while (!g_atomic_int_get(&td->done))
-		gtk_main_iteration_do(FALSE);
-	g_thread_join(thread);
-	/* ht_index hält jetzt (nach dem Ref-Fix in
-	 * sond_tvfm_item_get_fileparts()) eine eigene Ref pro SondFilePart -
-	 * muss also freigegeben werden, sonst Leck. */
-	g_hash_table_destroy(ht_index);
-	g_free(td);
-	info_window_close(info_window);
+
+	zond_index_erstellen_ht(zond, ht_index);
 }
 
 static void cb_app_index_erstellen(GSimpleAction *a, GVariant *p, gpointer d) {
@@ -831,6 +856,8 @@ static GMenuModel* build_menu(Projekt *zond) {
 	g_menu_append_submenu(sec_index, "Index durchsuchen",
 			G_MENU_MODEL(sub_idx_such));
 	g_object_unref(sub_idx_such);
+	/* "Chat mit dem Index" bewußt entfernt - fürs Release abgeklemmt
+	 * (siehe Makefile-Kommentar, Ziel "zond"), noch nicht ausgereift. */
 	g_menu_append_section(m_proj, NULL, G_MENU_MODEL(sec_index));
 	g_object_unref(sec_index);
 

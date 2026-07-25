@@ -46,6 +46,7 @@ typedef struct sqlite3 sqlite3;
 typedef struct _ZondDBase ZondDBase;
 
 typedef struct _SondProcessFileCtx SondProcessFileCtx;
+typedef struct _SondChatCtx SondChatCtx;
 
 typedef struct pdf_document pdf_document;
 
@@ -144,6 +145,13 @@ typedef struct _Projekt {
 	GtkApplication *app;
 
 	SondProcessFileCtx *wctx;
+
+	/* Chat-Modell (Generierung): anders als wctx/index_ctx nicht an ein
+	 * offenes Projekt gebunden (dasselbe Modell bleibt beim Wechsel des
+	 * Projekts nutzbar) - daher hier auf Anwendungsebene, lazy angelegt
+	 * beim ersten "Chat"-Aufruf (siehe zond_chat.c) und in zond_cleanup()
+	 * wieder freigegeben. NULL, solange noch nicht benutzt. */
+	SondChatCtx *chat_ctx;
 
 	guint state; //Modifier Mask
 	Icon icon[NUMBER_OF_ICONS];

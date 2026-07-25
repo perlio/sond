@@ -516,6 +516,23 @@ static void project_open_cleanup(Projekt* zond, gboolean trees_loaded) {
 	zond->project_dir = NULL;
 }
 
+/* Pfad zu einer GGUF-Modelldatei ermitteln: konfigurierter GSettings-Wert
+ * (falls per Einstellungsdialog gesetzt), sonst Standardablage
+ * <exe_dir>/../models/<default_filename> - analog zum bestehenden
+ * <exe_dir>/../share/tessdata-Muster. Leerer GSettings-Wert ('') bedeutet
+ * "kein eigener Pfad gesetzt", genau wie beim schon vorhandenen
+ * "project"-Schlüssel. */
+gchar* resolve_model_path(Projekt* zond, gchar const* settings_key,
+		gchar const* default_filename) {
+	gchar *configured = g_settings_get_string(zond->settings, settings_key);
+
+	if (configured && *configured)
+		return configured;
+
+	g_free(configured);
+	return g_build_filename(zond->exe_dir, "../models", default_filename, NULL);
+}
+
 /**
  * Open a project (create new or open existing)
  * @param zond The project structure
@@ -570,10 +587,13 @@ gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, GError 
 	}
 
 	gchar* datadir = g_build_filename(zond->exe_dir, "../share/tessdata", NULL);
+	gchar* embedding_model_path = resolve_model_path(zond, "embedding-model-path",
+			"Qwen3-Embedding-0.6B-Q8_0.gguf");
 	zond->wctx = sond_process_file_create_wctx(zond->ctx,
 			(void (*)(gpointer, gchar const*, ...)) info_window_set_message_thread_safe,
-			NULL, datadir, 4, ".sond_index.db", error);
+			NULL, datadir, 4, ".sond_index.db", embedding_model_path, error);
 	g_free(datadir);
+	g_free(embedding_model_path);
 	if (!zond->wctx) {
 		project_open_cleanup(zond, trees_loaded);
 

@@ -22,6 +22,8 @@
 #define KEY_NUM_COLS     "sond-rv-num-cols"
 #define KEY_FILTER_DATA  "sond-rv-filter-data"
 #define KEY_COUNT_LABEL  "sond-rv-count-label"
+#define KEY_DETAIL_VIEW  "sond-rv-detail-view"
+#define KEY_DETAIL_COL   "sond-rv-detail-col"
 
 typedef struct {
     gchar    *needle;      /* aktueller Filtertext, kleingeschrieben, ggf. NULL/leer */
@@ -262,25 +264,244 @@ static gboolean cb_treeview_key_press(GtkWidget *treeview, GdkEventKey *event,
 }
 
 /* ==========================================================================
- * Spaltenbreite -> Zeilenumbruch der letzten (Fundstelle-)Spalte anpassen
+ * Spaltenfarbe + Fundstelle-Kürzung: alles per Hand in fertigen Pango-
+ * Markup gebaut statt über Zellrenderer-Eigenschaften (wrap-mode/lines/
+ * height/foreground) - die hatten sich in der Praxis als unzuverlässig
+ * erwiesen (weder Höhe noch Farbe kamen reproduzierbar an). Mit Markup
+ * direkt im gerenderten Text sind Farbe und Zeilenumbruch garantiert.
  * ======================================================================== */
 
-static void cb_column_width_changed(GObject *col, GParamSpec *pspec,
-        gpointer renderer_ptr) {
-    GtkCellRenderer *renderer = GTK_CELL_RENDERER(renderer_ptr);
-    gint width = gtk_tree_view_column_get_width(GTK_TREE_VIEW_COLUMN(col));
-    gint wrap_width = width - 16;
-    gint old_wrap_width = 0;
+#define RV_ROW_COLOR "#3a5a7a"
 
-    if (width <= 0)
+/* Fundstelle-Vorschau: fest auf RV_SNIPPET_PREVIEW_MAXCHARS Zeichen
+ * gekürzt und auf genau RV_SNIPPET_PREVIEW_LINES Zeilen aufgeteilt (Bruch
+ * am nächsten Leerzeichen zur Mitte) - für alle Treffer gleich hoch. Der
+ * volle Text steht im Detailbereich (Master-Detail, s.u.). */
+#define RV_SNIPPET_PREVIEW_MAXCHARS 200
+#define RV_SNIPPET_PREVIEW_LINES    2
+
+static gchar* rv_split_lines(gchar const *s, gint n_lines) {
+    GString *out = NULL;
+    glong    len = g_utf8_strlen(s, -1);
+
+    if (n_lines < 2 || len == 0)
+        return g_strdup(s);
+
+    out = g_string_new(NULL);
+
+    gchar const *rest      = s;
+    glong        rest_len  = len;
+    for (gint line = 0; line < n_lines - 1 && rest_len > 0; line++) {
+        glong        target   = rest_len / (n_lines - line);
+        gchar const *mid_ptr  = g_utf8_offset_to_pointer(rest, target);
+        gchar const *brk      = NULL;
+
+        for (gchar const *p = mid_ptr; *p; p = g_utf8_next_char(p))
+            if (*p == ' ') { brk = p; break; }
+        if (!brk)
+            for (gchar const *p = mid_ptr; p > rest; p = g_utf8_prev_char(p))
+                if (*p == ' ') { brk = p; break; }
+
+        if (!brk)
+            break; /* kein Leerzeichen mehr gefunden - Rest in einer Zeile */
+
+        g_string_append_len(out, rest, brk - rest);
+        g_string_append_c(out, '\n');
+        rest     = brk + 1;
+        rest_len = g_utf8_strlen(rest, -1);
+    }
+    g_string_append(out, rest);
+
+    return g_string_free(out, FALSE);
+}
+
+static void cb_snippet_cell_data(GtkTreeViewColumn *col, GtkCellRenderer *renderer,
+        GtkTreeModel *model, GtkTreeIter *iter, gpointer user_data) {
+    gint   col_idx = GPOINTER_TO_INT(user_data);
+    gchar *text    = NULL;
+    gchar *cut     = NULL;
+    gchar *split   = NULL;
+    gchar *escaped = NULL;
+    gchar *markup  = NULL;
+
+    gtk_tree_model_get(model, iter, col_idx, &text, -1);
+
+    if (text && g_utf8_strlen(text, -1) > RV_SNIPPET_PREVIEW_MAXCHARS) {
+        gchar const *end = g_utf8_offset_to_pointer(text, RV_SNIPPET_PREVIEW_MAXCHARS);
+        cut = g_strdup_printf("%.*s…", (gint) (end - text), text);
+    } else
+        cut = g_strdup(text ? text : "");
+
+    split = rv_split_lines(cut, RV_SNIPPET_PREVIEW_LINES);
+
+    escaped = g_markup_escape_text(split, -1);
+    markup  = g_strdup_printf("<span foreground=\"" RV_ROW_COLOR "\">%s</span>",
+            escaped);
+
+    g_object_set(renderer, "markup", markup, NULL);
+
+    g_free(markup);
+    g_free(escaped);
+    g_free(split);
+    g_free(cut);
+    g_free(text);
+}
+
+/* Metadaten-Spalten (Datei, Seite, ...): keine Kürzung, aber dieselbe
+ * Farbe wie die Fundstelle. */
+static void cb_metadata_cell_data(GtkTreeViewColumn *col, GtkCellRenderer *renderer,
+        GtkTreeModel *model, GtkTreeIter *iter, gpointer user_data) {
+    gint   col_idx = GPOINTER_TO_INT(user_data);
+    gchar *text    = NULL;
+    gchar *escaped = NULL;
+    gchar *markup  = NULL;
+
+    gtk_tree_model_get(model, iter, col_idx, &text, -1);
+
+    escaped = g_markup_escape_text(text ? text : "", -1);
+    markup  = g_strdup_printf("<span foreground=\"" RV_ROW_COLOR "\">%s</span>",
+            escaped);
+
+    g_object_set(renderer, "markup", markup, NULL);
+
+    g_free(markup);
+    g_free(escaped);
+    g_free(text);
+}
+
+/* ==========================================================================
+ * Master-Detail: volle Zeile der Auswahl im Detailbereich anzeigen
+ * ======================================================================== */
+
+static void cb_selection_changed(GtkTreeSelection *sel, gpointer user_data) {
+    GtkWidget     *result_view = GTK_WIDGET(user_data);
+    GtkWidget     *detail_view = NULL;
+    GtkTextBuffer *buffer      = NULL;
+    GtkTreeModel  *model       = NULL;
+    GList         *rows        = NULL;
+    gint           detail_col  = 0;
+    gchar         *text        = NULL;
+
+    detail_view = GTK_WIDGET(g_object_get_data(G_OBJECT(result_view), KEY_DETAIL_VIEW));
+    if (!detail_view)
         return;
 
-    if (wrap_width < 50)
-        wrap_width = 50;
+    detail_col = GPOINTER_TO_INT(
+            g_object_get_data(G_OBJECT(result_view), KEY_DETAIL_COL));
+    buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(detail_view));
 
-    g_object_get(renderer, "wrap-width", &old_wrap_width, NULL);
-    if (ABS(old_wrap_width - wrap_width) > 5)
-        g_object_set(renderer, "wrap-width", wrap_width, NULL);
+    rows = gtk_tree_selection_get_selected_rows(sel, &model);
+    if (rows) {
+        GtkTreeIter iter = { 0 };
+
+        if (gtk_tree_model_get_iter(model, &iter, (GtkTreePath*) rows->data))
+            gtk_tree_model_get(model, &iter, detail_col, &text, -1);
+
+        g_list_free_full(rows, (GDestroyNotify) gtk_tree_path_free);
+    }
+
+    gtk_text_buffer_set_text(buffer, text ? text : "", -1);
+    g_free(text);
+}
+
+/* ==========================================================================
+ * Fenstergeometrie (Größe, Position, Aufteilung Liste/Detail) über
+ * Sitzungen hinweg merken - in einer eigenen kleinen Konfigurationsdatei,
+ * unabhängig vom GSettings-Schema der Anwendung, damit dieses generische,
+ * mehrfach genutzte Widget keine Projekt-/Settings-Referenz benötigt.
+ * ======================================================================== */
+
+#define RV_CONFIG_GROUP   "window"
+#define RV_DEFAULT_WIDTH  1400
+#define RV_DEFAULT_HEIGHT 800
+
+static gchar* rv_config_path(void) {
+    return g_build_filename(g_get_user_config_dir(), "zond", "result_view.conf", NULL);
+}
+
+static void rv_load_geometry(gint *width, gint *height, gint *x, gint *y,
+        gint *paned_pos) {
+    GKeyFile *kf   = NULL;
+    gchar    *path = NULL;
+    gint      v    = 0;
+    GError   *err  = NULL;
+
+    *width = RV_DEFAULT_WIDTH;
+    *height = RV_DEFAULT_HEIGHT;
+    *x = -1;
+    *y = -1;
+    *paned_pos = -1;
+
+    path = rv_config_path();
+    kf = g_key_file_new();
+    if (g_key_file_load_from_file(kf, path, G_KEY_FILE_NONE, NULL)) {
+        v = g_key_file_get_integer(kf, RV_CONFIG_GROUP, "width", NULL);
+        if (v > 100)
+            *width = v;
+
+        v = g_key_file_get_integer(kf, RV_CONFIG_GROUP, "height", NULL);
+        if (v > 100)
+            *height = v;
+
+        v = g_key_file_get_integer(kf, RV_CONFIG_GROUP, "x", &err);
+        if (!err)
+            *x = v;
+        g_clear_error(&err);
+
+        v = g_key_file_get_integer(kf, RV_CONFIG_GROUP, "y", &err);
+        if (!err)
+            *y = v;
+        g_clear_error(&err);
+
+        v = g_key_file_get_integer(kf, RV_CONFIG_GROUP, "paned-position", NULL);
+        if (v > 0)
+            *paned_pos = v;
+    }
+
+    g_key_file_free(kf);
+    g_free(path);
+}
+
+static void rv_save_geometry(gint width, gint height, gint x, gint y,
+        gint paned_pos) {
+    GKeyFile *kf   = NULL;
+    gchar    *path = NULL;
+    gchar    *dir  = NULL;
+
+    path = rv_config_path();
+    dir = g_path_get_dirname(path);
+    g_mkdir_with_parents(dir, 0700);
+    g_free(dir);
+
+    kf = g_key_file_new();
+    /* bestehende Datei erst laden, damit wir nichts Unbekanntes verwerfen */
+    g_key_file_load_from_file(kf, path, G_KEY_FILE_NONE, NULL);
+
+    g_key_file_set_integer(kf, RV_CONFIG_GROUP, "width", width);
+    g_key_file_set_integer(kf, RV_CONFIG_GROUP, "height", height);
+    g_key_file_set_integer(kf, RV_CONFIG_GROUP, "x", x);
+    g_key_file_set_integer(kf, RV_CONFIG_GROUP, "y", y);
+    g_key_file_set_integer(kf, RV_CONFIG_GROUP, "paned-position", paned_pos);
+
+    g_key_file_save_to_file(kf, path, NULL);
+
+    g_key_file_free(kf);
+    g_free(path);
+}
+
+static gboolean cb_window_delete(GtkWidget *window, GdkEvent *event,
+        gpointer user_data) {
+    GtkWidget *paned  = GTK_WIDGET(user_data);
+    gint       width  = 0;
+    gint       height = 0;
+    gint       x      = 0;
+    gint       y      = 0;
+
+    gtk_window_get_size(GTK_WINDOW(window), &width, &height);
+    gtk_window_get_position(GTK_WINDOW(window), &x, &y);
+    rv_save_geometry(width, height, x, y, gtk_paned_get_position(GTK_PANED(paned)));
+
+    return gtk_widget_hide_on_delete(window);
 }
 
 /* ==========================================================================
@@ -299,14 +520,22 @@ GtkWidget* sond_result_view_new(GtkWindow       *parent,
     GtkWidget    *search     = NULL;
     GtkWidget    *count_label = NULL;
     GtkWidget    *hint_label = NULL;
+    GtkWidget    *paned      = NULL;
     GtkWidget    *swindow    = NULL;
     GtkWidget    *treeview   = NULL;
+    GtkWidget    *detail_swindow = NULL;
+    GtkWidget    *detail_view    = NULL;
     GtkListStore *store      = NULL;
     GtkTreeModel *filter     = NULL;
     GtkTreeModel *sort_model = NULL;
     GType        *col_types  = NULL;
     gint          num_cols   = 0;
     FilterData   *fd         = NULL;
+    gint          geo_width  = 0;
+    gint          geo_height = 0;
+    gint          geo_x      = 0;
+    gint          geo_y      = 0;
+    gint          paned_pos  = 0;
 
     g_return_val_if_fail(column_titles != NULL, NULL);
 
@@ -316,16 +545,20 @@ GtkWidget* sond_result_view_new(GtkWindow       *parent,
 
     g_return_val_if_fail(num_cols > 0, NULL);
 
+    rv_load_geometry(&geo_width, &geo_height, &geo_x, &geo_y, &paned_pos);
+
     /* --- Fenster --- */
     window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_window_set_title(GTK_WINDOW(window), title ? title : "Ergebnisse");
-    gtk_window_set_default_size(GTK_WINDOW(window), 900, 500);
+    gtk_window_set_default_size(GTK_WINDOW(window), geo_width, geo_height);
     if (parent) {
         gtk_window_set_transient_for(GTK_WINDOW(window), parent);
         gtk_window_set_destroy_with_parent(GTK_WINDOW(window), TRUE);
     }
-    g_signal_connect(window, "delete-event",
-                     G_CALLBACK(gtk_widget_hide_on_delete), NULL);
+    if (geo_x >= 0 && geo_y >= 0)
+        gtk_window_move(GTK_WINDOW(window), geo_x, geo_y);
+    else if (parent)
+        gtk_window_set_position(GTK_WINDOW(window), GTK_WIN_POS_CENTER_ON_PARENT);
 
     vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     gtk_container_add(GTK_CONTAINER(window), vbox);
@@ -403,23 +636,26 @@ GtkWidget* sond_result_view_new(GtkWindow       *parent,
             continue; /* versteckte Spalte: nur im Store */
 
         renderer = gtk_cell_renderer_text_new();
-        g_object_set(renderer, "ypad", 4, NULL);
+        g_object_set(renderer, "ypad", 4, "yalign", 0.0, NULL);
         col      = gtk_tree_view_column_new_with_attributes(
                        column_titles[i], renderer, "text", i, NULL);
 
         if (i == last_visible) {
-            /* letzte sichtbare Spalte: verbleibenden Platz, Zeilenumbruch,
-             * der sich mit der Spaltenbreite mitändert (statt fest 400px). */
-            gtk_tree_view_column_set_expand(col, TRUE);
-            g_object_set(renderer,
-                         "wrap-mode", PANGO_WRAP_WORD_CHAR,
-                         "wrap-width", 400,
-                         NULL);
-            g_signal_connect(col, "notify::width",
-                    G_CALLBACK(cb_column_width_changed), renderer);
+            /* letzte sichtbare Spalte: schmaler, dafür zweizeilige
+             * Vorschau (fest gekürzt und umgebrochen, s.o.) - über alle
+             * Treffer hinweg gleich hoch. Voller Text steht im
+             * Detailbereich unterhalb der Liste (Master-Detail, s.u.). */
+            gtk_tree_view_column_set_sizing(col, GTK_TREE_VIEW_COLUMN_FIXED);
+            gtk_tree_view_column_set_fixed_width(col, 380);
+            gtk_tree_view_column_set_resizable(col, TRUE);
+            g_object_set(renderer, "ellipsize", PANGO_ELLIPSIZE_END, NULL);
+            gtk_tree_view_column_set_cell_data_func(col, renderer,
+                    cb_snippet_cell_data, GINT_TO_POINTER(i), NULL);
         } else {
             gtk_tree_view_column_set_resizable(col, TRUE);
             gtk_tree_view_column_set_min_width(col, 80);
+            gtk_tree_view_column_set_cell_data_func(col, renderer,
+                    cb_metadata_cell_data, GINT_TO_POINTER(i), NULL);
         }
 
         gtk_tree_view_column_set_sort_column_id(col, i);
@@ -433,14 +669,49 @@ GtkWidget* sond_result_view_new(GtkWindow       *parent,
             G_CALLBACK(cb_treeview_button_press), window);
     g_signal_connect(treeview, "key-press-event",
             G_CALLBACK(cb_treeview_key_press), window);
+    g_signal_connect(gtk_tree_view_get_selection(GTK_TREE_VIEW(treeview)),
+            "changed", G_CALLBACK(cb_selection_changed), window);
 
-    /* --- ScrolledWindow --- */
+    /* --- ScrolledWindow (Liste) --- */
     swindow = gtk_scrolled_window_new(NULL, NULL);
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(swindow),
                                    GTK_POLICY_AUTOMATIC,
                                    GTK_POLICY_AUTOMATIC);
     gtk_container_add(GTK_CONTAINER(swindow), treeview);
-    gtk_box_pack_start(GTK_BOX(vbox), swindow, TRUE, TRUE, 0);
+
+    /* --- Detailbereich: voller Text der ausgewählten Zeile (Master-
+     * Detail) - dadurch bleibt die Liste gleichmäßig hoch (einzeilig,
+     * ellipsiert), und beliebig lange Treffer sind trotzdem vollständig
+     * lesbar, sobald man eine Zeile anklickt. --- */
+    detail_view = gtk_text_view_new();
+    gtk_text_view_set_editable(GTK_TEXT_VIEW(detail_view), FALSE);
+    gtk_text_view_set_cursor_visible(GTK_TEXT_VIEW(detail_view), FALSE);
+    gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(detail_view), GTK_WRAP_WORD_CHAR);
+    gtk_text_view_set_left_margin(GTK_TEXT_VIEW(detail_view), 8);
+    gtk_text_view_set_right_margin(GTK_TEXT_VIEW(detail_view), 8);
+    gtk_text_view_set_top_margin(GTK_TEXT_VIEW(detail_view), 6);
+    gtk_text_view_set_bottom_margin(GTK_TEXT_VIEW(detail_view), 6);
+
+    detail_swindow = gtk_scrolled_window_new(NULL, NULL);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(detail_swindow),
+                                   GTK_POLICY_AUTOMATIC,
+                                   GTK_POLICY_AUTOMATIC);
+    gtk_scrolled_window_set_shadow_type(GTK_SCROLLED_WINDOW(detail_swindow),
+            GTK_SHADOW_IN);
+    gtk_container_add(GTK_CONTAINER(detail_swindow), detail_view);
+
+    paned = gtk_paned_new(GTK_ORIENTATION_VERTICAL);
+    gtk_paned_pack1(GTK_PANED(paned), swindow, TRUE, FALSE);
+    gtk_paned_pack2(GTK_PANED(paned), detail_swindow, TRUE, FALSE);
+
+    if (paned_pos <= 0)
+        paned_pos = (gint) (geo_height * 0.7);
+    gtk_paned_set_position(GTK_PANED(paned), paned_pos);
+
+    gtk_box_pack_start(GTK_BOX(vbox), paned, TRUE, TRUE, 0);
+
+    g_signal_connect(window, "delete-event",
+                     G_CALLBACK(cb_window_delete), paned);
 
     /* --- Fußzeile: Bedienhinweis --- */
     footer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
@@ -458,6 +729,8 @@ GtkWidget* sond_result_view_new(GtkWindow       *parent,
     g_object_set_data(G_OBJECT(window), KEY_SORTMODEL, sort_model);
     g_object_set_data(G_OBJECT(window), KEY_NUM_COLS,  GINT_TO_POINTER(num_cols));
     g_object_set_data(G_OBJECT(window), KEY_COUNT_LABEL, count_label);
+    g_object_set_data(G_OBJECT(window), KEY_DETAIL_VIEW, detail_view);
+    g_object_set_data(G_OBJECT(window), KEY_DETAIL_COL, GINT_TO_POINTER(last_visible));
     g_object_set_data_full(G_OBJECT(window), KEY_FILTER_DATA, fd, filter_data_free);
 
     /* "changed" (statt "search-changed") für sofortiges Filtern ohne Delay */

@@ -8,10 +8,6 @@
 			<default>''</default>
 		</key>
 
-		<key name='root' type='s'>
-			<default>'C:\\'</default>
-		</key>
-
 		<key name='speichern' type='b'>
 			<default>false</default>
 		</key>
@@ -22,6 +18,14 @@
 
 		<key name='zoom' type='d'>
 			<default>140</default>
+		</key>
+
+		<key name='embedding-model-path' type='s'>
+			<default>''</default>
+		</key>
+
+		<key name='chat-model-path' type='s'>
+			<default>''</default>
 		</key>
 
 	</schema>

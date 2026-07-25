@@ -34,6 +34,7 @@
 #include "zond_pdf_document.h"
 
 #include "10init/app_window.h"
+#include "10init/headerbar.h"
 #include "20allgemein/project.h"
 
 #include "40viewer/viewer.h"
@@ -46,7 +47,7 @@
  * row-activated: Treffer anspringen und im Viewer markieren
  * ---------------------------------------------------------------------- */
 
-static void
+void
 zond_indexsuche_row_activated(GtkTreeView *treeview, GtkTreePath *tree_path,
         GtkTreeViewColumn *col, gpointer data) {
     Projekt      *zond         = (Projekt *) data;
@@ -183,6 +184,233 @@ zond_indexsuche_row_activated(GtkTreeView *treeview, GtkTreePath *tree_path,
 
 
 /* -------------------------------------------------------------------------
+ * Vollständigkeits-Prüfung vor der Suche über eine Auswahl:
+ *
+ * "Ausgewählte Punkte" filtert Suchtreffer auf den Index-Stand, wie er
+ * zuletzt indiziert wurde - fehlt für einen ausgewählten Punkt (Teile
+ * der) Indizierung, sieht das Ergebnis genauso aus wie "kommt dort nicht
+ * vor", ohne daß der Nutzer das unterscheiden könnte. Deshalb wird die
+ * Auswahl VOR der eigentlichen Suche auf Vollständigkeit geprüft (nicht
+ * erst hinterher an einem leeren Ergebnis herumgerätselt) - fehlt etwas,
+ * wird nachgefragt, ob jetzt nachindiziert werden soll.
+ * ---------------------------------------------------------------------- */
+
+typedef struct {
+    SondFilePart  *sfp;          /* (transfer none) */
+    SondPageRange *range;        /* (transfer none), kann NULL sein (ganze Datei) */
+    gchar         *display_name;
+    gint           missing;
+    gint           total;
+} SondIndexCoverageGap;
+
+static void
+sond_index_coverage_gap_free(gpointer p) {
+    SondIndexCoverageGap *gap = p;
+    if (!gap) return;
+    g_free(gap->display_name);
+    g_free(gap);
+}
+
+/* Ermittelt für einen einzelnen ausgewählten Punkt (sfp, range), wie viele
+ * der erwarteten Seiten noch nicht indiziert sind. Bei PDFs ohne
+ * eingeschränkten Seitenbereich (range == NULL, "ganze Datei") wird dazu
+ * die tatsächliche Seitenzahl ermittelt - ein reiner Metadaten-Zugriff
+ * (pdf_count_pages), kein Volltext/OCR, sollte also auch bei vielen/
+ * großen PDFs schnell gehen. Nicht-PDF-Fileparts gelten als ein einziger
+ * "virtueller" Eintrag (page_nr = -1 in der Konvention von sond_index.c).
+ *
+ * Returns: TRUE bei Erfolg (auch wenn missing == 0), FALSE bei Fehler
+ *          (z.B. Datei nicht lesbar) - error gesetzt.
+ */
+static gboolean
+check_coverage_one(Projekt *zond, SondFilePart *sfp, SondPageRange *range,
+        gint *out_missing, gint *out_total, GError **error) {
+    SondIndexCtx *index_ctx = zond->wctx->index_ctx;
+    gchar        *fp        = sond_file_part_get_filepart(sfp);
+    gint          missing   = 0;
+    gint          total     = 1;
+
+    if (!fp) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "Dateipfad nicht ermittelbar");
+        return FALSE;
+    }
+
+    if (SOND_IS_FILE_PART_PDF(sfp)) {
+        gint von = 0, bis = 0;
+
+        if (range && range->von >= 0) {
+            von = range->von;
+            bis = range->bis;
+        } else {
+            pdf_document *doc = sond_file_part_pdf_open_document(zond->ctx,
+                    SOND_FILE_PART_PDF(sfp), FALSE, FALSE, error);
+            if (!doc) {
+                g_free(fp);
+                return FALSE;
+            }
+            bis = pdf_count_pages(zond->ctx, doc) - 1;
+            pdf_drop_document(zond->ctx, doc);
+        }
+        total = bis - von + 1;
+
+        GArray     *indexed     = sond_index_ctx_get_pages_for_file(index_ctx, fp);
+        GHashTable *indexed_set = g_hash_table_new(NULL, NULL);
+        for (guint i = 0; i < indexed->len; i++)
+            g_hash_table_add(indexed_set,
+                    GINT_TO_POINTER(g_array_index(indexed, gint, i)));
+
+        for (gint p = von; p <= bis; p++)
+            if (!g_hash_table_contains(indexed_set, GINT_TO_POINTER(p)))
+                missing++;
+
+        g_hash_table_destroy(indexed_set);
+        g_array_free(indexed, TRUE);
+    } else {
+        GArray *indexed = sond_index_ctx_get_pages_for_file(index_ctx, fp);
+        total   = 1;
+        missing = (indexed->len == 0) ? 1 : 0;
+        g_array_free(indexed, TRUE);
+    }
+
+    g_free(fp);
+    *out_missing = missing;
+    *out_total   = total;
+    return TRUE;
+}
+
+/* Prüft alle Punkte in ht_fileparts. Fehler beim Prüfen einzelner Punkte
+ * (z.B. Datei nicht lesbar) werden nur geloggt, nicht als Gesamtfehler
+ * propagiert - lieber eine unvollständige Diagnose als die Suche deshalb
+ * ganz zu blockieren.
+ *
+ * Returns: (transfer full) GPtrArray von SondIndexCoverageGap* für alle
+ *          Punkte mit mindestens einer fehlenden Seite (leer, wenn alles
+ *          vollständig indiziert ist).
+ */
+static GPtrArray*
+check_coverage(Projekt *zond, GHashTable *ht_fileparts) {
+    GPtrArray *gaps = g_ptr_array_new_with_free_func(sond_index_coverage_gap_free);
+    GHashTableIter iter_sel;
+    gpointer key = NULL, value = NULL;
+
+    g_hash_table_iter_init(&iter_sel, ht_fileparts);
+    while (g_hash_table_iter_next(&iter_sel, &key, &value)) {
+        SondFilePart  *sfp   = (SondFilePart*) key;
+        SondPageRange *range = (SondPageRange*) value;
+        gint           missing = 0, total = 0;
+        GError        *error   = NULL;
+
+        if (!check_coverage_one(zond, sfp, range, &missing, &total, &error)) {
+            g_warning("check_coverage: %s", error ? error->message : "?");
+            g_clear_error(&error);
+            continue;
+        }
+
+        if (missing > 0) {
+            SondIndexCoverageGap *gap = g_new0(SondIndexCoverageGap, 1);
+            gap->sfp          = sfp;
+            gap->range        = range;
+            gap->display_name = sond_file_part_get_filepart(sfp);
+            gap->missing      = missing;
+            gap->total        = total;
+            g_ptr_array_add(gaps, gap);
+        }
+    }
+
+    return gaps;
+}
+
+static gchar*
+format_gap_line(SondIndexCoverageGap *gap) {
+    return (gap->total == 1)
+            ? g_strdup_printf("%s (nicht indiziert)", gap->display_name)
+            : g_strdup_printf("%s (%d/%d Seiten fehlen)",
+                    gap->display_name, gap->missing, gap->total);
+}
+
+#define SOND_INDEXSUCHE_COVERAGE_SHOW_MAX 10
+
+/* Zeigt die Lücken-Übersicht (mit "Aufklappen" für mehr als
+ * SOND_INDEXSUCHE_COVERAGE_SHOW_MAX Einträge) und fragt nach, wie weiter
+ * verfahren werden soll.
+ *
+ * Returns: GTK_RESPONSE_YES (jetzt nachindizieren), GTK_RESPONSE_NO
+ *          (trotzdem suchen) oder GTK_RESPONSE_CANCEL/DELETE_EVENT (ganz
+ *          abbrechen).
+ */
+static gint
+ask_coverage_gaps(Projekt *zond, GPtrArray *gaps, guint n_total) {
+    GtkWidget *dialog  = NULL;
+    GtkWidget *content = NULL;
+    GtkWidget *box     = NULL;
+    GtkWidget *label   = NULL;
+    gchar     *summary = NULL;
+    gint       response = 0;
+    guint      shown    = MIN(gaps->len, SOND_INDEXSUCHE_COVERAGE_SHOW_MAX);
+
+    dialog = gtk_dialog_new_with_buttons(
+            "Auswahl nicht vollständig indiziert",
+            GTK_WINDOW(zond->app_window),
+            GTK_DIALOG_DESTROY_WITH_PARENT | GTK_DIALOG_MODAL,
+            "Jetzt nachindizieren", GTK_RESPONSE_YES,
+            "Trotzdem suchen",      GTK_RESPONSE_NO,
+            "Abbrechen",            GTK_RESPONSE_CANCEL,
+            NULL);
+    gtk_dialog_set_default_response(GTK_DIALOG(dialog), GTK_RESPONSE_YES);
+    gtk_window_set_default_size(GTK_WINDOW(dialog), 480, -1);
+
+    content = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
+    box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+    gtk_container_set_border_width(GTK_CONTAINER(box), 12);
+    gtk_container_add(GTK_CONTAINER(content), box);
+
+    summary = g_strdup_printf(
+            "%u von %u ausgewählten Punkten sind nicht vollständig indiziert:",
+            gaps->len, n_total);
+    label = gtk_label_new(summary);
+    gtk_widget_set_halign(label, GTK_ALIGN_START);
+    gtk_label_set_line_wrap(GTK_LABEL(label), TRUE);
+    gtk_box_pack_start(GTK_BOX(box), label, FALSE, FALSE, 0);
+    g_free(summary);
+
+    for (guint i = 0; i < shown; i++) {
+        SondIndexCoverageGap *gap = g_ptr_array_index(gaps, i);
+        gchar *line = format_gap_line(gap);
+        GtkWidget *l = gtk_label_new(line);
+        gtk_widget_set_halign(l, GTK_ALIGN_START);
+        gtk_box_pack_start(GTK_BOX(box), l, FALSE, FALSE, 0);
+        g_free(line);
+    }
+
+    if (gaps->len > shown) {
+        gchar *more_label = g_strdup_printf("... und %u weitere anzeigen",
+                gaps->len - shown);
+        GtkWidget *expander = gtk_expander_new(more_label);
+        g_free(more_label);
+
+        GtkWidget *inner_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 3);
+        gtk_container_set_border_width(GTK_CONTAINER(inner_box), 6);
+        for (guint i = shown; i < gaps->len; i++) {
+            SondIndexCoverageGap *gap = g_ptr_array_index(gaps, i);
+            gchar *line = format_gap_line(gap);
+            GtkWidget *l = gtk_label_new(line);
+            gtk_widget_set_halign(l, GTK_ALIGN_START);
+            gtk_box_pack_start(GTK_BOX(inner_box), l, FALSE, FALSE, 0);
+            g_free(line);
+        }
+        gtk_container_add(GTK_CONTAINER(expander), inner_box);
+        gtk_box_pack_start(GTK_BOX(box), expander, FALSE, FALSE, 0);
+    }
+
+    gtk_widget_show_all(dialog);
+    response = my_dialog_run(GTK_DIALOG(dialog));
+    gtk_widget_destroy(dialog);
+
+    return response;
+}
+
+/* -------------------------------------------------------------------------
  * Öffentliche Funktion: Dialog + Ergebnisanzeige
  * ---------------------------------------------------------------------- */
 
@@ -202,6 +430,31 @@ zond_indexsuche_do(Projekt *zond, GHashTable* ht_fileparts) {
                 "Kein Index vorhanden.\n"
                 "Bitte zuerst Dateien indizieren.", NULL);
         return;
+    }
+
+    if (ht_fileparts) {
+        GPtrArray *gaps = check_coverage(zond, ht_fileparts);
+        if (gaps->len > 0) {
+            gint resp = ask_coverage_gaps(zond, gaps, g_hash_table_size(ht_fileparts));
+            if (resp == GTK_RESPONSE_CANCEL) {
+                g_ptr_array_unref(gaps);
+                return;
+            }
+            if (resp == GTK_RESPONSE_YES) {
+                GHashTable *ht_reindex = g_hash_table_new_full(NULL, NULL,
+                        g_object_unref, sond_page_range_free);
+                for (guint i = 0; i < gaps->len; i++) {
+                    SondIndexCoverageGap *gap = g_ptr_array_index(gaps, i);
+                    SondPageRange *range_copy = gap->range
+                            ? sond_page_range_new(gap->range->von, gap->range->bis)
+                            : NULL;
+                    g_hash_table_insert(ht_reindex, g_object_ref(gap->sfp), range_copy);
+                }
+                zond_index_erstellen_ht(zond, ht_reindex);
+            }
+            /* GTK_RESPONSE_NO: einfach weiter mit der Suche, ohne nachzuindizieren. */
+        }
+        g_ptr_array_unref(gaps);
     }
 
     /* --- Eingabe-Dialog --- */

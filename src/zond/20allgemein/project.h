@@ -40,4 +40,11 @@ gint project_open(Projekt*, const gchar*, gboolean, GError**);
 gint project_load(Projekt* zond, GError** error);
 gint project_new(Projekt* zond, GError** error);
 
+/* Pfad zu einer GGUF-Modelldatei ermitteln (GSettings-Override oder
+ * <exe_dir>/../models/<default_filename>) - auch außerhalb von project.c
+ * genutzt (zond_chat.c), um denselben Standardpfad für das Chat-Modell
+ * zu ermitteln wie project_open() ihn fürs Embedding-Modell verwendet. */
+gchar* resolve_model_path(Projekt *zond, gchar const *settings_key,
+		gchar const *default_filename);
+
 #endif // PROJECT_H_INCLUDED
