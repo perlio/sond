@@ -264,14 +264,11 @@ static gboolean cb_treeview_key_press(GtkWidget *treeview, GdkEventKey *event,
 }
 
 /* ==========================================================================
- * Spaltenfarbe + Fundstelle-Kürzung: alles per Hand in fertigen Pango-
- * Markup gebaut statt über Zellrenderer-Eigenschaften (wrap-mode/lines/
- * height/foreground) - die hatten sich in der Praxis als unzuverlässig
- * erwiesen (weder Höhe noch Farbe kamen reproduzierbar an). Mit Markup
- * direkt im gerenderten Text sind Farbe und Zeilenumbruch garantiert.
+ * Fundstelle-Kürzung: per Hand geschnitten und umgebrochen statt über
+ * Zellrenderer-Eigenschaften (wrap-mode/lines/height) - die hatten sich in
+ * der Praxis als unzuverlässig erwiesen. Der eingebettete Zeilenumbruch im
+ * "text" wird von Pango zuverlässig als echter Zeilenumbruch gerendert.
  * ======================================================================== */
-
-#define RV_ROW_COLOR "#3a5a7a"
 
 /* Fundstelle-Vorschau: fest auf RV_SNIPPET_PREVIEW_MAXCHARS Zeichen
  * gekürzt und auf genau RV_SNIPPET_PREVIEW_LINES Zeilen aufgeteilt (Bruch
@@ -321,8 +318,6 @@ static void cb_snippet_cell_data(GtkTreeViewColumn *col, GtkCellRenderer *render
     gchar *text    = NULL;
     gchar *cut     = NULL;
     gchar *split   = NULL;
-    gchar *escaped = NULL;
-    gchar *markup  = NULL;
 
     gtk_tree_model_get(model, iter, col_idx, &text, -1);
 
@@ -334,38 +329,10 @@ static void cb_snippet_cell_data(GtkTreeViewColumn *col, GtkCellRenderer *render
 
     split = rv_split_lines(cut, RV_SNIPPET_PREVIEW_LINES);
 
-    escaped = g_markup_escape_text(split, -1);
-    markup  = g_strdup_printf("<span foreground=\"" RV_ROW_COLOR "\">%s</span>",
-            escaped);
+    g_object_set(renderer, "text", split, NULL);
 
-    g_object_set(renderer, "markup", markup, NULL);
-
-    g_free(markup);
-    g_free(escaped);
     g_free(split);
     g_free(cut);
-    g_free(text);
-}
-
-/* Metadaten-Spalten (Datei, Seite, ...): keine Kürzung, aber dieselbe
- * Farbe wie die Fundstelle. */
-static void cb_metadata_cell_data(GtkTreeViewColumn *col, GtkCellRenderer *renderer,
-        GtkTreeModel *model, GtkTreeIter *iter, gpointer user_data) {
-    gint   col_idx = GPOINTER_TO_INT(user_data);
-    gchar *text    = NULL;
-    gchar *escaped = NULL;
-    gchar *markup  = NULL;
-
-    gtk_tree_model_get(model, iter, col_idx, &text, -1);
-
-    escaped = g_markup_escape_text(text ? text : "", -1);
-    markup  = g_strdup_printf("<span foreground=\"" RV_ROW_COLOR "\">%s</span>",
-            escaped);
-
-    g_object_set(renderer, "markup", markup, NULL);
-
-    g_free(markup);
-    g_free(escaped);
     g_free(text);
 }
 
@@ -654,8 +621,6 @@ GtkWidget* sond_result_view_new(GtkWindow       *parent,
         } else {
             gtk_tree_view_column_set_resizable(col, TRUE);
             gtk_tree_view_column_set_min_width(col, 80);
-            gtk_tree_view_column_set_cell_data_func(col, renderer,
-                    cb_metadata_cell_data, GINT_TO_POINTER(i), NULL);
         }
 
         gtk_tree_view_column_set_sort_column_id(col, i);
