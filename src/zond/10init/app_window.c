@@ -155,6 +155,8 @@ static void cb_pin_button_toggled(GtkToggleButton* toggle, gpointer user_data) {
 			gtk_widget_set_sensitive(zond->textview, FALSE);
 		zond->node_id_textview = zond->node_id_act;
 
+		gtk_widget_set_sensitive(zond->textview_jump_button, FALSE);
+
 		zond_treeview_load_textview(zond);
 	}
 }

@@ -150,7 +150,9 @@ void zond_treeview_cursor_changed(ZondTreeview *treeview, gpointer user_data) {
 	}
 
     gtk_widget_set_sensitive(zond->textview, TRUE);
-    gtk_widget_set_sensitive(zond->textview_jump_button, TRUE);
+    gtk_widget_set_sensitive(zond->textview_jump_button,
+    		gtk_toggle_button_get_active(
+    				GTK_TOGGLE_BUTTON(zond->textview_pin_button)));
 
     //node-id ermitteln
 	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(treeview)),
