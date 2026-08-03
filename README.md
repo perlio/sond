@@ -33,21 +33,21 @@ Unterhalb der drei Bäume befindet sich eine Statuszeile, die u.a. Fehlermeldung
 
 Alle drei Bäume beruhen auf derselben Basiskomponente und teilen sich daher folgendes Verhalten:
 
+- Mehrfachauswahl von Zeilen ist möglich; dabei können jedoch nicht gleichzeitig ein Knoten und einer seiner Vor- oder Nachfahren markiert sein.
 - Rechtsklick auf einen Eintrag öffnet ein Kontextmenü mit den für die jeweilige Ebene zulässigen Operationen. Ein Klick auf eine noch nicht selektierte Zeile setzt zuvor den Cursor auf diese Zeile.
-- Mehrfachauswahl ist möglich; dabei können jedoch nicht gleichzeitig ein Knoten und einer seiner Vor- oder Nachfahren markiert sein.
-- Der Zeilentext ist per Inline-Bearbeitung änderbar (Doppelklick auf die bereits selektierte Zeile bzw. F2 – Standard-GTK-Verhalten, kein eigener Shortcut im Programm definiert); im Bestands- und Auswertungsverzeichnis wird die Änderung sofort gespeichert.
+- Der Zeilentext ist per Inline-Bearbeitung änderbar: ein einfacher Klick auf den Text der bereits selektierten (fokussierten) Zeile startet die Bearbeitung. Icon und Text stehen als getrennte Zellen in derselben Spalte; nur ein Doppelklick auf das Icon löst "Öffnen" aus (s.u.), da nur dort keine Bearbeitung ansteht. Im Bestands- und Auswertungsverzeichnis wird die Textänderung sofort gespeichert.
 - Ausgeschnittene, aber noch nicht eingefügte Zeilen werden ausgegraut dargestellt; die aktuelle Cursor-Zeile ist unterstrichen.
 - **Es gibt keine Drag-&-Drop-Unterstützung.** Verschieben, Kopieren und Anbinden von Knoten erfolgt ausschließlich über die Menü- bzw. Tastaturbefehle Kopieren/Ausschneiden/Einfügen.
 - Bei fokussierter Baumansicht öffnet das Tippen einer beliebigen druckbaren Taste (ohne Strg) automatisch ein Suchfeld (Popover), mit dem sich der Baum nach dem eingegebenen Text durchsuchen läßt (s. "Bearbeiten → Suchen").
-- Ein Doppelklick (bzw. das Signal "row-activated") öffnet im Dateiverzeichnis die zugehörige Datei, im Bestands- und Auswertungsverzeichnis den mit dem Punkt verknüpften Abschnitt im PDF-Viewer bzw. löst allgemein "Öffnen" aus. Wird dabei zusätzlich die Umschalttaste gehalten, öffnet sich bei PDF-Abschnitten stets ein neues Viewer-Fenster, statt ein bereits offenes wiederzuverwenden.
+- Ein Doppelklick auf das Icon einer Zeile (bzw. das Signal "row-activated") öffnet im Dateiverzeichnis die zugehörige Datei, im Bestands- und Auswertungsverzeichnis den mit dem Punkt verknüpften Abschnitt im PDF-Viewer bzw. löst allgemein "Öffnen" aus. Wird dabei zusätzlich die Umschalttaste gehalten, öffnet sich bei PDF-Abschnitten stets ein neues Viewer-Fenster, statt ein bereits offenes wiederzuverwenden.
 
-Im Dateiverzeichnis besitzt das Kontextmenü zusätzlich (unter Windows) einen Abschnitt zur SeaDrive-Cloud-Synchronisation: Dateien/Verzeichnisse können als "immer offline verfügbar" markiert, diese Markierung wieder aufgehoben oder der lokale Cache geleert werden – jeweils für das gesamte Verzeichnis oder nur die Auswahl.
+Im Dateiverzeichnis besitzt das Kontextmenü zusätzlich (unter Windows) einen Abschnitt zur SeaDrive-Cloud-Synchronisation: Dateien/Verzeichnisse können als "immer offline verfügbar" markiert, diese Markierung wieder aufgehoben oder der lokale Cache geleert werden – jeweils für das gesamte Projektverzeichnis oder nur die Auswahl.
 
 Im Bestands- und Auswertungsverzeichnis werden Zeilen, denen bereits ein Notiztext hinterlegt ist, farblich hervorgehoben. Verlinkte Punkte (s. "Bearbeiten → Als Link einfügen") werden kursiv dargestellt, der "Kopf" eines Links zusätzlich violett.
 
 ### Notizfeld
 
-Zu jedem markierten Punkt kann im Notizfeld neben den Baumansichten ein Freitext hinterlegt werden; er wird beim Verlassen des Feldes automatisch gespeichert. Über den Pin-Knopf läßt sich der angezeigte Text an einem Punkt festhalten, während im Baum weiter navigiert wird; der danebenliegende Knopf springt zur angepinnten Zeile zurück (dieser Knopf ist erst aktiv, nachdem einmal gepinnt wurde).
+Zu jedem markierten Punkt kann im Notizfeld neben den Baumansichten ein Freitext hinterlegt werden. Über den Pin-Knopf läßt sich der angezeigte Text an einem Punkt festhalten, während im Baum weiter navigiert wird; der danebenliegende Knopf springt zur angepinnten Zeile zurück (dieser Knopf ist erst aktiv, wenn gepinnt wurde).
 
 ### Tastenkürzel im Hauptfenster
 
@@ -66,7 +66,7 @@ Zu jedem markierten Punkt kann im Notizfeld neben den Baumansichten ein Freitext
 | Strg+J | Zu Ursprung springen |
 | Strg+O | Öffnen |
 
-Weitere feste Interaktionen ohne Menü-Accelerator: eine beliebige druckbare Taste öffnet das Such-Popover (s.o.); ein Doppelklick öffnet Datei bzw. Abschnitt.
+Weitere feste Interaktionen ohne Menü-Accelerator: eine beliebige druckbare Taste öffnet das Such-Popover (s.o.); ein Doppelklick auf das Icon öffnet Datei bzw. Abschnitt.
 
 ## Menü
 
