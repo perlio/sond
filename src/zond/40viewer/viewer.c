@@ -272,6 +272,7 @@ static gboolean viewer_entry_in_dd(JournalEntry* entry,
  * sections()), weil die dort ablaufende Kompaktierung (pdfp->deleted/
  * inserted-Flags werden gelöscht/page_akt neu gesetzt) genau das ist,
  * was anbindung_korrigieren() auswertet - danach sind die Flags weg. */
+#ifndef VIEWER
 static void viewer_update_index_for_save(PdfViewer *pdfv, DisplayedDocument *dd) {
 	SondIndexCtx *index_ctx = NULL;
 	gchar *filename = NULL;
@@ -372,6 +373,7 @@ static void viewer_update_index_for_save(PdfViewer *pdfv, DisplayedDocument *dd)
 
 	return;
 }
+#endif //VIEWER
 
 static void  viewer_reset_dirty_dds(PdfViewer* pdfv) {
 	for (guint i = 0; i < pdfv->zond->arr_pv->len; i++) {
