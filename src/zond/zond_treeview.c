@@ -984,6 +984,24 @@ static void zond_treeview_anbinden_error_message(InfoWindow *info_window,
 	return;
 }
 
+/* Rückt anchor_id/child für das nächste Geschwister-Element beim Anbinden
+ * (Mehrfachauswahl im Dateiverzeichnis wie auch Verzeichnis-Rekursion) auf
+ * das gerade eingefügte Element vor - aber nur, wenn wirklich etwas
+ * eingefügt wurde (result > 0). result == 0 bedeutet "übersprungen, kein
+ * Fehler" (z.B. Datei bereits anderweitig angebunden, s.
+ * zond_treeview_leaf_anbinden) - in dem Fall muss der bisherige Ankerpunkt
+ * unverändert bleiben, sonst würde das nächste Element mit anchor_id == 0
+ * eingefügt (führt zu einem Knoten ohne gültigen Baum-Bezug, s.
+ * zond_dbase_insert_node). result == -1 (abgebrochen) wird hier nicht
+ * behandelt, das prüfen die Aufrufer weiterhin selbst. */
+static void zond_treeview_anbinden_advance_anchor(gint *anchor_id,
+		gboolean *child, gint result) {
+	if (result > 0) {
+		*anchor_id = result;
+		*child = FALSE;
+	}
+}
+
 /*  Fehler: werden im info_window angezeigt
  **  ansonsten: Id des zunächst erzeugten Knotens  */
 static gint zond_treeview_anbinden_rekursiv(ZondTreeview *ztv,
@@ -1083,10 +1101,8 @@ static gint zond_treeview_anbinden_rekursiv(ZondTreeview *ztv,
 			if (new_node_id == -1) //abgebrochen
 				break;
 
-			if (new_node_id > 0) {
-				child_anchor = FALSE;
-				anchor_id_child = new_node_id;
-			}
+			zond_treeview_anbinden_advance_anchor(&anchor_id_child, &child_anchor,
+					new_node_id);
 		}
 
 		new_node_id = anchor_id_dir; //wird zurückgegeben
@@ -1126,8 +1142,8 @@ static gint zond_treeview_clipboard_anbinden_foreach(SondTreeview *stv,
 	if (rc == -1) //Kein Fehler, Cancel gedrückt!
 		return 1; //sond_treeview_..._foreach bricht dann ab
 
-	s_selection->child = FALSE;
-	s_selection->anchor_id = rc;
+	zond_treeview_anbinden_advance_anchor(&s_selection->anchor_id,
+			&s_selection->child, rc);
 
 	return 0;
 }
