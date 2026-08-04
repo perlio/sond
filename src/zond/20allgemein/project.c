@@ -490,16 +490,23 @@ gint project_load_trees(Projekt *zond, GError **error) {
  * Clean up partially opened project on error
  * Clears treeviews, filesystem root, databases and frees allocated strings
  * @param zond The project structure to clean up
- * @param trees_loaded TRUE if treeviews were successfully loaded
+ *
+ * Die Baumansichten werden immer geleert, unabhängig davon, ob
+ * project_load_trees() vollständig durchgelaufen ist: zond_tree_store_clear()
+ * ist auch auf einem leeren/nie befüllten Store gefahrlos aufrufbar. Ein
+ * vorheriges "trees_loaded"-Flag war hier fehleranfällig, weil
+ * project_load_trees() auch dann schon reale Zeilen eingefügt haben kann,
+ * wenn es anschließend (z.B. bei der Link-Auflösung) mit Fehler abbricht -
+ * mit trees_loaded==FALSE blieben solche Zeilen ungeleert im Modell stehen
+ * und ein nachfolgender Redraw griff auf das bereits freigegebene
+ * dbase_zond zu (Absturz).
  */
-static void project_open_cleanup(Projekt* zond, gboolean trees_loaded) {
-	// Clear treeviews if they were loaded
-	if (trees_loaded) {
-		zond_tree_store_clear(
-				ZOND_TREE_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]))));
-		zond_tree_store_clear(
-				ZOND_TREE_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(zond->treeview[BAUM_AUSWERTUNG]))));
-	}
+static void project_open_cleanup(Projekt* zond) {
+	// Baumansichten immer leeren (auch bei nur teilweise geladenen Bäumen)
+	zond_tree_store_clear(
+			ZOND_TREE_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]))));
+	zond_tree_store_clear(
+			ZOND_TREE_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(zond->treeview[BAUM_AUSWERTUNG]))));
 
 	// Clear filesystem root (safe to call even if not set)
 	sond_treeviewfm_set_root(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), NULL, NULL);
@@ -543,7 +550,6 @@ gchar* resolve_model_path(Projekt* zond, gchar const* settings_key,
  */
 gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, GError **error) {
 	gint rc = 0;
-	gboolean trees_loaded = FALSE;
 
 	// Close current project if open
 	rc = project_close(zond, error);
@@ -564,7 +570,7 @@ gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, GError 
 	// Create or open databases
 	rc = project_create_dbase_zond(zond, create, error);
 	if (rc) {
-		project_open_cleanup(zond, FALSE);
+		project_open_cleanup(zond);
 		return -1;
 	}
 
@@ -572,17 +578,16 @@ gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, GError 
 	if (!create) {
 		rc = project_load_trees(zond, error);
 		if (rc) {
-			project_open_cleanup(zond, FALSE);
+			project_open_cleanup(zond);
 			return -1;
 		}
-		trees_loaded = TRUE;
 	}
 
 	// Set filesystem root
 	rc = sond_treeviewfm_set_root(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
 			zond->project_dir, error);
 	if (rc) {
-		project_open_cleanup(zond, trees_loaded);
+		project_open_cleanup(zond);
 		return -1;
 	}
 
@@ -595,7 +600,7 @@ gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, GError 
 	g_free(datadir);
 	g_free(embedding_model_path);
 	if (!zond->wctx) {
-		project_open_cleanup(zond, trees_loaded);
+		project_open_cleanup(zond);
 
 		return -1;
 	}

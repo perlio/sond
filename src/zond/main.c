@@ -18,6 +18,7 @@
 
 #include <gtk/gtk.h>
 
+#include "../misc.h"
 #include "../sond_log_and_error.h"
 #include "zond_init.h"
 #include "20allgemein/project.h"
@@ -74,8 +75,12 @@ static void cb_open(GApplication *app, GFile **files, gint n_files,
 
 	rc = project_open(zond, uri_unesc + 8, FALSE, &error);
 	g_free(uri_unesc);
+
+	gtk_window_present(GTK_WINDOW(zond->app_window));
+
 	if (rc == -1) {
-		LOG_INFO("Fehler - Projekt kann nicht geöffnet werden: %s", error->message);
+		display_message(zond->app_window, "Fehler - Projekt kann nicht geöffnet werden\n\n",
+				error->message, NULL);
 		g_error_free(error);
 	}
 

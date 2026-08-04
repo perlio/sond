@@ -807,6 +807,24 @@ static gint zond_treeview_remove_childish_anbindungen(ZondTreeview *ztv,
 				if (rc)
 					return -1;
 
+				/* parent stammt vom Knoten baum_inhalt_file, der gleich
+				 * gelöscht wird - ist dieser Knoten selbst schon beschädigt
+				 * (parent_ID<=0, z.B. Altlast aus einer früheren, mittlerweile
+				 * behobenen Version), würde die Beschädigung hier unbemerkt
+				 * auf den neuen Ankerpunkt übertragen und beim nächsten
+				 * zond_dbase_insert_node() weitergegeben/vervielfältigt.
+				 * Lieber jetzt sauber abbrechen, bevor irgendetwas
+				 * geändert/gelöscht wird. */
+				if (parent <= 0) {
+					if (error)
+						*error = g_error_new(ZOND_ERROR, 0, "%s\n"
+								"Anbindungs-Knoten %d ist beschädigt "
+								"(parent_ID=%d) - Anbinden abgebrochen",
+								__func__, baum_inhalt_file, parent);
+
+					return -1;
+				}
+
 				*anchor_id = parent;
 				*child = TRUE;
 			} else
@@ -2673,7 +2691,24 @@ static gint zond_treeview_insert_links_foreach(ZondTreeview *ztv,
 		if (rc)
 			return -1;
 
-				//iter_anchor basteln
+		/* root muss BAUM_INHALT oder BAUM_AUSWERTUNG sein, um gültig als
+		 * Index in zond->treeview[] zu dienen - alles andere (insbesondere
+		 * 0, was bei einer beschädigten Projektdatei mit fehlerhaft
+		 * verketteten Baum-Wurzeln vorkommen kann) würde auf treeview[BAUM_FS]
+		 * (falscher GObject-Typ) oder außerhalb des Arrays zeigen und
+		 * abstürzen. Siehe project.c/zond_dbase_insert_node für den
+		 * eigentlichen Schutz gegen die Entstehung solcher Daten. */
+		if (root != BAUM_INHALT && root != BAUM_AUSWERTUNG) {
+			if (error)
+				*error = g_error_new(ZOND_ERROR, 0,
+						"%s\nLink-Ziel (Knoten %d) hat keine gültige "
+						"Baum-Wurzel (root=%d) - Projektdatenbank "
+						"vermutlich beschädigt", __func__, node_id, root);
+
+			return -1;
+		}
+
+		//iter_anchor basteln
 		iter_anchor = *iter; //Abfrage, ob iter != NULL überflüssig, da dann node_id niemals negativ ist
 		if (((GNode*) (iter->user_data))->prev == NULL) {
 			iter_anchor.user_data = ((GNode*) (iter->user_data))->parent;

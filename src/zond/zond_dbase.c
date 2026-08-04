@@ -707,6 +707,29 @@ gint zond_dbase_insert_node(ZondDBase *zond_dbase, gint anchor_ID,
 	gint rc = 0;
 	sqlite3_stmt **stmt = NULL;
 
+	/* anchor_ID muss ein echter, existierender Knoten sein (>0). anchor_ID==0
+	 * darf hier nie ankommen: für child==TRUE würde parent_ID=0 geschrieben,
+	 * für child==FALSE older_sibling_ID=0 - beides zusammen mit dem
+	 * jeweils anderen Feld exakt die "Adresse" (parent_ID=0, older_sibling_ID=0),
+	 * die sich sowohl die beiden Baum-Wurzeln (ID 1, 2) als auch sämtliche
+	 * über zond_dbase_create_file_root() angelegten Datei-Registrierungsknoten
+	 * (type=FILE_PART) teilen. Das nachfolgende UPDATE zur Pflege der
+	 * Geschwisterkette matcht dann ALLE diese Knoten gleichzeitig statt nur
+	 * des einen gemeinten und verbiegt u.a. die Baum-Wurzeln selbst - das
+	 * führt beim nächsten Laden zu einer korrupten Baumstruktur (siehe
+	 * Absturz beim Öffnen wegen falsch ermittelter Baum-Wurzel). Aufrufer
+	 * müssen anchor_ID daher selbst validieren (s. zond_treeview_get_anchor/
+	 * zond_treeview_check_anchor_id); dies hier ist die letzte Sicherung
+	 * direkt vor dem Schreiben in die Datenbank. */
+	if (anchor_ID <= 0) {
+		if (error)
+			*error = g_error_new(g_quark_from_static_string("ZOND_DBASE"), 0,
+					"%s\nUngültige anchor_ID (%d) - Knoten würde ohne "
+					"gültigen Baum-Bezug angelegt", __func__, anchor_ID);
+
+		return -1;
+	}
+
 	const gchar *sql[] =
 			{ "SAVEPOINT statement; ",
 
