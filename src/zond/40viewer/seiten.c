@@ -290,6 +290,15 @@ get_content_stream_as_buffer(fz_context *ctx, pdf_obj *page_ref,
 	return buf;
 }
 
+/* TODO (geplant): Auswahl des OCR-Modus, analog "Index erstellen".
+ * Aktuell fest auf SOND_OCR_MODE_CHECK (s.u.) - Seiten mit bereits
+ * vorhandenem verstecktem Text werden übergangen.
+ * Geplant:
+ *   1. OCR neu (bestehenden Text verwerfen, Seite neu erkennen)
+ *   2. Bisherigen und neu erkannten Tesseract-Text gegenüberstellen und
+ *      auswählen lassen
+ * Dabei soll auch "für alle Seiten" wählbar sein (ein Modus/eine Wahl
+ * für den ganzen Durchlauf statt Rückfrage je Seite). */
 void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 	gint rc = 0;
 	GError* error = NULL;

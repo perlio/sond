@@ -2300,6 +2300,33 @@ static gint zond_treeview_open_auszug(ZondTreeview* ztv, GtkTreeIter* iter_paren
 	return 0;
 }
 
+static gint zond_treeview_open_single_view(Projekt* zond, SondFilePart* sfp,
+		Anbindung* anbindung_node, gint node_id, gboolean end,
+		DisplayedDocument** dd, PdfPos* pdf_pos, GError** error) {
+	gint rc = 0;
+	Anbindung anbindung_ges = { 0 };
+
+	//Anbindung anpassen und Anfangsposition berechnen
+	if (!anbindung_is_empty(anbindung_node)) {
+		rc = get_anbindung_ges(zond, node_id,
+				zond->state & GDK_CONTROL_MASK, *anbindung_node,
+				&anbindung_ges, error);
+		if (rc) {
+			g_object_unref(sfp);
+
+			return -1;
+		}
+	}
+
+	*dd = document_new_displayed_document(SOND_FILE_PART_PDF(sfp),
+			&anbindung_ges, anbindung_node, end, pdf_pos, error);
+	g_object_unref(sfp);
+	if (!(*dd))
+		return -1;
+
+	return 0;
+}
+
 static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 		gboolean open_with, GError **error) {
 	gint rc = 0;
@@ -2310,6 +2337,11 @@ static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 	PdfPos pdf_pos = { 0 };
 	GtkTreeIter iter_target = { 0 };
 	Baum baum = KEIN_BAUM;
+	Baum baum_click = KEIN_BAUM;
+
+	//Baum der KLICKPOSITION (unaufgelöst) - entscheidet, ob überhaupt
+	//Auswertungsverzeichnis-Logik (Auszug) in Frage kommt
+	baum_click = zond_tree_store_get_root(zond_tree_store_get_tree_store(iter));
 
 	zond_tree_store_get_iter_target(iter, &iter_target);
 	baum = zond_tree_store_get_root(zond_tree_store_get_tree_store(&iter_target));
@@ -2318,7 +2350,7 @@ static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 	if (rc)
 		return -1;
 
-	if (!sfp && baum != BAUM_AUSWERTUNG)
+	if (!sfp && baum_click != BAUM_AUSWERTUNG)
 		return 0;
 
 	//mit externem Programm oder mit renderer öffnen
@@ -2331,53 +2363,72 @@ static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 		return 0;
 	}
 
-	if (baum == BAUM_INHALT) { //internen Viewer verwenden
-		Anbindung anbindung_ges = { 0 };
-
-		//Anbindung anpassen und Anfangsposition berechnen
-		if (!anbindung_is_empty(&anbindung_node)) {
-			rc = get_anbindung_ges(zond, node_id,
-					zond->state & GDK_CONTROL_MASK, anbindung_node,
-					&anbindung_ges, error);
-			if (rc) {
-				g_object_unref(sfp);
-
-				return -1;
-			}
-		}
-
-		dd = document_new_displayed_document(SOND_FILE_PART_PDF(sfp),
-				&anbindung_ges, &anbindung_node, (zond->state & GDK_MOD1_MASK),
-				&pdf_pos, error);
-		g_object_unref(sfp);
-		if (!dd)
+	if (baum_click == BAUM_INHALT) { //direkter Klick im Bestandsverzeichnis: internen Viewer verwenden
+		rc = zond_treeview_open_single_view(zond, sfp, &anbindung_node, node_id,
+				(zond->state & GDK_MOD1_MASK), &dd, &pdf_pos, error);
+		if (rc)
 			return -1;
 	}
-	else { //Auszug!
-		gint rc = 0;
-		GtkTreeIter iter_parent = { 0 };
-		gboolean has_parent = TRUE;
-
-		if (sfp) { //Eltern-Knoten holen
-			g_object_unref(sfp); //brauchen wir hier nicht
-
-			if (!gtk_tree_model_iter_parent(
-					GTK_TREE_MODEL(zond_tree_store_get_tree_store(iter)),
-					&iter_parent, iter))
-				has_parent = FALSE;
-		}
-		else {
-			iter_parent = *iter;
-			iter = NULL;
-		}
-
+	else if (!sfp) { //Klick im Auswertungsverzeichnis, Ziel ist Strukturpunkt -> Auszug der Ziel-Kinder
 		rc = zond_treeview_open_auszug(ZOND_TREEVIEW(zond->treeview[baum]),
-				(has_parent) ? &iter_parent: NULL,
-				iter, (zond->state & GDK_MOD1_MASK), &dd, &pdf_pos, error);
+				&iter_target, NULL, (zond->state & GDK_MOD1_MASK), &dd, &pdf_pos, error);
 		if (rc) {
 			document_free_displayed_documents(dd);
 
 			return -1;
+		}
+	}
+	else { //Klick im Auswertungsverzeichnis, Ziel ist Anbindung
+		gboolean auszug = FALSE;
+		GtkTreeIter iter_parent = { 0 };
+
+		if (!(zond->state & GDK_CONTROL_MASK)) {
+			//Strg NICHT gedrückt: Elternknoten der Klickposition prüfen
+			SondFilePart *sfp_parent = NULL;
+			Anbindung anbindung_parent_dummy = { 0 };
+			gboolean has_parent = FALSE;
+
+			has_parent = gtk_tree_model_iter_parent(
+					GTK_TREE_MODEL(zond_tree_store_get_tree_store(iter)),
+					&iter_parent, iter);
+
+			if (has_parent) {
+				rc = get_filepart_from_iter(ZOND_TREEVIEW(zond->treeview[BAUM_AUSWERTUNG]),
+						&iter_parent, &sfp_parent, &anbindung_parent_dummy, NULL, error);
+				if (rc) {
+					g_object_unref(sfp);
+
+					return -1;
+				}
+
+				if (sfp_parent)
+					g_object_unref(sfp_parent);
+				else
+					auszug = TRUE; //Elternknoten = Strukturpunkt
+			}
+		}
+		//Strg gedrückt: auszug bleibt FALSE -> immer Einzelansicht, unabhängig vom
+		//Elternknoten (Strg = genereller "nur diese eine Anbindung"-Override)
+
+		if (auszug) {
+			//Elternknoten = Strukturpunkt -> Auszug mit Geschwistern der Klickposition
+			g_object_unref(sfp);
+
+			rc = zond_treeview_open_auszug(ZOND_TREEVIEW(zond->treeview[BAUM_AUSWERTUNG]),
+					&iter_parent, iter, (zond->state & GDK_MOD1_MASK), &dd, &pdf_pos, error);
+			if (rc) {
+				document_free_displayed_documents(dd);
+
+				return -1;
+			}
+		}
+		else {
+			//Elternknoten selbst Anbindung, kein Elternknoten (Top-Level), oder Strg gedrückt
+			//-> Einzelansicht wie Klick im Bestandsverzeichnis
+			rc = zond_treeview_open_single_view(zond, sfp, &anbindung_node, node_id,
+					(zond->state & GDK_MOD1_MASK), &dd, &pdf_pos, error);
+			if (rc)
+				return -1;
 		}
 	}
 
