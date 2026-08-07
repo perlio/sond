@@ -2694,6 +2694,7 @@ GHashTable* sond_treeviewfm_get_fileparts(SondTreeviewFM *stvfm, gboolean select
 		rc = sond_tvfm_item_get_fileparts(stvfm_item, ht, error);
 		g_object_unref(stvfm_item);
 	}
+
 	if (rc)
 		return NULL;
 

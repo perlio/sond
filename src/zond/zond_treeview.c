@@ -2933,6 +2933,7 @@ static gint zond_treeview_get_selected_fileparts_foreach(ZondTreeview *ztv,
 	SondFilePart *sfp = NULL;
 	SondPageRange *range = NULL;
 	Anbindung anbindung = { 0 };
+	gboolean had_file_part = FALSE;
 
 	GHashTable *ht_fileparts = (GHashTable*) data;
 
@@ -2940,49 +2941,91 @@ static gint zond_treeview_get_selected_fileparts_foreach(ZondTreeview *ztv,
 	if (node_id == -1)
 		return -1;
 
-	sfp = sond_file_part_from_filepart(file_part, error);
-	if (!sfp) {
-		g_free(file_part);
-		g_free(section);
-		return -1;
-	}
-	g_free(file_part);
+	had_file_part = (file_part != NULL);
 
-	/* Anbindung auswerten: kein section (oder komplett leer) -> ganze Datei
-	 * (range == NULL). Sonst wird nur der referenzierte Seitenbereich
-	 * (nur ganze Seiten, Zeichen-Index wird bewusst ignoriert - s.
-	 * Absprache) (neu) indiziert. Ein reiner Text-Punkt
-	 * (anbindung_is_pdf_punkt) hat kein "bis" - dann gilt bis == von
-	 * (eine einzelne Seite). */
-	anbindung_parse_file_section(section, &anbindung);
-	g_free(section);
-
-	if (!anbindung_is_empty(&anbindung)) {
-		gint von = anbindung.von.seite;
-		gint bis = anbindung_is_pdf_punkt(anbindung) ? von : anbindung.bis.seite;
-
-		range = sond_page_range_new(von, bis);
-	}
-	/* sonst range == NULL -> ganze Datei */
-
-	/* Mehrere ausgewählte Punkte können dieselbe Datei referenzieren
-	 * (gleiches SondFilePart, per Identität interniert) - dann Vereinigung
-	 * der Seitenbereiche bilden. Ganze Datei (range == NULL) dominiert. */
-	if (g_hash_table_contains(ht_fileparts, sfp)) {
-		SondPageRange *existing = g_hash_table_lookup(ht_fileparts, sfp);
-
-		if (!existing || !range) {
-			/* einer von beiden will die ganze Datei -> ganze Datei */
-			sond_page_range_free(range);
-			g_hash_table_insert(ht_fileparts, sfp, NULL);
-		} else {
-			existing->von = MIN(existing->von, range->von);
-			existing->bis = MAX(existing->bis, range->bis);
-			sond_page_range_free(range);
-			g_object_unref(sfp); /* schon als Key vorhanden - eigene Ref wieder los */
+	/* Knoten ohne file_part (z.B. rein strukturierende Ordner-/Kategorie-
+	 * Knoten im Auswertungsbaum ohne eigene Dateianbindung) tragen selbst
+	 * nichts zur Indizierung bei - übernehmen unten einfach nichts in
+	 * ht_fileparts. Ein NULL-file_part direkt an
+	 * sond_file_part_from_filepart() würde crashen (g_strsplit() verlangt
+	 * einen Nicht-NULL-String) - daher abgefangen. */
+	if (file_part) {
+		sfp = sond_file_part_from_filepart(file_part, error);
+		if (!sfp) {
+			g_free(file_part);
+			g_free(section);
+			return -1;
 		}
+		g_free(file_part);
+
+		/* Anbindung auswerten: kein section (oder komplett leer) -> ganze
+		 * Datei (range == NULL). Sonst wird nur der referenzierte
+		 * Seitenbereich (nur ganze Seiten, Zeichen-Index wird bewusst
+		 * ignoriert - s. Absprache) (neu) indiziert. Ein reiner Text-Punkt
+		 * (anbindung_is_pdf_punkt) hat kein "bis" - dann gilt bis == von
+		 * (eine einzelne Seite). */
+		anbindung_parse_file_section(section, &anbindung);
+		g_free(section);
+
+		if (!anbindung_is_empty(&anbindung)) {
+			gint von = anbindung.von.seite;
+			gint bis = anbindung_is_pdf_punkt(anbindung) ? von : anbindung.bis.seite;
+
+			range = sond_page_range_new(von, bis);
+		}
+		/* sonst range == NULL -> ganze Datei */
+
+		/* Mehrere ausgewählte Punkte können dieselbe Datei referenzieren
+		 * (gleiches SondFilePart, per Identität interniert) - dann
+		 * Vereinigung der Seitenbereiche bilden. Ganze Datei (range == NULL)
+		 * dominiert. */
+		if (g_hash_table_contains(ht_fileparts, sfp)) {
+			SondPageRange *existing = g_hash_table_lookup(ht_fileparts, sfp);
+
+			if (!existing || !range) {
+				/* einer von beiden will die ganze Datei -> ganze Datei */
+				sond_page_range_free(range);
+				g_hash_table_insert(ht_fileparts, sfp, NULL);
+			} else {
+				existing->von = MIN(existing->von, range->von);
+				existing->bis = MAX(existing->bis, range->bis);
+				sond_page_range_free(range);
+				g_object_unref(sfp); /* schon als Key vorhanden - eigene Ref wieder los */
+			}
+		} else
+			g_hash_table_insert(ht_fileparts, sfp, range);
 	} else
-		g_hash_table_insert(ht_fileparts, sfp, range);
+		g_free(section);
+
+	/* In die Kinder absteigen - aber nur, wenn das überhaupt neue
+	 * Information bringen kann:
+	 * - Knoten ohne eigene Anbindung (strukturierender Knoten): immer
+	 *   absteigen, in beiden Bäumen (Ordner-/Kategorie-Knoten tragen
+	 *   selbst nichts bei, die Dateianbindungen stecken erst in den
+	 *   Kindern).
+	 * - Knoten MIT eigener Anbindung: im Auswertungsbaum kann ein Punkt
+	 *   Unterpunkte mit eigener, unabhängiger Anbindung haben (frei vom
+	 *   Nutzer strukturiert) - dort absteigen. Im Inhaltsbaum dagegen
+	 *   werden Anker-Knoten strikt nach Seiten-Enthaltensein
+	 *   einsortiert (s. ziele_abfragen_anker_rek/anbindung_1_eltern_von_2
+	 *   in ziele.c) - Kinder sind dort immer nur Teilbereiche derselben
+	 *   Anbindung, ihr Seitenbereich ist also bereits durch den
+	 *   Elternbereich abgedeckt. Absteigen würde dort nur unnötig Arbeit
+	 *   kosten, ohne das Ergebnis zu verändern - also weglassen. */
+	if (!had_file_part || sond_treeview_get_id(SOND_TREEVIEW(ztv)) == BAUM_AUSWERTUNG) {
+		GtkTreeModel *model = gtk_tree_view_get_model(GTK_TREE_VIEW(ztv));
+		GtkTreeIter iter_child = { 0 };
+
+		for (gboolean valid = gtk_tree_model_iter_children(model, &iter_child, iter);
+				valid; valid = gtk_tree_model_iter_next(model, &iter_child)) {
+			gint rc = 0;
+
+			rc = zond_treeview_get_selected_fileparts_foreach(ztv, &iter_child,
+					data, error);
+			if (rc)
+				return -1;
+		}
+	}
 
 	return 0;
 }

@@ -587,6 +587,12 @@ SondFilePart* sond_file_part_from_filepart(gchar const* filepart, GError** error
 	gchar** v_string = NULL;
 	gint zaehler = 0;
 
+	if (!filepart) {
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+				"%s\nfilepart ist NULL", __func__);
+		return NULL;
+	}
+
 	v_string = g_strsplit(filepart, "//", -1);
 
 	while (v_string[zaehler]) {

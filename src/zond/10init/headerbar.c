@@ -257,27 +257,44 @@ gboolean zond_index_erstellen_ht(Projekt *zond, GHashTable *ht_index) {
 	return TRUE;
 }
 
+/* Welcher Baum hat gerade tatsächlich eine (nicht-leere) Auswahl?
+ *
+ * Vorher wurde hier zond->baum_prev ("zuletzt aktiver Baum", gesetzt in
+ * cb_treeview_focus_out) herangezogen. Das ist aber unzuverlässig: beim
+ * Klick durch die (mehrstufige) Menüleiste trifft die Focus-Out-
+ * Benachrichtigung des zuvor aktiven Baums teils erst NACH der Menü-Aktion
+ * ein (per Diagnose-Logs bestätigt - reine GTK-Ereignisreihenfolge, kein
+ * Fokus-Sprung). zond->baum_prev war dadurch beim ersten Versuch noch der
+ * alte/Default-Wert; erst danach stimmte er zufällig wieder. Robuster:
+ * direkt bei allen Bäumen nachsehen, wer tatsächlich etwas ausgewählt hat -
+ * unabhängig von jeglicher Fokus-Buchführung. */
+static Baum zond_baum_mit_auswahl(Projekt *zond) {
+	for (Baum baum = BAUM_FS; baum < NUM_BAUM; baum++)
+		if (gtk_tree_selection_count_selected_rows(zond->selection[baum]) > 0)
+			return baum;
+
+	return KEIN_BAUM;
+}
+
 static void do_index_erstellen(Projekt *zond, gboolean sel_only) {
 	GError *error = NULL;
 	GHashTable *ht_index = NULL;
+	Baum baum = BAUM_FS;
 
-	/* zond->baum_active ist hier bereits KEIN_BAUM: das Öffnen des
-	 * Headerbar-Menüs hat dem zuvor aktiven Treeview den Fokus entzogen
-	 * (cb_treeview_focus_out in app_window.c), bevor dieser Handler läuft.
-	 * zond->baum_prev hält den zuletzt aktiven Baum fest und ist daher
-	 * hier die richtige Referenz (wie schon in export.c gehandhabt). */
-	if (zond->baum_prev == KEIN_BAUM) {
-		display_message(zond->app_window, "Fehler beim Erstellen des Index:\n",
-				"Kein Baum ausgewählt", NULL);
-		return;
+	if (sel_only) {
+		baum = zond_baum_mit_auswahl(zond);
+		if (baum == KEIN_BAUM) {
+			display_message(zond->app_window, "Keine Punkte ausgewählt", NULL);
+			return;
+		}
 	}
 
-	if (zond->baum_prev == BAUM_FS || !sel_only)
+	if (baum == BAUM_FS || !sel_only)
 		ht_index = sond_treeviewfm_get_fileparts(
 				SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), sel_only, &error);
 	else
 		ht_index = zond_treeview_get_selected_fileparts(
-				ZOND_TREEVIEW(zond->treeview[zond->baum_prev]), &error);
+				ZOND_TREEVIEW(zond->treeview[baum]), &error);
 	if (!ht_index) {
 		display_message(zond->app_window, "Fehler beim Erstellen des Index:\n",
 				error->message, NULL);
@@ -309,27 +326,26 @@ static void cb_win_indexsuche_auswahl(GSimpleAction *a, GVariant *p, gpointer d)
 	Projekt *zond = (Projekt*) d;
 	GError *error = NULL;
 	GHashTable *ht_fileparts = NULL;
+	Baum baum = KEIN_BAUM;
 
-	/* Auswahl im jeweils zuletzt aktiven Baum ermitteln. zond->baum_active
-	 * ist an dieser Stelle bereits KEIN_BAUM, weil das Öffnen des
-	 * Headerbar-Menüs dem Treeview den Fokus entzogen hat (siehe
-	 * cb_treeview_focus_out in app_window.c), bevor dieser Handler läuft -
-	 * zond->baum_prev ist daher hier die richtige Referenz (wie in
-	 * export.c gehandhabt). Vorher wurde hier immer NULL übergeben,
-	 * "Ausgewählte Punkte" filterte also nie und verhielt sich wie
-	 * "Gesamtes Projektverzeichnis". */
-	if (zond->baum_prev == KEIN_BAUM) {
-		display_message(zond->app_window, "Fehler beim Ermitteln der Auswahl:\n",
-				"Kein Baum ausgewählt", NULL);
+	/* Auswahl im Baum ermitteln, der gerade tatsächlich etwas ausgewählt
+	 * hat (s. zond_baum_mit_auswahl() oben - robuster als das frühere
+	 * zond->baum_prev, das durch Menü-Ereignisreihenfolge veraltet sein
+	 * konnte). Vorher wurde hier immer NULL übergeben, "Ausgewählte
+	 * Punkte" filterte also nie und verhielt sich wie "Gesamtes
+	 * Projektverzeichnis". */
+	baum = zond_baum_mit_auswahl(zond);
+	if (baum == KEIN_BAUM) {
+		display_message(zond->app_window, "Keine Punkte ausgewählt", NULL);
 		return;
 	}
 
-	if (zond->baum_prev == BAUM_FS)
+	if (baum == BAUM_FS)
 		ht_fileparts = sond_treeviewfm_get_fileparts(
 				SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), TRUE, &error);
 	else
 		ht_fileparts = zond_treeview_get_selected_fileparts(
-				ZOND_TREEVIEW(zond->treeview[zond->baum_prev]), &error);
+				ZOND_TREEVIEW(zond->treeview[baum]), &error);
 
 	if (!ht_fileparts) {
 		display_message(zond->app_window, "Fehler beim Ermitteln der Auswahl:\n",
