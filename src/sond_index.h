@@ -390,7 +390,8 @@ void sond_index(fz_context* ctx,
                         gchar const   *mime_type,
                         gint           seite_von,
                         gint           seite_bis,
-                        gint           ocr_mode);
+                        gint           ocr_mode,
+                        gint const    *cancel);
 
 G_END_DECLS
 

@@ -1478,7 +1478,7 @@ void sond_index(fz_context* ctx,
 		void (*log_func)(void*, gchar const*, ...), gpointer log_func_data,
 		SondIndexCtx  *sond_index_ctx, gchar const* filename, guchar const  *buf,
 		gsize size, gchar const *mime_type,
-		gint seite_von, gint seite_bis, gint ocr_mode) {
+		gint seite_von, gint seite_bis, gint ocr_mode, gint const *cancel) {
     if (!sond_index_ctx) return;
     if (!mime_type) return;
 
@@ -1517,8 +1517,22 @@ void sond_index(fz_context* ctx,
     }
 
     gint chunk_idx = 0;
+    gboolean cancelled = FALSE;
     for (guint s = 0; s < segs->len; s++) {
         SondTextSegment *seg = g_ptr_array_index(segs, s);
+
+        /* Abbrechen-Button: bei einer einzelnen großen Datei (viele Seiten,
+         * jede mit Embedding-Berechnung) kann das Indizieren einer Datei
+         * lange dauern - ohne diese Prüfung wurde ein Klick auf "Abbrechen"
+         * erst beim nächsten Aufruf von sond_index() (also nächste Datei)
+         * wirksam, bei nur einer Datei in der Auswahl gar nicht, bis der
+         * ganze Lauf von selbst fertig war. Bereits fertig indizierte
+         * Seiten bleiben erhalten (unten committet) - der nächste Lauf
+         * überspringt sie dank sond_index_ctx_should_process_page(). */
+        if (cancel && g_atomic_int_get(cancel)) {
+            cancelled = TRUE;
+            break;
+        }
 
         /* Doppelte Arbeit vermeiden: wenn diese Seite bereits mit
          * demselben oder höherem OCR-Modus indiziert wurde (z.B. weil
@@ -1565,6 +1579,15 @@ void sond_index(fz_context* ctx,
 
         for (guint i = 0; i < chunks->len; i++) {
             SondChunk   *chunk = g_ptr_array_index(chunks, i);
+
+            /* Auch innerhalb einer Seite prüfen - compute_embedding() pro
+             * Chunk kann für sich schon spürbar dauern, bei vielen Chunks
+             * pro Seite summiert sich das. */
+            if (cancel && g_atomic_int_get(cancel)) {
+                cancelled = TRUE;
+                break;
+            }
+
             gfloat *embedding  = compute_embedding(sond_index_ctx,
                     log_func, log_func_data, chunk->text);
             if (!db_insert_chunk(sond_index_ctx, log_func, log_func_data, filename, chunk_idx,
@@ -1584,10 +1607,20 @@ void sond_index(fz_context* ctx,
 
         g_ptr_array_unref(chunks);
 
+        if (cancelled)
+            break;
+
         /* Seite als (mit diesem Modus) indiziert markieren */
         sond_index_page_set(sond_index_ctx, filename, seg->page_nr, ocr_mode);
     }
 
+    /* Bei Abbruch mitten in der Datei: bislang fertig indizierte Seiten
+     * trotzdem committen (nicht verwerfen) - resumable dank
+     * sond_index_ctx_should_process_page() beim nächsten Lauf. Die
+     * angebrochene Seite wurde oben bewusst nicht als fertig markiert,
+     * ihre halb eingefügten Chunks sind also verwaist; das ist unschädlich,
+     * da clear_page() sie beim nächsten Lauf vor dem Neu-Indizieren
+     * dieser Seite entfernt. */
     if (sqlite3_exec(sond_index_ctx->db, "COMMIT;", NULL, NULL, &errmsg) != SQLITE_OK) {
         if (log_func)
             log_func(log_func_data, "sond_index: COMMIT fehlgeschlagen: %s", errmsg);

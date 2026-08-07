@@ -651,7 +651,7 @@ static void sond_process_file_do_rec(SondProcessFileCtx* wctx,
 			wctx->index_ctx, filename,
 			(*out_data && *out_size > 0) ? *out_data : data,
 			(*out_data && *out_size > 0) ? *out_size : size,
-			mime_type, seite_von, seite_bis, wctx->ocr_mode);
+			mime_type, seite_von, seite_bis, wctx->ocr_mode, &wctx->cancel);
 
 	g_free(mime_type);
 

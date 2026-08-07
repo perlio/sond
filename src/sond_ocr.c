@@ -387,6 +387,18 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, SondOcrPool* pool,
 			else if (status == 4) //Abstellgleis
 				continue;
 		}
+
+		/* Kurze Pause statt sofort erneut zu pollen: ohne dies ist diese
+		 * Schleife ein reines Busy-Spin, das dauerhaft einen ganzen
+		 * CPU-Kern belegt und damit direkt mit den eigentlichen
+		 * Tesseract-Worker-Threads um Rechenzeit konkurriert (vgl.
+		 * dieselbe Problematik/Lösung in headerbar.c,
+		 * zond_index_erstellen_ht). Macht sich besonders beim Warten auf
+		 * noch laufende Seiten nach einem Abbruch bemerkbar - der Poll-Thread
+		 * blockiert dann unnötig einen Kern, der den Worker-Threads beim
+		 * Fertigwerden fehlt. 2ms ist gegenüber der Dauer einer
+		 * Seiten-OCR (typischerweise deutlich über 100ms) vernachlässigbar. */
+		g_usleep(2000);
 	}
 
 	return cancelled ? 1 : 0;
@@ -744,7 +756,6 @@ typedef struct {
 } TesseractThreadData;
 
 static gboolean ocr_cancel(void *data, int words) {
-	gboolean ret = FALSE;
 	gint progress = 0;
 	gint last_progress = 0;
 
@@ -762,10 +773,22 @@ static gboolean ocr_cancel(void *data, int words) {
 		g_atomic_int_set(&cancel_data->last_progress, progress);
 	}
 
-	if (cancel_data->cancel_this && (g_atomic_int_get((gint*) cancel_data->cancel_this)))
-		ret = TRUE;
-
-	return ret;  // TRUE = abbrechen
+	/* Absichtlich NICHT mehr TRUE zurückgeben, wenn cancel_this gesetzt ist:
+	 * ein bereits laufender TessBaseAPIRecognize()-Aufruf mitten in der
+	 * Erkennung über diesen Callback abzubrechen, hat sich als Ursache eines
+	 * echten Hängers erwiesen (bestätigt per Test: ohne Abbrechen ist eine
+	 * Seite/das ganze Dokument nach wenigen Minuten fertig, mit Abbrechen
+	 * mitten in einer laufenden Seite kommt danach überhaupt keine
+	 * Meldung mehr, auch nach mehreren Minuten nicht - offenbar ein
+	 * bekanntes Problem der Tesseract-LSTM-Engine mit dem
+	 * monitor-basierten Cancel-Callback). Bereits gestartete Seiten laufen
+	 * jetzt stattdessen einfach ganz normal zu Ende (wenige Sekunden bis
+	 * ~1-2 Minuten, je nach Anzahl nötiger Auflösungs-Durchgänge) - der
+	 * eigentliche Abbruch wirkt weiterhin dadurch, dass
+	 * sond_ocr_do_tasks() für noch nicht gestartete Seiten (status 0) bei
+	 * gesetztem cancel_all keine neuen Tasks mehr an den Thread-Pool
+	 * übergibt. Die Fortschritts-Zählung oben bleibt unverändert aktiv. */
+	return FALSE;
 }
 
 static gint ocr_pixmap(SondOcrTask* task, SondOcrPool* pool,
@@ -887,8 +910,19 @@ static void ocr_worker(gpointer task_data, gpointer user_data) {
     SondOcrTask *task = (SondOcrTask *)task_data;
     SondOcrPool *pool = (SondOcrPool *)user_data;
 
-    if (g_atomic_int_get(pool->cancel_all))
+    /* Task wurde zwar schon in den Thread-Pool gepusht (Status 1 "läuft"),
+     * aber der Worker-Thread hat ihn noch nicht wirklich abgeholt/gestartet,
+     * als der Abbruch kam - hier also nichts mehr tun. Wichtig: status MUSS
+     * trotzdem noch auf einen Endzustand gesetzt werden (3 = "Fehler/nicht
+     * fertig geworden", zählt in sond_ocr_do_tasks() als erledigt). Ohne
+     * dies blieb der Task für immer auf Status 1 stehen - sond_ocr_do_tasks()
+     * wartet dort ewig auf einen Statuswechsel, der nie kommt: der
+     * eigentliche Hänger nach "Abbrechen", unabhängig vom
+     * Tesseract-Cancel-Callback. */
+    if (g_atomic_int_get(pool->cancel_all)) {
+    	g_atomic_int_set(&task->status, 3);
     	return;
+    }
 
     // Hole oder erstelle Thread-lokale Tesseract-Instanz
     TesseractThreadData *thread_data = g_private_get(&pool->thread_data_key);

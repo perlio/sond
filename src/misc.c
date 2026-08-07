@@ -470,6 +470,31 @@ static void cb_info_window_response(GtkDialog *dialog, gint id, gpointer data) {
 	return;
 }
 
+/* X-Button (Fenster schließen) während der Hintergrund-Thread noch läuft:
+ * ohne diesen Handler übersetzt GTK ein delete-event NICHT automatisch in
+ * ein "response"-Signal - das passiert nur innerhalb von gtk_dialog_run(),
+ * welches hier während der laufenden Verarbeitung bewusst nicht verwendet
+ * wird (siehe zond_index_erstellen_ht/eigene Poll-Schleife statt
+ * modalem Run). Ohne Behandlung würde GTKs Default-Verhalten das Fenster
+ * (info_window->dialog) sofort zerstören, während der Hintergrund-Thread
+ * noch aktiv Widgets darin nachträgt (info_window_set_message_thread_safe)
+ * - Zugriff auf bereits zerstörte Widgets. Deshalb: wie Abbrechen
+ * behandeln (cancel setzen), aber TRUE zurückgeben, damit GTK das Fenster
+ * NICHT zerstört - info_window_close() (aufgerufen, sobald der
+ * Hintergrund-Thread wirklich fertig ist) schließt es dann sauber über
+ * my_dialog_run(), wo die genannte Übersetzung wieder normal greift. */
+static gboolean cb_info_window_delete_event(GtkWidget *widget, GdkEvent *event,
+		gpointer data) {
+	InfoWindow *info_window = (InfoWindow*) data;
+
+	if (!g_atomic_int_get(info_window->cancel)) {
+		info_window_set_message(info_window, "...abgebrochen");
+		g_atomic_int_set(info_window->cancel, 1);
+	}
+
+	return TRUE; //Event konsumiert - Fenster nicht zerstören
+}
+
 InfoWindow*
 info_window_open(GtkWidget *window, gint* cancel, const gchar *title) {
 	GtkWidget *content = NULL;
@@ -521,6 +546,8 @@ info_window_open(GtkWidget *window, gint* cancel, const gchar *title) {
 
 	g_signal_connect(GTK_DIALOG(info_window->dialog), "response",
 			G_CALLBACK(cb_info_window_response), info_window);
+	g_signal_connect(GTK_DIALOG(info_window->dialog), "delete-event",
+			G_CALLBACK(cb_info_window_delete_event), info_window);
 
 	return info_window;
 }
