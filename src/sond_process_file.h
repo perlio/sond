@@ -47,6 +47,11 @@ typedef struct _SondProcessFileCtx {
 	gpointer log_func_data;
     SondOcrPool  *ocr_pool;   /* NULL → keine OCR         */
     SondIndexCtx *index_ctx;  /* NULL → keine Indizierung */
+    /* Wurzel des Projektverzeichnisses (zond->project_dir) - Obergrenze für
+     * das Hochprüfen/Coalescen in der coverage-Tabelle nach erfolgreich
+     * indizierten Dateien (sond_process_fileparts()). NULL → kein
+     * Coalescing (z.B. wenn kein Projekt zugeordnet ist). */
+    gchar *project_dir;
     /* Umgang mit bereits vorhandenem verstecktem Text beim OCRen.
      * Werte entsprechen SondOcrMode (sond_ocr.h):
      *   0 = SOND_OCR_MODE_NONE  - kein OCR
@@ -85,7 +90,7 @@ SondProcessFileCtx* sond_process_file_create_wctx(fz_context* ctx,
 		void (*log_func)(void*, gchar const*, ...), gpointer log_func_data,
 		gchar const* tessdata_path, gint num_ocr_threads,
 		gchar const* index_db_filename, gchar const* embedding_model_path,
-		GError **error);
+		gchar const* project_dir, GError **error);
 
 void sond_process_file_destroy_wctx(SondProcessFileCtx*);
 

@@ -257,6 +257,89 @@ gboolean sond_index_ctx_should_process_page(SondIndexCtx *ctx,
                                              gint          requested_mode);
 
 /**
+ * sond_index_ctx_coverage_get:
+ * @ctx:  SondIndexCtx
+ * @path: Datei- oder Verzeichnispfad
+ *
+ * Liefert den Modus, mit dem path oder der nächstgelegene abdeckende
+ * Vorfahre als vollständig indiziert vermerkt ist (coalescierte
+ * "coverage"-Tabelle, eine Ebene oberhalb von "pages" - siehe
+ * SQL_CREATE_COVERAGE in sond_index.c).
+ *
+ * Returns: SondOcrMode-Wert, oder -1, wenn path nicht (auch nicht über
+ * einen Vorfahren) als abgedeckt vermerkt ist.
+ */
+gint sond_index_ctx_coverage_get(SondIndexCtx *ctx, gchar const *path);
+
+/**
+ * sond_index_ctx_coverage_mark:
+ * @ctx:      SondIndexCtx
+ * @path:     Datei- oder Verzeichnispfad
+ * @ocr_mode: SondOcrMode-Wert
+ * @error:    GError
+ *
+ * Markiert path als vollständig mit ocr_mode indiziert (Coalescing).
+ * Löscht dabei automatisch überflüssig gewordene, feinere Einträge
+ * unterhalb von path (sowohl in "coverage" als auch in "pages").
+ *
+ * Returns: FALSE bei Datenbankfehler.
+ */
+gboolean sond_index_ctx_coverage_mark(SondIndexCtx *ctx, gchar const *path,
+                                       gint ocr_mode, GError **error);
+
+/**
+ * sond_index_ctx_coverage_invalidate:
+ * @ctx:   SondIndexCtx
+ * @path:  Datei- oder Verzeichnispfad
+ * @error: GError
+ *
+ * Entwertet path: danach hat path keinen coverage-Eintrag mehr (weder
+ * direkt noch über einen Vorfahren). War path nur indirekt über einen
+ * Vorfahren abgedeckt, wird dieser aufgelöst und auf jeder Zwischenebene
+ * werden die (weiterhin gültigen) Geschwister per flachem
+ * Verzeichnis-Listing neu eingetragen - kein rekursiver Scan.
+ *
+ * Bekannte Einschränkung: setzt echte Dateisystem-Verzeichnisse zwischen
+ * Vorfahre und path voraus (BAUM_FS) - eingebettete ("//"-)Pfade und die
+ * Seiten-Ebene innerhalb einer bereits gemeinsam abgedeckten Datei sind
+ * noch nicht vorgesehen.
+ *
+ * Returns: FALSE bei Datenbankfehler.
+ */
+gboolean sond_index_ctx_coverage_invalidate(SondIndexCtx *ctx,
+                                             gchar const *path,
+                                             GError **error);
+
+/**
+ * sond_index_ctx_coverage_try_collapse:
+ * @ctx:      SondIndexCtx
+ * @path:     Datei- oder Verzeichnispfad (projektrelativ), gerade per
+ *            coverage_mark abgedeckt
+ * @root_dir: absolute Projektwurzel (zond->project_dir) - wird nur
+ *            gebraucht, um aus einem relativen Verzeichnis-Key einen
+ *            echten Dateisystempfad für g_dir_open() zu bauen
+ * @error:    GError
+ *
+ * Prüft von path aus schrittweise nach oben, ob jeweils alle Geschwister
+ * (flaches Verzeichnis-Listing) irgendeinen coverage-Eintrag haben, und
+ * fasst sie ggf. zu einem Eintrag für das Elternverzeichnis zusammen -
+ * dessen ocr_mode ist dabei der MINDESTMODUS aller Geschwister (nicht der
+ * Modus der zuletzt verarbeiteten Datei), s. coverage_mark-Kommentar zur
+ * Mindestmodus-Konvention.
+ *
+ * Stoppt spätestens, wenn ein Eintrag bereits direkt im
+ * Projektverzeichnis liegt - es wird nie zu einem einzigen
+ * projektweiten Eintrag zusammengefasst (root_dir selbst wird nie als
+ * coverage-Key verwendet).
+ *
+ * Returns: FALSE bei Datenbankfehler.
+ */
+gboolean sond_index_ctx_coverage_try_collapse(SondIndexCtx *ctx,
+                                               gchar const *path,
+                                               gchar const *root_dir,
+                                               GError **error);
+
+/**
  * sond_index_ctx_rename_file:
  * @ctx:        SondIndexCtx
  * @prefix_old: Alter Pfad-Präfix

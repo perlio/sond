@@ -64,6 +64,15 @@ fz_pixmap* pdf_render_pixmap(fz_context *ctx, pdf_page* page,
 
 gint pdf_set_content_stream(fz_context*, pdf_page*, fz_buffer*, GError**);
 
+/**
+ * Liest den aktuellen Content-Stream einer Seite (page_ref) komplett in
+ * einen neuen fz_buffer. Gemeinsam genutzt von seiten.c (Journal alt/neu
+ * bei OCR) und sond_ocr.c (alten Content vor die neue OCR-Textebene
+ * setzen).
+ */
+fz_buffer* pdf_get_content_stream_as_buffer(fz_context*, pdf_obj* page_ref,
+		GError**);
+
 gint pdf_get_sond_font(fz_context* ctx, pdf_document* doc, pdf_obj**, GError** error);
 
 pdf_obj* pdf_put_sond_font(fz_context* ctx, pdf_document* doc, GError** error);

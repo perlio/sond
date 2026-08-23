@@ -37,6 +37,7 @@
 #include "../99conv/general.h"
 
 #include "../40viewer/viewer.h"
+#include "../40viewer/viewer_save.h"
 #include "../zond_tree_store.h"
 
 #include "project.h"
@@ -596,7 +597,8 @@ gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, GError 
 			"Qwen3-Embedding-0.6B-Q8_0.gguf");
 	zond->wctx = sond_process_file_create_wctx(zond->ctx,
 			(void (*)(gpointer, gchar const*, ...)) info_window_set_message_thread_safe,
-			NULL, datadir, 4, ".sond_index.db", embedding_model_path, error);
+			NULL, datadir, 4, ".sond_index.db", embedding_model_path,
+			zond->project_dir, error);
 	g_free(datadir);
 	g_free(embedding_model_path);
 	if (!zond->wctx) {

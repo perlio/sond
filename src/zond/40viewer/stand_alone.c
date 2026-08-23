@@ -32,6 +32,7 @@
 #include "viewer.h"
 #include "viewer_ui.h"
 #include "viewer_render.h"
+#include "viewer_save.h"
 #include "document.h"
 
 static void pv_activate_widgets(PdfViewer *pv, gboolean activ) {

@@ -162,6 +162,22 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 			g_clear_error(&idx_err);
 			return -1;
 		}
+
+		/* Vorsichtsmaßnahme: einen eventuell bestehenden coverage-Eintrag
+		 * für genau diesen Pfad (oder ein Vorfahre-Verzeichnis) auflösen.
+		 * Nicht wegen des gelöschten Pfads selbst (der existiert ja gleich
+		 * nicht mehr), sondern damit nicht irgendwann später ein neuer,
+		 * völlig anderer Pfad gleichen Namens fälschlich als "schon
+		 * abgedeckt" gilt. */
+		if (!sond_index_ctx_coverage_invalidate(priv->zond->wctx->index_ctx,
+				path, &idx_err)) {
+			sqlite3_exec(priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
+			if (error) *error = g_error_new(G_IO_ERROR, G_IO_ERROR_FAILED,
+					"%s: sond_index_ctx_coverage_invalidate: %s", __func__,
+					idx_err ? idx_err->message : "?");
+			g_clear_error(&idx_err);
+			return -1;
+		}
 	}
 
 	rc = dbase_zond_begin(priv->zond->dbase_zond, error);
@@ -706,6 +722,110 @@ static gint zond_treeviewfm_get_text_from_section(SondTVFMItem* stvfm_item,
 	}
 
 	return 0;
+}
+
+/* zond_treeviewfm_get_fileparts() und Helfer:
+ *
+ * Eigene, zond-spezifische Variante von sond_treeviewfm_get_fileparts()
+ * (sond_treeviewfm.c). Die generische Basisklasse kennt nur "ganze Datei"
+ * (NULL) als Wert, weil sie bewusst nicht weiß, was eine "Section" eines
+ * SOND_TVFM_ITEM_TYPE_LEAF_SECTION-Knotens bedeutet (bei PDF ein
+ * Seitenbereich, bei anderen Dateitypen ggf. etwas ganz anderes - z.B.
+ * ein Zeitausschnitt bei Audio/Video). Nur zond selbst weiß: in BAUM_FS
+ * ist ein LEAF_SECTION-Knoten immer eine Anbindung (angelegt in
+ * ziele.c), deren path_or_section ein Seitenbereich ist. Deshalb baut
+ * diese Funktion die Hashtable komplett selbst, ausschließlich über die
+ * schon vorhandenen öffentlichen SondTVFMItem-Zugriffsfunktionen
+ * (sond_treeviewfm.h) - ohne jede Änderung an der Basisklasse. */
+static gint zond_treeviewfm_item_get_fileparts(SondTVFMItem *stvfm_item,
+		GHashTable *ht, GError **error) {
+	SondTVFMItemType type = sond_tvfm_item_get_item_type(stvfm_item);
+	gchar const *path_or_section = sond_tvfm_item_get_path_or_section(stvfm_item);
+	SondFilePart *sond_file_part = sond_tvfm_item_get_sond_file_part(stvfm_item);
+
+	//"Wirkliches" dir und root-dir - s. sond_tvfm_item_get_fileparts()
+	if (type == SOND_TVFM_ITEM_TYPE_DIR && (path_or_section || !sond_file_part)) {
+		GPtrArray *arr_children = NULL;
+		gint rc = 0;
+
+		rc = sond_tvfm_item_load_children(stvfm_item, &arr_children, error);
+		if (rc)
+			return -1;
+
+		for (guint i = 0; i < arr_children->len; i++) {
+			SondTVFMItem *child = g_ptr_array_index(arr_children, i);
+
+			rc = zond_treeviewfm_item_get_fileparts(child, ht, error);
+			if (rc)
+				return -1;
+		}
+	}
+	else {
+		/* eigene Ref pro Key nötig (ht: key-destroy-func g_object_unref,
+		 * s. zond_treeviewfm_get_fileparts() unten) - sond_file_part
+		 * gehört sonst dem stvfm_item. */
+		SondPageRange *range = NULL;
+
+		if (type == SOND_TVFM_ITEM_TYPE_LEAF_SECTION && path_or_section) {
+			/* Anbindung - path_or_section ist deren Seitenbereich-String
+			 * (s. Anlage in ziele.c). Ohne "bis" (reiner Punkt) liefert
+			 * anbindung_build_file_section() ein bis mit seite==0 UND
+			 * index==0 - dieselbe Bedingung erkennt hier, dass nur eine
+			 * einzelne Seite (nicht seite 0 als Bereichsende) gemeint ist. */
+			Anbindung anbindung = { 0 };
+
+			anbindung_parse_file_section(path_or_section, &anbindung);
+			range = sond_page_range_new(anbindung.von.seite,
+					(anbindung.bis.seite == 0 && anbindung.bis.index == 0) ?
+							anbindung.von.seite : anbindung.bis.seite);
+		}
+
+		g_hash_table_insert(ht, g_object_ref(sond_file_part), range);
+	}
+
+	return 0;
+}
+
+static gint zond_treeviewfm_get_fileparts_foreach(SondTreeview *stv,
+		GtkTreeIter *iter, gpointer data, GError **error) {
+	SondTVFMItem *stvfm_item = NULL;
+	GHashTable *ht = (GHashTable*) data;
+	gint rc = 0;
+
+	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(stv)),
+			iter, 0, &stvfm_item, -1);
+	rc = zond_treeviewfm_item_get_fileparts(stvfm_item, ht, error);
+	g_object_unref(stvfm_item);
+	if (rc)
+		return -1;
+
+	return 0;
+}
+
+GHashTable* zond_treeviewfm_get_fileparts(ZondTreeviewFM *ztvfm,
+		gboolean selected_only, GError **error) {
+	GHashTable *ht = NULL;
+	gint rc = 0;
+
+	ht = g_hash_table_new_full(NULL, NULL, g_object_unref, sond_page_range_free);
+
+	if (selected_only)
+		rc = sond_treeview_selection_foreach(SOND_TREEVIEW(ztvfm),
+				zond_treeviewfm_get_fileparts_foreach, ht, error);
+	else {
+		SondTVFMItem *stvfm_item =
+				sond_tvfm_item_create(SOND_TREEVIEWFM(ztvfm), NULL, NULL);
+
+		rc = zond_treeviewfm_item_get_fileparts(stvfm_item, ht, error);
+		g_object_unref(stvfm_item);
+	}
+
+	if (rc) {
+		g_hash_table_destroy(ht);
+		return NULL;
+	}
+
+	return ht;
 }
 
 static void zond_treeviewfm_finalize(GObject *obj) {

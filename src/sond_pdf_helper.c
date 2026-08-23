@@ -937,6 +937,26 @@ gint pdf_set_content_stream(fz_context *ctx,
 	return 0;
 }
 
+fz_buffer* pdf_get_content_stream_as_buffer(fz_context *ctx, pdf_obj *page_ref,
+		GError **error) {
+	pdf_obj *obj_contents = NULL;
+	fz_stream *stream = NULL;
+	fz_buffer *buf = NULL;
+
+	fz_try( ctx ) {
+		obj_contents = pdf_dict_get(ctx, page_ref, PDF_NAME(Contents));
+		stream = pdf_open_contents_stream(ctx,
+				pdf_get_bound_document(ctx, page_ref), obj_contents);
+		buf = fz_read_all(ctx, stream, 1024);
+	}
+	fz_always( ctx )
+		fz_drop_stream(ctx, stream);
+	fz_catch ( ctx )
+		ERROR_PDF_VAL(NULL)
+
+	return buf;
+}
+
 gint pdf_get_sond_font(fz_context* ctx, pdf_document* doc, pdf_obj** font_ref,
 		GError** error) {
 	gint num_pages = 0;

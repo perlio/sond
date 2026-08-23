@@ -774,6 +774,32 @@ void sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files) {
 			}
 		}
 
+		/* Coverage-Hochprüfen (Coalescing mit den Geschwistern): das
+		 * eigentliche Markieren der Datei als vollständig abgedeckt
+		 * passiert bereits zuverlässig in sond_index() selbst (dort ist
+		 * die wahre Gesamtseitenzahl bekannt - hier nur "nicht
+		 * abgebrochen" zu prüfen wäre nicht sicher genug, s. dortiger
+		 * Kommentar). Hier deshalb nur per coverage_get() nachsehen, ob
+		 * das gerade tatsächlich passiert ist, und wenn ja, nach oben
+		 * weiterprüfen, ob jetzt auch das Elternverzeichnis komplett ist. */
+		if (!g_atomic_int_get(&wctx->cancel) &&
+				wctx->index_ctx && wctx->project_dir &&
+				sond_index_ctx_coverage_get(wctx->index_ctx, file_part)
+						>= wctx->ocr_mode) {
+			GError *coverage_error = NULL;
+
+			if (!sond_index_ctx_coverage_try_collapse(wctx->index_ctx,
+					file_part, wctx->project_dir,
+					&coverage_error)) {
+				if (wctx->log_func)
+					wctx->log_func(wctx->log_func_data,
+							"sond_process_fileparts: coverage_try_collapse '%s': %s",
+							file_part,
+							coverage_error ? coverage_error->message : "?");
+				g_clear_error(&coverage_error);
+			}
+		}
+
 		g_free(file_part);
 	}
 
@@ -784,7 +810,7 @@ SondProcessFileCtx* sond_process_file_create_wctx(fz_context* ctx,
 		void (*log_func)(void*, gchar const*, ...), gpointer log_func_data,
 		gchar const* tessdata_path, gint num_ocr_threads,
 		gchar const* index_db_filename, gchar const* embedding_model_path,
-		GError **error) {
+		gchar const* project_dir, GError **error) {
 
 	SondProcessFileCtx* wctx = g_new0(SondProcessFileCtx, 1);
 
@@ -797,6 +823,8 @@ SondProcessFileCtx* sond_process_file_create_wctx(fz_context* ctx,
 
 	wctx->log_func = log_func;
 	wctx->log_func_data = (gpointer) log_func_data;
+
+	wctx->project_dir = g_strdup(project_dir);
 
 	wctx->ocr_pool = sond_ocr_pool_new(tessdata_path, "deu",
 			num_ocr_threads, &wctx->cancel, &wctx->progress, error);
@@ -819,6 +847,7 @@ void sond_process_file_destroy_wctx(SondProcessFileCtx *wctx) {
 		sond_index_ctx_free(wctx->index_ctx);
 	if (wctx->ocr_pool)
 		sond_ocr_pool_free(wctx->ocr_pool);
+	g_free(wctx->project_dir);
 
 	g_free(wctx);
 

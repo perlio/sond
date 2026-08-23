@@ -38,6 +38,7 @@
 #include "20allgemein/project.h"
 
 #include "40viewer/viewer.h"
+#include "40viewer/viewer_search.h"
 #include "40viewer/document.h"
 
 #include "99conv/general.h"
@@ -414,8 +415,15 @@ ask_coverage_gaps(Projekt *zond, GPtrArray *gaps, guint n_total) {
  * Öffentliche Funktion: Dialog + Ergebnisanzeige
  * ---------------------------------------------------------------------- */
 
+/* ht_filter: schränkt die Treffer auf diese Punkte ein (NULL = keine
+ * Einschränkung, ganzer Index). ht_coverage: worüber der Abdeckungs-Check
+ * (schon indiziert? fehlt etwas?) läuft - für "Ausgewählte Punkte" dieselbe
+ * Map wie ht_filter, für "Gesamtes Projektverzeichnis" eine eigene, vom
+ * Aufrufer erzeugte Map über alle Dateien (ht_filter bleibt dort NULL,
+ * sonst würde jeder Treffer unnötig gegen die komplette Dateiliste
+ * geprüft). NULL = kein Abdeckungs-Check. */
 static void
-zond_indexsuche_do(Projekt *zond, GHashTable* ht_fileparts) {
+zond_indexsuche_do(Projekt *zond, GHashTable* ht_filter, GHashTable *ht_coverage) {
     GtkWidget *dialog     = NULL;
     GtkWidget *content    = NULL;
     GtkWidget *grid       = NULL;
@@ -432,10 +440,10 @@ zond_indexsuche_do(Projekt *zond, GHashTable* ht_fileparts) {
         return;
     }
 
-    if (ht_fileparts) {
-        GPtrArray *gaps = check_coverage(zond, ht_fileparts);
+    if (ht_coverage) {
+        GPtrArray *gaps = check_coverage(zond, ht_coverage);
         if (gaps->len > 0) {
-            gint resp = ask_coverage_gaps(zond, gaps, g_hash_table_size(ht_fileparts));
+            gint resp = ask_coverage_gaps(zond, gaps, g_hash_table_size(ht_coverage));
             if (resp == GTK_RESPONSE_CANCEL) {
                 g_ptr_array_unref(gaps);
                 return;
@@ -524,7 +532,7 @@ zond_indexsuche_do(Projekt *zond, GHashTable* ht_fileparts) {
             }
 
             /* Treffer auf Auswahl filtern wenn gewünscht.
-             * ht_fileparts ist eine Map SondFilePart* -> SondPageRange*
+             * ht_filter ist eine Map SondFilePart* -> SondPageRange*
              * (siehe sond_treeviewfm_get_fileparts()/zond_treeview_get_
              * selected_fileparts()) - direkt vom Aufrufer übergeben, kein
              * erneutes Auslesen einer Treeview-Selektion nötig (das war
@@ -533,7 +541,7 @@ zond_indexsuche_do(Projekt *zond, GHashTable* ht_fileparts) {
              * Ein NULL-Wert bedeutet "ganze Datei"; ein SondPageRange*
              * beschränkt den Treffer zusätzlich auf dessen Seitenbereich
              * (die Anbindung des ausgewählten Punkts). */
-            if (ht_fileparts && hits->len > 0) {
+            if (ht_filter && hits->len > 0) {
                 GPtrArray *filtered = g_ptr_array_new_with_free_func(
                         sond_index_hit_free);
 
@@ -544,7 +552,7 @@ zond_indexsuche_do(Projekt *zond, GHashTable* ht_fileparts) {
                     GHashTableIter iter_sel;
                     gpointer key = NULL;
                     gpointer value = NULL;
-                    g_hash_table_iter_init(&iter_sel, ht_fileparts);
+                    g_hash_table_iter_init(&iter_sel, ht_filter);
                     while (g_hash_table_iter_next(&iter_sel, &key, &value)) {
                         SondFilePart *sfp_sel = (SondFilePart*) key;
                         SondPageRange *range = (SondPageRange*) value;
@@ -672,11 +680,29 @@ zond_indexsuche_do(Projekt *zond, GHashTable* ht_fileparts) {
 
 void
 zond_indexsuche_activate(GtkMenuItem *item, gpointer data) {
-    zond_indexsuche_do((Projekt*) data, NULL);
+    Projekt *zond = (Projekt*) data;
+    GHashTable *ht_coverage = NULL;
+    GError *error = NULL;
+
+    /* "Gesamtes Projektverzeichnis": keine Auswahl zum Filtern (ht_filter
+     * bleibt NULL, wie bisher), aber der Abdeckungs-Check (schon
+     * indiziert?) soll trotzdem laufen - dafür eine eigene Map über alle
+     * Dateien im Projekt aufbauen, unabhängig vom (NULL) Filter. Schlägt
+     * das Aufbauen fehl, wird die Suche trotzdem ausgeführt, nur eben ohne
+     * Abdeckungs-Check (kein Grund, die Suche deswegen zu blockieren). */
+    ht_coverage = zond_treeviewfm_get_fileparts(
+            ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), FALSE, &error);
+    if (!ht_coverage)
+        g_clear_error(&error);
+
+    zond_indexsuche_do(zond, NULL, ht_coverage);
+
+    if (ht_coverage)
+        g_hash_table_destroy(ht_coverage);
 }
 
 void
 zond_indexsuche_activate_with_selection(GtkMenuItem *item,
 		GHashTable* ht_fileparts, gpointer data) {
-    zond_indexsuche_do((Projekt*) data, ht_fileparts);
+    zond_indexsuche_do((Projekt*) data, ht_fileparts, ht_fileparts);
 }

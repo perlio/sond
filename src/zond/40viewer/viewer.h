@@ -187,27 +187,36 @@ typedef struct _Viewer_Page_New {
 
 void viewer_springen_zu_pos_pdf(PdfViewer*, PdfPos, gdouble);
 
+/* Wie viewer_springen_zu_pos_pdf(), aber als g_idle-Callback eingereiht -
+ * für den Fall, daß das Layout (viewer_refresh_layout()/viewer_create_
+ * layout()) noch nicht fertig aufgebaut ist. Von viewer.c selbst benutzt
+ * (viewer_display_document()) sowie von viewer_search.c
+ * (viewer_highlight_at_char_pos()). */
+void viewer_springen_zu_pos_pdf_idle(PdfViewer*, PdfPos, gdouble);
+
 void viewer_refresh_layout(PdfViewer*, gint);
 
 ViewerPageNew* viewer_new_page(PdfViewer*, DisplayedDocument*, gint);
 
 void viewer_display_document(PdfViewer*, DisplayedDocument*, gint, gint);
 
+/* Ob mindestens eines der im Viewer angezeigten DisplayedDocuments
+ * ungespeicherte Änderungen (zpdfd_part->dirty) hat - steuert die
+ * Sensitivität von button_speichern. Von viewer.c (viewer_display_document())
+ * und viewer_save.c (viewer_save_dirty_dds()) benutzt. */
+gboolean viewer_has_dirty_dd(PdfViewer*);
+
 void viewer_schliessen(PdfViewer*);
 
-gint viewer_save_dirty_dds(PdfViewer*, GError**);
-
-void viewer_save_and_close(PdfViewer*);
+/* viewer_save_dirty_dds()/viewer_save_and_close(): siehe viewer_save.h */
 
 void viewer_get_iter_thumb(PdfViewer*, gint, GtkTreeIter*);
 
 gint viewer_abfragen_pdf_punkt(PdfViewer *pv, fz_point punkt,
 		PdfPunkt *pdf_punkt);
 
-gint viewer_handle_text_search(PdfViewer* pv, GtkWidget *widget, GError **error);
-
-void viewer_highlight_at_char_pos(PdfViewer *pv, gint page_nr,
-		gint char_pos_in_page, gchar const *term);
+/* viewer_handle_text_search()/viewer_highlight_at_char_pos(): siehe
+ * viewer_search.h */
 
 void viewer_handle_page_entry_activated(PdfViewer* pv, GtkEntry *entry);
 

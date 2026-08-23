@@ -35,12 +35,12 @@ static const float ocr_scales[] = {4.3, 6.4, 8.6};
 
 static gint add_ocr_layer_to_page(fz_context *ctx,
 		GString* content, pdf_page *page, pdf_obj* font_ref,
-		OcrTransform* ocr_transform, GError** error) {
+		OcrTransform* ocr_transform, fz_buffer** buf_content_new,
+		GError** error) {
 	pdf_obj* resources = NULL;
 	pdf_obj* fonts = NULL;
 	pdf_obj* font_name = NULL;
 	fz_buffer* buf_new = NULL;
-	fz_stream* stream = NULL;
 	gint rc = 0;
 
 	fz_try(ctx) {
@@ -77,18 +77,9 @@ static gint add_ocr_layer_to_page(fz_context *ctx,
 		ERROR_PDF
 
 	//alten content stream holen und in buffer
-	fz_try(ctx) {
-		pdf_obj* contents = NULL;
-
-		contents = pdf_dict_get(ctx, page->obj, PDF_NAME(Contents));
-		stream = pdf_open_contents_stream(ctx,
-				page->doc, contents);
-		buf_new = fz_read_all(ctx, stream, 1024);
-	}
-	fz_always( ctx )
-		fz_drop_stream(ctx, stream);
-	fz_catch (ctx)
-		ERROR_PDF
+	buf_new = pdf_get_content_stream_as_buffer(ctx, page->obj, error);
+	if (!buf_new)
+		return -1;
 
 	// OCR-Block voranstellen: zuerst OCR, dann alter Stream
 	// So ist garantiert, daß keine aktive cm-Matrix aus dem alten Stream
@@ -111,8 +102,23 @@ static gint add_ocr_layer_to_page(fz_context *ctx,
 	//alle indirekten Objekte - sofern identisch - zusammengefaßt hat
 	//Dann würde ändern des val alle Seiten betreffen
 	rc = pdf_set_content_stream(ctx, page, buf_new, error);
-	if (rc)
+	if (rc) {
+		/* buf_new wird von pdf_set_content_stream()/pdf_update_stream()
+		 * NICHT übernommen (kein _drop-Suffix, vgl. Aufrufstelle in
+		 * viewer_save.c, wo entry.ocr.buf_new nach demselben Aufruf
+		 * weiterhin vom Journal gehalten und erst später gedroppt wird) -
+		 * bei Fehlschlag also selbst droppen, sonst Leck. */
+		fz_drop_buffer(ctx, buf_new);
 		return -1;
+	}
+
+	/* buf_new ist der fertige neue Content-Stream (OCR-Block + alter
+	 * Stream) - genau das, was der Aufrufer als "neuer Zustand der Seite"
+	 * für den Journal-Eintrag braucht. Statt buf_new hier zu droppen und
+	 * den Aufrufer den Content-Stream später noch einmal (fehleranfällig)
+	 * aus der Seite neu einlesen zu lassen, geben wir ihn direkt zurück -
+	 * Ownership geht an den Aufrufer über. */
+	*buf_content_new = buf_new;
 
 	return 0;
 }
@@ -188,6 +194,7 @@ static gint sond_ocr_osd(SondOcrTask* task, SondOcrPool* pool, GError** error) {
 				gint rc = 0;
 
 				fz_drop_pixmap(task->ctx, task->pixmap);
+				task->pixmap = NULL; //nie dangling stehen lassen - Aufrufer verläßt sich darauf
 
 				rc = pdf_page_rotate(task->ctx, task->page->obj, 360 - orient_deg, error);
 				if (rc)
@@ -256,7 +263,7 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, SondOcrPool* pool,
 					if (task->log_func)
 						task->log_func(task->log_func_data,
 								"Seite %u konnte nicht auf versteckten Text geprüft werden: %s",
-							i, (*error)->message);
+							task->page->super.number, (*error)->message);
 					g_clear_error(error);
 					pages_done++;
 					g_atomic_int_set(&task->status, 4);
@@ -272,7 +279,7 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, SondOcrPool* pool,
 							if (task->log_func)
 								task->log_func(task->log_func_data,
 										"Seite %u: versteckter Text konnte nicht entfernt werden: %s",
-										i, (*error)->message);
+										task->page->super.number, (*error)->message);
 							g_clear_error(error);
 							pages_done++;
 							g_atomic_int_set(&task->status, 4);
@@ -286,7 +293,7 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, SondOcrPool* pool,
 							if (task->log_func)
 								task->log_func(task->log_func_data,
 										"Seite %u: Content-Stream konnte nicht ersetzt werden: %s",
-										i, (*error)->message);
+										task->page->super.number, (*error)->message);
 							g_clear_error(error);
 							pages_done++;
 							g_atomic_int_set(&task->status, 4);
@@ -295,18 +302,30 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, SondOcrPool* pool,
 
 						if (task->log_func)
 							task->log_func(task->log_func_data,
-									"Seite %u: versteckter Text entfernt - wird neu OCRt", i);
+									"Seite %u: versteckter Text entfernt - wird neu OCRt", task->page->super.number);
 						/* weiter unten: Seite normal rendern und OCRen */
 					}
 					else {
 						if (task->log_func)
 							task->log_func(task->log_func_data,
-									"Seite %u enthält versteckten Text - OCR übersprungen", i);
+									"Seite %u enthält versteckten Text - OCR übersprungen", task->page->super.number);
 						pages_done++;
 						g_atomic_int_set(&task->status, 4);
 						continue;
 					}
 				}
+
+				/* Bei einem Retry mit höherer Auflösung (durchgang > 0) hängt
+				 * hier noch der Pixmap des vorigen Durchgangs an task->pixmap -
+				 * der Worker-Thread ist damit fertig (er hat ihn nur gelesen
+				 * und task->status auf 0 zurückgesetzt, bevor er zurückkehrt;
+				 * status==0 hier zu sehen heißt also "Worker ist fertig damit"),
+				 * aber niemand hat ihn gedroppt. Vor dem Überschreiben also
+				 * erst freigeben - beim allerersten Durchgang ist task->pixmap
+				 * NULL (aus g_new0() in sond_ocr_task_new()), da ist das ein
+				 * No-Op. */
+				if (task->pixmap)
+					fz_drop_pixmap(task->ctx, task->pixmap);
 
 				task->scale = ocr_scales[task->durchgang];
 				task->pixmap = pdf_render_pixmap(task->ctx, task->page, task->scale, error);
@@ -314,7 +333,7 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, SondOcrPool* pool,
 					if (task->log_func)
 						task->log_func(task->log_func_data,
 								"Seite %u konnte nicht gerendert werden: %s",
-								i, (*error)->message);
+								task->page->super.number, (*error)->message);
 					g_clear_error(error);
 					pages_done++;
 					g_atomic_int_set(&task->status, 4);
@@ -325,8 +344,28 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, SondOcrPool* pool,
 				if (rc) {
 					if (task->log_func)
 						task->log_func(task->log_func_data, "OSD Seite %u gescheitert: %s",
-								i, (*error)->message);
+								task->page->super.number, (*error)->message);
 					g_clear_error(error);
+
+					/* sond_ocr_osd() kann auf drei Arten scheitern: (a) Rotation
+					 * fehlgeschlagen - task->pixmap wurde dort bereits gedroppt
+					 * und auf NULL gesetzt; (b) Rerender nach Rotation
+					 * fehlgeschlagen - task->pixmap ist NULL; (c)
+					 * TessBaseAPIDetectOrientationScript selbst fehlgeschlagen -
+					 * task->pixmap wurde in sond_ocr_osd() gar nicht angefaßt,
+					 * ist also noch ein gültiger, ungedroppter Pixmap. Nicht
+					 * pauschal auf NULL setzen (das würde Fall (c) leaken),
+					 * sondern nur droppen, falls noch vorhanden - danach ist der
+					 * Zustand in allen drei Fällen einheitlich NULL, und die
+					 * Seite wird aufgegeben statt mit ungültigem/fehlendem
+					 * Pixmap in calculate_ocr_transform() weiterzumachen. */
+					if (task->pixmap) {
+						fz_drop_pixmap(task->ctx, task->pixmap);
+						task->pixmap = NULL;
+					}
+					pages_done++;
+					g_atomic_int_set(&task->status, 4);
+					continue;
 				}
 				rc = calculate_ocr_transform(task->ctx, task->page,
 						task->pixmap, task->scale, &task->ocr_transform, error);
@@ -334,7 +373,7 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, SondOcrPool* pool,
 					if (task->log_func)
 						task->log_func(task->log_func_data,
 								"Transform-Matrix konnte nicht berechnet werden: %s",
-								i, (*error)->message);
+								task->page->super.number, (*error)->message);
 					g_clear_error(error);
 					pages_done++;
 					g_atomic_int_set(&task->status, 4);
@@ -347,7 +386,7 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, SondOcrPool* pool,
 					if (task->log_func)
 						task->log_func(task->log_func_data,
 								"Thread konnte nicht gepusht werden: %s",
-								i, (*error)->message);
+								task->page->super.number, (*error)->message);
 					g_clear_error(error);
 					pages_done++;
 					g_atomic_int_set(&task->status, 4);
@@ -361,19 +400,24 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, SondOcrPool* pool,
 
 				//content einfügen
 				rc = add_ocr_layer_to_page(task->ctx, task->content, task->page,
-						task->font_ref, &task->ocr_transform, error);
+						task->font_ref, &task->ocr_transform,
+						&task->buf_content_new, error);
 				if (rc) {
 					if (task->log_func)
 						task->log_func(task->log_func_data,
 								"Einfügen der OCR-Daten in PDF-Page %u fehlgeschlagen: %s",
-								i, (*error)->message);
+								task->page->super.number, (*error)->message);
 					g_clear_error(error);
 				}
-				else if (task->log_func)
-					task->log_func(task->log_func_data,
-							"Seite %u: OCR abgeschlossen, Konfidenz %.1f%% (%d/%d erledigt)",
-							task->page->super.number, task->confidence,
-							pages_done + 1, arr_tasks->len);
+				else {
+					task->content_changed = TRUE;
+
+					if (task->log_func)
+						task->log_func(task->log_func_data,
+								"Seite %u: OCR abgeschlossen, Konfidenz %.1f%% (%d/%d erledigt)",
+								task->page->super.number, task->confidence,
+								pages_done + 1, arr_tasks->len);
+				}
 
 				pages_done++;
 				g_atomic_int_set(&task->status, 4);
@@ -407,8 +451,14 @@ gint sond_ocr_do_tasks(GPtrArray* arr_tasks, SondOcrPool* pool,
 void sond_ocr_task_free(SondOcrTask* task) {
 	if (task->page)
 		pdf_drop_page(task->ctx, task->page);
+	if (task->pixmap) //letzter Pixmap des Tasks - wird sonst nirgends mehr gedroppt
+		fz_drop_pixmap(task->ctx, task->pixmap);
 	if (task->content)
 		g_string_free(task->content, TRUE);
+	if (task->buf_content_new) //nicht vom Aufrufer abgeholt (z.B. sond_ocr_pdf_doc()) - hier droppen
+		fz_drop_buffer(task->ctx, task->buf_content_new);
+	if (task->font_ref) //Gegenstück zu pdf_keep_obj() in sond_ocr_task_new()
+		pdf_drop_obj(task->ctx, task->font_ref);
 
 	g_free(task);
 

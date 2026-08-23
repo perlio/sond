@@ -98,6 +98,28 @@ static const gchar *SQL_CREATE_PAGES =
            * erneuten Läufen anhand des zuletzt angewandten OCR-Modus
            * vermieden werden kann. */
 
+static const gchar *SQL_CREATE_COVERAGE =
+    "CREATE TABLE IF NOT EXISTS coverage ("
+    "  path      TEXT    PRIMARY KEY,"
+    "  ocr_mode  INTEGER NOT NULL"
+    ");"; /* Coalescierte Abdeckungs-Angaben, eine Ebene oberhalb von
+           * "pages": ein Eintrag "path -> ocr_mode" bedeutet "path (Datei
+           * oder Verzeichnis) und alles darunter ist vollständig mit
+           * mindestens diesem Modus indiziert". Sobald alle Seiten einer
+           * Datei (pages) bzw. alle Elemente eines Verzeichnisses
+           * (coverage) denselben oder einen stärkeren Modus erreicht
+           * haben, werden ihre feineren Einzeleinträge gelöscht und durch
+           * einen einzigen Eintrag hier ersetzt (Coalescing) - dieselbe
+           * Hierarchie wie Seite -> Datei -> Verzeichnis -> Projekt, nur
+           * aus praktischen Gründen (unterschiedliche natürliche
+           * Schlüssel: Seitenzahl vs. Pfad) auf zwei Tabellen verteilt.
+           * "erzwingen" (SOND_OCR_MODE_FORCE) fragt diese Tabelle nie ab
+           * (reindiziert immer bedingungslos, s.
+           * sond_index_ctx_should_process_page) - ein einzelner
+           * (schwächster gemeinsamer) Modus pro Eintrag reicht daher aus,
+           * ohne Information zu verlieren, die für NONE/CHECK-Anfragen
+           * relevant wäre. */
+
 /* =======================================================================
  * Schema initialisieren
  * ======================================================================= */
@@ -157,6 +179,14 @@ static gboolean db_init_schema(SondIndexCtx *ctx, GError **error) {
     if (rc != SQLITE_OK) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                     "db_init_schema: CREATE meta: %s", errmsg);
+        sqlite3_free(errmsg);
+        return FALSE;
+    }
+
+    rc = sqlite3_exec(ctx->db, SQL_CREATE_COVERAGE, NULL, NULL, &errmsg);
+    if (rc != SQLITE_OK) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "db_init_schema: CREATE coverage: %s", errmsg);
         sqlite3_free(errmsg);
         return FALSE;
     }
@@ -683,6 +713,415 @@ gboolean sond_index_ctx_should_process_page(SondIndexCtx *ctx,
 }
 
 /* =======================================================================
+ * coverage: coalescierte Abdeckungs-Angaben (Datei-/Verzeichnis-Ebene)
+ * ======================================================================= */
+
+/*
+ * sond_index_ctx_coverage_get:
+ *
+ * Liefert den Modus, mit dem path (oder der nächstgelegene abdeckende
+ * Vorfahre - path selbst muß keinen eigenen Eintrag haben) als vollständig
+ * indiziert vermerkt ist, oder -1, wenn nichts gefunden wird (weder path
+ * selbst noch irgendein Vorfahre ist abgedeckt).
+ *
+ * Geht dazu von path aus schrittweise nach oben (an '/' getrennt) und
+ * prüft bei jeder Ebene per Primärschlüssel-Lookup, ob ein coverage-
+ * Eintrag existiert - kein SQL-Prefix-Scan nötig, da die Pfadtiefe klein
+ * und beschränkt ist.
+ */
+gint sond_index_ctx_coverage_get(SondIndexCtx *ctx, gchar const *path) {
+    sqlite3_stmt *stmt   = NULL;
+    gchar        *probe  = NULL;
+    gint          result = -1;
+
+    if (!ctx || !path)
+        return -1;
+
+    if (sqlite3_prepare_v2(ctx->db,
+            "SELECT ocr_mode FROM coverage WHERE path = ?", -1, &stmt, NULL)
+            != SQLITE_OK)
+        return -1;
+
+    probe = g_strdup(path);
+    for (;;) {
+        gchar *slash = NULL;
+
+        sqlite3_reset(stmt);
+        sqlite3_bind_text(stmt, 1, probe, -1, SQLITE_TRANSIENT);
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            result = sqlite3_column_int(stmt, 0);
+            break;
+        }
+
+        slash = strrchr(probe, '/');
+        if (!slash)
+            break; /* oberste Ebene erreicht, nichts gefunden */
+        *slash = '\0';
+    }
+
+    g_free(probe);
+    sqlite3_finalize(stmt);
+    return result;
+}
+
+/*
+ * sond_index_ctx_coverage_mark:
+ *
+ * Markiert path (Datei oder Verzeichnis) als vollständig mit ocr_mode
+ * indiziert. Löscht dabei automatisch:
+ *  - alle jetzt überflüssigen, feineren coverage-Einträge UNTERHALB von
+ *    path (falls path ein Verzeichnis ist, dessen Kinder vorher einzeln
+ *    eingetragen waren),
+ *  - alle pages-Einträge für path selbst bzw. für Pfade, die mit
+ *    path + "//" beginnen (eingebettete Inhalte, z.B. Anhänge einer .eml -
+ *    dieselbe Konvention wie in sond_index_ctx_clear_file()), falls path
+ *    eine Datei ist, deren Seiten vorher einzeln in "pages" standen.
+ *
+ * Ersetzt einen eventuell schon vorhandenen Eintrag für path selbst
+ * (INSERT OR REPLACE).
+ */
+gboolean sond_index_ctx_coverage_mark(SondIndexCtx *ctx, gchar const *path,
+        gint ocr_mode, GError **error) {
+    sqlite3_stmt *stmt      = NULL;
+    gchar        *like_dir  = NULL;
+    gchar        *like_file = NULL;
+
+    if (!ctx || !path) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "%s: ctx/path fehlt", __func__);
+        return FALSE;
+    }
+
+    like_dir  = g_strdup_printf("%s/%%", path);
+    like_file = g_strdup_printf("%s//%%", path);
+
+    if (sqlite3_prepare_v2(ctx->db,
+            "DELETE FROM coverage WHERE path = ?1 OR path LIKE ?2",
+            -1, &stmt, NULL) != SQLITE_OK) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "%s: prepare DELETE coverage: %s", __func__,
+                sqlite3_errmsg(ctx->db));
+        g_free(like_dir);
+        g_free(like_file);
+        return FALSE;
+    }
+    sqlite3_bind_text(stmt, 1, path,     -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, like_dir, -1, SQLITE_TRANSIENT);
+    sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    stmt = NULL;
+
+    if (sqlite3_prepare_v2(ctx->db,
+            "DELETE FROM pages WHERE filename = ?1 OR filename LIKE ?2",
+            -1, &stmt, NULL) != SQLITE_OK) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "%s: prepare DELETE pages: %s", __func__,
+                sqlite3_errmsg(ctx->db));
+        g_free(like_dir);
+        g_free(like_file);
+        return FALSE;
+    }
+    sqlite3_bind_text(stmt, 1, path,      -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, like_file, -1, SQLITE_TRANSIENT);
+    sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    stmt = NULL;
+
+    g_free(like_dir);
+    g_free(like_file);
+
+    if (sqlite3_prepare_v2(ctx->db,
+            "INSERT INTO coverage(path, ocr_mode) VALUES(?, ?)"
+            " ON CONFLICT(path) DO UPDATE SET ocr_mode = excluded.ocr_mode",
+            -1, &stmt, NULL) != SQLITE_OK) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "%s: prepare INSERT coverage: %s", __func__,
+                sqlite3_errmsg(ctx->db));
+        return FALSE;
+    }
+    sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int (stmt, 2, ocr_mode);
+    if (sqlite3_step(stmt) != SQLITE_DONE) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "%s: INSERT coverage '%s': %s", __func__, path,
+                sqlite3_errmsg(ctx->db));
+        sqlite3_finalize(stmt);
+        return FALSE;
+    }
+    sqlite3_finalize(stmt);
+
+    return TRUE;
+}
+
+/*
+ * sond_index_ctx_coverage_invalidate:
+ *
+ * Entwertet path (Datei oder Verzeichnis): danach hat path selbst keinen
+ * coverage-Eintrag mehr (weder direkt noch über einen Vorfahren).
+ *
+ * Fall 1: path selbst hat einen eigenen coverage-Eintrag -> einfach
+ * löschen.
+ *
+ * Fall 2: path ist nur indirekt über einen Vorfahren-Eintrag abgedeckt ->
+ * dieser Vorfahre wird aufgelöst und auf jeder Ebene zwischen Vorfahre und
+ * path werden die jeweiligen Geschwister (die weiterhin gültig sind) neu
+ * eingetragen, mit demselben Modus, den der Vorfahre hatte. Dafür wird auf
+ * jeder Ebene ein flaches Verzeichnis-Listing der echten
+ * Dateisystem-Kinder gemacht (kein rekursiver Scan).
+ *
+ * Achtung/bekannte Einschränkung: setzt voraus, daß alle Ebenen zwischen
+ * dem gefundenen Vorfahren und path echte Dateisystem-Verzeichnisse sind
+ * (BAUM_FS). Für eingebettete ("//"-)Pfade innerhalb einer Datei (z.B.
+ * Anhänge einer .eml) oder für die Seiten-Ebene innerhalb einer bereits
+ * gemeinsam abgedeckten Datei (dort gibt es kein "Verzeichnis" zum
+ * Auflisten) ist das noch nicht vorgesehen - dafür wird eine gesonderte
+ * Behandlung bei der eigentlichen Anbindung an die Edit/Löschen-Stellen
+ * gebraucht.
+ */
+gboolean sond_index_ctx_coverage_invalidate(SondIndexCtx *ctx,
+        gchar const *path, GError **error) {
+    sqlite3_stmt *stmt     = NULL;
+    gchar        *ancestor = NULL;
+    gint          mode     = 0;
+
+    if (!ctx || !path) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "%s: ctx/path fehlt", __func__);
+        return FALSE;
+    }
+
+    /* Abdeckenden Vorfahren (oder path selbst) suchen - wie
+     * sond_index_ctx_coverage_get(), aber wir merken uns, WELCHE Ebene
+     * getroffen hat. */
+    ancestor = g_strdup(path);
+    if (sqlite3_prepare_v2(ctx->db,
+            "SELECT ocr_mode FROM coverage WHERE path = ?", -1, &stmt, NULL)
+            != SQLITE_OK) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "%s: prepare SELECT coverage: %s", __func__,
+                sqlite3_errmsg(ctx->db));
+        g_free(ancestor);
+        return FALSE;
+    }
+    for (;;) {
+        gchar *slash = NULL;
+
+        sqlite3_reset(stmt);
+        sqlite3_bind_text(stmt, 1, ancestor, -1, SQLITE_TRANSIENT);
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            mode = sqlite3_column_int(stmt, 0);
+            break;
+        }
+
+        slash = strrchr(ancestor, '/');
+        if (!slash) {
+            /* Weder path noch irgendein Vorfahre abgedeckt - nichts zu tun */
+            sqlite3_finalize(stmt);
+            g_free(ancestor);
+            return TRUE;
+        }
+        *slash = '\0';
+    }
+    sqlite3_finalize(stmt);
+    stmt = NULL;
+
+    /* Vorfahren-Eintrag (bzw. path selbst, falls Fall 1) löschen */
+    if (sqlite3_prepare_v2(ctx->db,
+            "DELETE FROM coverage WHERE path = ?", -1, &stmt, NULL)
+            != SQLITE_OK) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "%s: prepare DELETE coverage: %s", __func__,
+                sqlite3_errmsg(ctx->db));
+        g_free(ancestor);
+        return FALSE;
+    }
+    sqlite3_bind_text(stmt, 1, ancestor, -1, SQLITE_TRANSIENT);
+    sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+    stmt = NULL;
+
+    if (!g_strcmp0(ancestor, path)) {
+        /* Fall 1: path hatte selbst den Eintrag - fertig, kein Runterbrechen
+         * auf Geschwister nötig. */
+        g_free(ancestor);
+        return TRUE;
+    }
+
+    /* Fall 2: von ancestor aus Richtung path absteigen, auf jeder
+     * Zwischenebene die Geschwister (echtes Verzeichnis-Listing) außer dem
+     * jeweils weiterführenden Kind mit mode neu eintragen. */
+    {
+        gsize  ancestor_len = strlen(ancestor);
+        gchar *rest         = g_strdup(path + ancestor_len + 1); /* +1: '/' */
+        gchar *current_dir  = g_strdup(ancestor);
+        gchar **segments    = g_strsplit(rest, "/", -1);
+
+        /* Lauft ueber JEDES Segment, auch das letzte (der direkte Eltern-
+         * ordner von path) - dort muessen die Geschwister genauso markiert
+         * werden. Das Weiter-Absteigen danach ist beim letzten Segment
+         * harmlos (current_dir wird nur noch nicht mehr benutzt). */
+        for (gint i = 0; segments[i]; i++) {
+            GDir  *dir   = NULL;
+            GError *dir_error = NULL;
+            gchar const *entry_name = NULL;
+
+            dir = g_dir_open(current_dir, 0, &dir_error);
+            if (!dir) {
+                if (error && !*error)
+                    g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                            "%s: g_dir_open '%s': %s", __func__, current_dir,
+                            dir_error ? dir_error->message : "?");
+                g_clear_error(&dir_error);
+                break; /* nicht fatal fuer die Invalidierung selbst -
+                        * path ist bereits nicht mehr abgedeckt (s.o.),
+                        * es fehlen hoechstens Geschwister-Eintraege. */
+            }
+
+            while ((entry_name = g_dir_read_name(dir))) {
+                gchar *sibling_path = NULL;
+
+                if (!g_strcmp0(entry_name, segments[i]))
+                    continue; /* das ist die Richtung zu path - hier nicht eintragen */
+
+                sibling_path = g_build_filename(current_dir, entry_name, NULL);
+                sond_index_ctx_coverage_mark(ctx, sibling_path, mode, NULL);
+                g_free(sibling_path);
+            }
+            g_dir_close(dir);
+
+            {
+                gchar *next_dir = g_build_filename(current_dir, segments[i], NULL);
+                g_free(current_dir);
+                current_dir = next_dir;
+            }
+        }
+
+        g_free(rest);
+        g_free(current_dir);
+        g_strfreev(segments);
+    }
+
+    g_free(ancestor);
+    return TRUE;
+}
+
+/*
+ * sond_index_ctx_coverage_try_collapse:
+ *
+ * Nach dem path (Datei oder Verzeichnis) soeben abgedeckt wurde
+ * (coverage_mark() ist für path bereits erfolgt), wird von hier aus
+ * schrittweise nach oben geprüft: hat auf der jeweils nächsthöheren
+ * Ebene JEDES Geschwister (echtes, flaches Verzeichnis-Listing)
+ * IRGENDEINEN coverage-Eintrag (per sond_index_ctx_coverage_get() - egal
+ * mit welchem Modus, s. Mindestmodus-Konvention)? Wenn ja, wird die ganze
+ * Ebene zu einem Eintrag für das Elternverzeichnis zusammengefasst
+ * (coverage_mark() löscht dabei automatisch die Kind-Einträge), dessen
+ * ocr_mode der MINDESTMODUS aller Geschwister ist - NICHT der Modus der
+ * zuletzt verarbeiteten Datei, sonst würde z.B. ein mit "prüfen"
+ * abgedecktes Geschwister ein Coalescing verhindern, nur weil die
+ * gerade fertig gewordene Datei mit "erzwingen" liefen. Die Prüfung
+ * setzt sich dann beim nächsten Elternverzeichnis fort. Stoppt, sobald
+ * eine Ebene nicht vollständig abgedeckt ist, die oberste Ebene direkt
+ * im Projektverzeichnis erreicht ist, oder ein Verzeichnis nicht
+ * gelesen werden kann.
+ *
+ * path/root_dir: path ist - wie alle coverage-Keys - projektrelativ
+ * (Konvention wie überall sonst im Code: "/"-getrennt, kein
+ * g_build_filename/g_path_get_dirname-Ergebnis als Key verwenden, da das
+ * unter Windows "\" liefern würde). root_dir ist der ABSOLUTE
+ * Projektwurzelpfad (zond->project_dir) - wird NUR gebraucht, um aus
+ * einem relativen Verzeichnis-Key einen echten Dateisystempfad für
+ * g_dir_open() zu bauen.
+ *
+ * Es wird absichtlich NIE über die oberste Ebene direkt im
+ * Projektverzeichnis hinaus zusammengefasst (also nie ein einziger
+ * Eintrag für das gesamte Projekt gebildet): von außen (nicht über zond)
+ * hinzugefügte Dateien landen laut Vorgabe immer nur direkt im
+ * Projektverzeichnis selbst, nie tiefer. Solange die obersten Einträge
+ * einzeln stehen bleiben, bleibt die coverage-Tabelle auch bei solchen
+ * externen Änderungen gültig, ohne daß wir Verzeichnisänderungen von
+ * außen erkennen müssten.
+ *
+ * Bekannte Einschränkung: jede Datei/jeder Unterordner in einem
+ * Verzeichnis muss einen coverage-Eintrag haben, damit die Ebene als
+ * vollständig gilt - Dateien, die (noch) nie indiziert wurden oder die
+ * grundsätzlich nicht indiziert werden (z.B. projektfremde Beidateien),
+ * verhindern das Coalescing auf dieser Ebene dauerhaft. Kein Fehler,
+ * lediglich eine verpasste Optimierung.
+ */
+gboolean sond_index_ctx_coverage_try_collapse(SondIndexCtx *ctx,
+        gchar const *path, gchar const *root_dir, GError **error) {
+    gchar *current = NULL;
+
+    if (!ctx || !path)
+        return TRUE;
+
+    current = g_strdup(path);
+
+    for (;;) {
+        gchar       *parent      = NULL; /* projektrelativ, "/"-Konvention */
+        gchar       *parent_abs  = NULL; /* echter Pfad, nur für g_dir_open */
+        GDir        *dir         = NULL;
+        GError      *dir_error   = NULL;
+        gchar const *entry_name  = NULL;
+        gboolean     all_covered = TRUE;
+        gint         min_mode    = G_MAXINT;
+        gchar       *slash       = NULL;
+
+        slash = strrchr(current, '/');
+        if (!slash) {
+            /* current liegt bereits direkt im Projektverzeichnis - hier
+             * wird absichtlich gestoppt, s. Doc-Kommentar oben. */
+            break;
+        }
+
+        parent = g_strndup(current, slash - current);
+        parent_abs = g_strconcat(root_dir, "/", parent, NULL);
+
+        dir = g_dir_open(parent_abs, 0, &dir_error);
+        g_free(parent_abs);
+        if (!dir) {
+            /* nicht fatal fuer den bereits erfolgten coverage_mark(path,...)
+             * - lediglich keine weitere Zusammenfassung nach oben moeglich */
+            g_clear_error(&dir_error);
+            g_free(parent);
+            break;
+        }
+
+        while ((entry_name = g_dir_read_name(dir))) {
+            gchar *entry_path = g_strconcat(parent, "/", entry_name, NULL);
+            gint   entry_mode = sond_index_ctx_coverage_get(ctx, entry_path);
+
+            g_free(entry_path);
+            if (entry_mode < 0) {
+                all_covered = FALSE;
+                break;
+            }
+            if (entry_mode < min_mode)
+                min_mode = entry_mode;
+        }
+        g_dir_close(dir);
+
+        if (!all_covered) {
+            g_free(parent);
+            break;
+        }
+
+        if (!sond_index_ctx_coverage_mark(ctx, parent, min_mode, error)) {
+            g_free(parent);
+            g_free(current);
+            return FALSE;
+        }
+
+        g_free(current);
+        current = parent;
+    }
+
+    g_free(current);
+    return TRUE;
+}
+
+/* =======================================================================
  * sond_index_ctx_rename_file
  * ======================================================================= */
 
@@ -734,6 +1173,45 @@ gboolean sond_index_ctx_rename_file(SondIndexCtx *ctx,
     }
 
     g_free(pattern);
+
+    /* coverage: eigener Durchgang, eigenes LIKE-Muster - anders als
+     * chunks/pages (deren "//"-Konvention nur eingebettete Inhalte
+     * markiert) folgen coverage-Pfade der normalen Verzeichnis-Hierarchie
+     * mit einfachem "/" (s. coverage_mark/_try_collapse). Ein einzelnes
+     * "/%"-Muster deckt dabei sowohl echte Unterpfade ("prefix/kind") als
+     * auch eingebettete ("prefix//teil") ab, ohne dabei unbeabsichtigt
+     * andere Pfade mit gemeinsamem Präfix zu treffen (z.B. "prefix_bak"). */
+    {
+        sqlite3_stmt *stmt          = NULL;
+        gchar        *pattern_slash = g_strdup_printf("%s/%%", prefix_old);
+        gint          rc            = sqlite3_prepare_v2(ctx->db,
+                "UPDATE coverage SET path = ?2 || SUBSTR(path, LENGTH(?1) + 1) "
+                "WHERE path = ?1 OR path LIKE ?3",
+                -1, &stmt, NULL);
+
+        if (rc != SQLITE_OK) {
+            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                        "sond_index_ctx_rename_file: prepare coverage: %s",
+                        sqlite3_errmsg(ctx->db));
+            g_free(pattern_slash);
+            return FALSE;
+        }
+
+        sqlite3_bind_text(stmt, 1, prefix_old,    -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, 2, prefix_new,    -1, SQLITE_STATIC);
+        sqlite3_bind_text(stmt, 3, pattern_slash, -1, SQLITE_TRANSIENT);
+        rc = sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+        g_free(pattern_slash);
+
+        if (rc != SQLITE_DONE) {
+            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                        "sond_index_ctx_rename_file: step coverage: %s",
+                        sqlite3_errmsg(ctx->db));
+            return FALSE;
+        }
+    }
+
     return TRUE;
 }
 
@@ -1628,6 +2106,29 @@ void sond_index(fz_context* ctx,
         sqlite3_exec(sond_index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
         g_ptr_array_unref(segs);
         return;
+    }
+
+    /* Coverage-Coalescing: nur wenn die ganze Datei angefordert war
+     * (seite_von/seite_bis == -1, d.h. bei PDF wurden wirklich ALLE Seiten
+     * extrahiert, bei anderen Formaten gibt es ohnehin keine
+     * Seitenbereichs-Beschränkung) UND der Durchlauf nicht mitten drin
+     * abgebrochen wurde. Nur an dieser Stelle ist zuverlässig bekannt, wie
+     * viele Seiten die Datei wirklich hat (segs->len) - eine Prüfung weiter
+     * oben (z.B. in sond_process_fileparts(), das nur "nicht abgebrochen"
+     * sieht) könnte eine Datei fälschlich als komplett markieren, die
+     * wegen eines anderen Fehlers (nicht Abbruch) nur teilweise
+     * verarbeitet wurde. */
+    if (!cancelled && seite_von == -1 && seite_bis == -1) {
+        GError *coverage_error = NULL;
+
+        if (!sond_index_ctx_coverage_mark(sond_index_ctx, filename, ocr_mode,
+                &coverage_error)) {
+            if (log_func)
+                log_func(log_func_data, "sond_index: coverage_mark '%s': %s",
+                        filename,
+                        coverage_error ? coverage_error->message : "?");
+            g_clear_error(&coverage_error);
+        }
     }
 
     g_ptr_array_unref(segs);

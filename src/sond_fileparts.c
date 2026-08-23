@@ -1549,10 +1549,11 @@ gint sond_file_part_pdf_save_and_close(fz_context *ctx, pdf_document *pdf_doc,
 	GBytes* bytes = NULL;
 
 	buf = pdf_doc_to_buf(ctx, pdf_doc, error);
+	//pdf_doc wird von pdf_doc_to_buf() nur gelesen, nie übernommen - Drop
+	//deshalb unabhängig vom Ergebnis, sonst Leck im Fehlerfall
+	pdf_drop_document(ctx, pdf_doc);
 	if (!buf)
 		return -1;
-
-	pdf_drop_document(ctx, pdf_doc);
 
 	bytes = g_bytes_new(buf->data, buf->len);
 	fz_drop_buffer(ctx, buf);

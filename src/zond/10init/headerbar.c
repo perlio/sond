@@ -290,8 +290,8 @@ static void do_index_erstellen(Projekt *zond, gboolean sel_only) {
 	}
 
 	if (baum == BAUM_FS || !sel_only)
-		ht_index = sond_treeviewfm_get_fileparts(
-				SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), sel_only, &error);
+		ht_index = zond_treeviewfm_get_fileparts(
+				ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), sel_only, &error);
 	else
 		ht_index = zond_treeview_get_selected_fileparts(
 				ZOND_TREEVIEW(zond->treeview[baum]), &error);
@@ -341,8 +341,8 @@ static void cb_win_indexsuche_auswahl(GSimpleAction *a, GVariant *p, gpointer d)
 	}
 
 	if (baum == BAUM_FS)
-		ht_fileparts = sond_treeviewfm_get_fileparts(
-				SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), TRUE, &error);
+		ht_fileparts = zond_treeviewfm_get_fileparts(
+				ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), TRUE, &error);
 	else
 		ht_fileparts = zond_treeview_get_selected_fileparts(
 				ZOND_TREEVIEW(zond->treeview[baum]), &error);

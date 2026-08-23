@@ -89,6 +89,22 @@ typedef struct {
 	float confidence; //von Tesseract erreichte Konfidenz (TessBaseAPIMeanTextConf) des letzten Durchgangs
 	OcrTransform ocr_transform;
 	GString* content;
+	gboolean content_changed; /* TRUE nur, wenn add_ocr_layer_to_page() den
+	 * Content-Stream der Seite tatsächlich verändert hat. Bleibt FALSE, wenn
+	 * die Seite wegen bereits vorhandenem verstecktem Text übersprungen
+	 * wurde (SOND_OCR_MODE_CHECK) oder das Einfügen fehlschlug - Aufrufer
+	 * (seiten.c) benutzt das, um für unveränderte Seiten keinen
+	 * Journal-Eintrag anzulegen und die Datei nicht fälschlich als
+	 * geändert zu markieren. */
+	fz_buffer* buf_content_new; /* NUR gesetzt, wenn content_changed==TRUE:
+	 * der von add_ocr_layer_to_page() bereits fertig zusammengesetzte neue
+	 * Content-Stream (OCR-Block + alter Stream) - derselbe, der auch in
+	 * die Seite geschrieben wurde. Aufrufer (seiten.c) übernimmt ihn direkt
+	 * für den Journal-Eintrag (entry.ocr.buf_new), statt ihn nach dem
+	 * Schreiben fehleranfällig aus der Seite neu einzulesen. Ownership geht
+	 * beim Auslesen auf den Aufrufer über (task->buf_content_new danach auf
+	 * NULL setzen); wird er nicht abgeholt, droppt sond_ocr_task_free()
+	 * ihn. */
 } SondOcrTask;
 
 gint sond_ocr_do_tasks(GPtrArray* arr_tasks, SondOcrPool* pool,

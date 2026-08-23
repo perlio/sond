@@ -32,6 +32,14 @@ gint zond_treeviewfm_set_cursor_on_section(ZondTreeviewFM*, gchar const*,
 
 void zond_treeviewfm_kill_parent(ZondTreeviewFM*, GtkTreeIter*);
 
+/* Wie sond_treeviewfm_get_fileparts() (sond_treeviewfm.h), aber
+ * Anbindungs-bewusst: ein markierter SOND_TVFM_ITEM_TYPE_LEAF_SECTION-
+ * Knoten in BAUM_FS (= eine Anbindung, s. ziele.c) liefert den
+ * tatsächlichen Seitenbereich statt (wie in der Basisklasse) immer NULL
+ * (= ganze Datei). */
+GHashTable* zond_treeviewfm_get_fileparts(ZondTreeviewFM*, gboolean,
+		GError**);
+
 G_END_DECLS
 
 #endif // ZOND_TREEVIEWFM_H_INCLUDED

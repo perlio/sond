@@ -41,6 +41,7 @@
 
 #include "viewer.h"
 #include "viewer_render.h"
+#include "viewer_save.h"
 #include "document.h"
 
 static GPtrArray*
@@ -267,29 +268,6 @@ seiten_abfrage_seiten(PdfViewer *pv, const gchar *title, gint *winkel,
 /*
  **  Seiten OCR
  */
-static fz_buffer*
-get_content_stream_as_buffer(fz_context *ctx, pdf_obj *page_ref,
-		GError **error) {
-	pdf_obj *obj_contents = NULL;
-	fz_stream *stream = NULL;
-	fz_buffer *buf = NULL;
-
-	//Stream doc_text
-
-	fz_try( ctx ) {
-		obj_contents = pdf_dict_get(ctx, page_ref, PDF_NAME(Contents));
-		stream = pdf_open_contents_stream(ctx,
-				pdf_get_bound_document(ctx, page_ref), obj_contents);
-		buf = fz_read_all(ctx, stream, 1024);
-	}
-	fz_always( ctx )
-		fz_drop_stream(ctx, stream);
-	fz_catch ( ctx )
-		ERROR_PDF_VAL(NULL)
-
-	return buf;
-}
-
 /* TODO (geplant): Auswahl des OCR-Modus, analog "Index erstellen".
  * Aktuell fest auf SOND_OCR_MODE_CHECK (s.u.) - Seiten mit bereits
  * vorhandenem verstecktem Text werden übergangen.
@@ -368,7 +346,7 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 			}
 		}
 
-		buf_content = get_content_stream_as_buffer(ctx, pdf_document_page->page->obj, &error);
+		buf_content = pdf_get_content_stream_as_buffer(ctx, pdf_document_page->page->obj, &error);
 		if (!buf_content) {
 			info_window_set_message(info_window, "Alter Content-Stream nicht gefunden: %s",
 					error->message, NULL);
@@ -455,7 +433,13 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 		g_ptr_array_add(arr_tasks, task);
 
 		//OCR
+		gboolean content_changed = FALSE;
+		fz_buffer* buf_content_new = NULL;
+
 		rc = sond_ocr_do_tasks(arr_tasks, pool, SOND_OCR_MODE_CHECK, &error);
+		content_changed = task->content_changed; //vor dem unref auslesen - der danach freigegeben wird
+		buf_content_new = task->buf_content_new; //übernimmt ref - task->buf_content_new deshalb NULLen,
+		task->buf_content_new = NULL;             //sonst droppt sond_ocr_task_free() ihn gleich mit
 		g_ptr_array_unref(arr_tasks);
 		if (rc) { //Fähler
 			fz_drop_buffer(ctx, entry.ocr.buf_old);
@@ -470,17 +454,31 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 				break;
 		}
 
-		buf_content = get_content_stream_as_buffer(ctx, pdf_document_page->page->obj, &error);
-		if (!buf_content) {
-			info_window_set_message(info_window,
-					"Neuer Content-Streams konnte nicht ermittelt werden: %s",
-					error->message);
-			g_clear_error(&error);
+		/* Seite wegen bereits vorhandenem verstecktem Text übersprungen (oder
+		 * Einfügen der OCR-Daten fehlgeschlagen) - Content-Stream unverändert.
+		 * Keinen Journal-Eintrag anlegen und die Datei nicht als geändert
+		 * markieren (sonst würde bloßes Prüfen bereits-OCRter Seiten den
+		 * Speichern-Button aktivieren, obwohl nichts zu speichern ist). */
+		if (!content_changed) {
 			fz_drop_buffer(ctx, entry.ocr.buf_old);
 			continue;
 		}
 
-		entry.ocr.buf_new = buf_content; //übernimmt ref
+		/* buf_content_new kommt direkt aus add_ocr_layer_to_page() (via
+		 * task->buf_content_new) - derselbe Buffer, der bereits in die
+		 * Seite geschrieben wurde. Kein erneutes, fehleranfälliges Lesen
+		 * des Content-Streams mehr nötig; bei content_changed==TRUE ist er
+		 * immer gesetzt (beides wird an derselben Stelle in sond_ocr.c
+		 * zusammen gesetzt). Defensiv trotzdem prüfen. */
+		if (!buf_content_new) {
+			info_window_set_message(info_window,
+					"Neuer Content-Stream nicht verfügbar - Seite %u übersprungen",
+					pdf_document_page->page_akt + 1);
+			fz_drop_buffer(ctx, entry.ocr.buf_old);
+			continue;
+		}
+
+		entry.ocr.buf_new = buf_content_new; //übernimmt ref
 
 		arr_entries = zond_pdf_document_get_arr_journal(pdf_document_page->document);
 		g_array_append_val(arr_entries, entry);
