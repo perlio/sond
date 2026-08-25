@@ -627,10 +627,15 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 		}
 #endif //VIEWER
 
+		/* doc wird ab hier NICHT mehr selbst gedroppt: viewer_do_save_dd()
+		 * hat das - auf jedem seiner Rückkehrpfade, egal ob Erfolg oder
+		 * Fehler - bereits selbst erledigt (entweder direkt, oder über
+		 * sond_file_part_pdf_save_and_close(), die pdf_doc seit dem Fix
+		 * dort unabhängig vom Ergebnis droppt). Ein weiterer
+		 * pdf_drop_document(ctx, doc) hier wäre ein Doppel-Free. */
 		rc = viewer_do_save_dd(pdfv, dd, ctx, doc, error);
 		if (rc) {
 			g_prefix_error(error, "%s\n", __func__);
-			pdf_drop_document(ctx, doc);
 #ifndef VIEWER
 			dbase_zond_rollback(pdfv->zond->dbase_zond, error);
 
@@ -640,7 +645,6 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 		rc = dbase_zond_commit(pdfv->zond->dbase_zond, error);
 		if (rc) {
 			g_prefix_error(error, "%s\n", __func__);
-			pdf_drop_document(ctx, doc);
 #endif //viewer
 
 			return -1;

@@ -322,5 +322,95 @@
     Verletzung nur im zweiten Statement), prüfen, ob das Rollback wirklich
     beide Schemata (store und work) zurücksetzt.
 
+ Bugs (Review 25.08.2026, Viewer-Gesamtdurchsicht nach den obigen Änderungen -
+ mit Claude durchgegangen, Teilreviews per Subagenten, Funde vor Übernahme in
+ diese Liste stichprobenartig am Code nachgeprüft):
+
+ - viewer_save.c, viewer_save_dirty_dds() (Zeile 631-633, 640-643):
+   pdf_drop_document(ctx, doc) doppelt - viewer_do_save_dd() droppt doc auf
+   JEDEM eigenen Rückkehrpfad (Erfolg wie Fehler) schon selbst, u.a. seit
+   dem Fix an sond_file_part_pdf_save_and_close() (droppt pdf_doc jetzt
+   unabhängig vom Ergebnis). viewer_save_dirty_dds() droppte danach sowohl
+   bei rc!=0 von viewer_do_save_dd() als auch bei einem nachfolgenden
+   Commit-Fehlschlag nochmal - Doppel-Free bei praktisch jedem Fehler in
+   dieser Speicherkette.
+   BEHOBEN (25.08.2026): beide redundanten pdf_drop_document()-Aufrufe in
+   viewer_save_dirty_dds() entfernt, Kommentar ergänzt.
+
+ - viewer_save.c: physisches Speichern (Zeile 468) und Sync der gelöschten
+   Seiten ins Live-Dokument (Zeile 483-567) laufen nacheinander - scheitert
+   Letzteres, ist die Datei/das Journal schon "fertig", das In-Memory-
+   Dokument aber nur teilweise nachgezogen. Noch nicht geprüft.
+
+ - viewer.c (Zeile 772-773): pv->von_alt wird zweimal gesetzt, bis_alt
+   bleibt auf altem Wert - Copy-Paste-Fehler, potenziell Index außerhalb
+   arr_pages beim Dokumentwechsel. Noch nicht behoben.
+
+ - viewer.c (Zeile 652): prüft viewer_page->thread (Seite unterm
+   Mauszeiger) statt viewer_page_old_range->thread (Seite mit der
+   wegzuräumenden alten Markierung) - alte Highlights bleiben ggf. stehen.
+   Noch nicht behoben.
+
+ - viewer.c, viewer_springen_zu_pos_pdf()/viewer_abfragen_pdf_punkt(): kein
+   Guard für arr_pages->len == 0, obwohl an anderer Stelle im selben File
+   vorhanden - potenziell Index -1/NULL-Deref, wenn ein dd nur aus
+   gelöschten Seiten besteht. Noch nicht geprüft/behoben.
+
+ - viewer_annot.c, viewer_annot_handle_release_clicked_annot(): lokales
+   GError* error überschattet den GError**-Parameter; jeder interne
+   Fehlerpfad gibt TRUE zurück, ohne je den äußeren *error zu setzen -
+   Aufrufer (viewer_ui.c, Zeile 322-325) dereferenziert error->message auf
+   seinem eigenen, weiterhin NULLen error - Absturz bei praktisch jedem
+   Fehler beim Verschieben einer Text-Annotation. Noch nicht behoben.
+
+ - viewer_annot.c: drei weitere, noch nicht selbst verifizierte Punkte -
+   annot_after bleibt bei gelöschten Annotationen auf NULL (verfälschter
+   "ungespeichert"-Status/verwaiste Journal-Einträge möglich);
+   pdf_update_annot() ohne umgebendes fz_try/fz_catch; kein Rollback der
+   arr_annots-Buchführung, wenn nach erfolgreichem pdf_create_annot() ein
+   späterer Schritt scheitert.
+
+ - seiten.c (Zeile 1241), cb_pv_seiten_einfuegen(): g_object_unref(sfp)
+   beim Erfolgspfad ohne Guard - beim Datei-Pfad (ret==1) korrekt mit
+   "if (ret == 1)" geschützt (Zeile 1223), beim Clipboard-Pfad (ret==2,
+   sfp bleibt NULL) fehlt der Schutz - g_object_unref(NULL) bei jedem
+   normalen "Seiten einfügen aus Zwischenablage". Noch nicht behoben.
+
+ - seiten.c, cb_pv_seiten_ocr(): wird "Abbrechen" genau geklickt, während
+   der letzte OCR-Task noch erfolgreich fertig wird, liefert
+   sond_ocr_do_tasks() rc==1; der break-Zweig überspringt dann Journal-
+   Eintrag und Aufräumen, obwohl die Seite im Speicher schon geändert
+   wurde - Buffer-Leak und/oder verlorene Änderung. Noch nicht
+   verifiziert/behoben.
+
+ - viewer_render.c: drei noch nicht selbst verifizierte Punkte -
+   unsynchronisierter Zugriff auf pv->arr_rendered (Lock nur bei nicht-
+   leerer Pool-Queue); fz_context wird in viewer_render_page() nur im
+   Erfolgsfall gedroppt, auf allen fünf Fehlerpfaden nicht;
+   cb_viewer_render_page_for_printing() liest display_list ohne
+   Erfolgsprüfung - NULL-Deref bei fehlgeschlagenem Rendern statt
+   Fehlerdialog.
+
+ - document.c, get_pdf_pos(): zweiter, unabhängiger else-Zweig
+   überschreibt ges_bis_seite nochmal mit der Gesamtseitenzahl, obwohl nur
+   im ersten else (leeres anbindung_ges) korrekt - kann beim Sprung zu
+   einer Position die falsche (zu späte) Seite ansteuern. Noch nicht
+   verifiziert/behoben.
+
+ - stand_alone.c, cb_datei_oeffnen(): lehnt Anwender beim Öffnen einer
+   neuen Datei trotz ungespeicherter Änderungen "trotzdem schließen" ab,
+   öffnet die Funktion die neue Datei trotzdem - altes Dokument wird
+   verwaist statt gedroppt, ungespeicherte Änderungen gehen trotz der
+   eigentlich schützenden Abfrage verloren. Noch nicht behoben.
+
+ - stand_alone.c: URI->Pfad-Umrechnung mit "+8"-Offset - vom Review nur
+   mit niedriger Konfidenz gemeldet (unklar, ob für die Zielumgebung
+   Windows überhaupt falsch). Noch nicht geprüft.
+
+ - viewer_ui.c: Menüpunkt "Entnehmen" hat projektweit keinen
+   "activate"-Handler (per grep verifiziert), ist aber sichtbar und
+   anklickbar - macht nichts, ohne dass der Anwender das erkennen kann.
+   Noch nicht behoben.
+
  */
 
