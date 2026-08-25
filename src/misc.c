@@ -416,6 +416,24 @@ typedef struct {
 
 static gboolean show_message_main(gpointer data) {
     MessageData *md = (MessageData*) data;
+
+    /* Bei synchronem Aufruf vom Hauptthread aus (main_thread==TRUE, s.u.)
+     * ERST etwaige, von einem Worker-Thread per g_idle_add() eingereihte,
+     * aber noch nicht abgearbeitete Meldungen verarbeiten, BEVOR die eigene
+     * Meldung angehängt wird. Sonst kann eine synchron (direkt) geloggte
+     * Meldung eine zeitlich frühere, aber nur asynchron eingereihte
+     * Meldung "überholen" und vor ihr im Fenster erscheinen - genau das
+     * passierte bisher z.B. bei "OCR abgeschlossen" (Hauptthread, sofort
+     * angehängt), das vor den vorher vom Worker-Thread geloggten
+     * "neuer Versuch mit höherer Auflösung"-Meldungen auftauchte, obwohl
+     * es zeitlich danach entstanden ist. Betrifft nur den main_thread-Fall:
+     * mehrere per g_idle_add() eingereihte Meldungen laufen ohnehin schon
+     * in der Reihenfolge des Einreihens (GLib-Garantie), brauchen also
+     * untereinander keine Sonderbehandlung. */
+	if (md->main_thread)
+		while (gtk_events_pending())
+			gtk_main_iteration();
+
 	md->info_window->last_inserted_widget = gtk_label_new(md->message);
     g_free(md->message);
 
@@ -423,10 +441,6 @@ static gboolean show_message_main(gpointer data) {
 	gtk_widget_show(md->info_window->last_inserted_widget);
 	gtk_box_pack_start(GTK_BOX(md->info_window->content),
 			md->info_window->last_inserted_widget, FALSE, FALSE, 0);
-
-	if (md->main_thread)
-		while (gtk_events_pending())
-			gtk_main_iteration();
 
 	info_window_scroll(md->info_window);
     g_free(md);
