@@ -268,15 +268,58 @@ seiten_abfrage_seiten(PdfViewer *pv, const gchar *title, gint *winkel,
 /*
  **  Seiten OCR
  */
+/* Rückfrage bei Seiten, die bereits eine (versteckte) Textebene enthalten -
+ * Rückgabe GTK_RESPONSE_YES: verwerfen und neu OCRen, sonst (GTK_RESPONSE_NO
+ * oder Fenster geschlossen): Seite überspringen. *remember_out: TRUE, wenn
+ * "für alle weiteren Seiten übernehmen" angehakt war - der Aufrufer
+ * übernimmt die Entscheidung dann für den Rest des Durchlaufs, ohne erneut
+ * zu fragen. */
+static gint seiten_ocr_abfrage_hidden_text(PdfViewer *pv, guint seitenzahl,
+		gboolean *remember_out) {
+	GtkWidget *dialog = NULL;
+	GtkWidget *content_area = NULL;
+	GtkWidget *label = NULL;
+	GtkWidget *check_remember = NULL;
+	gchar *text = NULL;
+	gint res = 0;
+
+	dialog = gtk_dialog_new_with_buttons("Seite enthält bereits Text",
+			GTK_WINDOW(pv->vf), GTK_DIALOG_MODAL,
+			"Verwerfen und neu OCRen", GTK_RESPONSE_YES,
+			"Seite überspringen", GTK_RESPONSE_NO, NULL);
+
+	content_area = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
+
+	text = g_strdup_printf("Seite %u enthält bereits eine (versteckte) "
+			"Textebene.\nVerwerfen und neu OCRen, oder Seite überspringen?",
+			seitenzahl);
+	label = gtk_label_new(text);
+	g_free(text);
+	gtk_box_pack_start(GTK_BOX(content_area), label, FALSE, FALSE, 0);
+
+	check_remember = gtk_check_button_new_with_label(
+			"Für alle weiteren Seiten übernehmen");
+	gtk_box_pack_start(GTK_BOX(content_area), check_remember, FALSE, FALSE, 0);
+
+	gtk_widget_show_all(dialog);
+
+	res = my_dialog_run(GTK_DIALOG(dialog));
+	*remember_out = gtk_toggle_button_get_active(
+			GTK_TOGGLE_BUTTON(check_remember));
+
+	gtk_widget_destroy(dialog);
+
+	return res;
+}
+
 /* TODO (geplant): Auswahl des OCR-Modus, analog "Index erstellen".
- * Aktuell fest auf SOND_OCR_MODE_CHECK (s.u.) - Seiten mit bereits
- * vorhandenem verstecktem Text werden übergangen.
- * Geplant:
- *   1. OCR neu (bestehenden Text verwerfen, Seite neu erkennen)
+ *   1. OCR neu (bestehenden Text verwerfen, Seite neu erkennen) statt
+ *      pauschal überspringen bei bereits vorhandenem verstecktem Text -
+ *      UMGESETZT (24.08.2026): Rückfrage je Seite mit verstecktem Text
+ *      (seiten_ocr_abfrage_hidden_text(), s.u.), inkl. "für alle weiteren
+ *      Seiten übernehmen" (mode_remembered, s.u.).
  *   2. Bisherigen und neu erkannten Tesseract-Text gegenüberstellen und
- *      auswählen lassen
- * Dabei soll auch "für alle Seiten" wählbar sein (ein Modus/eine Wahl
- * für den ganzen Durchlauf statt Rückfrage je Seite). */
+ *      auswählen lassen - weiterhin offen, nicht Teil dieser Änderung. */
 void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 	gint rc = 0;
 	GError* error = NULL;
@@ -287,6 +330,9 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 	SondOcrPool* pool = NULL;
 	gint progress = 0;
 	gint cancel = 0;
+	//gemerkte Entscheidung aus vorheriger Rückfrage ("für alle weiteren
+	//Seiten übernehmen") - SOND_OCR_MODE_NONE = noch nichts gemerkt
+	SondOcrMode mode_remembered = SOND_OCR_MODE_NONE;
 
 	PdfViewer *pv = (PdfViewer*) data;
 
@@ -343,6 +389,40 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 						pdf_document_page->page_akt + 1, error->message);
 				g_clear_error(&error);
 				continue;
+			}
+		}
+
+		//OCR-Modus für diese Seite bestimmen - versteckter Text vorhanden?
+		SondOcrMode mode = SOND_OCR_MODE_CHECK;
+		{
+			gboolean hidden = FALSE;
+			gint rc_hidden = 0;
+
+			rc_hidden = pdf_page_has_hidden_text(ctx, pdf_document_page->page,
+					&hidden, &error);
+			if (rc_hidden) {
+				info_window_set_message(info_window,
+						"Seite %u konnte nicht auf versteckten Text geprüft werden: %s",
+						pdf_document_page->page_akt + 1, error->message);
+				g_clear_error(&error);
+				continue;
+			}
+
+			if (hidden) {
+				if (mode_remembered != SOND_OCR_MODE_NONE)
+					mode = mode_remembered;
+				else {
+					gint res = 0;
+					gboolean remember = FALSE;
+
+					res = seiten_ocr_abfrage_hidden_text(pv,
+							pdf_document_page->page_akt + 1, &remember);
+					mode = (res == GTK_RESPONSE_YES) ?
+							SOND_OCR_MODE_FORCE : SOND_OCR_MODE_CHECK;
+
+					if (remember)
+						mode_remembered = mode;
+				}
 			}
 		}
 
@@ -436,7 +516,7 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 		gboolean content_changed = FALSE;
 		fz_buffer* buf_content_new = NULL;
 
-		rc = sond_ocr_do_tasks(arr_tasks, pool, SOND_OCR_MODE_CHECK, &error);
+		rc = sond_ocr_do_tasks(arr_tasks, pool, mode, &error);
 		content_changed = task->content_changed; //vor dem unref auslesen - der danach freigegeben wird
 		buf_content_new = task->buf_content_new; //übernimmt ref - task->buf_content_new deshalb NULLen,
 		task->buf_content_new = NULL;             //sonst droppt sond_ocr_task_free() ihn gleich mit
@@ -711,6 +791,10 @@ static gint seiten_cb_loesche_seite(PdfViewer *pv, ViewerPageNew* viewer_page,
 	//highlights und Markierungen Text löschen
 	pv->highlight.page[0] = -1;
 	pv->text_occ.index_act = -1;
+	//page_act mit zurücksetzen - Seitennummern verschieben sich durch das
+	//Löschen, arr_quad/page_act könnten sich sonst auf die falsche Seite
+	//beziehen
+	pv->text_occ.page_act = -1;
 
 	viewer_close_thread_pool_and_transfer(pv);
 
@@ -964,6 +1048,10 @@ static gint seiten_einfuegen_foreach(PdfViewer *pv, ViewerPageNew* viewer_page,
 	//highlights und Markierungen Text löschen
 	pv->highlight.page[0] = -1;
 	pv->text_occ.index_act = -1;
+	//page_act mit zurücksetzen - Seitennummern verschieben sich durch das
+	//Einfügen, arr_quad/page_act könnten sich sonst auf die falsche Seite
+	//beziehen
+	pv->text_occ.page_act = -1;
 
 	//jetzt in viewer einfügen
 	for (gint u = 0; u < data_insert->count; u++) {

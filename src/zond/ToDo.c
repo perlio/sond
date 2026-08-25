@@ -111,6 +111,12 @@
    strlen() statt Rückgabewert von fz_buffer_storage() für flat_len - bei
    eingebetteten NUL-Bytes im geflatteten Text (Glyphen ohne
    Unicode-Mapping) falsche Länge, im schlimmsten Fall Read-over-bounds.
+   BEHOBEN (23.08.2026): flat_len jetzt aus dem Rückgabewert von
+   fz_buffer_storage(). (char_pos_in_page selbst, aus sond_index.c/FTS5
+   highlight(), landet zwar immer auf einer UTF-8-Zeichengrenze im damals
+   indizierten Text - das war aber gar nicht das Problem, sondern der zur
+   Klickzeit frisch erzeugte flat_data-Buffer selbst, der potenziell NULs
+   enthält bzw. nicht terminiert ist.)
 
  - sond_fileparts.c, sond_file_part_pdf_save_and_close() (~Zeile 1551-1553):
    pdf_doc wird bei fehlschlagendem pdf_doc_to_buf() nicht gedroppt - Leck.
@@ -123,19 +129,198 @@
    auf error, danach derselbe error-Pointer an dbase_zond_rollback() - falls
    die Rollback-Funktion selbst einen Fehler setzt, GError-Vertrag verletzt.
    Nicht in zond_dbase.c nachgeprüft.
+   BEHOBEN (23.08.2026): Ursache war project.c, dbase_zond_rollback() -
+   reichte denselben (evtl. schon belegten) error an zwei
+   zond_dbase_rollback()-Aufrufe (store/work) durch; schlug das
+   ROLLBACK-Statement selbst fehl (zond_dbase.h, ERROR_Z_DBASE-Makro),
+   wurde der ursprüngliche Fehler überschrieben statt kombiniert. Jetzt
+   bekommt jeder der beiden Aufrufe einen eigenen error_int; ist der
+   gesetzt, wird die Meldung an einen schon vorhandenen error angehängt
+   (add_string(), wie im ROLLBACK_TO_STATEMENT-Makro) statt ihn zu
+   überschreiben - beide Fehlerursachen erreichen den Anwender. Betrifft
+   nur den seltenen Fall, daß das ROLLBACK-Statement selbst scheitert;
+   ERROR_Z_DBASE und die übrigen Aufrufer bleiben unverändert.
 
  - viewer_save.c (~Zeile 505-512): first_page/last_page-Reassignment beim
    Löschen der jeweils anderen dd-Grenzseite - Indexarithmetik nicht
    durchgerechnet, evtl. harmlos.
+   GEPRÜFT (24.08.2026), KEIN BUG: seiten_loeschen() (seiten.c, ~Zeile
+   807-856) zählt vor jeder einzelnen zu löschenden Seite die noch nicht
+   gelöschten Seiten des Dokuments und überspringt (continue) die
+   Markierung als gelöscht, sobald nur noch eine übrig wäre (Zeile
+   820-831) - läuft pro Seite, gilt also auch beim Löschen mehrerer Seiten
+   auf einmal. Ein Dokument kann dadurch nie auf 0 Seiten leerlaufen, die
+   in viewer_save.c befürchtete Situation (first_page/last_page-Array wird
+   leer, first_page zeigt danach ins Leere) ist also nicht erreichbar.
+   Einziger (kleinerer) Nebenpunkt: die übersprungene letzte Seite wird
+   stillschweigend nicht gelöscht, ohne Meldung an den Anwender.
 
  - sond_fileparts.c: kein Locking beim Speichern zweier embedded files
    desselben Parents - potentielles Lost-Update, hängt vom Threading-Modell
    der Aufrufer ab (nicht geprüft).
+   GEPRÜFT (24.08.2026), KEIN BUG: bei der aktuellen Architektur wird nur
+   sequentiell in Dateien geschrieben; Threads existieren nur beim Rendern
+   und OCRen, nicht beim Speichern.
 
  - sond_fileparts.c, sond_file_part_delete(): gibt nach erfolgreichem
    Schreiben noch -1 zurück, wenn nachträgliches
    sond_file_part_test_for_children() fehlschlägt - irreführender
    Fehlerstatus trotz erfolgreicher Aktion.
+   BEHOBEN (24.08.2026): test_for_children()-Fehlschlag wird jetzt wie
+   schon in sond_file_part_create_from_mime_type() (Vorbild, Zeile
+   188-192) nur noch per LOG_WARN() protokolliert statt als -1 der
+   eigentlich schon erfolgreichen Löschung durchgereicht zu werden.
+   has_children des Parents bleibt in diesem seltenen Fehlerfall auf dem
+   letzten bekannten Stand (reines Anzeige-Detail für die Baumansicht,
+   keine Dateninkonsistenz).
+
+ Bugs (Review 23.08.2026, Textsuche im Viewer - mit Claude durchgegangen):
+
+ - viewer_ui.c, pv-Erzeugung (~Zeile 729): text_occ.index_act/page_act
+   werden nie explizit initialisiert - pv kommt aus g_malloc0(), beide
+   starten also bei 0 statt beim überall sonst verwendeten Sentinel -1.
+   button_nachher/button_vorher sind von Anfang an klickbar. Klick auf
+   "Weiter" als allererste Aktion (vor jeder Suche) führt dazu, daß
+   index_act >= 0 fälschlich als "Treffer wird angezeigt" gilt,
+   index_act auf 1 hochgezählt und viewer_anzeigen_text_occ() darauf
+   g_array_index() auf einem LEEREN arr_quad ausführt - undefined
+   behavior/Absturzgefahr.
+   BEHOBEN (23.08.2026): index_act = -1 und page_act = -1 direkt bei
+   pv-Erzeugung ergänzt.
+
+ - viewer_ui.c, cb_viewer_text_search_entry_buffer_changed() (~Zeile
+   126-134) sowie seiten.c, seiten_cb_loesche_seite() (~Zeile 712) und
+   der Seiten-Einfügen-Handler (~Zeile 965): setzen text_occ.index_act
+   (und teils arr_quad) zurück, aber nicht text_occ.page_act. Bleibt man
+   beim Ändern des Suchbegriffs (bzw. nach Seiten löschen/einfügen) auf
+   derselben Seitennummer, hält viewer_handle_text_search() diese Seite
+   fälschlich für "schon durchsucht" und überspringt sie dauerhaft -
+   auch nach vollem Rundlauf. Ergebnis: "Kein Treffer", obwohl der
+   Begriff auf der sichtbaren Seite steht.
+   BEHOBEN (23.08.2026): page_act = -1 an allen drei Stellen ergänzt.
+   (Bei viewer.c:767, dem einfachen Klick-Handler, bewußt NICHT
+   geändert - dort bleiben arr_quad/page_act gültig, da sich weder
+   Seite noch Suchbegriff ändern.)
+
+ - viewer_search.c, viewer_text_occ_search_next(): Vereinfacht - das
+   fehleranfällige "idx bei -1/len starten, vor Prüfung inkrementieren"-
+   Idiom (do/while mit continue) durch eine simple Richtungs-Schleife
+   ersetzt. Verhält sich identisch, ist aber auch bei leerem Array von
+   sich aus sicher statt auf den Aufrufer-Guard angewiesen zu sein.
+
+ Architektur-Plan (24.08.2026, noch nicht umgesetzt - erstmal zurückgestellt):
+ Atomarität store/work bei den Dual-Write-Stellen
+
+ Betroffene Stellen (Stand 24.08.2026, per grep verifiziert):
+ - viewer_save.c, viewer_save_dirty_dds() (~Zeile 604-647): dbase_zond_begin/
+   commit/rollback um dbase_zond_update_sections() (Seiten löschen/einfügen).
+ - zond_treeviewfm.c, zond_treeviewfm_before_move()/_after() (~Zeile 215-369):
+   dbase_zond_begin/commit/rollback um dbase_zond_update_path() und
+   mehrfach dbase_zond_update_gmessage_index() (Datei/Verzeichnis umbenennen/
+   verschieben, inkl. GMessage-Sonderfälle). ZUSÄTZLICH dort eine dritte,
+   unabhängige Transaktion auf index_ctx->db (FTS-Suchindex, eigene
+   sqlite3-Verbindung, eigenes rohes sqlite3_exec("BEGIN/COMMIT/ROLLBACK")),
+   die bislang nicht mit der store/work-Transaktion verklammert ist.
+
+ Problem: store und work sind zwei unabhängige sqlite3-Verbindungen; die
+ obigen Stellen schreiben sequenziell in beide (dbase_zond_begin/commit/
+ rollback, project.c). Schlägt der zweite Commit nach erfolgreichem ersten
+ fehl, oder das Rollback selbst, entsteht potenziell ein inkonsistenter
+ Zustand zwischen store und work - keine echte Atomarität über beide Dateien.
+
+ Plan:
+
+ 1. journal_mode-Sicherung (eigenständig, zuerst umsetzbar, unabhängig von
+    2.-5.): vor jedem Öffnen des Projekts (project_create_dbase_zond()) UND
+    unmittelbar vor jeder der o.g. Dual-Write-Transaktionen den aktuellen
+    journal_mode beider Dateien per "PRAGMA journal_mode;" abfragen (über
+    die jeweils schon offene Verbindung - journal_mode ist eine
+    Dateieigenschaft, nicht verbindungsgebunden). Ist er nicht Rollback-
+    Journal (z.B. WAL, weil extern z.B. mit DB Browser for SQLite
+    umgestellt), Rückwechsel versuchen ("PRAGMA journal_mode=DELETE;") UND
+    den zurückgelieferten Wert prüfen (ein gescheiterter Wechsel wirft
+    keinen Fehler, sondern liefert stillschweigend den alten Modus zurück -
+    sqlite.org/pragma.html). Bleibt es bei WAL, Operation NICHT ausführen,
+    klare Fehlermeldung an den Anwender ("Datenbank wird von einem anderen
+    Programm verwendet"). Grund: ATTACH-Transaktionen sind nur im Rollback-
+    Journal-Modus dateiübergreifend atomar (Master-Journal-Mechanismus),
+    unter WAL nicht - und der Modus kann jederzeit von außen (auch bei
+    offener eigener Verbindung, da SQLite außerhalb aktiver Statements kein
+    Lock hält) unbemerkt umgestellt werden.
+
+ 2. work bei Projekt-Öffnen an store attachen (project_create_dbase_zond()):
+    zusätzlich zur weiterhin bestehenden eigenen work-Verbindung (die alle
+    "normalen", bereits heute nur work betreffenden Operationen unverändert
+    bedient - KEINE der ca. 80 einzelnen zond_dbase_*-Funktionen wird
+    angefasst) wird auf der store-Verbindung per
+    "ATTACH DATABASE '<path_tmp>' AS work;" work zusätzlich als zweites
+    Schema eingehängt (einmalig beim Öffnen, nicht pro Operation). store
+    bleibt "main", unqualifizierte Tabellennamen bestehender store-
+    Funktionen bleiben dadurch unverändert korrekt. Wichtig: sequenzielles
+    (nie gleichzeitiges) Schreiben auf work über zwei verschiedene
+    Verbindungen (die eigene work-Verbindung UND store-mit-attachtem-work)
+    ist bei SQLite unproblematisch, s. Diskussion vom 24.08. Willkommener
+    Nebeneffekt: sqlite3_update_hook() (auf work's eigener Verbindung
+    registriert, für project_set_changed()/"changed"-Tracking) feuert NICHT
+    für Schreibzugriffe, die über die attachte Verbindung laufen - und das
+    ist hier richtig so, nicht nachzuholen: Dual-Write-Änderungen sollen den
+    Hook gerade NICHT auslösen, weil store dabei ja ohnehin synchron
+    mitgeschrieben wird (kein "unsaved delta" gegenüber store, changed soll
+    für diesen Fall nicht auf TRUE gehen). Bisher musste das umgekehrt extra
+    abgefangen werden, weil die alten Dual-Write-Funktionen über work's
+    eigene (Hook-tragende) Verbindung liefen: viewer_save_dirty_dds()
+    (viewer_save.c, Zeile 582-584 sichert changed, Zeile 650-652 setzt ihn
+    zurück, falls vorher FALSE) und zond_treeviewfm_before_move()/_after()
+    (zond_treeviewfm.c, changed_tmp, Zeile 246/366) machen genau das. Mit
+    der attachten Verbindung entfällt der Hook-Aufruf von vornherein - diese
+    Sicherungs-/Rücksetzungs-Logik an beiden Stellen wird überflüssig und
+    kann ersatzlos entfernt werden.
+
+ 3. dbase_zond_update_sections()/update_path()/update_gmessage_index()
+    (project.c) neu schreiben: statt zweimal dieselbe Einzel-DB-Funktion auf
+    unterschiedlichen ZondDBase-Objekten aufzurufen, EIN schemaqualifiziertes
+    SQL-Statement-Paar (bzw. mehrere, je nach Funktion) auf der store-mit-
+    attachtem-work-Verbindung, innerhalb einer Transaktion ("work.tabelle"
+    für work, unqualifiziert/"main.tabelle" für store). Nur diese Handvoll
+    Funktionen ändern sich - alle anderen, einzel-DB-operierenden
+    zond_dbase_*-Funktionen (~80 Aufrufer) bleiben unangetastet.
+
+ 4. dbase_zond_begin/commit/rollback (project.c) entsprechend vereinfachen:
+    statt Schleife über zwei ZondDBase-Objekte (zond_dbase_store,
+    zond_dbase_work) mit je eigenem BEGIN/COMMIT/ROLLBACK nur noch ein
+    einziges BEGIN/COMMIT/ROLLBACK auf der einen store-mit-work-Verbindung.
+    Eigene Datei/eigenen klar abgegrenzten Abschnitt erwägen, da eng an das
+    ATTACH-Setup gekoppelt (Schema-Namen, journal_mode-Check aus 1.).
+
+ 5. Rückbau der aktuellen Rollback-Fehlerbehandlung: der kürzlich gebaute
+    Error-Merge in dbase_zond_rollback() (zwei separate error_int für
+    store- und work-Rollback, zusammengeführt via add_string(), s. Eintrag
+    oben "viewer_save.c, viewer_save_dirty_dds()...") wird durch 4.
+    überflüssig - es gibt nur noch einen einzigen ROLLBACK-Aufruf, der
+    scheitern kann. Diese Merge-Logik kann komplett entfernt werden
+    zugunsten eines normalen einzelnen GError-Fehlerpfads.
+
+ 6. Offene Entscheidung vor Umsetzung: index_ctx (FTS-Suchindex,
+    zond_treeviewfm.c) - ebenfalls ins ATTACH mit reinnehmen (drittes
+    Schema, eine gemeinsame Drei-Wege-Transaktion), oder bewusst separat
+    lassen (Inkonsistenz zwischen Suchindex und Projektdaten als
+    tolerierbar einstufen, da der Index im Zweifel neu aufgebaut werden
+    kann)? Muss vor 3./4. geklärt werden, da es die Form der Transaktion
+    in zond_treeviewfm.c betrifft.
+
+ 7. Separat notiert, nicht Teil dieser Atomaritäts-Umstellung, aber im
+    selben Bereich entdeckt: zond_treeviewfm.c, zond_treeviewfm_after()
+    (~Zeile 351-356) - exit(EXIT_FAILURE) bei fehlgeschlagenem
+    dbase_zond_commit(), unabhängig von der genauen Fehlerursache (auch
+    bei einem gewöhnlichen ersten-Commit-Fehler, nicht nur bei echter
+    store/work-Inkonsistenz). Kein Error-Dialog, keine Chance, sonstige
+    ungesicherte Änderungen der Sitzung zu retten. Ggf. eigenständig zu
+    behandeln.
+
+ 8. Testschritt (nach Umsetzung): gezielt einen Fehler mitten in einer
+    Dual-Write-Operation provozieren (z.B. künstliche Constraint-
+    Verletzung nur im zweiten Statement), prüfen, ob das Rollback wirklich
+    beide Schemata (store und work) zurücksetzt.
 
  */
 

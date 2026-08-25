@@ -129,6 +129,10 @@ static void cb_viewer_text_search_entry_buffer_changed(gpointer data) {
 	g_array_remove_range(pv->text_occ.arr_quad, 0, pv->text_occ.arr_quad->len);
 	pv->text_occ.not_found = FALSE;
 	pv->text_occ.index_act = -1;
+	//page_act mit zurücksetzen, sonst hält viewer_handle_text_search() die
+	//aktuelle Seite fälschlich für "schon für DIESEN (neuen) Begriff
+	//durchsucht" und überspringt sie dauerhaft
+	pv->text_occ.page_act = -1;
 
 	return;
 }
@@ -727,6 +731,10 @@ viewer_init(Projekt *zond) {
 	pv->anbindung.bis.index = EOP + 1;
 
 	pv->text_occ.arr_quad = g_array_new( FALSE, FALSE, sizeof(fz_quad));
+	//Sentinel "kein Treffer aktuell angezeigt" - g_malloc0() würde 0 liefern,
+	//was fälschlich als gültiger Index/gültige Seite gelesen würde
+	pv->text_occ.index_act = -1;
+	pv->text_occ.page_act = -1;
 
 	pv->arr_rendered = g_array_new( FALSE, FALSE, sizeof(RenderResponse));
 	g_array_set_clear_func(pv->arr_rendered,

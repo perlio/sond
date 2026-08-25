@@ -807,9 +807,19 @@ gint sond_file_part_delete(SondFilePart* sfp, GError** error) {
 		if (rc)
 			return -1;
 
-		rc = sond_file_part_test_for_children(sfp_parent, error);
-		if (rc)
-			return -1;
+		//Löschung ist an dieser Stelle bereits erfolgreich und gespeichert.
+		//test_for_children() aktualisiert nur has_children für die
+		//Baumansicht - ein Fehlschlag hier darf die schon erfolgte Löschung
+		//nicht als fehlgeschlagen melden (wie schon in
+		//sond_file_part_create_from_mime_type() gehandhabt).
+		{
+			GError* error_children = NULL;
+
+			if (sond_file_part_test_for_children(sfp_parent, &error_children)) {
+				LOG_WARN("%s\n", error_children->message);
+				g_error_free(error_children);
+			}
+		}
 	}
 
 	return 0;

@@ -64,8 +64,28 @@ gint dbase_zond_begin(DBaseZond* dbase_zond, GError** error) {
 }
 
 void dbase_zond_rollback(DBaseZond* dbase_zond, GError** error) {
-	zond_dbase_rollback(dbase_zond->zond_dbase_store, error);
-	zond_dbase_rollback(dbase_zond->zond_dbase_work, error);
+	ZondDBase* dbases[] = { dbase_zond->zond_dbase_store, dbase_zond->zond_dbase_work };
+
+	for (gint i = 0; i < 2; i++) {
+		GError* error_int = NULL;
+
+		zond_dbase_rollback(dbases[i], &error_int);
+		if (!error_int)
+			continue;   //Normalfall: Rollback erfolgreich
+
+		/* Passiert nur, wenn das ROLLBACK-Statement selbst fehlschlägt
+		 * (selten). Vorhandenen Fehler (Grund des Rollbacks) nicht
+		 * überschreiben, sondern die Rollback-Fehlermeldung anhängen -
+		 * beide Informationen müssen beim Anwender ankommen. */
+		if (!error)
+			g_error_free(error_int);
+		else if (*error) {
+			(*error)->message = add_string((*error)->message,
+					g_strdup_printf("\n\n%s", error_int->message));
+			g_error_free(error_int);
+		} else
+			*error = error_int;
+	}
 
 	return;
 }

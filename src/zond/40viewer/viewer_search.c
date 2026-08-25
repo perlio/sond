@@ -171,9 +171,15 @@ void viewer_highlight_at_char_pos(PdfViewer *pv, gint page_nr,
 	if (map && flat_buf) {
 		/* Zeichenindex aus Byte-Offset: fz_runeidx */
 		unsigned char *flat_data = NULL;
-		fz_buffer_storage(ctx, flat_buf, &flat_data);
+		/* flat_len aus dem Rückgabewert von fz_buffer_storage() - nicht per
+		 * strlen() ermitteln: flat_data ist kein garantiert NUL-
+		 * terminierter String ohne eingebettete NUL-Bytes. Für Glyphen
+		 * ohne Unicode-Mapping kann FZ_TEXT_FLATTEN_ALL ein NUL-Byte
+		 * mitten in den Text setzen - strlen() würde dann zu früh
+		 * abbrechen (falsche, zu kleine Länge) oder, falls der Buffer gar
+		 * nicht terminiert ist, über dessen Ende hinauslaufen. */
+		gsize flat_len = fz_buffer_storage(ctx, flat_buf, &flat_data);
 		if (flat_data) {
-			gsize flat_len = strlen((gchar *) flat_data);
 			gint  safe_pos = (char_pos_in_page < (gint) flat_len)
 					? char_pos_in_page : (gint) flat_len - 1;
 			if (safe_pos >= 0) {
@@ -288,24 +294,19 @@ void viewer_highlight_at_char_pos(PdfViewer *pv, gint page_nr,
 }
 
 static gint viewer_text_occ_search_next(PdfViewer *pv, gint index, gint dir) {
-	gint idx = (dir == 1) ? -1 : pv->text_occ.arr_quad->len;
-
-	do {
-		fz_quad quad = { 0 };
-
-		idx += dir;
-
-		quad = g_array_index(pv->text_occ.arr_quad, fz_quad, idx);
-
-		if (dir == 1 && (gint) quad.ul.y < index)
-			continue;
-		else if (dir == -1 && (gint) quad.ul.y > index)
-			continue;
-
-		return idx;
-
-	} while ((dir == 1 && idx < pv->text_occ.arr_quad->len - 1)
-			|| (dir == -1 && idx > 0));
+	if (dir == 1) {
+		for (guint i = 0; i < pv->text_occ.arr_quad->len; i++) {
+			fz_quad quad = g_array_index(pv->text_occ.arr_quad, fz_quad, i);
+			if ((gint) quad.ul.y >= index)
+				return (gint) i;
+		}
+	} else {
+		for (gint i = (gint) pv->text_occ.arr_quad->len - 1; i >= 0; i--) {
+			fz_quad quad = g_array_index(pv->text_occ.arr_quad, fz_quad, i);
+			if ((gint) quad.ul.y <= index)
+				return i;
+		}
+	}
 
 	return -1;
 }
