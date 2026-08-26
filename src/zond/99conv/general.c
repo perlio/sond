@@ -166,7 +166,20 @@ void anbindung_get_orig(ZondPdfDocument* zpdfd, Anbindung* anbindung) {
 
 		pdfp = zond_pdf_document_get_pdf_document_page(zpdfd, i);
 
-		if (pdfp && pdfp->inserted) {
+		/* Seiten, die in der frisch von der Platte geöffneten Kopie
+		 * (doc) NICHT (mehr) vorhanden sind, verschieben die Live-
+		 * Numerierung gegenüber der Platten-Numerierung: entweder weil
+		 * sie live neu eingefügt, aber noch nicht gespeichert sind
+		 * (pdfp->inserted), oder weil sie bei einem früheren Speichern
+		 * bereits aus der Datei ausgeschlossen wurden (pdfp->deleted &&
+		 * pdfp->on_disk_deleted) - live aber (als "Karteileiche") noch
+		 * mitgezählt werden. Noch nicht gespeicherte Löschungen
+		 * (pdfp->deleted && !pdfp->on_disk_deleted) existieren in doc
+		 * dagegen noch (werden gerade erst in diesem Speichervorgang
+		 * entfernt) und zählen daher wie eine normale, unveränderte
+		 * Seite mit. */
+		if (pdfp && (pdfp->inserted ||
+				(pdfp->deleted && pdfp->on_disk_deleted))) {
 			if (i <= anbindung_akt.von.seite) {
 				anbindung->von.seite--;
 				anbindung->bis.seite--;
@@ -197,15 +210,11 @@ void anbindung_korrigieren(ZPDFDPart* zpdfd_part, Anbindung* anbindung) {
 
 		//innerhalb des zu speichernde zpdfd_parts?
 		if (i >= anbindung_zpdfd_part.von.seite && i <= anbindung_zpdfd_part.bis.seite) {
-			//nur gelöschte Seiten herausrechnen
-			if (pdfp->deleted) {
-				if (i <= anbindung->von.seite) {
-					anbindung->von.seite--;
-					anbindung->bis.seite--;
-				}
-				else if (i <= anbindung->bis.seite)
-					anbindung->bis.seite--;
-			}
+			/* Gelöschte Seiten innerhalb des zpdfd_parts verschieben die
+			 * Numerierung nach dem Speichern nicht mehr: das Speichern
+			 * kompaktiert die Live-Numerierung nicht mehr (page_akt
+			 * bleibt für gelöschte Seiten dauerhaft stabil, s.
+			 * PdfDocumentPage->on_disk_deleted) - nichts zu tun. */
 		}
 		else {//außerhalb: eingefügte Seiten
 			if (pdfp->inserted) { //weil die sind ja zuvor hinzugerechnet worden

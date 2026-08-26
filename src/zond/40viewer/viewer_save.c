@@ -281,6 +281,16 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 		pdfp = zond_pdf_document_get_pdf_document_page(dd->zpdfd_part->zond_pdf_document, i);
 
 		if (pdfp->deleted && !pdfp->inserted) {
+			/* Schon bei einem früheren Speichern aus der Datei
+			 * ausgeschlossen (nur noch live als Karteileiche in
+			 * arr_pages vorhanden, s. PdfDocumentPage->on_disk_deleted) -
+			 * existiert in der hier frisch geöffneten doc gar nicht
+			 * mehr. Nichts zu tun, page_orig unverändert lassen (sonst
+			 * würde eine nie in doc vorhandene Seite fälschlich
+			 * abgezogen). */
+			if (pdfp->on_disk_deleted)
+				continue;
+
 			fz_try(ctx)
 				pdf_delete_page(ctx, doc, page_orig);
 			fz_catch(ctx) {
@@ -288,6 +298,8 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 
 				ERROR_PDF
 			}
+
+			pdfp->on_disk_deleted = TRUE;
 
 			page_orig--;
 
@@ -446,10 +458,30 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 				pdf_annot* annot_next = NULL;
 
 				pdfp_annot = g_ptr_array_index(pdfp->arr_annots, u);
+
+				/* Schon bei einem früheren Speichern aus der Datei
+				 * ausgeschlossen (s. on_disk_deleted an PdfDocumentPage)
+				 * - existiert auf der frisch geladenen Seite gar nicht
+				 * mehr. pdf_ann bewußt NICHT voranrücken, sonst
+				 * verschiebt sich die positionsweise Zuordnung zu den
+				 * übrigen, tatsächlich noch vorhandenen Annotationen. */
+				if (pdfp_annot->deleted && pdfp_annot->on_disk_deleted)
+					continue;
+
 				if (pdf_ann) {
 					annot_next = pdf_next_annot(ctx, pdf_ann);
-					if (pdfp_annot->deleted)
-						pdf_delete_annot(ctx, pdf_page, pdf_ann);
+					if (pdfp_annot->deleted) {
+						fz_try(ctx)
+							pdf_delete_annot(ctx, pdf_page, pdf_ann);
+						fz_catch(ctx) {
+							pdf_drop_page(ctx, pdf_page);
+							pdf_drop_document(ctx, doc);
+
+							ERROR_PDF
+						}
+
+						pdfp_annot->on_disk_deleted = TRUE;
+					}
 				}
 				else
 					LOG_WARN("%s\nzu viele annots", __func__);
@@ -480,86 +512,43 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 			g_array_remove_index(arr_journal, i);
 	}
 
-	//gelöschte Seiten aus geöffnetem dd löschen
+	/* Live-Buchführung nachziehen: nur noch Flags setzen, kein Zugriff
+	 * mehr auf das Live-pdf_doc. Das tatsächliche Ausschließen aus der
+	 * gespeicherten Datei ist oben in der ersten Schleife bereits
+	 * passiert (inkl. Markieren via on_disk_deleted); hier wird nur noch
+	 * "inserted" zurückgesetzt (Seite ist jetzt nicht mehr "neu, noch
+	 * nicht gespeichert") und - rein informativ für spätere best-effort-
+	 * Aufräumversuche - on_disk_deleted an bereits gelöschten Seiten/
+	 * Annotationen (falls hier oben in der ersten Schleife noch nicht
+	 * gesetzt, z.B. bei Phantom-Seiten) nachgezogen. Gelöschte Seiten und
+	 * Annotationen bleiben bewußt dauerhaft in arr_pages/arr_annots
+	 * liegen ("Karteileichen") - kein pdf_delete_page()/pdf_delete_annot()
+	 * mehr auf dem Live-pdf_doc, keine Umnumerierung, kein Anpassen von
+	 * first_page/last_page. Sie sind für Anzeige (viewer_new_page()) und
+	 * künftige Speichervorgänge (on_disk_deleted-Prüfung oben) bereits
+	 * korrekt unsichtbar/ausgeschlossen. Reine Struct-Feld-Zuweisungen -
+	 * kann anders als vorher nicht mehr fehlschlagen. */
 	gint i = dd->zpdfd_part->last_page->page_akt;
 
-	//ist oben schon sichergestellt, daß kein rendering mehr stattfindet
 	do {
 		PdfDocumentPage* pdfp = NULL;
 
 		pdfp = zond_pdf_document_get_pdf_document_page(dd->zpdfd_part->zond_pdf_document, i);
 
-		if (pdfp)
+		if (pdfp) {
 			pdfp->inserted = NULL;
 
-		if (pdfp && pdfp->deleted) { //Seite aus pdf_document löschen
-			fz_try(zond_pdf_document_get_ctx(dd->zpdfd_part->zond_pdf_document)) {
-				zond_pdf_document_mutex_lock(dd->zpdfd_part->zond_pdf_document);
+			if (pdfp->deleted)
+				pdfp->on_disk_deleted = TRUE;
 
-				pdf_delete_page(zond_pdf_document_get_ctx(dd->zpdfd_part->zond_pdf_document),
-						zond_pdf_document_get_pdf_doc(dd->zpdfd_part->zond_pdf_document), i);
-			}
-			fz_always(zond_pdf_document_get_ctx(dd->zpdfd_part->zond_pdf_document))
-				zond_pdf_document_mutex_unlock(dd->zpdfd_part->zond_pdf_document);
-			fz_catch(zond_pdf_document_get_ctx(dd->zpdfd_part->zond_pdf_document)) {
-				if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
-						fz_caught(zond_pdf_document_get_ctx(dd->zpdfd_part->zond_pdf_document)),
-						"%s\n%s", __func__,
-						fz_caught_message(zond_pdf_document_get_ctx(dd->zpdfd_part->zond_pdf_document)));
+			if (pdfp->arr_annots) {
+				for (gint u = 0; u < pdfp->arr_annots->len; u++) {
+					PdfDocumentPageAnnot* pdfp_annot = NULL;
 
-				return -1;
-			}
-
-			//ggf. dd anpassen, falls erste oder letzte Seite gelöscht wird
-			//kann derzeit nur passieren, wenn dd ganzes Dokument umfaßt und keine Anbindung ist
-			if (pdfp == dd->zpdfd_part->first_page) //Dokument muß mindestens zwei Seiten haben
-				dd->zpdfd_part->first_page =
-						zond_pdf_document_get_pdf_document_page(
-								dd->zpdfd_part->zond_pdf_document, i + 1);
-			else if (pdfp == dd->zpdfd_part->last_page)
-				dd->zpdfd_part->last_page =
-						zond_pdf_document_get_pdf_document_page(
-								dd->zpdfd_part->zond_pdf_document, i - 1);
-
-			g_ptr_array_remove_index(zond_pdf_document_get_arr_pages(
-					dd->zpdfd_part->zond_pdf_document), i);
-
-			//Seitenzahlen der folgenden Seiten anpassen
-			for (gint f = i; f < zond_pdf_document_get_arr_pages(
-					dd->zpdfd_part->zond_pdf_document)->len; f++) {
-				PdfDocumentPage* pdfp_loop = NULL;
-
-				pdfp_loop = g_ptr_array_index(zond_pdf_document_get_arr_pages(
-						dd->zpdfd_part->zond_pdf_document), f);
-				if (pdfp_loop)
-					pdfp_loop->page_akt--;
-			}
-		}
-		else if (pdfp->arr_annots) {
-			pdf_annot* annot_pdf = NULL;
-
-			annot_pdf = pdf_first_annot(ctx, pdfp->page); //gibt es, sonst kein arr_annots!
-
-			//gelöschte annots aus arr_annot löschen
-			for (gint u = 0; u < pdfp->arr_annots->len; u++) {
-				PdfDocumentPageAnnot* pdfp_annot = NULL;
-				pdf_annot* annot_next = NULL;
-
-				pdfp_annot = g_ptr_array_index(pdfp->arr_annots, u);
-				annot_next = pdf_next_annot(ctx, annot_pdf);
-
-				if (pdfp_annot->deleted) {
-					g_ptr_array_remove_index(pdfp->arr_annots, u);
-
-					fz_try(ctx)
-						pdf_delete_annot(ctx, pdfp->page, annot_pdf);
-					fz_catch(ctx)
-						ERROR_PDF
-
-					u--;
+					pdfp_annot = g_ptr_array_index(pdfp->arr_annots, u);
+					if (pdfp_annot->deleted)
+						pdfp_annot->on_disk_deleted = TRUE;
 				}
-
-				annot_pdf = annot_next;
 			}
 		}
 

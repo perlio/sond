@@ -340,7 +340,44 @@
  - viewer_save.c: physisches Speichern (Zeile 468) und Sync der gelöschten
    Seiten ins Live-Dokument (Zeile 483-567) laufen nacheinander - scheitert
    Letzteres, ist die Datei/das Journal schon "fertig", das In-Memory-
-   Dokument aber nur teilweise nachgezogen. Noch nicht geprüft.
+   Dokument aber nur teilweise nachgezogen.
+   BEHOBEN (26.08.2026): Grundproblem war, daß pdf_delete_page()/
+   pdf_delete_annot() auf dem Live-pdf_doc UND das Nachziehen von
+   arr_pages/arr_annots (Entfernen + Umnumerieren von page_akt) in
+   viewer_do_save_dd() als EIN untrennbarer Schritt behandelt wurden -
+   ein Fehlschlag mittendrin ließ arr_pages/page_akt in einem Zustand
+   zurück, der weder dem Vorher noch dem Nachher entsprach. Statt das
+   robuster zu machen: neues Feld PdfDocumentPage/PdfDocumentPageAnnot->
+   on_disk_deleted (zond_pdf_document.h) trennt "beim letzten Speichern
+   bereits aus der Datei ausgeschlossen" von "aus der Live-Buchführung
+   (arr_pages/arr_annots) entfernt" - Letzteres ist jetzt reine Best-
+   Effort-Kosmetik ohne Korrektheitsrelevanz. viewer_do_save_dd()s dritte
+   Schleife löscht nicht mehr aus dem Live-pdf_doc und faßt arr_pages/
+   arr_annots nicht mehr an (kein pdf_delete_page()/pdf_delete_annot(),
+   keine Umnumerierung, kein Anpassen von first_page/last_page mehr
+   nötig) - sie setzt nur noch Flags (inserted zurücksetzen, deleted->
+   on_disk_deleted nachziehen), reine Struct-Zuweisungen, kann nicht mehr
+   fehlschlagen. Gelöschte Seiten/Annotationen bleiben dauerhaft als
+   "Karteileichen" liegen, sind aber über pdfp->deleted schon überall
+   (Rendering: viewer_new_page(); FTS-Index: viewer_update_index_for_
+   save(); Sprung-Positionen: get_pdf_pos()) korrekt unsichtbar/
+   ausgeschlossen - das war vorher schon so gebaut, unabhängig vom
+   Aufräumen. anbindung_get_orig() (general.c) entsprechend symmetrisch
+   um "pdfp->deleted && pdfp->on_disk_deleted" ergänzt (Karteileichen
+   fehlen wie inserted-Seiten in der frisch geöffneten Speicher-Kopie),
+   die erste Schleife in viewer_do_save_dd() prüft vor jedem pdf_delete_
+   page()/pdf_delete_annot() jetzt on_disk_deleted (kein Doppel-Löschen
+   einer schon länger ausgeschlossenen Karteileiche mehr) und setzt es
+   nach Erfolg. anbindung_korrigieren() (general.c) um den jetzt
+   hinfälligen "gelöschte Seiten verschieben Numerierung"-Zweig gekürzt
+   (Speichern kompaktiert die Live-Numerierung nicht mehr).
+   Nebenbei entdeckter und mit demselben Muster behobener Bug: der
+   Annot-Lösch-Zweig der (jetzt entfernten) dritten Schleife trug
+   pdfp_annot aus arr_annots aus, BEVOR pdf_delete_annot() überhaupt
+   versucht wurde - bei einem Fehlschlag dort dachte die Buchführung
+   "weg", obwohl die Annotation physisch noch vorhanden war. In der
+   ersten Schleife jetzt: erst löschen versuchen, nur bei Erfolg
+   on_disk_deleted setzen.
 
  - viewer.c (Zeile 772-773): pv->von_alt wird zweimal gesetzt, bis_alt
    bleibt auf altem Wert - Copy-Paste-Fehler, potenziell Index außerhalb

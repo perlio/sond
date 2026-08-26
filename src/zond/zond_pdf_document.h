@@ -33,6 +33,16 @@ typedef struct _Pdf_Document_Page {
 	gint page_akt;
 	ZPDFDPart* inserted;
 	gboolean deleted;
+	/* Nur relevant, wenn deleted == TRUE: ob diese Seite beim letzten
+	 * physischen Speichern bereits aus der Datei ausgeschlossen wurde
+	 * (auf der Platte also definitiv nicht mehr existiert) - unabhängig
+	 * davon, ob sie live/im Speicher (arr_pages) noch als "Karteileiche"
+	 * herumliegt (das Live-Aufräumen ist reines Best-Effort und nicht
+	 * mehr korrektheitsrelevant). Wird von anbindung_get_orig() gebraucht,
+	 * um die Live-Numerierung (page_akt) korrekt auf die Numerierung der
+	 * jeweils frisch von der Platte geöffneten Speicher-Kopie
+	 * abzubilden - s. dort. */
+	gboolean on_disk_deleted;
 } PdfDocumentPage;
 
 typedef struct _ZPDFD_Part {
@@ -68,6 +78,7 @@ typedef struct _Pdf_Document_Page_Annot {
 	PdfDocumentPage *pdf_document_page; //keine ref!
 	gboolean inserted;
 	gboolean deleted;
+	gboolean on_disk_deleted; //wie PdfDocumentPage->on_disk_deleted, s. dort
 	gboolean changed;
 	Annot annot;
 } PdfDocumentPageAnnot;
