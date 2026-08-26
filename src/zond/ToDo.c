@@ -508,8 +508,21 @@
    der letzte OCR-Task noch erfolgreich fertig wird, liefert
    sond_ocr_do_tasks() rc==1; der break-Zweig überspringt dann Journal-
    Eintrag und Aufräumen, obwohl die Seite im Speicher schon geändert
-   wurde - Buffer-Leak und/oder verlorene Änderung. Noch nicht
-   verifiziert/behoben.
+   wurde - Buffer-Leak und/oder verlorene Änderung.
+   VERIFIZIERT UND BEHOBEN (26.08.2026): bestätigt über sond_ocr.c,
+   sond_ocr_do_tasks() (Zeile 228-449) - bei Abbruch werden keine neuen
+   Tasks mehr gestartet, ein bereits laufender (status 1) aber ganz normal
+   zu Ende abgewartet (sonst Use-after-free im Worker-Thread) und kann
+   erfolgreich fertig werden (task->content_changed = TRUE, Zeile 413 -
+   nur im Erfolgsfall gesetzt, bei echtem Taskfehler/rc==-1 bleibt es
+   FALSE). Der Rückgabewert ist trotzdem "return cancelled ? 1 : 0;" -
+   unabhängig davon, ob der eine Task dieses Aufrufs noch erfolgreich
+   fertig wurde. Fix: rc==1 löst kein sofortiges break mehr aus, sondern
+   setzt nur ein Flag (stop_after_this_page); die schon vorhandene normale
+   Verarbeitung (Journal-Eintrag, Aufräumen, viewer_foreach()) für die
+   eine, gerade fertig gewordene Seite läuft dadurch unverändert durch -
+   erst danach (an allen drei Ausstiegspunkten dieser Seite: content_
+   changed==FALSE, buf_content_new fehlt, normales Ende) wird abgebrochen.
 
  - viewer_render.c: drei noch nicht selbst verifizierte Punkte -
    unsynchronisierter Zugriff auf pv->arr_rendered (Lock nur bei nicht-

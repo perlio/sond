@@ -515,23 +515,32 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 		//OCR
 		gboolean content_changed = FALSE;
 		fz_buffer* buf_content_new = NULL;
+		/* Abbrechen wurde geklickt, während der (einzige) Task dieses
+		 * Aufrufs bereits lief - der wird von sond_ocr_do_tasks() ganz
+		 * normal zu Ende abgewartet (s. dort) und kann noch erfolgreich
+		 * fertig geworden sein (content_changed/buf_content_new unten dann
+		 * korrekt gesetzt). Nicht sofort break, sonst geht eine bereits
+		 * physisch in die Seite geschriebene Änderung (Journal-Eintrag,
+		 * Aufräumen) verloren bzw. buf_content_new leakt. Stattdessen diese
+		 * eine Seite noch normal fertig verarbeiten und erst danach
+		 * abbrechen. */
+		gboolean stop_after_this_page = FALSE;
 
 		rc = sond_ocr_do_tasks(arr_tasks, pool, mode, &error);
 		content_changed = task->content_changed; //vor dem unref auslesen - der danach freigegeben wird
 		buf_content_new = task->buf_content_new; //übernimmt ref - task->buf_content_new deshalb NULLen,
 		task->buf_content_new = NULL;             //sonst droppt sond_ocr_task_free() ihn gleich mit
 		g_ptr_array_unref(arr_tasks);
-		if (rc) { //Fähler
-			fz_drop_buffer(ctx, entry.ocr.buf_old);
-
+		if (rc) { //Fähler oder Abbruch
 			if (rc == -1) {
+				fz_drop_buffer(ctx, entry.ocr.buf_old);
 				info_window_set_message(info_window, "OCR-Task gescheitert: %s",
 						error->message);
 				g_clear_error(&error);
 				continue;
 			}
 			else if (rc == 1)
-				break;
+				stop_after_this_page = TRUE;
 		}
 
 		/* Seite wegen bereits vorhandenem verstecktem Text übersprungen (oder
@@ -541,6 +550,8 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 		 * Speichern-Button aktivieren, obwohl nichts zu speichern ist). */
 		if (!content_changed) {
 			fz_drop_buffer(ctx, entry.ocr.buf_old);
+			if (stop_after_this_page)
+				break;
 			continue;
 		}
 
@@ -555,6 +566,8 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 					"Neuer Content-Stream nicht verfügbar - Seite %u übersprungen",
 					pdf_document_page->page_akt + 1);
 			fz_drop_buffer(ctx, entry.ocr.buf_old);
+			if (stop_after_this_page)
+				break;
 			continue;
 		}
 
@@ -580,6 +593,9 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 
 		//Damit speichern angeht - gibt keinen Fehler zurück, wenn func == NULL
 		viewer_foreach(pv, pdf_document_page, NULL, NULL);
+
+		if (stop_after_this_page)
+			break;
 	}
 
 	g_ptr_array_unref(arr_document_page);
