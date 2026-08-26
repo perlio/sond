@@ -499,7 +499,10 @@
    beim Erfolgspfad ohne Guard - beim Datei-Pfad (ret==1) korrekt mit
    "if (ret == 1)" geschützt (Zeile 1223), beim Clipboard-Pfad (ret==2,
    sfp bleibt NULL) fehlt der Schutz - g_object_unref(NULL) bei jedem
-   normalen "Seiten einfügen aus Zwischenablage". Noch nicht behoben.
+   normalen "Seiten einfügen aus Zwischenablage".
+   BEHOBEN (26.08.2026): Zeile 1241 wie an den drei anderen Stellen
+   derselben Funktion (Zeile 1198, 1210, 1223-1224) mit "if (ret == 1)"
+   geschützt.
 
  - seiten.c, cb_pv_seiten_ocr(): wird "Abbrechen" genau geklickt, während
    der letzte OCR-Task noch erfolgreich fertig wird, liefert

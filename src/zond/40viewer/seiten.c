@@ -1238,7 +1238,8 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 	rc = zond_pdf_document_insert_pages(viewer_page->dd->zpdfd_part->zond_pdf_document,
 			page_doc, viewer_page->dd->zpdfd_part, doc_merge, &error);
 	pdf_drop_document(pv->zond->ctx, doc_merge);
-	g_object_unref(sfp);
+	if (ret == 1)
+		g_object_unref(sfp);
 	if (rc) {
 		display_message(pv->vf, "Fehler Einfügen\n\n", error->message,
 				"\n\nViewer wird geschlossen", NULL);
