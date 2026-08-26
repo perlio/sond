@@ -411,21 +411,89 @@
  - viewer.c, viewer_springen_zu_pos_pdf()/viewer_abfragen_pdf_punkt(): kein
    Guard für arr_pages->len == 0, obwohl an anderer Stelle im selben File
    vorhanden - potenziell Index -1/NULL-Deref, wenn ein dd nur aus
-   gelöschten Seiten besteht. Noch nicht geprüft/behoben.
+   gelöschten Seiten besteht.
+   GEPRÜFT (26.08.2026): kein Bug - ein dd hat immer mindestens eine
+   Seite, die letzte Seite eines dd kann nicht gelöscht werden.
 
  - viewer_annot.c, viewer_annot_handle_release_clicked_annot(): lokales
    GError* error überschattet den GError**-Parameter; jeder interne
    Fehlerpfad gibt TRUE zurück, ohne je den äußeren *error zu setzen -
    Aufrufer (viewer_ui.c, Zeile 322-325) dereferenziert error->message auf
    seinem eigenen, weiterhin NULLen error - Absturz bei praktisch jedem
-   Fehler beim Verschieben einer Text-Annotation. Noch nicht behoben.
+   Fehler beim Verschieben einer Text-Annotation.
+   BEHOBEN (26.08.2026): lokale Schattierungsvariable entfernt; jeder
+   interne Fehlerpfad im "verschoben?"-Zweig setzt jetzt stattdessen den
+   äußeren *error-Parameter (per g_error_new(), analog zu
+   viewer_annot_do_create() und den übrigen GError**-Funktionen in dieser
+   Datei) und ruft nicht mehr selbst display_message() auf - die Anzeige
+   der Meldung bleibt wie überall sonst Sache des Aufrufers. Der bislang
+   komplett stumme Fehlerpfad (Zeile 356-357, Seite noch nicht fertig
+   gerendert) zeigt dem Nutzer jetzt ebenfalls eine Meldung statt
+   stillschweigend abzubrechen. Der Aufruf von viewer_annot_do_change()
+   übergibt jetzt direkt den äußeren error-Parameter statt einer lokalen
+   Variable.
+   Zusätzlich (auf Nachfrage): die Rückgabewerte TRUE/FALSE (gboolean-
+   Konstanten - kompiliert zwar folgenlos, weil gboolean in GLib nur ein
+   typedef auf gint ist, war aber ein Stilbruch gegenüber der
+   Rückgabewert-Konvention aller anderen GError**-Funktionen in diesem
+   Code, die -1/0 als Fehler-/Erfolgscode verwenden) durch -1/0 ersetzt.
 
- - viewer_annot.c: drei weitere, noch nicht selbst verifizierte Punkte -
-   annot_after bleibt bei gelöschten Annotationen auf NULL (verfälschter
-   "ungespeichert"-Status/verwaiste Journal-Einträge möglich);
-   pdf_update_annot() ohne umgebendes fz_try/fz_catch; kein Rollback der
-   arr_annots-Buchführung, wenn nach erfolgreichem pdf_create_annot() ein
-   späterer Schritt scheitert.
+ - viewer_annot.c: drei weitere Punkte -
+
+   1) annot_after bleibt bei gelöschten Annotationen auf NULL (verfälschter
+      "ungespeichert"-Status/verwaiste Journal-Einträge möglich).
+      BEHOBEN (26.08.2026): viewer_annot_delete() (viewer_annot.c) setzt für
+      JOURNAL_TYPE_ANNOT_DELETED-Einträge bewußt nur annot_before (es gibt
+      kein "danach" mehr) - annot_after bleibt {0}. viewer_entry_in_dd()
+      (viewer_save.c) prüfte aber bei Annot-Journal-Einträgen, die auf der
+      ersten/letzten (angeschnittenen) Seite eines zpdfd_part liegen,
+      unbedingt annot_after, um zu bestimmen, ob die Annotation im
+      sichtbaren/gespeicherten Ausschnitt liegt - bei DELETED damit ein
+      bedeutungsloses Rect {0,0,0,0} statt der tatsächlichen letzten
+      Position der gelöschten Annotation. Betraf zwei Aufrufer:
+      viewer_reset_dirty_dds() (dirty-Flag pro Ausschnitt kann fälschlich
+      FALSE bleiben, obwohl dort eine ungespeicherte Löschung liegt) und die
+      Journal-Bereinigung direkt nach erfolgreichem Speichern (Löschung
+      bleibt fälschlich für immer im Journal hängen, oder wird - je nach
+      Ausgang der Rect-Prüfung mit dem bedeutungslosen Rect - fälschlich
+      schon entfernt, bevor der tatsächlich betroffene Ausschnitt gespeichert
+      wurde, wodurch die Löschung dort verlorenginge). Fix: annot je nach
+      entry->type wählen - bei JOURNAL_TYPE_ANNOT_DELETED annot_before
+      (letzter bekannter Zustand vor dem Löschen), sonst weiterhin
+      annot_after (aktueller Zustand nach Erstellen/Ändern).
+
+   2) pdf_update_annot() ohne umgebendes fz_try/fz_catch; kein Rollback der
+      arr_annots-Buchführung, wenn nach erfolgreichem pdf_create_annot() ein
+      späterer Schritt scheitert.
+      BEHOBEN (26.08.2026): pdf_update_annot() in viewer_annot_do_change()
+      jetzt in fz_try/fz_catch, analog zu den übrigen Aufrufen in derselben
+      Funktion.
+      Für den Rollback kein pdf_delete_annot()-Versuch (der seinerseits
+      scheitern könnte, s. Diskussion) - stattdessen genau wie bei den
+      Karteileichen aus Finding 2 (on_disk_deleted) gelöst: viewer_annot_
+      do_create() bekommt einen neuen Out-Parameter gboolean* created, der
+      direkt nach erfolgreichem pdf_create_annot() auf TRUE gesetzt wird
+      (unabhängig vom weiteren Ausgang der Funktion). Scheitert ein
+      späterer Schritt (Farbe/Icon setzen, viewer_annot_do_change()),
+      erzeugt der Aufrufer viewer_annot_create() bei created == TRUE einen
+      PdfDocumentPageAnnot-Eintrag mit deleted = TRUE, on_disk_deleted =
+      TRUE und hängt ihn an arr_annots an - reine Struct-Zuweisungen, kann
+      nicht fehlschlagen. Notwendig (nicht nur bequem): pdf_document_page_
+      annot_get_pdf_annot() (zond_pdf_document.c) löst den zu einem
+      PdfDocumentPageAnnot gehörenden pdf_annot* rein positionell auf
+      (Index in arr_annots == n-te Annotation von pdf_first_annot()/pdf_
+      next_annot() auf der Live-Seite) - die physisch bereits an letzter
+      Stelle der Live-Seite hängende Phantom-Annotation MUSS also in
+      arr_annots mitgezählt werden, sonst verschöbe sich diese Zuordnung
+      für alle danach auf dieser Seite neu erstellten Annotationen um 1.
+      Dank deleted/on_disk_deleted bleibt sie dabei überall (Rendering-
+      Overlay, künftige Speichervorgänge, Hit-Testing) korrekt unsichtbar/
+      übersprungen, exakt wie eine echte, bereits gespeicherte Löschung.
+      Der Aufruf von viewer_annot_do_create() beim Nachvollziehen eines
+      JOURNAL_TYPE_ANNOT_CREATED-Journal-Eintrags in viewer_do_save_dd()
+      (viewer_save.c) übergibt created = NULL, weil dort bei jedem
+      Fehlschlag ohnehin das komplette frisch geöffnete doc verworfen wird
+      - kein Bookkeeping nötig.
 
  - seiten.c (Zeile 1241), cb_pv_seiten_einfuegen(): g_object_unref(sfp)
    beim Erfolgspfad ohne Guard - beim Datei-Pfad (ret==1) korrekt mit

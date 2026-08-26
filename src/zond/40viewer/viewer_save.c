@@ -56,10 +56,23 @@ static gboolean viewer_entry_in_dd(JournalEntry* entry,
 		ZPDFDPart* zpdfd_part) {
 	if (entry->pdf_document_page->page_akt >= zpdfd_part->first_page->page_akt &&
 			entry->pdf_document_page->page_akt <= zpdfd_part->last_page->page_akt) {
+		Annot* annot = NULL;
+
 		if (entry->type == JOURNAL_TYPE_PAGES_INSERTED ||
 				entry->type == JOURNAL_TYPE_PAGE_DELETED ||
 				entry->type == JOURNAL_TYPE_ROTATE ||
 				entry->type == JOURNAL_TYPE_OCR) return TRUE;
+
+		/* Sind ja nur Annots übrig. Für die Randseiten-Zuordnung zählt die
+		 * Position, die die Annotation zum Zeitpunkt dieses Journal-
+		 * Eintrags tatsächlich hatte: bei CREATED/CHANGED ist das der
+		 * aktuelle/neue Zustand (annot_after; annot_before ist bei CREATED
+		 * gar nicht gesetzt). Bei DELETED gibt es keinen "nachher"-Zustand
+		 * mehr (annot_after bleibt {0}) - maßgeblich ist hier annot_before,
+		 * der letzte bekannte Zustand vor dem Löschen. */
+		annot = (entry->type == JOURNAL_TYPE_ANNOT_DELETED) ?
+				&entry->annot_changed.annot_before :
+				&entry->annot_changed.annot_after;
 
 		//Sind ja nur Annots überig
 		if (entry->pdf_document_page->page_akt == zpdfd_part->first_page->page_akt) {
@@ -69,7 +82,7 @@ static gboolean viewer_entry_in_dd(JournalEntry* entry,
 						(gfloat) zpdfd_part->first_index,
 						entry->pdf_document_page->rect.y1};
 
-				if (viewer_annot_is_in_rect(&entry->annot_changed.annot_after, rect))
+				if (viewer_annot_is_in_rect(annot, rect))
 					return 1;
 			}
 		}
@@ -79,7 +92,7 @@ static gboolean viewer_entry_in_dd(JournalEntry* entry,
 				fz_rect rect = {0.0, entry->pdf_document_page->rect.x1, 0.0,
 						(gfloat) zpdfd_part->last_index};
 
-				if (viewer_annot_is_in_rect(&entry->annot_changed.annot_after, rect))
+				if (viewer_annot_is_in_rect(annot, rect))
 					return 1;
 			}
 		}
@@ -416,8 +429,10 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 				pdf_annot* pdf_ann = NULL;
 
 				//pdf_ann borrowed pointer
+				//created (NULL): bei einem Fehlschlag hier wird doc ohnehin
+				//komplett verworfen (s. u.), kein Bookkeeping nötig
 				pdf_ann = viewer_annot_do_create(ctx, pdf_page, entry.pdf_document_page->rotate,
-						entry.annot_changed.annot_after, error);
+						entry.annot_changed.annot_after, NULL, error);
 				if (!pdf_ann) {
 					pdf_drop_page(ctx, pdf_page);
 					pdf_drop_document(ctx, doc);

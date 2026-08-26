@@ -202,7 +202,14 @@ gint viewer_annot_do_change(fz_context* ctx, pdf_annot* pdf_annot, gint rotate,
 		}
 	}
 
-	pdf_update_annot(ctx, pdf_annot);
+	fz_try(ctx)
+		pdf_update_annot(ctx, pdf_annot);
+	fz_catch(ctx) {
+		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"), fz_caught(ctx),
+				"%s\n%s", __func__, fz_caught_message(ctx));
+
+		return -1;
+	}
 
 	return 0;
 }
@@ -498,9 +505,11 @@ gint viewer_annot_handle_release_clicked_annot(PdfViewer* pv,
 }
 
 pdf_annot* viewer_annot_do_create(fz_context* ctx, pdf_page* pdf_page, gint rotate,
-		Annot annot, GError** error) {
+		Annot annot, gboolean* created, GError** error) {
 	pdf_annot* pdf_annot = NULL;
 	gint rc = 0;
+
+	if (created) *created = FALSE;
 
 	fz_try(ctx) pdf_annot = pdf_create_annot(ctx, pdf_page, annot.type);
 	fz_catch(ctx) {
@@ -510,6 +519,13 @@ pdf_annot* viewer_annot_do_create(fz_context* ctx, pdf_page* pdf_page, gint rota
 		return NULL;
 	}
 	pdf_drop_annot(ctx, pdf_annot); //geht schon jetzt; page behält ref!
+
+	/* Ab hier existiert die Annotation physisch auf pdf_page, auch wenn
+	 * einer der folgenden Schritte noch scheitert - das muß der Aufrufer
+	 * wissen (s. dort), um die Live-Buchführung (arr_annots) konsistent zu
+	 * einer eventuell schon vorhandenen zusätzlichen physischen Annotation
+	 * zu halten. */
+	if (created) *created = TRUE;
 
 	if (annot.type == PDF_ANNOT_UNDERLINE) {
 		const gfloat color[3] = { 0.1, .85, 0 };
@@ -544,6 +560,7 @@ gint viewer_annot_create(ViewerPageNew *viewer_page, GError **error) {
 	PdfDocumentPageAnnot *pdf_document_page_annot = NULL;
 	JournalEntry entry = { 0, };
 	Annot annot = { 0 };
+	gboolean created = FALSE;
 
 	fz_context *ctx = zond_pdf_document_get_ctx(
 			viewer_page->pdf_document_page->document);
@@ -580,10 +597,32 @@ gint viewer_annot_create(ViewerPageNew *viewer_page, GError **error) {
 
 	zond_pdf_document_mutex_lock(viewer_page->pdf_document_page->document);
 	pdf_annot = viewer_annot_do_create(ctx, viewer_page->pdf_document_page->page,
-			viewer_page->pdf_document_page->rotate, annot, error);
+			viewer_page->pdf_document_page->rotate, annot, &created, error);
 	zond_pdf_document_mutex_unlock(viewer_page->pdf_document_page->document);
 	if (!pdf_annot) {
 		annot_free(&annot);
+
+		if (created) {
+			/* pdf_create_annot() ist geglückt, ein späterer Schritt (Farbe/
+			 * Icon setzen, viewer_annot_do_change()) aber gescheitert -
+			 * physisch existiert die Annotation trotzdem auf der Live-Seite,
+			 * an der letzten Position von deren mupdf-Annotationsliste. Kein
+			 * Rollback-Versuch über pdf_delete_annot() (der seinerseits
+			 * scheitern könnte) - stattdessen wie eine ganz normale, bereits
+			 * gespeicherte Löschung behandeln: in arr_annots tracken (sonst
+			 * würde die rein positionelle Indizierung in
+			 * pdf_document_page_annot_get_pdf_annot() für alle danach
+			 * erstellten Annotationen um 1 verschoben) und sofort als
+			 * deleted/on_disk_deleted markieren. Reine Struct-Zuweisungen,
+			 * kann nicht fehlschlagen. */
+			PdfDocumentPageAnnot *orphan = g_malloc0(sizeof(PdfDocumentPageAnnot));
+
+			orphan->pdf_document_page = viewer_page->pdf_document_page;
+			orphan->deleted = TRUE;
+			orphan->on_disk_deleted = TRUE;
+
+			g_ptr_array_add(viewer_page->pdf_document_page->arr_annots, orphan);
+		}
 
 		return -1;
 	}
