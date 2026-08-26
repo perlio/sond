@@ -434,7 +434,11 @@ static void viewer_einrichten_fenster(PdfViewer *pv) {
 	pv->item_drehen = gtk_menu_item_new_with_label("Seiten drehen");
 	pv->item_einfuegen = gtk_menu_item_new_with_label("Seiten einfügen");
 	pv->item_loeschen = gtk_menu_item_new_with_label("Seiten löschen");
-	pv->item_entnehmen = gtk_menu_item_new_with_label("Entnehmen");
+	/* item_entnehmen (Menüpunkt "Entnehmen") ersatzlos entfernt (26.08.2026)
+	 * - Funktion war nie implementiert (kein "activate"-Handler), die
+	 * geplante Funktionalität (mehrere Seiten zu einem neuen PDF
+	 * kombinieren) soll später über eine Kombination von Anbindungen
+	 * gelöst werden, nicht im Viewer selbst. S. ToDo.c. */
 	pv->item_ocr = gtk_menu_item_new_with_label("OCR");
 
 	GtkWidget *sep0 = gtk_separator_menu_item_new();
@@ -460,7 +464,6 @@ static void viewer_einrichten_fenster(PdfViewer *pv) {
 	gtk_menu_shell_append(GTK_MENU_SHELL(menu_viewer), pv->item_einfuegen);
 	gtk_menu_shell_append(GTK_MENU_SHELL(menu_viewer), pv->item_drehen);
 	gtk_menu_shell_append(GTK_MENU_SHELL(menu_viewer), pv->item_loeschen);
-	gtk_menu_shell_append(GTK_MENU_SHELL(menu_viewer), pv->item_entnehmen);
 	gtk_menu_shell_append(GTK_MENU_SHELL(menu_viewer), pv->item_ocr);
 	gtk_menu_shell_append(GTK_MENU_SHELL(menu_viewer), sep0);
 	gtk_menu_shell_append(GTK_MENU_SHELL(menu_viewer), pv->item_copy);

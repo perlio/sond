@@ -118,7 +118,6 @@ typedef struct _Pdf_Viewer {
 	GtkWidget *item_drehen;
 	GtkWidget *item_einfuegen;
 	GtkWidget *item_loeschen;
-	GtkWidget *item_entnehmen;
 	GtkWidget *item_ocr;
 	GtkWidget *item_copy;
 
