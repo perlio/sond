@@ -577,16 +577,65 @@
    neuen Datei trotz ungespeicherter Änderungen "trotzdem schließen" ab,
    öffnet die Funktion die neue Datei trotzdem - altes Dokument wird
    verwaist statt gedroppt, ungespeicherte Änderungen gehen trotz der
-   eigentlich schützenden Abfrage verloren. Noch nicht behoben.
+   eigentlich schützenden Abfrage verloren.
+   BEHOBEN (26.08.2026): pv_schliessen_datei() gibt jetzt gint statt void
+   zurück (0: Datei tatsächlich geschlossen; -1: Anwender hat "Trotzdem
+   schließen?" nach gescheitertem Speichern abgelehnt, pv->dd bleibt
+   unverändert auf dem alten, ungespeicherten Dokument stehen).
+   cb_datei_oeffnen() prüft diesen Rückgabewert jetzt und bricht bei -1
+   sofort ab (Dateiname wird freigegeben, kein pv_oeffnen_datei()-Aufruf
+   mehr) - vorher wurde der Rückgabewert ignoriert und die neue Datei
+   trotzdem geladen, wobei viewer_display_document() pv->dd ungeprüft
+   überschrieben und damit das eben geschützte, ungespeicherte Dokument
+   verwaist hätte. cb_datei_schliessen() ignoriert den Rückgabewert
+   weiterhin bewußt, da dort kein Folgeschritt existiert, der pv->dd
+   überschreiben könnte.
 
  - stand_alone.c: URI->Pfad-Umrechnung mit "+8"-Offset - vom Review nur
    mit niedriger Konfidenz gemeldet (unklar, ob für die Zielumgebung
-   Windows überhaupt falsch). Noch nicht geprüft.
+   Windows überhaupt falsch).
+   GEPRÜFT (26.08.2026): für reines Windows-Ziel wäre der Offset korrekt
+   gewesen (g_file_get_uri() liefert dort "file:///C:/...", "file:///"
+   ist genau 8 Zeichen lang) - aber die App soll ggf. auch unter Linux
+   laufen ("file:///home/user/..." + 8 ergäbe fälschlich
+   "home/user/..." ohne führenden Slash). BEHOBEN (26.08.2026): open_app()
+   in stand_alone.c baut den Pfad nicht mehr manuell aus dem URI-String
+   zusammen (g_file_get_uri()/g_uri_unescape_string()/"+8"-Offset
+   entfernt), sondern verwendet g_file_get_path() auf dem von GTK bereits
+   gelieferten GFile* - das liefert plattformunabhängig den nativen
+   lokalen Pfad (inkl. Un-Escaping) und funktioniert so auf Windows und
+   Linux gleichermaßen. Liefert g_file_get_path() NULL (kein lokaler
+   Pfad ermittelbar), wird das jetzt mit einer Fehlermeldung abgefangen
+   statt mit einem kaputten Pfad weiterzuarbeiten.
 
  - viewer_ui.c: Menüpunkt "Entnehmen" hat projektweit keinen
    "activate"-Handler (per grep verifiziert), ist aber sichtbar und
    anklickbar - macht nichts, ohne dass der Anwender das erkennen kann.
-   Noch nicht behoben.
+   BEHOBEN (26.08.2026): Menüpunkt vorerst ersatzlos entfernt statt mit
+   einem Handler versehen - die geplante Funktion (mehrere Seiten zu
+   einem neuen PDF kombinieren) ist noch nicht ausgereift und soll
+   später vermutlich über eine Kombination von Anbindungen gelöst
+   werden, nicht im Viewer selbst. pv->item_entnehmen (viewer.h) sowie
+   alle Verwendungen (Erzeugung/Einhängen in viewer_ui.c,
+   gtk_widget_set_sensitive() in stand_alone.c) entfernt.
+
+ - seiten.c, seiten_ocr_abfrage_hidden_text() (vom Anwender gemeldet, nicht
+   Teil des ursprünglichen Reviews): Rückfrage-Dialog bei Seiten mit bereits
+   vorhandener versteckter Textebene hatte nur "Verwerfen und neu OCRen"
+   und "Seite überspringen" - keine Möglichkeit, den gesamten (u.U.
+   mehrseitigen) OCR-Lauf abzubrechen. Bei vielen bereits-OCRten Seiten
+   musste man sich durch jede einzelne Seite durchklicken.
+   BEHOBEN (26.08.2026): dritter Button "Abbrechen" (GTK_RESPONSE_CANCEL)
+   ergänzt. my_dialog_run() (misc.c) verknüpft das delete-event ("X")
+   bereits generisch mit GTK_RESPONSE_CANCEL - damit bricht auch das
+   Schließen des Fensters jetzt den gesamten Lauf ab, nicht nur diese
+   Seite. In cb_pv_seiten_ocr() (Aufrufer) wird GTK_RESPONSE_CANCEL jetzt
+   gesondert behandelt: dieselbe cancel-Flag wie beim Abbrechen-Button des
+   InfoWindow wird gesetzt (info_window->cancel, atomar, konsistent mit
+   cb_abbrechen_clicked()/cb_info_window_delete_event() in misc.c) und die
+   Schleife sofort verlassen - die aktuelle Seite wurde an dieser Stelle
+   noch nicht angefasst (kein Content-Stream gelesen, kein Task angelegt),
+   ein direktes break ist daher unproblematisch.
 
  */
 

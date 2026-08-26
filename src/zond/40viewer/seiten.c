@@ -269,11 +269,16 @@ seiten_abfrage_seiten(PdfViewer *pv, const gchar *title, gint *winkel,
  **  Seiten OCR
  */
 /* Rückfrage bei Seiten, die bereits eine (versteckte) Textebene enthalten -
- * Rückgabe GTK_RESPONSE_YES: verwerfen und neu OCRen, sonst (GTK_RESPONSE_NO
- * oder Fenster geschlossen): Seite überspringen. *remember_out: TRUE, wenn
- * "für alle weiteren Seiten übernehmen" angehakt war - der Aufrufer
- * übernimmt die Entscheidung dann für den Rest des Durchlaufs, ohne erneut
- * zu fragen. */
+ * Rückgabe GTK_RESPONSE_YES: verwerfen und neu OCRen, GTK_RESPONSE_NO:
+ * Seite überspringen, GTK_RESPONSE_CANCEL ("Abbrechen"-Button oder Fenster
+ * per "X"/delete-event geschlossen - my_dialog_run() verknüpft das
+ * delete-event bereits generisch mit GTK_RESPONSE_CANCEL): gesamten
+ * OCR-Lauf abbrechen, nicht nur diese Seite überspringen (sonst müsste man
+ * sich bei vielen bereits-OCRten Seiten durch jede einzelne durchklicken).
+ * *remember_out: TRUE, wenn "für alle weiteren Seiten übernehmen" angehakt
+ * war - der Aufrufer übernimmt die Entscheidung dann für den Rest des
+ * Durchlaufs, ohne erneut zu fragen (gilt nur für YES/NO, nicht für den
+ * Abbruch-Fall). */
 static gint seiten_ocr_abfrage_hidden_text(PdfViewer *pv, guint seitenzahl,
 		gboolean *remember_out) {
 	GtkWidget *dialog = NULL;
@@ -286,7 +291,8 @@ static gint seiten_ocr_abfrage_hidden_text(PdfViewer *pv, guint seitenzahl,
 	dialog = gtk_dialog_new_with_buttons("Seite enthält bereits Text",
 			GTK_WINDOW(pv->vf), GTK_DIALOG_MODAL,
 			"Verwerfen und neu OCRen", GTK_RESPONSE_YES,
-			"Seite überspringen", GTK_RESPONSE_NO, NULL);
+			"Seite überspringen", GTK_RESPONSE_NO,
+			"Abbrechen", GTK_RESPONSE_CANCEL, NULL);
 
 	content_area = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
 
@@ -417,6 +423,26 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 
 					res = seiten_ocr_abfrage_hidden_text(pv,
 							pdf_document_page->page_akt + 1, &remember);
+					if (res == GTK_RESPONSE_CANCEL) {
+						/* "Abbrechen" (Button oder Fenster per "X"
+						 * geschlossen) - kompletten Lauf abbrechen, nicht
+						 * nur diese Seite. Dieselbe cancel-Flag wie beim
+						 * Abbrechen-Button des InfoWindow setzen (s.
+						 * cb_abbrechen_clicked()/cb_info_window_delete_event()
+						 * in misc.c) - konsistent mit dem übrigen
+						 * Abbruch-Mechanismus, auch wenn hier noch kein
+						 * Hintergrund-Task für diese Seite läuft. Diese
+						 * Seite wurde noch nicht angefasst (weder
+						 * buf_content noch Task angelegt), daher reicht ein
+						 * direktes break. */
+						if (!g_atomic_int_get(info_window->cancel)) {
+							info_window_set_message(info_window, "...abgebrochen");
+							g_atomic_int_set(info_window->cancel, 1);
+						}
+
+						break;
+					}
+
 					mode = (res == GTK_RESPONSE_YES) ?
 							SOND_OCR_MODE_FORCE : SOND_OCR_MODE_CHECK;
 
