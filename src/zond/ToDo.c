@@ -524,19 +524,54 @@
    erst danach (an allen drei Ausstiegspunkten dieser Seite: content_
    changed==FALSE, buf_content_new fehlt, normales Ende) wird abgebrochen.
 
- - viewer_render.c: drei noch nicht selbst verifizierte Punkte -
-   unsynchronisierter Zugriff auf pv->arr_rendered (Lock nur bei nicht-
-   leerer Pool-Queue); fz_context wird in viewer_render_page() nur im
-   Erfolgsfall gedroppt, auf allen fünf Fehlerpfaden nicht;
-   cb_viewer_render_page_for_printing() liest display_list ohne
-   Erfolgsprüfung - NULL-Deref bei fehlgeschlagenem Rendern statt
-   Fehlerdialog.
+ - viewer_render.c: drei Punkte -
+
+   1) unsynchronisierter Zugriff auf pv->arr_rendered (Lock nur bei nicht-
+      leerer Pool-Queue). Verifiziert - g_thread_pool_unprocessed() zählt
+      nur noch nicht gestartete Tasks, nicht gerade laufende (bis zu 3
+      parallele Worker); bei leerer Warteschlange, aber laufendem Worker
+      liest/verändert viewer_render_check() (Idle-Callback, Hauptthread)
+      pv->arr_rendered ohne Lock, während der Worker unter Lock anhängt -
+      Daten-Race auf einem GArray.
+      BEHOBEN (26.08.2026): Optimierung gestrichen, viewer_render_check()
+      ruft viewer_render_transfer_rendered() jetzt immer mit Lock auf.
+      Der Overhead eines unumkämpften Mutex ist gegenüber dem Risiko
+      vernachlässigbar.
+
+   2) fz_context wird in viewer_render_page() nur im Erfolgsfall gedroppt,
+      auf allen fünf Fehlerpfaden nicht.
+      BEHOBEN (26.08.2026): fz_drop_context(ctx) vor jedem der fünf
+      return-Fehlerpfade ergänzt (Laden, Display-List, Stext, Pixmap,
+      Thumb). Der ganz erste Fehlerpfad (fz_clone_context() selbst
+      schlägt fehl) braucht keinen Drop, da dort noch gar kein ctx
+      existiert.
+
+   3) cb_viewer_render_page_for_printing() liest display_list ohne
+      Erfolgsprüfung - NULL-Deref bei fehlgeschlagenem Rendern statt
+      Fehlerdialog.
+      BEHOBEN (26.08.2026): direkt nach viewer_render_wait_for_transfer()
+      wird jetzt geprüft, ob pdf_document_page->display_list tatsächlich
+      gesetzt ist (die Funktion selbst meldet Fehlschläge nicht nach
+      außen, nur LOG_WARN intern) - wenn nicht, derselbe display_message()
+      -Fehlerdialog wie bei den übrigen Fehlerpfaden dieser Funktion,
+      statt fz_run_display_list() mit NULL aufzurufen (Nullpointer-Zugriff
+      in mupdf, läuft nicht über fz_throw() und wird daher auch nicht von
+      fz_try/fz_catch abgefangen).
 
  - document.c, get_pdf_pos(): zweiter, unabhängiger else-Zweig
    überschreibt ges_bis_seite nochmal mit der Gesamtseitenzahl, obwohl nur
    im ersten else (leeres anbindung_ges) korrekt - kann beim Sprung zu
-   einer Position die falsche (zu späte) Seite ansteuern. Noch nicht
-   verifiziert/behoben.
+   einer Position die falsche (zu späte) Seite ansteuern.
+   VERIFIZIERT UND BEHOBEN (26.08.2026): bestätigt - Copy-Paste-Fehler aus
+   dem ges-Zweig. War anbindung_ges nicht leer (z.B. Anbindung Seite 5-10
+   einer Datei) und anbindung_node leer, überschrieb der zweite else-Zweig
+   das bereits korrekt gesetzte ges_bis_seite (10) fälschlich mit der
+   Gesamtseitenzahl des ganzen Dokuments - beim Sprung ans Ende der
+   Anbindung (node_bis_seite==0 && node_bis_index==0-Fallback) landete man
+   dadurch auf der letzten Seite des gesamten PDFs statt am Ende der
+   Anbindung. Fix: zweiten else-Zweig ersatzlos gestrichen - die node_*-
+   Variablen behalten bei leerem anbindung_node ohnehin schon korrekt
+   ihren Default-Wert 0 aus der Deklaration.
 
  - stand_alone.c, cb_datei_oeffnen(): lehnt Anwender beim Öffnen einer
    neuen Datei trotz ungespeicherter Änderungen "trotzdem schließen" ab,

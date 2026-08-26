@@ -52,8 +52,15 @@ static PdfPos get_pdf_pos(ZondPdfDocument* zpdfd, gboolean was_opened,
 		node_bis_seite = anbindung_node->bis.seite;
 		node_bis_index = anbindung_node->bis.index;
 	}
-	else
-		ges_bis_seite = zond_pdf_document_get_number_of_pages(zpdfd) - 1;
+	/* War anbindung_node leer, bleiben node_von_seite/node_von_index/
+	 * node_bis_seite/node_bis_index korrekt auf ihrem Default 0 (s.
+	 * Deklarationen oben) - kein else nötig. Hier stand fälschlich
+	 * (Copy-Paste aus dem ges-Zweig oben) nochmal eine Zuweisung an
+	 * ges_bis_seite, die dessen bereits korrekt gesetzten Wert (Ende der
+	 * tatsächlichen anbindung_ges, falls diese nicht leer war) wieder mit
+	 * der Gesamtseitenzahl des ganzen Dokuments überschrieben hat - führte
+	 * beim Sprung ans Ende einer Anbindung (Zeile ~71: node_bis_seite == 0
+	 * && node_bis_index == 0) zur falschen (zu späten) Seite. */
 
 	if (!end) {
 		pdf_pos.seite = node_von_seite - ges_von_seite;
