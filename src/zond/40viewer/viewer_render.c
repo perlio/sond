@@ -212,14 +212,17 @@ void viewer_render_response_free(gpointer data) {
 }
 
 static gboolean viewer_render_check(gpointer data) {
-	gboolean protect = FALSE;
-
 	PdfViewer *pv = (PdfViewer*) data;
 
-	if (pv->thread_pool_page
-			&& g_thread_pool_unprocessed(pv->thread_pool_page) != 0)
-		protect = TRUE;
-	viewer_render_transfer_rendered(pv, protect);
+	/* Immer mit Lock: g_thread_pool_unprocessed() zählt nur noch nicht
+	 * gestartete Tasks in der Warteschlange, nicht die bis zu 3 parallel
+	 * laufenden Worker (g_thread_pool_new(..., 3, ...)). Bei leerer
+	 * Warteschlange, aber (noch) laufendem Worker, würde ohne Lock
+	 * pv->arr_rendered hier (Hauptthread) gleichzeitig mit dem unter Lock
+	 * anhängenden Worker (viewer_render_page()) gelesen/verändert -
+	 * Daten-Race auf einem GArray. Der Overhead eines unumkämpften Mutex
+	 * ist demgegenüber vernachlässigbar. */
+	viewer_render_transfer_rendered(pv, TRUE);
 
 	if (pv->count_active_thread == 0) {
 		pv->idle_source = 0;
@@ -588,6 +591,8 @@ void viewer_render_page(gpointer data, gpointer user_data) {
 			g_array_append_val(pv->arr_rendered, render_response);
 			g_mutex_unlock(&pv->mutex_arr_rendered);
 
+			fz_drop_context(ctx);
+
 			return;
 		}
 	}
@@ -603,6 +608,8 @@ void viewer_render_page(gpointer data, gpointer user_data) {
 			g_mutex_lock(&pv->mutex_arr_rendered);
 			g_array_append_val(pv->arr_rendered, render_response);
 			g_mutex_unlock(&pv->mutex_arr_rendered);
+
+			fz_drop_context(ctx);
 
 			return;
 		}
@@ -620,6 +627,8 @@ void viewer_render_page(gpointer data, gpointer user_data) {
 			g_mutex_lock(&pv->mutex_arr_rendered);
 			g_array_append_val(pv->arr_rendered, render_response);
 			g_mutex_unlock(&pv->mutex_arr_rendered);
+
+			fz_drop_context(ctx);
 
 			return;
 		}
@@ -639,6 +648,8 @@ void viewer_render_page(gpointer data, gpointer user_data) {
 			g_array_append_val(pv->arr_rendered, render_response);
 			g_mutex_unlock(&pv->mutex_arr_rendered);
 
+			fz_drop_context(ctx);
+
 			return;
 		}
 	}
@@ -656,6 +667,8 @@ void viewer_render_page(gpointer data, gpointer user_data) {
 			g_mutex_lock(&pv->mutex_arr_rendered);
 			g_array_append_val(pv->arr_rendered, render_response);
 			g_mutex_unlock(&pv->mutex_arr_rendered);
+
+			fz_drop_context(ctx);
 
 			return;
 		}
@@ -882,6 +895,23 @@ static void cb_viewer_render_page_for_printing(GtkPrintOperation *op,
 
 	viewer_render_thread(pdfv, page_nr);
 	viewer_render_wait_for_transfer(viewer_page->pdf_document_page);
+
+	/* viewer_render_wait_for_transfer() wartet nur, bis der Render-Task
+	 * fertig ist (erfolgreich oder nicht) - ein Fehlschlag wird dabei nur
+	 * intern geloggt (LOG_WARN in viewer_render_transfer_rendered()), aber
+	 * nicht nach hier zurückgemeldet. Ohne diese Prüfung würde
+	 * fz_run_display_list() unten mit display_list == NULL aufgerufen -
+	 * ein direkter Nullpointer-Zugriff tief in mupdf, der NICHT über
+	 * fz_throw() läuft und damit auch vom umgebenden fz_try/fz_catch nicht
+	 * abgefangen wird (Absturz statt Fehlerdialog). */
+	if (!viewer_page->pdf_document_page->display_list) {
+		gchar *errmsg = g_strdup_printf("Seite Nr. %i", page_nr);
+		display_message(pdfv->vf, "Fehler Drucken ", errmsg,
+				" -\n\nSeite konnte nicht gerendert werden", NULL);
+		g_free(errmsg);
+
+		return;
+	}
 
 	width = gtk_print_context_get_width(context);
 	height = gtk_print_context_get_height(context);
