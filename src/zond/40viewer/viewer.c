@@ -649,7 +649,7 @@ void viewer_handle_layout_motion_notify(PdfViewer* pv, GdkEvent *event) {
 							range_old);
 					viewer_render_wait_for_transfer(viewer_page_old_range->pdf_document_page);
 
-					if (!(viewer_page->thread & 2))
+					if (!(viewer_page_old_range->thread & 2))
 						continue;
 
 					gtk_widget_queue_draw(
@@ -770,7 +770,7 @@ gint viewer_handle_button_press(PdfViewer* pv,
 		pv->x = event->button.x_root;
 
 		pv->von_alt = pdf_punkt.seite;
-		pv->von_alt = pdf_punkt.seite;
+		pv->bis_alt = pdf_punkt.seite;
 
 		gtk_widget_set_sensitive(pv->item_copy, FALSE);
 

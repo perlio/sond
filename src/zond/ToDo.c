@@ -381,12 +381,32 @@
 
  - viewer.c (Zeile 772-773): pv->von_alt wird zweimal gesetzt, bis_alt
    bleibt auf altem Wert - Copy-Paste-Fehler, potenziell Index außerhalb
-   arr_pages beim Dokumentwechsel. Noch nicht behoben.
+   arr_pages beim Dokumentwechsel.
+   BEHOBEN (26.08.2026): zweite Zuweisung war ein Copy-Paste-Fehler von
+   pv->von_alt = pdf_punkt.seite; statt pv->bis_alt = pdf_punkt.seite;.
+   von_alt/bis_alt werden sonst nur als Paar benutzt (viewer.c, Zeile
+   659-660: pv->von_alt = von.seite; pv->bis_alt = bis.seite;) und
+   treiben ungeprüft eine Schleife über pv->arr_pages
+   (viewer_handle_layout_motion_notify(), Zeile 643 ff.) - ein stehen
+   gebliebenes altes bis_alt aus einem vorher in demselben pv-Fenster
+   angezeigten, längeren Dokument hätte bei der nächsten Mausbewegung zu
+   einem Zugriff außerhalb arr_pages führen können. Fix: Zeile 773 ->
+   pv->bis_alt = pdf_punkt.seite;. Vor der Umsetzung noch einmal separat
+   (eigene Re-Analyse + unabhängiger Subagent) verifiziert.
 
  - viewer.c (Zeile 652): prüft viewer_page->thread (Seite unterm
    Mauszeiger) statt viewer_page_old_range->thread (Seite mit der
    wegzuräumenden alten Markierung) - alte Highlights bleiben ggf. stehen.
-   Noch nicht behoben.
+   BEHOBEN (26.08.2026): Bit 2 von ViewerPageNew->thread bedeutet "image
+   gerendert" (Kommentar viewer_render.c:160) und wird überall sonst im
+   Code auf genau der Struct-Instanz geprüft, deren image_page angefaßt
+   wird (z.B. viewer.c:665, viewer_annot.c:61) - hier aber wurde
+   viewer_page (Hover-Seite, äußerer Scope) statt
+   viewer_page_old_range (die Seite, deren image_page unmittelbar danach
+   per gtk_widget_queue_draw() neu gezeichnet wird) geprüft. Fix: Zeile
+   652 -> if (!(viewer_page_old_range->thread & 2)) continue;. Vor der
+   Umsetzung noch einmal separat (eigene Re-Analyse + unabhängiger
+   Subagent) verifiziert.
 
  - viewer.c, viewer_springen_zu_pos_pdf()/viewer_abfragen_pdf_punkt(): kein
    Guard für arr_pages->len == 0, obwohl an anderer Stelle im selben File
