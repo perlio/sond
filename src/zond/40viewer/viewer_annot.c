@@ -343,7 +343,6 @@ gint viewer_annot_handle_release_clicked_annot(PdfViewer* pv,
 		JournalEntry entry = { 0, };
 		GArray* arr_journal = NULL;
 		gint rc = 0;
-		GError* error = NULL;
 		pdf_annot *pdf_annot = NULL;
 		fz_rect rect_old = fz_empty_rect;
 
@@ -353,8 +352,12 @@ gint viewer_annot_handle_release_clicked_annot(PdfViewer* pv,
 			viewer_render_wait_for_transfer(
 					viewer_page->pdf_document_page);
 
-			if (!(viewer_page->pdf_document_page->thread & 2))
-				return TRUE;
+			if (!(viewer_page->pdf_document_page->thread & 2)) {
+				if (error) *error = g_error_new(g_quark_from_static_string("zond"), 0,
+						"%s\nSeite noch nicht fertig gerendert", __func__);
+
+				return -1;
+			}
 		}
 
 		ctx = zond_pdf_document_get_ctx(
@@ -367,10 +370,11 @@ gint viewer_annot_handle_release_clicked_annot(PdfViewer* pv,
 		if (!pdf_annot) {
 			zond_pdf_document_mutex_unlock(
 					viewer_page->pdf_document_page->document);
-			display_message(pv->vf, "Fehler - Annotation editieren\n\n",
-					"Bei Aufruf pdf_annot_get_pdf_annot", NULL);
 
-			return TRUE;
+			if (error) *error = g_error_new(g_quark_from_static_string("zond"), 0,
+					"%s\nBei Aufruf pdf_annot_get_pdf_annot", __func__);
+
+			return -1;
 		}
 		//clicked_annot->rect wurde beim Ziehen laufend angepaßt
 		//im JournalEntry soll der bisherige Zustand gespeichert werden
@@ -380,11 +384,10 @@ gint viewer_annot_handle_release_clicked_annot(PdfViewer* pv,
 		fz_always(ctx)
 			zond_pdf_document_mutex_unlock(viewer_page->pdf_document_page->document);
 		fz_catch(ctx) {
-			display_message(pv->vf, "Fehler Annot ändern-\n\n",
-					"Bei Aufruf pdf_annot_rect: ", fz_caught_message(ctx),
-					NULL);
+			if (error) *error = g_error_new(g_quark_from_static_string("mupdf"), fz_caught(ctx),
+					"%s\nBei Aufruf pdf_annot_rect: %s", __func__, fz_caught_message(ctx));
 
-			return TRUE;
+			return -1;
 		}
 
 		//neues rect kommt ja schon so an, aber clamp machen
@@ -401,18 +404,16 @@ gint viewer_annot_handle_release_clicked_annot(PdfViewer* pv,
 			do {
 				if (viewer_annot_check_diff(dd, viewer_page->pdf_document_page,
 						rect_old, pv->clicked_annot->annot.annot_text.rect)) {
-					display_message(pv->vf,
-							"Fehler - Annotation verschieben\n\n",
-							"Annotation würde in geöffnerem Abschnitt entfernt oder hinzugefügt\n\n"
-							"Bitte Abschnitt schließen und erneut versuchen",
-							NULL);
-
 					pv->clicked_annot->annot.annot_text.rect = rect_old;
 
 					//Fenster hervorholen
 					gtk_window_present(GTK_WINDOW(pv_loop->vf));
 
-					return TRUE;
+					if (error) *error = g_error_new(g_quark_from_static_string("zond"), 0,
+							"%s\nAnnotation würde in geöffnetem Abschnitt entfernt oder hinzugefügt\n\n"
+							"Bitte Abschnitt schließen und erneut versuchen", __func__);
+
+					return -1;
 				}
 
 			} while ((dd = dd->next) != NULL);
@@ -421,16 +422,13 @@ gint viewer_annot_handle_release_clicked_annot(PdfViewer* pv,
 		zond_pdf_document_mutex_lock(
 				viewer_page->pdf_document_page->document);
 		rc = viewer_annot_do_change(ctx, pdf_annot, viewer_page->pdf_document_page->rotate,
-				pv->clicked_annot->annot, &error);
+				pv->clicked_annot->annot, error);
 		zond_pdf_document_mutex_unlock(
 				viewer_page->pdf_document_page->document);
 		if (rc) {
-			display_message(pv->vf, "Fehler Annot ändern-\n\n",
-					error->message, NULL);
-			g_error_free(error);
 			pv->clicked_annot->annot.annot_text.rect = rect_old;
 
-			return TRUE;
+			return -1;
 		}
 
 		//ins Journal
