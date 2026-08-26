@@ -57,7 +57,16 @@ static void pv_activate_widgets(PdfViewer *pv, gboolean activ) {
 	return;
 }
 
-static void pv_schliessen_datei(PdfViewer *pv) {
+/* Rückgabe 0: Datei wurde tatsächlich geschlossen (pv->dd/arr_pages
+ * zurückgesetzt). Rückgabe -1: Anwender hat "Trotzdem schließen?" nach
+ * gescheitertem Speichern abgelehnt - die Datei bleibt bewußt unverändert
+ * geöffnet (pv->dd zeigt weiter auf das alte Dokument mit den nicht
+ * gespeicherten Änderungen). Aufrufer, die danach noch eine neue Datei in
+ * denselben pv laden (cb_datei_oeffnen()), MÜSSEN diesen Rückgabewert
+ * prüfen - sonst überschreibt viewer_display_document() pv->dd
+ * ungeprüft, und die gerade eben geschützten ungespeicherten Änderungen
+ * gehen doch verloren. */
+static gint pv_schliessen_datei(PdfViewer *pv) {
 	gint rc = 0;
 	GError *error = NULL;
 
@@ -74,7 +83,7 @@ static void pv_schliessen_datei(PdfViewer *pv) {
 				g_error_free(error);
 
 				if (rc == GTK_RESPONSE_NO)
-					return;
+					return -1;
 			}
 		}
 
@@ -112,7 +121,7 @@ static void pv_schliessen_datei(PdfViewer *pv) {
 
 	pv_activate_widgets(pv, FALSE);
 
-	return;
+	return 0;
 }
 
 static gint pv_oeffnen_datei(PdfViewer *pv, gchar const* path, GError**error) {
@@ -160,8 +169,14 @@ void cb_datei_oeffnen(GtkWidget *item, gpointer data) {
 	if (!filename)
 		return;
 
-	if (pv->dd)
-		pv_schliessen_datei(pv);
+	if (pv->dd) {
+		rc = pv_schliessen_datei(pv);
+		if (rc) { //Anwender hat "Trotzdem schließen?" abgelehnt - altes Dokument bleibt geöffnet
+			g_free(filename);
+
+			return;
+		}
+	}
 	rc = pv_oeffnen_datei(pv, filename, &error);
 	g_free(filename);
 	if (rc) {
@@ -186,12 +201,15 @@ static void open_app(GtkApplication *app, gpointer files, gint n_files,
 
 	gtk_application_add_window(app, GTK_WINDOW(pv->vf));
 
-	gchar *uri = g_file_get_uri(((GFile**)files)[0]);
-	gchar *uri_unesc = g_uri_unescape_string(uri, NULL);
-	g_free(uri);
+	gchar *filename = g_file_get_path(((GFile**)files)[0]);
+	if (!filename) {
+		display_message(pv->vf, "Fehler - Datei öffnen:\n",
+				"Kein lokaler Dateipfad ermittelbar", NULL);
+		return;
+	}
 
-	rc = pv_oeffnen_datei(pv, uri_unesc + 8, &error);
-	g_free(uri_unesc);
+	rc = pv_oeffnen_datei(pv, filename, &error);
+	g_free(filename);
 	if (rc) {
 		display_message(pv->vf, "Fehler - Datei öffnen:\n", error->message, NULL);
 		g_error_free(error);
