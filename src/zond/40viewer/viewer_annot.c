@@ -304,8 +304,17 @@ static gboolean viewer_annot_check_diff(DisplayedDocument* dd,
 	if (pdf_document_page != dd->zpdfd_part->first_page &&
 			pdf_document_page != dd->zpdfd_part->last_page) return FALSE;
 
-	crop.y0 = dd->zpdfd_part->first_index;
-	crop.y1 = dd->zpdfd_part->last_index;
+	/* Obere Grenze (first_index) nur, wenn diese Seite die ERSTE des dd
+	 * ist, untere (last_index) nur, wenn sie die LETZTE ist - bei einer
+	 * einseitigen dd (first_page == last_page == diese Seite) treffen
+	 * beide Bedingungen zu, wie schon bisher. Ist die Seite nur eine der
+	 * beiden Rollen, bleibt die jeweils andere Grenze auf dem vollen
+	 * Seitenrand (crop ist oben schon mit pdf_document_page->rect
+	 * vorbelegt). */
+	if (pdf_document_page == dd->zpdfd_part->first_page)
+		crop.y0 = dd->zpdfd_part->first_index;
+	if (pdf_document_page == dd->zpdfd_part->last_page)
+		crop.y1 = dd->zpdfd_part->last_index;
 
 	if (fz_is_valid_rect(fz_intersect_rect(rect_old, crop)) !=
 			fz_is_valid_rect(fz_intersect_rect(rect_new, crop)))

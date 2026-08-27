@@ -772,8 +772,14 @@
    hinaus, aber völlig legitim), meldet viewer_annot_check_diff()
    fälschlich eine Sichtbarkeitsänderung - die Verschiebung wird
    zurückgenommen und ein irreführender Fehlerdialog ("Annotation würde in
-   geöffnetem Abschnitt entfernt oder hinzugefügt") gezeigt. Noch nicht
-   behoben.
+   geöffnetem Abschnitt entfernt oder hinzugefügt") gezeigt.
+   BEHOBEN (26.08.2026): crop.y0 wird jetzt nur noch gesetzt, wenn
+   pdf_document_page == first_page, crop.y1 nur, wenn ==last_page - sonst
+   bleibt die jeweils andere Grenze auf der Vorbelegung mit dem vollen
+   Seitenrand (crop = pdf_document_page->rect) stehen. Bei einer
+   einseitigen dd (first_page==last_page) treffen wie bisher beide
+   Bedingungen zu, unverändertes Verhalten. Spiegelt den kurz zuvor
+   gemachten Fix an viewer_entry_in_dd() (viewer_save.c).
 
  - viewer_annot.c, viewer_annot_create_markup() (Zeile ~686-687): Rückgabe
    TRUE (= Fehler laut Konvention) beim "Seite noch nicht fertig gerendert"
