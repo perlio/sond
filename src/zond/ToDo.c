@@ -637,5 +637,276 @@
    noch nicht angefasst (kein Content-Stream gelesen, kein Task angelegt),
    ein direktes break ist daher unproblematisch.
 
+ Bugs (Review 26.08.2026, Runde 2 - Viewer-Gesamtdurchsicht per Subagenten,
+ die wichtigsten/überraschendsten Funde vor Übernahme in diese Liste am
+ Code nachgeprüft - Konfidenz einzeln vermerkt):
+
+ - viewer.c, viewer_handle_button_press() (Zeile ~821): prüft vor Aufruf
+   von viewer_on_text() "thread & 4" statt "thread & 8" (verifiziert -
+   viewer_set_cursor() an der praktisch identischen Stelle, Zeile 492,
+   prüft korrekt "& 8"). Bit 4 zeigt nur an, daß die display_list fertig
+   ist, Bit 8 erst, daß stext_page (von viewer_on_text() zwingend
+   gebraucht) fertig ist. Scheitert der stext-Render-Schritt für eine
+   Seite, bleibt thread bei 6 statt 14 stehen (viewer_render_transfer_
+   rendered() in viewer_render.c) - stext_page ist dann NULL, während Bit 4
+   schon gesetzt ist. viewer_on_text() dereferenziert dann NULL->
+   first_block - roher NULL-Zugriff, nicht über fz_throw, von keinem
+   fz_try/fz_catch abfangbar - Absturz bei einem einzelnen Linksklick auf
+   eine solche Seite.
+   BEHOBEN (26.08.2026): "thread & 4" auf "thread & 8" korrigiert, analog
+   zu viewer_set_cursor() an der praktisch identischen Stelle.
+
+ - viewer.c, viewer_handle_layout_motion_notify() (Zeile ~603/638):
+   Bedingung fürs Neuzeichnen während Text-Drag prüft nur
+   "pdf_document_page->thread & 8" (stext fertig), zeichnet dann aber
+   viewer_page->image_page. image_page wird erst mit viewer_page->thread &
+   2 (anderes Struct, anderes Flag) angelegt. viewer_render_stext_page_
+   fast() (aus der Textsuche heraus aufgerufen, viewer_search.c:126) kann
+   Bit 8 synchron setzen, ohne image_page anzulegen. Zieht man während/nach
+   einer solchen Suche eine Textmarkierung über eine so vorbereitete Seite,
+   wird gtk_widget_queue_draw(NULL) aufgerufen - GLib-"critical", unter
+   G_DEBUG=fatal-criticals/-warnings (in Debug-Umgebungen üblich) fatal.
+   Noch nicht behoben.
+
+ - viewer.c, viewer_handle_layout_motion_notify() (PDF_ANNOT_TEXT-Zweig,
+   Zeile ~665-679): beim Ziehen einer Text-Annotation wird für die
+   Bereitschaftsprüfung und fürs Neuzeichnen die Seite unter dem aktuellen
+   Mauszeiger benutzt (viewer_page), nicht die Seite, auf der die gezogene
+   Annotation tatsächlich liegt (pv->clicked_annot->annot). Dieselbe
+   Fehlerklasse wie der schon behobene Bug bei Zeile 652, hier an einer
+   zweiten, noch unbehobenen Stelle. Wandert die Maus beim Ziehen über eine
+   Seitengrenze, wird die falsche Seite neu gezeichnet - die Annotation
+   hängt visuell fest, bis ein unabhängiges Neuzeichnen die richtige Seite
+   erfasst. Noch nicht behoben.
+
+ - viewer.c, viewer_handle_button_press() (Anbindung "umdrehen", Zeile
+   ~879-882, nur #ifndef VIEWER): "page_pdf >= pv->anbindung.von.seite" ist
+   bei gleicher Seite schon für sich allein wahr, die zusätzliche
+   punktgenau/y-Prüfung kann das Ergebnis dann nicht mehr ändern - der
+   else-Zweig ("umdrehen") wird bei gleicher Seite nie erreicht. Im
+   punktgenauen (Shift-Klick-)Modus: setzt man den "bis"-Punkt auf
+   derselben Seite oberhalb (kleinere y) des schon gesetzten "von"-Punkts,
+   entsteht trotzdem eine Anbindung mit von.index > bis.index statt daß
+   von/bis vertauscht werden (Auswirkung auf zond_anbindung_erzeugen() nicht
+   mitgeprüft). Noch nicht behoben.
+
+ - viewer_save.c, viewer_do_save_dd(), JOURNAL_TYPE_ANNOT_CHANGED-Zweig
+   (Zeile ~442-459, verifiziert): pdf_document_page_annot_get_index()
+   liefert die rohe (Karteileichen-inklusive) Position in arr_annots - für
+   pdf_document_page_annot_get_pdf_annot() auf der LIVE-Seite richtig, da
+   dort nie physisch gelöscht wird (nur Hidden-Flag). Hier wird derselbe
+   rohe Index aber gegen pdf_page verwendet - eine frisch neu geöffnete
+   Kopie der Datei vom letzten Speicherstand. Wurde bei einem früheren
+   Speichern schon eine Annotation vor dieser im arr_annots-Index physisch
+   gelöscht (pdf_delete_annot(), Zeile ~462-506), hat die neu geöffnete
+   Datei weniger Annots als arr_annots Einträge. pdf_annot_lookup_index()
+   (sond_pdf_helper.c:1040, verifiziert) prüft dabei keine Grenzen - läuft
+   über das Ende der echten Liste hinaus einfach auf NULL. Der Rückgabewert
+   wird hier ungeprüft an viewer_annot_do_change() weitergereicht, das dann
+   pdf_set_annot_rect()/pdf_set_annot_contents()/pdf_update_annot() auf
+   NULL aufruft - roher NULL-Zugriff in MuPDF, nicht fz_try/fz_catch-fähig.
+   Trigger: Seite mit zwei Annots A (Index 0) und B (Index 1); A löschen
+   und speichern (A bleibt für immer als Karteileiche in arr_annots an
+   Index 0, physische Datei hat jetzt nur noch B); später B in derselben
+   Sitzung bearbeiten und erneut speichern - Absturz beim zweiten
+   Speichern. Noch nicht behoben.
+
+ - viewer_save.c, viewer_entry_in_dd() (Zeile ~78-99): bei einem dd, dessen
+   erste UND letzte Seite dieselbe Seite ist (einseitiger Ausschnitt, oben
+   UND unten beschnitten - z.B. Zitat mitten auf einer Seite), greift immer
+   nur der erste if-Zweig (first_page-Vergleich); first_index wird als
+   obere Grenze verwendet, last_index (untere Grenze) dabei komplett
+   ignoriert (rect.y1 = ganze Seite statt last_index). Journal-Einträge
+   unterhalb von last_index auf dieser Seite werden fälschlich als "im dd
+   sichtbar" gewertet - kann viewer_reset_dirty_dds() fälschlich "dirty"
+   setzen und/oder viewer_do_save_dd()s Journal-Aufräumschleife einen
+   Eintrag zu früh/falsch zuordnen aus arr_journal entfernen. Noch nicht
+   behoben.
+
+ - viewer_annot.c, viewer_annot_check_diff() (Zeile ~299-315): setzt
+   crop.y0/y1 immer auf first_index/last_index, unabhängig davon, ob die
+   geprüfte Seite nur first_page oder nur last_page eines mehrseitigen dd
+   ist. Für eine Seite, die nur first_page ist, sollte unten keine Grenze
+   gelten (Inhalt geht auf Folgeseiten weiter), für eine Seite, die nur
+   last_page ist, oben keine - hier wird aber immer die jeweils andere,
+   fachlich irrelevante Grenze mit reingemischt. Verschiebt ein Anwender
+   eine Text-Annotation auf der ersten Seite eines mehrseitigen dd
+   innerhalb der Seite nach unten (weit über last_index der LETZTEN Seite
+   hinaus, aber völlig legitim), meldet viewer_annot_check_diff()
+   fälschlich eine Sichtbarkeitsänderung - die Verschiebung wird
+   zurückgenommen und ein irreführender Fehlerdialog ("Annotation würde in
+   geöffnetem Abschnitt entfernt oder hinzugefügt") gezeigt. Noch nicht
+   behoben.
+
+ - viewer_annot.c, viewer_annot_create_markup() (Zeile ~686-687): Rückgabe
+   TRUE (= Fehler laut Konvention) beim "Seite noch nicht fertig gerendert"
+   -Abbruch, ohne *error zu setzen - derselbe Bug, der bei
+   viewer_annot_handle_release_clicked_annot() schon behoben wurde (s.o.),
+   hier an einer weiteren, noch unbehobenen Stelle. Jeder Aufrufer, der der
+   GError-Konvention folgt (rc!=0 -> error->message lesen) dereferenziert
+   ein noch-NULL GError*. Noch nicht behoben.
+
+ - viewer_annot.c, viewer_annot_delete() (Zeile ~97): setzt *error = ...
+   ohne vorheriges "if (error)" - jede andere Fehlerstelle in dieser
+   Funktion und in viewer_annot_handle_release_clicked_annot() prüft das
+   korrekt. Ruft ein Aufrufer (laut Konvention zulässig) mit error==NULL
+   auf und schlägt genau dieser Zweig fehl (pdf_annot nicht auflösbar),
+   Absturz. Noch nicht behoben.
+
+ - viewer_annot.c, viewer_annot_do_change() (TEXT-Zweig, Zeile ~177-215,
+   niedrigere Konfidenz): pdf_set_annot_contents()/pdf_set_annot_rect() und
+   pdf_update_annot() laufen in zwei getrennten fz_try-Blöcken. Schlägt nur
+   der zweite (pdf_update_annot()) fehl, geben beide Aufrufer die
+   In-Memory-Annot auf den alten Stand zurück und legen keinen
+   Journal-Eintrag an - aber die erste fz_try hat das PDF-Objekt (Rect/
+   Contents) vermutlich schon direkt verändert. Möglicher Fall von "physisch
+   schon passiert, Buchführung sagt nein" - dieselbe Fehlerklasse wie der
+   schon für viewer_annot_do_create() behobene Bug, hier für den
+   Änderungs- statt den Erzeugungspfad, nicht abschließend gegen MuPDFs
+   internes Commit-Verhalten verifiziert. Noch nicht geprüft.
+
+ - viewer_render.c, viewer_close_thread_pool_and_transfer(): g_thread_pool_
+   free(pool, immediate=TRUE, wait_=TRUE) verwirft wartende (noch nicht an
+   einen Worker vergebene) Tasks stillschweigend - für jeden gibt es nie
+   ein RenderResponse in arr_rendered, aber pv->count_active_thread wurde
+   für jeden schon beim Einreihen hochgezählt (viewer_render_thread()) und
+   wird nur beim tatsächlichen Empfang in arr_rendered wieder runtergezählt
+   (viewer_render_transfer_rendered()). Bei mehr als 3 gleichzeitig
+   sichtbaren/angestoßenen Seiten (Pool-Größe 3) und einem Aufruf dieser
+   Funktion währenddessen (z.B. seiten_drehen()/seiten_cb_loesche_seite() in
+   seiten.c, die den pv danach offen lassen) bleibt count_active_thread
+   dauerhaft über 0 - viewer_render_check()s Idle-Quelle terminiert nie
+   mehr, läuft für den Rest der Sitzung mit voller Rate weiter (ein
+   CPU-Kern dauerhaft ausgelastet). Noch nicht behoben.
+
+ - viewer_render.c, viewer_render_stext_page_from_page() (Zeile ~453-461):
+   im fz_catch-Zweig fehlt fz_drop_stext_page(ctx, stext_page) - die
+   Parallel-Funktion viewer_render_stext_page_from_display_list() macht das
+   in ihrem eigenen fz_catch korrekt. Wirft pdf_run_page() bei einer
+   beschädigten Seite eine Exception, leakt ein fz_stext_page pro
+   Fehlversuch - kann sich bei Retries (viewer_render_stext_page_fast() wird
+   z.B. bei jeder erneuten Suche/jedem Sprung auf dieselbe Seite erneut
+   aufgerufen) aufsummieren. Noch nicht behoben.
+
+ - viewer_search.c, viewer_handle_text_search() (Überlauf-Prüfung, Zeile
+   ~441-472): pdf_pos.index steht an dieser Stelle immer schon fest auf 0
+   (vorwärts) bzw. EOP=99999 (rückwärts) - die Prüfung "pdf_pos.index <=
+   pdf_punkt.punkt.y" (bzw. >=) ist dadurch für jede realistische
+   Koordinate immer wahr, der else-Zweig (der die Ausgangsseite noch ein
+   zweites Mal vollständig durchsuchen würde) ist toter Code. Sucht man
+   nach einem Begriff, der nur auf der aktuell sichtbaren Seite, aber
+   OBERHALB (vorwärts) bzw. UNTERHALB (rückwärts) der aktuellen
+   Scroll-Position vorkommt, meldet die Suche fälschlich "Kein Treffer",
+   obwohl der Treffer sichtbar auf der Seite steht - reproduzierbar im
+   normalen "Begriff eingeben, Weiter/Zurück klicken"-Ablauf. Noch nicht
+   behoben.
+
+ - seiten.c, cb_pv_seiten_ocr() (Zeile ~353-361): scheitert sond_ocr_pool_
+   new() (z.B. tessdata-Verzeichnis fehlt), wird sofort zurückgekehrt, ohne
+   info_window_close() aufzurufen. info_window_open() hat den Dialog aber
+   schon sichtbar/modal geschaltet und Abbrechen-Button/delete-event fest
+   mit info_window->cancel verdrahtet - das zeigt auf die lokale Variable
+   "cancel" dieser Funktion, deren Stack-Frame nach dem return nicht mehr
+   existiert. Klickt der Anwender danach Abbrechen oder schließt das
+   Fenster per "X", schreibt der Handler in bereits freigegebenen
+   Stack-Speicher. Außerdem bleiben GtkDialog und InfoWindow-Struct
+   dauerhaft undestroyed/ungefreed und das (modale) Fenster blockiert den
+   Viewer. Noch nicht behoben.
+
+ - seiten.c, cb_pv_seiten_ocr() (Zeile ~528): pdf_drop_obj(ctx, font_ref)
+   unbedingt am Ende, obwohl font_ref auf drei Wegen gesetzt werden kann -
+   pdf_new_indirect()/pdf_put_sond_font() liefern eine eigene (zu
+   droppende) Referenz, pdf_get_sond_font() (per pdf_dict_gets(), wie
+   sonst im Projekt üblich) aber eine GELIEHENE. Findet pdf_get_sond_font()
+   eine bereits im Dokument vorhandene SOND-Schriftart (z.B. weil die PDF
+   in einer früheren Sitzung schon OCRt und neu geöffnet wurde, bevor
+   zond_pdf_document_get_ocr_num() den Font neu gecacht hat), dekrementiert
+   dieser Drop eine fremde Referenz ohne vorherigen eigenen Keep - Gefahr
+   eines Use-after-free auf das Font-Objekt beim nächsten Zugriff (Rendern/
+   Speichern). Noch nicht behoben.
+
+ - seiten.c, seiten_anbindung()/seiten_anbindung_int() (Zeile ~860-927):
+   beide Aufrufe übergeben identisch pv->zond->dbase_zond->zond_dbase_store
+   - zond_dbase_work (wo neu angelegte, noch nicht gespeicherte Anbindungen
+   der aktuellen Sitzung liegen, s. dbase_zond_update_sections()-Muster in
+   project.c) wird nie geprüft; der Parameter "attached" bleibt im
+   Funktionskörper ungenutzt. Eine in der laufenden Sitzung neu angelegte,
+   noch nicht gespeicherte Anbindung verhindert das Löschen der
+   betreffenden Seite dadurch nicht (cb_pv_seiten_loeschen() erlaubt das
+   Löschen fälschlich) - die Anbindung wird verwaist. Noch nicht behoben.
+
+ - seiten.c, seiten_drehen() (Zeile ~725-792, niedrigere Konfidenz):
+   seiten_drehen_pdf() schreibt /Rotate direkt und dauerhaft auf das
+   pdf_obj; scheitert das anschließende zond_pdf_document_load_page() (Neu-
+   Laden nach dem Verwerfen von display_list/stext_page/arr_annots), bricht
+   die Funktion mit -1 ab, OHNE einen Journal-Eintrag für die schon
+   physisch gedrehte aktuelle Seite anzulegen, und verarbeitet die
+   restlichen ausgewählten Seiten der Schleife gar nicht mehr - "physisch
+   passiert, aber weder journalisiert noch für die übrigen Seiten
+   fortgesetzt", ähnliche Fehlerklasse wie der schon behobene OCR-
+   Abbruch-Bug. Noch nicht behoben.
+
+ - document.c, get_pdf_pos() (Zeile ~85-92, verifiziert - unabhängig vom
+   bereits behobenen Copy-Paste-Bug in derselben Funktion): die Schleife
+   zum Herausrechnen gelöschter Seiten läuft vom ABSOLUTEN ges_von_seite
+   bis zum RELATIVEN pdf_pos.seite (das ist node_von_seite - ges_von_seite
+   bzw. node_bis_seite - ges_von_seite, s. Zeile 66/73) - bei jeder
+   Anbindung, die nicht bei Seite 0 des PDF beginnt, ist ges_von_seite
+   meist schon größer als dieser kleine relative Offset, die
+   Schleifenbedingung "i < pdf_pos.seite" ist dann sofort falsch, 0
+   Iterationen. Zusätzlich schrumpft die Schleifengrenze bei jedem Treffer
+   selbst (pdf_pos.seite wird im Rumpf dekrementiert und ist zugleich die
+   Abbruchbedingung) - kann bei mehreren gelöschten Seiten hintereinander
+   vorzeitig abbrechen, bevor alle relevanten Seiten geprüft wurden.
+   Ergebnis: falsche (zu frühe oder zu weit vorgezogene) Zielseite beim
+   Sprung zu einem Node/einer Anbindung in einem PDF, in dem in der
+   aktuellen Sitzung schon Seiten gelöscht wurden - im Extremfall ein
+   Index außerhalb von pv->arr_pages, das mehrere Stellen in viewer.c
+   ungeprüft per g_ptr_array_index() lesen. Noch nicht behoben.
+
+ - stand_alone.c, pv_schliessen_datei() (Zeile ~74-90, verifiziert): sowohl
+   die "Speichern?"- als auch die "Trotzdem schließen?"-Abfrage
+   (abfrage_frage(), nur Ja/Nein-Buttons) werden nur auf GTK_RESPONSE_YES
+   bzw. GTK_RESPONSE_NO geprüft. my_dialog_run() (misc.c) verknüpft das
+   Schließen per "X" aber generisch mit einem DRITTEN Response,
+   GTK_RESPONSE_CANCEL, das hier an keiner der beiden Stellen abgefangen
+   wird - fällt bei "Speichern?" durch wie "Nein" (kein Speichern, keine
+   weitere Rückfrage), fällt bei "Trotzdem schließen?" durch wie "Ja"
+   (Datei wird trotz gescheitertem Speichern geschlossen) - genau der Fall,
+   den der heute (26.08.2026) an dieser Funktion gemachte Fix eigentlich
+   verhindern sollte. Schließt man eine dieser beiden Abfragen per "X"
+   statt per Button, gehen ungespeicherte Änderungen trotzdem verloren.
+   Noch nicht behoben.
+
+ - stand_alone.c, pv_schliessen_datei() (Zeile ~102-107): pv->tree_thumb
+   wird zerstört und durch eine neue GtkTreeView ersetzt, aber nirgends
+   wieder in seinen Container (pv->swindow_tree) eingehängt -
+   gtk_container_add() dafür gibt es nur einmal im ganzen Projekt, in
+   viewer_ui.c beim initialen Fensteraufbau. Nach dem ersten Schließen
+   einer Datei (auch implizit beim Öffnen einer neuen über
+   cb_datei_oeffnen()) bleibt das Thumbnail-Panel für den Rest der
+   Sitzung dauerhaft leer, unabhängig davon, was danach geöffnet wird.
+   Noch nicht behoben.
+
+ - stand_alone.c, pv_oeffnen_datei() (Zeile ~127-144): sond_file_part_from_
+   filepart() liefert eine eigene Referenz (g_object_ref); document_new_
+   displayed_document()/zpdfd_part_peek() übernimmt diese nicht, sondern
+   hält selbst eine unabhängige Referenz. Das im Projekt sonst überall
+   übliche Muster (Aufrufer unreft sfp nach dem Aufruf, s. zond_treeview.c)
+   fehlt hier komplett - auf beiden Rückkehrpfaden (Erfolg wie
+   document_new_displayed_document()-Fehlschlag). Jede geöffnete Datei
+   leakt eine Referenz auf ihr SondFilePart; über eine Sitzung mit
+   mehreren Öffnen/Schließen-Zyklen läppert sich das. Noch nicht behoben.
+
+ - projektweit, niedrigere Konfidenz: mehrere display_message()/
+   abfrage_frage()-Aufrufe geben error->message (kann u.a. aus Dateipfaden
+   oder MuPDF-Fehlertexten stammen) direkt als printf-artiges
+   message_format an GTK weiter, ohne Format-Escaping - ein "%" im
+   dynamischen Text wird als Formatspezifizierer ohne passendes Argument
+   interpretiert (u.a. stand_alone.c:81/183/213, viewer_ui.c mehrfach).
+   Betrifft laut Review auch etliche Stellen außerhalb des Viewer-Moduls -
+   eher ein projektweites, bestehendes Muster als ein neu eingeführter
+   Bug. Noch nicht geprüft/entschieden, ob das behoben werden soll.
+
  */
 

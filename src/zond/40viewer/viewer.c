@@ -818,7 +818,7 @@ gint viewer_handle_button_press(PdfViewer* pv,
 				//Nach Einfügen von annot-text: auf Zeiger zurückflitschen
 				gtk_toggle_button_set_active(
 						GTK_TOGGLE_BUTTON(pv->button_zeiger), TRUE);
-			} else if ((viewer_page->pdf_document_page->thread & 4)
+			} else if ((viewer_page->pdf_document_page->thread & 8)
 					&& viewer_on_text(pv, viewer_page, pdf_punkt.punkt))
 				pv->click_on_text = TRUE;
 			else
