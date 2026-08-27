@@ -268,6 +268,32 @@ static void  viewer_reset_dirty_dds(PdfViewer* pdfv) {
 	return;
 }
 
+/* Liefert die physische Annot-Position auf der frisch geöffneten pdf_page
+ * (0-basiert) - im Unterschied zu pdf_document_page_annot_get_index()
+ * (rohe arr_annots-Position inkl. Karteileichen) werden hier bereits bei
+ * einem früheren Speichern physisch gelöschte Annotationen (->deleted &&
+ * ->on_disk_deleted) nicht mitgezählt, weil sie auf pdf_page (Kopie vom
+ * letzten Speicherstand) gar nicht mehr existieren - dieselbe Logik wie
+ * in der "Annots löschen"-Schleife weiter unten (dort pdf_ann bewußt
+ * nicht vorrücken statt hier den Zähler nicht erhöhen). Rückgabe -1, wenn
+ * target nicht in arr_annots gefunden (sollte nicht vorkommen). */
+static gint viewer_save_get_physical_annot_index(PdfDocumentPage* pdfp,
+		PdfDocumentPageAnnot* target) {
+	gint physical = 0;
+
+	for (gint u = 0; u < pdfp->arr_annots->len; u++) {
+		PdfDocumentPageAnnot* pdfp_annot = g_ptr_array_index(pdfp->arr_annots, u);
+
+		if (pdfp_annot == target)
+			return physical;
+
+		if (!(pdfp_annot->deleted && pdfp_annot->on_disk_deleted))
+			physical++;
+	}
+
+	return -1;
+}
+
 static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 		fz_context* ctx, pdf_document* doc, GError** error) {
 	GArray* arr_journal = NULL;
@@ -444,9 +470,18 @@ static gint viewer_do_save_dd(PdfViewer* pv, DisplayedDocument* dd,
 				gint rc = 0;
 				pdf_annot* pdf_ann = NULL;
 
-				index = pdf_document_page_annot_get_index(
+				index = viewer_save_get_physical_annot_index(pdfp,
 						entry.annot_changed.pdf_document_page_annot);
-				pdf_ann = pdf_annot_lookup_index(ctx, pdf_page, index);
+				pdf_ann = (index >= 0) ?
+						pdf_annot_lookup_index(ctx, pdf_page, index) : NULL;
+				if (!pdf_ann) {
+					pdf_drop_page(ctx, pdf_page);
+					pdf_drop_document(ctx, doc);
+					*error = g_error_new(VIEWER_ERROR, 0,
+							"%s\nZu ändernde Annotation auf Seite %i nicht gefunden",
+							__func__, pdfp->page_akt + 1);
+					return -1;
+				}
 
 				rc = viewer_annot_do_change(ctx, pdf_ann,
 						entry.pdf_document_page->rotate,

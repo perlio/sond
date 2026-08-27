@@ -635,7 +635,19 @@ void viewer_handle_layout_motion_notify(PdfViewer* pv, GdkEvent *event) {
 
 				pv->highlight.page[zaehler] = -1;
 
-				gtk_widget_queue_draw(viewer_page_loop->image_page);
+				/* image_page kann hier noch NULL sein - "thread & 8" sagt
+				 * nur, daß stext_page vorhanden ist (auch über den
+				 * synchronen Schnellpfad viewer_render_stext_page_fast(),
+				 * z.B. aus der Textsuche heraus, gesetzt), image_page wird
+				 * aber erst mit dem separaten Flag viewer_page->thread & 2
+				 * angelegt (viewer_render_transfer_rendered()). Ohne diese
+				 * Prüfung: gtk_widget_queue_draw(NULL) - GLib-"critical",
+				 * unter G_DEBUG=fatal-criticals/-warnings fatal. Die
+				 * Markierung selbst (pv->highlight) ist trotzdem korrekt
+				 * berechnet - sobald die Seite später normal gerendert
+				 * wird, zeigt sie die Markierung dann ohnehin an. */
+				if (viewer_page_loop->image_page)
+					gtk_widget_queue_draw(viewer_page_loop->image_page);
 			}
 
 			//Wenn Maus ruckartig über Seitengrenzen bewegt wird
@@ -876,7 +888,7 @@ gint viewer_handle_button_press(PdfViewer* pv,
 				//Seite und zurückliegender Index
 				//"richtige" Reihenfolge
 
-				if ((page_pdf >= pv->anbindung.von.seite)
+				if ((page_pdf > pv->anbindung.von.seite)
 						|| ((punktgenau)
 								&& (page_pdf == pv->anbindung.von.seite)
 								&& (pdf_punkt.punkt.y >= pv->anbindung.von.index))) {

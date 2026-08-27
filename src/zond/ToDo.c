@@ -666,7 +666,12 @@
    einer solchen Suche eine Textmarkierung über eine so vorbereitete Seite,
    wird gtk_widget_queue_draw(NULL) aufgerufen - GLib-"critical", unter
    G_DEBUG=fatal-criticals/-warnings (in Debug-Umgebungen üblich) fatal.
-   Noch nicht behoben.
+   BEHOBEN (26.08.2026): gtk_widget_queue_draw(viewer_page_loop->image_page)
+   nur noch aufgerufen, wenn image_page tatsächlich gesetzt ist. Die
+   Markierungsberechnung (pv->highlight) bleibt unverändert - sie ist auch
+   ohne image_page schon korrekt (stext_page ist ja da), nur das sofortige
+   Neuzeichnen entfällt für eine noch nicht angelegte Seite; sobald sie
+   später normal gerendert wird, zeigt sie die Markierung ohnehin an.
 
  - viewer.c, viewer_handle_layout_motion_notify() (PDF_ANNOT_TEXT-Zweig,
    Zeile ~665-679): beim Ziehen einer Text-Annotation wird für die
@@ -677,7 +682,16 @@
    zweiten, noch unbehobenen Stelle. Wandert die Maus beim Ziehen über eine
    Seitengrenze, wird die falsche Seite neu gezeichnet - die Annotation
    hängt visuell fest, bis ein unabhängiges Neuzeichnen die richtige Seite
-   erfasst. Noch nicht behoben.
+   erfasst.
+   GEPRÜFT (26.08.2026), KEIN BUG (bewusst so belassen): die Rect-
+   Koordinaten der Annotation werden unabhängig von viewer_page korrekt
+   fortgeschrieben (reine Delta-Rechnung über pv->x/pv->y) - nur das
+   sofortige Neuzeichnen bleibt beim Verlassen der eigenen Seite aus,
+   rein kosmetisch. Anwender-Einschätzung: Annotation bleibt beim
+   Herausziehen über den Seitenrand optisch am Rand "kleben", bis entweder
+   die Maus wieder auf die eigene Seite zurückkehrt (dann normal
+   mitgezogen) oder losgelassen wird (dann bleibt sie visuell am Rand
+   stehen) - kein eigenständiger Fix nötig.
 
  - viewer.c, viewer_handle_button_press() (Anbindung "umdrehen", Zeile
    ~879-882, nur #ifndef VIEWER): "page_pdf >= pv->anbindung.von.seite" ist
@@ -688,7 +702,13 @@
    derselben Seite oberhalb (kleinere y) des schon gesetzten "von"-Punkts,
    entsteht trotzdem eine Anbindung mit von.index > bis.index statt daß
    von/bis vertauscht werden (Auswirkung auf zond_anbindung_erzeugen() nicht
-   mitgeprüft). Noch nicht behoben.
+   mitgeprüft).
+   BEHOBEN (26.08.2026): "page_pdf >= pv->anbindung.von.seite" auf
+   "page_pdf > pv->anbindung.von.seite" korrigiert (durchgerechnet: für
+   spätere/frühere Seite sowie den nicht-punktgenauen Fall auf derselben
+   Seite ändert sich dadurch nichts - nur der beschriebene Fehlerfall
+   (punktgenau, gleiche Seite, zweiter Klick oberhalb des ersten) wechselt
+   jetzt korrekt in den "umdrehen"-Zweig).
 
  - viewer_save.c, viewer_do_save_dd(), JOURNAL_TYPE_ANNOT_CHANGED-Zweig
    (Zeile ~442-459, verifiziert): pdf_document_page_annot_get_index()
@@ -709,7 +729,17 @@
    und speichern (A bleibt für immer als Karteileiche in arr_annots an
    Index 0, physische Datei hat jetzt nur noch B); später B in derselben
    Sitzung bearbeiten und erneut speichern - Absturz beim zweiten
-   Speichern. Noch nicht behoben.
+   Speichern.
+   BEHOBEN (26.08.2026): neue Hilfsfunktion viewer_save_get_physical_
+   annot_index() zieht dieselbe Karteileichen-Ausschluss-Logik wie die
+   "Annots löschen"-Schleife weiter unten (dort: pdf_ann bewußt nicht
+   vorrücken, hier: Zähler bewußt nicht erhöhen bei ->deleted &&
+   ->on_disk_deleted) in eine wiederverwendbare Funktion und ersetzt damit
+   die rohe arr_annots-Position im ANNOT_CHANGED-Zweig. Zusätzlich wird
+   der Rückgabewert von pdf_annot_lookup_index() jetzt geprüft (vorher
+   ungeprüft an viewer_annot_do_change() weitergereicht) - schlägt die
+   Auflösung trotzdem fehl, gibt es jetzt eine GError-Meldung statt eines
+   Absturzes.
 
  - viewer_save.c, viewer_entry_in_dd() (Zeile ~78-99): bei einem dd, dessen
    erste UND letzte Seite dieselbe Seite ist (einseitiger Ausschnitt, oben
