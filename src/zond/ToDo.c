@@ -750,8 +750,15 @@
    unterhalb von last_index auf dieser Seite werden fälschlich als "im dd
    sichtbar" gewertet - kann viewer_reset_dirty_dds() fälschlich "dirty"
    setzen und/oder viewer_do_save_dd()s Journal-Aufräumschleife einen
-   Eintrag zu früh/falsch zuordnen aus arr_journal entfernen. Noch nicht
-   behoben.
+   Eintrag zu früh/falsch zuordnen aus arr_journal entfernen.
+   BEHOBEN (26.08.2026): is_first/is_last jetzt unabhängig voneinander
+   ermittelt statt über if/else-if-Reihenfolge; obere Grenze (first_index)
+   gilt nur, wenn die Seite die erste ist, untere (last_index) nur, wenn
+   sie die letzte ist - eine Seite, die beides ist (einseitiger
+   Ausschnitt), bekommt jetzt beide Grenzen zugleich statt nur die obere.
+   Die "keine Beschneidung"-Kurzschlüsse (sofort TRUE) für die drei
+   bisherigen Fälle bleiben über den y0==0/y1==Seitenende-Vergleich
+   erhalten.
 
  - viewer_annot.c, viewer_annot_check_diff() (Zeile ~299-315): setzt
    crop.y0/y1 immer auf first_index/last_index, unabhängig davon, ob die

@@ -74,29 +74,46 @@ static gboolean viewer_entry_in_dd(JournalEntry* entry,
 				&entry->annot_changed.annot_before :
 				&entry->annot_changed.annot_after;
 
-		//Sind ja nur Annots überig
-		if (entry->pdf_document_page->page_akt == zpdfd_part->first_page->page_akt) {
-			if (zpdfd_part->first_index == 0) return TRUE;
-			else {
-				fz_rect rect = {0.0, entry->pdf_document_page->rect.x1,
-						(gfloat) zpdfd_part->first_index,
-						entry->pdf_document_page->rect.y1};
+		{
+			gboolean is_first = FALSE;
+			gboolean is_last = FALSE;
+			gfloat y0 = 0.0;
+			gfloat y1 = 0.0;
+
+			is_first = (entry->pdf_document_page->page_akt ==
+					zpdfd_part->first_page->page_akt);
+			is_last = (entry->pdf_document_page->page_akt ==
+					zpdfd_part->last_page->page_akt);
+
+			//Seite mittendrin (weder erste noch letzte) - immer vollständig im dd
+			if (!is_first && !is_last)
+				return TRUE;
+
+			/* Obere Grenze nur relevant, wenn diese Seite die erste ist,
+			 * untere Grenze nur, wenn sie die letzte ist - eine Seite, die
+			 * BEIDES ist (einseitiger Ausschnitt, oben UND unten
+			 * beschnitten), bekommt beide Grenzen; eine Seite, die nur eine
+			 * der beiden Rollen hat, nur die jeweils passende (auf der
+			 * anderen Seite ist der dd nicht begrenzt, der Inhalt geht auf
+			 * Nachbarseiten weiter). Vorher wurde bei is_first&&is_last
+			 * (einseitiger Ausschnitt) wegen der if/else-if-Reihenfolge nur
+			 * die obere Grenze angewandt, last_index komplett ignoriert. */
+			y0 = (is_first && zpdfd_part->first_index > 0) ?
+					(gfloat) zpdfd_part->first_index : 0.0;
+			y1 = (is_last && zpdfd_part->last_index != EOP) ?
+					(gfloat) zpdfd_part->last_index :
+					entry->pdf_document_page->rect.y1;
+
+			if (y0 == 0.0 && y1 == entry->pdf_document_page->rect.y1)
+				return TRUE; //keine Beschneidung auf dieser Seite
+
+			{
+				fz_rect rect = {0.0, entry->pdf_document_page->rect.x1, y0, y1};
 
 				if (viewer_annot_is_in_rect(annot, rect))
 					return 1;
 			}
 		}
-		else if (entry->pdf_document_page->page_akt == zpdfd_part->last_page->page_akt) {
-			if (zpdfd_part->last_index == EOP) return TRUE;
-			else {
-				fz_rect rect = {0.0, entry->pdf_document_page->rect.x1, 0.0,
-						(gfloat) zpdfd_part->last_index};
-
-				if (viewer_annot_is_in_rect(annot, rect))
-					return 1;
-			}
-		}
-		else return TRUE;
 	}
 
 	return FALSE;
