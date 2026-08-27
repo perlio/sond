@@ -787,14 +787,20 @@
    viewer_annot_handle_release_clicked_annot() schon behoben wurde (s.o.),
    hier an einer weiteren, noch unbehobenen Stelle. Jeder Aufrufer, der der
    GError-Konvention folgt (rc!=0 -> error->message lesen) dereferenziert
-   ein noch-NULL GError*. Noch nicht behoben.
+   ein noch-NULL GError* (verifiziert: viewer_ui.c:302-306 tut genau das).
+   BEHOBEN (26.08.2026): exakt die schon bei
+   viewer_annot_handle_release_clicked_annot() bewährte Fassung
+   übernommen - *error wird jetzt gesetzt, Rückgabe TRUE auf -1
+   umgestellt (passt auch stilistisch zur -1/0-Konvention der Funktion).
 
  - viewer_annot.c, viewer_annot_delete() (Zeile ~97): setzt *error = ...
    ohne vorheriges "if (error)" - jede andere Fehlerstelle in dieser
    Funktion und in viewer_annot_handle_release_clicked_annot() prüft das
    korrekt. Ruft ein Aufrufer (laut Konvention zulässig) mit error==NULL
    auf und schlägt genau dieser Zweig fehl (pdf_annot nicht auflösbar),
-   Absturz. Noch nicht behoben.
+   Absturz.
+   BEHOBEN (26.08.2026): "if (error)"-Absicherung ergänzt, wie an allen
+   anderen Fehlerstellen dieser Funktion.
 
  - viewer_annot.c, viewer_annot_do_change() (TEXT-Zweig, Zeile ~177-215,
    niedrigere Konfidenz): pdf_set_annot_contents()/pdf_set_annot_rect() und

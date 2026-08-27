@@ -94,7 +94,7 @@ static gint viewer_annot_delete(PdfDocumentPageAnnot *pdf_document_page_annot,
 	pdf_annot = pdf_document_page_annot_get_pdf_annot(pdf_document_page_annot);
 	if (!pdf_annot) {
 		zond_pdf_document_mutex_unlock(pdf_document_page_annot->pdf_document_page->document);
-		*error = g_error_new(VIEWER_ERROR, 0, "%s\nAnnotation nicht gefunden", __func__);
+		if (error) *error = g_error_new(VIEWER_ERROR, 0, "%s\nAnnotation nicht gefunden", __func__);
 		return -1;
 	}
 
@@ -692,8 +692,12 @@ gint viewer_annot_create_markup(PdfViewer *pv, ViewerPageNew* viewer_page,
 					viewer_page_loop->pdf_document_page);
 		}
 
-		if (!(viewer_page_loop->pdf_document_page->thread & 2))
-			return TRUE;
+		if (!(viewer_page_loop->pdf_document_page->thread & 2)) {
+			if (error) *error = g_error_new(g_quark_from_static_string("zond"), 0,
+					"%s\nSeite noch nicht fertig gerendert", __func__);
+
+			return -1;
+		}
 
 		rc = viewer_annot_create(viewer_page_loop, error);
 		if (rc)
