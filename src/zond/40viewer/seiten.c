@@ -947,8 +947,11 @@ static gint seiten_anbindung(PdfViewer *pv, GPtrArray *arr_document_page,
 }
 #endif // VIEWER
 
-static gint seiten_loeschen(PdfViewer *pv, GPtrArray *arr_document_page,
-		GError **error) {
+/* Kann nicht scheitern (kein Rückgabewert/GError**, im Unterschied zu
+ * seiten_anbindung()) - Seiten werden hier immer entweder gelöscht oder
+ * (letzte verbliebene Seite der Datei) übersprungen, beides ohne
+ * Fehlerfall. */
+static void seiten_loeschen(PdfViewer *pv, GPtrArray *arr_document_page) {
 	gboolean page_deleted = FALSE;
 
 	for (gint i = 0; i < arr_document_page->len; i++) {
@@ -993,9 +996,39 @@ static gint seiten_loeschen(PdfViewer *pv, GPtrArray *arr_document_page,
 
 		gtk_tree_selection_unselect_all(
 				gtk_tree_view_get_selection(GTK_TREE_VIEW(pv->tree_thumb)));
+
+		/* Ein oder mehrere geöffnete Viewer können durch das Löschen jetzt
+		 * keine einzige Seite mehr anzeigen (der komplette angezeigte
+		 * Abschnitt wurde leergelöscht) - so ein Viewer ist kein sinnvoller
+		 * Zustand mehr und wird geschlossen. viewer_schliessen() statt
+		 * viewer_save_and_close(): kein "Speichern?"-Dialog nötig, weil die
+		 * Journal-Einträge (inkl. dieser Löschung) am zond_pdf_document
+		 * hängen, nicht am Viewer-Fenster - sie bleiben erhalten und werden
+		 * beim nächsten Speichern über irgendeinen anderen offenen Viewer
+		 * (oder das Projekt) auf diesem Dokument ohnehin berücksichtigt.
+		 * Rückwärts iterieren, weil viewer_schliessen() seinen pv per
+		 * g_ptr_array_remove_fast() aus arr_pv entfernt (tauscht das letzte
+		 * Element in die Lücke - Vorwärtsiteration würde das nachgerückte
+		 * Element überspringen).
+		 *
+		 * Das kann auch den hier übergebenen pv selbst schließen (und
+		 * freigeben) - beide Aufrufer (cb_pv_seiten_loeschen()/
+		 * cb_seiten_ausschneiden()) fassen pv danach nicht mehr an, das ist
+		 * also unkritisch. Über cb_pv_seiten_loeschen() (mit vorgeschalteter
+		 * seiten_anbindung()-Prüfung) dürfte das für den aufrufenden pv
+		 * praktisch nicht vorkommen, so lange dessen dd über eine noch
+		 * bestehende Anbindung geöffnet wurde; cb_seiten_ausschneiden() ruft
+		 * seiten_anbindung() dagegen gar nicht auf, dort ist dieser Fall
+		 * für den aufrufenden pv also durchaus real erreichbar. */
+		for (gint p = (gint) pv->zond->arr_pv->len - 1; p >= 0; p--) {
+			PdfViewer *pv_test = g_ptr_array_index(pv->zond->arr_pv, p);
+
+			if (pv_test->arr_pages->len == 0)
+				viewer_schliessen(pv_test);
+		}
 	}
 
-	return 0;
+	return;
 }
 
 void cb_pv_seiten_loeschen(GtkMenuItem *item, gpointer data) {
@@ -1034,16 +1067,10 @@ void cb_pv_seiten_loeschen(GtkMenuItem *item, gpointer data) {
 	}
 #endif // VIEWER
 
-	rc = seiten_loeschen(pv, arr_document_page, &error);
+	seiten_loeschen(pv, arr_document_page);
 	g_ptr_array_unref(arr_document_page);
-	if (rc == -1) {
-		display_message(pv->vf, "Fehler Seiten Löschen\n\n", error->message, NULL);
-		g_error_free(error);
-
-		viewer_save_and_close(pv);
-
-		return;
-	}
+	//seiten_loeschen() kann pv selbst geschlossen haben (s. dortiger
+	//Kommentar) - pv wird deshalb hier bewusst nicht mehr angefasst
 
 	return;
 }
@@ -1174,9 +1201,15 @@ static gint seiten_abfrage_seitenzahl(PdfViewer *pv, guint *num) {
 	gtk_widget_grab_focus(entry);
 
 	res = my_dialog_run(GTK_DIALOG(dialog));
-	rc = string_to_guint(gtk_entry_get_text(GTK_ENTRY(entry)), num);
-	if (rc)
-		res = -1;
+
+	if (res == 1 || res == 2) {
+		rc = string_to_guint(gtk_entry_get_text(GTK_ENTRY(entry)), num);
+		if (rc) {
+			display_message(pv->vf, "Seiten einfügen\n\n",
+					"Ungültige oder fehlende Seitenzahl bei \"nach Seite:\"", NULL);
+			res = -1;
+		}
+	}
 
 	gtk_widget_destroy(dialog);
 
@@ -1215,8 +1248,7 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 
 	if (pos > pv->arr_pages->len)
 		pos = pv->arr_pages->len;
-	if (pos < 0)
-		pos = 0;
+	//kein "if (pos < 0) pos = 0;" mehr - pos ist guint, kann nie negativ sein
 
 	viewer_page = g_ptr_array_index(pv->arr_pages, (pos == pv->arr_pages->len) ? pos - 1 : pos);
 
@@ -1432,15 +1464,14 @@ void cb_seiten_ausschneiden(GtkMenuItem *item, gpointer data) {
 
 	GPtrArray *arr_document_page = seiten_get_document_pages(pv, arr_page_pv);
 	g_array_unref(arr_page_pv);
-	rc = seiten_loeschen(pv, arr_document_page, &error);
+	seiten_loeschen(pv, arr_document_page);
 	g_ptr_array_unref(arr_document_page);
-	if (rc == -1) {
-		display_message(pv->vf, "Fehler Ausschneiden Seiten\n\n", error->message, NULL);
-		g_error_free(error);
-	} else if (rc == 1)
-		display_message(pv->vf,
-				"Fehler Ausschneiden -\n\nSeiten enthalten Anbindungen\n",
-				NULL);
+	//seiten_loeschen() kann pv selbst geschlossen haben (s. dortiger
+	//Kommentar) - pv wird deshalb hier bewusst nicht mehr angefasst.
+	//Anders als cb_pv_seiten_loeschen() wird vorher keine
+	//seiten_anbindung()-Prüfung gemacht - "Ausschneiden" kann also auch
+	//Seiten entfernen, die Anbindungen tragen. Falls das nicht gewollt
+	//ist, hier ggf. denselben Guard wie dort ergänzen.
 
 	return;
 }

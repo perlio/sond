@@ -159,16 +159,16 @@ gint viewer_annot_handle_delete(PdfViewer* pv, GError** error) {
 
 static fz_rect pdf_annot_rotate_rect(gint rotate, fz_rect rect) {
 	if (rotate == 90) {
-		rect.x0 -= 20;
-		rect.x1 -= 20;
+		rect.x0 -= ANNOT_ICON_WIDTH;
+		rect.x1 -= ANNOT_ICON_WIDTH;
 	} else if (rotate == 180) {
-		rect.x0 -= 20;
-		rect.x1 -= 20;
-		rect.y0 -= 20;
-		rect.y1 -= 20;
+		rect.x0 -= ANNOT_ICON_WIDTH;
+		rect.x1 -= ANNOT_ICON_WIDTH;
+		rect.y0 -= ANNOT_ICON_HEIGHT;
+		rect.y1 -= ANNOT_ICON_HEIGHT;
 	} else if (rotate == 270) {
-		rect.y0 -= 20;
-		rect.y1 -= 20;
+		rect.y0 -= ANNOT_ICON_HEIGHT;
+		rect.y1 -= ANNOT_ICON_HEIGHT;
 	}
 
 	return rect;

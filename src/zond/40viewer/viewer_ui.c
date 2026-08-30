@@ -278,11 +278,6 @@ static gboolean cb_viewer_layout_release_button(GtkWidget *layout,
 	if (!(pv->dd))
 		return TRUE;
 
-	if (event->button.button != GDK_BUTTON_PRIMARY)
-		return FALSE;
-	if (!(pv->dd))
-		return TRUE;
-
 	rc = viewer_abfragen_pdf_punkt(pv,
 			fz_make_point(event->motion.x, event->motion.y), &pdf_punkt);
 	viewer_page = g_ptr_array_index(pv->arr_pages, pdf_punkt.seite);

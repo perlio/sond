@@ -155,7 +155,10 @@ static void viewer_render_transfer_rendered(PdfViewer *pdfv, gboolean protect) {
 			gtk_layout_put(GTK_LAYOUT(pdfv->layout),
 					GTK_WIDGET(viewer_page->image_page), x_pos,
 					viewer_page->y_pos);
-			g_object_unref(viewer_page->pixbuf_page);
+			//g_clear_object() statt g_object_unref(): GtkImage hält seine
+			//eigene Referenz, viewer_page->pixbuf_page danach auf NULL
+			//setzen statt als dangling Pointer stehen zu lassen
+			g_clear_object(&viewer_page->pixbuf_page);
 
 			viewer_page->thread |= 2; //bit 2: image gerendert
 		}
@@ -168,7 +171,10 @@ static void viewer_render_transfer_rendered(PdfViewer *pdfv, gboolean protect) {
 			gtk_list_store_set(GTK_LIST_STORE(
 					gtk_tree_view_get_model(GTK_TREE_VIEW(pdfv->tree_thumb))),
 					&iter, 0, viewer_page->pixbuf_thumb, -1);
-			g_object_unref(viewer_page->pixbuf_thumb);
+			//g_clear_object() statt g_object_unref(): GtkListStore hält
+			//seine eigene Referenz, viewer_page->pixbuf_thumb danach auf
+			//NULL setzen statt als dangling Pointer stehen zu lassen
+			g_clear_object(&viewer_page->pixbuf_thumb);
 
 			viewer_page->thread |= 4; //bit 2: thumb gerendert
 		}
@@ -261,9 +267,7 @@ viewer_render_pixbuf_from_pixmap(fz_context *ctx, fz_pixmap *pixmap) {
 	GdkPixbuf *pixbuf = NULL;
 	ViewerPixbufPrivate *viewer_pixbuf_priv = NULL;
 
-	viewer_pixbuf_priv = g_try_malloc0(sizeof(ViewerPixbufPrivate));
-	if (!viewer_pixbuf_priv)
-		return NULL;
+	viewer_pixbuf_priv = g_malloc0(sizeof(ViewerPixbufPrivate));
 
 	viewer_pixbuf_priv->ctx = ctx;
 

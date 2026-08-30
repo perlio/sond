@@ -694,17 +694,19 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 			g_prefix_error(error, "%s\n", __func__);
 #ifndef VIEWER
 			dbase_zond_rollback(pdfv->zond->dbase_zond, error);
+#endif //VIEWER
 
 			return -1;
 		}
 
+#ifndef VIEWER
 		rc = dbase_zond_commit(pdfv->zond->dbase_zond, error);
 		if (rc) {
 			g_prefix_error(error, "%s\n", __func__);
-#endif //viewer
 
 			return -1;
 		}
+#endif //VIEWER
 	} while ((dd = dd->next));
 
 #ifndef VIEWER

@@ -287,6 +287,16 @@ void viewer_schliessen(PdfViewer *pv) {
 	g_ptr_array_unref(pv->arr_pages); //vor gtk_widget_destroy(vf), weil freeFunc gesetzt Nein! stimmt nicht! Keine free-func
 	g_array_unref(pv->text_occ.arr_quad);
 
+	//gdk_cursor_new_from_name() liefert eine neue Referenz (transfer full,
+	//s. GDK-Doku) - ohne diese unrefs leakt jedes Öffnen+Schließen eines
+	//Viewers fünf GdkCursor-Objekte. g_clear_object() statt g_object_unref():
+	//NULL-sicher und setzt den Pointer selbst zurück.
+	g_clear_object(&pv->cursor_default);
+	g_clear_object(&pv->cursor_text);
+	g_clear_object(&pv->cursor_vtext);
+	g_clear_object(&pv->cursor_grab);
+	g_clear_object(&pv->cursor_annot);
+
 	gtk_widget_destroy(pv->vf);
 
 	document_free_displayed_documents(pv->dd);
