@@ -83,7 +83,9 @@ static PdfPos get_pdf_pos(ZondPdfDocument* zpdfd, gboolean was_opened,
 
 	/* gelöschte Seiten herausrechnen (nur wenn PDF offen) */
 	if (was_opened && pdf_pos.seite != EOP && pdf_pos.seite > 0) {
-		for (guint i = ges_von_seite; i < (guint)pdf_pos.seite; i++) {
+		guint bis_seite_abs = (guint) ges_von_seite + (guint) pdf_pos.seite;
+
+		for (guint i = (guint) ges_von_seite; i < bis_seite_abs; i++) {
 			PdfDocumentPage* pdfp = g_ptr_array_index(
 					zond_pdf_document_get_arr_pages(zpdfd), i);
 			if (pdfp && pdfp->deleted)

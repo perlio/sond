@@ -73,6 +73,9 @@ static gint pv_schliessen_datei(PdfViewer *pv) {
 
 	if (gtk_widget_get_sensitive(pv->button_speichern)) {
 		rc = abfrage_frage(pv->vf, "PDF geändert", "Speichern?", NULL);
+		if (rc == GTK_RESPONSE_CANCEL)
+			return -1;
+
 		if (rc == GTK_RESPONSE_YES) {
 			rc = viewer_save_dirty_dds(pv, &error);
 			if (rc) {
@@ -81,7 +84,7 @@ static gint pv_schliessen_datei(PdfViewer *pv) {
 				rc = abfrage_frage(pv->vf, error->message, "Trotzdem schließen?", NULL);
 				g_error_free(error);
 
-				if (rc == GTK_RESPONSE_NO)
+				if (rc != GTK_RESPONSE_YES)
 					return -1;
 			}
 		}
@@ -99,11 +102,7 @@ static gint pv_schliessen_datei(PdfViewer *pv) {
 	//dann existiert der fz_context aber schon nicht mehr...
 //    gtk_list_store_clear( GTK_LIST_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(pv->tree_thumb) )) );
 	gtk_widget_destroy(pv->tree_thumb);
-	pv->tree_thumb = gtk_tree_view_new();
-	GtkListStore *list_store = gtk_list_store_new(1, GDK_TYPE_PIXBUF);
-	gtk_tree_view_set_model(GTK_TREE_VIEW(pv->tree_thumb),
-			GTK_TREE_MODEL(list_store));
-	g_object_unref(list_store);
+	viewer_ui_recreate_tree_thumb(pv);
 
 	//layout von ViewerImages befreien
 	gtk_container_foreach(GTK_CONTAINER(pv->layout),
@@ -133,6 +132,7 @@ static gint pv_oeffnen_datei(PdfViewer *pv, gchar const* path, GError**error) {
 
 	dd = document_new_displayed_document(SOND_FILE_PART_PDF(sfp_pdf_page_tree),
 			NULL, NULL, FALSE, NULL, error);
+	g_object_unref(sfp_pdf_page_tree);
 	if (!dd)
 		return -1;
 

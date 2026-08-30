@@ -410,6 +410,47 @@ static void viewer_thumblist_render_textcell(GtkTreeViewColumn *column,
 	return;
 }
 
+/* Baut pv->tree_thumb (Thumbnail-Baum) komplett neu auf: Widget, Spalte mit
+ * Text-/Pixbuf-Renderer, Modell, Einfügen in pv->swindow_tree (das selbst
+ * NICHT neu erzeugt wird - muss vom Aufrufer bereits existieren), Signale.
+ * Gemeinsam genutzt von viewer_einrichten_fenster() (initialer Aufbau) und
+ * pv_schliessen_datei() in stand_alone.c (Neuaufbau nach dem Zerstören des
+ * alten tree_thumb beim Schließen einer Datei). */
+void viewer_ui_recreate_tree_thumb(PdfViewer *pv) {
+	pv->tree_thumb = gtk_tree_view_new();
+	gtk_tree_view_set_headers_visible(GTK_TREE_VIEW(pv->tree_thumb), FALSE);
+
+	GtkTreeSelection *sel = gtk_tree_view_get_selection(GTK_TREE_VIEW(pv->tree_thumb));
+	gtk_tree_selection_set_mode(sel, GTK_SELECTION_MULTIPLE);
+
+	GtkTreeViewColumn *column = gtk_tree_view_column_new();
+	gtk_tree_view_column_set_resizable(column, FALSE);
+	gtk_tree_view_column_set_sizing(column, GTK_TREE_VIEW_COLUMN_FIXED);
+
+	GtkCellRenderer *renderer_text = gtk_cell_renderer_text_new();
+	gtk_tree_view_column_pack_start(column, renderer_text, FALSE);
+	gtk_tree_view_column_set_cell_data_func(column, renderer_text,
+			viewer_thumblist_render_textcell, NULL, NULL);
+
+	GtkCellRenderer *renderer_pixbuf = gtk_cell_renderer_pixbuf_new();
+	gtk_tree_view_column_pack_start(column, renderer_pixbuf, TRUE);
+	gtk_tree_view_column_set_attributes(column, renderer_pixbuf, "pixbuf", 0, NULL);
+	gtk_tree_view_append_column(GTK_TREE_VIEW(pv->tree_thumb), column);
+
+	GtkListStore *store_thumbs = gtk_list_store_new(1, GDK_TYPE_PIXBUF);
+	gtk_tree_view_set_model(GTK_TREE_VIEW(pv->tree_thumb), GTK_TREE_MODEL(store_thumbs));
+	g_object_unref(store_thumbs);
+
+	gtk_container_add(GTK_CONTAINER(pv->swindow_tree), pv->tree_thumb);
+	gtk_widget_show(pv->tree_thumb);
+
+	g_signal_connect(pv->tree_thumb, "row-activated", G_CALLBACK(cb_thumb_activated), pv);
+	g_signal_connect(gtk_tree_view_get_selection(GTK_TREE_VIEW(pv->tree_thumb)),
+			"changed", G_CALLBACK(cb_thumb_sel_changed), pv);
+
+	return;
+}
+
 // UI-Aufbau-Funktion
 static void viewer_einrichten_fenster(PdfViewer *pv) {
 	pv->vf = gtk_window_new(GTK_WINDOW_TOPLEVEL);
@@ -586,31 +627,8 @@ static void viewer_einrichten_fenster(PdfViewer *pv) {
 	gtk_widget_set_halign(pv->layout, GTK_ALIGN_CENTER);
 
 	// Scrolled window für thumbnail_tree
-	pv->tree_thumb = gtk_tree_view_new();
-	gtk_tree_view_set_headers_visible(GTK_TREE_VIEW(pv->tree_thumb), FALSE);
-	GtkTreeSelection *sel = gtk_tree_view_get_selection(GTK_TREE_VIEW(pv->tree_thumb));
-	gtk_tree_selection_set_mode(sel, GTK_SELECTION_MULTIPLE);
-
-	GtkTreeViewColumn *column = gtk_tree_view_column_new();
-	gtk_tree_view_column_set_resizable(column, FALSE);
-	gtk_tree_view_column_set_sizing(column, GTK_TREE_VIEW_COLUMN_FIXED);
-
-	GtkCellRenderer *renderer_text = gtk_cell_renderer_text_new();
-	gtk_tree_view_column_pack_start(column, renderer_text, FALSE);
-	gtk_tree_view_column_set_cell_data_func(column, renderer_text,
-			viewer_thumblist_render_textcell, NULL, NULL);
-
-	GtkCellRenderer *renderer_pixbuf = gtk_cell_renderer_pixbuf_new();
-	gtk_tree_view_column_pack_start(column, renderer_pixbuf, TRUE);
-	gtk_tree_view_column_set_attributes(column, renderer_pixbuf, "pixbuf", 0, NULL);
-	gtk_tree_view_append_column(GTK_TREE_VIEW(pv->tree_thumb), column);
-
-	GtkListStore *store_thumbs = gtk_list_store_new(1, GDK_TYPE_PIXBUF);
-	gtk_tree_view_set_model(GTK_TREE_VIEW(pv->tree_thumb), GTK_TREE_MODEL(store_thumbs));
-	g_object_unref(store_thumbs);
-
 	pv->swindow_tree = gtk_scrolled_window_new(NULL, NULL);
-	gtk_container_add(GTK_CONTAINER(pv->swindow_tree), pv->tree_thumb);
+	viewer_ui_recreate_tree_thumb(pv);
 	GtkAdjustment *vadj_thumb = gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(pv->swindow_tree));
 
 	GtkWidget *paned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
@@ -694,10 +712,6 @@ static void viewer_einrichten_fenster(PdfViewer *pv) {
 			G_CALLBACK(cb_viewer_render_visible_pages), pv);
 	g_signal_connect_swapped(vadj_thumb, "value-changed",
 			G_CALLBACK(cb_viewer_render_visible_thumbs), pv);
-
-	g_signal_connect(pv->tree_thumb, "row-activated", G_CALLBACK(cb_thumb_activated), pv);
-	g_signal_connect(gtk_tree_view_get_selection(GTK_TREE_VIEW(pv->tree_thumb)),
-			"changed", G_CALLBACK(cb_thumb_sel_changed), pv);
 
 	g_signal_connect(pv->layout, "button-press-event",
 			G_CALLBACK(cb_viewer_layout_press_button), (gpointer)pv);

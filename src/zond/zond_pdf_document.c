@@ -313,8 +313,10 @@ gint zond_pdf_document_load_page(PdfDocumentPage *pdf_document_page,
 	ZondPdfDocumentPrivate *priv = zond_pdf_document_get_instance_private(
 			pdf_document_page->document);
 
-	if (pdf_document_page->page)
+	if (pdf_document_page->page) {
 		pdf_drop_page(ctx, pdf_document_page->page);
+		pdf_document_page->page = NULL;
+	}
 
 	fz_try(ctx)
 		pdf_document_page->page = pdf_load_page(ctx, priv->doc,

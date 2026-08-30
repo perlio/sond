@@ -104,7 +104,7 @@ void display_message(GtkWidget *window, ...) {
 
 	GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(window),
 			GTK_DIALOG_DESTROY_WITH_PARENT, GTK_MESSAGE_INFO, GTK_BUTTONS_CLOSE,
-			message);
+			"%s", message);
 	g_free(message);
 
 	my_dialog_run(GTK_DIALOG(dialog));
@@ -135,7 +135,7 @@ gint dialog_with_buttons(GtkWidget *window, const gchar *message,
 
 	GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(window),
 			GTK_DIALOG_DESTROY_WITH_PARENT, GTK_MESSAGE_QUESTION,
-			GTK_BUTTONS_NONE, message, NULL);
+			GTK_BUTTONS_NONE, "%s", message);
 	gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(dialog), "%s",
 			secondary);
 

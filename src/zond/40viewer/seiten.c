@@ -363,6 +363,8 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 		g_error_free(error);
 		g_ptr_array_unref(arr_document_page);
 
+		info_window_close(info_window);
+
 		return;
 	}
 
@@ -491,6 +493,9 @@ void cb_pv_seiten_ocr(GtkMenuItem *item, gpointer data) {
 				fz_drop_buffer(ctx, entry.ocr.buf_old);
 				continue;
 			}
+
+			if (font_ref) //gefunden - pdf_dict_gets() liefert nur eine geliehene Referenz
+				pdf_keep_obj(ctx, font_ref);
 
 			if (!font_ref) {
 				font_ref = pdf_put_sond_font(ctx,
@@ -771,8 +776,24 @@ static gint seiten_drehen(PdfViewer *pv, GPtrArray *arr_document_page,
 
 			rc = zond_pdf_document_load_page(pdf_document_page,
 					zond_pdf_document_get_ctx(pdf_document_page->document), error);
-			if (rc)
-				return -1;
+			if (rc) {
+				/* page/display_list/stext_page/arr_annots wurden oben bereits
+				 * verworfen, page ist jetzt NULL (zond_pdf_document_load_page()
+				 * setzt das bei einem gescheiterten Reload) - Flags müssen das
+				 * widerspiegeln, sonst hält der Renderer die Seite fälschlich
+				 * für geladen und griffe auf page (NULL) zu. Diese eine Seite
+				 * bleibt ungedreht (physisch/im pdf_obj zwar schon rotiert,
+				 * aber ohne Journal-Eintrag - geht beim nächsten Speichern
+				 * wieder verloren); mit den übrigen ausgewählten Seiten wird
+				 * fortgefahren. */
+				pdf_document_page->thread &= ~(2 | 4 | 8);
+
+				LOG_WARN("Seite %i konnte nach Drehung nicht neu geladen werden: %s",
+						pdf_document_page->page_akt + 1, (*error)->message);
+				g_clear_error(error);
+
+				continue;
+			}
 		}
 
 		pdf_document_page->thread &= 2;
@@ -857,7 +878,7 @@ static gint seiten_cb_loesche_seite(PdfViewer *pv, ViewerPageNew* viewer_page,
 }
 
 #ifndef VIEWER
-static gint seiten_anbindung_int(ZondDBase* zond_dbase, gint attached,
+static gint seiten_anbindung_int(ZondDBase* zond_dbase,
 		PdfDocumentPage* pdf_document_page, GError** error) {
 	gint rc = 0;
 	GArray* arr_sections = NULL;
@@ -905,7 +926,7 @@ static gint seiten_anbindung(PdfViewer *pv, GPtrArray *arr_document_page,
 
 		pdf_document_page = g_ptr_array_index(arr_document_page, i);
 
-		rc = seiten_anbindung_int(pv->zond->dbase_zond->zond_dbase_store, 0,
+		rc = seiten_anbindung_int(pv->zond->dbase_zond->zond_dbase_work,
 				pdf_document_page, error);
 		if (rc) {
 			if (rc == -1) g_prefix_error(error, "%s\n", __func__);
@@ -913,7 +934,7 @@ static gint seiten_anbindung(PdfViewer *pv, GPtrArray *arr_document_page,
 			return (rc == -1) ? -1 : 1;
 		}
 
-		rc = seiten_anbindung_int(pv->zond->dbase_zond->zond_dbase_store, 1,
+		rc = seiten_anbindung_int(pv->zond->dbase_zond->zond_dbase_store,
 				pdf_document_page, error);
 		if (rc) {
 			if (rc == -1) g_prefix_error(error, "%s\n", __func__);

@@ -455,9 +455,8 @@ gint viewer_handle_text_search(PdfViewer* pv, GtkWidget *widget, GError **error)
 		if (pdf_pos.seite == pdf_punkt.seite) //Ausgangsseite wieder erreicht?
 				{
 			//vielleicht Treffer vor/nach index?
-			if ((dir == 1 && pdf_pos.index <= (gint) pdf_punkt.punkt.y)
-					|| (dir == -1
-							&& pdf_pos.index >= (gint) pdf_punkt.punkt.y)) {
+			if ((dir == 1 && pdf_punkt.punkt.y == 0.0)
+					|| (dir == -1 && pdf_punkt.punkt.y == (gfloat) EOP)) {
 				pv->text_occ.not_found = TRUE;
 				display_message(pv->vf, "Kein Treffer", NULL);
 

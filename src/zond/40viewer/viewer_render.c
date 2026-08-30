@@ -194,8 +194,17 @@ void viewer_render_wait_for_transfer(PdfDocumentPage* pdf_document_page) {
 
 void viewer_close_thread_pool_and_transfer(PdfViewer *pdfv) {
 	if (pdfv->thread_pool_page) {
+		/* g_thread_pool_free() mit immediate=TRUE verwirft alle noch nicht
+		 * einem Worker zugeteilten (wartenden) Tasks - für jede davon wurde
+		 * count_active_thread aber bereits beim Einreihen (g_thread_pool_push())
+		 * hochgezählt und wird nie mehr heruntergezählt, da nie ein
+		 * RenderResponse dafür entsteht. Vor dem Free abfangen. */
+		guint unprocessed = g_thread_pool_unprocessed(pdfv->thread_pool_page);
+
 		g_thread_pool_free(pdfv->thread_pool_page, TRUE, TRUE);
 		pdfv->thread_pool_page = NULL;
+
+		pdfv->count_active_thread -= (gint) unprocessed;
 	}
 
 	viewer_render_transfer_rendered(pdfv, FALSE);
@@ -457,8 +466,10 @@ static gint viewer_render_stext_page_from_page(
 		fz_close_device(ctx, s_t_device);
 		fz_drop_device(ctx, s_t_device);
 	}
-	fz_catch( ctx )
+	fz_catch( ctx ) {
+		fz_drop_stext_page(ctx, stext_page);
 		ERROR_PDF
+	}
 
 	pdf_document_page->stext_page = stext_page;
 
