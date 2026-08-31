@@ -124,6 +124,72 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 	if (type == SOND_TVFM_ITEM_TYPE_LEAF || type == SOND_TVFM_ITEM_TYPE_LEAF_SECTION)
 		section = sond_tvfm_item_get_path_or_section(stvfm_item);
 
+	/* Ist ID (die zu löschende Datei bzw. der Abschnitt) selbst oder einer
+	 * ihrer Vorfahren im Bestandsverzeichnis Anbindungspunkt
+	 * (zond_dbase_find_baum_inhalt_file geht dazu die Vorfahren hoch)? Ein
+	 * angebundener Abkömmling von ID wird dagegen schon von der Prüfung
+	 * weiter unten (zond_dbase_test_path_section) erfasst - deren
+	 * "Eltern"-Zweig deckt exakt diesen Fall ab, und zwar günstiger als ein
+	 * zweiter rekursiver CTE-Walk über parent_ID (ohne Index auf parent_ID
+	 * potentiell teuer über die ganze knoten-Tabelle, s. das Einfrieren
+	 * weiter oben in dieser Session), während dieser Vorfahren-Check hier
+	 * ausschließlich über den ID-Primärschlüssel läuft und daher billig
+	 * bleibt.
+	 * Muss - genau wie die test_path_section-Prüfungen weiter unten - gegen
+	 * BEIDE Datenbanken laufen: Arbeits- und Speicher-Datenbank sind zwei
+	 * getrennte Instanzen mit i.A. unterschiedlichen IDs für denselben
+	 * Pfad/Abschnitt, die ID aus der einen taugt also nicht für eine Abfrage
+	 * gegen die andere - deshalb pro Datenbank eine eigene ID-Ermittlung.
+	 * In der Arbeits-DB wird - wie bei der Bestandsverzeichnis-eigenen
+	 * Sperre - still blockiert; ist der Vorfahre nur in der (noch nicht
+	 * aktuellen) Speicher-DB angebunden, ist das nur ein Zwischenzustand
+	 * durch fehlendes Speichern, daher dieselbe Bitte um vorheriges
+	 * Speichern wie bei den test_path_section-Treffern dort. */
+	if (type == SOND_TVFM_ITEM_TYPE_LEAF || type == SOND_TVFM_ITEM_TYPE_LEAF_SECTION) {
+		gint ID = 0;
+		gint baum_inhalt_file = 0;
+
+		rc = zond_dbase_get_section(priv->zond->dbase_zond->zond_dbase_work,
+				path, section, &ID, error);
+		if (rc)
+			return -1;
+
+		if (ID) {
+			rc = zond_dbase_find_baum_inhalt_file(
+					priv->zond->dbase_zond->zond_dbase_work, ID,
+					&baum_inhalt_file, NULL, NULL, error);
+			if (rc)
+				return -1;
+
+			if (baum_inhalt_file)
+				return 1;
+		}
+
+		ID = 0;
+		rc = zond_dbase_get_section(priv->zond->dbase_zond->zond_dbase_store,
+				path, section, &ID, error);
+		if (rc)
+			return -1;
+
+		if (ID) {
+			rc = zond_dbase_find_baum_inhalt_file(
+					priv->zond->dbase_zond->zond_dbase_store, ID,
+					&baum_inhalt_file, NULL, NULL, error);
+			if (rc)
+				return -1;
+
+			if (baum_inhalt_file) {
+				display_message(priv->zond->app_window,
+						"Die zu löschende Datei bzw. der Abschnitt ist "
+						"noch in der Speicher-Datenbank angebunden.\n"
+						"Bitte zuerst das Projekt speichern, "
+						"bevor Sie die Datei bzw. den Abschnitt löschen.", NULL);
+
+				return 1;
+			}
+		}
+	}
+
 	rc = zond_dbase_test_path_section(priv->zond->dbase_zond->zond_dbase_work,
 			path, section, FALSE, error);
 	if (rc == -1)
@@ -593,7 +659,6 @@ static gint zond_treeviewfm_delete_section(SondTVFMItem* stvfm_item, GError** er
 	gchar* filepart = NULL;
 	gchar const* section = NULL;
 	gint ID = 0;
-	gint baum_inhalt_file = 0;
 
 	ZondTreeviewFMPrivate* ztvfm_priv = NULL;
 
@@ -610,36 +675,10 @@ static gint zond_treeviewfm_delete_section(SondTVFMItem* stvfm_item, GError** er
 	if (rc)
 		return -1;
 
-	/* Ist dieser Abschnitt im Bestandsverzeichnis angebunden? Wenn ja, muss
-	 * die Anbindung dort mitentfernt werden - sonst bleibt ein Anker-Knoten
-	 * (type=2) zurück, dessen "link" auf die gleich gelöschte file_part-Zeile
-	 * zeigt (tote Referenz). */
-	rc = zond_dbase_get_baum_inhalt_file_from_file_part(
-			ztvfm_priv->zond->dbase_zond->zond_dbase_work, ID,
-			&baum_inhalt_file, error);
-	if (rc)
-		return -1;
-
-	if (baum_inhalt_file) {
-		GtkTreeIter *iter_baum_inhalt = NULL;
-
-		/* GUI-Zeile im Bestandsverzeichnis steht unter ID (file_part),
-		 * nicht unter baum_inhalt_file (Anker) - siehe
-		 * zond_treeviewfm_text_edited weiter oben, die denselben Weg geht. */
-		iter_baum_inhalt = zond_treeview_abfragen_iter(
-				ZOND_TREEVIEW(ztvfm_priv->zond->treeview[BAUM_INHALT]), ID);
-
-		if (iter_baum_inhalt) {
-			zond_tree_store_remove(iter_baum_inhalt);
-			gtk_tree_iter_free(iter_baum_inhalt);
-		}
-
-		rc = zond_dbase_remove_node(ztvfm_priv->zond->dbase_zond->zond_dbase_work,
-				baum_inhalt_file, error);
-		if (rc)
-			return -1;
-	}
-
+	/* Ist ID (oder ein Vorfahre) im Bestandsverzeichnis angebunden, wurde
+	 * die Löschung bereits in zond_treeviewfm_before_delete verhindert -
+	 * diese Funktion hier wird für einen angebundenen Abschnitt also nie
+	 * erreicht. */
 	rc = zond_dbase_remove_node(ztvfm_priv->zond->dbase_zond->zond_dbase_work, ID, error);
 	if (rc)
 		return -1;
