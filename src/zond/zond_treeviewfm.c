@@ -26,7 +26,6 @@
 
 typedef struct {
 	Projekt *zond;
-	gboolean changed_tmp;
 } ZondTreeviewFMPrivate;
 
 G_DEFINE_TYPE_WITH_PRIVATE(ZondTreeviewFM, zond_treeviewfm, SOND_TYPE_TREEVIEWFM)
@@ -109,12 +108,14 @@ static gboolean get_gmessage_index(SondTVFMItem* stvfm_item, gint* index) {
 }
 
 static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
-		SondTVFMItem *stvfm_item, GError **error) {
+		SondTVFMItem *stvfm_item, GError **error, gpointer *ctx) {
 	gint rc = 0;
 	g_autofree gchar* path = NULL;
 	gint index_from = 0;
 	gchar const* section = NULL;
 	SondTVFMItemType type;
+	gboolean from_gmessage = FALSE;
+	g_autofree gchar* prefix = NULL;
 
 	ZondTreeviewFMPrivate *priv = zond_treeviewfm_get_instance_private(ztvfm);
 
@@ -143,6 +144,11 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 
 		return 1;
 	}
+
+	/* Vorgezogen: muss vor der Wahl single-/dual-DB feststehen */
+	from_gmessage = get_gmessage_index(stvfm_item, &index_from);
+	if (from_gmessage)
+		prefix = g_strndup(path, strlen(path) - strlen(strrchr(path, '/') + 1));
 
 	/* Index-DB-Transaktion öffnen (vor zond-DB, damit both oder neither) */
 	if (priv->zond->wctx && priv->zond->wctx->index_ctx && !section) {
@@ -180,27 +186,26 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 		}
 	}
 
-	rc = dbase_zond_begin(priv->zond->dbase_zond, error);
+	/* Kontext für "after": Bit 0 = dual_write, Bit 1 = changed vor der Transaktion */
+	*ctx = GINT_TO_POINTER(
+			(from_gmessage ? 1 : 0) |
+			(priv->zond->dbase_zond->changed ? 2 : 0));
+
+	rc = from_gmessage ?
+			dbase_zond_begin(priv->zond->dbase_zond, error) :
+			zond_dbase_begin(priv->zond->dbase_zond->zond_dbase_work, error);
 	if (rc) {
 		if (priv->zond->wctx && priv->zond->wctx->index_ctx && !section)
 			sqlite3_exec(priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
 		return -1;
 	}
 
-	if (!section) { //wenn Datei gelöscht wird, kann auch Type-5-node gelöscht werden
-
-	}
-
 	//wenn aus GMessage verschoben wurde - nachfolgende indizes anpassen
-	if (get_gmessage_index(stvfm_item, &index_from)) {
+	if (from_gmessage) {
 		gint rc = 0;
-		gchar* prefix = NULL;
-
-		prefix = g_strndup(path, strlen(path) - strlen(strrchr(path, '/') + 1));
 
 		rc = dbase_zond_update_gmessage_index(priv->zond->dbase_zond,
 				prefix, index_from, FALSE, error);
-		g_free(prefix);
 		if (rc) {
 			dbase_zond_rollback(priv->zond->dbase_zond, error);
 			if (priv->zond->wctx && priv->zond->wctx->index_ctx && !section)
@@ -214,7 +219,7 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 
 static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 		SondTVFMItem* stvfm_item, SondTVFMItem* stvfm_item_parent,
-		gchar const* base_new, gint index_to, GError **error) {
+		gchar const* base_new, gint index_to, GError **error, gpointer *ctx) {
 	gint rc = 0;
 	g_autofree gchar* prefix_old = NULL;
 	g_autofree gchar* prefix_new = NULL;
@@ -242,8 +247,8 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 	else
 		prefix_new = add_string(prefix_new, g_strdup(base_new));
 
-	//Änderungsstatus zwischenspeichern
-	ztvfm_priv->changed_tmp = ztvfm_priv->zond->dbase_zond->changed;
+	//Kontext für "after" setzen: move ist immer dual (Bit 0 = 1), Bit 1 = changed vor der Transaktion
+	*ctx = GINT_TO_POINTER(1 | (ztvfm_priv->zond->dbase_zond->changed ? 2 : 0));
 
 	/* Index-DB-Transaktion öffnen und Pfad umbenennen */
 	if (ztvfm_priv->zond->wctx && ztvfm_priv->zond->wctx->index_ctx) {
@@ -340,30 +345,49 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 }
 
 static void zond_treeviewfm_after(SondTreeviewFM* stvfm,
-		gboolean suc) {
+		gboolean suc, gpointer ctx) {
 	GError* error_int = NULL;
+	gint c = GPOINTER_TO_INT(ctx);
+	gboolean dual_write = c & 1;
+	gboolean changed_before = (c >> 1) & 1;
 	ZondTreeviewFMPrivate *priv = zond_treeviewfm_get_instance_private(
 			ZOND_TREEVIEWFM(stvfm));
 
 	if (suc) {
 		gint rc = 0;
 
-		rc = dbase_zond_commit(priv->zond->dbase_zond, &error_int);
-		if (rc) {
-			if (priv->zond->wctx && priv->zond->wctx->index_ctx)
-				sqlite3_exec(priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
-			exit(EXIT_FAILURE);
+		if (dual_write) {
+			rc = dbase_zond_commit(priv->zond->dbase_zond, &error_int);
+			if (rc) {
+				if (priv->zond->wctx && priv->zond->wctx->index_ctx)
+					sqlite3_exec(priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
+				exit(EXIT_FAILURE);
+			}
+		} else {
+			rc = zond_dbase_commit(priv->zond->dbase_zond->zond_dbase_work, &error_int);
+			if (rc) {
+				if (priv->zond->wctx && priv->zond->wctx->index_ctx)
+					sqlite3_exec(priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
+				display_message(priv->zond->app_window,
+						"Fehler beim Speichern:\n\n", error_int->message, NULL);
+				g_clear_error(&error_int);
+			}
 		}
 		if (priv->zond->wctx && priv->zond->wctx->index_ctx)
 			sqlite3_exec(priv->zond->wctx->index_ctx->db, "COMMIT;", NULL, NULL, NULL);
 	}
 	else {
-		dbase_zond_rollback(priv->zond->dbase_zond, &error_int);
+		if (dual_write)
+			dbase_zond_rollback(priv->zond->dbase_zond, &error_int);
+		else
+			zond_dbase_rollback(priv->zond->dbase_zond->zond_dbase_work, &error_int);
+
 		if (priv->zond->wctx && priv->zond->wctx->index_ctx)
 			sqlite3_exec(priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
 	}
 
-	project_reset_changed(priv->zond, priv->changed_tmp);
+	if (dual_write)
+		project_reset_changed(priv->zond, changed_before);
 
 	return;
 }
@@ -569,6 +593,7 @@ static gint zond_treeviewfm_delete_section(SondTVFMItem* stvfm_item, GError** er
 	gchar* filepart = NULL;
 	gchar const* section = NULL;
 	gint ID = 0;
+	gint baum_inhalt_file = 0;
 
 	ZondTreeviewFMPrivate* ztvfm_priv = NULL;
 
@@ -584,6 +609,36 @@ static gint zond_treeviewfm_delete_section(SondTVFMItem* stvfm_item, GError** er
 	g_free(filepart);
 	if (rc)
 		return -1;
+
+	/* Ist dieser Abschnitt im Bestandsverzeichnis angebunden? Wenn ja, muss
+	 * die Anbindung dort mitentfernt werden - sonst bleibt ein Anker-Knoten
+	 * (type=2) zurück, dessen "link" auf die gleich gelöschte file_part-Zeile
+	 * zeigt (tote Referenz). */
+	rc = zond_dbase_get_baum_inhalt_file_from_file_part(
+			ztvfm_priv->zond->dbase_zond->zond_dbase_work, ID,
+			&baum_inhalt_file, error);
+	if (rc)
+		return -1;
+
+	if (baum_inhalt_file) {
+		GtkTreeIter *iter_baum_inhalt = NULL;
+
+		/* GUI-Zeile im Bestandsverzeichnis steht unter ID (file_part),
+		 * nicht unter baum_inhalt_file (Anker) - siehe
+		 * zond_treeviewfm_text_edited weiter oben, die denselben Weg geht. */
+		iter_baum_inhalt = zond_treeview_abfragen_iter(
+				ZOND_TREEVIEW(ztvfm_priv->zond->treeview[BAUM_INHALT]), ID);
+
+		if (iter_baum_inhalt) {
+			zond_tree_store_remove(iter_baum_inhalt);
+			gtk_tree_iter_free(iter_baum_inhalt);
+		}
+
+		rc = zond_dbase_remove_node(ztvfm_priv->zond->dbase_zond->zond_dbase_work,
+				baum_inhalt_file, error);
+		if (rc)
+			return -1;
+	}
 
 	rc = zond_dbase_remove_node(ztvfm_priv->zond->dbase_zond->zond_dbase_work, ID, error);
 	if (rc)

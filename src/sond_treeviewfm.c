@@ -1300,6 +1300,7 @@ static gint sond_tvfm_item_move(SondTVFMItem* stvfm_item,
 		gint index_to, GError** error) {
 	gint rc = 0;
 	gint res = 0;
+	gpointer ctx = NULL;
 
 	SondTVFMItemPrivate* stvfm_item_priv =
 			sond_tvfm_item_get_instance_private(stvfm_item);
@@ -1309,11 +1310,11 @@ static gint sond_tvfm_item_move(SondTVFMItem* stvfm_item,
 	if (stvfm_item_priv->stvfm == stvfm_item_parent_priv->stvfm)
 		g_signal_emit(stvfm_item_priv->stvfm,
 				SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->signal_before_move, 0,
-				stvfm_item, stvfm_item_parent, base, index_to, error, &res);
+				stvfm_item, stvfm_item_parent, base, index_to, error, &ctx, &res);
 	else {
 		g_signal_emit(stvfm_item_priv->stvfm,
 				SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->signal_before_delete, 0,
-				stvfm_item, error, &res);
+				stvfm_item, error, &ctx, &res);
 		if (res == -1)
 			return -1;
 		else if (res == 1)
@@ -1341,7 +1342,7 @@ static gint sond_tvfm_item_move(SondTVFMItem* stvfm_item,
 
 	g_signal_emit(stvfm_item_parent_priv->stvfm,
 			SOND_TREEVIEWFM_GET_CLASS(stvfm_item_parent_priv->stvfm)->signal_after, 0,
-			(rc == 0) ? TRUE : FALSE);
+			(rc == 0) ? TRUE : FALSE, ctx);
 	if (rc)
 		return -1;
 
@@ -1418,6 +1419,7 @@ static gint sond_treeviewfm_text_edited(SondTreeviewFM *stvfm,
 	SondTVFMItem* stvfm_item_parent = NULL;
 	SondTVFMItemPrivate* stvfm_item_priv = NULL;
 	gint res = 0;
+	gpointer ctx = NULL;
 
 	if (!is_valid_filename(text_new))
 		return 0;
@@ -1434,7 +1436,7 @@ static gint sond_treeviewfm_text_edited(SondTreeviewFM *stvfm,
 
 	g_signal_emit(stvfm_item_priv->stvfm,
 			SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->signal_before_move,
-			0, stvfm_item, stvfm_item_parent, text_new, 0, error, &res);
+			0, stvfm_item, stvfm_item_parent, text_new, 0, error, &ctx, &res);
 
 	if (res) {
 		g_object_unref(stvfm_item_parent);
@@ -1445,7 +1447,7 @@ static gint sond_treeviewfm_text_edited(SondTreeviewFM *stvfm,
 	g_object_unref(stvfm_item_parent);
 	g_signal_emit(stvfm_item_priv->stvfm,
 			SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->signal_after, 0,
-			(rc == 0) ? TRUE : FALSE);
+			(rc == 0) ? TRUE : FALSE, ctx);
 	if (rc)
 		return -1;
 
@@ -1590,12 +1592,13 @@ static void sond_treeviewfm_class_init(SondTreeviewFMClass *klass) {
 	sond_treeviewfm_add_base_menu(SOND_TREEVIEW_CLASS(klass)->gmenu);
 
 	klass->signal_before_move = g_signal_new("before-move",
-			SOND_TYPE_TREEVIEWFM, G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_INT, 5,
+			SOND_TYPE_TREEVIEWFM, G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_INT, 6,
 			SOND_TYPE_TVFM_ITEM,
 			SOND_TYPE_TVFM_ITEM,
 			G_TYPE_STRING,
 			G_TYPE_INT,
-			G_TYPE_POINTER);
+			G_TYPE_POINTER,   /* GError** */
+			G_TYPE_POINTER);  /* Transaktions-Kontext (out) */
 
 	klass->signal_before_insert = g_signal_new("before-insert",
 			SOND_TYPE_TREEVIEWFM, G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_INT, 5,
@@ -1606,13 +1609,15 @@ static void sond_treeviewfm_class_init(SondTreeviewFMClass *klass) {
 			G_TYPE_POINTER);
 
 	klass->signal_before_delete = g_signal_new("before-delete",
-			SOND_TYPE_TREEVIEWFM, G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_INT, 2,
+			SOND_TYPE_TREEVIEWFM, G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_INT, 3,
 			SOND_TYPE_TVFM_ITEM,
-			G_TYPE_POINTER);
+			G_TYPE_POINTER,   /* GError** */
+			G_TYPE_POINTER);  /* Transaktions-Kontext (out) */
 
 	klass->signal_after = g_signal_new("after",
-			SOND_TYPE_TREEVIEWFM, G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 1,
-			G_TYPE_BOOLEAN);
+			SOND_TYPE_TREEVIEWFM, G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 2,
+			G_TYPE_BOOLEAN,
+			G_TYPE_POINTER);  /* der von before-* gelieferte Kontext */
 
 	klass->text_from_section = NULL;
 	klass->deter_background = NULL;
@@ -2368,6 +2373,7 @@ static gint sond_treeviewfm_foreach_loeschen(SondTreeview *stv,
 	SondTVFMItem* stvfm_item = NULL;
 	gint res = 0;
 	gint rc = 0;
+	gpointer ctx = NULL;
 	SondTreeviewFM* stvfm = SOND_TREEVIEWFM(stv);
 
 	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)), iter, 0,
@@ -2375,7 +2381,7 @@ static gint sond_treeviewfm_foreach_loeschen(SondTreeview *stv,
 	g_object_unref(stvfm_item);
 
 	g_signal_emit(stvfm, SOND_TREEVIEWFM_GET_CLASS(stvfm)->signal_before_delete,
-			0, stvfm_item, error, &res);
+			0, stvfm_item, error, &ctx, &res);
 	if (res == -1)
 		return -1;
 	else if (res == 1)
@@ -2383,7 +2389,7 @@ static gint sond_treeviewfm_foreach_loeschen(SondTreeview *stv,
 
 	rc = delete_item(stvfm_item, error);
 	g_signal_emit(stvfm, SOND_TREEVIEWFM_GET_CLASS(stvfm)->signal_after,
-			0, (rc == 0) ? TRUE : FALSE);
+			0, (rc == 0) ? TRUE : FALSE, ctx);
 	if (rc)
 		return -1;
 
