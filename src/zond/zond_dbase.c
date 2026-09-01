@@ -711,8 +711,17 @@ gint zond_dbase_test_path_section(ZondDBase *zond_dbase, const gchar *filepart,
 			Anbindung anbindung_int = { 0 };
 
 			section_db = sqlite3_column_text(stmt[0], 0);
-			if (!(smaller ? section_db : (const guchar*) section))
-				return 1; //heißt, daß ganze Datei angebunden ist - dann ist jede section erfaßt
+
+			/* section_db==NULL heisst: die gefundene Anbindung zeigt auf die
+			 * GANZE Datei (kein spezieller Abschnitt) - das umfasst dann jede
+			 * section (auch eine schmalere, um die es hier gerade geht), und
+			 * zwar unabhaengig von smaller. War hier vorher fehlerhaft an
+			 * smaller gekoppelt (pruefte bei smaller==FALSE stattdessen den
+			 * eigenen section-Parameter statt section_db) - dadurch wurde eine
+			 * auf die ganze Datei bezogene Anbindung beim Loeschen eines
+			 * einzelnen Abschnitts uebersehen. */
+			if (!section_db)
+				return 1;
 			anbindung_parse_file_section((gchar const*) section_db, &anbindung_int);
 
 			if ((smaller ? anbindung_1_eltern_von_2(anbindung_int, anbindung) :

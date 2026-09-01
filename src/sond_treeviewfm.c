@@ -932,7 +932,11 @@ gint sond_treeviewfm_file_part_visible(SondTreeviewFM *stvfm, GtkTreeIter *iter_
 			return 1;
 		}
 
-		if (g_str_has_prefix(filepart, filepart_item)) {
+		/* Präfix-Treffer nur, wenn direkt danach ein Trenner folgt -
+		 * "/" bzw. der erste Schrägstrich von "//" - sonst würde z.B.
+		 * "sub" fälschlich als Präfix von "sub2/d.pdf" durchgehen. */
+		if (g_str_has_prefix(filepart, filepart_item)
+				&& filepart[strlen(filepart_item)] == '/') {
 			/* Präfix-Treffer: rekursiv in Kinder */
 			g_free(filepart_item);
 			gint rc = sond_treeviewfm_file_part_visible(stvfm, &iter_child,
