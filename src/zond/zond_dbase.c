@@ -624,14 +624,37 @@ static gint zond_dbase_rollback_to_statement(ZondDBase *zond_dbase,
 	return 0;
 }
 
-gint zond_dbase_test_path(ZondDBase *zond_dbase, const gchar *filepart,
-		gchar const* section, GError **error) {
+/* Escaped für LIKE: \\, %, _ werden mit \\ maskiert, damit sie in einem
+ * LIKE-Pattern (ESCAPE '\\') als Literal behandelt werden - notwendig, weil
+ * echte Datei-/Verzeichnisnamen (v.a. unter Windows) durchaus "%" oder "_"
+ * enthalten können, die sonst als SQL-Wildcards mißverstanden würden. */
+static gchar* like_escape(const gchar *s) {
+	GString *out = g_string_new(NULL);
+
+	for (const gchar *p = s; *p; p++) {
+		if (*p == '\\' || *p == '%' || *p == '_')
+			g_string_append_c(out, '\\');
+		g_string_append_c(out, *p);
+	}
+
+	return g_string_free(out, FALSE);
+}
+
+/* Existenzprüfung: gibt es im Bestandsverzeichnis (BAUM_INHALT) eine
+ * Anbindung (type=2), deren file_part mit path_prefix beginnt? Für den
+ * DIR-Fall in zond_treeviewfm_before_delete - path_prefix ist dort bereits
+ * path + Trenner ("/" bzw. "//"), damit z.B. "sub1/sub2" nicht fälschlich
+ * "sub1/sub2xyz" erfaßt. */
+gint zond_dbase_test_path(ZondDBase *zond_dbase, const gchar *path_prefix,
+		GError **error) {
 	gint rc = 0;
 	sqlite3_stmt **stmt = NULL;
+	g_autofree gchar *escaped = NULL;
+	g_autofree gchar *pattern = NULL;
 
 	const gchar *sql[] = { "SELECT k1.ID FROM knoten k1 INNER JOIN "
 			"knoten k2 ON k1.link=k2.ID "
-			"WHERE k1.type=2 AND k2.file_part LIKE ?1 || '%' COLLATE BINARY; "
+			"WHERE k1.type=2 AND k2.file_part LIKE ?1 ESCAPE '\\' COLLATE BINARY; "
 	};
 
 	rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
@@ -639,7 +662,10 @@ gint zond_dbase_test_path(ZondDBase *zond_dbase, const gchar *filepart,
 	if (rc)
 		return -1;
 
-	rc = sqlite3_bind_text(stmt[0], 1, filepart, -1, NULL);
+	escaped = like_escape(path_prefix);
+	pattern = g_strconcat(escaped, "%", NULL);
+
+	rc = sqlite3_bind_text(stmt[0], 1, pattern, -1, NULL);
 	if (rc != SQLITE_OK)
 		ERROR_Z_DBASE
 
@@ -661,7 +687,7 @@ gint zond_dbase_test_path_section(ZondDBase *zond_dbase, const gchar *filepart,
 
 	const gchar *sql[] = { "SELECT k2.section FROM knoten k1 INNER JOIN "
 			"knoten k2 ON k1.link=k2.ID "
-			"WHERE k1.type=2 AND k2.file_part LIKE ?1 COLLATE BINARY; "
+			"WHERE k1.type=2 AND k2.file_part = ?1 COLLATE BINARY; "
 	};
 
 	rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
@@ -1626,6 +1652,15 @@ gint zond_dbase_get_section(ZondDBase *zond_dbase, gchar const* filepart,
 	if (rc == SQLITE_ROW && ID)
 		*ID = sqlite3_column_int(stmt[0], 0);
 
+	/* Reset statt das Statement bei SQLITE_ROW offen (mit aktivem
+	 * Lese-Cursor) stehen zu lassen, bis zufällig irgendwann derselbe
+	 * Funktionsname auf demselben ZondDBase-Objekt erneut aufgerufen wird
+	 * (zond_dbase_prepare resettet erst dann). Ein offenes Statement hält
+	 * einen SHARED-Lock - genügt z.B., um sqlite3_backup_step in
+	 * zond_dbase_backup() auf diesem Ziel mit SQLITE_BUSY scheitern zu
+	 * lassen. */
+	sqlite3_reset(stmt[0]);
+
 	return 0;
 }
 
@@ -1673,6 +1708,9 @@ gint zond_dbase_find_baum_inhalt_file(ZondDBase *zond_dbase, gint node_id,
 			*file_part = g_strdup(
 					(gchar const* ) sqlite3_column_text(stmt[0], 2));
 	}
+
+	//s. Kommentar in zond_dbase_get_section
+	sqlite3_reset(stmt[0]);
 
 	return 0;
 }

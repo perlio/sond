@@ -124,91 +124,72 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 	if (type == SOND_TVFM_ITEM_TYPE_LEAF || type == SOND_TVFM_ITEM_TYPE_LEAF_SECTION)
 		section = sond_tvfm_item_get_path_or_section(stvfm_item);
 
-	/* Ist ID (die zu löschende Datei bzw. der Abschnitt) selbst oder einer
-	 * ihrer Vorfahren im Bestandsverzeichnis Anbindungspunkt
-	 * (zond_dbase_find_baum_inhalt_file geht dazu die Vorfahren hoch)? Ein
-	 * angebundener Abkömmling von ID wird dagegen schon von der Prüfung
-	 * weiter unten (zond_dbase_test_path_section) erfasst - deren
-	 * "Eltern"-Zweig deckt exakt diesen Fall ab, und zwar günstiger als ein
-	 * zweiter rekursiver CTE-Walk über parent_ID (ohne Index auf parent_ID
-	 * potentiell teuer über die ganze knoten-Tabelle, s. das Einfrieren
-	 * weiter oben in dieser Session), während dieser Vorfahren-Check hier
-	 * ausschließlich über den ID-Primärschlüssel läuft und daher billig
-	 * bleibt.
-	 * Muss - genau wie die test_path_section-Prüfungen weiter unten - gegen
-	 * BEIDE Datenbanken laufen: Arbeits- und Speicher-Datenbank sind zwei
-	 * getrennte Instanzen mit i.A. unterschiedlichen IDs für denselben
-	 * Pfad/Abschnitt, die ID aus der einen taugt also nicht für eine Abfrage
-	 * gegen die andere - deshalb pro Datenbank eine eigene ID-Ermittlung.
-	 * In der Arbeits-DB wird - wie bei der Bestandsverzeichnis-eigenen
-	 * Sperre - still blockiert; ist der Vorfahre nur in der (noch nicht
-	 * aktuellen) Speicher-DB angebunden, ist das nur ein Zwischenzustand
-	 * durch fehlendes Speichern, daher dieselbe Bitte um vorheriges
-	 * Speichern wie bei den test_path_section-Treffern dort. */
-	if (type == SOND_TVFM_ITEM_TYPE_LEAF || type == SOND_TVFM_ITEM_TYPE_LEAF_SECTION) {
-		gint ID = 0;
-		gint baum_inhalt_file = 0;
+	/* Sperre genau dann, wenn der zu löschende Knoten selbst (LEAF /
+	 * LEAF_SECTION) oder - bei einem DIR - irgendeiner seiner Abkömmlinge
+	 * im Bestandsverzeichnis angebunden ist. Das ist exakt der Fall, in
+	 * dem ON DELETE CASCADE (über parent_ID abwärts) einen Anker (type=2,
+	 * link zeigt auf den gelöschten Knoten) mit in den Abgrund reißen
+	 * würde - eine tote Referenz. Ein VORFAHRE von ID ist davon nie
+	 * betroffen (CASCADE läuft nie aufwärts) und braucht keine Sperre.
+	 *
+	 * DIR: Existenzprüfung mit Präfix - jede Anbindung, deren file_part
+	 * mit path + Trenner beginnt. Trenner ist "//", wenn path ein bloßer
+	 * Container-Root ist (sond_file_part gesetzt, path_or_section NULL -
+	 * der Container selbst wird als Verzeichnis dargestellt), sonst "/"
+	 * (echtes Dateisystemverzeichnis oder Unterpfad innerhalb eines
+	 * Containers).
+	 *
+	 * LEAF / LEAF_SECTION: exakter Abgleich file_part == path, bei
+	 * LEAF_SECTION zusätzlich Bereichsvergleich (umfaßt path_or_section
+	 * die in BAUM_INHALT gefundene section, oder ist sie gleich?). Beides
+	 * gegen beide Datenbanken. */
+	if (type == SOND_TVFM_ITEM_TYPE_DIR) {
+		gboolean is_container_root = sond_tvfm_item_get_sond_file_part(stvfm_item)
+				&& !sond_tvfm_item_get_path_or_section(stvfm_item);
+		g_autofree gchar *path_prefix = g_strconcat(path,
+				is_container_root ? "//" : "/", NULL);
 
-		rc = zond_dbase_get_section(priv->zond->dbase_zond->zond_dbase_work,
-				path, section, &ID, error);
-		if (rc)
+		rc = zond_dbase_test_path(priv->zond->dbase_zond->zond_dbase_work,
+				path_prefix, error);
+		if (rc == -1)
 			return -1;
+		else if (rc == 1)
+			return 1;
 
-		if (ID) {
-			rc = zond_dbase_find_baum_inhalt_file(
-					priv->zond->dbase_zond->zond_dbase_work, ID,
-					&baum_inhalt_file, NULL, NULL, error);
-			if (rc)
-				return -1;
-
-			if (baum_inhalt_file)
-				return 1;
-		}
-
-		ID = 0;
-		rc = zond_dbase_get_section(priv->zond->dbase_zond->zond_dbase_store,
-				path, section, &ID, error);
-		if (rc)
+		rc = zond_dbase_test_path(priv->zond->dbase_zond->zond_dbase_store,
+				path_prefix, error);
+		if (rc == -1)
 			return -1;
+		else if (rc == 1) {
+			display_message(priv->zond->app_window,
+					"Die zu löschende Datei bzw. der Abschnitt ist "
+					"noch in der Speicher-Datenbank vorhanden.\n"
+					"Bitte zuerst das Projekt speichern, "
+					"bevor Sie die Datei bzw. den Abschnitt löschen.", NULL);
 
-		if (ID) {
-			rc = zond_dbase_find_baum_inhalt_file(
-					priv->zond->dbase_zond->zond_dbase_store, ID,
-					&baum_inhalt_file, NULL, NULL, error);
-			if (rc)
-				return -1;
-
-			if (baum_inhalt_file) {
-				display_message(priv->zond->app_window,
-						"Die zu löschende Datei bzw. der Abschnitt ist "
-						"noch in der Speicher-Datenbank angebunden.\n"
-						"Bitte zuerst das Projekt speichern, "
-						"bevor Sie die Datei bzw. den Abschnitt löschen.", NULL);
-
-				return 1;
-			}
+			return 1;
 		}
-	}
+	} else {
+		rc = zond_dbase_test_path_section(priv->zond->dbase_zond->zond_dbase_work,
+				path, section, FALSE, error);
+		if (rc == -1)
+			return -1;
+		else if (rc == 1)
+			return 1;
 
-	rc = zond_dbase_test_path_section(priv->zond->dbase_zond->zond_dbase_work,
-			path, section, FALSE, error);
-	if (rc == -1)
-		return -1;
-	else if (rc == 1)
-		return 1;
+		rc = zond_dbase_test_path_section(priv->zond->dbase_zond->zond_dbase_store,
+				path, section, FALSE, error);
+		if (rc == -1)
+			return -1;
+		else if (rc == 1) {
+			display_message(priv->zond->app_window,
+					"Die zu löschende Datei bzw. der Abschnitt ist "
+					"noch in der Speicher-Datenbank vorhanden.\n"
+					"Bitte zuerst das Projekt speichern, "
+					"bevor Sie die Datei bzw. den Abschnitt löschen.", NULL);
 
-	rc = zond_dbase_test_path_section(priv->zond->dbase_zond->zond_dbase_store,
-			path, section, FALSE, error);
-	if (rc == -1)
-		return -1;
-	else if (rc == 1) {
-		display_message(priv->zond->app_window,
-				"Die zu löschende Datei bzw. der Abschnitt ist "
-				"noch in der Speicher-Datenbank vorhanden.\n"
-				"Bitte zuerst das Projekt speichern, "
-				"bevor Sie die Datei bzw. den Abschnitt löschen.", NULL);
-
-		return 1;
+			return 1;
+		}
 	}
 
 	/* Vorgezogen: muss vor der Wahl single-/dual-DB feststehen */
@@ -675,10 +656,10 @@ static gint zond_treeviewfm_delete_section(SondTVFMItem* stvfm_item, GError** er
 	if (rc)
 		return -1;
 
-	/* Ist ID (oder ein Vorfahre) im Bestandsverzeichnis angebunden, wurde
-	 * die Löschung bereits in zond_treeviewfm_before_delete verhindert -
-	 * diese Funktion hier wird für einen angebundenen Abschnitt also nie
-	 * erreicht. */
+	/* Ist ID selbst oder ein Abkömmling von ID im Bestandsverzeichnis
+	 * angebunden, wurde die Löschung bereits in
+	 * zond_treeviewfm_before_delete verhindert - diese Funktion hier wird
+	 * für einen angebundenen Abschnitt also nie erreicht. */
 	rc = zond_dbase_remove_node(ztvfm_priv->zond->dbase_zond->zond_dbase_work, ID, error);
 	if (rc)
 		return -1;
