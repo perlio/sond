@@ -975,7 +975,7 @@ static void zond_treeview_anbinden_error_message(InfoWindow *info_window,
 
 	sfp = sond_tvfm_item_get_sond_file_part(stvfm_item);
 	filepart = sond_file_part_get_filepart(sfp);
-	errmsg = g_strdup_printf(format, filepart, error->message);
+	errmsg = g_strdup_printf(format, filepart ? filepart : "(kein Dateiname)", error->message);
 	g_free(filepart);
 	g_error_free(error);
 	info_window_set_message(info_window, errmsg);
@@ -2350,7 +2350,7 @@ static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 	if (rc)
 		return -1;
 
-	if (!sfp && baum_click != BAUM_AUSWERTUNG)
+	if (!sfp && (open_with || baum_click != BAUM_AUSWERTUNG))
 		return 0;
 
 	//mit externem Programm oder mit renderer öffnen

@@ -282,10 +282,10 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 	//Falls aus GMessage verschoben wird - welchen Index hatte Eintrag?
 	from_gmessage = get_gmessage_index(stvfm_item, &index_from);
 
-	if (prefix_new) { //wenn nicht root-Verzeichnis
+	if (*prefix_new != '\0') { //wenn nicht root-Verzeichnis
 		if (!sond_tvfm_item_get_path_or_section(stvfm_item_parent))
 			prefix_new = add_string(prefix_new, g_strdup("//"));
-		else if (prefix_new) //wenn
+		else
 			prefix_new = add_string(prefix_new, g_strdup("/"));
 	}
 
@@ -721,10 +721,9 @@ static gint zond_treeviewfm_load_sections(SondTVFMItem* stvfm_item,
 		gchar* section_child = NULL;
 		gint rc = 0;
 		gint younger_sibling_id = 0;
-		gchar* icon_name = NULL;
 
 		rc = zond_dbase_get_node(ztvfm_priv->zond->dbase_zond->zond_dbase_work, child,
-				NULL, NULL, NULL, &section_child, &icon_name, NULL, NULL, error);
+				NULL, NULL, NULL, &section_child, NULL, NULL, NULL, error);
 		if (rc)
 			return -1;
 
@@ -732,7 +731,8 @@ static gint zond_treeviewfm_load_sections(SondTVFMItem* stvfm_item,
 				sond_tvfm_item_create(sond_tvfm_item_get_stvfm(stvfm_item),
 						sfp, section_child);
 		g_free(section_child);
-		sond_tvfm_item_set_icon_name(stvfm_item_child, icon_name);
+		sond_tvfm_item_set_icon_name(stvfm_item_child,
+				ztvfm_priv->zond->icon[ICON_ANBINDUNG].icon_name);
 		g_ptr_array_add(arr_children_int, stvfm_item_child);
 
 		rc = zond_dbase_get_younger_sibling(ztvfm_priv->zond->dbase_zond->zond_dbase_work,
