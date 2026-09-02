@@ -63,6 +63,8 @@ gint zond_dbase_backup(ZondDBase*, ZondDBase*, GError**);
 gint zond_dbase_prepare(ZondDBase*, const gchar*, const gchar**, gint,
 		sqlite3_stmt***, GError**);
 
+gint zond_dbase_check_journal_settings(ZondDBase*, GError**);
+
 gint zond_dbase_begin(ZondDBase*, GError**);
 
 gint zond_dbase_commit(ZondDBase*, GError**);
@@ -86,11 +88,6 @@ gint zond_dbase_update_icon_name(ZondDBase*, gint, const gchar*, GError**);
 gint zond_dbase_update_node_text(ZondDBase*, gint, const gchar*, GError**);
 
 gint zond_dbase_update_text(ZondDBase*, gint, const gchar*, GError**);
-
-gint zond_dbase_update_path(ZondDBase*, const gchar*, const gchar*, GError**);
-
-gint zond_dbase_update_gmessage_index(ZondDBase*, gchar const*,
-		gint, gboolean, GError**);
 
 gint zond_dbase_verschieben_knoten(ZondDBase*, gint, gint, gboolean, GError**);
 
@@ -129,8 +126,6 @@ gint zond_dbase_find_baum_inhalt_file(ZondDBase*, gint, gint*, gint*, gchar**,
 gint zond_dbase_is_file_part_copied(ZondDBase*, gint, gboolean*, GError**);
 
 gint zond_dbase_get_arr_sections(ZondDBase*, gchar const*, GArray**, GError** );
-
-gint zond_dbase_update_section(ZondDBase*, gint, const gchar*, GError**);
 
 G_END_DECLS
 

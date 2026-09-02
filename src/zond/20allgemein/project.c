@@ -52,40 +52,56 @@
 gint dbase_zond_begin(DBaseZond* dbase_zond, GError** error) {
 	gint rc = 0;
 
-	rc = zond_dbase_begin(dbase_zond->zond_dbase_store, error);
+	/* journal_mode/synchronous können sich jederzeit von außen geändert
+	 * haben (s. zond_dbase_check_journal_settings()) - deshalb hier vor
+	 * jeder Dual-Write-Transaktion erneut geprüft, nicht nur beim Öffnen.
+	 * Für BEIDE Dateien, obwohl die Transaktion selbst nur noch auf EINER
+	 * Connection läuft (s.u.) - work hat trotz ATTACH weiterhin seine
+	 * eigene, unabhängige Datei/Verbindung für alle Einzel-DB-Operationen,
+	 * deren journal_mode/synchronous unabhängig von außen verstellt worden
+	 * sein könnte. */
+	rc = zond_dbase_check_journal_settings(dbase_zond->zond_dbase_store, error);
 	if (rc)
 		return -1;
 
-	rc = zond_dbase_begin(dbase_zond->zond_dbase_work, error);
+	rc = zond_dbase_check_journal_settings(dbase_zond->zond_dbase_work, error);
 	if (rc)
-		ERROR_ROLLBACK_Z(dbase_zond->zond_dbase_store)
+		return -1;
 
-	return 0;
+	/* Nur noch EIN BEGIN auf der store-Connection - work ist per ATTACH
+	 * (project_create_dbase_zond()) als zweites Schema mit eingehängt,
+	 * die Dual-Write-Funktionen (dbase_zond_update_sections()/_path()/
+	 * _gmessage_index()) schreiben schema-qualifiziert auf main+work
+	 * innerhalb dieser einen Transaktion (ToDo.c, Architektur-Plan
+	 * Atomarität store/work, Punkt 4). */
+	return zond_dbase_begin(dbase_zond->zond_dbase_store, error);
 }
 
 void dbase_zond_rollback(DBaseZond* dbase_zond, GError** error) {
-	ZondDBase* dbases[] = { dbase_zond->zond_dbase_store, dbase_zond->zond_dbase_work };
+	GError* error_int = NULL;
 
-	for (gint i = 0; i < 2; i++) {
-		GError* error_int = NULL;
+	/* Nur noch EIN ROLLBACK (Punkt 4) - die alte Merge-Logik für ZWEI
+	 * unabhängige Rollback-Fehler (store- und work-Connection) entfällt
+	 * dadurch (Punkt 5). Trotzdem weiterhin über einen lokalen error_int,
+	 * NICHT direkt über den übergebenen error-Parameter: der hält an
+	 * dieser Stelle i.d.R. schon den Fehler, WEGEN dem gerade
+	 * zurückgerollt wird (z.B. den gescheiterten Commit, s.
+	 * dbase_zond_commit()) - würde das fehlschlagende ROLLBACK-Statement
+	 * selbst *error direkt überschreiben, ginge dieser eigentliche Grund
+	 * verloren (und die alte GError würde geleakt). Daher: anhängen statt
+	 * überschreiben, wie zuvor. */
+	zond_dbase_rollback(dbase_zond->zond_dbase_store, &error_int);
+	if (!error_int)
+		return;   //Normalfall: Rollback erfolgreich
 
-		zond_dbase_rollback(dbases[i], &error_int);
-		if (!error_int)
-			continue;   //Normalfall: Rollback erfolgreich
-
-		/* Passiert nur, wenn das ROLLBACK-Statement selbst fehlschlägt
-		 * (selten). Vorhandenen Fehler (Grund des Rollbacks) nicht
-		 * überschreiben, sondern die Rollback-Fehlermeldung anhängen -
-		 * beide Informationen müssen beim Anwender ankommen. */
-		if (!error)
-			g_error_free(error_int);
-		else if (*error) {
-			(*error)->message = add_string((*error)->message,
-					g_strdup_printf("\n\n%s", error_int->message));
-			g_error_free(error_int);
-		} else
-			*error = error_int;
-	}
+	if (!error)
+		g_error_free(error_int);
+	else if (*error) {
+		(*error)->message = add_string((*error)->message,
+				g_strdup_printf("\n\n%s", error_int->message));
+		g_error_free(error_int);
+	} else
+		*error = error_int;
 
 	return;
 }
@@ -93,16 +109,18 @@ void dbase_zond_rollback(DBaseZond* dbase_zond, GError** error) {
 gint dbase_zond_commit(DBaseZond* dbase_zond, GError** error) {
 	gint rc = 0;
 
+	/* Nur noch EIN COMMIT (Punkt 4). Der frühere "Katastrophe"-Fall (zweiter
+	 * Commit scheitert, nachdem der erste schon erfolgreich war -
+	 * store/work dadurch inkonsistent) kann strukturell nicht mehr
+	 * auftreten, weil es nur noch einen einzigen Commit auf einer
+	 * einzigen Connection gibt - der schlägt entweder ganz oder gar nicht
+	 * fehl (vorausgesetzt journal_mode/synchronous halten, s.
+	 * zond_dbase_check_journal_settings() oben). Entfällt daher
+	 * ersatzlos (Punkt 4/5). */
 	rc = zond_dbase_commit(dbase_zond->zond_dbase_store, error);
 	if (rc) {
 		dbase_zond_rollback(dbase_zond, error);
 		return -1;
-	}
-
-	rc = zond_dbase_commit(dbase_zond->zond_dbase_work, error);
-	if (rc) {
-		// If second commit fails, we have inconsistent databases - critical error
-		g_error("Katastrophe - Datenbanken inkonsistent - 2. commit: %s", (*error)->message);
 	}
 
 	return 0;
@@ -112,39 +130,105 @@ gint dbase_zond_commit(DBaseZond* dbase_zond, GError** error) {
 // Database Update Functions
 // ============================================================================
 
-static gint dbase_zond_update_section_dbase(ZondDBase* zond_dbase,
-		DisplayedDocument* dd, GError** error) {
+/* Alle drei folgenden Funktionen laufen auf der EINEN store-Connection mit
+ * angehängtem work-Schema (project_create_dbase_zond(), ATTACH DATABASE
+ * ... AS work) - dieselbe schema-qualifizierte SQL wird einmal für "main"
+ * (=store) und einmal für "work" ausgeführt, innerhalb derselben, von
+ * dbase_zond_begin() geöffneten Transaktion (ToDo.c, Architektur-Plan
+ * Atomarität store/work, Punkt 3). work behält daneben unverändert seine
+ * eigene Connection für alle anderen (Einzel-DB-)Operationen. */
+
+/* Sections müssen für main und work UNABHÄNGIG gelesen und neu berechnet
+ * werden (nicht: einmal berechnen, in beide schreiben) - store und work
+ * können für dieselbe Zeile unterschiedliche Ausgangswerte haben, da work
+ * laufend fortgeschrieben, store aber nur bei project_save() komplett
+ * nachgezogen wird (Diskussion 03.09.2026). */
+static gint dbase_zond_update_section_schema(sqlite3 *db, gchar const *schema,
+		DisplayedDocument *dd, GError **error) {
 	gint rc = 0;
+	gchar *sql = NULL;
+	sqlite3_stmt *stmt = NULL;
+	SondFilePartPDF *sfp_pdf = NULL;
+	gchar *filepart = NULL;
 	g_autoptr(GArray) arr_sections = NULL;
-	SondFilePartPDF* sfp_pdf = NULL;
-	gchar* filepart = NULL;
 
 	sfp_pdf = zond_pdf_document_get_sfp_pdf(dd->zpdfd_part->zond_pdf_document);
 	filepart = sond_file_part_get_filepart(SOND_FILE_PART(sfp_pdf));
 
-	rc = zond_dbase_get_arr_sections(zond_dbase, filepart, &arr_sections, error);
-	g_free(filepart);
-	if (rc)
+	sql = g_strdup_printf("SELECT ID, section FROM %s.knoten WHERE file_part=?1;",
+			schema);
+	rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+	g_free(sql);
+	if (rc != SQLITE_OK) {
+		if (error)
+			*error = g_error_new(g_quark_from_static_string("SQLITE3"), rc,
+					"%s (%s): %s", __func__, schema, sqlite3_errmsg(db));
+		g_free(filepart);
 		return -1;
+	}
+	sqlite3_bind_text(stmt, 1, filepart, -1, SQLITE_TRANSIENT);
+	g_free(filepart);
 
-	for (gint i = 0; i < arr_sections->len; i++) {
+	arr_sections = g_array_new(FALSE, FALSE, sizeof(Section));
+	g_array_set_clear_func(arr_sections, (GDestroyNotify) section_free);
+
+	while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
 		Section section = { 0 };
+
+		section.ID = sqlite3_column_int(stmt, 0);
+		section.section = g_strdup((gchar const*) sqlite3_column_text(stmt, 1));
+
+		//wenn section == NULL, dann brauch es nicht gespeichert zu werden,
+		//ist ja die ganze PDF-Datei - keine Anpassung nötig
+		if (section.section)
+			g_array_append_val(arr_sections, section);
+	}
+	sqlite3_finalize(stmt);
+
+	if (rc != SQLITE_DONE) {
+		if (error)
+			*error = g_error_new(g_quark_from_static_string("SQLITE3"), rc,
+					"%s (%s): %s", __func__, schema, sqlite3_errmsg(db));
+		return -1;
+	}
+
+	for (guint i = 0; i < arr_sections->len; i++) {
+		Section section = g_array_index(arr_sections, Section, i);
 		Anbindung anbindung_int = { 0 };
-		gint rc = 0;
-		gchar* section_new = NULL;
+		gchar *section_new = NULL;
+		gchar *sql_update = NULL;
+		sqlite3_stmt *stmt_update = NULL;
 
-		section = g_array_index(arr_sections, Section, i);
 		anbindung_parse_file_section(section.section, &anbindung_int);
-
 		anbindung_aktualisieren(dd->zpdfd_part->zond_pdf_document, &anbindung_int);
 		// Recalculate changes that will be removed during save
 		anbindung_korrigieren(dd->zpdfd_part, &anbindung_int);
-
 		anbindung_build_file_section(anbindung_int, &section_new);
-		rc = zond_dbase_update_section(zond_dbase, section.ID, section_new, error);
-		g_free(section_new);
-		if (rc)
+
+		sql_update = g_strdup_printf("UPDATE %s.knoten SET section=?2 WHERE ID=?1;",
+				schema);
+		rc = sqlite3_prepare_v2(db, sql_update, -1, &stmt_update, NULL);
+		g_free(sql_update);
+		if (rc != SQLITE_OK) {
+			if (error)
+				*error = g_error_new(g_quark_from_static_string("SQLITE3"), rc,
+						"%s (%s): %s", __func__, schema, sqlite3_errmsg(db));
+			g_free(section_new);
 			return -1;
+		}
+
+		sqlite3_bind_int(stmt_update, 1, section.ID);
+		sqlite3_bind_text(stmt_update, 2, section_new, -1, SQLITE_TRANSIENT);
+		g_free(section_new);
+
+		rc = sqlite3_step(stmt_update);
+		sqlite3_finalize(stmt_update);
+		if (rc != SQLITE_DONE) {
+			if (error)
+				*error = g_error_new(g_quark_from_static_string("SQLITE3"), rc,
+						"%s (%s): %s", __func__, schema, sqlite3_errmsg(db));
+			return -1;
+		}
 	}
 
 	return 0;
@@ -152,13 +236,14 @@ static gint dbase_zond_update_section_dbase(ZondDBase* zond_dbase,
 
 gint dbase_zond_update_sections(DBaseZond* dbase_zond, DisplayedDocument* dd,
 		GError** error) {
+	sqlite3 *db = zond_dbase_get_dbase(dbase_zond->zond_dbase_store);
 	gint rc = 0;
 
-	rc = dbase_zond_update_section_dbase(dbase_zond->zond_dbase_store, dd, error);
+	rc = dbase_zond_update_section_schema(db, "main", dd, error);
 	if (rc)
 		return -1;
 
-	rc = dbase_zond_update_section_dbase(dbase_zond->zond_dbase_work, dd, error);
+	rc = dbase_zond_update_section_schema(db, "work", dd, error);
 	if (rc)
 		return -1;
 
@@ -167,34 +252,87 @@ gint dbase_zond_update_sections(DBaseZond* dbase_zond, DisplayedDocument* dd,
 
 gint dbase_zond_update_path(DBaseZond* dbase_zond, gchar const* prefix_old,
 		gchar const* prefix_new, GError** error) {
-	gint rc = 0;
+	sqlite3 *db = zond_dbase_get_dbase(dbase_zond->zond_dbase_store);
+	static gchar const *schemas[] = { "main", "work" };
 
-	rc = zond_dbase_update_path(dbase_zond->zond_dbase_store, prefix_old,
-			prefix_new, error);
-	if (rc)
-		return -1;
+	for (gint i = 0; i < 2; i++) {
+		gchar *sql = NULL;
+		sqlite3_stmt *stmt = NULL;
+		gint rc = 0;
 
-	rc = zond_dbase_update_path(dbase_zond->zond_dbase_work, prefix_old, prefix_new,
-			error);
-	if (rc)
-		return -1;
+		sql = g_strdup_printf("UPDATE %s.knoten SET file_part = "
+				"REPLACE( SUBSTR( file_part, 1, LENGTH( ?1 ) ), ?1, ?2 ) || "
+				"SUBSTR( file_part, LENGTH( ?1 ) + 1 );", schemas[i]);
+		rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+		g_free(sql);
+		if (rc != SQLITE_OK) {
+			if (error)
+				*error = g_error_new(g_quark_from_static_string("SQLITE3"), rc,
+						"%s (%s): %s", __func__, schemas[i], sqlite3_errmsg(db));
+			return -1;
+		}
+
+		sqlite3_bind_text(stmt, 1, prefix_old, -1, SQLITE_STATIC);
+		sqlite3_bind_text(stmt, 2, prefix_new, -1, SQLITE_STATIC);
+
+		rc = sqlite3_step(stmt);
+		sqlite3_finalize(stmt);
+		if (rc != SQLITE_DONE) {
+			if (error)
+				*error = g_error_new(g_quark_from_static_string("SQLITE3"), rc,
+						"%s (%s): %s", __func__, schemas[i], sqlite3_errmsg(db));
+			return -1;
+		}
+	}
 
 	return 0;
 }
 
 gint dbase_zond_update_gmessage_index(DBaseZond* dbase_zond,
 		gchar const* prefix, gint index, gboolean into, GError** error) {
-	gint rc = 0;
+	sqlite3 *db = zond_dbase_get_dbase(dbase_zond->zond_dbase_store);
+	static gchar const *schemas[] = { "main", "work" };
 
-	rc = zond_dbase_update_gmessage_index(dbase_zond->zond_dbase_store, prefix,
-			index, into, error);
-	if (rc)
-		return -1;
+	for (gint i = 0; i < 2; i++) {
+		gchar *sql = NULL;
+		sqlite3_stmt *stmt = NULL;
+		gint rc = 0;
 
-	rc = zond_dbase_update_gmessage_index(dbase_zond->zond_dbase_work, prefix,
-			index, into, error);
-	if (rc)
-		return -1;
+		sql = g_strdup_printf(
+				"UPDATE %s.knoten "
+				"SET file_part = ?1 || " //?1 ist prefix
+				"(CAST(SUBSTR(SUBSTR(file_part, LENGTH(?1) + 1), 1, "
+				"INSTR(SUBSTR(file_part, LENGTH(?1) + 1) || '/', '/') - 1) "
+				"AS INTEGER) + ?2) || " //?2 ist Zahl, die hinzugesetzt/abgezogen wird
+				"SUBSTR(SUBSTR(file_part, LENGTH(?1) + 1), "
+				"INSTR(SUBSTR(file_part, LENGTH(?1) + 1) || '/', '/')) "
+				"WHERE file_part LIKE ?1 || '%%' "
+				"AND CAST(SUBSTR(SUBSTR(file_part, LENGTH(?1) + 1), 1, "
+						"INSTR(SUBSTR(file_part, LENGTH(?1) + 1) || '/', '/') - 1) "
+						"AS INTEGER) >= ?3; ", //?3 ist Schwellenwert
+				schemas[i]);
+		rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+		g_free(sql);
+		if (rc != SQLITE_OK) {
+			if (error)
+				*error = g_error_new(g_quark_from_static_string("SQLITE3"), rc,
+						"%s (%s): %s", __func__, schemas[i], sqlite3_errmsg(db));
+			return -1;
+		}
+
+		sqlite3_bind_text(stmt, 1, prefix, -1, SQLITE_STATIC);
+		sqlite3_bind_int(stmt, 2, into ? 1 : -1);
+		sqlite3_bind_int(stmt, 3, index);
+
+		rc = sqlite3_step(stmt);
+		sqlite3_finalize(stmt);
+		if (rc != SQLITE_DONE) {
+			if (error)
+				*error = g_error_new(g_quark_from_static_string("SQLITE3"), rc,
+						"%s (%s): %s", __func__, schemas[i], sqlite3_errmsg(db));
+			return -1;
+		}
+	}
 
 	return 0;
 }
@@ -277,17 +415,48 @@ static gint project_create_dbase_zond(Projekt *zond, gboolean create, GError **e
 	path_tmp = g_strconcat(path, ".tmp", NULL);
 
 	zond_dbase_work = zond_dbase_new(path_tmp, TRUE, FALSE, error);
-	g_free(path_tmp);
 	if (!zond_dbase_work) {
+		g_free(path_tmp);
 		g_object_unref(zond_dbase_store);
 		return -1;
 	}
 
 	rc = zond_dbase_backup(zond_dbase_store, zond_dbase_work, error);
 	if (rc) {
+		g_free(path_tmp);
 		g_object_unref(zond_dbase_store);
 		g_object_unref(zond_dbase_work);
 		return -1;
+	}
+
+	/* work zusätzlich als zweites Schema an store anhängen (ToDo.c,
+	 * Architektur-Plan Atomarität store/work, Punkt 2): work behält
+	 * daneben seine eigene, unten registrierte Verbindung für alle
+	 * "normalen" Einzel-DB-Operationen - die angehängte Verbindung wird
+	 * nur von den Dual-Write-Funktionen (dbase_zond_update_sections()/
+	 * _path()/_gmessage_index(), project.c) benutzt. %Q escaped/quoted
+	 * path_tmp automatisch (könnte theoretisch ein Apostroph enthalten). */
+	{
+		gchar *sql_attach = NULL;
+		gchar *errmsg_sqlite = NULL;
+		gint rc_attach = 0;
+
+		sql_attach = sqlite3_mprintf("ATTACH DATABASE %Q AS work;", path_tmp);
+		rc_attach = sqlite3_exec(zond_dbase_get_dbase(zond_dbase_store),
+				sql_attach, NULL, NULL, &errmsg_sqlite);
+		sqlite3_free(sql_attach);
+		g_free(path_tmp);
+
+		if (rc_attach != SQLITE_OK) {
+			if (error)
+				*error = g_error_new(g_quark_from_static_string("SQLITE3"),
+						rc_attach, "%s: ATTACH work: %s", __func__,
+						errmsg_sqlite);
+			sqlite3_free(errmsg_sqlite);
+			g_object_unref(zond_dbase_store);
+			g_object_unref(zond_dbase_work);
+			return -1;
+		}
 	}
 
 	sqlite3_update_hook(zond_dbase_get_dbase(zond_dbase_work),

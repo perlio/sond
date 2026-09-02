@@ -393,6 +393,108 @@ static gint zond_dbase_open(ZondDBase *zond_dbase, gboolean create_file,
 		}
 	}
 
+	rc = zond_dbase_check_journal_settings(zond_dbase, error);
+	if (rc)
+		return -1;
+
+	return 0;
+}
+
+/* journal_mode/synchronous prüfen und ggf. korrigieren (ToDo.c,
+ * Architektur-Plan Atomarität store/work, Punkt 1): Voraussetzung für
+ * atomare Mehrdatei-Transaktionen per ATTACH ist journal_mode in
+ * {DELETE, TRUNCATE, PERSIST} (nicht WAL/MEMORY/OFF) UND synchronous
+ * != OFF (s. sqlite.org/atomiccommit.html, sqlite.org/wal.html,
+ * Zitate im ToDo.c-Eintrag). Beides sind Dateieigenschaften, nicht an
+ * eine Verbindung gebunden - können also jederzeit von außen (auch bei
+ * offener eigener Verbindung) unbemerkt umgestellt worden sein, daher
+ * hier bei jedem Öffnen geprüft (zond_dbase_open()) UND zusätzlich vor
+ * jeder Dual-Write-Transaktion (dbase_zond_begin(), project.c). */
+gint zond_dbase_check_journal_settings(ZondDBase *zond_dbase, GError **error) {
+	sqlite3 *db = zond_dbase_get_dbase(zond_dbase);
+	sqlite3_stmt *stmt = NULL;
+	gint rc = 0;
+	gchar *journal_mode = NULL;
+
+	rc = sqlite3_prepare_v2(db, "PRAGMA journal_mode;", -1, &stmt, NULL);
+	if (rc != SQLITE_OK) {
+		if (error)
+			*error = g_error_new(g_quark_from_static_string("SQLITE3"), rc,
+					"%s: PRAGMA journal_mode: %s", __func__,
+					sqlite3_errmsg(db));
+		return -1;
+	}
+	if (sqlite3_step(stmt) == SQLITE_ROW)
+		journal_mode = g_strdup((const gchar*) sqlite3_column_text(stmt, 0));
+	sqlite3_finalize(stmt);
+
+	if (journal_mode && g_ascii_strcasecmp(journal_mode, "delete")
+			&& g_ascii_strcasecmp(journal_mode, "truncate")
+			&& g_ascii_strcasecmp(journal_mode, "persist")) {
+		//falscher Modus (WAL/MEMORY/OFF) - Rückwechsel versuchen
+		g_free(journal_mode);
+		journal_mode = NULL;
+
+		stmt = NULL;
+		rc = sqlite3_prepare_v2(db, "PRAGMA journal_mode=DELETE;", -1, &stmt,
+				NULL);
+		if (rc == SQLITE_OK) {
+			if (sqlite3_step(stmt) == SQLITE_ROW)
+				journal_mode = g_strdup(
+						(const gchar*) sqlite3_column_text(stmt, 0));
+			sqlite3_finalize(stmt);
+		}
+	}
+
+	if (!journal_mode || (g_ascii_strcasecmp(journal_mode, "delete")
+			&& g_ascii_strcasecmp(journal_mode, "truncate")
+			&& g_ascii_strcasecmp(journal_mode, "persist"))) {
+		g_free(journal_mode);
+		g_set_error(error, SOND_ERROR, 0,
+				"Datenbank wird von einem anderen Programm verwendet "
+				"(journal_mode)");
+		return -1;
+	}
+	g_free(journal_mode);
+
+	{
+		gint sync_val = -1;
+
+		stmt = NULL;
+		rc = sqlite3_prepare_v2(db, "PRAGMA synchronous;", -1, &stmt, NULL);
+		if (rc != SQLITE_OK) {
+			if (error)
+				*error = g_error_new(g_quark_from_static_string("SQLITE3"),
+						rc, "%s: PRAGMA synchronous: %s", __func__,
+						sqlite3_errmsg(db));
+			return -1;
+		}
+		if (sqlite3_step(stmt) == SQLITE_ROW)
+			sync_val = sqlite3_column_int(stmt, 0);
+		sqlite3_finalize(stmt);
+
+		if (sync_val == 0) {
+			//synchronous=OFF - Rückwechsel versuchen
+			sqlite3_exec(db, "PRAGMA synchronous=FULL;", NULL, NULL, NULL);
+
+			stmt = NULL;
+			sync_val = -1;
+			if (sqlite3_prepare_v2(db, "PRAGMA synchronous;", -1, &stmt,
+					NULL) == SQLITE_OK) {
+				if (sqlite3_step(stmt) == SQLITE_ROW)
+					sync_val = sqlite3_column_int(stmt, 0);
+				sqlite3_finalize(stmt);
+			}
+
+			if (sync_val == 0) {
+				g_set_error(error, SOND_ERROR, 0,
+						"Datenbank wird von einem anderen Programm verwendet "
+						"(synchronous=OFF)");
+				return -1;
+			}
+		}
+	}
+
 	return 0;
 }
 
@@ -1035,78 +1137,6 @@ gint zond_dbase_update_text(ZondDBase *zond_dbase, gint node_id,
 		ERROR_Z_DBASE
 
 	rc = sqlite3_bind_text(stmt[0], 2, text, -1, NULL);
-	if (rc != SQLITE_OK)
-		ERROR_Z_DBASE
-
-	rc = sqlite3_step(stmt[0]);
-	if (rc != SQLITE_DONE)
-		ERROR_Z_DBASE
-
-	return 0;
-}
-
-gint zond_dbase_update_path(ZondDBase *zond_dbase, const gchar *old_path,
-		const gchar *new_path, GError **error) {
-	gint rc = 0;
-	sqlite3_stmt **stmt = NULL;
-
-	const gchar *sql[] = { "UPDATE knoten SET file_part = "
-			"REPLACE( SUBSTR( file_part, 1, LENGTH( ?1 ) ), ?1, ?2 ) || "
-			"SUBSTR( file_part, LENGTH( ?1 ) + 1 );" };
-
-	rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
-			error);
-	if (rc)
-		return -1;
-
-	rc = sqlite3_bind_text(stmt[0], 1, old_path, -1, NULL);
-	if (rc != SQLITE_OK)
-		ERROR_Z_DBASE
-
-	rc = sqlite3_bind_text(stmt[0], 2, new_path, -1, NULL);
-	if (rc != SQLITE_OK)
-		ERROR_Z_DBASE
-
-	rc = sqlite3_step(stmt[0]);
-	if (rc != SQLITE_DONE)
-		ERROR_Z_DBASE
-
-	return 0;
-}
-
-gint zond_dbase_update_gmessage_index(ZondDBase* zond_dbase, gchar const* prefix,
-		gint index, gboolean into, GError** error) {
-	gint rc = 0;
-	sqlite3_stmt **stmt = NULL;
-
-	const gchar *sql[] = {
-			"UPDATE knoten "
-			"SET file_part = ?1 || " //?1 ist prefix
-			"(CAST(SUBSTR(SUBSTR(file_part, LENGTH(?1) + 1), 1, "
-			"INSTR(SUBSTR(file_part, LENGTH(?1) + 1) || '/', '/') - 1) "
-			"AS INTEGER) + ?2) || " //?2 ist Zahl, die hinzugesetzt/abgezogen wird
-			"SUBSTR(SUBSTR(file_part, LENGTH(?1) + 1), "
-			"INSTR(SUBSTR(file_part, LENGTH(?1) + 1) || '/', '/')) "
-			"WHERE file_part LIKE ?1 || '%' "
-			"AND CAST(SUBSTR(SUBSTR(file_part, LENGTH(?1) + 1), 1, "
-					"INSTR(SUBSTR(file_part, LENGTH(?1) + 1) || '/', '/') - 1) "
-					"AS INTEGER) >= ?3; " //?3 ist Schwellenwert
-		};
-
-	rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
-			error);
-	if (rc)
-		return -1;
-
-	rc = sqlite3_bind_text(stmt[0], 1, prefix, -1, NULL);
-	if (rc != SQLITE_OK)
-		ERROR_Z_DBASE
-
-	rc = sqlite3_bind_int(stmt[0], 2, into ? 1 : -1);
-	if (rc != SQLITE_OK)
-		ERROR_Z_DBASE
-
-	rc = sqlite3_bind_int(stmt[0], 3, index);
 	if (rc != SQLITE_OK)
 		ERROR_Z_DBASE
 
@@ -1801,33 +1831,6 @@ gint zond_dbase_get_arr_sections(ZondDBase* zond_dbase, gchar const* file_part,
 		//ist ja die ganze PDF-Datei - keine Anpassung nötig
 		if (section.section) g_array_append_val(*arr_sections, section);
 	} while (rc == SQLITE_ROW);
-
-	return 0;
-}
-
-gint zond_dbase_update_section(ZondDBase *zond_dbase, gint node_id,
-		const gchar *section, GError **error) {
-	gint rc = 0;
-	sqlite3_stmt **stmt = NULL;
-	const gchar *sql[] = {
-			"UPDATE knoten SET section=?2 WHERE ID=?1;" };
-
-	rc = zond_dbase_prepare(zond_dbase, __func__, sql, nelem(sql), &stmt,
-			error);
-	if (rc)
-		return -1;
-
-	rc = sqlite3_bind_int(stmt[0], 1, node_id);
-	if (rc != SQLITE_OK)
-		ERROR_Z_DBASE
-
-	rc = sqlite3_bind_text(stmt[0], 2, section, -1, NULL);
-	if (rc != SQLITE_OK)
-		ERROR_Z_DBASE
-
-	rc = sqlite3_step(stmt[0]);
-	if (rc != SQLITE_DONE)
-		ERROR_Z_DBASE
 
 	return 0;
 }
