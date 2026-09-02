@@ -324,43 +324,16 @@ static void cb_win_index_erstellen_sel(GSimpleAction *a, GVariant *p, gpointer d
 
 static void cb_win_indexsuche_auswahl(GSimpleAction *a, GVariant *p, gpointer d) {
 	Projekt *zond = (Projekt*) d;
-	GError *error = NULL;
-	GHashTable *ht_fileparts = NULL;
-	Baum baum = KEIN_BAUM;
 
 	/* Auswahl im Baum ermitteln, der gerade tatsächlich etwas ausgewählt
 	 * hat (s. zond_baum_mit_auswahl() oben - robuster als das frühere
 	 * zond->baum_prev, das durch Menü-Ereignisreihenfolge veraltet sein
 	 * konnte). Vorher wurde hier immer NULL übergeben, "Ausgewählte
 	 * Punkte" filterte also nie und verhielt sich wie "Gesamtes
-	 * Projektverzeichnis". */
-	baum = zond_baum_mit_auswahl(zond);
-	if (baum == KEIN_BAUM) {
-		display_message(zond->app_window, "Keine Punkte ausgewählt", NULL);
-		return;
-	}
-
-	if (baum == BAUM_FS)
-		ht_fileparts = zond_treeviewfm_get_fileparts(
-				ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), TRUE, &error);
-	else
-		ht_fileparts = zond_treeview_get_selected_fileparts(
-				ZOND_TREEVIEW(zond->treeview[baum]), &error);
-
-	if (!ht_fileparts) {
-		display_message(zond->app_window, "Fehler beim Ermitteln der Auswahl:\n",
-				error ? error->message : "?", NULL);
-		g_clear_error(&error);
-		return;
-	}
-	if (g_hash_table_size(ht_fileparts) == 0) {
-		display_message(zond->app_window, "Keine Punkte ausgewählt", NULL);
-		g_hash_table_destroy(ht_fileparts);
-		return;
-	}
-
-	zond_indexsuche_activate_with_selection(NULL, ht_fileparts, d);
-	g_hash_table_destroy(ht_fileparts);
+	 * Projektverzeichnis". Nur hier per Scan ermittelt, weil das globale
+	 * Fenstermenü (anders als die Kontextmenüs) keinen eigenen
+	 * Baum-Kontext hat - s. zond_indexsuche_activate_fuer_baum(). */
+	zond_indexsuche_activate_fuer_baum(zond, zond_baum_mit_auswahl(zond));
 }
 
 /* ============================================================================

@@ -706,3 +706,43 @@ zond_indexsuche_activate_with_selection(GtkMenuItem *item,
 		GHashTable* ht_fileparts, gpointer data) {
     zond_indexsuche_do((Projekt*) data, ht_fileparts, ht_fileparts);
 }
+
+/* Gemeinsame Logik fuer "Indexsuche in Auswahl", aufgerufen aus den
+ * Kontextmenues aller drei Baeume (dort ist "baum" instanzgebunden bekannt,
+ * ueber zond->baum_active - zuverlaessig, da bei Rechtsklick synchron per
+ * focus-in gesetzt) sowie aus dem globalen Fenstermenue (dort wird "baum"
+ * vorher per zond_baum_mit_auswahl() ermittelt, weil dort kein fester
+ * Baum-Kontext existiert). baum == KEIN_BAUM zeigt "Keine Punkte
+ * ausgewaehlt" an. */
+void
+zond_indexsuche_activate_fuer_baum(Projekt *zond, Baum baum) {
+    GError *error = NULL;
+    GHashTable *ht_fileparts = NULL;
+
+    if (baum == KEIN_BAUM) {
+        display_message(zond->app_window, "Keine Punkte ausgewählt", NULL);
+        return;
+    }
+
+    if (baum == BAUM_FS)
+        ht_fileparts = zond_treeviewfm_get_fileparts(
+                ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), TRUE, &error);
+    else
+        ht_fileparts = zond_treeview_get_selected_fileparts(
+                ZOND_TREEVIEW(zond->treeview[baum]), &error);
+
+    if (!ht_fileparts) {
+        display_message(zond->app_window, "Fehler beim Ermitteln der Auswahl:\n",
+                error ? error->message : "?", NULL);
+        g_clear_error(&error);
+        return;
+    }
+    if (g_hash_table_size(ht_fileparts) == 0) {
+        display_message(zond->app_window, "Keine Punkte ausgewählt", NULL);
+        g_hash_table_destroy(ht_fileparts);
+        return;
+    }
+
+    zond_indexsuche_activate_with_selection(NULL, ht_fileparts, zond);
+    g_hash_table_destroy(ht_fileparts);
+}

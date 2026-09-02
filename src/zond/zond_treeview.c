@@ -308,6 +308,24 @@ static void zond_treeview_class_init(ZondTreeviewClass *klass) {
 	g_menu_append_section(gmenu, NULL, G_MENU_MODEL(sec_edit));
 	g_object_unref(sec_edit);
 
+	/* Indexsuche: "Gesamtes Projektverzeichnis" referenziert direkt die
+	 * globale win.indexsuche-Action (s. init_win_actions() in
+	 * headerbar.c) - unabhängig von jeder Auswahl, daher ohne Weiteres
+	 * gemeinsam nutzbar. "Ausgewählte Punkte" braucht dagegen eine lokale
+	 * stv.-Action (s. zond_treeview_action_indexsuche_auswahl unten), die
+	 * über zond->baum_active zuverlässig weiß, ob gerade BAUM_INHALT oder
+	 * BAUM_AUSWERTUNG gemeint ist - eine gemeinsame, parameterlose
+	 * win.-Action könnte das für zwei Bäume mit derselben (klassenweit
+	 * geteilten) Menüstruktur nicht unterscheiden. */
+	GMenu *sec_idx = g_menu_new();
+	GMenu *sub_idx = g_menu_new();
+	g_menu_append(sub_idx, "Gesamtes Projektverzeichnis", "win.indexsuche");
+	g_menu_append(sub_idx, "Ausgew\u00e4hlte Punkte",    "stv.indexsuche-sel");
+	g_menu_append_submenu(sec_idx, "Index durchsuchen", G_MENU_MODEL(sub_idx));
+	g_object_unref(sub_idx);
+	g_menu_append_section(gmenu, NULL, G_MENU_MODEL(sec_idx));
+	g_object_unref(sec_idx);
+
 	/* Icon-Submenu: leer, wird bei erster Instanz befuellt */
 	GMenu *sec_icon = g_menu_new();
 	klass->gmenu_icons = g_menu_new();
@@ -2578,6 +2596,18 @@ static void zond_treeview_action_icon(GSimpleAction *a, GVariant *p, gpointer d)
 	if (rc == -1) { display_message(zond->app_window, "Icon \u00e4ndern fehlgeschlagen\n\n", error->message, NULL); g_error_free(error); }
 }
 
+static void zond_treeview_action_indexsuche_auswahl(GSimpleAction *a,
+		GVariant *p, gpointer d) {
+	Projekt *zond = (Projekt*) d;
+
+	/* baum_active statt Scan: bei Rechtsklick in diesem Baum synchron per
+	 * focus-in gesetzt (s. cb_treeview_focus_in, app_window.c), also hier
+	 * zuverlässig BAUM_INHALT bzw. BAUM_AUSWERTUNG - anders als beim
+	 * globalen Fenstermenü (s. zond_indexsuche_activate_fuer_baum() in
+	 * zond_indexsuche.c). */
+	zond_indexsuche_activate_fuer_baum(zond, zond->baum_active);
+}
+
 static void zond_treeview_init_contextmenu(ZondTreeview *ztv) {
 	/* Instanzspezifische Aktionen registrieren.
 	 * GMenu-Sections wurden bereits in class_init aufgebaut. */
@@ -2596,7 +2626,8 @@ static void zond_treeview_init_contextmenu(ZondTreeview *ztv) {
 		{ "anb-entf",      G_CALLBACK(zond_treeview_action_anb_entf),		NULL},
 		{ "jump",          G_CALLBACK(zond_treeview_action_jump),			NULL},
 		{ "oeffnen",       G_CALLBACK(zond_treeview_action_oeffnen),
-				G_VARIANT_TYPE_BOOLEAN}
+				G_VARIANT_TYPE_BOOLEAN},
+		{ "indexsuche-sel", G_CALLBACK(zond_treeview_action_indexsuche_auswahl), NULL}
 	};
 
 	for (guint i = 0; i < G_N_ELEMENTS(acts); i++) {

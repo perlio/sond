@@ -936,7 +936,7 @@ static void zond_treeviewfm_class_init(ZondTreeviewFMClass *klass) {
 
 	GMenu *sec_idx = g_menu_new();
 	GMenu *sub_idx = g_menu_new();
-	g_menu_append(sub_idx, "Gesamtes Projektverzeichnis", "stv.indexsuche");
+	g_menu_append(sub_idx, "Gesamtes Projektverzeichnis", "win.indexsuche");
 	g_menu_append(sub_idx, "Ausgew\u00e4hlte Punkte",    "stv.indexsuche-sel");
 	g_menu_append_submenu(sec_idx, "Index durchsuchen", G_MENU_MODEL(sub_idx));
 	g_object_unref(sub_idx);
@@ -990,27 +990,20 @@ static void zond_treeviewfm_jump_activate(GtkMenuItem* item, gpointer data) {
 	return;
 }
 
-static void zond_treeviewfm_indexsuche_auswahl_activate(GtkMenuItem *item,
-		gpointer data) {
-	Projekt *zond = (Projekt*) data;
-	GHashTable* ht = NULL;
-
-	zond_indexsuche_activate_with_selection(item, ht, zond);
-}
-
 static void zond_treeviewfm_action_jump(GSimpleAction *a, GVariant *p,
 		gpointer d) {
 	zond_treeviewfm_jump_activate(NULL, d);
 }
 
-static void zond_treeviewfm_action_indexsuche(GSimpleAction *a, GVariant *p,
-		gpointer d) {
-	zond_indexsuche_activate(NULL, d);
-}
-
 static void zond_treeviewfm_action_indexsuche_auswahl(GSimpleAction *a,
 		GVariant *p, gpointer d) {
-	zond_treeviewfm_indexsuche_auswahl_activate(NULL, d);
+	Projekt *zond = (Projekt*) d;
+
+	/* baum_active statt Scan: bei Rechtsklick im Dateiverzeichnis synchron
+	 * per focus-in gesetzt (s. cb_treeview_focus_in, app_window.c), also
+	 * hier zuverlässig BAUM_FS - anders als beim globalen Fenstermenü
+	 * (s. zond_indexsuche_activate_fuer_baum() in zond_indexsuche.c). */
+	zond_indexsuche_activate_fuer_baum(zond, zond->baum_active);
 }
 
 static void zond_treeviewfm_init_contextmenu(ZondTreeviewFM *ztvfm,
@@ -1025,12 +1018,6 @@ static void zond_treeviewfm_init_contextmenu(ZondTreeviewFM *ztvfm,
 			G_CALLBACK(zond_treeviewfm_action_jump), zond);
 	g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act_jump));
 	g_object_unref(act_jump);
-
-	GSimpleAction *act_idx = g_simple_action_new("indexsuche", NULL);
-	g_signal_connect(act_idx, "activate",
-			G_CALLBACK(zond_treeviewfm_action_indexsuche), zond);
-	g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act_idx));
-	g_object_unref(act_idx);
 
 	GSimpleAction *act_idx_sel = g_simple_action_new("indexsuche-sel", NULL);
 	g_signal_connect(act_idx_sel, "activate",
