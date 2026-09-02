@@ -605,6 +605,8 @@ SondFilePart* sond_file_part_from_filepart(gchar const* filepart, GError** error
 			return NULL;
 		}
 
+		if (sfp)
+			g_object_unref(sfp);
 		sfp = sfp_child;
 		zaehler++;
 	}
@@ -1455,8 +1457,15 @@ static gint sond_file_part_pdf_authen_doc(SondFilePartPDF* sfp_pdf, fz_context* 
 
 	SondFilePartPDFPrivate* sfp_pdf_priv = sond_file_part_pdf_get_instance_private(sfp_pdf);
 
+	/* eigene Kopie, NICHT sfp_pdf_priv->passwd selbst - dialog_with_buttons()
+	 * (s. misc.c) gibt den String, auf den sein gchar**-Parameter zeigt, per
+	 * g_free() frei und ersetzt ihn. Würde password_try hier denselben
+	 * Pointer wie sfp_pdf_priv->passwd halten, würde genau dieser Aufruf
+	 * sfp_pdf_priv->passwd freigeben, ohne das Feld zu aktualisieren -
+	 * dangling pointer / Use-after-free, sobald das gecachte Passwort erneut
+	 * fehlschlägt (Dialog abgebrochen oder falsch eingegeben). */
 	if (sfp_pdf_priv->passwd)
-		password_try = sfp_pdf_priv->passwd;
+		password_try = g_strdup(sfp_pdf_priv->passwd);
 
 	do {
 		gint res_auth = 0;
@@ -1467,23 +1476,30 @@ static gint sond_file_part_pdf_authen_doc(SondFilePartPDF* sfp_pdf, fz_context* 
 		fz_catch(ctx) {
 			if (error) *error = g_error_new(g_quark_from_static_string("mupdf"), fz_caught(ctx),
 					"%s\n%s", __func__, fz_caught_message(ctx));
+			g_free(password_try);
 
 			return -1;
 		}
 		if (res_auth) //erfolgreich!
 		{
 			sfp_pdf_priv->auth = res_auth;
-			if (password_try) //Passwort überhaupt erforderlich
+			if (password_try) { //Passwort überhaupt erforderlich
+				g_free(sfp_pdf_priv->passwd);
 				sfp_pdf_priv->passwd = password_try;
+			}
 			break;
-		} else if (!prompt)
+		} else if (!prompt) {
+			g_free(password_try);
 			return 1;
+		}
 
 		res_dialog = dialog_with_buttons(NULL, "PDF verschlüsselt", "Passwort eingeben:",
 				&password_try, "Ok", GTK_RESPONSE_OK, "Abbrechen",
 				GTK_RESPONSE_CANCEL, NULL);
-		if (res_dialog != GTK_RESPONSE_OK)
+		if (res_dialog != GTK_RESPONSE_OK) {
+			g_free(password_try);
 			return 1;
+		}
 	} while (1);
 
 	return 0;
@@ -1645,7 +1661,19 @@ gint sond_file_part_pdf_load_embedded_files(SondFilePartPDF* sfp_pdf,
 	return 0;
 }
 
+static void sond_file_part_pdf_finalize(GObject *self) {
+	SondFilePartPDFPrivate *sfp_pdf_priv =
+			sond_file_part_pdf_get_instance_private(SOND_FILE_PART_PDF(self));
+
+	g_free(sfp_pdf_priv->passwd);
+
+	G_OBJECT_CLASS(sond_file_part_pdf_parent_class)->finalize(self);
+
+	return;
+}
+
 static void sond_file_part_pdf_class_init(SondFilePartPDFClass *klass) {
+	G_OBJECT_CLASS(klass)->finalize = sond_file_part_pdf_finalize;
 
 	return;
 }
@@ -1760,7 +1788,7 @@ static fz_stream* sond_file_part_pdf_lookup_embedded_file(fz_context* ctx,
 
 	if (!lookup.stream) { //Datei nicht gefunden
 		if (error) *error = g_error_new(g_quark_from_static_string("sond"),
-				0, "%s\embedded file '%s' nicht gefunden", __func__, path);
+				0, "%s\nembedded file '%s' nicht gefunden", __func__, path);
 
 		return NULL;
 	}
@@ -1892,27 +1920,29 @@ static fz_buffer* sond_file_part_pdf_mod_emb_file(SondFilePartPDF* sfp_pdf,
 	return buf_out;
 }
 
-static gint look_for_embedded_file(fz_context* ctx, pdf_obj* names, pdf_obj* key,
-		pdf_obj* val, gpointer data, GError** error) {
-	pdf_obj* EF_F = NULL;
-	gchar const* path_embedded = NULL;
-	gchar const* path = (gchar const*) data;
-
-	EF_F = pdf_get_EF_F(ctx, val, &path_embedded, error);
-	if (!EF_F)
-		return -1;
-
-	if (g_strcmp0(path_embedded, path) == 0)
-		return 1;
-
-	return 0;
-}
-
 typedef struct {
 	gchar const* path_old;
 	gchar const* path_new;
 	gboolean found;
 } Rename;
+
+static gint look_for_embedded_file(fz_context* ctx, pdf_obj* names, pdf_obj* key,
+		pdf_obj* val, gpointer data, GError** error) {
+	pdf_obj* EF_F = NULL;
+	gchar const* path_embedded = NULL;
+	Rename* rename = (Rename*) data;
+
+	EF_F = pdf_get_EF_F(ctx, val, &path_embedded, error);
+	if (!EF_F)
+		return -1;
+
+	if (g_strcmp0(path_embedded, rename->path_new) == 0) {
+		rename->found = TRUE;
+		return 1;
+	}
+
+	return 0;
+}
 
 static gint rename_embedded_file(fz_context* ctx, pdf_obj* names, pdf_obj* key,
 		pdf_obj* val, gpointer data, GError** error) {
