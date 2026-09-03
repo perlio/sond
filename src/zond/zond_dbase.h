@@ -6,6 +6,19 @@
 typedef struct sqlite3 sqlite3;
 typedef struct sqlite3_stmt sqlite3_stmt;
 
+/* Guard fuer g_auto(): resettet beim Verlassen des Scopes die Statements,
+ die per zond_dbase_prepare() geholt wurden. Muß von JEDER Funktion, die
+ zond_dbase_prepare() aufruft, unmittelbar nach dem Erfolgs-Check angelegt
+ werden - zond_dbase_prepare() selbst resettet (Cache-Hit) nicht mehr. */
+typedef struct {
+	sqlite3_stmt **stmt;
+	gint num_stmts;
+} SondStmtResetGuard;
+
+void sond_stmt_reset_guard_clear(SondStmtResetGuard*);
+
+G_DEFINE_AUTO_CLEANUP_CLEAR_FUNC(SondStmtResetGuard, sond_stmt_reset_guard_clear)
+
 typedef enum {
 	ZOND_DBASE_TYPE_BAUM_ROOT,
 	ZOND_DBASE_TYPE_BAUM_STRUKT, //1

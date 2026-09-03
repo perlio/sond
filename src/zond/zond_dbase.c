@@ -593,6 +593,13 @@ static gint zond_dbase_prepare_stmts(ZondDBase *zond_dbase, gint num,
 	return 0;
 }
 
+void sond_stmt_reset_guard_clear(SondStmtResetGuard *guard) {
+	for (gint i = 0; i < guard->num_stmts; i++)
+		sqlite3_reset(guard->stmt[i]);
+
+	return;
+}
+
 gint zond_dbase_prepare(ZondDBase *zond_dbase, const gchar *func,
 		const gchar **sql, gint num_stmts, sqlite3_stmt ***stmt, GError **error) {
 	if (!(*stmt = g_object_get_data(G_OBJECT(zond_dbase), func))) {
@@ -608,9 +615,10 @@ gint zond_dbase_prepare(ZondDBase *zond_dbase, const gchar *func,
 		}
 
 		g_object_set_data_full(G_OBJECT(zond_dbase), func, *stmt, g_free);
-	} else
-		for (gint i = 0; i < num_stmts; i++)
-			sqlite3_reset((*stmt)[i]);
+	}
+	/* Reset erfolgt nicht mehr hier: jede aufrufende Funktion muß per
+	 g_auto(SondStmtResetGuard) selbst dafür sorgen, daß ihre Statements
+	 beim Verlassen des Scopes resettet werden. */
 
 	return 0;
 }
@@ -625,6 +633,8 @@ gint zond_dbase_begin(ZondDBase *zond_dbase, GError **error) {
 			error);
 	if (rc)
 		return -1;
+
+	g_auto(SondStmtResetGuard) reset_guard = { stmt, nelem(sql) };
 
 	rc = sqlite3_step(stmt[0]);
 	if (rc != SQLITE_DONE)
@@ -647,6 +657,8 @@ gint zond_dbase_commit(ZondDBase *zond_dbase, GError **error) {
 		return -1;
 	}
 
+	g_auto(SondStmtResetGuard) reset_guard = { stmt, nelem(sql) };
+
 	rc = sqlite3_step(stmt[0]);
 	if (rc != SQLITE_DONE)
 		ERROR_Z_DBASE
@@ -667,6 +679,8 @@ static gint do_zond_dbase_rollback(ZondDBase *zond_dbase, GError **error) {
 
 		return -1;
 	}
+
+	g_auto(SondStmtResetGuard) reset_guard = { stmt, nelem(sql) };
 
 	rc = sqlite3_step(stmt[0]);
 	if (rc != SQLITE_DONE)
@@ -719,6 +733,8 @@ static gint zond_dbase_rollback_to_statement(ZondDBase *zond_dbase,
 		return -1;
 	}
 
+	g_auto(SondStmtResetGuard) reset_guard = { stmt, nelem(sql) };
+
 	rc = sqlite3_step(stmt[0]);
 	if (rc != SQLITE_DONE)
 		ERROR_Z_DBASE
@@ -764,6 +780,8 @@ gint zond_dbase_test_path(ZondDBase *zond_dbase, const gchar *path_prefix,
 	if (rc)
 		return -1;
 
+	g_auto(SondStmtResetGuard) reset_guard = { stmt, nelem(sql) };
+
 	escaped = like_escape(path_prefix);
 	pattern = g_strconcat(escaped, "%", NULL);
 
@@ -796,6 +814,8 @@ gint zond_dbase_test_path_section(ZondDBase *zond_dbase, const gchar *filepart,
 			error);
 	if (rc)
 		return -1;
+
+	g_auto(SondStmtResetGuard) reset_guard = { stmt, nelem(sql) };
 
 	rc = sqlite3_bind_text(stmt[0], 1, filepart, -1, NULL);
 	if (rc != SQLITE_OK)
@@ -913,6 +933,8 @@ gint zond_dbase_insert_node(ZondDBase *zond_dbase, gint anchor_ID,
 		return -1;
 	}
 
+	g_auto(SondStmtResetGuard) reset_guard = { stmt, nelem(sql) };
+
 	//Damit alles auf NULL gestellt wird
 	sqlite3_clear_bindings(stmt[1]);
 
@@ -1010,6 +1032,8 @@ gint zond_dbase_create_file_root(ZondDBase *zond_dbase, const gchar *file_part,
 		return -1;
 	}
 
+	g_auto(SondStmtResetGuard) reset_guard = { stmt, nelem(sql) };
+
 	rc = sqlite3_bind_text(stmt[1], 1, file_part, -1, NULL);
 	if (rc != SQLITE_OK)
 		ERROR_Z_DBASE
@@ -1070,6 +1094,8 @@ gint zond_dbase_update_icon_name(ZondDBase *zond_dbase, gint node_id,
 		return -1;
 	}
 
+	g_auto(SondStmtResetGuard) reset_guard = { stmt, nelem(sql) };
+
 	rc = sqlite3_bind_int(stmt[0], 1, node_id);
 	if (rc != SQLITE_OK)
 		ERROR_Z_DBASE
@@ -1101,6 +1127,8 @@ gint zond_dbase_update_node_text(ZondDBase *zond_dbase, gint node_id,
 		return -1;
 	}
 
+	g_auto(SondStmtResetGuard) reset_guard = { stmt, nelem(sql) };
+
 	rc = sqlite3_bind_int(stmt[0], 1, node_id);
 	if (rc != SQLITE_OK)
 		ERROR_Z_DBASE
@@ -1131,6 +1159,8 @@ gint zond_dbase_update_text(ZondDBase *zond_dbase, gint node_id,
 
 		return -1;
 	}
+
+	g_auto(SondStmtResetGuard) reset_guard = { stmt, nelem(sql) };
 
 	rc = sqlite3_bind_int(stmt[0], 1, node_id);
 	if (rc != SQLITE_OK)
@@ -1193,6 +1223,8 @@ gint zond_dbase_verschieben_knoten(ZondDBase *zond_dbase, gint node_id,
 			error);
 	if (rc)
 		ERROR_Z_DBASE
+
+	g_auto(SondStmtResetGuard) reset_guard = { stmt, nelem(sql) };
 
 	rc = sqlite3_bind_int(stmt[1], 1, node_id);
 	if (rc != SQLITE_OK)
@@ -1267,6 +1299,8 @@ gint zond_dbase_remove_node(ZondDBase *zond_dbase, gint node_id, GError **error)
 		return -1;
 	}
 
+	g_auto(SondStmtResetGuard) reset_guard = { stmt, nelem(sql) };
+
 	rc = sqlite3_bind_int(stmt[1], 1, node_id);
 	if (rc != SQLITE_OK)
 		ERROR_Z_DBASE
@@ -1311,6 +1345,8 @@ gint zond_dbase_get_node(ZondDBase *zond_dbase, gint node_id, gint *type,
 
 		return -1;
 	}
+
+	g_auto(SondStmtResetGuard) reset_guard = { stmt, nelem(sql) };
 
 	rc = sqlite3_bind_int(stmt[0], 1, node_id);
 	if (rc != SQLITE_OK)
@@ -1396,6 +1432,8 @@ gint zond_dbase_get_tree_root(ZondDBase *zond_dbase, gint node_id, gint *root,
 		return -1;
 	}
 
+	g_auto(SondStmtResetGuard) reset_guard = { stmt, nelem(sql) };
+
 	rc = sqlite3_bind_int(stmt[0], 1, node_id);
 	if (rc != SQLITE_OK)
 		ERROR_Z_DBASE
@@ -1433,6 +1471,8 @@ gint zond_dbase_get_parent(ZondDBase *zond_dbase, gint node_id, gint *parent_id,
 		return -1;
 	}
 
+	g_auto(SondStmtResetGuard) reset_guard = { stmt, nelem(sql) };
+
 	rc = sqlite3_bind_int(stmt[0], 1, node_id);
 	if (rc != SQLITE_OK)
 		ERROR_Z_DBASE
@@ -1467,6 +1507,8 @@ gint zond_dbase_get_first_child(ZondDBase *zond_dbase, gint node_id,
 			error);
 	if (rc)
 		return -1;
+
+	g_auto(SondStmtResetGuard) reset_guard = { stmt, nelem(sql) };
 
 	rc = sqlite3_bind_int(stmt[0], 1, node_id);
 	if (rc != SQLITE_OK)
@@ -1503,6 +1545,8 @@ gint zond_dbase_get_older_sibling(ZondDBase *zond_dbase, gint node_id,
 		return -1;
 	}
 
+	g_auto(SondStmtResetGuard) reset_guard = { stmt, nelem(sql) };
+
 	rc = sqlite3_bind_int(stmt[0], 1, node_id);
 	if (rc != SQLITE_OK)
 		ERROR_Z_DBASE
@@ -1536,6 +1580,8 @@ gint zond_dbase_get_younger_sibling(ZondDBase *zond_dbase, gint node_id,
 	if (rc)
 		return -1;
 
+	g_auto(SondStmtResetGuard) reset_guard = { stmt, nelem(sql) };
+
 	rc = sqlite3_bind_int(stmt[0], 1, node_id);
 	if (rc != SQLITE_OK)
 		ERROR_Z_DBASE
@@ -1567,6 +1613,8 @@ gint zond_dbase_get_baum_inhalt_file_from_file_part(ZondDBase *zond_dbase,
 	if (rc)
 		return -1;
 
+	g_auto(SondStmtResetGuard) reset_guard = { stmt, nelem(sql) };
+
 	rc = sqlite3_bind_int(stmt[0], 1, file_part);
 	if (rc != SQLITE_OK)
 		ERROR_Z_DBASE
@@ -1592,6 +1640,8 @@ gint zond_dbase_get_baum_auswertung_copy(ZondDBase *zond_dbase, gint node_id,
 			error);
 	if (rc)
 		return -1;
+
+	g_auto(SondStmtResetGuard) reset_guard = { stmt, nelem(sql) };
 
 	rc = sqlite3_bind_int(stmt[0], 1, node_id);
 	if (rc != SQLITE_OK)
@@ -1631,6 +1681,8 @@ gint zond_dbase_get_first_baum_inhalt_file_child(ZondDBase *zond_dbase, gint ID,
 			error);
 	if (rc)
 		return -1;
+
+	g_auto(SondStmtResetGuard) reset_guard = { stmt, nelem(sql) };
 
 	rc = sqlite3_bind_int(stmt[0], 1, ID);
 	if (rc != SQLITE_OK)
@@ -1672,6 +1724,8 @@ gint zond_dbase_get_section(ZondDBase *zond_dbase, gchar const* filepart,
 	if (rc)
 		return -1;
 
+	g_auto(SondStmtResetGuard) reset_guard = { stmt, nelem(sql) };
+
 	rc = sqlite3_bind_text(stmt[0], 1, filepart, -1, NULL);
 	if (rc != SQLITE_OK)
 		ERROR_Z_DBASE
@@ -1691,14 +1745,8 @@ gint zond_dbase_get_section(ZondDBase *zond_dbase, gchar const* filepart,
 	if (rc == SQLITE_ROW && ID)
 		*ID = sqlite3_column_int(stmt[0], 0);
 
-	/* Reset statt das Statement bei SQLITE_ROW offen (mit aktivem
-	 * Lese-Cursor) stehen zu lassen, bis zufällig irgendwann derselbe
-	 * Funktionsname auf demselben ZondDBase-Objekt erneut aufgerufen wird
-	 * (zond_dbase_prepare resettet erst dann). Ein offenes Statement hält
-	 * einen SHARED-Lock - genügt z.B., um sqlite3_backup_step in
-	 * zond_dbase_backup() auf diesem Ziel mit SQLITE_BUSY scheitern zu
-	 * lassen. */
-	sqlite3_reset(stmt[0]);
+	/* Reset erfolgt jetzt einheitlich durch reset_guard beim Verlassen des
+	 * Scopes - s. Kommentar bei SondStmtResetGuard (zond_dbase.h). */
 
 	return 0;
 }
@@ -1729,6 +1777,8 @@ gint zond_dbase_find_baum_inhalt_file(ZondDBase *zond_dbase, gint node_id,
 	if (rc)
 		return -1;
 
+	g_auto(SondStmtResetGuard) reset_guard = { stmt, nelem(sql) };
+
 	rc = sqlite3_bind_int(stmt[0], 1, node_id);
 	if (rc != SQLITE_OK)
 		ERROR_Z_DBASE
@@ -1747,9 +1797,6 @@ gint zond_dbase_find_baum_inhalt_file(ZondDBase *zond_dbase, gint node_id,
 			*file_part = g_strdup(
 					(gchar const* ) sqlite3_column_text(stmt[0], 2));
 	}
-
-	//s. Kommentar in zond_dbase_get_section
-	sqlite3_reset(stmt[0]);
 
 	return 0;
 }
@@ -1776,6 +1823,8 @@ gint zond_dbase_is_file_part_copied(ZondDBase *zond_dbase, gint search_root,
 
 		return -1;
 	}
+
+	g_auto(SondStmtResetGuard) reset_guard = { stmt, nelem(sql) };
 
 	rc = sqlite3_bind_int(stmt[0], 1, search_root);
 	if (rc != SQLITE_OK)
@@ -1806,6 +1855,8 @@ gint zond_dbase_get_arr_sections(ZondDBase* zond_dbase, gchar const* file_part,
 			error);
 	if (rc)
 		return -1;
+
+	g_auto(SondStmtResetGuard) reset_guard = { stmt, nelem(sql) };
 
 	rc = sqlite3_bind_text(stmt[0], 1, file_part, -1, NULL);
 	if (rc != SQLITE_OK)

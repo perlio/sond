@@ -61,7 +61,7 @@
  - zond_treeviewfm.c, zond_treeviewfm_before_move()/_after() (~Zeile 215-369):
    dbase_zond_begin/commit/rollback um dbase_zond_update_path() und
    mehrfach dbase_zond_update_gmessage_index() (Datei/Verzeichnis umbenennen/
-   verschieben, inkl. GMessage-Sonderfälle). ZUSÄTZLICH dort eine dritte,
+   verschieben, inkl. GMessage-SonderfälleAch). ZUSÄTZLICH dort eine dritte,
    unabhängige Transaktion auf index_ctx->db (FTS-Suchindex, eigene
    sqlite3-Verbindung, eigenes rohes sqlite3_exec("BEGIN/COMMIT/ROLLBACK")),
    die bislang nicht mit der store/work-Transaktion verklammert ist.

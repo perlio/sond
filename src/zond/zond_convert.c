@@ -432,6 +432,8 @@ static gint zond_convert_get_younger_sibling_0(ZondDBase *zond_dbase, Baum baum,
 	if (rc)
 		return -1;
 
+	g_auto(SondStmtResetGuard) reset_guard = { stmt, nelem(sql) };
+
 	rc = sqlite3_bind_int(stmt[baum - 1], 1, node_id);
 	if (rc != SQLITE_OK)
 		ERROR_Z_DBASE
@@ -464,6 +466,8 @@ static gint zond_convert_get_first_child_0(ZondDBase *zond_dbase, Baum baum,
 			error);
 	if (rc)
 		return -1;
+
+	g_auto(SondStmtResetGuard) reset_guard = { stmt, nelem(sql) };
 
 	rc = sqlite3_bind_int(stmt[baum - 1], 1, node_id);
 	if (rc != SQLITE_OK)
@@ -501,6 +505,8 @@ static gint zond_convert_get_node_from_baum_auswertung_0(ZondDBase *zond_dbase,
 			error);
 	if (rc)
 		return -1;
+
+	g_auto(SondStmtResetGuard) reset_guard = { stmt, nelem(sql) };
 
 	rc = sqlite3_bind_int(stmt[0], 1, node_id);
 	if (rc != SQLITE_OK)
@@ -550,6 +556,8 @@ static gint zond_convert_get_node_from_baum_inhalt_0(ZondDBase *zond_dbase,
 			error);
 	if (rc)
 		return -1;
+
+	g_auto(SondStmtResetGuard) reset_guard = { stmt, nelem(sql) };
 
 	rc = sqlite3_bind_int(stmt[0], 1, node_id);
 	if (rc != SQLITE_OK)
@@ -939,6 +947,8 @@ static gint zond_convert_0_to_1_update_link(ZondDBase *zond_dbase, gint node_id,
 			error);
 	if (rc)
 		return -1;
+
+	g_auto(SondStmtResetGuard) reset_guard = { stmt, nelem(sql) };
 
 	rc = sqlite3_bind_int(stmt[0], 1, node_id);
 	if (rc != SQLITE_OK)
