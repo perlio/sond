@@ -406,12 +406,6 @@ static void zond_treeviewfm_after(SondTreeviewFM* stvfm,
 		if (dual_write) {
 			rc = dbase_zond_commit(priv->zond->dbase_zond, &error_int);
 			if (rc) {
-				/* TEMPORÄRE DIAGNOSE: exit(EXIT_FAILURE) unten gab den
-				 * Fehler bisher nirgends aus - Absturz ohne jede
-				 * Meldung. Nur zum Debuggen des store/work-Atomarität-
-				 * Problems, danach wieder entfernen. */
-				g_warning("dbase_zond_commit fehlgeschlagen: %s",
-						error_int ? error_int->message : "??");
 				if (priv->zond->wctx && priv->zond->wctx->index_ctx)
 					sqlite3_exec(priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
 				exit(EXIT_FAILURE);
