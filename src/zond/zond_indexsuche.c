@@ -23,6 +23,7 @@
 
 #include "../misc.h"
 #include "../sond_index.h"
+#include "../sond_mime.h"
 #include "../sond_result_view.h"
 #include "../sond_fileparts.h"
 #include "../sond_process_file.h"
@@ -127,9 +128,33 @@ zond_indexsuche_row_activated(GtkTreeView *treeview, GtkTreePath *tree_path,
             	zpdfd_open = zond_pdf_document_is_open(SOND_FILE_PART_PDF(sfp));
             	if (zpdfd_open) {
             		Anbindung anbindung = { { page_nr, 0 }, { page_nr, EOP } };
+            		GPtrArray *arr_pages = NULL;
+            		PdfDocumentPage *pdfp = NULL;
 
             		anbindung_aktualisieren(zpdfd_open, &anbindung);
             		page_nr_akt = anbindung.von.seite;
+
+            		/* Die Zielseite kann inzwischen im offenen, noch nicht
+            		 * gespeicherten Viewer zum Löschen vorgemerkt sein
+            		 * (pdfp->deleted). anbindung_aktualisieren() verschiebt
+            		 * die Numerierung nur wegen anhängiger Einfügungen -
+            		 * Löschen ändert die (stabile) Numerierung nicht, s.
+            		 * anbindung_korrigieren(). Treffer und Seite sind dabei
+            		 * nach wie vor gültig (Index bzw. gespeicherte PDF-Datei
+            		 * unverändert) - nur die aktuelle Sitzung würde die Seite
+            		 * nicht mehr anzeigen können, s. Task #16. */
+            		arr_pages = zond_pdf_document_get_arr_pages(zpdfd_open);
+            		if (page_nr_akt >= 0 && (guint) page_nr_akt < arr_pages->len)
+            			pdfp = g_ptr_array_index(arr_pages, page_nr_akt);
+            		if (pdfp && pdfp->deleted) {
+            			display_message(zond->app_window,
+            					"Seite gelöscht\n\n",
+            					"Die Seite mit dem Suchtreffer ist im "
+            					"geöffneten, noch nicht gespeicherten "
+            					"Dokument zum Löschen vorgemerkt.", NULL);
+            			g_free(filename);
+            			return;
+            		}
             	}
 
             	/* PDF → interner PDF-Viewer */
@@ -235,6 +260,33 @@ check_coverage_one(Projekt *zond, SondFilePart *sfp, SondPageRange *range,
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                 "Dateipfad nicht ermittelbar");
         return FALSE;
+    }
+
+    /* Schneller Vorab-Check über die coalescierte coverage-Tabelle: ist fp
+     * (oder ein Vorfahre) komplett abgedeckt, brauchen wir die
+     * pages-Tabelle für diesen Punkt gar nicht erst anzufassen - spart bei
+     * großen, bereits vollständig indizierten Projektverzeichnissen den
+     * Großteil der Arbeit (s. Task #32). */
+    if (sond_index_ctx_coverage_get(index_ctx, fp) >= 0) {
+        g_free(fp);
+        *out_missing = 0;
+        *out_total   = 1;
+        return TRUE;
+    }
+
+    /* Dateien, die ohnehin nie indiziert werden (.db, .znd, Bilder, ...),
+     * sollen hier nicht als "fehlt noch" auftauchen - sonst meldet
+     * "Gesamtes Projektverzeichnis" ständig Lücken bei Dateien, die gar
+     * nicht indizierbar sind. Schnelle, rein dateinamensbasierte Schätzung
+     * (mime_from_extension(), keine Dateizugriffe) reicht für diesen
+     * Vorab-Check - PDFs sind über den SondFilePart-Typ ohnehin schon
+     * sicher erkannt (Zweig unten), unabhängig von der Extension. */
+    if (!SOND_IS_FILE_PART_PDF(sfp) &&
+            !sond_index_mime_type_supported(mime_from_extension(fp))) {
+        g_free(fp);
+        *out_missing = 0;
+        *out_total   = 0;
+        return TRUE;
     }
 
     if (SOND_IS_FILE_PART_PDF(sfp)) {
@@ -431,6 +483,7 @@ zond_indexsuche_do(Projekt *zond, GHashTable* ht_filter, GHashTable *ht_coverage
     GtkWidget *entry_term = NULL;
     GtkWidget *label_ctx  = NULL;
     GtkWidget *entry_ctx  = NULL;
+    GtkWidget *check_whole_word = NULL;
     gint       response   = 0;
 
     if (!zond->wctx || !zond->wctx->index_ctx) {
@@ -498,10 +551,17 @@ zond_indexsuche_do(Projekt *zond, GHashTable* ht_filter, GHashTable *ht_coverage
     gtk_entry_set_placeholder_text(GTK_ENTRY(entry_ctx), "optional");
     gtk_widget_set_hexpand(entry_ctx, TRUE);
 
+    check_whole_word = gtk_check_button_new_with_label("Nur ganzes Wort");
+    gtk_widget_set_tooltip_text(check_whole_word,
+            "Unmarkiert (Standard): findet auch Wörter, die mit dem "
+            "Suchbegriff beginnen (z.B. „Vertragspartner“ bei "
+            "„Vertrag“).");
+
     gtk_grid_attach(GTK_GRID(grid), label_term, 0, 0, 1, 1);
     gtk_grid_attach(GTK_GRID(grid), entry_term, 1, 0, 1, 1);
     gtk_grid_attach(GTK_GRID(grid), label_ctx,  0, 1, 1, 1);
     gtk_grid_attach(GTK_GRID(grid), entry_ctx,  1, 1, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), check_whole_word, 1, 2, 1, 1);
 
     gtk_container_add(GTK_CONTAINER(content), grid);
     gtk_widget_show_all(dialog);
@@ -513,13 +573,16 @@ zond_indexsuche_do(Projekt *zond, GHashTable* ht_filter, GHashTable *ht_coverage
         const gchar *ctx  = gtk_entry_get_text(GTK_ENTRY(entry_ctx));
 
         if (term && *term) {
-            GPtrArray *hits  = NULL;
-            GError    *error = NULL;
+            GPtrArray *hits       = NULL;
+            GError    *error      = NULL;
+            gboolean   whole_word = gtk_toggle_button_get_active(
+                    GTK_TOGGLE_BUTTON(check_whole_word));
 
             hits = sond_index_search(
                     zond->wctx->index_ctx,
                     term,
                     (ctx && *ctx) ? ctx : NULL,
+                    whole_word,
                     &error);
 
             if (!hits) {

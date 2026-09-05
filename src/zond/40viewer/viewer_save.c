@@ -123,7 +123,11 @@ static gboolean viewer_entry_in_dd(JournalEntry* entry,
  * diese Datei auf den nach dem Speichern gültigen Stand bringen:
  * - Seiten mit einem JOURNAL_TYPE_OCR-Eintrag: Inhalt ändert sich (neue
  *   versteckte Textebene) - nur diese eine Seite verwerfen, kein
- *   pauschales Verwerfen der ganzen Datei.
+ *   pauschales Verwerfen der ganzen Datei. Zusätzlich eine eventuell
+ *   bestehende coverage-Abdeckung invalidieren.
+ * - Seiten mit einem JOURNAL_TYPE_PAGES_INSERTED-Eintrag: neuer, noch nie
+ *   geprüfter Seiteninhalt - kein clear_page nötig, aber ebenfalls eine
+ *   eventuell bestehende coverage-Abdeckung invalidieren (s.u.).
  * - Seiten, die gelöscht werden (pdfp->deleted): ebenfalls verwerfen.
  * - Überlebende Seiten, deren Nummer sich durch anderswo gelöschte/
  *   eingefügte Seiten verschiebt: in chunks/pages umnummerieren (Inhalt
@@ -153,32 +157,102 @@ static void viewer_update_index_for_save(PdfViewer *pdfv, DisplayedDocument *dd)
 			SOND_FILE_PART(zond_pdf_document_get_sfp_pdf(
 					dd->zpdfd_part->zond_pdf_document)));
 
-	/* OCR: Inhalt der betroffenen Seite ändert sich - verwerfen. Zusätzlich
+	/* OCR: Inhalt der betroffenen Seite ändert sich - verwerfen, UND
 	 * (nur hier, nicht bei reinem Löschen/Umnumerieren weiter unten - dort
-	 * ändert sich der Inhalt überlebender Seiten nicht): eine eventuell
+	 * ändert sich der Inhalt überlebender Seiten nicht) eine eventuell
 	 * bestehende coverage-Abdeckung dieser Datei (oder eines Vorfahre-
-	 * Verzeichnisses) ist jetzt falsch, weil clear_page() gerade Chunks
-	 * ohne Ersatz entfernt hat - ohne Invalidierung würde eine spätere
-	 * Abdeckungs-Prüfung fälschlich "vollständig indiziert" melden. */
-	arr_journal = zond_pdf_document_get_arr_journal(dd->zpdfd_part->zond_pdf_document);
-	for (guint u = 0; u < arr_journal->len; u++) {
-		JournalEntry entry = g_array_index(arr_journal, JournalEntry, u);
+	 * Verzeichnisses) invalidieren, weil clear_page() gerade Chunks ohne
+	 * Ersatz entfernt hat - ohne Invalidierung würde eine spätere
+	 * Abdeckungs-Prüfung fälschlich "vollständig indiziert" melden.
+	 *
+	 * PAGES_INSERTED: hier kommt neuer, noch nie geprüfter Seiteninhalt
+	 * hinzu - kein clear_page nötig (dafür gibt es ja noch keinen
+	 * Index-Eintrag), aber dieselbe coverage-Invalidierung wie bei OCR:
+	 * eine bestehende Abdeckungs-Aussage ("alles hier ist mindestens
+	 * Modus M") wird durch die neue, ungeprüfte Seite ebenso verletzt. */
+	{
+		GArray *inserted_pages = g_array_new(FALSE, FALSE, sizeof(gint));
 
-		if (entry.type != JOURNAL_TYPE_OCR)
-			continue;
-		if (!viewer_entry_in_dd(&entry, dd->zpdfd_part))
-			continue;
+		arr_journal = zond_pdf_document_get_arr_journal(dd->zpdfd_part->zond_pdf_document);
+		for (guint u = 0; u < arr_journal->len; u++) {
+			JournalEntry entry = g_array_index(arr_journal, JournalEntry, u);
 
-		if (!sond_index_ctx_clear_page(index_ctx, filename,
-				entry.pdf_document_page->page_akt, &error)) {
-			LOG_WARN("%s\n", error->message);
-			g_clear_error(&error);
+			if (entry.type != JOURNAL_TYPE_OCR &&
+					entry.type != JOURNAL_TYPE_PAGES_INSERTED)
+				continue;
+			if (!viewer_entry_in_dd(&entry, dd->zpdfd_part))
+				continue;
+
+			if (entry.type == JOURNAL_TYPE_OCR) {
+				if (!sond_index_ctx_clear_page(index_ctx, filename,
+						entry.pdf_document_page->page_akt, &error)) {
+					LOG_WARN("%s\n", error->message);
+					g_clear_error(&error);
+				}
+
+				if (!sond_index_ctx_coverage_invalidate(index_ctx, filename, &error)) {
+					LOG_WARN("%s\n", error->message);
+					g_clear_error(&error);
+				}
+			} else { /* JOURNAL_TYPE_PAGES_INSERTED - Sammeln, s.u.: einmal
+			          * für die ganze Datei behandeln, nicht pro Eintrag,
+			          * damit bei mehreren Einfüge-Vorgängen keine bereits
+			          * "geretteten" Seiten fälschlich wieder mit erfasst
+			          * werden. */
+				gint first = entry.pdf_document_page->page_akt;
+				gint count = entry.pages_inserted.count;
+
+				for (gint p = first; p < first + count; p++)
+					g_array_append_val(inserted_pages, p);
+			}
 		}
 
-		if (!sond_index_ctx_coverage_invalidate(index_ctx, filename, &error)) {
-			LOG_WARN("%s\n", error->message);
-			g_clear_error(&error);
+		if (inserted_pages->len > 0) {
+			/* Vor dem Verwerfen eines eventuell bestehenden Datei-Eintrags
+			 * erst den Seiten-Fortschritt der ÜBRIGEN (weder gelöschten
+			 * noch neu eingefügten) Seiten retten. ACHTUNG: nicht einfach
+			 * "0..Seitenzahl minus eingefügte", weil gelöschte Seiten als
+			 * stabile "Karteileichen" im Seiten-Array stehen bleiben (keine
+			 * Kompaktierung mehr) - die rohe Seitenzahl zählt sie mit. */
+			GPtrArray *arr_pages = zond_pdf_document_get_arr_pages(
+					dd->zpdfd_part->zond_pdf_document);
+			GArray *pages_to_write = g_array_new(FALSE, FALSE, sizeof(gint));
+
+			for (guint i = 0; i < arr_pages->len; i++) {
+				PdfDocumentPage *pdfp = g_ptr_array_index(arr_pages, i);
+				gint page_nr = (gint) i;
+				gboolean is_new = FALSE;
+
+				if (!pdfp || pdfp->deleted)
+					continue;
+
+				for (guint u = 0; u < inserted_pages->len; u++) {
+					if (g_array_index(inserted_pages, gint, u) == page_nr) {
+						is_new = TRUE;
+						break;
+					}
+				}
+				if (is_new)
+					continue;
+
+				g_array_append_val(pages_to_write, page_nr);
+			}
+
+			if (!sond_index_ctx_coverage_expand_to_pages(index_ctx, filename,
+					(gint const*) pages_to_write->data, pages_to_write->len,
+					&error)) {
+				LOG_WARN("%s\n", error->message);
+				g_clear_error(&error);
+			}
+			g_array_unref(pages_to_write);
+
+			if (!sond_index_ctx_coverage_invalidate(index_ctx, filename, &error)) {
+				LOG_WARN("%s\n", error->message);
+				g_clear_error(&error);
+			}
 		}
+
+		g_array_unref(inserted_pages);
 	}
 
 	/* Gelöschte Seiten verwerfen, überlebende ggf. umnummerieren - über
@@ -238,6 +312,80 @@ static void viewer_update_index_for_save(PdfViewer *pdfv, DisplayedDocument *dd)
 			LOG_WARN("%s\n", error->message);
 			g_clear_error(&error);
 		}
+	}
+
+	/* Nach dem Renumerieren prüfen, ob jetzt ALLE aktuell existierenden
+	 * (nicht gelöschten) Seiten der Datei individuell indiziert sind
+	 * (keine Lücke mehr, z.B. weil gerade die letzte, bisher nicht
+	 * indizierte Seite gelöscht wurde) - falls ja, zur Datei-Ebene
+	 * kollabieren (Mindestmodus-Prinzip wie bei coverage_try_collapse),
+	 * statt die pages-Tabelle dauerhaft fein-granular stehen zu lassen.
+	 * ACHTUNG: zond_pdf_document_get_number_of_pages() ist NICHT die
+	 * aktuelle Seitenzahl - gelöschte Seiten bleiben als stabile
+	 * "Karteileichen" im Seiten-Array stehen (keine Kompaktierung mehr),
+	 * deshalb hier direkt über das Array gehen und pdfp->deleted prüfen. */
+	{
+		GPtrArray *arr_pages = zond_pdf_document_get_arr_pages(
+				dd->zpdfd_part->zond_pdf_document);
+		GArray *pages_now = sond_index_ctx_get_pages_for_file(index_ctx, filename);
+		g_autofree gboolean *seen = g_new0(gboolean, arr_pages->len ? arr_pages->len : 1);
+		gboolean complete = TRUE;
+		gint min_mode = G_MAXINT;
+		gint n_live = 0;
+
+		for (guint i = 0; i < arr_pages->len; i++) {
+			PdfDocumentPage *pdfp = g_ptr_array_index(arr_pages, i);
+
+			if (pdfp && !pdfp->deleted)
+				n_live++;
+		}
+
+		for (guint u = 0; u < pages_now->len && complete; u++) {
+			gint page_nr = g_array_index(pages_now, gint, u);
+			gint mode;
+
+			if (page_nr < 0 || (guint) page_nr >= arr_pages->len) {
+				complete = FALSE;
+				break;
+			}
+			seen[page_nr] = TRUE;
+
+			mode = sond_index_ctx_get_page_ocr_mode(index_ctx, filename, page_nr);
+			if (mode < 0) {
+				complete = FALSE;
+				break;
+			}
+			if (mode < min_mode)
+				min_mode = mode;
+		}
+
+		if (n_live == 0 || pages_now->len != (guint) n_live)
+			complete = FALSE;
+
+		if (complete) {
+			for (guint i = 0; i < arr_pages->len; i++) {
+				PdfDocumentPage *pdfp = g_ptr_array_index(arr_pages, i);
+
+				if (pdfp && !pdfp->deleted && !seen[i]) {
+					complete = FALSE;
+					break;
+				}
+			}
+		}
+
+		if (complete) {
+			if (!sond_index_ctx_coverage_mark(index_ctx, filename, min_mode, &error)) {
+				LOG_WARN("%s\n", error->message);
+				g_clear_error(&error);
+			} else if (pdfv->zond->project_dir) {
+				if (!sond_index_ctx_coverage_try_collapse(index_ctx, filename,
+						pdfv->zond->project_dir, &error)) {
+					LOG_WARN("%s\n", error->message);
+					g_clear_error(&error);
+				}
+			}
+		}
+		g_array_unref(pages_now);
 	}
 
 	g_array_unref(old_nrs);

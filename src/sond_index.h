@@ -272,6 +272,60 @@ gboolean sond_index_ctx_should_process_page(SondIndexCtx *ctx,
 gint sond_index_ctx_coverage_get(SondIndexCtx *ctx, gchar const *path);
 
 /**
+ * SondIndexStatus:
+ *
+ * Ternärer Indizierungs-Status eines "Punkts" (Datei, Verzeichnis, oder
+ * Anbindung mit Seitenbereich innerhalb einer Datei) für die Overlay-Icons
+ * in den Bäumen (BAUM_FS und ggf. weitere).
+ */
+typedef enum {
+    SOND_INDEX_STATUS_NONE = 0,   /* nicht indiziert */
+    SOND_INDEX_STATUS_PARTIAL,    /* teilweise indiziert */
+    SOND_INDEX_STATUS_FULL        /* vollständig indiziert */
+} SondIndexStatus;
+
+/**
+ * sond_index_ctx_get_file_status:
+ * @ctx:        SondIndexCtx
+ * @filename:   Dateipfad (filepart-Konvention, wie in coverage/pages
+ *              gespeichert)
+ * @von_seite:  erste Seite einer Anbindung (0-basiert), oder -1 für
+ *              "ganze Datei" (auch für Nicht-PDF-Formate)
+ * @bis_seite:  letzte Seite einer Anbindung (0-basiert, inklusive),
+ *              ignoriert wenn @von_seite == -1
+ *
+ * Rein DB-basiert, ohne die Datei zu öffnen: bei "ganze Datei" reicht für
+ * NONE/PARTIAL die reine Existenzfrage ("gibt es überhaupt eine indizierte
+ * Seite"), FULL kommt ausschließlich aus der coalescierten coverage-
+ * Tabelle. Bei einer Anbindung (expliziter Seitenbereich) wird zusätzlich
+ * gezählt, wie viele der angeforderten Seiten schon einen pages-Eintrag
+ * haben.
+ *
+ * Returns: SondIndexStatus.
+ */
+SondIndexStatus sond_index_ctx_get_file_status(SondIndexCtx *ctx,
+                                                gchar const  *filename,
+                                                gint          von_seite,
+                                                gint          bis_seite);
+
+/**
+ * sond_index_ctx_get_dir_status:
+ * @ctx:  SondIndexCtx
+ * @path: Verzeichnispfad (filepart-Konvention)
+ *
+ * Aggregiert über alle Dateien unterhalb von @path per Präfix-Abfrage
+ * (schnell, da "pages.filename" bzw. "coverage.path" jeweils führende
+ * Spalte ihres Primärschlüssels sind - kein Tabellen-Scan). FULL kommt aus
+ * der coverage-Tabelle (path selbst oder ein Vorfahre abgedeckt); sonst
+ * PARTIAL, wenn irgendetwas unterhalb von path einen pages- oder
+ * coverage-Eintrag hat, sonst NONE.
+ *
+ * Returns: SondIndexStatus.
+ */
+SondIndexStatus sond_index_ctx_get_dir_status(SondIndexCtx *ctx,
+                                               gchar const  *path);
+
+/**
  * sond_index_ctx_coverage_mark:
  * @ctx:      SondIndexCtx
  * @path:     Datei- oder Verzeichnispfad
@@ -288,9 +342,76 @@ gboolean sond_index_ctx_coverage_mark(SondIndexCtx *ctx, gchar const *path,
                                        gint ocr_mode, GError **error);
 
 /**
+ * sond_index_ctx_coverage_clear:
+ * @ctx:   SondIndexCtx
+ * @path:  Datei- oder Verzeichnispfad, der gerade GELÖSCHT wurde
+ * @error: GError
+ *
+ * Entfernt jeden coverage-Eintrag für genau path sowie für alles, was
+ * (per einfachem "/"-Präfix) darunter liegt - reine Fall-1-Bereinigung,
+ * OHNE einen eventuell abdeckenden VORFAHREN anzutasten.
+ *
+ * Bewusst kein Aufbrechen eines Vorfahren-Eintrags (im Unterschied zu
+ * sond_index_ctx_coverage_invalidate()): reines Löschen von Inhalt kann
+ * die Aussage "unter Vorfahre X ist alles mindestens Modus M" niemals
+ * verletzen - es verschwindet nur Inhalt, es kommt kein neuer,
+ * ungeprüfter Inhalt hinzu. Diese Funktion ist also nur eine
+ * Vorsichtsmaßnahme gegen später am selben Pfad neu auftauchenden,
+ * komplett anderen Inhalt (der sonst fälschlich als "schon abgedeckt"
+ * gälte).
+ *
+ * Returns: FALSE bei Datenbankfehler.
+ */
+gboolean sond_index_ctx_coverage_clear(SondIndexCtx *ctx,
+                                        gchar const *path,
+                                        GError **error);
+
+/**
+ * sond_index_ctx_coverage_expand_to_pages:
+ * @ctx:              SondIndexCtx
+ * @filename:         Dateiname, der gerade einen EIGENEN (nicht nur über
+ *                     einen Vorfahren geerbten) coverage-Eintrag hat oder
+ *                     haben könnte
+ * @pages_to_write:   Seiten (0-basiert = page_akt), die einzeln
+ *                     eingetragen werden sollen - typischerweise alle
+ *                     aktuell noch existierenden (nicht gelöschten)
+ *                     Seiten AUSSER den gerade neu eingefügten
+ * @n_pages_to_write: Anzahl Einträge in pages_to_write
+ * @error:            GError
+ *
+ * Gegenstück zu sond_index_ctx_coverage_mark(): hat filename einen
+ * eigenen coverage-Eintrag (Modus M), werden für jede Seite in
+ * pages_to_write individuelle "pages"-Zeilen mit Modus M angelegt - der
+ * bisher durch Kollabieren "verdichtete" Seiten-Fortschritt wird also vor
+ * dem Verwerfen des Datei-Eintrags (s. sond_index_ctx_coverage_invalidate(),
+ * im Anschluss aufzurufen) gerettet, statt verloren zu gehen.
+ *
+ * Bewusst eine explizite Seitenliste statt "Gesamtzahl + Ausschlussliste":
+ * gelöschte Seiten bleiben im Viewer als stabile "Karteileichen" im
+ * Seiten-Array stehen (keine Kompaktierung mehr) - die rohe Seitenzahl
+ * (zond_pdf_document_get_number_of_pages()) ist deshalb NICHT die Anzahl
+ * tatsächlich noch existierender Seiten. Der Aufrufer muss die Liste
+ * daher unter Berücksichtigung von PdfDocumentPage->deleted selbst bilden.
+ *
+ * Hat filename keinen eigenen Eintrag (z.B. nur über einen Vorfahren
+ * abgedeckt), passiert nichts - dieser Fall wird bereits vollständig von
+ * sond_index_ctx_coverage_invalidate() (Fall 2, Geschwister-Dateien)
+ * abgedeckt.
+ *
+ * Returns: FALSE bei Datenbankfehler.
+ */
+gboolean sond_index_ctx_coverage_expand_to_pages(SondIndexCtx *ctx,
+                                                  gchar const  *filename,
+                                                  gint const   *pages_to_write,
+                                                  guint         n_pages_to_write,
+                                                  GError      **error);
+
+/**
  * sond_index_ctx_coverage_invalidate:
  * @ctx:   SondIndexCtx
- * @path:  Datei- oder Verzeichnispfad
+ * @path:  Datei- oder Verzeichnispfad, unter dem gerade NEUER, noch nicht
+ *         geprüfter Inhalt auftaucht (Datei/Verzeichnis wird hierher
+ *         verschoben, Seiten werden in eine Datei eingefügt, ...)
  * @error: GError
  *
  * Entwertet path: danach hat path keinen coverage-Eintrag mehr (weder
@@ -298,6 +419,11 @@ gboolean sond_index_ctx_coverage_mark(SondIndexCtx *ctx, gchar const *path,
  * Vorfahren abgedeckt, wird dieser aufgelöst und auf jeder Zwischenebene
  * werden die (weiterhin gültigen) Geschwister per flachem
  * Verzeichnis-Listing neu eingetragen - kein rekursiver Scan.
+ *
+ * Im Unterschied zu sond_index_ctx_coverage_clear(): hier kommt neuer,
+ * ungeprüfter Inhalt unter path hinzu, der die Aussage eines abdeckenden
+ * Vorfahren ("alles darunter ist mindestens Modus M") tatsächlich
+ * verletzen kann - deshalb muss der Vorfahre hier aufgelöst werden.
  *
  * Bekannte Einschränkung: setzt echte Dateisystem-Verzeichnisse zwischen
  * Vorfahre und path voraus (BAUM_FS) - eingebettete ("//"-)Pfade und die
@@ -387,11 +513,15 @@ void sond_index_hit_free(gpointer p);
 
 /**
  * sond_index_search:
- * @ctx:     SondIndexCtx
- * @term:    Hauptsuchbegriff (ein oder mehrere Wörter → Phrasensuche)
- * @context: Optionaler Kontext-Begriff (AND-Verknüpfung auf Chunk-Ebene),
- *           oder NULL für reine Begriffssuche
- * @error:   GError
+ * @ctx:        SondIndexCtx
+ * @term:       Hauptsuchbegriff (ein oder mehrere Wörter → Phrasensuche)
+ * @context:    Optionaler Kontext-Begriff (AND-Verknüpfung auf Chunk-Ebene),
+ *              oder NULL für reine Begriffssuche
+ * @whole_word: FALSE (Default/empfohlen): zusätzlich Präfix-Treffer, z.B.
+ *              findet "Vertrag" auch "Vertragspartner" - bei einer Phrase
+ *              gilt der Präfix nur für deren letztes Wort (FTS5-Grenze).
+ *              TRUE: nur exakte, ganze Wörter (bisheriges Verhalten).
+ * @error:      GError
  *
  * Durchsucht chunks_fts nach @term. Wenn @context angegeben ist, müssen
  * beide Begriffe im selben Chunk vorkommen (AND-Semantik).
@@ -404,6 +534,7 @@ void sond_index_hit_free(gpointer p);
 GPtrArray* sond_index_search(SondIndexCtx *ctx,
                               gchar const  *term,
                               gchar const  *context,
+                              gboolean      whole_word,
                               GError      **error);
 
 /* =======================================================================
@@ -475,6 +606,23 @@ void sond_index(fz_context* ctx,
                         gint           seite_bis,
                         gint           ocr_mode,
                         gint const    *cancel);
+
+/**
+ * sond_index_mime_type_supported:
+ * @mime_type: zu prüfender MIME-Typ (kann NULL sein)
+ *
+ * Ja/Nein-Entsprechung zur Dispatch-Logik in sond_index() (s.o.) - welche
+ * MIME-Typen dort überhaupt zu einer Extraktion führen, ohne selbst etwas
+ * zu tun. Gedacht für Stellen, die VOR dem eigentlichen Indizieren wissen
+ * müssen, ob eine Datei überhaupt in Frage kommt (z.B. der Abdeckungs-
+ * Check in zond_indexsuche.c: Dateien, die ohnehin nie indiziert werden
+ * - .db, .znd, Bilder, Archive außer docx/odt, ... - sollen dort nicht
+ * als "fehlt noch" auftauchen).
+ *
+ * Returns: TRUE, wenn sond_index() für diesen MIME-Typ tatsächlich Text
+ *          extrahiert; FALSE sonst (auch bei NULL).
+ */
+gboolean sond_index_mime_type_supported(gchar const *mime_type);
 
 G_END_DECLS
 

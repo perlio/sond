@@ -118,11 +118,18 @@ SondOcrTask* sond_ocr_task_new(fz_context* ctx, pdf_document* doc,
 		GError** error);
 
 /* seite_von/seite_bis (0-basiert, inklusive): nur dieser Seitenbereich wird
- * OCRt, -1/-1 = ganzes Dokument. */
+ * OCRt, -1/-1 = ganzes Dokument.
+ * out_changed (kann NULL sein): wird auf TRUE gesetzt, wenn mindestens eine
+ * Seite tatsächlich verändert wurde (neue OCR-Textebene eingefügt oder
+ * versteckter Text entfernt) - FALSE, wenn z.B. alle Seiten schon Text
+ * hatten und deshalb übersprungen wurden, oder OCR für jede Seite
+ * fehlgeschlagen ist. Der Aufrufer kann damit einen unnötigen (und bei
+ * strukturell fragilen PDFs riskanten) Rewrite des Dokuments vermeiden,
+ * wenn ohnehin nichts zu schreiben ist. */
 gint sond_ocr_pdf_doc(fz_context* ctx, SondOcrPool* ocr_pool, pdf_document* doc,
 		SondOcrMode mode, gint seite_von, gint seite_bis,
 		void (*log_func)(void*, gchar const*, ...), gpointer log_func_data,
-		GError** error);
+		gboolean* out_changed, GError** error);
 
 SondOcrPool* sond_ocr_pool_new(const gchar *tessdata_path,
 		const gchar *language, gint num_threads,

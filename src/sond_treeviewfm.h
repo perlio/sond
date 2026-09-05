@@ -9,6 +9,7 @@
 
 typedef struct _SondFilePart SondFilePart;
 typedef struct _SondProcessFileCtx SondProcessFileCtx;
+typedef struct _SondIndexCtx SondIndexCtx;
 
 G_BEGIN_DECLS
 
@@ -51,6 +52,15 @@ struct _SondTreeviewFMClass {
 	gint (*delete_section) (SondTVFMItem*, GError**);
 	SondProcessFileCtx* (*get_wctx) (SondTreeviewFM*);
 
+	/* Liefert für einen LEAF_SECTION-Knoten (Anbindung) den 1-basierten
+	 * Seitenbereich, den diese Section abdeckt - für den
+	 * Indizierungsstatus-Overlay. Die generische Basisklasse kennt die
+	 * Section-Semantik nicht (s. has_sections/load_sections), deshalb
+	 * optionales Vfunc statt fester Logik; NULL/Rückgabe FALSE = Section
+	 * wird wie die ganze Datei behandelt. */
+	gboolean (*get_section_page_range)(SondTVFMItem*, gint *von_seite,
+			gint *bis_seite);
+
 	/* Signal: SeaDrive-Status geändert (connected, pending_down, pending_up) */
 	guint signal_seadrive_status;
 };
@@ -90,6 +100,19 @@ gint sond_treeviewfm_set_root(SondTreeviewFM*, const gchar*, GError**);
 const gchar* sond_treeviewfm_get_root(SondTreeviewFM*);
 
 gboolean sond_treeviewfm_is_seadrive_path(SondTreeviewFM*);
+
+/* Overlay-Icons (Indizierungsstatus): das generische SondTreeviewFM kennt
+ * keinen Projekt-/SondIndexCtx-Bezug direkt (der entsteht/verschwindet mit
+ * dem geöffneten Projekt), deshalb Dependency-Injection per Getter-
+ * Funktion statt eines fest gespeicherten Zeigers - so wird bei jedem
+ * Neuzeichnen der jeweils aktuelle SondIndexCtx erfragt (oder NULL, wenn
+ * gerade kein Projekt offen ist - dann werden schlicht keine Overlay-Icons
+ * gezeichnet). func/user_data dürfen NULL sein, um die Funktion wieder zu
+ * deaktivieren. */
+typedef SondIndexCtx* (*SondTreeviewFMIndexCtxFunc)(gpointer user_data);
+
+void sond_treeviewfm_set_index_ctx_func(SondTreeviewFM*,
+		SondTreeviewFMIndexCtxFunc func, gpointer user_data);
 
 #ifdef _WIN32
 void     sond_treeviewfm_seadrive_update_status(SondTreeviewFM*,

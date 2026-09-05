@@ -190,6 +190,11 @@ static guint watcher_count_pending_down(const gchar *dir_utf8,
                 wcscmp(fd.cFileName, L"..") == 0)
             continue;
 
+        /* Reparse-Points (Symlinks/Junctions) überspringen - sonst könnte
+         * eine Verzeichnisschleife diese Rekursion endlos laufen lassen. */
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
+            continue;
+
         if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
             gchar *name = g_utf16_to_utf8(
                     (gunichar2*) fd.cFileName, -1, NULL, NULL, NULL);
@@ -276,14 +281,20 @@ gpointer sond_treeviewfm_seadrive_watcher_thread(gpointer user_data)
     /* CF-API initialisieren - muss vor dem Thread-Start erfolgen */
     cfapi_init();
 
-    const gchar *root = sond_treeviewfm_get_root(stvfm);
+    /* Eigene Kopie statt geliehenem Zeiger auf stvfm_priv->root: der
+     * Aufrufer (sond_treeviewfm_set_root()) joint diesen Thread zwar immer
+     * synchron VOR einer Root-Änderung, aber der Thread soll nicht von
+     * dieser Aufrufreihenfolge abhängen, falls die mal umgebaut wird. */
+    gchar *root = g_strdup(sond_treeviewfm_get_root(stvfm));
     if (!root)
         return NULL;
 
     /* Verzeichnis-Handle für ReadDirectoryChangesW */
     wchar_t *root_w = prepare_long_path(root, NULL);
-    if (!root_w)
+    if (!root_w) {
+        g_free(root);
         return NULL;
+    }
 
     HANDLE hDir = CreateFileW(root_w,
             FILE_LIST_DIRECTORY,
@@ -293,14 +304,17 @@ gpointer sond_treeviewfm_seadrive_watcher_thread(gpointer user_data)
             NULL);
     g_free(root_w);
 
-    if (hDir == INVALID_HANDLE_VALUE)
+    if (hDir == INVALID_HANDLE_VALUE) {
+        g_free(root);
         return NULL;
+    }
 
     /* OVERLAPPED + Event für asynchrones ReadDirectoryChangesW */
     OVERLAPPED ov = { 0 };
     ov.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
     if (!ov.hEvent) {
         CloseHandle(hDir);
+        g_free(root);
         return NULL;
     }
 
@@ -309,9 +323,17 @@ gpointer sond_treeviewfm_seadrive_watcher_thread(gpointer user_data)
 
     /* Ersten ReadDirectoryChangesW-Aufruf starten - VOR dem Scan,
      * damit während des Scans entstehende Events nicht verloren gehen */
-    ReadDirectoryChangesW(hDir, buf, sizeof(buf), TRUE,
+    if (!ReadDirectoryChangesW(hDir, buf, sizeof(buf), TRUE,
             FILE_NOTIFY_CHANGE_ATTRIBUTES | FILE_NOTIFY_CHANGE_LAST_WRITE,
-            NULL, &ov, NULL);
+            NULL, &ov, NULL)) {
+        LOG_WARN("SeaDrive-Watcher: ReadDirectoryChangesW('%s') fehlgeschlagen "
+                "(Fehler %lu) - Watcher wird nicht gestartet",
+                root, (unsigned long) GetLastError());
+        CloseHandle(ov.hEvent);
+        CloseHandle(hDir);
+        g_free(root);
+        return NULL;
+    }
 
     /* Initialscan: zählt bereits vorhandene PINNED+offline Dateien.
      * ReadDirectoryChangesW läuft bereits - Events während des Scans
@@ -419,9 +441,14 @@ gpointer sond_treeviewfm_seadrive_watcher_thread(gpointer user_data)
 
             /* Nächsten ReadDirectoryChangesW-Aufruf starten */
             ResetEvent(ov.hEvent);
-            ReadDirectoryChangesW(hDir, buf, sizeof(buf), TRUE,
+            if (!ReadDirectoryChangesW(hDir, buf, sizeof(buf), TRUE,
                     FILE_NOTIFY_CHANGE_ATTRIBUTES | FILE_NOTIFY_CHANGE_LAST_WRITE,
-                    NULL, &ov, NULL);
+                    NULL, &ov, NULL)) {
+                LOG_WARN("SeaDrive-Watcher: ReadDirectoryChangesW('%s') beim "
+                        "Neu-Anstoßen fehlgeschlagen (Fehler %lu) - Watcher "
+                        "wird beendet", root, (unsigned long) GetLastError());
+                break;
+            }
         }
     }
 
@@ -429,6 +456,7 @@ gpointer sond_treeviewfm_seadrive_watcher_thread(gpointer user_data)
     CancelIo(hDir);
     CloseHandle(ov.hEvent);
     CloseHandle(hDir);
+    g_free(root);
 
     return NULL;
 }
@@ -725,6 +753,15 @@ static void seadrive_action_activate(GSimpleAction *action, GVariant *parameter,
         apply_pin_state_to_root(stvfm, pin_state);
     }
 
+    /* Bei UNSPECIFIED/UNPINNED ändert sich das PINNED-Attribut sofort
+     * (synchron), das Overlay-Icon muss also sofort neu gezeichnet werden.
+     * Bei PINNED dagegen bleibt die Datei i.d.R. zunächst weiter "offline"
+     * (RECALL_ON_DATA_ACCESS) - SeaDrive lädt sie erst im Hintergrund
+     * herunter. Das Icon würde also ohnehin noch "nicht lokal" zeigen; der
+     * spätere Wechsel auf "gepinnt" kommt automatisch über den Watcher-
+     * Thread (FILE_NOTIFY_CHANGE_ATTRIBUTES -> sond_treeviewfm_seadrive_
+     * item_hydrated() -> queue_draw), ein sofortiges Neuzeichnen hier wäre
+     * also nur ein unnötiger Zwischenschritt. */
     if (pin_state != STVFM_PIN_STATE_PINNED)
         gtk_widget_queue_draw(GTK_WIDGET(stvfm));
 }

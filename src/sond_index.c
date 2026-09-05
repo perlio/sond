@@ -198,6 +198,11 @@ static gboolean db_init_schema(SondIndexCtx *ctx, GError **error) {
  * meta-Tabelle: einfacher Schlüssel-Wert-Speicher
  * ======================================================================= */
 
+#ifdef SOND_WITH_EMBEDDINGS
+/* Aktuell ausschließlich für Embeddings genutzt (embedding_model/
+ * embedding_dim, s.u.) - deshalb hier mit eingerahmt, sonst "unused
+ * function" ohne Embeddings-Build. Falls die meta-Tabelle künftig auch
+ * embeddings-unabhängig gebraucht wird, hier wieder herausziehen. */
 static gchar* db_meta_get(SondIndexCtx *ctx, gchar const *key) {
     sqlite3_stmt *stmt  = NULL;
     gchar        *value = NULL;
@@ -228,6 +233,7 @@ static void db_meta_set(SondIndexCtx *ctx, gchar const *key, gchar const *value)
     sqlite3_step(stmt);
     sqlite3_finalize(stmt);
 }
+#endif
 
 #ifdef SOND_WITH_EMBEDDINGS
 /* sond_llama_ensure_backends:
@@ -764,6 +770,88 @@ gint sond_index_ctx_coverage_get(SondIndexCtx *ctx, gchar const *path) {
     return result;
 }
 
+SondIndexStatus sond_index_ctx_get_file_status(SondIndexCtx *ctx,
+        gchar const *filename, gint von_seite, gint bis_seite) {
+    if (!ctx || !filename)
+        return SOND_INDEX_STATUS_NONE;
+
+    if (sond_index_ctx_coverage_get(ctx, filename) >= 0)
+        return SOND_INDEX_STATUS_FULL;
+
+    if (von_seite < 0) {
+        /* Ganze Datei (auch Nicht-PDF, dort page_nr immer -1): ohne die
+         * Datei zu öffnen reicht hier die Existenzfrage, um NONE von
+         * PARTIAL zu unterscheiden - FULL wurde oben bereits über die
+         * coverage-Tabelle ausgeschlossen bzw. bestätigt. */
+        sqlite3_stmt *stmt = NULL;
+        gboolean any = FALSE;
+
+        if (sqlite3_prepare_v2(ctx->db,
+                "SELECT 1 FROM pages WHERE filename = ? LIMIT 1",
+                -1, &stmt, NULL) == SQLITE_OK) {
+            sqlite3_bind_text(stmt, 1, filename, -1, SQLITE_TRANSIENT);
+            any = (sqlite3_step(stmt) == SQLITE_ROW);
+            sqlite3_finalize(stmt);
+        }
+
+        return any ? SOND_INDEX_STATUS_PARTIAL : SOND_INDEX_STATUS_NONE;
+    }
+
+    /* Anbindung mit explizitem Seitenbereich: zählen, wie viele der
+     * angeforderten Seiten schon einen pages-Eintrag haben. */
+    {
+        GArray     *indexed = sond_index_ctx_get_pages_for_file(ctx, filename);
+        GHashTable *set     = g_hash_table_new(NULL, NULL);
+        gint        found   = 0;
+        gint        total   = bis_seite - von_seite + 1;
+
+        for (guint i = 0; i < indexed->len; i++)
+            g_hash_table_add(set,
+                    GINT_TO_POINTER(g_array_index(indexed, gint, i)));
+
+        for (gint p = von_seite; p <= bis_seite; p++)
+            if (g_hash_table_contains(set, GINT_TO_POINTER(p)))
+                found++;
+
+        g_hash_table_destroy(set);
+        g_array_free(indexed, TRUE);
+
+        if (found <= 0)
+            return SOND_INDEX_STATUS_NONE;
+        if (total > 0 && found >= total)
+            return SOND_INDEX_STATUS_FULL;
+        return SOND_INDEX_STATUS_PARTIAL;
+    }
+}
+
+SondIndexStatus sond_index_ctx_get_dir_status(SondIndexCtx *ctx,
+        gchar const *path) {
+    sqlite3_stmt *stmt    = NULL;
+    gchar        *pattern = NULL;
+    gboolean      any     = FALSE;
+
+    if (!ctx || !path)
+        return SOND_INDEX_STATUS_NONE;
+
+    if (sond_index_ctx_coverage_get(ctx, path) >= 0)
+        return SOND_INDEX_STATUS_FULL;
+
+    pattern = g_strdup_printf("%s/%%", path);
+
+    if (sqlite3_prepare_v2(ctx->db,
+            "SELECT EXISTS(SELECT 1 FROM pages WHERE filename LIKE ?1)"
+            " OR EXISTS(SELECT 1 FROM coverage WHERE path LIKE ?1)",
+            -1, &stmt, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(stmt, 1, pattern, -1, SQLITE_TRANSIENT);
+        if (sqlite3_step(stmt) == SQLITE_ROW)
+            any = (sqlite3_column_int(stmt, 0) != 0);
+        sqlite3_finalize(stmt);
+    }
+
+    g_free(pattern);
+    return any ? SOND_INDEX_STATUS_PARTIAL : SOND_INDEX_STATUS_NONE;
+}
+
 /*
  * sond_index_ctx_coverage_mark:
  *
@@ -847,6 +935,123 @@ gboolean sond_index_ctx_coverage_mark(SondIndexCtx *ctx, gchar const *path,
                 sqlite3_errmsg(ctx->db));
         sqlite3_finalize(stmt);
         return FALSE;
+    }
+    sqlite3_finalize(stmt);
+
+    return TRUE;
+}
+
+/*
+ * sond_index_ctx_coverage_clear:
+ *
+ * Reine Fall-1-Bereinigung für Löschen: entfernt jeden coverage-Eintrag
+ * für path selbst und alles darunter (per "/"-Präfix) - rührt einen
+ * eventuell abdeckenden VORFAHREN nicht an, s. Kommentar in sond_index.h.
+ */
+gboolean sond_index_ctx_coverage_clear(SondIndexCtx *ctx, gchar const *path,
+        GError **error) {
+    sqlite3_stmt *stmt     = NULL;
+    gchar        *like_dir = NULL;
+
+    if (!ctx || !path) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "%s: ctx/path fehlt", __func__);
+        return FALSE;
+    }
+
+    like_dir = g_strdup_printf("%s/%%", path);
+
+    if (sqlite3_prepare_v2(ctx->db,
+            "DELETE FROM coverage WHERE path = ?1 OR path LIKE ?2",
+            -1, &stmt, NULL) != SQLITE_OK) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "%s: prepare DELETE coverage: %s", __func__,
+                sqlite3_errmsg(ctx->db));
+        g_free(like_dir);
+        return FALSE;
+    }
+    sqlite3_bind_text(stmt, 1, path,     -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, like_dir, -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(stmt) != SQLITE_DONE) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "%s: step DELETE coverage: %s", __func__,
+                sqlite3_errmsg(ctx->db));
+        sqlite3_finalize(stmt);
+        g_free(like_dir);
+        return FALSE;
+    }
+    sqlite3_finalize(stmt);
+    g_free(like_dir);
+
+    return TRUE;
+}
+
+/*
+ * sond_index_ctx_coverage_expand_to_pages:
+ *
+ * Gegenstück zu coverage_mark(): hat filename einen eigenen coverage-
+ * Eintrag, wird für jede Seite in pages_to_write eine einzelne
+ * pages-Zeile mit demselben Modus angelegt - rettet den Seiten-
+ * Fortschritt vor dem anschließenden Verwerfen des Datei-Eintrags (s.
+ * Kommentar in sond_index.h). Bewusst eine explizite Seitenliste (statt
+ * "Gesamtzahl + Ausschlussliste"): der Aufrufer kennt die tatsächlich
+ * noch existierenden Seiten (page_akt bleibt für gelöschte Seiten
+ * dauerhaft, aber stabil, im Array stehen - "Karteileichen"; die rohe
+ * Array-Länge ist NICHT die aktuelle Seitenzahl).
+ */
+gboolean sond_index_ctx_coverage_expand_to_pages(SondIndexCtx *ctx,
+        gchar const *filename, gint const *pages_to_write,
+        guint n_pages_to_write, GError **error) {
+    sqlite3_stmt *stmt = NULL;
+    gint          mode = -1;
+
+    if (!ctx || !filename) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "%s: ctx/filename fehlt", __func__);
+        return FALSE;
+    }
+
+    if (sqlite3_prepare_v2(ctx->db,
+            "SELECT ocr_mode FROM coverage WHERE path = ?", -1, &stmt, NULL)
+            != SQLITE_OK) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "%s: prepare SELECT coverage: %s", __func__,
+                sqlite3_errmsg(ctx->db));
+        return FALSE;
+    }
+    sqlite3_bind_text(stmt, 1, filename, -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(stmt) == SQLITE_ROW)
+        mode = sqlite3_column_int(stmt, 0);
+    sqlite3_finalize(stmt);
+    stmt = NULL;
+
+    if (mode < 0)
+        return TRUE; /* kein eigener Eintrag - nichts zu tun, s.o. */
+
+    if (sqlite3_prepare_v2(ctx->db,
+            "INSERT INTO pages(filename, page_nr, ocr_mode) VALUES(?,?,?)"
+            " ON CONFLICT(filename, page_nr) DO UPDATE SET ocr_mode = excluded.ocr_mode",
+            -1, &stmt, NULL) != SQLITE_OK) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "%s: prepare INSERT pages: %s", __func__,
+                sqlite3_errmsg(ctx->db));
+        return FALSE;
+    }
+
+    for (guint i = 0; i < n_pages_to_write; i++) {
+        gint page = pages_to_write[i];
+
+        sqlite3_reset(stmt);
+        sqlite3_bind_text(stmt, 1, filename, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int (stmt, 2, page);
+        sqlite3_bind_int (stmt, 3, mode);
+        if (sqlite3_step(stmt) != SQLITE_DONE) {
+            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "%s: INSERT pages '%s' Seite %d: %s", __func__,
+                    filename, page, sqlite3_errmsg(ctx->db));
+            sqlite3_finalize(stmt);
+            return FALSE;
+        }
     }
     sqlite3_finalize(stmt);
 
@@ -1441,26 +1646,35 @@ void sond_index_hit_free(gpointer p) {
  *   - Mehrere Wörter in term → Phrasensuche: "Wort1 Wort2"
  *   - Ein Wort                → einfaches Token: Wort
  *   - context vorhanden      → AND-Verknüpfung: <term> AND <context>
+ *   - whole_word == FALSE    → zusätzlich Präfix-Suche (angehängtes "*"):
+ *     bei einem einzelnen Wort auf das Wort selbst (Wort*, findet z.B.
+ *     auch "Wortliste"), bei einer Phrase auf deren letztes Wort
+ *     ("Wort1 Wort2"*) - mehr erlaubt die FTS5-Syntax für Phrasen nicht
+ *     (Präfix nur auf den letzten Token der Phrase). Echte Teilstring-
+ *     Suche (Treffer auch mitten im Wort, z.B. "arbeit" in "Mehrarbeit")
+ *     unterstützt der verwendete Standard-Tokenizer nicht - dafür bräuchte
+ *     es einen Trigram-Tokenizer samt Neuindizierung.
  *
  * Rückgabe: neu allozierter String, mit g_free() freigeben.
  */
-static gchar* build_fts_query(gchar const *term, gchar const *context) {
+static gchar* build_fts_query(gchar const *term, gchar const *context,
+        gboolean whole_word) {
     gchar *term_q   = NULL;
     gchar *query    = NULL;
 
     /* Phrase wenn term ein Leerzeichen enthält */
     if (strchr(term, ' '))
-        term_q = g_strdup_printf("\"%s\"", term);
+        term_q = g_strdup_printf(whole_word ? "\"%s\"" : "\"%s\"*", term);
     else
-        term_q = g_strdup(term);
+        term_q = g_strdup_printf(whole_word ? "%s" : "%s*", term);
 
     if (context && *context) {
         gchar *ctx_q = NULL;
 
         if (strchr(context, ' '))
-            ctx_q = g_strdup_printf("\"%s\"", context);
+            ctx_q = g_strdup_printf(whole_word ? "\"%s\"" : "\"%s\"*", context);
         else
-            ctx_q = g_strdup(context);
+            ctx_q = g_strdup_printf(whole_word ? "%s" : "%s*", context);
 
         query = g_strdup_printf("%s AND %s", term_q, ctx_q);
         g_free(ctx_q);
@@ -1530,9 +1744,49 @@ static gchar* normalize_snippet_whitespace(gchar const *text) {
     return g_strstrip(g_string_free(out, FALSE));
 }
 
+/* Chunks überlappen sich nur um chunk_overlap Zeichen (deutlich weniger als
+ * SNIPPET_CTX, s.u.) - liegt ein Treffer nahe am Anfang "seines" Chunks,
+ * reicht der Text INNERHALB dieses einen Chunks nicht für den gewünschten
+ * Vorlauf, obwohl auf der Seite davor noch mehr steht (im vorangehenden,
+ * überlappenden Chunk). Holt bis zu max_chars Zeichen vom Ende des
+ * unmittelbar vorangehenden Chunks derselben Datei/Seite (nächstniedrigerer
+ * char_pos) - oder NULL, falls keiner existiert oder leer. */
+static gchar* fetch_prev_chunk_tail(SondIndexCtx *ctx, gchar const *filename,
+        gint page_nr, gint char_pos, gint max_chars) {
+    sqlite3_stmt *stmt   = NULL;
+    gchar        *result = NULL;
+
+    if (sqlite3_prepare_v2(ctx->db,
+            "SELECT text FROM chunks WHERE filename = ?1 AND page_nr = ?2"
+            " AND char_pos < ?3 ORDER BY char_pos DESC LIMIT 1",
+            -1, &stmt, NULL) != SQLITE_OK)
+        return NULL;
+
+    sqlite3_bind_text(stmt, 1, filename, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(stmt, 2, page_nr);
+    sqlite3_bind_int(stmt, 3, char_pos);
+
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        gchar const *prev_text = (gchar const*) sqlite3_column_text(stmt, 0);
+
+        if (prev_text && *prev_text) {
+            gchar const *prev_end = prev_text + strlen(prev_text);
+            gchar const *tail     = prev_end;
+
+            for (gint k = 0; k < max_chars && tail > prev_text; k++)
+                tail = g_utf8_prev_char(tail);
+            result = g_strdup(tail);
+        }
+    }
+
+    sqlite3_finalize(stmt);
+    return result;
+}
+
 GPtrArray* sond_index_search(SondIndexCtx *ctx,
                               gchar const  *term,
                               gchar const  *context,
+                              gboolean      whole_word,
                               GError      **error) {
     GPtrArray    *result = NULL;
     sqlite3_stmt *stmt   = NULL;
@@ -1548,11 +1802,13 @@ GPtrArray* sond_index_search(SondIndexCtx *ctx,
     /* ---------------------------------------------------------------
      * 1. Volltextsuche über FTS5
      * ------------------------------------------------------------- */
-    query = build_fts_query(term, context);
+    query = build_fts_query(term, context, whole_word);
 
-    /* highlight() markiert jeden Token-Treffer mit \x01...\x02.
-     * Dadurch werden nur ganze Wörter gefunden (FTS5-Tokenisierung),
-     * konsistent für alle Texttypen. */
+    /* highlight() markiert jeden Token-Treffer mit \x01...\x02. Bei
+     * Präfix-Suche (whole_word == FALSE, Default) markiert es dabei den
+     * ganzen getroffenen Token, nicht nur den eingegebenen Präfix - so
+     * erscheint z.B. bei Suche nach "Vertrag" auch "Vertragspartner"
+     * komplett markiert. */
     rc = sqlite3_prepare_v2(ctx->db,
         "SELECT c.filename, c.page_nr, c.char_pos,"
         "       c.char_pos - (SELECT MIN(c2.char_pos) FROM chunks c2"
@@ -1622,21 +1878,41 @@ GPtrArray* sond_index_search(SondIndexCtx *ctx,
             gchar const *orig_start = chunk_text + occ_offset_in_chunk;
             gchar const *orig_end   = orig_start + term_len_orig;
 
-            gchar const *snip_start = orig_start;
-            for (gint k = 0; k < SNIPPET_CTX && snip_start > chunk_text; k++)
+            gchar const *snip_start   = orig_start;
+            gint         chars_before = 0;
+            for (; chars_before < SNIPPET_CTX && snip_start > chunk_text; chars_before++)
                 snip_start = g_utf8_prev_char(snip_start);
 
             gchar const *snip_end = orig_end;
             for (gint k = 0; k < SNIPPET_CTX && snip_end < chunk_end; k++)
                 snip_end = g_utf8_next_char(snip_end);
 
-            gboolean ellipsis_before = (snip_start > chunk_text);
+            gboolean  ellipsis_before = FALSE;
+            gchar    *prefix_extra    = NULL;
+
+            if (chars_before < SNIPPET_CTX && chunk_offset_on_page > 0) {
+                /* Chunk-Anfang erreicht, ohne den vollen Vorlauf zu
+                 * bekommen - aber auf der Seite steht davor noch mehr
+                 * (vorangehender, überlappender Chunk). Von dort den
+                 * fehlenden Rest holen, s. fetch_prev_chunk_tail(). */
+                prefix_extra = fetch_prev_chunk_tail(ctx,
+                        (gchar const*) sqlite3_column_text(stmt, 0),
+                        sqlite3_column_int(stmt, 1),
+                        sqlite3_column_int(stmt, 2),
+                        SNIPPET_CTX - chars_before);
+                ellipsis_before = TRUE; /* vor dem (ggf. ergänzten) Ausschnitt
+                                          steht so oder so noch mehr Text */
+            } else
+                ellipsis_before = (snip_start > chunk_text);
+
             gboolean ellipsis_after  = (snip_end   < chunk_end);
             gsize    snip_len        = (gsize)(snip_end - snip_start);
-            gchar   *snippet_raw = g_strdup_printf("%s%.*s%s",
+            gchar   *snippet_raw = g_strdup_printf("%s%s%.*s%s",
                     ellipsis_before ? "..." : "",
+                    prefix_extra ? prefix_extra : "",
                     (gint)snip_len, snip_start,
                     ellipsis_after  ? "..." : "");
+            g_free(prefix_extra);
             gchar   *snippet = normalize_snippet_whitespace(snippet_raw);
             g_free(snippet_raw);
 
@@ -1736,7 +2012,7 @@ GPtrArray* sond_index_search(SondIndexCtx *ctx,
         }
 
         /* ?1 = LIKE-Muster, ?2 = FTS-Query (für NOT IN) */
-        gchar *fts_query = build_fts_query(term, context);
+        gchar *fts_query = build_fts_query(term, context, whole_word);
         sqlite3_bind_text(stmt, 1, pattern,   -1, SQLITE_TRANSIENT);
         sqlite3_bind_text(stmt, 2, fts_query, -1, SQLITE_TRANSIENT);
         g_free(pattern);
@@ -1951,6 +2227,28 @@ static void sond_index_page_set(SondIndexCtx *ctx, gchar const *filename,
 /* =======================================================================
  * sond_server_index
  * ======================================================================= */
+
+/* Muss mit der Dispatch-Liste unten in sond_index() übereinstimmen. */
+gboolean sond_index_mime_type_supported(gchar const *mime_type) {
+    if (!mime_type)
+        return FALSE;
+
+    if (!g_strcmp0(mime_type, "application/pdf"))
+        return TRUE;
+    if (!g_strcmp0(mime_type, "message/rfc822"))
+        return TRUE;
+    if (!g_strcmp0(mime_type, "text/html"))
+        return TRUE;
+    if (!g_strcmp0(mime_type,
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"))
+        return TRUE;
+    if (!g_strcmp0(mime_type, "application/vnd.oasis.opendocument.text"))
+        return TRUE;
+    if (g_str_has_prefix(mime_type, "text/"))
+        return TRUE;
+
+    return FALSE;
+}
 
 void sond_index(fz_context* ctx,
 		void (*log_func)(void*, gchar const*, ...), gpointer log_func_data,

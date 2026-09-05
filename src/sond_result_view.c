@@ -276,6 +276,30 @@ static gboolean cb_treeview_key_press(GtkWidget *treeview, GdkEventKey *event,
  * volle Text steht im Detailbereich (Master-Detail, s.u.). */
 #define RV_SNIPPET_PREVIEW_MAXCHARS 200
 #define RV_SNIPPET_PREVIEW_LINES    2
+#define RV_SNIPPET_PREVIEW_LEAD     40  /* Zeichen vor dem Treffer, s.u. */
+
+#define KEY_SEARCH_TERM  "index-search-term" /* von außen gesetzt, s.
+                                                 zond_indexsuche.c/zond_chat.c */
+
+/* Case-insensitive Vergleich ab genau dieser Position (UTF-8-bewusst,
+ * ohne den Text komplett kleinzuschreiben - vermeidet Byte-/Zeichenlängen-
+ * Verschiebungen durch g_utf8_strdown() bei manchen Zeichen). */
+static gboolean utf8_ci_match_at(gchar const *haystack, gchar const *needle) {
+    gchar const *h = haystack;
+    gchar const *n = needle;
+
+    while (*n) {
+        if (!*h)
+            return FALSE;
+        if (g_unichar_tolower(g_utf8_get_char(h))
+                != g_unichar_tolower(g_utf8_get_char(n)))
+            return FALSE;
+        h = g_utf8_next_char(h);
+        n = g_utf8_next_char(n);
+    }
+
+    return TRUE;
+}
 
 static gchar* rv_split_lines(gchar const *s, gint n_lines) {
     GString *out = NULL;
@@ -314,18 +338,65 @@ static gchar* rv_split_lines(gchar const *s, gint n_lines) {
 
 static void cb_snippet_cell_data(GtkTreeViewColumn *col, GtkCellRenderer *renderer,
         GtkTreeModel *model, GtkTreeIter *iter, gpointer user_data) {
-    gint   col_idx = GPOINTER_TO_INT(user_data);
-    gchar *text    = NULL;
-    gchar *cut     = NULL;
-    gchar *split   = NULL;
+    gint         col_idx  = GPOINTER_TO_INT(user_data);
+    gchar       *text     = NULL;
+    gchar       *cut      = NULL;
+    gchar       *split    = NULL;
+    GtkWidget   *treeview = NULL;
+    GtkWidget   *toplevel = NULL;
+    gchar const *term     = NULL;
+    gchar const *start_ptr = NULL;
+    gboolean     lead_ellipsis  = FALSE;
+    gboolean     trail_ellipsis = FALSE;
 
     gtk_tree_model_get(model, iter, col_idx, &text, -1);
 
-    if (text && g_utf8_strlen(text, -1) > RV_SNIPPET_PREVIEW_MAXCHARS) {
-        gchar const *end = g_utf8_offset_to_pointer(text, RV_SNIPPET_PREVIEW_MAXCHARS);
-        cut = g_strdup_printf("%.*s…", (gint) (end - text), text);
-    } else
-        cut = g_strdup(text ? text : "");
+    if (!text) {
+        g_object_set(renderer, "text", "", NULL);
+        return;
+    }
+
+    /* Vorschau am tatsächlichen Treffer ausrichten statt immer am
+     * Textanfang: seit der Kontext vor dem Treffer (Suche über die
+     * chunks-Tabelle) großzügiger bemessen ist, würde eine feste
+     * Kürzung ab Zeichen 0 sonst oft nur Text VOR dem Treffer zeigen,
+     * ohne das Suchwort selbst - der eigentliche Treffer stünde dann
+     * erst im (weiter unten markierten) Detailbereich. */
+    treeview = gtk_tree_view_column_get_tree_view(col);
+    toplevel = treeview ? gtk_widget_get_toplevel(treeview) : NULL;
+    term = (toplevel && GTK_IS_WINDOW(toplevel))
+            ? (gchar const*) g_object_get_data(G_OBJECT(toplevel), KEY_SEARCH_TERM)
+            : NULL;
+
+    start_ptr = text;
+
+    if (term && *term) {
+        gchar const *match = NULL;
+
+        for (gchar const *p = text; *p; p = g_utf8_next_char(p))
+            if (utf8_ci_match_at(p, term)) { match = p; break; }
+
+        if (match) {
+            gchar const *lead = match;
+            for (gint k = 0; k < RV_SNIPPET_PREVIEW_LEAD && lead > text; k++)
+                lead = g_utf8_prev_char(lead);
+            start_ptr = lead;
+        }
+    }
+
+    lead_ellipsis = (start_ptr > text);
+
+    {
+        gchar const *end_ptr = start_ptr;
+        for (gint k = 0; k < RV_SNIPPET_PREVIEW_MAXCHARS && *end_ptr; k++)
+            end_ptr = g_utf8_next_char(end_ptr);
+        trail_ellipsis = (*end_ptr != '\0');
+
+        cut = g_strdup_printf("%s%.*s%s",
+                lead_ellipsis  ? "…" : "",
+                (gint) (end_ptr - start_ptr), start_ptr,
+                trail_ellipsis ? "…" : "");
+    }
 
     split = rv_split_lines(cut, RV_SNIPPET_PREVIEW_LINES);
 
@@ -339,6 +410,55 @@ static void cb_snippet_cell_data(GtkTreeViewColumn *col, GtkCellRenderer *render
 /* ==========================================================================
  * Master-Detail: volle Zeile der Auswahl im Detailbereich anzeigen
  * ======================================================================== */
+
+#define RV_HIGHLIGHT_TAG "sond-rv-highlight"
+
+/* Alle Vorkommen von term im aktuellen Buffer-Text farblich markieren -
+ * sonst findet man den eigentlichen Treffer im (jetzt oft längeren)
+ * Detailtext kaum wieder. Kein Treffer bei semantischer Suche (Chat:
+ * KEY_SEARCH_TERM bleibt dort ungesetzt) - dann einfach nichts zu tun. */
+static void rv_highlight_term(GtkTextBuffer *buffer, gchar const *term) {
+    GtkTextTagTable *tag_table  = NULL;
+    GtkTextTag      *tag        = NULL;
+    GtkTextIter      start_iter = { 0 };
+    GtkTextIter      end_iter   = { 0 };
+    gchar           *text       = NULL;
+    glong            term_len   = 0;
+    gint             char_pos   = 0;
+
+    if (!term || !*term)
+        return;
+
+    term_len = g_utf8_strlen(term, -1);
+    if (term_len == 0)
+        return;
+
+    tag_table = gtk_text_buffer_get_tag_table(buffer);
+    tag = gtk_text_tag_table_lookup(tag_table, RV_HIGHLIGHT_TAG);
+    if (!tag)
+        tag = gtk_text_buffer_create_tag(buffer, RV_HIGHLIGHT_TAG,
+                "background", "#fff59d", NULL); /* helles Gelb */
+
+    gtk_text_buffer_get_start_iter(buffer, &start_iter);
+    gtk_text_buffer_get_end_iter(buffer, &end_iter);
+    text = gtk_text_buffer_get_text(buffer, &start_iter, &end_iter, FALSE);
+    if (!text)
+        return;
+
+    for (gchar const *p = text; *p; p = g_utf8_next_char(p), char_pos++) {
+        if (utf8_ci_match_at(p, term)) {
+            GtkTextIter it_start = { 0 };
+            GtkTextIter it_end   = { 0 };
+
+            gtk_text_buffer_get_iter_at_offset(buffer, &it_start, char_pos);
+            gtk_text_buffer_get_iter_at_offset(buffer, &it_end,
+                    char_pos + (gint) term_len);
+            gtk_text_buffer_apply_tag(buffer, tag, &it_start, &it_end);
+        }
+    }
+
+    g_free(text);
+}
 
 static void cb_selection_changed(GtkTreeSelection *sel, gpointer user_data) {
     GtkWidget     *result_view = GTK_WIDGET(user_data);
@@ -369,6 +489,9 @@ static void cb_selection_changed(GtkTreeSelection *sel, gpointer user_data) {
 
     gtk_text_buffer_set_text(buffer, text ? text : "", -1);
     g_free(text);
+
+    rv_highlight_term(buffer,
+            (gchar const*) g_object_get_data(G_OBJECT(result_view), KEY_SEARCH_TERM));
 }
 
 /* ==========================================================================

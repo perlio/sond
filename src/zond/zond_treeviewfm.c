@@ -216,17 +216,19 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 			return -1;
 		}
 
-		/* Vorsichtsmaßnahme: einen eventuell bestehenden coverage-Eintrag
-		 * für genau diesen Pfad (oder ein Vorfahre-Verzeichnis) auflösen.
+		/* Vorsichtsmaßnahme: einen eventuell bestehenden eigenen
+		 * coverage-Eintrag für genau diesen Pfad (oder darunter) entfernen.
 		 * Nicht wegen des gelöschten Pfads selbst (der existiert ja gleich
 		 * nicht mehr), sondern damit nicht irgendwann später ein neuer,
 		 * völlig anderer Pfad gleichen Namens fälschlich als "schon
-		 * abgedeckt" gilt. */
-		if (!sond_index_ctx_coverage_invalidate(priv->zond->wctx->index_ctx,
+		 * abgedeckt" gilt. Ein eventuell abdeckender VORFAHRE wird bewusst
+		 * NICHT angetastet - reines Löschen von Inhalt kann dessen Aussage
+		 * nicht verletzen, s. Kommentar bei sond_index_ctx_coverage_clear(). */
+		if (!sond_index_ctx_coverage_clear(priv->zond->wctx->index_ctx,
 				path, &idx_err)) {
 			sqlite3_exec(priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
 			if (error) *error = g_error_new(G_IO_ERROR, G_IO_ERROR_FAILED,
-					"%s: sond_index_ctx_coverage_invalidate: %s", __func__,
+					"%s: sond_index_ctx_coverage_clear: %s", __func__,
 					idx_err ? idx_err->message : "?");
 			g_clear_error(&idx_err);
 			return -1;
@@ -307,6 +309,25 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 					sqlite3_errmsg(ztvfm_priv->zond->wctx->index_ctx->db));
 			return -1;
 		}
+
+		/* Vorsichtsmaßnahme: falls der ZIEL-Pfad schon (direkt oder über
+		 * einen Vorfahren) als abgedeckt gilt, muss das VOR dem Umbenennen
+		 * aufgelöst werden - hierher kommt gleich neuer Inhalt (die
+		 * verschobene Datei/das Verzeichnis), der ggf. noch gar nicht
+		 * geprüft ist und die Abdeckungs-Aussage sonst verletzen würde.
+		 * Reihenfolge wichtig: muss VOR sond_index_ctx_rename_file()
+		 * laufen, sonst würde der gerade erst umbenannte, korrekte eigene
+		 * Eintrag der verschobenen Datei gleich wieder mitgelöscht. */
+		if (!sond_index_ctx_coverage_invalidate(ztvfm_priv->zond->wctx->index_ctx,
+				prefix_new, &idx_err)) {
+			sqlite3_exec(ztvfm_priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
+			if (error) *error = g_error_new(G_IO_ERROR, G_IO_ERROR_FAILED,
+					"%s: sond_index_ctx_coverage_invalidate: %s", __func__,
+					idx_err ? idx_err->message : "?");
+			g_clear_error(&idx_err);
+			return -1;
+		}
+
 		if (!sond_index_ctx_rename_file(ztvfm_priv->zond->wctx->index_ctx,
 				prefix_old, prefix_new, &idx_err)) {
 			sqlite3_exec(ztvfm_priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
@@ -903,6 +924,27 @@ GHashTable* zond_treeviewfm_get_fileparts(ZondTreeviewFM *ztvfm,
 	return ht;
 }
 
+/* Vfunc für sond_treeviewfm.c (Indizierungsstatus-Overlay): ein
+ * LEAF_SECTION-Knoten in BAUM_FS ist bei zond immer eine Anbindung
+ * (angelegt in ziele.c), deren path_or_section ein Seitenbereich-String
+ * ist - dieselbe Auswertung wie in zond_treeviewfm_item_get_fileparts(). */
+static gboolean zond_treeviewfm_get_section_page_range(SondTVFMItem *stvfm_item,
+		gint *von_seite, gint *bis_seite) {
+	gchar const *section = sond_tvfm_item_get_path_or_section(stvfm_item);
+	Anbindung anbindung = { 0 };
+
+	if (!section)
+		return FALSE;
+
+	anbindung_parse_file_section(section, &anbindung);
+
+	*von_seite = anbindung.von.seite;
+	*bis_seite = (anbindung.bis.seite == 0 && anbindung.bis.index == 0) ?
+			anbindung.von.seite : anbindung.bis.seite;
+
+	return TRUE;
+}
+
 static void zond_treeviewfm_finalize(GObject *obj) {
 
 	G_OBJECT_CLASS(zond_treeviewfm_parent_class)->finalize(obj);
@@ -921,6 +963,8 @@ static void zond_treeviewfm_class_init(ZondTreeviewFMClass *klass) {
 	SOND_TREEVIEWFM_CLASS(klass)->load_sections = zond_treeviewfm_load_sections;
 	SOND_TREEVIEWFM_CLASS(klass)->has_sections = zond_treeviewfm_has_sections;
 	SOND_TREEVIEWFM_CLASS(klass)->delete_section = zond_treeviewfm_delete_section;
+	SOND_TREEVIEWFM_CLASS(klass)->get_section_page_range =
+			zond_treeviewfm_get_section_page_range;
 
 	/* Zond-spezifische GMenu-Sections einmalig fuer diese Klasse aufbauen */
 	SOND_TREEVIEW_CLASS(klass)->gmenu = g_menu_new();
@@ -1026,6 +1070,18 @@ static void zond_treeviewfm_init_contextmenu(ZondTreeviewFM *ztvfm,
 	g_object_unref(act_idx_sel);
 }
 
+/* Getter fuer sond_treeviewfm_set_index_ctx_func(): liefert den aktuellen
+ * SondIndexCtx* des Projekts (oder NULL, falls kein Projekt/wctx/index_ctx
+ * vorhanden ist - dann zeichnet SondTreeviewFM einfach keine Overlay-Icons
+ * fuer den Indizierungsstatus). */
+static SondIndexCtx* zond_treeviewfm_get_index_ctx_cb(gpointer user_data) {
+	Projekt *zond = (Projekt*) user_data;
+
+	if (!zond || !zond->wctx) return NULL;
+
+	return zond->wctx->index_ctx;
+}
+
 ZondTreeviewFM* zond_treeviewfm_new(Projekt* zond) {
 	ZondTreeviewFM* ztvfm = NULL;
 	ZondTreeviewFMPrivate* ztvfm_priv = NULL;
@@ -1034,6 +1090,9 @@ ZondTreeviewFM* zond_treeviewfm_new(Projekt* zond) {
 	ztvfm_priv = zond_treeviewfm_get_instance_private(ztvfm);
 
 	ztvfm_priv->zond = zond;
+
+	sond_treeviewfm_set_index_ctx_func(SOND_TREEVIEWFM(ztvfm),
+			zond_treeviewfm_get_index_ctx_cb, zond);
 
 	zond_treeviewfm_init_contextmenu(ztvfm, zond);
 

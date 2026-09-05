@@ -26,6 +26,9 @@
 #include "../sond_treeview.h"
 #include "../sond_log_and_error.h"
 #include "../sond_process_file.h"
+#include "../sond_index.h"
+#include "../sond_mime.h"
+#include "../sond_icon_util.h"
 
 #include "zond_init.h"
 #include "zond_dbase.h"
@@ -407,6 +410,101 @@ static gboolean on_query_tooltip(GtkWidget  *widget,
     return TRUE;
 }
 
+/* Indizierungsstatus für das Overlay-Icon eines BAUM_INHALT/BAUM_AUSWERTUNG-
+ * Knotens. Anders als bei BAUM_FS (sond_treeviewfm.c) gibt es hier kein
+ * SondFilePart am Item, sondern die Anbindung (Datei + Seitenbereich) muss
+ * über die DB ermittelt werden - dafür die schon vorhandene
+ * zond_treeview_get_filepart_and_section() (löst dabei auch
+ * BAUM_AUSWERTUNG_COPY-Verweisknoten auf). Knoten ohne eigene Anbindung
+ * (reine Gliederungs-/Kategorieknoten) liefern NONE - kein Overlay. */
+static SondIndexStatus zond_treeview_get_index_status(ZondTreeview *ztv,
+		GtkTreeIter *iter) {
+	ZondTreeviewPrivate *ztv_priv = zond_treeview_get_instance_private(ztv);
+	SondIndexCtx *index_ctx = NULL;
+	gchar *file_part = NULL;
+	gchar *section = NULL;
+	gint von_seite = -1, bis_seite = -1;
+	SondIndexStatus status = SOND_INDEX_STATUS_NONE;
+	gint node_id = 0;
+	GError *local_error = NULL;
+
+	if (!ztv_priv->zond || !ztv_priv->zond->wctx)
+		return SOND_INDEX_STATUS_NONE;
+
+	index_ctx = ztv_priv->zond->wctx->index_ctx;
+	if (!index_ctx)
+		return SOND_INDEX_STATUS_NONE;
+
+	node_id = zond_treeview_get_filepart_and_section(ztv, iter, &file_part,
+			&section, &local_error);
+	if (node_id == -1) {
+		LOG_WARN("%s: zond_treeview_get_filepart_and_section: %s", __func__,
+				local_error->message);
+		g_clear_error(&local_error);
+		return SOND_INDEX_STATUS_NONE;
+	}
+
+	if (!file_part) {
+		g_free(section);
+		return SOND_INDEX_STATUS_NONE; /* reiner Gliederungs-/Kategorieknoten */
+	}
+
+	if (!sond_index_mime_type_supported(mime_from_extension(file_part))) {
+		g_free(file_part);
+		g_free(section);
+		return SOND_INDEX_STATUS_NONE;
+	}
+
+	if (section) {
+		Anbindung anbindung = { 0 };
+
+		anbindung_parse_file_section(section, &anbindung);
+		von_seite = anbindung.von.seite;
+		bis_seite = (anbindung.bis.seite == 0 && anbindung.bis.index == 0) ?
+				anbindung.von.seite : anbindung.bis.seite;
+	}
+
+	status = sond_index_ctx_get_file_status(index_ctx, file_part, von_seite,
+			bis_seite);
+
+	g_free(file_part);
+	g_free(section);
+
+	return status;
+}
+
+static void zond_treeview_render_icon(GtkTreeViewColumn *column,
+		GtkCellRenderer *renderer, GtkTreeModel *model, GtkTreeIter *iter,
+		gpointer data) {
+	ZondTreeview *ztv = ZOND_TREEVIEW(data);
+	gchar *icon_name = NULL;
+	SondIndexStatus index_status = SOND_INDEX_STATUS_NONE;
+
+	gtk_tree_model_get(model, iter, 0, &icon_name, -1);
+
+	index_status = zond_treeview_get_index_status(ztv, iter);
+
+	if (index_status != SOND_INDEX_STATUS_NONE) {
+		gint overlay_px = MAX(sond_icon_util_renderer_get_size(renderer) / 2, 8);
+		GdkPixbuf *badge_pb = sond_icon_util_status_badge_pixbuf(index_status,
+				overlay_px);
+		SondIconOverlay overlay = { badge_pb, SOND_ICON_CORNER_BOTTOM_LEFT };
+
+		sond_icon_util_render_with_overlays(GTK_WIDGET(ztv), renderer,
+				icon_name, &overlay, badge_pb ? 1 : 0);
+
+		if (badge_pb) g_object_unref(badge_pb);
+		g_free(icon_name);
+		return;
+	}
+
+	g_object_set(G_OBJECT(renderer), "icon-name",
+			icon_name ? icon_name : "image-missing", NULL);
+	g_free(icon_name);
+
+	return;
+}
+
 static void zond_treeview_init(ZondTreeview *ztv) {
 	//Tree-Model erzeugen und verbinden
 	ZondTreeStore *tree_store = g_object_new( ZOND_TYPE_TREE_STORE, NULL);
@@ -416,10 +514,10 @@ static void zond_treeview_init(ZondTreeview *ztv) {
 
 	gtk_tree_view_set_headers_visible(GTK_TREE_VIEW(ztv), FALSE);
 
-	gtk_tree_view_column_set_attributes(
+	gtk_tree_view_column_set_cell_data_func(
 			gtk_tree_view_get_column(GTK_TREE_VIEW(ztv), 0),
 			sond_treeview_get_cell_renderer_icon(SOND_TREEVIEW(ztv)),
-			"icon-name", 0, NULL);
+			zond_treeview_render_icon, ztv, NULL);
 	gtk_tree_view_column_set_attributes(
 			gtk_tree_view_get_column(GTK_TREE_VIEW(ztv), 0),
 			sond_treeview_get_cell_renderer_text(SOND_TREEVIEW(ztv)), "text", 1,

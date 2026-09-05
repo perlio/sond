@@ -405,6 +405,10 @@ typedef struct {
 	gchar const*   filename;
 	SondProcessFileCtx* wctx;
 	gint*          out_pdf_count;
+	gboolean*      changed; /* wird auf TRUE gesetzt, sobald mindestens ein
+	                          * embedded file tatsächlich ersetzt wurde
+	                          * (pdf_update_stream erfolgreich) - s.
+	                          * process_pdf_for_ocr() */
 } ProcessPdfData;
 
 static gint process_emb_file(fz_context* ctx, pdf_obj* dict,
@@ -525,6 +529,13 @@ static gint process_emb_file(fz_context* ctx, pdf_obj* dict,
 		return 0;
 	}
 
+	/* An dieser Stelle nur erreicht, wenn pdf_update_stream() nicht
+	 * geworfen hat - das äußere Dokument wurde also tatsächlich
+	 * verändert (s. process_pdf_for_ocr(): entscheidet danach zusammen
+	 * mit dem OCR-eigenen "changed", ob ein Rewrite nötig ist). */
+	if (((ProcessPdfData*)data)->changed)
+		*((ProcessPdfData*)data)->changed = TRUE;
+
 	g_free(filename_emb);
 
 	return 0;
@@ -539,8 +550,10 @@ static gint process_pdf_for_ocr(guchar* data, gsize size,
 	fz_stream* file = NULL;
 	fz_buffer* buf = NULL;
 	gint rc = 0;
+	gboolean emb_changed = FALSE;
+	gboolean ocr_changed = FALSE;
 
-	ProcessPdfData process_data = {filename, wctx, out_pdf_count};
+	ProcessPdfData process_data = {filename, wctx, out_pdf_count, &emb_changed};
 
 	fz_try(wctx->ctx)
 		file = fz_open_memory(wctx->ctx, data, size);
@@ -572,13 +585,25 @@ static gint process_pdf_for_ocr(guchar* data, gsize size,
 	//pdf-page-tree OCRen
 	rc = sond_ocr_pdf_doc(wctx->ctx, wctx->ocr_pool, doc,
 			(SondOcrMode) wctx->ocr_mode, seite_von, seite_bis,
-			wctx->log_func, wctx->log_func_data, error);
+			wctx->log_func, wctx->log_func_data, &ocr_changed, error);
 	if (rc == -1) {
 		pdf_drop_document(wctx->ctx, doc);
 		return -1;
 	}
 
 	*out_pdf_count += 1;
+
+	if (!emb_changed && !ocr_changed) {
+		/* Weder an eingebetteten Dateien noch an den eigenen Seiten wurde
+		 * tatsächlich etwas verändert (z.B. weil überall schon Text
+		 * vorlag). Der Rewrite über pdf_doc_to_buf() ist dann nicht nur
+		 * unnötig, sondern kann bei strukturell fragilen PDFs sogar
+		 * fehlschlagen, obwohl gar nichts zu tun gewesen wäre - out_data/
+		 * out_size bleiben NULL/0, der Aufrufer nutzt dann die
+		 * unveränderten Originaldaten (s. sond_process_file_do_rec()). */
+		pdf_drop_document(wctx->ctx, doc);
+		return 0;
+	}
 
 	//Rückgabe-buffer füllen
 	buf = pdf_doc_to_buf(wctx->ctx, doc, error);
@@ -738,6 +763,28 @@ void sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files) {
 
 		SondFilePart* sfp = SOND_FILE_PART(key);
 		file_part = sond_file_part_get_filepart(sfp);
+
+		/* Schneller Vorab-Check über die coalescierte coverage-Tabelle
+		 * (dieselbe wie beim Abdeckungs-Check der Indexsuche, s.
+		 * check_coverage_one() in zond_indexsuche.c): ist file_part (oder
+		 * ein abdeckender Vorfahre) schon bei mindestens dem angeforderten
+		 * OCR-Modus vollständig indiziert, muss die Datei für diesen Lauf
+		 * gar nicht erst geöffnet werden - spart bei "Gesamtes
+		 * Projektverzeichnis" auf einem bereits durchindizierten Projekt
+		 * das Öffnen/OCR-Prüfen jeder einzelnen Datei. Bei "erzwingen"
+		 * (FORCE) nie überspringen - das entspricht demselben Vorbehalt
+		 * wie bei sond_index_ctx_should_process_page(). Ist range gesetzt
+		 * (nur ein Seitenbereich angefragt), ist eine volle Datei-Abdeckung
+		 * immer hinreichend (impliziert jeden Teilbereich) - eine NICHT
+		 * ausreichende Datei-Abdeckung wird hier bewusst NICHT als "range
+		 * auch nicht abgedeckt" gewertet, sondern führt einfach zum
+		 * normalen (langsameren, aber korrekten) Weg unten. */
+		if (wctx->index_ctx && wctx->ocr_mode != SOND_OCR_MODE_FORCE &&
+				sond_index_ctx_coverage_get(wctx->index_ctx, file_part)
+						>= wctx->ocr_mode) {
+			g_free(file_part);
+			continue;
+		}
 
 		bytes = sond_file_part_get_bytes(sfp, &error);
 		if (!bytes) {

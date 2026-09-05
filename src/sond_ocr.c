@@ -495,10 +495,13 @@ SondOcrTask* sond_ocr_task_new(fz_context* ctx,
 gint sond_ocr_pdf_doc(fz_context* ctx, SondOcrPool* ocr_pool, pdf_document* doc,
 		SondOcrMode mode, gint seite_von, gint seite_bis,
 		void(*log_func)(void*, gchar const*, ...), gpointer log_func_data,
-		GError** error) {
+		gboolean* out_changed, GError** error) {
 	gint num_pages = 0;
 	pdf_obj* font_ref = NULL;
 	gint rc = 0;
+
+	if (out_changed)
+		*out_changed = FALSE;
 
 	if (mode == SOND_OCR_MODE_NONE)
 		return 0;
@@ -543,6 +546,19 @@ gint sond_ocr_pdf_doc(fz_context* ctx, SondOcrPool* ocr_pool, pdf_document* doc,
 	pdf_drop_obj(ctx, font_ref);
 
 	rc = sond_ocr_do_tasks(arr_tasks, ocr_pool, mode, error);
+
+	if (out_changed) {
+		/* Vor dem unref auslesen - danach ist arr_tasks (und jeder
+		 * einzelne task) freigegeben, s. dasselbe Muster in seiten.c. */
+		for (guint i = 0; i < arr_tasks->len; i++) {
+			SondOcrTask* task = g_ptr_array_index(arr_tasks, i);
+			if (task->content_changed) {
+				*out_changed = TRUE;
+				break;
+			}
+		}
+	}
+
 	g_ptr_array_unref(arr_tasks);
 	if (rc == -1)
 		return -1;

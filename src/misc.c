@@ -400,9 +400,6 @@ void info_window_set_message(InfoWindow *info_window, const gchar *format, ...) 
 	gtk_box_pack_start(GTK_BOX(info_window->content),
 			info_window->last_inserted_widget, FALSE, FALSE, 0);
 
-	while (gtk_events_pending())
-		gtk_main_iteration();
-
 	info_window_scroll(info_window);
 
 	return;
@@ -410,29 +407,11 @@ void info_window_set_message(InfoWindow *info_window, const gchar *format, ...) 
 
 typedef struct {
     InfoWindow *info_window;
-    gboolean main_thread;
     gchar *message;
 } MessageData;
 
 static gboolean show_message_main(gpointer data) {
     MessageData *md = (MessageData*) data;
-
-    /* Bei synchronem Aufruf vom Hauptthread aus (main_thread==TRUE, s.u.)
-     * ERST etwaige, von einem Worker-Thread per g_idle_add() eingereihte,
-     * aber noch nicht abgearbeitete Meldungen verarbeiten, BEVOR die eigene
-     * Meldung angehängt wird. Sonst kann eine synchron (direkt) geloggte
-     * Meldung eine zeitlich frühere, aber nur asynchron eingereihte
-     * Meldung "überholen" und vor ihr im Fenster erscheinen - genau das
-     * passierte bisher z.B. bei "OCR abgeschlossen" (Hauptthread, sofort
-     * angehängt), das vor den vorher vom Worker-Thread geloggten
-     * "neuer Versuch mit höherer Auflösung"-Meldungen auftauchte, obwohl
-     * es zeitlich danach entstanden ist. Betrifft nur den main_thread-Fall:
-     * mehrere per g_idle_add() eingereihte Meldungen laufen ohnehin schon
-     * in der Reihenfolge des Einreihens (GLib-Garantie), brauchen also
-     * untereinander keine Sonderbehandlung. */
-	if (md->main_thread)
-		while (gtk_events_pending())
-			gtk_main_iteration();
 
 	md->info_window->last_inserted_widget = gtk_label_new(md->message);
     g_free(md->message);
@@ -448,21 +427,27 @@ static gboolean show_message_main(gpointer data) {
     return G_SOURCE_REMOVE;
 }
 
-// Im Worker-Thread aufrufen:
+// Von jedem Thread aus aufrufbar (auch vom Hauptthread):
 void info_window_set_message_thread_safe(InfoWindow *info_window, const gchar *format, ...) {
     MessageData *md = g_new(MessageData, 1);
     md->info_window = info_window;
-    md->main_thread = g_main_context_is_owner(g_main_context_default());
 
     va_list args;
     va_start(args, format);
     md->message = g_strdup_vprintf(format, args);
     va_end(args);
 
-    if (md->main_thread)
-    	show_message_main(md);
-    else
-    	g_idle_add(show_message_main, md);
+    /* Immer über g_idle_add() einreihen - auch bei Aufruf vom Hauptthread
+     * aus. So laufen ALLE Meldungen (gleich ob Haupt- oder Worker-Thread)
+     * durch dieselbe FIFO-Queue und erscheinen automatisch in der
+     * richtigen zeitlichen Reihenfolge (GLib-Garantie: idle-Quellen werden
+     * in Einreihungsreihenfolge abgearbeitet) - ohne dass hierfür ein
+     * rekursiver gtk_main_iteration()-Aufruf nötig wäre. Letzterer war
+     * die vermutete Ursache eines seltenen, schwer reproduzierbaren
+     * Absturzes: er pumpte die Hauptschleife verschachtelt, während
+     * z.B. zond_index_erstellen_ht() bereits selbst mitten in einer
+     * eigenen gtk_main_iteration_do()-Pump-Schleife steckte. */
+    g_idle_add(show_message_main, md);
 
     return;
 }

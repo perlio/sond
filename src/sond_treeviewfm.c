@@ -36,19 +36,29 @@
 #include "sond_file_helper.h"
 #include "sond_ocr.h"
 #include "sond_index.h"
+#include "sond_mime.h"
 #include "sond_process_file.h"
 #include "sond_treeviewfm_seadrive.h"
+#include "sond_icon_util.h"
 
 //SOND_TREEVIEWDM
 typedef struct {
 	gchar *root;
 	GtkTreeViewColumn *column_eingang;
 	gboolean is_seadrive_path;
+	SondTreeviewFMIndexCtxFunc index_ctx_func;
+	gpointer index_ctx_func_data;
 #ifdef _WIN32
 	GThread *seadrive_watcher_thread;
 	gint     seadrive_watcher_stop;   /* atomares Flag: 0=laufen, 1=stoppen */
 	guint    seadrive_pending_down;   /* PINNED + RECALL_ON_DATA_ACCESS */
 	guint    seadrive_pending_up;     /* NOT_IN_SYNC */
+	/* Pfade, die aktuell als "nicht synchronisiert" gezählt sind (dedupliziert
+	 * seadrive_pending_up-Erhöhungen bei mehrfachen LAST_WRITE-Events für
+	 * denselben Pfad). Pro Instanz statt static/global, und beim Root-Wechsel
+	 * geleert - sonst bleiben Einträge einer vorigen Projekt-Session stehen
+	 * und der Zähler zählt beim nächsten Öffnen falsch (bleibt zu niedrig). */
+	GHashTable *seadrive_not_in_sync;
 #endif
 } SondTreeviewFMPrivate;
 
@@ -963,6 +973,8 @@ static void sond_treeviewfm_finalize(GObject *g_object) {
 
 #ifdef _WIN32
 	sond_treeviewfm_seadrive_stop_watcher(SOND_TREEVIEWFM(g_object));
+	if (stvfm_priv->seadrive_not_in_sync)
+		g_hash_table_destroy(stvfm_priv->seadrive_not_in_sync);
 #endif
 
 	g_free(stvfm_priv->root);
@@ -3155,20 +3167,108 @@ static void sond_treeviewfm_render_file_size(GtkTreeViewColumn *column,
 	return;
 }
 
-/* Lädt ein benanntes Icon als GdkPixbuf in der angegebenen Größe.
- * Gibt NULL zurück wenn das Icon nicht gefunden wird. */
-static GdkPixbuf* load_icon_pixbuf(GtkWidget *widget,
-		const gchar *icon_name, gint size) {
-	GtkIconTheme *theme = NULL;
-	GdkPixbuf *pixbuf = NULL;
+/* Ermittelt den filepart-Pfad (Datei/Verzeichnis, "//"-Konvention bei
+ * eingebetteten Inhalten) für die Indizierungsstatus-Abfrage - unabhängig
+ * vom OS-Pfad "rel", den der SeaDrive-Zweig weiter unten für den
+ * Dateisystem-Zugriff braucht. NULL, wenn für dieses Item kein sinnvoller
+ * Pfad existiert (z.B. eine reine Anbindung/Section ohne eigene Datei). */
+static gchar* sond_treeviewfm_get_coverage_path(SondTVFMItemPrivate *priv,
+		gboolean *out_is_dir) {
+	*out_is_dir = FALSE;
 
-	if (!icon_name) return NULL;
+	if (priv->type == SOND_TVFM_ITEM_TYPE_LEAF && priv->sond_file_part)
+		return sond_file_part_get_filepart(priv->sond_file_part);
 
-	theme = SOND_ICON_THEME_FOR_WIDGET(widget);
-	pixbuf = gtk_icon_theme_load_icon(theme, icon_name, size,
-			GTK_ICON_LOOKUP_USE_BUILTIN, NULL);
+	if (priv->type == SOND_TVFM_ITEM_TYPE_DIR) {
+		*out_is_dir = TRUE;
+		if (!priv->sond_file_part) //DIR im Filesystem
+			return g_strdup(priv->path_or_section);
+		else //Container (z.B. Zip/GMessage) als "Verzeichnis" dargestellt
+			return sond_file_part_get_filepart(priv->sond_file_part);
+	}
 
-	return pixbuf;
+	return NULL;
+}
+
+/* Indizierungsstatus für das Overlay-Icon, oder SOND_INDEX_STATUS_NONE
+ * (kein Overlay - s. Absprache: nur teilweise/vollständig werden markiert,
+ * sonst zu viel visuelles Rauschen in einem frischen, noch nicht
+ * indizierten Projekt). Liefert außerdem NONE, wenn der Punkt gar nicht
+ * indizierbar ist (z.B. .db/.znd) - dieselbe Prüfung wie beim
+ * Abdeckungs-Check der Indexsuche (check_coverage_one()). */
+static SondIndexStatus sond_treeviewfm_get_index_status(
+		SondTreeviewFM *stvfm, SondTVFMItem *stvfm_item) {
+	SondTVFMItemPrivate *priv = sond_tvfm_item_get_instance_private(stvfm_item);
+	SondTreeviewFMPrivate *stvfm_priv = sond_treeviewfm_get_instance_private(stvfm);
+	SondIndexCtx *index_ctx = NULL;
+	gchar *coverage_path = NULL;
+	gboolean is_dir = FALSE;
+	SondIndexStatus status = SOND_INDEX_STATUS_NONE;
+
+	if (!stvfm_priv->index_ctx_func)
+		return SOND_INDEX_STATUS_NONE;
+
+	index_ctx = stvfm_priv->index_ctx_func(stvfm_priv->index_ctx_func_data);
+	if (!index_ctx)
+		return SOND_INDEX_STATUS_NONE;
+
+	/* Section (Anbindung): die generische Basisklasse kennt path_or_section
+	 * nur als opaken String (Bedeutung hängt von der Subklasse ab, s.
+	 * has_sections/load_sections) - deshalb hier nicht über
+	 * sond_treeviewfm_get_coverage_path(), sondern direkt über die
+	 * zugrundeliegende Datei plus optionalem Seitenbereich-Vfunc. */
+	if (priv->type == SOND_TVFM_ITEM_TYPE_LEAF_SECTION) {
+		gint von_seite = -1, bis_seite = -1;
+
+		if (!priv->sond_file_part)
+			return SOND_INDEX_STATUS_NONE;
+
+		coverage_path = sond_file_part_get_filepart(priv->sond_file_part);
+		if (!coverage_path)
+			return SOND_INDEX_STATUS_NONE;
+
+		if (!SOND_IS_FILE_PART_PDF(priv->sond_file_part) &&
+				!sond_index_mime_type_supported(
+						mime_from_extension(coverage_path))) {
+			g_free(coverage_path);
+			return SOND_INDEX_STATUS_NONE;
+		}
+
+		if (SOND_TREEVIEWFM_GET_CLASS(stvfm)->get_section_page_range)
+			SOND_TREEVIEWFM_GET_CLASS(stvfm)->get_section_page_range(
+					stvfm_item, &von_seite, &bis_seite);
+
+		status = sond_index_ctx_get_file_status(index_ctx, coverage_path,
+				von_seite, bis_seite);
+		g_free(coverage_path);
+
+		return status;
+	}
+
+	coverage_path = sond_treeviewfm_get_coverage_path(priv, &is_dir);
+	if (!coverage_path)
+		return SOND_INDEX_STATUS_NONE;
+
+	if (is_dir)
+		status = sond_index_ctx_get_dir_status(index_ctx, coverage_path);
+	else {
+		/* Nicht indizierbare Dateitypen (.db, .znd, Bilder, ...) gar nicht
+		 * erst prüfen - sonst zeigt jede solche Datei dauerhaft "nicht
+		 * indiziert" an, obwohl sie nie indiziert werden wird. PDFs sind
+		 * über den SondFilePart-Typ unabhängig von der Extension sicher
+		 * erkannt. */
+		if (!SOND_IS_FILE_PART_PDF(priv->sond_file_part) &&
+				!sond_index_mime_type_supported(
+						mime_from_extension(coverage_path))) {
+			g_free(coverage_path);
+			return SOND_INDEX_STATUS_NONE;
+		}
+		status = sond_index_ctx_get_file_status(index_ctx, coverage_path, -1, -1);
+	}
+
+	g_free(coverage_path);
+
+	return status;
 }
 
 static void sond_treeviewfm_render_file_icon(GtkTreeViewColumn *column,
@@ -3177,6 +3277,8 @@ static void sond_treeviewfm_render_file_icon(GtkTreeViewColumn *column,
 	SondTVFMItem* stvfm_item = NULL;
 	SondTVFMItemPrivate* stvfm_item_priv = NULL;
 	SondTreeviewFM *stvfm = SOND_TREEVIEWFM(data);
+	SondSeadriveBadge seadrive_badge = SOND_SEADRIVE_BADGE_NONE; //unten rechts
+	SondIndexStatus index_status = SOND_INDEX_STATUS_NONE; //unten links: Indizierung
 
 	gtk_tree_model_get(model, iter, 0, &stvfm_item, -1);
 	if (!stvfm_item) {
@@ -3190,7 +3292,6 @@ static void sond_treeviewfm_render_file_icon(GtkTreeViewColumn *column,
 	/* Overlay-Icon für SeaDrive-Cloud-Status ermitteln */
 	if (sond_treeviewfm_is_seadrive_path(stvfm)) {
 		gchar *full_path = NULL;
-		const gchar *overlay_icon_name = NULL;
 
 		const gchar *root = sond_treeviewfm_get_root(stvfm);
 		const gchar* rel = NULL;
@@ -3225,53 +3326,64 @@ static void sond_treeviewfm_render_file_icon(GtkTreeViewColumn *column,
 				if (attrs != INVALID_FILE_ATTRIBUTES) {
 					gboolean pinned   = (attrs & FILE_ATTRIBUTE_PINNED) != 0;
 					gboolean offline  = (attrs & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) != 0;
-					gboolean unpinned = (attrs & FILE_ATTRIBUTE_UNPINNED) != 0;
 
-					if (offline && !unpinned)
-						overlay_icon_name = "view-refresh"; /* wird heruntergeladen oder nicht lokal */
-					else if (unpinned)
-						overlay_icon_name = "process-stop";
+					/* offline hat Vorrang: sagt zuverlässig, ob die Datei
+					 * GERADE lokal vorhanden ist. pinned ist nur eine
+					 * Markierung/Absicht, keine Zustandsgarantie - s.
+					 * Kommentar bei SondSeadriveBadge (sond_icon_util.h).
+					 * "unpinned, aber noch lokal vorhanden" bekommt bewusst
+					 * kein Icon - wie der unmarkierte Normalzustand. */
+					if (offline)
+						seadrive_badge = SOND_SEADRIVE_BADGE_OFFLINE;
 					else if (pinned)
-						overlay_icon_name = "emblem-default";
+						seadrive_badge = SOND_SEADRIVE_BADGE_PINNED;
 				}
 			}
+#else
+			g_free(full_path);
 #endif
+		}
+	}
 
-			if (overlay_icon_name) {
-				gint icon_size = 0;
-				GdkPixbuf *main_pb = NULL;
-				GdkPixbuf *overlay_pb = NULL;
+	/* Overlay-Icon für Indizierungsstatus ermitteln (unabhängig von
+	 * SeaDrive - beide können gleichzeitig zutreffen, dann je eine Ecke) */
+	index_status = sond_treeviewfm_get_index_status(stvfm, stvfm_item);
 
-				/* Icon-Größe aus dem Renderer ermitteln */
-				g_object_get(renderer, "stock-size", &icon_size, NULL);
-				gint px = 0;
-				gtk_icon_size_lookup((GtkIconSize)icon_size, &px, NULL);
-				if (px <= 0) px = 16;
+	if (seadrive_badge != SOND_SEADRIVE_BADGE_NONE || index_status != SOND_INDEX_STATUS_NONE) {
+		SondIconOverlay overlays[2];
+		guint n_overlays = 0;
+		gint overlay_px = MAX(sond_icon_util_renderer_get_size(renderer) / 2, 8);
+		GdkPixbuf *seadrive_pb = NULL;
+		GdkPixbuf *index_pb = NULL;
 
-				main_pb = load_icon_pixbuf(GTK_WIDGET(stvfm),
-						stvfm_item_priv->icon_name, px);
-				if (main_pb) {
-					gint overlay_px = MAX(px / 2, 8);
-					overlay_pb = load_icon_pixbuf(GTK_WIDGET(stvfm),
-							overlay_icon_name, overlay_px);
-					if (overlay_pb) {
-						/* Overlay unten-rechts einblenden */
-						gint dest_x = px - overlay_px;
-						gint dest_y = px - overlay_px;
-						gdk_pixbuf_composite(overlay_pb, main_pb,
-								dest_x, dest_y,
-								overlay_px, overlay_px,
-								dest_x, dest_y,
-								1.0, 1.0,
-								GDK_INTERP_BILINEAR, 255);
-						g_object_unref(overlay_pb);
-					}
-					g_object_set(G_OBJECT(renderer), "pixbuf", main_pb, NULL);
-					g_object_unref(main_pb);
-					return;
-				}
+		if (seadrive_badge != SOND_SEADRIVE_BADGE_NONE) {
+			/* SeaDrive-Status unten rechts */
+			seadrive_pb = sond_icon_util_seadrive_badge_pixbuf(seadrive_badge,
+					overlay_px);
+			if (seadrive_pb) {
+				overlays[n_overlays].pixbuf = seadrive_pb;
+				overlays[n_overlays].corner = SOND_ICON_CORNER_BOTTOM_RIGHT;
+				n_overlays++;
 			}
 		}
+
+		if (index_status != SOND_INDEX_STATUS_NONE) {
+			/* Indizierungsstatus unten links */
+			index_pb = sond_icon_util_status_badge_pixbuf(index_status, overlay_px);
+			if (index_pb) {
+				overlays[n_overlays].pixbuf = index_pb;
+				overlays[n_overlays].corner = SOND_ICON_CORNER_BOTTOM_LEFT;
+				n_overlays++;
+			}
+		}
+
+		sond_icon_util_render_with_overlays(GTK_WIDGET(stvfm), renderer,
+				stvfm_item_priv->icon_name, overlays, n_overlays);
+
+		if (seadrive_pb) g_object_unref(seadrive_pb);
+		if (index_pb) g_object_unref(index_pb);
+
+		return;
 	}
 
 	/* Kein Overlay - normales Icon setzen */
@@ -3371,9 +3483,14 @@ gint sond_treeviewfm_set_root(SondTreeviewFM *stvfm, const gchar *root,
 
 #ifdef _WIN32
 	sond_treeviewfm_seadrive_stop_watcher(stvfm);
-	/* Status zurücksetzen und Signal emittieren */
+	/* Status zurücksetzen und Signal emittieren - seadrive_not_in_sync MUSS
+	 * hier mitgeleert werden, sonst bleiben Pfade einer vorigen Projekt-
+	 * Session in der Tabelle stehen und seadrive_pending_up zählt beim
+	 * nächsten Öffnen desselben Projekts falsch (bleibt zu niedrig). */
 	stvfm_priv->seadrive_pending_down = 0;
 	stvfm_priv->seadrive_pending_up = 0;
+	if (stvfm_priv->seadrive_not_in_sync)
+		g_hash_table_remove_all(stvfm_priv->seadrive_not_in_sync);
 	g_signal_emit(stvfm,
 			SOND_TREEVIEWFM_GET_CLASS(stvfm)->signal_seadrive_status, 0,
 			(guint)0, (guint)0);
@@ -3449,6 +3566,23 @@ sond_treeviewfm_is_seadrive_path(SondTreeviewFM *stvfm) {
 	return stvfm_priv->is_seadrive_path;
 }
 
+void
+sond_treeviewfm_set_index_ctx_func(SondTreeviewFM *stvfm,
+		SondTreeviewFMIndexCtxFunc func, gpointer user_data) {
+	if (!stvfm)
+		return;
+
+	SondTreeviewFMPrivate *stvfm_priv = sond_treeviewfm_get_instance_private(
+			stvfm);
+
+	stvfm_priv->index_ctx_func = func;
+	stvfm_priv->index_ctx_func_data = user_data;
+
+	gtk_widget_queue_draw(GTK_WIDGET(stvfm));
+
+	return;
+}
+
 #ifdef _WIN32
 void
 sond_treeviewfm_seadrive_update_status(SondTreeviewFM *stvfm,
@@ -3466,15 +3600,14 @@ sond_treeviewfm_seadrive_update_status(SondTreeviewFM *stvfm,
 	}
 
 	if (path_up) {
-		static GHashTable *not_in_sync = NULL;
-		if (!not_in_sync)
-			not_in_sync = g_hash_table_new_full(
+		if (!p->seadrive_not_in_sync)
+			p->seadrive_not_in_sync = g_hash_table_new_full(
 					g_str_hash, g_str_equal, g_free, NULL);
 		if (up_pending) {
-			if (g_hash_table_add(not_in_sync, g_strdup(path_up)))
+			if (g_hash_table_add(p->seadrive_not_in_sync, g_strdup(path_up)))
 				p->seadrive_pending_up++;
 		} else {
-			if (g_hash_table_remove(not_in_sync, path_up))
+			if (g_hash_table_remove(p->seadrive_not_in_sync, path_up))
 				p->seadrive_pending_up--;
 		}
 		changed = TRUE;
