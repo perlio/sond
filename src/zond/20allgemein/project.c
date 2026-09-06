@@ -412,7 +412,13 @@ static gint project_create_dbase_zond(Projekt *zond, gboolean create, GError **e
 	if (!zond_dbase_store)
 		return -1;
 
-	path_tmp = g_strconcat(path, ".tmp", NULL);
+	/* Bewußt NICHT mehr neben der Projektdatei (die auf einem Cloud-Sync-
+	 * Laufwerk liegen kann) - s. Kommentar bei project_get_local_tmp_path(). */
+	path_tmp = project_get_local_tmp_path(path, error);
+	if (!path_tmp) {
+		g_object_unref(zond_dbase_store);
+		return -1;
+	}
 
 	zond_dbase_work = zond_dbase_new(path_tmp, TRUE, FALSE, error);
 	if (!zond_dbase_work) {
@@ -595,7 +601,15 @@ gint project_close(Projekt *zond, GError **error) {
 	// Must be before project_clear_dbase_zond because it triggers callbacks
 	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(zond->fs_button), FALSE);
 
-	gchar *working_copy = g_strconcat(zond->project_dir, "/", zond->project_name, ".tmp", NULL);
+	/* Bewußt NICHT mehr neben der Projektdatei - s. Kommentar bei
+	 * project_get_local_tmp_path(). Derselbe volle Projektpfad wie in
+	 * project_create_dbase_zond() liefert deterministisch denselben
+	 * lokalen Pfad zurück. */
+	gchar *project_path_full = g_strdup_printf("%s/%s", zond->project_dir,
+			zond->project_name);
+	gchar *working_copy = project_get_local_tmp_path(project_path_full,
+			&error_remove);
+	g_free(project_path_full);
 
 	sond_treeviewfm_set_root(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), NULL, NULL);
 	project_clear_dbase_zond(&(zond->dbase_zond));
@@ -608,7 +622,11 @@ gint project_close(Projekt *zond, GError **error) {
 	}
 
 	// Remove temporary database
-	if (!sond_remove(working_copy, &error_remove)) {
+	if (!working_copy) {
+		display_message(zond->app_window, "Fehler beim Ermitteln des Pfads "
+				"der temporären Datenbank: ", error_remove->message, NULL);
+		g_error_free(error_remove);
+	} else if (!sond_remove(working_copy, &error_remove)) {
 		display_message(zond->app_window, "Fehler beim Löschen der "
 				"temporären Datenbank: ", error_remove->message, NULL);
 		g_error_free(error_remove);
@@ -642,13 +660,28 @@ gint project_load_trees(Projekt *zond, GError **error) {
 	gint rc = 0;
 	GtkTreeIter iter = { 0 };
 
-	rc = zond_treeview_load_baum(ZOND_TREEVIEW(zond->treeview[BAUM_INHALT]), error);
+	/* Zeitmessung nur zu Testzwecken - s. project_open(). */
+	{
+		gint64 t_start = g_get_monotonic_time();
+
+		rc = zond_treeview_load_baum(ZOND_TREEVIEW(zond->treeview[BAUM_INHALT]), error);
+
+		LOG_INFO("project_load_trees: BAUM_INHALT dauerte %.2f s",
+				(g_get_monotonic_time() - t_start) / 1e6);
+	}
 	if (rc == -1) {
 		g_prefix_error(error, "%s\n", __func__);
 		return -1;
 	}
 
-	rc = zond_treeview_load_baum(ZOND_TREEVIEW(zond->treeview[BAUM_AUSWERTUNG]), error);
+	{
+		gint64 t_start = g_get_monotonic_time();
+
+		rc = zond_treeview_load_baum(ZOND_TREEVIEW(zond->treeview[BAUM_AUSWERTUNG]), error);
+
+		LOG_INFO("project_load_trees: BAUM_AUSWERTUNG dauerte %.2f s",
+				(g_get_monotonic_time() - t_start) / 1e6);
+	}
 	if (rc == -1) {
 		g_prefix_error(error, "%s\n", __func__);
 		return -1;
@@ -730,6 +763,31 @@ gchar* resolve_model_path(Projekt* zond, gchar const* settings_key,
 	return g_build_filename(zond->exe_dir, "../models", default_filename, NULL);
 }
 
+gchar* project_get_local_tmp_path(gchar const *project_path, GError **error) {
+	gchar *hash = NULL;
+	gchar *dir = NULL;
+	gchar *filename = NULL;
+	gchar *path_tmp = NULL;
+
+	hash = g_compute_checksum_for_string(G_CHECKSUM_SHA256, project_path, -1);
+
+	dir = g_build_filename(g_get_user_cache_dir(), "zond", NULL);
+	if (!sond_mkdir_with_parents(dir, error)) {
+		g_free(hash);
+		g_free(dir);
+		return NULL;
+	}
+
+	filename = g_strconcat(hash, ".tmp", NULL);
+	path_tmp = g_build_filename(dir, filename, NULL);
+
+	g_free(filename);
+	g_free(hash);
+	g_free(dir);
+
+	return path_tmp;
+}
+
 /**
  * Open a project (create new or open existing)
  * @param zond The project structure
@@ -764,6 +822,11 @@ gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, GError 
 		return -1;
 	}
 
+	/* Zeitmessung nur zu Testzwecken - hilft einzugrenzen, welcher der drei
+	 * Schritte beim Öffnen großer SeaDrive-Projekte die Zeit frißt (lange
+	 * UI-Blockade beobachtet). Bei Bedarf später wieder entfernen. */
+	gint64 t_open_start = g_get_monotonic_time();
+
 	// Load tree structures if opening existing project
 	if (!create) {
 		rc = project_load_trees(zond, error);
@@ -773,9 +836,21 @@ gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, GError 
 		}
 	}
 
+	{
+		gdouble secs = (g_get_monotonic_time() - t_open_start) / 1e6;
+		LOG_INFO("project_open: project_load_trees() dauerte %.2f s", secs);
+	}
+
 	// Set filesystem root
-	rc = sond_treeviewfm_set_root(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
-			zond->project_dir, error);
+	{
+		gint64 t_start = g_get_monotonic_time();
+
+		rc = sond_treeviewfm_set_root(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
+				zond->project_dir, error);
+
+		LOG_INFO("project_open: sond_treeviewfm_set_root() dauerte %.2f s",
+				(g_get_monotonic_time() - t_start) / 1e6);
+	}
 	if (rc) {
 		project_open_cleanup(zond);
 		return -1;
@@ -784,10 +859,17 @@ gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, GError 
 	gchar* datadir = g_build_filename(zond->exe_dir, "../share/tessdata", NULL);
 	gchar* embedding_model_path = resolve_model_path(zond, "embedding-model-path",
 			"Qwen3-Embedding-0.6B-Q8_0.gguf");
-	zond->wctx = sond_process_file_create_wctx(zond->ctx,
-			(void (*)(gpointer, gchar const*, ...)) info_window_set_message_thread_safe,
-			NULL, datadir, 4, ".sond_index.db", embedding_model_path,
-			zond->project_dir, error);
+	{
+		gint64 t_start = g_get_monotonic_time();
+
+		zond->wctx = sond_process_file_create_wctx(zond->ctx,
+				(void (*)(gpointer, gchar const*, ...)) info_window_set_message_thread_safe,
+				NULL, datadir, 4, ".sond_index.db", embedding_model_path,
+				zond->project_dir, error);
+
+		LOG_INFO("project_open: sond_process_file_create_wctx() dauerte %.2f s",
+				(g_get_monotonic_time() - t_start) / 1e6);
+	}
 	g_free(datadir);
 	g_free(embedding_model_path);
 	if (!zond->wctx) {
@@ -795,6 +877,9 @@ gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, GError 
 
 		return -1;
 	}
+
+	LOG_INFO("project_open: gesamt bis hierhin %.2f s",
+			(g_get_monotonic_time() - t_open_start) / 1e6);
 
 	// Success - enable widgets and finalize
 	project_set_widgets_sensitive(zond, TRUE);

@@ -767,35 +767,6 @@ gint zond_treeview_walk_tree(ZondTreeview *ztv, gboolean with_younger_siblings,
 	return 0;
 }
 
-static gboolean zond_treeview_iter_foreach_node_id(GtkTreeModel *model,
-		GtkTreePath *path, GtkTreeIter *iter, gpointer user_data) {
-	GtkTreeIter **new_iter = (GtkTreeIter**) user_data;
-	gint node_id = GPOINTER_TO_INT(
-			g_object_get_data( G_OBJECT(model), "node_id" ));
-
-	gint node_id_tree = 0;
-	gtk_tree_model_get(model, iter, 2, &node_id_tree, -1);
-
-	if (node_id == node_id_tree) {
-		*new_iter = gtk_tree_iter_copy(iter);
-		return TRUE;
-	} else
-		return FALSE;
-}
-
-GtkTreeIter*
-zond_treeview_abfragen_iter(ZondTreeview *treeview, gint node_id) {
-	GtkTreeIter *iter = NULL;
-	GtkTreeModel *model = gtk_tree_view_get_model(GTK_TREE_VIEW(treeview));
-
-	g_object_set_data(G_OBJECT(model), "node_id", GINT_TO_POINTER(node_id));
-	gtk_tree_model_foreach(model,
-			(GtkTreeModelForeachFunc) zond_treeview_iter_foreach_node_id,
-			&iter);
-
-	return iter;
-}
-
 static gint zond_treeview_insert_file_parts(ZondTreeview *ztv, gint node_id,
 		GtkTreeIter *iter, gboolean child, GtkTreeIter *iter_inserted,
 		gint anchor_id, gint *node_id_inserted, GError **error) {
@@ -808,7 +779,9 @@ static gint zond_treeview_insert_file_parts(ZondTreeview *ztv, gint node_id,
 	ZondTreeviewPrivate *ztv_priv = zond_treeview_get_instance_private(ztv);
 
 	//Wenn Zweig schon vorhanden ist, weil etwa BAUM_INHALT_PDF_ABSCHNITT bestanden hat
-	iter_pdf_abschnitt = zond_treeview_abfragen_iter(ztv, node_id);
+	iter_pdf_abschnitt = zond_tree_store_get_iter_by_node_id(
+			ZOND_TREE_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(ztv))),
+			node_id);
 	if (iter_pdf_abschnitt) {
 		zond_tree_store_move_node(iter_pdf_abschnitt,
 				ZOND_TREE_STORE(
@@ -2107,7 +2080,9 @@ static void zond_treeview_jump_to_iter(Projekt *zond, GtkTreeIter *iter) {
 gint zond_treeview_jump_to_node_id(Projekt *zond, gint node_id) {
 	GtkTreeIter *iter = NULL;
 
-	iter = zond_treeview_abfragen_iter(ZOND_TREEVIEW(zond->treeview[BAUM_INHALT]), node_id);
+	iter = zond_tree_store_get_iter_by_node_id(
+			ZOND_TREE_STORE(gtk_tree_view_get_model(
+					GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]))), node_id);
 	if (!iter)
 		return 1;
 
@@ -2788,6 +2763,21 @@ zond_treeview_new(Projekt *zond, gint root_node_id) {
 	return ztv;
 }
 
+/* Nur zu Testzwecken: Fortschritts-Log für zond_treeview_load_node(), um
+ zu sehen, ob die Zeit pro Knoten während des Ladens konstant bleibt
+ (linear) oder zunimmt (Hinweis auf einen weiteren O(n²)-Effekt), UND
+ getrennte Summen pro Teil-Operation, um einzugrenzen, welcher Aufruf
+ tatsächlich die Zeit kostet (Index-Fix allein hat nicht geholfen, s.
+ Untersuchung 09/2026). Bei Bedarf später wieder entfernen. Reset in
+ zond_treeview_load_baum(). */
+static gint64 s_load_node_count = 0;
+static gint64 s_load_node_t_start = 0;
+static gint64 s_t_get_type_and_link = 0;
+static gint64 s_t_walk_tree_fileparts = 0;
+static gint64 s_t_tree_store_insert = 0;
+static gint64 s_t_get_node = 0;
+static gint64 s_t_tree_store_set = 0;
+
 static gint zond_treeview_load_node(ZondTreeview *ztv, gint node_id,
 		GtkTreeIter *iter_anchor, gboolean child, GtkTreeIter *iter_inserted,
 		gint anchor_id, gint *node_id_inserted, GError **error) {
@@ -2795,21 +2785,38 @@ static gint zond_treeview_load_node(ZondTreeview *ztv, gint node_id,
 	gint link = 0;
 	gint rc = 0;
 	GtkTreeIter iter_new = { 0 };
+	gint64 t0 = 0;
 
 	ZondTreeviewPrivate *ztv_priv = zond_treeview_get_instance_private(ztv);
 
+	s_load_node_count++;
+	if (s_load_node_count % 2000 == 0) {
+		LOG_INFO("zond_treeview_load_node: %ld Knoten nach %.2f s "
+				"(get_type_and_link=%.2f walk_tree_fileparts=%.2f "
+				"tree_store_insert=%.2f get_node=%.2f tree_store_set=%.2f)",
+				(long) s_load_node_count,
+				(g_get_monotonic_time() - s_load_node_t_start) / 1e6,
+				s_t_get_type_and_link / 1e6, s_t_walk_tree_fileparts / 1e6,
+				s_t_tree_store_insert / 1e6, s_t_get_node / 1e6,
+				s_t_tree_store_set / 1e6);
+	}
+
+	t0 = g_get_monotonic_time();
 	rc = zond_dbase_get_type_and_link(
 			ztv_priv->zond->dbase_zond->zond_dbase_work, node_id, &type, &link,
 			error);
+	s_t_get_type_and_link += g_get_monotonic_time() - t0;
 	if (rc)
 		return -1;
 
 	if (type == ZOND_DBASE_TYPE_BAUM_INHALT_FILE) {
 		gint rc = 0;
 
+		t0 = g_get_monotonic_time();
 		rc = zond_treeview_walk_tree(ztv, FALSE, link, iter_anchor, child,
 				&iter_new, node_id, NULL, zond_treeview_insert_file_parts,
 				error);
+		s_t_walk_tree_fileparts += g_get_monotonic_time() - t0;
 		if (rc)
 			return -1;
 	}
@@ -2818,7 +2825,9 @@ static gint zond_treeview_load_node(ZondTreeview *ztv, gint node_id,
 		gchar *icon_name = NULL;
 		gchar *node_text = NULL;
 
+		t0 = g_get_monotonic_time();
 		zond_tree_store_insert(iter_anchor, child, &iter_new);
+		s_t_tree_store_insert += g_get_monotonic_time() - t0;
 
 		if (type == ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_LINK) {
 			icon_name = g_strdup_printf("%d", node_id); //head_nr wird hier gespeichert
@@ -2827,14 +2836,18 @@ static gint zond_treeview_load_node(ZondTreeview *ztv, gint node_id,
 		else {
 			gint rc = 0;
 
+			t0 = g_get_monotonic_time();
 			rc = zond_dbase_get_node(
 					ztv_priv->zond->dbase_zond->zond_dbase_work, node_id, NULL,
 					NULL, NULL, NULL, &icon_name, &node_text, NULL, error);
+			s_t_get_node += g_get_monotonic_time() - t0;
 			if (rc)
 				return -1;
 		}
 
+		t0 = g_get_monotonic_time();
 		zond_tree_store_set(&iter_new, icon_name, node_text, node_id);
+		s_t_tree_store_set += g_get_monotonic_time() - t0;
 
 		g_free(icon_name);
 		g_free(node_text);
@@ -2916,8 +2929,10 @@ static gint zond_treeview_insert_links_foreach(ZondTreeview *ztv,
 		zond_tree_store_remove(iter);
 
 		//iter_target ermitteln
-		iter_target = zond_treeview_abfragen_iter(
-				ZOND_TREEVIEW(ztv_priv->zond->treeview[root]), node_id);
+		iter_target = zond_tree_store_get_iter_by_node_id(
+				ZOND_TREE_STORE(gtk_tree_view_get_model(
+						GTK_TREE_VIEW(ztv_priv->zond->treeview[root]))),
+				node_id);
 		if (!iter_target) {
 			if (error)
 				*error = g_error_new( ZOND_ERROR, 0, "%s\nKein Iter ermittelt",
@@ -2952,6 +2967,15 @@ gint zond_treeview_load_baum(ZondTreeview *ztv, GError **error) {
 	gint root = 0;
 	GtkTreeIter iter_root = { 0 };
 	ZondTreeStore *tree_store = NULL;
+
+	//Nur zu Testzwecken - s. Kommentar bei s_load_node_count.
+	s_load_node_count = 0;
+	s_load_node_t_start = g_get_monotonic_time();
+	s_t_get_type_and_link = 0;
+	s_t_walk_tree_fileparts = 0;
+	s_t_tree_store_insert = 0;
+	s_t_get_node = 0;
+	s_t_tree_store_set = 0;
 
 	ZondTreeviewPrivate *ztv_priv = zond_treeview_get_instance_private(ztv);
 

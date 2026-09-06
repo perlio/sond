@@ -135,12 +135,14 @@ static gint zond_anbindung_baum_inhalt(Projekt *zond, gint anchor_id,
 	if (baum_inhalt_file) //in Baum Inhalt angebunden - muß in tree eingefügt werden
 	{
 		//eingefügtes ziel in Baum
-		iter = zond_treeview_abfragen_iter(
-				ZOND_TREEVIEW(zond->treeview[BAUM_INHALT]), anchor_id);
+		iter = zond_tree_store_get_iter_by_node_id(
+				ZOND_TREE_STORE(gtk_tree_view_get_model(
+						GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]))),
+				anchor_id);
 		if (!iter) {
 			if (error)
 				*error = g_error_new( ZOND_ERROR, 0,
-						"%s\nzond_treeview_abfragen_iter gibt NULL zurück",
+						"%s\nzond_tree_store_get_iter_by_node_id gibt NULL zurück",
 						__func__);
 
 			return -1;

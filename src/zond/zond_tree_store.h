@@ -116,5 +116,16 @@ gint zond_tree_store_get_node_id(GtkTreeIter*);
 
 void zond_tree_store_kill_parent(GtkTreeIter*);
 
+/* Schneller Ersatz für ein früheres gtk_tree_model_foreach() über den
+ kompletten Baum (O(n) pro Aufruf, bei häufigem Aufruf während des Ladens
+ O(n²) insgesamt): O(1)-Lookup über eine intern mitgeführte Hashtabelle
+ node_id -> Origin-GNode (Link-Kopien werden nicht separat indiziert, sind
+ aber über den Origin/RowData->links weiterhin erreichbar - bestehender
+ Code löst Link-Ketten ohnehin selbst auf). Rückgabe: heap-allozierter
+ GtkTreeIter* (mit gtk_tree_iter_free() freizugeben) oder NULL, wenn
+ node_id nicht (mehr) in tree_store vorhanden ist. */
+GtkTreeIter* zond_tree_store_get_iter_by_node_id(ZondTreeStore *tree_store,
+		gint node_id);
+
 G_END_DECLS
 #endif /* ZOND_TREE_STORE_H_INCLUDED */

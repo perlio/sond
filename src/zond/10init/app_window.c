@@ -168,11 +168,15 @@ static void cb_jump_button_clicked(GtkButton *button, gpointer user_data) {
 	if (!zond->node_id_textview)
 		return;
 
-	iter = zond_treeview_abfragen_iter(
-			ZOND_TREEVIEW(zond->treeview[BAUM_AUSWERTUNG]), zond->node_id_textview);
+	iter = zond_tree_store_get_iter_by_node_id(
+			ZOND_TREE_STORE(gtk_tree_view_get_model(
+					GTK_TREE_VIEW(zond->treeview[BAUM_AUSWERTUNG]))),
+			zond->node_id_textview);
 	if (!iter)
-		iter = zond_treeview_abfragen_iter(
-				ZOND_TREEVIEW(zond->treeview[BAUM_INHALT]), zond->node_id_textview);
+		iter = zond_tree_store_get_iter_by_node_id(
+				ZOND_TREE_STORE(gtk_tree_view_get_model(
+						GTK_TREE_VIEW(zond->treeview[BAUM_INHALT]))),
+				zond->node_id_textview);
 
 	if (!iter)
 		return;

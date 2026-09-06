@@ -498,7 +498,9 @@ static gint zond_treeviewfm_text_edited(SondTreeviewFM *stvfm,
 			return -1;
 
 		//Text in treeview anpassen
-		iter = zond_treeview_abfragen_iter(ZOND_TREEVIEW(ztvfm_priv->zond->treeview[BAUM_INHALT]),
+		iter = zond_tree_store_get_iter_by_node_id(
+				ZOND_TREE_STORE(gtk_tree_view_get_model(
+						GTK_TREE_VIEW(ztvfm_priv->zond->treeview[BAUM_INHALT]))),
 				ID_section);
 
 		if (iter) {

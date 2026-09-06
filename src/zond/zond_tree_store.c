@@ -57,6 +57,14 @@ struct _ZondTreeStorePrivate {
 	gint stamp;
 	gint root_node_id;
 	GNode *root;
+
+	/* node_id (Origin, kein Link) -> GNode* - Index für
+	 zond_tree_store_get_iter_by_node_id(), s. Kommentar dort.
+	 Wird gepflegt in zond_tree_store_set() (Eintrag/Aktualisierung),
+	 node_free() (Entfernen - deckt sowohl Einzel-Remove als auch
+	 zond_tree_store_clear() ab) und zond_tree_store_move_node()
+	 (Umhängen zwischen zwei tree_stores). */
+	GHashTable *ht_node_id;
 };
 
 typedef struct _Data {
@@ -187,6 +195,8 @@ static void zond_tree_store_init(ZondTreeStore *tree_store) {
 	priv->root->data = g_malloc0(sizeof(RowData));
 	((RowData*) priv->root->data)->tree_store = tree_store;
 
+	priv->ht_node_id = g_hash_table_new(NULL, NULL);
+
 	/* While the odds are against us getting 0...  */
 	do {
 		priv->stamp = g_random_int();
@@ -211,6 +221,13 @@ static gboolean node_free(GNode *node, gpointer data) {
 				((RowData*) node_target->data)->links, node);
 	} else if (row_data->data) //nur wenn kein link und nicht root
 	{
+		//Index node_id -> Origin-GNode mitpflegen (s.
+		//zond_tree_store_get_iter_by_node_id) - vor dem Freigeben, da
+		//row_data->data->node_id danach nicht mehr lesbar wäre
+		if (row_data->data->node_id)
+			g_hash_table_remove(row_data->tree_store->priv->ht_node_id,
+					GINT_TO_POINTER(row_data->data->node_id));
+
 		g_free(row_data->data->icon_name);
 		g_free(row_data->data->node_text);
 
@@ -239,6 +256,8 @@ static void zond_tree_store_finalize(GObject *object) {
 	g_node_traverse(priv->root, G_POST_ORDER, G_TRAVERSE_ALL, -1, node_free,
 			NULL);
 	g_node_destroy(priv->root);
+
+	g_hash_table_destroy(priv->ht_node_id);
 
 	/* must chain up */
 	G_OBJECT_CLASS (zond_tree_store_parent_class)->finalize(object);
@@ -545,6 +564,13 @@ void zond_tree_store_set(GtkTreeIter *iter, const gchar *icon_name,
 	//urspr�nglichen orig_link ermitteln
 	while ((node_orig = ((RowData*) node->data)->target))
 		node = node_orig;
+
+	//Index node_id -> Origin-GNode mitpflegen (s. zond_tree_store_get_iter_by_node_id)
+	if (node_id) {
+		ZondTreeStore *ts = ((RowData*) node->data)->tree_store;
+		g_hash_table_insert(ts->priv->ht_node_id, GINT_TO_POINTER(node_id),
+				node);
+	}
 
 	//ge�ndert setzten - k�nnte anderer tree_store sein!
 	zond_tree_store_set_changed(((RowData*) node->data)->tree_store, node);
@@ -1048,6 +1074,23 @@ void zond_tree_store_move_node(GtkTreeIter *iter_src,
 
 	((RowData*) node_src->data)->tree_store = tree_store_anchor;
 
+	/* Index node_id -> Origin-GNode ggf. in neuen tree_store umhängen (s.
+	 zond_tree_store_get_iter_by_node_id). Nur relevant für Origin-Knoten
+	 (target == NULL) - Links sind dort nie eigenständig eingetragen, ihr
+	 node_id gehört dem Origin. Bei Verschieben innerhalb desselben
+	 tree_store ist remove+insert unschädlich (gleicher key, gleicher
+	 Knoten). */
+	if (!((RowData*) node_src->data)->target
+			&& ((RowData*) node_src->data)->data
+			&& ((RowData*) node_src->data)->data->node_id) {
+		gint node_id = ((RowData*) node_src->data)->data->node_id;
+
+		g_hash_table_remove(ZOND_TREE_STORE(model_src)->priv->ht_node_id,
+				GINT_TO_POINTER(node_id));
+		g_hash_table_insert(tree_store_anchor->priv->ht_node_id,
+				GINT_TO_POINTER(node_id), node_src);
+	}
+
 	//jetzt Knoten, die auf ausgel�sten Knoten zeigen, l�schen
 	list = ((RowData*) node_src->data)->links;
 	while (list) {
@@ -1405,6 +1448,25 @@ gint zond_tree_store_get_node_id(GtkTreeIter *iter) {
 		node_id = ((RowData*) G_NODE(iter->user_data)->data)->data->node_id;
 
 	return node_id;
+}
+
+GtkTreeIter* zond_tree_store_get_iter_by_node_id(ZondTreeStore *tree_store,
+		gint node_id) {
+	GNode *node = NULL;
+	GtkTreeIter iter = { 0 };
+
+	if (!tree_store || !node_id)
+		return NULL;
+
+	node = g_hash_table_lookup(tree_store->priv->ht_node_id,
+			GINT_TO_POINTER(node_id));
+	if (!node)
+		return NULL;
+
+	iter.stamp = tree_store->priv->stamp;
+	iter.user_data = node;
+
+	return gtk_tree_iter_copy(&iter);
 }
 
 //Funktion entfernt nicht etwa parent von iter, sondern iter, und setzt dessen Kinder an Stelle

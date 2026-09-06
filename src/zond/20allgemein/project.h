@@ -47,4 +47,20 @@ gint project_new(Projekt* zond, GError** error);
 gchar* resolve_model_path(Projekt *zond, gchar const *settings_key,
 		gchar const *default_filename);
 
+/* Lokalen, deterministischen Pfad für die work-Datenbank (SQLite-
+ * "Arbeitskopie", laufend fortgeschrieben, s. project_create_dbase_zond())
+ * ermitteln. Liegt bewußt AUSSERHALB des Projektordners, da dieser bei
+ * Cloud-Sync-Laufwerken (SeaDrive etc.) liegen kann - eine dort laufend
+ * gelesene/geschriebene SQLite-Datei kollidiert mit der Sync-Aktivität
+ * des Cloud-Clients und verlangsamt jeden einzelnen Datenbankzugriff
+ * erheblich (siehe Untersuchung Performance-Problem großer Projekte,
+ * 09/2026). Der Pfad wird deterministisch aus dem vollen (absoluten)
+ * Projektpfad abgeleitet (SHA-256-Hash) - derselbe project_path liefert
+ * immer denselben lokalen Pfad, sowohl beim Anlegen
+ * (project_create_dbase_zond()) als auch bei der Absturz-Wiederherstellung
+ * (zond_init.c, recover()). Bewußt NICHT nur der Projektname (Basename):
+ * zwei verschiedene Projekte mit gleichem Dateinamen in unterschiedlichen
+ * Ordnern würden sonst auf denselben lokalen Pfad kollidieren. */
+gchar* project_get_local_tmp_path(gchar const *project_path, GError **error);
+
 #endif // PROJECT_H_INCLUDED

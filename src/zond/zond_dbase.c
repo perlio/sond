@@ -305,6 +305,39 @@ zond_dbase_get_version(sqlite3 *db, GError **error) {
 	return v_string;
 }
 
+/* Indizes auf parent_ID/older_sibling_ID nachrüsten (CREATE INDEX IF NOT
+ * EXISTS - gefahrlos für neue wie bestehende Projektdateien). Fehlten
+ * bisher komplett (nur der automatische Index auf ID/Primärschlüssel
+ * existierte) - jeder Baum-Traversierungsschritt
+ * (zond_dbase_get_first_child()/_get_younger_sibling(), s.
+ * zond_treeview_walk_tree()) filtert aber genau auf diese beiden Spalten
+ * und erzwang dadurch pro Knoten einen kompletten Tabellen-Scan über
+ * alle Zeilen von "knoten" - bei größeren Projekten (zehntausende
+ * Knoten) minutenlange Ladezeiten beim Öffnen (Untersuchung 09/2026).
+ * Wird bei jedem Öffnen (neu, bestehend, konvertiert) einmal ausgeführt -
+ * für bereits vorhandene Indizes ist das ein no-op. */
+static gint zond_dbase_ensure_indexes(sqlite3 *db, GError **error) {
+	gchar *errmsg = NULL;
+	gint rc = 0;
+
+	rc = sqlite3_exec(db,
+			"CREATE INDEX IF NOT EXISTS idx_knoten_parent_id "
+					"ON knoten(parent_ID); "
+					"CREATE INDEX IF NOT EXISTS idx_knoten_older_sibling_id "
+					"ON knoten(older_sibling_ID); ",
+			NULL, NULL, &errmsg);
+	if (rc != SQLITE_OK) {
+		if (error)
+			*error = g_error_new(g_quark_from_static_string("SQLITE3"), rc,
+					"%s: %s", __func__, errmsg);
+		sqlite3_free(errmsg);
+
+		return -1;
+	}
+
+	return 0;
+}
+
 static gint zond_dbase_open(ZondDBase *zond_dbase, gboolean create_file,
 		gboolean create, GError **error) {
 	gint rc = 0;
@@ -396,6 +429,20 @@ static gint zond_dbase_open(ZondDBase *zond_dbase, gboolean create_file,
 	rc = zond_dbase_check_journal_settings(zond_dbase, error);
 	if (rc)
 		return -1;
+
+	/* create_file && !create: leere Schattendatei, wird erst NACH diesem
+	 * Aufruf per zond_dbase_backup() aus store befüllt (work-Datenbank,
+	 * s. project_create_dbase_zond()) - "knoten" existiert hier noch
+	 * nicht, CREATE INDEX würde fehlschlagen ("no such table"). Der
+	 * Index kommt in diesem Fall automatisch mit dem Backup aus store
+	 * mit (Backup kopiert das komplette Schema samt Indizes). In allen
+	 * anderen Fällen (neu angelegt, bestehend geöffnet, konvertiert)
+	 * existiert "knoten" an dieser Stelle bereits. */
+	if (!(create_file && !create)) {
+		rc = zond_dbase_ensure_indexes(zond_dbase_priv->dbase, error);
+		if (rc)
+			return -1;
+	}
 
 	return 0;
 }

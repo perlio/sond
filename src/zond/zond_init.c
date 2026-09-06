@@ -69,18 +69,29 @@ static void recover(Projekt *zond, gchar *project, GApplication *app) {
 		}
 		g_free(path_bak);
 
-		path_tmp = g_strconcat(project, ".tmp", NULL);
-		rc = sond_rename(path_tmp, project, &error);
-		if (rc) {
+		/* Bewußt NICHT mehr <project>.tmp - s. Kommentar bei
+		 * project_get_local_tmp_path(). Derselbe project-Pfad wie beim
+		 * ursprünglichen Anlegen (project_create_dbase_zond()) liefert
+		 * deterministisch denselben lokalen Pfad zurück. */
+		path_tmp = project_get_local_tmp_path(project, &error);
+		if (!path_tmp) {
 			display_message(zond->app_window,
-					"Konnte wiederhergestellte Datei (.tmp) nicht umbenennen: ",
+					"Konnte Pfad der temporären Datenbank nicht ermitteln: ",
 					error->message, NULL);
 			g_clear_error(&error);
+		} else {
+			rc = sond_rename(path_tmp, project, &error);
+			if (rc) {
+				display_message(zond->app_window,
+						"Konnte wiederhergestellte Datei (.tmp) nicht umbenennen: ",
+						error->message, NULL);
+				g_clear_error(&error);
+			}
+			else
+				display_message(zond->app_window, project,
+						" erfolgreich wiederhergestellt", NULL);
+			g_free(path_tmp);
 		}
-		else
-			display_message(zond->app_window, project,
-					" erfolgreich wiederhergestellt", NULL);
-		g_free(path_tmp);
 	} else if (res != GTK_RESPONSE_NO)
 		g_application_quit(app);
 
