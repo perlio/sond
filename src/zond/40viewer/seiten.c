@@ -1296,7 +1296,7 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 		}
 
 		doc_merge = sond_file_part_pdf_open_document(pv->zond->ctx,
-				SOND_FILE_PART_PDF(sfp), TRUE, TRUE, &error);
+				SOND_FILE_PART_PDF(sfp), TRUE, &error);
 		if (!doc_merge) {
 			display_message(pv->vf, "Datei einfügen\n\n"
 					"Einzufügende Datei konnte nicht geöffnet werden:\n",

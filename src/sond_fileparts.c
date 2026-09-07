@@ -852,19 +852,10 @@ gint sond_file_part_delete(SondFilePart* sfp, GError** error) {
 		if (rc)
 			return -1;
 
-		//Löschung ist an dieser Stelle bereits erfolgreich und gespeichert.
-		//test_for_children() aktualisiert nur has_children für die
-		//Baumansicht - ein Fehlschlag hier darf die schon erfolgte Löschung
-		//nicht als fehlgeschlagen melden (wie schon in
-		//sond_file_part_create_from_mime_type() gehandhabt).
-		{
-			GError* error_children = NULL;
-
-			if (sond_file_part_test_for_children(sfp_parent, &error_children)) {
-				LOG_WARN("%s\n", error_children ? error_children->message : "(kein Fehler gesetzt)");
-				g_clear_error(&error_children);
-			}
-		}
+		//has_children wurde bereits von zip_mod_zip_file()/pdf_mod_emb_file()/
+		//gmessage_mod_part() direkt aus dem beim Löschen ohnehin schon
+		//offenen/geänderten Archiv bzw. Dokument aktualisiert - ein erneutes
+		//komplettes Öffnen per test_for_children() ist dafür nicht mehr nötig.
 	}
 
 	return 0;
@@ -1278,6 +1269,18 @@ zip_t* sond_file_part_zip_open_archive(SondFilePartZip* sfp_zip,
 		}
 		zip_error_fini(&zip_error);
 
+		if (writeable) {
+			/* Ohne dieses Flag überspringt zip_close() bei 0 verbleibenden
+			 * Einträgen (z.B. nach Löschen der letzten Datei) das Schreiben
+			 * komplett und ruft stattdessen zip_source_remove(src) auf -
+			 * ein danach folgendes zip_source_open(src) (in
+			 * sond_file_part_zip_archive_to_bytes_with_src()) schlägt dann
+			 * mit "entry has been deleted" fehl, obwohl zip_close() selbst
+			 * Erfolg gemeldet hat. Mit dem Flag schreibt zip_close() auch
+			 * ein leeres Archiv regulär in src. */
+			zip_set_archive_flag(archive, ZIP_AFL_CREATE_OR_KEEP_FILE_FOR_EMPTY_ARCHIVE, 1);
+		}
+
 		if (writeable && src_out)
 			*src_out = src;
 	}
@@ -1383,6 +1386,15 @@ static GBytes* sond_file_part_zip_mod_zip_file(SondFilePartZip* sfp_zip,
 			zip_source_free(src);
 			zip_discard(archive);
 			return NULL;
+		}
+
+		//has_children direkt aus dem noch offenen (aber schon geänderten)
+		//archive ermitteln - erspart ein erneutes komplettes Öffnen/Parsen
+		//des gerade erst geschriebenen Archivs nur für diese Prüfung
+		{
+			SondFilePartPrivate* sfp_priv =
+					sond_file_part_get_instance_private(SOND_FILE_PART(sfp_zip));
+			sfp_priv->has_children = (zip_get_num_entries(archive, 0) > 0);
 		}
 	} else {
 		/* Ersetzen: Datei suchen und Inhalt aktualisieren */
@@ -1545,6 +1557,14 @@ static gint sond_file_part_zip_insert_zip_file(SondFilePartZip* sfp_zip,
 	if (rc)
 		return -1;
 
+	//erfolgreich eingefügt - Archiv hat jetzt in jedem Fall mindestens
+	//dieses eine Kind, ein erneutes Prüfen/Öffnen ist dafür nicht nötig
+	{
+		SondFilePartPrivate* sfp_priv =
+				sond_file_part_get_instance_private(SOND_FILE_PART(sfp_zip));
+		sfp_priv->has_children = TRUE;
+	}
+
 	return 0;
 }
 
@@ -1612,8 +1632,21 @@ static gint sond_file_part_pdf_authen_doc(SondFilePartPDF* sfp_pdf, fz_context* 
 	return 0;
 }
 
+/**
+ * Öffnet sfp_pdf als pdf_document.
+ *
+ * Ob ein seekbarer Stream nötig/möglich ist, hängt nur von sfp_parent ab:
+ * liegt sfp_pdf direkt im Filesystem (sfp_parent == NULL), ist der
+ * Disk-Stream (sond_pdf_open_file(), Long-Path-Support) immer seekable und
+ * damit für Lesen UND Verändern gleichermaßen geeignet und zusätzlich
+ * günstiger als der Umweg über einen vollständig gepufferten Stream. Liegt
+ * sfp_pdf verschachtelt in Zip/PDF/GMessage, ist der vom Parent gelieferte
+ * Stream (entpackt/dekodiert) grundsätzlich nicht seekable - dort MUSS der
+ * Inhalt zuerst vollständig gelesen und dann als seekbarer Buffer-Stream
+ * übergeben werden (sond_gbytes_to_fz_stream()).
+ */
 pdf_document* sond_file_part_pdf_open_document(fz_context* ctx,
-		SondFilePartPDF *sfp_pdf, gboolean writeable, gboolean prompt_for_passwd,
+		SondFilePartPDF *sfp_pdf, gboolean prompt_for_passwd,
 		GError **error) {
 	gint rc = 0;
 	pdf_document* doc = NULL;
@@ -1626,8 +1659,10 @@ pdf_document* sond_file_part_pdf_open_document(fz_context* ctx,
 	sfp_parent = sond_file_part_get_parent(SOND_FILE_PART(sfp_pdf));
 	gchar const* path = sond_file_part_get_path(SOND_FILE_PART(sfp_pdf));
 
-	if (!sfp_parent && writeable) {
-		/* Filesystem: Long-Path-Support via sond_pdf_open_file */
+	if (!sfp_parent) {
+		/* Filesystem: Long-Path-Support via sond_pdf_open_file - seekable,
+		 * daher unabhängig davon geeignet, ob doc verändert wird oder
+		 * nicht (s. Doc-Kommentar oben) */
 		gchar* full_path = g_strconcat(
 				SOND_FILE_PART_CLASS(g_type_class_peek(SOND_TYPE_FILE_PART))->path_root,
 				"/", path, NULL);
@@ -1637,7 +1672,8 @@ pdf_document* sond_file_part_pdf_open_document(fz_context* ctx,
 			return NULL;
 	}
 	else {
-		/* ZIP, GMessage, PDF-embedded: vollständig laden, dann als Stream */
+		/* ZIP, GMessage, PDF-embedded: vollständig laden, dann als Stream -
+		 * hier zwingend, weil sonst kein seekbarer Stream verfügbar wäre */
 		GBytes* bytes = sond_file_part_get_bytes(SOND_FILE_PART(sfp_pdf), error);
 		if (!bytes)
 			return NULL;
@@ -1751,7 +1787,7 @@ gint sond_file_part_pdf_load_embedded_files(SondFilePartPDF* sfp_pdf,
 		return -1;
 	}
 
-	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, FALSE, FALSE, error);
+	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, FALSE, error);
 	if (!doc) {
 		fz_drop_context(ctx);
 		return -1;
@@ -1822,7 +1858,7 @@ static gint sond_file_part_pdf_test_for_embedded_files(
 		return -1;
 	}
 
-	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, FALSE, FALSE, error);
+	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, FALSE, error);
 	if (!doc) {
 		fz_drop_context(ctx);
 		return -1;
@@ -1894,7 +1930,7 @@ static fz_stream* sond_file_part_pdf_lookup_embedded_file(fz_context* ctx,
 	pdf_document* doc = NULL;
 
 	doc = sond_file_part_pdf_open_document(ctx,
-			sfp_pdf, FALSE, FALSE, error);
+			sfp_pdf, FALSE, error);
 	if (!doc)
 		return NULL;
 
@@ -2008,7 +2044,7 @@ static fz_buffer* sond_file_part_pdf_mod_emb_file(SondFilePartPDF* sfp_pdf,
 	fz_buffer* buf_out = NULL;
 	Modify modify = { path, buf, FALSE };
 
-	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, FALSE, TRUE, error);
+	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, TRUE, error);
 	if (!doc)
 		return NULL;
 
@@ -2026,6 +2062,28 @@ static fz_buffer* sond_file_part_pdf_mod_emb_file(SondFilePartPDF* sfp_pdf,
 				0, "%s\nembedded file '%s' nicht gefunden", __func__, path);
 
 		return NULL;
+	}
+
+	if (!buf) {
+		//Löschen: has_children direkt aus dem noch offenen (bereits
+		//geänderten) doc ermitteln - billiger zweiter Walk über die schon
+		//geparste Namens-Struktur, erspart ein komplettes Neu-Öffnen von
+		//der Platte nur für diese Prüfung. Schlägt der Walk fehl, bleibt
+		//has_children unverändert - das darf die eigentliche Löschung
+		//(oben bereits erfolgreich) nicht als fehlgeschlagen erscheinen
+		//lassen.
+		gboolean has_emb_file = FALSE;
+		GError* error_check = NULL;
+
+		if (!pdf_walk_embedded_files(ctx, doc, test_for_emb_files,
+				&has_emb_file, &error_check)) {
+			SondFilePartPrivate* sfp_priv =
+					sond_file_part_get_instance_private(SOND_FILE_PART(sfp_pdf));
+			sfp_priv->has_children = has_emb_file;
+		} else {
+			LOG_WARN("%s\n", error_check ? error_check->message : "(kein Fehler gesetzt)");
+			g_clear_error(&error_check);
+		}
 	}
 
 	//write pdf to other buffer
@@ -2129,7 +2187,7 @@ static gint sond_file_part_pdf_rename_embedded_file(SondFilePartPDF* sfp_pdf,
 		return -1;
 	}
 
-	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, TRUE, TRUE, error);
+	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, TRUE, error);
 	if (!doc) {
 		fz_drop_context(ctx);
 		return -1;
@@ -2177,7 +2235,7 @@ static gint sond_file_part_pdf_insert_embedded_file(SondFilePartPDF* sfp_pdf,
 	gint rc = 0;
 	pdf_document* doc = NULL;
 
-	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, TRUE, TRUE, error);
+	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, TRUE, error);
 	if (!doc)
 		return -1;
 
@@ -2190,6 +2248,14 @@ static gint sond_file_part_pdf_insert_embedded_file(SondFilePartPDF* sfp_pdf,
 	rc = sond_file_part_pdf_save_and_close(ctx, doc, sfp_pdf, error);
 	if (rc)
 		return -1;
+
+	//erfolgreich eingefügt - PDF hat jetzt in jedem Fall mindestens dieses
+	//eine embedded file, ein erneutes Prüfen/Öffnen ist dafür nicht nötig
+	{
+		SondFilePartPrivate* sfp_priv =
+				sond_file_part_get_instance_private(SOND_FILE_PART(sfp_pdf));
+		sfp_priv->has_children = TRUE;
+	}
 
 	return 0;
 }
@@ -2434,6 +2500,17 @@ static GBytes* sond_file_part_gmessage_mod_part(SondFilePartGMessage* sfp_gmessa
 			(guchar*)data, data_len, error);
 	if (rc)
 		return NULL;
+
+	if (!bytes) {
+		//Löschen: has_children direkt aus der noch offenen (bereits
+		//geänderten) message ermitteln, wie test_for_multipart() das für
+		//den frisch geöffneten Fall auch tut - erspart ein erneutes
+		//Öffnen/Parsen nur für diese Prüfung
+		SondFilePartPrivate* sfp_priv =
+				sond_file_part_get_instance_private(SOND_FILE_PART(sfp_gmessage));
+		sfp_priv->has_children =
+				(g_mime_message_get_mime_part(sfp_gmessage_priv->message) != NULL);
+	}
 
 	GBytes* result = sond_file_part_gmessage_to_bytes(sfp_gmessage, error);
 	if (!result)

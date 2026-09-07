@@ -449,7 +449,7 @@ static gint clean_pdf(fz_context *ctx, SondFilePartPDF *sfp_pdf, GError **error)
 				sond_file_part_get_filepart(SOND_FILE_PART(sfp_pdf)));
 		return -1;
 	}
-	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, TRUE, TRUE, error);
+	doc = sond_file_part_pdf_open_document(ctx, sfp_pdf, TRUE, error);
 	if (!doc) {
 		if (g_error_matches(*error, g_quark_from_static_string("sond"), 1)) {
 			g_clear_error(error);

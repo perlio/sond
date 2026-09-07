@@ -297,7 +297,7 @@ check_coverage_one(Projekt *zond, SondFilePart *sfp, SondPageRange *range,
             bis = range->bis;
         } else {
             pdf_document *doc = sond_file_part_pdf_open_document(zond->ctx,
-                    SOND_FILE_PART_PDF(sfp), FALSE, FALSE, error);
+                    SOND_FILE_PART_PDF(sfp), FALSE, error);
             if (!doc) {
                 g_free(fp);
                 return FALSE;

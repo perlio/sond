@@ -800,7 +800,7 @@ gint viewer_save_dirty_dds(PdfViewer *pdfv, GError** error) {
 		ctx = zond_pdf_document_get_ctx(dd->zpdfd_part->zond_pdf_document);
 		doc = sond_file_part_pdf_open_document(ctx,
 				zond_pdf_document_get_sfp_pdf(dd->zpdfd_part->zond_pdf_document),
-				TRUE, FALSE, error);
+				FALSE, error);
 		if (!doc)
 			return -1;
 
