@@ -1062,7 +1062,7 @@ static gchar const* sond_file_part_get_mime_type(SondFilePart* sfp) {
 static gint sond_file_part_pdf_insert_embedded_file(SondFilePartPDF*,
 		fz_context*, fz_buffer*, gchar const*, gchar const*, GError**);
 static gint sond_file_part_zip_insert_zip_file(SondFilePartZip*,
-		GBytes*, gchar const*, gchar const*, GError**);
+		GBytes*, gchar const*, GError**);
 
 static gint sond_file_part_insert(SondFilePart* sfp, GBytes* bytes,
 		gchar const* filename, gchar const* mime_type, GError** error) {
@@ -1113,7 +1113,7 @@ static gint sond_file_part_insert(SondFilePart* sfp, GBytes* bytes,
 		}
 		else if (SOND_IS_FILE_PART_ZIP(sfp))
 			rc = sond_file_part_zip_insert_zip_file(SOND_FILE_PART_ZIP(sfp),
-					bytes, filename, mime_type, error);
+					bytes, filename, error);
 		else if (SOND_IS_FILE_PART_GMESSAGE(sfp)) {
 			g_set_error(error, SOND_ERROR, 0,
 					"%s\nEinfügen in E-Mail noch nicht unterstützt", __func__);
@@ -1501,7 +1501,7 @@ static gint sond_file_part_zip_rename_file(SondFilePartZip* sfp_zip,
 }
 
 static gint sond_file_part_zip_insert_zip_file(SondFilePartZip* sfp_zip,
-		GBytes* bytes, gchar const* filename, gchar const* mime_type, GError** error) {
+		GBytes* bytes, gchar const* filename, GError** error) {
 	zip_t* archive = NULL;
 	zip_source_t* arch_src = NULL;
 	zip_source_t* entry_src = NULL;
