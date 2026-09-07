@@ -660,28 +660,13 @@ gint project_load_trees(Projekt *zond, GError **error) {
 	gint rc = 0;
 	GtkTreeIter iter = { 0 };
 
-	/* Zeitmessung nur zu Testzwecken - s. project_open(). */
-	{
-		gint64 t_start = g_get_monotonic_time();
-
-		rc = zond_treeview_load_baum(ZOND_TREEVIEW(zond->treeview[BAUM_INHALT]), error);
-
-		LOG_INFO("project_load_trees: BAUM_INHALT dauerte %.2f s",
-				(g_get_monotonic_time() - t_start) / 1e6);
-	}
+	rc = zond_treeview_load_baum(ZOND_TREEVIEW(zond->treeview[BAUM_INHALT]), error);
 	if (rc == -1) {
 		g_prefix_error(error, "%s\n", __func__);
 		return -1;
 	}
 
-	{
-		gint64 t_start = g_get_monotonic_time();
-
-		rc = zond_treeview_load_baum(ZOND_TREEVIEW(zond->treeview[BAUM_AUSWERTUNG]), error);
-
-		LOG_INFO("project_load_trees: BAUM_AUSWERTUNG dauerte %.2f s",
-				(g_get_monotonic_time() - t_start) / 1e6);
-	}
+	rc = zond_treeview_load_baum(ZOND_TREEVIEW(zond->treeview[BAUM_AUSWERTUNG]), error);
 	if (rc == -1) {
 		g_prefix_error(error, "%s\n", __func__);
 		return -1;
@@ -822,11 +807,6 @@ gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, GError 
 		return -1;
 	}
 
-	/* Zeitmessung nur zu Testzwecken - hilft einzugrenzen, welcher der drei
-	 * Schritte beim Öffnen großer SeaDrive-Projekte die Zeit frißt (lange
-	 * UI-Blockade beobachtet). Bei Bedarf später wieder entfernen. */
-	gint64 t_open_start = g_get_monotonic_time();
-
 	// Load tree structures if opening existing project
 	if (!create) {
 		rc = project_load_trees(zond, error);
@@ -836,21 +816,9 @@ gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, GError 
 		}
 	}
 
-	{
-		gdouble secs = (g_get_monotonic_time() - t_open_start) / 1e6;
-		LOG_INFO("project_open: project_load_trees() dauerte %.2f s", secs);
-	}
-
 	// Set filesystem root
-	{
-		gint64 t_start = g_get_monotonic_time();
-
-		rc = sond_treeviewfm_set_root(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
-				zond->project_dir, error);
-
-		LOG_INFO("project_open: sond_treeviewfm_set_root() dauerte %.2f s",
-				(g_get_monotonic_time() - t_start) / 1e6);
-	}
+	rc = sond_treeviewfm_set_root(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
+			zond->project_dir, error);
 	if (rc) {
 		project_open_cleanup(zond);
 		return -1;
@@ -859,17 +827,10 @@ gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, GError 
 	gchar* datadir = g_build_filename(zond->exe_dir, "../share/tessdata", NULL);
 	gchar* embedding_model_path = resolve_model_path(zond, "embedding-model-path",
 			"Qwen3-Embedding-0.6B-Q8_0.gguf");
-	{
-		gint64 t_start = g_get_monotonic_time();
-
-		zond->wctx = sond_process_file_create_wctx(zond->ctx,
-				(void (*)(gpointer, gchar const*, ...)) info_window_set_message_thread_safe,
-				NULL, datadir, 4, ".sond_index.db", embedding_model_path,
-				zond->project_dir, error);
-
-		LOG_INFO("project_open: sond_process_file_create_wctx() dauerte %.2f s",
-				(g_get_monotonic_time() - t_start) / 1e6);
-	}
+	zond->wctx = sond_process_file_create_wctx(zond->ctx,
+			(void (*)(gpointer, gchar const*, ...)) info_window_set_message_thread_safe,
+			NULL, datadir, 4, ".sond_index.db", embedding_model_path,
+			zond->project_dir, error);
 	g_free(datadir);
 	g_free(embedding_model_path);
 	if (!zond->wctx) {
@@ -877,9 +838,6 @@ gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, GError 
 
 		return -1;
 	}
-
-	LOG_INFO("project_open: gesamt bis hierhin %.2f s",
-			(g_get_monotonic_time() - t_open_start) / 1e6);
 
 	// Success - enable widgets and finalize
 	project_set_widgets_sensitive(zond, TRUE);

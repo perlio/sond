@@ -314,6 +314,21 @@ zond_dbase_get_version(sqlite3 *db, GError **error) {
  * und erzwang dadurch pro Knoten einen kompletten Tabellen-Scan über
  * alle Zeilen von "knoten" - bei größeren Projekten (zehntausende
  * Knoten) minutenlange Ladezeiten beim Öffnen (Untersuchung 09/2026).
+ *
+ * idx_knoten_parent_older ist zusammengesetzt (parent_ID, older_sibling_ID)
+ * statt zwei getrennter Indizes auf beiden Spalten: get_first_child()
+ * filtert auf BEIDE Spalten zugleich ("WHERE parent_ID=?1 AND
+ * older_sibling_ID=0"). Mit nur einem Index je Spalte wählte SQLite den
+ * auf older_sibling_ID - der aber denkbar unselektiv ist (jeder "erste
+ * Knoten" jeder Geschwistergruppe im gesamten Baum hat
+ * older_sibling_ID=0), und filterte parent_ID danach nur noch linear
+ * durch die Treffer (per EXPLAIN QUERY PLAN verifiziert, Untersuchung
+ * 09/2026) - kaum schneller als der ursprüngliche Volltabellen-Scan. Der
+ * zusammengesetzte Index deckt genau dieses WHERE ab (Gleichheit auf
+ * beiden Spalten). get_younger_sibling() ("WHERE older_sibling_ID=?1",
+ * nur eine Spalte) braucht weiterhin den separaten Index auf
+ * older_sibling_ID allein.
+ *
  * Wird bei jedem Öffnen (neu, bestehend, konvertiert) einmal ausgeführt -
  * für bereits vorhandene Indizes ist das ein no-op. */
 static gint zond_dbase_ensure_indexes(sqlite3 *db, GError **error) {
@@ -321,8 +336,8 @@ static gint zond_dbase_ensure_indexes(sqlite3 *db, GError **error) {
 	gint rc = 0;
 
 	rc = sqlite3_exec(db,
-			"CREATE INDEX IF NOT EXISTS idx_knoten_parent_id "
-					"ON knoten(parent_ID); "
+			"CREATE INDEX IF NOT EXISTS idx_knoten_parent_older "
+					"ON knoten(parent_ID, older_sibling_ID); "
 					"CREATE INDEX IF NOT EXISTS idx_knoten_older_sibling_id "
 					"ON knoten(older_sibling_ID); ",
 			NULL, NULL, &errmsg);

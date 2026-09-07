@@ -2628,9 +2628,19 @@ static gint sond_treeviewfm_search(SondTreeview *stv, GtkTreeIter *iter,
 	thread_search = g_thread_new( NULL, sond_treeviewfm_thread_search,
 			&data_thread);
 
+	/* NICHT als reine Busy-Loop ohne jede Pause - das friert die UI (und
+	 * damit auch den eigenen Abbrechen-Button im info_window) komplett ein
+	 * und beansprucht einen ganzen CPU-Kern nur fürs Pollen. Analog zur
+	 * Wartschleife von zond_index_erstellen_ht() (headerbar.c): anstehende
+	 * Events abarbeiten, damit Fortschrittsfenster/Abbrechen reagieren,
+	 * danach kurz schlafen statt sofort erneut zu pollen. */
 	while (!g_atomic_int_get(search_fs->atom_ready)) {
 		if (*(search_fs->info_window->cancel))
 			g_atomic_int_set(search_fs->atom_cancelled, 1);
+
+		while (gtk_events_pending())
+			gtk_main_iteration_do(FALSE);
+		g_usleep(20000);
 	}
 
 	res_thread = g_thread_join(thread_search);

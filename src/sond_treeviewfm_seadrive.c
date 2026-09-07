@@ -166,7 +166,7 @@ static gboolean watcher_idle_cb(gpointer user_data)
 /* ------------------------------------------------------------------ */
 
 static guint watcher_count_pending_down(const gchar *dir_utf8,
-        SondTreeviewFM *stvfm, guint *out_total)
+        SondTreeviewFM *stvfm)
 {
     guint count = 0;
     gchar *pattern = g_strconcat(dir_utf8, "/*", NULL);
@@ -201,12 +201,10 @@ static guint watcher_count_pending_down(const gchar *dir_utf8,
             if (name) {
                 gchar *sub = g_strconcat(dir_utf8, "/", name, NULL);
                 g_free(name);
-                count += watcher_count_pending_down(sub, stvfm, out_total);
+                count += watcher_count_pending_down(sub, stvfm);
                 g_free(sub);
             }
         } else {
-            if (out_total)
-                (*out_total)++;
             if ((fd.dwFileAttributes & FILE_ATTRIBUTE_PINNED) &&
                     (fd.dwFileAttributes & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS))
                 count++;
@@ -339,21 +337,9 @@ gpointer sond_treeviewfm_seadrive_watcher_thread(gpointer user_data)
 
     /* Initialscan: zählt bereits vorhandene PINNED+offline Dateien.
      * ReadDirectoryChangesW läuft bereits - Events während des Scans
-     * werden gepuffert und danach verarbeitet (selbstkorrigierend).
-     * Zeitmessung + Log nur zu Testzwecken (Performance bei sehr großen
-     * Projektverzeichnissen, z.B. TÜ-Datenbestände mit ~100.000 Dateien) -
-     * bei Bedarf später wieder entfernen. */
+     * werden gepuffert und danach verarbeitet (selbstkorrigierend). */
     if (!sond_treeviewfm_seadrive_stop_requested(stvfm)) {
-        gint64 t_start = g_get_monotonic_time();
-        guint total = 0;
-        guint initial = watcher_count_pending_down(root, stvfm, &total);
-        gdouble secs = (g_get_monotonic_time() - t_start) / 1e6;
-
-        LOG_INFO("SeaDrive-Initialscan '%s': %u Dateien gescannt, "
-                "%u davon pending_down (gepinnt+offline), %.2f s%s",
-                root, total, initial, secs,
-                sond_treeviewfm_seadrive_stop_requested(stvfm) ?
-                        " (abgebrochen - stop angefordert)" : "");
+        guint initial = watcher_count_pending_down(root, stvfm);
 
         WatcherInitData *d = g_new0(WatcherInitData, 1);
         d->stvfm = stvfm;

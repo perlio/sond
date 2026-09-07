@@ -321,4 +321,87 @@
     Hintergrund-Indizierungs-Thread läuft, prüfen, ob SQLITE_BUSY sauber
     behandelt wird statt eines Absturzes oder stillen Fehlers.
 
+ Performance-Untersuchung großer SeaDrive-Projekte (06.09.2026,
+ abgeschlossen):
+
+ Befund: Öffnen sehr großer Projekte (z.B. 24-178, 68.817 Dateien, ~20.000
+ Baumknoten) dauerte bis zu ~140s. Root Cause (verifiziert per EXPLAIN
+ QUERY PLAN): zond_dbase_get_first_child() ("WHERE parent_ID=?1 AND
+ older_sibling_ID=0") hatte keinen brauchbaren Index - SQLite wählte
+ idx_knoten_older_sibling_id (schlechte Selektivität, older_sibling_ID=0
+ trifft auf jeden "ersten Knoten" im gesamten Baum zu) und filterte
+ parent_ID danach nur noch linear durch die Treffer. Fix: zusammengesetzter
+ Index idx_knoten_parent_older(parent_ID, older_sibling_ID) in
+ zond_dbase_ensure_indexes() (zond_dbase.c, CREATE INDEX IF NOT EXISTS).
+ Läuft bei jedem Öffnen von zond_dbase_open() aus (neu angelegt, bestehend
+ geöffnet, konvertierte Altdatei - zond_convert() bekommt immer ein schon
+ offenes ZondDBase* und arbeitet nur mit UPDATE auf der bereits
+ existierenden "knoten"-Tabelle, läuft also zwangsläufig NACH
+ ensure_indexes()) automatisch mit, kein separater Migrationsschritt
+ nötig. Einzige Ausnahme: die work-Schattendatei (create_file=TRUE,
+ create=FALSE, "knoten" existiert dort zum Zeitpunkt von zond_dbase_open()
+ noch nicht) - der Index kommt dort automatisch über den anschließenden
+ zond_dbase_backup() mit (kopiert komplettes Schema inkl. Indizes von
+ store). Ergebnis: project_load_trees() 140s -> 2,62s.
+
+ Verworfene Zwischenhypothesen: PDF-Masseneinlesen beim Öffnen,
+ GNode-Sibling-Insert O(n²), gtk_tree_model_foreach() O(n²) in
+ zond_treeview_abfragen_iter() (real, gefixt via neuer Hashtable
+ ht_node_id in ZondTreeStore - aber nicht der dominante Faktor),
+ SeaDrive-Sync-Interferenz auf der work-Datei (work trotzdem dauerhaft an
+ einen lokalen, nicht synchronisierten Cache-Pfad verlegt -
+ project_get_local_tmp_path(), unabhängig davon sinnvoll).
+
+ Nebenbefund: ein reiner Verzeichnis-Scan (FindFirstFileW/FindNextFileW
+ über Metadaten/Attribute, kein Dateizugriff) ist auch bei ~70.000 Dateien
+ nur ~1,5s (watcher_count_pending_down(), sond_treeviewfm_seadrive.c) -
+ macht die folgende Planung praktikabel.
+
+ SeaDrive-Verzeichnis-Coverage-Badge (06.09.2026, geplant, noch NICHT
+ umgesetzt):
+
+ Idee: Ordner-Icon zeigt - analog zum bestehenden Indizierungs-Status-
+ Badge (SondIndexStatus FULL/PARTIAL/NONE, unten links) - rekursiv den
+ Hydrierungsstatus aller Dateien darunter an (unten rechts, wo heute nur
+ das SeaDrive-Attribut des Ordners selbst per GetFileAttributesW()
+ abgefragt wird, s. sond_treeviewfm_render_file_icon(), sond_treeviewfm.c
+ ~Zeile 3274).
+
+ Plan:
+ 1. Neue GHashTable *seadrive_dir_offline_count in SondTreeviewFMPrivate:
+    Pfad -> rekursiver Offline-Zähler für den ganzen Teilbaum (nicht nur
+    direkte Kinder - Rendering soll O(1) bleiben, Update-Pfad darf dafür
+    mehrere Hashtable-Zugriffe kosten).
+ 2. watcher_count_pending_down() (sond_treeviewfm_seadrive.c) erweitern:
+    zusätzlich zur globalen Summe für jedes durchlaufene Verzeichnis den
+    eigenen Teilbaum-Zählerstand in die Hashtable eintragen.
+ 3. Watcher-Bug (unabhängig von den Badges auch für den schon bestehenden
+    pending_down-Zähler in der Statusleiste relevant): ReadDirectoryChangesW-
+    Filter hat bisher nur FILE_NOTIFY_CHANGE_ATTRIBUTES |
+    FILE_NOTIFY_CHANGE_LAST_WRITE - FILE_NOTIFY_CHANGE_FILE_NAME fehlt,
+    neue/gelöschte Dateien werden vom Watcher gar nicht bemerkt (Zähler
+    laufen mit der Zeit auseinander). Fix: Filter ergänzen, fni->Action
+    (ADDED/REMOVED/RENAMED_*) auswerten, Zähler für die Datei UND alle
+    Vorfahren-Verzeichnisse bis root anpassen.
+ 4. Watcher-Bug: kein Buffer-Overflow-Handling - bei sehr vielen
+    gleichzeitigen Änderungen (großes TÜ-Archiv) kann
+    ReadDirectoryChangesW Events verlieren (bytes_returned==0 trotz
+    Erfolg bzw. ERROR_NOTIFY_ENUM_DIR), aktuell unbemerkt, Zähler bleiben
+    dauerhaft falsch. Fix: erkennen, kompletten Resync (erneuter
+    watcher_count_pending_down()-Durchlauf) für die betroffene Wurzel
+    anstoßen - jetzt unproblematisch (s. Nebenbefund oben, ~1,5s/70k
+    Dateien).
+ 5. Neuer Enum SondSeadriveDirStatus (NONE/PARTIAL/FULL_OFFLINE, Naming
+    analog SondIndexStatus) + Getter-Funktion.
+ 6. sond_treeviewfm_render_file_icon() für DIR-Items: zusätzlich zur
+    bisherigen Prüfung des Ordner-eigenen Attributs die neue Hashtable
+    konsultieren und ggf. PARTIAL/FULL_OFFLINE-Badge zeigen.
+ 7. Test: Ordner mit gemischtem Hydrierungsstatus (Badge=PARTIAL
+    erwartet), Datei-Hinzufügen/-Löschen während laufendem Watcher,
+    künstlich ausgelöster Buffer-Overflow (Resync-Verifikation).
+
+ Empfohlene Reihenfolge: 3./4. zuerst (eigenständige Bugfixes, betreffen
+ auch den schon bestehenden pending_down-Zähler), dann 1./2./5./6. für die
+ neuen Badges.
+
  */

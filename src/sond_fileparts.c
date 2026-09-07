@@ -87,6 +87,13 @@ static void sond_file_part_finalize(GObject* self) {
 static void sond_file_part_class_init(SondFilePartClass *klass) {
 	G_OBJECT_CLASS(klass)->finalize = sond_file_part_finalize;
 
+	/* Tracking bereits geöffneter Top-Level-Dateien (parent == NULL) -
+	 * analog zu arr_opened_files der Instanzen von Zip/PDF/GMessage, das in
+	 * deren jeweiliger _init() belegt wird. Fehlte diese Zuweisung, liefe
+	 * sond_file_part_is_open()/_do_create() für Dateien im Filesystem ins
+	 * Leere (g_ptr_array_add/_remove_fast auf NULL). */
+	klass->arr_opened_files = g_ptr_array_new( );
+
 	return;
 }
 
@@ -165,6 +172,12 @@ SondFilePart* sond_file_part_create_from_mime_type(gchar const* path,
 	SondFilePart* sfp_child = NULL;
 	GType type = 0;
 
+	g_return_val_if_fail(path, NULL);
+
+	//NULL ist erlaubt (z.B. leere Datei ohne erkennbaren Typ) und wird wie
+	//sond_file_part_create_leaf() auf application/octet-stream abgebildet
+	mime_type = mime_type ? mime_type : "application/octet-stream";
+
 	if (!g_strcmp0(mime_type, "application/pdf"))
 		type = SOND_TYPE_FILE_PART_PDF;
 	else if (!g_strcmp0(mime_type, "application/zip"))
@@ -187,8 +200,8 @@ SondFilePart* sond_file_part_create_from_mime_type(gchar const* path,
 
 		rc = sond_file_part_test_for_children(sfp_child, &error);
 		if (rc) {
-			LOG_WARN("%s\n", error->message);
-			g_error_free(error);
+			LOG_WARN("%s\n", error ? error->message : "(kein Fehler gesetzt)");
+			g_clear_error(&error);
 		}
 	}
 
@@ -203,6 +216,8 @@ SondFilePart* sond_file_part_create(SondFilePart* sfp_parent, const gchar* path,
 	SondFilePart* sfp = NULL;
 	gchar* content_type = NULL;
 
+	g_return_val_if_fail(path, NULL);
+
 	sfp = sond_file_part_is_open(sfp_parent, path);
 	if (sfp)
 		return sfp;
@@ -216,11 +231,10 @@ SondFilePart* sond_file_part_create(SondFilePart* sfp_parent, const gchar* path,
 	if (len > 0)
 		content_type = mime_guess_content_type(data, len, path, error);
 	g_bytes_unref(bytes);
-	if (!content_type) {
-		if (len > 0) /* mime_guess_content_type hat Fehler gesetzt */
-			return NULL;
-		content_type = g_strdup("application/octet-stream");
-	}
+	if (!content_type && len > 0) /* mime_guess_content_type hat Fehler gesetzt */
+		return NULL;
+	//bei leerer Datei bleibt content_type NULL - den Fallback auf
+	//application/octet-stream übernimmt sond_file_part_create_from_mime_type()
 
 	sfp = sond_file_part_create_from_mime_type(path, sfp_parent, content_type);
 	g_free(content_type);
@@ -230,7 +244,11 @@ SondFilePart* sond_file_part_create(SondFilePart* sfp_parent, const gchar* path,
 
 SondFilePart* sond_file_part_create_leaf(gchar const* path,
 		SondFilePart* parent, gchar const* mime_type) {
-	SondFilePart* sfp = sond_file_part_do_create(SOND_TYPE_FILE_PART_LEAF, path, parent);
+	SondFilePart* sfp = NULL;
+
+	g_return_val_if_fail(path, NULL);
+
+	sfp = sond_file_part_do_create(SOND_TYPE_FILE_PART_LEAF, path, parent);
 	sond_file_part_leaf_set_mime_type(SOND_FILE_PART_LEAF(sfp),
 			mime_type ? mime_type : "application/octet-stream");
 	return sfp;
@@ -248,7 +266,11 @@ SondFilePart* sond_file_part_get_parent(SondFilePart *sfp) {
 }
 
 void sond_file_part_set_parent(SondFilePart *sfp, SondFilePart* parent) {
-	SondFilePartPrivate *sfp_priv = sond_file_part_get_instance_private(sfp);
+	SondFilePartPrivate *sfp_priv = NULL;
+
+	g_return_if_fail(sfp);
+
+	sfp_priv = sond_file_part_get_instance_private(sfp);
 
 	if (sond_file_part_get_arr_opened_files(sfp_priv->parent))
 		g_ptr_array_remove_fast(sond_file_part_get_arr_opened_files(sfp_priv->parent), sfp);
@@ -279,7 +301,12 @@ gchar const* sond_file_part_get_path(SondFilePart *sfp) {
 }
 
 void sond_file_part_set_path(SondFilePart *sfp, const gchar *path) {
-	SondFilePartPrivate *sfp_priv = sond_file_part_get_instance_private(sfp);
+	SondFilePartPrivate *sfp_priv = NULL;
+
+	g_return_if_fail(sfp);
+	g_return_if_fail(path);
+
+	sfp_priv = sond_file_part_get_instance_private(sfp);
 
 	g_free(sfp_priv->path);
 	sfp_priv->path = g_strdup(path);
@@ -288,15 +315,21 @@ void sond_file_part_set_path(SondFilePart *sfp, const gchar *path) {
 }
 
 gboolean sond_file_part_get_has_children(SondFilePart *sfp) {
-	SondFilePartPrivate* sfp_priv =
-			sond_file_part_get_instance_private(sfp);
+	SondFilePartPrivate* sfp_priv = NULL;
+
+	g_return_val_if_fail(sfp, FALSE);
+
+	sfp_priv = sond_file_part_get_instance_private(sfp);
 
 	return sfp_priv->has_children;
 }
 
 void sond_file_part_set_has_children(SondFilePart *sfp, gboolean children) {
-	SondFilePartPrivate* sfp_priv =
-			sond_file_part_get_instance_private(sfp);
+	SondFilePartPrivate* sfp_priv = NULL;
+
+	g_return_if_fail(sfp);
+
+	sfp_priv = sond_file_part_get_instance_private(sfp);
 
 	sfp_priv->has_children = children;
 
@@ -325,6 +358,8 @@ gchar* sond_file_part_get_filepart(SondFilePart* sfp) {
 	SondFilePart* sfp_parent = NULL;
 	gchar* filepart = NULL;
 	GList* ptr_elem = NULL;
+
+	g_return_val_if_fail(sfp, NULL);
 
 	list = g_list_append(list, sfp);
 
@@ -421,7 +456,7 @@ static GBytes* sond_file_part_read_bytes_internal(SondFilePart* sfp_parent,
 			if (zip_stat(archive, path, 0, &zstat) != 0 ||
 					!(zstat.valid & ZIP_STAT_SIZE)) {
 				zip_discard(archive);
-				if (error) *error = g_error_new(SOND_ERROR, 0,
+				g_set_error(error, SOND_ERROR, 0,
 						"%s\nDatei '%s' nicht im ZIP oder Größe unbekannt",
 						__func__, path);
 				return NULL;
@@ -429,7 +464,7 @@ static GBytes* sond_file_part_read_bytes_internal(SondFilePart* sfp_parent,
 			zip_file_t* zf = zip_fopen(archive, path, 0);
 			if (!zf) {
 				zip_discard(archive);
-				if (error) *error = g_error_new(SOND_ERROR, 0,
+				g_set_error(error, SOND_ERROR, 0,
 						"%s\nzip_fopen('%s'): %s", __func__, path,
 						zip_error_strerror(zip_get_error(archive)));
 				return NULL;
@@ -440,7 +475,7 @@ static GBytes* sond_file_part_read_bytes_internal(SondFilePart* sfp_parent,
 			zip_discard(archive);
 			if (bytes_read < 0 || (zip_uint64_t)bytes_read != zstat.size) {
 				g_free(data);
-				if (error) *error = g_error_new(SOND_ERROR, 0,
+				g_set_error(error, SOND_ERROR, 0,
 						"%s\nzip_fread('%s'): unvollständig gelesen", __func__, path);
 				return NULL;
 			}
@@ -448,7 +483,7 @@ static GBytes* sond_file_part_read_bytes_internal(SondFilePart* sfp_parent,
 		} else {
 			zip_file_t* zf = zip_fopen(archive, path, 0);
 			if (!zf) {
-				if (error) *error = g_error_new(SOND_ERROR, 0,
+				g_set_error(error, SOND_ERROR, 0,
 						"%s\nzip_fopen('%s'): %s", __func__, path,
 						zip_error_strerror(zip_get_error(archive)));
 				zip_discard(archive);
@@ -460,7 +495,7 @@ static GBytes* sond_file_part_read_bytes_internal(SondFilePart* sfp_parent,
 			zip_discard(archive);
 			if (n < 0) {
 				g_free(buf);
-				if (error) *error = g_error_new(SOND_ERROR, 0,
+				g_set_error(error, SOND_ERROR, 0,
 						"%s\nzip_fread('%s') fehlgeschlagen", __func__, path);
 				return NULL;
 			}
@@ -471,7 +506,7 @@ static GBytes* sond_file_part_read_bytes_internal(SondFilePart* sfp_parent,
 		/* PDF embedded file: MuPDF */
 		fz_context* ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
 		if (!ctx) {
-			if (error) *error = g_error_new(SOND_ERROR, 0,
+			g_set_error(error, SOND_ERROR, 0,
 					"%s\nfz_new_context fehlgeschlagen", __func__);
 			return NULL;
 		}
@@ -489,7 +524,7 @@ static GBytes* sond_file_part_read_bytes_internal(SondFilePart* sfp_parent,
 			fz_always(ctx)
 				fz_drop_stream(ctx, stream);
 			fz_catch(ctx) {
-				if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
+				g_set_error(error, g_quark_from_static_string("mupdf"),
 						fz_caught(ctx), "%s\n%s", __func__, fz_caught_message(ctx));
 				fz_drop_context(ctx);
 				return NULL;
@@ -505,7 +540,7 @@ static GBytes* sond_file_part_read_bytes_internal(SondFilePart* sfp_parent,
 				fz_drop_stream(ctx, stream);
 			fz_catch(ctx) {
 				g_free(buf);
-				if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
+				g_set_error(error, g_quark_from_static_string("mupdf"),
 						fz_caught(ctx), "%s\n%s", __func__, fz_caught_message(ctx));
 				fz_drop_context(ctx);
 				return NULL;
@@ -532,7 +567,7 @@ static GBytes* sond_file_part_read_bytes_internal(SondFilePart* sfp_parent,
 					GMIME_OBJECT(g_mime_message_part_get_message(GMIME_MESSAGE_PART(object)));
 			if (!part) {
 				g_object_unref(object);
-				if (error) *error = g_error_new(SOND_ERROR, 0,
+				g_set_error(error, SOND_ERROR, 0,
 						"%s\nGMimeMessagePart hat keine Nachricht", __func__);
 				return NULL;
 			}
@@ -543,7 +578,7 @@ static GBytes* sond_file_part_read_bytes_internal(SondFilePart* sfp_parent,
 			GMimeDataWrapper* wrapper = g_mime_part_get_content(GMIME_PART(object));
 			if (!wrapper) {
 				g_object_unref(object);
-				if (error) *error = g_error_new(SOND_ERROR, 0,
+				g_set_error(error, SOND_ERROR, 0,
 						"%s\nGMimePart hat keinen Content", __func__);
 				return NULL;
 			}
@@ -553,13 +588,13 @@ static GBytes* sond_file_part_read_bytes_internal(SondFilePart* sfp_parent,
 		}
 		else {
 			g_object_unref(object);
-			if (error) *error = g_error_new(SOND_ERROR, 0,
+			g_set_error(error, SOND_ERROR, 0,
 					"%s\nGMimeObject ist kein zulässiger MimePart", __func__);
 			return NULL;
 		}
 
 		if (length <= 0) {
-			if (error) *error = g_error_new(SOND_ERROR, 0,
+			g_set_error(error, SOND_ERROR, 0,
 					"%s\n%s leer oder __Fehler__", __func__,
 					GMIME_IS_MESSAGE_PART(object) ? "GMimeMessagePart" : "GMimePart");
 			g_object_unref(object);
@@ -577,7 +612,7 @@ static GBytes* sond_file_part_read_bytes_internal(SondFilePart* sfp_parent,
 		return result;
 	}
 
-	if (error) *error = g_error_new(SOND_ERROR, 0,
+	g_set_error(error, SOND_ERROR, 0,
 			"%s\nUnbekannter Parent-Typ", __func__);
 	return NULL;
 }
@@ -616,6 +651,8 @@ SondFilePart* sond_file_part_from_filepart(gchar const* filepart, GError** error
 }
 
 GBytes* sond_file_part_get_bytes(SondFilePart* sfp, GError** error) {
+	g_return_val_if_fail(sfp, NULL);
+
 	return sond_file_part_read_bytes_internal(
 			sond_file_part_get_parent(sfp),
 			sond_file_part_get_path(sfp),
@@ -648,6 +685,8 @@ save_bytes_longpath(GBytes* bytes, const gchar *filename, GError **error)
 gchar* sond_file_part_write_to_tmp_file(SondFilePart* sfp, GError **error) {
 	gchar *filename = NULL;
 	GBytes *bytes = NULL;
+
+	g_return_val_if_fail(sfp, NULL);
 
 	bytes = sond_file_part_get_bytes(sfp, error);
 	if (!bytes)
@@ -685,6 +724,8 @@ gchar* sond_file_part_write_to_tmp_file(SondFilePart* sfp, GError **error) {
 
 gint sond_file_part_open(SondFilePart* sfp, gboolean open_with,
 		GError** error) {
+	g_return_val_if_fail(sfp, -1);
+
 	//hier alle Varianten, in denen eigener Viewer geöffnet wird
 	if (!open_with &&
 			((SOND_IS_FILE_PART_LEAF(sfp) &&
@@ -736,8 +777,8 @@ gint sond_file_part_open(SondFilePart* sfp, gboolean open_with,
 
 				if (!sond_remove(path, &error_rem)) {
 					LOG_WARN("Datei '%s' konnte nicht gelöscht werden:\n%s",
-							path, error_rem->message);
-					g_error_free(error_rem);
+							path, error_rem ? error_rem->message : "(kein Fehler gesetzt)");
+					g_clear_error(&error_rem);
 				}
 			}
 			return -1;
@@ -758,6 +799,8 @@ static GBytes* sond_file_part_gmessage_mod_part(SondFilePartGMessage*,
 
 gint sond_file_part_delete(SondFilePart* sfp, GError** error) {
 	SondFilePart* sfp_parent = NULL;
+
+	g_return_val_if_fail(sfp, -1);
 
 	sfp_parent = sond_file_part_get_parent(sfp);
 
@@ -784,7 +827,7 @@ gint sond_file_part_delete(SondFilePart* sfp, GError** error) {
 			/* PDF braucht ctx und fz_buffer */
 			fz_context* ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
 			if (!ctx) {
-				if (error) *error = g_error_new(SOND_ERROR, 0,
+				g_set_error(error, SOND_ERROR, 0,
 						"%s\nfz_new_context fehlgeschlagen", __func__);
 				return -1;
 			}
@@ -818,8 +861,8 @@ gint sond_file_part_delete(SondFilePart* sfp, GError** error) {
 			GError* error_children = NULL;
 
 			if (sond_file_part_test_for_children(sfp_parent, &error_children)) {
-				LOG_WARN("%s\n", error_children->message);
-				g_error_free(error_children);
+				LOG_WARN("%s\n", error_children ? error_children->message : "(kein Fehler gesetzt)");
+				g_clear_error(&error_children);
 			}
 		}
 	}
@@ -833,23 +876,63 @@ gint sond_file_part_delete(SondFilePart* sfp, GError** error) {
 gint sond_file_part_replace(SondFilePart* sfp, GBytes* bytes, GError** error) {
 	SondFilePart* sfp_parent = NULL;
 
+	g_return_val_if_fail(sfp, -1);
+	g_return_val_if_fail(bytes, -1);
+
 	sfp_parent = sond_file_part_get_parent(sfp);
 
 	if (!sfp_parent) { //Datei im Filesystem
-		gint rc = 0;
 		gchar* filename = NULL;
-
-		rc = sond_file_part_delete(sfp, error);
-		if (rc)
-			return -1;
+		gchar* filename_tmp = NULL;
+		gboolean suc = FALSE;
 
 		filename = g_strconcat(SOND_FILE_PART_CLASS(g_type_class_peek(SOND_TYPE_FILE_PART))->path_root,
 				"/", sond_file_part_get_path(sfp), NULL);
 
-		gboolean suc = save_bytes_longpath(bytes, filename, error);
-		g_free(filename);
-		if (!suc)
+		/* Erst in eine temporäre Datei im selben Verzeichnis schreiben (garantiert
+		 * dasselbe Volume für den abschließenden rename) und die Originaldatei
+		 * erst danach löschen - sonst geht ihr Inhalt verloren, falls das
+		 * Schreiben der neuen Daten fehlschlägt (volle Platte, Rechte, ...).
+		 * sond_rename() überschreibt unter Windows kein existierendes Ziel
+		 * (MoveFileW ohne MOVEFILE_REPLACE_EXISTING), daher muss die
+		 * Originaldatei vor dem rename weg sein - das Restrisiko beschränkt
+		 * sich damit auf das kurze Fenster zwischen dem delete und dem reinen
+		 * Metadaten-rename. */
+		filename_tmp = g_strdup_printf("%s.tmp%d", filename,
+				g_random_int_range(10000, 99999));
+
+		suc = save_bytes_longpath(bytes, filename_tmp, error);
+		if (!suc) {
+			g_free(filename_tmp);
+			g_free(filename);
 			return -1;
+		}
+
+		if (!sond_remove(filename, error)) {
+			GError* error_rem = NULL;
+
+			if (!sond_remove(filename_tmp, &error_rem)) {
+				LOG_WARN("Temp-Datei '%s' konnte nicht gelöscht werden:\n%s",
+						filename_tmp, error_rem ? error_rem->message : "(kein Fehler gesetzt)");
+				g_clear_error(&error_rem);
+			}
+			g_free(filename_tmp);
+			g_free(filename);
+			return -1;
+		}
+
+		suc = sond_rename(filename_tmp, filename, error);
+		if (!suc) {
+			g_prefix_error(error,
+					"Originaldatei bereits gelöscht - neuer Inhalt liegt "
+					"stattdessen unter '%s' vor:\n", filename_tmp);
+			g_free(filename_tmp);
+			g_free(filename);
+			return -1;
+		}
+
+		g_free(filename_tmp);
+		g_free(filename);
 	}
 	else {
 		gint rc = 0;
@@ -859,7 +942,7 @@ gint sond_file_part_replace(SondFilePart* sfp, GBytes* bytes, GError** error) {
 			/* PDF-Grenze: GBytes → fz_buffer → mod → fz_buffer → GBytes */
 			fz_context* ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
 			if (!ctx) {
-				if (error) *error = g_error_new(SOND_ERROR, 0,
+				g_set_error(error, SOND_ERROR, 0,
 						"%s\nfz_new_context fehlgeschlagen", __func__);
 				return -1;
 			}
@@ -870,7 +953,7 @@ gint sond_file_part_replace(SondFilePart* sfp, GBytes* bytes, GError** error) {
 				buf_in = fz_new_buffer_from_copied_data(ctx, data, len);
 			fz_catch(ctx) {
 				fz_drop_context(ctx);
-				if (error) *error = g_error_new(SOND_ERROR, 0,
+				g_set_error(error, SOND_ERROR, 0,
 						"%s\nfz_new_buffer_from_copied_data fehlgeschlagen", __func__);
 				return -1;
 			}
@@ -922,8 +1005,27 @@ gint sond_file_part_rename(SondFilePart* sfp, gchar const* path_new,
 	sfp_priv = sond_file_part_get_instance_private(sfp);
 
 	if (!sfp_priv->parent) {//sfp ist im fs gespeichert
-		if (!sond_rename(sfp_priv->path, path_new, error))
+		/* sfp_priv->path und path_new sind root-relative Pfade (s. Kommentar
+		 * bei SondFilePartPrivate.path) - anders als bei den übrigen
+		 * Dateisystem-Zugriffen in dieser Datei (delete/insert/zip/pdf/
+		 * gmessage) fehlte hier bislang das Voranstellen von path_root. Ohne
+		 * das "funktioniert" es nur, solange das Arbeitsverzeichnis zufällig
+		 * mit path_root übereinstimmt (von sond_treeviewfm_set_root() per
+		 * g_chdir() so gehalten) - und es unterläuft unter Windows den an
+		 * anderer Stelle in dieser Datei extra vorgesehenen
+		 * Long-Path-Support, der einen absoluten Pfad voraussetzt. */
+		gchar const* root = SOND_FILE_PART_CLASS(
+				g_type_class_peek(SOND_TYPE_FILE_PART))->path_root;
+		gchar* full_old = root ? g_strconcat(root, "/", sfp_priv->path, NULL)
+				: g_strdup(sfp_priv->path);
+		gchar* full_new = root ? g_strconcat(root, "/", path_new, NULL)
+				: g_strdup(path_new);
+
+		if (!sond_rename(full_old, full_new, error))
 			rc = -1;
+
+		g_free(full_old);
+		g_free(full_new);
 	}
 	else if (SOND_IS_FILE_PART_PDF(sfp_priv->parent))
 		rc = sond_file_part_pdf_rename_embedded_file(SOND_FILE_PART_PDF(sfp_priv->parent),
@@ -935,7 +1037,7 @@ gint sond_file_part_rename(SondFilePart* sfp, gchar const* path_new,
 		rc = sond_file_part_gmessage_rename_file(SOND_FILE_PART_GMESSAGE(sfp_priv->parent),
 				sfp_priv->path, base_new, error);
 	else {
-		if (error) *error = g_error_new(g_quark_from_static_string("sond"), 0,
+		g_set_error(error, g_quark_from_static_string("sond"), 0,
 				"Derzeit nicht implementiert");
 
 		rc = -1;
@@ -976,11 +1078,11 @@ static gint sond_file_part_insert(SondFilePart* sfp, GBytes* bytes,
 	if (!sfp) { //Datei im Filesystem
 		gchar* path = NULL;
 
-		path = g_strconcat(SOND_FILE_PART_CLASS(g_type_class_peek_static(
+		path = g_strconcat(SOND_FILE_PART_CLASS(g_type_class_peek(
 				SOND_TYPE_FILE_PART))->path_root, "/", filename, NULL);
 
 		if (sond_exists(path)) {
-			if (error) *error = g_error_new(G_IO_ERROR, G_IO_ERROR_EXISTS,
+			g_set_error(error, G_IO_ERROR, G_IO_ERROR_EXISTS,
 					"%s\nDatei existiert", __func__);
 			g_free(path);
 			return -1;
@@ -998,7 +1100,7 @@ static gint sond_file_part_insert(SondFilePart* sfp, GBytes* bytes,
 			/* PDF-Grenze: GBytes → fz_buffer */
 			fz_context* ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
 			if (!ctx) {
-				if (error) *error = g_error_new(SOND_ERROR, 0,
+				g_set_error(error, SOND_ERROR, 0,
 						"%s\nfz_new_context fehlgeschlagen", __func__);
 				return -1;
 			}
@@ -1009,7 +1111,7 @@ static gint sond_file_part_insert(SondFilePart* sfp, GBytes* bytes,
 				buf = fz_new_buffer_from_copied_data(ctx, data, len);
 			fz_catch(ctx) {
 				fz_drop_context(ctx);
-				if (error) *error = g_error_new(SOND_ERROR, 0,
+				g_set_error(error, SOND_ERROR, 0,
 						"%s\nfz_new_buffer_from_copied_data fehlgeschlagen", __func__);
 				return -1;
 			}
@@ -1022,7 +1124,7 @@ static gint sond_file_part_insert(SondFilePart* sfp, GBytes* bytes,
 			rc = sond_file_part_zip_insert_zip_file(SOND_FILE_PART_ZIP(sfp),
 					bytes, filename, mime_type, error);
 		else if (SOND_IS_FILE_PART_GMESSAGE(sfp)) {
-			if (error) *error = g_error_new(SOND_ERROR, 0,
+			g_set_error(error, SOND_ERROR, 0,
 					"%s\nEinfügen in E-Mail noch nicht unterstützt", __func__);
 			return -1;
 		}
@@ -1038,6 +1140,8 @@ gint sond_file_part_copy(SondFilePart* sfp_src,
 		SondFilePart* sfp_dst, gchar const* path, GError** error) {
 	GBytes* bytes = NULL;
 	gint rc = 0;
+
+	g_return_val_if_fail(path, -1);
 
 	bytes = sond_file_part_get_bytes(sfp_src, error);
 	if (!bytes)
@@ -1093,10 +1197,13 @@ zip_t* sond_file_part_zip_open_archive(SondFilePartZip* sfp_zip,
 	gsize data_len = 0;
 	int flags = 0;
 
+	g_return_val_if_fail(sfp_zip, NULL);
+
 	SondFilePart* sfp_parent = sond_file_part_get_parent(SOND_FILE_PART(sfp_zip));
 
 	if (!sfp_parent && !writeable) {
-		/* Filesystem, nur lesend: direkt über zip_open (Long-Path: ToDo) */
+		/* Filesystem, nur lesend: direkt über zip_open. Long-Path-Support
+		 * kommt über sond_fopen() (s.u.), das ist bereits erledigt. */
 		gchar* full_path = g_strconcat(
 				SOND_FILE_PART_CLASS(g_type_class_peek(SOND_TYPE_FILE_PART))->path_root,
 				"/", sond_file_part_get_path(SOND_FILE_PART(sfp_zip)), NULL);
@@ -1108,7 +1215,7 @@ zip_t* sond_file_part_zip_open_archive(SondFilePartZip* sfp_zip,
 		src = zip_source_filep_create(f, 0, -1, &zip_error);
 		if (!src) {
 			fclose(f);
-			if (error) *error = g_error_new(SOND_ERROR, 0,
+			g_set_error(error, SOND_ERROR, 0,
 					"%s\nzip_source_filep_create: %s", __func__,
 					zip_error_strerror(&zip_error));
 			zip_error_fini(&zip_error);
@@ -1117,7 +1224,7 @@ zip_t* sond_file_part_zip_open_archive(SondFilePartZip* sfp_zip,
 		archive = zip_open_from_source(src, ZIP_RDONLY, &zip_error);
 		if (!archive) {
 			zip_source_free(src);
-			if (error) *error = g_error_new(SOND_ERROR, 0,
+			g_set_error(error, SOND_ERROR, 0,
 					"%s\nzip_open_from_source: %s", __func__,
 					zip_error_strerror(&zip_error));
 			zip_error_fini(&zip_error);
@@ -1136,7 +1243,7 @@ zip_t* sond_file_part_zip_open_archive(SondFilePartZip* sfp_zip,
 		data_copy = g_memdup2(raw, data_len);
 		g_bytes_unref(bytes);
 		if (!data_copy) {
-			if (error) *error = g_error_new(SOND_ERROR, 0,
+			g_set_error(error, SOND_ERROR, 0,
 					"%s\ng_memdup2 fehlgeschlagen", __func__);
 			return NULL;
 		}
@@ -1145,7 +1252,7 @@ zip_t* sond_file_part_zip_open_archive(SondFilePartZip* sfp_zip,
 		src = zip_source_buffer_create(data_copy, data_len, 1 /*freep*/, &zip_error);
 		if (!src) {
 			g_free(data_copy);
-			if (error) *error = g_error_new(SOND_ERROR, 0,
+			g_set_error(error, SOND_ERROR, 0,
 					"%s\nzip_source_buffer_create: %s", __func__,
 					zip_error_strerror(&zip_error));
 			zip_error_fini(&zip_error);
@@ -1163,7 +1270,7 @@ zip_t* sond_file_part_zip_open_archive(SondFilePartZip* sfp_zip,
 			if (writeable && src_out)
 				zip_source_free(src); /* extra ref wieder freigeben */
 			zip_source_free(src);
-			if (error) *error = g_error_new(SOND_ERROR, 0,
+			g_set_error(error, SOND_ERROR, 0,
 					"%s\nzip_open_from_source: %s", __func__,
 					zip_error_strerror(&zip_error));
 			zip_error_fini(&zip_error);
@@ -1189,7 +1296,7 @@ static GBytes* sond_file_part_zip_archive_to_bytes_with_src(zip_t* archive,
 
 	/* Archiv schreiben: zip_close() schreibt Änderungen in die source zurück */
 	if (zip_close(archive) != 0) {
-		if (error) *error = g_error_new(SOND_ERROR, 0,
+		g_set_error(error, SOND_ERROR, 0,
 				"%s\nzip_close: %s", __func__,
 				zip_error_strerror(zip_source_error(src)));
 		zip_discard(archive);
@@ -1198,7 +1305,7 @@ static GBytes* sond_file_part_zip_archive_to_bytes_with_src(zip_t* archive,
 
 	/* Source öffnen und Länge bestimmen */
 	if (zip_source_open(src) != 0) {
-		if (error) *error = g_error_new(SOND_ERROR, 0,
+		g_set_error(error, SOND_ERROR, 0,
 				"%s\nzip_source_open: %s", __func__,
 				zip_error_strerror(zip_source_error(src)));
 		return NULL;
@@ -1210,7 +1317,7 @@ static GBytes* sond_file_part_zip_archive_to_bytes_with_src(zip_t* archive,
 
 	if (len <= 0) {
 		zip_source_close(src);
-		if (error) *error = g_error_new(SOND_ERROR, 0,
+		g_set_error(error, SOND_ERROR, 0,
 				"%s\nzip_source hat 0 Bytes", __func__);
 		return NULL;
 	}
@@ -1221,7 +1328,7 @@ static GBytes* sond_file_part_zip_archive_to_bytes_with_src(zip_t* archive,
 
 	if (bytes_read != len) {
 		g_free(data);
-		if (error) *error = g_error_new(SOND_ERROR, 0,
+		g_set_error(error, SOND_ERROR, 0,
 				"%s\nzip_source_read: gelesen=%" G_GINT64_FORMAT
 				" erwartet=%" G_GINT64_FORMAT, __func__,
 				(gint64)bytes_read, (gint64)len);
@@ -1264,13 +1371,13 @@ static GBytes* sond_file_part_zip_mod_zip_file(SondFilePartZip* sfp_zip,
 		if (idx < 0) {
 			zip_source_free(src);
 			zip_discard(archive);
-			if (error) *error = g_error_new(SOND_ERROR, 0,
+			g_set_error(error, SOND_ERROR, 0,
 					"%s\nDatei '%s' nicht im ZIP-Archiv gefunden", __func__, path);
 			return NULL;
 		}
 
 		if (zip_delete(archive, idx) != 0) {
-			if (error) *error = g_error_new(SOND_ERROR, 0,
+			g_set_error(error, SOND_ERROR, 0,
 					"%s\nzip_delete('%s'): %s", __func__, path,
 					zip_error_strerror(zip_get_error(archive)));
 			zip_source_free(src);
@@ -1290,7 +1397,7 @@ static GBytes* sond_file_part_zip_mod_zip_file(SondFilePartZip* sfp_zip,
 		if (!entry_src) {
 			zip_source_free(src);
 			zip_discard(archive);
-			if (error) *error = g_error_new(SOND_ERROR, 0,
+			g_set_error(error, SOND_ERROR, 0,
 					"%s\nzip_source_buffer_create: %s", __func__,
 					zip_error_strerror(&zip_error));
 			zip_error_fini(&zip_error);
@@ -1304,7 +1411,7 @@ static GBytes* sond_file_part_zip_mod_zip_file(SondFilePartZip* sfp_zip,
 			if (zip_file_add(archive, path, entry_src, ZIP_FL_ENC_UTF_8) < 0) {
 				zip_source_free(entry_src);
 				zip_source_free(src);
-				if (error) *error = g_error_new(SOND_ERROR, 0,
+				g_set_error(error, SOND_ERROR, 0,
 						"%s\nzip_file_add('%s'): %s", __func__, path,
 						zip_error_strerror(zip_get_error(archive)));
 				zip_discard(archive);
@@ -1315,7 +1422,7 @@ static GBytes* sond_file_part_zip_mod_zip_file(SondFilePartZip* sfp_zip,
 			if (zip_file_replace(archive, (zip_uint64_t)idx, entry_src, ZIP_FL_ENC_UTF_8) != 0) {
 				zip_source_free(entry_src);
 				zip_source_free(src);
-				if (error) *error = g_error_new(SOND_ERROR, 0,
+				g_set_error(error, SOND_ERROR, 0,
 						"%s\nzip_file_replace('%s'): %s", __func__, path,
 						zip_error_strerror(zip_get_error(archive)));
 				zip_discard(archive);
@@ -1345,7 +1452,7 @@ static gint sond_file_part_zip_rename_file(SondFilePartZip* sfp_zip,
 	if (zip_name_locate(archive, path_new, 0) >= 0) {
 		zip_source_free(src);
 		zip_discard(archive);
-		if (error) *error = g_error_new(SOND_ERROR, 0,
+		g_set_error(error, SOND_ERROR, 0,
 				"%s\nDatei '%s' existiert bereits im ZIP-Archiv", __func__, path_new);
 		return -1;
 	}
@@ -1354,13 +1461,13 @@ static gint sond_file_part_zip_rename_file(SondFilePartZip* sfp_zip,
 	if (idx < 0) {
 		zip_source_free(src);
 		zip_discard(archive);
-		if (error) *error = g_error_new(SOND_ERROR, 0,
+		g_set_error(error, SOND_ERROR, 0,
 				"%s\nDatei '%s' nicht im ZIP-Archiv gefunden", __func__, path_old);
 		return -1;
 	}
 
 	if (zip_file_rename(archive, (zip_uint64_t)idx, path_new, ZIP_FL_ENC_UTF_8) != 0) {
-		if (error) *error = g_error_new(SOND_ERROR, 0,
+		g_set_error(error, SOND_ERROR, 0,
 				"%s\nzip_file_rename: %s", __func__,
 				zip_error_strerror(zip_get_error(archive)));
 		zip_source_free(src);
@@ -1397,7 +1504,7 @@ static gint sond_file_part_zip_insert_zip_file(SondFilePartZip* sfp_zip,
 	if (zip_name_locate(archive, filename, 0) >= 0) {
 		zip_source_free(arch_src);
 		zip_discard(archive);
-		if (error) *error = g_error_new(SOND_ERROR, SOND_ERROR_EXISTS,
+		g_set_error(error, SOND_ERROR, SOND_ERROR_EXISTS,
 				"%s\nDatei '%s' existiert bereits im ZIP-Archiv", __func__, filename);
 		return -1;
 	}
@@ -1410,7 +1517,7 @@ static gint sond_file_part_zip_insert_zip_file(SondFilePartZip* sfp_zip,
 	if (!entry_src) {
 		zip_source_free(arch_src);
 		zip_discard(archive);
-		if (error) *error = g_error_new(SOND_ERROR, 0,
+		g_set_error(error, SOND_ERROR, 0,
 				"%s\nzip_source_buffer_create: %s", __func__,
 				zip_error_strerror(&zip_error));
 		zip_error_fini(&zip_error);
@@ -1421,7 +1528,7 @@ static gint sond_file_part_zip_insert_zip_file(SondFilePartZip* sfp_zip,
 	if (zip_file_add(archive, filename, entry_src, ZIP_FL_ENC_UTF_8) < 0) {
 		zip_source_free(entry_src);
 		zip_source_free(arch_src);
-		if (error) *error = g_error_new(SOND_ERROR, 0,
+		g_set_error(error, SOND_ERROR, 0,
 				"%s\nzip_file_add('%s'): %s", __func__, filename,
 				zip_error_strerror(zip_get_error(archive)));
 		zip_discard(archive);
@@ -1474,7 +1581,7 @@ static gint sond_file_part_pdf_authen_doc(SondFilePartPDF* sfp_pdf, fz_context* 
 		fz_try(ctx)
 			res_auth = pdf_authenticate_password(ctx, doc, password_try);
 		fz_catch(ctx) {
-			if (error) *error = g_error_new(g_quark_from_static_string("mupdf"), fz_caught(ctx),
+			g_set_error(error, g_quark_from_static_string("mupdf"), fz_caught(ctx),
 					"%s\n%s", __func__, fz_caught_message(ctx));
 			g_free(password_try);
 
@@ -1511,7 +1618,12 @@ pdf_document* sond_file_part_pdf_open_document(fz_context* ctx,
 	gint rc = 0;
 	pdf_document* doc = NULL;
 	fz_stream* stream = NULL;
-	SondFilePart* sfp_parent = sond_file_part_get_parent(SOND_FILE_PART(sfp_pdf));
+	SondFilePart* sfp_parent = NULL;
+
+	g_return_val_if_fail(ctx, NULL);
+	g_return_val_if_fail(sfp_pdf, NULL);
+
+	sfp_parent = sond_file_part_get_parent(SOND_FILE_PART(sfp_pdf));
 	gchar const* path = sond_file_part_get_path(SOND_FILE_PART(sfp_pdf));
 
 	if (!sfp_parent && writeable) {
@@ -1544,7 +1656,7 @@ pdf_document* sond_file_part_pdf_open_document(fz_context* ctx,
 	fz_always(ctx)
 		fz_drop_stream(ctx, stream);
 	fz_catch(ctx) {
-		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
+		g_set_error(error, g_quark_from_static_string("mupdf"),
 				fz_caught(ctx),
 				"%s\nPDF-Dokument '%s' konnte nicht geöffnet werden:\n%s", __func__,
 				sond_file_part_get_path(SOND_FILE_PART(sfp_pdf)),
@@ -1558,7 +1670,7 @@ pdf_document* sond_file_part_pdf_open_document(fz_context* ctx,
 		if (rc == -1)
 			g_prefix_error(error, "%s\n", __func__);
 		else
-			if (error) *error = g_error_new(g_quark_from_static_string("sond"), 1,
+			g_set_error(error, g_quark_from_static_string("sond"), 1,
 					"%s\nEntschlüsselung gescheitert", __func__);
 		pdf_drop_document(ctx, doc);
 
@@ -1573,6 +1685,10 @@ gint sond_file_part_pdf_save_and_close(fz_context *ctx, pdf_document *pdf_doc,
 	gint rc = 0;
 	fz_buffer* buf = NULL;
 	GBytes* bytes = NULL;
+
+	g_return_val_if_fail(ctx, -1);
+	g_return_val_if_fail(pdf_doc, -1);
+	g_return_val_if_fail(sfp_pdf, -1);
 
 	buf = pdf_doc_to_buf(ctx, pdf_doc, error);
 	//pdf_doc wird von pdf_doc_to_buf() nur gelesen, nie übernommen - Drop
@@ -1625,9 +1741,12 @@ gint sond_file_part_pdf_load_embedded_files(SondFilePartPDF* sfp_pdf,
 	pdf_document* doc = NULL;
 	Load load = { 0 };
 
+	g_return_val_if_fail(sfp_pdf, -1);
+	g_return_val_if_fail(arr_children, -1);
+
 	ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
 	if (!ctx) {
-		if (error) *error = g_error_new(SOND_ERROR, 0,
+		g_set_error(error, SOND_ERROR, 0,
 				"%s\nfz_new_context gibt NULL zurück", __func__);
 		return -1;
 	}
@@ -1650,7 +1769,7 @@ gint sond_file_part_pdf_load_embedded_files(SondFilePartPDF* sfp_pdf,
 
 	if (load.arr_embedded_files->len == 0) { //darf ja nicht sein
 		g_ptr_array_unref(load.arr_embedded_files);
-		if (error) *error = g_error_new(g_quark_from_static_string("sond"),
+		g_set_error(error, g_quark_from_static_string("sond"),
 				0, "%s\nKein embedded file gefunden", __func__);
 
 		return -1;
@@ -1697,7 +1816,7 @@ static gint sond_file_part_pdf_test_for_embedded_files(
 
 	ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
 	if (!ctx) {
-		if (error) *error = g_error_new(SOND_ERROR, 0,
+		g_set_error(error, SOND_ERROR, 0,
 				"%s\nfz_new_context gibt NULL zurück", __func__);
 
 		return -1;
@@ -1754,10 +1873,9 @@ static gint lookup_embedded_file(fz_context* ctx, pdf_obj* names, pdf_obj* key,
 		fz_try(ctx)
 			stream = pdf_open_stream(ctx, EF_F);
 		fz_catch(ctx) {
-			if (error)
-				*error = g_error_new(g_quark_from_static_string("mupdf"),
-						fz_caught(ctx), "%s\n%s", __func__,
-						fz_caught_message(ctx));
+			g_set_error(error, g_quark_from_static_string("mupdf"),
+					fz_caught(ctx), "%s\n%s", __func__,
+					fz_caught_message(ctx));
 
 			return -1;
 		}
@@ -1787,7 +1905,7 @@ static fz_stream* sond_file_part_pdf_lookup_embedded_file(fz_context* ctx,
 		return NULL;
 
 	if (!lookup.stream) { //Datei nicht gefunden
-		if (error) *error = g_error_new(g_quark_from_static_string("sond"),
+		g_set_error(error, g_quark_from_static_string("sond"),
 				0, "%s\nembedded file '%s' nicht gefunden", __func__, path);
 
 		return NULL;
@@ -1821,7 +1939,7 @@ static gint delete_embedded_file(fz_context* ctx, pdf_obj*names, pdf_obj* key,
 			ERROR_PDF
 
 		if (index == -1) {
-			if (error) *error = g_error_new(SOND_ERROR, 0,
+			g_set_error(error, SOND_ERROR, 0,
 					"%s\nkey nicht gefunden", __func__);
 
 			return -1;
@@ -1857,7 +1975,7 @@ static gint modify_embedded_file(fz_context* ctx, pdf_obj* names, pdf_obj* key,
 
 		doc = pdf_pin_document(ctx, EF_F);
 		if (!doc) {
-			if (error) *error = g_error_new(g_quark_from_static_string("mupdf"),
+			g_set_error(error, g_quark_from_static_string("mupdf"),
 					fz_caught(ctx), "%s\n%s", __func__,
 					fz_caught_message(ctx));
 
@@ -1868,10 +1986,9 @@ static gint modify_embedded_file(fz_context* ctx, pdf_obj* names, pdf_obj* key,
 		fz_always(ctx)
 			pdf_drop_document(ctx, doc);
 		fz_catch(ctx) {
-			if (error)
-				*error = g_error_new(g_quark_from_static_string("mupdf"),
-						fz_caught(ctx), "%s\n%s", __func__,
-						fz_caught_message(ctx));
+			g_set_error(error, g_quark_from_static_string("mupdf"),
+					fz_caught(ctx), "%s\n%s", __func__,
+					fz_caught_message(ctx));
 
 			return -1;
 		}
@@ -1905,7 +2022,7 @@ static fz_buffer* sond_file_part_pdf_mod_emb_file(SondFilePartPDF* sfp_pdf,
 
 	if (!modify.found) {
 		pdf_drop_document(ctx, doc);
-		if (error) *error = g_error_new(g_quark_from_static_string("sond"),
+		g_set_error(error, g_quark_from_static_string("sond"),
 				0, "%s\nembedded file '%s' nicht gefunden", __func__, path);
 
 		return NULL;
@@ -1952,9 +2069,8 @@ static gint rename_embedded_file(fz_context* ctx, pdf_obj* names, pdf_obj* key,
 	Rename* rename = (Rename*) data;
 
 	if (!pdf_is_dict(ctx, val)) {
-		if (error)
-			*error = g_error_new(g_quark_from_static_string("sond"),
-					0, "%s\nnamestree malformed", __func__);
+		g_set_error(error, g_quark_from_static_string("sond"),
+				0, "%s\nnamestree malformed", __func__);
 		return -1;
 	}
 
@@ -1968,18 +2084,16 @@ static gint rename_embedded_file(fz_context* ctx, pdf_obj* names, pdf_obj* key,
 			path_tmp = pdf_to_text_string(ctx, F);
 	}
 	fz_catch(ctx) {
-		if (error)
-			*error = g_error_new(g_quark_from_static_string("mupdf"),
-					fz_caught(ctx), "%s\n%s", __func__,
-					fz_caught_message(ctx));
+		g_set_error(error, g_quark_from_static_string("mupdf"),
+				fz_caught(ctx), "%s\n%s", __func__,
+				fz_caught_message(ctx));
 
 		return -1;
 	}
 
 	if (!path_tmp) {
-		if (error)
-			*error = g_error_new(SOND_ERROR, 0, "%s\nEingebettete Datei hat keinen Pfad",
-					__func__);
+		g_set_error(error, SOND_ERROR, 0, "%s\nEingebettete Datei hat keinen Pfad",
+				__func__);
 		return -1;
 	}
 
@@ -1991,10 +2105,9 @@ static gint rename_embedded_file(fz_context* ctx, pdf_obj* names, pdf_obj* key,
 		pdf_dict_put_text_string(ctx, val, PDF_NAME(UF), rename->path_new);
 	}
 	fz_catch(ctx) {
-		if (error)
-			*error = g_error_new(g_quark_from_static_string("mupdf"),
-					fz_caught(ctx), "%s\n%s", __func__,
-					fz_caught_message(ctx));
+		g_set_error(error, g_quark_from_static_string("mupdf"),
+				fz_caught(ctx), "%s\n%s", __func__,
+				fz_caught_message(ctx));
 
 		return -1;
 	}
@@ -2011,7 +2124,7 @@ static gint sond_file_part_pdf_rename_embedded_file(SondFilePartPDF* sfp_pdf,
 
 	ctx = fz_new_context(NULL, NULL, FZ_STORE_UNLIMITED);
 	if (!ctx) {
-		if (error) *error = g_error_new(g_quark_from_static_string("mupdf"), 0,
+		g_set_error(error, g_quark_from_static_string("mupdf"), 0,
 				"%s\nfz_new_context gibt NULL zurück", __func__);
 		return -1;
 	}
@@ -2035,7 +2148,7 @@ static gint sond_file_part_pdf_rename_embedded_file(SondFilePartPDF* sfp_pdf,
 	if (rename.found) { //Ziel-Datei existiert schon!
 		pdf_drop_document(ctx, doc);
 		fz_drop_context(ctx);
-		if (error) *error = g_error_new(g_quark_from_static_string("sond"),
+		g_set_error(error, g_quark_from_static_string("sond"),
 				0, "%s\nDatei '%s' existiert bereits als embedded file",
 				__func__, rename.path_new);
 
@@ -2144,21 +2257,21 @@ static gint sond_file_part_gmessage_open(SondFilePartGMessage* sfp_gmessage,
 		GMimeStream* gmime_stream = g_mime_stream_file_new(f);
 		if (!gmime_stream) {
 			fclose(f);
-			if (error) *error = g_error_new(SOND_ERROR, 0,
+			g_set_error(error, SOND_ERROR, 0,
 					"%s\ng_mime_stream_file_new fehlgeschlagen", __func__);
 			return -1;
 		}
 		GMimeParser* parser = g_mime_parser_new_with_stream(gmime_stream);
 		g_object_unref(gmime_stream);
 		if (!parser) {
-			if (error) *error = g_error_new(SOND_ERROR, 0,
+			g_set_error(error, SOND_ERROR, 0,
 					"%s\ng_mime_parser_new_with_stream fehlgeschlagen", __func__);
 			return -1;
 		}
 		sfp_gmessage_priv->message = g_mime_parser_construct_message(parser, NULL);
 		g_object_unref(parser);
 		if (!sfp_gmessage_priv->message) {
-			if (error) *error = g_error_new(SOND_ERROR, 0,
+			g_set_error(error, SOND_ERROR, 0,
 					"%s\ng_mime_parser_construct_message fehlgeschlagen", __func__);
 			return -1;
 		}
@@ -2230,6 +2343,10 @@ gint sond_file_part_gmessage_load_path(SondFilePartGMessage* sfp_gmessage,
 		gchar const* path, GPtrArray** arr_mime_parts, GError** error) {
 	GMimeObject* object = NULL;
 
+	g_return_val_if_fail(sfp_gmessage, -1);
+	g_return_val_if_fail(path, -1);
+	g_return_val_if_fail(arr_mime_parts, -1);
+
 	object = sond_file_part_gmessage_lookup_part_by_path(
 				sfp_gmessage, path, error);
 	if (!object)
@@ -2255,10 +2372,9 @@ gint sond_file_part_gmessage_load_path(SondFilePartGMessage* sfp_gmessage,
 	else {
 		g_ptr_array_unref(*arr_mime_parts);
 		g_object_unref(object);
-		if (error)
-			*error = g_error_new(SOND_ERROR, 0,
-					"%s\nPart mit Pfad '%s' ist kein Multipart",
-					__func__, path);
+		g_set_error(error, SOND_ERROR, 0,
+				"%s\nPart mit Pfad '%s' ist kein Multipart",
+				__func__, path);
 		return -1;
 	}
 
@@ -2400,15 +2516,21 @@ static void sond_file_part_leaf_init(SondFilePartLeaf* self) {
 }
 
 gchar const* sond_file_part_leaf_get_mime_type(SondFilePartLeaf *sfp_leaf) {
-	SondFilePartLeafPrivate *sfp_leaf_priv =
-			sond_file_part_leaf_get_instance_private(sfp_leaf);
+	SondFilePartLeafPrivate *sfp_leaf_priv = NULL;
+
+	g_return_val_if_fail(sfp_leaf, NULL);
+
+	sfp_leaf_priv = sond_file_part_leaf_get_instance_private(sfp_leaf);
 
 	return sfp_leaf_priv->mime_type;
 }
 
 void sond_file_part_leaf_set_mime_type(SondFilePartLeaf* sfp_leaf, gchar const* mime_type) {
-	SondFilePartLeafPrivate* sfp_leaf_priv =
-			sond_file_part_leaf_get_instance_private(sfp_leaf);
+	SondFilePartLeafPrivate* sfp_leaf_priv = NULL;
+
+	g_return_if_fail(sfp_leaf);
+
+	sfp_leaf_priv = sond_file_part_leaf_get_instance_private(sfp_leaf);
 
 	g_free(sfp_leaf_priv->mime_type);
 	sfp_leaf_priv->mime_type = g_strdup(mime_type);
