@@ -45,25 +45,61 @@ GdkPixbuf* sond_icon_util_status_badge_pixbuf(SondIndexStatus status, gint size)
  * gezeichnet (wie SondIndexStatus) statt über Icon-Theme-Namen
  * ("view-refresh", "process-stop", "emblem-default") oder feinere Formen
  * wie Haken/Ring - beides war bei den winzigen Overlay-Größen kaum
- * unterscheidbar/erkennbar. Nur zwei Zustände bekommen ein Icon, der Rest
- * (lokal vorhanden, weder gepinnt noch offline - der Normalfall) bleibt
- * bewusst ohne Icon, um nicht unnötig visuelles Rauschen zu erzeugen:
- * Violett = nicht lokal (wird bei Zugriff heruntergeladen), Grün = dauerhaft
- * gehalten (gepinnt).
+ * unterscheidbar/erkennbar. Der Normalfall (lokal vorhanden, nicht
+ * gepinnt) bleibt bewusst ohne Icon, um nicht unnötig visuelles Rauschen
+ * zu erzeugen: Violett = nicht lokal und (aktuell) auch nicht angefordert,
+ * Orange = gepinnt, aber noch nicht heruntergeladen ("wird geladen, sobald
+ * online"), Grün = lokal vorhanden UND dauerhaft gehalten (gepinnt).
  *
- * Wichtig: OFFLINE hat Vorrang vor PINNED, weil "nicht lokal vorhanden"
- * (FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) die für den Nutzer entscheidende
- * Tatsache ist - eine zusätzliche "unpinned"-Markierung sagt nichts darüber
- * aus, ob die Datei GERADE lokal vorhanden ist (das ist nur eine Absicht/
- * Markierung, keine Zustandsgarantie). "unpinned, aber noch lokal
- * vorhanden" fällt bewusst in NONE - wie der unmarkierte Normalzustand. */
+ * Prioritätsreihenfolge (s. sond_treeviewfm_render_file_icon()):
+ * 1. gepinnt UND nicht hydriert -> PENDING (Orange) - explizit angefordert,
+ *    Download folgt.
+ * 2. nicht hydriert, nicht gepinnt -> OFFLINE (Violett) - einfach nicht
+ *    lokal, keine Anforderung.
+ * 3. hydriert UND gepinnt -> PINNED (Grün).
+ * 4. sonst (hydriert, nicht gepinnt) -> NONE - der unmarkierte
+ *    Normalzustand, keine Garantie, aber auch keine Aktion nötig.
+ * (Untersuchung/Redesign "SeaDrive-Badges Datei+Ordner", 09/2026) */
 typedef enum {
 	SOND_SEADRIVE_BADGE_NONE = 0,
-	SOND_SEADRIVE_BADGE_OFFLINE, /* nicht lokal - wird bei Zugriff heruntergeladen */
-	SOND_SEADRIVE_BADGE_PINNED   /* lokal vorhanden UND dauerhaft gehalten */
+	SOND_SEADRIVE_BADGE_OFFLINE,  /* nicht lokal, nicht angefordert */
+	SOND_SEADRIVE_BADGE_PENDING,  /* gepinnt, noch nicht heruntergeladen */
+	SOND_SEADRIVE_BADGE_PINNED    /* lokal vorhanden UND dauerhaft gehalten */
 } SondSeadriveBadge;
 
 GdkPixbuf* sond_icon_util_seadrive_badge_pixbuf(SondSeadriveBadge badge, gint size);
+
+/* Rekursiver SeaDrive-Hydrierungsstatus für einen ganzen Verzeichnis-
+ * Teilbaum (analog SondIndexStatus, aber für den Cloud-Status statt für
+ * Indizierung) - s. sond_treeviewfm_seadrive_get_dir_status(). Ersetzt für
+ * Verzeichnis-Einträge das simple Attribut-Badge (das nur den Ordner
+ * selbst betrifft, was bei SeaDrive praktisch nie gesetzt ist) durch eine
+ * Aussage über den gesamten Teilbaum. Bewusst dieselbe Grün/Violett/kein-
+ * Badge-Bedeutung wie beim Datei-Badge (SondSeadriveBadge), damit der
+ * Nutzer nicht zwei verschiedene Farbschemata lernen muss - Grau ist der
+ * einzige zusätzliche, ordner-spezifische Zustand (kann bei einer
+ * einzelnen Datei nicht auftreten):
+ * - NONE: Teilbaum leer/nicht gescannt, ODER alle Dateien hydriert, aber
+ *   nicht alle gepinnt (= dieselbe Bedeutung wie beim Datei-Badge: kein
+ *   Grund für ein Icon).
+ * - FULL_OFFLINE (Violett): alle Dateien im Teilbaum nicht hydriert.
+ * - FULL_HYDRATED_PINNED (Grün): alle Dateien hydriert UND alle gepinnt.
+ * - MIXED (Grau): weder komplett hydriert noch komplett offline -
+ *   uneinheitlicher Teilbaum, hat also KEINEN gemeinsamen Nenner mit
+ *   einer der anderen drei Bedeutungen.
+ * (Redesign "SeaDrive-Badges Datei+Ordner", 09/2026 - vorherige Version
+ * hatte PARTIAL/FULL_OFFLINE basierend auf "gepinnt+pending", nicht auf
+ * tatsächlicher Hydrierung - das ließ Ordner ohne jedes Pin fälschlich
+ * badge-los erscheinen, obwohl ihre Dateien einzeln als offline
+ * angezeigt wurden.) */
+typedef enum {
+	SOND_SEADRIVE_DIR_STATUS_NONE = 0,
+	SOND_SEADRIVE_DIR_STATUS_FULL_OFFLINE,
+	SOND_SEADRIVE_DIR_STATUS_FULL_HYDRATED_PINNED,
+	SOND_SEADRIVE_DIR_STATUS_MIXED
+} SondSeadriveDirStatus;
+
+GdkPixbuf* sond_icon_util_seadrive_dir_badge_pixbuf(SondSeadriveDirStatus status, gint size);
 
 /* Ecke, in der ein Overlay-Icon auf dem Basis-Icon plaziert wird
  * (gdk_pixbuf_composite). Aktuell nur die beiden unteren Ecken gebraucht

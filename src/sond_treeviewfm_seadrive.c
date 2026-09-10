@@ -131,7 +131,33 @@ typedef struct {
 
 typedef struct {
     SondTreeviewFM *stvfm;
-    gint            delta_down;  /* +1 oder -1, 0 = keine Änderung */
+    gchar          *path_pending_down; /* Pfad, auf den sich delta_down bezieht
+                                         * (immer gesetzt, außer bei einer
+                                         * Dehydration ohne Zähler-Änderung -
+                                         * dann bleibt delta_down einfach 0
+                                         * und update_status ignoriert ihn).
+                                         * Wird - da ohnehin immer gesetzt -
+                                         * auch als Pfad für die Ordner-
+                                         * Coverage-Aktualisierung
+                                         * wiederverwendet (s. coverage_*
+                                         * unten). */
+    gint            delta_down;  /* +1 oder -1, 0 = keine Änderung - NUR für
+                                   * den Projekt-weiten "wird gerade
+                                   * heruntergeladen"-Zähler
+                                   * (seadrive_pending_down), s.
+                                   * sond_treeviewfm_seadrive_update_status(). */
+    gint            delta_total; /* +1 (ADDED/RENAMED_NEW_NAME) / -1 (REMOVED/
+                                   * RENAMED_OLD_NAME) / 0 (MODIFIED - Datei
+                                   * existierte schon) - für den Ordner-
+                                   * Coverage-Badge (Gesamtzahl Dateien im
+                                   * Teilbaum). */
+    gboolean        coverage_not_hydrated;    /* aktueller Hydrierungsstatus
+                                                * der Datei für den Ordner-
+                                                * Coverage-Badge (FALSE bei
+                                                * REMOVED - Datei zählt dann
+                                                * gar nicht mehr mit, s.
+                                                * delta_total). */
+    gboolean        coverage_hydrated_pinned; /* dito für "hydriert+gepinnt" */
     gchar          *path_down;       /* Pfad der hydrierten Datei, NULL sonst */
     gchar          *path_dehydrated; /* Pfad der dehydrierten Datei, NULL sonst */
     gchar          *path_up;     /* NULL oder Pfad für pending_up-Änderung */
@@ -143,8 +169,16 @@ static gboolean watcher_idle_cb(gpointer user_data)
     WatcherIdleData *d = user_data;
 
     sond_treeviewfm_seadrive_update_status(d->stvfm,
-            d->delta_down,
+            d->path_pending_down, d->delta_down,
             d->path_up, d->up_pending);
+
+    /* Ordner-Coverage-Badge unabhängig von obigem pending_down-Zähler
+     * nachziehen (andere Fragestellung, s. SondSeadriveDirCounts) -
+     * path_pending_down ist in beiden Aufrufstellen unten immer gesetzt. */
+    if (d->path_pending_down)
+        sond_treeviewfm_seadrive_update_coverage(d->stvfm,
+                d->path_pending_down, d->coverage_not_hydrated,
+                d->coverage_hydrated_pinned, d->delta_total);
 
     /* Wenn Datei hydrated: Knoten im Baum korrigieren */
     if (d->path_down)
@@ -154,6 +188,7 @@ static gboolean watcher_idle_cb(gpointer user_data)
     if (d->path_dehydrated)
         sond_treeviewfm_seadrive_item_dehydrated(d->stvfm, d->path_dehydrated);
 
+    g_free(d->path_pending_down);
     g_free(d->path_down);
     g_free(d->path_dehydrated);
     g_free(d->path_up);
@@ -165,22 +200,49 @@ static gboolean watcher_idle_cb(gpointer user_data)
 /*  Watcher: Initialscan pending_down                                  */
 /* ------------------------------------------------------------------ */
 
-static guint watcher_count_pending_down(const gchar *dir_utf8,
-        SondTreeviewFM *stvfm)
+/* Trägt die vollen Pfade aller PINNED+offline Dateien unter dir_utf8
+ * (rekursiv) in out_paths ein (Set, Keys = g_strdup'te Pfade - für den
+ * Projekt-weiten "wird gerade heruntergeladen"-Zähler, seadrive_pending_
+ * down), analog alle nicht hydrierten Dateien in out_not_hydrated_paths
+ * und alle hydriert+gepinnten in out_hydrated_pinned_paths (Ground-Truth-
+ * Sets für den Ordner-Coverage-Badge, s. sond_treeviewfm_seadrive_update_
+ * coverage()) UND für JEDES durchlaufene Verzeichnis dessen rekursive
+ * {not_hydrated,hydrated_pinned,total}-Statistik in out_dir_counts (Pfad ->
+ * SondSeadriveDirCounts*). Wird sowohl für den Initialscan als auch für
+ * einen Resync nach Buffer-Overflow verwendet (s. WatcherRescanData) -
+ * beide Fälle brauchen die kompletten Pfad-Sets/die komplette Ordner-
+ * Statistik, nicht nur eine Anzahl, damit spätere Einzel-Events (Add/
+ * Remove/Hydration) korrekt gegen ein Set/eine Statistik abgeglichen statt
+ * blind auf einen Zähler angewandt werden können.
+ *
+ * out_not_hydrated/out_hydrated_pinned/out_total (können NULL sein):
+ * liefern die für dir_utf8 selbst ermittelte rekursive Summe an den
+ * Aufrufer zurück, damit dieser (bei einem Verzeichnis-Kind) seine eigene
+ * Summe hochrechnen kann, ohne aus out_dir_counts nachschlagen zu
+ * müssen. */
+static void watcher_count_pending_down(const gchar *dir_utf8,
+        SondTreeviewFM *stvfm, GHashTable *out_paths,
+        GHashTable *out_not_hydrated_paths, GHashTable *out_hydrated_pinned_paths,
+        GHashTable *out_dir_counts, guint *out_not_hydrated,
+        guint *out_hydrated_pinned, guint *out_total)
 {
-    guint count = 0;
+    guint dir_not_hydrated = 0;
+    guint dir_hydrated_pinned = 0;
+    guint dir_total = 0;
+
     gchar *pattern = g_strconcat(dir_utf8, "/*", NULL);
     wchar_t *lp = prepare_long_path(pattern, NULL);
     g_free(pattern);
     if (!lp)
-        return 0;
+        goto done;
 
+    {
     WIN32_FIND_DATAW fd;
     HANDLE h = FindFirstFileW(lp, &fd);
     g_free(lp);
 
     if (h == INVALID_HANDLE_VALUE)
-        return 0;
+        goto done;
 
     do {
         if (sond_treeviewfm_seadrive_stop_requested(stvfm))
@@ -195,42 +257,110 @@ static guint watcher_count_pending_down(const gchar *dir_utf8,
         if (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
             continue;
 
+        gchar *name = g_utf16_to_utf8(
+                (gunichar2*) fd.cFileName, -1, NULL, NULL, NULL);
+        if (!name)
+            continue;
+        gchar *sub = g_strconcat(dir_utf8, "/", name, NULL);
+        g_free(name);
+
         if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-            gchar *name = g_utf16_to_utf8(
-                    (gunichar2*) fd.cFileName, -1, NULL, NULL, NULL);
-            if (name) {
-                gchar *sub = g_strconcat(dir_utf8, "/", name, NULL);
-                g_free(name);
-                count += watcher_count_pending_down(sub, stvfm);
-                g_free(sub);
-            }
+            guint sub_not_hydrated = 0, sub_hydrated_pinned = 0, sub_total = 0;
+            watcher_count_pending_down(sub, stvfm, out_paths,
+                    out_not_hydrated_paths, out_hydrated_pinned_paths,
+                    out_dir_counts, &sub_not_hydrated, &sub_hydrated_pinned,
+                    &sub_total);
+            dir_not_hydrated += sub_not_hydrated;
+            dir_hydrated_pinned += sub_hydrated_pinned;
+            dir_total += sub_total;
+            g_free(sub);
         } else {
-            if ((fd.dwFileAttributes & FILE_ATTRIBUTE_PINNED) &&
-                    (fd.dwFileAttributes & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS))
-                count++;
+            gboolean pinned  = (fd.dwFileAttributes & FILE_ATTRIBUTE_PINNED) != 0;
+            gboolean offline = (fd.dwFileAttributes & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) != 0;
+
+            dir_total++;
+            if (offline) {
+                dir_not_hydrated++;
+                g_hash_table_add(out_not_hydrated_paths, g_strdup(sub));
+                /* Projekt-weiter "wird gerade heruntergeladen"-Zähler
+                 * (seadrive_pending_down) bleibt bei der engeren
+                 * PINNED+offline-Definition - andere Fragestellung als
+                 * die Ordner-Coverage-Statistik oben. */
+                if (pinned)
+                    g_hash_table_add(out_paths, g_strdup(sub));
+            } else if (pinned) {
+                dir_hydrated_pinned++;
+                g_hash_table_add(out_hydrated_pinned_paths, g_strdup(sub));
+            }
+            g_free(sub);
         }
     } while (FindNextFileW(h, &fd));
 
     FindClose(h);
-    return count;
+    }
+
+done:
+    if (out_dir_counts) {
+        SondSeadriveDirCounts *counts = g_new(SondSeadriveDirCounts, 1);
+        counts->not_hydrated = dir_not_hydrated;
+        counts->hydrated_pinned = dir_hydrated_pinned;
+        counts->total = dir_total;
+        g_hash_table_insert(out_dir_counts, g_strdup(dir_utf8), counts);
+    }
+    if (out_not_hydrated) *out_not_hydrated = dir_not_hydrated;
+    if (out_hydrated_pinned) *out_hydrated_pinned = dir_hydrated_pinned;
+    if (out_total) *out_total = dir_total;
+    return;
 }
 
 typedef struct {
     SondTreeviewFM *stvfm;
-    guint           count;
-} WatcherInitData;
+    GHashTable     *paths;               /* transfer full - s. sond_treeviewfm_seadrive_set_pending_down_paths() */
+    GHashTable     *not_hydrated_paths;   /* transfer full - s. sond_treeviewfm_seadrive_set_not_hydrated_paths() */
+    GHashTable     *hydrated_pinned_paths;/* transfer full - s. sond_treeviewfm_seadrive_set_hydrated_pinned_paths() */
+    GHashTable     *dir_counts; /* transfer full - s. sond_treeviewfm_seadrive_set_dir_counts() */
+} WatcherRescanData;
 
-static gboolean watcher_init_idle_cb(gpointer user_data)
+static gboolean watcher_rescan_idle_cb(gpointer user_data)
 {
-    WatcherInitData *d = user_data;
-    /* Zähler absolut setzen via update mit delta = count.
-     * Da pending_down zu diesem Zeitpunkt noch 0 ist (nur der
-     * Watcher-Thread hat ihn noch nicht verändert), ist
-     * delta = count korrekt. Watcher-Events die während des
-     * Scans gepuffert wurden, kommen danach und korrigieren. */
-    sond_treeviewfm_seadrive_set_pending_down(d->stvfm, d->count);
+    WatcherRescanData *d = user_data;
+    /* Ersetzt die kompletten Ground-Truth-Sets/die Ordner-Statistik. Beim
+     * allerersten Aufruf (Initialscan) sind sie noch leer; bei einem
+     * späteren Resync (Buffer-Overflow) wird der alte, ggf. inzwischen
+     * falsche Stand komplett verworfen - Watcher-Events, die während des
+     * Scans gepuffert wurden, kommen danach und korrigieren ggf. noch
+     * einmal nach. */
+    sond_treeviewfm_seadrive_set_pending_down_paths(d->stvfm, d->paths);
+    sond_treeviewfm_seadrive_set_not_hydrated_paths(d->stvfm, d->not_hydrated_paths);
+    sond_treeviewfm_seadrive_set_hydrated_pinned_paths(d->stvfm, d->hydrated_pinned_paths);
+    sond_treeviewfm_seadrive_set_dir_counts(d->stvfm, d->dir_counts);
     g_free(d);
     return G_SOURCE_REMOVE;
+}
+
+/* Stößt einen kompletten Rescan von root an und ersetzt anschließend (per
+ * g_idle_add, UI-Thread) die kompletten Ground-Truth-Sets und die Ordner-
+ * Statistik. Gemeinsam von Initialscan und Buffer-Overflow-Resync genutzt. */
+static void watcher_rescan(SondTreeviewFM *stvfm, const gchar *root)
+{
+    GHashTable *paths = g_hash_table_new_full(
+            g_str_hash, g_str_equal, g_free, NULL);
+    GHashTable *not_hydrated_paths = g_hash_table_new_full(
+            g_str_hash, g_str_equal, g_free, NULL);
+    GHashTable *hydrated_pinned_paths = g_hash_table_new_full(
+            g_str_hash, g_str_equal, g_free, NULL);
+    GHashTable *dir_counts = g_hash_table_new_full(
+            g_str_hash, g_str_equal, g_free, g_free);
+    watcher_count_pending_down(root, stvfm, paths, not_hydrated_paths,
+            hydrated_pinned_paths, dir_counts, NULL, NULL, NULL);
+
+    WatcherRescanData *d = g_new0(WatcherRescanData, 1);
+    d->dir_counts = dir_counts;
+    d->stvfm = stvfm;
+    d->paths = paths;
+    d->not_hydrated_paths = not_hydrated_paths;
+    d->hydrated_pinned_paths = hydrated_pinned_paths;
+    g_idle_add(watcher_rescan_idle_cb, d);
 }
 
 /* ------------------------------------------------------------------ */
@@ -322,9 +452,15 @@ gpointer sond_treeviewfm_seadrive_watcher_thread(gpointer user_data)
     DWORD bytes_returned = 0;
 
     /* Ersten ReadDirectoryChangesW-Aufruf starten - VOR dem Scan,
-     * damit während des Scans entstehende Events nicht verloren gehen */
+     * damit während des Scans entstehende Events nicht verloren gehen.
+     * FILE_NOTIFY_CHANGE_FILE_NAME zusätzlich zu ATTRIBUTES/LAST_WRITE:
+     * ohne diesen Filter werden neu angelegte oder gelöschte Dateien vom
+     * Watcher gar nicht bemerkt - der pending_down/pending_up-Zähler lief
+     * dadurch mit der Zeit auseinander (Untersuchung SeaDrive-Coverage,
+     * 09/2026). */
     if (!ReadDirectoryChangesW(hDir, buf, sizeof(buf), TRUE,
-            FILE_NOTIFY_CHANGE_ATTRIBUTES | FILE_NOTIFY_CHANGE_LAST_WRITE,
+            FILE_NOTIFY_CHANGE_ATTRIBUTES | FILE_NOTIFY_CHANGE_LAST_WRITE |
+                    FILE_NOTIFY_CHANGE_FILE_NAME,
             NULL, &ov, NULL)) {
         LOG_WARN("SeaDrive-Watcher: ReadDirectoryChangesW('%s') fehlgeschlagen "
                 "(Fehler %lu) - Watcher wird nicht gestartet",
@@ -335,17 +471,11 @@ gpointer sond_treeviewfm_seadrive_watcher_thread(gpointer user_data)
         return NULL;
     }
 
-    /* Initialscan: zählt bereits vorhandene PINNED+offline Dateien.
+    /* Initialscan: ermittelt bereits vorhandene PINNED+offline Dateien.
      * ReadDirectoryChangesW läuft bereits - Events während des Scans
      * werden gepuffert und danach verarbeitet (selbstkorrigierend). */
-    if (!sond_treeviewfm_seadrive_stop_requested(stvfm)) {
-        guint initial = watcher_count_pending_down(root, stvfm);
-
-        WatcherInitData *d = g_new0(WatcherInitData, 1);
-        d->stvfm = stvfm;
-        d->count = initial;
-        g_idle_add(watcher_init_idle_cb, d);
-    }
+    if (!sond_treeviewfm_seadrive_stop_requested(stvfm))
+        watcher_rescan(stvfm, root);
 
     while (!sond_treeviewfm_seadrive_stop_requested(stvfm)) {
 
@@ -354,8 +484,20 @@ gpointer sond_treeviewfm_seadrive_watcher_thread(gpointer user_data)
 
         if (wait == WAIT_OBJECT_0) {
             /* Ereignisse verarbeiten */
-            if (GetOverlappedResult(hDir, &ov, &bytes_returned, FALSE)
-                    && bytes_returned > 0) {
+            if (GetOverlappedResult(hDir, &ov, &bytes_returned, FALSE)) {
+              if (bytes_returned == 0) {
+                /* Buffer-Overflow: ReadDirectoryChangesW meldet Erfolg, aber
+                 * 0 Bytes - der interne Puffer ist übergelaufen, ALLE
+                 * Ereignisse seit dem letzten erfolgreichen Read sind
+                 * verloren (nicht nur die im Puffer nicht mehr unter-
+                 * gebrachten). Einzige sichere Reaktion: kompletter Resync
+                 * (jetzt unproblematisch, s. Untersuchung SeaDrive-Coverage
+                 * 09/2026 - ~1,5s auch bei ~70.000 Dateien). */
+                LOG_WARN("SeaDrive-Watcher('%s'): ReadDirectoryChangesW-Puffer "
+                        "übergelaufen - Events verloren, erzwinge Resync",
+                        root);
+                watcher_rescan(stvfm, root);
+              } else {
 
                 FILE_NOTIFY_INFORMATION *fni =
                         (FILE_NOTIFY_INFORMATION*) buf;
@@ -382,52 +524,99 @@ gpointer sond_treeviewfm_seadrive_watcher_thread(gpointer user_data)
                         gchar *full = g_strconcat(root, "/", filename, NULL);
                         g_free(filename);
 
-                        wchar_t *lp = prepare_long_path(full, NULL);
-                        if (lp) {
-                            DWORD attrs = GetFileAttributesW(lp);
-                            g_free(lp);
+                        if (fni->Action == FILE_ACTION_REMOVED ||
+                                fni->Action == FILE_ACTION_RENAMED_OLD_NAME) {
+                            /* Datei/Verzeichnis ist weg - Attribute nicht
+                             * mehr abfragbar. Pfad bedingungslos aus beiden
+                             * Tracking-Sets entfernen (No-Op, falls nicht
+                             * enthalten - z.B. weil es ein Verzeichnis war
+                             * oder die Datei nie PINNED+offline bzw. NOT_IN_
+                             * SYNC war). Ohne das würden gelöschte Dateien,
+                             * die gerade noch heruntergeladen wurden, ewig
+                             * mitgezählt (Untersuchung SeaDrive-Coverage,
+                             * 09/2026). delta_total=-1 zieht die Datei aus
+                             * der Ordner-Coverage-Gesamtzahl ab (auch ein
+                             * No-Op über die 0-Kappung, falls es ein
+                             * Verzeichnis war - dessen eigener Eintrag in
+                             * seadrive_dir_counts bleibt dann zwar stehen,
+                             * wird aber beim nächsten Rescan bereinigt). */
+                            WatcherIdleData *d = g_new0(WatcherIdleData, 1);
+                            d->stvfm = stvfm;
+                            d->path_pending_down = g_strdup(full);
+                            d->delta_down = -1;
+                            d->delta_total = -1;
+                            d->path_up = g_strdup(full);
+                            d->up_pending = FALSE;
 
-                            if (attrs != INVALID_FILE_ATTRIBUTES &&
-                                    !(attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+                            g_idle_add(watcher_idle_cb, d);
+                        } else {
+                            /* ADDED, RENAMED_NEW_NAME, MODIFIED (Attribute/
+                             * Last-Write) - Datei existiert (noch), aktuelle
+                             * Attribute abfragen. */
+                            wchar_t *lp = prepare_long_path(full, NULL);
+                            if (lp) {
+                                DWORD attrs = GetFileAttributesW(lp);
+                                g_free(lp);
 
-                                WatcherIdleData *d = g_new0(WatcherIdleData, 1);
-                                d->stvfm = stvfm;
+                                if (attrs != INVALID_FILE_ATTRIBUTES &&
+                                        !(attrs & FILE_ATTRIBUTE_DIRECTORY)) {
 
-                                /* ATTRIBUTES: pending_down aktualisieren */
-                                {
-                                    gboolean pinned   = (attrs & FILE_ATTRIBUTE_PINNED) != 0;
-                                    gboolean offline  = (attrs & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) != 0;
-                                    gboolean unpinned = (attrs & FILE_ATTRIBUTE_UNPINNED) != 0;
+                                    WatcherIdleData *d = g_new0(WatcherIdleData, 1);
+                                    d->stvfm = stvfm;
+                                    d->path_pending_down = g_strdup(full);
+                                    /* Nur bei echter Neuanlage zählt die Datei
+                                     * zusätzlich zur Ordner-Gesamtzahl - bei
+                                     * MODIFIED existierte sie schon. */
+                                    if (fni->Action == FILE_ACTION_ADDED ||
+                                            fni->Action == FILE_ACTION_RENAMED_NEW_NAME)
+                                        d->delta_total = +1;
 
-                                    if (pinned && offline)
-                                        d->delta_down = +1; /* gepinnt, noch nicht lokal */
-                                    else if (pinned && !offline) {
-                                        d->delta_down = -1; /* hydrated via pin */
-                                        d->path_down  = g_strdup(full);
-                                    } else if (unpinned && offline) {
-                                        /* Datei dehydriert - war nicht mehr PINNED+offline,
-                                         * also nicht im Zähler - delta_down nicht setzen */
-                                        d->path_dehydrated = g_strdup(full);
-                                    } else if (!pinned && offline)
-                                        d->delta_down = -1; /* unpinned während laufendem Download */
-                                    else if (!unpinned) {
-                                        /* !pinned && !offline && !unpinned:
-                                         * Hydration via Doppelklick-Recall -
-                                         * Knoten im Baum korrigieren */
-                                        d->path_down = g_strdup(full);
+                                    /* pending_down aktualisieren */
+                                    {
+                                        gboolean pinned   = (attrs & FILE_ATTRIBUTE_PINNED) != 0;
+                                        gboolean offline  = (attrs & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) != 0;
+                                        gboolean unpinned = (attrs & FILE_ATTRIBUTE_UNPINNED) != 0;
+
+                                        /* Ordner-Coverage-Badge: dieselbe
+                                         * Definition wie im Scan
+                                         * (watcher_count_pending_down()) -
+                                         * "nicht hydriert" unabhängig vom
+                                         * Pin, "hydriert+gepinnt" nur wenn
+                                         * beides zutrifft. */
+                                        d->coverage_not_hydrated = offline;
+                                        d->coverage_hydrated_pinned =
+                                                (!offline && pinned);
+
+                                        if (pinned && offline)
+                                            d->delta_down = +1; /* gepinnt, noch nicht lokal */
+                                        else if (pinned && !offline) {
+                                            d->delta_down = -1; /* hydrated via pin */
+                                            d->path_down  = g_strdup(full);
+                                        } else if (unpinned && offline) {
+                                            /* Datei dehydriert - war nicht mehr PINNED+offline,
+                                             * also nicht im Zähler - delta_down nicht setzen */
+                                            d->path_dehydrated = g_strdup(full);
+                                        } else if (!pinned && offline)
+                                            d->delta_down = -1; /* unpinned während laufendem Download */
+                                        else if (!unpinned) {
+                                            /* !pinned && !offline && !unpinned:
+                                             * Hydration via Doppelklick-Recall -
+                                             * Knoten im Baum korrigieren */
+                                            d->path_down = g_strdup(full);
+                                        }
+                                        /* !pinned && !offline && unpinned:
+                                         * Dehydration abgeschlossen - nichts tun */
                                     }
-                                    /* !pinned && !offline && unpinned:
-                                     * Dehydration abgeschlossen - nichts tun */
-                                }
 
-                                /* LAST_WRITE: In-Sync-Status prüfen */
-                                {
-                                    gboolean in_sync = watcher_check_in_sync(full);
-                                    d->path_up = g_strdup(full);
-                                    d->up_pending = !in_sync;
-                                }
+                                    /* LAST_WRITE: In-Sync-Status prüfen */
+                                    {
+                                        gboolean in_sync = watcher_check_in_sync(full);
+                                        d->path_up = g_strdup(full);
+                                        d->up_pending = !in_sync;
+                                    }
 
-								g_idle_add(watcher_idle_cb, d);
+                                    g_idle_add(watcher_idle_cb, d);
+                                }
                             }
                         }
                         g_free(full);
@@ -438,12 +627,14 @@ gpointer sond_treeviewfm_seadrive_watcher_thread(gpointer user_data)
                     fni = (FILE_NOTIFY_INFORMATION*)
                             ((BYTE*) fni + fni->NextEntryOffset);
                 } while (1);
+              }
             }
 
             /* Nächsten ReadDirectoryChangesW-Aufruf starten */
             ResetEvent(ov.hEvent);
             if (!ReadDirectoryChangesW(hDir, buf, sizeof(buf), TRUE,
-                    FILE_NOTIFY_CHANGE_ATTRIBUTES | FILE_NOTIFY_CHANGE_LAST_WRITE,
+                    FILE_NOTIFY_CHANGE_ATTRIBUTES | FILE_NOTIFY_CHANGE_LAST_WRITE |
+                            FILE_NOTIFY_CHANGE_FILE_NAME,
                     NULL, &ov, NULL)) {
                 LOG_WARN("SeaDrive-Watcher: ReadDirectoryChangesW('%s') beim "
                         "Neu-Anstoßen fehlgeschlagen (Fehler %lu) - Watcher "

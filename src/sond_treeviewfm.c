@@ -59,6 +59,34 @@ typedef struct {
 	 * geleert - sonst bleiben Einträge einer vorigen Projekt-Session stehen
 	 * und der Zähler zählt beim nächsten Öffnen falsch (bleibt zu niedrig). */
 	GHashTable *seadrive_not_in_sync;
+	/* Pfade, die aktuell als "pending_down" (PINNED+offline) gezählt sind -
+	 * Ground Truth für seadrive_pending_down, analog seadrive_not_in_sync.
+	 * Ohne dieses Set wäre bei einem REMOVED-Event (Datei gelöscht, während
+	 * sie noch heruntergeladen wurde) nicht feststellbar, ob sie gerade
+	 * mitgezählt wurde - der Zähler würde langfristig auseinanderlaufen
+	 * (Untersuchung SeaDrive-Coverage, 09/2026). Wird beim Initialscan und
+	 * bei einem Resync (Buffer-Overflow von ReadDirectoryChangesW) komplett
+	 * neu aufgebaut/ersetzt. */
+	GHashTable *seadrive_pending_down_paths;
+	/* Rekursive Ordner-Statistik für den Ordner-Coverage-Badge: Pfad (voller
+	 * Pfad wie bei seadrive_pending_down_paths) -> SondSeadriveDirCounts*.
+	 * Komplett neu aufgebaut bei Initialscan/Resync (s.
+	 * sond_treeviewfm_seadrive_set_dir_counts()), inkrementell nachgezogen
+	 * bei jedem Einzel-Event (s. sond_treeviewfm_seadrive_dir_delta(),
+	 * Untersuchung SeaDrive-Coverage, 09/2026). */
+	GHashTable *seadrive_dir_counts;
+	/* Ground-Truth-Sets für die in seadrive_dir_counts eingerechneten
+	 * Datei-Zustände - ANDERE, weitere Fragestellung als
+	 * seadrive_pending_down_paths (das bleibt PINNED+offline für den
+	 * Projekt-weiten Zähler). Ohne diese Sets wäre bei einem REMOVED-Event
+	 * nicht mehr feststellbar, ob die gelöschte Datei gerade als "nicht
+	 * hydriert" bzw. "hydriert+gepinnt" mitgezählt wurde - Zähler würden
+	 * auseinanderlaufen (Redesign "SeaDrive-Badges Datei+Ordner", 09/2026,
+	 * analog dem bestehenden pending_down_paths-Muster). Komplett neu
+	 * aufgebaut bei Initialscan/Resync, inkrementell gepflegt bei jedem
+	 * Einzel-Event (s. sond_treeviewfm_seadrive_update_coverage()). */
+	GHashTable *seadrive_not_hydrated_paths;
+	GHashTable *seadrive_hydrated_pinned_paths;
 #endif
 } SondTreeviewFMPrivate;
 
@@ -975,6 +1003,14 @@ static void sond_treeviewfm_finalize(GObject *g_object) {
 	sond_treeviewfm_seadrive_stop_watcher(SOND_TREEVIEWFM(g_object));
 	if (stvfm_priv->seadrive_not_in_sync)
 		g_hash_table_destroy(stvfm_priv->seadrive_not_in_sync);
+	if (stvfm_priv->seadrive_pending_down_paths)
+		g_hash_table_destroy(stvfm_priv->seadrive_pending_down_paths);
+	if (stvfm_priv->seadrive_dir_counts)
+		g_hash_table_destroy(stvfm_priv->seadrive_dir_counts);
+	if (stvfm_priv->seadrive_not_hydrated_paths)
+		g_hash_table_destroy(stvfm_priv->seadrive_not_hydrated_paths);
+	if (stvfm_priv->seadrive_hydrated_pinned_paths)
+		g_hash_table_destroy(stvfm_priv->seadrive_hydrated_pinned_paths);
 #endif
 
 	g_free(stvfm_priv->root);
@@ -3076,10 +3112,16 @@ static void sond_treeviewfm_row_expanded(GtkTreeView *tree_view,
 
 	rc = sond_treeviewfm_expand_dummy(SOND_TREEVIEWFM(tree_view), iter, stvfm_item, &error);
 	if (rc) {
+		/* error kann NULL sein, wenn der Fehlerpfad (z.B. ein
+		 * g_return_val_if_fail() tiefer im Aufrufbaum) keinen GError setzt -
+		 * error->message wäre dann ein Absturz statt nur einer fehlenden
+		 * Fehlermeldung (Absturz-Untersuchung 09/2026). */
 		display_message(SOND_GET_TOPLEVEL(tree_view),
-				"Zeile konnte nicht expandiert werden\n\n", error->message,
+				"Zeile konnte nicht expandiert werden\n\n",
+				error ? error->message : "(keine Fehlermeldung verfügbar)",
 				NULL);
-		g_error_free(error);
+		if (error)
+			g_error_free(error);
 
 		return;
 	}
@@ -3288,6 +3330,7 @@ static void sond_treeviewfm_render_file_icon(GtkTreeViewColumn *column,
 	SondTVFMItemPrivate* stvfm_item_priv = NULL;
 	SondTreeviewFM *stvfm = SOND_TREEVIEWFM(data);
 	SondSeadriveBadge seadrive_badge = SOND_SEADRIVE_BADGE_NONE; //unten rechts
+	SondSeadriveDirStatus dir_status = SOND_SEADRIVE_DIR_STATUS_NONE; //unten rechts, nur Verzeichnisse
 	SondIndexStatus index_status = SOND_INDEX_STATUS_NONE; //unten links: Indizierung
 
 	gtk_tree_model_get(model, iter, 0, &stvfm_item, -1);
@@ -3329,7 +3372,6 @@ static void sond_treeviewfm_render_file_icon(GtkTreeViewColumn *column,
 		if (full_path) {
 #ifdef _WIN32
 			wchar_t *lp = prepare_long_path(full_path, NULL);
-			g_free(full_path);
 			if (lp) {
 				DWORD attrs = GetFileAttributesW(lp);
 				g_free(lp);
@@ -3337,21 +3379,31 @@ static void sond_treeviewfm_render_file_icon(GtkTreeViewColumn *column,
 					gboolean pinned   = (attrs & FILE_ATTRIBUTE_PINNED) != 0;
 					gboolean offline  = (attrs & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) != 0;
 
-					/* offline hat Vorrang: sagt zuverlässig, ob die Datei
-					 * GERADE lokal vorhanden ist. pinned ist nur eine
-					 * Markierung/Absicht, keine Zustandsgarantie - s.
-					 * Kommentar bei SondSeadriveBadge (sond_icon_util.h).
-					 * "unpinned, aber noch lokal vorhanden" bekommt bewusst
-					 * kein Icon - wie der unmarkierte Normalzustand. */
-					if (offline)
+					/* Prioritätsreihenfolge s. Kommentar bei SondSeadriveBadge
+					 * (sond_icon_util.h): PENDING (gepinnt, noch nicht
+					 * hydriert) vor OFFLINE (nicht hydriert, nicht gepinnt)
+					 * vor PINNED (hydriert UND gepinnt). "unpinned, aber
+					 * lokal vorhanden" bekommt bewusst kein Icon - wie der
+					 * unmarkierte Normalzustand. */
+					if (offline && pinned)
+						seadrive_badge = SOND_SEADRIVE_BADGE_PENDING;
+					else if (offline)
 						seadrive_badge = SOND_SEADRIVE_BADGE_OFFLINE;
 					else if (pinned)
 						seadrive_badge = SOND_SEADRIVE_BADGE_PINNED;
 				}
 			}
-#else
-			g_free(full_path);
+
+			/* Für Verzeichnisse zusätzlich den aggregierten Teilbaum-Status
+			 * konsultieren, wenn das Ordner-eigene Attribut nichts zeigt
+			 * (Normalfall - Ordner selbst sind bei SeaDrive praktisch nie
+			 * PINNED/offline markiert; aussagekräftig ist, was darunter
+			 * liegt - Untersuchung SeaDrive-Coverage, 09/2026). */
+			if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_DIR &&
+					seadrive_badge == SOND_SEADRIVE_BADGE_NONE)
+				dir_status = sond_treeviewfm_seadrive_get_dir_status(stvfm, full_path);
 #endif
+			g_free(full_path);
 		}
 	}
 
@@ -3359,7 +3411,18 @@ static void sond_treeviewfm_render_file_icon(GtkTreeViewColumn *column,
 	 * SeaDrive - beide können gleichzeitig zutreffen, dann je eine Ecke) */
 	index_status = sond_treeviewfm_get_index_status(stvfm, stvfm_item);
 
-	if (seadrive_badge != SOND_SEADRIVE_BADGE_NONE || index_status != SOND_INDEX_STATUS_NONE) {
+	/* Immer über sond_icon_util_render_with_overlays() rendern (auch mit
+	 * 0 Overlays), NIE mehr direkt "icon-name" auf dem Renderer setzen:
+	 * GtkCellRendererPixbufs eigene icon-name-Aufloesung bestimmt die
+	 * Pixelgroesse ueber die "stock-size"-Property und lieferte in dieser
+	 * Umgebung für Ordner (icon_name "folder") einfach GAR KEIN Icon -
+	 * während derselbe Name über gtk_icon_theme_load_icon() mit expliziter
+	 * Pixelgroesse (s. sond_icon_util_renderer_get_size()) zuverlässig
+	 * funktioniert. Dateien fielen das vorher nicht auf, weil sie fast
+	 * immer schon ein Overlay-Badge hatten und damit ohnehin über
+	 * render_with_overlays liefen (Untersuchung "Ordner ohne Icon",
+	 * 09/2026). */
+	{
 		SondIconOverlay overlays[2];
 		guint n_overlays = 0;
 		gint overlay_px = MAX(sond_icon_util_renderer_get_size(renderer) / 2, 8);
@@ -3367,8 +3430,18 @@ static void sond_treeviewfm_render_file_icon(GtkTreeViewColumn *column,
 		GdkPixbuf *index_pb = NULL;
 
 		if (seadrive_badge != SOND_SEADRIVE_BADGE_NONE) {
-			/* SeaDrive-Status unten rechts */
+			/* SeaDrive-Status unten rechts (einzelne Datei/Ordner selbst) */
 			seadrive_pb = sond_icon_util_seadrive_badge_pixbuf(seadrive_badge,
+					overlay_px);
+			if (seadrive_pb) {
+				overlays[n_overlays].pixbuf = seadrive_pb;
+				overlays[n_overlays].corner = SOND_ICON_CORNER_BOTTOM_RIGHT;
+				n_overlays++;
+			}
+		} else if (dir_status != SOND_SEADRIVE_DIR_STATUS_NONE) {
+			/* SeaDrive-Status unten rechts (Ordner-Teilbaum-Aggregation -
+			 * nur wenn kein Ordner-eigenes Attribut greift, s.o.) */
+			seadrive_pb = sond_icon_util_seadrive_dir_badge_pixbuf(dir_status,
 					overlay_px);
 			if (seadrive_pb) {
 				overlays[n_overlays].pixbuf = seadrive_pb;
@@ -3392,14 +3465,7 @@ static void sond_treeviewfm_render_file_icon(GtkTreeViewColumn *column,
 
 		if (seadrive_pb) g_object_unref(seadrive_pb);
 		if (index_pb) g_object_unref(index_pb);
-
-		return;
 	}
-
-	/* Kein Overlay - normales Icon setzen */
-	g_object_set(G_OBJECT(renderer), "icon-name",
-			stvfm_item_priv->icon_name ? stvfm_item_priv->icon_name : "image-missing",
-			NULL);
 
 	return;
 }
@@ -3501,6 +3567,14 @@ gint sond_treeviewfm_set_root(SondTreeviewFM *stvfm, const gchar *root,
 	stvfm_priv->seadrive_pending_up = 0;
 	if (stvfm_priv->seadrive_not_in_sync)
 		g_hash_table_remove_all(stvfm_priv->seadrive_not_in_sync);
+	if (stvfm_priv->seadrive_pending_down_paths)
+		g_hash_table_remove_all(stvfm_priv->seadrive_pending_down_paths);
+	if (stvfm_priv->seadrive_dir_counts)
+		g_hash_table_remove_all(stvfm_priv->seadrive_dir_counts);
+	if (stvfm_priv->seadrive_not_hydrated_paths)
+		g_hash_table_remove_all(stvfm_priv->seadrive_not_hydrated_paths);
+	if (stvfm_priv->seadrive_hydrated_pinned_paths)
+		g_hash_table_remove_all(stvfm_priv->seadrive_hydrated_pinned_paths);
 	g_signal_emit(stvfm,
 			SOND_TREEVIEWFM_GET_CLASS(stvfm)->signal_seadrive_status, 0,
 			(guint)0, (guint)0);
@@ -3595,18 +3669,106 @@ sond_treeviewfm_set_index_ctx_func(SondTreeviewFM *stvfm,
 
 #ifdef _WIN32
 void
+sond_treeviewfm_seadrive_dir_delta(SondTreeviewFM *stvfm,
+		const gchar *dir_path, gint delta_not_hydrated,
+		gint delta_hydrated_pinned, gint delta_total) {
+	SondTreeviewFMPrivate *p = NULL;
+	SondSeadriveDirCounts *counts = NULL;
+
+	if (!stvfm || !dir_path || (delta_not_hydrated == 0 &&
+			delta_hydrated_pinned == 0 && delta_total == 0))
+		return;
+
+	p = sond_treeviewfm_get_instance_private(stvfm);
+
+	if (!p->seadrive_dir_counts)
+		p->seadrive_dir_counts = g_hash_table_new_full(
+				g_str_hash, g_str_equal, g_free, g_free);
+
+	counts = g_hash_table_lookup(p->seadrive_dir_counts, dir_path);
+	if (!counts) {
+		counts = g_new0(SondSeadriveDirCounts, 1);
+		g_hash_table_insert(p->seadrive_dir_counts, g_strdup(dir_path), counts);
+	}
+
+	/* Negative Deltas bei 0 kappen statt umlaufen zu lassen (guint!) -
+	 * Schutz gegen Drift durch verpasste/doppelte Events, analog den
+	 * Guards bei seadrive_pending_down/-up. */
+	if (delta_not_hydrated < 0 && (guint) -delta_not_hydrated > counts->not_hydrated)
+		counts->not_hydrated = 0;
+	else
+		counts->not_hydrated += delta_not_hydrated;
+
+	if (delta_hydrated_pinned < 0 && (guint) -delta_hydrated_pinned > counts->hydrated_pinned)
+		counts->hydrated_pinned = 0;
+	else
+		counts->hydrated_pinned += delta_hydrated_pinned;
+
+	if (delta_total < 0 && (guint) -delta_total > counts->total)
+		counts->total = 0;
+	else
+		counts->total += delta_total;
+
+	gtk_widget_queue_draw(GTK_WIDGET(stvfm));
+}
+
+void
+sond_treeviewfm_seadrive_update_dir_coverage(SondTreeviewFM *stvfm,
+		const gchar *file_full_path, gint delta_not_hydrated,
+		gint delta_hydrated_pinned, gint delta_total) {
+	const gchar *root = NULL;
+	gchar *dir = NULL;
+	gchar *slash = NULL;
+
+	if (!file_full_path || (delta_not_hydrated == 0 &&
+			delta_hydrated_pinned == 0 && delta_total == 0))
+		return;
+
+	root = sond_treeviewfm_get_root(stvfm);
+	if (!root)
+		return;
+
+	dir = g_strdup(file_full_path);
+
+	for (;;) {
+		slash = strrchr(dir, '/');
+		if (!slash)
+			break;
+		*slash = '\0';
+
+		sond_treeviewfm_seadrive_dir_delta(stvfm, dir, delta_not_hydrated,
+				delta_hydrated_pinned, delta_total);
+
+		if (!g_strcmp0(dir, root))
+			break; /* root selbst mit erledigt - keine Vorfahren mehr darüber */
+	}
+
+	g_free(dir);
+}
+
+void
 sond_treeviewfm_seadrive_update_status(SondTreeviewFM *stvfm,
-		gint delta_down,
+		const gchar *path_pending_down, gint delta_down,
 		const gchar *path_up, gboolean up_pending) {
 	gboolean changed = FALSE;
 	SondTreeviewFMPrivate *p = sond_treeviewfm_get_instance_private(stvfm);
 
-	if (delta_down > 0) {
-		p->seadrive_pending_down++;
-		changed = TRUE;
-	} else if (delta_down < 0 && p->seadrive_pending_down > 0) {
-		p->seadrive_pending_down--;
-		changed = TRUE;
+	if (delta_down > 0 && path_pending_down) {
+		if (!p->seadrive_pending_down_paths)
+			p->seadrive_pending_down_paths = g_hash_table_new_full(
+					g_str_hash, g_str_equal, g_free, NULL);
+		if (g_hash_table_add(p->seadrive_pending_down_paths,
+				g_strdup(path_pending_down))) {
+			p->seadrive_pending_down++;
+			changed = TRUE;
+		}
+	} else if (delta_down < 0 && path_pending_down) {
+		if (p->seadrive_pending_down_paths &&
+				g_hash_table_remove(p->seadrive_pending_down_paths,
+						path_pending_down)) {
+			p->seadrive_pending_down--;
+			changed = TRUE;
+		}
 	}
 
 	if (path_up) {
@@ -3633,14 +3795,127 @@ sond_treeviewfm_seadrive_update_status(SondTreeviewFM *stvfm,
 }
 
 void
-sond_treeviewfm_seadrive_set_pending_down(SondTreeviewFM *stvfm, guint count) {
+sond_treeviewfm_seadrive_set_pending_down_paths(SondTreeviewFM *stvfm,
+		GHashTable *paths) {
 	SondTreeviewFMPrivate *p = sond_treeviewfm_get_instance_private(stvfm);
-	p->seadrive_pending_down = count;
+
+	if (p->seadrive_pending_down_paths)
+		g_hash_table_destroy(p->seadrive_pending_down_paths);
+	p->seadrive_pending_down_paths = paths;
+	p->seadrive_pending_down = paths ? g_hash_table_size(paths) : 0;
+
 	gtk_widget_queue_draw(GTK_WIDGET(stvfm));
 	g_signal_emit(stvfm,
 			SOND_TREEVIEWFM_GET_CLASS(stvfm)->signal_seadrive_status, 0,
 			p->seadrive_pending_down,
 			p->seadrive_pending_up);
+}
+
+void
+sond_treeviewfm_seadrive_set_dir_counts(SondTreeviewFM *stvfm,
+		GHashTable *dir_counts) {
+	SondTreeviewFMPrivate *p = sond_treeviewfm_get_instance_private(stvfm);
+
+	if (p->seadrive_dir_counts)
+		g_hash_table_destroy(p->seadrive_dir_counts);
+	p->seadrive_dir_counts = dir_counts;
+
+	gtk_widget_queue_draw(GTK_WIDGET(stvfm));
+}
+
+void
+sond_treeviewfm_seadrive_set_not_hydrated_paths(SondTreeviewFM *stvfm,
+		GHashTable *paths) {
+	SondTreeviewFMPrivate *p = sond_treeviewfm_get_instance_private(stvfm);
+
+	if (p->seadrive_not_hydrated_paths)
+		g_hash_table_destroy(p->seadrive_not_hydrated_paths);
+	p->seadrive_not_hydrated_paths = paths;
+}
+
+void
+sond_treeviewfm_seadrive_set_hydrated_pinned_paths(SondTreeviewFM *stvfm,
+		GHashTable *paths) {
+	SondTreeviewFMPrivate *p = sond_treeviewfm_get_instance_private(stvfm);
+
+	if (p->seadrive_hydrated_pinned_paths)
+		g_hash_table_destroy(p->seadrive_hydrated_pinned_paths);
+	p->seadrive_hydrated_pinned_paths = paths;
+}
+
+void
+sond_treeviewfm_seadrive_update_coverage(SondTreeviewFM *stvfm,
+		const gchar *file_full_path, gboolean not_hydrated,
+		gboolean hydrated_pinned, gint delta_total) {
+	SondTreeviewFMPrivate *p = NULL;
+	gint applied_not_hydrated = 0;
+	gint applied_hydrated_pinned = 0;
+
+	if (!stvfm || !file_full_path)
+		return;
+
+	p = sond_treeviewfm_get_instance_private(stvfm);
+
+	if (not_hydrated) {
+		if (!p->seadrive_not_hydrated_paths)
+			p->seadrive_not_hydrated_paths = g_hash_table_new_full(
+					g_str_hash, g_str_equal, g_free, NULL);
+		if (g_hash_table_add(p->seadrive_not_hydrated_paths,
+				g_strdup(file_full_path)))
+			applied_not_hydrated = +1;
+	} else if (p->seadrive_not_hydrated_paths &&
+			g_hash_table_remove(p->seadrive_not_hydrated_paths, file_full_path))
+		applied_not_hydrated = -1;
+
+	if (hydrated_pinned) {
+		if (!p->seadrive_hydrated_pinned_paths)
+			p->seadrive_hydrated_pinned_paths = g_hash_table_new_full(
+					g_str_hash, g_str_equal, g_free, NULL);
+		if (g_hash_table_add(p->seadrive_hydrated_pinned_paths,
+				g_strdup(file_full_path)))
+			applied_hydrated_pinned = +1;
+	} else if (p->seadrive_hydrated_pinned_paths &&
+			g_hash_table_remove(p->seadrive_hydrated_pinned_paths, file_full_path))
+		applied_hydrated_pinned = -1;
+
+	if (applied_not_hydrated != 0 || applied_hydrated_pinned != 0 ||
+			delta_total != 0)
+		sond_treeviewfm_seadrive_update_dir_coverage(stvfm, file_full_path,
+				applied_not_hydrated, applied_hydrated_pinned, delta_total);
+}
+
+SondSeadriveDirStatus
+sond_treeviewfm_seadrive_get_dir_status(SondTreeviewFM *stvfm,
+		const gchar *dir_path) {
+	SondTreeviewFMPrivate *p = NULL;
+	SondSeadriveDirCounts *counts = NULL;
+
+	if (!stvfm || !dir_path)
+		return SOND_SEADRIVE_DIR_STATUS_NONE;
+
+	p = sond_treeviewfm_get_instance_private(stvfm);
+	if (!p->seadrive_dir_counts)
+		return SOND_SEADRIVE_DIR_STATUS_NONE;
+
+	counts = g_hash_table_lookup(p->seadrive_dir_counts, dir_path);
+	if (!counts || counts->total == 0)
+		return SOND_SEADRIVE_DIR_STATUS_NONE;
+
+	if (counts->not_hydrated == counts->total)
+		return SOND_SEADRIVE_DIR_STATUS_FULL_OFFLINE;
+
+	if (counts->not_hydrated == 0) {
+		/* alle Dateien hydriert */
+		if (counts->hydrated_pinned == counts->total)
+			return SOND_SEADRIVE_DIR_STATUS_FULL_HYDRATED_PINNED;
+		/* hydriert, aber nicht alle gepinnt - dieselbe "kein Icon
+		 * nötig"-Bedeutung wie beim Datei-Badge */
+		return SOND_SEADRIVE_DIR_STATUS_NONE;
+	}
+
+	/* 0 < not_hydrated < total - weder komplett hydriert noch komplett
+	 * offline, kein gemeinsamer Nenner */
+	return SOND_SEADRIVE_DIR_STATUS_MIXED;
 }
 
 void

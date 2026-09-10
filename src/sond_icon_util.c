@@ -86,8 +86,23 @@ GdkPixbuf* sond_icon_util_seadrive_badge_pixbuf(SondSeadriveBadge badge, gint si
 	switch (badge) {
 	case SOND_SEADRIVE_BADGE_OFFLINE:
 		return draw_circle_badge(0.55, 0.25, 0.75, size); /* Violett */
+	case SOND_SEADRIVE_BADGE_PENDING:
+		return draw_circle_badge(0.95, 0.61, 0.07, size); /* Orange - wie INDEX_STATUS_PARTIAL */
 	case SOND_SEADRIVE_BADGE_PINNED:
 		return draw_circle_badge(0.20, 0.66, 0.33, size); /* Grün */
+	default:
+		return NULL;
+	}
+}
+
+GdkPixbuf* sond_icon_util_seadrive_dir_badge_pixbuf(SondSeadriveDirStatus status, gint size) {
+	switch (status) {
+	case SOND_SEADRIVE_DIR_STATUS_FULL_OFFLINE:
+		return draw_circle_badge(0.55, 0.25, 0.75, size); /* Violett - wie BADGE_OFFLINE */
+	case SOND_SEADRIVE_DIR_STATUS_FULL_HYDRATED_PINNED:
+		return draw_circle_badge(0.20, 0.66, 0.33, size); /* Grün - wie BADGE_PINNED */
+	case SOND_SEADRIVE_DIR_STATUS_MIXED:
+		return draw_circle_badge(0.55, 0.55, 0.55, size); /* Grau - nur Ordner, kein Datei-Äquivalent */
 	default:
 		return NULL;
 	}
@@ -118,6 +133,31 @@ gboolean sond_icon_util_render_with_overlays(GtkWidget *widget,
 		g_object_set(G_OBJECT(renderer), "icon-name",
 				base_icon_name ? base_icon_name : "image-missing", NULL);
 		return FALSE;
+	}
+
+	/* WICHTIG: gtk_icon_theme_load_icon() (in sond_icon_util_load_pixbuf())
+	 * kann - je nach GTK-/Theme-Implementierung - ein INTERN GECACHTES,
+	 * gemeinsam genutztes GdkPixbuf zurückgeben, keine frische Kopie pro
+	 * Aufruf. gdk_pixbuf_composite() unten zeichnet direkt IN main_pb
+	 * hinein - ohne diese Kopie hier würde das Overlay-Badge dauerhaft in
+	 * den Cache-Eintrag für "base_icon_name" "hineingebrannt" und danach
+	 * bei JEDER anderen Zeile mit demselben Basis-Icon (z.B. jedem anderen
+	 * Ordner - "folder") mit angezeigt, unabhängig von deren eigenem
+	 * Status (Bug "Ordner faelschlich gruen/violett", 09/2026 - vom
+	 * Nutzer aufgedeckt). Nur bei tatsächlich vorhandenen Overlays kopieren
+	 * (sonst unnötiger Allokations-Overhead für den Normalfall). */
+	if (n_overlays > 0) {
+		GdkPixbuf *copy = gdk_pixbuf_copy(main_pb);
+		if (copy) {
+			g_object_unref(main_pb);
+			main_pb = copy;
+		} else {
+			LOG_WARN("%s: gdk_pixbuf_copy() fehlgeschlagen - Overlay(s) "
+					"würden das gecachte Basis-Icon \"%s\" verändern, "
+					"werden deshalb übersprungen", __func__,
+					base_icon_name ? base_icon_name : "(null)");
+			n_overlays = 0;
+		}
 	}
 
 	for (guint i = 0; i < n_overlays; i++) {

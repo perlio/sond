@@ -2410,7 +2410,13 @@ gint sond_file_part_gmessage_load_path(SondFilePartGMessage* sfp_gmessage,
 	GMimeObject* object = NULL;
 
 	g_return_val_if_fail(sfp_gmessage, -1);
-	g_return_val_if_fail(path, -1);
+	/* path darf NULL sein - bedeutet "oberste Ebene der .eml" (Root-Mime-
+	 * Objekt der Message), wird von lookup_path() (sond_gmessage_helper.c)
+	 * bereits korrekt behandelt ("if (!path) return object;"). Jeder
+	 * Top-Level-.eml-Tree-Knoten wird mit path_or_section==NULL angelegt
+	 * (sond_treeviewfm.c, sond_tvfm_item_create() - Konvention wie bei PDF/
+	 * "//"), eine Assertion hier hätte JEDE Expansion eines .eml auf
+	 * oberster Ebene abgelehnt (Absturz-Untersuchung 09/2026). */
 	g_return_val_if_fail(arr_mime_parts, -1);
 
 	object = sond_file_part_gmessage_lookup_part_by_path(

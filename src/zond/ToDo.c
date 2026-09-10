@@ -404,4 +404,144 @@
  auch den schon bestehenden pending_down-Zähler), dann 1./2./5./6. für die
  neuen Badges.
 
+ Stand 08.09.2026: KOMPLETT UMGESETZT (alle 7 Punkte).
+ - 3./4.: seadrive_pending_down_paths-Set in SondTreeviewFMPrivate,
+   FILE_NOTIFY_CHANGE_FILE_NAME ergänzt, Action-Auswertung ADDED/REMOVED/
+   RENAMED_*, Buffer-Overflow-Resync über watcher_rescan().
+ - 1./2.: SondSeadriveDirCounts (offline/total, rekursiv) in
+   seadrive_dir_counts (SondTreeviewFMPrivate). watcher_count_pending_down()
+   liefert jetzt zusätzlich zum Pfad-Set für JEDES durchlaufene Verzeichnis
+   seine rekursive Statistik zurück (out_dir_counts, sond_treeviewfm_
+   seadrive.c). Live-Nachführung (über die urspr. 7 Punkte hinaus, auf
+   Nachfrage ergänzt): sond_treeviewfm_seadrive_update_status() ruft bei
+   jeder tatsächlichen Set-Änderung UND bei jedem ADDED/REMOVED/RENAMED_*
+   zusätzlich sond_treeviewfm_seadrive_dir_delta_for_file() auf - läuft die
+   Pfad-Segmente vom Elternverzeichnis der Datei bis root hoch und passt
+   jeden Vorfahren an (sond_treeviewfm_seadrive_dir_delta(), negative
+   Deltas bei 0 gekappt). Ordner-Badges bleiben dadurch laufend aktuell,
+   nicht nur nach dem nächsten Rescan.
+ - 5.: SondSeadriveDirStatus (NONE/PARTIAL/FULL_OFFLINE, sond_icon_util.h)
+   + sond_icon_util_seadrive_dir_badge_pixbuf() (Orange/Violett, dieselben
+   Farben wie INDEX_STATUS_PARTIAL/SEADRIVE_BADGE_OFFLINE für konsistente
+   Bedeutung). Getter: sond_treeviewfm_seadrive_get_dir_status().
+ - 6.: sond_treeviewfm_render_file_icon() - für DIR-Items wird der
+   Ordner-Teilbaum-Status NUR konsultiert, wenn das Ordner-eigene SeaDrive-
+   Attribut nichts zeigt (Normalfall), teilen sich denselben Overlay-Slot
+   unten rechts (nur eine Ecke für SeaDrive-Status verfügbar).
+
+ Beim Testen gefundener, unabhängiger Bug "Ordner ohne Icon" (08./09.2026,
+ behoben): NICHTS mit dem SeaDrive-Umbau selbst zu tun, sondern ein
+ latenter, vorbestehender Bug in sond_treeviewfm_render_file_icon(), der
+ durch das Testen der neuen Ordner-Badges erstmals auffiel. Ursache: der
+ alte "Kein Overlay"-Zweig setzte für Items ohne jedes Badge die
+ "icon-name"-Property direkt auf dem GtkCellRendererPixbuf
+ (g_object_set(renderer, "icon-name", ...)). GtkCellRendererPixbufs eigene
+ Aufloesung von icon-name bestimmt die Ziel-Pixelgroesse offenbar ueber die
+ "stock-size"-Property und lieferte in dieser Umgebung fuer "folder"
+ schlicht KEIN Bild (kein Crash, keine Warnung - einfach leer). Der
+ Overlay-Pfad dagegen laed das Icon explizit ueber
+ sond_icon_util_load_pixbuf()/gtk_icon_theme_load_icon() mit der ueber
+ sond_icon_util_renderer_get_size() ermittelten Pixelgroesse und setzt
+ "pixbuf" statt "icon-name" - das funktioniert zuverlaessig. Dateien fiel
+ das nie auf, weil sie fast immer schon ein Badge (SeaDrive/Index) hatten
+ und dadurch ohnehin ueber den Overlay-Pfad liefen; Ordner hatten vorher so
+ gut wie nie ein Badge und liefen praktisch IMMER ueber den kaputten
+ Direkt-Pfad - nur bemerkt hat es bisher niemand. Fix: der "Kein
+ Overlay"-Sonderfall wurde komplett entfernt, sond_treeviewfm_render_
+ file_icon() ruft jetzt IMMER sond_icon_util_render_with_overlays() auf
+ (auch mit 0 Overlays) - ein einziger, konsistenter Lade-Mechanismus fuer
+ alle Zeilen. Verifiziert per temporaerem LOG_INFO (type/icon_name/
+ seadrive_badge/dir_status/index_status/overlay_path) - Log bestaetigte:
+ alle DIR-Zeilen liefen mit lauter 0/NONE durch den alten Direkt-Pfad,
+ alle LEAF-Zeilen mit Badge (seadrive_badge=1) durch den Overlay-Pfad.
+
+ Direkte Folge davon aufgedeckter, ZWEITER Bug "Ordner faelschlich gruen/
+ Dateien faelschlich violett" (09.09./10.09.2026, behoben): Nachdem obiger
+ Fix ALLE Zeilen ueber sond_icon_util_render_with_overlays() laufen liess,
+ meldete der Nutzer, nach dem Pinnen EINES einzigen Ordners ("Immer
+ offline verfuegbar") zeigten PLOETZLICH ALLE Ordner im Projekt ein
+ gruenes Badge und ALLE Dateien ein violettes - obwohl laut Windows
+ Explorer nur der eine gepinnte Ordner (und sein echter Teilbaum)
+ tatsaechlich gepinnt war, und obwohl eigens eingebautes Logging bestaetigte,
+ dass die Attribut-Abfrage (GetFileAttributesW) fuer die betroffenen
+ Ordner korrekt "nicht gepinnt" lieferte. Ursache: gdk_pixbuf_composite()
+ in sond_icon_util_render_with_overlays() zeichnete das Overlay-Badge
+ DIREKT in das von gtk_icon_theme_load_icon() gelieferte Pixbuf hinein.
+ Icon-Themes duerfen (und tun es in der Praxis) fuer wiederholte Anfragen
+ nach demselben Icon-Namen/derselben Groesse dasselbe INTERN GECACHTE
+ GdkPixbuf zurueckgeben statt einer frischen Kopie - das Hineinzeichnen
+ veraenderte also dauerhaft den Cache-Eintrag fuer z.B. "folder" bzw.
+ "text-x-generic". Der eine tatsaechlich gepinnte Ordner "brannte" so sein
+ gruenes Badge in den gemeinsamen "folder"-Cache-Eintrag, danach zeigten
+ ALLE Ordner (die denselben Cache-Eintrag abfragen) dieses kontaminierte
+ Icon - unabhaengig von ihrem eigenen, korrekt berechneten Status; analog
+ fuer den Dateityp mit dem violetten Badge. Ein vorbestehender, latenter
+ Bug (nicht neu durch obigen Fix verursacht), der vorher nur nicht auffiel,
+ weil Ordner so gut wie nie ein Overlay-Badge bekamen. Fix: Basis-Pixbuf
+ wird jetzt per gdk_pixbuf_copy() dupliziert, BEVOR ueberhaupt ein Overlay
+ hineinkomponiert wird (nur wenn n_overlays>0, sonst kein Overhead) -
+ das Original im Icon-Theme-Cache bleibt unveraendert.
+
+ Redesign SeaDrive-Badges Datei+Ordner (10.09.2026, umgesetzt, auf
+ Nutzer-Feedback zum obigen Fund): die Diskussion um "gruen bei allen
+ Ordnern" deckte einen ECHTEN Semantik-Bug auf (unabhaengig vom Cache-Bug
+ oben): der Ordner-Coverage-Zaehler zaehlte bislang "offline" als
+ "PINNED+noch nicht heruntergeladen" (pending_down) - Dateien, die
+ einfach nie gepinnt und nie geoeffnet wurden (der SeaDrive-Normalfall
+ fuer die meisten Cloud-Dateien), zaehlten NICHT als "offline", obwohl sie
+ einzeln als violett angezeigt wurden. Ein Ordner voller solcher Dateien
+ bekam dadurch gar kein Badge. Neues, mit dem Nutzer abgestimmtes Modell:
+ - Datei-Badge (sond_icon_util.h SondSeadriveBadge, jetzt 3 Zustaende):
+   1. gepinnt+nicht hydriert -> PENDING/Orange ("wird geladen, sobald
+      online" - wiederverwendet dieselbe Farbe wie INDEX_STATUS_PARTIAL).
+   2. nicht hydriert, nicht gepinnt -> OFFLINE/Violett.
+   3. hydriert+gepinnt -> PINNED/Gruen.
+   4. sonst (hydriert, nicht gepinnt) -> kein Badge.
+ - Ordner-Badge (SondSeadriveDirStatus, jetzt NONE/FULL_OFFLINE/
+   FULL_HYDRATED_PINNED/MIXED): bewusst DIESELBE Gruen/Violett/kein-Badge-
+   Bedeutung wie beim Datei-Badge (Nutzer-Vorgabe: "nicht zig Schemata
+   lernen muessen"), Grau als einziger zusaetzlicher, nur-Ordner-Zustand:
+   * alle Dateien im Teilbaum nicht hydriert -> Violett.
+   * alle hydriert UND alle gepinnt -> Gruen.
+   * alle hydriert, aber nicht alle gepinnt -> kein Badge (wie eine
+     einzelne ungepinnte, hydrierte Datei).
+   * weder komplett hydriert noch komplett offline -> Grau (MIXED).
+   * leerer/nicht gescannter Teilbaum -> kein Badge (kein Zustand,
+     sondern "keine Daten" - ohnehin ueber Aufklappbarkeit erkennbar).
+ Datenmodell: SondSeadriveDirCounts hat jetzt drei Felder (not_hydrated,
+ hydrated_pinned, total statt vorher offline/total). Neue Ground-Truth-
+ Sets seadrive_not_hydrated_paths/seadrive_hydrated_pinned_paths
+ (SondTreeviewFMPrivate, sond_treeviewfm.c) verhindern Drift bei REMOVED-
+ Events, analog dem bestehenden seadrive_pending_down_paths-Muster -
+ bewusst SEPARAT von diesem gehalten (andere Fragestellung: "wird gerade
+ wegen Pin heruntergeladen" fuer den Projekt-weiten Zaehler vs. "ist der
+ Teilbaum lokal verfuegbar" fuer den Ordner-Badge). Neue Funktion
+ sond_treeviewfm_seadrive_update_coverage() (Set-Pflege + Delta-Ableitung)
+ ruft intern sond_treeviewfm_seadrive_update_dir_coverage() (Ancestor-Walk,
+ vormals dir_delta_for_file) mit den TATSAECHLICH angewandten Deltas auf.
+ watcher_count_pending_down() (sond_treeviewfm_seadrive.c) baut beim Scan
+ zusaetzlich zu out_paths (PINNED+offline) die beiden neuen Ground-Truth-
+ Sets auf; der Live-Watcher setzt pro ADDED/MODIFIED-Event coverage_not_
+ hydrated/coverage_hydrated_pinned direkt aus den frisch gelesenen
+ Attributen (WatcherIdleData), REMOVED setzt beide FALSE (Datei zaehlt
+ nirgends mehr mit, delta_total=-1 uebernimmt den Rest).
+
+ Beim Testen gefundener, unabhängiger Absturz (08.09.2026, behoben):
+ Expansion eines .eml auf oberster Ebene im Baum konnte abstürzen.
+ Ursache NICHTS mit dem SeaDrive-Umbau oben zu tun - zwei Bugs in
+ sond_fileparts.c/sond_treeviewfm.c, die es schon vorher gab:
+ - sond_file_part_gmessage_load_path() (sond_fileparts.c) hatte
+   g_return_val_if_fail(path, -1) - lehnte NULL als Pfad ab, obwohl
+   path_or_section==NULL die reguläre, überall verwendete Konvention für
+   "oberste Ebene der .eml" ist (dieselbe wie bei PDF/"//", s.
+   sond_tvfm_item_create()) und lookup_path() (sond_gmessage_helper.c)
+   NULL bereits korrekt behandelt ("if (!path) return object;"). Die
+   Assertion hätte JEDE Expansion eines .eml auf oberster Ebene
+   abgelehnt. Fix: Assertion entfernt.
+ - sond_treeviewfm_row_expanded() (sond_treeviewfm.c) dereferenzierte
+   error->message ohne NULL-Check - bei einem Fehlerpfad, der (wie
+   obiger g_return_val_if_fail) keinen GError setzt, Absturz statt nur
+   fehlender Fehlermeldung. Fix: NULL-Check ergänzt (defensiv, generell
+   gegen ähnliche Fälle).
+
  */
