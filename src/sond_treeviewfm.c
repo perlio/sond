@@ -75,18 +75,21 @@ typedef struct {
 	 * bei jedem Einzel-Event (s. sond_treeviewfm_seadrive_dir_delta(),
 	 * Untersuchung SeaDrive-Coverage, 09/2026). */
 	GHashTable *seadrive_dir_counts;
-	/* Ground-Truth-Sets für die in seadrive_dir_counts eingerechneten
-	 * Datei-Zustände - ANDERE, weitere Fragestellung als
-	 * seadrive_pending_down_paths (das bleibt PINNED+offline für den
-	 * Projekt-weiten Zähler). Ohne diese Sets wäre bei einem REMOVED-Event
-	 * nicht mehr feststellbar, ob die gelöschte Datei gerade als "nicht
-	 * hydriert" bzw. "hydriert+gepinnt" mitgezählt wurde - Zähler würden
-	 * auseinanderlaufen (Redesign "SeaDrive-Badges Datei+Ordner", 09/2026,
-	 * analog dem bestehenden pending_down_paths-Muster). Komplett neu
-	 * aufgebaut bei Initialscan/Resync, inkrementell gepflegt bei jedem
-	 * Einzel-Event (s. sond_treeviewfm_seadrive_update_coverage()). */
-	GHashTable *seadrive_not_hydrated_paths;
-	GHashTable *seadrive_hydrated_pinned_paths;
+	/* Ground-Truth-Map für den Datei-eigenen SeaDrive-Badge: voller Pfad ->
+	 * GINT_TO_POINTER(SondSeadriveBadge), Einträge mit Wert NONE werden
+	 * nicht gespeichert. ERSETZT ab 09/2026 den früheren LIVEN
+	 * GetFileAttributesW-Aufruf pro Renderzeile in
+	 * sond_treeviewfm_render_file_icon() (Konsistenz mit seadrive_dir_
+	 * counts, das schon vorher aus der Hashtable statt live gelesen wurde -
+	 * Untersuchung "Ordner-Badges", 09/2026) UND liefert gleichzeitig die
+	 * Grundlage für die Ordner-Coverage-Zähler (not_hydrated/
+	 * hydrated_pinned in seadrive_dir_counts werden aus Änderungen dieser
+	 * Map abgeleitet, s. sond_treeviewfm_seadrive_update_file_badge()) -
+	 * ANDERE, weitere Fragestellung als seadrive_pending_down_paths (das
+	 * bleibt die engere PINNED+offline-Definition für den Projekt-weiten
+	 * Zähler). Komplett neu aufgebaut bei Initialscan/Resync, inkrementell
+	 * gepflegt bei jedem Einzel-Event. */
+	GHashTable *seadrive_file_badges;
 #endif
 } SondTreeviewFMPrivate;
 
@@ -1007,10 +1010,8 @@ static void sond_treeviewfm_finalize(GObject *g_object) {
 		g_hash_table_destroy(stvfm_priv->seadrive_pending_down_paths);
 	if (stvfm_priv->seadrive_dir_counts)
 		g_hash_table_destroy(stvfm_priv->seadrive_dir_counts);
-	if (stvfm_priv->seadrive_not_hydrated_paths)
-		g_hash_table_destroy(stvfm_priv->seadrive_not_hydrated_paths);
-	if (stvfm_priv->seadrive_hydrated_pinned_paths)
-		g_hash_table_destroy(stvfm_priv->seadrive_hydrated_pinned_paths);
+	if (stvfm_priv->seadrive_file_badges)
+		g_hash_table_destroy(stvfm_priv->seadrive_file_badges);
 #endif
 
 	g_free(stvfm_priv->root);
@@ -3371,37 +3372,47 @@ static void sond_treeviewfm_render_file_icon(GtkTreeViewColumn *column,
 
 		if (full_path) {
 #ifdef _WIN32
-			wchar_t *lp = prepare_long_path(full_path, NULL);
-			if (lp) {
-				DWORD attrs = GetFileAttributesW(lp);
-				g_free(lp);
-				if (attrs != INVALID_FILE_ATTRIBUTES) {
-					gboolean pinned   = (attrs & FILE_ATTRIBUTE_PINNED) != 0;
-					gboolean offline  = (attrs & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) != 0;
+			if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF) {
+				/* Reiner Hashtable-Lookup statt live GetFileAttributesW -
+				 * der Watcher hält seadrive_file_badges ohnehin schon
+				 * aktuell (Konsistenz mit dir_status, das schon vorher aus
+				 * der Hashtable las - Untersuchung "Ordner-Badges",
+				 * 09/2026). */
+				seadrive_badge = sond_treeviewfm_seadrive_get_file_badge(
+						stvfm, full_path);
+			} else if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_DIR) {
+				/* Ordner selbst werden vom Scan/Watcher NICHT in
+				 * seadrive_file_badges geführt (der bezieht sich nur auf
+				 * Dateien) - eigenes Attribut bleibt hier bewusst ein
+				 * live-Check, da Ordner praktisch nie PINNED/offline
+				 * markiert sind (seltener Sonderfall, kein Performance-
+				 * Thema). Aussagekräftig ist ohnehin der aggregierte
+				 * Teilbaum-Status (dir_status) darunter. */
+				wchar_t *lp = prepare_long_path(full_path, NULL);
+				if (lp) {
+					DWORD attrs = GetFileAttributesW(lp);
+					g_free(lp);
+					if (attrs != INVALID_FILE_ATTRIBUTES) {
+						gboolean pinned   = (attrs & FILE_ATTRIBUTE_PINNED) != 0;
+						gboolean offline  = (attrs & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) != 0;
 
-					/* Prioritätsreihenfolge s. Kommentar bei SondSeadriveBadge
-					 * (sond_icon_util.h): PENDING (gepinnt, noch nicht
-					 * hydriert) vor OFFLINE (nicht hydriert, nicht gepinnt)
-					 * vor PINNED (hydriert UND gepinnt). "unpinned, aber
-					 * lokal vorhanden" bekommt bewusst kein Icon - wie der
-					 * unmarkierte Normalzustand. */
-					if (offline && pinned)
-						seadrive_badge = SOND_SEADRIVE_BADGE_PENDING;
-					else if (offline)
-						seadrive_badge = SOND_SEADRIVE_BADGE_OFFLINE;
-					else if (pinned)
-						seadrive_badge = SOND_SEADRIVE_BADGE_PINNED;
+						/* Prioritätsreihenfolge s. Kommentar bei
+						 * SondSeadriveBadge (sond_icon_util.h). */
+						if (offline && pinned)
+							seadrive_badge = SOND_SEADRIVE_BADGE_PENDING;
+						else if (offline)
+							seadrive_badge = SOND_SEADRIVE_BADGE_OFFLINE;
+						else if (pinned)
+							seadrive_badge = SOND_SEADRIVE_BADGE_PINNED;
+					}
 				}
-			}
 
-			/* Für Verzeichnisse zusätzlich den aggregierten Teilbaum-Status
-			 * konsultieren, wenn das Ordner-eigene Attribut nichts zeigt
-			 * (Normalfall - Ordner selbst sind bei SeaDrive praktisch nie
-			 * PINNED/offline markiert; aussagekräftig ist, was darunter
-			 * liegt - Untersuchung SeaDrive-Coverage, 09/2026). */
-			if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_DIR &&
-					seadrive_badge == SOND_SEADRIVE_BADGE_NONE)
-				dir_status = sond_treeviewfm_seadrive_get_dir_status(stvfm, full_path);
+				/* Aggregierten Teilbaum-Status konsultieren, wenn das
+				 * Ordner-eigene Attribut nichts zeigt (Normalfall). */
+				if (seadrive_badge == SOND_SEADRIVE_BADGE_NONE)
+					dir_status = sond_treeviewfm_seadrive_get_dir_status(
+							stvfm, full_path);
+			}
 #endif
 			g_free(full_path);
 		}
@@ -3571,10 +3582,8 @@ gint sond_treeviewfm_set_root(SondTreeviewFM *stvfm, const gchar *root,
 		g_hash_table_remove_all(stvfm_priv->seadrive_pending_down_paths);
 	if (stvfm_priv->seadrive_dir_counts)
 		g_hash_table_remove_all(stvfm_priv->seadrive_dir_counts);
-	if (stvfm_priv->seadrive_not_hydrated_paths)
-		g_hash_table_remove_all(stvfm_priv->seadrive_not_hydrated_paths);
-	if (stvfm_priv->seadrive_hydrated_pinned_paths)
-		g_hash_table_remove_all(stvfm_priv->seadrive_hydrated_pinned_paths);
+	if (stvfm_priv->seadrive_file_badges)
+		g_hash_table_remove_all(stvfm_priv->seadrive_file_badges);
 	g_signal_emit(stvfm,
 			SOND_TREEVIEWFM_GET_CLASS(stvfm)->signal_seadrive_status, 0,
 			(guint)0, (guint)0);
@@ -3824,64 +3833,107 @@ sond_treeviewfm_seadrive_set_dir_counts(SondTreeviewFM *stvfm,
 }
 
 void
-sond_treeviewfm_seadrive_set_not_hydrated_paths(SondTreeviewFM *stvfm,
-		GHashTable *paths) {
+sond_treeviewfm_seadrive_set_file_badges(SondTreeviewFM *stvfm,
+		GHashTable *badges) {
 	SondTreeviewFMPrivate *p = sond_treeviewfm_get_instance_private(stvfm);
 
-	if (p->seadrive_not_hydrated_paths)
-		g_hash_table_destroy(p->seadrive_not_hydrated_paths);
-	p->seadrive_not_hydrated_paths = paths;
+	if (p->seadrive_file_badges)
+		g_hash_table_destroy(p->seadrive_file_badges);
+	p->seadrive_file_badges = badges;
+
+	gtk_widget_queue_draw(GTK_WIDGET(stvfm));
+	g_signal_emit(stvfm,
+			SOND_TREEVIEWFM_GET_CLASS(stvfm)->signal_seadrive_status, 0,
+			p->seadrive_pending_down,
+			p->seadrive_pending_up);
 }
 
-void
-sond_treeviewfm_seadrive_set_hydrated_pinned_paths(SondTreeviewFM *stvfm,
-		GHashTable *paths) {
-	SondTreeviewFMPrivate *p = sond_treeviewfm_get_instance_private(stvfm);
-
-	if (p->seadrive_hydrated_pinned_paths)
-		g_hash_table_destroy(p->seadrive_hydrated_pinned_paths);
-	p->seadrive_hydrated_pinned_paths = paths;
-}
-
-void
-sond_treeviewfm_seadrive_update_coverage(SondTreeviewFM *stvfm,
-		const gchar *file_full_path, gboolean not_hydrated,
-		gboolean hydrated_pinned, gint delta_total) {
+SondSeadriveBadge
+sond_treeviewfm_seadrive_get_file_badge(SondTreeviewFM *stvfm,
+		const gchar *file_full_path) {
 	SondTreeviewFMPrivate *p = NULL;
-	gint applied_not_hydrated = 0;
-	gint applied_hydrated_pinned = 0;
+	gpointer val = NULL;
+
+	if (!stvfm || !file_full_path)
+		return SOND_SEADRIVE_BADGE_NONE;
+
+	p = sond_treeviewfm_get_instance_private(stvfm);
+	if (!p->seadrive_file_badges)
+		return SOND_SEADRIVE_BADGE_NONE;
+
+	if (!g_hash_table_lookup_extended(p->seadrive_file_badges, file_full_path,
+			NULL, &val))
+		return SOND_SEADRIVE_BADGE_NONE;
+
+	return (SondSeadriveBadge) GPOINTER_TO_INT(val);
+}
+
+/* Leitet aus einem SondSeadriveBadge-Wert ab, ob die Datei für die Ordner-
+ * Coverage-Statistik als "nicht hydriert" bzw. "hydriert+gepinnt" zählt -
+ * einzige Stelle, an der diese Zuordnung getroffen wird (Konsistenz
+ * zwischen Scan und Live-Update, s. watcher_count_pending_down() in
+ * sond_treeviewfm_seadrive.c, die dieselbe Logik redundant, aber
+ * gleichlautend anwendet). */
+static void
+seadrive_badge_to_coverage(SondSeadriveBadge badge,
+		gboolean *out_not_hydrated, gboolean *out_hydrated_pinned) {
+	*out_not_hydrated = (badge == SOND_SEADRIVE_BADGE_OFFLINE ||
+			badge == SOND_SEADRIVE_BADGE_PENDING);
+	*out_hydrated_pinned = (badge == SOND_SEADRIVE_BADGE_PINNED);
+}
+
+void
+sond_treeviewfm_seadrive_update_file_badge(SondTreeviewFM *stvfm,
+		const gchar *file_full_path, SondSeadriveBadge new_badge,
+		gint delta_total) {
+	SondTreeviewFMPrivate *p = NULL;
+	SondSeadriveBadge old_badge = SOND_SEADRIVE_BADGE_NONE;
+	gpointer old_val = NULL;
+	gboolean old_not_hydrated = FALSE, old_hydrated_pinned = FALSE;
+	gboolean new_not_hydrated = FALSE, new_hydrated_pinned = FALSE;
+	gint delta_not_hydrated = 0, delta_hydrated_pinned = 0;
 
 	if (!stvfm || !file_full_path)
 		return;
 
 	p = sond_treeviewfm_get_instance_private(stvfm);
 
-	if (not_hydrated) {
-		if (!p->seadrive_not_hydrated_paths)
-			p->seadrive_not_hydrated_paths = g_hash_table_new_full(
-					g_str_hash, g_str_equal, g_free, NULL);
-		if (g_hash_table_add(p->seadrive_not_hydrated_paths,
-				g_strdup(file_full_path)))
-			applied_not_hydrated = +1;
-	} else if (p->seadrive_not_hydrated_paths &&
-			g_hash_table_remove(p->seadrive_not_hydrated_paths, file_full_path))
-		applied_not_hydrated = -1;
+	if (p->seadrive_file_badges &&
+			g_hash_table_lookup_extended(p->seadrive_file_badges,
+					file_full_path, NULL, &old_val))
+		old_badge = (SondSeadriveBadge) GPOINTER_TO_INT(old_val);
 
-	if (hydrated_pinned) {
-		if (!p->seadrive_hydrated_pinned_paths)
-			p->seadrive_hydrated_pinned_paths = g_hash_table_new_full(
-					g_str_hash, g_str_equal, g_free, NULL);
-		if (g_hash_table_add(p->seadrive_hydrated_pinned_paths,
-				g_strdup(file_full_path)))
-			applied_hydrated_pinned = +1;
-	} else if (p->seadrive_hydrated_pinned_paths &&
-			g_hash_table_remove(p->seadrive_hydrated_pinned_paths, file_full_path))
-		applied_hydrated_pinned = -1;
+	if (old_badge != new_badge) {
+		seadrive_badge_to_coverage(old_badge, &old_not_hydrated,
+				&old_hydrated_pinned);
+		seadrive_badge_to_coverage(new_badge, &new_not_hydrated,
+				&new_hydrated_pinned);
+		delta_not_hydrated = (gint) new_not_hydrated - (gint) old_not_hydrated;
+		delta_hydrated_pinned = (gint) new_hydrated_pinned -
+				(gint) old_hydrated_pinned;
 
-	if (applied_not_hydrated != 0 || applied_hydrated_pinned != 0 ||
+		if (new_badge == SOND_SEADRIVE_BADGE_NONE) {
+			if (p->seadrive_file_badges)
+				g_hash_table_remove(p->seadrive_file_badges, file_full_path);
+		} else {
+			if (!p->seadrive_file_badges)
+				p->seadrive_file_badges = g_hash_table_new_full(
+						g_str_hash, g_str_equal, g_free, NULL);
+			g_hash_table_insert(p->seadrive_file_badges,
+					g_strdup(file_full_path), GINT_TO_POINTER(new_badge));
+		}
+
+		gtk_widget_queue_draw(GTK_WIDGET(stvfm));
+		g_signal_emit(stvfm,
+				SOND_TREEVIEWFM_GET_CLASS(stvfm)->signal_seadrive_status, 0,
+				p->seadrive_pending_down,
+				p->seadrive_pending_up);
+	}
+
+	if (delta_not_hydrated != 0 || delta_hydrated_pinned != 0 ||
 			delta_total != 0)
 		sond_treeviewfm_seadrive_update_dir_coverage(stvfm, file_full_path,
-				applied_not_hydrated, applied_hydrated_pinned, delta_total);
+				delta_not_hydrated, delta_hydrated_pinned, delta_total);
 }
 
 SondSeadriveDirStatus

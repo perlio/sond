@@ -544,4 +544,46 @@
    fehlender Fehlermeldung. Fix: NULL-Check ergänzt (defensiv, generell
    gegen ähnliche Fälle).
 
+ Konsolidierung seadrive_file_badges + Erweiterung auf ZondTreeview
+ (11.09.2026, umgesetzt, auf Nutzer-Vorschlag): Nutzer wies auf Inkonsistenz
+ hin - der Ordner-Badge (oben) las schon aus Hashtables, der Datei-Badge
+ (sond_treeviewfm_render_file_icon()) fragte pro Renderzeile weiterhin live
+ GetFileAttributesW() ab, obwohl der Watcher den Zustand ohnehin laufend in
+ den beiden obigen Ground-Truth-Sets nachhaelt. Fix: die zwei bool-Sets
+ seadrive_not_hydrated_paths/seadrive_hydrated_pinned_paths ersetzt durch
+ EINE Hashtable seadrive_file_badges (Pfad -> SondSeadriveBadge-Wert,
+ Eintraege mit NONE werden nicht gespeichert) - dient jetzt gleichzeitig
+ als (a) Ground-Truth fuer den Datei-eigenen Badge (O(1)-Lookup statt
+ Syscall) und (b) Grundlage der Ordner-Coverage-Deltas. Neue Funktionen in
+ sond_treeviewfm.h/.c: sond_treeviewfm_seadrive_set_file_badges() (Ersatz
+ fuer den kompletten Stand nach Scan/Resync), _get_file_badge() (Lookup,
+ von render_file_icon() UND von ZondTreeview genutzt),
+ _update_file_badge() (Live-Watcher-Update, leitet die Ordner-Coverage-
+ Deltas intern aus dem alten/neuen Badge-Wert ab statt sie separat
+ mitzuschleppen). watcher_count_pending_down()/watcher_idle_cb()
+ (sond_treeviewfm_seadrive.c) entsprechend auf die eine Hashtable/das eine
+ WatcherIdleData-Feld (coverage_badge statt zwei Bools) umgestellt.
+
+ Direkt darauf aufbauend (Nutzerfrage: "sollte man die Badge-Anzeige auch
+ auf die anderen Baeume erweitern?"): zond_treeview_render_icon()
+ (zond_treeview.c, fuer BAUM_INHALT UND BAUM_AUSWERTUNG - beides Instanzen
+ derselben ZondTreeview-Klasse, ein Code-Aenderungspunkt reicht) bekommt
+ jetzt zusaetzlich zum bestehenden Index-Status-Overlay (unten links) ein
+ SeaDrive-Datei-Badge (unten rechts), per neuer Funktion
+ zond_treeview_get_seadrive_badge(): file_part (Pfad relativ zum BAUM_FS-
+ root, ggf. mit "//"-Suffix fuer eine interne Section/einen Anhang) wird
+ auf den Teil vor einem evtl. "//" gekuerzt und mit dem BAUM_FS-root zum
+ vollen Pfad zusammengesetzt, dann derselbe Hashtable-Lookup wie bei
+ BAUM_FS selbst. Kein zusaetzlicher DB- oder Dateizugriff pro Renderzeile:
+ zond_treeview_get_index_status() wurde dafuer in zwei Teile gesplittet
+ (zond_treeview_get_index_status_for_filepart() nimmt jetzt file_part/
+ section direkt entgegen), damit render_icon() zond_treeview_get_filepart_
+ and_section() nur EINMAL pro Zeile aufruft (Index- UND SeaDrive-Badge
+ nutzen dasselbe Ergebnis) statt wie zunaechst implementiert zweimal.
+ Live-Aktualisierung: neuer zweiter Handler cb_seadrive_status_redraw_
+ other_trees() (app_window.c), an dasselbe schon bestehende "seadrive-
+ status"-Signal von zond->treeview[BAUM_FS] gehaengt wie der Statusbar-
+ Handler - stoesst gtk_widget_queue_draw() auf BAUM_INHALT/BAUM_AUSWERTUNG
+ an (reines Neuzeichnen sichtbarer Zeilen, kein DB-Zugriff).
+
  */

@@ -505,6 +505,20 @@ static void cb_seadrive_status_app_window(SondTreeviewFM *stvfm,
 	gtk_label_set_text(label, text);
 	g_free(text);
 }
+
+/* Stößt ein Neuzeichnen von BAUM_INHALT/BAUM_AUSWERTUNG an, wenn sich der
+ * SeaDrive-Status in BAUM_FS ändert (Datei-Badges dort werden ja aus
+ * derselben, vom Watcher gepflegten seadrive_file_badges-Hashtable
+ * gelesen, s. zond_treeview_get_seadrive_badge()). Reines Neuzeichnen
+ * sichtbarer Zeilen - kein DB-Zugriff, kein spürbarer Overhead. */
+static void cb_seadrive_status_redraw_other_trees(SondTreeviewFM *stvfm,
+		guint pending_down, guint pending_up, gpointer user_data) {
+	Projekt *zond = user_data;
+	if (zond->treeview[BAUM_INHALT])
+		gtk_widget_queue_draw(GTK_WIDGET(zond->treeview[BAUM_INHALT]));
+	if (zond->treeview[BAUM_AUSWERTUNG])
+		gtk_widget_queue_draw(GTK_WIDGET(zond->treeview[BAUM_AUSWERTUNG]));
+}
 #endif
 
 void init_app_window(Projekt *zond) {
@@ -530,6 +544,10 @@ void init_app_window(Projekt *zond) {
 					zond->treeview[BAUM_FS], "seadrive-status",
 					G_CALLBACK(cb_seadrive_status_app_window),
 					label_seadrive);
+
+		g_signal_connect(
+				zond->treeview[BAUM_FS], "seadrive-status",
+				G_CALLBACK(cb_seadrive_status_redraw_other_trees), zond);
 	}
 #endif
 

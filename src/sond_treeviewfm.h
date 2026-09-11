@@ -153,25 +153,37 @@ void     sond_treeviewfm_seadrive_set_pending_down_paths(SondTreeviewFM*,
  * full (Pfad -> SondSeadriveDirCounts*), Ownership geht an stvfm über. */
 void     sond_treeviewfm_seadrive_set_dir_counts(SondTreeviewFM*,
              GHashTable *dir_counts);
-/* Ersetzen die Ground-Truth-Sets für die Ordner-Coverage-Zähler
- * (Initialscan/Resync) - transfer full, Ownership geht an stvfm über
- * (String-Sets, Werte irrelevant), analog set_pending_down_paths(). */
-void     sond_treeviewfm_seadrive_set_not_hydrated_paths(SondTreeviewFM*,
-             GHashTable *paths);
-void     sond_treeviewfm_seadrive_set_hydrated_pinned_paths(SondTreeviewFM*,
-             GHashTable *paths);
-/* Aktualisiert den Ordner-Coverage-Badge für EINE Datei anhand ihres
- * aktuellen Zustands (Ground-Truth-Sets seadrive_not_hydrated_paths/
- * seadrive_hydrated_pinned_paths verhindern Drift bei doppelten/
- * verpassten Events, analog seadrive_pending_down_paths). not_hydrated/
- * hydrated_pinned = FALSE/FALSE für eine gelöschte Datei (existiert nicht
- * mehr, wird also aus beiden Sets entfernt, falls enthalten). delta_total:
- * +1/-1/0 wie bei sond_treeviewfm_seadrive_update_dir_coverage(). Ruft
- * diese intern mit den TATSÄCHLICH angewandten Deltas auf (nur wenn ein
- * Set sich wirklich geändert hat). */
-void     sond_treeviewfm_seadrive_update_coverage(SondTreeviewFM*,
-             const gchar *file_full_path, gboolean not_hydrated,
-             gboolean hydrated_pinned, gint delta_total);
+/* Ersetzt die komplette Ground-Truth-Map für die Datei-Badges (Initialscan/
+ * Resync) - transfer full, Ownership geht an stvfm über. Pfad ->
+ * GINT_TO_POINTER(SondSeadriveBadge); Einträge mit Wert NONE werden nicht
+ * gespeichert (ein Lookup-Fehlschlag bedeutet ohnehin NONE) - hält die Map
+ * kleiner, da der Normalfall (hydriert, nicht gepinnt) die Mehrheit ist. */
+void     sond_treeviewfm_seadrive_set_file_badges(SondTreeviewFM*,
+             GHashTable *badges);
+/* Liefert den aktuellen, vom Scan/Watcher gepflegten Datei-Badge für
+ * file_full_path (voller Pfad), oder NONE, wenn kein Eintrag existiert.
+ * Ersetzt einen früheren LIVEN GetFileAttributesW-Aufruf pro Renderzeile
+ * durch einen reinen O(1)-Hashtable-Lookup - der Watcher hält die Map
+ * ohnehin schon aktuell (Untersuchung "Ordner-Badges", 09/2026: der
+ * Ordner-Status nutzte das Muster schon, der Datei-Badge inkonsistenter-
+ * weise noch nicht). Auch von anderen Bäumen nutzbar (z.B. ZondTreeview),
+ * die auf dieselben Datei-Pfade verweisen - dafür stvfm auf die FS-Baum-
+ * Instanz des Projekts (BAUM_FS) beziehen. */
+SondSeadriveBadge sond_treeviewfm_seadrive_get_file_badge(SondTreeviewFM*,
+             const gchar *file_full_path);
+/* Aktualisiert den Datei-Badge für GENAU eine Datei (Ground-Truth-Map
+ * seadrive_file_badges verhindert Drift bei doppelten/verpassten Events,
+ * analog seadrive_pending_down_paths) UND zieht daraus abgeleitet die
+ * Ordner-Coverage-Statistik alle Vorfahren-Verzeichnisse hoch nach (s.
+ * sond_treeviewfm_seadrive_update_dir_coverage()) - EIN Aufruf pro Datei-
+ * Ereignis genügt, weil sich beides aus demselben new_badge-Wert ableitet
+ * (PENDING/OFFLINE -> zählt als "nicht hydriert", PINNED -> zählt als
+ * "hydriert+gepinnt", NONE -> keins von beidem). new_badge=NONE für eine
+ * gelöschte Datei (existiert nicht mehr). delta_total: +1 (ADDED/RENAMED_
+ * NEW_NAME) / -1 (REMOVED/RENAMED_OLD_NAME) / 0 (MODIFIED). */
+void     sond_treeviewfm_seadrive_update_file_badge(SondTreeviewFM*,
+             const gchar *file_full_path, SondSeadriveBadge new_badge,
+             gint delta_total);
 /* Passt die Ordner-Statistik für GENAU dir_path an (kein Ancestor-Walk -
  * das macht sond_treeviewfm_seadrive_update_dir_coverage() für eine Datei
  * automatisch). Legt den Eintrag bei Bedarf an; negative Deltas werden bei

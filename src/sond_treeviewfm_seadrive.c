@@ -151,13 +151,15 @@ typedef struct {
                                    * existierte schon) - für den Ordner-
                                    * Coverage-Badge (Gesamtzahl Dateien im
                                    * Teilbaum). */
-    gboolean        coverage_not_hydrated;    /* aktueller Hydrierungsstatus
-                                                * der Datei für den Ordner-
-                                                * Coverage-Badge (FALSE bei
-                                                * REMOVED - Datei zählt dann
-                                                * gar nicht mehr mit, s.
-                                                * delta_total). */
-    gboolean        coverage_hydrated_pinned; /* dito für "hydriert+gepinnt" */
+    SondSeadriveBadge coverage_badge; /* aktueller Badge-Wert der Datei
+                                        * (NONE bei REMOVED - Datei zählt
+                                        * dann gar nicht mehr mit, s.
+                                        * delta_total). Wird sowohl für den
+                                        * Datei-eigenen Badge (Ground-Truth-
+                                        * Map) als auch zur Herleitung der
+                                        * Ordner-Coverage-Deltas verwendet,
+                                        * s. sond_treeviewfm_seadrive_update_
+                                        * file_badge(). */
     gchar          *path_down;       /* Pfad der hydrierten Datei, NULL sonst */
     gchar          *path_dehydrated; /* Pfad der dehydrierten Datei, NULL sonst */
     gchar          *path_up;     /* NULL oder Pfad für pending_up-Änderung */
@@ -172,13 +174,12 @@ static gboolean watcher_idle_cb(gpointer user_data)
             d->path_pending_down, d->delta_down,
             d->path_up, d->up_pending);
 
-    /* Ordner-Coverage-Badge unabhängig von obigem pending_down-Zähler
-     * nachziehen (andere Fragestellung, s. SondSeadriveDirCounts) -
-     * path_pending_down ist in beiden Aufrufstellen unten immer gesetzt. */
+    /* Datei-eigenen Badge (Ground-Truth-Map) UND davon abgeleitet die
+     * Ordner-Coverage aktualisieren - path_pending_down ist in beiden
+     * Aufrufstellen unten immer gesetzt. */
     if (d->path_pending_down)
-        sond_treeviewfm_seadrive_update_coverage(d->stvfm,
-                d->path_pending_down, d->coverage_not_hydrated,
-                d->coverage_hydrated_pinned, d->delta_total);
+        sond_treeviewfm_seadrive_update_file_badge(d->stvfm,
+                d->path_pending_down, d->coverage_badge, d->delta_total);
 
     /* Wenn Datei hydrated: Knoten im Baum korrigieren */
     if (d->path_down)
@@ -203,17 +204,18 @@ static gboolean watcher_idle_cb(gpointer user_data)
 /* Trägt die vollen Pfade aller PINNED+offline Dateien unter dir_utf8
  * (rekursiv) in out_paths ein (Set, Keys = g_strdup'te Pfade - für den
  * Projekt-weiten "wird gerade heruntergeladen"-Zähler, seadrive_pending_
- * down), analog alle nicht hydrierten Dateien in out_not_hydrated_paths
- * und alle hydriert+gepinnten in out_hydrated_pinned_paths (Ground-Truth-
- * Sets für den Ordner-Coverage-Badge, s. sond_treeviewfm_seadrive_update_
- * coverage()) UND für JEDES durchlaufene Verzeichnis dessen rekursive
- * {not_hydrated,hydrated_pinned,total}-Statistik in out_dir_counts (Pfad ->
- * SondSeadriveDirCounts*). Wird sowohl für den Initialscan als auch für
- * einen Resync nach Buffer-Overflow verwendet (s. WatcherRescanData) -
- * beide Fälle brauchen die kompletten Pfad-Sets/die komplette Ordner-
- * Statistik, nicht nur eine Anzahl, damit spätere Einzel-Events (Add/
- * Remove/Hydration) korrekt gegen ein Set/eine Statistik abgeglichen statt
- * blind auf einen Zähler angewandt werden können.
+ * down), sowie für JEDE Datei mit einem Badge != NONE dessen Wert in
+ * out_file_badges (Pfad -> GINT_TO_POINTER(SondSeadriveBadge) - Ground-
+ * Truth-Map für den Datei-eigenen Badge UND Grundlage der Ordner-Coverage-
+ * Statistik, s. sond_treeviewfm_seadrive_update_file_badge()) UND für JEDES
+ * durchlaufene Verzeichnis dessen rekursive {not_hydrated,hydrated_pinned,
+ * total}-Statistik in out_dir_counts (Pfad -> SondSeadriveDirCounts*). Wird
+ * sowohl für den Initialscan als auch für einen Resync nach Buffer-
+ * Overflow verwendet (s. WatcherRescanData) - beide Fälle brauchen die
+ * kompletten Pfad-Sets/die komplette Ordner-Statistik, nicht nur eine
+ * Anzahl, damit spätere Einzel-Events (Add/Remove/Hydration) korrekt gegen
+ * ein Set/eine Statistik abgeglichen statt blind auf einen Zähler
+ * angewandt werden können.
  *
  * out_not_hydrated/out_hydrated_pinned/out_total (können NULL sein):
  * liefern die für dir_utf8 selbst ermittelte rekursive Summe an den
@@ -222,7 +224,7 @@ static gboolean watcher_idle_cb(gpointer user_data)
  * müssen. */
 static void watcher_count_pending_down(const gchar *dir_utf8,
         SondTreeviewFM *stvfm, GHashTable *out_paths,
-        GHashTable *out_not_hydrated_paths, GHashTable *out_hydrated_pinned_paths,
+        GHashTable *out_file_badges,
         GHashTable *out_dir_counts, guint *out_not_hydrated,
         guint *out_hydrated_pinned, guint *out_total)
 {
@@ -267,7 +269,7 @@ static void watcher_count_pending_down(const gchar *dir_utf8,
         if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
             guint sub_not_hydrated = 0, sub_hydrated_pinned = 0, sub_total = 0;
             watcher_count_pending_down(sub, stvfm, out_paths,
-                    out_not_hydrated_paths, out_hydrated_pinned_paths,
+                    out_file_badges,
                     out_dir_counts, &sub_not_hydrated, &sub_hydrated_pinned,
                     &sub_total);
             dir_not_hydrated += sub_not_hydrated;
@@ -277,21 +279,35 @@ static void watcher_count_pending_down(const gchar *dir_utf8,
         } else {
             gboolean pinned  = (fd.dwFileAttributes & FILE_ATTRIBUTE_PINNED) != 0;
             gboolean offline = (fd.dwFileAttributes & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) != 0;
+            SondSeadriveBadge badge = SOND_SEADRIVE_BADGE_NONE;
+
+            /* Dieselbe Prioritätsreihenfolge wie in
+             * sond_treeviewfm_render_file_icon()/sond_icon_util.h. */
+            if (offline && pinned)
+                badge = SOND_SEADRIVE_BADGE_PENDING;
+            else if (offline)
+                badge = SOND_SEADRIVE_BADGE_OFFLINE;
+            else if (pinned)
+                badge = SOND_SEADRIVE_BADGE_PINNED;
 
             dir_total++;
-            if (offline) {
+            if (badge == SOND_SEADRIVE_BADGE_PENDING ||
+                    badge == SOND_SEADRIVE_BADGE_OFFLINE)
                 dir_not_hydrated++;
-                g_hash_table_add(out_not_hydrated_paths, g_strdup(sub));
-                /* Projekt-weiter "wird gerade heruntergeladen"-Zähler
-                 * (seadrive_pending_down) bleibt bei der engeren
-                 * PINNED+offline-Definition - andere Fragestellung als
-                 * die Ordner-Coverage-Statistik oben. */
-                if (pinned)
-                    g_hash_table_add(out_paths, g_strdup(sub));
-            } else if (pinned) {
+            else if (badge == SOND_SEADRIVE_BADGE_PINNED)
                 dir_hydrated_pinned++;
-                g_hash_table_add(out_hydrated_pinned_paths, g_strdup(sub));
-            }
+
+            if (badge != SOND_SEADRIVE_BADGE_NONE)
+                g_hash_table_insert(out_file_badges, g_strdup(sub),
+                        GINT_TO_POINTER(badge));
+
+            /* Projekt-weiter "wird gerade heruntergeladen"-Zähler
+             * (seadrive_pending_down) bleibt bei der engeren
+             * PINNED+offline-Definition - andere Fragestellung als
+             * die Ordner-Coverage-Statistik oben. */
+            if (badge == SOND_SEADRIVE_BADGE_PENDING)
+                g_hash_table_add(out_paths, g_strdup(sub));
+
             g_free(sub);
         }
     } while (FindNextFileW(h, &fd));
@@ -315,51 +331,46 @@ done:
 
 typedef struct {
     SondTreeviewFM *stvfm;
-    GHashTable     *paths;               /* transfer full - s. sond_treeviewfm_seadrive_set_pending_down_paths() */
-    GHashTable     *not_hydrated_paths;   /* transfer full - s. sond_treeviewfm_seadrive_set_not_hydrated_paths() */
-    GHashTable     *hydrated_pinned_paths;/* transfer full - s. sond_treeviewfm_seadrive_set_hydrated_pinned_paths() */
-    GHashTable     *dir_counts; /* transfer full - s. sond_treeviewfm_seadrive_set_dir_counts() */
+    GHashTable     *paths;        /* transfer full - s. sond_treeviewfm_seadrive_set_pending_down_paths() */
+    GHashTable     *file_badges;  /* transfer full - s. sond_treeviewfm_seadrive_set_file_badges() */
+    GHashTable     *dir_counts;   /* transfer full - s. sond_treeviewfm_seadrive_set_dir_counts() */
 } WatcherRescanData;
 
 static gboolean watcher_rescan_idle_cb(gpointer user_data)
 {
     WatcherRescanData *d = user_data;
-    /* Ersetzt die kompletten Ground-Truth-Sets/die Ordner-Statistik. Beim
+    /* Ersetzt die komplette Ground-Truth-Map/die Ordner-Statistik. Beim
      * allerersten Aufruf (Initialscan) sind sie noch leer; bei einem
      * späteren Resync (Buffer-Overflow) wird der alte, ggf. inzwischen
      * falsche Stand komplett verworfen - Watcher-Events, die während des
      * Scans gepuffert wurden, kommen danach und korrigieren ggf. noch
      * einmal nach. */
     sond_treeviewfm_seadrive_set_pending_down_paths(d->stvfm, d->paths);
-    sond_treeviewfm_seadrive_set_not_hydrated_paths(d->stvfm, d->not_hydrated_paths);
-    sond_treeviewfm_seadrive_set_hydrated_pinned_paths(d->stvfm, d->hydrated_pinned_paths);
+    sond_treeviewfm_seadrive_set_file_badges(d->stvfm, d->file_badges);
     sond_treeviewfm_seadrive_set_dir_counts(d->stvfm, d->dir_counts);
     g_free(d);
     return G_SOURCE_REMOVE;
 }
 
 /* Stößt einen kompletten Rescan von root an und ersetzt anschließend (per
- * g_idle_add, UI-Thread) die kompletten Ground-Truth-Sets und die Ordner-
+ * g_idle_add, UI-Thread) die komplette Ground-Truth-Map und die Ordner-
  * Statistik. Gemeinsam von Initialscan und Buffer-Overflow-Resync genutzt. */
 static void watcher_rescan(SondTreeviewFM *stvfm, const gchar *root)
 {
     GHashTable *paths = g_hash_table_new_full(
             g_str_hash, g_str_equal, g_free, NULL);
-    GHashTable *not_hydrated_paths = g_hash_table_new_full(
-            g_str_hash, g_str_equal, g_free, NULL);
-    GHashTable *hydrated_pinned_paths = g_hash_table_new_full(
+    GHashTable *file_badges = g_hash_table_new_full(
             g_str_hash, g_str_equal, g_free, NULL);
     GHashTable *dir_counts = g_hash_table_new_full(
             g_str_hash, g_str_equal, g_free, g_free);
-    watcher_count_pending_down(root, stvfm, paths, not_hydrated_paths,
-            hydrated_pinned_paths, dir_counts, NULL, NULL, NULL);
+    watcher_count_pending_down(root, stvfm, paths, file_badges,
+            dir_counts, NULL, NULL, NULL);
 
     WatcherRescanData *d = g_new0(WatcherRescanData, 1);
     d->dir_counts = dir_counts;
     d->stvfm = stvfm;
     d->paths = paths;
-    d->not_hydrated_paths = not_hydrated_paths;
-    d->hydrated_pinned_paths = hydrated_pinned_paths;
+    d->file_badges = file_badges;
     g_idle_add(watcher_rescan_idle_cb, d);
 }
 
@@ -577,15 +588,18 @@ gpointer sond_treeviewfm_seadrive_watcher_thread(gpointer user_data)
                                         gboolean offline  = (attrs & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) != 0;
                                         gboolean unpinned = (attrs & FILE_ATTRIBUTE_UNPINNED) != 0;
 
-                                        /* Ordner-Coverage-Badge: dieselbe
-                                         * Definition wie im Scan
-                                         * (watcher_count_pending_down()) -
-                                         * "nicht hydriert" unabhängig vom
-                                         * Pin, "hydriert+gepinnt" nur wenn
-                                         * beides zutrifft. */
-                                        d->coverage_not_hydrated = offline;
-                                        d->coverage_hydrated_pinned =
-                                                (!offline && pinned);
+                                        /* Datei-Badge: dieselbe Prioritäts-
+                                         * reihenfolge wie im Scan
+                                         * (watcher_count_pending_down()) /
+                                         * render_file_icon(). */
+                                        if (offline && pinned)
+                                            d->coverage_badge = SOND_SEADRIVE_BADGE_PENDING;
+                                        else if (offline)
+                                            d->coverage_badge = SOND_SEADRIVE_BADGE_OFFLINE;
+                                        else if (pinned)
+                                            d->coverage_badge = SOND_SEADRIVE_BADGE_PINNED;
+                                        else
+                                            d->coverage_badge = SOND_SEADRIVE_BADGE_NONE;
 
                                         if (pinned && offline)
                                             d->delta_down = +1; /* gepinnt, noch nicht lokal */
