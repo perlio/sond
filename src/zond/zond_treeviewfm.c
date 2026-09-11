@@ -14,6 +14,7 @@
 #include "zond_tree_store.h"
 
 #include "10init/app_window.h"
+#include "10init/headerbar.h"
 #include "20allgemein/project.h"
 #include "40viewer/viewer.h"
 #include "40viewer/document.h"
@@ -26,6 +27,18 @@
 
 typedef struct {
 	Projekt *zond;
+
+	/* Übergabe zond_treeviewfm_before_delete() -> zond_treeviewfm_after():
+	 * Pfad des gerade gelöschten Knotens, damit NACH der tatsächlichen
+	 * physischen Löschung (also erst im "after"-Handler, wenn
+	 * g_dir_open()/g_dir_read_name() den Knoten nicht mehr sehen) geprüft
+	 * werden kann, ob das Elternverzeichnis dadurch jetzt vollständig
+	 * abgedeckt ist (sond_index_ctx_coverage_try_collapse()). NULL, wenn
+	 * für die aktuelle Löschung keine Coverage-Prüfung nötig/möglich ist.
+	 * Wird in before_delete() ausschließlich unmittelbar vor dem
+	 * erfolgreichen return gesetzt, damit bei einem Fehler-return (kein
+	 * "after" wird dann emittiert) nichts hängen bleibt. */
+	gchar *pending_delete_path;
 } ZondTreeviewFMPrivate;
 
 G_DEFINE_TYPE_WITH_PRIVATE(ZondTreeviewFM, zond_treeviewfm, SOND_TYPE_TREEVIEWFM)
@@ -263,6 +276,66 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 		}
 	}
 
+	/* Erst jetzt, unmittelbar vor dem garantiert erfolgreichen return, für
+	 * zond_treeviewfm_after() vormerken: nach der gleich folgenden
+	 * physischen Löschung könnte das Elternverzeichnis von path vollständig
+	 * abgedeckt sein (die gelöschte Datei war ja evtl. gerade der einzige
+	 * "Lückenfüller") - s. Kommentar bei pending_delete_path. Bewusst erst
+	 * hier (nach allen obigen Fehler-return-Pfaden, bei denen kein "after"
+	 * emittiert wird) gesetzt, damit nichts hängen bleibt. */
+	if (priv->zond->wctx && priv->zond->wctx->index_ctx && !section) {
+		g_free(priv->pending_delete_path);
+		priv->pending_delete_path = g_strdup(path);
+	}
+
+	return 0;
+}
+
+/* Analogon zu zond_treeviewfm_before_move(), aber für echtes Kopieren
+ * (nicht Ausschneiden/Verschieben): sond_tvfm_item_copy() wird nicht nur
+ * beim Verschieben, sondern auch beim reinen Kopieren (Kopieren/Einfügen)
+ * aufgerufen und emittiert dabei selbst kein Signal - deshalb sendet
+ * process_stvfm_item_move_or_copy() in sond_treeviewfm.c in diesem Fall
+ * "before-insert". Anders als bei before-move gibt es keinen alten Pfad,
+ * der umbenannt werden müsste; es genügt, die Ziel-Abdeckung aufzulösen,
+ * weil dort gleich neuer, noch ungeprüfter Inhalt entsteht. Best-effort:
+ * ein Fehler hier soll das eigentliche Kopieren nicht verhindern.
+ * (Bug-Fix 11.09.2026: Kopieren einer nicht indizierten Datei in einen
+ * als komplett indiziert markierten Ordner ließ den Ordner fälschlich
+ * grün, weil dieser Pfad bislang gar nicht auf Coverage hörte.) */
+static gint zond_treeviewfm_before_insert(SondTreeviewFM* stvfm,
+		SondTVFMItem* stvfm_item, SondTVFMItem* stvfm_item_parent,
+		gchar const* base_new, gint index_to, GError **error) {
+	g_autofree gchar* prefix_new = NULL;
+	GError *idx_err = NULL;
+
+	ZondTreeviewFMPrivate *ztvfm_priv = zond_treeviewfm_get_instance_private(
+			ZOND_TREEVIEWFM(stvfm));
+
+	if (!ztvfm_priv->zond->wctx || !ztvfm_priv->zond->wctx->index_ctx)
+		return 0;
+
+	prefix_new = get_path_from_stvfm_item(stvfm_item_parent);
+
+	if (*prefix_new != '\0') { //wenn nicht root-Verzeichnis
+		if (!sond_tvfm_item_get_path_or_section(stvfm_item_parent))
+			prefix_new = add_string(prefix_new, g_strdup("//"));
+		else
+			prefix_new = add_string(prefix_new, g_strdup("/"));
+	}
+
+	if (SOND_IS_FILE_PART_GMESSAGE(sond_tvfm_item_get_sond_file_part(stvfm_item_parent)))
+		prefix_new = add_string(prefix_new, g_strdup("alpha"));
+	else
+		prefix_new = add_string(prefix_new, g_strdup(base_new));
+
+	if (!sond_index_ctx_coverage_invalidate(ztvfm_priv->zond->wctx->index_ctx,
+			prefix_new, ztvfm_priv->zond->project_dir, &idx_err)) {
+		LOG_WARN("%s: sond_index_ctx_coverage_invalidate('%s'): %s", __func__,
+				prefix_new, idx_err ? idx_err->message : "?");
+		g_clear_error(&idx_err);
+	}
+
 	return 0;
 }
 
@@ -299,6 +372,10 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 	//Kontext für "after" setzen: move ist immer dual (Bit 0 = 1), Bit 1 = changed vor der Transaktion
 	*ctx = GINT_TO_POINTER(1 | (ztvfm_priv->zond->dbase_zond->changed ? 2 : 0));
 
+	LOG_INFO("%s: DIAG aufgerufen, wctx=%p index_ctx=%p", __func__,
+			(void*) ztvfm_priv->zond->wctx,
+			(void*) (ztvfm_priv->zond->wctx ? ztvfm_priv->zond->wctx->index_ctx : NULL));
+
 	/* Index-DB-Transaktion öffnen und Pfad umbenennen */
 	if (ztvfm_priv->zond->wctx && ztvfm_priv->zond->wctx->index_ctx) {
 		GError *idx_err = NULL;
@@ -318,8 +395,10 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 		 * Reihenfolge wichtig: muss VOR sond_index_ctx_rename_file()
 		 * laufen, sonst würde der gerade erst umbenannte, korrekte eigene
 		 * Eintrag der verschobenen Datei gleich wieder mitgelöscht. */
+		LOG_INFO("%s: DIAG prefix_old='%s' prefix_new='%s'", __func__,
+				prefix_old, prefix_new);
 		if (!sond_index_ctx_coverage_invalidate(ztvfm_priv->zond->wctx->index_ctx,
-				prefix_new, &idx_err)) {
+				prefix_new, ztvfm_priv->zond->project_dir, &idx_err)) {
 			sqlite3_exec(ztvfm_priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
 			if (error) *error = g_error_new(G_IO_ERROR, G_IO_ERROR_FAILED,
 					"%s: sond_index_ctx_coverage_invalidate: %s", __func__,
@@ -441,6 +520,33 @@ static void zond_treeviewfm_after(SondTreeviewFM* stvfm,
 				g_clear_error(&error_int);
 			}
 		}
+		/* Löschung war erfolgreich: falls dabei ein Pfad zur
+		 * Coverage-Nachprüfung vorgemerkt wurde (s. pending_delete_path),
+		 * jetzt - und nur jetzt, weil der Knoten physisch weg ist und ein
+		 * echtes Verzeichnis-Listing ihn nicht mehr sieht - prüfen, ob das
+		 * Elternverzeichnis dadurch vollständig abgedeckt ist (die gerade
+		 * gelöschte Datei war ja evtl. der einzige "Lückenfüller"). Bug-Fix
+		 * 11.09.2026: sonst blieb ein Ordner nach Löschen der zuvor
+		 * hineinkopierten, nicht indizierten Datei dauerhaft "orange"
+		 * (gemischt), obwohl wieder alle verbliebenen Geschwister einzeln
+		 * abgedeckt waren - es fehlte lediglich das erneute Zusammenfassen
+		 * (Coalescing) zu einem Ordner-Eintrag. Vor dem COMMIT, damit der
+		 * evtl. neu gesetzte coverage-Eintrag Teil derselben Transaktion
+		 * ist wie das Löschen selbst. */
+		if (priv->pending_delete_path && priv->zond->wctx &&
+				priv->zond->wctx->index_ctx) {
+			GError *collapse_error = NULL;
+
+			if (!sond_index_ctx_coverage_try_collapse(
+					priv->zond->wctx->index_ctx, priv->pending_delete_path,
+					priv->zond->project_dir, &collapse_error)) {
+				LOG_WARN("%s: sond_index_ctx_coverage_try_collapse('%s'): %s",
+						__func__, priv->pending_delete_path,
+						collapse_error ? collapse_error->message : "?");
+				g_clear_error(&collapse_error);
+			}
+		}
+
 		if (priv->zond->wctx && priv->zond->wctx->index_ctx)
 			sqlite3_exec(priv->zond->wctx->index_ctx->db, "COMMIT;", NULL, NULL, NULL);
 	}
@@ -456,6 +562,8 @@ static void zond_treeviewfm_after(SondTreeviewFM* stvfm,
 
 	if (dual_write)
 		project_reset_changed(priv->zond, changed_before);
+
+	g_clear_pointer(&priv->pending_delete_path, g_free);
 
 	return;
 }
@@ -948,6 +1056,10 @@ static gboolean zond_treeviewfm_get_section_page_range(SondTVFMItem *stvfm_item,
 }
 
 static void zond_treeviewfm_finalize(GObject *obj) {
+	ZondTreeviewFMPrivate *priv = zond_treeviewfm_get_instance_private(
+			ZOND_TREEVIEWFM(obj));
+
+	g_clear_pointer(&priv->pending_delete_path, g_free);
 
 	G_OBJECT_CLASS(zond_treeviewfm_parent_class)->finalize(obj);
 }
@@ -980,11 +1092,15 @@ static void zond_treeviewfm_class_init(ZondTreeviewFMClass *klass) {
 	g_menu_append_section(gmenu, NULL, G_MENU_MODEL(sec_jump));
 	g_object_unref(sec_jump);
 
+	/* "Index"-Untermen\u00fc analog zum Hauptmen\u00fc (headerbar.c), hier aber -
+	 * wie bei "SeaDrive" im Kontextmen\u00fc - bewusst nur "Auswahl" je Aktion,
+	 * kein "Gesamtes Projekt" (Nutzerwunsch 11.09.2026: Parit\u00e4t der
+	 * Men\u00fcstruktur zwischen Index und SeaDrive). */
 	GMenu *sec_idx = g_menu_new();
 	GMenu *sub_idx = g_menu_new();
-	g_menu_append(sub_idx, "Gesamtes Projektverzeichnis", "win.indexsuche");
-	g_menu_append(sub_idx, "Ausgew\u00e4hlte Punkte",    "stv.indexsuche-sel");
-	g_menu_append_submenu(sec_idx, "Index durchsuchen", G_MENU_MODEL(sub_idx));
+	g_menu_append(sub_idx, "Erstellen",   "stv.index-erstellen-sel");
+	g_menu_append(sub_idx, "Durchsuchen", "stv.indexsuche-sel");
+	g_menu_append_submenu(sec_idx, "Index", G_MENU_MODEL(sub_idx));
 	g_object_unref(sub_idx);
 	g_menu_append_section(gmenu, NULL, G_MENU_MODEL(sec_idx));
 	g_object_unref(sec_idx);
@@ -1052,6 +1168,15 @@ static void zond_treeviewfm_action_indexsuche_auswahl(GSimpleAction *a,
 	zond_indexsuche_activate_fuer_baum(zond, zond->baum_active);
 }
 
+static void zond_treeviewfm_action_index_erstellen_auswahl(GSimpleAction *a,
+		GVariant *p, gpointer d) {
+	Projekt *zond = (Projekt*) d;
+
+	/* Analogon zu zond_treeviewfm_action_indexsuche_auswahl() oberhalb,
+	 * s. dortigen Kommentar. */
+	zond_index_erstellen_activate_fuer_baum(zond, zond->baum_active);
+}
+
 static void zond_treeviewfm_init_contextmenu(ZondTreeviewFM *ztvfm,
 		Projekt *zond) {
 	/* Nur GActions registrieren — GMenu-Sections wurden bereits in
@@ -1070,6 +1195,12 @@ static void zond_treeviewfm_init_contextmenu(ZondTreeviewFM *ztvfm,
 			G_CALLBACK(zond_treeviewfm_action_indexsuche_auswahl), zond);
 	g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act_idx_sel));
 	g_object_unref(act_idx_sel);
+
+	GSimpleAction *act_idx_erst_sel = g_simple_action_new("index-erstellen-sel", NULL);
+	g_signal_connect(act_idx_erst_sel, "activate",
+			G_CALLBACK(zond_treeviewfm_action_index_erstellen_auswahl), zond);
+	g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act_idx_erst_sel));
+	g_object_unref(act_idx_erst_sel);
 }
 
 /* Getter fuer sond_treeviewfm_set_index_ctx_func(): liefert den aktuellen
@@ -1102,6 +1233,8 @@ ZondTreeviewFM* zond_treeviewfm_new(Projekt* zond) {
 			G_CALLBACK(zond_treeviewfm_before_delete), NULL);
 	g_signal_connect(ztvfm, "before-move",
 			G_CALLBACK(zond_treeviewfm_before_move), NULL);
+	g_signal_connect(ztvfm, "before-insert",
+			G_CALLBACK(zond_treeviewfm_before_insert), NULL);
 	g_signal_connect(ztvfm, "after",
 			G_CALLBACK(zond_treeviewfm_after), NULL);
 

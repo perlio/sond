@@ -190,7 +190,8 @@ static void viewer_update_index_for_save(PdfViewer *pdfv, DisplayedDocument *dd)
 					g_clear_error(&error);
 				}
 
-				if (!sond_index_ctx_coverage_invalidate(index_ctx, filename, &error)) {
+				if (!sond_index_ctx_coverage_invalidate(index_ctx, filename,
+						pdfv->zond->project_dir, &error)) {
 					LOG_WARN("%s\n", error->message);
 					g_clear_error(&error);
 				}
@@ -246,7 +247,8 @@ static void viewer_update_index_for_save(PdfViewer *pdfv, DisplayedDocument *dd)
 			}
 			g_array_unref(pages_to_write);
 
-			if (!sond_index_ctx_coverage_invalidate(index_ctx, filename, &error)) {
+			if (!sond_index_ctx_coverage_invalidate(index_ctx, filename,
+					pdfv->zond->project_dir, &error)) {
 				LOG_WARN("%s\n", error->message);
 				g_clear_error(&error);
 			}

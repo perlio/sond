@@ -1360,6 +1360,9 @@ static gint sond_tvfm_item_move(SondTVFMItem* stvfm_item,
 	SondTVFMItemPrivate* stvfm_item_parent_priv =
 			sond_tvfm_item_get_instance_private(stvfm_item_parent);
 
+	LOG_INFO("%s: DIAG base='%s' same_stvfm=%d", __func__, base,
+			stvfm_item_priv->stvfm == stvfm_item_parent_priv->stvfm);
+
 	if (stvfm_item_priv->stvfm == stvfm_item_parent_priv->stvfm)
 		g_signal_emit(stvfm_item_priv->stvfm,
 				SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->signal_before_move, 0,
@@ -1610,26 +1613,23 @@ void sond_treeviewfm_add_base_menu(GMenu *gmenu) {
 	g_menu_append_section(gmenu, NULL, G_MENU_MODEL(sec_search));
 	g_object_unref(sec_search);
 
-	/* SeaDrive-Section */
+	/* SeaDrive-Section: eigenes Untermen\u00fc "SeaDrive" (Nutzer-Feedback
+	 * 11.09.2026, damit klar ist, dass die drei Punkte zusammengeh\u00f6ren),
+	 * darin nur noch "Auswahl". "Gesamtes Projekt" (wirkte schon immer auf
+	 * die Projekt-Wurzel, unabh\u00e4ngig von Selektion/Rechtsklick-Ziel) ist
+	 * seit 11.09.2026 ins Hauptmen\u00fc gewandert ("Projekt > SeaDrive",
+	 * win.sd-*-all in headerbar.c) - das geh\u00f6rte eigentlich nie in ein
+	 * Kontextmen\u00fc, das ja "dieser Punkt"/"diese Auswahl" suggeriert
+	 * (Nutzer-Feedback, s. ToDo.c). */
 	GMenu *sec_sd = g_menu_new();
-	GMenu *sub_pin = g_menu_new();
-	g_menu_append(sub_pin, "Gesamtes Verzeichnis", "stv.sd-pin-all");
-	g_menu_append(sub_pin, "Auswahl",              "stv.sd-pin-sel");
-	g_menu_append_submenu(sec_sd, "Immer offline verf\u00fcgbar",
-			G_MENU_MODEL(sub_pin));
-	g_object_unref(sub_pin);
-	GMenu *sub_unspec = g_menu_new();
-	g_menu_append(sub_unspec, "Gesamtes Verzeichnis", "stv.sd-unspec-all");
-	g_menu_append(sub_unspec, "Auswahl",              "stv.sd-unspec-sel");
-	g_menu_append_submenu(sec_sd, "Offline verf\u00fcgbar aufheben",
-			G_MENU_MODEL(sub_unspec));
-	g_object_unref(sub_unspec);
-	GMenu *sub_unpin = g_menu_new();
-	g_menu_append(sub_unpin, "Gesamtes Verzeichnis", "stv.sd-unpin-all");
-	g_menu_append(sub_unpin, "Auswahl",              "stv.sd-unpin-sel");
-	g_menu_append_submenu(sec_sd, "Cache leeren",
-			G_MENU_MODEL(sub_unpin));
-	g_object_unref(sub_unpin);
+	GMenu *sub_sd = g_menu_new();
+	g_menu_append(sub_sd, "Immer offline verf\u00fcgbar",
+			"stv.sd-pin-sel");
+	g_menu_append(sub_sd, "Offline verf\u00fcgbar aufheben",
+			"stv.sd-unspec-sel");
+	g_menu_append(sub_sd, "Cache leeren", "stv.sd-unpin-sel");
+	g_menu_append_submenu(sec_sd, "SeaDrive", G_MENU_MODEL(sub_sd));
+	g_object_unref(sub_sd);
 	g_menu_append_section(gmenu, NULL, G_MENU_MODEL(sec_sd));
 	g_object_unref(sec_sd);
 }
@@ -1871,6 +1871,8 @@ typedef struct _S_FM_Paste_Selection {
 static gint process_stvfm_item_move_or_copy(SondTVFMItem* stvfm_item,
 		SFMPasteSelection* s_paste_sel, gboolean move, GError** error) {
 	gint rc = 0;
+
+	LOG_INFO("%s: DIAG move=%d", __func__, move);
 	guint max_tries = 100;
 	const gchar *dot = NULL;
 	gboolean has_ext = FALSE;
@@ -1916,10 +1918,29 @@ static gint process_stvfm_item_move_or_copy(SondTVFMItem* stvfm_item,
 			rc = sond_tvfm_item_move(stvfm_item,
 					s_paste_sel->stvfm_item_parent, trial_base,
 					s_paste_sel->index_to, error);
-		else
-			rc = sond_tvfm_item_copy(stvfm_item,
-					s_paste_sel->stvfm_item_parent, trial_base,
-					s_paste_sel->index_to, error);
+		else {
+			/* Echtes Kopieren (nicht Ausschneiden): sond_tvfm_item_copy()
+			 * selbst emittiert kein Signal (anders als sond_tvfm_item_move(),
+			 * das "before-move" nutzt) - deshalb hier "before-insert" senden,
+			 * damit z.B. die Index-Coverage am Zielort aufgelöst werden kann,
+			 * bevor dort neuer, ungeprüfter Inhalt entsteht (Bug-Fix
+			 * 11.09.2026: Kopieren einer nicht indizierten Datei in einen als
+			 * komplett indiziert markierten Ordner ließ den Ordner fälschlich
+			 * grün, weil dieser Pfad bislang gar nicht auf Coverage hörte). */
+			gint res = 0;
+
+			g_signal_emit(stvfm_item_parent_priv->stvfm,
+					SOND_TREEVIEWFM_GET_CLASS(stvfm_item_parent_priv->stvfm)->signal_before_insert, 0,
+					stvfm_item, s_paste_sel->stvfm_item_parent, trial_base,
+					s_paste_sel->index_to, error, &res);
+
+			if (res)
+				rc = -1;
+			else
+				rc = sond_tvfm_item_copy(stvfm_item,
+						s_paste_sel->stvfm_item_parent, trial_base,
+						s_paste_sel->index_to, error);
+		}
 
 		if (rc == -1) {
 			if (g_error_matches(*error, G_IO_ERROR, G_IO_ERROR_EXISTS)) {
@@ -2118,6 +2139,8 @@ parent:
 static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 		GtkTreeIter *iter, gpointer data, GError **error) {
 	SondTVFMItem *stvfm_item = NULL;
+
+	LOG_INFO("%s: DIAG aufgerufen", __func__);
 	SFMPasteSelection *s_paste_sel = (SFMPasteSelection*) data;
 	Clipboard *clipboard = NULL;
 	gint rc = 0;

@@ -24,6 +24,7 @@
 #include "../../sond_file_helper.h"
 #include "../../sond_fileparts.h"
 #include "../../sond_treeviewfm.h"
+#include "../../sond_treeviewfm_seadrive.h"
 #include "../../sond_process_file.h"
 #include "../../misc.h"
 
@@ -33,6 +34,7 @@
 #include "../zond_pdf_document.h"
 
 #include "../10init/app_window.h"
+#include "../10init/headerbar.h"
 #include "../40viewer/document.h"
 #include "../99conv/general.h"
 
@@ -371,6 +373,8 @@ static void project_set_changed(gpointer user_data) {
  * @param active TRUE to enable, FALSE to disable
  */
 void project_set_widgets_sensitive(Projekt *zond, gboolean active) {
+	gboolean seadrive_active;
+
 	gtk_widget_set_sensitive(GTK_WIDGET(zond->treeview[BAUM_FS]), active);
 	gtk_widget_set_sensitive(GTK_WIDGET(zond->treeview[BAUM_INHALT]), active);
 	gtk_widget_set_sensitive(GTK_WIDGET(zond->treeview[BAUM_AUSWERTUNG]), active);
@@ -385,6 +389,23 @@ void project_set_widgets_sensitive(Projekt *zond, gboolean active) {
 
 	if (!active)
 		g_simple_action_set_enabled(zond->menu.speichern, FALSE);
+
+	/* SeaDrive-Menüpunkte (Haupt- und Kontextmenüs) nur anwählbar, wenn ein
+	 * Projekt offen UND dessen Wurzel (BAUM_FS) tatsächlich ein SeaDrive-
+	 * Verzeichnis ist - sond_treeviewfm_set_root() (weiter oben in diesem
+	 * bzw. dem aufrufenden Codepfad) hat is_seadrive_path zu diesem
+	 * Zeitpunkt bereits aktuell gesetzt. Nutzer-Feedback 11.09.2026: ohne
+	 * SeaDrive-Projekt sollen die Punkte ausgegraut statt nur wirkungslos
+	 * sein. */
+	seadrive_active = active &&
+			sond_treeviewfm_is_seadrive_path(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]));
+	sond_treeviewfm_seadrive_set_contextmenu_sensitive(
+			SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), seadrive_active);
+	zond_treeview_seadrive_set_contextmenu_sensitive(
+			ZOND_TREEVIEW(zond->treeview[BAUM_INHALT]), seadrive_active);
+	zond_treeview_seadrive_set_contextmenu_sensitive(
+			ZOND_TREEVIEW(zond->treeview[BAUM_AUSWERTUNG]), seadrive_active);
+	headerbar_set_seadrive_sensitive(zond, seadrive_active);
 
 	return;
 }

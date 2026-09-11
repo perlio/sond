@@ -27,6 +27,7 @@
 
 #include "sond_text_extract.h"
 #include "sond_ocr.h"
+#include "sond_log_and_error.h"
 
 #ifdef SOND_WITH_EMBEDDINGS
 #include <llama.h>
@@ -1084,7 +1085,7 @@ gboolean sond_index_ctx_coverage_expand_to_pages(SondIndexCtx *ctx,
  * gebraucht.
  */
 gboolean sond_index_ctx_coverage_invalidate(SondIndexCtx *ctx,
-        gchar const *path, GError **error) {
+        gchar const *path, gchar const *root_dir, GError **error) {
     sqlite3_stmt *stmt     = NULL;
     gchar        *ancestor = NULL;
     gint          mode     = 0;
@@ -1108,6 +1109,7 @@ gboolean sond_index_ctx_coverage_invalidate(SondIndexCtx *ctx,
         g_free(ancestor);
         return FALSE;
     }
+    LOG_INFO("%s: DIAG path='%s'", __func__, path);
     for (;;) {
         gchar *slash = NULL;
 
@@ -1115,12 +1117,16 @@ gboolean sond_index_ctx_coverage_invalidate(SondIndexCtx *ctx,
         sqlite3_bind_text(stmt, 1, ancestor, -1, SQLITE_TRANSIENT);
         if (sqlite3_step(stmt) == SQLITE_ROW) {
             mode = sqlite3_column_int(stmt, 0);
+            LOG_INFO("%s: DIAG Treffer bei ancestor='%s' (mode=%d)", __func__,
+                    ancestor, mode);
             break;
         }
 
         slash = strrchr(ancestor, '/');
         if (!slash) {
             /* Weder path noch irgendein Vorfahre abgedeckt - nichts zu tun */
+            LOG_INFO("%s: DIAG kein Treffer fuer '%s' oder Vorfahren - no-op",
+                    __func__, path);
             sqlite3_finalize(stmt);
             g_free(ancestor);
             return TRUE;
@@ -1144,6 +1150,8 @@ gboolean sond_index_ctx_coverage_invalidate(SondIndexCtx *ctx,
     sqlite3_step(stmt);
     sqlite3_finalize(stmt);
     stmt = NULL;
+    LOG_INFO("%s: DIAG DELETE coverage WHERE path='%s' ausgefuehrt "
+            "(changes=%d)", __func__, ancestor, sqlite3_changes(ctx->db));
 
     if (!g_strcmp0(ancestor, path)) {
         /* Fall 1: path hatte selbst den Eintrag - fertig, kein Runterbrechen
@@ -1169,12 +1177,35 @@ gboolean sond_index_ctx_coverage_invalidate(SondIndexCtx *ctx,
             GDir  *dir   = NULL;
             GError *dir_error = NULL;
             gchar const *entry_name = NULL;
+            /* current_dir ist - wie alle coverage-Keys - projektrelativ;
+             * für g_dir_open() wird der echte Dateisystempfad gebraucht
+             * (wie bei sond_index_ctx_coverage_try_collapse()). Ohne diesen
+             * Präfix schlägt g_dir_open() praktisch immer fehl (relativ
+             * zum Prozess-CWD, nicht zur Projektwurzel) und die
+             * Geschwister-Neueintragung unten wird stillschweigend
+             * übersprungen - Bug-Fix 11.09.2026: dadurch verloren beim
+             * Kopieren einer nicht indizierten Datei in einen abgedeckten
+             * Ordner auch die BEREITS indizierten Geschwister ihren
+             * coverage-Eintrag (grüner Badge verschwand fälschlich mit). */
+            gchar *current_dir_abs = root_dir ?
+                    g_strconcat(root_dir, "/", current_dir, NULL) : NULL;
 
-            dir = g_dir_open(current_dir, 0, &dir_error);
+            dir = current_dir_abs ?
+                    g_dir_open(current_dir_abs, 0, &dir_error) : NULL;
+            if (!dir && !dir_error && root_dir)
+                g_set_error(&dir_error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                        "root_dir fehlt");
+            g_free(current_dir_abs);
             if (!dir) {
+                LOG_INFO("%s: DIAG g_dir_open('%s', root_dir='%s') "
+                        "fehlgeschlagen: %s", __func__, current_dir,
+                        root_dir ? root_dir : "(null)",
+                        dir_error ? dir_error->message : "?");
                 if (error && !*error)
                     g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                            "%s: g_dir_open '%s': %s", __func__, current_dir,
+                            "%s: g_dir_open '%s' (root_dir='%s'): %s",
+                            __func__, current_dir,
+                            root_dir ? root_dir : "(null)",
                             dir_error ? dir_error->message : "?");
                 g_clear_error(&dir_error);
                 break; /* nicht fatal fuer die Invalidierung selbst -
@@ -1188,14 +1219,19 @@ gboolean sond_index_ctx_coverage_invalidate(SondIndexCtx *ctx,
                 if (!g_strcmp0(entry_name, segments[i]))
                     continue; /* das ist die Richtung zu path - hier nicht eintragen */
 
-                sibling_path = g_build_filename(current_dir, entry_name, NULL);
+                /* coverage-Keys sind - wie ueberall im Code - "/"-getrennt
+                 * (nicht g_build_filename(), das unter Windows "\" liefern
+                 * wuerde und die Keys damit inkompatibel zu allen anderen,
+                 * mit "/" gebildeten Lookups machen wuerde, s. Konvention
+                 * bei sond_index_ctx_coverage_try_collapse()). */
+                sibling_path = g_strconcat(current_dir, "/", entry_name, NULL);
                 sond_index_ctx_coverage_mark(ctx, sibling_path, mode, NULL);
                 g_free(sibling_path);
             }
             g_dir_close(dir);
 
             {
-                gchar *next_dir = g_build_filename(current_dir, segments[i], NULL);
+                gchar *next_dir = g_strconcat(current_dir, "/", segments[i], NULL);
                 g_free(current_dir);
                 current_dir = next_dir;
             }

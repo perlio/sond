@@ -29,6 +29,7 @@
 #include "../sond_index.h"
 #include "../sond_mime.h"
 #include "../sond_icon_util.h"
+#include "../sond_treeviewfm_seadrive.h"
 
 #include "zond_init.h"
 #include "zond_dbase.h"
@@ -311,23 +312,46 @@ static void zond_treeview_class_init(ZondTreeviewClass *klass) {
 	g_menu_append_section(gmenu, NULL, G_MENU_MODEL(sec_edit));
 	g_object_unref(sec_edit);
 
-	/* Indexsuche: "Gesamtes Projektverzeichnis" referenziert direkt die
-	 * globale win.indexsuche-Action (s. init_win_actions() in
-	 * headerbar.c) - unabhängig von jeder Auswahl, daher ohne Weiteres
-	 * gemeinsam nutzbar. "Ausgewählte Punkte" braucht dagegen eine lokale
-	 * stv.-Action (s. zond_treeview_action_indexsuche_auswahl unten), die
-	 * über zond->baum_active zuverlässig weiß, ob gerade BAUM_INHALT oder
-	 * BAUM_AUSWERTUNG gemeint ist - eine gemeinsame, parameterlose
-	 * win.-Action könnte das für zwei Bäume mit derselben (klassenweit
-	 * geteilten) Menüstruktur nicht unterscheiden. */
+	/* "Index"-Untermenü: analog zum Hauptmenü (headerbar.c: "Projekt >
+	 * Index > Erstellen/Durchsuchen"), hier aber - wie bei "SeaDrive" im
+	 * Kontextmenü unten - bewusst nur "Auswahl" je Aktion, kein "Gesamtes
+	 * Projekt" (Nutzerwunsch 11.09.2026: Parität der Menüstruktur zwischen
+	 * Index und SeaDrive). Beide Aktionen brauchen eine lokale
+	 * stv.-Action (s. zond_treeview_action_index_erstellen_auswahl/
+	 * _indexsuche_auswahl unten), die über zond->baum_active zuverlässig
+	 * weiß, ob gerade BAUM_INHALT oder BAUM_AUSWERTUNG gemeint ist - eine
+	 * gemeinsame, parameterlose win.-Action könnte das für zwei Bäume mit
+	 * derselben (klassenweit geteilten) Menüstruktur nicht unterscheiden. */
 	GMenu *sec_idx = g_menu_new();
 	GMenu *sub_idx = g_menu_new();
-	g_menu_append(sub_idx, "Gesamtes Projektverzeichnis", "win.indexsuche");
-	g_menu_append(sub_idx, "Ausgew\u00e4hlte Punkte",    "stv.indexsuche-sel");
-	g_menu_append_submenu(sec_idx, "Index durchsuchen", G_MENU_MODEL(sub_idx));
+	g_menu_append(sub_idx, "Erstellen",   "stv.index-erstellen-sel");
+	g_menu_append(sub_idx, "Durchsuchen", "stv.indexsuche-sel");
+	g_menu_append_submenu(sec_idx, "Index", G_MENU_MODEL(sub_idx));
 	g_object_unref(sub_idx);
 	g_menu_append_section(gmenu, NULL, G_MENU_MODEL(sec_idx));
 	g_object_unref(sec_idx);
+
+	/* SeaDrive: eigenes Untermenü "SeaDrive" (Nutzer-Feedback 11.09.2026,
+	 * damit klar ist, dass die drei Punkte zusammengehören), analog zu
+	 * BAUM_FS (sond_treeviewfm.c) darin nur noch "Auswahl" - "Gesamtes
+	 * Projekt" gibt es nur im Hauptmenü ("Projekt > SeaDrive",
+	 * win.sd-*-all, headerbar.c), weil diese Aktion immer die ganze
+	 * Projekt-Wurzel betrifft, unabhängig von der aktuellen Auswahl/dem
+	 * Rechtsklick-Ziel, und daher nicht in ein Kontextmenü gehört (Nutzer-
+	 * Feedback, s. ToDo.c). Menüpunkte werden ausgegraut, wenn das Projekt
+	 * nicht auf einem SeaDrive-Pfad liegt, s. zond_treeview_seadrive_
+	 * set_contextmenu_sensitive() (project.c). */
+	GMenu *sec_sd = g_menu_new();
+	GMenu *sub_sd = g_menu_new();
+	g_menu_append(sub_sd, "Immer offline verfügbar",
+			"stv.sd-pin-sel");
+	g_menu_append(sub_sd, "Offline verfügbar aufheben",
+			"stv.sd-unspec-sel");
+	g_menu_append(sub_sd, "Cache leeren", "stv.sd-unpin-sel");
+	g_menu_append_submenu(sec_sd, "SeaDrive", G_MENU_MODEL(sub_sd));
+	g_object_unref(sub_sd);
+	g_menu_append_section(gmenu, NULL, G_MENU_MODEL(sec_sd));
+	g_object_unref(sec_sd);
 
 	/* Icon-Submenu: leer, wird bei erster Instanz befuellt */
 	GMenu *sec_icon = g_menu_new();
@@ -412,11 +436,12 @@ static gboolean on_query_tooltip(GtkWidget  *widget,
 
 /* Indizierungsstatus für das Overlay-Icon eines BAUM_INHALT/BAUM_AUSWERTUNG-
  * Knotens, ausgehend von bereits ermittelten file_part/section (s.
- * zond_treeview_get_filepart_and_section() - wird sowohl von
- * zond_treeview_get_index_status() als auch direkt von
- * zond_treeview_render_icon() genutzt, damit dort nicht für Index- und
- * SeaDrive-Badge zweimal dieselbe DB-Abfrage läuft). file_part == NULL
- * (reiner Gliederungs-/Kategorieknoten) liefert NONE - kein Overlay. */
+ * zond_treeview_get_filepart_and_section(), einzige Aufrufstelle ist
+ * zond_treeview_render_icon() - ruft get_filepart_and_section() dort nur
+ * EINMAL pro Zeile auf und nutzt das Ergebnis sowohl für dieses Index-
+ * Badge als auch für das SeaDrive-Badge, statt für jedes einzeln erneut
+ * dieselbe DB-Abfrage zu machen). file_part == NULL (reiner Gliederungs-/
+ * Kategorieknoten) liefert NONE - kein Overlay. */
 static SondIndexStatus zond_treeview_get_index_status_for_filepart(
 		ZondTreeview *ztv, const gchar *file_part, const gchar *section) {
 	ZondTreeviewPrivate *ztv_priv = zond_treeview_get_instance_private(ztv);
@@ -447,39 +472,6 @@ static SondIndexStatus zond_treeview_get_index_status_for_filepart(
 
 	return sond_index_ctx_get_file_status(index_ctx, file_part, von_seite,
 			bis_seite);
-}
-
-/* Indizierungsstatus für das Overlay-Icon eines BAUM_INHALT/BAUM_AUSWERTUNG-
- * Knotens. Anders als bei BAUM_FS (sond_treeviewfm.c) gibt es hier kein
- * SondFilePart am Item, sondern die Anbindung (Datei + Seitenbereich) muss
- * über die DB ermittelt werden - dafür die schon vorhandene
- * zond_treeview_get_filepart_and_section() (löst dabei auch
- * BAUM_AUSWERTUNG_COPY-Verweisknoten auf). Knoten ohne eigene Anbindung
- * (reine Gliederungs-/Kategorieknoten) liefern NONE - kein Overlay. */
-static SondIndexStatus zond_treeview_get_index_status(ZondTreeview *ztv,
-		GtkTreeIter *iter) {
-	gchar *file_part = NULL;
-	gchar *section = NULL;
-	SondIndexStatus status = SOND_INDEX_STATUS_NONE;
-	gint node_id = 0;
-	GError *local_error = NULL;
-
-	node_id = zond_treeview_get_filepart_and_section(ztv, iter, &file_part,
-			&section, &local_error);
-	if (node_id == -1) {
-		LOG_WARN("%s: zond_treeview_get_filepart_and_section: %s", __func__,
-				local_error->message);
-		g_clear_error(&local_error);
-		return SOND_INDEX_STATUS_NONE;
-	}
-
-	status = zond_treeview_get_index_status_for_filepart(ztv, file_part,
-			section);
-
-	g_free(file_part);
-	g_free(section);
-
-	return status;
 }
 
 /* SeaDrive-Badge (unten rechts) für einen BAUM_INHALT/BAUM_AUSWERTUNG-Knoten.
@@ -577,6 +569,20 @@ static void zond_treeview_render_icon(GtkTreeViewColumn *column,
 	g_free(icon_name);
 
 	return;
+}
+
+/* Graut die "Auswahl"-SeaDrive-Menüpunkte im Kontextmenü von ztv ein/aus -
+ * s. Doku in zond_treeview.h. */
+void zond_treeview_seadrive_set_contextmenu_sensitive(ZondTreeview *ztv,
+		gboolean sensitive) {
+	GSimpleActionGroup *ag = sond_treeview_get_action_group(SOND_TREEVIEW(ztv));
+	const gchar *names[] = { "sd-pin-sel", "sd-unspec-sel", "sd-unpin-sel" };
+
+	for (guint i = 0; i < G_N_ELEMENTS(names); i++) {
+		GAction *a = g_action_map_lookup_action(G_ACTION_MAP(ag), names[i]);
+		if (a)
+			g_simple_action_set_enabled(G_SIMPLE_ACTION(a), sensitive);
+	}
 }
 
 static void zond_treeview_init(ZondTreeview *ztv) {
@@ -2755,6 +2761,129 @@ static void zond_treeview_action_indexsuche_auswahl(GSimpleAction *a,
 	zond_indexsuche_activate_fuer_baum(zond, zond->baum_active);
 }
 
+static void zond_treeview_action_index_erstellen_auswahl(GSimpleAction *a,
+		GVariant *p, gpointer d) {
+	Projekt *zond = (Projekt*) d;
+
+	/* Analogon zu zond_treeview_action_indexsuche_auswahl() oberhalb,
+	 * s. dortigen Kommentar. */
+	zond_index_erstellen_activate_fuer_baum(zond, zond->baum_active);
+}
+
+/* Wendet pin_state auf alle real referenzierten Dateien der aktuellen
+ * Auswahl in ztv an. Nutzt dieselbe Aggregation wie die Indexsuche
+ * (zond_treeview_get_selected_fileparts()) - Seitenbereiche werden dabei
+ * ignoriert (Pinnen ist dateiweise), mehrere Anbindungen auf dieselbe
+ * Datei ergeben durch die dortige Interning-basierte Map ohnehin nur
+ * einen SondFilePart*. Verschachtelte Fileparts (Seite in PDF, ZIP-
+ * Eintrag, Mail-Anhang) werden auf ihren Dateisystem-Vorfahren
+ * (parent==NULL) zurückgeführt - analog zu
+ * zond_treeview_get_seadrive_badge() weiter oben. */
+void zond_treeview_seadrive_apply_to_selection(ZondTreeview *ztv,
+		guint pin_state) {
+	ZondTreeviewPrivate *ztv_priv = zond_treeview_get_instance_private(ztv);
+	Projekt *zond = ztv_priv->zond;
+	SondTreeviewFM *stvfm_fs = NULL;
+	const gchar *root = NULL;
+	GHashTable *ht_fileparts = NULL;
+	GHashTable *ht_paths = NULL;
+	GHashTableIter iter;
+	gpointer key = NULL;
+	GError *error = NULL;
+
+	if (!zond->treeview[BAUM_FS])
+		return;
+
+	stvfm_fs = SOND_TREEVIEWFM(zond->treeview[BAUM_FS]);
+	if (!sond_treeviewfm_is_seadrive_path(stvfm_fs))
+		return; /* kein SeaDrive-Projekt - Menüpunkte sind dann ohne Wirkung */
+
+	root = sond_treeviewfm_get_root(stvfm_fs);
+	if (!root)
+		return;
+
+	ht_fileparts = zond_treeview_get_selected_fileparts(ztv, &error);
+	if (!ht_fileparts) {
+		display_message(zond->app_window,
+				"Fehler beim Ermitteln der Auswahl:\n",
+				error ? error->message : "?", NULL);
+		g_clear_error(&error);
+		return;
+	}
+	if (g_hash_table_size(ht_fileparts) == 0) {
+		display_message(zond->app_window, "Keine Punkte ausgewählt", NULL);
+		g_hash_table_destroy(ht_fileparts);
+		return;
+	}
+
+	/* Auf reale Dateisystempfade auflösen und dabei deduplizieren -
+	 * mehrere Anbindungen können nach dem Zurückführen auf den
+	 * Dateisystem-Vorfahren auf denselben Pfad zeigen (z.B. zwei
+	 * verschiedene Seiten/Anhänge derselben Datei). */
+	ht_paths = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+
+	g_hash_table_iter_init(&iter, ht_fileparts);
+	while (g_hash_table_iter_next(&iter, &key, NULL)) {
+		SondFilePart *top = SOND_FILE_PART(key);
+		const gchar *rel = NULL;
+		gchar *full_path = NULL;
+
+		while (sond_file_part_get_parent(top))
+			top = sond_file_part_get_parent(top);
+
+		rel = sond_file_part_get_path(top);
+		if (!rel || !*rel)
+			continue;
+
+		full_path = g_strconcat(root, "/", rel, NULL);
+		if (g_hash_table_contains(ht_paths, full_path))
+			g_free(full_path);
+		else
+			g_hash_table_add(ht_paths, full_path);
+	}
+	g_hash_table_destroy(ht_fileparts);
+
+	{
+		GHashTableIter piter;
+		gpointer pkey = NULL;
+
+		g_hash_table_iter_init(&piter, ht_paths);
+		while (g_hash_table_iter_next(&piter, &pkey, NULL)) {
+			GError *path_error = NULL;
+			if (!sond_seadrive_set_pin_state((const gchar*) pkey, pin_state,
+					TRUE, &path_error)) {
+				LOG_WARN("SeaDrive set_pin_state('%s'): %s",
+						(const gchar*) pkey,
+						path_error ? path_error->message : "?");
+				g_clear_error(&path_error);
+			}
+		}
+	}
+	g_hash_table_destroy(ht_paths);
+}
+
+static void zond_treeview_action_sd_pin_sel(GSimpleAction *a, GVariant *p,
+		gpointer d) {
+	Projekt *zond = (Projekt*) d;
+	zond_treeview_seadrive_apply_to_selection(
+			ZOND_TREEVIEW(zond->treeview[zond->baum_active]),
+			STVFM_PIN_STATE_PINNED);
+}
+static void zond_treeview_action_sd_unspec_sel(GSimpleAction *a, GVariant *p,
+		gpointer d) {
+	Projekt *zond = (Projekt*) d;
+	zond_treeview_seadrive_apply_to_selection(
+			ZOND_TREEVIEW(zond->treeview[zond->baum_active]),
+			STVFM_PIN_STATE_UNSPECIFIED);
+}
+static void zond_treeview_action_sd_unpin_sel(GSimpleAction *a, GVariant *p,
+		gpointer d) {
+	Projekt *zond = (Projekt*) d;
+	zond_treeview_seadrive_apply_to_selection(
+			ZOND_TREEVIEW(zond->treeview[zond->baum_active]),
+			STVFM_PIN_STATE_UNPINNED);
+}
+
 static void zond_treeview_init_contextmenu(ZondTreeview *ztv) {
 	/* Instanzspezifische Aktionen registrieren.
 	 * GMenu-Sections wurden bereits in class_init aufgebaut. */
@@ -2774,7 +2903,11 @@ static void zond_treeview_init_contextmenu(ZondTreeview *ztv) {
 		{ "jump",          G_CALLBACK(zond_treeview_action_jump),			NULL},
 		{ "oeffnen",       G_CALLBACK(zond_treeview_action_oeffnen),
 				G_VARIANT_TYPE_BOOLEAN},
-		{ "indexsuche-sel", G_CALLBACK(zond_treeview_action_indexsuche_auswahl), NULL}
+		{ "indexsuche-sel", G_CALLBACK(zond_treeview_action_indexsuche_auswahl), NULL},
+		{ "index-erstellen-sel", G_CALLBACK(zond_treeview_action_index_erstellen_auswahl), NULL},
+		{ "sd-pin-sel",     G_CALLBACK(zond_treeview_action_sd_pin_sel),     NULL},
+		{ "sd-unspec-sel",  G_CALLBACK(zond_treeview_action_sd_unspec_sel),  NULL},
+		{ "sd-unpin-sel",   G_CALLBACK(zond_treeview_action_sd_unpin_sel),   NULL}
 	};
 
 	for (guint i = 0; i < G_N_ELEMENTS(acts); i++) {

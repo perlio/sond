@@ -53,6 +53,8 @@
 #include "../40viewer/document.h"
 #include "../99conv/test.h"
 
+#include "headerbar.h"
+
 
 /* ============================================================================
  * HILFSFUNKTIONEN
@@ -276,32 +278,49 @@ static Baum zond_baum_mit_auswahl(Projekt *zond) {
 	return KEIN_BAUM;
 }
 
-static void do_index_erstellen(Projekt *zond, gboolean sel_only) {
+static void do_index_erstellen_gesamt(Projekt *zond) {
 	GError *error = NULL;
 	GHashTable *ht_index = NULL;
-	Baum baum = BAUM_FS;
 
-	if (sel_only) {
-		baum = zond_baum_mit_auswahl(zond);
-		if (baum == KEIN_BAUM) {
-			display_message(zond->app_window, "Keine Punkte ausgewählt", NULL);
-			return;
-		}
-	}
-
-	if (baum == BAUM_FS || !sel_only)
-		ht_index = zond_treeviewfm_get_fileparts(
-				ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), sel_only, &error);
-	else
-		ht_index = zond_treeview_get_selected_fileparts(
-				ZOND_TREEVIEW(zond->treeview[baum]), &error);
+	ht_index = zond_treeviewfm_get_fileparts(
+			ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), FALSE, &error);
 	if (!ht_index) {
 		display_message(zond->app_window, "Fehler beim Erstellen des Index:\n",
 				error->message, NULL);
 		g_error_free(error);
 		return;
 	}
-	if (sel_only && g_hash_table_size(ht_index) == 0) {
+
+	zond_index_erstellen_ht(zond, ht_index);
+}
+
+/* Gemeinsame Logik fuer "Index erstellen (Auswahl)", aufgerufen aus den
+ * Kontextmenues aller drei Baeume (dort ist "baum" instanzgebunden bekannt,
+ * ueber zond->baum_active) sowie aus dem globalen Fenstermenue (dort wird
+ * "baum" vorher per zond_baum_mit_auswahl() ermittelt) - Analogon zu
+ * zond_indexsuche_activate_fuer_baum() in zond_indexsuche.c. */
+void zond_index_erstellen_activate_fuer_baum(Projekt *zond, Baum baum) {
+	GError *error = NULL;
+	GHashTable *ht_index = NULL;
+
+	if (baum == KEIN_BAUM) {
+		display_message(zond->app_window, "Keine Punkte ausgewählt", NULL);
+		return;
+	}
+
+	if (baum == BAUM_FS)
+		ht_index = zond_treeviewfm_get_fileparts(
+				ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), TRUE, &error);
+	else
+		ht_index = zond_treeview_get_selected_fileparts(
+				ZOND_TREEVIEW(zond->treeview[baum]), &error);
+	if (!ht_index) {
+		display_message(zond->app_window, "Fehler beim Ermitteln der Auswahl:\n",
+				error ? error->message : "?", NULL);
+		g_clear_error(&error);
+		return;
+	}
+	if (g_hash_table_size(ht_index) == 0) {
 		display_message(zond->app_window, "Keine Punkte ausgewählt", NULL);
 		g_hash_table_destroy(ht_index);
 		return;
@@ -311,7 +330,7 @@ static void do_index_erstellen(Projekt *zond, gboolean sel_only) {
 }
 
 static void cb_app_index_erstellen(GSimpleAction *a, GVariant *p, gpointer d) {
-	do_index_erstellen((Projekt*) d, FALSE);
+	do_index_erstellen_gesamt((Projekt*) d);
 }
 
 static void cb_app_indexsuche(GSimpleAction *a, GVariant *p, gpointer d) {
@@ -319,7 +338,9 @@ static void cb_app_indexsuche(GSimpleAction *a, GVariant *p, gpointer d) {
 }
 
 static void cb_win_index_erstellen_sel(GSimpleAction *a, GVariant *p, gpointer d) {
-	do_index_erstellen((Projekt*) d, TRUE);
+	Projekt *zond = (Projekt*) d;
+
+	zond_index_erstellen_activate_fuer_baum(zond, zond_baum_mit_auswahl(zond));
 }
 
 static void cb_win_indexsuche_auswahl(GSimpleAction *a, GVariant *p, gpointer d) {
@@ -334,6 +355,68 @@ static void cb_win_indexsuche_auswahl(GSimpleAction *a, GVariant *p, gpointer d)
 	 * Fenstermenü (anders als die Kontextmenüs) keinen eigenen
 	 * Baum-Kontext hat - s. zond_indexsuche_activate_fuer_baum(). */
 	zond_indexsuche_activate_fuer_baum(zond, zond_baum_mit_auswahl(zond));
+}
+
+/* ============================================================================
+ * CALLBACKS - SEADRIVE (Hauptmenü: "Gesamtes Projekt" UND "Auswahl", analog
+ * zur Indexsuche direkt oberhalb - "Gesamtes Projekt" betrifft immer die
+ * Projekt-Wurzel unabhängig von einer Auswahl, "Auswahl" braucht dagegen
+ * wie bei cb_win_indexsuche_auswahl() zond_baum_mit_auswahl(), weil das
+ * globale Menü - anders als die Kontextmenüs der einzelnen Bäume - keinen
+ * festen Baum-Kontext hat. Die Kontextmenüs selbst bieten seit 11.09.2026
+ * nur noch "Auswahl" an, s. sond_treeviewfm.c/zond_treeview.c.
+ * sond_treeviewfm_seadrive_pin_root()/_pin_selection() sind auf Nicht-
+ * Windows/Nicht-SeaDrive-Projekten ein No-Op.
+ * ========================================================================== */
+
+static void cb_win_seadrive_pin_all(GSimpleAction *a, GVariant *p, gpointer d) {
+	Projekt *zond = (Projekt*) d;
+	sond_treeviewfm_seadrive_pin_root(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
+			STVFM_PIN_STATE_PINNED);
+}
+
+static void cb_win_seadrive_unspec_all(GSimpleAction *a, GVariant *p, gpointer d) {
+	Projekt *zond = (Projekt*) d;
+	sond_treeviewfm_seadrive_pin_root(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
+			STVFM_PIN_STATE_UNSPECIFIED);
+}
+
+static void cb_win_seadrive_unpin_all(GSimpleAction *a, GVariant *p, gpointer d) {
+	Projekt *zond = (Projekt*) d;
+	sond_treeviewfm_seadrive_pin_root(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
+			STVFM_PIN_STATE_UNPINNED);
+}
+
+/* Gemeinsame Dispatch-Logik für "Auswahl" aus dem globalen Menü: ermittelt
+ * den Baum mit einer aktuellen Selektion (zond_baum_mit_auswahl()) und
+ * ruft je nach Baumtyp die passende, schon für die Kontextmenüs gebaute
+ * Funktion auf (BAUM_FS: SondTVFMItem-basiert; BAUM_INHALT/BAUM_AUSWERTUNG:
+ * DB-Anbindungen-basiert, s. zond_treeview_seadrive_apply_to_selection()). */
+static void seadrive_pin_auswahl(Projekt *zond, guint pin_state) {
+	Baum baum = zond_baum_mit_auswahl(zond);
+
+	if (baum == KEIN_BAUM) {
+		display_message(zond->app_window, "Keine Punkte ausgewählt", NULL);
+		return;
+	}
+	if (baum == BAUM_FS)
+		sond_treeviewfm_seadrive_pin_selection(
+				SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), pin_state);
+	else
+		zond_treeview_seadrive_apply_to_selection(
+				ZOND_TREEVIEW(zond->treeview[baum]), pin_state);
+}
+
+static void cb_win_seadrive_pin_sel(GSimpleAction *a, GVariant *p, gpointer d) {
+	seadrive_pin_auswahl((Projekt*) d, STVFM_PIN_STATE_PINNED);
+}
+
+static void cb_win_seadrive_unspec_sel(GSimpleAction *a, GVariant *p, gpointer d) {
+	seadrive_pin_auswahl((Projekt*) d, STVFM_PIN_STATE_UNSPECIFIED);
+}
+
+static void cb_win_seadrive_unpin_sel(GSimpleAction *a, GVariant *p, gpointer d) {
+	seadrive_pin_auswahl((Projekt*) d, STVFM_PIN_STATE_UNPINNED);
 }
 
 /* ============================================================================
@@ -712,6 +795,13 @@ static void init_win_actions(Projekt *zond) {
 	WIN_ACT("index-erstellen-sel", cb_win_index_erstellen_sel);
 	WIN_ACT("indexsuche-auswahl",  cb_win_indexsuche_auswahl);
 
+	WIN_ACT("sd-pin-all",     cb_win_seadrive_pin_all);
+	WIN_ACT("sd-unspec-all",  cb_win_seadrive_unspec_all);
+	WIN_ACT("sd-unpin-all",   cb_win_seadrive_unpin_all);
+	WIN_ACT("sd-pin-sel",     cb_win_seadrive_pin_sel);
+	WIN_ACT("sd-unspec-sel",  cb_win_seadrive_unspec_sel);
+	WIN_ACT("sd-unpin-sel",   cb_win_seadrive_unpin_sel);
+
 	WIN_ACT("projekt-neu",     cb_app_projekt_neu);
 	WIN_ACT("projekt-oeffnen", cb_app_projekt_oeffnen);
 	WIN_ACT("index-erstellen", cb_app_index_erstellen);
@@ -832,23 +922,61 @@ static GMenuModel* build_menu(Projekt *zond) {
 	g_menu_append_section(m_proj, NULL, G_MENU_MODEL(sec_export));
 	g_object_unref(sec_export);
 
+	/* "Index": eigenes Untermenü (statt zweier lose in "Projekt" hängender
+	 * Einträge), damit auf den ersten Blick klar ist, dass "Erstellen" und
+	 * "Durchsuchen" zusammengehören - genau dieselbe Struktur wie beim
+	 * "SeaDrive"-Untermenü unten (Nutzerwunsch 11.09.2026: Parität
+	 * zwischen beiden). Je Aktion "Gesamtes Projekt"/"Auswahl". Die
+	 * Kontextmenüs von BAUM_FS/BAUM_INHALT/BAUM_AUSWERTUNG
+	 * (sond_treeviewfm.c/zond_treeview.c) bieten dagegen bewusst nur noch
+	 * "Auswahl" an - "Gesamtes Projekt" betrifft immer das ganze
+	 * Projektverzeichnis, unabhängig vom Rechtsklick-Ziel, und gehörte
+	 * deshalb eigentlich nie in ein Kontextmenü (Nutzer-Feedback, s.
+	 * ToDo.c). */
 	GMenu *sec_index = g_menu_new();
+	GMenu *sub_idx = g_menu_new();
 	GMenu *sub_idx_erst = g_menu_new();
-	g_menu_append(sub_idx_erst, "Gesamtes Projektverzeichnis", "win.index-erstellen");
-	g_menu_append(sub_idx_erst, "Ausgewählte Punkte",          "win.index-erstellen-sel");
-	g_menu_append_submenu(sec_index, "Index erstellen",
-			G_MENU_MODEL(sub_idx_erst));
+	g_menu_append(sub_idx_erst, "Gesamtes Projekt", "win.index-erstellen");
+	g_menu_append(sub_idx_erst, "Auswahl",          "win.index-erstellen-sel");
+	g_menu_append_submenu(sub_idx, "Erstellen", G_MENU_MODEL(sub_idx_erst));
 	g_object_unref(sub_idx_erst);
 	GMenu *sub_idx_such = g_menu_new();
-	g_menu_append(sub_idx_such, "Gesamtes Projektverzeichnis", "win.indexsuche");
-	g_menu_append(sub_idx_such, "Ausgewählte Punkte",          "win.indexsuche-auswahl");
-	g_menu_append_submenu(sec_index, "Index durchsuchen",
-			G_MENU_MODEL(sub_idx_such));
+	g_menu_append(sub_idx_such, "Gesamtes Projekt", "win.indexsuche");
+	g_menu_append(sub_idx_such, "Auswahl",          "win.indexsuche-auswahl");
+	g_menu_append_submenu(sub_idx, "Durchsuchen", G_MENU_MODEL(sub_idx_such));
 	g_object_unref(sub_idx_such);
+	g_menu_append_submenu(sec_index, "Index", G_MENU_MODEL(sub_idx));
+	g_object_unref(sub_idx);
 	/* "Chat mit dem Index" bewußt entfernt - fürs Release abgeklemmt
 	 * (siehe Makefile-Kommentar, Ziel "zond"), noch nicht ausgereift. */
 	g_menu_append_section(m_proj, NULL, G_MENU_MODEL(sec_index));
 	g_object_unref(sec_index);
+
+	/* SeaDrive: dieselbe Struktur wie "Index" oberhalb, s. dortigen
+	 * Kommentar. */
+	GMenu *sec_sd = g_menu_new();
+	GMenu *sub_sd = g_menu_new();
+	GMenu *sub_sd_pin = g_menu_new();
+	g_menu_append(sub_sd_pin, "Gesamtes Projekt", "win.sd-pin-all");
+	g_menu_append(sub_sd_pin, "Auswahl",          "win.sd-pin-sel");
+	g_menu_append_submenu(sub_sd, "Immer offline verfügbar",
+			G_MENU_MODEL(sub_sd_pin));
+	g_object_unref(sub_sd_pin);
+	GMenu *sub_sd_unspec = g_menu_new();
+	g_menu_append(sub_sd_unspec, "Gesamtes Projekt", "win.sd-unspec-all");
+	g_menu_append(sub_sd_unspec, "Auswahl",          "win.sd-unspec-sel");
+	g_menu_append_submenu(sub_sd, "Offline verfügbar aufheben",
+			G_MENU_MODEL(sub_sd_unspec));
+	g_object_unref(sub_sd_unspec);
+	GMenu *sub_sd_unpin = g_menu_new();
+	g_menu_append(sub_sd_unpin, "Gesamtes Projekt", "win.sd-unpin-all");
+	g_menu_append(sub_sd_unpin, "Auswahl",          "win.sd-unpin-sel");
+	g_menu_append_submenu(sub_sd, "Cache leeren", G_MENU_MODEL(sub_sd_unpin));
+	g_object_unref(sub_sd_unpin);
+	g_menu_append_submenu(sec_sd, "SeaDrive", G_MENU_MODEL(sub_sd));
+	g_object_unref(sub_sd);
+	g_menu_append_section(m_proj, NULL, G_MENU_MODEL(sec_sd));
+	g_object_unref(sec_sd);
 
 	GMenu *sec_beenden = g_menu_new();
 	g_menu_append(sec_beenden, "Beenden", "win.beenden");
@@ -1001,6 +1129,7 @@ void init_headerbar(Projekt *zond) {
 	g_simple_action_set_enabled(zond->menu.schliessen,     FALSE);
 	g_simple_action_set_enabled(zond->menu.export_odt,     FALSE);
 	g_simple_action_set_enabled(zond->menu.pdf,            FALSE);
+	headerbar_set_seadrive_sensitive(zond, FALSE);
 
 #ifdef _WIN32
 	GtkWidget *label_seadrive = gtk_label_new("");
@@ -1009,4 +1138,19 @@ void init_headerbar(Projekt *zond) {
 	g_object_set_data(G_OBJECT(zond->app_window), "seadrive-label",
 			label_seadrive);
 #endif
+}
+
+void headerbar_set_seadrive_sensitive(Projekt *zond, gboolean sensitive) {
+	GActionGroup *ag = gtk_widget_get_action_group(zond->app_window, "win");
+	const gchar *names[] = { "sd-pin-all", "sd-unspec-all", "sd-unpin-all",
+			"sd-pin-sel", "sd-unspec-sel", "sd-unpin-sel" };
+
+	if (!ag)
+		return;
+
+	for (guint i = 0; i < G_N_ELEMENTS(names); i++) {
+		GAction *a = g_action_map_lookup_action(G_ACTION_MAP(ag), names[i]);
+		if (a)
+			g_simple_action_set_enabled(G_SIMPLE_ACTION(a), sensitive);
+	}
 }

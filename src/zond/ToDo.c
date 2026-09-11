@@ -586,4 +586,172 @@
  Handler - stoesst gtk_widget_queue_draw() auf BAUM_INHALT/BAUM_AUSWERTUNG
  an (reines Neuzeichnen sichtbarer Zeilen, kein DB-Zugriff).
 
+ SeaDrive-Menue neu geordnet: nur noch "Auswahl" in Kontextmenues, "Gesamtes
+ Projekt" nur im Hauptmenue (11.09.2026, Nutzer-Vorschlag). Auslöser: die
+ Frage, ob die SeaDrive-Pin/Unpin-Aktionen (bisher nur im BAUM_FS-
+ Kontextmenue, s.o.) auch ins ZondTreeview-Kontextmenue sollen. Beim
+ Vergleich mit der Indexsuche (die dasselbe Auswahl/Gesamtprojekt-Problem
+ schon loest, s. zond_indexsuche_activate_fuer_baum()) fiel auf: die
+ bisherige "Gesamtes Verzeichnis"-Option im BAUM_FS-Kontextmenue rief
+ tatsaechlich schon immer apply_pin_state_to_root() auf - wirkte also IMMER
+ auf die Projekt-Wurzel, unabhaengig vom Rechtsklick-Ziel oder einer
+ Selektion. Eine projekt-globale Aktion gehoert aber nicht in ein
+ Kontextmenue (das "dieser Punkt"/"diese Auswahl" suggeriert), sondern ins
+ Hauptmenue. Umgesetzt:
+ - sond_treeviewfm_seadrive.c: apply_pin_state_to_root() -> oeffentliche
+   sond_treeviewfm_seadrive_pin_root() (unveraendertes Verhalten, inkl.
+   Fehlerdialog). Die "-all"-Eintraege in der Actions-Tabelle von
+   sond_treeviewfm_seadrive_init_contextmenu() entfernt - dort nur noch
+   sd-pin-sel/sd-unspec-sel/sd-unpin-sel.
+ - sond_treeviewfm.c (add_base_menu): SeaDrive-Sektion von drei
+   Zwei-Optionen-Submenues auf drei flache Eintraege ("Immer offline
+   verfuegbar"/"Offline verfuegbar aufheben"/"Cache leeren") vereinfacht.
+ - zond_treeview.c: neue Funktion zond_treeview_seadrive_apply_to_
+   selection() - nutzt (wie die Indexsuche) zond_treeview_get_selected_
+   fileparts() zur Aggregation der Auswahl, ignoriert die Seitenbereiche
+   (Pinnen ist dateiweise), fuehrt jeden SondFilePart* auf seinen
+   Dateisystem-Vorfahren (parent==NULL) zurueck - analog zu
+   zond_treeview_get_seadrive_badge() - und dedupliziert die daraus
+   entstehenden echten Pfade ueber ein String-Set, bevor sond_seadrive_
+   set_pin_state() pro Pfad aufgerufen wird. Neue Kontextmenue-Eintraege
+   (nur "Auswahl") + Actions sd-pin-sel/sd-unspec-sel/sd-unpin-sel, analog
+   zum Registrierungsmuster von indexsuche-sel.
+ - headerbar.c: neue Sektion "Projekt > Immer offline verfuegbar/Offline
+   verfuegbar aufheben/Cache leeren" (direkt unter "Index durchsuchen",
+   NICHT unter "Extras" - dort zunaechst platziert, auf Nutzer-Rueckmeldung
+   "kein Eintrag im Hauptmenu" korrigiert: gesucht wurde naheliegenderweise
+   neben der Indexsuche), jede mit Submenue "Gesamtes Projekt"/"Auswahl" -
+   exakt wie bei "Index erstellen"/"Index durchsuchen" (Nutzer-Klarstellung
+   nach erster, zu knapper Umsetzung, die im Hauptmenue nur "Gesamtes
+   Projekt" anbot). "Gesamtes Projekt" (win.sd-*-all) ruft unveraendert
+   sond_treeviewfm_seadrive_pin_root() auf BAUM_FS auf. "Auswahl"
+   (win.sd-*-sel) braucht dagegen - wie cb_win_indexsuche_auswahl() - einen
+   zond_baum_mit_auswahl()-Dispatch (neue Hilfsfunktion
+   seadrive_pin_auswahl()), da das globale Menue keinen festen Baum-Kontext
+   hat: je nach Ergebnis wird die schon vorhandene, fuer die Kontextmenues
+   gebaute Funktion aufgerufen - neu oeffentlich gemachte
+   sond_treeviewfm_seadrive_pin_selection() (vorher nur inline in
+   seadrive_action_activate()) fuer BAUM_FS, zond_treeview_seadrive_apply_
+   to_selection() (vorher static) fuer BAUM_INHALT/BAUM_AUSWERTUNG.
+
+ SeaDrive-Menue: Gruppierung + Ausgrauen (11.09.2026, Nutzer-Feedback).
+ Zwei Nachbesserungen an obigem Menue-Umbau:
+ (1) Alle drei SeaDrive-Aktionen (Immer offline verfuegbar/Offline
+     verfuegbar aufheben/Cache leeren) haengen jetzt sowohl im Hauptmenue
+     ("Projekt") als auch in beiden Kontextmenues (BAUM_FS, ZondTreeview)
+     in einem eigenen Untermenue "SeaDrive", statt lose als einzelne
+     Eintraege in der jeweiligen Sektion zu stehen - macht auf den ersten
+     Blick klar, dass sie zusammengehoeren.
+ (2) Alle sechs win.sd-*-Aktionen sowie die stv.sd-*-sel-Aktionen in beiden
+     Kontextmenues werden jetzt ausgegraut, wenn kein Projekt offen ist
+     oder dessen Wurzel kein SeaDrive-Verzeichnis ist (vorher liefen sie
+     bei einem Nicht-SeaDrive-Projekt einfach wirkungslos ins Leere).
+     Zentraler Umschaltpunkt: project_set_widgets_sensitive() (project.c),
+     bereits der bestehende Ort fuer aehnliche Enable/Disable-Logik
+     (speichern/schliessen/export_odt/pdf/...) - ausgewertet wird dort
+     sond_treeviewfm_is_seadrive_path(BAUM_FS), was zu diesem Zeitpunkt
+     schon aktuell ist (sond_treeviewfm_set_root() laeuft im Oeffnen-
+     Codepfad vorher). Neue Funktionen: sond_treeviewfm_seadrive_set_
+     contextmenu_sensitive() (sond_treeviewfm_seadrive.c/.h),
+     zond_treeview_seadrive_set_contextmenu_sensitive() (zond_treeview.c/
+     .h), headerbar_set_seadrive_sensitive() (headerbar.c/.h, holt sich
+     die "win"-Actiongroup ueber gtk_widget_get_action_group() statt einen
+     eigenen Satz Projekt-Struct-Felder je Aktion anzulegen) - alle drei
+     nach demselben Muster: Actionnamen-Liste, g_action_map_lookup_action()
+     + g_simple_action_set_enabled() je Treffer.
+
+ Index-Coverage-Bug beim Kopieren/Loeschen (11.09.2026, Nutzer-Fund).
+ Nutzer-Meldung: Ordner als "komplett indiziert" markiert (gruen), eine
+ nicht indizierte Datei per Ausschneiden/Einfuegen hineinverschoben ->
+ Ordner blieb gruen, DB-Coverage-Eintrag ueberlebte. Drei verschachtelte
+ Bugs, alle per Diagnose-Logging (LOG_INFO an mehreren Stellen der
+ Aufrufkette, Nutzer baut neu und reproduziert) statt reiner
+ Code-Analyse gefunden - Static-Analyse (eigene wie Subagent) hatte
+ faelschlich angenommen, der Pfad sei schon korrekt verdrahtet:
+ (1) Der erste Reproduktionsversuch war tatsaechlich ein Kopieren
+     (Kopieren/Einfuegen), kein Ausschneiden - klargestellt per
+     Rueckfrage, nachdem "keine einzige Logzeile" trotz Logging direkt
+     am Eintritt von zond_treeviewfm_before_move() auftrat.
+     sond_tvfm_item_copy() (fuer echtes Kopieren) emittierte anders als
+     sond_tvfm_item_move() gar kein Signal - die Index-Coverage bekam
+     vom neuen, ungeprueften Inhalt nie etwas mit. Fix: sond_treeviewfm.c/
+     process_stvfm_item_move_or_copy() emittiert im Kopier-Zweig jetzt
+     das seit langem definierte, aber bis dahin nie verbundene Signal
+     "before-insert". Neuer Handler zond_treeviewfm_before_insert()
+     (zond_treeviewfm.c, an "before-insert" gehaengt in
+     zond_treeviewfm_new()) loest die Ziel-Coverage auf - Analogon zu
+     zond_treeviewfm_before_move(), aber ohne Umbenennungslogik,
+     best-effort (Fehler blockiert das Kopieren nicht).
+ (2) Nach dem Fix (1) verschwand der gruene Badge auch bei der
+     BEREITS indizierten Nachbardatei. Ursache: sond_index_ctx_
+     coverage_invalidate() (sond_index.c) loest beim Aufloesen eines
+     abdeckenden Vorfahren-Eintrags dessen Geschwister per echtem
+     Verzeichnis-Listing (g_dir_open()) neu auf, damit sie ihren
+     Coverage-Status einzeln zurueckbekommen - rief g_dir_open() aber mit
+     einem rein projektrelativen Pfad auf (schlug praktisch immer fehl,
+     da relativ zum Prozess-CWD statt zur Projektwurzel), wodurch die
+     Geschwister-Neueintragung committed stillschweigend uebersprungen
+     wurde. Anders als sond_index_ctx_coverage_try_collapse(), die dafuer
+     extra einen root_dir-Parameter hat. Fix: coverage_invalidate()
+     bekommt denselben root_dir-Parameter, baut daraus den echten Pfad
+     fuer g_dir_open(). Dabei zusaetzlich bemerkt und mitkorrigiert: die
+     Geschwister-Keys wurden mit g_build_filename() gebaut, was unter
+     Windows "\" statt "/" liefert - inkonsistent zur ueberall sonst
+     verwendeten "/"-Konvention fuer coverage-Keys (waere sonst nie von
+     einem "/"-basierten Lookup wiedergefunden worden). Jetzt explizite
+     "/"-Konkatenation wie bei coverage_try_collapse(). Alle vier
+     Aufrufer (zond_treeviewfm.c x2, viewer_save.c x2) uebergeben jetzt
+     zond->project_dir bzw. pdfv->zond->project_dir.
+ (3) Nach dem Fix (2) blieb der Ordner nach Loeschen der zuvor
+     hineinkopierten Datei dauerhaft orange/gemischt statt wieder gruen
+     zu werden. Ursache: nirgends wurde nach einem Loeschen erneut
+     geprueft, ob das Elternverzeichnis jetzt wieder vollstaendig
+     abgedeckt ist (Coalescing lief bisher nur nach erfolgreichem
+     Neu-Indizieren, s. sond_process_file.c). Fix: neues Feld
+     pending_delete_path in ZondTreeviewFMPrivate - zond_treeviewfm_
+     before_delete() merkt es sich (erst unmittelbar vor dem garantiert
+     erfolgreichen return, damit bei Fehler-Returns ohne "after"-Signal
+     nichts haengen bleibt). zond_treeviewfm_after() ruft bei Erfolg
+     sond_index_ctx_coverage_try_collapse() dafuer auf - bewusst erst
+     hier (nach der tatsaechlichen physischen Loeschung), weil try_
+     collapse() ein echtes Verzeichnis-Listing macht und die geloeschte
+     Datei darin nicht mehr auftauchen darf, damit die verbliebenen
+     Geschwister als "vollstaendig" erkannt werden. Feld wird in after()
+     immer freigegeben (Erfolg wie Fehlschlag) sowie defensiv in
+     finalize(). Alle DIAG-LOG_INFO-Zeilen aus dieser Untersuchung
+     (sond_index.c, sond_treeviewfm.c, zond_treeviewfm.c) sind nach
+     Verifikation zu entfernen.
+
+ Index-Menue: Parallelstruktur zu SeaDrive (11.09.2026, Nutzerwunsch).
+ Nutzer wollte "Index erstellen"/"Index durchsuchen" strukturell an das
+ eben gebaute SeaDrive-Menue angleichen. Umgesetzt:
+ - headerbar.c (build_menu): "Projekt > Index erstellen" und "Projekt >
+   Index durchsuchen" (bisher zwei lose nebeneinanderstehende Submenues
+   in derselben Sektion) zusammengefasst zu einem Untermenue "Index" mit
+   Unterpunkten "Erstellen"/"Durchsuchen", jeweils mit "Gesamtes
+   Projekt"/"Auswahl" - exakt dieselbe Drei-Ebenen-Struktur wie "Projekt
+   > SeaDrive > Immer offline verfuegbar/... > Gesamtes Projekt/
+   Auswahl". Labels "Gesamtes Projektverzeichnis"/"Ausgewaehlte Punkte"
+   dabei auf "Gesamtes Projekt"/"Auswahl" vereinheitlicht (Parese zu
+   SeaDrive).
+ - headerbar.c/.h: neue oeffentliche Funktion zond_index_erstellen_
+   activate_fuer_baum(Projekt*, Baum) - Analogon zu zond_indexsuche_
+   activate_fuer_baum() (zond_indexsuche.c), damit auch Kontextmenues
+   sie mit zond->baum_active aufrufen koennen (vorher konnte "Index
+   erstellen (Auswahl)" nur ueber das globale Fenstermenue mit
+   zond_baum_mit_auswahl()-Scan ausgeloest werden, es gab dafuer noch
+   keine Kontextmenue-Aktion). do_index_erstellen() dafuer aufgeteilt in
+   do_index_erstellen_gesamt() (nur noch Gesamtprojekt-Fall) und die neue
+   oeffentliche Funktion.
+ - sond_treeviewfm.c (BAUM_FS) und zond_treeview.c (BAUM_INHALT/
+   BAUM_AUSWERTUNG): das bisherige "Index durchsuchen"-Kontextmenue
+   (das dort fälschlich noch "Gesamtes Projektverzeichnis" als
+   win.indexsuche anbot - Rechtsklick-Kontextmenues sollten das seit dem
+   SeaDrive-Umbau grundsaetzlich nicht mehr tun) ersetzt durch ein
+   "Index"-Untermenue mit "Erstellen"/"Durchsuchen", beide bewusst nur
+   als "Auswahl" (stv.index-erstellen-sel/stv.indexsuche-sel) - Parallele
+   zum SeaDrive-Kontextmenue. Neue Aktion stv.index-erstellen-sel je
+   Klasse registriert, ruft zond_index_erstellen_activate_fuer_baum(zond,
+   zond->baum_active) auf.
+
  */

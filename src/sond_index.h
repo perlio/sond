@@ -408,11 +408,18 @@ gboolean sond_index_ctx_coverage_expand_to_pages(SondIndexCtx *ctx,
 
 /**
  * sond_index_ctx_coverage_invalidate:
- * @ctx:   SondIndexCtx
- * @path:  Datei- oder Verzeichnispfad, unter dem gerade NEUER, noch nicht
- *         geprüfter Inhalt auftaucht (Datei/Verzeichnis wird hierher
- *         verschoben, Seiten werden in eine Datei eingefügt, ...)
- * @error: GError
+ * @ctx:      SondIndexCtx
+ * @path:     Datei- oder Verzeichnispfad, unter dem gerade NEUER, noch nicht
+ *            geprüfter Inhalt auftaucht (Datei/Verzeichnis wird hierher
+ *            verschoben, Seiten werden in eine Datei eingefügt, ...)
+ * @root_dir: absolute Projektwurzel (zond->project_dir) - wird nur
+ *            gebraucht, um aus den relativen Verzeichnis-Keys der
+ *            Geschwister-Neueintragung (Fall 2) echte Dateisystempfade für
+ *            g_dir_open() zu bauen, wie bei
+ *            sond_index_ctx_coverage_try_collapse(). Darf NULL sein, wenn
+ *            path selbst einen eigenen coverage-Eintrag hat (Fall 1) -
+ *            dann wird kein Verzeichnis geöffnet.
+ * @error:    GError
  *
  * Entwertet path: danach hat path keinen coverage-Eintrag mehr (weder
  * direkt noch über einen Vorfahren). War path nur indirekt über einen
@@ -434,6 +441,7 @@ gboolean sond_index_ctx_coverage_expand_to_pages(SondIndexCtx *ctx,
  */
 gboolean sond_index_ctx_coverage_invalidate(SondIndexCtx *ctx,
                                              gchar const *path,
+                                             gchar const *root_dir,
                                              GError **error);
 
 /**

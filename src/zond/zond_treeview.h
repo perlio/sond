@@ -55,6 +55,26 @@ GtkTreePath* zond_treeview_get_path(SondTreeview*, gint);
 
 GHashTable* zond_treeview_get_selected_fileparts(ZondTreeview *ztv,
 		GError **error);
+
+/*
+ * Wendet pin_state (STVFM_PIN_STATE_*, s. sond_treeviewfm_seadrive.h) auf
+ * alle real referenzierten Dateien der aktuellen Auswahl in ztv an. Vom
+ * eigenen Kontextmenü von ztv genutzt UND seit 11.09.2026 vom globalen
+ * Hauptmenü ("Projekt > SeaDrive > .../Auswahl", win.sd-*-sel in
+ * headerbar.c), wenn dieser Baum gerade der Baum mit einer Selektion ist.
+ */
+void zond_treeview_seadrive_apply_to_selection(ZondTreeview *ztv,
+		guint pin_state);
+
+/*
+ * Graut die "Auswahl"-SeaDrive-Menüpunkte im Kontextmenü von ztv ein/aus.
+ * Aufgerufen, wenn ein Projekt geöffnet/geschlossen wird (project.c,
+ * project_set_widgets_sensitive()) - sensitive sollte dabei bereits
+ * "aktives Projekt UND BAUM_FS liegt auf einem SeaDrive-Pfad" sein.
+ */
+void zond_treeview_seadrive_set_contextmenu_sensitive(ZondTreeview *ztv,
+		gboolean sensitive);
+
 G_END_DECLS
 
 #endif // SOND_TREEVIEW_H_INCLUDED

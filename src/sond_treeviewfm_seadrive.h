@@ -52,6 +52,36 @@ gboolean sond_seadrive_set_pin_state(const gchar *full_path,
  */
 void sond_treeviewfm_seadrive_init_contextmenu(SondTreeviewFM *stvfm);
 
+/*
+ * Setzt den Pin-State rekursiv auf dem gesamten Projektverzeichnis (Root
+ * von stvfm) und zeigt bei Fehlern selbst einen Dialog. Ehemals "Gesamtes
+ * Verzeichnis" im Kontextmenü von BAUM_FS (stv.sd-*-all) - seit 11.09.2026
+ * nur noch über das Hauptmenü ("Extras > SeaDrive", win.sd-*-all in
+ * headerbar.c) erreichbar: die Aktion betraf schon immer die Projekt-
+ * Wurzel, unabhängig von Rechtsklick-Ziel oder Selektion, und gehörte
+ * damit eigentlich nie in ein Kontextmenü (das ja "dieser Punkt"/"diese
+ * Auswahl" suggeriert) - Nutzer-Feedback, s. ToDo.c.
+ */
+void sond_treeviewfm_seadrive_pin_root(SondTreeviewFM *stvfm, guint pin_state);
+
+/*
+ * Setzt den Pin-State auf der aktuellen Selektion in stvfm (rekursiv bei
+ * ausgewählten Ordnern). Vom Kontextmenü von BAUM_FS selbst genutzt UND
+ * seit 11.09.2026 vom Hauptmenü ("Projekt > SeaDrive > .../Auswahl",
+ * win.sd-*-sel in headerbar.c), wenn BAUM_FS gerade der Baum mit einer
+ * Selektion ist.
+ */
+void sond_treeviewfm_seadrive_pin_selection(SondTreeviewFM *stvfm, guint pin_state);
+
+/*
+ * Graut die "Auswahl"-SeaDrive-Menüpunkte im Kontextmenü von stvfm ein/aus.
+ * Aufgerufen, wenn ein Projekt geöffnet/geschlossen wird (project.c,
+ * project_set_widgets_sensitive()) - sensitive sollte dabei bereits
+ * "aktives Projekt UND sond_treeviewfm_is_seadrive_path(stvfm)" sein.
+ */
+void sond_treeviewfm_seadrive_set_contextmenu_sensitive(SondTreeviewFM *stvfm,
+        gboolean sensitive);
+
 gpointer sond_treeviewfm_seadrive_watcher_thread(gpointer user_data);
 void sond_treeviewfm_seadrive_item_dehydrated(SondTreeviewFM *stvfm, const gchar *full_path);
 
@@ -86,6 +116,25 @@ static inline void
 sond_treeviewfm_seadrive_init_contextmenu(SondTreeviewFM *stvfm)
 {
     (void)stvfm;
+}
+
+static inline void
+sond_treeviewfm_seadrive_pin_root(SondTreeviewFM *stvfm, guint pin_state)
+{
+    (void)stvfm; (void)pin_state;
+}
+
+static inline void
+sond_treeviewfm_seadrive_pin_selection(SondTreeviewFM *stvfm, guint pin_state)
+{
+    (void)stvfm; (void)pin_state;
+}
+
+static inline void
+sond_treeviewfm_seadrive_set_contextmenu_sensitive(SondTreeviewFM *stvfm,
+        gboolean sensitive)
+{
+    (void)stvfm; (void)sensitive;
 }
 
 #endif /* _WIN32 */

@@ -3,6 +3,8 @@
 
 #include <glib.h>
 
+#include "../zond_init.h" /* fuer Baum-Enum (zond_index_erstellen_activate_fuer_baum) */
+
 typedef struct _Projekt Projekt;
 typedef struct _SondTreeviewFM SondTreeviewFM;
 
@@ -28,5 +30,33 @@ void init_headerbar(Projekt*);
  *          werden).
  */
 gboolean zond_index_erstellen_ht(Projekt *zond, GHashTable *ht_index);
+
+/**
+ * zond_index_erstellen_activate_fuer_baum:
+ * @zond: Projekt
+ * @baum: welcher der drei Bäume die Auswahl liefert (KEIN_BAUM -> Meldung
+ *        "Keine Punkte ausgewählt")
+ *
+ * Gemeinsame Logik für "Index erstellen (Auswahl)" - Analogon zu
+ * zond_indexsuche_activate_fuer_baum() (zond_indexsuche.c), s. dort für die
+ * Begründung des baum-Parameters (Kontextmenüs kennen ihn synchron über
+ * zond->baum_active, das globale Fenstermenü ermittelt ihn per Scan über
+ * zond_baum_mit_auswahl()).
+ */
+void zond_index_erstellen_activate_fuer_baum(Projekt *zond, Baum baum);
+
+/**
+ * headerbar_set_seadrive_sensitive:
+ * @zond:      Projekt
+ * @sensitive: TRUE, wenn die SeaDrive-Hauptmenüpunkte ("Projekt >
+ *             Immer offline verfügbar/Offline verfügbar aufheben/
+ *             Cache leeren", je Gesamtes-Projekt- und Auswahl-Variante)
+ *             anwählbar sein sollen.
+ *
+ * Von project_set_widgets_sensitive() (project.c) aufgerufen, wenn ein
+ * Projekt geöffnet/geschlossen wird - @sensitive sollte dabei bereits
+ * "aktives Projekt UND BAUM_FS liegt auf einem SeaDrive-Pfad" sein.
+ */
+void headerbar_set_seadrive_sensitive(Projekt *zond, gboolean sensitive);
 
 #endif // HEADERBAR_H_INCLUDED

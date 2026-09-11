@@ -907,10 +907,16 @@ static gint seadrive_pin_foreach(SondTreeview *stv, GtkTreeIter *iter,
 }
 
 /* ------------------------------------------------------------------ */
-/*  Internal: apply to root directory                                 */
+/*  Public: apply to root directory ("Gesamtes Projekt")               */
 /* ------------------------------------------------------------------ */
 
-static void apply_pin_state_to_root(SondTreeviewFM *stvfm, guint pin_state)
+/* War früher intern und wurde aus dem BAUM_FS-Kontextmenü heraus
+ * aufgerufen ("Gesamtes Verzeichnis"). Seit 11.09.2026 öffentlich, da nur
+ * noch vom Hauptmenü (win.sd-*-all, headerbar.c) aus erreichbar - die
+ * Aktion betraf schon immer die Projekt-Wurzel unabhängig von Selektion/
+ * Rechtsklick-Ziel und gehörte damit eigentlich nie in ein Kontextmenü,
+ * s. sond_treeviewfm_seadrive.h. */
+void sond_treeviewfm_seadrive_pin_root(SondTreeviewFM *stvfm, guint pin_state)
 {
     const gchar *root = sond_treeviewfm_get_root(stvfm);
     GError *error = NULL;
@@ -927,36 +933,34 @@ static void apply_pin_state_to_root(SondTreeviewFM *stvfm, guint pin_state)
 }
 
 /* ------------------------------------------------------------------ */
-/*  GSimpleAction-Callback (ersetzt seadrive_menu_activate)           */
+/*  Public: apply to current selection ("Auswahl")                    */
 /* ------------------------------------------------------------------ */
 
-static void seadrive_action_activate(GSimpleAction *action, GVariant *parameter,
-        gpointer data)
+/* Wendet pin_state auf die aktuelle Selektion in stvfm an (rekursiv bei
+ * ausgewählten Ordnern, s. seadrive_pin_foreach()/apply_pin_state_to_item()).
+ * War früher nur inline in seadrive_action_activate(); seit 11.09.2026
+ * öffentlich, da auch vom globalen Hauptmenü aus genutzt ("Projekt >
+ * SeaDrive > .../Auswahl", win.sd-*-sel in headerbar.c), wenn BAUM_FS
+ * gerade der Baum mit einer Selektion ist (s. zond_baum_mit_auswahl()). */
+void sond_treeviewfm_seadrive_pin_selection(SondTreeviewFM *stvfm,
+        guint pin_state)
 {
-    SondTreeviewFM *stvfm = SOND_TREEVIEWFM(data);
-    guint    pin_state = (guint) GPOINTER_TO_INT(
-            g_object_get_data(G_OBJECT(action), "pin_state"));
-    gboolean sel_only  = (gboolean) GPOINTER_TO_INT(
-            g_object_get_data(G_OBJECT(action), "sel"));
-    GError  *error = NULL;
+    GError *error = NULL;
 
-    if (sel_only) {
-        if (!gtk_tree_selection_count_selected_rows(
-                gtk_tree_view_get_selection(GTK_TREE_VIEW(stvfm)))) {
-            display_message(gtk_widget_get_toplevel(GTK_WIDGET(stvfm)),
-                            "Keine Punkte ausgewaehlt", NULL);
-            return;
-        }
-        gint rc = sond_treeview_selection_foreach(SOND_TREEVIEW(stvfm),
-                      seadrive_pin_foreach, GUINT_TO_POINTER(pin_state), &error);
-        if (rc == -1) {
-            display_message(gtk_widget_get_toplevel(GTK_WIDGET(stvfm)),
-                            "SeaDrive: Fehler\n\n",
-                            error ? error->message : "", NULL);
-            g_clear_error(&error);
-        }
-    } else {
-        apply_pin_state_to_root(stvfm, pin_state);
+    if (!gtk_tree_selection_count_selected_rows(
+            gtk_tree_view_get_selection(GTK_TREE_VIEW(stvfm)))) {
+        display_message(gtk_widget_get_toplevel(GTK_WIDGET(stvfm)),
+                        "Keine Punkte ausgewaehlt", NULL);
+        return;
+    }
+
+    gint rc = sond_treeview_selection_foreach(SOND_TREEVIEW(stvfm),
+                  seadrive_pin_foreach, GUINT_TO_POINTER(pin_state), &error);
+    if (rc == -1) {
+        display_message(gtk_widget_get_toplevel(GTK_WIDGET(stvfm)),
+                        "SeaDrive: Fehler\n\n",
+                        error ? error->message : "", NULL);
+        g_clear_error(&error);
     }
 
     /* Bei UNSPECIFIED/UNPINNED ändert sich das PINNED-Attribut sofort
@@ -973,6 +977,23 @@ static void seadrive_action_activate(GSimpleAction *action, GVariant *parameter,
 }
 
 /* ------------------------------------------------------------------ */
+/*  GSimpleAction-Callback (ersetzt seadrive_menu_activate)           */
+/* ------------------------------------------------------------------ */
+
+static void seadrive_action_activate(GSimpleAction *action, GVariant *parameter,
+        gpointer data)
+{
+    SondTreeviewFM *stvfm = SOND_TREEVIEWFM(data);
+    guint pin_state = (guint) GPOINTER_TO_INT(
+            g_object_get_data(G_OBJECT(action), "pin_state"));
+
+    /* Im Kontextmenü gibt es seit 11.09.2026 nur noch "Auswahl" - "Gesamtes
+     * Projekt" (sond_treeviewfm_seadrive_pin_root()) ist nur noch über das
+     * Hauptmenü erreichbar, s. sond_treeviewfm_seadrive_init_contextmenu(). */
+    sond_treeviewfm_seadrive_pin_selection(stvfm, pin_state);
+}
+
+/* ------------------------------------------------------------------ */
 /*  Public: attach SeaDrive submenu to context menu                   */
 /* ------------------------------------------------------------------ */
 
@@ -982,25 +1003,44 @@ void sond_treeviewfm_seadrive_init_contextmenu(SondTreeviewFM *stvfm)
      * bereits in sond_treeviewfm_class_init aufgebaut. */
     GSimpleActionGroup *ag = sond_treeview_get_action_group(SOND_TREEVIEW(stvfm));
 
-    struct { const gchar *name; guint pin_state; gboolean sel; } actions[] = {
-        { "sd-pin-all",     STVFM_PIN_STATE_PINNED,      FALSE },
-        { "sd-pin-sel",     STVFM_PIN_STATE_PINNED,      TRUE  },
-        { "sd-unspec-all",  STVFM_PIN_STATE_UNSPECIFIED, FALSE },
-        { "sd-unspec-sel",  STVFM_PIN_STATE_UNSPECIFIED, TRUE  },
-        { "sd-unpin-all",   STVFM_PIN_STATE_UNPINNED,    FALSE },
-        { "sd-unpin-sel",   STVFM_PIN_STATE_UNPINNED,    TRUE  },
+    /* "-all"-Varianten (wirkten schon immer auf die Projekt-Wurzel,
+     * unabhängig von Selektion/Rechtsklick-Ziel) gibt es seit 11.09.2026
+     * nur noch im Hauptmenü (win.sd-*-all, headerbar.c) - hier im
+     * Kontextmenü bewusst nur noch "Auswahl", s. sond_treeviewfm.c
+     * (add_base_menu) und sond_treeviewfm_seadrive.h. */
+    struct { const gchar *name; guint pin_state; } actions[] = {
+        { "sd-pin-sel",     STVFM_PIN_STATE_PINNED      },
+        { "sd-unspec-sel",  STVFM_PIN_STATE_UNSPECIFIED },
+        { "sd-unpin-sel",   STVFM_PIN_STATE_UNPINNED    },
     };
 
     for (guint i = 0; i < G_N_ELEMENTS(actions); i++) {
         GSimpleAction *act = g_simple_action_new(actions[i].name, NULL);
         g_object_set_data(G_OBJECT(act), "pin_state",
                 GINT_TO_POINTER((gint) actions[i].pin_state));
-        g_object_set_data(G_OBJECT(act), "sel",
-                GINT_TO_POINTER((gint) actions[i].sel));
         g_signal_connect(act, "activate",
                 G_CALLBACK(seadrive_action_activate), stvfm);
         g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act));
         g_object_unref(act);
+    }
+}
+
+/* Graut die "Auswahl"-SeaDrive-Einträge im Kontextmenü von stvfm ein/aus.
+ * Von project_set_widgets_sensitive() (project.c) aufgerufen, wenn ein
+ * Projekt geöffnet/geschlossen wird bzw. sich herausstellt, ob dessen
+ * Wurzel überhaupt ein SeaDrive-Verzeichnis ist (sond_treeviewfm_is_
+ * seadrive_path()) - Nutzer-Feedback 11.09.2026: ohne SeaDrive-Projekt
+ * sollen die Menüpunkte nicht anwählbar sein statt wirkungslos. */
+void sond_treeviewfm_seadrive_set_contextmenu_sensitive(SondTreeviewFM *stvfm,
+        gboolean sensitive)
+{
+    GSimpleActionGroup *ag = sond_treeview_get_action_group(SOND_TREEVIEW(stvfm));
+    const gchar *names[] = { "sd-pin-sel", "sd-unspec-sel", "sd-unpin-sel" };
+
+    for (guint i = 0; i < G_N_ELEMENTS(names); i++) {
+        GAction *a = g_action_map_lookup_action(G_ACTION_MAP(ag), names[i]);
+        if (a)
+            g_simple_action_set_enabled(G_SIMPLE_ACTION(a), sensitive);
     }
 }
 
