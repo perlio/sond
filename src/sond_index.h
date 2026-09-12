@@ -137,6 +137,61 @@ gboolean sond_index_ctx_clear_file(SondIndexCtx *ctx,
                                     GError      **error);
 
 /**
+ * sond_index_ctx_set_page_count:
+ * @ctx:         SondIndexCtx
+ * @filename:    Dateiname
+ * @total_pages: aktuelle GESAMTE Seitenzahl der PDF-Datei (aus
+ *               sond_text_extract_pdf()'s out_n_pages, NICHT die Anzahl
+ *               indizierter Segmente - Seiten ohne extrahierbaren Text
+ *               liefern kein Segment, zählen aber mit)
+ * @error:       GError
+ *
+ * Setzt/überschreibt die in file_pagecount gemerkte Seitenzahl
+ * (INSERT OR REPLACE). Aufzurufen bei jeder vollständigen Indizierung
+ * sowie nach Seiten-Einfügen/-Löschen im Viewer (dort mit der Anzahl
+ * noch existierender, nicht als gelöscht markierter Seiten) - s.
+ * ToDo.c (11.09.2026, Nutzerentscheidung).
+ *
+ * Returns: FALSE bei Datenbankfehler (kein Fehler, wenn ctx/filename
+ *          fehlen - dann No-Op).
+ */
+gboolean sond_index_ctx_set_page_count(SondIndexCtx *ctx,
+                                        gchar const  *filename,
+                                        gint          total_pages,
+                                        GError      **error);
+
+/**
+ * sond_index_ctx_get_page_count:
+ * @ctx:      SondIndexCtx
+ * @filename: Dateiname
+ *
+ * Returns: zuletzt bekannte Gesamtseitenzahl, oder -1 wenn unbekannt
+ *          (nie gesetzt - z.B. Datei noch nie vollständig indiziert,
+ *          oder vor Einführung dieser Tabelle).
+ */
+gint sond_index_ctx_get_page_count(SondIndexCtx *ctx, gchar const *filename);
+
+/**
+ * sond_index_ctx_clear_page_count:
+ * @ctx:      SondIndexCtx
+ * @filename: Datei- oder Verzeichnispfad
+ * @error:    GError
+ *
+ * Entfernt den Eintrag für filename sowie alles darunter (LIKE
+ * 'filename/%', deckt sowohl Unterverzeichnisse als auch eingebettete
+ * ("//") Teile ab - s. Konvention bei sond_index_ctx_coverage_mark()).
+ * Aufzurufen, wenn eine Datei komplett aus dem Index entfernt wird
+ * (sond_index_ctx_clear_file(), sond_index_ctx_delete_index() bei
+ * ganzer Datei) - NICHT bei bloßem Coalescing/Decoalescing der
+ * coverage-Tabelle, das lässt die Seitenzahl unberührt.
+ *
+ * Returns: FALSE bei Datenbankfehler.
+ */
+gboolean sond_index_ctx_clear_page_count(SondIndexCtx *ctx,
+                                          gchar const  *filename,
+                                          GError      **error);
+
+/**
  * sond_index_ctx_clear_page:
  * @ctx:      SondIndexCtx
  * @filename: Dateiname
@@ -472,6 +527,75 @@ gboolean sond_index_ctx_coverage_try_collapse(SondIndexCtx *ctx,
                                                gchar const *path,
                                                gchar const *root_dir,
                                                GError **error);
+
+/**
+ * sond_index_ctx_delete_index:
+ * @ctx:       SondIndexCtx
+ * @path:      Datei- oder Verzeichnispfad (filepart-Konvention,
+ *             projektrelativ)
+ * @von_seite: erste zu löschende Seite (0-basiert), oder -1 für "ganze
+ *             Datei/ganzes Verzeichnis" (dann wird @bis_seite ignoriert)
+ * @bis_seite: letzte zu löschende Seite (0-basiert), nur relevant wenn
+ *             @von_seite >= 0
+ * @root_dir:  absolute Projektwurzel (zond->project_dir) - wird an
+ *             sond_index_ctx_coverage_invalidate() durchgereicht
+ * @error:     GError
+ *
+ * Löscht Index-Daten (chunks/pages, NICHT die Datei selbst), ohne dass
+ * sich am Dateisystem etwas ändert - im Unterschied zu
+ * sond_index_ctx_coverage_clear() (dort ist der Pfad bereits gelöscht,
+ * die Vorfahren-Abdeckung bleibt also gültig) kann path danach wieder
+ * neuen, ungeprüften (weil: nicht mehr indizierten) Inhalt "haben" -
+ * ein eventuell abdeckender Vorfahre muss deshalb wie bei
+ * coverage_invalidate() aufgelöst werden.
+ *
+ * @von_seite < 0 (ganze Datei/Verzeichnis, z.B. "Gesamtes Projekt" oder
+ * eine Auswahl ohne Anbindung): entfernt chunks/pages für path selbst
+ * sowie alles darunter (Unterverzeichnisse, eingebettete Teile), löst
+ * einen abdeckenden Vorfahren auf (coverage_invalidate) und entfernt
+ * verbliebene coverage-Einträge für path/darunter (coverage_clear).
+ *
+ * @von_seite >= 0 (Seitenbereich innerhalb EINER Datei, z.B. eine
+ * Anbindung aus BAUM_INHALT/BAUM_AUSWERTUNG): rettet zunächst per
+ * sond_index_ctx_coverage_expand_to_pages() den Fortschritt der
+ * verbleibenden Seiten - normalerweise aus der "pages"-Tabelle bekannt;
+ * war path bereits zu einem eigenen coverage-Eintrag kollabiert (keine
+ * einzelnen "pages"-Zeilen mehr), wird ersatzweise auf
+ * sond_index_ctx_get_page_count() zurückgegriffen (coalescing-
+ * unabhängig gemerkte Gesamtseitenzahl, s. dort), um "0..total_pages-1
+ * außerhalb [von_seite,bis_seite]" korrekt zu rekonstruieren, ohne die
+ * Datei erneut zu öffnen (SeaDrive-Hydrierung vermeiden). Nur wenn
+ * auch das unbekannt ist (Datei vor Einführung von file_pagecount
+ * indiziert), geht der übrige Seiten-Fortschritt der Datei verloren -
+ * dieselbe akzeptierte Restriktion wie bei Fall 1 in
+ * coverage_invalidate(). Danach wird ein eigener oder abdeckender
+ * Vorfahren-Eintrag aufgelöst (coverage_invalidate), und gezielt nur
+ * die Seiten im angegebenen Bereich aus chunks/pages gelöscht.
+ *
+ * Returns: FALSE bei Datenbankfehler.
+ */
+gboolean sond_index_ctx_delete_index(SondIndexCtx *ctx,
+                                      gchar const *path,
+                                      gint von_seite,
+                                      gint bis_seite,
+                                      gchar const *root_dir,
+                                      GError **error);
+
+/**
+ * sond_index_ctx_delete_all:
+ * @ctx:   SondIndexCtx
+ * @error: GError
+ *
+ * Löscht den GESAMTEN Index (chunks, pages, coverage) - "Index löschen"
+ * für "Gesamtes Projekt". Einfacher/schneller Sonderfall von
+ * sond_index_ctx_delete_index() (dort müsste man dafür den kompletten
+ * Baum ablaufen, um alle Top-Level-Pfade einzeln zu invalidieren): hier
+ * ist von vornherein klar, dass NICHTS mehr abgedeckt sein wird, ein
+ * schlichtes Leeren aller drei Tabellen reicht.
+ *
+ * Returns: FALSE bei Datenbankfehler.
+ */
+gboolean sond_index_ctx_delete_all(SondIndexCtx *ctx, GError **error);
 
 /**
  * sond_index_ctx_rename_file:

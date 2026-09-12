@@ -586,8 +586,28 @@ gint project_close(Projekt *zond, GError **error) {
 
 		if (rc == GTK_RESPONSE_YES) {
 			gint save_rc = project_save(zond, error);
-			if (save_rc)
-				return -1;
+			if (save_rc) {
+				/* Nutzervorgabe: Speichern kann fehlschlagen (z.B.
+				 * Netzlaufwerk kurzzeitig nicht erreichbar), ohne dass
+				 * der Nutzer die Möglichkeit verlieren soll, das
+				 * Projekt trotzdem - ohne die fehlgeschlagene
+				 * Speicherung - zu schließen (und dabei wie gewohnt
+				 * nach den offenen PDF-Viewern gefragt zu werden).
+				 * Vorher wurde hier sofort abgebrochen (return -1),
+				 * ohne diese Möglichkeit. */
+				g_autofree gchar *msg_save_failed = g_strdup_printf(
+						"Speichern fehlgeschlagen: %s",
+						(error && *error) ? (*error)->message : "unbekannter Fehler");
+				gint rc_trotzdem = abfrage_frage(zond->app_window,
+						msg_save_failed,
+						"Projekt trotzdem ohne Speichern schließen?", NULL);
+
+				if (rc_trotzdem != GTK_RESPONSE_YES)
+					return -1;
+
+				if (error && *error)
+					g_clear_error(error);
+			}
 		} else if (rc != GTK_RESPONSE_NO) {
 			return 1;  // User cancelled
 		}

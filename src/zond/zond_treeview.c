@@ -326,6 +326,7 @@ static void zond_treeview_class_init(ZondTreeviewClass *klass) {
 	GMenu *sub_idx = g_menu_new();
 	g_menu_append(sub_idx, "Erstellen",   "stv.index-erstellen-sel");
 	g_menu_append(sub_idx, "Durchsuchen", "stv.indexsuche-sel");
+	g_menu_append(sub_idx, "Löschen",     "stv.index-loeschen-sel");
 	g_menu_append_submenu(sec_idx, "Index", G_MENU_MODEL(sub_idx));
 	g_object_unref(sub_idx);
 	g_menu_append_section(gmenu, NULL, G_MENU_MODEL(sec_idx));
@@ -2770,6 +2771,15 @@ static void zond_treeview_action_index_erstellen_auswahl(GSimpleAction *a,
 	zond_index_erstellen_activate_fuer_baum(zond, zond->baum_active);
 }
 
+static void zond_treeview_action_index_loeschen_auswahl(GSimpleAction *a,
+		GVariant *p, gpointer d) {
+	Projekt *zond = (Projekt*) d;
+
+	/* Analogon zu zond_treeview_action_indexsuche_auswahl() oberhalb,
+	 * s. dortigen Kommentar. */
+	zond_index_loeschen_activate_fuer_baum(zond, zond->baum_active);
+}
+
 /* Wendet pin_state auf alle real referenzierten Dateien der aktuellen
  * Auswahl in ztv an. Nutzt dieselbe Aggregation wie die Indexsuche
  * (zond_treeview_get_selected_fileparts()) - Seitenbereiche werden dabei
@@ -2802,7 +2812,7 @@ void zond_treeview_seadrive_apply_to_selection(ZondTreeview *ztv,
 	if (!root)
 		return;
 
-	ht_fileparts = zond_treeview_get_selected_fileparts(ztv, &error);
+	ht_fileparts = zond_treeview_get_selected_fileparts(ztv, FALSE, &error);
 	if (!ht_fileparts) {
 		display_message(zond->app_window,
 				"Fehler beim Ermitteln der Auswahl:\n",
@@ -2905,6 +2915,7 @@ static void zond_treeview_init_contextmenu(ZondTreeview *ztv) {
 				G_VARIANT_TYPE_BOOLEAN},
 		{ "indexsuche-sel", G_CALLBACK(zond_treeview_action_indexsuche_auswahl), NULL},
 		{ "index-erstellen-sel", G_CALLBACK(zond_treeview_action_index_erstellen_auswahl), NULL},
+		{ "index-loeschen-sel", G_CALLBACK(zond_treeview_action_index_loeschen_auswahl), NULL},
 		{ "sd-pin-sel",     G_CALLBACK(zond_treeview_action_sd_pin_sel),     NULL},
 		{ "sd-unspec-sel",  G_CALLBACK(zond_treeview_action_sd_unspec_sel),  NULL},
 		{ "sd-unpin-sel",   G_CALLBACK(zond_treeview_action_sd_unpin_sel),   NULL}
@@ -3238,6 +3249,16 @@ static gint zond_treeview_get_filepart_and_section(ZondTreeview *ztv,
 	return node_id;
 }
 
+/* Bündelt die Parameter für zond_treeview_get_selected_fileparts_foreach()
+ * in EINEM gpointer - die Funktion wird über sond_treeview_selection_foreach()
+ * mit generischer gpointer-data-Signatur aufgerufen und auch rekursiv für
+ * Kind-Knoten wiederverwendet, kann also nicht einfach einen zweiten
+ * Parameter bekommen. */
+typedef struct {
+	GHashTable *ht_fileparts;
+	gboolean reject_unterseitig;
+} ZondTreeviewGetFilepartsData;
+
 static gint zond_treeview_get_selected_fileparts_foreach(ZondTreeview *ztv,
 		GtkTreeIter *iter, gpointer data, GError **error) {
 	gint node_id = 0;
@@ -3248,7 +3269,8 @@ static gint zond_treeview_get_selected_fileparts_foreach(ZondTreeview *ztv,
 	Anbindung anbindung = { 0 };
 	gboolean had_file_part = FALSE;
 
-	GHashTable *ht_fileparts = (GHashTable*) data;
+	ZondTreeviewGetFilepartsData *gfd = (ZondTreeviewGetFilepartsData*) data;
+	GHashTable *ht_fileparts = gfd->ht_fileparts;
 
 	node_id = zond_treeview_get_filepart_and_section(ztv, iter, &file_part, &section, error);
 	if (node_id == -1)
@@ -3281,8 +3303,25 @@ static gint zond_treeview_get_selected_fileparts_foreach(ZondTreeview *ztv,
 		g_free(section);
 
 		if (!anbindung_is_empty(&anbindung)) {
-			gint von = anbindung.von.seite;
-			gint bis = anbindung_is_pdf_punkt(anbindung) ? von : anbindung.bis.seite;
+			gint von = 0;
+			gint bis = 0;
+
+			/* Index erstellen/löschen (Auswahl): unterseitige Anbindungen
+			 * (beginnen/enden nicht an Seitengrenzen, oder sind ein reiner
+			 * Punkt) sind dafür nicht zulässig - Indizierung/Löschen
+			 * arbeitet nur seitenweise, s. anbindung_ist_unterseitig()
+			 * (general.c) und ToDo.c (11.09.2026, Nutzerentscheidung). */
+			if (gfd->reject_unterseitig && anbindung_ist_unterseitig(anbindung)) {
+				g_object_unref(sfp);
+				g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+						"Die Auswahl enthält eine unterseitige Anbindung "
+						"(beginnt/endet nicht an einer Seitengrenze) - das "
+						"ist für Indizierung/Index löschen nicht zulässig.");
+				return -1;
+			}
+
+			von = anbindung.von.seite;
+			bis = anbindung_is_pdf_punkt(anbindung) ? von : anbindung.bis.seite;
 
 			range = sond_page_range_new(von, bis);
 		}
@@ -3344,16 +3383,20 @@ static gint zond_treeview_get_selected_fileparts_foreach(ZondTreeview *ztv,
 }
 
 GHashTable* zond_treeview_get_selected_fileparts(ZondTreeview *ztv,
-		GError **error) {
+		gboolean reject_unterseitig, GError **error) {
 	GHashTable *ht_fileparts = NULL;
 	gint rc = 0;
+	ZondTreeviewGetFilepartsData gfd = { 0 };
 
 	ht_fileparts = g_hash_table_new_full(NULL, NULL, g_object_unref,
 			sond_page_range_free);
 
+	gfd.ht_fileparts = ht_fileparts;
+	gfd.reject_unterseitig = reject_unterseitig;
+
 	rc = sond_treeview_selection_foreach(SOND_TREEVIEW(ztv),
 			(gint(*)(SondTreeview*, GtkTreeIter*, gpointer, GError**))
-			zond_treeview_get_selected_fileparts_foreach, ht_fileparts, error);
+			zond_treeview_get_selected_fileparts_foreach, &gfd, error);
 
 	if (rc) {
 		g_hash_table_destroy(ht_fileparts);

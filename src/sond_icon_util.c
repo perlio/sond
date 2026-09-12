@@ -77,7 +77,7 @@ GdkPixbuf* sond_icon_util_status_badge_pixbuf(SondIndexStatus status, gint size)
 	if (status == SOND_INDEX_STATUS_FULL)
 		return draw_circle_badge(0.20, 0.66, 0.33, size); /* Grün */
 	if (status == SOND_INDEX_STATUS_PARTIAL)
-		return draw_circle_badge(0.95, 0.61, 0.07, size); /* Orange */
+		return draw_circle_badge(0.55, 0.55, 0.55, size); /* Grau - wie SEADRIVE_DIR_STATUS_MIXED (11.09.2026 auf Nutzer-Feedback von Orange umgestellt: Orange wirkte wie ein Warn-/Unfertig-Signal statt eines reinen Ist-Zustands) */
 
 	return NULL;
 }
@@ -87,7 +87,7 @@ GdkPixbuf* sond_icon_util_seadrive_badge_pixbuf(SondSeadriveBadge badge, gint si
 	case SOND_SEADRIVE_BADGE_OFFLINE:
 		return draw_circle_badge(0.55, 0.25, 0.75, size); /* Violett */
 	case SOND_SEADRIVE_BADGE_PENDING:
-		return draw_circle_badge(0.95, 0.61, 0.07, size); /* Orange - wie INDEX_STATUS_PARTIAL */
+		return draw_circle_badge(0.95, 0.61, 0.07, size); /* Orange (seit 11.09.2026 nicht mehr geteilt mit INDEX_STATUS_PARTIAL, das jetzt Grau ist) */
 	case SOND_SEADRIVE_BADGE_PINNED:
 		return draw_circle_badge(0.20, 0.66, 0.33, size); /* Grün */
 	default:

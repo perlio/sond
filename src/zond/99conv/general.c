@@ -43,6 +43,20 @@ gboolean anbindung_is_pdf_punkt(Anbindung anbindung) {
 	return FALSE;
 }
 
+gboolean anbindung_ist_unterseitig(Anbindung anbindung) {
+	/* Punkt: markiert eine einzelne Position, nie eine ganze Seite -
+	 * zählt hier immer als unterseitig. */
+	if (anbindung_is_pdf_punkt(anbindung))
+		return TRUE;
+
+	/* von.index != 0: beginnt nicht am Seitenanfang.
+	 * bis.index != EOP: endet nicht am Seitenende (EOP = "End Of Page",
+	 * s. viewer.h - von anbindung_build_file_section()/den Anbindungs-
+	 * Editierstellen im Viewer explizit so gesetzt, wenn "bis zum Ende
+	 * der Seite" gemeint ist). */
+	return anbindung.von.index != 0 || anbindung.bis.index != EOP;
+}
+
 gboolean anbindung_1_vor_2(Anbindung anbindung1, Anbindung anbindung2) {
 	if (anbindung_1_gleich_2(anbindung1, anbindung2))
 		return FALSE;

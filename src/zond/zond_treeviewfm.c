@@ -372,10 +372,6 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 	//Kontext für "after" setzen: move ist immer dual (Bit 0 = 1), Bit 1 = changed vor der Transaktion
 	*ctx = GINT_TO_POINTER(1 | (ztvfm_priv->zond->dbase_zond->changed ? 2 : 0));
 
-	LOG_INFO("%s: DIAG aufgerufen, wctx=%p index_ctx=%p", __func__,
-			(void*) ztvfm_priv->zond->wctx,
-			(void*) (ztvfm_priv->zond->wctx ? ztvfm_priv->zond->wctx->index_ctx : NULL));
-
 	/* Index-DB-Transaktion öffnen und Pfad umbenennen */
 	if (ztvfm_priv->zond->wctx && ztvfm_priv->zond->wctx->index_ctx) {
 		GError *idx_err = NULL;
@@ -395,8 +391,6 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 		 * Reihenfolge wichtig: muss VOR sond_index_ctx_rename_file()
 		 * laufen, sonst würde der gerade erst umbenannte, korrekte eigene
 		 * Eintrag der verschobenen Datei gleich wieder mitgelöscht. */
-		LOG_INFO("%s: DIAG prefix_old='%s' prefix_new='%s'", __func__,
-				prefix_old, prefix_new);
 		if (!sond_index_ctx_coverage_invalidate(ztvfm_priv->zond->wctx->index_ctx,
 				prefix_new, ztvfm_priv->zond->project_dir, &idx_err)) {
 			sqlite3_exec(ztvfm_priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
@@ -944,7 +938,7 @@ static gint zond_treeviewfm_get_text_from_section(SondTVFMItem* stvfm_item,
  * schon vorhandenen öffentlichen SondTVFMItem-Zugriffsfunktionen
  * (sond_treeviewfm.h) - ohne jede Änderung an der Basisklasse. */
 static gint zond_treeviewfm_item_get_fileparts(SondTVFMItem *stvfm_item,
-		GHashTable *ht, GError **error) {
+		GHashTable *ht, gboolean reject_unterseitig, GError **error) {
 	SondTVFMItemType type = sond_tvfm_item_get_item_type(stvfm_item);
 	gchar const *path_or_section = sond_tvfm_item_get_path_or_section(stvfm_item);
 	SondFilePart *sond_file_part = sond_tvfm_item_get_sond_file_part(stvfm_item);
@@ -961,7 +955,8 @@ static gint zond_treeviewfm_item_get_fileparts(SondTVFMItem *stvfm_item,
 		for (guint i = 0; i < arr_children->len; i++) {
 			SondTVFMItem *child = g_ptr_array_index(arr_children, i);
 
-			rc = zond_treeviewfm_item_get_fileparts(child, ht, error);
+			rc = zond_treeviewfm_item_get_fileparts(child, ht,
+					reject_unterseitig, error);
 			if (rc)
 				return -1;
 		}
@@ -981,6 +976,19 @@ static gint zond_treeviewfm_item_get_fileparts(SondTVFMItem *stvfm_item,
 			Anbindung anbindung = { 0 };
 
 			anbindung_parse_file_section(path_or_section, &anbindung);
+
+			/* Index erstellen/löschen (Auswahl): unterseitige Anbindungen
+			 * sind dafür nicht zulässig - s. anbindung_ist_unterseitig()
+			 * (99conv/general.h) und ToDo.c (11.09.2026,
+			 * Nutzerentscheidung). */
+			if (reject_unterseitig && anbindung_ist_unterseitig(anbindung)) {
+				g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+						"Die Auswahl enthält eine unterseitige Anbindung "
+						"(beginnt/endet nicht an einer Seitengrenze) - das "
+						"ist für Indizierung/Index löschen nicht zulässig.");
+				return -1;
+			}
+
 			range = sond_page_range_new(anbindung.von.seite,
 					(anbindung.bis.seite == 0 && anbindung.bis.index == 0) ?
 							anbindung.von.seite : anbindung.bis.seite);
@@ -992,15 +1000,21 @@ static gint zond_treeviewfm_item_get_fileparts(SondTVFMItem *stvfm_item,
 	return 0;
 }
 
+typedef struct {
+	GHashTable *ht;
+	gboolean reject_unterseitig;
+} ZtvfmGetFilepartsData;
+
 static gint zond_treeviewfm_get_fileparts_foreach(SondTreeview *stv,
 		GtkTreeIter *iter, gpointer data, GError **error) {
 	SondTVFMItem *stvfm_item = NULL;
-	GHashTable *ht = (GHashTable*) data;
+	ZtvfmGetFilepartsData *gfd = (ZtvfmGetFilepartsData*) data;
 	gint rc = 0;
 
 	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(stv)),
 			iter, 0, &stvfm_item, -1);
-	rc = zond_treeviewfm_item_get_fileparts(stvfm_item, ht, error);
+	rc = zond_treeviewfm_item_get_fileparts(stvfm_item, gfd->ht,
+			gfd->reject_unterseitig, error);
 	g_object_unref(stvfm_item);
 	if (rc)
 		return -1;
@@ -1009,20 +1023,23 @@ static gint zond_treeviewfm_get_fileparts_foreach(SondTreeview *stv,
 }
 
 GHashTable* zond_treeviewfm_get_fileparts(ZondTreeviewFM *ztvfm,
-		gboolean selected_only, GError **error) {
+		gboolean selected_only, gboolean reject_unterseitig, GError **error) {
 	GHashTable *ht = NULL;
 	gint rc = 0;
 
 	ht = g_hash_table_new_full(NULL, NULL, g_object_unref, sond_page_range_free);
 
-	if (selected_only)
+	if (selected_only) {
+		ZtvfmGetFilepartsData gfd = { ht, reject_unterseitig };
+
 		rc = sond_treeview_selection_foreach(SOND_TREEVIEW(ztvfm),
-				zond_treeviewfm_get_fileparts_foreach, ht, error);
-	else {
+				zond_treeviewfm_get_fileparts_foreach, &gfd, error);
+	} else {
 		SondTVFMItem *stvfm_item =
 				sond_tvfm_item_create(SOND_TREEVIEWFM(ztvfm), NULL, NULL);
 
-		rc = zond_treeviewfm_item_get_fileparts(stvfm_item, ht, error);
+		/* "Gesamtes Projekt": nie ablehnen, s. Doc-Kommentar (Header). */
+		rc = zond_treeviewfm_item_get_fileparts(stvfm_item, ht, FALSE, error);
 		g_object_unref(stvfm_item);
 	}
 
@@ -1100,6 +1117,7 @@ static void zond_treeviewfm_class_init(ZondTreeviewFMClass *klass) {
 	GMenu *sub_idx = g_menu_new();
 	g_menu_append(sub_idx, "Erstellen",   "stv.index-erstellen-sel");
 	g_menu_append(sub_idx, "Durchsuchen", "stv.indexsuche-sel");
+	g_menu_append(sub_idx, "Löschen",     "stv.index-loeschen-sel");
 	g_menu_append_submenu(sec_idx, "Index", G_MENU_MODEL(sub_idx));
 	g_object_unref(sub_idx);
 	g_menu_append_section(gmenu, NULL, G_MENU_MODEL(sec_idx));
@@ -1177,6 +1195,15 @@ static void zond_treeviewfm_action_index_erstellen_auswahl(GSimpleAction *a,
 	zond_index_erstellen_activate_fuer_baum(zond, zond->baum_active);
 }
 
+static void zond_treeviewfm_action_index_loeschen_auswahl(GSimpleAction *a,
+		GVariant *p, gpointer d) {
+	Projekt *zond = (Projekt*) d;
+
+	/* Analogon zu zond_treeviewfm_action_indexsuche_auswahl() oberhalb,
+	 * s. dortigen Kommentar. */
+	zond_index_loeschen_activate_fuer_baum(zond, zond->baum_active);
+}
+
 static void zond_treeviewfm_init_contextmenu(ZondTreeviewFM *ztvfm,
 		Projekt *zond) {
 	/* Nur GActions registrieren — GMenu-Sections wurden bereits in
@@ -1201,6 +1228,12 @@ static void zond_treeviewfm_init_contextmenu(ZondTreeviewFM *ztvfm,
 			G_CALLBACK(zond_treeviewfm_action_index_erstellen_auswahl), zond);
 	g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act_idx_erst_sel));
 	g_object_unref(act_idx_erst_sel);
+
+	GSimpleAction *act_idx_loesch_sel = g_simple_action_new("index-loeschen-sel", NULL);
+	g_signal_connect(act_idx_loesch_sel, "activate",
+			G_CALLBACK(zond_treeviewfm_action_index_loeschen_auswahl), zond);
+	g_action_map_add_action(G_ACTION_MAP(ag), G_ACTION(act_idx_loesch_sel));
+	g_object_unref(act_idx_loesch_sel);
 }
 
 /* Getter fuer sond_treeviewfm_set_index_ctx_func(): liefert den aktuellen

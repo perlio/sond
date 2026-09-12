@@ -31,6 +31,7 @@
 #include "../../sond_log_and_error.h"
 #include "../../sond_file_helper.h"
 #include "../../sond_process_file.h"
+#include "../../sond_index.h"
 #include "../../sond_treeviewfm_seadrive.h"
 
 #include "../zond_pdf_document.h"
@@ -283,7 +284,7 @@ static void do_index_erstellen_gesamt(Projekt *zond) {
 	GHashTable *ht_index = NULL;
 
 	ht_index = zond_treeviewfm_get_fileparts(
-			ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), FALSE, &error);
+			ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), FALSE, FALSE, &error);
 	if (!ht_index) {
 		display_message(zond->app_window, "Fehler beim Erstellen des Index:\n",
 				error->message, NULL);
@@ -310,10 +311,10 @@ void zond_index_erstellen_activate_fuer_baum(Projekt *zond, Baum baum) {
 
 	if (baum == BAUM_FS)
 		ht_index = zond_treeviewfm_get_fileparts(
-				ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), TRUE, &error);
+				ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), TRUE, TRUE, &error);
 	else
 		ht_index = zond_treeview_get_selected_fileparts(
-				ZOND_TREEVIEW(zond->treeview[baum]), &error);
+				ZOND_TREEVIEW(zond->treeview[baum]), TRUE, &error);
 	if (!ht_index) {
 		display_message(zond->app_window, "Fehler beim Ermitteln der Auswahl:\n",
 				error ? error->message : "?", NULL);
@@ -331,6 +332,132 @@ void zond_index_erstellen_activate_fuer_baum(Projekt *zond, Baum baum) {
 
 static void cb_app_index_erstellen(GSimpleAction *a, GVariant *p, gpointer d) {
 	do_index_erstellen_gesamt((Projekt*) d);
+}
+
+/* "Index löschen": entfernt Index-Daten (chunks/pages/coverage in
+ * .sond_index.db), OHNE etwas am Dateisystem oder an Anbindungen
+ * (dbase_zond) zu ändern - eine Anbindung, deren Datei/Seitenbereich
+ * danach nicht mehr indiziert ist, wird dadurch weder ungültig noch
+ * verschwindet sie: sie zeigt lediglich (wie jede sonst nicht
+ * indizierte Datei/Seite) keinen grünen/gemischten Badge mehr an, und
+ * Volltextsuche/Indexsuche liefern für diesen Bereich keine Treffer
+ * mehr, bis neu indiziert wird (Nutzer-Klärung 11.09.2026, s. ToDo.c). */
+
+static void zond_index_loeschen_redraw(Projekt *zond) {
+	for (Baum baum = BAUM_FS; baum < NUM_BAUM; baum++)
+		gtk_widget_queue_draw(GTK_WIDGET(zond->treeview[baum]));
+}
+
+static void do_index_loeschen_gesamt(Projekt *zond) {
+	GError *error = NULL;
+	gint rc = 0;
+
+	if (!zond->wctx || !zond->wctx->index_ctx) {
+		display_message(zond->app_window, "Kein Index vorhanden", NULL);
+		return;
+	}
+
+	rc = abfrage_frage(zond->app_window, "Index löschen",
+			"Gesamten Index (alle Dateien) unwiderruflich löschen?", NULL);
+	if (rc != GTK_RESPONSE_YES)
+		return;
+
+	if (!sond_index_ctx_delete_all(zond->wctx->index_ctx, &error)) {
+		display_message(zond->app_window, "Fehler beim Löschen des Index:\n",
+				error->message, NULL);
+		g_error_free(error);
+		return;
+	}
+
+	zond_index_loeschen_redraw(zond);
+}
+
+/* Gemeinsame Logik fuer "Index löschen (Auswahl)" - Analogon zu
+ * zond_index_erstellen_ht(), aber synchron (reines Datenbank-Löschen,
+ * kein Datei-/OCR-Zugriff nötig) und mit vorheriger Rückfrage, da
+ * destruktiv (bereits geleistete OCR-/Embedding-Arbeit geht verloren,
+ * bis neu indiziert wird). */
+static void zond_index_loeschen_ht(Projekt *zond, GHashTable *ht_index) {
+	GHashTableIter iter = { 0 };
+	gpointer key = NULL;
+	gpointer value = NULL;
+	gint rc = 0;
+
+	rc = abfrage_frage(zond->app_window, "Index löschen",
+			"Index für die ausgewählten Punkte unwiderruflich löschen?",
+			NULL);
+	if (rc != GTK_RESPONSE_YES) {
+		g_hash_table_destroy(ht_index);
+		return;
+	}
+
+	g_hash_table_iter_init(&iter, ht_index);
+	while (g_hash_table_iter_next(&iter, &key, &value)) {
+		SondFilePart *sfp = SOND_FILE_PART(key);
+		SondPageRange *range = (SondPageRange*) value; /* NULL = ganze Datei */
+		gchar *file_part = sond_file_part_get_filepart(sfp);
+		GError *error = NULL;
+
+		if (!sond_index_ctx_delete_index(zond->wctx->index_ctx, file_part,
+				range ? range->von : -1, range ? range->bis : -1,
+				zond->project_dir, &error)) {
+			LOG_WARN("%s: sond_index_ctx_delete_index('%s'): %s", __func__,
+					file_part, error ? error->message : "?");
+			g_clear_error(&error);
+		}
+		g_free(file_part);
+	}
+
+	g_hash_table_destroy(ht_index);
+	zond_index_loeschen_redraw(zond);
+}
+
+/* Analogon zu zond_index_erstellen_activate_fuer_baum() - s. dortigen
+ * Kommentar, dieselbe Ermittlung der Auswahl aus BAUM_FS bzw.
+ * BAUM_INHALT/BAUM_AUSWERTUNG. */
+void zond_index_loeschen_activate_fuer_baum(Projekt *zond, Baum baum) {
+	GError *error = NULL;
+	GHashTable *ht_index = NULL;
+
+	if (baum == KEIN_BAUM) {
+		display_message(zond->app_window, "Keine Punkte ausgewählt", NULL);
+		return;
+	}
+
+	if (!zond->wctx || !zond->wctx->index_ctx) {
+		display_message(zond->app_window, "Kein Index vorhanden", NULL);
+		return;
+	}
+
+	if (baum == BAUM_FS)
+		ht_index = zond_treeviewfm_get_fileparts(
+				ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), TRUE, TRUE, &error);
+	else
+		ht_index = zond_treeview_get_selected_fileparts(
+				ZOND_TREEVIEW(zond->treeview[baum]), TRUE, &error);
+	if (!ht_index) {
+		display_message(zond->app_window, "Fehler beim Ermitteln der Auswahl:\n",
+				error ? error->message : "?", NULL);
+		g_clear_error(&error);
+		return;
+	}
+	if (g_hash_table_size(ht_index) == 0) {
+		display_message(zond->app_window, "Keine Punkte ausgewählt", NULL);
+		g_hash_table_destroy(ht_index);
+		return;
+	}
+
+	zond_index_loeschen_ht(zond, ht_index);
+}
+
+static void cb_app_index_loeschen(GSimpleAction *a, GVariant *p, gpointer d) {
+	do_index_loeschen_gesamt((Projekt*) d);
+}
+
+static void cb_win_index_loeschen_sel(GSimpleAction *a, GVariant *p, gpointer d) {
+	Projekt *zond = (Projekt*) d;
+
+	zond_index_loeschen_activate_fuer_baum(zond, zond_baum_mit_auswahl(zond));
 }
 
 static void cb_app_indexsuche(GSimpleAction *a, GVariant *p, gpointer d) {
@@ -757,6 +884,7 @@ static void init_app_actions(Projekt *zond) {
 	APP_ACT("projekt-speichern",  cb_app_projekt_speichern);
 	APP_ACT("projekt-schliessen", cb_app_projekt_schliessen);
 	APP_ACT("index-erstellen",    cb_app_index_erstellen);
+	APP_ACT("index-loeschen",     cb_app_index_loeschen);
 	APP_ACT("indexsuche",         cb_app_indexsuche);
 	APP_ACT("beenden",            cb_app_beenden);
 	APP_ACT("ueber",              cb_app_ueber);
@@ -793,6 +921,7 @@ static void init_win_actions(Projekt *zond) {
 	} while (0)
 
 	WIN_ACT("index-erstellen-sel", cb_win_index_erstellen_sel);
+	WIN_ACT("index-loeschen-sel",  cb_win_index_loeschen_sel);
 	WIN_ACT("indexsuche-auswahl",  cb_win_indexsuche_auswahl);
 
 	WIN_ACT("sd-pin-all",     cb_win_seadrive_pin_all);
@@ -805,6 +934,7 @@ static void init_win_actions(Projekt *zond) {
 	WIN_ACT("projekt-neu",     cb_app_projekt_neu);
 	WIN_ACT("projekt-oeffnen", cb_app_projekt_oeffnen);
 	WIN_ACT("index-erstellen", cb_app_index_erstellen);
+	WIN_ACT("index-loeschen",  cb_app_index_loeschen);
 	WIN_ACT("indexsuche",      cb_app_indexsuche);
 	WIN_ACT("beenden",         cb_app_beenden);
 	WIN_ACT("ueber",           cb_app_ueber);
@@ -945,6 +1075,11 @@ static GMenuModel* build_menu(Projekt *zond) {
 	g_menu_append(sub_idx_such, "Auswahl",          "win.indexsuche-auswahl");
 	g_menu_append_submenu(sub_idx, "Durchsuchen", G_MENU_MODEL(sub_idx_such));
 	g_object_unref(sub_idx_such);
+	GMenu *sub_idx_loesch = g_menu_new();
+	g_menu_append(sub_idx_loesch, "Gesamtes Projekt", "win.index-loeschen");
+	g_menu_append(sub_idx_loesch, "Auswahl",          "win.index-loeschen-sel");
+	g_menu_append_submenu(sub_idx, "Löschen", G_MENU_MODEL(sub_idx_loesch));
+	g_object_unref(sub_idx_loesch);
 	g_menu_append_submenu(sec_index, "Index", G_MENU_MODEL(sub_idx));
 	g_object_unref(sub_idx);
 	/* "Chat mit dem Index" bewußt entfernt - fürs Release abgeklemmt

@@ -225,8 +225,17 @@ typedef struct {
     SondFilePart  *sfp;          /* (transfer none) */
     SondPageRange *range;        /* (transfer none), kann NULL sein (ganze Datei) */
     gchar         *display_name;
-    gint           missing;
-    gint           total;
+    /* total_known == FALSE: PDF ganz ohne Coverage-Eintrag und ohne
+     * expliziten Seitenbereich - die echte Gesamtseitenzahl wird bewusst
+     * NICHT durch Öffnen der Datei ermittelt (Nutzer-Entscheidung
+     * 11.09.2026: das würde bei SeaDrive-Platzhaltern Hydrierung
+     * auslösen, nur um eine Zahl fürs Anzeigen zu bekommen). Dann ist nur
+     * "indexed" aussagekräftig (rein aus der pages-Tabelle, kein
+     * Dateizugriff), missing/total sind in diesem Fall ungültig. */
+    gboolean       total_known;
+    gint           missing;      /* nur gültig, wenn total_known */
+    gint           total;        /* nur gültig, wenn total_known */
+    gint           indexed;      /* nur gültig, wenn !total_known */
 } SondIndexCoverageGap;
 
 static void
@@ -238,23 +247,43 @@ sond_index_coverage_gap_free(gpointer p) {
 }
 
 /* Ermittelt für einen einzelnen ausgewählten Punkt (sfp, range), wie viele
- * der erwarteten Seiten noch nicht indiziert sind. Bei PDFs ohne
- * eingeschränkten Seitenbereich (range == NULL, "ganze Datei") wird dazu
- * die tatsächliche Seitenzahl ermittelt - ein reiner Metadaten-Zugriff
- * (pdf_count_pages), kein Volltext/OCR, sollte also auch bei vielen/
- * großen PDFs schnell gehen. Nicht-PDF-Fileparts gelten als ein einziger
- * "virtueller" Eintrag (page_nr = -1 in der Konvention von sond_index.c).
+ * der erwarteten Seiten noch nicht indiziert sind. Nicht-PDF-Fileparts
+ * gelten als ein einziger "virtueller" Eintrag (page_nr = -1 in der
+ * Konvention von sond_index.c).
+ *
+ * PDFs MIT explizitem Seitenbereich (range->von >= 0, z.B. eine Anbindung
+ * auf einen Teilbereich): von/bis kommen direkt aus range, kein
+ * Dateizugriff nötig.
+ *
+ * PDFs OHNE Coverage-Eintrag und OHNE expliziten Seitenbereich ("ganze
+ * Datei", der Normalfall bei "Gesamtes Projektverzeichnis"): die
+ * tatsächliche Gesamtseitenzahl wird bewusst NICHT durch Öffnen der Datei
+ * ermittelt (Nutzer-Entscheidung 11.09.2026) - das würde bei SeaDrive-
+ * Platzhaltern eine Cloud-Hydrierung auslösen, nur um eine Zahl für die
+ * Anzeige zu bekommen, und ist fürs eigentliche Ziel (auf Lücken
+ * hinweisen, ggf. nachindizieren) nicht nötig. Stattdessen rein aus der
+ * pages-Tabelle und file_pagecount (beides reine DB-Zugriffe, kein
+ * Dateizugriff): 0 indizierte Seiten -> "nicht indiziert"; ist die
+ * Gesamtseitenzahl aus einer früheren vollständigen Indizierung/einem
+ * Speichervorgang bekannt (file_pagecount, s. sond_index.h) -> "X von Y
+ * Seiten fehlen" wie bei einer Anbindung mit explizitem Bereich; sonst
+ * (Datei noch nie vollständig indiziert) -> "nur N Seiten indiziert"
+ * ohne Aussage zur Gesamtzahl (out_total_known = FALSE).
  *
  * Returns: TRUE bei Erfolg (auch wenn missing == 0), FALSE bei Fehler
  *          (z.B. Datei nicht lesbar) - error gesetzt.
  */
 static gboolean
 check_coverage_one(Projekt *zond, SondFilePart *sfp, SondPageRange *range,
-        gint *out_missing, gint *out_total, GError **error) {
+        gint *out_missing, gint *out_total, gboolean *out_total_known,
+        gint *out_indexed, GError **error) {
     SondIndexCtx *index_ctx = zond->wctx->index_ctx;
     gchar        *fp        = sond_file_part_get_filepart(sfp);
     gint          missing   = 0;
     gint          total     = 1;
+
+    *out_total_known = TRUE;
+    *out_indexed = 0;
 
     if (!fp) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
@@ -289,22 +318,9 @@ check_coverage_one(Projekt *zond, SondFilePart *sfp, SondPageRange *range,
         return TRUE;
     }
 
-    if (SOND_IS_FILE_PART_PDF(sfp)) {
-        gint von = 0, bis = 0;
+    if (SOND_IS_FILE_PART_PDF(sfp) && range && range->von >= 0) {
+        gint von = range->von, bis = range->bis;
 
-        if (range && range->von >= 0) {
-            von = range->von;
-            bis = range->bis;
-        } else {
-            pdf_document *doc = sond_file_part_pdf_open_document(zond->ctx,
-                    SOND_FILE_PART_PDF(sfp), FALSE, error);
-            if (!doc) {
-                g_free(fp);
-                return FALSE;
-            }
-            bis = pdf_count_pages(zond->ctx, doc) - 1;
-            pdf_drop_document(zond->ctx, doc);
-        }
         total = bis - von + 1;
 
         GArray     *indexed     = sond_index_ctx_get_pages_for_file(index_ctx, fp);
@@ -318,6 +334,33 @@ check_coverage_one(Projekt *zond, SondFilePart *sfp, SondPageRange *range,
                 missing++;
 
         g_hash_table_destroy(indexed_set);
+        g_array_free(indexed, TRUE);
+    } else if (SOND_IS_FILE_PART_PDF(sfp)) {
+        /* Ganze Datei, keine Coverage - s. Funktionskommentar: bewusst
+         * kein sond_file_part_pdf_open_document()/pdf_count_pages() mehr
+         * hier, rein DB-Zugriffe (pages-Tabelle + file_pagecount), keine
+         * Datei wird geöffnet. Seit Einführung von file_pagecount
+         * (11.09.2026, coalescing-unabhängig gemerkte Gesamtseitenzahl,
+         * s. sond_index.h) kennen wir die echte Seitenzahl oft trotzdem
+         * - dann lässt sich "X von Y Seiten" wieder genau wie bei einer
+         * Anbindung mit explizitem Bereich angeben, statt nur "nur X
+         * Seiten indiziert" ohne Gesamtzahl. */
+        GArray *indexed     = sond_index_ctx_get_pages_for_file(index_ctx, fp);
+        gint    total_pages = sond_index_ctx_get_page_count(index_ctx, fp);
+
+        if (indexed->len == 0) {
+            missing = 1;
+            total   = 1;
+        } else if (total_pages >= 0) {
+            total   = total_pages;
+            missing = total_pages - (gint) indexed->len;
+            if (missing < 0) /* Verteidigung gegen Inkonsistenzen */
+                missing = 0;
+        } else {
+            *out_total_known = FALSE;
+            *out_indexed     = indexed->len;
+            missing = indexed->len; /* nur als "> 0"-Signal fuer check_coverage() unten */
+        }
         g_array_free(indexed, TRUE);
     } else {
         GArray *indexed = sond_index_ctx_get_pages_for_file(index_ctx, fp);
@@ -351,10 +394,12 @@ check_coverage(Projekt *zond, GHashTable *ht_fileparts) {
     while (g_hash_table_iter_next(&iter_sel, &key, &value)) {
         SondFilePart  *sfp   = (SondFilePart*) key;
         SondPageRange *range = (SondPageRange*) value;
-        gint           missing = 0, total = 0;
+        gint           missing = 0, total = 0, indexed = 0;
+        gboolean       total_known = TRUE;
         GError        *error   = NULL;
 
-        if (!check_coverage_one(zond, sfp, range, &missing, &total, &error)) {
+        if (!check_coverage_one(zond, sfp, range, &missing, &total,
+                &total_known, &indexed, &error)) {
             g_warning("check_coverage: %s", error ? error->message : "?");
             g_clear_error(&error);
             continue;
@@ -365,8 +410,10 @@ check_coverage(Projekt *zond, GHashTable *ht_fileparts) {
             gap->sfp          = sfp;
             gap->range        = range;
             gap->display_name = sond_file_part_get_filepart(sfp);
+            gap->total_known  = total_known;
             gap->missing      = missing;
             gap->total        = total;
+            gap->indexed      = indexed;
             g_ptr_array_add(gaps, gap);
         }
     }
@@ -376,6 +423,9 @@ check_coverage(Projekt *zond, GHashTable *ht_fileparts) {
 
 static gchar*
 format_gap_line(SondIndexCoverageGap *gap) {
+    if (!gap->total_known)
+        return g_strdup_printf("%s (nur %d Seite%s indiziert)",
+                gap->display_name, gap->indexed, gap->indexed == 1 ? "" : "n");
     return (gap->total == 1)
             ? g_strdup_printf("%s (nicht indiziert)", gap->display_name)
             : g_strdup_printf("%s (%d/%d Seiten fehlen)",
@@ -754,7 +804,7 @@ zond_indexsuche_activate(GtkMenuItem *item, gpointer data) {
      * das Aufbauen fehl, wird die Suche trotzdem ausgeführt, nur eben ohne
      * Abdeckungs-Check (kein Grund, die Suche deswegen zu blockieren). */
     ht_coverage = zond_treeviewfm_get_fileparts(
-            ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), FALSE, &error);
+            ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), FALSE, FALSE, &error);
     if (!ht_coverage)
         g_clear_error(&error);
 
@@ -789,10 +839,10 @@ zond_indexsuche_activate_fuer_baum(Projekt *zond, Baum baum) {
 
     if (baum == BAUM_FS)
         ht_fileparts = zond_treeviewfm_get_fileparts(
-                ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), TRUE, &error);
+                ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), TRUE, FALSE, &error);
     else
         ht_fileparts = zond_treeview_get_selected_fileparts(
-                ZOND_TREEVIEW(zond->treeview[baum]), &error);
+                ZOND_TREEVIEW(zond->treeview[baum]), FALSE, &error);
 
     if (!ht_fileparts) {
         display_message(zond->app_window, "Fehler beim Ermitteln der Auswahl:\n",

@@ -53,8 +53,24 @@ gint zond_treeview_load_baum(ZondTreeview*, GError**);
 
 GtkTreePath* zond_treeview_get_path(SondTreeview*, gint);
 
+/**
+ * zond_treeview_get_selected_fileparts:
+ * @ztv:                ZondTreeview (BAUM_INHALT oder BAUM_AUSWERTUNG)
+ * @reject_unterseitig: TRUE, wenn eine unterseitige Anbindung in der
+ *                       Auswahl (beginnt/endet nicht an einer
+ *                       Seitengrenze, oder reiner Punkt - s.
+ *                       anbindung_ist_unterseitig() in
+ *                       99conv/general.h) die ganze Abfrage mit einem
+ *                       GError scheitern lassen soll, statt sie
+ *                       stillschweigend wie eine ganzseitige Anbindung
+ *                       zu behandeln. Für Index erstellen/löschen
+ *                       (Auswahl) TRUE, für alle anderen Aufrufer
+ *                       (Indexsuche, SeaDrive-Pinnen) FALSE - dort ist
+ *                       eine unterseitige Anbindung unproblematisch.
+ * @error:               GError
+ */
 GHashTable* zond_treeview_get_selected_fileparts(ZondTreeview *ztv,
-		GError **error);
+		gboolean reject_unterseitig, GError **error);
 
 /*
  * Wendet pin_state (STVFM_PIN_STATE_*, s. sond_treeviewfm_seadrive.h) auf

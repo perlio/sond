@@ -36,9 +36,18 @@ void zond_treeviewfm_kill_parent(ZondTreeviewFM*, GtkTreeIter*);
  * Anbindungs-bewusst: ein markierter SOND_TVFM_ITEM_TYPE_LEAF_SECTION-
  * Knoten in BAUM_FS (= eine Anbindung, s. ziele.c) liefert den
  * tatsächlichen Seitenbereich statt (wie in der Basisklasse) immer NULL
- * (= ganze Datei). */
+ * (= ganze Datei).
+ *
+ * reject_unterseitig: TRUE, wenn eine unterseitige Anbindung (beginnt/
+ * endet nicht an einer Seitengrenze, oder reiner Punkt - s.
+ * anbindung_ist_unterseitig() in 99conv/general.h) in der Auswahl die
+ * ganze Abfrage mit einem GError scheitern lassen soll. Für Index
+ * erstellen/löschen (Auswahl) TRUE, für alle anderen Aufrufer
+ * (Indexsuche) FALSE. Nur bei selected_only == TRUE relevant - bei
+ * "Gesamtes Projekt" (selected_only == FALSE) wird nie geprüft, s.
+ * ToDo.c (11.09.2026, Nutzerentscheidung). */
 GHashTable* zond_treeviewfm_get_fileparts(ZondTreeviewFM*, gboolean,
-		GError**);
+		gboolean, GError**);
 
 G_END_DECLS
 

@@ -37,7 +37,9 @@ GdkPixbuf* sond_icon_util_load_pixbuf(GtkWidget *widget,
  * direkt per Cairo, statt über einen Icon-Theme-Namen zu gehen (Standard-
  * Freedesktop-Namen wie "emblem-ok" sind auf einem minimalen Windows/
  * MSYS2-Setup ohne vollständiges Icon-Theme oft nicht auflösbar). Grün =
- * vollständig indiziert, Orange = teilweise, NULL (kein Pixbuf) bei
+ * vollständig indiziert, Grau = teilweise (11.09.2026 von Orange auf Grau
+ * umgestellt - Orange wirkte als Warn-/Unfertig-Signal statt eines reinen
+ * Ist-Zustands, s. auch SEADRIVE_DIR_STATUS_MIXED), NULL (kein Pixbuf) bei
  * SOND_INDEX_STATUS_NONE. */
 GdkPixbuf* sond_icon_util_status_badge_pixbuf(SondIndexStatus status, gint size);
 

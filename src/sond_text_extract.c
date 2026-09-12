@@ -71,7 +71,8 @@ static void log_warn(SondLogFunc log_func, gpointer log_data, gchar const *fmt, 
  * ======================================================================= */
 
 GPtrArray* sond_text_extract_pdf(fz_context *ctx, guchar const *buf, gsize size,
-        SondLogFunc log_func, gpointer log_data, gint seite_von, gint seite_bis) {
+        SondLogFunc log_func, gpointer log_data, gint seite_von, gint seite_bis,
+        gint *out_n_pages) {
     GPtrArray *segs = g_ptr_array_new_with_free_func(
             (GDestroyNotify) sond_text_segment_free);
 
@@ -85,6 +86,9 @@ GPtrArray* sond_text_extract_pdf(fz_context *ctx, guchar const *buf, gsize size,
 
         gint n_pages = pdf_count_pages(ctx, doc);
         gint i_von = (seite_von >= 0) ? seite_von : 0;
+
+        if (out_n_pages)
+            *out_n_pages = n_pages;
         gint i_bis = (seite_bis >= 0) ? MIN(seite_bis, n_pages - 1) : n_pages - 1;
 
         for (gint i = i_von; i <= i_bis; i++) {

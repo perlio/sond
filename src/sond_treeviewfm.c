@@ -1360,9 +1360,6 @@ static gint sond_tvfm_item_move(SondTVFMItem* stvfm_item,
 	SondTVFMItemPrivate* stvfm_item_parent_priv =
 			sond_tvfm_item_get_instance_private(stvfm_item_parent);
 
-	LOG_INFO("%s: DIAG base='%s' same_stvfm=%d", __func__, base,
-			stvfm_item_priv->stvfm == stvfm_item_parent_priv->stvfm);
-
 	if (stvfm_item_priv->stvfm == stvfm_item_parent_priv->stvfm)
 		g_signal_emit(stvfm_item_priv->stvfm,
 				SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->signal_before_move, 0,
@@ -1872,7 +1869,6 @@ static gint process_stvfm_item_move_or_copy(SondTVFMItem* stvfm_item,
 		SFMPasteSelection* s_paste_sel, gboolean move, GError** error) {
 	gint rc = 0;
 
-	LOG_INFO("%s: DIAG move=%d", __func__, move);
 	guint max_tries = 100;
 	const gchar *dot = NULL;
 	gboolean has_ext = FALSE;
@@ -2140,7 +2136,6 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 		GtkTreeIter *iter, gpointer data, GError **error) {
 	SondTVFMItem *stvfm_item = NULL;
 
-	LOG_INFO("%s: DIAG aufgerufen", __func__);
 	SFMPasteSelection *s_paste_sel = (SFMPasteSelection*) data;
 	Clipboard *clipboard = NULL;
 	gint rc = 0;

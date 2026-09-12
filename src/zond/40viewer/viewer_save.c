@@ -342,6 +342,18 @@ static void viewer_update_index_for_save(PdfViewer *pdfv, DisplayedDocument *dd)
 				n_live++;
 		}
 
+		/* file_pagecount (coalescing-unabhängige Gesamtseitenzahl, s.
+		 * sond_index.h) auf den aktuellen Stand bringen - unabhängig
+		 * davon, ob unten überhaupt (wieder) auf Datei-Ebene kollabiert
+		 * werden kann. Sonst bliebe nach Seiten-Einfügen/-Löschen eine
+		 * veraltete Zahl stehen, die z.B. sond_index_ctx_delete_index()
+		 * beim Rekonstruieren der übrigen Seiten fälschlich zugrunde
+		 * legen würde (11.09.2026, Nutzerentscheidung). */
+		if (!sond_index_ctx_set_page_count(index_ctx, filename, n_live, &error)) {
+			LOG_WARN("%s\n", error->message);
+			g_clear_error(&error);
+		}
+
 		for (guint u = 0; u < pages_now->len && complete; u++) {
 			gint page_nr = g_array_index(pages_now, gint, u);
 			gint mode;

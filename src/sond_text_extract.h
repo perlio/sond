@@ -70,15 +70,28 @@ typedef void (*SondLogFunc)(gpointer log_data, gchar const *format, ...);
 
 /**
  * sond_text_extract_pdf:
- * @seite_von: erste zu extrahierende Seite (0-basiert), -1 = ab Seite 0
- * @seite_bis: letzte zu extrahierende Seite (0-basiert, inklusive),
- *             -1 = bis letzte Seite
+ * @seite_von:    erste zu extrahierende Seite (0-basiert), -1 = ab Seite 0
+ * @seite_bis:    letzte zu extrahierende Seite (0-basiert, inklusive),
+ *                -1 = bis letzte Seite
+ * @out_n_pages:  (optional, darf NULL sein) liefert die TATSÄCHLICHE
+ *                Gesamtseitenzahl des PDF (pdf_count_pages()) - NICHT
+ *                dasselbe wie die Anzahl gelieferter Segmente: Seiten
+ *                ohne extrahierbaren Text (leer, oder rein Bild vor
+ *                OCR) erzeugen kein Segment (s.u.), tauchen in
+ *                @out_n_pages aber trotzdem mit. Für
+ *                sond_index_ctx_set_page_count() gedacht (s.
+ *                sond_index.c) - unverändert (nicht auf -1 gesetzt),
+ *                wenn das Dokument gar nicht erst geöffnet werden
+ *                konnte.
  *
- * Ein Segment pro Seite (nur im Bereich [seite_von, seite_bis]), Text via
- * MuPDF stext (FZ_TEXT_FLATTEN_ALL, identisch zu fz_search_stext_page).
+ * Höchstens ein Segment pro Seite (nur im Bereich [seite_von, seite_bis],
+ * und nur für Seiten mit tatsächlich extrahiertem Text - Seiten ohne
+ * Text liefern KEIN Segment), Text via MuPDF stext (FZ_TEXT_FLATTEN_ALL,
+ * identisch zu fz_search_stext_page).
  */
 GPtrArray* sond_text_extract_pdf(fz_context *ctx, guchar const *buf, gsize size,
-        SondLogFunc log_func, gpointer log_data, gint seite_von, gint seite_bis);
+        SondLogFunc log_func, gpointer log_data, gint seite_von, gint seite_bis,
+        gint *out_n_pages);
 
 /**
  * sond_text_extract_html:

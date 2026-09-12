@@ -49,10 +49,23 @@
  Runden, alle Funde behoben bzw. geprüft/bewusst nicht behoben) wurde nach
  dem Commit vom 29.08.2026 aus dieser Datei entfernt, um sie schlank zu
  halten - Details zu jedem einzelnen Fix stehen dauerhaft in der jeweiligen
- Commit-Message bzw. im Diff (git log).
+ Commit-Message bzw. im Diff (git log). Dasselbe Prinzip gilt seit
+ 12.09.2026 auch für den unten folgenden Abschnitt zur SeaDrive-/Index-
+ Historie (06.-11.09.2026): vollständig umgesetzte Punkte sind auf kurze,
+ datierte Zusammenfassungen eingedampft, die mechanische Detailbeschreibung
+ lebt jetzt in den Doc-Kommentaren der jeweiligen Header (sond_index.h,
+ sond_icon_util.h, sond_treeviewfm.h, zond_treeview.h, general.h,
+ sond_text_extract.h) bzw. im Diff/git log - nur genuin noch offene Punkte
+ und Entscheidungen/Verwerfungen, die sich nicht aus dem Code selbst
+ ergeben, wurden ausführlicher belassen.
 
- Architektur-Plan (24.08.2026, noch nicht umgesetzt - erstmal zurückgestellt):
- Atomarität store/work bei den Dual-Write-Stellen
+ Architektur-Plan: Atomarität store/work bei den Dual-Write-Stellen
+ (24.08.2026 aufgesetzt; Phase 1 - Punkte 1.-5. - am 02.09.2026 UMGESETZT,
+ s. Doc-Kommentare in project.c bei dbase_zond_begin()/_commit()/
+ _rollback() und vor dbase_zond_update_section_schema(); Phase 2 - Punkte
+ 6./7., plus die separat notierten Punkte 8./9. - weiterhin OFFEN,
+ zurückgestellt. 12.09.2026 richtiggestellt, nachdem im Code verifiziert:
+ vorher stand hier fälschlich "insgesamt noch nicht umgesetzt"):
 
  Betroffene Stellen (Stand 24.08.2026, ergänzt 02.09.2026, per grep
  verifiziert):
@@ -61,36 +74,39 @@
  - zond_treeviewfm.c, zond_treeviewfm_before_move()/_after() (~Zeile 215-369):
    dbase_zond_begin/commit/rollback um dbase_zond_update_path() und
    mehrfach dbase_zond_update_gmessage_index() (Datei/Verzeichnis umbenennen/
-   verschieben, inkl. GMessage-SonderfälleAch). ZUSÄTZLICH dort eine dritte,
+   verschieben, inkl. GMessage-Sonderfälle). ZUSÄTZLICH dort eine dritte,
    unabhängige Transaktion auf index_ctx->db (FTS-Suchindex, eigene
    sqlite3-Verbindung, eigenes rohes sqlite3_exec("BEGIN/COMMIT/ROLLBACK")),
-   die bislang nicht mit der store/work-Transaktion verklammert ist.
+   die bislang (Phase 2, s.u.) nicht mit der store/work-Transaktion
+   verklammert ist.
  - zond_treeviewfm.c, zond_treeviewfm_before_delete() (~Zeile 236-260):
    dual_write dort BEDINGT (nur wenn from_gmessage) - dbase_zond_begin/
    commit/rollback um dbase_zond_update_gmessage_index() beim Löschen eines
    Elements aus einer GMessage/E-Mail-Anhangsstruktur (nachfolgende
    Geschwister-Indizes müssen in beiden DBs neu nummeriert werden). Beim
    normalen Löschen (nicht aus GMessage) reiner Single-Write auf work,
-   nicht betroffen. Bei der ursprünglichen Bestandsaufnahme vom 24.08.2026
-   übersehen, am 02.09.2026 nachgetragen.
+   nicht betroffen.
 
- Problem: store und work sind zwei unabhängige sqlite3-Verbindungen; die
- obigen Stellen schreiben sequenziell in beide (dbase_zond_begin/commit/
+ Problem (Ausgangslage vor Phase 1, für Phase 2 - index_ctx - unverändert
+ relevant): store und work sind zwei unabhängige sqlite3-Verbindungen; die
+ obigen Stellen schrieben sequenziell in beide (dbase_zond_begin/commit/
  rollback, project.c). Schlägt der zweite Commit nach erfolgreichem ersten
  fehl, oder das Rollback selbst, entsteht potenziell ein inkonsistenter
- Zustand zwischen store und work - keine echte Atomarität über beide Dateien.
+ Zustand zwischen store und work - keine echte Atomarität über beide
+ Dateien. Für index_ctx (separate dritte Transaktion, s.o.) besteht dieses
+ Problem unverändert fort, bis Phase 2 (6./7.) umgesetzt ist.
 
- Plan (abschichtbar in zwei Phasen, s. Begruendung in 6.b unten,
+ Plan (abschichtbar in zwei Phasen, s. Begründung in 6.b unten,
  Frage/Antwort 03.09.2026):
 
- Phase 1 - Punkte 1.-5.: store/work atomar machen, unabhaengig von
- index_ctx, in sich abgeschlossen umsetzbar.
+ Phase 1 - Punkte 1.-5.: store/work atomar machen, unabhängig von
+ index_ctx, in sich abgeschlossen umsetzbar. UMGESETZT 02.09.2026.
  Phase 2 - Punkte 6./7.: index_ctx-Anbindung (Entscheidung s.u.), kann
- zeitlich beliebig spaeter erfolgen, ohne Phase 1 nochmal anzufassen.
+ zeitlich beliebig später erfolgen, ohne Phase 1 nochmal anzufassen. OFFEN.
 
  Geprüfte und verworfene Alternative (03.09.2026): komplett auf EINE
  Connection für store+work umstellen (work als "main", store nur noch
- als angehängtes Schema, oder umgekehrt), statt wie geplant work's
+ als angehängtes Schema, oder umgekehrt), statt wie umgesetzt work's
  eigene Connection für die ~80 Einzel-DB-Funktionen unangetastet zu
  lassen und nur für die paar Dual-Use-Funktionen zusätzlich anzuhängen.
  Verworfen, aus mehreren Gründen:
@@ -125,117 +141,44 @@
  Ergebnis: technisch nicht unmöglich, aber Umfang und Risiko (praktisch
  alle ~80 Funktionen anfassen, stille Fehlrouting-Gefahr) stehen in
  keinem guten Verhältnis zum Nutzen (eine Connection weniger). Bei der
- bestehenden, chirurgischen Lösung (work-Connection unangetastet, ATTACH
- nur für die Dual-Use-Funktionen) bleiben.
+ umgesetzten, chirurgischen Lösung (work-Connection unangetastet, ATTACH
+ nur für die Dual-Use-Funktionen) geblieben.
 
- 1. journal_mode/synchronous-Sicherung (eigenständig, zuerst umsetzbar,
-    unabhängig von 2.-5.; Voraussetzungen am 02.09.2026 anhand der
-    offiziellen SQLite-Doku verifiziert, Zitate s.u.): vor jedem
-    Öffnen des Projekts (project_create_dbase_zond()) UND unmittelbar vor
-    jeder der o.g. Dual-Write-Transaktionen für BEIDE Dateien zwei Werte
-    per "PRAGMA journal_mode;" bzw. "PRAGMA synchronous;" abfragen (über
-    die jeweils schon offene Verbindung - beides sind Dateieigenschaften,
-    nicht verbindungsgebunden):
-
-    - journal_mode muss DELETE, TRUNCATE oder PERSIST sein (NICHT WAL,
-      NICHT MEMORY, NICHT OFF). Ist er das nicht (z.B. WAL, weil extern
-      z.B. mit DB Browser for SQLite umgestellt), Rückwechsel versuchen
-      ("PRAGMA journal_mode=DELETE;") UND den zurückgelieferten Wert
-      prüfen (ein gescheiterter Wechsel wirft keinen Fehler, sondern
-      liefert stillschweigend den alten Modus zurück - sqlite.org/
-      pragma.html).
-    - synchronous darf nicht OFF sein. Ist es das, Rückwechsel versuchen
-      ("PRAGMA synchronous=FULL;", oder zumindest NORMAL).
-
-    Bleibt journal_mode bei WAL/MEMORY/OFF oder synchronous bei OFF,
-    Operation NICHT ausführen, klare Fehlermeldung an den Anwender
-    ("Datenbank wird von einem anderen Programm verwendet"). Grund (Zitat
-    sqlite.org/atomiccommit.html): ATTACH-Transaktionen über mehrere
-    Dateien sind nur atomar, wenn dabei eine "Super-Journal"-Datei
-    angelegt wird - "if the database files have other settings that
-    compromise integrity across a power-loss event (such as PRAGMA
-    synchronous=OFF or PRAGMA journal_mode=MEMORY) then the creation of
-    the super-journal is omitted, as an optimization." journal_mode=OFF
-    deaktiviert das Journal ganz, ist also erst recht nicht abgedeckt.
-    Für WAL gilt separat (Zitat sqlite.org/wal.html, Abschnitt
-    "Disadvantages"): "Transactions that involve changes against multiple
-    ATTACHed databases are atomic for each individual database, but are
-    not atomic across all databases as a set." - dort gibt es den
-    Super-Journal-Mechanismus prinzipiell nicht, unabhängig von
-    synchronous. Alle drei Ausschlüsse (WAL, MEMORY, OFF bei journal_mode;
-    OFF bei synchronous) sind also nötig, nicht nur der WAL-Fall. Und:
-    der Modus kann jederzeit von außen (auch bei offener eigener
-    Verbindung, da SQLite außerhalb aktiver Statements kein Lock hält)
-    unbemerkt umgestellt werden - daher die Prüfung unmittelbar vor jeder
-    Transaktion, nicht nur beim Öffnen.
-
- 2. work bei Projekt-Öffnen an store attachen (project_create_dbase_zond()):
-    zusätzlich zur weiterhin bestehenden eigenen work-Verbindung (die alle
-    "normalen", bereits heute nur work betreffenden Operationen unverändert
-    bedient - KEINE der ca. 80 einzelnen zond_dbase_*-Funktionen wird
-    angefasst) wird auf der store-Verbindung per
-    "ATTACH DATABASE '<path_tmp>' AS work;" work zusätzlich als zweites
-    Schema eingehängt (einmalig beim Öffnen, nicht pro Operation). store
-    bleibt "main", unqualifizierte Tabellennamen bestehender store-
-    Funktionen bleiben dadurch unverändert korrekt. Wichtig: sequenzielles
-    (nie gleichzeitiges) Schreiben auf work über zwei verschiedene
-    Verbindungen (die eigene work-Verbindung UND store-mit-attachtem-work)
-    ist bei SQLite unproblematisch, s. Diskussion vom 24.08. Willkommener
-    Nebeneffekt: sqlite3_update_hook() (auf work's eigener Verbindung
-    registriert, für project_set_changed()/"changed"-Tracking) feuert NICHT
-    für Schreibzugriffe, die über die attachte Verbindung laufen - und das
-    ist hier richtig so, nicht nachzuholen: Dual-Write-Änderungen sollen den
-    Hook gerade NICHT auslösen, weil store dabei ja ohnehin synchron
-    mitgeschrieben wird (kein "unsaved delta" gegenüber store, changed soll
-    für diesen Fall nicht auf TRUE gehen). Bisher musste das umgekehrt extra
-    abgefangen werden, weil die alten Dual-Write-Funktionen über work's
-    eigene (Hook-tragende) Verbindung liefen: viewer_save_dirty_dds()
-    (viewer_save.c, Zeile 582-584 sichert changed, Zeile 650-652 setzt ihn
-    zurück, falls vorher FALSE) und zond_treeviewfm_before_move()/_after()
-    (zond_treeviewfm.c, changed_tmp, Zeile 246/366) machen genau das. Mit
-    der attachten Verbindung entfällt der Hook-Aufruf von vornherein - diese
-    Sicherungs-/Rücksetzungs-Logik an beiden Stellen wird überflüssig und
-    kann ersatzlos entfernt werden.
-
+ Punkte 1.-5. (Phase 1, UMGESETZT 02.09.2026 - Mechanik/Details jetzt in
+ den Doc-Kommentaren der genannten Funktionen, nicht mehr hier ausgeführt):
+ 1. journal_mode/synchronous-Sicherung vor jedem Öffnen des Projekts UND
+    vor jeder Dual-Write-Transaktion (zond_dbase_check_journal_settings(),
+    aufgerufen aus dbase_zond_begin() für BEIDE Dateien) - lehnt die
+    Operation mit klarer Fehlermeldung ab, wenn journal_mode auf
+    WAL/MEMORY/OFF oder synchronous auf OFF steht (verhindert sonst den
+    für ATTACH-Transaktionen nötigen SQLite-Super-Journal-Mechanismus,
+    s. sqlite.org/atomiccommit.html).
+ 2. work wird beim Öffnen des Projekts (project_create_dbase_zond()) per
+    "ATTACH DATABASE ... AS work;" zusätzlich als zweites Schema an die
+    store-Connection gehängt - work behält daneben unverändert seine
+    eigene Connection für alle ~80 Einzel-DB-Funktionen. Nebeneffekt:
+    sqlite3_update_hook() (nur auf works eigener Connection registriert)
+    feuert für Dual-Writes über die attachte Verbindung nicht mehr -
+    die frühere Sicherungs-/Rücksetzungs-Logik für "changed" in
+    viewer_save_dirty_dds()/zond_treeviewfm_before_move()/_after() wurde
+    dadurch überflüssig und entfernt.
  3. dbase_zond_update_sections()/update_path()/update_gmessage_index()
-    (project.c) neu schreiben: statt zweimal dieselbe Einzel-DB-Funktion auf
-    unterschiedlichen ZondDBase-Objekten aufzurufen, EIN schemaqualifiziertes
-    SQL-Statement-Paar (bzw. mehrere, je nach Funktion) auf der store-mit-
-    attachtem-work-Verbindung, innerhalb einer Transaktion ("work.tabelle"
-    für work, unqualifiziert/"main.tabelle" für store). Nur diese Handvoll
-    Funktionen ändern sich - alle anderen, einzel-DB-operierenden
-    zond_dbase_*-Funktionen (~80 Aufrufer) bleiben unangetastet.
+    (project.c) schreiben jetzt schemaqualifiziert ("work.tabelle" /
+    unqualifiziert für store) auf der store-mit-attachtem-work-
+    Verbindung, innerhalb einer Transaktion - statt zweimal dieselbe
+    Einzel-DB-Funktion auf getrennten ZondDBase-Objekten aufzurufen.
+ 4. dbase_zond_begin/commit/rollback (project.c) laufen jetzt nur noch
+    mit einem einzigen BEGIN/COMMIT/ROLLBACK auf der einen
+    store-mit-work-Verbindung, statt einer Schleife über zwei Objekte.
+ 5. Die Rollback-Fehlerbehandlung in dbase_zond_rollback() entsprechend
+    vereinfacht (nur noch ein lokaler error_int für den einen
+    Rollback-Aufruf, an ein schon gesetztes *error angehängt statt
+    zwischen zwei error_int gemergt - direktes Durchreichen auf *error
+    bewusst vermieden, s. Kommentar dort, würde sonst den eigentlichen
+    Fehlergrund überschreiben können).
 
- 4. dbase_zond_begin/commit/rollback (project.c) entsprechend vereinfachen:
-    statt Schleife über zwei ZondDBase-Objekte (zond_dbase_store,
-    zond_dbase_work) mit je eigenem BEGIN/COMMIT/ROLLBACK nur noch ein
-    einziges BEGIN/COMMIT/ROLLBACK auf der einen store-mit-work-Verbindung.
-    Eigene Datei/eigenen klar abgegrenzten Abschnitt erwägen, da eng an das
-    ATTACH-Setup gekoppelt (Schema-Namen, journal_mode-Check aus 1.).
-
- 5. Rückbau der aktuellen Rollback-Fehlerbehandlung (UMGESETZT
-    02.09.2026, dabei korrigiert - s.u.): der kürzlich gebaute Error-Merge
-    in dbase_zond_rollback() (zwei separate error_int für store- und
-    work-Rollback, zusammengeführt via add_string(), s. Eintrag oben
-    "viewer_save.c, viewer_save_dirty_dds()...") wird durch 4. teilweise
-    überflüssig - es gibt nur noch einen einzigen ROLLBACK-Aufruf, der
-    scheitern kann, daher keine Schleife/kein Vergleich zwischen ZWEI
-    Rollback-Fehlern mehr nötig.
-    KORREKTUR bei der Umsetzung (02.09.2026): "komplett entfernen zugunsten
-    eines normalen einzelnen GError-Fehlerpfads" war zu weitgehend gedacht
-    - ein direkter Durchreich auf den übergebenen error-Parameter hätte
-    einen Bug (zurück-)gebracht: an der Rollback-Aufrufstelle (s.
-    dbase_zond_commit()) ist *error i.d.R. schon gesetzt (Grund des
-    Rollbacks, z.B. der gescheiterte Commit). Schlägt das ROLLBACK-
-    Statement selbst fehl (selten), würde ein direktes *error=... diesen
-    eigentlichen Fehler überschreiben UND die alte GError leaken. Daher
-    beibehalten, nur vereinfacht: EIN lokaler error_int für den einen
-    Rollback-Aufruf, bei Fehler an ein schon gesetztes *error angehängt
-    (nicht überschrieben) statt wie vorher zwischen zwei error_int
-    gemergt.
-
- 6. Entscheidung index_ctx (02.09.2026, vorher offene Frage - jetzt
-    entschieden, zwei getrennte Fragen):
+ 6. Entscheidung index_ctx (02.09.2026 getroffen, Umsetzung = Phase 2,
+    weiterhin OFFEN, zwei getrennte Fragen):
 
     a) Index-DB dauerhaft in die Projekt-DB integrieren (store/work)?
        NEIN. Indizierung (neue Dateien einlesen, Embeddings berechnen)
@@ -263,16 +206,17 @@
        grundsätzliches Hindernis.
        Abschichtbar (Frage/Antwort 03.09.2026): so umgesetzt betrifft
        6.b) NUR den bestehenden separaten Transaktionsblock auf
-       index_ctx->db in zond_treeviewfm.c, NICHT dbase_zond_begin/commit/
-       rollback (4.) und NICHT die SQL-Umschreibung in 3. - store/work-
-       Atomarität (1.-5.) kann daher als abgeschlossene Phase 1
-       vorgezogen werden, 6./7. als Phase 2 beliebig später folgen, ohne
-       1.-5. noch einmal anzufassen. In der Zwischenzeit (Phase 1
-       umgesetzt, Phase 2 noch offen) bleibt index_ctx wie heute eine
-       separate, eigene Transaktion neben der dann schon atomaren
-       store+work-Transaktion - und das in 7. beschriebene
-       Cross-Thread-Risiko besteht unverändert fort, bis 6.b) umgesetzt
-       ist.
+       index_ctx->db in zond_treeviewfm.c (Stand 12.09.2026 unverändert:
+       zwei rohe sqlite3_exec(index_ctx->db, "BEGIN;") in
+       zond_treeviewfm_before_move()/_before_insert()), NICHT
+       dbase_zond_begin/commit/rollback (4.) und NICHT die
+       SQL-Umschreibung in 3. - deshalb konnte store/work-Atomarität
+       (1.-5.) unabhängig als Phase 1 vorgezogen werden. In der
+       Zwischenzeit (Phase 1 umgesetzt, Phase 2 noch offen) bleibt
+       index_ctx wie bisher eine separate, eigene Transaktion neben der
+       jetzt schon atomaren store+work-Transaktion - und das in 7.
+       beschriebene Cross-Thread-Risiko besteht unverändert fort, bis
+       6.b) umgesetzt ist.
        Voraussetzung für 6.b) selbst: SQLITE_BUSY behandeln - läuft der
        Hintergrund-Thread gerade eine offene Schreibtransaktion auf
        index_ctx's eigener Connection, bekommt der ATTACH-Schreibversuch
@@ -281,7 +225,8 @@
        sonst klare Fehlermeldung an den Anwender ("Indizierung läuft,
        bitte kurz warten").
 
- 7. Separat notiert, unabhängig von 6.b) beim Nachdenken darüber gefunden:
+ 7. Separat notiert, unabhängig von 6.b) beim Nachdenken darüber gefunden
+    (weiterhin offenes Risiko, per Grep am 12.09.2026 erneut bestätigt):
     zond->wctx (inkl. wctx->index_ctx, EINE feste SQLite-Connection) wird
     beim Start der Indizierung 1:1 an den Hintergrund-Thread durchgereicht
     (headerbar.c Zeile 222: td->wctx = zond->wctx, kurz vor g_thread_new(...)).
@@ -304,454 +249,285 @@
     klar behandelbar mit busy_timeout, statt unklarem Cross-Thread-
     Interleaving). Bis 6.b) umgesetzt ist, bleibt es ein offenes Risiko.
 
- 8. Separat notiert, nicht Teil dieser Atomaritäts-Umstellung, aber im
-    selben Bereich entdeckt: zond_treeviewfm.c, zond_treeviewfm_after()
-    (~Zeile 351-356) - exit(EXIT_FAILURE) bei fehlgeschlagenem
-    dbase_zond_commit(), unabhängig von der genauen Fehlerursache (auch
-    bei einem gewöhnlichen ersten-Commit-Fehler, nicht nur bei echter
-    store/work-Inkonsistenz). Kein Error-Dialog, keine Chance, sonstige
-    ungesicherte Änderungen der Sitzung zu retten. Ggf. eigenständig zu
-    behandeln.
+ 8. UMGESETZT (12.09.2026): zond_treeviewfm.c, zond_treeviewfm_after() -
+    das bisherige exit(EXIT_FAILURE) bei fehlgeschlagenem
+    dbase_zond_commit() (dual_write-Zweig) ist ersetzt durch:
+    - Bei physischer Umbenennung/Verschiebung (pending_move_path_old/
+      _new, gesetzt in before_move()): Revert-Versuch per sond_rename()
+      mit vertauschten Pfaden - deckt sowohl reinen Rename- als auch
+      Move(Kopieren+Löschen)-Fall ab, da das Dateisystem danach gleich
+      aussieht. Erfolg -> normaler Fehlerdialog ("bitte erneut
+      versuchen"), kein exit, normaler Weiterbetrieb.
+    - Schlägt der Revert fehl (oder war keiner möglich, z.B. reine
+      GMessage-Index-Renumerierung ohne physische Aktion): neue Funktion
+      write_commit_failure_report() schreibt eine für den Anwender
+      lesbare Klartextdatei (ZOND_FEHLER_<Zeitstempel>.txt) ins
+      Projektverzeichnis mit altem/neuem Pfad und beiden Fehlermeldungen
+      - einziger dauerhafter Anhaltspunkt, da project_close() die
+      Arbeitskopie am Ende aufräumt. Kritischer Fehlerdialog verweist auf
+      diese Datei.
+    - project_close() wird in einer Schleife aufgerufen, bis sie 0
+      zurückgibt, dann erst exit(EXIT_FAILURE). project_close() selbst
+      wurde dafür erweitert (project.c): schlägt project_save() darin
+      fehl, wird jetzt zusätzlich gefragt "Speichern fehlgeschlagen:
+      <Fehler>. Projekt trotzdem ohne Speichern schließen?" - bei "Ja"
+      wird wie gewohnt weitergemacht (offene PDF-Viewer werden mit
+      Speichern-Abfrage geschlossen usw.), sonst -1 wie bisher. Durch die
+      Schleife hat der Anwender die Chance, ein z.B. nur kurzzeitig
+      nicht erreichbares Netzlaufwerk zwischenzeitlich zu beheben und das
+      Projekt doch noch zu retten, aber keine Möglichkeit, ohne Speichern
+      oder ausdrückliche Bestätigung einfach in den Normalbetrieb
+      zurückzukehren (Nutzervorgabe).
+    Betroffene Dateien: zond_treeviewfm.c (neue Felder
+    pending_move_path_old/_new, neue Funktion
+    write_commit_failure_report(), umgebauter dual_write-Fehlerzweig in
+    zond_treeviewfm_after()), project.c (project_close() um die
+    Rückfrage bei fehlgeschlagenem Speichern erweitert).
 
- 9. Testschritt (nach Umsetzung): gezielt einen Fehler mitten in einer
-    Dual-Write-Operation provozieren (z.B. künstliche Constraint-
-    Verletzung nur im zweiten Statement), prüfen, ob das Rollback wirklich
-    beide Schemata (store und work) zurücksetzt. Zusätzlich (aus 6.b)/7.):
-    gezielt eine Dual-Write-Operation auslösen, während der
-    Hintergrund-Indizierungs-Thread läuft, prüfen, ob SQLITE_BUSY sauber
-    behandelt wird statt eines Absturzes oder stillen Fehlers.
+ 9. Testschritt (nach Umsetzung von Phase 2): gezielt einen Fehler mitten
+    in einer Dual-Write-Operation provozieren (z.B. künstliche
+    Constraint-Verletzung nur im zweiten Statement), prüfen, ob das
+    Rollback wirklich beide Schemata (store und work) zurücksetzt.
+    Zusätzlich (aus 6.b)/7.): gezielt eine Dual-Write-Operation auslösen,
+    während der Hintergrund-Indizierungs-Thread läuft, prüfen, ob
+    SQLITE_BUSY sauber behandelt wird statt eines Absturzes oder stillen
+    Fehlers. Speziell zu Punkt 8 (noch zu testen): Revert-Erfolgsfall
+    (Umbenennen rückgängig, kein exit), Revert-Fehlschlagsfall
+    (Fehlerdatei wird geschrieben, project_close()-Schleife greift), und
+    die neue Rückfrage in project_close() bei fehlgeschlagenem
+    project_save() (inkl. Fall, dass der Anwender zunächst ablehnt und
+    es bei erneuter Gelegenheit doch klappt).
 
- Performance-Untersuchung großer SeaDrive-Projekte (06.09.2026,
- abgeschlossen):
+ SeaDrive-/Index-Historie 06.-11.09.2026 (Punkte vollständig umgesetzt,
+ auf kurze Zusammenfassungen eingedampft - Details s. jeweilige Header-
+ Doc-Kommentare bzw. Commit-Historie/git log, Prinzip s. Hinweis oben):
 
- Befund: Öffnen sehr großer Projekte (z.B. 24-178, 68.817 Dateien, ~20.000
- Baumknoten) dauerte bis zu ~140s. Root Cause (verifiziert per EXPLAIN
- QUERY PLAN): zond_dbase_get_first_child() ("WHERE parent_ID=?1 AND
- older_sibling_ID=0") hatte keinen brauchbaren Index - SQLite wählte
- idx_knoten_older_sibling_id (schlechte Selektivität, older_sibling_ID=0
- trifft auf jeden "ersten Knoten" im gesamten Baum zu) und filterte
- parent_ID danach nur noch linear durch die Treffer. Fix: zusammengesetzter
- Index idx_knoten_parent_older(parent_ID, older_sibling_ID) in
- zond_dbase_ensure_indexes() (zond_dbase.c, CREATE INDEX IF NOT EXISTS).
- Läuft bei jedem Öffnen von zond_dbase_open() aus (neu angelegt, bestehend
- geöffnet, konvertierte Altdatei - zond_convert() bekommt immer ein schon
- offenes ZondDBase* und arbeitet nur mit UPDATE auf der bereits
- existierenden "knoten"-Tabelle, läuft also zwangsläufig NACH
- ensure_indexes()) automatisch mit, kein separater Migrationsschritt
- nötig. Einzige Ausnahme: die work-Schattendatei (create_file=TRUE,
- create=FALSE, "knoten" existiert dort zum Zeitpunkt von zond_dbase_open()
- noch nicht) - der Index kommt dort automatisch über den anschließenden
- zond_dbase_backup() mit (kopiert komplettes Schema inkl. Indizes von
- store). Ergebnis: project_load_trees() 140s -> 2,62s.
+ - Performance-Untersuchung großer SeaDrive-Projekte (06.09.2026,
+   abgeschlossen): project_load_trees() 140s -> 2,62s bei sehr großen
+   Projekten (68.817 Dateien). Root Cause: fehlender zusammengesetzter
+   Index auf knoten(parent_ID, older_sibling_ID) - Fix in
+   zond_dbase_ensure_indexes() (zond_dbase.c).
 
- Verworfene Zwischenhypothesen: PDF-Masseneinlesen beim Öffnen,
- GNode-Sibling-Insert O(n²), gtk_tree_model_foreach() O(n²) in
- zond_treeview_abfragen_iter() (real, gefixt via neuer Hashtable
- ht_node_id in ZondTreeStore - aber nicht der dominante Faktor),
- SeaDrive-Sync-Interferenz auf der work-Datei (work trotzdem dauerhaft an
- einen lokalen, nicht synchronisierten Cache-Pfad verlegt -
- project_get_local_tmp_path(), unabhängig davon sinnvoll).
+ - SeaDrive-Verzeichnis-Coverage-Badge (06.09.2026 geplant, 08.09.2026
+   komplett umgesetzt): Ordner-Icon zeigt rekursiv den Hydrierungsstatus
+   des Teilbaums an (unten rechts, analog zum Index-Status-Badge unten
+   links). Datenstrukturen/Funktionen (seadrive_dir_counts,
+   SondSeadriveDirStatus, watcher_count_pending_down()) dokumentiert in
+   sond_icon_util.h/sond_treeviewfm.h. Dabei zwei eigenständige
+   Watcher-Bugs behoben (fehlender FILE_NOTIFY_CHANGE_FILE_NAME-Filter,
+   fehlendes Buffer-Overflow-Resync-Handling).
 
- Nebenbefund: ein reiner Verzeichnis-Scan (FindFirstFileW/FindNextFileW
- über Metadaten/Attribute, kein Dateizugriff) ist auch bei ~70.000 Dateien
- nur ~1,5s (watcher_count_pending_down(), sond_treeviewfm_seadrive.c) -
- macht die folgende Planung praktikabel.
+ - Beim Testen gefundene, unabhängige Bugs (08.-10.09.2026, alle behoben):
+   "Ordner ohne Icon" (kaputter icon-name-Direktpfad für Ordner ohne
+   Badge, jetzt einheitlich über sond_icon_util_render_with_overlays());
+   "Ordner fälschlich grün/Dateien fälschlich violett" (Overlay wurde in
+   ein vom Icon-Theme intern gecachtes, geteiltes GdkPixbuf gezeichnet -
+   Fix: gdk_pixbuf_copy() vor dem Hineinkomponieren); Absturz bei
+   Expansion eines .eml auf oberster Ebene (g_return_val_if_fail lehnte
+   die reguläre NULL-Konvention ab; fehlender NULL-Check auf
+   error->message in sond_treeviewfm_row_expanded()).
 
- SeaDrive-Verzeichnis-Coverage-Badge (06.09.2026, geplant, noch NICHT
- umgesetzt):
+ - Redesign SeaDrive-Badges Datei+Ordner (10.09.2026, umgesetzt): der
+   obige Cache-Bug-Fund deckte einen echten Semantik-Bug auf - "offline"
+   zählte bisher nur PINNED+nicht-hydriert, nicht auch nie gepinnte
+   Dateien. Neues 3-Zustands-Modell je Datei (PENDING/OFFLINE/PINNED) und
+   4-Zustands-Modell je Ordner (NONE/FULL_OFFLINE/FULL_HYDRATED_PINNED/
+   MIXED), dokumentiert in sond_icon_util.h.
 
- Idee: Ordner-Icon zeigt - analog zum bestehenden Indizierungs-Status-
- Badge (SondIndexStatus FULL/PARTIAL/NONE, unten links) - rekursiv den
- Hydrierungsstatus aller Dateien darunter an (unten rechts, wo heute nur
- das SeaDrive-Attribut des Ordners selbst per GetFileAttributesW()
- abgefragt wird, s. sond_treeviewfm_render_file_icon(), sond_treeviewfm.c
- ~Zeile 3274).
+ - Konsolidierung seadrive_file_badges + Erweiterung auf ZondTreeview
+   (11.09.2026, umgesetzt): die bisherigen zwei bool-Ground-Truth-Sets
+   durch eine Hashtable seadrive_file_badges ersetzt (Pfad ->
+   SondSeadriveBadge), dient jetzt sowohl dem Datei-Badge (O(1) statt
+   GetFileAttributesW pro Renderzeile) als auch den Ordner-Coverage-
+   Deltas - s. sond_treeviewfm.h (_set_file_badges()/_get_file_badge()/
+   _update_file_badge()). Auf Nutzerfrage direkt erweitert auf
+   ZondTreeview (BAUM_INHALT/BAUM_AUSWERTUNG): neues SeaDrive-Datei-Badge
+   unten rechts, s. zond_treeview_get_seadrive_badge() (zond_treeview.c).
 
- Plan:
- 1. Neue GHashTable *seadrive_dir_offline_count in SondTreeviewFMPrivate:
-    Pfad -> rekursiver Offline-Zähler für den ganzen Teilbaum (nicht nur
-    direkte Kinder - Rendering soll O(1) bleiben, Update-Pfad darf dafür
-    mehrere Hashtable-Zugriffe kosten).
- 2. watcher_count_pending_down() (sond_treeviewfm_seadrive.c) erweitern:
-    zusätzlich zur globalen Summe für jedes durchlaufene Verzeichnis den
-    eigenen Teilbaum-Zählerstand in die Hashtable eintragen.
- 3. Watcher-Bug (unabhängig von den Badges auch für den schon bestehenden
-    pending_down-Zähler in der Statusleiste relevant): ReadDirectoryChangesW-
-    Filter hat bisher nur FILE_NOTIFY_CHANGE_ATTRIBUTES |
-    FILE_NOTIFY_CHANGE_LAST_WRITE - FILE_NOTIFY_CHANGE_FILE_NAME fehlt,
-    neue/gelöschte Dateien werden vom Watcher gar nicht bemerkt (Zähler
-    laufen mit der Zeit auseinander). Fix: Filter ergänzen, fni->Action
-    (ADDED/REMOVED/RENAMED_*) auswerten, Zähler für die Datei UND alle
-    Vorfahren-Verzeichnisse bis root anpassen.
- 4. Watcher-Bug: kein Buffer-Overflow-Handling - bei sehr vielen
-    gleichzeitigen Änderungen (großes TÜ-Archiv) kann
-    ReadDirectoryChangesW Events verlieren (bytes_returned==0 trotz
-    Erfolg bzw. ERROR_NOTIFY_ENUM_DIR), aktuell unbemerkt, Zähler bleiben
-    dauerhaft falsch. Fix: erkennen, kompletten Resync (erneuter
-    watcher_count_pending_down()-Durchlauf) für die betroffene Wurzel
-    anstoßen - jetzt unproblematisch (s. Nebenbefund oben, ~1,5s/70k
-    Dateien).
- 5. Neuer Enum SondSeadriveDirStatus (NONE/PARTIAL/FULL_OFFLINE, Naming
-    analog SondIndexStatus) + Getter-Funktion.
- 6. sond_treeviewfm_render_file_icon() für DIR-Items: zusätzlich zur
-    bisherigen Prüfung des Ordner-eigenen Attributs die neue Hashtable
-    konsultieren und ggf. PARTIAL/FULL_OFFLINE-Badge zeigen.
- 7. Test: Ordner mit gemischtem Hydrierungsstatus (Badge=PARTIAL
-    erwartet), Datei-Hinzufügen/-Löschen während laufendem Watcher,
-    künstlich ausgelöster Buffer-Overflow (Resync-Verifikation).
+ - SeaDrive-Menü neu geordnet + gruppiert + ausgegraut (11.09.2026,
+   Nutzer-Vorschlag/-Feedback, umgesetzt): nur noch "Auswahl" in
+   Kontextmenüs, "Gesamtes Projekt" nur im Hauptmenü - Parallele zur
+   Indexsuche/zum Index-Menü (s.u.). Auslöser: die alte "Gesamtes
+   Verzeichnis"-Option im BAUM_FS-Kontextmenü wirkte tatsächlich schon
+   immer projektglobal (apply_pin_state_to_root()), gehörte semantisch
+   also nicht ins Kontextmenü. Anschließend zu einem eigenen Untermenü
+   "SeaDrive" gruppiert und ausgegraut, wenn kein SeaDrive-Projekt offen
+   ist (project_set_widgets_sensitive()). Neue Funktionen dazu in
+   sond_treeviewfm_seadrive.h/zond_treeview.h/headerbar.h dokumentiert.
 
- Empfohlene Reihenfolge: 3./4. zuerst (eigenständige Bugfixes, betreffen
- auch den schon bestehenden pending_down-Zähler), dann 1./2./5./6. für die
- neuen Badges.
+ - Index-Coverage-Bug beim Kopieren/Löschen (11.09.2026, Nutzer-Fund,
+   behoben). Symptom: Ordner blieb nach Hineinkopieren einer nicht
+   indizierten Datei fälschlich "komplett indiziert" (grün). Drei
+   verschachtelte Bugs (per Diagnose-Logging gefunden, inzwischen wieder
+   entfernt): (1) echtes Kopieren emittierte anders als Verschieben gar
+   kein Signal, das die Ziel-Coverage hätte auflösen können - Fix: Signal
+   "before-insert" jetzt auch beim Kopieren emittiert, neuer Handler
+   zond_treeviewfm_before_insert(). (2) sond_index_ctx_
+   coverage_invalidate() löste Geschwister-Einträge mit einem
+   projektrelativen statt absoluten Pfad auf (g_dir_open() schlug still
+   fehl) und baute deren Keys Windows-typisch mit "\" statt der überall
+   sonst verwendeten "/"-Konvention - Fix: root_dir-Parameter ergänzt
+   (analog coverage_try_collapse()), Keys jetzt konsistent mit "/".
+   (3) nach einem Löschen wurde nie erneut geprüft, ob das
+   Elternverzeichnis wieder vollständig abgedeckt ist - Fix:
+   pending_delete_path in ZondTreeviewFMPrivate, zond_treeviewfm_after()
+   stößt bei Erfolg coverage_try_collapse() an.
 
- Stand 08.09.2026: KOMPLETT UMGESETZT (alle 7 Punkte).
- - 3./4.: seadrive_pending_down_paths-Set in SondTreeviewFMPrivate,
-   FILE_NOTIFY_CHANGE_FILE_NAME ergänzt, Action-Auswertung ADDED/REMOVED/
-   RENAMED_*, Buffer-Overflow-Resync über watcher_rescan().
- - 1./2.: SondSeadriveDirCounts (offline/total, rekursiv) in
-   seadrive_dir_counts (SondTreeviewFMPrivate). watcher_count_pending_down()
-   liefert jetzt zusätzlich zum Pfad-Set für JEDES durchlaufene Verzeichnis
-   seine rekursive Statistik zurück (out_dir_counts, sond_treeviewfm_
-   seadrive.c). Live-Nachführung (über die urspr. 7 Punkte hinaus, auf
-   Nachfrage ergänzt): sond_treeviewfm_seadrive_update_status() ruft bei
-   jeder tatsächlichen Set-Änderung UND bei jedem ADDED/REMOVED/RENAMED_*
-   zusätzlich sond_treeviewfm_seadrive_dir_delta_for_file() auf - läuft die
-   Pfad-Segmente vom Elternverzeichnis der Datei bis root hoch und passt
-   jeden Vorfahren an (sond_treeviewfm_seadrive_dir_delta(), negative
-   Deltas bei 0 gekappt). Ordner-Badges bleiben dadurch laufend aktuell,
-   nicht nur nach dem nächsten Rescan.
- - 5.: SondSeadriveDirStatus (NONE/PARTIAL/FULL_OFFLINE, sond_icon_util.h)
-   + sond_icon_util_seadrive_dir_badge_pixbuf() (Orange/Violett, dieselben
-   Farben wie INDEX_STATUS_PARTIAL/SEADRIVE_BADGE_OFFLINE für konsistente
-   Bedeutung). Getter: sond_treeviewfm_seadrive_get_dir_status().
- - 6.: sond_treeviewfm_render_file_icon() - für DIR-Items wird der
-   Ordner-Teilbaum-Status NUR konsultiert, wenn das Ordner-eigene SeaDrive-
-   Attribut nichts zeigt (Normalfall), teilen sich denselben Overlay-Slot
-   unten rechts (nur eine Ecke für SeaDrive-Status verfügbar).
+ - Index-Menü: Parallelstruktur zu SeaDrive (11.09.2026, Nutzerwunsch,
+   umgesetzt). "Index erstellen"/"Index durchsuchen" strukturell an das
+   SeaDrive-Menü angeglichen (Untermenü "Index" mit "Erstellen"/
+   "Durchsuchen", je "Gesamtes Projekt"/"Auswahl"; Kontextmenüs nur
+   "Auswahl"). Neue öffentliche Funktion zond_index_erstellen_
+   activate_fuer_baum() (headerbar.h) analog zond_indexsuche_
+   activate_fuer_baum().
 
- Beim Testen gefundener, unabhängiger Bug "Ordner ohne Icon" (08./09.2026,
- behoben): NICHTS mit dem SeaDrive-Umbau selbst zu tun, sondern ein
- latenter, vorbestehender Bug in sond_treeviewfm_render_file_icon(), der
- durch das Testen der neuen Ordner-Badges erstmals auffiel. Ursache: der
- alte "Kein Overlay"-Zweig setzte für Items ohne jedes Badge die
- "icon-name"-Property direkt auf dem GtkCellRendererPixbuf
- (g_object_set(renderer, "icon-name", ...)). GtkCellRendererPixbufs eigene
- Aufloesung von icon-name bestimmt die Ziel-Pixelgroesse offenbar ueber die
- "stock-size"-Property und lieferte in dieser Umgebung fuer "folder"
- schlicht KEIN Bild (kein Crash, keine Warnung - einfach leer). Der
- Overlay-Pfad dagegen laed das Icon explizit ueber
- sond_icon_util_load_pixbuf()/gtk_icon_theme_load_icon() mit der ueber
- sond_icon_util_renderer_get_size() ermittelten Pixelgroesse und setzt
- "pixbuf" statt "icon-name" - das funktioniert zuverlaessig. Dateien fiel
- das nie auf, weil sie fast immer schon ein Badge (SeaDrive/Index) hatten
- und dadurch ohnehin ueber den Overlay-Pfad liefen; Ordner hatten vorher so
- gut wie nie ein Badge und liefen praktisch IMMER ueber den kaputten
- Direkt-Pfad - nur bemerkt hat es bisher niemand. Fix: der "Kein
- Overlay"-Sonderfall wurde komplett entfernt, sond_treeviewfm_render_
- file_icon() ruft jetzt IMMER sond_icon_util_render_with_overlays() auf
- (auch mit 0 Overlays) - ein einziger, konsistenter Lade-Mechanismus fuer
- alle Zeilen. Verifiziert per temporaerem LOG_INFO (type/icon_name/
- seadrive_badge/dir_status/index_status/overlay_path) - Log bestaetigte:
- alle DIR-Zeilen liefen mit lauter 0/NONE durch den alten Direkt-Pfad,
- alle LEAF-Zeilen mit Badge (seadrive_badge=1) durch den Overlay-Pfad.
+ - SeaDrive-Hydrierung beim Abdeckungs-Check der Indexsuche (11.09.2026,
+   Nutzer-Fund, behoben). check_coverage_one() (zond_indexsuche.c)
+   öffnete bisher jede PDF ohne eigenen Coverage-Eintrag ("ganze Datei"-
+   Fall) nur, um per pdf_count_pages() die Gesamtseitenzahl für die
+   Lücken-Anzeige zu bekommen - zog bei SeaDrive-Platzhaltern volle
+   Hydrierung nach sich. Nutzer-Entscheidung: Gesamtzahl dafür
+   verzichtbar, reiner pages-Tabellen-Zugriff (DB, kein Dateizugriff)
+   reicht. Seit der später ergänzten file_pagecount-Tabelle (s.u.) ist
+   die Gesamtzahl in den meisten Fällen wieder verfügbar, ebenfalls ohne
+   Dateizugriff - s. check_coverage_one()/SondIndexCoverageGap
+   (zond_indexsuche.c) für den aktuellen Stand.
 
- Direkte Folge davon aufgedeckter, ZWEITER Bug "Ordner faelschlich gruen/
- Dateien faelschlich violett" (09.09./10.09.2026, behoben): Nachdem obiger
- Fix ALLE Zeilen ueber sond_icon_util_render_with_overlays() laufen liess,
- meldete der Nutzer, nach dem Pinnen EINES einzigen Ordners ("Immer
- offline verfuegbar") zeigten PLOETZLICH ALLE Ordner im Projekt ein
- gruenes Badge und ALLE Dateien ein violettes - obwohl laut Windows
- Explorer nur der eine gepinnte Ordner (und sein echter Teilbaum)
- tatsaechlich gepinnt war, und obwohl eigens eingebautes Logging bestaetigte,
- dass die Attribut-Abfrage (GetFileAttributesW) fuer die betroffenen
- Ordner korrekt "nicht gepinnt" lieferte. Ursache: gdk_pixbuf_composite()
- in sond_icon_util_render_with_overlays() zeichnete das Overlay-Badge
- DIREKT in das von gtk_icon_theme_load_icon() gelieferte Pixbuf hinein.
- Icon-Themes duerfen (und tun es in der Praxis) fuer wiederholte Anfragen
- nach demselben Icon-Namen/derselben Groesse dasselbe INTERN GECACHTE
- GdkPixbuf zurueckgeben statt einer frischen Kopie - das Hineinzeichnen
- veraenderte also dauerhaft den Cache-Eintrag fuer z.B. "folder" bzw.
- "text-x-generic". Der eine tatsaechlich gepinnte Ordner "brannte" so sein
- gruenes Badge in den gemeinsamen "folder"-Cache-Eintrag, danach zeigten
- ALLE Ordner (die denselben Cache-Eintrag abfragen) dieses kontaminierte
- Icon - unabhaengig von ihrem eigenen, korrekt berechneten Status; analog
- fuer den Dateityp mit dem violetten Badge. Ein vorbestehender, latenter
- Bug (nicht neu durch obigen Fix verursacht), der vorher nur nicht auffiel,
- weil Ordner so gut wie nie ein Overlay-Badge bekamen. Fix: Basis-Pixbuf
- wird jetzt per gdk_pixbuf_copy() dupliziert, BEVOR ueberhaupt ein Overlay
- hineinkomponiert wird (nur wenn n_overlays>0, sonst kein Overhead) -
- das Original im Icon-Theme-Cache bleibt unveraendert.
+ - "Index erstellen": Invalid argument (11.09.2026, Nutzer-Fund). Kein
+   Bug - erwartetes Verhalten bei nicht erreichbarem SeaDrive/Seafile-
+   Server (mehr Dateien galten dank der obigen Coverage-Fixes zurecht
+   als "nicht abgedeckt" und wurden entsprechend gelesen/hydriert).
+   Dabei ein echter, unabhängiger Bug gefunden und behoben:
+   coverage_invalidate()/coverage_try_collapse() (sond_index.c) nutzten
+   g_dir_open() ohne Long-Path-Präfix, anders als der Rest des Codes
+   (sond_dir_open() & Co.) - umgestellt.
 
- Redesign SeaDrive-Badges Datei+Ordner (10.09.2026, umgesetzt, auf
- Nutzer-Feedback zum obigen Fund): die Diskussion um "gruen bei allen
- Ordnern" deckte einen ECHTEN Semantik-Bug auf (unabhaengig vom Cache-Bug
- oben): der Ordner-Coverage-Zaehler zaehlte bislang "offline" als
- "PINNED+noch nicht heruntergeladen" (pending_down) - Dateien, die
- einfach nie gepinnt und nie geoeffnet wurden (der SeaDrive-Normalfall
- fuer die meisten Cloud-Dateien), zaehlten NICHT als "offline", obwohl sie
- einzeln als violett angezeigt wurden. Ein Ordner voller solcher Dateien
- bekam dadurch gar kein Badge. Neues, mit dem Nutzer abgestimmtes Modell:
- - Datei-Badge (sond_icon_util.h SondSeadriveBadge, jetzt 3 Zustaende):
-   1. gepinnt+nicht hydriert -> PENDING/Orange ("wird geladen, sobald
-      online" - wiederverwendet dieselbe Farbe wie INDEX_STATUS_PARTIAL).
-   2. nicht hydriert, nicht gepinnt -> OFFLINE/Violett.
-   3. hydriert+gepinnt -> PINNED/Gruen.
-   4. sonst (hydriert, nicht gepinnt) -> kein Badge.
- - Ordner-Badge (SondSeadriveDirStatus, jetzt NONE/FULL_OFFLINE/
-   FULL_HYDRATED_PINNED/MIXED): bewusst DIESELBE Gruen/Violett/kein-Badge-
-   Bedeutung wie beim Datei-Badge (Nutzer-Vorgabe: "nicht zig Schemata
-   lernen muessen"), Grau als einziger zusaetzlicher, nur-Ordner-Zustand:
-   * alle Dateien im Teilbaum nicht hydriert -> Violett.
-   * alle hydriert UND alle gepinnt -> Gruen.
-   * alle hydriert, aber nicht alle gepinnt -> kein Badge (wie eine
-     einzelne ungepinnte, hydrierte Datei).
-   * weder komplett hydriert noch komplett offline -> Grau (MIXED).
-   * leerer/nicht gescannter Teilbaum -> kein Badge (kein Zustand,
-     sondern "keine Daten" - ohnehin ueber Aufklappbarkeit erkennbar).
- Datenmodell: SondSeadriveDirCounts hat jetzt drei Felder (not_hydrated,
- hydrated_pinned, total statt vorher offline/total). Neue Ground-Truth-
- Sets seadrive_not_hydrated_paths/seadrive_hydrated_pinned_paths
- (SondTreeviewFMPrivate, sond_treeviewfm.c) verhindern Drift bei REMOVED-
- Events, analog dem bestehenden seadrive_pending_down_paths-Muster -
- bewusst SEPARAT von diesem gehalten (andere Fragestellung: "wird gerade
- wegen Pin heruntergeladen" fuer den Projekt-weiten Zaehler vs. "ist der
- Teilbaum lokal verfuegbar" fuer den Ordner-Badge). Neue Funktion
- sond_treeviewfm_seadrive_update_coverage() (Set-Pflege + Delta-Ableitung)
- ruft intern sond_treeviewfm_seadrive_update_dir_coverage() (Ancestor-Walk,
- vormals dir_delta_for_file) mit den TATSAECHLICH angewandten Deltas auf.
- watcher_count_pending_down() (sond_treeviewfm_seadrive.c) baut beim Scan
- zusaetzlich zu out_paths (PINNED+offline) die beiden neuen Ground-Truth-
- Sets auf; der Live-Watcher setzt pro ADDED/MODIFIED-Event coverage_not_
- hydrated/coverage_hydrated_pinned direkt aus den frisch gelesenen
- Attributen (WatcherIdleData), REMOVED setzt beide FALSE (Datei zaehlt
- nirgends mehr mit, delta_total=-1 uebernimmt den Rest).
+ Zwei im Zuge der Indexsuche-Untersuchung gefundene, aber NICHT behobene
+ Hydrierungsquellen (11.09.2026, weiterhin OFFEN; betreffen nicht speziell
+ die Indexsuche, sondern jeden vollständigen BAUM_FS-Scan):
+ (1) sond_tvfm_item_load_fs_dir() (sond_treeviewfm.c) liest beim
+     Einlesen eines Verzeichnisses für jede nicht als SeaDrive-
+     Platzhalter erkannte Datei die ersten 2 KB zur MIME-Typ-Erkennung
+     (sond_file_part_create() -> sond_file_part_read_bytes_internal()).
+     Betrifft jeden vollen Tree-Scan (z.B. "Gesamtes Projektverzeichnis"
+     bei Index erstellen/durchsuchen), nicht nur die Indexsuche.
+ (2) Die SeaDrive-Platzhalter-Erkennung selbst (GetFileAttributesW +
+     FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) kann im Einzelfall fehlschlagen
+     oder ungenau sein - dann greift die 2-KB-Lese-Weiche aus (1) nicht.
 
- Beim Testen gefundener, unabhängiger Absturz (08.09.2026, behoben):
- Expansion eines .eml auf oberster Ebene im Baum konnte abstürzen.
- Ursache NICHTS mit dem SeaDrive-Umbau oben zu tun - zwei Bugs in
- sond_fileparts.c/sond_treeviewfm.c, die es schon vorher gab:
- - sond_file_part_gmessage_load_path() (sond_fileparts.c) hatte
-   g_return_val_if_fail(path, -1) - lehnte NULL als Pfad ab, obwohl
-   path_or_section==NULL die reguläre, überall verwendete Konvention für
-   "oberste Ebene der .eml" ist (dieselbe wie bei PDF/"//", s.
-   sond_tvfm_item_create()) und lookup_path() (sond_gmessage_helper.c)
-   NULL bereits korrekt behandelt ("if (!path) return object;"). Die
-   Assertion hätte JEDE Expansion eines .eml auf oberster Ebene
-   abgelehnt. Fix: Assertion entfernt.
- - sond_treeviewfm_row_expanded() (sond_treeviewfm.c) dereferenzierte
-   error->message ohne NULL-Check - bei einem Fehlerpfad, der (wie
-   obiger g_return_val_if_fail) keinen GError setzt, Absturz statt nur
-   fehlender Fehlermeldung. Fix: NULL-Check ergänzt (defensiv, generell
-   gegen ähnliche Fälle).
+ SeaDrive-Hydrierungsfehler: UX-Umgang (11.09.2026, zurückgestellt).
+ Anlass: s.o. ("Invalid argument"). Nutzerfrage: wie geht die App damit
+ um, dass eine angeforderte Hydrierung (SeaDrive/Seafile-Server nicht
+ erreichbar, oder anderer Fehler) fehlschlägt? In welchen Fällen kann
+ das überhaupt auftreten? Gemeinsam begonnene, aber nicht fertig
+ durchgegangene Liste der Zugriffsstellen:
+ 1. Doppelklick auf eine nicht hydrierte Datei (Öffnen im Viewer)
+ 2. Indizierung einer Datei (sond_index_erstellen, s.o.)
+ 3. (dritter Punkt vom Nutzer nur angerissen, nicht ausformuliert -
+    offen)
+ (weitere Kandidaten, aus dem Code bekannt, aber noch nicht mit dem
+ Nutzer besprochen: Indexsuche-Abdeckungs-Check - s.o. größtenteils
+ behoben -, "Gesamtes Projektverzeichnis"-Scans beim Laden von
+ BAUM_FS-Verzeichnissen, Kopieren/Verschieben von Dateien im
+ Projektbaum, PDF-Vorschau/Thumbnail-Erzeugung.)
 
- Konsolidierung seadrive_file_badges + Erweiterung auf ZondTreeview
- (11.09.2026, umgesetzt, auf Nutzer-Vorschlag): Nutzer wies auf Inkonsistenz
- hin - der Ordner-Badge (oben) las schon aus Hashtables, der Datei-Badge
- (sond_treeviewfm_render_file_icon()) fragte pro Renderzeile weiterhin live
- GetFileAttributesW() ab, obwohl der Watcher den Zustand ohnehin laufend in
- den beiden obigen Ground-Truth-Sets nachhaelt. Fix: die zwei bool-Sets
- seadrive_not_hydrated_paths/seadrive_hydrated_pinned_paths ersetzt durch
- EINE Hashtable seadrive_file_badges (Pfad -> SondSeadriveBadge-Wert,
- Eintraege mit NONE werden nicht gespeichert) - dient jetzt gleichzeitig
- als (a) Ground-Truth fuer den Datei-eigenen Badge (O(1)-Lookup statt
- Syscall) und (b) Grundlage der Ordner-Coverage-Deltas. Neue Funktionen in
- sond_treeviewfm.h/.c: sond_treeviewfm_seadrive_set_file_badges() (Ersatz
- fuer den kompletten Stand nach Scan/Resync), _get_file_badge() (Lookup,
- von render_file_icon() UND von ZondTreeview genutzt),
- _update_file_badge() (Live-Watcher-Update, leitet die Ordner-Coverage-
- Deltas intern aus dem alten/neuen Badge-Wert ab statt sie separat
- mitzuschleppen). watcher_count_pending_down()/watcher_idle_cb()
- (sond_treeviewfm_seadrive.c) entsprechend auf die eine Hashtable/das eine
- WatcherIdleData-Feld (coverage_badge statt zwei Bools) umgestellt.
+ Technische Einschränkung: ein fehlgeschlagener Hydrierungsversuch
+ äußert sich nur als generisches CRT errno=EINVAL ("Invalid argument")
+ über die üblichen fread()/_wfopen()-Pfade - es gibt keinen
+ unterscheidbaren Windows-Cloud-Files-API-Fehlercode, an dem man
+ "Hydrierung fehlgeschlagen" zuverlässig von anderen Lesefehlern
+ unterscheiden könnte. Rein reaktive Fehlerauswertung ist also
+ unzuverlässig.
 
- Direkt darauf aufbauend (Nutzerfrage: "sollte man die Badge-Anzeige auch
- auf die anderen Baeume erweitern?"): zond_treeview_render_icon()
- (zond_treeview.c, fuer BAUM_INHALT UND BAUM_AUSWERTUNG - beides Instanzen
- derselben ZondTreeview-Klasse, ein Code-Aenderungspunkt reicht) bekommt
- jetzt zusaetzlich zum bestehenden Index-Status-Overlay (unten links) ein
- SeaDrive-Datei-Badge (unten rechts), per neuer Funktion
- zond_treeview_get_seadrive_badge(): file_part (Pfad relativ zum BAUM_FS-
- root, ggf. mit "//"-Suffix fuer eine interne Section/einen Anhang) wird
- auf den Teil vor einem evtl. "//" gekuerzt und mit dem BAUM_FS-root zum
- vollen Pfad zusammengesetzt, dann derselbe Hashtable-Lookup wie bei
- BAUM_FS selbst. Kein zusaetzlicher DB- oder Dateizugriff pro Renderzeile:
- zond_treeview_get_index_status() wurde dafuer in zwei Teile gesplittet
- (zond_treeview_get_index_status_for_filepart() nimmt jetzt file_part/
- section direkt entgegen), damit render_icon() zond_treeview_get_filepart_
- and_section() nur EINMAL pro Zeile aufruft (Index- UND SeaDrive-Badge
- nutzen dasselbe Ergebnis) statt wie zunaechst implementiert zweimal.
- Live-Aktualisierung: neuer zweiter Handler cb_seadrive_status_redraw_
- other_trees() (app_window.c), an dasselbe schon bestehende "seadrive-
- status"-Signal von zond->treeview[BAUM_FS] gehaengt wie der Statusbar-
- Handler - stoesst gtk_widget_queue_draw() auf BAUM_INHALT/BAUM_AUSWERTUNG
- an (reines Neuzeichnen sichtbarer Zeilen, kein DB-Zugriff).
+ Zwei denkbare Strategien, nicht entschieden, keine gegenüber der
+ anderen priorisiert:
+ A) Reaktiv: an den bekannten Zugriffsstellen bei Lesefehlern eine
+    klarere, spezifischere Fehlermeldung anzeigen (Hinweis auf
+    mögliche SeaDrive/Server-Nichterreichbarkeit), statt der rohen
+    Systemfehlermeldung.
+ B) Proaktiv: vor kritischen Aktionen (z.B. Indizierung) grob prüfen,
+    ob der SeaDrive/Seafile-Server überhaupt erreichbar ist, und bei
+    Nichterreichbarkeit vorab und gesammelt warnen, statt einzeln pro
+    Datei zu scheitern. Es existiert aktuell kein Erreichbarkeits-
+    Indikator im Code (das "seadrive-status"-Signal zählt nur
+    pending_down/pending_up laufender Transfers, ist aber kein
+    Erreichbarkeits-Flag).
 
- SeaDrive-Menue neu geordnet: nur noch "Auswahl" in Kontextmenues, "Gesamtes
- Projekt" nur im Hauptmenue (11.09.2026, Nutzer-Vorschlag). Auslöser: die
- Frage, ob die SeaDrive-Pin/Unpin-Aktionen (bisher nur im BAUM_FS-
- Kontextmenue, s.o.) auch ins ZondTreeview-Kontextmenue sollen. Beim
- Vergleich mit der Indexsuche (die dasselbe Auswahl/Gesamtprojekt-Problem
- schon loest, s. zond_indexsuche_activate_fuer_baum()) fiel auf: die
- bisherige "Gesamtes Verzeichnis"-Option im BAUM_FS-Kontextmenue rief
- tatsaechlich schon immer apply_pin_state_to_root() auf - wirkte also IMMER
- auf die Projekt-Wurzel, unabhaengig vom Rechtsklick-Ziel oder einer
- Selektion. Eine projekt-globale Aktion gehoert aber nicht in ein
- Kontextmenue (das "dieser Punkt"/"diese Auswahl" suggeriert), sondern ins
- Hauptmenue. Umgesetzt:
- - sond_treeviewfm_seadrive.c: apply_pin_state_to_root() -> oeffentliche
-   sond_treeviewfm_seadrive_pin_root() (unveraendertes Verhalten, inkl.
-   Fehlerdialog). Die "-all"-Eintraege in der Actions-Tabelle von
-   sond_treeviewfm_seadrive_init_contextmenu() entfernt - dort nur noch
-   sd-pin-sel/sd-unspec-sel/sd-unpin-sel.
- - sond_treeviewfm.c (add_base_menu): SeaDrive-Sektion von drei
-   Zwei-Optionen-Submenues auf drei flache Eintraege ("Immer offline
-   verfuegbar"/"Offline verfuegbar aufheben"/"Cache leeren") vereinfacht.
- - zond_treeview.c: neue Funktion zond_treeview_seadrive_apply_to_
-   selection() - nutzt (wie die Indexsuche) zond_treeview_get_selected_
-   fileparts() zur Aggregation der Auswahl, ignoriert die Seitenbereiche
-   (Pinnen ist dateiweise), fuehrt jeden SondFilePart* auf seinen
-   Dateisystem-Vorfahren (parent==NULL) zurueck - analog zu
-   zond_treeview_get_seadrive_badge() - und dedupliziert die daraus
-   entstehenden echten Pfade ueber ein String-Set, bevor sond_seadrive_
-   set_pin_state() pro Pfad aufgerufen wird. Neue Kontextmenue-Eintraege
-   (nur "Auswahl") + Actions sd-pin-sel/sd-unspec-sel/sd-unpin-sel, analog
-   zum Registrierungsmuster von indexsuche-sel.
- - headerbar.c: neue Sektion "Projekt > Immer offline verfuegbar/Offline
-   verfuegbar aufheben/Cache leeren" (direkt unter "Index durchsuchen",
-   NICHT unter "Extras" - dort zunaechst platziert, auf Nutzer-Rueckmeldung
-   "kein Eintrag im Hauptmenu" korrigiert: gesucht wurde naheliegenderweise
-   neben der Indexsuche), jede mit Submenue "Gesamtes Projekt"/"Auswahl" -
-   exakt wie bei "Index erstellen"/"Index durchsuchen" (Nutzer-Klarstellung
-   nach erster, zu knapper Umsetzung, die im Hauptmenue nur "Gesamtes
-   Projekt" anbot). "Gesamtes Projekt" (win.sd-*-all) ruft unveraendert
-   sond_treeviewfm_seadrive_pin_root() auf BAUM_FS auf. "Auswahl"
-   (win.sd-*-sel) braucht dagegen - wie cb_win_indexsuche_auswahl() - einen
-   zond_baum_mit_auswahl()-Dispatch (neue Hilfsfunktion
-   seadrive_pin_auswahl()), da das globale Menue keinen festen Baum-Kontext
-   hat: je nach Ergebnis wird die schon vorhandene, fuer die Kontextmenues
-   gebaute Funktion aufgerufen - neu oeffentlich gemachte
-   sond_treeviewfm_seadrive_pin_selection() (vorher nur inline in
-   seadrive_action_activate()) fuer BAUM_FS, zond_treeview_seadrive_apply_
-   to_selection() (vorher static) fuer BAUM_INHALT/BAUM_AUSWERTUNG.
+ Nutzer-Entscheidung: "Merke Dir das. Stellen das zurück." - Thema
+ nicht bearbeiten, bis der Nutzer es wieder aufgreift.
 
- SeaDrive-Menue: Gruppierung + Ausgrauen (11.09.2026, Nutzer-Feedback).
- Zwei Nachbesserungen an obigem Menue-Umbau:
- (1) Alle drei SeaDrive-Aktionen (Immer offline verfuegbar/Offline
-     verfuegbar aufheben/Cache leeren) haengen jetzt sowohl im Hauptmenue
-     ("Projekt") als auch in beiden Kontextmenues (BAUM_FS, ZondTreeview)
-     in einem eigenen Untermenue "SeaDrive", statt lose als einzelne
-     Eintraege in der jeweiligen Sektion zu stehen - macht auf den ersten
-     Blick klar, dass sie zusammengehoeren.
- (2) Alle sechs win.sd-*-Aktionen sowie die stv.sd-*-sel-Aktionen in beiden
-     Kontextmenues werden jetzt ausgegraut, wenn kein Projekt offen ist
-     oder dessen Wurzel kein SeaDrive-Verzeichnis ist (vorher liefen sie
-     bei einem Nicht-SeaDrive-Projekt einfach wirkungslos ins Leere).
-     Zentraler Umschaltpunkt: project_set_widgets_sensitive() (project.c),
-     bereits der bestehende Ort fuer aehnliche Enable/Disable-Logik
-     (speichern/schliessen/export_odt/pdf/...) - ausgewertet wird dort
-     sond_treeviewfm_is_seadrive_path(BAUM_FS), was zu diesem Zeitpunkt
-     schon aktuell ist (sond_treeviewfm_set_root() laeuft im Oeffnen-
-     Codepfad vorher). Neue Funktionen: sond_treeviewfm_seadrive_set_
-     contextmenu_sensitive() (sond_treeviewfm_seadrive.c/.h),
-     zond_treeview_seadrive_set_contextmenu_sensitive() (zond_treeview.c/
-     .h), headerbar_set_seadrive_sensitive() (headerbar.c/.h, holt sich
-     die "win"-Actiongroup ueber gtk_widget_get_action_group() statt einen
-     eigenen Satz Projekt-Struct-Felder je Aktion anzulegen) - alle drei
-     nach demselben Muster: Actionnamen-Liste, g_action_map_lookup_action()
-     + g_simple_action_set_enabled() je Treffer.
+ "Index löschen" + Unterseitig-Sperre + file_pagecount (11.09.2026,
+ Nutzerwunsch/-Fund, umgesetzt - Details/Mechanik s. Doc-Kommentare
+ sond_index.h, general.h, zond_treeviewfm.h/zond_treeview.h,
+ sond_text_extract.h; hier nur Anlass, Entscheidungen und Verweise, die
+ sich nicht aus dem Code selbst ergeben):
 
- Index-Coverage-Bug beim Kopieren/Loeschen (11.09.2026, Nutzer-Fund).
- Nutzer-Meldung: Ordner als "komplett indiziert" markiert (gruen), eine
- nicht indizierte Datei per Ausschneiden/Einfuegen hineinverschoben ->
- Ordner blieb gruen, DB-Coverage-Eintrag ueberlebte. Drei verschachtelte
- Bugs, alle per Diagnose-Logging (LOG_INFO an mehreren Stellen der
- Aufrufkette, Nutzer baut neu und reproduziert) statt reiner
- Code-Analyse gefunden - Static-Analyse (eigene wie Subagent) hatte
- faelschlich angenommen, der Pfad sei schon korrekt verdrahtet:
- (1) Der erste Reproduktionsversuch war tatsaechlich ein Kopieren
-     (Kopieren/Einfuegen), kein Ausschneiden - klargestellt per
-     Rueckfrage, nachdem "keine einzige Logzeile" trotz Logging direkt
-     am Eintritt von zond_treeviewfm_before_move() auftrat.
-     sond_tvfm_item_copy() (fuer echtes Kopieren) emittierte anders als
-     sond_tvfm_item_move() gar kein Signal - die Index-Coverage bekam
-     vom neuen, ungeprueften Inhalt nie etwas mit. Fix: sond_treeviewfm.c/
-     process_stvfm_item_move_or_copy() emittiert im Kopier-Zweig jetzt
-     das seit langem definierte, aber bis dahin nie verbundene Signal
-     "before-insert". Neuer Handler zond_treeviewfm_before_insert()
-     (zond_treeviewfm.c, an "before-insert" gehaengt in
-     zond_treeviewfm_new()) loest die Ziel-Coverage auf - Analogon zu
-     zond_treeviewfm_before_move(), aber ohne Umbenennungslogik,
-     best-effort (Fehler blockiert das Kopieren nicht).
- (2) Nach dem Fix (1) verschwand der gruene Badge auch bei der
-     BEREITS indizierten Nachbardatei. Ursache: sond_index_ctx_
-     coverage_invalidate() (sond_index.c) loest beim Aufloesen eines
-     abdeckenden Vorfahren-Eintrags dessen Geschwister per echtem
-     Verzeichnis-Listing (g_dir_open()) neu auf, damit sie ihren
-     Coverage-Status einzeln zurueckbekommen - rief g_dir_open() aber mit
-     einem rein projektrelativen Pfad auf (schlug praktisch immer fehl,
-     da relativ zum Prozess-CWD statt zur Projektwurzel), wodurch die
-     Geschwister-Neueintragung committed stillschweigend uebersprungen
-     wurde. Anders als sond_index_ctx_coverage_try_collapse(), die dafuer
-     extra einen root_dir-Parameter hat. Fix: coverage_invalidate()
-     bekommt denselben root_dir-Parameter, baut daraus den echten Pfad
-     fuer g_dir_open(). Dabei zusaetzlich bemerkt und mitkorrigiert: die
-     Geschwister-Keys wurden mit g_build_filename() gebaut, was unter
-     Windows "\" statt "/" liefert - inkonsistent zur ueberall sonst
-     verwendeten "/"-Konvention fuer coverage-Keys (waere sonst nie von
-     einem "/"-basierten Lookup wiedergefunden worden). Jetzt explizite
-     "/"-Konkatenation wie bei coverage_try_collapse(). Alle vier
-     Aufrufer (zond_treeviewfm.c x2, viewer_save.c x2) uebergeben jetzt
-     zond->project_dir bzw. pdfv->zond->project_dir.
- (3) Nach dem Fix (2) blieb der Ordner nach Loeschen der zuvor
-     hineinkopierten Datei dauerhaft orange/gemischt statt wieder gruen
-     zu werden. Ursache: nirgends wurde nach einem Loeschen erneut
-     geprueft, ob das Elternverzeichnis jetzt wieder vollstaendig
-     abgedeckt ist (Coalescing lief bisher nur nach erfolgreichem
-     Neu-Indizieren, s. sond_process_file.c). Fix: neues Feld
-     pending_delete_path in ZondTreeviewFMPrivate - zond_treeviewfm_
-     before_delete() merkt es sich (erst unmittelbar vor dem garantiert
-     erfolgreichen return, damit bei Fehler-Returns ohne "after"-Signal
-     nichts haengen bleibt). zond_treeviewfm_after() ruft bei Erfolg
-     sond_index_ctx_coverage_try_collapse() dafuer auf - bewusst erst
-     hier (nach der tatsaechlichen physischen Loeschung), weil try_
-     collapse() ein echtes Verzeichnis-Listing macht und die geloeschte
-     Datei darin nicht mehr auftauchen darf, damit die verbliebenen
-     Geschwister als "vollstaendig" erkannt werden. Feld wird in after()
-     immer freigegeben (Erfolg wie Fehlschlag) sowie defensiv in
-     finalize(). Alle DIAG-LOG_INFO-Zeilen aus dieser Untersuchung
-     (sond_index.c, sond_treeviewfm.c, zond_treeviewfm.c) sind nach
-     Verifikation zu entfernen.
+ - "Index löschen": neue Funktion, parallel zu "Index erstellen"/"Index
+   durchsuchen" (Hauptmenü: Gesamtes Projekt/Auswahl; Kontextmenüs
+   BAUM_FS + ZondTreeview: nur Auswahl). Löscht NUR Index-Daten (chunks/
+   pages/coverage in .sond_index.db) - weder die Dateien selbst noch
+   Anbindungen (dbase_zond, komplett separate Datenbank) werden
+   angerührt. Kernfunktionen: sond_index_ctx_delete_index()/
+   _delete_all() (sond_index.h). Vom Nutzer aufgeworfene und per
+   Rückfrage geklärte Frage: eine Anbindung speichert ihre Position
+   eigenständig (Datei + Seite/Offset), nicht als Verweis auf einen
+   Index-Eintrag - wird durch "Index löschen" also nicht ungültig,
+   verliert lediglich ihren Coverage-Badge/ihre Durchsuchbarkeit bis zur
+   Neuindizierung. Erwünschtes Verhalten, kein Bug.
 
- Index-Menue: Parallelstruktur zu SeaDrive (11.09.2026, Nutzerwunsch).
- Nutzer wollte "Index erstellen"/"Index durchsuchen" strukturell an das
- eben gebaute SeaDrive-Menue angleichen. Umgesetzt:
- - headerbar.c (build_menu): "Projekt > Index erstellen" und "Projekt >
-   Index durchsuchen" (bisher zwei lose nebeneinanderstehende Submenues
-   in derselben Sektion) zusammengefasst zu einem Untermenue "Index" mit
-   Unterpunkten "Erstellen"/"Durchsuchen", jeweils mit "Gesamtes
-   Projekt"/"Auswahl" - exakt dieselbe Drei-Ebenen-Struktur wie "Projekt
-   > SeaDrive > Immer offline verfuegbar/... > Gesamtes Projekt/
-   Auswahl". Labels "Gesamtes Projektverzeichnis"/"Ausgewaehlte Punkte"
-   dabei auf "Gesamtes Projekt"/"Auswahl" vereinheitlicht (Parese zu
-   SeaDrive).
- - headerbar.c/.h: neue oeffentliche Funktion zond_index_erstellen_
-   activate_fuer_baum(Projekt*, Baum) - Analogon zu zond_indexsuche_
-   activate_fuer_baum() (zond_indexsuche.c), damit auch Kontextmenues
-   sie mit zond->baum_active aufrufen koennen (vorher konnte "Index
-   erstellen (Auswahl)" nur ueber das globale Fenstermenue mit
-   zond_baum_mit_auswahl()-Scan ausgeloest werden, es gab dafuer noch
-   keine Kontextmenue-Aktion). do_index_erstellen() dafuer aufgeteilt in
-   do_index_erstellen_gesamt() (nur noch Gesamtprojekt-Fall) und die neue
-   oeffentliche Funktion.
- - sond_treeviewfm.c (BAUM_FS) und zond_treeview.c (BAUM_INHALT/
-   BAUM_AUSWERTUNG): das bisherige "Index durchsuchen"-Kontextmenue
-   (das dort fälschlich noch "Gesamtes Projektverzeichnis" als
-   win.indexsuche anbot - Rechtsklick-Kontextmenues sollten das seit dem
-   SeaDrive-Umbau grundsaetzlich nicht mehr tun) ersetzt durch ein
-   "Index"-Untermenue mit "Erstellen"/"Durchsuchen", beide bewusst nur
-   als "Auswahl" (stv.index-erstellen-sel/stv.indexsuche-sel) - Parallele
-   zum SeaDrive-Kontextmenue. Neue Aktion stv.index-erstellen-sel je
-   Klasse registriert, ruft zond_index_erstellen_activate_fuer_baum(zond,
-   zond->baum_active) auf.
+ - Unterseitige Anbindungen gesperrt: Nutzer-Einwand nach obigem
+   Feature - Indizierung/Coverage arbeitet nur seitenweise, eine
+   unterseitige Anbindung (z.B. "Seite 1, untere Hälfte") teilt sich
+   beim Löschen ihren Seiten-Index-Eintrag mit einer ggf. zweiten
+   Anbindung auf derselben Seite ("Seite 1 komplett") - deren Index
+   würde sonst mitgelöscht. Erster Lösungsvorschlag (vor dem Löschen
+   alle Anbindungen der Datei per zond_dbase_get_arr_sections()
+   gegenprüfen) vom Nutzer verworfen ("Kappes") - zu komplex, löst
+   außerdem nicht den allgemeineren Fall zweier sich überschneidender,
+   aber beide seitenweise ausgerichteter Anbindungen (z.B. "Seite 1" und
+   "Seite 1-3" - bleibt als vom Nutzer bewusst hingenommenes
+   Restrisiko). Stattdessen einfachere, vom Nutzer vorgegebene Lösung:
+   unterseitige Anbindungen dürfen für Index erstellen/löschen (Auswahl)
+   gar nicht erst ausgewählt werden, Fehlermeldung statt stiller
+   Verarbeitung - anbindung_ist_unterseitig() (general.h),
+   reject_unterseitig-Parameter in den get_fileparts-Funktionen.
+
+ - file_pagecount: Anlass war die Nutzer-Erwartung, dass
+   coverage_invalidate() eine kollabierte Datei-Coverage beim Löschen
+   eines Teilbereichs wieder auf einzelne Seiten herunterbricht - ging
+   bisher nicht, weil die Gesamtseitenzahl nirgends coalescing-
+   unabhängig gespeichert war (und ohne Öffnen der Datei, SeaDrive-
+   Hydrierung vermeiden, nicht ermittelbar ist). Nutzer-Entscheidung:
+   "Ich denke, wir müßten das machen. Und daran denken, daß, wenn Seiten
+   eingefügt oder gelöscht werden, die Gesamtzahl angepaßt wird." - neue
+   Tabelle file_pagecount(filename, total_pages), s.
+   sond_index_ctx_set/get/clear_page_count() (sond_index.h). Aktualisiert
+   bei jeder vollständigen Indizierung (sond_index()) sowie beim
+   PDF-Speichern mit Seiten-Journal (viewer_update_index_for_save(),
+   viewer_save.c - vor dem physischen Speichern, wie bestätigt).
+   Aufgefallener Zählfehler dabei vermieden: die Gesamtzahl kommt aus
+   sond_text_extract_pdf()'s out_n_pages (pdf_count_pages()), NICHT aus
+   der Segment-Anzahl - Seiten ohne extrahierbaren Text liefern kein
+   Segment, zählen aber mit.
+
+ - Indexsuche-Abdeckungs-Check "X von Y Seiten" dank file_pagecount:
+   Nachtrag zum obigen Feature - da die Gesamtseitenzahl jetzt oft
+   bekannt ist, zeigt check_coverage_one() (zond_indexsuche.c) für
+   "ganze Datei, keine Coverage, aber schon einzelne Seiten indiziert"
+   wieder "X von Y Seiten fehlen" statt nur "nur X Seiten indiziert"
+   ohne Gesamtzahl - weiterhin ohne Dateizugriff (rein file_pagecount +
+   pages-Tabelle). Ist file_pagecount unbekannt, bleibt es beim
+   bisherigen Verhalten.
+
+ Index-Status-Badge: Grau statt Orange für PARTIAL (12.09.2026,
+ Nutzer-Feedback, umgesetzt). Orange wirkte wie ein Warn-/Unfertig-
+ Signal statt eines reinen Ist-Zustands ("teilweise indiziert" ist kein
+ Fehler). sond_icon_util_status_badge_pixbuf() nutzt für
+ SOND_INDEX_STATUS_PARTIAL jetzt dieselbe Grau-Farbe wie
+ SEADRIVE_DIR_STATUS_MIXED. SeaDrive-PENDING (Datei gepinnt, noch nicht
+ heruntergeladen) bleibt bewusst Orange - beide Farben waren bis dahin
+ geteilt (Kommentar "wie INDEX_STATUS_PARTIAL"), sind es jetzt nicht
+ mehr. Stale gewordener Doc-Kommentar in sond_icon_util.h (Zeile ~40,
+ nannte noch Orange für PARTIAL) mitkorrigiert.
 
  */

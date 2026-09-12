@@ -28,6 +28,7 @@
 #include "sond_text_extract.h"
 #include "sond_ocr.h"
 #include "sond_log_and_error.h"
+#include "sond_file_helper.h"
 
 #ifdef SOND_WITH_EMBEDDINGS
 #include <llama.h>
@@ -121,6 +122,29 @@ static const gchar *SQL_CREATE_COVERAGE =
            * ohne Information zu verlieren, die für NONE/CHECK-Anfragen
            * relevant wäre. */
 
+static const gchar *SQL_CREATE_PAGECOUNT =
+    "CREATE TABLE IF NOT EXISTS file_pagecount ("
+    "  filename    TEXT    PRIMARY KEY,"
+    "  total_pages INTEGER NOT NULL"
+    ");"; /* Zuletzt bekannte GESAMTE Seitenzahl einer PDF-Datei -
+           * unabhängig vom Coalescing-Zustand von "coverage"/"pages"
+           * (wird NIE automatisch durch coverage_mark()/_try_collapse()
+           * gelöscht oder verändert, im Unterschied zu diesen beiden).
+           * Einzige Quelle, um nach vollständigem Coalescing (einzelne
+           * "pages"-Zeilen sind dann weg) noch zu wissen, wie viele
+           * Seiten eine Datei hat, ohne sie erneut zu öffnen (SeaDrive-
+           * Hydrierung vermeiden) - wird gebraucht, um beim Löschen
+           * einzelner Seiten aus dem Index (sond_index_ctx_delete_index())
+           * die ÜBRIGEN Seiten korrekt als weiterhin indiziert
+           * wiederherzustellen. Befüllt bei vollständiger Indizierung
+           * (sond_index(), echte Seitenzahl aus sond_text_extract_pdf(),
+           * NICHT die Anzahl gelieferter Segmente - Seiten ohne
+           * extrahierbaren Text liefern kein Segment), aktualisiert bei
+           * Seiten-Einfügen/-Löschen im Viewer (viewer_save.c), gelöscht
+           * nur wenn die Datei komplett aus dem Index entfernt wird
+           * (sond_index_ctx_clear_file()/delete_index() bei ganzer
+           * Datei) - s. ToDo.c (11.09.2026, Nutzerentscheidung). */
+
 /* =======================================================================
  * Schema initialisieren
  * ======================================================================= */
@@ -188,6 +212,14 @@ static gboolean db_init_schema(SondIndexCtx *ctx, GError **error) {
     if (rc != SQLITE_OK) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                     "db_init_schema: CREATE coverage: %s", errmsg);
+        sqlite3_free(errmsg);
+        return FALSE;
+    }
+
+    rc = sqlite3_exec(ctx->db, SQL_CREATE_PAGECOUNT, NULL, NULL, &errmsg);
+    if (rc != SQLITE_OK) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "db_init_schema: CREATE file_pagecount: %s", errmsg);
         sqlite3_free(errmsg);
         return FALSE;
     }
@@ -501,6 +533,96 @@ gboolean sond_index_ctx_clear_file(SondIndexCtx *ctx,
                     sqlite3_errmsg(ctx->db));
         return FALSE;
     }
+
+    /* Datei existiert nicht mehr im Index - die zuletzt bekannte
+     * Seitenzahl (file_pagecount) ist damit ebenfalls hinfällig. */
+    if (!sond_index_ctx_clear_page_count(ctx, filename, error))
+        return FALSE;
+
+    return TRUE;
+}
+
+/* =======================================================================
+ * sond_index_ctx_set_page_count / _get_page_count / _clear_page_count
+ * ======================================================================= */
+
+gboolean sond_index_ctx_set_page_count(SondIndexCtx *ctx, gchar const *filename,
+        gint total_pages, GError **error) {
+    sqlite3_stmt *stmt = NULL;
+
+    if (!ctx || !filename)
+        return TRUE;
+
+    if (sqlite3_prepare_v2(ctx->db,
+            "INSERT INTO file_pagecount(filename, total_pages) VALUES(?, ?)"
+            " ON CONFLICT(filename) DO UPDATE SET total_pages = excluded.total_pages",
+            -1, &stmt, NULL) != SQLITE_OK) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "%s: prepare: %s", __func__, sqlite3_errmsg(ctx->db));
+        return FALSE;
+    }
+    sqlite3_bind_text(stmt, 1, filename, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int (stmt, 2, total_pages);
+    if (sqlite3_step(stmt) != SQLITE_DONE) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "%s: step: %s", __func__, sqlite3_errmsg(ctx->db));
+        sqlite3_finalize(stmt);
+        return FALSE;
+    }
+    sqlite3_finalize(stmt);
+
+    return TRUE;
+}
+
+gint sond_index_ctx_get_page_count(SondIndexCtx *ctx, gchar const *filename) {
+    sqlite3_stmt *stmt   = NULL;
+    gint          result = -1;
+
+    if (!ctx || !filename)
+        return -1;
+
+    if (sqlite3_prepare_v2(ctx->db,
+            "SELECT total_pages FROM file_pagecount WHERE filename = ?",
+            -1, &stmt, NULL) != SQLITE_OK)
+        return -1;
+
+    sqlite3_bind_text(stmt, 1, filename, -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(stmt) == SQLITE_ROW)
+        result = sqlite3_column_int(stmt, 0);
+    sqlite3_finalize(stmt);
+
+    return result;
+}
+
+gboolean sond_index_ctx_clear_page_count(SondIndexCtx *ctx,
+        gchar const *filename, GError **error) {
+    sqlite3_stmt *stmt    = NULL;
+    gchar        *pattern = NULL;
+
+    if (!ctx || !filename)
+        return TRUE;
+
+    pattern = g_strdup_printf("%s/%%", filename);
+
+    if (sqlite3_prepare_v2(ctx->db,
+            "DELETE FROM file_pagecount WHERE filename = ?1 OR filename LIKE ?2",
+            -1, &stmt, NULL) != SQLITE_OK) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "%s: prepare: %s", __func__, sqlite3_errmsg(ctx->db));
+        g_free(pattern);
+        return FALSE;
+    }
+    sqlite3_bind_text(stmt, 1, filename, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, pattern,  -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(stmt) != SQLITE_DONE) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "%s: step: %s", __func__, sqlite3_errmsg(ctx->db));
+        sqlite3_finalize(stmt);
+        g_free(pattern);
+        return FALSE;
+    }
+    sqlite3_finalize(stmt);
+    g_free(pattern);
 
     return TRUE;
 }
@@ -1109,7 +1231,6 @@ gboolean sond_index_ctx_coverage_invalidate(SondIndexCtx *ctx,
         g_free(ancestor);
         return FALSE;
     }
-    LOG_INFO("%s: DIAG path='%s'", __func__, path);
     for (;;) {
         gchar *slash = NULL;
 
@@ -1117,16 +1238,12 @@ gboolean sond_index_ctx_coverage_invalidate(SondIndexCtx *ctx,
         sqlite3_bind_text(stmt, 1, ancestor, -1, SQLITE_TRANSIENT);
         if (sqlite3_step(stmt) == SQLITE_ROW) {
             mode = sqlite3_column_int(stmt, 0);
-            LOG_INFO("%s: DIAG Treffer bei ancestor='%s' (mode=%d)", __func__,
-                    ancestor, mode);
             break;
         }
 
         slash = strrchr(ancestor, '/');
         if (!slash) {
             /* Weder path noch irgendein Vorfahre abgedeckt - nichts zu tun */
-            LOG_INFO("%s: DIAG kein Treffer fuer '%s' oder Vorfahren - no-op",
-                    __func__, path);
             sqlite3_finalize(stmt);
             g_free(ancestor);
             return TRUE;
@@ -1150,8 +1267,6 @@ gboolean sond_index_ctx_coverage_invalidate(SondIndexCtx *ctx,
     sqlite3_step(stmt);
     sqlite3_finalize(stmt);
     stmt = NULL;
-    LOG_INFO("%s: DIAG DELETE coverage WHERE path='%s' ausgefuehrt "
-            "(changes=%d)", __func__, ancestor, sqlite3_changes(ctx->db));
 
     if (!g_strcmp0(ancestor, path)) {
         /* Fall 1: path hatte selbst den Eintrag - fertig, kein Runterbrechen
@@ -1174,38 +1289,39 @@ gboolean sond_index_ctx_coverage_invalidate(SondIndexCtx *ctx,
          * werden. Das Weiter-Absteigen danach ist beim letzten Segment
          * harmlos (current_dir wird nur noch nicht mehr benutzt). */
         for (gint i = 0; segments[i]; i++) {
-            GDir  *dir   = NULL;
+            SondDir *dir   = NULL;
             GError *dir_error = NULL;
             gchar const *entry_name = NULL;
             /* current_dir ist - wie alle coverage-Keys - projektrelativ;
-             * für g_dir_open() wird der echte Dateisystempfad gebraucht
-             * (wie bei sond_index_ctx_coverage_try_collapse()). Ohne diesen
-             * Präfix schlägt g_dir_open() praktisch immer fehl (relativ
-             * zum Prozess-CWD, nicht zur Projektwurzel) und die
-             * Geschwister-Neueintragung unten wird stillschweigend
-             * übersprungen - Bug-Fix 11.09.2026: dadurch verloren beim
-             * Kopieren einer nicht indizierten Datei in einen abgedeckten
-             * Ordner auch die BEREITS indizierten Geschwister ihren
-             * coverage-Eintrag (grüner Badge verschwand fälschlich mit). */
-            gchar *current_dir_abs = root_dir ?
-                    g_strconcat(root_dir, "/", current_dir, NULL) : NULL;
-
-            dir = current_dir_abs ?
-                    g_dir_open(current_dir_abs, 0, &dir_error) : NULL;
-            if (!dir && !dir_error && root_dir)
-                g_set_error(&dir_error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                        "root_dir fehlt");
-            g_free(current_dir_abs);
-            if (!dir) {
-                LOG_INFO("%s: DIAG g_dir_open('%s', root_dir='%s') "
-                        "fehlgeschlagen: %s", __func__, current_dir,
-                        root_dir ? root_dir : "(null)",
-                        dir_error ? dir_error->message : "?");
+             * fürs Öffnen wird der echte Dateisystempfad gebraucht (wie
+             * bei sond_index_ctx_coverage_try_collapse()). Ohne diesen
+             * Präfix schlägt das Öffnen praktisch immer fehl (relativ zum
+             * Prozess-CWD, nicht zur Projektwurzel) und die Geschwister-
+             * Neueintragung unten wird stillschweigend übersprungen -
+             * Bug-Fix 11.09.2026: dadurch verloren beim Kopieren einer
+             * nicht indizierten Datei in einen abgedeckten Ordner auch die
+             * BEREITS indizierten Geschwister ihren coverage-Eintrag
+             * (grüner Badge verschwand fälschlich mit). sond_dir_open()
+             * statt g_dir_open(): Long-Path-sicher (Windows), wie überall
+             * sonst im Code für Dateisystemzugriffe (sond_file_helper.c). */
+            if (!root_dir) {
                 if (error && !*error)
                     g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                            "%s: g_dir_open '%s' (root_dir='%s'): %s",
-                            __func__, current_dir,
-                            root_dir ? root_dir : "(null)",
+                            "%s: root_dir fehlt", __func__);
+                break;
+            }
+
+            {
+                gchar *current_dir_abs = g_strconcat(root_dir, "/",
+                        current_dir, NULL);
+                dir = sond_dir_open(current_dir_abs, &dir_error);
+                g_free(current_dir_abs);
+            }
+            if (!dir) {
+                if (error && !*error)
+                    g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                            "%s: Verzeichnis '%s' (unter '%s') nicht "
+                            "lesbar: %s", __func__, current_dir, root_dir,
                             dir_error ? dir_error->message : "?");
                 g_clear_error(&dir_error);
                 break; /* nicht fatal fuer die Invalidierung selbst -
@@ -1213,7 +1329,7 @@ gboolean sond_index_ctx_coverage_invalidate(SondIndexCtx *ctx,
                         * es fehlen hoechstens Geschwister-Eintraege. */
             }
 
-            while ((entry_name = g_dir_read_name(dir))) {
+            while ((entry_name = sond_dir_read_name(dir))) {
                 gchar *sibling_path = NULL;
 
                 if (!g_strcmp0(entry_name, segments[i]))
@@ -1228,7 +1344,7 @@ gboolean sond_index_ctx_coverage_invalidate(SondIndexCtx *ctx,
                 sond_index_ctx_coverage_mark(ctx, sibling_path, mode, NULL);
                 g_free(sibling_path);
             }
-            g_dir_close(dir);
+            sond_dir_close(dir);
 
             {
                 gchar *next_dir = g_strconcat(current_dir, "/", segments[i], NULL);
@@ -1301,8 +1417,8 @@ gboolean sond_index_ctx_coverage_try_collapse(SondIndexCtx *ctx,
 
     for (;;) {
         gchar       *parent      = NULL; /* projektrelativ, "/"-Konvention */
-        gchar       *parent_abs  = NULL; /* echter Pfad, nur für g_dir_open */
-        GDir        *dir         = NULL;
+        gchar       *parent_abs  = NULL; /* echter Pfad, nur zum Öffnen */
+        SondDir     *dir         = NULL;
         GError      *dir_error   = NULL;
         gchar const *entry_name  = NULL;
         gboolean     all_covered = TRUE;
@@ -1319,7 +1435,12 @@ gboolean sond_index_ctx_coverage_try_collapse(SondIndexCtx *ctx,
         parent = g_strndup(current, slash - current);
         parent_abs = g_strconcat(root_dir, "/", parent, NULL);
 
-        dir = g_dir_open(parent_abs, 0, &dir_error);
+        /* sond_dir_open() statt g_dir_open(): Long-Path-sicher (Windows),
+         * wie überall sonst im Code für Dateisystemzugriffe (s.
+         * sond_file_helper.c) - bei tief verschachtelten (z.B. SeaDrive-
+         * synchronisierten) Projektverzeichnissen kann der reale Pfad
+         * sonst am klassischen MAX_PATH-Limit scheitern. */
+        dir = sond_dir_open(parent_abs, &dir_error);
         g_free(parent_abs);
         if (!dir) {
             /* nicht fatal fuer den bereits erfolgten coverage_mark(path,...)
@@ -1329,7 +1450,7 @@ gboolean sond_index_ctx_coverage_try_collapse(SondIndexCtx *ctx,
             break;
         }
 
-        while ((entry_name = g_dir_read_name(dir))) {
+        while ((entry_name = sond_dir_read_name(dir))) {
             gchar *entry_path = g_strconcat(parent, "/", entry_name, NULL);
             gint   entry_mode = sond_index_ctx_coverage_get(ctx, entry_path);
 
@@ -1341,7 +1462,7 @@ gboolean sond_index_ctx_coverage_try_collapse(SondIndexCtx *ctx,
             if (entry_mode < min_mode)
                 min_mode = entry_mode;
         }
-        g_dir_close(dir);
+        sond_dir_close(dir);
 
         if (!all_covered) {
             g_free(parent);
@@ -1363,6 +1484,202 @@ gboolean sond_index_ctx_coverage_try_collapse(SondIndexCtx *ctx,
 }
 
 /* =======================================================================
+ * sond_index_ctx_delete_index / sond_index_ctx_delete_all
+ * ======================================================================= */
+
+gboolean sond_index_ctx_delete_index(SondIndexCtx *ctx, gchar const *path,
+        gint von_seite, gint bis_seite, gchar const *root_dir,
+        GError **error) {
+    sqlite3_stmt *stmt = NULL;
+
+    if (!ctx || !path) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "%s: ctx/path fehlt", __func__);
+        return FALSE;
+    }
+
+    if (von_seite >= 0) {
+        /* Seitenbereich innerhalb einer Datei (Anbindung). Fortschritt der
+         * verbleibenden Seiten zuerst retten, dann einen eigenen oder
+         * abdeckenden Vorfahren-Eintrag auflösen - exakt das Muster aus
+         * viewer_save.c beim Einfügen neuer Seiten. */
+        GArray *known_pages = sond_index_ctx_get_pages_for_file(ctx, path);
+        GArray *pages_to_keep = g_array_new(FALSE, FALSE, sizeof(gint));
+
+        if (known_pages->len > 0) {
+            /* Normalfall: path ist (noch) nicht zu einem eigenen
+             * coverage-Eintrag kollabiert - einzelne "pages"-Zeilen
+             * geben die exakt bekannten Seiten vor. */
+            for (guint i = 0; i < known_pages->len; i++) {
+                gint page_nr = g_array_index(known_pages, gint, i);
+
+                if (page_nr < von_seite || page_nr > bis_seite)
+                    g_array_append_val(pages_to_keep, page_nr);
+            }
+        } else {
+            /* path WAR komplett zu einem eigenen coverage-Eintrag
+             * kollabiert (keine einzelnen "pages"-Zeilen mehr) - ohne
+             * file_pagecount ginge hier sonst der gesamte übrige
+             * Seiten-Fortschritt der Datei verloren (Fall 1, s.
+             * coverage_invalidate()-Kommentar). Mit bekannter
+             * Gesamtseitenzahl lassen sich stattdessen alle NICHT zu
+             * löschenden Seiten (0..total_pages-1 außerhalb
+             * [von_seite,bis_seite]) korrekt rekonstruieren, ohne die
+             * Datei erneut zu öffnen (SeaDrive-Hydrierung vermeiden,
+             * s. ToDo.c, 11.09.2026, Nutzerentscheidung). */
+            gint total_pages = sond_index_ctx_get_page_count(ctx, path);
+
+            if (total_pages >= 0) {
+                for (gint p = 0; p < total_pages; p++)
+                    if (p < von_seite || p > bis_seite)
+                        g_array_append_val(pages_to_keep, p);
+            }
+            /* sonst (total_pages < 0 - Gesamtseitenzahl nie erfasst,
+             * z.B. Datei vor Einführung von file_pagecount indiziert):
+             * pages_to_keep bleibt leer - bekannte, dokumentierte
+             * Einschränkung (Fall 1). */
+        }
+        g_array_unref(known_pages);
+
+        if (!sond_index_ctx_coverage_expand_to_pages(ctx, path,
+                (gint const*) pages_to_keep->data, pages_to_keep->len,
+                error)) {
+            g_array_unref(pages_to_keep);
+            return FALSE;
+        }
+        g_array_unref(pages_to_keep);
+
+        if (!sond_index_ctx_coverage_invalidate(ctx, path, root_dir, error))
+            return FALSE;
+
+        if (sqlite3_prepare_v2(ctx->db,
+                "DELETE FROM chunks WHERE filename = ?1 AND page_nr "
+                "BETWEEN ?2 AND ?3", -1, &stmt, NULL) != SQLITE_OK) {
+            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "%s: prepare DELETE chunks: %s", __func__,
+                    sqlite3_errmsg(ctx->db));
+            return FALSE;
+        }
+        sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int (stmt, 2, von_seite);
+        sqlite3_bind_int (stmt, 3, bis_seite);
+        sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+        stmt = NULL;
+
+        if (sqlite3_prepare_v2(ctx->db,
+                "DELETE FROM pages WHERE filename = ?1 AND page_nr "
+                "BETWEEN ?2 AND ?3", -1, &stmt, NULL) != SQLITE_OK) {
+            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "%s: prepare DELETE pages: %s", __func__,
+                    sqlite3_errmsg(ctx->db));
+            return FALSE;
+        }
+        sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int (stmt, 2, von_seite);
+        sqlite3_bind_int (stmt, 3, bis_seite);
+        sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+
+        return TRUE;
+    }
+
+    /* Ganze Datei/ganzes Verzeichnis: path selbst sowie alles darunter
+     * (Unterverzeichnisse, eingebettete Teile - "path/%" deckt per
+     * Konvention beides ab, s. Kommentar bei coverage_mark). */
+    {
+        gchar *like_below = g_strdup_printf("%s/%%", path);
+
+        if (sqlite3_prepare_v2(ctx->db,
+                "DELETE FROM chunks WHERE filename = ?1 OR filename LIKE ?2",
+                -1, &stmt, NULL) != SQLITE_OK) {
+            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "%s: prepare DELETE chunks: %s", __func__,
+                    sqlite3_errmsg(ctx->db));
+            g_free(like_below);
+            return FALSE;
+        }
+        sqlite3_bind_text(stmt, 1, path,       -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 2, like_below, -1, SQLITE_TRANSIENT);
+        sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+        stmt = NULL;
+
+        if (sqlite3_prepare_v2(ctx->db,
+                "DELETE FROM pages WHERE filename = ?1 OR filename LIKE ?2",
+                -1, &stmt, NULL) != SQLITE_OK) {
+            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "%s: prepare DELETE pages: %s", __func__,
+                    sqlite3_errmsg(ctx->db));
+            g_free(like_below);
+            return FALSE;
+        }
+        sqlite3_bind_text(stmt, 1, path,       -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 2, like_below, -1, SQLITE_TRANSIENT);
+        sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+        g_free(like_below);
+    }
+
+    if (!sond_index_ctx_coverage_invalidate(ctx, path, root_dir, error))
+        return FALSE;
+
+    if (!sond_index_ctx_coverage_clear(ctx, path, error))
+        return FALSE;
+
+    /* Ganze Datei(en) gelöscht - zuletzt bekannte Seitenzahl(en) sind
+     * damit hinfällig. */
+    if (!sond_index_ctx_clear_page_count(ctx, path, error))
+        return FALSE;
+
+    return TRUE;
+}
+
+gboolean sond_index_ctx_delete_all(SondIndexCtx *ctx, GError **error) {
+    char *errmsg = NULL;
+
+    if (!ctx) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "%s: ctx fehlt", __func__);
+        return FALSE;
+    }
+
+    if (sqlite3_exec(ctx->db, "DELETE FROM chunks;", NULL, NULL, &errmsg)
+            != SQLITE_OK) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "%s: DELETE chunks: %s", __func__, errmsg);
+        sqlite3_free(errmsg);
+        return FALSE;
+    }
+
+    if (sqlite3_exec(ctx->db, "DELETE FROM pages;", NULL, NULL, &errmsg)
+            != SQLITE_OK) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "%s: DELETE pages: %s", __func__, errmsg);
+        sqlite3_free(errmsg);
+        return FALSE;
+    }
+
+    if (sqlite3_exec(ctx->db, "DELETE FROM coverage;", NULL, NULL, &errmsg)
+            != SQLITE_OK) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "%s: DELETE coverage: %s", __func__, errmsg);
+        sqlite3_free(errmsg);
+        return FALSE;
+    }
+
+    if (sqlite3_exec(ctx->db, "DELETE FROM file_pagecount;", NULL, NULL, &errmsg)
+            != SQLITE_OK) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "%s: DELETE file_pagecount: %s", __func__, errmsg);
+        sqlite3_free(errmsg);
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+/* =======================================================================
  * sond_index_ctx_rename_file
  * ======================================================================= */
 
@@ -1378,7 +1695,7 @@ gboolean sond_index_ctx_rename_file(SondIndexCtx *ctx,
      * Das ersetzt den Anfang (prefix_old) durch prefix_new,
      * der Rest (nach dem Präfix) bleibt unverandert.
      */
-    const gchar *tables[] = { "chunks", "pages" };
+    const gchar *tables[] = { "chunks", "pages", "file_pagecount" };
     gchar       *pattern  = g_strdup_printf("%s//%%", prefix_old);
 
     for (guint t = 0; t < G_N_ELEMENTS(tables); t++) {
@@ -2296,10 +2613,16 @@ void sond_index(fz_context* ctx,
 
     /* Segmente extrahieren */
     GPtrArray *segs = NULL;
+    /* Echte Gesamtseitenzahl (nur bei PDF gesetzt, s.
+     * sond_text_extract_pdf()) - NICHT dasselbe wie segs->len (Seiten
+     * ohne extrahierbaren Text liefern kein Segment). Für
+     * sond_index_ctx_set_page_count() weiter unten. */
+    gint n_pages_total = -1;
 
     if (!g_strcmp0(mime_type, "application/pdf"))
         segs = sond_text_extract_pdf(ctx, buf, size,
-        		(SondLogFunc) log_func, log_func_data, seite_von, seite_bis);
+        		(SondLogFunc) log_func, log_func_data, seite_von, seite_bis,
+        		&n_pages_total);
     else if (!g_strcmp0(mime_type, "message/rfc822"))
         segs = sond_text_extract_gmessage(buf, size);
     else if (!g_strcmp0(mime_type, "text/html"))
@@ -2444,10 +2767,10 @@ void sond_index(fz_context* ctx,
 
     /* Coverage-Coalescing: nur wenn die ganze Datei angefordert war
      * (seite_von/seite_bis == -1, d.h. bei PDF wurden wirklich ALLE Seiten
-     * extrahiert, bei anderen Formaten gibt es ohnehin keine
+     * geprüft, bei anderen Formaten gibt es ohnehin keine
      * Seitenbereichs-Beschränkung) UND der Durchlauf nicht mitten drin
-     * abgebrochen wurde. Nur an dieser Stelle ist zuverlässig bekannt, wie
-     * viele Seiten die Datei wirklich hat (segs->len) - eine Prüfung weiter
+     * abgebrochen wurde. Nur an dieser Stelle ist zuverlässig bekannt, dass
+     * die Datei wirklich komplett durchgesehen wurde - eine Prüfung weiter
      * oben (z.B. in sond_process_fileparts(), das nur "nicht abgebrochen"
      * sieht) könnte eine Datei fälschlich als komplett markieren, die
      * wegen eines anderen Fehlers (nicht Abbruch) nur teilweise
@@ -2462,6 +2785,22 @@ void sond_index(fz_context* ctx,
                         filename,
                         coverage_error ? coverage_error->message : "?");
             g_clear_error(&coverage_error);
+        }
+
+        /* file_pagecount: nur bei PDF bekannt (n_pages_total bleibt -1
+         * bei allen anderen Formaten) - coalescing-unabhängige
+         * Gesamtseitenzahl, s. sond_index.h/ToDo.c. */
+        if (n_pages_total >= 0) {
+            GError *pagecount_error = NULL;
+
+            if (!sond_index_ctx_set_page_count(sond_index_ctx, filename,
+                    n_pages_total, &pagecount_error)) {
+                if (log_func)
+                    log_func(log_func_data,
+                            "sond_index: set_page_count '%s': %s", filename,
+                            pagecount_error ? pagecount_error->message : "?");
+                g_clear_error(&pagecount_error);
+            }
         }
     }
 

@@ -46,6 +46,20 @@ gboolean zond_index_erstellen_ht(Projekt *zond, GHashTable *ht_index);
 void zond_index_erstellen_activate_fuer_baum(Projekt *zond, Baum baum);
 
 /**
+ * zond_index_loeschen_activate_fuer_baum:
+ * @zond: Projekt
+ * @baum: welcher der drei Bäume die Auswahl liefert (KEIN_BAUM -> Meldung
+ *        "Keine Punkte ausgewählt")
+ *
+ * Gemeinsame Logik für "Index löschen (Auswahl)" - Analogon zu
+ * zond_index_erstellen_activate_fuer_baum() oberhalb, s. dort für die
+ * Begründung des baum-Parameters. Löscht NUR Index-Daten
+ * (.sond_index.db), nicht die Dateien selbst und nicht Anbindungen
+ * (dbase_zond) - fragt vorher per Dialog nach, da destruktiv.
+ */
+void zond_index_loeschen_activate_fuer_baum(Projekt *zond, Baum baum);
+
+/**
  * headerbar_set_seadrive_sensitive:
  * @zond:      Projekt
  * @sensitive: TRUE, wenn die SeaDrive-Hauptmenüpunkte ("Projekt >
