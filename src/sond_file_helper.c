@@ -163,6 +163,25 @@ sond_mkdir_with_parents(const gchar *path, GError **error)
     return sond_mkdir(path, error);
 }
 
+#ifdef G_OS_WIN32
+/* Sharing-Violations sind beim Auto-Update ein bekanntes, rein zeitliches
+ * Problem: eine gerade erst beendete zond.exe (bzw. eine ihrer DLLs) wird
+ * von Windows/Virenscanner manchmal noch einen kurzen Moment gesperrt
+ * gehalten, obwohl der Prozess laut WaitForSingleObject schon beendet ist.
+ * Deshalb hier ein paar Mal mit kurzer Pause erneut versuchen, statt sofort
+ * aufzugeben (insgesamt ca. 5 Sekunden). */
+#define SOND_WIN32_RETRY_TRIES 25
+#define SOND_WIN32_RETRY_DELAY_MS 200
+
+static gboolean
+win32_is_transient_error(DWORD win_error)
+{
+    return win_error == ERROR_SHARING_VIOLATION
+            || win_error == ERROR_LOCK_VIOLATION
+            || win_error == ERROR_ACCESS_DENIED;
+}
+#endif
+
 gboolean
 sond_remove(const gchar *path, GError **error)
 {
@@ -173,11 +192,21 @@ sond_remove(const gchar *path, GError **error)
     if (!long_path)
         return FALSE;
 
-    BOOL success = DeleteFileW(long_path);
+    BOOL success = FALSE;
+    DWORD win_error = 0;
+    for (int attempt = 0; attempt < SOND_WIN32_RETRY_TRIES; attempt++) {
+        success = DeleteFileW(long_path);
+        if (success)
+            break;
+        win_error = GetLastError();
+        if (!win32_is_transient_error(win_error))
+            break;
+        Sleep(SOND_WIN32_RETRY_DELAY_MS);
+    }
     g_free(long_path);
 
     if (!success) {
-        set_error_from_win32(error, GetLastError());
+        set_error_from_win32(error, win_error);
         return FALSE;
     }
     return TRUE;
@@ -201,11 +230,21 @@ sond_rmdir(const gchar *path, GError **error)
     if (!long_path)
         return FALSE;
 
-    BOOL success = RemoveDirectoryW(long_path);
+    BOOL success = FALSE;
+    DWORD win_error = 0;
+    for (int attempt = 0; attempt < SOND_WIN32_RETRY_TRIES; attempt++) {
+        success = RemoveDirectoryW(long_path);
+        if (success)
+            break;
+        win_error = GetLastError();
+        if (!win32_is_transient_error(win_error))
+            break;
+        Sleep(SOND_WIN32_RETRY_DELAY_MS);
+    }
     g_free(long_path);
 
     if (!success) {
-        set_error_from_win32(error, GetLastError());
+        set_error_from_win32(error, win_error);
         return FALSE;
     }
     return TRUE;
@@ -228,31 +267,53 @@ sond_rmdir_r(const gchar *path, GError **error)
     if (!dir)
         return FALSE;
 
+    /* success wird FALSE, sobald ein Eintrag nicht geloescht werden konnte -
+     * wir brechen dann aber NICHT ab, sondern versuchen trotzdem, alle
+     * uebrigen Eintraege loszuwerden. Sonst reicht eine einzige gerade noch
+     * gesperrte Datei (siehe sond_remove/sond_rmdir oben), um den kompletten
+     * Rest eines ansonsten loeschbaren Verzeichnisses zu retten - genau das
+     * hat beim Auto-Update dazu gefuehrt, dass das alte bin/-Verzeichnis
+     * stehen blieb und die neue Version danach nicht mehr an seine Stelle
+     * verschoben werden konnte. */
     gboolean success = TRUE;
     const gchar *name;
 
     while ((name = sond_dir_read_name(dir)) != NULL) {
         gchar *fullpath = g_build_filename(path, name, NULL);
         GStatBuf st;
+        GError *error_entry = NULL;
+        gboolean ok;
 
-        if (sond_stat(fullpath, &st, error) != 0) {
+        if (sond_stat(fullpath, &st, &error_entry) != 0) {
             success = FALSE;
+            if (error && !*error)
+                *error = error_entry;
+            else
+                g_clear_error(&error_entry);
             g_free(fullpath);
-            break;
+            continue;
         }
 
         if (S_ISDIR(st.st_mode))
-            success = sond_rmdir_r(fullpath, error);
+            ok = sond_rmdir_r(fullpath, &error_entry);
         else
-            success = sond_remove(fullpath, error);
+            ok = sond_remove(fullpath, &error_entry);
+
+        if (!ok) {
+            success = FALSE;
+            if (error && !*error)
+                *error = error_entry;
+            else
+                g_clear_error(&error_entry);
+        }
 
         g_free(fullpath);
-        if (!success)
-            break;
     }
 
     sond_dir_close(dir);
 
+    /* Das Verzeichnis selbst nur loeschen, wenn wirklich alles drin weg ist -
+     * sonst wuerde sond_rmdir() ohnehin mit ERROR_DIR_NOT_EMPTY scheitern. */
     if (success && !sond_rmdir(path, error))
         success = FALSE;
 
@@ -351,12 +412,46 @@ sond_rename(const gchar *oldpath, const gchar *newpath, GError **error)
         return FALSE;
     }
 
-    BOOL success = MoveFileW(long_oldpath, long_newpath);
+    BOOL success = FALSE;
+    DWORD win_error = 0;
+    gboolean cleaned_dest = FALSE;
+    for (int attempt = 0; attempt < SOND_WIN32_RETRY_TRIES; attempt++) {
+        success = MoveFileW(long_oldpath, long_newpath);
+        if (success)
+            break;
+        win_error = GetLastError();
+
+        if ((win_error == ERROR_ALREADY_EXISTS || win_error == ERROR_FILE_EXISTS)
+                && !cleaned_dest) {
+            /* Ziel existiert noch - typischerweise ein Rest einer vorherigen,
+             * nicht ganz vollstaendigen Aufraeumaktion (eine darin enthaltene
+             * Datei war zu dem Zeitpunkt noch gesperrt). MoveFileW
+             * ueberschreibt anders als ein Unix-rename() nie von selbst -
+             * also einmal versuchen, das Ziel wegzuraeumen, und den Move
+             * dann wiederholen. */
+            GError *error_clean = NULL;
+            GStatBuf st;
+
+            cleaned_dest = TRUE; //nur einmal versuchen, nicht endlos loopen
+            if (sond_stat(newpath, &st, &error_clean) == 0) {
+                if (S_ISDIR(st.st_mode))
+                    sond_rmdir_r(newpath, &error_clean);
+                else
+                    sond_remove(newpath, &error_clean);
+            }
+            g_clear_error(&error_clean);
+            continue; //sofort erneut versuchen, ohne zu warten
+        }
+
+        if (!win32_is_transient_error(win_error))
+            break;
+        Sleep(SOND_WIN32_RETRY_DELAY_MS);
+    }
     g_free(long_oldpath);
     g_free(long_newpath);
 
     if (!success) {
-        set_error_from_win32(error, GetLastError());
+        set_error_from_win32(error, win_error);
         return FALSE;
     }
     return TRUE;

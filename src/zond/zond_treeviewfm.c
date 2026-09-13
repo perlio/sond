@@ -144,7 +144,8 @@ static gboolean get_gmessage_index(SondTVFMItem* stvfm_item, gint* index) {
 }
 
 static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
-		SondTVFMItem *stvfm_item, GError **error, gpointer *ctx) {
+		SondTVFMItem *stvfm_item, GError **error, gpointer *ctx,
+		gpointer user_data) {
 	gint rc = 0;
 	g_autofree gchar* path = NULL;
 	gint index_from = 0;
@@ -341,7 +342,8 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
  * grün, weil dieser Pfad bislang gar nicht auf Coverage hörte.) */
 static gint zond_treeviewfm_before_insert(SondTreeviewFM* stvfm,
 		SondTVFMItem* stvfm_item, SondTVFMItem* stvfm_item_parent,
-		gchar const* base_new, gint index_to, GError **error) {
+		gchar const* base_new, gint index_to, GError **error,
+		gpointer user_data) {
 	g_autofree gchar* prefix_new = NULL;
 	GError *idx_err = NULL;
 
@@ -377,7 +379,8 @@ static gint zond_treeviewfm_before_insert(SondTreeviewFM* stvfm,
 
 static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 		SondTVFMItem* stvfm_item, SondTVFMItem* stvfm_item_parent,
-		gchar const* base_new, gint index_to, GError **error, gpointer *ctx) {
+		gchar const* base_new, gint index_to, GError **error, gpointer *ctx,
+		gpointer user_data) {
 	gint rc = 0;
 	g_autofree gchar* prefix_old = NULL;
 	g_autofree gchar* prefix_new = NULL;
@@ -600,7 +603,7 @@ static void write_commit_failure_report(Projekt *zond, gchar const *path_old,
 }
 
 static void zond_treeviewfm_after(SondTreeviewFM* stvfm,
-		gboolean suc, gpointer ctx) {
+		gboolean suc, gpointer ctx, gpointer user_data) {
 	GError* error_int = NULL;
 	gint c = GPOINTER_TO_INT(ctx);
 	gboolean dual_write = c & 1;
@@ -1539,6 +1542,29 @@ gint zond_treeviewfm_set_cursor_on_section(ZondTreeviewFM *ztvfm,
 	return 0;
 }
 
+/* ACHTUNG - Abhängigkeit von GTK3-INTERNA: Die folgenden drei Funktionen
+ * (zond_treeviewfm_walk_tree(), _move_node(), zond_treeviewfm_kill_parent())
+ * casten GtkTreeIter::user_data direkt auf GNode*, hängen Teilbäume per
+ * g_node_unlink()/g_node_insert_after() zwischen zwei Positionen im Baum
+ * um und feuern row_inserted/row_deleted/row_has_child_toggled von Hand,
+ * statt eine öffentliche GtkTreeStore-Funktion aufzurufen. Grund: GTK3
+ * bietet keine öffentliche API, mit der sich ein kompletter Teilbaum
+ * (Knoten + alle Nachfahren) in einem GtkTreeStore an eine andere Stelle
+ * umhängen ließe, ohne ihn komplett neu aufzubauen (rekursives
+ * Entfernen+Neueinfügen jedes einzelnen Nachfahren, inkl. Verlust aller
+ * daran hängenden GtkTreeRowReferences/Iteratoren) - gtk_tree_store_swap()
+ * und _move_before()/_move_after() bewegen laut GTK3-Doku nur einen
+ * einzelnen Knoten unter unverändertem Parent, gerade nicht das hier
+ * gebrauchte "ganzen Teilbaum an neue Stelle" (auch unter neuem Parent).
+ * Das funktioniert nur, weil GtkTreeStore intern tatsächlich mit GNode
+ * arbeitet (s. gtktreestore.c in der GTK3-Quelle) - das ist aber ein
+ * Implementierungsdetail, kein Teil der öffentlichen API/ABI, und könnte
+ * sich mit einer künftigen GTK3-Version (oder gar innerhalb 3.x) ändern,
+ * ohne dass der Compiler etwas davon merkt. Bei einem GTK3-Minor-Update
+ * (oder erst recht bei einem Wechsel auf GTK4, das den Tree-Store-Unterbau
+ * ohnehin grundlegend anders modelliert) muss dieser Abschnitt gezielt
+ * gegen die dann aktuelle gtktreestore.c-Implementierung gegengeprüft
+ * werden. */
 #define G_NODE(node) ((GNode *)node)
 static void zond_treeviewfm_walk_tree(GtkTreeModel *model, gint stamp,
 		GNode *node, gint pos) {
