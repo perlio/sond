@@ -7,6 +7,7 @@
 #include "../sond_process_file.h"
 #include "../sond_ocr.h"
 #include "../sond_log_and_error.h"
+#include "../sond_file_helper.h"
 #include "zond_indexsuche.h"
 
 #include "zond_dbase.h"
@@ -39,6 +40,28 @@ typedef struct {
 	 * erfolgreichen return gesetzt, damit bei einem Fehler-return (kein
 	 * "after" wird dann emittiert) nichts hängen bleibt. */
 	gchar *pending_delete_path;
+
+	/* Übergabe zond_treeviewfm_before_move() -> zond_treeviewfm_after():
+	 * alter/neuer absoluter Pfad der gerade vorgemerkten Verschiebung/
+	 * Umbenennung, für den Fehlerbericht (s. write_commit_failure_report())
+	 * IMMER gesetzt, unabhängig davon, ob es sich um eine physische
+	 * Dateisystem-Aktion handelte. pending_move_is_physical ist nur dann
+	 * TRUE, wenn weder der verschobene Knoten noch sein neuer Elternknoten
+	 * einen sond_file_part haben - exakt die Bedingung, unter der die
+	 * Basisklasse (sond_tvfm_item_rename()/sond_tvfm_item_copy() in
+	 * sond_treeviewfm.c) real sond_rename() bzw.
+	 * sond_copy_r()+sond_rmdir_r() aufruft; nur dann ist ein Revert per
+	 * sond_rename() mit vertauschten Pfaden sinnvoll/zulässig (deckt
+	 * sowohl den reinen Rename- als auch den Move(Kopieren+Löschen)-Fall
+	 * ab, weil das Dateisystem danach gleich aussieht). FALSE z.B. bei
+	 * reiner GMessage-Index-Renumerierung ohne physische Aktion. Wird -
+	 * wie pending_delete_path - erst unmittelbar vor dem garantiert
+	 * erfolgreichen return in before_move() gesetzt, damit bei einem
+	 * Fehler-return (kein "after" wird dann emittiert) nichts hängen
+	 * bleibt. */
+	gchar *pending_move_path_old;
+	gchar *pending_move_path_new;
+	gboolean pending_move_is_physical;
 } ZondTreeviewFMPrivate;
 
 G_DEFINE_TYPE_WITH_PRIVATE(ZondTreeviewFM, zond_treeviewfm, SOND_TYPE_TREEVIEWFM)
@@ -288,6 +311,19 @@ static gint zond_treeviewfm_before_delete(ZondTreeviewFM* ztvfm,
 		priv->pending_delete_path = g_strdup(path);
 	}
 
+	/* Diese Löschung (nicht zond_treeviewfm_before_move()) hat die
+	 * folgende "after"-Emission ausgelöst - ein hier evtl. dual_write=1
+	 * (from_gmessage, s.o.) gesetzter Kontext betrifft eine rein
+	 * datenbankinterne Index-Renumerierung, nie eine physische
+	 * Dateisystem-Aktion. pending_move_path_old/_new/pending_move_is_physical
+	 * daher hier zurücksetzen, damit zond_treeviewfm_after() im Fehlerfall
+	 * nicht versehentlich mit veralteten Pfaden von einer früheren,
+	 * unabhängigen Verschiebung revertiert (s. Kommentar bei
+	 * pending_move_path_old/_new oben). */
+	g_clear_pointer(&priv->pending_move_path_old, g_free);
+	g_clear_pointer(&priv->pending_move_path_new, g_free);
+	priv->pending_move_is_physical = FALSE;
+
 	return 0;
 }
 
@@ -482,7 +518,85 @@ static gint zond_treeviewfm_before_move(SondTreeviewFM* stvfm,
 		}
 	}
 
+	/* Erst hier, unmittelbar vor dem garantiert erfolgreichen return (s.
+	 * Kommentar bei pending_move_path_old/_new/pending_move_is_physical
+	 * oben), für zond_treeviewfm_after() vormerken: alter/neuer absoluter
+	 * Pfad dieser Verschiebung/Umbenennung, samt Kennzeichnung, ob es sich
+	 * dabei um eine physische Dateisystem-Aktion handelt (dann - und nur
+	 * dann - kann im Fehlerfall per sond_rename() revertiert werden). */
+	g_free(ztvfm_priv->pending_move_path_old);
+	g_free(ztvfm_priv->pending_move_path_new);
+	ztvfm_priv->pending_move_path_old = g_strconcat(
+			ztvfm_priv->zond->project_dir, "/", prefix_old, NULL);
+	ztvfm_priv->pending_move_path_new = g_strconcat(
+			ztvfm_priv->zond->project_dir, "/", prefix_new, NULL);
+	ztvfm_priv->pending_move_is_physical =
+			!sond_tvfm_item_get_sond_file_part(stvfm_item) &&
+			!sond_tvfm_item_get_sond_file_part(stvfm_item_parent);
+
 	return 0;
+}
+
+/* Schreibt eine für den Anwender lesbare Klartext-Fehlerdatei
+ * (ZOND_FEHLER_<Zeitstempel>.txt) ins Projektverzeichnis, wenn eine
+ * Verschiebung/Umbenennung in der Datenbank nicht gespeichert werden
+ * konnte und (soweit physisch möglich) auch nicht per sond_rename()
+ * rückgängig gemacht werden konnte - s. zond_treeviewfm_after(). Einziger
+ * dauerhafter Anhaltspunkt für Anwender/Support, weil project_close()
+ * gleich im Anschluss die lokale Arbeitskopie aufräumt. path_old/path_new
+ * können NULL sein (keine physische Aktion betroffen), ebenso msg_revert
+ * (kein Revert versucht). Best-effort: ein Fehler beim Schreiben des
+ * Berichts selbst wird nur geloggt, verhindert aber nicht das Beenden. */
+static void write_commit_failure_report(Projekt *zond, gchar const *path_old,
+		gchar const *path_new, gchar const *msg_commit,
+		gchar const *msg_revert) {
+	g_autoptr(GDateTime) now = NULL;
+	g_autofree gchar *timestamp = NULL;
+	g_autofree gchar *filename = NULL;
+	GError *error_report = NULL;
+	FILE *fp = NULL;
+
+	if (!zond->project_dir)
+		return;
+
+	now = g_date_time_new_now_local();
+	timestamp = g_date_time_format(now, "%Y%m%d_%H%M%S");
+	filename = g_strdup_printf("%s/ZOND_FEHLER_%s.txt", zond->project_dir,
+			timestamp);
+
+	fp = sond_fopen(filename, "w", &error_report);
+	if (!fp) {
+		LOG_WARN("%s: sond_fopen('%s'): %s", __func__, filename,
+				error_report ? error_report->message : "?");
+		g_clear_error(&error_report);
+		return;
+	}
+
+	fprintf(fp, "ZOND - Fehlerbericht\n");
+	fprintf(fp, "Zeitpunkt: %s\n\n", timestamp);
+	fprintf(fp, "Eine Verschiebung/Umbenennung konnte nicht gespeichert "
+			"werden. Das Programm wurde sicherheitshalber beendet, "
+			"nachdem versucht wurde, das Projekt zu speichern und zu "
+			"schließen.\n\n");
+
+	if (path_old && path_new) {
+		fprintf(fp, "Alter Pfad: %s\n", path_old);
+		fprintf(fp, "Neuer Pfad: %s\n\n", path_new);
+	} else
+		fprintf(fp, "(Keine physische Dateisystem-Änderung betroffen.)\n\n");
+
+	fprintf(fp, "Fehler beim Speichern:\n%s\n\n",
+			msg_commit ? msg_commit : "unbekannt");
+
+	if (msg_revert)
+		fprintf(fp, "Fehler beim Rückgängigmachen der Verschiebung:\n%s\n",
+				msg_revert);
+	else if (path_old && path_new)
+		fprintf(fp, "Ein Rückgängigmachen wurde nicht versucht.\n");
+
+	fclose(fp);
+
+	return;
 }
 
 static void zond_treeviewfm_after(SondTreeviewFM* stvfm,
@@ -500,8 +614,69 @@ static void zond_treeviewfm_after(SondTreeviewFM* stvfm,
 		if (dual_write) {
 			rc = dbase_zond_commit(priv->zond->dbase_zond, &error_int);
 			if (rc) {
+				gboolean reverted = FALSE;
+				GError *error_revert = NULL;
+
 				if (priv->zond->wctx && priv->zond->wctx->index_ctx)
 					sqlite3_exec(priv->zond->wctx->index_ctx->db, "ROLLBACK;", NULL, NULL, NULL);
+
+				/* Physische Verschiebung rückgängig machen, wenn möglich
+				 * (s. Kommentar bei pending_move_is_physical) - vertauschte
+				 * Pfade decken sowohl reinen Rename- als auch
+				 * Move(Kopieren+Löschen)-Fall ab, weil das Dateisystem
+				 * danach gleich aussieht. */
+				if (priv->pending_move_is_physical)
+					reverted = sond_rename(priv->pending_move_path_new,
+							priv->pending_move_path_old, &error_revert);
+
+				if (reverted) {
+					display_message(priv->zond->app_window,
+							"Speichern der Verschiebung/Umbenennung ist "
+							"fehlgeschlagen und wurde rückgängig gemacht:\n\n",
+							error_int->message, "\n\nBitte erneut versuchen.",
+							NULL);
+					g_clear_error(&error_int);
+					g_clear_pointer(&priv->pending_move_path_old, g_free);
+					g_clear_pointer(&priv->pending_move_path_new, g_free);
+					priv->pending_move_is_physical = FALSE;
+					g_clear_pointer(&priv->pending_delete_path, g_free);
+
+					return;
+				}
+
+				/* Revert fehlgeschlagen oder keiner möglich (z.B. reine
+				 * GMessage-Index-Renumerierung ohne physische Aktion):
+				 * Fehlerbericht schreiben, Projekt in einer Schleife zu
+				 * schließen versuchen (Chance, ein z.B. nur kurzzeitig
+				 * nicht erreichbares Netzlaufwerk zwischenzeitlich zu
+				 * beheben), dann in jedem Fall beenden. */
+				write_commit_failure_report(priv->zond,
+						priv->pending_move_is_physical ? priv->pending_move_path_old : NULL,
+						priv->pending_move_is_physical ? priv->pending_move_path_new : NULL,
+						error_int->message,
+						error_revert ? error_revert->message : NULL);
+
+				display_message(priv->zond->app_window,
+						"Kritischer Fehler beim Speichern einer "
+						"Verschiebung/Umbenennung. Projekt und Datenbank "
+						"können inkonsistent sein. Details wurden in eine "
+						"Fehlerdatei im Projektordner geschrieben "
+						"(ZOND_FEHLER_*.txt). Das Programm wird jetzt "
+						"beendet.", NULL);
+
+				g_clear_error(&error_int);
+				g_clear_error(&error_revert);
+
+				{
+					gint rc_close;
+
+					do {
+						GError *error_close = NULL;
+						rc_close = project_close(priv->zond, &error_close);
+						g_clear_error(&error_close);
+					} while (rc_close);
+				}
+
 				exit(EXIT_FAILURE);
 			}
 		} else {
@@ -558,6 +733,9 @@ static void zond_treeviewfm_after(SondTreeviewFM* stvfm,
 		project_reset_changed(priv->zond, changed_before);
 
 	g_clear_pointer(&priv->pending_delete_path, g_free);
+	g_clear_pointer(&priv->pending_move_path_old, g_free);
+	g_clear_pointer(&priv->pending_move_path_new, g_free);
+	priv->pending_move_is_physical = FALSE;
 
 	return;
 }
@@ -640,58 +818,6 @@ static void zond_treeviewfm_results_row_activated(GtkTreeView *treeview,
 			treeview, tree_path, col, data);
 
 	return;
-}
-
-gint zond_treeviewfm_insert_section(ZondTreeviewFM *ztvfm, gint node_id,
-		GtkTreeIter *iter_anchor, gboolean child, GtkTreeIter *iter_inserted,
-		GError **error) {
-	gint rc = 0;
-	gchar *file_part = NULL;
-	gchar *section = NULL;
-	Anbindung anbindung = { 0 };
-	gchar *icon_name = NULL;
-	gchar *node_text = NULL;
-	GtkTreeIter iter_new = { 0 };
-	gint first_grandchild = 0;
-
-	ZondTreeviewFMPrivate *ztvfm_priv = zond_treeviewfm_get_instance_private(
-			ztvfm);
-
-	rc = zond_dbase_get_node(ztvfm_priv->zond->dbase_zond->zond_dbase_work,
-			node_id, NULL, NULL, &file_part, &section, &icon_name, &node_text,
-			NULL, error);
-	if (rc)
-		return -1;
-
-	if (!section) {
-		if (error)
-			*error = g_error_new( ZOND_ERROR, 0,
-					"%s\nKnoten enthält keine section", __func__);
-		g_free(file_part);
-
-		return -1;
-	}
-
-	anbindung_parse_file_section(section, &anbindung);
-	g_free(section);
-
-	rc = zond_dbase_get_first_child(ztvfm_priv->zond->dbase_zond->zond_dbase_work,
-			node_id, &first_grandchild, error);
-	if (rc == -1)
-		return -1;
-
-	if (first_grandchild) {
-		GtkTreeIter iter_tmp = { 0 };
-
-		gtk_tree_store_insert(
-				GTK_TREE_STORE(gtk_tree_view_get_model( GTK_TREE_VIEW(ztvfm) )),
-				&iter_tmp, &iter_new, -1);
-	}
-
-	if (iter_inserted)
-		*iter_inserted = iter_new;
-
-	return 0;
 }
 
 static gint zond_treeviewfm_open_stvfm_item(GtkTreeIter* iter, SondTVFMItem* stvfm_item,
@@ -1077,6 +1203,8 @@ static void zond_treeviewfm_finalize(GObject *obj) {
 			ZOND_TREEVIEWFM(obj));
 
 	g_clear_pointer(&priv->pending_delete_path, g_free);
+	g_clear_pointer(&priv->pending_move_path_old, g_free);
+	g_clear_pointer(&priv->pending_move_path_new, g_free);
 
 	G_OBJECT_CLASS(zond_treeviewfm_parent_class)->finalize(obj);
 }

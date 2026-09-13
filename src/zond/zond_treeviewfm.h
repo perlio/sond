@@ -18,9 +18,6 @@ struct _ZondTreeviewFMClass {
 	SondTreeviewFMClass parent_class;
 };
 
-gint zond_treeviewfm_insert_section(ZondTreeviewFM*, gint, GtkTreeIter*,
-		gboolean, GtkTreeIter*, GError**);
-
 ZondTreeviewFM* zond_treeviewfm_new(Projekt* zond);
 
 gint zond_treeviewfm_section_visible(ZondTreeviewFM*, gchar const*,

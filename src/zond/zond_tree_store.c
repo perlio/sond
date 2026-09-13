@@ -544,6 +544,7 @@ void zond_tree_store_set(GtkTreeIter *iter, const gchar *icon_name,
 		const gchar *node_text, const gint node_id) {
 	GNode *node = NULL;
 	GNode *node_orig = NULL;
+	gint node_id_old = 0;
 
 	node = iter->user_data;
 
@@ -558,16 +559,30 @@ void zond_tree_store_set(GtkTreeIter *iter, const gchar *icon_name,
 		row_data->data->node_text = g_strdup(node_text);
 	}
 
-	if (node_id)
+	if (node_id) {
+		//alte node_id merken (s.u.) - VOR dem Überschreiben
+		node_id_old = row_data->data->node_id;
 		row_data->data->node_id = node_id;
+	}
 
 	//urspr�nglichen orig_link ermitteln
 	while ((node_orig = ((RowData*) node->data)->target))
 		node = node_orig;
 
-	//Index node_id -> Origin-GNode mitpflegen (s. zond_tree_store_get_iter_by_node_id)
+	//Index node_id -> Origin-GNode mitpflegen (s. zond_tree_store_get_iter_by_node_id) -
+	//ändert sich die node_id eines bereits indizierten Knotens (aktuell setzt
+	//kein Aufrufer node_id auf einen schon vorher indizierten Knoten neu, s.
+	//Kommentar an ht_node_id; das hier ist also Absicherung gegen künftige
+	//Aufrufer), muss der alte Eintrag zuerst entfernt werden - sonst bliebe
+	//ein veralteter Eintrag node_id_old -> node stehen, der auf einen Knoten
+	//zeigt, der diese node_id gar nicht mehr trägt.
 	if (node_id) {
 		ZondTreeStore *ts = ((RowData*) node->data)->tree_store;
+
+		if (node_id_old && node_id_old != node_id)
+			g_hash_table_remove(ts->priv->ht_node_id,
+					GINT_TO_POINTER(node_id_old));
+
 		g_hash_table_insert(ts->priv->ht_node_id, GINT_TO_POINTER(node_id),
 				node);
 	}
@@ -798,6 +813,18 @@ void zond_tree_store_insert(GtkTreeIter *iter, gboolean child,
 	return;
 }
 
+/* Legt einen neuen Link-Knoten an, dessen target UNVERÄNDERT der übergebene
+ node_target ist - anders als der öffentliche Wrapper
+ zond_tree_store_insert_link() (s. dort) wird node_target hier NICHT auf
+ einen etwaigen Origin aufgelöst. Das ist beabsichtigt: zond_tree_store_load_node()
+ ruft diese Funktion auch direkt (unter Umgehung der Auflösung) mit einem
+ node_target auf, das selbst schon ein Link ist (Kind ist selbst
+ Link-Head, oder Kind zeigt auf Link-Head, oder Dummy-Fall, s. dort) - so
+ wird eine im Quell-Teilbaum bereits bestehende Link-Kette beim Spiegeln
+ strukturgleich nachgebildet, statt sie aufzulösen. Nur der öffentliche
+ Einstiegspunkt zond_tree_store_insert_link() garantiert "kein Link auf
+ Link"; diese interne Hilfsfunktion darf und soll auch mit einem Link als
+ node_target aufgerufen werden. */
 static void zond_tree_store_insert_link_at_pos(GNode *node_target, gint head_nr,
 		GNode *node_parent, gint pos, GtkTreeIter *iter_new,
 		gboolean insert_link) {
@@ -833,11 +860,26 @@ static void zond_tree_store_insert_link_at_pos(GNode *node_target, gint head_nr,
 	return;
 }
 
+/* iter_target darf auch auf einen bereits bestehenden Link zeigen (z.B. wird
+ beim Kopieren eines Links in die Zwischenablage stets der Link selbst
+ übernommen, nicht sein Ziel, s. zond_treeview_paste_clipboard_as_link_foreach()) -
+ iter_target wird hier auf den echten Origin aufgelöst, BEVOR der eigentliche
+ Link angelegt wird, so daß ein neu eingefügter Link nie auf einen anderen
+ Link zeigt ("Link auf Link" kann über diesen - öffentlichen - Einstiegspunkt
+ nicht entstehen). Die interne Hilfsfunktion zond_tree_store_insert_link_at_pos()
+ macht diese Auflösung bewusst NICHT (s. Kommentar dort). */
 void zond_tree_store_insert_link(GtkTreeIter *iter_target, gint head_nr,
 		ZondTreeStore *tree_store, GtkTreeIter *iter_anchor, gboolean child,
 		GtkTreeIter *iter_new) {
 	gint pos = 0;
 	GNode *node_parent = NULL;
+	GNode *node_target = NULL;
+	GNode *node_orig = NULL;
+
+	//auf echten Origin auflösen (s. Funktionskommentar)
+	node_target = iter_target->user_data;
+	while ((node_orig = ((RowData*) node_target->data)->target))
+		node_target = node_orig;
 
 	if (iter_anchor && !child) {
 		pos = g_node_child_position( G_NODE(iter_anchor->user_data)->parent,
@@ -852,7 +894,7 @@ void zond_tree_store_insert_link(GtkTreeIter *iter_target, gint head_nr,
 	else
 		node_parent = tree_store->priv->root; //if ! iter_anchor
 
-	zond_tree_store_insert_link_at_pos(iter_target->user_data, head_nr,
+	zond_tree_store_insert_link_at_pos(node_target, head_nr,
 			node_parent, pos, iter_new, TRUE);
 
 	return;
@@ -959,6 +1001,18 @@ static void copy_node_data(GtkTreeIter *src_iter,
 	data->data->node_text = g_strdup(
 			((RowData*) G_NODE(src_iter->user_data)->data)->data->node_text);
 
+	//Index node_id -> Origin-GNode mitpflegen (s. zond_tree_store_get_iter_by_node_id).
+	//ACHTUNG (zond_tree_store_copy_node() ist aktuell toter Code - wird von
+	//nirgendwo aus dem echten Kopier-Pfad aufgerufen, s. Kommentar dort):
+	//Hier wird dieselbe node_id wie beim Quellknoten übernommen. Liegt die
+	//Kopie im selben tree_store wie das Original, würde dieser Eintrag den
+	//des Originals kommentarlos überschreiben (zwei GNodes, ein Hashtable-Key,
+	//"last insert wins") - ein künftiger Reaktivierer dieser Funktion muss das
+	//berücksichtigen (z.B. vorher prüfen oder eine neue node_id vergeben).
+	if (data->data->node_id)
+		g_hash_table_insert(tree_store_dest->priv->ht_node_id,
+				GINT_TO_POINTER(data->data->node_id), dest_iter->user_data);
+
 	path = zond_tree_store_get_path(GTK_TREE_MODEL(tree_store_dest), dest_iter);
 	gtk_tree_model_row_changed(GTK_TREE_MODEL(tree_store_dest), path,
 			dest_iter);
@@ -967,6 +1021,12 @@ static void copy_node_data(GtkTreeIter *src_iter,
 	return;
 }
 
+/* Aktuell toter Code: wird außer von sich selbst (rekursiv, für Kinder) von
+ nirgendwo im Projekt aufgerufen. Der tatsächliche "Kopieren"-Klemmbrett-Pfad
+ (zond_treeview_clipboard_kopieren_foreach() / zond_treeview_copy_node_to_baum_auswertung())
+ läuft über zond_tree_store_insert() + zond_tree_store_set() + eigenes
+ DB-Insert, nicht über diese Funktion. Vor einer Reaktivierung: s. Kommentar
+ an copy_node_data() zur node_id/ht_node_id-Behandlung. */
 void zond_tree_store_copy_node(GtkTreeIter *iter_src,
 		ZondTreeStore *tree_store_dest, GtkTreeIter *iter_dest, gboolean kind,
 		GtkTreeIter *iter_new) {
@@ -1037,6 +1097,42 @@ static void zond_tree_store_walk_tree(GNode *node, gint pos) {
 	return;
 }
 
+/* Rekursiv über den gesamten verschobenen Teilbaum (node und alle
+ Nachkommen, auch Links): hängt sowohl den pro Knoten gespeicherten
+ tree_store-Zeiger (RowData->tree_store - u.a. von
+ zond_tree_store_remove_node()/zond_tree_store_set() benutzt, um OHNE
+ ein vom Aufrufer übergebenes GtkTreeModel das richtige Modell für
+ row_deleted/row_changed zu ermitteln) als auch - nur für Origin-Knoten
+ mit node_id, s. Kommentar an ht_node_id - den Eintrag im
+ ht_node_id-Index (zond_tree_store_get_iter_by_node_id()) von
+ store_old nach store_anchor um. Ohne das rekursive Umhängen würden
+ Nachkommen eines beim Verschieben in einen ANDEREN ZondTreeStore
+ mitgenommenen Knotens weiterhin (fälschlich) auf den alten Store
+ verweisen - sowohl direkt über RowData->tree_store als auch über den
+ Index. Bei einem Verschieben innerhalb desselben tree_store ist das
+ Umhängen unschädlich (gleicher Store, gleicher Knoten). */
+static void zond_tree_store_reassign_tree_store(GNode *node,
+		ZondTreeStore *store_old, ZondTreeStore *store_anchor) {
+	GNode *child = NULL;
+	RowData *row_data = node->data;
+
+	row_data->tree_store = store_anchor;
+
+	if (!row_data->target && row_data->data && row_data->data->node_id) {
+		gint node_id = row_data->data->node_id;
+
+		g_hash_table_remove(store_old->priv->ht_node_id,
+				GINT_TO_POINTER(node_id));
+		g_hash_table_insert(store_anchor->priv->ht_node_id,
+				GINT_TO_POINTER(node_id), node);
+	}
+
+	for (child = node->children; child; child = child->next)
+		zond_tree_store_reassign_tree_store(child, store_old, store_anchor);
+
+	return;
+}
+
 void zond_tree_store_move_node(GtkTreeIter *iter_src,
 		ZondTreeStore *tree_store_anchor, GtkTreeIter *iter_anchor,
 		gboolean child, GtkTreeIter *iter_new) {
@@ -1072,30 +1168,24 @@ void zond_tree_store_move_node(GtkTreeIter *iter_src,
 	}
 	gtk_tree_path_free(path);
 
-	((RowData*) node_src->data)->tree_store = tree_store_anchor;
-
-	/* Index node_id -> Origin-GNode ggf. in neuen tree_store umhängen (s.
-	 zond_tree_store_get_iter_by_node_id). Nur relevant für Origin-Knoten
-	 (target == NULL) - Links sind dort nie eigenständig eingetragen, ihr
-	 node_id gehört dem Origin. Bei Verschieben innerhalb desselben
-	 tree_store ist remove+insert unschädlich (gleicher key, gleicher
-	 Knoten). */
-	if (!((RowData*) node_src->data)->target
-			&& ((RowData*) node_src->data)->data
-			&& ((RowData*) node_src->data)->data->node_id) {
-		gint node_id = ((RowData*) node_src->data)->data->node_id;
-
-		g_hash_table_remove(ZOND_TREE_STORE(model_src)->priv->ht_node_id,
-				GINT_TO_POINTER(node_id));
-		g_hash_table_insert(tree_store_anchor->priv->ht_node_id,
-				GINT_TO_POINTER(node_id), node_src);
-	}
+	/* tree_store-Zeiger und ht_node_id-Index für node_src UND alle seine
+	 Nachkommen umhängen (s. Kommentar an zond_tree_store_reassign_tree_store) -
+	 node_src selbst kann Kinder mit eigener node_id haben (z.B. verschobener
+	 PDF-Abschnitt mit Unterknoten), die sonst fälschlich beim alten Store
+	 verzeichnet blieben. */
+	zond_tree_store_reassign_tree_store(node_src, ZOND_TREE_STORE(model_src),
+			tree_store_anchor);
 
 	//jetzt Knoten, die auf ausgel�sten Knoten zeigen, l�schen
 	list = ((RowData*) node_src->data)->links;
 	while (list) {
 		GNode *link = NULL;
 		GtkTreeIter iter_link = { 0 };
+		/* Nachfolger VOR einem eventuellen Entfernen merken: zond_tree_store_remove()
+		 loest ueber node_free() ein g_list_remove() genau auf dieser Liste
+		 (((RowData*) node_src->data)->links) aus, das die aktuelle Zelle "list"
+		 freigibt. list->next danach zu lesen waere ein Use-after-free. */
+		GList *list_next = list->next;
 
 		link = list->data;
 
@@ -1106,7 +1196,7 @@ void zond_tree_store_move_node(GtkTreeIter *iter_src,
 
 			zond_tree_store_remove(&iter_link);
 		}
-		list = list->next;
+		list = list_next;
 	}
 
 	//jetzt Knoten wieder einf�gen

@@ -137,7 +137,14 @@ static void zond_pdf_document_finalize(GObject *self) {
 		g_free(path);
 	}
 
-	zond_pdf_document_close_context(priv->ctx); //drop_context reicht nicht aus!
+	//priv->ctx kann NULL sein, wenn zond_pdf_document_open() schon beim
+	//Erzeugen des fz_context gescheitert ist (zond_pdf_document_init_context()
+	//liefert dann NULL, z.B. bei "incompatible header/library version" -
+	//s. dortigen Fehlerzweig) und das frisch erzeugte, noch nicht vollständig
+	//initialisierte Objekt daraufhin per g_object_unref() gleich wieder
+	//abgeräumt wird.
+	if (priv->ctx)
+		zond_pdf_document_close_context(priv->ctx); //drop_context reicht nicht aus!
 
 	g_mutex_clear(&priv->mutex_doc);
 

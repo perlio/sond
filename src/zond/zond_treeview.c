@@ -1621,7 +1621,6 @@ static gint zond_treeview_paste_clipboard_as_link_foreach(
 		GError **error) {
 	gint node_id_new = 0;
 	gint node_id = 0;
-	GtkTreeIter iter_target = { 0 };
 	GtkTreeIter iter_new = { 0 };
 
 	SSelection *s_selection = (SSelection*) data;
@@ -1639,9 +1638,10 @@ static gint zond_treeview_paste_clipboard_as_link_foreach(
 	if (node_id_new < 0)
 		return -1;
 
-	//falls link im clipboard: iter_target ermitteln, damit nicht link auf link zeigt
-	zond_tree_store_get_iter_target(iter, &iter_target);
-	zond_tree_store_insert_link(&iter_target, node_id_new,
+	//zond_tree_store_insert_link() löst iter selbst intern auf den echten
+	//Origin auf, falls iter (z.B. weil ein Link kopiert wurde) bereits auf
+	//einen Link zeigt - verhindert Link auf Link, s. Kommentar dort.
+	zond_tree_store_insert_link(iter, node_id_new,
 			zond_tree_store_get_tree_store(s_selection->iter_anchor),
 			(s_selection->anchor_id) ? s_selection->iter_anchor : NULL,
 			s_selection->child, &iter_new);
@@ -1763,6 +1763,36 @@ static gint zond_treeview_paste_clipboard(Projekt *zond, gboolean child,
 	return 0;
 }
 
+/* Prüft, ob auf iter (ein Origin-Knoten in BAUM_INHALT) noch ein "echter",
+ vom Nutzer angelegter Link zeigt (head_nr > 0). Reine Mirror-Links
+ (head_nr == 0), die automatisch für Kinder eines bereits gelinkten
+ Elternknotens entstehen, zählen NICHT - sie bilden nur einen bereits
+ bestehenden Link nach und stellen keine eigenständige, vom Nutzer
+ sichtbare Verknüpfung auf GENAU diesen Knoten dar.
+ Deckt NICHT den Fall ab, dass iter (nur) kopiert wurde (BAUM_AUSWERTUNG_COPY) -
+ eine Copy wird beim Anlegen als komplett eigenständiger Knoten mit eigenen,
+ per g_strdup() kopierten Daten angelegt (kein RowData->target, keine
+ Registrierung in RowData->links); die Copy-Beziehung existiert also nur in
+ der Spalte "link" der DB (type = BAUM_AUSWERTUNG_COPY) und ist im Baum/
+ RowData nicht sichtbar - dafür bleibt die schon vorhandene DB-Prüfung
+ (zond_dbase_get_baum_auswertung_copy(), s.u.) weiterhin erforderlich. */
+static gboolean zond_treeview_node_still_linked(GtkTreeIter *iter) {
+	GList *list = NULL;
+
+	list = zond_tree_store_get_linked_nodes(iter);
+
+	for (; list; list = list->next) {
+		GtkTreeIter iter_link = { 0 };
+
+		iter_link.user_data = list->data; //stamp wird von get_link_head_nr nicht geprüft
+
+		if (zond_tree_store_get_link_head_nr(&iter_link) > 0)
+			return TRUE;
+	}
+
+	return FALSE;
+}
+
 static gint zond_treeview_selection_loeschen_foreach(SondTreeview *tree_view,
 		GtkTreeIter *iter, gpointer data, GError **error) {
 	gint node_id = 0;
@@ -1789,6 +1819,16 @@ static gint zond_treeview_selection_loeschen_foreach(SondTreeview *tree_view,
 	else
 		gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(tree_view)),
 				iter, 2, &node_id, -1);
+
+	//Verhindern, dass ein Knoten gelöscht wird, auf den noch ein echter Link
+	//zeigt - gilt für JEDEN Baum, nicht nur BAUM_INHALT: Links zeigen zwar
+	//immer von BAUM_AUSWERTUNG aus, aber ihr Ziel kann sowohl in BAUM_INHALT
+	//als auch - bei Links innerhalb desselben Baums - in BAUM_AUSWERTUNG selbst
+	//liegen. Deshalb hier, VOR der Baum-Weiche, nicht erst im BAUM_INHALT-Zweig.
+	//rc == 2 wird bis zond_treeview_action_loeschen() durchgereicht, dort
+	//erfolgt die Meldung an den Nutzer.
+	if (zond_treeview_node_still_linked(iter))
+		return 2;
 
 	if (tree_view == zond->treeview[BAUM_INHALT]) {
 		gint rc = 0;
@@ -1819,8 +1859,10 @@ static gint zond_treeview_selection_loeschen_foreach(SondTreeview *tree_view,
 
 				rc = zond_treeview_selection_loeschen_foreach(
 						tree_view, &iter_child, data, error);
-				if (rc)
+				if (rc == -1)
 					return -1;
+				else if (rc)
+					return rc; //rc == 2: Kind noch gelinkt, s.o. - durchreichen
 			}
 		}
 		else {
@@ -1965,6 +2007,13 @@ static gint zond_treeview_selection_entfernen_anbindung_foreach(
 
 	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(stv)), iter, 2,
 			&node_id, -1);
+
+	//Verhindern, dass ein Knoten entfernt wird, auf den noch ein echter Link
+	//zeigt - s. Kommentar an zond_treeview_node_still_linked(). rc == 2 wird
+	//bis zond_treeview_action_anb_entf() durchgereicht, dort erfolgt die
+	//Meldung an den Nutzer.
+	if (zond_treeview_node_still_linked(iter))
+		return 2;
 
 	rc = zond_dbase_get_node(zond->dbase_zond->zond_dbase_work, node_id, &type,
 			NULL, &file_part, &section, NULL, NULL, NULL, error);
@@ -2702,12 +2751,14 @@ static void zond_treeview_action_loeschen(GSimpleAction *a, GVariant *p, gpointe
 	Projekt *zond = (Projekt*) d; gint rc = 0; GError *error = NULL;
 	rc = sond_treeview_selection_foreach(zond->treeview[zond->baum_active], zond_treeview_selection_loeschen_foreach, zond, &error);
 	if (rc == -1) { display_message(zond->app_window, "L\u00f6schen fehlgeschlagen\n\n", error->message, NULL); g_error_free(error); }
+	else if (rc == 2) display_message(zond->app_window, "L\u00f6schen nicht m\u00f6glich - es besteht noch mindestens ein Link auf diesen Punkt", NULL);
 }
 static void zond_treeview_action_anb_entf(GSimpleAction *a, GVariant *p, gpointer d) {
 	Projekt *zond = (Projekt*) d; gint rc = 0; GError *error = NULL;
 	if (zond->baum_active != BAUM_INHALT) return;
 	rc = sond_treeview_selection_foreach(zond->treeview[BAUM_INHALT], zond_treeview_selection_entfernen_anbindung_foreach, zond, &error);
-	if (rc) { display_message(zond->app_window, "L\u00f6schen von Anbindungen fehlgeschlagen\n\n", error->message, NULL); g_error_free(error); }
+	if (rc == -1) { display_message(zond->app_window, "L\u00f6schen von Anbindungen fehlgeschlagen\n\n", error->message, NULL); g_error_free(error); }
+	else if (rc == 2) display_message(zond->app_window, "Anbindung entfernen nicht m\u00f6glich - es besteht noch mindestens ein Link auf diesen Punkt", NULL);
 }
 static void zond_treeview_action_jump(GSimpleAction *a, GVariant *p, gpointer d) {
 	Projekt *zond = (Projekt*) d;

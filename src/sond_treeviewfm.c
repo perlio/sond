@@ -1341,8 +1341,20 @@ static gint move_item(SondTVFMItem* stvfm_item_src,
 	//Jetzt Quelle löschen
 	rc = delete_item(stvfm_item_src, error);
 	if (rc) {
-		LOG_WARN("Item konnte nicht gelöscht werden: %s", (*error)->message);
+		/* Nicht mehr nur loggen und Erfolg vortäuschen: Kopie liegt zwar
+		 * schon am Ziel, aber die Quelle konnte nicht entfernt werden -
+		 * das muß dem Nutzer gemeldet werden (sonst Datei/Verzeichnis
+		 * unbemerkt doppelt vorhanden). Ursprüngliche Fehlermeldung von
+		 * delete_item() in die neue GError-Meldung übernehmen. */
+		g_autofree gchar *msg_delete = (error && *error) ?
+				g_strdup((*error)->message) : NULL;
 		g_clear_error(error);
+
+		g_set_error(error, SOND_ERROR, 0,
+				"Kopiert, aber am Ursprungsort konnte nicht gelöscht werden"
+				"%s%s", msg_delete ? ":\n" : "", msg_delete ? msg_delete : "");
+
+		return -1;
 	}
 
 	return 0;
@@ -2223,7 +2235,12 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 					sfp_new,
 					(stvfm_item_priv->path_or_section) ?
 							path_new : NULL);
-	g_object_unref(sfp_new);
+	/* sfp_new bleibt NULL, wenn ein "echtes" Dateisystem-Verzeichnis
+	 * (kein sond_file_part) kopiert/verschoben wird - g_object_unref(NULL)
+	 * würde dann nur eine GLib-CRITICAL auslösen (bzw. bei
+	 * G_DEBUG=fatal-warnings abstürzen), s. Code-Review 09/2026. */
+	if (sfp_new)
+		g_object_unref(sfp_new);
 
 	stvfm_item_new_priv = sond_tvfm_item_get_instance_private(stvfm_item_new);
 
@@ -3058,17 +3075,23 @@ static void sond_treeviewfm_row_activated(GtkTreeView *tree_view,
 
 static void sond_treeviewfm_row_collapsed(GtkTreeView *tree_view,
 		GtkTreeIter *iter, GtkTreePath *path, gpointer data) {
-	GtkTreeIter iter_child;
-	gboolean not_empty = TRUE;
+	GtkTreeIter iter_child = { 0 };
+	gboolean has_child = FALSE;
 
-	gtk_tree_model_iter_children(gtk_tree_view_get_model(tree_view),
+	has_child = gtk_tree_model_iter_children(gtk_tree_view_get_model(tree_view),
 			&iter_child, iter);
 
-	do {
-		not_empty = gtk_tree_store_remove(
+	/* gtk_tree_model_iter_children() kann FALSE liefern, wenn das
+	 * Verzeichnis inzwischen (während es expandiert war) leer geworden
+	 * ist - z.B. weil sein letztes Kind gelöscht oder verschoben wurde,
+	 * ohne dass dabei re-kollabiert wurde. iter_child wäre dann
+	 * uninitialisiert; die Schleife darf in diesem Fall gar nicht erst
+	 * laufen (Bug-Fix 09/2026, Absturz-Untersuchung: vorher lief hier
+	 * unbedingt ein erster do-while-Durchlauf mit ungültigem Iterator). */
+	while (has_child)
+		has_child = gtk_tree_store_remove(
 				GTK_TREE_STORE(gtk_tree_view_get_model(tree_view)),
 				&iter_child);
-	} while (not_empty);
 
 	//dummy einfügen, dir ist ja nicht leer
 	gtk_tree_store_insert(GTK_TREE_STORE(gtk_tree_view_get_model(tree_view)),

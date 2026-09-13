@@ -62,6 +62,10 @@ GDK_AVAILABLE_IN_ALL
 void zond_tree_store_insert(GtkTreeIter *iter, gboolean child,
 		GtkTreeIter *iter_new);
 
+/* iter_target darf auch auf einen bereits bestehenden Link zeigen - die
+ Funktion löst intern auf den echten Origin auf, so daß ein neu eingefügter
+ Link nie auf einen anderen Link zeigt (kein "Link auf Link"). Siehe
+ Kommentar an der Implementierung in zond_tree_store.c. */
 GDK_AVAILABLE_IN_ALL
 void zond_tree_store_insert_link(GtkTreeIter*, gint, ZondTreeStore*,
 		GtkTreeIter*, gboolean, GtkTreeIter*);
