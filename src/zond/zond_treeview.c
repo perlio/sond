@@ -3333,10 +3333,17 @@ static gint zond_treeview_get_selected_fileparts_foreach(ZondTreeview *ztv,
 	 * Knoten im Auswertungsbaum ohne eigene Dateianbindung) tragen selbst
 	 * nichts zur Indizierung bei - übernehmen unten einfach nichts in
 	 * ht_fileparts. Ein NULL-file_part direkt an
-	 * sond_file_part_from_filepart() würde crashen (g_strsplit() verlangt
-	 * einen Nicht-NULL-String) - daher abgefangen. */
+	 * sond_file_part_from_filepart_leaf() würde crashen (g_strsplit()
+	 * verlangt einen Nicht-NULL-String) - daher abgefangen. */
 	if (file_part) {
-		sfp = sond_file_part_from_filepart(file_part, error);
+		/* _leaf-Variante statt sond_file_part_from_filepart(): rein
+		 * endungsbasiert, kein Dateizugriff (SeaDrive-Hydrierung) - s.
+		 * Doc-Kommentar an sond_file_part_from_filepart_leaf()
+		 * (sond_fileparts.c) und ToDo.c (12.-15.09.2026). Diese Funktion
+		 * sammelt ausschließlich für Index erstellen/durchsuchen/löschen
+		 * (Auswahl); andere Aufrufer der Anbindung (z.B. Datei öffnen)
+		 * laufen über eigene Wege mit echter Inhaltserkennung. */
+		sfp = sond_file_part_from_filepart_leaf(file_part, error);
 		if (!sfp) {
 			g_free(file_part);
 			g_free(section);

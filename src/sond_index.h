@@ -192,6 +192,76 @@ gboolean sond_index_ctx_clear_page_count(SondIndexCtx *ctx,
                                           GError      **error);
 
 /**
+ * sond_index_ctx_set_entry_count:
+ * @ctx:           SondIndexCtx
+ * @filename:      Pfad des Containers (ZIP-Archiv, E-Mail, PDF mit
+ *                 Einbettungen)
+ * @total_entries: aktuelle Anzahl der internen Einträge
+ * @error:         GError
+ *
+ * Setzt/überschreibt die in container_entrycount gemerkte Einträge-
+ * Anzahl (INSERT OR REPLACE) - dieselbe Rolle wie
+ * sond_index_ctx_set_page_count(), nur für Container statt PDF-Seiten.
+ * Aufzurufen, sobald zond die interne Einträgeliste eines Containers
+ * ohnehin ermittelt (Indizieren). Keine mtime/Größe nötig - s.
+ * Kommentar an container_entrycount (sond_index.c).
+ *
+ * Returns: FALSE bei Datenbankfehler (kein Fehler, wenn ctx/filename
+ *          fehlen - dann No-Op).
+ */
+gboolean sond_index_ctx_set_entry_count(SondIndexCtx *ctx,
+                                         gchar const  *filename,
+                                         gint          total_entries,
+                                         GError      **error);
+
+/**
+ * sond_index_ctx_get_entry_count:
+ * @ctx:      SondIndexCtx
+ * @filename: Pfad des Containers
+ *
+ * Returns: zuletzt bekannte Anzahl interner Einträge, oder -1 wenn
+ *          unbekannt (nie erfasst - z.B. Container noch nie indiziert).
+ */
+gint sond_index_ctx_get_entry_count(SondIndexCtx *ctx, gchar const *filename);
+
+/**
+ * sond_index_ctx_clear_entry_count:
+ * @ctx:      SondIndexCtx
+ * @filename: Datei- oder Verzeichnispfad
+ * @error:    GError
+ *
+ * Entfernt den Eintrag für filename sowie alles darunter (LIKE
+ * 'filename/%', deckt sowohl Unterverzeichnisse als auch eingebettete
+ * ("//") Teile ab, s. sond_index_ctx_clear_page_count()). Aufzurufen,
+ * wenn eine Datei/ein Verzeichnis komplett aus dem Index entfernt wird.
+ *
+ * Returns: FALSE bei Datenbankfehler.
+ */
+gboolean sond_index_ctx_clear_entry_count(SondIndexCtx *ctx,
+                                           gchar const  *filename,
+                                           GError      **error);
+
+/**
+ * sond_index_ctx_count_nested_indexed:
+ * @ctx:  SondIndexCtx
+ * @path: Pfad des Containers (ZIP/E-Mail/PDF mit Einbettungen)
+ *
+ * Zählt, wie viele verschiedene DIREKTE Kinder von path (eine Ebene,
+ * Konvention "path//kind") irgendeinen Hinweis auf Indizierung haben -
+ * noch einzelne Zeilen in "pages" (teilweise/gerade indiziert) oder
+ * schon zu einem eigenen coverage-Eintrag kollabiert (vollständig
+ * indiziert). Ein Treffer, der noch tiefer verschachtelt ist
+ * ("path//kind//enkel..."), zählt dabei als Beleg für "kind", nicht als
+ * eigener Eintrag - was sich in einem indizierten Kind selbst verbirgt,
+ * ist für die Coverage-Aussage über path unerheblich. Zusammen mit
+ * sond_index_ctx_get_entry_count() ergibt das "X von Y Einträgen fehlen"
+ * für Container, ohne sie zu öffnen - s. ToDo.c (12.-14.09.2026).
+ *
+ * Returns: Anzahl, oder -1 bei Datenbankfehler bzw. fehlendem ctx/path.
+ */
+gint sond_index_ctx_count_nested_indexed(SondIndexCtx *ctx, gchar const *path);
+
+/**
  * sond_index_ctx_clear_page:
  * @ctx:      SondIndexCtx
  * @filename: Dateiname

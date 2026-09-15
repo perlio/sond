@@ -37,6 +37,7 @@
 #include "sond_pdf_helper.h"
 #include "sond_gmessage_helper.h"
 #include "sond_file_helper.h"
+#include "sond_mime.h"
 
 //Grundlegendes Object, welches file_parts beschreibt
 /*
@@ -639,6 +640,60 @@ SondFilePart* sond_file_part_from_filepart(gchar const* filepart, GError** error
 
 			return NULL;
 		}
+
+		if (sfp)
+			g_object_unref(sfp);
+		sfp = sfp_child;
+		zaehler++;
+	}
+	g_strfreev(v_string);
+
+	return (sfp) ? g_object_ref(sfp) : NULL;
+}
+
+/* Wie sond_file_part_from_filepart() - baut dieselbe verschachtelte
+ * Eltern-Kind-Kette (ein SondFilePart pro "//"-Segment, gebraucht z.B. für
+ * eine Anbindung INNERHALB eines Containers wie "archiv.zip//eintrag.pdf",
+ * damit sond_file_part_get_bytes() den Eintrag später über die
+ * Eltern-Kette korrekt extrahieren kann) - aber ganz ohne Dateizugriff:
+ * pro Segment sond_file_part_create_leaf() mit rein endungsbasiertem
+ * MIME-Typ (mime_from_extension()) statt sond_file_part_create(), das
+ * für jedes Segment tatsächlich die ersten 2048 Bytes liest (SeaDrive-
+ * Hydrierung). Nur für den Indizierungs-Sammelpfad gedacht
+ * (zond_treeview_get_selected_fileparts_foreach(), zond_treeview.c) -
+ * an allen anderen Aufrufstellen von sond_file_part_from_filepart() wird
+ * die Datei ohnehin gleich darauf geöffnet (Viewer/PDF-Stapelfunktionen),
+ * dort bleibt die echte Inhaltserkennung sinnvoll und unangetastet. s.
+ * ToDo.c (12.-15.09.2026). */
+SondFilePart* sond_file_part_from_filepart_leaf(gchar const* filepart,
+		GError** error) {
+	g_autoptr(SondFilePart) sfp = NULL;
+	gchar** v_string = NULL;
+	gint zaehler = 0;
+
+	if (!filepart) {
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+				"%s\nfilepart ist NULL", __func__);
+		return NULL;
+	}
+
+	v_string = g_strsplit(filepart, "//", -1);
+
+	while (v_string[zaehler]) {
+		/* Wie sond_file_part_create(): erst nachsehen, ob dieser Pfad
+		 * unter diesem Elternteil (bzw. global, wenn sfp NULL ist)
+		 * schon offen ist, statt blind ein neues Objekt anzulegen -
+		 * sonst würden zwei Anbindungen auf dieselbe Datei zwei
+		 * verschiedene SondFilePart-Objekte erzeugen und die
+		 * Identitäts-basierte Vereinigung ihrer Seitenbereiche
+		 * (zond_treeview_get_selected_fileparts_foreach(),
+		 * zond_treeview.c) sowie das Interning im Rest des Programms
+		 * unterlaufen. */
+		SondFilePart* sfp_child = sond_file_part_is_open(sfp, v_string[zaehler]);
+
+		if (!sfp_child)
+			sfp_child = sond_file_part_create_leaf(v_string[zaehler], sfp,
+					mime_from_extension(v_string[zaehler]));
 
 		if (sfp)
 			g_object_unref(sfp);

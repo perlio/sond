@@ -485,12 +485,19 @@ static gchar* build_gmessage_text(GMimeMessage *message) {
     const gchar *subject = g_mime_message_get_subject(message);
     g_string_append_printf(text, "Betreff: %s\n", subject ? subject : "");
 
+    /* g_mime_message_get_date() liefert (transfer none) - eine von der
+     * Message gehaltene, geliehene Referenz. Ein g_date_time_unref()
+     * hier wäre falsch: das würde den Referenzzähler des message-
+     * internen GDateTime vorzeitig auf 0 bringen und das Objekt
+     * freigeben, während die Message noch darauf zeigt - Absturz/
+     * GLib-CRITICAL ("g_date_time_unref: assertion 'datetime->ref_count
+     * > 0' failed") erst später bei deren eigenem Aufräumen. Gefunden
+     * per Log-Fund des Nutzers, 15.09.2026. */
     GDateTime *date = g_mime_message_get_date(message);
     if (date) {
         gchar *date_str = g_date_time_format(date, "%d.%m.%Y %H:%M:%S %Z");
         g_string_append_printf(text, "Datum:   %s\n", date_str ? date_str : "");
         g_free(date_str);
-        g_date_time_unref(date);
     }
 
     g_string_append(text, "\n"

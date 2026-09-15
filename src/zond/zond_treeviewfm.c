@@ -1,5 +1,8 @@
 #include "zond_treeviewfm.h"
 
+#include <glib/gstdio.h>
+#include <sys/stat.h>
+
 #include "../misc.h"
 #include "../sond_fileparts.h"
 #include "../sond_renderer.h"
@@ -8,6 +11,7 @@
 #include "../sond_ocr.h"
 #include "../sond_log_and_error.h"
 #include "../sond_file_helper.h"
+#include "../sond_mime.h"
 #include "zond_indexsuche.h"
 
 #include "zond_dbase.h"
@@ -1066,14 +1070,102 @@ static gint zond_treeviewfm_get_text_from_section(SondTVFMItem* stvfm_item,
  * diese Funktion die Hashtable komplett selbst, ausschließlich über die
  * schon vorhandenen öffentlichen SondTVFMItem-Zugriffsfunktionen
  * (sond_treeviewfm.h) - ohne jede Änderung an der Basisklasse. */
+/* Reiner readdir-Scanner für "wirkliche" (nicht in einem Container liegende)
+ * Dateisystem-Verzeichnisse - ersetzt für diesen Fall den Weg über
+ * sond_tvfm_item_load_children()/sond_file_part_create() (Inhalts-Sniffing
+ * der ersten 2 KB, SeaDrive-Hydrierung). Benutzt nur sond_dir_open()/
+ * sond_dir_read_name() (Verzeichnis-Listing) und sond_stat() (Metadaten,
+ * kein Inhalt) - beides zieht bei SeaDrive-Platzhaltern keine Hydrierung
+ * nach sich. Der Dateityp wird ausschließlich über die Endung bestimmt
+ * (mime_from_extension()) und über sond_file_part_create_leaf() verpackt
+ * (ebenfalls ohne Dateizugriff) - für den Zweck hier (Soll/Ist-Abgleich
+ * beim Durchsuchen/Löschen des Index gegen die DB) reicht das:
+ * check_coverage_one() erkennt PDFs zusätzlich über die Endung, nicht nur
+ * über den GObject-Typ (zond_indexsuche.c).
+ *
+ * In Container (ZIP/E-Mail/PDF mit Einbettungen) wird hier NICHT
+ * hineingestiegen - das war beim bisherigen Weg für "Gesamtes Projekt"/
+ * ordnerbasierte "Auswahl" ohnehin nie der Fall: ein frisch entdeckter
+ * Container-Top-Knoten hat sond_file_part != NULL UND path_or_section ==
+ * NULL, fällt unten in zond_treeviewfm_item_get_fileparts() also stets in
+ * den ELSE-Zweig (ein einziger, opaker Filepart, da "application/zip" &
+ * Co. ohnehin nicht indizierbar sind) - keine Verhaltensänderung. Inhalte
+ * innerhalb eines Containers werden weiterhin nur über eine explizite
+ * Auswahl darin erreicht (sond_file_part != NULL UND path_or_section
+ * gesetzt) - dafür bleibt der bisherige, echte Weg unverändert, s.
+ * zond_treeviewfm_item_get_fileparts(). ToDo.c, 12.-14.09.2026. */
+gint zond_treeviewfm_item_get_fileparts_readdir(SondTreeviewFM *stvfm,
+		gchar const *rel_dir, GHashTable *ht, GError **error) {
+	gchar const *root = sond_treeviewfm_get_root(stvfm);
+	gchar *path_dir = NULL;
+	SondDir *dir = NULL;
+	gchar const *filename = NULL;
+
+	path_dir = rel_dir ? g_strconcat(root, "/", rel_dir, NULL) : g_strdup(root);
+	dir = sond_dir_open(path_dir, error);
+	g_free(path_dir);
+	if (!dir)
+		return -1;
+
+	while ((filename = sond_dir_read_name(dir)) != NULL) {
+		gchar *rel_path_child = NULL;
+		GStatBuf st = { 0 };
+		GError *error_stat = NULL;
+
+		rel_path_child = rel_dir ?
+				g_strconcat(rel_dir, "/", filename, NULL) : g_strdup(filename);
+
+		if (sond_stat(rel_path_child, &st, &error_stat)) {
+			LOG_WARN("%s: sond_stat('%s') gibt Fehler zurück: %s", __func__,
+					rel_path_child,
+					error_stat ? error_stat->message : "?");
+			g_clear_error(&error_stat);
+			g_free(rel_path_child);
+			continue;
+		}
+
+		if (S_ISDIR(st.st_mode)) {
+			gint rc = zond_treeviewfm_item_get_fileparts_readdir(stvfm,
+					rel_path_child, ht, error);
+			g_free(rel_path_child);
+			if (rc) {
+				sond_dir_close(dir);
+				return -1;
+			}
+		} else {
+			gchar const *mime = mime_from_extension(filename);
+			SondFilePart *sfp_leaf = sond_file_part_create_leaf(
+					rel_path_child, NULL, mime);
+
+			g_free(rel_path_child);
+			g_hash_table_insert(ht, sfp_leaf, NULL);
+		}
+	}
+
+	sond_dir_close(dir);
+
+	return 0;
+}
+
 static gint zond_treeviewfm_item_get_fileparts(SondTVFMItem *stvfm_item,
 		GHashTable *ht, gboolean reject_unterseitig, GError **error) {
 	SondTVFMItemType type = sond_tvfm_item_get_item_type(stvfm_item);
 	gchar const *path_or_section = sond_tvfm_item_get_path_or_section(stvfm_item);
 	SondFilePart *sond_file_part = sond_tvfm_item_get_sond_file_part(stvfm_item);
 
-	//"Wirkliches" dir und root-dir - s. sond_tvfm_item_get_fileparts()
-	if (type == SOND_TVFM_ITEM_TYPE_DIR && (path_or_section || !sond_file_part)) {
+	//Wirkliches Dateisystem-Verzeichnis (auch verschachtelt - sond_file_part
+	//bleibt dabei auf dem gesamten Ast NULL, s. sond_tvfm_item_load_fs_dir()):
+	//reiner readdir-Scanner, s. dortigen Kommentar.
+	if (type == SOND_TVFM_ITEM_TYPE_DIR && !sond_file_part) {
+		return zond_treeviewfm_item_get_fileparts_readdir(
+				sond_tvfm_item_get_stvfm(stvfm_item), path_or_section, ht,
+				error);
+	}
+	//Innerhalb eines Containers (ZIP/E-Mail/PDF mit Einbettungen), nur über
+	//eine explizite Auswahl darin erreichbar - unverändert der bisherige,
+	//echte Weg (der Nutzer hat diesen Container durch eigenes Navigieren
+	//bereits geöffnet, s. Kommentar an zond_treeviewfm_item_get_fileparts_readdir).
+	else if (type == SOND_TVFM_ITEM_TYPE_DIR && path_or_section) {
 		GPtrArray *arr_children = NULL;
 		gint rc = 0;
 

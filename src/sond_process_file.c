@@ -93,6 +93,28 @@ static gint process_zip_for_ocr(guchar* data, gsize size,
 
 	zip_int64_t num_entries = zip_get_num_entries(archive, 0);
 
+	/* Für die Index-Suche (check_coverage_one() in zond_indexsuche.c): Zahl
+	 * der direkten Einträge dieses Containers DB-seitig festhalten, ohne
+	 * dass dafür je wieder in die ZIP hineingesehen werden müsste. Nur
+	 * eine Ebene - was sich innerhalb eines Eintrags, der selbst wieder
+	 * ein Container ist, verbirgt, zählt hier bewusst nicht mit (ToDo.c,
+	 * 12.-14.09.2026). Unabhängig von "modified" setzen: die Zahl der
+	 * Einträge ist auch dann bekannt, wenn keiner von ihnen tatsächlich
+	 * verändert wurde. */
+	if (wctx->index_ctx) {
+		GError *error_entrycount = NULL;
+
+		if (!sond_index_ctx_set_entry_count(wctx->index_ctx, filename,
+				(gint) num_entries, &error_entrycount)) {
+			if (wctx->log_func)
+				wctx->log_func(wctx->log_func_data,
+						"ZIP '%s': entry_count nicht gespeichert: %s",
+						filename, error_entrycount ?
+								error_entrycount->message : "?");
+			g_clear_error(&error_entrycount);
+		}
+	}
+
 	for (zip_int64_t i = 0; i < num_entries; i++) {
 		if (g_atomic_int_get(&wctx->cancel))
 			break;

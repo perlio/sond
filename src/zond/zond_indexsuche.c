@@ -20,6 +20,8 @@
 
 #include <gtk/gtk.h>
 #include <glib.h>
+#include <glib/gstdio.h>
+#include <sys/stat.h>
 
 #include "../misc.h"
 #include "../sond_index.h"
@@ -28,6 +30,8 @@
 #include "../sond_fileparts.h"
 #include "../sond_process_file.h"
 #include "../sond_renderer.h"
+#include "../sond_file_helper.h"
+#include "../sond_log_and_error.h"
 
 #include "zond_init.h"
 #include "zond_treeviewfm.h"
@@ -236,6 +240,20 @@ typedef struct {
     gint           missing;      /* nur gültig, wenn total_known */
     gint           total;        /* nur gültig, wenn total_known */
     gint           indexed;      /* nur gültig, wenn !total_known */
+    gchar         *dir_path;     /* NUR bei einem Verzeichnis-Gap gesetzt
+                                   * (projektrelativ, "/"-Konvention) - ein
+                                   * kompletter, gar nicht abgedeckter
+                                   * Dateisystem-Ast, absichtlich NICHT
+                                   * einzeln in Dateien aufgeschlüsselt
+                                   * (Performance bei großen
+                                   * Projektverzeichnissen, s.
+                                   * scan_coverage_gaps_fs()). sfp bleibt
+                                   * in diesem Fall NULL; die tatsächliche
+                                   * Aufschlüsselung in einzelne Fileparts
+                                   * passiert erst bei Bedarf, wenn der
+                                   * Nutzer "jetzt nachindizieren" wählt
+                                   * (s. handle_coverage_gaps()). ToDo.c
+                                   * (15.09.2026). */
 } SondIndexCoverageGap;
 
 static void
@@ -243,6 +261,7 @@ sond_index_coverage_gap_free(gpointer p) {
     SondIndexCoverageGap *gap = p;
     if (!gap) return;
     g_free(gap->display_name);
+    g_free(gap->dir_path);
     g_free(gap);
 }
 
@@ -270,6 +289,36 @@ sond_index_coverage_gap_free(gpointer p) {
  * (Datei noch nie vollständig indiziert) -> "nur N Seiten indiziert"
  * ohne Aussage zur Gesamtzahl (out_total_known = FALSE).
  *
+ * Container: PDFs mit Einbettungen laufen immer über die is_pdf-Zweige
+ * oben (eine Datei, die je nach OCR-Lauf komplett verarbeitet wird -
+ * eigene Seiten UND alle embedded files in einem Rutsch, s.
+ * process_pdf_for_ocr() in sond_process_file.c), E-Mails (message/rfc822)
+ * sind über sond_index_mime_type_supported() direkt als "ganze Datei"
+ * indizierbar und bekommen bei vollständiger Verarbeitung immer einen
+ * eigenen pages-Eintrag unter ihrem eigenen Dateinamen (s.
+ * sond_process_file_do_rec()) - für beide reicht daher die normale
+ * Logik weiter unten bzw. oben, ohne container_entrycount zu befragen.
+ * Nur ZIP-Archive haben KEINEN eigenen indizierbaren Inhalt (nie ein
+ * pages-Eintrag unter ihrem eigenen Namen) und können trotzdem über eine
+ * frühere explizite Auswahl innerhalb des Archivs bereits teilweise
+ * indizierten Inhalt enthalten - dafür container_entrycount (Gesamtzahl
+ * interner Einträge, gemerkt beim Indizieren, s. process_zip_for_ocr())
+ * und ein Präfix-Treffer in pages/coverage, ebenfalls ohne das Archiv zu
+ * öffnen (s. sond_index_ctx_count_nested_indexed()). Ist
+ * container_entrycount für eine ZIP-Datei noch nie gesetzt worden (das
+ * Archiv wurde noch nie als Ganzes/über "Gesamtes Verzeichnis"
+ * verarbeitet), reicht die schlichte Aussage "nicht erfaßt" - eine genaue
+ * Zahl wäre nur durch Öffnen des Archivs zu ermitteln und ist laut
+ * Vorgabe nicht nötig.
+ *
+ * PDF-Erkennung erfolgt zusätzlich über die Endung (nicht nur über
+ * SOND_IS_FILE_PART_PDF()), da Fileparts aus dem readdir-Scanner für
+ * "Gesamtes Projekt"/ordnerbasierte "Auswahl" bewusst immer als LEAF
+ * angelegt werden (kein Dateizugriff zur Typbestimmung, s.
+ * zond_treeviewfm_item_get_fileparts_readdir()).
+ *
+ * Kein Dateizugriff in diesem gesamten Ablauf (ToDo.c, 12.-14.09.2026).
+ *
  * Returns: TRUE bei Erfolg (auch wenn missing == 0), FALSE bei Fehler
  *          (z.B. Datei nicht lesbar) - error gesetzt.
  */
@@ -281,6 +330,7 @@ check_coverage_one(Projekt *zond, SondFilePart *sfp, SondPageRange *range,
     gchar        *fp        = sond_file_part_get_filepart(sfp);
     gint          missing   = 0;
     gint          total     = 1;
+    gboolean      is_pdf    = FALSE;
 
     *out_total_known = TRUE;
     *out_indexed = 0;
@@ -291,11 +341,22 @@ check_coverage_one(Projekt *zond, SondFilePart *sfp, SondPageRange *range,
         return FALSE;
     }
 
+    /* PDF-Erkennung zusätzlich über die Endung, nicht nur über den
+     * GObject-Typ: Fileparts aus dem readdir-Scanner für "Gesamtes
+     * Projekt"/ordnerbasierte "Auswahl" (zond_treeviewfm.c,
+     * zond_treeviewfm_item_get_fileparts_readdir()) sind bewusst immer
+     * SOND_TYPE_FILE_PART_LEAF (kein Dateizugriff zur Typbestimmung) -
+     * SOND_IS_FILE_PART_PDF() wäre für sie also immer FALSE, obwohl es
+     * sich um eine PDF-Datei handelt. ToDo.c (12.-14.09.2026). */
+    is_pdf = SOND_IS_FILE_PART_PDF(sfp) ||
+            !g_strcmp0(mime_from_extension(fp), "application/pdf");
+
     /* Schneller Vorab-Check über die coalescierte coverage-Tabelle: ist fp
      * (oder ein Vorfahre) komplett abgedeckt, brauchen wir die
      * pages-Tabelle für diesen Punkt gar nicht erst anzufassen - spart bei
      * großen, bereits vollständig indizierten Projektverzeichnissen den
-     * Großteil der Arbeit (s. Task #32). */
+     * Großteil der Arbeit (s. Task #32). Deckt auch den Fall ab, dass ein
+     * Container (ZIP/E-Mail) komplett bis hierhin kollabiert ist. */
     if (sond_index_ctx_coverage_get(index_ctx, fp) >= 0) {
         g_free(fp);
         *out_missing = 0;
@@ -308,17 +369,61 @@ check_coverage_one(Projekt *zond, SondFilePart *sfp, SondPageRange *range,
      * "Gesamtes Projektverzeichnis" ständig Lücken bei Dateien, die gar
      * nicht indizierbar sind. Schnelle, rein dateinamensbasierte Schätzung
      * (mime_from_extension(), keine Dateizugriffe) reicht für diesen
-     * Vorab-Check - PDFs sind über den SondFilePart-Typ ohnehin schon
-     * sicher erkannt (Zweig unten), unabhängig von der Extension. */
-    if (!SOND_IS_FILE_PART_PDF(sfp) &&
-            !sond_index_mime_type_supported(mime_from_extension(fp))) {
+     * Vorab-Check. */
+    if (!is_pdf && !sond_index_mime_type_supported(mime_from_extension(fp))) {
+        /* Ausnahme: Container (ZIP - message/rfc822 und PDF sind über
+         * is_pdf bzw. sond_index_mime_type_supported() bereits als "ganze
+         * Datei" indizierbar und daher hier nicht mehr relevant). Auch
+         * ohne dass fp selbst indizierbar ist, kann darin - über eine
+         * frühere explizite Auswahl innerhalb des Containers - bereits
+         * etwas indiziert worden sein (z.B. genau eine PDF in einem
+         * ZIP-Archiv - das ist keineswegs selten, s. ToDo.c). Rein per DB
+         * geprüft (container_entrycount + Präfix-Treffer in
+         * pages/coverage), der Container wird dafür nie geöffnet. */
+        gint total_entries = sond_index_ctx_get_entry_count(index_ctx, fp);
+
+        if (total_entries >= 0) {
+            gint nested_indexed =
+                    sond_index_ctx_count_nested_indexed(index_ctx, fp);
+
+            if (nested_indexed < 0)
+                nested_indexed = 0;
+
+            g_free(fp);
+            *out_missing = total_entries - nested_indexed;
+            if (*out_missing < 0) /* Verteidigung gegen Inkonsistenzen */
+                *out_missing = 0;
+            *out_total = total_entries;
+            return TRUE;
+        }
+
+        /* container_entrycount noch nie gesetzt: entweder ist fp gar kein
+         * Container, sondern schlicht ein nicht indizierbarer Dateityp
+         * (Bild, .db, .znd, ...) - der soll wie bisher gar nicht erst als
+         * Lücke auftauchen. Oder fp IST ein Container (aktuell: ZIP -
+         * process_zip_for_ocr() in sond_process_file.c setzt
+         * container_entrycount immer, sobald die ZIP auch nur einmal
+         * geöffnet wurde), wurde aber noch NIE als Ganzes verarbeitet -
+         * z.B. weil bisher nur ein einzelner Eintrag darin gezielt über
+         * BAUM_FS ausgewählt und indiziert wurde. In diesem Fall reicht
+         * laut Vorgabe die schlichte Aussage "nicht erfaßt", ohne
+         * Anspruch auf eine genaue Zahl (ToDo.c, 12.-14.09.2026) - dafür
+         * wie bei einer normalen, noch nie indizierten Datei behandelt
+         * (missing = total = 1, s. format_gap_line()). */
+        if (!g_strcmp0(mime_from_extension(fp), "application/zip")) {
+            g_free(fp);
+            *out_missing = 1;
+            *out_total   = 1;
+            return TRUE;
+        }
+
         g_free(fp);
         *out_missing = 0;
         *out_total   = 0;
         return TRUE;
     }
 
-    if (SOND_IS_FILE_PART_PDF(sfp) && range && range->von >= 0) {
+    if (is_pdf && range && range->von >= 0) {
         gint von = range->von, bis = range->bis;
 
         total = bis - von + 1;
@@ -335,7 +440,7 @@ check_coverage_one(Projekt *zond, SondFilePart *sfp, SondPageRange *range,
 
         g_hash_table_destroy(indexed_set);
         g_array_free(indexed, TRUE);
-    } else if (SOND_IS_FILE_PART_PDF(sfp)) {
+    } else if (is_pdf) {
         /* Ganze Datei, keine Coverage - s. Funktionskommentar: bewusst
          * kein sond_file_part_pdf_open_document()/pdf_count_pages() mehr
          * hier, rein DB-Zugriffe (pages-Tabelle + file_pagecount), keine
@@ -421,8 +526,155 @@ check_coverage(Projekt *zond, GHashTable *ht_fileparts) {
     return gaps;
 }
 
+/* Rekursiver, verzeichnisbasierter Lücken-Scanner für "Index durchsuchen"
+ * auf "wirklichen" (nicht in einem Container liegenden) Dateisystem-Ästen -
+ * Alternative zu check_coverage() für "Gesamtes Projekt": statt für jede
+ * einzelne Datei ein SondFilePart anzulegen und check_coverage_one()
+ * aufzurufen (bei einem großen, größtenteils schon indizierten
+ * Projektverzeichnis mehrere Minuten allein für den Abgleich, Nutzer-Fund
+ * 15.09.2026), wird pro Verzeichnis-Ebene zuerst EINE Abfrage
+ * (sond_index_ctx_get_dir_status() - coverage_get() + eine
+ * LIKE-Existenzprüfung auf pages/coverage, rein DB-seitig) genutzt, um zu
+ * entscheiden:
+ * - FULL: der ganze Ast ist schon abgedeckt - gar nicht erst per readdir
+ *   hineinlesen, keine Lücke.
+ * - NONE: nirgends im Ast irgendein Indizierungs-Hinweis - NICHT einzeln
+ *   jede Datei darin auflisten (Nutzer-Vorgabe: Pfad reicht, keine
+ *   Dateizahl - eine Zählung würde wieder ein volles Listing erfordern),
+ *   sondern der ganze Ast als EINE Lücke (dir_path gesetzt, sfp bleibt
+ *   NULL). Die tatsächliche Aufschlüsselung in einzelne Fileparts
+ *   passiert erst bei Bedarf, wenn der Nutzer "jetzt nachindizieren"
+ *   wählt (s. handle_coverage_gaps()).
+ * - PARTIAL: gemischt - eine Ebene tiefer per readdir absteigen und
+ *   dieselbe dreiteilige Prüfung je Kind-Verzeichnis wiederholen, bis die
+ *   Mischgrenze gefunden ist. Reale Dateien auf einer solchen
+ *   (Misch-)Ebene werden weiterhin einzeln über check_coverage_one()
+ *   geprüft, exakt wie bisher (inkl. PDF-Seitenbereich-Feinheiten,
+ *   container_entrycount etc.) - frisch angelegte Fileparts werden dafür
+ *   zusätzlich in ht_owner eingetragen (transfer full), damit sie so
+ *   lange leben wie die gaps (der Aufrufer zerstört ht_owner, nachdem er
+ *   mit gaps fertig ist - analog zur bisherigen ht_coverage-Lebensdauer
+ *   bei check_coverage()).
+ *
+ * Die oberste Ebene (rel_dir == NULL, das Projektverzeichnis selbst) wird
+ * NIE pauschal per get_dir_status() geprüft, sondern immer direkt per
+ * readdir aufgeklappt: Coverage wird laut bestehender Vereinbarung nie
+ * über die oberste Ebene hinaus zusammengefasst (s.
+ * sond_index_ctx_coverage_try_collapse()) - ein einzelner coverage-
+ * Eintrag für das ganze Projekt existiert also nie, ein get_dir_status()
+ * für den Wurzelpfad wäre daher sinnlos (und wegen der LIKE-Muster-
+ * Konstruktion dort auch technisch nicht auf die Wurzel anwendbar).
+ *
+ * Kein Dateizugriff in diesem gesamten Ablauf, nur Verzeichnis-Metadaten
+ * (sond_dir_open()/sond_stat()) und DB-Abfragen. ToDo.c (15.09.2026).
+ */
+static gint
+scan_coverage_gaps_fs(Projekt *zond, SondTreeviewFM *stvfm,
+        gchar const *rel_dir, GPtrArray *gaps, GHashTable *ht_owner,
+        GError **error) {
+    SondIndexCtx *index_ctx = zond->wctx->index_ctx;
+    gchar const  *root      = sond_treeviewfm_get_root(stvfm);
+    gchar        *path_dir  = NULL;
+    SondDir      *dir       = NULL;
+    gchar const  *filename  = NULL;
+
+    if (rel_dir) {
+        SondIndexStatus status = sond_index_ctx_get_dir_status(index_ctx, rel_dir);
+
+        if (status == SOND_INDEX_STATUS_FULL)
+            return 0; /* ganzer Ast abgedeckt - nichts zu tun */
+
+        if (status == SOND_INDEX_STATUS_NONE) {
+            SondIndexCoverageGap *gap = g_new0(SondIndexCoverageGap, 1);
+            gap->display_name = g_strdup(rel_dir);
+            gap->dir_path     = g_strdup(rel_dir);
+            gap->total_known  = TRUE;
+            gap->missing      = 1;
+            gap->total        = 1;
+            g_ptr_array_add(gaps, gap);
+            return 0; /* nicht weiter aufschlüsseln */
+        }
+        /* PARTIAL: weiter unten readdir'en und pro Kind rekursiv/einzeln prüfen. */
+    }
+
+    path_dir = rel_dir ? g_strconcat(root, "/", rel_dir, NULL) : g_strdup(root);
+    dir = sond_dir_open(path_dir, error);
+    g_free(path_dir);
+    if (!dir)
+        return -1;
+
+    while ((filename = sond_dir_read_name(dir)) != NULL) {
+        gchar *rel_path_child = NULL;
+        GStatBuf st = { 0 };
+        GError *error_stat = NULL;
+
+        rel_path_child = rel_dir ?
+                g_strconcat(rel_dir, "/", filename, NULL) : g_strdup(filename);
+
+        if (sond_stat(rel_path_child, &st, &error_stat)) {
+            LOG_WARN("%s: sond_stat('%s') gibt Fehler zurück: %s", __func__,
+                    rel_path_child, error_stat ? error_stat->message : "?");
+            g_clear_error(&error_stat);
+            g_free(rel_path_child);
+            continue;
+        }
+
+        if (S_ISDIR(st.st_mode)) {
+            gint rc = scan_coverage_gaps_fs(zond, stvfm, rel_path_child, gaps,
+                    ht_owner, error);
+            g_free(rel_path_child);
+            if (rc) {
+                sond_dir_close(dir);
+                return -1;
+            }
+        } else {
+            gchar const *mime = mime_from_extension(filename);
+            SondFilePart *sfp_leaf = sond_file_part_create_leaf(
+                    rel_path_child, NULL, mime);
+            gint     missing     = 0, total = 0, indexed = 0;
+            gboolean total_known = TRUE;
+            GError  *error_one   = NULL;
+
+            g_free(rel_path_child);
+
+            /* ht_owner hält die Referenz, solange gaps lebt - unabhängig
+             * davon, ob dieser Filepart am Ende tatsächlich als Lücke
+             * gemeldet wird (spart eine Fallunterscheidung, ein
+             * überzähliger Owner-Eintrag ist harmlos). */
+            g_hash_table_add(ht_owner, g_object_ref(sfp_leaf));
+
+            if (!check_coverage_one(zond, sfp_leaf, NULL, &missing, &total,
+                    &total_known, &indexed, &error_one)) {
+                LOG_WARN("scan_coverage_gaps_fs: %s",
+                        error_one ? error_one->message : "?");
+                g_clear_error(&error_one);
+                g_object_unref(sfp_leaf);
+                continue;
+            }
+
+            if (missing > 0) {
+                SondIndexCoverageGap *gap = g_new0(SondIndexCoverageGap, 1);
+                gap->sfp          = sfp_leaf;
+                gap->range        = NULL;
+                gap->display_name = sond_file_part_get_filepart(sfp_leaf);
+                gap->total_known  = total_known;
+                gap->missing      = missing;
+                gap->total        = total;
+                gap->indexed      = indexed;
+                g_ptr_array_add(gaps, gap);
+            }
+            g_object_unref(sfp_leaf); /* eigene Ref los - ht_owner hält weiterhin eine */
+        }
+    }
+
+    sond_dir_close(dir);
+    return 0;
+}
+
 static gchar*
 format_gap_line(SondIndexCoverageGap *gap) {
+    if (gap->dir_path)
+        return g_strdup_printf("Ordner \"%s\": nicht erfaßt", gap->display_name);
     if (!gap->total_known)
         return g_strdup_printf("%s (nur %d Seite%s indiziert)",
                 gap->display_name, gap->indexed, gap->indexed == 1 ? "" : "n");
@@ -443,7 +695,7 @@ format_gap_line(SondIndexCoverageGap *gap) {
  *          abbrechen).
  */
 static gint
-ask_coverage_gaps(Projekt *zond, GPtrArray *gaps, guint n_total) {
+ask_coverage_gaps(Projekt *zond, GPtrArray *gaps) {
     GtkWidget *dialog  = NULL;
     GtkWidget *content = NULL;
     GtkWidget *box     = NULL;
@@ -469,8 +721,8 @@ ask_coverage_gaps(Projekt *zond, GPtrArray *gaps, guint n_total) {
     gtk_container_add(GTK_CONTAINER(content), box);
 
     summary = g_strdup_printf(
-            "%u von %u ausgewählten Punkten sind nicht vollständig indiziert:",
-            gaps->len, n_total);
+            "%u Punkt%s nicht vollständig indiziert:",
+            gaps->len, gaps->len == 1 ? " ist" : "e sind");
     label = gtk_label_new(summary);
     gtk_widget_set_halign(label, GTK_ALIGN_START);
     gtk_label_set_line_wrap(GTK_LABEL(label), TRUE);
@@ -524,6 +776,70 @@ ask_coverage_gaps(Projekt *zond, GPtrArray *gaps, guint n_total) {
  * Aufrufer erzeugte Map über alle Dateien (ht_filter bleibt dort NULL,
  * sonst würde jeder Treffer unnötig gegen die komplette Dateiliste
  * geprüft). NULL = kein Abdeckungs-Check. */
+
+/* Zeigt bei mindestens einer Lücke in gaps den Nachfrage-Dialog
+ * (ask_coverage_gaps()) und indiziert auf Wunsch nach - gemeinsam für
+ * beide Wege, wie gaps entstanden sein kann: check_coverage() (Datei-für-
+ * Datei, für "Auswahl") oder scan_coverage_gaps_fs() (verzeichnisbasiert,
+ * für "Gesamtes Projekt", s. dort). Ein Verzeichnis-Gap (dir_path
+ * gesetzt, sfp NULL) wird beim Nachindizieren erst hier per
+ * zond_treeviewfm_item_get_fileparts_readdir() in einzelne Fileparts
+ * aufgeschlüsselt - die teure Aufschlüsselung findet also nur für
+ * tatsächlich vom Nutzer bestätigte Lücken statt, nicht schon beim
+ * bloßen Anzeigen des Berichts. ToDo.c (15.09.2026).
+ *
+ * Returns: TRUE weiter mit der Suche, FALSE = Suche ganz abbrechen
+ * (Nutzer hat "Abbrechen" gewählt). */
+static gboolean
+handle_coverage_gaps(Projekt *zond, GPtrArray *gaps) {
+    gint resp = 0;
+
+    if (!gaps || gaps->len == 0)
+        return TRUE;
+
+    resp = ask_coverage_gaps(zond, gaps);
+    if (resp == GTK_RESPONSE_CANCEL)
+        return FALSE;
+
+    if (resp == GTK_RESPONSE_YES) {
+        GHashTable *ht_reindex = g_hash_table_new_full(NULL, NULL,
+                g_object_unref, sond_page_range_free);
+        gboolean ok = TRUE;
+
+        for (guint i = 0; i < gaps->len && ok; i++) {
+            SondIndexCoverageGap *gap = g_ptr_array_index(gaps, i);
+
+            if (gap->dir_path) {
+                GError *error_expand = NULL;
+
+                if (zond_treeviewfm_item_get_fileparts_readdir(
+                        SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
+                        gap->dir_path, ht_reindex, &error_expand)) {
+                    display_message(zond->app_window,
+                            "Fehler beim Aufschlüsseln von \"", gap->dir_path,
+                            "\":\n", error_expand ? error_expand->message : "?",
+                            NULL);
+                    g_clear_error(&error_expand);
+                    ok = FALSE;
+                }
+            } else {
+                SondPageRange *range_copy = gap->range
+                        ? sond_page_range_new(gap->range->von, gap->range->bis)
+                        : NULL;
+                g_hash_table_insert(ht_reindex, g_object_ref(gap->sfp), range_copy);
+            }
+        }
+
+        if (ok)
+            zond_index_erstellen_ht(zond, ht_reindex);
+        else
+            g_hash_table_destroy(ht_reindex);
+    }
+    /* GTK_RESPONSE_NO: einfach weiter mit der Suche, ohne nachzuindizieren. */
+
+    return TRUE;
+}
+
 static void
 zond_indexsuche_do(Projekt *zond, GHashTable* ht_filter, GHashTable *ht_coverage) {
     GtkWidget *dialog     = NULL;
@@ -545,27 +861,10 @@ zond_indexsuche_do(Projekt *zond, GHashTable* ht_filter, GHashTable *ht_coverage
 
     if (ht_coverage) {
         GPtrArray *gaps = check_coverage(zond, ht_coverage);
-        if (gaps->len > 0) {
-            gint resp = ask_coverage_gaps(zond, gaps, g_hash_table_size(ht_coverage));
-            if (resp == GTK_RESPONSE_CANCEL) {
-                g_ptr_array_unref(gaps);
-                return;
-            }
-            if (resp == GTK_RESPONSE_YES) {
-                GHashTable *ht_reindex = g_hash_table_new_full(NULL, NULL,
-                        g_object_unref, sond_page_range_free);
-                for (guint i = 0; i < gaps->len; i++) {
-                    SondIndexCoverageGap *gap = g_ptr_array_index(gaps, i);
-                    SondPageRange *range_copy = gap->range
-                            ? sond_page_range_new(gap->range->von, gap->range->bis)
-                            : NULL;
-                    g_hash_table_insert(ht_reindex, g_object_ref(gap->sfp), range_copy);
-                }
-                zond_index_erstellen_ht(zond, ht_reindex);
-            }
-            /* GTK_RESPONSE_NO: einfach weiter mit der Suche, ohne nachzuindizieren. */
-        }
+        gboolean cont = handle_coverage_gaps(zond, gaps);
         g_ptr_array_unref(gaps);
+        if (!cont)
+            return;
     }
 
     /* --- Eingabe-Dialog --- */
@@ -794,24 +1093,43 @@ zond_indexsuche_do(Projekt *zond, GHashTable* ht_filter, GHashTable *ht_coverage
 void
 zond_indexsuche_activate(GtkMenuItem *item, gpointer data) {
     Projekt *zond = (Projekt*) data;
-    GHashTable *ht_coverage = NULL;
+    GPtrArray *gaps = NULL;
+    GHashTable *ht_owner = NULL;
     GError *error = NULL;
+    gboolean cont = TRUE;
 
     /* "Gesamtes Projektverzeichnis": keine Auswahl zum Filtern (ht_filter
      * bleibt NULL, wie bisher), aber der Abdeckungs-Check (schon
-     * indiziert?) soll trotzdem laufen - dafür eine eigene Map über alle
-     * Dateien im Projekt aufbauen, unabhängig vom (NULL) Filter. Schlägt
-     * das Aufbauen fehl, wird die Suche trotzdem ausgeführt, nur eben ohne
-     * Abdeckungs-Check (kein Grund, die Suche deswegen zu blockieren). */
-    ht_coverage = zond_treeviewfm_get_fileparts(
-            ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), FALSE, FALSE, &error);
-    if (!ht_coverage)
+     * indiziert?) soll trotzdem laufen - dafür über den verzeichnisbasierten
+     * Scanner (s. scan_coverage_gaps_fs()), NICHT mehr über eine flache
+     * Fileparts-Sammlung über ALLE Dateien im Projekt: bei einem großen,
+     * größtenteils schon indizierten Projekt dauerte das bisher mehrere
+     * Minuten (Nutzer-Fund 15.09.2026). Schlägt der Scan fehl bzw. bricht
+     * er mittendrin ab, wird die Suche trotzdem ausgeführt, nur eben mit
+     * den bis dahin gefundenen Lücken (kein Grund, die Suche deswegen zu
+     * blockieren). ht_owner hält die währenddessen frisch angelegten
+     * Fileparts am Leben, bis der Lücken-Dialog abgearbeitet ist. */
+    ht_owner = g_hash_table_new_full(NULL, NULL, g_object_unref, NULL);
+    gaps = g_ptr_array_new_with_free_func(sond_index_coverage_gap_free);
+
+    if (scan_coverage_gaps_fs(zond, SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
+            NULL, gaps, ht_owner, &error)) {
+        g_warning("zond_indexsuche_activate: Abdeckungs-Check unvollständig: %s",
+                error ? error->message : "?");
         g_clear_error(&error);
+    }
 
-    zond_indexsuche_do(zond, NULL, ht_coverage);
+    cont = handle_coverage_gaps(zond, gaps);
 
-    if (ht_coverage)
-        g_hash_table_destroy(ht_coverage);
+    g_ptr_array_unref(gaps);
+    g_hash_table_destroy(ht_owner);
+
+    if (!cont)
+        return;
+
+    /* Kein weiterer Abdeckungs-Check mehr nötig - der ist oben schon
+     * gelaufen. */
+    zond_indexsuche_do(zond, NULL, NULL);
 }
 
 void

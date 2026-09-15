@@ -326,6 +326,68 @@ static GDateTime* parse_mysql_timestamp(const char *timestamp) {
 }
 
 /**
+ * fetch_full_string_column:
+ *
+ * mysql_stmt_fetch() terminiert gebundene String-Puffer NICHT mit NUL - wer
+ * sie als C-String weiterverwendet (label, properties-JSON), muss das
+ * manuell nachholen, sonst wird über das Pufferende hinaus gelesen
+ * (undefiniertes Verhalten).
+ *
+ * Ist der feste Puffer außerdem zu klein für die tatsächlichen Daten
+ * (MYSQL_DATA_TRUNCATED, z.B. bei sehr großen JSON-Properties), wird die
+ * Spalte per mysql_stmt_fetch_column() vollständig in einen separaten,
+ * ausreichend großen Puffer nachgeladen - statt die Daten wie bisher
+ * stillschweigend abzuschneiden.
+ *
+ * WICHTIG: @fixed_buffer bleibt unverändert an das Statement gebunden und
+ * wird hier nie freigegeben (sonst würde der nächste mysql_stmt_fetch() in
+ * freigegebenen Speicher schreiben). Bei Truncation liefert diese Funktion
+ * einen neuen Puffer zurück; der Aufrufer muss diesen dann freigeben, wenn
+ * er ungleich @fixed_buffer ist.
+ *
+ * @stmt: Statement, aus dem gefetcht wurde
+ * @bind: MYSQL_BIND-Eintrag der Spalte (liefert buffer_length und length)
+ * @column_index: 0-basierter Spaltenindex im SELECT
+ * @fixed_buffer: der fest gebundene Puffer der Spalte
+ *
+ * Returns: NUL-terminierter Puffer mit den vollständigen Daten - entweder
+ *          @fixed_buffer selbst (nur terminiert) oder ein neuer Puffer.
+ */
+static gchar* fetch_full_string_column(MYSQL_STMT *stmt,
+                                        MYSQL_BIND *bind,
+                                        guint column_index,
+                                        gchar *fixed_buffer) {
+    unsigned long actual_length = bind->length ? *bind->length : 0;
+
+    if (actual_length + 1 <= bind->buffer_length) {
+        /* Passt in den festen Puffer - nur terminieren */
+        fixed_buffer[actual_length] = '\0';
+        return fixed_buffer;
+    }
+
+    /* Fester Puffer zu klein - separaten Puffer für diese Zeile anlegen */
+    gchar *tmp_buffer = g_malloc(actual_length + 1);
+
+    MYSQL_BIND fetch_bind;
+    memset(&fetch_bind, 0, sizeof(fetch_bind));
+    fetch_bind.buffer_type = MYSQL_TYPE_STRING;
+    fetch_bind.buffer = tmp_buffer;
+    fetch_bind.buffer_length = actual_length + 1;
+
+    if (mysql_stmt_fetch_column(stmt, &fetch_bind, column_index, 0) != 0) {
+        LOG_WARN("Nachladen der abgeschnittenen Spalte %u fehlgeschlagen: %s",
+                 column_index, mysql_stmt_error(stmt));
+        g_free(tmp_buffer);
+        /* Fallback: abgeschnittene Daten aus dem festen Puffer, terminiert */
+        fixed_buffer[bind->buffer_length - 1] = '\0';
+        return fixed_buffer;
+    }
+
+    tmp_buffer[actual_length] = '\0';
+    return tmp_buffer;
+}
+
+/**
  * sond_graph_db_load_node:
  */
 SondGraphNode* sond_graph_db_load_node(MYSQL *conn, gint64 node_id, GError **error) {
@@ -438,19 +500,21 @@ SondGraphNode* sond_graph_db_load_node(MYSQL *conn, gint64 node_id, GError **err
         goto cleanup;
     }
 
-    /* Warnung bei Truncation */
-    if (fetch_result == MYSQL_DATA_TRUNCATED) {
-    	LOG_WARN("Data truncated for node %" G_GINT64_FORMAT, node_id);
-    }
+    /* Puffer NUL-terminieren; bei zu großen Properties wird hier
+     * transparent nachgeladen statt die Daten still abzuschneiden. */
+    gchar *label_full = fetch_full_string_column(stmt, &bind_results[1], 1, label);
+    gchar *properties_full = fetch_full_string_column(stmt, &bind_results[2], 2, properties);
 
     /* Node erstellen */
     node = sond_graph_node_new();
     sond_graph_node_set_id(node, id);
-    sond_graph_node_set_label(node, label);
+    sond_graph_node_set_label(node, label_full);
+    if (label_full != label) g_free(label_full);
 
     /* Properties laden - NEUE API mit GPtrArray */
     GError *json_error = NULL;
-    GPtrArray *props = sond_graph_property_list_from_json(properties, &json_error);
+    GPtrArray *props = sond_graph_property_list_from_json(properties_full, &json_error);
+    if (properties_full != properties) g_free(properties_full);
     if (props == NULL && json_error != NULL) {
         g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,
                    "Failed to parse properties JSON: %s",
@@ -493,6 +557,12 @@ SondGraphNode* sond_graph_db_load_node(MYSQL *conn, gint64 node_id, GError **err
         "FROM edges e WHERE e.source_id = ?";
 
     stmt = mysql_stmt_init(conn);
+    if (stmt == NULL) {
+        /* Fehler beim Laden der Edges - Node trotzdem zurückgeben */
+        LOG_WARN("mysql_stmt_init failed for edges query: %s", mysql_error(conn));
+        goto cleanup;
+    }
+
     if (mysql_stmt_prepare(stmt, edges_query, strlen(edges_query))) {
         /* Fehler beim Laden der Edges - Node trotzdem zurückgeben */
     	LOG_WARN("Failed to load edges: %s", mysql_stmt_error(stmt));
@@ -553,16 +623,23 @@ SondGraphNode* sond_graph_db_load_node(MYSQL *conn, gint64 node_id, GError **err
     mysql_stmt_bind_result(stmt, edge_bind);
 
     while (mysql_stmt_fetch(stmt) == 0) {
+        /* Puffer NUL-terminieren; bei zu großen Edge-Properties wird hier
+         * transparent nachgeladen statt die Daten still abzuschneiden. */
+        gchar *edge_label_full = fetch_full_string_column(stmt, &edge_bind[1], 1, edge_label);
+        gchar *edge_properties_full = fetch_full_string_column(stmt, &edge_bind[3], 3, edge_properties);
+
         /* Vollständige Edge mit Properties erstellen */
         SondGraphEdge *edge = sond_graph_edge_new();
         sond_graph_edge_set_id(edge, edge_id);
-        sond_graph_edge_set_label(edge, edge_label);
+        sond_graph_edge_set_label(edge, edge_label_full);
         sond_graph_edge_set_source_id(edge, node_id);
         sond_graph_edge_set_target_id(edge, target_id);
+        if (edge_label_full != edge_label) g_free(edge_label_full);
 
         /* Edge-Properties laden */
         GError *edge_json_error = NULL;
-        GPtrArray *edge_props = sond_graph_property_list_from_json(edge_properties, &edge_json_error);
+        GPtrArray *edge_props = sond_graph_property_list_from_json(edge_properties_full, &edge_json_error);
+        if (edge_properties_full != edge_properties) g_free(edge_properties_full);
         if (edge_props == NULL && edge_json_error != NULL) {
         	LOG_WARN("Failed to parse edge properties for edge %" G_GINT64_FORMAT " %s",
                      edge_id, edge_json_error->message);
@@ -853,7 +930,7 @@ static void build_property_filters_sql(MYSQL *conn,
                     " AND EXISTS ("
                     "   SELECT 1 FROM JSON_TABLE(%s.properties, '$[*]' COLUMNS("
                     "     prop_key VARCHAR(255) PATH '$[0]',"
-                    "     prop_value VARCHAR(1000) PATH '$[1][0]'"
+                    "     prop_value TEXT PATH '$[1][0]'"
                     "   )) AS jt"
                     "   WHERE jt.prop_key = '%s'"
                     "   AND jt.prop_value LIKE '%s' ESCAPE '\\\\'"
@@ -885,7 +962,7 @@ static void build_property_filters_sql(MYSQL *conn,
                     " AND EXISTS ("
                     "   SELECT 1 FROM JSON_TABLE(%s.properties, '$[*]' COLUMNS("
                     "     prop_key VARCHAR(255) PATH '$[0]',"
-                    "     prop_value VARCHAR(1000) PATH '$[1][%d]'"
+                    "     prop_value TEXT PATH '$[1][%d]'"
                     "   )) AS jt"
                     "   WHERE jt.prop_key = '%s'"
                     "   AND jt.prop_value = '%s'"
@@ -1240,7 +1317,7 @@ gboolean sond_graph_db_delete_node(MYSQL *conn, gint64 node_id, GError **error) 
         return FALSE;
     }
 
-    gchar *query = g_strdup_printf("DELETE FROM nodes WHERE id = %" G_GUINT64_FORMAT, node_id);
+    gchar *query = g_strdup_printf("DELETE FROM nodes WHERE id = %" G_GINT64_FORMAT, node_id);
 
     if (mysql_query(conn, query)) {
         g_set_error(error, SOND_GRAPH_DB_ERROR, SOND_GRAPH_DB_ERROR_QUERY,

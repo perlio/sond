@@ -402,18 +402,29 @@
    g_dir_open() ohne Long-Path-Präfix, anders als der Rest des Codes
    (sond_dir_open() & Co.) - umgestellt.
 
- Zwei im Zuge der Indexsuche-Untersuchung gefundene, aber NICHT behobene
- Hydrierungsquellen (11.09.2026, weiterhin OFFEN; betreffen nicht speziell
- die Indexsuche, sondern jeden vollständigen BAUM_FS-Scan):
+ Zwei im Zuge der Indexsuche-Untersuchung gefundene Hydrierungsquellen
+ (11.09.2026):
  (1) sond_tvfm_item_load_fs_dir() (sond_treeviewfm.c) liest beim
      Einlesen eines Verzeichnisses für jede nicht als SeaDrive-
      Platzhalter erkannte Datei die ersten 2 KB zur MIME-Typ-Erkennung
      (sond_file_part_create() -> sond_file_part_read_bytes_internal()).
-     Betrifft jeden vollen Tree-Scan (z.B. "Gesamtes Projektverzeichnis"
-     bei Index erstellen/durchsuchen), nicht nur die Indexsuche.
+     Für BAUM_FS bei "Index erstellen/durchsuchen/löschen" (Gesamtes
+     Projekt UND Auswahl) BEHOBEN, s. Eintrag 12.-14.09.2026 unten -
+     zond_treeviewfm_item_get_fileparts() nutzt dafür jetzt einen von
+     load_fs_dir() unabhängigen, reinen readdir-Scanner. load_fs_dir()
+     selbst bleibt unverändert (Nutzer-Entscheidung: der interaktive
+     Aufklapp-Mechanismus des Baums darf ruhig hydrieren, das ist beim
+     gezielten Hineinnavigieren erwartbar) - betroffen war nur der
+     bisherige Umweg über genau diesen Mechanismus beim Sammeln der zu
+     (de-)indizierenden Punkte. Für BAUM_INHALT/BAUM_AUSWERTUNG (Auswahl
+     dort) weiterhin OFFEN - anderer Mechanismus (Anbindung statt
+     Verzeichnis-Scan), s. Eintrag 15.09.2026 unten.
  (2) Die SeaDrive-Platzhalter-Erkennung selbst (GetFileAttributesW +
      FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) kann im Einzelfall fehlschlagen
      oder ungenau sein - dann greift die 2-KB-Lese-Weiche aus (1) nicht.
+     Für den jetzt behobenen BAUM_FS-Indizierungsweg ohne Belang (der
+     neue Scanner liest dort gar nicht mehr, unabhängig von dieser
+     Erkennung).
 
  SeaDrive-Hydrierungsfehler: UX-Umgang (11.09.2026, zurückgestellt).
  Anlass: s.o. ("Invalid argument"). Nutzerfrage: wie geht die App damit
@@ -529,5 +540,173 @@
  geteilt (Kommentar "wie INDEX_STATUS_PARTIAL"), sind es jetzt nicht
  mehr. Stale gewordener Doc-Kommentar in sond_icon_util.h (Zeile ~40,
  nannte noch Orange für PARTIAL) mitkorrigiert.
+
+ SeaDrive-Massenhydrierung bei "Index durchsuchen" (12.-15.09.2026,
+ Nutzer-Fund, für BAUM_FS behoben - Details/Mechanik in den jeweiligen
+ Doc-Kommentaren, hier nur Anlass, Entscheidungen und der Stand):
+
+ - Anlass: bei einem teilweise indizierten SeaDrive-Projekt lud "Index
+   durchsuchen" ohne Ende Dateien herunter, die gar nicht
+   indizierungsfähig sind. Nutzer-Entscheidung (verschärft im Lauf der
+   Diskussion): das Durchsuchen des Index darf UNTER KEINEN UMSTÄNDEN
+   ein Öffnen/Hydrieren einer Datei erfordern - auch nicht für Dateien
+   innerhalb von ZIP/PDF-Einbettungen/E-Mail-Anhängen. Der interaktive
+   Aufklapp-Mechanismus von BAUM_FS (sond_tvfm_item_load_fs_dir() &
+   Co.) bleibt davon ausdrücklich unberührt - "wenn ich in eine Datei
+   einsteige, muss geladen werden, ist klar".
+
+ - zond_treeviewfm_item_get_fileparts() (zond_treeviewfm.c) sammelt für
+   "wirkliche" (nicht in einem Container liegende) Dateisystem-Äste
+   jetzt über einen eigenen readdir-Scanner (neue Funktion
+   zond_treeviewfm_item_get_fileparts_readdir()) statt über den
+   bisherigen Weg via sond_tvfm_item_load_children()/
+   sond_file_part_create() (2-KB-Inhalts-Sniffing). Nutzt nur
+   sond_dir_open()/sond_stat() (Metadaten) und
+   sond_file_part_create_leaf() mit rein endungsbasiertem MIME-Typ
+   (mime_from_extension()) - kein Dateizugriff. Gilt für "Gesamtes
+   Projekt" UND ordnerbasierte "Auswahl" gleichermaßen, für Index
+   Erstellen/Durchsuchen/Löschen (dieselbe Sammelfunktion). Ein frisch
+   entdeckter Container (ZIP/PDF mit Einbettungen/E-Mail) wird dabei
+   NIE aufgeschlüsselt, sondern immer als ein einziger opaker Filepart
+   eingetragen - das war beim bisherigen Weg für diesen Fall ohnehin
+   nie anders (verifiziert, keine Verhaltensänderung für "Index
+   erstellen": die tatsächliche Rekursion in Container-Inhalte
+   passiert unverändert erst downstream in sond_process_file.c, s.
+   nächster Punkt).
+
+ - Klargestellt (Nutzer-Nachfrage, per Code verifiziert statt vermutet):
+   die vollständige, beliebig tief verschachtelte Rekursion in
+   Container-Inhalte bei "Index erstellen" findet in sond_process_file.c
+   statt, NICHT bei der Fileparts-Sammlung - process_zip_for_ocr() geht
+   dort alle ZIP-Einträge durch, pdf_walk_embedded_files() alle
+   embedded files eines PDF, gmessage_process_part() rekursiv den
+   ganzen MIME-Baum einer E-Mail, jeweils mit rekursivem Aufruf von
+   sond_process_file_do_rec() pro Eintrag (Pfad-Konvention "//"). Beide
+   Befunde (Sammlung sammelt Container nur opak ein / Verarbeitung
+   schlüsselt sie vollständig auf) widersprechen sich nicht, sie
+   betreffen verschiedene Pipeline-Stufen.
+
+ - container_entrycount(filename, total_entries) - neue Tabelle
+   (sond_index.h/.c), analog file_pagecount, aber für die Anzahl
+   direkter Container-Einträge statt Seiten. Grund: check_coverage_one()
+   (zond_indexsuche.c) muss für einen NICHT vollständig abgedeckten ZIP-
+   Container trotzdem sagen können, ob/wie viel darin schon (über eine
+   frühere gezielte Auswahl) indiziert wurde, ohne den Container zu
+   öffnen. Bewusst nur EINE Ebene (Nutzer-Vorgabe: "für die
+   coverage-Prüfung reicht die Aussage 'xyz.zip nicht erfaßt', egal was
+   sich genau darin befindet") - kein Anspruch auf eine rekursive
+   Gesamtzahl über mehrere Container-Ebenen hinweg. Population: ZIP in
+   process_zip_for_ocr() (zip_get_num_entries(), immer, unabhängig
+   davon ob dabei etwas verändert wurde). Keine mtime/Größe nötig (wie
+   file_pagecount): externe Änderungen finden laut bestehender Absprache
+   nur auf Projekt-Root-Ebene statt. sond_index_ctx_count_nested_
+   indexed() zählt dazu passend nur DIREKTE Kinder (ein "//"-Segment,
+   tiefer verschachtelte Treffer zählen als Beleg für ihr direktes
+   Elternsegment, nicht extra).
+
+   Zunächst analog auch für PDF (process_pdf_for_ocr(), Zähler in
+   ProcessPdfData) und E-Mail (process_gmessage_for_ocr(),
+   g_mime_multipart_get_count() des Wurzel-Teils) mitgebaut, dann aber
+   wieder zurückgebaut (15.09.2026, Nutzerfrage/-Entscheidung): beim
+   Umsetzen aufgefallen, dass check_coverage_one() den
+   container_entrycount-Zweig nur für ZIP (application/zip - weder
+   is_pdf noch von sond_index_mime_type_supported() als "ganze Datei"
+   indizierbar erkannt) je betritt. PDFs laufen immer über die
+   is_pdf-Zweige (eigene Seiten + alle embedded files werden bei "Index
+   erstellen" in einem Rutsch verarbeitet, s.o.), E-Mails sind über
+   message/rfc822 direkt unterstützt und bekommen bei vollständiger
+   Verarbeitung immer einen eigenen pages-Eintrag unter ihrem eigenen
+   Dateinamen (Header + nicht-Attachment-Body-Text, s.
+   build_gmessage_text() in sond_text_extract.c) - beide brauchen den
+   container_entrycount-Zweig daher nie, die PDF-/E-Mail-Population wäre
+   dauerhaft toter Code gewesen. container_entrycount betrifft damit nur
+   ZIP.
+
+ - check_coverage_one() (zond_indexsuche.c) zusätzlich angepasst: PDF-
+   Erkennung jetzt auch über die Dateiendung (nicht nur
+   SOND_IS_FILE_PART_PDF()), da die readdir-Scanner-Fileparts immer
+   LEAF sind. Für ZIP-Dateien ohne bekannten container_entrycount (noch
+   nie als Ganzes verarbeitet) wird jetzt "nicht erfaßt" gemeldet
+   (missing=total=1, wie eine normale nie indizierte Datei) statt
+   stillschweigend gar nicht als Lücke aufzutauchen - vorher wären
+   Container, von denen bislang nur ein gezielt ausgewählter Eintrag
+   indiziert wurde, fälschlich gar nicht als Lücke erschienen.
+
+ - BAUM_INHALT/BAUM_AUSWERTUNG (15.09.2026, Nutzerfrage, behoben):
+   sammeln ihre Fileparts für "Index erstellen/durchsuchen/löschen
+   (Auswahl)" nicht über einen Verzeichnis-Scan, sondern über die
+   Anbindung jedes Baum-Knotens
+   (zond_treeview_get_selected_fileparts_foreach(), zond_treeview.c) -
+   der Datei-Teil der Anbindung ging dabei bisher durch
+   sond_file_part_from_filepart() (sond_fileparts.c), die für JEDES
+   "//"-Segment sond_file_part_create() aufruft - und die liest
+   tatsächlich 2048 Bytes zur MIME-Erkennung. Dieser Weg war also NICHT
+   hydrierungsfrei, unabhängig vom obigen BAUM_FS-Fix. Fix: neue
+   Funktion sond_file_part_from_filepart_leaf() (sond_fileparts.c) -
+   baut dieselbe verschachtelte Eltern-Kind-Kette wie
+   sond_file_part_from_filepart() (wird für "Index erstellen" bei
+   Anbindungen INNERHALB eines Containers gebraucht, damit
+   sond_file_part_get_bytes() den Eintrag später korrekt über die
+   Eltern-Kette extrahieren kann - anders als beim BAUM_FS-Scanner, der
+   Container nie aufschlüsselt), aber mit sond_file_part_create_leaf()
+   (Endung statt Inhalt) statt sond_file_part_create() pro Segment -
+   inklusive derselben sond_file_part_is_open()-Vorabsuche wie im
+   Original, sonst würde die Identitäts-basierte Vereinigung mehrerer
+   Anbindungen auf dieselbe Datei (Z. 3385ff.) unterlaufen. Nur an
+   dieser einen Stelle eingesetzt; sond_file_part_from_filepart() selbst
+   unangetastet gelassen - wird an anderen Stellen (Datei öffnen im
+   Viewer: seiten.c/stand_alone.c; PDF-Stapelfunktionen:
+   headerbar.c:selection_abfragen_pdf(); zond_treeview.c:
+   get_filepart_from_iter()) zu Recht weiterhin mit echter
+   Inhaltserkennung gebraucht. Als Nebeneffekt jetzt auch für
+   zond_treeview_seadrive_apply_to_selection() (Pin/Unpin-Menü)
+   hydrierungsfrei, da diese denselben Sammelweg nutzt.
+
+ Performance "Index durchsuchen" bei großen Projektverzeichnissen
+ (15.09.2026, Nutzer-Fund, für "Gesamtes Projekt" behoben):
+
+ - Anlass: bei einem großen, größtenteils schon indizierten
+   Projektverzeichnis dauerte allein der Abgleich mit dem Bestand
+   mehrere Minuten - der bisherige Weg legte für JEDE Datei im Projekt
+   ein SondFilePart an und fragte die DB einzeln ab, auch innerhalb
+   längst vollständig abgedeckter Ordner. Dazu kam eine UX-Klage: bei
+   einem schlecht abgedeckten Projekt wurden ggf. hunderte einzelne
+   Dateien als Lücke aufgelistet, ohne dass das dem Nutzer weiterhalf.
+
+ - Neuer Scanner scan_coverage_gaps_fs() (zond_indexsuche.c), ersetzt
+   für "Gesamtes Projekt" den bisherigen Weg über
+   zond_treeviewfm_get_fileparts()+check_coverage(). Nutzt die
+   schon vorhandene sond_index_ctx_get_dir_status() (coverage_get() +
+   eine LIKE-Existenzprüfung auf pages/coverage, rein DB-seitig) pro
+   Verzeichnis-Ebene: FULL -> ganzer Ast übersprungen, gar nicht erst
+   per readdir hineingelesen; NONE -> ganzer Ast als EINE Lücke
+   gemeldet (Nutzer-Vorgabe: nur der Pfad, keine Dateizahl - eine
+   Zählung würde wieder ein volles Listing erfordern); PARTIAL -> eine
+   Ebene tiefer readdir'en und dieselbe Prüfung je Kind wiederholen,
+   bis die Mischgrenze gefunden ist - erst dort werden einzelne Dateien
+   weiterhin per check_coverage_one() geprüft. Die oberste Ebene
+   (Projektverzeichnis selbst) wird nie pauschal geprüft, sondern immer
+   direkt aufgeklappt - Coverage wird nie über die oberste Ebene hinaus
+   zusammengefasst (s. coverage_try_collapse()), ein Eintrag fürs ganze
+   Projekt existiert also nie.
+
+ - SondIndexCoverageGap um dir_path erweitert (Verzeichnis-Gap, sfp
+   bleibt NULL). Die eigentliche Aufschlüsselung eines gemeldeten
+   Verzeichnis-Asts in einzelne Fileparts passiert dabei bewusst NICHT
+   beim Scannen/Anzeigen, sondern erst verzögert, wenn der Nutzer im
+   Lücken-Dialog "jetzt nachindizieren" wählt (neue gemeinsame Funktion
+   handle_coverage_gaps(), löst zond_treeviewfm_item_get_fileparts_
+   readdir() dafür extra aus) - dafür wurde diese bisher datei-lokale
+   Funktion (zond_treeviewfm.c) exponiert (zond_treeviewfm.h).
+
+ - Offen (zurückgestellt): dieselbe Verzeichnis-Kurzschluss-Logik für
+   "Index erstellen (Gesamtes Projekt)" - dort wird die Fileparts-
+   Sammlung aber VOR der OCR-Modus-Abfrage ausgeführt
+   (zond_index_erstellen_ht(), headerbar.c), ein komplett abgedeckter
+   Ast dürfte beim Modus "erzwingen" aber NICHT übersprungen werden.
+   Ohne die Abfragereihenfolge umzustellen (ask_ocr_mode() vor die
+   Sammlung vorziehen, Modus bis in
+   zond_treeviewfm_item_get_fileparts_readdir() durchreichen) wäre ein
+   Kurzschluss dort falsch. Nutzerwunsch, aber noch nicht umgesetzt.
 
  */

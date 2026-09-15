@@ -145,6 +145,28 @@ static const gchar *SQL_CREATE_PAGECOUNT =
            * (sond_index_ctx_clear_file()/delete_index() bei ganzer
            * Datei) - s. ToDo.c (11.09.2026, Nutzerentscheidung). */
 
+static const gchar *SQL_CREATE_ENTRYCOUNT =
+    "CREATE TABLE IF NOT EXISTS container_entrycount ("
+    "  filename      TEXT    PRIMARY KEY,"
+    "  total_entries INTEGER NOT NULL"
+    ");"; /* Zuletzt bekannte Anzahl der internen Einträge eines Container-
+           * Formats (ZIP-Archiv, E-Mail mit Anhängen, PDF mit eingebetteten
+           * Dateien) - dieselbe Rolle wie file_pagecount, nur "Eintrag"
+           * statt "Seite" als Einheit. Grund: das Durchsuchen des Index
+           * (im Unterschied zum Erstellen) soll NIE eine Datei öffnen
+           * müssen (SeaDrive-Hydrierung, s. ToDo.c 12.09.2026) - ohne
+           * diese Tabelle gäbe es keine Möglichkeit, "X von Y Einträgen
+           * fehlen" für einen Container zu ermitteln, ohne ihn erneut zu
+           * öffnen. Befüllt beim Indizieren, sobald zond die interne
+           * Einträgeliste eines Containers ohnehin ermittelt (s.
+           * sond_index_ctx_set_entry_count()). Keine mtime/Größe nötig:
+           * Änderungen an Container-Interna finden laut Absprache nur
+           * über zond selbst statt und werden dabei bereits über die
+           * bestehende Invalidierung erfasst - der DB-Stand gilt daher
+           * immer als aktuell (Nutzer-Entscheidung 12.09.2026). Eigene
+           * Tabelle statt gemeinsam mit file_pagecount: unterschiedliche
+           * Einheit (Seiten vs. Einträge), eigenständig erweiterbar. */
+
 /* =======================================================================
  * Schema initialisieren
  * ======================================================================= */
@@ -220,6 +242,14 @@ static gboolean db_init_schema(SondIndexCtx *ctx, GError **error) {
     if (rc != SQLITE_OK) {
         g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
                     "db_init_schema: CREATE file_pagecount: %s", errmsg);
+        sqlite3_free(errmsg);
+        return FALSE;
+    }
+
+    rc = sqlite3_exec(ctx->db, SQL_CREATE_ENTRYCOUNT, NULL, NULL, &errmsg);
+    if (rc != SQLITE_OK) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "db_init_schema: CREATE container_entrycount: %s", errmsg);
         sqlite3_free(errmsg);
         return FALSE;
     }
@@ -535,6 +565,12 @@ gboolean sond_index_ctx_clear_file(SondIndexCtx *ctx,
     }
 
     /* Datei existiert nicht mehr im Index - die zuletzt bekannte
+     * interne Einträgeanzahl (container_entrycount), falls filename ein
+     * Container war, ist damit ebenfalls hinfällig. */
+    if (!sond_index_ctx_clear_entry_count(ctx, filename, error))
+        return FALSE;
+
+    /* Datei existiert nicht mehr im Index - die zuletzt bekannte
      * Seitenzahl (file_pagecount) ist damit ebenfalls hinfällig. */
     if (!sond_index_ctx_clear_page_count(ctx, filename, error))
         return FALSE;
@@ -625,6 +661,158 @@ gboolean sond_index_ctx_clear_page_count(SondIndexCtx *ctx,
     g_free(pattern);
 
     return TRUE;
+}
+
+/* =======================================================================
+ * sond_index_ctx_set_entry_count / _get_entry_count / _clear_entry_count
+ * ======================================================================= */
+
+gboolean sond_index_ctx_set_entry_count(SondIndexCtx *ctx, gchar const *filename,
+        gint total_entries, GError **error) {
+    sqlite3_stmt *stmt = NULL;
+
+    if (!ctx || !filename)
+        return TRUE;
+
+    if (sqlite3_prepare_v2(ctx->db,
+            "INSERT INTO container_entrycount(filename, total_entries) VALUES(?, ?)"
+            " ON CONFLICT(filename) DO UPDATE SET total_entries = excluded.total_entries",
+            -1, &stmt, NULL) != SQLITE_OK) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "%s: prepare: %s", __func__, sqlite3_errmsg(ctx->db));
+        return FALSE;
+    }
+    sqlite3_bind_text(stmt, 1, filename, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int (stmt, 2, total_entries);
+    if (sqlite3_step(stmt) != SQLITE_DONE) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "%s: step: %s", __func__, sqlite3_errmsg(ctx->db));
+        sqlite3_finalize(stmt);
+        return FALSE;
+    }
+    sqlite3_finalize(stmt);
+
+    return TRUE;
+}
+
+gint sond_index_ctx_get_entry_count(SondIndexCtx *ctx, gchar const *filename) {
+    sqlite3_stmt *stmt   = NULL;
+    gint          result = -1;
+
+    if (!ctx || !filename)
+        return -1;
+
+    if (sqlite3_prepare_v2(ctx->db,
+            "SELECT total_entries FROM container_entrycount WHERE filename = ?",
+            -1, &stmt, NULL) != SQLITE_OK)
+        return -1;
+
+    sqlite3_bind_text(stmt, 1, filename, -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(stmt) == SQLITE_ROW)
+        result = sqlite3_column_int(stmt, 0);
+    sqlite3_finalize(stmt);
+
+    return result;
+}
+
+gboolean sond_index_ctx_clear_entry_count(SondIndexCtx *ctx,
+        gchar const *filename, GError **error) {
+    sqlite3_stmt *stmt    = NULL;
+    gchar        *pattern = NULL;
+
+    if (!ctx || !filename)
+        return TRUE;
+
+    pattern = g_strdup_printf("%s/%%", filename);
+
+    if (sqlite3_prepare_v2(ctx->db,
+            "DELETE FROM container_entrycount WHERE filename = ?1 OR filename LIKE ?2",
+            -1, &stmt, NULL) != SQLITE_OK) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "%s: prepare: %s", __func__, sqlite3_errmsg(ctx->db));
+        g_free(pattern);
+        return FALSE;
+    }
+    sqlite3_bind_text(stmt, 1, filename, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, pattern,  -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(stmt) != SQLITE_DONE) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "%s: step: %s", __func__, sqlite3_errmsg(ctx->db));
+        sqlite3_finalize(stmt);
+        g_free(pattern);
+        return FALSE;
+    }
+    sqlite3_finalize(stmt);
+    g_free(pattern);
+
+    return TRUE;
+}
+
+/* =======================================================================
+ * sond_index_ctx_count_nested_indexed
+ * ======================================================================= */
+
+gint sond_index_ctx_count_nested_indexed(SondIndexCtx *ctx, gchar const *path) {
+    sqlite3_stmt *stmt       = NULL;
+    gchar        *pattern    = NULL;
+    gsize         prefix_len = 0;
+    GHashTable   *ht_children = NULL;
+    gint          result     = -1;
+
+    if (!ctx || !path)
+        return -1;
+
+    pattern    = g_strdup_printf("%s//%%", path);
+    prefix_len = strlen(path) + 2; /* Länge von "path//" */
+
+    /* Nested Pfade (Konvention "path//..."), die IRGENDEINEN Hinweis auf
+     * Indizierung haben - entweder noch einzelne Zeilen in "pages"
+     * (teilweise/gerade erst indiziert) oder schon zu einem eigenen
+     * coverage-Eintrag kollabiert (vollständig indiziert, s.
+     * coverage_mark()/_try_collapse()). Rein aus der DB, kein
+     * Dateizugriff.
+     *
+     * Auf DIREKTE Kinder (eine Ebene) reduziert: ein Treffer, der noch
+     * tiefer verschachtelt ist ("path//kind//enkel...", z.B. ein PDF
+     * innerhalb eines bereits als embedded file indizierten Zip-Eintrags),
+     * zählt als Beleg für "kind", nicht als eigener Eintrag - passend zu
+     * total_entries (container_entrycount), das ebenfalls nur eine Ebene
+     * zählt (ToDo.c, 12.-14.09.2026). */
+    if (sqlite3_prepare_v2(ctx->db,
+            "SELECT DISTINCT filename AS p FROM pages WHERE filename LIKE ?1"
+            "  UNION"
+            "  SELECT DISTINCT path AS p FROM coverage WHERE path LIKE ?1",
+            -1, &stmt, NULL) != SQLITE_OK) {
+        g_free(pattern);
+        return -1;
+    }
+
+    sqlite3_bind_text(stmt, 1, pattern, -1, SQLITE_TRANSIENT);
+
+    ht_children = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        gchar const *p = (gchar const *) sqlite3_column_text(stmt, 0);
+        gchar const *rest = NULL;
+        gchar const *next_sep = NULL;
+        gchar *child = NULL;
+
+        if (!p || strlen(p) <= prefix_len)
+            continue;
+
+        rest     = p + prefix_len;
+        next_sep = strstr(rest, "//");
+        child    = next_sep ? g_strndup(p, (gsize) (next_sep - p)) : g_strdup(p);
+
+        g_hash_table_add(ht_children, child);
+    }
+    sqlite3_finalize(stmt);
+
+    result = (gint) g_hash_table_size(ht_children);
+    g_hash_table_destroy(ht_children);
+    g_free(pattern);
+
+    return result;
 }
 
 /* =======================================================================
@@ -1627,6 +1815,12 @@ gboolean sond_index_ctx_delete_index(SondIndexCtx *ctx, gchar const *path,
     if (!sond_index_ctx_coverage_clear(ctx, path, error))
         return FALSE;
 
+    /* Ganze Datei(en)/Verzeichnis gelöscht - zuletzt bekannte
+     * Einträgeanzahl(en) etwaiger Container darunter sind damit
+     * hinfällig. */
+    if (!sond_index_ctx_clear_entry_count(ctx, path, error))
+        return FALSE;
+
     /* Ganze Datei(en) gelöscht - zuletzt bekannte Seitenzahl(en) sind
      * damit hinfällig. */
     if (!sond_index_ctx_clear_page_count(ctx, path, error))
@@ -1676,6 +1870,14 @@ gboolean sond_index_ctx_delete_all(SondIndexCtx *ctx, GError **error) {
         return FALSE;
     }
 
+    if (sqlite3_exec(ctx->db, "DELETE FROM container_entrycount;", NULL, NULL, &errmsg)
+            != SQLITE_OK) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                "%s: DELETE container_entrycount: %s", __func__, errmsg);
+        sqlite3_free(errmsg);
+        return FALSE;
+    }
+
     return TRUE;
 }
 
@@ -1695,7 +1897,8 @@ gboolean sond_index_ctx_rename_file(SondIndexCtx *ctx,
      * Das ersetzt den Anfang (prefix_old) durch prefix_new,
      * der Rest (nach dem Präfix) bleibt unverandert.
      */
-    const gchar *tables[] = { "chunks", "pages", "file_pagecount" };
+    const gchar *tables[] = { "chunks", "pages", "file_pagecount",
+            "container_entrycount" };
     gchar       *pattern  = g_strdup_printf("%s//%%", prefix_old);
 
     for (guint t = 0; t < G_N_ELEMENTS(tables); t++) {

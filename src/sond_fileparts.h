@@ -82,6 +82,12 @@ gchar* sond_file_part_get_filepart(SondFilePart*);
 
 SondFilePart* sond_file_part_from_filepart(gchar const*, GError**);
 
+/* Wie sond_file_part_from_filepart(), aber ohne jeden Dateizugriff (nur
+ * endungsbasierte MIME-Erkennung, s. Doc-Kommentar an der Implementierung) -
+ * für den hydrierungsfreien Indizierungs-Sammelpfad bei BAUM_INHALT/
+ * BAUM_AUSWERTUNG (ToDo.c, 12.-15.09.2026). */
+SondFilePart* sond_file_part_from_filepart_leaf(gchar const*, GError**);
+
 gint sond_file_part_delete(SondFilePart*, GError**);
 
 gint sond_file_part_rename(SondFilePart*, gchar const* path_new,

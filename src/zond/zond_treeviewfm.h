@@ -46,6 +46,20 @@ void zond_treeviewfm_kill_parent(ZondTreeviewFM*, GtkTreeIter*);
 GHashTable* zond_treeviewfm_get_fileparts(ZondTreeviewFM*, gboolean,
 		gboolean, GError**);
 
+/* Reiner readdir-Scanner für einen "wirklichen" (nicht in einem Container
+ * liegenden) Dateisystem-Ast - Kernstück von
+ * zond_treeviewfm_item_get_fileparts() (s. dortigen Kommentar), hier
+ * zusätzlich exponiert für die verzögerte Aufschlüsselung eines als
+ * Verzeichnis-Lücke gemeldeten Asts bei "Index durchsuchen" -> "jetzt
+ * nachindizieren" (s. zond_indexsuche.c, scan_coverage_gaps_fs()/
+ * handle_coverage_gaps()). rel_dir NULL = Projektwurzel. Trägt die
+ * gefundenen Dateien (als SOND_TYPE_FILE_PART_LEAF, rein endungsbasierter
+ * MIME-Typ, kein Dateizugriff) in ht ein (Value jeweils NULL = ganze
+ * Datei) - ht muss vom Aufrufer mit passenden Destroy-Funktionen für
+ * SondFilePart*-Keys angelegt sein. ToDo.c (12.-15.09.2026). */
+gint zond_treeviewfm_item_get_fileparts_readdir(SondTreeviewFM*,
+		gchar const*, GHashTable*, GError**);
+
 G_END_DECLS
 
 #endif // ZOND_TREEVIEWFM_H_INCLUDED
