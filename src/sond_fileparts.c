@@ -1205,9 +1205,40 @@ gint sond_file_part_copy(SondFilePart* sfp_src,
 /*
  * ZIPs
  */
-G_DEFINE_TYPE(SondFilePartZip, sond_file_part_zip, SOND_TYPE_FILE_PART)
+typedef struct {
+	/* Verzeichnis-Index des Archivs, s. Doc-Kommentar an
+	 * sond_file_part_zip_list_dir() (sond_fileparts.h). Key: Prefix ohne
+	 * '/' ("" = Wurzel), Value: GPtrArray<SondZipDirEntry*>. NULL = noch
+	 * nicht aufgebaut (lazy) oder invalidiert. */
+	GHashTable* dir_index;
+} SondFilePartZipPrivate;
+
+G_DEFINE_TYPE_WITH_PRIVATE(SondFilePartZip, sond_file_part_zip, SOND_TYPE_FILE_PART)
+
+static void sond_zip_dir_entry_free(gpointer p) {
+	SondZipDirEntry* e = (SondZipDirEntry*) p;
+	g_free(e->path);
+	g_free(e);
+}
+
+/* Invalidiert den ggf. gecachten Verzeichnis-Index - bei jeder Änderung am
+ * Archivinhalt aufzurufen (s. sond_file_part_zip_mod_zip_file(),
+ * sond_file_part_zip_rename_file(), sond_file_part_zip_insert_zip_file()). */
+static void sond_file_part_zip_invalidate_dir_index(SondFilePartZip* sfp_zip) {
+	SondFilePartZipPrivate* priv =
+			sond_file_part_zip_get_instance_private(sfp_zip);
+
+	if (priv->dir_index) {
+		g_hash_table_destroy(priv->dir_index);
+		priv->dir_index = NULL;
+	}
+
+	return;
+}
 
 static void sond_file_part_zip_finalize(GObject *self) {
+	sond_file_part_zip_invalidate_dir_index(SOND_FILE_PART_ZIP(self));
+
 	G_OBJECT_CLASS(sond_file_part_zip_parent_class)->finalize(self);
 
 	return;
@@ -1226,6 +1257,114 @@ static void sond_file_part_zip_init(SondFilePartZip* self) {
 	sfp_priv->arr_opened_files = g_ptr_array_new( );
 
 	return;
+}
+
+/* Baut den vollständigen Verzeichnis-Index eines ZIP-Archivs in einem
+ * einzigen Durchlauf über alle Einträge auf (s. Doc-Kommentar an
+ * sond_file_part_zip_list_dir(), sond_fileparts.h). Für jeden Eintrag
+ * werden sämtliche Verzeichnis-Ebenen, die er durchläuft, dedupliziert
+ * (seen) unter dem jeweiligen unmittelbaren Eltern-Präfix einsortiert; der
+ * Eintrag selbst (Datei oder expliziter Verzeichniseintrag) landet unter
+ * dem Präfix seines unmittelbaren Elternverzeichnisses. Ergebnis:
+ * GHashTable Präfix (ohne '/', "" = Wurzel) -> GPtrArray<SondZipDirEntry*>
+ * für ALLE Ebenen gleichzeitig - ersetzt das frühere, je Verzeichnisknoten
+ * erneut komplett scannende Vorgehen. */
+static GHashTable* sfp_zip_build_dir_index(zip_t* archive) {
+	GHashTable* index = NULL;
+	GHashTable* seen = NULL;
+	zip_int64_t num_entries = 0;
+
+	index = g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
+			(GDestroyNotify) g_ptr_array_unref);
+	seen = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+
+	num_entries = zip_get_num_entries(archive, 0);
+
+	for (zip_int64_t i = 0; i < num_entries; i++) {
+		gchar const* name = zip_get_name(archive, (zip_uint64_t) i, ZIP_FL_ENC_UTF_8);
+		gboolean ends_with_slash = FALSE;
+		gsize clean_len = 0;
+		gsize pos = 0;
+
+		if (!name || !*name)
+			continue;
+
+		ends_with_slash = (name[strlen(name) - 1] == '/');
+		clean_len = ends_with_slash ? strlen(name) - 1 : strlen(name);
+
+		while (pos < clean_len) {
+			gchar const* rest = name + pos;
+			gchar const* slash_in_rest = memchr(rest, '/', clean_len - pos);
+			gsize comp_end = slash_in_rest ? (gsize) (slash_in_rest - name) : clean_len;
+			gboolean is_last_component = (comp_end == clean_len);
+			gchar* parent_prefix = NULL;
+			gchar* child_path = NULL;
+			gboolean child_is_dir = FALSE;
+
+			parent_prefix = g_strndup(name, pos > 0 ? pos - 1 : 0);
+
+			if (is_last_component) {
+				child_is_dir = ends_with_slash;
+				child_path = ends_with_slash ?
+						g_strndup(name, clean_len + 1) : g_strdup(name);
+			} else {
+				child_is_dir = TRUE;
+				child_path = g_strndup(name, comp_end + 1); //inkl. '/'
+			}
+
+			if (!g_hash_table_contains(seen, child_path)) {
+				SondZipDirEntry* e = g_new0(SondZipDirEntry, 1);
+				GPtrArray* bucket = NULL;
+
+				e->path = g_strdup(child_path);
+				e->is_dir = child_is_dir;
+
+				bucket = g_hash_table_lookup(index, parent_prefix);
+				if (!bucket) {
+					bucket = g_ptr_array_new_with_free_func(sond_zip_dir_entry_free);
+					g_hash_table_insert(index, g_strdup(parent_prefix), bucket);
+				}
+				g_ptr_array_add(bucket, e);
+
+				g_hash_table_add(seen, g_strdup(child_path));
+			}
+
+			g_free(parent_prefix);
+			g_free(child_path);
+
+			pos = comp_end + 1; //hinter das '/'
+		}
+	}
+
+	g_hash_table_destroy(seen);
+
+	return index;
+}
+
+GPtrArray* sond_file_part_zip_list_dir(SondFilePartZip* sfp_zip,
+		gchar const* prefix, GError** error) {
+	SondFilePartZipPrivate* priv = NULL;
+	GPtrArray* result = NULL;
+
+	g_return_val_if_fail(sfp_zip, NULL);
+
+	priv = sond_file_part_zip_get_instance_private(sfp_zip);
+
+	if (!priv->dir_index) {
+		zip_t* archive = sond_file_part_zip_open_archive(sfp_zip, FALSE, NULL, error);
+		if (!archive)
+			return NULL;
+
+		priv->dir_index = sfp_zip_build_dir_index(archive);
+
+		zip_discard(archive);
+	}
+
+	result = g_hash_table_lookup(priv->dir_index, prefix ? prefix : "");
+	if (!result)
+		return g_ptr_array_new_with_free_func(sond_zip_dir_entry_free);
+
+	return g_ptr_array_ref(result);
 }
 
 /**
@@ -1501,6 +1640,12 @@ static GBytes* sond_file_part_zip_mod_zip_file(SondFilePartZip* sfp_zip,
 	GBytes* result = sond_file_part_zip_archive_to_bytes_with_src(archive, src, error);
 	zip_source_free(src); /* extra ref freigeben */
 
+	//Archivinhalt hat sich geändert (Datei eingefügt/ersetzt/gelöscht) -
+	//gecachten Verzeichnis-Index (s. sond_file_part_zip_list_dir())
+	//verwerfen, sonst zeigt eine spätere Anzeige/Anbindung veraltete
+	//Einträge
+	sond_file_part_zip_invalidate_dir_index(sfp_zip);
+
 	return result;
 }
 
@@ -1551,6 +1696,9 @@ static gint sond_file_part_zip_rename_file(SondFilePartZip* sfp_zip,
 	g_bytes_unref(bytes_out);
 	if (rc)
 		return -1;
+
+	//s. Kommentar in sond_file_part_zip_mod_zip_file()
+	sond_file_part_zip_invalidate_dir_index(sfp_zip);
 
 	return 0;
 }
@@ -1619,6 +1767,9 @@ static gint sond_file_part_zip_insert_zip_file(SondFilePartZip* sfp_zip,
 				sond_file_part_get_instance_private(SOND_FILE_PART(sfp_zip));
 		sfp_priv->has_children = TRUE;
 	}
+
+	//s. Kommentar in sond_file_part_zip_mod_zip_file()
+	sond_file_part_zip_invalidate_dir_index(sfp_zip);
 
 	return 0;
 }

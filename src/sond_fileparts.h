@@ -109,6 +109,38 @@ struct _SondFilePartZipClass {
 zip_t* sond_file_part_zip_open_archive(SondFilePartZip*, gboolean writeable,
 		zip_source_t**, GError**);
 
+/* Ein direktes Kind (Datei oder Unterverzeichnis) innerhalb eines ZIP-
+ * Archivs, wie von sond_file_part_zip_list_dir() geliefert. path: bei
+ * Verzeichnissen der volle Pfad inkl. abschließendem '/', sonst der volle
+ * Eintragsname. */
+typedef struct {
+	gchar* path;
+	gboolean is_dir;
+} SondZipDirEntry;
+
+/* Liefert die direkten Kinder von prefix (ohne abschließendes '/', NULL =
+ * Archiv-Wurzel) im ZIP-Archiv sfp_zip - GPtrArray<SondZipDirEntry*>
+ * (Freigabe durch Aufrufer via g_ptr_array_unref(), Elemente werden dabei
+ * automatisch mitfreigegeben). Leeres Verzeichnis: gültiges, leeres Array
+ * (nicht NULL); NULL nur bei echtem Fehler (Archiv nicht zu öffnen).
+ *
+ * Baut den vollständigen Verzeichnis-Index des Archivs beim ersten Aufruf
+ * EINMAL in einem einzigen Durchlauf über alle Einträge und hält ihn auf
+ * sfp_zip gecacht (analog zum gecachten GMimeMessage bei
+ * SondFilePartGMessage, s. sond_file_part_gmessage_open() in
+ * sond_fileparts.c) - jeder weitere Aufruf für dasselbe Archiv, gleich für
+ * welchen Unterpfad/welche Tiefe, bedient sich per O(1)-Hashtable-Lookup
+ * statt das Archiv erneut vollständig zu scannen bzw. sogar erneut zu
+ * öffnen. Ohne das: bei rekursivem Aufschlüsseln eines ganzen Archivs
+ * (Anbinden von BAUM_FS nach BAUM_INHALT, s. ToDo.c) ein weiterer
+ * O(Einträge)-Durchlauf UND ein erneutes Öffnen je besuchtem
+ * Verzeichnisknoten - macht bei Archiven mit mehreren tausend Einträgen
+ * das Anbinden praktisch endlos (Nutzer-Fund, 15./16.09.2026). Der Cache
+ * wird bei jeder Archiv-Änderung (Einfügen/Ersetzen/Löschen/Umbenennen
+ * eines Eintrags) invalidiert. */
+GPtrArray* sond_file_part_zip_list_dir(SondFilePartZip* sfp_zip,
+		gchar const* prefix, GError** error);
+
 //Sond_File_Part_PDF definieren
 #define SOND_TYPE_FILE_PART_PDF sond_file_part_pdf_get_type( )
 G_DECLARE_DERIVABLE_TYPE(SondFilePartPDF, sond_file_part_pdf, SOND,

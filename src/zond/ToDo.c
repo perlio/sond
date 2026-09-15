@@ -709,4 +709,51 @@
    zond_treeviewfm_item_get_fileparts_readdir() durchreichen) wäre ein
    Kurzschluss dort falsch. Nutzerwunsch, aber noch nicht umgesetzt.
 
+ GLib-CRITICAL "g_date_time_unref: assertion 'datetime->ref_count > 0'
+ failed" (15.09.2026, Nutzer-Log-Fund, behoben):
+
+ - Ursache: build_gmessage_text() (sond_text_extract.c) rief auf dem
+   Rückgabewert von g_mime_message_get_date() ein g_date_time_unref()
+   auf - dieser ist aber laut GMime-API (transfer none) eine von der
+   Message gehaltene, geliehene Referenz. Der zusätzliche unref senkte
+   deren Referenzzähler vorzeitig auf 0; der eigentliche Crash/die
+   CRITICAL-Meldung trat erst später beim Aufräumen der Message selbst
+   auf. Fix: unref-Aufruf entfernt, Fundstelle kommentiert. Einzige
+   Fundstelle im ganzen Code (per grep verifiziert).
+
+ ZIP-Anbinden (BAUM_FS -> BAUM_INHALT) bei großen Archiven praktisch
+ endlos (15./16.09.2026, Nutzer-Fund, behoben):
+
+ - Anlass: Anbinden eines ZIP-Archivs mit mehreren tausend Einträgen
+   hing sich scheinbar auf, das Info-Fenster zeigte nichts an. Ursache
+   keine echte Endlosschleife, sondern eine mit der Archivgröße
+   explodierende Laufzeit: sfp_zip_list_dir() (früher in
+   sond_treeviewfm.c) durchlief bei JEDEM Aufruf - also für JEDEN
+   Verzeichnisknoten im ZIP - erneut ALLE zip_get_num_entries()
+   Einträge, UND sond_tvfm_item_create() rief für jeden neu angelegten
+   ZIP-Verzeichnisknoten zusätzlich noch einmal denselben Vollscan nur
+   zur has_children-Bestimmung auf (Redundanz). Bei rekursivem
+   Anbinden des ganzen Baums (kein nutzerdosiertes Aufklappen wie beim
+   normalen Browsen in BAUM_FS) macht das O(Einträge × Verzeichnisse)
+   Laufzeit ohne jede Zwischenmeldung.
+   Die (nötige) echte Inhaltserkennung je Datei (eine ZIP-Datei kann
+   selbst wieder ein Container sein, dessen Kinder ebenfalls angebunden
+   werden müssen, s. Nutzer-Entscheidung) bleibt davon unberührt -
+   Anlass des Fixes ist nur die vermeidbare Vervielfachung der reinen
+   Archiv-Auflistung.
+
+ - Fix, analog zum gecachten GMimeMessage bei SondFilePartGMessage
+   (sond_file_part_gmessage_open(), sond_fileparts.c): SondFilePartZip
+   auf G_DEFINE_TYPE_WITH_PRIVATE umgestellt, neues Feld dir_index
+   (GHashTable, Präfix -> GPtrArray<SondZipDirEntry*>). Die komplette
+   Verzeichnisstruktur des Archivs wird jetzt in
+   sond_file_part_zip_list_dir() (neu, öffentlich, sond_fileparts.h/.c
+   - ersetzt das alte, dateilokale sfp_zip_list_dir() in
+   sond_treeviewfm.c) beim ERSTEN Aufruf für dieses Archiv in einem
+   einzigen Durchlauf aufgebaut und auf dem SondFilePartZip gecacht;
+   jeder weitere Aufruf - gleich für welchen Unterpfad/welche Tiefe -
+   bedient sich per Hashtable-Lookup, ohne das Archiv erneut zu öffnen
+   oder zu scannen. Cache-Invalidierung bei jeder Archivänderung
+   (sond_file_part_zip_mod_zip_file()/_rename_file()/_insert_zip_file()).
+
  */

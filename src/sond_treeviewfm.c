@@ -526,87 +526,6 @@ static gint sond_tvfm_item_load_fs_dir(SondTVFMItem* stvfm_item,
 	return 0;
 }
 
-typedef struct {
-	gchar* path; /* Verzeichnis: endet auf '/' */
-	gboolean is_dir; /* NULL = Verzeichnis */
-} ZipDirEntry;
-
-static void zip_dir_entry_free(gpointer p) {
-	ZipDirEntry* e = (ZipDirEntry*) p;
-	g_free(e->path);
-	g_free(e);
-}
-
-static GPtrArray* sfp_zip_list_dir(SondFilePartZip* sfp_zip,
-		gchar const* prefix, GError** error) {
-	zip_t* archive = NULL;
-	zip_int64_t num_entries = 0;
-	GHashTable* seen_dirs = NULL;
-	GPtrArray* result = NULL;
-	gsize prefix_len = prefix ? strlen(prefix) + 1 : 0; /* +1 für '/' */
-
-	archive = sond_file_part_zip_open_archive(sfp_zip, FALSE, NULL, error);
-	if (!archive)
-		return NULL;
-
-	num_entries = zip_get_num_entries(archive, 0);
-	seen_dirs = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
-	result = g_ptr_array_new_with_free_func(zip_dir_entry_free);
-
-	for (zip_int64_t i = 0; i < num_entries; i++) {
-		gchar const* name = zip_get_name(archive, (zip_uint64_t)i, ZIP_FL_ENC_UTF_8);
-		if (!name) continue;
-
-		if (prefix) {
-			if (!g_str_has_prefix(name, prefix)) continue;
-			if (name[strlen(prefix)] != '/') continue;
-		}
-
-		gchar const* rel = name + prefix_len;
-		if (*rel == '\0') continue;
-
-		gchar const* slash = strchr(rel, '/');
-
-		if (!slash) {
-			/* Normale Datei: MIME direkt lesen */
-			ZipDirEntry* e = g_new0(ZipDirEntry, 1);
-			e->path = g_strdup(name);
-			e->is_dir = FALSE;
-
-			g_ptr_array_add(result, e);
-		} else if (*(slash + 1) == '\0') {
-			/* Expliziter Verzeichnis-Eintrag: wie abgeleitetes Verzeichnis behandeln */
-			gchar* dir_key = g_strdup(name); /* endet auf '/' */
-			if (!g_hash_table_contains(seen_dirs, dir_key)) {
-				ZipDirEntry* e = g_new0(ZipDirEntry, 1);
-				e->path = g_strdup(dir_key);
-				e->is_dir = TRUE;
-				g_hash_table_add(seen_dirs, dir_key);
-				g_ptr_array_add(result, e);
-			} else
-				g_free(dir_key);
-		} else {
-			/* Datei in Unterverzeichnis → Verzeichnis ableiten */
-			gsize dir_len = (gsize)(slash - name) + 1; /* inkl. '/' */
-			gchar* dir_key = g_strndup(name, dir_len);
-
-			if (!g_hash_table_contains(seen_dirs, dir_key)) {
-				ZipDirEntry* e = g_new0(ZipDirEntry, 1);
-				e->path = g_strdup(dir_key); /* endet auf '/' */
-				e->is_dir = TRUE;            /* Verzeichnis */
-				g_hash_table_add(seen_dirs, dir_key);
-				g_ptr_array_add(result, e);
-			} else
-				g_free(dir_key);
-		}
-	}
-
-	zip_discard(archive);
-	g_hash_table_destroy(seen_dirs);
-
-	return result;
-}
-
 static gint sond_tvfm_item_load_zip_dir(SondTVFMItem* stvfm_item,
 		GPtrArray** arr_children, GError** error) {
 	GPtrArray* entries = NULL;
@@ -614,8 +533,11 @@ static gint sond_tvfm_item_load_zip_dir(SondTVFMItem* stvfm_item,
 	SondTVFMItemPrivate* stvfm_item_priv =
 			sond_tvfm_item_get_instance_private(stvfm_item);
 
-	/* path_or_section ist das Verzeichnispäfix (ohne '/'), NULL = Archiv-Wurzel */
-	entries = sfp_zip_list_dir(
+	/* path_or_section ist das Verzeichnispäfix (ohne '/'), NULL = Archiv-
+	 * Wurzel. sond_file_part_zip_list_dir() cacht den Verzeichnis-Index
+	 * auf dem SondFilePartZip selbst (s. dortigen Doc-Kommentar in
+	 * sond_fileparts.h) - hier kein erneuter Vollscan mehr je Knoten. */
+	entries = sond_file_part_zip_list_dir(
 			SOND_FILE_PART_ZIP(stvfm_item_priv->sond_file_part),
 			stvfm_item_priv->path_or_section, error);
 	if (!entries)
@@ -631,7 +553,7 @@ static gint sond_tvfm_item_load_zip_dir(SondTVFMItem* stvfm_item,
 	*arr_children = g_ptr_array_new_with_free_func((GDestroyNotify)g_object_unref);
 
 	for (guint i = 0; i < entries->len; i++) {
-		ZipDirEntry* e = g_ptr_array_index(entries, i);
+		SondZipDirEntry* e = g_ptr_array_index(entries, i);
 		SondTVFMItem* child = NULL;
 
 		if (e->is_dir) {
