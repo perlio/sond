@@ -722,7 +722,8 @@
    Fundstelle im ganzen Code (per grep verifiziert).
 
  ZIP-Anbinden (BAUM_FS -> BAUM_INHALT) bei großen Archiven praktisch
- endlos (15./16.09.2026, Nutzer-Fund, behoben):
+ endlos (15./16.09.2026, Nutzer-Fund, TEILWEISE behoben - Ursache des
+ eigentlichen Hängers noch nicht gefunden, s. unten):
 
  - Anlass: Anbinden eines ZIP-Archivs mit mehreren tausend Einträgen
    hing sich scheinbar auf, das Info-Fenster zeigte nichts an. Ursache
@@ -755,5 +756,99 @@
    bedient sich per Hashtable-Lookup, ohne das Archiv erneut zu öffnen
    oder zu scannen. Cache-Invalidierung bei jeder Archivänderung
    (sond_file_part_zip_mod_zip_file()/_rename_file()/_insert_zip_file()).
+
+ - Nutzer-Rückmeldung (16.09.2026): trotz obigem Fix hängt sich das
+   Anbinden bei einem Archiv mit mehreren tausend Einträgen weiterhin
+   auf - diesmal nicht nur langsam, sondern gar nicht mehr abbrechbar
+   ("Keine Rückmeldung" von Windows), was für eine echte Endlosschleife
+   (nicht nur O(n²)-Langsamkeit) spricht. Ausgeschlossen per gezielter
+   Rückfrage: alter Build (neu gebaut, Effekt bleibt), SeaDrive-
+   Hydrierung (Datei liegt lokal/schon hydriert), Hängen beim bloßen
+   Archiv-Öffnen (normales Browsen/Aufklappen in BAUM_FS funktioniert
+   einwandfrei - der Hänger tritt nachweislich NUR beim automatischen,
+   rekursiven Anbinden auf, nicht beim nutzergesteuerten Aufklappen).
+   Als vorbereitender Schritt wurde testweise Diagnose-Logging
+   (LOG_INFO("DIAG ...")) eingebaut - in zond_treeview_anbinden_rekursiv(),
+   zond_treeview_leaf_anbinden(), zond_treeview_remove_childish_
+   anbindungen() (zond_treeview.c) sowie in sond_tvfm_item_load_zip_dir()
+   je Archiv-Eintrag inkl. vor/nach sond_file_part_create()
+   (sond_treeviewfm.c) - noch nicht ausgewertet, Diagnose zurückgestellt
+   auf Nutzerwunsch (andere Priorität, s. nächster Punkt). Das Logging
+   ist NICHT wieder entfernt und muss vor einem Release noch raus.
+
+ Kopieren eines Verzeichnisses aus einem Container (ZIP) in das
+ Filesystem (16.09.2026, Nutzeranfrage, umgesetzt):
+
+ - copy_dir_across_sfps() (sond_treeviewfm.c) war bislang nur ein Stub
+   ("noch nicht implementiert") - aufgerufen von sond_tvfm_item_copy()
+   immer dann, wenn beim Kopieren eines Verzeichnis-Knotens mindestens
+   eine Seite (Quelle oder Ziel) einen SondFilePart trägt (also nicht
+   reines Dateisystem-zu-Dateisystem, dafür sorgt weiterhin
+   sond_copy_r()).
+
+ - Neue Funktion copy_container_dir_to_fs() implementiert die Richtung
+   Container -> Dateisystem rekursiv: legt das Zielverzeichnis per
+   sond_mkdir() an, holt die Kinder generisch über
+   sond_tvfm_item_load_children() (funktioniert unverändert für ZIP,
+   und strukturell auch für PDF-Ordner/GMessage-Multipart) und
+   unterscheidet je Kind zwei Fälle:
+   1. Echtes Unterverzeichnis IM SELBEN Archiv (Kriterium: Kind trägt
+      denselben SondFilePart wie der Quellknoten, nur mit anderem
+      path_or_section - so legt sond_tvfm_item_load_zip_dir() ZIP-
+      Unterverzeichnisse an) -> rekursiver Aufruf.
+   2. Alles andere (normale Datei ODER eine eingebettete Datei, die
+      selbst wieder ein Container ist, z.B. eine verschachtelte .zip/
+      .pdf) -> wird als GANZE Datei kopiert (sond_file_part_copy() mit
+      sfp_dst=NULL, wie beim schon vorhandenen einzelnen Datei-Kopieren
+      aus einem Container ins Filesystem). Bewusste Nutzer-Entscheidung:
+      eingebettete Container werden NICHT in ihre interne Struktur
+      (PageTree, Anhänge) aufgelöst, sondern 1:1 als normale Datei
+      übernommen - der Nutzer erwartet beim Herauskopieren reale
+      Dateien, keine synthetische App-Ansicht.
+
+ - Sonderfall abgefangen (nicht Teil der Anfrage, aber sonst stiller
+   Fehler): der PDF-"PageTree"- bzw. GMessage-"Message"-Pseudo-Knoten
+   (steht für den Inhalt der Container-Datei selbst, trägt denselben
+   SondFilePart wie deren "Ordner", ist aber vom Typ LEAF statt DIR,
+   s. sond_tvfm_item_create()) würde ohne Sonderbehandlung fälschlich
+   noch einmal als eigene Datei "PageTree"/"Message" kopiert - eine
+   Duplizierung der ganzen PDF/E-Mail-Datei unter falschem Namen. Bei
+   ZIP kommt das nie vor (ZIP-Items sind immer DIR). Für PDF/GMessage
+   bricht copy_container_dir_to_fs() diesen Fall jetzt klar mit
+   Fehlermeldung ab, statt ein falsches Ergebnis zu erzeugen - echtes
+   Kopieren eines PDF-/E-Mail-"Ordners" ins Filesystem war nicht Teil
+   der Anfrage und bleibt offen.
+
+ - Nutzer-Entscheidung: die umgekehrte Richtung (Dateisystem-Verzeichnis
+   in einen Container wie ZIP hineinkopieren) bleibt bewusst
+   unimplementiert (weiterhin Fehlermeldung in copy_dir_across_sfps()).
+
+ Performance ZIP-Anbinden: fehlendes Transaktions-Batching (16.09.2026,
+ Nutzer-Messung 2000 Dateien ~30s, behoben):
+
+ - Ursache: zond_treeview_clipboard_anbinden() (zond_treeview.c) rief
+   sond_treeview_clipboard_foreach() bislang ohne umschließende
+   Transaktion auf. Jeder zond_dbase_insert_node()-Aufruf (Filepart-
+   Registrierung + Anker-Knoten, oft mehrere pro Datei) läuft intern über
+   ein eigenes SAVEPOINT/RELEASE - ohne äußere Transaktion committet
+   jedes RELEASE für sich. Diese DB erzwingt bewusst journal_mode in
+   {DELETE, TRUNCATE, PERSIST} (nicht WAL) und synchronous=FULL (nötig
+   für atomare Mehrdatei-Transaktionen per ATTACH, s.
+   zond_dbase_check_journal_settings()) - jeder dieser Commits löst also
+   einen echten fsync() aus. Bei mehreren tausend Dateien macht allein
+   das den Löwenanteil der Laufzeit aus.
+
+ - Fix: die ganze Anbinden-Operation (der komplette
+   sond_treeview_clipboard_foreach()-Durchlauf) jetzt in EIN
+   zond_dbase_begin()/zond_dbase_commit() eingepackt - analog zum
+   bestehenden Muster in zond_treeview_clipboard_kopieren_foreach() (nur
+   dort pro Top-Level-Element statt für den ganzen Durchlauf). Nur noch
+   ein fsync für die komplette Operation. Nutzer-Abbruch (rc==1 aus
+   sond_treeview_clipboard_foreach()) committet bewusst trotzdem - die
+   bis dahin eingefügten Knoten sollen wie im bisherigen (nicht-
+   transaktionalen) Verhalten erhalten bleiben; nur ein echter DB-Fehler
+   (rc==-1, kommt praktisch nie vor, da zond_treeview_anbinden_rekursiv()
+   Fehler pro Knoten selbst abfängt und weitermacht) löst ein Rollback
+   aus.
 
  */

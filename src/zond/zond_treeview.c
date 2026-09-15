@@ -938,6 +938,10 @@ static gint zond_treeview_remove_childish_anbindungen(ZondTreeview *ztv,
 		if (rc)
 			return -1;
 
+		//DIAG (15./16.09.2026, ZIP-Anbinden-Hänger)
+		LOG_INFO("DIAG remove_childish_anbindungen: ID=%d, baum_inhalt_file=%d",
+				ID, baum_inhalt_file);
+
 		if (!baum_inhalt_file)
 			break;
 
@@ -1048,8 +1052,18 @@ static gint zond_treeview_leaf_anbinden(ZondTreeview *ztv,
 
 	ZondTreeviewPrivate *ztv_priv = zond_treeview_get_instance_private(ztv);
 
+	//DIAG (15./16.09.2026, ZIP-Anbinden-Hänger)
+	LOG_INFO("DIAG leaf_anbinden: Eintritt, sfp=%p", (gpointer)
+			sond_tvfm_item_get_sond_file_part(stvfm_item));
+
 	sfp = sond_tvfm_item_get_sond_file_part(stvfm_item);
+
+	LOG_INFO("DIAG leaf_anbinden: rufe get_filepart auf");
+
 	filepart = sond_file_part_get_filepart(sfp);
+
+	LOG_INFO("DIAG leaf_anbinden: filepart='%s'", filepart ? filepart : "(null)");
+
 	section = sond_tvfm_item_get_path_or_section(stvfm_item);
 
 	info_text = (section) ? g_strdup_printf("Anbindung Abschnitt '%s' in '%s'",
@@ -1182,13 +1196,25 @@ static gint zond_treeview_anbinden_rekursiv(ZondTreeview *ztv,
 
 	ZondTreeviewPrivate *ztv_priv = zond_treeview_get_instance_private(ztv);
 
+	//DIAG (15./16.09.2026, ZIP-Anbinden-Hänger)
+	LOG_INFO("DIAG anbinden_rekursiv: Eintritt, stvfm_item=%p, type=%d, "
+			"display_name='%s'", (gpointer) stvfm_item,
+			sond_tvfm_item_get_item_type(stvfm_item),
+			sond_tvfm_item_get_display_name(stvfm_item) ?
+					sond_tvfm_item_get_display_name(stvfm_item) : "(null)");
+
 	if (*(info_window->cancel))
 		return -1;
 
 	if (sond_tvfm_item_get_item_type(stvfm_item) == SOND_TVFM_ITEM_TYPE_LEAF ||
 			sond_tvfm_item_get_item_type(stvfm_item) == SOND_TVFM_ITEM_TYPE_LEAF_SECTION) {
+		LOG_INFO("DIAG anbinden_rekursiv: LEAF-Zweig, rufe leaf_anbinden auf");
+
 		new_node_id = zond_treeview_leaf_anbinden(ztv, anchor_iter, anchor_id, child,
 				stvfm_item, info_window, zaehler, &error);
+
+		LOG_INFO("DIAG anbinden_rekursiv: leaf_anbinden zurück, new_node_id=%d",
+				new_node_id);
 
 		if (new_node_id == -1) {
 			zond_treeview_anbinden_error_message(info_window, stvfm_item,
@@ -1252,7 +1278,15 @@ static gint zond_treeview_anbinden_rekursiv(ZondTreeview *ztv,
 		info_window_set_message(info_window, text);
 		g_free(text);
 
+		//DIAG (15./16.09.2026, ZIP-Anbinden-Hänger)
+		LOG_INFO("DIAG anbinden_rekursiv: '%s' als Knoten %d eingefügt, "
+				"rufe load_children auf", basename, anchor_id_dir);
+
 		rc = sond_tvfm_item_load_children(stvfm_item, &arr_children, &error);
+
+		LOG_INFO("DIAG anbinden_rekursiv: load_children zurück, rc=%d, "
+				"n_children=%u", rc, arr_children ? arr_children->len : 0);
+
 		if (rc) {
 			zond_treeview_anbinden_error_message(info_window, stvfm_item,
 					"Kinder von filepart '%s' konnten nicht geladen werden:\n%s",
@@ -1266,6 +1300,11 @@ static gint zond_treeview_anbinden_rekursiv(ZondTreeview *ztv,
 			SondTVFMItem* stvfm_item_child = NULL;
 
 			stvfm_item_child = g_ptr_array_index(arr_children, i);
+
+			//DIAG (15./16.09.2026, ZIP-Anbinden-Hänger)
+			LOG_INFO("DIAG anbinden_rekursiv: '%s' - Kind %u/%u, rekursiver Aufruf",
+					basename, i + 1, arr_children->len);
+
 			new_node_id = zond_treeview_anbinden_rekursiv(ztv, &iter_new, anchor_id_child,
 					child_anchor, stvfm_item_child, info_window, zaehler, dir_inserted);
 			if (new_node_id == -1) //abgebrochen
@@ -1304,6 +1343,10 @@ static gint zond_treeview_clipboard_anbinden_foreach(SondTreeview *stv,
 	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(stv)), iter, 0,
 			&stvfm_item, -1);
 
+	//DIAG (15./16.09.2026, ZIP-Anbinden-Hänger)
+	LOG_INFO("DIAG anbinden_foreach: stvfm_item=%p geholt, rufe rekursiv auf",
+			(gpointer) stvfm_item);
+
 	rc = zond_treeview_anbinden_rekursiv(s_selection->ztv,
 			&s_selection->anchor_iter, s_selection->anchor_id,
 			s_selection->child, stvfm_item, s_selection->info_window,
@@ -1322,6 +1365,8 @@ static void zond_treeview_clipboard_anbinden(Projekt *zond, gint anchor_id,
 		GtkTreeIter *anchor_iter, gboolean child, InfoWindow *info_window) {
 	SSelectionAnbinden s_selection = { 0 };
 	GError *error = NULL;
+	gint rc = 0;
+	gchar *text = NULL;
 
 	s_selection.ztv = ZOND_TREEVIEW(zond->treeview[BAUM_INHALT]);
 	s_selection.anchor_id = anchor_id;
@@ -1331,8 +1376,60 @@ static void zond_treeview_clipboard_anbinden(Projekt *zond, gint anchor_id,
 	s_selection.dir_inserted = FALSE;
 	s_selection.info_window = info_window;
 
-	sond_treeview_clipboard_foreach(
+	/* Die ganze Anbinden-Operation in EINER Transaktion: ohne das
+	 * committet jeder einzelne zond_dbase_insert_node()-Aufruf (SAVEPOINT/
+	 * RELEASE) für sich - bei dem hier erzwungenen journal_mode
+	 * (DELETE/TRUNCATE/PERSIST, nicht WAL) und synchronous=FULL (nötig für
+	 * atomare Mehrdatei-Transaktionen per ATTACH, s.
+	 * zond_dbase_check_journal_settings()) bedeutet das einen echten
+	 * fsync() PRO Knoten. Bei mehreren tausend Dateien macht allein das
+	 * den Löwenanteil der Laufzeit aus (Nutzer-Messung: 2000 Dateien ~30s,
+	 * ToDo.c 16.09.2026). Mit einer Transaktion: ein einziger fsync für
+	 * die ganze Operation - analog zum bestehenden Muster in
+	 * zond_treeview_clipboard_kopieren_foreach(). */
+	rc = zond_dbase_begin(zond->dbase_zond->zond_dbase_work, &error);
+	if (rc) {
+		text = g_strdup_printf("Transaktion konnte nicht gestartet werden:\n%s",
+				error->message);
+		info_window_set_message(info_window, text);
+		g_free(text);
+		g_error_free(error);
+
+		return;
+	}
+
+	rc = sond_treeview_clipboard_foreach(
 			zond_treeview_clipboard_anbinden_foreach, &s_selection, &error);
+
+	/* rc == 1 (Nutzer-Abbruch) ist kein Fehler - bereits eingefügte Knoten
+	 * sollen wie bisher (ohne Transaktion) erhalten bleiben, daher trotzdem
+	 * committen. rc == -1 (echter Fehler) kommt hier praktisch nicht vor,
+	 * da zond_treeview_anbinden_rekursiv() Fehler pro Knoten selbst
+	 * abfängt/meldet und weitermacht - zur Sicherheit trotzdem
+	 * behandelt. */
+	if (rc == -1) {
+		zond_dbase_rollback(zond->dbase_zond->zond_dbase_work, &error);
+		if (error) {
+			text = g_strdup_printf("Fehler beim Anbinden:\n%s", error->message);
+			info_window_set_message(info_window, text);
+			g_free(text);
+			g_error_free(error);
+		}
+
+		return;
+	}
+
+	rc = zond_dbase_commit(zond->dbase_zond->zond_dbase_work, &error);
+	if (rc) {
+		text = g_strdup_printf("Transaktion konnte nicht abgeschlossen werden:\n%s",
+				error->message);
+		info_window_set_message(info_window, text);
+		g_free(text);
+		g_error_free(error);
+		zond_dbase_rollback(zond->dbase_zond->zond_dbase_work, NULL);
+
+		return;
+	}
 
 	if (s_selection.zaehler || s_selection.dir_inserted) {
 		sond_treeview_expand_to_row(zond->treeview[BAUM_INHALT],
@@ -1341,7 +1438,7 @@ static void zond_treeview_clipboard_anbinden(Projekt *zond, gint anchor_id,
 				&s_selection.anchor_iter);
 	}
 
-	gchar *text = g_strdup_printf("%i Anbindungen eingefügt",
+	text = g_strdup_printf("%i Anbindungen eingefügt",
 			s_selection.zaehler);
 	info_window_set_message(info_window, text);
 	g_free(text);

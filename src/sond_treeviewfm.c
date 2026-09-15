@@ -556,6 +556,10 @@ static gint sond_tvfm_item_load_zip_dir(SondTVFMItem* stvfm_item,
 		SondZipDirEntry* e = g_ptr_array_index(entries, i);
 		SondTVFMItem* child = NULL;
 
+		//DIAG (15./16.09.2026, ZIP-Anbinden-Hänger)
+		LOG_INFO("DIAG load_zip_dir: Eintrag %u/%u '%s' (is_dir=%d)",
+				i + 1, entries->len, e->path, e->is_dir);
+
 		if (e->is_dir) {
 			/* Verzeichnis: path endet auf '/', ohne dieses als path_or_section */
 			gchar* dir_path = g_strndup(e->path, strlen(e->path) - 1);
@@ -563,8 +567,17 @@ static gint sond_tvfm_item_load_zip_dir(SondTVFMItem* stvfm_item,
 					stvfm_item_priv->sond_file_part, dir_path);
 			g_free(dir_path);
 		} else {
-			SondFilePart* sfp_child = sond_file_part_create(stvfm_item_priv->sond_file_part,
+			SondFilePart* sfp_child = NULL;
+
+			LOG_INFO("DIAG load_zip_dir: rufe sond_file_part_create('%s') auf",
+					e->path);
+
+			sfp_child = sond_file_part_create(stvfm_item_priv->sond_file_part,
 					e->path, error);
+
+			LOG_INFO("DIAG load_zip_dir: sond_file_part_create zurück, sfp_child=%p",
+					(gpointer) sfp_child);
+
 			if (!sfp_child) {
 				LOG_WARN("SondFilePart konnte nicht erzeugt werden:\n%s",
 						(*error)->message);
@@ -1158,18 +1171,119 @@ static gint delete_item(SondTVFMItem* stvfm_item, GError** error) {
 	return 0;
 }
 
+/* Kopiert ein Verzeichnis aus einem Container (ZIP/PDF-Ordner/GMessage-
+ * Multipart) rekursiv in das echte Dateisystem. path_dst_rel: Zielpfad
+ * relativ zur Projektwurzel (ohne führendes '/') - wird hier angelegt.
+ *
+ * Eingebettete Dateien, die selbst wieder ein Container sind
+ * (verschachtelte ZIP/PDF/E-Mail), werden als EINE Datei kopiert (ihre
+ * rohen Bytes über sond_file_part_copy(), wie beim normalen Datei-Kopieren
+ * aus einem Container ins Filesystem) - NICHT in ihre interne Struktur
+ * (PageTree, Anhänge etc.) aufgelöst; das entspricht dem, was der Nutzer
+ * beim Herauskopieren erwartet (Nutzer-Entscheidung, 16.09.2026). Kriterium
+ * dafür: ein Kind zählt nur dann als "echtes" Unterverzeichnis desselben
+ * Archivs (und wird rekursiv weiter aufgeschlüsselt), wenn es denselben
+ * SondFilePart wie der Quellknoten trägt (s. sond_tvfm_item_load_zip_dir():
+ * Unterverzeichnisse im selben ZIP bekommen den identischen SondFilePart,
+ * nur mit anderem path_or_section; eine eingebettete Datei bekommt dagegen
+ * immer einen NEUEN, eigenen SondFilePart). */
+static gint copy_container_dir_to_fs(SondTVFMItem* stvfm_item_src,
+		gchar const* path_dst_rel, GError** error) {
+	SondTVFMItemPrivate* stvfm_item_src_priv =
+			sond_tvfm_item_get_instance_private(stvfm_item_src);
+	SondTreeviewFMPrivate* stvfm_priv =
+			sond_treeviewfm_get_instance_private(stvfm_item_src_priv->stvfm);
+	gchar* path_dst_real = NULL;
+	GPtrArray* arr_children = NULL;
+	gint rc = 0;
+
+	path_dst_real = g_strconcat(stvfm_priv->root, "/", path_dst_rel, NULL);
+	rc = sond_mkdir(path_dst_real, error) ? 0 : -1;
+	g_free(path_dst_real);
+	if (rc)
+		return -1;
+
+	rc = sond_tvfm_item_load_children(stvfm_item_src, &arr_children, error);
+	if (rc)
+		return -1;
+
+	for (guint i = 0; i < arr_children->len; i++) {
+		SondTVFMItem* child = g_ptr_array_index(arr_children, i);
+		SondTVFMItemPrivate* child_priv =
+				sond_tvfm_item_get_instance_private(child);
+		gchar const* child_base = sond_tvfm_item_get_display_name(child);
+		gchar* child_path_dst_rel = NULL;
+		gboolean is_real_subdir = FALSE;
+
+		/* Sonderfall PDF/"PageTree" bzw. GMessage/"Message": dieser
+		 * synthetische Pseudo-Knoten trägt denselben SondFilePart wie der
+		 * "Ordner" selbst (die PDF/E-Mail-Datei), ist aber vom Typ LEAF,
+		 * nicht DIR (s. sond_tvfm_item_create()) - er steht für den
+		 * Inhalt der Container-Datei SELBST, nicht für eine eigene
+		 * Kind-Datei. Für ZIP kommt das nie vor (ZIP-Items sind immer
+		 * DIR). Kopieren als "Datei" würde hier fälschlich noch einmal
+		 * die gesamte PDF/E-Mail-Datei unter dem Namen 'PageTree'/
+		 * 'Message' duplizieren - daher hier klar als (noch) nicht
+		 * unterstützt abgebrochen, statt ein falsches Ergebnis zu
+		 * erzeugen (Nutzeranfrage betraf nur ZIP, 16.09.2026). */
+		if (child_priv->sond_file_part == stvfm_item_src_priv->sond_file_part
+				&& child_priv->type != SOND_TVFM_ITEM_TYPE_DIR) {
+			g_set_error(error, SOND_ERROR, 0,
+					"%s\nKopieren eines PDF-/E-Mail-'Ordners' (mit "
+					"eigenem Inhalt PageTree/Message) in das Dateisystem "
+					"noch nicht implementiert - bitte die Datei selbst "
+					"kopieren", __func__);
+			rc = -1;
+			break;
+		}
+
+		is_real_subdir = (child_priv->type == SOND_TVFM_ITEM_TYPE_DIR)
+				&& (child_priv->sond_file_part == stvfm_item_src_priv->sond_file_part);
+
+		child_path_dst_rel = g_strconcat(path_dst_rel, "/", child_base, NULL);
+
+		if (is_real_subdir)
+			rc = copy_container_dir_to_fs(child, child_path_dst_rel, error);
+		else
+			//Datei (auch: eingebetteter Container) - als Ganzes/1:1 kopieren
+			rc = sond_file_part_copy(child_priv->sond_file_part, NULL,
+					child_path_dst_rel, error);
+
+		g_free(child_path_dst_rel);
+		if (rc)
+			break;
+	}
+
+	g_ptr_array_unref(arr_children);
+
+	return rc;
+}
+
 static gint copy_dir_across_sfps(SondTVFMItem* stvfm_item,
 		SondTVFMItem* stvfm_item_parent, gchar const* base,
 		GError** error) {
-	{
+	SondTVFMItemPrivate* stvfm_item_parent_priv =
+			sond_tvfm_item_get_instance_private(stvfm_item_parent);
+	gchar* path_dst_rel = NULL;
+	gint rc = 0;
+
+	if (stvfm_item_parent_priv->sond_file_part) {
 		if (error) *error = g_error_new(SOND_ERROR, 0,
-			"%s\nKopieren eines Verzeichnisses in anderen SondFilePart-Typen"
-				"noch nicht implementiert", __func__);
+			"%s\nKopieren eines Verzeichnisses aus einem Container in ein "
+				"anderes Container-Ziel (nur Kopieren in das Dateisystem "
+				"ist implementiert) noch nicht implementiert", __func__);
 
 		return -1;
 	}
 
-	return 0;
+	path_dst_rel = stvfm_item_parent_priv->path_or_section ?
+			g_strconcat(stvfm_item_parent_priv->path_or_section, "/", base, NULL) :
+			g_strdup(base);
+
+	rc = copy_container_dir_to_fs(stvfm_item, path_dst_rel, error);
+	g_free(path_dst_rel);
+
+	return rc;
 }
 
 static gint sond_tvfm_item_copy(SondTVFMItem* stvfm_item,
