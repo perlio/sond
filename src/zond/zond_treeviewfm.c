@@ -1169,7 +1169,7 @@ static gint zond_treeviewfm_item_get_fileparts(SondTVFMItem *stvfm_item,
 		GPtrArray *arr_children = NULL;
 		gint rc = 0;
 
-		rc = sond_tvfm_item_load_children(stvfm_item, &arr_children, error);
+		rc = sond_tvfm_item_load_children(stvfm_item, &arr_children, NULL, error);
 		if (rc)
 			return -1;
 

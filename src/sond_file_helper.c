@@ -23,6 +23,7 @@
 #include <gio/gio.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <string.h>
 
 #ifdef G_OS_WIN32
 #include <windows.h>
@@ -320,6 +321,16 @@ sond_rmdir_r(const gchar *path, GError **error)
     return success;
 }
 
+/* Nutzer-Entscheidung 09/2026 (nach zwei Regressionen in Folge - erst
+ * "invalid argument" beim Laden durch ZIP-Sonderzeichen im Dateinamen,
+ * dann "Datei von anderem Prozeß verwendet" bei praktisch jedem Projekt,
+ * weil der CreateFileW-Ersatz einen zu engen Freigabemodus setzte):
+ * versuchsweiser Umstieg von _wfopen() auf CreateFileW()/_open_osfhandle()/
+ * _fdopen() (s. Versionsgeschichte) wieder VOLLSTÄNDIG zurückgenommen -
+ * zurück zu _wfopen(), trotz der bekannten, seltenen Einschränkung bei
+ * ZIP-Dateinamen mit Leerzeichen/Punkt am Ende einer Pfadkomponente (löst
+ * dort weiterhin errno=EINVAL aus, s. ToDo.c). Stabilität hat Vorrang vor
+ * diesem Randfall. */
 FILE*
 sond_fopen(const gchar *path, const gchar *mode, GError **error)
 {

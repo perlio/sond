@@ -23,6 +23,7 @@
 #include "../../sond_log_and_error.h"
 #include "../../sond_file_helper.h"
 #include "../../sond_fileparts.h"
+#include "../../sond_mime.h"
 #include "../../sond_treeviewfm.h"
 #include "../../sond_treeviewfm_seadrive.h"
 #include "../../sond_process_file.h"
@@ -456,6 +457,21 @@ static gint project_create_dbase_zond(Projekt *zond, gboolean create, GError **e
 		return -1;
 	}
 
+	/* Performance-Indizes verlässlich auf "work" setzen - unabhängig
+	 * davon, ob das analoge (unkritische, per zond_dbase_open() nicht
+	 * mehr fatale) CREATE INDEX auf "store" gerade funktioniert hat.
+	 * "work" liegt bewusst lokal (s.o., project_get_local_tmp_path()),
+	 * ein Fehlschlagen hier ist also ein echter, unerwarteter lokaler
+	 * I/O-Fehler und bleibt daher fatal. Hintergrund: Nutzer-Fund
+	 * 09/2026, ZIP-Anbinden-Performance (s. zond_dbase.c/ToDo.c). */
+	rc = zond_dbase_ensure_performance_indexes(zond_dbase_work, error);
+	if (rc) {
+		g_free(path_tmp);
+		g_object_unref(zond_dbase_store);
+		g_object_unref(zond_dbase_work);
+		return -1;
+	}
+
 	/* work zusätzlich als zweites Schema an store anhängen (ToDo.c,
 	 * Architektur-Plan Atomarität store/work, Punkt 2): work behält
 	 * daneben seine eigene, unten registrierte Verbindung für alle
@@ -863,6 +879,23 @@ gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, GError 
 	if (rc) {
 		project_open_cleanup(zond);
 		return -1;
+	}
+
+	/* Einmalige Initialisierung des geteilten magic_t-Handles (s. Doc-
+	 * Kommentar mime_guess_content_type_init(), sond_mime.c) - MUSS hier
+	 * (Hauptthread, vor dem Start des Indizier-Hintergrundthreads gleich
+	 * unten) passieren, nicht erst beim ersten tatsächlichen Aufruf.
+	 * Fehlschlag ist unkritisch (mime_guess_content_type() fällt dann auf
+	 * das alte, langsamere Open/Load/Close pro Aufruf zurück) - deshalb
+	 * hier nur eine Warnung, kein Abbruch des Projekt-Ladens. */
+	{
+		GError *error_magic = NULL;
+		if (!mime_guess_content_type_init(&error_magic)) {
+			LOG_WARN("%s: mime_guess_content_type_init() fehlgeschlagen "
+					"(unkritisch, nur langsamer): %s", __func__,
+					error_magic->message);
+			g_error_free(error_magic);
+		}
 	}
 
 	gchar* datadir = g_build_filename(zond->exe_dir, "../share/tessdata", NULL);

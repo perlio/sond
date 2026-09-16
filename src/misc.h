@@ -19,6 +19,7 @@ typedef size_t gsize;
 typedef struct _SondFilePart SondFilePart;
 typedef struct _GtkWidget GtkWidget;
 typedef struct _GtkWindow GtkWindow;
+typedef struct _GtkTextMark GtkTextMark;
 typedef struct _GtkCalendar GtkCalendar;
 typedef struct _GPtrArray GPtrArray;
 typedef struct _GFile GFile;
@@ -48,8 +49,18 @@ GtkWidget* result_listbox_new(GtkWindow*, const gchar*);
 /*  info_window  */
 typedef struct _Info_Window {
 	GtkWidget *dialog;
-	GtkWidget *content;
-	GtkWidget *last_inserted_widget;
+	/* Nutzer-Fund 16.09.2026: früher eine GtkBox mit einem GtkLabel PRO
+	 * Nachricht (info_window_set_message() je Aufruf ein neues Label
+	 * gepackt) - bei sehr vielen Nachrichten (z.B. eine Zeile pro Datei
+	 * beim Anbinden tausender Dateien) macht das GtkBox-Größenberechnung
+	 * O(Anzahl Kinder) PRO neuer Nachricht, verschärft durch das
+	 * UI-Pumping (gtk_main_iteration() nach jeder Nachricht erzwingt den
+	 * Resize sofort statt ihn zu bündeln) - in Summe O(n²) für n
+	 * Nachrichten. Jetzt ein GtkTextView/GtkTextBuffer (text_view/
+	 * end_mark) - Text anhängen ist dafür gebaut und bleibt trotz vieler
+	 * Zeilen günstig. */
+	GtkWidget *text_view;
+	GtkTextMark *end_mark;
 	GtkWidget *progress_bar;
 	gint* cancel;
 } InfoWindow;

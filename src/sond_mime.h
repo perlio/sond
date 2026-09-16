@@ -23,6 +23,7 @@ typedef char gchar;
 typedef size_t gsize;
 typedef struct _GError GError;
 typedef unsigned char guchar;
+typedef int gboolean;
 
 const gchar* mime_to_extension(const gchar*);
 
@@ -34,5 +35,12 @@ const gchar* mime_from_extension(const gchar* filename);
 
 gchar* mime_guess_content_type(const guchar* buffer, gsize size,
 		const gchar* path, GError** error);
+
+/* Einmalig aufrufen, solange garantiert nur der Hauptthread läuft (z.B. in
+ * project_open(), vor sond_process_file_create_wctx()) - s. Doc-Kommentar
+ * in sond_mime.c. Lädt das magic_t-Handle, das mime_guess_content_type()
+ * danach für die gesamte Programmlaufzeit wiederverwendet, statt es bei
+ * jedem Aufruf neu zu öffnen/laden. */
+gboolean mime_guess_content_type_init(GError** error);
 
 #endif /* SRC_SOND_MIME_H_ */

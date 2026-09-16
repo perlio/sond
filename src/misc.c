@@ -343,24 +343,16 @@ void info_window_set_progress_bar_fraction(InfoWindow *info_window,
 	return;
 }
 
-static void on_content_size_allocate(GtkWidget *widget, GdkRectangle *allocation, gpointer data) {
-	InfoWindow *info_window = (InfoWindow*) data;
-	GtkWidget *viewport = NULL;
-	GtkWidget *swindow = NULL;
-	GtkAdjustment *adj = NULL;
-
-	viewport = gtk_widget_get_parent(info_window->content);
-	swindow = gtk_widget_get_parent(viewport);
-	adj = gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(swindow));
-	gtk_adjustment_set_value(adj, gtk_adjustment_get_upper(adj));
-
-	// Signal wieder abkoppeln, nur einmal scrollen
-	g_signal_handlers_disconnect_by_func(widget, on_content_size_allocate, data);
-}
-
+/* Nutzer-Fund 16.09.2026: ersetzt die frühere size-allocate-basierte
+ * Scroll-Klimmzug-Lösung (die brauchte es, weil bei einer wachsenden
+ * GtkBox aus einzelnen Labels erst NACH dem nächsten Layout-Durchlauf klar
+ * war, wie weit runter zu scrollen ist). Ein GtkTextMark mit
+ * left_gravity=FALSE am Textende bleibt automatisch am Ende, während Text
+ * eingefügt wird (s. end_mark in InfoWindow) - gtk_text_view_scroll_mark_
+ * onscreen() dafür ist der dafür vorgesehene, robuste GTK-Weg. */
 static void info_window_scroll(InfoWindow *info_window) {
-	g_signal_connect(info_window->content, "size-allocate",
-	                 G_CALLBACK(on_content_size_allocate), info_window);
+	gtk_text_view_scroll_mark_onscreen(GTK_TEXT_VIEW(info_window->text_view),
+			info_window->end_mark);
 	return;
 }
 
@@ -387,18 +379,18 @@ void info_window_display_progress(InfoWindow *info_window, gint progress) {
 void info_window_set_message(InfoWindow *info_window, const gchar *format, ...) {
 	va_list args;
 	gchar *message = NULL;
+	GtkTextBuffer *buffer = NULL;
+	GtkTextIter end_iter;
 
 	va_start(args, format);
 	message = g_strdup_vprintf(format, args);
 	va_end(args);
 
-	info_window->last_inserted_widget = gtk_label_new(message);
+	buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(info_window->text_view));
+	gtk_text_buffer_get_end_iter(buffer, &end_iter);
+	gtk_text_buffer_insert(buffer, &end_iter, message, -1);
+	gtk_text_buffer_insert(buffer, &end_iter, "\n", -1);
 	g_free(message);
-	gtk_widget_set_halign(info_window->last_inserted_widget, GTK_ALIGN_START);
-
-	gtk_widget_show(info_window->last_inserted_widget);
-	gtk_box_pack_start(GTK_BOX(info_window->content),
-			info_window->last_inserted_widget, FALSE, FALSE, 0);
 
 	info_window_scroll(info_window);
 
@@ -412,14 +404,14 @@ typedef struct {
 
 static gboolean show_message_main(gpointer data) {
     MessageData *md = (MessageData*) data;
+	GtkTextBuffer *buffer = NULL;
+	GtkTextIter end_iter;
 
-	md->info_window->last_inserted_widget = gtk_label_new(md->message);
+	buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(md->info_window->text_view));
+	gtk_text_buffer_get_end_iter(buffer, &end_iter);
+	gtk_text_buffer_insert(buffer, &end_iter, md->message, -1);
+	gtk_text_buffer_insert(buffer, &end_iter, "\n", -1);
     g_free(md->message);
-
-	gtk_widget_set_halign(md->info_window->last_inserted_widget, GTK_ALIGN_START);
-	gtk_widget_show(md->info_window->last_inserted_widget);
-	gtk_box_pack_start(GTK_BOX(md->info_window->content),
-			md->info_window->last_inserted_widget, FALSE, FALSE, 0);
 
 	info_window_scroll(md->info_window);
     g_free(md);
@@ -500,6 +492,8 @@ info_window_open(GtkWidget *window, gint* cancel, const gchar *title) {
 	GtkWidget *swindow = NULL;
 	GtkWidget *bottom_box = NULL;
 	GtkWidget *button = NULL;
+	GtkTextBuffer *buffer = NULL;
+	GtkTextIter end_iter;
 
 	InfoWindow *info_window = g_malloc0(sizeof(InfoWindow));
 
@@ -514,8 +508,21 @@ info_window_open(GtkWidget *window, gint* cancel, const gchar *title) {
 	swindow = gtk_scrolled_window_new( NULL, NULL);
 	gtk_box_pack_start(GTK_BOX(content), swindow, TRUE, TRUE, 0);
 
-	info_window->content = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-	gtk_container_add(GTK_CONTAINER(swindow), info_window->content);
+	/* Nutzer-Fund 16.09.2026: statt einer GtkBox mit einem GtkLabel PRO
+	 * Nachricht (s. ausführlichen Kommentar an InfoWindow.text_view in
+	 * misc.h) jetzt ein einzelnes GtkTextView - Text anhängen bleibt auch
+	 * bei sehr vielen Zeilen (z.B. eine pro Datei beim Anbinden) günstig. */
+	info_window->text_view = gtk_text_view_new();
+	gtk_text_view_set_editable(GTK_TEXT_VIEW(info_window->text_view), FALSE);
+	gtk_text_view_set_cursor_visible(GTK_TEXT_VIEW(info_window->text_view), FALSE);
+	gtk_container_add(GTK_CONTAINER(swindow), info_window->text_view);
+
+	buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(info_window->text_view));
+	gtk_text_buffer_get_end_iter(buffer, &end_iter);
+	/* left_gravity = FALSE: Mark bleibt am Textende, während neuer Text
+	 * eingefügt wird - Grundlage für info_window_scroll(). */
+	info_window->end_mark = gtk_text_buffer_create_mark(buffer, NULL,
+			&end_iter, FALSE);
 
 	/* Untere Leiste: Progress-Bar + Abbrechen-Button nebeneinander, nicht scrollbar */
 	bottom_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);

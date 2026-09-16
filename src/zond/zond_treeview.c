@@ -938,10 +938,6 @@ static gint zond_treeview_remove_childish_anbindungen(ZondTreeview *ztv,
 		if (rc)
 			return -1;
 
-		//DIAG (15./16.09.2026, ZIP-Anbinden-Hänger)
-		LOG_INFO("DIAG remove_childish_anbindungen: ID=%d, baum_inhalt_file=%d",
-				ID, baum_inhalt_file);
-
 		if (!baum_inhalt_file)
 			break;
 
@@ -1052,18 +1048,8 @@ static gint zond_treeview_leaf_anbinden(ZondTreeview *ztv,
 
 	ZondTreeviewPrivate *ztv_priv = zond_treeview_get_instance_private(ztv);
 
-	//DIAG (15./16.09.2026, ZIP-Anbinden-Hänger)
-	LOG_INFO("DIAG leaf_anbinden: Eintritt, sfp=%p", (gpointer)
-			sond_tvfm_item_get_sond_file_part(stvfm_item));
-
 	sfp = sond_tvfm_item_get_sond_file_part(stvfm_item);
-
-	LOG_INFO("DIAG leaf_anbinden: rufe get_filepart auf");
-
 	filepart = sond_file_part_get_filepart(sfp);
-
-	LOG_INFO("DIAG leaf_anbinden: filepart='%s'", filepart ? filepart : "(null)");
-
 	section = sond_tvfm_item_get_path_or_section(stvfm_item);
 
 	info_text = (section) ? g_strdup_printf("Anbindung Abschnitt '%s' in '%s'",
@@ -1071,6 +1057,24 @@ static gint zond_treeview_leaf_anbinden(ZondTreeview *ztv,
 			filepart);
 	info_window_set_message(info_window, info_text);
 	g_free(info_text);
+
+	/* Ohne dies bleibt das Info-Window während der gesamten (bei vielen
+	 * Dateien ggf. sehr langen) Anbinden-Operation komplett eingefroren -
+	 * GTK zeichnet die oben per info_window_set_message() eingefügte
+	 * Zeile erst, wenn die Hauptschleife wieder erreicht wird, was bei
+	 * dieser synchronen, rekursiven Funktion sonst erst nach dem
+	 * allerletzten Element passiert. Pumpt außerdem anstehende Events -
+	 * insbesondere das "clicked"-Signal des Abbrechen-Buttons
+	 * (cb_abbrechen_clicked -> gtk_dialog_response -> cb_info_window_
+	 * response setzt info_window->cancel, misc.c), das ohne diese Pumpe
+	 * nie verarbeitet wird und der Button dadurch faktisch wirkungslos
+	 * bleibt. Der eigentliche Abbruch erfolgt weiterhin über die
+	 * bestehende Prüfung von *(info_window->cancel) am Anfang von
+	 * zond_treeview_anbinden_rekursiv() (Aufrufer) - hier wird nur dafür
+	 * gesorgt, dass das Setzen des Flags überhaupt eine Chance hat,
+	 * rechtzeitig zu passieren. Nutzer-Fund 16.09.2026. */
+	while (gtk_events_pending())
+		gtk_main_iteration();
 
 	rc = zond_dbase_get_section(ztv_priv->zond->dbase_zond->zond_dbase_work,
 			filepart, section, &ID_file_part, error);
@@ -1186,6 +1190,23 @@ static void zond_treeview_anbinden_advance_anchor(gint *anchor_id,
 	}
 }
 
+/* Fortschritts-Callback für sond_tvfm_item_load_children() (SondTVFMProgress)
+ * beim Anbinden - s. ausführlichen Kommentar in sond_treeviewfm.h. Pumpt
+ * nur die GTK-Events (macht damit u.a. den Abbrechen-Button während des
+ * ggf. langen Einlesens eines großen ZIP-Verzeichnisses wirksam), zeigt
+ * bei text != NULL zusätzlich eine Meldung im InfoWindow an. Das eigentliche
+ * Abbrechen prüft load_zip_dir selbst über progress->cancel
+ * (== info_window->cancel), hier ist nichts weiter zu tun. */
+static void zond_treeview_anbinden_progress(gpointer data, gchar const *text) {
+	InfoWindow *info_window = (InfoWindow*) data;
+
+	if (text)
+		info_window_set_message(info_window, text);
+
+	while (gtk_events_pending())
+		gtk_main_iteration();
+}
+
 /*  Fehler: werden im info_window angezeigt
  **  ansonsten: Id des zunächst erzeugten Knotens  */
 static gint zond_treeview_anbinden_rekursiv(ZondTreeview *ztv,
@@ -1196,25 +1217,13 @@ static gint zond_treeview_anbinden_rekursiv(ZondTreeview *ztv,
 
 	ZondTreeviewPrivate *ztv_priv = zond_treeview_get_instance_private(ztv);
 
-	//DIAG (15./16.09.2026, ZIP-Anbinden-Hänger)
-	LOG_INFO("DIAG anbinden_rekursiv: Eintritt, stvfm_item=%p, type=%d, "
-			"display_name='%s'", (gpointer) stvfm_item,
-			sond_tvfm_item_get_item_type(stvfm_item),
-			sond_tvfm_item_get_display_name(stvfm_item) ?
-					sond_tvfm_item_get_display_name(stvfm_item) : "(null)");
-
 	if (*(info_window->cancel))
 		return -1;
 
 	if (sond_tvfm_item_get_item_type(stvfm_item) == SOND_TVFM_ITEM_TYPE_LEAF ||
 			sond_tvfm_item_get_item_type(stvfm_item) == SOND_TVFM_ITEM_TYPE_LEAF_SECTION) {
-		LOG_INFO("DIAG anbinden_rekursiv: LEAF-Zweig, rufe leaf_anbinden auf");
-
 		new_node_id = zond_treeview_leaf_anbinden(ztv, anchor_iter, anchor_id, child,
 				stvfm_item, info_window, zaehler, &error);
-
-		LOG_INFO("DIAG anbinden_rekursiv: leaf_anbinden zurück, new_node_id=%d",
-				new_node_id);
 
 		if (new_node_id == -1) {
 			zond_treeview_anbinden_error_message(info_window, stvfm_item,
@@ -1278,15 +1287,19 @@ static gint zond_treeview_anbinden_rekursiv(ZondTreeview *ztv,
 		info_window_set_message(info_window, text);
 		g_free(text);
 
-		//DIAG (15./16.09.2026, ZIP-Anbinden-Hänger)
-		LOG_INFO("DIAG anbinden_rekursiv: '%s' als Knoten %d eingefügt, "
-				"rufe load_children auf", basename, anchor_id_dir);
+		/* s. ausführlichen Kommentar bei der analogen Stelle in
+		 * zond_treeview_leaf_anbinden() weiter oben - gleicher Grund
+		 * (Sichtbarkeit + Abbrechen-Button). */
+		while (gtk_events_pending())
+			gtk_main_iteration();
 
-		rc = sond_tvfm_item_load_children(stvfm_item, &arr_children, &error);
+		{
+			SondTVFMProgress progress = { info_window->cancel,
+					zond_treeview_anbinden_progress, info_window };
 
-		LOG_INFO("DIAG anbinden_rekursiv: load_children zurück, rc=%d, "
-				"n_children=%u", rc, arr_children ? arr_children->len : 0);
-
+			rc = sond_tvfm_item_load_children(stvfm_item, &arr_children,
+					&progress, &error);
+		}
 		if (rc) {
 			zond_treeview_anbinden_error_message(info_window, stvfm_item,
 					"Kinder von filepart '%s' konnten nicht geladen werden:\n%s",
@@ -1300,10 +1313,6 @@ static gint zond_treeview_anbinden_rekursiv(ZondTreeview *ztv,
 			SondTVFMItem* stvfm_item_child = NULL;
 
 			stvfm_item_child = g_ptr_array_index(arr_children, i);
-
-			//DIAG (15./16.09.2026, ZIP-Anbinden-Hänger)
-			LOG_INFO("DIAG anbinden_rekursiv: '%s' - Kind %u/%u, rekursiver Aufruf",
-					basename, i + 1, arr_children->len);
 
 			new_node_id = zond_treeview_anbinden_rekursiv(ztv, &iter_new, anchor_id_child,
 					child_anchor, stvfm_item_child, info_window, zaehler, dir_inserted);
@@ -1342,10 +1351,6 @@ static gint zond_treeview_clipboard_anbinden_foreach(SondTreeview *stv,
 	//SondFilePart im ZondTreeviewFM holen
 	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(stv)), iter, 0,
 			&stvfm_item, -1);
-
-	//DIAG (15./16.09.2026, ZIP-Anbinden-Hänger)
-	LOG_INFO("DIAG anbinden_foreach: stvfm_item=%p geholt, rufe rekursiv auf",
-			(gpointer) stvfm_item);
 
 	rc = zond_treeview_anbinden_rekursiv(s_selection->ztv,
 			&s_selection->anchor_iter, s_selection->anchor_id,
@@ -2845,10 +2850,45 @@ static void zond_treeview_action_paste_link_up(GSimpleAction *a, GVariant *p, gp
 	else if (rc == 1) display_message(zond->app_window, "Einf\u00fcgen als Unterpunkt einer Datei nicht zul\u00e4ssig", NULL);
 }
 static void zond_treeview_action_loeschen(GSimpleAction *a, GVariant *p, gpointer d) {
-	Projekt *zond = (Projekt*) d; gint rc = 0; GError *error = NULL;
+	Projekt *zond = (Projekt*) d; gint rc = 0; gint rc_commit = 0; GError *error = NULL;
+
+	/* Nutzer-Fund 16.09.2026: L\u00f6schen mehrerer hundert Unterknoten dauerte
+	 * >20 Sek. Ursache (analog zum fr\u00fcheren Anbinden-Fund, s. ToDo.c):
+	 * jeder einzelne zond_dbase_remove_node()-Aufruf committet f\u00fcr sich
+	 * (SAVEPOINT/RELEASE) - bei erzwungenem synchronous=FULL ein echter
+	 * fsync() PRO gel\u00f6schtem Knoten. Fix: die ganze L\u00f6sch-Operation in
+	 * eine Transaktion einpacken - ein einziger fsync f\u00fcr alles.
+	 * Nutzer-Entscheidung (anders als beim Anbinden-Fix, der bei Abbruch/
+	 * Fehler bewusst trotzdem committet, um das bisherige Verhalten nicht
+	 * zu \u00e4ndern): bei rc == -1 (echter DB-Fehler, kommt praktisch nie vor)
+	 * hier ein echtes ROLLBACK - kein halb gel\u00f6schter Baum bei einem
+	 * echten DB-Fehler, auch wenn das ein Verhaltensunterschied zum
+	 * bisherigen (nicht-transaktionalen) Zustand ist. */
+	rc = zond_dbase_begin(zond->dbase_zond->zond_dbase_work, &error);
+	if (rc) {
+		display_message(zond->app_window, "Transaktion konnte nicht gestartet werden\n\n", error->message, NULL);
+		g_error_free(error);
+		return;
+	}
+
 	rc = sond_treeview_selection_foreach(zond->treeview[zond->baum_active], zond_treeview_selection_loeschen_foreach, zond, &error);
-	if (rc == -1) { display_message(zond->app_window, "L\u00f6schen fehlgeschlagen\n\n", error->message, NULL); g_error_free(error); }
-	else if (rc == 2) display_message(zond->app_window, "L\u00f6schen nicht m\u00f6glich - es besteht noch mindestens ein Link auf diesen Punkt", NULL);
+
+	if (rc == -1) {
+		zond_dbase_rollback(zond->dbase_zond->zond_dbase_work, &error);
+		display_message(zond->app_window, "L\u00f6schen fehlgeschlagen\n\n", error->message, NULL);
+		g_error_free(error);
+		return;
+	}
+
+	rc_commit = zond_dbase_commit(zond->dbase_zond->zond_dbase_work, &error);
+	if (rc_commit) {
+		display_message(zond->app_window, "Transaktion konnte nicht abgeschlossen werden\n\n", error->message, NULL);
+		g_error_free(error);
+		zond_dbase_rollback(zond->dbase_zond->zond_dbase_work, NULL);
+		return;
+	}
+
+	if (rc == 2) display_message(zond->app_window, "L\u00f6schen nicht m\u00f6glich - es besteht noch mindestens ein Link auf diesen Punkt", NULL);
 }
 static void zond_treeview_action_anb_entf(GSimpleAction *a, GVariant *p, gpointer d) {
 	Projekt *zond = (Projekt*) d; gint rc = 0; GError *error = NULL;

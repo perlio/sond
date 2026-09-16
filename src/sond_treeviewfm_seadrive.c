@@ -378,6 +378,26 @@ static void watcher_rescan(SondTreeviewFM *stvfm, const gchar *root)
 /*  Watcher: Hilfsfunktionen für Thread                               */
 /* ------------------------------------------------------------------ */
 
+/* Nutzer-Fund 16.09.2026: Nach dem Kopieren mehrerer Dateien aus einem
+ * ZIP-Archiv ins Dateisystem (auch schon bei nur ~20 Dateien - ein
+ * Puffer-Overflow von ReadDirectoryChangesW als Ursache damit
+ * ausgeschlossen) blieb die SeaDrive-Statusanzeige dauerhaft auf "✓"
+ * (alles synchron) stehen, obwohl die frisch kopierten Dateien noch
+ * hochgeladen werden mussten. Ursache: diese Funktion wertete jede Art
+ * von Unsicherheit/Fehlschlag (CfGetPlaceholderInfo fehlt, Datei nicht
+ * öffenbar, CfGetPlaceholderInfo() schlägt fehl) als "im Zweifel: in
+ * sync" - TRUE. Eine gerade erst per normalem CreateFile()/fwrite() (statt
+ * über die Cloud-Files-Platzhalter-APIs) neu angelegte Datei wird von
+ * CfGetPlaceholderInfo() vermutlich (noch) nicht als Cloud-Datei erkannt,
+ * der Aufruf schlägt fehl - und der optimistische Fallback verschleiert
+ * dann dauerhaft (nicht nur kurz nach dem Anlegen), dass die Datei noch
+ * hochgeladen werden muss. Für einen Indikator, der vor "Daten sind noch
+ * nicht gesichert" warnen soll, ist das die falsche Default-Richtung: ein
+ * fälschliches "noch nicht synchron" ist höchstens ein optisches
+ * Ärgernis, ein fälschliches "alles synchron" verschleiert echten
+ * Datenverlust-Risiko-Zustand. Fallback deshalb auf FALSE (not in sync,
+ * Upload ausstehend) gedreht - eine Datei gilt jetzt nur noch dann als
+ * synchron, wenn die Prüfung das auch tatsächlich bestätigen konnte. */
 static gboolean watcher_check_in_sync(const gchar *utf8_path)
 {
     SeaDrivePlaceholderBasicInfo basic = { 0 };
@@ -387,11 +407,11 @@ static gboolean watcher_check_in_sync(const gchar *utf8_path)
     wchar_t *lp;
 
     if (!g_CfGetPlaceholderInfo)
-        return TRUE; /* im Zweifel: in sync */
+        return FALSE; /* im Zweifel: not in sync */
 
     lp = prepare_long_path(utf8_path, NULL);
     if (!lp)
-        return TRUE;
+        return FALSE;
 
     h = CreateFileW(lp, FILE_READ_ATTRIBUTES,
             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
@@ -399,14 +419,14 @@ static gboolean watcher_check_in_sync(const gchar *utf8_path)
     g_free(lp);
 
     if (h == INVALID_HANDLE_VALUE)
-        return TRUE;
+        return FALSE;
 
     hr = g_CfGetPlaceholderInfo(h, CF_PLACEHOLDER_INFO_BASIC,
             &basic, sizeof(basic), &returned);
     CloseHandle(h);
 
     if (FAILED(hr) && hr != HRESULT_MORE_DATA)
-        return TRUE;
+        return FALSE;
 
     return basic.InSyncState == CF_IN_SYNC_STATE_IN_SYNC;
 }

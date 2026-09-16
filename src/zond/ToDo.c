@@ -766,15 +766,322 @@
    Hydrierung (Datei liegt lokal/schon hydriert), Hängen beim bloßen
    Archiv-Öffnen (normales Browsen/Aufklappen in BAUM_FS funktioniert
    einwandfrei - der Hänger tritt nachweislich NUR beim automatischen,
-   rekursiven Anbinden auf, nicht beim nutzergesteuerten Aufklappen).
-   Als vorbereitender Schritt wurde testweise Diagnose-Logging
-   (LOG_INFO("DIAG ...")) eingebaut - in zond_treeview_anbinden_rekursiv(),
-   zond_treeview_leaf_anbinden(), zond_treeview_remove_childish_
-   anbindungen() (zond_treeview.c) sowie in sond_tvfm_item_load_zip_dir()
-   je Archiv-Eintrag inkl. vor/nach sond_file_part_create()
-   (sond_treeviewfm.c) - noch nicht ausgewertet, Diagnose zurückgestellt
-   auf Nutzerwunsch (andere Priorität, s. nächster Punkt). Das Logging
-   ist NICHT wieder entfernt und muss vor einem Release noch raus.
+   rekursiven Anbinden auf, nicht beim nutzergesteuerten Aufklappen). Als
+   vorbereitender Schritt wurde testweise Diagnose-Logging
+   (LOG_INFO("DIAG ...")) eingebaut, s. u. - danach zunächst zurückgestellt
+   (andere Priorität, s. nächste zwei Punkte).
+
+ - Wahrscheinliche eigentliche Ursache gefunden (16.09.2026): ein
+   Nutzer-Test mit einer sehr großen ZIP-Datei (~30.000 Einträge,
+   ausschließlich .xml-Dateien) hing sich auf; im Log erschienen dabei
+   sehr viele Warnungen "sond_icon_util_load_pixbuf('mail-read', 16)
+   fehlgeschlagen" sowie (überraschend) DIAG-Zeilen aus
+   remove_childish_anbindungen() - beides deutet auf E-Mail-Behandlung
+   hin, obwohl das Archiv nur XML enthält. Ursache:
+   mime_guess_content_type() (sond_mime.c) erkennt Klartext mit
+   kopfzeilenartigen Mustern über libmagic gelegentlich DIREKT als
+   "message/rfc822", ohne (anders als im expliziten text/plain-
+   Rückfallzweig direkt daneben) die Dateiendung gegenzuprüfen. Trifft
+   das auf eine .xml-Datei zu, wird daraus fälschlich ein
+   SondFilePartGMessage (sond_file_part_create_from_mime_type()); wird
+   der Datenmüll von GMime zusätzlich noch als "multipart" fehlgedeutet
+   (sond_file_part_gmessage_test_for_multipart()), entstehen synthetische
+   Kind-Knoten bzw. eine sehr langsame/entartete Boundary-Suche - schon
+   eine einzelne solche Datei unter tausenden reicht, um die gesamte
+   Anbinden-Operation praktisch zum Erliegen zu bringen (erklärt auch,
+   warum ein kleinerer Testlauf mit 2000 Dateien noch durchlief: die
+   Doppel-Koinzidenz aus Fehlerkennung UND Multipart-artigem Inhalt ist
+   selten, wird aber bei 15x mehr Dateien wahrscheinlicher). Nicht
+   abschließend am Log verifiziert, da der Nutzer aus Datenschutzgründen
+   (Dateinamen müssten von Hand geschwärzt werden, Tests laufen auf
+   verschiedenen Rechnern) keine Log-Auszüge mehr liefern konnte -
+   plausibilisiert stattdessen über Code-Lektüre und die beobachteten
+   Symptome.
+
+ - Fix: in mime_guess_content_type() ein allgemeines Sicherheitsnetz
+   ergänzt (nicht nur im text/plain-Zweig) - führt die Erkennung
+   (gleich über welchen Pfad) zu "message/rfc822", aber die Dateiendung
+   ist bekannt und eine andere, gewinnt die Endung (echte E-Mails liegen
+   praktisch immer als .eml vor). Dabei eine LOG_WARN-Zeile ergänzt, die
+   NUR die beiden MIME-Typen nennt (kein Dateiname/-pfad, aus
+   Datenschutzgründen) - damit kann der Nutzer ohne Schwärzen zählen, wie
+   oft das greift, und die Theorie nachträglich verifizieren.
+
+ - Das komplette Diagnose-Logging (LOG_INFO("DIAG ...")) aus
+   zond_treeview_anbinden_rekursiv(), zond_treeview_leaf_anbinden(),
+   zond_treeview_remove_childish_anbindungen() (zond_treeview.c) sowie
+   sond_tvfm_item_load_zip_dir() (sond_treeviewfm.c) wieder entfernt -
+   enthielt Dateinamen/-pfade, war für den Nutzer aus den genannten
+   Datenschutz-/Aufwandsgründen nicht mehr praktikabel auszuwerten, und
+   die neue, gezielte LOG_WARN in mime_guess_content_type() deckt den
+   Diagnosebedarf ab, ohne dieses Problem zu haben.
+
+ - Nutzer-Fund (16.09.2026): Theorie widerlegt, OHNE Testen des obigen
+   Fixes - "Alle Dateien sind zutreffend als xml-Dateien angebunden.
+   Alle!". Es fand also KEINE Fehlklassifikation statt; die "mail-read"-
+   Warnungen und remove_childish_anbindungen()-Aufrufe im Log haben eine
+   andere, harmlose Erklärung (remove_childish_anbindungen() wird
+   ohnehin für JEDE angebundene Datei aufgerufen, nicht nur bei
+   E-Mails - s. u.; die "mail-read"-Warnungen dürften aus bereits vorher
+   im Projektbaum vorhandenen, echten E-Mail-Anbindungen stammen, die
+   beim Rendern des Treeviews während des Anbinden-Vorgangs mitgezeichnet
+   wurden - der Log-Auszug stammte laut Nutzer vom ANFANG des Logs).
+   Der Sicherheitsnetz-Fix in mime_guess_content_type() bleibt als
+   harmlose Zusatzabsicherung im Code, ist für dieses Problem aber
+   nachweislich NICHT die Ursache gewesen.
+
+ - Tatsächliche Ursache gefunden (16.09.2026, per Code-Lektüre, ohne
+   weitere Log-/Nutzer-Daten nötig): dieselbe Fehlerklasse wie beim
+   bereits behobenen #43 (fehlende Indizes auf parent_ID/
+   older_sibling_ID), nur an anderen Spalten der Tabelle "knoten".
+   zond_treeview_leaf_anbinden() (zond_treeview.c) ruft für JEDE
+   einzuhängende Datei zond_dbase_get_section() ("WHERE file_part=?1"),
+   zond_dbase_find_baum_inhalt_file() (rekursives CTE mit
+   abschließendem "knoten.type=2 AND knoten.link=cte_knoten.ID") sowie
+   darüber zond_treeview_remove_childish_anbindungen() ->
+   zond_dbase_get_first_baum_inhalt_file_child() (gleiches Muster,
+   "knoten.type=2 AND knoten.link=cte_knoten.ID") auf - für file_part
+   UND (type,link) existierte kein Index, jede dieser drei Abfragen war
+   also ein Volltabellen-Scan über "knoten". Da das genau EINMAL PRO
+   ANZUBINDENDER DATEI passiert und "knoten" während desselben
+   Anbinden-Vorgangs mit jeder Datei weiter wächst, ist der gesamte
+   Vorgang O(n²) statt O(n): erklärt zwanglos sowohl die ~30 Sek. bei
+   2.000 Dateien als auch den kompletten, unabbrechbaren Stillstand bei
+   ~30.000 Dateien (15x mehr Dateien, aber ~200x mehr Zeilen-Scans) -
+   UNABHÄNGIG vom Dateiinhalt/MIME-Typ, passend zur Beobachtung "alle
+   Dateien korrekt als XML angebunden". Erklärt zugleich, warum das
+   Transaktions-Batching (#103) beim 2.000er-Fall keine messbare
+   Verbesserung brachte: fsync-pro-Insert war nie die dominante Kosten,
+   sondern diese Volltabellen-Scans.
+
+ - Fix: zond_dbase_ensure_indexes() (zond_dbase.c) um zwei weitere
+   Indizes ergänzt - idx_knoten_type_link ON knoten(type, link) (deckt
+   alle "type=X AND link=?1"-Abfragen sowie die rekursiven CTEs ab) und
+   idx_knoten_file_part ON knoten(file_part). CREATE INDEX IF NOT
+   EXISTS, wie schon bei #43 - läuft bei jedem Öffnen einer Projektdatei
+   automatisch mit, kein Migrationsschritt nötig, gefahrlos auch für
+   bereits bestehende .znd-Dateien.
+
+ - Offen: vom Nutzer zu bestätigen, dass der Fix das ursprüngliche
+   Hängen (30.000er-Archiv) tatsächlich behebt (nach Neubau erwartet:
+   deutlich unter 30 Sek. für 2.000 Dateien, und lineares statt
+   quadratisches Wachstum bei 30.000). Falls noch nicht ausreichend:
+   ggf. den Sicherheitsnetz-Fix in mime_guess_content_type() wieder
+   entfernen, da seine Grundannahme widerlegt ist (unkritisch, kann
+   aber auf Wunsch des Nutzers zurückgebaut werden).
+
+ - Nutzer-Fund (16.09.2026, unmittelbare Regression durch obigen
+   Index-Fix): "Fehler beim Laden des Projekts: invalid argument" beim
+   nächsten Öffnen eines bestehenden Projekts. Ursache: zond_dbase_
+   ensure_indexes() (zond_dbase.c) lief bisher NUR beim Öffnen von
+   "store" (die eigentliche .znd-Projektdatei, s. project_create_dbase_
+   zond()) - "work" bekommt sein Schema stattdessen per Rohkopie
+   (zond_dbase_backup()) von "store" übernommen. Die beiden neuen
+   Indizes (type/link, file_part) wurden also beim Laden eines
+   bestehenden, älteren Projekts zum ersten Mal per CREATE INDEX auf
+   "store" geschrieben - einem echten Schreibzugriff auf eine Datei, die
+   bewusst auf einem Cloud-Sync-Laufwerk liegen kann (SeaDrive/Seafile -
+   "work" wurde in #42 genau deswegen auf einen lokalen Pfad verlegt).
+   Ist der Cloud-Dienst dabei gerade nicht erreichbar, scheitert der
+   Schreibzugriff mit dem bereits an anderer Stelle dokumentierten
+   generischen CRT-Fehler errno=EINVAL ("Invalid argument", s. Eintrag
+   11.09.2026 oben) - und das ließ (vor diesem Fix) das komplette Laden
+   des Projekts fehlschlagen, obwohl die Indizes auf "store" rein
+   kosmetisch sind.
+
+ - Nutzer-Fund (16.09.2026): Fehler bestand auch nach obigem Fix
+   unverändert fort ("Mist. Nix geändert!") - und trat, wie sich per
+   Rückfrage herausstellte, NUR bei diesem einen (stark getesteten)
+   Projekt auf, nicht bei anderen; auf einem zweiten Rechner mit der
+   Vorgängerversion von zond ließ sich dieselbe Projektdatei klaglos
+   öffnen. Das legte den obigen store/work-Index-Fix als Ursache nahe
+   (neuer Code) - war es aber nicht: die komplette, unformatierte
+   Fehlermeldung war NUR "invalid argument", ganz ohne Funktionsnamen-
+   Präfix. Alle eigenen Fehlerkonstruktionen in zond_dbase.c (auch die
+   des Index-Fixes) hätten aber IMMER "funktionsname: ..." vorangestellt
+   - eine nackte Meldung ohne jeden Präfix kam im ganzen Code nur an
+   einer Stelle vor: sond_fopen() (sond_file_helper.c) bei einem
+   fehlschlagenden _wfopen() (Windows-CRT, errno=EINVAL). Bestätigt durch
+   Test: Nutzer hatte im Projektverzeichnis eine große, per "Verzeichnis
+   aus ZIP kopieren" (s.u.) erzeugte Dateistruktur liegen (UND das
+   Projekt zwischenzeitlich einmal während eines Hängers zwangsbeendet -
+   Letzteres erwies sich als red herring) - nach Löschen dieser Struktur
+   ließ sich das Projekt wieder öffnen. Der andere Rechner mit der
+   Vorgängerversion hatte diese Struktur nie bekommen können, weil es die
+   Kopierfunktion dort noch gar nicht gab - daher keine echte Code-
+   Version-Abhängigkeit, wie zunächst vermutet.
+
+ - Tatsächliche Ursache: _wfopen() (von sond_fopen() auf Windows bisher
+   genutzt) validiert den übergebenen Dateinamen zusätzlich selbst (CRT-
+   Parametervalidierung) und lehnt bestimmte, für CreateFileW mit dem
+   "\\?\"-Langpfad-Präfix durchaus gültige Namen ab - insbesondere
+   Pfadkomponenten mit Leerzeichen/Punkt am Ende, die Win32 ohne diesen
+   Präfix automatisch bereinigt, mit ihm aber nicht. Solche Namen kommen
+   in ZIP-Archiven öfter vor und wurden durch das neue "Verzeichnis aus
+   ZIP kopieren" 1:1 ins Dateisystem übernommen. Beim nächsten Laden des
+   Projekts scannt sond_treeviewfm_set_root() das Projektverzeichnis und
+   liest dabei jede Datei zur MIME-Typ-Erkennung an (sond_fopen()) -
+   genau dort schlug es fehl und ließ das komplette Laden abbrechen.
+
+ - Fix (Versuch 1, s.u. wieder zurückgenommen): sond_fopen_win32()
+   (sond_file_helper.c, neue statische Hilfsfunktion) ersetzte _wfopen()
+   durch CreateFileW() + _open_osfhandle()/_fdopen() - wie sond_mkdir/
+   _remove/_rmdir in derselben Datei, die die rohe Win32-API statt der
+   CRT-Wrapper-Funktion nutzen und damit deren zusätzliche, hier
+   störende Namensvalidierung umgehen.
+
+ - Nutzer-Fund (16.09.2026, Regression durch obigen Fix): "Seit einem
+   Tag funktioniert nichts mehr" - nach dem Fix kam bei JEDEM Projekt
+   (nicht nur dem ZIP-Testfall) "Der Prozeß kann nicht ... da von
+   einem anderen Prozeß verwendet" (ERROR_SHARING_VIOLATION). Ursache:
+   der neue CreateFileW()-Aufruf setzte dwShareMode=FILE_SHARE_READ -
+   _wfopen() erlaubt standardmäßig aber auch gleichzeitiges Schreiben/
+   Löschen durch andere Prozesse/Handles (_SH_DENYNO). Mit der engeren
+   Freigabe schlug praktisch jeder gleichzeitige Zugriff fehl (z.B. ein
+   noch offener Viewer auf dieselbe Datei, Virenscanner, Sync-Client).
+   Kurzzeitig auf FILE_SHARE_READ|WRITE|DELETE korrigiert (entspricht
+   _SH_DENYNO) - das hätte den Freigabemodus wieder passend gemacht.
+
+ - Nutzer-Entscheidung (16.09.2026): nach zwei Regressionen in Folge
+   durch denselben Umbau den kompletten CreateFileW-Ansatz wieder
+   VOLLSTÄNDIG zurückgenommen - sond_fopen() nutzt auf Windows wieder
+   _wfopen() wie ursprünglich. Die bekannte, seltene Einschränkung bei
+   ZIP-Dateinamen mit Leerzeichen/Punkt am Ende einer Pfadkomponente
+   (löst dort weiterhin errno=EINVAL beim Öffnen/Lesen aus, s.o.)
+   bleibt also bestehen - Stabilität hat Vorrang. Betrifft nur den
+   Randfall "ZIP-Verzeichnis mit solchen Namen ins Dateisystem
+   kopieren, dann Projekt neu laden, bevor die Datei umbenannt wurde";
+   die eigentlichen, oben behobenen Anbinden-Performance-Probleme
+   (fehlende Datenbank-Indizes) sind davon nicht betroffen.
+
+ - Damit ebenfalls hinfällig (nie umgesetzt, nur als Idee im Raum
+   gestanden): die analoge Umstellung von sond_stat()/_wstat64() auf
+   GetFileAttributesExW() - nicht weiterverfolgen, gleiches Risiko wie
+   oben.
+
+ Performance "Anbinden" - weiterer Fehlversuch und Rückbau (16.09.2026):
+
+ - Nutzer-Fund: "1000 Dateien dauern eine Minute anzubinden" - trotz der
+   oben behobenen fehlenden Datenbank-Indizes eher noch schlechter als
+   die ursprünglich beobachteten 2000 Dateien/~30 Sek. Das schließt die
+   Datenbank-Indizes als (alleinige) Erklärung für die Dauer aus.
+
+ - Vermutung (per Code-Lektüre, nicht mit Nutzer abgestimmt VOR der
+   Umsetzung umgesetzt - das war der Fehler, s.u.): mime_guess_content_
+   type() (sond_mime.c) ruft bei JEDEM Aufruf (also einmal pro Datei)
+   magic_open()+magic_load() neu auf - lädt/kompiliert damit die
+   komplette libmagic-Signaturdatenbank für jede einzelne Datei neu.
+   Versuchsweise auf ein pro Thread gecachtes magic_t-Handle (GPrivate)
+   umgestellt, um das zu vermeiden, mit der Begründung, dass die Funktion
+   sowohl vom GTK-Hauptthread als auch von den Indizier-Worker-Threads
+   aus aufgerufen wird.
+
+ - Nutzer-Fund: SIGSEGV in libmagic-1.dll unmittelbar nach dieser
+   Änderung. Vermutlich ein Thread-Safety-Problem INNERHALB von libmagic
+   selbst (bekanntes Problem einiger libmagic-Versionen bei
+   gleichzeitiger Nutzung, auch mit getrennten Handles pro Thread).
+
+ - Nutzer-Entscheidung: Änderung komplett zurückgenommen - zurück zu
+   magic_open()/magic_load()/magic_close() bei jedem Aufruf. Stabilität
+   hat Vorrang. Die vermutete Ursache der Anbinden-Dauer (magic_load()
+   pro Datei) bleibt damit weiterhin ungeklärt/unbehoben und OFFEN -
+   nicht weiter angefasst, bis das Vorgehen mit dem Nutzer VORHER
+   abgestimmt ist (nicht wie hier: erst umsetzen, dann erklären).
+
+ - Ausdrücklicher Nutzer-Hinweis (16.09.2026): "Erst Vorschläge machen.
+   Das ergibt keinen Sinn!" - künftig bei Änderungen an dieser Art von
+   sensiblen/heißen Pfaden ERST den Vorschlag samt Begründung machen und
+   auf Bestätigung warten, DANN erst die Änderung im Code vornehmen -
+   nicht umgekehrt. Gilt über diesen konkreten Fall hinaus.
+
+ - Nutzer-Einwand (16.09.2026, korrekt, per Code-Lektüre bestätigt): ein
+   Mutex sei überflüssig, weil eine echte Kollision zwischen Haupt- und
+   Hintergrundthread schon architektonisch ausgeschlossen sei. Geprüft
+   und bestätigt: die "4 Threads" bei sond_process_file_create_wctx()
+   sind ein Tesseract-OCR-Pool (sond_ocr.c) für die Texterkennung auf
+   Seitenebene - mime_guess_content_type() wird davon NIE aufgerufen. Es
+   gibt nur EINEN Indizier-Hintergrundthread ("ocr-doc", g_thread_new()
+   in headerbar.c), der sequenziell arbeitet, UND dieser läuft nur,
+   während das modale Info-Window das Hauptfenster sperrt - laut Code-
+   Kommentar bei cb_info_window_delete_event() (misc.c) schließt dieses
+   Fenster nachweislich erst, wenn der Hintergrundthread wirklich fertig
+   ist. Der GTK-Hauptthread (Anbinden) kann also nie währenddessen
+   ebenfalls mime_guess_content_type() aufrufen.
+
+ - Nutzer-Vorschlag (16.09.2026, aufgegriffen): magic_t nicht lazy beim
+   ersten Aufruf laden (Risiko: zwei Threads könnten zufällig gleichzeitig
+   zum ALLERERSTEN Mal laden - vermutlich die eigentliche Ursache des
+   früheren SIGSEGV, unabhängig von der oben widerlegten Nutzungs-
+   Kollision), sondern explizit und einmalig an einer Stelle, an der
+   garantiert nur der Hauptthread läuft und noch kein Hintergrundthread
+   existiert.
+
+ - Umgesetzt: mime_guess_content_type_init() (sond_mime.c/.h, neu) lädt
+   ein datei-statisches magic_t-Handle (g_magic) einmalig und idempotent;
+   mime_guess_content_type() nutzt es fortan für alle Aufrufe (Anbinden
+   UND Indizieren gleichermaßen - beide Aufrufer profitieren, nicht nur
+   einer), kein magic_close() mehr pro Aufruf. Fällt auf das alte
+   Verhalten (Open/Load/Close pro Aufruf) zurück, falls aus irgendeinem
+   Grund ohne vorherige Initialisierung aufgerufen (defensiv, sollte im
+   Normalbetrieb nie eintreten). Aufruf von mime_guess_content_type_
+   init() in project_open() (project.c), unmittelbar VOR sond_process_
+   file_create_wctx() (also vor dem Start des Indizier-Hintergrundthreads,
+   noch auf dem Hauptthread) - ein Fehlschlagen dort ist unkritisch (nur
+   LOG_WARN, kein Abbruch des Projekt-Ladens), weil mime_guess_content_
+   type() in dem Fall einfach auf den langsameren Fallback zurückfällt.
+   KEIN Mutex, KEIN GPrivate - bewusst so einfach wie möglich, da echte
+   Nebenläufigkeit architektonisch ausgeschlossen ist (s.o.).
+
+ - Offen: vom Nutzer zu bestätigen (erst mit wenigen Dateien anbinden,
+   dann eine kleine Indizierung, dann erst wieder hochskalieren) - falls
+   es erneut abstürzt, war die Ursache vermutlich NICHT die Nebenläufigkeit
+   (die ist jetzt so oder so ausgeschlossen), sondern ein von Nebenläufigkeit
+   unabhängiger Bug in dieser libmagic-Version bei bloßer Wiederverwendung
+   desselben Handles über viele Aufrufe hinweg.
+
+ - Nutzer-Rückmeldung: 1000 Dateien anbinden jetzt ~10 Sek. (vorher ~60
+   Sek.) - deutliche Verbesserung, kein Absturz.
+
+ UI-Feedback beim Anbinden fehlte komplett (16.09.2026, Nutzer-Fund,
+ behoben):
+
+ - Nutzer-Fund: bei einem Test mit >30.000 Dateien "tut sich nichts" im
+   Info-Window, und der Abbrechen-Button sei "sinnlos". Ursache (per
+   Code-Lektüre bestätigt, keine neue Regression - bestand schon immer):
+   zond_treeview_leaf_anbinden()/zond_treeview_anbinden_rekursiv()
+   (zond_treeview.c) laufen komplett synchron im Hauptthread, OHNE
+   jemals gtk_main_iteration()/gtk_events_pending() aufzurufen. GTK
+   zeichnet die per info_window_set_message() eingefügten Zeilen aber
+   erst, wenn die Hauptschleife wieder erreicht wird - bei dieser
+   synchronen Funktion also erst, wenn ALLES fertig ist. Aus demselben
+   Grund wird auch das "clicked"-Signal des Abbrechen-Buttons nie
+   verarbeitet (das läuft über gtk_dialog_response() -> das "response"-
+   Signal -> cb_info_window_response(), misc.c, die info_window->cancel
+   setzt) - der Button war dadurch faktisch wirkungslos, obwohl die
+   Abbruch-Prüfung selbst (*(info_window->cancel) am Anfang von
+   zond_treeview_anbinden_rekursiv()) längst vorhanden war.
+
+ - Fix: in zond_treeview_leaf_anbinden() (nach jeder Datei) und im
+   DIR-Zweig von zond_treeview_anbinden_rekursiv() (nach jedem
+   eingefügten Verzeichnis) jeweils direkt nach der info_window_set_
+   message()-Zeile ein "while (gtk_events_pending()) gtk_main_
+   iteration();" ergänzt. Zeichnet damit laufend mit UND macht den
+   Abbrechen-Button erstmals tatsächlich wirksam - die eigentliche
+   Abbruch-Logik (Prüfung von *(info_window->cancel)) war bereits
+   vorhanden und musste nicht geändert werden.
+
+ - Fix: zond_dbase_ensure_indexes() öffentlich zugänglich gemacht
+   (zond_dbase_ensure_performance_indexes(), zond_dbase.h) und in
+   project_create_dbase_zond() (project.c) zusätzlich direkt NACH dem
+   Backup explizit auf "work" aufgerufen - dort laufen alle
+   performance-kritischen Abfragen, unabhängig vom Zustand/der
+   Erreichbarkeit von "store". Ein Fehlschlagen auf "work" (lokal,
+   unerwarteter echter I/O-Fehler) bleibt fatal. Der ursprüngliche
+   Aufruf auf "store" (zond_dbase_open()) ist dagegen NICHT mehr fatal -
+   nur noch LOG_WARN bei Fehlschlag; die Indizes auf "store" werden
+   ohnehin beim nächsten erfolgreichen project_save() automatisch
+   nachgezogen (zond_dbase_backup() kopiert das komplette Schema von
+   "work" nach "store").
 
  Kopieren eines Verzeichnisses aus einem Container (ZIP) in das
  Filesystem (16.09.2026, Nutzeranfrage, umgesetzt):
@@ -823,8 +1130,9 @@
    in einen Container wie ZIP hineinkopieren) bleibt bewusst
    unimplementiert (weiterhin Fehlermeldung in copy_dir_across_sfps()).
 
- Performance ZIP-Anbinden: fehlendes Transaktions-Batching (16.09.2026,
- Nutzer-Messung 2000 Dateien ~30s, behoben):
+ Performance Anbinden: fehlendes Transaktions-Batching (16.09.2026,
+ Nutzer-Messung 2000 Dateien ~30s, behoben; Nutzer-Nachfrage 16.09.2026:
+ nicht ZIP-spezifisch, s.u.):
 
  - Ursache: zond_treeview_clipboard_anbinden() (zond_treeview.c) rief
    sond_treeview_clipboard_foreach() bislang ohne umschließende
@@ -838,6 +1146,22 @@
    einen echten fsync() aus. Bei mehreren tausend Dateien macht allein
    das den Löwenanteil der Laufzeit aus.
 
+ - Nutzer-Nachfrage (berechtigt, aufgegriffen): der Fund/die Messung
+   stammte aus einem Test mit einem ZIP-Archiv, deshalb zunächst als
+   "ZIP-Anbinden" bezeichnet/dokumentiert (auch im Titel von Task #103).
+   Tatsächlich ist der Fix aber gar nicht ZIP-spezifisch: zond_treeview_
+   clipboard_anbinden() ist die EINZIGE Stelle, die beim Einfügen aus der
+   Zwischenablage in zond_treeview_anbinden_rekursiv() verzweigt -
+   aufgerufen von zond_treeview_paste_clipboard() immer dann, wenn die
+   Quelle BAUM_FS ist, unabhängig davon, ob die ausgewählten Punkte
+   normale Dateien/Verzeichnisse im Dateisystem oder ein ZIP-Archiv sind.
+   Es gibt auch keinen zweiten Weg ins Anbinden (kein Drag&Drop, kein
+   separater Code-Pfad - per grep verifiziert). Die Transaktion liegt
+   eine Ebene über dieser Verzweigung, um die komplette Operation herum -
+   normales Anbinden vieler Dateien/Ordner aus dem Dateisystem (ganz ohne
+   ZIP) profitiert also seit demselben Fix genauso davon. Titel/Überschrift
+   entsprechend von "ZIP-Anbinden" auf "Anbinden" korrigiert.
+
  - Fix: die ganze Anbinden-Operation (der komplette
    sond_treeview_clipboard_foreach()-Durchlauf) jetzt in EIN
    zond_dbase_begin()/zond_dbase_commit() eingepackt - analog zum
@@ -850,5 +1174,419 @@
    (rc==-1, kommt praktisch nie vor, da zond_treeview_anbinden_rekursiv()
    Fehler pro Knoten selbst abfängt und weitermacht) löst ein Rollback
    aus.
+
+ Performance ZIP-Anbinden: verbleibende Silent-Freeze-Lücke bei sehr
+ großen Archiven + SondTVFMProgress-Mechanismus (16.09.2026,
+ Nutzer-Fund, behoben):
+
+ - Nutzer-Fund: auch nach dem UI-Pumping-Fix oben (s. "UI-Feedback beim
+   Anbinden fehlte komplett") blieb bei einem Test mit >30.000 ZIP-
+   Einträgen eine lange stille Pause: "Es erscheint: Verzeichnis
+   eingefügt: xyz.zip. Dann wieder nichts." Ursache (per Code-Lektüre):
+   sond_tvfm_item_load_zip_dir() (sond_treeviewfm.c) liest und erzeugt
+   ALLE Einträge eines ZIP-Verzeichnisses in einer einzigen Schleife,
+   BEVOR sond_tvfm_item_load_children() überhaupt zurückkehrt - pro
+   Nicht-Verzeichnis-Eintrag ein sond_file_part_create()-Aufruf
+   (MIME-Sniffing). Bei 30.000 Einträgen und wenigen ms pro Eintrag
+   ergibt das mehrere Minuten, in denen weder gtk_main_iteration()
+   läuft noch der Abbrechen-Button reagieren kann - das UI-Pumping an
+   den beiden Anbinden-Stellen in zond_treeview.c greift hier nicht,
+   weil es NACH dieser Schleife liegt (die Schleife selbst ist der
+   Engpass, nicht die Rekursion darüber).
+
+ - Nutzer-Anregung (aufgegriffen): denselben cancel/log_func-Gedanken
+   wie bei SondProcessFileCtx (sond_process_file.h, dort schreibend -
+   OCR + Indizierung) auch für sond_tvfm_item_load_children()/die vier
+   load_*_dir-Funktionen einführen, u.a. weil auch interaktives
+   Aufklappen großer Verzeichnisse (BAUM_FS) spürbar dauern kann.
+
+ - Vorab geklärt (Nutzer-Nachfrage, bestätigt): sond_process_file ist
+   lesend UND schreibend (OCR verändert PDFs, Indizierung schreibt in
+   die DB) - dessen wctx->cancel wird deshalb nur an sicheren
+   Checkpoints geprüft (Anfang von sond_process_file_do_rec()), nie
+   mitten in einer Operation. sond_tvfm_item_load_*_dir() ist dagegen
+   REIN LESEND (baut nur In-Memory-Objekte, keine Disk-/DB-Schreiben) -
+   Abbruch ist dort daher an praktisch jeder Stelle unkritisch möglich,
+   ohne Rollback-Sorgen. Deshalb: gleiche STRUKTUR (kleiner Kontext mit
+   cancel-Zeiger + Progress-Callback), aber bewusst getrennte, dem
+   jeweiligen Risiko angemessene Abbruch-LOGIK - kein gemeinsamer
+   Implementierungscode über das Interface-Muster hinaus.
+
+ - Fix: neuer Typ SondTVFMProgress (sond_treeviewfm.h: gint *cancel,
+   progress_func(gpointer, gchar const*), progress_func_data). Als
+   zusätzlicher, NULL-barer Parameter durch sond_tvfm_item_load_
+   children() und alle vier load_fs_dir/load_zip_dir/load_pdf_dir/
+   load_gmessage_dir-Funktionen durchgeschleift (Dispatcher +
+   Signaturen in sond_treeviewfm.c). Tatsächlich ausgewertet wird er
+   bisher nur in load_zip_dir(): alle 200 Einträge wird bei
+   vorhandenem progress progress_func() aufgerufen und *cancel
+   geprüft - bei Abbruch bricht nur die Schleife ab (bereits geladene
+   Kinder bleiben erhalten, rc bleibt 0, kein Fehler); die Rekursion
+   in zond_treeview_anbinden_rekursiv() bricht dann an ihrer
+   gewohnten Prüfstelle (*(info_window->cancel) am Funktionsanfang)
+   ohnehin ab. load_fs_dir/load_pdf_dir/load_gmessage_dir nehmen den
+   Parameter zwar entgegen (einheitliche Signatur), werten ihn aber
+   (noch) nicht aus - dort ist kein vergleichbarer Engpass bekannt.
+
+ - Alle bestehenden Aufrufer außer dem Anbinden-Pfad übergeben
+   weiterhin NULL (unverändertes Verhalten). Der Anbinden-Aufruf in
+   zond_treeview_anbinden_rekursiv() (DIR-Zweig, zond_treeview.c)
+   bekommt einen echten Kontext: cancel zeigt auf info_window->cancel
+   (dasselbe Flag, das der Abbrechen-Button schon setzt), progress_func
+   (neuer statischer Helper zond_treeview_anbinden_progress()) pumpt
+   nur die GTK-Events (macht damit auch während des Einlesens eines
+   großen ZIP-Verzeichnisses den Abbrechen-Button wirksam) und zeigt
+   bei übergebenem Text zusätzlich eine InfoWindow-Meldung an.
+
+ - Bewusst zurückgestellt (kein Teil dieses Fixes): eine Busy-/
+   Fortschritts-Cursor-Anzeige (z.B. Uhrglas, später ggf. ein sich
+   füllender Kreis) beim interaktiven Aufklappen von BAUM_FS-
+   Verzeichnissen (sond_treeviewfm_expand_dummy()) - der Mechanismus
+   (SondTVFMProgress) ist dafür vorbereitet, aber noch nicht an dieser
+   Stelle verdrahtet.
+
+ Performance ZIP-Anbinden: Archiv wurde pro Datei komplett neu geöffnet
+ (16.09.2026, Nutzer-Fund nach obigem Fix, behoben):
+
+ - Nutzer-Fund: trotz des SondTVFMProgress-Mechanismus oben blieb beim
+   Anbinden großer ZIPs eine Pause von ca. 30 Sek. NACH jedem einzelnen
+   eingefügten ZIP-Unterverzeichnis, bevor die "Anbindung Datei"-Zeilen
+   seiner Kinder erscheinen - unabhängig von der Anzahl der Einträge in
+   diesem Unterverzeichnis (auch bei nur wenigen Dateien).
+
+ - Ursache (per Code-Lektüre): sond_file_part_create() (sond_fileparts.c)
+   liest für den MIME-Sniff pro Datei nur die ersten 2048 Bytes, aber
+   sond_file_part_zip_open_archive() öffnete dafür bei JEDEM Aufruf das
+   GESAMTE ZIP-Archiv neu von der Platte (sond_fopen() + zip_source_
+   filep_create() + zip_open_from_source()) - das parst das komplette
+   Central Directory des Archivs neu - und verwarf den Handle danach
+   sofort wieder (zip_discard()). Bei einem Unterverzeichnis mit z.B. 6
+   Dateien wurde das ganze (u.U. sehr große, ggf. auf SeaDrive liegende)
+   Archiv also 6x komplett neu geöffnet und geparst, nur um 6x 2048 Bytes
+   zu lesen. sond_file_part_zip_list_dir() cachte den Verzeichnis-Index
+   bereits pro Objekt (dir_index) - genau dieses Cache-Muster fehlte beim
+   eigentlichen Lesen der Dateiinhalte.
+
+ - Nutzer-Nachfrage (berechtigt): wo ein analoger Mechanismus schon
+   existiert, statt neu zu erfinden - Antwort: genau der dir_index-Cache
+   in SondFilePartZipPrivate.
+
+ - Fix: SondFilePartZipPrivate um ein zweites Feld cached_archive
+   (zip_t*) erweitert, exakt nach demselben Lifecycle-Muster wie
+   dir_index - lazy aufgebaut, invalidiert in
+   sond_file_part_zip_invalidate_dir_index() (bei jeder Archiv-Änderung
+   durch rename/insert/delete im ZIP - dort ohnehin schon aufgerufen),
+   geschlossen in sond_file_part_zip_finalize() (läuft über dieselbe
+   invalidate-Funktion). sond_file_part_zip_open_archive() liefert für
+   den read-only/Filesystem-Fall (!sfp_parent && !writeable - der
+   häufigste beim Anbinden) ab dem zweiten Aufruf direkt den gecachten
+   Handle statt neu zu öffnen. Neue Funktion
+   sond_file_part_zip_release_archive() als Gegenstück: lässt den
+   gecachten Handle unangetastet, verwirft einen nicht-gecachten
+   (verschachtelter Fall) wie bisher sofort - ersetzt an den drei
+   betroffenen Aufrufstellen (read_bytes_internal, list_dir,
+   test_for_files) das bisherige direkte zip_discard(). Der writeable-
+   Fall (rename/insert/delete im ZIP) ist unverändert - der lädt ohnehin
+   je Schreibvorgang frisch in den Speicher.
+
+ Performance Löschen (BAUM_INHALT): fehlendes Transaktions-Batching
+ (16.09.2026, Nutzer-Fund, behoben):
+
+ - Nutzer-Fund: Löschen von 5 ausgewählten Knoten mit zusammen mehreren
+   hundert Unterknoten in BAUM_INHALT dauerte >20 Sek.
+
+ - Ursache: identisches Muster wie beim Anbinden (s.o.) - zond_
+   treeview_action_loeschen() (zond_treeview.c) rief sond_treeview_
+   selection_foreach()/zond_treeview_selection_loeschen_foreach() bisher
+   ohne umschließende Transaktion auf. Jeder zond_dbase_remove_node()-
+   Aufruf (einer pro gelöschtem Knoten, dazu noch mehrere begleitende
+   Lese-Abfragen wie zond_dbase_get_node()/_get_baum_auswertung_copy()/
+   _is_file_part_copied()/_get_baum_inhalt_file_from_file_part())
+   committet einzeln (SAVEPOINT/RELEASE) - bei erzwungenem
+   synchronous=FULL ein echter fsync() PRO gelöschtem Knoten.
+
+ - Fix: die ganze Lösch-Operation in zond_treeview_action_loeschen() in
+   EIN zond_dbase_begin()/zond_dbase_commit() eingepackt - analog zum
+   Anbinden-Fix. Nutzer-Entscheidung (bewusst abweichend vom Anbinden-
+   Muster, das bei Abbruch/Fehler trotzdem committet): bei rc == -1
+   (echter DB-Fehler, kommt praktisch nie vor) hier ein echtes ROLLBACK -
+   kein halb gelöschter Baum bei einem echten DB-Fehler. rc == 2 (Löschen
+   abgebrochen, weil noch ein Link auf einen der Knoten besteht) committet
+   weiterhin die bis dahin bereits gelöschten Geschwister-Knoten - das
+   entspricht dem bisherigen (nicht-transaktionalen) Verhalten und wurde
+   bewusst nicht geändert.
+
+ - Nutzer-Rückmeldung: Löschen geht "etwas schneller", dauert aber bei
+   mehreren hundert Unterknoten immer noch ein paar Sekunden. Nutzer-
+   Vermutung (per Nachfrage geprüft, NICHT bestätigt): GNode-Traversierung/
+   -Freigabe beim Löschen. Per Code-Lektüre widerlegt: node_free()
+   (zond_tree_store.c) gibt pro Knoten nur ein kleines RowData/Data-Struct
+   frei und entfernt einen Hashtable-Eintrag (ht_node_id) - beides O(1),
+   nicht die Bremse.
+
+ - Tatsächliche verbleibende Kosten (Fund, NOCH NICHT behoben - Nutzer:
+   "erstmal ja" heißt vorerst akzeptiert, nur dokumentiert):
+   1. Pro gelöschtem Knoten laufen weiterhin mehrere einzelne DB-
+      Lesequeries (s.o.: get_node/_get_baum_auswertung_copy/
+      _is_file_part_copied/_get_baum_inhalt_file_from_file_part) - kein
+      fsync mehr, aber die Statement-Ausführungen selbst kosten bei
+      mehreren hundert Knoten × 5-6 Abfragen spürbar Zeit.
+   2. Wahrscheinlich der größere Anteil: zond_tree_store_remove_node()
+      (zond_tree_store.c) berechnet für JEDEN einzeln entfernten Knoten
+      per zond_tree_store_get_path() dessen GtkTreePath (rekursiver
+      Parent-Walk mit linearem Geschwister-Scan je Ebene) und feuert
+      danach gtk_tree_model_row_deleted() - das an BAUM_INHALT hängende,
+      sichtbare GtkTreeView verarbeitet dieses Signal SOFORT (Neu-
+      berechnung sichtbarer Zeilen, Redraw) - einmal PRO Knoten statt
+      gebündelt. Standard-GTK-Architektur (kein Bug), aber bei hunderten
+      Einzel-Löschungen am sichtbaren Baum ein bekannter Performance-
+      Fallstrick.
+
+ - Möglicher weiterer Fix (vorgeschlagen, NICHT umgesetzt): Model
+   während der Lösch-Schleife in zond_treeview_action_loeschen() kurz
+   vom GtkTreeView abkoppeln (gtk_tree_view_set_model(view, NULL)) und
+   danach wieder anhängen. row-deleted-Signale feuern weiterhin (Modell
+   bleibt für andere Beobachter korrekt), aber ohne angehängten View
+   verarbeitet GTK sie nicht einzeln - beim Wiederanhängen baut GTK die
+   sichtbaren Zeilen einmalig neu auf statt hunderte Male inkrementell.
+
+ Performance BAUM_FS-Aufklappen: redundanter ZIP-dir_index-Aufbau beim
+ bloßen Auflisten (16.09.2026, Nutzer-Fund, behoben):
+
+ - Nutzer-Fund: Aufklappen eines (vollständig hydrierten, also kein
+   SeaDrive-Netzwerkeffekt) Verzeichnisses mit 5 ZIP- und 3 CSV-Dateien
+   dauerte ~10 Sek.
+
+ - Ursache: sond_tvfm_item_create() (sond_treeviewfm.c) behandelte den
+   ZIP-Fall anders als PDF/GMessage - dort wird für has_children die
+   schon vom Erzeugen des SondFilePart her vorhandene, billige
+   sond_file_part_get_has_children()-Flag wiederverwendet, im ZIP-Zweig
+   wurde stattdessen IMMER sond_tvfm_item_load_zip_dir(stvfm_item, NULL,
+   NULL, NULL) aufgerufen. Das ruft über sond_file_part_zip_list_dir()
+   beim allerersten Zugriff auf ein Archiv sfp_zip_build_dir_index() auf
+   - einen kompletten Durchlauf über JEDEN Eintrag im GESAMTEN Archiv
+   (Pfad-Zerlegung, Hashtable-Aufbau für alle Verzeichnisebenen) - nur um
+   festzustellen, ob überhaupt ein Eintrag existiert. Das passierte für
+   jede ZIP-Datei bereits beim bloßen AUFLISTEN des sie enthaltenden
+   Verzeichnisses, nicht erst beim Hineinklicken. Bei großen Archiven
+   (mehrere Tausend Einträge) macht allein das bei mehreren ZIP-Dateien
+   in einem Verzeichnis mehrere Sekunden aus.
+
+ - Fix: für path_or_section == NULL (das ZIP-File selbst, noch nicht
+   hineinexpandiert) die von sond_file_part_zip_test_for_files() (läuft
+   schon in sond_file_part_create_from_mime_type() beim Erzeugen des
+   SondFilePart, prüft nur zip_get_num_entries() auf dem gecachten
+   Archiv-Handle, OHNE die Einträge zu parsen) gesetzte has_children-
+   Flag wiederverwenden - analog PDF/GMessage. Für bereits expandierte
+   ZIP-Unterverzeichnisse (path_or_section != NULL) bleibt
+   load_zip_dir() unverändert, da dort dir_index durchs Expandieren
+   ohnehin schon gecacht und der Aufruf billig ist.
+
+ Performance InfoWindow: ein GtkLabel-Widget PRO Nachricht (16.09.2026,
+ Nutzer-Nachfrage - "ist das Schreiben einer Zeile pro Datei ins
+ InfoWindow selbst ein Performance-Killer?" -, behoben):
+
+ - Nutzer-Nachfrage (berechtigt, bestätigt): info_window_set_message()
+   (misc.c) legte bei JEDEM Aufruf ein neues GtkLabel an und packte es
+   per gtk_box_pack_start() in info_window->content - eine GtkBox, die
+   seit info_window_open() nie geleert wird. Bei z.B. 30.000 Dateien
+   beim Anbinden landen am Ende 30.000 einzelne Label-Widgets in einer
+   Box innerhalb eines GtkScrolledWindow.
+
+ - Ursache: GtkBox muss bei jeder Kind-Änderung ihre Größenanforderung
+   neu berechnen - O(Anzahl Kinder). Normalerweise bündelt GTK mehrere
+   queue_resize()-Aufrufe bis zum nächsten Main-Loop-Durchlauf. Der
+   UI-Pumping-Fix von zuvor (gtk_main_iteration() nach jeder einzelnen
+   Anbinden-Nachricht, s.o. "UI-Feedback beim Anbinden fehlte komplett")
+   verhindert genau dieses Bündeln: jede einzelne Nachricht erzwingt
+   sofort einen vollständigen Resize/Redraw über die inzwischen
+   angewachsene Box. In Summe O(n²) statt O(n) für n Nachrichten - der
+   UI-Pumping-Fix hat also das Sichtbarkeits-/Abbrechen-Problem gelöst,
+   dabei aber vermutlich diesen Kostenfaktor erst richtig scharf gemacht.
+
+ - Fix: InfoWindow (misc.h) von GtkBox+GtkLabel-pro-Zeile (Felder
+   content/last_inserted_widget) auf ein einzelnes GtkTextView mit
+   GtkTextBuffer umgestellt (neue Felder text_view/end_mark). Text an
+   einen GtkTextBuffer anhängen bleibt auch bei sehr vielen Zeilen
+   günstig (dafür gebaut), im Unterschied zu vielen einzelnen
+   Kind-Widgets in einer Box. Auto-Scroll-ans-Ende läuft jetzt über
+   einen GtkTextMark mit left_gravity=FALSE (bleibt automatisch am
+   Textende) + gtk_text_view_scroll_mark_onscreen() - robuster und
+   einfacher als die alte size-allocate-Einmal-Verbindung/Trennung.
+   Betrifft nur misc.c/misc.h - alle Aufrufer (project.c, headerbar.c,
+   seiten.c, zond_chat.c, zond_update.c, zond_treeview.c) unverändert,
+   da Funktionssignaturen gleich geblieben sind (content/
+   last_inserted_widget wurden von keiner anderen Datei gelesen).
+
+ Performance BAUM_FS Auf-/Zuklappen bei ZIP-Dateien: Archiv-Öffnen schon
+ beim bloßen Erkennen (16.09.2026, Nutzer-Rückmeldung nach Task #116 -
+ "sind sie nicht [weg]. Auch das Zuklappen... dauert lange" -, behoben):
+
+ - Nutzer-Rückmeldung: der Fix aus #116 (redundanten dir_index-Aufbau
+   vermeiden) brachte keine spürbare Besserung; zusätzlich dauerte auch
+   das ZUKLAPPEN des Verzeichnisses lange - unerwartet, da Zuklappen
+   normalerweise nur schon geladene Zeilen ausblendet/verwirft, nichts
+   neu lädt.
+
+ - Tatsächliche Ursache (tiefer als #116): sond_file_part_create_from_
+   mime_type() ruft für JEDE neu entdeckte ZIP-Datei (schon beim bloßen
+   Auflisten eines Verzeichnisses, nicht erst beim Aufklappen der ZIP
+   selbst) sond_file_part_test_for_children() ->
+   sond_file_part_zip_test_for_files() auf, die bisher das Archiv via
+   sond_file_part_zip_open_archive()/zip_open_from_source() (libzip)
+   öffnete, nur um zip_get_num_entries() abzufragen. Das PROBLEM: schon
+   das bloße ÖFFNEN eines ZIP-Archivs mit libzip parst IMMER dessen
+   komplettes Central Directory - das ist die eigentliche teure
+   Operation, nicht erst der (in #116 vermiedene) zusätzliche
+   dir_index-Aufbau. Jedes Auflisten eines ZIP-Dateien enthaltenden
+   Verzeichnisses öffnete also alle enthaltenen Archive komplett neu.
+   Erklärt auch das Zuklappen: sond_treeviewfm_row_collapsed()
+   (sond_treeviewfm.c) zerstört beim Einklappen alle Kind-Zeilen inkl.
+   der zugehörigen SondFilePartZip-Objekte (zip_discard() auf die beim
+   Öffnen aufgebaute interne libzip-Struktur) - bei großen Archiven mit
+   vielen Tausend Einträgen ist auch dieses Freigeben nicht kostenlos.
+   Jedes erneute Aufklappen fing wieder bei Null an (Objekte wurden beim
+   Zuklappen ja zerstört, nicht wiederverwendet).
+
+ - Fix: sond_file_part_zip_test_for_files() ersatzlos entfernt (war
+   danach unbenutzt). sond_file_part_test_for_children() setzt für ZIP
+   jetzt direkt has_children = TRUE, OHNE das Archiv zu öffnen - Nutzer-
+   Entscheidung: leere ZIP-Dateien sind selten und harmlos, wenn sie
+   fälschlich mit einem Aufklapp-Pfeil gezeigt werden, der dann eine
+   leere Liste offenbart. Echtes Öffnen des Archivs passiert jetzt nur
+   noch dort, wo wirklich gebraucht: beim tatsächlichen Aufklappen DER
+   ZIP-DATEI SELBST (sond_tvfm_item_load_zip_dir()) oder beim Anbinden.
+   Damit sind Auf-/Zuklappen eines Verzeichnisses mit ZIP-Dateien jetzt
+   unabhängig von deren Größe genauso schnell wie mit normalen Dateien.
+
+ Bug (nicht Performance) beim Kopieren eines Verzeichnisses aus einem
+ ZIP-Archiv ins Dateisystem (16.09.2026, Nutzer-Fund, behoben):
+
+ - Nutzer-Fund: "Das Kopieren von Verzeichnissen aus zips funktioniert
+   zwar, aber im BAUM_FS wird ein Verzeichnis-Item angezeigt, das, wenn
+   man es öffnet, einen Fehler anzeigt" - genauer Fehlertext "Zeile
+   konnte nicht expandiert werden / No such file or directory". Wichtiger
+   Befund des Nutzers: auf der Platte ist das kopierte Verzeichnis
+   fehlerfrei vorhanden, und nach Schließen+Neuöffnen des Projekts lässt
+   sich dasselbe Verzeichnis anstandslos aufklappen. Fehler betraf laut
+   Nutzer die oberste, gerade eingefügte Ebene selbst (nicht erst einen
+   Unterordner darin).
+
+ - Ursache (per Code-Lektüre, ohne Testen bestätigt - kein Zugriff auf
+   funktionierendes make zond in dieser Session): das eigentliche Kopieren
+   (copy_dir_across_sfps()/copy_container_dir_to_fs(), Task #102) legt die
+   Dateien/Verzeichnisse korrekt im Dateisystem an - das ist NICHT die
+   fehlerhafte Stelle. Der Fehler steckt in
+   sond_treeviewfm_paste_clipboard_foreach(): nach erfolgreichem Kopieren
+   baut diese Funktion generisch ein neues SondTVFMItem für die Anzeige,
+   indem sie den GType des sond_file_part der QUELLE klont:
+
+     if (stvfm_item_priv->sond_file_part) {
+         sfp_new = g_object_new(G_OBJECT_TYPE(stvfm_item_priv->sond_file_part), NULL);
+         if (!stvfm_item_priv->path_or_section)
+             sond_file_part_set_path(sfp_new, path_new);
+         ...
+         sond_file_part_set_parent(sfp_new, stvfm_item_parent_priv->sond_file_part);
+     }
+
+   Ein Verzeichnis INNERHALB eines ZIP-Archivs hat aber gar keine eigene
+   sond_file_part-Identität - es teilt sich die des umschließenden
+   Archivs, nur path_or_section unterscheidet den Unterpfad (s.
+   sond_tvfm_item_load_zip_dir(): Verzeichnis-Einträge bekommen das
+   sond_file_part des Eltern-Containers). Bei so einem Verzeichnis ist
+   path_or_section gesetzt, also läuft sond_file_part_set_path(sfp_new,
+   ...) NICHT (die Bedingung ist !path_or_section) - sfp_new bleibt ohne
+   Pfad. Das Ziel-Parent (ein normaler Ordner im Dateisystem) hat selbst
+   kein sond_file_part, also wird auch sfp_new's Parent auf NULL gesetzt.
+   Ergebnis: sfp_new ist eine neue, orphane SondFilePartZip-Instanz ohne
+   Pfad und ohne Eltern-Archiv.
+
+   Beim ersten Kinder-Check (in sond_tvfm_item_create(), ZIP-Zweig) sowie
+   beim späteren echten Aufklappen versucht diese Attrappe trotzdem, sich
+   selbst als ZIP-Datei zu öffnen: sond_file_part_zip_open_archive()
+   baut mit sfp_parent==NULL und !writeable den Pfad
+   "Projektwurzel/" + sond_file_part_get_path(sfp_new). Da
+   get_path(sfp_new) NULL liefert, bricht g_strconcat() dort ab (NULL
+   markiert für g_strconcat() das Varargs-Ende) - es bleibt nur
+   "Projektwurzel/" übrig, und sond_fopen() versucht, das
+   Projektwurzelverzeichnis selbst mit "rb" zu öffnen. Das schlägt fehl -
+   exakt mit "No such file or directory".
+
+   Warum kein Fehler schon beim Einfügen sichtbar wurde: der ZIP-Zweig in
+   sond_tvfm_item_create() wertete den Rückgabewert von
+   sond_tvfm_item_load_zip_dir() bisher per "? TRUE : FALSE" aus - auch
+   der Fehlercode -1 zählte damit fälschlich als "hat Kinder", weshalb
+   trotz gescheitertem Öffnen ein Aufklapp-Pfeil samt Dummy-Kind gesetzt
+   wurde. Der Fehler zeigte sich dadurch erst beim tatsächlichen Klick
+   zum Aufklappen (mit echtem GError), nicht schon beim Einfügen (dort
+   wird error=NULL übergeben, der Fehler also verschluckt).
+
+   Warum nach Projekt-Neustart kein Problem: beim Neuladen entsteht das
+   Verzeichnis-Item ganz normal durch echtes Verzeichnis-Listing des
+   Dateisystems (sond_file_part bleibt NULL) - der komplette
+   Klon-Mechanismus oben kommt dabei gar nicht zum Zug.
+
+ - Fix: in sond_treeviewfm_paste_clipboard_foreach() wird sfp_new NICHT
+   mehr geklont, wenn die Quelle ein Verzeichnis-Marker ist
+   (path_or_section gesetzt) UND das Ziel-Parent kein eigenes
+   sond_file_part hat (Kopie ins echte Dateisystem). sfp_new bleibt dann
+   NULL - der schon vorhandene, dafür ausgelegte Zweig in
+   sond_tvfm_item_create() (sond_file_part == NULL -> echtes
+   Dateisystem-Verzeichnis, has_children per sond_tvfm_item_load_fs_dir()
+   auf dem tatsächlich existierenden Pfad ermittelt) greift dann korrekt -
+   exakt der Code, der auch beim Projekt-Neustart funktioniert. Alle
+   anderen Fälle (einzelne Dateien; Kopien innerhalb von ZIP/PDF/GMessage,
+   wo Ziel-Parent ein eigenes sond_file_part hat) bleiben unverändert.
+   Zusätzlich der oben beschriebene "-1 zählt als TRUE"-Fehler in
+   sond_tvfm_item_create() behoben (nur Rückgabewert 1 zählt jetzt als
+   "hat Kinder").
+
+ - Nutzer-Rückmeldung (16.09.2026) nach Build: "super. Kopieren klappt." -
+   Fix bestätigt.
+
+ SeaDrive-Statusanzeige zeigt dauerhaft "✓" trotz ausstehender Uploads
+ (16.09.2026, Nutzer-Fund im Anschluss an obigen Kopier-Fix, behoben):
+
+ - Nutzer-Fund: nach dem Kopieren von Dateien aus einem ZIP-Archiv ins
+   Dateisystem (SeaDrive-synchronisiertes Projektverzeichnis) zeigte die
+   SeaDrive-Statuszeile durchgehend ein Häkchen ("SeaDrive: ✓", s.
+   cb_seadrive_status_app_window() in app_window.c - Haken erscheint bei
+   pending_down==0 && pending_up==0), obwohl die frisch kopierten Dateien
+   noch zum Server hochgeladen werden mussten.
+
+ - Erste Theorie (verworfen): ein Puffer-Overflow von
+   ReadDirectoryChangesW (32-KB-Puffer) während des Bulk-Kopierens könnte
+   einen Resync auslösen, der pending_up nicht neu ermittelt
+   (watcher_count_pending_down() prüft nur PINNED/OFFLINE-Attribute,
+   nie den In-Sync-Status). Von Nutzer widerlegt: derselbe Effekt trat
+   auch bei nur ~20 kopierten Dateien auf - dafür reicht der Puffer
+   bei Weitem.
+
+ - Tatsächliche Ursache: watcher_check_in_sync() (sond_treeviewfm_
+   seadrive.c) - wird bei JEDEM einzelnen ADDED/MODIFIED-Watcher-Event
+   aufgerufen, um per CfGetPlaceholderInfo() (Cloud Files API) den
+   echten Sync-Status einer Datei abzufragen - wertete jede Art von
+   Unsicherheit (CfGetPlaceholderInfo-Funktionszeiger fehlt, Datei nicht
+   öffenbar, CfGetPlaceholderInfo() selbst schlägt fehl) per Fallback als
+   "im Zweifel: in sync" (TRUE). Eine gerade erst per normalem
+   CreateFile()/fwrite() (statt über die Cloud-Files-Platzhalter-APIs)
+   neu angelegte Datei wird von CfGetPlaceholderInfo() vermutlich (noch)
+   nicht als Cloud-Datei erkannt, der Aufruf schlägt fehl - der
+   optimistische Fallback verschleierte dadurch dauerhaft (nicht nur
+   kurz nach dem Anlegen, da kein späteres Ereignis den Fehler
+   korrigierte), dass die Datei noch hochgeladen werden musste.
+
+ - Fix: alle drei Fallback-Stellen in watcher_check_in_sync() von TRUE
+   auf FALSE gedreht - im Zweifel gilt eine Datei jetzt als NICHT
+   synchron (Upload ausstehend), nicht mehr als synchron. Für einen
+   Indikator, der vor "Daten sind noch nicht gesichert" warnen soll, ist
+   das die richtige Default-Richtung: ein fälschliches "noch nicht
+   synchron" ist höchstens ein optisches Ärgernis, ein fälschliches
+   "alles synchron" verschleiert ein echtes Datenverlust-Risiko.
+
+ - Nutzer-Rückmeldung (16.09.2026) nach Build: "scheint zu passen. Meldet
+   72 zum Hochladen, springt dann nach ca. 5 Sek auf Häkchen. Explorer
+   zeigt zu diesem Zeitpunkt, dass schon hochgeladen." - Fix bestätigt,
+   Anzeige deckt sich mit dem tatsächlichen SeaDrive/Explorer-Status.
 
  */

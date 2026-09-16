@@ -213,8 +213,8 @@ static gchar const* sond_tvfm_item_get_basename(SondTVFMItem* stvfm_item) {
 	return basename;
 }
 
-static gint sond_tvfm_item_load_fs_dir(SondTVFMItem*, GPtrArray**, GError**);
-static gint sond_tvfm_item_load_zip_dir(SondTVFMItem*, GPtrArray**, GError**);
+static gint sond_tvfm_item_load_fs_dir(SondTVFMItem*, GPtrArray**, SondTVFMProgress*, GError**);
+static gint sond_tvfm_item_load_zip_dir(SondTVFMItem*, GPtrArray**, SondTVFMProgress*, GError**);
 
 static char const* mime_type_to_icon_name_manual(const char *mime_type)
 {
@@ -328,7 +328,7 @@ SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM* stvfm,
 		stvfm_item_priv->type = SOND_TVFM_ITEM_TYPE_DIR;
 
 		//hat Verzeichnis Einträge?
-		rc = sond_tvfm_item_load_fs_dir(stvfm_item, NULL, &error);
+		rc = sond_tvfm_item_load_fs_dir(stvfm_item, NULL, NULL, &error);
 		if (rc == -1) {
 			LOG_WARN("Fehler beim Öffnen des Verzeichnisses '%s':\n%s",
 					(sond_tvfm_item_get_basename(stvfm_item)) ?
@@ -364,9 +364,41 @@ SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM* stvfm,
 		}
 		else if (SOND_IS_FILE_PART_ZIP(sond_file_part)) {
 			stvfm_item_priv->type = SOND_TVFM_ITEM_TYPE_DIR;
-			stvfm_item_priv->has_children =
-					sond_tvfm_item_load_zip_dir(stvfm_item, NULL, NULL) ?
-							TRUE : FALSE;
+
+			/* Nutzer-Fund 16.09.2026: für path_or_section == NULL (das
+			 * ZIP-File selbst, noch nicht hineinexpandiert) NICHT
+			 * load_zip_dir() aufrufen - das erzwingt über
+			 * sond_file_part_zip_list_dir() beim allerersten Zugriff auf
+			 * dieses Archiv den kompletten dir_index-Aufbau (ALLE
+			 * Einträge, alle Ebenen, s. sfp_zip_build_dir_index()), nur
+			 * um zu prüfen ob überhaupt ein Eintrag existiert. Bei
+			 * großen Archiven (mehrere Tausend Einträge) macht allein
+			 * das bloße AUFLISTEN eines Verzeichnisses mit mehreren
+			 * ZIP-Dateien darin (noch ohne sie zu öffnen) spürbar Zeit
+			 * aus. Stattdessen die von sond_file_part_zip_test_for_files()
+			 * (läuft schon in sond_file_part_create_from_mime_type() beim
+			 * Erzeugen des SondFilePart) günstig gesetzte has_children-
+			 * Flag wiederverwenden - analog zum PDF/GMessage-Zweig oben.
+			 * Für bereits expandierte ZIP-Unterverzeichnisse
+			 * (path_or_section != NULL) bleibt load_zip_dir() unverändert
+			 * - dort ist dir_index durchs Expandieren ohnehin schon
+			 * gecacht, also billig. */
+			if (!path_or_section)
+				stvfm_item_priv->has_children =
+						sond_file_part_get_has_children(sond_file_part);
+			else
+				/* Nutzer-Fund 16.09.2026: Rückgabewert ist -1 (Fehler), 0
+				 * (keine Kinder) oder 1 (Kinder) - der frühere Vergleich
+				 * "? TRUE : FALSE" wertete auch -1 (Fehler, z.B. defektes/
+				 * pfadloses sond_file_part nach fehlerhafter Kopie aus
+				 * einem Container) fälschlich als "hat Kinder", wodurch ein
+				 * Dummy-Kind eingefügt wurde, obwohl das Verzeichnis beim
+				 * echten Aufklappen dann mit einer Fehlermeldung
+				 * fehlschlägt. Jetzt: nur 1 zählt als "hat Kinder". */
+				stvfm_item_priv->has_children =
+						(sond_tvfm_item_load_zip_dir(stvfm_item, NULL, NULL, NULL) == 1) ?
+								TRUE : FALSE;
+
 			stvfm_item_priv->icon_name = (path_or_section) ?
 					"folder" : "package-x-generic";
 		}
@@ -421,7 +453,7 @@ SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM* stvfm,
 }
 
 static gint sond_tvfm_item_load_fs_dir(SondTVFMItem* stvfm_item,
-		GPtrArray** arr_children, GError **error) {
+		GPtrArray** arr_children, SondTVFMProgress* progress, GError **error) {
 	GPtrArray* loaded_children = NULL;
 	gboolean dir_has_children = FALSE;
 	gchar* path_dir = NULL;
@@ -527,7 +559,7 @@ static gint sond_tvfm_item_load_fs_dir(SondTVFMItem* stvfm_item,
 }
 
 static gint sond_tvfm_item_load_zip_dir(SondTVFMItem* stvfm_item,
-		GPtrArray** arr_children, GError** error) {
+		GPtrArray** arr_children, SondTVFMProgress* progress, GError** error) {
 	GPtrArray* entries = NULL;
 
 	SondTVFMItemPrivate* stvfm_item_priv =
@@ -556,9 +588,19 @@ static gint sond_tvfm_item_load_zip_dir(SondTVFMItem* stvfm_item,
 		SondZipDirEntry* e = g_ptr_array_index(entries, i);
 		SondTVFMItem* child = NULL;
 
-		//DIAG (15./16.09.2026, ZIP-Anbinden-Hänger)
-		LOG_INFO("DIAG load_zip_dir: Eintrag %u/%u '%s' (is_dir=%d)",
-				i + 1, entries->len, e->path, e->is_dir);
+		/* Nutzer-Fund 16.09.2026: Bei großen Archiven (>30000 Einträge)
+		 * lief diese Schleife bisher komplett unbeobachtbar und
+		 * unabbrechbar durch (jede Iteration ruft sond_file_part_create()
+		 * auf, das per libmagic den MIME-Typ sniffed - je nach Puffergröße
+		 * spürbar Zeit pro Eintrag). progress ist rein lesend eingesetzt:
+		 * Abbruch hier verwirft nur noch nicht geladene Kinder, keine
+		 * Rollback-Problematik (im Unterschied zu SondProcessFileCtx). */
+		if (progress && (i % 200) == 0) {
+			if (progress->progress_func)
+				progress->progress_func(progress->progress_func_data, NULL);
+			if (progress->cancel && *progress->cancel)
+				break;
+		}
 
 		if (e->is_dir) {
 			/* Verzeichnis: path endet auf '/', ohne dieses als path_or_section */
@@ -569,14 +611,8 @@ static gint sond_tvfm_item_load_zip_dir(SondTVFMItem* stvfm_item,
 		} else {
 			SondFilePart* sfp_child = NULL;
 
-			LOG_INFO("DIAG load_zip_dir: rufe sond_file_part_create('%s') auf",
-					e->path);
-
 			sfp_child = sond_file_part_create(stvfm_item_priv->sond_file_part,
 					e->path, error);
-
-			LOG_INFO("DIAG load_zip_dir: sond_file_part_create zurück, sfp_child=%p",
-					(gpointer) sfp_child);
 
 			if (!sfp_child) {
 				LOG_WARN("SondFilePart konnte nicht erzeugt werden:\n%s",
@@ -599,7 +635,7 @@ static gint sond_tvfm_item_load_zip_dir(SondTVFMItem* stvfm_item,
 }
 
 static gint sond_tvfm_item_load_pdf_dir(SondTVFMItem* stvfm_item, GPtrArray** arr_children,
-		GError** error) {
+		SondTVFMProgress* progress, GError** error) {
 	gint rc = 0;
 	GPtrArray* arr_emb_files = NULL;
 	SondTVFMItemPrivate* stvfm_item_priv = NULL;
@@ -637,7 +673,7 @@ static gint sond_tvfm_item_load_pdf_dir(SondTVFMItem* stvfm_item, GPtrArray** ar
 }
 
 static gint sond_tvfm_item_load_gmessage_dir(SondTVFMItem* stvfm_item,
-		GPtrArray** arr_children, GError** error) {
+		GPtrArray** arr_children, SondTVFMProgress* progress, GError** error) {
 	gint rc = 0;
 	GPtrArray* arr_mimeparts = NULL;
 
@@ -736,7 +772,7 @@ static gint sond_tvfm_item_load_gmessage_dir(SondTVFMItem* stvfm_item,
 }
 
 gint sond_tvfm_item_load_children(SondTVFMItem* stvfm_item,
-		GPtrArray** arr_children, GError** error) {
+		GPtrArray** arr_children, SondTVFMProgress* progress, GError** error) {
 	SondTVFMItemPrivate *stvfm_item_priv =
 			sond_tvfm_item_get_instance_private(stvfm_item);
 
@@ -745,13 +781,13 @@ gint sond_tvfm_item_load_children(SondTVFMItem* stvfm_item,
 
 		//untergliedern: dir in FileSystem, zip-Archiv oder GMessage
 		if (stvfm_item_priv->sond_file_part == NULL) //FileSystem
-			rc = sond_tvfm_item_load_fs_dir(stvfm_item, arr_children, error);
+			rc = sond_tvfm_item_load_fs_dir(stvfm_item, arr_children, progress, error);
 		else if(SOND_IS_FILE_PART_ZIP(stvfm_item_priv->sond_file_part))
-			rc = sond_tvfm_item_load_zip_dir(stvfm_item, arr_children, error);
+			rc = sond_tvfm_item_load_zip_dir(stvfm_item, arr_children, progress, error);
 		else if (SOND_IS_FILE_PART_PDF(stvfm_item_priv->sond_file_part))
-			rc = sond_tvfm_item_load_pdf_dir(stvfm_item, arr_children, error);
+			rc = sond_tvfm_item_load_pdf_dir(stvfm_item, arr_children, progress, error);
 		else if(SOND_IS_FILE_PART_GMESSAGE(stvfm_item_priv->sond_file_part))
-			rc = sond_tvfm_item_load_gmessage_dir(stvfm_item, arr_children, error);
+			rc = sond_tvfm_item_load_gmessage_dir(stvfm_item, arr_children, progress, error);
 
 		if (rc)
 			return -1;
@@ -1203,7 +1239,7 @@ static gint copy_container_dir_to_fs(SondTVFMItem* stvfm_item_src,
 	if (rc)
 		return -1;
 
-	rc = sond_tvfm_item_load_children(stvfm_item_src, &arr_children, error);
+	rc = sond_tvfm_item_load_children(stvfm_item_src, &arr_children, NULL, error);
 	if (rc)
 		return -1;
 
@@ -2249,7 +2285,36 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 									"/" : "",
 									s_paste_sel->base_inserted, NULL);
 
-	if (stvfm_item_priv->sond_file_part) {
+	/* Nutzer-Fund 16.09.2026: stvfm_item_priv->path_or_section gesetzt heißt
+	 * hier: das kopierte Element ist ein Verzeichnis-Marker INNERHALB eines
+	 * Containers (ZIP/PDF/GMessage) - sein sond_file_part ist der
+	 * umschließende Container selbst, keine eigenständige Identität (s.
+	 * Erzeugung z.B. in sond_tvfm_item_load_zip_dir(): Verzeichnis-Einträge
+	 * bekommen das sond_file_part des Eltern-Containers, nur
+	 * path_or_section unterscheidet den Unterpfad). Landet so ein
+	 * Verzeichnis per Kopie in einem Ziel OHNE eigenen sond_file_part (also
+	 * im echten Dateisystem - genau das, was
+	 * copy_dir_across_sfps()/copy_container_dir_to_fs() tatsächlich
+	 * anlegen), ist ein geklontes sond_file_part witzlos bis kaputt: die
+	 * neue Instanz (hier z.B. eine SondFilePartZip) bekommt weder Pfad
+	 * (sond_file_part_set_path() läuft nur für !path_or_section) noch ein
+	 * Eltern-Archiv (Ziel-Parent hat ja keins) und versucht beim ersten
+	 * Kinder-Check trotzdem, sich selbst als Archiv zu öffnen - scheitert
+	 * mit "No such file or directory" (Projektwurzel + "/" landet als
+	 * Dateiname in fopen(), weil sond_file_part_get_path() NULL liefert und
+	 * g_strconcat() dort abbricht). Der Fehler zeigte sich erst beim
+	 * tatsächlichen Aufklappen (nicht schon beim Einfügen), weil
+	 * sond_tvfm_item_load_zip_dir(...) ? TRUE : FALSE einen Fehler (-1)
+	 * fälschlich als "hat Kinder" wertet. Fix: in diesem Fall gar nicht
+	 * klonen - das neue Element ist ein ganz normales
+	 * Dateisystem-Verzeichnis (sond_file_part bleibt NULL), was ohnehin dem
+	 * entspricht, was auf der Platte real angelegt wurde; der bestehende
+	 * NULL-sichere Zweig unten (sond_tvfm_item_create() mit
+	 * sond_file_part == NULL) übernimmt das korrekt. Alle anderen Fälle
+	 * (Dateien; Kopien innerhalb von ZIP/PDF/GMessage) bleiben unverändert. */
+	if (stvfm_item_priv->sond_file_part &&
+			!(stvfm_item_priv->path_or_section &&
+					!stvfm_item_parent_priv->sond_file_part)) {
 		sfp_new = g_object_new(G_OBJECT_TYPE(stvfm_item_priv->sond_file_part), NULL);
 
 		if (!stvfm_item_priv->path_or_section)
@@ -2678,7 +2743,7 @@ static gint sond_treeviewfm_search_needle(SondTVFMItem* stvfm_item,
 			gint rc = 0;
 
 			rc = sond_tvfm_item_load_children(stvfm_item,
-					&arr_children, error);
+					&arr_children, NULL, error);
 			if (rc)
 				return -1;
 
@@ -2772,7 +2837,7 @@ static gint sond_tvfm_item_get_fileparts(SondTVFMItem *stvfm_item,
 
 		gint rc = 0;
 
-		rc = sond_tvfm_item_load_children(stvfm_item, &arr_children, error);
+		rc = sond_tvfm_item_load_children(stvfm_item, &arr_children, NULL, error);
 		if (rc)
 			return -1;
 
@@ -3141,7 +3206,7 @@ static gint sond_treeviewfm_expand_dummy(SondTreeviewFM *stvfm, GtkTreeIter *ite
 	GPtrArray *arr_children = NULL;
 	gint rc = 0;
 
-	rc = sond_tvfm_item_load_children(stvfm_item, &arr_children, error);
+	rc = sond_tvfm_item_load_children(stvfm_item, &arr_children, NULL, error);
 	if (rc)
 		return -1;
 

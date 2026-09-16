@@ -125,7 +125,6 @@ static SondFilePart* sond_file_part_do_create(GType sfp_type, const gchar *path,
 }
 
 static gint sond_file_part_pdf_test_for_embedded_files(SondFilePartPDF*, GError**);
-static gint sond_file_part_zip_test_for_files(SondFilePartZip*, GError**);
 static gint sond_file_part_gmessage_test_for_multipart(SondFilePartGMessage*, GError**);
 
 static gint sond_file_part_test_for_children(SondFilePart* sfp, GError** error) {
@@ -133,8 +132,27 @@ static gint sond_file_part_test_for_children(SondFilePart* sfp, GError** error) 
 
 	if (SOND_IS_FILE_PART_PDF(sfp))
 		rc = sond_file_part_pdf_test_for_embedded_files(SOND_FILE_PART_PDF(sfp), error);
-	else if (SOND_IS_FILE_PART_ZIP(sfp))
-		rc = sond_file_part_zip_test_for_files(SOND_FILE_PART_ZIP(sfp), error);
+	else if (SOND_IS_FILE_PART_ZIP(sfp)) {
+		/* Nutzer-Fund 16.09.2026: sond_file_part_zip_test_for_files() rief
+		 * bisher sond_file_part_zip_open_archive() auf, nur um
+		 * zip_get_num_entries() abzufragen - aber schon das bloße ÖFFNEN
+		 * (zip_open_from_source(), libzip) parst IMMER das komplette
+		 * Central Directory, unabhängig davon, was man danach mit dem
+		 * Handle macht. Das ist also selbst schon die teure Operation,
+		 * nicht (nur) der spätere dir_index-Aufbau (s. Task #116). Bei
+		 * jedem bloßen ENTDECKEN einer ZIP-Datei (jedes Auflisten eines
+		 * sie enthaltenden Verzeichnisses, z.B. Auf-/Zuklappen in
+		 * BAUM_FS) wurde so ihr komplettes Archiv geöffnet+geparst (und
+		 * beim Zuklappen die zugehörige SondFilePartZip-Instanz samt
+		 * dieser Struktur wieder verworfen - beim nächsten Aufklappen von
+		 * vorn). Fix: gar nicht erst öffnen - has_children optimistisch
+		 * TRUE setzen (Nutzer-Entscheidung: leere ZIPs sind selten und
+		 * harmlos, wenn sie fälschlich mit einem Aufklapp-Pfeil gezeigt
+		 * werden, der dann nichts enthält). Echtes Öffnen passiert
+		 * weiterhin beim tatsächlichen Bedarf (Aufklappen der ZIP-Datei
+		 * selbst: sond_tvfm_item_load_zip_dir(); Anbinden). */
+		sond_file_part_set_has_children(sfp, TRUE);
+	}
 	else if (SOND_IS_FILE_PART_GMESSAGE(sfp))
 		rc = sond_file_part_gmessage_test_for_multipart(SOND_FILE_PART_GMESSAGE(sfp), error);
 
@@ -391,6 +409,7 @@ gchar* sond_file_part_get_filepart(SondFilePart* sfp) {
 
 zip_t* sond_file_part_zip_open_archive(SondFilePartZip*,
 		gboolean, zip_source_t**, GError**);
+static void sond_file_part_zip_release_archive(SondFilePartZip*, zip_t*);
 
 static GMimeObject* sond_file_part_gmessage_lookup_part_by_path(SondFilePartGMessage*,
 		gchar const*, GError**);
@@ -456,7 +475,7 @@ static GBytes* sond_file_part_read_bytes_internal(SondFilePart* sfp_parent,
 			zip_stat_t zstat = { 0 };
 			if (zip_stat(archive, path, 0, &zstat) != 0 ||
 					!(zstat.valid & ZIP_STAT_SIZE)) {
-				zip_discard(archive);
+				sond_file_part_zip_release_archive(SOND_FILE_PART_ZIP(sfp_parent), archive);
 				g_set_error(error, SOND_ERROR, 0,
 						"%s\nDatei '%s' nicht im ZIP oder Größe unbekannt",
 						__func__, path);
@@ -464,16 +483,16 @@ static GBytes* sond_file_part_read_bytes_internal(SondFilePart* sfp_parent,
 			}
 			zip_file_t* zf = zip_fopen(archive, path, 0);
 			if (!zf) {
-				zip_discard(archive);
 				g_set_error(error, SOND_ERROR, 0,
 						"%s\nzip_fopen('%s'): %s", __func__, path,
 						zip_error_strerror(zip_get_error(archive)));
+				sond_file_part_zip_release_archive(SOND_FILE_PART_ZIP(sfp_parent), archive);
 				return NULL;
 			}
 			guchar* data = g_malloc(zstat.size);
 			zip_int64_t bytes_read = zip_fread(zf, data, zstat.size);
 			zip_fclose(zf);
-			zip_discard(archive);
+			sond_file_part_zip_release_archive(SOND_FILE_PART_ZIP(sfp_parent), archive);
 			if (bytes_read < 0 || (zip_uint64_t)bytes_read != zstat.size) {
 				g_free(data);
 				g_set_error(error, SOND_ERROR, 0,
@@ -487,13 +506,13 @@ static GBytes* sond_file_part_read_bytes_internal(SondFilePart* sfp_parent,
 				g_set_error(error, SOND_ERROR, 0,
 						"%s\nzip_fopen('%s'): %s", __func__, path,
 						zip_error_strerror(zip_get_error(archive)));
-				zip_discard(archive);
+				sond_file_part_zip_release_archive(SOND_FILE_PART_ZIP(sfp_parent), archive);
 				return NULL;
 			}
 			guchar* buf = g_malloc((gsize)max_len);
 			zip_int64_t n = zip_fread(zf, buf, (zip_uint64_t)max_len);
 			zip_fclose(zf);
-			zip_discard(archive);
+			sond_file_part_zip_release_archive(SOND_FILE_PART_ZIP(sfp_parent), archive);
 			if (n < 0) {
 				g_free(buf);
 				g_set_error(error, SOND_ERROR, 0,
@@ -1211,6 +1230,19 @@ typedef struct {
 	 * '/' ("" = Wurzel), Value: GPtrArray<SondZipDirEntry*>. NULL = noch
 	 * nicht aufgebaut (lazy) oder invalidiert. */
 	GHashTable* dir_index;
+	/* Nutzer-Fund 16.09.2026: gecachter, read-only Archiv-Handle für den
+	 * (häufigsten) Fall "Archiv ist eine normale Datei im Filesystem,
+	 * nicht verschachtelt" (s. sond_file_part_zip_open_archive()). Ohne
+	 * diesen Cache öffnete jeder einzelne Lesezugriff (insbes. das
+	 * MIME-Sniffing beim Anbinden, sond_file_part_create() ->
+	 * sond_file_part_read_bytes_internal()) das komplette Archiv neu und
+	 * parste dessen Central Directory neu - bei ZIPs mit vielen Einträgen
+	 * (und erst recht auf SeaDrive) macht allein das pro Datei spürbare
+	 * Zeit aus. NULL = noch nicht geöffnet oder invalidiert. Analog zu
+	 * dir_index: lazy aufgebaut, in
+	 * sond_file_part_zip_invalidate_dir_index() (bei jeder
+	 * Archiv-Änderung) und in sond_file_part_zip_finalize() geschlossen. */
+	zip_t* cached_archive;
 } SondFilePartZipPrivate;
 
 G_DEFINE_TYPE_WITH_PRIVATE(SondFilePartZip, sond_file_part_zip, SOND_TYPE_FILE_PART)
@@ -1221,9 +1253,11 @@ static void sond_zip_dir_entry_free(gpointer p) {
 	g_free(e);
 }
 
-/* Invalidiert den ggf. gecachten Verzeichnis-Index - bei jeder Änderung am
- * Archivinhalt aufzurufen (s. sond_file_part_zip_mod_zip_file(),
- * sond_file_part_zip_rename_file(), sond_file_part_zip_insert_zip_file()). */
+/* Invalidiert den ggf. gecachten Verzeichnis-Index UND den gecachten
+ * read-only Archiv-Handle (s. Doc-Kommentar an cached_archive in
+ * SondFilePartZipPrivate) - bei jeder Änderung am Archivinhalt aufzurufen
+ * (s. sond_file_part_zip_mod_zip_file(), sond_file_part_zip_rename_file(),
+ * sond_file_part_zip_insert_zip_file()). */
 static void sond_file_part_zip_invalidate_dir_index(SondFilePartZip* sfp_zip) {
 	SondFilePartZipPrivate* priv =
 			sond_file_part_zip_get_instance_private(sfp_zip);
@@ -1232,6 +1266,28 @@ static void sond_file_part_zip_invalidate_dir_index(SondFilePartZip* sfp_zip) {
 		g_hash_table_destroy(priv->dir_index);
 		priv->dir_index = NULL;
 	}
+
+	if (priv->cached_archive) {
+		zip_discard(priv->cached_archive);
+		priv->cached_archive = NULL;
+	}
+
+	return;
+}
+
+/* Gibt einen von sond_file_part_zip_open_archive() gelieferten Archiv-
+ * Handle wieder frei - Gegenstück zum bisherigen direkten zip_discard()
+ * an den Aufrufstellen. Ist archive der gecachte Handle (s.
+ * cached_archive), bleibt er geöffnet (wird erst bei Archiv-Änderung oder
+ * beim Zerstören des Objekts geschlossen); sonst (verschachteltes Archiv,
+ * writeable-Fall) wird wie bisher sofort verworfen. */
+static void sond_file_part_zip_release_archive(SondFilePartZip* sfp_zip,
+		zip_t* archive) {
+	SondFilePartZipPrivate* priv =
+			sond_file_part_zip_get_instance_private(sfp_zip);
+
+	if (archive != priv->cached_archive)
+		zip_discard(archive);
 
 	return;
 }
@@ -1357,7 +1413,7 @@ GPtrArray* sond_file_part_zip_list_dir(SondFilePartZip* sfp_zip,
 
 		priv->dir_index = sfp_zip_build_dir_index(archive);
 
-		zip_discard(archive);
+		sond_file_part_zip_release_archive(sfp_zip, archive);
 	}
 
 	result = g_hash_table_lookup(priv->dir_index, prefix ? prefix : "");
@@ -1371,7 +1427,17 @@ GPtrArray* sond_file_part_zip_list_dir(SondFilePartZip* sfp_zip,
  * Öffnet das ZIP-Archiv aus dem Buffer des übergeordneten Elements.
  * Bei writeable=TRUE wird src_out (falls nicht NULL) mit der zip_source_t* befüllt,
  * die nach zip_close() die geänderten Daten hält (für sond_file_part_zip_archive_to_buf_with_src).
- * Rückgabe: zip_t* (muss mit zip_discard() oder zip_close() freigegeben werden)
+ *
+ * Rückgabe: zip_t*. Freigabe je nach Fall unterschiedlich (Nutzer-Fund
+ * 16.09.2026, s. cached_archive in SondFilePartZipPrivate):
+ * - writeable==TRUE: wie bisher mit zip_close() freigeben (Aufrufer
+ *   unverändert).
+ * - writeable==FALSE: MUSS mit sond_file_part_zip_release_archive()
+ *   freigegeben werden, NICHT mehr mit direktem zip_discard()/zip_close().
+ *   Im häufigsten Fall (normale Datei im Filesystem) ist die Rückgabe ein
+ *   gecachter, für die Lebensdauer des SondFilePartZip-Objekts offen
+ *   gehaltener Handle - release lässt ihn dann unangetastet; im
+ *   verschachtelten Fall verwirft release ihn wie bisher sofort.
  */
 zip_t* sond_file_part_zip_open_archive(SondFilePartZip* sfp_zip,
 		gboolean writeable, zip_source_t** src_out, GError** error) {
@@ -1381,12 +1447,29 @@ zip_t* sond_file_part_zip_open_archive(SondFilePartZip* sfp_zip,
 	void* data_copy = NULL;
 	gsize data_len = 0;
 	int flags = 0;
+	SondFilePartZipPrivate* priv = NULL;
 
 	g_return_val_if_fail(sfp_zip, NULL);
+
+	priv = sond_file_part_zip_get_instance_private(sfp_zip);
 
 	SondFilePart* sfp_parent = sond_file_part_get_parent(SOND_FILE_PART(sfp_zip));
 
 	if (!sfp_parent && !writeable) {
+		/* Nutzer-Fund 16.09.2026: dieser Fall (normale ZIP-Datei im
+		 * Filesystem, nur lesend) ist bei Weitem der häufigste beim
+		 * Anbinden/Durchsuchen - u.a. wird er für JEDEN einzelnen Eintrag
+		 * beim MIME-Sniffing neu durchlaufen
+		 * (sond_file_part_create() -> read_bytes_internal()). Deshalb
+		 * hier gecacht (analog zum dir_index-Cache oben): einmal öffnen
+		 * und für die Lebensdauer des Objekts wiederverwenden, statt bei
+		 * jedem Aufruf das komplette Archiv (Central Directory) neu zu
+		 * parsen. Freigabe über sond_file_part_zip_release_archive(),
+		 * NICHT mehr über direktes zip_discard()/zip_close() durch den
+		 * Aufrufer. */
+		if (priv->cached_archive)
+			return priv->cached_archive;
+
 		/* Filesystem, nur lesend: direkt über zip_open. Long-Path-Support
 		 * kommt über sond_fopen() (s.u.), das ist bereits erledigt. */
 		gchar* full_path = g_strconcat(
@@ -1416,6 +1499,9 @@ zip_t* sond_file_part_zip_open_archive(SondFilePartZip* sfp_zip,
 			return NULL;
 		}
 		zip_error_fini(&zip_error);
+
+		/* Für nachfolgende Aufrufe cachen - s. Kommentar oben. */
+		priv->cached_archive = archive;
 	}
 	else {
 		/* Alle anderen Fälle (verschachtelt oder writeable): vollständig in Puffer laden */
@@ -1535,23 +1621,11 @@ static GBytes* sond_file_part_zip_archive_to_bytes_with_src(zip_t* archive,
 	return g_bytes_new_take(data, (gsize)len);
 }
 
-static gint sond_file_part_zip_test_for_files(SondFilePartZip* sfp_zip, GError** error) {
-	zip_t* archive = NULL;
-	zip_int64_t num_entries = 0;
-	SondFilePartPrivate* sfp_priv = NULL;
-
-	archive = sond_file_part_zip_open_archive(sfp_zip, FALSE, NULL, error);
-	if (!archive)
-		return -1;
-
-	num_entries = zip_get_num_entries(archive, 0);
-	zip_discard(archive);
-
-	sfp_priv = sond_file_part_get_instance_private(SOND_FILE_PART(sfp_zip));
-	sfp_priv->has_children = (num_entries > 0);
-
-	return 0;
-}
+/* sond_file_part_zip_test_for_files() (öffnete das Archiv nur für
+ * zip_get_num_entries()) wurde entfernt - s. ausführlichen Kommentar an
+ * sond_file_part_test_for_children() (Nutzer-Fund 16.09.2026): schon das
+ * Öffnen allein ist die teure Operation, has_children wird für ZIP jetzt
+ * optimistisch TRUE gesetzt statt echt geprüft. */
 
 static GBytes* sond_file_part_zip_mod_zip_file(SondFilePartZip* sfp_zip,
 		gchar const* path, GBytes* bytes, GError** error) {

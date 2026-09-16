@@ -88,7 +88,36 @@ gchar const* sond_tvfm_item_get_icon_name(SondTVFMItem*);
 SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM*,
 		SondFilePart *, gchar const*);
 
-gint sond_tvfm_item_load_children(SondTVFMItem*, GPtrArray**, GError**);
+/* SondTVFMProgress:
+ *
+ * Optionaler Fortschritts-/Abbruch-Kontext für sond_tvfm_item_load_children()
+ * (relevant v.a. für sond_tvfm_item_load_zip_dir() bei großen Archiven, wo
+ * das Einlesen/MIME-Sniffen aller Einträge spürbar dauern kann - s.
+ * ausführlichen Fund/Entwurf in ToDo.c, 16.09.2026).
+ *
+ * NULL als Parameter überall = altes Verhalten (kein Pumping, kein Abbruch
+ * möglich) - alle bestehenden Aufrufer außer dem Anbinden-Pfad übergeben
+ * weiterhin NULL.
+ *
+ * cancel: Zeiger auf ein außen gehaltenes Flag (z.B. info_window->cancel);
+ *   wird periodisch geprüft. Ist *cancel != 0, wird das Laden weiterer
+ *   Kinder abgebrochen - bereits geladene Kinder werden unverändert
+ *   zurückgegeben (rc bleibt 0, kein Fehler), der Aufrufer bricht die
+ *   Rekursion an seiner gewohnten Abbruch-Prüfstelle ab. Das ist hier
+ *   unkritisch möglich, weil load_children rein lesend ist (im Unterschied
+ *   zu SondProcessFileCtx, das auch schreibt und daher nur an sicheren
+ *   Stellen abbrechen darf).
+ * progress_func/progress_func_data: wird periodisch (nicht pro Eintrag)
+ *   aufgerufen, z.B. um GTK-Events zu pumpen und/oder eine
+ *   Fortschrittsanzeige zu aktualisieren. text kann NULL sein (dann nur
+ *   pumpen, keine neue Anzeige). */
+typedef struct _SondTVFMProgress {
+	gint *cancel;
+	void (*progress_func)(gpointer progress_func_data, gchar const *text);
+	gpointer progress_func_data;
+} SondTVFMProgress;
+
+gint sond_tvfm_item_load_children(SondTVFMItem*, GPtrArray**, SondTVFMProgress*, GError**);
 
 gint sond_treeviewfm_file_part_visible(SondTreeviewFM*, GtkTreeIter*,
 		gchar const*, gboolean, GtkTreeIter*, GError**);

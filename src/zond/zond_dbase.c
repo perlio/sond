@@ -330,7 +330,33 @@ zond_dbase_get_version(sqlite3 *db, GError **error) {
  * older_sibling_ID allein.
  *
  * Wird bei jedem Öffnen (neu, bestehend, konvertiert) einmal ausgeführt -
- * für bereits vorhandene Indizes ist das ein no-op. */
+ * für bereits vorhandene Indizes ist das ein no-op.
+ *
+ * Nachtrag 09/2026 (eigentliche Ursache des "ZIP-Anbinden hängt sich auf"-
+ * Problems - die zuerst vermutete MIME-Fehlerkennung war es nachweislich
+ * nicht, s. ToDo.c #101): exakt dieselbe Art von Fehler wie oben bei
+ * parent_ID/older_sibling_ID, nur an anderen Spalten. zond_treeview_leaf_
+ * anbinden() (zond_treeview.c) ruft für JEDE einzuhängende Datei u.a.
+ * zond_dbase_get_section() ("WHERE file_part=?1"), zond_dbase_find_
+ * baum_inhalt_file() (rekursives CTE, dessen abschließender JOIN auf
+ * "knoten.type=2 AND knoten.link=cte_knoten.ID" filtert) sowie darüber
+ * zond_treeview_remove_childish_anbindungen() ->
+ * zond_dbase_get_first_baum_inhalt_file_child() (gleiches Muster,
+ * "knoten.type=2 AND knoten.link=cte_knoten.ID") auf. Für keine dieser
+ * Spalten (file_part, (type,link)) existierte ein Index - jede dieser
+ * Abfragen erzwang also einen kompletten Tabellen-Scan über "knoten",
+ * und zwar EINMAL PRO ANZUBINDENDER DATEI. Die Tabelle wächst während
+ * desselben Anbinden-Vorgangs mit jeder eingefügten Datei um weitere
+ * Zeilen - macht den gesamten Vorgang quadratisch (O(n²)) statt linear:
+ * bei 2.000 Dateien (~30 Sek., noch gerade akzeptabel) gegenüber
+ * ~30.000 Dateien (15x mehr, aber durch die quadratische Wirkung eher
+ * 200x mehr Zeilen-Scans) erklärt das zwanglos den beobachteten
+ * kompletten Stillstand ohne jede Fortschrittsanzeige. Erklärt zugleich,
+ * warum das Transaktions-Batching (#103) beim 2.000er-Fall keine
+ * messbare Verbesserung brachte: fsync-pro-Insert war nie die
+ * dominante Kosten, sondern diese Volltabellen-Scans. Unabhängig vom
+ * Dateiinhalt/MIME-Typ - passt zur Beobachtung, dass ausnahmslos alle
+ * Dateien korrekt als XML klassifiziert und angebunden wurden. */
 static gint zond_dbase_ensure_indexes(sqlite3 *db, GError **error) {
 	gchar *errmsg = NULL;
 	gint rc = 0;
@@ -339,7 +365,11 @@ static gint zond_dbase_ensure_indexes(sqlite3 *db, GError **error) {
 			"CREATE INDEX IF NOT EXISTS idx_knoten_parent_older "
 					"ON knoten(parent_ID, older_sibling_ID); "
 					"CREATE INDEX IF NOT EXISTS idx_knoten_older_sibling_id "
-					"ON knoten(older_sibling_ID); ",
+					"ON knoten(older_sibling_ID); "
+					"CREATE INDEX IF NOT EXISTS idx_knoten_type_link "
+					"ON knoten(type, link); "
+					"CREATE INDEX IF NOT EXISTS idx_knoten_file_part "
+					"ON knoten(file_part); ",
 			NULL, NULL, &errmsg);
 	if (rc != SQLITE_OK) {
 		if (error)
@@ -448,18 +478,56 @@ static gint zond_dbase_open(ZondDBase *zond_dbase, gboolean create_file,
 	/* create_file && !create: leere Schattendatei, wird erst NACH diesem
 	 * Aufruf per zond_dbase_backup() aus store befüllt (work-Datenbank,
 	 * s. project_create_dbase_zond()) - "knoten" existiert hier noch
-	 * nicht, CREATE INDEX würde fehlschlagen ("no such table"). Der
-	 * Index kommt in diesem Fall automatisch mit dem Backup aus store
-	 * mit (Backup kopiert das komplette Schema samt Indizes). In allen
-	 * anderen Fällen (neu angelegt, bestehend geöffnet, konvertiert)
-	 * existiert "knoten" an dieser Stelle bereits. */
+	 * nicht, CREATE INDEX würde fehlschlagen ("no such table"). Für
+	 * "work" reicht das nicht (mehr) aus, um die Indizes sicherzustellen
+	 * - project_create_dbase_zond() ruft dafür jetzt zusätzlich explizit
+	 * zond_dbase_ensure_performance_indexes() auf "work" NACH dem Backup
+	 * auf (s. dort), unabhängig vom Zustand von "store".
+	 *
+	 * Nachtrag 09/2026 (Nutzer-Fund: "Fehler beim Laden des Projekts:
+	 * invalid argument" direkt nach Einführung der type/link- und
+	 * file_part-Indizes): ein Fehlschlagen hier (auf "store") NICHT mehr
+	 * fatal behandeln. "store" ist die eigentliche Projektdatei und kann
+	 * auf einem Cloud-Sync-Laufwerk (SeaDrive/Seafile/...) liegen - s.
+	 * project_get_local_tmp_path()/project_create_dbase_zond(), die
+	 * "work" genau deswegen bewusst auf einen lokalen Pfad legen. Ein
+	 * CREATE INDEX ist ein echter Schreibzugriff auf die Store-Datei;
+	 * schlägt der (z.B. weil der Cloud-Dienst gerade nicht erreichbar
+	 * ist - bekanntes, bereits in ToDo.c dokumentiertes CRT-EINVAL-Muster
+	 * bei SeaDrive-Zugriffsproblemen) fehl, würde das komplette Laden
+	 * des Projekts daran scheitern, obwohl die Indizes auf "store" rein
+	 * kosmetisch sind (nur Performance-Feature für die dortigen, kaum
+	 * genutzten Abfragen) - die eigentlich relevante Kopie auf "work"
+	 * bekommt ihre Indizes ja jetzt unabhängig davon direkt gesetzt.
+	 * "store" bekommt die Indizes spätestens beim nächsten erfolgreichen
+	 * project_save() automatisch mit (zond_dbase_backup() kopiert das
+	 * komplette Schema samt Indizes von "work" nach "store"). */
 	if (!(create_file && !create)) {
-		rc = zond_dbase_ensure_indexes(zond_dbase_priv->dbase, error);
-		if (rc)
-			return -1;
+		GError *error_indexes = NULL;
+
+		rc = zond_dbase_ensure_indexes(zond_dbase_priv->dbase, &error_indexes);
+		if (rc) {
+			LOG_WARN("%s: Indizes auf 'store' konnten nicht angelegt/"
+					"aktualisiert werden (unkritisch, reine "
+					"Performance-Optimierung - wird beim nächsten "
+					"Speichern automatisch nachgeholt):\n%s", __func__,
+					error_indexes->message);
+			g_error_free(error_indexes);
+		}
 	}
 
 	return 0;
+}
+
+/* Öffentlicher Wrapper um das dateilokale zond_dbase_ensure_indexes() -
+ * s. Doc-Kommentar dort sowie bei zond_dbase_open() und project.c/
+ * project_create_dbase_zond() für den Hintergrund (Nutzer-Fund 09/2026,
+ * ZIP-Anbinden-Performance). Von project_create_dbase_zond() genutzt, um
+ * die Indizes verlässlich (unabhängig vom Erreichbarkeits-/Schreibzustand
+ * von "store") direkt auf "work" zu setzen - dort laufen alle
+ * performance-kritischen Abfragen. */
+gint zond_dbase_ensure_performance_indexes(ZondDBase *zond_dbase, GError **error) {
+	return zond_dbase_ensure_indexes(zond_dbase_get_dbase(zond_dbase), error);
 }
 
 /* journal_mode/synchronous prüfen und ggf. korrigieren (ToDo.c,

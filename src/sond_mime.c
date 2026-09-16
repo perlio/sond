@@ -21,6 +21,8 @@
 #include <magic.h>
 #include <zlib.h>
 
+#include "sond_log_and_error.h"
+
 
 typedef struct {
     const char* mime_type;
@@ -295,22 +297,81 @@ buffer_looks_like_text (const guchar *buf, gsize len)
     return TRUE;
 }
 
-gchar* mime_guess_content_type(const guchar* buffer, gsize size,
-		const gchar* path, GError** error) {
-	gchar* result = NULL;
+/* Datei-statisches, einmalig geladenes magic_t-Handle - s. mime_guess_
+ * content_type_init(). NULL, solange nicht initialisiert; mime_guess_
+ * content_type() fällt in dem Fall auf das alte Verhalten (Open/Load/Close
+ * pro Aufruf) zurück, damit die Funktion auch ohne Init nie hart fehlschlägt
+ * (z.B. in Testprogrammen/99conv). */
+static magic_t g_magic = NULL;
 
-	magic_t magic = magic_open(MAGIC_MIME_TYPE);
+/* Lädt das magic_t-Handle EINMALIG für die gesamte Programmlaufzeit.
+ * MUSS aufgerufen werden, solange garantiert nur der Hauptthread läuft und
+ * noch KEIN Hintergrund-Thread existiert (aktuell: project_open(), vor
+ * sond_process_file_create_wctx() - project.c) - genau das ist die
+ * Voraussetzung, unter der ein einzelnes, geteiltes Handle ohne Mutex
+ * sicher ist: mime_guess_content_type() wird zwar sowohl vom GTK-
+ * Hauptthread (Anbinden) als auch vom einzigen Indizier-Hintergrundthread
+ * ("ocr-doc", s. headerbar.c) aus aufgerufen, aber beide laufen laut
+ * Architektur nie gleichzeitig (Indizieren blockiert das Hauptfenster über
+ * ein modales Info-Window, das nachweislich erst schließt, wenn der
+ * Hintergrund-Thread wirklich fertig ist - s. Kommentar bei cb_info_window_
+ * delete_event(), misc.c). Nutzer-Entscheidung 09/2026, nach einem
+ * fehlgeschlagenen Versuch mit Lazy-Init pro Thread (GPrivate), der in
+ * einem SIGSEGV endete - vermutlich weil zwei Threads dabei gleichzeitig
+ * zum ALLERERSTEN Mal hätten laden können, was hier durch die einmalige,
+ * garantiert einzelthreadige Initialisierung ausgeschlossen ist.
+ *
+ * Idempotent - unkritisch, mehrfach aufzurufen (z.B. weil project_open()
+ * bei jedem Projektwechsel im selben Prozess erneut durchlaufen wird): ist
+ * g_magic schon gesetzt, wird nichts erneut geladen. */
+gboolean mime_guess_content_type_init(GError** error) {
+	magic_t magic = NULL;
+
+	if (g_magic)
+		return TRUE;
+
+	magic = magic_open(MAGIC_MIME_TYPE);
 	if (!magic) {
 		if (error) *error = g_error_new(g_quark_from_static_string("stdlib"), errno,
 				"%s\nmagic_open fehlgeschlagen: %s", __func__, strerror(errno));
-		return NULL;
+		return FALSE;
 	}
 
 	if (magic_load(magic, NULL) != 0) {
 		g_set_error(error, g_quark_from_static_string("magic"), 0,
 				"%s\nmagic_load fehlgeschlagen: %s", __func__, magic_error(magic));
 		magic_close(magic);
-		return NULL;
+		return FALSE;
+	}
+
+	g_magic = magic;
+	return TRUE;
+}
+
+gchar* mime_guess_content_type(const guchar* buffer, gsize size,
+		const gchar* path, GError** error) {
+	gchar* result = NULL;
+	magic_t magic = g_magic;
+	gboolean local_magic = FALSE;
+
+	if (!magic) {
+		/* Fallback, falls ohne (oder vor) mime_guess_content_type_init()
+		 * aufgerufen - langsam (Open/Load/Close pro Aufruf), aber
+		 * funktionsfähig. */
+		local_magic = TRUE;
+		magic = magic_open(MAGIC_MIME_TYPE);
+		if (!magic) {
+			if (error) *error = g_error_new(g_quark_from_static_string("stdlib"), errno,
+					"%s\nmagic_open fehlgeschlagen: %s", __func__, strerror(errno));
+			return NULL;
+		}
+
+		if (magic_load(magic, NULL) != 0) {
+			g_set_error(error, g_quark_from_static_string("magic"), 0,
+					"%s\nmagic_load fehlgeschlagen: %s", __func__, magic_error(magic));
+			magic_close(magic);
+			return NULL;
+		}
 	}
 
 	const char* mime = magic_buffer(magic, buffer, size);
@@ -425,6 +486,40 @@ gchar* mime_guess_content_type(const guchar* buffer, gsize size,
 	else
 		result = mime ? g_strdup(mime) : g_strdup("application/octet-stream");
 
-	magic_close(magic);
+	/* Sicherheitsnetz gegen eine bekannte libmagic-Schwäche: Klartext mit
+	 * kopfzeilenartigen Mustern (z.B. Zeilen, die wie "Von:"/"Betreff:"/
+	 * "Datum:" aussehen) wird von libmagic gelegentlich DIREKT (nicht nur
+	 * über den text/plain-Zweig oben) als message/rfc822 erkannt, obwohl
+	 * es z.B. XML- oder sonstiger Text mit E-Mail-ähnlichen Metadaten ist.
+	 * Das macht daraus fälschlich einen SondFilePartGMessage (s.
+	 * sond_file_part_create_from_mime_type()) - im schlimmsten Fall wird
+	 * der Datenmüll zusätzlich noch als "multipart" fehlgedeutet (GMime
+	 * sucht dann nach Boundaries, die nicht existieren) und erzeugt
+	 * synthetische Kind-Knoten bzw. die Verarbeitung wird extrem langsam.
+	 * Nutzer-Fund 15./16.09.2026: scheinbare Endlosschleife/massive
+	 * Verlangsamung beim Anbinden einer sehr großen ZIP-Datei mit
+	 * ausschließlich XML-Dateien. Eine bekannte, von message/rfc822
+	 * abweichende Dateiendung hat hier Vorrang vor der Heuristik - echte
+	 * E-Mails liegen praktisch immer als .eml vor. Die LOG_WARN-Zeile
+	 * (ohne Dateiname/-pfad, nur die beiden MIME-Typen - Datenschutz)
+	 * dient der Verifikation, wie oft das tatsächlich zuschlägt. */
+	if (path && !g_strcmp0(result, "message/rfc822")) {
+		const gchar *mime_ext = mime_from_extension(path);
+		if (mime_ext && g_strcmp0(mime_ext, "message/rfc822")) {
+			LOG_WARN("%s: libmagic erkannte 'message/rfc822', Dateiendung "
+					"spricht aber für '%s' - Endung wird bevorzugt "
+					"(bekannte libmagic-Schwäche bei textartigem Inhalt)",
+					__func__, mime_ext);
+			g_free(result);
+			result = g_strdup(mime_ext);
+		}
+	}
+
+	/* Nur das lokale Fallback-Handle schließen - das geteilte g_magic lebt
+	 * für die gesamte Programmlaufzeit weiter (kein Close pro Aufruf mehr,
+	 * das war der eigentliche Performance-Fix). */
+	if (local_magic)
+		magic_close(magic);
+
 	return result;
 }

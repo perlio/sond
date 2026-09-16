@@ -78,6 +78,12 @@ gint zond_dbase_prepare(ZondDBase*, const gchar*, const gchar**, gint,
 
 gint zond_dbase_check_journal_settings(ZondDBase*, GError**);
 
+/* Legt die Performance-Indizes (parent_ID/older_sibling_ID, type/link,
+ * file_part auf "knoten") verlässlich auf der übergebenen Datenbank an -
+ * s. Doc-Kommentar bei zond_dbase_ensure_indexes() (zond_dbase.c) und
+ * project_create_dbase_zond() (project.c) für den Hintergrund. */
+gint zond_dbase_ensure_performance_indexes(ZondDBase*, GError**);
+
 gint zond_dbase_begin(ZondDBase*, GError**);
 
 gint zond_dbase_commit(ZondDBase*, GError**);
