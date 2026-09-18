@@ -348,6 +348,71 @@ gboolean mime_guess_content_type_init(GError** error) {
 	return TRUE;
 }
 
+/* Nutzer-Fund 18.09.2026: eine Datei ohne Erweiterung ("Message"), deren
+ * Inhalt tatsächlich eine E-Mail war, wurde von libmagic als text/plain
+ * eingestuft (die vorhandene Endungs-basierte Korrektur direkt unten in
+ * mime_guess_content_type() - "Endung sagt message/rfc822, libmagic sagt
+ * text/plain, Endung gewinnt" - konnte hier nicht greifen, weil es gar
+ * keine Endung gab) und lief deshalb über den falschen Renderer, was zu
+ * einem eigenständigen Performance-Problem führte (s. render_text_to_
+ * surface(), sond_renderer.c, und ToDo.c). Diese Funktion schließt genau
+ * diese Lücke - aber bewusst SEHR KONSERVATIV (Nutzer-Entscheidung
+ * 18.09.2026, angesichts des früheren Fehlschlags einer zu aggressiven
+ * Heuristik, s. "Sicherheitsnetz"-Kommentar unten): anders als die dort
+ * beschriebenen generischen, sprachabhängigen Kopfzeilen-Muster ("Von:",
+ * "Betreff:", ...), die in gewöhnlichem Fließtext leicht zufällig
+ * auftreten können, wird hier NUR auf "MIME-Version:" oder "Message-ID:"
+ * geprüft - beides Header, die (a) durch den Doppelpunkt UND die exakte,
+ * englische Schreibweise praktisch nie zufällig in normalem Text
+ * vorkommen und (b) von jedem MIME-fähigen Mailprogramm/-server gesetzt
+ * werden, RFC822 also fast ausnahmslos abdecken. Bewusst hingenommene
+ * Einschränkung: eine sehr rudimentäre/alte Mail ganz ohne diese beiden
+ * Header (kein MIME, keine Message-ID) wird dadurch nicht erkannt - das
+ * wurde dem Risiko neuer Fehlerkennungen bewusst nachgeordnet.
+ *
+ * Prüft nur den Kopfbereich (vor der ersten Leerzeile, max. die ersten
+ * 8 KB) und nur an Zeilenanfängen - ein zufälliges Vorkommen mitten in
+ * einer Zeile (z.B. in einem Fließtext-Satz, der "MIME-Version:" nur
+ * erwähnt) zählt nicht. */
+static gboolean buffer_looks_like_rfc822(const guchar *buffer, gsize size) {
+    const gchar *text = (const gchar*) buffer;
+    gsize scan_limit = MIN(size, (gsize) 8192);
+    gsize header_end = scan_limit;
+    gsize i;
+
+    if (!buffer || size == 0)
+        return FALSE;
+
+    /* Ende des Kopfbereichs suchen: erste Leerzeile (\n\n oder \r\n\r\n) */
+    for (i = 0; i + 1 < scan_limit; i++) {
+        if (text[i] == '\n' && text[i + 1] == '\n') {
+            header_end = i;
+            break;
+        }
+        if (i + 3 < scan_limit && text[i] == '\r' && text[i + 1] == '\n' &&
+                text[i + 2] == '\r' && text[i + 3] == '\n') {
+            header_end = i;
+            break;
+        }
+    }
+
+    for (i = 0; i < header_end; i++) {
+        gboolean at_line_start = (i == 0) || (text[i - 1] == '\n');
+
+        if (!at_line_start)
+            continue;
+
+        if (header_end - i >= 13 &&
+                g_ascii_strncasecmp(text + i, "MIME-Version:", 13) == 0)
+            return TRUE;
+        if (header_end - i >= 11 &&
+                g_ascii_strncasecmp(text + i, "Message-ID:", 11) == 0)
+            return TRUE;
+    }
+
+    return FALSE;
+}
+
 gchar* mime_guess_content_type(const guchar* buffer, gsize size,
 		const gchar* path, GError** error) {
 	gchar* result = NULL;
@@ -479,6 +544,14 @@ gchar* mime_guess_content_type(const guchar* buffer, gsize size,
 	    if (path && !g_strcmp0(mime_from_extension(path), "text/csv"))
 	        result = g_strdup("text/csv");
 	    else if (path && !g_strcmp0(mime_from_extension(path), "message/rfc822"))
+	        result = g_strdup("message/rfc822");
+	    /* Nutzer-Fund 18.09.2026 (s. ausführl. Doc-Kommentar an
+	     * buffer_looks_like_rfc822() oben): Dateien ohne (oder mit
+	     * unbekannter) Erweiterung profitieren von den beiden Zweigen
+	     * oben nicht, weil mime_from_extension() dafür NULL liefert -
+	     * greift deshalb hier zusätzlich, nur wenn KEINE der beiden
+	     * Endungs-Prüfungen oben schon etwas ergeben hat. */
+	    else if (buffer_looks_like_rfc822(buffer, size))
 	        result = g_strdup("message/rfc822");
 	    else
 	        result = g_strdup(mime);

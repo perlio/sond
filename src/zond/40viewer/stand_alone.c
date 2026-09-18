@@ -164,7 +164,7 @@ void cb_datei_oeffnen(GtkWidget *item, gpointer data) {
 			return;
 	}
 
-	gchar *filename = filename_oeffnen(GTK_WINDOW(pv->vf));
+	gchar *filename = filename_oeffnen(GTK_WINDOW(pv->vf), NULL);
 	if (!filename)
 		return;
 

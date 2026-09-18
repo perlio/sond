@@ -261,11 +261,35 @@ filename_speichern(GtkWindow *window, const gchar *titel, const gchar *ext) {
 	return filename; //muß g_freed werden
 }
 
+/* Nutzer-Fund 18.09.2026: "Aber: der Zeitverlust ist der gleiche, bis
+ * Öffnen das Verzeichnis anzeigt." - per Eclipse/gdb-Suspend lokalisiert:
+ * der Hänger beim Öffnen eines neuen Projekts saß gar nicht in
+ * sond/zond selbst, sondern in my_dialog_run() -> choose_file() ->
+ * filename_oeffnen() -> project_load() - also im GTK-Dateiauswahldialog
+ * (GtkFileChooserDialog) selbst. Ursache: choose_file() startete bisher
+ * IMMER ohne expliziten Pfad (path==NULL), fiel also auf
+ * g_get_current_dir() zurück - und das Arbeitsverzeichnis des Prozesses
+ * war noch auf das zuletzt geöffnete (und ggf. gerade erst geschlossene)
+ * SeaDrive-Projektverzeichnis gesetzt (g_chdir() in
+ * sond_treeviewfm_set_root(), root!=NULL-Zweig; project_close() setzt
+ * das nirgends zurück). GtkFileChooserDialog musste also genau das
+ * potentiell riesige SeaDrive-Projektverzeichnis (alle Fallakten-Dateien)
+ * einlesen, um seine Dateiliste zu füllen - das ist derselbe
+ * "Cloud-Filtertreiber pro Datei langsam"-Effekt wie beim SeaDrive-
+ * Watcher-Scan, nur diesmal in GTKs eigenem Dialog statt in unserem
+ * Code, und deshalb von uns nicht direkt beschleunigbar.
+ *
+ * Fix: neuer Parameter start_path - der Aufrufer kann jetzt einen
+ * sinnvolleren (kleineren) Startordner vorgeben, statt sich auf das
+ * zufällige aktuelle Arbeitsverzeichnis zu verlassen. project_load()
+ * nutzt dafür das Elternverzeichnis des zuletzt geöffneten Projekts
+ * (typischerweise nur eine Handvoll Fallakten-Ordner, nicht deren
+ * Inhalt) statt dessen - im Regelfall erheblich schneller einzulesen. */
 gchar*
-filename_oeffnen(GtkWindow *window) {
+filename_oeffnen(GtkWindow *window, const gchar *start_path) {
 	gchar* filename = NULL;
 
-	filename = choose_file(GTK_WIDGET(window), NULL, "Datei auswählen",
+	filename = choose_file(GTK_WIDGET(window), start_path, "Datei auswählen",
 			"Öffnen", GTK_FILE_CHOOSER_ACTION_OPEN, NULL);
 
 	if (!filename)

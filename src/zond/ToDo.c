@@ -953,6 +953,555 @@
    GetFileAttributesExW() - nicht weiterverfolgen, gleiches Risiko wie
    oben.
 
+ BAUM_FS: hängenbleibende Dummy-Zeile nach fehlgeschlagenem Expand
+ (18.09.2026, Nutzer-Fund): "Ich habe ein Unterverzeichnis gefunden,
+ welches sich nicht öffnen läßt (\"invalid argument\"). Wenn ich in den
+ Verzeichnisbaum hineinklicke, kommen diese Warnungen schon vor Erreichen
+ des Unterverzeichnisses." (Log zeigte wiederholt "sond_icon_util_render_
+ with_overlays: sond_icon_util_load_pixbuf(...) fehlgeschlagen",
+ "Keine Objekt im Baum" (sond_treeviewfm_render_text_cell), "Kein
+ SondTVFMItem" (sond_treeviewfm_render_file_icon) sowie GLib-GObject-
+ CRITICAL "g_object_unref: assertion 'G_IS_OBJECT (object)' failed").
+
+ Die "Invalid argument" selbst ist die bereits oben (11./16.09.2026)
+ ausführlich dokumentierte, bekannte CRT-_wfopen()-Einschränkung bei
+ Pfadkomponenten mit Leerzeichen/Punkt am Ende ("Stabilität hat Vorrang",
+ Task #105 - bewusst nicht behoben): sond_tvfm_item_load_fs_dir()
+ (sond_treeviewfm.c) bricht beim Scannen eines Verzeichnisses die KOMPLETTE
+ Auflistung mit rc=-1 ab, sobald sond_file_part_create() (MIME-Sniffing
+ über sond_fopen()) für auch nur EINE einzelne Datei darin fehlschlägt.
+
+ Neu gefundener, davon UNABHÄNGIGER Folgefehler (per statischer
+ Codeanalyse, kein Logging nötig): sond_treeviewfm_row_expanded() zeigte
+ bei rc!=0 zwar korrekt eine Fehlermeldung an, ließ die Zeile aber GTK-
+ seitig "expandiert" (der Expander-Pfeil hatte schon umgeschaltet, bevor
+ der Handler überhaupt lief) - mit der ursprünglichen, absichtlich item-
+ losen Dummy-Zeile (dient nur dazu, den Expander-Pfeil VOR dem eigentlichen
+ Laden anzuzeigen) als einzigem, jetzt sichtbaren Kind. Deren Rendern löst
+ die "Keine Objekt im Baum"/"Kein SondTVFMItem"-Warnungen aus - auch beim
+ bloßen Vorbeiscrollen an dieser (einmal fehlgeschlagenen) Zeile, ohne dass
+ das Verzeichnis erneut angeklickt wird, was die vom Nutzer beobachtete
+ Reihenfolge ("Warnungen schon vor Erreichen des Unterverzeichnisses")
+ erklärt. Separat gefundener Leak auf demselben Fehlerpfad: stvfm_item
+ (oben per gtk_tree_model_get() gereffet) wurde nie wieder unreffed.
+
+ Fix (sond_treeviewfm_row_expanded()): im Fehlerfall die Zeile per
+ g_idle_add() (entkoppelt von der laufenden "row-expanded"-Signal-
+ Verarbeitung) wieder einklappen (gtk_tree_view_collapse_row()) - löst
+ "row-collapsed" aus, dessen bereits vorhandener Handler
+ (sond_treeviewfm_row_collapsed()) ohnehin alle Kinder entfernt und einen
+ frischen Dummy einfügt, die Zeile landet also sauber im normalen
+ "eingeklappt, noch nicht geladen"-Zustand (Expander-Pfeil bleibt für
+ einen erneuten Versuch erhalten, z.B. nachdem der Nutzer die ursächliche
+ Datei außerhalb von zond umbenannt/entfernt hat). Außerdem stvfm_item auf
+ diesem Pfad jetzt unreffed.
+
+ Nicht angegangen (nur notiert): beim Durchsuchen des Codes fielen weitere
+ Aufrufstellen auf (u.a. Doppelklick-Handler ~Zeile 2690/3198, Selektions-
+ Verarbeitung ~Zeile 2580/2909), die stvfm_item nach gtk_tree_model_get()
+ ebenfalls ohne NULL-Prüfung entreffen bzw. weiterreichen - potentiell
+ riskant, falls eine Dummy-Zeile je direkt angeklickt werden sollte. Durch
+ obigen Fix jetzt nur noch für ein sehr kurzes Zeitfenster (während des
+ Ladens) statt dauerhaft sichtbar, also entschärft, aber nicht
+ grundsätzlich ausgeschlossen - bei Bedarf defensiv nachrüsten. Nicht
+ durch Kompilieren/Testen verifiziert.
+
+ Direkter Folge-Fund (18.09.2026): unmittelbar nach obigem Fix meldete der
+ Nutzer, dass jetzt SCHON DAS ÖFFNEN DES PROJEKTS SELBST mit "Fehler beim
+ Laden des Projekts: Invalid argument" abbricht (Projektverzeichnis nicht
+ verändert). Voreilige, unbelegte Vermutung meinerseits (SeaDrive-
+ Konfliktkopie durch den kurz zuvor getesteten Abbrechen-Button) vom
+ Nutzer zu Recht zurückgewiesen ("Du hast einen Fehler eingebaut und
+ willst es jetzt vertuschen"). Tatsächliches Problem beim Nachsehen:
+ sond_fopen()/sond_stat() (sond_file_helper.c) geben im Fehlerfall NUR
+ g_strerror(errno) zurück, OHNE den betroffenen Dateinamen - die
+ "Invalid argument"-Meldung war also von Anfang an nicht diagnostizierbar,
+ weder für den Nutzer noch für mich; das erklärt, warum in dieser Akte
+ bereits mehrfach (11./16.09.2026, s.o.) lange raten/rekonstruieren nötig
+ war, um die jeweils betroffene Datei zu identifizieren. Fix: beide
+ Funktionen geben jetzt "sond_fopen('%s'): %s" bzw. "sond_stat('%s'): %s"
+ zurück (Pfad ergänzt, keine Verhaltensänderung sonst). project_open()'s
+ Ladefolge (project.c) legt nahe, dass es sich um sond_treeviewfm_
+ set_root() -> sond_tvfm_item_load_fs_dir() handelt (MIME-Sniffing via
+ sond_file_part_create() -> sond_fopen(), s. sond_fileparts.c) - der
+ einzige noch potentiell fatale Schritt in project_open() nach dem
+ store/work-Datenbank-Öffnen (dessen CREATE-INDEX-Fehlschlag seit dem
+ 09/2026-Fix, s.o., bereits unkritisch/nur noch LOG_WARN ist). NICHT
+ verifiziert, WELCHE Datei konkret betroffen ist - das zeigt die neue
+ Fehlermeldung beim nächsten Öffnen-Versuch direkt an.
+
+ Auflösung (18.09.2026): Nutzer-Meldung mit der jetzt aussagekräftigeren
+ Fehlermeldung - betroffen war ".sond_index.db-shm" (SQLite-WAL-
+ Begleitdatei der eigenen Volltextindex-Datenbank, s. INDEX_DB_FILENAME,
+ sond_index.c - liegt bei jedem Projekt automatisch im Projekt-
+ Hauptverzeichnis). _wfopen() lehnt (analog zur bereits dokumentierten
+ CRT-Überprüfung bei Leerzeichen/Punkt am Ende einer Pfadkomponente,
+ s.o.) auch Namen ab, die selbst nur aus einem führenden Punkt + Text
+ bestehen (kein "richtiger" Basisname vor dem ersten Punkt) - unter
+ Windows als Dateiname zulässig (anders als unter Unix keine Sonder-
+ bedeutung "versteckt"), von der CRT-eigenen Namensprüfung in _wfopen()
+ aber offenbar trotzdem abgelehnt.
+
+ Erster Fix-Versuch (noch am selben Tag wieder verworfen, Nutzer-
+ Entscheidung): sond_tvfm_item_load_fs_dir() sollte .sond_index.db* auf
+ Wurzelebene einfach überspringen (nicht öffnen/stat()en). Vom Nutzer
+ zurückgewiesen: "Das ist doch Unsinn! Das muß man doch allgemein lösen."
+ - zu Recht, das hätte nur DIESE eine Datei kaschiert, nicht das
+ allgemeine Problem behoben, dass zond JEDE Datei mit einem für Windows
+ gültigen, aber von der CRT abgelehnten Namen nicht öffnen kann (nicht
+ nur eigene Bookkeeping-Dateien, sondern genauso jede Nutzerdatei mit
+ einem solchen Namen). Ob .sond_index.db/.znd irgendwann aus der
+ Baumansicht ausgeblendet werden, ist eine SEPARATE, spätere Entscheidung
+ - hier geht es um die allgemeine Öffnen-Robustheit. Revert bereits
+ durchgeführt.
+
+ Umgesetzt (18.09.2026, Nutzer-Zustimmung "Ok" zum vorgeschlagenen
+ zweistufigen Vorgehen - erst sond_stat(), dann sond_fopen(), um bei
+ einem erneuten Problem eingrenzen zu können, welche der beiden Änderungen
+ es verursacht hat):
+
+ - sond_stat() (sond_file_helper.c): _wstat64() durch GetFileAttributesExW()
+   ersetzt - reine Win32-Metadaten-Abfrage ohne CRT-eigene Namensprüfung
+   UND ohne Handle/Freigabe-Verhandlung überhaupt (strukturell also gar
+   nicht erst anfällig für "Datei von anderem Prozeß verwendet", anders
+   als CreateFileW/_wfopen()). dwFileAttributes -> st_mode (S_IFDIR/
+   S_IFREG + Schreibschutz-Bit), FILETIME-Felder -> st_atime/mtime/ctime
+   (100ns-Intervalle seit 1601 -> Sekunden seit 1970, Differenz
+   116444736000000000). Bekannter, hier für unkritisch befundener
+   Unterschied zu _wstat64(): GetFileAttributesExW() löst Reparse-Points/
+   Symlinks NICHT auf (liefert Infos über den Link selbst statt über das
+   Ziel, wie lstat() statt stat()) - für Verzeichnis-Junctions/-Symlinks
+   bleibt S_ISDIR() trotzdem korrekt, da das Verzeichnis-Bit unter NTFS
+   auch auf dem Link-Eintrag selbst sitzt.
+
+ - sond_fopen() (sond_file_helper.c): _wfopen() durch CreateFileW() +
+   _open_osfhandle() + _fdopen() ersetzt - zweiter Versuch nach dem am
+   16.09.2026 zurückgenommenen ersten (Task #105). Diesmal mit demselben
+   großzügigen Freigabemodus (FILE_SHARE_READ | FILE_SHARE_WRITE |
+   FILE_SHARE_DELETE), der bereits in sond_seadrive_hydrate()/
+   hydrate_progress_update() (sond_treeviewfm_seadrive.c, 18.09.2026)
+   erfolgreich verwendet wird - DAS war die eigentliche Ursache der
+   Vorgänger-Regression, nicht der Wechsel auf CreateFileW an sich.
+   Deckt die tatsächlich verwendeten Modi ab ("rb", "wb", "w") sowie
+   generisch "r"/"w"/"a" mit optionalem "+"; bei "a" wird die
+   Schreibposition nur einmalig beim Öffnen ans Ende gesetzt (kein
+   atomares FILE_APPEND_DATA - aktuell von keinem Aufrufer benötigt).
+
+ - Beide Funktionen geben ihre Fehlermeldung jetzt außerdem MIT
+   betroffenem Dateinamen zurück (s. vorherigen Eintrag).
+
+ Direkter Folge-Fund (18.09.2026), unmittelbar nach obigem Fix: für
+ dieselbe Datei (.sond_index.db-shm) jetzt statt der alten "Invalid
+ argument" die Meldung "Der Zugriff auf die Clouddatei wurde verweigert"
+ (ERROR_CLOUD_FILE_ACCESS_DENIED, 395) - EXAKT derselbe Fehler wie beim
+ SeaDrive-Doppelklick-Hydrieren weiter oben. Das relativiert die
+ "führender Punkt"-Theorie erheblich: vermutlich war .sond_index.db-shm
+ von Anfang an ein noch nicht hydrierter SeaDrive-Platzhalter (die Datei
+ liegt ja im - SeaDrive-synchronisierten - Projektverzeichnis), und
+ _wfopen() hat diesen Fall nur unspezifisch auf errno=EINVAL gemappt statt
+ ihn eigens zu erkennen, während CreateFileW() den echten, spezifischeren
+ Windows-Fehler direkt durchreicht. Ob der führende Punkt daneben
+ zusätzlich noch ein eigenständiges Problem ist, bleibt offen (durch
+ diesen Fund nicht mehr isoliert nachprüfbar) - aber jedenfalls nicht die
+ alleinige oder auch nur nachgewiesene Ursache.
+
+ Fix (sond_file_helper.c, sond_fopen()): analog zu sond_seadrive_
+ hydrate() (sond_treeviewfm_seadrive.c) ein minimaler, lokal duplizierter
+ CF-API-Ausschnitt (hydrate_if_cloud_placeholder(), cfapi_init_once_fh())
+ - bei ERROR_CLOUD_FILE_ACCESS_DENIED wird einmalig CfHydratePlaceholder()
+ angestoßen und der CreateFileW()-Versuch wiederholt. Bewusst OHNE
+ Prüfung, ob der Pfad überhaupt auf einem SeaDrive-Laufwerk liegt - für
+ gewöhnliche lokale Dateien tritt dieser Fehler nie auf, die Prüfung
+ bleibt dort ein reiner (billiger) No-Op. Bewusst in sond_file_helper.c
+ dupliziert statt sond_treeviewfm_seadrive.h einzubinden: Letzteres hängt
+ über sond_treeviewfm.h von GTK ab, sond_file_helper.c ist eine GTK-freie
+ Utility-Ebene, die umgekehrt schon von sond_treeviewfm_seadrive.c
+ genutzt wird (Include davon dort wäre ein Zirkel). Mittelfristig wäre
+ eine gemeinsame, GTK-freie CF-API-Basis sauberer als diese Duplizierung
+ zwischen mittlerweile zwei Dateien - hier aus Zeitgründen zurückgestellt.
+
+ Bewusst NICHT auf sond_stat()/GetFileAttributesExW() übertragen: reine
+ Metadaten-Abfragen brauchen keinen Dateiinhalt und lösen daher (im
+ Unterschied zu einem echten Lesezugriff) normalerweise keine Hydrierung
+ aus bzw. schlagen deswegen nicht mit diesem Fehler fehl - bislang auch
+ kein Hinweis, dass sond_stat() davon betroffen wäre.
+
+ Damit sollten Dateien mit für Windows gültigen, aber von der alten
+ CRT-Validierung abgelehnten Namen UND (unabhängig davon) noch nicht
+ hydrierte SeaDrive-Platzhalter jetzt allgemein normal les-/schreibbar
+ sein.
+
+ Nutzer-Test (18.09.2026): "Klappt jetzt. Auch das Verzeichnis von eben
+ läßt sich durchgehend öffnen." - Projekt öffnet wieder normal, UND das
+ in Problem C (BAUM_FS-Dummy-Zeile) beschriebene, nicht expandierbare
+ Unterverzeichnis funktioniert jetzt ebenfalls durchgehend. Beide
+ Fixes damit durch Nutzer-Test bestätigt.
+
+ Offen/zurückgestellt, da vom Nutzer nur beiläufig angemerkt, nicht als
+ Blocker: Nutzer-Einwand "Ich will das aber nicht hydrieren!" zur
+ Auto-Hydrierung in sond_fopen() - der jetzige Fix hydriert nur GENAU
+ dann, wenn ein CreateFileW()-Zugriff sonst mit
+ ERROR_CLOUD_FILE_ACCESS_DENIED scheitern würde (kein proaktives/
+ flächendeckendes Hydrieren), und fordert dabei nur 1 Byte an (die
+ Cloud-API hydriert i.d.R. trotzdem die ganze Datei, aber
+ .sond_index.db-shm ist typischerweise klein). Funktioniert laut obigem
+ Test. Falls dem Nutzer auch dieses bedarfsgesteuerte Hydrieren
+ grundsätzlich nicht behagt, wäre die sauberere Alternative, die
+ Index-DB (.sond_index.db + SQLite-eigene -wal/-shm-Begleitdateien)
+ analog zur "work"-DB (s. Task #42, project_get_local_tmp_path()) an
+ einen lokalen, nicht-synchronisierten Pfad zu verlegen, statt sie im
+ SeaDrive-synchronisierten Projektverzeichnis zu halten - dann träte
+ das Platzhalter-/Hydrierungsproblem für diese Datei erst gar nicht auf.
+ Nicht umgesetzt, da vom Nutzer nicht eingefordert und der jetzige Fix
+ nachweislich funktioniert; bei Bedarf später nachholen.
+
+ Folge-Fund (18.09.2026), unmittelbar danach: "Wenn ich im Inhalts- oder
+ Auswertungsbaum eine nicht hydrierte Datei doppelklicke, passiert das
+ selbe, was vor dem Fix im BAUM_FS passiert ist: UI friert ein, bis die
+ Datei hydriert ist." - der BAUM_FS-Fix (Problem A/B oben,
+ sond_treeviewfm_open(), sond_treeviewfm.c) deckte nur den Doppelklick
+ im Dateisystembaum selbst ab. Öffnen aus BAUM_INHALT/BAUM_AUSWERTUNG
+ läuft über einen komplett anderen Code-Pfad (zond_treeview_open_node(),
+ zond_treeview.c - sfp kommt direkt aus der Anbindung/DB, nicht aus dem
+ BAUM_FS-Tree-Modell) und hatte den Hydrierungs-Check schlicht nicht.
+
+ Fix (zond_treeview.c, zond_treeview_open_node(), direkt nach
+ get_filepart_from_iter()): sfp (falls vorhanden) über
+ sond_file_part_get_parent() bis zum Dateisystem-Vorfahren (parent ==
+ NULL) hochgelaufen - exakt dasselbe Muster wie schon in
+ zond_treeview_seadrive_apply_to_selection() (weiter oben in derselben
+ Datei, fürs Pinnen) verwendet -, daraus mit dem BAUM_FS-Root den vollen
+ Pfad gebildet und wie in sond_treeviewfm_open() behandelt:
+ sond_seadrive_needs_hydration() prüfen, bei Bedarf
+ sond_seadrive_hydrate_async() anstoßen bzw. bei schon laufender
+ Hydrierung sond_seadrive_show_hydrate_progress_dialog() zeigen, dann
+ sofort zurückkehren, OHNE den eigentlichen (synchronen) Öffnen-Code
+ überhaupt zu erreichen.
+
+ Deckt den vom Nutzer gemeldeten Hauptfall ab (Doppelklick direkt auf
+ eine Anbindung, sfp != NULL - sowohl BAUM_INHALT als auch
+ BAUM_AUSWERTUNG, sowohl interner Viewer als auch "Öffnen mit"/externes
+ Programm, da die Prüfung vor der Verzweigung dorthin sitzt). NICHT
+ abgedeckt: der "Auszug"-Fall (Doppelklick auf einen Strukturpunkt im
+ Auswertungsverzeichnis, der mehrere Kind-Anbindungen zu einer
+ gemeinsamen Ansicht zusammenfasst, zond_treeview_open_auszug()) - dort
+ ist sfp NULL, es müssten stattdessen alle gesammelten Kind-Fileparts
+ einzeln geprüft werden. Zurückgestellt, da vom Nutzer nur der
+ Einzeldatei-Fall gemeldet wurde; bei Bedarf nachrüsten (Muster: über
+ die gesammelten Fileparts iterieren, analog
+ zond_treeview_seadrive_apply_to_selection()).
+
+ Refactoring (18.09.2026), unmittelbar danach: Nutzer-Hinweis "Identischer
+ Code in sond_treeviewfm.c und zond_treeview.c - das ist ungünstig." -
+ zutreffend: die Check-und-Reagiere-Sequenz (needs_hydration()/
+ is_hydrating()/hydrate_async()/show_hydrate_progress_dialog()) stand
+ wortgleich in sond_treeviewfm_open() (BAUM_FS) UND im gerade eben
+ ergänzten zond_treeview_open_node() (BAUM_INHALT/AUSWERTUNG). In
+ sond_seadrive_ensure_hydrated(GtkWindow *parent, const gchar *full_path)
+ (sond_treeviewfm_seadrive.c/h, neu) zusammengefasst: TRUE = Datei schon
+ lokal, Aufrufer öffnet normal weiter; FALSE = Hydrierung angestoßen bzw.
+ Dialog gezeigt, Aufrufer kehrt sofort zurück. Beide Aufrufer (s.o.) auf
+ diese eine Funktion umgestellt - die restliche, pro Aufrufer
+ unterschiedliche Pfad-Ermittlung (SondTVFMItem-Baum bzw.
+ SondFilePart-Elternkette) bleibt jeweils dort, wo sie war, da sie
+ aufruferspezifisch ist.
+
+ Nutzer-Gegenvorschlag geprüft und verworfen: sond_file_part_open() als
+ gemeinsame Stelle - PDFs mit internem Viewer laufen nie durch
+ sond_file_part_open() (das ist nur der "Öffnen mit externem Programm"/
+ ShellExecute-Pfad), sondern über
+ zond_treeview_open_single_view()/_open_auszug().
+
+ Korrektur (18.09.2026, Nutzer-Test): "Auch bei Öffnen mit wird die
+ Hydrierung in zond angestoßen. Habe ich ausprobiert. Mechanismus mit
+ zweitem Doppelklick funktioniert aber." - widerlegt die ursprünglich
+ hier notierte (unbelegte) zweite Begründung, bei "Öffnen mit" würde
+ ohnehin das externe Programm/der Explorer selbst hydrieren. Tatsächlich
+ läuft sond_seadrive_ensure_hydrated() bei BEIDEN Aufrufern schon VOR der
+ Verzweigung zu open_with/sond_file_part_open(), greift also auch dort -
+ und laut Test korrekt (inkl. Fortschritts-/Abbrechen-Dialog beim
+ zweiten Doppelklick). Bleibt als einziger, weiterhin gültiger Grund
+ gegen sond_file_part_open() als gemeinsame Stelle: die fehlende
+ Abdeckung des internen-PDF-Viewer-Pfads (s.o.) - die inzwischen falsche
+ zweite Begründung wurde aus dem Code-Kommentar (sond_treeviewfm_
+ seadrive.c) entfernt.
+
+ Damit durch Nutzer-Test bestätigt: Hydrierungs-Check greift korrekt
+ sowohl beim internen Viewer als auch bei "Öffnen mit", in beiden Bäumen
+ (BAUM_FS und BAUM_INHALT/AUSWERTUNG).
+
+ Nachtrag (18.09.2026), Auszug-Fall nachgerüstet: Nutzer-Wunsch "Jetzt
+ müssen wir das mit dem Auszug im Baum_Auswertung in den Griff bekommen:
+ Für alle betroffenen PDF muß erforderlichenfalls die Hydrierung
+ angestoßen werden. Erneuter Doppelklick muß dann halt den Download-
+ Status für alle betroffenen - das heißt noch nicht hydrierten - Dateien
+ anzeigen. Schließen und Abbruch wie gehabt." - der bislang
+ zurückgestellte Auszug-Fall (Klick auf einen Strukturpunkt im
+ Auswertungsverzeichnis, der mehrere Kind-Anbindungen zu einer
+ gemeinsamen Ansicht zusammenfasst, zond_treeview_open_auszug(),
+ zond_treeview.c) kann mehrere verschiedene reale PDF-Dateien betreffen.
+
+ Neu: sond_seadrive_ensure_hydrated_multi(GtkWindow*, GPtrArray
+ *full_paths) und sond_seadrive_show_hydrate_progress_dialog_multi()
+ (sond_treeviewfm_seadrive.c/h) - Mengen-Analogon zu
+ sond_seadrive_ensure_hydrated()/_show_hydrate_progress_dialog(): stößt
+ für jede noch nicht hydrierte Datei die Hydrierung an (No-Op bei schon
+ laufenden), und zeigt bei mindestens einer schon laufenden Hydrierung
+ EINEN gemeinsamen Dialog mit je einer Fortschrittszeile (Dateiname +
+ Balken) pro noch nicht fertiger Datei - ein gemeinsamer "Abbrechen"
+ bricht alle noch laufenden Einträge ab, ein gemeinsames "Schließen"
+ schließt nur den Dialog (Downloads laufen unbeobachtet weiter) -
+ dieselbe Bedienung wie beim Einzeldatei-Dialog, nur auf alle Einträge
+ gleichzeitig angewandt ("Schließen und Abbruch wie gehabt"). Dialog
+ schließt sich von selbst, sobald alle Einträge fertig sind.
+
+ In zond_treeview.c neu: zond_treeview_auszug_collect_paths() sammelt
+ (dedupliziert) die vollen Pfade aller realen PDF-Dateien unter einem
+ Strukturpunkt; zond_treeview_auszug_ensure_hydrated() wendet darauf
+ sond_seadrive_ensure_hydrated_multi() an. Vor BEIDEN bestehenden
+ Aufrufstellen von zond_treeview_open_auszug() in
+ zond_treeview_open_node() eingehängt (Strukturpunkt-Direktklick UND der
+ "auszug"-Zweig beim Klick auf eine Anbindung mit Strukturpunkt-Eltern).
+
+ Regression (18.09.2026), sofort im Anschluss: "UI friert bei Klick auf
+ Auszug ein!" - zond_treeview_auszug_collect_paths() nutzte in der
+ ersten Fassung für die Sammlung get_filepart_from_iter() (dieselbe
+ Funktion, die auch zond_treeview_open_auszug() selbst für die
+ tatsächliche Anzeige verwendet) und darüber
+ sond_file_part_from_filepart(). Genau diese Funktion liest aber pro
+ Pfad-Segment tatsächlich die ersten 2048 Bytes der Datei für echte
+ Inhaltserkennung (statt bloßem Endungsraten) - bei einer noch nicht
+ hydrierten SeaDrive-Datei löst schon dieser Lesezugriff über
+ sond_fopen() dessen (für den .sond_index.db-shm-Fall bewusst
+ eingebaute, s.o.) synchrone Hydrierung-und-Retry-Logik aus und blockiert
+ die UI damit GENAU an der Stelle, die eigentlich erst prüfen sollte, ob
+ geöffnet werden darf, ohne zu blockieren - der neue Vorab-Check wurde so
+ selbst zur Ursache des Einfrierens.
+
+ Fix: zond_treeview_auszug_collect_paths() auf
+ zond_treeview_get_filepart_and_section() (reine DB-/Baum-Abfrage, kein
+ Dateizugriff) + sond_file_part_from_filepart_leaf() (rein endungs-
+ basiert, ebenfalls kein Dateizugriff) umgestellt - exakt dasselbe
+ Muster wie schon in zond_treeview_get_selected_fileparts_foreach()
+ (Task #93, "hydrierungsfreie Fileparts-Sammlung", für die Indizierung).
+ Da sond_file_part_from_filepart_leaf() immer SOND_TYPE_FILE_PART_LEAF-
+ Objekte liefert (nie SOND_TYPE_FILE_PART_PDF), läuft die PDF-Erkennung
+ jetzt über den (ebenfalls endungsbasiert gesetzten) MIME-Typ-String
+ (sond_file_part_leaf_get_mime_type() == "application/pdf") statt über
+ SOND_IS_FILE_PART_PDF(). Bekannte, hier hingenommene Einschränkung:
+ eine .pdf-Datei mit tatsächlich anderem Inhalt (oder umgekehrt) würde
+ dadurch falsch/nicht erkannt - exakt dieselbe Einschränkung, die die
+ Indizierungs-Sammlung (Task #93) schon für ihren Zweck akzeptiert.
+
+ Nachtrag (18.09.2026), nach Bestätigung ("Gut!"): "Vielleicht noch ein
+ ScrolledWindow machen, damit bei vielen Meldungen alle Fortschritte
+ gesehen werden können." - sond_seadrive_show_hydrate_progress_dialog_
+ multi() (sond_treeviewfm_seadrive.c) packte die Fortschrittszeilen
+ bislang direkt in die vbox der Dialog-Content-Area, ohne Höhenbegrenzung
+ - bei vielen betroffenen Dateien wäre der Dialog beliebig hoch
+ gewachsen. Fix: vbox jetzt in ein GtkScrolledWindow gepackt
+ (gtk_scrolled_window_set_min/max_content_height() 60/320px,
+ gtk_scrolled_window_set_propagate_natural_height(TRUE), damit der
+ Dialog bei WENIGEN Einträgen trotzdem klein bleibt statt immer die
+ volle Maximalhöhe zu belegen und erst ab ca. 5 Zeilen zu scrollen
+ beginnt). Horizontal bewusst GTK_POLICY_NEVER (Zeilenumbruch der Labels
+ übernimmt das schon, s. gtk_label_set_line_wrap()).
+
+ Nicht durch Kompilieren/Testen verifiziert.
+
+ ---------------------------------------------------------------------
+ Neues, unabhängiges Problem (18.09.2026): "Im Projektverzeichnis liegt
+ eine Datei 'Message'. Ist inhaltlich eine eml. Ist hydriert. Wenn ich
+ diese im BAUM_FS doppelklicke, friert die UI ein." - explizit NICHT
+ SeaDrive/Hydrierung (Datei bereits lokal). Diagnose per Nutzer-
+ Debugger-Suspend (Call-Stack): sond_treeviewfm_open() ->
+ sond_treeviewfm_open_stvfm_item() -> sond_file_part_open()
+ (sond_fileparts.c:851) -> sond_render() -> render_document_from_bytes()
+ -> render_plain_text() -> render_text_to_surface() ->
+ pango_layout_get_pixel_size() (sond_renderer.c:835, urspr. Zeilennr.).
+
+ Ursache: die Datei "Message" hat keine Erweiterung, mit der die
+ Dateierkennung (MIME-Sniffing bei sond_file_part_create(), s.o.) sie
+ zuverlässig als message/rfc822 erkennen könnte - sie wurde stattdessen
+ als text/plain eingestuft und lief deshalb über render_plain_text()
+ statt render_gmessage(). Der eigentliche Hänger sitzt aber NICHT in der
+ Fehlerkennung selbst, sondern danach: der komplette Rohtext der Mail
+ (inkl. Base64-kodierter Anhänge als extrem lange, leerzeichen-/
+ umbruchpunktfreie "Wörter") wurde unbegrenzt an Pango/Cairo zum
+ Zeilenumbruch übergeben - pango_layout_get_pixel_size() (bzw. das
+ zugrundeliegende Shaping via HarfBuzz) braucht für solche pathologischen
+ Eingaben praktisch nie endende Zeit. Die schon vorhandene max_height-
+ Begrenzung in render_text_to_surface() half hier nicht, weil sie erst
+ NACH dieser Berechnung ansetzt (nur zur Anzeige-Kappung, nicht zur
+ Eingabe-Begrenzung).
+
+ Fix (sond_renderer.c, render_text_to_surface()): text wird jetzt VOR
+ der Pango-Verarbeitung hart auf SOND_RENDER_TEXT_MAX_CHARS (300.000
+ Zeichen) gekappt (UTF-8-sicher via g_utf8_offset_to_pointer()) - egal
+ aus welchem Grund der Text so groß/pathologisch ist (Fehlerkennung als
+ Plaintext hier, denkbar auch ein wirklich riesiger Logfile o.ä.).
+ Zentral in render_text_to_surface() selbst statt in den einzelnen
+ Aufrufern (render_html/_plain_text/_doc/_gmessage-Fallback/...)
+ platziert, damit alle Aufrufer einheitlich geschützt sind. Die
+ bestehende "[Darstellung abgeschnitten]"-Anzeige greift jetzt auch bei
+ reiner Zeichen-Kappung (nicht mehr nur bei Höhen-Überschreitung).
+ searchable_text bleibt bei allen Aufrufern bewusst der volle,
+ ungekappte Text (analog zur schon bestehenden max_height-Kappung, die
+ ebenfalls nur die Anzeige, nicht die Volltextsuche einschränkt).
+
+ Bewusst NICHT angegangen in diesem Schritt (separat nachgeholt, s.
+ direkt im Anschluss): die zugrundeliegende MIME-Fehlerkennung von
+ erweiterungslosen .eml-Inhalten als text/plain statt message/rfc822.
+
+ Nicht durch Kompilieren/Testen verifiziert.
+
+ ---------------------------------------------------------------------
+ Nachtrag (18.09.2026), auf Nutzer-Wunsch ("Ok. Aber jetzt an der
+ mime-Erkennung arbeiten."): die eigentliche Ursache des vorigen Freezes
+ behoben - Dateien ohne (erkennbare) Erweiterung, deren Inhalt eine
+ E-Mail ist, wurden von libmagic als text/plain eingestuft. Die schon
+ vorhandene Korrektur dafür (mime_guess_content_type(), Zweig "libmagic
+ sagt text/plain, aber Dateiendung sagt message/rfc822 -> Endung
+ gewinnt") konnte hier nicht greifen, weil es mangels Erweiterung gar
+ keine Endung gab, aus der mime_from_extension() etwas hätte ableiten
+ können.
+
+ Nutzer-Entscheidung zur Erkennungsstrenge (Rückfrage gestellt, da schon
+ einmal - 15./16.09.2026 - eine zu aggressive Kopfzeilen-Heuristik
+ ("Von:"/"Betreff:"/"Datum:"-artige Textmuster) zu massenhaften
+ Fehlerkennungen und dadurch zu einer schweren Performance-Regression
+ beim Anbinden einer ZIP-Datei mit vielen XML-Dateien geführt hatte, s.
+ "Sicherheitsnetz"-Kommentar in sond_mime.c): "Sehr konservativ" gewählt
+ - minimales Risiko neuer Fehlerkennungen bewusst über vollständigere
+ Erkennung gestellt.
+
+ Neu: buffer_looks_like_rfc822() (sond_mime.c) prüft NUR, ob im
+ Kopfbereich der Datei (vor der ersten Leerzeile, max. 8 KB) eine Zeile
+ mit "MIME-Version:" oder "Message-ID:" (Groß-/Kleinschreibung
+ unerheblich) am Zeilenanfang steht - anders als die früheren generischen
+ deutschen Kopfzeilen-Wörter kommen diese beiden exakten, englischen
+ RFC822-Header praktisch nie zufällig in normalem Fließtext vor, werden
+ aber von praktisch jedem MIME-fähigen Mailprogramm/-server gesetzt.
+ Eingehängt in mime_guess_content_type() im bestehenden
+ text/plain-Zweig, NACH den beiden Endungs-Prüfungen (nur als
+ zusätzlicher dritter Fallback, wenn keine davon schon etwas ergeben
+ hat) - Dateien mit einer bekannten, abweichenden Erweiterung (z.B.
+ .txt) werden von der schon vorhandenen "Sicherheitsnetz"-Korrektur
+ weiter unten in der Funktion trotzdem wieder auf ihre Endung
+ zurückgesetzt, falls diese neue Heuristik dort fälschlich anschlägt -
+ nur erweiterungslose bzw. Dateien mit unbekannter Erweiterung profitieren
+ also tatsächlich davon.
+
+ Bewusst hingenommene Einschränkung (Nutzer-Entscheidung): eine sehr
+ rudimentäre/alte Mail ganz ohne MIME-Version- und Message-ID-Header wird
+ dadurch weiterhin nicht erkannt und weiterhin über render_plain_text()
+ dargestellt (jetzt aber ohne mehr einzufrieren, s. Fix oben).
+
+ Nicht durch Kompilieren/Testen verifiziert - insbesondere zu testen:
+ (a) die Datei "Message" öffnet jetzt über den GMessage-Viewer statt
+ über render_plain_text(); (b) keine neuen Fehlerkennungen bei normalen
+ Text-/XML-/Log-Dateien (insbesondere die schon einmal betroffene
+ ZIP-mit-vielen-XML-Dateien-Konstellation vom 15./16.09.2026 erneut
+ gegenprüfen).
+
+ ---------------------------------------------------------------------
+ Neues, verwandtes Problem (18.09.2026): "Wenn die Index-DB nicht
+ hydriert ist, öffnet das Projekt nicht." - project_open() (project.c)
+ ruft sond_process_file_create_wctx() -> sond_index_ctx_new()
+ (sond_index.c) -> sqlite3_open(db_path, ...) auf die eigene
+ Volltextindex-Datenbank (.sond_index.db) auf. Anders als beim
+ .sond_index.db-shm-Fund weiter oben (dort griff die in sond_fopen()
+ eingebaute Hydrierung-und-Retry-Logik) hilft das hier NICHT: SQLite
+ nutzt für sqlite3_open() seine EIGENE Windows-VFS, nie sond_fopen() -
+ schlägt bei einem nicht hydrierten SeaDrive-Platzhalter also einfach
+ mit "unable to open database file" fehl, ohne dass zond-Code die
+ Gelegenheit zum Eingreifen (Hydrieren+Retry) bekäme.
+
+ Fix (project.c, project_open(), direkt vor dem sond_process_file_
+ create_wctx()-Aufruf): für alle drei möglichen Dateien (.sond_index.db
+ selbst sowie die SQLite-WAL-Begleitdateien -wal/-shm, die nur bei
+ fehlendem Checkpoint beim letzten Schließen existieren) wird jetzt
+ vorab sond_seadrive_needs_hydration() geprüft und bei Bedarf
+ sond_seadrive_hydrate() (die BLOCKIERENDE Variante, nicht die
+ Fire-and-forget-Variante aus Problem A/B oben) aufgerufen. Bewusst
+ synchron/blockierend: anders als beim Öffnen einer einzelnen
+ Nutzer-Datei (dort Fire-and-forget + sofortige Rückkehr an die UI
+ möglich) unterstützt SQLite grundsätzlich keinen partiellen/
+ gestreamten Zugriff auf eine Cloud-Datei - die Datei MUSS vollständig
+ lokal vorliegen, bevor sqlite3_open() überhaupt versucht wird; das
+ Projekt kann ohne geöffnete Index-DB ohnehin nicht sinnvoll
+ weiterladen, ein Zurückkehren an die UI wäre hier keine echte Option.
+
+ Bewusst NICHT in sond_index_ctx_new() (sond_index.c) selbst behoben:
+ diese Funktion ist GTK-frei und wird auch vom Server-Worker
+ (sond_server_repo_worker.c, headless/serverseitig) genutzt - eine
+ SeaDrive/Windows/GTK-spezifische Hydrierung dort einzubauen wäre eine
+ Schichten-Verletzung (dieselbe Überlegung wie bei sond_file_helper.c,
+ s.o.: "GTK-freie, niedrige Utility-Ebene"). Der Fix sitzt daher auf
+ Anwendungsebene (project.c), wo SeaDrive/GTK ohnehin schon zur
+ Verfügung stehen.
+
+ Für sehr große Index-DBs (viele indizierte Dokumente/Embeddings) könnte
+ dieses blockierende Warten spürbar werden - anders als beim 51-GB-
+ Video-Fund oben aber praktisch kaum vermeidbar (keine sinnvolle
+ Teilfunktionalität ohne offene Index-DB) und daher hier ohne
+ Fortschrittsanzeige hingenommen; bei Bedarf später nachrüsten (z.B.
+ eigener Lade-Dialog analog zum Anbinden-Info-Window).
+
+ Nicht durch Kompilieren/Testen verifiziert.
+
+ ---------------------------------------------------------------------
+ Regressions-Fund (18.09.2026): "Doppelklick auf unhydrierte Datei
+ (nicht PDF) im BAUM_INHALT: UI friert ein! Hatten wir das nicht schon
+ behandelt?" - berechtigter Einwand: der Task/ToDo-Eintrag "BAUM_INHALT/
+ AUSWERTUNG: Hydrierungs-Check bei Doppelklick nachrüsten" weiter oben
+ hatte genau diesen Fall schon behandelt, aber unvollständig - derselbe
+ Fehler wie beim separat schon korrigierten Auszug-Fall ("Regression:
+ Auszug-Hydrierungscheck fror UI selbst ein"): der damalige Fix prüfte
+ die Hydrierung erst NACH get_filepart_from_iter() (zond_treeview.c) -
+ aber genau diese Funktion baut über sond_file_part_from_filepart() ein
+ echtes SondFilePart auf und liest dafür pro Segment bereits die ersten
+ 2048 Bytes der Datei zur Inhaltserkennung. Bei einer noch nicht
+ hydrierten Datei löst schon dieser Lesezugriff über sond_fopen() dessen
+ synchrone Hydrierung-und-Retry-Logik aus - der Check kam also zu spät,
+ der Hänger passierte schon davor. Warum bei den eigenen Tests
+ unentdeckt: offenbar zufällig immer mit bereits lokalen Dateien
+ getestet (der Auszug-Fall war mit denselben PDF-Testdateien schon
+ lokal, als der Einzeldatei-Pfad getestet wurde).
+
+ Fix: exakt dasselbe Muster wie beim Auszug-Fall angewandt - der Check
+ sitzt jetzt VOR get_filepart_from_iter() und ermittelt den
+ Dateisystem-Vorfahren direkt aus dem file_part-String (via
+ zond_treeview_get_filepart_and_section(), rein DB-/Baum-Abfrage, kein
+ Dateizugriff - Teil vor einem evtl. "//", analog
+ zond_treeview_get_seadrive_badge() weiter oben), statt dafür erst ein
+ SondFilePart-Objekt aufzubauen. get_filepart_from_iter() (mit dem
+ riskanten, aber für die eigentliche Anzeige nötigen echten
+ Inhaltssniffing) wird jetzt erst NACH einem positiven Hydrierungs-Check
+ aufgerufen, wenn die Datei nachweislich schon lokal ist.
+
+ Damit sollte dieselbe Fehlerklasse jetzt an allen drei betroffenen
+ Stellen behoben sein: BAUM_FS (sond_treeviewfm_open(), nutzte von
+ Anfang an SondTVFMItem-Metadaten statt Inhaltssniffing, war nie
+ betroffen), Auszug-Fall (zond_treeview_auszug_collect_paths()) und jetzt
+ auch der Einzeldatei-Fall (zond_treeview_open_node()) - alle drei
+ ermitteln den zu prüfenden Pfad jetzt konsequent OHNE Dateizugriff,
+ bevor überhaupt irgendein Lesezugriff versucht wird.
+
+ Nicht durch Kompilieren/Testen verifiziert.
+
+ Zurückgestellt (Nutzer-Entscheidung 18.09.2026): Sonderfall ZIP-
+ Archivinhalte - ZIP erlaubt Dateinamen/Zeichen, die im Windows-
+ Dateisystem gar nicht erst anlegbar wären (z.B. bei "Verzeichnis aus ZIP
+ kopieren" ins Dateisystem, s. 16.09.2026 oben) - dafür ggf. eigene,
+ separate Betrachtung nötig, wenn das konkret auftritt.
+
+ Später (vom Nutzer explizit zurückgestellt): Sonderfall ZIP-
+ Archivinhalte - Zip erlaubt Dateinamen/Zeichen, die im Windows-
+ Dateisystem gar nicht erst anlegbar wären (z.B. bei "Verzeichnis aus ZIP
+ kopieren" ins Dateisystem, s. 16.09.2026 oben) - dafür ggf. eigene,
+ separate Betrachtung nötig.
+
  Performance "Anbinden" - weiterer Fehlversuch und Rückbau (16.09.2026):
 
  - Nutzer-Fund: "1000 Dateien dauern eine Minute anzubinden" - trotz der
@@ -2164,8 +2713,341 @@
    fällt der Code (anders als vorher) auf den normalen Öffnen-Weg zurück,
    statt kommentarlos nichts zu tun. Das testweise eingebaute Diagnose-
    Logging wurde wieder entfernt.
+ - Vom Nutzer bestätigt: behebt den gemeldeten Bug ("klappt jetzt!").
+
+ Folgeproblem (18.09.2026), vom Nutzer direkt im Anschluss an obige
+ Bestätigung gemeldet: sond_seadrive_hydrate() (s.o.) ruft
+ CfHydratePlaceholder() synchron im GTK-Hauptthread auf. Der Doku-Hinweis
+ oben ("hydriert gezielt 1 Byte ... ohne synchron auf die ganze Datei zu
+ warten") erwies sich als falsch: der Nutzer klickte versehentlich eine
+ >51-GB-Datei doppelt an, das Programm fror daraufhin mehrere Minuten
+ komplett ein, ohne Cursor-Rückmeldung und ohne Abbrechen-Möglichkeit
+ (vermutlich lädt der SeaDrive-Provider unabhängig von der angeforderten
+ Länge grundsätzlich die ganze Datei, bevor der Aufruf zurückkehrt).
+
+ Ursprünglich vorgeschlagen: das im Projekt etablierte Info-Fenster+
+ GThread+Polling-Muster (analog zond_index_erstellen_ht_mit_modus() in
+ headerbar.c) mit Abbrechen-Button. Nutzer-Entscheidung dagegen, deutlich
+ einfacher: kein Warten und kein Info-Fenster nötig, wenn der Download
+ ohnehin im Hintergrund weiterläuft - es soll immer sofort an die UI
+ zurückgegeben werden; einzige Anforderung: ein erneuter Doppelklick auf
+ dieselbe, noch herunterladende Datei darf keinen zweiten, redundanten
+ Hydrier-Versuch auslösen.
+
+ Umsetzung (sond_treeviewfm_seadrive.c/.h):
+ - sond_seadrive_needs_hydration(full_path): neuer, schneller, nicht-
+   blockierender Vorab-Check (nur GetFileAttributesW). Von
+   sond_seadrive_hydrate() (Fast-Path für schon lokale Dateien) und von
+   sond_treeviewfm_open() genutzt, um zu entscheiden, ob überhaupt
+   hydriert werden muss, ohne dafür einen Thread zu starten.
+ - sond_seadrive_hydrate_async(full_path): neu, Fire-and-forget. Prüft
+   unter einem Mutex eine GHashTable aktuell laufender Pfade
+   (g_hydrating_paths) - ist full_path bereits enthalten, sofortiger
+   No-Op-Rückkehr (erfüllt die Nutzer-Anforderung "erneuter Doppelklick
+   ... nichts mehr bewirkt"). Sonst: Pfad einfügen, GThread starten
+   (g_thread_new(), sofort g_thread_unref() - nicht gejoined), der
+   Thread ruft das bisherige, weiterhin synchrone
+   sond_seadrive_hydrate() auf, loggt Fehler per LOG_WARN und entfernt
+   den Pfad wieder aus der Menge.
+ - sond_treeviewfm_open() (sond_treeviewfm.c): ruft jetzt erst
+   sond_seadrive_needs_hydration() - bei FALSE (schon lokal) fällt der
+   Code direkt auf den normalen Öffnen-Weg durch (kein unnötiger
+   Thread-Start). Bei TRUE: sond_seadrive_hydrate_async() anstoßen und
+   IMMER sofort return 0 (kein synchrones Prüfen von Erfolg/Fehlschlag
+   mehr möglich, da fire-and-forget - Fehler landen nur noch im Log,
+   nicht mehr im Rückgabewert dieser Funktion).
+ - Der oben zitierte, jetzt widerlegte Doku-Kommentar bei
+   sond_seadrive_hydrate() wurde um eine Korrektur (18.09.2026) ergänzt.
  - Nicht durch Kompilieren/Testen verifiziert (kein Zugriff auf make
    zond in dieser Session) - Bestätigung durch den Nutzer nach dem
-   nächsten Build steht noch aus.
+   nächsten Build steht noch aus. Insbesondere zu testen: (a) Doppelklick
+   auf große Platzhalter-Datei gibt UI sofort frei, Download läuft im
+   Hintergrund weiter und Datei-Badge aktualisiert sich nach Abschluss
+   wie gehabt über den SeaDrive-Watcher; (b) Doppelklick auf bereits
+   lokale Datei öffnet weiterhin sofort ganz normal.
+
+ Ergänzung (18.09.2026), unmittelbar im Anschluss: Nutzerwunsch, (b) oben
+ ("wiederholter Doppelklick auf dieselbe, noch herunterladende Datei löst
+ keinen zweiten Download aus") um Sichtbarkeit/Kontrolle zu erweitern -
+ Zitat: "Vielleicht bei erneutem Klick auf Datei, deren Hydration schon
+ gestartet wurde: Fenster mit Mitteilung, daß Download im Gange, schon
+ x/y Bytes heruntergeladen und Abbruchmöglichkeit. Damit nicht der Server
+ verstopft wird." D.h. statt eines stillen No-Ops bei erneutem
+ Doppelklick jetzt ein Dialog mit Fortschritt und echtem Abbrechen-
+ Versuch (nicht nur "UI-Warten abbrechen", das ja mit dem Fire-and-
+ forget-Design von vornherein entfällt - hier geht es um den tatsächlich
+ laufenden Download).
+
+ Umsetzung (sond_treeviewfm_seadrive.c/.h):
+ - HydratingEntry (Wert in g_hydrating_paths, ersetzt den bisherigen
+   Dummy-Wert): enthält jetzt ein per DuplicateHandle(GetCurrentThread(),
+   ..., THREAD_TERMINATE, ...) erzeugtes Thread-Handle des jeweiligen
+   Hydrier-Threads, sobald dieser läuft.
+ - sond_seadrive_is_hydrating(full_path): einfache Abfrage, ob für
+   full_path aktuell ein Eintrag existiert.
+ - sond_seadrive_hydrate_cancel(full_path): ruft CancelSynchronousIo()
+   auf das Thread-Handle auf (bricht den dort blockierenden
+   CfHydratePlaceholder()-Aufruf ab) - oder setzt nur cancel_requested,
+   falls der Thread sein Handle noch nicht eingetragen hat (Race
+   unmittelbar nach dem Start), woraufhin der Thread den Download gar
+   nicht erst beginnt. WICHTIG (Doku-Kommentar an der Funktion):
+   CancelSynchronousIo() ist für CfHydratePlaceholder() nicht offiziell
+   dokumentiert/garantiert - ob der SeaDrive-Minifilter/-Dienst den
+   Abbruch tatsächlich zeitnah beachtet und den Download serverseitig
+   stoppt, ist unsicher. Es ist aber der einzige als Konsument (nicht als
+   Sync-Provider) verfügbare Mechanismus, ohne CfHydratePlaceholder()
+   selbst auf OVERLAPPED umzustellen.
+ - sond_seadrive_show_hydrate_progress_dialog(parent, full_path): neuer
+   GtkDialog (angelehnt an das bestehende InfoWindow-Muster in misc.c,
+   aber eigenständig, da die Fortschrittsquelle hier eine externe
+   Pollschleife statt eines vom Aufrufer selbst gefütterten Fortschritts
+   ist). Fortschritt: Dateigröße einmalig per GetFileSizeEx(), danach
+   alle 300ms per g_timeout_add() OnDiskDataSize über
+   CfGetPlaceholderInfo(CF_PLACEHOLDER_INFO_STANDARD) abgefragt (Struct-
+   Layout aus der offiziellen cfapi.h recherchiert und wie der Rest der
+   Datei manuell dupliziert). "Abbrechen"-Button ruft
+   sond_seadrive_hydrate_cancel() auf und deaktiviert sich selbst; das
+   Fenster schließt sich von selbst, sobald sond_seadrive_is_hydrating()
+   FALSE liefert (Hydrierung zu Ende - egal ob Erfolg, Fehler oder
+   Abbruch). Schließen über das X bricht NICHT ab, der Download läuft
+   dann unbeobachtet im Hintergrund weiter (Timeout wird beim "destroy"-
+   Signal sauber entfernt).
+ - sond_treeviewfm_open(): unterscheidet jetzt bei needs_hydration==TRUE
+   zusätzlich per sond_seadrive_is_hydrating() zwischen "neu anstoßen"
+   (erster Doppelklick) und "Fortschritt/Abbrechen-Dialog zeigen"
+   (wiederholter Doppelklick).
+ - Nicht durch Kompilieren/Testen verifiziert. Zusätzlich zu (a)/(b) oben
+   zu testen: (d) wiederholter Doppelklick auf eine noch laufende
+   Hydrierung zeigt den Fortschrittsdialog mit plausibel wachsendem
+   Balken; (e) Abbrechen-Button beendet den Download tatsächlich (Badge
+   bleibt PENDING/Platzhalter, kein Wechsel zu hydriert) - falls nicht:
+   s.o., CancelSynchronousIo() ist für diesen Anwendungsfall nicht
+   offiziell garantiert, ggf. Rückfall auf OVERLAPPED-basierten Ansatz
+   nötig; (f) Schließen des Dialogfensters per X lässt den Download im
+   Hintergrund unangetastet weiterlaufen.
+
+ Ergänzung (18.09.2026), unmittelbar im Anschluss: Nutzer-Feedback - ohne
+ einen expliziten "Schließen"-Button war für den Fall "Fortschritt
+ ansehen, aber NICHT abbrechen wollen" nur das X am Fensterrand nutzbar,
+ was nicht offensichtlich ist. Ergänzt: zweiter Button "Schließen" links
+ vom "Abbrechen"-Button (gtk_dialog_add_button() mit GTK_RESPONSE_NONE,
+ "clicked" per g_signal_connect_swapped direkt auf gtk_widget_destroy()
+ gemappt) - verhält sich wie das X (kein Cancel, Download läuft im
+ Hintergrund weiter), macht diese Option aber explizit sichtbar.
+
+ Nutzer-Test (18.09.2026): Abbrechen funktioniert ("klappt gut") -
+ CancelSynchronousIo() auf das Hydrier-Thread-Handle bricht
+ CfHydratePlaceholder() also tatsächlich zuverlässig ab, die
+ Unsicherheit aus dem Doc-Kommentar an sond_seadrive_hydrate_cancel()
+ hat sich damit nicht bewahrheitet. Fortschrittsanzeige dagegen zeigte
+ durchgehend 0%, obwohl laut Windows-Explorer aktiv heruntergeladen
+ wurde. Ursache (statische Analyse): cfapi.h deklariert
+ CF_PLACEHOLDER_STANDARD_INFO.FileIdentity als BYTE[1] - nur ein
+ Platzhalter für ein tatsächlich variabel langes, vom Aufrufer selbst
+ groß genug zu allozierendes Feld (SeaDrivePlaceholderBasicInfo oben im
+ selben File hat dieses Problem für CF_PLACEHOLDER_INFO_BASIC schon immer
+ richtig gelöst: dort schon immer 256 statt 1 Byte). Mit nur 1 Byte
+ Puffer liefert CfGetPlaceholderInfo() bei einer nicht-winzigen Identity
+ (bei SeaDrive offenbar der Normalfall) HRESULT_MORE_DATA - ein
+ FAILURE-HRESULT trotz des Namens (Severity-Bit gesetzt) -,
+ SUCCEEDED(hr) schlägt fehl, hydrate_progress_update() bricht VOR dem
+ Auswerten von OnDiskDataSize ab, Progress-Bar bleibt auf ihrem
+ Default-Wert 0%. Fix: FileIdentity in SeaDrivePlaceholderStandardInfo
+ (sond_treeviewfm_seadrive.c) ebenfalls auf 256 Byte vergrößert;
+ zusätzlich ein einmaliges (nicht alle 300ms wiederholtes) Diagnose-
+ LOG_WARN samt HRESULT und ReturnedLength ergänzt, falls 256 Byte
+ wider Erwarten immer noch nicht reichen sollten. Nicht durch
+ Kompilieren/Testen verifiziert.
+
+ Neuer Nutzer-Fund (18.09.2026): "Wenn ich eine eml als Immer verfügbar
+ markiere, dann wird auch Message mit grünem badge versehen, aber nicht
+ die mime-parts". Ursache in sond_treeviewfm_render_file_icon()
+ (sond_treeviewfm.c, BAUM_FS-Icon-Rendering): der SeaDrive-Badge-Zweig
+ verlangte für LEAF- wie für DIR-Zeilen bisher explizit
+ !sond_file_part_get_parent(...), also ein Top-Level-Objekt OHNE Parent -
+ Mime-Parts einer E-Mail (Anhänge/Inline-Teile als eigene LEAF-Kindzeilen
+ mit der .eml als sond_file_part-Parent) fielen dadurch grundsätzlich aus
+ der Badge-Berechnung heraus (ebenso beträfe es ZIP-Einträge oder
+ PDF-Seiten als eigene Zeilen). Der Pin-/Hydrierungsstatus gehört aber
+ zur realen Datei im Dateisystem als janzem, nicht zum einzelnen
+ (virtuellen) Teil - alle Kinder EINER realen Datei müssen also dasselbe
+ Badge zeigen wie die Datei selbst.
+
+ Fix: die Top-Level-Bedingung entfernt, stattdessen läuft der Code jetzt
+ (wie schon zond_treeview_get_seadrive_badge() bzw.
+ sond_file_part_get_filepart() es für BAUM_INHALT/AUSWERTUNG bzw. den
+ "//"-Filepart-String tun) über sond_file_part_get_parent() zum obersten
+ Vorfahren hoch und verwendet dessen Pfad für den full_path-/
+ Hashtable-Lookup (sond_treeviewfm_seadrive_get_file_badge()). Bei einem
+ Top-Level-Objekt ohne Parent läuft die Schleife einfach nicht, das
+ bisherige Verhalten für "normale" Dateien bleibt also unverändert. Die
+ PDF-mit-Pagetree-Ausnahme (eigene Zeile für den Container selbst, kein
+ Badge, da dort keine echte Einzeldatei angezeigt wird) bleibt bestehen.
+ Der bisher zusätzliche !stvfm_item_priv->path_or_section-Check im
+ DIR-Zweig bleibt ebenfalls bestehen (schließt reine Abschnitts-/
+ Header-Pseudo-Knoten weiterhin aus), nur die Parent-Bedingung wurde dort
+ entsprechend entfernt.
+
+ Nicht durch Kompilieren/Testen verifiziert.
+
+ Direkter Folge-Fund (18.09.2026), derselbe Tag: "Anwahl von 'Immer
+ offline verfügbar' wirkt nur bei Message, nicht bei den mimeparts" -
+ dieselbe Fehlerklasse wie beim Badge oben, jetzt aber bei der
+ eigentlichen Pin-Aktion selbst (BAUM_FS-Kontextmenü, sond_treeviewfm_
+ seadrive.c). stvfm_item_get_full_path() lieferte für ein SondFilePart
+ mit Parent (Mime-Part/ZIP-Eintrag/PDF-Seite) bisher dessen EIGENEN,
+ ggf. rein internen/synthetischen sond_file_part_get_path()-Wert statt
+ des echten Dateisystempfads - root+"/"+dieser-Pfad ergab damit einen
+ nicht-existenten Pfad, sond_seadrive_set_pin_state() schlug für solche
+ Zeilen wirkungslos fehl (nur LOG_WARN, keine sichtbare Fehlermeldung).
+ Bei "Message" selbst (sfp ohne Parent) war der eigene Pfad zufällig
+ schon der richtige, deshalb funktionierte es nur dort.
+
+ Fix: stvfm_item_get_full_path() läuft jetzt, genau wie zuvor schon
+ zond_treeview_seadrive_apply_to_selection() (BAUM_INHALT/AUSWERTUNG,
+ zond_treeview.c - dort war der Fix bereits korrekt vorhanden) und der
+ SeaDrive-Badge-Fix von oben, zum obersten sond_file_part-Vorfahren
+ hoch und verwendet dessen Pfad. Die "Skip embedded entries"-Prüfung in
+ apply_pin_state_to_item() (sfp != NULL && path_or_section != NULL)
+ bleibt unverändert bestehen - sie betrifft reine Abschnitts-/
+ Bereichs-Pseudo-Knoten (z.B. Seitenbereich), nicht Mime-Parts, und war
+ nicht die Ursache.
+
+ Nicht durch Kompilieren/Testen verifiziert.
+
+ Weiterer Folge-Fund (18.09.2026), unmittelbar im Anschluss: "Die
+ (virtuellen) Verzeichnisse in einem Container (zip-Verzeichnis,
+ multipart) werden nicht mit badge markiert." Dieselbe Ursache wie bei
+ den beiden Funden oben, diesmal im DIR-Zweig von
+ sond_treeviewfm_render_file_icon() selbst: dort blieb bisher zusätzlich
+ zur (jetzt entfernten) Parent-Bedingung noch ein
+ !stvfm_item_priv->path_or_section-Check bestehen, in der irrigen
+ Annahme, path_or_section markiere nur reine Abschnitts-/Header-Pseudo-
+ Knoten. Tatsächlich wird path_or_section aber auch für ein bereits
+ aufgeklapptes ZIP-Unterverzeichnis bzw. ein Multipart-Verzeichnis einer
+ E-Mail gesetzt (interner Pfad/Kennung innerhalb des Containers,
+ sond_tvfm_item_create()) - das sond_file_part ist dabei dasselbe Objekt
+ wie beim Container-Top-Level-Item (die ganze .zip/.eml). Auch diese
+ virtuellen Verzeichniszeilen sind also nur eine andere Ansicht EINER
+ realen Datei und müssen deren Badge zeigen.
+
+ Fix: die path_or_section-Bedingung im DIR-Zweig ebenfalls entfernt -
+ bei vorhandenem sond_file_part wird jetzt unabhängig von
+ path_or_section zum obersten Vorfahren hochgelaufen. Der schon
+ bestehende Mechanismus darunter (live GetFileAttributesW auf full_path,
+ da Ordner nicht in seadrive_file_badges geführt werden) funktioniert
+ dafür unverändert, da full_path jetzt korrekt auf die reale Container-
+ Datei zeigt statt leer zu bleiben - GetFileAttributesW liefert dann
+ schlicht die Attribute dieser Datei (kein Verzeichnis, aber das ist für
+ die reine Pinned/Offline-Auswertung unerheblich).
+
+ Nicht durch Kompilieren/Testen verifiziert.
+
+ Neuer, unabhängiger Nutzer-Fund (18.09.2026): "Schließen des Projekts
+ bei SeaDrive-Projekten dauert sehr lange (20 Sek.)". Ursache:
+ project_close() -> sond_treeviewfm_set_root(BAUM_FS, NULL) ->
+ sond_treeviewfm_seadrive_stop_watcher() setzte das Stop-Flag für den
+ Watcher-Thread und wartete dann per g_thread_join() SYNCHRON im GTK-
+ Hauptthread auf dessen Ende. Der Watcher-Thread selbst reagiert zwar
+ reaktionsschnell auf das Flag (500ms-Timeout in der Warteschleife bzw.
+ sofortiger Check in der Rescan-Rekursion, watcher_count_pending_down())
+ - das eigentliche Ende des Threads verzögert sich aber durch dessen
+ Aufräumcode: CancelIo(hDir) auf das noch ausstehende, per
+ ReadDirectoryChangesW gestartete OVERLAPPED-Directory-Watch stößt den
+ Abbruch nur AN, das anschließende CloseHandle(hDir) wartet laut
+ Windows-I/O-Modell auf den tatsächlichen Abschluss dieser ausstehenden
+ I/O - und SeaDrives Cloud-Filtertreiber braucht dafür offenbar
+ regelmäßig um die 20 Sekunden (vermutlich ein interner Timeout).
+
+ Fix: sond_treeviewfm_seadrive_stop_watcher_async() (neu,
+ sond_treeviewfm.c/.h) - setzt das Stop-Flag, merkt sich das GThread-
+ Handle, setzt stvfm_priv->seadrive_watcher_thread schon jetzt (nicht
+ erst nach dem Join) auf NULL und delegiert das eigentliche
+ g_thread_join() an einen neu gestarteten, kurzlebigen "Reaper"-Thread
+ (per g_thread_unref() sofort "fire-and-forget" freigegeben - das
+ dokumentierte GLib-Muster dafür). Der GTK-Hauptthread kehrt damit
+ sofort zurück, das eigentliche CancelIo/CloseHandle-Warten passiert im
+ Hintergrund, unbemerkt vom Nutzer. Sicherheitsüberlegung: der Watcher-
+ Thread fasst nach dem Setzen des Stop-Flags keine stvfm-Daten mehr an
+ (nur noch eigene lokale Handles/Kopien), das Auslagern ist also
+ unproblematisch - ABER NUR, solange stvfm selbst danach am Leben
+ bleibt. Deshalb zwei Varianten: sond_treeviewfm_seadrive_stop_watcher()
+ (unverändert blockierend) bleibt für sond_treeviewfm_finalize() bestehen
+ (dort wird direkt im Anschluss der private Instanz-Speicher freigegeben
+ - ein im Hintergrund noch laufender Watcher-Thread wäre dort ein
+ Use-after-free-Risiko), die neue nicht-blockierende Variante wird nur
+ in sond_treeviewfm_set_root() verwendet (BAUM_FS-Widget bleibt über die
+ Projekt-Lebensdauer hinaus bestehen).
+
+ Nicht durch Kompilieren/Testen verifiziert.
+
+ Korrektur (18.09.2026), Nutzer-Test: "Aber es ändert nichts." - Fix
+ half nicht. Auf Bitte per Eclipse/gdb "Suspend" während des Hängers
+ einen Call-Stack geholt: der zeigte den Hänger NICHT im Watcher-Thread-
+ Join, sondern weiterhin in sond_treeviewfm_set_root() selbst, konkret in
+ g_hash_table_remove_all(stvfm_priv->seadrive_file_badges) (Zeile 3904
+ vor diesem Fix). Der Watcher-Thread-Fix oben war also unnötig (schadet
+ aber nicht) - die eigentliche Ursache war die ganze Zeit diese Zeile.
+ Erklärung: bei einem großen SeaDrive-Projekt hat praktisch jede noch
+ nicht heruntergeladene (OFFLINE-)Datei einen eigenen Eintrag in
+ seadrive_file_badges - bei vielen Zehn- oder Hunderttausend Dateien im
+ Projekt entsprechend viele Einträge, die remove_all() einzeln (mit je
+ einem g_free() auf den Key-String) synchron im GTK-Hauptthread
+ abarbeiten musste. Betraf im Prinzip auch die drei anderen SeaDrive-
+ Hashtables (seadrive_not_in_sync, seadrive_pending_down_paths,
+ seadrive_dir_counts), dort aber typischerweise mit deutlich weniger
+ Einträgen.
+
+ Fix: neuer Typ SeadriveOldTables + statische Funktion
+ seadrive_old_tables_reap() (beide direkt vor sond_treeviewfm_set_root()
+ in sond_treeviewfm.c). In set_root() werden die vier Hashtable-Zeiger
+ jetzt nur noch aus stvfm_priv "gestohlen" (Felder sofort auf NULL
+ gesetzt statt sie zu leeren) und die eigentliche Zerstörung
+ (g_hash_table_destroy() auf alle vier) an einen kurzlebigen Hintergrund-
+ Thread abgegeben (g_thread_new()+g_thread_unref(), "fire and forget",
+ analog zum Watcher-Reaper). Die vier Tabellen enthalten ausschließlich
+ Strings/Zahlen ohne Rückverweis auf stvfm - ihre Zerstörung ist deshalb
+ unabhängig vom weiteren Leben des stvfm-Objekts sicher, die Watcher-
+ Einschränkung "nur außerhalb finalize()" gilt hier NICHT.
+
+ Nicht durch Kompilieren/Testen verifiziert - diesmal bitte per Call-
+ Stack (oder einfach durch Nachmessen der Schließzeit) verifizieren, ob
+ damit tatsächlich behoben, BEVOR weitere Stellen vermutet werden.
+
+ Folge-Fund (18.09.2026), Nutzer-Test des Close-Fixes: Schließen selbst
+ jetzt schnell ("Sehr gut!!"), ABER: "der Zeitverlust ist der gleiche,
+ bis Öffnen das Verzeichnis anzeigt." Per Eclipse/gdb-Suspend lokalisiert
+ - diesmal lag der Hänger NICHT in sond/zond-eigenem Code, sondern in
+ my_dialog_run() -> choose_file() -> filename_oeffnen() -> project_load()
+ - also im GTK-Dateiauswahldialog (GtkFileChooserDialog) selbst, der
+ aufgeht, BEVOR der Nutzer überhaupt eine neue Projektdatei ausgewählt
+ hat. Ursache: choose_file() rief bisher immer ohne expliziten
+ Startpfad auf (path==NULL) und fiel intern auf g_get_current_dir()
+ zurück - das Arbeitsverzeichnis des Prozesses war zu diesem Zeitpunkt
+ aber noch auf das AKTUELL (bzw. gerade eben) geöffnete SeaDrive-
+ Projektverzeichnis gesetzt (g_chdir() in sond_treeviewfm_set_root(),
+ root!=NULL-Zweig - project_close() setzt das nirgends zurück, und
+ project_load() ruft filename_oeffnen() ohnehin VOR project_open()/
+ project_close() auf). GtkFileChooserDialog musste also erst das
+ komplette, potentiell riesige alte Fallakten-Verzeichnis einlesen, um
+ seine eigene Dateiliste zu füllen - derselbe "Cloud-Filtertreiber pro
+ Datei langsam"-Effekt wie beim SeaDrive-Scan, diesmal aber in GTKs
+ eigenem Dialog statt in unserem Code und deshalb dort nicht direkt
+ beschleunigbar.
+
+ Fix: filename_oeffnen() (misc.c/.h) um einen neuen Parameter
+ start_path erweitert, an choose_file() durchgereicht. Die beiden
+ anderen, unkritischen Aufrufer (seiten.c: Datei zum Einfügen/Merge
+ auswählen; stand_alone.c: PDF im Stand-alone-Viewer öffnen) übergeben
+ weiterhin NULL (unverändertes Verhalten). project_load() (project.c)
+ ermittelt jetzt vor dem Dialogaufruf per g_path_get_dirname() das
+ ELTERNverzeichnis von zond->project_dir (des noch geöffneten, alten
+ Projekts - project_close() läuft ja erst später in project_open()) und
+ übergibt das als Startordner - typischerweise nur eine Handvoll
+ Fallakten-Ordner statt deren komplettem, riesigem Inhalt. Fehlt
+ project_dir (erstes Öffnen einer frischen Session), bleibt es beim
+ alten Verhalten (NULL -> g_get_current_dir()).
+
+ Nicht durch Kompilieren/Testen verifiziert.
 
  */

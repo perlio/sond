@@ -29,6 +29,94 @@
 #include <windows.h>
 #include <io.h>
 #include <wchar.h>
+#include <stdint.h>
+
+/* ------------------------------------------------------------------ */
+/*  Minimaler CF-API-Ausschnitt für Cloud-Hydrierung bei Bedarf         */
+/* ------------------------------------------------------------------ */
+
+/* Nutzer-Fund 18.09.2026: Nachdem sond_fopen() (s.u.) auf CreateFileW()
+ * umgestellt wurde, kam für .sond_index.db-shm (zonds eigene, im
+ * Projektverzeichnis liegende SQLite-WAL-Begleitdatei) plötzlich statt
+ * der bisherigen (irreführenden) "Invalid argument"-Meldung die
+ * spezifischere "Der Zugriff auf die Clouddatei wurde verweigert"
+ * (ERROR_CLOUD_FILE_ACCESS_DENIED, 395) - exakt derselbe Fehler, der
+ * schon beim SeaDrive-Doppelklick-Hydrieren aufgetreten war (s.
+ * sond_seadrive_hydrate(), sond_treeviewfm_seadrive.c, 18.09.2026): die
+ * Datei war ein noch nicht hydrierter SeaDrive-Platzhalter, und ein
+ * roher Lesezugriff (egal ob über _wfopen() - das mappt diesen Fall nur
+ * unspezifisch auf errno=EINVAL statt ihn eigens zu erkennen - oder über
+ * CreateFileW(GENERIC_READ)) schlägt dafür fehl; nötig ist stattdessen
+ * die offizielle Cloud-Filter-API. D.h. die ursprüngliche "führender
+ * Punkt"-Theorie zur .sond_index.db-shm-Regression war vermutlich falsch
+ * bzw. unvollständig - es handelte sich von Anfang an um genau dieses
+ * Hydrierungsproblem, nur von _wfopen() irreführend als generisches
+ * EINVAL gemeldet.
+ *
+ * Allgemeine Lösung (statt SeaDrive-Sonderfall-Prüfung vor jedem
+ * sond_fopen()-Aufruf im ganzen Code): bei genau diesem Fehler einmalig
+ * Hydrierung anstoßen und den Öffnen-Versuch wiederholen - unabhängig
+ * davon, ob der Pfad überhaupt auf einem SeaDrive-Laufwerk liegt (für
+ * gewöhnliche lokale Dateien tritt dieser Fehler nie auf, die Prüfung
+ * ist also ein reiner No-Op-Fall dort). Absichtlich hier in
+ * sond_file_helper.c dupliziert statt sond_treeviewfm_seadrive.h
+ * einzubinden: Letzteres hängt (über sond_treeviewfm.h) von GTK ab,
+ * sond_file_helper.c ist bewusst eine GTK-freie, niedrige Utility-Ebene
+ * (die umgekehrt schon von sond_treeviewfm_seadrive.c genutzt wird -
+ * ein Rückbezug wäre ein Include-Zirkel). Mittelfristig wäre eine
+ * gemeinsame, GTK-freie CF-API-Basis (eigene kleine Datei) sauberer als
+ * diese Duplizierung - hier aus Zeitgründen zurückgestellt. */
+#ifndef ERROR_CLOUD_FILE_ACCESS_DENIED
+#define ERROR_CLOUD_FILE_ACCESS_DENIED 395L
+#endif
+
+typedef HRESULT (WINAPI *PFN_CfHydratePlaceholder_fh)(
+    HANDLE       FileHandle,
+    LARGE_INTEGER StartingOffset,
+    LARGE_INTEGER Length,
+    DWORD        HydrateFlags,
+    LPOVERLAPPED Overlapped);
+
+static PFN_CfHydratePlaceholder_fh g_CfHydratePlaceholder_fh = NULL;
+static HMODULE                     g_hCldApi_fh              = NULL;
+static GOnce                       g_cfapi_once_fh           = G_ONCE_INIT;
+
+static gpointer cfapi_init_once_fh(gpointer data)
+{
+    (void) data;
+    g_hCldApi_fh = LoadLibraryA("cldapi.dll");
+    if (g_hCldApi_fh)
+        g_CfHydratePlaceholder_fh = (PFN_CfHydratePlaceholder_fh)
+                GetProcAddress(g_hCldApi_fh, "CfHydratePlaceholder");
+    return g_hCldApi_fh;
+}
+
+/* Versucht best-effort, long_path zu hydrieren (Fehler werden bewusst
+ * ignoriert - der Aufrufer wiederholt danach ohnehin seinen ursprünglichen
+ * CreateFileW()-Versuch und meldet bei erneutem Fehlschlag dessen realen
+ * Fehler, s. sond_fopen()). */
+static void hydrate_if_cloud_placeholder(const wchar_t *long_path)
+{
+    HANDLE h;
+
+    g_once(&g_cfapi_once_fh, cfapi_init_once_fh, NULL);
+    if (!g_CfHydratePlaceholder_fh)
+        return;
+
+    h = CreateFileW(long_path, FILE_READ_ATTRIBUTES,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+    if (h == INVALID_HANDLE_VALUE)
+        return;
+
+    {
+        LARGE_INTEGER offset = { .QuadPart = 0 };
+        LARGE_INTEGER length = { .QuadPart = 1 };
+        g_CfHydratePlaceholder_fh(h, offset, length, 0, NULL);
+    }
+
+    CloseHandle(h);
+}
 
 /* Konvertiert UTF-8-Pfad zu Wide-String mit \\?\ Prefix */
 wchar_t*
@@ -338,32 +426,118 @@ sond_fopen(const gchar *path, const gchar *mode, GError **error)
     g_return_val_if_fail(mode != NULL, NULL);
 
 #ifdef G_OS_WIN32
-    wchar_t *long_path = prepare_long_path(path, error);
+    /* Nutzer-Fund 18.09.2026 (s. ausführl. Doc-Kommentar bei sond_stat()
+     * oben, ToDo.c): _wfopen() validiert Dateinamen zusätzlich zu dem,
+     * was Win32 mit dem \\?\-Langpfad-Präfix verlangt, und lehnt dabei
+     * u.a. Namen mit Leerzeichen/Punkt am Ende sowie Namen ab, die nur
+     * aus einem führenden Punkt + Text bestehen. Allgemeine Lösung
+     * (Nutzer-Entscheidung 18.09.2026: "Das muß man doch allgemein
+     * lösen" - statt die konkret betroffene Datei zu verstecken):
+     * CreateFileW() statt _wfopen(), zweiter Versuch nach dem am
+     * 16.09.2026 wegen zu engem Freigabemodus zurückgenommenen ersten
+     * Versuch (s. ToDo.c, Task #105) - diesmal mit demselben großzügigen
+     * Freigabemodus (FILE_SHARE_READ|WRITE|DELETE), der bereits in
+     * sond_seadrive_hydrate()/hydrate_progress_update()
+     * (sond_treeviewfm_seadrive.c) erfolgreich verwendet wird. Das war
+     * die eigentliche Ursache der Vorgänger-Regression ("Datei von
+     * anderem Prozeß verwendet"), nicht der Wechsel auf CreateFileW an
+     * sich. Über _open_osfhandle()/_fdopen() wird daraus wieder ein
+     * normales FILE*, mit dem der Rest des Codes unverändert
+     * weiterarbeiten kann.
+     *
+     * Deckt die in dieser Codebasis tatsächlich verwendeten Modi ab
+     * ("rb", "wb", "w") sowie generisch "r"/"w"/"a" mit optionalem "+" -
+     * bei "a" wird die Schreibposition nur einmalig beim Öffnen ans Ende
+     * gesetzt (kein atomares FILE_APPEND_DATA), da kein Aufrufer diesen
+     * Modus aktuell nutzt. */
+    DWORD desired_access = 0;
+    DWORD creation_disposition = 0;
+    gboolean binary = (strchr(mode, 'b') != NULL);
+    gboolean append = (strchr(mode, 'a') != NULL);
+    gboolean plus = (strchr(mode, '+') != NULL);
+    wchar_t *long_path = NULL;
+    HANDLE h = INVALID_HANDLE_VALUE;
+    gint osf_flags = 0;
+    gint fd = -1;
+    FILE *file = NULL;
+
+    if (strchr(mode, 'r')) {
+        desired_access = plus ? (GENERIC_READ | GENERIC_WRITE) : GENERIC_READ;
+        creation_disposition = OPEN_EXISTING;
+    } else if (strchr(mode, 'w')) {
+        desired_access = plus ? (GENERIC_READ | GENERIC_WRITE) : GENERIC_WRITE;
+        creation_disposition = CREATE_ALWAYS;
+    } else if (append) {
+        desired_access = plus ? (GENERIC_READ | GENERIC_WRITE) : GENERIC_WRITE;
+        creation_disposition = OPEN_ALWAYS;
+    } else {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
+                    "sond_fopen('%s'): unbekannter Modus '%s'", path, mode);
+        return NULL;
+    }
+
+    long_path = prepare_long_path(path, error);
     if (!long_path)
         return NULL;
 
-    wchar_t *wmode = g_utf8_to_utf16(mode, -1, NULL, NULL, NULL);
-    if (!wmode) {
-        g_set_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
-                    "Ungültiger Modus");
-        g_free(long_path);
+    h = CreateFileW(long_path, desired_access,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            NULL, creation_disposition, FILE_ATTRIBUTE_NORMAL, NULL);
+
+    if (h == INVALID_HANDLE_VALUE &&
+            GetLastError() == (DWORD) ERROR_CLOUD_FILE_ACCESS_DENIED) {
+        /* S. ausführlichen Doc-Kommentar bei hydrate_if_cloud_placeholder()
+         * oben (18.09.2026) - noch nicht hydrierter SeaDrive-Platzhalter,
+         * einmalig Hydrierung anstoßen und erneut versuchen. */
+        hydrate_if_cloud_placeholder(long_path);
+        h = CreateFileW(long_path, desired_access,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                NULL, creation_disposition, FILE_ATTRIBUTE_NORMAL, NULL);
+    }
+
+    g_free(long_path);
+
+    if (h == INVALID_HANDLE_VALUE) {
+        DWORD win_err = GetLastError();
+        gchar *msg = g_win32_error_message(win_err);
+        g_set_error(error, G_IO_ERROR, g_io_error_from_win32(win_err),
+                    "sond_fopen('%s'): %s", path, msg);
+        g_free(msg);
         return NULL;
     }
 
-    FILE *file = _wfopen(long_path, wmode);
-    g_free(long_path);
-    g_free(wmode);
+    if (append)
+        SetFilePointer(h, 0, NULL, FILE_END);
 
-    if (!file) {
-        g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
-                    "%s", g_strerror(errno));
+    osf_flags = binary ? _O_BINARY : _O_TEXT;
+    if (desired_access == GENERIC_READ)
+        osf_flags |= _O_RDONLY;
+
+    fd = _open_osfhandle((intptr_t) h, osf_flags);
+    if (fd == -1) {
+        gint err = errno;
+        CloseHandle(h);
+        g_set_error(error, G_IO_ERROR, g_io_error_from_errno(err),
+                    "sond_fopen('%s'): _open_osfhandle: %s", path,
+                    g_strerror(err));
+        return NULL;
     }
+
+    file = _fdopen(fd, mode);
+    if (!file) {
+        gint err = errno;
+        _close(fd); /* schließt auch das zugrundeliegende Handle */
+        g_set_error(error, G_IO_ERROR, g_io_error_from_errno(err),
+                    "sond_fopen('%s'): _fdopen: %s", path, g_strerror(err));
+        return NULL;
+    }
+
     return file;
 #else
     FILE *file = g_fopen(path, mode);
     if (!file) {
         g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
-                    "%s", g_strerror(errno));
+                    "sond_fopen('%s'): %s", path, g_strerror(errno));
     }
     return file;
 #endif
@@ -376,25 +550,72 @@ sond_stat(const gchar *path, GStatBuf *buf, GError **error)
     g_return_val_if_fail(buf != NULL, -1);
 
 #ifdef G_OS_WIN32
+    /* Nutzer-Fund 18.09.2026 ("Fehler beim Laden des Projekts: Invalid
+     * argument" bei .sond_index.db-shm, s. ToDo.c): _wstat64() (wie
+     * _wfopen(), s. sond_fopen() unten) validiert Dateinamen ZUSÄTZLICH
+     * über das hinaus, was Win32 mit dem \\?\-Langpfad-Präfix verlangt,
+     * und lehnt dabei u.a. Namen ab, die nur aus einem führenden Punkt +
+     * Text bestehen (analog zur schon dokumentierten Ablehnung von
+     * Leerzeichen/Punkt am Ende einer Pfadkomponente). Allgemeine Lösung
+     * statt Einzelfall-Workaround (Nutzer-Entscheidung 18.09.2026): auf
+     * GetFileAttributesExW() umgestellt - eine reine Win32-Metadaten-
+     * Abfrage ohne CRT-eigene Namensprüfung UND ohne Handle/Freigabe-
+     * Verhandlung (im Gegensatz zu CreateFileW/_wfopen() also strukturell
+     * gar nicht erst anfällig für "Datei von anderem Prozeß verwendet").
+     *
+     * Bekannter Unterschied zu _wstat64(): _wstat64() löst Reparse-Points/
+     * Symlinks auf (liefert Infos über das ZIEL, wie POSIX stat()),
+     * GetFileAttributesExW() dagegen nicht (wie POSIX lstat() - liefert
+     * Infos über den Reparse-Point selbst). Für Verzeichnis-Junctions/
+     * -Symlinks bleibt S_ISDIR() trotzdem korrekt (das Verzeichnis-Bit
+     * sitzt unter NTFS auch auf dem Link-Eintrag selbst) - nur bei
+     * Datei-Symlinks mit abweichendem Zieltyp könnte sich das Verhalten
+     * unterscheiden; im bisherigen Code nirgends als relevant erkennbar. */
     wchar_t *long_path = prepare_long_path(path, error);
     if (!long_path)
         return -1;
 
-    struct _stat64 st;
-    gint result = _wstat64(long_path, &st);
+    WIN32_FILE_ATTRIBUTE_DATA attr_data = { 0 };
+    BOOL ok = GetFileAttributesExW(long_path, GetFileExInfoStandard, &attr_data);
     g_free(long_path);
 
-    if (result != 0) {
-        g_set_error(error, G_IO_ERROR, g_io_error_from_errno(errno),
-                    "%s", g_strerror(errno));
+    if (!ok) {
+        DWORD win_err = GetLastError();
+        gchar *msg = g_win32_error_message(win_err);
+        g_set_error(error, G_IO_ERROR, g_io_error_from_win32(win_err),
+                    "sond_stat('%s'): %s", path, msg);
+        g_free(msg);
         return -1;
     }
 
-    buf->st_mode  = st.st_mode;
-    buf->st_size  = st.st_size;
-    buf->st_atime = st.st_atime;
-    buf->st_mtime = st.st_mtime;
-    buf->st_ctime = st.st_ctime;
+    {
+        /* FILETIME zaehlt 100-ns-Intervalle seit 1601-01-01, time_t
+         * Sekunden seit 1970-01-01 - Epochendifferenz in 100ns-Einheiten. */
+        const guint64 filetime_unix_epoch_diff = 116444736000000000ULL;
+        gboolean is_dir = (attr_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+        gboolean writable = !(attr_data.dwFileAttributes & FILE_ATTRIBUTE_READONLY);
+        ULARGE_INTEGER ul;
+
+        memset(buf, 0, sizeof(*buf));
+
+        buf->st_mode = (is_dir ? (S_IFDIR | 0111) : S_IFREG) |
+                (writable ? 0666 : 0444);
+        buf->st_size = ((gint64) attr_data.nFileSizeHigh << 32) |
+                attr_data.nFileSizeLow;
+
+        ul.LowPart = attr_data.ftLastAccessTime.dwLowDateTime;
+        ul.HighPart = attr_data.ftLastAccessTime.dwHighDateTime;
+        buf->st_atime = (time_t) ((ul.QuadPart - filetime_unix_epoch_diff) / 10000000ULL);
+
+        ul.LowPart = attr_data.ftLastWriteTime.dwLowDateTime;
+        ul.HighPart = attr_data.ftLastWriteTime.dwHighDateTime;
+        buf->st_mtime = (time_t) ((ul.QuadPart - filetime_unix_epoch_diff) / 10000000ULL);
+
+        ul.LowPart = attr_data.ftCreationTime.dwLowDateTime;
+        ul.HighPart = attr_data.ftCreationTime.dwHighDateTime;
+        buf->st_ctime = (time_t) ((ul.QuadPart - filetime_unix_epoch_diff) / 10000000ULL);
+    }
+
     return 0;
 #else
     if (g_stat(path, buf) != 0) {

@@ -59,6 +59,96 @@ gboolean sond_seadrive_set_pin_state(const gchar *full_path,
 gboolean sond_seadrive_hydrate(const gchar *full_path, GError **error);
 
 /*
+ * Schneller, nicht-blockierender Vorab-Check (nur GetFileAttributesW):
+ * TRUE, wenn full_path ein noch nicht lokal vorhandener Cloud-Platzhalter
+ * ist (Hydrierung nötig), FALSE wenn die Datei schon lokal ist oder ihre
+ * Attribute nicht gelesen werden konnten. Erlaubt es Aufrufern (s.
+ * sond_treeviewfm_open()), bei bereits lokalen Dateien direkt normal zu
+ * öffnen, statt unnötig einen Hydrier-Hintergrund-Thread zu starten.
+ */
+gboolean sond_seadrive_needs_hydration(const gchar *full_path);
+
+/*
+ * Wie sond_seadrive_hydrate(), aber nicht-blockierend: stößt die
+ * Hydrierung in einem Hintergrund-Thread an und kehrt sofort zurück
+ * (Fire-and-forget). Ein erneuter Aufruf für denselben full_path,
+ * während bereits ein Thread dafür läuft, ist ein No-Op. Fehler landen
+ * nur im Log. Hintergrund: bei sehr großen Dateien blockierte der
+ * synchrone Aufruf von sond_seadrive_hydrate() im GTK-Hauptthread das
+ * gesamte Programm ohne Rückmeldung/Abbrechen-Möglichkeit (Nutzer-Fund
+ * 18.09.2026, s. ausführlichen Doc-Kommentar an der Implementierung,
+ * sond_treeviewfm_seadrive.c, und ToDo.c).
+ */
+void sond_seadrive_hydrate_async(const gchar *full_path);
+
+/*
+ * TRUE, wenn full_path aktuell hydriert wird (sond_seadrive_hydrate_
+ * async() dafür einen Hintergrund-Thread laufen hat).
+ */
+gboolean sond_seadrive_is_hydrating(const gchar *full_path);
+
+/*
+ * Versucht (bestmöglich, keine Erfolgsgarantie), eine laufende
+ * Hydrierung von full_path abzubrechen. S. ausführlichen Doc-Kommentar
+ * an der Implementierung (sond_treeviewfm_seadrive.c) zu den Grenzen
+ * dieses Mechanismus (CancelSynchronousIo, für CfHydratePlaceholder()
+ * nicht offiziell dokumentiert).
+ */
+void sond_seadrive_hydrate_cancel(const gchar *full_path);
+
+/*
+ * Zeigt einen kleinen Dialog mit Fortschritt (bereits heruntergeladene/
+ * gesamte Bytes) und einem Abbrechen-Button für eine bereits laufende
+ * Hydrierung von full_path. Gedacht für einen erneuten Doppelklick auf
+ * eine Datei, die schon hydriert wird (s. sond_treeviewfm_open()) -
+ * Nutzer-Wunsch 18.09.2026, um bei versehentlich angeklickten
+ * Großdateien den SeaDrive-Server nicht unnötig weiter zu belasten.
+ * Schließen des Dialogs (per "Schließen"-Button oder X) bricht die
+ * Hydrierung NICHT ab; der Dialog schließt sich außerdem von selbst,
+ * sobald die Hydrierung endet.
+ */
+void sond_seadrive_show_hydrate_progress_dialog(GtkWindow *parent,
+        const gchar *full_path);
+
+/*
+ * Konsolidierte Check-und-Reagiere-Sequenz für Doppelklick-artige
+ * Öffnen-Aktionen (s. ausführl. Doc-Kommentar an der Implementierung,
+ * sond_treeviewfm_seadrive.c) - fasst needs_hydration()/is_hydrating()/
+ * hydrate_async()/show_hydrate_progress_dialog() zusammen, damit diese
+ * Sequenz nicht an jeder Öffnen-Stelle (BAUM_FS, BAUM_INHALT/
+ * AUSWERTUNG, ...) erneut dupliziert werden muss. full_path muss der
+ * volle Pfad der realen Datei im Dateisystem sein (Container-Vorfahre
+ * mit parent==NULL). Rückgabe: TRUE = Datei ist bereits lokal, Aufrufer
+ * soll normal öffnen. FALSE = Hydrierung wurde angestoßen bzw. Dialog
+ * gezeigt, Aufrufer soll sofort zurückkehren statt zu öffnen.
+ */
+gboolean sond_seadrive_ensure_hydrated(GtkWindow *parent,
+        const gchar *full_path);
+
+/*
+ * Wie sond_seadrive_show_hydrate_progress_dialog(), aber für mehrere
+ * gleichzeitig betroffene Dateien (Auszug-Fall im Auswertungsverzeichnis,
+ * s. ausführl. Doc-Kommentar an der Implementierung,
+ * sond_treeviewfm_seadrive.c) - eine Fortschrittszeile pro Datei in
+ * full_paths, ein gemeinsamer Abbrechen-Button (bricht alle noch
+ * laufenden Einträge ab) und ein gemeinsamer Schließen-Button.
+ */
+void sond_seadrive_show_hydrate_progress_dialog_multi(GtkWindow *parent,
+        GPtrArray *full_paths);
+
+/*
+ * Wie sond_seadrive_ensure_hydrated(), aber für eine Menge von Pfaden
+ * (Auszug-Fall) - stößt für jede noch nicht hydrierte Datei aus
+ * full_paths die Hydrierung an (No-Op, falls schon läuft) und zeigt bei
+ * bereits laufender Hydrierung (mind. einer davon) den gemeinsamen
+ * Fortschrittsdialog (s.o.). Rückgabe: TRUE = alle Dateien bereits
+ * lokal, Aufrufer soll normal öffnen. FALSE = mindestens eine Datei
+ * musste hydriert werden, Aufrufer soll sofort zurückkehren.
+ */
+gboolean sond_seadrive_ensure_hydrated_multi(GtkWindow *parent,
+        GPtrArray *full_paths);
+
+/*
  * Attach SeaDrive menu items to the context menu of stvfm.
  * Call this after sond_treeviewfm_init_contextmenu().
  */
@@ -121,6 +211,46 @@ static inline gboolean
 sond_seadrive_hydrate(const gchar *full_path, GError **error)
 {
     (void)full_path; (void)error;
+    return TRUE;
+}
+
+static inline void
+sond_seadrive_hydrate_async(const gchar *full_path)
+{
+    (void)full_path;
+}
+
+static inline gboolean
+sond_seadrive_is_hydrating(const gchar *full_path)
+{
+    (void)full_path;
+    return FALSE;
+}
+
+static inline void
+sond_seadrive_hydrate_cancel(const gchar *full_path)
+{
+    (void)full_path;
+}
+
+static inline void
+sond_seadrive_show_hydrate_progress_dialog(GtkWindow *parent,
+        const gchar *full_path)
+{
+    (void)parent; (void)full_path;
+}
+
+static inline gboolean
+sond_seadrive_ensure_hydrated(GtkWindow *parent, const gchar *full_path)
+{
+    (void)parent; (void)full_path;
+    return TRUE;
+}
+
+static inline gboolean
+sond_seadrive_ensure_hydrated_multi(GtkWindow *parent, GPtrArray *full_paths)
+{
+    (void)parent; (void)full_paths;
     return TRUE;
 }
 

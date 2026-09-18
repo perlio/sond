@@ -42,7 +42,11 @@ gint string_to_guint(const gchar*, guint*);
 
 gchar* filename_speichern(GtkWindow*, const gchar*, const gchar*);
 
-gchar* filename_oeffnen(GtkWindow*);
+/* start_path (kann NULL sein): Ordner, in dem der Dialog initial öffnet -
+ * s. ausführlichen Kommentar an choose_file()/filename_oeffnen() (misc.c)
+ * zum Hintergrund (Nutzer-Fund 18.09.2026, langsames Öffnen des Datei-
+ * Dialogs bei SeaDrive-Projekten). */
+gchar* filename_oeffnen(GtkWindow*, const gchar *start_path);
 
 GtkWidget* result_listbox_new(GtkWindow*, const gchar*);
 

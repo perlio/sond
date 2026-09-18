@@ -2609,16 +2609,43 @@ static gint sond_treeviewfm_open(GtkTreeIter* iter, SondTVFMItem *stvfm_item,
 
 #ifdef _WIN32
 	/* Bei offline-Dateien im SeaDrive-Pfad: Download über die offizielle
-	 * CfHydratePlaceholder()-API anstoßen (sond_seadrive_hydrate(),
+	 * CfHydratePlaceholder()-API anstoßen (sond_seadrive_hydrate_async(),
 	 * sond_treeviewfm_seadrive.c/h). Den Pin-State nicht ändern.
 	 *
-	 * Bis 17.09.2026 stand hier stattdessen ein roher
-	 * CreateFileW(GENERIC_READ)+ReadFile()-"Trick". Regressions-Fund
-	 * 18.09.2026 (s. ToDo.c): nach dem Windows-Update KB5124008 (09/2026)
-	 * schlägt dieser Trick zuverlässig mit ERROR_CLOUD_FILE_ACCESS_DENIED
-	 * fehl (auch nach KB5129195 und komplettem Neu-Build von zond - kein
-	 * zond-Bug). sond_seadrive_hydrate() verwendet stattdessen die dafür
-	 * vorgesehene CF-API, s. ausführlichen Kommentar dort. */
+	 * Bis 17.09.2026 stand hier ein roher CreateFileW(GENERIC_READ)+
+	 * ReadFile()-"Trick". Regressions-Fund 18.09.2026 (s. ToDo.c): nach
+	 * dem Windows-Update KB5124008 (09/2026) schlägt dieser Trick
+	 * zuverlässig mit ERROR_CLOUD_FILE_ACCESS_DENIED fehl (auch nach
+	 * KB5129195 und komplettem Neu-Build von zond - kein zond-Bug).
+	 * Ersetzt durch sond_seadrive_hydrate(), das stattdessen die dafür
+	 * vorgesehene CF-API verwendet.
+	 *
+	 * Weiterer Nutzer-Fund, ebenfalls 18.09.2026: sond_seadrive_hydrate()
+	 * blockiert synchron bis die Datei (bzw. der angeforderte Bereich)
+	 * lokal verfügbar ist - bei einer 51-GB-Datei fror das Programm
+	 * dadurch minutenlang komplett ein, ohne Rückmeldung oder Abbrechen-
+	 * Möglichkeit. Nutzer-Entscheidung: beim ERSTEN Doppelklick kein
+	 * Info-Fenster (der Download läuft ohnehin im Hintergrund weiter) -
+	 * stattdessen sofort in die UI zurückkehren und die eigentliche
+	 * Hydrierung in einem Hintergrund-Thread erledigen
+	 * (sond_seadrive_hydrate_async(), Fire-and-forget). Vorab ein
+	 * schneller, nicht-blockierender Check (sond_seadrive_needs_
+	 * hydration()), ob überhaupt hydriert werden muss - schon lokale
+	 * Dateien fallen unten auf den normalen Öffnen-Weg durch.
+	 *
+	 * Ergänzung, ebenfalls 18.09.2026: bei einem erneuten Doppelklick auf
+	 * dieselbe, noch laufende Datei (sond_seadrive_is_hydrating() ==
+	 * TRUE) jetzt statt eines stillen No-Ops ein Fortschritts-/Abbrechen-
+	 * Dialog (sond_seadrive_show_hydrate_progress_dialog(),
+	 * sond_treeviewfm_seadrive.c/h) - Nutzerwunsch, um den SeaDrive-Server
+	 * bei versehentlichen Großdatei-Downloads nicht unnötig weiter zu
+	 * belasten.
+	 *
+	 * Nutzer-Hinweis 18.09.2026: dieselbe Check-und-Reagiere-Sequenz war
+	 * wortgleich auch in zond_treeview_open_node() (zond_treeview.c, für
+	 * BAUM_INHALT/BAUM_AUSWERTUNG) nötig geworden - in
+	 * sond_seadrive_ensure_hydrated() (sond_treeviewfm_seadrive.c/h)
+	 * konsolidiert. */
 	if (SOND_IS_FILE_PART_LEAF(stvfm_item_priv->sond_file_part) &&
 			!sond_file_part_get_parent(stvfm_item_priv->sond_file_part)) {
 		SondTreeviewFM *stvfm = sond_tvfm_item_get_stvfm(stvfm_item);
@@ -2628,22 +2655,14 @@ static gint sond_treeviewfm_open(GtkTreeIter* iter, SondTVFMItem *stvfm_item,
 					stvfm_item_priv->sond_file_part);
 			if (root && sfp_path) {
 				gchar *full_path = g_strconcat(root, "/", sfp_path, NULL);
-				GError *hydrate_error = NULL;
-				gboolean ok = sond_seadrive_hydrate(full_path, &hydrate_error);
-
-				if (!ok) {
-					LOG_WARN("%s: sond_seadrive_hydrate('%s'): %s", __func__,
-							full_path,
-							hydrate_error ? hydrate_error->message : "?");
-					g_clear_error(&hydrate_error);
-				}
+				gboolean is_local = sond_seadrive_ensure_hydrated(
+						GTK_WINDOW(SOND_GET_TOPLEVEL(stvfm)), full_path);
 				g_free(full_path);
-				/* Nur bei Erfolg hier abbrechen (Download angestoßen, aber
-				 * ggf. noch nicht abgeschlossen - erneuter Doppelklick
-				 * später öffnet dann normal). Bei Fehlschlag stattdessen
-				 * unten auf den normalen Öffnen-Weg zurückfallen, statt
-				 * kommentarlos nichts zu tun. */
-				if (ok)
+
+				/* Bei Bedarf sofort zurück an die UI. Erneuter Doppelklick
+				 * später (nach Abschluss des Downloads) öffnet dann normal
+				 * über den unten stehenden Weg. */
+				if (!is_local)
 					return 0;
 			}
 		}
@@ -3254,6 +3273,42 @@ static gint sond_treeviewfm_expand_dummy(SondTreeviewFM *stvfm, GtkTreeIter *ite
 	return 0;
 }
 
+/* Nutzer-Fund 18.09.2026: Verzeichnis mit "Invalid argument" nicht
+ * expandierbar (bekannte CRT-_wfopen()-Einschränkung bei Pfadkomponenten
+ * mit Leerzeichen/Punkt am Ende - s. ausführliche Doku in ToDo.c,
+ * Einträge 11./16.09.2026 - "Stabilität hat Vorrang", bewusst nicht
+ * behoben). Bislang blieb die Zeile trotz des Fehlschlags GTK-seitig
+ * "expandiert" (der Expander-Pfeil war schon umgeschaltet, bevor dieser
+ * Handler überhaupt lief) - mit der (nie entfernten) Dummy-Zeile als
+ * einzigem sichtbaren Kind. Dieses Dummy-Kind hat bewusst KEIN
+ * SondTVFMItem (Spalte 0 bleibt NULL - dient nur dazu, den Expander-Pfeil
+ * anzuzeigen, bevor die echten Kinder geladen sind); beim Rendern dieser
+ * jetzt sichtbaren Zeile liefen deshalb dauerhaft "Keine Objekt im
+ * Baum"/"Kein SondTVFMItem"-Warnungen aus den Cell-Renderern auf - auch
+ * beim bloßen Vorbeiscrollen an dieser Zeile, ohne dass das ursächliche
+ * Verzeichnis selbst je wieder angeklickt wurde. Separat gefundener,
+ * unabhängiger Leak auf demselben Fehlerpfad: stvfm_item (oben per
+ * gtk_tree_model_get() gereffet) wurde nie wieder unreffed. */
+static gboolean row_expand_failed_collapse_idle(gpointer data) {
+	GtkTreeView *tree_view = ((gpointer *) data)[0];
+	GtkTreePath *path = ((gpointer *) data)[1];
+
+	/* Per g_idle_add() entkoppelt statt direkt aus dem "row-expanded"-
+	 * Handler heraus zu kollabieren - vermeidet, die Baumstruktur mitten
+	 * in dessen eigener Signal-Verarbeitung zu verändern.
+	 * gtk_tree_view_collapse_row() löst "row-collapsed" aus, dessen
+	 * Handler (sond_treeviewfm_row_collapsed()) ohnehin schon alle Kinder
+	 * entfernt und einen frischen Dummy einfügt - die Zeile landet damit
+	 * exakt im normalen, für einen erneuten Versuch bereiten
+	 * "eingeklappt, noch nicht geladen"-Zustand. */
+	gtk_tree_view_collapse_row(tree_view, path);
+
+	gtk_tree_path_free(path);
+	g_free(data);
+
+	return G_SOURCE_REMOVE;
+}
+
 static void sond_treeviewfm_row_expanded(GtkTreeView *tree_view,
 		GtkTreeIter *iter, GtkTreePath *path, gpointer data) {
 	gint rc = 0;
@@ -3270,6 +3325,8 @@ static void sond_treeviewfm_row_expanded(GtkTreeView *tree_view,
 
 	rc = sond_treeviewfm_expand_dummy(SOND_TREEVIEWFM(tree_view), iter, stvfm_item, &error);
 	if (rc) {
+		gpointer *idle_data = NULL;
+
 		/* error kann NULL sein, wenn der Fehlerpfad (z.B. ein
 		 * g_return_val_if_fail() tiefer im Aufrufbaum) keinen GError setzt -
 		 * error->message wäre dann ein Absturz statt nur einer fehlenden
@@ -3280,6 +3337,16 @@ static void sond_treeviewfm_row_expanded(GtkTreeView *tree_view,
 				NULL);
 		if (error)
 			g_error_free(error);
+
+		/* S. ausführlichen Doc-Kommentar oben (18.09.2026) - Zeile wieder
+		 * einklappen statt sie mit sichtbarer, item-loser Dummy-Zeile
+		 * "expandiert" zu belassen. */
+		idle_data = g_new0(gpointer, 2);
+		idle_data[0] = tree_view;
+		idle_data[1] = gtk_tree_path_copy(path);
+		g_idle_add(row_expand_failed_collapse_idle, idle_data);
+
+		g_object_unref(stvfm_item); /* s.o. - war hier bisher geleakt */
 
 		return;
 	}
@@ -3541,21 +3608,62 @@ static void sond_treeviewfm_render_file_icon(GtkTreeViewColumn *column,
 		const gchar *root = sond_treeviewfm_get_root(stvfm);
 		const gchar* rel = NULL;
 
-		/* Dateien (LEAF) und Filesystem-Verzeichnisse erhalten Overlay-Icons */
+		/* Dateien (LEAF) und Filesystem-Verzeichnisse erhalten Overlay-Icons.
+		 *
+		 * Nutzer-Fund 18.09.2026: eine als "immer verfügbar" (gepinnt)
+		 * markierte .eml bekam selbst das grüne Badge, ihre Mime-Parts
+		 * (Anhänge/Inline-Teile, als eigene LEAF-Kindzeilen mit
+		 * sond_file_part_get_parent() != NULL dargestellt) aber nicht.
+		 * Ursache: hier wurde bisher per !sond_file_part_get_parent(...)
+		 * genau auf Top-Level-Objekte ohne Parent eingeschränkt - Mime-
+		 * Parts (und ebenso ZIP-Einträge, PDF-Seiten als eigene Zeilen
+		 * usw.) fielen dadurch grundsätzlich raus. Der SeaDrive-Pin-/
+		 * Hydrierungsstatus gehört aber zur realen Datei im Dateisystem,
+		 * nicht zum einzelnen (virtuellen) Teil - alle Kinder EINER realen
+		 * Datei müssen also dasselbe Badge zeigen wie die Datei selbst.
+		 * Fix: statt die Top-Level-Bedingung zu prüfen, wird jetzt immer
+		 * zum obersten Vorfahren hochgelaufen (Schleife wie in
+		 * sond_file_part_get_filepart()/zond_treeview_get_seadrive_badge())
+		 * und dessen Pfad für den full_path/Hashtable-Lookup verwendet -
+		 * bei einem Top-Level-Objekt (kein Parent) macht die Schleife
+		 * nichts, verhält sich also für den bisherigen Fall unverändert. */
 		if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF &&
 				// stvfm_item_priv->sond_file_part && - überflüssig?!
-				//im Filesystem
-				!sond_file_part_get_parent(stvfm_item_priv->sond_file_part) &&
 				//PDF mit children - Pagetree
 				!(SOND_IS_FILE_PART_PDF(stvfm_item_priv->sond_file_part) &&
-						sond_file_part_get_has_children(stvfm_item_priv->sond_file_part)))
-			rel = sond_file_part_get_path(stvfm_item_priv->sond_file_part);
+						sond_file_part_get_has_children(stvfm_item_priv->sond_file_part))) {
+			SondFilePart *top = stvfm_item_priv->sond_file_part;
+
+			while (sond_file_part_get_parent(top))
+				top = sond_file_part_get_parent(top);
+
+			rel = sond_file_part_get_path(top);
+		}
 		else if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_DIR) {
 			if (!stvfm_item_priv->sond_file_part) //DIR im Filesystem
 				rel = stvfm_item_priv->path_or_section;
-			else if (!sond_file_part_get_parent(stvfm_item_priv->sond_file_part) &&
-					!stvfm_item_priv->path_or_section)
-				rel = sond_file_part_get_path(stvfm_item_priv->sond_file_part);
+			else {
+				/* Nutzer-Fund 18.09.2026: "Die (virtuellen) Verzeichnisse
+				 * in einem Container (zip-Verzeichnis, multipart) werden
+				 * nicht mit badge markiert." - der bisherige zusätzliche
+				 * !path_or_section-Check schloss genau diesen Fall aus:
+				 * ein bereits aufgeklapptes ZIP-Unterverzeichnis oder ein
+				 * Multipart-Verzeichnis einer E-Mail hat sond_file_part
+				 * (dasselbe Objekt wie das Container-Top-Level-Item) UND
+				 * path_or_section (den internen Pfad/die Kennung
+				 * innerhalb des Containers) gesetzt - beides sind aber
+				 * virtuelle Ansichten EINER realen Datei, für die
+				 * genauso das Badge der realen Datei gelten muss (s.
+				 * Mime-Part-Fix oben, gleicher Tag). Deshalb jetzt ohne
+				 * die path_or_section-Bedingung immer zum obersten
+				 * Vorfahren hochgelaufen. */
+				SondFilePart *top = stvfm_item_priv->sond_file_part;
+
+				while (sond_file_part_get_parent(top))
+					top = sond_file_part_get_parent(top);
+
+				rel = sond_file_part_get_path(top);
+			}
 		}
 
 		if (rel)
@@ -3766,6 +3874,38 @@ static void sond_treeviewfm_init(SondTreeviewFM *stvfm) {
 	return;
 }
 
+#ifdef _WIN32
+/* Container für die vier SeaDrive-Ground-Truth-Hashtables, deren
+ * Zerstörung von sond_treeviewfm_set_root() in den Hintergrund verlagert
+ * wird - s. ausführlichen Kommentar dort. Alle vier enthalten
+ * ausschließlich Strings/Zahlen ohne Rückverweis auf ein stvfm-Objekt,
+ * ihre Zerstörung ist deshalb von einem beliebigen Thread aus und zu
+ * einem beliebigen späteren Zeitpunkt sicher. */
+typedef struct {
+	GHashTable *not_in_sync;
+	GHashTable *pending_down_paths;
+	GHashTable *dir_counts;
+	GHashTable *file_badges;
+} SeadriveOldTables;
+
+static gpointer seadrive_old_tables_reap(gpointer data) {
+	SeadriveOldTables *old = data;
+
+	if (old->not_in_sync)
+		g_hash_table_destroy(old->not_in_sync);
+	if (old->pending_down_paths)
+		g_hash_table_destroy(old->pending_down_paths);
+	if (old->dir_counts)
+		g_hash_table_destroy(old->dir_counts);
+	if (old->file_badges)
+		g_hash_table_destroy(old->file_badges);
+
+	g_free(old);
+
+	return NULL;
+}
+#endif
+
 gint sond_treeviewfm_set_root(SondTreeviewFM *stvfm, const gchar *root,
 		GError **error) {
 	gint rc = 0;
@@ -3779,21 +3919,58 @@ gint sond_treeviewfm_set_root(SondTreeviewFM *stvfm, const gchar *root,
 	g_free(sfp_class->path_root);
 
 #ifdef _WIN32
-	sond_treeviewfm_seadrive_stop_watcher(stvfm);
+	sond_treeviewfm_seadrive_stop_watcher_async(stvfm);
 	/* Status zurücksetzen und Signal emittieren - seadrive_not_in_sync MUSS
 	 * hier mitgeleert werden, sonst bleiben Pfade einer vorigen Projekt-
 	 * Session in der Tabelle stehen und seadrive_pending_up zählt beim
-	 * nächsten Öffnen desselben Projekts falsch (bleibt zu niedrig). */
+	 * nächsten Öffnen desselben Projekts falsch (bleibt zu niedrig).
+	 *
+	 * Nutzer-Fund 18.09.2026 (Folgefund - der erste Verdacht, der Watcher-
+	 * Thread-Join, war laut Call-Stack-Analyse per Eclipse/gdb-Suspend
+	 * NICHT die Ursache): der Stack zeigte den Hänger exakt HIER, in
+	 * g_hash_table_remove_all() auf seadrive_file_badges. Bei einem
+	 * großen SeaDrive-Projekt hat praktisch jede noch nicht
+	 * heruntergeladene (OFFLINE-)Datei einen eigenen Eintrag in dieser
+	 * Tabelle - bei vielen Zehn- oder Hunderttausend Dateien im Projekt
+	 * entsprechend viele Einträge, die remove_all() einzeln (mit je einem
+	 * g_free() auf den Key-String) synchron im GTK-Hauptthread abarbeiten
+	 * musste. Betraf im Prinzip auch die drei anderen SeaDrive-Hashtables
+	 * hier, nur mit typischerweise deutlich weniger Einträgen.
+	 *
+	 * Fix: die alten Tabellen werden hier nur noch aus stvfm_priv
+	 * "gestohlen" (Felder sofort auf NULL gesetzt, ein nachfolgender
+	 * Zugriff sieht also sofort "leer") und ihre komplette Zerstörung
+	 * (g_hash_table_destroy()) an einen kurzlebigen Hintergrund-Thread
+	 * abgegeben (seadrive_old_tables_reap(), analog zum Watcher-Reaper
+	 * bei sond_treeviewfm_seadrive_stop_watcher_async()). Die Tabellen
+	 * enthalten ausschließlich Strings/Zahlen ohne Rückverweis auf
+	 * stvfm, ihre Zerstörung ist deshalb unabhängig vom weiteren Leben
+	 * des stvfm-Objekts sicher - anders als beim Watcher-Thread ist hier
+	 * nicht mal die Einschränkung "nur wenn stvfm am Leben bleibt" nötig
+	 * (kann also unverändert auch von sond_treeviewfm_finalize() genutzt
+	 * werden, falls die Tabellen dort je zu groß werden sollten). */
 	stvfm_priv->seadrive_pending_down = 0;
 	stvfm_priv->seadrive_pending_up = 0;
-	if (stvfm_priv->seadrive_not_in_sync)
-		g_hash_table_remove_all(stvfm_priv->seadrive_not_in_sync);
-	if (stvfm_priv->seadrive_pending_down_paths)
-		g_hash_table_remove_all(stvfm_priv->seadrive_pending_down_paths);
-	if (stvfm_priv->seadrive_dir_counts)
-		g_hash_table_remove_all(stvfm_priv->seadrive_dir_counts);
-	if (stvfm_priv->seadrive_file_badges)
-		g_hash_table_remove_all(stvfm_priv->seadrive_file_badges);
+	{
+		SeadriveOldTables *old = g_new0(SeadriveOldTables, 1);
+
+		old->not_in_sync = stvfm_priv->seadrive_not_in_sync;
+		old->pending_down_paths = stvfm_priv->seadrive_pending_down_paths;
+		old->dir_counts = stvfm_priv->seadrive_dir_counts;
+		old->file_badges = stvfm_priv->seadrive_file_badges;
+
+		stvfm_priv->seadrive_not_in_sync = NULL;
+		stvfm_priv->seadrive_pending_down_paths = NULL;
+		stvfm_priv->seadrive_dir_counts = NULL;
+		stvfm_priv->seadrive_file_badges = NULL;
+
+		if (old->not_in_sync || old->pending_down_paths || old->dir_counts ||
+				old->file_badges)
+			g_thread_unref(g_thread_new("seadrive-tables-reaper",
+					seadrive_old_tables_reap, old));
+		else
+			g_free(old);
+	}
 	g_signal_emit(stvfm,
 			SOND_TREEVIEWFM_GET_CLASS(stvfm)->signal_seadrive_status, 0,
 			(guint)0, (guint)0);
@@ -4385,6 +4562,42 @@ sond_treeviewfm_seadrive_start_watcher(SondTreeviewFM *stvfm) {
 			stvfm);
 }
 
+/* Nutzer-Fund 18.09.2026: "Schließen des Projekts bei SeaDrive-Projekten
+ * dauert sehr lange (20 Sek.)". Das synchrone g_thread_join() in
+ * sond_treeviewfm_seadrive_stop_watcher() blockierte den GTK-Hauptthread
+ * (project_close() -> sond_treeviewfm_set_root(NULL) -> hier), bis der
+ * Watcher-Thread sein CloseHandle() auf das ReadDirectoryChangesW-
+ * Verzeichnis-Handle abgeschlossen hatte. Offenbar braucht SeaDrives
+ * Cloud-Filtertreiber dafür regelmäßig um die 20 Sekunden (vermutlich ein
+ * interner Timeout), um die dort noch ausstehende, per CancelIo() nur
+ * ANGESTOSSENE (nicht sofort abgeschlossene) Directory-Change-
+ * Notification wirklich abzubrechen - CloseHandle() wartet laut Windows-
+ * I/O-Modell auf den Abschluss ausstehender I/O, bevor das Handle
+ * wirklich freigegeben wird.
+ *
+ * Der Watcher-Thread fasst nach dem Setzen des Stop-Flags (s. sond_
+ * treeviewfm_seadrive_watcher_thread(), Schleifenende) keinerlei stvfm-
+ * Daten mehr an - nur noch CancelIo()/CloseHandle()/g_free() auf seine
+ * eigenen, rein lokalen Handles/Kopien (hDir, ov.hEvent, root). Das
+ * Warten auf sein Ende kann deshalb GEFAHRLOS in einen eigenen
+ * kurzlebigen "Reaper"-Thread verlagert werden, SOLANGE das stvfm-Objekt
+ * selbst währenddessen am Leben bleibt - das gilt für den Aufruf aus
+ * sond_treeviewfm_set_root() (Projekt schließen/wechseln: das BAUM_FS-
+ * Widget bleibt über die Projekt-Lebensdauer hinaus bestehen), NICHT
+ * aber für den Aufruf aus sond_treeviewfm_finalize(): dort wird direkt im
+ * Anschluss der private Instanz-Speicher freigegeben, ein im Hintergrund
+ * noch laufender Watcher-Thread könnte dann via sond_treeviewfm_seadrive_
+ * stop_requested(stvfm) auf bereits freigegebenen Speicher zugreifen
+ * (Use-after-free). Deshalb zwei Varianten: die synchrone (unverändert,
+ * für finalize()) und eine neue asynchrone (für set_root()). */
+static gpointer seadrive_watcher_reap(gpointer data) {
+	GThread *old_thread = (GThread*) data;
+
+	g_thread_join(old_thread);
+
+	return NULL;
+}
+
 void
 sond_treeviewfm_seadrive_stop_watcher(SondTreeviewFM *stvfm) {
 	SondTreeviewFMPrivate *p = sond_treeviewfm_get_instance_private(stvfm);
@@ -4393,6 +4606,34 @@ sond_treeviewfm_seadrive_stop_watcher(SondTreeviewFM *stvfm) {
 	g_atomic_int_set(&p->seadrive_watcher_stop, 1);
 	g_thread_join(p->seadrive_watcher_thread);
 	p->seadrive_watcher_thread = NULL;
+}
+
+/* Wie sond_treeviewfm_seadrive_stop_watcher(), wartet aber NICHT im
+ * aufrufenden Thread auf das Thread-Ende, s. ausführlichen Kommentar
+ * oben. Nur verwenden, wenn stvfm selbst danach am Leben bleibt (aktuell:
+ * sond_treeviewfm_set_root()). */
+void
+sond_treeviewfm_seadrive_stop_watcher_async(SondTreeviewFM *stvfm) {
+	SondTreeviewFMPrivate *p = sond_treeviewfm_get_instance_private(stvfm);
+	GThread *old_thread = NULL;
+
+	if (!p->seadrive_watcher_thread)
+		return;
+
+	g_atomic_int_set(&p->seadrive_watcher_stop, 1);
+
+	/* Schon hier (nicht erst nach dem Join) auf NULL setzen, damit
+	 * sond_treeviewfm_seadrive_start_watcher() bei einem sofort
+	 * folgenden Öffnen eines neuen Projekts nicht fälschlich "läuft
+	 * schon" annimmt. */
+	old_thread = p->seadrive_watcher_thread;
+	p->seadrive_watcher_thread = NULL;
+
+	/* g_thread_unref() statt g_thread_join() auf den Reaper selbst -
+	 * dokumentiertes GLib-Muster für "fire and forget"-Threads, deren
+	 * Ergebnis niemanden interessiert. */
+	g_thread_unref(g_thread_new("seadrive-watcher-reaper",
+			seadrive_watcher_reap, old_thread));
 }
 #endif
 

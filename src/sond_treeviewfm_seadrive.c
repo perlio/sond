@@ -856,7 +856,37 @@ gboolean sond_seadrive_set_pin_state(const gchar *full_path,
  * error zurück, wenn cldapi.dll/CfHydratePlaceholder nicht verfügbar ist
  * oder der Aufruf selbst fehlschlägt - der Aufrufer fällt in diesem Fall
  * auf den normalen Öffnen-Weg zurück (s. sond_treeviewfm_open()).
+ *
+ * Korrektur 18.09.2026: Die obige Annahme, die 1-Byte-Begrenzung von
+ * Length spare das Warten auf die komplette Downloaddauer, hat sich in
+ * der Praxis als falsch erwiesen - Nutzer-Fund: bei einer 51-GB-Datei
+ * blockierte dieser Aufruf trotzdem minutenlang (vermutlich lädt der
+ * SeaDrive-Provider unabhängig von der angeforderten Länge grundsätzlich
+ * die ganze Datei, bevor CfHydratePlaceholder zurückkehrt). Diese Funktion
+ * bleibt deshalb synchron/blockierend - s. sond_seadrive_hydrate_async()
+ * weiter unten, die sie in einem Hintergrund-Thread aufruft, und
+ * sond_seadrive_needs_hydration() für einen schnellen, nicht-blockierenden
+ * Vorab-Check (nur GetFileAttributesW), mit dem der Aufrufer entscheiden
+ * kann, ob eine Hydrierung überhaupt nötig ist, ohne dafür einen Thread
+ * zu starten.
  */
+gboolean sond_seadrive_needs_hydration(const gchar *full_path)
+{
+    wchar_t *lp;
+    DWORD    attrs;
+
+    lp = prepare_long_path(full_path, NULL);
+    if (!lp)
+        return FALSE;
+
+    attrs = GetFileAttributesW(lp);
+    g_free(lp);
+
+    if (attrs == INVALID_FILE_ATTRIBUTES)
+        return FALSE;
+
+    return (attrs & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS) != 0;
+}
 gboolean sond_seadrive_hydrate(const gchar *full_path, GError **error)
 {
     wchar_t *lp;
@@ -929,6 +959,858 @@ gboolean sond_seadrive_hydrate(const gchar *full_path, GError **error)
 }
 
 /* ------------------------------------------------------------------ */
+/*  Public API: sond_seadrive_hydrate_async                            */
+/* ------------------------------------------------------------------ */
+
+/* Menge der Pfade, für die aktuell ein Hydrier-Hintergrund-Thread läuft -
+ * verhindert, dass ein erneuter Doppelklick auf dieselbe, noch
+ * herunterladende Datei einen zweiten, redundanten Thread/
+ * CfHydratePlaceholder()-Aufruf auslöst. Nutzer-Fund 18.09.2026: bei
+ * sehr großen Dateien (gemeldeter Fall: 51 GB) blockierte der bis dahin
+ * SYNCHRONE Aufruf von sond_seadrive_hydrate() im GTK-Hauptthread das
+ * gesamte Programm minutenlang ohne jede Rückmeldung oder
+ * Abbrechen-Möglichkeit (s. ToDo.c). Nutzer-Entscheidung: kein
+ * Info-Fenster beim ERSTEN Doppelklick (der Download läuft ohnehin im
+ * Hintergrund weiter, unabhängig davon, ob die UI darauf wartet) -
+ * stattdessen sofort in die UI zurückkehren (Fire-and-forget).
+ *
+ * Ergänzung, ebenfalls 18.09.2026: bei einem erneuten Doppelklick auf
+ * dieselbe, noch laufende Datei jetzt statt eines stillen No-Ops ein
+ * Fortschritts-/Abbrechen-Dialog (sond_seadrive_show_hydrate_progress_
+ * dialog(), weiter unten) - Nutzerwunsch, um bei versehentlichen
+ * Großdateien den Download tatsächlich stoppen zu können, statt den
+ * SeaDrive-Server unnötig weiter zu belasten.
+ *
+ * Wert je Pfad: HydratingEntry (unten), enthält u.a. ein
+ * THREAD_TERMINATE-Handle auf den Hydrier-Thread für CancelSynchronousIo()
+ * (echter Abbruch-Versuch, s. sond_seadrive_hydrate_cancel()). Schlüssel:
+ * full_path (g_strdup'd). Von Haupt- UND Hintergrund-Threads genutzt,
+ * deshalb per Mutex geschützt (statisch/all-zero-initialisiert - laut
+ * GLib-Doku für GMutex zulässig, kein g_mutex_init() nötig). */
+static GMutex      g_hydrating_mutex;
+static GHashTable *g_hydrating_paths = NULL;
+
+typedef struct {
+    HANDLE   thread_handle;    /* NULL, bis der Hydrier-Thread wirklich
+                                 * läuft (kurzes Zeitfenster direkt nach
+                                 * dem Einfügen in g_hydrating_paths, s.
+                                 * sond_seadrive_hydrate_async()) */
+    gboolean cancel_requested; /* per sond_seadrive_hydrate_cancel()
+                                 * gesetzt - falls thread_handle zu diesem
+                                 * Zeitpunkt noch NULL ist (s.o.), wertet
+                                 * hydrate_thread_func() dies selbst aus
+                                 * und startet den Download erst gar
+                                 * nicht. */
+} HydratingEntry;
+
+static void hydrating_entry_free(gpointer data)
+{
+    HydratingEntry *entry = (HydratingEntry *) data;
+    if (entry->thread_handle)
+        CloseHandle(entry->thread_handle);
+    g_free(entry);
+}
+
+typedef struct {
+    gchar *full_path;
+} HydrateThreadData;
+
+static gpointer hydrate_thread_func(gpointer data)
+{
+    HydrateThreadData *td = (HydrateThreadData *) data;
+    GError *error = NULL;
+    HydratingEntry *entry;
+    HANDLE thread_handle_dup = NULL;
+    gboolean pre_cancelled = FALSE;
+
+    /* Eigenes Thread-Handle (mit THREAD_TERMINATE-Recht, s.
+     * CancelSynchronousIo()-Doku) für einen möglichen späteren
+     * Abbrechen-Versuch von außen bereitstellen. */
+    DuplicateHandle(GetCurrentProcess(), GetCurrentThread(),
+            GetCurrentProcess(), &thread_handle_dup, THREAD_TERMINATE,
+            FALSE, 0);
+
+    g_mutex_lock(&g_hydrating_mutex);
+    entry = g_hash_table_lookup(g_hydrating_paths, td->full_path);
+    if (entry) {
+        if (entry->cancel_requested)
+            pre_cancelled = TRUE;
+        else
+            entry->thread_handle = thread_handle_dup;
+    }
+    g_mutex_unlock(&g_hydrating_mutex);
+
+    if (pre_cancelled) {
+        /* Abbrechen wurde schon angefordert, bevor dieser Thread überhaupt
+         * so weit kam, sein Handle einzutragen - Download erst gar nicht
+         * starten. */
+        if (thread_handle_dup)
+            CloseHandle(thread_handle_dup);
+    } else if (!sond_seadrive_hydrate(td->full_path, &error)) {
+        /* Bei per CancelSynchronousIo() abgebrochenen Aufrufen liefert
+         * GetLastError() innerhalb von sond_seadrive_hydrate() i.d.R.
+         * ERROR_OPERATION_ABORTED - wird hier wie jeder andere Fehler
+         * einfach mitgeloggt. */
+        LOG_WARN("%s: sond_seadrive_hydrate('%s'): %s", __func__,
+                td->full_path, error ? error->message : "?");
+        g_clear_error(&error);
+    }
+
+    g_mutex_lock(&g_hydrating_mutex);
+    g_hash_table_remove(g_hydrating_paths, td->full_path); /* schließt
+            thread_handle_dup via hydrating_entry_free(), falls gesetzt */
+    g_mutex_unlock(&g_hydrating_mutex);
+
+    g_free(td->full_path);
+    g_free(td);
+    return NULL;
+}
+
+/*
+ * sond_seadrive_hydrate_async:
+ *
+ * Wie sond_seadrive_hydrate(), aber nicht-blockierend: startet die
+ * eigentliche Hydrierung in einem eigenen Hintergrund-Thread und kehrt
+ * sofort zurück (Fire-and-forget, s. Doc-Kommentar oben, 18.09.2026). Ein
+ * erneuter Aufruf für denselben full_path, während bereits ein Thread
+ * dafür läuft, ist ein No-Op (Aufrufer sollte in diesem Fall stattdessen
+ * sond_seadrive_show_hydrate_progress_dialog() zeigen, s.
+ * sond_treeviewfm_open()). Fehler landen nur im Log (LOG_WARN in
+ * hydrate_thread_func()) - ein synchroner Rückgabewert wäre ohnehin
+ * nicht sinnvoll nutzbar, da der eigentliche Download beim Rücksprung
+ * i.d.R. noch läuft.
+ */
+void sond_seadrive_hydrate_async(const gchar *full_path)
+{
+    HydrateThreadData *td = NULL;
+    GThread *thread = NULL;
+
+    g_mutex_lock(&g_hydrating_mutex);
+    if (!g_hydrating_paths)
+        g_hydrating_paths = g_hash_table_new_full(g_str_hash, g_str_equal,
+                g_free, hydrating_entry_free);
+
+    if (g_hash_table_contains(g_hydrating_paths, full_path)) {
+        /* schon ein Hydrier-Thread für diese Datei unterwegs - No-Op */
+        g_mutex_unlock(&g_hydrating_mutex);
+        return;
+    }
+    g_hash_table_insert(g_hydrating_paths, g_strdup(full_path),
+            g_new0(HydratingEntry, 1));
+    g_mutex_unlock(&g_hydrating_mutex);
+
+    td = g_new0(HydrateThreadData, 1);
+    td->full_path = g_strdup(full_path);
+
+    thread = g_thread_new("seadrive-hydrate", hydrate_thread_func, td);
+    if (!thread) {
+        /* Thread-Erzeugung fehlgeschlagen - Eintrag wieder entfernen,
+         * sonst bliebe die Datei für immer fälschlich als "läuft schon"
+         * markiert. */
+        g_mutex_lock(&g_hydrating_mutex);
+        g_hash_table_remove(g_hydrating_paths, td->full_path);
+        g_mutex_unlock(&g_hydrating_mutex);
+        g_free(td->full_path);
+        g_free(td);
+        return;
+    }
+    g_thread_unref(thread); /* fire-and-forget, kein g_thread_join() */
+}
+
+/*
+ * sond_seadrive_is_hydrating:
+ *
+ * TRUE, wenn für full_path aktuell ein Hydrier-Hintergrund-Thread läuft
+ * (s.o.). Vom Aufrufer genutzt, um bei einem erneuten Doppelklick
+ * zwischen "neue Hydrierung anstoßen" (sond_seadrive_hydrate_async()) und
+ * "Fortschritt/Abbrechen-Dialog zeigen" (sond_seadrive_show_hydrate_
+ * progress_dialog()) zu unterscheiden.
+ */
+gboolean sond_seadrive_is_hydrating(const gchar *full_path)
+{
+    gboolean result;
+
+    g_mutex_lock(&g_hydrating_mutex);
+    result = g_hydrating_paths &&
+            g_hash_table_contains(g_hydrating_paths, full_path);
+    g_mutex_unlock(&g_hydrating_mutex);
+
+    return result;
+}
+
+/*
+ * sond_seadrive_hydrate_cancel:
+ *
+ * Versucht, eine laufende Hydrierung von full_path abzubrechen - über
+ * CancelSynchronousIo() auf das Thread-Handle des Hydrier-Threads (dieser
+ * steckt synchron/blockierend in CfHydratePlaceholder(), s.
+ * sond_seadrive_hydrate()). Ist der Thread noch nicht so weit, sein
+ * Handle einzutragen (s. HydratingEntry oben), wird nur cancel_requested
+ * gesetzt - der Thread bricht dann selbst vorzeitig ab, bevor er den
+ * Download überhaupt beginnt.
+ *
+ * WICHTIG: CancelSynchronousIo() ist für CfHydratePlaceholder()
+ * offiziell nicht dokumentiert (Microsoft dokumentiert es allgemein für
+ * synchrone Dateizugriffe, s. cancelsynchronousio-func). Ob der
+ * SeaDrive-Minifilter/-Dienst einen so markierten Abbruch tatsächlich
+ * zeitnah beachtet und den Download serverseitig stoppt, ist nicht
+ * garantiert - es ist aber der einzige als Konsument (nicht Sync-
+ * Provider) verfügbare Mechanismus, ohne den eigentlichen CF-API-Aufruf
+ * auf OVERLAPPED umzustellen. Kein Rückgabewert: Erfolg zeigt sich
+ * indirekt darüber, dass der Eintrag aus g_hydrating_paths verschwindet
+ * (von sond_seadrive_show_hydrate_progress_dialog() gepollt).
+ */
+void sond_seadrive_hydrate_cancel(const gchar *full_path)
+{
+    HydratingEntry *entry;
+
+    g_mutex_lock(&g_hydrating_mutex);
+    entry = g_hydrating_paths ?
+            g_hash_table_lookup(g_hydrating_paths, full_path) : NULL;
+    if (entry) {
+        if (entry->thread_handle)
+            CancelSynchronousIo(entry->thread_handle);
+        else
+            entry->cancel_requested = TRUE;
+    }
+    g_mutex_unlock(&g_hydrating_mutex);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Public API: sond_seadrive_show_hydrate_progress_dialog              */
+/* ------------------------------------------------------------------ */
+
+/* CF_PLACEHOLDER_INFO_STANDARD liefert u.a. OnDiskDataSize (bereits lokal
+ * vorhandene Bytes) - Struktur-Layout 1:1 aus der offiziellen cfapi.h
+ * übernommen (Recherche 18.09.2026), hier wie beim Rest der Datei manuell
+ * dupliziert (kein cfapi.h im verwendeten MinGW-Toolchain, s. Kommentar
+ * bei cfapi_init_once()). PinState/InSyncState hier bewusst als DWORD
+ * (nicht als CF_PIN_STATE/CF_IN_SYNC_STATE-Enum) deklariert, analog
+ * SeaDrivePlaceholderBasicInfo oben - nur OnDiskDataSize wird tatsächlich
+ * ausgewertet.
+ *
+ * Regressions-Fund 18.09.2026 (Nutzer: Fortschrittsanzeige bleibt
+ * durchgehend bei 0%, obwohl laut Windows-Explorer kräftig heruntergeladen
+ * wird): das offizielle cfapi.h deklariert FileIdentity[] als BYTE[1] -
+ * ein reiner Platzhalter für einen tatsächlich variabel langen Puffer, der
+ * vom Aufrufer selbst groß genug angelegt werden muss (s. auch
+ * SeaDrivePlaceholderBasicInfo oben, dort schon immer mit 256 Byte statt
+ * [1] deklariert). Mit nur 1 Byte Puffer für FileIdentity liefert
+ * CfGetPlaceholderInfo() bei einer nicht winzigen Identity (bei SeaDrive
+ * offenbar der Normalfall) HRESULT_MORE_DATA zurück - technisch ein
+ * FAILURE-HRESULT (Severity-Bit gesetzt trotz des Namens), SUCCEEDED()
+ * schlägt also fehl und hydrate_progress_update() brach VOR dem
+ * Auswerten von OnDiskDataSize ab, ohne die Progress-Bar je zu
+ * aktualisieren - exakt das gemeldete Symptom. Fix: FileIdentity analog
+ * SeaDrivePlaceholderBasicInfo auf 256 Byte vergrößert. */
+#define CF_PLACEHOLDER_INFO_STANDARD  1
+
+typedef struct {
+    LARGE_INTEGER OnDiskDataSize;
+    LARGE_INTEGER ValidatedDataSize;
+    LARGE_INTEGER ModifiedDataSize;
+    LARGE_INTEGER PropertiesSize;
+    DWORD         PinState;
+    DWORD         InSyncState;
+    LARGE_INTEGER FileId;
+    LARGE_INTEGER SyncRootFileId;
+    ULONG         FileIdentityLength;
+    BYTE          FileIdentity[256];
+} SeaDrivePlaceholderStandardInfo;
+
+typedef struct {
+    gchar     *full_path;
+    GtkWidget *dialog;
+    GtkWidget *progress_bar;
+    GtkWidget *label;
+    guint64    file_size;
+    guint      timeout_id;
+    gboolean   logged_failure; /* Diagnose-Log höchstens einmal pro
+                                 * offenem Dialog, nicht alle 300ms */
+} HydrateProgressUi;
+
+static void hydrate_progress_update(HydrateProgressUi *ui)
+{
+    wchar_t *lp;
+    HANDLE   h;
+
+    lp = prepare_long_path(ui->full_path, NULL);
+    if (!lp)
+        return;
+
+    h = CreateFileW(lp, FILE_READ_ATTRIBUTES,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+    g_free(lp);
+    if (h == INVALID_HANDLE_VALUE)
+        return;
+
+    cfapi_init();
+    if (g_CfGetPlaceholderInfo) {
+        SeaDrivePlaceholderStandardInfo info = { 0 };
+        DWORD returned_length = 0;
+        HRESULT hr = g_CfGetPlaceholderInfo(h, CF_PLACEHOLDER_INFO_STANDARD,
+                &info, sizeof(info), &returned_length);
+
+        if (SUCCEEDED(hr)) {
+            guint64 on_disk = (guint64) info.OnDiskDataSize.QuadPart;
+            gdouble fraction = 0.0;
+            gchar *on_disk_str, *total_str, *text;
+
+            if (ui->file_size > 0) {
+                fraction = (gdouble) on_disk / (gdouble) ui->file_size;
+                if (fraction > 1.0)
+                    fraction = 1.0;
+            }
+            gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(ui->progress_bar),
+                    fraction);
+
+            on_disk_str = g_format_size(on_disk);
+            total_str = g_format_size(ui->file_size);
+            text = g_strdup_printf("%s von %s heruntergeladen",
+                    on_disk_str, total_str);
+            gtk_progress_bar_set_text(GTK_PROGRESS_BAR(ui->progress_bar),
+                    text);
+            g_free(on_disk_str);
+            g_free(total_str);
+            g_free(text);
+        } else if (!ui->logged_failure) {
+            /* S. Doc-Kommentar an SeaDrivePlaceholderStandardInfo (18.09.
+             * 2026, FileIdentity-Puffergröße) - sollte returned_length
+             * hier immer noch größer als sizeof(info) sein, reicht auch
+             * 256 Byte FileIdentity nicht und muss weiter vergrößert
+             * werden. */
+            LOG_WARN("%s: CfGetPlaceholderInfo('%s'): 0x%08lX "
+                    "(returned_length=%lu, sizeof(info)=%zu)", __func__,
+                    ui->full_path, (unsigned long) hr,
+                    (unsigned long) returned_length, sizeof(info));
+            ui->logged_failure = TRUE;
+        }
+    }
+
+    CloseHandle(h);
+}
+
+static gboolean hydrate_progress_tick(gpointer data)
+{
+    HydrateProgressUi *ui = (HydrateProgressUi *) data;
+
+    if (!sond_seadrive_is_hydrating(ui->full_path)) {
+        /* Hydrierung fertig (Erfolg, Fehler oder Abbruch) - Dialog
+         * selbstständig schließen. */
+        ui->timeout_id = 0;
+        gtk_widget_destroy(ui->dialog);
+        return G_SOURCE_REMOVE;
+    }
+
+    hydrate_progress_update(ui);
+
+    return G_SOURCE_CONTINUE;
+}
+
+static void cb_hydrate_progress_dialog_destroy(GtkWidget *dialog,
+        gpointer data)
+{
+    HydrateProgressUi *ui = (HydrateProgressUi *) data;
+    (void) dialog;
+
+    if (ui->timeout_id)
+        g_source_remove(ui->timeout_id);
+    g_free(ui->full_path);
+    g_free(ui);
+}
+
+static void cb_hydrate_progress_abbrechen_clicked(GtkButton *button,
+        gpointer data)
+{
+    HydrateProgressUi *ui = (HydrateProgressUi *) data;
+
+    sond_seadrive_hydrate_cancel(ui->full_path);
+    gtk_widget_set_sensitive(GTK_WIDGET(button), FALSE);
+    gtk_label_set_text(GTK_LABEL(ui->label), "Wird abgebrochen...");
+}
+
+/*
+ * sond_seadrive_show_hydrate_progress_dialog:
+ *
+ * Nutzer-Fund 18.09.2026: bei einem erneuten Doppelklick auf eine Datei,
+ * deren Hydrierung bereits läuft (sond_seadrive_is_hydrating() == TRUE),
+ * statt eines stillen No-Ops diesen Dialog zeigen - Fortschritt (bereits
+ * heruntergeladene/gesamte Bytes, via CfGetPlaceholderInfo() gepollt) und
+ * eine Abbrechen-Möglichkeit (s. sond_seadrive_hydrate_cancel(), inkl.
+ * Einschränkungen bzgl. Zuverlässigkeit), damit bei versehentlich
+ * angeklickten Großdateien nicht unnötig der SeaDrive-Server weiter
+ * beansprucht wird. Schließen des Fensters (per "Schließen"-Button oder
+ * X) bricht NICHT ab - der Download läuft dann einfach unbeobachtet im
+ * Hintergrund weiter, wie beim ersten Doppelklick auch. Der Dialog
+ * schließt sich außerdem von
+ * selbst, sobald die Hydrierung (gleich aus welchem Grund) endet.
+ */
+void sond_seadrive_show_hydrate_progress_dialog(GtkWindow *parent,
+        const gchar *full_path)
+{
+    HydrateProgressUi *ui;
+    GtkWidget *content_area;
+    GtkWidget *vbox;
+    GtkWidget *button;
+    gchar *basename, *message;
+    wchar_t *lp;
+    LARGE_INTEGER size = { .QuadPart = 0 };
+
+    ui = g_new0(HydrateProgressUi, 1);
+    ui->full_path = g_strdup(full_path);
+
+    /* Dateigröße einmalig ermitteln - auch bei einem noch nicht
+     * hydrierten Platzhalter verfügbar (Metadatum, unabhängig vom
+     * Hydrierungsstand). */
+    lp = prepare_long_path(full_path, NULL);
+    if (lp) {
+        HANDLE h = CreateFileW(lp, FILE_READ_ATTRIBUTES,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+        g_free(lp);
+        if (h != INVALID_HANDLE_VALUE) {
+            GetFileSizeEx(h, &size);
+            CloseHandle(h);
+        }
+    }
+    ui->file_size = (guint64) size.QuadPart;
+
+    ui->dialog = gtk_dialog_new_with_buttons("Download läuft", parent,
+            GTK_DIALOG_DESTROY_WITH_PARENT, NULL, NULL);
+    gtk_window_set_default_size(GTK_WINDOW(ui->dialog), 420, -1);
+
+    content_area = gtk_dialog_get_content_area(GTK_DIALOG(ui->dialog));
+    vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_container_set_border_width(GTK_CONTAINER(vbox), 12);
+
+    basename = g_path_get_basename(full_path);
+    message = g_strdup_printf("Download läuft bereits: %s", basename);
+    ui->label = gtk_label_new(message);
+    gtk_label_set_line_wrap(GTK_LABEL(ui->label), TRUE);
+    g_free(message);
+    g_free(basename);
+    gtk_box_pack_start(GTK_BOX(vbox), ui->label, FALSE, FALSE, 0);
+
+    ui->progress_bar = gtk_progress_bar_new();
+    gtk_progress_bar_set_show_text(GTK_PROGRESS_BAR(ui->progress_bar), TRUE);
+    gtk_box_pack_start(GTK_BOX(vbox), ui->progress_bar, FALSE, FALSE, 0);
+
+    gtk_container_add(GTK_CONTAINER(content_area), vbox);
+
+    /* Schließen-Button (Nutzer-Fund 18.09.2026): ohne ihn war die
+     * Dialoggeometrie nicht "man kann auf Schließen klicken, wenn man
+     * NICHT abbrechen will" - nur das X (WM-Rand) bot das. Ruft nur
+     * gtk_widget_destroy() auf, ohne sond_seadrive_hydrate_cancel() -
+     * Download läuft danach wie beim X-Button unbeobachtet im
+     * Hintergrund weiter. */
+    button = gtk_dialog_add_button(GTK_DIALOG(ui->dialog), "Schließen",
+            GTK_RESPONSE_NONE);
+    g_signal_connect_swapped(button, "clicked",
+            G_CALLBACK(gtk_widget_destroy), ui->dialog);
+
+    button = gtk_dialog_add_button(GTK_DIALOG(ui->dialog), "Abbrechen",
+            GTK_RESPONSE_NONE);
+    g_signal_connect(button, "clicked",
+            G_CALLBACK(cb_hydrate_progress_abbrechen_clicked), ui);
+
+    g_signal_connect(ui->dialog, "destroy",
+            G_CALLBACK(cb_hydrate_progress_dialog_destroy), ui);
+
+    gtk_widget_show_all(ui->dialog);
+
+    hydrate_progress_update(ui);
+    ui->timeout_id = g_timeout_add(300, hydrate_progress_tick, ui);
+}
+
+/* Nutzer-Hinweis 18.09.2026: "Identischer Code in sond_treeviewfm.c und
+ * zond_treeview.c - das ist ungünstig." - beide Stellen (BAUM_FS-
+ * Doppelklick in sond_treeviewfm_open() bzw. BAUM_INHALT/AUSWERTUNG-
+ * Doppelklick in zond_treeview_open_node()) prüften vor dem eigentlichen
+ * Öffnen wortgleich needs_hydration()/is_hydrating()/hydrate_async()/
+ * show_hydrate_progress_dialog() und kehrten dann sofort zurück. Diese
+ * gemeinsame Sequenz hierher gezogen.
+ *
+ * Bewusst NICHT als gemeinsame Stelle gewählt: sond_file_part_open()
+ * (Öffnen mit externem Programm/ShellExecute) - erreichte PDFs mit
+ * internem Viewer ohnehin nicht (die laufen über
+ * zond_treeview_open_single_view()/_open_auszug(), nie über
+ * sond_file_part_open()). Nutzer-Test 18.09.2026 hat dabei eine
+ * ursprüngliche Vermutung widerlegt: Hydrierung bei "Öffnen mit" wird
+ * NICHT etwa vom gestarteten externen Programm bzw. Windows-Explorer
+ * selbst übernommen, sondern ganz normal von zond ausgelöst - weil
+ * beide Aufrufer (s.u.) diesen Check schon VOR der Verzweigung zu
+ * open_with/sond_file_part_open() durchlaufen. Funktioniert nachweislich
+ * korrekt (inkl. Dialog beim zweiten Doppelklick) - der eigentliche,
+ * weiterhin gültige Grund gegen sond_file_part_open() als gemeinsame
+ * Stelle ist allein die fehlende Abdeckung des internen-Viewer-Pfads.
+ * Die Ermittlung des vollen Pfads der realen Datei (Container-Vorfahre
+ * mit parent==NULL) bleibt bewusst beim jeweiligen Aufrufer, da sie je
+ * nach Baum ein anderes Datenmodell abläuft (SondTVFMItem bzw.
+ * SondFilePart) und sich dafür keine gemeinsame Stelle anbietet. */
+gboolean sond_seadrive_ensure_hydrated(GtkWindow *parent,
+        const gchar *full_path)
+{
+    if (!full_path || !sond_seadrive_needs_hydration(full_path))
+        return TRUE;
+
+    if (sond_seadrive_is_hydrating(full_path))
+        sond_seadrive_show_hydrate_progress_dialog(parent, full_path);
+    else
+        sond_seadrive_hydrate_async(full_path);
+
+    return FALSE;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Public API: sond_seadrive_ensure_hydrated_multi (Auszug-Fall)      */
+/* ------------------------------------------------------------------ */
+
+/* Nutzer-Wunsch 18.09.2026: der Auszug-Fall im Auswertungsverzeichnis
+ * (mehrere Kind-Anbindungen unter einem Strukturpunkt werden zu einer
+ * gemeinsamen Ansicht zusammengefasst, s. zond_treeview_open_auszug(),
+ * zond_treeview.c) kann mehrere verschiedene reale PDF-Dateien
+ * betreffen, die jede für sich hydriert werden müssen: "Für alle
+ * betroffenen PDF muß erforderlichenfalls die Hydrierung angestoßen
+ * werden. Erneuter Doppelklick muß dann halt den Download-Status für
+ * alle betroffenen - das heißt noch nicht hydrierten - Dateien anzeigen.
+ * Schließen und Abbruch wie gehabt."
+ *
+ * Analog zum Einzeldatei-Fall (sond_seadrive_ensure_hydrated() oben),
+ * aber für eine Menge von Pfaden: pro betroffener, noch nicht
+ * hydrierter Datei wird die Hydrierung angestoßen (No-Op, falls schon
+ * läuft); war beim Aufruf schon mindestens eine davon in Hydrierung
+ * (= zweiter Doppelklick), wird EIN gemeinsamer Dialog mit je einer
+ * Fortschrittszeile pro noch nicht hydrierter Datei gezeigt (statt N
+ * einzelner Dialoge). "Schließen" schließt nur den Dialog (Downloads
+ * laufen unbeobachtet weiter, wie beim Einzeldatei-Dialog); "Abbrechen"
+ * bricht alle noch laufenden Einträge gleichzeitig ab. Der Dialog
+ * schließt sich von selbst, sobald ALLE Einträge fertig sind. */
+
+typedef struct {
+    gchar     *full_path;
+    GtkWidget *label;
+    GtkWidget *progress_bar;
+    guint64    file_size;
+    gboolean   logged_failure;
+    gboolean   done;
+} HydrateProgressEntryMulti;
+
+typedef struct {
+    GPtrArray *entries; /* HydrateProgressEntryMulti*, eigene Kopien */
+    GtkWidget *dialog;
+    GtkWidget *abbrechen_button;
+    guint      timeout_id;
+} HydrateProgressUiMulti;
+
+/* Analog hydrate_progress_update() oben, aber auf einen Eintrag einer
+ * HydrateProgressUiMulti angewandt statt auf die einzige Datei einer
+ * HydrateProgressUi. */
+static void hydrate_progress_entry_update(HydrateProgressEntryMulti *entry)
+{
+    wchar_t *lp;
+    HANDLE   h;
+
+    lp = prepare_long_path(entry->full_path, NULL);
+    if (!lp)
+        return;
+
+    h = CreateFileW(lp, FILE_READ_ATTRIBUTES,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+    g_free(lp);
+    if (h == INVALID_HANDLE_VALUE)
+        return;
+
+    cfapi_init();
+    if (g_CfGetPlaceholderInfo) {
+        SeaDrivePlaceholderStandardInfo info = { 0 };
+        DWORD returned_length = 0;
+        HRESULT hr = g_CfGetPlaceholderInfo(h, CF_PLACEHOLDER_INFO_STANDARD,
+                &info, sizeof(info), &returned_length);
+
+        if (SUCCEEDED(hr)) {
+            guint64 on_disk = (guint64) info.OnDiskDataSize.QuadPart;
+            gdouble fraction = 0.0;
+            gchar *on_disk_str, *total_str, *text;
+
+            if (entry->file_size > 0) {
+                fraction = (gdouble) on_disk / (gdouble) entry->file_size;
+                if (fraction > 1.0)
+                    fraction = 1.0;
+            }
+            gtk_progress_bar_set_fraction(
+                    GTK_PROGRESS_BAR(entry->progress_bar), fraction);
+
+            on_disk_str = g_format_size(on_disk);
+            total_str = g_format_size(entry->file_size);
+            text = g_strdup_printf("%s von %s", on_disk_str, total_str);
+            gtk_progress_bar_set_text(GTK_PROGRESS_BAR(entry->progress_bar),
+                    text);
+            g_free(on_disk_str);
+            g_free(total_str);
+            g_free(text);
+        } else if (!entry->logged_failure) {
+            LOG_WARN("%s: CfGetPlaceholderInfo('%s'): 0x%08lX "
+                    "(returned_length=%lu, sizeof(info)=%zu)", __func__,
+                    entry->full_path, (unsigned long) hr,
+                    (unsigned long) returned_length, sizeof(info));
+            entry->logged_failure = TRUE;
+        }
+    }
+
+    CloseHandle(h);
+}
+
+static void hydrate_progress_entry_free(gpointer data)
+{
+    HydrateProgressEntryMulti *entry = (HydrateProgressEntryMulti *) data;
+    g_free(entry->full_path);
+    g_free(entry);
+}
+
+/* Aktualisiert alle noch nicht fertigen Einträge (Fortschrittsbalken
+ * bzw. "fertig", falls die Hydrierung inzwischen endete) - OHNE den
+ * Dialog bei Bedarf zu schließen (das übernimmt separat
+ * hydrate_progress_tick_multi(), s.u.). Getrennt gehalten, damit der
+ * initiale, synchrone Aufruf direkt nach dem Aufbau des Dialogs (s.
+ * sond_seadrive_show_hydrate_progress_dialog_multi()) nicht riskiert,
+ * das gerade erst erzeugte ui bei sofort schon abgeschlossener
+ * Hydrierung wieder freizugeben, bevor der Aufrufer fertig damit ist
+ * (Use-after-free) - anders als hydrate_progress_tick_multi(), das nur
+ * als g_timeout_add()-Callback läuft, nachdem der Aufrufer längst
+ * zurückgekehrt ist. */
+static void hydrate_progress_update_multi(HydrateProgressUiMulti *ui)
+{
+    guint i;
+
+    for (i = 0; i < ui->entries->len; i++) {
+        HydrateProgressEntryMulti *entry = g_ptr_array_index(ui->entries, i);
+
+        if (entry->done)
+            continue;
+
+        if (!sond_seadrive_is_hydrating(entry->full_path)) {
+            entry->done = TRUE;
+            gtk_progress_bar_set_fraction(
+                    GTK_PROGRESS_BAR(entry->progress_bar), 1.0);
+            gtk_progress_bar_set_text(GTK_PROGRESS_BAR(entry->progress_bar),
+                    "fertig");
+            continue;
+        }
+
+        hydrate_progress_entry_update(entry);
+    }
+}
+
+static gboolean hydrate_progress_all_done_multi(HydrateProgressUiMulti *ui)
+{
+    guint i;
+
+    for (i = 0; i < ui->entries->len; i++) {
+        HydrateProgressEntryMulti *entry = g_ptr_array_index(ui->entries, i);
+        if (!entry->done)
+            return FALSE;
+    }
+    return TRUE;
+}
+
+static gboolean hydrate_progress_tick_multi(gpointer data)
+{
+    HydrateProgressUiMulti *ui = (HydrateProgressUiMulti *) data;
+
+    hydrate_progress_update_multi(ui);
+
+    if (hydrate_progress_all_done_multi(ui)) {
+        /* Alle betroffenen Dateien fertig (Erfolg, Fehler oder Abbruch) -
+         * Dialog selbstständig schließen. */
+        ui->timeout_id = 0;
+        gtk_widget_destroy(ui->dialog);
+        return G_SOURCE_REMOVE;
+    }
+
+    return G_SOURCE_CONTINUE;
+}
+
+static void cb_hydrate_progress_dialog_destroy_multi(GtkWidget *dialog,
+        gpointer data)
+{
+    HydrateProgressUiMulti *ui = (HydrateProgressUiMulti *) data;
+    (void) dialog;
+
+    if (ui->timeout_id)
+        g_source_remove(ui->timeout_id);
+    g_ptr_array_free(ui->entries, TRUE);
+    g_free(ui);
+}
+
+static void cb_hydrate_progress_abbrechen_clicked_multi(GtkButton *button,
+        gpointer data)
+{
+    HydrateProgressUiMulti *ui = (HydrateProgressUiMulti *) data;
+    guint i;
+
+    for (i = 0; i < ui->entries->len; i++) {
+        HydrateProgressEntryMulti *entry = g_ptr_array_index(ui->entries, i);
+        if (!entry->done) {
+            sond_seadrive_hydrate_cancel(entry->full_path);
+            gtk_label_set_text(GTK_LABEL(entry->label), "Wird abgebrochen...");
+        }
+    }
+    gtk_widget_set_sensitive(GTK_WIDGET(button), FALSE);
+}
+
+/*
+ * sond_seadrive_show_hydrate_progress_dialog_multi:
+ * Wie sond_seadrive_show_hydrate_progress_dialog(), aber für mehrere
+ * gleichzeitig betroffene Dateien - eine Fortschrittszeile (Dateiname +
+ * Balken) pro Eintrag in full_paths, ein gemeinsamer "Abbrechen"-Button
+ * (bricht alle noch laufenden Einträge ab) und ein gemeinsamer
+ * "Schließen"-Button. Schließt sich automatisch, sobald ALLE Einträge
+ * fertig sind.
+ */
+void sond_seadrive_show_hydrate_progress_dialog_multi(GtkWindow *parent,
+        GPtrArray *full_paths)
+{
+    HydrateProgressUiMulti *ui;
+    GtkWidget *content_area;
+    GtkWidget *scrolled_window;
+    GtkWidget *vbox;
+    GtkWidget *button;
+    guint i;
+
+    ui = g_new0(HydrateProgressUiMulti, 1);
+    ui->entries = g_ptr_array_new_with_free_func(hydrate_progress_entry_free);
+
+    ui->dialog = gtk_dialog_new_with_buttons("Download läuft", parent,
+            GTK_DIALOG_DESTROY_WITH_PARENT, NULL, NULL);
+    gtk_window_set_default_size(GTK_WINDOW(ui->dialog), 460, -1);
+
+    /* Nutzer-Wunsch 18.09.2026: bei vielen betroffenen Dateien (Auszug
+     * mit entsprechend vielen Anbindungen) sollen trotzdem alle
+     * Fortschrittszeilen einsehbar bleiben, ohne dass der Dialog selbst
+     * über den Bildschirm hinaus wächst - Liste deshalb in ein
+     * GtkScrolledWindow mit fester Maximalhöhe gepackt (scrollt ab ca.
+     * 5 Zeilen; propagate_natural_height lässt den Dialog bei WENIGER
+     * Einträgen trotzdem passend klein bleiben, statt immer die volle
+     * Maximalhöhe zu belegen). */
+    scrolled_window = gtk_scrolled_window_new(NULL, NULL);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled_window),
+            GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_scrolled_window_set_min_content_height(
+            GTK_SCROLLED_WINDOW(scrolled_window), 60);
+    gtk_scrolled_window_set_max_content_height(
+            GTK_SCROLLED_WINDOW(scrolled_window), 320);
+    gtk_scrolled_window_set_propagate_natural_height(
+            GTK_SCROLLED_WINDOW(scrolled_window), TRUE);
+
+    content_area = gtk_dialog_get_content_area(GTK_DIALOG(ui->dialog));
+    vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+    gtk_container_set_border_width(GTK_CONTAINER(vbox), 12);
+
+    for (i = 0; i < full_paths->len; i++) {
+        const gchar *full_path = g_ptr_array_index(full_paths, i);
+        HydrateProgressEntryMulti *entry = g_new0(HydrateProgressEntryMulti, 1);
+        gchar *basename;
+        wchar_t *lp;
+        LARGE_INTEGER size = { .QuadPart = 0 };
+
+        entry->full_path = g_strdup(full_path);
+
+        lp = prepare_long_path(full_path, NULL);
+        if (lp) {
+            HANDLE h = CreateFileW(lp, FILE_READ_ATTRIBUTES,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                    NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+            g_free(lp);
+            if (h != INVALID_HANDLE_VALUE) {
+                GetFileSizeEx(h, &size);
+                CloseHandle(h);
+            }
+        }
+        entry->file_size = (guint64) size.QuadPart;
+
+        basename = g_path_get_basename(full_path);
+        entry->label = gtk_label_new(basename);
+        gtk_label_set_line_wrap(GTK_LABEL(entry->label), TRUE);
+        gtk_widget_set_halign(entry->label, GTK_ALIGN_START);
+        g_free(basename);
+        gtk_box_pack_start(GTK_BOX(vbox), entry->label, FALSE, FALSE, 0);
+
+        entry->progress_bar = gtk_progress_bar_new();
+        gtk_progress_bar_set_show_text(GTK_PROGRESS_BAR(entry->progress_bar),
+                TRUE);
+        gtk_box_pack_start(GTK_BOX(vbox), entry->progress_bar, FALSE, FALSE, 0);
+
+        g_ptr_array_add(ui->entries, entry);
+    }
+
+    gtk_container_add(GTK_CONTAINER(scrolled_window), vbox);
+    gtk_container_add(GTK_CONTAINER(content_area), scrolled_window);
+
+    button = gtk_dialog_add_button(GTK_DIALOG(ui->dialog), "Schließen",
+            GTK_RESPONSE_NONE);
+    g_signal_connect_swapped(button, "clicked",
+            G_CALLBACK(gtk_widget_destroy), ui->dialog);
+
+    ui->abbrechen_button = gtk_dialog_add_button(GTK_DIALOG(ui->dialog),
+            "Abbrechen", GTK_RESPONSE_NONE);
+    g_signal_connect(ui->abbrechen_button, "clicked",
+            G_CALLBACK(cb_hydrate_progress_abbrechen_clicked_multi), ui);
+
+    g_signal_connect(ui->dialog, "destroy",
+            G_CALLBACK(cb_hydrate_progress_dialog_destroy_multi), ui);
+
+    gtk_widget_show_all(ui->dialog);
+
+    hydrate_progress_update_multi(ui); /* initiale Anzeige, kein Auto-Destroy */
+    ui->timeout_id = g_timeout_add(300, hydrate_progress_tick_multi, ui);
+}
+
+/*
+ * sond_seadrive_ensure_hydrated_multi:
+ * Wie sond_seadrive_ensure_hydrated(), aber für eine Menge von Pfaden
+ * (Auszug-Fall) - s. ausführlichen Doc-Kommentar oberhalb der Structs.
+ * full_paths wird nur gelesen (full_path-Strings werden bei Bedarf
+ * kopiert), Aufrufer bleibt Eigentümer.
+ */
+gboolean sond_seadrive_ensure_hydrated_multi(GtkWindow *parent,
+        GPtrArray *full_paths)
+{
+    GPtrArray *pending;
+    gboolean any_hydrating = FALSE;
+    gboolean result = TRUE;
+    guint i;
+
+    if (!full_paths || full_paths->len == 0)
+        return TRUE;
+
+    pending = g_ptr_array_new();
+    for (i = 0; i < full_paths->len; i++) {
+        const gchar *path = g_ptr_array_index(full_paths, i);
+        if (path && sond_seadrive_needs_hydration(path)) {
+            g_ptr_array_add(pending, (gpointer) path);
+            if (sond_seadrive_is_hydrating(path))
+                any_hydrating = TRUE;
+        }
+    }
+
+    if (pending->len > 0) {
+        for (i = 0; i < pending->len; i++)
+            sond_seadrive_hydrate_async(
+                    (const gchar *) g_ptr_array_index(pending, i));
+
+        if (any_hydrating)
+            sond_seadrive_show_hydrate_progress_dialog_multi(parent, pending);
+
+        result = FALSE;
+    }
+
+    g_ptr_array_free(pending, TRUE);
+    return result;
+}
+
+/* ------------------------------------------------------------------ */
 /*  Internal: build full UTF-8 path from stvfm_item                   */
 /* ------------------------------------------------------------------ */
 
@@ -947,10 +1829,30 @@ static gchar *stvfm_item_get_full_path(SondTVFMItem *stvfm_item)
     if (rel && *rel)
         return g_strconcat(root, "/", rel, NULL);
 
-    /* fs leaf files: path_or_section is NULL, sfp holds relative path */
+    /* fs leaf files (auch eingebettete Teile - Mime-Parts, ZIP-Einträge,
+     * PDF-Seiten): path_or_section ist NULL, sfp gibt zunächst nur den
+     * eigenen (bei eingebetteten Teilen ggf. rein internen/synthetischen)
+     * Pfad des jeweiligen Teils her.
+     *
+     * Nutzer-Fund 18.09.2026: "Anwahl von 'Immer offline verfügbar' wirkt
+     * nur bei Message, nicht bei den mimeparts" - bisher wurde genau
+     * dieser eigene sfp-Pfad direkt verwendet, was für Top-Level-Dateien
+     * (kein Parent, z.B. den Message-Knoten selbst) zufällig stimmt, für
+     * einen mit Parent (Mime-Part/ZIP-Eintrag/PDF-Seite) aber einen
+     * nicht-existenten Pfad ergibt - sond_seadrive_set_pin_state()
+     * schlägt dann für diese Zeilen wirkungslos fehl. Der Pin-/
+     * Hydrierungsstatus gehört aber ohnehin zur realen Datei als janzem,
+     * nicht zum einzelnen Teil - deshalb jetzt, analog zum selben Fund im
+     * SeaDrive-Badge (render_file_icon(), ToDo.c 18.09.2026), konsequent
+     * zum obersten Vorfahren hochgelaufen und dessen Pfad verwendet. */
     sfp = sond_tvfm_item_get_sond_file_part(stvfm_item);
     if (sfp) {
-        const gchar *sfp_path = sond_file_part_get_path(sfp);
+        const gchar *sfp_path;
+
+        while (sond_file_part_get_parent(sfp))
+            sfp = sond_file_part_get_parent(sfp);
+
+        sfp_path = sond_file_part_get_path(sfp);
         if (sfp_path && *sfp_path)
             return g_strconcat(root, "/", sfp_path, NULL);
     }

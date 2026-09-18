@@ -2524,6 +2524,154 @@ static gint get_filepart_from_iter(ZondTreeview* ztv, GtkTreeIter* iter,
 	return 0;
 }
 
+#ifdef _WIN32
+/* Nutzer-Wunsch 18.09.2026: der Auszug-Fall (Klick auf einen
+ * Strukturpunkt im Auswertungsverzeichnis, der mehrere Kind-Anbindungen
+ * zu einer gemeinsamen Ansicht zusammenfasst - s.
+ * zond_treeview_open_auszug() unten) blieb vom Hydrierungs-Check oben
+ * (sfp != NULL-Fall) bewusst unberührt, weil dort ggf. mehrere
+ * verschiedene reale Dateien betroffen sein können: "Für alle
+ * betroffenen PDF muß erforderlichenfalls die Hydrierung angestoßen
+ * werden." Sammelt dafür die vollen Pfade aller zugrundeliegenden realen
+ * PDF-Dateien unter iter_parent (Dateisystem-Vorfahre mit parent==NULL
+ * je Anbindung), dedupliziert - mehrere Seiten/Anbindungen derselben
+ * Datei liefern denselben Pfad nur einmal.
+ *
+ * Regressions-Fund 18.09.2026 ("UI friert bei Klick auf Auszug ein!"):
+ * die erste Fassung nutzte hierfür get_filepart_from_iter() - genau wie
+ * zond_treeview_open_auszug() selbst - und rief damit
+ * sond_file_part_from_filepart() auf. Diese Funktion liest aber pro
+ * Segment tatsächlich die ersten 2048 Bytes der Datei (echte
+ * Inhaltserkennung statt Endungsraten, s. Doc-Kommentar an
+ * sond_file_part_from_filepart_leaf(), sond_fileparts.c) - bei einer
+ * noch nicht hydrierten SeaDrive-Datei löst schon DIESER Lesezugriff
+ * über sond_fopen() dessen (für den .sond_index.db-shm-Fall bewusst
+ * eingebaute, s. ToDo.c) synchrone Hydrierung-und-Retry-Logik aus und
+ * blockiert damit genau an der Stelle, die eigentlich erst noch geprüft
+ * werden sollte, ob sie blockieren würde. Fix: wie schon in
+ * zond_treeview_get_selected_fileparts_foreach() weiter unten (Task
+ * #93, "hydrierungsfreie Fileparts-Sammlung") auf
+ * sond_file_part_from_filepart_leaf() umgestellt - rein endungsbasiert,
+ * kein Dateizugriff. Liefert dafür immer SOND_TYPE_FILE_PART_LEAF-
+ * Objekte (nie SOND_TYPE_FILE_PART_PDF), PDF-Erkennung deshalb über den
+ * (endungsbasiert gesetzten) MIME-Typ-String statt SOND_IS_FILE_PART_PDF().
+ *
+ * Rückgabe: neu allokiertes GPtrArray* mit g_free-baren gchar*-
+ * Einträgen (auch bei 0 Treffern nie NULL), vom Aufrufer per
+ * g_ptr_array_free(arr, TRUE) freizugeben. NULL nur bei echtem Fehler
+ * (*error gesetzt). */
+static GPtrArray* zond_treeview_auszug_collect_paths(ZondTreeview *ztv,
+		GtkTreeIter *iter_parent, const gchar *root, GError **error) {
+	GtkTreeModel *model = gtk_tree_view_get_model(GTK_TREE_VIEW(ztv));
+	GtkTreeIter iter_tmp = { 0 };
+	GHashTable *ht_seen = NULL;
+	GPtrArray *paths = g_ptr_array_new_with_free_func(g_free);
+
+	if (!gtk_tree_model_iter_nth_child(model, &iter_tmp, iter_parent, 0))
+		return paths;
+
+	ht_seen = g_hash_table_new(g_str_hash, g_str_equal);
+
+	do {
+		gchar *file_part = NULL;
+		gchar *section = NULL;
+		gint ret = 0;
+		SondFilePart *sfp = NULL;
+		SondFilePart *top = NULL;
+		const gchar *rel = NULL;
+		gboolean is_pdf = FALSE;
+
+		ret = zond_treeview_get_filepart_and_section(ztv, &iter_tmp,
+				&file_part, &section, error);
+		if (ret == -1) {
+			g_hash_table_destroy(ht_seen);
+			g_ptr_array_free(paths, TRUE);
+			return NULL;
+		}
+		g_free(section);
+
+		if (!file_part)
+			continue;
+
+		sfp = sond_file_part_from_filepart_leaf(file_part, error);
+		g_free(file_part);
+		if (!sfp) {
+			g_hash_table_destroy(ht_seen);
+			g_ptr_array_free(paths, TRUE);
+			return NULL;
+		}
+
+		is_pdf = SOND_IS_FILE_PART_LEAF(sfp) &&
+				!g_strcmp0(sond_file_part_leaf_get_mime_type(
+						SOND_FILE_PART_LEAF(sfp)), "application/pdf");
+
+		if (is_pdf) {
+			top = sfp;
+			while (sond_file_part_get_parent(top))
+				top = sond_file_part_get_parent(top);
+			rel = sond_file_part_get_path(top);
+
+			if (root && rel && *rel) {
+				gchar *full_path = g_strconcat(root, "/", rel, NULL);
+				if (g_hash_table_contains(ht_seen, full_path))
+					g_free(full_path);
+				else {
+					g_hash_table_add(ht_seen, full_path);
+					g_ptr_array_add(paths, full_path); /* Ownership -> paths;
+							ht_seen dient nur der Dedup-Prüfung (kein eigener
+							Destroy-Func gesetzt). */
+				}
+			}
+		}
+
+		g_object_unref(sfp);
+	} while (gtk_tree_model_iter_next(model, &iter_tmp));
+
+	g_hash_table_destroy(ht_seen);
+
+	return paths;
+}
+
+/* Wendet sond_seadrive_ensure_hydrated_multi() auf alle unter
+ * iter_parent hängenden PDF-Anbindungen an (s.
+ * zond_treeview_auszug_collect_paths() oben). Rückgabe: 0 = keine
+ * Hydrierung nötig, Aufrufer soll normal per
+ * zond_treeview_open_auszug() öffnen; 1 = Hydrierung wurde
+ * angestoßen bzw. Fortschrittsdialog gezeigt, Aufrufer soll sofort mit
+ * 0 zurückkehren, OHNE zu öffnen; -1 = echter Fehler (*error gesetzt),
+ * Aufrufer soll mit -1 zurückkehren. */
+static gint zond_treeview_auszug_ensure_hydrated(Projekt *zond,
+		ZondTreeview *ztv, GtkTreeIter *iter_parent, GError **error) {
+	SondTreeviewFM *stvfm_fs = NULL;
+	const gchar *root = NULL;
+	GPtrArray *paths = NULL;
+	gboolean is_local = TRUE;
+
+	if (!zond->treeview[BAUM_FS])
+		return 0;
+
+	stvfm_fs = SOND_TREEVIEWFM(zond->treeview[BAUM_FS]);
+	if (!sond_treeviewfm_is_seadrive_path(stvfm_fs))
+		return 0;
+
+	root = sond_treeviewfm_get_root(stvfm_fs);
+	if (!root)
+		return 0;
+
+	paths = zond_treeview_auszug_collect_paths(ztv, iter_parent, root, error);
+	if (!paths)
+		return -1;
+
+	if (paths->len > 0)
+		is_local = sond_seadrive_ensure_hydrated_multi(
+				GTK_WINDOW(zond->app_window), paths);
+
+	g_ptr_array_free(paths, TRUE);
+
+	return is_local ? 0 : 1;
+}
+#endif
+
 static gint zond_treeview_open_auszug(ZondTreeview* ztv, GtkTreeIter* iter_parent,
 		GtkTreeIter* iter_pos, gboolean end, DisplayedDocument** dd, PdfPos* pdf_pos,
 		GError** error) {
@@ -2668,6 +2816,83 @@ static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 
 	zond_tree_store_get_iter_target(iter, &iter_target);
 	baum = zond_tree_store_get_root(zond_tree_store_get_tree_store(&iter_target));
+
+#ifdef _WIN32
+	/* Nutzer-Fund 18.09.2026: Doppelklick auf eine noch nicht hydrierte
+	 * SeaDrive-Datei im Bestands-/Auswertungsverzeichnis blockierte die
+	 * UI genauso, wie es vor dem BAUM_FS-Fix (s. sond_treeviewfm_open(),
+	 * sond_treeviewfm.c, ToDo.c) dort der Fall war - der dortige Check
+	 * fehlte hier komplett, weil das Öffnen über einen ganz anderen
+	 * Code-Pfad läuft (Anbindung/DB statt BAUM_FS-Baum).
+	 *
+	 * Regressions-Fund 18.09.2026 ("Hatten wir das nicht schon
+	 * behandelt?"): der ERSTE Fix hierfür (s. Versionsgeschichte) prüfte
+	 * erst NACH get_filepart_from_iter() - aber genau DIESE Funktion
+	 * ruft über sond_file_part_from_filepart() bereits
+	 * sond_file_part_create() auf, das pro Segment die ersten 2048 Bytes
+	 * der Datei für echte Inhaltserkennung liest (s. ausführl. Doc-
+	 * Kommentar an sond_file_part_from_filepart_leaf(), sond_fileparts.c)
+	 * - bei einer noch nicht hydrierten Datei löste schon DIESER
+	 * Lesezugriff über sond_fopen() dessen synchrone Hydrierung-und-
+	 * Retry-Logik aus und blockierte damit VOR dem eigentlichen Check.
+	 * Exakt derselbe Fehler wie beim Auszug-Fall (Task/ToDo-Eintrag
+	 * "Regression: Auszug-Hydrierungscheck fror UI selbst ein" weiter
+	 * oben) - dort schon korrigiert, hier beim eigentlichen
+	 * Einzeldatei-Pfad aber übersehen, weil die eigenen Tests offenbar
+	 * zufällig auf bereits lokalen Dateien liefen.
+	 *
+	 * Fix: der Check läuft jetzt VOR get_filepart_from_iter() und nutzt
+	 * dafür (wie beim Auszug-Fall) NUR
+	 * zond_treeview_get_filepart_and_section() (reine DB-/Baum-Abfrage,
+	 * kein Dateizugriff) statt eines schon aufgebauten SondFilePart -
+	 * der Dateisystem-Vorfahre wird hier direkt aus dem file_part-String
+	 * bestimmt (Teil vor einem evtl. "//", analog
+	 * zond_treeview_get_seadrive_badge() weiter oben), ganz ohne
+	 * SondFilePart-Objekt und damit ganz ohne den riskanten
+	 * Byte-Lesezugriff. get_filepart_from_iter() (mit dem echten
+	 * Inhaltssniffing) wird erst NACH einem positiven Hydrierungs-Check
+	 * aufgerufen, wenn die Datei nachweislich schon lokal ist.
+	 *
+	 * Deckt den Fall ab, in dem der Klick direkt auf eine Anbindung
+	 * trifft. Der Auszug-Fall (Klick auf einen Strukturpunkt im
+	 * Auswertungsverzeichnis - s. zond_treeview_open_auszug() unten)
+	 * wird weiterhin separat behandelt, direkt vor den beiden
+	 * Aufrufstellen von zond_treeview_open_auszug() weiter unten
+	 * (zond_treeview_auszug_ensure_hydrated()/_collect_paths()) - dort
+	 * mit sond_seadrive_ensure_hydrated_multi() statt der hier
+	 * verwendeten Einzeldatei-Variante. */
+	SondTreeviewFM *stvfm_fs = SOND_TREEVIEWFM(zond->treeview[BAUM_FS]);
+
+	if (sond_treeviewfm_is_seadrive_path(stvfm_fs)) {
+		const gchar *root = sond_treeviewfm_get_root(stvfm_fs);
+		gchar *file_part = NULL;
+		gint ret = 0;
+
+		ret = zond_treeview_get_filepart_and_section(
+				ZOND_TREEVIEW(zond->treeview[baum]), &iter_target,
+				&file_part, NULL, error);
+		if (ret == -1)
+			return -1;
+
+		if (root && file_part) {
+			const gchar *sep = g_strstr_len(file_part, -1, "//");
+			gchar *rel = sep ? g_strndup(file_part, sep - file_part)
+					: g_strdup(file_part);
+			gchar *full_path = g_strconcat(root, "/", rel, NULL);
+			gboolean is_local = sond_seadrive_ensure_hydrated(
+					GTK_WINDOW(zond->app_window), full_path);
+			g_free(rel);
+			g_free(full_path);
+
+			if (!is_local) {
+				g_free(file_part);
+				return 0;
+			}
+		}
+		g_free(file_part);
+	}
+#endif
+
 	rc = get_filepart_from_iter(ZOND_TREEVIEW(zond->treeview[baum]),
 			&iter_target, &sfp, &anbindung_node, &node_id, error);
 	if (rc)
@@ -2693,6 +2918,16 @@ static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 			return -1;
 	}
 	else if (!sfp) { //Klick im Auswertungsverzeichnis, Ziel ist Strukturpunkt -> Auszug der Ziel-Kinder
+#ifdef _WIN32
+		{
+			gint hyd_rc = zond_treeview_auszug_ensure_hydrated(zond,
+					ZOND_TREEVIEW(zond->treeview[baum]), &iter_target, error);
+			if (hyd_rc == -1)
+				return -1;
+			if (hyd_rc == 1)
+				return 0;
+		}
+#endif
 		rc = zond_treeview_open_auszug(ZOND_TREEVIEW(zond->treeview[baum]),
 				&iter_target, NULL, (zond->state & GDK_MOD1_MASK), &dd, &pdf_pos, error);
 		if (rc) {
@@ -2736,6 +2971,18 @@ static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 		if (auszug) {
 			//Elternknoten = Strukturpunkt -> Auszug mit Geschwistern der Klickposition
 			g_object_unref(sfp);
+
+#ifdef _WIN32
+			{
+				gint hyd_rc = zond_treeview_auszug_ensure_hydrated(zond,
+						ZOND_TREEVIEW(zond->treeview[BAUM_AUSWERTUNG]),
+						&iter_parent, error);
+				if (hyd_rc == -1)
+					return -1;
+				if (hyd_rc == 1)
+					return 0;
+			}
+#endif
 
 			rc = zond_treeview_open_auszug(ZOND_TREEVIEW(zond->treeview[BAUM_AUSWERTUNG]),
 					&iter_parent, iter, (zond->state & GDK_MOD1_MASK), &dd, &pdf_pos, error);

@@ -264,6 +264,11 @@ void     sond_treeviewfm_seadrive_item_hydrated(SondTreeviewFM*, const gchar *fu
 gboolean sond_treeviewfm_seadrive_stop_requested(SondTreeviewFM*);
 void     sond_treeviewfm_seadrive_start_watcher(SondTreeviewFM*);
 void     sond_treeviewfm_seadrive_stop_watcher(SondTreeviewFM*);
+/* Nicht-blockierende Variante für sond_treeviewfm_set_root() (Projekt
+ * schließen/wechseln) - s. ausführlichen Kommentar in sond_treeviewfm.c.
+ * NICHT verwenden, wenn stvfm selbst im Anschluss zerstört wird
+ * (finalize() nutzt weiterhin die blockierende Variante). */
+void     sond_treeviewfm_seadrive_stop_watcher_async(SondTreeviewFM*);
 #endif
 
 G_END_DECLS

@@ -818,10 +818,42 @@ static GtkWidget* show_surface_viewer(cairo_surface_t *surface, int width, int h
     return viewer->window;
 }
 
+/* Nutzer-Fund 18.09.2026: eine Rohdatei mit .eml-Inhalt, aber ohne von
+ * der MIME-Erkennung erkannte Header (Dateiname "Message", ohne
+ * Erweiterung) wurde als text/plain statt message/rfc822 eingestuft und
+ * lief deshalb über render_plain_text() -> render_text_to_surface()
+ * statt über render_gmessage(). Das Öffnen fror die UI daraufhin
+ * komplett ein - Stack-Trace (Nutzer, per Debugger-Suspend) zeigte den
+ * Hänger NICHT in der Dateierkennung, sondern in
+ * pango_layout_get_pixel_size() unten: Base64-kodierte Anhänge im
+ * Rohtext ergeben extrem lange, leerzeichen-/umbruchpunktfreie
+ * "Wörter" - für so etwas brauchen Pango/HarfBuzz beim Zeilenumbruch/
+ * Shaping pathologisch lange (praktisch nie endende) Zeit. Die
+ * bestehende max_height-Begrenzung weiter unten greift erst NACH dieser
+ * Berechnung und schützt daher nicht davor.
+ *
+ * Fix: text hier hart auf eine Zeichen-Obergrenze kappen, BEVOR er an
+ * Pango geht - unabhängig von der eigentlichen Ursache (Fehlerkennung
+ * als Plaintext, ein wirklich riesiger Logfile, o.ä.). Zentral hier statt
+ * in den einzelnen Aufrufern (render_html/_plain_text/_doc/...), damit
+ * alle Aufrufer einheitlich geschützt sind. searchable_text bleibt bei
+ * allen Aufrufern bewusst der volle, ungekappte Text (analog zur schon
+ * bestehenden max_height-Kappung, die ebenfalls nur die Anzeige, nicht
+ * die Volltextsuche einschränkt). */
+#define SOND_RENDER_TEXT_MAX_CHARS 300000
+
 static cairo_surface_t* render_text_to_surface(
         const char *text, PangoAttrList *attrs,
         int width, int max_height,
         int *out_height) {
+    gchar *truncated_copy = NULL;
+
+    if (text && g_utf8_strlen(text, -1) > SOND_RENDER_TEXT_MAX_CHARS) {
+        const gchar *cut = g_utf8_offset_to_pointer(text,
+                SOND_RENDER_TEXT_MAX_CHARS);
+        truncated_copy = g_strndup(text, cut - text);
+        text = truncated_copy;
+    }
 
     /* Höhe berechnen */
     cairo_surface_t *tmp = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
@@ -837,8 +869,8 @@ static cairo_surface_t* render_text_to_surface(
     cairo_destroy(tmp_cr);
     cairo_surface_destroy(tmp);
 
-    gboolean truncated = (ph > max_height);
-    if (truncated) ph = max_height;
+    gboolean truncated = (ph > max_height) || (truncated_copy != NULL);
+    if (ph > max_height) ph = max_height;
     int height = ph + 20;
     if (out_height) *out_height = truncated ? max_height + 1 : height;
 
@@ -851,6 +883,7 @@ static cairo_surface_t* render_text_to_surface(
                  width, height,
                  cairo_status_to_string(cairo_surface_status(surface)));
         cairo_surface_destroy(surface);
+        g_free(truncated_copy);
         return NULL;
     }
 
@@ -879,6 +912,7 @@ static cairo_surface_t* render_text_to_surface(
 	g_object_unref(layout);
 
 	cairo_destroy(cr);
+    g_free(truncated_copy);
     return surface;
 }
 

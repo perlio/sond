@@ -1277,7 +1277,7 @@ void cb_pv_seiten_einfuegen(GtkMenuItem *item, gpointer data) {
 		gchar *path_merge = NULL;
 
 		//Datei auswählen
-		path_merge = filename_oeffnen(GTK_WINDOW(pv->vf));
+		path_merge = filename_oeffnen(GTK_WINDOW(pv->vf), NULL);
 
 		sfp = sond_file_part_from_filepart(path_merge, &error);
 		g_free(path_merge);

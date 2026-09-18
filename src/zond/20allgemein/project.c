@@ -898,6 +898,52 @@ gint project_open(Projekt *zond, const gchar *abs_path, gboolean create, GError 
 		}
 	}
 
+#ifdef _WIN32
+	/* Nutzer-Fund 18.09.2026: "Wenn die Index-DB nicht hydriert ist,
+	 * öffnet das Projekt nicht." - sond_process_file_create_wctx() unten
+	 * ruft über sond_index_ctx_new() (sond_index.c) sqlite3_open() auf
+	 * die eigene Volltextindex-Datenbank (.sond_index.db) auf. SQLite
+	 * nutzt dafür SEINE EIGENE Windows-VFS - anders als bei der
+	 * .sond_index.db-shm-Begleitdatei (s. ToDo.c, sond_fopen()) greift
+	 * hier also weder sond_fopen() noch dessen dort eingebaute
+	 * Hydrierung-und-Retry-Logik, das schlägt bei einem nicht
+	 * hydrierten SeaDrive-Platzhalter einfach mit "unable to open
+	 * database file" fehl. Da SQLite grundsätzlich keinen
+	 * partiellen/gestreamten Zugriff auf eine Cloud-Datei unterstützt,
+	 * MUSS die Datei vollständig lokal vorliegen, bevor sqlite3_open()
+	 * überhaupt versucht wird - anders als beim Öffnen einer einzelnen
+	 * Nutzer-Datei (dort Fire-and-forget + sofortige Rückkehr an die UI
+	 * möglich, s. sond_treeviewfm_open()) gibt es hier keine Alternative
+	 * zu synchronem (blockierendem) Warten: ohne geöffnete Index-DB kann
+	 * das Projekt nicht sinnvoll weiterladen. Geprüft werden alle drei
+	 * möglichen Dateien (.sond_index.db selbst sowie die SQLite-eigenen
+	 * WAL-Begleitdateien -wal/-shm, die nur existieren, wenn beim
+	 * letzten Schließen kein Checkpoint durchlief) - für ein neues
+	 * Projekt (Datei existiert noch nicht) liefert sond_seadrive_needs_
+	 * hydration() dabei einfach FALSE, kein Sonderfall nötig. */
+	if (sond_treeviewfm_is_seadrive_path(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]))) {
+		static const gchar *index_db_suffixes[] = { "", "-wal", "-shm" };
+		guint i;
+
+		for (i = 0; i < G_N_ELEMENTS(index_db_suffixes); i++) {
+			gchar *full_path = g_strdup_printf("%s/.sond_index.db%s",
+					zond->project_dir, index_db_suffixes[i]);
+
+			if (sond_seadrive_needs_hydration(full_path)) {
+				GError *error_hydrate = NULL;
+
+				if (!sond_seadrive_hydrate(full_path, &error_hydrate)) {
+					LOG_WARN("%s: sond_seadrive_hydrate('%s'): %s", __func__,
+							full_path,
+							error_hydrate ? error_hydrate->message : "?");
+					g_clear_error(&error_hydrate);
+				}
+			}
+			g_free(full_path);
+		}
+	}
+#endif
+
 	gchar* datadir = g_build_filename(zond->exe_dir, "../share/tessdata", NULL);
 	gchar* embedding_model_path = resolve_model_path(zond, "embedding-model-path",
 			"Qwen3-Embedding-0.6B-Q8_0.gguf");
@@ -965,12 +1011,26 @@ static gint project_confirm_switch(Projekt *zond) {
  */
 gint project_load(Projekt* zond, GError** error) {
 	gint rc = 0;
+	gchar *start_dir = NULL;
 
 	rc = project_confirm_switch(zond);
 	if (rc)
 		return 0;
 
-	gchar *abs_path = filename_oeffnen(GTK_WINDOW(zond->app_window));
+	/* Nutzer-Fund 18.09.2026: "der Zeitverlust ist der gleiche, bis
+	 * Öffnen das Verzeichnis anzeigt" - s. ausführlichen Kommentar an
+	 * filename_oeffnen() (misc.c). Das noch (project_close() läuft erst
+	 * gleich in project_open()) geöffnete Projekt kennt sein eigenes
+	 * project_dir (das komplette, ggf. riesige SeaDrive-Fallakten-
+	 * verzeichnis) - dessen ELTERNverzeichnis (typischerweise nur eine
+	 * Handvoll Fallakten-Ordner) ist ein deutlich günstigerer Startpunkt
+	 * für den Dateiauswahldialog als das zufällige aktuelle
+	 * Arbeitsverzeichnis. */
+	if (zond->project_dir)
+		start_dir = g_path_get_dirname(zond->project_dir);
+
+	gchar *abs_path = filename_oeffnen(GTK_WINDOW(zond->app_window), start_dir);
+	g_free(start_dir);
 	if (!abs_path)
 		return 0;
 
