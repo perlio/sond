@@ -52,6 +52,8 @@ typedef struct {
 	SondFilePart* parent; //NULL, wenn Datei in fs
 	GPtrArray* arr_opened_files; //Kinder, wenn sfp Kinder haben kann (pdf, zip, GMessage)
 	gboolean has_children;
+	/* s. Doc-Kommentar an sond_file_part_get_is_attachment() (sond_fileparts.h) */
+	gboolean is_attachment;
 } SondFilePartPrivate;
 
 G_DEFINE_TYPE_WITH_PRIVATE(SondFilePart, sond_file_part, G_TYPE_OBJECT)
@@ -351,6 +353,28 @@ void sond_file_part_set_has_children(SondFilePart *sfp, gboolean children) {
 	sfp_priv = sond_file_part_get_instance_private(sfp);
 
 	sfp_priv->has_children = children;
+
+	return;
+}
+
+gboolean sond_file_part_get_is_attachment(SondFilePart *sfp) {
+	SondFilePartPrivate* sfp_priv = NULL;
+
+	g_return_val_if_fail(sfp, FALSE);
+
+	sfp_priv = sond_file_part_get_instance_private(sfp);
+
+	return sfp_priv->is_attachment;
+}
+
+void sond_file_part_set_is_attachment(SondFilePart *sfp, gboolean is_attachment) {
+	SondFilePartPrivate* sfp_priv = NULL;
+
+	g_return_if_fail(sfp);
+
+	sfp_priv = sond_file_part_get_instance_private(sfp);
+
+	sfp_priv->is_attachment = is_attachment;
 
 	return;
 }

@@ -208,15 +208,15 @@ static gint ask_ocr_mode(GtkWindow *parent) {
 	return mode;
 }
 
-gboolean zond_index_erstellen_ht(Projekt *zond, GHashTable *ht_index) {
+/* Gemeinsamer Kern von zond_index_erstellen_ht() (fragt den OCR-Modus
+ * selbst ab, für alle Aufrufer außer "Index erstellen (Gesamtes Projekt)")
+ * - dort (do_index_erstellen_gesamt()) muss der Modus schon VOR der
+ * Fileparts-Sammlung feststehen (Verzeichnis-Kurzschluss, Task #100, s.
+ * dortigen Kommentar), wird also vorher abgefragt und hier direkt
+ * durchgereicht statt erneut nachgefragt zu werden. */
+static gboolean zond_index_erstellen_ht_mit_modus(Projekt *zond,
+		GHashTable *ht_index, gint ocr_mode) {
 	InfoWindow *info_window = NULL;
-	gint ocr_mode = 0;
-
-	ocr_mode = ask_ocr_mode(GTK_WINDOW(zond->app_window));
-	if (ocr_mode == -1) {
-		g_hash_table_destroy(ht_index);
-		return FALSE;
-	}
 
 	zond->wctx->ocr_mode = ocr_mode;
 	info_window = info_window_open(zond->app_window, &zond->wctx->cancel,
@@ -260,6 +260,17 @@ gboolean zond_index_erstellen_ht(Projekt *zond, GHashTable *ht_index) {
 	return TRUE;
 }
 
+gboolean zond_index_erstellen_ht(Projekt *zond, GHashTable *ht_index) {
+	gint ocr_mode = ask_ocr_mode(GTK_WINDOW(zond->app_window));
+
+	if (ocr_mode == -1) {
+		g_hash_table_destroy(ht_index);
+		return FALSE;
+	}
+
+	return zond_index_erstellen_ht_mit_modus(zond, ht_index, ocr_mode);
+}
+
 /* Welcher Baum hat gerade tatsächlich eine (nicht-leere) Auswahl?
  *
  * Vorher wurde hier zond->baum_prev ("zuletzt aktiver Baum", gesetzt in
@@ -279,12 +290,27 @@ static Baum zond_baum_mit_auswahl(Projekt *zond) {
 	return KEIN_BAUM;
 }
 
+/* Nutzer-Wunsch 16.09.2026 (Task #100): Verzeichnis-Kurzschluss analog
+ * "Index durchsuchen" (scan_coverage_gaps_fs(), zond_indexsuche.c) auch
+ * hier für "Gesamtes Projekt" - ein bereits vollständig indizierter
+ * Verzeichnis-Ast wird gar nicht erst per readdir aufgeschlüsselt (s.
+ * zond_treeviewfm_item_get_fileparts_readdir()). Dafür muss der OCR-Modus
+ * schon VOR der Sammlung feststehen (anders als bei allen anderen
+ * Aufrufern von zond_index_erstellen_ht(), die ihn erst NACH der Sammlung
+ * abfragen): bei "erzwingen" darf kein Ast übersprungen werden, ein
+ * bereits abgedeckter Ast muss dann trotzdem erneut durchlaufen werden. */
 static void do_index_erstellen_gesamt(Projekt *zond) {
 	GError *error = NULL;
 	GHashTable *ht_index = NULL;
+	gint ocr_mode = 0;
+
+	ocr_mode = ask_ocr_mode(GTK_WINDOW(zond->app_window));
+	if (ocr_mode == -1)
+		return;
 
 	ht_index = zond_treeviewfm_get_fileparts(
-			ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), FALSE, FALSE, &error);
+			ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), FALSE, FALSE,
+			ocr_mode != SOND_OCR_MODE_FORCE, &error);
 	if (!ht_index) {
 		display_message(zond->app_window, "Fehler beim Erstellen des Index:\n",
 				error->message, NULL);
@@ -292,7 +318,7 @@ static void do_index_erstellen_gesamt(Projekt *zond) {
 		return;
 	}
 
-	zond_index_erstellen_ht(zond, ht_index);
+	zond_index_erstellen_ht_mit_modus(zond, ht_index, ocr_mode);
 }
 
 /* Gemeinsame Logik fuer "Index erstellen (Auswahl)", aufgerufen aus den
@@ -311,7 +337,8 @@ void zond_index_erstellen_activate_fuer_baum(Projekt *zond, Baum baum) {
 
 	if (baum == BAUM_FS)
 		ht_index = zond_treeviewfm_get_fileparts(
-				ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), TRUE, TRUE, &error);
+				ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), TRUE, TRUE, FALSE,
+				&error);
 	else
 		ht_index = zond_treeview_get_selected_fileparts(
 				ZOND_TREEVIEW(zond->treeview[baum]), TRUE, &error);
@@ -395,7 +422,26 @@ static void zond_index_loeschen_ht(Projekt *zond, GHashTable *ht_index) {
 	while (g_hash_table_iter_next(&iter, &key, &value)) {
 		SondFilePart *sfp = SOND_FILE_PART(key);
 		SondPageRange *range = (SondPageRange*) value; /* NULL = ganze Datei */
-		gchar *file_part = sond_file_part_get_filepart(sfp);
+		gchar *file_part_raw = sond_file_part_get_filepart(sfp);
+		/* Der "Message"-Knoten einer E-Mail teilt sich denselben SondFilePart
+		 * mit der ganzen .eml-Datei (s. zond_treeviewfm_item_get_fileparts(),
+		 * Schritt 2/6, ToDo.c 17.09.2026) - sond_file_part_get_filepart()
+		 * liefert dafür also nur den nackten Dateinamen, ohne "//header".
+		 * Ohne diese Umrechnung würde "Index löschen" für den Message-Knoten
+		 * fälschlich die GANZE .eml als "ganze Datei" an delete_index()
+		 * übergeben: hat "mail.eml" selbst einen coverage-Eintrag (aus dem
+		 * Ganze-Datei-Indizierlauf), träfe das Fall 1 in
+		 * coverage_invalidate() (Vorfahre == path selbst) - der Eintrag wird
+		 * dort einfach gelöscht, OHNE die Geschwister-Rekonstruktion aus
+		 * Fall 2, die nur greift, wenn path selbst NICHT der eigene
+		 * coverage-Träger ist. Ergebnis: Message- UND alle Mimepart-Badges
+		 * verschwinden - genau der von Nutzer gemeldete Bug (17.09.2026, s.
+		 * ToDo.c). Analog zu coverage_key in sond_process_fileparts()
+		 * (sond_process_file.c) muss deshalb auch hier für gmessage_header_only
+		 * der Pfad "file_part//header" verwendet werden - derselbe Pfad, unter
+		 * dem sond_index() den Header tatsächlich abgelegt/abgedeckt hat. */
+		gchar *file_part = (range && range->gmessage_header_only) ?
+				g_strdup_printf("%s//header", file_part_raw) : file_part_raw;
 		GError *error = NULL;
 
 		if (!sond_index_ctx_delete_index(zond->wctx->index_ctx, file_part,
@@ -405,7 +451,8 @@ static void zond_index_loeschen_ht(Projekt *zond, GHashTable *ht_index) {
 					file_part, error ? error->message : "?");
 			g_clear_error(&error);
 		}
-		g_free(file_part);
+		if (file_part != file_part_raw) g_free(file_part);
+		g_free(file_part_raw);
 	}
 
 	g_hash_table_destroy(ht_index);
@@ -431,7 +478,8 @@ void zond_index_loeschen_activate_fuer_baum(Projekt *zond, Baum baum) {
 
 	if (baum == BAUM_FS)
 		ht_index = zond_treeviewfm_get_fileparts(
-				ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), TRUE, TRUE, &error);
+				ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), TRUE, TRUE, FALSE,
+				&error);
 	else
 		ht_index = zond_treeview_get_selected_fileparts(
 				ZOND_TREEVIEW(zond->treeview[baum]), TRUE, &error);

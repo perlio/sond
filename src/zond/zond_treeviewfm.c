@@ -1095,11 +1095,35 @@ static gint zond_treeviewfm_get_text_from_section(SondTVFMItem* stvfm_item,
  * gesetzt) - dafür bleibt der bisherige, echte Weg unverändert, s.
  * zond_treeviewfm_item_get_fileparts(). ToDo.c, 12.-14.09.2026. */
 gint zond_treeviewfm_item_get_fileparts_readdir(SondTreeviewFM *stvfm,
-		gchar const *rel_dir, GHashTable *ht, GError **error) {
+		gchar const *rel_dir, GHashTable *ht, gboolean skip_fully_covered,
+		GError **error) {
 	gchar const *root = sond_treeviewfm_get_root(stvfm);
 	gchar *path_dir = NULL;
 	SondDir *dir = NULL;
 	gchar const *filename = NULL;
+
+	/* Nutzer-Wunsch 16.09.2026 (Task #100): derselbe Verzeichnis-
+	 * Kurzschluss wie in scan_coverage_gaps_fs() (zond_indexsuche.c) - ein
+	 * bereits vollständig indizierter Ast wird gar nicht erst per readdir
+	 * aufgeschlüsselt, erneutes Indizieren wäre per Definition von
+	 * "Coverage" ein No-Op. rel_dir == NULL (Projektwurzel) wird nie
+	 * geprüft - Coverage wird nie über die oberste Ebene hinaus
+	 * zusammengefasst (sond_index_ctx_coverage_try_collapse()), ein
+	 * Eintrag fürs ganze Projekt existiert also nie. Der Aufrufer trägt
+	 * die Verantwortung, skip_fully_covered nicht zu setzen, wenn der
+	 * OCR-Modus "erzwingen" ist (s. Doc-Kommentar im Header). */
+	if (skip_fully_covered && rel_dir) {
+		ZondTreeviewFMPrivate *priv =
+				zond_treeviewfm_get_instance_private(ZOND_TREEVIEWFM(stvfm));
+
+		if (priv->zond->wctx && priv->zond->wctx->index_ctx) {
+			SondIndexStatus status = sond_index_ctx_get_dir_status(
+					priv->zond->wctx->index_ctx, rel_dir);
+
+			if (status == SOND_INDEX_STATUS_FULL)
+				return 0; /* ganzer Ast abgedeckt - nichts zu tun */
+		}
+	}
 
 	path_dir = rel_dir ? g_strconcat(root, "/", rel_dir, NULL) : g_strdup(root);
 	dir = sond_dir_open(path_dir, error);
@@ -1126,7 +1150,7 @@ gint zond_treeviewfm_item_get_fileparts_readdir(SondTreeviewFM *stvfm,
 
 		if (S_ISDIR(st.st_mode)) {
 			gint rc = zond_treeviewfm_item_get_fileparts_readdir(stvfm,
-					rel_path_child, ht, error);
+					rel_path_child, ht, skip_fully_covered, error);
 			g_free(rel_path_child);
 			if (rc) {
 				sond_dir_close(dir);
@@ -1148,7 +1172,8 @@ gint zond_treeviewfm_item_get_fileparts_readdir(SondTreeviewFM *stvfm,
 }
 
 static gint zond_treeviewfm_item_get_fileparts(SondTVFMItem *stvfm_item,
-		GHashTable *ht, gboolean reject_unterseitig, GError **error) {
+		GHashTable *ht, gboolean reject_unterseitig,
+		gboolean skip_fully_covered, GError **error) {
 	SondTVFMItemType type = sond_tvfm_item_get_item_type(stvfm_item);
 	gchar const *path_or_section = sond_tvfm_item_get_path_or_section(stvfm_item);
 	SondFilePart *sond_file_part = sond_tvfm_item_get_sond_file_part(stvfm_item);
@@ -1159,7 +1184,7 @@ static gint zond_treeviewfm_item_get_fileparts(SondTVFMItem *stvfm_item,
 	if (type == SOND_TVFM_ITEM_TYPE_DIR && !sond_file_part) {
 		return zond_treeviewfm_item_get_fileparts_readdir(
 				sond_tvfm_item_get_stvfm(stvfm_item), path_or_section, ht,
-				error);
+				skip_fully_covered, error);
 	}
 	//Innerhalb eines Containers (ZIP/E-Mail/PDF mit Einbettungen), nur über
 	//eine explizite Auswahl darin erreichbar - unverändert der bisherige,
@@ -1177,7 +1202,7 @@ static gint zond_treeviewfm_item_get_fileparts(SondTVFMItem *stvfm_item,
 			SondTVFMItem *child = g_ptr_array_index(arr_children, i);
 
 			rc = zond_treeviewfm_item_get_fileparts(child, ht,
-					reject_unterseitig, error);
+					reject_unterseitig, skip_fully_covered, error);
 			if (rc)
 				return -1;
 		}
@@ -1214,6 +1239,18 @@ static gint zond_treeviewfm_item_get_fileparts(SondTVFMItem *stvfm_item,
 					(anbindung.bis.seite == 0 && anbindung.bis.index == 0) ?
 							anbindung.von.seite : anbindung.bis.seite);
 		}
+		else if (type == SOND_TVFM_ITEM_TYPE_LEAF && !path_or_section &&
+				SOND_IS_FILE_PART_GMESSAGE(sond_file_part)) {
+			/* Der "Message"-Knoten einer E-Mail: type==LEAF, path_or_section
+			 * ist NULL (der "//message"-Marker wird beim Erzeugen des Items
+			 * sofort gelöscht, s. sond_tvfm_item_create()), und sond_file_part
+			 * ist derselbe SondFilePart wie der der gesamten eml - eindeutig
+			 * unterscheidbar von "das ganze Dir/die ganze Datei" nur über
+			 * diesen Item-Typ zum Zeitpunkt der Auswahl (s. ToDo.c,
+			 * 17.09.2026, E-Mail-Coverage-Redesign, Schritt 2/6). Statt der
+			 * ganzen Mail wird für diesen Eintrag nur der Header indiziert. */
+			range = sond_page_range_new_gmessage_header();
+		}
 
 		g_hash_table_insert(ht, g_object_ref(sond_file_part), range);
 	}
@@ -1224,6 +1261,7 @@ static gint zond_treeviewfm_item_get_fileparts(SondTVFMItem *stvfm_item,
 typedef struct {
 	GHashTable *ht;
 	gboolean reject_unterseitig;
+	gboolean skip_fully_covered;
 } ZtvfmGetFilepartsData;
 
 static gint zond_treeviewfm_get_fileparts_foreach(SondTreeview *stv,
@@ -1235,7 +1273,7 @@ static gint zond_treeviewfm_get_fileparts_foreach(SondTreeview *stv,
 	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(stv)),
 			iter, 0, &stvfm_item, -1);
 	rc = zond_treeviewfm_item_get_fileparts(stvfm_item, gfd->ht,
-			gfd->reject_unterseitig, error);
+			gfd->reject_unterseitig, gfd->skip_fully_covered, error);
 	g_object_unref(stvfm_item);
 	if (rc)
 		return -1;
@@ -1244,14 +1282,15 @@ static gint zond_treeviewfm_get_fileparts_foreach(SondTreeview *stv,
 }
 
 GHashTable* zond_treeviewfm_get_fileparts(ZondTreeviewFM *ztvfm,
-		gboolean selected_only, gboolean reject_unterseitig, GError **error) {
+		gboolean selected_only, gboolean reject_unterseitig,
+		gboolean skip_fully_covered, GError **error) {
 	GHashTable *ht = NULL;
 	gint rc = 0;
 
 	ht = g_hash_table_new_full(NULL, NULL, g_object_unref, sond_page_range_free);
 
 	if (selected_only) {
-		ZtvfmGetFilepartsData gfd = { ht, reject_unterseitig };
+		ZtvfmGetFilepartsData gfd = { ht, reject_unterseitig, skip_fully_covered };
 
 		rc = sond_treeview_selection_foreach(SOND_TREEVIEW(ztvfm),
 				zond_treeviewfm_get_fileparts_foreach, &gfd, error);
@@ -1260,7 +1299,8 @@ GHashTable* zond_treeviewfm_get_fileparts(ZondTreeviewFM *ztvfm,
 				sond_tvfm_item_create(SOND_TREEVIEWFM(ztvfm), NULL, NULL);
 
 		/* "Gesamtes Projekt": nie ablehnen, s. Doc-Kommentar (Header). */
-		rc = zond_treeviewfm_item_get_fileparts(stvfm_item, ht, FALSE, error);
+		rc = zond_treeviewfm_item_get_fileparts(stvfm_item, ht, FALSE,
+				skip_fully_covered, error);
 		g_object_unref(stvfm_item);
 	}
 
@@ -1275,22 +1315,56 @@ GHashTable* zond_treeviewfm_get_fileparts(ZondTreeviewFM *ztvfm,
 /* Vfunc für sond_treeviewfm.c (Indizierungsstatus-Overlay): ein
  * LEAF_SECTION-Knoten in BAUM_FS ist bei zond immer eine Anbindung
  * (angelegt in ziele.c), deren path_or_section ein Seitenbereich-String
- * ist - dieselbe Auswertung wie in zond_treeviewfm_item_get_fileparts(). */
-static gboolean zond_treeviewfm_get_section_page_range(SondTVFMItem *stvfm_item,
-		gint *von_seite, gint *bis_seite) {
+ * ist - dieselbe Auswertung wie in zond_treeviewfm_item_get_fileparts().
+ *
+ * Nutzer-Einwand 16.09.2026: liefert jetzt den fertigen SondIndexStatus
+ * statt nur des Seitenbereichs (s. ausführlichen Doc-Kommentar an der
+ * vfunc-Deklaration in sond_treeviewfm.h) - "Section = Seitenbereich" ist
+ * eine zond/PDF-spezifische Interpretation, die hier (in der zond-Subklasse)
+ * hingehört und nicht in die generische Basisklasse gehört. Übernimmt dafür
+ * auch die Mime-Type-Prüfung von sond_treeviewfm_get_index_status() (Leaf-
+ * eigener, gesniffter Mime-Type bevorzugt, PDF/GMessage-Bypass) - dieselbe
+ * Logik wie dort, hier auf die zugrundeliegende Datei der Section
+ * angewandt. */
+static SondIndexStatus zond_treeviewfm_get_section_index_status(
+		SondTVFMItem *stvfm_item, SondIndexCtx *index_ctx) {
 	gchar const *section = sond_tvfm_item_get_path_or_section(stvfm_item);
+	SondFilePart *sfp = sond_tvfm_item_get_sond_file_part(stvfm_item);
 	Anbindung anbindung = { 0 };
+	gchar *coverage_path = NULL;
+	SondIndexStatus status = SOND_INDEX_STATUS_NONE;
+	gint von_seite = -1;
+	gint bis_seite = -1;
 
-	if (!section)
-		return FALSE;
+	if (!section || !sfp)
+		return SOND_INDEX_STATUS_NONE;
+
+	coverage_path = sond_file_part_get_filepart(sfp);
+	if (!coverage_path)
+		return SOND_INDEX_STATUS_NONE;
+
+	if (!SOND_IS_FILE_PART_PDF(sfp) && !SOND_IS_FILE_PART_GMESSAGE(sfp)) {
+		gchar const *mime_type = SOND_IS_FILE_PART_LEAF(sfp) ?
+				sond_file_part_leaf_get_mime_type(SOND_FILE_PART_LEAF(sfp)) :
+				mime_from_extension(coverage_path);
+
+		if (!sond_index_mime_type_supported(mime_type)) {
+			g_free(coverage_path);
+			return SOND_INDEX_STATUS_NONE;
+		}
+	}
 
 	anbindung_parse_file_section(section, &anbindung);
 
-	*von_seite = anbindung.von.seite;
-	*bis_seite = (anbindung.bis.seite == 0 && anbindung.bis.index == 0) ?
+	von_seite = anbindung.von.seite;
+	bis_seite = (anbindung.bis.seite == 0 && anbindung.bis.index == 0) ?
 			anbindung.von.seite : anbindung.bis.seite;
 
-	return TRUE;
+	status = sond_index_ctx_get_file_status(index_ctx, coverage_path, von_seite,
+			bis_seite);
+	g_free(coverage_path);
+
+	return status;
 }
 
 static void zond_treeviewfm_finalize(GObject *obj) {
@@ -1317,8 +1391,8 @@ static void zond_treeviewfm_class_init(ZondTreeviewFMClass *klass) {
 	SOND_TREEVIEWFM_CLASS(klass)->load_sections = zond_treeviewfm_load_sections;
 	SOND_TREEVIEWFM_CLASS(klass)->has_sections = zond_treeviewfm_has_sections;
 	SOND_TREEVIEWFM_CLASS(klass)->delete_section = zond_treeviewfm_delete_section;
-	SOND_TREEVIEWFM_CLASS(klass)->get_section_page_range =
-			zond_treeviewfm_get_section_page_range;
+	SOND_TREEVIEWFM_CLASS(klass)->get_section_index_status =
+			zond_treeviewfm_get_section_index_status;
 
 	/* Zond-spezifische GMenu-Sections einmalig fuer diese Klasse aufbauen */
 	SOND_TREEVIEW_CLASS(klass)->gmenu = g_menu_new();

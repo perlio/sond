@@ -42,9 +42,23 @@ void zond_treeviewfm_kill_parent(ZondTreeviewFM*, GtkTreeIter*);
  * erstellen/löschen (Auswahl) TRUE, für alle anderen Aufrufer
  * (Indexsuche) FALSE. Nur bei selected_only == TRUE relevant - bei
  * "Gesamtes Projekt" (selected_only == FALSE) wird nie geprüft, s.
- * ToDo.c (11.09.2026, Nutzerentscheidung). */
+ * ToDo.c (11.09.2026, Nutzerentscheidung).
+ *
+ * skip_fully_covered: Nutzer-Wunsch 16.09.2026, Verzeichnis-Kurzschluss
+ * analog scan_coverage_gaps_fs() (zond_indexsuche.c) jetzt auch für "Index
+ * erstellen (Gesamtes Projekt)". Nur bei selected_only == FALSE wirksam
+ * (nur dort steigt zond_treeviewfm_item_get_fileparts_readdir() rekursiv
+ * über "wirkliche" Verzeichnis-Äste ab): ein Ast, der laut
+ * sond_index_ctx_get_dir_status() bereits VOLLSTÄNDIG indiziert ist, wird
+ * gar nicht erst per readdir aufgeschlüsselt - erneutes Indizieren wäre
+ * per Definition von "Coverage" ein No-Op. Der Aufrufer muss dafür sorgen,
+ * dass dies NICHT gesetzt wird, wenn der OCR-Modus "erzwingen" ist (dort
+ * darf kein Ast übersprungen werden) - s. do_index_erstellen_gesamt()
+ * (headerbar.c), wo der OCR-Modus deshalb VOR diesem Aufruf abgefragt
+ * wird (vorher danach). Für alle anderen Aufrufer (Auswahl, Indexsuche,
+ * Lücken-Aufschlüsselung) bleibt es FALSE - unverändertes Verhalten. */
 GHashTable* zond_treeviewfm_get_fileparts(ZondTreeviewFM*, gboolean,
-		gboolean, GError**);
+		gboolean, gboolean, GError**);
 
 /* Reiner readdir-Scanner für einen "wirklichen" (nicht in einem Container
  * liegenden) Dateisystem-Ast - Kernstück von
@@ -56,9 +70,16 @@ GHashTable* zond_treeviewfm_get_fileparts(ZondTreeviewFM*, gboolean,
  * gefundenen Dateien (als SOND_TYPE_FILE_PART_LEAF, rein endungsbasierter
  * MIME-Typ, kein Dateizugriff) in ht ein (Value jeweils NULL = ganze
  * Datei) - ht muss vom Aufrufer mit passenden Destroy-Funktionen für
- * SondFilePart*-Keys angelegt sein. ToDo.c (12.-15.09.2026). */
+ * SondFilePart*-Keys angelegt sein. ToDo.c (12.-15.09.2026).
+ *
+ * skip_fully_covered: s. Kommentar an zond_treeviewfm_get_fileparts()
+ * oben - bei rel_dir == NULL (Projektwurzel) ohne Wirkung (Coverage wird
+ * nie über die oberste Ebene hinaus zusammengefasst, s.
+ * sond_index_ctx_coverage_try_collapse()). Von handle_coverage_gaps()
+ * bewusst mit FALSE aufgerufen: der dortige Ast ist per Definition schon
+ * als Lücke bekannt, ein erneuter Coverage-Check wäre sinnlos. */
 gint zond_treeviewfm_item_get_fileparts_readdir(SondTreeviewFM*,
-		gchar const*, GHashTable*, GError**);
+		gchar const*, GHashTable*, gboolean, GError**);
 
 G_END_DECLS
 

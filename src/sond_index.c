@@ -25,10 +25,13 @@
 #include <string.h>
 #include <math.h>
 
+#include <gmime/gmime.h>
+
 #include "sond_text_extract.h"
 #include "sond_ocr.h"
 #include "sond_log_and_error.h"
 #include "sond_file_helper.h"
+#include "sond_gmessage_helper.h"
 
 #ifdef SOND_WITH_EMBEDDINGS
 #include <llama.h>
@@ -1034,6 +1037,116 @@ gboolean sond_index_ctx_should_process_page(SondIndexCtx *ctx,
  * ======================================================================= */
 
 /*
+ * coverage_get_exact:
+ *
+ * Wie sond_index_ctx_coverage_get(), aber OHNE den Ahnen-Walk - liefert
+ * nur den Modus, wenn path SELBST einen coverage-Eintrag hat, sonst -1.
+ * Für das GMessage-bewusste Collapse/Invalidate unten (17.09.2026, s.
+ * ToDo.c) gebraucht: dort werden gezielt die erwarteten Kind-Pfade
+ * ("x.eml//header", "x.eml//0", ...) einzeln geprüft - ein Ahnen-Walk
+ * würde dabei (bei verschachtelten Containern) unter Umständen fälschlich
+ * bei einem GANZ ANDEREN, weiter oben liegenden Vorfahren landen (derselbe
+ * Mechanismus, der den ursprünglichen Bug verursacht hat, s.
+ * sond_index_ctx_coverage_invalidate()-Kommentar) - hier ist aber
+ * ausschließlich der EXAKTE Zustand des jeweiligen Kindes von Interesse.
+ */
+static gint coverage_get_exact(SondIndexCtx *ctx, gchar const *path) {
+    sqlite3_stmt *stmt   = NULL;
+    gint          result = -1;
+
+    if (!ctx || !path)
+        return -1;
+
+    if (sqlite3_prepare_v2(ctx->db,
+            "SELECT ocr_mode FROM coverage WHERE path = ?", -1, &stmt, NULL)
+            != SQLITE_OK)
+        return -1;
+
+    sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(stmt) == SQLITE_ROW)
+        result = sqlite3_column_int(stmt, 0);
+    sqlite3_finalize(stmt);
+
+    return result;
+}
+
+/*
+ * gmessage_container_boundary:
+ *
+ * Sucht das LETZTE "//"-Vorkommen in path (die Container-Grenze der
+ * unmittelbar umgebenden E-Mail, s. Konvention bei
+ * sond_file_part_get_filepart()). Liefert NULL, wenn path kein "//"
+ * enthält (reiner Dateisystem-Pfad).
+ */
+static gchar* gmessage_find_last_boundary(gchar const *path) {
+    gchar *last = NULL;
+    gchar *p    = (gchar *) path;
+
+    while ((p = strstr(p, "//"))) {
+        last = p;
+        p += 2;
+    }
+    return last;
+}
+
+/*
+ * is_gmessage_child_segment:
+ *
+ * Prüft, ob segment (der Teil NACH dem letzten "//" in einem coverage-
+ * Pfad) zur E-Mail-Adressierung passt: entweder wörtlich "header" oder
+ * eine reine, vorzeichenlose Dezimalzahl (ein direkter, root-naher
+ * Mimepart-Index, s. gmessage_container_child_keys()). Ein Segment mit
+ * "/" (tiefer verschachteltes Multipart, z.B. "0/1") oder mit
+ * beliebigen anderen Zeichen (ein echter, per Namen adressierter Eintrag
+ * z.B. innerhalb eines ZIP-Containers, dessen "//"-Konvention NICHTS mit
+ * der E-Mail-Header/Mimepart-Zählung hier zu tun hat) liefert FALSE -
+ * das GMessage-bewusste Collapse/Invalidate greift dann bewusst NICHT,
+ * die Verarbeitung fällt auf das bisherige (unveränderte) Verhalten
+ * zurück. Tiefer verschachtelte Multiparts sind damit (noch) nicht
+ * Teil des Collapse - bewusste Einschränkung, s. ToDo.c 17.09.2026. */
+static gboolean is_gmessage_child_segment(gchar const *segment) {
+    if (!segment || !*segment)
+        return FALSE;
+
+    if (!g_strcmp0(segment, "header"))
+        return TRUE;
+
+    for (gchar const *p = segment; *p; p++)
+        if (!g_ascii_isdigit(*p))
+            return FALSE;
+
+    return TRUE;
+}
+
+/*
+ * gmessage_container_child_keys:
+ *
+ * Liefert die vollständige, erwartete Liste der Kind-coverage-Pfade eines
+ * GMessage-Containers (container, OHNE trailing "//..."): ein virtueller
+ * "container//header"-Slot (s. Schritt 3, ToDo.c) plus je ein
+ * "container//0" .. "container//(N-1)" für die N direkten Mimeparts, N =
+ * container_entrycount(container) - 1 (die dort hinterlegte Gesamtzahl
+ * zählt den Header-Slot mit, s. gmessage_count_root_entries() in
+ * sond_index()). NULL, wenn container_entrycount für container (noch)
+ * nicht bekannt ist - dann kann nicht sicher aufgezählt werden.
+ */
+static GPtrArray* gmessage_container_child_keys(SondIndexCtx *ctx,
+        gchar const *container) {
+    gint total_entries = sond_index_ctx_get_entry_count(ctx, container);
+    GPtrArray *keys = NULL;
+
+    if (total_entries < 1)
+        return NULL;
+
+    keys = g_ptr_array_new_with_free_func(g_free);
+    g_ptr_array_add(keys, g_strdup_printf("%s//header", container));
+    for (gint i = 0; i < total_entries - 1; i++)
+        g_ptr_array_add(keys, g_strdup_printf("%s//%d", container, i));
+
+    return keys;
+}
+
+/*
  * sond_index_ctx_coverage_get:
  *
  * Liefert den Modus, mit dem path (oder der nächstgelegene abdeckende
@@ -1381,16 +1494,26 @@ gboolean sond_index_ctx_coverage_expand_to_pages(SondIndexCtx *ctx,
  * Fall 2: path ist nur indirekt über einen Vorfahren-Eintrag abgedeckt ->
  * dieser Vorfahre wird aufgelöst und auf jeder Ebene zwischen Vorfahre und
  * path werden die jeweiligen Geschwister (die weiterhin gültig sind) neu
- * eingetragen, mit demselben Modus, den der Vorfahre hatte. Dafür wird auf
- * jeder Ebene ein flaches Verzeichnis-Listing der echten
- * Dateisystem-Kinder gemacht (kein rekursiver Scan).
+ * eingetragen, mit demselben Modus, den der Vorfahre hatte. Auf einer
+ * echten Dateisystem-Ebene ("/"-getrennt) per flachem Verzeichnis-Listing
+ * (kein rekursiver Scan); an einer E-Mail-Container-Grenze ("//", Header
+ * oder ein nummerierter Mimepart, s. is_gmessage_child_segment()) über die
+ * per container_entrycount errechneten erwarteten Kind-Schlüssel, OHNE
+ * die Mail zu öffnen (GMessage-bewusstes Invalidate, 17.09.2026, s.
+ * ToDo.c - behebt den ursprünglichen Bug, dass beim Löschen des Index für
+ * EINEN Mimepart plötzlich ALLE Mimepart- und der Message-Badge
+ * verschwanden, weil die Geschwister-Neueintragung zuvor per
+ * sond_dir_open() auf die - als Verzeichnis unlesbare - .eml-Datei
+ * selbst traf und stillschweigend ausfiel).
  *
- * Achtung/bekannte Einschränkung: setzt voraus, daß alle Ebenen zwischen
- * dem gefundenen Vorfahren und path echte Dateisystem-Verzeichnisse sind
- * (BAUM_FS). Für eingebettete ("//"-)Pfade innerhalb einer Datei (z.B.
- * Anhänge einer .eml) oder für die Seiten-Ebene innerhalb einer bereits
- * gemeinsam abgedeckten Datei (dort gibt es kein "Verzeichnis" zum
- * Auflisten) ist das noch nicht vorgesehen - dafür wird eine gesonderte
+ * Bekannte Einschränkung: für andere "//"-Container als E-Mail (z.B.
+ * ZIP-interne Pfade) sowie für tiefer verschachtelte Multiparts
+ * (z.B. "x.eml//0/1") ist die Geschwister-Rekonstruktion weiterhin nicht
+ * vorgesehen - dieselbe Einschränkung wie vor dem GMessage-bewussten
+ * Invalidate, nur nicht mehr fälschlich mit einfachem "/" statt "//"
+ * vermischt (s. is_gmessage_child_segment()). Ebenso unbehandelt: die
+ * Seiten-Ebene innerhalb einer bereits gemeinsam abgedeckten Datei (dort
+ * gibt es kein "Verzeichnis" zum Auflisten) - dafür wird eine gesonderte
  * Behandlung bei der eigentlichen Anbindung an die Edit/Löschen-Stellen
  * gebraucht.
  */
@@ -1464,86 +1587,150 @@ gboolean sond_index_ctx_coverage_invalidate(SondIndexCtx *ctx,
     }
 
     /* Fall 2: von ancestor aus Richtung path absteigen, auf jeder
-     * Zwischenebene die Geschwister (echtes Verzeichnis-Listing) außer dem
-     * jeweils weiterführenden Kind mit mode neu eintragen. */
+     * Zwischenebene die Geschwister außer dem jeweils weiterführenden Kind
+     * mit mode neu eintragen. Zwei Arten von Zwischenebenen, je nachdem,
+     * welcher Trenner im ORIGINALEN path an dieser Stelle stand (17.09.2026,
+     * GMessage-bewusstes Invalidate, s. ToDo.c):
+     *  - "/"  : echtes Dateisystem-Verzeichnis -> Geschwister per
+     *           sond_dir_open()-Listing (unverändertes Verhalten).
+     *  - "//" : Grenze in einen Container hinein. Nur für E-Mail-Kinder
+     *           ("header" oder ein reiner Mimepart-Index, s.
+     *           is_gmessage_child_segment()) bekannt: Geschwister sind die
+     *           per container_entrycount errechneten erwarteten Kind-
+     *           Schlüssel (s. gmessage_container_child_keys()), OHNE
+     *           Dateizugriff. Für alle anderen "//"-Fälle (z.B. ZIP-interne
+     *           Pfade) bewusst UNVERÄNDERTES (eingeschränktes) Verhalten:
+     *           sond_dir_open() auf einen Container schlägt fehl (ist keine
+     *           Verzeichnis), die Rekonstruktion bricht dort einfach ab -
+     *           exakt die schon vorher dokumentierte Einschränkung oben,
+     *           jetzt nur nicht mehr fälschlich mit einfachem "/" statt
+     *           "//" beim Wiedereintragen vermischt. */
     {
-        gsize  ancestor_len = strlen(ancestor);
-        gchar *rest         = g_strdup(path + ancestor_len + 1); /* +1: '/' */
-        gchar *current_dir  = g_strdup(ancestor);
-        gchar **segments    = g_strsplit(rest, "/", -1);
+        gsize      ancestor_len = strlen(ancestor);
+        gchar const *p          = path + ancestor_len; /* zeigt auf den Trenner */
+        GPtrArray *seg_names    = g_ptr_array_new_with_free_func(g_free);
+        GArray    *seg_is_cont  = g_array_new(FALSE, FALSE, sizeof(gboolean));
+        gchar     *current_dir  = g_strdup(ancestor);
+
+        /* Segmente + jeweiligen Trenner-Typ aus dem ORIGINALEN path
+         * herauslösen (statt wie bisher pauschal an "/" zu splitten). */
+        while (*p) {
+            gboolean is_container;
+            gchar const *seg_start;
+
+            if (p[0] == '/' && p[1] == '/') {
+                is_container = TRUE;
+                p += 2;
+            } else if (p[0] == '/') {
+                is_container = FALSE;
+                p += 1;
+            } else {
+                break; /* sollte nicht vorkommen */
+            }
+
+            seg_start = p;
+            while (*p && *p != '/')
+                p++;
+
+            g_ptr_array_add(seg_names, g_strndup(seg_start, p - seg_start));
+            g_array_append_val(seg_is_cont, is_container);
+        }
 
         /* Lauft ueber JEDES Segment, auch das letzte (der direkte Eltern-
          * ordner von path) - dort muessen die Geschwister genauso markiert
          * werden. Das Weiter-Absteigen danach ist beim letzten Segment
          * harmlos (current_dir wird nur noch nicht mehr benutzt). */
-        for (gint i = 0; segments[i]; i++) {
-            SondDir *dir   = NULL;
-            GError *dir_error = NULL;
-            gchar const *entry_name = NULL;
-            /* current_dir ist - wie alle coverage-Keys - projektrelativ;
-             * fürs Öffnen wird der echte Dateisystempfad gebraucht (wie
-             * bei sond_index_ctx_coverage_try_collapse()). Ohne diesen
-             * Präfix schlägt das Öffnen praktisch immer fehl (relativ zum
-             * Prozess-CWD, nicht zur Projektwurzel) und die Geschwister-
-             * Neueintragung unten wird stillschweigend übersprungen -
-             * Bug-Fix 11.09.2026: dadurch verloren beim Kopieren einer
-             * nicht indizierten Datei in einen abgedeckten Ordner auch die
-             * BEREITS indizierten Geschwister ihren coverage-Eintrag
-             * (grüner Badge verschwand fälschlich mit). sond_dir_open()
-             * statt g_dir_open(): Long-Path-sicher (Windows), wie überall
-             * sonst im Code für Dateisystemzugriffe (sond_file_helper.c). */
-            if (!root_dir) {
-                if (error && !*error)
-                    g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                            "%s: root_dir fehlt", __func__);
-                break;
+        for (guint i = 0; i < seg_names->len; i++) {
+            gchar const *segment     = g_ptr_array_index(seg_names, i);
+            gboolean     is_container = g_array_index(seg_is_cont, gboolean, i);
+            gchar       *next_dir     = NULL;
+
+            if (is_container && is_gmessage_child_segment(segment)) {
+                GPtrArray *child_keys = gmessage_container_child_keys(ctx, current_dir);
+
+                if (!child_keys)
+                    break; /* container_entrycount unbekannt - s.o., nicht fatal */
+
+                for (guint k = 0; k < child_keys->len; k++) {
+                    gchar const *child_key = g_ptr_array_index(child_keys, k);
+                    gchar *expected_this = g_strdup_printf("%s//%s",
+                            current_dir, segment);
+
+                    if (g_strcmp0(child_key, expected_this))
+                        sond_index_ctx_coverage_mark(ctx, child_key, mode, NULL);
+                    g_free(expected_this);
+                }
+                g_ptr_array_unref(child_keys);
+
+                next_dir = g_strdup_printf("%s//%s", current_dir, segment);
+            } else {
+                SondDir *dir   = NULL;
+                GError *dir_error = NULL;
+                gchar const *entry_name = NULL;
+                /* current_dir ist - wie alle coverage-Keys - projektrelativ;
+                 * fürs Öffnen wird der echte Dateisystempfad gebraucht (wie
+                 * bei sond_index_ctx_coverage_try_collapse()). Ohne diesen
+                 * Präfix schlägt das Öffnen praktisch immer fehl (relativ zum
+                 * Prozess-CWD, nicht zur Projektwurzel) und die Geschwister-
+                 * Neueintragung unten wird stillschweigend übersprungen -
+                 * Bug-Fix 11.09.2026: dadurch verloren beim Kopieren einer
+                 * nicht indizierten Datei in einen abgedeckten Ordner auch die
+                 * BEREITS indizierten Geschwister ihren coverage-Eintrag
+                 * (grüner Badge verschwand fälschlich mit). sond_dir_open()
+                 * statt g_dir_open(): Long-Path-sicher (Windows), wie überall
+                 * sonst im Code für Dateisystemzugriffe (sond_file_helper.c). */
+                if (!root_dir) {
+                    if (error && !*error)
+                        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                                "%s: root_dir fehlt", __func__);
+                    break;
+                }
+
+                {
+                    gchar *current_dir_abs = g_strconcat(root_dir, "/",
+                            current_dir, NULL);
+                    dir = sond_dir_open(current_dir_abs, &dir_error);
+                    g_free(current_dir_abs);
+                }
+                if (!dir) {
+                    if (error && !*error)
+                        g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                                "%s: Verzeichnis '%s' (unter '%s') nicht "
+                                "lesbar: %s", __func__, current_dir, root_dir,
+                                dir_error ? dir_error->message : "?");
+                    g_clear_error(&dir_error);
+                    break; /* nicht fatal fuer die Invalidierung selbst -
+                            * path ist bereits nicht mehr abgedeckt (s.o.),
+                            * es fehlen hoechstens Geschwister-Eintraege. */
+                }
+
+                while ((entry_name = sond_dir_read_name(dir))) {
+                    gchar *sibling_path = NULL;
+
+                    if (!g_strcmp0(entry_name, segment))
+                        continue; /* das ist die Richtung zu path - hier nicht eintragen */
+
+                    /* coverage-Keys sind - wie ueberall im Code - "/"-getrennt
+                     * (nicht g_build_filename(), das unter Windows "\" liefern
+                     * wuerde und die Keys damit inkompatibel zu allen anderen,
+                     * mit "/" gebildeten Lookups machen wuerde, s. Konvention
+                     * bei sond_index_ctx_coverage_try_collapse()). */
+                    sibling_path = g_strconcat(current_dir, "/", entry_name, NULL);
+                    sond_index_ctx_coverage_mark(ctx, sibling_path, mode, NULL);
+                    g_free(sibling_path);
+                }
+                sond_dir_close(dir);
+
+                next_dir = g_strconcat(current_dir, "/", segment, NULL);
             }
 
-            {
-                gchar *current_dir_abs = g_strconcat(root_dir, "/",
-                        current_dir, NULL);
-                dir = sond_dir_open(current_dir_abs, &dir_error);
-                g_free(current_dir_abs);
-            }
-            if (!dir) {
-                if (error && !*error)
-                    g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
-                            "%s: Verzeichnis '%s' (unter '%s') nicht "
-                            "lesbar: %s", __func__, current_dir, root_dir,
-                            dir_error ? dir_error->message : "?");
-                g_clear_error(&dir_error);
-                break; /* nicht fatal fuer die Invalidierung selbst -
-                        * path ist bereits nicht mehr abgedeckt (s.o.),
-                        * es fehlen hoechstens Geschwister-Eintraege. */
-            }
-
-            while ((entry_name = sond_dir_read_name(dir))) {
-                gchar *sibling_path = NULL;
-
-                if (!g_strcmp0(entry_name, segments[i]))
-                    continue; /* das ist die Richtung zu path - hier nicht eintragen */
-
-                /* coverage-Keys sind - wie ueberall im Code - "/"-getrennt
-                 * (nicht g_build_filename(), das unter Windows "\" liefern
-                 * wuerde und die Keys damit inkompatibel zu allen anderen,
-                 * mit "/" gebildeten Lookups machen wuerde, s. Konvention
-                 * bei sond_index_ctx_coverage_try_collapse()). */
-                sibling_path = g_strconcat(current_dir, "/", entry_name, NULL);
-                sond_index_ctx_coverage_mark(ctx, sibling_path, mode, NULL);
-                g_free(sibling_path);
-            }
-            sond_dir_close(dir);
-
-            {
-                gchar *next_dir = g_strconcat(current_dir, "/", segments[i], NULL);
-                g_free(current_dir);
-                current_dir = next_dir;
-            }
+            g_free(current_dir);
+            current_dir = next_dir;
         }
 
-        g_free(rest);
         g_free(current_dir);
-        g_strfreev(segments);
+        g_ptr_array_unref(seg_names);
+        g_array_free(seg_is_cont, TRUE);
     }
 
     g_free(ancestor);
@@ -1553,9 +1740,19 @@ gboolean sond_index_ctx_coverage_invalidate(SondIndexCtx *ctx,
 /*
  * sond_index_ctx_coverage_try_collapse:
  *
- * Nach dem path (Datei oder Verzeichnis) soeben abgedeckt wurde
- * (coverage_mark() ist für path bereits erfolgt), wird von hier aus
- * schrittweise nach oben geprüft: hat auf der jeweils nächsthöheren
+ * Nach dem path (Datei, Verzeichnis oder E-Mail-Kind wie "x.eml//header")
+ * soeben abgedeckt wurde (coverage_mark() ist für path bereits erfolgt),
+ * wird von hier aus schrittweise nach oben geprüft. Zwei Ebenen-Arten
+ * (17.09.2026, GMessage-bewusstes Collapse, s. ToDo.c):
+ *  - Liegt current an einer E-Mail-Container-Grenze ("//", Header oder
+ *    ein nummerierter Mimepart, s. is_gmessage_child_segment()): sind
+ *    ALLE per container_entrycount erwarteten Geschwister (Header + jeder
+ *    Mimepart, s. gmessage_container_child_keys()) einzeln abgedeckt -
+ *    ohne Dateizugriff -, wird die ganze E-Mail zu EINEM Eintrag
+ *    zusammengefasst ("x.eml" bedeutet dann "Header UND alle Mimeparts
+ *    vollständig"), danach geht es mit der .eml-Datei selbst normal in
+ *    ihrem echten Dateisystem-Verzeichnis weiter.
+ *  - Sonst (reine "/"-Ebene): hat auf der jeweils nächsthöheren
  * Ebene JEDES Geschwister (echtes, flaches Verzeichnis-Listing)
  * IRGENDEINEN coverage-Eintrag (per sond_index_ctx_coverage_get() - egal
  * mit welchem Modus, s. Mindestmodus-Konvention)? Wenn ja, wird die ganze
@@ -1612,6 +1809,64 @@ gboolean sond_index_ctx_coverage_try_collapse(SondIndexCtx *ctx,
         gboolean     all_covered = TRUE;
         gint         min_mode    = G_MAXINT;
         gchar       *slash       = NULL;
+        gchar       *boundary    = NULL;
+
+        /* GMessage-Container-Grenze ("//") hat Vorrang vor einer
+         * Dateisystem-Ebene ("/"): current ist dann ein E-Mail-internes
+         * Kind (Header oder Mimepart), dessen "Elternverzeichnis" die
+         * E-Mail selbst ist - kein echtes Verzeichnis, das sond_dir_open()
+         * lesen könnte. S. ToDo.c, 17.09.2026, Schritt 4/6. */
+        boundary = gmessage_find_last_boundary(current);
+        if (boundary && is_gmessage_child_segment(boundary + 2)) {
+            gchar *container = g_strndup(current, boundary - current);
+            GPtrArray *child_keys = gmessage_container_child_keys(ctx, container);
+
+            if (!child_keys) {
+                /* container_entrycount für container unbekannt - kann
+                 * nicht sicher aufgezählt werden (kein Fehler, nur keine
+                 * weitere Zusammenfassung möglich, analog zu einem nicht
+                 * lesbaren Verzeichnis unten). */
+                g_free(container);
+                g_free(current);
+                current = NULL;
+                break;
+            }
+
+            for (guint i = 0; i < child_keys->len; i++) {
+                gchar const *child_key = g_ptr_array_index(child_keys, i);
+                gint entry_mode = coverage_get_exact(ctx, child_key);
+
+                if (entry_mode < 0) {
+                    all_covered = FALSE;
+                    break;
+                }
+                if (entry_mode < min_mode)
+                    min_mode = entry_mode;
+            }
+            g_ptr_array_unref(child_keys);
+
+            if (!all_covered) {
+                g_free(container);
+                g_free(current);
+                current = NULL;
+                break;
+            }
+
+            if (!sond_index_ctx_coverage_mark(ctx, container, min_mode, error)) {
+                g_free(container);
+                g_free(current);
+                return FALSE;
+            }
+
+            /* Weiter mit der E-Mail-Datei selbst als current - die liegt
+             * (anders als ihre internen Kinder) wieder in einem echten
+             * Dateisystem-Verzeichnis und wird von der Schleife im
+             * nächsten Durchlauf ganz normal über den "/"-Zweig unten
+             * weiterbehandelt. */
+            g_free(current);
+            current = container;
+            continue;
+        }
 
         slash = strrchr(current, '/');
         if (!slash) {
@@ -2806,13 +3061,91 @@ gboolean sond_index_mime_type_supported(gchar const *mime_type) {
     return FALSE;
 }
 
+/*
+ * gmessage_count_root_entries:
+ *
+ * Anzahl der direkten Mimeparts einer E-Mail (Wurzel-Multipart-Anzahl,
+ * oder 1 bei einem Wurzel-Leaf/-MessagePart ohne Multipart) - für
+ * container_entrycount (s.u.), rein aus dem bereits im Speicher
+ * vorliegenden Puffer ermittelt (kein zusätzlicher Dateizugriff, also
+ * SeaDrive-unbedenklich - der Puffer liegt an dieser Stelle ohnehin
+ * schon vor, s. sond_process_fileparts()). -1 bei Öffnen-Fehler.
+ *
+ * Wiedereinführung (17.09.2026, Nutzer-Entscheidung, nachdem eine
+ * frühere E-Mail-Population am 15.09.2026 als toter Code zurückgebaut
+ * worden war, s. ToDo.c Task #94): mit der Header/Mimepart-Trennung
+ * (Schritt 2/3) gibt es jetzt erstmals echte, einzeln abgedeckte
+ * E-Mail-Kinder ("x.eml//header", "x.eml//0", ...), die für ein
+ * GMessage-bewusstes Collapse/Invalidate (Schritt 4) gezählt werden
+ * müssen, ohne die Mail dafür zu öffnen.
+ */
+static gint gmessage_count_root_entries(guchar const *buf, gsize size) {
+    GMimeMessage *message = NULL;
+    GMimeObject  *root    = NULL;
+    gint          count   = -1;
+
+    message = gmessage_open(buf, size);
+    if (!message)
+        return -1;
+
+    root = g_mime_message_get_mime_part(message);
+    if (!root) {
+        g_object_unref(message);
+        return -1;
+    }
+
+    count = GMIME_IS_MULTIPART(root) ?
+            g_mime_multipart_get_count(GMIME_MULTIPART(root)) : 1;
+
+    g_object_unref(message);
+    return count;
+}
+
 void sond_index(fz_context* ctx,
 		void (*log_func)(void*, gchar const*, ...), gpointer log_func_data,
 		SondIndexCtx  *sond_index_ctx, gchar const* filename, guchar const  *buf,
 		gsize size, gchar const *mime_type,
-		gint seite_von, gint seite_bis, gint ocr_mode, gint const *cancel) {
+		gint seite_von, gint seite_bis, gint ocr_mode, gint const *cancel,
+		gboolean gmessage_header_only) {
     if (!sond_index_ctx) return;
     if (!mime_type) return;
+
+    /* Nur für "message/rfc822" sinnvoll (s.o., Doku in sond_index.h) - bei
+     * allen anderen MIME-Typen wird das Flag ignoriert. Der Header-Teil
+     * einer Mail bekommt einen EIGENEN, von der ganzen Datei
+     * unterscheidbaren Pfad ("<filename>//header"), unter dem
+     * should_process_page/clear_page/Chunks/coverage_mark unten arbeiten -
+     * so bleibt diese Teil-Indizierung unabhängig davon, ob/wie vollständig
+     * der Rest der Mail (die einzelnen Mimeparts) bereits indiziert ist. */
+    gboolean is_header_only = gmessage_header_only &&
+            !g_strcmp0(mime_type, "message/rfc822");
+    g_autofree gchar *header_path = is_header_only ?
+            g_strdup_printf("%s//header", filename) : NULL;
+    gchar const *idx_filename = is_header_only ? header_path : filename;
+
+    /* container_entrycount für die GANZE Mail (filename, nicht
+     * idx_filename) auffrischen - unabhängig von gmessage_header_only,
+     * da der Puffer hier so oder so schon im Speicher liegt (s.
+     * gmessage_count_root_entries()). +1 für den virtuellen "header"-
+     * Slot, der beim GMessage-bewussten Collapse (sond_index_ctx_
+     * coverage_try_collapse()/_invalidate(), 17.09.2026) neben den
+     * nummerierten Mimeparts mitgezählt wird. */
+    if (!g_strcmp0(mime_type, "message/rfc822")) {
+        gint n_mimeparts = gmessage_count_root_entries(buf, size);
+
+        if (n_mimeparts >= 0) {
+            GError *entrycount_error = NULL;
+
+            if (!sond_index_ctx_set_entry_count(sond_index_ctx, filename,
+                    n_mimeparts + 1, &entrycount_error)) {
+                if (log_func)
+                    log_func(log_func_data,
+                            "sond_index: set_entry_count '%s': %s", filename,
+                            entrycount_error ? entrycount_error->message : "?");
+                g_clear_error(&entrycount_error);
+            }
+        }
+    }
 
     /* Segmente extrahieren */
     GPtrArray *segs = NULL;
@@ -2827,7 +3160,8 @@ void sond_index(fz_context* ctx,
         		(SondLogFunc) log_func, log_func_data, seite_von, seite_bis,
         		&n_pages_total);
     else if (!g_strcmp0(mime_type, "message/rfc822"))
-        segs = sond_text_extract_gmessage(buf, size);
+        segs = is_header_only ? sond_text_extract_gmessage_header(buf, size) :
+                sond_text_extract_gmessage(buf, size);
     else if (!g_strcmp0(mime_type, "text/html"))
         segs = sond_text_extract_html(buf, size);
     else if (!g_strcmp0(mime_type,
@@ -2877,7 +3211,7 @@ void sond_index(fz_context* ctx,
          * zwei ausgewählte Punkte sich überschneidende Seiten derselben
          * Datei referenzieren, oder ein früherer Lauf sie schon erledigt
          * hat), bleiben ihre vorhandenen Chunks unangetastet. */
-        if (!sond_index_ctx_should_process_page(sond_index_ctx, filename,
+        if (!sond_index_ctx_should_process_page(sond_index_ctx, idx_filename,
                 seg->page_nr, ocr_mode))
             continue;
 
@@ -2888,12 +3222,12 @@ void sond_index(fz_context* ctx,
          * in einem früheren Lauf) indiziert war. */
         {
             GError *clear_error = NULL;
-            if (!sond_index_ctx_clear_page(sond_index_ctx, filename,
+            if (!sond_index_ctx_clear_page(sond_index_ctx, idx_filename,
                     seg->page_nr, &clear_error)) {
                 if (log_func)
                     log_func(log_func_data,
                             "sond_index: clear_page '%s' Seite %d: %s",
-                            filename, seg->page_nr,
+                            idx_filename, seg->page_nr,
                             clear_error ? clear_error->message : "unknown");
                 g_clear_error(&clear_error);
             }
@@ -2913,7 +3247,7 @@ void sond_index(fz_context* ctx,
         if (log_func)
             log_func(log_func_data,
                     "Indiziere '%s': Seite %d (%u/%u), %u Chunk(s) ...",
-                    filename, seg->page_nr + 1, s + 1, segs->len, chunks->len);
+                    idx_filename, seg->page_nr + 1, s + 1, segs->len, chunks->len);
 
         for (guint i = 0; i < chunks->len; i++) {
             SondChunk   *chunk = g_ptr_array_index(chunks, i);
@@ -2928,7 +3262,7 @@ void sond_index(fz_context* ctx,
 
             gfloat *embedding  = compute_embedding(sond_index_ctx,
                     log_func, log_func_data, chunk->text);
-            if (!db_insert_chunk(sond_index_ctx, log_func, log_func_data, filename, chunk_idx,
+            if (!db_insert_chunk(sond_index_ctx, log_func, log_func_data, idx_filename, chunk_idx,
                             seg->page_nr,
                             seg->char_pos + chunk->offset,
                             mime_type,
@@ -2949,7 +3283,7 @@ void sond_index(fz_context* ctx,
             break;
 
         /* Seite als (mit diesem Modus) indiziert markieren */
-        sond_index_page_set(sond_index_ctx, filename, seg->page_nr, ocr_mode);
+        sond_index_page_set(sond_index_ctx, idx_filename, seg->page_nr, ocr_mode);
     }
 
     /* Bei Abbruch mitten in der Datei: bislang fertig indizierte Seiten
@@ -2981,30 +3315,55 @@ void sond_index(fz_context* ctx,
     if (!cancelled && seite_von == -1 && seite_bis == -1) {
         GError *coverage_error = NULL;
 
-        if (!sond_index_ctx_coverage_mark(sond_index_ctx, filename, ocr_mode,
+        if (!sond_index_ctx_coverage_mark(sond_index_ctx, idx_filename, ocr_mode,
                 &coverage_error)) {
             if (log_func)
                 log_func(log_func_data, "sond_index: coverage_mark '%s': %s",
-                        filename,
+                        idx_filename,
                         coverage_error ? coverage_error->message : "?");
             g_clear_error(&coverage_error);
         }
 
         /* file_pagecount: nur bei PDF bekannt (n_pages_total bleibt -1
-         * bei allen anderen Formaten) - coalescing-unabhängige
-         * Gesamtseitenzahl, s. sond_index.h/ToDo.c. */
+         * bei allen anderen Formaten, insbesondere auch bei
+         * gmessage_header_only) - coalescing-unabhängige Gesamtseitenzahl,
+         * s. sond_index.h/ToDo.c. */
         if (n_pages_total >= 0) {
             GError *pagecount_error = NULL;
 
-            if (!sond_index_ctx_set_page_count(sond_index_ctx, filename,
+            if (!sond_index_ctx_set_page_count(sond_index_ctx, idx_filename,
                     n_pages_total, &pagecount_error)) {
                 if (log_func)
                     log_func(log_func_data,
-                            "sond_index: set_page_count '%s': %s", filename,
+                            "sond_index: set_page_count '%s': %s", idx_filename,
                             pagecount_error ? pagecount_error->message : "?");
                 g_clear_error(&pagecount_error);
             }
         }
+
+        /* Schritt 5 (17.09.2026, s. ToDo.c): bei einer normalen (nicht auf
+         * den Header beschränkten) Ganze-Datei-Indizierung einer E-Mail
+         * zusätzlich den Header UNTER SEINEM EIGENEN Pfad ("filename//header")
+         * indizieren - per rekursivem Selbstaufruf mit
+         * gmessage_header_only=TRUE (is_header_only verhindert dort eine
+         * weitere Rekursion). Jeder einzelne Mimepart (inkl. Attachments!)
+         * bekommt bereits unabhängig davon einen eigenen Coverage-Eintrag
+         * "filename//N", weil process_gmessage_for_ocr()/
+         * gmessage_process_part() (sond_process_file.c) für JEDES
+         * MIME-Leaf - unabhängig von dessen Content-Disposition -
+         * sond_process_file_do_rec() aufruft, das am Ende ganz normal in
+         * sond_index() mündet (Anhänge werden also, entgegen einer früheren
+         * Annahme in diesem Redesign, bereits heute individuell indiziert,
+         * sofern ihr MIME-Typ unterstützt wird). Mit dem hier ergänzten
+         * "filename//header" ist der Satz an Kind-Einträgen (Header + jeder
+         * Mimepart) vollständig - das GMessage-bewusste Collapse (Schritt 4)
+         * kann "filename" damit auch bei einem ganz normalen "Gesamtes
+         * Projekt"-Lauf automatisch erreichen (bei flacher Multipart-Struktur
+         * ohne verschachtelte Multiparts, s. is_gmessage_child_segment()). */
+        if (!is_header_only && !g_strcmp0(mime_type, "message/rfc822"))
+            sond_index(ctx, log_func, log_func_data, sond_index_ctx, filename,
+                    buf, size, mime_type, seite_von, seite_bis, ocr_mode,
+                    cancel, TRUE);
     }
 
     g_ptr_array_unref(segs);

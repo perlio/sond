@@ -733,22 +733,34 @@ static gint sond_tvfm_item_load_gmessage_dir(SondTVFMItem* stvfm_item,
 							stvfm_item_priv->sond_file_part, path);
 		else {
 			SondFilePart* sfp_child = NULL;
+			GMimeContentDisposition* disp = NULL;
+			gboolean is_attachment = FALSE;
+
+			/* Content-Disposition unabhängig vom konkreten GMime-Typ einmal
+			 * einheitlich lesen (Nutzerwunsch 16.09.2026: Attachment/Inline
+			 * im Baum unterscheidbar machen) - vorher wurde disp nur im
+			 * GMimeMessagePart-Zweig (für den Dateinamen) geholt, im
+			 * GMIME_IS_PART-Zweig lieferte das schon g_mime_part_get_filename()
+			 * intern mit, der Disposition-WERT selbst ("attachment"/"inline")
+			 * aber nirgends. */
+			disp = g_mime_object_get_content_disposition(mime_child);
+			if (disp) {
+				gchar const* dval = g_mime_content_disposition_get_disposition(disp);
+
+				is_attachment = dval &&
+						!g_ascii_strcasecmp(dval, "attachment");
+			}
 
 			if (GMIME_IS_PART(mime_child))
 				filename = g_mime_part_get_filename(GMIME_PART(mime_child));
-			else { //GMimeMessagepart
-				GMimeContentDisposition* disp = NULL;
-
-				disp = g_mime_object_get_content_disposition(mime_child);
-
-				if (disp)
-					filename = g_mime_content_disposition_get_parameter(disp, "filename");
-			}
+			else if (disp) //GMimeMessagepart
+				filename = g_mime_content_disposition_get_parameter(disp, "filename");
 
 			sfp_child = sond_file_part_is_open(stvfm_item_priv->sond_file_part, path);
 			if (!sfp_child)
 				sfp_child = sond_file_part_create_from_mime_type(path,
 						stvfm_item_priv->sond_file_part, mime_string);
+			sond_file_part_set_is_attachment(sfp_child, is_attachment);
 
 			stvfm_item_child = sond_tvfm_item_create(stvfm_item_priv->stvfm,
 						sfp_child, NULL);
@@ -3407,37 +3419,23 @@ static SondIndexStatus sond_treeviewfm_get_index_status(
 	if (!index_ctx)
 		return SOND_INDEX_STATUS_NONE;
 
-	/* Section (Anbindung): die generische Basisklasse kennt path_or_section
-	 * nur als opaken String (Bedeutung hängt von der Subklasse ab, s.
-	 * has_sections/load_sections) - deshalb hier nicht über
-	 * sond_treeviewfm_get_coverage_path(), sondern direkt über die
-	 * zugrundeliegende Datei plus optionalem Seitenbereich-Vfunc. */
+	/* Section (Anbindung o.ä.): komplett an die Unterklasse delegiert.
+	 * Nutzer-Einwand 16.09.2026: früher lieferte die Unterklasse hier nur
+	 * zwei Ints (von_seite/bis_seite), die DIESE Basisklasse dann selbst
+	 * als PDF-artigen Seitenbereich interpretierte und an
+	 * sond_index_ctx_get_file_status() weiterreichte - eine Vermischung,
+	 * da "Section = Seitenbereich" eine zond/PDF-spezifische Annahme ist
+	 * (bei zond zufällig immer zutreffend), die die generische
+	 * Basisklasse nicht voraussetzen darf (s. ausführlichen Kommentar an
+	 * get_section_index_status(), sond_treeviewfm.h). Die Unterklasse
+	 * bekommt jetzt den bereits ermittelten index_ctx übergeben und
+	 * liefert den fertigen Status direkt. */
 	if (priv->type == SOND_TVFM_ITEM_TYPE_LEAF_SECTION) {
-		gint von_seite = -1, bis_seite = -1;
+		if (SOND_TREEVIEWFM_GET_CLASS(stvfm)->get_section_index_status)
+			return SOND_TREEVIEWFM_GET_CLASS(stvfm)->get_section_index_status(
+					stvfm_item, index_ctx);
 
-		if (!priv->sond_file_part)
-			return SOND_INDEX_STATUS_NONE;
-
-		coverage_path = sond_file_part_get_filepart(priv->sond_file_part);
-		if (!coverage_path)
-			return SOND_INDEX_STATUS_NONE;
-
-		if (!SOND_IS_FILE_PART_PDF(priv->sond_file_part) &&
-				!sond_index_mime_type_supported(
-						mime_from_extension(coverage_path))) {
-			g_free(coverage_path);
-			return SOND_INDEX_STATUS_NONE;
-		}
-
-		if (SOND_TREEVIEWFM_GET_CLASS(stvfm)->get_section_page_range)
-			SOND_TREEVIEWFM_GET_CLASS(stvfm)->get_section_page_range(
-					stvfm_item, &von_seite, &bis_seite);
-
-		status = sond_index_ctx_get_file_status(index_ctx, coverage_path,
-				von_seite, bis_seite);
-		g_free(coverage_path);
-
-		return status;
+		return SOND_INDEX_STATUS_NONE;
 	}
 
 	coverage_path = sond_treeviewfm_get_coverage_path(priv, &is_dir);
@@ -3449,16 +3447,64 @@ static SondIndexStatus sond_treeviewfm_get_index_status(
 	else {
 		/* Nicht indizierbare Dateitypen (.db, .znd, Bilder, ...) gar nicht
 		 * erst prüfen - sonst zeigt jede solche Datei dauerhaft "nicht
-		 * indiziert" an, obwohl sie nie indiziert werden wird. PDFs sind
-		 * über den SondFilePart-Typ unabhängig von der Extension sicher
-		 * erkannt. */
-		if (!SOND_IS_FILE_PART_PDF(priv->sond_file_part) &&
-				!sond_index_mime_type_supported(
-						mime_from_extension(coverage_path))) {
-			g_free(coverage_path);
-			return SOND_INDEX_STATUS_NONE;
+		 * indiziert" an, obwohl sie nie indiziert werden wird.
+		 *
+		 * Nutzer-Fund 16.09.2026: der MIME-Typ wird jetzt bevorzugt vom
+		 * SondFilePart selbst geholt statt ihn hier ein zweites Mal (und
+		 * unzuverlässig) aus der Endung von coverage_path zu raten. Bei
+		 * einem SondFilePartLeaf ist das der beim Erzeugen per echtem
+		 * Content-Sniffing ermittelte und gespeicherte Typ (s.
+		 * sond_file_part_create()). Betraf v.a. eingebettete
+		 * Container-Einträge ohne aussagekräftige Endung - z.B. einzelne
+		 * MIME-Parts einer E-Mail (eine HTML-Alternative, ein
+		 * Inline-Bild): deren "Pfad" ist ein interner, von der
+		 * MIME-Bibliothek vergebener Name ohne (oder mit irreführender)
+		 * Endung - der echte Typ ("text/html" etc.) steht aber längst auf
+		 * dem SondFilePartLeaf. PDF und GMessage (E-Mail) als LEAF (kein
+		 * Multipart/keine Einbettungen) sind unabhängig von der Endung
+		 * immer unterstützt - analog zur schon bestehenden PDF-Ausnahme,
+		 * jetzt auch für GMessage ergänzt. */
+		/* Message-Knoten einer E-Mail: eindeutig erkennbar wie schon in
+		 * zond_treeviewfm_item_get_fileparts() (Schritt 2, E-Mail-Coverage-
+		 * Redesign, 17.09.2026) - LEAF ohne path_or_section, dessen
+		 * sond_file_part derselbe wie der der ganzen eml ist (kein eigener
+		 * Mimepart-Kind-sfp). coverage_path ist dafür bewusst der BARE
+		 * Dateiname ("mail.eml", s. sond_treeviewfm_get_coverage_path()) -
+		 * der Header wird aber seit Schritt 3 gezielt unter
+		 * "mail.eml//header" abgedeckt, nicht unter "mail.eml" selbst.
+		 * Badge zeigt FULL, wenn ENTWEDER der Header gezielt indiziert ist
+		 * ODER die ganze Mail als ein Block/per Collapse (Schritt 4)
+		 * unter "mail.eml" selbst abgedeckt ist - beides bedeutet "Header
+		 * ist durchsucht". Sonst der jeweils bessere Teilstatus (NONE <
+		 * PARTIAL < FULL), damit ein begonnener, aber noch nicht
+		 * abgeschlossener Zustand nicht fälschlich als "gar nichts"
+		 * erscheint. */
+		if (priv->type == SOND_TVFM_ITEM_TYPE_LEAF && !priv->path_or_section &&
+				SOND_IS_FILE_PART_GMESSAGE(priv->sond_file_part)) {
+			gchar *header_path = g_strconcat(coverage_path, "//header", NULL);
+			SondIndexStatus header_status =
+					sond_index_ctx_get_file_status(index_ctx, header_path, -1, -1);
+			SondIndexStatus whole_status =
+					sond_index_ctx_get_file_status(index_ctx, coverage_path, -1, -1);
+
+			g_free(header_path);
+			status = MAX(header_status, whole_status);
 		}
-		status = sond_index_ctx_get_file_status(index_ctx, coverage_path, -1, -1);
+		else if (SOND_IS_FILE_PART_PDF(priv->sond_file_part) ||
+				SOND_IS_FILE_PART_GMESSAGE(priv->sond_file_part))
+			status = sond_index_ctx_get_file_status(index_ctx, coverage_path, -1, -1);
+		else {
+			gchar const *mime_type = SOND_IS_FILE_PART_LEAF(priv->sond_file_part) ?
+					sond_file_part_leaf_get_mime_type(
+							SOND_FILE_PART_LEAF(priv->sond_file_part)) :
+					mime_from_extension(coverage_path);
+
+			if (!sond_index_mime_type_supported(mime_type)) {
+				g_free(coverage_path);
+				return SOND_INDEX_STATUS_NONE;
+			}
+			status = sond_index_ctx_get_file_status(index_ctx, coverage_path, -1, -1);
+		}
 	}
 
 	g_free(coverage_path);
@@ -3576,11 +3622,12 @@ static void sond_treeviewfm_render_file_icon(GtkTreeViewColumn *column,
 	 * render_with_overlays liefen (Untersuchung "Ordner ohne Icon",
 	 * 09/2026). */
 	{
-		SondIconOverlay overlays[2];
+		SondIconOverlay overlays[3];
 		guint n_overlays = 0;
 		gint overlay_px = MAX(sond_icon_util_renderer_get_size(renderer) / 2, 8);
 		GdkPixbuf *seadrive_pb = NULL;
 		GdkPixbuf *index_pb = NULL;
+		GdkPixbuf *attachment_pb = NULL;
 
 		if (seadrive_badge != SOND_SEADRIVE_BADGE_NONE) {
 			/* SeaDrive-Status unten rechts (einzelne Datei/Ordner selbst) */
@@ -3613,11 +3660,29 @@ static void sond_treeviewfm_render_file_icon(GtkTreeViewColumn *column,
 			}
 		}
 
+		/* Attachment-Badge oben rechts (16.09.2026, Nutzerwunsch: Attachment/
+		 * Inline im Baum unterscheidbar machen) - unabhängig von DIR/LEAF,
+		 * da ein Attachment je nach Inhalt auch ein Container (ZIP/PDF/
+		 * verschachtelte E-Mail, dann als DIR dargestellt) sein kann; das
+		 * Attribut hängt am sond_file_part selbst (s. Doc-Kommentar an
+		 * sond_file_part_get_is_attachment()), nicht am Baum-Item-Typ. */
+		if (stvfm_item_priv->sond_file_part &&
+				sond_file_part_get_is_attachment(stvfm_item_priv->sond_file_part)) {
+			attachment_pb = sond_icon_util_attachment_badge_pixbuf(
+					GTK_WIDGET(stvfm), overlay_px);
+			if (attachment_pb) {
+				overlays[n_overlays].pixbuf = attachment_pb;
+				overlays[n_overlays].corner = SOND_ICON_CORNER_TOP_RIGHT;
+				n_overlays++;
+			}
+		}
+
 		sond_icon_util_render_with_overlays(GTK_WIDGET(stvfm), renderer,
 				stvfm_item_priv->icon_name, overlays, n_overlays);
 
 		if (seadrive_pb) g_object_unref(seadrive_pb);
 		if (index_pb) g_object_unref(index_pb);
+		if (attachment_pb) g_object_unref(attachment_pb);
 	}
 
 	return;

@@ -449,9 +449,13 @@ static void collect_gmessage_parts(GMimeObject *obj, GPtrArray *parts) {
     }
 }
 
-/* Baut Header + Body als einen zusammenhängenden Text auf. Wird
- * IDENTISCH von der Indizierung und vom Renderer verwendet. */
-static gchar* build_gmessage_text(GMimeMessage *message) {
+/* Baut nur den Header (Von/An/CC/BCC/Betreff/Datum) auf - gemeinsamer Kern
+ * von build_gmessage_text() (Header+Body, für Renderer und die "ganze
+ * Datei"-Indizierung) und sond_text_extract_gmessage_header() (nur
+ * Header, für die Indizierung des "Message"-Knotens - 17.09.2026,
+ * Nutzerwunsch: an den Header kommt man im Baum sonst nicht heran, da der
+ * Message-Knoten beim Öffnen die ganze Mail zeigt, s. ToDo.c). */
+static gchar* build_gmessage_header_text(GMimeMessage *message) {
     GString *text = g_string_new(NULL);
 
     InternetAddressList *from_list = g_mime_message_get_from(message);
@@ -499,6 +503,17 @@ static gchar* build_gmessage_text(GMimeMessage *message) {
         g_string_append_printf(text, "Datum:   %s\n", date_str ? date_str : "");
         g_free(date_str);
     }
+
+    return g_string_free(text, FALSE);
+}
+
+/* Baut Header + Body als einen zusammenhängenden Text auf. Wird
+ * IDENTISCH von der Indizierung ("ganze Datei") und vom Renderer
+ * verwendet. */
+static gchar* build_gmessage_text(GMimeMessage *message) {
+    gchar *header = build_gmessage_header_text(message);
+    GString *text = g_string_new(header);
+    g_free(header);
 
     g_string_append(text, "\n"
             "────────────────────────────────────────────────────────────"
@@ -572,6 +587,32 @@ GPtrArray* sond_text_extract_gmessage(guchar const *buf, gsize size) {
     if (!message) return segs;
 
     gchar *text = build_gmessage_text(message);
+    g_object_unref(message);
+
+    if (!text || *text == '\0') {
+        g_free(text);
+        return segs;
+    }
+
+    g_ptr_array_add(segs, sond_text_segment_new(text, -1, 0));
+    return segs;
+}
+
+/* Nur der Header (Von/An/CC/BCC/Betreff/Datum), ohne Body/Mimeparts - für
+ * die Indizierung des "Message"-Knotens (17.09.2026, Schritt 1 des
+ * E-Mail-Coverage-Redesigns, s. ToDo.c). Der Message-Knoten bleibt beim
+ * Öffnen/"Öffnen mit" weiterhin die ganze Mail (dafür bräuchte es die
+ * Originaldatei, kein extrahierter Text) - diese Funktion betrifft
+ * ausschließlich die Volltextindizierung. */
+GPtrArray* sond_text_extract_gmessage_header(guchar const *buf, gsize size) {
+    GPtrArray *segs = g_ptr_array_new_with_free_func(
+            (GDestroyNotify) sond_text_segment_free);
+    if (!buf || size == 0) return segs;
+
+    GMimeMessage *message = gmessage_open(buf, size);
+    if (!message) return segs;
+
+    gchar *text = build_gmessage_header_text(message);
     g_object_unref(message);
 
     if (!text || *text == '\0') {

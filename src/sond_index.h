@@ -790,10 +790,22 @@ GPtrArray* sond_index_semantic_search(SondIndexCtx *ctx,
  *             Seite in der pages-Tabelle vermerkt, um künftige Läufe
  *             doppelte Arbeit sparen zu lassen (siehe
  *             sond_index_ctx_should_process_page())
+ * @gmessage_header_only: nur für mime_type "message/rfc822" relevant. TRUE:
+ *             es wird NICHT die ganze Mail (Header + Textteile), sondern
+ *             NUR der Header indiziert (sond_text_extract_gmessage_header()
+ *             statt sond_text_extract_gmessage()) - für die gezielte
+ *             Indizierung des "Message"-Knotens im Baum. Intern wird dafür
+ *             ein eigener, von @filename abgeleiteter Pfad
+ *             ("@filename//header") für should_process_page/clear_page/
+ *             Chunks/coverage_mark verwendet, damit dieser Teil-Index
+ *             unabhängig vom (möglicherweise unvollständigen) Rest der
+ *             Mail als abgedeckt gilt. S. ToDo.c, 17.09.2026,
+ *             E-Mail-Coverage-Redesign (Schritt 3/6).
  *
  * Indiziert wird für:
  *   application/pdf   – Text aus OCR-tem PDF (MuPDF stext)
- *   message/rfc822    – Header + Textteile (GMime)
+ *   message/rfc822    – Header + Textteile (GMime), oder nur Header
+ *                        (s. @gmessage_header_only)
  *   text*             – Rohtext direkt
  * Alle anderen MIME-Typen: sofortiger Rücksprung.
  */
@@ -807,7 +819,8 @@ void sond_index(fz_context* ctx,
                         gint           seite_von,
                         gint           seite_bis,
                         gint           ocr_mode,
-                        gint const    *cancel);
+                        gint const    *cancel,
+                        gboolean       gmessage_header_only);
 
 /**
  * sond_index_mime_type_supported:

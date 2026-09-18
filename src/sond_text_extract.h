@@ -121,6 +121,17 @@ GPtrArray* sond_text_extract_plain(guchar const *buf, gsize size);
 GPtrArray* sond_text_extract_gmessage(guchar const *buf, gsize size);
 
 /**
+ * sond_text_extract_gmessage_header:
+ *
+ * Ein Segment = NUR der Header (Von/An/CC/BCC/Betreff/Datum), ohne
+ * Trennlinie/Body - für die gezielte Indizierung des "Message"-Knotens
+ * (17.09.2026, E-Mail-Coverage-Redesign, s. ToDo.c). Betrifft nur die
+ * Indizierung, nicht die Anzeige - der Message-Knoten öffnet beim
+ * Betrachten weiterhin die ganze Mail (sond_text_extract_gmessage()).
+ */
+GPtrArray* sond_text_extract_gmessage_header(guchar const *buf, gsize size);
+
+/**
  * SondEmlImage: Bild-Anhang einer E-Mail, für die Anzeige im Renderer.
  * Betrifft nur die Darstellung, nicht den durchsuchbaren Text.
  */

@@ -30,6 +30,7 @@ typedef unsigned char guchar;
 typedef void* gpointer;
 typedef long long unsigned gsize;
 typedef int gint;
+typedef int gboolean;
 
 /**
  * SondProcessFileCtx:
@@ -65,6 +66,12 @@ typedef struct _SondProcessFileCtx {
  * SondPageRange:
  * @von: erste Seite (0-basiert), -1 = ganze Datei
  * @bis: letzte Seite (0-basiert, inklusive), -1 = ganze Datei
+ * @gmessage_header_only: TRUE, wenn dieser Eintrag NICHT einen
+ *         Seitenbereich beschreibt, sondern den "Message"-Knoten einer
+ *         E-Mail - dort soll (statt der ganzen Mail) nur der Header
+ *         (Von/An/CC/BCC/Betreff/Datum) indiziert werden. von/bis sind in
+ *         diesem Fall irrelevant (-1/-1). S. ToDo.c, 17.09.2026,
+ *         E-Mail-Coverage-Redesign (Schritt 2/6).
  *
  * Seitenbereich, auf den Indizierung/OCR für eine Datei beschränkt werden
  * soll (z.B. weil nur eine an einen Baum-Punkt angebundene Teilstrecke
@@ -74,15 +81,21 @@ typedef struct _SondProcessFileCtx {
 typedef struct _SondPageRange {
     gint von;
     gint bis;
+    gboolean gmessage_header_only;
 } SondPageRange;
 
 SondPageRange* sond_page_range_new(gint von, gint bis);
+
+/* Für die Anbindung des "Message"-Knotens einer E-Mail (s.o.) - erzeugt
+ * einen Range-Eintrag mit von=bis=-1 und gmessage_header_only=TRUE. */
+SondPageRange* sond_page_range_new_gmessage_header(void);
+
 void sond_page_range_free(gpointer p);
 
 void sond_process_file(SondProcessFileCtx* wctx,
 		guchar* data, gsize size, gchar const* filename,
 		guchar** out_data, gsize* out_size, gint* out_pdf_count,
-		gint seite_von, gint seite_bis);
+		gint seite_von, gint seite_bis, gboolean gmessage_header_only);
 
 void sond_process_fileparts(SondProcessFileCtx* wctx, GHashTable* files);
 

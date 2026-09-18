@@ -699,15 +699,9 @@
    readdir() dafür extra aus) - dafür wurde diese bisher datei-lokale
    Funktion (zond_treeviewfm.c) exponiert (zond_treeviewfm.h).
 
- - Offen (zurückgestellt): dieselbe Verzeichnis-Kurzschluss-Logik für
-   "Index erstellen (Gesamtes Projekt)" - dort wird die Fileparts-
-   Sammlung aber VOR der OCR-Modus-Abfrage ausgeführt
-   (zond_index_erstellen_ht(), headerbar.c), ein komplett abgedeckter
-   Ast dürfte beim Modus "erzwingen" aber NICHT übersprungen werden.
-   Ohne die Abfragereihenfolge umzustellen (ask_ocr_mode() vor die
-   Sammlung vorziehen, Modus bis in
-   zond_treeviewfm_item_get_fileparts_readdir() durchreichen) wäre ein
-   Kurzschluss dort falsch. Nutzerwunsch, aber noch nicht umgesetzt.
+ - Dieselbe Verzeichnis-Kurzschluss-Logik für "Index erstellen (Gesamtes
+   Projekt)" nachgezogen (16.09.2026, Nutzerwunsch/-bestätigung "Ja",
+   Task #100 - s. eigenen Abschnitt weiter unten für Details).
 
  GLib-CRITICAL "g_date_time_unref: assertion 'datetime->ref_count > 0'
  failed" (15.09.2026, Nutzer-Log-Fund, behoben):
@@ -1588,5 +1582,548 @@
    72 zum Hochladen, springt dann nach ca. 5 Sek auf Häkchen. Explorer
    zeigt zu diesem Zeitpunkt, dass schon hochgeladen." - Fix bestätigt,
    Anzeige deckt sich mit dem tatsächlichen SeaDrive/Explorer-Status.
+
+ Verzeichnis-Kurzschluss auch bei "Index erstellen (Gesamtes Projekt)"
+ (16.09.2026, Nutzerwunsch/-bestätigung, Task #100, umgesetzt):
+
+ - Anlass: Nachfrage, ob sich derselbe Verzeichnis-Kurzschluss wie bei
+   "Index durchsuchen" (scan_coverage_gaps_fs(), s.o.) nicht auch bei
+   "Index erstellen" lohnt - bislang durchlief "Gesamtes Projekt" dort
+   immer den vollen readdir-Weg (zond_treeviewfm_item_get_fileparts_
+   readdir()), auch für längst vollständig indizierte Äste.
+
+ - Hindernis, warum das nicht einfach derselbe Kurzschluss war: bei
+   "Index erstellen" wird der OCR-Modus (kein OCR / prüfen / erzwingen,
+   ask_ocr_mode()) bisher immer ERST NACH der Fileparts-Sammlung
+   abgefragt (zond_index_erstellen_ht(), headerbar.c). Bei "erzwingen"
+   darf aber kein Ast übersprungen werden, auch wenn er schon vollständig
+   abgedeckt ist. Ein Kurzschluss ohne Kenntnis des Modus zum Zeitpunkt
+   der Sammlung wäre also bei "erzwingen" falsch gewesen.
+
+ - Umsetzung:
+   1. zond_index_erstellen_ht() (headerbar.c) in einen öffentlichen Teil
+      (fragt wie bisher den OCR-Modus ab, für Auswahl/Lücken-
+      Aufschlüsselung - Reihenfolge dort unkritisch) und einen neuen
+      internen Kern zond_index_erstellen_ht_mit_modus() aufgeteilt, der
+      einen schon bekannten Modus direkt entgegennimmt statt erneut zu
+      fragen.
+   2. do_index_erstellen_gesamt() (headerbar.c, "Gesamtes Projekt") ruft
+      jetzt ask_ocr_mode() VOR der Sammlung auf und übergibt das Ergebnis
+      direkt an zond_index_erstellen_ht_mit_modus() - EIN Dialog wie
+      bisher, nur früher im Ablauf.
+   3. zond_treeviewfm_get_fileparts()/zond_treeviewfm_item_get_fileparts()/
+      zond_treeviewfm_item_get_fileparts_readdir() (zond_treeviewfm.c/.h)
+      um einen neuen Parameter skip_fully_covered erweitert und
+      durchgereicht. In _readdir() (dem tatsächlichen Rekursions-Kern):
+      bei skip_fully_covered und rel_dir != NULL wird zuerst
+      sond_index_ctx_get_dir_status() abgefragt - bei
+      SOND_INDEX_STATUS_FULL wird der Ast gar nicht erst per readdir
+      geöffnet (return 0, keine Fileparts). Für rel_dir == NULL
+      (Projektwurzel) nie geprüft, analog scan_coverage_gaps_fs() -
+      Coverage wird nie über die oberste Ebene hinaus zusammengefasst.
+   4. do_index_erstellen_gesamt() übergibt skip_fully_covered als
+      (ocr_mode != SOND_OCR_MODE_FORCE) - bei "erzwingen" also FALSE,
+      unverändertes (vollständiges) Verhalten. Alle anderen Aufrufer
+      (Auswahl erstellen/löschen, Indexsuche-Auswahl, Lücken-
+      Aufschlüsselung in handle_coverage_gaps()) übergeben weiterhin
+      FALSE - für sie ändert sich nichts.
+
+ - Nicht durch Kompilieren/Testen verifiziert (kein Zugriff auf make zond
+   in dieser Session) - Bestätigung durch den Nutzer nach dem nächsten
+   Build steht noch aus.
+
+ Index-Badges fehlen bei eingebetteten MIME-Parts (E-Mail) + Architektur-
+ Refactor get_section_page_range -> get_section_index_status
+ (16.09.2026, Nutzerfund + Nutzer-Entscheidung, Task #122, umgesetzt):
+
+ - Nutzerfund: "die Index-badges scheinen bei emls nicht zu
+   funktionieren." Nach Rückfrage (Symptom: "Kein Badge, obwohl
+   indiziert") und Nutzer-Revision "es werden nur bei verschiedenen
+   mime-parts, insbesondere text/html etc., keine badges gemalt" -
+   betraf also nicht die Eml-Datei selbst, sondern einzelne eingebettete
+   MIME-Teile (z.B. eine HTML-Alternative) innerhalb einer E-Mail.
+
+ - Ursache: sond_treeviewfm_get_index_status() (sond_treeviewfm.c)
+   entschied "ist dieser Dateityp überhaupt indizierbar?" bisher über
+   mime_from_extension(coverage_path) - also über die (aus dem
+   internen Pfad-String geratene) Dateiendung. Eingebettete MIME-Parts
+   einer E-Mail haben aber oft keinen aussagekräftigen Dateinamen/keine
+   Endung, obwohl ihr echter, per Content-Sniffing ermittelter Mime-Typ
+   (mime_guess_content_type() in sond_file_part_create(), gespeichert
+   via sond_file_part_leaf_set_mime_type()) längst auf dem
+   SondFilePartLeaf steht - und genau dieser gespeicherte Typ ist es
+   auch, nach dem sond_index() beim tatsächlichen Indizieren
+   dispatcht. Die Endungs-Ratelogik hier lief also am tatsächlich
+   verwendeten Typ vorbei und lieferte für genau indizierte Teile
+   fälschlich SOND_INDEX_STATUS_NONE.
+
+ - Zusätzlicher Architektur-Einwand des Nutzers (unabhängig vom obigen
+   Bug, an sond_treeviewfm_get_index_status()): die vfunc
+   get_section_page_range() lieferte für einen LEAF_SECTION-Knoten
+   (Anbindung) nur zwei Ints (von_seite/bis_seite), die diese generische
+   BASISKLASSE dann selbst als PDF-artigen Seitenbereich an
+   sond_index_ctx_get_file_status() weiterreichte. Zitat: "Das ist im
+   Falle von zond_treeviewfm (zufällig) so, muß aber nicht sein. Die
+   vfunc sollte daher vielleicht SondIndexStatus zurückgeben." - "Section
+   = Seitenbereich" ist eine zond/PDF-spezifische Annahme (bei zond
+   zufällig immer zutreffend), die die generische Basisklasse nicht
+   voraussetzen darf; eine andere Unterklasse könnte "Section" z.B. als
+   Zeitausschnitt (Audio/Video) verstehen.
+
+ - Fix/Umsetzung (beides in einem Aufwasch, da dieselbe Funktion
+   betroffen war):
+   1. sond_treeviewfm.h: vfunc get_section_page_range(SondTVFMItem*,
+      gint*, gint*) -> gboolean ersetzt durch
+      get_section_index_status(SondTVFMItem*, SondIndexCtx*) ->
+      SondIndexStatus. Dafür #include "sond_index.h" ergänzt (keine
+      zirkuläre Abhängigkeit: sond_index.h inkludiert nur
+      glib/sqlite3/mupdf).
+   2. sond_treeviewfm.c: sond_treeviewfm_get_index_status() - der
+      komplette LEAF_SECTION-Zweig (Coverage-Pfad ermitteln,
+      Mime-Check, alte vfunc für von_seite/bis_seite aufrufen,
+      sond_index_ctx_get_file_status() selbst aufrufen) durch eine
+      einfache Delegation an die neue vfunc ersetzt - die Basisklasse
+      reicht nur noch stvfm_item und index_ctx durch und gibt das
+      Ergebnis direkt zurück. Für den regulären (Nicht-Section)
+      Datei-Zweig: Mime-Type-Ermittlung umgestellt auf
+      sond_file_part_leaf_get_mime_type() (wenn SondFilePartLeaf),
+      mime_from_extension() nur noch als Fallback für Nicht-Leaf-Typen;
+      zusätzlich SOND_IS_FILE_PART_GMESSAGE()-Bypass analog zur
+      bestehenden SOND_IS_FILE_PART_PDF()-Ausnahme ergänzt (beides
+      generische, in sond_fileparts.h definierte Typen - keine
+      zond-Spezifika, daher unproblematisch in der Basisklasse).
+   3. zond_treeviewfm.c: zond_treeviewfm_get_section_page_range() zu
+      zond_treeviewfm_get_section_index_status() umgebaut - übernimmt
+      jetzt zusätzlich die (von der Basisklasse entfernte) Mime-Check-
+      Logik für die zugrundeliegende Datei der Section (Leaf-Mime-Typ
+      bevorzugt, PDF/GMessage-Bypass) sowie den abschließenden
+      sond_index_ctx_get_file_status()-Aufruf mit dem per
+      anbindung_parse_file_section() ermittelten Seitenbereich; liefert
+      den fertigen SondIndexStatus direkt. class_init-Verdrahtung
+      entsprechend angepasst.
+
+ - Nicht durch Kompilieren/Testen verifiziert (kein Zugriff auf make zond
+   in dieser Session) - Bestätigung durch den Nutzer nach dem nächsten
+   Build (insbesondere: Badges bei E-Mail-MIME-Parts wie text/html jetzt
+   korrekt) steht noch aus.
+
+ Diskussion: Coverage-Invalidate-Bug bei E-Mail-Mimeparts, Attachment-
+ Anzeige im Baum, Header-Indizierung (16./17.09.2026, Nutzerfund +
+ ausführliche Design-Diskussion):
+
+ - Nutzerfund: Löschen des Index für einen einzelnen Mimepart einer E-Mail
+   ließ die Badges für ALLE Mimeparts (einschl. der Message selbst)
+   verschwinden. Ursache: sond_index_ctx_coverage_invalidate()
+   (sond_index.c) sucht einen abdeckenden Vorfahren rein über
+   strrchr(path, '/') - bei einem Container-Pfad wie "mail.eml//0" landet
+   das (durch die zwei direkt aufeinanderfolgenden Slashes) nach zwei
+   Abschneide-Schritten zufällig exakt bei "mail.eml" - dem eigenen,
+   kollabierten Coverage-Eintrag der ganzen Mail (entstanden, weil
+   sond_index() beim Indizieren der ganzen Datei am Ende IMMER
+   coverage_mark(ctx, filename, ...) mit filename = der ganzen Datei
+   aufruft, s.u.). Der Eintrag wird korrekt gelöscht, aber die
+   anschließende Geschwister-Neueintragung (Fall 2) versucht ein echtes
+   Verzeichnis-Listing (sond_dir_open()) auf "mail.eml" - schlägt fehl
+   (ist eine Datei, kein Verzeichnis), Geschwister werden NICHT neu
+   eingetragen. Derselbe Mechanismus (Ahnen-Walk über "//") sorgt
+   umgekehrt dafür, dass ein Attachment-Mimepart, dessen Inhalt NIE
+   indiziert wird (s.u.), trotzdem fälschlich als "vollständig indiziert"
+   angezeigt wird, sobald die Mail als Ganzes einen Coverage-Eintrag hat.
+
+ - Was beim Indizieren einer .eml (sond_index(), mime_type
+   "message/rfc822" -> sond_text_extract_gmessage(), sond_text_extract.c)
+   tatsächlich passiert: Header (Von/An/CC/BCC/Betreff/Datum) UND
+   rekursiv alle NICHT als "attachment" disponierten (Content-Disposition)
+   text- und image-Mimeparts (MIME-Typ "text/..." bzw. "image/...",
+   HTML zu Klartext konvertiert) werden zu
+   EINEM zusammenhängenden Textsegment zusammengefasst und unter dem
+   Coverage-Pfad der ganzen Datei ("mail.eml") abgelegt - keine
+   Aufteilung nach Mimepart. Bilder werden zwar gesammelt
+   (sond_text_extract_gmessage_images()), aber NUR vom Renderer für die
+   Anzeige genutzt, nicht von sond_index() - Inline-Bilder werden aktuell
+   nie per OCR erfasst. Echte Attachments (jeder Art) werden nie
+   erfasst - auch nicht, wenn sie durchsuchbaren Text enthalten (z.B. ein
+   Attachment-PDF) -, außer der Nutzer wählt den einzelnen Mimepart-Knoten
+   im Baum gezielt für "Index erstellen (Auswahl)" aus.
+
+ - Diskutiertes (noch nicht umgesetztes) Redesign: "mail.eml" (ohne
+   Suffix) als Coverage-Pfad für "Header UND alle Mimeparts vollständig"
+   reservieren (nur per generalisiertem coverage_try_collapse() erreicht,
+   wenn wirklich jedes Kind - Message + jeder Mimepart - einen eigenen
+   Coverage-Eintrag hat); "mail.eml//header" für "nur der Header ist
+   indiziert" (Message-Knoten bleibt dabei ein ganz normales
+   SOND_TVFM_ITEM_TYPE_LEAF - kein Sonderfall in
+   zond_treeviewfm_item_get_fileparts() nötig, da anbindungsseitig ohnehin
+   schon eindeutig: eine Anbindung mit filepart=="mail.eml" ohne jedes
+   Suffix kann laut get_path_from_stvfm_item() nur durch Anbinden des
+   Message-Knotens entstehen, da der oberste eml-DIR-Knoten selbst nie
+   direkt anbindbar ist). coverage_try_collapse()/coverage_invalidate()
+   müssten dafür einen GMessage-bewussten Zweig bekommen (echte Kinder
+   per GMime aufzählen statt sond_dir_open()), was nebenbei auch den
+   Invalidate-Bug oben sauber löst. Größerer Umbau, noch nicht
+   angegangen - nur Design festgehalten.
+
+ - Umgesetzt aus der Diskussion (17.09.2026, Nutzer-Entscheidung "Ja,
+   aber ohne die Öffnen/Indizieren-Anzeige - das lassen wir so, kann man
+   in der Doku drauf hinweisen"): Attachment/Inline im Baum sichtbar
+   unterscheidbar gemacht, unabhängig vom obigen (noch offenen) Coverage-
+   Redesign.
+   1. SondFilePart (Basisklasse, sond_fileparts.c/.h): neues generisches
+      Attribut is_attachment (wie path/parent) + Getter/Setter
+      sond_file_part_get/set_is_attachment(). Auf der Basisklasse, nicht
+      auf SondFilePartLeaf, weil ein Attachment je nach Inhalt zu jedem
+      SondFilePart-Subtyp werden kann (PDF/ZIP/GMessage/Leaf).
+   2. sond_tvfm_item_load_gmessage_dir() (sond_treeviewfm.c): Content-
+      Disposition jetzt einheitlich (vorher nur im GMimeMessagePart-Zweig
+      für den Dateinamen) gelesen und bei "attachment" auf dem neu
+      erzeugten sfp_child per sond_file_part_set_is_attachment() vermerkt.
+   3. sond_icon_util.h/.c: SondIconCorner um TOP_LEFT/TOP_RIGHT erweitert
+      (vorher nur die beiden unteren Ecken, jetzt für SeaDrive+Index+
+      Attachment gleichzeitig gebraucht); sond_icon_util_render_with_
+      overlays() Compositing entsprechend generalisiert (2x2-Ecken statt
+      nur links/rechts unten). Neue Funktion
+      sond_icon_util_attachment_badge_pixbuf() - lädt "mail-attachment-
+      symbolic" aus dem Icon-Theme (anders als die Status-Badges bewusst
+      ein Symbol statt eines Farbkreises, da hier keine mehrwertige
+      Zustandsskala, sondern eine binäre Eigenschaft angezeigt wird).
+   4. sond_treeviewfm_render_file_icon(): drittes Overlay (Attachment,
+      oben rechts) ergänzt, geprüft unabhängig vom Baum-Item-Typ (DIR
+      oder LEAF) direkt über sond_file_part_get_is_attachment() auf
+      stvfm_item_priv->sond_file_part - erfasst damit auch als Attachment
+      eingebettete Container (ZIP/PDF/verschachtelte E-Mail).
+   - Bewusst NICHT umgesetzt (Nutzer-Entscheidung): keine UI-Kennzeichnung
+     dafür, dass "Öffnen/Öffnen mit" des Message-Knotens die GANZE E-Mail
+     öffnet, während "Indizieren" (nach obigem, noch offenem Redesign) nur
+     die Kopfzeilen abdecken würde - bleibt unkommentiert in der
+     Anwendung, nur hier in der Doku festgehalten.
+   - Nicht durch Kompilieren/Testen verifiziert (kein Zugriff auf make
+     zond in dieser Session) - Bestätigung durch den Nutzer nach dem
+     nächsten Build steht noch aus.
+
+ Coverage-/Indizierungs-Redesign für E-Mails, schrittweise Umsetzung
+ (17.09.2026, Nutzer-Entscheidung "Wir wollen das angehen!" /
+ "Nein, ok nacheinander." - explizit EIN Schritt nach dem anderen,
+ jeweils dokumentiert, bevor der nächste beginnt):
+
+ Geplante Schritte (s.o. Diskussion für das Zielbild):
+   1. sond_text_extract.c/.h: reine Header-Extraktion als eigene Funktion.
+   2. Message-Knoten-Auswahl von "ganze Datei" unterscheiden, unnötige
+      OCR-Vorverarbeitung dafür überspringen.
+   3. sond_index()-Dispatch: bei Message-Knoten Header-Extraktion +
+      Coverage-Pfad "x.eml//header" statt "x.eml" verwenden.
+   4. coverage_try_collapse()/coverage_invalidate() GMessage-bewusst
+      machen (container_entrycount statt sond_dir_open() - behebt
+      nebenbei den Invalidate-Bug oben).
+   5. zond_treeviewfm_item_get_fileparts_readdir(): "Gesamtes Projekt"
+      soll .eml-Dateien in Message+Mimeparts auflösen statt als einen
+      opaken Leaf zu behandeln.
+   6. sond_treeviewfm_get_index_status(): Badge-Berechnung für E-Mails
+      auf die neue Aggregat-Logik umstellen.
+
+ Schritt 1 (abgeschlossen): sond_text_extract.c/.h - build_gmessage_text()
+ in einen neuen, reinen Header-Baustein build_gmessage_header_text() und
+ den unverändert bleibenden Rest (Trennlinie + Body-Sammlung) aufgeteilt;
+ neue öffentliche Funktion sond_text_extract_gmessage_header() (nur
+ Header, kein Body) für die künftige gezielte Message-Knoten-Indizierung
+ (Schritt 3) ergänzt. Bestehende sond_text_extract_gmessage() (Anzeige +
+ bisherige Indizierung) unverändert im Verhalten.
+
+ Schritt 2 (abgeschlossen): Message-Knoten von "ganze Datei" unterscheiden.
+   1. SondPageRange (sond_process_file.h) um gboolean gmessage_header_only
+      erweitert (statt von/bis zu überladen oder einen neuen Typ
+      einzuführen - dasselbe Muster wie is_attachment als eigenständiges
+      Attribut). Neuer Konstruktor sond_page_range_new_gmessage_header()
+      (von=bis=-1, gmessage_header_only=TRUE).
+   2. zond_treeviewfm_item_get_fileparts() (zond_treeviewfm.c): neuer
+      else-if-Zweig erkennt den Message-Knoten eindeutig über
+      type==SOND_TVFM_ITEM_TYPE_LEAF && !path_or_section &&
+      SOND_IS_FILE_PART_GMESSAGE(sond_file_part) (der "//message"-Marker
+      wird beim Item-Erzeugen sofort zu NULL, s. sond_tvfm_item_create() -
+      ein LEAF mit GMessage-sfp und ohne path_or_section kann nur der
+      Message-Knoten sein, nie ein numerisch adressierter Mimepart) und
+      trägt für diesen Fall sond_page_range_new_gmessage_header() statt
+      NULL/eines Seitenbereichs ein.
+   3. Das neue Flag durchgereicht: sond_process_fileparts() liest
+      range->gmessage_header_only und übergibt es an sond_process_file()
+      -> sond_process_file_do_rec() (beide Signaturen um den Parameter
+      gmessage_header_only erweitert, ebenso der einzige externe Aufrufer
+      sond_server_repo_worker.c mit FALSE). Dort: process_gmessage_for_ocr()
+      wird bei gmessage_header_only übersprungen - das OCRen/Bearbeiten
+      eingebetteter Inhalte (Bilder, PDF-Attachments) wäre reine
+      Verschwendung, wenn ohnehin nur der Header indiziert werden soll
+      (Schritt 3). sond_index() selbst bekommt das Flag in diesem Schritt
+      BEWUSST NOCH NICHT übergeben - der Aufruf bleibt unverändert, sodass
+      bei Auswahl des Message-Knotens vorerst weiterhin die ganze Mail
+      (ohne die nun übersprungene OCR-Vorverarbeitung) unter dem
+      Coverage-Pfad der ganzen Datei indiziert wird. Die eigentliche
+      Umstellung auf Header-only-Extraktion + eigenen Coverage-Pfad
+      "x.eml//header" ist Schritt 3.
+   - sond_process_file.h: gboolean-Typedef ergänzt (fehlte bisher unter
+     den dortigen minimalen Typedefs für gchar/guchar/gint/gsize/gpointer -
+     identisch zu glibs eigenem typedef int gboolean, daher unproblematisch
+     bei gemeinsamer Übersetzungseinheit mit glib.h, wie schon bei den
+     bestehenden Typedefs dort).
+   - Bei der Signaturerweiterung von sond_process_file_do_rec() zunächst
+     vier interne, rekursive Aufrufstellen übersehen (Compiler-Fehler
+     "too few arguments", vom Nutzer beim eigenen Build gemeldet):
+     process_zip_for_ocr() (ZIP-Eintrag-Rekursion), gmessage_process_part()
+     (eingebettete Nachricht), ein weiterer Mimepart-Rekursionszweig
+     sowie process_emb_file() (in PDF eingebettete Datei). Alle vier
+     verarbeiten stets verschachtelte/eingebettete Inhalte, nie den
+     obersten Message-Knoten selbst - dort jeweils FALSE ergänzt.
+   - Nicht durch Kompilieren/Testen verifiziert (kein Zugriff auf make
+     zond in dieser Session) - Bestätigung durch den Nutzer nach dem
+     nächsten Build steht noch aus.
+
+ Schritt 3 (abgeschlossen): sond_index()-Dispatch für Header-only.
+   1. sond_index() (sond_index.c/.h) um Parameter gboolean
+      gmessage_header_only erweitert (einziger externer Aufrufer:
+      sond_process_file.c). Nur wirksam bei mime_type "message/rfc822".
+   2. Intern: is_header_only = gmessage_header_only &&
+      mime_type=="message/rfc822"; davon abgeleitet ein g_autofree
+      header_path = "<filename>//header" und idx_filename = is_header_only
+      ? header_path : filename. idx_filename wird ab da konsequent überall
+      verwendet, wo bisher filename für DB-Operationen stand:
+      sond_index_ctx_should_process_page(), sond_index_ctx_clear_page(),
+      db_insert_chunk(), sond_index_page_set(),
+      sond_index_ctx_coverage_mark(), sond_index_ctx_set_page_count() (dort
+      ohnehin nur für PDF relevant, bei Mails nie erreicht) sowie die
+      zugehörigen Log-Meldungen. filename selbst bleibt unverändert (wird
+      für die Extraktion/den ursprünglichen Dateinamen weiter gebraucht).
+   3. Segment-Extraktion: bei is_header_only
+      sond_text_extract_gmessage_header() statt
+      sond_text_extract_gmessage() (Schritt 1).
+   4. sond_index_ctx_coverage_mark() wurde geprüft: löscht/inserted nur den
+      übergebenen path selbst plus "path/%"/"path//%"-Kinder, rührt KEINEN
+      Vorfahren an - unproblematisch für einen "x.eml//header"-Pfad, keine
+      Berührung mit dem bekannten Ahnen-Walk-Bug (der sitzt in
+      coverage_get()/coverage_invalidate(), s.o., Schritt 4).
+   5. sond_process_fileparts() (sond_process_file.c): die beiden
+      coverage_get()-Aufrufe (Vorab-Kurzschluss vor dem Öffnen der Datei,
+      Nach-Prüfung fürs Coalescing) fragten bisher immer file_part (den
+      Pfad der ganzen Datei) ab - bei gmessage_header_only jetzt stattdessen
+      coverage_key = "file_part//header", damit sie denselben Pfad sehen,
+      den sond_index() tatsächlich beschreibt. coverage_try_collapse()
+      wird bei gmessage_header_only bewusst NICHT aufgerufen - das ist
+      Schritt 4 (GMessage-bewusstes Collapse), vorher würde der bestehende
+      sond_dir_open()-basierte Mechanismus nur denselben "//"-Ahnen-Walk-Bug
+      treffen, den das Redesign beheben soll.
+   - Auswirkung für den Nutzer: Wählt er jetzt den "Message"-Knoten einer
+     E-Mail gezielt für "Index erstellen (Auswahl)" aus, wird NUR der
+     Header (Von/An/CC/BCC/Betreff/Datum) indiziert und unter
+     "x.eml//header" abgedeckt - die einzelnen Mimeparts (und "x.eml" ohne
+     Suffix als "alles vollständig") sind davon unberührt. Das finale
+     Zusammenspiel ("x.eml" = Header UND alle Mimeparts vollständig, per
+     Collapse) folgt in Schritt 4.
+   - Nicht durch Kompilieren/Testen verifiziert (kein Zugriff auf make
+     zond in dieser Session) - Bestätigung durch den Nutzer nach dem
+     nächsten Build steht noch aus.
+
+ Schritt 4 (abgeschlossen): GMessage-bewusstes Collapse/Invalidate.
+
+ - Vorfrage an den Nutzer geklärt (17.09.2026): container_entrycount für
+   E-Mails war am 15.09.2026 (Task #94) bewusst als toter Code
+   zurückgebaut worden, weil es damals keinen Verwendungszweck hatte. Mit
+   der Header/Mimepart-Trennung (Schritt 2/3) gibt es den jetzt - Nutzer
+   hat der Wiedereinführung zugestimmt. Zweite Entscheidung: Attachments
+   ZÄHLEN beim Collapse mit ("x.eml" wird nur dann komplett, wenn wirklich
+   jeder Mimepart - auch Attachments - einzeln indiziert wurde) - in der
+   Praxis wird das Collapse damit fast nur bei bewusster, vollständiger
+   Einzelauswahl aller Mimeparts einer Mail erreicht, nicht beiläufig
+   durch "Gesamtes Projekt" (das weiterhin nur EINEN Blob für Header+
+   Inline-Text erzeugt, s.u.).
+
+ 1. container_entrycount-Population für E-Mails NEU (sond_index.c):
+    gmessage_count_root_entries(buf, size) - öffnet die Mail aus dem
+    bereits im Speicher vorliegenden Puffer (kein zusätzlicher
+    Dateizugriff, SeaDrive-unbedenklich) und liefert die Anzahl direkter
+    Wurzel-Mimeparts (g_mime_multipart_get_count() bei Multipart-Root,
+    sonst 1). In sond_index() wird darüber IMMER (unabhängig von
+    gmessage_header_only, da der Puffer so oder so vorliegt)
+    container_entrycount(filename) = n_mimeparts + 1 (der "+1" ist der
+    virtuelle Header-Slot) aufgefrischt.
+
+ 2. Neue interne Bausteine (sond_index.c, statisch):
+    - coverage_get_exact(ctx, path): wie sond_index_ctx_coverage_get(),
+      aber OHNE Ahnen-Walk - nur der exakte Pfad selbst.
+    - gmessage_find_last_boundary(path): letztes "//"-Vorkommen.
+    - is_gmessage_child_segment(segment): TRUE nur für "header" oder eine
+      reine Ziffernfolge - grenzt E-Mail-Kinder sauber von anderen
+      "//"-Containern (z.B. ZIP-interne Pfade mit echten Dateinamen) und
+      von tiefer verschachtelten Multiparts (z.B. "0/1") ab, für die
+      diese Runde bewusst KEIN Collapse/Invalidate anbietet (Segment mit
+      "/" oder mit Nicht-Ziffern -> Funktion liefert FALSE -> bisheriges,
+      unverändertes Verhalten greift).
+    - gmessage_container_child_keys(ctx, container): "container//header"
+      + "container//0" .. "container//(N-1)" aus container_entrycount,
+      NULL wenn unbekannt.
+
+ 3. sond_index_ctx_coverage_try_collapse(): zusätzlicher Zweig VOR der
+    bisherigen "/"-basierten sond_dir_open()-Logik - liegt current an
+    einer erkannten E-Mail-Grenze, werden die erwarteten Kind-Schlüssel
+    statt eines Verzeichnis-Listings geprüft (coverage_get_exact() pro
+    Kind, Mindestmodus wie bisher); sind alle abgedeckt, wird die E-Mail
+    zu einem Eintrag zusammengefasst und current auf die .eml-Datei
+    selbst gesetzt (die geht danach normal über den bestehenden
+    "/"-Zweig weiter nach oben). Kein erkannter GMessage-Kindpfad ->
+    unverändertes Verhalten (fällt auf sond_dir_open() zurück, das für
+    einen Container ohnehin fehlschlägt - keine Verschlechterung
+    gegenüber vorher).
+
+ 4. sond_index_ctx_coverage_invalidate(): die Fall-2-Geschwister-
+    Rekonstruktion (bisher: g_strsplit(rest, "/", -1), IMMER
+    sond_dir_open()) durch einen eigenen Tokenizer ersetzt, der pro
+    Segment auch den ORIGINALEN Trenner ("/" vs. "//") mitführt. Pro
+    Ebene: bei "//" + erkanntem E-Mail-Kindsegment werden die erwarteten
+    Geschwister-Schlüssel (wie oben) außer dem gerade invalidierten neu
+    eingetragen (container_entrycount-basiert, kein Dateizugriff); sonst
+    unverändert sond_dir_open()-Listing. Das behebt den ursprünglichen
+    Bug direkt: Löschen des Index für einen einzelnen Mimepart (z.B.
+    "mail.eml//0") fand den kollabierten "mail.eml"-Eintrag als
+    abdeckenden Vorfahren, löschte ihn, und die Geschwister-Rekonstruktion
+    scheiterte lautlos an sond_dir_open("mail.eml") (Datei, kein
+    Verzeichnis) - jetzt werden stattdessen "mail.eml//header" und alle
+    ÜBRIGEN "mail.eml//N" korrekt mit dem alten Modus neu eingetragen,
+    nur der invalidierte Mimepart selbst verliert seinen Badge. Nebeneffekt
+    behoben: dieselbe Rekonstruktion baute bisher (rein hypothetisch, weil
+    sond_dir_open() ohnehin nie erfolgreich war) Geschwister-Pfade IMMER
+    mit einfachem "/" statt korrekt "//" - jetzt trennerkorrekt.
+
+ 5. sond_process_file.c: die in Schritt 3 bewusst gesetzte Sperre
+    "kein coverage_try_collapse() bei gmessage_header_only" wieder
+    aufgehoben - der neue GMessage-Zweig macht das jetzt sicher.
+
+ - Bekannte, bewusste Einschränkungen (dokumentiert im Code):
+   tiefer verschachtelte Multiparts (z.B. "x.eml//0/1") und "//"-Grenzen
+   anderer Container (ZIP) nehmen weiterhin NICHT am Collapse/Invalidate
+   teil - exakt dieselbe Einschränkung wie vorher, nur nicht mehr
+   fälschlich mit der E-Mail-Logik vermischt.
+ - Nicht durch Kompilieren/Testen verifiziert (kein Zugriff auf make
+   zond in dieser Session) - Bestätigung durch den Nutzer nach dem
+   nächsten Build steht noch aus, insbesondere: (a) Badges bleiben beim
+   Löschen des Index eines einzelnen Mimeparts für die übrigen
+   Mimeparts/die Message erhalten, (b) nach Einzelindizierung von Header
+   UND jedem Mimepart (inkl. Attachments) kollabiert "x.eml" zu einem
+   grünen Gesamt-Badge.
+
+ KORREKTUR einer eigenen Fehlannahme (17.09.2026, beim Planen von Schritt 5
+ entdeckt): in der Diskussion vom 16./17.09.2026 wurde angenommen (und vom
+ Nutzer auf Nachfrage bestätigt), "echte Attachments werden nie erfasst -
+ auch nicht, wenn sie durchsuchbaren Text enthalten". Das stimmte nur für
+ sond_text_extract_gmessage() (den kombinierten Header+Inline-Blob) - es
+ gibt aber eine ZWEITE, unabhängige Rekursion: process_gmessage_for_ocr()
+ -> gmessage_process_part() (sond_process_file.c, schon lange vorhanden)
+ geht JEDES MIME-Leaf durch, UNABHÄNGIG von dessen Content-Disposition,
+ und ruft dafür sond_process_file_do_rec() mit Dateiname
+ "eml_filename//internal_path" auf - das mündet am Ende ganz normal in
+ sond_index(), welches den jeweiligen Mimepart (PDF, Text, DOCX, ...)
+ gemäß seines eigenen MIME-Typs indiziert. Ein Attachment-PDF WIRD also
+ bereits heute durchsucht, sofern sein MIME-Typ unterstützt ist - nur
+ eben unter dem Pfad "x.eml//N", nicht als Teil des kombinierten
+ "x.eml"-Blobs. Für flache Multipart-Strukturen (kein verschachteltes
+ Multipart) entspricht "N" dabei genau dem Index, den auch
+ container_entrycount/gmessage_container_child_keys() erwarten (Schritt
+ 4) - purer Zufall keineswegs, sondern weil beide Mechanismen dieselbe
+ "//"+Index-Konvention (sond_file_part_get_filepart()) verwenden.
+
+ Schritt 5 (abgeschlossen, dadurch viel kleiner als ursprünglich geplant):
+ einziges fehlendes Puzzlestück für ein vollständiges Kind-Set (Header +
+ jeder Mimepart) bei einem GANZ NORMALEN "Gesamtes Projekt"/Ganze-Datei-
+ Lauf war der Header selbst - der wird von keiner der beiden Rekursionen
+ erzeugt. Fix (sond_index.c, im coverage-Coalescing-Block, nach
+ coverage_mark(idx_filename,...) und dem file_pagecount-Block): bei einer
+ normalen (nicht schon header-only) message/rfc822-Indizierung ruft
+ sond_index() sich selbst rekursiv mit gmessage_header_only=TRUE auf (das
+ dortige is_header_only verhindert eine weitere Rekursionsebene) - erzeugt
+ "filename//header" über exakt denselben Weg wie Schritt 3. KEINE Änderung
+ an zond_treeviewfm_item_get_fileparts_readdir() nötig (ursprünglicher
+ Plan verworfen) - die Fileparts-Sammlung bleibt unverändert ein opaker
+ Leaf pro Datei, die Aufschlüsselung passiert wie schon vorher
+ ausschließlich downstream in sond_process_file.c.
+ - Praktische Folge: bei einer E-Mail mit flacher Multipart-Struktur
+   (kein multipart-in-multipart, z.B. kein "HTML+Text-Alternative neben
+   Attachments") kollabiert "x.eml" nach einem normalen "Gesamtes
+   Projekt"-Lauf jetzt automatisch zu einem einzigen grünen Eintrag -
+   inklusive Attachments, wie vom Nutzer gefordert ("Wenn die gesamte eml
+   indiziert wird, sollen natürlich auch die attachments indiziert
+   werden!" - was, wie oben festgestellt, für unterstützte MIME-Typen
+   bereits vorher der Fall war, nur ohne die Header-Ergänzung nie zum
+   Collapse führte). Bei verschachtelten Multiparts bleibt es (bewusst,
+   s. Schritt 4) bei Einzel-Badges ohne automatisches Collapse - kein
+   Rückschritt, nur (weiterhin) keine Optimierung für diesen Fall.
+ - Nicht durch Kompilieren/Testen verifiziert (kein Zugriff auf make
+   zond in dieser Session) - Bestätigung durch den Nutzer nach dem
+   nächsten Build steht noch aus.
+
+ Schritt 6 (abgeschlossen): Badge-Anzeige.
+ - Analyse: sond_treeviewfm_get_coverage_path() liefert für ein LEAF-Item
+   einfach sond_file_part_get_filepart(sond_file_part). Für einen
+   Mimepart-Kind-Knoten ist das schon automatisch "mail.eml//N" (eigener
+   sfp mit eigenem path-Feld) - für den Message-Knoten dagegen bewusst
+   das BARE "mail.eml" (teilt sich denselben sfp mit der ganzen eml, kein
+   eigenes Pfadsegment, s. Schritt 2). sond_index_ctx_get_dir_status()
+   (Badge des eml-DIR-Knotens) nutzt SQL LIKE 'path/%' - das matcht per
+   SQL-Semantik automatisch auch "mail.eml//header" und "mail.eml//N"
+   (ein "/" gefolgt von IRGENDETWAS, auch einem weiteren "/") - Mimepart-
+   und DIR-Badges brauchten deshalb KEINE Änderung, nur der Message-
+   Knoten selbst.
+ - Fix (sond_treeviewfm.c, sond_treeviewfm_get_index_status()): neuer
+   Zweig VOR der bestehenden PDF/GMessage-Sonderbehandlung, der den
+   Message-Knoten exakt wie in zond_treeviewfm_item_get_fileparts()
+   erkennt (LEAF, kein path_or_section, GMessage-sfp). Statt nur
+   coverage_path ("mail.eml") wird ZUSÄTZLICH "mail.eml//header"
+   abgefragt; der Badge zeigt den jeweils besseren der beiden Status
+   (MAX von NONE/PARTIAL/FULL) - FULL, wenn ENTWEDER der Header gezielt
+   indiziert ist ODER die ganze Mail als Block/per Collapse unter
+   "mail.eml" selbst abgedeckt ist.
+ - Nicht durch Kompilieren/Testen verifiziert (kein Zugriff auf make
+   zond in dieser Session) - Bestätigung durch den Nutzer nach dem
+   nächsten Build steht noch aus.
+
+ Damit ist das E-Mail-Coverage-Redesign (alle 6 geplanten Schritte) aus
+ Nutzersicht abgeschlossen - Gesamtverifikation (Build + manuelles
+ Durchspielen: Message einzeln indizieren, einzelne Mimeparts einzeln
+ indizieren/löschen, Collapse bei vollständiger Abdeckung, Badges in
+ allen drei Knotentypen) steht noch aus.
+
+ Regressions-Bugfix (18.09.2026): nach dem Build meldete der Nutzer "Index
+ löschen für einen mimepart löscht auch message und wohl auch die anderen
+ mimeparts". Ursache ausschließlich per statischer Codeanalyse gefunden
+ (auf Nutzerwunsch "Lieber erst weiter analysieren" - kein Diagnose-
+ Logging eingebaut):
+
+ zond_index_loeschen_ht() (headerbar.c) baute - anders als
+ zond_index_erstellen_ht()/sond_process_fileparts() (sond_process_file.c,
+ dortiges "coverage_key") - den an sond_index_ctx_delete_index()
+ übergebenen Pfad NICHT gmessage_header_only-bewusst, sondern übergab
+ immer den nackten sond_file_part_get_filepart()-Rückgabewert. Für den
+ Message-Knoten (teilt sich denselben sfp mit der ganzen .eml, s. Schritt
+ 2/6 oben) ist das der nackte Dateiname "mail.eml", NICHT "mail.eml//header".
+ "Index löschen" für den Message-Knoten landete dadurch in
+ sond_index_ctx_delete_index() im "ganze Datei"-Zweig für "mail.eml"
+ SELBST. Hat "mail.eml" (aus dem ursprünglichen Ganze-Datei-Indizierlauf)
+ einen eigenen, direkten coverage-Eintrag, greift in
+ sond_index_ctx_coverage_invalidate() Fall 1 (Vorfahre == path selbst) -
+ der Eintrag wird dort einfach gelöscht, OHNE die
+ Geschwister-Rekonstruktion aus Fall 2 (die nur greift, wenn path selbst
+ NICHT der eigene coverage-Träger ist, sondern erst ein Vorfahre
+ abdeckend gefunden wird). Ergebnis: Message- UND alle Mimepart-Badges
+ verschwinden - exakt das gemeldete Symptom. Für einen wirklich
+ nummerierten Mimepart-Knoten (eigener sfp, eigenes path-Feld, z.B. "0")
+ dagegen bereits vorher korrekt: dessen coverage-Pfad hat nach einem
+ Ganze-Datei-Lauf keinen eigenen direkten Eintrag mehr (von
+ coverage_mark("mail.eml",...) beim Coalescing automatisch mitgelöscht,
+ s. Schritt 4/5), landet beim Invalidieren also in Fall 2 und durchläuft
+ die (mehrfach durchgerechnete, korrekte) GMessage-bewusste
+ Geschwister-Rekonstruktion.
+
+ Fix (headerbar.c, zond_index_loeschen_ht()): analog coverage_key in
+ sond_process_fileparts() wird bei range->gmessage_header_only jetzt
+ "%s//header" statt des nackten file_part an sond_index_ctx_delete_index()
+ übergeben - derselbe Pfad, unter dem sond_index() den Header tatsächlich
+ abgelegt/abgedeckt hat.
+ - Nicht durch Kompilieren/Testen verifiziert (kein Zugriff auf make
+   zond in dieser Session) - Bestätigung durch den Nutzer nach dem
+   nächsten Build steht noch aus.
 
  */

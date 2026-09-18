@@ -814,7 +814,7 @@ handle_coverage_gaps(Projekt *zond, GPtrArray *gaps) {
 
                 if (zond_treeviewfm_item_get_fileparts_readdir(
                         SOND_TREEVIEWFM(zond->treeview[BAUM_FS]),
-                        gap->dir_path, ht_reindex, &error_expand)) {
+                        gap->dir_path, ht_reindex, FALSE, &error_expand)) {
                     display_message(zond->app_window,
                             "Fehler beim Aufschlüsseln von \"", gap->dir_path,
                             "\":\n", error_expand ? error_expand->message : "?",
@@ -1157,7 +1157,8 @@ zond_indexsuche_activate_fuer_baum(Projekt *zond, Baum baum) {
 
     if (baum == BAUM_FS)
         ht_fileparts = zond_treeviewfm_get_fileparts(
-                ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), TRUE, FALSE, &error);
+                ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), TRUE, FALSE, FALSE,
+                &error);
     else
         ht_fileparts = zond_treeview_get_selected_fileparts(
                 ZOND_TREEVIEW(zond->treeview[baum]), FALSE, &error);

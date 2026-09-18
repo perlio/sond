@@ -43,6 +43,18 @@ GdkPixbuf* sond_icon_util_load_pixbuf(GtkWidget *widget,
  * SOND_INDEX_STATUS_NONE. */
 GdkPixbuf* sond_icon_util_status_badge_pixbuf(SondIndexStatus status, gint size);
 
+/* Attachment-Badge (16.09.2026, Nutzerwunsch): einfaches, über das
+ * Icon-Theme geladenes Symbol ("mail-attachment-symbolic") statt eines
+ * Farbkreises wie bei den Status-Badges oben - hier gibt es keine
+ * mehrwertige Zustandsskala (indiziert/teilweise/SeaDrive-Status), sondern
+ * nur eine binäre Eigenschaft (Content-Disposition: attachment ja/nein,
+ * s. sond_file_part_get_is_attachment()), für die ein wiedererkennbares
+ * Symbol (Büroklammer) klarer ist als eine weitere Farbe. NULL, wenn das
+ * Icon-Theme das Symbol nicht kennt (Aufrufer zeigt dann einfach kein
+ * Badge, analog zum Verhalten bei den übrigen *_badge_pixbuf()-Funktionen
+ * im Fehlerfall). */
+GdkPixbuf* sond_icon_util_attachment_badge_pixbuf(GtkWidget *widget, gint size);
+
 /* SeaDrive-Cloud-Status, per Cairo als einfacher, voll gefüllter Farbkreis
  * gezeichnet (wie SondIndexStatus) statt über Icon-Theme-Namen
  * ("view-refresh", "process-stop", "emblem-default") oder feinere Formen
@@ -104,11 +116,16 @@ typedef enum {
 GdkPixbuf* sond_icon_util_seadrive_dir_badge_pixbuf(SondSeadriveDirStatus status, gint size);
 
 /* Ecke, in der ein Overlay-Icon auf dem Basis-Icon plaziert wird
- * (gdk_pixbuf_composite). Aktuell nur die beiden unteren Ecken gebraucht
- * (SeaDrive-Status unten rechts, Indizierungsstatus unten links). */
+ * (gdk_pixbuf_composite). Die beiden unteren Ecken sind seit längerem in
+ * Gebrauch (SeaDrive-Status unten rechts, Indizierungsstatus unten links);
+ * TOP_RIGHT kam 16.09.2026 für das Attachment-Badge (E-Mail-Mimeparts,
+ * s. sond_file_part_get_is_attachment()) hinzu - unten wären beide Ecken
+ * für Dateien mit SeaDrive-Status UND Indizierungsstatus schon belegt. */
 typedef enum {
 	SOND_ICON_CORNER_BOTTOM_LEFT,
-	SOND_ICON_CORNER_BOTTOM_RIGHT
+	SOND_ICON_CORNER_BOTTOM_RIGHT,
+	SOND_ICON_CORNER_TOP_LEFT,
+	SOND_ICON_CORNER_TOP_RIGHT
 } SondIconCorner;
 
 /* Ein einzelnes Overlay für sond_icon_util_render_with_overlays():

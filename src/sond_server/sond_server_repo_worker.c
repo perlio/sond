@@ -1430,7 +1430,8 @@ static gpointer seafile_repo_worker_thread(gpointer user_data) {
         }
 
 		sond_process_file(&wctx, data, data_size, file->path,
-        				&result.data, &result.size, &result.pdf_count, -1, -1);
+        				&result.data, &result.size, &result.pdf_count, -1, -1,
+        				FALSE);
         g_free(data);
 
         /* PDF Count aktualisieren */

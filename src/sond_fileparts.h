@@ -68,6 +68,21 @@ gboolean sond_file_part_get_has_children(SondFilePart*);
 
 void sond_file_part_set_has_children(SondFilePart*, gboolean);
 
+/* Generisches Attribut auf Basisklassen-Ebene (wie path/parent), obwohl
+ * aktuell einziger Erzeuger sond_tvfm_item_load_gmessage_dir()
+ * (sond_treeviewfm.c) ist: markiert ein sfp, dessen Erzeugung aus einem
+ * MIME-Part mit Content-Disposition "attachment" stammt (16.09.2026,
+ * Nutzerwunsch - Anzeige-Unterscheidung Attachment/Inline im Baum). Muss
+ * auf der Basisklasse liegen, nicht auf SondFilePartLeaf, weil ein
+ * Attachment je nach Inhalt zu jedem SondFilePart-Subtyp werden kann
+ * (PDF/ZIP/GMessage/Leaf - s. sond_file_part_create_from_mime_type()).
+ * Default FALSE (kein Setzen nötig für alle anderen Erzeugungswege -
+ * Dateisystem, ZIP-Einträge, PDF-Embeddings kennen den Begriff
+ * "Attachment" schlicht nicht). */
+gboolean sond_file_part_get_is_attachment(SondFilePart*);
+
+void sond_file_part_set_is_attachment(SondFilePart*, gboolean);
+
 GPtrArray* sond_file_part_get_arr_opened_files(SondFilePart*);
 
 GBytes* sond_file_part_get_bytes(SondFilePart*, GError**);

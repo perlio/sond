@@ -108,6 +108,10 @@ GdkPixbuf* sond_icon_util_seadrive_dir_badge_pixbuf(SondSeadriveDirStatus status
 	}
 }
 
+GdkPixbuf* sond_icon_util_attachment_badge_pixbuf(GtkWidget *widget, gint size) {
+	return sond_icon_util_load_pixbuf(widget, "mail-attachment-symbolic", size);
+}
+
 gint sond_icon_util_renderer_get_size(GtkCellRenderer *renderer) {
 	gint icon_size = 0;
 	gint px = 0;
@@ -167,9 +171,12 @@ gboolean sond_icon_util_render_with_overlays(GtkWidget *widget,
 		if (!overlays[i].pixbuf)
 			continue;
 
-		dest_y = px - overlay_px;
-		dest_x = (overlays[i].corner == SOND_ICON_CORNER_BOTTOM_RIGHT) ?
-				px - overlay_px : 0;
+		dest_y = (overlays[i].corner == SOND_ICON_CORNER_TOP_LEFT ||
+				overlays[i].corner == SOND_ICON_CORNER_TOP_RIGHT) ?
+						0 : px - overlay_px;
+		dest_x = (overlays[i].corner == SOND_ICON_CORNER_BOTTOM_RIGHT ||
+				overlays[i].corner == SOND_ICON_CORNER_TOP_RIGHT) ?
+						px - overlay_px : 0;
 
 		gdk_pixbuf_composite(overlays[i].pixbuf, main_pb,
 				dest_x, dest_y, overlay_px, overlay_px,
