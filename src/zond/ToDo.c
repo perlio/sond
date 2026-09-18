@@ -2122,6 +2122,48 @@
  "%s//header" statt des nackten file_part an sond_index_ctx_delete_index()
  übergeben - derselbe Pfad, unter dem sond_index() den Header tatsächlich
  abgelegt/abgedeckt hat.
+ - Vom Nutzer bestätigt: behebt den gemeldeten Bug ("scheint zu klappen").
+
+ Separate Regression (18.09.2026), NICHT durch das E-Mail-Coverage-
+ Redesign verursacht: Doppelklick-Hydrierung von SeaDrive-Platzhaltern
+ (BAUM_FS) funktionierte nach einem Windows-Update plötzlich gar nicht
+ mehr - für ALLE Dateitypen, übersteht Neustart und kompletten Neu-Build
+ von zond. Ausführliche Fehlersuche (siehe auch die vielen ausgeschlossenen
+ Hypothesen unten, damit sie nicht erneut geprüft werden):
+ - Ausgeschlossen: Laufzeit-Zustand (Neustart hilft nicht), stale .o durch
+   inkrementellen Build (clean rebuild hilft nicht), SeaDrive-Client selbst
+   (Explorer hydriert dieselbe Datei problemlos), jede der 7 Code-Änderungen
+   dieser Sitzung (alle nachweislich auf message/rfc822-Dispatch oder die
+   Index-erstellen/löschen-Menüaktionen beschränkt, keine berührt
+   sond_treeviewfm_open()/sond_file_part_create()/Item-Typ-Bestimmung).
+ - Diagnose-Logging in sond_treeviewfm_open() (mit Nutzer-Zustimmung
+   eingebaut, s.u. wieder entfernt) zeigte: CreateFileW(GENERIC_READ) auf
+   den SeaDrive-Platzhalter schlägt mit GetLastError()=395
+   (ERROR_CLOUD_FILE_ACCESS_DENIED) fehl - der alte Code hatte dafür einen
+   rohen "kurz reinlesen"-Trick verwendet (CreateFileW+ReadFile 1 Byte)
+   statt der dafür vorgesehenen Cloud-Files-API.
+ - Recherche: Windows 11 KB5124008 (08.09.2026) war laut Presseberichten
+   (Windows Latest u.a.) ein ungewöhnlich umfangreiches Update mit
+   zahlreichen, scheinbar unzusammenhängenden Kollateralschäden (Explorer.
+   exe-Abstürze, File History, RDS, sogar Claude Cowork selbst über eine
+   Plan9-Filesystem-Änderung) - passt zeitlich zum vom Nutzer bestätigten
+   Windows-Update. Die Windows-Dokumentation zu ERROR_CLOUD_FILE_ACCESS_
+   DENIED bestätigt: der Fehler tritt typischerweise auf, wenn eine
+   Anwendung eine Cloud-Datei mit gewöhnlichem Lesezugriff statt über die
+   Cloud-Filter-API zu hydrieren versucht - exakt das alte Verhalten. Das
+   Notfall-Update KB5129195 (15.09.2026) behebt dies laut Nutzer NICHT.
+ - Fix: sond_seadrive_hydrate() (neu, sond_treeviewfm_seadrive.c/.h) ersetzt
+   den alten CreateFileW(GENERIC_READ)+ReadFile()-Trick durch die
+   offizielle CfHydratePlaceholder()-API (dynamisch aus cldapi.dll geladen,
+   wie der Rest der Datei - kein cfapi.h im verwendeten MinGW-Toolchain,
+   s. Kommentar bei cfapi_init_once()). Öffnet das Handle nur mit
+   FILE_READ_ATTRIBUTES (statt GENERIC_READ) und hydriert dann gezielt 1
+   Byte über CfHydratePlaceholder() - reicht laut Doku, um den Provider
+   zum Download zu bewegen, ohne synchron auf die ganze Datei zu warten.
+   sond_treeviewfm_open() ruft jetzt diese Funktion auf; bei Fehlschlag
+   fällt der Code (anders als vorher) auf den normalen Öffnen-Weg zurück,
+   statt kommentarlos nichts zu tun. Das testweise eingebaute Diagnose-
+   Logging wurde wieder entfernt.
  - Nicht durch Kompilieren/Testen verifiziert (kein Zugriff auf make
    zond in dieser Session) - Bestätigung durch den Nutzer nach dem
    nächsten Build steht noch aus.

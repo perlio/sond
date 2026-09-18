@@ -47,6 +47,18 @@ gboolean sond_seadrive_set_pin_state(const gchar *full_path,
                                      GError     **error);
 
 /*
+ * Stößt die Hydrierung (den Download) einer noch nicht lokal vorhandenen
+ * Cloud-Datei über die offizielle CfHydratePlaceholder()-API an - Ersatz
+ * für den früheren CreateFileW(GENERIC_READ)+ReadFile()-Trick, der nach
+ * dem Windows-Update KB5124008 (09/2026) zuverlässig mit
+ * ERROR_CLOUD_FILE_ACCESS_DENIED fehlschlägt (s. ausführlichen
+ * Doc-Kommentar an der Implementierung, sond_treeviewfm_seadrive.c).
+ * TRUE (No-Op), wenn die Datei schon lokal ist. FALSE mit gesetztem error
+ * bei echtem Fehlschlag (z.B. CF-API nicht verfügbar).
+ */
+gboolean sond_seadrive_hydrate(const gchar *full_path, GError **error);
+
+/*
  * Attach SeaDrive menu items to the context menu of stvfm.
  * Call this after sond_treeviewfm_init_contextmenu().
  */
@@ -103,6 +115,13 @@ sond_seadrive_set_pin_state(const gchar *full_path,
 {
     (void)full_path; (void)pin_state; (void)recurse; (void)error;
     return FALSE;
+}
+
+static inline gboolean
+sond_seadrive_hydrate(const gchar *full_path, GError **error)
+{
+    (void)full_path; (void)error;
+    return TRUE;
 }
 
 static inline gboolean

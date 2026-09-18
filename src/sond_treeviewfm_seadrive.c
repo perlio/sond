@@ -49,6 +49,8 @@
 #define CF_SET_PIN_FLAG_NONE         0x00000000
 #define CF_SET_PIN_FLAG_RECURSE      0x00000001
 
+#define CF_HYDRATE_FLAG_NONE         0x00000000
+
 #define HRESULT_MORE_DATA      ((HRESULT)0x800700EAL)
 
 /* ------------------------------------------------------------------ */
@@ -75,6 +77,16 @@ typedef HRESULT (WINAPI *PFN_CfGetSyncRootInfoByPath)(
     DWORD   InfoBufferLength,
     PDWORD  ReturnedLength);
 
+/* S. Doc-Kommentar an sond_seadrive_hydrate() (18.09.2026) - offizieller
+ * Ersatz für den früheren, rohen CreateFileW+ReadFile-"Trick" in
+ * sond_treeviewfm_open(). */
+typedef HRESULT (WINAPI *PFN_CfHydratePlaceholder)(
+    HANDLE       FileHandle,
+    LARGE_INTEGER StartingOffset,
+    LARGE_INTEGER Length,
+    DWORD        HydrateFlags,
+    LPOVERLAPPED Overlapped);
+
 /* ------------------------------------------------------------------ */
 /*  Runtime-loaded CF-API pointers                                     */
 /* ------------------------------------------------------------------ */
@@ -82,6 +94,7 @@ typedef HRESULT (WINAPI *PFN_CfGetSyncRootInfoByPath)(
 static PFN_CfSetPinState           g_CfSetPinState           = NULL;
 static PFN_CfGetPlaceholderInfo    g_CfGetPlaceholderInfo    = NULL;
 static PFN_CfGetSyncRootInfoByPath g_CfGetSyncRootInfoByPath = NULL;
+static PFN_CfHydratePlaceholder    g_CfHydratePlaceholder    = NULL;
 static HMODULE                     g_hCldApi                 = NULL;
 static GOnce                       g_cfapi_once              = G_ONCE_INIT;
 
@@ -98,6 +111,8 @@ static gpointer cfapi_init_once(gpointer data)
         GetProcAddress(g_hCldApi, "CfGetPlaceholderInfo");
     g_CfGetSyncRootInfoByPath = (PFN_CfGetSyncRootInfoByPath)
         GetProcAddress(g_hCldApi, "CfGetSyncRootInfoByPath");
+    g_CfHydratePlaceholder = (PFN_CfHydratePlaceholder)
+        GetProcAddress(g_hCldApi, "CfHydratePlaceholder");
     return g_hCldApi;
 }
 
@@ -793,6 +808,123 @@ gboolean sond_seadrive_set_pin_state(const gchar *full_path,
         }
         return FALSE;
     }
+    return TRUE;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Public API: sond_seadrive_hydrate                                 */
+/* ------------------------------------------------------------------ */
+
+/*
+ * sond_seadrive_hydrate:
+ *
+ * Stößt die Hydrierung (den Download) einer noch nicht lokal vorhandenen
+ * Cloud-Datei an - Ersatz für den früheren Mechanismus in
+ * sond_treeviewfm_open() (Doppelklick auf einen SeaDrive-Platzhalter), der
+ * dafür einfach mit CreateFileW(GENERIC_READ)+ReadFile() ein Byte gelesen
+ * hat, um SeaDrive/Windows zum "Recall" zu bewegen.
+ *
+ * Regressions-Fund 18.09.2026 (s. ToDo.c): nach einem Windows-Update
+ * (KB5124008, 08.09.2026 - laut Presseberichten ungewöhnlich umfangreich
+ * und mit zahlreichen Kollateralschäden an unzusammenhängenden
+ * Systemkomponenten) schlägt dieser rohe CreateFileW(GENERIC_READ)-Aufruf
+ * bei SeaDrive-Platzhaltern zuverlässig mit GetLastError()=395
+ * (ERROR_CLOUD_FILE_ACCESS_DENIED) fehl - auch nach Installation des
+ * Notfall-Nachfolge-Updates (KB5129195) und nach vollständigem Neustart/
+ * Neu-Build von zond selbst (also kein zond-Bug, s. Diagnose-Logging-
+ * Auswertung). Die Windows-Dokumentation zu ERROR_CLOUD_FILE_ACCESS_DENIED
+ * deckt sich damit: der Fehler tritt typischerweise auf, wenn eine
+ * Anwendung eine noch nicht hydrierte Cloud-Datei mit einem gewöhnlichen
+ * Lesezugriff öffnet, STATT die Hydrierung über die dafür vorgesehene
+ * Cloud-Filter-API anzustoßen - genau das tat der alte Code.
+ *
+ * Diese Funktion verwendet stattdessen die offizielle, für genau diesen
+ * Zweck vorgesehene CfHydratePlaceholder()-API (cfapi.h/cldapi.dll,
+ * dynamisch geladen wie der Rest dieser Datei - s. Kommentar bei
+ * cfapi_init_once(), derselbe Grund: kein cfapi.h im hier verwendeten
+ * MinGW-Toolchain). Laut Microsoft-Dokumentation genügt dafür ein Handle
+ * mit reinem Attribut-Zugriff (FILE_READ_ATTRIBUTES statt GENERIC_READ) -
+ * das dürfte der eigentliche Unterschied sein, den das Windows-Update
+ * jetzt strenger prüft. Länge bewusst auf 1 Byte begrenzt (wie beim alten
+ * ReadFile(1 Byte)-Trick): reicht, um den Provider (SeaDrive) zum
+ * Download der Datei zu bewegen, ohne dass dieser Aufruf selbst
+ * (synchron, blockierend) auf die komplette Downloaddauer einer großen
+ * Datei warten muss.
+ *
+ * Bereits lokal vorhandene Dateien (kein FILE_ATTRIBUTE_RECALL_ON_DATA_
+ * ACCESS) sind ein No-Op (TRUE, kein Fehler). Gibt FALSE mit gesetztem
+ * error zurück, wenn cldapi.dll/CfHydratePlaceholder nicht verfügbar ist
+ * oder der Aufruf selbst fehlschlägt - der Aufrufer fällt in diesem Fall
+ * auf den normalen Öffnen-Weg zurück (s. sond_treeviewfm_open()).
+ */
+gboolean sond_seadrive_hydrate(const gchar *full_path, GError **error)
+{
+    wchar_t *lp;
+    DWORD    attrs;
+    HANDLE   h;
+    HRESULT  hr;
+    LARGE_INTEGER offset = { .QuadPart = 0 };
+    LARGE_INTEGER length = { .QuadPart = 1 };
+
+    lp = prepare_long_path(full_path, error);
+    if (!lp)
+        return FALSE;
+
+    attrs = GetFileAttributesW(lp);
+    if (attrs == INVALID_FILE_ATTRIBUTES) {
+        if (error) {
+            gchar *msg = g_win32_error_message(GetLastError());
+            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "GetFileAttributesW('%s'): %s", full_path, msg);
+            g_free(msg);
+        }
+        g_free(lp);
+        return FALSE;
+    }
+
+    if (!(attrs & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS)) {
+        /* schon lokal - nichts zu tun */
+        g_free(lp);
+        return TRUE;
+    }
+
+    cfapi_init();
+    if (!g_CfHydratePlaceholder) {
+        g_set_error(error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
+                "CfHydratePlaceholder nicht verfügbar (cldapi.dll)");
+        g_free(lp);
+        return FALSE;
+    }
+
+    h = CreateFileW(lp, FILE_READ_ATTRIBUTES,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+    g_free(lp);
+
+    if (h == INVALID_HANDLE_VALUE) {
+        if (error) {
+            gchar *msg = g_win32_error_message(GetLastError());
+            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "CreateFileW('%s'): %s", full_path, msg);
+            g_free(msg);
+        }
+        return FALSE;
+    }
+
+    hr = g_CfHydratePlaceholder(h, offset, length, CF_HYDRATE_FLAG_NONE, NULL);
+    CloseHandle(h);
+
+    if (FAILED(hr)) {
+        if (error) {
+            gchar *msg = g_win32_error_message(hr & 0xFFFF);
+            g_set_error(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+                    "CfHydratePlaceholder('%s'): %s (0x%08lX)",
+                    full_path, msg, (unsigned long) hr);
+            g_free(msg);
+        }
+        return FALSE;
+    }
+
     return TRUE;
 }
 

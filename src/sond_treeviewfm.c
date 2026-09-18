@@ -2608,9 +2608,17 @@ static gint sond_treeviewfm_open(GtkTreeIter* iter, SondTVFMItem *stvfm_item,
 		return 0;
 
 #ifdef _WIN32
-	/* Bei offline-Dateien im SeaDrive-Pfad: Download triggern durch kurzes
-	 * Lesen der Datei. Windows/SeaDrive beginnt dadurch den Download der
-	 * gesamten Datei (Recall). Den Pin-State nicht ändern. */
+	/* Bei offline-Dateien im SeaDrive-Pfad: Download über die offizielle
+	 * CfHydratePlaceholder()-API anstoßen (sond_seadrive_hydrate(),
+	 * sond_treeviewfm_seadrive.c/h). Den Pin-State nicht ändern.
+	 *
+	 * Bis 17.09.2026 stand hier stattdessen ein roher
+	 * CreateFileW(GENERIC_READ)+ReadFile()-"Trick". Regressions-Fund
+	 * 18.09.2026 (s. ToDo.c): nach dem Windows-Update KB5124008 (09/2026)
+	 * schlägt dieser Trick zuverlässig mit ERROR_CLOUD_FILE_ACCESS_DENIED
+	 * fehl (auch nach KB5129195 und komplettem Neu-Build von zond - kein
+	 * zond-Bug). sond_seadrive_hydrate() verwendet stattdessen die dafür
+	 * vorgesehene CF-API, s. ausführlichen Kommentar dort. */
 	if (SOND_IS_FILE_PART_LEAF(stvfm_item_priv->sond_file_part) &&
 			!sond_file_part_get_parent(stvfm_item_priv->sond_file_part)) {
 		SondTreeviewFM *stvfm = sond_tvfm_item_get_stvfm(stvfm_item);
@@ -2620,28 +2628,23 @@ static gint sond_treeviewfm_open(GtkTreeIter* iter, SondTVFMItem *stvfm_item,
 					stvfm_item_priv->sond_file_part);
 			if (root && sfp_path) {
 				gchar *full_path = g_strconcat(root, "/", sfp_path, NULL);
-				wchar_t *lp = prepare_long_path(full_path, NULL);
-				g_free(full_path);
-				if (lp) {
-					DWORD attrs = GetFileAttributesW(lp);
-					if (attrs != INVALID_FILE_ATTRIBUTES &&
-							(attrs & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS)) {
-						/* Datei offline - durch Öffnen und kurzes Lesen
-						 * den Recall-Mechanismus triggern */
-						HANDLE h = CreateFileW(lp,
-								GENERIC_READ, FILE_SHARE_READ,
-								NULL, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
-						if (h != INVALID_HANDLE_VALUE) {
-							BYTE buf[1];
-							DWORD read = 0;
-							ReadFile(h, buf, sizeof(buf), &read, NULL);
-							CloseHandle(h);
-						}
-						g_free(lp);
-						return 0;
-					}
-					g_free(lp);
+				GError *hydrate_error = NULL;
+				gboolean ok = sond_seadrive_hydrate(full_path, &hydrate_error);
+
+				if (!ok) {
+					LOG_WARN("%s: sond_seadrive_hydrate('%s'): %s", __func__,
+							full_path,
+							hydrate_error ? hydrate_error->message : "?");
+					g_clear_error(&hydrate_error);
 				}
+				g_free(full_path);
+				/* Nur bei Erfolg hier abbrechen (Download angestoßen, aber
+				 * ggf. noch nicht abgeschlossen - erneuter Doppelklick
+				 * später öffnet dann normal). Bei Fehlschlag stattdessen
+				 * unten auf den normalen Öffnen-Weg zurückfallen, statt
+				 * kommentarlos nichts zu tun. */
+				if (ok)
+					return 0;
 			}
 		}
 	}
