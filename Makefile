@@ -34,11 +34,12 @@ SRCS += $(filter-out $(SRC_DIRS)/zond/40viewer/stand_alone.c $(SRC_DIRS)/zond/zo
 	$(shell find $(SRC_DIRS)/zond -name '*.c')) \
 	$(SRC_DIRS)/misc_stdlib.c $(SRC_DIRS)/misc.c \
 	$(SRC_DIRS)/sond_fileparts.c $(SRC_DIRS)/sond_treeview.c $(SRC_DIRS)/sond_treeviewfm.c \
+	$(SRC_DIRS)/sond_tvfm_item.c \
 	$(SRC_DIRS)/sond_renderer.c $(SRC_DIRS)/sond_ocr.c $(SRC_DIRS)/sond_log_and_error.c \
 	$(SRC_DIRS)/sond_pdf_helper.c $(SRC_DIRS)/sond_gmessage_helper.c $(SRC_DIRS)/sond_mime.c \
 	$(SRC_DIRS)/sond_file_helper.c $(SRC_DIRS)/sond_process_file.c $(SRC_DIRS)/sond_index.c \
 	$(SRC_DIRS)/sond_text_extract.c \
-	$(SRC_DIRS)/sond_result_view.c $(SRC_DIRS)/sond_treeviewfm_seadrive.c \
+	$(SRC_DIRS)/sond_result_view.c $(SRC_DIRS)/sond_seadrive.c \
 	$(SRC_DIRS)/sond_icon_util.c
 CFLAGS += $(shell pkg-config --cflags libsoup-3.0 libmagic libxml-2.0 gtk+-3.0 gobject-2.0 json-glib-1.0 gmime-3.0) \
 	-DCONFIG_$(CONFIG)

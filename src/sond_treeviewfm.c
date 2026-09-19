@@ -38,792 +38,18 @@
 #include "sond_index.h"
 #include "sond_mime.h"
 #include "sond_process_file.h"
-#include "sond_treeviewfm_seadrive.h"
+#include "sond_seadrive.h"
 #include "sond_icon_util.h"
-
-//SOND_TREEVIEWDM
-typedef struct {
-	gchar *root;
-	GtkTreeViewColumn *column_eingang;
-	gboolean is_seadrive_path;
-	SondTreeviewFMIndexCtxFunc index_ctx_func;
-	gpointer index_ctx_func_data;
-#ifdef _WIN32
-	GThread *seadrive_watcher_thread;
-	gint     seadrive_watcher_stop;   /* atomares Flag: 0=laufen, 1=stoppen */
-	guint    seadrive_pending_down;   /* PINNED + RECALL_ON_DATA_ACCESS */
-	guint    seadrive_pending_up;     /* NOT_IN_SYNC */
-	/* Pfade, die aktuell als "nicht synchronisiert" gezählt sind (dedupliziert
-	 * seadrive_pending_up-Erhöhungen bei mehrfachen LAST_WRITE-Events für
-	 * denselben Pfad). Pro Instanz statt static/global, und beim Root-Wechsel
-	 * geleert - sonst bleiben Einträge einer vorigen Projekt-Session stehen
-	 * und der Zähler zählt beim nächsten Öffnen falsch (bleibt zu niedrig). */
-	GHashTable *seadrive_not_in_sync;
-	/* Pfade, die aktuell als "pending_down" (PINNED+offline) gezählt sind -
-	 * Ground Truth für seadrive_pending_down, analog seadrive_not_in_sync.
-	 * Ohne dieses Set wäre bei einem REMOVED-Event (Datei gelöscht, während
-	 * sie noch heruntergeladen wurde) nicht feststellbar, ob sie gerade
-	 * mitgezählt wurde - der Zähler würde langfristig auseinanderlaufen
-	 * (Untersuchung SeaDrive-Coverage, 09/2026). Wird beim Initialscan und
-	 * bei einem Resync (Buffer-Overflow von ReadDirectoryChangesW) komplett
-	 * neu aufgebaut/ersetzt. */
-	GHashTable *seadrive_pending_down_paths;
-	/* Rekursive Ordner-Statistik für den Ordner-Coverage-Badge: Pfad (voller
-	 * Pfad wie bei seadrive_pending_down_paths) -> SondSeadriveDirCounts*.
-	 * Komplett neu aufgebaut bei Initialscan/Resync (s.
-	 * sond_treeviewfm_seadrive_set_dir_counts()), inkrementell nachgezogen
-	 * bei jedem Einzel-Event (s. sond_treeviewfm_seadrive_dir_delta(),
-	 * Untersuchung SeaDrive-Coverage, 09/2026). */
-	GHashTable *seadrive_dir_counts;
-	/* Ground-Truth-Map für den Datei-eigenen SeaDrive-Badge: voller Pfad ->
-	 * GINT_TO_POINTER(SondSeadriveBadge), Einträge mit Wert NONE werden
-	 * nicht gespeichert. ERSETZT ab 09/2026 den früheren LIVEN
-	 * GetFileAttributesW-Aufruf pro Renderzeile in
-	 * sond_treeviewfm_render_file_icon() (Konsistenz mit seadrive_dir_
-	 * counts, das schon vorher aus der Hashtable statt live gelesen wurde -
-	 * Untersuchung "Ordner-Badges", 09/2026) UND liefert gleichzeitig die
-	 * Grundlage für die Ordner-Coverage-Zähler (not_hydrated/
-	 * hydrated_pinned in seadrive_dir_counts werden aus Änderungen dieser
-	 * Map abgeleitet, s. sond_treeviewfm_seadrive_update_file_badge()) -
-	 * ANDERE, weitere Fragestellung als seadrive_pending_down_paths (das
-	 * bleibt die engere PINNED+offline-Definition für den Projekt-weiten
-	 * Zähler). Komplett neu aufgebaut bei Initialscan/Resync, inkrementell
-	 * gepflegt bei jedem Einzel-Event. */
-	GHashTable *seadrive_file_badges;
-#endif
-} SondTreeviewFMPrivate;
+#include "sond_treeviewfm_private.h"
 
 G_DEFINE_TYPE_WITH_PRIVATE(SondTreeviewFM, sond_treeviewfm, SOND_TYPE_TREEVIEW)
 
-//SOND_TVFM_ITEM
-typedef struct {
-	SondTreeviewFM* stvfm;
-	gchar*display_name;
-	gchar const* icon_name;
-	gboolean has_children;
-	SondTVFMItemType type;
-	SondFilePart* sond_file_part;
-	gchar* path_or_section;
-} SondTVFMItemPrivate;
-
-G_DEFINE_TYPE_WITH_PRIVATE(SondTVFMItem, sond_tvfm_item, G_TYPE_OBJECT)
-
-static void sond_tvfm_item_finalize(GObject *self) {
-	SondTVFMItemPrivate *sond_tvfm_item_priv =
-			sond_tvfm_item_get_instance_private(SOND_TVFM_ITEM(self));
-
-	g_free(sond_tvfm_item_priv->display_name);
-
-	//sfp-Type oder root
-	if (sond_tvfm_item_priv->sond_file_part)
-		g_object_unref(sond_tvfm_item_priv->sond_file_part);
-
-	g_free(sond_tvfm_item_priv->path_or_section);
-
-	G_OBJECT_CLASS(sond_tvfm_item_parent_class)->finalize(self);
-
-	return;
+/* Freund-Accessor für sond_seadrive.c - s. ausführl. Kommentar in
+ * sond_treeviewfm_private.h. */
+SondTreeviewFMPrivate *sond_treeviewfm_get_priv(SondTreeviewFM *stvfm) {
+	return sond_treeviewfm_get_instance_private(stvfm);
 }
 
-static void sond_tvfm_item_class_init(SondTVFMItemClass *klass) {
-	G_OBJECT_CLASS(klass)->finalize = sond_tvfm_item_finalize;
-
-	klass->load_sections = NULL;
-
-	return;
-}
-
-static void sond_tvfm_item_init(SondTVFMItem *self) {
-
-	return;
-}
-
-SondTVFMItemType sond_tvfm_item_get_item_type(SondTVFMItem *stvfm_item) {
-	SondTVFMItemPrivate *stvfm_item_priv =
-			sond_tvfm_item_get_instance_private(stvfm_item);
-	return stvfm_item_priv->type;
-}
-
-gchar const* sond_tvfm_item_get_path_or_section(SondTVFMItem *stvfm_item) {
-	SondTVFMItemPrivate *stvfm_item_priv =
-			sond_tvfm_item_get_instance_private(stvfm_item);
-
-	return stvfm_item_priv->path_or_section;
-}
-
-gchar const* sond_tvfm_item_get_display_name(SondTVFMItem *stvfm_item) {
-	SondTVFMItemPrivate *stvfm_item_priv =
-			sond_tvfm_item_get_instance_private(stvfm_item);
-
-	return stvfm_item_priv->display_name;
-}
-
-SondFilePart* sond_tvfm_item_get_sond_file_part(SondTVFMItem *stvfm_item) {
-	SondTVFMItemPrivate *stvfm_item_priv =
-			sond_tvfm_item_get_instance_private(stvfm_item);
-
-	return stvfm_item_priv->sond_file_part;
-}
-
-SondTreeviewFM* sond_tvfm_item_get_stvfm(SondTVFMItem *stvfm_item) {
-	SondTVFMItemPrivate *stvfm_item_priv =
-			sond_tvfm_item_get_instance_private(stvfm_item);
-
-	return stvfm_item_priv->stvfm;
-}
-
-gchar const* sond_tvfm_item_get_icon_name(SondTVFMItem* stvfm_item) {
-	SondTVFMItemPrivate *stvfm_item_priv =
-			sond_tvfm_item_get_instance_private(stvfm_item);
-
-	return stvfm_item_priv->icon_name;
-}
-
-void sond_tvfm_item_set_icon_name(SondTVFMItem* stvfm_item,
-		gchar const* icon_name) {
-	SondTVFMItemPrivate *stvfm_item_priv =
-			sond_tvfm_item_get_instance_private(stvfm_item);
-
-	stvfm_item_priv->icon_name = icon_name;
-
-	return;
-}
-
-static gchar const* sond_tvfm_item_get_basename(SondTVFMItem* stvfm_item) {
-	gchar const* path = NULL;
-	gchar const* basename = NULL;
-
-	SondTVFMItemPrivate *stvfm_item_priv =
-			sond_tvfm_item_get_instance_private(stvfm_item);
-
-	if (stvfm_item_priv->path_or_section)
-		path = stvfm_item_priv->path_or_section;
-	else if (stvfm_item_priv->sond_file_part)
-		path = sond_file_part_get_path(stvfm_item_priv->sond_file_part);
-	else
-		return NULL;
-
-	basename = strrchr(path, '/');
-
-	if (basename)
-		basename++; //nach dem '/'
-	else
-		basename = path; //kein '/', also kompletter Pfad ist der Basename
-
-	return basename;
-}
-
-static gint sond_tvfm_item_load_fs_dir(SondTVFMItem*, GPtrArray**, SondTVFMProgress*, GError**);
-static gint sond_tvfm_item_load_zip_dir(SondTVFMItem*, GPtrArray**, SondTVFMProgress*, GError**);
-
-static char const* mime_type_to_icon_name_manual(const char *mime_type)
-{
-    if (!mime_type)
-        return g_strdup("text-x-generic");
-
-    // Exakte Matches
-    static const struct {
-        const char *mime;
-        const char *icon;
-    } mime_map[] = {
-        // Dokumente
-        {"application/pdf", "pdf"},
-        {"application/vnd.oasis.opendocument.text", "x-office-document"},
-        {"application/msword", "x-office-document"},
-        {"application/vnd.openxmlformats-officedocument.wordprocessingml.document", "x-office-document"},
-
-        // Tabellen
-        {"application/vnd.oasis.opendocument.spreadsheet", "x-office-spreadsheet"},
-        {"application/vnd.ms-excel", "x-office-spreadsheet"},
-        {"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "x-office-spreadsheet"},
-
-        // Präsentationen
-        {"application/vnd.oasis.opendocument.presentation", "x-office-presentation"},
-        {"application/vnd.ms-powerpoint", "x-office-presentation"},
-
-        // Bilder
-        {"image/png", "image-x-generic"},
-        {"image/jpeg", "image-x-generic"},
-        {"image/gif", "image-x-generic"},
-        {"image/svg+xml", "image-x-generic"},
-
-        // Audio
-        {"audio/mpeg", "audio-x-generic"},
-        {"audio/ogg", "audio-x-generic"},
-        {"audio/flac", "audio-x-generic"},
-
-        // Video
-        {"video/mp4", "video-x-generic"},
-        {"video/x-matroska", "video-x-generic"},
-        {"video/webm", "video-x-generic"},
-
-        // Archive
-        {"application/zip", "package-x-generic"},
-        {"application/x-tar", "package-x-generic"},
-        {"application/gzip", "package-x-generic"},
-        {"application/x-7z-compressed", "package-x-generic"},
-        {"application/x-rar", "package-x-generic"},
-
-        // Text
-        {"text/plain", "text-x-generic"},
-        {"text/html", "text-html"},
-        {"text/xml", "text-xml"},
-
-        // Code
-        {"text/x-c", "text-x-script"},
-        {"text/x-python", "text-x-script"},
-        {"text/x-java", "text-x-script"},
-        {"application/javascript", "text-x-script"},
-
-        {NULL, NULL}
-    };
-
-    // Exakte Suche
-    for (int i = 0; mime_map[i].mime; i++) {
-        if (strcmp(mime_type, mime_map[i].mime) == 0) {
-            return mime_map[i].icon;
-        }
-    }
-
-    // Prefix-basierte Suche
-    if (g_str_has_prefix(mime_type, "text/")) {
-        return "text-x-generic";
-    }
-    if (g_str_has_prefix(mime_type, "image/")) {
-        return "image-x-generic";
-    }
-    if (g_str_has_prefix(mime_type, "audio/")) {
-        return "audio-x-generic";
-    }
-    if (g_str_has_prefix(mime_type, "video/")) {
-        return "video-x-generic";
-    }
-    if (g_str_has_prefix(mime_type, "application/")) {
-        return "application-x-executable";
-    }
-
-    // Fallback
-    return "text-x-generic";
-}
-
-SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM* stvfm,
-		SondFilePart *sond_file_part, gchar const* path_or_section) {
-	SondTVFMItem *stvfm_item = NULL;
-	SondTVFMItemPrivate *stvfm_item_priv = NULL;
-
-	stvfm_item = g_object_new(SOND_TYPE_TVFM_ITEM, NULL);
-	stvfm_item_priv = sond_tvfm_item_get_instance_private(stvfm_item);
-
-	stvfm_item_priv->stvfm = stvfm;
-	stvfm_item_priv->path_or_section = g_strdup(path_or_section);
-	if (sond_file_part)
-		stvfm_item_priv->sond_file_part = g_object_ref(sond_file_part);
-	stvfm_item_priv->display_name =
-			g_strdup(sond_tvfm_item_get_basename(stvfm_item));
-
-	if (!sond_file_part) {
-		gint rc = 0;
-		GError* error = NULL;
-
-		stvfm_item_priv->type = SOND_TVFM_ITEM_TYPE_DIR;
-
-		//hat Verzeichnis Einträge?
-		rc = sond_tvfm_item_load_fs_dir(stvfm_item, NULL, NULL, &error);
-		if (rc == -1) {
-			LOG_WARN("Fehler beim Öffnen des Verzeichnisses '%s':\n%s",
-					(sond_tvfm_item_get_basename(stvfm_item)) ?
-							sond_tvfm_item_get_basename(stvfm_item) :
-							sond_treeviewfm_get_root(sond_tvfm_item_get_stvfm(stvfm_item)),
-							error->message);
-
-			g_error_free(error);
-		}
-		else
-			if (rc == 1) stvfm_item_priv->has_children = TRUE;
-
-		stvfm_item_priv->icon_name = "folder";
-	}
-	else {
-		if (SOND_IS_FILE_PART_PDF(sond_file_part)) {
-			if (sond_file_part_get_has_children(sond_file_part) &&
-					!path_or_section) { //Marker für PageTree nicht gesetzt
-				stvfm_item_priv->type = SOND_TVFM_ITEM_TYPE_DIR;
-				stvfm_item_priv->has_children = TRUE;
-				stvfm_item_priv->icon_name = "pdf-folder";
-			}
-			else {
-				stvfm_item_priv->type = SOND_TVFM_ITEM_TYPE_LEAF;
-				stvfm_item_priv->icon_name = "pdf";
-				if (!g_strcmp0(path_or_section, "//")) { //Marker gesetzt
-					g_free(stvfm_item_priv->path_or_section); //Marker löschen
-					stvfm_item_priv->path_or_section = NULL;
-					g_free(stvfm_item_priv->display_name); //Display-Name ersetzen
-					stvfm_item_priv->display_name = g_strdup("PageTree");
-				}
-			}
-		}
-		else if (SOND_IS_FILE_PART_ZIP(sond_file_part)) {
-			stvfm_item_priv->type = SOND_TVFM_ITEM_TYPE_DIR;
-
-			/* Nutzer-Fund 16.09.2026: für path_or_section == NULL (das
-			 * ZIP-File selbst, noch nicht hineinexpandiert) NICHT
-			 * load_zip_dir() aufrufen - das erzwingt über
-			 * sond_file_part_zip_list_dir() beim allerersten Zugriff auf
-			 * dieses Archiv den kompletten dir_index-Aufbau (ALLE
-			 * Einträge, alle Ebenen, s. sfp_zip_build_dir_index()), nur
-			 * um zu prüfen ob überhaupt ein Eintrag existiert. Bei
-			 * großen Archiven (mehrere Tausend Einträge) macht allein
-			 * das bloße AUFLISTEN eines Verzeichnisses mit mehreren
-			 * ZIP-Dateien darin (noch ohne sie zu öffnen) spürbar Zeit
-			 * aus. Stattdessen die von sond_file_part_zip_test_for_files()
-			 * (läuft schon in sond_file_part_create_from_mime_type() beim
-			 * Erzeugen des SondFilePart) günstig gesetzte has_children-
-			 * Flag wiederverwenden - analog zum PDF/GMessage-Zweig oben.
-			 * Für bereits expandierte ZIP-Unterverzeichnisse
-			 * (path_or_section != NULL) bleibt load_zip_dir() unverändert
-			 * - dort ist dir_index durchs Expandieren ohnehin schon
-			 * gecacht, also billig. */
-			if (!path_or_section)
-				stvfm_item_priv->has_children =
-						sond_file_part_get_has_children(sond_file_part);
-			else
-				/* Nutzer-Fund 16.09.2026: Rückgabewert ist -1 (Fehler), 0
-				 * (keine Kinder) oder 1 (Kinder) - der frühere Vergleich
-				 * "? TRUE : FALSE" wertete auch -1 (Fehler, z.B. defektes/
-				 * pfadloses sond_file_part nach fehlerhafter Kopie aus
-				 * einem Container) fälschlich als "hat Kinder", wodurch ein
-				 * Dummy-Kind eingefügt wurde, obwohl das Verzeichnis beim
-				 * echten Aufklappen dann mit einer Fehlermeldung
-				 * fehlschlägt. Jetzt: nur 1 zählt als "hat Kinder". */
-				stvfm_item_priv->has_children =
-						(sond_tvfm_item_load_zip_dir(stvfm_item, NULL, NULL, NULL) == 1) ?
-								TRUE : FALSE;
-
-			stvfm_item_priv->icon_name = (path_or_section) ?
-					"folder" : "package-x-generic";
-		}
-		else if (SOND_IS_FILE_PART_GMESSAGE(sond_file_part)) {
-			if (sond_file_part_get_has_children(sond_file_part) &&
-					!path_or_section) { //Marker für Message nicht gesetzt
-				stvfm_item_priv->type = SOND_TVFM_ITEM_TYPE_DIR;
-				stvfm_item_priv->has_children = TRUE;
-				stvfm_item_priv->icon_name = "mail-read";
-			}
-			else {
-				stvfm_item_priv->type = SOND_TVFM_ITEM_TYPE_LEAF;
-				stvfm_item_priv->icon_name = "mail-read";
-				if (!g_strcmp0(path_or_section, "//message")) { //Marker gesetzt
-					g_free(stvfm_item_priv->path_or_section); //Marker löschen
-					stvfm_item_priv->path_or_section = NULL;
-					g_free(stvfm_item_priv->display_name); //Display-Name ersetzen
-					stvfm_item_priv->display_name = g_strdup("Message");
-				}
-				else if (path_or_section) { //Multipart-Verzeichnis
-					stvfm_item_priv->type = SOND_TVFM_ITEM_TYPE_DIR;
-					stvfm_item_priv->has_children =
-							sond_file_part_get_has_children(sond_file_part);
-					stvfm_item_priv->icon_name = "folder";
-				}
-			}
-		}
-		else if (SOND_IS_FILE_PART_LEAF(sond_file_part)) {
-			stvfm_item_priv->type = SOND_TVFM_ITEM_TYPE_LEAF;
-			stvfm_item_priv->icon_name = mime_type_to_icon_name_manual(
-					sond_file_part_leaf_get_mime_type(
-							SOND_FILE_PART_LEAF(sond_file_part)));
-		}
-	}
-
-	//section?
-	if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF
-			&& stvfm_item_priv->path_or_section) //Spezialfall "//" wurde oben schon weggefischt
-		stvfm_item_priv->type = SOND_TVFM_ITEM_TYPE_LEAF_SECTION;
-
-	//Spezialbehandlung für Sections
-	if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF_SECTION ||
-			stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF) {
-		//Wenn type == SOND_TVFM_ITEM_TYPE_LEAF_SECTION:
-		//stvfm_item_priv->icon_name muß in load_children gesetzt werden;
-		if (SOND_TREEVIEWFM_GET_CLASS(stvfm)->has_sections)
-			stvfm_item_priv->has_children =
-					SOND_TREEVIEWFM_GET_CLASS(stvfm)->has_sections(stvfm_item);
-	}
-
-	return stvfm_item;
-}
-
-static gint sond_tvfm_item_load_fs_dir(SondTVFMItem* stvfm_item,
-		GPtrArray** arr_children, SondTVFMProgress* progress, GError **error) {
-	GPtrArray* loaded_children = NULL;
-	gboolean dir_has_children = FALSE;
-	gchar* path_dir = NULL;
-    SondDir* dir = NULL;
-    gchar const* filename = NULL;
-
-	SondTVFMItemPrivate *stvfm_item_priv =
-			sond_tvfm_item_get_instance_private(stvfm_item);
-	SondTreeviewFMPrivate* stvfm_priv =
-			sond_treeviewfm_get_instance_private(stvfm_item_priv->stvfm);
-
-	path_dir = g_strconcat(stvfm_priv->root,
-			"/", stvfm_item_priv->path_or_section, NULL);
-	dir = sond_dir_open(path_dir, error);
-	g_free(path_dir);
-	if (!dir)
-		return -1;
-
-	if (arr_children)
-		loaded_children = g_ptr_array_new_with_free_func((GDestroyNotify)g_object_unref);
-
-    while ((filename = sond_dir_read_name(dir)) != NULL) {
-		SondTVFMItem* stvfm_item_child = NULL;
-		gchar* rel_path_child = NULL;
-		GStatBuf st = { 0 };
-
-		dir_has_children = TRUE;
-
-		if (!arr_children) //Es gibt Eintrag - reicht
-    		break;
-
-		if (stvfm_item_priv->path_or_section)
-			rel_path_child = g_strconcat(stvfm_item_priv->path_or_section, "/",
-					filename, NULL);
-		else rel_path_child = g_strdup(filename);
-
-		if (sond_stat(rel_path_child, &st, error)) {
-			LOG_WARN("g_stat(%s) gibt Fehler zurück: %s", rel_path_child, (*error)->message);
-			g_clear_error(error);
-			g_free(rel_path_child);
-
-			continue;
-		}
-
-		if (S_ISDIR(st.st_mode)) {
-			//Verzeichnis
-			stvfm_item_child = sond_tvfm_item_create(stvfm_item_priv->stvfm,
-					stvfm_item_priv->sond_file_part, rel_path_child);
-		}
-		else {
-			SondFilePart* sfp_child = NULL;
-			gchar* full_path = NULL;
-			const gchar* mime_from_ext = NULL;
-
-			full_path = g_strconcat(stvfm_priv->root, "/", rel_path_child, NULL);
-
-#ifdef _WIN32
-			/* Bei SeaDrive: offline-Dateien nicht lesen - nur Extension-basierter MIME-Typ */
-			if (stvfm_priv->is_seadrive_path) {
-				wchar_t *lp = prepare_long_path(full_path, NULL);
-				if (lp) {
-					DWORD attrs = GetFileAttributesW(lp);
-					g_free(lp);
-					if (attrs != INVALID_FILE_ATTRIBUTES &&
-							(attrs & FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS))
-						mime_from_ext = mime_from_extension(filename);
-				}
-			}
-#endif
-
-			if (mime_from_ext) {
-				/* Datei offline - SondFilePartLeaf erzwingen, kein Öffnen */
-				sfp_child = sond_file_part_create_leaf(
-						rel_path_child, stvfm_item_priv->sond_file_part,
-						mime_from_ext);
-			} else
-				/* Datei lokal verfügbar - normal lesen und sfp erzeugen */
-				sfp_child = sond_file_part_create(stvfm_item_priv->sond_file_part,
-						rel_path_child, error);
-			g_free(full_path);
-			if (!sfp_child) {
-				g_free(rel_path_child);
-				sond_dir_close(dir);
-				return -1;
-			}
-
-			stvfm_item_child = sond_tvfm_item_create(stvfm_item_priv->stvfm,
-					sfp_child, NULL);
-			g_object_unref(sfp_child);
-		}
-
-		g_free(rel_path_child);
-
-		g_ptr_array_add(loaded_children, stvfm_item_child);
-    }
-
-    sond_dir_close(dir);
-
-	if (arr_children) *arr_children = loaded_children;
-	else if (dir_has_children) return 1;
-
-	return 0;
-}
-
-static gint sond_tvfm_item_load_zip_dir(SondTVFMItem* stvfm_item,
-		GPtrArray** arr_children, SondTVFMProgress* progress, GError** error) {
-	GPtrArray* entries = NULL;
-
-	SondTVFMItemPrivate* stvfm_item_priv =
-			sond_tvfm_item_get_instance_private(stvfm_item);
-
-	/* path_or_section ist das Verzeichnispäfix (ohne '/'), NULL = Archiv-
-	 * Wurzel. sond_file_part_zip_list_dir() cacht den Verzeichnis-Index
-	 * auf dem SondFilePartZip selbst (s. dortigen Doc-Kommentar in
-	 * sond_fileparts.h) - hier kein erneuter Vollscan mehr je Knoten. */
-	entries = sond_file_part_zip_list_dir(
-			SOND_FILE_PART_ZIP(stvfm_item_priv->sond_file_part),
-			stvfm_item_priv->path_or_section, error);
-	if (!entries)
-		return -1; /* Fehler */
-
-	if (!arr_children) {
-		/* Nur prüfen ob Einträge vorhanden */
-		gboolean has = (entries->len > 0);
-		g_ptr_array_unref(entries);
-		return has ? 1 : 0;
-	}
-
-	*arr_children = g_ptr_array_new_with_free_func((GDestroyNotify)g_object_unref);
-
-	for (guint i = 0; i < entries->len; i++) {
-		SondZipDirEntry* e = g_ptr_array_index(entries, i);
-		SondTVFMItem* child = NULL;
-
-		/* Nutzer-Fund 16.09.2026: Bei großen Archiven (>30000 Einträge)
-		 * lief diese Schleife bisher komplett unbeobachtbar und
-		 * unabbrechbar durch (jede Iteration ruft sond_file_part_create()
-		 * auf, das per libmagic den MIME-Typ sniffed - je nach Puffergröße
-		 * spürbar Zeit pro Eintrag). progress ist rein lesend eingesetzt:
-		 * Abbruch hier verwirft nur noch nicht geladene Kinder, keine
-		 * Rollback-Problematik (im Unterschied zu SondProcessFileCtx). */
-		if (progress && (i % 200) == 0) {
-			if (progress->progress_func)
-				progress->progress_func(progress->progress_func_data, NULL);
-			if (progress->cancel && *progress->cancel)
-				break;
-		}
-
-		if (e->is_dir) {
-			/* Verzeichnis: path endet auf '/', ohne dieses als path_or_section */
-			gchar* dir_path = g_strndup(e->path, strlen(e->path) - 1);
-			child = sond_tvfm_item_create(stvfm_item_priv->stvfm,
-					stvfm_item_priv->sond_file_part, dir_path);
-			g_free(dir_path);
-		} else {
-			SondFilePart* sfp_child = NULL;
-
-			sfp_child = sond_file_part_create(stvfm_item_priv->sond_file_part,
-					e->path, error);
-
-			if (!sfp_child) {
-				LOG_WARN("SondFilePart konnte nicht erzeugt werden:\n%s",
-						(*error)->message);
-				g_clear_error(error);
-
-				continue;
-			}
-
-			child = sond_tvfm_item_create(stvfm_item_priv->stvfm, sfp_child, NULL);
-			g_object_unref(sfp_child);
-		}
-
-		g_ptr_array_add(*arr_children, child);
-	}
-
-	g_ptr_array_unref(entries);
-
-	return 0;
-}
-
-static gint sond_tvfm_item_load_pdf_dir(SondTVFMItem* stvfm_item, GPtrArray** arr_children,
-		SondTVFMProgress* progress, GError** error) {
-	gint rc = 0;
-	GPtrArray* arr_emb_files = NULL;
-	SondTVFMItemPrivate* stvfm_item_priv = NULL;
-	SondTVFMItem* stvfm_item_pdf_page_tree = NULL;
-
-	stvfm_item_priv = sond_tvfm_item_get_instance_private(stvfm_item);
-
-	rc = sond_file_part_pdf_load_embedded_files(SOND_FILE_PART_PDF(stvfm_item_priv->sond_file_part),
-			&arr_emb_files, error);
-	if (rc)
-		return -1;
-
-	*arr_children = g_ptr_array_new_with_free_func((GDestroyNotify) g_object_unref);
-
-	stvfm_item_pdf_page_tree =
-			sond_tvfm_item_create(stvfm_item_priv->stvfm,
-					stvfm_item_priv->sond_file_part, "//");
-	g_ptr_array_add(*arr_children, stvfm_item_pdf_page_tree);
-
-	for (guint i = 0; i < arr_emb_files->len; i++) {
-		SondFilePart* sfp = NULL;
-		SondTVFMItem* stvfm_item_child = NULL;
-
-		sfp = g_ptr_array_index(arr_emb_files, i);
-
-		stvfm_item_child =
-				sond_tvfm_item_create(stvfm_item_priv->stvfm, sfp, NULL);
-
-		g_ptr_array_add(*arr_children, stvfm_item_child);
-	}
-
-	g_ptr_array_unref(arr_emb_files);
-
-	return 0;
-}
-
-static gint sond_tvfm_item_load_gmessage_dir(SondTVFMItem* stvfm_item,
-		GPtrArray** arr_children, SondTVFMProgress* progress, GError** error) {
-	gint rc = 0;
-	GPtrArray* arr_mimeparts = NULL;
-
-	SondTVFMItemPrivate* stvfm_item_priv = sond_tvfm_item_get_instance_private(stvfm_item);
-
-	rc = sond_file_part_gmessage_load_path(
-			SOND_FILE_PART_GMESSAGE(stvfm_item_priv->sond_file_part),
-			stvfm_item_priv->path_or_section,
-			&arr_mimeparts, error);
-	if (rc)
-		return -1;
-
-	*arr_children = g_ptr_array_new_with_free_func((GDestroyNotify)g_object_unref);
-
-	/* Erstes Kind: Message (Header + Body) - analog zu PageTree bei PDF */
-	if (!stvfm_item_priv->path_or_section) { /* Nur auf oberster Ebene der .eml */
-		SondTVFMItem* stvfm_item_message = NULL;
-		SondTVFMItemPrivate* stvfm_item_message_priv = NULL;
-
-		stvfm_item_message = sond_tvfm_item_create(stvfm_item_priv->stvfm,
-				stvfm_item_priv->sond_file_part, "//message");
-		stvfm_item_message_priv = sond_tvfm_item_get_instance_private(stvfm_item_message);
-
-		/* Display-Name anpassen */
-		g_free(stvfm_item_message_priv->display_name);
-		stvfm_item_message_priv->display_name = g_strdup("Message");
-
-		g_ptr_array_add(*arr_children, stvfm_item_message);
-	}
-
-	for (guint i = 0; i < arr_mimeparts->len; i++) {
-		SondTVFMItem* stvfm_item_child = NULL;
-		GMimeContentType* mime_type = NULL;
-		gchar const* mime_string = NULL;
-		GMimeObject* mime_child = NULL;
-		gchar* path = NULL;
-		gchar* base = NULL;
-		gchar const* filename = NULL;
-		SondTVFMItemPrivate* stvfm_item_child_priv = NULL;
-
-		mime_child = g_ptr_array_index(arr_mimeparts, i);
-
-		mime_type = g_mime_object_get_content_type(
-				mime_child);
-		mime_string = g_mime_content_type_get_mime_type(mime_type);
-
-		base = g_strdup_printf("%u", i);
-		path = g_strconcat(stvfm_item_priv->path_or_section ?
-				stvfm_item_priv->path_or_section : "",
-				stvfm_item_priv->path_or_section ? "/" : "",
-				base, NULL);
-		g_free(base);
-
-		if (GMIME_IS_MULTIPART(mime_child))
-			stvfm_item_child =
-					sond_tvfm_item_create(stvfm_item_priv->stvfm,
-							stvfm_item_priv->sond_file_part, path);
-		else {
-			SondFilePart* sfp_child = NULL;
-			GMimeContentDisposition* disp = NULL;
-			gboolean is_attachment = FALSE;
-
-			/* Content-Disposition unabhängig vom konkreten GMime-Typ einmal
-			 * einheitlich lesen (Nutzerwunsch 16.09.2026: Attachment/Inline
-			 * im Baum unterscheidbar machen) - vorher wurde disp nur im
-			 * GMimeMessagePart-Zweig (für den Dateinamen) geholt, im
-			 * GMIME_IS_PART-Zweig lieferte das schon g_mime_part_get_filename()
-			 * intern mit, der Disposition-WERT selbst ("attachment"/"inline")
-			 * aber nirgends. */
-			disp = g_mime_object_get_content_disposition(mime_child);
-			if (disp) {
-				gchar const* dval = g_mime_content_disposition_get_disposition(disp);
-
-				is_attachment = dval &&
-						!g_ascii_strcasecmp(dval, "attachment");
-			}
-
-			if (GMIME_IS_PART(mime_child))
-				filename = g_mime_part_get_filename(GMIME_PART(mime_child));
-			else if (disp) //GMimeMessagepart
-				filename = g_mime_content_disposition_get_parameter(disp, "filename");
-
-			sfp_child = sond_file_part_is_open(stvfm_item_priv->sond_file_part, path);
-			if (!sfp_child)
-				sfp_child = sond_file_part_create_from_mime_type(path,
-						stvfm_item_priv->sond_file_part, mime_string);
-			sond_file_part_set_is_attachment(sfp_child, is_attachment);
-
-			stvfm_item_child = sond_tvfm_item_create(stvfm_item_priv->stvfm,
-						sfp_child, NULL);
-			g_object_unref(sfp_child);
-		}
-
-		g_free(path);
-
-		stvfm_item_child_priv =
-				sond_tvfm_item_get_instance_private(stvfm_item_child);
-		g_free(stvfm_item_child_priv->display_name);
-		stvfm_item_child_priv->display_name = filename ?
-				g_strdup(filename) : g_strdup(mime_string);
-
-		g_ptr_array_add(*arr_children, stvfm_item_child);
-	}
-
-	g_ptr_array_unref(arr_mimeparts);
-
-	return 0;
-}
-
-gint sond_tvfm_item_load_children(SondTVFMItem* stvfm_item,
-		GPtrArray** arr_children, SondTVFMProgress* progress, GError** error) {
-	SondTVFMItemPrivate *stvfm_item_priv =
-			sond_tvfm_item_get_instance_private(stvfm_item);
-
-	if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_DIR) {
-		gint rc = 0;
-
-		//untergliedern: dir in FileSystem, zip-Archiv oder GMessage
-		if (stvfm_item_priv->sond_file_part == NULL) //FileSystem
-			rc = sond_tvfm_item_load_fs_dir(stvfm_item, arr_children, progress, error);
-		else if(SOND_IS_FILE_PART_ZIP(stvfm_item_priv->sond_file_part))
-			rc = sond_tvfm_item_load_zip_dir(stvfm_item, arr_children, progress, error);
-		else if (SOND_IS_FILE_PART_PDF(stvfm_item_priv->sond_file_part))
-			rc = sond_tvfm_item_load_pdf_dir(stvfm_item, arr_children, progress, error);
-		else if(SOND_IS_FILE_PART_GMESSAGE(stvfm_item_priv->sond_file_part))
-			rc = sond_tvfm_item_load_gmessage_dir(stvfm_item, arr_children, progress, error);
-
-		if (rc)
-			return -1;
-	}
-	else if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF ||
-			stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF_SECTION) {
-		if (SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->load_sections) {
-			gint rc = 0;
-
-			rc = SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->load_sections(stvfm_item,
-					arr_children, error);
-			if (rc)
-				return -1;
-		}
-		else {
-			if (error) *error = g_error_new(g_quark_from_static_string("sond"), 0,
-					"%s\nKeine Kinder vorhanden", __func__);
-
-			return -1;
-		}
-	}
-
-	return 0;
-}
 
 //Nun geht's mit SondTreeviewFM weiter
 static void sond_treeviewfm_render_text_cell(GtkTreeViewColumn *column,
@@ -842,7 +68,7 @@ static void sond_treeviewfm_render_text_cell(GtkTreeViewColumn *column,
 		return;
 	}
 
-	stvfm_item_priv = sond_tvfm_item_get_instance_private(stvfm_item);
+	stvfm_item_priv = sond_tvfm_item_get_priv(stvfm_item);
 
 	if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_DIR ||
 			stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF)
@@ -930,7 +156,7 @@ gint sond_treeviewfm_file_part_visible(SondTreeviewFM *stvfm, GtkTreeIter *iter_
 				&stvfm_item, -1);
 
 		SondTVFMItemPrivate* stvfm_item_priv =
-				sond_tvfm_item_get_instance_private(stvfm_item);
+				sond_tvfm_item_get_priv(stvfm_item);
 		g_object_unref(stvfm_item);
 
 		path_item = stvfm_item_priv->path_or_section;
@@ -1050,453 +276,6 @@ static void sond_treeviewfm_constructed(GObject *self) {
 	return;
 }
 
-/**
- * Ändert stvfm_item_priv->path_or_section
- */
-static void sond_tvfm_item_set_basename(SondTVFMItem* stvfm_item,
-		gchar const* new_basename) {
-	gchar const* path = NULL;
-	gchar const* dir = NULL;
-	gchar* path_new = NULL;
-
-	SondTVFMItemPrivate *stvfm_item_priv =
-			sond_tvfm_item_get_instance_private(stvfm_item);
-
-	if (!stvfm_item_priv->path_or_section)
-		LOG_WARN("STVFMItem ist Leaf oder root-dir ('%s')",
-				sond_file_part_get_path(stvfm_item_priv->sond_file_part));
-
-	path = stvfm_item_priv->path_or_section;
-
-	dir = strrchr(path, '/');
-
-	if (!dir)
-		path_new = g_strdup(new_basename);
-	else
-		path_new = g_strdup_printf("%.*s/%s", (int)(dir - path), path, new_basename);
-
-	g_free(stvfm_item_priv->path_or_section);
-	stvfm_item_priv->path_or_section = g_strdup(path_new);
-
-	return;
-}
-
-static gint sond_tvfm_item_rename(SondTVFMItem* stvfm_item,
-		SondTVFMItem* stvfm_item_parent, gchar const* base_new,
-		GError** error) {
-	g_autofree gchar* path_new = NULL;
-
-	SondTVFMItemPrivate* stvfm_item_parent_priv =
-			sond_tvfm_item_get_instance_private(stvfm_item_parent);
-	SondTVFMItemPrivate* stvfm_item_priv =
-			sond_tvfm_item_get_instance_private(stvfm_item);
-
-	path_new = g_strconcat((stvfm_item_parent_priv->path_or_section) ?
-				stvfm_item_parent_priv->path_or_section : "",
-				(stvfm_item_parent_priv->path_or_section) ? "/" : "",
-						base_new, NULL);
-
-	if (!stvfm_item_priv->path_or_section) {
-		gint rc = 0;
-		rc = sond_file_part_rename(stvfm_item_priv->sond_file_part,
-				path_new, base_new, error);
-		if (rc)
-			return -1;
-	}
-	else { //richtiges Verzeichnis, nicht LEAF oder Root-Dir (=LEAF)
-		//Normale Dateien
-		if (!stvfm_item_priv->sond_file_part) {
-			//->path_or_section immer != NULL, wenn nicht root-dir
-			if (!sond_rename(stvfm_item_priv->path_or_section, path_new, error))
-				return -1;
-
-			sond_tvfm_item_set_basename(stvfm_item, path_new);
-		}
-		else if (SOND_IS_FILE_PART_ZIP(stvfm_item_priv->sond_file_part)) {
-			//ToDo: zip-Verzeichnis-Namen ändern
-			if (error) *error = g_error_new(g_quark_from_static_string("sond"), 0,
-					"%s\nrename zip-dir noch nicht implementiert", __func__);
-
-			return -1;
-		}
-		else if (SOND_IS_FILE_PART_GMESSAGE(stvfm_item_priv->sond_file_part)) {
-			//ToDo: Multipart umbenennen
-			if (error) *error = g_error_new(g_quark_from_static_string("sond"), 0,
-					"%s\nrename GMimeMultipart noch nicht implementiert", __func__);
-
-			return -1;
-		}
-		//was anderes?
-		else {
-			if (error) *error = g_error_new(g_quark_from_static_string("sond"), 0,
-					"%s\nNicht implementiert", __func__);
-
-			return -1;
-		}
-	}
-
-	return 0;
-}
-
-static gint delete_item(SondTVFMItem* stvfm_item, GError** error) {
-	SondTVFMItemPrivate* stvfm_item_priv =
-			sond_tvfm_item_get_instance_private(stvfm_item);
-
-	if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_DIR) {
-		if (!stvfm_item_priv->sond_file_part) { //FileSystem - geht schon
-			gboolean res = FALSE;
-			gchar* path = NULL;
-			SondTreeviewFMPrivate* stvfm_priv =
-					sond_treeviewfm_get_instance_private(stvfm_item_priv->stvfm);
-
-			if (!stvfm_item_priv->path_or_section)
-				return 0; //Root-Verzeichnis kann nicht gelöscht werden!
-
-			path = g_strconcat(stvfm_priv->root, "/", stvfm_item_priv->path_or_section, NULL);
-
-			res = sond_rmdir_r(path, error);
-			g_free(path);
-			if (!res)
-				return -1;
-		}
-		else if (!stvfm_item_priv->path_or_section) { //sfp existiert - also root-Element
-			gint rc = 0;
-
-			rc = sond_file_part_delete(stvfm_item_priv->sond_file_part, error);
-			if (rc) {
-				return -1;
-			}
-		}
-		else if (SOND_IS_FILE_PART_ZIP(stvfm_item_priv->sond_file_part)) {
-			g_set_error(error, SOND_ERROR, 0, "%s\nnicht implementiert", __func__);
-
-			return -1;
-		}
-		else if (SOND_IS_FILE_PART_PDF(stvfm_item_priv->sond_file_part)) { //PDF-Datei ist Dir - ganz löschen
-			g_set_error(error, SOND_ERROR, 0, "%s\nnicht implementiert", __func__);
-
-			return -1;
-		}
-		else if (SOND_IS_FILE_PART_GMESSAGE(stvfm_item_priv->sond_file_part)) {
-			g_set_error(error, SOND_ERROR, 0, "%s\nnicht implementiert", __func__);
-
-			return -1;
-		}
-	}
-	else if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF) {
-		gint rc = 0;
-
-		if (SOND_IS_FILE_PART_PDF(stvfm_item_priv->sond_file_part) &&
-				sond_file_part_get_has_children(stvfm_item_priv->sond_file_part)) {
-			if (error) *error = g_error_new(g_quark_from_static_string("sond"), 0,
-					"Löschen des Pagetree aus PDF-Datei nicht unterstützt");
-
-			return -1;
-		}
-		else if (SOND_IS_FILE_PART_GMESSAGE(stvfm_item_priv->sond_file_part)) {
-			if (error) *error = g_error_new(SOND_ERROR, 0,
-					"EMail-Leaf-Eintrag kann nicht gelöscht werden");
-
-			return -1;
-		}
-
-		rc = sond_file_part_delete(stvfm_item_priv->sond_file_part, error);
-		if (rc)
-			return -1;
-	}
-	else if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF_SECTION) {
-		if (SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->delete_section) {
-			gint rc = 0;
-
-			rc = SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->delete_section(stvfm_item, error);
-			if (rc)
-				return -1;
-		}
-		else
-			return 0;
-	}
-
-	return 0;
-}
-
-/* Kopiert ein Verzeichnis aus einem Container (ZIP/PDF-Ordner/GMessage-
- * Multipart) rekursiv in das echte Dateisystem. path_dst_rel: Zielpfad
- * relativ zur Projektwurzel (ohne führendes '/') - wird hier angelegt.
- *
- * Eingebettete Dateien, die selbst wieder ein Container sind
- * (verschachtelte ZIP/PDF/E-Mail), werden als EINE Datei kopiert (ihre
- * rohen Bytes über sond_file_part_copy(), wie beim normalen Datei-Kopieren
- * aus einem Container ins Filesystem) - NICHT in ihre interne Struktur
- * (PageTree, Anhänge etc.) aufgelöst; das entspricht dem, was der Nutzer
- * beim Herauskopieren erwartet (Nutzer-Entscheidung, 16.09.2026). Kriterium
- * dafür: ein Kind zählt nur dann als "echtes" Unterverzeichnis desselben
- * Archivs (und wird rekursiv weiter aufgeschlüsselt), wenn es denselben
- * SondFilePart wie der Quellknoten trägt (s. sond_tvfm_item_load_zip_dir():
- * Unterverzeichnisse im selben ZIP bekommen den identischen SondFilePart,
- * nur mit anderem path_or_section; eine eingebettete Datei bekommt dagegen
- * immer einen NEUEN, eigenen SondFilePart). */
-static gint copy_container_dir_to_fs(SondTVFMItem* stvfm_item_src,
-		gchar const* path_dst_rel, GError** error) {
-	SondTVFMItemPrivate* stvfm_item_src_priv =
-			sond_tvfm_item_get_instance_private(stvfm_item_src);
-	SondTreeviewFMPrivate* stvfm_priv =
-			sond_treeviewfm_get_instance_private(stvfm_item_src_priv->stvfm);
-	gchar* path_dst_real = NULL;
-	GPtrArray* arr_children = NULL;
-	gint rc = 0;
-
-	path_dst_real = g_strconcat(stvfm_priv->root, "/", path_dst_rel, NULL);
-	rc = sond_mkdir(path_dst_real, error) ? 0 : -1;
-	g_free(path_dst_real);
-	if (rc)
-		return -1;
-
-	rc = sond_tvfm_item_load_children(stvfm_item_src, &arr_children, NULL, error);
-	if (rc)
-		return -1;
-
-	for (guint i = 0; i < arr_children->len; i++) {
-		SondTVFMItem* child = g_ptr_array_index(arr_children, i);
-		SondTVFMItemPrivate* child_priv =
-				sond_tvfm_item_get_instance_private(child);
-		gchar const* child_base = sond_tvfm_item_get_display_name(child);
-		gchar* child_path_dst_rel = NULL;
-		gboolean is_real_subdir = FALSE;
-
-		/* Sonderfall PDF/"PageTree" bzw. GMessage/"Message": dieser
-		 * synthetische Pseudo-Knoten trägt denselben SondFilePart wie der
-		 * "Ordner" selbst (die PDF/E-Mail-Datei), ist aber vom Typ LEAF,
-		 * nicht DIR (s. sond_tvfm_item_create()) - er steht für den
-		 * Inhalt der Container-Datei SELBST, nicht für eine eigene
-		 * Kind-Datei. Für ZIP kommt das nie vor (ZIP-Items sind immer
-		 * DIR). Kopieren als "Datei" würde hier fälschlich noch einmal
-		 * die gesamte PDF/E-Mail-Datei unter dem Namen 'PageTree'/
-		 * 'Message' duplizieren - daher hier klar als (noch) nicht
-		 * unterstützt abgebrochen, statt ein falsches Ergebnis zu
-		 * erzeugen (Nutzeranfrage betraf nur ZIP, 16.09.2026). */
-		if (child_priv->sond_file_part == stvfm_item_src_priv->sond_file_part
-				&& child_priv->type != SOND_TVFM_ITEM_TYPE_DIR) {
-			g_set_error(error, SOND_ERROR, 0,
-					"%s\nKopieren eines PDF-/E-Mail-'Ordners' (mit "
-					"eigenem Inhalt PageTree/Message) in das Dateisystem "
-					"noch nicht implementiert - bitte die Datei selbst "
-					"kopieren", __func__);
-			rc = -1;
-			break;
-		}
-
-		is_real_subdir = (child_priv->type == SOND_TVFM_ITEM_TYPE_DIR)
-				&& (child_priv->sond_file_part == stvfm_item_src_priv->sond_file_part);
-
-		child_path_dst_rel = g_strconcat(path_dst_rel, "/", child_base, NULL);
-
-		if (is_real_subdir)
-			rc = copy_container_dir_to_fs(child, child_path_dst_rel, error);
-		else
-			//Datei (auch: eingebetteter Container) - als Ganzes/1:1 kopieren
-			rc = sond_file_part_copy(child_priv->sond_file_part, NULL,
-					child_path_dst_rel, error);
-
-		g_free(child_path_dst_rel);
-		if (rc)
-			break;
-	}
-
-	g_ptr_array_unref(arr_children);
-
-	return rc;
-}
-
-static gint copy_dir_across_sfps(SondTVFMItem* stvfm_item,
-		SondTVFMItem* stvfm_item_parent, gchar const* base,
-		GError** error) {
-	SondTVFMItemPrivate* stvfm_item_parent_priv =
-			sond_tvfm_item_get_instance_private(stvfm_item_parent);
-	gchar* path_dst_rel = NULL;
-	gint rc = 0;
-
-	if (stvfm_item_parent_priv->sond_file_part) {
-		if (error) *error = g_error_new(SOND_ERROR, 0,
-			"%s\nKopieren eines Verzeichnisses aus einem Container in ein "
-				"anderes Container-Ziel (nur Kopieren in das Dateisystem "
-				"ist implementiert) noch nicht implementiert", __func__);
-
-		return -1;
-	}
-
-	path_dst_rel = stvfm_item_parent_priv->path_or_section ?
-			g_strconcat(stvfm_item_parent_priv->path_or_section, "/", base, NULL) :
-			g_strdup(base);
-
-	rc = copy_container_dir_to_fs(stvfm_item, path_dst_rel, error);
-	g_free(path_dst_rel);
-
-	return rc;
-}
-
-static gint sond_tvfm_item_copy(SondTVFMItem* stvfm_item,
-		SondTVFMItem* stvfm_item_parent, gchar const* base,
-		gint index_to, GError** error) {
-	gint rc = 0;
-	gchar* base_real = NULL;
-
-	SondTVFMItemPrivate* stvfm_item_priv =
-			sond_tvfm_item_get_instance_private(stvfm_item);
-	SondTVFMItemPrivate* stvfm_item_parent_priv =
-			sond_tvfm_item_get_instance_private(stvfm_item_parent);
-
-	base_real = (stvfm_item_parent_priv->sond_file_part &&
-			SOND_IS_FILE_PART_GMESSAGE(stvfm_item_parent_priv->sond_file_part)) ?
-					g_strdup_printf("%u", index_to) :
-					g_strdup(base);
-
-	//sfp soll kopiert werden
-	if (!stvfm_item_priv->path_or_section) {
-		gchar* path = NULL;
-
-		//Page-Tree einer PDF-Datei: geht (noch) nicht
-		if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF) {
-			if (SOND_IS_FILE_PART_PDF(stvfm_item_priv->sond_file_part) &&
-				sond_file_part_get_has_children(
-						stvfm_item_priv->sond_file_part)) {
-				if (error) *error = g_error_new(SOND_ERROR, 0,
-						"%s\nKopieren des Page-Tree aus PDF-Dateien nicht implementiert",
-						__func__);
-				g_free(base_real);
-
-				return -1;
-			}
-			else if (SOND_IS_FILE_PART_GMESSAGE(stvfm_item_priv->sond_file_part)) {
-				g_set_error(error, SOND_ERROR, 0, "Kopieren des Email-Leaf-Eintrags nicht zulässig");
-				g_free(base_real);
-
-				return -1;
-			}
-		}
-
-		//Wenn in ein dir kopiert wird, ist der Pfad des dir vom übergeordneten sfp
-		//der Beginn des neuen Pfades des sfp
-		path = stvfm_item_parent_priv->path_or_section ?
-				g_strconcat(stvfm_item_parent_priv->path_or_section, "/", base_real, NULL) :
-				g_strdup(base_real);
-		g_free(base_real);
-
-		rc = sond_file_part_copy(stvfm_item_priv->sond_file_part,
-				stvfm_item_parent_priv->sond_file_part, path, error);
-		g_free(path);
-	}
-	else { //dir soll kopiert werden
-		//innerhalt Dateisystem - geht schon
-		if (!stvfm_item_parent_priv->sond_file_part &&
-				!stvfm_item_priv->sond_file_part) {
-			gchar* path_dst = NULL;
-
-			path_dst = g_strconcat((stvfm_item_parent_priv->path_or_section) ?
-							stvfm_item_parent_priv->path_or_section : "",
-							(stvfm_item_parent_priv->path_or_section) ? "/" : "",
-							base_real, NULL);
-			g_free(base_real);
-
-			rc = sond_copy_r(stvfm_item_priv->path_or_section, path_dst, FALSE, error);
-			g_free(path_dst);
-		}
-		else { //kopieren Verzeichnis zwischen zwei sfp-Welten
-			rc = copy_dir_across_sfps(stvfm_item, stvfm_item_parent,
-					base_real, error);
-			g_free(base_real);
-		}
-	}
-	if (rc)
-		return -1;
-
-	return 0;
-}
-
-static gint move_item(SondTVFMItem* stvfm_item_src,
-		SondTVFMItem* stvfm_item_parent_dst,
-		gchar const* base, gint index_to, GError** error) {
-	gint rc = 0;
-
-	rc = sond_tvfm_item_copy(stvfm_item_src,
-			stvfm_item_parent_dst, base, index_to, error);
-	if (rc)
-		return -1;
-
-	//Jetzt Quelle löschen
-	rc = delete_item(stvfm_item_src, error);
-	if (rc) {
-		/* Nicht mehr nur loggen und Erfolg vortäuschen: Kopie liegt zwar
-		 * schon am Ziel, aber die Quelle konnte nicht entfernt werden -
-		 * das muß dem Nutzer gemeldet werden (sonst Datei/Verzeichnis
-		 * unbemerkt doppelt vorhanden). Ursprüngliche Fehlermeldung von
-		 * delete_item() in die neue GError-Meldung übernehmen. */
-		g_autofree gchar *msg_delete = (error && *error) ?
-				g_strdup((*error)->message) : NULL;
-		g_clear_error(error);
-
-		g_set_error(error, SOND_ERROR, 0,
-				"Kopiert, aber am Ursprungsort konnte nicht gelöscht werden"
-				"%s%s", msg_delete ? ":\n" : "", msg_delete ? msg_delete : "");
-
-		return -1;
-	}
-
-	return 0;
-}
-
-static gint sond_tvfm_item_move(SondTVFMItem* stvfm_item,
-		SondTVFMItem* stvfm_item_parent, gchar const* base,
-		gint index_to, GError** error) {
-	gint rc = 0;
-	gint res = 0;
-	gpointer ctx = NULL;
-
-	SondTVFMItemPrivate* stvfm_item_priv =
-			sond_tvfm_item_get_instance_private(stvfm_item);
-	SondTVFMItemPrivate* stvfm_item_parent_priv =
-			sond_tvfm_item_get_instance_private(stvfm_item_parent);
-
-	if (stvfm_item_priv->stvfm == stvfm_item_parent_priv->stvfm)
-		g_signal_emit(stvfm_item_priv->stvfm,
-				SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->signal_before_move, 0,
-				stvfm_item, stvfm_item_parent, base, index_to, error, &ctx, &res);
-	else {
-		g_signal_emit(stvfm_item_priv->stvfm,
-				SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->signal_before_delete, 0,
-				stvfm_item, error, &ctx, &res);
-		if (res == -1)
-			return -1;
-		else if (res == 1)
-			return 1;
-
-		g_signal_emit(stvfm_item_parent_priv->stvfm,
-				SOND_TREEVIEWFM_GET_CLASS(stvfm_item_parent_priv->stvfm)->signal_before_insert, 0,
-				stvfm_item, stvfm_item_parent, base, index_to, error, &res);
-	}
-
-	if (res)
-		return -1;
-
-	//Verschieben innerhalb des gleichen sfp, das aber nicht GMessage ist
-	if (stvfm_item_parent_priv->sond_file_part ==
-			sond_file_part_get_parent(stvfm_item_priv->sond_file_part) &&
-			!SOND_IS_FILE_PART_GMESSAGE(stvfm_item_parent_priv->sond_file_part) &&
-			//außer wenn PageTree
-			!(stvfm_item_priv->sond_file_part &&
-					SOND_IS_FILE_PART_PDF(stvfm_item_priv->sond_file_part) &&
-					sond_file_part_get_has_children(stvfm_item_priv->sond_file_part)))
-		rc = sond_tvfm_item_rename(stvfm_item, stvfm_item_parent, base, error);
-	else
-		rc = move_item(stvfm_item, stvfm_item_parent, base, index_to, error);
-
-	g_signal_emit(stvfm_item_parent_priv->stvfm,
-			SOND_TREEVIEWFM_GET_CLASS(stvfm_item_parent_priv->stvfm)->signal_after, 0,
-			(rc == 0) ? TRUE : FALSE, ctx);
-	if (rc)
-		return -1;
-
-	return 0;
-}
 
 static gboolean is_valid_filename(const gchar *filename) {
     if (filename == NULL || *filename == '\0')
@@ -1581,7 +360,7 @@ static gint sond_treeviewfm_text_edited(SondTreeviewFM *stvfm,
 		gtk_tree_model_get(gtk_tree_view_get_model(
 				GTK_TREE_VIEW(stvfm)), &iter_parent, 0, &stvfm_item_parent, -1);
 
-	stvfm_item_priv = sond_tvfm_item_get_instance_private(stvfm_item);
+	stvfm_item_priv = sond_tvfm_item_get_priv(stvfm_item);
 
 	g_signal_emit(stvfm_item_priv->stvfm,
 			SOND_TREEVIEWFM_GET_CLASS(stvfm_item_priv->stvfm)->signal_before_move,
@@ -1653,7 +432,7 @@ static void sond_treeviewfm_results_row_activated(GtkTreeView *treeview,
 static gint sond_treeviewfm_open_stvfm_item(GtkTreeIter* iter, SondTVFMItem* stvfm_item,
 		gboolean open_with, GError** error) {
 	gint rc = 0;
-	SondTVFMItemPrivate *stvfm_item_priv = sond_tvfm_item_get_instance_private(stvfm_item);
+	SondTVFMItemPrivate *stvfm_item_priv = sond_tvfm_item_get_priv(stvfm_item);
 
 	rc = sond_file_part_open(stvfm_item_priv->sond_file_part, open_with, error);
 	if (rc)
@@ -1876,7 +655,7 @@ static gint sond_treeviewfm_create_dir(SondTreeviewFM *stvfm, gboolean child,
 		gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)),
 				&iter, 0, &stvfm_item_parent, -1);
 
-	stvfm_item_parent_priv = sond_tvfm_item_get_instance_private(stvfm_item_parent);
+	stvfm_item_parent_priv = sond_tvfm_item_get_priv(stvfm_item_parent);
 
 	if (stvfm_item_parent_priv->type != SOND_TVFM_ITEM_TYPE_DIR)
 		return 0; //Wenn etwas anderes als in dir - nix machen
@@ -1975,9 +754,9 @@ static gint process_stvfm_item_move_or_copy(SondTVFMItem* stvfm_item,
 	g_autofree gchar *base = NULL;
 
 	SondTVFMItemPrivate* stvfm_item_priv =
-			sond_tvfm_item_get_instance_private(stvfm_item);
+			sond_tvfm_item_get_priv(stvfm_item);
 	SondTVFMItemPrivate* stvfm_item_parent_priv =
-			sond_tvfm_item_get_instance_private(s_paste_sel->stvfm_item_parent);
+			sond_tvfm_item_get_priv(s_paste_sel->stvfm_item_parent);
 
 	//Einfügen in GMessage
 	if(SOND_IS_FILE_PART_GMESSAGE(stvfm_item_parent_priv->sond_file_part))
@@ -2086,7 +865,7 @@ static void remove_item_from_tree(GtkTreeIter* iter,
 	gboolean is_gmessage = FALSE;
 
 	SondTVFMItemPrivate* stvfm_item_priv =
-			sond_tvfm_item_get_instance_private(stvfm_item);
+			sond_tvfm_item_get_priv(stvfm_item);
 
 	if (stvfm_item_priv->path_or_section)
 		is_gmessage = SOND_IS_FILE_PART_GMESSAGE(stvfm_item_priv->sond_file_part);
@@ -2140,7 +919,7 @@ parent:
 				goto end;
 			}
 
-			stvfm_item_parent_priv = sond_tvfm_item_get_instance_private(
+			stvfm_item_parent_priv = sond_tvfm_item_get_priv(
 					stvfm_item_parent);
 			stvfm_item_parent_priv->type = SOND_TVFM_ITEM_TYPE_LEAF;
 			stvfm_item_parent_priv->has_children = FALSE;
@@ -2174,7 +953,7 @@ parent:
 				&stvfm_item_sibling, -1);
 
 				stvfm_item_sibling_priv =
-				sond_tvfm_item_get_instance_private(stvfm_item_sibling);
+				sond_tvfm_item_get_priv(stvfm_item_sibling);
 				g_object_unref(stvfm_item_sibling);
 
 				/* Message-Item überspringen: path_or_section == NULL bei GMessage-LEAF
@@ -2243,7 +1022,7 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 	gchar* path_new = NULL;
 
 	SondTVFMItemPrivate* stvfm_item_parent_priv =
-			sond_tvfm_item_get_instance_private(s_paste_sel->stvfm_item_parent);
+			sond_tvfm_item_get_priv(s_paste_sel->stvfm_item_parent);
 
 	clipboard = ((SondTreeviewClass*) g_type_class_peek(
 			SOND_TYPE_TREEVIEW))->clipboard;
@@ -2251,7 +1030,7 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(stv)), iter, 0,
 			&stvfm_item, -1);
 	stvfm_item_priv =
-			sond_tvfm_item_get_instance_private(stvfm_item);
+			sond_tvfm_item_get_priv(stvfm_item);
 	g_object_unref(stvfm_item); //keine Angst - tree_store hält ref
 
 	//Verschieben im selben Verzeichnis?
@@ -2355,7 +1134,7 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 	if (sfp_new)
 		g_object_unref(sfp_new);
 
-	stvfm_item_new_priv = sond_tvfm_item_get_instance_private(stvfm_item_new);
+	stvfm_item_new_priv = sond_tvfm_item_get_priv(stvfm_item_new);
 
 	if (clipboard->ausschneiden && stvfm_item_priv->path_or_section) //stvfm_item ist jedenfalls ein DIR
 		adjust_sfps_in_dir(stvfm_item_priv->sond_file_part,
@@ -2401,7 +1180,7 @@ static gint sond_treeviewfm_paste_clipboard_foreach(SondTreeview *stv,
 				GTK_TREE_VIEW(stvfm_item_parent_priv->stvfm)), &iter_sibling, 0,
 					&stvfm_item_sibling, -1);
 			stvfm_item_sibling_priv =
-					sond_tvfm_item_get_instance_private(stvfm_item_sibling);
+					sond_tvfm_item_get_priv(stvfm_item_sibling);
 			g_object_unref(stvfm_item_sibling);
 
 			if (strchr(stvfm_item_sibling_priv->path_or_section, '/')) {
@@ -2488,7 +1267,7 @@ static gint sond_treeviewfm_paste_clipboard(SondTreeviewFM *stvfm, gboolean kind
 		stvfm_item_parent =
 				sond_tvfm_item_create(stvfm, NULL, NULL);
 
-	stvfm_item_parent_priv = sond_tvfm_item_get_instance_private(stvfm_item_parent);
+	stvfm_item_parent_priv = sond_tvfm_item_get_priv(stvfm_item_parent);
 
 	//index der einzufügenden Stelle ermitteln, falls !kind
 	//denn wenn kind == TRUE ist index_to 0
@@ -2588,7 +1367,7 @@ static gint sond_treeviewfm_foreach_loeschen(SondTreeview *stv,
 	else if (res == 1)
 		return 0;
 
-	rc = delete_item(stvfm_item, error);
+	rc = sond_tvfm_item_delete(stvfm_item, error);
 	g_signal_emit(stvfm, SOND_TREEVIEWFM_GET_CLASS(stvfm)->signal_after,
 			0, (rc == 0) ? TRUE : FALSE, ctx);
 	if (rc)
@@ -2602,7 +1381,7 @@ static gint sond_treeviewfm_foreach_loeschen(SondTreeview *stv,
 static gint sond_treeviewfm_open(GtkTreeIter* iter, SondTVFMItem *stvfm_item,
 		gboolean open_with, GError **error) {
 	gint rc = 0;
-	SondTVFMItemPrivate *stvfm_item_priv = sond_tvfm_item_get_instance_private(stvfm_item);
+	SondTVFMItemPrivate *stvfm_item_priv = sond_tvfm_item_get_priv(stvfm_item);
 
 	if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_DIR)
 		return 0;
@@ -2646,13 +1425,33 @@ static gint sond_treeviewfm_open(GtkTreeIter* iter, SondTVFMItem *stvfm_item,
 	 * BAUM_INHALT/BAUM_AUSWERTUNG) nötig geworden - in
 	 * sond_seadrive_ensure_hydrated() (sond_treeviewfm_seadrive.c/h)
 	 * konsolidiert. */
-	if (SOND_IS_FILE_PART_LEAF(stvfm_item_priv->sond_file_part) &&
-			!sond_file_part_get_parent(stvfm_item_priv->sond_file_part)) {
+	{
 		SondTreeviewFM *stvfm = sond_tvfm_item_get_stvfm(stvfm_item);
 		if (sond_treeviewfm_is_seadrive_path(stvfm)) {
 			const gchar *root = sond_treeviewfm_get_root(stvfm);
-			const gchar *sfp_path = sond_file_part_get_path(
-					stvfm_item_priv->sond_file_part);
+			/* Nutzer-Fund 19.09.2026: DIR-Knoten sind oben schon
+			 * ausgeschlossen (return 0) - alles, was hier ankommt (LEAF
+			 * wie LEAF_SECTION, unabhängig davon, ob der jeweilige
+			 * sond_file_part vom Typ Leaf/PDF/ZIP/GMessage ist), steckt
+			 * letztlich in GENAU EINER echten Datei auf der Platte.
+			 * Vormals wurde hier per SOND_IS_FILE_PART_LEAF() +
+			 * fehlendem Parent nur der Sonderfall "direkte, unverschach-
+			 * telte Leaf-Datei" abgedeckt - eine PDF-/GMessage-Section
+			 * (LEAF_SECTION, sond_file_part bleibt vom Container-Typ,
+			 * s. sond_tvfm_item_create()) fiel dadurch komplett durch
+			 * und bekam nie eine Hydrierungsprüfung. Statt die Typen zu
+			 * unterscheiden: immer zum obersten Vorfahren (ohne Parent)
+			 * hochlaufen - nur der trägt in seinem path-Feld den echten,
+			 * projektrelativen Pfad (s. sond_file_part_do_create()); bei
+			 * verschachtelten Parts (ZIP-Eintrag, PDF-Embedded-File,
+			 * GMessage-Mimepart) ist path nur ein container-interner
+			 * Bezeichner, den man nicht naiv an root anhängen darf. */
+			SondFilePart *sfp_root = stvfm_item_priv->sond_file_part;
+			SondFilePart *sfp_parent = NULL;
+			while ((sfp_parent = sond_file_part_get_parent(sfp_root)))
+				sfp_root = sfp_parent;
+
+			const gchar *sfp_path = sond_file_part_get_path(sfp_root);
 			if (root && sfp_path) {
 				gchar *full_path = g_strconcat(root, "/", sfp_path, NULL);
 				gboolean is_local = sond_seadrive_ensure_hydrated(
@@ -2748,7 +1547,7 @@ static gint sond_treeviewfm_search_needle(SondTVFMItem* stvfm_item,
 	if (g_atomic_int_get(search_fs->atom_cancelled))
 		g_atomic_int_set(search_fs->atom_ready, 1);
 	else {
-		SondTVFMItemPrivate* stvfm_item_priv = sond_tvfm_item_get_instance_private(stvfm_item);
+		SondTVFMItemPrivate* stvfm_item_priv = sond_tvfm_item_get_priv(stvfm_item);
 
 		if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_LEAF) {
 			gchar* basename = NULL;
@@ -2858,46 +1657,6 @@ static gint sond_treeviewfm_search(SondTreeview *stv, GtkTreeIter *iter,
 	return 0;
 }
 
-static gint sond_tvfm_item_get_fileparts(SondTVFMItem *stvfm_item,
-		GHashTable* ht, GError **error) {
-	SondTVFMItemPrivate *stvfm_item_priv = sond_tvfm_item_get_instance_private(stvfm_item);
-
-	//"Wirkliches" dir und root-dir - ITEM_TYPE_DIR mit path_or_section != NULL
-	//ist ja in echt filepart
-	if (stvfm_item_priv->type == SOND_TVFM_ITEM_TYPE_DIR &&
-			(stvfm_item_priv->path_or_section ||
-					!stvfm_item_priv->sond_file_part)) {
-		GPtrArray *arr_children = NULL;
-
-		gint rc = 0;
-
-		rc = sond_tvfm_item_load_children(stvfm_item, &arr_children, NULL, error);
-		if (rc)
-			return -1;
-
-		for (guint i = 0; i < arr_children->len; i++) {
-			SondTVFMItem *child = g_ptr_array_index(arr_children, i);
-
-			rc = sond_tvfm_item_get_fileparts(child, ht, error);
-			if (rc)
-				return -1;
-		}
-	}
-	else
-		/* ht wurde mit g_object_unref als key-destroy-func angelegt
-		 * (sond_treeviewfm_get_fileparts()) - erwartet also eine eigene
-		 * Ref pro Key. sond_file_part gehört sonst dem stvfm_item (dessen
-		 * eigene Ref), ohne g_object_ref() hier würde die Hashtable beim
-		 * Zerstören eine fremde Ref freigeben und damit ein Objekt, das noch
-		 * im Treeview angezeigt wird, vorzeitig finalisieren.
-		 * Wert explizit NULL (nicht g_hash_table_add(), das würde value ==
-		 * key setzen) - sond_process_fileparts() liest den Wert als
-		 * SondPageRange* (NULL == ganze Datei); dieser Baum (BAUM_FS) kennt
-		 * keine Anbindungen, hier ist immer die ganze Datei gemeint. */
-		g_hash_table_insert(ht, g_object_ref(stvfm_item_priv->sond_file_part), NULL);
-
-	return 0;
-}
 
 static gint sond_treeviewfm_get_fileparts_foreach(SondTreeview *stv,
 		GtkTreeIter *iter, gpointer data, GError **error) {
@@ -3250,7 +2009,7 @@ static gint sond_treeviewfm_expand_dummy(SondTreeviewFM *stvfm, GtkTreeIter *ite
 		SondTVFMItemPrivate* child_item_priv = NULL;
 
 		child_item = g_ptr_array_index(arr_children, i);
-		child_item_priv = sond_tvfm_item_get_instance_private(child_item);
+		child_item_priv = sond_tvfm_item_get_priv(child_item);
 
 		gtk_tree_store_insert(GTK_TREE_STORE(
 				gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm) )),
@@ -3475,7 +2234,7 @@ static gchar* sond_treeviewfm_get_coverage_path(SondTVFMItemPrivate *priv,
  * Abdeckungs-Check der Indexsuche (check_coverage_one()). */
 static SondIndexStatus sond_treeviewfm_get_index_status(
 		SondTreeviewFM *stvfm, SondTVFMItem *stvfm_item) {
-	SondTVFMItemPrivate *priv = sond_tvfm_item_get_instance_private(stvfm_item);
+	SondTVFMItemPrivate *priv = sond_tvfm_item_get_priv(stvfm_item);
 	SondTreeviewFMPrivate *stvfm_priv = sond_treeviewfm_get_instance_private(stvfm);
 	SondIndexCtx *index_ctx = NULL;
 	gchar *coverage_path = NULL;
@@ -3598,7 +2357,7 @@ static void sond_treeviewfm_render_file_icon(GtkTreeViewColumn *column,
 		return;
 	}
 
-	stvfm_item_priv = sond_tvfm_item_get_instance_private(stvfm_item);
+	stvfm_item_priv = sond_tvfm_item_get_priv(stvfm_item);
 	g_object_unref(stvfm_item);
 
 	/* Overlay-Icon für SeaDrive-Cloud-Status ermitteln */
@@ -3874,38 +2633,6 @@ static void sond_treeviewfm_init(SondTreeviewFM *stvfm) {
 	return;
 }
 
-#ifdef _WIN32
-/* Container für die vier SeaDrive-Ground-Truth-Hashtables, deren
- * Zerstörung von sond_treeviewfm_set_root() in den Hintergrund verlagert
- * wird - s. ausführlichen Kommentar dort. Alle vier enthalten
- * ausschließlich Strings/Zahlen ohne Rückverweis auf ein stvfm-Objekt,
- * ihre Zerstörung ist deshalb von einem beliebigen Thread aus und zu
- * einem beliebigen späteren Zeitpunkt sicher. */
-typedef struct {
-	GHashTable *not_in_sync;
-	GHashTable *pending_down_paths;
-	GHashTable *dir_counts;
-	GHashTable *file_badges;
-} SeadriveOldTables;
-
-static gpointer seadrive_old_tables_reap(gpointer data) {
-	SeadriveOldTables *old = data;
-
-	if (old->not_in_sync)
-		g_hash_table_destroy(old->not_in_sync);
-	if (old->pending_down_paths)
-		g_hash_table_destroy(old->pending_down_paths);
-	if (old->dir_counts)
-		g_hash_table_destroy(old->dir_counts);
-	if (old->file_badges)
-		g_hash_table_destroy(old->file_badges);
-
-	g_free(old);
-
-	return NULL;
-}
-#endif
-
 gint sond_treeviewfm_set_root(SondTreeviewFM *stvfm, const gchar *root,
 		GError **error) {
 	gint rc = 0;
@@ -3920,60 +2647,15 @@ gint sond_treeviewfm_set_root(SondTreeviewFM *stvfm, const gchar *root,
 
 #ifdef _WIN32
 	sond_treeviewfm_seadrive_stop_watcher_async(stvfm);
-	/* Status zurücksetzen und Signal emittieren - seadrive_not_in_sync MUSS
-	 * hier mitgeleert werden, sonst bleiben Pfade einer vorigen Projekt-
-	 * Session in der Tabelle stehen und seadrive_pending_up zählt beim
-	 * nächsten Öffnen desselben Projekts falsch (bleibt zu niedrig).
-	 *
-	 * Nutzer-Fund 18.09.2026 (Folgefund - der erste Verdacht, der Watcher-
-	 * Thread-Join, war laut Call-Stack-Analyse per Eclipse/gdb-Suspend
-	 * NICHT die Ursache): der Stack zeigte den Hänger exakt HIER, in
-	 * g_hash_table_remove_all() auf seadrive_file_badges. Bei einem
-	 * großen SeaDrive-Projekt hat praktisch jede noch nicht
-	 * heruntergeladene (OFFLINE-)Datei einen eigenen Eintrag in dieser
-	 * Tabelle - bei vielen Zehn- oder Hunderttausend Dateien im Projekt
-	 * entsprechend viele Einträge, die remove_all() einzeln (mit je einem
-	 * g_free() auf den Key-String) synchron im GTK-Hauptthread abarbeiten
-	 * musste. Betraf im Prinzip auch die drei anderen SeaDrive-Hashtables
-	 * hier, nur mit typischerweise deutlich weniger Einträgen.
-	 *
-	 * Fix: die alten Tabellen werden hier nur noch aus stvfm_priv
-	 * "gestohlen" (Felder sofort auf NULL gesetzt, ein nachfolgender
-	 * Zugriff sieht also sofort "leer") und ihre komplette Zerstörung
-	 * (g_hash_table_destroy()) an einen kurzlebigen Hintergrund-Thread
-	 * abgegeben (seadrive_old_tables_reap(), analog zum Watcher-Reaper
-	 * bei sond_treeviewfm_seadrive_stop_watcher_async()). Die Tabellen
-	 * enthalten ausschließlich Strings/Zahlen ohne Rückverweis auf
-	 * stvfm, ihre Zerstörung ist deshalb unabhängig vom weiteren Leben
-	 * des stvfm-Objekts sicher - anders als beim Watcher-Thread ist hier
-	 * nicht mal die Einschränkung "nur wenn stvfm am Leben bleibt" nötig
-	 * (kann also unverändert auch von sond_treeviewfm_finalize() genutzt
-	 * werden, falls die Tabellen dort je zu groß werden sollten). */
-	stvfm_priv->seadrive_pending_down = 0;
-	stvfm_priv->seadrive_pending_up = 0;
-	{
-		SeadriveOldTables *old = g_new0(SeadriveOldTables, 1);
-
-		old->not_in_sync = stvfm_priv->seadrive_not_in_sync;
-		old->pending_down_paths = stvfm_priv->seadrive_pending_down_paths;
-		old->dir_counts = stvfm_priv->seadrive_dir_counts;
-		old->file_badges = stvfm_priv->seadrive_file_badges;
-
-		stvfm_priv->seadrive_not_in_sync = NULL;
-		stvfm_priv->seadrive_pending_down_paths = NULL;
-		stvfm_priv->seadrive_dir_counts = NULL;
-		stvfm_priv->seadrive_file_badges = NULL;
-
-		if (old->not_in_sync || old->pending_down_paths || old->dir_counts ||
-				old->file_badges)
-			g_thread_unref(g_thread_new("seadrive-tables-reaper",
-					seadrive_old_tables_reap, old));
-		else
-			g_free(old);
-	}
-	g_signal_emit(stvfm,
-			SOND_TREEVIEWFM_GET_CLASS(stvfm)->signal_seadrive_status, 0,
-			(guint)0, (guint)0);
+	/* Setzt Zähler zurück und leert (im Hintergrund, s. dortigen
+	 * ausführlichen Kommentar zum "Schließen dauert 20 Sek."-Fund
+	 * 18.09.2026) die vier SeaDrive-Ground-Truth-Hashtables - MUSS hier
+	 * passieren, sonst bleiben Pfade/Zähler einer vorigen Projekt-Session
+	 * stehen und verfälschen die Anzeige beim nächsten Öffnen desselben
+	 * Projekts. Jetzt in sond_seadrive.c (Refactoring 18.09.2026, "in
+	 * _treeviewfm.c sind auch Funktionen, die in sond_treeviewfm_seadrive
+	 * gehören"). */
+	sond_seadrive_reset_ground_truth(stvfm);
 #endif
 
 	if (!root) {
@@ -4063,577 +2745,4 @@ sond_treeviewfm_set_index_ctx_func(SondTreeviewFM *stvfm,
 	return;
 }
 
-#ifdef _WIN32
-void
-sond_treeviewfm_seadrive_dir_delta(SondTreeviewFM *stvfm,
-		const gchar *dir_path, gint delta_not_hydrated,
-		gint delta_hydrated_pinned, gint delta_total) {
-	SondTreeviewFMPrivate *p = NULL;
-	SondSeadriveDirCounts *counts = NULL;
-
-	if (!stvfm || !dir_path || (delta_not_hydrated == 0 &&
-			delta_hydrated_pinned == 0 && delta_total == 0))
-		return;
-
-	p = sond_treeviewfm_get_instance_private(stvfm);
-
-	if (!p->seadrive_dir_counts)
-		p->seadrive_dir_counts = g_hash_table_new_full(
-				g_str_hash, g_str_equal, g_free, g_free);
-
-	counts = g_hash_table_lookup(p->seadrive_dir_counts, dir_path);
-	if (!counts) {
-		counts = g_new0(SondSeadriveDirCounts, 1);
-		g_hash_table_insert(p->seadrive_dir_counts, g_strdup(dir_path), counts);
-	}
-
-	/* Negative Deltas bei 0 kappen statt umlaufen zu lassen (guint!) -
-	 * Schutz gegen Drift durch verpasste/doppelte Events, analog den
-	 * Guards bei seadrive_pending_down/-up. */
-	if (delta_not_hydrated < 0 && (guint) -delta_not_hydrated > counts->not_hydrated)
-		counts->not_hydrated = 0;
-	else
-		counts->not_hydrated += delta_not_hydrated;
-
-	if (delta_hydrated_pinned < 0 && (guint) -delta_hydrated_pinned > counts->hydrated_pinned)
-		counts->hydrated_pinned = 0;
-	else
-		counts->hydrated_pinned += delta_hydrated_pinned;
-
-	if (delta_total < 0 && (guint) -delta_total > counts->total)
-		counts->total = 0;
-	else
-		counts->total += delta_total;
-
-	gtk_widget_queue_draw(GTK_WIDGET(stvfm));
-}
-
-void
-sond_treeviewfm_seadrive_update_dir_coverage(SondTreeviewFM *stvfm,
-		const gchar *file_full_path, gint delta_not_hydrated,
-		gint delta_hydrated_pinned, gint delta_total) {
-	const gchar *root = NULL;
-	gchar *dir = NULL;
-	gchar *slash = NULL;
-
-	if (!file_full_path || (delta_not_hydrated == 0 &&
-			delta_hydrated_pinned == 0 && delta_total == 0))
-		return;
-
-	root = sond_treeviewfm_get_root(stvfm);
-	if (!root)
-		return;
-
-	dir = g_strdup(file_full_path);
-
-	for (;;) {
-		slash = strrchr(dir, '/');
-		if (!slash)
-			break;
-		*slash = '\0';
-
-		sond_treeviewfm_seadrive_dir_delta(stvfm, dir, delta_not_hydrated,
-				delta_hydrated_pinned, delta_total);
-
-		if (!g_strcmp0(dir, root))
-			break; /* root selbst mit erledigt - keine Vorfahren mehr darüber */
-	}
-
-	g_free(dir);
-}
-
-void
-sond_treeviewfm_seadrive_update_status(SondTreeviewFM *stvfm,
-		const gchar *path_pending_down, gint delta_down,
-		const gchar *path_up, gboolean up_pending) {
-	gboolean changed = FALSE;
-	SondTreeviewFMPrivate *p = sond_treeviewfm_get_instance_private(stvfm);
-
-	if (delta_down > 0 && path_pending_down) {
-		if (!p->seadrive_pending_down_paths)
-			p->seadrive_pending_down_paths = g_hash_table_new_full(
-					g_str_hash, g_str_equal, g_free, NULL);
-		if (g_hash_table_add(p->seadrive_pending_down_paths,
-				g_strdup(path_pending_down))) {
-			p->seadrive_pending_down++;
-			changed = TRUE;
-		}
-	} else if (delta_down < 0 && path_pending_down) {
-		if (p->seadrive_pending_down_paths &&
-				g_hash_table_remove(p->seadrive_pending_down_paths,
-						path_pending_down)) {
-			p->seadrive_pending_down--;
-			changed = TRUE;
-		}
-	}
-
-	if (path_up) {
-		if (!p->seadrive_not_in_sync)
-			p->seadrive_not_in_sync = g_hash_table_new_full(
-					g_str_hash, g_str_equal, g_free, NULL);
-		if (up_pending) {
-			if (g_hash_table_add(p->seadrive_not_in_sync, g_strdup(path_up)))
-				p->seadrive_pending_up++;
-		} else {
-			if (g_hash_table_remove(p->seadrive_not_in_sync, path_up))
-				p->seadrive_pending_up--;
-		}
-		changed = TRUE;
-	}
-
-	if (changed) {
-		gtk_widget_queue_draw(GTK_WIDGET(stvfm));
-		g_signal_emit(stvfm,
-				SOND_TREEVIEWFM_GET_CLASS(stvfm)->signal_seadrive_status, 0,
-				p->seadrive_pending_down,
-				p->seadrive_pending_up);
-	}
-}
-
-void
-sond_treeviewfm_seadrive_set_pending_down_paths(SondTreeviewFM *stvfm,
-		GHashTable *paths) {
-	SondTreeviewFMPrivate *p = sond_treeviewfm_get_instance_private(stvfm);
-
-	if (p->seadrive_pending_down_paths)
-		g_hash_table_destroy(p->seadrive_pending_down_paths);
-	p->seadrive_pending_down_paths = paths;
-	p->seadrive_pending_down = paths ? g_hash_table_size(paths) : 0;
-
-	gtk_widget_queue_draw(GTK_WIDGET(stvfm));
-	g_signal_emit(stvfm,
-			SOND_TREEVIEWFM_GET_CLASS(stvfm)->signal_seadrive_status, 0,
-			p->seadrive_pending_down,
-			p->seadrive_pending_up);
-}
-
-void
-sond_treeviewfm_seadrive_set_dir_counts(SondTreeviewFM *stvfm,
-		GHashTable *dir_counts) {
-	SondTreeviewFMPrivate *p = sond_treeviewfm_get_instance_private(stvfm);
-
-	if (p->seadrive_dir_counts)
-		g_hash_table_destroy(p->seadrive_dir_counts);
-	p->seadrive_dir_counts = dir_counts;
-
-	gtk_widget_queue_draw(GTK_WIDGET(stvfm));
-}
-
-void
-sond_treeviewfm_seadrive_set_file_badges(SondTreeviewFM *stvfm,
-		GHashTable *badges) {
-	SondTreeviewFMPrivate *p = sond_treeviewfm_get_instance_private(stvfm);
-
-	if (p->seadrive_file_badges)
-		g_hash_table_destroy(p->seadrive_file_badges);
-	p->seadrive_file_badges = badges;
-
-	gtk_widget_queue_draw(GTK_WIDGET(stvfm));
-	g_signal_emit(stvfm,
-			SOND_TREEVIEWFM_GET_CLASS(stvfm)->signal_seadrive_status, 0,
-			p->seadrive_pending_down,
-			p->seadrive_pending_up);
-}
-
-SondSeadriveBadge
-sond_treeviewfm_seadrive_get_file_badge(SondTreeviewFM *stvfm,
-		const gchar *file_full_path) {
-	SondTreeviewFMPrivate *p = NULL;
-	gpointer val = NULL;
-
-	if (!stvfm || !file_full_path)
-		return SOND_SEADRIVE_BADGE_NONE;
-
-	p = sond_treeviewfm_get_instance_private(stvfm);
-	if (!p->seadrive_file_badges)
-		return SOND_SEADRIVE_BADGE_NONE;
-
-	if (!g_hash_table_lookup_extended(p->seadrive_file_badges, file_full_path,
-			NULL, &val))
-		return SOND_SEADRIVE_BADGE_NONE;
-
-	return (SondSeadriveBadge) GPOINTER_TO_INT(val);
-}
-
-/* Leitet aus einem SondSeadriveBadge-Wert ab, ob die Datei für die Ordner-
- * Coverage-Statistik als "nicht hydriert" bzw. "hydriert+gepinnt" zählt -
- * einzige Stelle, an der diese Zuordnung getroffen wird (Konsistenz
- * zwischen Scan und Live-Update, s. watcher_count_pending_down() in
- * sond_treeviewfm_seadrive.c, die dieselbe Logik redundant, aber
- * gleichlautend anwendet). */
-static void
-seadrive_badge_to_coverage(SondSeadriveBadge badge,
-		gboolean *out_not_hydrated, gboolean *out_hydrated_pinned) {
-	*out_not_hydrated = (badge == SOND_SEADRIVE_BADGE_OFFLINE ||
-			badge == SOND_SEADRIVE_BADGE_PENDING);
-	*out_hydrated_pinned = (badge == SOND_SEADRIVE_BADGE_PINNED);
-}
-
-void
-sond_treeviewfm_seadrive_update_file_badge(SondTreeviewFM *stvfm,
-		const gchar *file_full_path, SondSeadriveBadge new_badge,
-		gint delta_total) {
-	SondTreeviewFMPrivate *p = NULL;
-	SondSeadriveBadge old_badge = SOND_SEADRIVE_BADGE_NONE;
-	gpointer old_val = NULL;
-	gboolean old_not_hydrated = FALSE, old_hydrated_pinned = FALSE;
-	gboolean new_not_hydrated = FALSE, new_hydrated_pinned = FALSE;
-	gint delta_not_hydrated = 0, delta_hydrated_pinned = 0;
-
-	if (!stvfm || !file_full_path)
-		return;
-
-	p = sond_treeviewfm_get_instance_private(stvfm);
-
-	if (p->seadrive_file_badges &&
-			g_hash_table_lookup_extended(p->seadrive_file_badges,
-					file_full_path, NULL, &old_val))
-		old_badge = (SondSeadriveBadge) GPOINTER_TO_INT(old_val);
-
-	if (old_badge != new_badge) {
-		seadrive_badge_to_coverage(old_badge, &old_not_hydrated,
-				&old_hydrated_pinned);
-		seadrive_badge_to_coverage(new_badge, &new_not_hydrated,
-				&new_hydrated_pinned);
-		delta_not_hydrated = (gint) new_not_hydrated - (gint) old_not_hydrated;
-		delta_hydrated_pinned = (gint) new_hydrated_pinned -
-				(gint) old_hydrated_pinned;
-
-		if (new_badge == SOND_SEADRIVE_BADGE_NONE) {
-			if (p->seadrive_file_badges)
-				g_hash_table_remove(p->seadrive_file_badges, file_full_path);
-		} else {
-			if (!p->seadrive_file_badges)
-				p->seadrive_file_badges = g_hash_table_new_full(
-						g_str_hash, g_str_equal, g_free, NULL);
-			g_hash_table_insert(p->seadrive_file_badges,
-					g_strdup(file_full_path), GINT_TO_POINTER(new_badge));
-		}
-
-		gtk_widget_queue_draw(GTK_WIDGET(stvfm));
-		g_signal_emit(stvfm,
-				SOND_TREEVIEWFM_GET_CLASS(stvfm)->signal_seadrive_status, 0,
-				p->seadrive_pending_down,
-				p->seadrive_pending_up);
-	}
-
-	if (delta_not_hydrated != 0 || delta_hydrated_pinned != 0 ||
-			delta_total != 0)
-		sond_treeviewfm_seadrive_update_dir_coverage(stvfm, file_full_path,
-				delta_not_hydrated, delta_hydrated_pinned, delta_total);
-}
-
-SondSeadriveDirStatus
-sond_treeviewfm_seadrive_get_dir_status(SondTreeviewFM *stvfm,
-		const gchar *dir_path) {
-	SondTreeviewFMPrivate *p = NULL;
-	SondSeadriveDirCounts *counts = NULL;
-
-	if (!stvfm || !dir_path)
-		return SOND_SEADRIVE_DIR_STATUS_NONE;
-
-	p = sond_treeviewfm_get_instance_private(stvfm);
-	if (!p->seadrive_dir_counts)
-		return SOND_SEADRIVE_DIR_STATUS_NONE;
-
-	counts = g_hash_table_lookup(p->seadrive_dir_counts, dir_path);
-	if (!counts || counts->total == 0)
-		return SOND_SEADRIVE_DIR_STATUS_NONE;
-
-	if (counts->not_hydrated == counts->total)
-		return SOND_SEADRIVE_DIR_STATUS_FULL_OFFLINE;
-
-	if (counts->not_hydrated == 0) {
-		/* alle Dateien hydriert */
-		if (counts->hydrated_pinned == counts->total)
-			return SOND_SEADRIVE_DIR_STATUS_FULL_HYDRATED_PINNED;
-		/* hydriert, aber nicht alle gepinnt - dieselbe "kein Icon
-		 * nötig"-Bedeutung wie beim Datei-Badge */
-		return SOND_SEADRIVE_DIR_STATUS_NONE;
-	}
-
-	/* 0 < not_hydrated < total - weder komplett hydriert noch komplett
-	 * offline, kein gemeinsamer Nenner */
-	return SOND_SEADRIVE_DIR_STATUS_MIXED;
-}
-
-void
-sond_treeviewfm_seadrive_item_hydrated(SondTreeviewFM *stvfm,
-		const gchar *full_path) {
-	GtkTreeIter iter = { 0 };
-	SondTVFMItem *stvfm_item = NULL;
-	SondTVFMItemPrivate *stvfm_item_priv = NULL;
-	SondFilePart *sfp_old = NULL;
-	SondFilePart *sfp_new = NULL;
-	const gchar *rel_path = NULL;
-	int rc = 0;
-	SondTVFMItemType type = 0;
-
-	const gchar *root = sond_treeviewfm_get_root(stvfm);
-	if (!root || !full_path)
-		return;
-
-	/* relativen Pfad ermitteln */
-	gsize root_len = strlen(root);
-	if (!g_str_has_prefix(full_path, root))
-		return;
-	rel_path = full_path + root_len;
-	if (*rel_path == '/' || *rel_path == '\\')
-		rel_path++;
-	if (!*rel_path)
-		return;
-
-	/* Knoten im sichtbaren Baum suchen - nicht expandieren */
-	rc = sond_treeviewfm_file_part_visible(stvfm, NULL, rel_path, FALSE,
-			&iter, NULL);
-	if (rc != 1)
-		return; /* nicht sichtbar - wird beim nächsten Expandieren korrekt geladen */
-
-	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)),
-			&iter, 0, &stvfm_item, -1);
-	if (!stvfm_item)
-		return;
-
-	stvfm_item_priv = sond_tvfm_item_get_instance_private(stvfm_item);
-	sfp_old = stvfm_item_priv->sond_file_part;
-	type = stvfm_item_priv->type;
-	g_object_unref(stvfm_item);
-
-	/* Nur korrigieren wenn Item als einfaches LEAF geladen wurde
-	 * (d.h. es war offline beim Laden und wurde nicht auf Kinder geprüft) */
-	if (type != SOND_TVFM_ITEM_TYPE_LEAF ||
-			!SOND_IS_FILE_PART_LEAF(sfp_old))
-		return;
-
-	/* Altes sfp aus arr_opened_files entfernen damit sond_file_part_create
-	 * nicht das alte LEAF zurückgibt anstatt ein neues PDF/ZIP/GMessage zu erstellen */
-	GPtrArray *arr = sond_file_part_get_arr_opened_files(
-			sond_file_part_get_parent(sfp_old));
-	if (arr)
-		g_ptr_array_remove_fast(arr, sfp_old);
-
-	/* Neues sfp mit korrektem Typ erstellen */
-	GError* error = NULL;
-	sfp_new = sond_file_part_create(sond_file_part_get_parent(sfp_old),
-			rel_path, &error);
-
-	if (!sfp_new) {
-		LOG_WARN("SondFilePart kann nicht geöffnet werden:\n%s",
-				error->message);
-		g_error_free(error);
-
-		return;
-	}
-
-	/* Altes Item im Baum durch neues ersetzen */
-	SondTVFMItem *stvfm_item_new = sond_tvfm_item_create(stvfm, sfp_new, NULL);
-	g_object_unref(sfp_new);
-
-	gtk_tree_store_set(
-			GTK_TREE_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm))),
-			&iter, 0, stvfm_item_new, -1);
-
-	SondTVFMItemPrivate *new_priv =
-			sond_tvfm_item_get_instance_private(stvfm_item_new);
-
-	/* Falls jetzt Kinder möglich: Dummy-Kind einfügen */
-	if (new_priv->has_children) {
-		GtkTreeIter iter_dummy = { 0 };
-		gtk_tree_store_insert(GTK_TREE_STORE(
-				gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm))),
-				&iter_dummy, &iter, -1);
-	}
-
-	g_object_unref(stvfm_item_new);
-
-	gtk_widget_queue_draw(GTK_WIDGET(stvfm));
-}
-
-void
-sond_treeviewfm_seadrive_item_dehydrated(SondTreeviewFM *stvfm,
-		const gchar *full_path) {
-	GtkTreeIter iter = { 0 };
-	SondTVFMItem *stvfm_item = NULL;
-	SondTVFMItemPrivate *stvfm_item_priv = NULL;
-	SondFilePart *sfp_old = NULL;
-	const gchar *rel_path = NULL;
-	int rc = 0;
-
-	const gchar *root = sond_treeviewfm_get_root(stvfm);
-	if (!root || !full_path)
-		return;
-
-	/* relativen Pfad ermitteln */
-	gsize root_len = strlen(root);
-	if (!g_str_has_prefix(full_path, root))
-		return;
-	rel_path = full_path + root_len;
-	if (*rel_path == '/' || *rel_path == '\\')
-		rel_path++;
-	if (!*rel_path)
-		return;
-
-	/* Knoten im sichtbaren Baum suchen - nicht expandieren */
-	rc = sond_treeviewfm_file_part_visible(stvfm, NULL, rel_path, FALSE,
-			&iter, NULL);
-	if (rc != 1)
-		return; /* nicht sichtbar */
-
-	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)),
-			&iter, 0, &stvfm_item, -1);
-	if (!stvfm_item)
-		return;
-
-	stvfm_item_priv = sond_tvfm_item_get_instance_private(stvfm_item);
-	sfp_old = stvfm_item_priv->sond_file_part;
-	g_object_unref(stvfm_item);
-
-	/* Nur korrigieren wenn Item ein durch Hydration entstandenes DIR ist:
-	 * GMessage oder ZIP als sfp, kein path_or_section (= Datei selbst, nicht Unterknoten) */
-	if (stvfm_item_priv->type != SOND_TVFM_ITEM_TYPE_DIR ||
-			!sfp_old ||
-			stvfm_item_priv->path_or_section ||
-			(!SOND_IS_FILE_PART_GMESSAGE(sfp_old) &&
-			 !SOND_IS_FILE_PART_ZIP(sfp_old) &&
-			 !SOND_IS_FILE_PART_PDF(sfp_old)))
-		return;
-
-	/* Altes sfp zuerst aus arr_opened_files entfernen - VOR create_leaf,
-	 * damit nicht das alte sfp zurückgegeben wird */
-	{
-		GPtrArray *arr = sond_file_part_get_arr_opened_files(
-				sond_file_part_get_parent(sfp_old));
-		if (arr)
-			g_ptr_array_remove_fast(arr, sfp_old);
-	}
-
-	/* MIME-Typ aus Extension ermitteln - Datei ist jetzt offline */
-	const gchar *mime_type = mime_from_extension(rel_path);
-	if (!mime_type)
-		mime_type = "application/octet-stream";
-
-	/* Neues LEAF-sfp erstellen */
-	SondFilePart *sfp_new = sond_file_part_create_leaf(
-			rel_path,
-			sond_file_part_get_parent(sfp_old),
-			mime_type);
-	if (!sfp_new)
-		return;
-
-	/* Alle Kinder aus dem Baum entfernen */
-	{
-		GtkTreeIter iter_child = { 0 };
-		gboolean has_child = gtk_tree_model_iter_children(
-				gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)), &iter_child, &iter);
-		while (has_child)
-			has_child = gtk_tree_store_remove(
-					GTK_TREE_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm))),
-					&iter_child);
-	}
-
-	/* Neues LEAF-Item erstellen und im Baum ersetzen */
-	SondTVFMItem *stvfm_item_new = sond_tvfm_item_create(stvfm, sfp_new, NULL);
-	g_object_unref(sfp_new);
-
-	gtk_tree_store_set(
-			GTK_TREE_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm))),
-			&iter, 0, stvfm_item_new, -1);
-
-	g_object_unref(stvfm_item_new);
-
-	gtk_widget_queue_draw(GTK_WIDGET(stvfm));
-}
-
-gboolean
-sond_treeviewfm_seadrive_stop_requested(SondTreeviewFM *stvfm) {
-	SondTreeviewFMPrivate *p = sond_treeviewfm_get_instance_private(stvfm);
-	return g_atomic_int_get(&p->seadrive_watcher_stop) != 0;
-}
-
-void
-sond_treeviewfm_seadrive_start_watcher(SondTreeviewFM *stvfm) {
-	SondTreeviewFMPrivate *p = sond_treeviewfm_get_instance_private(stvfm);
-	if (p->seadrive_watcher_thread)
-		return;
-	g_atomic_int_set(&p->seadrive_watcher_stop, 0);
-	p->seadrive_watcher_thread = g_thread_new(
-			"seadrive-watcher",
-			sond_treeviewfm_seadrive_watcher_thread,
-			stvfm);
-}
-
-/* Nutzer-Fund 18.09.2026: "Schließen des Projekts bei SeaDrive-Projekten
- * dauert sehr lange (20 Sek.)". Das synchrone g_thread_join() in
- * sond_treeviewfm_seadrive_stop_watcher() blockierte den GTK-Hauptthread
- * (project_close() -> sond_treeviewfm_set_root(NULL) -> hier), bis der
- * Watcher-Thread sein CloseHandle() auf das ReadDirectoryChangesW-
- * Verzeichnis-Handle abgeschlossen hatte. Offenbar braucht SeaDrives
- * Cloud-Filtertreiber dafür regelmäßig um die 20 Sekunden (vermutlich ein
- * interner Timeout), um die dort noch ausstehende, per CancelIo() nur
- * ANGESTOSSENE (nicht sofort abgeschlossene) Directory-Change-
- * Notification wirklich abzubrechen - CloseHandle() wartet laut Windows-
- * I/O-Modell auf den Abschluss ausstehender I/O, bevor das Handle
- * wirklich freigegeben wird.
- *
- * Der Watcher-Thread fasst nach dem Setzen des Stop-Flags (s. sond_
- * treeviewfm_seadrive_watcher_thread(), Schleifenende) keinerlei stvfm-
- * Daten mehr an - nur noch CancelIo()/CloseHandle()/g_free() auf seine
- * eigenen, rein lokalen Handles/Kopien (hDir, ov.hEvent, root). Das
- * Warten auf sein Ende kann deshalb GEFAHRLOS in einen eigenen
- * kurzlebigen "Reaper"-Thread verlagert werden, SOLANGE das stvfm-Objekt
- * selbst währenddessen am Leben bleibt - das gilt für den Aufruf aus
- * sond_treeviewfm_set_root() (Projekt schließen/wechseln: das BAUM_FS-
- * Widget bleibt über die Projekt-Lebensdauer hinaus bestehen), NICHT
- * aber für den Aufruf aus sond_treeviewfm_finalize(): dort wird direkt im
- * Anschluss der private Instanz-Speicher freigegeben, ein im Hintergrund
- * noch laufender Watcher-Thread könnte dann via sond_treeviewfm_seadrive_
- * stop_requested(stvfm) auf bereits freigegebenen Speicher zugreifen
- * (Use-after-free). Deshalb zwei Varianten: die synchrone (unverändert,
- * für finalize()) und eine neue asynchrone (für set_root()). */
-static gpointer seadrive_watcher_reap(gpointer data) {
-	GThread *old_thread = (GThread*) data;
-
-	g_thread_join(old_thread);
-
-	return NULL;
-}
-
-void
-sond_treeviewfm_seadrive_stop_watcher(SondTreeviewFM *stvfm) {
-	SondTreeviewFMPrivate *p = sond_treeviewfm_get_instance_private(stvfm);
-	if (!p->seadrive_watcher_thread)
-		return;
-	g_atomic_int_set(&p->seadrive_watcher_stop, 1);
-	g_thread_join(p->seadrive_watcher_thread);
-	p->seadrive_watcher_thread = NULL;
-}
-
-/* Wie sond_treeviewfm_seadrive_stop_watcher(), wartet aber NICHT im
- * aufrufenden Thread auf das Thread-Ende, s. ausführlichen Kommentar
- * oben. Nur verwenden, wenn stvfm selbst danach am Leben bleibt (aktuell:
- * sond_treeviewfm_set_root()). */
-void
-sond_treeviewfm_seadrive_stop_watcher_async(SondTreeviewFM *stvfm) {
-	SondTreeviewFMPrivate *p = sond_treeviewfm_get_instance_private(stvfm);
-	GThread *old_thread = NULL;
-
-	if (!p->seadrive_watcher_thread)
-		return;
-
-	g_atomic_int_set(&p->seadrive_watcher_stop, 1);
-
-	/* Schon hier (nicht erst nach dem Join) auf NULL setzen, damit
-	 * sond_treeviewfm_seadrive_start_watcher() bei einem sofort
-	 * folgenden Öffnen eines neuen Projekts nicht fälschlich "läuft
-	 * schon" annimmt. */
-	old_thread = p->seadrive_watcher_thread;
-	p->seadrive_watcher_thread = NULL;
-
-	/* g_thread_unref() statt g_thread_join() auf den Reaper selbst -
-	 * dokumentiertes GLib-Muster für "fire and forget"-Threads, deren
-	 * Ergebnis niemanden interessiert. */
-	g_thread_unref(g_thread_new("seadrive-watcher-reaper",
-			seadrive_watcher_reap, old_thread));
-}
-#endif
 

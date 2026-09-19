@@ -3050,4 +3050,268 @@
 
  Nicht durch Kompilieren/Testen verifiziert.
 
+ Refactoring (18.09.2026, Nutzer-Fund): "sond_treeviewfm.c und
+ sond_treeviewfm_seadrive.c sind riesen Trümmer! Kann man das besser
+ aufteilen? Und in _treeviewfm.c sind auch Funktionen, die in
+ sond_treeviewfm_seadrive gehören; das Modul sollte auch eher
+ sond_seadrive.c heißen." Auf Nachfrage (Umfang: nur umbenennen? auch
+ verschieben? zusätzlich sond_treeviewfm.c selbst weiter aufteilen?)
+ Nutzer-Entscheidung: umbenennen + SeaDrive-Code verschieben, aber
+ sond_treeviewfm.c selbst NICHT weiter aufsplitten.
+
+ Ursache dafür, dass die SeaDrive-Backend-Logik (Ground-Truth-
+ Hashtables für Badges/Coverage, Watcher-Start/Stop) bisher zwangsläufig
+ in sond_treeviewfm.c stehen musste, obwohl sie inhaltlich zu SeaDrive
+ gehört: G_DEFINE_TYPE_WITH_PRIVATE() erzeugt nur einen STATISCHEN,
+ ausschließlich in der eigenen Übersetzungseinheit sichtbaren Accessor
+ (sond_treeviewfm_get_instance_private()/sond_tvfm_item_get_instance_
+ private()) auf die private Instanzstruktur - Code in einer anderen .c-
+ Datei kann diese Structs also nicht direkt anfassen.
+
+ Lösung: neuer "Freund"-Header sond_treeviewfm_private.h macht beide
+ privaten Structs (SondTreeviewFMPrivate, SondTVFMItemPrivate) sowie je
+ einen normalen (nicht-statischen) Freund-Accessor bekannt
+ (sond_treeviewfm_get_priv(), sond_tvfm_item_get_priv()), implementiert
+ in sond_treeviewfm.c direkt hinter den beiden G_DEFINE_TYPE_WITH_
+ PRIVATE()-Aufrufen als 1:1-Durchreicher an den jeweiligen Makro-
+ Accessor. Der Header ist bewusst NICHT Teil der öffentlichen API (kein
+ Include in sond_treeviewfm.h) - nur sond_treeviewfm.c und sond_
+ seadrive.c binden ihn ein.
+
+ Damit ließen sich ca. 570 Zeilen (17 Funktionen/Structs: die Ordner-/
+ Datei-Badge-Verwaltung, die SeaDrive-Statuszähler, Item-Hydrierung/-
+ Dehydrierung im Baum, sowie Watcher-Start/-Stop/-Stop-Async mitsamt dem
+ ausführlichen Task-#148-Kommentar zum Reaper-Pattern) unverändert aus
+ sond_treeviewfm.c nach sond_seadrive.c (vormals sond_treeviewfm_
+ seadrive.c) verschieben - einzige nötige Textänderung darin: sond_
+ treeviewfm_get_instance_private( -> sond_treeviewfm_get_priv( und
+ sond_tvfm_item_get_instance_private( -> sond_tvfm_item_get_priv(
+ (jeweils rein mechanisch, keine Verhaltensänderung). Die zugehörigen
+ Deklarationen wurden aus dem #ifdef _WIN32-Block von sond_treeviewfm.h
+ nach sond_seadrive.h verschoben (inkl. des SondSeadriveDirCounts-Typs);
+ sond_treeviewfm.h braucht dadurch auch sond_icon_util.h nicht mehr
+ direkt einzubinden.
+
+ Zusätzlich neue Funktion sond_seadrive_reset_ground_truth(SondTreeviewFM*)
+ in sond_seadrive.c: fasst den früheren SeadriveOldTables/seadrive_old_
+ tables_reap()-Mechanismus (Task #148: die vier Ground-Truth-Hashtables
+ beim Projekt-Wechsel/-Schließen "stehlen" statt synchron zu leeren) samt
+ des dazugehörigen Inline-Blocks in sond_treeviewfm_set_root() zu einer
+ sauber benannten, öffentlichen Funktion zusammen - sond_treeviewfm_
+ set_root() ruft jetzt nur noch diese eine Funktion auf. Verhalten
+ unverändert, nur die Zuständigkeitsgrenze zwischen den beiden Modulen
+ verbessert.
+
+ Umbenennung: sond_treeviewfm_seadrive.c/.h -> sond_seadrive.c/.h
+ (Makefile Zeile 41 sowie alle 6 einbindenden Dateien - ToDo.c selbst,
+ project.c, zond_treeview.c, headerbar.c, app_window.c - angepasst;
+ Kommentar-Erwähnungen des alten Dateinamens an anderer Stelle wie
+ gehabt belassen, soweit sie sich auf den Stand zum jeweiligen
+ Zeitpunkt beziehen).
+
+ sond_treeviewfm.c dadurch von 4639 auf ca. 3940 Zeilen geschrumpft,
+ sond_seadrive.c (vormals sond_treeviewfm_seadrive.c, 2101 Zeilen) auf
+ ca. 2790 Zeilen gewachsen - reine Verschiebung, keine
+ Funktionalitätsänderung.
+
+ Nicht durch Kompilieren/Testen verifiziert.
+
+ Refactoring (19.09.2026, Nutzer-Fund im Anschluss an obiges SeaDrive-
+ Refactoring): "Und wie wäre es, wenn man stvfm_item aus sond_treeviewfm
+ herausnimmt?" SondTVFMItem (das GObject-Derivat für EINEN Knoten im
+ Baum: Datei/Verzeichnis/Section, Erzeugen/Kinder laden/Umbenennen/
+ Kopieren/Verschieben/Löschen) steckte komplett in sond_treeviewfm.h/.c,
+ obwohl es inhaltlich ein eigenständiges Modell ist.
+
+ Auf Nachfrage (Umfang: nur verschieben, oder zusätzlich die zahlreichen
+ direkten SondTVFMItemPrivate-Feldzugriffe in sond_treeviewfm.c auf
+ saubere Getter/Setter umstellen?) zunächst Nutzer-Entscheidung
+ "verschieben + Zugriffe aufräumen". Beim Durcharbeiten der kompletten
+ 3939 Zeilen von sond_treeviewfm.c zeigte sich aber: die Kopier-/
+ Verschiebe-/Einfüge-/Lösch-Kaskaden (mehrere Items gleichzeitig, über
+ Dateisystem- und ZIP-Grenzen hinweg) pfriemeln an gut einem Dutzend
+ Stellen direkt in SondTVFMItemPrivate herum - eine saubere Getter-/
+ Setter-Kapselung hätte dort mehrere neue, ungetestete Setter
+ (set_item_type, set_has_children, set_path_or_section,
+ set_display_name) in genau diesem riskanten, dateisystemverändernden
+ Code nötig gemacht, ohne dass ich das kompilieren/testen kann. Dieser
+ konkrete Befund wurde dem Nutzer vorgelegt; Entscheidung daraufhin:
+ "Nur verschieben, kein Cleanup" - reine mechanische Verschiebung wie
+ beim SeaDrive-Refactoring oben, keine Verhaltensänderung, keine neuen
+ Setter/Getter außer dem für den Dateisplit technisch Nötigen.
+
+ Umsetzung: neue Dateien sond_tvfm_item.h/.c. Öffentliche API (Typ-
+ Deklaration, Getter, sond_tvfm_item_create(), SondTVFMProgress,
+ sond_tvfm_item_load_children()) jetzt in sond_tvfm_item.h; sond_
+ treeviewfm.h inkludiert diesen Header (statt der Typ-Deklaration
+ selbst), transparent für alle bisherigen Includer. Das SondTVFMItemPrivate-
+ Struct sowie der Freund-Accessor sond_tvfm_item_get_priv() bleiben wie
+ gehabt in sond_treeviewfm_private.h (Definition jetzt in sond_tvfm_
+ item.c statt sond_treeviewfm.c) - dadurch behält sond_treeviewfm.c
+ exakt wie vorher direkten Zugriff auf die Item-Privatfelder, nur der
+ Accessor-Funktionsname hat sich geändert (sond_tvfm_item_get_instance_
+ private( -> sond_tvfm_item_get_priv(, rein mechanisch).
+
+ Sechs Funktionen, die vor dem Refactoring file-static in sond_
+ treeviewfm.c waren (bzw. "delete_item" hießen), werden sowohl von der
+ jetzt in sond_tvfm_item.c lebenden Item-Logik selbst als auch von im
+ Baum-Code verbliebenen Aufrufern (Rename/Kontextmenü-Löschen/
+ Umbenennen-Handler/Fileparts-Sammlung) gebraucht: sond_tvfm_item_get_
+ basename(), _rename(), _copy(), _move(), _delete() (umbenannt von
+ delete_item(), da nicht mehr file-static), _get_fileparts(). Diese
+ sechs wurden bewusst NICHT in die öffentliche sond_tvfm_item.h
+ aufgenommen, sondern als "modul-interne Freund-API" in sond_
+ treeviewfm_private.h ergänzt - das entspricht genau der vorherigen
+ Sichtbarkeit (file-static), nur jetzt auf zwei Übersetzungseinheiten
+ verteilt statt einer.
+
+ sond_treeviewfm.c dadurch von 3939 auf 2728 Zeilen geschrumpft, sond_
+ tvfm_item.c (neu) ca. 750 Zeilen. Verschiebung per sed anhand
+ exakter Zeilenbereiche (statt Retippen großer Blöcke), anschließend
+ durchgehend verifiziert (Klammernbilanz, #ifdef/#else/#endif-Paarung,
+ keine verwaisten Referenzen auf jetzt in sond_tvfm_item.c lebende
+ Funktionen, alle Aufrufstellen der sechs neu exportierten Funktionen
+ einzeln nachgeprüft) - reine Verschiebung, keine
+ Funktionalitätsänderung.
+
+ Nicht durch Kompilieren/Testen verifiziert.
+
+ Bug (19.09.2026, Nutzer-Fund nach obigem stvfm_item-Refactoring, GTK-
+ Warning): "Failed to set text '<small><tt>.../AdV Arrestanordnung -
+ A&F GmbH.pdf</tt></small>' from markup due to error parsing markup:
+ ... Sie haben ein &-Zeichen benutzt, ohne eine Entität beginnen zu
+ wollen". Ursache: zond_treeview_query_tooltip() (zond_treeview.c) baut
+ den Tooltip-Text per g_strdup_printf("<small><tt>%s</tt></small>", ...)
+ aus dem rohen Dateipfad (file_part) bzw. Anbindungstext (anb_string)
+ zusammen und übergibt das direkt an gtk_tooltip_set_markup() - ohne
+ Escaping wirft Pango bei Sonderzeichen wie '&', '<', '>' im
+ Dateinamen einen Parse-Fehler und der Tooltip bleibt leer. Auch die
+ Fehlermeldung (error->message) im selben Zweig war ungeescaped. Analoges
+ Muster in zond_treeview_render_node_text() gefunden: das Label eines
+ Link-Knotens (zond_tree_store_is_link()) wird ebenso ungeescaped in
+ "<i>%s</i>" eingesetzt - Link-Knoten können vom Nutzer umbenannt werden
+ (zond_treeview_text_edited()), also ebenfalls potentiell betroffen.
+
+ Fix: an allen vier Stellen (file_part, anb_string, error->message in
+ zond_treeview_query_tooltip(); label in zond_treeview_render_node_text())
+ g_markup_escape_text() vor dem Einsetzen in die Markup-Strings
+ eingefügt. Restliche g_strdup_printf(..."<..."...)-Aufrufe im Projekt
+ geprüft - keine weiteren Fundstellen mit
+ Nutzertext/Dateipfad in Markup.
+
+ Nicht durch Kompilieren/Testen verifiziert.
+
+ Bug (19.09.2026, Nutzer-Review von sond_treeviewfm_open(), Zeile
+ 1428f.): die SeaDrive-Hydrierungsprüfung vor dem Öffnen einer Datei aus
+ BAUM_FS lief nur für SOND_TVFM_ITEM_TYPE_LEAF-Knoten, deren sond_file_part
+ vom Typ SondFilePartLeaf war UND keinen Parent hatte
+ (SOND_IS_FILE_PART_LEAF(...) && !sond_file_part_get_parent(...)).
+ Nutzer-Fund: eine LEAF_SECTION (Anbindung/Section, z.B. Seitenbereich
+ innerhalb eines PDF oder Mimepart einer E-Mail) behält denselben
+ sond_file_part wie der übergeordnete LEAF-Zustand - bei einer PDF-/
+ GMessage-Section bleibt das also ein SondFilePartPDF/-GMessage
+ (Container-Typ, s. sond_tvfm_item_create() in sond_tvfm_item.c), womit
+ SOND_IS_FILE_PART_LEAF() fehlschlägt und die komplette Prüfung
+ übersprungen wird - ein Klick auf eine Seite eines großen, noch nicht
+ hydrierten PDF in BAUM_FS ging also direkt in
+ document_new_displayed_document() (mupdf-Rohzugriff) statt vorher
+ sond_seadrive_ensure_hydrated() anzustoßen.
+
+ Auf Nachfrage, warum überhaupt nach Typ unterschieden wird: der
+ !get_parent()-Teil war NICHT redundant, sondern notwendig - bei
+ verschachtelten sond_file_parts (ZIP-Eintrag, PDF-Embedded-File,
+ GMessage-Mimepart) enthält das path-Feld nur den container-internen
+ Bezeichner, nicht den echten projektrelativen Plattenpfad (s.
+ sond_file_part_do_create(), das path unverändert vom jeweiligen
+ Erzeuger übernimmt) - ein naives g_strconcat(root, "/", path) wäre für
+ solche Parts falsch. Der SOND_IS_FILE_PART_LEAF()-Teil dagegen war die
+ eigentliche Fehlerquelle: nicht der Typ des sond_file_part entscheidet,
+ ob eine Hydrierungsprüfung nötig ist, sondern einzig, ob es einen
+ Parent hat oder nicht (DIR-Knoten sind ohnehin schon oben
+ ausgeschlossen - alles andere fußt letztlich in genau einer echten
+ Datei).
+
+ Fix: SOND_IS_FILE_PART_LEAF()-Unterscheidung entfernt. Stattdessen wird
+ immer (für jeden Nicht-DIR-Knoten) vom eigenen sond_file_part über
+ sond_file_part_get_parent() zum obersten Vorfahren hochgelaufen -
+ dessen path ist garantiert der echte projektrelative Pfad, unabhängig
+ davon, ob der ursprüngliche Knoten LEAF oder LEAF_SECTION war und
+ unabhängig vom konkreten Container-Typ (Leaf/PDF/ZIP/GMessage). Die
+ analoge Stelle in zond_treeview.c (BAUM_INHALT/AUSWERTUNG, Task
+ #137/139) war von diesem Bug nicht betroffen - dort wird der
+ Dateisystem-Pfad ohnehin per String-Split am "//"-Trenner aus dem
+ file_part-String bestimmt, unabhängig vom SondFilePart-Typ.
+
+ Nicht durch Kompilieren/Testen verifiziert.
+
+ Bug (19.09.2026, Nutzer-Review von zond_treeview_open_node(),
+ zond_treeview.c): "ensure_ wird auch geprüft, wenn ich im
+ BAUM_AUSWERTUNG auf eine COPY klicke, obwohl ja später nochmal in
+ multi alles geprüft und angestoßen wird." Der Einzeldatei-
+ Hydrierungscheck ganz oben in der Funktion lief bisher IMMER unbedingt
+ für iter_target - unabhängig davon, ob der Klick am Ende in den
+ Einzel- oder den Auszug-Pfad (mehrere Geschwister-Anbindungen zu einer
+ gemeinsamen Ansicht zusammengefasst) mündet. Traf der Klick auf eine
+ Anbindung, deren Anzeige-Elternknoten ein Strukturpunkt ist (auszug==
+ TRUE, ermittelt erst weiter unten in der Funktion), wurde trotzdem
+ schon vorher eine Einzeldatei-Hydrierung für GENAU diese eine Datei
+ angestoßen - und bei noch nicht lokaler Datei sofort mit return 0
+ abgebrochen, BEVOR überhaupt geprüft wurde, ob gleich sowieso der
+ Auszug-Pfad mit sond_seadrive_ensure_hydrated_multi() für ALLE
+ Geschwister greift. Der Nutzer musste dadurch ggf. mehrfach klicken
+ (einmal pro noch nicht hydriertem Geschwister), statt gleich eine
+ gebündelte Abfrage für alle betroffenen Dateien zu bekommen.
+
+ Fix: die Auszug-Entscheidung (ist der Anzeige-Elternknoten - bei
+ direktem Strukturpunkt-Treffer: der Zielknoten selbst - ein
+ Strukturpunkt?) wird jetzt GANZ OBEN in der Funktion vorgezogen, rein
+ per zond_treeview_get_filepart_and_section() (reine DB-Abfrage, kein
+ Dateizugriff - dieselbe Funktion, die der bestehende Einzel-Check
+ schon nutzte), OHNE die dafür weiter unten verwendete teure
+ get_filepart_from_iter()/SondFilePart-Variante zu brauchen. Je nach
+ Ergebnis läuft jetzt genau EINMAL entweder der Einzel- oder der Multi-
+ Hydrierungscheck. Die beiden vormals an ihrer ursprünglichen Stelle
+ (im !sfp-Zweig bzw. im auszug-Unterzweig) redundant gewordenen Aufrufe
+ von zond_treeview_auszug_ensure_hydrated() wurden ersatzlos entfernt -
+ die dortige spätere Neuberechnung von auszug/iter_parent per
+ get_filepart_from_iter() bleibt unverändert bestehen (jetzt gefahrlos,
+ weil die betroffenen Dateien zu diesem Zeitpunkt bereits nachweislich
+ hydriert sind) und entscheidet weiterhin, ob zond_treeview_open_auszug()
+ oder zond_treeview_open_single_view() aufgerufen wird.
+
+ Nicht durch Kompilieren/Testen verifiziert.
+
+ Refactoring (19.09.2026, Nutzer-Fund): "sond_seadrive_ensure_hydrated
+ und _multi enthalten viel doppelten Code. Kann man _ensure_hydrated
+ nicht als _multi mit arr->len==1 verstehen?" Zutreffend: der komplette
+ Einzeldatei-Fortschrittsdialog (HydrateProgressUi-Struct,
+ hydrate_progress_update(), hydrate_progress_tick(),
+ cb_hydrate_progress_dialog_destroy(),
+ cb_hydrate_progress_abbrechen_clicked(),
+ sond_seadrive_show_hydrate_progress_dialog(), ca. 140 Zeilen) war eine
+ strukturelle 1:1-Dopplung der Multi-Variante (HydrateProgressEntryMulti/
+ HydrateProgressUiMulti und Umfeld) - nur für genau einen statt beliebig
+ viele Pfade. sond_seadrive_show_hydrate_progress_dialog() wurde
+ außerdem nirgends sonst im Projekt direkt aufgerufen (nur von
+ sond_seadrive_ensure_hydrated() selbst, geprüft per grep).
+
+ Fix: kompletter Einzeldatei-Dialog-Code entfernt.
+ sond_seadrive_ensure_hydrated() ist jetzt nur noch ein dünner Wrapper,
+ der full_path in einen einelementigen GPtrArray packt und an
+ sond_seadrive_ensure_hydrated_multi() delegiert. Header (sond_
+ seadrive.h) angepasst: Deklaration + Doc-Kommentar von
+ sond_seadrive_show_hydrate_progress_dialog() sowie dessen Linux-Stub
+ entfernt, Doc-Kommentar von sond_seadrive_ensure_hydrated() aktualisiert.
+ SeaDrivePlaceholderStandardInfo/CF_PLACEHOLDER_INFO_STANDARD (von der
+ Multi-Variante weiterhin gebraucht) unverändert stehen gelassen.
+
+ Einzige sichtbare Verhaltensänderung: der Dialog bei einem erneuten
+ Doppelklick auf eine einzelne, noch hydrierende Datei zeigt jetzt
+ denselben Rahmen wie der Auszug-Fall (Titel "Download läuft", darunter
+ EINE Zeile mit Dateiname + Fortschrittsbalken statt des Satzes
+ "Download läuft bereits: <Name>") - inhaltlich identisch, nur ohne den
+ einleitenden Satz.
+
+ Nicht durch Kompilieren/Testen verifiziert.
+
  */

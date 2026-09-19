@@ -29,7 +29,7 @@
 #include "../sond_index.h"
 #include "../sond_mime.h"
 #include "../sond_icon_util.h"
-#include "../sond_treeviewfm_seadrive.h"
+#include "../sond_seadrive.h"
 
 #include "zond_init.h"
 #include "zond_dbase.h"
@@ -235,8 +235,15 @@ static void zond_treeview_render_node_text(GtkTreeViewColumn *column,
 		// Retrieve the current label
 		gtk_tree_model_get(model, iter, 1, &label, -1);
 
-		markuptxt = g_strdup_printf("<i>%s</i>", label);
+		/* label kann Nutzertext sein (Knoten umbenannt) und Zeichen wie
+		 * '&' enthalten - ohne Escaping wirft gtk_cell_renderer das als
+		 * ungültiges Pango-Markup weg (Fund 19.09.2026, analog dem
+		 * Tooltip-Fund in zond_treeview_query_tooltip()). */
+		gchar *label_escaped = g_markup_escape_text(label, -1);
 		g_free(label);
+
+		markuptxt = g_strdup_printf("<i>%s</i>", label_escaped);
+		g_free(label_escaped);
 
 		if (zond_tree_store_get_link_head_nr(iter)) {
 			markuptxt = add_string(g_strdup("<span foreground=\"purple\">"),
@@ -404,7 +411,10 @@ static gboolean on_query_tooltip(GtkWidget  *widget,
 	node_id = zond_treeview_get_filepart_and_section(
 			ZOND_TREEVIEW(tree_view), &iter, &file_part, &section, &error);
 	if (node_id == -1) {
-		markup = g_strdup_printf("Fehler: %s", error->message);
+		gchar *error_message_escaped =
+				g_markup_escape_text(error->message, -1);
+		markup = g_strdup_printf("Fehler: %s", error_message_escaped);
+		g_free(error_message_escaped);
 		g_error_free(error);
 	}
 	else if (file_part) {
@@ -414,16 +424,27 @@ static gboolean on_query_tooltip(GtkWidget  *widget,
 			anb_string = anbindung_to_human_readable(&anbindung);
 		}
 
-		// Markup zusammenbauen
-		markup = g_strdup_printf("<small><tt>%s</tt></small>\n",
-				file_part);
+		/* file_part/anb_string sind Dateipfad bzw. Anbindungstext und
+		 * können Zeichen wie '&' enthalten - ohne Escaping bricht
+		 * gtk_tooltip_set_markup() mit "Failed to set text ... from
+		 * markup" ab und der Tooltip bleibt leer (Nutzer-Fund
+		 * 19.09.2026, Datei "AdV Arrestanordnung - A&F GmbH.pdf"). */
+		gchar *file_part_escaped = g_markup_escape_text(file_part, -1);
 		g_free(file_part);
 
+		// Markup zusammenbauen
+		markup = g_strdup_printf("<small><tt>%s</tt></small>\n",
+				file_part_escaped);
+		g_free(file_part_escaped);
+
 		if (anb_string) {
+			gchar *anb_string_escaped =
+					g_markup_escape_text(anb_string, -1);
+			g_free(anb_string);
 			markup = add_string(markup,
 					g_strdup_printf("<small><tt>%s</tt></small>",
-			anb_string));
-			g_free(anb_string);
+			anb_string_escaped));
+			g_free(anb_string_escaped);
 		}
 
 		gtk_tooltip_set_markup(tooltip, markup);
@@ -2853,43 +2874,119 @@ static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 	 * Inhaltssniffing) wird erst NACH einem positiven Hydrierungs-Check
 	 * aufgerufen, wenn die Datei nachweislich schon lokal ist.
 	 *
-	 * Deckt den Fall ab, in dem der Klick direkt auf eine Anbindung
-	 * trifft. Der Auszug-Fall (Klick auf einen Strukturpunkt im
-	 * Auswertungsverzeichnis - s. zond_treeview_open_auszug() unten)
-	 * wird weiterhin separat behandelt, direkt vor den beiden
-	 * Aufrufstellen von zond_treeview_open_auszug() weiter unten
-	 * (zond_treeview_auszug_ensure_hydrated()/_collect_paths()) - dort
-	 * mit sond_seadrive_ensure_hydrated_multi() statt der hier
-	 * verwendeten Einzeldatei-Variante. */
+	 * Nutzer-Fund 19.09.2026 ("ensure_ wird auch geprüft, wenn ich auf
+	 * eine COPY klicke, obwohl später nochmal in multi alles geprüft
+	 * wird"): dieser Block lief bisher IMMER unbedingt für iter_target,
+	 * unabhängig davon, ob der Klick am Ende in den Einzel- oder den
+	 * Auszug-Pfad (mehrere Geschwister-Anbindungen zu einer Ansicht
+	 * zusammengefasst, s. zond_treeview_open_auszug() unten) mündet.
+	 * Traf der Klick auf eine Anbindung, deren Anzeige-Elternknoten ein
+	 * Strukturpunkt ist (auszug==TRUE weiter unten), wurde hier trotzdem
+	 * schon eine Einzeldatei-Hydrierung für GENAU diese eine Datei
+	 * angestoßen - und bei noch nicht lokaler Datei sofort mit return 0
+	 * abgebrochen, BEVOR überhaupt geprüft wurde, ob gleich sowieso der
+	 * Auszug-Pfad mit sond_seadrive_ensure_hydrated_multi() für ALLE
+	 * Geschwister greift. Ergebnis: der Nutzer musste ggf. mehrfach
+	 * klicken (einmal pro noch nicht hydriertem Geschwister), statt
+	 * gleich eine gebündelte Abfrage für alle betroffenen Dateien zu
+	 * bekommen.
+	 *
+	 * Fix: die Auszug-Entscheidung (Anzeige-Elternknoten ist
+	 * Strukturpunkt? s. auch die identische Prüfung weiter unten bei
+	 * "Ziel ist Anbindung") wird jetzt HIER VORGEZOGEN - rein per
+	 * zond_treeview_get_filepart_and_section() (DB-Abfrage, kein
+	 * Dateizugriff, s.o.), also ohne die dortige teure
+	 * get_filepart_from_iter()/SondFilePart-Variante zu brauchen. Je
+	 * nach Ergebnis läuft entweder EINMALIG der Einzel- oder EINMALIG
+	 * der Multi-Hydrierungscheck - nie beide. Die beiden ehemals an
+	 * dieser Stelle duplizierten Aufrufe von
+	 * zond_treeview_auszug_ensure_hydrated() weiter unten (im
+	 * !sfp-Zweig und im auszug-Unterzweig) entfallen deshalb ersatzlos -
+	 * die dortige spätere Neuberechnung von auszug/iter_parent per
+	 * get_filepart_from_iter() bleibt unverändert bestehen (jetzt
+	 * gefahrlos, weil die betroffenen Dateien zu diesem Zeitpunkt
+	 * bereits nachweislich hydriert sind) und entscheidet weiterhin, ob
+	 * zond_treeview_open_auszug() oder zond_treeview_open_single_view()
+	 * aufgerufen wird. */
 	SondTreeviewFM *stvfm_fs = SOND_TREEVIEWFM(zond->treeview[BAUM_FS]);
 
 	if (sond_treeviewfm_is_seadrive_path(stvfm_fs)) {
 		const gchar *root = sond_treeviewfm_get_root(stvfm_fs);
-		gchar *file_part = NULL;
+		gchar *file_part_target = NULL;
+		gboolean auszug_pre = FALSE;
+		GtkTreeIter iter_auszug_parent = { 0 };
 		gint ret = 0;
 
 		ret = zond_treeview_get_filepart_and_section(
 				ZOND_TREEVIEW(zond->treeview[baum]), &iter_target,
-				&file_part, NULL, error);
+				&file_part_target, NULL, error);
 		if (ret == -1)
 			return -1;
 
-		if (root && file_part) {
-			const gchar *sep = g_strstr_len(file_part, -1, "//");
-			gchar *rel = sep ? g_strndup(file_part, sep - file_part)
-					: g_strdup(file_part);
+		if (baum_click == BAUM_AUSWERTUNG && !file_part_target) {
+			//Ziel selbst ist Strukturpunkt -> Auszug der Ziel-Kinder
+			//(entspricht dem !sfp-Zweig weiter unten)
+			auszug_pre = TRUE;
+			iter_auszug_parent = iter_target;
+		}
+		else if (baum_click == BAUM_AUSWERTUNG && file_part_target &&
+				!(zond->state & GDK_CONTROL_MASK)) {
+			//Ziel ist Anbindung, Strg nicht gedrückt: Anzeige-
+			//Elternknoten der KLICKPOSITION (nicht iter_target!) prüfen -
+			//identische Semantik wie weiter unten bei "Ziel ist
+			//Anbindung", hier aber rein per DB-Abfrage.
+			GtkTreeIter iter_parent_tmp = { 0 };
+
+			if (gtk_tree_model_iter_parent(
+					GTK_TREE_MODEL(zond_tree_store_get_tree_store(iter)),
+					&iter_parent_tmp, iter)) {
+				gchar *file_part_parent = NULL;
+
+				ret = zond_treeview_get_filepart_and_section(
+						ZOND_TREEVIEW(zond->treeview[BAUM_AUSWERTUNG]),
+						&iter_parent_tmp, &file_part_parent, NULL, error);
+				if (ret == -1) {
+					g_free(file_part_target);
+					return -1;
+				}
+
+				if (!file_part_parent) {
+					auszug_pre = TRUE;
+					iter_auszug_parent = iter_parent_tmp;
+				}
+				g_free(file_part_parent);
+			}
+		}
+
+		if (auszug_pre) {
+			gint hyd_rc = 0;
+
+			g_free(file_part_target);
+
+			hyd_rc = zond_treeview_auszug_ensure_hydrated(zond,
+					ZOND_TREEVIEW(zond->treeview[BAUM_AUSWERTUNG]),
+					&iter_auszug_parent, error);
+			if (hyd_rc == -1)
+				return -1;
+			if (hyd_rc == 1)
+				return 0;
+		}
+		else if (root && file_part_target) {
+			const gchar *sep = g_strstr_len(file_part_target, -1, "//");
+			gchar *rel = sep ? g_strndup(file_part_target, sep - file_part_target)
+					: g_strdup(file_part_target);
 			gchar *full_path = g_strconcat(root, "/", rel, NULL);
 			gboolean is_local = sond_seadrive_ensure_hydrated(
 					GTK_WINDOW(zond->app_window), full_path);
 			g_free(rel);
 			g_free(full_path);
+			g_free(file_part_target);
 
-			if (!is_local) {
-				g_free(file_part);
+			if (!is_local)
 				return 0;
-			}
 		}
-		g_free(file_part);
+		else
+			g_free(file_part_target);
 	}
 #endif
 
@@ -2918,16 +3015,9 @@ static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 			return -1;
 	}
 	else if (!sfp) { //Klick im Auswertungsverzeichnis, Ziel ist Strukturpunkt -> Auszug der Ziel-Kinder
-#ifdef _WIN32
-		{
-			gint hyd_rc = zond_treeview_auszug_ensure_hydrated(zond,
-					ZOND_TREEVIEW(zond->treeview[baum]), &iter_target, error);
-			if (hyd_rc == -1)
-				return -1;
-			if (hyd_rc == 1)
-				return 0;
-		}
-#endif
+		/* Hydrierungscheck (Multi) läuft jetzt vorgezogen weiter oben
+		 * (s. dortigen Kommentar, Nutzer-Fund 19.09.2026) - hier nicht
+		 * mehr nötig. */
 		rc = zond_treeview_open_auszug(ZOND_TREEVIEW(zond->treeview[baum]),
 				&iter_target, NULL, (zond->state & GDK_MOD1_MASK), &dd, &pdf_pos, error);
 		if (rc) {
@@ -2972,17 +3062,9 @@ static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 			//Elternknoten = Strukturpunkt -> Auszug mit Geschwistern der Klickposition
 			g_object_unref(sfp);
 
-#ifdef _WIN32
-			{
-				gint hyd_rc = zond_treeview_auszug_ensure_hydrated(zond,
-						ZOND_TREEVIEW(zond->treeview[BAUM_AUSWERTUNG]),
-						&iter_parent, error);
-				if (hyd_rc == -1)
-					return -1;
-				if (hyd_rc == 1)
-					return 0;
-			}
-#endif
+			/* Hydrierungscheck (Multi) läuft jetzt vorgezogen ganz oben
+			 * in dieser Funktion (s. dortigen Kommentar, Nutzer-Fund
+			 * 19.09.2026) - hier nicht mehr nötig. */
 
 			rc = zond_treeview_open_auszug(ZOND_TREEVIEW(zond->treeview[BAUM_AUSWERTUNG]),
 					&iter_parent, iter, (zond->state & GDK_MOD1_MASK), &dd, &pdf_pos, error);

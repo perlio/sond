@@ -1,14 +1,26 @@
 /*
- * sond_treeviewfm_seadrive.c
+ * sond_seadrive.c (bis 18.09.2026: sond_treeviewfm_seadrive.c)
  *
  * SeaDrive integration for SondTreeviewFM.
  * Windows-only - on Linux this compiles to an empty translation unit.
  *
  * Uses prepare_long_path() from sond_file_helper for consistent UTF-8
  * handling and long path support (>260 chars) throughout.
+ *
+ * Refactoring (18.09.2026, Nutzer-Fund "sond_treeviewfm.c und
+ * sond_treeviewfm_seadrive.c sind riesen Trümmer! ... in _treeviewfm.c
+ * sind auch Funktionen, die in sond_treeviewfm_seadrive gehören"): Modul
+ * umbenannt (treeviewfm_seadrive -> seadrive) UND die ~800 Zeilen
+ * SeaDrive-Backend-Logik (Ground-Truth-Hashtables für Badges/Coverage,
+ * Watcher-Start/Stop), die vorher zwangsläufig in sond_treeviewfm.c
+ * stehen mußte (G_DEFINE_TYPE_WITH_PRIVATE() erzeugt nur einen in dieser
+ * Übersetzungseinheit sichtbaren statischen Accessor), hierher verschoben.
+ * Zugriff auf SondTreeviewFMPrivate/SondTVFMItemPrivate jetzt über die
+ * "Freund"-Accessoren sond_treeviewfm_get_priv()/sond_tvfm_item_get_priv()
+ * aus sond_treeviewfm_private.h (dort ausführl. Kommentar zur Begründung).
  */
 
-#include "sond_treeviewfm_seadrive.h"
+#include "sond_seadrive.h"
 
 #ifdef _WIN32
 
@@ -17,9 +29,11 @@
 #include <gtk/gtk.h>
 
 #include "sond_treeview.h"
+#include "sond_treeviewfm_private.h"
 #include "sond_fileparts.h"
 #include "sond_file_helper.h"
 #include "sond_log_and_error.h"
+#include "sond_mime.h"
 #include "misc.h"
 
 /* ------------------------------------------------------------------ */
@@ -1218,210 +1232,30 @@ typedef struct {
     BYTE          FileIdentity[256];
 } SeaDrivePlaceholderStandardInfo;
 
-typedef struct {
-    gchar     *full_path;
-    GtkWidget *dialog;
-    GtkWidget *progress_bar;
-    GtkWidget *label;
-    guint64    file_size;
-    guint      timeout_id;
-    gboolean   logged_failure; /* Diagnose-Log höchstens einmal pro
-                                 * offenem Dialog, nicht alle 300ms */
-} HydrateProgressUi;
-
-static void hydrate_progress_update(HydrateProgressUi *ui)
-{
-    wchar_t *lp;
-    HANDLE   h;
-
-    lp = prepare_long_path(ui->full_path, NULL);
-    if (!lp)
-        return;
-
-    h = CreateFileW(lp, FILE_READ_ATTRIBUTES,
-            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-            NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
-    g_free(lp);
-    if (h == INVALID_HANDLE_VALUE)
-        return;
-
-    cfapi_init();
-    if (g_CfGetPlaceholderInfo) {
-        SeaDrivePlaceholderStandardInfo info = { 0 };
-        DWORD returned_length = 0;
-        HRESULT hr = g_CfGetPlaceholderInfo(h, CF_PLACEHOLDER_INFO_STANDARD,
-                &info, sizeof(info), &returned_length);
-
-        if (SUCCEEDED(hr)) {
-            guint64 on_disk = (guint64) info.OnDiskDataSize.QuadPart;
-            gdouble fraction = 0.0;
-            gchar *on_disk_str, *total_str, *text;
-
-            if (ui->file_size > 0) {
-                fraction = (gdouble) on_disk / (gdouble) ui->file_size;
-                if (fraction > 1.0)
-                    fraction = 1.0;
-            }
-            gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(ui->progress_bar),
-                    fraction);
-
-            on_disk_str = g_format_size(on_disk);
-            total_str = g_format_size(ui->file_size);
-            text = g_strdup_printf("%s von %s heruntergeladen",
-                    on_disk_str, total_str);
-            gtk_progress_bar_set_text(GTK_PROGRESS_BAR(ui->progress_bar),
-                    text);
-            g_free(on_disk_str);
-            g_free(total_str);
-            g_free(text);
-        } else if (!ui->logged_failure) {
-            /* S. Doc-Kommentar an SeaDrivePlaceholderStandardInfo (18.09.
-             * 2026, FileIdentity-Puffergröße) - sollte returned_length
-             * hier immer noch größer als sizeof(info) sein, reicht auch
-             * 256 Byte FileIdentity nicht und muss weiter vergrößert
-             * werden. */
-            LOG_WARN("%s: CfGetPlaceholderInfo('%s'): 0x%08lX "
-                    "(returned_length=%lu, sizeof(info)=%zu)", __func__,
-                    ui->full_path, (unsigned long) hr,
-                    (unsigned long) returned_length, sizeof(info));
-            ui->logged_failure = TRUE;
-        }
-    }
-
-    CloseHandle(h);
-}
-
-static gboolean hydrate_progress_tick(gpointer data)
-{
-    HydrateProgressUi *ui = (HydrateProgressUi *) data;
-
-    if (!sond_seadrive_is_hydrating(ui->full_path)) {
-        /* Hydrierung fertig (Erfolg, Fehler oder Abbruch) - Dialog
-         * selbstständig schließen. */
-        ui->timeout_id = 0;
-        gtk_widget_destroy(ui->dialog);
-        return G_SOURCE_REMOVE;
-    }
-
-    hydrate_progress_update(ui);
-
-    return G_SOURCE_CONTINUE;
-}
-
-static void cb_hydrate_progress_dialog_destroy(GtkWidget *dialog,
-        gpointer data)
-{
-    HydrateProgressUi *ui = (HydrateProgressUi *) data;
-    (void) dialog;
-
-    if (ui->timeout_id)
-        g_source_remove(ui->timeout_id);
-    g_free(ui->full_path);
-    g_free(ui);
-}
-
-static void cb_hydrate_progress_abbrechen_clicked(GtkButton *button,
-        gpointer data)
-{
-    HydrateProgressUi *ui = (HydrateProgressUi *) data;
-
-    sond_seadrive_hydrate_cancel(ui->full_path);
-    gtk_widget_set_sensitive(GTK_WIDGET(button), FALSE);
-    gtk_label_set_text(GTK_LABEL(ui->label), "Wird abgebrochen...");
-}
-
-/*
- * sond_seadrive_show_hydrate_progress_dialog:
- *
- * Nutzer-Fund 18.09.2026: bei einem erneuten Doppelklick auf eine Datei,
- * deren Hydrierung bereits läuft (sond_seadrive_is_hydrating() == TRUE),
- * statt eines stillen No-Ops diesen Dialog zeigen - Fortschritt (bereits
- * heruntergeladene/gesamte Bytes, via CfGetPlaceholderInfo() gepollt) und
- * eine Abbrechen-Möglichkeit (s. sond_seadrive_hydrate_cancel(), inkl.
- * Einschränkungen bzgl. Zuverlässigkeit), damit bei versehentlich
- * angeklickten Großdateien nicht unnötig der SeaDrive-Server weiter
- * beansprucht wird. Schließen des Fensters (per "Schließen"-Button oder
- * X) bricht NICHT ab - der Download läuft dann einfach unbeobachtet im
- * Hintergrund weiter, wie beim ersten Doppelklick auch. Der Dialog
- * schließt sich außerdem von
- * selbst, sobald die Hydrierung (gleich aus welchem Grund) endet.
- */
-void sond_seadrive_show_hydrate_progress_dialog(GtkWindow *parent,
-        const gchar *full_path)
-{
-    HydrateProgressUi *ui;
-    GtkWidget *content_area;
-    GtkWidget *vbox;
-    GtkWidget *button;
-    gchar *basename, *message;
-    wchar_t *lp;
-    LARGE_INTEGER size = { .QuadPart = 0 };
-
-    ui = g_new0(HydrateProgressUi, 1);
-    ui->full_path = g_strdup(full_path);
-
-    /* Dateigröße einmalig ermitteln - auch bei einem noch nicht
-     * hydrierten Platzhalter verfügbar (Metadatum, unabhängig vom
-     * Hydrierungsstand). */
-    lp = prepare_long_path(full_path, NULL);
-    if (lp) {
-        HANDLE h = CreateFileW(lp, FILE_READ_ATTRIBUTES,
-                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
-        g_free(lp);
-        if (h != INVALID_HANDLE_VALUE) {
-            GetFileSizeEx(h, &size);
-            CloseHandle(h);
-        }
-    }
-    ui->file_size = (guint64) size.QuadPart;
-
-    ui->dialog = gtk_dialog_new_with_buttons("Download läuft", parent,
-            GTK_DIALOG_DESTROY_WITH_PARENT, NULL, NULL);
-    gtk_window_set_default_size(GTK_WINDOW(ui->dialog), 420, -1);
-
-    content_area = gtk_dialog_get_content_area(GTK_DIALOG(ui->dialog));
-    vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
-    gtk_container_set_border_width(GTK_CONTAINER(vbox), 12);
-
-    basename = g_path_get_basename(full_path);
-    message = g_strdup_printf("Download läuft bereits: %s", basename);
-    ui->label = gtk_label_new(message);
-    gtk_label_set_line_wrap(GTK_LABEL(ui->label), TRUE);
-    g_free(message);
-    g_free(basename);
-    gtk_box_pack_start(GTK_BOX(vbox), ui->label, FALSE, FALSE, 0);
-
-    ui->progress_bar = gtk_progress_bar_new();
-    gtk_progress_bar_set_show_text(GTK_PROGRESS_BAR(ui->progress_bar), TRUE);
-    gtk_box_pack_start(GTK_BOX(vbox), ui->progress_bar, FALSE, FALSE, 0);
-
-    gtk_container_add(GTK_CONTAINER(content_area), vbox);
-
-    /* Schließen-Button (Nutzer-Fund 18.09.2026): ohne ihn war die
-     * Dialoggeometrie nicht "man kann auf Schließen klicken, wenn man
-     * NICHT abbrechen will" - nur das X (WM-Rand) bot das. Ruft nur
-     * gtk_widget_destroy() auf, ohne sond_seadrive_hydrate_cancel() -
-     * Download läuft danach wie beim X-Button unbeobachtet im
-     * Hintergrund weiter. */
-    button = gtk_dialog_add_button(GTK_DIALOG(ui->dialog), "Schließen",
-            GTK_RESPONSE_NONE);
-    g_signal_connect_swapped(button, "clicked",
-            G_CALLBACK(gtk_widget_destroy), ui->dialog);
-
-    button = gtk_dialog_add_button(GTK_DIALOG(ui->dialog), "Abbrechen",
-            GTK_RESPONSE_NONE);
-    g_signal_connect(button, "clicked",
-            G_CALLBACK(cb_hydrate_progress_abbrechen_clicked), ui);
-
-    g_signal_connect(ui->dialog, "destroy",
-            G_CALLBACK(cb_hydrate_progress_dialog_destroy), ui);
-
-    gtk_widget_show_all(ui->dialog);
-
-    hydrate_progress_update(ui);
-    ui->timeout_id = g_timeout_add(300, hydrate_progress_tick, ui);
-}
+/* Nutzer-Fund 19.09.2026 ("sond_seadrive_ensure_hydrated und _multi
+ * enthalten viel doppelten Code - kann man _ensure_hydrated nicht als
+ * _multi mit arr->len==1 verstehen?"): der komplette Einzeldatei-
+ * Fortschrittsdialog, der hier vorher stand (HydrateProgressUi,
+ * hydrate_progress_update(), hydrate_progress_tick(),
+ * cb_hydrate_progress_dialog_destroy(),
+ * cb_hydrate_progress_abbrechen_clicked(),
+ * sond_seadrive_show_hydrate_progress_dialog()), war strukturell eine
+ * 1:1-Dopplung der weiter unten stehenden Multi-Variante
+ * (HydrateProgressEntryMulti/HydrateProgressUiMulti und Umfeld) - nur
+ * für genau einen statt beliebig viele Pfade. Ersatzlos entfernt:
+ * sond_seadrive_ensure_hydrated() (s.u.) delegiert jetzt an
+ * sond_seadrive_ensure_hydrated_multi() mit einem einelementigen
+ * GPtrArray, und sond_seadrive_show_hydrate_progress_dialog() (nirgends
+ * sonst im Projekt direkt aufgerufen, s. grep) entfällt zugunsten von
+ * sond_seadrive_show_hydrate_progress_dialog_multi(). Einzige sichtbare
+ * Änderung: der Dialog bei einem erneuten Doppelklick auf eine einzelne,
+ * noch hydrierende Datei zeigt jetzt denselben Dialograhmen wie der
+ * Auszug-Fall (Titel "Download läuft", darunter EINE Zeile mit
+ * Dateiname + Fortschrittsbalken statt des Satzes "Download läuft
+ * bereits: <Name>") - inhaltlich identisch, nur ohne den einleitenden
+ * Satz. SeaDrivePlaceholderStandardInfo/CF_PLACEHOLDER_INFO_STANDARD
+ * oben bleiben unverändert bestehen, da hydrate_progress_entry_update()
+ * (Multi-Variante) sie weiterhin braucht. */
 
 /* Nutzer-Hinweis 18.09.2026: "Identischer Code in sond_treeviewfm.c und
  * zond_treeview.c - das ist ungünstig." - beide Stellen (BAUM_FS-
@@ -1448,18 +1282,30 @@ void sond_seadrive_show_hydrate_progress_dialog(GtkWindow *parent,
  * mit parent==NULL) bleibt bewusst beim jeweiligen Aufrufer, da sie je
  * nach Baum ein anderes Datenmodell abläuft (SondTVFMItem bzw.
  * SondFilePart) und sich dafür keine gemeinsame Stelle anbietet. */
+/* Nutzer-Fund 19.09.2026: nur noch ein dünner Wrapper um
+ * sond_seadrive_ensure_hydrated_multi() mit einem einelementigen
+ * GPtrArray - s. ausführl. Kommentar dort sowie den entfallenen
+ * Einzeldatei-Dialog weiter oben. full_path wird nur gelesen (die
+ * Multi-Variante kopiert bei Bedarf selbst), der einelementige Array
+ * trägt also nur full_path als rohen Zeiger und braucht keine eigene
+ * free_func. */
 gboolean sond_seadrive_ensure_hydrated(GtkWindow *parent,
         const gchar *full_path)
 {
-    if (!full_path || !sond_seadrive_needs_hydration(full_path))
+    GPtrArray *full_paths;
+    gboolean result;
+
+    if (!full_path)
         return TRUE;
 
-    if (sond_seadrive_is_hydrating(full_path))
-        sond_seadrive_show_hydrate_progress_dialog(parent, full_path);
-    else
-        sond_seadrive_hydrate_async(full_path);
+    full_paths = g_ptr_array_new();
+    g_ptr_array_add(full_paths, (gpointer) full_path);
 
-    return FALSE;
+    result = sond_seadrive_ensure_hydrated_multi(parent, full_paths);
+
+    g_ptr_array_free(full_paths, TRUE);
+
+    return result;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1503,9 +1349,8 @@ typedef struct {
     guint      timeout_id;
 } HydrateProgressUiMulti;
 
-/* Analog hydrate_progress_update() oben, aber auf einen Eintrag einer
- * HydrateProgressUiMulti angewandt statt auf die einzige Datei einer
- * HydrateProgressUi. */
+/* Ermittelt per CfGetPlaceholderInfo() den Hydrierungs-Fortschritt eines
+ * einzelnen Eintrags (Datei) und aktualisiert dessen Fortschrittsbalken. */
 static void hydrate_progress_entry_update(HydrateProgressEntryMulti *entry)
 {
     wchar_t *lp;
@@ -1969,7 +1814,7 @@ static gint seadrive_pin_foreach(SondTreeview *stv, GtkTreeIter *iter,
  * noch vom Hauptmenü (win.sd-*-all, headerbar.c) aus erreichbar - die
  * Aktion betraf schon immer die Projekt-Wurzel unabhängig von Selektion/
  * Rechtsklick-Ziel und gehörte damit eigentlich nie in ein Kontextmenü,
- * s. sond_treeviewfm_seadrive.h. */
+ * s. sond_seadrive.h. */
 void sond_treeviewfm_seadrive_pin_root(SondTreeviewFM *stvfm, guint pin_state)
 {
     const gchar *root = sond_treeviewfm_get_root(stvfm);
@@ -2061,7 +1906,7 @@ void sond_treeviewfm_seadrive_init_contextmenu(SondTreeviewFM *stvfm)
      * unabhängig von Selektion/Rechtsklick-Ziel) gibt es seit 11.09.2026
      * nur noch im Hauptmenü (win.sd-*-all, headerbar.c) - hier im
      * Kontextmenü bewusst nur noch "Auswahl", s. sond_treeviewfm.c
-     * (add_base_menu) und sond_treeviewfm_seadrive.h. */
+     * (add_base_menu) und sond_seadrive.h. */
     struct { const gchar *name; guint pin_state; } actions[] = {
         { "sd-pin-sel",     STVFM_PIN_STATE_PINNED      },
         { "sd-unspec-sel",  STVFM_PIN_STATE_UNSPECIFIED },
@@ -2096,6 +1941,680 @@ void sond_treeviewfm_seadrive_set_contextmenu_sensitive(SondTreeviewFM *stvfm,
         if (a)
             g_simple_action_set_enabled(G_SIMPLE_ACTION(a), sensitive);
     }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Verschoben aus sond_treeviewfm.c (Refactoring 18.09.2026, "in       */
+/*  _treeviewfm.c sind auch Funktionen, die in sond_treeviewfm_seadrive */
+/*  gehören") - Zugriff auf SondTreeviewFMPrivate/SondTVFMItemPrivate   */
+/*  über die Freund-Accessoren sond_treeviewfm_get_priv()/              */
+/*  sond_tvfm_item_get_priv() aus sond_treeviewfm_private.h.            */
+/* ------------------------------------------------------------------ */
+
+void
+sond_treeviewfm_seadrive_dir_delta(SondTreeviewFM *stvfm,
+		const gchar *dir_path, gint delta_not_hydrated,
+		gint delta_hydrated_pinned, gint delta_total) {
+	SondTreeviewFMPrivate *p = NULL;
+	SondSeadriveDirCounts *counts = NULL;
+
+	if (!stvfm || !dir_path || (delta_not_hydrated == 0 &&
+			delta_hydrated_pinned == 0 && delta_total == 0))
+		return;
+
+	p = sond_treeviewfm_get_priv(stvfm);
+
+	if (!p->seadrive_dir_counts)
+		p->seadrive_dir_counts = g_hash_table_new_full(
+				g_str_hash, g_str_equal, g_free, g_free);
+
+	counts = g_hash_table_lookup(p->seadrive_dir_counts, dir_path);
+	if (!counts) {
+		counts = g_new0(SondSeadriveDirCounts, 1);
+		g_hash_table_insert(p->seadrive_dir_counts, g_strdup(dir_path), counts);
+	}
+
+	/* Negative Deltas bei 0 kappen statt umlaufen zu lassen (guint!) -
+	 * Schutz gegen Drift durch verpasste/doppelte Events, analog den
+	 * Guards bei seadrive_pending_down/-up. */
+	if (delta_not_hydrated < 0 && (guint) -delta_not_hydrated > counts->not_hydrated)
+		counts->not_hydrated = 0;
+	else
+		counts->not_hydrated += delta_not_hydrated;
+
+	if (delta_hydrated_pinned < 0 && (guint) -delta_hydrated_pinned > counts->hydrated_pinned)
+		counts->hydrated_pinned = 0;
+	else
+		counts->hydrated_pinned += delta_hydrated_pinned;
+
+	if (delta_total < 0 && (guint) -delta_total > counts->total)
+		counts->total = 0;
+	else
+		counts->total += delta_total;
+
+	gtk_widget_queue_draw(GTK_WIDGET(stvfm));
+}
+
+void
+sond_treeviewfm_seadrive_update_dir_coverage(SondTreeviewFM *stvfm,
+		const gchar *file_full_path, gint delta_not_hydrated,
+		gint delta_hydrated_pinned, gint delta_total) {
+	const gchar *root = NULL;
+	gchar *dir = NULL;
+	gchar *slash = NULL;
+
+	if (!file_full_path || (delta_not_hydrated == 0 &&
+			delta_hydrated_pinned == 0 && delta_total == 0))
+		return;
+
+	root = sond_treeviewfm_get_root(stvfm);
+	if (!root)
+		return;
+
+	dir = g_strdup(file_full_path);
+
+	for (;;) {
+		slash = strrchr(dir, '/');
+		if (!slash)
+			break;
+		*slash = '\0';
+
+		sond_treeviewfm_seadrive_dir_delta(stvfm, dir, delta_not_hydrated,
+				delta_hydrated_pinned, delta_total);
+
+		if (!g_strcmp0(dir, root))
+			break; /* root selbst mit erledigt - keine Vorfahren mehr darüber */
+	}
+
+	g_free(dir);
+}
+
+void
+sond_treeviewfm_seadrive_update_status(SondTreeviewFM *stvfm,
+		const gchar *path_pending_down, gint delta_down,
+		const gchar *path_up, gboolean up_pending) {
+	gboolean changed = FALSE;
+	SondTreeviewFMPrivate *p = sond_treeviewfm_get_priv(stvfm);
+
+	if (delta_down > 0 && path_pending_down) {
+		if (!p->seadrive_pending_down_paths)
+			p->seadrive_pending_down_paths = g_hash_table_new_full(
+					g_str_hash, g_str_equal, g_free, NULL);
+		if (g_hash_table_add(p->seadrive_pending_down_paths,
+				g_strdup(path_pending_down))) {
+			p->seadrive_pending_down++;
+			changed = TRUE;
+		}
+	} else if (delta_down < 0 && path_pending_down) {
+		if (p->seadrive_pending_down_paths &&
+				g_hash_table_remove(p->seadrive_pending_down_paths,
+						path_pending_down)) {
+			p->seadrive_pending_down--;
+			changed = TRUE;
+		}
+	}
+
+	if (path_up) {
+		if (!p->seadrive_not_in_sync)
+			p->seadrive_not_in_sync = g_hash_table_new_full(
+					g_str_hash, g_str_equal, g_free, NULL);
+		if (up_pending) {
+			if (g_hash_table_add(p->seadrive_not_in_sync, g_strdup(path_up)))
+				p->seadrive_pending_up++;
+		} else {
+			if (g_hash_table_remove(p->seadrive_not_in_sync, path_up))
+				p->seadrive_pending_up--;
+		}
+		changed = TRUE;
+	}
+
+	if (changed) {
+		gtk_widget_queue_draw(GTK_WIDGET(stvfm));
+		g_signal_emit(stvfm,
+				SOND_TREEVIEWFM_GET_CLASS(stvfm)->signal_seadrive_status, 0,
+				p->seadrive_pending_down,
+				p->seadrive_pending_up);
+	}
+}
+
+void
+sond_treeviewfm_seadrive_set_pending_down_paths(SondTreeviewFM *stvfm,
+		GHashTable *paths) {
+	SondTreeviewFMPrivate *p = sond_treeviewfm_get_priv(stvfm);
+
+	if (p->seadrive_pending_down_paths)
+		g_hash_table_destroy(p->seadrive_pending_down_paths);
+	p->seadrive_pending_down_paths = paths;
+	p->seadrive_pending_down = paths ? g_hash_table_size(paths) : 0;
+
+	gtk_widget_queue_draw(GTK_WIDGET(stvfm));
+	g_signal_emit(stvfm,
+			SOND_TREEVIEWFM_GET_CLASS(stvfm)->signal_seadrive_status, 0,
+			p->seadrive_pending_down,
+			p->seadrive_pending_up);
+}
+
+void
+sond_treeviewfm_seadrive_set_dir_counts(SondTreeviewFM *stvfm,
+		GHashTable *dir_counts) {
+	SondTreeviewFMPrivate *p = sond_treeviewfm_get_priv(stvfm);
+
+	if (p->seadrive_dir_counts)
+		g_hash_table_destroy(p->seadrive_dir_counts);
+	p->seadrive_dir_counts = dir_counts;
+
+	gtk_widget_queue_draw(GTK_WIDGET(stvfm));
+}
+
+void
+sond_treeviewfm_seadrive_set_file_badges(SondTreeviewFM *stvfm,
+		GHashTable *badges) {
+	SondTreeviewFMPrivate *p = sond_treeviewfm_get_priv(stvfm);
+
+	if (p->seadrive_file_badges)
+		g_hash_table_destroy(p->seadrive_file_badges);
+	p->seadrive_file_badges = badges;
+
+	gtk_widget_queue_draw(GTK_WIDGET(stvfm));
+	g_signal_emit(stvfm,
+			SOND_TREEVIEWFM_GET_CLASS(stvfm)->signal_seadrive_status, 0,
+			p->seadrive_pending_down,
+			p->seadrive_pending_up);
+}
+
+SondSeadriveBadge
+sond_treeviewfm_seadrive_get_file_badge(SondTreeviewFM *stvfm,
+		const gchar *file_full_path) {
+	SondTreeviewFMPrivate *p = NULL;
+	gpointer val = NULL;
+
+	if (!stvfm || !file_full_path)
+		return SOND_SEADRIVE_BADGE_NONE;
+
+	p = sond_treeviewfm_get_priv(stvfm);
+	if (!p->seadrive_file_badges)
+		return SOND_SEADRIVE_BADGE_NONE;
+
+	if (!g_hash_table_lookup_extended(p->seadrive_file_badges, file_full_path,
+			NULL, &val))
+		return SOND_SEADRIVE_BADGE_NONE;
+
+	return (SondSeadriveBadge) GPOINTER_TO_INT(val);
+}
+
+/* Leitet aus einem SondSeadriveBadge-Wert ab, ob die Datei für die Ordner-
+ * Coverage-Statistik als "nicht hydriert" bzw. "hydriert+gepinnt" zählt -
+ * einzige Stelle, an der diese Zuordnung getroffen wird (Konsistenz
+ * zwischen Scan und Live-Update, s. watcher_count_pending_down() in
+ * sond_treeviewfm_seadrive.c, die dieselbe Logik redundant, aber
+ * gleichlautend anwendet). */
+static void
+seadrive_badge_to_coverage(SondSeadriveBadge badge,
+		gboolean *out_not_hydrated, gboolean *out_hydrated_pinned) {
+	*out_not_hydrated = (badge == SOND_SEADRIVE_BADGE_OFFLINE ||
+			badge == SOND_SEADRIVE_BADGE_PENDING);
+	*out_hydrated_pinned = (badge == SOND_SEADRIVE_BADGE_PINNED);
+}
+
+void
+sond_treeviewfm_seadrive_update_file_badge(SondTreeviewFM *stvfm,
+		const gchar *file_full_path, SondSeadriveBadge new_badge,
+		gint delta_total) {
+	SondTreeviewFMPrivate *p = NULL;
+	SondSeadriveBadge old_badge = SOND_SEADRIVE_BADGE_NONE;
+	gpointer old_val = NULL;
+	gboolean old_not_hydrated = FALSE, old_hydrated_pinned = FALSE;
+	gboolean new_not_hydrated = FALSE, new_hydrated_pinned = FALSE;
+	gint delta_not_hydrated = 0, delta_hydrated_pinned = 0;
+
+	if (!stvfm || !file_full_path)
+		return;
+
+	p = sond_treeviewfm_get_priv(stvfm);
+
+	if (p->seadrive_file_badges &&
+			g_hash_table_lookup_extended(p->seadrive_file_badges,
+					file_full_path, NULL, &old_val))
+		old_badge = (SondSeadriveBadge) GPOINTER_TO_INT(old_val);
+
+	if (old_badge != new_badge) {
+		seadrive_badge_to_coverage(old_badge, &old_not_hydrated,
+				&old_hydrated_pinned);
+		seadrive_badge_to_coverage(new_badge, &new_not_hydrated,
+				&new_hydrated_pinned);
+		delta_not_hydrated = (gint) new_not_hydrated - (gint) old_not_hydrated;
+		delta_hydrated_pinned = (gint) new_hydrated_pinned -
+				(gint) old_hydrated_pinned;
+
+		if (new_badge == SOND_SEADRIVE_BADGE_NONE) {
+			if (p->seadrive_file_badges)
+				g_hash_table_remove(p->seadrive_file_badges, file_full_path);
+		} else {
+			if (!p->seadrive_file_badges)
+				p->seadrive_file_badges = g_hash_table_new_full(
+						g_str_hash, g_str_equal, g_free, NULL);
+			g_hash_table_insert(p->seadrive_file_badges,
+					g_strdup(file_full_path), GINT_TO_POINTER(new_badge));
+		}
+
+		gtk_widget_queue_draw(GTK_WIDGET(stvfm));
+		g_signal_emit(stvfm,
+				SOND_TREEVIEWFM_GET_CLASS(stvfm)->signal_seadrive_status, 0,
+				p->seadrive_pending_down,
+				p->seadrive_pending_up);
+	}
+
+	if (delta_not_hydrated != 0 || delta_hydrated_pinned != 0 ||
+			delta_total != 0)
+		sond_treeviewfm_seadrive_update_dir_coverage(stvfm, file_full_path,
+				delta_not_hydrated, delta_hydrated_pinned, delta_total);
+}
+
+SondSeadriveDirStatus
+sond_treeviewfm_seadrive_get_dir_status(SondTreeviewFM *stvfm,
+		const gchar *dir_path) {
+	SondTreeviewFMPrivate *p = NULL;
+	SondSeadriveDirCounts *counts = NULL;
+
+	if (!stvfm || !dir_path)
+		return SOND_SEADRIVE_DIR_STATUS_NONE;
+
+	p = sond_treeviewfm_get_priv(stvfm);
+	if (!p->seadrive_dir_counts)
+		return SOND_SEADRIVE_DIR_STATUS_NONE;
+
+	counts = g_hash_table_lookup(p->seadrive_dir_counts, dir_path);
+	if (!counts || counts->total == 0)
+		return SOND_SEADRIVE_DIR_STATUS_NONE;
+
+	if (counts->not_hydrated == counts->total)
+		return SOND_SEADRIVE_DIR_STATUS_FULL_OFFLINE;
+
+	if (counts->not_hydrated == 0) {
+		/* alle Dateien hydriert */
+		if (counts->hydrated_pinned == counts->total)
+			return SOND_SEADRIVE_DIR_STATUS_FULL_HYDRATED_PINNED;
+		/* hydriert, aber nicht alle gepinnt - dieselbe "kein Icon
+		 * nötig"-Bedeutung wie beim Datei-Badge */
+		return SOND_SEADRIVE_DIR_STATUS_NONE;
+	}
+
+	/* 0 < not_hydrated < total - weder komplett hydriert noch komplett
+	 * offline, kein gemeinsamer Nenner */
+	return SOND_SEADRIVE_DIR_STATUS_MIXED;
+}
+
+void
+sond_treeviewfm_seadrive_item_hydrated(SondTreeviewFM *stvfm,
+		const gchar *full_path) {
+	GtkTreeIter iter = { 0 };
+	SondTVFMItem *stvfm_item = NULL;
+	SondTVFMItemPrivate *stvfm_item_priv = NULL;
+	SondFilePart *sfp_old = NULL;
+	SondFilePart *sfp_new = NULL;
+	const gchar *rel_path = NULL;
+	int rc = 0;
+	SondTVFMItemType type = 0;
+
+	const gchar *root = sond_treeviewfm_get_root(stvfm);
+	if (!root || !full_path)
+		return;
+
+	/* relativen Pfad ermitteln */
+	gsize root_len = strlen(root);
+	if (!g_str_has_prefix(full_path, root))
+		return;
+	rel_path = full_path + root_len;
+	if (*rel_path == '/' || *rel_path == '\\')
+		rel_path++;
+	if (!*rel_path)
+		return;
+
+	/* Knoten im sichtbaren Baum suchen - nicht expandieren */
+	rc = sond_treeviewfm_file_part_visible(stvfm, NULL, rel_path, FALSE,
+			&iter, NULL);
+	if (rc != 1)
+		return; /* nicht sichtbar - wird beim nächsten Expandieren korrekt geladen */
+
+	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)),
+			&iter, 0, &stvfm_item, -1);
+	if (!stvfm_item)
+		return;
+
+	stvfm_item_priv = sond_tvfm_item_get_priv(stvfm_item);
+	sfp_old = stvfm_item_priv->sond_file_part;
+	type = stvfm_item_priv->type;
+	g_object_unref(stvfm_item);
+
+	/* Nur korrigieren wenn Item als einfaches LEAF geladen wurde
+	 * (d.h. es war offline beim Laden und wurde nicht auf Kinder geprüft) */
+	if (type != SOND_TVFM_ITEM_TYPE_LEAF ||
+			!SOND_IS_FILE_PART_LEAF(sfp_old))
+		return;
+
+	/* Altes sfp aus arr_opened_files entfernen damit sond_file_part_create
+	 * nicht das alte LEAF zurückgibt anstatt ein neues PDF/ZIP/GMessage zu erstellen */
+	GPtrArray *arr = sond_file_part_get_arr_opened_files(
+			sond_file_part_get_parent(sfp_old));
+	if (arr)
+		g_ptr_array_remove_fast(arr, sfp_old);
+
+	/* Neues sfp mit korrektem Typ erstellen */
+	GError* error = NULL;
+	sfp_new = sond_file_part_create(sond_file_part_get_parent(sfp_old),
+			rel_path, &error);
+
+	if (!sfp_new) {
+		LOG_WARN("SondFilePart kann nicht geöffnet werden:\n%s",
+				error->message);
+		g_error_free(error);
+
+		return;
+	}
+
+	/* Altes Item im Baum durch neues ersetzen */
+	SondTVFMItem *stvfm_item_new = sond_tvfm_item_create(stvfm, sfp_new, NULL);
+	g_object_unref(sfp_new);
+
+	gtk_tree_store_set(
+			GTK_TREE_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm))),
+			&iter, 0, stvfm_item_new, -1);
+
+	SondTVFMItemPrivate *new_priv =
+			sond_tvfm_item_get_priv(stvfm_item_new);
+
+	/* Falls jetzt Kinder möglich: Dummy-Kind einfügen */
+	if (new_priv->has_children) {
+		GtkTreeIter iter_dummy = { 0 };
+		gtk_tree_store_insert(GTK_TREE_STORE(
+				gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm))),
+				&iter_dummy, &iter, -1);
+	}
+
+	g_object_unref(stvfm_item_new);
+
+	gtk_widget_queue_draw(GTK_WIDGET(stvfm));
+}
+
+void
+sond_treeviewfm_seadrive_item_dehydrated(SondTreeviewFM *stvfm,
+		const gchar *full_path) {
+	GtkTreeIter iter = { 0 };
+	SondTVFMItem *stvfm_item = NULL;
+	SondTVFMItemPrivate *stvfm_item_priv = NULL;
+	SondFilePart *sfp_old = NULL;
+	const gchar *rel_path = NULL;
+	int rc = 0;
+
+	const gchar *root = sond_treeviewfm_get_root(stvfm);
+	if (!root || !full_path)
+		return;
+
+	/* relativen Pfad ermitteln */
+	gsize root_len = strlen(root);
+	if (!g_str_has_prefix(full_path, root))
+		return;
+	rel_path = full_path + root_len;
+	if (*rel_path == '/' || *rel_path == '\\')
+		rel_path++;
+	if (!*rel_path)
+		return;
+
+	/* Knoten im sichtbaren Baum suchen - nicht expandieren */
+	rc = sond_treeviewfm_file_part_visible(stvfm, NULL, rel_path, FALSE,
+			&iter, NULL);
+	if (rc != 1)
+		return; /* nicht sichtbar */
+
+	gtk_tree_model_get(gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)),
+			&iter, 0, &stvfm_item, -1);
+	if (!stvfm_item)
+		return;
+
+	stvfm_item_priv = sond_tvfm_item_get_priv(stvfm_item);
+	sfp_old = stvfm_item_priv->sond_file_part;
+	g_object_unref(stvfm_item);
+
+	/* Nur korrigieren wenn Item ein durch Hydration entstandenes DIR ist:
+	 * GMessage oder ZIP als sfp, kein path_or_section (= Datei selbst, nicht Unterknoten) */
+	if (stvfm_item_priv->type != SOND_TVFM_ITEM_TYPE_DIR ||
+			!sfp_old ||
+			stvfm_item_priv->path_or_section ||
+			(!SOND_IS_FILE_PART_GMESSAGE(sfp_old) &&
+			 !SOND_IS_FILE_PART_ZIP(sfp_old) &&
+			 !SOND_IS_FILE_PART_PDF(sfp_old)))
+		return;
+
+	/* Altes sfp zuerst aus arr_opened_files entfernen - VOR create_leaf,
+	 * damit nicht das alte sfp zurückgegeben wird */
+	{
+		GPtrArray *arr = sond_file_part_get_arr_opened_files(
+				sond_file_part_get_parent(sfp_old));
+		if (arr)
+			g_ptr_array_remove_fast(arr, sfp_old);
+	}
+
+	/* MIME-Typ aus Extension ermitteln - Datei ist jetzt offline */
+	const gchar *mime_type = mime_from_extension(rel_path);
+	if (!mime_type)
+		mime_type = "application/octet-stream";
+
+	/* Neues LEAF-sfp erstellen */
+	SondFilePart *sfp_new = sond_file_part_create_leaf(
+			rel_path,
+			sond_file_part_get_parent(sfp_old),
+			mime_type);
+	if (!sfp_new)
+		return;
+
+	/* Alle Kinder aus dem Baum entfernen */
+	{
+		GtkTreeIter iter_child = { 0 };
+		gboolean has_child = gtk_tree_model_iter_children(
+				gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm)), &iter_child, &iter);
+		while (has_child)
+			has_child = gtk_tree_store_remove(
+					GTK_TREE_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm))),
+					&iter_child);
+	}
+
+	/* Neues LEAF-Item erstellen und im Baum ersetzen */
+	SondTVFMItem *stvfm_item_new = sond_tvfm_item_create(stvfm, sfp_new, NULL);
+	g_object_unref(sfp_new);
+
+	gtk_tree_store_set(
+			GTK_TREE_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(stvfm))),
+			&iter, 0, stvfm_item_new, -1);
+
+	g_object_unref(stvfm_item_new);
+
+	gtk_widget_queue_draw(GTK_WIDGET(stvfm));
+}
+
+gboolean
+sond_treeviewfm_seadrive_stop_requested(SondTreeviewFM *stvfm) {
+	SondTreeviewFMPrivate *p = sond_treeviewfm_get_priv(stvfm);
+	return g_atomic_int_get(&p->seadrive_watcher_stop) != 0;
+}
+
+void
+sond_treeviewfm_seadrive_start_watcher(SondTreeviewFM *stvfm) {
+	SondTreeviewFMPrivate *p = sond_treeviewfm_get_priv(stvfm);
+	if (p->seadrive_watcher_thread)
+		return;
+	g_atomic_int_set(&p->seadrive_watcher_stop, 0);
+	p->seadrive_watcher_thread = g_thread_new(
+			"seadrive-watcher",
+			sond_treeviewfm_seadrive_watcher_thread,
+			stvfm);
+}
+
+/* Nutzer-Fund 18.09.2026: "Schließen des Projekts bei SeaDrive-Projekten
+ * dauert sehr lange (20 Sek.)". Das synchrone g_thread_join() in
+ * sond_treeviewfm_seadrive_stop_watcher() blockierte den GTK-Hauptthread
+ * (project_close() -> sond_treeviewfm_set_root(NULL) -> hier), bis der
+ * Watcher-Thread sein CloseHandle() auf das ReadDirectoryChangesW-
+ * Verzeichnis-Handle abgeschlossen hatte. Offenbar braucht SeaDrives
+ * Cloud-Filtertreiber dafür regelmäßig um die 20 Sekunden (vermutlich ein
+ * interner Timeout), um die dort noch ausstehende, per CancelIo() nur
+ * ANGESTOSSENE (nicht sofort abgeschlossene) Directory-Change-
+ * Notification wirklich abzubrechen - CloseHandle() wartet laut Windows-
+ * I/O-Modell auf den Abschluss ausstehender I/O, bevor das Handle
+ * wirklich freigegeben wird.
+ *
+ * Der Watcher-Thread fasst nach dem Setzen des Stop-Flags (s. sond_
+ * treeviewfm_seadrive_watcher_thread(), Schleifenende) keinerlei stvfm-
+ * Daten mehr an - nur noch CancelIo()/CloseHandle()/g_free() auf seine
+ * eigenen, rein lokalen Handles/Kopien (hDir, ov.hEvent, root). Das
+ * Warten auf sein Ende kann deshalb GEFAHRLOS in einen eigenen
+ * kurzlebigen "Reaper"-Thread verlagert werden, SOLANGE das stvfm-Objekt
+ * selbst währenddessen am Leben bleibt - das gilt für den Aufruf aus
+ * sond_treeviewfm_set_root() (Projekt schließen/wechseln: das BAUM_FS-
+ * Widget bleibt über die Projekt-Lebensdauer hinaus bestehen), NICHT
+ * aber für den Aufruf aus sond_treeviewfm_finalize(): dort wird direkt im
+ * Anschluss der private Instanz-Speicher freigegeben, ein im Hintergrund
+ * noch laufender Watcher-Thread könnte dann via sond_treeviewfm_seadrive_
+ * stop_requested(stvfm) auf bereits freigegebenen Speicher zugreifen
+ * (Use-after-free). Deshalb zwei Varianten: die synchrone (unverändert,
+ * für finalize()) und eine neue asynchrone (für set_root()). */
+static gpointer seadrive_watcher_reap(gpointer data) {
+	GThread *old_thread = (GThread*) data;
+
+	g_thread_join(old_thread);
+
+	return NULL;
+}
+
+void
+sond_treeviewfm_seadrive_stop_watcher(SondTreeviewFM *stvfm) {
+	SondTreeviewFMPrivate *p = sond_treeviewfm_get_priv(stvfm);
+	if (!p->seadrive_watcher_thread)
+		return;
+	g_atomic_int_set(&p->seadrive_watcher_stop, 1);
+	g_thread_join(p->seadrive_watcher_thread);
+	p->seadrive_watcher_thread = NULL;
+}
+
+/* Wie sond_treeviewfm_seadrive_stop_watcher(), wartet aber NICHT im
+ * aufrufenden Thread auf das Thread-Ende, s. ausführlichen Kommentar
+ * oben. Nur verwenden, wenn stvfm selbst danach am Leben bleibt (aktuell:
+ * sond_treeviewfm_set_root()). */
+void
+sond_treeviewfm_seadrive_stop_watcher_async(SondTreeviewFM *stvfm) {
+	SondTreeviewFMPrivate *p = sond_treeviewfm_get_priv(stvfm);
+	GThread *old_thread = NULL;
+
+	if (!p->seadrive_watcher_thread)
+		return;
+
+	g_atomic_int_set(&p->seadrive_watcher_stop, 1);
+
+	/* Schon hier (nicht erst nach dem Join) auf NULL setzen, damit
+	 * sond_treeviewfm_seadrive_start_watcher() bei einem sofort
+	 * folgenden Öffnen eines neuen Projekts nicht fälschlich "läuft
+	 * schon" annimmt. */
+	old_thread = p->seadrive_watcher_thread;
+	p->seadrive_watcher_thread = NULL;
+
+	/* g_thread_unref() statt g_thread_join() auf den Reaper selbst -
+	 * dokumentiertes GLib-Muster für "fire and forget"-Threads, deren
+	 * Ergebnis niemanden interessiert. */
+	g_thread_unref(g_thread_new("seadrive-watcher-reaper",
+			seadrive_watcher_reap, old_thread));
+}
+
+/* Container für die vier SeaDrive-Ground-Truth-Hashtables, deren
+ * Zerstörung von sond_treeviewfm_set_root() (über sond_seadrive_reset_
+ * ground_truth()) in den Hintergrund verlagert wird. Alle vier enthalten
+ * ausschließlich Strings/Zahlen ohne Rückverweis auf ein stvfm-Objekt,
+ * ihre Zerstörung ist deshalb von einem beliebigen Thread aus und zu
+ * einem beliebigen späteren Zeitpunkt sicher. */
+typedef struct {
+	GHashTable *not_in_sync;
+	GHashTable *pending_down_paths;
+	GHashTable *dir_counts;
+	GHashTable *file_badges;
+} SeadriveOldTables;
+
+static gpointer seadrive_old_tables_reap(gpointer data) {
+	SeadriveOldTables *old = data;
+
+	if (old->not_in_sync)
+		g_hash_table_destroy(old->not_in_sync);
+	if (old->pending_down_paths)
+		g_hash_table_destroy(old->pending_down_paths);
+	if (old->dir_counts)
+		g_hash_table_destroy(old->dir_counts);
+	if (old->file_badges)
+		g_hash_table_destroy(old->file_badges);
+
+	g_free(old);
+
+	return NULL;
+}
+
+/* Setzt die vier SeaDrive-Ground-Truth-Hashtables auf leer zurück und
+ * emittiert das Status-Signal mit (0, 0) - aufgerufen von
+ * sond_treeviewfm_set_root() bei Projekt-Wechsel/-Schließen. Verschoben
+ * aus sond_treeviewfm.c (Refactoring 18.09.2026, "in _treeviewfm.c sind
+ * auch Funktionen, die in sond_treeviewfm_seadrive gehören") - vormals
+ * SeadriveOldTables/seadrive_old_tables_reap() plus ein Inline-Block in
+ * sond_treeviewfm_set_root() selbst.
+ *
+ * Nutzer-Fund 18.09.2026 (Folgefund - der erste Verdacht, der Watcher-
+ * Thread-Join, war laut Call-Stack-Analyse per Eclipse/gdb-Suspend NICHT
+ * die Ursache): der Stack zeigte den Hänger exakt HIER, in
+ * g_hash_table_remove_all() auf seadrive_file_badges. Bei einem großen
+ * SeaDrive-Projekt hat praktisch jede noch nicht heruntergeladene
+ * (OFFLINE-)Datei einen eigenen Eintrag in dieser Tabelle - bei vielen
+ * Zehn- oder Hunderttausend Dateien im Projekt entsprechend viele
+ * Einträge, die remove_all() einzeln (mit je einem g_free() auf den Key-
+ * String) synchron im GTK-Hauptthread abarbeiten musste. Betraf im
+ * Prinzip auch die drei anderen SeaDrive-Hashtables hier, nur mit
+ * typischerweise deutlich weniger Einträgen.
+ *
+ * Fix: die alten Tabellen werden hier nur noch aus stvfm_priv
+ * "gestohlen" (Felder sofort auf NULL gesetzt, ein nachfolgender Zugriff
+ * sieht also sofort "leer") und ihre komplette Zerstörung
+ * (g_hash_table_destroy()) an einen kurzlebigen Hintergrund-Thread
+ * abgegeben, analog zum Watcher-Reaper bei sond_treeviewfm_seadrive_
+ * stop_watcher_async(). Die Tabellen enthalten ausschließlich
+ * Strings/Zahlen ohne Rückverweis auf stvfm, ihre Zerstörung ist deshalb
+ * unabhängig vom weiteren Leben des stvfm-Objekts sicher. */
+void
+sond_seadrive_reset_ground_truth(SondTreeviewFM *stvfm) {
+	SondTreeviewFMPrivate *stvfm_priv = NULL;
+
+	if (!stvfm)
+		return;
+
+	stvfm_priv = sond_treeviewfm_get_priv(stvfm);
+
+	stvfm_priv->seadrive_pending_down = 0;
+	stvfm_priv->seadrive_pending_up = 0;
+	{
+		SeadriveOldTables *old = g_new0(SeadriveOldTables, 1);
+
+		old->not_in_sync = stvfm_priv->seadrive_not_in_sync;
+		old->pending_down_paths = stvfm_priv->seadrive_pending_down_paths;
+		old->dir_counts = stvfm_priv->seadrive_dir_counts;
+		old->file_badges = stvfm_priv->seadrive_file_badges;
+
+		stvfm_priv->seadrive_not_in_sync = NULL;
+		stvfm_priv->seadrive_pending_down_paths = NULL;
+		stvfm_priv->seadrive_dir_counts = NULL;
+		stvfm_priv->seadrive_file_badges = NULL;
+
+		if (old->not_in_sync || old->pending_down_paths || old->dir_counts ||
+				old->file_badges)
+			g_thread_unref(g_thread_new("seadrive-tables-reaper",
+					seadrive_old_tables_reap, old));
+		else
+			g_free(old);
+	}
+	g_signal_emit(stvfm,
+			SOND_TREEVIEWFM_GET_CLASS(stvfm)->signal_seadrive_status, 0,
+			(guint)0, (guint)0);
 }
 
 #endif /* _WIN32 */

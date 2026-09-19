@@ -6,7 +6,6 @@
 #include <gtk/gtk.h>
 
 #include "sond_treeview.h"
-#include "sond_icon_util.h" /* SondSeadriveDirStatus */
 /* SondIndexCtx, SondIndexStatus - für SondTreeviewFMClass::
  * get_section_index_status() (Nutzer-Vorschlag 16.09.2026: die vfunc
  * liefert direkt einen SondIndexStatus statt zweier Ints, die die
@@ -14,27 +13,14 @@
  * dortigen Doc-Kommentar). Keine zirkuläre Abhängigkeit: sond_index.h
  * inkludiert nur glib/sqlite3/mupdf. */
 #include "sond_index.h"
+/* SondTVFMItem - Refactoring 18.09.2026, s. dortigen Kommentar. MUSS vor
+ * der SondTreeviewFMClass-Deklaration stehen, deren vfuncs SondTVFMItem*
+ * verwenden. */
+#include "sond_tvfm_item.h"
 
-typedef struct _SondFilePart SondFilePart;
 typedef struct _SondProcessFileCtx SondProcessFileCtx;
 
 G_BEGIN_DECLS
-
-typedef enum {
-	SOND_TVFM_ITEM_TYPE_DIR, //Verzeichnis
-	SOND_TVFM_ITEM_TYPE_LEAF, //SondFilePart
-	SOND_TVFM_ITEM_TYPE_LEAF_SECTION //Teil von Datei
-} SondTVFMItemType;
-
-//Sond_TVFM_ITEM definieren - lokales GObject-Derivat
-#define SOND_TYPE_TVFM_ITEM sond_tvfm_item_get_type( )
-G_DECLARE_DERIVABLE_TYPE(SondTVFMItem, sond_tvfm_item, SOND, TVFM_ITEM, GObject)
-
-struct _SondTVFMItemClass {
-	GObjectClass parent_class;
-
-	gint (*load_sections)(SondTVFMItem*, GPtrArray**, GError**);
-};
 
 #define SOND_TYPE_TREEVIEWFM sond_treeviewfm_get_type( )
 G_DECLARE_DERIVABLE_TYPE(SondTreeviewFM, sond_treeviewfm, SOND, TREEVIEWFM, SondTreeview)
@@ -94,54 +80,6 @@ struct _SondTreeviewFMClass {
  * nachdem sie ein eigenes GMenu angelegt haben. */
 void sond_treeviewfm_add_base_menu(GMenu *gmenu);
 
-SondTVFMItemType sond_tvfm_item_get_item_type(SondTVFMItem*);
-
-gchar const* sond_tvfm_item_get_path_or_section(SondTVFMItem *);
-
-gchar const* sond_tvfm_item_get_display_name(SondTVFMItem*);
-
-SondFilePart* sond_tvfm_item_get_sond_file_part(SondTVFMItem*);
-
-SondTreeviewFM* sond_tvfm_item_get_stvfm(SondTVFMItem *);
-
-void sond_tvfm_item_set_icon_name(SondTVFMItem*, gchar const*);
-
-gchar const* sond_tvfm_item_get_icon_name(SondTVFMItem*);
-
-SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM*,
-		SondFilePart *, gchar const*);
-
-/* SondTVFMProgress:
- *
- * Optionaler Fortschritts-/Abbruch-Kontext für sond_tvfm_item_load_children()
- * (relevant v.a. für sond_tvfm_item_load_zip_dir() bei großen Archiven, wo
- * das Einlesen/MIME-Sniffen aller Einträge spürbar dauern kann - s.
- * ausführlichen Fund/Entwurf in ToDo.c, 16.09.2026).
- *
- * NULL als Parameter überall = altes Verhalten (kein Pumping, kein Abbruch
- * möglich) - alle bestehenden Aufrufer außer dem Anbinden-Pfad übergeben
- * weiterhin NULL.
- *
- * cancel: Zeiger auf ein außen gehaltenes Flag (z.B. info_window->cancel);
- *   wird periodisch geprüft. Ist *cancel != 0, wird das Laden weiterer
- *   Kinder abgebrochen - bereits geladene Kinder werden unverändert
- *   zurückgegeben (rc bleibt 0, kein Fehler), der Aufrufer bricht die
- *   Rekursion an seiner gewohnten Abbruch-Prüfstelle ab. Das ist hier
- *   unkritisch möglich, weil load_children rein lesend ist (im Unterschied
- *   zu SondProcessFileCtx, das auch schreibt und daher nur an sicheren
- *   Stellen abbrechen darf).
- * progress_func/progress_func_data: wird periodisch (nicht pro Eintrag)
- *   aufgerufen, z.B. um GTK-Events zu pumpen und/oder eine
- *   Fortschrittsanzeige zu aktualisieren. text kann NULL sein (dann nur
- *   pumpen, keine neue Anzeige). */
-typedef struct _SondTVFMProgress {
-	gint *cancel;
-	void (*progress_func)(gpointer progress_func_data, gchar const *text);
-	gpointer progress_func_data;
-} SondTVFMProgress;
-
-gint sond_tvfm_item_load_children(SondTVFMItem*, GPtrArray**, SondTVFMProgress*, GError**);
-
 gint sond_treeviewfm_file_part_visible(SondTreeviewFM*, GtkTreeIter*,
 		gchar const*, gboolean, GtkTreeIter*, GError**);
 
@@ -166,110 +104,6 @@ typedef SondIndexCtx* (*SondTreeviewFMIndexCtxFunc)(gpointer user_data);
 
 void sond_treeviewfm_set_index_ctx_func(SondTreeviewFM*,
 		SondTreeviewFMIndexCtxFunc func, gpointer user_data);
-
-#ifdef _WIN32
-/* Rekursive Ordner-Statistik für den SeaDrive-Coverage-Badge (Ordner-
- * Ebene), jeweils im GANZEN Teilbaum unter dem Ordner (rekursiv), nicht
- * nur direkte Kinder - Rendering bleibt dadurch O(1) pro Zeile. S.
- * sond_treeviewfm_seadrive_get_dir_status(). Bewusst UNABHÄNGIG von
- * seadrive_pending_down_paths/-pending_down (das bleibt die engere Frage
- * "wie viele gepinnte Dateien werden gerade heruntergeladen" für die
- * Projekt-weite Zähleranzeige) - hier geht es um die tatsächliche lokale
- * Verfügbarkeit (Redesign "SeaDrive-Badges Datei+Ordner", 09/2026,
- * nachdem die vorherige, auf "gepinnt+pending" basierende Definition
- * Ordner ohne jedes Pin fälschlich badge-los erscheinen ließ). */
-typedef struct {
-	guint not_hydrated;    /* Dateien im Teilbaum, die NICHT lokal vorhanden sind (unabhängig vom Pin-Status) */
-	guint hydrated_pinned; /* Dateien im Teilbaum, die lokal vorhanden UND gepinnt sind */
-	guint total;           /* Dateien insgesamt im Teilbaum */
-} SondSeadriveDirCounts;
-
-/* path_pending_down: Pfad, auf den sich delta_down bezieht (NULL, wenn
- * delta_down==0). delta_down>0: Pfad wird ins interne pending_down-Set
- * aufgenommen (Zähler nur erhöht, wenn er noch nicht drin war);
- * delta_down<0: Pfad wird aus dem Set entfernt (Zähler nur verringert,
- * wenn er tatsächlich drin war) - verhindert Drift bei doppelten/
- * verpassten Events (s. Untersuchung SeaDrive-Coverage, 09/2026). Betrifft
- * NUR den Projekt-weiten "wird gerade heruntergeladen"-Zähler
- * (seadrive_pending_down) - für den Ordner-Coverage-Badge s.
- * sond_treeviewfm_seadrive_update_dir_coverage(). */
-void     sond_treeviewfm_seadrive_update_status(SondTreeviewFM*,
-             const gchar *path_pending_down, gint delta_down,
-             const gchar *path_up, gboolean up_pending);
-/* Ersetzt das komplette pending_down-Set (Initialscan oder Resync nach
- * Buffer-Overflow) - transfer full, Ownership geht an stvfm über (String-
- * Set, Werte irrelevant). Zähler wird aus g_hash_table_size() abgeleitet. */
-void     sond_treeviewfm_seadrive_set_pending_down_paths(SondTreeviewFM*,
-             GHashTable *paths);
-/* Ersetzt die komplette Ordner-Statistik (Initialscan/Resync) - transfer
- * full (Pfad -> SondSeadriveDirCounts*), Ownership geht an stvfm über. */
-void     sond_treeviewfm_seadrive_set_dir_counts(SondTreeviewFM*,
-             GHashTable *dir_counts);
-/* Ersetzt die komplette Ground-Truth-Map für die Datei-Badges (Initialscan/
- * Resync) - transfer full, Ownership geht an stvfm über. Pfad ->
- * GINT_TO_POINTER(SondSeadriveBadge); Einträge mit Wert NONE werden nicht
- * gespeichert (ein Lookup-Fehlschlag bedeutet ohnehin NONE) - hält die Map
- * kleiner, da der Normalfall (hydriert, nicht gepinnt) die Mehrheit ist. */
-void     sond_treeviewfm_seadrive_set_file_badges(SondTreeviewFM*,
-             GHashTable *badges);
-/* Liefert den aktuellen, vom Scan/Watcher gepflegten Datei-Badge für
- * file_full_path (voller Pfad), oder NONE, wenn kein Eintrag existiert.
- * Ersetzt einen früheren LIVEN GetFileAttributesW-Aufruf pro Renderzeile
- * durch einen reinen O(1)-Hashtable-Lookup - der Watcher hält die Map
- * ohnehin schon aktuell (Untersuchung "Ordner-Badges", 09/2026: der
- * Ordner-Status nutzte das Muster schon, der Datei-Badge inkonsistenter-
- * weise noch nicht). Auch von anderen Bäumen nutzbar (z.B. ZondTreeview),
- * die auf dieselben Datei-Pfade verweisen - dafür stvfm auf die FS-Baum-
- * Instanz des Projekts (BAUM_FS) beziehen. */
-SondSeadriveBadge sond_treeviewfm_seadrive_get_file_badge(SondTreeviewFM*,
-             const gchar *file_full_path);
-/* Aktualisiert den Datei-Badge für GENAU eine Datei (Ground-Truth-Map
- * seadrive_file_badges verhindert Drift bei doppelten/verpassten Events,
- * analog seadrive_pending_down_paths) UND zieht daraus abgeleitet die
- * Ordner-Coverage-Statistik alle Vorfahren-Verzeichnisse hoch nach (s.
- * sond_treeviewfm_seadrive_update_dir_coverage()) - EIN Aufruf pro Datei-
- * Ereignis genügt, weil sich beides aus demselben new_badge-Wert ableitet
- * (PENDING/OFFLINE -> zählt als "nicht hydriert", PINNED -> zählt als
- * "hydriert+gepinnt", NONE -> keins von beidem). new_badge=NONE für eine
- * gelöschte Datei (existiert nicht mehr). delta_total: +1 (ADDED/RENAMED_
- * NEW_NAME) / -1 (REMOVED/RENAMED_OLD_NAME) / 0 (MODIFIED). */
-void     sond_treeviewfm_seadrive_update_file_badge(SondTreeviewFM*,
-             const gchar *file_full_path, SondSeadriveBadge new_badge,
-             gint delta_total);
-/* Passt die Ordner-Statistik für GENAU dir_path an (kein Ancestor-Walk -
- * das macht sond_treeviewfm_seadrive_update_dir_coverage() für eine Datei
- * automatisch). Legt den Eintrag bei Bedarf an; negative Deltas werden bei
- * 0 gekappt (Schutz gegen Drift durch verpasste/doppelte Events). */
-void     sond_treeviewfm_seadrive_dir_delta(SondTreeviewFM*,
-             const gchar *dir_path, gint delta_not_hydrated,
-             gint delta_hydrated_pinned, gint delta_total);
-/* Wendet die Deltas einer einzelnen Datei-Zustandsänderung (Hydrierung/
- * Pin/Neuanlage/Löschung) auf ALLE Vorfahren-Verzeichnisse von
- * file_full_path bis root an (Ordner-Badge bleibt dadurch laufend
- * aktuell, nicht nur nach einem Rescan). Bewusst von
- * sond_treeviewfm_seadrive_update_status() getrennt - andere Fragestellung
- * (s. SondSeadriveDirCounts). */
-void     sond_treeviewfm_seadrive_update_dir_coverage(SondTreeviewFM*,
-             const gchar *file_full_path, gint delta_not_hydrated,
-             gint delta_hydrated_pinned, gint delta_total);
-/* Liefert den aggregierten Hydrierungsstatus für dir_path (voller Pfad,
- * wie von watcher_count_pending_down() als Key verwendet), oder NONE,
- * wenn kein Eintrag existiert (z.B. Ordner erst nach dem letzten
- * Rescan angelegt), der Teilbaum leer ist, oder alle Dateien hydriert,
- * aber nicht alle gepinnt sind (dieselbe "kein Icon nötig"-Bedeutung wie
- * beim Datei-Badge, s. SondSeadriveDirStatus). */
-SondSeadriveDirStatus sond_treeviewfm_seadrive_get_dir_status(SondTreeviewFM*,
-             const gchar *dir_path);
-void     sond_treeviewfm_seadrive_item_hydrated(SondTreeviewFM*, const gchar *full_path);
-gboolean sond_treeviewfm_seadrive_stop_requested(SondTreeviewFM*);
-void     sond_treeviewfm_seadrive_start_watcher(SondTreeviewFM*);
-void     sond_treeviewfm_seadrive_stop_watcher(SondTreeviewFM*);
-/* Nicht-blockierende Variante für sond_treeviewfm_set_root() (Projekt
- * schließen/wechseln) - s. ausführlichen Kommentar in sond_treeviewfm.c.
- * NICHT verwenden, wenn stvfm selbst im Anschluss zerstört wird
- * (finalize() nutzt weiterhin die blockierende Variante). */
-void     sond_treeviewfm_seadrive_stop_watcher_async(SondTreeviewFM*);
-#endif
 
 G_END_DECLS
 

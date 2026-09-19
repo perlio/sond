@@ -21,7 +21,7 @@
 
 #include "../../misc.h"
 #include "../../sond_treeviewfm.h"
-#include "../../sond_treeviewfm_seadrive.h"
+#include "../../sond_seadrive.h"
 #include "../../sond_log_and_error.h"
 #include "../zond_init.h"
 #include "../zond_dbase.h"

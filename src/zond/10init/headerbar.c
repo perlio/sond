@@ -32,7 +32,7 @@
 #include "../../sond_file_helper.h"
 #include "../../sond_process_file.h"
 #include "../../sond_index.h"
-#include "../../sond_treeviewfm_seadrive.h"
+#include "../../sond_seadrive.h"
 
 #include "../zond_pdf_document.h"
 #include "../zond_tree_store.h"

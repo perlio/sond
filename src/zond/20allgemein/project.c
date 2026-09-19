@@ -25,7 +25,7 @@
 #include "../../sond_fileparts.h"
 #include "../../sond_mime.h"
 #include "../../sond_treeviewfm.h"
-#include "../../sond_treeviewfm_seadrive.h"
+#include "../../sond_seadrive.h"
 #include "../../sond_process_file.h"
 #include "../../misc.h"
 
