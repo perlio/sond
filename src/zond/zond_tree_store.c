@@ -924,9 +924,24 @@ static void zond_tree_store_load_node(GNode *node_parent,
 					((RowData*) node_target_child->data)->target, 0,
 					node_parent, pos, NULL, FALSE);
 		else if (((RowData*) node_target_child->data)->head_nr == -1) //Kind ist dummy
-				{ //kommt vor, wenn link auf Knoten, der Kind hat, das auf Knoten verweist ...
-				  //dann kind von Ziel von Ziel als Link einf�gen
-			zond_tree_store_insert_link_at_pos(node_parent_target, 0,
+				{ /* kommt vor, wenn link auf Knoten, der Kind hat, das auf Knoten
+				 verweist (node_parent_target ist selbst noch ein unaufgelöster
+				 Link - sein einziges Kind ist der Dummy, der beim ersten
+				 Anlegen dieses Links eingefügt wurde, weil sein eigenes Ziel
+				 Kinder hat). Es muss dann das ZIEL von node_parent_target
+				 gespiegelt werden, nicht node_parent_target selbst - sonst
+				 entsteht ein Link auf sich selbst (node_parent_target bleibt
+				 für immer "Kind ist dummy"), der beim nächsten Aufklappen
+				 exakt denselben Dummy-Fall erneut auslöst: endlose
+				 Selbst-Verschachtelung (Bug, s. ToDo.c). */
+			GNode *node_target_resolved = node_parent_target;
+			GNode *node_next = NULL;
+
+			while ((node_next =
+					((RowData*) node_target_resolved->data)->target))
+				node_target_resolved = node_next;
+
+			zond_tree_store_insert_link_at_pos(node_target_resolved, 0,
 					node_parent, pos, NULL, FALSE);
 		} else //Kind ist kein link
 		{

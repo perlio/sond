@@ -3314,4 +3314,51 @@
 
  Nicht durch Kompilieren/Testen verifiziert.
 
+ Bug (19.09.2026, Nutzer-Fund: "wenn ich das Projekt schließe und neu
+ lade, spinnen die links" + Test-ZND-Datei): zond_tree_store_load_node()
+ (zond_tree_store.c) erzeugte beim Nachladen (Aufklappen) eines Link-
+ Knotens unter bestimmten Umständen einen Link auf SICH SELBST, was
+ beim Aufklappen zu endloser Selbst-Verschachtelung führte ("a.pdf" ->
+ "a.pdf" -> "a.pdf" -> ... ohne Ende). Konkret betroffen: ein Link A
+ (z.B. ein head-link auf eine Anbindung/Datei in BAUM_INHALT), dessen
+ Ziel Kinder hat, war selbst noch nie aufgeklappt worden und trug daher
+ nur seinen initialen Dummy-Platzhalter als Kind. Wird nun - an anderer
+ Stelle im Baum - ein Knoten gespiegelt, der SEINERSEITS ein Kind hat,
+ das Link A ist (Fall "Kind ist selbst link-head", Zeile ~916), entsteht
+ dabei ein weiterer Link B mit target=A (bewusst so: Link-Ketten im
+ Quell-Teilbaum werden strukturgleich nachgebildet statt aufgelöst, s.
+ Kommentar bei zond_tree_store_insert_link_at_pos()). Klappt man B auf,
+ ruft zond_tree_store_load_link() zond_tree_store_load_node() mit
+ node_parent_target=A auf - und A hat ja nur den einen Dummy als Kind.
+ Der beim Dummy-Fall (Zeile ~926) vorgesehene Code
+ (zond_tree_store_insert_link_at_pos(node_parent_target, ...)) fügte
+ dabei fälschlich einen Link auf A SELBST ein (statt, wie der
+ dortige - bereits vorher vorhandene, aber nicht umgesetzte - Kommentar
+ es correct beschreibt, auf das ZIEL von A). Der neu entstandene
+ Knoten zeigt dadurch wieder auf A, hat wieder nur dessen (weiterhin
+ ungeladenen) Dummy als Kind - jedes weitere Aufklappen wiederholt exakt
+ denselben Fall: unendliche Verschachtelung, ohne dass je die echten
+ Kinder von A's Ziel (im Testfall: die Anbindungen S.1-S.1/S.2-S.2 von
+ a.pdf) erreicht werden.
+
+ Per SQLite-Analyse der vom Nutzer übergebenen Test.ZND (Tabelle
+ knoten) rekonstruiert: Knoten 22 (BAUM_AUSWERTUNG_LINK, link=3=a.pdf-
+ file_part) liegt als Kind unter Knoten 19 (BAUM_AUSWERTUNG_COPY von
+ a.pdf). An anderer Stelle (Knoten 12/24 bzw. 23) wird Knoten 13 (der
+ Strukturpunkt, unter dem 19 liegt) gespiegelt - dabei entsteht der
+ oben beschriebene Link B auf Knoten 22 (=A). Aufklappen von B erzeugte
+ die endlose a.pdf-Verschachtelung aus dem Screenshot.
+
+ Fix: im Dummy-Fall wird node_parent_target jetzt vor dem Einfügen per
+ while-Schleife über ->target vollständig aufgelöst (wie an anderen
+ Stellen im File, z.B. zond_tree_store_insert()/_insert_link()), und
+ erst das Ergebnis (im Testfall: das echte file_part a.pdf, Knoten 3)
+ als Link-Ziel verwendet - genau wie es der schon vorher vorhandene
+ Kommentar an der Stelle ("dann Kind von Ziel von Ziel als Link
+ einfügen") beschrieb, aber der Code bisher nicht tat.
+
+ Nicht durch Kompilieren/Testen verifiziert (Testdatei liegt vor, aber
+ kein Build/Testlauf durch mich möglich - bitte mit der Test.ZND
+ gegenprüfen).
+
  */
