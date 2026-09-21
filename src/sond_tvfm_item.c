@@ -152,6 +152,38 @@ void sond_tvfm_item_set_icon_name(SondTVFMItem* stvfm_item,
 	return;
 }
 
+/* Nutzer-Fund 21.09.2026 ("wenn aus BAUM_FS der Punkt 'Message' [bzw.
+ * 'PageTree' bei PDF] angebunden wird, lautet die Beschriftung im
+ * BAUM_INHALT ebenfalls 'Message'/'PageTree' - stattdessen sollte der
+ * Dateiname genommen werden, wie beim Anbinden eines DIR"), korrigiert
+ * nach Nutzer-Klarstellung ("nur beim Anbinden ändern - in BAUM_FS
+ * sollen weiterhin 'Pagetree' bzw. 'Message' stehen, da steht ja der
+ * Dateiname direkt darüber, keine Verwechslung möglich"): der
+ * display_name der beiden synthetischen Marker-Knoten (PDF-PageTree,
+ * GMESSAGE-Message) in BAUM_FS bleibt bewusst "PageTree"/"Message" - s.
+ * sond_tvfm_item_create() unten, Marker-Zweige unverändert. Dieser
+ * Helfer liefert NUR für den Anbinden-Pfad (s. sond_tvfm_item_get_
+ * anbinden_label() unten) den echten Basename der Datei, zu der der
+ * Marker-Knoten gehört - von sond_file_part_get_path() DES SondFilePart
+ * selbst (der PDF- bzw. .eml-Datei), nicht von path_or_section (das für
+ * diese Marker-Pfade "//" bzw. "//message" nur Datenmüll basename-t). */
+static gchar* sond_tvfm_item_basename_of_sfp_dup(SondFilePart *sond_file_part) {
+	gchar const *path = NULL;
+	gchar const *basename = NULL;
+
+	if (!sond_file_part)
+		return NULL;
+
+	path = sond_file_part_get_path(sond_file_part);
+	if (!path)
+		return NULL;
+
+	basename = strrchr(path, '/');
+	basename = basename ? basename + 1 : path;
+
+	return g_strdup(basename);
+}
+
 gchar const* sond_tvfm_item_get_basename(SondTVFMItem* stvfm_item) {
 	gchar const* path = NULL;
 	gchar const* basename = NULL;
@@ -174,6 +206,36 @@ gchar const* sond_tvfm_item_get_basename(SondTVFMItem* stvfm_item) {
 		basename = path; //kein '/', also kompletter Pfad ist der Basename
 
 	return basename;
+}
+
+/* Nutzer-Vorgabe 21.09.2026 ("Beschriftung nur beim Anbinden ändern, in
+ * BAUM_FS soll weiterhin 'Pagetree'/'Message' stehen"): eigene, vom
+ * normalen display_name UNABHÄNGIGE Beschriftung speziell für den
+ * Anbinden-Pfad (s. zond_treeview_leaf_anbinden(), zond_treeview.c, die
+ * diese Funktion statt sond_tvfm_item_get_display_name() aufruft). Für
+ * die beiden synthetischen Marker-Knoten (is_content_root_marker, s.
+ * sond_tvfm_item_create()) wird der echte Dateiname geliefert - für alle
+ * anderen Knoten (auch DIR) unverändert der normale display_name, der
+ * dort schon immer korrekt ist. IMMER ein neu alloziertes gchar* -
+ * Aufrufer muss g_free()en, auch im Nicht-Marker-Fall (Kopie von
+ * display_name), damit die Ownership-Regel für den Aufrufer einheitlich
+ * ist und unabhängig vom Sonderfall bleibt. */
+gchar* sond_tvfm_item_get_anbinden_label(SondTVFMItem *stvfm_item) {
+	SondTVFMItemPrivate *stvfm_item_priv =
+			sond_tvfm_item_get_instance_private(stvfm_item);
+
+	if (stvfm_item_priv->is_content_root_marker) {
+		gchar *real_basename = sond_tvfm_item_basename_of_sfp_dup(
+				stvfm_item_priv->sond_file_part);
+
+		if (real_basename)
+			return real_basename;
+		//Fallback, falls sond_file_part_get_path() wider Erwarten NULL
+		//liefert: dann eben doch der Platzhalter, statt eines leeren
+		//node_text.
+	}
+
+	return g_strdup(stvfm_item_priv->display_name);
 }
 
 static gint sond_tvfm_item_load_fs_dir(SondTVFMItem*, GPtrArray**, SondTVFMProgress*, GError**);
@@ -322,6 +384,11 @@ SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM* stvfm,
 					stvfm_item_priv->path_or_section = NULL;
 					g_free(stvfm_item_priv->display_name); //Display-Name ersetzen
 					stvfm_item_priv->display_name = g_strdup("PageTree");
+					/* Nutzer-Vorgabe 21.09.2026: display_name in BAUM_FS
+					 * bleibt "PageTree" - nur beim Anbinden soll der echte
+					 * Dateiname verwendet werden (s. sond_tvfm_item_get_
+					 * anbinden_label()), daher hier nur das Flag setzen. */
+					stvfm_item_priv->is_content_root_marker = TRUE;
 				}
 			}
 		}
@@ -380,6 +447,11 @@ SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM* stvfm,
 					stvfm_item_priv->path_or_section = NULL;
 					g_free(stvfm_item_priv->display_name); //Display-Name ersetzen
 					stvfm_item_priv->display_name = g_strdup("Message");
+					/* Nutzer-Vorgabe 21.09.2026: display_name in BAUM_FS
+					 * bleibt "Message" - nur beim Anbinden soll der echte
+					 * Dateiname verwendet werden (s. sond_tvfm_item_get_
+					 * anbinden_label()), daher hier nur das Flag setzen. */
+					stvfm_item_priv->is_content_root_marker = TRUE;
 				}
 				else if (path_or_section) { //Multipart-Verzeichnis
 					stvfm_item_priv->type = SOND_TVFM_ITEM_TYPE_DIR;
@@ -654,15 +726,16 @@ static gint sond_tvfm_item_load_gmessage_dir(SondTVFMItem* stvfm_item,
 	/* Erstes Kind: Message (Header + Body) - analog zu PageTree bei PDF */
 	if (!stvfm_item_priv->path_or_section) { /* Nur auf oberster Ebene der .eml */
 		SondTVFMItem* stvfm_item_message = NULL;
-		SondTVFMItemPrivate* stvfm_item_message_priv = NULL;
 
 		stvfm_item_message = sond_tvfm_item_create(stvfm_item_priv->stvfm,
 				stvfm_item_priv->sond_file_part, "//message");
-		stvfm_item_message_priv = sond_tvfm_item_get_instance_private(stvfm_item_message);
-
-		/* Display-Name anpassen */
-		g_free(stvfm_item_message_priv->display_name);
-		stvfm_item_message_priv->display_name = g_strdup("Message");
+		/* Nutzer-Fund 21.09.2026 ("Beschriftung nur beim Anbinden ändern"):
+		 * die vormals hier zusätzlich vorgenommene, redundante
+		 * Display-Name-Zuweisung (auf denselben hartcodierten Platzhalter
+		 * "Message", den sond_tvfm_item_create() für den "//message"-
+		 * Marker ohnehin schon setzt) ersatzlos entfernt - reine
+		 * Code-Hygiene, keine Verhaltensänderung, da beide Zuweisungen
+		 * exakt denselben Wert setzten. */
 
 		g_ptr_array_add(*arr_children, stvfm_item_message);
 	}

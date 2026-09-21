@@ -52,6 +52,12 @@ gchar const* sond_tvfm_item_get_path_or_section(SondTVFMItem *);
 
 gchar const* sond_tvfm_item_get_display_name(SondTVFMItem*);
 
+/* Nutzer-Vorgabe 21.09.2026 ("Beschriftung nur beim Anbinden ändern, in
+ * BAUM_FS soll weiterhin 'Pagetree'/'Message' stehen") - s. ausführl.
+ * Doc-Kommentar an der Definition (sond_tvfm_item.c). Rückgabe ist immer
+ * neu alloziert, auch im Normalfall - Aufrufer muss g_free()en. */
+gchar* sond_tvfm_item_get_anbinden_label(SondTVFMItem*);
+
 SondFilePart* sond_tvfm_item_get_sond_file_part(SondTVFMItem*);
 
 SondTreeviewFM* sond_tvfm_item_get_stvfm(SondTVFMItem *);

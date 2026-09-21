@@ -1121,11 +1121,28 @@ static gint zond_treeview_leaf_anbinden(ZondTreeview *ztv,
 		}
 
 		//Datei in zond_dbase einfügen
-		rc = zond_treeview_insert_file_part_in_db(ztv_priv->zond, filepart,
-				sond_tvfm_item_get_display_name(stvfm_item),
-				sond_tvfm_item_get_icon_name(stvfm_item), &ID_file_part, error);
-		if (rc)
-			return -1;
+		{
+			gchar *anbinden_label = NULL;
+
+			/* Nutzer-Vorgabe 21.09.2026 ("wenn aus dem BAUM_FS der Punkt
+			 * 'Message'/'Pagetree' angebunden wird, sollte im BAUM_INHALT
+			 * der Dateiname stehen - in BAUM_FS selbst aber weiterhin
+			 * 'Message'/'Pagetree', da steht der Dateiname ja direkt
+			 * darüber"): sond_tvfm_item_get_anbinden_label() liefert genau
+			 * für diese beiden Marker-Knoten den echten Dateinamen statt
+			 * des in BAUM_FS unverändert bleibenden display_name - für
+			 * alle anderen Knoten liefert sie eine Kopie von display_name
+			 * (also dasselbe wie sond_tvfm_item_get_display_name() vorher
+			 * hier direkt lieferte). */
+			anbinden_label = sond_tvfm_item_get_anbinden_label(stvfm_item);
+
+			rc = zond_treeview_insert_file_part_in_db(ztv_priv->zond, filepart,
+					anbinden_label,
+					sond_tvfm_item_get_icon_name(stvfm_item), &ID_file_part, error);
+			g_free(anbinden_label);
+			if (rc)
+				return -1;
+		}
 	}
 	else { //nur wenn in db, dann möglicherweise in baum_inhalt
 		//wenn schon pdf_root existiert, dann herausfinden, ob aktuell an Baum angebunden

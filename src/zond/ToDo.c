@@ -3723,3 +3723,84 @@
  Nicht durch Kompilieren/Testen verifiziert.
 
  */
+
+/*
+ Bug (21.09.2026, Nutzer-Fund): "Wenn aus dem BAUM_FS der Punkt
+ 'Message', also eine eml, angebunden wird, lautet die Beschriftung im
+ BAUM_INHALT ebenfalls 'Message'. Das ist nicht gut. Stattdessen sollte
+ der Dateiname genommen werden, wie wenn das DIR angebunden wird. Ebenso
+ beim Pagetree in einer PDF."
+
+ Ursache (sond_tvfm_item.c, sond_tvfm_item_create()): für die beiden
+ synthetischen Marker-Kindknoten einer PDF ("PageTree", path_or_section
+ == "//") bzw. eines .eml (GMESSAGE, "Message", path_or_section ==
+ "//message") wurde der display_name hart auf die literalen Strings
+ "PageTree"/"Message" gesetzt - weil die generische Basename-Ermittlung
+ (sond_tvfm_item_get_basename(), die zuerst versucht wird) für diese
+ Marker-Pfade nur Datenmüll liefert: strrchr('/') auf "//" bzw.
+ "//message" liefert einen leeren String bzw. "message", nicht den
+ echten Dateinamen. Der beim Anbinden als node_text übernommene
+ display_name (zond_treeview_leaf_anbinden() -> sond_tvfm_item_
+ get_display_name() -> zond_treeview_insert_file_part_in_db() ->
+ zond_dbase_create_file_root()) war dadurch für beide Knotentypen
+ IMMER derselbe generische Platzhalter, unabhängig von der tatsächlichen
+ Datei - anders als beim Anbinden eines DIR oder einer echten Datei, wo
+ path_or_section bzw. sond_file_part_get_path() den echten (Datei-)Namen
+ liefert.
+
+ Fix: neuer statischer Helfer sond_tvfm_item_basename_of_sfp_dup()
+ (sond_tvfm_item.c, vor sond_tvfm_item_get_basename()) liefert den
+ echten Basename der Datei, zu der der Marker-Knoten gehört - via
+ sond_file_part_get_path() DES SondFilePart selbst (der PDF- bzw.
+ .eml-Datei, dieselbe Quelle, die auch beim Anbinden eines "normalen"
+ Knotens ohne path_or_section verwendet würde), nicht von
+ path_or_section. In beiden betroffenen Zweigen (PDF-PageTree- und
+ GMESSAGE-Message-Branch in sond_tvfm_item_create()) wird jetzt statt
+ des hartcodierten Strings dieser Helfer aufgerufen, mit Fallback auf
+ den alten Platzhalter nur für den (nicht erwarteten) Fall, dass
+ sond_file_part_get_path() NULL liefert.
+
+ Zusätzlich entfernt: in sond_tvfm_item_load_gmessage_dir() gab es eine
+ REDUNDANTE zweite Display-Name-Zuweisung (wieder auf den hartcodierten
+ "Message"-Platzhalter) direkt nach dem sond_tvfm_item_create()-Aufruf
+ für den Message-Marker-Knoten - hätte den obigen Fix an dieser einen
+ Aufrufstelle sofort wieder rückgängig gemacht. Der analoge PDF-PageTree-
+ Aufruf (sond_tvfm_item_load_pdf_dir() bzw. entsprechende Funktion) hatte
+ keine solche redundante zweite Zuweisung und war daher von diesem
+ Zusatzfehler nicht betroffen.
+
+ Nicht durch Kompilieren/Testen verifiziert.
+
+ Korrektur (21.09.2026, Nutzer-Klarstellung direkt im Anschluss): "Ich
+ dachte eigentlich daran, den Namen nur beim Anbinden in den BAUM_INHALT
+ zu ändern. Im BAUM_FS sollten weiterhin die Bezeichnungen Pagetree bzw.
+ Message stehen. Da ist ja der Dateiname direkt darüber, so daß keine
+ Verwechslung möglich ist." - der obige Fix hatte den Anwendungsbereich
+ zu weit gefasst: er änderte den display_name generell (also auch die
+ BAUM_FS-Anzeige selbst), nicht nur den beim Anbinden nach BAUM_INHALT
+ übernommenen Wert.
+
+ Fix, enger gefasst: die display_name-Änderung in sond_tvfm_item_
+ create() (beide Marker-Zweige) ZURÜCKGENOMMEN - BAUM_FS zeigt wieder
+ unverändert "PageTree"/"Message". Stattdessen neues privates Flag
+ is_content_root_marker in SondTVFMItemPrivate (sond_treeviewfm_
+ private.h) ergänzt, das an genau den beiden Marker-Stellen (statt der
+ verworfenen display_name-Änderung) gesetzt wird. Neue öffentliche
+ Funktion sond_tvfm_item_get_anbinden_label() (sond_tvfm_item.h/.c):
+ liefert für Knoten mit gesetztem Flag den echten Dateinamen (via des
+ schon vorhandenen Helfers sond_tvfm_item_basename_of_sfp_dup(), der
+ dafür unverändert weiterverwendet wird), für alle anderen Knoten eine
+ Kopie von display_name (also unverändertes Verhalten) - IMMER neu
+ alloziert, damit die Ownership für den Aufrufer einheitlich ist.
+ zond_treeview_leaf_anbinden() (zond_treeview.c, Anbinden-Pfad für noch
+ nicht in der DB vorhandene Dateien) ruft jetzt diese neue Funktion statt
+ sond_tvfm_item_get_display_name() auf und gibt das Ergebnis nach dem
+ zond_treeview_insert_file_part_in_db()-Aufruf wieder frei. Die vorhin
+ entfernte redundante zweite Display-Name-Zuweisung in sond_tvfm_item_
+ load_gmessage_dir() bleibt entfernt (reine Code-Hygiene, unabhängig von
+ dieser Korrektur - setzte ohnehin nur denselben, jetzt wieder
+ unveränderten Platzhalterwert ein zweites Mal).
+
+ Nicht durch Kompilieren/Testen verifiziert.
+
+ */

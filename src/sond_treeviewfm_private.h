@@ -98,6 +98,13 @@ typedef struct {
 	SondTVFMItemType type;
 	SondFilePart* sond_file_part;
 	gchar* path_or_section;
+	/* Nutzer-Vorgabe 21.09.2026 ("Beschriftung nur beim Anbinden ändern,
+	 * in BAUM_FS soll weiterhin 'Pagetree'/'Message' stehen - da steht ja
+	 * der Dateiname direkt darüber"): markiert die beiden synthetischen
+	 * Marker-Kindknoten (PDF-PageTree bzw. GMESSAGE-Message), deren
+	 * display_name bewusst NICHT der echte Dateiname ist - s. ausführl.
+	 * Kommentar an sond_tvfm_item_get_anbinden_label() (sond_tvfm_item.c). */
+	gboolean is_content_root_marker;
 } SondTVFMItemPrivate;
 
 /* Freund-Accessor für sond_seadrive.c, analog sond_treeviewfm_get_priv().
