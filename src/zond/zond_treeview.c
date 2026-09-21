@@ -94,10 +94,9 @@ static gint zond_treeview_get_root(ZondTreeview *ztv, gint node_id, gint *root,
 static gint zond_treeview_get_filepart_and_section(ZondTreeview *ztv, GtkTreeIter *iter,
 		gchar **file_part, gchar** section, GError **error);
 
-/* Nutzer-Vorgabe 20.09.2026 (s. Kommentar an
- * zond_treeview_determine_iter_parent(), ToDo.c): ermittelt iter_parent für
- * einen Klick in BAUM_AUSWERTUNG - deckt sowohl den direkten Strukturpunkt-
- * Treffer als auch das Hochklettern durch Link-Ketten einheitlich ab. */
+/* Ermittelt iter_parent für einen Klick in BAUM_AUSWERTUNG - deckt sowohl
+ * den direkten Strukturpunkt-Treffer als auch das Hochklettern durch
+ * Link-Ketten einheitlich ab (s. Definition unten). */
 static gint zond_treeview_determine_iter_parent(ZondTreeview *ztv,
 		GtkTreeIter *iter_click_start, GtkTreeIter *iter_parent,
 		GError **error);
@@ -1124,16 +1123,10 @@ static gint zond_treeview_leaf_anbinden(ZondTreeview *ztv,
 		{
 			gchar *anbinden_label = NULL;
 
-			/* Nutzer-Vorgabe 21.09.2026 ("wenn aus dem BAUM_FS der Punkt
-			 * 'Message'/'Pagetree' angebunden wird, sollte im BAUM_INHALT
-			 * der Dateiname stehen - in BAUM_FS selbst aber weiterhin
-			 * 'Message'/'Pagetree', da steht der Dateiname ja direkt
-			 * darüber"): sond_tvfm_item_get_anbinden_label() liefert genau
-			 * für diese beiden Marker-Knoten den echten Dateinamen statt
-			 * des in BAUM_FS unverändert bleibenden display_name - für
-			 * alle anderen Knoten liefert sie eine Kopie von display_name
-			 * (also dasselbe wie sond_tvfm_item_get_display_name() vorher
-			 * hier direkt lieferte). */
+			/* Für die synthetischen Marker-Knoten "Message"/"Pagetree"
+			 * liefert dies den echten Dateinamen (in BAUM_FS bleibt die
+			 * Anzeige unverändert); für alle anderen Knoten eine Kopie
+			 * von display_name. */
 			anbinden_label = sond_tvfm_item_get_anbinden_label(stvfm_item);
 
 			rc = zond_treeview_insert_file_part_in_db(ztv_priv->zond, filepart,
@@ -2773,14 +2766,10 @@ static gint zond_treeview_open_auszug(ZondTreeview* ztv, GtkTreeIter* iter_paren
 		else
 			anbindung_ges = anbindung_node;
 
-		/* Nutzer-Fund 20.09.2026 ("document_get_pos_in_anbindung ruft
-		 * zpdfd_part_peek auf - das öffnet ein Objekt"): was_opened MUSS
-		 * hier, VOR document_new_displayed_document() (das dieses PDF
-		 * gleich öffnet), festgehalten werden - danach wäre
-		 * zond_pdf_document_is_open() für dieses sfp immer TRUE, weil wir
-		 * es ja selbst gerade geöffnet haben. Gebraucht weiter unten für
-		 * document_get_pos_in_anbindung() bei einem verschachtelten
-		 * iter_pos-Treffer (s. dortigen Kommentar, "Pos-Problem"). */
+		/* Muss VOR document_new_displayed_document() (öffnet dieses PDF)
+		 * festgehalten werden - danach wäre zond_pdf_document_is_open()
+		 * für dieses sfp immer TRUE. Gebraucht weiter unten für
+		 * get_pdf_pos() bei einem verschachtelten iter_pos-Treffer. */
 		was_opened_tmp = (zond_pdf_document_is_open(SOND_FILE_PART_PDF(sfp))
 				!= NULL);
 
@@ -2803,48 +2792,23 @@ static gint zond_treeview_open_auszug(ZondTreeview* ztv, GtkTreeIter* iter_paren
 
 		if (iter_pos || end) {
 			if (iter_pos && !found) {
-				/* Nutzer-Fund 20.09.2026 ("Seitenanzeige bleibt zunächst
-				 * leer, erst nach Scrollen"): iter_pos (die Klickposition)
-				 * kann seit dem Link-Klettern (s. ToDo.c, zond_treeview_
-				 * climb_link_chain()) mehrere Ebenen TIEFER liegen als
-				 * iter_tmp (direktes Kind von iter_parent) - z.B. wenn
-				 * iter_tmp ein Link ist, dessen gespiegelte Unterabschnitte
-				 * erst darunter liegen. Reine Zeiger-Gleichheit
-				 * (iter_pos->user_data == iter_tmp.user_data) fand solche
-				 * verschachtelten Klicks nie - found blieb FALSE, die
-				 * Schleife behandelte iter_pos so, als läge er HINTER dem
-				 * kompletten Auszug, und akkumulierte immer weiter
-				 * (pdf_pos->seite + 1 für jedes einzelne Kind). Ergebnis:
-				 * pdf_pos zeigte am Ende auf eine Seite hinter dem ganzen
-				 * Dokument - der Viewer versuchte, dorthin zu scrollen,
-				 * zeigte aber (aus dem Bereich) zunächst gar nichts an;
-				 * erst manuelles Scrollen (das den sichtbaren Bereich neu
-				 * berechnet) brachte wieder eine gültige Seite zum
-				 * Vorschein.
+				/* iter_pos (die Klickposition) kann durchs Link-Klettern
+				 * mehrere Ebenen tiefer liegen als iter_tmp (direktes Kind
+				 * von iter_parent), z.B. wenn iter_tmp ein Link ist, dessen
+				 * gespiegelte Unterabschnitte erst darunter liegen. Daher:
+				 * iter_tmp ist Treffer, wenn es iter_pos selbst ODER dessen
+				 * Vorfahre ist (per GtkTreePath).
 				 *
-				 * Fix: statt exakter Gleichheit wird jetzt geprüft, ob
-				 * iter_tmp iter_pos ist ODER ein Vorfahre von iter_pos (per
-				 * GtkTreePath) - trifft das zu, ist iter_pos irgendwo
-				 * innerhalb des Teilbaums von iter_tmp geklickt worden.
-				 *
-				 * Präzisierung (Nutzer-Vorgabe 20.09.2026, "Pos-Problem"):
-				 * ist iter_tmp dabei nur VORFAHRE (nicht iter_pos selbst),
-				 * wird nicht mehr pauschal an den Anfang/das Ende von
-				 * iter_tmp gesprungen, sondern die exakte Unterposition
-				 * von iter_pos ermittelt - dessen eigene Anbindung wird
-				 * per get_filepart_from_iter() geholt und deren Position
-				 * INNERHALB von anbindung_ges (demselben Bezugsrahmen wie
-				 * pdf_pos_loop) per document_get_pos_in_anbindung()
-				 * berechnet (dieselbe Logik wie get_pdf_pos(), nur ohne
-				 * neues DisplayedDocument). Vorausgesetzt wird, dass
-				 * iter_pos in derselben Datei wie iter_tmp liegt (bei
-				 * verschachtelten Links/Copies unterhalb von iter_tmp der
-				 * Normalfall, da sie denselben gespiegelten Teilbaum einer
-				 * Datei fortsetzen) - zur Sicherheit wird das per
-				 * sond_file_part_get_path()-Vergleich geprüft; bei
-				 * Abweichung (sollte nicht vorkommen) greift ersatzweise
-				 * weiterhin die alte, grobe Anfang/Ende-von-iter_tmp-
-				 * Lösung. */
+				 * Ist iter_tmp nur Vorfahre (is_self == FALSE), wird nicht
+				 * pauschal an den Anfang/das Ende von iter_tmp gesprungen,
+				 * sondern die exakte Unterposition von iter_pos ermittelt:
+				 * dessen eigene Anbindung (get_filepart_from_iter()) wird
+				 * per get_pdf_pos() relativ zu anbindung_ges (demselben
+				 * Bezugsrahmen wie pdf_pos_loop) eingeordnet. Setzt voraus,
+				 * dass iter_pos in derselben Datei wie iter_tmp liegt (bei
+				 * verschachtelten Links/Copies der Normalfall) - geprüft
+				 * per sond_file_part_get_path()-Vergleich; bei Abweichung
+				 * greift ersatzweise die grobe Anfang/Ende-Lösung. */
 				GtkTreePath *path_tmp = gtk_tree_model_get_path(model,
 						&iter_tmp);
 				GtkTreePath *path_pos = gtk_tree_model_get_path(model,
@@ -2882,18 +2846,11 @@ static gint zond_treeview_open_auszug(ZondTreeview* ztv, GtkTreeIter* iter_paren
 									&& !g_strcmp0(
 											sond_file_part_get_path(sfp_click),
 											sond_file_part_get_path(sfp))) {
-								/* Nutzer-Fund 20.09.2026 ("das öffnet ein
-								 * Objekt" / "warum dann get_pdf_pos nicht
-								 * public machen?"): dd_tmp->zpdfd_part->
-								 * zond_pdf_document ist dasselbe, längst
-								 * offene ZondPdfDocument, das zu
-								 * anbindung_ges gehört - kein erneutes
-								 * Peeken nötig, und statt eines reinen
-								 * 1:1-Wrappers wird jetzt direkt das
-								 * (nicht mehr static) get_pdf_pos()
-								 * aufgerufen, s. document.h. was_opened_tmp
-								 * wurde oben, VOR dem Öffnen dieses
-								 * Dokuments für iter_tmp, festgehalten. */
+								/* dd_tmp->zpdfd_part->zond_pdf_document ist
+								 * dasselbe, längst offene ZondPdfDocument,
+								 * das zu anbindung_ges gehört - kein
+								 * erneutes Peeken nötig, s. get_pdf_pos()
+								 * (document.h). */
 								PdfPos pos_click = get_pdf_pos(
 										dd_tmp->zpdfd_part->zond_pdf_document,
 										was_opened_tmp, &anbindung_ges,
@@ -2963,12 +2920,9 @@ static gint zond_treeview_open_single_view(Projekt* zond, SondFilePart* sfp,
 	return 0;
 }
 
-/* Nutzer-Vorgabe 19./20.09.2026, final präzisiert 20.09.2026 (ToDo.c):
- * ermittelt iter_parent für einen Klick in BAUM_AUSWERTUNG - deckt sowohl
- * den direkten Strukturpunkt-Treffer, den direkten Copy-Treffer, als auch
- * das Hochklettern durch Link-Ketten (verschachtelte Anbindungen
- * mehrfach gespiegelter Dateien) einheitlich ab. Exakte, vom Nutzer als
- * Pseudocode vorgegebene Fassung:
+/* Ermittelt iter_parent für einen Klick in BAUM_AUSWERTUNG: direkter
+ * Strukturpunkt-Treffer, direkter Copy-Treffer, oder Hochklettern durch
+ * Link-Ketten (verschachtelte Anbindungen mehrfach gespiegelter Dateien).
  *
  *   do {
  *       iter_target = get_iter_target(iter_click);  //volle GNode-target-
@@ -2983,33 +2937,25 @@ static gint zond_treeview_open_single_view(Projekt* zond, SondFilePart* sfp,
  *       }
  *   } while (TRUE);
  *
- * "get_iter_target" ist zond_tree_store_get_iter_target() - löst NUR die
- * GNode-target-Kette auf (Link-Spiegelungen), nicht die DB-Spalte "link"
- * einer Copy. Eine Copy hat deshalb selbst dann kein weiteres target, wenn
- * sie inhaltlich eine Datei/Anbindung repräsentiert - die Auflösung
- * terminiert bei ihr selbst, wodurch "iter_target -> Copy" korrekt erkannt
- * wird, GENAU DANN wenn iter_click (nach evtl. vorherigem Klettern durch
- * echte Links) bei einer Copy (ob echt oder gespiegelt) ankommt. Eine
- * gespiegelte Copy (target gesetzt, weil sie selbst irgendwo verlinkt
- * auftaucht) zählt für die eigene Auflösungskette ihrer KINDER als weiterer
- * Link-Schritt (deckt z.B. "Strukturpunkt -> head-link auf anderen
- * Strukturpunkt -> dessen gespiegelte Copy -> deren gespiegelter Link auf
- * dieselbe Anbindung" ab: das Klettern läuft durch die gespiegelte Copy
- * hindurch bis zu deren eigenem Anzeige-Elternknoten, dem head-link).
+ * get_iter_target ist zond_tree_store_get_iter_target() - löst nur die
+ * GNode-target-Kette (Link-Spiegelungen) auf, nicht die DB-Spalte "link"
+ * einer Copy; eine Copy hat deshalb nie ein weiteres target, auch wenn sie
+ * inhaltlich eine Anbindung repräsentiert - "iter_target -> Copy" trifft
+ * also genau dann zu, wenn iter_click bei einer (echten oder gespiegelten)
+ * Copy ankommt. Eine gespiegelte Copy zählt für ihre eigenen Kinder
+ * trotzdem als weiterer Link-Schritt (deckt Ketten wie "Strukturpunkt ->
+ * head-link auf anderen Strukturpunkt -> dessen gespiegelte Copy -> deren
+ * gespiegelter Link auf dieselbe Anbindung" ab).
  *
- * "ist_file_link" wird über zond_dbase_find_baum_inhalt_file() geprüft
- * (dieselbe Funktion, die auch zond_treeview_get_root() nutzt): liefert sie
- * gar keinen baum_inhalt_file, liegt iter_target nicht (mehr) in
- * BAUM_INHALT (z.B. weil iter_target selbst wieder ein Strukturpunkt ist -
- * dieser Fall wird aber schon vorher separat abgefangen); liefert sie ihn,
- * aber deren id_file_part entspricht bereits der node_id von iter_target
- * selbst, ist iter_target schon der unmittelbar angebundene file_part
- * (oberste Ebene erreicht).
+ * ist_file_link prüft über zond_dbase_find_baum_inhalt_file(): kein
+ * baum_inhalt_file gefunden -> iter_target liegt nicht in BAUM_INHALT;
+ * id_file_part == node_id von iter_target -> bereits unmittelbar
+ * angebunden (oberste Ebene erreicht).
  *
- * Rein DB-basiert - kein Dateizugriff, deshalb sowohl für die günstige
- * Hydrierungs-Vorprüfung (s. #ifdef _WIN32-Block in
- * zond_treeview_open_node()) als auch für die eigentliche Öffnen-
- * Entscheidung dort verwendbar. */
+ * Rein DB-basiert, kein Dateizugriff - deshalb sowohl für die günstige
+ * Hydrierungs-Vorprüfung (#ifdef _WIN32-Block in
+ * zond_treeview_open_node()) als auch die eigentliche Öffnen-Entscheidung
+ * dort nutzbar. */
 static gint zond_treeview_determine_iter_parent(ZondTreeview *ztv,
 		GtkTreeIter *iter_click_start, GtkTreeIter *iter_parent,
 		GError **error) {
@@ -3111,23 +3057,17 @@ static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 	zond_tree_store_get_iter_target(iter, &iter_target);
 	baum = zond_tree_store_get_root(zond_tree_store_get_tree_store(&iter_target));
 
-	/* Nutzer-Fund 20.09.2026 ("ungünstig, zweimal iter_parent ermitteln"):
-	 * iter_parent wird jetzt an genau EINER Stelle ermittelt - hier, ganz
-	 * am Anfang, sobald feststeht, ob der Klick überhaupt in den
-	 * Auszug-Pfad münden kann (Auswertungsverzeichnis, kein Strg-Override
-	 * auf ein Ziel mit eigenem Inhalt). Sowohl der SeaDrive-
-	 * Hydrierungs-Vorabcheck weiter unten (nur unter _WIN32) als auch die
-	 * eigentliche open_auszug()-Weiche ganz unten verwenden danach nur
-	 * noch diesen einen Wert. Das ist unproblematisch, weil zwischen
-	 * beiden Verwendungsstellen keine Strukturänderung am
-	 * BAUM_AUSWERTUNG-GNode-Baum stattfindet - die SeaDrive-Hydrierung
-	 * wirkt nur auf das Dateisystem/BAUM_FS, nie auf den
-	 * Auswertungsverzeichnis-Baum selbst, iter_parent bleibt also gültig.
-	 * Für die Ermittlung genügt hier die leichte, rein DB-basierte
-	 * zond_treeview_get_filepart_and_section() (kein Dateizugriff) - das
-	 * spätere "echte" sfp (aus get_filepart_from_iter(), mit Inhalts-
-	 * sniffing) muss zum selben Ergebnis (NULL oder nicht-NULL) kommen,
-	 * da beide denselben Knoten auswerten. */
+	/* iter_parent wird hier EINMALIG ermittelt, sobald feststeht, dass der
+	 * Klick überhaupt in den Auszug-Pfad münden kann (Auswertungs-
+	 * verzeichnis, kein Strg-Override auf ein Ziel mit eigenem Inhalt).
+	 * Sowohl der SeaDrive-Hydrierungs-Vorabcheck unten (_WIN32) als auch
+	 * die open_auszug()-Weiche ganz unten verwenden danach nur noch diesen
+	 * Wert - zwischen beiden Stellen ändert sich der BAUM_AUSWERTUNG-Baum
+	 * nicht (SeaDrive-Hydrierung wirkt nur auf BAUM_FS), iter_parent
+	 * bleibt also gültig. Die leichte, rein DB-basierte
+	 * zond_treeview_get_filepart_and_section() reicht hier aus, da sie für
+	 * denselben Knoten dasselbe NULL/nicht-NULL-Ergebnis liefert wie das
+	 * spätere "echte" sfp aus get_filepart_from_iter(). */
 	{
 		gint ret = 0;
 
@@ -3151,86 +3091,41 @@ static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 	}
 
 #ifdef _WIN32
-	/* Nutzer-Fund 18.09.2026: Doppelklick auf eine noch nicht hydrierte
-	 * SeaDrive-Datei im Bestands-/Auswertungsverzeichnis blockierte die
-	 * UI genauso, wie es vor dem BAUM_FS-Fix (s. sond_treeviewfm_open(),
-	 * sond_treeviewfm.c, ToDo.c) dort der Fall war - der dortige Check
-	 * fehlte hier komplett, weil das Öffnen über einen ganz anderen
-	 * Code-Pfad läuft (Anbindung/DB statt BAUM_FS-Baum).
+	/* Doppelklick auf eine noch nicht hydrierte SeaDrive-Datei im
+	 * Bestands-/Auswertungsverzeichnis darf die UI nicht blockieren - der
+	 * Hydrierungscheck muss daher VOR jedem Dateizugriff laufen und darf
+	 * dafür selbst keinen Dateizugriff brauchen. get_filepart_from_iter()
+	 * scheidet deshalb aus (baut ein SondFilePart auf, das dafür die
+	 * ersten 2048 Bytes liest - s. sond_file_part_from_filepart_leaf(),
+	 * sond_fileparts.c - was bei einer nicht hydrierten Datei selbst schon
+	 * die synchrone Hydrierung auslöst). Stattdessen rein per
+	 * zond_treeview_get_filepart_and_section() (DB-/Baum-Abfrage, kein
+	 * Dateizugriff): der Dateisystem-Vorfahre wird direkt aus dem
+	 * file_part-String bestimmt (Teil vor einem evtl. "//"). get_filepart_
+	 * from_iter() (mit echtem Inhaltssniffing) läuft erst NACH positivem
+	 * Hydrierungs-Check.
 	 *
-	 * Regressions-Fund 18.09.2026 ("Hatten wir das nicht schon
-	 * behandelt?"): der ERSTE Fix hierfür (s. Versionsgeschichte) prüfte
-	 * erst NACH get_filepart_from_iter() - aber genau DIESE Funktion
-	 * ruft über sond_file_part_from_filepart() bereits
-	 * sond_file_part_create() auf, das pro Segment die ersten 2048 Bytes
-	 * der Datei für echte Inhaltserkennung liest (s. ausführl. Doc-
-	 * Kommentar an sond_file_part_from_filepart_leaf(), sond_fileparts.c)
-	 * - bei einer noch nicht hydrierten Datei löste schon DIESER
-	 * Lesezugriff über sond_fopen() dessen synchrone Hydrierung-und-
-	 * Retry-Logik aus und blockierte damit VOR dem eigentlichen Check.
-	 * Exakt derselbe Fehler wie beim Auszug-Fall (Task/ToDo-Eintrag
-	 * "Regression: Auszug-Hydrierungscheck fror UI selbst ein" weiter
-	 * oben) - dort schon korrigiert, hier beim eigentlichen
-	 * Einzeldatei-Pfad aber übersehen, weil die eigenen Tests offenbar
-	 * zufällig auf bereits lokalen Dateien liefen.
-	 *
-	 * Fix: der Check läuft jetzt VOR get_filepart_from_iter() und nutzt
-	 * dafür (wie beim Auszug-Fall) NUR
-	 * zond_treeview_get_filepart_and_section() (reine DB-/Baum-Abfrage,
-	 * kein Dateizugriff) statt eines schon aufgebauten SondFilePart -
-	 * der Dateisystem-Vorfahre wird hier direkt aus dem file_part-String
-	 * bestimmt (Teil vor einem evtl. "//", analog
-	 * zond_treeview_get_seadrive_badge() weiter oben), ganz ohne
-	 * SondFilePart-Objekt und damit ganz ohne den riskanten
-	 * Byte-Lesezugriff. get_filepart_from_iter() (mit dem echten
-	 * Inhaltssniffing) wird erst NACH einem positiven Hydrierungs-Check
-	 * aufgerufen, wenn die Datei nachweislich schon lokal ist.
-	 *
-	 * Nutzer-Fund 19.09.2026 ("ensure_ wird auch geprüft, wenn ich auf
-	 * eine COPY klicke, obwohl später nochmal in multi alles geprüft
-	 * wird"): dieser Block lief bisher IMMER unbedingt für iter_target,
-	 * unabhängig davon, ob der Klick am Ende in den Einzel- oder den
-	 * Auszug-Pfad (mehrere Geschwister-Anbindungen zu einer Ansicht
-	 * zusammengefasst, s. zond_treeview_open_auszug() unten) mündet.
-	 * Traf der Klick auf eine Anbindung, deren Anzeige-Elternknoten ein
-	 * Strukturpunkt ist (auszug==TRUE weiter unten), wurde hier trotzdem
-	 * schon eine Einzeldatei-Hydrierung für GENAU diese eine Datei
-	 * angestoßen - und bei noch nicht lokaler Datei sofort mit return 0
-	 * abgebrochen, BEVOR überhaupt geprüft wurde, ob gleich sowieso der
-	 * Auszug-Pfad mit sond_seadrive_ensure_hydrated_multi() für ALLE
-	 * Geschwister greift. Ergebnis: der Nutzer musste ggf. mehrfach
-	 * klicken (einmal pro noch nicht hydriertem Geschwister), statt
-	 * gleich eine gebündelte Abfrage für alle betroffenen Dateien zu
-	 * bekommen.
-	 *
-	 * Fix: die Auszug-Entscheidung (Anzeige-Elternknoten ist
-	 * Strukturpunkt? s. auch die identische Prüfung weiter unten bei
-	 * "Ziel ist Anbindung") wird jetzt HIER VORGEZOGEN - rein per
-	 * zond_treeview_get_filepart_and_section() (DB-Abfrage, kein
-	 * Dateizugriff, s.o.), also ohne die dortige teure
-	 * get_filepart_from_iter()/SondFilePart-Variante zu brauchen. Je
-	 * nach Ergebnis läuft entweder EINMALIG der Einzel- oder EINMALIG
-	 * der Multi-Hydrierungscheck - nie beide. Die beiden ehemals an
-	 * dieser Stelle duplizierten Aufrufe von
-	 * zond_treeview_auszug_ensure_hydrated() weiter unten (im
-	 * !sfp-Zweig und im auszug-Unterzweig) entfallen deshalb ersatzlos -
-	 * die dortige spätere Neuberechnung von auszug/iter_parent per
-	 * get_filepart_from_iter() bleibt unverändert bestehen (jetzt
-	 * gefahrlos, weil die betroffenen Dateien zu diesem Zeitpunkt
-	 * bereits nachweislich hydriert sind) und entscheidet weiterhin, ob
-	 * zond_treeview_open_auszug() oder zond_treeview_open_single_view()
-	 * aufgerufen wird. */
+	 * Die Auszug-Entscheidung (Anzeige-Elternknoten ist Strukturpunkt?)
+	 * wird ebenfalls hier vorgezogen, damit je nach Ergebnis genau EINMAL
+	 * der Einzel- oder der Multi-Hydrierungscheck läuft, nie beide - sonst
+	 * würde bei einem Klick auf eine Anbindung mit Strukturpunkt-Eltern
+	 * zunächst eine Einzeldatei-Hydrierung für nur diese eine Datei
+	 * angestoßen, bevor der Auszug-Pfad mit
+	 * sond_seadrive_ensure_hydrated_multi() ohnehin alle Geschwister
+	 * gebündelt behandelt. Die spätere Neuberechnung von iter_parent per
+	 * get_filepart_from_iter() weiter unten bleibt bestehen und
+	 * entscheidet weiterhin, ob zond_treeview_open_auszug() oder
+	 * zond_treeview_open_single_view() aufgerufen wird - ist an dieser
+	 * Stelle aber gefahrlos, weil die betroffenen Dateien bereits
+	 * hydriert sind. */
 	SondTreeviewFM *stvfm_fs = SOND_TREEVIEWFM(zond->treeview[BAUM_FS]);
 
 	if (sond_treeviewfm_is_seadrive_path(stvfm_fs)) {
 		const gchar *root = sond_treeviewfm_get_root(stvfm_fs);
 
-		/* Nutzer-Fund 20.09.2026 ("ungünstig, zweimal iter_parent
-		 * ermitteln"): file_part_target und iter_parent/have_iter_parent
-		 * werden jetzt ganz oben in dieser Funktion EINMALIG ermittelt
-		 * (s. dortigen Kommentar) und hier nur noch verwendet - keine
-		 * erneuten Aufrufe von zond_treeview_get_filepart_and_section()
-		 * oder zond_treeview_determine_iter_parent() mehr. */
+		/* file_part_target und iter_parent/have_iter_parent wurden bereits
+		 * ganz oben in dieser Funktion einmalig ermittelt (s. dortigen
+		 * Kommentar) - hier nur noch verwendet. */
 		if (have_iter_parent) {
 			gint hyd_rc = 0;
 
@@ -3307,21 +3202,15 @@ static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 		if (sfp)
 			g_object_unref(sfp);
 
-		/* Hydrierungscheck (Multi) läuft jetzt vorgezogen ganz oben in
-		 * dieser Funktion (s. dortigen Kommentar, Nutzer-Fund 19.09.2026) -
-		 * hier nicht mehr nötig.
-		 *
-		 * iter_parent (Nutzer-Vorgabe 20.09.2026, s. Kommentar an
-		 * zond_treeview_determine_iter_parent() UND am Anfang dieser
-		 * Funktion, Nutzer-Fund "ungünstig, zweimal iter_parent
-		 * ermitteln") wurde bereits ganz oben ermittelt und wird hier nur
-		 * noch verwendet, kein zweiter Aufruf mehr nötig. have_iter_parent
-		 * muss an dieser Stelle TRUE sein: der einzige Unterschied zur
-		 * dortigen Bedingung ist file_part_target (leichte DB-Abfrage) vs.
-		 * sfp (echtes SondFilePart) - beide werten denselben Knoten aus
-		 * und müssen bzgl. NULL/nicht-NULL übereinstimmen. Der Vollständig-
-		 * keit halber (defensiv, sollte nie greifen) hier trotzdem ein
-		 * Fallback auf den einzelnen Nachholaufruf. */
+		/* Hydrierungscheck (Multi) läuft bereits vorgezogen ganz oben in
+		 * dieser Funktion, hier nicht mehr nötig. iter_parent wurde dort
+		 * ebenfalls schon ermittelt (s. Kommentar an
+		 * zond_treeview_determine_iter_parent() und am Anfang dieser
+		 * Funktion) und wird hier nur noch verwendet. have_iter_parent muss
+		 * an dieser Stelle TRUE sein: file_part_target (leichte DB-Abfrage)
+		 * und sfp (echtes SondFilePart) werten denselben Knoten aus und
+		 * müssen bzgl. NULL/nicht-NULL übereinstimmen - der
+		 * Vollständigkeit halber trotzdem ein defensiver Fallback. */
 		if (!have_iter_parent) {
 			rc = zond_treeview_determine_iter_parent(
 					ZOND_TREEVIEW(zond->treeview[BAUM_AUSWERTUNG]), iter,

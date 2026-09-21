@@ -17,30 +17,20 @@
  */
 
 /*
- * Refactoring (18.09.2026, Nutzer-Fund "wie wäre es, wenn man stvfm_item
- * aus sond_treeviewfm herausnimmt?"): SondTVFMItem - das GObject-Derivat
- * für EINEN Knoten im SondTreeviewFM-Baum - war bisher komplett in
- * sond_treeviewfm.c mituntergebracht. Reine Verschiebung hierher (samt
- * G_DEFINE_TYPE_WITH_PRIVATE() und allen sond_tvfm_item_*-Funktionen),
- * KEINE Verhaltensänderung. Zugriff auf SondTreeviewFMPrivate (für
- * root-Pfad etc.) über den Freund-Accessor sond_treeviewfm_get_priv() aus
- * sond_treeviewfm_private.h - analog zu sond_seadrive.c.
+ * SondTVFMItem - GObject-Derivat für EINEN Knoten im SondTreeviewFM-Baum;
+ * ausgelagert aus sond_treeviewfm.c (reine Verschiebung, keine
+ * Verhaltensänderung). Zugriff auf SondTreeviewFMPrivate über den
+ * Freund-Accessor sond_treeviewfm_get_priv() (sond_treeviewfm_private.h),
+ * analog sond_seadrive.c.
  *
- * Auf Nutzer-Entscheidung NUR verschoben: sond_treeviewfm.c greift
- * weiterhin an etlichen Stellen (Rename/Kopieren/Einfügen/Löschen-
- * Kaskaden, die mehrere Items gleichzeitig lesen/schreiben müssen) direkt
- * auf SondTVFMItemPrivate zu - das bleibt unverändert bestehen (über den
- * Freund-Accessor sond_tvfm_item_get_priv(), s. sond_treeviewfm_private.h),
- * genau wie sond_seadrive.c das für SondTreeviewFMPrivate schon tut. Die
- * vormals file-statischen Funktionen sond_tvfm_item_get_basename(),
- * sond_tvfm_item_rename(), sond_tvfm_item_copy(), sond_tvfm_item_move(),
- * delete_item() (jetzt sond_tvfm_item_delete()) und sond_tvfm_item_get_
- * fileparts() werden auch vom in sond_treeviewfm.c verbliebenen Baum-Code
- * aufgerufen und sind deshalb jetzt nicht mehr static, sondern in
- * sond_treeviewfm_private.h (nicht in der öffentlichen sond_tvfm_item.h!)
- * als modul-interne "Freund"-API deklariert - das entspricht genau ihrer
- * vorherigen Sichtbarkeit (file-static), nur jetzt auf zwei
- * Übersetzungseinheiten verteilt statt einer.
+ * sond_treeviewfm.c greift weiterhin direkt auf SondTVFMItemPrivate zu
+ * (Rename/Kopieren/Einfügen/Löschen-Kaskaden über mehrere Items) - über
+ * den Freund-Accessor sond_tvfm_item_get_priv(). Die vormals file-
+ * statischen Funktionen sond_tvfm_item_get_basename(), _rename(), _copy(),
+ * _move(), _delete() (früher delete_item()) und _get_fileparts() werden
+ * auch von dort aufgerufen und sind deshalb nicht mehr static, sondern in
+ * sond_treeviewfm_private.h (nicht der öffentlichen sond_tvfm_item.h) als
+ * modul-interne Freund-API deklariert.
  */
 
 #include "sond_tvfm_item.h"
@@ -152,21 +142,14 @@ void sond_tvfm_item_set_icon_name(SondTVFMItem* stvfm_item,
 	return;
 }
 
-/* Nutzer-Fund 21.09.2026 ("wenn aus BAUM_FS der Punkt 'Message' [bzw.
- * 'PageTree' bei PDF] angebunden wird, lautet die Beschriftung im
- * BAUM_INHALT ebenfalls 'Message'/'PageTree' - stattdessen sollte der
- * Dateiname genommen werden, wie beim Anbinden eines DIR"), korrigiert
- * nach Nutzer-Klarstellung ("nur beim Anbinden ändern - in BAUM_FS
- * sollen weiterhin 'Pagetree' bzw. 'Message' stehen, da steht ja der
- * Dateiname direkt darüber, keine Verwechslung möglich"): der
- * display_name der beiden synthetischen Marker-Knoten (PDF-PageTree,
- * GMESSAGE-Message) in BAUM_FS bleibt bewusst "PageTree"/"Message" - s.
- * sond_tvfm_item_create() unten, Marker-Zweige unverändert. Dieser
- * Helfer liefert NUR für den Anbinden-Pfad (s. sond_tvfm_item_get_
- * anbinden_label() unten) den echten Basename der Datei, zu der der
- * Marker-Knoten gehört - von sond_file_part_get_path() DES SondFilePart
- * selbst (der PDF- bzw. .eml-Datei), nicht von path_or_section (das für
- * diese Marker-Pfade "//" bzw. "//message" nur Datenmüll basename-t). */
+/* Liefert für die synthetischen Marker-Knoten (PDF-PageTree, GMESSAGE-
+ * Message) den echten Basename der zugehörigen Datei - von
+ * sond_file_part_get_path() DES SondFilePart selbst (PDF-/.eml-Datei),
+ * nicht von path_or_section (das für diese Marker-Pfade "//" bzw.
+ * "//message" nur Datenmüll basename-t). Nur für den Anbinden-Pfad
+ * gebraucht (s. sond_tvfm_item_get_anbinden_label() unten) - der
+ * display_name in BAUM_FS bleibt bewusst "PageTree"/"Message" (s.
+ * sond_tvfm_item_create()). */
 static gchar* sond_tvfm_item_basename_of_sfp_dup(SondFilePart *sond_file_part) {
 	gchar const *path = NULL;
 	gchar const *basename = NULL;
@@ -208,18 +191,13 @@ gchar const* sond_tvfm_item_get_basename(SondTVFMItem* stvfm_item) {
 	return basename;
 }
 
-/* Nutzer-Vorgabe 21.09.2026 ("Beschriftung nur beim Anbinden ändern, in
- * BAUM_FS soll weiterhin 'Pagetree'/'Message' stehen"): eigene, vom
- * normalen display_name UNABHÄNGIGE Beschriftung speziell für den
- * Anbinden-Pfad (s. zond_treeview_leaf_anbinden(), zond_treeview.c, die
- * diese Funktion statt sond_tvfm_item_get_display_name() aufruft). Für
- * die beiden synthetischen Marker-Knoten (is_content_root_marker, s.
- * sond_tvfm_item_create()) wird der echte Dateiname geliefert - für alle
- * anderen Knoten (auch DIR) unverändert der normale display_name, der
- * dort schon immer korrekt ist. IMMER ein neu alloziertes gchar* -
- * Aufrufer muss g_free()en, auch im Nicht-Marker-Fall (Kopie von
- * display_name), damit die Ownership-Regel für den Aufrufer einheitlich
- * ist und unabhängig vom Sonderfall bleibt. */
+/* Beschriftung speziell für den Anbinden-Pfad (s.
+ * zond_treeview_leaf_anbinden(), zond_treeview.c - ruft dies statt
+ * sond_tvfm_item_get_display_name() auf): für die synthetischen Marker-
+ * Knoten (is_content_root_marker) der echte Dateiname, sonst unverändert
+ * der normale display_name. Immer neu alloziert - Aufrufer muss immer
+ * g_free()en, auch im Nicht-Marker-Fall, damit die Ownership-Regel
+ * einheitlich bleibt. */
 gchar* sond_tvfm_item_get_anbinden_label(SondTVFMItem *stvfm_item) {
 	SondTVFMItemPrivate *stvfm_item_priv =
 			sond_tvfm_item_get_instance_private(stvfm_item);
@@ -384,10 +362,7 @@ SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM* stvfm,
 					stvfm_item_priv->path_or_section = NULL;
 					g_free(stvfm_item_priv->display_name); //Display-Name ersetzen
 					stvfm_item_priv->display_name = g_strdup("PageTree");
-					/* Nutzer-Vorgabe 21.09.2026: display_name in BAUM_FS
-					 * bleibt "PageTree" - nur beim Anbinden soll der echte
-					 * Dateiname verwendet werden (s. sond_tvfm_item_get_
-					 * anbinden_label()), daher hier nur das Flag setzen. */
+					//echter Dateiname nur beim Anbinden, s. get_anbinden_label()
 					stvfm_item_priv->is_content_root_marker = TRUE;
 				}
 			}
@@ -447,10 +422,7 @@ SondTVFMItem* sond_tvfm_item_create(SondTreeviewFM* stvfm,
 					stvfm_item_priv->path_or_section = NULL;
 					g_free(stvfm_item_priv->display_name); //Display-Name ersetzen
 					stvfm_item_priv->display_name = g_strdup("Message");
-					/* Nutzer-Vorgabe 21.09.2026: display_name in BAUM_FS
-					 * bleibt "Message" - nur beim Anbinden soll der echte
-					 * Dateiname verwendet werden (s. sond_tvfm_item_get_
-					 * anbinden_label()), daher hier nur das Flag setzen. */
+					//echter Dateiname nur beim Anbinden, s. get_anbinden_label()
 					stvfm_item_priv->is_content_root_marker = TRUE;
 				}
 				else if (path_or_section) { //Multipart-Verzeichnis
@@ -729,13 +701,6 @@ static gint sond_tvfm_item_load_gmessage_dir(SondTVFMItem* stvfm_item,
 
 		stvfm_item_message = sond_tvfm_item_create(stvfm_item_priv->stvfm,
 				stvfm_item_priv->sond_file_part, "//message");
-		/* Nutzer-Fund 21.09.2026 ("Beschriftung nur beim Anbinden ändern"):
-		 * die vormals hier zusätzlich vorgenommene, redundante
-		 * Display-Name-Zuweisung (auf denselben hartcodierten Platzhalter
-		 * "Message", den sond_tvfm_item_create() für den "//message"-
-		 * Marker ohnehin schon setzt) ersatzlos entfernt - reine
-		 * Code-Hygiene, keine Verhaltensänderung, da beide Zuweisungen
-		 * exakt denselben Wert setzten. */
 
 		g_ptr_array_add(*arr_children, stvfm_item_message);
 	}

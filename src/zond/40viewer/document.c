@@ -26,13 +26,8 @@ void document_free_displayed_documents(DisplayedDocument *dd) {
 	return;
 }
 
-/* Nutzer-Fund 20.09.2026 ("Warum dann get_pdf_pos nicht public machen?"):
- * die zunächst hier ergänzte Wrapper-Funktion document_get_pos_in_
- * anbindung() (s. Versionsgeschichte/ToDo.c) tat nach der Korrektur des
- * Peek/Drop-Umwegs nichts anderes mehr, als 1:1 an get_pdf_pos()
- * durchzureichen - ein Wrapper ohne jeden Mehrwert. Stattdessen jetzt
- * einfach get_pdf_pos() selbst nicht mehr static, mit Deklaration in
- * document.h - kein Umbenennen, keine zusätzliche Indirektionsebene. */
+/* Nicht mehr static, Deklaration in document.h - direkt von document.c
+ * (hier) und zond_treeview.c genutzt (s. Doc-Kommentar dort). */
 PdfPos get_pdf_pos(ZondPdfDocument* zpdfd, gboolean was_opened,
 		Anbindung* anbindung_ges, Anbindung* anbindung_node, gboolean end) {
 	PdfPos pdf_pos = { 0 };

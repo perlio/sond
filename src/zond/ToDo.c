@@ -3804,3 +3804,90 @@
  Nicht durch Kompilieren/Testen verifiziert.
 
  */
+
+/*
+ Offene Punkte (21.09.2026, Nutzer-Sammlung - erstmal nur notiert, nicht
+ umgesetzt):
+
+ #164 Suchen-Funktion (Popup-Entry): durchsucht aktuell live node_text +
+ Kommentartext der zond_treeviews sowie Dateinamen angebundener Dateien -
+ unabhängig vom (neueren) Volltext-Index (sond_index.c), der nur
+ Dateiinhalte erfasst, keine Knotentitel/Kommentare/Dateinamen. Fragen:
+ wird die Popup-Suche neben der Index-Suche noch gebraucht? Dafür
+ spricht: sie deckt node_text/Kommentare ab, die der Index gar nicht
+ erfasst (das sind Metadaten des Baums, keine Dateiinhalte) - ein
+ vollständiger Ersatz durch den Index bräuchte also ohnehin eine
+ Erweiterung des Indexschemas um genau diese Felder. Dateinamen: im Index
+ vermutlich nicht enthalten (der indiziert Inhalte, nicht Namen) - zu
+ prüfen; falls nicht, wäre eine Aufnahme (z.B. als durchsuchbares
+ Metadatenfeld pro file_part) eine Möglichkeit, beide Suchen ein Stück
+ weit zu vereinheitlichen. Eine Beschränkung der Popup-Suche auf die
+ zond_treeviews (statt z.B. auch BAUM_FS) ergibt Sinn, wenn ihr Zweck
+ gerade die knoten-/kommentarbezogene Suche ist, die es nur dort gibt.
+
+ #165 Code-Kommentare: die in dieser Session (und wohl auch vorher)
+ verwendete Form - ausführliche Herleitung mit Datumsangaben ("am xx.
+ haben wir X gemacht, drei Tage später Y") - ist aufgebläht und für
+ spätere Leser wenig hilfreich. Kommentare sollten künftig knapp auf was
+ gemacht wird und ggf. warum reduziert werden, ohne Versionsgeschichte.
+ Gilt als Stilvorgabe für neue Kommentare; ein nachträgliches Aufräumen
+ bestehender Kommentare ist ein separates, potenziell sehr großes
+ Vorhaben und hier nicht mitgemeint.
+
+ #166 sond_treeviewfm bekommt Dateien, die "von außen" (außerhalb der
+ App) auf Root-Ebene eingefügt werden, nicht mit - Baum aktualisiert sich
+ nicht automatisch. Zwei Ansätze: (a) Dateisystem-Watcher (GFileMonitor)
+ auf das Root-Verzeichnis, analog zum bereits vorhandenen SeaDrive-
+ Watcher-Mechanismus, der bei Änderungen die Kinder-Liste des
+ betroffenen DIR-Knotens invalidiert/neu lädt; (b) einfacher manueller
+ "Aktualisieren"-Menüpunkt, der für den aktuell selektierten (oder den
+ Root-)Knoten die Kinder neu einliest, ohne Hintergrundprozess. (b) ist
+ deutlich einfacher umzusetzen, verlangt aber eine bewusste Nutzeraktion;
+ (a) ist komfortabler, aber mehr Aufwand und Fehlerfläche (Symmetrie zu
+ den bekannten SeaDrive-Watcher-Bugs dieser Session zu bedenken).
+
+ #167 Import fremder Projekte in ein bestehendes Projekt: ein "Projekt"
+ ist eine eigene zond_dbase (SQLite) mit eigenem knoten-Baum und
+ Datei-Referenzen relativ zu einem Root-Verzeichnis. Import hieße:
+ (Teil-)Baum einer Fremd-DB in die aktuelle DB übernehmen, inkl.
+ abhängiger file_part-Zeilen. Zu klären: Auswahl-Granularität (ganzes
+ Fremdprojekt? nur ein Teilbaum?), ID-Remapping (Fremd-IDs kollidieren
+ mit eigenen), Umgang mit unterschiedlichen Root-Verzeichnissen (Dateien
+ mitkopieren oder nur Pfade umschreiben?) und Konfliktbehandlung bei
+ bereits vorhandenen gleichen Dateien/Pfaden. Technisch am ehesten
+ verwandt mit der bestehenden zond_dbase_backup(), die aber komplette
+ 1:1-Kopien macht statt selektiver Teilmengen.
+
+ #168 Exportfunktion: aktueller Zustand laut Nutzer unbefriedigend -
+ noch nicht untersucht, welche Datei/Funktion das konkret betrifft; das
+ wäre der erste Schritt vor einem Redesign.
+
+ #169 Projekt-Teilexport: markierte Punkte eines Baums (z.B. BAUM_INHALT
+ oder BAUM_AUSWERTUNG) samt zugehöriger Dateien als eigenständiges,
+ kleineres Projekt exportieren. Spiegelbildlich zu #167 (Import) - beide
+ bräuchten im Kern dieselbe Fähigkeit, einen Teilbaum samt abhängiger
+ file_parts konsistent zu extrahieren (einmal Richtung "rein", einmal
+ Richtung "raus" in eine neue zond_dbase mit eigenem Root-Verzeichnis,
+ in das die betroffenen Dateien kopiert würden). Gemeinsame Infrastruktur
+ für #167/#169 naheliegend.
+
+ #170 PDFs aus Auszug/markierten Punkten erzeugen: der bestehende
+ Auszug-Mechanismus (zond_treeview_open_auszug(), document.c) fügt PDF-
+ Segmente bereits zu einer gemeinsamen ANSICHT zusammen (mehrere
+ DisplayedDocument in einer Kette) - für eine echte Export-PDF-Datei
+ bräuchte es zusätzlich einen Schreibpfad, der dieselben Segmente (via
+ mupdf, das für das PDF-Handling ohnehin schon verwendet wird, s.
+ zond_pdf_document.c) tatsächlich in eine neue, physische PDF-Datei
+ zusammenführt statt nur anzuzeigen.
+ */
+
+/*
+ #165 (21.09.2026, Nutzer-Vorgabe "Kommentare im Code kürzen"): dated-
+ narrative Kommentare ("am xx.yy. haben wir...") in zond_treeview.c,
+ sond_tvfm_item.c/.h, sond_treeviewfm_private.h und document.c/.h auf
+ knappe "was + ggf. warum"-Form gekürzt, ohne Herleitungsgeschichte.
+ ToDo.c selbst bleibt als dieses datierte Journal unverändert im
+ bisherigen Stil. Nach jeder Änderung Klammer- (),{},[] und Kommentar-
+ balance (/* */, unter Berücksichtigung von //-Zeilenkommentaren und
+ String-/Char-Literalen) programmatisch geprüft - überall ausgeglichen.
+ */

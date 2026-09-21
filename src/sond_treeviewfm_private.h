@@ -2,29 +2,19 @@
 #define SOND_TREEVIEWFM_PRIVATE_H_INCLUDED
 
 /*
- * "Freund"-Header (18.09.2026, Refactoring "sond_treeviewfm.c/
- * sond_treeviewfm_seadrive.c sind riesige Trümmer"): G_DEFINE_TYPE_WITH_
- * PRIVATE() erzeugt normalerweise einen STATISCHEN inline-Accessor
- * (sond_treeviewfm_get_instance_private()/sond_tvfm_item_get_instance_
- * private()), der nur innerhalb DERSELBEN Übersetzungseinheit sichtbar
- * ist. Das ist der Grund, warum vorher sämtliche SeaDrive-Backend-Logik
- * (Ground-Truth-Hashtables für Badges/Coverage, Watcher-Start/Stop), die
- * direkten Zugriff auf SondTreeviewFMPrivate braucht, zwangsläufig in
- * sond_treeviewfm.c selbst landen musste, obwohl sie inhaltlich zu
- * SeaDrive gehört (Nutzer-Fund 18.09.2026: "in _treeviewfm.c sind auch
- * Funktionen, die in sond_treeviewfm_seadrive gehören").
- *
- * Dieser Header macht die beiden privaten Structs UND je einen normalen
- * (nicht-statischen) "Freund"-Accessor bekannt, damit sond_seadrive.c
- * (früher sond_treeviewfm_seadrive.c) direkt auf sie zugreifen kann,
- * ohne den öffentlichen API-Umfang von sond_treeviewfm.h zu vergrößern -
- * dieser Header ist NICHT für Aufrufer außerhalb von sond_treeviewfm.c/
- * sond_seadrive.c gedacht (deshalb kein Include in sond_treeviewfm.h).
- * Die G_DEFINE_TYPE_WITH_PRIVATE()-Makroaufrufe UND die eigentliche
- * GObject-Typregistrierung bleiben unverändert in sond_treeviewfm.c -
- * hier stehen nur die Struct-Definitionen (identisch zu vorher) und die
- * beiden Freund-Funktionsdeklarationen, deren Implementierung
- * (sond_treeviewfm.c) den jeweiligen Makro-Accessor 1:1 durchreicht.
+ * "Freund"-Header: G_DEFINE_TYPE_WITH_PRIVATE() erzeugt einen STATISCHEN
+ * inline-Accessor, der nur innerhalb derselben Übersetzungseinheit
+ * sichtbar ist. Dieser Header macht die beiden privaten Structs UND je
+ * einen normalen (nicht-statischen) "Freund"-Accessor bekannt, damit
+ * sond_seadrive.c direkt auf SondTreeviewFMPrivate/SondTVFMItemPrivate
+ * zugreifen kann (Ground-Truth-Hashtables für Badges/Coverage, Watcher),
+ * ohne die öffentliche API von sond_treeviewfm.h zu vergrößern - nicht
+ * für Aufrufer außerhalb von sond_treeviewfm.c/sond_seadrive.c gedacht
+ * (deshalb kein Include in sond_treeviewfm.h). Die
+ * G_DEFINE_TYPE_WITH_PRIVATE()-Makroaufrufe und die GObject-
+ * Typregistrierung bleiben in sond_treeviewfm.c - hier nur die Struct-
+ * Definitionen und die Freund-Funktionsdeklarationen, deren
+ * Implementierung den jeweiligen Makro-Accessor 1:1 durchreicht.
  */
 
 #include "sond_treeviewfm.h"
@@ -98,12 +88,9 @@ typedef struct {
 	SondTVFMItemType type;
 	SondFilePart* sond_file_part;
 	gchar* path_or_section;
-	/* Nutzer-Vorgabe 21.09.2026 ("Beschriftung nur beim Anbinden ändern,
-	 * in BAUM_FS soll weiterhin 'Pagetree'/'Message' stehen - da steht ja
-	 * der Dateiname direkt darüber"): markiert die beiden synthetischen
-	 * Marker-Kindknoten (PDF-PageTree bzw. GMESSAGE-Message), deren
-	 * display_name bewusst NICHT der echte Dateiname ist - s. ausführl.
-	 * Kommentar an sond_tvfm_item_get_anbinden_label() (sond_tvfm_item.c). */
+	/* Markiert die synthetischen Marker-Kindknoten (PDF-PageTree bzw.
+	 * GMESSAGE-Message), deren display_name bewusst NICHT der echte
+	 * Dateiname ist - s. sond_tvfm_item_get_anbinden_label() (sond_tvfm_item.c). */
 	gboolean is_content_root_marker;
 } SondTVFMItemPrivate;
 
