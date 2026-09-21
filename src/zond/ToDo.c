@@ -3361,4 +3361,365 @@
  kein Build/Testlauf durch mich möglich - bitte mit der Test.ZND
  gegenprüfen).
 
+ Feature (19./20.09.2026, Nutzer-Vorgabe, "Link-Klettern"): in
+ BAUM_AUSWERTUNG können mehrere Dateien/Dateiteile untereinander
+ angeordnet sein, so daß sie beim Öffnen als ein Gesamt-PDF angezeigt
+ werden (Auszug, s. zond_treeview_open_auszug()). Eine davon kann dabei
+ ein Link sein, der seinerseits die Anbindungen/Unterabschnitte seines
+ Ziels in BAUM_INHALT spiegelt. Bisher bestimmte beim Klick auf einen
+ solchen gespiegelten Unterabschnitt einfach dessen unmittelbarer
+ Anzeige-Elternknoten iter_parent für den Auszug - das kann aber selbst
+ wieder nur ein weiterer gespiegelter Zwischen-Link sein, so daß der
+ Auszug an der falschen (zu tief verschachtelten) Stelle ansetzte.
+
+ Nutzer-Vorgabe: die Klickposition bestimmt weiterhin, an welcher
+ Stelle geöffnet wird, aber WAS geöffnet wird (iter_parent), bestimmt
+ der oberste Punkt des Links auf diese Datei. Präzisiert: es macht
+ einen Unterschied, ob Link oder Copy - nur bei einem Link auf eine
+ Anbindung in BAUM_INHALT wird dessen Kette hochgeklettert, bis der
+ Link aufhört (nächster Anzeige-Elternknoten ist selbst kein Link mehr)
+ oder die Anbindung in BAUM_INHALT ihre oberste Ebene (reine Datei,
+ kein section mehr) erreicht hat. Copy-Knoten nehmen daran nicht teil.
+
+ Umsetzung: neue Hilfsfunktion zond_treeview_climb_link_chain()
+ (zond_treeview.c, vor zond_treeview_open_node()) - rein DB-basiert
+ (zond_treeview_get_filepart_and_section(), gtk_tree_model_iter_parent(),
+ zond_tree_store_is_link()), kein Dateizugriff. Eingebaut an zwei
+ Stellen in zond_treeview_open_node(): (1) in der günstigen
+ Hydrierungs-Vorprüfung (Task #154) - identische Klettersequenz, damit
+ die Vorhersage Einzel- vs. Multi-Hydrierung mit dem tatsächlich
+ später ermittelten iter_parent übereinstimmt; (2) in der eigentlichen
+ Auszug/Einzelansicht-Entscheidung ("Ziel ist Anbindung", Strg nicht
+ gedrückt) - hat der Anzeige-Elternknoten selbst Inhalt (sfp_parent)
+ UND ist er ein Link, wird zuerst geklettert und dann der oberste
+ erreichte Link so behandelt, als sei ER direkt angeklickt worden
+ (dessen eigener Anzeige-Elternknoten wird iter_parent, sofern der
+ keinen eigenen sfp trägt).
+
+ Nicht durch Kompilieren/Testen verifiziert.
+
+ Bug (20.09.2026, Nutzer-Fund): Struktur "Strukturpunkt A -> Kind ist
+ head-link B auf einen ANDEREN Strukturpunkt C -> dessen Kind ist Copy D
+ einer Anbindung in BAUM_INHALT -> dessen Kind ist Link E auf dieselbe
+ Anbindung". Klick auf die gespiegelte Kopie von E (unter B/mirror-of-D)
+ tat gar nichts; Klick auf E direkt (unter C/D) öffnete korrekt.
+
+ Ursache: zond_treeview_climb_link_chain() (s.o.) prüfte pro Ebene nur
+ "hat die AKTUELLE Anbindung schon die oberste Ebene (section==NULL)
+ erreicht", nicht aber, ob der NÄCHSTE Vorfahre überhaupt noch eine
+ Datei referenziert. Der Vorfahre von mirror-of-D ist mirror-of-B - ein
+ Link, aber auf einen STRUKTURPUNKT (C), nicht auf eine Datei - dessen
+ file_part ist ebenfalls NULL, was fälschlich wie "oberste Ebene
+ erreicht" behandelt wurde. Die Kette kletterte deshalb bis zu B hoch;
+ iter_parent wurde anschließend Strukturpunkt A, dessen einziges Kind
+ (B) selbst keine Datei ist und in zond_treeview_open_auszug() beim
+ Aufbau übersprungen wird (if (!sfp) continue;) - es blieben keine
+ Dokumente übrig, dd blieb NULL, der Klick blieb sichtbar wirkungslos.
+
+ Fix: vor jedem Klettern zu einem Vorfahren wird jetzt zusätzlich
+ dessen eigenes file_part geprüft - ist es NULL (Vorfahre referenziert
+ gar keine Datei, z.B. Link auf einen anderen Strukturpunkt statt auf
+ eine Anbindung), wird NICHT mehr dorthin geklettert, die Kette bleibt
+ auf der letzten echten Datei-Ebene stehen.
+
+ Bekannte, noch offene Nebenfrage (nicht Teil dieses Fixes):
+ zond_treeview_open_auszug() vergleicht die Klickposition (iter_pos)
+ nur gegen die DIREKTEN Kinder von iter_parent (Zeiger-Gleichheit). Ist
+ iter_parent jetzt (durch das Klettern) weiter oben angesiedelt als
+ vorher, kann iter_pos mehrere Ebenen tiefer liegen (wie E unter
+ mirror-of-D unter B) und wird beim Positionsabgleich nie gefunden -
+ das Dokument öffnet dann zwar (Hauptbug behoben), aber ggf. an der
+ falschen Stelle statt exakt an der angeklickten Anbindung. Bereits vor
+ dem Link-Klettern-Feature so vorhanden (z.B. beim ursprünglichen
+ Punkt4/Punkt5-Beispiel), durch das Klettern aber häufiger relevant.
+ Müsste ggf. auf Abstammungs-Prüfung (gtk_tree_path_is_ancestor()) statt
+ exakter Gleichheit umgestellt werden - noch nicht umgesetzt, mit dem
+ Nutzer noch nicht abschließend besprochen.
+
+ Nicht durch Kompilieren/Testen verifiziert.
+
+ Bug (20.09.2026, Nutzer-Fund, Folgefund zum vorigen Punkt): "Seiten-
+ anzeige (1/x) bleibt zunächst leer, Seite wird auch nicht angezeigt,
+ erst nach Scrollen." Genau die oben als offen vermerkte Nebenfrage
+ schlug jetzt konkret zu: in zond_treeview_open_auszug() verglich der
+ Positionsabgleich iter_pos (Klickposition) per exakter Zeiger-
+ Gleichheit (iter_pos->user_data == iter_tmp.user_data) NUR gegen die
+ DIREKTEN Kinder von iter_parent. Nach dem Link-Klettern kann iter_pos
+ aber mehrere Ebenen tiefer liegen als iter_tmp (z.B. ein gespiegelter
+ Unterabschnitt unter einem Link-Kind) - die Gleichheit traf nie zu,
+ found blieb FALSE, und die Schleife akkumulierte pdf_pos->seite immer
+ weiter (als läge iter_pos hinter dem gesamten Auszug). Der Viewer
+ versuchte danach, auf eine Seite HINTER dem ganzen Dokument zu
+ scrollen - zeigte deshalb zunächst nichts an, bis manuelles Scrollen
+ den sichtbaren Bereich neu berechnete und wieder eine gültige Seite
+ fand.
+
+ Fix: Positionsabgleich nutzt jetzt GtkTreePath-Vergleich
+ (gtk_tree_path_compare()/gtk_tree_path_is_ancestor()) statt exakter
+ Gleichheit - iter_tmp gilt als Treffer, wenn iter_pos IHM ENTSPRICHT
+ ODER IRGENDWO IN SEINEM TEILBAUM liegt. Die Position springt dann an
+ den (akkumulierten) Anfang von iter_tmp - im konkreten Fall (Link auf
+ dieselbe Anbindung wie das gefundene Kind) korrekt, weil beide
+ dieselbe Anbindung referenzieren; bei einer abweichenden, genaueren
+ Unterposition innerhalb eines gefundenen Kindes würde weiterhin nur
+ dessen Anfang angesprungen, nicht die exakte Unterposition - dafür
+ müsste iter_pos' eigene Anbindung zusätzlich ausgewertet werden
+ (bisher nicht nötig, da nicht aufgetreten).
+
+ Nicht durch Kompilieren/Testen verifiziert.
+
+ Überarbeitung (20.09.2026, Nutzer-Vorgabe): der bisherige Kletter-Test
+ in zond_treeview_climb_link_chain() ("section==NULL" = oberste Ebene
+ erreicht) war zu PDF-Anbindungs-spezifisch und wurde nach dem Bugfund
+ mit dem Link-auf-Strukturpunkt-Fall (s.o.) durch einen zusätzlichen
+ Sonderfall geflickt. Nutzer gab die eigentliche, allgemeingültige
+ Bedingung präzise vor: "Wenn iter_click (1) ein Link ist, dessen (2)
+ Ziel in BAUM_INHALT liegt und (3) als node_id vom type 5 [FILE_PART]
+ ist, (4) das aber nicht unmittelbar als type 2 [BAUM_INHALT_FILE]
+ angebunden ist, dann: eine Etage höher und gleiche Prüfung."
+
+ Fix: zond_treeview_climb_link_chain() komplett auf diese vier
+ Bedingungen umgestellt, pro Ebene neu geprüft (keine Sonderfall-Flicken
+ mehr nötig). Bedingungen 2+4 werden über die bereits vorhandene
+ zond_dbase_find_baum_inhalt_file() ermittelt (dieselbe Funktion, die
+ auch zond_treeview_get_root() nutzt): kein baum_inhalt_file gefunden ->
+ Bedingung 2 scheitert (Ziel liegt nicht/nicht mehr in BAUM_INHALT, z.B.
+ Link auf Strukturpunkt); gefundenes id_file_part entspricht bereits der
+ aktuellen node_id -> Bedingung 4 scheitert (schon unmittelbar
+ angebunden, oberste Ebene). Vorteil gegenüber dem alten section-Test:
+ funktioniert jetzt auch korrekt für nicht-PDF-Anbindungs-Container
+ (ZIP-Eintrag, eingebettete PDF, GMessage-Mimepart), die keine "section"
+ im Sinne einer Seiten-Anbindung haben, aber trotzdem nicht unmittelbar
+ angebundene, verschachtelte file_part-Knoten sind.
+
+ Nicht durch Kompilieren/Testen verifiziert.
+
+ Komplett-Neufassung (20.09.2026, Nutzer-Vorgabe): auch die um die vier
+ Bedingungen erweiterte zond_treeview_climb_link_chain() (s.o.) deckte
+ nicht alle Fälle ab - insbesondere den direkten Klick auf einen
+ Strukturpunkt im Auswertungsverzeichnis (kein Link, aber trotzdem
+ Ausgangspunkt für einen Auszug) sowie den Klick auf eine BAUM_AUSWERTUNG_
+ COPY (eigene, DB-Ebenen-Referenz auf eine Anbindung, kein GNode-Link).
+ Beide Fälle wurden bisher durch getrennten, teils dupliziertern Code vor
+ bzw. neben dem Klettern behandelt (Zweige "!sfp" und "Ziel ist
+ Anbindung" in zond_treeview_open_node()). Nutzer gab nach mehreren
+ Rückfragen und Gegenbeispielen (unter anderem node16: einfacher Link auf
+ eine ganze PDF-Datei, ohne Klettern; Punkt4/Punkt5: zweistufiger Fall,
+ Link auf Section verschachtelt in Link auf ganze Datei; sowie ein
+ vierstufiger Fall Strukturpunkt A -> Link B auf Strukturpunkt C -> Copy D
+ einer Anbindung -> Link E auf dieselbe Anbindung wie D) die
+ abschließende, einheitliche Formulierung als Pseudocode vor:
+
+   do {
+       iter_target = target(iter_click);
+       if (iter_target -> Strukturpunkt):
+           iter_parent = iter_click; break;
+       else if (iter_target -> COPY):
+           iter_parent = parent(iter_click); break;
+       else {
+           iter_click = parent(iter_click);
+           if (iter_target -> PDF/PDF-Section && !node_id(iter_target)
+                   ist unmittelbar als file_link angebunden):
+               continue;
+           else
+               break;
+       }
+   }
+   (iter_parent = iter_click, sofern die Schleife nicht schon vorher per
+   break mit eigenem iter_parent verlassen wurde)
+
+ Wichtig dabei (eigener Irrtum, vom Nutzer korrigiert): trifft iter_target
+ direkt beim allerersten Durchlauf (iter_click == ursprünglicher Klick)
+ auf einen Strukturpunkt, ist iter_parent NICHT der Strukturpunkt (das
+ Ziel/target) selbst, sondern iter_click - also die tatsächlich
+ angeklickte Position im Auswertungsverzeichnis. Das ist entscheidend,
+ weil iter_parent als Vorfahre der Klickposition INNERHALB des
+ Auswertungsverzeichnis-eigenen Baums an zond_treeview_open_auszug()
+ übergeben wird; das aufgelöste target liegt dagegen im BAUM_INHALT-Baum
+ und wäre dort fehl am Platz.
+
+ Fix: zond_treeview_climb_link_chain() vollständig ersetzt durch
+ zond_treeview_determine_iter_parent() (zond_treeview.c, vor
+ zond_treeview_open_node()) exakt nach obigem Pseudocode. Implementiert
+ als for(;;)-Schleife: pro Durchlauf zond_tree_store_get_iter_target() +
+ zond_tree_store_get_node_id() auf iter_click anwenden, dann per
+ zond_dbase_get_type_and_link() den DB-Typ des aufgelösten Ziels
+ bestimmen. BAUM_STRUKT -> iter_parent = iter_click (s. Korrektur oben).
+ BAUM_AUSWERTUNG_COPY -> iter_parent = parent(iter_click) (oder iter_click
+ selbst, falls kein Elternknoten vorhanden - Top-Level-Fall). Sonst
+ (FILE_PART/VIRT_PDF): bei fehlendem Elternknoten ebenfalls abbrechen mit
+ iter_parent = iter_click; bei vorhandenem Elternknoten und Typ FILE_PART
+ zusätzlich per zond_dbase_find_baum_inhalt_file() prüfen, ob das Ziel
+ (a) überhaupt in BAUM_INHALT verankert ist und (b) nicht schon
+ unmittelbar als file_link angebunden ist (Bedingungen 2+4 der vorigen
+ Fassung, s.o.) - nur dann eine Ebene hochklettern (iter_click = Eltern)
+ und weiterprüfen; andernfalls iter_parent = Elternknoten von iter_click
+ (Fall "Ziel ist Anbindung, kein Klettern nötig").
+
+ Beide bisherigen Aufrufstellen in zond_treeview_open_node() auf die neue
+ Funktion umgestellt: der vorgezogene #ifdef _WIN32-Check (Task #154)
+ sowie die "echte" Ermittlung weiter unten, wo jetzt die vormals
+ getrennten Zweige "!sfp" (direkter Strukturpunkt-Treffer) und "Ziel ist
+ Anbindung" zu einem einzigen Zweig zusammengefasst sind: sfp wird (falls
+ vorhanden) freigegeben, dann zond_treeview_determine_iter_parent() ab dem
+ ROHEN Klick-iter aufgerufen (nicht ab iter_target - die Funktion löst
+ target() selbst pro Durchlauf auf), und zond_treeview_open_auszug() mit
+ diesem iter_parent aufgerufen; iter_pos wird dabei NULL übergeben, wenn
+ iter_parent (Zeiger-)identisch mit dem ursprünglichen iter ist (direkter
+ Strukturpunkt-Treffer, kein Klettern), sonst iter selbst (Positions-
+ Treffer wie bisher). Der Strg-Override (erzwungene Einzelansicht) bleibt
+ als eigener, davor geprüfter Zweig erhalten, greift jetzt aber nur noch,
+ wenn das Ziel selbst Inhalt trägt (sfp != NULL) - ein Klick auf einen
+ reinen Strukturpunkt kennt kein "nur diese eine Anbindung" und läuft
+ deshalb auch bei gedrücktem Strg immer über den Auszug-Zweig.
+
+ Nicht durch Kompilieren/Testen verifiziert.
+
+ Nutzer bestätigt (20.09.2026, nach Build/Test): "Scheint zu klappen."
+ Anschließender Fund (20.09.2026, "ungünstig, zweimal iter_parent
+ ermitteln"): trotz der Zusammenlegung oben wurde iter_parent
+ tatsächlich weiterhin ZWEIMAL ermittelt - einmal im vorgezogenen
+ #ifdef _WIN32-Hydrierungscheck (Task #154), einmal in der "echten"
+ Weiche weiter unten. Beide Aufrufstellen prüften zufällig dieselbe,
+ vom rohen Klick-iter abhängige Bedingung, liefen aber unabhängig
+ voneinander.
+
+ Fix: iter_parent (zusammen mit dem dafür nötigen file_part_target und
+ einem neuen Flag have_iter_parent) wird jetzt GANZ AM ANFANG von
+ zond_treeview_open_node() genau einmal ermittelt (neue lokale
+ Variablen auf Funktionsebene, direkt nach dem Bestimmen von
+ baum/baum_click/iter_target, in einem eigenen Block noch vor dem
+ #ifdef _WIN32). Der #ifdef _WIN32-Hydrierungscheck verwendet danach
+ nur noch have_iter_parent/iter_parent/file_part_target, ohne
+ zond_treeview_get_filepart_and_section() oder
+ zond_treeview_determine_iter_parent() erneut aufzurufen. file_part_target
+ wird direkt nach dem (jetzt außerhalb des #ifdef liegenden, also auch
+ auf Nicht-Windows gültigen) #endif einmalig freigegeben und auf NULL
+ gesetzt; alle vorzeitigen return-Pfade innerhalb des #ifdef-Blocks
+ geben es vorher explizit frei. Die "echte" Ermittlung weiter unten
+ verwendet ebenfalls direkt iter_parent/have_iter_parent statt eines
+ zweiten Aufrufs - mit einem defensiven (im Normalfall nie greifenden)
+ Nachhol-Aufruf für den Fall, dass have_iter_parent wider Erwarten
+ FALSE ist (file_part_target und das später ermittelte "echte" sfp
+ werten denselben Knoten aus und müssen bzgl. NULL/nicht-NULL
+ übereinstimmen, s. dortigen Kommentar).
+
+ Voraussetzung für die Wiederverwendung über den Hydrierungscheck
+ hinweg: zwischen den beiden Verwendungsstellen findet keine
+ Strukturänderung am BAUM_AUSWERTUNG-GNode-Baum statt - die
+ SeaDrive-Hydrierung wirkt nur auf das Dateisystem/BAUM_FS, nie auf den
+ Auswertungsverzeichnis-Baum selbst -, iter_parent bleibt also über
+ beide Verwendungsstellen hinweg gültig.
+
+ Nicht durch Kompilieren/Testen verifiziert.
+
+ "Pos-Problem" (20.09.2026, Nutzer-Vorgabe, Fortsetzung des obigen
+ "Seitenanzeige bleibt zunächst leer"-Fixes in zond_treeview_open_auszug()):
+ lag iter_pos (die Klickposition) nicht unmittelbar unter iter_parent,
+ sondern verschachtelt unterhalb eines direkten Kindes iter_tmp (Link-
+ Klettern, s.o.), sprang die Position bisher pauschal an den Anfang (bzw.
+ bei Alt ans Ende) von iter_tmp - unabhängig davon, WO innerhalb von
+ iter_tmp iter_pos tatsächlich lag. Nutzer-Vorgabe (Message "iter_click
+ ist nicht unmittelbares Kind von iter_parent: Vorfahre unmittelbar
+ unter iter_parent ergibt Anbindung; iter_click Position innerhalb
+ dieser Anbindung"): die grobe Anbindung von iter_tmp liefert nur den
+ Bezugsrahmen (welches PDF-Dokument bzw. welcher Seitenbereich als
+ Ganzes angezeigt wird), die tatsächliche Position soll aber die exakte
+ Unterposition von iter_pos innerhalb dieses Bezugsrahmens sein.
+
+ Fix, zweiteilig:
+
+ 1. document.c/h: neue Funktion document_get_pos_in_anbindung() ergänzt -
+ kapselt dieselbe Berechnung wie das bestehende (weiterhin static)
+ get_pdf_pos() (Position von anbindung_node innerhalb von anbindung_ges,
+ inkl. Bereinigung um gelöschte Seiten), aber OHNE ein neues
+ DisplayedDocument anzulegen (kein zpdfd_part wird dauerhaft gehalten -
+ zpdfd_part_peek()/zpdfd_part_drop() unmittelbar gepaart). Gebraucht, weil
+ für iter_tmp bereits ein DisplayedDocument (dd_tmp) samt anbindung_ges
+ existiert und nur noch die Unterposition von iter_pos INNERHALB
+ desselben Bezugsrahmens gebraucht wird, ohne das Dokument ein zweites
+ Mal "richtig" zu öffnen.
+
+ 2. zond_treeview_open_auszug(): die bisherige is_match-Prüfung (iter_tmp
+ == iter_pos ODER Vorfahre von iter_pos, per GtkTreePath) wird jetzt in
+ is_self (exakte Übereinstimmung) und den allgemeineren is_match
+ aufgeteilt. Nur im is_self-Fall bleibt das bisherige Verhalten
+ (Anfang/Ende von iter_tmp) unverändert bestehen - das war schon vorher
+ exakt richtig, weil iter_tmp dort selbst die geklickte Anbindung ist.
+ Im verschachtelten Fall (is_match && !is_self) wird zusätzlich per
+ get_filepart_from_iter() auf iter_pos dessen eigene Anbindung
+ (anbindung_click) ermittelt und deren Position innerhalb von
+ iter_tmps anbindung_ges per document_get_pos_in_anbindung() berechnet;
+ das Ergebnis (pos_click) wird statt der bisherigen 0/Ende-Annahme auf
+ pdf_pos addiert. Voraussetzung: anbindung_click liegt in derselben
+ Datei wie iter_tmp (Normalfall bei verschachtelten Links/Copies
+ unterhalb von iter_tmp - sie setzen denselben gespiegelten Teilbaum
+ EINER Datei fort) - zur Absicherung per sond_file_part_get_path()-
+ Stringvergleich geprüft (g_strcmp0); weicht die Datei ab oder liefert
+ get_filepart_from_iter() für iter_pos gar kein sfp (Flag "precise"
+ bleibt FALSE), greift ersatzweise unverändert die alte, grobe
+ Anfang/Ende-von-iter_tmp-Lösung - kein Rückschritt gegenüber vorher,
+ nur eine Verbesserung für den Normalfall.
+
+ Nebenbei aufgeräumt: g_object_unref(sfp) für iter_tmps eigenes
+ SondFilePart lief bisher SOFORT nach document_new_displayed_document(),
+ noch vor der Positionsermittlung - musste ans Ende der Schleifeniteration
+ verschoben werden, weil document_get_pos_in_anbindung() weiterhin
+ dasselbe sfp (für iter_tmps Datei) braucht. Alle Fehlerpfade dazwischen
+ geben sfp jetzt explizit vor jedem return frei statt sich auf den
+ (dadurch nicht mehr erreichten) ursprünglichen einzelnen unref-Aufruf zu
+ verlassen.
+
+ Nicht durch Kompilieren/Testen verifiziert.
+
+ Nutzer-Fund (20.09.2026, direkt im Anschluss): "document_get_pos_in_
+ anbindung ruft doch auch zpdfd_part_peek auf. Das öffnet ein Objekt."
+ Berechtigter Einwand - die erste Fassung nahm ein SondFilePartPDF*
+ entgegen und peekte sich darüber selbst ein (im Nicht-Trefferfall sogar
+ neu angelegtes) ZPDFDPart, obwohl der Aufrufer
+ (zond_treeview_open_auszug()) das passende, gerade erst von
+ document_new_displayed_document() für iter_tmp gelieferte
+ ZondPdfDocument (dd_tmp->zpdfd_part->zond_pdf_document) in diesem Moment
+ längst besitzt - der Peek/Drop-Umweg war unnötig und stand im
+ Widerspruch zum eigenen Kommentar ("ohne das Dokument ein zweites Mal zu
+ öffnen").
+
+ Fix: document_get_pos_in_anbindung() (document.c/h) auf einen reinen,
+ nichts öffnenden Wrapper um get_pdf_pos() umgestellt - nimmt jetzt
+ direkt ein ZondPdfDocument* entgegen (kein SondFilePartPDF*, kein
+ GError** mehr nötig, kann nicht scheitern) und reicht nur noch durch.
+ zond_treeview_open_auszug() übergibt dafür
+ dd_tmp->zpdfd_part->zond_pdf_document direkt (ZPDFDPart-Struct-Zugriff,
+ da zond_pdf_document.h mit der vollen Struct-Definition bereits
+ eingebunden ist). was_opened kann dabei NICHT mehr erst an dieser Stelle
+ per zond_pdf_document_is_open() ermittelt werden - das Dokument ist zu
+ diesem Zeitpunkt ja immer schon offen (durch den eigenen
+ document_new_displayed_document()-Aufruf für iter_tmp) -, sondern muss
+ vom Aufrufer VORHER festgehalten werden: neue lokale Variable
+ was_opened_tmp, per zond_pdf_document_is_open(sfp) unmittelbar VOR dem
+ document_new_displayed_document()-Aufruf gesetzt (exakt der Zeitpunkt,
+ zu dem document_new_displayed_document() intern denselben Wert für
+ seine EIGENE get_pdf_pos()-Berechnung ermittelt).
+
+ document.h: neuer Vorwärts-Typedef "typedef struct _ZondPdfDocument
+ ZondPdfDocument;" ergänzt (analog general.h/project.h/zond_init.h/
+ zond_treeview.h), da ZondPdfDocument jetzt Teil der öffentlichen
+ Signatur ist.
+
+ Nicht durch Kompilieren/Testen verifiziert.
+
+ Nutzer-Fund (20.09.2026, direkt im Anschluss): "Warum dann get_pdf_pos
+ nicht public machen?" - berechtigt: document_get_pos_in_anbindung()
+ reichte nach obiger Korrektur nur noch 1:1 an get_pdf_pos() durch, ohne
+ jeden eigenen Mehrwert - eine Indirektionsebene ohne Zweck.
+
+ Fix: document_get_pos_in_anbindung() ersatzlos entfernt, get_pdf_pos()
+ stattdessen selbst nicht mehr static und in document.h deklariert (samt
+ dortigem Doc-Kommentar zu zpdfd/was_opened). zond_treeview_open_auszug()
+ ruft jetzt direkt get_pdf_pos() auf. Kein Umbenennen, keine zusätzliche
+ Funktion - schlicht der bestehende, schon vorher korrekte Rechenkern
+ direkt sichtbar gemacht.
+
+ Nicht durch Kompilieren/Testen verifiziert.
+
  */

@@ -94,6 +94,14 @@ static gint zond_treeview_get_root(ZondTreeview *ztv, gint node_id, gint *root,
 static gint zond_treeview_get_filepart_and_section(ZondTreeview *ztv, GtkTreeIter *iter,
 		gchar **file_part, gchar** section, GError **error);
 
+/* Nutzer-Vorgabe 20.09.2026 (s. Kommentar an
+ * zond_treeview_determine_iter_parent(), ToDo.c): ermittelt iter_parent für
+ * einen Klick in BAUM_AUSWERTUNG - deckt sowohl den direkten Strukturpunkt-
+ * Treffer als auch das Hochklettern durch Link-Ketten einheitlich ab. */
+static gint zond_treeview_determine_iter_parent(ZondTreeview *ztv,
+		GtkTreeIter *iter_click_start, GtkTreeIter *iter_parent,
+		GError **error);
+
 void zond_treeview_load_textview(Projekt* zond) {
 	if (zond->node_id_act == 0)
         gtk_text_buffer_set_text(
@@ -2716,6 +2724,7 @@ static gint zond_treeview_open_auszug(ZondTreeview* ztv, GtkTreeIter* iter_paren
 		Anbindung anbindung_ges = { 0 };
 		gint node_id = 0;
 		PdfPos pdf_pos_loop = { 0 };
+		gboolean was_opened_tmp = FALSE;
 
 		rc = get_filepart_from_iter(ztv,
 				&iter_tmp, &sfp, &anbindung_node, &node_id, error);
@@ -2747,11 +2756,24 @@ static gint zond_treeview_open_auszug(ZondTreeview* ztv, GtkTreeIter* iter_paren
 		else
 			anbindung_ges = anbindung_node;
 
+		/* Nutzer-Fund 20.09.2026 ("document_get_pos_in_anbindung ruft
+		 * zpdfd_part_peek auf - das öffnet ein Objekt"): was_opened MUSS
+		 * hier, VOR document_new_displayed_document() (das dieses PDF
+		 * gleich öffnet), festgehalten werden - danach wäre
+		 * zond_pdf_document_is_open() für dieses sfp immer TRUE, weil wir
+		 * es ja selbst gerade geöffnet haben. Gebraucht weiter unten für
+		 * document_get_pos_in_anbindung() bei einem verschachtelten
+		 * iter_pos-Treffer (s. dortigen Kommentar, "Pos-Problem"). */
+		was_opened_tmp = (zond_pdf_document_is_open(SOND_FILE_PART_PDF(sfp))
+				!= NULL);
+
 		dd_tmp = document_new_displayed_document(SOND_FILE_PART_PDF(sfp),
 				&anbindung_ges, &anbindung_node, TRUE, &pdf_pos_loop, error);
-		g_object_unref(sfp);
-		if (!dd_tmp)
+		if (!dd_tmp) {
+			g_object_unref(sfp);
+
 			return -1;
+		}
 
 		if (!dd_first) {
 			dd_first = dd_tmp;
@@ -2764,14 +2786,117 @@ static gint zond_treeview_open_auszug(ZondTreeview* ztv, GtkTreeIter* iter_paren
 
 		if (iter_pos || end) {
 			if (iter_pos && !found) {
-				if (iter_pos->stamp == iter_tmp.stamp &&
-						iter_pos->user_data == iter_tmp.user_data) {
+				/* Nutzer-Fund 20.09.2026 ("Seitenanzeige bleibt zunächst
+				 * leer, erst nach Scrollen"): iter_pos (die Klickposition)
+				 * kann seit dem Link-Klettern (s. ToDo.c, zond_treeview_
+				 * climb_link_chain()) mehrere Ebenen TIEFER liegen als
+				 * iter_tmp (direktes Kind von iter_parent) - z.B. wenn
+				 * iter_tmp ein Link ist, dessen gespiegelte Unterabschnitte
+				 * erst darunter liegen. Reine Zeiger-Gleichheit
+				 * (iter_pos->user_data == iter_tmp.user_data) fand solche
+				 * verschachtelten Klicks nie - found blieb FALSE, die
+				 * Schleife behandelte iter_pos so, als läge er HINTER dem
+				 * kompletten Auszug, und akkumulierte immer weiter
+				 * (pdf_pos->seite + 1 für jedes einzelne Kind). Ergebnis:
+				 * pdf_pos zeigte am Ende auf eine Seite hinter dem ganzen
+				 * Dokument - der Viewer versuchte, dorthin zu scrollen,
+				 * zeigte aber (aus dem Bereich) zunächst gar nichts an;
+				 * erst manuelles Scrollen (das den sichtbaren Bereich neu
+				 * berechnet) brachte wieder eine gültige Seite zum
+				 * Vorschein.
+				 *
+				 * Fix: statt exakter Gleichheit wird jetzt geprüft, ob
+				 * iter_tmp iter_pos ist ODER ein Vorfahre von iter_pos (per
+				 * GtkTreePath) - trifft das zu, ist iter_pos irgendwo
+				 * innerhalb des Teilbaums von iter_tmp geklickt worden.
+				 *
+				 * Präzisierung (Nutzer-Vorgabe 20.09.2026, "Pos-Problem"):
+				 * ist iter_tmp dabei nur VORFAHRE (nicht iter_pos selbst),
+				 * wird nicht mehr pauschal an den Anfang/das Ende von
+				 * iter_tmp gesprungen, sondern die exakte Unterposition
+				 * von iter_pos ermittelt - dessen eigene Anbindung wird
+				 * per get_filepart_from_iter() geholt und deren Position
+				 * INNERHALB von anbindung_ges (demselben Bezugsrahmen wie
+				 * pdf_pos_loop) per document_get_pos_in_anbindung()
+				 * berechnet (dieselbe Logik wie get_pdf_pos(), nur ohne
+				 * neues DisplayedDocument). Vorausgesetzt wird, dass
+				 * iter_pos in derselben Datei wie iter_tmp liegt (bei
+				 * verschachtelten Links/Copies unterhalb von iter_tmp der
+				 * Normalfall, da sie denselben gespiegelten Teilbaum einer
+				 * Datei fortsetzen) - zur Sicherheit wird das per
+				 * sond_file_part_get_path()-Vergleich geprüft; bei
+				 * Abweichung (sollte nicht vorkommen) greift ersatzweise
+				 * weiterhin die alte, grobe Anfang/Ende-von-iter_tmp-
+				 * Lösung. */
+				GtkTreePath *path_tmp = gtk_tree_model_get_path(model,
+						&iter_tmp);
+				GtkTreePath *path_pos = gtk_tree_model_get_path(model,
+						iter_pos);
+				gboolean is_self = (gtk_tree_path_compare(path_tmp,
+						path_pos) == 0);
+				gboolean is_match = is_self
+						|| gtk_tree_path_is_ancestor(path_tmp, path_pos);
+
+				gtk_tree_path_free(path_tmp);
+				gtk_tree_path_free(path_pos);
+
+				if (is_match) {
+					gboolean precise = FALSE;
+
 					found = TRUE;
 
-					if (end) {
-						pdf_pos->seite += pdf_pos_loop.seite ;
+					if (!is_self) {
+						SondFilePart *sfp_click = NULL;
+						Anbindung anbindung_click = { 0 };
+						gint node_id_click = 0;
+						gint rc2 = 0;
+
+						rc2 = get_filepart_from_iter(ztv, iter_pos,
+								&sfp_click, &anbindung_click,
+								&node_id_click, error);
+						if (rc2) {
+							g_object_unref(sfp);
+
+							return -1;
+						}
+
+						if (sfp_click) {
+							if (SOND_IS_FILE_PART_PDF(sfp_click)
+									&& !g_strcmp0(
+											sond_file_part_get_path(sfp_click),
+											sond_file_part_get_path(sfp))) {
+								/* Nutzer-Fund 20.09.2026 ("das öffnet ein
+								 * Objekt" / "warum dann get_pdf_pos nicht
+								 * public machen?"): dd_tmp->zpdfd_part->
+								 * zond_pdf_document ist dasselbe, längst
+								 * offene ZondPdfDocument, das zu
+								 * anbindung_ges gehört - kein erneutes
+								 * Peeken nötig, und statt eines reinen
+								 * 1:1-Wrappers wird jetzt direkt das
+								 * (nicht mehr static) get_pdf_pos()
+								 * aufgerufen, s. document.h. was_opened_tmp
+								 * wurde oben, VOR dem Öffnen dieses
+								 * Dokuments für iter_tmp, festgehalten. */
+								PdfPos pos_click = get_pdf_pos(
+										dd_tmp->zpdfd_part->zond_pdf_document,
+										was_opened_tmp, &anbindung_ges,
+										&anbindung_click, end);
+
+								pdf_pos->seite += pos_click.seite;
+								pdf_pos->index = pos_click.index;
+								precise = TRUE;
+							}
+
+							g_object_unref(sfp_click);
+						}
+					}
+
+					if (!precise && end) {
+						pdf_pos->seite += pdf_pos_loop.seite;
 						pdf_pos->index = EOP;
 					}
+					//!precise && !end: unverändert am (akkumulierten)
+					//Anfang von iter_tmp - wie bisher
 				}
 				else
 					pdf_pos->seite += pdf_pos_loop.seite + 1;
@@ -2779,6 +2904,8 @@ static gint zond_treeview_open_auszug(ZondTreeview* ztv, GtkTreeIter* iter_paren
 			else if (!iter_pos && end)
 				pdf_pos->seite += pdf_pos_loop.seite + 1;
 		}
+
+		g_object_unref(sfp);
 	} while (gtk_tree_model_iter_next(model, &iter_tmp));
 
 	//Wenn letzte Seite des Dokuments: nicht Anfang nächster Seite!
@@ -2819,6 +2946,132 @@ static gint zond_treeview_open_single_view(Projekt* zond, SondFilePart* sfp,
 	return 0;
 }
 
+/* Nutzer-Vorgabe 19./20.09.2026, final präzisiert 20.09.2026 (ToDo.c):
+ * ermittelt iter_parent für einen Klick in BAUM_AUSWERTUNG - deckt sowohl
+ * den direkten Strukturpunkt-Treffer, den direkten Copy-Treffer, als auch
+ * das Hochklettern durch Link-Ketten (verschachtelte Anbindungen
+ * mehrfach gespiegelter Dateien) einheitlich ab. Exakte, vom Nutzer als
+ * Pseudocode vorgegebene Fassung:
+ *
+ *   do {
+ *       iter_target = get_iter_target(iter_click);  //volle GNode-target-
+ *                                                    //Kette, s.u.
+ *       if (iter_target -> Strukturpunkt) { iter_parent = iter_click; break; }
+ *       else if (iter_target -> Copy)     { iter_parent = parent(iter_click); break; }
+ *       else {
+ *           iter_click = parent(iter_click);
+ *           if (iter_target -> PDF/PDF-Section && !ist_file_link(iter_target))
+ *               continue;
+ *           else { iter_parent = iter_click; break; }
+ *       }
+ *   } while (TRUE);
+ *
+ * "get_iter_target" ist zond_tree_store_get_iter_target() - löst NUR die
+ * GNode-target-Kette auf (Link-Spiegelungen), nicht die DB-Spalte "link"
+ * einer Copy. Eine Copy hat deshalb selbst dann kein weiteres target, wenn
+ * sie inhaltlich eine Datei/Anbindung repräsentiert - die Auflösung
+ * terminiert bei ihr selbst, wodurch "iter_target -> Copy" korrekt erkannt
+ * wird, GENAU DANN wenn iter_click (nach evtl. vorherigem Klettern durch
+ * echte Links) bei einer Copy (ob echt oder gespiegelt) ankommt. Eine
+ * gespiegelte Copy (target gesetzt, weil sie selbst irgendwo verlinkt
+ * auftaucht) zählt für die eigene Auflösungskette ihrer KINDER als weiterer
+ * Link-Schritt (deckt z.B. "Strukturpunkt -> head-link auf anderen
+ * Strukturpunkt -> dessen gespiegelte Copy -> deren gespiegelter Link auf
+ * dieselbe Anbindung" ab: das Klettern läuft durch die gespiegelte Copy
+ * hindurch bis zu deren eigenem Anzeige-Elternknoten, dem head-link).
+ *
+ * "ist_file_link" wird über zond_dbase_find_baum_inhalt_file() geprüft
+ * (dieselbe Funktion, die auch zond_treeview_get_root() nutzt): liefert sie
+ * gar keinen baum_inhalt_file, liegt iter_target nicht (mehr) in
+ * BAUM_INHALT (z.B. weil iter_target selbst wieder ein Strukturpunkt ist -
+ * dieser Fall wird aber schon vorher separat abgefangen); liefert sie ihn,
+ * aber deren id_file_part entspricht bereits der node_id von iter_target
+ * selbst, ist iter_target schon der unmittelbar angebundene file_part
+ * (oberste Ebene erreicht).
+ *
+ * Rein DB-basiert - kein Dateizugriff, deshalb sowohl für die günstige
+ * Hydrierungs-Vorprüfung (s. #ifdef _WIN32-Block in
+ * zond_treeview_open_node()) als auch für die eigentliche Öffnen-
+ * Entscheidung dort verwendbar. */
+static gint zond_treeview_determine_iter_parent(ZondTreeview *ztv,
+		GtkTreeIter *iter_click_start, GtkTreeIter *iter_parent,
+		GError **error) {
+	GtkTreeIter iter_click = *iter_click_start;
+	ZondTreeviewPrivate *ztv_priv = zond_treeview_get_instance_private(ztv);
+
+	for (;;) {
+		GtkTreeIter iter_target = { 0 };
+		gint node_id_target = 0;
+		gint type_target = 0;
+		gint link_dummy = 0;
+		gint rc = 0;
+		GtkTreeIter iter_click_up = { 0 };
+		gboolean has_parent = FALSE;
+
+		zond_tree_store_get_iter_target(&iter_click, &iter_target);
+		node_id_target = zond_tree_store_get_node_id(&iter_target);
+
+		rc = zond_dbase_get_type_and_link(
+				ztv_priv->zond->dbase_zond->zond_dbase_work, node_id_target,
+				&type_target, &link_dummy, error);
+		if (rc)
+			return -1;
+
+		if (type_target == ZOND_DBASE_TYPE_BAUM_STRUKT) {
+			*iter_parent = iter_click;
+			return 0;
+		}
+
+		if (type_target == ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_COPY) {
+			has_parent = gtk_tree_model_iter_parent(
+					GTK_TREE_MODEL(zond_tree_store_get_tree_store(&iter_click)),
+					iter_parent, &iter_click);
+			if (!has_parent) //sollte nicht vorkommen - Notlösung
+				*iter_parent = iter_click;
+			return 0;
+		}
+
+		//"else"-Fall: iter_target ist weder Strukturpunkt noch Copy - eine
+		//Ebene höher gehen und prüfen, ob das Ziel noch "unterwegs" ist
+		//(FILE_PART, aber noch nicht unmittelbar angebunden) oder schon die
+		//oberste Ebene erreicht hat (oder gar kein FILE_PART ist)
+		has_parent = gtk_tree_model_iter_parent(
+				GTK_TREE_MODEL(zond_tree_store_get_tree_store(&iter_click)),
+				&iter_click_up, &iter_click);
+
+		if (!has_parent) {
+			*iter_parent = iter_click; //kein Elternknoten mehr - hier bleiben
+			return 0;
+		}
+
+		if (type_target == ZOND_DBASE_TYPE_FILE_PART) {
+			gint baum_inhalt_file = 0;
+			gint id_file_part = 0;
+			gchar *file_part_dummy = NULL;
+
+			rc = zond_dbase_find_baum_inhalt_file(
+					ztv_priv->zond->dbase_zond->zond_dbase_work,
+					node_id_target, &baum_inhalt_file, &id_file_part,
+					&file_part_dummy, error);
+			if (rc)
+				return -1;
+			g_free(file_part_dummy);
+
+			if (baum_inhalt_file && id_file_part != node_id_target) {
+				//noch nicht oberste Ebene - eine Etage höher, gleiche Prüfung
+				iter_click = iter_click_up;
+				continue;
+			}
+		}
+
+		//iter_target ist entweder gar kein FILE_PART, oder schon unmittelbar
+		//angebunden (oberste Ebene) - hier bleiben, mit der bereits einen
+		//Schritt höher gesetzten Position
+		*iter_parent = iter_click_up;
+		return 0;
+	}
+}
+
 static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 		gboolean open_with, GError **error) {
 	gint rc = 0;
@@ -2830,6 +3083,9 @@ static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 	GtkTreeIter iter_target = { 0 };
 	Baum baum = KEIN_BAUM;
 	Baum baum_click = KEIN_BAUM;
+	GtkTreeIter iter_parent = { 0 };
+	gboolean have_iter_parent = FALSE;
+	gchar *file_part_target = NULL;
 
 	//Baum der KLICKPOSITION (unaufgelöst) - entscheidet, ob überhaupt
 	//Auswertungsverzeichnis-Logik (Auszug) in Frage kommt
@@ -2837,6 +3093,45 @@ static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 
 	zond_tree_store_get_iter_target(iter, &iter_target);
 	baum = zond_tree_store_get_root(zond_tree_store_get_tree_store(&iter_target));
+
+	/* Nutzer-Fund 20.09.2026 ("ungünstig, zweimal iter_parent ermitteln"):
+	 * iter_parent wird jetzt an genau EINER Stelle ermittelt - hier, ganz
+	 * am Anfang, sobald feststeht, ob der Klick überhaupt in den
+	 * Auszug-Pfad münden kann (Auswertungsverzeichnis, kein Strg-Override
+	 * auf ein Ziel mit eigenem Inhalt). Sowohl der SeaDrive-
+	 * Hydrierungs-Vorabcheck weiter unten (nur unter _WIN32) als auch die
+	 * eigentliche open_auszug()-Weiche ganz unten verwenden danach nur
+	 * noch diesen einen Wert. Das ist unproblematisch, weil zwischen
+	 * beiden Verwendungsstellen keine Strukturänderung am
+	 * BAUM_AUSWERTUNG-GNode-Baum stattfindet - die SeaDrive-Hydrierung
+	 * wirkt nur auf das Dateisystem/BAUM_FS, nie auf den
+	 * Auswertungsverzeichnis-Baum selbst, iter_parent bleibt also gültig.
+	 * Für die Ermittlung genügt hier die leichte, rein DB-basierte
+	 * zond_treeview_get_filepart_and_section() (kein Dateizugriff) - das
+	 * spätere "echte" sfp (aus get_filepart_from_iter(), mit Inhalts-
+	 * sniffing) muss zum selben Ergebnis (NULL oder nicht-NULL) kommen,
+	 * da beide denselben Knoten auswerten. */
+	{
+		gint ret = 0;
+
+		ret = zond_treeview_get_filepart_and_section(
+				ZOND_TREEVIEW(zond->treeview[baum]), &iter_target,
+				&file_part_target, NULL, error);
+		if (ret == -1)
+			return -1;
+
+		if (baum_click == BAUM_AUSWERTUNG
+				&& !(file_part_target && (zond->state & GDK_CONTROL_MASK))) {
+			ret = zond_treeview_determine_iter_parent(
+					ZOND_TREEVIEW(zond->treeview[BAUM_AUSWERTUNG]), iter,
+					&iter_parent, error);
+			if (ret == -1) {
+				g_free(file_part_target);
+				return -1;
+			}
+			have_iter_parent = TRUE;
+		}
+	}
 
 #ifdef _WIN32
 	/* Nutzer-Fund 18.09.2026: Doppelklick auf eine noch nicht hydrierte
@@ -2912,64 +3207,27 @@ static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 
 	if (sond_treeviewfm_is_seadrive_path(stvfm_fs)) {
 		const gchar *root = sond_treeviewfm_get_root(stvfm_fs);
-		gchar *file_part_target = NULL;
-		gboolean auszug_pre = FALSE;
-		GtkTreeIter iter_auszug_parent = { 0 };
-		gint ret = 0;
 
-		ret = zond_treeview_get_filepart_and_section(
-				ZOND_TREEVIEW(zond->treeview[baum]), &iter_target,
-				&file_part_target, NULL, error);
-		if (ret == -1)
-			return -1;
-
-		if (baum_click == BAUM_AUSWERTUNG && !file_part_target) {
-			//Ziel selbst ist Strukturpunkt -> Auszug der Ziel-Kinder
-			//(entspricht dem !sfp-Zweig weiter unten)
-			auszug_pre = TRUE;
-			iter_auszug_parent = iter_target;
-		}
-		else if (baum_click == BAUM_AUSWERTUNG && file_part_target &&
-				!(zond->state & GDK_CONTROL_MASK)) {
-			//Ziel ist Anbindung, Strg nicht gedrückt: Anzeige-
-			//Elternknoten der KLICKPOSITION (nicht iter_target!) prüfen -
-			//identische Semantik wie weiter unten bei "Ziel ist
-			//Anbindung", hier aber rein per DB-Abfrage.
-			GtkTreeIter iter_parent_tmp = { 0 };
-
-			if (gtk_tree_model_iter_parent(
-					GTK_TREE_MODEL(zond_tree_store_get_tree_store(iter)),
-					&iter_parent_tmp, iter)) {
-				gchar *file_part_parent = NULL;
-
-				ret = zond_treeview_get_filepart_and_section(
-						ZOND_TREEVIEW(zond->treeview[BAUM_AUSWERTUNG]),
-						&iter_parent_tmp, &file_part_parent, NULL, error);
-				if (ret == -1) {
-					g_free(file_part_target);
-					return -1;
-				}
-
-				if (!file_part_parent) {
-					auszug_pre = TRUE;
-					iter_auszug_parent = iter_parent_tmp;
-				}
-				g_free(file_part_parent);
-			}
-		}
-
-		if (auszug_pre) {
+		/* Nutzer-Fund 20.09.2026 ("ungünstig, zweimal iter_parent
+		 * ermitteln"): file_part_target und iter_parent/have_iter_parent
+		 * werden jetzt ganz oben in dieser Funktion EINMALIG ermittelt
+		 * (s. dortigen Kommentar) und hier nur noch verwendet - keine
+		 * erneuten Aufrufe von zond_treeview_get_filepart_and_section()
+		 * oder zond_treeview_determine_iter_parent() mehr. */
+		if (have_iter_parent) {
 			gint hyd_rc = 0;
-
-			g_free(file_part_target);
 
 			hyd_rc = zond_treeview_auszug_ensure_hydrated(zond,
 					ZOND_TREEVIEW(zond->treeview[BAUM_AUSWERTUNG]),
-					&iter_auszug_parent, error);
-			if (hyd_rc == -1)
+					&iter_parent, error);
+			if (hyd_rc == -1) {
+				g_free(file_part_target);
 				return -1;
-			if (hyd_rc == 1)
+			}
+			if (hyd_rc == 1) {
+				g_free(file_part_target);
 				return 0;
+			}
 		}
 		else if (root && file_part_target) {
 			const gchar *sep = g_strstr_len(file_part_target, -1, "//");
@@ -2980,15 +3238,17 @@ static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 					GTK_WINDOW(zond->app_window), full_path);
 			g_free(rel);
 			g_free(full_path);
-			g_free(file_part_target);
 
-			if (!is_local)
+			if (!is_local) {
+				g_free(file_part_target);
 				return 0;
+			}
 		}
-		else
-			g_free(file_part_target);
 	}
 #endif
+
+	g_free(file_part_target);
+	file_part_target = NULL;
 
 	rc = get_filepart_from_iter(ZOND_TREEVIEW(zond->treeview[baum]),
 			&iter_target, &sfp, &anbindung_node, &node_id, error);
@@ -3014,73 +3274,57 @@ static gint zond_treeview_open_node(Projekt *zond, GtkTreeIter *iter,
 		if (rc)
 			return -1;
 	}
-	else if (!sfp) { //Klick im Auswertungsverzeichnis, Ziel ist Strukturpunkt -> Auszug der Ziel-Kinder
-		/* Hydrierungscheck (Multi) läuft jetzt vorgezogen weiter oben
-		 * (s. dortigen Kommentar, Nutzer-Fund 19.09.2026) - hier nicht
-		 * mehr nötig. */
-		rc = zond_treeview_open_auszug(ZOND_TREEVIEW(zond->treeview[baum]),
-				&iter_target, NULL, (zond->state & GDK_MOD1_MASK), &dd, &pdf_pos, error);
+	else if (sfp && (zond->state & GDK_CONTROL_MASK)) {
+		/* Strg gedrückt UND Ziel trägt selbst Inhalt: genereller "nur diese
+		 * eine Anbindung"-Override, unabhängig von iter_parent -
+		 * Einzelansicht wie Klick im Bestandsverzeichnis. (Ein Klick ohne
+		 * eigenen Inhalt - reiner Strukturpunkt - kennt kein "nur diese
+		 * eine Anbindung" und läuft deshalb immer über den Auszug-Zweig
+		 * unten, auch bei gedrücktem Strg.) */
+		rc = zond_treeview_open_single_view(zond, sfp, &anbindung_node, node_id,
+				(zond->state & GDK_MOD1_MASK), &dd, &pdf_pos, error);
+		if (rc)
+			return -1;
+	}
+	else { //Klick im Auswertungsverzeichnis, kein Strg-Override
+		if (sfp)
+			g_object_unref(sfp);
+
+		/* Hydrierungscheck (Multi) läuft jetzt vorgezogen ganz oben in
+		 * dieser Funktion (s. dortigen Kommentar, Nutzer-Fund 19.09.2026) -
+		 * hier nicht mehr nötig.
+		 *
+		 * iter_parent (Nutzer-Vorgabe 20.09.2026, s. Kommentar an
+		 * zond_treeview_determine_iter_parent() UND am Anfang dieser
+		 * Funktion, Nutzer-Fund "ungünstig, zweimal iter_parent
+		 * ermitteln") wurde bereits ganz oben ermittelt und wird hier nur
+		 * noch verwendet, kein zweiter Aufruf mehr nötig. have_iter_parent
+		 * muss an dieser Stelle TRUE sein: der einzige Unterschied zur
+		 * dortigen Bedingung ist file_part_target (leichte DB-Abfrage) vs.
+		 * sfp (echtes SondFilePart) - beide werten denselben Knoten aus
+		 * und müssen bzgl. NULL/nicht-NULL übereinstimmen. Der Vollständig-
+		 * keit halber (defensiv, sollte nie greifen) hier trotzdem ein
+		 * Fallback auf den einzelnen Nachholaufruf. */
+		if (!have_iter_parent) {
+			rc = zond_treeview_determine_iter_parent(
+					ZOND_TREEVIEW(zond->treeview[BAUM_AUSWERTUNG]), iter,
+					&iter_parent, error);
+			if (rc)
+				return -1;
+		}
+
+		/* iter_pos == NULL genau dann, wenn iter_parent == iter selbst ist
+		 * (direkter Strukturpunkt-Treffer, s. zond_treeview_determine_
+		 * iter_parent()) - dann soll wie bisher ohne Positions-Treffer
+		 * geöffnet werden (Anfang bzw. bei Alt Ende des letzten Kindes). */
+		rc = zond_treeview_open_auszug(ZOND_TREEVIEW(zond->treeview[BAUM_AUSWERTUNG]),
+				&iter_parent,
+				(iter_parent.user_data == iter->user_data) ? NULL : iter,
+				(zond->state & GDK_MOD1_MASK), &dd, &pdf_pos, error);
 		if (rc) {
 			document_free_displayed_documents(dd);
 
 			return -1;
-		}
-	}
-	else { //Klick im Auswertungsverzeichnis, Ziel ist Anbindung
-		gboolean auszug = FALSE;
-		GtkTreeIter iter_parent = { 0 };
-
-		if (!(zond->state & GDK_CONTROL_MASK)) {
-			//Strg NICHT gedrückt: Elternknoten der Klickposition prüfen
-			SondFilePart *sfp_parent = NULL;
-			Anbindung anbindung_parent_dummy = { 0 };
-			gboolean has_parent = FALSE;
-
-			has_parent = gtk_tree_model_iter_parent(
-					GTK_TREE_MODEL(zond_tree_store_get_tree_store(iter)),
-					&iter_parent, iter);
-
-			if (has_parent) {
-				rc = get_filepart_from_iter(ZOND_TREEVIEW(zond->treeview[BAUM_AUSWERTUNG]),
-						&iter_parent, &sfp_parent, &anbindung_parent_dummy, NULL, error);
-				if (rc) {
-					g_object_unref(sfp);
-
-					return -1;
-				}
-
-				if (sfp_parent)
-					g_object_unref(sfp_parent);
-				else
-					auszug = TRUE; //Elternknoten = Strukturpunkt
-			}
-		}
-		//Strg gedrückt: auszug bleibt FALSE -> immer Einzelansicht, unabhängig vom
-		//Elternknoten (Strg = genereller "nur diese eine Anbindung"-Override)
-
-		if (auszug) {
-			//Elternknoten = Strukturpunkt -> Auszug mit Geschwistern der Klickposition
-			g_object_unref(sfp);
-
-			/* Hydrierungscheck (Multi) läuft jetzt vorgezogen ganz oben
-			 * in dieser Funktion (s. dortigen Kommentar, Nutzer-Fund
-			 * 19.09.2026) - hier nicht mehr nötig. */
-
-			rc = zond_treeview_open_auszug(ZOND_TREEVIEW(zond->treeview[BAUM_AUSWERTUNG]),
-					&iter_parent, iter, (zond->state & GDK_MOD1_MASK), &dd, &pdf_pos, error);
-			if (rc) {
-				document_free_displayed_documents(dd);
-
-				return -1;
-			}
-		}
-		else {
-			//Elternknoten selbst Anbindung, kein Elternknoten (Top-Level), oder Strg gedrückt
-			//-> Einzelansicht wie Klick im Bestandsverzeichnis
-			rc = zond_treeview_open_single_view(zond, sfp, &anbindung_node, node_id,
-					(zond->state & GDK_MOD1_MASK), &dd, &pdf_pos, error);
-			if (rc)
-				return -1;
 		}
 	}
 

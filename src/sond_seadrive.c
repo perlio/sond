@@ -1,23 +1,19 @@
 /*
- * sond_seadrive.c (bis 18.09.2026: sond_treeviewfm_seadrive.c)
- *
- * SeaDrive integration for SondTreeviewFM.
- * Windows-only - on Linux this compiles to an empty translation unit.
- *
- * Uses prepare_long_path() from sond_file_helper for consistent UTF-8
- * handling and long path support (>260 chars) throughout.
- *
- * Refactoring (18.09.2026, Nutzer-Fund "sond_treeviewfm.c und
- * sond_treeviewfm_seadrive.c sind riesen Trümmer! ... in _treeviewfm.c
- * sind auch Funktionen, die in sond_treeviewfm_seadrive gehören"): Modul
- * umbenannt (treeviewfm_seadrive -> seadrive) UND die ~800 Zeilen
- * SeaDrive-Backend-Logik (Ground-Truth-Hashtables für Badges/Coverage,
- * Watcher-Start/Stop), die vorher zwangsläufig in sond_treeviewfm.c
- * stehen mußte (G_DEFINE_TYPE_WITH_PRIVATE() erzeugt nur einen in dieser
- * Übersetzungseinheit sichtbaren statischen Accessor), hierher verschoben.
- * Zugriff auf SondTreeviewFMPrivate/SondTVFMItemPrivate jetzt über die
- * "Freund"-Accessoren sond_treeviewfm_get_priv()/sond_tvfm_item_get_priv()
- * aus sond_treeviewfm_private.h (dort ausführl. Kommentar zur Begründung).
+ sond (sond_seadrive.c) - Akten, Beweisstücke, Unterlagen
+ Copyright (C) 2026  pelo america
+
+ This program is free software: you can redistribute it and/or modify
+ it under the terms of the GNU Affero General Public License as
+ published by the Free Software Foundation, either version 3 of the
+ License, or (at your option) any later version.
+
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU Affero General Public License for more details.
+
+ You should have received a copy of the GNU Affero General Public License
+ along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 #include "sond_seadrive.h"
@@ -838,21 +834,7 @@ gboolean sond_seadrive_set_pin_state(const gchar *full_path,
  * dafür einfach mit CreateFileW(GENERIC_READ)+ReadFile() ein Byte gelesen
  * hat, um SeaDrive/Windows zum "Recall" zu bewegen.
  *
- * Regressions-Fund 18.09.2026 (s. ToDo.c): nach einem Windows-Update
- * (KB5124008, 08.09.2026 - laut Presseberichten ungewöhnlich umfangreich
- * und mit zahlreichen Kollateralschäden an unzusammenhängenden
- * Systemkomponenten) schlägt dieser rohe CreateFileW(GENERIC_READ)-Aufruf
- * bei SeaDrive-Platzhaltern zuverlässig mit GetLastError()=395
- * (ERROR_CLOUD_FILE_ACCESS_DENIED) fehl - auch nach Installation des
- * Notfall-Nachfolge-Updates (KB5129195) und nach vollständigem Neustart/
- * Neu-Build von zond selbst (also kein zond-Bug, s. Diagnose-Logging-
- * Auswertung). Die Windows-Dokumentation zu ERROR_CLOUD_FILE_ACCESS_DENIED
- * deckt sich damit: der Fehler tritt typischerweise auf, wenn eine
- * Anwendung eine noch nicht hydrierte Cloud-Datei mit einem gewöhnlichen
- * Lesezugriff öffnet, STATT die Hydrierung über die dafür vorgesehene
- * Cloud-Filter-API anzustoßen - genau das tat der alte Code.
- *
- * Diese Funktion verwendet stattdessen die offizielle, für genau diesen
+ * Diese Funktion stattdessen die offizielle, für genau diesen
  * Zweck vorgesehene CfHydratePlaceholder()-API (cfapi.h/cldapi.dll,
  * dynamisch geladen wie der Rest dieser Datei - s. Kommentar bei
  * cfapi_init_once(), derselbe Grund: kein cfapi.h im hier verwendeten
