@@ -4279,3 +4279,292 @@
  programmatisch geprüft - ausgeglichen. Nicht durch Kompilieren/Testen
  verifiziert.
  */
+
+/*
+ Bug in der #164/#175-Ergebnistabelle (22.09.2026, Nutzer-Fund): "Der Text
+ in der Spalte 'Bestandsverzeichnis' ist fast immer leer, obwohl es einen
+ Treffer gibt, weil die Datei genauso heißt."
+
+ Ursache in suchen_baue_row() (suchen.c): node_text/text der Spalte
+ "Bestandsverzeichnis" wurden vom BAUM_INHALT_FILE-Anker-Knoten selbst
+ gelesen (per zond_dbase_get_node(id_anbindung, ...)). Der Anker-Knoten
+ trägt aber laut etablierter Konvention nie eigenes icon_name/node_text/
+ text - er belegt nur die Position im knoten-Baum (s. Kommentar in
+ zond_treeview_copy_node_to_baum_auswertung(), zond_treeview.c, sowie
+ sämtliche zond_dbase_insert_node()-Aufrufe für
+ ZOND_DBASE_TYPE_BAUM_INHALT_FILE, die icon_name/node_text/text immer als
+ NULL übergeben). Angezeigt wird an allen anderen Stellen im Code deshalb
+ stattdessen der verlinkte, dauerhafte file_part-Knoten - genau das hat
+ suchen_baue_row() nicht getan, weshalb node_text/text dort praktisch
+ immer NULL waren.
+
+ Behoben: node_text/text werden jetzt im selben get_node()-Aufruf wie
+ row->file_part/row->section vom file_part-Knoten (file_part_node_id)
+ gelesen statt vom Anker-Knoten; der separate get_node(id_anbindung, ...)-
+ Aufruf dafür entfällt. Die Spalte bleibt weiterhin korrekt leer, wenn gar
+ keine Anbindung existiert - das entscheidet unverändert row->has_anbindung
+ in suchen_fuellen_row_composite(), nicht die Textfelder selbst.
+
+ Klammer- und Blockkommentarbalance in suchen.c programmatisch geprüft -
+ ausgeglichen. Nicht durch Kompilieren/Testen verifiziert.
+ */
+
+/*
+ Folgebug zu #177 (22.09.2026, Nutzer-Fund, unmittelbar im Anschluß):
+ "Klick auf Spalte Bestandsverzeichnis springt nur dann zum Knoten, wenn
+ keine Datei angebunden."
+
+ Ursache in suchen_fuellen_row_composite() (suchen.c): der klickbare
+ Sprung-Button für die Spalte "Bestandsverzeichnis" bekam als Sprungziel
+ row->anbindung_node_id - die echte ID des BAUM_INHALT_FILE-Anker-Knotens.
+ Beim Anbinden wird der dazugehörige, sichtbare Tree-Store-Eintrag aber
+ nicht unter dieser Anker-ID registriert, sondern unter der ID des
+ verlinkten, dauerhaften file_part-Knotens (s. Kommentar "Angezeigt wird
+ ID_file_part (nicht new_node_id!)" in zond_treeview_leaf_anbinden(),
+ zond_treeview.c - dieselbe Aliasierung, die schon #164/#177 betraf).
+ zond_treeview_get_path() sucht per node_id-Spalte im Tree-Store und fand
+ mit der Anker-ID nie eine Zeile - der Sprung verpuffte lautlos. Bei
+ Strukturpunkten (suchen_fuellen_row_simple()) trat das nicht auf, weil
+ dort die Knoten-ID unaliasiert mit sich selbst identisch ist - daher der
+ fälschliche Eindruck "nur ohne Datei funktioniert es".
+
+ Behoben: die Box "Bestandsverzeichnis" bekommt jetzt row->file_part_
+ node_id als Sprungziel statt row->anbindung_node_id. row->anbindung_
+ node_id bleibt unverändert dort in Gebrauch, wo tatsächlich die echte
+ Anker-ID gebraucht wird (zond_dbase_get_baum_auswertung_copies() sowie
+ die "baum"/"node-id"-Objektdaten der ganzen Zeile für "In Baum Auswertung
+ kopieren", das über zond_treeview_copy_node_to_baum_auswertung() anhand
+ des Anker-Typs entscheidet, wie es den Unterbaum kopiert - eine
+ file_part_node_id hätte dort falsches Verhalten erzeugt).
+
+ Bewußt nicht mitbehoben: Doppelklick auf die Zeile selbst
+ (cb_lb_row_activated(), separate "baum"/"node-id"-Objektdaten auf der
+ Zeile) bleibt bei Anbindungen weiterhin ohne Sprungziel-Treffer - dieselbe
+ Aliasierungs-Ursache, aber die Zeilen-Objektdaten dürfen wegen der
+ "kopieren"-Funktion nicht auf file_part_node_id umgestellt werden. Klick
+ auf die Box ist laut Nutzer-Vorgabe ohnehin der vorgesehene Sprung-Weg;
+ Doppelklick auf die Zeile wäre ein eigener, kleiner Folge-Fix (getrennte
+ Objektdaten je Zweck), falls der Nutzer das noch braucht.
+
+ Klammer- und Blockkommentarbalance in suchen.c programmatisch geprüft -
+ ausgeglichen. Nicht durch Kompilieren/Testen verifiziert.
+ */
+
+/*
+ Weiterer Folgebug zu #177/#178 (22.09.2026, Nutzer-Fund, unmittelbar im
+ Anschluß): "In BAUM_AUSWERTUNG sind Copies von einer Anbindung in
+ BAUM_INHALT. Diese werden auch angezeigt, aber nicht in einer Zeile mit
+ der Anbindung."
+
+ Ursache: zond_treeview_copy_node_to_baum_auswertung() (zond_treeview.c)
+ setzt bei einer Copy der ANBINDUNG SELBST (nicht eines Kind-Knotens
+ darunter) deren "link" auf den Wert, den die Anbindung selbst als "link"
+ trägt - das ist bereits die file_part-ID direkt, nicht die Anbindung. Der
+ sonst übliche Zwei-Hop-Pfad Copy->Anbindung->file_part existiert für
+ diesen Fall also gar nicht, sondern nur ein Ein-Hop-Pfad Copy->file_part.
+
+ Das betraf zwei Stellen in suchen.c, die beide nur den Zwei-Hop-Fall
+ kannten:
+
+ - suchen_resolve_file_part_node(): löste bei einer Copy der Anbindung
+   selbst keinen file_part-Bezug auf (type_ziel war FILE_PART, nicht
+   BAUM_INHALT_FILE) - der Rohtreffer landete dadurch als "kein
+   Datei-Bezug" in einer eigenen Strukturpunkt-Zeile statt in der
+   ResultRow der Anbindung aggregiert zu werden. Jetzt wird zusätzlich
+   type_ziel==FILE_PART erkannt und "link" direkt als file_part_node_id
+   übernommen.
+
+ - suchen_baue_row(): fragte Copies nur über zond_dbase_get_baum_
+   auswertung_copies(id_anbindung) ab (type=3 AND link=id_anbindung) -
+   fand dadurch Copies der Anbindung selbst gar nicht (deren link ist
+   file_part_node_id, nicht id_anbindung), auch nach obigem Fix nicht.
+   Jetzt zusätzlich eine zweite Abfrage mit link=file_part_node_id, beide
+   Ergebnislisten zusammengeführt in row->arr_copies.
+
+ Klammer- und Blockkommentarbalance in suchen.c programmatisch geprüft -
+ ausgeglichen. Nicht durch Kompilieren/Testen verifiziert.
+ */
+
+/*
+ Neues Feature zur #164-Ergebnistabelle (22.09.2026, Nutzer-Vorgabe): "Und
+ jetzt noch implementieren, daß man zum Knoten im BAUM_FS springen kann.
+ Entweder beim Click auf die Zeile oder auch Button einbauen."
+
+ Umgesetzt als Button, konsistent mit den übrigen Spalten (nicht Klick auf
+ die ganze Zeile): die Spalte "Dateiname" in suchen_fuellen_row_composite()
+ (suchen.c) ist jetzt selbst ein klickbarer GtkButton statt eines reinen
+ GtkLabel. Neue Funktion suchen_springe_zu_baum_fs(Projekt*, gchar const
+ *file_part) schaltet BAUM_FS bei Bedarf sichtbar (zond->fs_button, analog
+ zum bestehenden Umschalten für BAUM_AUSWERTUNG in
+ suchen_springe_zu_knoten()) und sucht dann per sond_treeviewfm_file_part_
+ visible(SOND_TREEVIEWFM(zond->treeview[BAUM_FS]), NULL, file_part, TRUE,
+ &iter, &error) - dieselbe, bereits in zond_indexsuche.c etablierte
+ Funktion für "Datei im dateisystembasierten Baummodell finden", mit
+ open=TRUE, damit dafür nötige, noch nicht aufgeklappte Verzeichnisse
+ automatisch nachgeladen werden. Bei Erfolg (rc==1) sond_treeview_set_
+ cursor() auf den gefundenen Iter - fokussiert und scrollt automatisch,
+ wie an anderer Stelle im Code üblich (s. sond_treeviewfm_results_row_
+ activated(), sond_treeviewfm.c).
+
+ file_part wird beim Bau des Buttons als eigene, mit g_free freizugebende
+ Kopie per g_object_set_data_full() auf dem Button hinterlegt (Schlüssel
+ "file-part") - die ResultRow (und damit row->file_part) wird bereits kurz
+ nach dem Befüllen des Ergebnisfensters wieder freigegeben (s.
+ suchen_anzeigen_ergebnisse()), ein reiner Zeiger auf row->file_part wäre
+ beim späteren Klick also bereits ungültig.
+
+ Neuer Include: "../../sond_treeviewfm.h" (für SOND_TREEVIEWFM-Makro und
+ sond_treeviewfm_file_part_visible()) - vorher nur transitiv über
+ zond_treeview.h/sond_treeview.h erreichbar, dort aber nicht deklariert.
+
+ Betrifft nur suchen_fuellen_row_composite() (Zeilen mit Datei-Bezug) -
+ suchen_fuellen_row_simple() (reine Strukturpunkte) hat keine Spalte
+ "Dateiname" und bleibt unverändert.
+
+ Klammer- und Blockkommentarbalance in suchen.c programmatisch geprüft -
+ ausgeglichen. Nicht durch Kompilieren/Testen verifiziert.
+ */
+
+/*
+ Nachtrag zum BAUM_FS-Sprung (22.09.2026, Nutzer-Fund, unmittelbar im
+ Anschluß): "Klappt. Aber wenn ich zu BAUM_FS springe bleibt die
+ Markierung in BAUM_INHALT bestehen."
+
+ suchen_springe_zu_baum_fs() (suchen.c) hat vor dem Setzen des Cursors in
+ BAUM_FS gefehlt, was suchen_springe_zu_knoten() für die anderen Bäume
+ schon macht: gtk_tree_selection_unselect_all() auf den jeweils NICHT
+ angesprungenen Bäumen. Jetzt ergänzt: unselect auf BAUM_INHALT und
+ BAUM_AUSWERTUNG vor dem Cursor-Setzen in BAUM_FS.
+
+ Klammer- und Blockkommentarbalance in suchen.c programmatisch geprüft -
+ ausgeglichen. Nicht durch Kompilieren/Testen verifiziert.
+ */
+
+/*
+ Refactoring des #180-BAUM_FS-Sprungs (22.09.2026, Nutzer-Hinweis direkt
+ im Anschluß): "Kanns Du da nicht die Implementierung aus jump-to-origin
+ verwenden?"
+
+ suchen_springe_zu_baum_fs() (suchen.c) rief bisher selbstgestrickt
+ sond_treeviewfm_file_part_visible() + sond_treeview_set_cursor() auf.
+ Es gibt dafür aber bereits eine etablierte, öffentliche Funktion für
+ genau diesen Zweck: zond_treeviewfm_set_cursor_on_section() (zond_
+ treeviewfm.c), die auch vom bestehenden "Sprung zur Herkunft" (zond_
+ treeview_jump_to_origin(), zond_treeview.c, Menüpunkt/Action "jump",
+ FILE_PART-Fall) genutzt wird. Umgestellt darauf - Vorteil gegenüber der
+ vorigen Fassung: berücksichtigt zusätzlich row->section (z.B.
+ Seitenbereich einer PDF-Datei), was die datei-only Fassung schlicht
+ ignoriert hätte. Dafür wird jetzt auch "section" (zusätzlich zu
+ "file-part") als eigene, freizugebende Kopie auf dem Button hinterlegt
+ (g_object_set_data_full, nur falls vorhanden).
+
+ Das Unselect von BAUM_INHALT/BAUM_AUSWERTUNG (Nachtrag von eben) bleibt
+ zusätzlich zur wiederverwendeten Funktion bestehen - zond_treeview_jump_
+ to_origin() selbst macht das nicht, braucht es aber auch nicht: dort wird
+ der Sprung immer aus BAUM_INHALT/BAUM_AUSWERTUNG selbst ausgelöst
+ (Menü-Action auf dem aktiven Baum), hier dagegen aus dem separaten
+ Suchergebnisfenster, wo die alte Markierung sonst optisch stehen bliebe.
+
+ Klammer- und Blockkommentarbalance in suchen.c programmatisch geprüft -
+ ausgeglichen. Nicht durch Kompilieren/Testen verifiziert.
+ */
+
+/*
+ Refactoring des Sprungs zu BAUM_INHALT/BAUM_AUSWERTUNG (22.09.2026,
+ Nutzer-Hinweis direkt im Anschluß an das BAUM_FS-Refactoring): "Und der
+ Sprung zum Knoten in den anderen beiden Bäumen? Kannst Du da nicht auch
+ etwas wiederverwenden?"
+
+ suchen_springe_zu_knoten() (suchen.c) nutzte zond_treeview_get_path()
+ (zond_treeview.c) für den Lookup - ein gtk_tree_model_foreach() über den
+ kompletten Baummodell-Inhalt, O(n) pro Aufruf. Genau dieses Muster hatten
+ die Tasks #39-41 bereits überall sonst im Code durch zond_tree_store_get_
+ iter_by_node_id() ersetzt (O(1) über eine intern mitgeführte Hashtabelle,
+ s. Kommentar dort) - suchen.c war seit der #164-Einführung der einzige
+ verbliebene Aufrufer der alten Funktion, offenbar übersehen, weil suchen.c
+ zu dem Zeitpunkt neu und unabhängig von der damaligen Migration entstand.
+
+ Umgestellt auf denselben Lookup wie überall sonst (zond_tree_store_get_
+ iter_by_node_id() + sond_treeview_expand_to_row() + sond_treeview_set_
+ cursor()). Dabei fiel eine zweite Vereinfachung ab: das bisherige manuelle
+ Verbinden/Emittieren/Trennen von "cursor-changed" um den Cursor-Aufruf
+ (nötig, weil das Ziel-Treeview zum Sprungzeitpunkt aus dem Suchfenster
+ heraus meist keinen Fokus und damit keine permanente "cursor-changed"-
+ Verbindung hat, s. cb_treeview_focus_in()/cb_treeview_focus_out(),
+ app_window.c) entfällt ersatzlos: sond_treeview_set_cursor() (sond_
+ treeview.c) ruft selbst am Ende gtk_widget_grab_focus() auf - das löst
+ über cb_treeview_focus_in() automatisch genau denselben Mechanismus aus
+ (Verbinden + einmaliges erzwungenes Emittieren von "cursor-changed"),
+ nur über den offiziellen, fokus-basierten Pfad statt einer eigenen
+ Kopie davon. Dieselbe Funktion setzt damit jetzt auch den Sprung zu
+ BAUM_FS (suchen_springe_zu_baum_fs(), s.o.) und zu BAUM_INHALT/
+ BAUM_AUSWERTUNG konsistent auf denselben, bereits etablierten Bausteinen
+ auf.
+
+ zond_treeview_get_path() (zond_treeview.c/.h) hat dadurch aktuell keinen
+ Aufrufer mehr - bewußt nicht entfernt (kein Teil dieser Anfrage, eigene
+ Entscheidung wäre ggf. später sinnvoll).
+
+ Klammer- und Blockkommentarbalance in suchen.c programmatisch geprüft -
+ ausgeglichen. Nicht durch Kompilieren/Testen verifiziert.
+ */
+
+/*
+ #182 Nachfrage/Vereinfachung (22.09.2026): "Müßte das unselect nicht durch
+ die focus-in/out-Callbacks erledigt werden?" - Nutzer stellt damit die eben
+ (Nachträge zu #180/#181) hinzugefügten manuellen gtk_tree_selection_
+ unselect_all()-Aufrufe in suchen_springe_zu_knoten() und suchen_springe_
+ zu_baum_fs() (suchen.c) in Frage.
+
+ Erste Antwort (widerlegt, s.u.): vermutet, cb_treeview_focus_in()
+ (app_window.c) erledige das bereits selbst (Vergleich baum_active/
+ baum_prev + unselect_all(selection[baum_prev]) + Reselect), da sond_
+ treeview_set_cursor() intern gtk_widget_grab_focus() aufruft. Die beiden
+ unselect_all()-Aufrufpaare in suchen_springe_zu_knoten() und suchen_
+ springe_zu_baum_fs() (suchen.c) daraufhin entfernt.
+
+ Nutzer-Test widerlegt das ("Kein unselect"): die Markierung blieb nach
+ Entfernen tatsächlich stehen. Ursache der falschen Annahme: gtk_widget_
+ grab_focus() setzt zwar den internen Fokus-Widget von app_window (via
+ gtk_window_set_focus()), löst "focus-in-event" bei GTK3 aber nur dann
+ synchron aus, wenn app_window auch die echte Fenstermanager-/GDK-Fokus
+ hat. Das Ergebnisfenster ist ein eigenständiges Top-Level-Fenster und hält
+ diese zum Zeitpunkt des Klicks - app_window bekommt sie dadurch nicht
+ automatisch zurück, cb_treeview_focus_in() feuert also nicht zuverlässig.
+ Innerhalb desselben Fensters (z.B. zond_treeview_jump_to_origin(), von
+ BAUM_INHALT/BAUM_AUSWERTUNG selbst ausgelöst) besteht dieses Problem nicht,
+ da app_window dort ohnehin schon fokussiert ist - deshalb kommt dieser
+ Fall ohne eigenes unselect_all aus, der Sprung aus dem separaten
+ Suchergebnisfenster aber nicht.
+
+ Beide unselect_all()-Aufrufpaare wieder eingebaut, Kommentare entsprechend
+ korrigiert (Grund: fensterübergreifender Fokuswechsel, nicht redundant).
+
+ Offene Frage/Beobachtung für später: dieselbe Unsicherheit betrifft
+ möglicherweise auch das im #181-Nachtrag beschriebene Entfallen des
+ manuellen "cursor-changed"-Connect/Emit (dort mit derselben, jetzt
+ widerlegten Grab-Focus-Annahme begründet) - falls Label/Textview nach
+ einem Sprung aus dem Suchfenster nicht aktualisiert werden, ist das
+ vermutlich dieselbe Ursache und müsste analog behoben werden.
+
+ Klammer- und Blockkommentarbalance in suchen.c programmatisch geprüft -
+ ausgeglichen. Nicht durch Kompilieren/Testen verifiziert.
+ */
+
+/*
+ #183 Folgebug zu #182 (22.09.2026): "Wenn man in BAUM_FS gesprungen ist und
+ springt in BAUM_INHALT, wird Markierung BAUM_FS nicht gelöscht."
+
+ suchen_springe_zu_knoten() (suchen.c) räumte beim Wiedereinbau der
+ unselect_all()-Aufrufe (#182-Nachtrag) nur BAUM_INHALT und BAUM_AUSWERTUNG
+ auf - BAUM_FS fehlte, weil es an dieser Stelle nie Sprungziel sein kann
+ (eigener Guard weiter oben in derselben Funktion) und deshalb beim
+ Kopieren der Aufrufpaare aus suchen_springe_zu_baum_fs() übersehen wurde.
+ Als Sprungherkunft (Markierung von einem vorherigen BAUM_FS-Sprung) kommt
+ es aber sehr wohl in Betracht.
+
+ gtk_tree_selection_unselect_all(zond->selection[BAUM_FS]) ergänzt.
+
+ Klammer- und Blockkommentarbalance in suchen.c programmatisch geprüft -
+ ausgeglichen. Nicht durch Kompilieren/Testen verifiziert.
+ */

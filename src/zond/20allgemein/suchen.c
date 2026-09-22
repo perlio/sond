@@ -23,6 +23,7 @@
 #include "../../misc.h"
 #include "../zond_dbase.h"
 #include "../zond_treeview.h"
+#include "../zond_treeviewfm.h"
 
 #include "../zond_dbase.h"
 #include "../zond_treeview.h"
@@ -32,9 +33,6 @@
 #include "../20allgemein/ziele.h"
 
 #include "project.h"
-
-//Prototype
-void zond_treeview_cursor_changed(ZondTreeview*, gpointer);
 
 typedef struct _Node {
 	gint zond_suchen;
@@ -238,10 +236,26 @@ static void cb_suchen_nach_auswertung(GtkMenuItem *item, gpointer user_data) {
  * immer sichtbar. Analoges Umschalten schon vorhanden in
  * zond_treeview_jump_to_iter() (zond_treeview.c) bzw. spiegelbildlich in
  * app_window.c (cb_jump_button_clicked). node_id==0 (Zeile ohne
- * Anbindung, s. suchen_fuellen_row_composite()) hat kein Sprungziel. */
+ * Anbindung, s. suchen_fuellen_row_composite()) hat kein Sprungziel.
+ *
+ * Lookup+Sprung jetzt wie überall sonst im Code über zond_tree_store_get_
+ * iter_by_node_id() (O(1)-Hashtable) + sond_treeview_expand_to_row() +
+ * sond_treeview_set_cursor() (Nutzer-Hinweis 22.09.2026, im Anschluß an
+ * den analogen BAUM_FS-Sprung: "Und der Sprung zum Knoten in den anderen
+ * beiden Bäumen? Kannst Du da nicht auch etwas wiederverwenden?") - vorher
+ * per zond_treeview_get_path(), dem einzigen verbliebenen Aufrufer des
+ * älteren O(n) gtk_tree_model_foreach()-Ansatzes, den Task #39-41 überall
+ * sonst schon ersetzt hatten. Das manuelle, temporäre Verbinden/Trennen
+ * von "cursor-changed" (um Label/Textview auch ohne bestehenden Fokus zu
+ * aktualisieren) entfällt dabei ersatzlos: sond_treeview_set_cursor()
+ * ruft am Ende gtk_widget_grab_focus() auf, was über cb_treeview_focus_in()
+ * (app_window.c) automatisch genau dasselbe erledigt - Verbinden von
+ * "cursor-changed" UND einmaliges erzwungenes Emittieren, s. dortigen
+ * Code. Das ist derselbe offizielle Mechanismus, den auch der neue
+ * BAUM_FS-Sprung (suchen_springe_zu_baum_fs()) und praktisch jeder andere
+ * programmatische Tree-Sprung im Code nutzt. */
 static void suchen_springe_zu_knoten(Projekt *zond, Baum baum, gint node_id) {
-	GtkTreePath *path = NULL;
-	gulong signal = 0;
+	GtkTreeIter *iter = NULL;
 
 	if (!node_id)
 		return;
@@ -249,10 +263,9 @@ static void suchen_springe_zu_knoten(Projekt *zond, Baum baum, gint node_id) {
 	/* baum==BAUM_FS kann aus dieser Suche strukturell nie ein gültiges
 	 * Sprungziel sein - node_id ist immer eine "knoten"-Tabellen-ID
 	 * (suchen_db()), BAUM_FS hat aber ein eigenes, dateisystembasiertes
-	 * Baummodell ohne solche IDs (zond_treeview_get_path() würde mit der
-	 * falschen Spalte lesen und stumm ins Leere laufen). Tritt das
-	 * trotzdem auf, ist es ein Verdrahtungsfehler beim Befüllen der
-	 * Ergebniszeile (s. #164-Nachtrag in ToDo.c) - kein normaler Aufruf. */
+	 * Baummodell ohne solche IDs. Tritt das trotzdem auf, ist es ein
+	 * Verdrahtungsfehler beim Befüllen der Ergebniszeile (s. #164-Nachtrag
+	 * in ToDo.c) - kein normaler Aufruf. */
 	if (baum == BAUM_FS) {
 		g_warning("suchen_springe_zu_knoten: BAUM_FS als Sprungziel "
 				"angefordert (node_id=%d) - kein gültiges Sprungziel aus "
@@ -267,20 +280,36 @@ static void suchen_springe_zu_knoten(Projekt *zond, Baum baum, gint node_id) {
 			&& gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(zond->fs_button)))
 		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(zond->fs_button), FALSE);
 
+	/* Manuelles unselect_all bleibt nötig, obwohl cb_treeview_focus_in()
+	 * (app_window.c) genau das eigentlich schon erledigt: gtk_widget_grab_
+	 * focus() (in sond_treeview_set_cursor() unten) löst focus-in-event bei
+	 * GTK3 nur dann synchron aus, wenn app_window auch tatsächlich die
+	 * Fenstermanager-Fokus hat - hier hält aber das separate Ergebnisfenster
+	 * den echten Fokus, app_window bekommt ihn dadurch nicht automatisch
+	 * zurück. cb_treeview_focus_in() feuert also nicht zuverlässig; das
+	 * Entfernen dieser Zeilen (Nachtrag #182) wurde vom Nutzer getestet und
+	 * per "Kein unselect" widerlegt - wieder eingebaut. BAUM_FS gehört mit
+	 * dazu (Nachtrag #183: "Wenn man in BAUM_FS gesprungen ist und springt
+	 * in BAUM_INHALT, wird Markierung BAUM_FS nicht gelöscht") - ursprünglich
+	 * vergessen, weil BAUM_FS hier selbst nie Sprungziel sein kann (s. Guard
+	 * oben), als Sprungherkunft aber sehr wohl in Frage kommt. */
+	gtk_tree_selection_unselect_all(zond->selection[BAUM_FS]);
 	gtk_tree_selection_unselect_all(zond->selection[BAUM_INHALT]);
 	gtk_tree_selection_unselect_all(zond->selection[BAUM_AUSWERTUNG]);
 
-	path = zond_treeview_get_path(zond->treeview[baum], node_id);
-	gtk_tree_view_expand_to_path(GTK_TREE_VIEW(zond->treeview[baum]), path);
+	iter = zond_tree_store_get_iter_by_node_id(
+			ZOND_TREE_STORE(gtk_tree_view_get_model(GTK_TREE_VIEW(zond->treeview[baum]))),
+			node_id);
+	if (!iter) {
+		g_warning("suchen_springe_zu_knoten: Knoten (node_id=%d) nicht "
+				"(mehr) in Baum %d gefunden.", node_id, baum);
+		return;
+	}
 
-	//kurz Signal verbinden, damit label und textview angezeigt werden
-	signal = g_signal_connect(zond->treeview[baum], "cursor-changed",
-			G_CALLBACK(zond_treeview_cursor_changed), zond);
-	gtk_tree_view_set_cursor(GTK_TREE_VIEW(zond->treeview[baum]), path, NULL,
-			FALSE);
-	g_signal_handler_disconnect(zond->treeview[baum], signal);
+	sond_treeview_expand_to_row(zond->treeview[baum], iter);
+	sond_treeview_set_cursor(zond->treeview[baum], iter);
 
-	gtk_tree_path_free(path);
+	gtk_tree_iter_free(iter);
 
 	return;
 }
@@ -295,6 +324,75 @@ static void cb_lb_row_activated(GtkWidget *listbox, GtkWidget *row,
 			g_object_get_data( G_OBJECT(row), "node-id" ));
 
 	suchen_springe_zu_knoten(zond, baum, node_id);
+
+	return;
+}
+
+/* Springt in BAUM_FS zur Datei "file_part"+"section" (wie in der knoten-
+ * Tabelle gespeichert, s. Kommentar in suchen_resolve_file_part_node()) -
+ * Nutzer-Vorgabe (22.09.2026): "Und jetzt noch implementieren, daß man
+ * zum Knoten im BAUM_FS springen kann." Nutzt bewußt dieselbe Funktion wie
+ * der bestehende "Sprung zur Herkunft" (zond_treeview_jump_to_origin(),
+ * zond_treeview.c, FILE_PART-Fall) statt eigener sond_treeviewfm_file_
+ * part_visible()-Verdrahtung - Nutzer-Hinweis (22.09.2026): "Kanns Du da
+ * nicht die Implementierung aus jump-to-origin verwenden?" zond_
+ * treeviewfm_set_cursor_on_section() berücksichtigt dabei zusätzlich die
+ * section (z.B. Seitenbereich einer PDF-Datei), was die vorige,
+ * file_part-only Fassung ignorierte. Schaltet BAUM_FS bei Bedarf sichtbar
+ * (teilt sich die Fläche mit BAUM_AUSWERTUNG, analog zum Umschalten in
+ * suchen_springe_zu_knoten() bzw. in zond_treeview_jump_to_origin()
+ * selbst). Manuelles unselect_all auf BAUM_INHALT/BAUM_AUSWERTUNG bleibt
+ * nötig: zwar löst zond_treeviewfm_set_cursor_on_section() intern ebenfalls
+ * sond_treeview_set_cursor()/grab_focus() aus, aber solange das separate
+ * Ergebnisfenster die echte Fenstermanager-Fokus hält, bekommt app_window
+ * sie dadurch nicht automatisch zurück und cb_treeview_focus_in() (app_
+ * window.c) feuert nicht zuverlässig - anders als beim direkten Vorbild
+ * zond_treeview_jump_to_origin(), das immer aus dem bereits fokussierten
+ * BAUM_INHALT/BAUM_AUSWERTUNG selbst ausgelöst wird. Testweise entfernt
+ * (Nachtrag #182) und vom Nutzer per "Kein unselect" widerlegt - wieder
+ * eingebaut. */
+static void suchen_springe_zu_baum_fs(Projekt *zond, gchar const *file_part,
+		gchar const *section) {
+	GError *error = NULL;
+	gint rc = 0;
+
+	if (!file_part || !*file_part)
+		return;
+
+	if (!gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(zond->fs_button)))
+		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(zond->fs_button), TRUE);
+
+	gtk_tree_selection_unselect_all(zond->selection[BAUM_INHALT]);
+	gtk_tree_selection_unselect_all(zond->selection[BAUM_AUSWERTUNG]);
+
+	rc = zond_treeviewfm_set_cursor_on_section(
+			ZOND_TREEVIEWFM(zond->treeview[BAUM_FS]), file_part, section,
+			&error);
+	if (rc) {
+		display_message(zond->app_window,
+				"Fehler beim Springen zu BAUM_FS -\n\n"
+						"Bei Aufruf zond_treeviewfm_set_cursor_on_section:\n",
+				error->message, NULL);
+		g_error_free(error);
+	}
+
+	return;
+}
+
+/* Klick auf die Spalte "Dateiname" (s. suchen_fuellen_row_composite()) -
+ * file_part/section stehen als eigene Kopien auf dem Button
+ * (g_object_set_data_full mit g_free), da die ResultRow (und damit
+ * row->file_part/row->section) bereits kurz nach dem Befüllen des
+ * Ergebnisfensters wieder freigegeben wird (s.
+ * suchen_anzeigen_ergebnisse()). */
+static void cb_suchen_dateiname_geklickt(GtkButton *button,
+		gpointer user_data) {
+	Projekt *zond = (Projekt*) user_data;
+
+	gchar const *file_part = g_object_get_data(G_OBJECT(button), "file-part");
+	gchar const *section = g_object_get_data(G_OBJECT(button), "section");
+
+	suchen_springe_zu_baum_fs(zond, file_part, section);
 
 	return;
 }
@@ -383,10 +481,30 @@ static GtkWidget* suchen_zelle_leer(void) {
  * suchen_erzeugen_ergebnisfenster()) halten die drei Spalten über alle
  * Zeilen und die Kopfzeile hinweg gleich breit, obwohl jede Zeile eine
  * eigenständige GtkBox ist. Die Zeile selbst trägt zusätzlich "baum"/
- * "node-id" der Anbindung (0/0 ohne Anbindung), damit Doppelklick auf die
- * Zeile allgemein (cb_lb_row_activated()) und "In Baum Auswertung
+ * "node-id" der Anbindung (0/0 ohne Anbindung), damit "In Baum Auswertung
  * kopieren" (suchen_kopieren_listenpunkt(), arbeitet auf der
- * Zeilenauswahl) weiterhin ein sinnvolles Ziel haben. */
+ * Zeilenauswahl) ein sinnvolles Ziel hat - dafür wird bewußt die echte
+ * ID des BAUM_INHALT_FILE-Anker-Knotens (row->anbindung_node_id)
+ * gebraucht, da zond_treeview_copy_node_to_baum_auswertung() anhand
+ * dieses Typs entscheidet, wie es den Unterbaum kopiert.
+ *
+ * Für den Sprung per Klick auf die Box selbst (suchen_box_knoten(),
+ * BAUM_INHALT) darf dagegen NICHT diese Anker-ID verwendet werden: beim
+ * Anbinden wird der sichtbare Tree-Store-Eintrag nicht unter der ID des
+ * Anker-Knotens registriert, sondern unter der ID des verlinkten,
+ * dauerhaften file_part-Knotens (s. Kommentar "Angezeigt wird ID_file_part
+ * (nicht new_node_id!)" in zond_treeview.c, zond_treeview_leaf_anbinden())
+ * - zond_treeview_get_path() sucht per node_id-Spalte im Tree-Store und
+ * fände mit der Anker-ID nie etwas. Bug (22.09.2026, Nutzer-Fund): "Klick
+ * auf Spalte Bestandsverzeichnis springt nur dann zum Knoten, wenn keine
+ * Datei angebunden" - bei Strukturpunkten (suchen_fuellen_row_simple())
+ * tritt das nicht auf, weil dort node_id mit der echten, unaliasierten
+ * Knoten-ID identisch ist. Doppelklick auf die Zeile selbst
+ * (cb_lb_row_activated()) bleibt von diesem Fix unberührt und springt bei
+ * Anbindungen weiterhin nicht - dafür müßte "node-id" der Zeile auf
+ * dieselbe Weise gedoppelt werden wie hier für die Box; nicht Teil dieses
+ * Fixes (Klick auf die Box ist laut Nutzer-Vorgabe der eigentliche
+ * Sprung-Weg). */
 static void suchen_fuellen_row_composite(Projekt *zond, GtkWidget *list_box,
 		GtkSizeGroup *sg_filepart, GtkSizeGroup *sg_inhalt,
 		GtkSizeGroup *sg_auswertung, ResultRow *row) {
@@ -407,16 +525,32 @@ static void suchen_fuellen_row_composite(Projekt *zond, GtkWidget *list_box,
 	else
 		text_kopf = g_strdup(row->file_part ? row->file_part : "");
 
-	label_kopf = gtk_label_new(text_kopf);
-	g_free(text_kopf);
-	gtk_widget_set_halign(label_kopf, GTK_ALIGN_START);
+	//Spalte "Dateiname" jetzt klickbar - springt zur Datei in BAUM_FS (s.
+	//suchen_springe_zu_baum_fs()). Bewußt ein GtkButton wie bei den
+	//übrigen Spalten (suchen_box_knoten()), nicht Klick auf die ganze
+	//Zeile - Nutzer-Vorgabe (22.09.2026): "Entweder beim Click auf die
+	//Zeile oder auch Button einbauen".
+	label_kopf = gtk_button_new();
 	gtk_widget_set_valign(label_kopf, GTK_ALIGN_START);
+	gtk_container_add(GTK_CONTAINER(label_kopf), gtk_label_new(text_kopf));
+	gtk_widget_set_halign(gtk_bin_get_child(GTK_BIN(label_kopf)),
+			GTK_ALIGN_START);
+	g_object_set_data_full(G_OBJECT(label_kopf), "file-part",
+			g_strdup(row->file_part ? row->file_part : ""), g_free);
+	if (row->section && *row->section)
+		g_object_set_data_full(G_OBJECT(label_kopf), "section",
+				g_strdup(row->section), g_free);
+	g_signal_connect(label_kopf, "clicked",
+			G_CALLBACK(cb_suchen_dateiname_geklickt), zond);
+	g_free(text_kopf);
 	gtk_size_group_add_widget(sg_filepart, label_kopf);
 	gtk_box_pack_start(GTK_BOX(hbox), label_kopf, FALSE, FALSE, 0);
 
 	if (row->has_anbindung) {
+		//Sprungziel bewußt file_part_node_id, nicht anbindung_node_id - s.
+		//Funktionskommentar oben.
 		zelle_inhalt = suchen_box_knoten(zond, BAUM_INHALT,
-				row->anbindung_node_id, row->anbindung_node_text,
+				row->file_part_node_id, row->anbindung_node_text,
 				row->anbindung_text);
 
 		baum_row = BAUM_INHALT;
@@ -758,7 +892,18 @@ static gint suchen_db(Projekt *zond, const gchar *text, GArray *arr_treffer,
 /* Löst einen Rohtreffer (Knoten-ID aus suchen_db()) auf die ID des
  * zugehörigen file_part-Knotens auf (Basis-Datei oder Section) - über
  * den Knoten selbst (FILE_PART), seine Anbindung (BAUM_INHALT_FILE) oder
- * eine Copy davon (BAUM_AUSWERTUNG_COPY, zwei Hops über link->link).
+ * eine Copy davon (BAUM_AUSWERTUNG_COPY). Bei der Copy zeigt "link" je
+ * nachdem, WELCHER Knoten kopiert wurde, unterschiedlich weit: wurde die
+ * Anbindung selbst kopiert (zond_treeview_copy_node_to_baum_auswertung()),
+ * übernimmt die Copy deren "link" 1:1 - das ist bereits die file_part-ID
+ * (ein Hop). Wurde dagegen ein Kind-Knoten innerhalb der Anbindung
+ * kopiert, zeigt "link" auf die BAUM_INHALT_FILE-Anbindung selbst, deren
+ * "link" erst die file_part-ID liefert (zwei Hops). Beide Fälle müssen
+ * hier unterschieden werden - ursprünglich wurde nur der Zwei-Hop-Fall
+ * behandelt, wodurch Copies der Anbindung selbst fälschlich als "kein
+ * Datei-Bezug" galten und als eigenständige Zeile statt zusammen mit der
+ * Anbindung erschienen (Nutzer-Fund 22.09.2026).
+ *
  * *file_part_node_id bleibt 0, wenn der Knoten keinen Datei-Bezug hat
  * (z.B. ein reiner Strukturpunkt) - 0 ist als Knoten-ID nie vergeben
  * (echte Knoten beginnen ab ID 3, s. zond_dbase_create_db_maj_1()). */
@@ -780,20 +925,25 @@ static gint suchen_resolve_file_part_node(Projekt *zond, gint node_id,
 	else if (type == ZOND_DBASE_TYPE_BAUM_INHALT_FILE)
 		*file_part_node_id = link;
 	else if (type == ZOND_DBASE_TYPE_BAUM_AUSWERTUNG_COPY) {
-		gint type_anbindung = 0;
-		gint link_anbindung = 0;
+		gint type_ziel = 0;
+		gint link_ziel = 0;
 
 		rc = zond_dbase_get_type_and_link(zond->dbase_zond->zond_dbase_work,
-				link, &type_anbindung, &link_anbindung, error);
+				link, &type_ziel, &link_ziel, error);
 		if (rc)
 			return -1;
 
-		//link zeigt normalerweise auf eine BAUM_INHALT_FILE-Anbindung (s.
-		//Doc-Kommentar zond_dbase_create_db_maj_1()) - der dort ebenfalls
-		//erwähnte VIRT_PDF-Fall wird aktuell nirgends erzeugt und hier
-		//defensiv als "kein Datei-Bezug auflösbar" behandelt.
-		if (type_anbindung == ZOND_DBASE_TYPE_BAUM_INHALT_FILE)
-			*file_part_node_id = link_anbindung;
+		if (type_ziel == ZOND_DBASE_TYPE_FILE_PART)
+			//Ein Hop: Copy der Anbindung selbst, "link" ist bereits die
+			//file_part-ID (s. Funktionskommentar oben).
+			*file_part_node_id = link;
+		//Zwei Hops: Copy eines Kind-Knotens, "link" zeigt auf die
+		//BAUM_INHALT_FILE-Anbindung - der dort ebenfalls erwähnte
+		//VIRT_PDF-Fall (Doc-Kommentar zond_dbase_create_db_maj_1()) wird
+		//aktuell nirgends erzeugt und hier defensiv als "kein Datei-Bezug
+		//auflösbar" behandelt.
+		else if (type_ziel == ZOND_DBASE_TYPE_BAUM_INHALT_FILE)
+			*file_part_node_id = link_ziel;
 	}
 
 	return 0;
@@ -801,7 +951,17 @@ static gint suchen_resolve_file_part_node(Projekt *zond, gint node_id,
 
 /* Baut eine vollständige ResultRow zu einem file_part-Knoten: file_part
  * +section, sowie - falls vorhanden - die Anbindung in BAUM_INHALT und
- * alle ihre Copies in BAUM_AUSWERTUNG, jeweils mit node_text+text. */
+ * alle ihre Copies in BAUM_AUSWERTUNG, jeweils mit node_text+text.
+ *
+ * node_text/text der Anbindung (BAUM_INHALT_FILE) werden bewußt NICHT vom
+ * Anker-Knoten selbst gelesen, sondern vom verlinkten, dauerhaften
+ * file_part-Knoten (also aus demselben get_node()-Aufruf wie row->file_part/
+ * row->section) - der Anker-Knoten trägt laut Konvention nie eigenes
+ * icon_name/node_text/text (s. Kommentar in
+ * zond_treeview_copy_node_to_baum_auswertung(), zond_treeview.c), sondern
+ * nur die Position im knoten-Baum. Vorher wurde hier fälschlich vom
+ * Anker-Knoten gelesen, der dafür immer NULL lieferte - Bestandsverzeichnis-
+ * Spalte blieb dadurch fast immer leer (Nutzer-Fund 22.09.2026). */
 static gint suchen_baue_row(Projekt *zond, gint file_part_node_id,
 		ResultRow **out_row, GError **error) {
 	gint rc = 0;
@@ -813,7 +973,7 @@ static gint suchen_baue_row(Projekt *zond, gint file_part_node_id,
 
 	rc = zond_dbase_get_node(zond->dbase_zond->zond_dbase_work,
 			file_part_node_id, NULL, NULL, &row->file_part, &row->section,
-			NULL, NULL, NULL, error);
+			NULL, &row->anbindung_node_text, &row->anbindung_text, error);
 	if (rc) {
 		result_row_free(row);
 		return -1;
@@ -829,18 +989,13 @@ static gint suchen_baue_row(Projekt *zond, gint file_part_node_id,
 
 	if (id_anbindung) {
 		GArray *arr_copy_ids = NULL;
+		GArray *arr_copy_ids_direkt = NULL;
 
 		row->has_anbindung = TRUE;
 		row->anbindung_node_id = id_anbindung;
 
-		rc = zond_dbase_get_node(zond->dbase_zond->zond_dbase_work,
-				id_anbindung, NULL, NULL, NULL, NULL, NULL,
-				&row->anbindung_node_text, &row->anbindung_text, error);
-		if (rc) {
-			result_row_free(row);
-			return -1;
-		}
-
+		//Copies eines Kind-Knotens der Anbindung zeigen mit "link" auf
+		//id_anbindung (Zwei-Hop-Fall, s. suchen_resolve_file_part_node()).
 		rc = zond_dbase_get_baum_auswertung_copies(
 				zond->dbase_zond->zond_dbase_work, id_anbindung,
 				&arr_copy_ids, error);
@@ -849,29 +1004,48 @@ static gint suchen_baue_row(Projekt *zond, gint file_part_node_id,
 			return -1;
 		}
 
+		//Copies der Anbindung SELBST zeigen mit "link" direkt auf
+		//file_part_node_id (Ein-Hop-Fall) - separat abfragen und anhängen,
+		//sonst blieben sie in der Auswertungs-Spalte unsichtbar (Nutzer-Fund
+		//22.09.2026, gleiche Ursache wie bei suchen_resolve_file_part_node()).
+		rc = zond_dbase_get_baum_auswertung_copies(
+				zond->dbase_zond->zond_dbase_work, file_part_node_id,
+				&arr_copy_ids_direkt, error);
+		if (rc) {
+			g_array_unref(arr_copy_ids);
+			result_row_free(row);
+			return -1;
+		}
+
 		row->arr_copies = g_array_new(FALSE, FALSE, sizeof(ResultCopy));
 		g_array_set_clear_func(row->arr_copies,
 				(GDestroyNotify) result_copy_clear);
 
-		for (guint i = 0; i < arr_copy_ids->len; i++) {
-			gint copy_id = g_array_index(arr_copy_ids, gint, i);
-			ResultCopy copy = { 0 };
+		for (guint pass = 0; pass < 2; pass++) {
+			GArray *arr = pass == 0 ? arr_copy_ids : arr_copy_ids_direkt;
 
-			copy.node_id = copy_id;
+			for (guint i = 0; i < arr->len; i++) {
+				gint copy_id = g_array_index(arr, gint, i);
+				ResultCopy copy = { 0 };
 
-			rc = zond_dbase_get_node(zond->dbase_zond->zond_dbase_work,
-					copy_id, NULL, NULL, NULL, NULL, NULL, &copy.node_text,
-					&copy.text, error);
-			if (rc) {
-				g_array_unref(arr_copy_ids);
-				result_row_free(row);
-				return -1;
+				copy.node_id = copy_id;
+
+				rc = zond_dbase_get_node(zond->dbase_zond->zond_dbase_work,
+						copy_id, NULL, NULL, NULL, NULL, NULL,
+						&copy.node_text, &copy.text, error);
+				if (rc) {
+					g_array_unref(arr_copy_ids);
+					g_array_unref(arr_copy_ids_direkt);
+					result_row_free(row);
+					return -1;
+				}
+
+				g_array_append_val(row->arr_copies, copy);
 			}
-
-			g_array_append_val(row->arr_copies, copy);
 		}
 
 		g_array_unref(arr_copy_ids);
+		g_array_unref(arr_copy_ids_direkt);
 	}
 
 	*out_row = row;
