@@ -4236,3 +4236,46 @@
  Klammer- und Blockkommentarbalance in misc.c und suchen.c programmatisch
  geprüft - ausgeglichen. Nicht durch Kompilieren/Testen verifiziert.
  */
+
+/*
+ #176 (22.09.2026, Nutzer-Vorgabe im Anschluß an den XJustiz-Import):
+ "Aber ich wünsche mir, daß in das Bestandsverzeichnis an der gewählten
+ Stelle ein Strukturpunkt eingefügt wird, in den die einzelnen Dateien
+ eingefügt werden. Zur Bennenung: Aus dem Nachrichtenkopf: Name des
+ Produkts und Erstellungszeitpunkt."
+
+ xjustiz_import.c: statt die Dokumente direkt an der markierten Stelle im
+ Bestandsverzeichnis anzubinden, wird dort zunächst ein neuer
+ ZOND_DBASE_TYPE_BAUM_STRUKT-Knoten eingefügt (icon "folder", wie an
+ anderen Strukturpunkt-Einfügestellen üblich); die Dokumente hängen jetzt
+ als dessen Unterpunkte (anchor_id/child auf den neuen Strukturpunkt
+ umgebogen, danach unverändert die bisherige Geschwister-Anhänge-Schleife).
+
+ Benennung aus dem Nachrichtenkopf: xjustiz_parse_nachricht() um zwei
+ optionale Ausgabeparameter erweitert (*out_produktname, *out_zeitpunkt),
+ gesucht wie auch sonst in dieser Datei per "//"+local-name() unabhängig
+ von der genauen Verschachtelungstiefe (Recherche: erstellungszeitpunkt
+ direkt unter nachrichtenkopf ist durch ein Beispieldokument belegt,
+ nameDesProdukts unter grunddaten/herstellerinformation ist nur laut
+ XJustiz-Konvention plausibel, nicht an einem Beispiel verifiziert - daher
+ bewußt keine feste Pfadtiefe vorausgesetzt). Neue Funktion
+ xjustiz_format_zeitpunkt() formatiert den rohen xs:dateTime-Wert (z.B.
+ "2024-02-22T11:23:51.210+01:00") via g_date_time_new_from_iso8601() auf
+ "TT.MM.JJJJ hh:mm"; schlägt das Parsen fehl, wird der Rohwert
+ unverändert übernommen. Label = "<Produktname> <Zeitpunkt>", oder nur das
+ vorhandene Feld, oder Fallback "XJustiz-Import", falls beide fehlen.
+
+ Nebenbei behoben: echter Compilerfehler (-Wcomment) in
+ xjustiz_import.h, Zeile 59 - drei durch Schrägstrich getrennte
+ Pointer-Namen bildeten an der Trennstelle ein Kommentar-Ende-Zeichen
+ gefolgt von einem Kommentar-Anfang-Zeichen; durch Kommata ersetzt. Beim
+ Formulieren des neuen Doc-Kommentars zu xjustiz_parse_nachricht() ist
+ dieselbe Fehlerklasse ein zweites Mal (selbst verursacht, vor dem
+ Speichern durch die Klammer-/Kommentarbalance-Prüfung abgefangen)
+ aufgetreten: zwei Pointer-Namen, ebenso durch Schrägstrich getrennt -
+ ebenfalls durch Komma ersetzt.
+
+ Klammer- und Blockkommentarbalance in xjustiz_import.c und .h
+ programmatisch geprüft - ausgeglichen. Nicht durch Kompilieren/Testen
+ verifiziert.
+ */

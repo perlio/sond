@@ -253,6 +253,29 @@ static gchar* xjustiz_node_text(xmlNodePtr node) {
 	return text;
 }
 
+/* Formatiert einen XML xs:dateTime-Wert (z.B. aus erstellungszeitpunkt,
+ * etwa "2024-02-22T11:23:51.210+01:00") menschenlesbar ("TT.MM.JJJJ
+ * hh:mm") für die Verwendung als Namensbestandteil (s. xjustiz_import()).
+ * Bei Parsierungsfehler wird der Rohwert unverändert zurückgegeben -
+ * robuster als ein hartes Scheitern für einen reinen Namensbestandteil.
+ * NULL rein -> NULL raus. Rückgabe muß immer freigegeben werden. */
+static gchar* xjustiz_format_zeitpunkt(gchar const *roh) {
+	GDateTime *dt = NULL;
+	gchar *formatted = NULL;
+
+	if (!roh)
+		return NULL;
+
+	dt = g_date_time_new_from_iso8601(roh, NULL);
+	if (!dt)
+		return g_strdup(roh);
+
+	formatted = g_date_time_format(dt, "%d.%m.%Y %H:%M");
+	g_date_time_unref(dt);
+
+	return formatted ? formatted : g_strdup(roh);
+}
+
 /* Wertet die xjustiz_nachricht.xml aus: liefert für jedes referenzierte
  * PDF-Dokument (schriftgutobjekte/dokument/datei/dateiname, gefiltert auf
  * ".pdf") ein XJustizDatei-Element mit dem zugehörigen anzeigename
@@ -264,13 +287,29 @@ static gchar* xjustiz_node_text(xmlNodePtr node) {
  * o.ä.) - robust gegenüber Präfix-Varianten. Ebenso ".//" (statt fixer
  * Verschachtelungstiefe) für datei/anzeigename innerhalb eines dokument-
  * Knotens, da die Tiefe je Fachmodul variieren kann (s. Kommentar in
- * xjustiz_import.h). */
+ * xjustiz_import.h).
+ *
+ * *out_produktname, *out_zeitpunkt (beide optional - NULL-Pointer werden
+ * übergangen): Name des Produkts (laut Spezifikation unter grunddaten/
+ * herstellerinformation/nameDesProdukts) und Erstellungszeitpunkt (laut
+ * Spezifikation direkt unter nachrichtenkopf/erstellungszeitpunkt, roher
+ * XML-Wert, noch nicht formatiert - s. xjustiz_format_zeitpunkt()) für die
+ * Benennung des in xjustiz_import() neu angelegten Strukturpunkts. Beide
+ * Felder sind laut Spezifikation optional - bleiben dann NULL, statt
+ * lokal per fixem Pfad zu suchen (der je nach Fachmodul/Version abweichen
+ * kann) wird bewußt dieselbe "//"+local-name()-Suche wie oben verwendet,
+ * unabhängig von der genauen Verschachtelung. */
 static GPtrArray* xjustiz_parse_nachricht(gchar const *xml, gsize len,
-		GError **error) {
+		gchar **out_produktname, gchar **out_zeitpunkt, GError **error) {
 	xmlDocPtr doc = NULL;
 	xmlXPathContextPtr ctx = NULL;
 	xmlXPathObjectPtr xpath_dok = NULL;
 	GPtrArray *arr = NULL;
+
+	if (out_produktname)
+		*out_produktname = NULL;
+	if (out_zeitpunkt)
+		*out_zeitpunkt = NULL;
 
 	doc = xmlReadMemory(xml, (int) len, "xjustiz_nachricht.xml", NULL,
 			XML_PARSE_NOBLANKS | XML_PARSE_NONET);
@@ -371,6 +410,31 @@ static GPtrArray* xjustiz_parse_nachricht(gchar const *xml, gsize len,
 	if (xpath_dok)
 		xmlXPathFreeObject(xpath_dok);
 
+	if (out_produktname) {
+		xmlXPathObjectPtr xpath_prod = xmlXPathEvalExpression(
+				(xmlChar const*) "//*[local-name()='nameDesProdukts']", ctx);
+
+		if (xpath_prod && xpath_prod->nodesetval
+				&& xpath_prod->nodesetval->nodeNr > 0)
+			*out_produktname = xjustiz_node_text(
+					xpath_prod->nodesetval->nodeTab[0]);
+		if (xpath_prod)
+			xmlXPathFreeObject(xpath_prod);
+	}
+
+	if (out_zeitpunkt) {
+		xmlXPathObjectPtr xpath_zeit = xmlXPathEvalExpression(
+				(xmlChar const*) "//*[local-name()='erstellungszeitpunkt']",
+				ctx);
+
+		if (xpath_zeit && xpath_zeit->nodesetval
+				&& xpath_zeit->nodesetval->nodeNr > 0)
+			*out_zeitpunkt = xjustiz_node_text(
+					xpath_zeit->nodesetval->nodeTab[0]);
+		if (xpath_zeit)
+			xmlXPathFreeObject(xpath_zeit);
+	}
+
 	xmlXPathFreeContext(ctx);
 	xmlFreeDoc(doc);
 
@@ -441,6 +505,11 @@ gint xjustiz_import(Projekt *zond, gboolean child, gint *n_angebunden,
 	gsize xml_len = 0;
 	GPtrArray *arr_dok = NULL;
 	GPtrArray *nicht_gefunden = NULL;
+	gchar *produktname = NULL;
+	gchar *zeitpunkt_roh = NULL;
+	gchar *zeitpunkt = NULL;
+	gchar *struktur_label = NULL;
+	gint struktur_id = 0;
 
 	if (n_angebunden)
 		*n_angebunden = 0;
@@ -509,9 +578,12 @@ gint xjustiz_import(Projekt *zond, gboolean child, gint *n_angebunden,
 		return -1;
 	}
 
-	arr_dok = xjustiz_parse_nachricht(xml_content, xml_len, error);
+	arr_dok = xjustiz_parse_nachricht(xml_content, xml_len, &produktname,
+			&zeitpunkt_roh, error);
 	g_free(xml_content);
 	if (!arr_dok) {
+		g_free(produktname);
+		g_free(zeitpunkt_roh);
 		zip_close(archive);
 		g_free(zip_path_rel);
 		g_free(zip_path_abs);
@@ -519,6 +591,8 @@ gint xjustiz_import(Projekt *zond, gboolean child, gint *n_angebunden,
 	}
 
 	if (arr_dok->len == 0) {
+		g_free(produktname);
+		g_free(zeitpunkt_roh);
 		g_ptr_array_unref(arr_dok);
 		zip_close(archive);
 		g_free(zip_path_rel);
@@ -529,10 +603,31 @@ gint xjustiz_import(Projekt *zond, gboolean child, gint *n_angebunden,
 		return -1;
 	}
 
+	/* Benennung des gleich anzulegenden Strukturpunkts (s.u.) - Nutzer-
+	 * Vorgabe (22.09.2026): "Zur Benennung: Aus dem Nachrichtenkopf: Name
+	 * des Produkts und Erstellungszeitpunkt." Beide Felder laut
+	 * Spezifikation optional - Fallback auf das jeweils vorhandene Feld,
+	 * oder falls beide fehlen ein fester Platzhalter statt einer leeren
+	 * Beschriftung. */
+	zeitpunkt = xjustiz_format_zeitpunkt(zeitpunkt_roh);
+	g_free(zeitpunkt_roh);
+
+	if (produktname && zeitpunkt)
+		struktur_label = g_strdup_printf("%s %s", produktname, zeitpunkt);
+	else if (produktname)
+		struktur_label = g_strdup(produktname);
+	else if (zeitpunkt)
+		struktur_label = g_strdup(zeitpunkt);
+	else
+		struktur_label = g_strdup("XJustiz-Import");
+	g_free(produktname);
+	g_free(zeitpunkt);
+
 	nicht_gefunden = g_ptr_array_new_with_free_func(g_free);
 
 	rc = zond_dbase_begin(zond->dbase_zond->zond_dbase_work, error);
 	if (rc) {
+		g_free(struktur_label);
 		g_ptr_array_unref(nicht_gefunden);
 		g_ptr_array_unref(arr_dok);
 		zip_close(archive);
@@ -540,6 +635,31 @@ gint xjustiz_import(Projekt *zond, gboolean child, gint *n_angebunden,
 		g_free(zip_path_abs);
 		return -1;
 	}
+
+	/* Nutzer-Vorgabe (22.09.2026): "daß in das Bestandsverzeichnis an der
+	 * gewählten Stelle ein Strukturpunkt eingefügt wird, in den die
+	 * einzelnen Dateien eingefügt werden" - statt die Dokumente direkt an
+	 * der markierten Stelle anzubinden, wird hier zuerst EIN neuer
+	 * Strukturpunkt dort eingefügt; anchor_id/child werden anschließend so
+	 * umgebogen, daß alle folgenden Dokumente als dessen Kinder (erstes
+	 * Dokument) bzw. dessen Geschwister (weitere Dokumente, wie schon
+	 * bisher) landen. */
+	struktur_id = zond_dbase_insert_node(zond->dbase_zond->zond_dbase_work,
+			anchor_id, child, ZOND_DBASE_TYPE_BAUM_STRUKT, 0, NULL, NULL,
+			zond->icon[ICON_ORDNER].icon_name, struktur_label, NULL, error);
+	g_free(struktur_label);
+	if (struktur_id == -1) {
+		zond_dbase_rollback(zond->dbase_zond->zond_dbase_work, error);
+		g_ptr_array_unref(nicht_gefunden);
+		g_ptr_array_unref(arr_dok);
+		zip_close(archive);
+		g_free(zip_path_rel);
+		g_free(zip_path_abs);
+		return -1;
+	}
+
+	anchor_id = struktur_id;
+	child = TRUE;
 
 	/* Pro Dokument: Fehler (Datei nicht auflösbar, DB-Fehler) werden - wie
 	 * beim normalen Anbinden (zond_treeview_anbinden_rekursiv,
